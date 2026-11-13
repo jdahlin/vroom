@@ -12,6 +12,6 @@ VPRIV bool a64_mulconst(codegen_context *e, ast_qualified_type ty, int r, i128 r
 	unsigned shift = em_mulconst((unsigned)size * 8, rhs);
 	if (!shift)
 		return false;
-	op3s(e, I_ADD, size == 8, r, r, r, 0, (int)shift);
+	a64_record_emit_three_registers_shifted(e, A64_OP_ADD, size == 8, r, r, r, 0, (int)shift);
 	return true;
 }

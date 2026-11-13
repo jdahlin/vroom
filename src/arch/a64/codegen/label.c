@@ -37,7 +37,7 @@ VPRIV void deflabel(codegen_context *e, uint32_t l)
 		e->label_known_values_index[l] = !e->is_reachable ? CODEGEN_KNOWN_LABEL_DROPPED : e->known_values_valid ? CODEGEN_KNOWN_LABEL_KNOWN : CODEGEN_KNOWN_LABEL_PLACED;
 	if (!e->is_reachable)
 		return;
-	put(e, I_LABEL)->label = l;
+	a64_record_emit(e, A64_OP_LABEL)->label = l;
 }
 
 /* a loop head: the back edges come later */
@@ -45,7 +45,7 @@ VPRIV void deflabel_loop(codegen_context *e, uint32_t l, bool forced)
 {
 	e->known_values_valid = 0;
 	if (forced)
-		deflabel_forced(e, l);
+		a64_label_define_forced(e, l);
 	else
 		deflabel(e, l);
 }

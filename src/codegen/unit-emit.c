@@ -119,7 +119,7 @@ static void codegen_context_init(codegen_context *e, codegen_unit *E, vjob_regio
 	e->unit = E;
 	e->compile_context = c;
 	e->record_capacity = 1u << 24;
-	e->records = vjob_region_acquire(&r[0], (size_t)e->record_capacity * sizeof(ins), "emit.in");
+	e->records = vjob_region_acquire(&r[0], (size_t)e->record_capacity * sizeof(a64_record), "emit.in");
 	vtext_region_init(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
 	vtext_region_init(&e->out, &r[2], (size_t)1 << 32, "emit.out");
 	vtext_region_init(&e->data, &r[3], (size_t)1 << 28, "emit.data");
@@ -699,7 +699,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 				all.n = mo.n = 0;
 				for (int i = 0; i < k; i++)
 					vtext_append(&all, iov[i].iov_base, iov[i].iov_len);
-				darwin_text(&mo, all.p, all.n);
+				a64_darwin_text_translate(&mo, all.p, all.n);
 				iov[0] = (struct iovec){ mo.p, mo.n };
 				k = 1;
 			}

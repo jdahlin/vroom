@@ -16,28 +16,28 @@ VPRIV codegen_value a64_sdivconst(codegen_context *e, codegen_value a, const em_
 
 	if (!x)
 		extend(e, n, n, 4, true);
-	movi(e, 1, m, r->magic);
+	a64_record_emit_move_immediate(e, 1, m, r->magic);
 	if (x)
-		op3(e, I_SMULH, 1, q, n, m);
+		a64_record_emit_three_registers(e, A64_OP_SMULH, 1, q, n, m);
 	else {
 		/* Both inputs are sign-extended32; the full product fits in64. */
-		op4(e, I_MADD, 1, q, n, m, ZR);
-		shift_imm(e, I_ASRV, 1, q, q, 32);
+		a64_record_emit_four_registers(e, A64_OP_MADD, 1, q, n, m, ZR);
+		shift_imm(e, A64_OP_ASRV, 1, q, q, 32);
 	}
 	if (r->add)
-		op3(e, I_ADD, x, q, q, n);
+		a64_record_emit_three_registers(e, A64_OP_ADD, x, q, q, n);
 	if (r->shift)
-		shift_imm(e, I_ASRV, x, q, q, r->shift);
-	shift_imm(e, I_LSRV, x, m, q, r->bits - 1);
-	op3(e, I_ADD, x, q, q, m);
+		shift_imm(e, A64_OP_ASRV, x, q, q, r->shift);
+	shift_imm(e, A64_OP_LSRV, x, m, q, r->bits - 1);
+	a64_record_emit_three_registers(e, A64_OP_ADD, x, q, q, m);
 	if (r->remainder) {
-		movi(e, x, m, (int64_t)r->divisor);
-		op4(e, I_MSUB, x, n, q, m, n);
+		a64_record_emit_move_immediate(e, x, m, (int64_t)r->divisor);
+		a64_record_emit_four_registers(e, A64_OP_MSUB, x, n, q, m, n);
 	} else {
 		if (r->negative)
-			op3(e, I_SUB, x, q, ZR, q);
+			a64_record_emit_three_registers(e, A64_OP_SUB, x, q, ZR, q);
 		if (q != n)
-			mov(e, x, n, q);
+			a64_record_emit_move(e, x, n, q);
 	}
 	if (q != n)
 		tfree(e, q);

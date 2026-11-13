@@ -93,7 +93,7 @@ VPRIV int virbuild_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 	r = virbuild_treg(e);
 	virbuild_load(e, r, &ap, 8, false);
 	p = virbuild_register_read(e, r, VIR_TYPE_PTR);
-	if (size && !big && abi_align(c, t) == 16) {
+	if (size && !big && a64_abi_type_alignment(c, t) == 16) {
 		q = virbuild_insn_append(e, VIR_OP_P2I, VIR_TYPE_I64, 0, p, 0, 0);
 		q = virbuild_insn_append(e, VIR_OP_ADD, VIR_TYPE_I64, 0, q, virbuild_constant_integer(e, VIR_TYPE_I64, 15), 0);
 		q = virbuild_insn_append(e, VIR_OP_AND, VIR_TYPE_I64, 0, q, virbuild_constant_integer(e, VIR_TYPE_I64, -16), 0);

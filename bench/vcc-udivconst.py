@@ -17,7 +17,7 @@ SOURCE = r'''
 VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X_TEMPS); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
-VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
+VPRIV void slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 
 static uint32_t apply(uint32_t n, const em_udivconst_recipe *r)

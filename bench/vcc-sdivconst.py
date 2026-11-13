@@ -16,7 +16,7 @@ SOURCE = r'''
 #include "arch/a64/codegen/sdivconst.c"
 VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->live & X_TEMPS); }
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
-VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len)
+VPRIV void slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 
 static uint64_t seed=UINT64_C(0x987654321abcdeff);

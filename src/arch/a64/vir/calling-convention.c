@@ -132,7 +132,7 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_r
 		}
 		return;
 	case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:	/* (a record's logical immediate must be encodable) */
-		if (a64_vir_value_is_integer_constant(f, in->b) && logimm_ok(a64_vir_constant_logical_immediate(&f->insns[in->b]), in->type != VIR_TYPE_I32))
+		if (a64_vir_value_is_integer_constant(f, in->b) && a64_logical_immediate_is_encodable(a64_vir_constant_logical_immediate(&f->insns[in->b]), in->type != VIR_TYPE_I32))
 			x->mem |= 2;
 		return;
 	case VIR_OP_ICMP:

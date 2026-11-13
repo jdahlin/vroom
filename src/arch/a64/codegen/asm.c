@@ -3,15 +3,15 @@
 
 /* ---------------- inline asm ---------------- */
 
-enum { AO_REG, AO_IMM, AO_MEM, AO_ZERO, AO_VREG };
+enum { A64_ASM_OPERAND_REGISTER, A64_ASM_OPERAND_IMMEDIATE, A64_ASM_OPERAND_MEMORY, A64_ASM_OPERAND_ZERO, A64_ASM_OPERAND_VECTOR_REGISTER };
 
-typedef struct asmopnd {
-	uint8_t kind, reg, fixed, out, inout, wide;
-	codegen_value v;			/* AO_IMM: the constant / address */
-	codegen_lvalue l;			/* outputs: where the result goes */
-	ast_qualified_type t;
+typedef struct a64_asm_operand {
+	uint8_t kind, register_number, fixed, is_output, is_input_output, is_wide;
+	codegen_value value;			/* A64_ASM_OPERAND_IMMEDIATE: the constant / address */
+	codegen_lvalue lvalue;			/* outputs: where the result goes */
+	ast_qualified_type type;
 	uint32_t name;
-} asmopnd;
+} a64_asm_operand;
 
 /* the register named by a clobber string, or -1 */
 /*
@@ -24,7 +24,7 @@ typedef struct asmopnd {
  * decides the value.
  */
 
-static int clob_reg(const char *s)
+static int a64_asm_clobber_register(const char *s)
 {
 	if ((s[0] == 'x' || s[0] == 'w') && s[1] >= '0' && s[1] <= '9') {
 		int r = atoi(s + 1);
@@ -37,11 +37,11 @@ static int clob_reg(const char *s)
 }
 
 /* a vector register load or store as raw text: op qv|dv, [xr] (k 'z', 'p': an SVE register) */
-static void vraw(codegen_context *e, const char *opn, int k, int v, int xr)
+static void a64_asm_vector_access_emit(codegen_context *e, const char *opn, int k, int v, int xr)
 {
 	tbuf *rb = &e->raw;
 	size_t st = rb->n;
-	ins *i;
+	a64_record *i;
 
 	vtext_char_append(rb, '\t');
 	vtext_string_append(rb, opn);
@@ -49,21 +49,21 @@ static void vraw(codegen_context *e, const char *opn, int k, int v, int xr)
 	vtext_char_append(rb, (char)k);
 	vtext_unsigned_append(rb, (uint64_t)v);
 	vtext_string_append(rb, ", [");
-	reg(rb, xr, 1);
+	a64_register_name_append(rb, xr, 1);
 	vtext_char_append(rb, ']');
-	i = put(e, I_RAW);
-	i->off = (int32_t)st;
-	i->ref = (uint32_t)(rb->n - st);
+	i = a64_record_emit(e, A64_OP_RAW);
+	i->offset = (int32_t)st;
+	i->reference = (uint32_t)(rb->n - st);
 }
 
 /* the register name's letter of a vector operand's load and store */
-static int vreg_kind(cc *c, ast_qualified_type t)
+static int a64_asm_vector_register_letter(cc *c, ast_qualified_type t)
 {
 	return codegen_type_is_sve_predicate(c, t) ? 'p' : codegen_type_is_sve(c, t) ? 'z' : codegen_type_size(c, t) == 16 ? 'q' : 'd';
 }
 
 /* the register of a vector operand: v16+ (z16+), an SVE predicate p0+ (a governing predicate must be p0-p7) */
-static uint8_t sve_opreg(codegen_context *e, uint32_t loc, ast_qualified_type t, int *nv, int *np)
+static uint8_t a64_asm_sve_operand_register(codegen_context *e, uint32_t loc, ast_qualified_type t, int *nv, int *np)
 {
 	if (codegen_type_is_sve_predicate(e->compile_context, t)) {
 		if (*np >= 8)
@@ -75,14 +75,14 @@ static uint8_t sve_opreg(codegen_context *e, uint32_t loc, ast_qualified_type t,
 	return (uint8_t)(16 + (*nv)++);
 }
 
-VPRIV void gen_asm(codegen_context *e, uint32_t n)
+VPRIV void a64_asm_emit(codegen_context *e, uint32_t n)
 {
 	cc *c = e->compile_context;
 	const node *x = N(n);
 	const ast_asm_statement *a = &c->asms[x->a];
 	const char *tp = c->strs[a->tmpl - 1].s;
 	uint32_t nops = a->nout + a->nin;
-	asmopnd *op;
+	a64_asm_operand *op;
 	uint32_t clobs = 0, reserved = 0;
 	uint32_t tramp[64];
 	bool basic = nops == 0 && a->nclob == 0 && a->nlabel == 0;
@@ -96,11 +96,11 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		return;
 	if (nops > 64 || a->nlabel > 64)
 		codegen_fatal_report(e, x->loc, "too many asm operands");
-	op = alloca((nops + 1) * sizeof(asmopnd));
-	memset(op, 0, (nops + 1) * sizeof(asmopnd));
+	op = alloca((nops + 1) * sizeof(a64_asm_operand));
+	memset(op, 0, (nops + 1) * sizeof(a64_asm_operand));
 	/* clobbered registers: keep temporaries out of them */
 	for (uint32_t i = 0; i < a->nclob; i++) {
-		int r = clob_reg(c->strs[a->clob[i] - 1].s);
+		int r = a64_asm_clobber_register(c->strs[a->clob[i] - 1].s);
 
 		if (r >= 0)
 			clobs |= 1u << r;
@@ -112,8 +112,8 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 				/* live across a clobber: save it */
 				if (!sp.mask)
 					memset(&sp, 0, sizeof(sp));
-				sp.slots[i] = slot(e, 8, 8);
-				mem(e, I_ST, 3, 0, codegen_temporary_registers[i], FRAME, sp.slots[i]);
+				sp.slots[i] = a64_frame_slot_allocate(e, 8, 8);
+				a64_record_emit_memory(e, A64_OP_ST, 3, 0, codegen_temporary_registers[i], A64_REGISTER_FRAME, sp.slots[i]);
 				sp.mask |= 1u << i;
 			} else {
 				e->temporaries_in_use |= 1u << i;
@@ -124,19 +124,19 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 	for (uint32_t i = 0; i < a->nout; i++) {
 		const ast_asm_operand *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 		bool mem_ok = strpbrk(cs, "mQog") != NULL, reg_ok = strpbrk(cs, "rg") != NULL;
 		uint32_t en = ao->expr;
 
-		o->out = 1;
-		o->inout = strchr(cs, '+') != NULL;
-		o->t = N(en)->ty;
+		o->is_output = 1;
+		o->is_input_output = strchr(cs, '+') != NULL;
+		o->type = N(en)->ty;
 		o->name = ao->name;
-		if ((codegen_type_is_vector(c, o->t) || codegen_type_is_sve(c, o->t)) && strpbrk(cs, "wxU")) {
+		if ((codegen_type_is_vector(c, o->type) || codegen_type_is_sve(c, o->type)) && strpbrk(cs, "wxU")) {
 			/* a vector in v16+ (an SVE predicate in p0+): loaded before the template if read, stored after it */
-			o->kind = AO_VREG;
-			o->reg = sve_opreg(e, x->loc, o->t, &nvreg, &npreg);
-			o->l = gen_lval(e, en);
+			o->kind = A64_ASM_OPERAND_VECTOR_REGISTER;
+			o->register_number = a64_asm_sve_operand_register(e, x->loc, o->type, &nvreg, &npreg);
+			o->lvalue = gen_lval(e, en);
 			continue;
 		}
 		if (strpbrk(cs, "wxy") && !reg_ok)
@@ -145,60 +145,60 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			codegen_lvalue l = gen_lval(e, en);
 			codegen_value av = laddr(e, &l);
 
-			o->kind = AO_MEM;
-			o->reg = (uint8_t)toreg(e, &av);
+			o->kind = A64_ASM_OPERAND_MEMORY;
+			o->register_number = (uint8_t)toreg(e, &av);
 			continue;
 		}
-		o->kind = AO_REG;
-		o->l = gen_lval(e, en);
+		o->kind = A64_ASM_OPERAND_REGISTER;
+		o->lvalue = gen_lval(e, en);
 		if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->register_number != 0xff &&
 		    codegen_symbol_binding_get(e, N(en)->a)->kind == CODEGEN_BINDING_SLOT) {
 			o->fixed = 1;
-			o->reg = codegen_symbol_binding_get(e, N(en)->a)->register_number;
+			o->register_number = codegen_symbol_binding_get(e, N(en)->a)->register_number;
 		}
-		o->wide = codegen_type_is_wide(c, o->t);
-		if (o->inout) {
-			codegen_lvalue l2 = o->l;
-			codegen_value v = load(e, &l2, o->t);
+		o->is_wide = codegen_type_is_wide(c, o->type);
+		if (o->is_input_output) {
+			codegen_lvalue l2 = o->lvalue;
+			codegen_value v = load(e, &l2, o->type);
 
-			o->v = v;
+			o->value = v;
 		}
 	}
 	/* inputs */
 	for (uint32_t i = a->nout; i < nops; i++) {
 		const ast_asm_operand *ao = &a->ops[i];
 		const char *cs = c->strs[ao->constraint - 1].s;
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 		uint32_t en = ao->expr;
 		bool reg_ok = strpbrk(cs, "rpg") != NULL, mem_ok = strpbrk(cs, "mQog") != NULL;	/* p: address in a register */
 		int tied = -1;
 
-		o->t = N(en)->ty;
+		o->type = N(en)->ty;
 		o->name = ao->name;
 		for (const char *p = cs; *p; p++)
 			if (*p >= '0' && *p <= '9')
 				tied = atoi(p);
-		if ((codegen_type_is_vector(c, o->t) || codegen_type_is_sve(c, o->t)) && strpbrk(cs, "wxU") && tied < 0) {
+		if ((codegen_type_is_vector(c, o->type) || codegen_type_is_sve(c, o->type)) && strpbrk(cs, "wxU") && tied < 0) {
 			codegen_value v = gen(e, en);	/* the vector's address */
 
 			toreg(e, &v);
-			o->kind = AO_VREG;
-			o->reg = sve_opreg(e, x->loc, o->t, &nvreg, &npreg);
-			o->v = v;
+			o->kind = A64_ASM_OPERAND_VECTOR_REGISTER;
+			o->register_number = a64_asm_sve_operand_register(e, x->loc, o->type, &nvreg, &npreg);
+			o->value = v;
 			continue;
 		}
 		if (tied >= 0 && (uint32_t)tied < a->nout) {
 			/* the input goes into the output's register */
 			codegen_value v = gen(e, en);
-			asmopnd *to = &op[tied];
+			a64_asm_operand *to = &op[tied];
 
-			val_free(e, &to->v);
-			to->v = v;
-			to->inout = 1;
-			o->kind = AO_REG;
-			o->reg = 0xff;
+			val_free(e, &to->value);
+			to->value = v;
+			to->is_input_output = 1;
+			o->kind = A64_ASM_OPERAND_REGISTER;
+			o->register_number = 0xff;
 			o->fixed = 2;	/* alias of the output */
-			o->inout = (uint8_t)tied;
+			o->is_input_output = (uint8_t)tied;
 			continue;
 		}
 		if (mem_ok && !reg_ok && !strpbrk(cs, "inIJKLMNZ")) {
@@ -209,8 +209,8 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			l = gen_lval(e, en);
 			codegen_value av = laddr(e, &l);
 
-			o->kind = AO_MEM;
-			o->reg = (uint8_t)toreg(e, &av);
+			o->kind = A64_ASM_OPERAND_MEMORY;
+			o->register_number = (uint8_t)toreg(e, &av);
 			continue;
 		}
 		{
@@ -230,7 +230,7 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			}
 			if (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS) {
 				if (strchr(cs, 'Z') && v.kind == CODEGEN_VALUE_CONSTANT && v.integer == 0) {
-					o->kind = AO_ZERO;
+					o->kind = A64_ASM_OPERAND_ZERO;
 					continue;
 				}
 				for (const char *p = cs; *p; p++)
@@ -238,8 +238,8 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 						imm = true;
 			}
 			if (imm) {
-				o->kind = AO_IMM;
-				o->v = v;
+				o->kind = A64_ASM_OPERAND_IMMEDIATE;
+				o->value = v;
 				if (v.kind == CODEGEN_VALUE_ADDRESS)
 					codegen_reference_note(e, v.reference);
 				continue;
@@ -247,84 +247,84 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			if (!reg_ok && !strchr(cs, 'Z')) {
 				if (mem_ok) {
 					/* a value for a memory operand: put it in a slot */
-					int64_t sl = slot(e, codegen_type_size(c, o->t) ? codegen_type_size(c, o->t) : 8, 16);
+					int64_t sl = a64_frame_slot_allocate(e, codegen_type_size(c, o->type) ? codegen_type_size(c, o->type) : 8, 16);
 					codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16 };
 					int r;
 
-					store(e, &l, o->t, &v);
+					store(e, &l, o->type, &v);
 					val_free(e, &v);
 					r = treg(e);
-					opi(e, I_ADDI, 1, r, FRAME, sl);
-					o->kind = AO_MEM;
-					o->reg = (uint8_t)r;
+					a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, sl);
+					o->kind = A64_ASM_OPERAND_MEMORY;
+					o->register_number = (uint8_t)r;
 					continue;
 				}
 				codegen_fatal_report(e, x->loc, "impossible constraint in asm: '%s'", cs);
 			}
-			o->kind = AO_REG;
-			o->wide = codegen_type_is_wide(c, o->t);
-			if (o->wide)
-				toreg2(e, &v, codegen_type_is_signed(c, o->t));
+			o->kind = A64_ASM_OPERAND_REGISTER;
+			o->is_wide = codegen_type_is_wide(c, o->type);
+			if (o->is_wide)
+				toreg2(e, &v, codegen_type_is_signed(c, o->type));
 			else
 				toreg(e, &v);
-			o->v = v;
+			o->value = v;
 			if (N(en)->op == AST_NODE_VARIABLE && codegen_symbol_is_local_variable(c, N(en)->a) && codegen_symbol_binding_get(e, N(en)->a)->register_number != 0xff &&
 			    codegen_symbol_binding_get(e, N(en)->a)->kind == CODEGEN_BINDING_SLOT) {
 				o->fixed = 1;
-				o->reg = codegen_symbol_binding_get(e, N(en)->a)->register_number;
+				o->register_number = codegen_symbol_binding_get(e, N(en)->a)->register_number;
 			} else {
-				o->reg = v.register_number;
+				o->register_number = v.register_number;
 			}
 		}
 	}
 	/* output registers */
 	for (uint32_t i = 0; i < a->nout; i++) {
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 
-		if (o->kind != AO_REG)
+		if (o->kind != A64_ASM_OPERAND_REGISTER)
 			continue;
-		if (o->inout) {
-			if (o->wide)
-				toreg2(e, &o->v, false);
-			else if (o->v.kind != CODEGEN_VALUE_REGISTER)
-				toreg(e, &o->v);
+		if (o->is_input_output) {
+			if (o->is_wide)
+				toreg2(e, &o->value, false);
+			else if (o->value.kind != CODEGEN_VALUE_REGISTER)
+				toreg(e, &o->value);
 			if (!o->fixed)
-				o->reg = o->v.register_number;
+				o->register_number = o->value.register_number;
 		} else if (!o->fixed) {
-			o->reg = (uint8_t)treg(e);
-			o->v = codegen_value_register(o->reg);
-			if (o->wide) {
-				o->v.kind = CODEGEN_VALUE_REGISTER_PAIR;
-				o->v.register_high = (uint8_t)treg(e);
+			o->register_number = (uint8_t)treg(e);
+			o->value = codegen_value_register(o->register_number);
+			if (o->is_wide) {
+				o->value.kind = CODEGEN_VALUE_REGISTER_PAIR;
+				o->value.register_high = (uint8_t)treg(e);
 			}
 		}
 	}
 	/* fixed registers last, so evaluating the others cannot clobber them */
 	for (uint32_t i = 0; i < nops; i++) {
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 
-		if (o->fixed == 1 && (o->inout || !o->out) && o->v.kind != CODEGEN_VALUE_NONE)
-			mov(e, 1, o->reg, o->v.register_number);
+		if (o->fixed == 1 && (o->is_input_output || !o->is_output) && o->value.kind != CODEGEN_VALUE_NONE)
+			a64_record_emit_move(e, 1, o->register_number, o->value.register_number);
 	}
 	/* asm goto with outputs: the labels go through trampolines that store them */
 	for (uint32_t k = 0; k < a->nlabel; k++)
-		tramp[k] = a->nout ? newlabel(e) : user_label(e, a->labels[k]);
+		tramp[k] = a->nout ? a64_label_new(e) : user_label(e, a->labels[k]);
 	/* vector operands into their registers, last so no call in between clobbers them */
 	for (uint32_t i = 0; i < nops; i++) {
-		asmopnd *o = &op[i];
-		int q = vreg_kind(c, o->t);
+		a64_asm_operand *o = &op[i];
+		int q = a64_asm_vector_register_letter(c, o->type);
 
-		if (o->kind != AO_VREG)
+		if (o->kind != A64_ASM_OPERAND_VECTOR_REGISTER)
 			continue;
-		if (!o->out) {
-			vraw(e, "ldr", q, o->reg, o->v.register_number);
-			val_free(e, &o->v);
-		} else if (o->inout) {
-			codegen_lvalue l2 = o->l;
+		if (!o->is_output) {
+			a64_asm_vector_access_emit(e, "ldr", q, o->register_number, o->value.register_number);
+			val_free(e, &o->value);
+		} else if (o->is_input_output) {
+			codegen_lvalue l2 = o->lvalue;
 			codegen_value av = laddr(e, &l2);
 			int r = toreg(e, &av);
 
-			vraw(e, "ldr", q, o->reg, r);
+			a64_asm_vector_access_emit(e, "ldr", q, o->register_number, r);
 			val_free(e, &av);
 		}
 	}
@@ -390,48 +390,48 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 
 				if (k >= a->nlabel)
 					codegen_fatal_report(e, x->loc, "invalid operand number %d in inline asm string (%u operands, %u labels)", idx, nops, a->nlabel);
-				p_lbl(rb, e->top_symbol, tramp[k]);
+				a64_print_label(rb, e->top_symbol, tramp[k]);
 				continue;
 			}
 			{
-				asmopnd *o = &op[idx];
+				a64_asm_operand *o = &op[idx];
 
 				if (o->fixed == 2)
-					o = &op[o->inout];
+					o = &op[o->is_input_output];
 				switch (o->kind) {
-				case AO_VREG:
-					if (codegen_type_is_sve(c, o->t)) {
-						vtext_char_append(rb, (char)vreg_kind(c, o->t));
-						vtext_unsigned_append(rb, o->reg);
+				case A64_ASM_OPERAND_VECTOR_REGISTER:
+					if (codegen_type_is_sve(c, o->type)) {
+						vtext_char_append(rb, (char)a64_asm_vector_register_letter(c, o->type));
+						vtext_unsigned_append(rb, o->register_number);
 						break;
 					}
 					vtext_char_append(rb, mod == 'q' || mod == 'd' || mod == 's' || mod == 'h' || mod == 'b' ? mod : 'v');
-					vtext_unsigned_append(rb, o->reg);
+					vtext_unsigned_append(rb, o->register_number);
 					break;
-				case AO_REG:
-					if (mod == 'H' && o->wide) {
-						reg(rb, o->v.register_high, 1);
+				case A64_ASM_OPERAND_REGISTER:
+					if (mod == 'H' && o->is_wide) {
+						a64_register_name_append(rb, o->value.register_high, 1);
 					} else if (mod == 'a') {	/* address operand: [xN] */
 						vtext_char_append(rb, '[');
-						reg(rb, o->reg, 1);
+						a64_register_name_append(rb, o->register_number, 1);
 						vtext_char_append(rb, ']');
 					} else {
-						reg(rb, o->reg, mod != 'w');
+						a64_register_name_append(rb, o->register_number, mod != 'w');
 					}
 					break;
-				case AO_ZERO:
-					reg(rb, ZR, mod != 'w');
+				case A64_ASM_OPERAND_ZERO:
+					a64_register_name_append(rb, ZR, mod != 'w');
 					break;
-				case AO_MEM:
+				case A64_ASM_OPERAND_MEMORY:
 					vtext_char_append(rb, '[');
-					reg(rb, o->reg, 1);
+					a64_register_name_append(rb, o->register_number, 1);
 					vtext_char_append(rb, ']');
 					break;
-				case AO_IMM:
-					if (o->v.kind == CODEGEN_VALUE_ADDRESS) {
-						codegen_reference_offset_append(c, rb, o->v.reference, (int64_t)o->v.integer);
+				case A64_ASM_OPERAND_IMMEDIATE:
+					if (o->value.kind == CODEGEN_VALUE_ADDRESS) {
+						codegen_reference_offset_append(c, rb, o->value.reference, (int64_t)o->value.integer);
 					} else {	/* clang prints a bare number, as the assembler reads it */
-						vtext_signed_append(rb, mod == 'n' ? -(int64_t)o->v.integer : (int64_t)o->v.integer);
+						vtext_signed_append(rb, mod == 'n' ? -(int64_t)o->value.integer : (int64_t)o->value.integer);
 					}
 					break;
 				}
@@ -439,14 +439,14 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 		}
 	}
 	{
-		ins *i = put(e, I_RAW);
+		a64_record *i = a64_record_emit(e, A64_OP_RAW);
 
-		i->off = (int32_t)start;
-		i->ref = (uint32_t)(rb->n - start);
-		i->cond = 1;
+		i->offset = (int32_t)start;
+		i->reference = (uint32_t)(rb->n - start);
+		i->condition = 1;
 		/*
 		 * Extended asm reads and writes only its operands and clobbers:
-		 * the registers go after the text (cond 2, RAW_MASKS) for opt.c.
+		 * the registers go after the text (cond 2, A64_RAW_HAS_REGISTER_MASKS) for opt.c.
 		 * Basic asm and asm goto (its labels need what is live there)
 		 * stay unknown.
 		 */
@@ -454,97 +454,97 @@ VPRIV void gen_asm(codegen_context *e, uint32_t n)
 			uint64_t m[2] = { (1ull << 18) | (1ull << 29) | (1ull << 30), clobs };	/* reads, writes */
 
 			for (uint32_t k = 0; k < nops; k++) {
-				const asmopnd *o = &op[k];
+				const a64_asm_operand *o = &op[k];
 				uint64_t r;
 
-				if (o->kind == AO_MEM) {
-					m[0] |= 1ull << o->reg;
+				if (o->kind == A64_ASM_OPERAND_MEMORY) {
+					m[0] |= 1ull << o->register_number;
 					continue;
 				}
-				if (o->kind != AO_REG || o->reg == 0xff)
+				if (o->kind != A64_ASM_OPERAND_REGISTER || o->register_number == 0xff)
 					continue;
-				r = 1ull << o->reg;
-				if (o->v.kind == CODEGEN_VALUE_REGISTER_PAIR)
-					r |= 1ull << o->v.register_high;
-				if (o->out)
+				r = 1ull << o->register_number;
+				if (o->value.kind == CODEGEN_VALUE_REGISTER_PAIR)
+					r |= 1ull << o->value.register_high;
+				if (o->is_output)
 					m[1] |= r;
-				if (!o->out || o->inout)
+				if (!o->is_output || o->is_input_output)
 					m[0] |= r;
 			}
 			vtext_append(rb, (const char *)m, sizeof(m));
-			i->cond = RAW_MASKS;
+			i->condition = A64_RAW_HAS_REGISTER_MASKS;
 		}
 	}
 	for (uint32_t i = 0; i < a->nout; i++) {
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 
-		if (o->kind == AO_VREG) {
-			codegen_lvalue l2 = o->l;
+		if (o->kind == A64_ASM_OPERAND_VECTOR_REGISTER) {
+			codegen_lvalue l2 = o->lvalue;
 			codegen_value av = laddr(e, &l2);
 			int r = toreg(e, &av);
 
-			vraw(e, "str", vreg_kind(c, o->t), o->reg, r);
+			a64_asm_vector_access_emit(e, "str", a64_asm_vector_register_letter(c, o->type), o->register_number, r);
 			val_free(e, &av);
 		}
 	}
 	/* fixed output registers back into their temporaries */
 	for (uint32_t i = 0; i < a->nout; i++) {
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 
-		if (o->kind == AO_REG && o->fixed == 1) {
-			if (o->v.kind != CODEGEN_VALUE_REGISTER) {
-				o->v = codegen_value_register(treg(e));
+		if (o->kind == A64_ASM_OPERAND_REGISTER && o->fixed == 1) {
+			if (o->value.kind != CODEGEN_VALUE_REGISTER) {
+				o->value = codegen_value_register(treg(e));
 			}
-			mov(e, 1, o->v.register_number, o->reg);
+			a64_record_emit_move(e, 1, o->value.register_number, o->register_number);
 		}
 	}
 	if (sp.mask)
-		unspill(e, &sp);
+		a64_abi_temporaries_restore(e, &sp);
 	e->temporaries_in_use &= ~reserved;
 	/* store the outputs (on the fallthrough path and through each trampoline) */
 	{
-		uint32_t lafter = a->nlabel && a->nout ? newlabel(e) : 0;
+		uint32_t lafter = a->nlabel && a->nout ? a64_label_new(e) : 0;
 
 		for (int pass = 0; pass <= (int)(a->nout ? a->nlabel : 0); pass++) {
 			if (pass > 0) {
-				e->label_reference_counts[tramp[pass - 1]] |= LREF_EXT;	/* (the asm jumps here) */
-				deflabel_forced(e, tramp[pass - 1]);
+				e->label_reference_counts[tramp[pass - 1]] |= CODEGEN_LABEL_EXTERNAL;	/* (the asm jumps here) */
+				a64_label_define_forced(e, tramp[pass - 1]);
 			}
 			for (uint32_t i = 0; i < a->nout; i++) {
-				asmopnd *o = &op[i];
+				a64_asm_operand *o = &op[i];
 
-				if (o->kind != AO_REG)
+				if (o->kind != A64_ASM_OPERAND_REGISTER)
 					continue;
 				{
-					codegen_value v = o->v;
-					codegen_lvalue l = o->l;
+					codegen_value v = o->value;
+					codegen_lvalue l = o->lvalue;
 
-					store(e, &l, o->t, &v);
+					store(e, &l, o->type, &v);
 				}
 			}
 			if (pass > 0)
-				jump(e, user_label(e, a->labels[pass - 1]));
+				a64_jump_emit(e, user_label(e, a->labels[pass - 1]));
 			else if (lafter)
-				jump(e, lafter);
+				a64_jump_emit(e, lafter);
 		}
 		if (lafter)
 			deflabel(e, lafter);
 	}
 	for (uint32_t i = 0; i < nops; i++) {
-		asmopnd *o = &op[i];
+		a64_asm_operand *o = &op[i];
 
-		if (o->kind == AO_REG && o->fixed != 2)
-			val_free(e, &o->v);
-		if (o->kind == AO_MEM)
-			tfree(e, o->reg);
-		if (o->out && o->kind == AO_REG)
-			lfree(e, &o->l);
+		if (o->kind == A64_ASM_OPERAND_REGISTER && o->fixed != 2)
+			val_free(e, &o->value);
+		if (o->kind == A64_ASM_OPERAND_MEMORY)
+			tfree(e, o->register_number);
+		if (o->is_output && o->kind == A64_ASM_OPERAND_REGISTER)
+			lfree(e, &o->lvalue);
 	}
 	/* asm goto without outputs: the labels are branch targets */
 	if (!a->nout)
 		for (uint32_t k = 0; k < a->nlabel; k++) {
-			kv_edge(e, tramp[k]);
+			a64_label_edge_add(e, tramp[k]);
 			e->label_reference_counts[tramp[k]]++;
-			e->label_reference_counts[tramp[k]] |= LREF_EXT;
+			e->label_reference_counts[tramp[k]] |= CODEGEN_LABEL_EXTERNAL;
 		}
 }

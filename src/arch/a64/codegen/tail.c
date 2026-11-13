@@ -24,8 +24,8 @@ VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 		if (values[i].kind != CODEGEN_VALUE_CONSTANT) {
 			int r = toreg(e, &values[i]);
 
-			slots[i] = slot(e, 8, 8);
-			mem(e, I_ST, 3, 0, r, FRAME, slots[i]);
+			slots[i] = a64_frame_slot_allocate(e, 8, 8);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, r, A64_REGISTER_FRAME, slots[i]);
 			val_free(e, &values[i]);
 		}
 	}
@@ -34,14 +34,14 @@ VPRIV bool a64_tail_return(codegen_context *e, uint32_t expr)
 		int wide = codegen_type_size(c, ty) == 8;
 
 		if (slots[i])
-			mem(e, I_LD, wide ? 3 : 2, 0, (int)i, FRAME, slots[i]);
+			a64_record_emit_memory(e, A64_OP_LD, wide ? 3 : 2, 0, (int)i, A64_REGISTER_FRAME, slots[i]);
 		else
-			movi(e, wide, (int)i, (int64_t)codegen_integer_truncate(c, values[i].integer, ty));
+			a64_record_emit_move_immediate(e, wide, (int)i, (int64_t)codegen_integer_truncate(c, values[i].integer, ty));
 	}
 	uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee);
 
 	codegen_reference_note(e, ref);
-	put(e, I_TAIL)->ref = ref;
+	a64_record_emit(e, A64_OP_TAIL)->reference = ref;
 	e->is_reachable = false;
 	return true;
 }
@@ -51,7 +51,7 @@ VPRIV uint32_t a64_tail_ref(const codegen_context *e)
 {
 	uint32_t k = e->record_count;
 
-	while (k && e->records[k - 1].op == I_LABEL)
+	while (k && e->records[k - 1].opcode == A64_OP_LABEL)
 		k--;
-	return k && e->records[k - 1].op == I_TAIL && !e->records[k - 1].cond ? e->records[k - 1].ref : 0;
+	return k && e->records[k - 1].opcode == A64_OP_TAIL && !e->records[k - 1].condition ? e->records[k - 1].reference : 0;
 }

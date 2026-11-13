@@ -59,17 +59,17 @@ VPRIV int toreg(codegen_context *e, codegen_value *v)
 		return v->register_number;
 	case CODEGEN_VALUE_CONSTANT:
 		r = treg(e);
-		movi(e, 1, r, (int64_t)v->integer);
+		a64_record_emit_move_immediate(e, 1, r, (int64_t)v->integer);
 		*v = codegen_value_register(r);
 		return r;
 	case CODEGEN_VALUE_ADDRESS:
 		r = treg(e);
-		addr_of_ref(e, r, v->reference, (int64_t)v->integer);
+		a64_reference_address_emit(e, r, v->reference, (int64_t)v->integer);
 		*v = codegen_value_register(r);
 		return r;
 	default:
 		r = treg(e);
-		movi(e, 1, r, 0);
+		a64_record_emit_move_immediate(e, 1, r, 0);
 		*v = codegen_value_register(r);
 		return r;
 	}
@@ -83,8 +83,8 @@ VPRIV void toreg2(codegen_context *e, codegen_value *v, bool sgn)
 	if (v->kind == CODEGEN_VALUE_CONSTANT) {
 		int lo = treg(e), hi = treg(e);
 
-		movi(e, 1, lo, (int64_t)(uint64_t)(u128)v->integer);
-		movi(e, 1, hi, (int64_t)(uint64_t)((u128)v->integer >> 64));
+		a64_record_emit_move_immediate(e, 1, lo, (int64_t)(uint64_t)(u128)v->integer);
+		a64_record_emit_move_immediate(e, 1, hi, (int64_t)(uint64_t)((u128)v->integer >> 64));
 		v->kind = CODEGEN_VALUE_REGISTER_PAIR, v->register_number = (uint8_t)lo, v->register_high = (uint8_t)hi;
 		return;
 	}
@@ -92,9 +92,9 @@ VPRIV void toreg2(codegen_context *e, codegen_value *v, bool sgn)
 		int lo = toreg(e, v), hi = treg(e);
 
 		if (sgn)
-			opbf(e, I_SBFM, 1, hi, lo, 63, 63);
+			a64_record_emit_bitfield(e, A64_OP_SBFM, 1, hi, lo, 63, 63);
 		else
-			movi(e, 1, hi, 0);
+			a64_record_emit_move_immediate(e, 1, hi, 0);
 		v->kind = CODEGEN_VALUE_REGISTER_PAIR, v->register_number = (uint8_t)lo, v->register_high = (uint8_t)hi;
 	}
 }
@@ -114,24 +114,24 @@ VPRIV codegen_value laddr(codegen_context *e, codegen_lvalue *l)
 	case CODEGEN_LVALUE_SYMBOL:
 		if (unlikely(codegen_reference_is_weak(e->compile_context, l->reference))) {
 			r = treg(e);
-			addr_of_ref(e, r, l->reference, l->offset);
+			a64_reference_address_emit(e, r, l->reference, l->offset);
 			return codegen_value_register(r);
 		}
 		return codegen_value_address(l->reference, l->offset);
 	case CODEGEN_LVALUE_FRAME:
 		r = treg(e);
-		opi(e, I_ADDI, 1, r, FRAME, l->offset);
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, r, A64_REGISTER_FRAME, l->offset);
 		return codegen_value_register(r);
 	case CODEGEN_LVALUE_REGISTER:
 		if (l->offset)
-			opi(e, I_ADDI, 1, l->register_number, l->register_number, l->offset);
+			a64_record_emit_immediate(e, A64_OP_ADDI, 1, l->register_number, l->register_number, l->offset);
 		l->offset = 0;
 		return codegen_value_register(l->register_number);
 	case CODEGEN_LVALUE_LOCAL_REGISTER:
 		codegen_fatal_report(e, e->current_location, "internal: address of a register variable");
 	default:
 		r = treg(e);
-		mov(e, 1, r, l->register_number);
+		a64_record_emit_move(e, 1, r, l->register_number);
 		return codegen_value_register(r);
 	}
 }
@@ -162,13 +162,13 @@ VPRIV void copy_mem(codegen_context *e, int dst, int src, uint64_t n)
 		while (o < n) {
 			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
 
-			mem(e, I_LD, log2sz(k), 0, t, src, (int64_t)o);
-			mem(e, I_ST, log2sz(k), 0, t, dst, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(k), 0, t, src, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, t, dst, (int64_t)o);
 			o += k;
 		}
 		return;
 	}
-	call_fixed(e, CODEGEN_LIBRARY_MEMCPY, dst, src, -1, (int64_t)n);
+	a64_call_memory_function_emit(e, CODEGEN_LIBRARY_MEMCPY, dst, src, -1, (int64_t)n);
 }
 
 VPRIV void zero_mem(codegen_context *e, int dst, uint64_t n)
@@ -179,10 +179,10 @@ VPRIV void zero_mem(codegen_context *e, int dst, uint64_t n)
 		while (o < n) {
 			uint64_t k = n - o >= 8 ? 8 : n - o >= 4 ? 4 : n - o >= 2 ? 2 : 1;
 
-			mem(e, I_ST, log2sz(k), 0, ZR, dst, (int64_t)o);
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(k), 0, ZR, dst, (int64_t)o);
 			o += k;
 		}
 		return;
 	}
-	call_fixed(e, CODEGEN_LIBRARY_MEMSET, dst, -2, -1, (int64_t)n);
+	a64_call_memory_function_emit(e, CODEGEN_LIBRARY_MEMSET, dst, -2, -1, (int64_t)n);
 }

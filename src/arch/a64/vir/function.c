@@ -3,7 +3,7 @@
  * registers arm64 offers the allocator, the fixed operands of calls,
  * parameters and returns, then one pass over the blocks that writes the
  * emitter's records with the allocated registers, the edits and the edges'
- * moves.  finish_function then runs the record clean-ups, lays out the frame
+ * moves.  a64_function_finish then runs the record clean-ups, lays out the frame
  * and prints or encodes, as for any function.
  *
  *   integer: x0-x15 and x19-x28 (callee-saved); x16 is VIR_REGISTER_SCRATCH0 and the
@@ -13,9 +13,9 @@
  *            call keeps: offered when no vector lives across a call (a64_vir_vectors_cross_call)
  *            and saved and restored here, not by the prologue; v31 is VIR_REGISTER_SCRATCH1
  *
- * Floating-point operations are encoded words (I_WORD), as in fp.c.  A
- * value in a spill slot or a VIR slot is addressed from FRAME, so the frame
- * layout stays finish_function's.  Edge moves of a branch that is not a `br`
+ * Floating-point operations are encoded words (A64_OP_WORD), as in fp.c.  A
+ * value in a spill slot or a VIR slot is addressed from A64_REGISTER_FRAME, so the frame
+ * layout stays a64_function_finish's.  Edge moves of a branch that is not a `br`
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
 
@@ -46,7 +46,7 @@ static void vl_target_block_enter(void *ctx, uint32_t b)
 	a64_vir_context *L = ctx;
 
 	if (b == L->save_point)
-		put(L->context, I_NOP)->cond = NOP_PROLOG;
+		a64_record_emit(L->context, A64_OP_NOP)->condition = A64_NOP_PROLOGUE;
 	L->is_before_save_point = L->save_point != VIR_BLOCK_NONE && !vir_block_dominates(L->function, L->save_point, b);
 	L->at = b;
 	L->fallok = true;
@@ -62,7 +62,7 @@ static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i, const uint8
 	if (L->flag_condition >= 0 && L->flag_value != L->function->insns[i].a && !(i > L->folded_low && i < L->folded_high))
 		L->flag_condition = -1;
 	if (!e->is_reachable)
-		deflabel_forced(e, newlabel(e));	/* (code after a trap: never reached) */
+		a64_label_define_forced(e, a64_label_new(e));	/* (code after a trap: never reached) */
 	a64_vir_insn_lower(L, b, i, res);
 }
 
@@ -83,7 +83,7 @@ static void vl_target_edge_moves(void *ctx, uint32_t g)
 
 static void vl_target_label(void *ctx, uint32_t label)
 {
-	deflabel_forced(((a64_vir_context *)ctx)->context, label);
+	a64_label_define_forced(((a64_vir_context *)ctx)->context, label);
 }
 
 /* the block's branches' edges with moves: a small block each after it (a label, the moves, a jump) */
@@ -122,7 +122,7 @@ static void vl_target_after_blocks(void *ctx)
 
 	for (uint32_t b = 0; b < L->function->block_count && L->save_point != VIR_BLOCK_NONE; b++)
 		if (a64_vir_thread_state_instance.epilogue_labels[b]) {	/* a return in front of the save point, for the code behind it */
-			deflabel_forced(L->context, a64_vir_thread_state_instance.epilogue_labels[b]);
+			a64_label_define_forced(L->context, a64_vir_thread_state_instance.epilogue_labels[b]);
 			L->is_before_save_point = false;
 			L->at = b;
 			L->fallok = false;
@@ -412,24 +412,24 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 	for (uint32_t k = 0; k < f->slot_count; k++) {
 		if (f->slot[k].align > 16)
 			a64_vir_fail(&L, VIRBUILD_FAILURE(over_aligned_slot));
-		L.slot_offsets[k] = slot(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
+		L.slot_offsets[k] = a64_frame_slot_allocate(e, f->slot[k].size ? f->slot[k].size : 1, f->slot[k].align);
 	}
 	for (uint32_t k = 0; k < V->allocation.spill_count; k++)
-		L.spill_offsets[k] = slot(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
+		L.spill_offsets[k] = a64_frame_slot_allocate(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
 	for (int r = 8; r < 16; r++)
 		if (V->allocation.callee[1] >> r & 1)
-			L.callee_saved_float_offsets[r - 8] = slot(e, 8, 8);
+			L.callee_saved_float_offsets[r - 8] = a64_frame_slot_allocate(e, 8, 8);
 	for (uint32_t b = 0; b < f->block_count; b++)
-		L.labels[b] = newlabel(e);
-	L.return_label = newlabel(e);
+		L.labels[b] = a64_label_new(e);
+	L.return_label = a64_label_new(e);
 	a64_vir_function_body_lower(&L);
-	deflabel_forced(e, L.return_label);
+	a64_label_define_forced(e, L.return_label);
 	if (L.frame_is_at_risk && e->frame_maximum + e->outgoing_argument_bytes_max + 128 > 4000)
 		a64_vir_fail(&L, VIRBUILD_FAILURE(large_frame_scratch));
 	for (int r = 19; r <= 28; r++)
 		if (V->allocation.callee[0] >> r & 1)
 			e->callee_saved_used |= 1u << r;
-	finish_function(e, s);
+	a64_function_finish(e, s);
 	e->vir_try = false;
 	e->vir_lowering = false;
 	return true;

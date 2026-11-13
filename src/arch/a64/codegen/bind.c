@@ -37,7 +37,7 @@ VPRIV int64_t bind_slot(codegen_context *e, uint32_t s)
 		if (rr >= 0)
 			b->register_number = (uint8_t)rr;
 	}
-	b->slot = slot(e, codegen_type_size(c, t) ? codegen_type_size(c, t) : 1, al);
+	b->slot = a64_frame_slot_allocate(e, codegen_type_size(c, t) ? codegen_type_size(c, t) : 1, al);
 	return b->slot;
 }
 
@@ -85,8 +85,8 @@ VPRIV codegen_lvalue local_lval(codegen_context *e, uint32_t s)
 	if (b->kind == CODEGEN_BINDING_REGISTER && b->instance) {
 		/* read-only, its address never taken: a copy in a fresh slot will do */
 		l.kind = CODEGEN_LVALUE_FRAME;
-		l.offset = slot(e, 8, 8);
-		mem(e, I_ST, 3, 0, b->value.register_number, FRAME, l.offset);
+		l.offset = a64_frame_slot_allocate(e, 8, 8);
+		a64_record_emit_memory(e, A64_OP_ST, 3, 0, b->value.register_number, A64_REGISTER_FRAME, l.offset);
 		return l;
 	}
 	if (b->kind == B_NONE || b->instance == 0) {
@@ -99,18 +99,18 @@ VPRIV codegen_lvalue local_lval(codegen_context *e, uint32_t s)
 		bind_slot(e, s);
 		if (codegen_type_is_wide(c, t)) {
 			toreg2(e, &v, codegen_type_is_signed(c, t));
-			mem(e, I_ST, 3, 0, v.register_number, FRAME, b->slot);
-			mem(e, I_ST, 3, 0, v.register_high, FRAME, b->slot + 8);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, v.register_number, A64_REGISTER_FRAME, b->slot);
+			a64_record_emit_memory(e, A64_OP_ST, 3, 0, v.register_high, A64_REGISTER_FRAME, b->slot + 8);
 		} else {
 			r = toreg(e, &v);
-			mem(e, I_ST, log2sz(codegen_type_size(c, t)), 0, r, FRAME, b->slot);
+			a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(codegen_type_size(c, t)), 0, r, A64_REGISTER_FRAME, b->slot);
 		}
 		val_free(e, &v);
 	}
 	if (b->kind == CODEGEN_BINDING_INDIRECT) {
 		int r = treg(e);
 
-		mem(e, I_LD, 3, 0, r, FRAME, b->slot);
+		a64_record_emit_memory(e, A64_OP_LD, 3, 0, r, A64_REGISTER_FRAME, b->slot);
 		l.kind = CODEGEN_LVALUE_REGISTER;
 		l.register_number = (uint8_t)r;
 		return l;

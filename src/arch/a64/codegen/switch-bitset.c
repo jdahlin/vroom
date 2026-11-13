@@ -19,17 +19,17 @@ VPRIV bool a64_switch_bitset(codegen_context *e, uint32_t body, uint32_t base, i
 	 * variable shift counts, which would otherwise alias out-of-range cases.
 	 */
 	if (recipe.lo)
-		opi(e, I_SUBI, cx, index, r, (int64_t)recipe.lo);
+		a64_record_emit_immediate(e, A64_OP_SUBI, cx, index, r, (int64_t)recipe.lo);
 	else
-		mov(e, cx, index, r);
-	opi(e, I_SUBSI, cx, ZR, index, recipe.span);
-	bcond(e, C_HI, dflt);
-	movi(e, mx, mask, (int64_t)recipe.mask);
-	op3(e, I_LSRV, mx, mask, mask, index);
-	opi(e, I_ANDI, mx, mask, mask, 1);
-	cbz(e, true, mx, mask, e->case_labels[recipe.node]);
+		a64_record_emit_move(e, cx, index, r);
+	a64_record_emit_immediate(e, A64_OP_SUBSI, cx, ZR, index, recipe.span);
+	a64_branch_condition_emit(e, A64_CONDITION_HI, dflt);
+	a64_record_emit_move_immediate(e, mx, mask, (int64_t)recipe.mask);
+	a64_record_emit_three_registers(e, A64_OP_LSRV, mx, mask, mask, index);
+	a64_record_emit_immediate(e, A64_OP_ANDI, mx, mask, mask, 1);
+	a64_branch_compare_zero_emit(e, true, mx, mask, e->case_labels[recipe.node]);
 	tfree(e, index);
 	tfree(e, mask);
-	jump(e, dflt);
+	a64_jump_emit(e, dflt);
 	return true;
 }
