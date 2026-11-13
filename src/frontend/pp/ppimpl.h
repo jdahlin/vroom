@@ -787,7 +787,7 @@ static inline __attribute__((always_inline)) void next_exp(pp *p, ptok *t)
 static inline __attribute__((always_inline)) void next_tok(pp *p, ptok *t)
 {
 	if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
-		p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+		p->tmp.used = 0;	/* nothing above file level refers to tmp */
 	next_exp(p, t);
 }
 

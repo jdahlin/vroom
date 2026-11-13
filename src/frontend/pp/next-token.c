@@ -76,7 +76,7 @@ void pp_next(pp *p, ptok *t)
 			const vtok *v = &c->vt[c->i++];
 
 			if (p->depth == p->nfile && !p->svn && !p->hold_tmp)
-				p->tmp.p = p->tmp.base;	/* nothing above file level refers to tmp */
+				p->tmp.used = 0;	/* nothing above file level refers to tmp */
 			vfill(t, v, c->src, c->loc + v->off);
 		} else {
 			pp_next_slow(p, t);
