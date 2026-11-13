@@ -1,4 +1,12 @@
-/* macro.c: .macro, its arguments and templates, .rept, .irp and .exitm: expansion as text, as MC does. */
+/* macro.c: .macro, .purgem, .rept, .irp/.irpc and .exitm: macros are expanded as text, as MC does,
+ * and the expansion is parsed again as a new frame.
+ *
+ * A macro's body points into the source text, so the text passed to as_snippet_assemble must stay valid
+ * until as_end.  A call compiles the body once into a template (pieces and argument slots, as_template)
+ * and then appends each expansion to the context's expansion_text stack, which as_frame_pop unwinds to
+ * the frame's mark.  Nesting is limited by AS_FRAMES_MAX and reported as an error, and so is a
+ * missing .endm or .endr.  \@ counts instantiations through a->ninst; .altmacro changes the argument
+ * syntax (a->altmacro_mode). */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- macros */

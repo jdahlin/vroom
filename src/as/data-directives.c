@@ -1,4 +1,13 @@
-/* data-directives.c: data directives: values, strings, floats, alignment, .comm, .space, .fill, .org, .incbin, .reloc, .inst. */
+/* data-directives.c: the directives that put bytes into a section: .byte/.short/.long/.quad and their
+ * aliases, .octa, strings, floats, .base64, alignment, .comm, .space, .fill, .org, .incbin, .reloc,
+ * .inst, LEB128.
+ *
+ * A value that is not a constant becomes a fixup through as_value_emit (resolved or turned into a
+ * relocation by the object); .uleb128/.sleb128 of a label difference and .skip with a layout-dependent
+ * count become variable items (variable-items.c) instead of bytes.  .incbin reads the file at assembly
+ * time, relative to the context's directory (as_include_directory_set) unless the path is absolute.
+ * as_data_relocation_type is thread-local state that carries an x86 sym@MOD relocation type from the
+ * operand parser to as_value_emit.  Bad operands fail the assembly through as_error_report. */
 #include "as-internal.h"
 #include <ctype.h>
 

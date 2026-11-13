@@ -1,4 +1,14 @@
-/* the assembler's files (as/, arch/<cpu>/as/) share this header: what one of them defines and another uses */
+/* as-internal.h: what the files of the assembler module (as/ and arch/<cpu>/as/) share: as_context,
+ * its record types, the character-class and hash helpers, and the prototypes of the VPRIV functions
+ * one file defines and another calls.  Nothing outside the module includes it (the public interface
+ * is include/as/as.h).
+ *
+ * One as_context belongs to one thread and is never shared; its three regions (expansion text,
+ * definitions, current statement) are reset per object by as_begin and everything allocated from them
+ * (macro bodies, .set variables, frame descriptions, line rows ...) lives until the next as_begin.
+ * All errors go through as_error_report: the first one is kept in a->msg, a->err stops the statement
+ * loop, and the caller sees -1 and as_message_get.  The per-CPU files are told apart by o->machine,
+ * not by a second context type. */
 #ifndef VCC_AS_INTERNAL_H
 #define VCC_AS_INTERNAL_H
 

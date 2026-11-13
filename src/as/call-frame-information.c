@@ -1,4 +1,12 @@
-/* call-frame-information.c: the .cfi_* directives, and .eh_frame as MC's FrameEmitterImpl writes it. */
+/* call-frame-information.c: the .cfi_* directives and the .eh_frame section built from them, as MC's
+ * FrameEmitterImpl writes it (CIEs shared by FDEs with the same signal/simple/RA/B-key, entries padded
+ * with DW_CFA_nop).
+ *
+ * The directives only record instructions and frame descriptions in the context; the section is
+ * written once, by as_cfi_frame_emit from as_end, after variable items are relaxed, because FDE
+ * ranges are label differences that need the final layout.  Errors (an unfinished .cfi_startproc,
+ * CFI across sections, more than 8 distinct CIEs, .debug_frame) fail the assembly.  DWARF register
+ * numbers follow the object's machine (arm64 or x86-64). */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- CFI */

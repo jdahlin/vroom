@@ -1,4 +1,12 @@
-/* section.c: .section, .text, .data and the standard sections, and the parsing of section and symbol names. */
+/* section.c: .section and .pushsection (as_directive_section), the standard sections by name, switching
+ * the current frag, and the parsing of section and symbol names (quoted or plain).  .text, .data, .bss,
+ * .popsection and .previous are dispatched in as.c and use the helpers here.
+ *
+ * A section is a frag chain in the ElfObj; the context's cur is the frag appended to and prev the one
+ * .previous returns to, with a bounded stack for .pushsection (AS_SECTION_STACK_MAX).  A frag that
+ * .prefalign split goes on in its continuation, so a frag taken from cur or prev goes through
+ * as_fragment_latest first.  .section flags and types are checked against ELF's
+ * (SHF_MERGE needs an entry size, SHF_GROUP a group) and fail the assembly when wrong. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- sections */
