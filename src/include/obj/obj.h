@@ -260,8 +260,8 @@ void macho_emit(ElfObj *o, uint8_t *out);
  *   sections  ElfSec.flags holds the IMAGE_SCN_* characteristics without the alignment bits (those
  *             come from ElfSec.align), type is SHT_NOBITS for uninitialized data, group is the COMDAT
  *             symbol (0 none) and comdat the IMAGE_COMDAT_SELECT_* selection (0 none).  coff_section
- *             finds or creates one.  The section symbols the model makes are anonymous: the writer
- *             writes its own, with the section-definition records.
+ *             finds or creates one.  The model's section symbols (a section's name used as a
+ *             symbol) stand for the writer's own, written with the section-definition records.
  *   symbols   bind STB_GLOBAL/STB_WEAK is "external"; coff_class/coff_type are .scl/.type
  *             (coff_type 32 is a function: pc-relative references to it always keep a relocation, as
  *             MC); coff_weak makes a weak external (with a ".weak.NAME.default" definition when it is

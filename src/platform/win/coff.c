@@ -157,7 +157,9 @@ static void coff_relocation(ElfObj *o, CoffOut *w, ElfFix *x, uint64_t P, uint16
 {
 	uint32_t sec = elf_frag(o, x->frag)->sec;
 	uint32_t target = aid;
-	if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC) {
+	if (a->flags & ESYM_SECTION)	/* the model's section symbol: the writer's */
+		target = COFF_RELOC_SECTION | symsec(o, a);
+	else if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC) {
 		/* MC: a temporary becomes its section's symbol and its offset */
 		if (!insec(a)) { elf_error(o, "undefined temporary symbol '%s'", a->name); return; }
 		c += (int64_t)symoff(o, a);

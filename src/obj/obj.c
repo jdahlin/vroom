@@ -266,9 +266,8 @@ uint32_t elf_section_create(ElfObj *o, const char *name, uint32_t len, uint32_t 
 	newfrag(o, i, i, 0);
 	/* MC registers the section symbol under the section's name unless a
 	 * defined symbol has it; an undefined one becomes the section symbol */
-	uint32_t y = o->format == OBJ_COFF ? 0 : elf_sym_lookup(o, name, len);	/* (COFF: the writer names its own) */
-	if (o->format == OBJ_COFF) y = elf_sym_anon(o, s->name, len);
-	else if (!y) y = elf_sym(o, name, len);
+	uint32_t y = elf_sym_lookup(o, name, len);	/* (COFF too: .secrel32 .debug_abbrev names the section) */
+	if (!y) y = elf_sym(o, name, len);
 	else if (elf_symp(o, y)->flags & ESYM_DEFINED) y = elf_sym_anon(o, s->name, len);
 	ElfSym *ys = elf_symp(o, y);
 	ys->flags = (uint8_t)(ESYM_DEFINED | ESYM_SECTION | (ys->flags & ESYM_USED));

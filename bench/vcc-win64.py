@@ -2,7 +2,7 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|inline] [--ref-only] [--obj] [--objcmp]
-                     [-v] [--show CAT] [--no-cache] [PAT]
+                     [--vasm-ref] [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
 own; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
@@ -11,7 +11,12 @@ llvm-mingw sysroot (UCRT, static: no DLL beyond the system's) and run under
 Wine.  vcc passes when its program prints what clang's prints and exits the
 same way.  By default vcc's side uses `vpp -S`, assembled by clang; --obj
 uses the direct `vpp -c` path, and --objcmp compares both with clang's
-assembler.  --ref-only builds and runs clang's side only (WIN0).
+assembler.  --ref-only builds and runs clang's side only (WIN0).  --vasm-ref
+checks vcc's assembler and COFF writer alone (WIN4/WIN5): clang -S of each
+test, assembled by vasm --target=x86_64-w64-mingw32, linked and run as the
+reference is; it passes when the output and exit code are the reference's,
+and the object is also compared with clang -c of the same .s (stage
+'objdiff' when it differs but runs).
 
 The chain (bench/hostenv.py: MINGW_SYSROOT, WINE): the host's clang compiles
 with the test runtime headers (src/test/rt/include-win64 before
@@ -361,6 +366,56 @@ def objcmp(t):
     return t, 'pass', '', ''
 
 
+def vasmref(t):
+    """--vasm-ref: clang -S, vasm, lld, Wine against the reference"""
+    suite, name, path = t
+    src = open(path, 'rb').read().decode('latin-1')
+    s = static_skip(suite, name, src)
+    if s:
+        return t, 'skip', s[0], s[1]
+    flags = flags_of(suite, name, src)
+    wd = f'{OUT}/va/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
+    if 'skip' in ref:
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'skip', ref['skip'], ref['why']
+    os.makedirs(wd, exist_ok=True)
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-S', path, '-o', f'{wd}/ref.s'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'skip', 'clang-S', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh([VASM, TGT, f'{wd}/ref.s', '-o', f'{wd}/vas.o'])
+    if rc:
+        e = err.decode(errors='replace')
+        m = re.search(r'error: (.*)', e)
+        return t, 'fail', 'vasm', (m.group(1) if m else ct.first_err(e))[:120]
+    pk = hashlib.sha1(open(f'{wd}/vas.o', 'rb').read() + ref['key'].encode()).hexdigest()
+    pf = f'{OUT}/pass-vasm/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
+    rc, err = link([f'{wd}/vas.o'], f'{wd}/vas.exe')
+    if rc:
+        return t, 'fail', 'link', ct.first_err(err)
+    rc, out, err = run(f'{wd}/vas.exe')
+    if rc != ref['rc'] or out != ref['out']:
+        m = EXC.search(err) if rc == 255 else None
+        return t, 'fail', 'run', f'exception {m.group(1)}' if m else f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
+    rc, _, _ = sh([CL, TGT, '-c', f'{wd}/ref.s', '-o', f'{wd}/clang.o'])
+    if rc or open(f'{wd}/clang.o', 'rb').read() != open(f'{wd}/vas.o', 'rb').read():
+        return t, 'fail', 'objdiff', 'runs, but the object is not clang -c\'s'
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    open(pf, 'w').write(pk)
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
+
 NOCACHE = REF_ONLY = OBJ = False
 
 
@@ -373,9 +428,10 @@ if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '--vasm-ref', '-v')}
     av = [a for a in av if a not in flags]
     nocache, ref_only, obj, ocmode, verbose = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v'))
+    vamode = '--vasm-ref' in flags
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -393,7 +449,7 @@ if __name__ == '__main__':
     rt_obj()
     hostenv.wine_start(PREFIX)
     with Pool(j, initializer=init, initargs=(nocache, ref_only, obj)) as pool:
-        res = pool.map(objcmp if ocmode else one, ts, chunksize=1)
+        res = pool.map(vasmref if vamode else objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
