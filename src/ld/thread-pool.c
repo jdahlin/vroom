@@ -13,8 +13,8 @@ static struct {
 	void *arg;
 	size_t n;
 	atomic_size_t next;
-	int tickets;	/* workers still to join the current job */
-	int active;	/* workers that joined and are not done */
+	int active;
+	unsigned gen;
 } job;
 
 static void run_job(void)
@@ -27,12 +27,13 @@ static void run_job(void)
 static void *worker(void *unused)
 {
 	(void)unused;
+	unsigned seen = 0;
 	for (;;) {
 		{
 			VLOCK(plock);
-			while (job.tickets == 0)
+			while (job.gen == seen)
 				pthread_cond_wait(&pcv, &plock);
-			job.tickets--;
+			seen = job.gen;
 		}
 		run_job();
 		{
@@ -44,54 +45,13 @@ static void *worker(void *unused)
 	return NULL;
 }
 
-static uint64_t pf_ns(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
-}
-
-/* Waking a worker costs about as much as 50 us of work, and a call whose items
-   are all tiny (a link of four small objects) must not pay for the pool at
-   all: the caller runs items itself for PF_PROBE_NS first, which also measures
-   the cost of an item; only if work is left then, it wakes as many workers as
-   the remaining work keeps busy for PF_WORKER_NS each (and never more than
-   there are items left). */
-#define PF_PROBE_NS 30000u
-#define PF_WORKER_NS 60000u
-
 /* fn(arg, i) for i in [0, n), dynamically scheduled over the pool */
 static void pfor(size_t n, pfn fn, void *arg)
 {
-	size_t i = 0;
-	uint64_t t0, el = 0;
-	int nw;
-
 	if (n == 0)
 		return;
 	if (nthreads <= 1 || n == 1) {
-		for (; i < n; i++)
-			fn(arg, i);
-		return;
-	}
-	t0 = pf_ns();
-	do {
-		fn(arg, i++);
-		el = pf_ns() - t0;
-	} while (i < n && el < PF_PROBE_NS);
-	if (i == n)
-		return;
-	{	/* the cost of the items left, by the cost of those run */
-		uint64_t left = (uint64_t)(n - i) * (el / i + 1);
-		uint64_t w = left / PF_WORKER_NS;
-
-		nw = w > (uint64_t)(nthreads - 1) ? nthreads - 1 : (int)w;
-		if ((size_t)nw > n - i - 1)
-			nw = (int)(n - i - 1);
-	}
-	if (nw <= 0) {
-		for (; i < n; i++)
+		for (size_t i = 0; i < n; i++)
 			fn(arg, i);
 		return;
 	}
@@ -105,18 +65,13 @@ static void pfor(size_t n, pfn fn, void *arg)
 		job.fn = fn;
 		job.arg = arg;
 		job.n = n;
-		atomic_store(&job.next, i);
-		job.active = job.tickets = nw;
-		if (nw >= pool_started - 1)
-			pthread_cond_broadcast(&pcv);
-		else
-			for (int t = 0; t < nw; t++)
-				pthread_cond_signal(&pcv);
+		atomic_store(&job.next, 0);
+		job.active = pool_started - 1;
+		job.gen++;
+		pthread_cond_broadcast(&pcv);
 	}
 	run_job();
 	VLOCK(plock);
-	job.active -= job.tickets;	/* workers that never woke: do not wait for them */
-	job.tickets = 0;
 	while (job.active)
 		pthread_cond_wait(&pdone, &plock);
 }
