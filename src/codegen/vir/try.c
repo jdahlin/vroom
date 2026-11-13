@@ -14,12 +14,17 @@
  *
  * VCC_VIR_STATS=1: per TU, on stderr, how many functions went through VIR and
  * why the others did not (reasons: failure.h); see vw_stats_print.
+ *
+ * VCC_VIR_PASSES: time, leave out or check the builder's passes by name
+ * (pass-table.c); its lines are printed with VCC_VIR_STATS's.
  */
 #define WK_PREFIX vw_
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
+#include "pass-table.h"
+#include "port/performance-counters.h"
 
 /* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
 VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT] = {
@@ -90,6 +95,7 @@ VPRIV void vw_stats_print(emitter *E)
 		fprintf(stderr, "vcc vir-failure: reason=%s count=%u example=%.*s detail=%s\n", vir_failure_table[k].name,
 			(unsigned)E->vfailed[k].count, (int)id->len, id->s, E->vfailed[k].detail);
 	}
+	vir_pass_stats_print(E);
 }
 
 static int vw_mode(void)
@@ -166,6 +172,9 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 {
 	int m = vw_mode();
 	char nm[128] = "";
+	bool timed;	/* VCC_VIR_PASSES=time: the build and the lowering are rows of its statistic */
+	uint32_t npass;
+	vperf t0 = { 0, 0 };
 
 	if (!m || e->E->o->opt < 2 || WASM(e->c))
 		return false;
@@ -173,12 +182,18 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 	e->vfail = NULL;
 	if (e->E->vstats)
 		e->E->vattempted++;
+	timed = e->E->vstats && vir_pass_switch_get()->time;
+	vir_pass_list(&npass);
+	if (timed)
+		t0 = vperformance_now();
 	{
 		int novtag = e->novtag;	/* (a bail out of a volatile access leaves it raised) */
 
 		vw_wk_function(e, s);
 		e->novtag = novtag;
 	}
+	if (timed)
+		vir_pass_note(e->E, VIR_PASS_ROW_BUILD(npass), vperformance_subtract(vperformance_now(), t0).ins);
 	e->vtry = false;
 	if (m & 8)
 		vw_name(e, s, nm, sizeof nm);
@@ -217,8 +232,15 @@ VPRIV bool vw_try(ecx *e, uint32_t s)
 		if ((m & 16) && !nerr) {
 			const char *why;
 
+			bool ok;
+
 			V->detail[0] = 0;
-			if (X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why)) {
+			if (timed)
+				t0 = vperformance_now();
+			ok = X86(e->c) ? vw_x64(e, s, &why) : vw_a64(e, s, &why);
+			if (timed)
+				vir_pass_note(e->E, VIR_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
+			if (ok) {
 				if (e->E->vstats)
 					e->E->vlowered++;
 				if (m & 8)
