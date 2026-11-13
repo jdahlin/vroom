@@ -67,7 +67,7 @@ cc_type_intern         vir_block_dominators_build as_expression_parse
 | `common/`, `port/` | `v` + facility: `vvec_`, `vbuffer_`, `vregion_`, `vfile_` | `vir/` | `vir_` |
 | `frontend/lex/` | `lex_` | VIR builder (`codegen/vir/`) | `virbuild_` |
 | `frontend/pp/` | `pp_` | `as/` | `as_` |
-| `frontend/diag/` | `diag_` | `obj/` | `obj_` |
+| `diag/` | `diag_` | `obj/` | `obj_` |
 | AST and types (language-neutral) | `ast_` | `ld/` | `ld_` |
 | `frontend/c/` (parser, sema) | `cc_` | `driver/` | `driver_` |
 | `codegen/` shared | `codegen_` | `server/` | `vccd_` |

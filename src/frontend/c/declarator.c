@@ -303,7 +303,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 	bool inner = false;
 	declr id;
 
-	if (vstack_low())	/* int (((((... nests declarators */
+	if (vstack_guard_low())	/* int (((((... nests declarators */
 		fatal(c, tok(c)->loc, "declarator nested too deeply");
 
 	memset(d, 0, sizeof(*d));

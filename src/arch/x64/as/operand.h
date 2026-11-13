@@ -17,5 +17,5 @@ typedef struct {
 
 /* Encode already parsed operands using the assembler's instruction families.
  * The mnemonic and operands may be modified; no text parsing is performed. */
-int as_x64_insn(As *a, char *mn, XOp *o, int nops);
+int as_x64_insn(as_context *a, char *mn, XOp *o, int nops);
 #endif

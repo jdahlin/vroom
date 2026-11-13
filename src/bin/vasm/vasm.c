@@ -9,7 +9,7 @@
 #include "arch/wasm/as/wasmas.h"
 #endif
 #include "obj/obj.h"
-#include "port/vperf.h"
+#include "port/performance-counters.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,9 +37,9 @@ int main(int argc, char **argv)
 	const char *out = "a.out", *in = 0;
 	int bench = 0, first = 1;
 	if (argc > 2 && !strcmp(argv[1], "--bench")) { bench = atoi(argv[2]); first = 3; }
-	if (argc > 1 && !strcmp(argv[1], "--trace")) { as_trace = 1; argv++; argc--; }
-	else if (argc > 1 && !strcmp(argv[1], "--trace-all")) { as_trace = 2; argv++; argc--; }
-	As *a = as_new();
+	if (argc > 1 && !strcmp(argv[1], "--trace")) { as_trace_level = 1; argv++; argc--; }
+	else if (argc > 1 && !strcmp(argv[1], "--trace-all")) { as_trace_level = 2; argv++; argc--; }
+	as_context *a = as_new();
 	ElfObj *o = elf_new();
 	if (bench) {
 		/* inputs mapped once and touched, so this measures the assembler */
@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 		uint64_t h = 1469598103934665603ull;
 		for (int r = 0; r < bench; r++) {
 			double t0 = now();
-			vperf v0 = vperf_now();
+			vperf v0 = vperformance_now();
 			for (int i = 0; i < nf; i++) {
 				const char *msg;
 				if (as_run(a, o, ps[i], ns[i], argv[first + i], &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
@@ -66,7 +66,7 @@ int main(int argc, char **argv)
 					for (size_t b = 0; b < k; b++) h = (h ^ buf[b]) * 1099511628211ull;
 				}
 			}
-			v0 = vperf_sub(vperf_now(), v0);
+			v0 = vperformance_subtract(vperformance_now(), v0);
 			if (r) {	/* the first pass also hashes the objects */
 				vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
 				vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
@@ -75,7 +75,7 @@ int main(int argc, char **argv)
 			if (t < best) best = t;
 		}
 		uint64_t st, sb;
-		as_stats(a, &st, &sb);
+		as_statistics_get(a, &st, &sb);
 		st /= (uint64_t)bench; sb /= (uint64_t)bench;
 		printf("%.3f ms/pass (best of %d): in %zu B %.1f MB/s, out %zu B %.1f MB/s, %llu statements %.1f M/s, %.1f MB/s expanded\n",
 		       best * 1e3, bench, tin, tin / best / 1e6, tout, tout / best / 1e6,
@@ -112,7 +112,7 @@ int main(int argc, char **argv)
 	if (macho) {
 		/* Apple's dialect, as vpp -c for a Darwin target: back to ours, then the Mach-O writer */
 		size_t dn;
-		char *d = as_darwin_text(p, n, &dn);
+		char *d = macho_dialect_translate(p, n, &dn);
 		if (as_run(a, o, d, dn, in, &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
 		size_t on = macho_finish(o);
 		if (!on || o->has_err) { fprintf(stderr, "%s: %s\n", in, o->err[0] ? o->err : "cannot lay out the object"); return 1; }

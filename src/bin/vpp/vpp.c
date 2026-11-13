@@ -68,12 +68,12 @@ static void run_job(void *arg, size_t k)
 	(void)arg;
 	memcpy(ph0, ppd_ph, sizeof(ph0));	/* (per thread: the job's own work is the delta) */
 	t0 = now();
-	v0 = vperf_now();
+	v0 = vperformance_now();
 	j->status = ppd_run(j->ac, j->av, &e);
-	j->all = vperf_sub(vperf_now(), v0);
+	j->all = vperformance_subtract(vperformance_now(), v0);
 	j->ms = (now() - t0) * 1e3;
 	for (int i = 0; i < PPD_NPH; i++)
-		j->ph[i] = vperf_sub(ppd_ph[i], ph0[i]);
+		j->ph[i] = vperformance_subtract(ppd_ph[i], ph0[i]);
 }
 
 /* every job once, nthr at a time: the TUs on the shared pool (port/task.c),

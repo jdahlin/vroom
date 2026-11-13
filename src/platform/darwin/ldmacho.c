@@ -1381,7 +1381,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 
 	/* UUID: from the content before the signature */
 	{
-		uint64_t h1 = ld_xxh3(img, code_limit), h2 = ld_xxh3(img + code_limit / 2, code_limit - code_limit / 2);
+		uint64_t h1 = vdigest_xxh3(img, code_limit), h2 = vdigest_xxh3(img + code_limit / 2, code_limit - code_limit / 2);
 		uint8_t u[16];
 		memcpy(u, &h1, 8);
 		memcpy(u + 8, &h2, 8);
@@ -1424,7 +1424,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 		uint8_t *h = cd + 88 + idlen;
 		for (uint32_t p = 0; p < nslots; p++) {
 			uint64_t b = (uint64_t)p * 4096, n = code_limit - b < 4096 ? code_limit - b : 4096;
-			ld_sha256(img + b, n, h + 32 * p);
+			vdigest_sha256(img + b, n, h + 32 * p);
 		}
 	}
 	free(order);

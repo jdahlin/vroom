@@ -240,9 +240,9 @@ static void wcleanup(ecx *e, uint32_t s)
 		efatal(e, c->syms[s].loc, "wasm: a cleanup variable in a register");
 	claim_ref(e, ref);
 	wdecl(e, ref, c->syms[f].ty, NULL);
-	tb_s(tb, "\tcall\t");
+	vtext_string_append(tb, "\tcall\t");
 	wfname(c, tb, ref);
-	tb_c(tb, '\n');
+	vtext_char_append(tb, '\n');
 	if (wclassify_ret(c, ft->base).k == WA_SCALAR)
 		wi(e, "drop");
 }
@@ -710,10 +710,10 @@ VPRIV void wsj_begin(ecx *e)
 	W->sjp = wnewloc(e, WPT(c));
 	W->sjfid = wslot(e, 4, 4);
 	if (WASM32(c))
-		tb_s(&W->decl, "__wasm_setjmp\t(i32, i32, i32) -> ()\n__wasm_setjmp_test\t(i32, i32) -> (i32)\n"
+		vtext_string_append(&W->decl, "__wasm_setjmp\t(i32, i32, i32) -> ()\n__wasm_setjmp_test\t(i32, i32) -> (i32)\n"
 			       "__wasm_longjmp\t(i32, i32) -> ()\n");
 	else
-		tb_s(&W->decl, "__wasm_setjmp\t(i64, i32, i64) -> ()\n__wasm_setjmp_test\t(i64, i64) -> (i32)\n"
+		vtext_string_append(&W->decl, "__wasm_setjmp\t(i64, i32, i64) -> ()\n__wasm_setjmp_test\t(i64, i64) -> (i32)\n"
 			       "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "global.get\t__stack_pointer");
 	wset(e, W->sjsp);
@@ -816,13 +816,13 @@ static void wgblock(ecx *e, const node *x, int r)
 		wget(e, d->st);
 		wconst(e, WT_I32, 0);
 		wset(e, d->st);
-		tb_s(b, "\tbr_table\t{");
+		vtext_string_append(b, "\tbr_table\t{");
 		for (uint32_t j = 0; j < m; j++) {
-			tb_u(b, (uint64_t)(W->depth - 1 - sb[j]));
-			tb_s(b, ", ");
+			vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - sb[j]));
+			vtext_string_append(b, ", ");
 		}
-		tb_u(b, (uint64_t)(W->depth - 1 - sb[0]));
-		tb_s(b, "}\n");
+		vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - sb[0]));
+		vtext_string_append(b, "}\n");
 	}
 	for (uint32_t j = 0; j < m; j++) {
 		uint32_t s0 = W->gp[d->seg + j].i, s1 = j + 1 < m ? W->gp[d->seg + j + 1].i : x->c;
@@ -1119,15 +1119,15 @@ static void wswitch(ecx *e, uint32_t n)
 		wi(e, "i32.sub");
 		wconst(e, WT_I32, 0);
 		wset(e, g->st);
-		tb_s(b, "\tbr_table\t{");
+		vtext_string_append(b, "\tbr_table\t{");
 		for (uint32_t i = 0; i < nst; i++) {
 			while (j < m && W->seg[seg0 + j] < i)
 				j++;
-			tb_u(b, (uint64_t)(W->depth - 1 - (j < m && W->seg[seg0 + j] == i ? sb[j] : brk)));
-			tb_s(b, ", ");
+			vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - (j < m && W->seg[seg0 + j] == i ? sb[j] : brk)));
+			vtext_string_append(b, ", ");
 		}
-		tb_u(b, (uint64_t)(W->depth - 1 - brk));
-		tb_s(b, "}\n");
+		vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - brk));
+		vtext_string_append(b, "}\n");
 		wend(e, "end_if");
 	}
 	for (uint32_t i = 0; i < ncase; i++) {
@@ -1222,13 +1222,13 @@ static void wswitch(ecx *e, uint32_t n)
 			wi(e, "i32.wrap_i64");
 			wfree(e, u);
 		}
-		tb_s(b, "\tbr_table\t{");
+		vtext_string_append(b, "\tbr_table\t{");
 		for (uint32_t v = 0; v < span; v++) {
-			tb_u(b, (uint64_t)(W->depth - 1 - (int)tg[v]));
-			tb_s(b, ", ");
+			vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - (int)tg[v]));
+			vtext_string_append(b, ", ");
 		}
-		tb_u(b, (uint64_t)(W->depth - 1 - dflt));
-		tb_s(b, "}\n");
+		vtext_unsigned_append(b, (uint64_t)(W->depth - 1 - dflt));
+		vtext_string_append(b, "}\n");
 		free(tg);
 	} else {
 		bool tree = false;

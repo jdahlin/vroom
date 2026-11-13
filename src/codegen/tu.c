@@ -3,8 +3,8 @@
 #ifdef VCC_WASM
 #include "arch/wasm/as/wasmas.h"
 #endif
-#include "common/buf.h"
-#include "common/defer.h"
+#include "common/buffer.h"
+#include "common/scoped-cleanup.h"
 #include "port/task.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
@@ -85,18 +85,18 @@ VPRIV void enqueue(emitter *E, uint32_t item)
 /* a quoted assembler string */
 static void dbg_str(tbuf *b, const char *s)
 {
-	tb_c(b, '"');
+	vtext_char_append(b, '"');
 	for (; *s; s++) {
 		if (*s == '"' || *s == '\\')
-			tb_c(b, '\\');
-		tb_c(b, *s);
+			vtext_char_append(b, '\\');
+		vtext_char_append(b, *s);
 	}
-	tb_c(b, '"');
+	vtext_char_append(b, '"');
 }
 
-static vmpool ecxpool = VMPOOL_INIT(16);
+static vjob_region_pool ecxpool = VJOB_REGION_POOL_INIT(16);
 
-static void ecx_init(ecx *e, emitter *E, vmreg *r)
+static void ecx_init(ecx *e, emitter *E, vjob_region *r)
 {
 	cc *c = E->c;
 
@@ -104,53 +104,53 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 	e->E = E;
 	e->c = c;
 	e->capin = 1u << 24;
-	e->in = vmreg_get(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
-	tb_reg(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
-	tb_reg(&e->out, &r[2], (size_t)1 << 32, "emit.out");
-	tb_reg(&e->data, &r[3], (size_t)1 << 28, "emit.data");
-	e->rel = vmreg_get(&r[4], (size_t)1 << 26, "emit.rel");
-	e->b = vmreg_get(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
-	e->lm = vmreg_get(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
-	e->caselbl = vmreg_get(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
+	e->in = vjob_region_acquire(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
+	vtext_region_init(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
+	vtext_region_init(&e->out, &r[2], (size_t)1 << 32, "emit.out");
+	vtext_region_init(&e->data, &r[3], (size_t)1 << 28, "emit.data");
+	e->rel = vjob_region_acquire(&r[4], (size_t)1 << 26, "emit.rel");
+	e->b = vjob_region_acquire(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
+	e->lm = vjob_region_acquire(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
+	e->caselbl = vjob_region_acquire(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
 	e->caplabel = 1u << 22;
-	e->lrefc = vmreg_get(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
-	e->lkvi = vmreg_get(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
-	e->kvs = vmreg_get(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
-	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
-	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
-	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
-	e->sla = vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
+	e->lrefc = vjob_region_acquire(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
+	e->lkvi = vjob_region_acquire(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
+	e->kvs = vjob_region_acquire(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
+	e->cases = vjob_region_acquire(&r[11], (size_t)1 << 24, "emit.cases");
+	e->weakref = vjob_region_acquire(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
+	e->rlog = vjob_region_acquire(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
+	e->sla = vjob_region_acquire(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
 	e->sstk = (uint32_t *)(e->sla + CAPSLA);
 	/* nesting: reserved, touched only as deep as it goes (bounded by the parser's stack guard) */
-	e->loops = vmreg_get(&r[15], (size_t)CAPNEST * (sizeof(loopctx) + sizeof(uint32_t)), "emit.loops");
+	e->loops = vjob_region_acquire(&r[15], (size_t)CAPNEST * (sizeof(loopctx) + sizeof(uint32_t)), "emit.loops");
 	e->clean = (uint32_t *)(e->loops + CAPNEST);
 }
 
 /* (after the stitch: the chunks point into e->out) */
-static void ecx_free(ecx *e, vmreg *r)
+static void ecx_free(ecx *e, vjob_region *r)
 {
 	em_switch_values_reset(e);
 	cc *c = e->c;
 
 	/* written before read (put, newlabel, the case collection, ...): handed back as is */
-	vmreg_put(&r[0], VMREG_SCRATCH);
-	vmreg_put(&r[1], VMREG_SCRATCH);
-	vmreg_put(&r[2], e->out.n);
-	vmreg_put(&r[3], VMREG_SCRATCH);
-	vmreg_put(&r[4], VMREG_SCRATCH);
+	vjob_region_release(&r[0], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[1], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[2], e->out.n);
+	vjob_region_release(&r[3], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[4], VJOB_REGION_SCRATCH);
 	/* per sym / label, found zero */
-	vmreg_put(&r[5], (size_t)c->nsym * sizeof(bind) + 4096);
-	vmreg_put(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096);
-	vmreg_put(&r[7], VMREG_SCRATCH);
-	vmreg_put(&r[8], VMREG_SCRATCH);
-	vmreg_put(&r[9], VMREG_SCRATCH);
-	vmreg_put(&r[10], VMREG_SCRATCH);
-	vmreg_put(&r[11], VMREG_SCRATCH);
-	vmreg_put(&r[12], VMREG_SCRATCH);
-	vmreg_put(&r[13], VMREG_SCRATCH);	/* (copied by keep_make before this) */
-	vmreg_put(&r[14], VMREG_SCRATCH);
-	vmreg_put(&r[15], VMREG_SCRATCH);
-	vmpool_give(&ecxpool, r);
+	vjob_region_release(&r[5], (size_t)c->nsym * sizeof(bind) + 4096);
+	vjob_region_release(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096);
+	vjob_region_release(&r[7], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[8], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[9], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[10], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[11], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[12], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[13], VJOB_REGION_SCRATCH);	/* (copied by keep_make before this) */
+	vjob_region_release(&r[14], VJOB_REGION_SCRATCH);
+	vjob_region_release(&r[15], VJOB_REGION_SCRATCH);
+	vjob_region_pool_give(&ecxpool, r);
 #ifdef VCC_WASM
 	wasm_ecx_free(e);
 #endif
@@ -293,7 +293,7 @@ static void as_error(cc *c, const char *fmt, ...)
 }
 
 /* the object backend: header text, chunks (items), tail text */
-static vmpool rpool = VMPOOL_INIT(3);
+static vjob_region_pool rpool = VJOB_REGION_POOL_INIT(3);
 
 static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
@@ -304,13 +304,13 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	static _Thread_local rpatch *pt;
 	size_t need = (size_t)c->nsym + c->nstr + c->nlabel + 192;
 	rctx R = { .c = c, .as = o->as, .o = o->obj };
-	vmreg *rr = vmpool_take(&rpool);
+	vjob_region *rr = vjob_region_pool_take(&rpool);
 	uint32_t *cache;
 	int r = 0;
 
-	R.loff = vmreg_get(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
-	tb_reg(&R.nb, &rr[1], 1 << 20, "emit.nb");
-	cache = vmreg_get(&rr[2], need * sizeof(uint32_t), "emit.rcache");
+	R.loff = vjob_region_acquire(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
+	vtext_region_init(&R.nb, &rr[1], 1 << 20, "emit.nb");
+	cache = vjob_region_acquire(&rr[2], need * sizeof(uint32_t), "emit.rcache");
 	R.symc = cache;
 	R.strc = cache + c->nsym + 64;
 	R.lblc = R.strc + c->nstr + 64;
@@ -331,19 +331,19 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	R.pt = pt;
 	elf_set_machine(R.o, X86(c) ? EM_X86_64 : EM_AARCH64);
 	as_begin(R.as, R.o, "<vcc>");
-	if (as_snippet(R.as, hp, hn))
+	if (as_snippet_assemble(R.as, hp, hn))
 		r = -1;
 	for (uint32_t i = 0; !r && i < nch; i++)
 		r = r_chunk(&R, ch[i].p, ch[i].n);
 	ser = R.ser;
-	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
+	if (!r && (as_snippet_assemble(R.as, tp, tn) || as_end(R.as)))
 		r = -1;
-	vmreg_put(&rr[0], VMREG_SCRATCH);
-	vmreg_put(&rr[1], VMREG_SCRATCH);
-	vmreg_put(&rr[2], need * sizeof(uint32_t));
-	vmpool_give(&rpool, rr);
-	if (r || R.o->has_err || as_failed(R.as)) {
-		as_error(c, "assembler: %s", as_failed(R.as) ? as_msg(R.as) : R.o->err);
+	vjob_region_release(&rr[0], VJOB_REGION_SCRATCH);
+	vjob_region_release(&rr[1], VJOB_REGION_SCRATCH);
+	vjob_region_release(&rr[2], need * sizeof(uint32_t));
+	vjob_region_pool_give(&rpool, rr);
+	if (r || R.o->has_err || as_is_failed(R.as)) {
+		as_error(c, "assembler: %s", as_is_failed(R.as) ? as_message_get(R.as) : R.o->err);
 		return -1;
 	}
 	return 0;
@@ -406,7 +406,7 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 }
 
 /* emit_tu1's per-TU tables (E.*) and text buffers */
-static vmpool erpool = VMPOOL_INIT(18);
+static vjob_region_pool erpool = VJOB_REGION_POOL_INIT(18);
 
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
 		    const keep *K, keep *next)
@@ -417,34 +417,34 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	double t0 = now(), t1, t2;
 	tbuf hdr;
 	int errors;
-	vmreg *er = vmpool_take(&erpool), *xr[64];
+	vjob_region *er = vjob_region_pool_take(&erpool), *xr[64];
 
 	memset(&E, 0, sizeof(E));
 	E.c = c;
 	E.o = o;
 	E.mf = mf;
 	E.K = K;
-	E.claimed = vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
-	E.extref = vmreg_get(&er[1], c->nsym + 64, "emit.extref");
-	E.sflags = vmreg_get(&er[2], c->nsym + 64, "emit.sflags");
-	E.ffacts = vmreg_get(&er[14], c->nsym + 64, "emit.ffacts");
-	E.strdone = vmreg_get(&er[3], c->nstr + 64, "emit.strdone");
-	E.nflags = vmreg_get(&er[4], c->nnode + 64, "emit.nflags");
-	E.lref = vmreg_get(&er[5], c->nlabel + 64, "emit.lref");
-	E.lcdepth = vmreg_get(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
-	E.q = vmreg_get(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
-	E.chunks = vmreg_get(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
+	E.claimed = vjob_region_acquire(&er[0], c->nsym + 64, "emit.claimed");
+	E.extref = vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
+	E.sflags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
+	E.ffacts = vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
+	E.strdone = vjob_region_acquire(&er[3], c->nstr + 64, "emit.strdone");
+	E.nflags = vjob_region_acquire(&er[4], c->nnode + 64, "emit.nflags");
+	E.lref = vjob_region_acquire(&er[5], c->nlabel + 64, "emit.lref");
+	E.lcdepth = vjob_region_acquire(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
+	E.q = vjob_region_acquire(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
+	E.chunks = vjob_region_acquire(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
 	pthread_mutex_init(&E.mu, NULL);
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
 	pthread_mutex_init(&E.dmu, NULL);
-	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
-	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
-	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
-	E.luse = vmreg_get(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
-	E.lnoreg = vmreg_get(&er[16], c->nsym + 64, "emit.lnoreg");
-	E.lspan = vmreg_get(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
+	E.walked = vjob_region_acquire(&er[9], c->nsym + 64, "emit.walked");
+	E.fnsize = vjob_region_acquire(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.cwval = vjob_region_acquire(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
+	E.luse = vjob_region_acquire(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
+	E.lnoreg = vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
+	E.lspan = vjob_region_acquire(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
 	{
 		const char *k = getenv("VCC_LREGS");
 
@@ -502,7 +502,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		nthr = 64;
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
-		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
+		ecx_init(&ctx[i], &E, xr[i] = vjob_region_pool_take(&ecxpool));
 	/* the drain loop on nthr slots, slot i with ctx[i], on the shared pool
 	 * (port/task.c): helpers are idle pool threads only, under the process'
 	 * budget, so inside a full vpp --batch or vccd the slots run here one after
@@ -519,26 +519,26 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.cg = NULL; E.cgoff = E.cgn = E.scc = NULL, E.isz = NULL;
 	/* stitch */
 	qsort(E.chunks, E.nchunk, sizeof(chunk), chunk_cmp);
-	tb_reg(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
+	vtext_region_init(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
 	if (WASM(c))
 		wasm_header(c, &hdr, ctx, nthr);
 	else if (X86(c) && (o->xcf & 1))
 		/* -fcf-protection=branch: GNU_PROPERTY_X86_FEATURE_1_AND = IBT, as clang's start of file */
-		tb_s(&hdr, "\t.section\t.note.gnu.property,\"a\",@note\n\t.p2align\t3, 0x0\n\t.long\t4\n\t.long\t16\n"
+		vtext_string_append(&hdr, "\t.section\t.note.gnu.property,\"a\",@note\n\t.p2align\t3, 0x0\n\t.long\t4\n\t.long\t16\n"
 			   "\t.long\t5\n\t.asciz\t\"GNU\"\n\t.long\t3221225474\n\t.long\t4\n\t.long\t1\n\t.p2align\t3, 0x0\n\t.text\n");
 	else
-		tb_s(&hdr, "\t.text\n");
+		vtext_string_append(&hdr, "\t.text\n");
 	bool dbg = o->debug && !DARWIN(c) && !WASM(c);
 	if (dbg) {
-		tb_s(&hdr, ".Ldbg_text0:\n\t.file\t0 ");
+		vtext_string_append(&hdr, ".Ldbg_text0:\n\t.file\t0 ");
 		dbg_str(&hdr, o->dbg_dir ? o->dbg_dir : ".");
-		tb_c(&hdr, ' ');
+		vtext_char_append(&hdr, ' ');
 		dbg_str(&hdr, o->dbg_name ? o->dbg_name : "<stdin>");
-		tb_c(&hdr, '\n');
+		vtext_char_append(&hdr, '\n');
 		for (uint32_t i = 0; i < E.ndfile; i++) {
-			tb_f(&hdr, "\t.file\t%u ", i + 1);
+			vtext_format_append(&hdr, "\t.file\t%u ", i + 1);
 			dbg_str(&hdr, E.dfile[i]);
-			tb_c(&hdr, '\n');
+			vtext_char_append(&hdr, '\n');
 			free(E.dfile[i]);
 		}
 		free(E.dfile);
@@ -546,15 +546,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
 		const casm *a = &c->asms[N(c->tlasm[i])->a];
 
-		tb_s(&hdr, c->strs[a->tmpl - 1].s);
-		tb_s(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
+		vtext_string_append(&hdr, c->strs[a->tmpl - 1].s);
+		vtext_string_append(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
 	}
 	{
 		tbuf tail;
 		struct iovec *iov = malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
 		int k = 0;
 
-		tb_reg(&tail, &er[13], (size_t)1 << 26, "emit.tail");
+		vtext_region_init(&tail, &er[13], (size_t)1 << 26, "emit.tail");
 		{
 			/* .weak for weak undefined syms, in symbol order whatever the threads did */
 			uint32_t nw = 0, *w;
@@ -569,9 +569,9 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			qsort(w, nw, sizeof(uint32_t), u32_cmp);
 			for (uint32_t j = 0; j < nw; j++)
 				if (!E.claimed[w[j]] && c->syms[w[j]].name && !sym_attrs(c, w[j])->alias) {
-					tb_s(&tail, "\t.weak\t");
+					vtext_string_append(&tail, "\t.weak\t");
 					sym_name(c, &tail, w[j]);
-					tb_c(&tail, '\n');
+					vtext_char_append(&tail, '\n');
 				}
 			free(w);
 		}
@@ -585,19 +585,19 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 
 				/* Darwin: clang's (#pragma weak) aliases are local, .weak_reference on a definition */
 				/* clang: an ifunc is global even when static */
-				tb_s(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC && !a->ifunc ? "" : "\t.globl\t");
+				vtext_string_append(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC && !a->ifunc ? "" : "\t.globl\t");
 				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK) || a->ifunc)) {
 					sym_name(c, &tail, s);
-					tb_c(&tail, '\n');
+					vtext_char_append(&tail, '\n');
 				}
-				tb_s(&tail, "\t.type\t");
+				vtext_string_append(&tail, "\t.type\t");
 				sym_name(c, &tail, s);
-				tb_s(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
-				tb_s(&tail, "\t.set\t");
+				vtext_string_append(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				vtext_string_append(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
-				tb_s(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
-				tb_s(&tail, c->strs[a->alias - 1].s);
-				tb_c(&tail, '\n');
+				vtext_string_append(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
+				vtext_string_append(&tail, c->strs[a->alias - 1].s);
+				vtext_char_append(&tail, '\n');
 			}
 		}
 		if (dbg) {
@@ -605,27 +605,27 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			/* (x86: .word is 2 bytes there, so .short/.long/.quad) */
 			bool x = X86(c);
 
-			tb_s(&tail, "\t.text\n.Ldbg_text1:\n"
+			vtext_string_append(&tail, "\t.text\n.Ldbg_text1:\n"
 				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
 				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
 				    "\t.section\t.debug_info,\"\",@progbits\n");
-			tb_s(&tail, x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
+			vtext_string_append(&tail, x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
 				        "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
 				        "\t.short\t29\n\t.asciz\t" :
 				        "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
 				        "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
 				        "\t.hword\t29\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			tb_s(&tail, x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			vtext_string_append(&tail, x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
 			dbg_str(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			tb_s(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
+			vtext_string_append(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
 				        "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n");
-			tb_s(&tail, "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
+			vtext_string_append(&tail, "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
 		else
-			tb_s(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
+			vtext_string_append(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
 		for (uint32_t i = 0; i < E.nchunk; i++)
 			iov[k++] = (struct iovec){ (void *)E.chunks[i].p, E.chunks[i].n };
@@ -640,10 +640,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 				const char *msg;
 
 				if (!all.p)
-					tb_init(&all, (size_t)1 << 32);
+					vtext_init(&all, (size_t)1 << 32);
 				all.n = 0;
 				for (int i = 0; i < k; i++)
-					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
+					vtext_append(&all, iov[i].iov_base, iov[i].iov_len);
 #ifdef VCC_WASM
 				if (WASM(c)) {
 					uint8_t *ob;
@@ -675,12 +675,12 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 			if (DARWIN(c)) {
 				/* -S for Mach-O: the text in Apple's dialect (darwin.c) */
 				if (!all.p) {
-					tb_init(&all, (size_t)1 << 32);
-					tb_init(&mo, (size_t)1 << 32);
+					vtext_init(&all, (size_t)1 << 32);
+					vtext_init(&mo, (size_t)1 << 32);
 				}
 				all.n = mo.n = 0;
 				for (int i = 0; i < k; i++)
-					tb_put(&all, iov[i].iov_base, iov[i].iov_len);
+					vtext_append(&all, iov[i].iov_base, iov[i].iov_len);
 				darwin_text(&mo, all.p, all.n);
 				iov[0] = (struct iovec){ mo.p, mo.n };
 				k = 1;
@@ -733,32 +733,32 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		}
 		if (E.vstats && write_out && !*again)	/* (the final round's: objects and text alike) */
 			vw_stats_print(&E);
-		vmreg_put(&er[13], tail.n);
+		vjob_region_release(&er[13], tail.n);
 	}
 	if (E.rstats)
 		rp_print(&E);
-	vmreg_put(&er[12], hdr.n);
+	vjob_region_release(&er[12], hdr.n);
 	for (int i = 0; i < nthr; i++)
 		ecx_free(&ctx[i], xr[i]);
 	free(ctx);
 	errors = E.errors;
-	vmreg_put(&er[0], c->nsym + 64);
-	vmreg_put(&er[1], c->nsym + 64);
-	vmreg_put(&er[2], c->nsym + 64);
-	vmreg_put(&er[3], c->nstr + 64);
-	vmreg_put(&er[4], c->nnode + 64);
-	vmreg_put(&er[5], c->nlabel + 64);
-	vmreg_put(&er[6], (size_t)c->nlabel * 2 + 64);
-	vmreg_put(&er[7], VMREG_SCRATCH);	/* the queue and the chunks: written before read */
-	vmreg_put(&er[8], VMREG_SCRATCH);
-	vmreg_put(&er[9], c->nsym + 64);
-	vmreg_put(&er[10], (c->nsym + 64) * sizeof(uint16_t));
-	vmreg_put(&er[11], (c->nsym + 64) * sizeof(i128));
-	vmreg_put(&er[14], c->nsym + 64);
-	vmreg_put(&er[15], (c->nsym + 64) * sizeof(uint16_t));
-	vmreg_put(&er[16], c->nsym + 64);
-	vmreg_put(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
-	vmpool_give(&erpool, er);
+	vjob_region_release(&er[0], c->nsym + 64);
+	vjob_region_release(&er[1], c->nsym + 64);
+	vjob_region_release(&er[2], c->nsym + 64);
+	vjob_region_release(&er[3], c->nstr + 64);
+	vjob_region_release(&er[4], c->nnode + 64);
+	vjob_region_release(&er[5], c->nlabel + 64);
+	vjob_region_release(&er[6], (size_t)c->nlabel * 2 + 64);
+	vjob_region_release(&er[7], VJOB_REGION_SCRATCH);	/* the queue and the chunks: written before read */
+	vjob_region_release(&er[8], VJOB_REGION_SCRATCH);
+	vjob_region_release(&er[9], c->nsym + 64);
+	vjob_region_release(&er[10], (c->nsym + 64) * sizeof(uint16_t));
+	vjob_region_release(&er[11], (c->nsym + 64) * sizeof(i128));
+	vjob_region_release(&er[14], c->nsym + 64);
+	vjob_region_release(&er[15], (c->nsym + 64) * sizeof(uint16_t));
+	vjob_region_release(&er[16], c->nsym + 64);
+	vjob_region_release(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
+	vjob_region_pool_give(&erpool, er);
 	return errors;
 }
 
@@ -774,12 +774,12 @@ int emit_tu(cc *c, const cc_opts *o)
 		return 1;
 
 	double t0 = now();
-	vperf v0 = vperf_now();
+	vperf v0 = vperformance_now();
 	const char *r = getenv("VCC_EMIT_REPEAT");
 	int n = r ? atoi(r) : 1, err = 0;
-	static vmpool mfpool = VMPOOL_INIT(1);
-	vmreg *mfr = vmpool_take(&mfpool);
-	uint8_t *mf = vmreg_get(mfr, c->nsym + 64, "emit.mf");
+	static vjob_region_pool mfpool = VJOB_REGION_POOL_INIT(1);
+	vjob_region *mfr = vjob_region_pool_take(&mfpool);
+	uint8_t *mf = vjob_region_acquire(mfr, c->nsym + 64, "emit.mf");
 	bool again = false;
 	keep K[2];
 
@@ -797,8 +797,8 @@ int emit_tu(cc *c, const cc_opts *o)
 	}
 	keep_free(&K[0]);
 	keep_free(&K[1]);
-	vmreg_put(mfr, c->nsym + 64);
-	vmpool_give(&mfpool, mfr);
+	vjob_region_release(mfr, c->nsym + 64);
+	vjob_region_pool_give(&mfpool, mfr);
 	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
 	ppd_ph_add(PPD_PH_EMIT, v0);
 	return err;

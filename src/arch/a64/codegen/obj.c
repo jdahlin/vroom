@@ -8,7 +8,7 @@ static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
 	R->nb.n = 0;
 	p_lbl(&R->nb, fid, l);
 	R->lser[l] = R->ser;
-	return R->lsym[l] = as_sym(R->as, R->nb.p, R->nb.n);
+	return R->lsym[l] = as_symbol_by_name(R->as, R->nb.p, R->nb.n);
 }
 
 static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
@@ -339,22 +339,22 @@ VPRIV uint32_t a64_words(const ins *i)
 }
 
 /* the fixups after an instruction's first: off is where the instruction starts */
-static void more_fixups(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, const ins *i, uint32_t y, As *as)
+static void more_fixups(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, const ins *i, uint32_t y, as_context *as)
 {
 	if (i->op == I_LDGOT)
-		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_LD64_GOT_LO12_NC, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_LD64_GOT_LO12_NC, as_symbol_value(as, y, 0));
 	else if (i->op != I_TLV)
 		return;
 	else if (i->cond == 0)
-		elf_fixup(o, frag, off + 4, p + 4, R_VCC_TLVP_PAGEOFF12, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 4, p + 4, R_VCC_TLVP_PAGEOFF12, as_symbol_value(as, y, 0));
 	else if (i->cond == TLS_LE)
-		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSLE_ADD_TPREL_LO12_NC, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSLE_ADD_TPREL_LO12_NC, as_symbol_value(as, y, 0));
 	else if (i->cond == TLS_IE)
-		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC, as_symbol_value(as, y, 0));
 	else {
-		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_TLSDESC_LD64_LO12, as_val(as, y, 0));
-		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSDESC_ADD_LO12, as_val(as, y, 0));
-		elf_fixup(o, frag, off + 12, p + 12, R_AARCH64_TLSDESC_CALL, as_val(as, y, 0));
+		elf_fixup(o, frag, off + 4, p + 4, R_AARCH64_TLSDESC_LD64_LO12, as_symbol_value(as, y, 0));
+		elf_fixup(o, frag, off + 8, p + 8, R_AARCH64_TLSDESC_ADD_LO12, as_symbol_value(as, y, 0));
+		elf_fixup(o, frag, off + 12, p + 12, R_AARCH64_TLSDESC_CALL, as_symbol_value(as, y, 0));
 	}
 }
 
@@ -373,14 +373,14 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 	if (f->type) {
 		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : r_sym(R, f->ref);
 
-		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_val(R->as, y, f->off));
+		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_symbol_value(R->as, y, f->off));
 		more_fixups(o, frag, off, p, i, y, R->as);
 	}
 }
 
 static inline int hexval(char ch)
 {
-	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* tb_x: lower case */
+	return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;	/* vtext_hex_digits_append: lower case */
 }
 
 /* per label of a function with inline asm (valid if ser == rctx.ser) */
@@ -428,7 +428,7 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 		}
 		enc(i, w, &f, NULL, 0);
 		memcpy(p, w, 4);
-		elf_fixup(R->o, frag, off, p, f.type, as_val(R->as, y, 0));
+		elf_fixup(R->o, frag, off, p, f.type, as_symbol_value(R->as, y, 0));
 	}
 	return true;
 }
@@ -525,7 +525,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 		 * once the labels are known) or a fixup (applied in order after
 		 * the words are in the frag).
 		 */
-		uint32_t at = 0, frag = as_frag(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
+		uint32_t at = 0, frag = as_fragment_current(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
 		rpatch *pt = R->pt;
 		ElfObj *o = R->o;
 		uint64_t base;
@@ -592,7 +592,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 			if (g->lbl)
 				continue;
 			y = r_sym(R, g->ref);
-			elf_fixup(o, frag, base + 4u * (a + g->k), p + 4 * (a + g->k), g->type, as_val(R->as, y, g->off));
+			elf_fixup(o, frag, base + 4u * (a + g->k), p + 4 * (a + g->k), g->type, as_symbol_value(R->as, y, g->off));
 			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].k], y, R->as);
 		}
 		return 0;
@@ -629,16 +629,16 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 			unsigned n;
 
 			if (i->op == I_RAW) {
-				if (as_snippet(R->as, raw + i->off, i->ref))
+				if (as_snippet_assemble(R->as, raw + i->off, i->ref))
 					return -1;
 				continue;
 			}
 			if (i->op == I_LABEL) {
 				rlab *L = r_lab(R, i->label);
-				uint32_t frag = as_frag(R->as);
+				uint32_t frag = as_fragment_current(R->as);
 
 				if (L->flags & RL_NAMED) {
-					if (as_label(R->as, r_label(R, h->fid, i->label)))
+					if (as_label_define_symbol(R->as, r_label(R, h->fid, i->label)))
 						return -1;
 					continue;
 				}
@@ -658,7 +658,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 				rlab *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {
-					uint32_t frag = as_frag(R->as), off;
+					uint32_t frag = as_fragment_current(R->as), off;
 					uint8_t *p;
 
 					elf_code(o, frag);
@@ -687,7 +687,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
 			if (n)
-				r_words(R, as_frag(R->as), w, n, &f, h->fid, i);
+				r_words(R, as_fragment_current(R->as), w, n, &f, h->fid, i);
 		}
 		/* branches to labels never placed: through the (undefined) symbol, as the text would */
 		for (uint32_t j = 0; j < npend; j++) {
@@ -696,7 +696,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 
 			if (!(r_lab(R, i->label)->flags & RL_PLACED)) {
 				enc(i, w, &f, NULL, 0);
-				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_val(R->as, r_label(R, h->fid, i->label), 0));
+				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_symbol_value(R->as, r_label(R, h->fid, i->label), 0));
 			}
 		}
 	}

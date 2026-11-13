@@ -17,7 +17,7 @@ static int run(int argc, char **argv)
 #endif
 	double t0 = now();
 	t_last = t0;
-	p_last = vperf_now();
+	p_last = vperformance_now();
 	flt_last = timing ? minflt() : 0;
 	pic = opt.shared;
 

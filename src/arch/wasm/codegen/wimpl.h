@@ -208,31 +208,31 @@ static inline void wi(ecx *e, const char *s)
 {
 	tbuf *b = WB_;
 
-	tb_c(b, '\t');
-	tb_s(b, s);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\t');
+	vtext_string_append(b, s);
+	vtext_char_append(b, '\n');
 }
 
 static inline void wiu(ecx *e, const char *s, uint64_t v)
 {
 	tbuf *b = WB_;
 
-	tb_c(b, '\t');
-	tb_s(b, s);
-	tb_c(b, '\t');
-	tb_u(b, v);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\t');
+	vtext_string_append(b, s);
+	vtext_char_append(b, '\t');
+	vtext_unsigned_append(b, v);
+	vtext_char_append(b, '\n');
 }
 
 static inline void wii(ecx *e, const char *s, int64_t v)
 {
 	tbuf *b = WB_;
 
-	tb_c(b, '\t');
-	tb_s(b, s);
-	tb_c(b, '\t');
-	tb_i(b, v);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\t');
+	vtext_string_append(b, s);
+	vtext_char_append(b, '\t');
+	vtext_signed_append(b, v);
+	vtext_char_append(b, '\n');
 }
 
 /* "<type>.<op>" */
@@ -240,11 +240,11 @@ static inline void wop(ecx *e, int t, const char *op)
 {
 	tbuf *b = WB_;
 
-	tb_c(b, '\t');
-	tb_s(b, wt_name[wrep(e->c, t)]);
-	tb_c(b, '.');
-	tb_s(b, op);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\t');
+	vtext_string_append(b, wt_name[wrep(e->c, t)]);
+	vtext_char_append(b, '.');
+	vtext_string_append(b, op);
+	vtext_char_append(b, '\n');
 }
 
 static inline void wconst(ecx *e, int t, int64_t v)
@@ -283,9 +283,9 @@ static inline void waddr_ref(ecx *e, uint32_t ref, int64_t off)
 	tbuf *b = WB_;
 
 	claim_ref(e, ref);
-	tb_s(b, WASM32(e->c) ? "\ti32.const\t" : "\ti64.const\t");
+	vtext_string_append(b, WASM32(e->c) ? "\ti32.const\t" : "\ti64.const\t");
 	ref_off(e->c, b, ref, off);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\n');
 }
 
 static inline void wboundary(ecx *e, const char *op, int kind)

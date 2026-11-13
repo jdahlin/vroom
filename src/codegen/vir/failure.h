@@ -1,7 +1,7 @@
 /*
  * Why the VIR path gives up on a function (VIR-MIGRATION.md, gate G1).
  *
- * Every bail-out of the builder (build.c), of arm64's lowering (a64.c), of
+ * Every bail-out of the builder (codegen/vir/, not a64.c), of arm64's lowering (a64.c), of
  * x86-64's (arch/x64/codegen/vir.c) and of the driver (try.c) names one of
  * these.  The message is what VCC_VIR=s prints; the name is what the
  * statistic VCC_VIR_STATS=1 counts (try.c, tu.c).  Add a reason here and use

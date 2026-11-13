@@ -1,7 +1,7 @@
 /* x86-64 assembler: x87 floating point */
 #include "x64as.h"
 
-VPRIV int x64_i_x87(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_x87(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;
@@ -54,7 +54,7 @@ VPRIV int x64_i_x87(As *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
-VPRIV int x64_i_x87ar(As *a, char *mn, XOp *o, int nops)
+VPRIV int x64_i_x87ar(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
 	int sz = 0, cc;

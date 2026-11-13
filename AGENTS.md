@@ -36,7 +36,7 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `src/codegen/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa.c`, `lower-*.c`, `promote.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/codegen/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
@@ -68,11 +68,13 @@ relative to it); `TODO.md` stays at the top.
     resources through `cleanup` (`defer.h`: VAUTOFREE, VAUTOCLOSE, VLOCK; not
     across a longjmp), attributes for our own declarations (`attr.h`: VUSE,
     VNONNULL) and overflow-checked bounds for sizes read from input files
-    (`ckd.h`: vckd_range, vckd_add, vckd_mul).  Variants not yet merged are
+    (`ckd.h`: vchecked_range, vchecked_add, vchecked_multiply).  Variants not yet merged are
     listed in TODO.md.
   - `port/`: what depends on the host (headers in `include/port/`): file
     mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
     (`vstack.h`), CRC32C (`hostcrc.h`), `-march=native` on x86 (`x86native.h`),
+    the shared thread pool and CPU budget (`task.h`, `vtask_*`: parallel-for,
+    jobs, blocking regions; doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`),
     Apple PMU counters (`darwin/pmc.c`), and the wasm build's `wasm/mman.c`
     (the big reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
@@ -92,7 +94,7 @@ relative to it); `TODO.md` stays at the top.
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
-    conditionals, expressions; internal header `asimpl.h`; one module with
+    conditionals, expressions; internal header `as-internal.h`; one module with
     `arch/<cpu>/as/parse.c`, `as_SRC`).
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
@@ -228,6 +230,8 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
+bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
@@ -247,7 +251,7 @@ bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs a
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
-src/tools/gen-diagids.py [--check]      # frontend/diag/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
+src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
 vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
@@ -273,7 +277,7 @@ bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STA
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
-bench/vcc-f80.sh [N]                # x87 long double folding (include/common/f128.h) vs this x86-64 host's FPU (~3 s)
+bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
@@ -334,7 +338,8 @@ Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
 protected (private repo, free plan), so the gate is the workflow: push to
 main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
 fast-forwards main when everything is green).  A new harness belongs in
-`ci/premerge.sh` when it is fast and needs only the checkout.
+`ci/premerge.sh` when it is fast and needs only the checkout.  The asan job also
+builds the fuzz targets and replays `test/fuzz/regress` (`make -C src fuzz-regress`).
 
 ## Sanitizers
 ```
@@ -352,7 +357,7 @@ harness that imports `vcc-diff.py`.  The big reservations (16 GB shared pp
 region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
 (CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
 default there; vcc exits with its arenas mapped) and the default 8 MB stack
-(`ulimit -s unlimited` leaves `vstack_low()` without a stack bottom).  A TSan batch takes
+(`ulimit -s unlimited` leaves `vstack_guard_low()` without a stack bottom).  A TSan batch takes
 65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
 not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings
