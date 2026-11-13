@@ -90,7 +90,9 @@ as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 LEX_SRC = frontend/lex/lex.c common/intern.c
 PP_SRC  = frontend/pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c
-VCCD_SRC = server/vccd.c server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
+VCCD_SRC = server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
+# the server proper (vccd.c has main), one TU like the split modules; dstore.c and caps.c stay apart
+server_SRC = $(filter-out server/dstore.c server/caps.c,$(wildcard server/*.c))
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
@@ -122,7 +124,7 @@ $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj vir)
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj vir server)
 $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
@@ -152,7 +154,7 @@ $(OBJ)/ld/ldlib.o: ld/ld.c Makefile | $(OBJ)
 $(OUT)/vpp: $(call o,bin/vpp/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
+$(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(call mod,server) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC))
@@ -227,7 +229,7 @@ self: $(OUT)/vpp
 	for f in $(SELF_SRC); do o=$$(echo $$f | sed 's,/,-,g'); $(SELF_CC) $(SELF_FLAGS) $$f -o $(SELF)/$${o%.c}.o || exit 1; done
 	$(SELF_CC) $(SELF_FLAGS) -DVLD_MAIN ld/ld.c -o $(SELF)/ld-main.o
 	$(SELF_LD) $(call so,bin/vpp/vpp.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
-	$(SELF_LD) $(call so,$(VCCD_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
+	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(call so,bin/vasm/vasm.c) $(SELF_AS) -o $(SO)/vasm
 	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
 	$(SELF_LD) $(SO)/ld-main.o $(call so,common/ldhash.c) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
