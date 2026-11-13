@@ -13,8 +13,10 @@ W = sys.argv[1]
 objs = sorted(os.path.join(d, f) for d, _, fs in os.walk(W) for f in fs if f.endswith('.o') and '/scripts/' not in d + '/' and not f.endswith('.mod.o'))
 random.seed(1); objs = random.sample(objs, min(int(sys.argv[2]) if len(sys.argv) > 2 else 200, len(objs)))
 T = tempfile.mkdtemp()
-NM = [[], ['-p', '-S'], ['-n'], ['--help']]
-OC = [['-j', '.text'], ['-j', '.text', '-j', '.rela.text'], ['-j', '.data', '-j', '.rodata*', '-w'], ['-j', '.init.text', '-S'], ['-S'], ['-O', 'binary']]
+NM = [[], ['-p', '-S'], ['-n'], ['--help'], ['-A'], ['-o', '-u']]
+OC = [['-j', '.text'], ['-j', '.text', '-j', '.rela.text'], ['-j', '.data', '-j', '.rodata*', '-w'], ['-j', '.init.text', '-S'], ['-S'], ['-O', 'binary'],
+      ['--rename-section', '.text=.t2'], ['--rename-section', '.data=.rodata,alloc,readonly,load,contents'],
+      ['--rename-section', '.bss=.b2,alloc,load,contents', '--set-section-flags', '.data=alloc']]
 res = collections.Counter(); ex = {}
 def one(o):
     out = []

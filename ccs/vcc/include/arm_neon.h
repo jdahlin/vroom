@@ -206,6 +206,20 @@ typedef struct int32x4x2_t { int32x4_t val[2]; } int32x4x2_t;
 #define vtrn1q_u64(a, b) __VCC_V3(uint64x2_t, "trn1", "2d", a, b)
 #define vtrn2q_u64(a, b) __VCC_V3(uint64x2_t, "trn2", "2d", a, b)
 
+/* used by crypto/aegis128-neon-inner.c and its arm32 fallbacks */
+#define vqtbx1q_u8(d, t, i) ({ uint8x16_t __r = (d), __t = (t), __i = (i); \
+	__asm__("tbx %0.16b, {%1.16b}, %2.16b" : "+w"(__r) : "w"(__t), "w"(__i)); __r; })
+#define vtbx2_u8(d, t, i) ({ uint8x8x2_t __t = (t); uint8x8_t __r = (d), __i = (i); uint8x16_t __q = vcombine_u8(__t.val[0], __t.val[1]); \
+	__asm__("tbx %0.8b, {%1.16b}, %2.8b" : "+w"(__r) : "w"(__q), "w"(__i)); __r; })
+#define vminvq_s8(a) ({ int8x16_t __r, __a = (a); __asm__("sminv %b0, %1.16b" : "=w"(__r) : "w"(__a)); (int8_t)__r[0]; })
+#define vpmin_s8(a, b) ({ int8x8_t __r, __a = (a), __b = (b); \
+	__asm__("sminp %0.8b, %1.8b, %2.8b" : "=w"(__r) : "w"(__a), "w"(__b)); __r; })
+#define vmov_n_u64(x) ((uint64x1_t){ (unsigned long long)(x) })
+#define vcombine_u64(l, h) ({ uint64x1_t __l = (l), __h = (h); uint64x2_t __r = { __l[0], __h[0] }; __r; })
+#define vget_low_s8(v) ((int8x8_t)vget_low_u8((uint8x16_t)(v)))
+#define vget_high_s8(v) ((int8x8_t)vget_high_u8((uint8x16_t)(v)))
+#define vget_lane_s8(v, i) ({ int8x8_t __v = (v); __v[(i) & 7]; })
+
 /*
  * Other targets (vcc built for WebAssembly by itself, W6): the intrinsics
  * written as inline asm above, lane by lane in C with the same results.
@@ -258,6 +272,10 @@ typedef struct int32x4x2_t { int32x4_t val[2]; } int32x4x2_t;
 #undef vtrn2q_u32
 #undef vtrn1q_u64
 #undef vtrn2q_u64
+#undef vqtbx1q_u8
+#undef vtbx2_u8
+#undef vminvq_s8
+#undef vpmin_s8
 #define vdupq_n_u8(x) ({ unsigned char __x = (unsigned char)(x); uint8x16_t __r; for (int __k = 0; __k < 16; __k++) __r[__k] = __x; __r; })
 #define vdupq_n_u32(x) ({ unsigned int __x = (unsigned int)(x); uint32x4_t __r = { __x, __x, __x, __x }; __r; })
 #define vdupq_n_u64(x) ({ unsigned long long __x = (unsigned long long)(x); uint64x2_t __r = { __x, __x }; __r; })
@@ -306,6 +324,14 @@ typedef struct int32x4x2_t { int32x4_t val[2]; } int32x4x2_t;
 #define vaddvq_u16(a) ({ uint16x8_t __a = (a); uint16_t __s = 0; for (int __k = 0; __k < 8; __k++) __s += __a[__k]; __s; })
 #define vaddv_u8(a) ({ uint8x8_t __a = (a); uint8_t __s = 0; for (int __k = 0; __k < 8; __k++) __s += __a[__k]; __s; })
 #define vaddvq_u64(a) ({ uint64x2_t __a = (a); (uint64_t)(__a[0] + __a[1]); })
+#define vqtbx1q_u8(d, t, i) ({ uint8x16_t __r = (d), __t = (t), __i = (i); \
+	for (int __k = 0; __k < 16; __k++) if (__i[__k] < 16) __r[__k] = __t[__i[__k]]; __r; })
+#define vtbx2_u8(d, t, i) ({ uint8x8x2_t __t = (t); uint8x8_t __r = (d), __i = (i); uint8x16_t __q = vcombine_u8(__t.val[0], __t.val[1]); \
+	for (int __k = 0; __k < 8; __k++) if (__i[__k] < 16) __r[__k] = __q[__i[__k]]; __r; })
+#define vminvq_s8(a) ({ int8x16_t __a = (a); int8_t __m = __a[0]; for (int __k = 1; __k < 16; __k++) if (__a[__k] < __m) __m = __a[__k]; __m; })
+#define vpmin_s8(a, b) ({ int8x8_t __r, __a = (a), __b = (b); for (int __k = 0; __k < 4; __k++) { \
+	__r[__k] = __a[2 * __k] < __a[2 * __k + 1] ? __a[2 * __k] : __a[2 * __k + 1]; \
+	__r[__k + 4] = __b[2 * __k] < __b[2 * __k + 1] ? __b[2 * __k] : __b[2 * __k + 1]; } __r; })
 #endif
 
 #endif

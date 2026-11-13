@@ -51,6 +51,8 @@ VPRIV void claim_ref(ecx *e, uint32_t ref)
 		} else {
 			return;
 		}
+		if (unlikely(sym_attrs(c, s)->alias))
+			return;	/* a .set in the tail (emit_tu keeps its target), not storage */
 		if (!atomic_exchange(&E->claimed[s], 1))
 			enqueue(E, s);
 	}

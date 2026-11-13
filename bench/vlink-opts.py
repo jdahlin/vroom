@@ -86,6 +86,10 @@ CASES = [
     ('--eh-frame-hdr gc', '--eh-frame-hdr --gc-sections {t}/e1.o {t}/e2.o {t}/e3.o {t}/ep.o {t}/pers.o'),
     ('--eh-frame-hdr without .eh_frame', '--eh-frame-hdr {t}/cm.o'),
     ('--no-eh-frame-hdr', '--eh-frame-hdr --no-eh-frame-hdr {t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
+    # response files (kbuild: ld -r -o m.o @m.mod): quotes, a nested @file, one that does not exist
+    ('@file', '@{t}/objs.rsp'),
+    ('@file nested quoted', '@{t}/outer.rsp {t}/x.o'),
+    ('@missing', '@{t}/nosuch.rsp {t}/a.o {t}/x.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -186,6 +190,10 @@ def main():
         for lib, ms, fl in (('x', 'x', 'rcs'), ('ch', 'b1 b2 b3 unused', 'rcs'), ('chr', 'unused b3 b2 b1', 'rcs'),
                             ('p', 'p1 p2', 'rcs'), ('cm', 'cm2', 'rcs'), ('g', 'g2', 'rcs'), ('cmd', 'cmd', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
             subprocess.run([llvm('llvm-ar'), fl, f'{t}/lib/lib{lib}.a'] + [f'{t}/{m}.o' for m in ms.split()], check=True)
+        shutil.copy(f'{t}/a.o', f'{t}/a b.o')
+        open(f'{t}/objs.rsp', 'w').write(f'{t}/a.o\n{t}/x.o\n')
+        open(f'{t}/outer.rsp', 'w').write(f'"{t}/a b.o" @{t}/inner.rsp\n')
+        open(f'{t}/inner.rsp', 'w').write('-e _start\n')
         for name, args in CASES:
             a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib', t=t).split()
             r = {}
@@ -228,6 +236,21 @@ def main():
             print(f'FAIL --print-gc-sections:\n  vlink {pr[0]}\n  lld   {pr[1]}')
         elif v:
             print(f'ok   --print-gc-sections: {len(pr[0])} removed')
+        # -r stays lazy: of two members defining the same symbol only the needed one is
+        # read (the kernel's vmlinux.o and libstub's zboot.o vs efi-stub-entry.o)
+        shutil.copy(f'{t}/b1.o', f'{t}/b1dup.o')
+        subprocess.run([llvm('llvm-ar'), 'rcs', f'{t}/lib/libdup.a', f'{t}/b1.o', f'{t}/b1dup.o'], check=True)
+        syms = []
+        for exe in (VLINK, LLD):
+            p = subprocess.run([exe, '-r', f'{t}/c.o', '--start-group', f'{t}/lib/libdup.a', '--end-group',
+                                '-o', f'{t}/r.o'], capture_output=True, text=True)
+            nm = subprocess.run([llvm('llvm-nm'), f'{t}/r.o'], capture_output=True, text=True).stdout if p.returncode == 0 else ''
+            syms.append((p.returncode, first_err(p.stderr), sorted(nm.split('\n'))))
+        if syms[0] != syms[1] or syms[0][0]:
+            bad += 1
+            print(f'FAIL -r lazy archive:\n  vlink {syms[0][:2]}\n  lld   {syms[1][:2]}')
+        elif v:
+            print('ok   -r lazy archive')
         # undefined symbols: lld's whole stderr (every reference with its source file and function,
         # 3 then "referenced N more times", "did you mean" for the first two, archive members,
         # blank lines after multi-line errors), the program name aside

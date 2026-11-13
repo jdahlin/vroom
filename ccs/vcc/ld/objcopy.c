@@ -361,6 +361,7 @@ enum { SK_RAW, SK_SYMTAB, SK_STRTAB, SK_RELA };
 typedef struct {
 	const char *name;
 	char *newname;
+	const char *origname;		/* the input's name, when --rename-section changed it */
 	uint32_t type, link, info;
 	uint64_t flags, addr, origoff, size, align, entsize;
 	const uint8_t *data;
@@ -371,6 +372,37 @@ typedef struct {
 	uint64_t off;			/* new offset */
 	uint8_t *gen;			/* generated contents */
 } OSec;
+
+/* --set-section-flags/--rename-section flags (llvm-objcopy's getNewShfFlags; NOBITS
+ * with contents or load becomes PROGBITS) */
+static void set_flags(OSec *s, const char *f)
+{
+	const uint64_t mask = SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_MERGE | SHF_STRINGS | 0x80000000u;
+	uint64_t nf = SHF_WRITE;
+	bool contents = false, load = false;
+
+	while (*f) {
+		size_t l = strcspn(f, ",");
+#define FL(x) (l == sizeof(x) - 1 && !strncmp(f, x, l))
+		if (FL("alloc")) nf |= SHF_ALLOC;
+		else if (FL("readonly")) nf &= ~(uint64_t)SHF_WRITE;
+		else if (FL("code")) nf |= SHF_EXECINSTR;
+		else if (FL("merge")) nf |= SHF_MERGE;
+		else if (FL("strings")) nf |= SHF_STRINGS;
+		else if (FL("exclude")) nf |= 0x80000000u;
+		else if (FL("contents")) contents = true;
+		else if (FL("load")) load = true;
+		else if (!(FL("data") || FL("rom") || FL("share") || FL("debug") || FL("large") || FL("noload")))
+			oerror("unrecognized section flag '%.*s'", (int)l, f);
+#undef FL
+		f += l + (f[l] == ',');
+	}
+	s->flags = (s->flags & ~mask) | nf;
+	if (s->type == SHT_NOBITS && (!(s->flags & SHF_ALLOC) || contents || load)) {
+		s->type = SHT_PROGBITS;	/* (llvm: zero-filled contents) */
+		s->gen = xcalloc(s->size + 1, 1);
+	}
+}
 
 typedef struct {
 	Phdr p;
@@ -407,6 +439,8 @@ static struct {
 	const char *debuglink;
 	const char **ssf;	/* --set-section-flags name=f1,f2 */
 	uint32_t nssf;
+	const char **ren;	/* --rename-section old=new[,f1,f2] */
+	uint32_t nren;
 	const char **only;
 	uint32_t nonly;
 	const char **unneeded;
@@ -614,41 +648,37 @@ static int objcopy_run(int dirfd)
 			if ((sec[k].flags & SHF_ALLOC) && sec[k].type != SHT_NOTE)
 				sec[k].type = SHT_NOBITS;
 	}
-	/* --set-section-flags (llvm-objcopy's getNewShfFlags; NOBITS with contents/load becomes PROGBITS) */
+	/* --rename-section (llvm-objcopy: before --set-section-flags, which sees the new name;
+	 * the .rela of a renamed section follows it; flags as --set-section-flags) */
+	for (uint32_t a = 0; a < oc.nren; a++) {
+		const char *eq = strchr(oc.ren[a], '='), *fl = strchr(eq + 1, ',');
+		size_t ol = (size_t)(eq - oc.ren[a]), nl = fl ? (size_t)(fl - eq - 1) : strlen(eq + 1);
+		for (uint32_t k = 1; k < ns; k++) {
+			OSec *s = &sec[k];
+			if (s->origname || strlen(s->name) != ol || strncmp(s->name, oc.ren[a], ol))
+				continue;
+			s->origname = s->name;
+			s->newname = strndup(eq + 1, nl);
+			s->name = s->newname;
+			if (fl)
+				set_flags(s, fl + 1);
+			for (uint32_t r = 1; r < ns; r++)
+				if (sec[r].kind == SK_RELA && sec[r].info == k && !(sec[r].flags & SHF_ALLOC) && !sec[r].origname) {
+					size_t n = nl + 6;
+					sec[r].origname = sec[r].name;
+					sec[r].newname = xcalloc(n, 1);
+					snprintf(sec[r].newname, n, ".rela%s", s->name);
+					sec[r].name = sec[r].newname;
+				}
+		}
+	}
+	/* --set-section-flags */
 	for (uint32_t a = 0; a < oc.nssf; a++) {
 		const char *eq = strchr(oc.ssf[a], '=');
 		size_t nl = (size_t)(eq - oc.ssf[a]);
-		uint64_t nf = SHF_WRITE;
-		bool contents = false, load = false;
-
-		for (const char *f = eq + 1; *f;) {
-			size_t l = strcspn(f, ",");
-#define FL(x) (l == sizeof(x) - 1 && !strncmp(f, x, l))
-			if (FL("alloc")) nf |= SHF_ALLOC;
-			else if (FL("readonly")) nf &= ~(uint64_t)SHF_WRITE;
-			else if (FL("code")) nf |= SHF_EXECINSTR;
-			else if (FL("merge")) nf |= SHF_MERGE;
-			else if (FL("strings")) nf |= SHF_STRINGS;
-			else if (FL("exclude")) nf |= 0x80000000u;
-			else if (FL("contents")) contents = true;
-			else if (FL("load")) load = true;
-			else if (!(FL("data") || FL("rom") || FL("share") || FL("debug") || FL("large") || FL("noload")))
-				oerror("unrecognized section flag '%.*s'", (int)l, f);
-#undef FL
-			f += l + (f[l] == ',');
-		}
-		for (uint32_t k = 1; k < ns; k++) {
-			OSec *s = &sec[k];
-			const uint64_t mask = SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR | SHF_MERGE | SHF_STRINGS | 0x80000000u;
-
-			if (strlen(s->name) != nl || strncmp(s->name, oc.ssf[a], nl))
-				continue;
-			s->flags = (s->flags & ~mask) | nf;
-			if (s->type == SHT_NOBITS && (!(s->flags & SHF_ALLOC) || contents || load)) {
-				s->type = SHT_PROGBITS;	/* (llvm: zero-filled contents) */
-				s->gen = xcalloc(s->size + 1, 1);
-			}
-		}
+		for (uint32_t k = 1; k < ns; k++)
+			if (strlen(sec[k].name) == nl && !strncmp(sec[k].name, oc.ssf[a], nl))
+				set_flags(&sec[k], eq + 1);
 	}
 	/* --add-section: at the end, after everything else (llvm-objcopy: PROGBITS, or NOTE for .note*) */
 	for (uint32_t a = 0; a < oc.nadd; a++) {
@@ -773,7 +803,7 @@ static int objcopy_run(int dirfd)
 	uint32_t symstr_i = symtab_i != NONE ? sec[symtab_i].link : NONE;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
-		bool rm = oc.nremove && match_list(oc.remove, oc.nremove, s->name);
+		bool rm = oc.nremove && match_list(oc.remove, oc.nremove, s->origname ? s->origname : s->name);
 		if (oc.strip_all && !rm && k != shstr_i && strncmp(s->name, ".gnu.warning", 12) &&
 		    strncmp(s->name, ".gnu_debuglink", 14) && s->type != 0x70000003 && s->parent < 0)
 			rm = !(s->flags & SHF_ALLOC);
@@ -1176,6 +1206,10 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 			if (!strchr(v, '=') || v[0] == '=')
 				oerror("bad format for --set-section-flags: missing '='");
 			push(&oc.ssf, &oc.nssf, v);
+		} else if ((v = VAL("--rename-section"))) {
+			if (!strchr(v, '=') || v[0] == '=')
+				oerror("bad format for --rename-section: missing '='");
+			push(&oc.ren, &oc.nren, v);
 		} else if ((v = VAL("--add-gnu-debuglink"))) {
 			oc.debuglink = v;
 		} else if ((v = VAL("--add-section"))) {
@@ -1200,6 +1234,15 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 #undef OPT
 #undef VAL
 	}
+	/* llvm-objcopy: flags of a renamed section (by either name) are --rename-section's */
+	for (uint32_t i = 0; i < oc.nssf; i++)
+		for (uint32_t j = 0; j < oc.nren; j++) {
+			const char *eq = strchr(oc.ren[j], '='), *nw = eq + 1;
+			size_t sl = strcspn(oc.ssf[i], "="), ol = (size_t)(eq - oc.ren[j]), nl = strcspn(nw, ",");
+			if ((sl == ol && !strncmp(oc.ssf[i], oc.ren[j], sl)) || (sl == nl && !strncmp(oc.ssf[i], nw, sl)))
+				oerror("--set-section-flags=%.*s conflicts with --rename-section=%.*s=%.*s",
+				       (int)sl, oc.ssf[i], (int)ol, oc.ren[j], (int)nl, nw);
+		}
 	if (nf < 1)
 		oerror("no input file");
 	int rc = 1;
@@ -1215,6 +1258,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(oc.redef);
 	free(oc.add);
 	free(oc.ssf);
+	free(oc.ren);
 	return rc || oerrors;
 }
 
@@ -1291,7 +1335,7 @@ static char nm_type(const Elf *e, const Sym *y)
 }
 
 /* nm's inputs: files, or the members of an archive (regular: copied out, 8-aligned; thin: by path) */
-typedef struct { char *label, *path; uint8_t *mem; size_t size; bool member; } NIn;
+typedef struct { char *label, *path; uint8_t *mem; size_t size; bool member; const char *archive; } NIn;
 
 static void nin_push(NIn **v, int *n, NIn x)
 {
@@ -1361,7 +1405,7 @@ static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
 					nl++;
 				snprintf(name, sizeof name, "%.*s", (int)nl, h);
 			}
-			NIn x = {.label = strdup(name), .member = true};
+			NIn x = {.label = strdup(name), .member = true, .archive = path};
 			if (thin) {
 				char full[8192];
 
@@ -1388,6 +1432,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	oerrors = 0;
 	prog = "vnm";
 	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false, dyn = false;
+	bool fname = false;	/* -A/-o: each line starts with the file (archive:member) */
 	const char **files = xcalloc((size_t)argc + 1, sizeof *files);
 	int nf = 0;
 	for (int i = 1; i < argc; i++) {
@@ -1401,6 +1446,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				else if (*p == 'U') defd = true;
 				else if (*p == 'g') ext = true;
 				else if (*p == 'D') dyn = true;
+				else if (*p == 'A' || *p == 'o') fname = true;
 				else oerror("unsupported option -%c", *p);
 			}
 		} else if (!strcmp(a, "--no-sort")) {
@@ -1415,6 +1461,8 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			defd = true;
 		} else if (!strcmp(a, "--dynamic")) {
 			dyn = true;
+		} else if (!strcmp(a, "--print-file-name")) {
+			fname = true;
 		} else if (!strcmp(a, "--extern-only")) {
 			ext = true;
 		} else if (a[0] == '-' && a[1]) {
@@ -1450,7 +1498,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		for (uint32_t k = 0; k < e.nsh; k++)
 			if (e.sh[k].sh_type == (dyn ? SHT_DYNSYM : SHT_SYMTAB))
 				st = &e.sh[k];
-		if (nf > 1 || in[f].member)
+		if ((nf > 1 || in[f].member) && !fname)
 			fprintf(out, "\n%s:\n", in[f].label);
 		if (!st) {
 			fprintf(oerr, "%s: %s: no symbols\n", prog, in[f].label);
@@ -1529,12 +1577,19 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		if (!nosort)
 			qsort(v, m, sizeof *v, numeric ? ncmp_num : ncmp_name);
 		/* one buffered pass */
-		size_t cap = (size_t)m * 64 + 4096, len = 0;
+		char pfx[8192] = "";
+		if (fname && in[f].member)
+			snprintf(pfx, sizeof pfx, "%s:%s: ", in[f].archive, in[f].label);
+		else if (fname)
+			snprintf(pfx, sizeof pfx, "%s: ", in[f].label);
+		size_t pl = strlen(pfx), cap = (size_t)m * (64 + pl) + 4096, len = 0;
 		for (uint32_t i = 0; i < m; i++)
 			cap += strlen(v[i].name);
 		char *buf = malloc(cap);
 		for (uint32_t i = 0; i < m; i++) {
 			NSym *s = &v[i];
+			memcpy(buf + len, pfx, pl);
+			len += pl;
 			if (s->defined)
 				len += sprintf(buf + len, "%016llx ", (unsigned long long)s->addr);
 			else

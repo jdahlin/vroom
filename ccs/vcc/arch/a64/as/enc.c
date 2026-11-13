@@ -378,6 +378,7 @@ static const Mn mns[] = {
 	{ "fsub", K_FP, 0x1e203800, 1 },
 	{ "gmi", K_PAC, 0x9ac01400, 5 },
 	{ "hint", K_HINT, 0xd503201f, 0 },
+	{ "hlt", K_EXC, 0xd4400000, 0 },
 	{ "hvc", K_EXC, 0xd4000002, 0 },
 	{ "ic", K_IC, 0, 0 },
 	{ "ins", K_INS, 0, 0 },
@@ -1089,9 +1090,15 @@ static int k_extr(Ctx *c, const Mn *m)
 	return 0;
 }
 
+static int k_vnot(Ctx *c, const Mn *m);
+
 static int k_dp1(Ctx *c, const Mn *m)
 {
 	const A64Op *o = c->op;
+	if (c->n == 2 && o[0].kind == A64O_VREG && m->base == 0x5ac00000) {	/* rbit Vd.8b|16b, Vn */
+		static const Mn vrbit = { "rbit", K_VNOT, 0x2e605800, 0 };
+		return k_vnot(c, &vrbit);
+	}
 	if (c->n != 2 || !gpr_nosp(&o[0]) || !gpr_nosp(&o[1])) BADOPS;
 	int sf = isx(&o[0]);
 	uint32_t b = m->base | (uint32_t)sf << 31;
@@ -2652,12 +2659,12 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "smaxp", VS_SAME, VF_NO2D, 0x0e20a400, 0, 0 },
 	{ "smin", VS_SAME, VF_NO2D, 0x0e206c00, 0, 0 },
 	{ "sminp", VS_SAME, VF_NO2D, 0x0e20ac00, 0, 0 },
-	{ "smlal", VS_LONG, 0, 0x0e208000, 0, 0 },
-	{ "smlal2", VS_LONG, 0, 0x4e208000, 0, 0 },
-	{ "smlsl", VS_LONG, 0, 0x0e20a000, 0, 0 },
-	{ "smlsl2", VS_LONG, 0, 0x4e20a000, 0, 0 },
-	{ "smull", VS_LONG, 0, 0x0e20c000, 0, 0 },
-	{ "smull2", VS_LONG, 0, 0x4e20c000, 0, 0 },
+	{ "smlal", VS_LONG, 0, 0x0e208000, 0x0f002000, 0 },
+	{ "smlal2", VS_LONG, 0, 0x4e208000, 0x4f002000, 0 },
+	{ "smlsl", VS_LONG, 0, 0x0e20a000, 0x0f006000, 0 },
+	{ "smlsl2", VS_LONG, 0, 0x4e20a000, 0x4f006000, 0 },
+	{ "smull", VS_LONG, 0, 0x0e20c000, 0x0f00a000, 0 },
+	{ "smull2", VS_LONG, 0, 0x4e20c000, 0x4f00a000, 0 },
 	{ "sqxtn", VS_XTN, 0, 0x0e214800, 0, 0 },
 	{ "sqxtn2", VS_XTN, 0, 0x4e214800, 0, 0 },
 	{ "sqxtun", VS_XTN, 0, 0x2e212800, 0, 0 },
@@ -2683,12 +2690,12 @@ static const Vf vtab[] = {	/* sorted by name */
 	{ "ucvtf", VS_FMISC, 0, 0x2e21d800, 0, 0 },
 	{ "umaxp", VS_SAME, VF_NO2D, 0x2e20a400, 0, 0 },
 	{ "uminp", VS_SAME, VF_NO2D, 0x2e20ac00, 0, 0 },
-	{ "umlal", VS_LONG, 0, 0x2e208000, 0, 0 },
-	{ "umlal2", VS_LONG, 0, 0x6e208000, 0, 0 },
-	{ "umlsl", VS_LONG, 0, 0x2e20a000, 0, 0 },
-	{ "umlsl2", VS_LONG, 0, 0x6e20a000, 0, 0 },
-	{ "umull", VS_LONG, 0, 0x2e20c000, 0, 0 },
-	{ "umull2", VS_LONG, 0, 0x6e20c000, 0, 0 },
+	{ "umlal", VS_LONG, 0, 0x2e208000, 0x2f002000, 0 },
+	{ "umlal2", VS_LONG, 0, 0x6e208000, 0x6f002000, 0 },
+	{ "umlsl", VS_LONG, 0, 0x2e20a000, 0x2f006000, 0 },
+	{ "umlsl2", VS_LONG, 0, 0x6e20a000, 0x6f006000, 0 },
+	{ "umull", VS_LONG, 0, 0x2e20c000, 0x2f00a000, 0 },
+	{ "umull2", VS_LONG, 0, 0x6e20c000, 0x6f00a000, 0 },
 	{ "uqxtn", VS_XTN, 0, 0x2e214800, 0, 0 },
 	{ "uqxtn2", VS_XTN, 0, 0x6e214800, 0, 0 },
 	{ "ushl", VS_SAME, 0, 0x2e204400, 0, 0 },
@@ -2741,6 +2748,7 @@ static int k_simd(Ctx *c, const Vf *v)
 		int sz = arr_size(o[0].arr);
 		if (o[2].kind == A64O_VELEM && v->b2) {	/* by element: H (v0-v15) or S */
 			unsigned i = o[2].idx, r = o[2].reg;
+			if (o[2].arr != A64_ELB + sz) BADOPS;	/* the lane is Vn's element size */
 			if (sz == 1) { if (i > 7 || r > 15) BADOPS; *c->out = v->b2 | (i >> 2) << 11 | (i & 3) << 20; }
 			else if (sz == 2) { if (i > 3) BADOPS; *c->out = v->b2 | (i >> 1) << 11 | (i & 1) << 21; }
 			else BADOPS;
@@ -2792,6 +2800,17 @@ static int k_simd(Ctx *c, const Vf *v)
 		return 0;
 	}
 	case VS_LONG: {	/* Vd wide; Vn narrow (wide for the w forms), Vm narrow */
+		if (c->n == 3 && isvec(&o[0]) && isvec(&o[1]) && o[2].kind == A64O_VELEM && v->b2) {
+			/* by element (smull Vd.2d, Vn.2s, Vm.s[i]): H (v0-v15) or S lanes */
+			unsigned na = o[1].arr, i = o[2].idx, r = o[2].reg;
+			int sz = arr_size(na);
+			if (arr_q(na) != (unsigned)q2 || arr_wide(na) != (int)o[0].arr || o[2].arr != A64_ELB + sz) BADOPS;
+			if (sz == 1) { if (i > 7 || r > 15) BADOPS; *c->out = v->b2 | (i >> 2) << 11 | (i & 3) << 20; }
+			else if (sz == 2) { if (i > 3) BADOPS; *c->out = v->b2 | (i >> 1) << 11 | (i & 1) << 21; }
+			else BADOPS;
+			*c->out |= (uint32_t)sz << 22 | r << 16 | R(&o[1]) << 5 | R(&o[0]);
+			return 0;
+		}
 		if (c->n != 3 || !isvec(&o[0]) || !isvec(&o[1]) || !isvec(&o[2])) return 1;
 		unsigned na = o[2].arr;
 		if (arr_q(na) != (unsigned)q2 || arr_wide(na) != (int)o[0].arr) BADOPS;
