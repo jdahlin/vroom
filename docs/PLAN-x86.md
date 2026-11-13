@@ -1188,3 +1188,15 @@ Validerat: egna x86 318/318, GCC 1615/1615, TCC 105/105, samma fem kända
 inlinefel, ARM/QEMU 49/49 VIR-prov, fokuserat ASan/UBSan och filvist bygge.
 TSVC behåller 151/151 kontrollsummor och **83** vektorloopar. Regeln delas
 med ARM, vars nativeprestanda inte har mätts.
+
+
+### 2026-11-13: avvisade intervall- och dödlagringsförsök
+
+Dominerande teckenintervall tar bort divisionsbias i
+vdbeRecordCompareString men ger 1,1–1,4 % sämre speedtest1-CPU i två
+femprovserier. Lokal dödlagringsrensning efter lastvidarebefordran tar bara
+69 statiska instruktioner i amalgamationen och ger cirka 0,7 % sämre CPU.
+Båda prototyperna och tillfälliga främjandespårningar är återställda;
+fokusprov och verifieringshashar var gröna. Mätunderlag under V4 i
+PLAN-vir.md. Den behållna kompilatorn ligger fortsatt på 1,094–1,096× clang
+i de senaste jämförbara serierna; 1,05×-målet är öppet.

@@ -329,6 +329,41 @@ vir-annotate.txt,clang-annotate.txt,vm.vir,focus.json,mix-clean/mix.json}`.
 Ingen runtimevinst hävdas, inga ändringar i den andra sessionens källkod.
 
 
+2026-11-13, avvisade teckenintervall och lokal dödlagringsrensning:
+Nästa clang-jämförelse gällde divisionen `(serial_type-12)/2` i
+vdbeRecordCompareString. En föregående gren bevisar att värdet är minst
+12, så avrundningsbiasen behövs inte. En delad prototyp använde signerade
+konstantjämförelser på dominerande grenar med en enda ingång, plus enkla
+nollutvidgnings-/maskfakta, och tog bort fyra x86-instruktioner där.
+Fokuserade x86-prov och SQLite-hashar stämde, men två alternerade
+femprovserier på CPU 7 gav 1221,13 → 1234,00 ms och 1226,22 → 1243,30 ms
+(clang 1116,06 respektive 1115,32). Instruktioner/clang 1,263× → 1,261×,
+CPU 1,1–1,4 % sämre. Ingen sådan intervallanalys behålls.
+
+En andra prototyp rensade tidigare icke-volatila lagringar som en senare
+lagring till exakt samma byte ersatte inom blocket, utan observerande
+läsning/anrop mellan dem. Åtta kandidater per block; separata fält kunde
+bevisas disjunkta genom den befintliga bas/offset-analysen. Att göra detta
+i samma svep som lastvidarebefordran gav bara 22 färre statiska
+instruktioner och ingen CPU-vinst (1220,89 → 1223,59 ms, clang 1111,29).
+Flyttat efter lastvidarebefordran slapp passet läsningar som då redan var
+borta, men gav fortfarande bara 384111 → 384042 instruktioner i hela
+amalgamationen; VdbeExec 17291 → 17293. CPU 1220,31 → 1228,34 ms, clang
+1114,72, instruktioner/clang kvar kring 1,263×. Fokusprov och hash gröna,
+men prototypen är återställd. Ett mellanprov av disjunkta fält hade
+byteidentisk assembly med den första versionen; dess tidtagning överlappade
+ett bygge och används inte för slutsatser.
+
+En kort spårning av lika stora heltals-/FP-lagringar som blockerar
+slotfrämjande hittade bara kahanBabuskaNeumaierStepInt64, sumStep och
+sumInverse i SQLite. Ingen unionsoptimering infördes från det underlaget.
+Alla spårningsändringar är återställda. Underlag
+`work/vir-x86-perf/signrange/{results100,repeat100}`,
+`work/vir-x86-perf/local-dse/results100`,
+`work/vir-x86-perf/local-dse-late/results100` och
+`work/vir-x86-perf/{mixed-trace,copy-trace}`. **1,05×-målet är fortsatt
+öppet; senaste behållna förbättringen är slotfrämjandet nedan.**
+
 2026-11-13, främja smala lokalfält trots olika heltalsbärare:
 Jämförelsen av `vdbeRecordCompareString` med clangs assembly visade att
 serial_type låg kvar på stacken. Första främjandet blockeras av en inlinad
