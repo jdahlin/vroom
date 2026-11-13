@@ -89,7 +89,7 @@ VPRIV int objcopy_run_req(const struct req *r, bool nm)
 		if (ofd >= 0 && !out)
 			close(ofd);
 	} else {
-		pthread_mutex_lock(&lock);
+		vtask_mutex_lock(&lock);
 		status = nm ? nm_main(r->argc, r->argv, dfd, out, err) : objcopy_main(r->argc, r->argv, dfd, err);
 		pthread_mutex_unlock(&lock);
 	}

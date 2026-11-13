@@ -25,6 +25,7 @@
  */
 #include "ld/ld.h"
 #include "common/digest.h"
+#include "port/task.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -742,7 +743,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err);
 int ld_macho(int argc, char **argv, int dirfd, FILE *err)
 {
 	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-	pthread_mutex_lock(&lock);
+	vtask_mutex_lock(&lock);
 	int rc = link_macho(argc, argv, dirfd, err);
 	pthread_mutex_unlock(&lock);
 	return rc;

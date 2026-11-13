@@ -24,6 +24,7 @@
 #ifndef VCC_PORT_TASK_H
 #define VCC_PORT_TASK_H
 
+#include <pthread.h>
 #include <stddef.h>
 
 typedef struct vtask_cpus {
@@ -76,6 +77,17 @@ void vtask_wait_idle(void);
    budget does not count.  Pairs nest. */
 void vtask_blocking_begin(void);
 void vtask_blocking_end(void);
+
+/* pthread_mutex_lock of a lock that may be held for long (one link at a
+   time): a wait for it is a blocking region */
+static inline void vtask_mutex_lock(pthread_mutex_t *m)
+{
+	if (pthread_mutex_trylock(m)) {
+		vtask_blocking_begin();
+		pthread_mutex_lock(m);
+		vtask_blocking_end();
+	}
+}
 
 /* 0..n-1 on a pool thread (stable for the thread's life), -1 elsewhere */
 int vtask_worker_index(void);
