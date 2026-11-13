@@ -133,8 +133,8 @@ static bool a64_ld_thunks_create(int pass)
 						dval = y->st_value;
 					}
 					uint32_t found = LD_NONE;
-					for (uint32_t x = 0; x < thunks.n; x++) {
-						a64_ld_thunk *tx = &thunks.v[x];
+					for (uint32_t x = 0; x < ctx->relocations.thunks.n; x++) {
+						a64_ld_thunk *tx = &ctx->relocations.thunks.v[x];
 						bool same = dsec != LD_NONE ? (tx->sec == dsec && tx->val == dval)
 									 : (tx->g == dg && tx->sec == LD_NONE);
 						if (same && tx->addend == rl->r_addend &&
@@ -148,8 +148,8 @@ static bool a64_ld_thunks_create(int pass)
 							uint32_t ts = ld_input_section_create(".text.thunk", LD_SECTION_KIND_THUNK, SHT_PROGBITS,
 									       SHF_ALLOC | SHF_EXECINSTR, 4);
 							d = &isds.v[di];
-							VVEC_PUSH(thunksecs, ((a64_ld_thunk_section){0}), ld_region_alloc);
-							isecs.v[ts].aux = thunksecs.n - 1;
+							VVEC_PUSH(ctx->relocations.thunk_sections, ((a64_ld_thunk_section){0}), ld_region_alloc);
+							isecs.v[ts].aux = ctx->relocations.thunk_sections.n - 1;
 							isecs.v[ts].osec = oi;
 							isecs.v[ts].isd = di;
 							isecs.v[ts].off = d->thunk_off;
@@ -163,11 +163,11 @@ static bool a64_ld_thunks_create(int pass)
 						char *nm = ld_region_alloc(strlen(dn) + 20);
 						sprintf(nm, "__AArch64ADRPThunk_%s", dn);
 						tn.name = nm;
-						a64_ld_thunk_section *tsx = &thunksecs.v[isecs.v[d->thunksec].aux];
+						a64_ld_thunk_section *tsx = &ctx->relocations.thunk_sections.v[isecs.v[d->thunksec].aux];
 						tn.off = 0;
-						VVEC_PUSH(thunks, tn, ld_region_alloc);
-						VVEC_PUSH(tsx->list, thunks.n - 1, ld_region_alloc);
-						found = thunks.n - 1;
+						VVEC_PUSH(ctx->relocations.thunks, tn, ld_region_alloc);
+						VVEC_PUSH(tsx->list, ctx->relocations.thunks.n - 1, ld_region_alloc);
+						found = ctx->relocations.thunks.n - 1;
 						changed = true;
 					}
 					a64_ld_thunk_relocation_record(si, r, found);
@@ -177,10 +177,10 @@ static bool a64_ld_thunks_create(int pass)
 			/* assign thunk offsets in this ld_input_section_description's thunk section */
 			if (d->thunksec != LD_NONE) {
 				ld_input_section *ts = &isecs.v[d->thunksec];
-				a64_ld_thunk_section *tsx = &thunksecs.v[ts->aux];
+				a64_ld_thunk_section *tsx = &ctx->relocations.thunk_sections.v[ts->aux];
 				uint64_t off = 0;
 				for (uint32_t x = 0; x < tsx->list.n; x++) {
-					a64_ld_thunk *tx = &thunks.v[tsx->list.v[x]];
+					a64_ld_thunk *tx = &ctx->relocations.thunks.v[tsx->list.v[x]];
 					tx->off = off;
 					/* getMayUseShortThunk(): b if the destination is within
 					   +-128 MiB, decided against the current layout */
