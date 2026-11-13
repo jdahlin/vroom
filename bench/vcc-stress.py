@@ -109,7 +109,7 @@ def cases(d):
     case('anon-nest-20', 'ok', {'a.c': 'struct s { ' + 'struct { ' * 20 + 'int x; ' + '}; ' * 20 + '} v;\nint f(void) { return v.x; }\n'}, 'a.c')
     case('call-300-args', 'ok', {'a.c': 'void g(' + ', '.join(['int'] * 300) + ');\nvoid f(void) { g(' + ', '.join(['1'] * 300) + '); }\n'}, 'a.c')
     case('include-dirs-5000', 'ok', {'a.c': 'int x;\n'}, 'a.c', [f'-I{d}/nodir{i}' for i in range(5000)])
-    # a write error ends the job with a diagnostic (vfdbuf_flush: it dropped the data and exited 0);
+    # a write error ends the job with a diagnostic (vbuffer_flush: it dropped the data and exited 0);
     # the layout dump goes to a closed stdout.  Without vccd: the shim's output is the client's.
     case('write-error-closed-stdout', 'error', {'a.c': 'struct s { int a; long b; };\nstruct s v;\n'}, 'a.c',
          ['--vcc-layout-checks', '-fsyntax-only'], regex='write error', closed_stdout=True)

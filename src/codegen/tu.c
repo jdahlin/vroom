@@ -672,7 +672,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 						E.errors++;
 					} else {
 						o->wasm_obj->n = 0;
-						vbuf_put(o->wasm_obj, ob, on);
+						vbuffer_append(o->wasm_obj, ob, on);
 						free(ob);
 					}
 				} else

@@ -61,7 +61,7 @@ void pp_diag_emit(pp *p, vdiag *d)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2;
 	vdiag *top = d;
-	vbuf b = { 0 };
+	vbuffer b = { 0 };
 
 	if (d->level == VDL_NOTE && p->dtail)
 		kid_add(top = p->dtail, d);	/* a note reported after its diagnostic */
@@ -91,7 +91,7 @@ void pp_diag_emit(pp *p, vdiag *d)
 			p->tpend = d;
 		}
 	} else if (p->o->diag_format != PP_DIAG_SARIF) {
-		void (*r)(pp *, vbuf *, vdiag *) = p->o->diag_style == PP_DSTYLE_NARRATED ? diag_narrate : render_clang;
+		void (*r)(pp *, vbuffer *, vdiag *) = p->o->diag_style == PP_DSTYLE_NARRATED ? diag_narrate : render_clang;
 
 		if (!top->emitted)
 			r(p, &b, top), top->emitted = 1;
@@ -159,7 +159,7 @@ void pp_diag_summary(pp *p)
 
 /* the macro id is defined now */
 
-static void write_file(pp *p, const char *f, const vbuf *b)
+static void write_file(pp *p, const char *f, const vbuffer *b)
 {
 	int fd = p->o->errfd ? p->o->errfd : 2, out;
 	char path[4096];
@@ -188,7 +188,7 @@ void pp_diag_finish(pp *p)
 	if (unlikely(p->o->dsink && p->o->dsink->record && p->dhead))
 		dsink_records(p);
 	if (p->o->diag_format == PP_DIAG_SARIF || p->o->sarif_file) {
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
 		sarif_log(p, &b);
 		if (p->o->diag_format == PP_DIAG_SARIF)
@@ -198,7 +198,7 @@ void pp_diag_finish(pp *p)
 		free(b.p);
 	}
 	if (unlikely(p->o->html_file != NULL)) {
-		vbuf b = { 0 };
+		vbuffer b = { 0 };
 
 		html_page(p, &b);
 		write_file(p, p->o->html_file, &b);

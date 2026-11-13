@@ -2409,7 +2409,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		L.sp = ao.shrink ? V->ao.spoint : VIR_NOBLK;
 	}
 	if (getenv("VCC_VIR_CHECK")) {
-		vbuf msg = { 0 };
+		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->ao, &msg);
 
 		if (n) {

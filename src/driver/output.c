@@ -164,7 +164,7 @@ VPRIV void obj_release(void)
 
 /* -c for wasm64: the object's bytes (arch/wasm/as, platform/wasm) */
 
-_Thread_local vbuf tl_wasm_obj;
+_Thread_local vbuffer tl_wasm_obj;
 
 
 

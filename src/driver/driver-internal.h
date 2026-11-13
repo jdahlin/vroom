@@ -105,7 +105,7 @@ struct driver_job {
 extern _Thread_local As *tl_as;
 extern _Thread_local ElfObj *tl_obj;
 extern _Thread_local uint8_t *tl_objbuf;
-extern _Thread_local vbuf tl_wasm_obj;
+extern _Thread_local vbuffer tl_wasm_obj;
 
 /* job-buffer.c */
 VPRIV void bput(buf *b, const char *s, size_t n);

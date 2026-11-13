@@ -319,7 +319,7 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	int nthreads;		/* emitter threads (0: 1) */
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct As *as;		/* emit == 2: the assembler bound to obj (one per thread) */
-	struct vbuf *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
+	struct vbuffer *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
 } cc_opts;
 
 void cc_disable_builtin(uint64_t *bits, const char *name);
