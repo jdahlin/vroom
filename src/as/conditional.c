@@ -1,4 +1,11 @@
-/* conditional.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives. */
+/* conditional.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives.
+ *
+ * The conditions are one stack in the context (depth AS_CONDITIONS_MAX) shared by all frames, so an
+ * .if may be closed in another macro expansion; an .if still open at the end of the input is
+ * reported by as_end.  While the top is ignored the statement loop (as_statement_assemble) skips every
+ * statement except the conditional directives themselves, which it hands to as_directive_conditional
+ * first, so an ignored branch is never parsed and cannot report errors.  A misplaced .else or .endif
+ * fails the assembly with MC's message. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- conditionals */

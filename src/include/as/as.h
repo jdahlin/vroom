@@ -1,8 +1,10 @@
 #ifndef VCC_AS_H
 #define VCC_AS_H
 /*
- * GNU-as-compatible assembler front end for AArch64 (the subset the kernel
- * uses), writing into an ElfObj.  One As per thread.
+ * as: a GNU-as-compatible assembler (LLVM MC's semantics) for arm64 and x86-64, writing into an ElfObj
+ * (obj/obj.h).  The CPU is the object's machine.  One as_context per thread, reused across objects;
+ * failures are reported as a message, never a crash.  The module's files are listed by as_SRC in
+ * src/Makefile and share as-internal.h.
  */
 #include <stddef.h>
 #include <stdint.h>

@@ -1,5 +1,12 @@
-/* symbol.c: symbols of the object as the assembler names them: lookup, temporaries, numeric labels, .set variables,
- * the attribute directives (.globl, .type, .size ...), assignments, .symver and .weakref. */
+/* symbol.c: the assembler's symbols: lookup and creation by name, temporaries (.L names and the
+ * assembler's own), numeric labels (1: 1b 1f), .set/.equ variables, the attribute directives (.globl,
+ * .weak, .hidden, .type, .size, .comm's relatives), .symver, .weakref and .addrsig_sym.
+ *
+ * Symbols live in the ElfObj; this file only keeps the assembler's view: the numeric-label table and
+ * the variable table (a .set whose value is not absolute is substituted where it is read and
+ * materialised at as_end), both in the context's definitions region.  Redefinition and a bad attribute
+ * fail the assembly.  .symver is applied at the end (as_symver_finish) because the versioned name may
+ * be defined after it. */
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- symbols */
