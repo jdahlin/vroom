@@ -237,6 +237,13 @@ resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
 
+Design (2026-11-13): `DESIGN-linker-core.md`.  The core is the entry, the
+context, inputs and archives, and diagnostics; resolution, layout, the ELF
+symbol table and the output writer stay per format, with the reasons and two
+questions for the owner there.  PRs: a Mach-O comparison harness, Mach-O
+state in a context, no lock for Mach-O links, Mach-O names on
+`common/string-index.h`.
+
 Status: PR 1 of `DESIGN-linker-core.md` (Mach-O state in a context) is
 done: `struct macho_context` holds the Mach-O linker's 24 per-link
 variables, `macho_link_locked` creates it and `macho_context_destroy` frees

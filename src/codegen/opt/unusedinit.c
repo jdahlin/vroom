@@ -8,11 +8,11 @@
  * and builtins are deliberately not accepted).  Brace and string initializers belong to the
  * initializer walker and are kept.  Called by the shared walker, arm64's and wasm's statement code.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 static bool em_unused_int(cc *c, ast_qualified_type t)
 {
-	return is_integer(c, t) && !em_bitint(c, t) && !is_wide(c, t) && tsize(c, t) - 1 < 8 &&
+	return codegen_type_is_integer(c, t) && !codegen_type_is_bitint(c, t) && !codegen_type_is_wide(c, t) && codegen_type_size(c, t) - 1 < 8 &&
 	       !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) && !(T(c, t)->flags & AST_TYPE_FLAG_ATOMIC);
 }
 
@@ -32,9 +32,9 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 	case AST_NODE_NUMBER:
 		return true;
 	case AST_NODE_VARIABLE:
-		return is_local_var(c, x->a) && em_unused_int(c, c->syms[x->a].ty) &&
+		return codegen_symbol_is_local_variable(c, x->a) && em_unused_int(c, c->syms[x->a].ty) &&
 		       c->syms[x->a].sc != AST_STORAGE_STATIC && c->syms[x->a].sc != AST_STORAGE_EXTERN &&
-		       !sym_attrs(c, x->a)->asmname;
+		       !codegen_symbol_attributes(c, x->a)->asmname;
 	case AST_NODE_CAST:
 		if (x->aux != AST_CAST_NOP && x->aux != AST_CAST_INTEGER && x->aux != AST_CAST_BOOL)
 			return false;
@@ -63,30 +63,30 @@ static bool em_unused_pure(cc *c, uint32_t n, unsigned *left)
 	}
 }
 
-VPRIV bool em_unused_local(ecx *e, uint32_t s, uint32_t fn)
+VPRIV bool em_unused_local(codegen_context *e, uint32_t s, uint32_t fn)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y;
 	const attrs *a;
 
-	if (!e->E->o->opt || e->E->noopt || (e->E->sflags[s] & SA_USED))
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || (e->unit->symbol_flags[s] & CODEGEN_SYMBOL_USED))
 		return false;
 	/* fn is supplied by the backend/selector; top also protects an optnone
 	 * caller while a different function body is being inlined. */
-	if ((fn && (sym_attrs(c, fn)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)) ||
-	    (e->top && (sym_attrs(c, e->top)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)))
+	if ((fn && (codegen_symbol_attributes(c, fn)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)) ||
+	    (e->top_symbol && (codegen_symbol_attributes(c, e->top_symbol)->flags & CC_ATTRIBUTE_FLAG_OPTNONE)))
 		return false;
 	y = &c->syms[s];
-	a = sym_attrs(c, s);
-	return is_local_var(c, s) && y->kind == AST_SYMBOL_VARIABLE && y->sc != AST_STORAGE_STATIC &&
+	a = codegen_symbol_attributes(c, s);
+	return codegen_symbol_is_local_variable(c, s) && y->kind == AST_SYMBOL_VARIABLE && y->sc != AST_STORAGE_STATIC &&
 	       y->sc != AST_STORAGE_EXTERN && y->sc != AST_STORAGE_TYPEDEF && !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) &&
-	       em_unused_int(c, y->ty) && !vm_type(c, y->ty) && !a->cleanup &&
+	       em_unused_int(c, y->ty) && !codegen_type_is_variably_modified(c, y->ty) && !a->cleanup &&
 	       !a->used && !a->asmname;
 }
 
-VPRIV unsigned em_unused_init(ecx *e, const node *decl, uint32_t fn, unsigned budget)
+VPRIV unsigned em_unused_init(codegen_context *e, const node *decl, uint32_t fn, unsigned budget)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 
 	if (!em_unused_local(e, decl->a, fn))
 		return EM_UNUSED_KEEP;

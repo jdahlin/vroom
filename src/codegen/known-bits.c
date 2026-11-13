@@ -1,15 +1,15 @@
 /*
  * known-bits.c: which bits of an integer expression are known (kbits), and whether a constant fits
- * an inline-asm immediate constraint letter (imm_fits: arm64's I, J, K, L, M, N).
+ * an inline-asm immediate constraint letter (codegen_constraint_immediate_fits: arm64's I, J, K, L, M, N).
  *
  * kbits fills a known-mask and the values of those bits; it looks through casts, constants, comma,
  * conditional, bitwise operators and shifts, and is conservative: a bit not proven is not known.  Its
  * only user is arm64's inline-asm operand selection (arch/a64/codegen/asm.c), which also calls
- * imm_fits; imm_fits is the arm64 meaning of the letters (logimm_ok for the logical-immediate ones).
+ * codegen_constraint_immediate_fits; codegen_constraint_immediate_fits is the arm64 meaning of the letters (logimm_ok for the logical-immediate ones).
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
-VPRIV bool imm_fits(int ch, i128 v)
+VPRIV bool codegen_constraint_immediate_fits(int ch, i128 v)
 {
 	switch (ch) {
 	case 'I': return v >= 0 && v <= 4095;
@@ -23,11 +23,11 @@ VPRIV bool imm_fits(int ch, i128 v)
 	}
 }
 
-VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
+VPRIV void codegen_expression_known_bits(codegen_context *e, uint32_t n, uint64_t *k, uint64_t *v)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n);
-	int w = is_integer(c, x->ty) ? (int)tsize(c, x->ty) * 8 : 0;
+	int w = codegen_type_is_integer(c, x->ty) ? (int)codegen_type_size(c, x->ty) * 8 : 0;
 	uint64_t wm = w >= 64 ? ~0ull : w ? (1ull << w) - 1 : 0;
 	uint64_t ka, va, kb, vb;
 
@@ -40,15 +40,15 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 		*v = (uint64_t)c->ipool[x->a];
 		break;
 	case AST_NODE_COMMA:
-		kbits(e, x->b, k, v);
+		codegen_expression_known_bits(e, x->b, k, v);
 		break;
 	case AST_NODE_CAST: {
 		const node *a = N(x->a);
-		int aw = is_integer(c, a->ty) ? (int)tsize(c, a->ty) * 8 : 0;
+		int aw = codegen_type_is_integer(c, a->ty) ? (int)codegen_type_size(c, a->ty) * 8 : 0;
 
 		if (x->aux != AST_CAST_NOP && x->aux != AST_CAST_INTEGER && x->aux != AST_CAST_BOOL)
 			return;
-		kbits(e, x->a, &ka, &va);
+		codegen_expression_known_bits(e, x->a, &ka, &va);
 		if (!aw || aw > 64)
 			return;
 		if (x->aux == AST_CAST_BOOL) {
@@ -66,7 +66,7 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 			uint64_t hi = ~((1ull << aw) - 1), sb = 1ull << (aw - 1);
 
 			ka &= ~hi, va &= ~hi;
-			if (!is_signed(c, a->ty))
+			if (!codegen_type_is_signed(c, a->ty))
 				ka |= hi;
 			else if (ka & sb)
 				ka |= hi, va |= va & sb ? hi : 0;
@@ -77,12 +77,12 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 	case AST_NODE_UNARY:
 		if (x->aux != LEX_TOKEN_TILDE)
 			return;
-		kbits(e, x->a, &ka, &va);
+		codegen_expression_known_bits(e, x->a, &ka, &va);
 		*k = ka, *v = ~va & ka;
 		break;
 	case AST_NODE_BINARY:
-		kbits(e, x->a, &ka, &va);
-		kbits(e, x->b, &kb, &vb);
+		codegen_expression_known_bits(e, x->a, &ka, &va);
+		codegen_expression_known_bits(e, x->b, &kb, &vb);
 		switch (x->aux) {
 		case LEX_TOKEN_AMPERSAND:	/* known where both are known or either is a known 0 */
 			*k = (ka & kb) | (ka & ~va) | (kb & ~vb);
@@ -98,12 +98,12 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 			break;
 		case LEX_TOKEN_LESS_LESS:
 		case LEX_TOKEN_GREATER_GREATER: {
-			int bw = (int)tsize(c, N(x->b)->ty) * 8;
+			int bw = (int)codegen_type_size(c, N(x->b)->ty) * 8;
 			uint64_t s = vb;
 
 			if (~kb & (bw >= 64 ? ~0ull : (1ull << bw) - 1))
 				return;	/* an unknown shift count */
-			if (bw < 64 && is_signed(c, N(x->b)->ty) && (s >> (bw - 1) & 1))
+			if (bw < 64 && codegen_type_is_signed(c, N(x->b)->ty) && (s >> (bw - 1) & 1))
 				return;	/* negative */
 			if (s >= (uint64_t)w)
 				return;
@@ -115,11 +115,11 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 				uint64_t sb = 1ull << (w - 1);
 
 				ka &= wm, va &= ka;
-				if (!is_signed(c, x->ty))
+				if (!codegen_type_is_signed(c, x->ty))
 					ka |= ~wm;
 				else if (ka & sb)
 					ka |= ~wm, va |= va & sb ? ~wm : 0;
-				if (is_signed(c, x->ty)) {	/* arithmetic: the top bit's knowledge moves down */
+				if (codegen_type_is_signed(c, x->ty)) {	/* arithmetic: the top bit's knowledge moves down */
 					*k = (uint64_t)((int64_t)ka >> s);
 					*v = (uint64_t)((int64_t)va >> s);
 				} else {
@@ -144,23 +144,23 @@ VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v)
 	case AST_NODE_CONDITIONAL:
 		if (!x->b)
 			return;
-		kbits(e, x->a, &ka, &va);
+		codegen_expression_known_bits(e, x->a, &ka, &va);
 		{
 			const node *cn = N(x->a);
-			int cw = is_integer(c, cn->ty) ? (int)tsize(c, cn->ty) * 8 : 0;
+			int cw = codegen_type_is_integer(c, cn->ty) ? (int)codegen_type_size(c, cn->ty) * 8 : 0;
 			uint64_t cm = cw >= 64 ? ~0ull : cw ? (1ull << cw) - 1 : 0;
 
 			if (cm && (va & ka & cm)) {
-				kbits(e, x->b, k, v);
+				codegen_expression_known_bits(e, x->b, k, v);
 				break;
 			}
 			if (cm && (ka & cm) == cm) {
-				kbits(e, x->c, k, v);
+				codegen_expression_known_bits(e, x->c, k, v);
 				break;
 			}
 		}
-		kbits(e, x->b, &ka, &va);
-		kbits(e, x->c, &kb, &vb);
+		codegen_expression_known_bits(e, x->b, &ka, &va);
+		codegen_expression_known_bits(e, x->c, &kb, &vb);
 		*k = ka & kb & ~(va ^ vb);
 		*v = va & *k;
 		break;

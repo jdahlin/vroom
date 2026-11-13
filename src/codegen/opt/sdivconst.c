@@ -7,7 +7,7 @@
  * For 0<=n<H, writing n=a*d+r leaves 0<=r+n/H<d. For n=-u,
  * 0<u<=H, 0<r+u/H<=d; floor is -a-1 and the sign correction adds one.
  * Thus equality preserves every signed input, including the minimum. */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV bool em_sdivconst32(int32_t divisor, bool remainder, em_sdivconst_recipe *r)
 {
@@ -50,13 +50,13 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder, em_sdivconst_recipe *
 
 VPRIV bool em_sdivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_sdivconst_recipe *r)
 {
-	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
-	    !is_signed(c, ty) || em_bitint(c, ty))
+	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !codegen_type_is_integer(c, ty) ||
+	    !codegen_type_is_signed(c, ty) || codegen_type_is_bitint(c, ty))
 		return false;
-	unsigned size = (unsigned)tsize(c, ty);
+	unsigned size = (unsigned)codegen_type_size(c, ty);
 	if (size == 4)
-		return em_sdivconst32((int32_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
+		return em_sdivconst32((int32_t)codegen_integer_truncate(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	if (size == 8)
-		return em_sdivconst64((int64_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
+		return em_sdivconst64((int64_t)codegen_integer_truncate(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	return false;
 }

@@ -101,7 +101,7 @@ relative to it); `TODO.md` stays at the top.
     - `c/`: parser + sema (GNU C11, clang's layout and constant rules).  C++
       and Objective-C go next to it.
   - `codegen/`: code generator (straight from the AST): the shared part, state
-    and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
+    and types (`codegen-internal.h`), the work queue and threads (`unit-emit.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
     conditionals, expressions; internal header `as-internal.h`; one module with
@@ -157,7 +157,7 @@ relative to it); `TODO.md` stays at the top.
     application and range-extension thunks (`ld/*.c`, parts of the
     linker's module);
     `codegen/`: instruction records and register names (`ins.h`, `a64impl.h`,
-    included by `codegen/emitimpl.h`), expressions, statements, calls (AAPCS64
+    included by `codegen/codegen-internal.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `codegen` unity TU (`codegen_SRC`), so VPRIV stays static.
@@ -190,7 +190,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
-    files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `emitimpl.h`) with the types, macros
+    files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `codegen-internal.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
@@ -245,6 +245,7 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)

@@ -3,7 +3,7 @@
  * object out (the model is arch/wasm/as/was.h, internal).
  *
  * Only built with VCC_WASM=1 (WebAssembly is off by default, doc/PLAN-wasm.md).  Callers are
- * codegen/tu.c (the code generator's text for -c), the vasm tool and the assembler's own file.
+ * codegen/unit-emit.c (the code generator's text for -c), the vasm tool and the assembler's own file.
  * wasm_assemble returns 0, or -1 with a message in err; the object bytes are malloc'ed and the caller
  * frees them.  w32 selects wasm32; otherwise wasm64.
  */

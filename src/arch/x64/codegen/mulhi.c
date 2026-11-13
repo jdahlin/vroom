@@ -1,7 +1,7 @@
 /* High products, using implicit RDX:RAX unsigned/signed multiplication. */
 #include "x64impl.h"
 
-static val x64_mulhi(ecx *e, val a, val b, int op)
+static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_value b, int op)
 {
 	int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), src = rb;
 	static const uint8_t fixed[2] = { RAX, RDX };
@@ -21,15 +21,15 @@ static val x64_mulhi(ecx *e, val a, val b, int op)
 	/* The result retains a's register ownership, even when both inputs alias. */
 	if (rb != ra)
 		x64_tfree(e, rb);
-	return (val){ .k = V_REG, .r = (uint8_t)ra };
+	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
 }
 
-VPRIV val x64_umulhi(ecx *e, val a, val b)
+VPRIV codegen_value x64_umulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
 	return x64_mulhi(e, a, b, X_MULW);
 }
 
-VPRIV val x64_smulhi(ecx *e, val a, val b)
+VPRIV codegen_value x64_smulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
 	return x64_mulhi(e, a, b, X_SMULW);
 }

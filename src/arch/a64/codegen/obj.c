@@ -1,14 +1,14 @@
 /* vcc code generator: object backend: records -> machine code */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
-static uint32_t r_label(rctx *R, uint32_t fid, uint32_t l)
+static uint32_t r_label(codegen_commit_context *R, uint32_t fid, uint32_t l)
 {
-	if (R->lser[l] == R->ser)
-		return R->lsym[l];
-	R->nb.n = 0;
-	p_lbl(&R->nb, fid, l);
-	R->lser[l] = R->ser;
-	return R->lsym[l] = as_symbol_by_name(R->as, R->nb.p, R->nb.n);
+	if (R->label_serials[l] == R->serial)
+		return R->label_symbols[l];
+	R->name_buffer.n = 0;
+	p_lbl(&R->name_buffer, fid, l);
+	R->label_serials[l] = R->serial;
+	return R->label_symbols[l] = as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
 }
 
 static unsigned e_movi(uint32_t *w, int rd, int x, uint64_t v)
@@ -76,7 +76,7 @@ static uint32_t e_addsub_reg(int sf, int op, int s, int rd, int rn, int rm, unsi
 static const uint8_t ld_opc[4][3] = { { 1, 2, 3 }, { 1, 2, 3 }, { 1, 2, 1 }, { 1, 1, 1 } };
 
 /* encode one record into w (returns the word count; the fixup, if any, in *f) */
-static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, uint32_t at)
+static unsigned enc(const ins *i, uint32_t *w, codegen_commit_fixup *f, const uint32_t *loff, uint32_t at)
 {
 	int sf = i->sz;
 
@@ -211,11 +211,11 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		return 1;
 	case I_ADRP:
 		w[0] = 0x90000000u | R5(i->rd);
-		*f = (pfix){ 0, 0, R_AARCH64_ADR_PREL_PG_HI21, i->ref, i->off };
+		*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_ADR_PREL_PG_HI21, i->ref, i->off };
 		return 1;
 	case I_ADDLO:
 		w[0] = a64_addsub_imm(1, 0, 0, R5(i->rd), R5(i->rn), 0, 0);
-		*f = (pfix){ 0, 0, R_AARCH64_ADD_ABS_LO12_NC, i->ref, i->off };
+		*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_ADD_ABS_LO12_NC, i->ref, i->off };
 		return 1;
 	case I_LDLO: case I_STLO: {
 		static const uint32_t lo12[] = { R_AARCH64_LDST8_ABS_LO12_NC, R_AARCH64_LDST16_ABS_LO12_NC,
@@ -223,14 +223,14 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		unsigned opc = i->op == I_STLO ? 0 : ld_opc[i->sz][i->cond];
 
 		w[0] = a64_ldst_uoff(i->sz, 0, opc, R5(i->rd), R5(i->rn), 0);
-		*f = (pfix){ 0, 0, lo12[i->sz], i->ref, i->off };
+		*f = (codegen_commit_fixup){ 0, 0, lo12[i->sz], i->ref, i->off };
 		return 1;
 	}
 	case I_LDGOT:
 		/* two fixups: the caller handles I_LDGOT's second word */
 		w[0] = 0x90000000u | R5(i->rd);
 		w[1] = a64_ldst_uoff(3, 0, 1, R5(i->rd), R5(i->rd), 0);
-		*f = (pfix){ 0, 0, R_AARCH64_ADR_GOT_PAGE, i->ref, 0 };
+		*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_ADR_GOT_PAGE, i->ref, 0 };
 		return 2;
 	case I_ADR:
 		if (loff) {
@@ -238,7 +238,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			return 1;
 		}
 		w[0] = 0x10000000u | R5(i->rd);
-		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
+		*f = (codegen_commit_fixup){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
 		return 1;
 	case I_JTE:
 		if (loff) {
@@ -246,7 +246,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			return 1;
 		}
 		w[0] = 0;
-		*f = (pfix){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
+		*f = (codegen_commit_fixup){ 0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0 };
 		return 1;
 	case I_B: case I_BC: case I_CBZ: case I_CBNZ: case I_TBZ: case I_TBNZ: {
 		int64_t d = loff ? ((int64_t)loff[i->label] - at) * 4 : 0;
@@ -258,7 +258,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		default: w[0] = a64_cbz(sf, i->op == I_CBNZ, R5(i->rd), d); break;
 		}
 		if (!loff)
-			*f = (pfix){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : i->op == I_TBZ || i->op == I_TBNZ ? R_AARCH64_TSTBR14 :
+			*f = (codegen_commit_fixup){ 0, 1, i->op == I_B ? R_AARCH64_JUMP26 : i->op == I_TBZ || i->op == I_TBNZ ? R_AARCH64_TSTBR14 :
 					   R_AARCH64_CONDBR19, i->label, 0 };
 		return 1;
 	}
@@ -266,11 +266,11 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		if (!i->cond)
 			return 0;
 		w[0] = 0x14000000u;
-		*f = (pfix){ 0, 0, R_AARCH64_JUMP26, i->ref, 0 };
+		*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_JUMP26, i->ref, 0 };
 		return 1;
 	case I_BL:
 		w[0] = 0x94000000u;
-		*f = (pfix){ 0, 0, R_AARCH64_CALL26, i->ref, 0 };
+		*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_CALL26, i->ref, 0 };
 		return 1;
 	case I_BLR:
 		w[0] = a64_blr(R5(i->rn));
@@ -299,14 +299,14 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			w[0] = 0xd53bd041u;
 			w[1] = 0x91400020u;
 			w[2] = 0x91000000u;
-			*f = (pfix){ 1, 0, R_AARCH64_TLSLE_ADD_TPREL_HI12, i->ref, 0 };
+			*f = (codegen_commit_fixup){ 1, 0, R_AARCH64_TLSLE_ADD_TPREL_HI12, i->ref, 0 };
 			return 3;
 		case TLS_IE:	/* mrs x1, tpidr_el0; adrp x0, :gottprel:; ldr x0, [x0, :gottprel_lo12:]; add x0, x1, x0 */
 			w[0] = 0xd53bd041u;
 			w[1] = 0x90000000u;
 			w[2] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
 			w[3] = 0x8b000020u;
-			*f = (pfix){ 1, 0, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, i->ref, 0 };
+			*f = (codegen_commit_fixup){ 1, 0, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, i->ref, 0 };
 			return 4;
 		case TLS_DESC:	/* adrp x0; ldr x1, [x0]; add x0, x0; blr x1 (.tlsdesccall); mrs x1, tpidr_el0; add x0, x1, x0 */
 			w[0] = 0x90000000u;
@@ -315,7 +315,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 			w[3] = a64_blr(1);
 			w[4] = 0xd53bd041u;
 			w[5] = 0x8b000020u;
-			*f = (pfix){ 0, 0, R_AARCH64_TLSDESC_ADR_PAGE21, i->ref, 0 };
+			*f = (codegen_commit_fixup){ 0, 0, R_AARCH64_TLSDESC_ADR_PAGE21, i->ref, 0 };
 			return 6;
 		}
 		/* adrp x0, ref@TLVPPAGE; ldr x0, [x0, ref@TLVPPAGEOFF]; ldr x16, [x0]; blr x16 */
@@ -323,7 +323,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 		w[1] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
 		w[2] = a64_ldst_uoff(3, 0, 1, 16, 0, 0);
 		w[3] = a64_blr(16);
-		*f = (pfix){ 0, 0, R_VCC_TLVP_PAGE21, i->ref, 0 };
+		*f = (codegen_commit_fixup){ 0, 0, R_VCC_TLVP_PAGE21, i->ref, 0 };
 		return 4;
 	}
 	return 0;
@@ -333,7 +333,7 @@ static unsigned enc(const ins *i, uint32_t *w, pfix *f, const uint32_t *loff, ui
 VPRIV uint32_t a64_words(const ins *i)
 {
 	uint32_t w[16];
-	pfix f;
+	codegen_commit_fixup f;
 
 	return i->op == I_RAW ? 1u << 20 : enc(i, w, &f, NULL, 0);
 }
@@ -359,9 +359,9 @@ static void more_fixups(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, cons
 }
 
 /* emit one instruction's words at the end of frag, with its fixup(s) */
-static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const pfix *f, uint32_t fid, const ins *i)
+static void r_words(codegen_commit_context *R, uint32_t frag, const uint32_t *w, unsigned n, const codegen_commit_fixup *f, uint32_t fid, const ins *i)
 {
-	ElfObj *o = R->o;
+	ElfObj *o = R->object;
 	uint64_t off;
 	uint8_t *p;
 
@@ -371,10 +371,10 @@ static void r_words(rctx *R, uint32_t frag, const uint32_t *w, unsigned n, const
 	for (unsigned k = 0; k < n; k++)
 		memcpy(p + 4 * k, &w[k], 4);
 	if (f->type) {
-		uint32_t y = f->lbl ? r_label(R, fid, f->ref) : r_sym(R, f->ref);
+		uint32_t y = f->label_flag ? r_label(R, fid, f->reference) : codegen_commit_symbol_find(R, f->reference);
 
-		elf_fixup(o, frag, off + 4u * f->k, p + 4 * f->k, f->type, as_symbol_value(R->as, y, f->off));
-		more_fixups(o, frag, off, p, i, y, R->as);
+		elf_fixup(o, frag, off + 4u * f->word_index, p + 4 * f->word_index, f->type, as_symbol_value(R->assembler, y, f->offset));
+		more_fixups(o, frag, off, p, i, y, R->assembler);
 	}
 }
 
@@ -386,12 +386,12 @@ static inline int hexval(char ch)
 /* per label of a function with inline asm (valid if ser == rctx.ser) */
 enum { RL_NAMED = 1, RL_PLACED = 2, RL_DEFSYM = 4 };
 
-static inline rlab *r_lab(rctx *R, uint32_t l)
+static inline codegen_commit_label *r_lab(codegen_commit_context *R, uint32_t l)
 {
-	rlab *L = &R->lab[l];
+	codegen_commit_label *L = &R->labels[l];
 
-	if (L->ser != R->ser)
-		*L = (rlab){ R->ser, 0, 0, 0, 0 };
+	if (L->serial != R->serial)
+		*L = (codegen_commit_label){ R->serial, 0, 0, 0, 0 };
 	return L;
 }
 
@@ -400,20 +400,20 @@ static inline rlab *r_lab(rctx *R, uint32_t l)
 #define BR19_MIN (-(1 << 18))
 
 /* the branch record i at (frag, off, p) to placed label L */
-static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag, uint32_t off, uint8_t *p)
+static bool r_branch(codegen_commit_context *R, uint32_t fid, const ins *i, codegen_commit_label *L, uint32_t frag, uint32_t off, uint8_t *p)
 {
 	uint32_t w[4];
-	pfix f;
+	codegen_commit_fixup f;
 
-	if (L->frag == frag && !(L->off & 3) && !(off & 3)) {
-		int64_t d = ((int64_t)L->off - off) / 4;
+	if (L->fragment == frag && !(L->offset & 3) && !(off & 3)) {
+		int64_t d = ((int64_t)L->offset - off) / 4;
 
 		if ((i->op == I_TBZ || i->op == I_TBNZ) && (d < -(1 << 13) || d >= 1 << 13))
-			return r_fail(R, "function with inline asm too large: tbz beyond 32 KB") == 0;
+			return codegen_commit_fail(R, "function with inline asm too large: tbz beyond 32 KB") == 0;
 		if (i->op != I_B && (d < BR19_MIN || d > BR19_MAX))	/* not relaxed with inline asm in the function */
-			return r_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
-		R->loff[i->label] = L->off / 4;
-		enc(i, w, &f, R->loff, off / 4);
+			return codegen_commit_fail(R, "function with inline asm too large: conditional branch or adr beyond 1 MB") == 0;
+		R->label_word_offsets[i->label] = L->offset / 4;
+		enc(i, w, &f, R->label_word_offsets, off / 4);
 		memcpy(p, w, 4);
 		return true;
 	}
@@ -421,14 +421,14 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 		uint32_t y = r_label(R, fid, i->label);
 
 		if (!(L->flags & RL_DEFSYM)) {
-			if (elf_symp(R->o, y)->flags & ESYM_DEFINED)
-				return r_fail(R, "invalid symbol redefinition") == 0;
-			elf_define(R->o, y, L->frag, L->off);
+			if (elf_symp(R->object, y)->flags & ESYM_DEFINED)
+				return codegen_commit_fail(R, "invalid symbol redefinition") == 0;
+			elf_define(R->object, y, L->fragment, L->offset);
 			L->flags |= RL_DEFSYM;
 		}
 		enc(i, w, &f, NULL, 0);
 		memcpy(p, w, 4);
-		elf_fixup(R->o, frag, off, p, f.type, as_symbol_value(R->as, y, 0));
+		elf_fixup(R->object, frag, off, p, f.type, as_symbol_value(R->assembler, y, 0));
 	}
 	return true;
 }
@@ -436,14 +436,14 @@ static bool r_branch(rctx *R, uint32_t fid, const ins *i, rlab *L, uint32_t frag
 static inline bool is_cbr(unsigned op) { return op == I_BC || op == I_CBZ || op == I_CBNZ; }
 
 /* first rpatch with at >= pos (pt is sorted by at) */
-static uint32_t pt_lb(const rpatch *pt, uint32_t npt, uint32_t pos)
+static uint32_t pt_lb(const codegen_commit_patch *pt, uint32_t npt, uint32_t pos)
 {
 	uint32_t lo = 0, hi = npt;
 
 	while (lo < hi) {
 		uint32_t m = lo + (hi - lo) / 2;
 
-		if (pt[m].at < pos)
+		if (pt[m].word_position < pos)
 			lo = m + 1;
 		else
 			hi = m;
@@ -461,30 +461,30 @@ static uint32_t pt_lb(const rpatch *pt, uint32_t npt, uint32_t pos)
  * are spread out, and labels (loff) and records (pt) move with them.
  * Returns the number of words added.
  */
-static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, uint32_t *loff, rpatch *pt, uint32_t npt)
+static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, uint32_t *loff, codegen_commit_patch *pt, uint32_t npt)
 {
 	static _Thread_local uint32_t *cum;	/* cum[j]: relaxed branches among pt[0..j) */
 	uint32_t nl = 0, s;
 	bool grew = true;
 
 	if (!cum)
-		cum = reserve((size_t)1 << 32);
+		cum = codegen_memory_reserve((size_t)1 << 32);
 	while (grew) {
 		grew = false;
 		cum[0] = 0;
 		for (uint32_t j = 0; j < npt; j++)
-			cum[j + 1] = cum[j] + pt[j].lng;
+			cum[j + 1] = cum[j] + pt[j].is_relaxed;
 		for (uint32_t j = 0; j < npt; j++) {
-			const ins *i = &in[pt[j].k];
+			const ins *i = &in[pt[j].record_index];
 			uint32_t t;
 			int64_t d;
 
-			if (pt[j].lng || !pt[j].f.lbl || !is_cbr(i->op))
+			if (pt[j].is_relaxed || !pt[j].fixup.label_flag || !is_cbr(i->op))
 				continue;
 			t = loff[i->label];
-			d = (int64_t)t + cum[pt_lb(pt, npt, t)] - ((int64_t)pt[j].at + cum[j]);
+			d = (int64_t)t + cum[pt_lb(pt, npt, t)] - ((int64_t)pt[j].word_position + cum[j]);
 			if (d < BR19_MIN || d > BR19_MAX) {
-				pt[j].lng = 1;
+				pt[j].is_relaxed = 1;
 				grew = true;
 			}
 		}
@@ -494,9 +494,9 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 		return 0;
 	/* spread the words: everything after a relaxed branch moves by the relaxed ones up to it */
 	for (uint32_t j = npt, end_ = at; j-- > 0; ) {
-		uint32_t b = pt[j].at;
+		uint32_t b = pt[j].word_position;
 
-		if (!pt[j].lng)
+		if (!pt[j].is_relaxed)
 			continue;
 		s = cum[j + 1];
 		memmove(wb + b + 1 + s, wb + b + 1, (size_t)(end_ - b - 1) * 4);
@@ -507,31 +507,31 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 		if (in[k].op == I_LABEL)
 			loff[in[k].label] += cum[pt_lb(pt, npt, loff[in[k].label])];
 	for (uint32_t j = 0; j < npt; j++)
-		pt[j].at += cum[j];
+		pt[j].word_position += cum[j];
 	return nl;
 }
 
-VPRIV int a64_replay(rctx *R, const code_hdr *h)
+VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h)
 {
 	const ins *in = (const ins *)(h + 1);
-	const char *raw = (const char *)(in + h->nin);
+	const char *raw = (const char *)(in + h->record_count);
 	uint32_t w[16];
-	pfix f;
+	codegen_commit_fixup f;
 
-	if (!h->sym_labels) {
+	if (!h->symbol_labels) {
 		/*
 		 * One block, branches resolved here: encode everything once into
 		 * R->wb, noting the records that need a label offset (patched
 		 * once the labels are known) or a fixup (applied in order after
 		 * the words are in the frag).
 		 */
-		uint32_t at = 0, frag = as_fragment_current(R->as), *loff = R->loff, *wb = R->wb, npt = 0;
-		rpatch *pt = R->pt;
-		ElfObj *o = R->o;
+		uint32_t at = 0, frag = as_fragment_current(R->assembler), *loff = R->label_word_offsets, *wb = R->word_buffer, npt = 0;
+		codegen_commit_patch *pt = R->patches;
+		ElfObj *o = R->object;
 		uint64_t base;
 		uint8_t *p;
 
-		for (uint32_t k = 0; k < h->nin; k++) {
+		for (uint32_t k = 0; k < h->record_count; k++) {
 			const ins *i = &in[k];
 			unsigned n;
 
@@ -539,38 +539,38 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 				loff[i->label] = at;
 				continue;
 			}
-			n = enc(i, wb + at, &pt[npt].f, NULL, 0);
+			n = enc(i, wb + at, &pt[npt].fixup, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
-				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+				int r = a64_sysreg(R->compile_context->strs[i->ref].s, strlen(R->compile_context->strs[i->ref].s), 0);
 
 				if (r < 0)
-					return r_fail(R, "mrs: expected readable system register");
+					return codegen_commit_fail(R, "mrs: expected readable system register");
 				wb[at] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
-			if (pt[npt].f.type) {
-				pt[npt].k = k;
-				pt[npt].at = at;
-				pt[npt].lng = 0;
+			if (pt[npt].fixup.type) {
+				pt[npt].record_index = k;
+				pt[npt].word_position = at;
+				pt[npt].is_relaxed = 0;
 				npt++;
 			}
 			at += n;
 		}
 		if (unlikely(at > BR19_MAX))	/* a label can be out of a conditional branch's reach */
-			at += r_relax(in, h->nin, wb, at, loff, pt, npt);
+			at += r_relax(in, h->record_count, wb, at, loff, pt, npt);
 		elf_code(o, frag);
 		base = elf_frag(o, frag)->size;
 		p = elf_grow(o, frag, (size_t)at * 4);
 		for (uint32_t j = 0; j < npt; j++) {
-			const ins *i = &in[pt[j].k];
-			uint32_t a = pt[j].at;
+			const ins *i = &in[pt[j].record_index];
+			uint32_t a = pt[j].word_position;
 			int64_t d;
 
-			if (!pt[j].f.lbl)
+			if (!pt[j].fixup.label_flag)
 				continue;
-			if (pt[j].lng) {
+			if (pt[j].is_relaxed) {
 				/* b.!cond / cbnz<->cbz over the next word (the record was encoded with offset 0) */
 				if (i->op == I_BC && i->cond >= 14)
-					return r_fail(R, "internal: relaxing an unconditional b.al");
+					return codegen_commit_fail(R, "internal: relaxing an unconditional b.al");
 				wb[a] = (i->op == I_BC ? wb[a] ^ 1 : wb[a] ^ 1u << 24) | 2u << 5;
 				wb[a + 1] = a64_b(((int64_t)loff[i->label] - (a + 1)) * 4);
 				continue;
@@ -580,20 +580,20 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 			    is_cbr(i->op) ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_ADR ? d < BR19_MIN || d > BR19_MAX :
 			    i->op == I_B ? d < -(1 << 25) || d >= 1 << 25 : false)
-				return r_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
+				return codegen_commit_fail(R, i->op == I_ADR ? "function too large: adr to a label beyond 1 MB" :
 							   "function too large: branch out of range");
 			enc(i, wb + a, &f, loff, a);
 		}
 		memcpy(p, wb, (size_t)at * 4);
 		for (uint32_t j = 0; j < npt; j++) {
-			const pfix *g = &pt[j].f;
-			uint32_t a = pt[j].at, y;
+			const codegen_commit_fixup *g = &pt[j].fixup;
+			uint32_t a = pt[j].word_position, y;
 
-			if (g->lbl)
+			if (g->label_flag)
 				continue;
-			y = r_sym(R, g->ref);
-			elf_fixup(o, frag, base + 4u * (a + g->k), p + 4 * (a + g->k), g->type, as_symbol_value(R->as, y, g->off));
-			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].k], y, R->as);
+			y = codegen_commit_symbol_find(R, g->reference);
+			elf_fixup(o, frag, base + 4u * (a + g->word_index), p + 4 * (a + g->word_index), g->type, as_symbol_value(R->assembler, y, g->offset));
+			more_fixups(o, frag, base + 4u * a, p + 4 * a, &in[pt[j].record_index], y, R->assembler);
 		}
 		return 0;
 	}
@@ -603,75 +603,75 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 	 * branch end up in the same frag, else through the label's symbol.
 	 */
 	{
-		ElfObj *o = R->o;
+		ElfObj *o = R->object;
 		uint32_t npend = 0;
 
-		R->ser++;
-		for (const char *q = raw, *qe = raw + h->nraw; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
+		R->serial++;
+		for (const char *q = raw, *qe = raw + h->raw_count; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
 			uint32_t fid = 0, l = 0;
 			const char *d = q += 4;
 
 			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
 				fid = fid * 16 + (uint32_t)v;
-			if (q == d || q >= qe || *q != '_' || fid != h->fid)
+			if (q == d || q >= qe || *q != '_' || fid != h->function_id)
 				continue;
 			d = ++q;
 			for (int v; q < qe && (v = hexval(*q)) >= 0; q++)
 				l = l * 16 + (uint32_t)v;
-			if (q > d && l < h->nlabel) {
-				rlab *L = r_lab(R, l);
+			if (q > d && l < h->label_count) {
+				codegen_commit_label *L = r_lab(R, l);
 
 				L->flags |= RL_NAMED;
 			}
 		}
-		for (uint32_t k = 0; k < h->nin; k++) {
+		for (uint32_t k = 0; k < h->record_count; k++) {
 			const ins *i = &in[k];
 			unsigned n;
 
 			if (i->op == I_RAW) {
-				if (as_snippet_assemble(R->as, raw + i->off, i->ref))
+				if (as_snippet_assemble(R->assembler, raw + i->off, i->ref))
 					return -1;
 				continue;
 			}
 			if (i->op == I_LABEL) {
-				rlab *L = r_lab(R, i->label);
-				uint32_t frag = as_fragment_current(R->as);
+				codegen_commit_label *L = r_lab(R, i->label);
+				uint32_t frag = as_fragment_current(R->assembler);
 
 				if (L->flags & RL_NAMED) {
-					if (as_label_define_symbol(R->as, r_label(R, h->fid, i->label)))
+					if (as_label_define_symbol(R->assembler, r_label(R, h->function_id, i->label)))
 						return -1;
 					continue;
 				}
 				L->flags |= RL_PLACED;
-				L->frag = frag;
-				L->off = (uint32_t)elf_frag(o, frag)->size;
-				for (uint32_t j = L->pend; j; j = R->pend[j - 1].next) {
-					const rpend *pd = &R->pend[j - 1];
+				L->fragment = frag;
+				L->offset = (uint32_t)elf_frag(o, frag)->size;
+				for (uint32_t j = L->pending; j; j = R->pending[j - 1].next) {
+					const codegen_commit_pending_branch *pd = &R->pending[j - 1];
 
-					if (!r_branch(R, h->fid, &in[pd->k], L, pd->frag, pd->off, pd->p))
+					if (!r_branch(R, h->function_id, &in[pd->record_index], L, pd->fragment, pd->offset, pd->bytes))
 						return -1;
 				}
 				continue;
 			}
 			if (i->op == I_ADR || i->op == I_B || i->op == I_BC || i->op == I_CBZ || i->op == I_CBNZ || i->op == I_TBZ ||
 			    i->op == I_TBNZ) {
-				rlab *L = r_lab(R, i->label);
+				codegen_commit_label *L = r_lab(R, i->label);
 
 				if (!(L->flags & RL_NAMED)) {
-					uint32_t frag = as_fragment_current(R->as), off;
+					uint32_t frag = as_fragment_current(R->assembler), off;
 					uint8_t *p;
 
 					elf_code(o, frag);
 					off = (uint32_t)elf_frag(o, frag)->size;
 					p = elf_grow(o, frag, 4);
 					if (L->flags & RL_PLACED) {
-						if (!r_branch(R, h->fid, i, L, frag, off, p))
+						if (!r_branch(R, h->function_id, i, L, frag, off, p))
 							return -1;
 					} else {
-						rpend *pd = &R->pend[npend++];
+						codegen_commit_pending_branch *pd = &R->pending[npend++];
 
-						*pd = (rpend){ L->pend, k, frag, off, p };
-						L->pend = npend;
+						*pd = (codegen_commit_pending_branch){ L->pending, k, frag, off, p };
+						L->pending = npend;
 						enc(i, w, &f, NULL, 0);
 						memcpy(p, w, 4);
 					}
@@ -680,23 +680,23 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 			}
 			n = enc(i, w, &f, NULL, 0);
 			if (unlikely(i->op == I_MRS)) {
-				int r = a64_sysreg(R->c->strs[i->ref].s, strlen(R->c->strs[i->ref].s), 0);
+				int r = a64_sysreg(R->compile_context->strs[i->ref].s, strlen(R->compile_context->strs[i->ref].s), 0);
 
 				if (r < 0)
-					return r_fail(R, "mrs: expected readable system register");
+					return codegen_commit_fail(R, "mrs: expected readable system register");
 				w[0] = 0xd5200000u | ((unsigned)r & 0xffff) << 5 | R5(i->rd);
 			}
 			if (n)
-				r_words(R, as_fragment_current(R->as), w, n, &f, h->fid, i);
+				r_words(R, as_fragment_current(R->assembler), w, n, &f, h->function_id, i);
 		}
 		/* branches to labels never placed: through the (undefined) symbol, as the text would */
 		for (uint32_t j = 0; j < npend; j++) {
-			const rpend *pd = &R->pend[j];
-			const ins *i = &in[pd->k];
+			const codegen_commit_pending_branch *pd = &R->pending[j];
+			const ins *i = &in[pd->record_index];
 
 			if (!(r_lab(R, i->label)->flags & RL_PLACED)) {
 				enc(i, w, &f, NULL, 0);
-				elf_fixup(o, pd->frag, pd->off, pd->p, f.type, as_symbol_value(R->as, r_label(R, h->fid, i->label), 0));
+				elf_fixup(o, pd->fragment, pd->offset, pd->bytes, f.type, as_symbol_value(R->assembler, r_label(R, h->function_id, i->label), 0));
 			}
 		}
 	}

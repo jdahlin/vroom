@@ -12,7 +12,7 @@
  *   :lo12:x+k  :got:x  :got_lo12:x  adrp x   x@PAGEOFF+k  x@GOTPAGE  ...
  *   .Lname                                   Lname (Mach-O's assembler-local)
  */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 static bool idch(char ch)
 {

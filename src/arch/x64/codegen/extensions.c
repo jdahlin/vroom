@@ -3,21 +3,21 @@
  */
 #include "x64impl.h"
 
-VPRIV bool x64_last_u32(const ecx *e, int r)
+VPRIV bool x64_last_u32(const codegen_context *e, int r)
 {
-	const xst *x = e->x64;
+	const xst *x = e->x64_context;
 	if (r < 0 || r >= XMM0 || !x->nin)
 		return false;
-	const rec *i = &x->in[x->nin - 1];
-	if (i->r[0] != r)
+	const record *i = &x->in[x->nin - 1];
+	if (i->registers[0] != r)
 		return false;
-	if (i->op == X_MOVI)
-		return (uint64_t)i->imm <= UINT32_MAX;
-	if (i->op == X_LD || i->op == X_LDX || i->op == X_EXT)
-		return !i->cond && (i->sz == 1 || i->sz == 2 || i->sz == 4);
-	if (i->sz != 4)
+	if (i->opcode == X_MOVI)
+		return (uint64_t)i->immediate <= UINT32_MAX;
+	if (i->opcode == X_LD || i->opcode == X_LDX || i->opcode == X_EXT)
+		return !i->condition && (i->size == 1 || i->size == 2 || i->size == 4);
+	if (i->size != 4)
 		return false;
-	switch (i->op) {
+	switch (i->opcode) {
 	case X_MOV:
 	case X_LEA: case X_LEASCALE:
 	case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR:

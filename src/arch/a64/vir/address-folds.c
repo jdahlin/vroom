@@ -98,7 +98,7 @@ VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b, uint32_t
 /* the chain's consumer c: its folded form (A64_VIR_CHAIN_MEM: the next load or store's address) */
 static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t res)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	uint32_t op = L->function->insns[c].op;
 	const a64_vir_chain *x = &L->xx;
 	int a = a64_vir_operand_general_register(L, 0, R_X16), rd = res == VIR_REGISTER_NONE ? R_X16 : a64_vir_general_register(res), t;	/* (a base in x16: a64_vir_store_lower takes x17) */

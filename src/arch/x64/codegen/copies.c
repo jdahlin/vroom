@@ -12,11 +12,11 @@
  * div/mul, calls, REP, inline asm and atomics keep their fixed registers.
  * Tied/partial reads of a destination are rejected below even for these ops.
  */
-static unsigned x64_copy_fields(const rec *i)
+static unsigned x64_copy_fields(const record *i)
 {
-	switch (i->op) {
+	switch (i->opcode) {
 	case X_MOV:
-		return i->r[0] < XMM0 && i->r[1] < XMM0 ? 1u << 1 : 0;
+		return i->registers[0] < XMM0 && i->registers[1] < XMM0 ? 1u << 1 : 0;
 	case X_LDX: return (1u << 1) | (1u << 3);
 	case X_TESTM: return (1u << 1) | (1u << 3);
 	case X_STX: return (1u << 1) | (1u << 2) | (1u << 3);
@@ -39,22 +39,22 @@ static unsigned x64_copy_fields(const rec *i)
 
 static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to, bool apply)
 {
-	ecx *e = ctx;
-	rec *i = &e->x64->in[j];
+	codegen_context *e = ctx;
+	record *i = &e->x64_context->in[j];
 	unsigned fields = x64_copy_fields(i);
 	if (!fields)
 		return false;
 	/* A partial write or tied result may read bits not represented by an
 	 * independent operand. Do not redirect that register's identity.
 	 */
-	if (x64_effects(e, i).def & X_COPY_BIT(from))
+	if (x64_effects(e, i).defines & X_COPY_BIT(from))
 		return false;
 	bool found = false;
 	for (unsigned f = 1; f <= 2; f++) {
-		if ((fields & (1u << f)) && i->r[f] == from) {
+		if ((fields & (1u << f)) && i->registers[f] == from) {
 			found = true;
 			if (apply)
-				i->r[f] = to;
+				i->registers[f] = to;
 		}
 	}
 	return found;
@@ -62,34 +62,34 @@ static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to, bo
 
 static bool x64_copy_inspect(void *ctx, uint32_t j, uint64_t *read, uint64_t *write)
 {
-	ecx *e = ctx;
-	receffects f = x64_effects(e, &e->x64->in[j]);
-	if (f.br != RB_NONE || (f.fl & (OD_LABEL | OD_BARRIER | OD_CALL)))
+	codegen_context *e = ctx;
+	record_effects f = x64_effects(e, &e->x64_context->in[j]);
+	if (f.branch != RECORD_BRANCH_NONE || (f.flags & (RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER | RECORD_EFFECT_CALL)))
 		return false;
-	*read = f.use;
-	*write = f.def;
+	*read = f.used;
+	*write = f.defines;
 	return true;
 }
 
 /* Called from the existing two-address walk. No extra whole-function walk
  * or compaction is needed; the caller omits a successfully forwarded copy. */
-VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k)
+VPRIV bool x64_copy_forward_at(codegen_context *e, uint32_t k)
 {
-	xst *x = e->x64;
-	const rec *i = &x->in[k];
+	xst *x = e->x64_context;
+	const record *i = &x->in[k];
 	/* Return copies usually precede an epilogue jump. Reject these without
 	 * decoding effects or setting up a transaction. Labels also end a block. */
-	if (k + 1 >= x->nin || x->in[k + 1].op == X_JMP || x->in[k + 1].op == X_LABEL)
+	if (k + 1 >= x->nin || x->in[k + 1].opcode == X_JMP || x->in[k + 1].opcode == X_LABEL)
 		return false;
-	if (k + 1 >= x->nin || i->op != X_MOV || i->sz != 8 ||
-		i->r[0] >= XMM0 || i->r[1] >= XMM0 || i->r[0] == i->r[1] ||
-		!(X_TEMPS & (1u << i->r[0])) || i->r[1] == RSP ||
-		i->r[1] == RBP || i->r[1] == R11 || i->r[1] == R12)
+	if (k + 1 >= x->nin || i->opcode != X_MOV || i->size != 8 ||
+		i->registers[0] >= XMM0 || i->registers[1] >= XMM0 || i->registers[0] == i->registers[1] ||
+		!(X_TEMPS & (1u << i->registers[0])) || i->registers[1] == RSP ||
+		i->registers[1] == RBP || i->registers[1] == R11 || i->registers[1] == R12)
 		return false;
-	em_rec_copy_scan scan = {
-		.records = x->in, .stride = sizeof(rec), .op_offset = offsetof(rec, op),
+	record_copy_scan scan = {
+		.records = x->in, .stride = sizeof(record), .op_offset = offsetof(record, opcode),
 		.deleted_op = X_COPY_DELETED, .inspect = x64_copy_inspect,
 		.rewrite = x64_copy_rewrite, .ctx = e,
 	};
-	return em_rec_copy_forward(&scan, k, x->nin - 1, i->r[0], i->r[1]);
+	return record_copy_forward(&scan, k, x->nin - 1, i->registers[0], i->registers[1]);
 }
