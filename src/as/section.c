@@ -33,6 +33,12 @@ VPRIV void as_fragment_switch(as_context *a, uint32_t frag)
 VPRIV uint32_t as_section_standard_find(as_context *a, const char *name)
 {
 	as_text n = { name, (uint32_t)strlen(name) };
+	if (a->object->format == OBJ_COFF) {
+		uint32_t c = as_text_equals(n, ".text") ? COFF_SCN_CODE | COFF_SCN_EXECUTE | COFF_SCN_READ :
+			     as_text_equals(n, ".bss") ? COFF_SCN_UNINIT_DATA | COFF_SCN_READ | COFF_SCN_WRITE :
+			     COFF_SCN_INIT_DATA | COFF_SCN_READ | COFF_SCN_WRITE;
+		return coff_section(a->object, n.text, n.length, c, 0, 0);
+	}
 	uint32_t type = SHT_PROGBITS;
 	uint64_t flags = 0;
 	if (as_text_equals(n, ".text")) flags = SHF_ALLOC | SHF_EXECINSTR;
@@ -54,7 +60,7 @@ VPRIV int as_name_parse(as_context *a, const char **pp, const char *e, as_text *
 		return 0;
 	}
 	const char *s = p;
-	while (p < e && (as_char_is_identifier((unsigned char)*p) || *p == '-')) p++;
+	while (p < e && (as_char_is_identifier((unsigned char)*p) || *p == '-' || (*p == '@' && as_names_have_at(a)))) p++;
 	if (p == s) return as_error_report(a, "expected identifier");
 	*out = (as_text){ s, (uint32_t)(p - s) };
 	*pp = p;

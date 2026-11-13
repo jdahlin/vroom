@@ -422,6 +422,71 @@ is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
   strlen floorf ceilf truncf roundf rintf nearbyintf fabsf`
   (`__stack_chk_guard`/`__stack_chk_fail` under -fstack-protector).
 
+### WIN4, WIN5 (2026-11-13): the standalone assembler done; `vpp -c` waits for WIN1-WIN3
+
+`vasm --target=x86_64-w64-mingw32 x.s -o x.o` writes the COFF object clang
+-c writes, byte for byte.  Nothing from LLVM: `src/platform/win/coff.c` (the
+writer: section numbers with associative COMDAT last, section-definition
+records with MC's JamCRC from 0, COMDAT symbols after their section,
+registration-order symbols, weak externals with `.weak.NAME.default.UNIQUE`,
+`.file` records, a tail-merged string table, ADDR64 ADDR32 ADDR32NB REL32
+SECREL SECTION, the >= 0xffff relocation-count record, time stamp 0),
+`src/platform/win/unwind.c` (UNWIND_INFO version 1 at `.seh_endproc` or
+`.seh_handlerdata`, `.pdata` at the end; `.xdata$NAME`/`.pdata$NAME`
+select-any COMDAT for a `.text$NAME` COMDAT section, as MinGW has no
+associative COMDAT; a pair of its own for any other section) and
+`src/as/coff-directives.c` (`.def/.scl/.type/.endef`, `.section` flags
+`a b d n D r s w x y i` with `discard one_only same_size same_contents
+associative largest newest` and `,unique,N`, `.linkonce`, `.secrel32`,
+`.secidx`, `.rva`, `.symidx`, `.weak`/`.weak_anti_dep` as weak externals,
+`.file "x"`, `.seh_proc endproc pushreg stackalloc setframe savereg savexmm
+pushframe endprologue startepilogue endepilogue handler handlerdata
+unwindversion endfunclet unwindv2start`), plus `@IMGREL`/`@SECREL32`, `@` in
+names (`@feat.00`), `.comm` with a log2 alignment and MinGW's `-aligncomm`
+in `.drectve`, `.cfi_*` as MC's COFF `.eh_frame` (absolute 8-byte FDE
+addresses, data alignment -4), and MC's rule that pc-relative references to
+a function (`.type 32`) keep their relocation (also for jump relaxation).
+ELF-only directives (`.size .hidden .local .ident .previous .subsection
+.symver .weakref .rodata ...`) are errors at the same lines as MC's.
+
+Two fixes in shared code came out of the corpus: x86 jump relaxation now
+follows MC's relaxOnce (a backward jump sees the live layout, a forward one
+the previous pass's for both ends), and the CFA offset of x86-64 CFI starts at
+the CIE's 8 (`.cfi_adjust_cfa_offset` first was off by 8 on ELF too).
+
+Measured:
+- `bench/vas-obj.py`: 77/77 (13 new `win64-*.s` cases, 3 of them error files).
+- `bench/vas-corpus.py --target x86_64-w64-mingw32` (clang -S at -O0 and
+  -O2 of every C file under `src/test`): 4494/4494 identical; 854 skipped
+  (clang -S fails without a sysroot: headers the test runtime lacks).
+- `bench/vcc-win64.py --vasm-ref`: 2011/2012 run like clang's build under
+  Wine and are clang -c's object (gcc 1612, tcc 106, vcc 293/294); the one
+  left is `vcc/debug_asm` (`-g`): clang writes DWARF 4 line tables for this
+  target (include directories and file names in `.debug_line`), vasm writes
+  version 5 with `.debug_line_str` (WIN6).
+- `bench/vas-mutate.py -n 20000` (two seeds) with the ASan/UBSan vasm: no
+  crash; it found two signed overflows on absurd input, fixed.
+- Unchanged elsewhere: vas-obj ELF cases, `vas-enc.py` 1181 ok,
+  `vcc-x86.py --suite vcc --objcmp` 323/323, x86-64 ELF vas-corpus: the
+  same 8 -O2 differences as before the change.
+
+Not done: `.seh_unwindversion 2` and `.seh_splitchained` (chained unwind
+info) are refused as unsupported (clang emits neither for MinGW C), `-g`
+(above), big-object COFF (more than 65279 sections), `.secnum`/`.secoffset`,
+`.cv_*` CodeView directives.
+
+For the code generator (`vpp -c`): the driver sets `obj_set_format(o,
+OBJ_COFF)` next to `elf_set_machine(o, EM_X86_64)` (codegen/tu.c), and
+elf_finish/elf_emit then write COFF.  The record encoder needs no text: the
+`.def` attributes are `ElfSym.coff_class`/`coff_type` (set them and
+`elf_reg` the symbol where the text would have the `.def`), `.weak` is
+`elf_bind(STB_WEAK)` plus `coff_weak = 3`, sections are `coff_section(o,
+name, len, characteristics, comdat_sym, selection)`, `.comm` alignment is
+`coff_align_common`, and the unwind information is the `coff_seh_*` calls
+of obj.h, each with a temporary label the encoder defines at the
+instruction boundary (`coff_seh_proc` at the entry, one call per prologue
+instruction after it, `coff_seh_end_prologue`, `coff_seh_end`).
+
 ### WIN7 (2026-11-13): vlink writes PE, byte-identical to lld for clang's objects
 
 `src/platform/win/pe-linker.c` (one TU like `ld/ld.c`, #including

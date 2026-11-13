@@ -180,7 +180,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 		*v = (as_value){ as_label_temporary_define(a), 0, 0 };
 		return 0;
 	}
-	if (as_char_is_identifier_start((unsigned char)c) || c == '"') {
+	if (as_char_is_identifier_start((unsigned char)c) || c == '"' || (c == '@' && as_names_have_at(a) && !as_at_is_specifier(l->cursor + 1, l->end))) {
 		const char *s, *p;
 		if (c == '"') {
 			s = l->cursor + 1; p = s;
@@ -189,7 +189,8 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 			l->cursor = p + 1;
 		} else {
 			s = l->cursor; p = s;
-			while (p < l->end && as_char_is_identifier((unsigned char)*p)) p++;
+			while (p < l->end && (as_char_is_identifier((unsigned char)*p) ||
+					      (*p == '@' && as_names_have_at(a) && (p == s || !as_at_is_specifier(p + 1, l->end))))) p++;
 			l->cursor = p;
 		}
 		uint32_t y = as_symbol_intern(a, s, (size_t)(p - s));
@@ -205,7 +206,9 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 		}
 		if (a->variable_count) {
 			as_variable *vr = as_variable_slot_find(a, y, 0);
-			if (vr && vr->value.add != (uint32_t)-1) *v = vr->value;
+			/* (COFF: a variable naming a symbol stays itself; at the end it is that symbol's alias, MC) */
+			if (vr && vr->value.add != (uint32_t)-1 && !(a->object->format == OBJ_COFF && vr->value.add && !vr->value.sub))
+				*v = vr->value;
 		}
 		as_value_fold(a, v);
 		return 0;

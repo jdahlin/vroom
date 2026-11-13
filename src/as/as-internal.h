@@ -134,6 +134,7 @@ struct as_context {
 	uint64_t *variable_size_tree, *variable_offsets_previous;	/* live sizes (Fenwick), previous-pass offsets */
 	struct { uint32_t sym; char reg[8]; } *register_aliases;	/* x86: name = %reg, the register by another name */
 	uint32_t register_alias_count, register_alias_capacity;
+	uint32_t coff_symbol_definition;	/* COFF: the symbol of the open .def, 0 none */
 	int x64_lock_prefix, x64_operand_size;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
 	char messages[4096];		/* the errors so far, one per line group (clang goes on after one) */
 	uint32_t message_length, error_count;
@@ -219,6 +220,24 @@ VPRIV int as_expression_absolute_parse(as_context *a, const char **pp, const cha
 VPRIV int as_expression_value_parse(as_context *a, const char **pp, const char *e, as_value *v);
 /* data-directives.c */
 VPRIV int as_value_emit(as_context *a, int size, as_value *v);
+VPRIV int as_value_emit_relocation(as_context *a, int size, as_value *v, uint32_t type);	/* with this fixup type */
+/* coff-directives.c: a COFF object's directives (1: taken, the result in *rc) */
+VPRIV int as_directive_coff(as_context *a, as_text w, const char *p, const char *e, int *rc);
+
+/* COFF (AllowAtInName): '@' is part of a name unless what follows is a relocation specifier (sym@IMGREL) */
+static inline int as_at_is_specifier(const char *p, const char *e)
+{
+	static const char *const names[] = { "plt", "gotpcrel", "gotpcrel_norelax", "tpoff", "gottpoff", "tlsgd", "tlsld", "tlsldm",
+		"dtpoff", "ntpoff", "gotntpoff", "indntpoff", "gotoff", "got", "gotpc", "pltoff", "size", "imgrel", "secrel32", "abs8" };
+	const char *s = p;
+	while (p < e && as_char_is_identifier((unsigned char)*p) && *p != '.' && *p != '$') p++;
+	size_t n = (size_t)(p - s);
+	if (p < e && (*p == '@' || *p == '.' || *p == '$')) return 0;
+	for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+		if (as_text_equals_ignore_case(s, n, names[i])) return 1;
+	return 0;
+}
+static inline int as_names_have_at(const as_context *a) { return a->object->format == OBJ_COFF; }
 /* arch/<cpu>/as/parse.c */
 VPRIV void as_alias_rehash(as_context *a);
 VPRIV int a64_as_pools_flush(as_context *a);

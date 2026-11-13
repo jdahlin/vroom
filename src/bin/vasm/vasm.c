@@ -1,6 +1,7 @@
 /*
  * vasm: assembler driver.  vasm [-o out.o] in.s  (input: preprocessed text)
  *       vasm --target=x86_64-linux-gnu [-o out.o] in.s  (x86-64 AT&T syntax, an ELF object; default is arm64 ELF)
+ *       vasm --target=x86_64-w64-mingw32 [-o out.o] in.s  (x86-64 for Windows: a COFF object, .seh_* unwind tables)
  *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax; only with make VCC_WASM=1)
  *       vasm --target=arm64-apple-macos [-o out.o] in.s  (Apple's syntax, a Mach-O object)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
@@ -89,7 +90,11 @@ int main(int argc, char **argv)
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
 		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
-		else if (!strncmp(argv[i], "--target=x86_64", 15)) elf_set_machine(o, EM_X86_64);
+		else if (!strncmp(argv[i], "--target=x86_64", 15)) {
+			elf_set_machine(o, EM_X86_64);
+			if (strstr(argv[i], "mingw") || strstr(argv[i], "windows"))	/* x86_64-w64-mingw32: a COFF object */
+				obj_set_format(o, OBJ_COFF);
+		}
 		else if (!strncmp(argv[i], "--target=", 9) && (strstr(argv[i], "darwin") || strstr(argv[i], "apple") ||
 							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];

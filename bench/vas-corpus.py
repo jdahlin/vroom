@@ -4,6 +4,9 @@
   bench/vas-corpus.py [-j N] [-O LEVEL...] [--limit N] [--target T] [PAT]
 
 --target x86_64-linux-gnu: the same for x86-64 (vasm --target=...).
+--target x86_64-w64-mingw32: Windows x64, COFF objects (WIN4/WIN5): no sysroot,
+the test runtime's headers (src/test/rt/include-win64, rt/include) and clang's
+resource headers, as bench/vcc-win64.py compiles.
 
 Every C file under src/test (or those matching PAT) is compiled by
 clang --target=aarch64-linux-gnu -S at each -O level (default -O0 -O2);
@@ -20,12 +23,20 @@ VAS = os.environ.get('VAS', f'{BUILD}/vasm')
 CL = llvm('clang')
 
 TGT = 'aarch64-linux-gnu'
+RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
+
+def cflags(tgt):
+    """what clang -S needs for the target beyond --target"""
+    if 'mingw' in tgt or 'windows' in tgt:
+        return ['-nostdinc', '-I', f'{R}/src/test/rt/include-win64', '-I', f'{R}/src/test/rt/include', '-isystem', RES]
+    return []
 
 def one(job):
     f, opt, TGT = job
     with tempfile.TemporaryDirectory() as t:
         s, c, v = f'{t}/a.s', f'{t}/c.o', f'{t}/v.o'
-        if subprocess.run([CL, f'--target={TGT}', *opt.split(), '-w', '-S', f, '-o', s], capture_output=True).returncode:
+        if subprocess.run([CL, f'--target={TGT}', *cflags(TGT), *opt.split(), '-w', '-S', f, '-o', s], capture_output=True,
+                          cwd=os.path.dirname(f)).returncode:
             return ('skip', f, opt, '')
         march = [o for o in opt.split() if o.startswith(('-march=', '-mcpu='))]	# the .s has no .arch
         if subprocess.run([CL, f'--target={TGT}', *march, '-c', s, '-o', c], capture_output=True).returncode:
