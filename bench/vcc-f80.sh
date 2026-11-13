@@ -5,5 +5,5 @@ set -e
 B=$(dirname "$0")/..
 O=${TMPDIR:-/tmp}/vcc-f80.$$
 trap 'rm -f "$O"' EXIT
-${CLANG:-clang} -O2 -o "$O" "$B/src/test/f80/f80host.c"
+${CLANG:-clang} -O2 -o "$O" "$B/src/test/f80/f80host.c" "$B/src/common/fail.c" -I "$B/src/include"
 "$O" "$@"

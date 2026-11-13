@@ -4,6 +4,7 @@
  * four chunks per NEON lane set on aarch64, plain C elsewhere.
  */
 #include "common/digest.h"
+#include "common/fail.h"
 #include <string.h>
 
 static inline uint32_t rd32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
@@ -156,6 +157,8 @@ void vdigest_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
         return;
     }
     uint32_t sbuf[1024][8], (*cv)[8] = nch <= 1024 ? sbuf : malloc(nch * 32);
+    if (!cv)
+        vout_of_memory();
     size_t c = 0;
     for (; c + 4 < nch; c += 4) {
         const uint8_t *p[4] = {in + c * 1024, in + (c + 1) * 1024, in + (c + 2) * 1024,
