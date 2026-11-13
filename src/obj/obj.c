@@ -12,18 +12,6 @@
 #define FIX_CAP ((size_t)1 << 30)
 #define SEC_CAP ((size_t)64 << 20)
 
-_Thread_local jmp_buf *vjob_jb;
-
-_Thread_local int vjob_fail_fd = 2;
-
-void vjob_fail(const char *msg)
-{
-	dprintf(vjob_fail_fd, "vcc: error: %s\n", msg);
-	if (vjob_jb)
-		longjmp(*vjob_jb, 1);
-	abort();
-}
-
 void elf_error(ElfObj *o, const char *fmt, ...)
 {
 	if (o->has_err) return;

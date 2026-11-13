@@ -81,7 +81,7 @@ static __attribute__((noreturn, noinline)) void vintern_full(void)
 	char m[96];
 
 	snprintf(m, sizeof(m), "identifier table full (more than %u distinct identifiers)", MAX_ENT);
-	vjob_escape(m);
+	vjob_fail_table_full(m);
 }
 
 /* the probe from slot i on, inserting at the first empty slot */
@@ -208,7 +208,7 @@ uint32_t vintern_cstr(const char *s)
 	size_t n = strlen(s);
 
 	if (n + 16 > sizeof(b))
-		abort();
+		VBUG("vintern_cstr: string of 64 bytes or more");
 	memcpy(b, s, n);
 	return vintern_copy(b, n);
 }
@@ -237,8 +237,7 @@ static void init_once(void)
 		uint32_t id = vintern_cstr(preset[i]);
 
 		if (id != i + 1) {
-			fprintf(stderr, "vcc: duplicate keyword %s\n", preset[i]);
-			abort();
+			VBUG("duplicate keyword in the preset names");
 		}
 	}
 }

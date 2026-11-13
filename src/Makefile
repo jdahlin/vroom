@@ -89,8 +89,9 @@ AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/
 as_SRC   = as/as.c as/sym.c as/expr.c as/section.c as/data.c as/macro.c as/cond.c as/cfi.c as/relax.c \
            as/dwline.c platform/darwin/astext.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
+FAIL_SRC = common/fail.c
 DIGEST_SRC = common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
-LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
+LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c port/crc32c.c port/stack-guard.c port/job-regions.c
 PP_SRC  = frontend/pp/dircache.c driver/ccsnap.c $(DIGEST_SRC)
 VCCD_SRC = server/dstore.c server/caps.c utils/fixdep.c utils/ar.c utils/rsh.c
 # the server proper (vccd.c has main), one TU like the split modules; dstore.c and caps.c stay apart
@@ -119,9 +120,9 @@ SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(cal
 PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 # one module's objects: its unity TU, or its files
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
-AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
-AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c $(DIGEST_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
+AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC) $(FAIL_SRC)
+AS_OBJ  = $(call o,$(AS_FILES) $(FAIL_SRC)) $(call mod,as) $(call mod,obj)
+LD_SRC  = ld/ld.c $(FAIL_SRC) $(DIGEST_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: %.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -161,19 +162,19 @@ $(OUT)/vpp: $(call o,bin/vpp/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(call mod,server) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC))
+$(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC) $(FAIL_SRC))
 	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,bin/vasm/vasm.c) $(AS_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
-$(OUT)/virtest: $(call o,bin/virtest/virtest.c) $(call mod,vir)
+$(OUT)/virtest: $(call o,bin/virtest/virtest.c $(FAIL_SRC)) $(call mod,vir)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synth.c
-$(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC)) $(call mod,vir)
+$(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC) $(FAIL_SRC)) $(call mod,vir)
 	$(VCC_CC) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
@@ -235,7 +236,7 @@ self: $(OUT)/vpp
 	$(SELF_LD) $(call so,bin/vpp/vpp.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vpp
 	$(SELF_LD) $(call so,$(VCCD_SRC) $(server_SRC) ld/ld.c ld/objcopy.c platform/darwin/ldmacho.c) $(SELF_PP) $(SELF_LEX) $(SELF_AS) -o $(SO)/vccd
 	$(SELF_LD) $(call so,bin/vasm/vasm.c) $(SELF_AS) -o $(SO)/vasm
-	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) -o $(SO)/lextest
+	$(SELF_LD) $(call so,bin/lextest/lextest.c port/darwin/pmc.c) $(SELF_LEX) $(call so,$(FAIL_SRC)) -o $(SO)/lextest
 	$(SELF_LD) $(SO)/ld-main.o $(call so,$(DIGEST_SRC)) $(SO)/ld-objcopy.o $(SO)/platform-darwin-ldmacho.o -o $(SO)/vlink
 	$(SELF_LD) $(call so,bin/vcc/shim.c) -o $(SO)/vcc
 
@@ -272,13 +273,13 @@ $(FUZZ_OUT):
 	mkdir -p $@
 
 $(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) $(FAIL_SRC) -o $@
 
 $(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) $(FAIL_SRC) -o $@
 
 $(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) $(FAIL_SRC) -o $@
 
 # replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz
