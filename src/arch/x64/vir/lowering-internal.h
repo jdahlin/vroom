@@ -10,7 +10,7 @@
 #include "vir/layout.h"
 
 typedef struct x64_vir_context {
-	ecx *context;
+	codegen_context *context;
 	vir_function *function;
 	vir_alloc_out *allocation;
 	int64_t *slot, *spill;

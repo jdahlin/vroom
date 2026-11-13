@@ -4,15 +4,15 @@
  * em_double_unary(e, n) returns the inner operand node, or 0.  Only at -O1 and up.  Used by the
  * shared walker, arm64's expression code and wasm's emitter, which then generate the operand alone.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
-VPRIV uint32_t em_double_unary(ecx *e, uint32_t n)
+VPRIV uint32_t em_double_unary(codegen_context *e, uint32_t n)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const node *x = N(n), *inner, *operand;
 	uint64_t size;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_UNARY ||
+	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_UNARY ||
 	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
 		return 0;
 	inner = N(x->a);
@@ -20,8 +20,8 @@ VPRIV uint32_t em_double_unary(ecx *e, uint32_t n)
 		return 0;
 	operand = N(inner->a);
 	if (AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(inner->ty) || AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(operand->ty) ||
-	    !is_integer(c, x->ty) || em_bitint(c, x->ty))
+	    !codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty))
 		return 0;
-	size = tsize(c, x->ty);
+	size = codegen_type_size(c, x->ty);
 	return size == 4 || size == 8 ? inner->a : 0;
 }

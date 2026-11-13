@@ -1,14 +1,14 @@
 /* The pre-IR emitted as VIR instructions. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
 
 /* pre-IR value v in VIR (constants made on first use) */
-static uint32_t virbuild_to_vir_value(ecx *e, uint32_t v)
+static uint32_t virbuild_to_vir_value(codegen_context *e, uint32_t v)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_preir_insn *q;
 
 	v = virbuild_value_resolve(V, v);
@@ -31,9 +31,9 @@ static uint32_t virbuild_to_vir_value(ecx *e, uint32_t v)
 
 static uint32_t virbuild_to_vir_block(virbuild_context *V, uint32_t b) { return V->blocks[b].final_block; }
 
-VPRIV bool virbuild_to_vir_insn_emit(ecx *e, uint32_t i, uint32_t b)
+VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	vir_function *f = &V->f;
 	vir_insn in = V->insns[i].insn;
 	const vir_opcode_info *oi = &vir_opcode_table[in.op];

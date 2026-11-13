@@ -37,7 +37,7 @@ enum {
 
 typedef struct virbuild_pass {
 	const char *name;	/* stable; -fvir-passes and the statistics use it */
-	bool (*run)(ecx *e);	/* returns whether it changed anything; a failure is virbuild_fail */
+	bool (*run)(codegen_context *e);	/* returns whether it changed anything; a failure is virbuild_fail */
 	uint8_t needs;		/* PIR_*: facts it reads */
 	uint8_t makes;		/* PIR_*: facts it computes */
 	uint8_t keeps;		/* PIR_*: the facts still valid after it; the others are cleared */
@@ -46,14 +46,14 @@ typedef struct virbuild_pass {
 				   virbuild_pass_vir_run; run is NULL then, and the names agree */
 } virbuild_pass;
 
-/* (the switch -fvir-passes fills, virbuild_pass_switch, is the emitter's: emitimpl.h) */
+/* (the switch -fvir-passes fills, virbuild_pass_switch, is the code generator's: codegen-internal.h) */
 
 /* pass-table.c */
 VPRIV const virbuild_pass *virbuild_pass_list(uint32_t *n);
-VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p);
-VPRIV bool virbuild_pass_step_instrumented(ecx *e, uint32_t i, uint32_t *valid);
-VPRIV void virbuild_pass_note(emitter *E, uint32_t row, uint64_t instructions);
-VPRIV void virbuild_pass_stats_print(emitter *E);
+VPRIV bool virbuild_pass_step(codegen_context *e, const virbuild_pass *p);
+VPRIV bool virbuild_pass_step_instrumented(codegen_context *e, uint32_t i, uint32_t *valid);
+VPRIV void virbuild_pass_note(codegen_unit *E, uint32_t row, uint64_t instructions);
+VPRIV void virbuild_pass_stats_print(codegen_unit *E);
 /* the rows of virbuild_pass_note that are not passes: the whole build (walk, passes, to-vir,
    canon) and the lowering, so that a pass's share of either can be computed; the
    instructions spent timing the passes inside are taken off */
@@ -61,12 +61,12 @@ VPRIV void virbuild_pass_stats_print(emitter *E);
 #define VIRBUILD_PASS_ROW_LOWER(n) ((n) + 1)
 
 /* pipeline.c */
-VPRIV void virbuild_blocks_seal(ecx *e);
-VPRIV void virbuild_slot_uses_compute(ecx *e);
-VPRIV bool virbuild_function_to_vir(ecx *e);
+VPRIV void virbuild_blocks_seal(codegen_context *e);
+VPRIV void virbuild_slot_uses_compute(codegen_context *e);
+VPRIV bool virbuild_function_to_vir(codegen_context *e);
 
 /* preir-check.c: the pre-IR's invariants (preir.h, quality-vir-build.md section 2) as far as
    the facts in `valid` allow; NULL when they hold, else the first broken one (in buf) */
-VPRIV const char *virbuild_preir_check(ecx *e, uint32_t valid, char *buf, size_t n);
+VPRIV const char *virbuild_preir_check(codegen_context *e, uint32_t valid, char *buf, size_t n);
 
 #endif

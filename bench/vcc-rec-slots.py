@@ -14,17 +14,17 @@ typedef struct { uint32_t id; int64_t off; uint32_t size; } test_access;
 static uint32_t seed = 0x11223344;
 static unsigned next(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
 static bool intersects(test_access a, test_access b) { return a.off < b.off+b.size && b.off < a.off+a.size; }
-static void check(em_slot_cells *s, test_access *a, unsigned n, unsigned escaped)
+static void check(record_slot_cells *s, test_access *a, unsigned n, unsigned escaped)
 {
     for (unsigned single=0;single<2;single++) {
-    assert(em_slot_begin(s, 9));
+    assert(record_slot_begin(s, 9));
     for (unsigned k=0;k<n;k++) {
-        if (single) em_slot_collect(s,a[k].id,a[k].off,a[k].size);
-        else em_slot_access(s,a[k].id,a[k].off,a[k].size);
+        if (single) record_slot_collect(s,a[k].id,a[k].off,a[k].size);
+        else record_slot_access(s,a[k].id,a[k].off,a[k].size);
     }
-    for (unsigned id=1;id<9;id++) if (escaped & (1u<<id)) em_slot_escape(s,id);
-    if (!single) for (unsigned k=0;k<n;k++) em_slot_detail(s,a[k].id,a[k].off,a[k].size);
-    assert(em_slot_finish(s));
+    for (unsigned id=1;id<9;id++) if (escaped & (1u<<id)) record_slot_escape(s,id);
+    if (!single) for (unsigned k=0;k<n;k++) record_slot_detail(s,a[k].id,a[k].off,a[k].size);
+    assert(record_slot_finish(s));
     for (unsigned k=0;k<n;k++) {
         if (!a[k].id) continue;
         bool bad=false;
@@ -32,18 +32,18 @@ static void check(em_slot_cells *s, test_access *a, unsigned n, unsigned escaped
             bool different=a[j].off!=a[k].off || a[j].size!=a[k].size;
             if ((!a[j].id || (a[j].id==a[k].id && different)) && intersects(a[k],a[j])) bad=true;
         }
-        unsigned cell=em_slot_find(s,a[k].id,a[k].off,a[k].size);
+        unsigned cell=record_slot_find(s,a[k].id,a[k].off,a[k].size);
         assert(cell && cell<s->count);
-        assert(!!(s->flags[cell]&EM_SLOT_BAD)==bad);
-        assert(!!(s->flags[cell]&EM_SLOT_ESCAPED)==!!(escaped&(1u<<a[k].id)));
+        assert(!!(s->flags[cell]&RECORD_SLOT_BAD)==bad);
+        assert(!!(s->flags[cell]&RECORD_SLOT_ESCAPED)==!!(escaped&(1u<<a[k].id)));
         for (unsigned j=0;j<k;j++) if (a[j].id && a[j].id!=a[k].id)
-            assert(cell!=em_slot_find(s,a[j].id,a[j].off,a[j].size));
+            assert(cell!=record_slot_find(s,a[j].id,a[j].off,a[j].size));
     }
     }
 }
 int main(void)
 {
-    em_slot_cells s={0};
+    record_slot_cells s={0};
     /* Offset reuse is not allocation identity. Adjacent cells do not overlap.
      * Width changes and containment invalidate all intersecting exact cells.
      * An observable (ID 0) test_access poisons even a cell with no surviving load.
@@ -66,11 +66,11 @@ int main(void)
     test_access poison[]={ {1,4,4},{2,8,4},{0,0,1},{0,0,1},
                            {0,0,8},{0,0,8},{0,8,1},{0,8,1} };
     check(&s,poison,sizeof(poison)/sizeof(*poison),0);
-    assert(s.nw == 3);
+    assert(s.write_count == 3);
     check(&s,explicit,sizeof(explicit)/sizeof(*explicit),(1u<<7)|(1u<<8));
-    assert(em_slot_find(&s,3,16,8)==0);
-    assert(em_slot_find(&s,2,-16,4)==0);
-    assert(em_slot_find(&s,99,0,8)==0);
+    assert(record_slot_find(&s,3,16,8)==0);
+    assert(record_slot_find(&s,2,-16,4)==0);
+    assert(record_slot_find(&s,99,0,8)==0);
     /* Randomized, bounded oracle also exercises capacity reuse and changes
      * between one-range and multi-range allocations over repeated functions.
      */
@@ -86,43 +86,43 @@ int main(void)
         }
         check(&s,a,48,next()&0x1fe);
     }
-    assert(em_slot_begin(&s,2));
-    assert(!em_slot_finish(&s));
-    em_slot_access(&s,0,0,8);
-    assert(!em_slot_finish(&s));
-    assert(em_slot_begin(&s,2));
-    em_slot_access(&s,1,INT64_MAX,8);
-    assert(!em_slot_finish(&s));
-    assert(em_slot_begin(&s,2));
-    em_slot_access(&s,2,0,8);
-    assert(!em_slot_finish(&s));
-    assert(em_slot_begin(&s,2));
-    em_slot_access(&s,1,0,8);
-    em_slot_access(&s,1,8,8);
-    em_slot_detail(&s,1,INT64_MAX,8);
-    assert(!em_slot_finish(&s));
-    assert(!em_slot_begin(&s,0));
-    assert(!em_slot_begin(&s,0x10001));
-    assert(em_slot_begin(&s,2));
-    em_slot_collect(&s,2,0,8); /* invalid ID must not index a[2] */
-    assert(!s.valid && !em_slot_finish(&s));
-    assert(em_slot_begin(&s,2));
-    em_slot_collect(&s,1,INT64_MAX,8);
+    assert(record_slot_begin(&s,2));
+    assert(!record_slot_finish(&s));
+    record_slot_access(&s,0,0,8);
+    assert(!record_slot_finish(&s));
+    assert(record_slot_begin(&s,2));
+    record_slot_access(&s,1,INT64_MAX,8);
+    assert(!record_slot_finish(&s));
+    assert(record_slot_begin(&s,2));
+    record_slot_access(&s,2,0,8);
+    assert(!record_slot_finish(&s));
+    assert(record_slot_begin(&s,2));
+    record_slot_access(&s,1,0,8);
+    record_slot_access(&s,1,8,8);
+    record_slot_detail(&s,1,INT64_MAX,8);
+    assert(!record_slot_finish(&s));
+    assert(!record_slot_begin(&s,0));
+    assert(!record_slot_begin(&s,0x10001));
+    assert(record_slot_begin(&s,2));
+    record_slot_collect(&s,2,0,8); /* invalid ID must not index a[2] */
+    assert(!s.valid && !record_slot_finish(&s));
+    assert(record_slot_begin(&s,2));
+    record_slot_collect(&s,1,INT64_MAX,8);
     assert(!s.valid);
-    assert(em_slot_begin(&s,2));
-    em_slot_collect(&s,1,0,0);
+    assert(record_slot_begin(&s,2));
+    record_slot_collect(&s,1,0,0);
     assert(!s.valid);
-    assert(em_slot_begin(&s,2));
-    em_slot_collect(&s,0,INT64_MAX,1);
+    assert(record_slot_begin(&s,2));
+    record_slot_collect(&s,0,INT64_MAX,1);
     assert(!s.valid);
-    assert(em_slot_begin(&s,2));
-    em_slot_collect(&s,1,-8,8);
-    em_slot_collect(&s,1,-8,8); /* duplicates before the transition */
-    em_slot_collect(&s,1,0,8);
-    em_slot_collect(&s,1,-8,8); /* first range repeated after transition */
-    assert(em_slot_finish(&s));
-    assert(em_slot_find(&s,1,-8,8) && em_slot_find(&s,1,0,8));
-    free(s.a); free(s.c); free(s.w); free(s.wend); free(s.flags);
+    assert(record_slot_begin(&s,2));
+    record_slot_collect(&s,1,-8,8);
+    record_slot_collect(&s,1,-8,8); /* duplicates before the transition */
+    record_slot_collect(&s,1,0,8);
+    record_slot_collect(&s,1,-8,8); /* first range repeated after transition */
+    assert(record_slot_finish(&s));
+    assert(record_slot_find(&s,1,-8,8) && record_slot_find(&s,1,0,8));
+    free(s.allocations); free(s.cells); free(s.writes); free(s.write_ends); free(s.flags);
     return 0;
 }
 '''
@@ -144,8 +144,8 @@ def main():
         subprocess.run([str(binary)], check=True, timeout=10)
         if args.check_mutation:
             implementation=(Path(R)/'src/codegen/rec/slots.c').read_text()
-            implementation=implementation.replace('#include "../emitimpl.h"',
-                '#include "'+str(Path(R)/'src/codegen/emitimpl.h')+'"')
+            implementation=implementation.replace('#include "../codegen-internal.h"',
+                '#include "'+str(Path(R)/'src/codegen/codegen-internal.h')+'"')
             mutations = [
                 ('streaming first-range', implementation.replace('if (before == 1)', 'if (false)')),
                 ('poison width', implementation.replace(' && s->w[s->nw - 1].size == size', '')),

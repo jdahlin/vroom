@@ -45,23 +45,23 @@ typedef struct virbuild_address { uint32_t base; bool slot; int64_t off; } virbu
 VPRIV void virbuild_use_count_increment(virbuild_context *V, virbuild_simplify_state *S, uint32_t v);
 VPRIV void virbuild_use_count_decrement(virbuild_context *V, virbuild_simplify_state *S, uint32_t v);
 VPRIV bool virbuild_value_integer_constant(const virbuild_context *V, uint32_t v, int64_t *k);
-VPRIV uint32_t virbuild_simplify_undefined_value(ecx *e, virbuild_simplify_state *S, uint32_t ty);
-VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r);
+VPRIV uint32_t virbuild_simplify_undefined_value(codegen_context *e, virbuild_simplify_state *S, uint32_t ty);
+VPRIV bool virbuild_insn_simplify(codegen_context *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r);
 VPRIV bool virbuild_opcode_is_commutative(uint32_t op);
 
 /* value-numbering.c */
 VPRIV virbuild_value_entry *virbuild_value_table_lookup(virbuild_simplify_state *S, const virbuild_value_entry *x);
-VPRIV void virbuild_block_values_number(ecx *e, virbuild_simplify_state *S_, uint32_t b);
+VPRIV void virbuild_block_values_number(codegen_context *e, virbuild_simplify_state *S_, uint32_t b);
 
 /* load-forwarding.c */
 VPRIV void virbuild_address_decompose(virbuild_context *V, uint32_t a, virbuild_address *A);
-VPRIV void virbuild_far_load_init(ecx *e, virbuild_simplify_state *S);
+VPRIV void virbuild_far_load_init(codegen_context *e, virbuild_simplify_state *S);
 VPRIV virbuild_value_entry *virbuild_far_load_find(virbuild_context *V, virbuild_simplify_state *S, uint32_t q, const virbuild_address *A, bool *ok);
 
 /* cfg.c */
-VPRIV void virbuild_block_dominators_compute(ecx *e, virbuild_simplify_state *S);
+VPRIV void virbuild_block_dominators_compute(codegen_context *e, virbuild_simplify_state *S);
 
 /* simplify.c */
-VPRIV void virbuild_function_simplify(ecx *e);
+VPRIV void virbuild_function_simplify(codegen_context *e);
 
 #endif

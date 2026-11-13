@@ -1,5 +1,5 @@
 /* vcc code generator: printer: records -> assembly text */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* ---------------- printer: records -> assembly text ---------------- */
 
@@ -350,7 +350,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		vtext_string_append(b, "\tadrp\t");
 		reg(b, i->rd, 1);
 		vtext_string_append(b, ", ");
-		ref_off(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->ref, i->off);
 		vtext_char_append(b, '\n');
 		return;
 	case I_ADDLO:
@@ -359,7 +359,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		vtext_string_append(b, ", ");
 		reg(b, i->rn, 1);
 		vtext_string_append(b, ", :lo12:");
-		ref_off(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->ref, i->off);
 		vtext_char_append(b, '\n');
 		return;
 	case I_LDLO: case I_STLO:
@@ -370,20 +370,20 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		vtext_string_append(b, ", [");
 		reg(b, i->rn, 1);
 		vtext_string_append(b, ", :lo12:");
-		ref_off(c, b, i->ref, i->off);
+		codegen_reference_offset_append(c, b, i->ref, i->off);
 		vtext_string_append(b, "]\n");
 		return;
 	case I_LDGOT:
 		vtext_string_append(b, "\tadrp\t");
 		reg(b, i->rd, 1);
 		vtext_string_append(b, ", :got:");
-		ref_name(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->ref);
 		vtext_string_append(b, "\n\tldr\t");
 		reg(b, i->rd, 1);
 		vtext_string_append(b, ", [");
 		reg(b, i->rd, 1);
 		vtext_string_append(b, ", :got_lo12:");
-		ref_name(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->ref);
 		vtext_string_append(b, "]\n");
 		return;
 	case I_JTE:
@@ -437,7 +437,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 		vtext_string_append(b, i->op == I_TAIL ? "\tb\t" : "\tbl\t");
 		size_t at = b->n;
 
-		ref_name(c, b, i->ref);
+		codegen_reference_name_append(c, b, i->ref);
 		if (reg_like(b->p + at, b->n - at)) {
 			/* "bl b1" is a register operand to the assembler (llvm-mc too): quote it */
 			size_t n = b->n - at;
@@ -495,7 +495,7 @@ VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw
 
 		for (int k = 0; q[k + 1]; k++) {
 			vtext_string_append(b, q[k]);
-			ref_name(c, b, i->ref);
+			codegen_reference_name_append(c, b, i->ref);
 		}
 		for (int k = 0; q[k]; k++)
 			if (!q[k + 1])

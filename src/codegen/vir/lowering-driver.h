@@ -14,7 +14,7 @@
 #ifndef VCC_VIR_LOWERING_DRIVER_H
 #define VCC_VIR_LOWERING_DRIVER_H
 
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 #include "vir/layout.h"
 
 typedef struct virbuild_lowering_target {
@@ -67,8 +67,8 @@ typedef struct virbuild_lowering {
 	/* an instruction at which the block's lowering stops (a sibling call left the ret: arm64), none when *skip_at is 0; NULL: never */
 	const uint32_t *skip_at;
 	/* -g: a line-table row at the next record, called at each block and wherever f->locations starts a run; NULL: none */
-	void (*row)(ecx *e, uint32_t loc);
-	ecx *row_e;
+	void (*row)(codegen_context *e, uint32_t loc);
+	codegen_context *row_e;
 } virbuild_lowering;
 
 /* the chases, the layout, then each block in it that is not chased away, then after_blocks */
@@ -78,6 +78,6 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b);
 /* an edge's block: its label, then the edge's moves (the caller ends it with a jump) */
 VPRIV void virbuild_lower_edge_block(const virbuild_lowering *d, uint32_t label, uint32_t g);
 /* callee (a symbol's address) returns twice: setjmp and the like */
-VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee);
+VPRIV bool virbuild_call_returns_twice(codegen_context *e, const vir_insn *callee);
 
 #endif

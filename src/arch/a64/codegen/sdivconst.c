@@ -1,14 +1,14 @@
 /* Signed constant division: explicit signed high product and truncation to zero. */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
-VPRIV bool a64_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r)
+VPRIV bool a64_sdivconst_ok(codegen_context *e, codegen_value a, const em_sdivconst_recipe *r)
 {
-	unsigned available = NTEMP - (unsigned)__builtin_popcount((e->live | e->resv) & ((1u << NTEMP) - 1));
-	unsigned needed = (a.k != V_REG) + 1 + (r->add || r->remainder);
+	unsigned available = CODEGEN_TEMPORARY_COUNT - (unsigned)__builtin_popcount((e->temporaries_in_use | e->temporaries_reserved) & ((1u << CODEGEN_TEMPORARY_COUNT) - 1));
+	unsigned needed = (a.kind != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
 	return available >= needed;
 }
 
-VPRIV val a64_sdivconst(ecx *e, val a, const em_sdivconst_recipe *r)
+VPRIV codegen_value a64_sdivconst(codegen_context *e, codegen_value a, const em_sdivconst_recipe *r)
 {
 	int x = r->bits == 64, n = toreg(e, &a);
 	int q = r->add || r->remainder ? treg(e) : n;

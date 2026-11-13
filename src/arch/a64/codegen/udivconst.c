@@ -2,18 +2,18 @@
  * At most 12 instructions for unsigned32, 14 for unsigned64, including
  * normalization/constants and remainder (64-bit constants need up to four).
  * Unsigned32 recipes without correction merge extraction and final shift. */
-#include "../../../codegen/emitimpl.h"
+#include "../../../codegen/codegen-internal.h"
 
 /* One magic/divisor register plus a distinct quotient for correction/rem.
  * Include materializing a lazy address; never provoke an allocator retry. */
-VPRIV bool a64_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r)
+VPRIV bool a64_udivconst_ok(codegen_context *e, codegen_value a, const em_udivconst_recipe *r)
 {
-	unsigned available = NTEMP - (unsigned)__builtin_popcount((e->live | e->resv) & ((1u << NTEMP) - 1));
-	unsigned needed = (a.k != V_REG) + 1 + (r->add || r->remainder);
+	unsigned available = CODEGEN_TEMPORARY_COUNT - (unsigned)__builtin_popcount((e->temporaries_in_use | e->temporaries_reserved) & ((1u << CODEGEN_TEMPORARY_COUNT) - 1));
+	unsigned needed = (a.kind != CODEGEN_VALUE_REGISTER) + 1 + (r->add || r->remainder);
 	return available >= needed;
 }
 
-VPRIV val a64_udivconst(ecx *e, val a, const em_udivconst_recipe *r)
+VPRIV codegen_value a64_udivconst(codegen_context *e, codegen_value a, const em_udivconst_recipe *r)
 {
 	int x = r->bits == 64;
 	int n = toreg(e, &a);

@@ -1,6 +1,6 @@
 /* The walker's lowering interface for calls, parameters and returns, and the start and end of a function. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -8,28 +8,28 @@
 /* ---------------- calls ---------------- */
 
 /* the classification for arm64 (the signature's groups): scalars only for now */
-VPRIV void virbuild_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed)
+VPRIV void virbuild_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed)
 {
-	cc *c = e->c;
-	uint64_t size = tsize(c, t);
+	cc *c = e->compile_context;
+	uint64_t size = codegen_type_size(c, t);
 	int k = KIND(c, t);
 
 	memset(a, 0, sizeof *a);
 	a->size = size;
-	a->align = talign(c, t) > 8 ? talign(c, t) : 8;
-	a->unnamed = unnamed;
-	if (is_record(c, t) || is_array(c, t) || is_vec(c, t) || is_wide(c, t) || k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_FLOAT128 ||
+	a->align = codegen_type_alignment(c, t) > 8 ? codegen_type_alignment(c, t) : 8;
+	a->is_unnamed = unnamed;
+	if (codegen_type_is_record(c, t) || codegen_type_is_array(c, t) || codegen_type_is_vector(c, t) || codegen_type_is_wide(c, t) || k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_FLOAT128 ||
 	    k == AST_TYPE_FLOAT16 || k == AST_TYPE_BFLOAT16 || size > 8)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_argument_or_result));
-	a->n = 1;
-	a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
+	a->eightbyte_count = 1;
+	a->classes[0] = a->classes[1] = codegen_type_is_float(c, t) ? WALK_ARGUMENT_SSE : WALK_ARGUMENT_INTEGER;
 }
 
-static uint32_t virbuild_call_group_pack(const wkarg *a, uint32_t *w)
+static uint32_t virbuild_call_group_pack(const walk_argument *a, uint32_t *w)
 {
-	uint32_t pc = a->cls[0] == WA_SSE ? (a->size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+	uint32_t pc = a->classes[0] == WALK_ARGUMENT_SSE ? (a->size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
-	w[0] = VIR_GROUP_WORD0(VIR_GROUP_REG, 1, pc, 0, 0, 0, a->unnamed ? VIR_GROUP_UNNAMED : 0);
+	w[0] = VIR_GROUP_WORD0(VIR_GROUP_REG, 1, pc, 0, 0, 0, a->is_unnamed ? VIR_GROUP_UNNAMED : 0);
 	w[1] = VIR_GROUP_WORD1(a->size, 0);	/* (the size: Apple packs stack arguments) */
 	return pc;
 }
@@ -37,9 +37,9 @@ static uint32_t virbuild_call_group_pack(const wkarg *a, uint32_t *w)
 static uint32_t virbuild_pass_class_type(uint32_t pc) { return pc == VIR_CLASS_F32 ? VIR_TYPE_F32 : pc == VIR_CLASS_F64 ? VIR_TYPE_F64 : VIR_TYPE_I64; }
 
 /* a slot word's value: the store table's, else a load */
-static uint32_t virbuild_call_word_load(ecx *e, int64_t off, uint32_t ty)
+static uint32_t virbuild_call_word_load(codegen_context *e, int64_t off, uint32_t ty)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	int64_t rel;
 	uint32_t slot = virbuild_slot_find(e, off, 8, &rel);
 
@@ -59,10 +59,10 @@ static uint32_t virbuild_call_word_load(ecx *e, int64_t off, uint32_t ty)
 	}
 }
 
-static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool variadic, ast_qualified_type rt, uint32_t *rpc)
+static uint32_t virbuild_call_signature_make(codegen_context *e, const walk_argument *a, int n, bool variadic, ast_qualified_type rt, uint32_t *rpc)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 	uint32_t o = V->extra_count;
 
 	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 3 + 2 * (uint32_t)n);
@@ -71,7 +71,7 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 		V->extra[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->extra[o + 2] = 0;
 		*rpc = 0;
 	} else {
-		wkarg r;
+		walk_argument r;
 
 		virbuild_classify(e, rt, &r, false);
 		*rpc = virbuild_call_group_pack(&r, &V->extra[o + 1]);
@@ -82,22 +82,22 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 	return o;
 }
 
-VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt)
+VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_value *fn, const walk_argument *a, int n, bool variadic, const walk_argument *r, ast_qualified_type rt)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 	uint32_t callee, sig, rpc, o, v;
 	uint32_t *w;
 
 	if (r)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
 	for (int k = 0; k < n; k++)
-		if (a[k].mem || a[k].n != 1)
+		if (a[k].is_in_memory || a[k].eightbyte_count != 1)
 			virbuild_fail(e, VIRBUILD_FAILURE(record_argument));
 	if (fn) {
 		callee = virbuild_walker_value_get(e, fn, VIR_TYPE_PTR);
-		if (fn->k == V_REG)
-			virbuild_tfree(e, fn->r);
+		if (fn->kind == CODEGEN_VALUE_REGISTER)
+			virbuild_tfree(e, fn->register_number);
 	} else {
 		callee = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
 	}
@@ -107,7 +107,7 @@ VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bo
 	V->extra_count += 1 + (uint32_t)n;
 	V->extra[o] = (uint32_t)n;
 	for (int k = 0; k < n; k++) {
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t x = virbuild_call_word_load(e, a[k].slot, virbuild_pass_class_type(pc));
 
 		w = &V->extra[o + 1 + k];
@@ -116,68 +116,68 @@ VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bo
 	v = virbuild_insn_append(e, VIR_OP_CALL, rpc ? virbuild_pass_class_type(rpc) : VIR_TYPE_VOID, 0, callee, sig, o);
 	virbuild_store_table_clear(e, true);
 	if (!rpc)
-		return vconst(0);
+		return codegen_value_constant(0);
 	if (rpc != VIR_CLASS_INT) {
 		int q = virbuild_ftreg(e);
 
 		virbuild_register_write(e, q, v);
-		return (val){ .k = V_REG, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 	{
-		int q = virbuild_treg(e), size = wk_size(c, rt);
-		bool sgn = wk_signed(c, rt);
+		int q = virbuild_treg(e), size = walk_type_size(c, rt);
+		bool sgn = walk_type_is_signed(c, rt);
 
-		if (is_ptr(c, rt))
+		if (codegen_type_is_pointer(c, rt))
 			v = virbuild_value_convert(e, v, VIR_TYPE_PTR);
 		virbuild_register_write(e, q, v);
 		if (size == 4 && !sgn)
 			virbuild_register_write(e, q, virbuild_value_convert(e, v, VIR_TYPE_I32));
 		else if (size < 8)
 			virbuild_ext(e, q, size, sgn);
-		return (val){ .k = V_REG, .r = (uint8_t)q };
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)q };
 	}
 }
 
-VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
+VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
-	const node *body = N(c->syms[e->wk->fsym].body);
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
+	const node *body = N(c->syms[e->walk_state->function_symbol].body);
 
 	if (r)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
-	if (variadic && !DARWIN(c))
+	if (variadic && !CODEGEN_IS_DARWIN(c))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_function));
 	uint32_t pv0 = V->insn_count;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		ast_qualified_type ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
-		if (a[k].mem || a[k].n != 1)
+		if (a[k].is_in_memory || a[k].eightbyte_count != 1)
 			virbuild_fail(e, VIRBUILD_FAILURE(record_parameter));
-		if (virbuild_insn_append(e, VIR_OP_PARAM, pc == VIR_CLASS_INT && is_ptr(c, ty) ? VIR_TYPE_PTR : virbuild_pass_class_type(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
+		if (virbuild_insn_append(e, VIR_OP_PARAM, pc == VIR_CLASS_INT && codegen_type_is_pointer(c, ty) ? VIR_TYPE_PTR : virbuild_pass_class_type(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
 			virbuild_fail(e, VIRBUILD_FAILURE(parameters));
 	}
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		ast_qualified_type ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
+		uint32_t pc = a[k].classes[0] == WALK_ARGUMENT_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t v = pv0 + (uint32_t)k;
-		lval home;
+		codegen_lvalue home;
 		int q;
 
 		q = pc == VIR_CLASS_INT ? virbuild_treg(e) : virbuild_ftreg(e);
 		virbuild_register_write(e, q, v);
-		if (pc == VIR_CLASS_INT && wk_size(c, ty) == 4)
+		if (pc == VIR_CLASS_INT && walk_type_size(c, ty) == 4)
 			virbuild_register_write(e, q, virbuild_value_convert(e, v, VIR_TYPE_I32));	/* (the low half is the int; an i32 for the walker) */
-		else if (pc == VIR_CLASS_INT && wk_size(c, ty) < 4)
-			virbuild_ext(e, q, wk_size(c, ty), wk_signed(c, ty));
+		else if (pc == VIR_CLASS_INT && walk_type_size(c, ty) < 4)
+			virbuild_ext(e, q, walk_type_size(c, ty), walk_type_is_signed(c, ty));
 		if (virbuild_local(e, sym, &home)) {
-			virbuild_store(e, q, &home, pc == VIR_CLASS_INT ? wk_size(c, ty) : (int)a[k].size);
+			virbuild_store(e, q, &home, pc == VIR_CLASS_INT ? walk_type_size(c, ty) : (int)a[k].size);
 		} else {
-			lval s = { .k = L_FRAME, .off = a[k].slot, .align = 8 };
+			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = a[k].slot, .align = 8 };
 
 			virbuild_store(e, q, &s, 8);
 		}
@@ -187,31 +187,31 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 	{
 		uint32_t rpc;
 
-		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->wk->rty, &rpc);
+		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->walk_state->return_type, &rpc);
 	}
 }
 
-VPRIV void virbuild_ret(ecx *e, val *v, ast_qualified_type t, uint32_t lbl)
+VPRIV void virbuild_ret(codegen_context *e, codegen_value *v, ast_qualified_type t, uint32_t lbl)
 {
-	virbuild_context *V = e->vw;
-	cc *c = e->c;
+	virbuild_context *V = e->vir_builder;
+	cc *c = e->compile_context;
 
 	if (v) {
 		uint32_t x;
 
-		if (is_flt(c, t)) {
+		if (codegen_type_is_float(c, t)) {
 			x = virbuild_walker_value_get(e, v, virbuild_float_type(e, t));
 		} else {
-			int size = wk_size(c, t);
-			bool sgn = wk_signed(c, t);
+			int size = walk_type_size(c, t);
+			bool sgn = walk_type_is_signed(c, t);
 
-			if (v->k == V_CONST) {
-				int64_t k = (int64_t)v->i;
+			if (v->kind == CODEGEN_VALUE_CONSTANT) {
+				int64_t k = (int64_t)v->integer;
 
 				if (size < 8)
 					k = sgn ? (int64_t)((uint64_t)k << (64 - 8 * size)) >> (64 - 8 * size) :
 						  (int64_t)((uint64_t)k & ((1ull << (8 * size)) - 1));
-				x = virbuild_constant_integer(e, is_ptr(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64, k);
+				x = virbuild_constant_integer(e, codegen_type_is_pointer(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64, k);
 			} else {
 				int q = virbuild_toreg(e, v, size);
 
@@ -219,7 +219,7 @@ VPRIV void virbuild_ret(ecx *e, val *v, ast_qualified_type t, uint32_t lbl)
 					virbuild_ext(e, q, size, sgn);
 				else if (size == 4)
 					virbuild_register_write(e, q, virbuild_register_read(e, q, VIR_TYPE_I32));
-				x = virbuild_register_read(e, q, is_ptr(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64);
+				x = virbuild_register_read(e, q, codegen_type_is_pointer(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64);
 				virbuild_tfree(e, q);
 			}
 		}
@@ -231,7 +231,7 @@ VPRIV void virbuild_ret(ecx *e, val *v, ast_qualified_type t, uint32_t lbl)
 
 /* ---------------- the function ---------------- */
 
-VPRIV void virbuild_begin(ecx *e, uint32_t s)
+VPRIV void virbuild_begin(codegen_context *e, uint32_t s)
 {
 	virbuild_context *V = virbuild_context_get(e);
 
@@ -257,12 +257,12 @@ VPRIV void virbuild_begin(ecx *e, uint32_t s)
 	V->result_type = VIR_TYPE_VOID;
 	V->parameter_count = 0;
 	V->current_block = virbuild_block_new(e);
-	e->ndl = 0;
+	e->debug_row_count = 0;
 }
 
-VPRIV void virbuild_finish(ecx *e, uint32_t s)
+VPRIV void virbuild_finish(codegen_context *e, uint32_t s)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	(void)s;
 	{	/* the return block: ret, with the result if there is one */
@@ -284,9 +284,9 @@ VPRIV void virbuild_finish(ecx *e, uint32_t s)
 		virbuild_fail(e, V->failure_reason ? V->failure_reason : VIRBUILD_FAILURE(build_failed));
 }
 
-VPRIV void virbuild_ecx_free(ecx *e)
+VPRIV void virbuild_ecx_free(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 
 	if (!V)
 		return;
@@ -294,5 +294,5 @@ VPRIV void virbuild_ecx_free(ecx *e)
 	free(V->stores), free(V->locations), free(V->variable_types), free(V->variable_is_signed), free(V->predecessors), free(V->value_map), free(V->block_order), free(V->block_map);
 	free(V->lowering_slots), free(V->lowering_spills), free(V->lowering_labels), free(V->lowering_uses), free(V->lowering_edge_labels);
 	free(V);
-	e->vw = NULL;
+	e->vir_builder = NULL;
 }

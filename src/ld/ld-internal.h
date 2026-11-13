@@ -33,6 +33,7 @@
 
 #include "ld/ld.h"
 #include "arch/x64/reloc.h"
+#include "common/archive-reader.h"
 #include "common/buffer.h"
 #include "common/scoped-cleanup.h"
 #include "common/checked-arithmetic.h"
@@ -303,16 +304,12 @@ typedef struct { int first_output_section, last_output_section; bool load_addres
 /* an entry of the input-section-name cache: name -> its ld_input_section_description or LD_NONE */
 typedef struct { const char *name; uint32_t hash; uint32_t input_description; } ld_name_cache_entry;
 
-/* error output, the error count and limit, and the VLD_TIME=1 phase timer */
-struct ld_diagnostics {
-	FILE *error_stream;		/* ld_main's stream; written under ld_diagnostics_lock */
-	atomic_int error_count;		/* errors reported, also past the limit */
-	int error_limit;		/* --error-limit; 0: none */
-	bool last_was_multiline;	/* lld: a blank line after a multi-line diagnostic */
-	bool phase_timing;		/* VLD_TIME is set */
-	double phase_start_time;	/* seconds, CLOCK_MONOTONIC, at the last phase */
-	vperf phase_start_counters;	/* the main thread's counters at the last phase */
-	long phase_start_faults;	/* the process's minor faults at the last phase */
+/* the VLD_TIME=1 phase timer (the diagnostics, struct ld_diagnostics, are in ld/ld.h) */
+struct ld_phase_timing {
+	bool enabled;			/* VLD_TIME is set */
+	double start_time;		/* seconds, CLOCK_MONOTONIC, at the last phase */
+	vperf start_counters;		/* the main thread's counters at the last phase */
+	long start_faults;		/* the process's minor faults at the last phase */
 };
 
 /* output section addresses, file offsets and program headers */
@@ -510,6 +507,7 @@ struct ld_context {
 	struct ld_symbols symbols;
 	struct ld_script script;
 	struct ld_diagnostics diagnostics;
+	struct ld_phase_timing timing;
 	struct ld_layout layout;
 	struct ld_relocations relocations;
 	struct ld_relocatable relocatable;

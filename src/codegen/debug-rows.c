@@ -2,74 +2,74 @@
  * debug-rows.c: the line table of a function (-g): which source line, column and file each
  * instruction record belongs to.
  *
- * dbg_row is called by the lowering at each statement it wants a row for and attaches the current
+ * codegen_debug_row_add is called by the lowering at each statement it wants a row for and attaches the current
  * record index to the source location; rows for nothing emitted are dropped.  A pass that deletes or
- * moves records must call dbg_remap so the rows follow (the printers and optimisers do).  File
+ * moves records must call codegen_debug_rows_remap so the rows follow (the printers and optimisers do).  File
  * numbers are unit-wide and handed out under E->dmu, so the threads agree on them; the main file is
  * number 0, as in clang (MC maps `.file N` of the main file to 0).  Users: arm64's and x86-64's
  * direct emitters, and VIR's lowering driver (codegen/vir/lowering-driver.c) at each block and
  * each run of f->loc (x86-64 through x64_dbgrow).
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
 /* the .file number of a presumed file name (1-based; under dmu, shared by the threads) */
-static uint32_t dbg_file(ecx *e, const char *name, uint32_t len)
+static uint32_t codegen_debug_file_find(codegen_context *e, const char *name, uint32_t len)
 {
-	emitter *E = e->E;
+	codegen_unit *E = e->unit;
 	uint32_t f = 0;
 
-	const char *mf = E->o->dbg_name;
+	const char *mf = E->options->dbg_name;
 
-	if (e->dlname && e->dlnlen == len && !memcmp(e->dlname, name, len))
-		return e->dlfile;
+	if (e->debug_last_file_name && e->debug_last_file_name_length == len && !memcmp(e->debug_last_file_name, name, len))
+		return e->debug_last_file_number;
 	if (mf && strlen(mf) == len && !memcmp(mf, name, len))
 		return 0;	/* the main file is file 0 (as clang; MC maps a .file N of it to 0) */
-	pthread_mutex_lock(&E->dmu);
-	for (uint32_t i = 0; i < E->ndfile && !f; i++)
-		if (strlen(E->dfile[i]) == len && !memcmp(E->dfile[i], name, len))
+	pthread_mutex_lock(&E->debug_mutex);
+	for (uint32_t i = 0; i < E->debug_file_count && !f; i++)
+		if (strlen(E->debug_files[i]) == len && !memcmp(E->debug_files[i], name, len))
 			f = i + 1;
 	if (!f) {
-		if (E->ndfile == E->dfcap) {
-			E->dfcap = E->dfcap ? 2 * E->dfcap : 16;
-			E->dfile = realloc(E->dfile, E->dfcap * sizeof *E->dfile);
+		if (E->debug_file_count == E->debug_file_capacity) {
+			E->debug_file_capacity = E->debug_file_capacity ? 2 * E->debug_file_capacity : 16;
+			E->debug_files = realloc(E->debug_files, E->debug_file_capacity * sizeof *E->debug_files);
 		}
-		E->dfile[E->ndfile] = strndup(name, len);
-		f = ++E->ndfile;
+		E->debug_files[E->debug_file_count] = strndup(name, len);
+		f = ++E->debug_file_count;
 	}
-	pthread_mutex_unlock(&E->dmu);
-	e->dlname = name, e->dlnlen = len, e->dlfile = f;
+	pthread_mutex_unlock(&E->debug_mutex);
+	e->debug_last_file_name = name, e->debug_last_file_name_length = len, e->debug_last_file_number = f;
 	return f;
 }
 
-VPRIV bool dbg_where(ecx *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col)
+VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc, uint32_t *file, uint32_t *line, uint32_t *col)
 {
 	const char *name;
 	uint32_t len;
 
-	if (!pp_location_describe(e->c->p, loc, &name, &len, line, col) || !*line)
+	if (!pp_location_describe(e->compile_context->p, loc, &name, &len, line, col) || !*line)
 		return false;
-	*file = dbg_file(e, name, len);
+	*file = codegen_debug_file_find(e, name, len);
 	return true;
 }
 
-VPRIV void dbg_row(ecx *e, uint32_t loc)
+VPRIV void codegen_debug_row_add(codegen_context *e, uint32_t loc)
 {
 	uint32_t file, line, col;
 
-	if (!e->reach || !dbg_where(e, loc, &file, &line, &col))
+	if (!e->is_reachable || !codegen_debug_location_get(e, loc, &file, &line, &col))
 		return;
-	if (e->ndl && e->dl[e->ndl - 1].k >= e->nin)
-		e->ndl--;	/* nothing emitted for the previous one */
-	if (e->ndl == e->dlcap) {
-		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
-		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
+	if (e->debug_row_count && e->debug_rows[e->debug_row_count - 1].record_index >= e->record_count)
+		e->debug_row_count--;	/* nothing emitted for the previous one */
+	if (e->debug_row_count == e->debug_row_capacity) {
+		e->debug_row_capacity = e->debug_row_capacity ? 2 * e->debug_row_capacity : 256;
+		e->debug_rows = realloc(e->debug_rows, e->debug_row_capacity * sizeof *e->debug_rows);
 	}
-	e->dl[e->ndl++] = (struct dbgrow){ e->nin, file, line, col };
+	e->debug_rows[e->debug_row_count++] = (struct codegen_debug_row){ e->record_count, file, line, col };
 }
 
-VPRIV void dbg_remap(ecx *e, uint32_t *j, uint32_t k, uint32_t n)
+VPRIV void codegen_debug_rows_remap(codegen_context *e, uint32_t *j, uint32_t k, uint32_t n)
 {
 	/* compaction: record k (kept or dropped) is followed by new index n; rows at it move there */
-	while (*j < e->ndl && e->dl[*j].k <= k)
-		e->dl[(*j)++].k = n;
+	while (*j < e->debug_row_count && e->debug_rows[*j].record_index <= k)
+		e->debug_rows[(*j)++].record_index = n;
 }

@@ -1,6 +1,6 @@
 /* Two branches to a common destination become one. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -48,9 +48,9 @@ static bool virbuild_condition_is_chainable(virbuild_context *V, uint32_t v, con
 	}
 }
 
-VPRIV bool virbuild_conditions_merge(ecx *e)
+VPRIV bool virbuild_conditions_merge(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t ncnt = V->insn_count + V->block_order_count + 1, *cnt = calloc(ncnt, sizeof *cnt);
 	bool any = false, again = true;
 
@@ -99,7 +99,7 @@ VPRIV bool virbuild_conditions_merge(ecx *e)
 					 * value, not control flow).  Joining a plain branch pair costs the second compare
 					 * whenever the first decided alone, and pays only when the branches mispredict:
 					 * measured on sqlite, all: +0.4 % instructions, cycles unchanged (PLAN-vir.md). */
-					int mode = e->E->o->vir_aid.ccmp;
+					int mode = e->unit->options->vir_aid.ccmp;
 					uint32_t dn = 0;
 
 					if (mode == CC_CCMP_NONE)

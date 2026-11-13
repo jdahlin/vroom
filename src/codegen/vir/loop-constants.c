@@ -1,6 +1,6 @@
 /* Loop constants: what a loop computes each time round that costs instructions, made once in front of it (virbuild_loop_constants_pin). */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -14,8 +14,8 @@
  * -fhoist-loop-constants, on at -O3 */
 VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre)
 {
-	ecx *e = S->context;
-	virbuild_context *V = e->vw;
+	codegen_context *e = S->context;
+	virbuild_context *V = e->vir_builder;
 	uint32_t from[6], to[6], n = 0;
 
 	for (uint32_t i = 0; i < S->loop_block_count; i++)

@@ -19,7 +19,7 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
 		uint8_t *b = ld_file_map(ctx, p, &n);
 		if (!b)
 			continue;
-		if (n >= 8 && (!memcmp(b, "!<arch>\n", 8) || !memcmp(b, "!<thin>\n", 8))) {
+		if (varchive_format_detect(b, n) != VARCHIVE_FORMAT_NONE) {
 			if (lazy && !ctx->options.inputs.v[i].whole) {
 				uint32_t before = ctx->inputs.pending.n, c0 = ctx->inputs.lazy_candidates.n;
 

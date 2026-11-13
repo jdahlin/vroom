@@ -6,16 +6,16 @@
  * order.  Unsigned types of up to 8 bytes only (signed division needs a bias: sdivpow2.c).  Called by
  * the shared walker, arm64's arithmetic and wasm's emitter.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV bool em_divpow2(cc *c, ast_qualified_type ty, int *op, i128 *rhs)
 {
 	uint64_t d;
 
-	if ((*op != LEX_TOKEN_SLASH && *op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
-	    is_signed(c, ty) || em_bitint(c, ty) || !tsize(c, ty) || tsize(c, ty) > 8)
+	if ((*op != LEX_TOKEN_SLASH && *op != LEX_TOKEN_PERCENT) || !codegen_type_is_integer(c, ty) ||
+	    codegen_type_is_signed(c, ty) || codegen_type_is_bitint(c, ty) || !codegen_type_size(c, ty) || codegen_type_size(c, ty) > 8)
 		return false;
-	d = (uint64_t)em_trunc_to(c, *rhs, ty);
+	d = (uint64_t)codegen_integer_truncate(c, *rhs, ty);
 	if (!d || (d & (d - 1)))
 		return false;
 	if (*op == LEX_TOKEN_SLASH) {

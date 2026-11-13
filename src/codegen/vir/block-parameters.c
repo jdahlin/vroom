@@ -1,6 +1,6 @@
 /* Placeholder parameters: trivial ones removed, dead ones dropped. */
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -25,9 +25,9 @@ static uint32_t virbuild_parameter_trivial_value(virbuild_context *V, uint32_t p
 /* a parameter all of whose operands are one value (or itself) is that value.  A worklist
  * (Braun et al.'s tryRemoveTrivialPhi): removing one parameter rechecks only the
  * parameters that read it, so a nest of N loops costs O(N), not one sweep per level */
-VPRIV bool virbuild_parameters_trivial_remove(ecx *e)
+VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t np = V->insn_count, nedge = 0, nw = 0;
 	bool any = false;
 
@@ -133,9 +133,9 @@ static void virbuild_parameter_live_mark(virbuild_context *V, uint32_t *stk, uin
 	}
 }
 
-VPRIV void virbuild_parameters_dead_remove(ecx *e)
+VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	uint32_t *stk, n = 0;
 
 	VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity, V->insn_count + 1);

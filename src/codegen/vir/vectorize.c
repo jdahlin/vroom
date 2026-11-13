@@ -34,8 +34,8 @@
  * need it, lanes do not.
  */
 
-#define WK_PREFIX virbuild_
-#define LO_PREFIX virbuild_
+#define WALK_PREFIX virbuild_
+#define WALK_LOWER_PREFIX virbuild_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -51,7 +51,7 @@ static bool virbuild_vectorize_reject(virbuild_vectorize_state *S, const char *w
 
 static virbuild_vectorize_info *virbuild_vectorize_info_touch(virbuild_vectorize_state *S, uint32_t v)
 {
-	ecx *e = S->context;
+	codegen_context *e = S->context;
 
 	VIRBUILD_ARRAY_GROW(S->touched, S->touched_count, S->touched_capacity, 1);
 	S->touched[S->touched_count++] = v;
@@ -61,7 +61,7 @@ static virbuild_vectorize_info *virbuild_vectorize_info_touch(virbuild_vectorize
 /* v's record; a value from outside the loop gets one on first sight */
 static virbuild_vectorize_info *virbuild_vectorize_info_get(virbuild_vectorize_state *S, uint32_t v)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	static _Thread_local virbuild_vectorize_info bad;
 	virbuild_vectorize_info *x;
 	const virbuild_preir_insn *q;
@@ -126,7 +126,7 @@ static void virbuild_vectorize_info_opaque_set(virbuild_vectorize_state *S, uint
 	uint32_t ov = r->object_value;
 
 	*r = (virbuild_vectorize_info){ .kind = VIRBUILD_VECTORIZE_KIND_INV, .is_exact = 1, .use_count = r->use_count, .term_value = q, .term_factor = 1 };
-	if (S->context->vw->insns[q].insn.type == VIR_TYPE_PTR) {
+	if (S->context->vir_builder->insns[q].insn.type == VIR_TYPE_PTR) {
 		r->has_object = ok ? ok : VIRBUILD_VECTORIZE_OBJECT_PTR, r->object_value = ok ? ov : q;
 		if (!ok)
 			r->term_value = 0, r->term_factor = 0;
@@ -141,7 +141,7 @@ VPRIV bool virbuild_vectorize_insn_is_skipped(virbuild_context *V, uint32_t q)
 /* instruction q of the loop: its kind.  false: the loop is not vectorized */
 static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S, uint32_t q)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	vir_insn in = V->insns[q].insn;
 	const vir_opcode_info *oi = &vir_opcode_table[in.op];
 	uint32_t w[3] = { in.a, in.b, in.c };
@@ -392,7 +392,7 @@ static bool virbuild_vectorize_range_pair_add(virbuild_vectorize_state *S, uint3
  * check when the loop is entered */
 static bool virbuild_vectorize_dependences_check(virbuild_vectorize_state *S)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 
 	/* An indexed read is safe only when every written object is a distinct symbol. */
 	for (uint32_t i = 0; i < S->gather_count; i++) {
@@ -469,7 +469,7 @@ static uint32_t virbuild_vectorize_scalar_make(virbuild_vectorize_state *S, uint
 /* a copy of pure instruction or load v in block b, its operands through virbuild_vectorize_scalar_make */
 static uint32_t virbuild_vectorize_insn_clone(virbuild_vectorize_state *S, uint32_t v, uint32_t b, int mode)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	vir_insn in = V->insns[v].insn;
 	const vir_opcode_info *oi = &vir_opcode_table[in.op];
 	uint32_t w[3] = { in.a, in.b, in.c };
@@ -485,7 +485,7 @@ static uint32_t virbuild_vectorize_insn_clone(virbuild_vectorize_state *S, uint3
  * VPH, at the first iteration.  An invariant of the loop is made once, in VPH */
 static uint32_t virbuild_vectorize_scalar_make(virbuild_vectorize_state *S, uint32_t v, int mode)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	virbuild_vectorize_info *x;
 	uint32_t r;
 
@@ -560,7 +560,7 @@ static uint32_t virbuild_vectorize_mask_make(virbuild_vectorize_state *S, uint32
 
 static uint32_t virbuild_vectorize_mask_make(virbuild_vectorize_state *S, uint32_t v)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	vir_insn in;
 	uint32_t a, b, r;
 	virbuild_vectorize_info *x;
@@ -584,7 +584,7 @@ static uint32_t virbuild_vectorize_mask_make(virbuild_vectorize_state *S, uint32
 /* the i32 lanes of a widened value (VIRBUILD_VECTORIZE_KIND_W32, or a constant): what its trunc is */
 static uint32_t virbuild_vectorize_lanes_narrow(virbuild_vectorize_state *S, uint32_t v)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	virbuild_vectorize_info *x;
 	vir_insn in;
 	uint32_t a, b, c, r;
@@ -615,7 +615,7 @@ static uint32_t virbuild_vectorize_lane_expression_rebuild(virbuild_vectorize_st
 {
 	if (!*budget) return virbuild_vectorize_reject(S, "an indexed expression beyond the budget"), 0;
 	--*budget;
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	v = virbuild_value_resolve(V, v);
 	virbuild_vectorize_info *x = virbuild_vectorize_info_get(S, v);
 	vir_insn in = V->insns[v].insn;
@@ -653,7 +653,7 @@ static uint32_t virbuild_vectorize_lane_expression_rebuild(virbuild_vectorize_st
 /* Clone only the recurrence expression; independent work stays packed. */
 static uint32_t virbuild_vectorize_lane_recurrence_rebuild(virbuild_vectorize_state *S, uint32_t v, uint32_t lane, uint32_t *budget)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	v = virbuild_value_resolve(V, v);
 	for(uint32_t i=0;i<S->nfold;i++)if(v==S->fold[i].p)return S->fold[i].cur;
 	if (virbuild_vectorize_info_get(S, v)->kind != VIRBUILD_VECTORIZE_KIND_FOLD) return virbuild_vectorize_lane_expression_rebuild(S, v, lane, budget);
@@ -669,7 +669,7 @@ static uint32_t virbuild_vectorize_lane_recurrence_rebuild(virbuild_vectorize_st
 /* v's lanes */
 static uint32_t virbuild_vectorize_vector_make(virbuild_vectorize_state *S, uint32_t v)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	virbuild_vectorize_info *x;
 	vir_insn in;
 	uint32_t ty, vt, r = 0, a, b, c;
@@ -792,7 +792,7 @@ static uint32_t virbuild_vectorize_parameter_new(virbuild_vectorize_state *S, ui
  * reversed: a pointer of the vector body that steps vf * stride (contiguous reversed accesses use the lowest address) */
 static uint32_t virbuild_vectorize_address_make(virbuild_vectorize_state *S, uint32_t q, bool *rev)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	uint32_t a = virbuild_value_resolve(V, V->insns[q].insn.a), s;
 
 	*rev = virbuild_vectorize_info_get(S, a)->step == -(int64_t)S->esz;
@@ -812,7 +812,7 @@ static uint32_t virbuild_vectorize_address_make(virbuild_vectorize_state *S, uin
 /* [lo, hi): the bytes access x (virbuild_vectorize_range_pair_add's index) touches in the vector iterations; span = 4 * nv */
 static bool virbuild_vectorize_range_compute(virbuild_vectorize_state *S, uint32_t x, uint32_t span, uint32_t *lo, uint32_t *hi)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	uint32_t q = x >= 64 ? S->invariant_loads[x - 64] : S->accesses[x].insn, a = virbuild_value_resolve(V, V->insns[q].insn.a), s = virbuild_vectorize_scalar_make(S, a, VIRBUILD_VECTORIZE_MODE_T0);
 
 	if (!s)
@@ -841,14 +841,14 @@ static uint32_t virbuild_vectorize_parameter_new(virbuild_vectorize_state *S, ui
 {
 	uint32_t p = virbuild_parameter_new(S->context, b, 0, ty), w[3] = { x0, x1, x2 };
 
-	S->context->vw->insns[p].insn.b = virbuild_extra_append(S->context, w, 3);
+	S->context->vir_builder->insns[p].insn.b = virbuild_extra_append(S->context, w, 3);
 	return p;
 }
 
 static uint32_t virbuild_vectorize_block_new(virbuild_vectorize_state *S, uint32_t p0, uint32_t p1)
 {
-	ecx *e = S->context;
-	virbuild_context *V = e->vw;
+	codegen_context *e = S->context;
+	virbuild_context *V = e->vir_builder;
 	uint32_t b = virbuild_block_new(e), n = (p0 != VIRBUILD_BLOCK_NONE) + (p1 != VIRBUILD_BLOCK_NONE);
 
 	VIRBUILD_ARRAY_GROW(V->predecessors, V->predecessor_count, V->predecessor_capacity, 2);
@@ -864,14 +864,14 @@ static void virbuild_vectorize_block_terminate(virbuild_vectorize_state *S, uint
 {
 	uint32_t t = virbuild_preir_insn_add(S->context, op, VIR_TYPE_VOID, 0, x, y, z, b);
 
-	S->context->vw->blocks[b].terminator = t;
+	S->context->vir_builder->blocks[b].terminator = t;
 }
 
 /* nx = p + *K: adds and subtracts of constants on the way from parameter p to its next value.
  * A step that is a value from outside the loop counts as 1 and is noted in S->one */
 static bool virbuild_vectorize_step_chain_find(virbuild_vectorize_state *S, uint32_t p, uint32_t nx, int64_t *K, bool *nsw)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	uint32_t v = nx, none0 = S->none;
 
 	*K = 0, *nsw = true;
@@ -910,7 +910,7 @@ no:
  * is entered only when it starts below: the span's test) */
 static bool virbuild_vectorize_loop_test_is_unsigned_less(virbuild_vectorize_state *S, uint32_t p)
 {
-	virbuild_context *V = S->context->vw;
+	virbuild_context *V = S->context->vir_builder;
 	uint32_t t = V->blocks[S->header].terminator, c = virbuild_value_resolve(V, V->insns[t].insn.a), cc;
 
 	if (c >= S->value_count || V->insns[c].insn.op != VIR_OP_ICMP || V->insns[c].block != S->header)
@@ -938,8 +938,8 @@ static bool virbuild_vectorize_update_depends_on_parameter(virbuild_context *V, 
 
 static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 {
-	ecx *e = S->context;
-	virbuild_context *V = e->vw;
+	codegen_context *e = S->context;
+	virbuild_context *V = e->vir_builder;
 	uint32_t H = S->header, t = V->blocks[H].terminator, cond = virbuild_value_resolve(V, V->insns[t].insn.a), u, n, cc, d, cnt, cntn, nv, guard, z = 0;
 	bool incl;
 	int64_t c, ac;
@@ -1042,7 +1042,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 		 * scalar loop with a vector load in front.  Measured on arm64 (TSVC s314, s316: a
 		 * maximum by compare and select, nine times slower than the scalar loop); x86-64 is
 		 * left as its lowering was written. */
-		if (!st && !X86(S->context->c))
+		if (!st && !CODEGEN_IS_X64(S->context->compile_context))
 			return virbuild_vectorize_reject(S, "only an ordered reduction: nothing to pack");
 	}
 	for (uint32_t i = 0; i < S->reduction_count; i++)
@@ -1088,7 +1088,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 		return virbuild_vectorize_reject(S, "a step too large");
 
 	/* ---- build ---- */
-	e->curloc = V->insns[t].location;
+	e->current_location = V->insns[t].location;
 	S->preheader_block = virbuild_vectorize_block_new(S, S->predecessor, VIRBUILD_BLOCK_NONE);
 	S->vector_header_block = virbuild_vectorize_block_new(S, S->preheader_block, VIRBUILD_BLOCK_NONE);
 	S->vector_body_block = virbuild_vectorize_block_new(S, S->vector_header_block, VIRBUILD_BLOCK_NONE);
@@ -1347,8 +1347,8 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 /* the new blocks into the layout, in front of H */
 static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
 {
-	ecx *e = S->context;
-	virbuild_context *V = e->vw;
+	codegen_context *e = S->context;
+	virbuild_context *V = e->vir_builder;
 	const uint32_t nb[5] = { S->preheader_block, S->vector_header_block, S->vector_body_block, S->vector_exit_block, S->join_block };
 	uint32_t at = 0;
 
@@ -1363,18 +1363,18 @@ static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
 	V->block_order_count += 5;
 }
 
-VPRIV void virbuild_function_vectorize(ecx *e)
+VPRIV void virbuild_function_vectorize(codegen_context *e)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	virbuild_vectorize_state S = { .context = e, .value_count = V->insn_count };
-	uint32_t n0 = V->block_order_count, *hs, nh = 0, loc = e->curloc;
+	uint32_t n0 = V->block_order_count, *hs, nh = 0, loc = e->current_location;
 	char nm[100];
 
-	const cc_optimizations *on = &e->E->o->optimize;
+	const cc_optimizations *on = &e->unit->options->optimize;
 
 	/* the innermost loops: -fvectorize makes them vector loops, -fhoist-loop-constants makes
 	   their constants in front of them; neither with -mgeneral-regs-only (VIRBUILD_PASS_FLAG_VECTOR_GATE) */
-	if ((!on->vectorize && !on->hoist_loop_constants) || e->E->o->general_regs_only || !virbuild_is_enabled(e->E->o))
+	if ((!on->vectorize && !on->hoist_loop_constants) || e->unit->options->general_regs_only || !virbuild_is_enabled(e->unit->options))
 		return;
 	hs = malloc(((size_t)n0 + 1) * sizeof *hs);
 	if (!hs)
@@ -1432,8 +1432,8 @@ VPRIV void virbuild_function_vectorize(ecx *e)
 			else if (V->insns[V->blocks[S.predecessor].terminator].insn.op == VIR_OP_BR && V->insns[V->blocks[S.predecessor].terminator].insn.a == H)
 				virbuild_loop_constants_pin(&S, S.predecessor);
 		}
-		if (on->vectorize && e->E->o->vir_aid.vectorize_report) {
-			const vident *id = &vintern_ents[e->c->syms[e->wk->fsym].name];
+		if (on->vectorize && e->unit->options->vir_aid.vectorize_report) {
+			const vident *id = &vintern_ents[e->compile_context->syms[e->walk_state->function_symbol].name];
 
 			snprintf(nm, sizeof nm, "%.*s", (int)id->len, id->s);
 			fprintf(stderr, "vec: %s: loop b%u: %s%s\n", nm, H, done ? "vectorized" : "no: ", done ? "" : S.why ? S.why : "?");
@@ -1445,5 +1445,5 @@ VPRIV void virbuild_function_vectorize(ecx *e)
 		S.touched_count = 0;
 	}
 	free(hs), free(S.infos), free(S.in_loop), free(S.touched);
-	e->curloc = loc;
+	e->current_location = loc;
 }

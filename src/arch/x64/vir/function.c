@@ -98,11 +98,11 @@ static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
 		b,pred,v,reg,stored,decision);
 }
 
-VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
+VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char **why)
 {
-	virbuild_context *V = e->vw;
+	virbuild_context *V = e->vir_builder;
 	vir_function *f = &V->f;
-	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt;
+	bool spframe=e->unit->options->omit_frame_pointer && !e->unit->cleanups_disabled;
 	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
@@ -110,8 +110,8 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	vir_target_registers regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
-	if (e->E->o->sprot || x64_nosimd(e)) return false;
-	const attrs *attrs = sym_attrs(e->c, sym);
+	if (e->unit->options->sprot || x64_nosimd(e)) return false;
+	const attrs *attrs = codegen_symbol_attributes(e->compile_context, sym);
 	if (attrs && attrs->interrupt) { *why = VIRBUILD_FAILURE(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->constant_count; i++)
 		if (f->insns[i].op != VIR_OP_ICONST && f->insns[i].op != VIR_OP_FCONST &&
@@ -142,8 +142,8 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->loops)){*why=VIRBUILD_FAILURE(x64_loop_analysis);return false;}
 	/* -fvir-map, -fvir-probe, -fvir-map-function (doc/OPTIMIZATION.md) */
-	const cc_vir_aids *aid=&e->E->o->vir_aid;
-	const vident *name=&vintern_ents[e->c->syms[sym].name];
+	const cc_vir_aids *aid=&e->unit->options->vir_aid;
+	const vident *name=&vintern_ents[e->compile_context->syms[sym].name];
 	bool selected=!aid->map_function || (strlen(aid->map_function)==name->len && !memcmp(aid->map_function,name->s,name->len));
 	L.map=selected && aid->map;
 	L.probe=selected?(unsigned)aid->probe:0;
@@ -175,7 +175,7 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	if (!allocated) {
 		*why = VIRBUILD_FAILURE(x64_allocation_failed); snprintf(V->failure_detail, sizeof V->failure_detail, "%s", V->allocation.error_message); return false;
 	}
-	if (e->E->o->vir_aid.check) {
+	if (e->unit->options->vir_aid.check) {
 		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->allocation, &msg);
 		if (n) fprintf(stderr, "vir x86-64: allocation check: %.*s", (int)msg.n, msg.p ? (char *)msg.p : "");
@@ -188,35 +188,35 @@ VPRIV bool x64_vir_function_lower(ecx *e, uint32_t sym, const char **why)
 	L.slot = V->lowering_slots = x64_vir_array_grow(V->lowering_slots, &V->lowering_slot_capacity, f->slot_count + 1, sizeof *L.slot);
 	L.spill = V->lowering_spills = x64_vir_array_grow(V->lowering_spills, &V->lowering_spill_capacity, V->allocation.spill_count + 1, sizeof *L.spill);
 	L.label = V->lowering_labels = x64_vir_array_grow(V->lowering_labels, &V->lowering_label_capacity, f->block_count + 1, sizeof *L.label);
-	e->vtry = true; e->vfail = NULL;
-	if (_setjmp(e->bail)) {
-		*why = e->vfail ? e->vfail : VIRBUILD_FAILURE(x64_lowering_failed);
-		e->vtry = false;
+	e->vir_try = true; e->vir_failure_reason = NULL;
+	if (_setjmp(e->bail_jump)) {
+		*why = e->vir_failure_reason ? e->vir_failure_reason : VIRBUILD_FAILURE(x64_lowering_failed);
+		e->vir_try = false;
 		return false;
 	}
-	e->reach = true;
+	e->is_reachable = true;
 	x64_begin(e, sym);
-	e->x64->spframe=spframe;
-	e->x64->interrupt = e->x64->nlreg = 0;
-	e->wk->sdepth = e->wk->ntu = e->wk->ntf = 0;
-	e->wk->foff = 0; e->wk->falign = 16; e->wk->nlabel = 0;
-	e->wk->spneed = false; e->wk->canary = 0;
-	for (uint32_t k = 0; k < f->slot_count; k++) L.slot[k] = wk_slot(e, f->slot[k].size ?: 1, f->slot[k].align);
-	for (uint32_t k = 0; k < V->allocation.spill_count; k++) L.spill[k] = wk_slot(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
-	for (uint32_t b = 0; b < f->block_count; b++) L.label[b] = wk_newlabel(e);
-	L.ret = wk_newlabel(e);
+	e->x64_context->spframe=spframe;
+	e->x64_context->interrupt = e->x64_context->nlreg = 0;
+	e->walk_state->statement_depth = e->walk_state->temporary_slot_in_use_count = e->walk_state->temporary_slot_free_count = 0;
+	e->walk_state->frame_offset = 0; e->walk_state->frame_alignment = 16; e->walk_state->label_count = 0;
+	e->walk_state->stack_pointer_needed = false; e->walk_state->canary = 0;
+	for (uint32_t k = 0; k < f->slot_count; k++) L.slot[k] = walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);
+	for (uint32_t k = 0; k < V->allocation.spill_count; k++) L.spill[k] = walk_slot_temporary(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
+	for (uint32_t b = 0; b < f->block_count; b++) L.label[b] = walk_label_new(e);
+	L.ret = walk_label_new(e);
 	uint32_t *layout=V->lowering_layout=x64_vir_array_grow(V->lowering_layout,&V->lowering_layout_capacity,5*f->block_count,sizeof(uint32_t));
 	L.order=layout;L.position=layout+f->block_count;L.rotations=layout+2*f->block_count;L.chase=layout+3*f->block_count;L.loops=&V->loops;
 	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->allocation, .lp=&V->loops,
 		.order=L.order, .position=L.position, .rotation=L.rotations, .chase=L.chase, .path=layout+4*f->block_count,
-		.block_label=L.label, .optimize=!e->E->noopt, .rotate=e->E->o->optimize.rotate_loops,
-		.row=e->E->o->debug?x64_dbgrow:NULL, .row_e=e };
+		.block_label=L.label, .optimize=!e->unit->cleanups_disabled, .rotate=e->unit->options->optimize.rotate_loops,
+		.row=e->unit->options->debug?x64_dbgrow:NULL, .row_e=e };
 
 	for (int r = 0; r < 16; r++)
 		if (V->allocation.callee[0] >> r & 1) x64_csused(e, r);
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
 	x64_finish(e, sym);
-	e->vtry = false;
+	e->vir_try = false;
 	*why = NULL; return true;
 }

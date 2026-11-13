@@ -4,8 +4,8 @@
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L, const char *why)
 {
-	L->context->vfail = why;	/* (in ecx: L is not volatile across the jump) */
-	_longjmp(L->context->bail, 3);
+	L->context->vir_failure_reason = why;	/* (in ecx: L is not volatile across the jump) */
+	_longjmp(L->context->bail_jump, 3);
 }
 
 VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz)
@@ -22,7 +22,7 @@ VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz)
 /* constant v into general register rd */
 static void a64_vir_constant_materialize(a64_vir_context *L, uint32_t v, int rd)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	const vir_insn *k = &L->function->insns[v];
 
 	switch (k->op) {
@@ -145,7 +145,7 @@ static void a64_vir_register_rematerialize(a64_vir_context *L, uint8_t dst, uint
  * that instructions retired minus an unprobed run's is how often that kind executes.
  * Bits: 0 reload, 1 remat, 2 move, 3 store (edits before an instruction); 4 remat, 5 store,
  * 6 reload, 7 move (on an edge).  An upper bound: the nop also stops the record folds. */
-#define A64_VIR_PROBE(bit) do { if (L->context->E->o->vir_aid.probe >> (bit) & 1) word(L->context, 0xd503201f); } while (0)
+#define A64_VIR_PROBE(bit) do { if (L->context->unit->options->vir_aid.probe >> (bit) & 1) word(L->context, 0xd503201f); } while (0)
 
 /* one allocator edit, before the instruction it is positioned at */
 VPRIV void vl_edit(a64_vir_context *L, const vir_edit *x)

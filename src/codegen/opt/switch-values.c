@@ -9,7 +9,7 @@
  * discards the queue (em_switch_values_reset) so regeneration does not duplicate tables.  Used through
  * adapters in walk/switch-values.c, arm64 and wasm.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 typedef struct svproof {
  cc *c;
@@ -24,8 +24,8 @@ typedef struct svproof {
 
 static bool sv_integer(cc *c, ast_qualified_type t)
 {
- uint64_t z = tsize(c, t);
- return is_integer(c,t) && !em_bitint(c,t) && !em_bigint(c,t) &&
+ uint64_t z = codegen_type_size(c, t);
+ return codegen_type_is_integer(c,t) && !codegen_type_is_bitint(c,t) && !codegen_type_is_bitint_big(c,t) &&
         !(T(c,t)->flags & AST_TYPE_FLAG_ATOMIC) && (z==1 || z==2 || z==4 || z==8);
 }
 
@@ -53,7 +53,7 @@ static bool sv_constant(svproof *p, uint32_t n, uint64_t *v)
  }
  cc_value cv;
  if (!cc_eval(c,n,&cv) || cv.kind!=CC_VALUE_INTEGER) return false;
- *v=(uint64_t)em_trunc_to(c,cv.i,x->ty);
+ *v=(uint64_t)codegen_integer_truncate(c,cv.i,x->ty);
  return true;
 }
 
@@ -78,7 +78,7 @@ static bool sv_terminal(svproof *p, uint32_t n, unsigned depth)
    const sym *s=&c->syms[lhs->a];
    ty=lhs->ty;
    if (s->kind!=AST_SYMBOL_VARIABLE || !s->depth || s->sc==AST_STORAGE_STATIC || s->sc==AST_STORAGE_EXTERN ||
-       (AST_QUALIFIED_TYPE_QUALIFIERS(ty)&AST_QUALIFIER_VOLATILE) || sym_attrs(c,lhs->a)->cleanup) return false;
+       (AST_QUALIFIED_TYPE_QUALIFIERS(ty)&AST_QUALIFIER_VOLATILE) || codegen_symbol_attributes(c,lhs->a)->cleanup) return false;
    destination=a->a;
    expr=a->b;
   } else {
@@ -111,7 +111,7 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
  if (n>0x0fffffffu || N(n)->op!=AST_NODE_SWITCH) return false;
  const node *sw=N(n), *body=N(sw->b);
  ast_qualified_type ct=N(sw->a)->ty;
- unsigned bits=(unsigned)tsize(c,ct)*8;
+ unsigned bits=(unsigned)codegen_type_size(c,ct)*8;
  if (body->op!=AST_NODE_BLOCK || body->c<7 || body->c>128 ||
      !sv_integer(c,ct) || (bits!=32 && bits!=64)) return false;
  svproof p={.c=c,.budget=128};
@@ -134,7 +134,7 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
  if (!p.have_default || p.assigned || p.pending_default || p.first!=p.n || p.n<4) return false;
  /* Sort copied intervals, retaining each result through the target field. */
  for (unsigned i=0;i<p.n;i++) p.cases[i].target=i;
- if (!em_switch_prepare(p.cases,p.n,bits,is_signed(c,ct))) return false;
+ if (!em_switch_prepare(p.cases,p.n,bits,codegen_type_is_signed(c,ct))) return false;
  i128 lo=p.cases[0].lo, hi=p.cases[p.n-1].hi;
  u128 span=(u128)hi-(u128)lo;
  if (span>=256) return false;
@@ -152,7 +152,7 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
  if (N(sw->a)->op==AST_NODE_NUMBER) return false;
  *r=(em_switch_values_recipe){.lo=lo,.fallback=p.fallback,.ty=p.ty,
   .destination=p.destination,.slots=(uint16_t)slots,.selector_bits=(uint8_t)bits,
-  .element_bytes=(uint8_t)tsize(c,p.ty),.is_return=p.is_return};
+  .element_bytes=(uint8_t)codegen_type_size(c,p.ty),.is_return=p.is_return};
  for (unsigned i=0;i<slots;i++) r->values[i]=p.fallback;
  for (unsigned i=0;i<p.n;i++) {
   unsigned a=(unsigned)((u128)p.cases[i].lo-(u128)lo);
@@ -170,7 +170,7 @@ struct em_switch_values_data {
  unsigned char data[];
 };
 
-VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_recipe *r)
+VPRIV bool em_switch_values_queue(codegen_context *e, uint32_t n, const em_switch_values_recipe *r)
 {
  size_t len=(size_t)r->slots*r->element_bytes;
  struct em_switch_values_data *t=malloc(sizeof *t+len);
@@ -185,7 +185,7 @@ VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_rec
  return true;
 }
 
-VPRIV void em_switch_values_reset(ecx *e)
+VPRIV void em_switch_values_reset(codegen_context *e)
 {
  while (e->switch_values) {
   struct em_switch_values_data *t=e->switch_values;
@@ -195,30 +195,30 @@ VPRIV void em_switch_values_reset(ecx *e)
 
 /* Called after function size/CFI/end_function, inside its existing chunk.
  * Retries discard the per-function queue before regeneration. */
-VPRIV void em_switch_values_emit(ecx *e)
+VPRIV void em_switch_values_emit(codegen_context *e)
 {
  for (struct em_switch_values_data *t=e->switch_values;t;t=t->next) {
-  uint32_t ref=REF(RK_TABLE,t->node);
+  uint32_t ref=CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE,t->node);
   unsigned p2=t->bytes==8?3:t->bytes==4?2:t->bytes==2?1:0;
-  size_t len=(size_t)t->slots*t->bytes, h=it_open(e,IT_TEXT);
+  size_t len=(size_t)t->slots*t->bytes, h=codegen_item_open(e,CODEGEN_ITEM_TEXT);
   if (WASM(e->c)) {
-   vtext_string_append(&e->out,"\t.section\t.rodata.");ref_name(e->c,&e->out,ref);
+   vtext_string_append(&e->out,"\t.section\t.rodata.");codegen_reference_name_append(e->compile_context,&e->out,ref);
    vtext_string_append(&e->out,",\"\",@\n");
   } else vtext_string_append(&e->out,"\t.section\t.rodata,\"a\",@progbits\n");
   vtext_format_append(&e->out,"\t.p2align\t%u\n",p2);
-  it_close(e,h);
-  if (direct(e)) {
-   h=it_open(e,IT_LABEL);memcpy(it_room(e,4),&ref,4);it_close(e,h);
-   h=it_open(e,IT_BYTES);memcpy(it_room(e,len),t->data,len);it_close(e,h);
+  codegen_item_close(e,h);
+  if (codegen_context_is_direct(e)) {
+   h=codegen_item_open(e,CODEGEN_ITEM_LABEL);memcpy(codegen_item_room_need(e,4),&ref,4);codegen_item_close(e,h);
+   h=codegen_item_open(e,CODEGEN_ITEM_BYTES);memcpy(codegen_item_room_need(e,len),t->data,len);codegen_item_close(e,h);
   } else {
-   ref_name(e->c,&e->out,ref);vtext_string_append(&e->out,":\n");
+   codegen_reference_name_append(e->compile_context,&e->out,ref);vtext_string_append(&e->out,":\n");
    for (size_t i=0;i<len;i++) {
     vtext_string_append(&e->out,"\t.byte\t");
     vtext_unsigned_append(&e->out,t->data[i]);
     vtext_char_append(&e->out,'\n');
    }
    if (WASM(e->c)) {
-    vtext_string_append(&e->out,"\t.size\t");ref_name(e->c,&e->out,ref);
+    vtext_string_append(&e->out,"\t.size\t");codegen_reference_name_append(e->compile_context,&e->out,ref);
     vtext_format_append(&e->out,", %llu\n",(unsigned long long)len);
    }
   }

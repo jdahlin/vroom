@@ -1,5 +1,5 @@
 /* A fixed-size direct-mapped table; collisions discard opportunities only. */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 _Static_assert((EM_VALUES_SLOTS & (EM_VALUES_SLOTS - 1)) == 0, "value table size must be a power of two");
 

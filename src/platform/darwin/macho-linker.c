@@ -64,18 +64,15 @@ typedef struct {
 typedef struct { uint32_t string_index; uint8_t type, section_number; uint16_t description; uint64_t value; } macho_nlist;
 typedef struct { int32_t address; uint32_t info; } macho_relocation;
 
-static FILE *macho_error_stream;
-static int macho_error_count;
+/* the link's diagnostics: at most 20 errors, without lld's announcement */
+static struct ld_diagnostics macho_diagnostics;
 
+static void macho_error_report(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void macho_error_report(const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	if (macho_error_count++ < 20) {
-		fputs("vld: error: ", macho_error_stream);
-		vfprintf(macho_error_stream, fmt, ap);
-		fputc('\n', macho_error_stream);
-	}
+	ld_diagnostic_report(&macho_diagnostics, "error", fmt, ap);
 	va_end(ap);
 }
 
@@ -83,13 +80,13 @@ static void *macho_alloc(size_t n)
 {
 	void *p = calloc(1, n ? n : 1);
 	if (!p) {
-		fputs("vld: out of memory\n", macho_error_stream);
+		fputs("vld: out of memory\n", macho_diagnostics.error_stream);
 		exit(1);
 	}
 	return p;
 }
 #define MACHO_VECTOR_GROW(v, n, cap) do { if ((n) >= (cap)) { (cap) = (cap) ? 2 * (cap) : 16; \
-	(v) = realloc((v), (cap) * sizeof(*(v))); if (!(v)) { fputs("vld: out of memory\n", macho_error_stream); exit(1); } } } while (0)
+	(v) = realloc((v), (cap) * sizeof(*(v))); if (!(v)) { fputs("vld: out of memory\n", macho_diagnostics.error_stream); exit(1); } } } while (0)
 
 static inline uint32_t macho_u32_load(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static inline void macho_u32_store(void *p, uint32_t v) { memcpy(p, &v, 4); }
@@ -675,7 +672,7 @@ static void macho_buffer_append(macho_buffer *b, const void *d, size_t n)
 		b->capacity = (b->length + n) * 2 + 256;
 		b->bytes = realloc(b->bytes, b->capacity);
 		if (!b->bytes) {
-			fputs("vld: out of memory\n", macho_error_stream);
+			fputs("vld: out of memory\n", macho_diagnostics.error_stream);
 			exit(1);
 		}
 	}
@@ -726,7 +723,6 @@ static void macho_state_reset(void)
 	macho_imports = macho_got_globals = macho_stub_globals = NULL;
 	macho_object_count = macho_output_section_count = macho_output_section_capacity = macho_global_count = macho_global_capacity = macho_fixup_count = macho_fixup_capacity = macho_import_count = macho_import_capacity = macho_got_count = macho_stub_count = 0;
 	macho_text_section = macho_stubs_section = macho_got_section = MACHO_NONE;
-	macho_error_count = 0;
 }
 
 static uint32_t macho_section_index_find(uint32_t osi, const uint32_t *order, uint32_t n)
@@ -751,8 +747,8 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
 
 static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 {
-	macho_error_stream = err ? err : stderr;
 	macho_state_reset();
+	macho_diagnostics = (struct ld_diagnostics){ .error_stream = err ? err : stderr, .program = "vld", .error_limit = 20 };
 	const char *out = "a.out";
 	const char **inputs = macho_alloc((size_t)argc * sizeof(char *));
 	uint32_t ninputs = 0;
@@ -786,7 +782,7 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 	}
 	if (!ninputs)
 		macho_error_report("no input files");
-	if (macho_error_count) {
+	if (atomic_load(&macho_diagnostics.error_count)) {
 		free(inputs);
 		return 1;
 	}
@@ -817,7 +813,7 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 		if (got != o->size || !macho_object_read(o))
 			macho_error_report("%s: cannot read", inputs[i]);
 	}
-	if (macho_error_count)
+	if (atomic_load(&macho_diagnostics.error_count))
 		goto fail;
 
 	/* output sections: __text and __stubs first in __TEXT, __got alone in __DATA_CONST */
@@ -941,13 +937,13 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 	uint32_t gmain = macho_global_find_or_add("_main", false);
 	if (gmain == MACHO_NONE || macho_globals[gmain].object == MACHO_NONE)
 		macho_error_report("undefined symbol: _main");
-	if (macho_error_count)
+	if (atomic_load(&macho_diagnostics.error_count))
 		goto fail;
 
 	/* scan relocations: stubs, GOT slots, pointer fixups (addresses come later) */
 	/* (pass 0 needs no addresses except for fixups, which are redone after layout) */
 	macho_relocations_process(0, NULL);
-	if (macho_error_count)
+	if (atomic_load(&macho_diagnostics.error_count))
 		goto fail;
 	macho_output_sections[macho_stubs_section].size = 12ull * macho_stub_count;
 	macho_output_sections[macho_got_section].size = 8ull * macho_got_count;
@@ -1009,20 +1005,18 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 		} else {
 			segfilesz[seg] = segpresent[seg] && fend > segstart[seg] ? macho_value_align_up(fend - segstart[seg], MACHO_PAGE_SIZE) : 0;
 		}
-		if (!segfilesz[seg] && seg > SEG_TEXT)
-			segfile[seg] = 0;
-		fileoff = segfile[seg] + segfilesz[seg];
 		if (seg == SEG_TEXT)
 			fileoff = segfilesz[seg];
+		else if (!segfilesz[seg])
+			segfile[seg] = 0;	/* no bytes in the file: the next segment starts where this one would have */
+		else
+			fileoff = segfile[seg] + segfilesz[seg];
 		if (!segpresent[seg]) {
 			segend[seg] = segstart[seg];
 			addr = segstart[seg];
 		}
 	}
 	segstart[SEG_LINKEDIT] = macho_value_align_up(addr, MACHO_PAGE_SIZE);
-	for (int seg = SEG_DATA_CONST; seg < SEG_LINKEDIT; seg++)
-		if (segpresent[seg] && segfilesz[seg])
-			fileoff = segfile[seg] + segfilesz[seg];
 	segfile[SEG_LINKEDIT] = macho_value_align_up(fileoff, MACHO_PAGE_SIZE);
 
 	/* final symbol addresses */
@@ -1056,7 +1050,7 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 		if (!(macho_fixups[k].value >> 63) && (macho_fixups[k].value < MACHO_IMAGE_BASE || macho_fixups[k].value - MACHO_IMAGE_BASE >= (1ull << 36)))
 			macho_error_report("pointer fixup target 0x%llx out of range", (unsigned long long)macho_fixups[k].value);
 	}
-	if (macho_error_count)
+	if (atomic_load(&macho_diagnostics.error_count))
 		goto fail;
 
 	/* ---- __LINKEDIT ---- */
@@ -1430,7 +1424,7 @@ static int macho_link_locked(int argc, char **argv, int dirfd, FILE *err)
 	free(order);
 	free(syms);
 	free(sorted);
-	if (macho_error_count) {
+	if (atomic_load(&macho_diagnostics.error_count)) {
 		free(img);
 		goto fail;
 	}
