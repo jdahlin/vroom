@@ -526,3 +526,31 @@ proof).  Sites by file (old file names; find them in the step 1 files):
 | `frontend/diag/diag.c`, `diagout.c`, `diagtext.c` | `vbuf_*` calls (49, 123, 63) | 235 | `vbuffer_*` (renamed by WORK-common's script; nothing to do unless step 4 of WORK-common changed the failure mode: then check each `diag_finish` write) |
 
 No LEB128, byte load/store, string table or file mapping in this module.
+
+## Status
+
+Step 1 (split) done, on branch `quality/diag-step1`.  Where the file map did not
+fit the code, or the step needed a decision:
+- `git mv diag.c diag/record.c` was not used: record.c is one of the smaller
+  pieces (236 lines of 1875), so blame would not follow a rename anyway.  All
+  pieces are new files cut by line range from the old three.
+- Separated `static` functions became `VPRIV` with prototypes in `ppimpl.h`:
+  `jstr`, `jcstr`, `html_page`, `sarif_log`, `dsink_records`, `level_of`,
+  `kid_add`, `kid_after`, `render_clang`, `track_str`, `render_narr`, `lstart`,
+  `lend`, `fix_in_macro`, `macro_adjust`.
+- `lvname` (static array in record.c) is read by render-clang.c: the one use
+  became `pp_diag_level(d->level)`, the same value, so no shared array.
+- `DC_OLD`/`DC_NEW` moved with their only user, `type-diff.c`.
+- The comment of `diagout.c` (lines 1-22, JSON and SARIF both) opens
+  output-json.c whole; step 3 rewrites it per file.
+- `gen-diagids.py --check` says out of date on origin/main too (before this
+  step); not touched.  First differences when regenerated (needs `work/clang-td`):
+  added `err_builtin_invalid_arg_type`, `err_cannot_open_file`,
+  `err_invalid_mask_type_size`; dropped `err_enumerator_wrapped`,
+  `err_return_block_has_expr`.  Someone should run `src/tools/gen-diagids.py`.
+- The tree-wide rename (#159) touched the old files only in `common/buf.h` ->
+  `common/buffer.h`; applied to the new files by sed because
+  `rename-table.py` refuses on a tree where the table is already applied.
+- `bench/vcc-same.py` reports 7 `-E` differences (arm_neon.h, stdatomic users):
+  only the absolute path of `src/headers/` in the line markers, which differs
+  because base and new are built in different directories.
