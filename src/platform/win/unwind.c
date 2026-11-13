@@ -130,6 +130,7 @@ const char *coff_seh_epilogue(ElfObj *o, int start, uint32_t label)
 	if (!f) return SEH_NO_FRAME;
 	ElfSym *fn = elf_symp(o, f->function);
 	if (start) {
+		f->in_epilogue = 1;	/* (also after the error, as MC) */
 		if (!f->prolog_end) {
 			snprintf(o->coff->message, sizeof o->coff->message,
 				 "starting epilogue (.seh_startepilogue) before prologue has ended (.seh_endprologue) in %.*s",

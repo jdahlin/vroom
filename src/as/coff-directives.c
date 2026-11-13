@@ -3,8 +3,8 @@
  * .linkonce, .secrel32, .secidx, .rva, .symidx, .weak (a weak external), .file "name", and the .seh_*
  * family, whose unwind information the object layer builds (platform/win/unwind.c: each directive
  * defines a temporary label here and passes it on).  ELF's own directives (.size, .hidden, .ident,
- * .previous, ...) are unknown for COFF, as in MC; .cfi_* is refused (MC writes a DWARF .eh_frame for it,
- * which vcc does not, and clang never emits it for this target).
+ * .previous, ...) are unknown for COFF, as in MC.  (.cfi_* is the common code's: call-frame-information.c
+ * writes MC's COFF form of .eh_frame.)
  *
  * as_directive_dispatch calls as_directive_coff first for a COFF object (a->object->format); it returns
  * 1 when it took the directive (its result in *rc), 0 to let the common directives run.  The state is
@@ -289,7 +289,7 @@ static int as_coff_seh_register(as_context *a, const char **pp, const char *e, i
 	if (p < e && as_char_is_digit((unsigned char)*p)) {
 		int64_t v;
 		if (as_expression_absolute_parse(a, &p, e, &v)) return -1;
-		if (v < 0 || v > (xmm ? 31 : 15)) return as_error_report(a, "incorrect register number for use with this directive");
+		if (v < 0 || v > 31) return as_error_report(a, "incorrect register number for use with this directive");
 		*reg = (unsigned)v; *pp = p;
 		return 0;
 	}
@@ -302,7 +302,7 @@ static int as_coff_seh_register(as_context *a, const char **pp, const char *e, i
 	if (n[0] == 'r' && as_char_is_digit((unsigned char)n[1])) {
 		int k = atoi(n + 1);
 		size_t dl = strspn(n + 1, "0123456789");
-		if (k >= 8 && k <= 15) r = k, cls = n[1 + dl] ? 2 : 0;
+		if (k >= 8 && k <= 31) r = k, cls = n[1 + dl] ? 2 : 0;
 	}
 	if (!strncmp(n, "xmm", 3) && as_char_is_digit((unsigned char)n[3])) { int k = atoi(n + 3); if (k <= 31) r = k, cls = 1; }
 	if (cls < 0 && t.length && t.length < 6) cls = 2;	/* eax, ymm0, ...: a register of another class */
@@ -408,6 +408,8 @@ static int as_coff_seh(as_context *a, as_text d, const char *p, const char *e)
 			if (as_expression_absolute_parse(a, &p, e, &off)) return -1;
 		}
 		if (as_coff_end_check(a, p, e)) return -1;
+		if (!xmm && reg >= 16)	/* (APX r16-r31: UNWIND_INFO version 3, MC) */
+			return as_error_report(a, ".seh_%.*s with an extended register requires unwind v3", (int)d.length, d.text);
 		uint32_t label = as_label_temporary_define(a);
 		if (SEH_IS("pushreg")) return as_coff_seh_result(a, coff_seh_push_reg(o, label, reg));
 		if (SEH_IS("setframe")) return as_coff_seh_result(a, coff_seh_set_frame(o, label, reg, (uint64_t)(uint32_t)off));
@@ -451,10 +453,6 @@ VPRIV int as_directive_coff(as_context *a, as_text w, const char *p, const char 
 			return 1;
 		}
 		return 0;
-	}
-	if (n > 4 && !memcmp(d, "cfi_", 4)) {
-		*rc = as_error_report(a, "unsupported: .cfi_* directives for a COFF target (Windows x64 unwinds through .seh_*)");
-		return 1;
 	}
 	/* ELF's directives: unknown in MC's COFF parser */
 	if (IS("size") || IS("hidden") || IS("protected") || IS("internal") || IS("local") || IS("symver") || IS("weakref") ||

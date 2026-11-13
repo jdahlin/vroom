@@ -4,7 +4,8 @@
   bench/vas-obj.py [DIR...]     default: src/test/vas-obj
 
 Each file is assembled by clang (--target=aarch64-linux-gnu; x86-*.s files
---target=x86_64-linux-gnu, vasm --target=x86_64) and by vasm;
+--target=x86_64-linux-gnu, vasm --target=x86_64; win64-*.s files
+--target=x86_64-w64-mingw32, COFF objects, both sides) and by vasm;
 the objects must be byte-identical.  On a mismatch llvm-readelf shows the
 difference.  A file clang rejects must fail in vasm too, with clang's first
 errors at the same file:lines.  Directives, symbol tables and relocations, <1 s.
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VAS = os.environ.get('VAS', f'{BUILD}/vasm')
-CL = llvm('clang'); RE = llvm('llvm-readelf')
+CL = llvm('clang'); RE = llvm('llvm-readelf'); RO = llvm('llvm-readobj')
 
 def main():
     dirs = sys.argv[1:] or [f'{R}/src/test/vas-obj']
@@ -24,9 +25,10 @@ def main():
         for f in files:
             c, v = f'{t}/c.o', f'{t}/v.o'
             x86 = os.path.basename(f).startswith('x86-')
-            p = subprocess.run([CL, '--target=x86_64-linux-gnu' if x86 else '--target=aarch64-linux-gnu', '-c', f, '-o', c],
-                               capture_output=True, text=True)
-            q = subprocess.run([VAS] + (['--target=x86_64'] if x86 else []) + [f, '-o', v], capture_output=True, text=True)
+            win = os.path.basename(f).startswith('win64-')
+            tgt = '--target=x86_64-w64-mingw32' if win else '--target=x86_64-linux-gnu' if x86 else '--target=aarch64-linux-gnu'
+            p = subprocess.run([CL, tgt, '-c', f, '-o', c], capture_output=True, text=True)
+            q = subprocess.run([VAS] + ([tgt] if win else ['--target=x86_64'] if x86 else []) + [f, '-o', v], capture_output=True, text=True)
             if p.returncode:    # an error test: the same file:line of every error
                 import re
                 ce = re.findall(r'^(\S+?):(\d+):\d+: (?:error|note)', p.stderr, re.M)
@@ -40,8 +42,9 @@ def main():
                 bad += 1
                 print('DIFF', os.path.basename(f), q.stderr.strip()[:300])
                 if not p.returncode and not q.returncode:
-                    a = subprocess.run([RE, '-a', c], capture_output=True, text=True).stdout.splitlines()
-                    b = subprocess.run([RE, '-a', v], capture_output=True, text=True).stdout.splitlines()
+                    show = [RO, '--file-headers', '--sections', '--symbols', '--relocs', '--unwind'] if win else [RE, '-a']
+                    a = subprocess.run(show + [c], capture_output=True, text=True).stdout.splitlines()
+                    b = subprocess.run(show + [v], capture_output=True, text=True).stdout.splitlines()
                     import difflib
                     for l in list(difflib.unified_diff(a, b, 'clang', 'vasm', lineterm='', n=0))[:30]: print('  ' + l)
             else: ok += 1
