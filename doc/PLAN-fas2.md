@@ -514,6 +514,42 @@ The final bootstrap reproduced all 47 objects and vpp. All 324 eligible native
 direct-object comparisons and 65 assembler fixtures passed. The kernel parity
 run reproduced the seven baseline assembly failures and passed all 494 C jobs.
 
+**SQLite self-hosted x86 code generation (2026-11-13).** DWARF call stacks
+traced the earlier strcmp samples to mnemonic lookup in x64_i_int during
+object replay. Checking the first character before the ALU and shift name
+comparisons avoids most calls. Clang inlined xo_reg into its caller, while
+vcc built a temporary 40-byte operand and copied it to the destination.
+Building the operand in place reduced the self-built routine from 224 to 132 bytes.
+
+| Function | Previous self-built bytes | New self-built bytes | New clang-built bytes |
+| --- | ---: | ---: | ---: |
+| x64_emit | 8,971 | 4,302 | 3,722 |
+| as_fragment_base | 1,542 | 633 | 418 |
+| lex_tokenize_mode | 41,393 | 35,486 | 11,312 |
+
+Passing the encoder's fixup value by address lets VIR allocate x64_emit
+(seven spills). Local-exec TLS lowering lets it allocate as_fragment_base
+(zero spills). The lexer still falls back on computed goto, but branching
+through __builtin_expect now removes the repeated setcc, zero extensions and
+stack traffic for its likely/unlikely tests. Frame-relative stores and
+32-bit immediate moves also reduce VIR's generated code.
+
+| Compiler | Median wall ms | Median CPU ms | User cycles, billions | User instructions, billions |
+| --- | ---: | ---: | ---: | ---: |
+| Previous clang-built | 179.0 | 178.84 | 0.716 | 1.563 |
+| Previous self-built | 285.2 | 295.43 | 1.328 | 3.581 |
+| New clang-built | 174.4 | 189.87 | 0.759 | 1.480 |
+| New self-built | 274.2 | 267.96 | 1.200 | 3.193 |
+
+The paired rerun used 428d07d1 as the baseline, the same SQLite source,
+flags, CPU pin, warmup and seven alternating runs described above. Wall and
+perf counters came from separate series. The wall-time ratio fell from 1.59
+to 1.57 and the CPU-time ratio from 1.65 to 1.41. Host load varied across
+series. Every timed compile produced the original object hash. In the final
+self-built profile strcmp accounted for 5.3% of user cycles, the lexer 3.3%,
+x64_emit 2.8% and x64_replay 2.2%. Both x64_replay and walk still fall back
+on aggregate calls or returns.
+
 ### Status 2.12 (2026-11-10): kernel build without clang, vroomd and lld
 Ported from the branch `claude/parallel-compiler-optimization-2bb32f` (2026-11-08) to main's layout.
 - **vld, shared objects (vDSO):** `PHDRS` (FILEHDR/PHDRS), `VERSION` script (version-local → STB_LOCAL), `.dynsym`/`.dynstr`/`.hash`/`.gnu.hash`/`.gnu.version{,_d}`/`.dynamic` in lld's order, `=fill`, `-n`; only for `-shared` with a script. The vDSO byte-identical with ld.lld 23 (except the `$d` locals, known). Without `PHDRS`, `SIZEOF_HEADERS` is 64.
