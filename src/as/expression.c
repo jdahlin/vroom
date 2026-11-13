@@ -21,7 +21,7 @@ VPRIV int as_value_is_absolute(as_context *a, as_value *v)
 /* fold add - sub when both are in the same frag (or absolute) */
 VPRIV void as_value_fold(as_context *a, as_value *v)
 {
-	ElfObj *o = a->o;
+	ElfObj *o = a->object;
 	if (v->add) {
 		ElfSym *y = elf_symp(o, v->add);
 		if (y->flags & ESYM_ABS) { v->c += (int64_t)y->value; v->add = 0; }
@@ -44,7 +44,7 @@ VPRIV void as_value_fold(as_context *a, as_value *v)
 static int as_value_is_deferred_symbol(as_context *a, const as_value *v)
 {
 	int op; ElfVal x, y;
-	return v->add && !v->sub && !v->c && elf_expr_get(a->o, v->add, &op, &x, &y);
+	return v->add && !v->sub && !v->c && elf_expr_get(a->object, v->add, &op, &x, &y);
 }
 
 /* a value the layout settles: a constant, a label difference, a deferred expression */
@@ -57,23 +57,23 @@ VPRIV int as_value_is_deferrable(as_context *a, const as_value *v)
 static void as_value_defer_operation(as_context *a, int op, as_value *x, const as_value *y)
 {
 	uint32_t t = as_symbol_temporary(a);
-	elf_expr_sym(a->o, t, op, *x, *y);
+	elf_expr_sym(a->object, t, op, *x, *y);
 	*x = (as_value){ t, 0, 0 };
 }
 
-typedef struct { as_context *a; const char *p, *e; } as_expression_reader;
+typedef struct { as_context *context; const char *cursor, *end; } as_expression_reader;
 
 static int as_expression_parse(as_expression_reader *l, as_value *v);
 
 static int as_number_parse(as_expression_reader *l, as_value *v)
 {
-	const char *p = l->p, *e = l->e;
+	const char *p = l->cursor, *e = l->end;
 	uint64_t x = 0;
 	if (p + 1 < e && p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
 		p += 2;
 		const char *s = p;
 		while (p < e && as_char_is_hex_digit((unsigned char)*p)) { x = x * 16 + (uint64_t)(as_char_is_digit((unsigned char)*p) ? *p - '0' : (as_char_to_lower((unsigned char)*p) - 'a' + 10)); p++; }
-		if (p == s) return as_error_report(l->a, "invalid hexadecimal number");
+		if (p == s) return as_error_report(l->context, "invalid hexadecimal number");
 	} else if (p + 2 < e && p[0] == '0' && (p[1] == 'b' || p[1] == 'B') && (p[2] == '0' || p[2] == '1')) {
 		p += 2;
 		while (p < e && (*p == '0' || *p == '1')) x = x * 2 + (uint64_t)(*p++ - '0');
@@ -84,18 +84,18 @@ static int as_number_parse(as_expression_reader *l, as_value *v)
 		if (p < e && (*p == 'b' || *p == 'f') && (p + 1 >= e || !as_char_is_identifier((unsigned char)p[1]))) {
 			uint32_t num = 0;
 			for (const char *q = s; q < p; q++) num = num * 10 + (uint32_t)(*q - '0');
-			as_numeric_label *nl = as_numeric_label_find(l->a, num);
+			as_numeric_label *nl = as_numeric_label_find(l->context, num);
 			uint32_t y;
 			if (*p == 'b') {
-				if (!nl->cur) return as_error_report(l->a, "directional label undefined");
-				y = nl->cur;
+				if (!nl->current) return as_error_report(l->context, "directional label undefined");
+				y = nl->current;
 			} else {
-				if (!nl->fwd) nl->fwd = as_symbol_temporary(l->a);
-				y = nl->fwd;
+				if (!nl->forward) nl->forward = as_symbol_temporary(l->context);
+				y = nl->forward;
 			}
-			l->p = p + 1;
+			l->cursor = p + 1;
 			*v = (as_value){ y, 0, 0 };
-			as_value_fold(l->a, v);
+			as_value_fold(l->context, v);
 			return 0;
 		}
 		if (s[0] == '0' && p - s > 1) {	/* octal */
@@ -110,27 +110,27 @@ static int as_number_parse(as_expression_reader *l, as_value *v)
 		while (q < e && (*q == 'u' || *q == 'U' || *q == 'l' || *q == 'L')) q++;
 		if (q > p && (q >= e || !as_char_is_identifier((unsigned char)*q))) p = q;
 	}
-	l->p = p;
+	l->cursor = p;
 	*v = (as_value){ 0, 0, (int64_t)x };
 	return 0;
 }
 
 static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 {
-	as_context *a = l->a;
-	l->p = as_whitespace_skip(l->p, l->e);
-	if (l->p >= l->e) return as_error_report(a, "unexpected end of expression");
-	char c = *l->p;
+	as_context *a = l->context;
+	l->cursor = as_whitespace_skip(l->cursor, l->end);
+	if (l->cursor >= l->end) return as_error_report(a, "unexpected end of expression");
+	char c = *l->cursor;
 	if (c == '(') {
-		l->p++;
+		l->cursor++;
 		if (as_expression_parse(l, v)) return -1;
-		l->p = as_whitespace_skip(l->p, l->e);
-		if (l->p >= l->e || *l->p != ')') return as_error_report(a, "expected ')' in expression");
-		l->p++;
+		l->cursor = as_whitespace_skip(l->cursor, l->end);
+		if (l->cursor >= l->end || *l->cursor != ')') return as_error_report(a, "expected ')' in expression");
+		l->cursor++;
 		return 0;
 	}
 	if (c == '-' || c == '~' || c == '!' || c == '+') {
-		l->p++;
+		l->cursor++;
 		if (as_expression_primary_parse(l, v)) return -1;
 		if (c == '+') return 0;
 		if (c == '-') {
@@ -149,48 +149,48 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 		v->c = c == '~' ? ~v->c : !v->c;
 		return 0;
 	}
-	if (c == '%' && a->o->machine == EM_X86_64) {
+	if (c == '%' && a->object->machine == EM_X86_64) {
 		/* a register as a value (.if \\reg == %rsp): its name's hash, the same for the same register */
-		const char *p = l->p + 1, *s = p;
-		while (p < l->e && (as_char_is_identifier((unsigned char)*p) || as_char_is_digit((unsigned char)*p))) p++;
+		const char *p = l->cursor + 1, *s = p;
+		while (p < l->end && (as_char_is_identifier((unsigned char)*p) || as_char_is_digit((unsigned char)*p))) p++;
 		if (p == s) return as_error_report(a, "unknown token in expression");
 		uint64_t h = 1469598103934665603ull;
 		for (const char *q = s; q < p; q++) h = (h ^ (uint64_t)as_char_to_lower((unsigned char)*q)) * 1099511628211ull;
-		l->p = p;
+		l->cursor = p;
 		*v = (as_value){ 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61) };
 		return 0;
 	}
 	if (as_char_is_digit((unsigned char)c)) return as_number_parse(l, v);
 	if (c == '\'') {
-		const char *p = l->p + 1;
-		if (p >= l->e) return as_error_report(a, "bad character literal");
+		const char *p = l->cursor + 1;
+		if (p >= l->end) return as_error_report(a, "bad character literal");
 		int64_t x;
-		if (*p == '\\' && p + 1 < l->e) {
+		if (*p == '\\' && p + 1 < l->end) {
 			p++;
 			switch (*p) { case 'n': x = '\n'; break; case 't': x = '\t'; break; case '0': x = 0; break; default: x = (unsigned char)*p; }
 		} else x = (unsigned char)*p;
 		p++;
-		if (p < l->e && *p == '\'') p++;
-		l->p = p;
+		if (p < l->end && *p == '\'') p++;
+		l->cursor = p;
 		*v = (as_value){ 0, 0, x };
 		return 0;
 	}
-	if (c == '.' && (l->p + 1 >= l->e || !as_char_is_identifier((unsigned char)l->p[1]))) {
-		l->p++;
+	if (c == '.' && (l->cursor + 1 >= l->end || !as_char_is_identifier((unsigned char)l->cursor[1]))) {
+		l->cursor++;
 		*v = (as_value){ as_label_temporary_define(a), 0, 0 };
 		return 0;
 	}
 	if (as_char_is_identifier_start((unsigned char)c) || c == '"') {
 		const char *s, *p;
 		if (c == '"') {
-			s = l->p + 1; p = s;
-			while (p < l->e && *p != '"') p++;
-			if (p >= l->e) return as_error_report(a, "unterminated quoted symbol");
-			l->p = p + 1;
+			s = l->cursor + 1; p = s;
+			while (p < l->end && *p != '"') p++;
+			if (p >= l->end) return as_error_report(a, "unterminated quoted symbol");
+			l->cursor = p + 1;
 		} else {
-			s = l->p; p = s;
-			while (p < l->e && as_char_is_identifier((unsigned char)*p)) p++;
-			l->p = p;
+			s = l->cursor; p = s;
+			while (p < l->end && as_char_is_identifier((unsigned char)*p)) p++;
+			l->cursor = p;
 		}
 		uint32_t y = as_symbol_intern(a, s, (size_t)(p - s));
 		*v = (as_value){ y, 0, 0 };
@@ -205,7 +205,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 		}
 		if (a->variable_count) {
 			as_variable *vr = as_variable_slot_find(a, y, 0);
-			if (vr && vr->v.add != (uint32_t)-1) *v = vr->v;
+			if (vr && vr->value.add != (uint32_t)-1) *v = vr->value;
 		}
 		as_value_fold(a, v);
 		return 0;
@@ -216,7 +216,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
 /* GNU precedences as MC uses them */
 static int as_operator_parse(as_expression_reader *l, int *op)
 {
-	const char *p = as_whitespace_skip(l->p, l->e), *e = l->e;
+	const char *p = as_whitespace_skip(l->cursor, l->end), *e = l->end;
 	if (p >= e) return 0;
 	char c = p[0], d = p + 1 < e ? p[1] : 0;
 	int prec = 0, len = 1;
@@ -244,7 +244,7 @@ static int as_operator_parse(as_expression_reader *l, int *op)
 	case '%': *op = '%'; prec = 6; break;
 	default: return 0;
 	}
-	l->p = p + len;
+	l->cursor = p + len;
 	return prec;
 }
 
@@ -285,7 +285,7 @@ static int as_operator_apply(as_context *a, int op, as_value *x, as_value *y)
 		int diff_x = as_value_is_deferrable(a, x), diff_y = as_value_is_deferrable(a, y);
 		if (!diff_x || !diff_y || !strchr("*/%LR&|^!AOEN<>lg", op)) return as_error_report(a, "expected absolute expression");
 		uint32_t t = as_symbol_temporary(a);
-		elf_expr_sym(a->o, t, op, *x, *y);
+		elf_expr_sym(a->object, t, op, *x, *y);
 		*x = (as_value){ t, 0, 0 };
 		return 0;
 	}
@@ -318,12 +318,12 @@ static int as_expression_precedence_parse(as_expression_reader *l, as_value *v, 
 {
 	if (as_expression_primary_parse(l, v)) return -1;
 	for (;;) {
-		const char *save = l->p;
+		const char *save = l->cursor;
 		int op, p = as_operator_parse(l, &op);
-		if (!p || p < minp) { l->p = save; return 0; }
+		if (!p || p < minp) { l->cursor = save; return 0; }
 		as_value r;
 		if (as_expression_precedence_parse(l, &r, p + 1)) return -1;
-		if (as_operator_apply(l->a, op, v, &r)) return -1;
+		if (as_operator_apply(l->context, op, v, &r)) return -1;
 	}
 }
 
@@ -334,7 +334,7 @@ VPRIV int as_expression_absolute_parse(as_context *a, const char **pp, const cha
 	as_expression_reader l = { a, *pp, e };
 	as_value v;
 	if (as_expression_parse(&l, &v)) return -1;
-	*pp = l.p;
+	*pp = l.cursor;
 	if (!as_value_is_absolute(a, &v)) return as_error_report(a, "expected absolute expression");
 	*out = v.c;
 	return 0;
@@ -344,6 +344,6 @@ VPRIV int as_expression_value_parse(as_context *a, const char **pp, const char *
 {
 	as_expression_reader l = { a, *pp, e };
 	if (as_expression_parse(&l, v)) return -1;
-	*pp = l.p;
+	*pp = l.cursor;
 	return 0;
 }
