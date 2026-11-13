@@ -1,0 +1,4 @@
+const_conversion_objsize.c:15:7: warning: implicit conversion from 'unsigned long' to 'unsigned char' changes value from 300 to 44 [-Wconstant-conversion]
+   15 |         *o = __builtin_object_size(arr, 0);
+      |            ~ ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 warning generated.

@@ -1067,12 +1067,18 @@ static bool vv_loop(vvs *S)
 	if (!S->nacc && !S->nred && !S->nfold)
 		return vv_no(S, "nothing to vectorize: no store and no sum");
 	{
-		bool st = S->nred != 0 || S->nfold != 0;
+		bool st = S->nred != 0, fold = S->nfold != 0;
 
 		for (uint32_t i = 0; i < S->nacc; i++)
 			st |= S->acc[i].store;
-		if (!st)
+		if (!st && !fold)
 			return vv_no(S, "nothing to vectorize: no store and no sum");
+		/* An ordered reduction takes its lanes out one by one, in order: by itself it is the
+		 * scalar loop with a vector load in front.  Measured on arm64 (TSVC s314, s316: a
+		 * maximum by compare and select, nine times slower than the scalar loop); x86-64 is
+		 * left as its lowering was written. */
+		if (!st && !X86(S->e->c))
+			return vv_no(S, "only an ordered reduction: nothing to pack");
 	}
 	for (uint32_t i = 0; i < S->nred; i++)
 		if (vv_get(S, S->red[i].p)->nuse != 1 || vv_get(S, S->red[i].upd)->nuse != 0)
