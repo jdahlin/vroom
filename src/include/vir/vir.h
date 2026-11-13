@@ -109,6 +109,11 @@ enum { VTG_NONE, VTG_X86_64_LINUX, VTG_A64_LINUX, VTG_A64_DARWIN, VTG_N };
 
 #define VIR_NOBLK 0xffffffffu
 
+/* The analyses a function has computed and that nothing has invalidated since.  vir_cfg and
+ * vir_dom are the getters: they return at once when their bit is set and compute otherwise.
+ * Whatever changes blocks or edges calls vir_analyses_invalidate (construction does). */
+enum { VIR_VALID_CFG = 1, VIR_VALID_DOM = 2 };
+
 /* ---- 3: the records ---- */
 typedef struct vir_ins {
 	uint8_t  op;	/* VO_* */
@@ -156,6 +161,7 @@ typedef struct vir_fn {
 	uint32_t *extra; uint32_t nextra;
 	vir_loc  *loc;   uint32_t nloc;
 	uint32_t *tmp;		/* per value: scratch for the running pass, undefined between passes */
+	uint32_t valid;		/* VIR_VALID_*: the analyses whose results in blk[] are current (vir_analyses_invalidate) */
 } vir_fn;
 
 /* ---- 9: signatures ---- */
@@ -264,8 +270,12 @@ uint32_t vir_extra(vir_fn *f, const uint32_t *w, uint32_t n);	/* offset of a cop
 void vir_loc_add(vir_fn *f, uint32_t loc);	/* a run starting at the next instruction */
 
 /* ---- analyses and the canonical form ---- */
-bool vir_cfg(vir_fn *f);	/* blk[].pred/npred; false if a terminator's target is out of range */
-bool vir_dom(vir_fn *f);	/* vir_cfg first; blk[].idom/pre/post (Cooper-Harvey-Kennedy) */
+bool vir_cfg(vir_fn *f);	/* blk[].pred/npred (computed once until invalidated); false if a terminator's target is out of range */
+bool vir_dom(vir_fn *f);	/* blk[].idom/pre/post (Cooper-Harvey-Kennedy), computed once until invalidated; needs vir_cfg */
+static inline void vir_analyses_invalidate(vir_fn *f)	/* blocks, edges or terminators changed: every analysis is stale */
+{
+	f->valid = 0;
+}
 static inline bool vir_dominates(const vir_fn *f, uint32_t a, uint32_t b)	/* a dominates b (reflexive) */
 {
 	return f->blk[a].pre <= f->blk[b].pre && f->blk[b].pre <= f->blk[a].post;
