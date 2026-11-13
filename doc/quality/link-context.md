@@ -15,6 +15,86 @@ not followed), good for sizing, not for proof.  Reset status was read from
 section 3 come from a regex over function definitions (227 found) and a
 transitive closure over calls by name; they are within a few percent.
 
+## Design (decided)
+
+Taken with step 1 of the context (branch `quality/ld-context-1`); the
+inventory below is the input, section 5 is the work left.
+
+1. **One `struct ld_context` with one sub-struct per group** (`struct
+   ld_diagnostics diagnostics`, `struct ld_layout layout`, ...), declared in
+   `src/ld/ld-internal.h` with the types its fields need.  A field is read as
+   `ctx->group.field`.  Fields are renamed to words as they move (STYLE.md);
+   a type keeps its name when it moves into the header (the `ld_*` and
+   `elf_*` names are `doc/quality/rename-ld.tsv`'s, applied by #198).
+2. **Route: the final spelling first, the parameter later.**  Until every
+   function takes the context, `ld.c` defines the process's one context and
+   a constant pointer to it:
+   `static struct ld_context ld_link_context; static struct ld_context *const ctx = &ld_link_context;`.
+   Clang folds the constant pointer, so `ctx->layout.dot` compiles to the
+   same direct access as the old `dot`: no extra load in the hot loops
+   (relocation application, resolution, section writes on the pool).
+   Passing the context down later is a change of signatures only: a
+   parameter named `ctx` shadows the file-scope one and no body changes.
+   So the work is two mechanical series, each step provable alone:
+   (a) one group per PR into the struct (below); (b) once all groups are in,
+   one part file per PR gets `struct ld_context *ctx` parameters (`pfor`
+   callbacks get it through their `void *arg`), and when no function uses
+   the file-scope `ctx` any more, `ld_main` allocates a zeroed context per
+   link and the file-scope instance and pointer are deleted.
+3. **What replaces `ld_state_reset()`**: `ld_context_init()`
+   (`link-context.c`), called by `ld_main` under `ld_link_lock` before the link:
+   `memset` of the whole context, then the few fields whose start is not
+   zero (`error_limit` 20, `phase_timing` from `VLD_TIME`, the error stream;
+   later the `*_isec = LD_NONE` ids).  A moved field needs no reset line and
+   cannot miss one (`prev_multi`, a function static, was the case in point:
+   it now resets per link).  Each group PR deletes that group's lines from
+   `ld_state_reset()`; the PR that moves the last group deletes
+   `state-reset.c`.  A field that owns `malloc` memory (only `lsyms.v`
+   today) is freed by `ld_context_init` before the `memset`, or moved to
+   the arena by its group's PR.
+4. **Not in the context**: process-wide state stays file-scope where it is
+   (`thread-pool.c`: pool, job slot, locks, `ld_thread_count`; `region.c`: block
+   list, generation, `ld_keep_mappings`; `ld_diagnostics_lock`, which guards every link's
+   stream and cannot be zero-initialised portably; `ld_link_lock`); per-thread
+   state stays `__thread` (`ld_region_current`, `ld_region_end`, `ld_region_thread_generation`, the symbol-table
+   scratch).  `argv0` is a constant (`"vld"`), not state.  Before two links
+   may run at once (dropping `ld_link_lock`), the arena's block list must become
+   per-context (`ld_regions_free` unmaps every thread's blocks) and `pfor` must
+   take more than one job: that is the scheduler plan's and step 3's
+   ("The shared layer"), not this series'.
+5. **Proof for every group PR**: the static's deletion makes the compiler
+   find every use (a missed one does not compile); linker output byte for
+   byte against the merge-base's `vlink` (`bench/vlink-pool.py
+   base=DIR new=build/src` on `work/build-o0`: the vmlinux link with its
+   script, `ld -r` of `vmlinux.a`, small `ld -r`; it also gives the time),
+   `VCC_LDCMP=1 bench/vcc-ctests.py -j 4 --no-cache`, `bench/vlink-bad.py`,
+   `bench/vlink-opts.py`, `bench/vccd-test.py`, `bench/vcc-stress.py
+   --vccd`, and the rules' builds and `bench/vcc-ctests.py`.
+6. **How a group is moved** (what step 1 did): add the group's struct to
+   `ld-internal.h` (with the types it needs, moved unchanged from the part
+   that defined them) and a member to `struct ld_context`; delete the
+   statics; rewrite every use with a whole-word substitution that skips
+   member accesses and designated initialisers (`(?<![.>\w"-])\bNAME\b(?!\s*\()`
+   in Perl, comment-only lines left alone); then check by hand: struct
+   members with the same name (`SPhdr.phdrs`), `#include "...NAME..."`
+   lines, comments that name the old variable, and `-Wshadow` locals (only
+   `out` in `eh-frame.c` and `response-files.c` today); delete the group's
+   lines from `ld_state_reset()` and put any non-zero start value in
+   `ld_context_init`.
+
+Names: the inventory below was taken before the linker's rename (#198,
+`rename-ld.tsv`), so its function, type and process-wide names are the old
+ones (`reset_state` is `ld_state_reset`, `run` is `ld_link_run`,
+`free_arenas` is `ld_regions_free`, `ldlock` is `ld_link_lock`, `errlock` is
+`ld_diagnostics_lock`, `arena.c` is `region.c`, the arch fragments are
+`thunk-model.inc`, `thunk-creation.inc`, `relocation-scan.inc`,
+`relocation-apply.inc` and `x64/relocation.inc`; the types are `ld_*` and
+`elf_*`).  The per-link variables kept their names for this series.
+
+Correction to the inventory below: `tls_start` is reset by `ld_state_reset()`
+since PR #137 (`tls_tp = tls_start = tbss_off = 0`); the table's "NO" was
+written before it.  The real survivor was `prev_multi`.
+
 ## Totals (ELF linker, `ld.c` and its parts)
 
 | Class | Variables | Meaning |
@@ -393,3 +473,74 @@ All three have the same shape as the ELF linker (file-scope request state,
 one run at a time, a lock somewhere), so the context pattern of step 2
 applies to each; for the core of step 4 the three groups "symbols",
 "inputs" and "diagnostics" are what they would share.
+
+## 5. The work left: one PR per line
+
+Step 1 (`quality/ld-context-1`) introduced the context and moved
+**diagnostics** (`errf`, `nerrors`, `error_limit`, `prev_multi`, `timing`,
+`t_last`, `p_last`, `flt_last` -> `error_stream`, `error_count`,
+`error_limit`, `last_was_multiline`, `phase_timing`, `phase_start_time`,
+`phase_start_counters`, `phase_start_faults`) and **layout** (`dot`,
+`cur_osec`, `in_layout`, `tbss_off`, `ncache`, `ncmask`, `ncount`,
+`orphans`, `phdrs`, `phsecs`, `outsecs`, `ehfdes`, `hdr_va`,
+`headers_loaded`, `shoff`, `filesize`, `has_tls`, `tls_start`, `tls_tp` ->
+`dot`, `current_output_section`, `in_layout`, `tbss_offset`, `name_cache`,
+`name_cache_mask`, `name_cache_count`, `orphans`, `program_headers`,
+`program_header_sections`, `output_sections`, `eh_frame_fdes`,
+`file_header_address`, `headers_loaded`, `section_header_offset`,
+`file_size`, `has_tls`, `tls_start`, `tls_thread_pointer`).  Each PR below
+follows Design 6 and is proven by Design 5; the order puts self-contained
+groups first and the hot ones (`symbols`, `inputs`) where the timing of
+`vlink-pool.py` matters most.
+
+Series (a), groups into the struct:
+
+2. **relocation scan** (10): `isec_fva`, `thunks`, `thunksecs`, `tr_keys`,
+   `tr_vals`, `tr_mask`, `tr_n`, `pic`, `reladyn_buf`, `got_seen`.  Types
+   `Thunk`, `ThunkSec` move from `arch/a64/ld/thunk-model.inc` to the header;
+   `isec_fva` is read in `ld_relocation_target_final` (hot: time it).
+3. **relocatable output** (17): `routs`, `rmap`, `rmask`, `lmap`, `rbuf`,
+   `r_symoff`, `r_stroff`, `r_shstroff`, `r_shstrsize`, `r_nsyms`,
+   `r_nlocal`, `r_symidx`, `r_stridx`, `r_shstridx`, `r_nsh`, `r_locstr`,
+   `r_loc0`; only `relocatable-link.c`.
+4. **output, synthetic sections and GOT** (21): `out`, `ndyn`,
+   `reladyn_isec`, `buildid_isec`, `comment_isec`, `got_isec`,
+   `ehhdr_isec`, `symtab_isec`, `strtab_isec`, `shstrtab_isec`,
+   `dynsym_isec`, `dynstr_isec`, `hash_isec`, `gnuhash_isec`,
+   `versym_isec`, `verdef_isec`, `dynamic_isec`, `dyn_live`, `gotsyms`,
+   `gotlocs`, `wjobs` (type `GotLoc`).  The `*_isec` ids start
+   at `LD_NONE`: set them in `ld_context_init`.  `out` is also a local in
+   `eh-frame.c` and `response-files.c`: leave those.
+5. **output, symbol table** (10): `gouts`, `ngouts`, `symtab_buf`,
+   `strtab_buf`, `thunk_sym0`, `thunk_str0`, `nsymout`, `strsize`,
+   `nlocal_out`, `shstrtab_buf` (type `GOut`).
+6. **output, dynamic sections** (12): `dsyms`, `dyn_symndx`,
+   `gh_nbuckets`, `gh_maskwords`, `dsym_hash`, `dynstr`, `dynstr_offs`,
+   `dsym_name`, `soname_off`, `vername_off`, `ndynent`, `script_ord`.
+7. **script** (17): `isds`, `osecs`, `topcmds`, `entry_name`, `sphdrs`,
+   `have_phdrs`, `vernodes`, `ver_locals`, `nverdefs`, `refsyms`,
+   `provides`, `assert_fail`, `sp`, `sp_end`, `sp_file`, `cur_provide`,
+   `recorded`.  The script model's types (`Expr`, `Cmd`, `ISD`, `OSec`,
+   `SPhdr`, `VerNode`, `Provide`, ...) move to the header; `sp` is a common
+   local name: check `-Wshadow`.
+8. **symbols** (11): `hnames`, `hword`, `gnames`, `gsyms`, `ngsyms`,
+   `hmask`, `gorder`, `script_new`, `stub_names`, `nstubs`, `stop_syms`
+   (type `G`).  `gsyms`/`hmask` are in resolution's and relocation's inner
+   loops: time it.
+9. **inputs** (13): `x86_ld`, `ld_machine`, `objs`, `isecs`, `mergeins`,
+   `merges`, `pending`, `obj_quiet`, `nobj_real`, `lsyms`, `lcand`, `lout`, `ltaken`
+   (types `Obj`, `ISec`, `MergeIn`, `Merge`, `PendVec`, `LSym`).
+   `lsyms.v` is `malloc`ed: free it in `ld_context_init` before the
+   `memset` (or allocate it from the arena).
+10. **options** (2): `opt` (the struct becomes `struct ld_options`),
+    `dirfd_base`.  `ld_state_reset()` is then empty: delete `state-reset.c`
+    and its call in `ld_link_run()`.
+
+Series (b), the parameter (after 10; one or a few part files per PR, by the
+call graph from the leaves up): add `struct ld_context *ctx` to every
+function that uses it (section 3: 187 of 227); `pfor` callbacks take it from
+`arg`.  Proof as above plus `bench/vbench.py gate` is not enough (it times
+the compiler): the `vlink-pool.py` times must stay within noise.  Last PR:
+`ld_main` allocates and frees a zeroed context per link, the file-scope
+`ld_link_context` and `ctx` are deleted.  Dropping `ld_link_lock` waits for the
+per-context arena and a reentrant `pfor` (Design 4).

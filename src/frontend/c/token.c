@@ -57,8 +57,8 @@ VPRIV void init_keywords(void)
 VPRIV __attribute__((noinline)) void fetch_directive(cc *c, ptok *t)
 {
 	do {
-		if (unlikely(dc_stale(c)))
-			dc_materialize(c);	/* (the pragma acts on the real state) */
+		if (unlikely(driver_declaration_cache_is_stale(c)))
+			driver_declaration_cache_materialize(c);	/* (the pragma acts on the real state) */
 		pragma(c, t);
 		if (unlikely(c->lz_on))
 			lz_fetch(c, t);

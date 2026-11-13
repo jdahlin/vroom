@@ -1,6 +1,7 @@
 /* Resetting all per-link state so the linker can run again in one process. */
 
-/* all per-link state, so ld_main can be called again (vccd, VLD_REPEAT) */
+/* the per-link state not yet in struct ld_context (ld-internal.h), so ld_main
+   can be called again (vccd, VLD_REPEAT) */
 static void ld_state_reset(void)
 {
 	memset(&opt, 0, sizeof opt);
@@ -21,27 +22,18 @@ static void ld_state_reset(void)
 	memset(&lcand, 0, sizeof lcand);
 	memset(&lout, 0, sizeof lout);
 	memset(&ltaken, 0, sizeof ltaken);
-	memset(&orphans, 0, sizeof orphans);
 	memset(&thunks, 0, sizeof thunks);
 	memset(&thunksecs, 0, sizeof thunksecs);
-	memset(&phdrs, 0, sizeof phdrs);
-	memset(&phsecs, 0, sizeof phsecs);
-	memset(&outsecs, 0, sizeof outsecs);
 	memset(&wjobs, 0, sizeof wjobs);
 	memset(&assert_fail, 0, sizeof assert_fail);
 	memset(&recorded, 0, sizeof recorded);
 	memset(&script_new, 0, sizeof script_new);
 	memset(&routs, 0, sizeof routs);
 	/* in the arena, which ld_regions_free unmapped after the last link (vccd runs many) */
-	ncache = NULL;
-	ncmask = ncount = 0;
-	memset(&ehfdes, 0, sizeof ehfdes);
 	memset(&stop_syms, 0, sizeof stop_syms);
 	ehhdr_isec = LD_NONE;	/* set only while LD_NONE */
-	has_tls = headers_loaded = false;
 	x86_ld = false;
 	atomic_store(&ld_machine, 0);
-	tls_tp = tls_start = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
 	tr_keys = NULL;
@@ -59,7 +51,6 @@ static void ld_state_reset(void)
 	memset(&dynstr_offs, 0, sizeof dynstr_offs);
 	have_phdrs = dyn_live = false;
 	nverdefs = 0;
-	hdr_va = 0;
 	memset(&gotsyms, 0, sizeof gotsyms);	/* (all of it: its buffer was in the last link's arena) */
 	memset(&gotlocs, 0, sizeof gotlocs);
 	symtab_isec = strtab_isec = shstrtab_isec = LD_NONE;
@@ -69,7 +60,4 @@ static void ld_state_reset(void)
 	cur_provide = NULL;
 	gouts = NULL;
 	ngouts = 0;
-	atomic_store(&nerrors, 0);
-	error_limit = 20;
-	timing = getenv("VLD_TIME") != NULL;
 }

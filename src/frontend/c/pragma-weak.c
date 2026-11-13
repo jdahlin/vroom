@@ -110,7 +110,7 @@ VPRIV void pragma_weak(cc *c, const char *s, const char *e, const char *base, ui
 		return;
 	}
 #undef WLOC
-	dc_kill(c);	/* (the pending list is not in the declaration cache's snapshots) */
+	driver_declaration_cache_kill(c);	/* (the pending list is not in the declaration cache's snapshots) */
 	k = file_scope_sym(c, target ? target : name);
 	if (k && fn_or_var(&c->syms[k])) {
 		sym *y = &c->syms[k];

@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as td:
 #include "common/buffer.h"
 typedef vbuffer buf;
 #define bstr vbuffer_string_append
-#include "src/driver/x86predefines.h"
+#include "src/driver/x86-predefines.h"
 #include "port/x86native.h"
 static void apply(x86_features *f,x86_features *disabled,const char *s) {
  bool en=*s++=='+';
@@ -56,7 +56,7 @@ int main(int argc,char **argv) {
  x86_features f={{0}},disabled={{0}};if(argc<2)return 2; const char *cpu=argv[1];
  if(!strcmp(cpu,"native")){if(!x86_native_features(&f,&disabled,&cpu))return 2;}else if(!x86_cpu_features(cpu,&f))return 2;
  for(int i=2;i<argc;i++)apply(&f,&disabled,argv[i]);
- x86_features_finish(&f,disabled);buf out={0};x86_feature_predefines(&out,f,cpu);fwrite(out.p,1,out.n,stdout);free(out.p);return 0;
+ x86_features_finish(&f,disabled);buf out={0};driver_x86_feature_predefines_append(&out,f,cpu);fwrite(out.p,1,out.n,stdout);free(out.p);return 0;
 }
 ''')
   run([a.clang,'-O2','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(src),str(ROOT/'src/common/fail.c'),'-o',str(probe)])

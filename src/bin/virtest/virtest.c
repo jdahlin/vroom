@@ -74,7 +74,7 @@ static size_t virtest_separator_find(const char *s, size_t n)
 
 /* the builder API (vir_function_begin, vir_constant_add, vir_insn_add, ... vir_canon, vir_uses_count): a function built in the
  * builder form, with a constant created inside a block, a nop, an unreachable block and an unused constant */
-static int virtest_selftest_run(void)
+static int virtest_selftest(void)
 {
 	static const char want[] =
 		"func @f %s0 {\n"
@@ -415,7 +415,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--bless"))
 			bless = true;
 		else if (!strcmp(argv[i], "--selftest"))
-			return virtest_selftest_run();
+			return virtest_selftest();
 		else if (!strcmp(argv[i], "--passes") && i + 1 < argc)
 			cli_passes = argv[++i];
 		else if (!strcmp(argv[i], "--equiv")) {
