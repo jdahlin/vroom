@@ -2,7 +2,7 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|win64|inline] [--ref-only] [--obj] [--objcmp]
-                     [--vir] [--seh] [-v] [--show CAT] [--no-cache] [PAT]
+                     [--vir] [--seh] [--vlink-ref] [--vccrt-ref] [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
 own), and of src/test/win64 (Windows-only: the calling convention's rules,
@@ -18,6 +18,16 @@ vcc's side through VIR (VCC_VIR=l: -O2's SSA path, falling back per
 function to the direct emitter).  --seh: also check every vcc object's
 unwind data (seh_check below: each function's epilogue decoded as the
 Windows unwinder does, llvm-readobj --unwind against the bytes).
+--vlink-ref (WIN7) links clang's object twice with the same command line,
+by lld and by vlink (clang --ld-path, SOURCE_DATE_EPOCH fixed): vlink's
+program must run as the reference does (runs-ok) and its file should be
+byte-identical to lld's (image-identical; a test that runs but differs is
+`fail differs`, with the first differing structure in the reason).
+--vccrt-ref (WIN7R) links clang's object with an explicit link line that has
+vcc's run-time library (BUILD/vccrt/libvccrt.a, src/runtime/build.sh) where
+clang's has compiler-rt's builtins, once by lld and once by vlink, and runs
+both: each must give the reference result, and the link map must show no
+input from compiler-rt, libgcc or libunwind (`fail foreign` otherwise).
 
 The chain (bench/hostenv.py: MINGW_SYSROOT, WINE): the host's clang compiles
 with the test runtime headers (src/test/rt/include-win64 before
@@ -521,6 +531,178 @@ def objcmp(t):
     return t, 'pass', '', ''
 
 
+# --vlink-ref: clang's object linked by lld and by vlink with the same link line
+VLINK = os.path.join(os.path.dirname(VPP), 'vlink')
+VLENV = dict(os.environ, SOURCE_DATE_EPOCH='1700000000')
+
+
+def _vlink_hash():
+    try:
+        return hashlib.sha1(open(VLINK, 'rb').read()).hexdigest()[:16]
+    except OSError:
+        return '?'
+
+
+def pe_differs(a, b):
+    """where two PE files differ first: the headers, a section (by name), the symbol table"""
+    import struct
+    why = '' if len(a) == len(b) else f'size {len(b)} vs lld {len(a)}'
+    try:
+        pe = struct.unpack_from('<I', a, 60)[0]
+        nsec = struct.unpack_from('<H', a, pe + 6)[0]
+        sh_ = pe + 24 + struct.unpack_from('<H', a, pe + 20)[0]
+        end = sh_ + 40 * nsec
+        if a[:end] != b[:end]:
+            off = next(i for i in range(min(end, len(b))) if a[i] != b[i])
+            return f'headers (offset {off:#x}) {why}'.strip()
+        for i in range(nsec):
+            name, vs, va, rs, ro = struct.unpack_from('<8sIIII', a, sh_ + 40 * i)
+            if a[ro:ro + rs] != b[ro:ro + rs]:
+                return f'section {name.rstrip(bytes(1)).decode(errors="replace")} {why}'.strip()
+        return f'symbol table {why}'.strip()
+    except (struct.error, StopIteration, IndexError):
+        return f'unreadable {why}'.strip()
+
+
+def vlinkref(t):
+    suite, name, path = t
+    src = open(path, 'rb').read().decode('latin-1')
+    s = static_skip(suite, name, src)
+    if s:
+        return t, 'skip', s[0], s[1]
+    flags = flags_of(suite, name, src)
+    wd = f'{OUT}/vl/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
+    if 'skip' in ref:
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'skip', ref['skip'], ref['why']
+    os.makedirs(wd, exist_ok=True)
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+    obj = open(f'{wd}/ref.o', 'rb').read()
+    pk = hashlib.sha1(obj + ref['key'].encode() + VLHASH.encode()).hexdigest()
+    pf = f'{OUT}/pass-vlink/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
+    objs = [f'{wd}/ref.o', RTO]
+    rc, _, err = sh(LINK + objs + ['-o', f'{wd}/lld.exe'], timeout=60, env=VLENV)
+    if rc:
+        return t, 'error', 'lld', ct.first_err(err.decode(errors='replace'))
+    rc, _, err = sh(LINK + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
+    if rc:
+        e = err.decode(errors='replace')
+        return t, 'fail', 'vlink', (ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vlink: signal/timeout {rc}: ' + ct.first_err(e))[:150]
+    a, b = open(f'{wd}/lld.exe', 'rb').read(), open(f'{wd}/vlink.exe', 'rb').read()
+    rc, out, err = run(f'{wd}/vlink.exe')
+    if rc != ref['rc'] or out != ref['out']:
+        m = EXC.search(err) if rc == 255 else None
+        why = f'exception {m.group(1)}' if m else f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
+        return t, 'fail', 'run', why + ('' if a == b else ' [image differs: ' + pe_differs(a, b) + ']')
+    if a != b:
+        return t, 'fail', 'differs', pe_differs(a, b)
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    open(pf, 'w').write(pk)
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
+
+# --vccrt-ref: the link line clang -v shows for the target, with libvccrt.a in
+# place of libclang_rt.builtins-x86_64.a and no -L for compiler-rt's directory
+MLIB = f'{MINGW_SYSROOT}/x86_64-w64-mingw32/lib'
+VCCRT = os.environ.get('VCC_VCCRT', f'{BUILD}/vccrt/libvccrt.a')
+LLD = hostenv.llvm('ld.lld')
+
+
+def vccrt_link(objs, exe, runtime=None, linker=None, map_file=None):
+    """the explicit MinGW static link line with RUNTIME (default libvccrt.a)
+    as the run-time library, run by LINKER (ld.lld, or vlink); (rc, stderr)"""
+    cmd = [linker or LLD, f'--sysroot={MINGW_SYSROOT}', '-m', 'i386pep', '-Bstatic', '-o', exe,
+           f'{MLIB}/crt2.o', f'{MLIB}/crtbegin.o', f'-L{MLIB}'] + objs + \
+          ['--start-group', '-lmingw32', runtime or VCCRT, '-lmoldname', '-lmingwex', '-lmsvcrt',
+           '-ladvapi32', '-lshell32', '-luser32', '-lkernel32', '--end-group', f'{MLIB}/crtend.o']
+    if map_file:
+        cmd += [f'-Map={map_file}']
+    rc, _, err = sh(cmd, timeout=60, env=VLENV)
+    return rc, err.decode(errors='replace')
+
+
+def foreign_inputs(map_file):
+    """the input files of a link map that come from compiler-rt, libgcc or libunwind"""
+    try:
+        text = open(map_file, errors='replace').read()
+    except OSError:
+        return ['(no map)']
+    return sorted({m.group(0) for m in re.finditer(r'\S*(?:clang_rt|libgcc|libunwind|compiler-rt)\S*', text, re.I)})
+
+
+def _vccrt_hash():
+    try:
+        return hashlib.sha1(open(VCCRT, 'rb').read()).hexdigest()[:16]
+    except OSError:
+        return '?'
+
+
+def vccrtref(t):
+    suite, name, path = t
+    src = open(path, 'rb').read().decode('latin-1')
+    s = static_skip(suite, name, src)
+    if s:
+        return t, 'skip', s[0], s[1]
+    flags = flags_of(suite, name, src)
+    wd = f'{OUT}/rt/{suite}/{name}'
+    os.makedirs(wd, exist_ok=True)
+    ref = reference(suite, name, path, flags, wd)
+    if 'error' in ref:
+        return t, 'error', ref['error'], ref['why']
+    if 'skip' in ref:
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'skip', ref['skip'], ref['why']
+    os.makedirs(wd, exist_ok=True)
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    if rc:
+        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+    pk = hashlib.sha1(open(f'{wd}/ref.o', 'rb').read() + ref['key'].encode() + VLHASH.encode() + VRHASH.encode()).hexdigest()
+    pf = f'{OUT}/pass-vccrt/{suite}/{name}'
+    if not NOCACHE:
+        try:
+            if open(pf).read() == pk:
+                shutil.rmtree(wd, ignore_errors=True)
+                return t, 'pass', '', ''
+        except OSError:
+            pass
+    for which, linker in (('lld', None), ('vlink', VLINK)):
+        exe, mp = f'{wd}/{which}.exe', f'{wd}/{which}.map'
+        rc, err = vccrt_link([f'{wd}/ref.o', RTO], exe, linker=linker, map_file=mp)
+        if rc:
+            m = re.search(r"undefined (?:symbol|reference to):? ['`]?(\w+)", err)
+            return t, 'fail', f'link-{which}', 'undefined ' + m.group(1) if m else ct.first_err(err)[:150]
+        bad = foreign_inputs(mp)
+        if bad:
+            return t, 'fail', 'foreign', f'{which}: ' + ' '.join(bad)[:150]
+        rc, out, err = run(exe)
+        if rc == 'timeout':	# once more, as for the reference: Wine's first start in a worker
+            rc, out, err = run(exe)
+        if rc != ref['rc'] or out != ref['out']:
+            m = EXC.search(err) if rc == 255 else None
+            why = f'exception {m.group(1)}' if m else f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
+            return t, 'fail', f'run-{which}', why
+    os.makedirs(os.path.dirname(pf), exist_ok=True)
+    open(pf, 'w').write(pk)
+    shutil.rmtree(wd, ignore_errors=True)
+    return t, 'pass', '', ''
+
+
+VLHASH = _vlink_hash()
+VRHASH = os.environ.get('VCC_VCCRT_HASH') or _vccrt_hash()
 NOCACHE = REF_ONLY = OBJ = SEH = False
 
 
@@ -533,9 +715,11 @@ if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh', '--vlink-ref', '--vccrt-ref')}
     av = [a for a in av if a not in flags]
     nocache, ref_only, obj, ocmode, verbose, vir, seh = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh'))
+    vlmode = '--vlink-ref' in flags
+    rtmode = '--vccrt-ref' in flags
     if vir:
         os.environ['VCC_VIR'] = 'l'	# (inherited by every vpp the workers run)
     for opt in ('-j', '--suite', '--show'):
@@ -552,10 +736,15 @@ if __name__ == '__main__':
     if not ts:
         sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()
+    if rtmode:	# the library first: the workers key their pass cache on it
+        r = subprocess.run(['sh', f'{ct.R}/src/runtime/build.sh', os.path.dirname(VCCRT)], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(f'vcc-win64.py: src/runtime/build.sh failed:\n{r.stdout}{r.stderr}')
+        os.environ['VCC_VCCRT_HASH'] = _vccrt_hash()
     rt_obj()
     hostenv.wine_start(PREFIX)
     with Pool(j, initializer=init, initargs=(nocache, ref_only, obj, seh)) as pool:
-        res = pool.map(objcmp if ocmode else one, ts, chunksize=1)
+        res = pool.map(vccrtref if rtmode else vlinkref if vlmode else objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
@@ -583,5 +772,11 @@ if __name__ == '__main__':
                   f'{c["skip"]} excluded, {c["error"]} oracle errors   {det}')
         else:
             print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+    if rtmode:
+        print(f'vccrt: runs-ok with lld and with vlink {tot["pass"]}/{tot["pass"] + tot["fail"]}, '
+              f'linked from compiler-rt/libgcc/libunwind {tot["fail:foreign"]}')
+    if vlmode:
+        print(f'vlink: runs-ok {tot["pass"] + tot["fail:differs"]}/{tot["pass"] + tot["fail"]}, '
+              f'image-identical {tot["pass"]}/{tot["pass"] + tot["fail"]}')
     print(f'{time.time() - t0:.1f} s')
     sys.exit(1 if tot['fail'] or tot['error'] else 0)
