@@ -354,6 +354,13 @@ def garbage_requests():
             dict(header=hdr(MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
             dict(header=hdr(MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
             dict(header=b'\x72\x6f', payload=b'', close_early=True),
+            # 1 + argc + envc wraps to 1 in 32 bits: only the cwd
+            dict(header=hdr(MAGIC, 0xffffffff, 1, len(d) + 1), payload=d.encode() + b'\0'),
+            dict(header=hdr(MAGIC, 0xffffffff, 2, len(good)), payload=good),
+            # the payload's last string without its NUL
+            dict(header=hdr(MAGIC, len(argv), 0, len(good) - 1), payload=good[:-1]),
+            # pad not zero
+            dict(header=struct.pack('<IIIIQII', MAGIC, len(argv), 0, len(good), 0, 0, 1), payload=good),
         ]
         for i, b in enumerate(bad):
             try:
