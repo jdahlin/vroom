@@ -415,8 +415,10 @@ static bool pp_include_guard_is_known(const pp *p, const lex_file *f)
 {
 	bool seen = false;
 
+	/* clang: an entry whose #ifndef found its macro undefined (one that found it defined, its
+	   body skipped, does not make the guard known: Preprocessor::HandleIfdefDirective) */
 	for (uint32_t i = 0; i < p->nfe && !seen; i++)
-		seen = p->fe[i].f == f;
+		seen = p->fe[i].f == f && p->fe[i].guard_open;
 	for (int i = 0; i < p->depth && seen; i++)
 		if (p->cx[i].type == PP_CONTEXT_FILE && p->cx[i].f == f)
 			return false;
@@ -629,6 +631,7 @@ VPRIV void pp_file_enter(pp *p, const lex_file *f, const char *path, int32_t sdi
 	pp_file_entry_add(p, c, f, path);
 	p->fe[c->fe].comment_position = f->src;
 	p->fe[c->fe].sys = sys;
+	p->fe[c->fe].guard_open = fi->guard && !pp_macro_guard_is_defined(p, fi->guard);
 	if (unlikely(p->lmark) && f != &p->builtin)
 		pp_line_marker_file_enter(p, &p->fe[c->fe]);
 	p->fe[c->fe].from = from && from->f != &p->builtin && from->i ? from->loc + from->vt[from->i - 1].off : 0;

@@ -264,7 +264,7 @@ static pp_header_cache_entry *pp_header_cache_entry_publish(pp *p, const pp_head
 		const pp_file_entry *f = &p->fe[L->fe0 + i];
 
 		fe[i] = (pp_header_cache_file){ f->f, f->fi, pp_header_cache_string_share(p, f->name, f->namelen), pp_header_cache_string_share(p, f->spath, strlen(f->spath)),
-				 f->namelen, f->base - L->base0, f->sys };
+				 f->namelen, f->base - L->base0, f->sys, f->guard_open };
 	}
 	e->fe = fe;
 	e->span = p->next_location_base - L->base0;

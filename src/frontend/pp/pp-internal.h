@@ -172,6 +172,8 @@ typedef struct pp_file_entry {
 	uint32_t namelen;
 	const char *spath;	/* as spelled, for dependency files */
 	uint8_t sys;		/* a system header (found in a system directory, or included by one) */
+	uint8_t guard_open;	/* its include guard's macro was undefined when it was entered: from then on
+				   clang knows the guard (MultipleIncludeOpt) and does not enter it again */
 	uint32_t from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
 	uint32_t diagnostic_state;	/* the #pragma diagnostic state where it was entered (pdnode index) */
 	const char *comment_position;	/* -C: its comments before here are printed or dropped (NULL: none yet) */

@@ -1,5 +1,6 @@
 /* vcc preprocessor: the -E printer: spacing, line markers, comments and the output buffer */
 #include "pp-internal.h"
+#include <ctype.h>
 
 /* ---------------- -E text ---------------- */
 
@@ -447,6 +448,142 @@ VPRIV __attribute__((noinline)) unsigned pp_token_column(const pp *p, uint32_t l
 			s--;
 }
 
+/*
+ * #pragma message, GCC warning, GCC error: clang -E prints them from the message they carry (its
+ * PragmaMessage callback): the string literals concatenated and decoded, then '\\', '"' and what is
+ * not printable as octal escapes, in the form message("...") or GCC warning "...".  s/n: the
+ * directive's text after '#'; the line in out (at most cap bytes), its length; 0: not such a pragma
+ * or not plain string literals (printed as it is).
+ */
+static __attribute__((noinline, cold)) size_t pp_pragma_message_render(const char *s, size_t n, char *out, size_t cap)
+{
+	const char *e = s + n, *kind;
+	size_t o;
+	bool paren = false, any = false;
+
+#define PM_WS() while (s < e && (*s == ' ' || *s == '\t')) s++
+#define PM_WORD(w) (e - s >= (ptrdiff_t)sizeof(w) - 1 && !memcmp(s, w, sizeof(w) - 1) && \
+		    (e - s == (ptrdiff_t)sizeof(w) - 1 || s[sizeof(w) - 1] == ' ' || s[sizeof(w) - 1] == '\t' || \
+		     s[sizeof(w) - 1] == '(' || s[sizeof(w) - 1] == '"') && (s += sizeof(w) - 1))
+	PM_WS();
+	if (!PM_WORD("pragma"))
+		return 0;
+	PM_WS();
+	if (PM_WORD("message")) {
+		kind = "pragma message(\"";
+	} else if (PM_WORD("GCC")) {
+		PM_WS();
+		if (PM_WORD("warning"))
+			kind = "pragma GCC warning \"";
+		else if (PM_WORD("error"))
+			kind = "pragma GCC error \"";
+		else
+			return 0;
+	} else {
+		return 0;
+	}
+	PM_WS();
+	if (s < e && *s == '(')
+		paren = true, s++;
+	o = strlen(kind);
+	if (o + 8 > cap)
+		return 0;
+	memcpy(out, kind, o);
+	for (;;) {
+		PM_WS();
+		if (s >= e || *s != '"')
+			break;
+		any = true;
+		for (s++; s < e && *s != '"'; s++) {
+			unsigned ch = (unsigned char)*s;
+
+			if (ch == '\\' && s + 1 < e) {
+				ch = (unsigned char)*++s;
+				switch (ch) {
+				case 'n': ch = '\n'; break;
+				case 't': ch = '\t'; break;
+				case 'r': ch = '\r'; break;
+				case 'a': ch = 7; break;
+				case 'b': ch = 8; break;
+				case 'f': ch = 12; break;
+				case 'v': ch = 11; break;
+				case 'e': ch = 27; break;
+				case 'x': {
+					unsigned v = 0;
+
+					while (s + 1 < e && isxdigit((unsigned char)s[1]))
+						s++, v = v * 16 + (unsigned)(isdigit((unsigned char)*s) ? *s - '0' : (*s | 32) - 'a' + 10);
+					ch = v & 255;
+					break;
+				}
+				default:
+					if (ch >= '0' && ch <= '7') {
+						unsigned v = ch - '0';
+
+						for (int k = 0; k < 2 && s + 1 < e && s[1] >= '0' && s[1] <= '7'; k++)
+							v = v * 8 + (unsigned)(*++s - '0');
+						ch = v & 255;
+					} else if (ch == 'u' || ch == 'U') {
+						/* a universal character name: its UTF-8 bytes */
+						unsigned v = 0, nd = ch == 'u' ? 4 : 8;
+						unsigned char u8[4];
+						int nu;
+
+						for (unsigned k = 0; k < nd; k++, s++) {
+							if (s + 1 >= e || !isxdigit((unsigned char)s[1]))
+								return 0;
+							v = v * 16 + (unsigned)(isdigit((unsigned char)s[1]) ? s[1] - '0' : (s[1] | 32) - 'a' + 10);
+						}
+						nu = v < 0x80 ? 1 : v < 0x800 ? 2 : v < 0x10000 ? 3 : 4;
+						if (v > 0x10ffff || o + 4 * nu + 4 > cap)
+							return 0;
+						if (nu == 1)
+							u8[0] = (unsigned char)v;
+						else {
+							for (int k = nu - 1; k > 0; k--, v >>= 6)
+								u8[k] = (unsigned char)(0x80 | (v & 63));
+							u8[0] = (unsigned char)((0xf00u >> nu) | v);
+						}
+						for (int k = 0; k < nu - 1; k++) {
+							out[o++] = '\\';
+							out[o++] = (char)('0' + (u8[k] >> 6 & 7));
+							out[o++] = (char)('0' + (u8[k] >> 3 & 7));
+							out[o++] = (char)('0' + (u8[k] & 7));
+						}
+						ch = u8[nu - 1];
+					}
+					break;
+				}
+			}
+			if (o + 6 > cap)
+				return 0;
+			if (ch >= 32 && ch < 127 && ch != '\\' && ch != '"') {
+				out[o++] = (char)ch;
+			} else {
+				out[o++] = '\\';
+				out[o++] = (char)('0' + (ch >> 6 & 7));
+				out[o++] = (char)('0' + (ch >> 3 & 7));
+				out[o++] = (char)('0' + (ch & 7));
+			}
+		}
+		if (s >= e)
+			return 0;
+		s++;
+	}
+	PM_WS();
+	if (!any || (paren && (s >= e || *s++ != ')')))
+		return 0;
+	PM_WS();
+	if (s != e || o + 3 > cap)
+		return 0;
+	out[o++] = '"';
+	if (kind[7] == 'm')
+		out[o++] = ')';
+	return o;
+#undef PM_WS
+#undef PM_WORD
+}
+
 /* the token as clang -E -P prints it */
 static inline void pp_token_render(pp *p, const ptok *t)
 {
@@ -495,10 +632,16 @@ static inline void pp_token_render(pp *p, const ptok *t)
 		if (t->len == 31 && !memcmp(t->s, "pragma clang assume_nonnull end", 31))
 			line = p->cur_line;
 		pp_output_line_move(p, line, true);
-		pp_output_reserve(p, t->len + 2);
+		pp_output_reserve(p, 4 * t->len + 32);
 		p->out[p->nout++] = '#';
-		memcpy(p->out + p->nout, t->s, t->len);
-		p->nout += t->len;
+		size_t mn = t->len > 8 && memchr(t->s, '"', t->len) ? pp_pragma_message_render(t->s, t->len, p->out + p->nout, 4 * t->len + 30) : 0;
+
+		if (mn) {
+			p->nout += mn;
+		} else {
+			memcpy(p->out + p->nout, t->s, t->len);
+			p->nout += t->len;
+		}
 		p->col = 1, p->edir = 1, p->sol_on = 0;
 		p->pk = LEX_TOKEN_EOF, p->previous_end = NULL;
 		return;
