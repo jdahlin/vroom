@@ -57,7 +57,7 @@ VPRIV void vl_goto(vl *L, uint32_t b, uint32_t t)
 	if (vir_layout_duplicate(L->f, L->lp, VLT.hl, b, t, vl_fnext(L), L->dup, !L->e->E->noopt)) {
 		int d = L->dup++;
 
-		vl_block(L, t);
+		virbuild_lower_block(&L->drv, t);
 		L->dup = d;
 		return;
 	}

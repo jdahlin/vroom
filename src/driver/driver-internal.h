@@ -88,7 +88,7 @@ struct driver_job {
 	char *pmap;
 	double t0;
 	int comments, nomarkers;
-	int dmacros, showinc, ddefs, syntax, layout, ms_anon, short_wchar, strict_flex_arrays, tokhash, emit, objmode;
+	int dmacros, showinc, ddefs, syntax, layout, lint, ms_anon, short_wchar, strict_flex_arrays, tokhash, emit, objmode;
 	const char *stdver, *macos_min;
 	int fast_root4, nocontract;
 	int macos_min_flag, uchar, fmath;	/* fmath: 1 finite-only, 2 no errno, 4 __FAST_MATH__, 8 -pthread, 16 errno, 32 __ARM_FP_FAST */

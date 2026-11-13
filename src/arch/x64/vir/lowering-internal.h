@@ -6,6 +6,7 @@
 #include "../codegen/x64impl.h"
 #include "../../../codegen/walk/proto.h"
 #include "../../../codegen/vir/preir.h"
+#include "../../../codegen/vir/lowering-driver.h"
 #include "vir/layout.h"
 
 typedef struct vx {
@@ -23,6 +24,7 @@ typedef struct vx {
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
 	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
 	uint32_t testv; uint8_t testsize; int64_t testimm;
+	virbuild_lowering drv;	/* the shared driver's inputs (codegen/vir/lowering-driver.h) */
 } vx;
 
 VPRIV void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size);
@@ -38,8 +40,9 @@ VPRIV void vx_raw(vx *L, const char *s);
 VPRIV void vx_simd(vx *L, const char *op, int d, int a, int b);
 VPRIV void vx_mat(vx *L, uint8_t dst, uint32_t v);
 VPRIV void vx_memslot(vx *L, bool load, uint8_t reg, uint32_t s);
-VPRIV void vx_edits(vx *L, uint32_t *at, uint32_t end, uint32_t pos);
+VPRIV void vx_edit(vx *L, const vir_edit *x);
 VPRIV void vx_edge(vx *L, uint32_t b, uint32_t k);
+VPRIV void vx_edge_moves(vx *L, uint32_t g);
 VPRIV uint32_t vx_target(vx *L,uint32_t b,uint32_t k,uint32_t target);
 VPRIV uint32_t vx_next(const vx *L);
 VPRIV void vx_goto(vx *L, uint32_t b, uint32_t target);
@@ -57,6 +60,5 @@ VPRIV bool vx_sign64(vx *L,uint32_t v);
 VPRIV void vx_memblock(vx *L,const vir_ins *i,int dst,int src);
 VPRIV uint8_t vx_condition(vx *L,uint32_t b,uint32_t v,uint32_t value,int reg);
 VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res);
-VPRIV void vx_block(vx *L, uint32_t b);
 
 #endif

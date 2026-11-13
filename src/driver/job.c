@@ -172,7 +172,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 				return;
 			}
 		}
-		cc_opts co = { .target = job->po.target, .unsigned_char = job->po.unsigned_char, .dump_layouts = job->layout, .ms_anon = job->ms_anon, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
+		cc_opts co = { .target = job->po.target, .unsigned_char = job->po.unsigned_char, .dump_layouts = job->layout, .lint = job->lint, .ms_anon = job->ms_anon, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->std, .c2y = job->std == 23 && job->stdver && !strcmp(job->stdver, "202400L"), .implicit_int = job->std == 89 || job->wimpl_int, .implicit_fn = job->std == 89 || job->wimpl_fn, .conv_warn = job->conv_warn,
 				.strict_std = job->strict,
 				.fast_math = job->fast_root4 && (job->fmath & 7) == 7, .no_fp_contract = job->nocontract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->nobuiltin, .no_jump_tables = job->nojt, .instrument = job->instr, .wasm_sjlj = job->sjlj,

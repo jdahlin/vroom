@@ -114,6 +114,9 @@ relative to it); `TODO.md` stays at the top.
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
     and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
+    Passes on VIR: `include/vir/pass.h` (interface, registry, `vir_pass_run`'s check of
+    `keeps`), `pass-list.c` (the registry), `compact.c` (`vir_function_compact`), one pass
+    per file in `pass/`; `virtest --passes` runs them (`doc/quality/DESIGN-vir-optimizer.md`).
     Depends on nothing in `frontend/`, `codegen/` or `arch/`.
     `bin/virtest/` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
@@ -258,6 +261,7 @@ bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.was
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
+bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.c): cases with /* diag-vpp-flags: --lint */
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)

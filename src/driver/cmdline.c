@@ -199,6 +199,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			continue;
 		}
 		if (!strcmp(a, "--vcc-layout-checks")) { job->syntax = 1; job->layout = 1; continue; }
+		if (!strcmp(a, "--lint")) { job->syntax = 1; job->lint = 1; continue; }	/* vpp only: the style checks, front end alone */
 		if (!strcmp(a, "--vcc-tokhash")) { job->tokhash = 1; continue; }
 		if (!strcmp(a, "-o") && i + 1 < argc) { job->out = argv[++i]; continue; }
 		if (!strncmp(a, "-Wp,-MMD,", 9) || !strncmp(a, "-Wp,-MD,", 8)) {

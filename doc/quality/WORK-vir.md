@@ -166,7 +166,13 @@ Five sub-steps, one PR each.  Order and parallelism:
 
 **Status (main at ddbb6413):** 2a merged (#167), 2b merged (#175), 2c
 merged (#154) without the debug check `VCC_VIR_CHECK_ANALYSES=1` (it now
-comes with step 4.0), 2d merged (#172).  2e is open.
+comes with step 4.0), 2d merged (#172).  2e done in `src/codegen/vir/lowering-driver.[ch]`
+(branch `quality/vir-lowering-driver`): the table differs from the sketch below in
+these ways, all forced by what the two targets share: `block_enter` (the code after a
+block's label from the layout loop), `body_begin`, `block_end` (arm64's edge blocks), `fail`,
+`edge_blocks_at_end` is not a field (each target's own `block_end`/`after_blocks` places
+them, both through `virbuild_lower_edge_block`), and the driver's input struct also holds the
+operand buffers arm64 fills (`skip_multi_operands`) and `skip_at`.  `vl_grow`/`vx_grow` untouched.
 
 #### 2a. One pass per file in the builder (moves only)
 
@@ -222,13 +228,13 @@ switch.
 The table (`src/codegen/vir/pass-table.c`, type in `pass-table.h`):
 
 ```c
-typedef struct vir_pass {
+typedef struct virbuild_pass {
 	const char *name;          /* stable; VCC_VIR_PASSES and the statistics use it */
 	bool (*run)(ecx *e);       /* returns whether it changed anything */
 	uint8_t needs;             /* PIR_ORDER, PIR_PREDS, PIR_DOMS: facts it reads */
 	uint8_t keeps;             /* the facts still valid after it; the others are cleared */
 	uint8_t flags;             /* PASS_REQUIRED, PASS_THEN_TRIVIAL, PASS_IF_PREVIOUS_CHANGED, PASS_VECTOR_GATE */
-} vir_pass;
+} virbuild_pass;
 ```
 
 One row per step of `vw_emit` today, in its order (Q-VIRB 3.1):
@@ -604,7 +610,7 @@ One PR, `src/vir/`, `src/include/vir/`, `src/bin/virtest/`,
 `src/codegen/vir/pass-table.[ch]`, `src/Makefile` (`vir_SRC`),
 `doc/SPEC-vir.md` (14, 16, 17.1), as the design's sections 1-4 say:
 
-1. rename `vir_pass*` in `codegen/vir/` to `virbuild_pass*` (STYLE);
+1. rename `virbuild_pass*` in `codegen/vir/` to `virbuild_pass*` (STYLE);
 2. `src/include/vir/pass.h`, `src/vir/pass-list.c` (empty registry),
    `src/vir/compact.c` (`vir_function_compact`, tested from
    `virtest --selftest`), the `VCC_VIR_CHECK_ANALYSES=1` check 2c left out;
