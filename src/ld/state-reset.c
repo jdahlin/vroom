@@ -41,7 +41,7 @@ static void reset_state(void)
 	has_tls = headers_loaded = false;
 	x86_ld = false;
 	atomic_store(&ld_machine, 0);
-	tls_tp = tbss_off = 0;
+	tls_tp = tls_start = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;
 	tr_keys = NULL;
