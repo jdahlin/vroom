@@ -219,6 +219,7 @@ VPRIV uint32_t *vw_succp(vwst *V, uint32_t b, uint32_t k);
 VPRIV void vw_thread(ecx *e);
 VPRIV void vw_rpo(ecx *e);
 VPRIV void vw_preds(ecx *e);
+VPRIV uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b);
 VPRIV void vw_split(ecx *e);
 
 /* parameters.c */
@@ -231,7 +232,6 @@ VPRIV bool vw_promote(ecx *e);
 
 /* if-conversion.c */
 VPRIV bool vw_armempty(vwst *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t *n);
-VPRIV uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b);
 VPRIV bool vw_ifconv(ecx *e);
 
 /* condition-merge.c */

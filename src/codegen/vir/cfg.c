@@ -188,6 +188,14 @@ VPRIV void vw_doms(ecx *e, vwsimp *S)
 	free(ri);
 }
 
+VPRIV uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b)
+{
+	for (uint32_t i = 0; i < V->b[j].npred; i++)
+		if (V->pr[V->b[j].pred + i] == b)
+			return i;
+	return VW_NOBLK;
+}
+
 /* the edge b -> t needs a block of its own: t has parameters and b does not end in br */
 VPRIV void vw_split(ecx *e)
 {

@@ -141,14 +141,6 @@ static void vw_hoist(vwst *V, uint32_t a, uint32_t b, uint32_t cond)
 	V->b[a].head = V->b[a].tail = 0;
 }
 
-VPRIV uint32_t vw_predix(const vwst *V, uint32_t j, uint32_t b)
-{
-	for (uint32_t i = 0; i < V->b[j].npred; i++)
-		if (V->pr[V->b[j].pred + i] == b)
-			return i;
-	return VW_NOBLK;
-}
-
 VPRIV bool vw_ifconv(ecx *e)
 {
 	vwst *V = e->vw;
