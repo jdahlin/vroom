@@ -369,7 +369,8 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 					if(E->scc[t]==v || !inl_cand(E,c,t))continue;
 					bool take=c->syms[t].flags&SF_ALWAYS_INLINE;
 					if(!take) {
-						bool once=(E->once[t]&1) && c->syms[t].sc==SC_STATIC && !sym_attrs(c,t)->used;
+						bool once=(E->once[t]&1) && c->syms[t].sc==SC_STATIC && !sym_attrs(c,t)->used &&
+						          E->fnsize[s]<=WK_INLINE_ONCE;
 						take=once ? E->fnsize[t]<=WK_INLINE_ONCE : E->isz[t]<=lim ||
 						 (E->isz[t]<=lim*WK_INLINE_CONST_FACTOR && inl_constarg(E,c,t,edge.call));
 					}

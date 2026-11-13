@@ -82,6 +82,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_bytes.c', {'be16', 'be32', 'signed32', 'signedlow32', 'signedvol32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_inline_context.c', {'wrapped', 'layer1', 'layer2', 'constant0', 'constant1', 'general', 'ignored0', 'ignored1'}, {}),
+        ('vir_inline_large.c', {'helper', 'large', 'reference'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),
@@ -105,6 +106,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
+            if filename == 'vir_inline_large.c':
+                body = asm.read_text().split('large:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if not re.search(r'\bcall\w*\s+helper\b', body):
+                    raise SystemExit('large: once-only bonus copied an oversized helper into a large caller')
             if filename == 'vir_x86_inline.c':
                 body = asm.read_text().split('work:\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if re.search(r'\bcall\w*\b', body):

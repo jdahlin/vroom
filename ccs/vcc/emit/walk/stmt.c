@@ -1334,7 +1334,12 @@ VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call)
 		   static function called once is its only copy, so inlined up to a large body
 		   (clang's last-call-to-static bonus) */
 		if (e->vtry && e->E->isz) {
-			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used;
+			uint32_t caller=e->wk->inl?e->wk->inl->fn:e->wk->fsym;
+			/* Keep the ordinary/context budget when the caller already
+			 * exceeds the large-copy budget: even one copy can grow its
+			 * allocation unit and register pressure substantially. */
+			bool once = (e->E->once[s] & 1) && y->sc == SC_STATIC && !sym_attrs(c, s)->used &&
+			            e->E->fnsize[caller]<=WK_INLINE_ONCE;
 
 			lim = once ? WK_INLINE_ONCE : WK_INLINE_VIR;
 			/* fn_isize includes the same constant-argument sites bottom-up,

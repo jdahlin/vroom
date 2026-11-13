@@ -240,6 +240,61 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
+2026-11-13, begränsa engångsbonus i redan stora anropare:
+Den gemensamma walkern och bottom-up-storleksmodellen ger inte längre
+4000-nodersbonusen till en engångskropp när anroparens egen AST redan är
+större än 4000 noder. Ordinarie 150-nodersbudget och den kontextkänsliga
+600-nodersbudgeten finns kvar; always_inline, noinline och övriga
+legalitetsregler ändras inte. Beslutet använder den ursprungliga anroparen
+på varje nästlad anropsplats, precis som anropsgrafens storleksmodell.
+Samma kod används för ARM och x86; ingen funktion identifieras med namn.
+
+Mätningen pekade på VM:n: adressmatchade byten av clangs IndexMoveto och
+TableMoveto gav ingen helprogramvinst (1244,93 ms kontroll, 1251,77 index,
+1243,61 table, 1247,02 båda; clang 1112,85). En VM-hybrid krävde först
+utskrivning av statiska hjälpfunktioner som normalt inlinas bort, utan
+ändrade inliningbeslut; VM:ns assembly var byteidentisk med originalet.
+Clangs VM anropade sedan dessa VCC-hjälpare. Delade statiska objekt mappades
+till VCC:s original och privata konstanta objekt hölls i VM:ns textslot.
+Alla 2526 textadresser matchade mellan kontroll och hybrid. Den gav
+1263,74 → 1216,81 ms i första serien, men bara 1365,33 → 1351,09 under
+last i upprepningen. Det är diagnostiska hybrider, inte en kompilatorvinst.
+Underlag `work/vir-x86-perf/hybrid-large/{index,roots,vm}`; den temporära
+ändringen som skrev ut alla statiska funktioner är återställd.
+
+Den faktiska budgetändringen ger i SQLite VdbeExec 24854 → 17295
+instruktioner (−30,4 %), 119382 → 82806 kodbyte och 2680 → 1800 bytes
+stackram. Hela amalgamationen 387383 → 383946 statiska instruktioner.
+Dynamiskt i speedtest1 main storlek 100: 21,908 → 21,204 miljarder
+instruktioner, kvoten mot clang 1,314× → 1,272×.
+
+Alternerade CPU-medianer i ms, samma källor/flaggar och verifieringshash:
+
+| Serie | CPU | Prov | clang | Före | Efter | Efter/clang |
+|---|---:|---:|---:|---:|---:|---:|
+| Första | 7 | 5 | 1133,16 | 1266,92 | 1245,37 | 1,099× |
+| Kontenderad upprepning | 7 | 5 | 1244,04 | 1329,83 | 1408,20 | 1,132× |
+| Kontenderat annat kärnpar | 4 | 5 | 1381,46 | 1675,55 | 1558,73 | 1,128× |
+| Lugnare efter att arbetarna slutat | 7 | 5 | 1113,51 | 1241,84 | 1228,60 | 1,103× |
+| Slutbygge, kort bekräftelse | 7 | 3 | 1127,85 | 1261,80 | 1244,99 | 1,104× |
+
+Sex andra Python-arbetare drev CPU-tiderna kraftigt i de två kontenderade
+serierna; råproven sparas utan filtrering. De tre lugnare serierna ger
+**1,1–1,7 % vinst**, men **målet 1,05× är fortfarande öppet**. Slutbyggets
+SQLite-binär är byteidentisk med den först mätta kandidaten. Underlag
+`work/vir-x86-perf/large-once/{results100,repeat100,idle4,quiet7,final3}` och
+`work/vir-x86-perf/large-once-final`.
+
+`vir_inline_large.c` behåller en riktig call-gräns till en engångshjälpare
+i en stor aritmetisk funktion; resultaten jämförs med separata slingor över
+samma osignerade beräkning, även för extrema ingångsvärden. Befintliga
+prov behåller engångsbonusen för små anropare. Validerat: egna x86 317/317,
+GCC 1615/1615, TCC 105/105, samma fem kända inlinefel (namnen kontrollerade),
+fokuserat ASan/UBSan och filvist bygge gröna. ARM/QEMU 48/48 VIR-prov;
+ARM:s nativeprestanda är inte mätt. TSVC 151/151 kontrollsummor och **83**
+vektorloopar kvar, 158 sänkta funktioner. Prefixkontroll 134 namn och
+fokusriggerns befintliga O0/O1-prov gröna.
+
 2026-11-13, gemensam kontextkänslig inlining:
 VIR:s delade prepass/walker sparar nu anropsplatsen i anropsgrafen. En
 konstant heltals- eller nullpekare till en refererad parameter kan ge upp

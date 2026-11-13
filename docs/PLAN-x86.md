@@ -1157,3 +1157,19 @@ VM:n och större sökrutiner. Ingen ny optimeringskod behålls från denna
 omgång; prototyper med färre kopior/tester var neutrala eller långsammare.
 Fulla mätningar och avvisade försök under V4 i PLAN-vir.md. Den återställda
 kompilatorn passerar fokuserade x86-riggen och VIR:s självprov.
+
+
+### 2026-11-13: engångsbonus begränsad i stora anropare
+
+Den delade inlinern behåller vanliga/kontextkänsliga budgetar när en
+anropares egen AST redan är större än engångsbonusens 4000 noder. Därmed
+växer inte en redan stor allokeringsenhet enbart för att hjälparen har en
+referens. Walkern och bottom-up-storleksmodellen fattar samma beslut.
+SQLite VdbeExec 24854 → 17295 instruktioner, 119382 → 82806 kodbyte och
+2680 → 1800 bytes ram. Tre lugnare speedtest1-serier ger 1,1–1,7 % vinst,
+1,099–1,104× clang; kontenderade serier varierar kraftigt och redovisas
+också under V4 i PLAN-vir.md. **1,05×-målet är fortsatt öppet.**
+Validerat: egna x86 317/317, GCC 1615/1615, TCC 105/105 och samma fem kända
+inlinefel; ARM/QEMU 48/48, fokuserat ASan/UBSan och filvist bygge gröna.
+TSVC 151/151 och **83** vektorloopar; prefixkontroll 134 namn. Slutbyggets
+SQLite-binär är byteidentisk med den mätta kandidaten.
