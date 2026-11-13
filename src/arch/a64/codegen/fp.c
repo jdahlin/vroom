@@ -75,26 +75,7 @@ VPRIV void vr_load(ecx *e, int sz, int vr, int base, int64_t off)
 }
 
 /* host side: binary128 bits of a double (exact), and back (nearest) */
-VPRIV i128 ld_of_d(double x)
-{
-	uint64_t u;
-	int s, ex;
-	u128 m;
-
-	memcpy(&u, &x, 8);
-	s = (int)(u >> 63), ex = (int)(u >> 52) & 0x7ff, m = u & ((1ull << 52) - 1);
-	if (ex == 0x7ff)
-		return (i128)((u128)s << 127 | (u128)0x7fff << 112 | m << 60 | (m ? (u128)1 << 111 : 0));
-	if (!ex) {
-		if (!m)
-			return (i128)((u128)s << 127);
-		ex = 1;
-		while (!(m >> 52))
-			m <<= 1, ex--;
-		m &= (1ull << 52) - 1;
-	}
-	return (i128)((u128)s << 127 | (u128)(ex - 1023 + 16383) << 112 | m << 60);
-}
+VPRIV i128 ld_of_d(double x) { return (i128)vsoftfloat_of_double(x); }
 static double ld_to_d(i128 b)
 {
 	u128 u = (u128)b, m = u & (((u128)1 << 112) - 1);
