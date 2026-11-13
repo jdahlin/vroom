@@ -1,6 +1,6 @@
 {
- "redundant_tokens": 45845,
- "duplicate_runs_across_files": 242,
+ "redundant_tokens": 46027,
+ "duplicate_runs_across_files": 243,
  "fnv_hash_files": 18,
  "realloc_calls": 97,
  "mmap_calls": 25,
