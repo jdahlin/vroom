@@ -396,6 +396,16 @@ static void walk_declaration_emit(codegen_context *e, const node *x)
 		}
 	}
 	e->walk_state->constant_generations[s] = 0;
+	/* A read of a never-written automatic integer has an indeterminate
+	   value. Choose zero without allocating or reading a stack slot. */
+	if (e->unit->options->opt && !x->b && codegen_type_is_integer(c, y->ty) && !walk_type_is_in_memory(e, y->ty) &&
+	    !(e->unit->symbol_flags[s] & (CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_CONSTANT_WRITTEN | CODEGEN_SYMBOL_CONSTANT_MULTIPLE)) && !e->unit->local_needs_memory[s] &&
+	    !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) && !(T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+	    !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && y->sc != AST_STORAGE_REGISTER && !codegen_symbol_attributes(c, s)->cleanup) {
+		e->walk_state->constant_generations[s] = e->walk_state->generation;
+		e->walk_state->constant_values[s] = codegen_value_constant(0);
+		return;
+	}
 	if (e->unit->options->opt && x->b && !codegen_expression_has_side_effects(c, x->b) && !codegen_symbol_attributes(c, s)->cleanup) {
 		/* A side-effect-free constant initializer for a local never written. */
 		cc_value cv;

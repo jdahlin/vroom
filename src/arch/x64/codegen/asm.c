@@ -133,7 +133,11 @@ static void x64_asmmem(cc *c, tbuf *b, const codegen_lvalue *l)
 	if (l->offset)
 		vtext_signed_append(b, l->offset);
 	vtext_char_append(b, '(');
-	x64_asmreg(b, l->kind == CODEGEN_LVALUE_FRAME ? RBP : l->register_number, 8, false);
+	/* Resolve negative frame offsets after all local alignments are known. */
+	if (l->kind == CODEGEN_LVALUE_FRAME && l->offset < 0)
+		vtext_char_append(b, 0);
+	else
+		x64_asmreg(b, l->kind == CODEGEN_LVALUE_FRAME ? RBP : l->register_number, 8, false);
 	vtext_char_append(b, ')');
 }
 
@@ -481,15 +485,15 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			while (N(an)->op == AST_NODE_CAST && (N(an)->aux == AST_CAST_NOP || N(an)->aux == AST_CAST_POINTER_TO_POINTER || N(an)->aux == AST_CAST_ARRAY_DECAY ||
 						       N(an)->aux == AST_CAST_FUNCTION_DECAY))
 				an = N(an)->a;
-			if (N(an)->op == AST_NODE_ADDRESS)
-				an = N(an)->a;
+			bool address = N(an)->op == AST_NODE_ADDRESS;
+			if (address) an = N(an)->a;
 			if (i < 64 && (pkm >> i & 1)) {
 				v = pkv[i];	/* an inlined parameter still holding its constant argument */
 			} else if (codegen_type_is_integer(e->compile_context, N(en)->ty) && cc_eval(e->compile_context, en, &cv) && cv.kind == CC_VALUE_INTEGER) {
 				/* an integer constant expression as the front end folds it (__builtin_clzll(63), ...) */
 				v = codegen_value_constant(codegen_integer_truncate(e->compile_context, cv.i, N(en)->ty));
 			} else if (e->compile_context->o->pic && N(an)->op == AST_NODE_VARIABLE && (c->syms[N(an)->a].kind == AST_SYMBOL_FUNCTION ||
-				   (c->syms[N(an)->a].kind == AST_SYMBOL_VARIABLE && !codegen_symbol_is_local_variable(c, N(an)->a)))) {
+				   (c->syms[N(an)->a].kind == AST_SYMBOL_VARIABLE && (address || codegen_type_is_array(c, N(an)->ty)) && !codegen_symbol_is_local_variable(c, N(an)->a)))) {
 				/* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
 				v = (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, codegen_symbol_canonical(c, N(an)->a)) };
 			} else {
@@ -498,6 +502,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		}
 		if (v.kind == CODEGEN_VALUE_CONSTANT || v.kind == CODEGEN_VALUE_ADDRESS) {	/* (an address is an immediate under -fPIC too, as clang) */
 			bool imm = false;
+			if (v.kind == CODEGEN_VALUE_ADDRESS) codegen_reference_note(e, v.reference);
 
 			for (const char *p = cs; *p; p++)
 				if (v.kind == CODEGEN_VALUE_ADDRESS ? (*p == 'i' || *p == 'g' || *p == 's') : x64_immok(*p, v.integer))
@@ -505,8 +510,6 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			if (imm) {
 				o->kind = XO_IMM;
 				o->v = v;
-				if (v.kind == CODEGEN_VALUE_ADDRESS)
-					codegen_reference_note(e, v.reference);
 				continue;
 			}
 		}
@@ -578,13 +581,6 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				x64_tfree(e, op[i].v.register_number);
 				break;
 			}
-	/* Raw text cannot defer frame-base selection to the printer. Materialize
-	   frame operands through the regular address record, including realignment. */
-	for (uint32_t i = 0; i < nops; i++)
-		if (op[i].kind == XO_MEM && op[i].l.kind == CODEGEN_LVALUE_FRAME) {
-			int r = x64_laddr(e, &op[i].l);
-			op[i].l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r };
-		}
 	/* the template: {att|intel} alternatives keep the first */
 	start = rb->n;
 	if (basic) {
@@ -768,8 +764,17 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		}
 	}
 	uint32_t asm_live = X->live;
+	/* Register inputs are dead after the template. Output
+	   writeback can reuse them while all output values stay live. */
+	uint32_t writeback_live = asm_live;
+	for (uint32_t i = a->nout; i < nops; i++) {
+		if (op[i].kind == XO_REG && op[i].tied < 0 && !op[i].sp)
+			writeback_live &= ~(1u << op[i].reg);
+	}
+	for (uint32_t i = 0; i < a->nout; i++)
+		if (op[i].kind == XO_REG) writeback_live |= 1u << op[i].reg;
 	for (uint32_t edge = 0; edge <= a->nlabel; edge++) {
-		X->live = asm_live;
+		X->live = writeback_live;
 		if (edge) x64_label(e, edges[edge - 1]);
 		/* The prepass keeps every output address-backed (lnoreg). Its
 		   address was evaluated after fixed registers were reserved, so it
@@ -794,6 +799,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			} else {
 				x64_store(e, o->reg, &o->l, o->size);
 			}
+			if (o->lpark) x64_tfree(e, o->l.register_number);
 		}
 		for (int r = 0; r < 32; r++)
 			if (saved & (1u << r)) {
@@ -814,7 +820,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			x64_tfree(e, o->reg);
 		if (o->kind == XO_X87 && o->out && o->l.kind == CODEGEN_LVALUE_REGISTER)
 			x64_tfree(e, o->l.register_number);
-		if (o->out && o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield)
+		if (o->out && o->l.kind == CODEGEN_LVALUE_REGISTER && !o->l.is_bitfield && !o->lpark)
 			x64_tfree(e, o->l.register_number);
 		if (!o->out && o->kind == XO_MEM && o->l.kind == CODEGEN_LVALUE_REGISTER)
 			x64_tfree(e, o->l.register_number);

@@ -111,14 +111,19 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 	ast_qualified_type xt;
 	unsigned bits, width;
 
+	bool stdc = id == CC_BUILTIN_STDC_COUNT_ONES || id == CC_BUILTIN_STDC_TRAILING_ZEROS;
+	if (stdc)
+		id = id == CC_BUILTIN_STDC_COUNT_ONES ? CC_BUILTIN_POPCOUNTG : CC_BUILTIN_CTZG;
+	unsigned maxargs = stdc || id == CC_BUILTIN_POPCOUNTG ? 1 : 2;
 	cc_builtin_arguments_parse(c, &args);
-	if (args.n < 1 || args.n > (id == CC_BUILTIN_POPCOUNTG ? 1u : 2u)) {
-		cc_builtin_arity_check(c, loc, id == CC_BUILTIN_POPCOUNTG ? 1u : args.n ? 2u : 1u, &args);
+	if (!args.n || args.n > maxargs) {
+		cc_builtin_arity_check(c, loc, args.n ? maxargs : 1, &args);
 		return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
 	}
 	x = cc_conversion_decay(c, args.v[0]);
 	xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(x)->ty);
-	if (!cc_type_is_integer(c, xt) || cc_type_is_signed(c, xt)) {
+	if (!cc_type_is_integer(c, xt) || cc_type_is_signed(c, xt) ||
+	    (stdc && (AST_TYPE_KIND(c, xt) == AST_TYPE_BOOL || AST_TYPE_KIND(c, xt) == AST_TYPE_ENUM))) {
 		cc_report_error(c, AST_NODE(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
 	}
@@ -133,8 +138,11 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 		}
 		fb = cc_conversion_apply(c, y, cc_type_basic(AST_TYPE_INT));
 	}
-	if (bits > 128)
-		return cc_builtin_bit_count_bitint(c, id, x, fb, bits, loc);
+	if (stdc && id == CC_BUILTIN_CTZG) fb = cc_node_integer_new(c, bits, cc_type_basic(AST_TYPE_INT), loc);
+	if (bits > 128) {
+		r = cc_builtin_bit_count_bitint(c, id, x, fb, bits, loc);
+		return stdc ? cc_conversion_apply(c, r, cc_type_basic(AST_TYPE_UNSIGNED_INT)) : r;
+	}
 	x = cc_lowering_once(c, x, &pre);
 	if (fb) fb = cc_lowering_once(c, fb, &fbpre);
 	if (width == 128) {
@@ -160,9 +168,9 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 	}
 	if (id == CC_BUILTIN_CLZG && bits < width)
 		r = cc_binary_build(c, LEX_TOKEN_MINUS, r, cc_node_integer_new(c, width - bits, cc_type_basic(AST_TYPE_INT), loc), loc);
-	if (args.n == 2)
+	if (fb)
 		r = cc_conditional_build(c, cc_binary_build(c, LEX_TOKEN_EXCLAMATION_EQUAL, x, cc_node_integer_new(c, 0, xt, loc), loc), r, fb, loc);
-	return cc_lowering_sequence(c, pre, cc_lowering_sequence(c, fbpre, r));
+	return cc_lowering_sequence(c, pre, cc_lowering_sequence(c, fbpre, stdc ? cc_conversion_apply(c, r, cc_type_basic(AST_TYPE_UNSIGNED_INT)) : r));
 }
 
 /* Generic rotations preserve the first operand's type and evaluate each

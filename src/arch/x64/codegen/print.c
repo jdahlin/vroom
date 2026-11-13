@@ -561,13 +561,21 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_unsigned_append(b, (uint8_t)i->immediate);
 			vtext_string_append(b, ", %xmm1, %xmm0");
 			break;
-		case X_RAW:
+		case X_RAW: {
 			if (i->condition && e->walk_state->frame_alignment > 16)
 				codegen_fatal_report(e, e->current_location, "inline asm r12 operand or clobber conflicts with aligned frame base");
 			vtext_string_append(b, "#APP\n");
-			vtext_append(b, e->raw.p + i->offset, i->reference);
+			const char *p = e->raw.p + i->offset, *end = p + i->reference;
+			while (p < end) {
+				const char *frame = memchr(p, 0, end - p);
+				vtext_append(b, p, (frame ? frame : end) - p);
+				if (!frame) break;
+				x64_reg(b, e->walk_state->frame_alignment > 16 ? R12 : RBP, 8);
+				p = frame + 1;
+			}
 			vtext_string_append(b, "\n#NO_APP");
 			break;
+		}
 		case X_JMPR:
 			if (e->unit->options->xcf & 4) {
 				vtext_string_append(b, (e->unit->options->xcf & 8) && i->registers[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
