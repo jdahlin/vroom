@@ -6,8 +6,8 @@ static const char *ld_spelling_suggestion_try(const char *cand, ld_object *ref, 
 {
 	uint32_t g = ld_global_name_find(cand);
 
-	if (g != LD_NONE && gsyms[g].state == LD_SYMBOL_STATE_OBJECT && gsyms[g].obj != LD_NONE) {
-		*where = objs.v[gsyms[g].obj]->path;
+	if (g != LD_NONE && ctx->symbols.globals[g].state == LD_SYMBOL_STATE_OBJECT && ctx->symbols.globals[g].obj != LD_NONE) {
+		*where = ctx->inputs.objects.v[ctx->symbols.globals[g].obj]->path;
 		return ld_global_name(g);
 	}
 	(void)ref;	/* (lld suggested no local of the referencing object in our tests) */
@@ -102,8 +102,8 @@ static void ld_undefined_references_report(uint32_t gid, ld_object *first, bool 
 	ld_object *reffile = NULL;
 
 	vbuffer_format_append(&b, "undefined symbol: %s", ld_global_name(gid));
-	for (uint32_t oi = 0; oi < objs.n; oi++) {
-		ld_object *o = objs.v[oi];
+	for (uint32_t oi = 0; oi < ctx->inputs.objects.n; oi++) {
+		ld_object *o = ctx->inputs.objects.v[oi];
 
 		for (uint32_t k = 1; k < o->nsh; k++) {
 			const elf_section_header *h = &o->sh[k];
@@ -143,18 +143,18 @@ static void ld_undefined_references_report(uint32_t gid, ld_object *first, bool 
 static void ld_undefined_symbols_report(void)
 {
 	uint32_t n = 0;
-	for (uint32_t i = 0; i < gorder.n; i++) {
-		ld_global_symbol *s = &gsyms[gorder.v[i]];
+	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
+		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
 		if (s->state != LD_SYMBOL_STATE_UNDEFINED || s->bind == STB_WEAK)
 			continue;
-		if ((ld_key_load(&s->first) >> 32) >= objs.n)	/* referenced only by the script */
+		if ((ld_key_load(&s->first) >> 32) >= ctx->inputs.objects.n)	/* referenced only by the script */
 			continue;
 		/* x86-64 executables relax every GD/LD sequence to LE, and its call
 		   to __tls_get_addr goes with it (lld scans no relocation there) */
-		if (x86_ld && !opt.shared && !strcmp(ld_global_name(gorder.v[i]), "__tls_get_addr"))
+		if (ctx->inputs.x86 && !ctx->options.shared && !strcmp(ld_global_name(ctx->symbols.order.v[i]), "__tls_get_addr"))
 			continue;
-		if (opt.no_undefined || !opt.shared) {
-			ld_undefined_references_report(gorder.v[i], objs.v[ld_key_load(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
+		if (ctx->options.no_undefined || !ctx->options.shared) {
+			ld_undefined_references_report(ctx->symbols.order.v[i], ctx->inputs.objects.v[ld_key_load(&s->first) >> 32], n < 2);	/* (lld: spelling for the first two) */
 			n++;
 		}
 	}

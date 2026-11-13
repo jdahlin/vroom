@@ -22,10 +22,10 @@ static bool ld_output_section_is_discardable(ld_output_section *os)
 static void ld_output_sections_adjust(void)
 {
 	uint64_t flags = SHF_ALLOC;
-	for (uint32_t c = 0; c < topcmds.n; c++) {
-		if (topcmds.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
+	for (uint32_t c = 0; c < ctx->script.commands.n; c++) {
+		if (ctx->script.commands.v[c].kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		ld_output_section *os = &osecs.v[topcmds.v[c].idx];
+		ld_output_section *os = &ctx->script.sections.v[ctx->script.commands.v[c].idx];
 		if (os->alignx) {
 			uint64_t a = ld_expression_value_resolve(ld_expression_eval(os->alignx));
 			if (a > os->addralign)
@@ -33,7 +33,7 @@ static void ld_output_sections_adjust(void)
 		}
 		bool empty = true;
 		for (uint32_t k = 0; k < os->cmds.n && empty; k++)
-			if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && isds.v[os->cmds.v[k].idx].secs.n)
+			if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->cmds.v[k].idx].secs.n)
 				empty = false;
 		bool discardable = empty && ld_output_section_is_discardable(os);
 		if (os->has_input && !discardable)

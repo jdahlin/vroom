@@ -10,14 +10,13 @@ static ld_expression *ld_script_expression_create(uint8_t op)
 	return e;
 }
 
-static ld_provide *cur_provide;
 
 static void ld_script_symbol_reference_note(uint32_t g)
 {
-	if (cur_provide)
-		VVEC_PUSH(cur_provide->refs, g, ld_region_alloc);
+	if (ctx->script.current_provide)
+		VVEC_PUSH(ctx->script.current_provide->refs, g, ld_region_alloc);
 	else
-		VVEC_PUSH(refsyms, g, ld_region_alloc);
+		VVEC_PUSH(ctx->script.referenced_symbols, g, ld_region_alloc);
 }
 
 static int ld_script_operator_precedence(const char *op)
@@ -42,10 +41,10 @@ static int ld_script_operator_precedence(const char *op)
 static int ld_script_operator_peek(char out[4])
 {
 	ld_script_whitespace_skip();
-	size_t left = (size_t)(sp_end - sp);
+	size_t left = (size_t)(ctx->script.end - ctx->script.cursor);
 	if (!left)
 		return 0;
-	char c = sp[0], c1 = left > 1 ? sp[1] : 0, c2 = left > 2 ? sp[2] : 0;
+	char c = ctx->script.cursor[0], c1 = left > 1 ? ctx->script.cursor[1] : 0, c2 = left > 2 ? ctx->script.cursor[2] : 0;
 	int n;
 	switch (c) {
 	case '<': case '>': n = c1 == c ? (c2 == '=' ? 3 : 2) : c1 == '=' ? 2 : 1; break;
@@ -56,7 +55,7 @@ static int ld_script_operator_peek(char out[4])
 	case '%': case '?': case ':': n = 1; break;
 	default: n = 0;
 	}
-	memcpy(out, sp, (size_t)n);
+	memcpy(out, ctx->script.cursor, (size_t)n);
 	out[n] = 0;
 	return n;
 }
@@ -72,7 +71,7 @@ static ld_expression *ld_script_expression_climb(ld_expression *lhs, int minp)
 			break;
 		if (!strcmp(op1, ":"))
 			break;
-		sp += n;
+		ctx->script.cursor += n;
 		if (!strcmp(op1, "?")) {
 			ld_expression *t = ld_script_expression_create(LD_EXPRESSION_TERNARY);
 			t->a = lhs;
@@ -126,8 +125,8 @@ static ld_expression *ld_script_primary_expression_parse(void)
 	if (ld_script_character_consume('-')) { ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NEGATE); e->a = ld_script_primary_expression_parse(); return e; }
 	if (ld_script_character_consume('+')) return ld_script_primary_expression_parse();
 	ld_script_whitespace_skip();
-	const char *b = sp;
-	if (sp < sp_end && *sp == '"') {
+	const char *b = ctx->script.cursor;
+	if (ctx->script.cursor < ctx->script.end && *ctx->script.cursor == '"') {
 		char *n = ld_script_name_parse();
 		uint32_t g = ld_global_name_intern(n);
 		ld_script_symbol_reference_note(g);
@@ -135,14 +134,14 @@ static ld_expression *ld_script_primary_expression_parse(void)
 		e->sym = g;
 		return e;
 	}
-	while (sp < sp_end && (ld_script_character_classes[(unsigned char)*sp] & LD_CHARACTER_IDENTIFIER))
-		sp++;
-	if (sp == b) {
+	while (ctx->script.cursor < ctx->script.end && (ld_script_character_classes[(unsigned char)*ctx->script.cursor] & LD_CHARACTER_IDENTIFIER))
+		ctx->script.cursor++;
+	if (ctx->script.cursor == b) {
 		ld_script_error_report("expected expression");
-		sp = sp_end;
+		ctx->script.cursor = ctx->script.end;
 		return ld_script_expression_create(LD_EXPRESSION_NUMBER);
 	}
-	char *tok = ld_script_text_duplicate(b, sp);
+	char *tok = ld_script_text_duplicate(b, ctx->script.cursor);
 	if (!strcmp(tok, ".")) return ld_script_expression_create(LD_EXPRESSION_DOT);
 	if (isdigit((unsigned char)tok[0])) {
 		ld_expression *e = ld_script_expression_create(LD_EXPRESSION_NUMBER);
@@ -168,13 +167,13 @@ static ld_expression *ld_script_primary_expression_parse(void)
 	if (!strcmp(tok, "ADDR")) {
 		e = ld_script_expression_create(LD_EXPRESSION_ADDRESS);
 		e->sym = ld_script_parenthesized_output_section_parse();
-		osecs.v[e->sym].used_in_expr = true;
+		ctx->script.sections.v[e->sym].used_in_expr = true;
 		return e;
 	}
 	if (!strcmp(tok, "LOADADDR")) {
 		e = ld_script_expression_create(LD_EXPRESSION_LOAD_ADDRESS);
 		e->sym = ld_script_parenthesized_output_section_parse();
-		osecs.v[e->sym].used_in_expr = true;
+		ctx->script.sections.v[e->sym].used_in_expr = true;
 		return e;
 	}
 	if (!strcmp(tok, "SIZEOF")) { e = ld_script_expression_create(LD_EXPRESSION_SIZEOF); e->sym = ld_script_parenthesized_output_section_parse(); return e; }
@@ -222,7 +221,7 @@ static ld_expression *ld_script_primary_expression_parse(void)
 		char *n = ld_script_pattern_name_parse();
 		ld_script_character_expect(')');
 		e = ld_script_expression_create(LD_EXPRESSION_NUMBER);
-		e->num = !strcmp(n, "MAXPAGESIZE") ? opt.max_page : 4096;
+		e->num = !strcmp(n, "MAXPAGESIZE") ? ctx->options.max_page : 4096;
 		return e;
 	}
 	uint32_t g = ld_global_name_intern(tok);

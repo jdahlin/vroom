@@ -4,7 +4,7 @@
 
 static uint64_t ld_headers_size(void)
 {
-	return sizeof(elf_file_header) + (uint64_t)(have_phdrs ? sphdrs.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
+	return sizeof(elf_file_header) + (uint64_t)(ctx->script.has_phdrs ? ctx->script.segments.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
 }
 
 /* ---------------- section assignment ---------------- */
@@ -40,16 +40,16 @@ static uint32_t ld_input_section_description_match(const char *name)
 		j = (j + 1) & ctx->layout.name_cache_mask;
 	}
 	uint32_t res = LD_NONE;
-	for (uint32_t i = 0; i < topcmds.n && res == LD_NONE; i++) {
-		ld_command *c = &topcmds.v[i];
+	for (uint32_t i = 0; i < ctx->script.commands.n && res == LD_NONE; i++) {
+		ld_command *c = &ctx->script.commands.v[i];
 		if (c->kind != LD_COMMAND_OUTPUT_SECTION)
 			continue;
-		ld_output_section *os = &osecs.v[c->idx];
+		ld_output_section *os = &ctx->script.sections.v[c->idx];
 		for (uint32_t k = 0; k < os->cmds.n && res == LD_NONE; k++) {
 			ld_command *cc = &os->cmds.v[k];
 			if (cc->kind != LD_COMMAND_INPUT_SECTION_DESCRIPTION)
 				continue;
-			ld_input_section_description *d = &isds.v[cc->idx];
+			ld_input_section_description *d = &ctx->script.input_descriptions.v[cc->idx];
 			for (uint32_t p = 0; p < d->npats; p++)
 				if (ld_pattern_match(&d->pats[p], name)) {
 					res = cc->idx;
@@ -66,13 +66,13 @@ static uint32_t ld_input_section_description_match(const char *name)
 static int ld_section_name_stable_cmp(const void *a, const void *b)
 {
 	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-	int c = strcmp(isecs.v[x].name, isecs.v[y].name);
+	int c = strcmp(ctx->inputs.sections.v[x].name, ctx->inputs.sections.v[y].name);
 	return c ? c : (x > y) - (x < y);
 }
 static int ld_section_alignment_stable_cmp(const void *a, const void *b)
 {
 	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-	uint32_t ax = isecs.v[x].align, ay = isecs.v[y].align;
+	uint32_t ax = ctx->inputs.sections.v[x].align, ay = ctx->inputs.sections.v[y].align;
 	if (ax != ay)
 		return ax > ay ? -1 : 1;
 	return (x > y) - (x < y);
@@ -82,7 +82,7 @@ static void ld_section_commit(ld_output_section *os, ld_input_section *is)
 {
 	if (os->type != is->type) {
 		if (!os->has_input)	/* (lld's .eh_frame is PROGBITS, x86-64's input too) */
-			os->type = is->type == 0x70000001 && !opt.relocatable ? SHT_PROGBITS : is->type;
+			os->type = is->type == 0x70000001 && !ctx->options.relocatable ? SHT_PROGBITS : is->type;
 		else if (os->type != SHT_NOBITS || is->type != SHT_NOBITS)
 			os->type = SHT_PROGBITS;
 	}
@@ -141,10 +141,10 @@ static int ld_rank_proximity(int a, int b) { return a == b ? 32 : __builtin_clz(
 /* the rank of a script output section, from its first input section */
 static int ld_output_section_rank(uint32_t oi)
 {
-	ld_output_section *os = &osecs.v[oi];
+	ld_output_section *os = &ctx->script.sections.v[oi];
 	for (uint32_t k = 0; k < os->cmds.n; k++)
-		if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && isds.v[os->cmds.v[k].idx].secs.n) {
-			ld_input_section *is = &isecs.v[isds.v[os->cmds.v[k].idx].secs.v[0]];
+		if (os->cmds.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->cmds.v[k].idx].secs.n) {
+			ld_input_section *is = &ctx->inputs.sections.v[ctx->script.input_descriptions.v[os->cmds.v[k].idx].secs.v[0]];
 			return ld_orphan_section_rank(is->flags, is->type, is->name);
 		}
 	return -1;
@@ -155,7 +155,7 @@ static void ld_name_cache_init(void)
 	if (ctx->layout.name_cache)
 		return;
 	uint32_t ncap = 1024;
-	while (ncap < isecs.n / 4)
+	while (ncap < ctx->inputs.sections.n / 4)
 		ncap *= 2;
 	ctx->layout.name_cache = ld_region_alloc(ncap * sizeof *ctx->layout.name_cache);
 	memset(ctx->layout.name_cache, 0, ncap * sizeof *ctx->layout.name_cache);

@@ -8,19 +8,19 @@ static bool ld_local_symbol_is_kept(const ld_object *o, const elf_symbol *y)
 	if (type == STT_SECTION)
 		return false;
 	const char *n = o->str + y->st_name;
-	if (opt.discard_all)
+	if (ctx->options.discard_all)
 		return false;
 	if (y->st_shndx == SHN_UNDEF)
 		return false;		/* not a Defined */
 	if (y->st_shndx != SHN_ABS && y->st_shndx < 0xff00) {
 		uint32_t s = o->isec0 + y->st_shndx;
-		ld_input_section *is = &isecs.v[s];
+		ld_input_section *is = &ctx->inputs.sections.v[s];
 		uint32_t os = ld_input_section_output_section(s);
 		if (is->kind == LD_SECTION_KIND_NONE || os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD)
 			return false;
-		if (n[0] == '.' && n[1] == 'L' && (opt.discard_locals || (is->flags & SHF_MERGE)))
+		if (n[0] == '.' && n[1] == 'L' && (ctx->options.discard_locals || (is->flags & SHF_MERGE)))
 			return false;
-	} else if (n[0] == '.' && n[1] == 'L' && opt.discard_locals) {
+	} else if (n[0] == '.' && n[1] == 'L' && ctx->options.discard_locals) {
 		return false;
 	}
 	return true;
@@ -32,7 +32,7 @@ static void ld_local_symbols_count(void *arg, size_t i)
 	(void)arg;
 	static __thread uint32_t (*ld_local_symbols_scratch)[2];
 	static __thread uint32_t ld_local_symbols_scratch_capacity;
-	ld_object *o = objs.v[i];
+	ld_object *o = ctx->inputs.objects.v[i];
 	uint32_t n = 0, end = o->firstg < o->nsym ? o->firstg : o->nsym;
 	uint64_t str = 0;
 	if (o->buf && end > 1) {
@@ -61,7 +61,7 @@ static uint16_t ld_symbol_section_index_of_input_section(uint32_t sec)
 	uint32_t os = ld_input_section_output_section(sec);
 	if (os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD)
 		return 0;
-	return osecs.v[os].shidx;
+	return ctx->script.sections.v[os].shidx;
 }
 
 static void ld_symbol_record_store(elf_symbol *d, uint8_t *strbuf, uint64_t *stroff, const char *name, uint8_t info,

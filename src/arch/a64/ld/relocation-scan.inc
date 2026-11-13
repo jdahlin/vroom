@@ -9,7 +9,7 @@ static void a64_ld_relocation_target_classify(const ld_object *o, uint32_t symid
 	t->undef = t->discarded = false;
 	if (symidx >= o->firstg) {
 		uint32_t g = o->gs[symidx - o->firstg];
-		ld_global_symbol *s = &gsyms[g];
+		ld_global_symbol *s = &ctx->symbols.globals[g];
 		if (s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted) {
 			t->undef = t->abs = true;
 			return;
@@ -29,19 +29,19 @@ static void a64_ld_relocation_target_classify(const ld_object *o, uint32_t symid
 	uint32_t sec = o->isec0 + y->st_shndx;
 	uint32_t os = ld_input_section_output_section(sec);
 	t->abs = false;
-	t->discarded = isecs.v[sec].kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE;
+	t->discarded = ctx->inputs.sections.v[sec].kind == LD_SECTION_KIND_NONE || os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE;
 }
 
 static void a64_ld_relocation_scan(void *arg, size_t i)
 {
 	(void)arg;
-	ld_input_section *is = &isecs.v[i];
+	ld_input_section *is = &ctx->inputs.sections.v[i];
 	if (!is->nrela || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 		return;
 	uint32_t os = ld_input_section_output_section(i);
 	if (os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE)
 		return;
-	ld_object *o = objs.v[is->obj];
+	ld_object *o = ctx->inputs.objects.v[is->obj];
 	uint32_t n = 0;
 	ld_relocation_target t;
 	for (uint32_t r = 0; r < is->nrela; r++) {
@@ -52,10 +52,10 @@ static void a64_ld_relocation_scan(void *arg, size_t i)
 			continue;
 		}
 		a64_ld_relocation_target_classify(o, symi, &t);
-		if (symi >= o->firstg && (is->flags & SHF_ALLOC) && gsyms[o->gs[symi - o->firstg]].demoted)
+		if (symi >= o->firstg && (is->flags & SHF_ALLOC) && ctx->symbols.globals[o->gs[symi - o->firstg]].demoted)
 			/* lld: its winning definition is in a dropped COMDAT member or /DISCARD/ */
 			ld_error_report("relocation refers to a symbol in a discarded section: %s\n>>> defined in %s\n>>> referenced by %s",
-			      ld_global_name(o->gs[symi - o->firstg]), objs.v[gsyms[o->gs[symi - o->firstg]].obj]->path, o->path);
+			      ld_global_name(o->gs[symi - o->firstg]), ctx->inputs.objects.v[ctx->symbols.globals[o->gs[symi - o->firstg]].obj]->path, o->path);
 		else if (t.discarded && (is->flags & SHF_ALLOC))
 			ld_error_report("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
@@ -81,7 +81,7 @@ static void a64_ld_relocation_scan(void *arg, size_t i)
 			if (symi < o->firstg)
 				atomic_store_explicit(&o->lgot[symi], 1, memory_order_relaxed);
 			else
-				atomic_store(&gsyms[o->gs[symi - o->firstg]].needgot, 1);
+				atomic_store(&ctx->symbols.globals[o->gs[symi - o->firstg]].needgot, 1);
 			break;
 		/* TLS: local-exec, and initial-exec/TLSDESC relaxed to it (an executable, as lld) */
 		case R_AARCH64_TLSLE_ADD_TPREL_HI12: case R_AARCH64_TLSLE_ADD_TPREL_LO12:
@@ -89,7 +89,7 @@ static void a64_ld_relocation_scan(void *arg, size_t i)
 		case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21: case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
 		case R_AARCH64_TLSDESC_ADR_PAGE21: case R_AARCH64_TLSDESC_LD64_LO12:
 		case R_AARCH64_TLSDESC_ADD_LO12: case R_AARCH64_TLSDESC_CALL:
-			if (opt.shared || opt.relocatable)
+			if (ctx->options.shared || ctx->options.relocatable)
 				ld_error_report("%s:(%s+0x%llx): TLS relocation %u in a shared object is not supported", o->path,
 				      is->name, (unsigned long long)rl->r_offset, type);
 			else if (t.undef)

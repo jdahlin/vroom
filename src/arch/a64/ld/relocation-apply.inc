@@ -21,8 +21,8 @@ static bool ld_value_fits_signed_or_unsigned(int64_t v, int bits) { return ld_va
 
 static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 {
-	ld_input_section *is = &isecs.v[si];
-	ld_object *o = objs.v[is->obj];
+	ld_input_section *is = &ctx->inputs.sections.v[si];
+	ld_object *o = ctx->inputs.objects.v[is->obj];
 	uint64_t secva = ld_input_section_address(si, 0);
 	elf_rela *dyn = ctx->relocations.rela_dyn_buffer ? ctx->relocations.rela_dyn_buffer + is->dyn0 : NULL;
 	uint32_t nd = 0;
@@ -31,7 +31,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 	/* lld AArch64Relaxer (safeToRelaxAdrpLdr): ADRP+LDR GOT pairs relax only if
 	   every GOT_PAGE of the section is followed by its LO12 */
 	bool got_relax = false;
-	if (opt.relax) {
+	if (ctx->options.relax) {
 		uint32_t r = 0;
 
 		for (; r < is->nrela; r++) {
@@ -69,7 +69,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 				dyn[nd].r_info = R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)t.va;
 				nd++;
-				if (!opt.no_apply_dyn)
+				if (!ctx->options.no_apply_dyn)
 					ld_u64_store(loc, t.va);
 			} else {
 				ld_u64_store(loc, t.va);
@@ -117,7 +117,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			break;
 		}
 		case R_AARCH64_ADR_PREL_PG_HI21: {
-			if (opt.relax && r + 1 < is->nrela) {
+			if (ctx->options.relax && r + 1 < is->nrela) {
 				const elf_rela *r2 = &is->rela[r + 1];
 				if ((uint32_t)r2->r_info == R_AARCH64_ADD_ABS_LO12_NC &&
 				    rl->r_offset + 4 == r2->r_offset && (rl->r_info >> 32) == (r2->r_info >> 32) &&
@@ -153,7 +153,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			 * adrp+add, then tryRelaxAdrpAdd: nop+adr when within 1 MB.  Under
 			 * -shared a global is preemptible unless -Bsymbolic (the kernel's
 			 * vmlinux and vDSO links; hidden globals are not relaxed there yet) */
-			if (got_relax && (!opt.shared || opt.bsymbolic || !t.global) && r + 1 < is->nrela) {
+			if (got_relax && (!ctx->options.shared || ctx->options.bsymbolic || !t.global) && r + 1 < is->nrela) {
 				const elf_rela *r2 = &is->rela[r + 1];
 				uint32_t adrp = ld_u32_load(loc), ldr = rl->r_offset + 4 < is->size ? ld_u32_load(loc + 4) : 0;
 				uint32_t rd = adrp & 0x1f;
@@ -181,7 +181,7 @@ static void a64_ld_input_section_relocate(uint32_t si, uint8_t *buf)
 			__attribute__((fallthrough));
 		case R_AARCH64_LD64_GOT_LO12_NC: {
 			uint64_t slot = ld_input_section_address(ctx->output.got_section, 8 * (uint64_t)(symi < o->firstg ? o->lgotidx[symi] :
-									  gsyms[o->gs[symi - o->firstg]].gotidx));
+									  ctx->symbols.globals[o->gs[symi - o->firstg]].gotidx));
 			if (type == R_AARCH64_LD64_GOT_LO12_NC) {
 				a64_ld_instruction_immediate_store(loc, 0xfffu << 10, (uint32_t)((slot & 0xfff) >> 3) << 10);
 				break;

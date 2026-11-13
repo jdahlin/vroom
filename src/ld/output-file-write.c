@@ -3,17 +3,17 @@
 static int ld_output_file_write(void)
 {
 	/* replace, don't truncate in place: the old file may be mmap'ed by a reader */
-	unlinkat(dirfd_base, opt.out, 0);
-	int fd = openat(dirfd_base, opt.out, O_WRONLY | O_CREAT | O_TRUNC, opt.relocatable ? 0666 : 0777);
+	unlinkat(ctx->options.directory_fd, ctx->options.out, 0);
+	int fd = openat(ctx->options.directory_fd, ctx->options.out, O_WRONLY | O_CREAT | O_TRUNC, ctx->options.relocatable ? 0666 : 0777);
 	if (fd < 0) {
-		ld_error_report("cannot open output file %s: %s", opt.out, strerror(errno));
+		ld_error_report("cannot open output file %s: %s", ctx->options.out, strerror(errno));
 		return 1;
 	}
 	uint64_t off = 0;
 	while (off < ctx->layout.file_size) {
 		ssize_t w = write(fd, ctx->output.image + off, ctx->layout.file_size - off > (1 << 30) ? (1 << 30) : ctx->layout.file_size - off);
 		if (w <= 0) {
-			ld_error_report("write %s: %s", opt.out, strerror(errno));
+			ld_error_report("write %s: %s", ctx->options.out, strerror(errno));
 			close(fd);
 			return 1;
 		}

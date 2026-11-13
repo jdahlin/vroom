@@ -532,6 +532,34 @@ inputs, options) and deletes `state-reset.c`.  The new names:
   `ld_relocatable_section`.  The arm64 thunk types are in the generic header
   because the context holds them; they move to a per-CPU part with Q-ld-15.
 
+Step 3 of the context (the input side, lines 7-10) is applied too:
+
+- `options` (line 10): the command line is `struct ld_options` (was the
+  anonymous `opt`), read as `ctx->options.FIELD`; `dirfd_base` is
+  `options.directory_fd`, set by `ld_context_init` from `ld_main`'s
+  argument.
+- `inputs` (line 9): `x86`, `machine`, `objects`, `sections`,
+  `merge_inputs`, `merge_sections`, `real_object_count`, `pending`, `quiet`,
+  `lazy_symbols` (`struct ld_lazy_symbol_table`, the anonymous struct before),
+  `lazy_candidates`, `lazy_order`, `lazy_taken`.  `lazy_symbols.v` is the one
+  `malloc`ed field: `ld_context_init` frees it before the `memset`.
+- `symbols` (line 8 and `script_ord`): `slot_names`, `slot_words`,
+  `slot_mask`, `names`, `globals`, `count`, `order`, `script_order`,
+  `script_inserted`, `stub_names`, `stub_count`, `stop_symbols`.
+- `script` (line 7): `input_descriptions`, `sections`, `commands`, `entry`,
+  `segments`, `has_phdrs`, `version_nodes`, `version_locals`,
+  `version_definition_count`, `referenced_symbols`, `provides`,
+  `current_provide`, `assert_failures`, `address_errors`, and the lexer's
+  `cursor`, `end`, `file`.
+- The data model moved to `ld-internal.h` unchanged: the parts that held only
+  types and state (`option-state.c`, `input-model.c`, `script-model.c`) are
+  gone, and so are the types at the top of `global-symbols.c`,
+  `input-mapping.c` and `lazy-archive.c`.  The dead `Unused` type (Q-ld-25)
+  is deleted.
+- `ld_state_reset()` and `state-reset.c` are deleted: `ld_context_init` is
+  the only start of a link.  What is left at file scope in the ELF linker is
+  process-wide (Design 4) and the context itself.
+
 2. **relocation scan** (10): `isec_fva`, `thunks`, `thunksecs`, `tr_keys`,
    `tr_vals`, `tr_mask`, `tr_n`, `pic`, `reladyn_buf`, `got_seen`.  Types
    `Thunk`, `ThunkSec` move from `arch/a64/ld/thunk-model.inc` to the header;
@@ -573,7 +601,7 @@ inputs, options) and deletes `state-reset.c`.  The new names:
     `dirfd_base`.  `ld_state_reset()` is then empty: delete `state-reset.c`
     and its call in `ld_link_run()`.
 
-Series (b), the parameter (after 10; one or a few part files per PR, by the
+Series (a) is done with step 3.  Series (b), the parameter (after 10; one or a few part files per PR, by the
 call graph from the leaves up): add `struct ld_context *ctx` to every
 function that uses it (section 3: 187 of 227); `pfor` callbacks take it from
 `arg`.  Proof as above plus `bench/vbench.py gate` is not enough (it times

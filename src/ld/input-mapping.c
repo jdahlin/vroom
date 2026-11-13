@@ -4,7 +4,7 @@
 
 static uint8_t *ld_file_map(const char *path, size_t *size)
 {
-	int fd = openat(dirfd_base, path, O_RDONLY);
+	int fd = openat(ctx->options.directory_fd, path, O_RDONLY);
 	if (fd < 0) {
 		ld_error_report("cannot open %s: %s", path, strerror(errno));
 		return NULL;
@@ -21,9 +21,6 @@ static uint8_t *ld_file_map(const char *path, size_t *size)
 	return p;
 }
 
-typedef struct { const char *path; const uint8_t *buf; size_t size; } ld_pending_member;
-typedef VVEC(ld_pending_member) ld_pending_member_vector;
-static ld_pending_member_vector pending;
 
 static void ld_archive_add(const char *path, const uint8_t *b, size_t n)
 {
@@ -88,7 +85,7 @@ static void ld_archive_add(const char *path, const uint8_t *b, size_t n)
 			char *full = ld_region_alloc(strlen(dir) + strlen(name) + 1);
 			strcpy(full, name[0] == '/' ? "" : dir);
 			strcat(full, name);
-			VVEC_PUSH(pending, ((ld_pending_member){.path = full}), ld_region_alloc);
+			VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = full}), ld_region_alloc);
 		} else {
 			if (size > n - off) {
 				ld_error_report("%s(%s): archive member goes past the end of the file", path, name);
@@ -96,7 +93,7 @@ static void ld_archive_add(const char *path, const uint8_t *b, size_t n)
 			}
 			char *full = ld_region_alloc(strlen(path) + strlen(name) + 3);
 			sprintf(full, "%s(%s)", path, name);
-			VVEC_PUSH(pending, ((ld_pending_member){.path = full, .buf = b + off, .size = size}), ld_region_alloc);
+			VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = full, .buf = b + off, .size = size}), ld_region_alloc);
 			off += size + (size & 1);
 		}
 	}

@@ -7,13 +7,13 @@
  * __start_X/__stop_X reference keeps nothing (lld's default -z start-stop-gc) */
 static void ld_sections_garbage_collect(const char *entry)
 {
-	uint8_t *live = calloc(isecs.n, 1);
-	uint32_t *work = malloc(isecs.n * sizeof(uint32_t)), nw = 0;
-#define LD_SECTION_GARBAGE_MARK(x) do { uint32_t m_ = (x); if (m_ < isecs.n && !live[m_] && isecs.v[m_].kind != LD_SECTION_KIND_NONE) { live[m_] = 1; work[nw++] = m_; } } while (0)
+	uint8_t *live = calloc(ctx->inputs.sections.n, 1);
+	uint32_t *work = malloc(ctx->inputs.sections.n * sizeof(uint32_t)), nw = 0;
+#define LD_SECTION_GARBAGE_MARK(x) do { uint32_t m_ = (x); if (m_ < ctx->inputs.sections.n && !live[m_] && ctx->inputs.sections.v[m_].kind != LD_SECTION_KIND_NONE) { live[m_] = 1; work[nw++] = m_; } } while (0)
 
 	ld_name_cache_init();
-	for (uint32_t i = 0; i < isecs.n; i++) {
-		ld_input_section *is = &isecs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
+		ld_input_section *is = &ctx->inputs.sections.v[i];
 
 		if (is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 			continue;
@@ -23,16 +23,16 @@ static void ld_sections_garbage_collect(const char *entry)
 			 * FDE's only outside code and section groups (an LSDA) */
 			uint32_t nrec;
 			ld_eh_frame_record *rec = ld_eh_frame_records_split(i, &nrec);
-			const ld_object *o = objs.v[is->obj];
+			const ld_object *o = ctx->inputs.objects.v[is->obj];
 
 			live[i] = 1;
 			for (uint32_t r = 0; rec && r < nrec; r++)
 				for (uint32_t k = rec[r].r0; k < rec[r].r1; k++) {
-					uint32_t t = ld_relocation_symbol_input_section(o, isecs.v[i].rela[k].r_info >> 32);
+					uint32_t t = ld_relocation_symbol_input_section(o, ctx->inputs.sections.v[i].rela[k].r_info >> 32);
 
 					if (t == LD_NONE)
 						continue;
-					if (!rec[r].cie && ((isecs.v[t].flags & SHF_EXECINSTR) || isecs.v[t].gnext))
+					if (!rec[r].cie && ((ctx->inputs.sections.v[t].flags & SHF_EXECINSTR) || ctx->inputs.sections.v[t].gnext))
 						continue;
 					LD_SECTION_GARBAGE_MARK(t);
 				}
@@ -45,22 +45,22 @@ static void ld_sections_garbage_collect(const char *entry)
 			    is->type == SHT_INIT_ARRAY || is->type == SHT_FINI_ARRAY || is->type == SHT_PREINIT_ARRAY ||
 			    (is->type == SHT_NOTE && !is->gnext) ||
 			    !strncmp(n, ".ctors", 6) || !strncmp(n, ".dtors", 6) || !strncmp(n, ".init", 5) ||
-			    !strncmp(n, ".fini", 5) || !strncmp(n, ".jcr", 4) || (d != LD_NONE && isds.v[d].keep);
+			    !strncmp(n, ".fini", 5) || !strncmp(n, ".jcr", 4) || (d != LD_NONE && ctx->script.input_descriptions.v[d].keep);
 
 		if (root)
 			LD_SECTION_GARBAGE_MARK(i);
 	}
 	uint32_t eg = ld_global_name_find(entry);
 
-	if (eg != LD_NONE && gsyms[eg].state == LD_SYMBOL_STATE_OBJECT)
-		LD_SECTION_GARBAGE_MARK(gsyms[eg].sec);
-	for (uint32_t g = 0; opt.shared && g < atomic_load(&ngsyms); g++)
-		if (gsyms[g].state == LD_SYMBOL_STATE_OBJECT && (gsyms[g].vis == STV_DEFAULT || gsyms[g].vis == STV_PROTECTED))
-			LD_SECTION_GARBAGE_MARK(gsyms[g].sec);
+	if (eg != LD_NONE && ctx->symbols.globals[eg].state == LD_SYMBOL_STATE_OBJECT)
+		LD_SECTION_GARBAGE_MARK(ctx->symbols.globals[eg].sec);
+	for (uint32_t g = 0; ctx->options.shared && g < atomic_load(&ctx->symbols.count); g++)
+		if (ctx->symbols.globals[g].state == LD_SYMBOL_STATE_OBJECT && (ctx->symbols.globals[g].vis == STV_DEFAULT || ctx->symbols.globals[g].vis == STV_PROTECTED))
+			LD_SECTION_GARBAGE_MARK(ctx->symbols.globals[g].sec);
 	for (bool again = true; again;) {
 		while (nw) {
-			ld_input_section *is = &isecs.v[work[--nw]];
-			ld_object *o = objs.v[is->obj];
+			ld_input_section *is = &ctx->inputs.sections.v[work[--nw]];
+			ld_object *o = ctx->inputs.objects.v[is->obj];
 
 			for (uint32_t r = 0; r < is->nrela; r++) {
 				uint32_t y = is->rela[r].r_info >> 32;
@@ -68,7 +68,7 @@ static void ld_sections_garbage_collect(const char *entry)
 				if (!y)
 					continue;
 				if (y >= o->firstg) {
-					ld_global_symbol *gs = &gsyms[o->gs[y - o->firstg]];
+					ld_global_symbol *gs = &ctx->symbols.globals[o->gs[y - o->firstg]];
 
 					if (gs->state == LD_SYMBOL_STATE_OBJECT)
 						LD_SECTION_GARBAGE_MARK(gs->sec);
@@ -80,12 +80,12 @@ static void ld_sections_garbage_collect(const char *entry)
 		}
 		/* SHF_LINK_ORDER: live when the section it links to is */
 		again = false;
-		for (uint32_t i = 0; i < isecs.n; i++) {
-			ld_input_section *is = &isecs.v[i];
+		for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
+			ld_input_section *is = &ctx->inputs.sections.v[i];
 
 			if (live[i] || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE || !(is->flags & 0x80))
 				continue;
-			const ld_object *o = objs.v[is->obj];
+			const ld_object *o = ctx->inputs.objects.v[is->obj];
 			uint32_t l = o->sh[is->shndx].sh_link;
 
 			if (l && l < o->nsh && live[o->isec0 + l]) {
@@ -94,13 +94,13 @@ static void ld_sections_garbage_collect(const char *entry)
 			}
 		}
 	}
-	for (uint32_t i = 0; i < isecs.n; i++) {
-		ld_input_section *is = &isecs.v[i];
+	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
+		ld_input_section *is = &ctx->inputs.sections.v[i];
 
 		if (live[i] || is->kind == LD_SECTION_KIND_NONE || is->obj == LD_NONE)
 			continue;
-		if (opt.print_gc)
-			printf("removing unused section %s:(%s)\n", objs.v[is->obj]->path, is->name);	/* lld: stdout */
+		if (ctx->options.print_gc)
+			printf("removing unused section %s:(%s)\n", ctx->inputs.objects.v[is->obj]->path, is->name);	/* lld: stdout */
 		is->kind = LD_SECTION_KIND_NONE;
 	}
 #undef LD_SECTION_GARBAGE_MARK
