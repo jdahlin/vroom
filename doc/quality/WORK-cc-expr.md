@@ -396,3 +396,24 @@ files.
 | `type.c` | rehash tables 79-94, 234-251 | 0 | stay: keyed by type records, not strings |
 
 No LEB128, byte load/store or file mapping in these files.
+
+## Status
+
+- Step 1 (moves only): done in the PR "cc: expressions and types, one job per file
+  (WORK-cc-expr step 1)".  Where the file map did not fit, the code is cut as
+  follows.
+  - `cplx_pure` moves to `lowering.c` with `cplx_reuse` (its only other caller
+    stays in `complex.c`, so it is `VPRIV`): the order's range 35-40 stops at
+    its comment.
+  - The inline wrappers `self_cmp`, `ptr_cmp` and `range_cmp` (`exprop.c`
+    656-662, 754-762, 823-843) stay in `expression-parse.c`: the order does
+    not name them and they are the parser's glue.  `logic_const`, which the
+    order names, moves and loses `inline` (it is `VPRIV` now; unity
+    builds still see it).
+  - `ccimpl.h` section markers name the new files; its sections are still
+    those of the old files until step 3 regenerates them.  New prototypes sit
+    at the end of the section the function came from, `struct vfixbuf;` is
+    forward-declared for `type_str`.
+  - `cc_SRC` keeps `keywords.c` out of the unity list as before.
+  - `bench/optaudit/coverage-ledger.json` still names `frontend/c/const.c`: it
+    is keyed by file hashes and belongs to the optimizer audit; not changed here.
