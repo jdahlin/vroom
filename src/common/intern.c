@@ -1,3 +1,11 @@
+/*
+ * The identifier table behind common/intern.h: one open-addressing table of
+ * 2^23 64-bit slots (hash << 32 | id) shared by all threads and inserted with
+ * a single CAS, the entries (spelling, length, hash, first 16 bytes) indexed
+ * by id, and the registration of a language's preset names (its keywords).
+ * The table and the entries are job regions (port/job-regions.h) that
+ * outlive a job; the hash is CRC32C over 8-byte words (port/crc32c.h).
+ */
 #include "port/crc32c.h"
 #include <stdatomic.h>
 #include <pthread.h>

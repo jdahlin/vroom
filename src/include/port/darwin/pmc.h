@@ -1,3 +1,10 @@
+/*
+ * Apple PMU counters of the calling thread (pmc.c): pmc_init(events) opens
+ * cycles, instructions and the named events (root only, else it returns 0);
+ * pmc_read fills one value per counter, named pmc_names[0 .. pmc_n).  Used by
+ * lextest for PMC runs; instructions and cycles alone are
+ * performance-counters.h and need no root.
+ */
 #ifndef VCC_PORT_DARWIN_PMC_H
 #define VCC_PORT_DARWIN_PMC_H
 #include <stdint.h>

@@ -1,4 +1,13 @@
-/* Digests used by the linkers and the header cache (digest-xxh3.c, digest-blake3.c, digest-sha256.c): XXH3-64 and BLAKE3 (lld's), SHA-256 (Mach-O code signatures). */
+/*
+ * The digests the tools need, one file each (digest-xxh3.c, digest-blake3.c,
+ * digest-sha256.c): no dependency, the same bytes as the reference.
+ *
+ *   vdigest_xxh3(data, len)                  XXH3-64, seed 0 (lld's merge-section sharding; the header cache key)
+ *   vdigest_blake3(data, len, out, outlen)   BLAKE3 truncated to outlen bytes (lld's --build-id=sha1 and md5)
+ *   vdigest_sha256(data, len, out)           SHA-256 (Mach-O code signatures)
+ *
+ * They are not the tables' string hash: that is hash.h.
+ */
 #ifndef VCC_COMMON_DIGEST_H
 #define VCC_COMMON_DIGEST_H
 #include <stddef.h>

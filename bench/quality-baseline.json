@@ -14,5 +14,11 @@
  "functions_over_300_lines": 30,
  "files_over_2000_lines": 9,
  "includes_of_another_modules_internal_header": 7,
- "module_pairs_including_each_other": 7
+ "module_pairs_including_each_other": 7,
+ "library_redundant_tokens": 967,
+ "library_files_without_header_comment": 0,
+ "library_files_with_label_only": 0,
+ "library_files_over_2000_lines": 0,
+ "library_functions_over_300_lines": 0,
+ "common_includes_of_port": 4
 }

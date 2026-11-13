@@ -55,28 +55,35 @@ relative to it); `TODO.md` stays at the top.
   one target OS in `platform/<os>/` (target, not host: host-specific code is
   in `port/`, host SIMD `#ifdef`s stay with their code).
   - `include/`: the headers another module includes, at the path of the
-    module (`include/common/arena.h`, `include/frontend/pp/pp.h`,
+    module (`include/common/region.h`, `include/frontend/pp/pp.h`,
     `include/arch/a64/a64.h`, `include/protocol.h`); code in `src/` includes
     them by that name with `-Isrc/include`.  A header only its own module uses
     stays next to its files, and a module's files include each other by
     relative path.
-  - `common/`: shared data structures and helpers, header-only unless noted
-    (headers in `include/common/`): reservations, regions and arenas
-    (`arena.h`), byte buffers (`buf.h`), the emitter's text buffer (`tbuf.h`),
-    growable arrays (`vec.h`), string hashes (`hash.h`; XXH3/BLAKE3 in
-    `ldhash.c`), interning (`intern.c`), binary128 (`f128.h`), scoped
-    resources through `cleanup` (`defer.h`: VAUTOFREE, VAUTOCLOSE, VLOCK; not
-    across a longjmp), attributes for our own declarations (`attr.h`: VUSE,
-    VNONNULL) and overflow-checked bounds for sizes read from input files
-    (`ckd.h`: vchecked_range, vchecked_add, vchecked_multiply).  Variants not yet merged are
-    listed in TODO.md.
-  - `port/`: what depends on the host (headers in `include/port/`): file
-    mapping (`mapfile.h`), thread counters (`vperf.h`), the stack guard
-    (`vstack.h`), CRC32C (`hostcrc.h`), `-march=native` on x86 (`x86native.h`),
-    the shared thread pool and CPU budget (`task.h`, `vtask_*`: parallel-for,
-    jobs, blocking regions; doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`),
-    Apple PMU counters (`darwin/pmc.c`), and the wasm build's `wasm/mman.c`
-    (the big reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
+  - `common/`: the shared library, portable C (headers in `include/common/`;
+    `include/common/common.h` is its overview and invariants; unit tests in
+    `test/common/`, `bench/common-test.py`).  One failure path (`fail.h`:
+    `vjob_fail`, `vout_of_memory`, `VBUG`); regions (`region.h`), the byte
+    buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
+    (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
+    string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
+    `leb128.h`, `format.h`, digests (`digest-xxh3.c`, `digest-blake3.c`,
+    `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
+    `bigint.h`, scoped resources through `cleanup` (`scoped-cleanup.h`:
+    VAUTOFREE, VAUTOCLOSE, VLOCK; not across a longjmp), attributes
+    (`attributes.h`: VUSE, VNONNULL) and overflow-checked bounds for sizes
+    read from input files (`checked-arithmetic.h`).  `common_SRC` in the
+    Makefile; every tool links it.
+  - `port/`: what depends on the host (headers in `include/port/`; `port_SRC`,
+    linked by every tool): job regions kept from one job to the next
+    (`job-regions.h`), file mapping, reading and writing (`file.h`), clocks
+    (`clock.h`), thread counters (`performance-counters.h`), the stack guard
+    (`stack-guard.h`), CRC32C (`crc32c.h`), `-march=native` on x86
+    (`x86native.h`), the shared thread pool and CPU budget (`task.h`,
+    `vtask_*`: parallel-for, jobs, blocking regions;
+    doc/quality/WORK-scheduler.md; `-j`/`VCC_JOBS`), Apple PMU counters
+    (`darwin/pmc.c`), and the wasm build's `wasm/mman.c` (the big
+    reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
   - `headers/`: vcc's own `<arm_neon.h>`, `<arm_acle.h>`, `<arm_sve.h>`,
     `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`).
@@ -234,6 +241,7 @@ build/src/task-test                 # port/task.c: the pool and budget (also und
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
+bench/common-test.py                # src/common and src/port unit tests (src/test/common), host compiler, ASan+UBSan (~5 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/src-asan   # random mutants of those units: virtest never crashes (~1 min)
@@ -285,7 +293,7 @@ VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60   # boots Debian
 bench/vbench.py gate                # performance gate: instructions vs the merge-base, budget 1 % (~1 min)
-bench/quality.py [--clones N]       # source quality numbers: duplication, private copies of lib/, threads, state, module includes (PLAN-quality.md, 3 s)
+bench/quality.py [--clones N]       # source quality numbers: duplication, private copies of what common/ offers; common/ and port/ gated apart, threads, state, module includes (PLAN-quality.md, 3 s)
 bench/quality.py --check            # ... none above bench/quality-baseline.json (--bless rewrites it)
 bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)

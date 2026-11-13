@@ -1,6 +1,19 @@
+/*
+ * Fixed-width integers of n 32-bit limbs, least significant first, in
+ * two's complement: what the front end needs for _BitInt and for constants
+ * wider than 64 bits.  The caller owns every buffer and there is no global
+ * state.  All operands of one call have n limbs unless stated.
+ *
+ *   vbi_nz(a, n)                  a is not zero
+ *   vbi_norm(a, n, bits, sign)    wrap a to `bits` bits: sign- or zero-extend the top limb and fill the rest
+ *   vbi_copy(d, n, a, m, neg)     d = a (m limbs), extended with the sign bit when neg
+ *   vbi_cmp(a, b, n)              -1, 0 or 1, as unsigned
+ *   vbi_neg, vbi_add, vbi_sub, vbi_mul    d = -a, a + b, a - b, a * b (low n limbs)
+ *   vbi_shift(d, a, n, shift, right, neg) shift left or right (arithmetic when neg)
+ *   vbi_div(q, r, a, b, n, divisor)       unsigned division; r needs n + 1 limbs and scratch divisor n + 1
+ */
 #ifndef VCC_COMMON_BIGINT_H
 #define VCC_COMMON_BIGINT_H
-/* Fixed-width LE32 arithmetic. Callers own storage; no global mutable state. */
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
