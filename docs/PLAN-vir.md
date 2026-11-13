@@ -280,6 +280,25 @@ kända inlinefel; fokuserat ASan/UBSan och filvist bygge gröna, O0/O1
 oförändrade. ARM/QEMU 47/47 VIR-prov. TSVC 151/151 kontrollsummor,
 **83** vektorloopar kvar; walk-prefixkontrollen 134 namn.
 
+2026-11-13, avvisat smalt relationsprov i minnet:
+Utökat x86:s privata load+icmp-vikning till byte/halvord med en konstant
+inom källtypens intervall. Signerade jämförelser av nollutvidgade värden
+bytte till motsvarande osignerade villkor; även signerade källor under
+osignerad jämförelse provades. Uttömmande byte-/halvordsprov, assembly och
+egen objektväg passerade. RecordCompareInt tappar movzwl och får
+`cmpw $1,28(%rdx); jbe`, men färre instruktioner hjälper inte här.
+
+Två femprovserier av speedtest1 main storlek 100: 1233,72 → 1247,42 ms
+och 1232,42 → 1245,94 ms, cirka **1,1 % långsammare**. Statiska
+instruktioner 387383 → 387172 och dynamiska 21,908 → 21,856 miljarder.
+Ett separat equal-key-prov av RecordCompareInt (30 miljoner anrop, sju
+alternerade rundor) går 39,830 → 45,620 ms; upprepningen 40,192 → 45,459.
+En handskriven `cmpw $2; jb`-variant ger 45,219 ms, alltså samma regression.
+Clang 33,853 ms i upprepningen. Mikroprovet behåller kompilatorns övriga
+funktionskod och använder identisk 64-bytesalignad start och checksumma;
+det isolerar inte orsaken till regressionen. **Inget av försöket behålls.**
+Underlag `work/vir-x86-perf/cmpnarrow`, patch `/tmp/vx-cmpnarrow-experiment.patch`.
+
 2026-11-13, redan utvidgade index i små heta funktioner:
 x86 återanvänder samma fysiska signutvidgningsbevis i vanlig ext och
 NSW-skalade adresser. En osignerad 8/16-bitarsladdning har redan rätt höga
