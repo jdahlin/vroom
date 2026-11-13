@@ -1,7 +1,7 @@
 /*
  * vcc code generator, x86-64 (PLAN-x86.md): the lowering of the walker's
  * operations (layer 2) to records (codegen/rec/rec.h), the two-address pass
- * and the printer of clang's AT&T syntax.  System V ABI, Linux ELF.
+ * and the printer of clang's AT&T syntax.  System V ABI, Linux ELF; Windows x64.
  *
  * Registers are physical, numbered as the encoding does (rax 0 .. r15 15).
  * Temporaries come from the caller-saved rax rcx rdx rsi rdi r8 r9 r10;
@@ -10,7 +10,8 @@
  * around themselves; a call saves the live temporaries.  Records are
  * three-address (r[0] = r[1] op r[2]) until twoaddr.c.  Frame slots are
  * rbp-relative.  Part of the codegen unity TU: every name starts with x64_
- * or X_.
+ * or X_.  Windows x64 and the Microsoft convention (PLAN-win64.md): abi-win64.c,
+ * the frame in print.c.
  */
 #ifndef VCC_X64IMPL_H
 #define VCC_X64IMPL_H
@@ -88,6 +89,7 @@ enum {
 	X_CMOV,		/* r0 = flags[cond] ? r2 : r1 */
 	X_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
 	X_CMPM,		/* compare memory r1+(r3<<sh)+off with r2 (XNOREG: immediate ref); cond reverses operands */
+	X_PROBE,	/* Windows: the stack pages rax bytes below rsp touched (callq ___chkstk_ms; it keeps every register) */
 	X_NOPS
 };
 
@@ -118,7 +120,19 @@ typedef struct xst {
 	int64_t sret;		/* frame slot of the hidden result pointer (0: none) */
 	int64_t save;		/* variadic: the register save area's slot (0: none) */
 	int64_t csslot[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
+	/* PLAN-win64.md: the function's convention is Microsoft's (msfn); its frame is the Windows
+	   one (winframe: Windows, or an ms_abi function: print.c saves the callee-saved registers
+	   the body writes, below rbp, and Windows gets the .seh_* directives); csmask: registers
+	   asm and register locals take (x64_csused); wsave: the bytes of that save area, which the
+	   printer puts between rbp and the locals */
+	bool msfn, winframe;
+	uint64_t csmask;
+	int64_t wsave;
 } xst;
+
+/* in an X_RAW text: the next number is a local's frame displacement, which print.c moves below the
+   Windows frame's save area */
+#define X_ASMFRAME '\001'
 
 /* the integer argument registers, in order */
 static inline int x64_argreg(int i) { static const uint8_t r[6] = { RDI, RSI, RDX, RCX, R8, R9 }; return r[i]; }
@@ -160,5 +174,15 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
 VPRIV bool x64_nosimd(ecx *e);
 VPRIV void x64_nofp(ecx *e);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
+/* abi-win64.c: the Microsoft x64 convention */
+VPRIV int x64w_argreg(int i);
+VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed);
+VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
+VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
+VPRIV void x64w_va_start(ecx *e, int rap);
+VPRIV int x64w_va_arg(ecx *e, int rap, qty t);
+VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const qty *types, int n, int64_t res, qty rt);
+/* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
+static inline bool x64w_helpers(const ecx *e) { return WIN64(e->c); }
 
 #endif

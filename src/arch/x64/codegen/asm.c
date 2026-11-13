@@ -37,7 +37,7 @@ static int x64_creg(int ch)
 }
 
 /* the register a clobber or register variable names (with or without %), -1 for none */
-static int x64_rname(const char *s)
+VPRIV int x64_rname(const char *s)
 {
 	if (*s == '%')
 		s++;
@@ -122,14 +122,17 @@ static void x64_asmlabel(ecx *e, tbuf *b, uint32_t l)
 	vtext_unsigned_append(b, l);
 }
 
-/* a memory operand as AT&T text */
-static void x64_asmmem(cc *c, tbuf *b, const lval *l)
+/* a memory operand as AT&T text; mark: a local's displacement is the printer's to place (the
+   Windows frame: X_ASMFRAME, then the offset below the save area) */
+static void x64_asmmem(cc *c, tbuf *b, const lval *l, bool mark)
 {
 	if (l->k == L_SYM) {
 		ref_off(c, b, l->ref, l->off);
 		vtext_string_append(b, "(%rip)");
 		return;
 	}
+	if (mark && l->k == L_FRAME && l->off < 0)
+		vtext_char_append(b, X_ASMFRAME);
 	if (l->off)
 		vtext_signed_append(b, l->off);
 	vtext_char_append(b, '(');
@@ -203,9 +206,12 @@ VPRIV void x64_csused(ecx *e, int r)
 {
 	xst *X = e->x64;
 
+	X->csmask |= UINT64_C(1) << r;
+	if (r == R12 && e->wk->falign > 16)
+		efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
+	if (X->winframe)
+		return;	/* (print.c saves what the body writes) */
 	if (r == RBX || (r == RBP && X->spframe) || (r >= R12 && r <= R15)) {
-		if (r == R12 && e->wk->falign > 16)
-			efatal(e, e->curloc, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->csslot[r])
 			X->csslot[r] = wk_pslot(e, 8, 8);
 	}
@@ -684,7 +690,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 					break;
 				}
 				case XO_MEM:
-					x64_asmmem(c, rb, &o->l);
+					x64_asmmem(c, rb, &o->l, X->winframe && e->wk->falign <= 16);
 					break;
 				case XO_X87:
 					vtext_string_append(rb, o->reg ? "%st(1)" : "%st");

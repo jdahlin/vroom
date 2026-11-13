@@ -21,6 +21,65 @@ VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
 	pthread_mutex_unlock(&E->cmu);
 }
 
+/*
+ * COFF (Windows x64), as clang: a function's .def/.scl/.type/.endef record (storage class 2
+ * external, 3 static; type 32 a function) first; sections .text, .data, .bss, .rdata ("dr") and
+ * .tls$ ("dw"); a named section "xr", "dr" or "dw"; -ffunction-sections / -fdata-sections put each
+ * in .text$NAME (.data$, .rdata$, .bss$) as a one_only COMDAT keyed by it; no .type or .size.
+ */
+static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
+{
+	cc *c = e->c;
+	const sym *y = &c->syms[s];
+	const attrs *a = sym_attrs(c, s);
+	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+
+	if (fn) {
+		vtext_string_append(b, "\t.def\t");
+		sym_name(c, b, s);
+		vtext_string_append(b, global ? ";\n\t.scl\t2;\n\t.type\t32;\n\t.endef\n" : ";\n\t.scl\t3;\n\t.type\t32;\n\t.endef\n");
+	}
+	if (a->section) {
+		vtext_string_append(b, "\t.section\t");
+		vtext_string_append(b, c->strs[a->section - 1].s);
+		vtext_string_append(b, fn ? ",\"xr\"\n" : (QQ(y->ty) & Q_CONST) ? ",\"dr\"\n" : ",\"dw\"\n");
+	} else if (c->o->sections & (fn ? 1 : 2)) {
+		static const struct { const char *def, *base, *flags; } m[] = {
+			{ "\t.text\n", ".text$", "xr" },
+			{ "\t.data\n", ".data$", "dw" },
+			{ "\t.bss\n", ".bss$", "bw" },
+			{ "\t.section\t.rdata,\"dr\"\n", ".rdata$", "dr" },
+			{ "\t.section\t.tls$,\"dw\"\n", ".tls$$", "dw" },
+		};
+		size_t k = 0;
+
+		while (k < sizeof m / sizeof *m && strcmp(defsec, m[k].def))
+			k++;
+		if (k < sizeof m / sizeof *m) {
+			vtext_string_append(b, "\t.section\t");
+			vtext_string_append(b, m[k].base);
+			sym_name(c, b, s);
+			vtext_format_append(b, ",\"%s\",one_only,", m[k].flags);
+			sym_name(c, b, s);
+			vtext_char_append(b, '\n');
+		} else {
+			vtext_string_append(b, defsec);
+		}
+	} else {
+		vtext_string_append(b, defsec);
+	}
+	if (global) {
+		vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+		sym_name(c, b, s);
+		vtext_char_append(b, '\n');
+	}
+	vtext_string_append(b, "\t.p2align\t");
+	vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
+	vtext_char_append(b, '\n');
+	sym_name(c, b, s);
+	vtext_string_append(b, ":\n");
+}
+
 VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
 {
 	cc *c = e->c;
@@ -28,6 +87,12 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	const attrs *a = sym_attrs(c, s);
 	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
 	size_t h = it_open(e, IT_TEXT);
+
+	if (WIN64(c)) {
+		sym_header_coff(e, b, s, fn, defsec, align);
+		it_close(e, h);
+		return;
+	}
 
 	if (a->section) {
 		const char *sn = c->strs[a->section - 1].s;
@@ -126,6 +191,17 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 {
 	const attrs *a = sym_attrs(c, s);
+
+	if (WIN64(c)) {
+		/* MinGW: .ctors/.dtors, a priority as .ctors.NNNNN (65535 - priority), as clang */
+		vtext_string_append(b, fini ? "\t.section\t.dtors" : "\t.section\t.ctors");
+		if (a && a->prio)
+			vtext_format_append(b, ".%05u", 65535 - a->prio);
+		vtext_string_append(b, ",\"dw\"\n\t.p2align\t3\n\t.quad\t");
+		sym_name(c, b, s);
+		vtext_char_append(b, '\n');
+		return;
+	}
 
 	vtext_string_append(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
 	if (a && a->prio) {

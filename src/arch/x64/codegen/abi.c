@@ -1,5 +1,6 @@
 /* vcc code generator, x86-64: the System V ABI: classification, calls,
- * parameters, results, varargs (x64impl.h) */
+ * parameters, results, varargs (x64impl.h).  The walker's entry points
+ * dispatch to abi-win64.c when e->msabi says the convention is Microsoft's. */
 #include "x64impl.h"
 
 /* ---------------- classification (System V 3.2.3) ---------------- */
@@ -224,6 +225,10 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a);
 /* -mgeneral-regs-only, -mno-sse: no value may travel in a vector or x87 register */
 VPRIV void x64_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 {
+	if (e->msabi) {
+		x64w_classify(e, t, a, unnamed);
+		return;
+	}
 	x64_classify0(e, t, a);
 	a->unnamed = unnamed;
 	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
@@ -327,6 +332,9 @@ static lval x64_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .alig
 VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
 {
 	cc *c = e->c;
+
+	if (e->msabi)
+		return x64w_call(e, ref, fn, a, n, variadic, r, rt);
 
 	if (RKIND(ref) == RK_SYM) {
 		x86_features features = cc_x86_features(c, RIDX(ref));
@@ -576,6 +584,11 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	int gp = 0, fp = 0;
 	int64_t stk = 0;
 
+	if (e->msabi) {
+		x64w_params(e, a, n, r, variadic);
+		return;
+	}
+
 	const attrs *fa = sym_attrs(e->c, e->wk->fsym);
 	X->interrupt = fa && fa->interrupt ? n : 0;
 	X->sret = 0;
@@ -752,6 +765,10 @@ VPRIV void x64_va_start(ecx *e, int rap)
 	lval ov = { .k = L_REG, .r = (uint8_t)rap, .off = 8 }, rs = { .k = L_REG, .r = (uint8_t)rap, .off = 16 };
 	lval sa = x64_fr(X->save), oa = x64_fr(16 + X->stk);
 
+	if (e->msabi) {
+		x64w_va_start(e, rap);
+		return;
+	}
 	if (!X->save)
 		efatal(e, e->curloc, "va_start in a function that is not variadic");
 	x64_movi(e, R11, 8 * X->ngp);
@@ -772,9 +789,12 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	wkarg a;
 	lval gpo = { .k = L_REG, .r = (uint8_t)rap, .off = 0 }, fpo = { .k = L_REG, .r = (uint8_t)rap, .off = 4 };
 	lval ov = { .k = L_REG, .r = (uint8_t)rap, .off = 8 }, rsa = { .k = L_REG, .r = (uint8_t)rap, .off = 16 };
-	int ra = x64_treg(e), ng, nf;
-	uint32_t lstk = wk_newlabel(e), ldone = wk_newlabel(e);
+	int ra, ng, nf;
+	uint32_t lstk, ldone;
 
+	if (e->msabi)
+		return x64w_va_arg(e, rap, t);
+	ra = x64_treg(e), lstk = wk_newlabel(e), ldone = wk_newlabel(e);
 	x64_classify(e, t, &a, true);
 	if (a.blanes)
 		efatal(e, e->curloc, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");

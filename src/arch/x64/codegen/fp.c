@@ -70,6 +70,7 @@ static val x64_half_call(ecx *e, int name, val v, qty from, qty to)
 	wkarg a;
 	lval slot = x64_tmpslot(e, 16);
 
+	e->msabi = x64w_helpers(e);	/* (the runtime's convention) */
 	x64_classify(e, from, &a, false);
 	a.slot = slot.off;
 	if (x64_isld(e->c, from)) {
@@ -243,6 +244,38 @@ static val x64_tfcall(ecx *e, int fn, const tfarg *a, int n, int rk)
 	lval out = { 0 };
 	rec *i;
 
+	if (x64w_helpers(e)) {
+		/* Microsoft's convention: the 16-byte types by reference to a copy in the frame,
+		   __float128 and long double results through a hidden pointer, __int128 in xmm0 */
+		static const int kinds[] = { [TQ] = TY_FLOAT128, [TX] = TY_LDOUBLE, [TD] = TY_DOUBLE, [TF] = TY_FLOAT,
+					     [TI] = TY_LLONG, [TW] = TY_INT128 };
+		int64_t in[2];
+		qty ty[2];
+
+		for (int k = 0; k < n; k++) {
+			lval d = x64_tmpslot(e, a[k].k == TQ || a[k].k == TX || a[k].k == TW ? 16 : 8);
+
+			ty[k] = prim(kinds[a[k].k]);
+			in[k] = d.off;
+			if (a[k].k == TQ || a[k].k == TX || a[k].k == TW) {
+				int rd = x64_laddr(e, &d);
+
+				x64_copy(e, rd, a[k].r, 16);
+				x64_tfree(e, rd);
+			} else {
+				x64_mem(e, X_ST, 8, a[k].r, &d, false);
+			}
+		}
+		for (int k = 0; k < n; k++)
+			x64_tfree(e, a[k].r);
+		out = x64_tmpslot(e, 16);
+		x64w_helper(e, fn, in, ty, n, out.off, prim(kinds[rk]));
+		if (rk == TQ || rk == TX || rk == TW)
+			return x64_vr(x64_laddr(e, &out));
+		res = rk == TI ? x64_treg(e) : x64_ftreg(e);
+		x64_mem(e, X_LD, rk == TF ? 4 : 8, res, &out, false);
+		return x64_vr(res);
+	}
 	for (int k = 0; k < n; k++)
 		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
 	saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;

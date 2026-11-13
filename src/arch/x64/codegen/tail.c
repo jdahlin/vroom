@@ -11,8 +11,13 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 	val values[6];
 	const node *call;
 
+	bool ms = e->x64->msfn;
+
 	if (e->x64->interrupt || W->inl || W->inst || W->nclean || W->nvla || W->spneed || e->E->o->sprot ||
-	    W->falign > 16 || !em_tail_candidate(e, W->fsym, expr, 6, &callee))
+	    W->falign > 16 || !em_tail_candidate(e, W->fsym, expr, ms ? 4 : 6, &callee))
+		return false;
+	/* the same convention on both sides; Windows: not through __imp_ or .refptr. */
+	if ((cc_func_abi(c, c->syms[callee].ty) == CC_FNABI_MS) != ms || (WIN64(c) && sym_needs_got(c, REF(RK_SYM, callee))))
 		return false;
 	call = N(expr);
 	/* Snapshot every argument before writing any ABI register. This handles
@@ -36,9 +41,9 @@ VPRIV bool x64_tail_return(ecx *e, uint32_t expr)
 		if (slots[i]) {
 			lval from = { .k = L_FRAME, .off = slots[i], .align = 8 };
 
-			x64_load(e, x64_argreg((int)i), &from, wk_size(c, ty), wk_signed(c, ty));
+			x64_load(e, ms ? x64w_argreg((int)i) : x64_argreg((int)i), &from, wk_size(c, ty), wk_signed(c, ty));
 		} else {
-			x64_op3(e, X_MOVI, wk_size(c, ty), x64_argreg((int)i), XNOREG, XNOREG)->imm =
+			x64_op3(e, X_MOVI, wk_size(c, ty), ms ? x64w_argreg((int)i) : x64_argreg((int)i), XNOREG, XNOREG)->imm =
 				(int64_t)em_trunc_to(c, values[i].i, ty);
 		}
 	}

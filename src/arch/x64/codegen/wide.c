@@ -75,6 +75,37 @@ static void x64_lcall(ecx *e, int fn, const int64_t *words, int nw, int xmmarg, 
 	int pad;
 	rec *i;
 
+	if (x64w_helpers(e)) {
+		/* Microsoft's convention: an __int128 by reference (its two words into one object),
+		   returned in xmm0; a float in xmm0 */
+		int64_t in[2];
+		qty ty[2], ti = prim(TY_INT128);
+		int na = 0;
+		bool single = fn == FN_FIXSFTI || fn == FN_FIXUNSSFTI || fn == FN_FLOATTISF || fn == FN_FLOATUNTISF;
+
+		(void)resw;
+		if (xmmarg == 0) {
+			in[na] = words[0], ty[na++] = prim(single ? TY_FLOAT : TY_DOUBLE);
+		} else {
+			for (int k = 0; k + 1 < nw; k += 2) {
+				lval d = { .k = L_FRAME, .off = wk_slot(e, 16, 16), .align = 16 };
+
+				for (int w = 0; w < 2; w++) {
+					lval s = { .k = L_FRAME, .off = words[k + w], .align = 8 }, dw = d;
+
+					dw.off += 8 * w;
+					x64_mem(e, X_LD, 8, R11, &s, false);
+					x64_mem(e, X_ST, 8, R11, &dw, false);
+				}
+				in[na] = d.off, ty[na++] = ti;
+			}
+			if (nw == 3)	/* a shift's count */
+				in[na] = words[2], ty[na++] = prim(TY_INT);
+		}
+		x64w_helper(e, fn, in, ty, na, res, fres ? prim(single ? TY_FLOAT : TY_DOUBLE) : ti);
+		return;
+	}
+
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
 			x64_op3(e, X_PUSH, 8, XNOREG, q, XNOREG);
@@ -394,6 +425,7 @@ VPRIV val x64_wcvt(ecx *e, val v, qty from, qty to)
 		int fn = tw ? (wk_signed(c, to) ? FN_FIXXFTI : FN_FIXUNSXFTI) :
 			(wk_signed(c, from) ? FN_FLOATTIXF : FN_FLOATUNTIXF);
 
+		e->msabi = x64w_helpers(e);	/* (the runtime's convention) */
 		x64_classify(e, from, &arg, false);
 		arg.slot = wk_slot(e, 16, 16);
 		for (int w = 0; w < 2; w++) {

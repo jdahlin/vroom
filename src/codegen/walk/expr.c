@@ -165,7 +165,7 @@ static lval wk_fromval(ecx *e, val v, qty t)
 		l.off = (int64_t)v.i;
 	} else {
 		l.k = L_REG;
-		l.r = (uint8_t)wk_reg(e, &v, prim(TY_LONG));
+		l.r = (uint8_t)wk_reg(e, &v, e->c->t_ptrdiff);
 	}
 	l.align = KIND(c, t) == TY_VOID ? 1 : talign(c, t);
 	return l;
@@ -377,7 +377,7 @@ VPRIV lval wk_lval(ecx *e, uint32_t n)
 				l.bf = 1, l.width = 1, l.bitoff = (uint16_t)(i.i & 7);
 				return l;
 			}
-			int ri = wk_reg(e, &i, prim(TY_LONG)), rb = LO(treg)(e);
+			int ri = wk_reg(e, &i, e->c->t_ptrdiff), rb = LO(treg)(e);
 			LO(mov)(e, rb, ri);
 			val bit = LO(bin)(e, LEX_TOKEN_AMPERSAND, 8, false, wk_vreg(rb), vconst(7));
 			lval bs = { .k = L_FRAME, .off = wk_slot(e, 8, 8), .align = 8 };
@@ -589,7 +589,7 @@ static val wk_bf_load_big(ecx *e, const lval *l, qty t)
 			if (l->sgn) v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(63));
 			else { wk_free(e, &v); v = vconst(0); }
 		}
-		int r = wk_reg(e, &v, prim(TY_ULONG));
+		int r = wk_reg(e, &v, e->c->t_size);
 		LO(store)(e, r, &out, 8);
 	}
 	wk_free(e, &v);
@@ -909,7 +909,7 @@ static val wk_cast(ecx *e, uint32_t n)
 							v = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, true, v, vconst(64 - part.width));
 						}
 					}
-					int r = wk_reg(e, &v, prim(TY_ULONG));
+					int r = wk_reg(e, &v, e->c->t_size);
 					LO(store)(e, r, &byte, 1); LO(tfree)(e, r);
 				}
 				wk_lfree(e, &src);
@@ -978,7 +978,7 @@ static val wk_cast(ecx *e, uint32_t n)
 			return wk_gen(e, x->a);	/* one representation (vectors of one size, records) */
 		wk_scalar(e, n, x->ty);
 		wk_scalar(e, x->a, from);
-		return wk_conv(e, wk_gen(e, x->a), is_ptr(c, from) ? prim(TY_ULONG) : from, is_ptr(c, x->ty) ? prim(TY_ULONG) : x->ty);
+		return wk_conv(e, wk_gen(e, x->a), is_ptr(c, from) ? e->c->t_size : from, is_ptr(c, x->ty) ? e->c->t_size : x->ty);
 	default:
 		wk_unsup(e, n, "this conversion");
 	}
@@ -1084,12 +1084,12 @@ static val wk_ptradd(ecx *e, val p, val i, qty it, int64_t es, bool sub)
 	cc *c = e->c;
 
 	if (em_bigint(c, it) || wk_wide(c, it)) {
-		i = wk_conv(e, i, it, prim(TY_LONG));
-		it = prim(TY_LONG);
+		i = wk_conv(e, i, it, e->c->t_ptrdiff);
+		it = e->c->t_ptrdiff;
 	}
 
 	if (i.k == V_CONST)
-		return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, prim(TY_ULONG), p, vconst(i.i * es));
+		return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, e->c->t_size, p, vconst(i.i * es));
 	{
 		int ri = wk_reg(e, &i, it);
 
@@ -1168,7 +1168,7 @@ VPRIV val wk_vla_bytes(ecx *e, qty t)
 		return vconst(tsize(c, t));
 	n = wk_vla_len(e, a->n);
 	b = wk_vla_bytes(e, a->base);
-	return wk_arith(e, LEX_TOKEN_STAR, prim(TY_ULONG), n, b);
+	return wk_arith(e, LEX_TOKEN_STAR, e->c->t_size, n, b);
 }
 
 /* p +- i elements of a pointer to a VLA */
@@ -1176,15 +1176,15 @@ static val wk_ptradd_vla(ecx *e, val p, val i, qty it, qty pt, bool sub)
 {
 	cc *c = e->c;
 	if (em_bigint(c, it) || wk_wide(c, it)) {
-		i = wk_conv(e, i, it, prim(TY_LONG));
-		it = prim(TY_LONG);
+		i = wk_conv(e, i, it, e->c->t_ptrdiff);
+		it = e->c->t_ptrdiff;
 	}
 	int ri = wk_reg(e, &i, it);
 
 	if (wk_size(c, it) < 8)
 		LO(ext)(e, ri, wk_size(c, it), wk_signed(c, it));
-	i = wk_arith(e, LEX_TOKEN_STAR, prim(TY_ULONG), wk_vreg(ri), wk_vla_bytes(e, T(c, pt)->base));
-	return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, prim(TY_ULONG), p, i);
+	i = wk_arith(e, LEX_TOKEN_STAR, e->c->t_size, wk_vreg(ri), wk_vla_bytes(e, T(c, pt)->base));
+	return wk_arith(e, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, e->c->t_size, p, i);
 }
 
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
@@ -1197,7 +1197,7 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 
 	uint32_t align = sym_align(c, s);
 	lsp.off += 8, ln.off += 16;
-	r = wk_reg(e, &n, prim(TY_ULONG));
+	r = wk_reg(e, &n, e->c->t_size);
 	LO(store)(e, r, &ln, 8);
 	if (e->wk->zgen[s] == e->wk->gen) {
 		/* reached again (a goto back): the previous instance freed first */
@@ -1220,15 +1220,15 @@ VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero)
 	/* Leave enough padding to round the returned pointer up independently
 	   of the stack pointer; the saved stack pointer still releases it all. */
 	if (align > 16) {
-		n = wk_arith(e, LEX_TOKEN_PLUS, prim(TY_ULONG), wk_vreg(r), vconst(align - 16));
-		r = wk_reg(e, &n, prim(TY_ULONG));
+		n = wk_arith(e, LEX_TOKEN_PLUS, e->c->t_size, wk_vreg(r), vconst(align - 16));
+		r = wk_reg(e, &n, e->c->t_size);
 	}
 	e->wk->spneed |= e->wk->canary != 0;	/* (alloca'd memory below the frame) */
 	p = LO(alloca)(e, wk_vreg(r));
 	if (align > 16) {
-		p = wk_arith(e, LEX_TOKEN_PLUS, prim(TY_ULONG), p, vconst(align - 1));
-		p = wk_arith(e, LEX_TOKEN_AMPERSAND, prim(TY_ULONG), p, vconst(-(int64_t)align));
-		wk_reg(e, &p, prim(TY_ULONG));
+		p = wk_arith(e, LEX_TOKEN_PLUS, e->c->t_size, p, vconst(align - 1));
+		p = wk_arith(e, LEX_TOKEN_AMPERSAND, e->c->t_size, p, vconst(-(int64_t)align));
+		wk_reg(e, &p, e->c->t_size);
 	}
 	LO(store)(e, p.r, &la, 8);
 	if (zero) {
@@ -1331,9 +1331,9 @@ static val wk_vlanes(ecx *e, int op, qty at, val a, qty bt, val b, qty rt, bool 
 	/* a constant of a lane type (__int128 and long double lanes are objects, by address) */
 #define WK_LK(t, k) (wk_wide(c, t) ? LO(wconst)(e, (k)) : is_flt(c, t) ? wk_conv(e, vconst(k), prim(TY_INT), t) : vconst(k))
 
-	ra = wk_reg(e, &a, is_vec(c, at) || wk_mem(e, at) ? prim(TY_ULONG) : at);
+	ra = wk_reg(e, &a, is_vec(c, at) || wk_mem(e, at) ? e->c->t_size : at);
 	if (!unary)
-		rb = wk_reg(e, &b, is_vec(c, bt) || wk_mem(e, bt) ? prim(TY_ULONG) : bt);
+		rb = wk_reg(e, &b, is_vec(c, bt) || wk_mem(e, bt) ? e->c->t_size : bt);
 	for (unsigned i = 0; i < nl; i++) {
 		val x = wk_lane(e, at, ra, i), r;
 
@@ -1419,7 +1419,7 @@ static val wk_binary(ecx *e, uint32_t n)
 	}
 	if (unlikely(is_vec(c, x->ty) || is_vec(c, lt) || is_vec(c, rt))) {
 		a = wk_gen(e, x->a);
-		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? prim(TY_ULONG) : lt);
+		b = wk_rhs(e, &a, x->b, is_vec(c, lt) ? e->c->t_size : lt);
 		return wk_vlanes(e, op, lt, a, rt, b, x->ty, false);
 	}
 	if (wk_is_cmp(op)) {
@@ -1441,9 +1441,9 @@ static val wk_binary(ecx *e, uint32_t n)
 	a = wk_gen(e, x->a);
 	b = wk_rhs(e, &a, x->b, lt);
 	if (is_ptr(c, lt) && is_ptr(c, rt) && op == LEX_TOKEN_MINUS && ptr_to_vla(c, lt)) {
-		val d = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_LONG), a, b);
+		val d = wk_arith(e, LEX_TOKEN_MINUS, e->c->t_ptrdiff, a, b);
 
-		return wk_arith(e, LEX_TOKEN_SLASH, prim(TY_LONG), d, wk_vla_bytes(e, T(c, lt)->base));
+		return wk_arith(e, LEX_TOKEN_SLASH, e->c->t_ptrdiff, d, wk_vla_bytes(e, T(c, lt)->base));
 	}
 	if (is_ptr(c, lt) && ptr_to_vla(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
 		return wk_ptradd_vla(e, a, b, rt, lt, op == LEX_TOKEN_MINUS);
@@ -1451,11 +1451,11 @@ static val wk_binary(ecx *e, uint32_t n)
 		return wk_ptradd_vla(e, b, a, lt, rt, false);
 	if (is_ptr(c, lt) && is_ptr(c, rt) && op == LEX_TOKEN_MINUS) {
 		int64_t es = (int64_t)tsize(c, T(c, lt)->base);
-		val d = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_LONG), a, b);
+		val d = wk_arith(e, LEX_TOKEN_MINUS, e->c->t_ptrdiff, a, b);
 
 		if (es <= 1)
 			return d;
-		return wk_arith(e, LEX_TOKEN_SLASH, prim(TY_LONG), d, vconst(es));
+		return wk_arith(e, LEX_TOKEN_SLASH, e->c->t_ptrdiff, d, vconst(es));
 	}
 	if (is_ptr(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS))
 		return wk_ptradd(e, a, b, rt, (int64_t)tsize(c, T(c, lt)->base) ?: 1, op == LEX_TOKEN_MINUS);
@@ -1620,7 +1620,7 @@ VPRIV val wk_reload(ecx *e, const lval *l, qty t)
 /* the bytes of the object at v (type t, held by address) into l; l's address is the value */
 VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v)
 {
-	int rs = wk_reg(e, &v, prim(TY_ULONG));
+	int rs = wk_reg(e, &v, e->c->t_size);
 	if (l->bf) {
 		wk_bf_store(e, l, t, rs);
 		LO(tfree)(e, rs);
@@ -1834,8 +1834,8 @@ static val wk_incval(ecx *e, qty t, bool dec, val a)
 		return LO(cmp)(e, LEX_TOKEN_EQUAL_EQUAL, 4, false, a, vconst(0));
 	}
 	if (is_ptr(c, t) && ptr_to_vla(c, t))
-		return wk_ptradd_vla(e, a, vconst(1), prim(TY_LONG), t, dec);
-	return wk_arith(e, dec ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, is_ptr(c, t) ? prim(TY_ULONG) : t, a,
+		return wk_ptradd_vla(e, a, vconst(1), e->c->t_ptrdiff, t, dec);
+	return wk_arith(e, dec ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, is_ptr(c, t) ? e->c->t_size : t, a,
 			is_flt(c, t) ? wk_conv(e, vconst(1), prim(TY_INT), t) : vconst(d ? d : 1));
 }
 
@@ -1937,7 +1937,7 @@ static val wk_incdec(ecx *e, uint32_t n)
 	qty t = N(x->a)->ty;
 	bool post = x->op == N_POSTINC || x->op == N_POSTDEC, dec = x->op == N_PREDEC || x->op == N_POSTDEC;
 	int64_t d = is_ptr(c, t) ? (int64_t)tsize(c, T(c, t)->base) : 1;
-	qty ot = is_ptr(c, t) ? prim(TY_ULONG) : t;
+	qty ot = is_ptr(c, t) ? e->c->t_size : t;
 	lval l;
 	val old = { 0 }, nv;
 	int r;
@@ -2059,7 +2059,7 @@ static void wk_argslot(ecx *e, wkarg *a, qty t, val v)
 	a->slot = wk_slot(e, a->size > 8 ? (a->size + 7) & ~(uint64_t)7 : 8, a->align);
 	l = (lval){ .k = L_FRAME, .off = a->slot, .align = 8 };
 	if (wk_mem(e, t)) {
-		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, &l);
+		int rs = wk_reg(e, &v, e->c->t_size), rd = LO(laddr)(e, &l);
 
 		if (a->size)
 			LO(copy)(e, rd, rs, a->size);
@@ -2115,7 +2115,7 @@ static bool wk_mem_inline(ecx *e, uint32_t n, int kind, val *out)
 	{
 		uint64_t len;
 		val d = wk_gen(e, c->lists[x->b]), v2;
-		int rd = wk_reg(e, &d, prim(TY_ULONG));
+		int rd = wk_reg(e, &d, e->c->t_size);
 
 		cc_eval(c, c->lists[x->b + 2], &cv);
 		len = (uint64_t)cv.i;
@@ -2126,7 +2126,7 @@ static bool wk_mem_inline(ecx *e, uint32_t n, int kind, val *out)
 				LO(zero)(e, rd, len);
 		} else {
 			val sv = wk_gen(e, c->lists[x->b + 1]);
-			int rs = wk_reg(e, &sv, prim(TY_ULONG));
+			int rs = wk_reg(e, &sv, e->c->t_size);
 
 			if (len && kind == CC_LIB_MEMMOVE) {	/* memmove: through a slot (the two may overlap) */
 				lval t = { .k = L_FRAME, .off = wk_slot(e, len, 8), .align = 8 };
@@ -2231,9 +2231,11 @@ static val wk_call(ecx *e, uint32_t n)
 			wkarg fa;
 			val v;
 
+			wk_abi(e, 0);
 			LO(classify)(e, N(an)->ty, &fa, false);
 			wk_argslot(e, &fa, N(an)->ty, wk_gen(e, an));
 			e->calls = true;
+			wk_abi(e, 0);
 			v = LO(call)(e, FIXED(k), NULL, &fa, 1, false, NULL, prim(TY_FLOAT));
 			return wk_conv(e, v, prim(TY_FLOAT), prim(TY_DOUBLE));
 		} else {
@@ -2246,18 +2248,21 @@ static val wk_call(ecx *e, uint32_t n)
 		qty at = N(an)->ty;
 
 		wk_scalar(e, an, at);
+		wk_abi(e, ft);
 		LO(classify)(e, at, &args[i], (f->flags & TF_VARIADIC) && i >= f->n);
 		wk_argslot(e, &args[i], at, wk_gen(e, an));
 	}
 	if (rec_) {
+		wk_abi(e, ft);
 		LO(classify)(e, f->base, &r, false);
 		r.slot = wk_slot(e, (r.size + 7) & ~(uint64_t)7 ?: 8, r.align);
 	}
 	if (!ref) {
 		fn = wk_gen(e, x->a);
-		wk_reg(e, &fn, prim(TY_ULONG));
+		wk_reg(e, &fn, e->c->t_size);
 	}
 	e->calls = true;
+	wk_abi(e, ft);
 	{
 		val v = LO(call)(e, ref, ref ? NULL : &fn, args, (int)na, var, rec_ ? &r : NULL, f->base);
 		lval l = { .k = L_FRAME, .off = r.slot, .align = 8 };
@@ -2338,10 +2343,12 @@ static int wk_valist(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 
-	if (X86(c) && is_ptr(c, N(n)->ty)) {
+	/* System V's va_list is an array (a parameter's decays to a pointer to it); the Microsoft one
+	   is a char * variable, so its address */
+	if (X86(c) && is_ptr(c, N(n)->ty) && !cc_valist_is_ms(c, N(n)->ty)) {
 		val v = wk_gen(e, n);
 
-		return wk_reg(e, &v, prim(TY_ULONG));
+		return wk_reg(e, &v, e->c->t_size);
 	}
 	{
 		lval l = wk_lval(e, n);
@@ -2574,7 +2581,7 @@ static val wk_fpattern(ecx *e, qty t, int64_t sl, int *eb)
 	cc *c = e->c;
 	lval l = { .k = L_FRAME, .off = sl, .align = 16 }, h = l;
 	int k = KIND(c, t), r = LO(treg)(e);
-	qty u = prim(TY_ULONG);
+	qty u = e->c->t_size;
 
 	h.off += 8;
 	if (k == TY_FLOAT16 || k == TY_BFLOAT16) {
@@ -2614,8 +2621,8 @@ static val wk_fptest(ecx *e, int bi, qty t, int64_t sl)
 
 	if (bi == BI_ISNORMAL) {
 		/* exponent - 1 below all ones - 1: neither zero/subnormal nor inf/NaN */
-		p = wk_arith(e, LEX_TOKEN_GREATER_GREATER, prim(TY_ULONG), p, vconst(64 - eb));
-		p = wk_arith(e, LEX_TOKEN_MINUS, prim(TY_ULONG), p, vconst(1));
+		p = wk_arith(e, LEX_TOKEN_GREATER_GREATER, e->c->t_size, p, vconst(64 - eb));
+		p = wk_arith(e, LEX_TOKEN_MINUS, e->c->t_size, p, vconst(1));
 		return LO(cmp)(e, LEX_TOKEN_LESS, 8, false, p, vconst((i128)((1ull << eb) - 2)));
 	}
 	if (bi == 0)	/* zero */
@@ -2762,7 +2769,7 @@ static val wk_ovload(ecx *e, int64_t slot, int limb)
 static void wk_ovstore(ecx *e, int64_t slot, int limb, val v)
 {
 	lval l = { .k = L_FRAME, .off = slot + limb * 4, .align = 4 };
-	int r = wk_reg(e, &v, prim(TY_ULONG));
+	int r = wk_reg(e, &v, e->c->t_size);
 	LO(store)(e, r, &l, 4);
 	LO(tfree)(e, r);
 }
@@ -2798,7 +2805,7 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 				val v = LO(bin)(e, LEX_TOKEN_STAR, 8, false, wk_ovload(e, as, i), wk_ovload(e, bs, j));
 				v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, rs, i + j));
 				v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, carry, 0));
-				int r = wk_reg(e, &v, prim(TY_ULONG));
+				int r = wk_reg(e, &v, e->c->t_size);
 				wk_ovstore(e, rs, i + j, wk_vreg(wk_dup(e, r)));
 				wk_ovstore(e, carry, 0, LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(32)));
 			}
@@ -2810,7 +2817,7 @@ static val wk_overflow_wide(ecx *e, const uint32_t *arg, int op)
 			if (op == LEX_TOKEN_MINUS) b = LO(bin)(e, LEX_TOKEN_CARET, 8, false, b, vconst(0xffffffffu));
 			val v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, wk_ovload(e, as, i), b);
 			v = LO(bin)(e, LEX_TOKEN_PLUS, 8, false, v, wk_ovload(e, carry, 0));
-			int r = wk_reg(e, &v, prim(TY_ULONG));
+			int r = wk_reg(e, &v, e->c->t_size);
 			wk_ovstore(e, rs, i, wk_vreg(wk_dup(e, r)));
 			wk_ovstore(e, carry, 0, LO(bin)(e, LEX_TOKEN_GREATER_GREATER, 8, false, v, vconst(32)));
 		}
@@ -2897,7 +2904,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		return vconst(0);
 	case BI_SETJMP: case BI_LONGJMP: {
 		val p = wk_gen(e, arg[0]);
-		int r = wk_reg(e, &p, prim(TY_ULONG));
+		int r = wk_reg(e, &p, e->c->t_size);
 
 		if (x->aux == BI_SETJMP) {
 			return LO(setjmp)(e, r);
@@ -2932,8 +2939,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 		qty at = N(arg[0])->ty, ae = T(c, at)->base, re = T(c, x->ty)->base;
 		int64_t na = T(c, at)->ext ?: T(c, at)->n, nr = T(c, x->ty)->ext ?: T(c, x->ty)->n;
 		bool sh = x->aux == BI_SHUFFLEVECTOR;
-		val a = wk_gen(e, arg[0]), bv = sh ? wk_rhs(e, &a, arg[1], prim(TY_ULONG)) : vconst(0);
-		int ra = wk_reg(e, &a, prim(TY_ULONG)), rb = sh ? wk_reg(e, &bv, prim(TY_ULONG)) : -1;
+		val a = wk_gen(e, arg[0]), bv = sh ? wk_rhs(e, &a, arg[1], e->c->t_size) : vconst(0);
+		int ra = wk_reg(e, &a, e->c->t_size), rb = sh ? wk_reg(e, &bv, e->c->t_size) : -1;
 		lval d = { .k = L_FRAME, .off = wk_slot(e, tsize(c, x->ty), 16), .align = talign(c, re) };
 
 		for (int64_t i = 0; i < nr; i++) {
@@ -2994,7 +3001,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		val v = wk_gen(e, arg[0]);
 
 		e->dyn = true;
-		val p = LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, prim(TY_ULONG)));
+		val p = LO(alloca)(e, wk_conv(e, v, N(arg[0])->ty, e->c->t_size));
 		/* Preserve this allocation across every currently active VLA scope. */
 		if (e->wk->nvla) {
 			int sp = LO(spget)(e);
@@ -3022,8 +3029,8 @@ static val wk_builtin(ecx *e, uint32_t n)
 		/* clz(((x ^ (x >> (bits - 1))) << 1) | 1): the redundant sign bits, never clz of 0 */
 		qty at = N(arg[0])->ty;
 		int sz = wk_size(c, at) > 4 ? 8 : 4;
-		val v = wk_conv(e, wk_gen(e, arg[0]), at, sz == 8 ? prim(TY_LONG) : prim(TY_INT)), t;
-		int r = wk_reg(e, &v, prim(TY_LONG));
+		val v = wk_conv(e, wk_gen(e, arg[0]), at, sz == 8 ? e->c->t_ptrdiff : prim(TY_INT)), t;
+		int r = wk_reg(e, &v, e->c->t_ptrdiff);
 
 		t = LO(bin)(e, LEX_TOKEN_GREATER_GREATER, sz, true, wk_vreg(wk_dup(e, r)), vconst(sz * 8 - 1));
 		v = LO(bin)(e, LEX_TOKEN_CARET, sz, false, wk_vreg(r), t);
@@ -3086,7 +3093,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 
 				r = wk_putmem(e, &l, tr, r);	/* (the stored object's address) */
 			}
-			rr = wk_reg(e, &r, prim(TY_ULONG));
+			rr = wk_reg(e, &r, e->c->t_size);
 			if (uu == wk_signed(c, tr)) {
 				/* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
 				hi = (lval){ .k = L_REG, .r = (uint8_t)rr, .off = 8, .align = 8 };
@@ -3111,7 +3118,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 		b = wk_conv(e, wk_gen(e, arg[1]), tb, w);
 		r = LO(wbin)(e, op, true, a, b);
 		l = wk_fromval(e, wk_gen(e, arg[2]), tr);
-		rr = wk_reg(e, &r, prim(TY_ULONG));
+		rr = wk_reg(e, &r, e->c->t_size);
 		cp = LO(treg)(e);
 		LO(mov)(e, cp, rr);
 		lo = wk_conv(e, (val){ .k = V_REG, .r = (uint8_t)cp }, w, tr);
@@ -3244,6 +3251,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_VA_START: {
 		int r = wk_valist(e, arg[0]);
 
+		e->msabi = cc_valist_is_ms(c, N(arg[0])->ty);
 		LO(va_start)(e, r);
 		LO(tfree)(e, r);
 		return vconst(0);
@@ -3257,7 +3265,9 @@ static val wk_builtin(ecx *e, uint32_t n)
 	case BI_VA_COPY: {
 		int rd = wk_valist(e, arg[0]), rs = wk_valist(e, arg[1]);
 
-		LO(copy)(e, rd, rs, tsize(c, T(c, c->t_valist)->kind == TY_ARRAY ? T(c, c->t_valist)->base : c->t_valist));
+		/* (the Microsoft va_list: a char *, whatever the target's own is) */
+		LO(copy)(e, rd, rs, cc_valist_is_ms(c, N(arg[0])->ty) ? 8 :
+			 tsize(c, T(c, c->t_valist)->kind == TY_ARRAY ? T(c, c->t_valist)->base : c->t_valist));
 		LO(tfree)(e, rd);
 		LO(tfree)(e, rs);
 		return vconst(0);
@@ -3452,6 +3462,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 		lval l;
 
 		wk_scalar(e, n, x->ty);
+		e->msabi = cc_valist_is_ms(c, N(x->a)->ty);
 		rp = LO(va_arg)(e, ra, x->ty);
 		LO(tfree)(e, ra);
 		l = (lval){ .k = L_REG, .r = (uint8_t)rp, .align = 8 };

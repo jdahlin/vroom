@@ -278,7 +278,7 @@ static void wk_elems(ecx *e, const lval *d, qty ty, uint32_t init)
 	if (wk_mem(e, ty)) {
 		/* another object's bytes (a struct variable, a call's result ...) */
 		val v = wk_gen(e, init);
-		int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = wk_addr(e, d);
+		int rs = wk_reg(e, &v, e->c->t_size), rd = wk_addr(e, d);
 
 		uint64_t bytes = tsize(c, ty);
 		if (is_record(c, ty) && (T(c, ty)->flags & TF_ATOMIC)) {
@@ -351,7 +351,8 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		wkarg a;
 		val r;
 
-		LO(classify)(e, prim(TY_ULONG), &a, false);
+		wk_abi(e, c->syms[fn].ty);
+		LO(classify)(e, e->c->t_size, &a, false);
 		a.slot = wk_slot(e, 8, 8);
 		{
 			int ra = LO(laddr)(e, &l);
@@ -362,6 +363,7 @@ VPRIV void wk_cleanups(ecx *e, int to)
 		}
 		note_ref(e, REF(RK_SYM, fn));
 		e->calls = true;
+		wk_abi(e, c->syms[fn].ty);
 		r = LO(call)(e, REF(RK_SYM, fn), NULL, &a, 1, false, NULL, prim(TY_VOID));
 		wk_free(e, &r);
 	}
@@ -1181,7 +1183,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 		if (x->a && wk_mem(e, W->rty)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			val v = wk_gen(e, x->a);
-			int r = wk_reg(e, &v, prim(TY_ULONG));
+			int r = wk_reg(e, &v, e->c->t_size);
 
 			if (W->nclean) {
 				/* the cleanups run after the value is taken: a copy, except of a local
@@ -1254,7 +1256,7 @@ static void wk_stmt1(ecx *e, uint32_t n)
 	case N_GOTO_IND: {
 		val v = wk_gen(e, x->a);
 
-		LO(jumpr)(e, wk_reg(e, &v, prim(TY_ULONG)));
+		LO(jumpr)(e, wk_reg(e, &v, e->c->t_size));
 		return;
 	}
 	default:
@@ -1601,6 +1603,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	}
 	W->retlbl = wk_newlabel(e);
 	LO(locals_begin)(e, s);
+	wk_abi(e, y->ty);
 	if (wk_mem(e, W->rty)) {
 		LO(classify)(e, W->rty, &W->rrec, false);
 		W->rrec.slot = wk_slot(e, 8, 8);	/* (memory: the hidden pointer's slot) */
@@ -1620,6 +1623,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 		pa[i].slot = LO(local)(e, p, &home) ? 0 :
 			wk_pslot_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WK_SLOT_PARAM);	/* (sdepth is 0: wk_slot was wk_pslot) */
 	}
+	wk_abi(e, y->ty);
 	LO(params)(e, pa, (int)body->aux, wk_mem(e, W->rty) ? &W->rrec : NULL, (ft->flags & TF_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];

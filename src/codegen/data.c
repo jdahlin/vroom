@@ -481,6 +481,22 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
+	if (WIN64(c)) {
+		/* COFF (clang's sections): .data, .bss, .rdata; thread-locals in .tls$, which the
+		   linker puts between the CRT's __tls_start and __tls_end; no .type or .size */
+		sym_header(e, b, s, false, (y->flags & SF_THREAD) && !a->section ? "\t.section\t.tls$,\"dw\"\n" :
+			   all_const(c, y->ty) ? "\t.section\t.rdata,\"dr\"\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		if (zero && !e->nrel) {
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
+		} else {
+			data_bytes(e, b, size);
+		}
+		e->E->nobj++;
+		out_chunk(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
 	if (!a->section && (y->flags & SF_THREAD) && !DARWIN(c)) {
 		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
 		const char *sec = zero && !e->nrel ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
@@ -677,6 +693,8 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
+	else if (WIN64(c))
+		vtext_string_append(b, "\t.section\t.rdata,\"dr\"\n");
 	else if (nul)
 		vtext_string_append(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else

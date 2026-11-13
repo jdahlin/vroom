@@ -125,6 +125,15 @@ typedef struct wkst {
 	bool spneed;
 } wkst;
 
+/* x86-64: the calling convention of the call, function or va_list the next LO(classify), LO(call),
+   LO(params), LO(va_start) or LO(va_arg) is for (e->msabi; PLAN-win64.md WIN2): fty a function
+   type or a pointer to one, 0 the target's own (library helpers).  Set right before each: the
+   evaluation of an argument may make other calls in between. */
+static inline void wk_abi(ecx *e, qty fty)
+{
+	e->msabi = X86(e->c) && (fty ? cc_func_abi(e->c, fty) == CC_FNABI_MS : WIN64(e->c));
+}
+
 enum { WK_FCMP_UNORDERED = 0x10000, WK_FCMP_ORDERED_NE };
 enum { WK_ALOAD, WK_ASTORE, WK_AXCHG, WK_AXADD, WK_ACAS, WK_AFENCE };
 enum { WK_SLOT_TEMP, WK_SLOT_LOCAL, WK_SLOT_PARAM, WK_SLOT_FUNC };	/* WK_SLOT_FUNC: lives for the whole function */

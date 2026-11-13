@@ -112,8 +112,8 @@
 /* the x86-64 CPU: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md), for
  * x86-64 Linux and Windows x64 */
 #define X86(c) PP_IS_X86_64((c)->o->target)
-/* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, the Microsoft calling convention,
- * LLP64); the code generator does not implement them yet (WIN2-WIN5) */
+/* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, SEH unwind directives, the
+ * Microsoft calling convention, LLP64) */
 #define WIN64(c) ((c)->o->target == PP_WIN64)
 
 /*
@@ -199,6 +199,7 @@ typedef struct emitter {
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
 	_Atomic uint8_t *strdone;	/* per string: emitted */
 	_Atomic uint8_t *extref;	/* per sym: referenced (for .weak of undefined syms) */
+	_Atomic uint8_t *refptr;	/* WIN64, per sym: reached through .refptr.NAME (the stub in the tail) */
 	_Atomic uint8_t *walked;
 	uint16_t *fnsize;		/* per function: AST nodes (prepass) */
 	uint8_t *inl_read; /* parameter references outside a direct (void)param discard */
@@ -438,6 +439,8 @@ typedef struct ecx {
 	bool vtry;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
 	bool vlow;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
 	const char *vfail;	/* ... and why (NULL: it did not fail) */
+	bool msabi;		/* X86: the next LO(classify/call/params/va_*) uses the Microsoft x64 convention
+				   (the walker sets it from cc_func_abi right before each; PLAN-win64.md WIN2) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } ecx;
 enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_MODTI3, FN_STRLEN,
@@ -448,7 +451,8 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
        FN_FLOATUNDITF, FN_FLOATTITF, FN_FLOATUNTITF, FN_FIXTFSI, FN_FIXTFDI, FN_FIXUNSTFSI, FN_FIXUNSTFDI,
        FN_FIXTFTI, FN_FIXUNSTFTI, FN_EXTENDXFTF2, FN_TRUNCTFXF2, FN_EXTENDBFSF2, FN_TRUNCSFBF2, FN_TRUNCDFBF2, FN_TRUNCXFBF2, FN_TRUNCTFBF2, FN_EXTENDHFSF2, FN_TRUNCSFHF2, FN_TRUNCDFHF2, FN_TRUNCXFHF2, FN_TRUNCTFHF2,
        FN_FLOATTIXF, FN_FLOATUNTIXF, FN_FIXXFTI, FN_FIXUNSXFTI,
-       FN_FLOORF, FN_CEILF, FN_TRUNCF, FN_ROUNDF, FN_RINTF, FN_NEARBYINTF, FN_FABSF };
+       FN_FLOORF, FN_CEILF, FN_TRUNCF, FN_ROUNDF, FN_RINTF, FN_NEARBYINTF, FN_FABSF,
+       FN___MAIN };	/* (MinGW: main calls __main first) */
 #define FIXED(k) REF(RK_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -844,6 +848,8 @@ VPRIV void unspill(ecx *e, const spill *s);
 VPRIV void call_fixed(ecx *e, int fn, int a0, int a1, int a2, int64_t n);
 VPRIV void finish_function(ecx *e, uint32_t s);	/* arch/a64/codegen/func.c: optimise, lay out and print the records */
 VPRIV bool sym_needs_got(cc *c, uint32_t ref);
+enum { WIN64_IMP = 1, WIN64_REFPTR };
+VPRIV int sym_win64_indirect(cc *c, uint32_t ref);	/* Windows: __imp_NAME, .refptr.NAME or direct (0) */
 /* bind.c */
 static inline int64_t keep_cl(const ecx *e, int64_t mark);
 static inline int X(cc *c, qty t);

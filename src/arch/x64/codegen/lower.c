@@ -601,8 +601,11 @@ VPRIV void x64_begin(ecx *e, uint32_t s)
 {
 	xst *X = x64_state(e);
 
-	(void)s;
 	X->nin = 0;
+	X->msfn = cc_func_abi(e->c, e->c->syms[s].ty) == CC_FNABI_MS;
+	X->winframe = WIN64(e->c) || X->msfn;
+	X->csmask = 0;
+	X->wsave = 0;
 	X->spframe = false;
 	X->framesz = X->spdelta = 0;
 	X->live = 0;
@@ -652,7 +655,7 @@ VPRIV void x64_finish(ecx *e, uint32_t s)
 	sym_header(e, b, s, true, "\t.text\n", 16);
 	x64_print(e, b, s);
 	size_t text = it_open(e, IT_TEXT);
-	if (e->E->o->pfe_n) {
+	if (e->E->o->pfe_n && !WIN64(e->c)) {
 		/* the patchable entry's address (the M nops before it, else the entry itself) */
 		vtext_string_append(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
 		sym_name(e->c, b, s);
@@ -687,12 +690,12 @@ VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model)
 	int r;
 	rec *i;
 
-	if (model < 2) {
+	if (model < 2 || WIN64(e->c)) {	/* (Windows: one model, _tls_index and the TEB's array) */
 		r = x64_treg(e);
 		i = x64_put(e, X_TLS);
 		i->r[0] = (uint8_t)r;
 		i->ref = ref;
-		i->cond = (uint8_t)model;
+		i->cond = WIN64(e->c) ? 0 : (uint8_t)model;
 		return r;
 	}
 	/* general dynamic: a call; the live temporaries saved around it, rsp 16-aligned */
@@ -930,6 +933,23 @@ VPRIV val x64_alloca(ecx *e, val n)
 
 	x64_op3(e, X_ADDI, 8, r, r, XNOREG)->imm = 15;
 	x64_op3(e, X_ANDI, 8, r, r, XNOREG)->imm = -16;
+	if (WIN64(e->c)) {
+		/* Windows commits the stack a guard page at a time: touch every page first,
+		   ___chkstk_ms with rax the size (as clang) */
+		bool keep = r != RAX && (e->x64->live & (1u << RAX));
+
+		if (keep) {
+			x64_op3(e, X_PUSH, 8, XNOREG, RAX, XNOREG);
+			e->x64->pushes++;
+		}
+		if (r != RAX)
+			x64_mov(e, RAX, r);
+		x64_put(e, X_PROBE);
+		if (keep) {
+			x64_op3(e, X_POP, 8, RAX, XNOREG, XNOREG);
+			e->x64->pushes--;
+		}
+	}
 	x64_op3(e, X_SUB, 8, RSP, RSP, r);
 	x64_mov(e, r, RSP);
 	return (val){ .k = V_REG, .r = (uint8_t)r };

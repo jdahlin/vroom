@@ -204,7 +204,7 @@ VPRIV void em_switch_values_emit(ecx *e)
   if (WASM(e->c)) {
    vtext_string_append(&e->out,"\t.section\t.rodata.");ref_name(e->c,&e->out,ref);
    vtext_string_append(&e->out,",\"\",@\n");
-  } else vtext_string_append(&e->out,"\t.section\t.rodata,\"a\",@progbits\n");
+  } else vtext_string_append(&e->out,WIN64(e->c)?"\t.section\t.rdata,\"dr\"\n":"\t.section\t.rodata,\"a\",@progbits\n");
   vtext_format_append(&e->out,"\t.p2align\t%u\n",p2);
   it_close(e,h);
   if (direct(e)) {

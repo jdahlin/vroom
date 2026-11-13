@@ -109,6 +109,7 @@ static const opdesc x64_desc[X_NOPS] = {
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
 	[X_X87] = X_DESC(X_U, OD_FP | OD_TRAP | OD_BARRIER),
 	[X_RESUME_FRAME] = { .fl = OD_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
+	[X_PROBE] = { .fl = OD_LOAD | OD_STORE | OD_TRAP | OD_BARRIER | X_W, .iuse = X_BIT(RAX) | X_BIT(RSP) },
 };
 
 static rmask x64_effect_reg(unsigned r)
@@ -161,6 +162,8 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
 		} else if (i->cond) {
 			f.fl |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
+		if (e && WIN64(e->c))
+			f.def |= X_BIT(R11); /* Windows: _tls_index through r11 */
 	} else if (i->op == X_REP) {
 		if (i->cond) f.use |= X_BIT(RAX);
 		else f.def |= X_BIT(RSI), f.use |= X_BIT(RSI);
@@ -265,6 +268,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_CVTF2F] = EM_FLOW_NEXT,
 		[X_X87] = EM_FLOW_NEXT,
 		[X_RESUME_FRAME] = EM_FLOW_NEXT,
+		[X_PROBE] = EM_FLOW_NEXT,
 	};
 	return flow;
 }

@@ -44,7 +44,9 @@ VPRIV void x64_locals_begin(ecx *e, uint32_t s)
 			X->lsym[X->nlreg++] = X->lsym[i];
 	for (unsigned i = 0; i < X->nlreg; i++) {
 		X->lreg[i] = regs[i];
-		if (!X->csslot[X->lreg[i]])
+		if (X->winframe)
+			X->csmask |= UINT64_C(1) << regs[i];	/* (the Windows frame's save area, print.c) */
+		else if (!X->csslot[X->lreg[i]])
 			X->csslot[X->lreg[i]] = wk_pslot(e, 8, 8);
 	}
 }

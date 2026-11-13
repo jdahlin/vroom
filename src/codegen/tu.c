@@ -423,6 +423,29 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 /* emit_tu1's per-TU tables (E.*) and text buffers */
 static vjob_region_pool erpool = VJOB_REGION_POOL_INIT(18);
 
+/*
+ * Windows x64: the .refptr.NAME pointers the code read (sym_win64_indirect), in symbol order, each
+ * in its own discard COMDAT as clang writes them (every TU that needs one has its copy; the linker
+ * keeps one); the MinGW runtime's pseudo-relocations fix one up when NAME lives in a DLL.
+ */
+static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr)
+{
+	for (uint32_t s = 0; refptr && s < c->nsym; s++)
+		if (atomic_load_explicit(&refptr[s], memory_order_relaxed)) {
+			vtext_string_append(b, "\t.section\t.rdata$.refptr.");
+			sym_name(c, b, s);
+			vtext_string_append(b, ",\"dr\",discard,.refptr.");
+			sym_name(c, b, s);
+			vtext_string_append(b, "\n\t.p2align\t3\n\t.globl\t.refptr.");
+			sym_name(c, b, s);
+			vtext_string_append(b, "\n.refptr.");
+			sym_name(c, b, s);
+			vtext_string_append(b, ":\n\t.quad\t");
+			sym_name(c, b, s);
+			vtext_char_append(b, '\n');
+		}
+}
+
 static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
 		    const keep *K, keep *next)
 {
@@ -441,6 +464,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.K = K;
 	E.claimed = vjob_region_acquire(&er[0], c->nsym + 64, "emit.claimed");
 	E.extref = vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
+	E.refptr = WIN64(c) ? calloc(c->nsym + 64, 1) : NULL;	/* (Windows only: the .refptr. stubs) */
 	E.sflags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
 	E.ffacts = vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
 	E.strdone = vjob_region_acquire(&er[3], c->nstr + 64, "emit.strdone");
@@ -605,9 +629,11 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 					sym_name(c, &tail, s);
 					vtext_char_append(&tail, '\n');
 				}
-				vtext_string_append(&tail, "\t.type\t");
-				sym_name(c, &tail, s);
-				vtext_string_append(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				if (!WIN64(c)) {	/* (COFF: no .type) */
+					vtext_string_append(&tail, "\t.type\t");
+					sym_name(c, &tail, s);
+					vtext_string_append(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				}
 				vtext_string_append(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
 				vtext_string_append(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
@@ -639,6 +665,8 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
+		else if (WIN64(c))
+			win64_tail(c, &tail, E.refptr);
 		else
 			vtext_string_append(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
@@ -773,6 +801,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	vjob_region_release(&er[15], (c->nsym + 64) * sizeof(uint16_t));
 	vjob_region_release(&er[16], c->nsym + 64);
 	vjob_region_release(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t));
+	free((void *)E.refptr);
 	vjob_region_pool_give(&erpool, er);
 	return errors;
 }

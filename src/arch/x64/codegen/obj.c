@@ -14,13 +14,16 @@ VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out)
 	case X_SHLI: case X_SHRI: case X_SARI: case X_SHL: case X_SHR: case X_SAR:
 	case X_IMULI: case X_NEG: case X_NOT: case X_CMP: case X_CMPI:
 	case X_TEST: case X_CMOV: case X_SETCC: case X_JMP: case X_JCC:
-	case X_CALL: case X_PUSH: case X_POP: case X_CQO:
+	case X_PUSH: case X_POP: case X_CQO:
 	case X_LEAL: case X_MFENCE: case X_UD2: case X_BSF: case X_BSR:
 	case X_MULW: case X_SMULW: case X_DIV: case X_IDIV: case X_EXT:
 	case X_FADD: case X_FSUB: case X_FMUL: case X_FDIV: case X_FXOR:
 		break;
 	case X_CALLR: case X_JMPR:
 		if (e->E->o->xcf & 4) return false;
+		break;
+	case X_CALL:
+		if (WIN64(e->c) && sym_needs_got(e->c, i->ref)) return false;	/* (callq *__imp_f(%rip): text) */
 		break;
 	default: return false;
 	}
@@ -33,6 +36,8 @@ VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out)
 			out->r[1] = RSP; out->off = (int32_t)off;
 		} else if (i->r[1] == RBP && i->off < 0 && e->wk->falign > 16)
 			out->r[1] = R12;
+		else if (i->r[1] == RBP && i->off < 0)
+			out->off = (int32_t)(i->off - e->x64->wsave);	/* (the Windows frame's save area, print.c) */
 	}
 	return true;
 }
