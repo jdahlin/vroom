@@ -18,6 +18,19 @@ driver, Microsoft's headers with SAL and `__declspec` beyond what MinGW uses,
 CodeView/PDB), 32-bit x86, arm64 Windows, and C++.  `__try`/`__except` is not
 supported by clang for MinGW either.
 
+**No clang or LLVM in the product.**  Clang, lld, llvm-mingw's compiler and
+the LLVM object tools appear only in the test harnesses, as the oracle vcc is
+compared with.  What a user runs is our own code end to end: `vcc` compiles,
+`vas` assembles, `vlink` links, `var` archives.  That includes the run-time
+support a compiled program links against: no compiler-rt and no libgcc.  The
+helpers generated code calls (`___chkstk_ms`, the `__int128` division and
+shift helpers, the `long double`/`__float128` conversions) come from vcc's own
+runtime library (step WIN7R).  The only third-party input is the mingw-w64
+sysroot: Windows headers, the CRT startup objects and the import libraries
+(the role glibc has on Linux).  The harness takes it from an llvm-mingw
+release because that packages it conveniently; nothing else in that tree is
+used on vcc's side.
+
 **Rules:** as PLAN-x86.md.  Clang is the reference
 (`clang --target=x86_64-w64-mingw32`, the same clang 23 as the other tables);
 data taken from clang once lives in generated files.  The output for arm64,
@@ -113,6 +126,7 @@ harnesses green.  If the PR grows too large to review, WIN7 (vlink) and WIN8
 | WIN5 | **COFF objects.** `src/platform/win/coff.c` beside `elf.c` (header, section table, symbol table with aux records, string table, relocations `ADDR64 ADDR32 ADDR32NB REL32 REL32_1..5 SECREL SECTION`, COMDAT, `.bss` sizes, alignment in section flags) and `.pdata`/`.xdata` built from the SEH directives as LLVM MC does; `-c` directly from the records | `vcc-win64.py --objcmp`: `vpp -c` byte-identical to clang assembling vcc's `-S`; `llvm-readobj --unwind` equal; the suites run with `--obj`; `bench/vlink-bad.py`-style corrupt COFF input fails cleanly |
 | WIN6 | **Debug info and the rest of the flags.** DWARF in COFF sections (`.debug_*` with section-relative relocations) for `-g`; `-ffunction-sections`/`-fdata-sections`; `-fPIC`/`-fPIE` accepted (everything is position independent already); `-municode`, `-mwindows`, `-mconsole`, `-mthreads` in the driver | `vcc-dwarf.py` for the target (`dwarfdump --verify`, `.text` unchanged); Wine's `winedbg --command bt` shows vcc's frames with lines; `vcc-driver.py` |
 | WIN7 | **vlink writes PE.** `src/platform/win/pe-linker.c` (as `macho-linker.c`: chosen when the first input is COFF or by `-m i386pep`): COFF and archive input, import libraries (short import records and GNU-style `.idata$N` objects), `.idata` synthesis, section merge by `$` suffix, COMDAT and weak-external resolution, `--gc-sections`, base relocations, sorted `.pdata`, the TLS directory, MinGW pseudo-relocations, `.ctors`/`.dtors`, `__ImageBase` and the other linker symbols, deterministic header (timestamp, checksum), `--subsystem`, `--entry`, `-shared` with an export table and `--out-implib` | `vcc-win64.py --vlink`: the loaded image identical to lld's for every test (as `VCC_LDCMP` does for ELF) and it runs under Wine; `vlink-opts.py` cases vs `ld.lld -m i386pep`; corrupt inputs fail cleanly; a DLL built by vlink loads into a clang-built program |
+| WIN7R | **vcc's own runtime library** for the target (`src/runtime/`, built by vcc into `libvccrt.a`, linked by the driver in place of compiler-rt/libgcc): `___chkstk_ms`, the `__int128` helpers (`__udivti3 __divti3 __umodti3 __modti3 __multi3`, shifts), the integer/FP conversions the code generator calls, whatever `long double` and `__float128` operations are not inline | every helper tested against compiler-rt's results on generated inputs (differential, under Wine); the three suites and WIN8's projects link with `-nodefaultlibs` + `libvccrt.a` + the CRT only: `llvm-nm` of each vcc-built executable's link shows no object from compiler-rt, libgcc or libunwind |
 | WIN8 | **Real projects.** zlib, SQLite and FFmpeg (C fallbacks, then with NASM) cross-compiled by vcc, their own test suites run under Wine, against clang's cross build (`bench/zlib/run.py`, `bench/sqlite/run.py`, `bench/ffmpeg/run.py` with `--target win64`); `vccd` serves the cross builds (`CC="vcc --target=..."` in a meson/CMake cross file) | the same test sets pass as with clang; no vcc-only failures; zlib's output bytes equal clang's build |
 | WIN9 | **CI.** `.github/workflows/win64.yml` (reusable, called from `premerge.yml`, added to `gate`'s `needs`) with two jobs: **`wine`** on `ubuntu-24.04` in the Debian container (`ci/setup-debian.sh win64` adds Wine and the pinned llvm-mingw; `ci/premerge.sh win64` runs WIN1-WIN7's harnesses and builds zlib and SQLite with vcc), which uploads the vcc-built executables with a manifest of expected output and exit code per test; **`native`** on `windows-latest`, which downloads that artifact and runs every executable on real Windows with a small Python runner, including the unwind tests | both jobs green and in the gate; the cache keys include the llvm-mingw and Wine versions (`toolfp`) |
 | WIN10 | **vcc on Windows** (after the PR; listed so the design leaves room): `src/port/` for Windows (file mapping with `VirtualAlloc` reservations, threads, named pipes for `vccd`, no `fork`), vcc built by vcc for the target, and the `native` CI job compiling the suites on the runner | `vcc.exe` built by vcc compiles the suites on `windows-latest`; `-S` output byte-identical to the Linux-hosted vcc (as `vcc-self.py` for wasm) |
