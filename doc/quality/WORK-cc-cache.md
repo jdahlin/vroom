@@ -290,3 +290,27 @@ wait with the file.
 | `decl.c` (in `library-function.c`) | sorted-name binary search 586-606, 758-769 | 2 | the local `cc_sorted_name_find` of WORK-cc-decl's adoption (`attribute.c`'s three): `string-index.h` is a hash, these tables are generated sorted; whichever adoption PR merges second calls the first's helper |
 
 No LEB128, byte load/store, buffers or file mapping in these files.
+
+## Status
+
+- Step 1 done (PR "cc: builtins and snapshot, one job per file"), stacked on
+  WORK-cc-decl step 1.  `replay.c` and `driver/ccsnap.c` are untouched
+  (replay.c is frozen pending the removal decision; ccsnap.c is the driver
+  order's), so the part of the review about the snapshot waits.
+- The order's line numbers are function lines; each range was taken from the
+  comment block above the function, as the order says.  The forward
+  declaration of `elementwise_abs_effects` (669) is gone: its users are in
+  four files, so the function is `VPRIV` with a prototype in `ccimpl.h`
+  (as are `arity`, `sigtype`, `builtin_type`, `atomic_call`,
+  `atomic_lock_free_call`, `generic_bitcount`, `bitcount_local`,
+  `bitcount_statement`, `stdc_rotate`, `elementwise_abs_call`,
+  `builtin_vector_lane`, `x86_pcmpstr_call`, `x86_simd_call`, `os_log_call`
+  and `object_pointer_bound`; the `object_bound` typedef moved there too).
+- `builtins[]` stays static in `builtin-table.c`; its two other users
+  (`builtin-vector.c`, `builtin-library-call.c`, and `builtin-call.c`) reach
+  it through the new `builtin_all()`.  The block of `ccimpl.h` where the
+  `builtin` type is declared holds these prototypes.
+- Stale comments fixed: "lowered ... in emit (builtin.c)" now says
+  `arch/<cpu>/codegen`; the `dr_*` prototypes in `ccimpl.h` sit under a
+  "replay.c" heading.
+- Proof not run: `bench/vbench.py gate` and `bench/quality.py --clones 999`.

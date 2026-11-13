@@ -112,14 +112,14 @@ VPRIV unsigned long long nsnow(void)
  * process-wide pool, so it outlives threads (vpp --batch starts some per pass)
  */
 
-_Thread_local As *tl_as;
+_Thread_local as_context *tl_as;
 _Thread_local ElfObj *tl_obj;
 _Thread_local uint8_t *tl_objbuf;
 #define OBJBUF_CAP ((size_t)1 << 32)
 
 
 
-static struct objst { As *as; ElfObj *obj; uint8_t *buf; struct objst *next; } *obj_free;
+static struct objst { as_context *as; ElfObj *obj; uint8_t *buf; struct objst *next; } *obj_free;
 static _Thread_local struct objst *tl_os;
 static pthread_mutex_t obj_mu = PTHREAD_MUTEX_INITIALIZER;
 

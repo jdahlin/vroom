@@ -82,6 +82,29 @@ typedef struct builtin {
 	const char *sig;	/* return type then parameters; '.' variadic (see sigtype) */
 } builtin;
 
+typedef struct object_bound {
+	i128 offset, whole, sub;
+	qty storage;
+} object_bound;
+
+VPRIV const builtin *builtin_all(void);
+VPRIV uint32_t atomic_lock_free_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t atomic_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t stdc_rotate(cc *c, const builtin *b, uint32_t loc);
+VPRIV uint32_t generic_bitcount(cc *c, int id, uint32_t loc);
+VPRIV bool object_pointer_bound(cc *c, uint32_t n, object_bound *b, unsigned depth, unsigned mode);
+VPRIV uint32_t os_log_call(cc *c, int id, uint32_t loc);
+VPRIV void arity(cc *c, uint32_t loc, unsigned want, const vec *args);
+VPRIV qty sigtype(cc *c, char ch);
+VPRIV qty builtin_type(cc *c, const builtin *b);
+VPRIV uint32_t elementwise_abs_call(cc *c, const builtin *b, uint32_t loc);
+VPRIV bool elementwise_abs_effects(cc *c, uint32_t n, bool load);
+VPRIV uint32_t x86_pcmpstr_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc);
+VPRIV uint32_t x86_simd_call(cc *c, const builtin *b, vec *args, qty rt, uint32_t loc);
+VPRIV uint32_t bitcount_local(cc *c, vec *body, qty t, uint32_t init, uint32_t loc);
+VPRIV void bitcount_statement(cc *c, vec *body, uint32_t n, uint32_t loc);
+VPRIV uint32_t builtin_vector_lane(cc *c, uint32_t v, qty et, unsigned i, uint32_t loc);
+
 /* implicit conversion of an rvalue (already decayed) to type to */
 enum { CX_NONE, CX_INIT, CX_PASS, CX_RETURN, CX_ASSIGN };
 
@@ -146,6 +169,7 @@ VPRIV void drcov_boundary(cc *c);
 VPRIV void drcov_finish(cc *c);
 VPRIV void drcov_init(void);
 VPRIV bool drcov_active(void);
+/* replay.c */
 VPRIV void dr_read(cc *c, int ns, uint32_t id, uint32_t s);
 VPRIV uint32_t dr_intern(cc *c, const ctype *t);
 VPRIV void dr_pragma(cc *c, int kind);
@@ -267,7 +291,7 @@ VPRIV qty promote(cc *c, qty t);
 VPRIV qty arith_conv(cc *c, qty a, qty b);
 VPRIV bool compatible(cc *c, qty a, qty b);
 VPRIV qty composite(cc *c, qty a, qty b);
-/* layout.c */
+/* record-layout.c */
 VPRIV void lay_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp);
 /* token.c */
 extern uint8_t kwclass[KW_END];
@@ -322,7 +346,8 @@ static inline __attribute__((always_inline)) void expect(cc *c, int kind, const 
 VPRIV bool expect_semi(cc *c, const char *after);
 VPRIV bool not_expr_start(cc *c, const ptok *t);
 VPRIV bool decl_comma_typo(cc *c);
-/* sym.c */
+VPRIV void pragma(cc *c, const ptok *t);
+/* scope.c, node.c, typo-correction.c, unused-declaration.c */
 VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id);
 static inline uint32_t dget(uint32_t **dir, uint32_t id);
 VPRIV void scope_open(cc *c);
@@ -358,12 +383,13 @@ VPRIV __attribute__((noinline, cold)) void delayed_bug(cc *c, uint32_t loc, cons
 VPRIV void delayed_bug_check(cc *c);
 VPRIV uint32_t mk_flt(cc *c, double v, qty ty, uint32_t loc);
 VPRIV uint32_t mk_fltq(cc *c, u128 q, qty ty, uint32_t loc);
-/* lit.c */
+VPRIV void unused_vars(cc *c, uint32_t m);
+/* literal.c */
 VPRIV uint32_t number(cc *c, const ptok *t);
 VPRIV bool is_strtok(int k);
 VPRIV uint32_t string_lit(cc *c);
 VPRIV uint32_t char_lit(cc *c);
-/* const.c */
+/* constant-eval.c, object-representation.c */
 VPRIV i128 trunc_to(cc *c, i128 v, qty t);
 VPRIV bool quiet_rt(const cc *c);
 VPRIV void i128s_(char *b, size_t n, i128 v);
@@ -376,7 +402,7 @@ VPRIV bool bitcast_constant(cc *c, uint32_t n);
 VPRIV bool vector_constant(cc *c, uint32_t n);
 VPRIV bool is_npc(cc *c, uint32_t n);
 VPRIV bool const_int(cc *c, uint32_t n, i128 *out);
-/* conv.c */
+/* conversion.c, conversion-warnings.c, array-bounds.c */
 VPRIV uint32_t cast_node(cc *c, uint32_t n, qty to, int kind);
 VPRIV __attribute__((noinline)) uint32_t decay_slow(cc *c, uint32_t n, qty t, int k);
 static inline uint32_t decay(cc *c, uint32_t n);
@@ -403,7 +429,11 @@ VPRIV uint32_t rvalue(cc *c, uint32_t n);
 VPRIV void need_scalar(cc *c, uint32_t n, const char *what);
 VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc);
 VPRIV uint32_t mk_bin(cc *c, int op, qty ty, uint32_t a, uint32_t b, uint32_t loc);
-/* complex.c */
+VPRIV void bad_conversion(cc *c, uint32_t n, qty to);
+VPRIV uint32_t conv_check(cc *c, uint32_t n, qty to);
+VPRIV void const_conv(cc *c, uint32_t n, qty to);
+VPRIV const char *arr_tyname(cc *c, qty t);
+/* complex.c, lowering.c */
 VPRIV qty cplx_elem(cc *c, qty t);
 VPRIV qty ty_complex(cc *c, qty et);
 VPRIV uint32_t mk_cplx(cc *c, qty t, uint32_t re, uint32_t im, uint32_t loc);
@@ -425,7 +455,8 @@ VPRIV uint32_t atomic_assign_expr(cc *c, uint32_t lhs, uint32_t rhs, int op, boo
 VPRIV uint32_t atomic_builtin_expr(cc *c, int id, qty t, const vec *input, uint32_t loc);
 VPRIV uint32_t cplx_incdec(cc *c, uint32_t n, int op, uint32_t loc);
 VPRIV uint32_t cplx_unary(cc *c, int op, uint32_t n, uint32_t loc);
-/* expr.c */
+VPRIV bool cplx_pure(cc *c, uint32_t n, int d);
+/* expression.c */
 VPRIV bool is_cmp(int op);
 VPRIV uint32_t binop(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV uint32_t assign(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
@@ -447,18 +478,29 @@ VPRIV uint32_t fast_math_call(cc *c, const char *name, size_t len, qty ft, const
 VPRIV uint32_t fp_sign_call(cc *c, const char *name, size_t len, qty ft, const vec *args, uint32_t loc);
 VPRIV uint32_t narrow_math_call(cc *c, const char *name, size_t len, uint32_t arg, uint32_t loc);
 VPRIV uint32_t builtin_call(cc *c, const builtin *b, uint32_t loc);
-/* expr.c */
+/* expression.c, call.c */
 VPRIV uint32_t paren_expr(cc *c, uint32_t loc);
 VPRIV uint32_t primary(cc *c);
 VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n);
 static inline uint32_t postfix(cc *c, uint32_t n);
-/* exprop.c */
+VPRIV __attribute__((noinline)) uint32_t ovl_pick(cc *c, uint32_t head, const vec *args, uint32_t loc);
+VPRIV __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn, uint32_t loc);
+/* expression-parse.c, expression-warnings.c */
 VPRIV uint32_t capture_vla_bounds(cc *c, qty ty, uint32_t first, uint32_t value, uint32_t loc);
 VPRIV uint32_t cast_expr(cc *c);
 VPRIV uint32_t cond_expr(cc *c);
 VPRIV uint32_t assign_expr(cc *c);
 VPRIV uint32_t expr(cc *c);
 VPRIV bool const_expr(cc *c, i128 *v, uint32_t *np);
+VPRIV void runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV uint32_t no_implicit(cc *c, uint32_t n);
+VPRIV bool same_ref(cc *c, uint32_t a, uint32_t b, int depth);
+VPRIV __attribute__((cold, noinline)) void self_compare(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV __attribute__((cold, noinline)) void null_compare(cc *c, int op, uint32_t x, uint32_t nul);
+VPRIV __attribute__((cold, noinline)) void range_compare(cc *c, uint32_t n, int nk, uint32_t loc);
+VPRIV void logic_const(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void ovf_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1);
+VPRIV void self_assign(cc *c, uint32_t l, uint32_t r, uint32_t loc);
 /* attr.c */
 VPRIV void init_attrs(void);
 VPRIV uint32_t skip_balanced(cc *c);
@@ -513,7 +555,7 @@ VPRIV void declarator(cc *c, declr *d, bool abstract_ok, uint32_t *first, uint32
 VPRIV qty vector_attribute(cc *c, qty t, uint32_t size, uint32_t loc);
 VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops);
 VPRIV qty type_name(cc *c);
-/* record.c */
+/* record-parse.c */
 extern _Thread_local fscratch tl_fscr;
 VPRIV __attribute__((noinline)) void struct_body(cc *c, uint32_t ti);
 VPRIV void enum_body(cc *c, uint32_t ti, attrs *after, uint32_t loc);
@@ -565,9 +607,12 @@ VPRIV void object_size_locals(cc *c, uint32_t sym0, uint32_t node0);
 VPRIV void fold_local_builtins(cc *c, uint32_t sym0, uint32_t node0);
 VPRIV void return_type_warn(cc *c, uint32_t s, uint32_t body, uint32_t rbrace, uint32_t lab0, int k);
 VPRIV bool enum_covered(cc *c, const node *sw);
-/* layout.c */
+/* type-name.c, layout-check.c */
 VPRIV const char *tyname(cc *c, qty t);
 VPRIV void layout_checks(cc *c);
+VPRIV const char *int_name(int k);
+struct vbuffer;
+VPRIV void type_str(cc *c, qty t, const char *inner, struct vbuffer *out, bool *ok);
 
 static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }

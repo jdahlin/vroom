@@ -72,13 +72,13 @@ static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
 			job->status = 1;
 			return;
 		}
-		as_set_dir(tl_as, env->cwd);
+		as_include_directory_set(tl_as, env->cwd);
 		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);
 		size_t tn = (size_t)got;
 
 		if (job->darwin) {
 			/* Apple's dialect, then the Mach-O writer */
-			char *d = as_darwin_text(t, tn, &tn);
+			char *d = macho_dialect_translate(t, tn, &tn);
 
 			free(t);
 			t = d;
@@ -270,13 +270,13 @@ static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
 	} else if (job->objmode) {
 		const char *msg;
 
-		as_set_dir(tl_as, env->cwd);
+		as_include_directory_set(tl_as, env->cwd);
 		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		char *dt = NULL;
 		size_t dn = o.n;
 
 		if (job->darwin)
-			dt = as_darwin_text(o.p, o.n, &dn);
+			dt = macho_dialect_translate(o.p, o.n, &dn);
 		if (as_run(tl_as, tl_obj, dt ? dt : o.p, dn, job->main_file, &msg)) {
 			dprintf(job->errfd, "vcc: error: %s\n", msg);
 			job->status = 1;

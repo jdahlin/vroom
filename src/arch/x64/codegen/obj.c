@@ -53,7 +53,7 @@ static uint32_t xo_label(rctx *R, uint32_t fid, uint32_t label)
 {
 	R->nb.n = 0;
 	x64_lbl(&R->nb, fid, label);
-	return as_sym(R->as, R->nb.p, R->nb.n);
+	return as_symbol_by_name(R->as, R->nb.p, R->nb.n);
 }
 
 static XOp xo_mem(rctx *R, const rec *i)
@@ -61,7 +61,7 @@ static XOp xo_mem(rctx *R, const rec *i)
 	XOp m = { .kind = XK_MEM, .base = (int8_t)(i->r[1] == RIP ? 16 : i->r[1]), .index = -1, .scale = 1,
 		.v = { .c = i->off }, .hasv = 1 };
 	if (i->r[1] == RIP)
-		m.v = as_val(R->as, r_sym(R, i->ref), i->off);
+		m.v = as_symbol_value(R->as, r_sym(R, i->ref), i->off);
 	if (i->op == X_LDX || i->op == X_STX) {
 		m.index = (int8_t)i->r[3]; m.scale = (uint8_t)(1u << i->sh);
 	}
@@ -97,7 +97,7 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 		XOp o[3] = { xo_reg(i->r[1], sz), xo_reg(i->r[0], sz), {0} };
 		switch (i->op) {
 		case X_LABEL:
-			if (as_label(R->as, xo_label(R, fid, i->label))) return -1;
+			if (as_label_define_symbol(R->as, xo_label(R, fid, i->label))) return -1;
 			continue;
 		case X_MOV:
 			mn = "mov";
@@ -142,11 +142,11 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
 			if (xo_emit(R,name,0,o,1)) return -1;
 			mn="movzbl"; sz=0; o[1]=xo_reg(i->r[0],4); break;
 		case X_JMP: case X_JCC: case X_LEAL:
-			o[0]=(XOp){ .kind=XK_EXPR,.v=as_val(R->as,xo_label(R,fid,i->label),0),.hasv=1 };
+			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->as,xo_label(R,fid,i->label),0),.hasv=1 };
 			if (i->op==X_LEAL) { mn="lea";sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
 			else { snprintf(name,sizeof name,"j%s",i->op==X_JMP?"mp":ccname[i->cond]);mn=name;sz=0;count=1; } break;
 		case X_CALL:
-			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_val(R->as,r_sym(R,i->ref),0),.hasv=1 };
+			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->as,r_sym(R,i->ref),0),.hasv=1 };
 			if(R->c->o->pic&&(RKIND(i->ref)==RK_NAME||sym_needs_got(R->c,i->ref)))o[0].mod=XM_PLT;
 			break;
 		case X_CALLR: case X_JMPR: mn=i->op==X_CALLR?"callq":"jmpq";sz=0;count=1;o[0]=xo_reg(i->r[1],8);o[0].star=1;break;

@@ -53,8 +53,8 @@ class Vccd:
             time.sleep(0.02)
         else: raise SystemExit('vccd-test: vccd did not start')
     def alive(self): return self.p.poll() is None
-    def stop(self):
-        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(5)
+    def stop(self, timeout=5):
+        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(timeout)
     def cc(self, cwd, src, out='a.o', extra=(), umask=None, timeout=30):
         """compile through the shim: (status, stderr)"""
         pre = (lambda: os.umask(umask)) if umask is not None else None
@@ -305,7 +305,7 @@ def killed_client_no_output():
         check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
         check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
         st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
-    finally: v.stop()
+    finally: v.stop(300)	# SIGTERM waits for the abandoned job: the next request's new build no longer drains it (Q-SCHED-01)
 
 @test()
 def memory_restart_between_builds():
@@ -451,6 +451,87 @@ def header_shadowed_by_new_file():
         st, err = v.cc(d, src, out='2.o', extra=['-Ii1', '-Ii2']); check(st == 0, err[-300:])
         check(obj(d, '1.o') != obj(d, '2.o'), 'i1/h.h was not picked up')
     finally: v.stop()
+
+@test()
+def two_groups_share_caches():
+    """two builds at once through one server (Q-SCHED-01): they do not flush each
+    other's caches (at most the first switch, when nothing is running), every
+    object is right, and a build after an edit still sees the edit"""
+    from concurrent.futures import ThreadPoolExecutor
+    v = Vccd(workers=4, env={'VCC_LOG': '1'})
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n')
+        leaders = [subprocess.Popen(['sleep', '60'], process_group=0) for _ in range(2)]
+        def one(i, pgid=None, out=None):
+            src = tu(d, f'a{i}.c', f'#include "h.h"\nint v{i} = N + {i};\nint f{i}(void) {{ return v{i} * 3; }}\n')
+            p = subprocess.run([SHIM] + TARGET + ['-c', '-o', out or f'a{i}.o', src], cwd=d, capture_output=True, timeout=30,
+                               env=dict(os.environ, VCC_SOCK=v.sock), process_group=pgid)
+            return i, p.returncode, p.stderr.decode(errors='replace')
+        try:
+            with ThreadPoolExecutor(6) as ex:	# jobs alternate between the two groups
+                res = list(ex.map(lambda i: one(i, leaders[i % 2].pid), range(48)))
+        finally:
+            for l in leaders: l.kill(); l.wait()
+        for i, st, err in res:
+            check(st == 0, f'job {i}: {st} {err[-200:]}')
+            check(f'v{i}'.encode() in obj(d, f'a{i}.o'), f'job {i}: object does not define v{i}')
+        o1 = obj(d, 'a0.o')
+        time.sleep(0.01)
+        open(f'{d}/h.h', 'w').write('#define N 22222\n')
+        _, st, err = one(0, None, 'b0.o'); check(st == 0, err[-300:])	# a new group
+        check(obj(d, 'b0.o') != o1, 'a build after the header edit used the stale header')
+    finally: v.stop()
+    m = re.search(r'(\d+) builds \(cache flushes\)', open(v.logf).read())
+    check(m is not None, 'no flush count in the vccd log')
+    n = int(m.group(1))
+    check(n <= 2, f'{n} cache flushes: at most one for the first switch and one for the build after the edit')
+
+def long_job(v, d):
+    """a compile in its own process group that is still running while the caller goes on (a build in progress)"""
+    big = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+    p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', big], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                         stderr=subprocess.DEVNULL, process_group=0)
+    time.sleep(0.5)
+    check(p.poll() is None, 'the long job ended too early for this test')
+    return p
+
+@test()
+def edit_seen_by_build_started_while_another_runs():
+    """Q-SCHED-01: build A is running, build B compiles a file that includes h.h, h.h is edited, build C starts (a new
+    make, while A still runs: no flush): C compiles the NEW h.h, not the one B's compile left in the caches"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            time.sleep(0.01)
+            open(f'{d}/h.h', 'w').write('#define N 22222\n')
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(a.poll() is None, 'the long job ended before the second build: the test did not test the case')
+            check(obj(d, '1.o') != obj(d, '2.o'), 'the build started while another ran used the header from before the edit')
+            check(obj(d, '2.o') == fresh(d, src, '3.o'), 'second build differs from a fresh server')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
+
+@test()
+def unedited_files_hit_the_cache_for_a_new_build():
+    """the other half: a file that did not change is not read again by a build that starts while another runs.  The
+    check is a stat (size, mtime, identity), so a rewrite of the same size with the same mtime goes unseen: that is how
+    this shows that the cached copy was used"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1111\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            ns = os.stat(f'{d}/h.h').st_mtime_ns
+            with open(f'{d}/h.h', 'r+') as f: f.write('#define N 2222\n')	# same size, same inode
+            os.utime(f'{d}/h.h', ns=(ns, ns))
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(obj(d, '1.o') == obj(d, '2.o'), 'an unchanged file (size, mtime) was read again')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
 
 # ---------------- the client's view ----------------
 

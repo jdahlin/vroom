@@ -103,6 +103,7 @@ arm64)
 	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
+	step task-test    "$BUILD/task-test"
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
@@ -161,6 +162,7 @@ tsan)
 	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step task-test    "$B/task-test"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;

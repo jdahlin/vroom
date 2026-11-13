@@ -66,13 +66,6 @@ VPRIV val ptr_add_vla(ecx *e, val p, val i, qty ptr, bool sub)
 	return ptr_add(e, p, i, 1, sub);
 }
 
-VPRIV bool ptr_to_vla(cc *c, qty ptr)
-{
-	const ctype *b = T(c, T(c, ptr)->base);
-
-	return b->kind == TY_ARRAY && (b->flags & TF_VLA);
-}
-
 VPRIV lval gen_lval(ecx *e, uint32_t n)
 {
 	cc *c = e->c;

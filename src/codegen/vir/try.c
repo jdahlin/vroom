@@ -1,6 +1,6 @@
 /*
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
- * (codegen/vir/build.c); what it cannot build is emitted as before (X8).
+ * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
  * VCC_VIR (read once): unset or 0 off; otherwise letters:
  *   b  build VIR (then emit the function as before)
@@ -19,7 +19,7 @@
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
 #include "../walk/proto.h"
-#include "vw.h"
+#include "preir.h"
 
 /* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
 VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT] = {
