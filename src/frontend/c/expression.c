@@ -85,7 +85,7 @@ static int swz_idx(char ch, int set)
 
 static void swz_range_error(cc *c, uint32_t loc, qty vt)
 {
-	pp_span r = { loc, pp_tok_end(c->p, c->prevloc) };	/* (loc: the '.', the name just consumed) */
+	diag_span r = { loc, pp_token_end_find(c->p, c->prevloc) };	/* (loc: the '.', the name just consumed) */
 
 	report(c, "error", loc, &r, 1, NULL, 0, "vector component access exceeds type '%s'", tyname(c, vt));
 }
@@ -369,7 +369,7 @@ VPRIV uint32_t conditional(cc *c, uint32_t cond, uint32_t a, uint32_t b, uint32_
 		bool pa = is_ptr(c, at);
 
 		if (!is_npc(c, pa ? rb : ra)) {	/* (clang: not for a null pointer constant) */
-			pp_span r[2] = { rng(c, ra), rng(c, rb) };
+			diag_span r[2] = { rng(c, ra), rng(c, rb) };
 			char an[256];
 
 			snprintf(an, sizeof an, "%s", tyname(c, at));
@@ -430,7 +430,7 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	int d;
 
 	if (!is_record(c, bt)) {
-		pp_span r[2] = { rng(c, base), { loc, pp_tok_end(c->p, c->prevloc) } };
+		diag_span r[2] = { rng(c, base), { loc, pp_token_end_find(c->p, c->prevloc) } };
 
 		report(c, "error", loc, r, 2, NULL, 0, "member reference base type '%s' is not a structure or union", tyname(c, bt));
 		return err_node(c, loc);
@@ -440,7 +440,7 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 		if (N(base)->op == N_VAR && (c->syms[N(base)->a].flags & SF_INVALID))
 			return err_node(c, loc);	/* (already reported) */
 		{
-			pp_span r = rng(c, base);
+			diag_span r = rng(c, base);
 
 			report(c, "error", loc, &r, 1, NULL, 0, "incomplete definition of type '%s'", tyname(c, bt));
 		}
@@ -449,7 +449,7 @@ static __attribute__((noinline)) uint32_t member_slow(cc *c, uint32_t base, uint
 	}
 	d = find_member(c, ti, name, path, 0);
 	if (d < 0) {
-		pp_span r = rng(c, base);
+		diag_span r = rng(c, base);
 
 		report(c, "error", c->prevloc, &r, 1, NULL, 0, "no member named '%.*s' in '%s'", IDF(name), tyname(c, bt));
 		return err_node(c, loc);
@@ -516,7 +516,7 @@ VPRIV uint32_t deref(cc *c, uint32_t p, uint32_t loc)
 
 	p = rvalue(c, p);
 	if (!is_ptr(c, N(p)->ty)) {
-		pp_span r = rng(c, p);
+		diag_span r = rng(c, p);
 
 		report(c, "error", loc, &r, 1, NULL, 0, "indirection requires pointer operand ('%s' invalid)", tyname(c, N(p)->ty));
 		return err_node(c, loc);
@@ -546,7 +546,7 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 	if (bitfield_of(c, n))
 		cc_error(c, loc, "address of bit-field requested");
 	if (!(N(n)->flags & NF_LVALUE) && KIND(c, t) != TY_FUNC && N(n)->op != N_COMPLIT) {
-		pp_span sp = rng(c, n);
+		diag_span sp = rng(c, n);
 
 		report(c, "error", loc, &sp, 1, NULL, 0, "cannot take the address of an rvalue of type '%s'", tyname(c, t));
 	}
@@ -556,7 +556,7 @@ VPRIV uint32_t addr_of(cc *c, uint32_t n, uint32_t loc)
 		while (N(b)->op == N_MEMBER)
 			b = N(b)->a;
 		if (N(b)->op == N_VAR && c->syms[N(b)->a].sc == SC_REGISTER && c->syms[N(b)->a].kind == S_VAR) {
-			pp_span sp = rng(c, n);
+			diag_span sp = rng(c, n);
 
 			report(c, "error", loc, &sp, 1, NULL, 0, "address of register variable requested");
 		}
@@ -600,7 +600,7 @@ static uint32_t generic_sel(cc *c, uint32_t loc)
 	if (!chosen)
 		chosen = def;
 	if (!chosen) {
-		pp_span r = rng(c, ctl);
+		diag_span r = rng(c, ctl);
 
 		if (!ISERR(ctl))	/* (clang: nothing more for an invalid operand; the result is invalid) */
 			report(c, "error", N(ctl)->loc, &r, 1, NULL, 0,
@@ -731,19 +731,19 @@ static __attribute__((noinline)) uint32_t primary_kw(cc *c, int kw, uint32_t loc
 static __attribute__((cold, noinline)) void implicit_call_error(cc *c, uint32_t id, uint32_t loc)
 {
 	const char *h = lib_header(c, id);
-	vdiag *d;
+	diag_record *d;
 
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	error_limit(c), c->errors++, c->ndiag++;
-	d = pp_diag_begin(c->p, VDL_ERROR, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support "
+	d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, loc, "call to undeclared function '%.*s'; ISO C99 and later do not support "
 			  "implicit function declarations", IDF(id));
-	pp_diag_flag(d, "implicit-function-declaration");
+	diag_record_flag_set(d, "implicit-function-declaration");
 	c23_word_help(c, d, id);
 	if (h) {
-		pp_diag_help(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
+		diag_record_help_set(c->p, d, "'%.*s' is declared in <%s>", IDF(id), h);
 		include_fix(c, d, loc, h);
 	}
-	pp_diag_emit(c->p, d);
+	diag_record_emit(c->p, d);
 }
 
 /* an identifier without a binding (already consumed): builtins, __func__, errors */
@@ -1070,7 +1070,7 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				at = N(n)->ty, it = N(ix)->ty;
 			}
 			if (!is_ptr(c, at) || !is_integer(c, it)) {
-				pp_span r[2] = { rng(c, n), rng(c, ix) };
+				diag_span r[2] = { rng(c, n), rng(c, ix) };
 
 				if (!is_ptr(c, at))
 					report(c, "error", loc, r, 2, NULL, 0, "subscripted value is not an array, pointer, or vector");
@@ -1080,14 +1080,14 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				continue;
 			}
 			if (is_func(c, T(c, at)->base)) {
-				pp_span r = rng(c, n);
+				diag_span r = rng(c, n);
 
 				report(c, "error", r.b, &r, 1, NULL, 0, "subscript of pointer to function type '%s'", tyname(c, T(c, at)->base));
 				n = err_node(c, loc);
 				continue;
 			}
 			if (!is_void(c, T(c, at)->base) && !complete(c, T(c, at)->base)) {
-				pp_span r = rng(c, n);
+				diag_span r = rng(c, n);
 
 				report(c, "error", loc, &r, 1, NULL, 0, "subscript of pointer to incomplete type '%s'", tyname(c, T(c, at)->base));
 				fwd_note(c, T(c, at)->base);
@@ -1126,9 +1126,9 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				}
 				if (is_ptr(c, N(n)->ty) && is_record(c, T(c, N(n)->ty)->base)) {
 					/* clang: fix-it '->', then go on as if it were there */
-					pp_span r = rng(c, n);
-					pp_fixit fx = { loc, loc + 1, "->", VDA_MACHINE };
-					pp_span b = c->span[n];
+					diag_span r = rng(c, n);
+					diag_fixit fx = { loc, loc + 1, "->", DIAG_APPLICABILITY_MACHINE };
+					diag_span b = c->span[n];
 
 					c->dms = ".";
 					report(c, "error", loc, &r, 1, &fx, 1, "member reference type '%s' is a pointer; did you mean to use '->'?",
@@ -1154,15 +1154,15 @@ VPRIV __attribute__((noinline)) uint32_t postfix_ops(cc *c, uint32_t n)
 				next(c);
 				if (is_record(c, N(n)->ty)) {
 					/* clang: fix-it '.', then go on as if it were there */
-					pp_span r[2] = { rng(c, n), { loc, loc + 2 } };
-					pp_fixit fx = { loc, loc + 2, ".", VDA_MACHINE };
+					diag_span r[2] = { rng(c, n), { loc, loc + 2 } };
+					diag_fixit fx = { loc, loc + 2, ".", DIAG_APPLICABILITY_MACHINE };
 
 					c->dms = "->";
 					report(c, "error", loc, r, 2, &fx, 1, "member reference type '%s' is not a pointer; did you mean to use '.'?",
 					       tyname(c, N(n)->ty));
 					n = member(c, n, id, loc);
 				} else {
-					pp_span b = c->span[n];
+					diag_span b = c->span[n];
 
 					n = deref(c, n, loc);
 					if (b.e && !c->span[n].e)

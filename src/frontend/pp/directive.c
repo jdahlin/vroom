@@ -6,22 +6,22 @@
 /* -Wextra-tokens: tokens after a conditional's (or #undef's) operands */
 static void pp_directive_extra_tokens_location(pp *p, uint32_t loc, const char *name, int nl)
 {
-	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//", 0 };
-	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+	diag_span r = { loc, loc };
+	diag_fixit fx = { loc, loc, "//", 0 };
+	diag_info di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 
-	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
+	diag_warning_report(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", nl, name);
 }
 
 VPRIV __attribute__((noinline)) void pp_directive_extra_token_warn(pp *p, const pp_context *c, uint32_t name, uint32_t i)
 {
 	uint32_t loc = c->loc + c->vt[i].off;
-	pp_span r = { loc, loc };
-	pp_fixit fx = { loc, loc, "//", 0 };
-	pp_dinfo di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
+	diag_span r = { loc, loc };
+	diag_fixit fx = { loc, loc, "//", 0 };
+	diag_info di = { "warning", loc, &r, 0, &fx, 1, NULL, 0 };
 	const lex_token *n = &c->vt[name];
 
-	pp_warnx(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", (int)n->len, c->src + n->off);
+	diag_warning_report(p, "extra-tokens", true, NULL, &di, "extra tokens at end of #%.*s directive", (int)n->len, c->src + n->off);
 }
 
 static void pp_directive_extra_token_at_warn(pp *p, const pp_context *c, const pp_directive_span *d, uint32_t i)
@@ -229,7 +229,7 @@ static __attribute__((cold, noinline)) void pp_pragma_message_run(pp *p, bool er
 {
 	const char *b, *m;
 	bool par = false;
-	pp_dinfo d = { err ? "error" : "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
+	diag_info d = { err ? "error" : "warning", loc, NULL, 0, NULL, 0, NULL, 0 };
 
 	while (q < e && (*q == ' ' || *q == '\t'))
 		q++;
@@ -251,15 +251,15 @@ static __attribute__((cold, noinline)) void pp_pragma_message_run(pp *p, bool er
 		if (q >= e || *q != ')')
 			goto bad;
 	}
-	pp_diag_next_id = err ? "err_pragma_message" : "warn_pragma_message";
+	diag_next_id = err ? "err_pragma_message" : "warn_pragma_message";
 	if (err)
-		pp_diagx(p, &d, "%.*s", (int)(m - b), b);
-	else if (!pp_warnx(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b))
-		pp_diag_next_id = NULL;	/* (off: no record took it) */
+		diag_report_extended(p, &d, "%.*s", (int)(m - b), b);
+	else if (!diag_warning_report(p, "#pragma-messages", true, NULL, &d, "%.*s", (int)(m - b), b))
+		diag_next_id = NULL;	/* (off: no record took it) */
 	return;
 bad:
 	d.what = "error";
-	pp_diagx(p, &d, "pragma %s requires parenthesized string", err ? "error" : "warning");
+	diag_report_extended(p, &d, "pragma %s requires parenthesized string", err ? "error" : "warning");
 }
 
 /*
@@ -470,11 +470,11 @@ VPRIV int pp_directive_run(pp *p, pp_context *c, ptok *out)
 		return 0;
 	case PP_DIRECTIVE_INCLUDE: case PP_DIRECTIVE_INCLUDE_NEXT: case PP_DIRECTIVE_IMPORT:
 		if (unlikely(p->collecting)) {
-			pp_dinfo n = { "note", p->coll_loc, NULL, 0, NULL, 0, NULL, 0 };
+			diag_info n = { "note", p->coll_loc, NULL, 0, NULL, 0, NULL, 0 };
 
 			PP_ERROR(p, loc + (c->vt[b].off - c->vt[b - 1].off),
 			      "embedding a #include directive within macro arguments is not supported");
-			pp_diagx(p, &n, "expansion of macro '%.*s' requested here", (int)vintern_ents[p->collecting_name].len,
+			diag_report_extended(p, &n, "expansion of macro '%.*s' requested here", (int)vintern_ents[p->collecting_name].len,
 				 vintern_ents[p->collecting_name].s);
 			return 0;
 		}
@@ -521,17 +521,17 @@ VPRIV int pp_directive_run(pp *p, pp_context *c, ptok *out)
 		else
 			f = l + 1;
 		{
-			int lv = d->kind == PP_DIRECTIVE_ERROR ? VDL_ERROR : pp_diag_wlevel(p, "#warnings", true, NULL, UINT32_MAX);
-			vdiag *r;
+			int lv = d->kind == PP_DIRECTIVE_ERROR ? DIAG_LEVEL_ERROR : diag_warning_level(p, "#warnings", true, NULL, UINT32_MAX);
+			diag_record *r;
 
 			if (lv < 0)
 				return 0;
-			r = pp_diag_begin(p, lv, nloc, "%.*s", e - b > 1 ? (int)(l->off + l->len - f->off) : 0,
+			r = diag_record_begin(p, lv, nloc, "%.*s", e - b > 1 ? (int)(l->off + l->len - f->off) : 0,
 					  e - b > 1 ? c->src + f->off : "");
 			r->id = d->kind == PP_DIRECTIVE_ERROR ? "err_pp_hash_error" : "pp_hash_warning";
 			if (d->kind == PP_DIRECTIVE_WARNING)
-				pp_diag_flag(r, "#warnings"), r->werror = lv == VDL_ERROR;
-			pp_diag_emit(p, r);
+				diag_record_flag_set(r, "#warnings"), r->werror = lv == DIAG_LEVEL_ERROR;
+			diag_record_emit(p, r);
 		}
 		return 0;
 	}

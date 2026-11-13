@@ -87,9 +87,9 @@ static __attribute__((noinline, cold)) void pp_macro_named_variadic_warn(pp *p, 
 	for (uint32_t i = b + 2; i + 1 < e && vt[i].kind != LEX_TOKEN_RIGHT_PAREN; i++)
 		if (vt[i].kind == LEX_TOKEN_IDENTIFIER && vt[i + 1].kind == LEX_TOKEN_ELLIPSIS) {
 			static const char *const g[] = { "pedantic", NULL };
-			pp_dinfo d = { "warning", c->loc + vt[i + 1].off, NULL, 0, NULL, 0, NULL, 0 };
+			diag_info d = { "warning", c->loc + vt[i + 1].off, NULL, 0, NULL, 0, NULL, 0 };
 
-			if (pp_warnx(p, "variadic-macros", false, g, &d, "named variadic macros are a GNU extension"))
+			if (diag_warning_report(p, "variadic-macros", false, g, &d, "named variadic macros are a GNU extension"))
 				PP_HEADER_CACHE_REGION_REJECT(p);	/* (a replay would not say it) */
 			return;
 		}
@@ -116,7 +116,7 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
 	if (!m || unlikely(m->flags & PP_MACRO_FLAG_UNKNOWN_TOKEN))	/* -Winvalid-pp-token (a cached site knows it has none) */
 		for (uint32_t i = b + 1; i < e; i++)
 			if (unlikely(vt[i].kind == LEX_TOKEN_UNKNOWN))
-				pp_invalid_tok(p, c->src + vt[i].off, vt[i].len, c->loc + vt[i].off);
+				pp_token_invalid_report(p, c->src + vt[i].off, vt[i].len, c->loc + vt[i].off);
 	if (!m) {
 		pp_macro *n = site ? pp_shared_allocate(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n));
 
@@ -166,12 +166,12 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
 
 		if (unlikely(o && !(o & 1) && om != m && !om->builtin && !pp_macro_is_same(om, m))) {
 			uint32_t nloc = c->loc + vt[b].off;
-			pp_span r = { nloc, nloc + vt[b].len };
-			pp_dinfo d = { "warning", nloc, &r, 0, NULL, 0, NULL, 0 };
+			diag_span r = { nloc, nloc + vt[b].len };
+			diag_info d = { "warning", nloc, &r, 0, NULL, 0, NULL, 0 };
 
 			/* (in <built-in>: the predefines are exempt, -D on the command line is not, as clang) */
 			if ((c->f != &p->builtin || vt[b].off >= p->o->predef_cmdl) &&
-			    pp_warnx(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
+			    diag_warning_report(p, "macro-redefined", true, NULL, &d, "'%.*s' macro redefined",
 							    (int)vt[b].len, c->src + vt[b].off))
 				pp_macro_note_at(p, om, nloc, "previous definition is here");
 		}

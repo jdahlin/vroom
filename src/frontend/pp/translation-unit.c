@@ -157,7 +157,7 @@ pp *pp_open(const pp_opts *o)
 
 		p->fatal_jump = &jb;
 		if (setjmp(jb)) {
-			pp_diag_summary(p);	/* ("1 error generated.", as clang) */
+			diag_summary_print(p);	/* ("1 error generated.", as clang) */
 			pp_close(p);
 			return NULL;
 		}

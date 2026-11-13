@@ -37,19 +37,19 @@ const uint8_t tempregs[NTEMP] = { 9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23,
 __attribute__((format(printf, 3, 4)))
 VPRIV void ediag(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	VLOCK(e->E->emu);
 	va_start(ap, fmt);
-	pp_vdiag(e->c->p, loc, "note", fmt, ap);
+	diag_report_va(e->c->p, loc, "note", fmt, ap);
 	va_end(ap);
 }
 
 __attribute__((format(printf, 3, 4)))
 VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: the function falls back (codegen/vir/) */
@@ -60,7 +60,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 	{
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -69,7 +69,7 @@ VPRIV void eerror(ecx *e, uint32_t loc, const char *fmt, ...)
 __attribute__((format(printf, 3, 4), noreturn))
 VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 {
-	pp_diag_pc = __builtin_return_address(0);
+	diag_report_site_pc = __builtin_return_address(0);
 	va_list ap;
 
 	if (e->vtry) {	/* the VIR walker: no diagnostic, the function falls back (codegen/vir/) */
@@ -80,7 +80,7 @@ VPRIV void efatal(ecx *e, uint32_t loc, const char *fmt, ...)
 	{	/* (the lock is dropped before the longjmp: cleanups do not run on it) */
 		VLOCK(e->E->emu);
 		va_start(ap, fmt);
-		pp_vdiag(e->c->p, loc, "error", fmt, ap);
+		diag_report_va(e->c->p, loc, "error", fmt, ap);
 		va_end(ap);
 	}
 	e->E->errors++;
@@ -303,7 +303,7 @@ static void as_error(cc *c, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	pp_vdiag(c->p, 0, "error", fmt, ap);
+	diag_report_va(c->p, 0, "error", fmt, ap);
 	va_end(ap);
 }
 

@@ -83,7 +83,7 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 			}
 			if (!decl_specs(c, &ds, true)) {
 				/* clang: an implicit-int parameter is only an error outside system headers */
-				if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && pp_in_system_header(c->p, tok(c)->loc)) {
+				if (is(c, LEX_TOKEN_IDENTIFIER) && !kwof(tok(c)) && pp_location_is_in_system_header(c->p, tok(c)->loc)) {
 					memset(&ds, 0, sizeof(ds));
 					ds.ty = prim(TY_INT);
 					ds.loc = tok(c)->loc;
@@ -223,7 +223,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 
 		expect(c, LEX_TOKEN_RIGHT_SQUARE, "']'");
 		if (!is_integer(c, N(n)->ty)) {
-			pp_span r = rng(c, n);
+			diag_span r = rng(c, n);
 
 			report(c, "error", N(n)->loc, &r, 1, NULL, 0, "size of array has non-integer type '%s'", tyname(c, N(n)->ty));
 			v = 1;
@@ -239,7 +239,7 @@ static void array_suffix(cc *c, dop *op, uint32_t name)
 			v = bound.i;
 		}
 		if (v < 0) {
-			pp_span r = rng(c, n);
+			diag_span r = rng(c, n);
 
 			if (name)
 				report(c, "error", r.b, &r, 1, NULL, 0, "'%.*s' declared as an array with a negative size", IDF(name));

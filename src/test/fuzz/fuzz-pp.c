@@ -150,7 +150,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
 					FUZZ_CHECK(vintern_ents[t.id].len == l && !memcmp(vintern_ents[t.id].s, s, l),
 						   "identifier spelling vs id %u", t.id);
 			}
-			(void)pp_where(p, t.loc, &name, &nl, &line, &col);	/* line may be 0: #line 0 */
+			(void)pp_location_describe(p, t.loc, &name, &nl, &line, &col);	/* line may be 0: #line 0 */
 		}
 	}
 	if (print)

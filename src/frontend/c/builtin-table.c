@@ -4,7 +4,7 @@
 /* "too few/many arguments", as clang: the caret after the arguments, the callee's name underlined */
 VPRIV void arity(cc *c, uint32_t loc, unsigned want, const vec *args)
 {
-	pp_span r = { loc, pp_tok_end(c->p, loc) };
+	diag_span r = { loc, pp_token_end_find(c->p, loc) };
 	unsigned have = args->n;
 
 	if (have && ISERR(args->v[have - 1]))	/* the ')' was missing (args_list): said */

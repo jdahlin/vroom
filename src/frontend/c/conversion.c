@@ -261,7 +261,7 @@ VPRIV void need_scalar(cc *c, uint32_t n, const char *what)
 /* n is assigned (or incremented) by the operator at loc */
 VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 {
-	pp_span r;	/* the operand's range, for the diagnostics only (pp_tok_end is not free) */
+	diag_span r;	/* the operand's range, for the diagnostics only (pp_token_end_find is not free) */
 
 	if (!(N(n)->flags & NF_LVALUE)) {
 		r = rng(c, n);
@@ -272,10 +272,10 @@ VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
 		r = rng(c, n);
 		if (N(n)->op == N_VAR) {
 			const sym *v = &c->syms[N(n)->a];
-			pp_span vr = { v->plb, pp_tok_end(c->p, v->ple) };
+			diag_span vr = { v->plb, pp_token_end_find(c->p, v->ple) };
 
 			if (!v->ple)
-				vr = (pp_span){ v->loc, v->loc };
+				vr = (diag_span){ v->loc, v->loc };
 			report(c, "error", loc, &r, 1, NULL, 0, "cannot assign to variable '%.*s' with const-qualified type '%s'",
 			       IDF(v->name), tyname(c, N(n)->ty));
 			report(c, "note", v->loc, &vr, 1, NULL, 0, "variable '%.*s' declared const here", IDF(v->name));

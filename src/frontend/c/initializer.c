@@ -288,10 +288,10 @@ static void il_fill(cc *c, ilist *l, uint64_t pos, bool braced, uint32_t first, 
 static uint32_t init_braced(cc *c, qty ty, bool st);
 
 /* a braced initializer skipped (excess elements): its range */
-static pp_span skip_braces(cc *c)
+static diag_span skip_braces(cc *c)
 {
 	int depth = 0;
-	pp_span r = { tok(c)->loc, 0 };
+	diag_span r = { tok(c)->loc, 0 };
 
 	do {
 		r.e = tok(c)->loc;
@@ -303,7 +303,7 @@ static pp_span skip_braces(cc *c)
 			fatal(c, tok(c)->loc, "expected '}'");
 		next(c);
 	} while (depth > 0);
-	r.e = pp_tok_end(c->p, r.e);
+	r.e = pp_token_end_find(c->p, r.e);
 	return r;
 }
 
@@ -334,14 +334,14 @@ static void str_fit(cc *c, qty arr, uint32_t s)
 	}
 	if (is_array(c, arr) && !(T(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && N(s)->op == N_STR &&
 	    c->strs[N(s)->a].esz == 1 && c->strs[N(s)->a].n - 1 > T(c, arr)->n) {
-		pp_span r = rng(c, s);
+		diag_span r = rng(c, s);
 
 		cc_warnx(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "initializer-string for char array is too long");
 	}
 }
 
 /* clang's -Wexcess-initializers, once per list: at the first excess element */
-static void excess_warn(cc *c, qty ty, bool *done, pp_span r)
+static void excess_warn(cc *c, qty ty, bool *done, diag_span r)
 {
 	const char *k = is_array(c, ty) ? "array" : is_vector(c, ty) ? "vector" : KIND(c, ty) == TY_UNION ? "union" :
 			is_record(c, ty) ? "struct" : "scalar";
