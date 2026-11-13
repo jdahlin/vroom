@@ -1374,6 +1374,12 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+The 2026-11-13 bootstrap profile added x86-64 local-exec TLS addresses,
+frame-relative slot stores, and 32-bit moves for zero-extendable constants.
+The local-exec address uses %fs:0 and a TPOFF displacement, preserving flags
+during allocator edits. Other TLS models still use direct lowering.
+See the [paired SQLite compile measurements](PLAN-fas2.md).
+
 `VCC_VIR=bl` on x86-64 now goes through the same builder and loop vectorizer
 as arm64; the function is marked `x86_64-linux`. `arch/x64/codegen/vir.c`
 lowers scalar leaf functions with SysV's integer/FP registers and stack
