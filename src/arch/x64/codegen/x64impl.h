@@ -90,6 +90,7 @@ enum {
 	X_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
 	X_CMPM,		/* compare memory r1+(r3<<sh)+off with r2 (XNOREG: immediate ref); cond reverses operands */
 	X_PROBE,	/* Windows: the stack pages rax bytes below rsp touched (callq ___chkstk_ms; it keeps every register) */
+	X_FRAMEADDR,	/* the Windows frame: r0 = rbp less its save area (print.c), the unwinder's establisher frame */
 	X_NOPS
 };
 
@@ -145,6 +146,7 @@ VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
 VPRIV void x64_restore(ecx *e, uint32_t sv);
 VPRIV int x64_ftreg(ecx *e);
 VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
+VPRIV int x64_rname(const char *s);	/* asm.c: a register name (with or without %), -1 for none */
 VPRIV rec *x64_put(ecx *e, int op);
 VPRIV void x64_twoaddr(ecx *e);
 VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs);
@@ -175,6 +177,9 @@ VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
 VPRIV bool x64_nosimd(ecx *e);
 VPRIV void x64_nofp(ecx *e);
 VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
+VPRIV void x64_call_xmms(ecx *e, const wkarg *r);	/* abi.c, both conventions: a result in xmm0, xmm1, ... */
+VPRIV void x64_call_park(ecx *e, qty rt);	/* abi.c, both conventions: a call's integer result to r11 */
+VPRIV val x64_call_value(ecx *e, val *fn, qty rt, const wkarg *r);	/* ... and its value as the walker takes it */
 /* abi-win64.c: the Microsoft x64 convention */
 VPRIV int x64w_argreg(int i);
 VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed);
@@ -183,6 +188,7 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV void x64w_va_start(ecx *e, int rap);
 VPRIV int x64w_va_arg(ecx *e, int rap, qty t);
 VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const qty *types, int n, int64_t res, qty rt);
+VPRIV void x64w_xmm_part(ecx *e, int op, int64_t off, int size);
 /* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
 static inline bool x64w_helpers(const ecx *e) { return WIN64(e->c); }
 

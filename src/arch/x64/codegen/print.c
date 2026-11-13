@@ -148,7 +148,9 @@ static void x64_guard(ecx *e, tbuf *b)
 {
 	const cc_opts *o = e->E->o;
 
-	if (o->sp_sym)
+	if (WIN64(e->c) && !o->sp_sym && !o->sp_gs)
+		vtext_string_append(b, "\tmovq\t__stack_chk_guard(%rip), %r11\n");	/* MinGW: libssp's variable */
+	else if (o->sp_sym)
 		vtext_format_append(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
 	else
 		vtext_format_append(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
@@ -835,6 +837,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			break;
 		case X_PROBE:
 			vtext_string_append(b, "\tcallq\t___chkstk_ms");
+			break;
+		case X_FRAMEADDR:
+			vtext_format_append(b, "\tleaq\t%lld(%%rbp), ", -(long long)X->wsave);
+			x64_reg(b, i->r[0], 8);
 			break;
 		case X_GOT:
 			if (WIN64(c)) {

@@ -84,5 +84,5 @@ VPRIV bool x64_byref(ecx *e, uint32_t s)
 	if (!e->x64->msfn || e->wk->inst || !(e->c->syms[s].flags & SF_PARAM))
 		return false;
 	x64w_classify(e, e->c->syms[s].ty, &a, false);
-	return a.mem || a.up;
+	return (a.mem || a.up) && !(a.mem && a.up);	/* (a split vector is copied: its halves come apart) */
 }

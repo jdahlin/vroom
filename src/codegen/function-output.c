@@ -27,7 +27,7 @@ VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
  * .tls$ ("dw"); a named section "xr", "dr" or "dw"; -ffunction-sections / -fdata-sections put each
  * in .text$NAME (.data$, .rdata$, .bss$) as a one_only COMDAT keyed by it; no .type or .size.
  */
-static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
+static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
@@ -68,16 +68,6 @@ static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *de
 	} else {
 		vtext_string_append(b, defsec);
 	}
-	if (global) {
-		vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
-		sym_name(c, b, s);
-		vtext_char_append(b, '\n');
-	}
-	vtext_string_append(b, "\t.p2align\t");
-	vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
-	vtext_char_append(b, '\n');
-	sym_name(c, b, s);
-	vtext_string_append(b, ":\n");
 }
 
 VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
@@ -89,12 +79,8 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	size_t h = it_open(e, IT_TEXT);
 
 	if (WIN64(c)) {
-		sym_header_coff(e, b, s, fn, defsec, align);
-		it_close(e, h);
-		return;
-	}
-
-	if (a->section) {
+		sym_header_coff(e, b, s, fn, defsec);
+	} else if (a->section) {
 		const char *sn = c->strs[a->section - 1].s;
 		bool bss = !strncmp(sn, ".bss", 4) || !strncmp(sn, ".tbss", 5);
 
@@ -137,7 +123,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	} else {
 		vtext_string_append(b, defsec);
 	}
-	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m)) {
+	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m) && !WIN64(c)) {	/* (COFF: text for now, WIN5) */
 		symhdr *sh;
 
 		it_close(e, h);
@@ -159,7 +145,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
 		sym_name(c, b, s);
 		vtext_char_append(b, '\n');
-		if (a->visibility) {
+		if (a->visibility && !WIN64(c)) {	/* (COFF has no symbol visibility) */
 			const char *v = c->strs[a->visibility - 1].s;
 
 			if (!strcmp(v, "hidden") || !strcmp(v, "protected")) {
@@ -171,9 +157,13 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	}
 	vtext_string_append(b, "\t.p2align\t");
 	vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
-	vtext_string_append(b, fn ? "\n\t.type\t" : "\n\t.type\t");
-	sym_name(c, b, s);
-	vtext_string_append(b, fn ? ",@function\n" : ",@object\n");
+	if (WIN64(c)) {
+		vtext_char_append(b, '\n');	/* (COFF: the .def record, no .type) */
+	} else {
+		vtext_string_append(b, fn ? "\n\t.type\t" : "\n\t.type\t");
+		sym_name(c, b, s);
+		vtext_string_append(b, fn ? ",@function\n" : ",@object\n");
+	}
 	if (fn && X86(c) && c->o->pfe_m) {
 		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
 		vtext_string_append(b, ".Lpfe");

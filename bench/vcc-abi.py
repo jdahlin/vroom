@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-abi.py: cross-compiler calls (TODO.md T2), Linux under qemu or the Darwin host.
 
-  bench/vcc-abi.py [-v] [--host | --target wasm64|wasm32|x86_64 [--vlink]] [PAT]
+  bench/vcc-abi.py [-v] [--host | --target wasm64|wasm32|x86_64|win64 [--vlink] [--vir]] [PAT]
 
 --generated dispatches to vcc-abi-generated.py for the pinned GCC/LLVM
 cross-call generators. It accepts --count, --start, --suite, -j and Linux
@@ -32,6 +32,13 @@ reason */` a test that does not apply to ILP32.
 as bench/vcc-x86.py builds them (vcc's side by `vpp -S` and clang's
 assembler), linked against glibc and run natively; `/* vcc-xfail-x86: ... */`
 marks a known bug there.
+--target win64: both halves built for x86_64-w64-mingw32 as bench/vcc-win64.py
+builds them (vcc's side by `vpp -S` and clang's assembler), linked by lld
+against the MinGW sysroot and run under Wine; `/* vcc-xfail-win64: ... */`
+marks a known bug there, `/* vcc-skip-win64: reason */` a test that does not
+apply (an LP64 or System V assumption).  --vir: vcc's side through VIR
+(VCC_VIR=l).  The tests under src/test/abi/msabi* also run natively on an
+x86-64 Linux host (--target x86_64): ms_abi functions against clang.
 """
 import importlib.util, os, re, shutil, sys, tempfile
 
@@ -44,18 +51,19 @@ D = f'{ct.T}/abi'
 HOST = False
 WASM = None	# the vcc-wasm.py module, with its target set, for --target wasm64/wasm32
 X86 = None	# the vcc-x86.py module, for --target x86_64
+W64 = None	# the vcc-win64.py module, for --target win64
 VLINK = False
 HOSTFL = ['-O2', '-fno-stack-protector']
 
 
 def compile_(cc, src, obj, inc):
-    base = HOSTFL if HOST else WASM.BASE if WASM else X86.BASE if X86 else ct.BASE
+    base = HOSTFL if HOST else WASM.BASE if WASM else X86.BASE if X86 else W64.BASE if W64 else ct.BASE
     flags, _ = ct.exec_marks(open(src).read())
     base = [*base, *flags]
-    if X86 and cc != 'clang':
+    if (X86 or W64) and cc != 'clang':
         rc, _, err = ct.sh([ct.VPP, '-S'] + base + ['-I', inc, src, '-o', obj + '.s'])
         if not rc:
-            rc, _, err = ct.sh([ct.CL, X86.TGT, '-c', obj + '.s', '-o', obj])
+            rc, _, err = ct.sh([ct.CL, (X86 or W64).TGT, '-c', obj + '.s', '-o', obj])
         return rc, err.decode(errors='replace')
     if cc == 'clang':
         cmd = [ct.CL] + base + ct.CLFL + ['-I', inc, '-c', src, '-o', obj]
@@ -71,9 +79,16 @@ def one(name, wd, verbose):
     contract = re.search(r'/\*\s*abi-targets:\s*linux;(.*?)\*/', src, re.S)
     if contract and (HOST or WASM):
         return 'skip', 'Linux-only ABI contract: ' + ' '.join(contract.group(1).split()), None
+    if W64:
+        sk = re.search(r'/\*\s*vcc-skip-win64:(.*?)\*/', src, re.S)
+        if sk:
+            return 'skip', ' '.join(sk.group(1).split()), None
+    elif name.startswith('msabi') and not X86:
+        return 'skip', 'ms_abi/sysv_abi: x86-64 only', None
     xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
         or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S)) \
-        or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S))
+        or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S)) \
+        or (W64 and re.search(r'/\*\s*vcc-xfail-win64:(.*?)\*/', src, re.S))
     xf = ' '.join(xf.group(1).split()) if xf else None
     if WASM and 'wasm32' in WASM.TGT:
         sk = re.search(r'/\*\s*vcc-skip-wasm32:(.*?)\*/', src, re.S)
@@ -100,6 +115,9 @@ def one(name, wd, verbose):
                 rc, err = WASM.link([objs['caller', a], objs['callee', b]], elf, VLINK)
             elif X86:
                 rc, err = X86.link([objs['caller', a], objs['callee', b]], elf)
+            elif W64:
+                elf = f'{wd}/{a}-{b}.exe'
+                rc, err = W64.link([objs['caller', a], objs['callee', b]], elf)
             else:
                 rc, err = ct.link([objs['caller', a], objs['callee', b]], elf)
             if rc:
@@ -108,6 +126,10 @@ def one(name, wd, verbose):
                 rc, out = WASM.run(elf)
             elif X86:
                 rc, out = X86.run(elf)
+            elif W64:
+                rc, out, _ = W64.run(elf)
+                if rc == 'timeout':	# (once more: Wine's first start in a fresh prefix is slow)
+                    rc, out, _ = W64.run(elf)
             elif HOST:
                 rc, out, _ = ct.sh([elf], timeout=20)
                 out = out.decode('latin-1')
@@ -129,8 +151,8 @@ def main():
         av.remove('--generated')
         if '--target' in av:
             i = av.index('--target') + 1
-            if i < len(av) and av[i] == 'x86_64':
-                av[i] = 'x86_64-linux-gnu'
+            if i < len(av) and av[i] in ('x86_64', 'win64'):
+                av[i] = 'x86_64-linux-gnu' if av[i] == 'x86_64' else 'x86_64-w64-mingw32'
         os.execv(sys.executable, [sys.executable, f'{B}/vcc-abi-generated.py', *av])
     verbose = '-v' in av
     HOST = '--host' in av
@@ -142,9 +164,21 @@ def main():
         i = av.index('--target')
         t = av[i + 1]
         del av[i:i + 2]
-        if t not in ('wasm64', 'wasm32', 'x86_64'):
-            sys.exit(f'vcc-abi: --target {t}: wasm64, wasm32 or x86_64')
-        if t == 'x86_64':
+        if t not in ('wasm64', 'wasm32', 'x86_64', 'win64'):
+            sys.exit(f'vcc-abi: --target {t}: wasm64, wasm32, x86_64 or win64')
+        if '--vir' in av:
+            av.remove('--vir')
+            os.environ['VCC_VIR'] = 'l'
+        if t == 'win64':
+            global W64
+            spec = importlib.util.spec_from_file_location('vw64', f'{B}/vcc-win64.py')
+            W64 = importlib.util.module_from_spec(spec); spec.loader.exec_module(W64)
+            why = W64.hostenv.mingw_missing()
+            if why:
+                sys.exit(f'vcc-abi: {why}')
+            W64.rt_obj()
+            W64.hostenv.wine_start(W64.PREFIX)
+        elif t == 'x86_64':
             global X86
             spec = importlib.util.spec_from_file_location('vx', f'{B}/vcc-x86.py')
             X86 = importlib.util.module_from_spec(spec); spec.loader.exec_module(X86)
@@ -157,7 +191,7 @@ def main():
             if VLINK:
                 WASM.VLENV = WASM.vlink_env()
     pat = av[0] if av else None
-    if not HOST and not WASM and not X86:
+    if not HOST and not WASM and not X86 and not W64:
         ct.build_rt()
     names = sorted(n for n in os.listdir(D) if os.path.isdir(f'{D}/{n}') and (not pat or re.search(pat, n)))
     tmp = tempfile.mkdtemp(prefix='vcc-abi-')
@@ -183,7 +217,7 @@ def main():
         if st != 'pass' or verbose:
             print(f'{st:5} {n}: {why}', flush=True)
     shutil.rmtree(tmp, ignore_errors=True)
-    print(f'abi{" (host)" if HOST else f" ({WASM.TGT[9:]})" if WASM else " (x86_64)" if X86 else ""}: {passes} pass, {xfails} xfail, {fails} fail' + (f', {skips} skipped' if skips else ''))
+    print(f'abi{" (host)" if HOST else f" ({WASM.TGT[9:]})" if WASM else " (x86_64)" if X86 else " (win64)" if W64 else ""}: {passes} pass, {xfails} xfail, {fails} fail' + (f', {skips} skipped' if skips else ''))
     sys.exit(1 if fails else 0)
 
 

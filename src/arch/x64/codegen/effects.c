@@ -110,6 +110,7 @@ static const opdesc x64_desc[X_NOPS] = {
 	[X_X87] = X_DESC(X_U, OD_FP | OD_TRAP | OD_BARRIER),
 	[X_RESUME_FRAME] = { .fl = OD_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
 	[X_PROBE] = { .fl = OD_LOAD | OD_STORE | OD_TRAP | OD_BARRIER | X_W, .iuse = X_BIT(RAX) | X_BIT(RSP) },
+	[X_FRAMEADDR] = { .regs = X_D, .fl = X_P, .iuse = X_BIT(RBP) },
 };
 
 static rmask x64_effect_reg(unsigned r)
@@ -269,6 +270,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X_X87] = EM_FLOW_NEXT,
 		[X_RESUME_FRAME] = EM_FLOW_NEXT,
 		[X_PROBE] = EM_FLOW_NEXT,
+		[X_FRAMEADDR] = EM_FLOW_NEXT,
 	};
 	return flow;
 }

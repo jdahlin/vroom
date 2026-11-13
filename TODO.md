@@ -625,6 +625,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+- [ ] **Windows x64: packed boolean vectors at calls** [C].  clang passes an
+  `ext_vector_type` `_Bool` vector of N lanes on the Microsoft convention one
+  lane per argument position (results through a hidden pointer, the bits
+  packed), as it does for System V; `arch/x64/codegen/abi-win64.c` passes it
+  as one by-reference vector.  `src/test/abi/packed_bool`, `packed_bool_4096`
+  and `packed_bool_variadic_fixed` are `vcc-xfail-win64`.
+  *Validate:* `bench/vcc-abi.py --target win64 packed_bool` XPASSes; remove the markers.
+- [ ] **Windows x64: MS bit-field layout of a packed record with `:0`** [C].
+  `tcc/95_bitfields_ms` TEST 6 (`__attribute__((packed))`, `int x:12, y:4, :0,
+  :4, z:3`): clang starts the unit after `:0` at the byte where the previous
+  unit ends, vcc aligns it to the type (`frontend/c/record-layout.c`); found
+  by `bench/vcc-win64.py`.
+  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,

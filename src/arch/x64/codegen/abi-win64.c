@@ -19,6 +19,8 @@
 
 static const uint8_t x64w_gpr[4] = { RCX, RDX, R8, R9 };
 
+VPRIV void x64_x87st(ecx *e, const lval *l);	/* fp.c */
+
 VPRIV int x64w_argreg(int i) { return x64w_gpr[i]; }
 
 /* the classes: n 1 one 8-byte word in a register (cls WA_INT or WA_SSE); up: returned in xmm0
@@ -29,11 +31,7 @@ VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 	uint64_t size = tsize(c, t);
 	int k = KIND(c, t);
 
-	memset(a, 0, sizeof *a);
-	a->size = size;
-	a->unnamed = unnamed;
-	a->align = talign(c, t) > 8 ? talign(c, t) : 8;
-	a->vector = is_vec(c, t);
+	*a = (wkarg){ .size = size, .unnamed = unnamed, .vector = is_vec(c, t), .align = talign(c, t) > 8 ? talign(c, t) : 8 };
 	if (is_record(c, t) || is_array(c, t)) {
 		/* "Any argument that doesn't fit in 8 bytes, or is not 1, 2, 4, or 8 bytes, must be
 		   passed by reference" (an empty record too) */
@@ -43,9 +41,18 @@ VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 			a->mem = true;
 		return;
 	}
+	if (is_vec(c, t) && T(c, t)->n == 1 && !is_bvec(c, t) && size <= 8) {
+		/* one lane: LLVM scalarizes it, so the element's register (v1hi in rax, v1sf in xmm0) */
+		a->n = 1;
+		a->cls[0] = is_flt(c, T(c, t)->base) ? WA_SSE : WA_INT;
+		return;
+	}
 	if (is_vec(c, t)) {
-		if (size <= 16)
-			a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* by reference, returned in xmm0 */
+		if (size <= 16)	/* by reference, returned in xmm0; LLVM widens a short one to 16 bytes, and
+				   reads it with an aligned 16-byte load */
+			a->n = 1, a->cls[0] = WA_SSE, a->up = true, a->align = 16;
+		else if (size % 16 == 0 && size <= 64)
+			a->mem = a->up = true;	/* (LLVM without AVX: a pointer per 16 bytes, returned in xmm0..) */
 		else
 			a->mem = true;
 		return;
@@ -54,8 +61,12 @@ VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 		a->mem = true;
 		return;
 	}
-	if (k == TY_INT128 || k == TY_UINT128) {
+	if ((k == TY_INT128 || k == TY_UINT128) && !em_bitint(c, t)) {	/* (_BitInt(65..128): by reference both ways) */
 		a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* MinGW: returned in xmm0 */
+		return;
+	}
+	if (k == TY_LDOUBLE && !WIN64(c)) {
+		a->mem = a->x87 = true;	/* ms_abi elsewhere (no MinGW rule): by reference, returned in st(0) */
 		return;
 	}
 	if (k == TY_LDOUBLE || k == TY_FLOAT128 || size > 8) {
@@ -68,35 +79,42 @@ VPRIV void x64w_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 		x64_nofp(e);
 }
 
-/* passed as a pointer to the caller's copy */
-static bool x64w_byref(const wkarg *a) { return a->mem || a->up; }
+/* a vector of 32 or 64 bytes: LLVM splits it in 16-byte halves, each by reference in its own
+   position, and returns it in xmm0, xmm1 (...) */
+static bool x64w_split(const wkarg *a) { return a->mem && a->up; }
+
+/* the positions an argument takes */
+static int x64w_npos(const wkarg *a) { return x64w_split(a) ? (int)(a->size / 16) : 1; }
+
+/* passed as a pointer to the caller's copy (the one object) */
+static bool x64w_byref(const wkarg *a) { return (a->mem || a->up) && !x64w_split(a); }
 
 static lval x64w_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
+
+/* the first size bytes of xmm0 stored to the frame slot at off (X_ST) or loaded from the object at
+   [r] (X_LD, off the register): a short vector result, no wider than it is */
+VPRIV void x64w_xmm_part(ecx *e, int op, int64_t off, int size)
+{
+	lval m = op == X_ST ? x64w_fr(off) : (lval){ .k = L_REG, .r = (uint8_t)off, .align = 1 };
+
+	if (size == 8 || size == 4) {
+		x64_mem(e, op, size, XMM0, &m, false);
+	} else if (op == X_ST) {
+		x64_op3(e, X_MOV, 4, R11, XMM0, XNOREG);
+		x64_mem(e, X_ST, size, R11, &m, false);
+	} else {
+		x64_mem(e, X_LD, size, R11, &m, false);
+		x64_op3(e, X_MOV, 4, XMM0, R11, XNOREG);
+	}
+}
 
 /* the live temporaries a Microsoft callee does not preserve, pushed (rsi and rdi survive, and the
    float temporaries xmm8-xmm14 are among xmm6-xmm15) */
 static uint32_t x64w_save(ecx *e)
 {
-	xst *X = e->x64;
-	uint32_t saved = X->live & X_TEMPS & ~((1u << RSI) | (1u << RDI));
+	static const uint8_t volatile_temps[] = { RAX, RCX, RDX, R8, R9, R10 };
 
-	for (int q = 0; q < 16; q++)
-		if (saved & (1u << q)) {
-			x64_op3(e, X_PUSH, 8, XNOREG, q, XNOREG);
-			X->pushes++;
-		}
-	return saved;
-}
-
-static void x64w_restore(ecx *e, uint32_t saved)
-{
-	xst *X = e->x64;
-
-	for (int q = 15; q >= 0; q--)
-		if (saved & (1u << q)) {
-			x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
-			X->pushes--;
-		}
+	return x64_save(e, volatile_temps, sizeof volatile_temps, -1, -1);
 }
 
 /* the outgoing area: max(4, n) words, rsp 16-aligned at the call; its size */
@@ -114,25 +132,25 @@ static int64_t x64w_outgoing(ecx *e, int n)
 
 VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
 {
-	cc *c = e->c;
 	xst *X = e->x64;
-	int retsize = KIND(c, rt) == TY_VOID ? 0 : wk_size(c, rt);
-	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
-	int first = r && r->mem ? 1 : 0;	/* the hidden result pointer takes position 0 */
+	int first = r && r->mem && !r->up && !r->x87 ? 1 : 0;	/* the hidden result pointer takes position 0 */
+	int np = first;
 	uint32_t saved = x64w_save(e);
-	int64_t total = x64w_outgoing(e, first + n);
 	rec *i;
 
+	for (int k = 0; k < n; k++)
+		np += x64w_npos(&a[k]);
+	int64_t total = x64w_outgoing(e, np);
 	/* the stack words first: r11 is their scratch, and fn's register moves into it next */
-	for (int k = 0; k < n; k++) {
-		int p = first + k;
-		lval s = x64w_fr(a[k].slot), d = { .k = L_REG, .r = RSP, .off = 8 * p };
+	for (int k = 0, p = first; k < n; p += x64w_npos(&a[k]), k++)
+		for (int j = 0; j < x64w_npos(&a[k]); j++) {
+			lval s = x64w_fr(a[k].slot + 16 * j), d = { .k = L_REG, .r = RSP, .off = 8 * (p + j) };
 
-		if (p < 4)
-			continue;
-		x64_mem(e, x64w_byref(&a[k]) ? X_LEA : X_LD, 8, R11, &s, false);
-		x64_mem(e, X_ST, 8, R11, &d, false);
-	}
+			if (p + j < 4)
+				continue;
+			x64_mem(e, x64w_byref(&a[k]) || x64w_split(&a[k]) ? X_LEA : X_LD, 8, R11, &s, false);
+			x64_mem(e, X_ST, 8, R11, &d, false);
+		}
 	if (fn)
 		x64_mov(e, R11, fn->r);
 	if (first) {
@@ -140,11 +158,16 @@ VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool v
 
 		x64_mem(e, X_LEA, 8, RCX, &s, false);
 	}
-	for (int k = 0; k < n && first + k < 4; k++) {
-		int p = first + k;
+	for (int k = 0, p = first; k < n && p < 4; p += x64w_npos(&a[k]), k++) {
 		lval s = x64w_fr(a[k].slot);
 
-		if (x64w_byref(&a[k]) || (!a[k].n && !a[k].mem)) {
+		if (x64w_split(&a[k])) {
+			for (int j = 0; j < x64w_npos(&a[k]) && p + j < 4; j++) {
+				lval h = x64w_fr(a[k].slot + 16 * j);
+
+				x64_mem(e, X_LEA, 8, x64w_gpr[p + j], &h, false);
+			}
+		} else if (x64w_byref(&a[k]) || (!a[k].n && !a[k].mem)) {
 			x64_mem(e, X_LEA, 8, x64w_gpr[p], &s, false);
 		} else if (a[k].cls[0] == WA_SSE) {
 			x64_mem(e, X_LD, 8, XMM0 + p, &s, false);
@@ -163,31 +186,23 @@ VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool v
 	i->sh = 1;	/* a Microsoft callee: rsi, rdi and xmm6-xmm15 survive it (print.c) */
 	x64_put(e, X_ADJSP)->imm = total;
 	X->pushes -= (int)(total / 8);
-	if (r && !r->mem && r->n) {
+	if (r && r->x87) {
+		lval d = x64w_fr(r->slot);
+
+		x64_x87st(e, &d);
+	} else if (r && r->up && !r->mem && r->size < 16) {
+		x64w_xmm_part(e, X_ST, r->slot, (int)r->size);
+	} else if (r && !r->mem && r->n) {
 		lval d = x64w_fr(r->slot);
 
 		x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[0] == WA_SSE ? XMM0 : RAX, &d, false);
-	} else if (retsize && !retf && !r) {
-		x64_mov(e, R11, RAX);
-		x64_ext(e, R11, retsize, retsgn);
+	} else if (r && x64w_split(r)) {
+		x64_call_xmms(e, r);
+	} else if (!r) {
+		x64_call_park(e, rt);
 	}
-	x64w_restore(e, saved);
-	if (fn && fn->k == V_REG)
-		x64_tfree(e, fn->r);
-	if (!retsize || r)
-		return vconst(0);
-	if (retf) {
-		int q = x64_ftreg(e);
-
-		x64_mov(e, q, XMM0);
-		return (val){ .k = V_REG, .r = (uint8_t)q };
-	}
-	{
-		int q = x64_treg(e);
-
-		x64_mov(e, q, R11);
-		return (val){ .k = V_REG, .r = (uint8_t)q };
-	}
+	x64_restore(e, saved);
+	return x64_call_value(e, fn, rt, r);
 }
 
 /*
@@ -196,10 +211,11 @@ VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool v
  */
 VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 {
-	xst *X = e->x64;
+	int first = r && r->mem && !r->up && !r->x87 ? 1 : 0;
+	int64_t half[4] = { 0 };	/* a split vector's half pointer from a register, parked in a slot */
 	cc *c = e->c;
+	xst *X = e->x64;
 	const node *body = N(c->syms[e->wk->fsym].body);
-	int first = r && r->mem ? 1 : 0;
 
 	X->interrupt = 0;
 	X->sret = 0;
@@ -217,13 +233,20 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		x64_mem(e, X_ST, 8, RCX, &d, false);
 		X->sret = r->slot;
 	}
-	for (int k = 0; k < n; k++) {
-		int p = first + k;
+	for (int k = 0, p = first; k < n; p += x64w_npos(&a[k]), k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		qty ty = c->syms[sym].ty;
 		lval home;
 		bool local = x64_local(e, sym, &home);
 
+		if (x64w_split(&a[k])) {	/* (copied into the slot below, once the registers are stored) */
+			for (int j = 0; j < x64w_npos(&a[k]) && p + j < 4; j++) {
+				lval d = x64w_fr(half[p + j] = wk_slot(e, 8, 8));
+
+				x64_mem(e, X_ST, 8, x64w_gpr[p + j], &d, false);
+			}
+			continue;
+		}
 		if (x64w_byref(&a[k])) {	/* (x64_byref: the slot holds the caller copy's address) */
 			lval d = x64w_fr(a[k].slot);
 
@@ -255,7 +278,20 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 			x64_load(e, home.r, &from, wk_size(c, ty), wk_signed(c, ty));
 		}
 	}
-	X->ngp = first + n, X->nfp = 0, X->stk = 0;
+	int np = first;
+
+	for (int k = 0; k < n; np += x64w_npos(&a[k]), k++)
+		for (int j = 0; x64w_split(&a[k]) && j < x64w_npos(&a[k]); j++) {
+			lval s = x64w_fr(np + j < 4 ? half[np + j] : 16 + 8 * (np + j)), d = x64w_fr(a[k].slot + 16 * j);
+			int rs = x64_treg(e), rd;
+
+			x64_mem(e, X_LD, 8, rs, &s, false);
+			rd = x64_laddr(e, &d);
+			x64_copy(e, rd, rs, 16);
+			x64_tfree(e, rd);
+			x64_tfree(e, rs);
+		}
+	X->ngp = np, X->nfp = 0, X->stk = 0;
 	if (variadic)
 		X->save = 16;	/* (va_start: the named words are below the first unnamed one) */
 	if (WIN64(c)) {
@@ -272,13 +308,11 @@ VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 /* va_list (a char * variable) at rap: the first unnamed argument's word */
 VPRIV void x64w_va_start(ecx *e, int rap)
 {
-	xst *X = e->x64;
-	lval ap = { .k = L_REG, .r = (uint8_t)rap }, oa = x64w_fr(16 + 8 * X->ngp);
+	lval first = x64w_fr(16 + 8 * e->x64->ngp), ap = { .k = L_REG, .r = (uint8_t)rap };
+	int r = x64_laddr(e, &first);
 
-	if (!X->save)
-		efatal(e, e->curloc, "va_start in a function that is not variadic");
-	x64_mem(e, X_LEA, 8, R11, &oa, false);
-	x64_mem(e, X_ST, 8, R11, &ap, false);
+	x64_store(e, r, &ap, 8);
+	x64_tfree(e, r);
 }
 
 /* the address of the next argument of type t: its 8-byte word, or the object it points to */

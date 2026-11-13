@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
-  bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|inline] [--ref-only] [--obj] [--objcmp]
+  bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|win64|inline] [--ref-only] [--obj] [--objcmp]
                      [--vir] [--seh] [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
-own; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
+own), and of src/test/win64 (Windows-only: the calling convention's rules,
+TLS, dllimport, constructors, and the unwinder walking, longjmp-ing and
+resuming out of vcc's frames; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
 twice: by clang (the oracle) and by vcc, each linked by lld against the
 llvm-mingw sysroot (UCRT, static: no DLL beyond the system's) and run under
 Wine.  vcc passes when its program prints what clang's prints and exits the
@@ -328,7 +330,7 @@ def wine_failure(rc, err, timeout):
 def flags_of(suite, name, src):
     flags = ct.dg_flags(src) if suite == 'gcc' else \
         [f for f in ct.dg_flags(src) if ct.INLINE_FLAGS.match(f)] if suite == 'inline' else \
-        ct.exec_marks(src)[0] if suite == 'vcc' else []
+        ct.exec_marks(src)[0] if suite in ('vcc', 'win64') else []
     if name.startswith('76_dollars'):
         flags = ['-fdollars-in-identifiers']
     return flags
@@ -376,7 +378,7 @@ def reference(suite, name, path, flags, wd):
                 return dict(r, error='oracle-run', why=f'wine: {rc}: ' + ct.first_err(err))
             else:
                 r['rc'] = rc; r['out'] = out
-                if suite in ('gcc', 'vcc', 'inline') and rc != 0:
+                if suite in ('gcc', 'vcc', 'win64', 'inline') and rc != 0:
                     r['skip'] = 'ref-fail'
                     r['why'] = 'clang build aborts (exit 3)' if rc == 3 else f'clang build exits {rc}'
                     if err.strip():
@@ -386,6 +388,16 @@ def reference(suite, name, path, flags, wd):
         json.dump(r, cache)
     shutil.rmtree(wd, ignore_errors=True)
     return r
+
+
+def tests(suite, pat):
+    """vcc-ctests.py's suites and src/test/win64 (the Windows-only tests)"""
+    ts = [] if suite == 'win64' else ct.tests(suite, pat) if suite else [t for s in ('gcc', 'tcc', 'vcc') for t in ct.tests(s, pat)]
+    if suite in (None, 'win64'):
+        d = f'{ct.T}/win64'
+        ts += [('win64', f[:-2], f'{d}/{f}') for f in sorted(os.listdir(d)) if f.endswith('.c')
+               if not pat or re.search(pat, f'win64/{f[:-2]}')]
+    return ts
 
 
 def static_skip(suite, name, src):
@@ -536,7 +548,7 @@ if __name__ == '__main__':
     why = hostenv.mingw_missing()
     if why:
         sys.exit(f'vcc-win64.py: {why}')
-    ts = ct.tests(suite, pat) if suite else [t for s in ('gcc', 'tcc', 'vcc') for t in ct.tests(s, pat)]
+    ts = tests(suite, pat)
     if not ts:
         sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()

@@ -121,6 +121,23 @@ static void lay_field(cc *c, layout *l, field *f, uint32_t fattr_align, bool fpa
 	l->unfilled = 0;
 	l->last_unit = 0;
 	falign = (uint64_t)ty_align(c, f->ty) * 8;
+	if (l->ms_struct) {
+		/* ms_struct (MinGW's default): a builtin scalar type, arrays and typedefs resolved, is
+		   aligned to its size when that is a power of 2, whatever a typedef says (clang: not an
+		   enum, pointer, _BitInt, _Atomic or record) */
+		qty b = f->ty;
+		int k;
+
+		while (is_array(c, b))
+			b = T(c, b)->base;
+		k = KIND(c, b);
+		if (k >= TY_BOOL && k <= TY_FLOAT128 && !T(c, b)->n && !(T(c, b)->flags & TF_ATOMIC)) {
+			uint64_t sz = ty_size(c, b) * 8u;
+
+			if (sz > falign && !(sz & (sz - 1)))
+				falign = sz;
+		}
+	}
 	fsize = is_array(c, f->ty) && (T(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : ty_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
 	ualign = falign;

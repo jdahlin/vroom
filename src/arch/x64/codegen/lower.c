@@ -845,6 +845,10 @@ VPRIV val x64_frame(ecx *e, bool ret, uint32_t level)
 	if (ret) {
 		l.off = 8;
 		x64_mem(e, X_LD, 8, r, &l, false);
+	} else if (!level && e->x64->winframe) {
+		/* Windows: the frame's establisher frame (rbp less the save area, as clang's
+		   llvm.frameaddress), which MinGW's setjmp hands UCRT's unwinding longjmp */
+		x64_op3(e, X_FRAMEADDR, 8, r, XNOREG, XNOREG);
 	}
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }

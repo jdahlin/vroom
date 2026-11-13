@@ -230,6 +230,8 @@ VPRIV void x64_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 		return;
 	}
 	x64_classify0(e, t, a);
+	if (WIN64(e->c) && a->x87)
+		a->x87 = false;	/* sysv_abi on Windows: long double results through the hidden pointer too (clang) */
 	a->unnamed = unnamed;
 	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
 	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
@@ -369,8 +371,6 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	}
 	xst *X = e->x64;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
-	int retsize = KIND(c, rt) == TY_VOID ? 0 : wk_size(c, rt);
-	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
 	uint32_t stackalign = 16;
@@ -525,11 +525,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
 		}
 	} else if (r && r->mem && r->up) {
-		for (int w = 0; w < (int)(r->size / 16); w++) {
-			lval d = x64_fr(r->slot + 16 * w);
-
-			x64_mem(e, X_ST, 16, XMM0 + w, &d, false);
-		}
+		x64_call_xmms(e, r);
 	} else if (r && !r->mem && r->n) {
 		/* a record in rax, rdx / xmm0, xmm1 (by class, in order) into its slot */
 		int ng = 0, nf = 0;
@@ -539,9 +535,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 
 			x64_mem(e, X_ST, r->up ? 16 : 8, r->cls[w] == WA_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
-	} else if (retsize && !retf && !r) {
-		x64_mov(e, R11, RAX);
-		x64_ext(e, R11, retsize, retsgn);
+	} else if (!r) {
+		x64_call_park(e, rt);
 	}
 	for (int q = XMM15 - 1; q >= XMM8; q--)
 		if (fsaved & (1u << q)) {
@@ -556,11 +551,40 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 			x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
 			X->pushes--;
 		}
+	return x64_call_value(e, fn, rt, r);
+}
+
+/* both conventions: a result in xmm0, xmm1, ... (a wide vector) to its slot */
+VPRIV void x64_call_xmms(ecx *e, const wkarg *r)
+{
+	for (int w = 0; w < (int)(r->size / 16); w++) {
+		lval d = x64_fr(r->slot + 16 * w);
+
+		x64_mem(e, X_ST, 16, XMM0 + w, &d, false);
+	}
+}
+
+/* both conventions: an integer result parked (extended) in r11 before the saved temporaries come
+   back, which may include rax */
+VPRIV void x64_call_park(ecx *e, qty rt)
+{
+	cc *c = e->c;
+
+	if (KIND(c, rt) != TY_VOID && !is_flt(c, rt)) {
+		x64_mov(e, R11, RAX);
+		x64_ext(e, R11, wk_size(c, rt), wk_signed(c, rt));
+	}
+}
+
+/* ... and the call's value once they are back: a float from xmm0, an integer from r11; nothing
+   for a record result (r) or none */
+VPRIV val x64_call_value(ecx *e, val *fn, qty rt, const wkarg *r)
+{
 	if (fn && fn->k == V_REG)
 		x64_tfree(e, fn->r);
-	if (!retsize || r)
+	if (KIND(e->c, rt) == TY_VOID || r)
 		return vconst(0);
-	if (retf) {
+	if (is_flt(e->c, rt)) {
 		int q = x64_ftreg(e);
 
 		x64_mov(e, q, XMM0);
@@ -713,7 +737,9 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
    copied to the caller's object (the hidden pointer, also the result) */
 VPRIV void x64_retrec(ecx *e, int raddr, const wkarg *r, uint32_t lbl)
 {
-	if (r->x87) {
+	if (e->x64->msfn && r->up && !r->mem && r->size < 16) {
+		x64w_xmm_part(e, X_LD, raddr, (int)r->size);	/* (Microsoft: a short vector, not over-read) */
+	} else if (r->x87) {
 		lval s = { .k = L_REG, .r = (uint8_t)raddr };
 
 		if (r->size == 32) {
@@ -765,12 +791,12 @@ VPRIV void x64_va_start(ecx *e, int rap)
 	lval ov = { .k = L_REG, .r = (uint8_t)rap, .off = 8 }, rs = { .k = L_REG, .r = (uint8_t)rap, .off = 16 };
 	lval sa = x64_fr(X->save), oa = x64_fr(16 + X->stk);
 
+	if (!X->save)
+		efatal(e, e->curloc, "va_start in a function that is not variadic");
 	if (e->msabi) {
 		x64w_va_start(e, rap);
 		return;
 	}
-	if (!X->save)
-		efatal(e, e->curloc, "va_start in a function that is not variadic");
 	x64_movi(e, R11, 8 * X->ngp);
 	x64_mem(e, X_ST, 4, R11, &gpo, false);
 	x64_movi(e, R11, 48 + 16 * X->nfp);

@@ -114,6 +114,16 @@ static bool param_list(cc *c, dop *op, const attrs *leading)
 
 				if (vs) t = vector_attribute(c, t, vs, d.loc);
 			}
+			{
+				/* ms_abi int (*f)(int): on the function type through the pointer, as declare() */
+				uint32_t fa = d.at.fnabi ? d.at.fnabi : ds.at.fnabi;
+
+				if (unlikely(fa)) {
+					qty ft = ty_fnabi(c, t, fa == (CC_WIN64(c) ? CC_FNABI_MS : CC_FNABI_SYSV) ? CC_FNABI_DEFAULT : (int)fa);
+
+					if (ft) t = ft;
+				}
+			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
