@@ -252,6 +252,11 @@ the libSystem table is read once under a lock of its own
 (`macho_libsystem_load`).  `ld_main` stays the one entry; the ELF lock is
 unchanged.
 
+PR 3 is done: the Mach-O linker's two name tables (globals, libSystem
+exports) are `common/string-index.h` tables; its private FNV hash and the
+hand-written probing and growth are gone.  Ids stay in insertion order, so
+the output is the same.
+
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 
 - The `vld: error: out of memory` message when the context allocation fails
