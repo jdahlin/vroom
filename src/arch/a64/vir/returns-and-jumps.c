@@ -23,18 +23,18 @@ VPRIV void a64_vir_callee_saved_float_save(a64_vir_context *L, bool restore, int
 
 VPRIV void a64_vir_return_lower(a64_vir_context *L)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	ins *t;
 
-	if (!e->reach)
+	if (!e->is_reachable)
 		return;
 	a64_vir_callee_saved_float_save(L, true, R_X16);
 	t = put(e, I_TAIL);
 	t->cond = 4;
 	t->sh = L->is_before_save_point;
 	t->label = L->return_label;
-	e->lrefc[L->return_label]++;
-	e->reach = false;
+	e->label_reference_counts[L->return_label]++;
+	e->is_reachable = false;
 }
 
 /*
@@ -54,7 +54,7 @@ VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
 		jump(L->context, L->labels[t]);
 		return;
 	}
-	if (vir_layout_duplicate(L->function, L->loops, a64_vir_thread_state_instance.head_labels, b, t, a64_vir_block_fallthrough(L), L->dup, !L->context->E->noopt)) {
+	if (vir_layout_duplicate(L->function, L->loops, a64_vir_thread_state_instance.head_labels, b, t, a64_vir_block_fallthrough(L), L->dup, !L->context->unit->cleanups_disabled)) {
 		int d = L->dup++;
 
 		virbuild_lower_block(&L->drv, t);
@@ -72,7 +72,7 @@ VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b, uin
 	a64_vir_argument *a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
 	int32_t stk;
 
-	a64_vir_arguments_assign(DARWIN(L->context->c), &f->extra[f->insns[i].b], a, ng, &stk);
+	a64_vir_arguments_assign(CODEGEN_IS_DARWIN(L->context->compile_context), &f->extra[f->insns[i].b], a, ng, &stk);
 	return !stk && a64_vir_call_is_sibling(L, b, i);
 }
 

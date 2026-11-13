@@ -58,13 +58,13 @@ int main(void)
     assert(x64_rname("r8junk") == R8 && x64_rname("xmm") == XMM0);
 
     vintern_ents = names;
-    assert(!EM_IDENT_IS(0, "main"));
-    setname("main"); assert(EM_IDENT_IS(1, "main") && !EM_IDENT_IS(1, "mains"));
-    setname("setjmp"); assert(EM_IDENT_IS(1, "setjmp") && !EM_IDENT_IS(1, "longjmp"));
-    setname("12345678"); assert(EM_IDENT_IS(1, "12345678") && !EM_IDENT_IS(1, "12345679"));
-    setname("123456789"); assert(EM_IDENT_IS(1, "123456789") && !EM_IDENT_IS(1, "123456780"));
-    setname("123456789abcdefg"); assert(EM_IDENT_IS(1, "123456789abcdefg") && !EM_IDENT_IS(1, "123456789abcdefh"));
-    assert(!EM_IDENT_IS(1, "123456789abcdefgh"));
+    assert(!CODEGEN_IDENTIFIER_IS(0, "main"));
+    setname("main"); assert(CODEGEN_IDENTIFIER_IS(1, "main") && !CODEGEN_IDENTIFIER_IS(1, "mains"));
+    setname("setjmp"); assert(CODEGEN_IDENTIFIER_IS(1, "setjmp") && !CODEGEN_IDENTIFIER_IS(1, "longjmp"));
+    setname("12345678"); assert(CODEGEN_IDENTIFIER_IS(1, "12345678") && !CODEGEN_IDENTIFIER_IS(1, "12345679"));
+    setname("123456789"); assert(CODEGEN_IDENTIFIER_IS(1, "123456789") && !CODEGEN_IDENTIFIER_IS(1, "123456780"));
+    setname("123456789abcdefg"); assert(CODEGEN_IDENTIFIER_IS(1, "123456789abcdefg") && !CODEGEN_IDENTIFIER_IS(1, "123456789abcdefh"));
+    assert(!CODEGEN_IDENTIFIER_IS(1, "123456789abcdefgh"));
     puts("emitter identifier and x86 register-name contracts pass");
     return 0;
 }

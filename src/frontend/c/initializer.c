@@ -886,7 +886,7 @@ CC_PRIVATE uint32_t cc_expression_location(cc *c, uint32_t n)
 
 /*
  * Whether init can initialise an object of static storage of type ty: the
- * walk of the emitter's data_init (codegen/data.c) without writing, so the error
+ * walk of the emitter's data_init (codegen/data-objects.c) without writing, so the error
  * comes from the front end, also for an object never emitted (clang Sema).
  * *bad: the first element that is not a constant.
  */
