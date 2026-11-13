@@ -1,4 +1,4 @@
-#include "port/hostcrc.h"
+#include "port/crc32c.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>

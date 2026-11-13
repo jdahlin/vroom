@@ -1029,7 +1029,7 @@ VPRIV uint32_t statement(cc *c)
 	bool sed = c->se_direct;	/* a statement of a statement expression's body: checked there (not the last) */
 
 	c->se_direct = 0;
-	if (vstack_low())	/* { { { ... and if/while bodies nest statements (scope_open's limit may come later) */
+	if (vstack_guard_low())	/* { { { ... and if/while bodies nest statements (scope_open's limit may come later) */
 		fatal(c, loc, "statements nested too deeply");
 	if (at_label(c))
 		return labeled_statement(c, sed);

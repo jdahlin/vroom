@@ -77,7 +77,7 @@ static __attribute__((noinline, cold)) void literal_range(cc *c, const ptok *t, 
 		return;
 	pp_diag_label(c->p, d, t->loc, pp_tok_end(c->p, t->loc), NULL);
 	if (kd == TY_LDOUBLE && !q) {	/* a constant binary128 holds: written for Arm Linux */
-		u128 v = q_parse(s, k);
+		u128 v = vsoftfloat_parse(s, k);
 		unsigned ex = (unsigned)(v >> 112) & 0x7fff;
 
 		if (ex != 0x7fff && v << 1)
@@ -112,7 +112,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		double d;
 
 		if (k >= 3 && (s[k - 3] | 32) == 'f' && s[k - 2] == '1' && s[k - 1] == '6') {
-			uint16_t h = q_to_h(q_parse(s, k - 3));
+			uint16_t h = vsoftfloat_to_half(vsoftfloat_parse(s, k - 3));
 
 			ty = prim(TY_FLOAT16);
 			if ((h & 0x7fff) == 0x7c00 || !(h & 0x7fff))
@@ -131,7 +131,7 @@ static uint32_t number_s(cc *c, const ptok *t, const char *s, size_t n)
 		if (k >= sizeof(buf))
 			k = sizeof(buf) - 1;
 		if (is_q(c, ty)) {
-			u128 q = q_parsep(s, k, q_prec(c, ty));
+			u128 q = vsoftfloat_parse_with_precision(s, k, q_prec(c, ty));
 			unsigned ex = (unsigned)(q >> 112) & 0x7fff;
 
 			if (unlikely(ex == 0x7fff || !(q << 1)))

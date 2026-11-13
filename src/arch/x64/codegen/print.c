@@ -79,22 +79,22 @@ static const char *const x64_ccn[] = { "o", "no", "b", "ae", "e", "ne", "be", "a
 VPRIV void x64_reg(tbuf *b, int r, int sz)
 {
 	if (IS_XMM(r)) {
-		tb_s(b, "%xmm");
-		tb_u(b, (uint64_t)(r - XMM0));
+		vtext_string_append(b, "%xmm");
+		vtext_unsigned_append(b, (uint64_t)(r - XMM0));
 		return;
 	}
-	tb_c(b, '%');
-	tb_s(b, sz == 8 ? x64_r64[r] : sz == 4 ? x64_r32[r] : sz == 2 ? x64_r16[r] : x64_r8[r]);
+	vtext_char_append(b, '%');
+	vtext_string_append(b, sz == 8 ? x64_r64[r] : sz == 4 ? x64_r32[r] : sz == 2 ? x64_r16[r] : x64_r8[r]);
 }
 
 static char x64_sfx(int sz) { return sz == 8 ? 'q' : sz == 4 ? 'l' : sz == 2 ? 'w' : 'b'; }
 
 VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l)
 {
-	tb_s(b, ".LBB");
-	tb_u(b, s);
-	tb_c(b, '_');
-	tb_u(b, l);
+	vtext_string_append(b, ".LBB");
+	vtext_unsigned_append(b, s);
+	vtext_char_append(b, '_');
+	vtext_unsigned_append(b, l);
 }
 
 static void x64_memop(ecx *e, tbuf *b, const rec *i)
@@ -111,34 +111,34 @@ static void x64_memop(ecx *e, tbuf *b, const rec *i)
 		base = R12;
 	if (i->r[1] == RIP) {
 		ref_off(c, b, i->ref, i->off);
-		tb_s(b, "(%rip)");
+		vtext_string_append(b, "(%rip)");
 		return;
 	}
 	if (off)
-		tb_i(b, off);
-	tb_c(b, '(');
+		vtext_signed_append(b, off);
+	vtext_char_append(b, '(');
 	x64_reg(b, base, 8);
 	if (i->op == X_LDX || i->op == X_STX || ((i->op == X_TESTM || i->op == X_CMPM) && i->r[3] != XNOREG)) {
-		tb_c(b, ','); x64_reg(b, i->r[3], 8);
-		tb_c(b, ','); tb_u(b, 1u << i->sh);
+		vtext_char_append(b, ','); x64_reg(b, i->r[3], 8);
+		vtext_char_append(b, ','); vtext_unsigned_append(b, 1u << i->sh);
 	}
-	tb_c(b, ')');
+	vtext_char_append(b, ')');
 }
 
 /* "\top" with the size suffix, then a tab */
 static void x64_ins(tbuf *b, const char *op, int sz)
 {
-	tb_c(b, '\t');
-	tb_s(b, op);
+	vtext_char_append(b, '\t');
+	vtext_string_append(b, op);
 	if (sz)
-		tb_c(b, x64_sfx(sz));
-	tb_c(b, '\t');
+		vtext_char_append(b, x64_sfx(sz));
+	vtext_char_append(b, '\t');
 }
 
 static void x64_imm(tbuf *b, int64_t v)
 {
-	tb_c(b, '$');
-	tb_i(b, v);
+	vtext_char_append(b, '$');
+	vtext_signed_append(b, v);
 }
 
 /* the stack protector's guard into r11: %fs:40 (glibc's TCB), or as -mstack-protector-guard-* say */
@@ -147,9 +147,9 @@ static void x64_guard(ecx *e, tbuf *b)
 	const cc_opts *o = e->E->o;
 
 	if (o->sp_sym)
-		tb_f(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
+		vtext_format_append(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
 	else
-		tb_f(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
+		vtext_format_append(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
 }
 
 /* Prologue callee-save slots can follow a frame larger than disp32. */
@@ -159,17 +159,17 @@ static void x64_cs_access(ecx *e, tbuf *b, int r, bool load)
 	int base = e->wk->falign > 16 ? R12 : RBP;
 	if(e->x64->spframe) {base=RSP;off+=e->x64->framesz-8;}
 	if (off < INT32_MIN || off > INT32_MAX) {
-		tb_s(b, "\tmovabsq\t$"); tb_i(b, off);
-		tb_s(b, ", %r11\n\taddq\t"); x64_reg(b, base, 8);
-		tb_s(b, ", %r11\n");
+		vtext_string_append(b, "\tmovabsq\t$"); vtext_signed_append(b, off);
+		vtext_string_append(b, ", %r11\n\taddq\t"); x64_reg(b, base, 8);
+		vtext_string_append(b, ", %r11\n");
 		base = R11, off = 0;
 	}
-	tb_s(b, "\tmovq\t");
-	if (!load) { x64_reg(b, r, 8); tb_s(b, ", "); }
-	if (off) tb_i(b, off);
-	tb_c(b, '('); x64_reg(b, base, 8); tb_c(b, ')');
-	if (load) { tb_s(b, ", "); x64_reg(b, r, 8); }
-	tb_c(b, '\n');
+	vtext_string_append(b, "\tmovq\t");
+	if (!load) { x64_reg(b, r, 8); vtext_string_append(b, ", "); }
+	if (off) vtext_signed_append(b, off);
+	vtext_char_append(b, '('); x64_reg(b, base, 8); vtext_char_append(b, ')');
+	if (load) { vtext_string_append(b, ", "); x64_reg(b, r, 8); }
+	vtext_char_append(b, '\n');
 }
 
 /* CFA stays rbp+16, but a realigned save slot is addressed through r12. */
@@ -185,9 +185,9 @@ static void x64_cs_cfi(tbuf *b, int r, int64_t off)
 		if (last) break;
 	}
 	/* DW_CFA_expression, register (rbx/r12-r15), length, DW_OP_breg12. */
-	tb_f(b, "\t.cfi_escape 0x10, %u, %u, 0x7c", (unsigned)r, n + 1);
-	for (unsigned i = 0; i < n; i++) tb_f(b, ", %u", (unsigned)leb[i]);
-	tb_c(b, '\n');
+	vtext_format_append(b, "\t.cfi_escape 0x10, %u, %u, 0x7c", (unsigned)r, n + 1);
+	for (unsigned i = 0; i < n; i++) vtext_format_append(b, ", %u", (unsigned)leb[i]);
+	vtext_char_append(b, '\n');
 }
 
 /* R12 first keeps its incoming value at -8(%rbp), as for normal realignment. */
@@ -217,77 +217,77 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		uint32_t f, l, cl;
 
 		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
-			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
+			vtext_format_append(b, "\t.loc\t%u %u 0\n", f, l);
 	}
 	if (cfi)
-		tb_s(b, "\t.cfi_startproc\n");
+		vtext_string_append(b, "\t.cfi_startproc\n");
 	if (e->E->o->xcf & 1)
-		tb_s(b, "\tendbr64\n");
+		vtext_string_append(b, "\tendbr64\n");
 	for (int k = e->E->o->pfe_m; k < e->E->o->pfe_n; k++)
-		tb_s(b, "\tnop\n");
+		vtext_string_append(b, "\tnop\n");
 	if (X->interrupt) {
 		int cfa = X->interrupt == 2 ? 24 : 16;
 		if (cfi) {
-			tb_s(b, "\t.cfi_signal_frame\n");
-			tb_f(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_offset %%rsp, %d\n", cfa - 8, uintr ? 8 : 16);
+			vtext_string_append(b, "\t.cfi_signal_frame\n");
+			vtext_format_append(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_offset %%rsp, %d\n", cfa - 8, uintr ? 8 : 16);
 		}
-		tb_s(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
+		vtext_string_append(b, "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 		if (cfi) {
-			tb_f(b, "\t.cfi_def_cfa %%rbp, %d\n\t.cfi_offset %%rbp, %d\n", cfa, -cfa);
-			tb_f(b, "\t.cfi_offset %%rsp, %d\n", uintr ? 8 : 16);
+			vtext_format_append(b, "\t.cfi_def_cfa %%rbp, %d\n\t.cfi_offset %%rbp, %d\n", cfa, -cfa);
+			vtext_format_append(b, "\t.cfi_offset %%rsp, %d\n", uintr ? 8 : 16);
 		}
 		int off = 0;
 		for (int k = 0; k < 14; k++) {
 			int r = interrupt_saved[k];
-			tb_f(b, "\tpushq\t%%%s\n", x64_r64[r]);
+			vtext_format_append(b, "\tpushq\t%%%s\n", x64_r64[r]);
 			off -= 8;
-			if (cfi) tb_f(b, "\t.cfi_offset %%%s, %d\n", x64_r64[r], off - cfa);
+			if (cfi) vtext_format_append(b, "\t.cfi_offset %%%s, %d\n", x64_r64[r], off - cfa);
 		}
-		tb_f(b, "\tandq\t$-%u, %%rsp\n", A);
+		vtext_format_append(b, "\tandq\t$-%u, %%rsp\n", A);
 		if (!x64_nosimd(e)) {
 			/* Keep the complete legacy FP state, including a possibly full x87
 			   stack, MXCSR and all sixteen XMM registers. Reserve a multiple
 			   of the local frame alignment so R12 stays suitably aligned. */
 			uint32_t fpframe = A > 512 ? A : 512;
-			tb_f(b, "\tsubq\t$%u, %%rsp\n", fpframe);
-			tb_s(b, "\t.byte 0x48, 0x0f, 0xae, 0x04, 0x24 # fxsave64 (%rsp)\n\tfninit\n\tfldcw\t(%rsp)\n");
+			vtext_format_append(b, "\tsubq\t$%u, %%rsp\n", fpframe);
+			vtext_string_append(b, "\t.byte 0x48, 0x0f, 0xae, 0x04, 0x24 # fxsave64 (%rsp)\n\tfninit\n\tfldcw\t(%rsp)\n");
 		}
-		tb_s(b, "\tmovq\t%rsp, %r12\n\tcld\n");
+		vtext_string_append(b, "\tmovq\t%rsp, %r12\n\tcld\n");
 		if (cfi && !x64_nosimd(e))
 			for (int k = 0; k < 16; k++) x64_cs_cfi(b, 17 + k, 160 + 16 * k);
 	} else {
 		if (!X->framefree && !X->spframe)
-			tb_s(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
+			vtext_string_append(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
 				      "\tmovq\t%rsp, %rbp\n\t.cfi_def_cfa_register %rbp\n" : "\tpushq\t%rbp\n\tmovq\t%rsp, %rbp\n");
 		if (A > 16) {
-			tb_s(b, "\tpushq\t%r12\n");
-			if (cfi) tb_s(b, "\t.cfi_offset %r12, -24\n");
-			tb_s(b, "\tandq\t$");
-			tb_i(b, -(int64_t)A);
-			tb_s(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
+			vtext_string_append(b, "\tpushq\t%r12\n");
+			if (cfi) vtext_string_append(b, "\t.cfi_offset %r12, -24\n");
+			vtext_string_append(b, "\tandq\t$");
+			vtext_signed_append(b, -(int64_t)A);
+			vtext_string_append(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
 		}
 	}
 	if (frame > INT32_MAX) {
-		tb_s(b, "\tmovabsq\t$");
-		tb_i(b, frame);
-		tb_s(b, ", %r11\n\tsubq\t%r11, %rsp\n");
+		vtext_string_append(b, "\tmovabsq\t$");
+		vtext_signed_append(b, frame);
+		vtext_string_append(b, ", %r11\n\tsubq\t%r11, %rsp\n");
 	} else if (frame) {
-		tb_s(b, "\tsubq\t$");
-		tb_i(b, frame);
-		tb_s(b, ", %rsp\n");
+		vtext_string_append(b, "\tsubq\t$");
+		vtext_signed_append(b, frame);
+		vtext_string_append(b, ", %rsp\n");
 	}
-	if(cfi && X->spframe && frame)tb_f(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
+	if(cfi && X->spframe && frame)vtext_format_append(b,"\t.cfi_def_cfa_offset %lld\n",(long long)frame+8);
 	if (e->wk->spneed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_guard(e, b);
-		tb_f(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%r12" : "%rbp");
+		vtext_format_append(b, "\tmovq\t%%r11, %d(%s)\n", e->wk->canary, A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
 			x64_cs_access(e, b, r, false);
 			if (cfi) {
 				if (A > 16) x64_cs_cfi(b, r, X->csslot[r]);
-				else tb_f(b, "\t.cfi_offset %%%s, %lld\n", x64_r64[r], (long long)(X->csslot[r] - 16));
+				else vtext_format_append(b, "\t.cfi_offset %%%s, %lld\n", x64_r64[r], (long long)(X->csslot[r] - 16));
 			}
 		}
 	for (uint32_t k = 0; k < X->nin; k++) {
@@ -301,7 +301,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
 			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
-				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 
 		if (direct(e)) {
@@ -325,17 +325,17 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		switch (i->op) {
 		case X_LABEL:
 			x64_lbl(b, s, i->label);
-			tb_s(b, ":\n");
+			vtext_string_append(b, ":\n");
 			continue;
 		case X_MOV:
 			if (IS_XMM(i->r[0]) && IS_XMM(i->r[1]))
-				tb_s(b, "\tmovaps\t");
+				vtext_string_append(b, "\tmovaps\t");
 			else if (IS_XMM(i->r[0]) || IS_XMM(i->r[1]))
-				tb_s(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
+				vtext_string_append(b, sz == 4 ? "\tmovd\t" : "\tmovq\t");
 			else
 				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[1], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_MOVI: {
@@ -344,31 +344,31 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			if (sz == 4) {
 				x64_ins(b, "mov", 4);
 				x64_imm(b, (int32_t)v);
-				tb_s(b, ", ");
+				vtext_string_append(b, ", ");
 				x64_reg(b, i->r[0], 4);
 			} else if (v >= INT32_MIN && v <= INT32_MAX) {
 				x64_ins(b, "mov", 8);
 				x64_imm(b, v);
-				tb_s(b, ", ");
+				vtext_string_append(b, ", ");
 				x64_reg(b, i->r[0], 8);
 			} else if ((uint64_t)v <= UINT32_MAX) {
 				x64_ins(b, "mov", 4);
 				x64_imm(b, v);
-				tb_s(b, ", ");
+				vtext_string_append(b, ", ");
 				x64_reg(b, i->r[0], 4);
 			} else {
 				x64_ins(b, "movabs", 8);
 				x64_imm(b, v);
-				tb_s(b, ", ");
+				vtext_string_append(b, ", ");
 				x64_reg(b, i->r[0], 8);
 			}
 			break;
 		}
 		case X_LDX: case X_LD:
 			if (IS_XMM(i->r[0])) {
-				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+				vtext_string_append(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 				x64_memop(e, b, i);
-				tb_s(b, ", ");
+				vtext_string_append(b, ", ");
 				x64_reg(b, i->r[0], 8);
 				break;
 			}
@@ -376,61 +376,61 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t", [8] = "\tmovq\t" };
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t", [8] = "\tmovq\t" };
 
-			tb_s(b, i->cond ? sx[sz] : zx[sz]);
+			vtext_string_append(b, i->cond ? sx[sz] : zx[sz]);
 			x64_memop(e, b, i);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], i->cond || sz == 8 ? 8 : 4);
 			break;
 			}
 		case X_STX: case X_ST:
 			if (IS_XMM(i->r[2]))
-				tb_s(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
+				vtext_string_append(b, sz == 4 ? "\tmovss\t" : sz == 8 ? "\tmovsd\t" : "\tmovups\t");
 			else
 				x64_ins(b, "mov", sz);
 			x64_reg(b, i->r[2], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
 		case X_LEA:
 			x64_ins(b, "lea", sz);
 			x64_memop(e, b, i);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_LEASCALE:
 			x64_ins(b, "lea", sz);
-			tb_c(b, '(');
+			vtext_char_append(b, '(');
 			x64_reg(b, i->r[1], 8);
-			tb_c(b, ',');
+			vtext_char_append(b, ',');
 			x64_reg(b, i->r[2], 8);
-			tb_c(b, ',');
-			tb_u(b, 1u << i->sh);
-			tb_s(b, "), ");
+			vtext_char_append(b, ',');
+			vtext_unsigned_append(b, 1u << i->sh);
+			vtext_string_append(b, "), ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_ADD: case X_SUB: case X_AND: case X_OR: case X_XOR: case X_IMUL: case X_ADC: case X_SBB:
 			x64_ins(b, alu[i->op], sz);
 			x64_reg(b, i->r[2], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_ADDI: case X_SUBI: case X_ANDI: case X_ORI: case X_XORI: case X_SHLI: case X_SHRI: case X_SARI:
 			x64_ins(b, alu[i->op], sz);
 			x64_imm(b, i->imm);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_IMULI:
 			x64_ins(b, "imul", sz);
 			x64_imm(b, i->imm);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[1], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_SHL: case X_SHR: case X_SAR:
 			x64_ins(b, alu[i->op], sz);
-			tb_s(b, "%cl, ");
+			vtext_string_append(b, "%cl, ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_NEG: case X_NOT:
@@ -440,200 +440,200 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		case X_CMP:
 			x64_ins(b, "cmp", sz);
 			x64_reg(b, i->r[2], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[1], sz);
 			break;
 		case X_CMPI:
 			x64_ins(b, "cmp", sz);
 			x64_imm(b, i->imm);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[1], sz);
 			break;
 		case X_TEST:
 			x64_ins(b, "test", sz);
 			x64_reg(b, i->r[1], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[1], sz);
 			break;
 		case X_CMOV:
-			tb_s(b,"\tcmov");tb_s(b,x64_ccn[i->cond]);tb_c(b,x64_sfx(sz));tb_c(b,'\t');
-			x64_reg(b,i->r[2],sz);tb_s(b,", ");x64_reg(b,i->r[0],sz);break;
+			vtext_string_append(b,"\tcmov");vtext_string_append(b,x64_ccn[i->cond]);vtext_char_append(b,x64_sfx(sz));vtext_char_append(b,'\t');
+			x64_reg(b,i->r[2],sz);vtext_string_append(b,", ");x64_reg(b,i->r[0],sz);break;
 		case X_CMPM:
 			x64_ins(b,"cmp",sz);
-			if(i->cond) {x64_memop(e,b,i);tb_s(b,", ");x64_reg(b,i->r[2],sz);}
+			if(i->cond) {x64_memop(e,b,i);vtext_string_append(b,", ");x64_reg(b,i->r[2],sz);}
 			else {
 				if(i->r[2]==XNOREG)x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
 				else x64_reg(b,i->r[2],sz);
-				tb_s(b,", ");x64_memop(e,b,i);
+				vtext_string_append(b,", ");x64_memop(e,b,i);
 			}
 			break;
 		case X_TESTM:
 			x64_ins(b,"test",sz);
 			x64_imm(b,sz==1?(uint8_t)i->ref:sz==2?(uint16_t)i->ref:(int32_t)i->ref);
-			tb_s(b,", ");x64_memop(e,b,i);break;
+			vtext_string_append(b,", ");x64_memop(e,b,i);break;
 		case X_SETCC:
-			tb_s(b, "\tset");
-			tb_s(b, x64_ccn[i->cond]);
-			tb_c(b, '\t');
+			vtext_string_append(b, "\tset");
+			vtext_string_append(b, x64_ccn[i->cond]);
+			vtext_char_append(b, '\t');
 			x64_reg(b, i->r[0], 1);
-			tb_s(b, "\n\tmovzbl\t");
+			vtext_string_append(b, "\n\tmovzbl\t");
 			x64_reg(b, i->r[0], 1);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 4);
 			break;
 		case X_JMP:
-			tb_s(b, "\tjmp\t");
+			vtext_string_append(b, "\tjmp\t");
 			x64_lbl(b, s, i->label);
 			break;
 		case X_JCC:
-			tb_s(b, "\tj");
-			tb_s(b, x64_ccn[i->cond]);
-			tb_c(b, '\t');
+			vtext_string_append(b, "\tj");
+			vtext_string_append(b, x64_ccn[i->cond]);
+			vtext_char_append(b, '\t');
 			x64_lbl(b, s, i->label);
 			break;
 		case X_TAIL:
 			continue; /* argument uses stay in records; branch follows the epilogue */
 		case X_CALL:
-			tb_s(b, "\tcallq\t");
+			vtext_string_append(b, "\tcallq\t");
 			ref_name(c, b, i->ref);
 			if (c->o->pic && (RKIND(i->ref) == RK_NAME || sym_needs_got(c, i->ref)))
-				tb_s(b, "@PLT");
+				vtext_string_append(b, "@PLT");
 			break;
 		case X_CALLR:
 			if (e->E->o->xcf & 4) {	/* -mretpoline-external-thunk */
-				tb_s(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tcallq\t__x86_indirect_thunk_" : "\tcallq\t__x86_indirect_thunk_");
-				tb_s(b, x64_r64[i->r[1]]);
+				vtext_string_append(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tcallq\t__x86_indirect_thunk_" : "\tcallq\t__x86_indirect_thunk_");
+				vtext_string_append(b, x64_r64[i->r[1]]);
 				break;
 			}
-			tb_s(b, "\tcallq\t*");
+			vtext_string_append(b, "\tcallq\t*");
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_PUSH:
-			tb_s(b, "\tpushq\t");
+			vtext_string_append(b, "\tpushq\t");
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_POP:
-			tb_s(b, "\tpopq\t");
+			vtext_string_append(b, "\tpopq\t");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_ADJSP:
-			tb_s(b, i->imm < 0 ? "\tsubq\t$" : "\taddq\t$");
-			tb_i(b, i->imm < 0 ? -i->imm : i->imm);
-			tb_s(b, ", %rsp");
+			vtext_string_append(b, i->imm < 0 ? "\tsubq\t$" : "\taddq\t$");
+			vtext_signed_append(b, i->imm < 0 ? -i->imm : i->imm);
+			vtext_string_append(b, ", %rsp");
 			if(X->spframe) {
 				X->spdelta+=i->imm;
-				if(cfi)tb_f(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->imm);
+				if(cfi)vtext_format_append(b,"\n\t.cfi_adjust_cfa_offset %lld",(long long)-i->imm);
 			}
 			break;
 		case X_CQO:
-			tb_s(b, sz == 8 ? "\tcqto" : "\tcltd");
+			vtext_string_append(b, sz == 8 ? "\tcqto" : "\tcltd");
 			break;
 		case X_XCHG: case X_XADD:
 			x64_ins(b, i->op == X_XCHG ? "xchg" : "lock xadd", sz);
 			x64_reg(b, i->r[0], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
 		case X_CMPXCHG:
 			x64_ins(b, "lock cmpxchg", sz);
 			x64_reg(b, i->r[2], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_memop(e, b, i);
 			break;
 		case X_JTE:
-			tb_s(b, "\t.long\t");
+			vtext_string_append(b, "\t.long\t");
 			x64_lbl(b, s, i->label);
-			tb_c(b, '-');
+			vtext_char_append(b, '-');
 			x64_lbl(b, s, i->ref);
 			break;
 		case X_LEAL:
-			tb_s(b, "\tleaq\t");
+			vtext_string_append(b, "\tleaq\t");
 			x64_lbl(b, s, i->label);
-			tb_s(b, "(%rip), ");
+			vtext_string_append(b, "(%rip), ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_BLENDVB:
-			tb_s(b, "\tpblendvb\t%xmm0, %xmm2, %xmm1");
+			vtext_string_append(b, "\tpblendvb\t%xmm0, %xmm2, %xmm1");
 			break;
 		case X_PCMPSTR:
-			tb_s(b, i->cond & 2 ? "\tpcmpi" : "\tpcmpe");
-			tb_s(b, i->cond & 1 ? "stri\t$" : "strm\t$");
-			tb_u(b, (uint8_t)i->imm);
-			tb_s(b, ", %xmm1, %xmm0");
+			vtext_string_append(b, i->cond & 2 ? "\tpcmpi" : "\tpcmpe");
+			vtext_string_append(b, i->cond & 1 ? "stri\t$" : "strm\t$");
+			vtext_unsigned_append(b, (uint8_t)i->imm);
+			vtext_string_append(b, ", %xmm1, %xmm0");
 			break;
 		case X_RAW:
 			if (i->cond && e->wk->falign > 16)
 				efatal(e, e->curloc, "inline asm r12 operand or clobber conflicts with aligned frame base");
-			tb_s(b, "#APP\n");
-			tb_put(b, e->raw.p + i->off, i->ref);
-			tb_s(b, "\n#NO_APP");
+			vtext_string_append(b, "#APP\n");
+			vtext_append(b, e->raw.p + i->off, i->ref);
+			vtext_string_append(b, "\n#NO_APP");
 			break;
 		case X_JMPR:
 			if (e->E->o->xcf & 4) {
-				tb_s(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
-				tb_s(b, x64_r64[i->r[1]]);
+				vtext_string_append(b, (e->E->o->xcf & 8) && i->r[1] >= 8 ? "\tcs\n\tjmp\t__x86_indirect_thunk_" : "\tjmp\t__x86_indirect_thunk_");
+				vtext_string_append(b, x64_r64[i->r[1]]);
 				break;
 			}
-			tb_s(b, "\tjmpq\t*");
+			vtext_string_append(b, "\tjmpq\t*");
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_NAMED:
 			ref_name(c, b, i->ref);
-			tb_c(b, ':');
+			vtext_char_append(b, ':');
 			if (e->E->o->xcf & 1)
-				tb_s(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
+				vtext_string_append(b, "\n\tendbr64");	/* (&&label: an indirect jump's target) */
 			break;
 		case X_MFENCE:
-			tb_s(b, "\tmfence");
+			vtext_string_append(b, "\tmfence");
 			break;
 		case X_RESUME_FRAME:
 			/* Match the final prologue even if alignment was discovered after
 			   setjmp (or inside an inline body). Bypass memory operand rewriting. */
 			if (e->wk->falign > 16) {
-				tb_s(b, "\tleaq\t-8(%rbp), %r12\n\tandq\t$");
-				tb_i(b, -(int64_t)e->wk->falign);
-				tb_s(b, ", %r12");
+				vtext_string_append(b, "\tleaq\t-8(%rbp), %r12\n\tandq\t$");
+				vtext_signed_append(b, -(int64_t)e->wk->falign);
+				vtext_string_append(b, ", %r12");
 			}
 			break;
 		case X_BARRIER:
-			tb_s(b, "\t# compiler barrier");
+			vtext_string_append(b, "\t# compiler barrier");
 			break;
 		case X_GOT:
-			tb_s(b, "\tmovq\t");
+			vtext_string_append(b, "\tmovq\t");
 			ref_off(c, b, i->ref, 0);
-			tb_s(b, "@GOTPCREL(%rip), ");
+			vtext_string_append(b, "@GOTPCREL(%rip), ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_TLS:
 			if (i->cond == 2) {
-				tb_s(b, "\tdata16\n\tleaq\t");
+				vtext_string_append(b, "\tdata16\n\tleaq\t");
 				ref_off(c, b, i->ref, 0);
-				tb_s(b, "@TLSGD(%rip), %rdi\n\tdata16\n\tdata16\n\trex64\n\tcallq\t__tls_get_addr@PLT");
+				vtext_string_append(b, "@TLSGD(%rip), %rdi\n\tdata16\n\tdata16\n\trex64\n\tcallq\t__tls_get_addr@PLT");
 				break;
 			}
-			tb_s(b, "\tmovq\t%fs:0, ");
+			vtext_string_append(b, "\tmovq\t%fs:0, ");
 			x64_reg(b, i->r[0], 8);
-			tb_s(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");
+			vtext_string_append(b, i->cond ? "\n\taddq\t" : "\n\tleaq\t");
 			ref_off(c, b, i->ref, 0);
-			tb_s(b, i->cond ? "@GOTTPOFF(%rip), " : "@TPOFF(");
+			vtext_string_append(b, i->cond ? "@GOTTPOFF(%rip), " : "@TPOFF(");
 			if (!i->cond) {
 				x64_reg(b, i->r[0], 8);
-				tb_s(b, "), ");
+				vtext_string_append(b, "), ");
 			}
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_UD2:
-			tb_s(b, "\tud2");
+			vtext_string_append(b, "\tud2");
 			break;
 		case X_BSF: case X_BSR:
 			x64_ins(b, i->op == X_BSF ? "bsf" : "bsr", sz);
 			x64_reg(b, i->r[1], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_BSWAP:
 			if(sz==2) {
-				tb_s(b,"\trorw\t$8, ");x64_reg(b,i->r[0],2);break;
+				vtext_string_append(b,"\trorw\t$8, ");x64_reg(b,i->r[0],2);break;
 			}
 			x64_ins(b, "bswap", sz);
 			x64_reg(b, i->r[0], sz);
@@ -650,71 +650,71 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			static const char *const sx[] = { [1] = "\tmovsbq\t", [2] = "\tmovswq\t", [4] = "\tmovslq\t" };
 			static const char *const zx[] = { [1] = "\tmovzbl\t", [2] = "\tmovzwl\t", [4] = "\tmovl\t" };
 
-			tb_s(b, i->cond ? sx[sz] : zx[sz]);
+			vtext_string_append(b, i->cond ? sx[sz] : zx[sz]);
 			x64_reg(b, i->r[1], sz);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], i->cond ? 8 : 4);
 			break;
 		}
 		case X_FADD: case X_FSUB: case X_FMUL: case X_FDIV: {
 			static const char *const fo[] = { "add", "sub", "mul", "div" };
 
-			tb_c(b, '\t');
-			tb_s(b, fo[i->op - X_FADD]);
-			tb_s(b, sz == 4 ? "ss\t" : "sd\t");
+			vtext_char_append(b, '\t');
+			vtext_string_append(b, fo[i->op - X_FADD]);
+			vtext_string_append(b, sz == 4 ? "ss\t" : "sd\t");
 			x64_reg(b, i->r[2], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		}
 		case X_FXOR:
-			tb_s(b, "\txorps\t");
+			vtext_string_append(b, "\txorps\t");
 			x64_reg(b, i->r[2], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_FSQRT:
-			tb_s(b, sz == 4 ? "\tsqrtss\t" : "\tsqrtsd\t");
+			vtext_string_append(b, sz == 4 ? "\tsqrtss\t" : "\tsqrtsd\t");
 			x64_reg(b, i->r[1], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_FCMP:
-			tb_s(b, sz == 4 ? "\tucomiss\t" : "\tucomisd\t");
+			vtext_string_append(b, sz == 4 ? "\tucomiss\t" : "\tucomisd\t");
 			x64_reg(b, i->r[2], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[1], 8);
 			break;
 		case X_FSETCC:
-			tb_s(b, i->cond ? "\tsetne\t" : "\tsete\t");
+			vtext_string_append(b, i->cond ? "\tsetne\t" : "\tsete\t");
 			x64_reg(b, i->r[0], 1);
-			tb_s(b, i->cond ? "\n\tsetp\t%r11b\n\torb\t%r11b, " : "\n\tsetnp\t%r11b\n\tandb\t%r11b, ");
+			vtext_string_append(b, i->cond ? "\n\tsetp\t%r11b\n\torb\t%r11b, " : "\n\tsetnp\t%r11b\n\tandb\t%r11b, ");
 			x64_reg(b, i->r[0], 1);
-			tb_s(b, "\n\tmovzbl\t");
+			vtext_string_append(b, "\n\tmovzbl\t");
 			x64_reg(b, i->r[0], 1);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 4);
 			break;
 		case X_CVTI2F:
-			tb_s(b, sz == 4 ? "\tcvtsi2ss" : "\tcvtsi2sd");
-			tb_c(b, i->sh == 8 ? 'q' : 'l');
-			tb_c(b, '\t');
+			vtext_string_append(b, sz == 4 ? "\tcvtsi2ss" : "\tcvtsi2sd");
+			vtext_char_append(b, i->sh == 8 ? 'q' : 'l');
+			vtext_char_append(b, '\t');
 			x64_reg(b, i->r[1], i->sh);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_CVTF2I:
-			tb_s(b, i->sh == 4 ? "\tcvttss2si" : "\tcvttsd2si");
-			tb_c(b, sz == 8 ? 'q' : 'l');
-			tb_c(b, '\t');
+			vtext_string_append(b, i->sh == 4 ? "\tcvttss2si" : "\tcvttsd2si");
+			vtext_char_append(b, sz == 8 ? 'q' : 'l');
+			vtext_char_append(b, '\t');
 			x64_reg(b, i->r[1], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], sz);
 			break;
 		case X_CVTF2F:
-			tb_s(b, sz == 8 ? "\tcvtss2sd\t" : "\tcvtsd2ss\t");
+			vtext_string_append(b, sz == 8 ? "\tcvtss2sd\t" : "\tcvtsd2ss\t");
 			x64_reg(b, i->r[1], 8);
-			tb_s(b, ", ");
+			vtext_string_append(b, ", ");
 			x64_reg(b, i->r[0], 8);
 			break;
 		case X_X87: {
@@ -723,27 +723,27 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				[XF_CHS] = "fchs", [XF_UCOMIP] = "fucomip\t%st(1), %st", [XF_POP] = "fstp\t%st(0)",
 				[XF_STCW] = "fnstcw", [XF_LDCW] = "fldcw", [XF_LDZ] = "fldz" };
 
-			tb_c(b, '\t');
+			vtext_char_append(b, '\t');
 			if (i->cond == XF_LD || i->cond == XF_STP)
-				tb_s(b, i->cond == XF_LD ? (sz == 4 ? "flds" : "fldl") : (sz == 4 ? "fstps" : "fstpl"));
+				vtext_string_append(b, i->cond == XF_LD ? (sz == 4 ? "flds" : "fldl") : (sz == 4 ? "fstps" : "fstpl"));
 			else if (i->cond == XF_ILD || i->cond == XF_ISTP)
-				tb_s(b, i->cond == XF_ILD ? (sz == 2 ? "filds" : sz == 4 ? "fildl" : "fildll")
+				vtext_string_append(b, i->cond == XF_ILD ? (sz == 2 ? "filds" : sz == 4 ? "fildl" : "fildll")
 							  : (sz == 2 ? "fistps" : sz == 4 ? "fistpl" : "fistpll"));
 			else
-				tb_s(b, xn[i->cond]);
+				vtext_string_append(b, xn[i->cond]);
 			if (i->r[1] != XNOREG) {
-				tb_c(b, '\t');
+				vtext_char_append(b, '\t');
 				x64_memop(e, b, i);
 			}
 			break;
 		}
 		case X_REP:
-			tb_s(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
+			vtext_string_append(b, i->cond ? "\trep\tstosb" : "\trep\tmovsb");
 			break;
 		default:
 			efatal(e, e->curloc, "internal error: x86-64 record %d", i->op);
 		}
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 	}
 	if (objcode) {
 		it_close(e, objitem);
@@ -752,64 +752,64 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	if(X->spframe && X->spdelta)efatal(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
 	if (e->wk->spneed) {
 		x64_guard(e, b);
-		tb_f(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
+		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->wk->canary, e->wk->falign > 16 ? "%r12" : "%rbp", s);
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->csslot[r]) {
 			x64_cs_access(e, b, r, true);
-			if (cfi) tb_f(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
+			if (cfi) vtext_format_append(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
 		}
 	for (; dj < e->ndl; dj++)
 		if (dj + 1 == e->ndl)
-			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+			vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	if (X->interrupt) {
 		if (!x64_nosimd(e))
-			tb_s(b, "\t.byte 0x49, 0x0f, 0xae, 0x0c, 0x24 # fxrstor64 (%r12)\n");
+			vtext_string_append(b, "\t.byte 0x49, 0x0f, 0xae, 0x0c, 0x24 # fxrstor64 (%r12)\n");
 		if (cfi && !x64_nosimd(e))
-			for (int k = 0; k < 16; k++) tb_f(b, "\t.cfi_escape 0x08, %u\n", 17 + k);
-		tb_s(b, "\tleaq\t-112(%rbp), %rsp\n");
+			for (int k = 0; k < 16; k++) vtext_format_append(b, "\t.cfi_escape 0x08, %u\n", 17 + k);
+		vtext_string_append(b, "\tleaq\t-112(%rbp), %rsp\n");
 		for (int k = 13; k >= 0; k--) {
 			int r = interrupt_saved[k];
-			tb_f(b, "\tpopq\t%%%s\n", x64_r64[r]);
-			if (cfi) tb_f(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
+			vtext_format_append(b, "\tpopq\t%%%s\n", x64_r64[r]);
+			if (cfi) vtext_format_append(b, "\t.cfi_same_value %%%s\n", x64_r64[r]);
 		}
-		tb_s(b, "\tpopq\t%rbp\n");
-		if (cfi) tb_f(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_same_value %%rbp\n", X->interrupt == 2 ? 16 : 8);
-		if (X->interrupt == 2) tb_s(b, "\taddq\t$8, %rsp\n");
-		if (cfi) tb_s(b, "\t.cfi_def_cfa %rsp, 8\n\t.cfi_same_value %rbp\n");
+		vtext_string_append(b, "\tpopq\t%rbp\n");
+		if (cfi) vtext_format_append(b, "\t.cfi_def_cfa %%rsp, %d\n\t.cfi_same_value %%rbp\n", X->interrupt == 2 ? 16 : 8);
+		if (X->interrupt == 2) vtext_string_append(b, "\taddq\t$8, %rsp\n");
+		if (cfi) vtext_string_append(b, "\t.cfi_def_cfa %rsp, 8\n\t.cfi_same_value %rbp\n");
 		/* Encodings accepted by the integrated assembler as well as GNU as. */
-		tb_s(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
+		vtext_string_append(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
 	} else {
 		if (e->wk->falign > 16) {
-			tb_s(b, "\tmovq\t-8(%rbp), %r12\n");
-			if (cfi) tb_s(b, "\t.cfi_same_value %r12\n");
+			vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
+			if (cfi) vtext_string_append(b, "\t.cfi_same_value %r12\n");
 		}
 		if(X->spframe) {
-			if(frame)tb_f(b,"\taddq\t$%lld, %%rsp\n",(long long)frame);
-			if(cfi && frame)tb_s(b,"\t.cfi_def_cfa_offset 8\n");
+			if(frame)vtext_format_append(b,"\taddq\t$%lld, %%rsp\n",(long long)frame);
+			if(cfi && frame)vtext_string_append(b,"\t.cfi_def_cfa_offset 8\n");
 		} else if (!X->framefree)
-			tb_s(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
+			vtext_string_append(b, cfi ? "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n\t.cfi_def_cfa %rsp, 8\n" : "\tmovq\t%rbp, %rsp\n\tpopq\t%rbp\n");
 		if (tail) {
-			tb_s(b, "\tjmp\t");
+			vtext_string_append(b, "\tjmp\t");
 			ref_name(c, b, tail);
-			if (c->o->pic && sym_needs_got(c, tail)) tb_s(b, "@PLT");
-			tb_c(b, '\n');
+			if (c->o->pic && sym_needs_got(c, tail)) vtext_string_append(b, "@PLT");
+			vtext_char_append(b, '\n');
 		} else {
 			/* Sibling jumps are call edges; interrupts retain their saved-frame return. */
-			tb_s(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
+			vtext_string_append(b, (e->E->o->xcf & 2) ? ((e->E->o->xcf & 8) ? "\tcs\n\tjmp\t__x86_return_thunk\n" : "\tjmp\t__x86_return_thunk\n") : "\tretq\n");
 		}
 	}
 	if (e->wk->spneed)
-		tb_f(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
-	tb_s(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
-	tb_u(b, s);
-	tb_s(b, ":\n\t.size\t");
+		vtext_format_append(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->E->o->pic ? "@PLT" : "");
+	vtext_string_append(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
+	vtext_unsigned_append(b, s);
+	vtext_string_append(b, ":\n\t.size\t");
 	sym_name(c, b, s);
-	tb_s(b, ", .Lfunc_end");
-	tb_u(b, s);
-	tb_c(b, '-');
+	vtext_string_append(b, ", .Lfunc_end");
+	vtext_unsigned_append(b, s);
+	vtext_char_append(b, '-');
 	sym_name(c, b, s);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\n');
 	it_close(e, objitem);
 }

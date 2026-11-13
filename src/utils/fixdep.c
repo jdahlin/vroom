@@ -24,7 +24,7 @@
 #include "common/intern.h"
 #include "frontend/lex/lex.h"
 #include "utils/fixdep.h"
-#include "common/buf.h"
+#include "common/buffer.h"
 
 /* ---------------- output buffer ---------------- */
 
