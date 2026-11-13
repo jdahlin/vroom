@@ -237,6 +237,19 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### Referenskompilatorernas optimeringsgränser (2026-11-13)
+
+Inventering och familjegranskning klar: 305 GCC-parametrar vid O0/O1/O2/O3/Os
+samt 821 numeriska LLVM-optioner, samtliga med rekommenderad behandling i
+`optimizer-limits/inventory.csv`. `RESEARCH-optimizer-limits.md` skiljer
+registrerade standardvärden från effektiv pass-/målpolicy och granskar de
+relevanta familjerna mot källkod. Rekommendation: överför tillväxtkontroll,
+frekvensvägda kostnader och begränsat analysarbete; inga numeriska standarder
+kopieras utan kalibrering i jämförbara enheter. Nästa implementation börjar
+med räknare för budgetstopp och tillväxt, därefter inline-/allokatorpolicy.
+Inga kompilatorändringar, ingen ny prestandavinst eller stängd releasegrind.
+
+
 ### V4 x86-64 mot clang -O2 (2026-11-12), mål högst 5 % långsammare
 
 
