@@ -23,6 +23,8 @@ It needs only the checkout (no build, no clang) and takes a few seconds.
 
   bench/quality.py                    the report
   bench/quality.py --clones 60        ... with the 60 longest duplicates
+  bench/quality.py --clones 999 --only ld/ arch/a64/ld/
+                                      ... only those with a side under a prefix
   bench/quality.py --json FILE        every number and list as JSON
   bench/quality.py --check [FILE]     exit 1 if a ratchet number is above
                                       the baseline (bench/quality-baseline.json)
@@ -549,7 +551,7 @@ def revision():
         return '?'
 
 
-def report(root, m, lists, nclones, N):
+def report(root, m, lists, nclones, N, only):
     k = lambda n: f'{n / 1000:.1f} k'
     where = os.path.relpath(root, R) if root.startswith(R + '/') else root
     print(f'{where} at {revision()}: {m["files"]} files, '
@@ -576,8 +578,10 @@ def report(root, m, lists, nclones, N):
     for p in lists['clone_pairs'][:12]:
         print(f'    {p["tokens"]:6}  {p["a"]}' + ('' if p['a'] == p['b'] else f' / {p["b"]}'))
     if nclones:
-        print(f'  longest {nclones}:')
-        for c in lists['clones'][:nclones]:
+        cl = [c for c in lists['clones']
+              if not only or c['dst'].startswith(only) or c['src'].startswith(only)]
+        print(f'  longest {min(nclones, len(cl))}' + (f' under {" ".join(only)}:' if only else ':'))
+        for c in cl[:nclones]:
             kind = 'exact' if c['exact'] else f'renamed {c["score"]:.2f}'
             print(f'    {c["tokens"]:5}  {c["dst"]}:{c["dst_lines"][0]}-{c["dst_lines"][1]}'
                   f'  =  {c["src"]}:{c["src_lines"][0]}-{c["src_lines"][1]}  ({kind})')
@@ -620,6 +624,7 @@ def main():
     ap.add_argument('--root')
     ap.add_argument('--min-tokens', type=int, default=60)
     ap.add_argument('--clones', type=int, default=0, metavar='N')
+    ap.add_argument('--only', nargs='+', default=[], metavar='PREFIX')
     ap.add_argument('--json', metavar='FILE')
     ap.add_argument('--check', nargs='?', const=BASELINE, metavar='FILE')
     ap.add_argument('--bless', nargs='?', const=BASELINE, metavar='FILE')
@@ -655,7 +660,7 @@ def main():
             print(f'better {k}: {c}, baseline {b} (bench/quality.py --bless)')
         print(f'quality: {len(RATCHET) - len(bad)}/{len(RATCHET)} numbers at or under the baseline')
         return 1 if bad else 0
-    report(root, m, lists, a.clones, a.min_tokens)
+    report(root, m, lists, a.clones, a.min_tokens, tuple(a.only))
     print(f'\n({time.time() - t0:.1f} s)')
     return 0
 
