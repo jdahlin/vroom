@@ -100,6 +100,9 @@ int main(int argc, char **argv)
 			return 2;
 		}
 	}
+	/* the shared pool's threads (emit helpers, link phases) run compiler code
+	   as the workers do: the same stack, so input nests as deep on either */
+	vtask_stack_size_set(WORKER_STACK);
 	log_requests = getenv("VCC_LOG");
 	{	/* the shims next to vccd: recipes may run them here (rsh) */
 		char self[4096], *sl;

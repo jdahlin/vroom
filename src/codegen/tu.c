@@ -5,6 +5,7 @@
 #endif
 #include "common/buf.h"
 #include "common/defer.h"
+#include "port/task.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 
@@ -236,6 +237,12 @@ static void *worker(void *arg)
 	return NULL;
 }
 
+/* one slot of the drain loop (vtask_parallel_for item) */
+static void emit_slot(void *arg, size_t i)
+{
+	worker(&((ecx *)arg)[i]);
+}
+
 static int chunk_cmp(const void *a, const void *b)
 {
 	const chunk *x = a, *y = b;
@@ -407,7 +414,6 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	emitter E;
 	int nthr = o->nthreads > 0 ? o->nthreads : 1;
 	ecx *ctx;
-	pthread_t th[64];
 	double t0 = now(), t1, t2;
 	tbuf hdr;
 	int errors;
@@ -497,38 +503,15 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	ctx = calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
 		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
-	{
-		/* the walkers recurse with the input's nesting and fall back when the stack runs
-		 * low (vstack_low): a worker gets a stack as large as this thread's, so that a
-		 * function compiles the same on any of them (Darwin's default for a new thread
-		 * is 512 KB, where deep input that compiled on one thread did not on several) */
-		pthread_attr_t at;
-		size_t ss = (size_t)8 << 20;
-
-#ifdef __APPLE__
-		ss = pthread_get_stacksize_np(pthread_self());
-#else
-		{
-			pthread_attr_t me;
-			void *addr;
-
-			if (!pthread_getattr_np(pthread_self(), &me)) {
-				pthread_attr_getstack(&me, &addr, &ss);
-				pthread_attr_destroy(&me);
-			}
-		}
-#endif
-		if (ss < ((size_t)1 << 20))
-			ss = (size_t)1 << 20;
-		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, ss);
-		for (int i = 1; i < nthr; i++)
-			pthread_create(&th[i], &at, worker, &ctx[i]);
-		pthread_attr_destroy(&at);
-	}
-	worker(&ctx[0]);
-	for (int i = 1; i < nthr; i++)
-		pthread_join(th[i], NULL);
+	/* the drain loop on nthr slots, slot i with ctx[i], on the shared pool
+	 * (port/task.c): helpers are idle pool threads only, under the process'
+	 * budget, so inside a full vpp --batch or vccd the slots run here one after
+	 * the other (a slot that starts late finds the queue empty and returns).
+	 * Pool threads have one stack size (as main's, or vccd's worker stack), so
+	 * a function nests as deep, and compiles the same, on any of them; their
+	 * thread-local scratch (optimizer, VIR) lives as long as they do instead of
+	 * being leaked by a thread per round. */
+	vtask_parallel_for((size_t)nthr, nthr, emit_slot, ctx, 0);
 	t2 = now();
 	free(E.once);free(E.inl_read);
 	E.once = E.inl_read = NULL;

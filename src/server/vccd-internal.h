@@ -64,6 +64,7 @@
 #include "utils/rsh.h"
 #include "ld/ld.h"
 #include "common/defer.h"
+#include "port/task.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 #define QSIZE 4096
