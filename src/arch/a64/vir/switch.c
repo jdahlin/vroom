@@ -4,8 +4,8 @@
 
 VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b, const vir_insn *in)
 {
-	ecx *e = L->e;
-	const vir_function *f = L->f;
+	ecx *e = L->context;
+	const vir_function *f = L->function;
 	int x = a64_vir_value_is_64_bit(f, in->a), r = a64_vir_operand_general_register(L, 0, R_X16);
 	uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
 	const uint32_t *cw = &f->extra[in->c + 1];

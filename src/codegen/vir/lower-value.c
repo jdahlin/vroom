@@ -10,12 +10,12 @@
 VPRIV uint32_t virbuild_value_convert_in_block(ecx *e, uint32_t b, uint32_t v, uint32_t to)
 {
 	virbuild_context *V = e->vw;
-	uint32_t from = V->p[v].in.type;
+	uint32_t from = V->insns[v].insn.type;
 
 	if (from == to)
 		return v;
-	if (V->p[v].in.op == VIR_OP_ICONST && to != VIR_TYPE_F32 && to != VIR_TYPE_F64) {
-		uint64_t x = V->p[v].in.b | (uint64_t)V->p[v].in.c << 32;
+	if (V->insns[v].insn.op == VIR_OP_ICONST && to != VIR_TYPE_F32 && to != VIR_TYPE_F64) {
+		uint64_t x = V->insns[v].insn.b | (uint64_t)V->insns[v].insn.c << 32;
 
 		return virbuild_constant_integer(e, to, to == VIR_TYPE_I32 ? (int64_t)(uint32_t)x : (int64_t)x);
 	}
@@ -37,24 +37,24 @@ VPRIV uint32_t virbuild_value_convert_in_block(ecx *e, uint32_t b, uint32_t v, u
 	virbuild_fail(e, VIRBUILD_FAILURE(value_type_mismatch));
 }
 
-VPRIV uint32_t virbuild_value_convert(ecx *e, uint32_t v, uint32_t to) { return virbuild_value_convert_in_block(e, e->vw->cur, v, to); }
+VPRIV uint32_t virbuild_value_convert(ecx *e, uint32_t v, uint32_t to) { return virbuild_value_convert_in_block(e, e->vw->current_block, v, to); }
 
 /* name r's value as type ty */
 VPRIV uint32_t virbuild_register_read(ecx *e, int r, uint32_t ty)
 {
 	if (r < 0 || r >= VIRBUILD_REGISTER_NONE)
 		virbuild_fail(e, VIRBUILD_FAILURE(no_such_register));
-	return virbuild_value_convert(e, virbuild_variable_read(e, (uint32_t)r, e->vw->cur, ty), ty);
+	return virbuild_value_convert(e, virbuild_variable_read(e, (uint32_t)r, e->vw->current_block, ty), ty);
 }
 
 VPRIV uint32_t virbuild_register_read_raw(ecx *e, int r)	/* name r's value as it is */
 {
 	virbuild_context *V = e->vw;
-	uint32_t *d = virbuild_variable_slot(e, V->cur, (uint32_t)r, false);
+	uint32_t *d = virbuild_variable_slot(e, V->current_block, (uint32_t)r, false);
 
 	if (d)
 		return *d;
-	return virbuild_variable_read(e, (uint32_t)r, V->cur, r >= VIRBUILD_FLOAT_REGISTER_FIRST ? VIR_TYPE_F64 : VIR_TYPE_I64);
+	return virbuild_variable_read(e, (uint32_t)r, V->current_block, r >= VIRBUILD_FLOAT_REGISTER_FIRST ? VIR_TYPE_F64 : VIR_TYPE_I64);
 }
 
 VPRIV void virbuild_register_write(ecx *e, int r, uint32_t v)
@@ -62,8 +62,8 @@ VPRIV void virbuild_register_write(ecx *e, int r, uint32_t v)
 	if (r < 0 || r >= VIRBUILD_REGISTER_NONE)
 		virbuild_fail(e, VIRBUILD_FAILURE(no_such_register));
 	if (r >= VIRBUILD_FLOAT_REGISTER_FIRST)
-		e->vw->fprod[r - VIRBUILD_FLOAT_REGISTER_FIRST] = 0;
-	virbuild_variable_write(e, (uint32_t)r, e->vw->cur, v);
+		e->vw->float_products[r - VIRBUILD_FLOAT_REGISTER_FIRST] = 0;
+	virbuild_variable_write(e, (uint32_t)r, e->vw->current_block, v);
 }
 
 VPRIV uint32_t virbuild_integer_type(int size) { return size == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32; }
@@ -106,10 +106,10 @@ VPRIV int virbuild_treg(ecx *e)
 	virbuild_context *V = e->vw;
 
 	for (int w = 0; w < 3; w++)
-		if (~V->live[w]) {
-			int k = __builtin_ctzll(~V->live[w]);
+		if (~V->live_names[w]) {
+			int k = __builtin_ctzll(~V->live_names[w]);
 
-			V->live[w] |= 1ull << k;
+			V->live_names[w] |= 1ull << k;
 			return w * 64 + k;
 		}
 	virbuild_fail(e, VIRBUILD_FAILURE(out_of_names));
@@ -120,8 +120,8 @@ VPRIV int virbuild_ftreg(ecx *e)
 	virbuild_context *V = e->vw;
 
 	for (int r = VIRBUILD_FLOAT_REGISTER_FIRST; r < VIRBUILD_REGISTER_NONE; r++)
-		if (!(V->flive >> (r - VIRBUILD_FLOAT_REGISTER_FIRST) & 1)) {
-			V->flive |= 1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST);
+		if (!(V->live_float_names >> (r - VIRBUILD_FLOAT_REGISTER_FIRST) & 1)) {
+			V->live_float_names |= 1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST);
 			return r;
 		}
 	virbuild_fail(e, VIRBUILD_FAILURE(out_of_float_names));
@@ -132,9 +132,9 @@ VPRIV void virbuild_tfree(ecx *e, int r)
 	virbuild_context *V = e->vw;
 
 	if (r >= 0 && r < VIRBUILD_FLOAT_REGISTER_FIRST)
-		V->live[r / 64] &= ~(1ull << (r % 64));
+		V->live_names[r / 64] &= ~(1ull << (r % 64));
 	else if (r >= VIRBUILD_FLOAT_REGISTER_FIRST && r < VIRBUILD_REGISTER_NONE)
-		V->flive &= ~(1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST));
+		V->live_float_names &= ~(1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST));
 }
 
 VPRIV void virbuild_tkeep(ecx *e, int r)
@@ -142,19 +142,19 @@ VPRIV void virbuild_tkeep(ecx *e, int r)
 	virbuild_context *V = e->vw;
 
 	if (r >= 0 && r < VIRBUILD_FLOAT_REGISTER_FIRST)
-		V->live[r / 64] |= 1ull << (r % 64);
+		V->live_names[r / 64] |= 1ull << (r % 64);
 	else if (r >= VIRBUILD_FLOAT_REGISTER_FIRST && r < VIRBUILD_REGISTER_NONE)
-		V->flive |= 1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST);
+		V->live_float_names |= 1ull << (r - VIRBUILD_FLOAT_REGISTER_FIRST);
 }
 
 VPRIV int virbuild_nfree(ecx *e)
 {
 	virbuild_context *V = e->vw;
 
-	return 192 - __builtin_popcountll(V->live[0]) - __builtin_popcountll(V->live[1]) - __builtin_popcountll(V->live[2]);
+	return 192 - __builtin_popcountll(V->live_names[0]) - __builtin_popcountll(V->live_names[1]) - __builtin_popcountll(V->live_names[2]);
 }
 
-VPRIV int virbuild_nffree(ecx *e) { return 63 - __builtin_popcountll(e->vw->flive); }
+VPRIV int virbuild_nffree(ecx *e) { return 63 - __builtin_popcountll(e->vw->live_float_names); }
 
 VPRIV void virbuild_mov(ecx *e, int rd, int rs)
 {
@@ -285,8 +285,8 @@ VPRIV void virbuild_ext(ecx *e, int r, int from, bool sgn)
 	if (from >= 8)
 		return;
 	v = virbuild_register_read_raw(e, r);
-	if (e->vw->p[v].in.op == VIR_OP_ICONST) {	/* a constant: folded */
-		uint64_t x = e->vw->p[v].in.b | (uint64_t)e->vw->p[v].in.c << 32;
+	if (e->vw->insns[v].insn.op == VIR_OP_ICONST) {	/* a constant: folded */
+		uint64_t x = e->vw->insns[v].insn.b | (uint64_t)e->vw->insns[v].insn.c << 32;
 		int sh = 64 - 8 * from;
 
 		x = sgn ? (uint64_t)((int64_t)(x << sh) >> sh) : x << sh >> sh;
@@ -349,10 +349,10 @@ static void virbuild_branch_if(ecx *e, uint32_t c, uint32_t lbl, bool nz)
 	virbuild_context *V = e->vw;
 	uint32_t t = virbuild_label_block(e, lbl), f = virbuild_block_new(e);
 
-	V->b[V->cur].term = virbuild_preir_insn_add(e, VIR_OP_BRIF, VIR_TYPE_VOID, 0, c, nz ? t : f, nz ? f : t, V->cur);
-	V->cur = f;
+	V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_BRIF, VIR_TYPE_VOID, 0, c, nz ? t : f, nz ? f : t, V->current_block);
+	V->current_block = f;
 	/* (the fallthrough's only predecessor is this block: the store table stays valid) */
-	V->b[f].fall = 1;
+	V->blocks[f].falls_through = 1;
 }
 
 VPRIV void virbuild_cmpbr(ecx *e, int op, int size, bool sgn, val a, val b, uint32_t lbl)
@@ -410,10 +410,10 @@ VPRIV void virbuild_switch_table(ecx *e, int r, int size, const em_switch_case *
 	}
 	qsort(c3, m, 3 * sizeof *c3, virbuild_switch_case_compare);
 	o = virbuild_extra_append(e, &m, 1);
-	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, m * st);
+	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, m * st);
 	for (uint32_t k = 0; k < m; k++) {
 		uint64_t lo = c3[3 * k], hi = c3[3 * k + 1];
-		uint32_t *w = &V->x[V->nx];
+		uint32_t *w = &V->extra[V->extra_count];
 
 		if (size == 8) {
 			w[0] = (uint32_t)lo, w[1] = (uint32_t)(lo >> 32), w[2] = (uint32_t)hi, w[3] = (uint32_t)(hi >> 32);
@@ -421,7 +421,7 @@ VPRIV void virbuild_switch_table(ecx *e, int r, int size, const em_switch_case *
 			w[0] = (uint32_t)lo, w[1] = (uint32_t)hi;
 		}
 		w[st - 1] = (uint32_t)c3[3 * k + 2];
-		V->nx += st;
+		V->extra_count += st;
 	}
 	free(c3);
 	virbuild_block_terminate(e, VIR_OP_SWITCH, x, virbuild_label_block(e, dflt), o, 0);
@@ -483,13 +483,13 @@ static uint32_t virbuild_float_product(ecx *e, const val *a, uint32_t x, uint32_
 	*fl = 0;
 	/* (arm64 only: the one lowering with fmadd) */
 	if (e->c->o->no_fp_contract || e->c->o->target > PP_DARWIN || a->k != V_REG || a->r < VIRBUILD_FLOAT_REGISTER_FIRST ||
-	    V->fprod[a->r - VIRBUILD_FLOAT_REGISTER_FIRST] != x || !x)
+	    V->float_products[a->r - VIRBUILD_FLOAT_REGISTER_FIRST] != x || !x)
 		return 0;
-	if (V->p[m].in.op == VIR_OP_FNEG)
-		*fl |= VIR_INSN_FLAG_NEGP, m = V->p[m].in.a;
-	if (V->p[m].in.op != VIR_OP_FMUL || V->p[m].in.type != ty)
+	if (V->insns[m].insn.op == VIR_OP_FNEG)
+		*fl |= VIR_INSN_FLAG_NEGP, m = V->insns[m].insn.a;
+	if (V->insns[m].insn.op != VIR_OP_FMUL || V->insns[m].insn.type != ty)
 		return 0;
-	if (V->p[V->p[m].in.a].in.op == VIR_OP_FCONST && V->p[V->p[m].in.b].in.op == VIR_OP_FCONST)
+	if (V->insns[V->insns[m].insn.a].insn.op == VIR_OP_FCONST && V->insns[V->insns[m].insn.b].insn.op == VIR_OP_FCONST)
 		return 0;	/* (a constant product is rounded on its own) */
 	return m;
 }
@@ -507,25 +507,25 @@ VPRIV val virbuild_fbin(ecx *e, int op, qty t, val a, val b)
 	if (m) {
 		/* a product this expression made, added or subtracted: one fused operation, as clang's
 		 * -ffp-contract=on (the left operand first; the product itself goes when nothing else reads it) */
-		const virbuild_preir_insn *P = e->vw->p;
-		uint32_t pa = P[m].in.a, pb = P[m].in.b, c = left ? y : x;
+		const virbuild_preir_insn *P = e->vw->insns;
+		uint32_t pa = P[m].insn.a, pb = P[m].insn.b, c = left ? y : x;
 
 		if (vop == VIR_OP_FSUB)
 			fl ^= left ? VIR_INSN_FLAG_NEGC : VIR_INSN_FLAG_NEGP;
 		/* a negated factor or addend is a flag (exact) */
-		if (P[pa].in.op == VIR_OP_FNEG)
-			fl ^= VIR_INSN_FLAG_NEGP, pa = P[pa].in.a;
-		if (P[pb].in.op == VIR_OP_FNEG)
-			fl ^= VIR_INSN_FLAG_NEGP, pb = P[pb].in.a;
-		if (P[c].in.op == VIR_OP_FNEG)
-			fl ^= VIR_INSN_FLAG_NEGC, c = P[c].in.a;
+		if (P[pa].insn.op == VIR_OP_FNEG)
+			fl ^= VIR_INSN_FLAG_NEGP, pa = P[pa].insn.a;
+		if (P[pb].insn.op == VIR_OP_FNEG)
+			fl ^= VIR_INSN_FLAG_NEGP, pb = P[pb].insn.a;
+		if (P[c].insn.op == VIR_OP_FNEG)
+			fl ^= VIR_INSN_FLAG_NEGC, c = P[c].insn.a;
 		v = virbuild_insn_append(e, VIR_OP_FMA, ty, fl, pa, pb, c);
 	} else {
 		v = virbuild_insn_append(e, vop, ty, 0, x, y, 0);
 	}
 	virbuild_register_write(e, r, v);
 	if (vop == VIR_OP_FMUL)
-		e->vw->fprod[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
+		e->vw->float_products[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
@@ -534,12 +534,12 @@ VPRIV val virbuild_fneg(ecx *e, qty t, val a)
 	uint32_t ty = virbuild_float_type(e, t), x = virbuild_walker_value_get(e, &a, ty);
 	int r = virbuild_float_result_register(e, &a, NULL);
 
-	bool prod = a.k == V_REG && a.r >= VIRBUILD_FLOAT_REGISTER_FIRST && x && e->vw->fprod[a.r - VIRBUILD_FLOAT_REGISTER_FIRST] == x && e->vw->p[x].in.op == VIR_OP_FMUL;
+	bool prod = a.k == V_REG && a.r >= VIRBUILD_FLOAT_REGISTER_FIRST && x && e->vw->float_products[a.r - VIRBUILD_FLOAT_REGISTER_FIRST] == x && e->vw->insns[x].insn.op == VIR_OP_FMUL;
 	uint32_t v = virbuild_insn_append(e, VIR_OP_FNEG, ty, 0, x, 0, 0);
 
 	virbuild_register_write(e, r, v);
 	if (prod)
-		e->vw->fprod[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
+		e->vw->float_products[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 

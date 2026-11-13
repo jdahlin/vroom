@@ -38,24 +38,24 @@
 #include "vir/register-allocation.h"
 
 typedef struct virbuild_preir_insn {	/* a pre-IR instruction: operands are pre-IR values, extras in virbuild_context.x */
-	vir_insn in;
-	uint32_t blk;	/* its block; VIRBUILD_BLOCK_NONE for a constant */
+	vir_insn insn;
+	uint32_t block;	/* its block; VIRBUILD_BLOCK_NONE for a constant */
 	uint32_t next;	/* the next one in the block's list (0: last) */
-	uint32_t loc;	/* source location */
-	uint32_t slot;	/* load, store: its frame slot + 1, 0 none */
+	uint32_t location;	/* source location */
+	uint32_t slot_plus_one;	/* load, store: its frame slot + 1, 0 none */
 } virbuild_preir_insn;
 
 typedef struct virbuild_preir_block {
-	uint32_t head, tail;	/* instructions, in order */
-	uint32_t phead, ptail;	/* parameters (Braun's phis) */
-	uint32_t term;		/* terminator (0: open) */
-	uint32_t pred, npred;	/* predecessors: virbuild_context.pr[pred..pred+npred), distinct */
-	uint32_t fin;		/* final block id, VIRBUILD_BLOCK_NONE unreachable */
-	uint8_t fall, reach;
-	uint8_t def;		/* a variable is written in it: not empty, whatever its instructions */
+	uint32_t first_insn, last_insn;	/* instructions, in order */
+	uint32_t first_parameter, last_parameter;	/* parameters (Braun's phis) */
+	uint32_t terminator;		/* terminator (0: open) */
+	uint32_t predecessor_first, predecessor_count;	/* predecessors: virbuild_context.pr[pred..pred+npred), distinct */
+	uint32_t final_block;		/* final block id, VIRBUILD_BLOCK_NONE unreachable */
+	uint8_t falls_through, is_reachable;
+	uint8_t has_definition;		/* a variable is written in it: not empty, whatever its instructions */
 } virbuild_preir_block;
 
-typedef struct virbuild_variable_entry { uint64_t key; uint32_t v, gen; } virbuild_variable_entry;	/* (block, variable) -> current definition */
+typedef struct virbuild_variable_entry { uint64_t key; uint32_t value, generation; } virbuild_variable_entry;	/* (block, variable) -> current definition */
 
 typedef struct virbuild_preir_slot {
 	int64_t off;		/* the walker's frame offset */
@@ -64,51 +64,51 @@ typedef struct virbuild_preir_slot {
 	uint8_t exposed;	/* its address escaped (laddr) */
 	uint32_t loads;		/* loads the store table did not answer (during the walk) */
 	uint8_t used;		/* a reachable load reads it (emission) */
-	uint32_t fin;		/* VIR slot id, VIRBUILD_BLOCK_NONE none yet */
-	uint8_t prom;		/* promoted to variables (virbuild_slots_promote): its stores go */
-	uint8_t f32w;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
+	uint32_t final_slot;		/* VIR slot id, VIRBUILD_BLOCK_NONE none yet */
+	uint8_t is_promoted;		/* promoted to variables (virbuild_slots_promote): its stores go */
+	uint8_t float32_written;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
 } virbuild_preir_slot;
 
 #define VIRBUILD_MEMSET_LIFETIME_FLAG 0x8000u	/* a memset's flag: the start of a local's lifetime (virbuild_undecl) */
-typedef struct virbuild_store_entry { uint32_t slot; int64_t off; int size; uint32_t v; } virbuild_store_entry;	/* store table */
-typedef struct virbuild_location { uint32_t sym, inst; } virbuild_location;
+typedef struct virbuild_store_entry { uint32_t slot; int64_t offset; int size; uint32_t v; } virbuild_store_entry;	/* store table */
+typedef struct virbuild_location { uint32_t symbol, instance; } virbuild_location;
 
 typedef struct virbuild_context {
-	virbuild_preir_insn *p; uint32_t np, cp;
-	virbuild_preir_block *b; uint32_t nb, cb;
-	uint32_t *x; uint32_t nx, cx;		/* extra words (pre-IR values) */
-	virbuild_variable_entry *h; uint32_t hn, hcap, hgen, halloc;	/* an entry of another gen is empty (no clearing per function);
+	virbuild_preir_insn *insns; uint32_t insn_count, insn_capacity;
+	virbuild_preir_block *blocks; uint32_t block_count, block_capacity;
+	uint32_t *extra; uint32_t extra_count, extra_capacity;		/* extra words (pre-IR values) */
+	virbuild_variable_entry *variable_entries; uint32_t variable_entry_count, variable_entry_capacity, variable_generation, variable_entry_allocated;	/* an entry of another gen is empty (no clearing per function);
 						 * hcap: the part in use, small again at each function */
-	uint32_t *lh, lhcap, lhalloc;		/* (symbol, inlining instance) -> local + 1 */
-	uint32_t *fwd; uint32_t cfwd;		/* removed parameters: the value that replaces them */
-	uint32_t *lab; uint32_t clab, labhi;		/* walker label -> block */
-	virbuild_preir_slot *sl; uint32_t nsl, csl;
-	uint32_t *act; uint32_t nact, cact;	/* slots that own their range now */
-	virbuild_store_entry *st; uint32_t nst, cst;
-	virbuild_location *loc; uint32_t nloc, cloc;
-	uint32_t nprom;				/* variables of the promoted fields so far (after the locals') */
-	uint8_t *vty; uint32_t cvty;		/* per local: its VIR type */
-	uint8_t *vsgn; uint32_t cvsgn;		/* ... and whether it is a signed integer */
-	uint32_t *pr; uint32_t npr, cpr;	/* predecessor lists */
-	uint32_t *map; uint32_t cmap;		/* pre-IR value -> VIR value */
-	uint32_t *order; uint32_t norder, corder;	/* blocks in emission order */
-	uint32_t *bmap; uint32_t cbmap;		/* scratch */
-	uint64_t live[3], flive;		/* names in use */
-	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
-	uint32_t cur;				/* the block being built */
+	uint32_t *local_hash, local_hash_capacity, local_hash_allocated;		/* (symbol, inlining instance) -> local + 1 */
+	uint32_t *forward; uint32_t forward_capacity;		/* removed parameters: the value that replaces them */
+	uint32_t *labels; uint32_t label_capacity, label_high;		/* walker label -> block */
+	virbuild_preir_slot *slots; uint32_t slot_count, slot_capacity;
+	uint32_t *active_slots; uint32_t active_slot_count, active_slot_capacity;	/* slots that own their range now */
+	virbuild_store_entry *stores; uint32_t store_count, store_capacity;
+	virbuild_location *locations; uint32_t location_count, location_capacity;
+	uint32_t promoted_count;				/* variables of the promoted fields so far (after the locals') */
+	uint8_t *variable_types; uint32_t variable_type_capacity;		/* per local: its VIR type */
+	uint8_t *variable_is_signed; uint32_t variable_is_signed_capacity;		/* ... and whether it is a signed integer */
+	uint32_t *predecessors; uint32_t predecessor_count, predecessor_capacity;	/* predecessor lists */
+	uint32_t *value_map; uint32_t value_map_capacity;		/* pre-IR value -> VIR value */
+	uint32_t *block_order; uint32_t block_order_count, block_order_capacity;	/* blocks in emission order */
+	uint32_t *block_map; uint32_t block_map_capacity;		/* scratch */
+	uint64_t live_names[3], live_float_names;		/* names in use */
+	uint32_t float_products[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
+	uint32_t current_block;				/* the block being built */
 	bool sealing;
-	uint32_t rty;				/* the result's type, VIR_TYPE_VOID none */
-	uint32_t nparam, fsig;			/* the function's signature (pre extra offset) */
-	const char *why;
-	char detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): VCC_VIR_STATS */
+	uint32_t result_type;				/* the result's type, VIR_TYPE_VOID none */
+	uint32_t parameter_count, function_signature;			/* the function's signature (pre extra offset) */
+	const char *failure_reason;
+	char failure_detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): VCC_VIR_STATS */
 	vir_function f;				/* the function built (valid until the thread's next vir_function_begin) */
-	int64_t *xslot, *xspill;
-	uint8_t *xuses; uint32_t cxuses;
-	uint32_t *xedgelab, cxedgelab;
-	uint32_t *xlayout, cxlayout;
-	uint32_t *xlabel, cxslot, cxspill, cxlabel; /* x86 lowering buffers, reused per ecx */
-	vir_loops lp;
-	vir_alloc_out ao;
+	int64_t *lowering_slots, *lowering_spills;
+	uint8_t *lowering_uses; uint32_t lowering_uses_capacity;
+	uint32_t *lowering_edge_labels, lowering_edge_label_capacity;
+	uint32_t *lowering_layout, lowering_layout_capacity;
+	uint32_t *lowering_labels, lowering_slot_capacity, lowering_spill_capacity, lowering_label_capacity; /* x86 lowering buffers, reused per ecx */
+	vir_loops loops;
+	vir_alloc_out allocation;
 } virbuild_context;
 
 #define VIRBUILD_REGISTER_NONE 255
@@ -130,22 +130,22 @@ typedef struct virbuild_context {
 
 /* the value operands of x (a parameter's: one per predecessor), as words that can be rewritten */
 #define VIRBUILD_FOR_EACH_OPERAND(V_, X_, O_, BODY_) do { \
-	virbuild_preir_insn *x_ = &(V_)->p[X_]; \
-	const vir_opcode_info *oi_ = &vir_opcode_table[x_->in.op]; \
-	if (x_->in.op == VIR_OP_BPARAM) { \
-		if (x_->in.b != VIRBUILD_BLOCK_NONE) \
-			for (uint32_t j_ = 0; j_ < (V_)->b[x_->blk].npred; j_++) { \
-				uint32_t *O_ = &(V_)->x[x_->in.b + j_]; BODY_; \
+	virbuild_preir_insn *x_ = &(V_)->insns[X_]; \
+	const vir_opcode_info *oi_ = &vir_opcode_table[x_->insn.op]; \
+	if (x_->insn.op == VIR_OP_BPARAM) { \
+		if (x_->insn.b != VIRBUILD_BLOCK_NONE) \
+			for (uint32_t j_ = 0; j_ < (V_)->blocks[x_->block].predecessor_count; j_++) { \
+				uint32_t *O_ = &(V_)->extra[x_->insn.b + j_]; BODY_; \
 			} \
 		break; \
 	} \
 	for (int k_ = 0; k_ < 3; k_++) \
-		if (virbuild_operand_kind_is_value(oi_->operand_kinds[k_]) && !(x_->in.op == VIR_OP_BRIF && k_ > 0)) { \
-			uint32_t *O_ = &(&x_->in.a)[k_]; BODY_; \
+		if (virbuild_operand_kind_is_value(oi_->operand_kinds[k_]) && !(x_->insn.op == VIR_OP_BRIF && k_ > 0)) { \
+			uint32_t *O_ = &(&x_->insn.a)[k_]; BODY_; \
 		} \
-	if (x_->in.op == VIR_OP_CALL || x_->in.op == VIR_OP_RET) \
-		for (uint32_t k_ = 0; k_ < (V_)->x[x_->in.c]; k_++) { \
-			uint32_t *O_ = &(V_)->x[x_->in.c + 1 + k_]; BODY_; \
+	if (x_->insn.op == VIR_OP_CALL || x_->insn.op == VIR_OP_RET) \
+		for (uint32_t k_ = 0; k_ < (V_)->extra[x_->insn.c]; k_++) { \
+			uint32_t *O_ = &(V_)->extra[x_->insn.c + 1 + k_]; BODY_; \
 		} \
 } while (0)
 
@@ -154,18 +154,18 @@ static inline bool virbuild_operand_kind_is_value(uint8_t k)
 	return k >= VIR_OPERAND_KIND_T && k <= VIR_OPERAND_KIND_BITC ? true : k == VIR_OPERAND_KIND_CONSTV;
 }
 
-static inline uint32_t virbuild_value_type(ecx *e, uint32_t v) { return e->vw->p[v].in.type; }
+static inline uint32_t virbuild_value_type(ecx *e, uint32_t v) { return e->vw->insns[v].insn.type; }
 
 static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
 {
 	uint32_t r = v;
 
-	while (V->fwd[r] != r)
-		r = V->fwd[r];
-	while (V->fwd[v] != r) {
-		uint32_t n = V->fwd[v];
+	while (V->forward[r] != r)
+		r = V->forward[r];
+	while (V->forward[v] != r) {
+		uint32_t n = V->forward[v];
 
-		V->fwd[v] = r;
+		V->forward[v] = r;
 		v = n;
 	}
 	return r;

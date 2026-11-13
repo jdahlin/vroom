@@ -25,7 +25,7 @@ VPRIV uint32_t a64_vir_arguments_assign(bool darwin, const uint32_t *w, a64_vir_
 			uint32_t al = darwin && !(VIR_GROUP_FLAGS(w0) & VIR_GROUP_UNNAMED) ? size : 8;
 
 			s = (int32_t)(((uint32_t)s + al - 1) & ~(al - 1));
-			a.stk = s;
+			a.stack_offset = s;
 			a.size = (uint8_t)(al == 8 ? 8 : size);
 			s += (int32_t)a.size;
 		} else {

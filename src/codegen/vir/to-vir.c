@@ -12,30 +12,30 @@ static uint32_t virbuild_to_vir_value(ecx *e, uint32_t v)
 	virbuild_preir_insn *q;
 
 	v = virbuild_value_resolve(V, v);
-	if (V->map[v])
-		return V->map[v];
-	q = &V->p[v];
-	if (q->blk != VIRBUILD_BLOCK_NONE) {
-		V->why = VIRBUILD_FAILURE(use_before_definition);
+	if (V->value_map[v])
+		return V->value_map[v];
+	q = &V->insns[v];
+	if (q->block != VIRBUILD_BLOCK_NONE) {
+		V->failure_reason = VIRBUILD_FAILURE(use_before_definition);
 		return 0;
 	}
-	if (q->in.op == VIR_OP_SLOTADDR) {
-		virbuild_preir_slot *s = &V->sl[q->in.a];
+	if (q->insn.op == VIR_OP_SLOTADDR) {
+		virbuild_preir_slot *s = &V->slots[q->insn.a];
 
-		if (s->fin == VIRBUILD_BLOCK_NONE)
-			s->fin = vir_slot_add(&V->f, s->size, s->align, s->exposed ? 0 : 0, s->off);
-		return V->map[v] = vir_constant_add(&V->f, VIR_OP_SLOTADDR, VIR_TYPE_PTR, s->fin, q->in.b, q->in.c);
+		if (s->final_slot == VIRBUILD_BLOCK_NONE)
+			s->final_slot = vir_slot_add(&V->f, s->size, s->align, s->exposed ? 0 : 0, s->off);
+		return V->value_map[v] = vir_constant_add(&V->f, VIR_OP_SLOTADDR, VIR_TYPE_PTR, s->final_slot, q->insn.b, q->insn.c);
 	}
-	return V->map[v] = vir_constant_add(&V->f, q->in.op, q->in.type, q->in.a, q->in.b, q->in.c);
+	return V->value_map[v] = vir_constant_add(&V->f, q->insn.op, q->insn.type, q->insn.a, q->insn.b, q->insn.c);
 }
 
-static uint32_t virbuild_to_vir_block(virbuild_context *V, uint32_t b) { return V->b[b].fin; }
+static uint32_t virbuild_to_vir_block(virbuild_context *V, uint32_t b) { return V->blocks[b].final_block; }
 
 VPRIV bool virbuild_to_vir_insn_emit(ecx *e, uint32_t i, uint32_t b)
 {
 	virbuild_context *V = e->vw;
 	vir_function *f = &V->f;
-	vir_insn in = V->p[i].in;
+	vir_insn in = V->insns[i].insn;
 	const vir_opcode_info *oi = &vir_opcode_table[in.op];
 	uint32_t w[3] = { in.a, in.b, in.c };
 
@@ -44,31 +44,31 @@ VPRIV bool virbuild_to_vir_insn_emit(ecx *e, uint32_t i, uint32_t b)
 			w[k] = virbuild_to_vir_value(e, w[k]);
 	switch (in.op) {
 	case VIR_OP_CALL: {
-		uint32_t n = V->x[in.c], o;
+		uint32_t n = V->extra[in.c], o;
 
-		w[1] = vir_extra_add(f, &V->x[in.b], 3 + 2 * VIR_SIGNATURE_GROUP_COUNT(V->x[in.b]));
-		o = vir_extra_add(f, &V->x[in.c], 1 + n);
+		w[1] = vir_extra_add(f, &V->extra[in.b], 3 + 2 * VIR_SIGNATURE_GROUP_COUNT(V->extra[in.b]));
+		o = vir_extra_add(f, &V->extra[in.c], 1 + n);
 		for (uint32_t k = 0; k < n; k++)
-			f->extra[o + 1 + k] = virbuild_to_vir_value(e, V->x[in.c + 1 + k]);
+			f->extra[o + 1 + k] = virbuild_to_vir_value(e, V->extra[in.c + 1 + k]);
 		w[2] = o;
 		break;
 	}
 	case VIR_OP_RET: {
-		uint32_t n = V->x[in.c], o = vir_extra_add(f, &V->x[in.c], 1 + n);
+		uint32_t n = V->extra[in.c], o = vir_extra_add(f, &V->extra[in.c], 1 + n);
 
 		for (uint32_t k = 0; k < n; k++)
-			f->extra[o + 1 + k] = virbuild_to_vir_value(e, V->x[in.c + 1 + k]);
+			f->extra[o + 1 + k] = virbuild_to_vir_value(e, V->extra[in.c + 1 + k]);
 		w[2] = o;
 		break;
 	}
 	case VIR_OP_BR: {
 		uint32_t t = in.a, n = 0, j = 0, o = 0;
 
-		while (j < V->b[t].npred && V->pr[V->b[t].pred + j] != b)
+		while (j < V->blocks[t].predecessor_count && V->predecessors[V->blocks[t].predecessor_first + j] != b)
 			j++;
-		for (uint32_t p = V->b[t].phead; p; p = V->p[p].next)
-			if (V->fwd[p] == p) {
-				uint32_t a = virbuild_to_vir_value(e, V->x[V->p[p].in.b + j]);
+		for (uint32_t p = V->blocks[t].first_parameter; p; p = V->insns[p].next)
+			if (V->forward[p] == p) {
+				uint32_t a = virbuild_to_vir_value(e, V->extra[V->insns[p].insn.b + j]);
 
 				if (!n)
 					o = vir_extra_add(f, &a, 1);
@@ -84,24 +84,24 @@ VPRIV bool virbuild_to_vir_insn_emit(ecx *e, uint32_t i, uint32_t b)
 		w[1] = virbuild_to_vir_block(V, in.b), w[2] = virbuild_to_vir_block(V, in.c);
 		break;
 	case VIR_OP_SWITCH: {
-		uint32_t n = V->x[in.c], st = V->p[in.a].in.type == VIR_TYPE_I64 ? 5 : 3, o = vir_extra_add(f, &V->x[in.c], 1 + n * st);
+		uint32_t n = V->extra[in.c], st = V->insns[in.a].insn.type == VIR_TYPE_I64 ? 5 : 3, o = vir_extra_add(f, &V->extra[in.c], 1 + n * st);
 
 		for (uint32_t k = 0; k < n; k++)
-			f->extra[o + 1 + k * st + st - 1] = virbuild_to_vir_block(V, V->x[in.c + 1 + k * st + st - 1]);
+			f->extra[o + 1 + k * st + st - 1] = virbuild_to_vir_block(V, V->extra[in.c + 1 + k * st + st - 1]);
 		w[1] = virbuild_to_vir_block(V, in.b), w[2] = o;
 		break;
 	}
 	default:
 		break;
 	}
-	if (V->why)
+	if (V->failure_reason)
 		return false;
 	{
 		uint32_t v = vir_insn_add(f, in.op, in.type, in.flags, w[0], w[1], w[2]);
 
 		if (!v)
 			return false;
-		V->map[i] = v;
+		V->value_map[i] = v;
 	}
 	return true;
 }

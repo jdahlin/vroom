@@ -7,24 +7,24 @@
  * there unless an edit before it writes it) */
 VPRIV bool a64_vir_pointer_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 {
-	const vir_function *f = L->f;
+	const vir_function *f = L->function;
 	const vir_insn *in = &f->insns[i], *nx = &f->insns[i + 1];
-	uint8_t base = L->opr[0];
+	uint8_t base = L->operand_registers[0];
 	int64_t k;
 
-	if (L->opr[1] != VIR_REGISTER_NONE || !a64_vir_value_is_integer_constant(f, in->b) || base == VIR_REGISTER_NONE || L->uses[i] != 1 ||
-	    L->o->slot[i] != VIR_BLOCK_NONE || i + 1 >= f->blocks[b].first + f->blocks[b].insn_count || nx->a != i ||
+	if (L->operand_registers[1] != VIR_REGISTER_NONE || !a64_vir_value_is_integer_constant(f, in->b) || base == VIR_REGISTER_NONE || L->uses[i] != 1 ||
+	    L->allocation->slot[i] != VIR_BLOCK_NONE || i + 1 >= f->blocks[b].first + f->blocks[b].insn_count || nx->a != i ||
 	    (nx->op != VIR_OP_LOAD && !(nx->op == VIR_OP_STORE && nx->b != i)) || a64_vir_access_is_vector(f, nx))
 		return false;
 	k = a64_vir_constant_bits(&f->insns[in->b]);
 	if (k < -256 || k > 32760)
 		return false;
-	for (uint32_t x = L->ei; x < L->eend && L->o->edit[x].pos <= i + 1; x++)
-		if (L->o->edit[x].pos == i + 1 && L->o->edit[x].dst == base)
+	for (uint32_t x = L->edit_next; x < L->edit_end && L->allocation->edit[x].pos <= i + 1; x++)
+		if (L->allocation->edit[x].pos == i + 1 && L->allocation->edit[x].dst == base)
 			return false;
-	L->pval = i;
-	L->pbase = a64_vir_general_register(base);
-	L->poff = k;
+	L->pointer_value = i;
+	L->pointer_base = a64_vir_general_register(base);
+	L->pointer_offset = k;
 	return true;
 }
 
@@ -42,7 +42,7 @@ enum { A64_VIR_CHAIN_MEM = 1, A64_VIR_CHAIN_EXT, A64_VIR_CHAIN_LSL, A64_VIR_CHAI
  * allocator edit comes in between.  x->first: the chain's first instruction, x->xv: x. */
 VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b, uint32_t c, a64_vir_chain *x)
 {
-	const vir_function *f = L->f;
+	const vir_function *f = L->function;
 	const vir_block *k = &f->blocks[b];
 	const vir_insn *in = &f->insns[c], *m = &f->insns[c + 1];
 	uint32_t j = in->b, lo = k->first + k->parameter_count, end = k->first + k->insn_count, w = 0;
@@ -98,29 +98,29 @@ VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b, uint32_t
 /* the chain's consumer c: its folded form (A64_VIR_CHAIN_MEM: the next load or store's address) */
 static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t res)
 {
-	ecx *e = L->e;
-	uint32_t op = L->f->insns[c].op;
+	ecx *e = L->context;
+	uint32_t op = L->function->insns[c].op;
 	const a64_vir_chain *x = &L->xx;
 	int a = a64_vir_operand_general_register(L, 0, R_X16), rd = res == VIR_REGISTER_NONE ? R_X16 : a64_vir_general_register(res), t;	/* (a base in x16: a64_vir_store_lower takes x17) */
 
-	L->xc = VIR_BLOCK_NONE;
+	L->chain_consumer = VIR_BLOCK_NONE;
 	switch (x->kind) {
 	case A64_VIR_CHAIN_MEM:
-		L->xval = c, L->xbase = a, L->xopt = x->opt, L->xsh = x->sh;
+		L->index_value = c, L->index_base = a, L->index_extension = x->opt, L->index_shift = x->sh;
 		return;
 	case A64_VIR_CHAIN_EXT: {
 		ins *n = put(e, op == VIR_OP_SUB ? I_SUB : I_ADD);	/* (extended register: cond 8 + option) */
 
-		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->xreg, n->cond = (uint8_t)(8 + x->opt), n->sh = x->sh;
+		n->sz = 1, n->rd = (uint8_t)rd, n->rn = (uint8_t)a, n->rm = (uint8_t)L->index_register, n->cond = (uint8_t)(8 + x->opt), n->sh = x->sh;
 		return;
 	}
 	case A64_VIR_CHAIN_LSL:
-		op3s(e, op == VIR_OP_SUB ? I_SUB : I_ADD, 1, rd, a, L->xreg, 0, x->sh);
+		op3s(e, op == VIR_OP_SUB ? I_SUB : I_ADD, 1, rd, a, L->index_register, 0, x->sh);
 		return;
 	default:	/* A64_VIR_CHAIN_MADDL */
-		t = L->xreg == R_X17 || a == R_X17 ? R_X16 : R_X17;
+		t = L->index_register == R_X17 || a == R_X17 ? R_X16 : R_X17;
 		movi(e, 1, t, x->k);
-		op4(e, x->opt == 6 ? I_SMADDL : I_UMADDL, 1, rd, L->xreg, t, a);
+		op4(e, x->opt == 6 ? I_SMADDL : I_UMADDL, 1, rd, L->index_register, t, a);
 		return;
 	}
 }
@@ -131,11 +131,11 @@ static void a64_vir_chain_consumer_act(a64_vir_context *L, uint32_t c, uint8_t r
  * reloads into other registers (a constant operand, the base), none before the load or store */
 VPRIV bool a64_vir_chain_fold(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res)
 {
-	const vir_function *f = L->f;
+	const vir_function *f = L->function;
 	a64_vir_chain x;
 
-	if (L->xc != VIR_BLOCK_NONE && i > L->xfirst && i <= L->xc) {
-		if (i == L->xc)
+	if (L->chain_consumer != VIR_BLOCK_NONE && i > L->chain_first && i <= L->chain_consumer) {
+		if (i == L->chain_consumer)
 			a64_vir_chain_consumer_act(L, i, res);
 		return true;
 	}
@@ -147,17 +147,17 @@ VPRIV bool a64_vir_chain_fold(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			continue;
 		if (!a64_vir_chain_info_get(L, b, c, &x) || x.first != i)
 			return false;
-		r = L->opr[i == c ? 1 : 0];
+		r = L->operand_registers[i == c ? 1 : 0];
 		if (r == VIR_REGISTER_NONE || a64_vir_register_is_float(r) || a64_vir_general_register(r) == R_X16 || a64_vir_general_register(r) == R_X17)
 			return false;
 		end = c + (x.kind == A64_VIR_CHAIN_MEM);
-		for (uint32_t q = L->ei; q < L->eend && L->o->edit[q].pos <= end; q++) {	/* (those before are at i or earlier) */
-			const vir_edit *d = &L->o->edit[q];
+		for (uint32_t q = L->edit_next; q < L->edit_end && L->allocation->edit[q].pos <= end; q++) {	/* (those before are at i or earlier) */
+			const vir_edit *d = &L->allocation->edit[q];
 
 			if (d->pos > i && !(d->pos <= c && (d->kind == VIR_EDIT_REMATERIALIZE || d->kind == VIR_EDIT_RELOAD) && d->dst != r))
 				return false;
 		}
-		L->xx = x, L->xfirst = i, L->xc = c, L->xreg = a64_vir_general_register(r);
+		L->xx = x, L->chain_first = i, L->chain_consumer = c, L->index_register = a64_vir_general_register(r);
 		if (i == c)
 			a64_vir_chain_consumer_act(L, i, res);
 		return true;

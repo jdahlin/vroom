@@ -14,41 +14,41 @@
  * VCC_VIR_VEC=n turns it off */
 VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre)
 {
-	ecx *e = S->e;
+	ecx *e = S->context;
 	virbuild_context *V = e->vw;
 	uint32_t from[6], to[6], n = 0;
 
-	for (uint32_t i = 0; i < S->nlb; i++)
-		for (uint32_t q = V->b[S->lb[i]].head; q; q = V->p[q].next)
-			if (!virbuild_vectorize_insn_is_skipped(V, q) && vir_opcode_table[V->p[q].in.op].effects & (VIR_EFFECT_C | VIR_EFFECT_A | VIR_EFFECT_T))
+	for (uint32_t i = 0; i < S->loop_block_count; i++)
+		for (uint32_t q = V->blocks[S->loop_blocks[i]].first_insn; q; q = V->insns[q].next)
+			if (!virbuild_vectorize_insn_is_skipped(V, q) && vir_opcode_table[V->insns[q].insn.op].effects & (VIR_EFFECT_C | VIR_EFFECT_A | VIR_EFFECT_T))
 				return;
-	for (uint32_t i = 0; i < S->nlb; i++)
-		for (uint32_t q = V->b[S->lb[i]].head; q; q = V->p[q].next) {
-			vir_insn in = V->p[q].in;
+	for (uint32_t i = 0; i < S->loop_block_count; i++)
+		for (uint32_t q = V->blocks[S->loop_blocks[i]].first_insn; q; q = V->insns[q].next) {
+			vir_insn in = V->insns[q].insn;
 			uint32_t m = 0;	/* the operands that may be pinned: bit 0 a, 1 b, 2 c */
 
-			if (q >= S->n0 || virbuild_vectorize_insn_is_skipped(V, q))
+			if (q >= S->value_count || virbuild_vectorize_insn_is_skipped(V, q))
 				continue;
 			switch (in.op) {
 			case VIR_OP_LOAD: case VIR_OP_PTRADD: m = 1; break;
 			case VIR_OP_STORE: m = (in.flags & VIR_INSN_FLAG_VOL) ? 0 : 3; break;
 			case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV: case VIR_OP_FCMP: m = 3; break;
 			case VIR_OP_FMA: m = 7; break;
-			case VIR_OP_SELECT: m = V->p[q].in.type == VIR_TYPE_F32 || V->p[q].in.type == VIR_TYPE_F64 ? 6 : 0; break;
+			case VIR_OP_SELECT: m = V->insns[q].insn.type == VIR_TYPE_F32 || V->insns[q].insn.type == VIR_TYPE_F64 ? 6 : 0; break;
 			case VIR_OP_ICMP: m = 2; break;
 			default: break;
 			}
 			if (in.op == VIR_OP_LOAD && (in.flags & VIR_INSN_FLAG_VOL))
 				m = 0;
 			for (int k = 0; k < 3; k++) {
-				uint32_t *w = k == 0 ? &V->p[q].in.a : k == 1 ? &V->p[q].in.b : &V->p[q].in.c, v, x = 0, j;
+				uint32_t *w = k == 0 ? &V->insns[q].insn.a : k == 1 ? &V->insns[q].insn.b : &V->insns[q].insn.c, v, x = 0, j;
 				vir_insn c;
 
 				if (!(m >> k & 1))
 					continue;
 				v = virbuild_value_resolve(V, *w);
-				c = V->p[v].in;
-				if (V->p[v].blk != VIRBUILD_BLOCK_NONE)
+				c = V->insns[v].insn;
+				if (V->insns[v].block != VIRBUILD_BLOCK_NONE)
 					continue;
 				if (c.op == VIR_OP_ICONST) {	/* (a compare's bound: add and sub take 12 bits, or 12 shifted by 12) */
 					uint64_t u = c.type == VIR_TYPE_I32 ? (uint64_t)(int64_t)(int32_t)c.b : (uint64_t)c.b | (uint64_t)c.c << 32;
@@ -77,7 +77,7 @@ VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre
 						x = virbuild_block_insn_append(e, pre, VIR_OP_BITCAST, VIR_TYPE_F64, 0, virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)((uint64_t)c.b | (uint64_t)c.c << 32)), 0, 0);
 					from[n] = v, to[n++] = x;
 				}
-				w = k == 0 ? &V->p[q].in.a : k == 1 ? &V->p[q].in.b : &V->p[q].in.c;	/* (V->p may have moved) */
+				w = k == 0 ? &V->insns[q].insn.a : k == 1 ? &V->insns[q].insn.b : &V->insns[q].insn.c;	/* (V->p may have moved) */
 				*w = to[j];
 			}
 		}

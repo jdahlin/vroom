@@ -10,8 +10,8 @@
  * scratch of the two compares that need one */
 VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t res)
 {
-	ecx *e = L->e;
-	vir_function *f = L->f;
+	ecx *e = L->context;
+	vir_function *f = L->function;
 	int vd = res == VIR_REGISTER_NONE ? 31 : a64_vir_vector_register(res);
 	/* two 64-bit lanes: the size bit of every lane-wise instruction used here */
 	uint32_t D = in->type == VIR_TYPE_F64X2 || in->type == VIR_TYPE_I64X2 || (in->op == VIR_OP_VREDUCE && f->insns[in->a].type == VIR_TYPE_I64X2) ? 0x00400000u : 0;
@@ -77,8 +77,8 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t 
 			return false;
 		a64_vir_fail(L, VIRBUILD_FAILURE(vector_select));
 	case VIR_OP_VSPLAT:
-		if (L->opr[0] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->opr[0]))
-			A64_VIR_VECTOR_WORD2(D ? 0x4e080400u : 0x4e040400u, a64_vir_vector_register(L->opr[0]), vd);	/* dup v.4s, v.s[0] (.2d, .d[0]) */
+		if (L->operand_registers[0] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->operand_registers[0]))
+			A64_VIR_VECTOR_WORD2(D ? 0x4e080400u : 0x4e040400u, a64_vir_vector_register(L->operand_registers[0]), vd);	/* dup v.4s, v.s[0] (.2d, .d[0]) */
 		else	/* (a constant: its bits, an fconst's too, through x16) */
 			A64_VIR_VECTOR_WORD2(D ? 0x4e080c00u : 0x4e040c00u, a64_vir_operand_general_register(L, 0, R_X16), vd);	/* dup v.4s, w (.2d, x) */
 		return true;
@@ -150,7 +150,7 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t 
 		uint32_t wide = in->type == VIR_TYPE_F64X2 || in->type == VIR_TYPE_I64X2;
 		uint32_t imm5 = (wide ? 8u : 4u) | (in->c << (wide ? 4 : 3));
 		int a = a64_vir_operand_float_register(L, 0);
-		bool fp = L->opr[1] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->opr[1]);
+		bool fp = L->operand_registers[1] != VIR_REGISTER_NONE && a64_vir_register_is_float(L->operand_registers[1]);
 		int b = fp ? a64_vir_operand_float_register(L, 1) : a64_vir_operand_general_register(L, 1, R_X16);
 		if (fp && b == vd && a != vd) {
 			A64_VIR_VECTOR_WORD3(0x4ea01c00u, b, b, 31);

@@ -17,57 +17,57 @@
 
 #define A64_VIR_OPERAND_MAX 512
 
-typedef struct a64_vir_argument { uint8_t reg; uint8_t size; int32_t stk; } a64_vir_argument;	/* reg VIR_REGISTER_NONE: at stk */
+typedef struct a64_vir_argument { uint8_t reg; uint8_t size; int32_t stack_offset; } a64_vir_argument;	/* reg VIR_REGISTER_NONE: at stk */
 
 typedef struct a64_vir_context {
-	ecx *e;
-	vir_function *f;
-	const vir_alloc_out *o;
-	int64_t *soff;		/* per VIR slot: its FRAME offset */
-	int64_t *spoff;		/* per spill slot */
-	uint32_t *lbl;		/* per block: its label */
-	uint32_t *chs;		/* per block: where a branch to it ends up (a64_vir_block_chase) */
-	uint32_t *ord, *opos;	/* the layout: the blocks in the order they are emitted, and each block's place in it (a64_vir_blocks_order) */
-	const vir_loops *lp;
-	uint32_t sp;		/* shrink-wrapping: the save point (vir_alloc_out.save_point), VIR_BLOCK_NONE none */
-	bool bare;		/* the code being emitted runs in front of it: returns without an epilogue */
+	ecx *context;
+	vir_function *function;
+	const vir_alloc_out *allocation;
+	int64_t *slot_offsets;		/* per VIR slot: its FRAME offset */
+	int64_t *spill_offsets;		/* per spill slot */
+	uint32_t *labels;		/* per block: its label */
+	uint32_t *chases;		/* per block: where a branch to it ends up (a64_vir_block_chase) */
+	uint32_t *order, *order_positions;	/* the layout: the blocks in the order they are emitted, and each block's place in it (a64_vir_blocks_order) */
+	const vir_loops *loops;
+	uint32_t save_point;		/* shrink-wrapping: the save point (vir_alloc_out.save_point), VIR_BLOCK_NONE none */
+	bool is_before_save_point;		/* the code being emitted runs in front of it: returns without an epilogue */
 	uint8_t *uses;
-	uint8_t *lo32;		/* per value: 1 if every use is a trunc or a ret32 return (only the low 32 bits are read) */
-	uint32_t retlbl;
-	uint32_t ov[A64_VIR_OPERAND_MAX];	/* the instruction's value operands (vir_operand_iterator order, no multi) */
-	uint8_t opr[A64_VIR_OPERAND_MAX];	/* ... and their registers */
-	uint32_t nop;
-	int fcc;		/* a compare's condition the next instruction reads from the flags, -1 none */
-	uint32_t fval;		/* ... that compare */
-	int fzr, fzx;		/* ... a test of register fzr (fzx: 64-bit) against 0 instead: cbz, cbnz (-1 none) */
-	int fbit;		/* ... of its bit fbit instead (fzr's register): tbz, tbnz (-1 none) */
-	uint32_t tlo, thi;	/* (tlo, thi): instructions folded into a branch (a64_vir_test_branch_fold) that emit nothing */
-	uint32_t cclo, cchi;	/* [cclo, cchi]: compares joined by and/or into one condition (cmp, ccmp ...); cchi 0 none */
-	int ccrun;		/* ... the condition the flags hold so far */
-	uint32_t pval;		/* a ptradd the next load or store addresses through (0 none) */
-	int pbase;		/* ... its base register */
-	int64_t poff;		/* ... and offset */
-	uint32_t xval;		/* a ptradd the next load or store addresses through as [base, index] (0 none) */
-	uint32_t xfirst, xc;	/* the chain a64_vir_chain_fold folds: its first instruction, its consumer (xc VIR_BLOCK_NONE none) */
+	uint8_t *low32;		/* per value: 1 if every use is a trunc or a ret32 return (only the low 32 bits are read) */
+	uint32_t return_label;
+	uint32_t operand_values[A64_VIR_OPERAND_MAX];	/* the instruction's value operands (vir_operand_iterator order, no multi) */
+	uint8_t operand_registers[A64_VIR_OPERAND_MAX];	/* ... and their registers */
+	uint32_t operand_count;
+	int flag_condition;		/* a compare's condition the next instruction reads from the flags, -1 none */
+	uint32_t flag_value;		/* ... that compare */
+	int zero_test_register, zero_test_is_64_bit;		/* ... a test of register fzr (fzx: 64-bit) against 0 instead: cbz, cbnz (-1 none) */
+	int test_bit;		/* ... of its bit fbit instead (fzr's register): tbz, tbnz (-1 none) */
+	uint32_t folded_low, folded_high;	/* (tlo, thi): instructions folded into a branch (a64_vir_test_branch_fold) that emit nothing */
+	uint32_t chain_low, chain_high;	/* [cclo, cchi]: compares joined by and/or into one condition (cmp, ccmp ...); cchi 0 none */
+	int chain_condition;		/* ... the condition the flags hold so far */
+	uint32_t pointer_value;		/* a ptradd the next load or store addresses through (0 none) */
+	int pointer_base;		/* ... its base register */
+	int64_t pointer_offset;		/* ... and offset */
+	uint32_t index_value;		/* a ptradd the next load or store addresses through as [base, index] (0 none) */
+	uint32_t chain_first, chain_consumer;	/* the chain a64_vir_chain_fold folds: its first instruction, its consumer (xc VIR_BLOCK_NONE none) */
 	struct a64_vir_chain { uint32_t first, xv; uint8_t kind, opt, sh; int64_t k; } xx;	/* ... a64_vir_chain_info_get's answer */
-	int xbase, xreg;	/* ... its base register, the index's */
-	uint8_t xopt, xsh;	/* ... the index's extension (2 uxtw, 3 lsl, 6 sxtw), scaled by the access size */
-	uint32_t ei, eend;	/* the block's edits: the next one, the end */
-	uint32_t eb;		/* ... the first */
-	bool risk;		/* x17 held data across a frame access: the frame must stay small */
+	int index_base, index_register;	/* ... its base register, the index's */
+	uint8_t index_extension, index_shift;	/* ... the index's extension (2 uxtw, 3 lsl, 6 sxtw), scaled by the access size */
+	uint32_t edit_next, edit_end;	/* the block's edits: the next one, the end */
+	uint32_t edit_first;		/* ... the first */
+	bool frame_is_at_risk;		/* x17 held data across a frame access: the frame must stay small */
 	bool tail;		/* a call right before a ret may be a sibling call (a64_vir_tail_call_reason) */
 	bool ret32;		/* the function returns a 32-bit integer: the upper half of x0 is unspecified */
-	int64_t fcs[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
+	int64_t callee_saved_float_offsets[8];		/* the FRAME offsets where d8-d15 are kept (those in o->callee[1]) */
 	uint32_t skip;		/* an instruction not to lower (the ret after a sibling call), 0 none */
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
 	int dup;		/* ... copies being lowered, one in another: vir_layout_duplicate */
 	bool fallok;		/* the code may fall through to the block after at (no edge moves follow) */
-	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
-	uint32_t ntr;
+	struct { uint32_t l, e, to; } edge_branches[1024];	/* moves of a branch's edges, after the block */
+	uint32_t edge_branch_count;
 	virbuild_lowering drv;	/* the shared driver's inputs (codegen/vir/lowering-driver.h) */
 } a64_vir_context;
 
-struct a64_vir_thread_state { int64_t *soff, *spoff; uint32_t *lbl, *chs, *path, *ord, *opos, *hl, *lbf; uint8_t *nf; uint32_t co, cop, chl, cnf, clf; uint8_t *uses, *lo32; uint32_t cs, csp, cl, cch, cpa, cu, c32; };
+struct a64_vir_thread_state { int64_t *slot_offsets, *spill_offsets; uint32_t *labels, *chases, *path, *order, *order_positions, *head_labels, *epilogue_labels; uint8_t *needs_fallthrough; uint32_t order_capacity, order_position_capacity, head_label_capacity, fallthrough_capacity, epilogue_label_capacity; uint8_t *uses, *low32; uint32_t slot_offset_capacity, spill_offset_capacity, label_capacity, chase_capacity, path_capacity, uses_capacity, low32_capacity; };
 
 static inline bool a64_vir_value_is_constant(const vir_function *f, uint32_t v) { return v && v < f->constant_count; }
 
@@ -127,13 +127,13 @@ static inline int a64_vir_vector_register(uint8_t r) { return r == VIR_REGISTER_
 
 static inline bool a64_vir_register_is_float(uint8_t r) { return r == VIR_REGISTER_SCRATCH1 || (r != VIR_REGISTER_SCRATCH0 && r < 128 && VIR_REGISTER_CLASS(r)); }
 
-static inline int a64_vir_slot_size_log2(const a64_vir_context *L, uint32_t s) { return L->o->slot_sizes[s] == 4 ? 2 : 3; }
+static inline int a64_vir_slot_size_log2(const a64_vir_context *L, uint32_t s) { return L->allocation->slot_sizes[s] == 4 ? 2 : 3; }
 
 /* a branch's condition: flags (r < 0) or register r against zero (cc EQ or NE) */
-typedef struct a64_vir_condition { int cc, r, x, bit; } a64_vir_condition;	/* bit >= 0: of r (tbz, tbnz) */
+typedef struct a64_vir_condition { int code, register_number, is_64_bit, bit; } a64_vir_condition;	/* bit >= 0: of r (tbz, tbnz) */
 
 /* a folded value: used once, by the next instruction, never in a slot */
-static inline bool a64_vir_value_is_folded(const a64_vir_context *L, uint32_t v) { return L->uses[v] == 1 && L->o->slot[v] == VIR_BLOCK_NONE; }
+static inline bool a64_vir_value_is_folded(const a64_vir_context *L, uint32_t v) { return L->uses[v] == 1 && L->allocation->slot[v] == VIR_BLOCK_NONE; }
 
 typedef struct a64_vir_chain a64_vir_chain;
 

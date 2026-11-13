@@ -49,7 +49,7 @@ static bool virbuild_pass_to_vir(ecx *e)
 	virbuild_context *V = e->vw;
 
 	if (!virbuild_function_to_vir(e))
-		virbuild_fail(e, V->why ? V->why : VIRBUILD_FAILURE(build_failed));
+		virbuild_fail(e, V->failure_reason ? V->failure_reason : VIRBUILD_FAILURE(build_failed));
 	return true;
 }
 
@@ -58,7 +58,7 @@ static bool virbuild_pass_canon(ecx *e)
 	virbuild_context *V = e->vw;
 
 	if (!vir_canon(&V->f))
-		virbuild_fail(e, V->why ? V->why : VIRBUILD_FAILURE(build_failed));
+		virbuild_fail(e, V->failure_reason ? V->failure_reason : VIRBUILD_FAILURE(build_failed));
 	return true;
 }
 
@@ -294,7 +294,7 @@ VPRIV bool virbuild_pass_step(ecx *e, const virbuild_pass *p)
 }
 
 /* per TU (keyed by its emitter, so emitimpl.h gains no field): counters per row, plus @build and @lower */
-typedef struct virbuild_pass_count { uint64_t runs, changed, ins, checked, changes; } virbuild_pass_count;
+typedef struct virbuild_pass_count { uint64_t runs, changed, instructions, checked, changes; } virbuild_pass_count;
 typedef struct virbuild_pass_tu { emitter *E; virbuild_pass_count c[VIRBUILD_PASS_COUNT + 2]; } virbuild_pass_tu;
 
 static pthread_mutex_t virbuild_pass_count_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -328,7 +328,7 @@ static void virbuild_pass_count_add(emitter *E, uint32_t row, bool ran, bool cha
 	if (t) {
 		t->c[row].runs += ran;
 		t->c[row].changed += changed;
-		t->c[row].ins += ins;
+		t->c[row].instructions += ins;
 		t->c[row].checked += checked;
 	}
 	pthread_mutex_unlock(&virbuild_pass_count_mutex);
@@ -432,7 +432,7 @@ VPRIV void virbuild_pass_stats_print(emitter *E)
 			else
 				snprintf(ch, sizeof ch, "%llu", (unsigned long long)c->changed);
 			fprintf(stderr, "vcc vir-pass: pass=%s runs=%llu changed=%s instructions=%llu", name,
-				(unsigned long long)c->runs, ch, (unsigned long long)c->ins);
+				(unsigned long long)c->runs, ch, (unsigned long long)c->instructions);
 			if (i < VIRBUILD_PASS_COUNT && virbuild_passes[i].vir)	/* the instructions it rewrote or removed (changed counts runs) */
 				fprintf(stderr, " changes=%llu", (unsigned long long)c->changes);
 			if (w->verify)

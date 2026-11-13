@@ -43,18 +43,18 @@ static uint32_t virbuild_call_word_load(ecx *e, int64_t off, uint32_t ty)
 	int64_t rel;
 	uint32_t slot = virbuild_slot_find(e, off, 8, &rel);
 
-	for (uint32_t i = V->nst; i-- > 0;)
-		if (V->st[i].slot == slot && V->st[i].off == off) {
-			uint32_t x = V->st[i].v;
+	for (uint32_t i = V->store_count; i-- > 0;)
+		if (V->stores[i].slot == slot && V->stores[i].offset == off) {
+			uint32_t x = V->stores[i].v;
 
-			if (V->st[i].size == 8 || (V->st[i].size == 4 && ty == VIR_TYPE_F32))
+			if (V->stores[i].size == 8 || (V->stores[i].size == 4 && ty == VIR_TYPE_F32))
 				return virbuild_value_convert(e, x, ty == VIR_TYPE_I64 && virbuild_value_type(e, x) == VIR_TYPE_PTR ? VIR_TYPE_PTR : ty);
 		}
-	V->sl[slot].loads++;
+	V->slots[slot].loads++;
 	{
 		uint32_t v = virbuild_insn_append(e, VIR_OP_LOAD, ty, virbuild_memory_flags_make(ty == VIR_TYPE_F32 ? 4 : 8, 8, false), virbuild_slot_address(e, slot, rel), 0, 0);
 
-		V->p[v].slot = slot + 1;
+		V->insns[v].slot_plus_one = slot + 1;
 		return v;
 	}
 }
@@ -63,22 +63,22 @@ static uint32_t virbuild_call_signature_make(ecx *e, const wkarg *a, int n, bool
 {
 	virbuild_context *V = e->vw;
 	cc *c = e->c;
-	uint32_t o = V->nx;
+	uint32_t o = V->extra_count;
 
-	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 3 + 2 * (uint32_t)n);
-	V->x[o] = VIR_SIGNATURE_HEADER((uint32_t)n, variadic);
+	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 3 + 2 * (uint32_t)n);
+	V->extra[o] = VIR_SIGNATURE_HEADER((uint32_t)n, variadic);
 	if (KIND(c, rt) == TY_VOID) {
-		V->x[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->x[o + 2] = 0;
+		V->extra[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->extra[o + 2] = 0;
 		*rpc = 0;
 	} else {
 		wkarg r;
 
 		virbuild_classify(e, rt, &r, false);
-		*rpc = virbuild_call_group_pack(&r, &V->x[o + 1]);
+		*rpc = virbuild_call_group_pack(&r, &V->extra[o + 1]);
 	}
 	for (int k = 0; k < n; k++)
-		virbuild_call_group_pack(&a[k], &V->x[o + 3 + 2 * k]);
-	V->nx += 3 + 2 * (uint32_t)n;
+		virbuild_call_group_pack(&a[k], &V->extra[o + 3 + 2 * k]);
+	V->extra_count += 3 + 2 * (uint32_t)n;
 	return o;
 }
 
@@ -102,15 +102,15 @@ VPRIV val virbuild_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bo
 		callee = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
 	}
 	sig = virbuild_call_signature_make(e, a, n, variadic, rt, &rpc);
-	o = V->nx;
-	VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 1 + (uint32_t)n);
-	V->nx += 1 + (uint32_t)n;
-	V->x[o] = (uint32_t)n;
+	o = V->extra_count;
+	VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 1 + (uint32_t)n);
+	V->extra_count += 1 + (uint32_t)n;
+	V->extra[o] = (uint32_t)n;
 	for (int k = 0; k < n; k++) {
 		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t x = virbuild_call_word_load(e, a[k].slot, virbuild_pass_class_type(pc));
 
-		w = &V->x[o + 1 + k];
+		w = &V->extra[o + 1 + k];
 		*w = x;
 	}
 	v = virbuild_insn_append(e, VIR_OP_CALL, rpc ? virbuild_pass_class_type(rpc) : VIR_TYPE_VOID, 0, callee, sig, o);
@@ -148,7 +148,7 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
 	if (variadic && !DARWIN(c))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_function));
-	uint32_t pv0 = V->np;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
+	uint32_t pv0 = V->insn_count;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
@@ -183,11 +183,11 @@ VPRIV void virbuild_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadi
 		}
 		virbuild_tfree(e, q);
 	}
-	V->nparam = (uint32_t)n;
+	V->parameter_count = (uint32_t)n;
 	{
 		uint32_t rpc;
 
-		V->fsig = virbuild_call_signature_make(e, a, n, variadic, e->wk->rty, &rpc);
+		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->wk->rty, &rpc);
 	}
 }
 
@@ -223,8 +223,8 @@ VPRIV void virbuild_ret(ecx *e, val *v, qty t, uint32_t lbl)
 				virbuild_tfree(e, q);
 			}
 		}
-		virbuild_variable_write(e, VIRBUILD_RESULT_VARIABLE, V->cur, x);
-		V->rty = virbuild_value_type(e, x);
+		virbuild_variable_write(e, VIRBUILD_RESULT_VARIABLE, V->current_block, x);
+		V->result_type = virbuild_value_type(e, x);
 	}
 	virbuild_branch_emit(e, virbuild_label_block(e, lbl));
 }
@@ -236,27 +236,27 @@ VPRIV void virbuild_begin(ecx *e, uint32_t s)
 	virbuild_context *V = virbuild_context_get(e);
 
 	(void)s;
-	V->np = 1;	/* (0 is no instruction) */
-	VIRBUILD_ARRAY_GROW(V->p, 0, V->cp, 1);
-	V->p[0] = (virbuild_preir_insn){ 0 };
-	V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
-	V->live[0] = V->live[1] = V->live[2] = 0;
-	V->flive = 0;
-	memset(V->fprod, 0, sizeof V->fprod);
-	V->hn = 0;
+	V->insn_count = 1;	/* (0 is no instruction) */
+	VIRBUILD_ARRAY_GROW(V->insns, 0, V->insn_capacity, 1);
+	V->insns[0] = (virbuild_preir_insn){ 0 };
+	V->block_count = V->extra_count = V->slot_count = V->active_slot_count = V->store_count = V->location_count = V->promoted_count = 0;
+	V->live_names[0] = V->live_names[1] = V->live_names[2] = 0;
+	V->live_float_names = 0;
+	memset(V->float_products, 0, sizeof V->float_products);
+	V->variable_entry_count = 0;
 	virbuild_variable_table_clear(V);
-	V->hcap = V->halloc < VIRBUILD_VARIABLE_TABLE_INITIAL ? V->halloc : VIRBUILD_VARIABLE_TABLE_INITIAL;
-	if (V->lhcap)
-		memset(V->lh, 0, V->lhcap * sizeof *V->lh);
-	V->lhcap = V->lhalloc < 256 ? V->lhalloc : 256;
-	if (V->labhi)	/* (only the labels the last function used) */
-		memset(V->lab, 0xff, V->labhi * sizeof *V->lab);
-	V->labhi = 0;
+	V->variable_entry_capacity = V->variable_entry_allocated < VIRBUILD_VARIABLE_TABLE_INITIAL ? V->variable_entry_allocated : VIRBUILD_VARIABLE_TABLE_INITIAL;
+	if (V->local_hash_capacity)
+		memset(V->local_hash, 0, V->local_hash_capacity * sizeof *V->local_hash);
+	V->local_hash_capacity = V->local_hash_allocated < 256 ? V->local_hash_allocated : 256;
+	if (V->label_high)	/* (only the labels the last function used) */
+		memset(V->labels, 0xff, V->label_high * sizeof *V->labels);
+	V->label_high = 0;
 	V->sealing = false;
-	V->why = NULL;	/* (one function's reason is not the next one's) */
-	V->rty = VIR_TYPE_VOID;
-	V->nparam = 0;
-	V->cur = virbuild_block_new(e);
+	V->failure_reason = NULL;	/* (one function's reason is not the next one's) */
+	V->result_type = VIR_TYPE_VOID;
+	V->parameter_count = 0;
+	V->current_block = virbuild_block_new(e);
 	e->ndl = 0;
 }
 
@@ -266,22 +266,22 @@ VPRIV void virbuild_finish(ecx *e, uint32_t s)
 
 	(void)s;
 	{	/* the return block: ret, with the result if there is one */
-		uint32_t w0 = V->x[V->fsig + 1], rty = VIR_GROUP_KIND(w0) == VIR_GROUP_REG ? virbuild_pass_class_type(VIR_GROUP_CLASS(w0, 0)) : VIR_TYPE_VOID;
+		uint32_t w0 = V->extra[V->function_signature + 1], rty = VIR_GROUP_KIND(w0) == VIR_GROUP_REG ? virbuild_pass_class_type(VIR_GROUP_CLASS(w0, 0)) : VIR_TYPE_VOID;
 		uint32_t o, rv;
 
-		if (rty == VIR_TYPE_I64 && V->rty == VIR_TYPE_PTR)
+		if (rty == VIR_TYPE_I64 && V->result_type == VIR_TYPE_PTR)
 			rty = VIR_TYPE_PTR;
-		rv = rty != VIR_TYPE_VOID ? virbuild_value_convert(e, virbuild_variable_read(e, VIRBUILD_RESULT_VARIABLE, V->cur, rty), rty) : 0;
-		o = V->nx;
+		rv = rty != VIR_TYPE_VOID ? virbuild_value_convert(e, virbuild_variable_read(e, VIRBUILD_RESULT_VARIABLE, V->current_block, rty), rty) : 0;
+		o = V->extra_count;
 
-		VIRBUILD_ARRAY_GROW(V->x, V->nx, V->cx, 2);
-		V->x[V->nx++] = rv ? 1 : 0;
+		VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 2);
+		V->extra[V->extra_count++] = rv ? 1 : 0;
 		if (rv)
-			V->x[V->nx++] = rv;
-		V->b[V->cur].term = virbuild_preir_insn_add(e, VIR_OP_RET, VIR_TYPE_VOID, 0, 0, 0, o, V->cur);
+			V->extra[V->extra_count++] = rv;
+		V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_RET, VIR_TYPE_VOID, 0, 0, 0, o, V->current_block);
 	}
 	if (!virbuild_function_emit(e))
-		virbuild_fail(e, V->why ? V->why : VIRBUILD_FAILURE(build_failed));
+		virbuild_fail(e, V->failure_reason ? V->failure_reason : VIRBUILD_FAILURE(build_failed));
 }
 
 VPRIV void virbuild_ecx_free(ecx *e)
@@ -290,9 +290,9 @@ VPRIV void virbuild_ecx_free(ecx *e)
 
 	if (!V)
 		return;
-	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
-	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
-	free(V->xslot), free(V->xspill), free(V->xlabel), free(V->xuses), free(V->xedgelab);
+	free(V->insns), free(V->blocks), free(V->extra), free(V->variable_entries), free(V->local_hash), free(V->forward), free(V->labels), free(V->slots), free(V->active_slots);
+	free(V->stores), free(V->locations), free(V->variable_types), free(V->variable_is_signed), free(V->predecessors), free(V->value_map), free(V->block_order), free(V->block_map);
+	free(V->lowering_slots), free(V->lowering_spills), free(V->lowering_labels), free(V->lowering_uses), free(V->lowering_edge_labels);
 	free(V);
 	e->vw = NULL;
 }

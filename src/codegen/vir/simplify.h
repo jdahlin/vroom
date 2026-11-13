@@ -15,25 +15,25 @@
  * address and type).  Constants are numbered first: the walker makes one per use.  What
  * nothing uses any more goes at the end. */
 
-typedef struct virbuild_value_entry { uint32_t op, ty, fl, a, b, c, gen, v; } virbuild_value_entry;	/* (key) -> value */
+typedef struct virbuild_value_entry { uint32_t opcode, type, flags, a, b, c, generation, value; } virbuild_value_entry;	/* (key) -> value */
 
 typedef struct virbuild_simplify_state {
-	uint32_t *cnt, n0;	/* uses per value; values from n0 on are the pass's constants */
-	virbuild_value_entry *ht; uint32_t hmask;	/* pure instructions and loads of the dominators, by content */
-	uint32_t *log, nlog;	/* ... the entries added, in order (undone leaving a block) */
-	uint32_t *kt, kmask, ncst, nk;	/* constants: value + 1 */
-	uint32_t memgen, gens, *egen;	/* the memory state loads are keyed by; per block at its end */
-	uint32_t blk;		/* the block pure instructions are keyed by: one kept live into other
+	uint32_t *use_counts, constant_start;	/* uses per value; values from n0 on are the pass's constants */
+	virbuild_value_entry *value_table; uint32_t value_table_mask;	/* pure instructions and loads of the dominators, by content */
+	uint32_t *table_log, table_log_count;	/* ... the entries added, in order (undone leaving a block) */
+	uint32_t *constant_table, constant_table_mask, constant_count, constant_entry_count;	/* constants: value + 1 */
+	uint32_t memory_generation, block_generations, *end_generations;	/* the memory state loads are keyed by; per block at its end */
+	uint32_t block;		/* the block pure instructions are keyed by: one kept live into other
 				 * blocks costs a register more often than it saves an instruction */
-	uint32_t *idom, *dkid, *dnext;	/* the dominator tree */
-	uint32_t undef[VIR_TYPE_COUNT];
+	uint32_t *immediate_dominators, *dominator_first_child, *dominator_next_sibling;	/* the dominator tree */
+	uint32_t undefined_values[VIR_TYPE_COUNT];
 	/* loads across blocks (virbuild_far_load_find): positions in reverse postorder, what may write, the loops */
-	uint32_t *seq;		/* per value below n0: its position (0: none) */
-	uint32_t *wr, nwr;	/* the instructions that may write memory, by position */
-	uint32_t *ri, *bend;	/* per block: its reverse-postorder index; the position of its end */
-	uint32_t *linner;	/* per index: its innermost loop, VIRBUILD_BLOCK_NONE none */
-	uint32_t *lstart, *lend, *lpar;	/* per loop: first and last index, the loop round it */
-	uint8_t *lmerged;	/* ... made of retreating edges to different blocks */
+	uint32_t *positions;		/* per value below n0: its position (0: none) */
+	uint32_t *writers, writer_count;	/* the instructions that may write memory, by position */
+	uint32_t *reverse_postorder_index, *block_end_positions;	/* per block: its reverse-postorder index; the position of its end */
+	uint32_t *loop_innermost;	/* per index: its innermost loop, VIRBUILD_BLOCK_NONE none */
+	uint32_t *loop_start, *loop_end, *loop_parent;	/* per loop: first and last index, the loop round it */
+	uint8_t *loop_is_merged;	/* ... made of retreating edges to different blocks */
 } virbuild_simplify_state;
 
 typedef struct virbuild_address { uint32_t base; bool slot; int64_t off; } virbuild_address;

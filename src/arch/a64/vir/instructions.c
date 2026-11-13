@@ -4,15 +4,15 @@
 
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_t res)
 {
-	ecx *e = L->e;
-	vir_function *f = L->f;
+	ecx *e = L->context;
+	vir_function *f = L->function;
 	const vir_insn *in = &f->insns[i];
 	int x = in->type == VIR_TYPE_I64 || in->type == VIR_TYPE_PTR;
 	int rd = res == VIR_REGISTER_NONE || a64_vir_register_is_float(res) ? R_X16 : a64_vir_general_register(res);
 	int vd = res == VIR_REGISTER_NONE || !a64_vir_register_is_float(res) ? 31 : a64_vir_vector_register(res);
 	int d = in->type == VIR_TYPE_F64;
 
-	if (i > L->tlo && i < L->thi)
+	if (i > L->folded_low && i < L->folded_high)
 		return;	/* (a64_vir_test_branch_fold: in the branch's test) */
 	if (a64_vir_vector_lower(L, in, res))
 		return;
@@ -25,10 +25,10 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			return;
 		__attribute__((fallthrough));
 	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR: {
-		if (L->cchi && i > L->cclo && i <= L->cchi) {	/* a chain's and/or: the flags hold it */
-			if (i == L->cchi) {
-				L->fcc = L->ccrun, L->fval = i, L->fzr = -1, L->fbit = -1;
-				L->cchi = 0;
+		if (L->chain_high && i > L->chain_low && i <= L->chain_high) {	/* a chain's and/or: the flags hold it */
+			if (i == L->chain_high) {
+				L->flag_condition = L->chain_condition, L->flag_value = i, L->zero_test_register = -1, L->test_bit = -1;
+				L->chain_high = 0;
 			}
 			return;
 		}
@@ -42,7 +42,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 					      [VIR_OP_XOR] = I_EORI, [VIR_OP_PTRADD] = I_ADDI };
 		int a = a64_vir_operand_general_register(L, 0, R_X16);
 
-		if (L->opr[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b))
+		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b))
 			opi(e, ri[in->op], x, rd, a, in->op == VIR_OP_AND || in->op == VIR_OP_OR || in->op == VIR_OP_XOR ?
 				(int64_t)a64_vir_constant_logical_immediate(&f->insns[in->b]) : a64_vir_constant_integer(&f->insns[in->b]));
 		else
@@ -55,7 +55,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 	case VIR_OP_MUL:
 		if (a64_vir_chain_fold(L, b, i, res))
 			return;
-		if (L->opr[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b) && a64_vir_constant_log2(&f->insns[in->b]) >= 0) {
+		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b) && a64_vir_constant_log2(&f->insns[in->b]) >= 0) {
 			int w = x ? 64 : 32, k = a64_vir_constant_log2(&f->insns[in->b]);
 
 			opbf(e, I_UBFM, x, rd, a64_vir_operand_general_register(L, 0, R_X16), (w - k) & (w - 1), w - 1 - k);
@@ -82,7 +82,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			return;
 		int a = a64_vir_operand_general_register(L, 0, R_X16), w = x ? 64 : 32;
 
-		if (L->opr[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b)) {
+		if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b)) {
 			int s = (int)(a64_vir_constant_integer(&f->insns[in->b]) & (w - 1));
 
 			if (in->op == VIR_OP_SHL)
@@ -124,9 +124,9 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			return;
 		int w = VIR_INSN_FLAG_WIDTH_LOG2(in->flags), a = a64_vir_operand_general_register(L, 0, R_X16);
 
-		if (w == 3 || (w == 2 && (!x || L->lo32[i])))
+		if (w == 3 || (w == 2 && (!x || L->low32[i])))
 			mov(e, 1, rd, a);	/* (ext.4 whose low half alone is read: a copy) */
-		else if ((in->flags & VIR_INSN_FLAG_MS) && L->lo32[i])	/* only its low half is read: the i32 form */
+		else if ((in->flags & VIR_INSN_FLAG_MS) && L->low32[i])	/* only its low half is read: the i32 form */
 			opbf(e, I_SBFM, 0, rd, a, 0, w == 2 ? 31 : (8 << w) - 1);
 		else if (in->flags & VIR_INSN_FLAG_MS)
 			opbf(e, I_SBFM, x, rd, a, 0, (8 << w) - 1);
@@ -145,21 +145,21 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 	case VIR_OP_FCMP: {
 		int cc;
 
-		if (in->op == VIR_OP_ICMP && L->cchi && i > L->cclo && i < L->cchi) {
+		if (in->op == VIR_OP_ICMP && L->chain_high && i > L->chain_low && i < L->chain_high) {
 			a64_vir_compare_chained_lower(L, in, f->insns[i + 1].op == VIR_OP_OR);
 			return;
 		}
-		if (in->op == VIR_OP_ICMP && !L->cchi && a64_vir_compare_chain_lower(L, b, i)) {
-			L->ccrun = a64_vir_integer_condition_codes[a64_vir_integer_compare_lower(L, in)];
+		if (in->op == VIR_OP_ICMP && !L->chain_high && a64_vir_compare_chain_lower(L, b, i)) {
+			L->chain_condition = a64_vir_integer_condition_codes[a64_vir_integer_compare_lower(L, in)];
 			return;
 		}
-		bool fuse = L->uses[i] == 1 && L->o->slot[i] == VIR_BLOCK_NONE && i + 1 < f->blocks[b].first + f->blocks[b].insn_count &&
+		bool fuse = L->uses[i] == 1 && L->allocation->slot[i] == VIR_BLOCK_NONE && i + 1 < f->blocks[b].first + f->blocks[b].insn_count &&
 			    (f->insns[i + 1].op == VIR_OP_BRIF || f->insns[i + 1].op == VIR_OP_SELECT) && f->insns[i + 1].a == i;
 
 		/* against 0 for a branch: x == 0, x != 0, x <=u 0, x >u 0 as cbz, cbnz; x < 0, x >= 0 as
 		 * tbnz, tbz of the sign bit; x <= -1, x > -1 too (when no edit in between writes x) */
-		if (fuse && in->op == VIR_OP_ICMP && f->insns[i + 1].op == VIR_OP_BRIF && L->opr[0] != VIR_REGISTER_NONE &&
-		    L->opr[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b) && a64_vir_register_is_kept(L, L->opr[0], i + 1)) {
+		if (fuse && in->op == VIR_OP_ICMP && f->insns[i + 1].op == VIR_OP_BRIF && L->operand_registers[0] != VIR_REGISTER_NONE &&
+		    L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(f, in->b) && a64_vir_register_is_kept(L, L->operand_registers[0], i + 1)) {
 			int64_t k = a64_vir_constant_integer(&f->insns[in->b]);
 			int c = in->flags & 15, cz = -1, cb = -1;
 
@@ -168,11 +168,11 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 			else if (k == -1)
 				cb = c == 3 ? C_NE : c == 4 ? C_EQ : -1;
 			if (cz >= 0 || cb >= 0) {
-				L->fcc = cz >= 0 ? cz : cb;
-				L->fval = i;
-				L->fzr = a64_vir_general_register(L->opr[0]);
-				L->fzx = a64_vir_value_is_64_bit(f, in->a);
-				L->fbit = cb >= 0 ? (L->fzx ? 63 : 31) : -1;
+				L->flag_condition = cz >= 0 ? cz : cb;
+				L->flag_value = i;
+				L->zero_test_register = a64_vir_general_register(L->operand_registers[0]);
+				L->zero_test_is_64_bit = a64_vir_value_is_64_bit(f, in->a);
+				L->test_bit = cb >= 0 ? (L->zero_test_is_64_bit ? 63 : 31) : -1;
 				return;
 			}
 		}
@@ -184,9 +184,9 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		}
 		/* used once, by the next instruction as its condition: that reads the flags */
 		if (cc >= 0 && fuse) {
-			L->fcc = cc;
-			L->fval = i;
-			L->fzr = -1, L->fbit = -1;
+			L->flag_condition = cc;
+			L->flag_value = i;
+			L->zero_test_register = -1, L->test_bit = -1;
 			return;
 		}
 		if (res == VIR_REGISTER_NONE)
@@ -291,9 +291,9 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		return;
 	}
 	case VIR_OP_BR: {
-		uint32_t g = L->o->edge_indices[L->o->slot_offsets[b]], t = a64_vir_block_chase(L, in->a);
+		uint32_t g = L->allocation->edge_indices[L->allocation->slot_offsets[b]], t = a64_vir_block_chase(L, in->a);
 
-		if (g != VIR_BLOCK_NONE && L->o->edge[g].count)
+		if (g != VIR_BLOCK_NONE && L->allocation->edge[g].count)
 			a64_vir_edge_moves_emit(L, g);
 		a64_vir_goto_emit(L, b, t);
 		return;
@@ -334,7 +334,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		e->reach = false;
 		return;
 	default: {
-		snprintf(L->e->vw->detail, sizeof L->e->vw->detail, "%s", vir_opcode_table[in->op].name ? vir_opcode_table[in->op].name : "?");
+		snprintf(L->context->vw->failure_detail, sizeof L->context->vw->failure_detail, "%s", vir_opcode_table[in->op].name ? vir_opcode_table[in->op].name : "?");
 		a64_vir_fail(L, VIRBUILD_FAILURE(unsupported_instruction));
 	}
 	}

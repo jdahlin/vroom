@@ -8,19 +8,19 @@
 
 VPRIV void virbuild_use_count_increment(virbuild_context *V, virbuild_simplify_state *S, uint32_t v)
 {
-	if (v < S->n0 && V->p[v].blk != VIRBUILD_BLOCK_NONE)
-		S->cnt[v]++;
+	if (v < S->constant_start && V->insns[v].block != VIRBUILD_BLOCK_NONE)
+		S->use_counts[v]++;
 }
 
 VPRIV void virbuild_use_count_decrement(virbuild_context *V, virbuild_simplify_state *S, uint32_t v)
 {
-	if (v < S->n0 && V->p[v].blk != VIRBUILD_BLOCK_NONE && S->cnt[v])
-		S->cnt[v]--;
+	if (v < S->constant_start && V->insns[v].block != VIRBUILD_BLOCK_NONE && S->use_counts[v])
+		S->use_counts[v]--;
 }
 
 VPRIV bool virbuild_value_integer_constant(const virbuild_context *V, uint32_t v, int64_t *k)
 {
-	const vir_insn *in = &V->p[v].in;
+	const vir_insn *in = &V->insns[v].insn;
 
 	if (in->op != VIR_OP_ICONST)
 		return false;
@@ -31,7 +31,7 @@ VPRIV bool virbuild_value_integer_constant(const virbuild_context *V, uint32_t v
 /* bytes v is zero-extended from (its type's size: nothing known) */
 static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V, uint32_t v)
 {
-	const vir_insn *in = &V->p[v].in;
+	const vir_insn *in = &V->insns[v].insn;
 	uint32_t sz = vir_type_size(in->type);
 	int64_t k;
 
@@ -54,7 +54,7 @@ static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V, ui
 /* bytes v is sign-extended from */
 static uint32_t virbuild_value_sign_extended_bytes(const virbuild_context *V, uint32_t v)
 {
-	const vir_insn *in = &V->p[v].in;
+	const vir_insn *in = &V->insns[v].insn;
 	uint32_t sz = vir_type_size(in->type), z;
 
 	if ((in->op == VIR_OP_LOAD || in->op == VIR_OP_EXT) && (in->flags & VIR_INSN_FLAG_MS))
@@ -65,37 +65,37 @@ static uint32_t virbuild_value_sign_extended_bytes(const virbuild_context *V, ui
 
 VPRIV uint32_t virbuild_simplify_undefined_value(ecx *e, virbuild_simplify_state *S, uint32_t ty)
 {
-	if (!S->undef[ty])
-		S->undef[ty] = virbuild_undefined_value(e, ty);
-	return S->undef[ty];
+	if (!S->undefined_values[ty])
+		S->undefined_values[ty] = virbuild_undefined_value(e, ty);
+	return S->undefined_values[ty];
 }
 
 /* q rewritten in place (true), or the value that replaces it in *r */
 VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q, uint32_t *r)
 {
 	virbuild_context *V = e->vw;
-	vir_insn in = V->p[q].in;
+	vir_insn in = V->insns[q].insn;
 	int64_t k, k2;
 
 	*r = q;
 	if (virbuild_opcode_is_commutative(in.op) && virbuild_value_integer_constant(V, in.a, &k) && !virbuild_value_integer_constant(V, in.b, &k2)) {
-		V->p[q].in.a = in.b, V->p[q].in.b = in.a;	/* the constant second (an immediate) */
-		in = V->p[q].in;
+		V->insns[q].insn.a = in.b, V->insns[q].insn.b = in.a;	/* the constant second (an immediate) */
+		in = V->insns[q].insn;
 	}
 	switch (in.op) {
 	case VIR_OP_I2P: case VIR_OP_P2I:	/* a pointer and its address as an integer are the same bits */
-		if (V->p[in.a].in.op == (in.op == VIR_OP_I2P ? VIR_OP_P2I : VIR_OP_I2P))
-			*r = V->p[in.a].in.a;
+		if (V->insns[in.a].insn.op == (in.op == VIR_OP_I2P ? VIR_OP_P2I : VIR_OP_I2P))
+			*r = V->insns[in.a].insn.a;
 		return false;
 	case VIR_OP_STORE: {	/* only the low bytes go to memory: not their extension, nor a truncation to more */
-		vir_insn xi = V->p[in.b].in;
+		vir_insn xi = V->insns[in.b].insn;
 
 		if (virbuild_promote_store_is_dead(V, q))
 			return false;	/* (it goes: its operands are not counted) */
-		if (V->p[in.b].blk != VIRBUILD_BLOCK_NONE && ((xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= VIR_INSN_FLAG_WIDTH_LOG2(in.flags)) ||
+		if (V->insns[in.b].block != VIRBUILD_BLOCK_NONE && ((xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= VIR_INSN_FLAG_WIDTH_LOG2(in.flags)) ||
 						   (xi.op == VIR_OP_TRUNC && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) <= 2))) {
 			virbuild_use_count_decrement(V, S, in.b), virbuild_use_count_increment(V, S, xi.a);
-			V->p[q].in.b = xi.a;
+			V->insns[q].insn.b = xi.a;
 			return true;
 		}
 		return false;
@@ -103,7 +103,7 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 	case VIR_OP_EXT: {
 		uint32_t x = in.a, K = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags), ts = vir_type_size(in.type);
 		bool s = in.flags & VIR_INSN_FLAG_MS;
-		vir_insn xi = V->p[x].in;
+		vir_insn xi = V->insns[x].insn;
 		uint32_t xs = vir_type_size(xi.type);
 
 		if (virbuild_value_integer_constant(V, x, &k)) {
@@ -128,31 +128,31 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 			*r = x;
 			return false;
 		}
-		if (xi.op == VIR_OP_EXT && vir_type_size(V->p[xi.a].in.type) <= ts) {
+		if (xi.op == VIR_OP_EXT && vir_type_size(V->insns[xi.a].insn.type) <= ts) {
 			uint32_t M = 1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags);
 
 			if (K <= M) {	/* the low K bytes of x are y's */
 				virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
-				V->p[q].in.a = xi.a;
+				V->insns[q].insn.a = xi.a;
 				return true;
 			}
 			if (s == !!(xi.flags & VIR_INSN_FLAG_MS) || !(xi.flags & VIR_INSN_FLAG_MS)) {	/* x's extension is q's */
 				virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
-				V->p[q].in.a = xi.a;
-				V->p[q].in.flags = xi.flags;
+				V->insns[q].insn.a = xi.a;
+				V->insns[q].insn.flags = xi.flags;
 				return true;
 			}
 		}
 		/* a load only q reads: the load extends */
-		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) == K) {
-			V->p[x].in.type = (uint8_t)in.type;
-			V->p[x].in.flags = (uint16_t)((xi.flags & ~VIR_INSN_FLAG_MS) | (s ? VIR_INSN_FLAG_MS : 0));
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) == K) {
+			V->insns[x].insn.type = (uint8_t)in.type;
+			V->insns[x].insn.flags = (uint16_t)((xi.flags & ~VIR_INSN_FLAG_MS) | (s ? VIR_INSN_FLAG_MS : 0));
 			*r = x;
 			return false;
 		}
-		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) < K &&
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && (1u << VIR_INSN_FLAG_WIDTH_LOG2(xi.flags)) < K &&
 		    (s ? virbuild_value_sign_extended_bytes(V, x) <= K : virbuild_value_zero_extended_bytes(V, x) <= K)) {
-			V->p[x].in.type = (uint8_t)in.type;
+			V->insns[x].insn.type = (uint8_t)in.type;
 			*r = x;
 			return false;
 		}
@@ -160,30 +160,30 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 	}
 	case VIR_OP_TRUNC: {
 		uint32_t x = in.a;
-		vir_insn xi = V->p[x].in;
+		vir_insn xi = V->insns[x].insn;
 
 		if (virbuild_value_integer_constant(V, x, &k)) {
 			*r = virbuild_constant_integer(e, VIR_TYPE_I32, (int64_t)(uint32_t)k);
 			return false;
 		}
-		if (xi.op == VIR_OP_EXT && V->p[xi.a].in.type == VIR_TYPE_I32 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {
+		if (xi.op == VIR_OP_EXT && V->insns[xi.a].insn.type == VIR_TYPE_I32 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {
 			*r = xi.a;
 			return false;
 		}
-		if (xi.op == VIR_OP_EXT && V->p[xi.a].in.type == VIR_TYPE_I32) {	/* a narrower extension, in i32 */
+		if (xi.op == VIR_OP_EXT && V->insns[xi.a].insn.type == VIR_TYPE_I32) {	/* a narrower extension, in i32 */
 			virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
-			V->p[q].in = (vir_insn){ VIR_OP_EXT, VIR_TYPE_I32, xi.flags, xi.a, 0, 0 };
+			V->insns[q].insn = (vir_insn){ VIR_OP_EXT, VIR_TYPE_I32, xi.flags, xi.a, 0, 0 };
 			return true;
 		}
 		if (xi.op == VIR_OP_EXT && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) >= 2) {	/* trunc of a widening of the low half */
 			virbuild_use_count_decrement(V, S, x), virbuild_use_count_increment(V, S, xi.a);
-			V->p[q].in.a = xi.a;
+			V->insns[q].insn.a = xi.a;
 			return true;
 		}
-		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->cnt[x] == 1 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) <= 2) {
-			V->p[x].in.type = VIR_TYPE_I32;
+		if (xi.op == VIR_OP_LOAD && !(xi.flags & VIR_INSN_FLAG_VOL) && S->use_counts[x] == 1 && VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) <= 2) {
+			V->insns[x].insn.type = VIR_TYPE_I32;
 			if (VIR_INSN_FLAG_WIDTH_LOG2(xi.flags) == 2)
-				V->p[x].in.flags &= (uint16_t)~VIR_INSN_FLAG_MS;
+				V->insns[x].insn.flags &= (uint16_t)~VIR_INSN_FLAG_MS;
 			*r = x;
 			return false;
 		}
@@ -191,7 +191,7 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 	}
 	case VIR_OP_S2F: case VIR_OP_U2F:	/* a constant converted: the constant (to nearest, as the instruction) */
 		if (virbuild_value_integer_constant(V, in.a, &k)) {
-			bool w = V->p[in.a].in.type != VIR_TYPE_I32;
+			bool w = V->insns[in.a].insn.type != VIR_TYPE_I32;
 			double d = in.op == VIR_OP_S2F ? (w ? (double)k : (double)(int32_t)k) : (w ? (double)(uint64_t)k : (double)(uint32_t)k);
 			float f = in.op == VIR_OP_S2F ? (w ? (float)k : (float)(int32_t)k) : (w ? (float)(uint64_t)k : (float)(uint32_t)k);
 			uint64_t bits;
@@ -202,8 +202,8 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 		}
 		return false;
 	case VIR_OP_FEXT: case VIR_OP_FTRUNC:
-		if (V->p[in.a].in.op == VIR_OP_FCONST && V->p[in.a].blk == VIRBUILD_BLOCK_NONE) {
-			uint64_t bits = (uint64_t)V->p[in.a].in.b | (uint64_t)V->p[in.a].in.c << 32;
+		if (V->insns[in.a].insn.op == VIR_OP_FCONST && V->insns[in.a].block == VIRBUILD_BLOCK_NONE) {
+			uint64_t bits = (uint64_t)V->insns[in.a].insn.b | (uint64_t)V->insns[in.a].insn.c << 32;
 			uint32_t fb = (uint32_t)bits;
 			double d;
 			float f;
@@ -247,18 +247,18 @@ VPRIV bool virbuild_insn_simplify(ecx *e, virbuild_simplify_state *S, uint32_t q
 			*r = in.a;
 			return false;
 		}
-		if (V->p[in.a].in.op == VIR_OP_SLOTADDR && V->p[in.a].blk == VIRBUILD_BLOCK_NONE) {	/* $s+k2 + k: $s+(k2+k) */
-			vir_insn a = V->p[in.a].in;	/* (a copy: virbuild_constant_make can move V->p) */
+		if (V->insns[in.a].insn.op == VIR_OP_SLOTADDR && V->insns[in.a].block == VIRBUILD_BLOCK_NONE) {	/* $s+k2 + k: $s+(k2+k) */
+			vir_insn a = V->insns[in.a].insn;	/* (a copy: virbuild_constant_make can move V->p) */
 
 			k2 = (int64_t)((uint64_t)a.b | (uint64_t)a.c << 32) + k;
 			*r = virbuild_constant_make(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, a.a, (uint32_t)k2, (uint32_t)((uint64_t)k2 >> 32));
 			return false;
 		}
-		if (V->p[in.a].in.op == VIR_OP_PTRADD && V->p[in.a].blk != VIRBUILD_BLOCK_NONE && virbuild_value_integer_constant(V, V->p[in.a].in.b, &k2)) {
-			uint32_t y = V->p[in.a].in.a, c = virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
+		if (V->insns[in.a].insn.op == VIR_OP_PTRADD && V->insns[in.a].block != VIRBUILD_BLOCK_NONE && virbuild_value_integer_constant(V, V->insns[in.a].insn.b, &k2)) {
+			uint32_t y = V->insns[in.a].insn.a, c = virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)((uint64_t)k + (uint64_t)k2));
 
 			virbuild_use_count_decrement(V, S, in.a), virbuild_use_count_increment(V, S, y);
-			V->p[q].in.a = y, V->p[q].in.b = c;
+			V->insns[q].insn.a = y, V->insns[q].insn.b = c;
 			return true;
 		}
 		return false;

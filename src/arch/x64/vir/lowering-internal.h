@@ -10,20 +10,20 @@
 #include "vir/layout.h"
 
 typedef struct x64_vir_context {
-	ecx *e;
-	vir_function *f;
-	vir_alloc_out *o;
+	ecx *context;
+	vir_function *function;
+	vir_alloc_out *allocation;
 	int64_t *slot, *spill;
-	int gtmp;
-	uint32_t *label, *edgelab, ret, cmp, cmpblock, setrec;
+	int general_temporary;
+	uint32_t *label, *edge_labels, ret, compare_condition, compare_block, setcc_record;
 	uint8_t *uses;
-	const vir_loops *lp;
-	uint32_t *order,*position,*rotation,*chase,at;
-	unsigned dup;bool fallok,r10;
-	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
-	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
-	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
-	uint32_t testv; uint8_t testsize; int64_t testimm;
+	const vir_loops *loops;
+	uint32_t *order,*position,*rotations,*chase,block_current;
+	unsigned dup;bool may_fall_through,scratch_register10;
+	uint32_t memory_value, memory_skip, scaled_value, scaled_skip; int memory_base, memory_index, scaled_index; uint8_t memory_shift, scaled_shift; bool memory_is_indexed; int64_t memory_offset;
+	uint32_t big_endian_value; int big_endian_base,big_endian_index; uint8_t big_endian_shift,big_endian_width; bool big_endian_is_indexed; int64_t big_endian_offset;
+	uint32_t compare_memory_value; uint8_t compare_memory_size; bool compare_memory_side;
+	uint32_t test_value; uint8_t test_size; int64_t test_immediate;
 	virbuild_lowering drv;	/* the shared driver's inputs (codegen/vir/lowering-driver.h) */
 } x64_vir_context;
 

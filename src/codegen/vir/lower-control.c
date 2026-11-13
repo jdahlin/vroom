@@ -134,9 +134,9 @@ VPRIV void virbuild_label(ecx *e, uint32_t l)
 	uint32_t b = virbuild_label_block(e, l);
 
 	e->reach = true;
-	V->b[V->cur].term = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, b, 0, 0, V->cur);
-	V->cur = b;
-	V->nst = 0;
+	V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_BR, VIR_TYPE_VOID, 0, b, 0, 0, V->current_block);
+	V->current_block = b;
+	V->store_count = 0;
 	wk_ael_clear(e, UINT32_MAX);
 }
 

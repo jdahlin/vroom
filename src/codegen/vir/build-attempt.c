@@ -234,7 +234,7 @@ VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
 
 			bool ok;
 
-			V->detail[0] = 0;
+			V->failure_detail[0] = 0;
 			if (timed)
 				t0 = vperformance_now();
 			ok = X86(e->c) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
@@ -244,12 +244,12 @@ VPRIV bool virbuild_function_try(ecx *e, uint32_t s)
 				if (e->E->vstats)
 					e->E->vlowered++;
 				if (m & 8)
-					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->ao.statistics.spills);
+					fprintf(stderr, "vir: %s: lowered, %u spills\n", nm, V->allocation.statistics.spills);
 				return true;
 			}
-			virbuild_failure_note(e, s, why, VIRBUILD_FAILURE_lowering_failed, V->detail);
+			virbuild_failure_note(e, s, why, VIRBUILD_FAILURE_lowering_failed, V->failure_detail);
 			if (m & 8)
-				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->detail[0] ? ": " : "", V->detail);
+				fprintf(stderr, "vir: %s: not lowered: %s%s%s\n", nm, why, V->failure_detail[0] ? ": " : "", V->failure_detail);
 		} else if (!nerr && e->E->vstats)
 			e->E->vbuilt++;
 	}

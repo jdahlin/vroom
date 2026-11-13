@@ -8,30 +8,30 @@ enum { VIRBUILD_VECTORIZE_KIND_NONE, VIRBUILD_VECTORIZE_KIND_INV, VIRBUILD_VECTO
 enum { VIRBUILD_VECTORIZE_OBJECT_NONE, VIRBUILD_VECTORIZE_OBJECT_SYM, VIRBUILD_VECTORIZE_OBJECT_PTR };
 
 typedef struct virbuild_vectorize_info {
-	uint8_t kind, exact, objk;
-	uint8_t uns;		/* an i32 whose form is its unsigned value (zero-extends; a signed operation on it is not exact) */
-	uint16_t nuse;		/* uses by the loop's instructions and terminators */
-	int64_t c;		/* what one iteration adds */
-	uint32_t objv, bv;	/* the object addressed (a symbol ref, a pointer value); an invariant term */
-	int64_t bs, k;		/* ... its factor; the constant term */
-	uint32_t sce, scb, sc0, vec;	/* its value at entry (in VPRE), in the vector body or VPH, at t = 0 (in VPH), its lanes */
+	uint8_t kind, is_exact, has_object;
+	uint8_t is_unsigned;		/* an i32 whose form is its unsigned value (zero-extends; a signed operation on it is not exact) */
+	uint16_t use_count;		/* uses by the loop's instructions and terminators */
+	int64_t step;		/* what one iteration adds */
+	uint32_t object_value, term_value;	/* the object addressed (a symbol ref, a pointer value); an invariant term */
+	int64_t term_factor, constant;		/* ... its factor; the constant term */
+	uint32_t entry_value, body_value, first_lane_value, lanes;	/* its value at entry (in VPRE), in the vector body or VPH, at t = 0 (in VPH), its lanes */
 } virbuild_vectorize_info;
 
-typedef struct virbuild_vectorize_access { uint32_t q, pos; bool store; } virbuild_vectorize_access;
-typedef struct virbuild_vectorize_reduction { uint32_t p, upd, x, acc, accnext; } virbuild_vectorize_reduction;
+typedef struct virbuild_vectorize_access { uint32_t insn, position; bool store; } virbuild_vectorize_access;
+typedef struct virbuild_vectorize_reduction { uint32_t parameter, update, operand, accumulator, accumulator_next; } virbuild_vectorize_reduction;
 
 typedef struct virbuild_vectorize_state {
-	ecx *e;
-	virbuild_vectorize_info *I; uint32_t n0;			/* per value below n0 */
-	uint32_t *touch; uint32_t ntouch, ctouch;
-	uint8_t *inl;				/* per block: in the loop */
-	uint32_t lb[64], nlb;			/* the loop's blocks, H first */
-	uint32_t H, P, L, X, jP, jL;		/* header, entry predecessor, latch, exit; their slots in H's predecessors */
-	uint32_t VPRE, VPH, VB, VX, J;
-	virbuild_vectorize_access acc[64]; uint32_t nacc;
-	uint32_t gather[64], ngather;
-	uint32_t invld[64], ninvld;		/* loads taken as invariant */
-	virbuild_vectorize_reduction red[8]; uint32_t nred;
+	ecx *context;
+	virbuild_vectorize_info *infos; uint32_t value_count;			/* per value below n0 */
+	uint32_t *touched; uint32_t touched_count, touched_capacity;
+	uint8_t *in_loop;				/* per block: in the loop */
+	uint32_t loop_blocks[64], loop_block_count;			/* the loop's blocks, H first */
+	uint32_t header, predecessor, latch, exit, predecessor_index, latch_index;		/* header, entry predecessor, latch, exit; their slots in H's predecessors */
+	uint32_t preheader_block, vector_header_block, vector_body_block, vector_exit_block, join_block;
+	virbuild_vectorize_access accesses[64]; uint32_t access_count;
+	uint32_t gathers[64], gather_count;
+	uint32_t invariant_loads[64], invariant_load_count;		/* loads taken as invariant */
+	virbuild_vectorize_reduction reductions[8]; uint32_t reduction_count;
 	struct { uint32_t p, next, acc, last, cur; } fold[8]; uint32_t nfold;
 	struct { uint32_t p, next, par, last; bool busy; } carry[8]; uint32_t ncarry;
 	uint32_t ind[32], indb[32], indn[32], nind;	/* H's inductions; VB's parameter and its next value */

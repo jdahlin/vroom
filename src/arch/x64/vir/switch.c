@@ -32,17 +32,17 @@ VPRIV void x64_vir_constant_compare_emit(x64_vir_context *L, int reg, int size, 
 {
 	int64_t k = size == 4 ? (int64_t)(int32_t)value : (int64_t)value;
 	if (k == (int32_t)k)
-		x64_op3(L->e, X_CMPI, size, XNOREG, reg, XNOREG)->imm = k;
+		x64_op3(L->context, X_CMPI, size, XNOREG, reg, XNOREG)->imm = k;
 	else {
-		x64_movi(L->e, R11, k);
-		x64_op3(L->e, X_CMP, size, XNOREG, reg, R11);
+		x64_movi(L->context, R11, k);
+		x64_op3(L->context, X_CMP, size, XNOREG, reg, R11);
 	}
 }
 
 VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block, const vir_insn *in, int selector)
 {
-	ecx *e = L->e;
-	vir_function *f = L->f;
+	ecx *e = L->context;
+	vir_function *f = L->function;
 	bool wide = f->insns[in->a].type == VIR_TYPE_I64;
 	uint32_t size = wide ? 8 : 4, stride = wide ? 5 : 3, n = f->extra[in->c];
 	const uint32_t *cases = &f->extra[in->c+1];

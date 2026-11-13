@@ -21,7 +21,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 {
 	const vir_insn *i = &f->insns[v];
 	const x64_vir_context *target=ctx;
-	bool r10=target && target->r10;
+	bool r10=target && target->scratch_register10;
 	if (i->op == VIR_OP_PARAM) {
 		int stack;
 		x->result = x64_vir_argument_register(f, f->signature, i->a, &stack);
