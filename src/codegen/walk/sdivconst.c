@@ -1,3 +1,12 @@
+/*
+ * sdivconst.c: signed division or remainder by a constant as a multiply-high, shifts and a sign
+ * correction, for the walker: the code behind the recipe of opt/sdivconst.c.
+ *
+ * wk_sdivconst_ok says whether the target has the registers the sequence needs (the saved input and
+ * the magic constant are the peak, LO(nfree) >= extra); wk_sdivconst then builds the sequence through
+ * the lowering interface LO() (smulhi for 64 bits, a widened multiply for 32), so it is the same for
+ * every CPU and for VIR.  The caller checks _ok first and keeps operand evaluation order.
+ */
 #include "walk.h"
 
 /* The saved input and materialized magic are the peak two extra registers.

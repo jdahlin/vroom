@@ -1,3 +1,11 @@
+/*
+ * sdivpow2.c: signed division or remainder by a power of two for the walker: add a bias so that the
+ * shift rounds toward zero, as C requires (recipe: opt/sdivpow2.c).
+ *
+ * wk_sdivpow2 builds the sequence through LO(), so it is the same for every CPU and for VIR.  Every
+ * operation consumes its input register: the remainder case keeps a copy of the bias in a separate
+ * temporary.  d == 1 (shift 0) is handled without a bias.
+ */
 #include "walk.h"
 
 /* All operations consume their input register; retain a separate bias for %. */

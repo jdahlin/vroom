@@ -1,4 +1,14 @@
-/* vcc code generator: handing a finished function's text to the unit, symbol headers and constructor entries */
+/*
+ * function-output.c: hand a finished function's text to the unit, write an ELF symbol header
+ * (section, visibility, alignment, .type, the label), and the constructor/destructor table entries.
+ *
+ * out_chunk appends one finished chunk, keyed by the function's order key, under E->cmu: chunks
+ * come from any worker thread and are stitched in key order at the end, which is what makes the
+ * output independent of thread timing.  sym_header writes what clang writes before a function or
+ * object (an explicit section, -ffunction-sections/-fdata-sections, hidden/protected, .p2align,
+ * -fpatchable-function-entry nops on x86), as text or, in the direct object path, as an item
+ * (obj.c).  Called by the backends' function finishers and by data.c.
+ */
 #include "emitimpl.h"
 
 VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)

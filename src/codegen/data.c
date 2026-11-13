@@ -1,4 +1,17 @@
-/* vcc code generator: data: initialised objects and strings */
+/*
+ * data.c: emit one initialised or zero-initialised object (emit_object) or string literal
+ * (emit_string) into the unit's output.
+ *
+ * data_init walks a static initializer (the AST of `{ ... }`, strings, addresses, designators,
+ * bit-fields) into e->data, the bytes, and e->rel, the relocations (symbol address plus addend at an
+ * offset); a later initializer of the same element wins (rel_prep).  The bytes then go out as
+ * assembler directives in text mode, or as one data item of the object stream (data_item, obj.c) when
+ * -c writes the object directly.  Targets differ in the directives and in the section (Mach-O and
+ * thread-local layouts, wasm's one section per object); that is decided here, not in the arch
+ * directories.  Every symbol the initializer names is recorded with note_ref so that lazily emitted
+ * statics it points to get emitted too.  Errors (an object too large, a non-constant initializer)
+ * longjmp to e->bail and drop this object only.
+ */
 #include "emitimpl.h"
 #include "common/softfloat.h"
 

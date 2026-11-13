@@ -1,4 +1,10 @@
-/* Complement recognition after the usual integer conversions. */
+/*
+ * xor-not.c: x ^ -1 is ~x, after the usual integer conversions.
+ *
+ * em_xor_not(c, ty, op, rhs) is true when the operator is ^ and the constant, wrapped to the type
+ * (em_trunc_to), is all ones; 4- and 8-byte integers.  Used by the shared walker, arm64's arithmetic
+ * and wasm's emitter, which then emit the complement.
+ */
 #include "../emitimpl.h"
 
 VPRIV bool em_xor_not(cc *c, qty ty, int op, i128 rhs)

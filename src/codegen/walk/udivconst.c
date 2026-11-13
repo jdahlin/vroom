@@ -1,3 +1,12 @@
+/*
+ * udivconst.c: unsigned division or remainder by a constant as a multiply-high and shifts, with the
+ * correction step for large magic numbers, for the walker (recipe: opt/udivconst.c).
+ *
+ * wk_udivconst_ok says whether the target has the registers for the peak (a saved numerator and the
+ * magic constant); wk_udivconst builds the sequence through LO() (a widened product for 32 bits,
+ * LO(umulhi) for 64), so it is the same for every CPU and for VIR.  A divisor above 2^(W-1) is just a
+ * compare.  The caller checks _ok first and keeps operand evaluation order.
+ */
 #include "walk.h"
 
 /* During multiplication, a saved numerator and a materialized large magic

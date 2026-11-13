@@ -1,4 +1,11 @@
-/* vcc code generator: whether a symbol is reached through the GOT */
+/*
+ * symbol-access.c: sym_needs_got: whether code must reach a symbol through the GOT.
+ *
+ * The answer follows clang's rules per target: on Darwin every symbol that may live in a dylib; on
+ * Linux with -fPIC every preemptible symbol, with -fPIE the ones not defined here, hidden and
+ * protected ones never; weak undefined symbols everywhere.  A wrong answer is a wrong relocation, so
+ * change it against clang's output.  Called by the arm64 and x86-64 lowerings (x86-64's VIR path included).
+ */
 #include "emitimpl.h"
 
 VPRIV bool sym_needs_got(cc *c, uint32_t ref)
