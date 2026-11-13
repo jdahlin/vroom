@@ -1,4 +1,12 @@
-/* ld, nm and objcopy run in the server's own process. */
+/*
+ * tools.c: run the linker, nm and objcopy inside the server instead of as processes.
+ *
+ * ld_in_process calls ld_main (ELF, or Mach-O by the first input) with the request's cwd as a
+ * directory fd and a FILE on its stderr, so the link needs no fork.  ld_run adds --vroom-stubs and
+ * answers -v.  nm and objcopy keep state in globals, so objcopy_run_req runs them one at a time
+ * (under a task-aware mutex: a waiting job gives its core away).  Ownership: the fds and FILEs made
+ * here are closed here on every path; the request's own fds are not (the worker closes them).
+ */
 #include "vccd-internal.h"
 
 

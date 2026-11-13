@@ -1,4 +1,15 @@
-/* Toolchain probes: jobs answered from the capability table without compiling. */
+/*
+ * probe.c: recognise toolchain probes (cc_probe_kind) and answer them from the capability table
+ * without compiling anything (cc_probe).
+ *
+ * Kconfig and kbuild try dozens of options and snippets on every configuration; each answer is a
+ * function of the options (caps.c) or of the snippet read from stdin, so no process or compile is
+ * needed.  The kinds are described below.  The rule for recognising a probe is strict: anything that
+ * reads a real file or writes a real output is a real job, because answering a real compile
+ * with a probe's "yes" would produce no object.  A source that is not in the table is compiled for
+ * real (forwarded with the bytes already read).  Answers must stay what clang would say: the table's
+ * contents are what the kernel's configuration then enables.
+ */
 #include "vccd-internal.h"
 
 /*
