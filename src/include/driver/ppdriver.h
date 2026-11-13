@@ -1,3 +1,17 @@
+/*
+ * ppdriver.h: the compile job's interface: run one job from a clang command line (ppd_run), compare
+ * a token stream against a reference (ppd_compare), and the counters of a -c job's phases.
+ *
+ * The module (src/driver/, job.c is its entry) turns a clang command line into one job: -E, -S/-c
+ * (C or assembler), --cmp, --vcc-tokhash or --explain, and writes the output; it is the only thing
+ * vpp and vccd call to compile.  ppd_run is thread safe and touches no process state: the
+ * working directory, the environment and the file descriptors come in through ppd_env, so under vccd
+ * they are the client's.  It returns the exit status (0 ok, 1 failed, 2 usage) and reports on
+ * env->errfd.  The thread-local ppd_umask and ppd_conn are set by the caller (vccd's dispatcher and
+ * worker) before the call.  The phase totals are atomics summed over all jobs of the process; the
+ * vperf per-thread ones are for the thread that ran the job.  Depends on the preprocessor and the
+ * front end; the modules above it (server/, bin/) include only this header.
+ */
 #ifndef VCC_PPDRIVER_H
 #define VCC_PPDRIVER_H
 typedef struct ppd_env {

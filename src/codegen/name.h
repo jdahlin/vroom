@@ -1,3 +1,11 @@
+/*
+ * name.h: compare an interned identifier with a short literal without rescanning its spelling.
+ *
+ * Interning keeps the first 16 bytes of every name as padded words (common/intern.h), so em_ident_eq
+ * compares at most two words.  The literal's length must be a compile-time constant at the call site
+ * and at most 16: use it through the macro (EM_IDENT_IS), not with a runtime length.  Header only,
+ * included by emitimpl.h.
+ */
 #ifndef VCC_EMIT_NAME_H
 #define VCC_EMIT_NAME_H
 

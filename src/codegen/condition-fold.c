@@ -1,4 +1,14 @@
-/* vcc code generator: folding conditions from ranges and known facts */
+/*
+ * condition-fold.c: decide a condition at compile time from what the walker knows: ranges of integer
+ * variables, repeated pure operands, comparisons of a value with itself, floating-point facts.
+ *
+ * cond_fold(e, n) returns 1 or 0 when the condition n is that constant, -1 when unknown.  It must
+ * only answer when it is certain: the caller drops the code on the dead side, so a wrong answer
+ * silently deletes live code.  Only pure expressions are examined (no calls, volatile reads or
+ * atomics: same_pure, irange), within the limits of the types (trange).  Called by the shared walker
+ * (walk/expr.c) and by arm64's direct emitter (arch/a64/codegen/); it reads the unit's
+ * floating-point facts (E->ffacts) but changes nothing.
+ */
 #include "emitimpl.h"
 
 /* jump to l if n's truth == jump_if; returns the constant truth or -1 */

@@ -1,4 +1,12 @@
-/* vcc code generator: symbol bindings and which symbols are local variables */
+/*
+ * local-variables.c: the emitter's per-symbol binding table (binding) and the one definition of
+ * "this symbol is a local variable" (is_local_var).
+ *
+ * is_local_var is true for automatic and register variables, parameters, and block-scope symbols with
+ * no storage class that are not marked global; a static or extern local is not one, because it lives
+ * in the data section.  Every backend and optimizer asks it, so a change here changes what gets a
+ * register or a frame slot everywhere.
+ */
 #include "emitimpl.h"
 
 VPRIV bind *binding(ecx *e, uint32_t s)

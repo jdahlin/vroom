@@ -1,5 +1,14 @@
-/* Bounded integer-result switch tables. This examines only the switch being
- * emitted; it never rewrites the AST or creates an IR/function walk. */
+/*
+ * switch-values.c: turn a switch whose cases only produce integer constants (`case 1: return 5;`,
+ * `case 2: x = 7; break;`) into a table lookup, when the table is small and the proof is complete.
+ *
+ * em_switch_values_plan examines the one switch being emitted, with a budget of 64 cases, and fills a
+ * recipe or says no; nothing in the AST is rewritten and no IR is built.  A plan that is accepted is
+ * queued per function (em_switch_values_queue) and the table is written after the function, inside
+ * its chunk (em_switch_values_emit, called by the backends after end_function); a retried function
+ * discards the queue (em_switch_values_reset) so regeneration does not duplicate tables.  Used through
+ * adapters in walk/switch-values.c, arm64 and wasm.
+ */
 #include "../emitimpl.h"
 
 typedef struct svproof {

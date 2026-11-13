@@ -1,6 +1,18 @@
 #ifndef VCC_CCSNAP_H
 #define VCC_CCSNAP_H
-/* the declaration cache (ccsnap.c): parser snapshots after leading top-level headers */
+/*
+ * ccsnap.h: the declaration cache's interface: the parser's state after a TU's leading headers,
+ * kept and restored (driver/ccsnap.c has the model).
+ *
+ * The front end calls dc_begin and dc_end once per TU (frontend/c/translation-unit.c) and
+ * dc_boundary at each file-scope declaration boundary; a boundary where the preprocessor has
+ * reported a new top-level region is the slow path (dc_boundary_slow), which may restore a
+ * snapshot instead of parsing the region again.  The state is "stale" while a restore is pending,
+ * and anything that needs the real state first calls dc_materialize (token.c, before a pragma
+ * acts); dc_kill turns the cache off for the rest of the TU (after an error, or a pending weak
+ * pragma), since later snapshots would be wrong.  Per-TU state is struct dcst (cc->dc); the
+ * snapshots are shared by the TUs of the process.  dc_stats prints what vccd's counters show.
+ */
 #include "frontend/c/ccint.h"
 
 struct dcnode;

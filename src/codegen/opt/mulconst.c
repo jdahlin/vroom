@@ -1,5 +1,10 @@
-/* Single shifted-add multiplication recipes. Targets retain multiplication
- * unless they can select a profitable machine operation (wasm keeps mul). */
+/*
+ * mulconst.c: which constant multipliers a single shifted add can do (x * 3, 5 and 9 as x + (x << k)).
+ *
+ * em_mulconst(bits, rhs) returns k, or 0 for no recipe; 32- and 64-bit only.  Targets keep the
+ * multiplication unless their machine has a profitable shifted-operand add (arm64 and x86-64's lea
+ * use it; wasm keeps mul).  Used by arch/a64/codegen and arch/x64/codegen.
+ */
 #include "../emitimpl.h"
 
 VPRIV unsigned em_mulconst(unsigned bits, i128 rhs)

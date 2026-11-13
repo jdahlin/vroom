@@ -1,4 +1,17 @@
-/* vcc code generator, AST walker: statements, switch, the function (walk.h) */
+/*
+ * stmt.c: the walker's statements: the per-function state (wkst), initializers, declarations,
+ * switch, control flow, inlining, and the function itself (wk_function).
+ *
+ * Compiled twice, like expr.c (x86-64's direct lowering, and VIR's builder through codegen/vir/walk.c
+ * with WK_PREFIX vw_): see expr.c for the rules that follow.  wk_function(e, s) is what tu.c (for
+ * x86-64) and codegen/vir/try.c call for one function; it sets up the frame slots and labels (all
+ * indexed per symbol or node with a generation number, so nothing is cleared between functions),
+ * walks the body, and finishes through LO(finish).  Reachability (e->reach) follows branches so that
+ * no code is generated behind constant conditions; array-element constants are forgotten at every
+ * label (wk_label), so no fact crosses a join.  Inlining is done here: an inlined copy binds its
+ * parameters to the arguments, and its returns go to a label (wkinl); the prepass (prepass.c) says
+ * whether a function may be inlined.
+ */
 #include "walk.h"
 
 /* ---------------- state ---------------- */
