@@ -842,7 +842,7 @@ villkorsuttryck. x86:s egna tester: 47/56 godkända, mot 46/56 före
   skalära masker mot referenslexern) utan fel; `-S -O2`, `-c -O2`, `-S -O0`, `-E` av
   vcc-, gcc-torture- och tcc-sviterna (1903 filer) byte-identiska mellan x86-64-bygget
   och ett arm64-korsbygge (NEON) som körs i qemu-aarch64.
-- Kvar: SSE2/AVX2-`classify` (den skalära tar en byte i taget), `vcc-diff.py cmp`
+- SIMD-delen klar 2026-11-13 (se X0 nedan). Kvar: `vcc-diff.py cmp`
   och `vcc-ctests.py` här (inget `work/`-träd; qemu-system-aarch64 saknas).
 
 Övriga steg inte påbörjade. Lagerindelningen (vandrare, sänkning, gemensamma
@@ -1244,3 +1244,30 @@ mot clang, även ASan/UBSan; x86:s vcc-svit 318/318 med åtta befintliga
 skippar; `as.c` kompilerar separat. `x86-relax-index.s` täcker interfolierade
 sektioner/subsektioner, framåt- och bakåthopp, alignment, LEB, CFI och
 DWARF-rader. X5:s direktkodning från maskinposter återstår.
+
+
+### X0 (2026-11-13): SIMD-lexer på x86-värden
+
+`classify` använder AVX-512 VBMI/BW när värdbygget stöder det, annars
+AVX2 med nibble-tabeller. Kommentar-, radsluts- och strängsökning använder
+AVX2. NEON-vägen behålls; utan AVX2 används skalär kod. Valet sker vid
+kompilering via värdens CPU-flaggor. Fuzz-referensen använder oberoende
+skalära sökningar; dess saknade namnbyte för `vlex_nodigraphs` är rättat.
+
+SQLite (9,28 MB), Ryzen 7 9700X, bästa CPU-tid av sju varma lexerpass:
+**30,5 → 4,9 ms** (AVX-512, **6,2×**); AVX2 **5,9 ms** (**5,2×**).
+Hela x86-kompileringen, bästa CPU-tid av fem nya processer: preprocessorn
+**81,8 → 51,6 ms**, direkt objekt **297,5 → 270,0 ms**, VIR-objekt
+**597,3 → 555,2 ms**. Båda kompilatorerna länkas med samma övriga objekt.
+Arm64-mål på samma x86-värd: direkt objekt **165,4 → 138,9 ms**.
+Rådata och metod: `results/lexer-simd-20261113.json`.
+
+Verifierat: Clangs råa tokenström identisk för **329 filer / 1 379 848
+tokens** med båda SIMD-varianterna; gränsfall i en ny fuzz-regression.
+ASan/UBSan med skalär oracle: **1 597 537** AVX-512- och **1 518 970**
+AVX2-fuzzfall, 46 s vardera. Alla bytepar i klassificeraren och alla
+sökbyte vid offset 0–127 kontrollerade mot skalära predikat.
+SQLite `-E` och direkt/VIR-objekt byteidentiska före/efter för båda målen;
+Clang-preprocessorparitet för SQLite och nio accepterade pp-regressioner
+(två avvisas av Clang). Arm64-jämförelsen normaliserar Clangs patchversion.
+Full kärnparitet och X0:s återstående värdvalidering är fortfarande öppna.

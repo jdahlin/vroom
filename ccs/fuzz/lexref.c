@@ -12,6 +12,7 @@
 #define vlex_trigraphs vlex_trigraphs_ref
 #define vlex_digitsep vlex_digitsep_ref
 #define vlex_c89 vlex_c89_ref
+#define vlex_nodigraphs vlex_nodigraphs_ref
 #define vlex_load_uncached vlex_load_uncached_ref
 #define vlex_no_intern vlex_no_intern_ref
 #define vlex_prefetch vlex_prefetch_ref

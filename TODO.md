@@ -1085,8 +1085,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `classify` and the three searches in `lex/lex.c` have a scalar version
   for hosts without NEON, CRC32C is SSE4.2 (`lib/hostcrc.h`), `pause` for
   `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
-  and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
-  at a time), and the kernel parity runs on this host (no `work/` here).
+  and libFuzzer. AVX2/AVX-512 classification and AVX2 searches added
+  2026-11-13 (PLAN-x86.md X0), with scalar fallback. Left: full kernel
+  parity runs on this host.
   *Validate:* `fuzz-regress`; `fuzz-lex` (window path vs reference) ~1M
   runs clean; `-S`/`-c`/`-E` of the C suites byte-identical between the
   x86-64 build and an arm64 cross build under qemu-aarch64 (1903 files x 4).
