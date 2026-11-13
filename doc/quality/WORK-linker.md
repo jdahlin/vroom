@@ -196,9 +196,26 @@ failure, and an unchanged message is the rule).  Left, with the reason:
 the Mach-O linker reads its inputs into its arena with 8 bytes of padding
 (`vfile_read` gives 1); objcopy's `-I binary`, `--add-section` and
 `--add-gnu-debuglink` reads print "short read", which `vfile_read` cannot
-tell apart; `wasmld.c` is not built.  Next: one archive parser (`ld_archive_add`,
-`nm_inputs_collect`, `utils/ar.c`, the Mach-O linker's), then the
-diagnostics function.
+tell apart; `wasmld.c` is not built.
+
+One archive reader, `common/archive-reader.c` (`varchive_*`): magic, member
+headers, the `//` table, thin archives and BSD `#1/` names, decoded in place
+and never read past the file.  It reports what it found (`header_valid`,
+`data_fits`, a long name it cannot find), and the ELF linker
+(`ld_archive_add`), nm (`nm_inputs_collect`) and ar (`ar_thin_archive_read`,
+`ar_regular_archive_read`) keep their own messages and their own choice of
+what is fatal.  The Mach-O linker reads no archives (its inputs are objects
+only), so it has no reader to replace; `wasmld.c` keeps its own until wasm is
+built again.  Behaviour that moves, all on inputs the old readers misread,
+and each now as llvm-ar/llvm-nm/lld: BSD archives (`#1/` names, `__.SYMDEF`)
+are read by vlink and vnm (they failed with "not an ELF64 file"); a short
+name without a `/` loses its trailing spaces in nm and ar `t` (`a.o`, not `a.o`
+and 13 spaces); a corrupt name field is classified by one rule
+(`/ ` symbol table, `// ` names, `/DIGITS` long name, `#1/` BSD, anything
+else a short name), so the three tools no longer disagree on it; and a thin
+archive whose `//` member goes past the end of the file is "malformed"
+instead of an over-read.  Valid GNU and thin archives give byte-identical
+results.  Next: the diagnostics function.
 
 ### 4. One linker core
 
@@ -206,6 +223,18 @@ ELF, wasm and Mach-O become output formats of one core: one symbol table,
 resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
+
+## Decisions (coordinator, on the owner's behalf, 2026-11-13)
+
+- The `vld: error: out of memory` message when the context allocation fails
+  (#224) is accepted.
+- This chain changes no output bytes.  In particular `vlink` does not take
+  lld 23's TLS local-exec `add` to `nop` relaxation (the two LDCMP cases
+  below): that is a separate question for the owner.
+- The step-3 remainders that would change a message or the allocator (the
+  Mach-O linker's inputs read into its arena with 8 bytes of padding;
+  objcopy's "short read" paths) stay as they are, listed in step 3 with the
+  reason.
 
 ## Known problem: two LDCMP cases (cause found, decision open)
 

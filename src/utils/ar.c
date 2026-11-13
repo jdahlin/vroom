@@ -49,6 +49,7 @@
 #include <unistd.h>
 
 #include "utils/ar.h"
+#include "common/archive-reader.h"
 #include "common/buffer.h"
 #include "port/file.h"
 #include "common/scoped-cleanup.h"
@@ -228,42 +229,32 @@ static uint64_t ar_field_number_parse(const unsigned char *s, size_t n, int base
 static bool ar_thin_archive_read(ar_request *q, const char *abs, const char *shown, const vfile_mapping *d, ar_member_list *l)
 {
 	VAUTOFREE char *adir = ar_path_directory(abs);
-	const unsigned char *names = NULL;
-	size_t off = 8, nlen = 0;
+	varchive_cursor cursor;
+	varchive_member member;
 	bool ok = adir != NULL;
 
-	if (d->n < 8 || memcmp(d->p, "!<thin>\n", 8)) {
+	if (varchive_format_detect(d->p, d->n) != VARCHIVE_FORMAT_THIN) {
 		ar_error_report(q, "ar: error: %s: %s\n", shown, "only thin archives are supported");
 		return false;
 	}
-	while (ok && off + 60 <= d->n) {
-		const unsigned char *h = d->p + off;
-		uint64_t sz = ar_field_number_parse(h + 48, 10, 10);
-
-		off += 60;
-		if ((h[0] == '/' && h[1] == ' ') || !memcmp(h, "/SYM64/ ", 8)) {	/* symbol table */
-			off += sz + (sz & 1);
-		} else if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
-			names = d->p + off;
-			nlen = sz;
-			off += sz + (sz & 1);
-		} else if (h[0] == '/' && h[1] >= '0' && h[1] <= '9' && names) {
-			size_t o = ar_field_number_parse(h + 1, 15, 10), e;
+	varchive_cursor_init(&cursor, d->p, d->n);
+	while (ok && varchive_member_next(&cursor, &member)) {
+		if (member.kind != VARCHIVE_MEMBER_FILE) {
+			/* the symbol table, the names */
+		} else if (member.name_kind == VARCHIVE_NAME_LONG && cursor.long_names) {
 			ar_member m = { 0 };
 			VAUTOFREE char *nm = NULL;
 
-			for (e = o; e < nlen && names[e] != '\n'; e++)
-				;
-			if (o >= nlen || e < o + 2 || names[e - 1] != '/') {
+			if (!member.name || !member.name_length || !member.name_ends_in_slash) {
 				ar_error_report(q, "ar: error: %s: %s\n", shown, "malformed thin archive");
 				ok = false;
 				break;
 			}
-			nm = strndup((const char *)names + o, e - o - 1);
+			nm = strndup(member.name, member.name_length);
 			m.absolute_name = nm ? ar_path_normalize(adir, nm) : NULL;
 			m.name = m.absolute_name ? ar_path_relative(q->directory, m.absolute_name) : NULL;
-			m.mode = ar_field_number_parse(h + 40, 8, 8);
-			m.size = sz;
+			m.mode = ar_field_number_parse((const unsigned char *)member.header + 40, 8, 8);
+			m.size = member.stored_size;
 			if (!m.name || !ar_member_list_push(l, m)) {
 				free(m.name);
 				free(m.absolute_name);
@@ -273,6 +264,7 @@ static bool ar_thin_archive_read(ar_request *q, const char *abs, const char *sho
 			ar_error_report(q, "ar: error: %s: %s\n", shown, "unsupported archive member");
 			ok = false;
 		}
+		varchive_cursor_advance(&cursor, &member);
 	}
 	return ok;
 }
@@ -291,9 +283,9 @@ static bool ar_member_file_add(ar_request *q, const char *path, ar_member_list *
 		ar_error_report(q, "ar: error: %s: %s\n", path, strerror(errno));
 		return false;
 	}
-	if (d.n >= 8 && !memcmp(d.p, "!<thin>\n", 8)) {
+	if (varchive_format_detect(d.p, d.n) == VARCHIVE_FORMAT_THIN) {
 		ok = ar_thin_archive_read(q, abs, path, &d, l);
-	} else if (d.n >= 8 && !memcmp(d.p, "!<arch>\n", 8)) {
+	} else if (varchive_format_detect(d.p, d.n) == VARCHIVE_FORMAT_REGULAR) {
 		ar_error_report(q, "ar: error: %s: %s\n", path, "a regular archive cannot go into a thin one");
 		ok = false;
 	} else {
@@ -719,64 +711,32 @@ static bool ar_fd_write_all(int fd, const void *p, size_t n)
 /* the members of the regular archive d, in order: names as stored, data in d */
 static bool ar_regular_archive_read(ar_request *q, const vfile_mapping *d, const char *shown, ar_member_list *l, bool *bsd)
 {
-	const char *b = (const char *)d->p, *longn = NULL;
-	size_t sz = d->n, longsz = 0;
+	varchive_cursor cursor;
+	varchive_member member;
 
-	for (size_t o = 8; o < sz;) {
-		const char *h = b + o;
-		char num[11] = { 0 }, name[4096];
-		size_t msz, nl = 0;
+	varchive_cursor_init(&cursor, d->p, d->n);
+	for (; varchive_member_next(&cursor, &member); varchive_cursor_advance(&cursor, &member)) {
+		char name[4096];
 
-		if (o + 60 > sz || h[58] != '`' || h[59] != '\n')
+		if (!member.header_valid || !member.data_fits)
 			goto bad;
-		memcpy(num, h + 48, 10);
-		msz = strtoull(num, NULL, 10);
-		if (msz > sz - o - 60)
-			goto bad;
-		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
-			longn = h + 60, longsz = msz;
-		} else if (!memcmp(h, "#1/", 3)) {	/* BSD: the name at the start of the data */
-			size_t nlen = strtoull(h + 3, NULL, 10);
-
-			if (nlen > msz)
-				goto bad;
+		if (cursor.bsd)
 			*bsd = true;
-			nl = strnlen(h + 60, nlen);
-			snprintf(name, sizeof name, "%.*s", (int)nl, h + 60);
-			if (strcmp(name, "__.SYMDEF") && strcmp(name, "__.SYMDEF SORTED") && strcmp(name, "__.SYMDEF_64")) {
-				ar_member m = { strdup(name), NULL, 0644, msz - nlen, (const unsigned char *)h + 60 + nlen };
+		if (member.kind != VARCHIVE_MEMBER_FILE)
+			continue;
+		if (!member.name)
+			goto bad;
+		snprintf(name, sizeof name, "%.*s", (int)member.name_length, member.name);
+		ar_member m = { strdup(name), NULL, 0644, member.size, member.data };
 
-				if (!m.name || !ar_member_list_push(l, m)) {
-					free(m.name);
-					ar_error_report(q, "ar: error: %s%s\n", "out of memory", "");
-					return false;
-				}
-			}
-		} else if (!(h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7)))) {
-			if (h[0] == '/') {
-				size_t off = strtoull(h + 1, NULL, 10), e;
-
-				if (!longn || off >= longsz)
-					goto bad;
-				for (e = off; e < longsz && longn[e] != '\n'; e++)
-					;
-				nl = e - off - (e > off && longn[e - 1] == '/');
-				snprintf(name, sizeof name, "%.*s", (int)nl, longn + off);
-			} else {
-				while (nl < 16 && h[nl] != '/')
-					nl++;
-				snprintf(name, sizeof name, "%.*s", (int)nl, h);
-			}
-			ar_member m = { strdup(name), NULL, 0644, msz, (const unsigned char *)h + 60 };
-
-			if (!m.name || !ar_member_list_push(l, m)) {
-				free(m.name);
-				ar_error_report(q, "ar: error: %s%s\n", "out of memory", "");
-				return false;
-			}
+		if (!m.name || !ar_member_list_push(l, m)) {
+			free(m.name);
+			ar_error_report(q, "ar: error: %s%s\n", "out of memory", "");
+			return false;
 		}
-		o += 60 + msz + (*bsd ? 0 : (msz & 1));
 	}
+	if (cursor.offset < d->n)	/* fewer than a header's bytes left */
+		goto bad;
 	return true;
 bad:
 	ar_error_report(q, "ar: error: %s: %s\n", shown, "truncated or malformed archive");
@@ -904,7 +864,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
 	if (vfile_map(archive_abs, &d, &st)) {
 		have_old = true;
-		if (d.n >= 8 && !memcmp(d.p, "!<arch>\n", 8)) {
+		if (varchive_format_detect(d.p, d.n) == VARCHIVE_FORMAT_REGULAR) {
 			if (op == 't' || op == 'p' || op == 'x') {
 				return ar_regular_archive_operate(&q, &d, archive, op, files, nfiles);
 			}

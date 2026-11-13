@@ -70,7 +70,7 @@ relative to it); `TODO.md` stays at the top.
     buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
     (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
     string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
-    `leb128.h`, `format.h`, digests (`digest-xxh3.c`, `digest-blake3.c`,
+    `leb128.h`, `format.h`, the ar archive reader (`archive-reader.c`), digests (`digest-xxh3.c`, `digest-blake3.c`,
     `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
     `bigint.h`, scoped resources through `cleanup` (`scoped-cleanup.h`:
     VAUTOFREE, VAUTOCLOSE, VLOCK; not across a longjmp), attributes
