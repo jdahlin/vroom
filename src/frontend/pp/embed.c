@@ -1,5 +1,7 @@
 /* vcc preprocessor: #embed (C23) and __has_embed: parameters, search, the file's bytes as integer literals */
+#include <errno.h>
 #include "ppimpl.h"
+#include "port/mapfile.h"
 
 /* a #embed / __has_embed parameter list (after the file name) */
 typedef struct embprm {
@@ -211,10 +213,29 @@ static bool emb_is_main(const pp *p, const char *path)
 	return !strcmp(path, m);
 }
 
-/* the bytes #embed takes from f: [*b, *b + *n) */
-static void emb_range(const vlex_file *f, const embprm *m, uint64_t *b, uint64_t *n)
+/* the file's bytes as they are on disk: the lexer's copy (find_embed) has a BOM
+   blanked and, in C23, the separators of numbers removed */
+static bool emb_map(const pp *p, const char *path, vmapped *m)
 {
-	uint64_t sz = f->size;
+	char abs[8192];
+	struct stat st;
+	size_t cl, l = strlen(path);
+
+	if (p->o->cwd && path[0] != '/') {
+		cl = strlen(p->o->cwd);
+		if (cl + l + 2 > sizeof(abs))
+			return false;
+		memcpy(abs, p->o->cwd, cl);
+		abs[cl] = '/';
+		memcpy(abs + cl + 1, path, l + 1);
+		path = abs;
+	}
+	return vmap_file(path, m, &st);
+}
+
+/* the bytes #embed takes from a file of sz bytes: [*b, *b + *n) */
+static void emb_range(uint64_t sz, const embprm *m, uint64_t *b, uint64_t *n)
+{
 
 	*b = m->offset < sz ? m->offset : sz;
 	*n = sz - *b;
@@ -235,6 +256,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 	uint32_t floc;
 	embprm m = { 0 };
 	uint64_t ob, on;
+	vmapped raw_;
 
 	pthread_once(&emb_once, emb_init);
 	if (!p->o->c23) {
@@ -268,21 +290,31 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 	}
 	if (p->o->deps && !emb_is_main(p, path))
 		dep_only(p, path, false);
-	emb_range(f, &m, &ob, &on);
+	if (!emb_map(p, path, &raw_)) {
+		pp_dinfo di = { "fatal error", floc, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_diagx(p, &di, "cannot open file '%s': %s", path, strerror(errno));
+		if (p->fatal_jb && !p->o->fatal_continue)
+			longjmp(*p->fatal_jb, 1);
+		return;
+	}
+	emb_range(raw_.n, &m, &ob, &on);
 	if (p->rec.n)	/* the header cache does not record #embed's bytes: the open regions are not cached */
 		p->rec.nbad = p->rec.n;
 	{
 		uint64_t nt = on ? m.npre + 2 * on - 1 + m.nsuf : m.nemp;
 		ptok *o, *w;
 
-		if (!nt)
+		if (!nt) {
+			vunmap_file(&raw_);
 			return;
+		}
 		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
 		if (on) {
 			if (m.npre)	/* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
 				memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;
 			for (uint64_t i = 0; i < on; i++) {
-				unsigned char v = (unsigned char)f->src[ob + i];
+				unsigned char v = raw_.p[ob + i];
 
 				if (i) {
 					*w++ = (ptok){ ",", 1, 0, loc, T_COMMA, 0, 0 };
@@ -297,6 +329,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 			memcpy(w, m.emp, m.nemp * sizeof(ptok)), w += m.nemp;
 		}
 		w[-1].flags |= PF_EMBEND;
+		vunmap_file(&raw_);
 		p->emb_tail = !on ? 1 : m.nsuf ? 2 : 0;	/* markers left: 2 bytes then suffix, 1 if_empty/suffix */
 		push_ptok(p, o, (uint32_t)(w - o), 0, 0, 0);
 	}
@@ -332,6 +365,11 @@ VPRIV int has_embed(pp *p, const ctx *fc, uint32_t loc)
 		return 0;
 	if (p->o->deps && !emb_is_main(p, path))
 		dep_only(p, path, false);
-	emb_range(f, &m, &ob, &on);
+	vmapped raw_;
+
+	if (!emb_map(p, path, &raw_))
+		return 0;
+	emb_range(raw_.n, &m, &ob, &on);
+	vunmap_file(&raw_);
 	return on ? 1 : 2;
 }
