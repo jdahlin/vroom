@@ -53,6 +53,17 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		o->cls = XR_XMM, o->reg = (uint8_t)r, o->size = b[0] == 'y' ? 32 : 16;
 		return 0;
 	}
+	if (b[0] == 'k' && b[1] >= '0' && b[1] <= '7' && !b[2]) {
+		o->cls = XR_MASK, o->reg = b[1] - '0', o->size = 8;
+		return 0;
+	}
+	if (!strncmp(b, "zmm", 3) && as_char_is_digit((unsigned char)b[3])) {
+		char *end;
+		long r = strtol(b + 3, &end, 10);
+		if (*end || r > 31) return -1;
+		o->cls = XR_ZMM, o->reg = r, o->size = 64;
+		return 0;
+	}
 	if (!strcmp(b, "rip")) { o->cls = XR_RIP; return 0; }
 	if ((!strncmp(b, "cr", 2) || !strncmp(b, "db", 2) || !strncmp(b, "dr", 2)) && as_char_is_digit((unsigned char)b[2])) {
 		int r = atoi(b + 2);
@@ -184,7 +195,7 @@ static int x64_operand(as_context *a, const char **pp, const char *e, XOp *o)
 		return 0;
 	}
 	if (p < e && *p == '%') {
-		XOp r;
+		XOp r = {0};
 		const char *q = x64_reg(a, p + 1, e, &r);
 
 		if (!q)
@@ -346,7 +357,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 
 			if (base >= 0 && base & 8) rex |= 1;
 			if (index >= 0 && index & 8) rex |= 2;
-			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : fits8(disp) ? 1 : 2);
+			md = dsym ? 2 : (base < 0 ? 0 : disp == 0 && (base & 7) != 5 ? 0 : disp % (f->tuple ? f->tuple : 1) == 0 && fits8(disp / (f->tuple ? f->tuple : 1)) ? 1 : 2);
 			if (base < 0) {
 				/* no base: SIB base 101 with mod 00 means disp32 */
 				modrm[nm++] = (uint8_t)((f->reg & 7) << 3 | 4);
@@ -381,7 +392,14 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		int pp = f->opsz16 ? 1 : f->rep == 0xf3 ? 2 : f->rep == 0xf2 ? 3 : 0;
 		int tail = (~f->vvvv & 15) << 3 | (f->vl ? 4 : 0) | pp;
 
-		if (X && B && !W && mm == 1) {
+		if (f->tuple) {
+			/* EVEX.512: register r/m bit 4 uses X; memory uses the SIB index. */
+			if (rm->kind == XK_REG) X = !(rm->reg & 16);
+			eb(&x, 0x62);
+			eb(&x, R << 7 | X << 6 | B << 5 | !(f->reg & 16) << 4 | mm);
+			eb(&x, W << 7 | (~f->vvvv & 15) << 3 | 4 | pp);
+			eb(&x, f->zero << 7 | 0x40 | !(f->vvvv & 16) << 3 | f->mask);
+		} else if (X && B && !W && mm == 1) {
 			eb(&x, 0xc5);
 			eb(&x, (uint8_t)(R << 7 | tail));
 		} else {
@@ -418,7 +436,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 				ew(&x, 0, 4);
 			}
 		} else {
-			ew(&x, disp, dispsz);
+			ew(&x, dispsz == 1 && f->tuple ? disp / f->tuple : disp, dispsz);
 		}
 	}
 	if (f->isz) {
@@ -697,8 +715,22 @@ VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *
 			return as_error_report(a, "too many operands");
 		if (x64_operand(a, &p, e, &o[nops]))
 			return -1;
-		nops++;
+		XOp *op = &o[nops++];
 		p = as_whitespace_skip(p, e);
+		if (p < e && *p == '{') {
+			XOp k = {0};
+			const char *q = p + 1;
+			if (op->kind != XK_REG || (op->cls != XR_ZMM && op->cls != XR_MASK) ||
+			    q == e || *q++ != '%' || !(q = x64_reg(a, q, e, &k)) ||
+			    k.cls != XR_MASK || !k.reg || q == e || *q++ != '}')
+				return as_error_report(a, "invalid writemask");
+			op->mask = k.reg;
+			p = as_whitespace_skip(q, e);
+			if (e - p >= 3 && !memcmp(p, "{z}", 3)) {
+				op->zero = 1;
+				p = as_whitespace_skip(p + 3, e);
+			}
+		}
 		if (p < e && *p == ',')
 			p = as_whitespace_skip(p + 1, e);
 		else if (p < e)
@@ -730,6 +762,9 @@ int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
 {
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
+	for (int i = 0; i < nops; i++)
+		if (o[i].kind == XK_REG && (o[i].cls == XR_ZMM || o[i].cls == XR_MASK))
+			return x64_i_avx512(a, mn, o, nops);
 	{
 		static int (*const fam[])(as_context *, char *, XOp *, int) = {
 			x64_i_crdr,

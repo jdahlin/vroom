@@ -39,6 +39,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 			{ "vpbroadcastd", 1, 2, 0x58, 1, 0, 0, 0 }, { "vpbroadcastq", 1, 2, 0x59, 1, 0, 0, 0 }, { "vpbroadcastb", 1, 2, 0x78, 1, 0, 0, 0 },
 			{ "vpbroadcastw", 1, 2, 0x79, 1, 0, 0, 0 }, { "vbroadcasti128", 1, 2, 0x5a, 1, 0, 0, 0 }, { "vbroadcastss", 1, 2, 0x18, 1, 0, 0, 0 },
 			{ "vpmovzxbd", 1, 2, 0x31, 1, 0, 0, 0 }, { "vpmovzxbq", 1, 2, 0x32, 1, 0, 0, 0 }, { "vpmovzxdq", 1, 2, 0x35, 1, 0, 0, 0 }, { "vpmovzxwd", 1, 2, 0x33, 1, 0, 0, 0 },
+			{ "vpminub", 1, 1, 0xda, 0, 0, 0, 0 },
 			{ "vptest", 1, 2, 0x17, 1, 0, 0, 0 },
 			{ "vpsrld", 1, 1, 0x72, 2, 0, 1, 2 }, { "vpslld", 1, 1, 0x72, 2, 0, 1, 6 }, { "vpsrad", 1, 1, 0x72, 2, 0, 1, 4 },
 			{ "vpsrlq", 1, 1, 0x73, 2, 0, 1, 2 }, { "vpsllq", 1, 1, 0x73, 2, 0, 1, 6 }, { "vpsrldq", 1, 1, 0x73, 2, 0, 1, 3 },
@@ -87,6 +88,10 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 				return x64_emit(a, &f);
 			}
 		}
+		if (!strcmp(mn, "vpmovmskb") && nops == 2 && o[0].kind == XK_REG &&
+		    o[0].cls == XR_XMM && dst->kind == XK_REG && dst->cls == XR_GPR && dst->size == 4)
+			return x64_emit(a, &F(.op=OPB(0x0f,0xd7), .nop=2, .opsz16=1, .vex=1,
+					      .vl=o[0].size == 32, .reg=dst->reg, .rm=o));
 		/* moves: vmovdqa/vmovdqu/vmovaps/vmovups (load 6f/28/10, store 7f/29/11), vmovd/vmovq */
 		if (nops == 2 && (!strcmp(mn, "vmovdqa") || !strcmp(mn, "vmovdqu") || !strcmp(mn, "vmovaps") || !strcmp(mn, "vmovups") ||
 				  !strcmp(mn, "vmovapd") || !strcmp(mn, "vmovupd"))) {
@@ -185,4 +190,70 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
 		return x64_emit(a, &f);
 	}
 	return X64_NEXT;
+}
+
+/* Full-width EVEX byte operations and VEX mask operations used by the lexer. */
+VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
+{
+	enum { LOAD, BINARY, TEST, TO_MASK, SHIFT, COMPARE, K_STORE, K_UNARY, K_BINARY };
+	static const struct {
+		const char *name;
+		uint8_t form, map, opcode, prefix, w, tuple;
+	} ops[] = {
+		{"vmovdqu64", LOAD, 1, 0x6f, 2, 1, 64}, {"vmovdqa64", LOAD, 1, 0x6f, 1, 1, 64},
+		{"vbroadcasti32x4", LOAD, 2, 0x5a, 1, 0, 16}, {"vpbroadcastb", LOAD, 2, 0x78, 1, 0, 1},
+		{"vpermt2b", BINARY, 2, 0x7d, 1, 0, 64}, {"vpermb", BINARY, 2, 0x8d, 1, 0, 64},
+		{"vpandq", BINARY, 1, 0xdb, 1, 1, 64}, {"vporq", BINARY, 1, 0xeb, 1, 1, 64},
+		{"vpshufb", BINARY, 2, 0x00, 1, 0, 64}, {"vpsrlw", SHIFT, 1, 0x71, 1, 0, 64},
+		{"vptestmb", TEST, 2, 0x26, 1, 0, 64}, {"vpcmpeqb", TEST, 1, 0x74, 1, 0, 64},
+		{"vpcmpub", COMPARE, 3, 0x3e, 1, 0, 64}, {"vpmovb2m", TO_MASK, 2, 0x29, 2, 0, 64},
+		{"kmovq", K_STORE, 1, 0x91, 0, 1, 0}, {"knotq", K_UNARY, 1, 0x44, 0, 1, 0},
+		{"korq", K_BINARY, 1, 0x45, 0, 1, 0}, {"kandq", K_BINARY, 1, 0x41, 0, 1, 0},
+	};
+	for (size_t i = 0; i < sizeof ops / sizeof *ops; i++) {
+		if (strcmp(mn, ops[i].name)) continue;
+		int form = ops[i].form;
+		bool imm = form == SHIFT || form == COMPARE;
+		bool binary = form == BINARY || form == TEST || form == COMPARE || form == K_BINARY;
+		if (n != 2 + binary + imm) break;
+		XOp *dst = &o[n-1], *rm = &o[imm];
+		uint8_t bytes[] = {0x0f, ops[i].map == 2 ? 0x38 : 0x3a, ops[i].opcode};
+		XForm f = F(.op=bytes, .nop=3, .vex=1, .tuple=ops[i].tuple, .w=ops[i].w,
+			    .opsz16=ops[i].prefix == 1, .rep=ops[i].prefix == 2 ? 0xf3 : 0);
+		if (ops[i].map == 1) bytes[1] = bytes[2], f.nop = 2;
+		if (form == K_STORE) {
+			if (rm->kind != XK_REG || rm->cls != XR_MASK ||
+			    (dst->kind != XK_MEM && dst->kind != XK_EXPR)) break;
+			f.reg = rm->reg;
+			f.rm = dst;
+			return x64_emit(a, &f);
+		}
+		int cls = form >= K_UNARY ? XR_MASK : XR_ZMM;
+		int dstcls = form == TEST || form == COMPARE || form == TO_MASK ? XR_MASK : cls;
+		if (dst->kind != XK_REG || dst->cls != dstcls || (dst->zero && dstcls == XR_MASK)) break;
+		if (rm->kind == XK_REG) {
+			if (rm->cls != cls || rm->mask || rm->zero) break;
+			if (form == LOAD && (ops[i].tuple == 16 || ops[i].tuple == 1)) break;
+		} else if (cls == XR_MASK || form == TO_MASK || rm->kind == XK_IMM) break;
+		if (binary) {
+			XOp *src = &o[imm+1];
+			if (src->kind != XK_REG || src->cls != cls || src->mask) break;
+			f.vvvv = src->reg;
+		}
+		if (imm) {
+			int64_t value;
+			if (o->kind != XK_IMM || !isconst(a, &o->v, &value)) break;
+			f.isz = 1;
+			f.imm = value;
+		}
+		if (form >= K_UNARY && dst->mask) break;
+		f.mask = dst->mask;
+		f.zero = dst->zero;
+		f.reg = dst->reg;
+		f.rm = rm;
+		f.vl = form == K_BINARY;
+		if (form == SHIFT) f.reg = 2, f.vvvv = dst->reg;
+		return x64_emit(a, &f);
+	}
+	return as_error_report(a, "unsupported operands for '%s'", mn);
 }
