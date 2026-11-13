@@ -27,14 +27,14 @@ VPRIV void vw_classify(ecx *e, qty t, wkarg *a, bool unnamed)
 
 static uint32_t vw_group(const wkarg *a, uint32_t *w)
 {
-	uint32_t pc = a->cls[0] == WA_SSE ? (a->size == 4 ? VC_F32 : VC_F64) : VC_INT;
+	uint32_t pc = a->cls[0] == WA_SSE ? (a->size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
-	w[0] = VG_WORD0(VG_REG, 1, pc, 0, 0, 0, a->unnamed ? VG_UNNAMED : 0);
-	w[1] = VG_WORD1(a->size, 0);	/* (the size: Apple packs stack arguments) */
+	w[0] = VIR_GROUP_WORD0(VIR_GROUP_REG, 1, pc, 0, 0, 0, a->unnamed ? VIR_GROUP_UNNAMED : 0);
+	w[1] = VIR_GROUP_WORD1(a->size, 0);	/* (the size: Apple packs stack arguments) */
 	return pc;
 }
 
-static uint32_t vw_pcty(uint32_t pc) { return pc == VC_F32 ? VT_F32 : pc == VC_F64 ? VT_F64 : VT_I64; }
+static uint32_t vw_pcty(uint32_t pc) { return pc == VIR_CLASS_F32 ? VIR_TYPE_F32 : pc == VIR_CLASS_F64 ? VIR_TYPE_F64 : VIR_TYPE_I64; }
 
 /* a slot word's value: the store table's, else a load */
 static uint32_t vw_word(ecx *e, int64_t off, uint32_t ty)
@@ -47,12 +47,12 @@ static uint32_t vw_word(ecx *e, int64_t off, uint32_t ty)
 		if (V->st[i].slot == slot && V->st[i].off == off) {
 			uint32_t x = V->st[i].v;
 
-			if (V->st[i].size == 8 || (V->st[i].size == 4 && ty == VT_F32))
-				return vw_conv(e, x, ty == VT_I64 && vw_ty(e, x) == VT_PTR ? VT_PTR : ty);
+			if (V->st[i].size == 8 || (V->st[i].size == 4 && ty == VIR_TYPE_F32))
+				return vw_conv(e, x, ty == VIR_TYPE_I64 && vw_ty(e, x) == VIR_TYPE_PTR ? VIR_TYPE_PTR : ty);
 		}
 	V->sl[slot].loads++;
 	{
-		uint32_t v = vw_ins(e, VO_LOAD, ty, vw_mfl(ty == VT_F32 ? 4 : 8, 8, false), vw_slotaddr(e, slot, rel), 0, 0);
+		uint32_t v = vw_ins(e, VIR_OP_LOAD, ty, vw_mfl(ty == VIR_TYPE_F32 ? 4 : 8, 8, false), vw_slotaddr(e, slot, rel), 0, 0);
 
 		V->p[v].slot = slot + 1;
 		return v;
@@ -66,9 +66,9 @@ static uint32_t vw_sig(ecx *e, const wkarg *a, int n, bool variadic, qty rt, uin
 	uint32_t o = V->nx;
 
 	GROW(V->x, V->nx, V->cx, 3 + 2 * (uint32_t)n);
-	V->x[o] = VSIG_HDR((uint32_t)n, variadic);
+	V->x[o] = VIR_SIGNATURE_HEADER((uint32_t)n, variadic);
 	if (KIND(c, rt) == TY_VOID) {
-		V->x[o + 1] = VG_WORD0(VG_NONE, 0, 0, 0, 0, 0, 0), V->x[o + 2] = 0;
+		V->x[o + 1] = VIR_GROUP_WORD0(VIR_GROUP_NONE, 0, 0, 0, 0, 0, 0), V->x[o + 2] = 0;
 		*rpc = 0;
 	} else {
 		wkarg r;
@@ -95,11 +95,11 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 		if (a[k].mem || a[k].n != 1)
 			vw_fail(e, VIRFAIL(record_argument));
 	if (fn) {
-		callee = vw_val(e, fn, VT_PTR);
+		callee = vw_val(e, fn, VIR_TYPE_PTR);
 		if (fn->k == V_REG)
 			vw_tfree(e, fn->r);
 	} else {
-		callee = vw_k(e, VO_SYMADDR, VT_PTR, ref, 0, 0);
+		callee = vw_k(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
 	}
 	sig = vw_sig(e, a, n, variadic, rt, &rpc);
 	o = V->nx;
@@ -107,17 +107,17 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 	V->nx += 1 + (uint32_t)n;
 	V->x[o] = (uint32_t)n;
 	for (int k = 0; k < n; k++) {
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
+		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t x = vw_word(e, a[k].slot, vw_pcty(pc));
 
 		w = &V->x[o + 1 + k];
 		*w = x;
 	}
-	v = vw_ins(e, VO_CALL, rpc ? vw_pcty(rpc) : VT_VOID, 0, callee, sig, o);
+	v = vw_ins(e, VIR_OP_CALL, rpc ? vw_pcty(rpc) : VIR_TYPE_VOID, 0, callee, sig, o);
 	vw_st_clear(e, true);
 	if (!rpc)
 		return vconst(0);
-	if (rpc != VC_INT) {
+	if (rpc != VIR_CLASS_INT) {
 		int q = vw_ftreg(e);
 
 		vw_set(e, q, v);
@@ -128,10 +128,10 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 		bool sgn = wk_signed(c, rt);
 
 		if (is_ptr(c, rt))
-			v = vw_conv(e, v, VT_PTR);
+			v = vw_conv(e, v, VIR_TYPE_PTR);
 		vw_set(e, q, v);
 		if (size == 4 && !sgn)
-			vw_set(e, q, vw_conv(e, v, VT_I32));
+			vw_set(e, q, vw_conv(e, v, VIR_TYPE_I32));
 		else if (size < 8)
 			vw_ext(e, q, size, sgn);
 		return (val){ .k = V_REG, .r = (uint8_t)q };
@@ -153,29 +153,29 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		qty ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
+		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 
 		if (a[k].mem || a[k].n != 1)
 			vw_fail(e, VIRFAIL(record_parameter));
-		if (vw_ins(e, VO_PARAM, pc == VC_INT && is_ptr(c, ty) ? VT_PTR : vw_pcty(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
+		if (vw_ins(e, VIR_OP_PARAM, pc == VIR_CLASS_INT && is_ptr(c, ty) ? VIR_TYPE_PTR : vw_pcty(pc), 0, (uint32_t)k, 0, 0) != pv0 + (uint32_t)k)
 			vw_fail(e, VIRFAIL(parameters));
 	}
 	for (int k = 0; k < n; k++) {
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
 		qty ty = c->syms[sym].ty;
-		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VC_F32 : VC_F64) : VC_INT;
+		uint32_t pc = a[k].cls[0] == WA_SSE ? (a[k].size == 4 ? VIR_CLASS_F32 : VIR_CLASS_F64) : VIR_CLASS_INT;
 		uint32_t v = pv0 + (uint32_t)k;
 		lval home;
 		int q;
 
-		q = pc == VC_INT ? vw_treg(e) : vw_ftreg(e);
+		q = pc == VIR_CLASS_INT ? vw_treg(e) : vw_ftreg(e);
 		vw_set(e, q, v);
-		if (pc == VC_INT && wk_size(c, ty) == 4)
-			vw_set(e, q, vw_conv(e, v, VT_I32));	/* (the low half is the int; an i32 for the walker) */
-		else if (pc == VC_INT && wk_size(c, ty) < 4)
+		if (pc == VIR_CLASS_INT && wk_size(c, ty) == 4)
+			vw_set(e, q, vw_conv(e, v, VIR_TYPE_I32));	/* (the low half is the int; an i32 for the walker) */
+		else if (pc == VIR_CLASS_INT && wk_size(c, ty) < 4)
 			vw_ext(e, q, wk_size(c, ty), wk_signed(c, ty));
 		if (vw_local(e, sym, &home)) {
-			vw_store(e, q, &home, pc == VC_INT ? wk_size(c, ty) : (int)a[k].size);
+			vw_store(e, q, &home, pc == VIR_CLASS_INT ? wk_size(c, ty) : (int)a[k].size);
 		} else {
 			lval s = { .k = L_FRAME, .off = a[k].slot, .align = 8 };
 
@@ -211,15 +211,15 @@ VPRIV void vw_ret(ecx *e, val *v, qty t, uint32_t lbl)
 				if (size < 8)
 					k = sgn ? (int64_t)((uint64_t)k << (64 - 8 * size)) >> (64 - 8 * size) :
 						  (int64_t)((uint64_t)k & ((1ull << (8 * size)) - 1));
-				x = vw_iconst(e, is_ptr(c, t) ? VT_PTR : VT_I64, k);
+				x = vw_iconst(e, is_ptr(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64, k);
 			} else {
 				int q = vw_toreg(e, v, size);
 
 				if (size < 4)	/* (an int's upper half is unspecified in AAPCS64: a free zero extension) */
 					vw_ext(e, q, size, sgn);
 				else if (size == 4)
-					vw_set(e, q, vw_get(e, q, VT_I32));
-				x = vw_get(e, q, is_ptr(c, t) ? VT_PTR : VT_I64);
+					vw_set(e, q, vw_get(e, q, VIR_TYPE_I32));
+				x = vw_get(e, q, is_ptr(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64);
 				vw_tfree(e, q);
 			}
 		}
@@ -254,7 +254,7 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
 	V->labhi = 0;
 	V->sealing = false;
 	V->why = NULL;	/* (one function's reason is not the next one's) */
-	V->rty = VT_VOID;
+	V->rty = VIR_TYPE_VOID;
 	V->nparam = 0;
 	V->cur = vw_newblk(e);
 	e->ndl = 0;
@@ -266,19 +266,19 @@ VPRIV void vw_finish(ecx *e, uint32_t s)
 
 	(void)s;
 	{	/* the return block: ret, with the result if there is one */
-		uint32_t w0 = V->x[V->fsig + 1], rty = VG_KIND(w0) == VG_REG ? vw_pcty(VG_CLASS(w0, 0)) : VT_VOID;
+		uint32_t w0 = V->x[V->fsig + 1], rty = VIR_GROUP_KIND(w0) == VIR_GROUP_REG ? vw_pcty(VIR_GROUP_CLASS(w0, 0)) : VIR_TYPE_VOID;
 		uint32_t o, rv;
 
-		if (rty == VT_I64 && V->rty == VT_PTR)
-			rty = VT_PTR;
-		rv = rty != VT_VOID ? vw_conv(e, vw_readv(e, VW_RETV, V->cur, rty), rty) : 0;
+		if (rty == VIR_TYPE_I64 && V->rty == VIR_TYPE_PTR)
+			rty = VIR_TYPE_PTR;
+		rv = rty != VIR_TYPE_VOID ? vw_conv(e, vw_readv(e, VW_RETV, V->cur, rty), rty) : 0;
 		o = V->nx;
 
 		GROW(V->x, V->nx, V->cx, 2);
 		V->x[V->nx++] = rv ? 1 : 0;
 		if (rv)
 			V->x[V->nx++] = rv;
-		V->b[V->cur].term = vw_put(e, VO_RET, VT_VOID, 0, 0, 0, o, V->cur);
+		V->b[V->cur].term = vw_put(e, VIR_OP_RET, VIR_TYPE_VOID, 0, 0, 0, o, V->cur);
 	}
 	if (!vw_emit(e))
 		vw_fail(e, V->why ? V->why : VIRFAIL(build_failed));

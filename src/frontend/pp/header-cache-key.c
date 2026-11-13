@@ -99,16 +99,16 @@ VPRIV pp_header_cache_key *pp_header_cache_key_get(uint32_t sig, const lex_file 
 				mine->hash = h;
 				mine->f = f;
 				mine->spath = sp;
-				mine->sig = sig;
-				mine->nfile = nfile;
-				mine->sdir = sdir;
-				mine->sys = sys;
+				mine->signature = sig;
+				mine->file_depth = nfile;
+				mine->search_directory = sdir;
+				mine->is_system = sys;
 			}
 			if (atomic_compare_exchange_strong_explicit(&pp_header_cache_key_table[i], &e, mine, memory_order_acq_rel,
 								    memory_order_acquire))
 				return mine;
 		}
-		if (e->hash == h && e->f == f && e->sig == sig && e->sdir == sdir && e->nfile == nfile && e->sys == sys &&
+		if (e->hash == h && e->f == f && e->signature == sig && e->search_directory == sdir && e->file_depth == nfile && e->is_system == sys &&
 		    !strcmp(e->spath, spath))
 			return e;
 	}
@@ -118,20 +118,20 @@ VPRIV pp_header_cache_key *pp_header_cache_key_get(uint32_t sig, const lex_file 
 VPRIV int pp_once_file_find(const pp *p, const lex_file *f)
 {
 	/* the same file by any path (symlink, hard link, a/../a): clang's FileEntry */
-	for (uint32_t i = 0; i < p->nonce; i++)
-		if (p->once[i] == f || (f->ino && p->once[i]->ino == f->ino && p->once[i]->dev == f->dev))
+	for (uint32_t i = 0; i < p->once_file_count; i++)
+		if (p->once_files[i] == f || (f->ino && p->once_files[i]->ino == f->ino && p->once_files[i]->dev == f->dev))
 			return (int)i;
 	return -1;
 }
 
 VPRIV void pp_once_file_add(pp *p, const lex_file *f)
 {
-	if (p->nonce == p->once_file_capacity) {
-		const lex_file **n = varena_alloc(&p->perm, 2 * p->once_file_capacity * sizeof(*n));
+	if (p->once_file_count == p->once_file_capacity) {
+		const lex_file **n = varena_alloc(&p->permanent_region, 2 * p->once_file_capacity * sizeof(*n));
 
-		memcpy(n, p->once, p->nonce * sizeof(*n));
-		p->once = n;
+		memcpy(n, p->once_files, p->once_file_count * sizeof(*n));
+		p->once_files = n;
 		p->once_file_capacity *= 2;
 	}
-	p->once[p->nonce++] = f;
+	p->once_files[p->once_file_count++] = f;
 }

@@ -17,22 +17,22 @@ VPRIV uint32_t vw_nsucc(vwst *V, uint32_t b)
 	if (!t)
 		return 0;
 	switch (V->p[t].in.op) {
-	case VO_BR: return 1;
-	case VO_BRIF: return 2;
-	case VO_SWITCH: return 1 + V->x[V->p[t].in.c];
+	case VIR_OP_BR: return 1;
+	case VIR_OP_BRIF: return 2;
+	case VIR_OP_SWITCH: return 1 + V->x[V->p[t].in.c];
 	default: return 0;
 	}
 }
 
 VPRIV uint32_t *vw_succp(vwst *V, uint32_t b, uint32_t k)
 {
-	vir_ins *in = &V->p[V->b[b].term].in;
+	vir_insn *in = &V->p[V->b[b].term].in;
 
 	switch (in->op) {
-	case VO_BR: return &in->a;
-	case VO_BRIF: return k ? &in->c : &in->b;
+	case VIR_OP_BR: return &in->a;
+	case VIR_OP_BRIF: return k ? &in->c : &in->b;
 	default: {
-		uint32_t st = V->p[in->a].in.ty == VT_I64 ? 5 : 3;
+		uint32_t st = V->p[in->a].in.type == VIR_TYPE_I64 ? 5 : 3;
 
 		return k ? &V->x[in->c + 1 + (k - 1) * st + st - 1] : &in->b;
 	}
@@ -53,7 +53,7 @@ VPRIV void vw_thread(ecx *e)
 			for (int hop = 0; hop < 64; hop++) {
 				vwb *q = &V->b[*t];
 
-				if (*t == 0 || q->head || q->phead || q->def || !q->term || V->p[q->term].in.op != VO_BR || V->p[q->term].in.a == *t)
+				if (*t == 0 || q->head || q->phead || q->def || !q->term || V->p[q->term].in.op != VIR_OP_BR || V->p[q->term].in.a == *t)
 					break;
 				*t = V->p[q->term].in.a;
 			}
@@ -205,7 +205,7 @@ VPRIV void vw_split(ecx *e)
 	for (uint32_t i = 0; i < n0; i++) {
 		uint32_t b = V->order[i], ns = vw_nsucc(V, b);
 
-		if (V->p[V->b[b].term].in.op == VO_BR)
+		if (V->p[V->b[b].term].in.op == VIR_OP_BR)
 			continue;
 		for (uint32_t k = 0; k < ns; k++) {
 			uint32_t t = *vw_succp(V, b, k), live = 0, eb = VW_NOBLK;
@@ -218,7 +218,7 @@ VPRIV void vw_split(ecx *e)
 			for (uint32_t j = 0; j < V->b[t].npred; j++)
 				if (V->pr[V->b[t].pred + j] == b) {
 					eb = vw_newblk(e);
-					V->b[eb].term = vw_put(e, VO_BR, VT_VOID, 0, t, 0, 0, eb);
+					V->b[eb].term = vw_put(e, VIR_OP_BR, VIR_TYPE_VOID, 0, t, 0, 0, eb);
 					V->b[eb].reach = 1;
 					GROW(V->pr, V->npr, V->cpr, 1);
 					V->b[eb].pred = V->npr;
@@ -236,7 +236,7 @@ VPRIV void vw_split(ecx *e)
 					uint32_t q = V->pr[V->b[t].pred + j];
 
 					if (q >= nb0 && V->b[q].npred == 1 && V->pr[V->b[q].pred] == b && !V->b[q].head &&
-					    V->p[V->b[q].term].in.op == VO_BR && V->p[V->b[q].term].in.a == t)
+					    V->p[V->b[q].term].in.op == VIR_OP_BR && V->p[V->b[q].term].in.a == t)
 						eb = q;
 				}
 			}

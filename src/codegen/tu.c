@@ -212,7 +212,7 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (c->syms[it].kind == S_FUNC && WASM(c)) {
+	if (WASM(c) && c->syms[it].kind == S_FUNC) {
 		wasm_emit_function(e, it);
 	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
 		if (!vw_try(e, it))
@@ -781,7 +781,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
  * VCC_EMIT_REPEAT=N: generate N times over the same AST (profiling), write once.
  * A round that marks functions for inlining (need_fold) is generated again.
  */
-extern _Atomic unsigned long long ppd_ns_emit;
+extern _Atomic unsigned long long driver_emit_nanoseconds;
 
 int emit_tu(cc *c, const cc_opts *o)
 {
@@ -814,7 +814,7 @@ int emit_tu(cc *c, const cc_opts *o)
 	keep_free(&K[1]);
 	vjob_region_release(mfr, c->nsym + 64);
 	vjob_region_pool_give(&mfpool, mfr);
-	ppd_ns_emit += (unsigned long long)((now() - t0) * 1e9);
-	ppd_ph_add(PPD_PH_EMIT, v0);
+	driver_emit_nanoseconds += (unsigned long long)((now() - t0) * 1e9);
+	driver_phase_add(DRIVER_PHASE_EMIT, v0);
 	return err;
 }

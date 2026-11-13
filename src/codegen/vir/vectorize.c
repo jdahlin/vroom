@@ -80,12 +80,12 @@ static vvi *vv_get(vvs *S, uint32_t v)
 	}
 	vv_touch(S, v);
 	*x = (vvi){ .kind = VK_INV, .exact = 1 };
-	if (q->blk == VW_NOBLK && q->in.op == VO_ICONST) {
-		x->k = q->in.ty == VT_I32 ? (int64_t)(int32_t)q->in.b : (int64_t)((uint64_t)q->in.b | (uint64_t)q->in.c << 32);
-	} else if (q->blk == VW_NOBLK && q->in.op == VO_SYMADDR) {
+	if (q->blk == VW_NOBLK && q->in.op == VIR_OP_ICONST) {
+		x->k = q->in.type == VIR_TYPE_I32 ? (int64_t)(int32_t)q->in.b : (int64_t)((uint64_t)q->in.b | (uint64_t)q->in.c << 32);
+	} else if (q->blk == VW_NOBLK && q->in.op == VIR_OP_SYMADDR) {
 		x->objk = VJ_SYM, x->objv = q->in.a;
 		x->k = (int64_t)((uint64_t)q->in.b | (uint64_t)q->in.c << 32);
-	} else if (q->in.ty == VT_PTR) {
+	} else if (q->in.type == VIR_TYPE_PTR) {
 		x->objk = VJ_PTR, x->objv = v;
 	} else {
 		x->bv = v, x->bs = 1;
@@ -126,7 +126,7 @@ static void vv_opaque(vvs *S, uint32_t q, vvi *r)
 	uint32_t ov = r->objv;
 
 	*r = (vvi){ .kind = VK_INV, .exact = 1, .nuse = r->nuse, .bv = q, .bs = 1 };
-	if (S->e->vw->p[q].in.ty == VT_PTR) {
+	if (S->e->vw->p[q].in.type == VIR_TYPE_PTR) {
 		r->objk = ok ? ok : VJ_PTR, r->objv = ok ? ov : q;
 		if (!ok)
 			r->bv = 0, r->bs = 0;
@@ -135,22 +135,22 @@ static void vv_opaque(vvs *S, uint32_t q, vvi *r)
 
 VPRIV bool vv_skip(vwst *V, uint32_t q)
 {
-	return vw_find(V, q) != q || vw_promdead(V, q) || (V->p[q].in.op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME));
+	return vw_find(V, q) != q || vw_promdead(V, q) || (V->p[q].in.op == VIR_OP_MEMSET && (V->p[q].in.flags & VW_LIFETIME));
 }
 
 /* instruction q of the loop: its kind.  false: the loop is not vectorized */
 static bool vv_classify(vvs *S, uint32_t q)
 {
 	vwst *V = S->e->vw;
-	vir_ins in = V->p[q].in;
-	const vir_opinfo *oi = &vir_optab[in.op];
+	vir_insn in = V->p[q].in;
+	const vir_opcode_info *oi = &vir_opcode_table[in.op];
 	uint32_t w[3] = { in.a, in.b, in.c };
 	vvi *o[3] = { NULL, NULL, NULL }, r = { 0 };
 	bool allinv = true;
 	int no = 0;
 
 	for (int k = 0; k < 3; k++)
-		if (vw_isval(oi->k[k])) {
+		if (vw_isval(oi->operand_kinds[k])) {
 			w[k] = vw_find(V, w[k]);
 			o[k] = vv_get(S, w[k]);
 			if (w[k] < S->n0 && o[k]->nuse < 0xffff)
@@ -159,7 +159,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 			no++;
 		}
 	for (uint32_t k = 0; k < no; k++) if (o[k]->kind == VK_FOLD) {
-		if (!(vir_optab[in.op].eff & EF_P)) return vv_no(S, "an ordered reduction used by an effect");
+		if (!(vir_opcode_table[in.op].effects & VIR_EFFECT_P)) return vv_no(S, "an ordered reduction used by an effect");
 		r.kind = VK_FOLD;
 		goto done;
 	}
@@ -173,61 +173,61 @@ static bool vv_classify(vvs *S, uint32_t q)
 			goto done;
 		}
 	switch (in.op) {
-	case VO_ADD: case VO_SUB: case VO_PTRADD:
+	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_PTRADD:
 		if (vv_lin(o[0]) && vv_lin(o[1])) {
-			bool rep = vv_comb(&r, o[0], o[1], in.op == VO_SUB ? -1 : 1);
-			bool ex = rep && o[0]->exact && o[1]->exact && (in.ty != VT_I32 || ((in.fl & VIF_NSW) && !o[0]->uns && !o[1]->uns));
+			bool rep = vv_comb(&r, o[0], o[1], in.op == VIR_OP_SUB ? -1 : 1);
+			bool ex = rep && o[0]->exact && o[1]->exact && (in.type != VIR_TYPE_I32 || ((in.flags & VIR_INSN_FLAG_NSW) && !o[0]->uns && !o[1]->uns));
 
 			r.kind = allinv ? VK_INV : VK_LIN, r.exact = ex;
 			if (allinv && !ex)
 				vv_opaque(S, q, &r);
-			else if (!ex && in.ty != VT_I32)
+			else if (!ex && in.type != VIR_TYPE_I32)
 				r.kind = VK_BAD;
 		} else {
-			r.kind = in.ty == S->ity && vv_lane(o[0]) && vv_lane(o[1]) ? VK_VEC : VK_BAD;
+			r.kind = in.type == S->ity && vv_lane(o[0]) && vv_lane(o[1]) ? VK_VEC : VK_BAD;
 		}
 		break;
-	case VO_MUL: case VO_SHL: {
-		int kc = vv_isk(o[1]) ? 1 : in.op == VO_MUL && vv_isk(o[0]) ? 0 : -1;
+	case VIR_OP_MUL: case VIR_OP_SHL: {
+		int kc = vv_isk(o[1]) ? 1 : in.op == VIR_OP_MUL && vv_isk(o[0]) ? 0 : -1;
 
-		if (kc >= 0 && vv_lin(o[1 - kc]) && !o[1 - kc]->objk && (in.op == VO_MUL || (o[1]->k >= 0 && o[1]->k < (in.ty == VT_I64 ? 63 : 31)))) {	/* (an i32 shift has no nsw: linear lanes, no exact form) */
+		if (kc >= 0 && vv_lin(o[1 - kc]) && !o[1 - kc]->objk && (in.op == VIR_OP_MUL || (o[1]->k >= 0 && o[1]->k < (in.type == VIR_TYPE_I64 ? 63 : 31)))) {	/* (an i32 shift has no nsw: linear lanes, no exact form) */
 			const vvi *x = o[1 - kc];
-			uint64_t K = in.op == VO_MUL ? (uint64_t)o[kc]->k : 1ull << o[1]->k;
+			uint64_t K = in.op == VIR_OP_MUL ? (uint64_t)o[kc]->k : 1ull << o[1]->k;
 
 			r = (vvi){ .kind = allinv ? VK_INV : VK_LIN, .c = (int64_t)((uint64_t)x->c * K), .bv = x->bv,
 				   .bs = (int64_t)((uint64_t)x->bs * K), .k = (int64_t)((uint64_t)x->k * K) };
-			r.exact = x->exact && (in.ty != VT_I32 || ((in.fl & VIF_NSW) && !x->uns));
+			r.exact = x->exact && (in.type != VIR_TYPE_I32 || ((in.flags & VIR_INSN_FLAG_NSW) && !x->uns));
 			if (!r.bs)
 				r.bv = 0;
 			if (allinv && !r.exact)
 				vv_opaque(S, q, &r);
-			else if (!r.exact && in.ty != VT_I32)
+			else if (!r.exact && in.type != VIR_TYPE_I32)
 				r.kind = VK_BAD;
 		} else if (allinv) {
 			vv_opaque(S, q, &r);
 		} else {
-			r.kind = in.op == VO_MUL && in.ty == VT_I32 && S->ity == VT_I32 && vv_lane(o[0]) && vv_lane(o[1]) ? VK_VEC : VK_BAD;	/* (no multiply on 64-bit lanes) */
+			r.kind = in.op == VIR_OP_MUL && in.type == VIR_TYPE_I32 && S->ity == VIR_TYPE_I32 && vv_lane(o[0]) && vv_lane(o[1]) ? VK_VEC : VK_BAD;	/* (no multiply on 64-bit lanes) */
 		}
 		break;
 	}
-	case VO_AND: case VO_OR: case VO_XOR: case VO_NEG: case VO_NOT:
+	case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR: case VIR_OP_NEG: case VIR_OP_NOT:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = in.ty == S->ity && vv_lane(o[0]) && (no < 2 || vv_lane(o[1])) ? VK_VEC : VK_BAD;
+			r.kind = in.type == S->ity && vv_lane(o[0]) && (no < 2 || vv_lane(o[1])) ? VK_VEC : VK_BAD;
 		break;
-	case VO_EXT:
-		if (VIF_W(in.fl) == 2 && in.ty == VT_I64 && V->p[w[0]].in.ty == VT_I32 && vv_lin(o[0]) && o[0]->exact &&
-		    ((in.fl & VIF_MS) ? !o[0]->uns : o[0]->uns)) {	/* (the extension that keeps its form's value) */
+	case VIR_OP_EXT:
+		if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 && in.type == VIR_TYPE_I64 && V->p[w[0]].in.type == VIR_TYPE_I32 && vv_lin(o[0]) && o[0]->exact &&
+		    ((in.flags & VIR_INSN_FLAG_MS) ? !o[0]->uns : o[0]->uns)) {	/* (the extension that keeps its form's value) */
 			r = *o[0];
 			r.nuse = 0, r.sce = r.scb = r.sc0 = r.vec = 0, r.uns = 0;
 		} else if (allinv) {
 			vv_opaque(S, q, &r);
 		} else {	/* (the walker selects int values as i64 and truncates) */
-			r.kind = VIF_W(in.fl) == 2 && in.ty == VT_I64 && V->p[w[0]].in.ty == VT_I32 && S->ity == VT_I32 && vv_lane(o[0]) ? VK_W32 : VK_BAD;
+			r.kind = VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 && in.type == VIR_TYPE_I64 && V->p[w[0]].in.type == VIR_TYPE_I32 && S->ity == VIR_TYPE_I32 && vv_lane(o[0]) ? VK_W32 : VK_BAD;
 		}
 		break;
-	case VO_I2P:	/* an address computed as an integer: its invariant term is the object */
+	case VIR_OP_I2P:	/* an address computed as an integer: its invariant term is the object */
 		if (vv_lin(o[0]) && o[0]->exact && (o[0]->objk || (o[0]->bv && o[0]->bs == 1))) {
 			r = *o[0];
 			r.nuse = 0, r.sce = r.scb = r.sc0 = r.vec = 0;
@@ -239,7 +239,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 			r.kind = VK_BAD;
 		}
 		break;
-	case VO_TRUNC:
+	case VIR_OP_TRUNC:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else if (o[0]->kind == VK_LIN)
@@ -247,56 +247,56 @@ static bool vv_classify(vvs *S, uint32_t q)
 		else
 			r.kind = o[0]->kind == VK_W32 ? VK_VEC : VK_BAD;
 		break;
-	case VO_ICMP:
+	case VIR_OP_ICMP:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = V->p[w[0]].in.ty == S->ity && vv_lane(o[0]) && vv_lane(o[1]) ? VK_MASK : VK_BAD;
+			r.kind = V->p[w[0]].in.type == S->ity && vv_lane(o[0]) && vv_lane(o[1]) ? VK_MASK : VK_BAD;
 		break;
-	case VO_FCMP:
+	case VIR_OP_FCMP:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = V->p[w[0]].in.ty == S->fty && vv_lane(o[0]) && vv_lane(o[1]) ? VK_MASK : VK_BAD;
+			r.kind = V->p[w[0]].in.type == S->fty && vv_lane(o[0]) && vv_lane(o[1]) ? VK_MASK : VK_BAD;
 		break;
-	case VO_SELECT:
+	case VIR_OP_SELECT:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = o[0]->kind == VK_MASK && (in.ty == S->ity || in.ty == S->fty) && vv_lane(o[1]) && vv_lane(o[2]) ? VK_VEC :
-				 o[0]->kind == VK_MASK && in.ty == VT_I64 && S->ity == VT_I32 && (o[1]->kind == VK_W32 || vv_isk(o[1])) &&
+			r.kind = o[0]->kind == VK_MASK && (in.type == S->ity || in.type == S->fty) && vv_lane(o[1]) && vv_lane(o[2]) ? VK_VEC :
+				 o[0]->kind == VK_MASK && in.type == VIR_TYPE_I64 && S->ity == VIR_TYPE_I32 && (o[1]->kind == VK_W32 || vv_isk(o[1])) &&
 				 (o[2]->kind == VK_W32 || vv_isk(o[2])) ? VK_W32 : VK_BAD;
 		break;
-	case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV: case VO_FNEG: case VO_FABS: case VO_FSQRT:
+	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV: case VIR_OP_FNEG: case VIR_OP_FABS: case VIR_OP_FSQRT:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = in.ty == S->fty && vv_lane(o[0]) && (no < 2 || vv_lane(o[1])) ? VK_VEC : VK_BAD;
+			r.kind = in.type == S->fty && vv_lane(o[0]) && (no < 2 || vv_lane(o[1])) ? VK_VEC : VK_BAD;
 		break;
-	case VO_FMA:
+	case VIR_OP_FMA:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = in.ty == S->fty && vv_lane(o[0]) && vv_lane(o[1]) && vv_lane(o[2]) ? VK_VEC : VK_BAD;
+			r.kind = in.type == S->fty && vv_lane(o[0]) && vv_lane(o[1]) && vv_lane(o[2]) ? VK_VEC : VK_BAD;
 		break;
-	case VO_S2F:
+	case VIR_OP_S2F:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
-			r.kind = in.ty == S->fty && V->p[w[0]].in.ty == S->ity && vv_lane(o[0]) ? VK_VEC :
+			r.kind = in.type == S->fty && V->p[w[0]].in.type == S->ity && vv_lane(o[0]) ? VK_VEC :
 				 /* (double)i: the i32 index widened lane by lane */
-				 in.ty == VT_F64 && S->fty == VT_F64 && V->p[w[0]].in.ty == VT_I32 && o[0]->kind == VK_LIN && o[0]->exact && !o[0]->uns ? VK_VEC : VK_BAD;
+				 in.type == VIR_TYPE_F64 && S->fty == VIR_TYPE_F64 && V->p[w[0]].in.type == VIR_TYPE_I32 && o[0]->kind == VK_LIN && o[0]->exact && !o[0]->uns ? VK_VEC : VK_BAD;
 		break;
-	case VO_SDIV: case VO_UDIV: case VO_SREM: case VO_UREM: case VO_LSHR: case VO_ASHR: case VO_UMULHI: case VO_SMULHI:
-	case VO_CLZ: case VO_CTZ: case VO_POPCNT: case VO_BSWAP: case VO_U2F: case VO_F2S: case VO_F2U: case VO_FEXT:
-	case VO_FTRUNC: case VO_BITCAST: case VO_PSUB: case VO_P2I:
+	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_SREM: case VIR_OP_UREM: case VIR_OP_LSHR: case VIR_OP_ASHR: case VIR_OP_UMULHI: case VIR_OP_SMULHI:
+	case VIR_OP_CLZ: case VIR_OP_CTZ: case VIR_OP_POPCNT: case VIR_OP_BSWAP: case VIR_OP_U2F: case VIR_OP_F2S: case VIR_OP_F2U: case VIR_OP_FEXT:
+	case VIR_OP_FTRUNC: case VIR_OP_BITCAST: case VIR_OP_PSUB: case VIR_OP_P2I:
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else
 			r.kind = VK_BAD;
 		break;
-	case VO_LOAD:
-		if (in.fl & VIF_VOL)
+	case VIR_OP_LOAD:
+		if (in.flags & VIR_INSN_FLAG_VOL)
 			return vv_no(S, "a volatile load");
 		if (!vv_lin(o[0]) || !o[0]->exact || !o[0]->objk) {
 			r.kind = VK_BAD;
@@ -305,12 +305,12 @@ static bool vv_classify(vvs *S, uint32_t q)
 				return vv_no(S, "too many invariant loads");
 			S->invld[S->ninvld++] = q;
 			vv_opaque(S, q, &r);
-		} else if (S->lg == 2 && VIF_W(in.fl) == 2 && in.ty == VT_I64 &&
+		} else if (S->lg == 2 && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 && in.type == VIR_TYPE_I64 &&
 		           (o[0]->c == 4 || o[0]->c == -4)) {
 			if (S->nacc == 64) return vv_no(S, "too many accesses");
 			S->acc[S->nacc++] = (vvacc){q, S->pos, false};
 			r.kind = VK_W32;
-		} else if (VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity) && (o[0]->c && o[0]->c % S->esz == 0 && o[0]->c >= -(1 << 20) && o[0]->c <= (1 << 20))) {
+		} else if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == S->lg && (in.type == S->fty || in.type == S->ity) && (o[0]->c && o[0]->c % S->esz == 0 && o[0]->c >= -(1 << 20) && o[0]->c <= (1 << 20))) {
 			if (S->nacc == 64)
 				return vv_no(S, "too many accesses");
 			S->acc[S->nacc++] = (vvacc){ q, S->pos, false };
@@ -319,16 +319,16 @@ static bool vv_classify(vvs *S, uint32_t q)
 			r.kind = VK_BAD;
 		}
 		break;
-	case VO_STORE: {
-		uint32_t vt = V->p[w[1]].in.ty;
+	case VIR_OP_STORE: {
+		uint32_t vt = V->p[w[1]].in.type;
 
-		if (in.fl & VIF_VOL)
+		if (in.flags & VIR_INSN_FLAG_VOL)
 			return vv_no(S, "a volatile store");
 		if (!vv_lin(o[0]) || !o[0]->exact || !o[0]->objk)
 			return vv_no(S, "a store whose address is not base + linear");
 		if (!o[0]->c || o[0]->c % S->esz || o[0]->c < -(1 << 20) || o[0]->c > (1 << 20))
 			return vv_no(S, o[0]->c ? "a store with a stride other than its size" : "a store to one address");
-		if (VIF_W(in.fl) != S->lg || (vt != S->fty && vt != S->ity))
+		if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) != S->lg || (vt != S->fty && vt != S->ity))
 			return vv_no(S, "a store of another width than the loop's lanes");
 		if (!vv_lane(o[1]))
 			return vv_no(S, "a stored value that cannot be vectorized");
@@ -342,23 +342,23 @@ static bool vv_classify(vvs *S, uint32_t q)
 		return vv_no(S, "an instruction with effects (a call, a block copy, an atomic)");
 	}
 	/* Expand pure address arithmetic lane by lane when it has no packed form. */
-	if (r.kind == VK_BAD && (in.op == VO_ADD || in.op == VO_SUB || in.op == VO_MUL || in.op == VO_SHL ||
-	    in.op == VO_LSHR || in.op == VO_ASHR || in.op == VO_EXT || in.op == VO_TRUNC || in.op == VO_I2P ||
-	    in.op == VO_P2I || in.op == VO_PTRADD || in.op == VO_AND || in.op == VO_OR || in.op == VO_XOR)) {
+	if (r.kind == VK_BAD && (in.op == VIR_OP_ADD || in.op == VIR_OP_SUB || in.op == VIR_OP_MUL || in.op == VIR_OP_SHL ||
+	    in.op == VIR_OP_LSHR || in.op == VIR_OP_ASHR || in.op == VIR_OP_EXT || in.op == VIR_OP_TRUNC || in.op == VIR_OP_I2P ||
+	    in.op == VIR_OP_P2I || in.op == VIR_OP_PTRADD || in.op == VIR_OP_AND || in.op == VIR_OP_OR || in.op == VIR_OP_XOR)) {
 		bool ok = true;
 		for (uint32_t k = 0; k < no; k++)
 			ok &= vv_lane(o[k]) || o[k]->kind == VK_W32 || o[k]->kind == VK_SCALAR;
 		if (ok) {
 			r.kind = VK_SCALAR;
-			if (in.op == VO_ADD || in.op == VO_PTRADD || in.op == VO_SUB) {
+			if (in.op == VIR_OP_ADD || in.op == VIR_OP_PTRADD || in.op == VIR_OP_SUB) {
 				if (o[0]->objk && !o[1]->objk) r.objk = o[0]->objk, r.objv = o[0]->objv;
-				else if (in.op != VO_SUB && o[1]->objk && !o[0]->objk) r.objk = o[1]->objk, r.objv = o[1]->objv;
-			} else if (in.op == VO_I2P || in.op == VO_P2I)
+				else if (in.op != VIR_OP_SUB && o[1]->objk && !o[0]->objk) r.objk = o[1]->objk, r.objv = o[1]->objv;
+			} else if (in.op == VIR_OP_I2P || in.op == VIR_OP_P2I)
 				r.objk = o[0]->objk, r.objv = o[0]->objv;
 		}
 	}
-	if (in.op == VO_LOAD && r.kind == VK_BAD && o[0]->kind == VK_SCALAR && o[0]->objk &&
-	    VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity)) {
+	if (in.op == VIR_OP_LOAD && r.kind == VK_BAD && o[0]->kind == VK_SCALAR && o[0]->objk &&
+	    VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == S->lg && (in.type == S->fty || in.type == S->ity)) {
 		if (S->ngather == 64) return vv_no(S, "too many indexed reads");
 		S->gather[S->ngather++] = q;
 		r.kind = VK_VEC;
@@ -470,14 +470,14 @@ static uint32_t vv_scalar(vvs *S, uint32_t v, int mode);
 static uint32_t vv_clone(vvs *S, uint32_t v, uint32_t b, int mode)
 {
 	vwst *V = S->e->vw;
-	vir_ins in = V->p[v].in;
-	const vir_opinfo *oi = &vir_optab[in.op];
+	vir_insn in = V->p[v].in;
+	const vir_opcode_info *oi = &vir_opcode_table[in.op];
 	uint32_t w[3] = { in.a, in.b, in.c };
 
 	for (int k = 0; k < 3; k++)
-		if (vw_isval(oi->k[k]) && !(w[k] = vv_scalar(S, w[k], mode)))
+		if (vw_isval(oi->operand_kinds[k]) && !(w[k] = vv_scalar(S, w[k], mode)))
 			return 0;
-	return vv_ins(S, b, in.op, in.ty, in.fl, w[0], w[1], w[2]);
+	return vv_ins(S, b, in.op, in.type, in.flags, w[0], w[1], w[2]);
 }
 
 /* v as a scalar.  VM_ENTRY: at the loop's entry, in VPRE (only what the header computes: VPRE
@@ -503,7 +503,7 @@ static uint32_t vv_scalar(vvs *S, uint32_t v, int mode)
 		return x->scb;
 	if (mode == VM_T0 && x->sc0)
 		return x->sc0;
-	if (V->p[v].in.op == VO_BPARAM) {	/* an induction */
+	if (V->p[v].in.op == VIR_OP_BPARAM) {	/* an induction */
 		for (uint32_t i = 0; i < S->nind; i++)
 			if (S->ind[i] == v)
 				return mode == VM_BODY ? S->indb[i] : vw_find(V, V->x[V->p[v].in.b + S->jP]);
@@ -530,7 +530,7 @@ static uint32_t vv_vty(const vvs *S, uint32_t ty)
 {
 	if (ty != S->ity && ty != S->fty)
 		return 0;
-	return ty == VT_F32 ? VT_F32X4 : ty == VT_I32 ? VT_I32X4 : ty == VT_F64 ? VT_F64X2 : VT_I64X2;
+	return ty == VIR_TYPE_F32 ? VIR_TYPE_F32X4 : ty == VIR_TYPE_I32 ? VIR_TYPE_I32X4 : ty == VIR_TYPE_F64 ? VIR_TYPE_F64X2 : VIR_TYPE_I64X2;
 }
 
 /* lanes 0, c, 2c, 3c */
@@ -541,13 +541,13 @@ static uint32_t vv_step(vvs *S, int64_t c)
 	for (uint32_t i = 0; i < S->nstep; i++)
 		if (S->stepc[i] == c)
 			return S->stepv[i];
-	s = vv_ins(S, S->VPH, VO_VSERIES, vv_vty(S, S->ity), 0, 0, 0, 0);
-	if (S->ity == VT_I64 && c != 1) {	/* (two lanes, no multiply: 0 and c are c & (0, -1)) */
-		k = vv_ins(S, S->VPH, VO_VSPLAT, VT_I64X2, 0, vw_iconst(S->e, VT_I64, c), 0, 0);
-		s = vv_ins(S, S->VPH, VO_AND, VT_I64X2, 0, k, vv_ins(S, S->VPH, VO_NEG, VT_I64X2, 0, s, 0, 0), 0);
+	s = vv_ins(S, S->VPH, VIR_OP_VSERIES, vv_vty(S, S->ity), 0, 0, 0, 0);
+	if (S->ity == VIR_TYPE_I64 && c != 1) {	/* (two lanes, no multiply: 0 and c are c & (0, -1)) */
+		k = vv_ins(S, S->VPH, VIR_OP_VSPLAT, VIR_TYPE_I64X2, 0, vw_iconst(S->e, VIR_TYPE_I64, c), 0, 0);
+		s = vv_ins(S, S->VPH, VIR_OP_AND, VIR_TYPE_I64X2, 0, k, vv_ins(S, S->VPH, VIR_OP_NEG, VIR_TYPE_I64X2, 0, s, 0, 0), 0);
 	} else if ((int32_t)c != 1) {
-		k = vv_ins(S, S->VPH, VO_VSPLAT, VT_I32X4, 0, vw_iconst(S->e, VT_I32, (int32_t)c), 0, 0);
-		s = vv_ins(S, S->VPH, VO_MUL, VT_I32X4, 0, s, k, 0);
+		k = vv_ins(S, S->VPH, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0, vw_iconst(S->e, VIR_TYPE_I32, (int32_t)c), 0, 0);
+		s = vv_ins(S, S->VPH, VIR_OP_MUL, VIR_TYPE_I32X4, 0, s, k, 0);
 	}
 	if (S->nstep < 4)
 		S->stepc[S->nstep] = c, S->stepv[S->nstep++] = s;
@@ -561,7 +561,7 @@ static uint32_t vv_mask(vvs *S, uint32_t v);
 static uint32_t vv_mask(vvs *S, uint32_t v)
 {
 	vwst *V = S->e->vw;
-	vir_ins in;
+	vir_insn in;
 	uint32_t a, b, r;
 	vvi *x;
 
@@ -576,7 +576,7 @@ static uint32_t vv_mask(vvs *S, uint32_t v)
 	in = V->p[v].in;
 	if (!(a = vv_vec(S, in.a)) || !(b = vv_vec(S, in.b)))
 		return 0;
-	r = vv_ins(S, S->VB, in.op == VO_ICMP ? VO_VICMP : VO_VFCMP, vv_vty(S, S->ity), in.fl & 15, a, b, 0);
+	r = vv_ins(S, S->VB, in.op == VIR_OP_ICMP ? VIR_OP_VICMP : VIR_OP_VFCMP, vv_vty(S, S->ity), in.flags & 15, a, b, 0);
 	S->I[v].vec = r;
 	return r;
 }
@@ -586,7 +586,7 @@ static uint32_t vv_w32(vvs *S, uint32_t v)
 {
 	vwst *V = S->e->vw;
 	vvi *x;
-	vir_ins in;
+	vir_insn in;
 	uint32_t a, b, c, r;
 
 	v = vw_find(V, v);
@@ -595,13 +595,13 @@ static uint32_t vv_w32(vvs *S, uint32_t v)
 		return x->vec;
 	in = V->p[v].in;
 	if (vv_isk(x)) {
-		r = vv_ins(S, S->VPH, VO_VSPLAT, VT_I32X4, 0, vw_iconst(S->e, VT_I32, (int32_t)x->k), 0, 0);
-	} else if (x->kind == VK_W32 && in.op == VO_EXT) {
+		r = vv_ins(S, S->VPH, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0, vw_iconst(S->e, VIR_TYPE_I32, (int32_t)x->k), 0, 0);
+	} else if (x->kind == VK_W32 && in.op == VIR_OP_EXT) {
 		return vv_vec(S, in.a);
-	} else if (x->kind == VK_W32 && in.op == VO_SELECT) {
+	} else if (x->kind == VK_W32 && in.op == VIR_OP_SELECT) {
 		if (!(a = vv_mask(S, in.a)) || !(b = vv_w32(S, in.b)) || !(c = vv_w32(S, in.c)))
 			return 0;
-		r = vv_ins(S, S->VB, VO_VBITSEL, VT_I32X4, 0, a, b, c);
+		r = vv_ins(S, S->VB, VIR_OP_VBITSEL, VIR_TYPE_I32X4, 0, a, b, c);
 	} else {
 		return vv_no(S, "a value that cannot be vectorized"), 0;
 	}
@@ -618,34 +618,34 @@ static uint32_t vv_at(vvs *S, uint32_t v, uint32_t lane, uint32_t *budget)
 	vwst *V = S->e->vw;
 	v = vw_find(V, v);
 	vvi *x = vv_get(S, v);
-	vir_ins in = V->p[v].in;
+	vir_insn in = V->p[v].in;
 	if (x->kind == VK_INV) return vv_scalar(S, v, VM_BODY);
 	if (x->kind == VK_LIN) {
 		uint32_t a = vv_scalar(S, v, VM_BODY);
 		if (!a || !lane) return a;
-		return vv_ins(S, S->VB, in.ty == VT_PTR ? VO_PTRADD : VO_ADD, in.ty, 0, a,
-			vw_iconst(S->e, in.ty == VT_I32 ? VT_I32 : VT_I64, lane * x->c), 0);
+		return vv_ins(S, S->VB, in.type == VIR_TYPE_PTR ? VIR_OP_PTRADD : VIR_OP_ADD, in.type, 0, a,
+			vw_iconst(S->e, in.type == VIR_TYPE_I32 ? VIR_TYPE_I32 : VIR_TYPE_I64, lane * x->c), 0);
 	}
 	if (x->kind == VK_MASK) {
 		uint32_t a=vv_mask(S,v);
 		if(!a)return 0;
-		uint32_t r=vv_ins(S,S->VB,VO_VEXTRACT,S->ity,0,a,lane,0);
-		return S->ity==VT_I32?r:vv_ins(S,S->VB,VO_TRUNC,VT_I32,0,r,0,0);
+		uint32_t r=vv_ins(S,S->VB,VIR_OP_VEXTRACT,S->ity,0,a,lane,0);
+		return S->ity==VIR_TYPE_I32?r:vv_ins(S,S->VB,VIR_OP_TRUNC,VIR_TYPE_I32,0,r,0,0);
 	}
 	if (x->kind == VK_VEC || x->kind == VK_CARRY) {
 		uint32_t a = vv_vec(S, v);
-		return a ? vv_ins(S, S->VB, VO_VEXTRACT, in.ty, 0, a, lane, 0) : 0;
+		return a ? vv_ins(S, S->VB, VIR_OP_VEXTRACT, in.type, 0, a, lane, 0) : 0;
 	}
-	if (x->kind == VK_W32 && in.op == VO_LOAD) {
+	if (x->kind == VK_W32 && in.op == VIR_OP_LOAD) {
 		if (!x->vec) return vv_no(S, "an indexed operand used before its load"), 0;
-		uint32_t a = vv_ins(S, S->VB, VO_VEXTRACT, VT_I32, 0, x->vec, lane, 0);
-		return vv_ins(S, S->VB, VO_EXT, VT_I64, 2 | (in.fl & VIF_MS), a, 0, 0);
+		uint32_t a = vv_ins(S, S->VB, VIR_OP_VEXTRACT, VIR_TYPE_I32, 0, x->vec, lane, 0);
+		return vv_ins(S, S->VB, VIR_OP_EXT, VIR_TYPE_I64, 2 | (in.flags & VIR_INSN_FLAG_MS), a, 0, 0);
 	}
 	if (x->kind == VK_SCALAR || x->kind == VK_W32) {
 		uint32_t w[3] = {in.a, in.b, in.c};
 		for (int k = 0; k < 3; k++)
-			if (vw_isval(vir_optab[in.op].k[k]) && !(w[k] = vv_at(S, w[k], lane, budget))) return 0;
-		return vv_ins(S, S->VB, in.op, in.ty, in.fl, w[0], w[1], w[2]);
+			if (vw_isval(vir_opcode_table[in.op].operand_kinds[k]) && !(w[k] = vv_at(S, w[k], lane, budget))) return 0;
+		return vv_ins(S, S->VB, in.op, in.type, in.flags, w[0], w[1], w[2]);
 	}
 	return vv_no(S, "an address operand that cannot be expanded"), 0;
 }
@@ -657,13 +657,13 @@ static uint32_t vv_foldat(vvs *S, uint32_t v, uint32_t lane, uint32_t *budget)
 	v = vw_find(V, v);
 	for(uint32_t i=0;i<S->nfold;i++)if(v==S->fold[i].p)return S->fold[i].cur;
 	if (vv_get(S, v)->kind != VK_FOLD) return vv_at(S, v, lane, budget);
-	if (!*budget || V->p[v].in.op == VO_BPARAM) return vv_no(S, "an ordered reduction expression beyond the budget"), 0;
+	if (!*budget || V->p[v].in.op == VIR_OP_BPARAM) return vv_no(S, "an ordered reduction expression beyond the budget"), 0;
 	--*budget;
-	vir_ins in = V->p[v].in;
+	vir_insn in = V->p[v].in;
 	uint32_t w[3] = {in.a,in.b,in.c};
-	for (int k=0;k<3;k++) if (vw_isval(vir_optab[in.op].k[k]))
+	for (int k=0;k<3;k++) if (vw_isval(vir_opcode_table[in.op].operand_kinds[k]))
 		if (!(w[k] = vv_foldat(S,w[k],lane,budget))) return 0;
-	return vv_ins(S,S->VB,in.op,in.ty,in.fl,w[0],w[1],w[2]);
+	return vv_ins(S,S->VB,in.op,in.type,in.flags,w[0],w[1],w[2]);
 }
 
 /* v's lanes */
@@ -671,14 +671,14 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 {
 	vwst *V = S->e->vw;
 	vvi *x;
-	vir_ins in;
+	vir_insn in;
 	uint32_t ty, vt, r = 0, a, b, c;
 
 	v = vw_find(V, v);
 	x = vv_get(S, v);
 	if (v < S->n0 && x->vec)
 		return x->vec;
-	ty = V->p[v].in.ty, vt = vv_vty(S, ty);
+	ty = V->p[v].in.type, vt = vv_vty(S, ty);
 	if (!vt || v >= S->n0) {
 		vv_no(S, "a value of another width than the loop's lanes");
 		return 0;
@@ -688,15 +688,15 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 	case VK_INV:
 		if (!(a = vv_scalar(S, v, VM_BODY)))
 			return 0;
-		r = vv_ins(S, S->VPH, VO_VSPLAT, vt, 0, a, 0, 0);
+		r = vv_ins(S, S->VPH, VIR_OP_VSPLAT, vt, 0, a, 0, 0);
 		break;
 	case VK_LIN: {
 		int64_t cc = x->c;
 
 		if (ty != S->ity || !(a = vv_scalar(S, v, VM_BODY)))
 			return vv_no(S, "a linear value of another width than the lanes"), 0;
-		a = vv_ins(S, S->VB, VO_VSPLAT, vt, 0, a, 0, 0);
-		r = vv_ins(S, S->VB, VO_ADD, vt, 0, a, vv_step(S, cc), 0);
+		a = vv_ins(S, S->VB, VIR_OP_VSPLAT, vt, 0, a, 0, 0);
+		r = vv_ins(S, S->VB, VIR_OP_ADD, vt, 0, a, vv_step(S, cc), 0);
 		break;
 	}
 	case VK_CARRY:
@@ -704,60 +704,60 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 			if (S->carry[i].busy) return vv_no(S, "a cyclic carried expression"), 0;
 			S->carry[i].busy = true;
 			if (!(a = vv_vec(S, S->carry[i].next))) return 0;
-			r = vv_ins(S, S->VB, VO_VSPLAT, vt, 0, S->carry[i].par, 0, 0);
+			r = vv_ins(S, S->VB, VIR_OP_VSPLAT, vt, 0, S->carry[i].par, 0, 0);
 			for (uint32_t lane = 1; lane < S->vf; lane++) {
-				b = vv_ins(S, S->VB, VO_VEXTRACT, ty, 0, a, lane-1, 0);
-				r = vv_ins(S, S->VB, VO_VINSERT, vt, 0, r, b, lane);
+				b = vv_ins(S, S->VB, VIR_OP_VEXTRACT, ty, 0, a, lane-1, 0);
+				r = vv_ins(S, S->VB, VIR_OP_VINSERT, vt, 0, r, b, lane);
 			}
-			S->carry[i].last = vv_ins(S, S->VB, VO_VEXTRACT, ty, 0, a, S->vf-1, 0);
+			S->carry[i].last = vv_ins(S, S->VB, VIR_OP_VEXTRACT, ty, 0, a, S->vf-1, 0);
 			S->carry[i].busy = false;
 			break;
 		}
 		break;
 	case VK_VEC:
 		switch (in.op) {
-		case VO_ADD: case VO_SUB: case VO_MUL: case VO_AND: case VO_OR: case VO_XOR:
-		case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV:
+		case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_MUL: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
+		case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV:
 			if (!(a = vv_vec(S, in.a)) || !(b = vv_vec(S, in.b)))
 				return 0;
 			r = vv_ins(S, S->VB, in.op, vt, 0, a, b, 0);
 			break;
-		case VO_FMA: {
+		case VIR_OP_FMA: {
 			uint32_t c;
 
 			if (!(a = vv_vec(S, in.a)) || !(b = vv_vec(S, in.b)) || !(c = vv_vec(S, in.c)))
 				return 0;
-			r = vv_ins(S, S->VB, VO_FMA, vt, in.fl, a, b, c);
+			r = vv_ins(S, S->VB, VIR_OP_FMA, vt, in.flags, a, b, c);
 			break;
 		}
-		case VO_NEG: case VO_NOT: case VO_FNEG: case VO_FABS: case VO_FSQRT:
+		case VIR_OP_NEG: case VIR_OP_NOT: case VIR_OP_FNEG: case VIR_OP_FABS: case VIR_OP_FSQRT:
 			if (!(a = vv_vec(S, in.a)))
 				return 0;
 			r = vv_ins(S, S->VB, in.op, vt, 0, a, 0, 0);
 			break;
-		case VO_TRUNC:
+		case VIR_OP_TRUNC:
 			if (!(r = vv_w32(S, in.a)))
 				return 0;
 			break;
-		case VO_S2F:
-			if (V->p[vw_find(V, in.a)].in.ty != S->ity) {	/* (an exact i32 index into 64-bit lanes) */
+		case VIR_OP_S2F:
+			if (V->p[vw_find(V, in.a)].in.type != S->ity) {	/* (an exact i32 index into 64-bit lanes) */
 				int64_t cc = vv_get(S, vw_find(V, in.a))->c;
 
 				if (!(a = vv_scalar(S, in.a, VM_BODY)))
 					return 0;
-				a = vv_ins(S, S->VB, VO_EXT, VT_I64, 2 | VIF_MS, a, 0, 0);
-				a = vv_ins(S, S->VB, VO_VSPLAT, VT_I64X2, 0, a, 0, 0);
-				a = vv_ins(S, S->VB, VO_ADD, VT_I64X2, 0, a, vv_step(S, cc), 0);
+				a = vv_ins(S, S->VB, VIR_OP_EXT, VIR_TYPE_I64, 2 | VIR_INSN_FLAG_MS, a, 0, 0);
+				a = vv_ins(S, S->VB, VIR_OP_VSPLAT, VIR_TYPE_I64X2, 0, a, 0, 0);
+				a = vv_ins(S, S->VB, VIR_OP_ADD, VIR_TYPE_I64X2, 0, a, vv_step(S, cc), 0);
 			} else if (!(a = vv_vec(S, in.a)))
 				return 0;
-			r = vv_ins(S, S->VB, VO_VS2F, vt, 0, a, 0, 0);
+			r = vv_ins(S, S->VB, VIR_OP_VS2F, vt, 0, a, 0, 0);
 			break;
-		case VO_SELECT:
+		case VIR_OP_SELECT:
 			if (!(a = vv_mask(S, in.a)) || !(b = vv_vec(S, in.b)) || !(c = vv_vec(S, in.c)))
 				return 0;
-			r = vv_ins(S, S->VB, VO_VBITSEL, vt, 0, a, b, c);
+			r = vv_ins(S, S->VB, VIR_OP_VBITSEL, vt, 0, a, b, c);
 			break;
-		case VO_LOAD: {
+		case VIR_OP_LOAD: {
 			/* A recurrence can need a later load. Move it only past stores to other symbols. */
 			const vvi *addr = vv_get(S, vw_find(V,in.a));
 			uint32_t pos = UINT32_MAX;
@@ -771,8 +771,8 @@ static uint32_t vv_vec(vvs *S, uint32_t v)
 			}
 			bool rev;
 			if (!(a=vv_addr(S,v,&rev))) return 0;
-			r=vv_ins(S,S->VB,VO_LOAD,vt,in.fl & ~(uint32_t)VIF_MS,a,in.b,0);
-			if (rev) r=vv_ins(S,S->VB,VO_VREV,vt,0,r,0,0);
+			r=vv_ins(S,S->VB,VIR_OP_LOAD,vt,in.flags & ~(uint32_t)VIR_INSN_FLAG_MS,a,in.b,0);
+			if (rev) r=vv_ins(S,S->VB,VIR_OP_VREV,vt,0,r,0,0);
 			break;
 		}
 		default:	/* (a load: made where the scalar loop has it) */
@@ -804,9 +804,9 @@ static uint32_t vv_addr(vvs *S, uint32_t q, bool *rev)
 	if (!(s = vv_scalar(S, a, VM_T0)))
 		return 0;
 	if (*rev)
-		s = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, -(int64_t)(16 - S->esz)), 0);
+		s = vv_ins(S, S->VPH, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, s, vw_iconst(S->e, VIR_TYPE_I64, -(int64_t)(16 - S->esz)), 0);
 	S->pin[S->npin].a = a, S->pin[S->npin].rev = *rev;
-	return S->pin[S->npin++].par = vv_param(S, S->VB, VT_PTR, s, 0, 0);
+	return S->pin[S->npin++].par = vv_param(S, S->VB, VIR_TYPE_PTR, s, 0, 0);
 }
 
 /* [lo, hi): the bytes access x (vv_chk's index) touches in the vector iterations; span = 4 * nv */
@@ -820,18 +820,18 @@ static bool vv_range(vvs *S, uint32_t x, uint32_t span, uint32_t *lo, uint32_t *
 	int64_t stride = vv_get(S, a)->c, mag = stride < 0 ? -stride : stride;
 	if (x < 64 && mag != S->esz) {
 		/* Cover the first through last touched element, including gaps. */
-		span = vv_ins(S, S->VPH, VO_LSHR, VT_I64, 0, span, vw_iconst(S->e, VT_I64, S->lg), 0);
-		span = vv_ins(S, S->VPH, VO_SUB, VT_I64, 0, span, vw_iconst(S->e, VT_I64, 1), 0);
-		span = vv_ins(S, S->VPH, VO_MUL, VT_I64, 0, span, vw_iconst(S->e, VT_I64, mag), 0);
-		span = vv_ins(S, S->VPH, VO_ADD, VT_I64, 0, span, vw_iconst(S->e, VT_I64, S->esz), 0);
+		span = vv_ins(S, S->VPH, VIR_OP_LSHR, VIR_TYPE_I64, 0, span, vw_iconst(S->e, VIR_TYPE_I64, S->lg), 0);
+		span = vv_ins(S, S->VPH, VIR_OP_SUB, VIR_TYPE_I64, 0, span, vw_iconst(S->e, VIR_TYPE_I64, 1), 0);
+		span = vv_ins(S, S->VPH, VIR_OP_MUL, VIR_TYPE_I64, 0, span, vw_iconst(S->e, VIR_TYPE_I64, mag), 0);
+		span = vv_ins(S, S->VPH, VIR_OP_ADD, VIR_TYPE_I64, 0, span, vw_iconst(S->e, VIR_TYPE_I64, S->esz), 0);
 	}
 	if (x >= 64) {
-		*lo = s, *hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, 1 << VIF_W(V->p[q].in.fl)), 0);
+		*lo = s, *hi = vv_ins(S, S->VPH, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, s, vw_iconst(S->e, VIR_TYPE_I64, 1 << VIR_INSN_FLAG_WIDTH_LOG2(V->p[q].in.flags)), 0);
 	} else if (vv_get(S, a)->c > 0) {
-		*lo = s, *hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, span, 0);
+		*lo = s, *hi = vv_ins(S, S->VPH, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, s, span, 0);
 	} else {
-		*hi = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, s, vw_iconst(S->e, VT_I64, S->esz), 0);
-		*lo = vv_ins(S, S->VPH, VO_PTRADD, VT_PTR, 0, *hi, vv_ins(S, S->VPH, VO_NEG, VT_I64, 0, span, 0, 0), 0);
+		*hi = vv_ins(S, S->VPH, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, s, vw_iconst(S->e, VIR_TYPE_I64, S->esz), 0);
+		*lo = vv_ins(S, S->VPH, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, *hi, vv_ins(S, S->VPH, VIR_OP_NEG, VIR_TYPE_I64, 0, span, 0, 0), 0);
 	}
 	return true;
 }
@@ -862,7 +862,7 @@ static uint32_t vv_blk(vvs *S, uint32_t p0, uint32_t p1)
 
 static void vv_term(vvs *S, uint32_t b, uint32_t op, uint32_t x, uint32_t y, uint32_t z)
 {
-	uint32_t t = vw_put(S->e, op, VT_VOID, 0, x, y, z, b);
+	uint32_t t = vw_put(S->e, op, VIR_TYPE_VOID, 0, x, y, z, b);
 
 	S->e->vw->b[b].term = t;
 }
@@ -876,25 +876,25 @@ static bool vv_chain(vvs *S, uint32_t p, uint32_t nx, int64_t *K, bool *nsw)
 
 	*K = 0, *nsw = true;
 	for (int n = 0; v != p; n++) {
-		vir_ins N;
+		vir_insn N;
 		uint32_t a, b;
 		int64_t k;
 
 		if (n == 8 || v >= S->n0 || V->p[v].blk == VW_NOBLK || !S->inl[V->p[v].blk])
 			goto no;
 		N = V->p[v].in;
-		if (N.op != VO_ADD && N.op != VO_SUB && N.op != VO_PTRADD)
+		if (N.op != VIR_OP_ADD && N.op != VIR_OP_SUB && N.op != VIR_OP_PTRADD)
 			goto no;
 		a = vw_find(V, N.a), b = vw_find(V, N.b);
 		if (vw_kint(V, b, &k)) {
-			*K += N.op == VO_SUB ? -k : k;
-		} else if (N.op == VO_ADD && b < S->n0 && V->p[b].in.op != VO_ICONST && (V->p[b].blk == VW_NOBLK || !S->inl[V->p[b].blk]) && S->none < 8) {
+			*K += N.op == VIR_OP_SUB ? -k : k;
+		} else if (N.op == VIR_OP_ADD && b < S->n0 && V->p[b].in.op != VIR_OP_ICONST && (V->p[b].blk == VW_NOBLK || !S->inl[V->p[b].blk]) && S->none < 8) {
 			S->one[S->none++] = b;
 			*K += 1;
 		} else {
 			goto no;
 		}
-		if (N.ty == VT_I32 && !(N.fl & VIF_NSW))
+		if (N.type == VIR_TYPE_I32 && !(N.flags & VIR_INSN_FLAG_NSW))
 			*nsw = false;
 		v = a;
 	}
@@ -913,9 +913,9 @@ static bool vv_ultctl(vvs *S, uint32_t p)
 	vwst *V = S->e->vw;
 	uint32_t t = V->b[S->H].term, c = vw_find(V, V->p[t].in.a), cc;
 
-	if (c >= S->n0 || V->p[c].in.op != VO_ICMP || V->p[c].blk != S->H)
+	if (c >= S->n0 || V->p[c].in.op != VIR_OP_ICMP || V->p[c].blk != S->H)
 		return false;
-	cc = V->p[c].in.fl & 15;
+	cc = V->p[c].in.flags & 15;
 	if (V->p[t].in.b == S->X)
 		cc = (uint32_t[]){ 1, 0, 5, 4, 3, 2, 9, 8, 7, 6 }[cc];
 	return ((cc == 6 || cc == 1) && vw_find(V, V->p[c].in.a) == p) || ((cc == 8 || cc == 1) && vw_find(V, V->p[c].in.b) == p);
@@ -929,10 +929,10 @@ static bool vv_reaches(vwst *V, uint32_t v, uint32_t p, uint32_t *budget)
 	if (v == p) return true;
 	if (!*budget) return true;
 	--*budget;
-	vir_ins in = V->p[v].in;
-	if (V->p[v].blk == VW_NOBLK || in.op == VO_BPARAM) return false;
+	vir_insn in = V->p[v].in;
+	if (V->p[v].blk == VW_NOBLK || in.op == VIR_OP_BPARAM) return false;
 	uint32_t w[3] = {in.a,in.b,in.c};
-	for (int k=0;k<3;k++) if (vw_isval(vir_optab[in.op].k[k]) && vv_reaches(V,w[k],p,budget)) return true;
+	for (int k=0;k<3;k++) if (vw_isval(vir_opcode_table[in.op].operand_kinds[k]) && vv_reaches(V,w[k],p,budget)) return true;
 	return false;
 }
 
@@ -952,8 +952,8 @@ static bool vv_loop(vvs *S)
 	for (int st = 1; st >= 0 && !S->lg; st--)
 		for (uint32_t i = 0; i < S->nlb && !S->lg; i++)
 			for (uint32_t q = V->b[S->lb[i]].head; q && !S->lg; q = V->p[q].next)
-				if (!vv_skip(V, q) && V->p[q].in.op == (st ? VO_STORE : VO_LOAD)) {
-					uint32_t w = VIF_W(V->p[q].in.fl);
+				if (!vv_skip(V, q) && V->p[q].in.op == (st ? VIR_OP_STORE : VIR_OP_LOAD)) {
+					uint32_t w = VIR_INSN_FLAG_WIDTH_LOG2(V->p[q].in.flags);
 
 					if (st && w != 2 && w != 3)
 						return vv_no(S, "a store that is not 4 or 8 bytes");
@@ -963,11 +963,11 @@ static bool vv_loop(vvs *S)
 	if (!S->lg)
 		S->lg = 2;
 	S->esz = 1u << S->lg, S->vf = 16 / S->esz;
-	S->ity = S->lg == 2 ? VT_I32 : VT_I64, S->fty = S->lg == 2 ? VT_F32 : VT_F64;
+	S->ity = S->lg == 2 ? VIR_TYPE_I32 : VIR_TYPE_I64, S->fty = S->lg == 2 ? VIR_TYPE_F32 : VIR_TYPE_F64;
 	/* H's parameters */
 	for (uint32_t p = V->b[H].phead; p; p = V->p[p].next) {
-		uint32_t init, nx, ty = V->p[p].in.ty, budget = 256;
-		vir_ins N;
+		uint32_t init, nx, ty = V->p[p].in.type, budget = 256;
+		vir_insn N;
 		vvi *x, r = { 0 };
 		int64_t K = 0;
 		bool kb;
@@ -986,30 +986,30 @@ static bool vv_loop(vvs *S)
 
 			if (S->nind == 32)
 				return vv_no(S, "too many inductions");
-			r.kind = VK_LIN, r.exact = rep && ii->exact && (ty != VT_I32 || kb);
+			r.kind = VK_LIN, r.exact = rep && ii->exact && (ty != VIR_TYPE_I32 || kb);
 			if (!r.exact && rep && ii->exact && K == 1 && vv_ultctl(S, p) && (!vv_isk(ii) || ii->k >= 0))
 				r.exact = r.uns = 1;	/* (below an unsigned bound, stepping 1: it cannot wrap) */
-			if (!r.exact && ty != VT_I32)
+			if (!r.exact && ty != VIR_TYPE_I32)
 				return vv_no(S, "an induction without a linear form");
 			S->indk[S->nind] = K;
 			S->ind[S->nind++] = p;
-		} else if ((ty == S->fty && ((N.op == VO_FADD || N.op == VO_FMUL) && (vw_find(V, N.a) == p || vw_find(V, N.b) == p) || (N.op == VO_FSUB || N.op == VO_FDIV) && vw_find(V, N.a) == p)) ||
-			   (ty == S->ity && ((N.op == VO_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VO_SUB && vw_find(V, N.a) == p)))) {
+		} else if ((ty == S->fty && ((N.op == VIR_OP_FADD || N.op == VIR_OP_FMUL) && (vw_find(V, N.a) == p || vw_find(V, N.b) == p) || (N.op == VIR_OP_FSUB || N.op == VIR_OP_FDIV) && vw_find(V, N.a) == p)) ||
+			   (ty == S->ity && ((N.op == VIR_OP_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VIR_OP_SUB && vw_find(V, N.a) == p)))) {
 			if (S->nred == 8)
 				return vv_no(S, "too many sums");
 			S->red[S->nred++] = (vvred){ p, nx, vw_find(V, N.a) == p ? N.b : N.a, 0, 0 };
 			r.kind = VK_RED;
-		} else if ((ty == S->fty || (ty == S->ity && N.op == VO_SELECT)) && S->nfold < 8 && vv_reaches(V, nx, p, &budget) && (N.op == VO_SELECT || N.op == VO_FADD || N.op == VO_FSUB || N.op == VO_FMUL || N.op == VO_FDIV)) {
+		} else if ((ty == S->fty || (ty == S->ity && N.op == VIR_OP_SELECT)) && S->nfold < 8 && vv_reaches(V, nx, p, &budget) && (N.op == VIR_OP_SELECT || N.op == VIR_OP_FADD || N.op == VIR_OP_FSUB || N.op == VIR_OP_FMUL || N.op == VIR_OP_FDIV)) {
 			S->fold[S->nfold].p = p;
 			S->fold[S->nfold++].next = nx;
 			r.kind = VK_FOLD;
-		} else if ((ty == S->fty || ty == S->ity) && S->ncarry < 8 && (N.op == VO_LOAD || N.op == VO_FMUL || N.op == VO_FADD || N.op == VO_FSUB || N.op == VO_BPARAM)) {
+		} else if ((ty == S->fty || ty == S->ity) && S->ncarry < 8 && (N.op == VIR_OP_LOAD || N.op == VIR_OP_FMUL || N.op == VIR_OP_FADD || N.op == VIR_OP_FSUB || N.op == VIR_OP_BPARAM)) {
 			S->carry[S->ncarry].p = p;
 			S->carry[S->ncarry].next = nx;
 			S->carry[S->ncarry++].busy = false;
 			r.kind = VK_CARRY;
 		} else {
-			return vv_no(S, ty == VT_F32 || ty == VT_F64 ? "a float carried around the loop (a reduction or a recurrence: order matters)" :
+			return vv_no(S, ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64 ? "a float carried around the loop (a reduction or a recurrence: order matters)" :
 					"a value carried around the loop that is neither an induction nor a sum");
 		}
 		x = vv_touch(S, p);
@@ -1022,7 +1022,7 @@ static bool vv_loop(vvs *S)
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next)
 			if (!vv_skip(V, q) && !vv_classify(S, q))
 				return false;
-		if (V->p[tt].in.op == VO_BRIF) {
+		if (V->p[tt].in.op == VIR_OP_BRIF) {
 			vvi *x = vv_get(S, vw_find(V, V->p[tt].in.a));
 
 			if (x->nuse < 0xffff)
@@ -1051,9 +1051,9 @@ static bool vv_loop(vvs *S)
 	if (!vv_depend(S))
 		return false;
 	/* the exit test: continue while u cc n */
-	if (cond >= S->n0 || V->p[cond].in.op != VO_ICMP || V->p[cond].blk != H)
+	if (cond >= S->n0 || V->p[cond].in.op != VIR_OP_ICMP || V->p[cond].blk != H)
 		return vv_no(S, "an exit test that is not a comparison in the header");
-	u = vw_find(V, V->p[cond].in.a), n = vw_find(V, V->p[cond].in.b), cc = V->p[cond].in.fl & 15;
+	u = vw_find(V, V->p[cond].in.a), n = vw_find(V, V->p[cond].in.b), cc = V->p[cond].in.flags & 15;
 	{
 		static const uint8_t inv[10] = { 1, 0, 5, 4, 3, 2, 9, 8, 7, 6 }, sw[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };
 
@@ -1066,22 +1066,22 @@ static bool vv_loop(vvs *S)
 		}
 	}
 	ui = vv_get(S, u), ni = vv_get(S, n);
-	if (ui->kind != VK_LIN || !ui->exact || ni->kind != VK_INV || (V->p[u].in.ty != VT_I32 && V->p[u].in.ty != VT_I64 && V->p[u].in.ty != VT_PTR))
+	if (ui->kind != VK_LIN || !ui->exact || ni->kind != VK_INV || (V->p[u].in.type != VIR_TYPE_I32 && V->p[u].in.type != VIR_TYPE_I64 && V->p[u].in.type != VIR_TYPE_PTR))
 		return vv_no(S, "an exit test that is not linear against invariant");
 	c = ui->c;
 	if (c > 0 && (cc == 2 || cc == 3) && !ui->uns)
 		incl = cc == 3;
 	else if (c < 0 && (cc == 4 || cc == 5) && !ui->uns)
 		incl = cc == 5;
-	else if (c > 0 && cc == 6 && (ui->uns || V->p[u].in.ty != VT_I32))
+	else if (c > 0 && cc == 6 && (ui->uns || V->p[u].in.type != VIR_TYPE_I32))
 		incl = false;
-	else if (c < 0 && cc == 8 && V->p[u].in.ty != VT_I32)
+	else if (c < 0 && cc == 8 && V->p[u].in.type != VIR_TYPE_I32)
 		incl = false;
 	else if (cc == 1 && !((c < 0 ? -c : c) & ((c < 0 ? -c : c) - 1)) && (c > 0 || !ui->uns))
 		incl = false;	/* != : the span must also be a multiple of the step */
 	else
 		return vv_no(S, "an exit test that is not <, <=, >, >=, != in the direction of the step");
-	if (V->p[u].in.ty == VT_PTR && cc >= 2 && cc <= 5)
+	if (V->p[u].in.type == VIR_TYPE_PTR && cc >= 2 && cc <= 5)
 		return vv_no(S, "an exit test that is not <, <=, >, >=, != in the direction of the step");
 	ac = c < 0 ? -c : c;
 	if (ac > (1 << 20))
@@ -1108,94 +1108,94 @@ static bool vv_loop(vvs *S)
 			return false;
 		uint32_t more = 0;
 
-		bool ptr = V->p[u].in.ty == VT_PTR;
+		bool ptr = V->p[u].in.type == VIR_TYPE_PTR;
 
-		if (V->p[u].in.ty == VT_I32) {
-			u0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (ui->uns ? 0 : VIF_MS), u0, 0, 0);
-			n0 = vv_ins(S, S->VPRE, VO_EXT, VT_I64, 2 | (ui->uns ? 0 : VIF_MS), n0, 0, 0);
+		if (V->p[u].in.type == VIR_TYPE_I32) {
+			u0 = vv_ins(S, S->VPRE, VIR_OP_EXT, VIR_TYPE_I64, 2 | (ui->uns ? 0 : VIR_INSN_FLAG_MS), u0, 0, 0);
+			n0 = vv_ins(S, S->VPRE, VIR_OP_EXT, VIR_TYPE_I64, 2 | (ui->uns ? 0 : VIR_INSN_FLAG_MS), n0, 0, 0);
 		} else if (cc == 6 || cc == 8) {	/* (64 bits, unsigned: the span is the difference only when it is not negative) */
-			more = cc == 6 ? vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 7, u0, n0, 0) : vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 7, n0, u0, 0);
+			more = cc == 6 ? vv_ins(S, S->VPRE, VIR_OP_ICMP, VIR_TYPE_I32, 7, u0, n0, 0) : vv_ins(S, S->VPRE, VIR_OP_ICMP, VIR_TYPE_I32, 7, n0, u0, 0);
 		}
 		for (uint32_t i = 0; i < S->none; i++) {	/* a step that is a value: 1 */
-			uint32_t o = S->one[i], ot = V->p[o].in.ty;
-			uint32_t m = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 0, o, vw_iconst(e, ot == VT_I32 ? VT_I32 : VT_I64, 1), 0);
+			uint32_t o = S->one[i], ot = V->p[o].in.type;
+			uint32_t m = vv_ins(S, S->VPRE, VIR_OP_ICMP, VIR_TYPE_I32, 0, o, vw_iconst(e, ot == VIR_TYPE_I32 ? VIR_TYPE_I32 : VIR_TYPE_I64, 1), 0);
 
-			more = more ? vv_ins(S, S->VPRE, VO_AND, VT_I32, 0, more, m, 0) : m;
+			more = more ? vv_ins(S, S->VPRE, VIR_OP_AND, VIR_TYPE_I32, 0, more, m, 0) : m;
 		}
-		d = c > 0 ? vv_ins(S, S->VPRE, ptr ? VO_PSUB : VO_SUB, VT_I64, 0, n0, u0, 0) : vv_ins(S, S->VPRE, ptr ? VO_PSUB : VO_SUB, VT_I64, 0, u0, n0, 0);
+		d = c > 0 ? vv_ins(S, S->VPRE, ptr ? VIR_OP_PSUB : VIR_OP_SUB, VIR_TYPE_I64, 0, n0, u0, 0) : vv_ins(S, S->VPRE, ptr ? VIR_OP_PSUB : VIR_OP_SUB, VIR_TYPE_I64, 0, u0, n0, 0);
 		if (cc == 1 && ac > 1) {
-			uint32_t m = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 0, vv_ins(S, S->VPRE, VO_AND, VT_I64, 0, d, vw_iconst(e, VT_I64, ac - 1), 0), vw_iconst(e, VT_I64, 0), 0);
+			uint32_t m = vv_ins(S, S->VPRE, VIR_OP_ICMP, VIR_TYPE_I32, 0, vv_ins(S, S->VPRE, VIR_OP_AND, VIR_TYPE_I64, 0, d, vw_iconst(e, VIR_TYPE_I64, ac - 1), 0), vw_iconst(e, VIR_TYPE_I64, 0), 0);
 
-			more = more ? vv_ins(S, S->VPRE, VO_AND, VT_I32, 0, more, m, 0) : m;
+			more = more ? vv_ins(S, S->VPRE, VIR_OP_AND, VIR_TYPE_I32, 0, more, m, 0) : m;
 		}
 		if (incl)
-			d = vv_ins(S, S->VPRE, VO_ADD, VT_I64, 0, d, vw_iconst(e, VT_I64, 1), 0);
-		guard = vv_ins(S, S->VPRE, VO_ICMP, VT_I32, 5, d, vw_iconst(e, VT_I64, (int64_t)S->vf * ac), 0);
+			d = vv_ins(S, S->VPRE, VIR_OP_ADD, VIR_TYPE_I64, 0, d, vw_iconst(e, VIR_TYPE_I64, 1), 0);
+		guard = vv_ins(S, S->VPRE, VIR_OP_ICMP, VIR_TYPE_I32, 5, d, vw_iconst(e, VIR_TYPE_I64, (int64_t)S->vf * ac), 0);
 		if (more)
-			guard = vv_ins(S, S->VPRE, VO_AND, VT_I32, 0, guard, more, 0);
-		vv_term(S, S->VPRE, VO_BRIF, guard, S->VPH, S->J);
+			guard = vv_ins(S, S->VPRE, VIR_OP_AND, VIR_TYPE_I32, 0, guard, more, 0);
+		vv_term(S, S->VPRE, VIR_OP_BRIF, guard, S->VPH, S->J);
 	}
 	/* VPH: the iterations done on lanes */
 	nv = d;
 	if (ac != 1) {
-		nv = vv_ins(S, S->VPH, VO_ADD, VT_I64, 0, nv, vw_iconst(e, VT_I64, ac - 1), 0);
+		nv = vv_ins(S, S->VPH, VIR_OP_ADD, VIR_TYPE_I64, 0, nv, vw_iconst(e, VIR_TYPE_I64, ac - 1), 0);
 		if (!(ac & (ac - 1))) {
 			uint32_t shift = 0;
 			for (int64_t v = ac; v > 1; v >>= 1) shift++;
-			nv = vv_ins(S, S->VPH, VO_LSHR, VT_I64, 0, nv, vw_iconst(e, VT_I64, shift), 0);
+			nv = vv_ins(S, S->VPH, VIR_OP_LSHR, VIR_TYPE_I64, 0, nv, vw_iconst(e, VIR_TYPE_I64, shift), 0);
 		} else
-			nv = vv_ins(S, S->VPH, VO_UDIV, VT_I64, 0, nv, vw_iconst(e, VT_I64, ac), 0);
+			nv = vv_ins(S, S->VPH, VIR_OP_UDIV, VIR_TYPE_I64, 0, nv, vw_iconst(e, VIR_TYPE_I64, ac), 0);
 	}
-	nv = vv_ins(S, S->VPH, VO_AND, VT_I64, 0, nv, vw_iconst(e, VT_I64, -(int64_t)S->vf), 0);
+	nv = vv_ins(S, S->VPH, VIR_OP_AND, VIR_TYPE_I64, 0, nv, vw_iconst(e, VIR_TYPE_I64, -(int64_t)S->vf), 0);
 	/* VB's parameters: operand 0 from VPH, 1 from VB (filled at the end) */
-	cnt = vv_param(S, S->VB, VT_I64, nv, 0, 0);
+	cnt = vv_param(S, S->VB, VIR_TYPE_I64, nv, 0, 0);
 	for (uint32_t i = 0; i < S->nind; i++) {
 		uint32_t p = S->ind[i];
 
-		S->indb[i] = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
+		S->indb[i] = vv_param(S, S->VB, V->p[p].in.type, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	for (uint32_t i = 0; i < S->nred; i++) {
-		if (V->p[S->red[i].p].in.ty == S->fty) {
+		if (V->p[S->red[i].p].in.type == S->fty) {
 			uint32_t p = S->red[i].p;
 			S->red[i].acc = vv_param(S, S->VB, S->fty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 			continue;
 		}
 		if (!z)
-			z = vv_ins(S, S->VPH, VO_VSPLAT, vv_vty(S, S->ity), 0, vw_iconst(e, S->ity, 0), 0, 0);
+			z = vv_ins(S, S->VPH, VIR_OP_VSPLAT, vv_vty(S, S->ity), 0, vw_iconst(e, S->ity, 0), 0, 0);
 		S->red[i].acc = vv_param(S, S->VB, vv_vty(S, S->ity), z, 0, 0);
 	}
 	for (uint32_t i = 0; i < S->nfold; i++) {
 		uint32_t p = S->fold[i].p;
-		S->fold[i].acc = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
+		S->fold[i].acc = vv_param(S, S->VB, V->p[p].in.type, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	for (uint32_t i = 0; i < S->ncarry; i++) {
 		uint32_t p = S->carry[i].p;
-		S->carry[i].par = vv_param(S, S->VB, V->p[p].in.ty, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
+		S->carry[i].par = vv_param(S, S->VB, V->p[p].in.type, vw_find(V, V->x[V->p[p].in.b + S->jP]), 0, 0);
 	}
 	/* the body */
 	for (uint32_t i = 0; i < S->nlb && !S->why; i++)
 		for (uint32_t q = V->b[S->lb[i]].head; q && !S->why; q = V->p[q].next) {
-			vir_ins in;
+			vir_insn in;
 			bool rev;
 			uint32_t a, x;
 
 			if (q >= S->n0 || vv_skip(V, q))
 				continue;
 			in = V->p[q].in;
-			if (in.op == VO_LOAD && S->I[q].vec) continue;
-			if (in.op == VO_LOAD && S->I[q].kind == VK_W32) {
+			if (in.op == VIR_OP_LOAD && S->I[q].vec) continue;
+			if (in.op == VIR_OP_LOAD && S->I[q].kind == VK_W32) {
 				if (!(a = vv_addr(S, q, &rev))) break;
-				x = vv_ins(S, S->VB, VO_LOAD, VT_I32X4, in.fl & ~(uint32_t)VIF_MS, a, in.b, 0);
-				if (rev) x = vv_ins(S, S->VB, VO_VREV, VT_I32X4, 0, x, 0, 0);
+				x = vv_ins(S, S->VB, VIR_OP_LOAD, VIR_TYPE_I32X4, in.flags & ~(uint32_t)VIR_INSN_FLAG_MS, a, in.b, 0);
+				if (rev) x = vv_ins(S, S->VB, VIR_OP_VREV, VIR_TYPE_I32X4, 0, x, 0, 0);
 				S->I[q].vec = x;
-			} else if (in.op == VO_LOAD && S->I[q].kind == VK_VEC) {
+			} else if (in.op == VIR_OP_LOAD && S->I[q].kind == VK_VEC) {
 				if (vv_get(S, vw_find(V, in.a))->kind == VK_SCALAR) {
 					x = 0;
 					for (uint32_t lane = 0; lane < S->vf; lane++) {
 						uint32_t budget = 256;
 						if (!(a = vv_at(S, in.a, lane, &budget))) break;
-						uint32_t val = vv_ins(S, S->VB, VO_LOAD, in.ty, in.fl, a, in.b, 0);
-						x = lane ? vv_ins(S, S->VB, VO_VINSERT, vv_vty(S, in.ty), 0, x, val, lane) : vv_ins(S, S->VB, VO_VSPLAT, vv_vty(S, in.ty), 0, val, 0, 0);
+						uint32_t val = vv_ins(S, S->VB, VIR_OP_LOAD, in.type, in.flags, a, in.b, 0);
+						x = lane ? vv_ins(S, S->VB, VIR_OP_VINSERT, vv_vty(S, in.type), 0, x, val, lane) : vv_ins(S, S->VB, VIR_OP_VSPLAT, vv_vty(S, in.type), 0, val, 0, 0);
 					}
 					S->I[q].vec = x;
 					continue;
@@ -1206,41 +1206,41 @@ static bool vv_loop(vvs *S)
 				if (stride != (int64_t)S->esz && stride != -(int64_t)S->esz) {
 					x = 0;
 					for (uint32_t lane = 0; lane < S->vf; lane++) {
-						uint32_t addr = lane ? vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, a, vw_iconst(e, VT_I64, lane * stride), 0) : a;
-						uint32_t val = vv_ins(S, S->VB, VO_LOAD, in.ty, in.fl, addr, in.b, 0);
-						x = lane ? vv_ins(S, S->VB, VO_VINSERT, vv_vty(S, in.ty), 0, x, val, lane) : vv_ins(S, S->VB, VO_VSPLAT, vv_vty(S, in.ty), 0, val, 0, 0);
+						uint32_t addr = lane ? vv_ins(S, S->VB, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a, vw_iconst(e, VIR_TYPE_I64, lane * stride), 0) : a;
+						uint32_t val = vv_ins(S, S->VB, VIR_OP_LOAD, in.type, in.flags, addr, in.b, 0);
+						x = lane ? vv_ins(S, S->VB, VIR_OP_VINSERT, vv_vty(S, in.type), 0, x, val, lane) : vv_ins(S, S->VB, VIR_OP_VSPLAT, vv_vty(S, in.type), 0, val, 0, 0);
 					}
 				} else
-					x = vv_ins(S, S->VB, VO_LOAD, vv_vty(S, in.ty), in.fl & ~(uint32_t)VIF_MS, a, in.b, 0);
+					x = vv_ins(S, S->VB, VIR_OP_LOAD, vv_vty(S, in.type), in.flags & ~(uint32_t)VIR_INSN_FLAG_MS, a, in.b, 0);
 				if (rev)
-					x = vv_ins(S, S->VB, VO_VREV, vv_vty(S, in.ty), 0, x, 0, 0);
+					x = vv_ins(S, S->VB, VIR_OP_VREV, vv_vty(S, in.type), 0, x, 0, 0);
 				S->I[q].vec = x;
-			} else if (in.op == VO_STORE) {
+			} else if (in.op == VIR_OP_STORE) {
 				if (!(x = vv_vec(S, in.b)) || !(a = vv_addr(S, q, &rev)))
 					break;
 				if (rev)
-					x = vv_ins(S, S->VB, VO_VREV, V->p[x].in.ty, 0, x, 0, 0);
+					x = vv_ins(S, S->VB, VIR_OP_VREV, V->p[x].in.type, 0, x, 0, 0);
 				int64_t stride = vv_get(S, vw_find(V, in.a))->c;
 				if (stride != (int64_t)S->esz && stride != -(int64_t)S->esz) {
 					for (uint32_t lane = 0; lane < S->vf; lane++) {
-						uint32_t addr = lane ? vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, a, vw_iconst(e, VT_I64, lane * stride), 0) : a;
-						uint32_t val = vv_ins(S, S->VB, VO_VEXTRACT, V->p[in.b].in.ty, 0, x, lane, 0);
-						vv_ins(S, S->VB, VO_STORE, VT_VOID, in.fl, addr, val, 0);
+						uint32_t addr = lane ? vv_ins(S, S->VB, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a, vw_iconst(e, VIR_TYPE_I64, lane * stride), 0) : a;
+						uint32_t val = vv_ins(S, S->VB, VIR_OP_VEXTRACT, V->p[in.b].in.type, 0, x, lane, 0);
+						vv_ins(S, S->VB, VIR_OP_STORE, VIR_TYPE_VOID, in.flags, addr, val, 0);
 					}
 				} else
-					vv_ins(S, S->VB, VO_STORE, VT_VOID, in.fl, a, x, 0);
+					vv_ins(S, S->VB, VIR_OP_STORE, VIR_TYPE_VOID, in.flags, a, x, 0);
 			} else if (S->I[q].kind == VK_REDUPD) {
 				for (uint32_t k = 0; k < S->nred; k++)
 					if (S->red[k].upd == q) {
 						if (!(x = vv_vec(S, S->red[k].x)))
 							break;
-						if (V->p[S->red[k].p].in.ty == S->fty) {
+						if (V->p[S->red[k].p].in.type == S->fty) {
 							/* Preserve the scalar recurrence, including rounding at every step. */
 							uint32_t acc = S->red[k].acc;
 							bool left = vw_find(V, in.a) == S->red[k].p;
 							for (uint32_t lane = 0; lane < S->vf; lane++) {
-								uint32_t val = vv_ins(S, S->VB, VO_VEXTRACT, S->fty, 0, x, lane, 0);
-								acc = vv_ins(S, S->VB, in.op, S->fty, in.fl, left ? acc : val, left ? val : acc, 0);
+								uint32_t val = vv_ins(S, S->VB, VIR_OP_VEXTRACT, S->fty, 0, x, lane, 0);
+								acc = vv_ins(S, S->VB, in.op, S->fty, in.flags, left ? acc : val, left ? val : acc, 0);
 							}
 							S->red[k].accnext = acc;
 						} else
@@ -1270,20 +1270,20 @@ static bool vv_loop(vvs *S)
 	}
 	/* the inductions step four iterations; the counter */
 	for (uint32_t i = 0; i < S->nind; i++) {
-		uint32_t p = S->ind[i], ty = V->p[p].in.ty;
+		uint32_t p = S->ind[i], ty = V->p[p].in.type;
 
-		S->indn[i] = vv_ins(S, S->VB, ty == VT_PTR ? VO_PTRADD : VO_ADD, ty, 0, S->indb[i],
-				    vw_iconst(e, ty == VT_I32 ? VT_I32 : VT_I64, (int64_t)((uint64_t)S->indk[i] * S->vf)), 0);
+		S->indn[i] = vv_ins(S, S->VB, ty == VIR_TYPE_PTR ? VIR_OP_PTRADD : VIR_OP_ADD, ty, 0, S->indb[i],
+				    vw_iconst(e, ty == VIR_TYPE_I32 ? VIR_TYPE_I32 : VIR_TYPE_I64, (int64_t)((uint64_t)S->indk[i] * S->vf)), 0);
 		V->x[V->p[S->indb[i]].in.b + 1] = S->indn[i];
 	}
 	for (uint32_t i = 0; i < S->nred; i++)
 		V->x[V->p[S->red[i].acc].in.b + 1] = S->red[i].accnext;
 	for (uint32_t i = 0; i < S->npin; i++)
-		V->x[V->p[S->pin[i].par].in.b + 1] = vv_ins(S, S->VB, VO_PTRADD, VT_PTR, 0, S->pin[i].par, vw_iconst(e, VT_I64, vv_get(S, S->pin[i].a)->c * S->vf), 0);
-	cntn = vv_ins(S, S->VB, VO_ADD, VT_I64, 0, cnt, vw_iconst(e, VT_I64, -(int64_t)S->vf), 0);
+		V->x[V->p[S->pin[i].par].in.b + 1] = vv_ins(S, S->VB, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, S->pin[i].par, vw_iconst(e, VIR_TYPE_I64, vv_get(S, S->pin[i].a)->c * S->vf), 0);
+	cntn = vv_ins(S, S->VB, VIR_OP_ADD, VIR_TYPE_I64, 0, cnt, vw_iconst(e, VIR_TYPE_I64, -(int64_t)S->vf), 0);
 	V->x[V->p[cnt].in.b + 1] = cntn;
-	guard = vv_ins(S, S->VB, VO_ICMP, VT_I32, 1, cntn, vw_iconst(e, VT_I64, 0), 0);
-	vv_term(S, S->VB, VO_BRIF, guard, S->VB, S->VX);
+	guard = vv_ins(S, S->VB, VIR_OP_ICMP, VIR_TYPE_I32, 1, cntn, vw_iconst(e, VIR_TYPE_I64, 0), 0);
+	vv_term(S, S->VB, VIR_OP_BRIF, guard, S->VB, S->VX);
 	/* VX and J: H's parameters after the vector iterations (operand 0: none were run) */
 	for (uint32_t p = V->b[H].phead; p; p = V->p[p].next) {
 		uint32_t init, fin = 0;
@@ -1296,12 +1296,12 @@ static bool vv_loop(vvs *S)
 				fin = S->indn[i];
 		for (uint32_t i = 0; i < S->nred; i++)
 			if (S->red[i].p == p) {
-				if (V->p[p].in.ty == S->fty) {
+				if (V->p[p].in.type == S->fty) {
 					fin = S->red[i].accnext;
 					break;
 				}
-				fin = vv_ins(S, S->VX, VO_VREDUCE, S->ity, 0, S->red[i].accnext, 0, 0);
-				fin = vv_ins(S, S->VX, VO_ADD, S->ity, 0, init, fin, 0);
+				fin = vv_ins(S, S->VX, VIR_OP_VREDUCE, S->ity, 0, S->red[i].accnext, 0, 0);
+				fin = vv_ins(S, S->VX, VIR_OP_ADD, S->ity, 0, init, fin, 0);
 			}
 		for (uint32_t i = 0; i < S->ncarry; i++)
 			if (S->carry[i].p == p) fin = S->carry[i].last;
@@ -1309,25 +1309,25 @@ static bool vv_loop(vvs *S)
 			if (S->fold[i].p == p) fin = S->fold[i].last;
 		if (!fin || njp == 40)
 			return vv_no(S, "a parameter without a final value");
-		jp[njp++] = vv_param(S, S->J, V->p[p].in.ty, init, fin, init);
+		jp[njp++] = vv_param(S, S->J, V->p[p].in.type, init, fin, init);
 	}
-	vv_term(S, S->VX, VO_BR, S->J, 0, 0);
-	vv_term(S, S->J, VO_BR, H, 0, 0);
+	vv_term(S, S->VX, VIR_OP_BR, S->J, 0, 0);
+	vv_term(S, S->J, VIR_OP_BR, H, 0, 0);
 	if (S->nchk) {	/* the pairs that may be one memory: any two ranges that meet, and the loop stays scalar */
-		uint32_t span = vv_ins(S, S->VPH, VO_SHL, VT_I64, 0, nv, vw_iconst(e, VT_I64, S->lg), 0), any = 0;
+		uint32_t span = vv_ins(S, S->VPH, VIR_OP_SHL, VIR_TYPE_I64, 0, nv, vw_iconst(e, VIR_TYPE_I64, S->lg), 0), any = 0;
 
 		for (uint32_t i = 0; i < S->nchk; i++) {
 			uint32_t l0, h0, l1, h1, m;
 
 			if (!vv_range(S, S->chk[i].a, span, &l0, &h0) || !vv_range(S, S->chk[i].b, span, &l1, &h1))
 				return false;
-			m = vv_ins(S, S->VPH, VO_AND, VT_I32, 0, vv_ins(S, S->VPH, VO_ICMP, VT_I32, 6, l0, h1, 0),
-				   vv_ins(S, S->VPH, VO_ICMP, VT_I32, 6, l1, h0, 0), 0);
-			any = any ? vv_ins(S, S->VPH, VO_OR, VT_I32, 0, any, m, 0) : m;
+			m = vv_ins(S, S->VPH, VIR_OP_AND, VIR_TYPE_I32, 0, vv_ins(S, S->VPH, VIR_OP_ICMP, VIR_TYPE_I32, 6, l0, h1, 0),
+				   vv_ins(S, S->VPH, VIR_OP_ICMP, VIR_TYPE_I32, 6, l1, h0, 0), 0);
+			any = any ? vv_ins(S, S->VPH, VIR_OP_OR, VIR_TYPE_I32, 0, any, m, 0) : m;
 		}
-		vv_term(S, S->VPH, VO_BRIF, any, S->J, S->VB);
+		vv_term(S, S->VPH, VIR_OP_BRIF, any, S->J, S->VB);
 	} else {
-		vv_term(S, S->VPH, VO_BR, S->VB, 0, 0);
+		vv_term(S, S->VPH, VIR_OP_BR, S->VB, 0, 0);
 	}
 	/* commit: P enters at VPRE; H's entry is J */
 	{
@@ -1388,7 +1388,7 @@ VPRIV void vw_vectorize(ecx *e)
 	if (!hs)
 		return;
 	for (uint32_t i = 0; i < n0; i++)	/* (the candidates first: vectorizing adds blocks) */
-		if (V->b[V->order[i]].npred == 2 && V->b[V->order[i]].term && V->p[V->b[V->order[i]].term].in.op == VO_BRIF)
+		if (V->b[V->order[i]].npred == 2 && V->b[V->order[i]].term && V->p[V->b[V->order[i]].term].in.op == VIR_OP_BRIF)
 			hs[nh++] = V->order[i];
 	for (uint32_t i = 0; i < nh; i++) {
 		uint32_t H = hs[i], t = V->b[H].term;
@@ -1399,7 +1399,7 @@ VPRIV void vw_vectorize(ecx *e)
 
 			S.lb[0] = H;
 			while (cur != H && n < 64 && V->b[cur].npred == 1 && V->pr[V->b[cur].pred] == prev && V->b[cur].term &&
-			       V->p[V->b[cur].term].in.op == VO_BR) {
+			       V->p[V->b[cur].term].in.op == VIR_OP_BR) {
 				bool live = false;
 
 				for (uint32_t p = V->b[cur].phead; p; p = V->p[p].next)
@@ -1437,7 +1437,7 @@ VPRIV void vw_vectorize(ecx *e)
 		if (!(vv_env() & 4)) {
 			if (done)
 				vv_pin(&S, S.J);
-			else if (V->p[V->b[S.P].term].in.op == VO_BR && V->p[V->b[S.P].term].in.a == H)
+			else if (V->p[V->b[S.P].term].in.op == VIR_OP_BR && V->p[V->b[S.P].term].in.a == H)
 				vv_pin(&S, S.P);
 		}
 		if (vv_env() & 2) {

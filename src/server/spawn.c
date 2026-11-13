@@ -11,7 +11,7 @@
 #include "vccd-internal.h"
 
 /* run a program with the request's cwd, env and fds */
-VPRIV int spawn(const struct req *r, const char *prog)
+VPRIV int vccd_program_spawn(const struct vccd_request *r, const char *prog)
 {
 	posix_spawn_file_actions_t fa;
 	char *saved = r->argv[0];
@@ -52,7 +52,7 @@ VPRIV int spawn(const struct req *r, const char *prog)
 	free(env);
 	posix_spawn_file_actions_destroy(&fa);
 	if (err) {
-		say(r, "%s: error: cannot run %s\n", prog);
+		vccd_request_message_write(r, "%s: error: cannot run %s\n", prog);
 		return 127;
 	}
 	vtask_blocking_begin();	/* the child uses the core meanwhile */

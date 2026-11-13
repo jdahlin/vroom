@@ -2,10 +2,10 @@
 
 #include "lowering-internal.h"
 
-VPRIV void vl_switch(vl *L, uint32_t b, const vir_ins *in)
+VPRIV void vl_switch(vl *L, uint32_t b, const vir_insn *in)
 {
 	ecx *e = L->e;
-	const vir_fn *f = L->f;
+	const vir_function *f = L->f;
 	int x = vl_x(f, in->a), r = vl_ix(L, 0, R_X16);
 	uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
 	const uint32_t *cw = &f->extra[in->c + 1];

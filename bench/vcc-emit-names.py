@@ -74,7 +74,7 @@ BUILTINS = r'''
 #include <assert.h>
 #include "frontend/c/builtin-table.c"
 int (*pp_builtin_known)(const char *);
-bool lib_builtin_known(const char *name) { (void)name; return false; }
+bool cc_library_builtin_is_known(const char *name) { (void)name; return false; }
 int main(void) {
  unsigned count = 0;
  for (int i = 0; cc_builtin_name(i); i++) {
@@ -89,7 +89,7 @@ int main(void) {
              !strcmp(s,"__builtin___strcat_chk") || !strcmp(s,"__builtin___strncpy_chk") ||
              !strcmp(s,"__builtin___strncat_chk") ? CC_LIB_CHK : CC_LIB_OTHER;
   assert(cc_builtin_libkind(i) == want);
-  if (want) { count++; assert((builtins[i].flags & 1) == (want == CC_LIB_FABSL)); }
+  if (want) { count++; assert((cc_builtin_table[i].flags & 1) == (want == CC_LIB_FABSL)); }
  }
  assert(count == 12);
  return 0;

@@ -86,8 +86,8 @@ static void diag_json_location_append(pp *p, vbuffer *b, uint32_t loc)
 	vbuffer_string_append(b, "{\"file\":");
 	diag_json_string_append(b, name, nl);
 	vbuffer_format_append(b, ",\"line\":%u,\"column\":%u,\"path\":", line, col);
-	diag_json_cstring_append(b, e->f->path);
-	vbuffer_format_append(b, ",\"offset\":%u}", loc - e->base);
+	diag_json_cstring_append(b, e->lex_file->path);
+	vbuffer_format_append(b, ",\"offset\":%u}", loc - e->location_base);
 }
 
 /* the include stack of loc, outermost first: [{"file", "line"}] */
@@ -98,13 +98,13 @@ static void diag_json_include_stack_append(pp *p, vbuffer *b, uint32_t loc)
 
 	vbuffer_string_append(b, "[");
 	if (loc != UINT32_MAX && pp_location_is_valid(p, loc, &e))
-		for (const pp_file_entry *x = e; x && x->from && n < 64; x = pp_location_file_entry(p, x->from))
+		for (const pp_file_entry *x = e; x && x->included_from && n < 64; x = pp_location_file_entry(p, x->included_from))
 			chain[n++] = x;
 	for (int i = n, first = 1; i-- > 0;) {
 		const char *name;
 		uint32_t nl, line, col;
 
-		if (!diag_location_presumed(p, chain[i]->from, &name, &nl, &line, &col))
+		if (!diag_location_presumed(p, chain[i]->included_from, &name, &nl, &line, &col))
 			continue;
 		vbuffer_string_append(b, first ? "{\"file\":" : ",{\"file\":");
 		diag_json_string_append(b, name, nl);
@@ -172,10 +172,10 @@ static void diag_json_record_append(pp *p, vbuffer *b, const diag_record *d, int
 		vbuffer_string_append(b, "],\"rendered\":");
 		/* the text as the text output prints it (in its style), with its include stack */
 		p->diagnostic_last_file = 0;
-		bool color = p->color;
-		p->color = 0;
+		bool color = p->diagnostic_color;
+		p->diagnostic_color = 0;
 		diag_record_render_plain(p, &r, (diag_record *)d);
-		p->color = color;
+		p->diagnostic_color = color;
 		p->diagnostic_last_file = fe;
 		diag_json_string_append(b, r.p ? r.p : "", r.n);
 		free(r.p);
@@ -186,7 +186,7 @@ static void diag_json_record_append(pp *p, vbuffer *b, const diag_record *d, int
 /* write the pending JSON record */
 VPRIV void diag_json_record_flush(pp *p)
 {
-	int fd = p->o->errfd ? p->o->errfd : 2;
+	int fd = p->options->errfd ? p->options->errfd : 2;
 	vbuffer b = { 0 };
 
 	if (!p->diagnostic_pending_structured)
@@ -202,7 +202,7 @@ VPRIV void diag_json_record_flush(pp *p)
 
 VPRIV __attribute__((noinline, cold)) void diag_sink_records_send(pp *p)
 {
-	for (const diag_record *d = p->dhead; d; d = d->next) {
+	for (const diag_record *d = p->diagnostic_head; d; d = d->next) {
 		diag_sink_record r = { .level = d->level, .flag = d->flag };
 		const pp_file_entry *e;
 		const char *name;
@@ -210,13 +210,13 @@ VPRIV __attribute__((noinline, cold)) void diag_sink_records_send(pp *p)
 		vbuffer b = { 0 };
 
 		if (d->loc != UINT32_MAX && pp_location_is_valid(p, d->loc, &e) && diag_location_presumed(p, d->loc, &name, &nl, &r.line, &r.col))
-			r.path = e->f->path;
-		if (!p->o->dsink->nojson) {
+			r.path = e->lex_file->path;
+		if (!p->options->dsink->nojson) {
 			diag_json_record_append(p, &b, d, 2);
 			r.json = b.p ? b.p : "";
 			r.jlen = b.n;
 		}
-		p->o->dsink->record(p->o->dsink, &r);
+		p->options->dsink->record(p->options->dsink, &r);
 		free(b.p);
 	}
 }

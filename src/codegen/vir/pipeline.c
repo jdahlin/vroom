@@ -35,7 +35,7 @@ VPRIV void vw_slot_uses(ecx *e)
 		V->sl[s].used = 0, V->sl[s].fin = VW_NOBLK;
 	for (uint32_t i = 0; i < V->norder; i++)
 		for (uint32_t q = V->b[V->order[i]].head; q; q = V->p[q].next)
-			if (V->p[q].in.op == VO_LOAD && V->p[q].slot)
+			if (V->p[q].in.op == VIR_OP_LOAD && V->p[q].slot)
 				V->sl[V->p[q].slot - 1].used = 1;
 }
 
@@ -44,35 +44,35 @@ VPRIV bool vw_to_vir(ecx *e)
 {
 	vwst *V = e->vw;
 	cc *c = e->c;
-	vir_fn *f = &V->f;
+	vir_function *f = &V->f;
 	uint32_t lastloc = UINT32_MAX;
 
-	vir_begin(f, X86(c) ? VTG_X86_64_LINUX : DARWIN(c) ? VTG_A64_DARWIN : VTG_A64_LINUX, REF(RK_SYM, e->wk->fsym),
-		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VF_VARIADIC : 0);
+	vir_function_begin(f, X86(c) ? VIR_TARGET_X86_64_LINUX : DARWIN(c) ? VIR_TARGET_A64_DARWIN : VIR_TARGET_A64_LINUX, REF(RK_SYM, e->wk->fsym),
+		  (T(c, c->syms[e->wk->fsym].ty)->flags & TF_VARIADIC) ? VIR_FUNCTION_FLAG_VARIADIC : 0);
 	GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
 	for (uint32_t i = 0; i < V->norder; i++)
 		V->b[V->order[i]].fin = i;
-	f->sig = vir_extra(f, &V->x[V->fsig], 3 + 2 * VSIG_NGROUPS(V->x[V->fsig]));
+	f->signature = vir_extra_add(f, &V->x[V->fsig], 3 + 2 * VIR_SIGNATURE_GROUP_COUNT(V->x[V->fsig]));
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
-		if (vir_blk_add(f, 0) == VIR_NOBLK)
+		if (vir_block_add(f, 0) == VIR_BLOCK_NONE)
 			return false;
 		for (uint32_t p = V->b[b].phead; p; p = V->p[p].next)
-			if (V->fwd[p] == p && !(V->map[p] = vir_ins_add(f, VO_BPARAM, V->p[p].in.ty, 0, 0, 0, 0)))
+			if (V->fwd[p] == p && !(V->map[p] = vir_insn_add(f, VIR_OP_BPARAM, V->p[p].in.type, 0, 0, 0, 0)))
 				return false;
 		for (uint32_t q = V->b[b].head; q; q = V->p[q].next) {
 			vwp *x = &V->p[q];
 
 			if (vw_find(V, q) != q)
 				continue;
-			if (vw_promdead(V, q) || (x->in.op == VO_MEMSET && (x->in.fl & VW_LIFETIME)) ||
-			    (x->in.op == VO_STORE && x->slot && !(x->in.fl & VIF_VOL) && !V->sl[x->slot - 1].exposed &&
+			if (vw_promdead(V, q) || (x->in.op == VIR_OP_MEMSET && (x->in.flags & VW_LIFETIME)) ||
+			    (x->in.op == VIR_OP_STORE && x->slot && !(x->in.flags & VIR_INSN_FLAG_VOL) && !V->sl[x->slot - 1].exposed &&
 			     !V->sl[x->slot - 1].used))
 				continue;	/* (a dead store) */
 			if (x->loc != lastloc) {
-				vir_loc_add(f, x->loc);
+				vir_location_add(f, x->loc);
 				lastloc = x->loc;
 			}
 			if (!vw_emit_ins(e, q, b))
@@ -85,7 +85,7 @@ VPRIV bool vw_to_vir(ecx *e)
 		if (!vw_emit_ins(e, V->b[b].term, b))
 			return false;
 	}
-	if (vir_failed())
+	if (vir_is_failed())
 		return false;
 	return true;
 }

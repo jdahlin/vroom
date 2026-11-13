@@ -5,9 +5,9 @@
 /* The allocation constraints and dispatch must agree about when the
  * selector is consumed before R10 is overwritten. Sparse range chains
  * need the original selector for every comparison. */
-VPRIV bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range)
+VPRIV bool vx_dense_switch(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range)
 {
-	bool wide=f->ins[in->a].ty==VT_I64;
+	bool wide=f->insns[in->a].type==VIR_TYPE_I64;
 	uint32_t stride=wide?5:3,n=f->extra[in->c];
 	const uint32_t *cases=&f->extra[in->c+1];
 	uint64_t lo=0,span=0,count=0;
@@ -39,11 +39,11 @@ VPRIV void vx_cmpconst(vx *L, int reg, int size, uint64_t value)
 	}
 }
 
-VPRIV void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector)
+VPRIV void vx_switch(vx *L, uint32_t block, const vir_insn *in, int selector)
 {
 	ecx *e = L->e;
-	vir_fn *f = L->f;
-	bool wide = f->ins[in->a].ty == VT_I64;
+	vir_function *f = L->f;
+	bool wide = f->insns[in->a].type == VIR_TYPE_I64;
 	uint32_t size = wide ? 8 : 4, stride = wide ? 5 : 3, n = f->extra[in->c];
 	const uint32_t *cases = &f->extra[in->c+1];
 	uint32_t *labels = malloc(((size_t)n+1)*sizeof *labels);

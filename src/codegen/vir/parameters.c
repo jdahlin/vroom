@@ -33,7 +33,7 @@ VPRIV bool vw_trivial(ecx *e)
 			}
 			if (!triv)
 				continue;
-			V->fwd[p] = same ? same : vw_undef(e, V->p[p].in.ty);
+			V->fwd[p] = same ? same : vw_undef(e, V->p[p].in.type);
 			any = true;
 		}
 	}
@@ -45,7 +45,7 @@ VPRIV bool vw_trivial(ecx *e)
 static void vw_mark(vwst *V, uint32_t *stk, uint32_t *n, uint32_t v)
 {
 	v = vw_find(V, v);
-	if (V->p[v].in.op == VO_BPARAM && V->p[v].blk != VW_NOBLK && !V->map[v]) {
+	if (V->p[v].in.op == VIR_OP_BPARAM && V->p[v].blk != VW_NOBLK && !V->map[v]) {
 		V->map[v] = 1;
 		stk[(*n)++] = v;
 	}
@@ -66,18 +66,18 @@ VPRIV void vw_deadparams(ecx *e)
 
 		for (uint32_t q = V->b[b].head;; q = V->p[q].next) {
 			uint32_t x = q ? q : V->b[b].term;
-			const vir_ins *in;
-			const vir_opinfo *oi;
+			const vir_insn *in;
+			const vir_opcode_info *oi;
 
 			if (!x)
 				break;
 			in = &V->p[x].in;
-			oi = &vir_optab[in->op];
-			if (vw_find(V, x) == x && in->op != VO_BR) {
+			oi = &vir_opcode_table[in->op];
+			if (vw_find(V, x) == x && in->op != VIR_OP_BR) {
 				for (int k = 0; k < 3; k++)
-					if (vw_isval(oi->k[k]) && !(in->op == VO_BRIF && k > 0))
+					if (vw_isval(oi->operand_kinds[k]) && !(in->op == VIR_OP_BRIF && k > 0))
 						vw_mark(V, stk, &n, (&in->a)[k]);
-				if (in->op == VO_CALL || in->op == VO_RET)
+				if (in->op == VIR_OP_CALL || in->op == VIR_OP_RET)
 					for (uint32_t k = 0; k < V->x[in->c]; k++)
 						vw_mark(V, stk, &n, V->x[in->c + 1 + k]);
 			}
@@ -96,7 +96,7 @@ VPRIV void vw_deadparams(ecx *e)
 
 		for (uint32_t p = k->phead; p; p = V->p[p].next)
 			if (V->fwd[p] == p && !V->map[p])
-				V->fwd[p] = vw_undef(e, V->p[p].in.ty);
+				V->fwd[p] = vw_undef(e, V->p[p].in.type);
 	}
 	free(stk);
 }

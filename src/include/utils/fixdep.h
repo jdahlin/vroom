@@ -5,6 +5,6 @@
  * in process (relative paths against cwd).  Returns fixdep's exit status;
  * messages go to errfd.
  */
-int vfixdep(const char *cwd, const char *depfile, const char *target, const char *cmdline, const char *cmdfile,
+int fixdep_run(const char *cwd, const char *depfile, const char *target, const char *cmdline, const char *cmdfile,
 	    int errfd);
 #endif

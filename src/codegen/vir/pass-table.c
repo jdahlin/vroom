@@ -260,7 +260,7 @@ static bool virbuild_pass_vir_run(ecx *e, const virbuild_pass *p)
 	char err[160];
 	bool changed = vir_pass_run(&e->vw->f, p->vir, &ctx, err, sizeof err);
 
-	if (vir_failed())
+	if (vir_is_failed())
 		vw_fail(e, VIRFAIL(build_failed));
 	if (err[0]) {
 		char nm[130];
