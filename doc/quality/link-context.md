@@ -24,8 +24,8 @@ inventory below is the input, section 5 is the work left.
    ld_diagnostics diagnostics`, `struct ld_layout layout`, ...), declared in
    `src/ld/ld-internal.h` with the types its fields need.  A field is read as
    `ctx->group.field`.  Fields are renamed to words as they move (STYLE.md);
-   the types keep their names here (the `ld_*` type renames are
-   `doc/quality/rename-ld.tsv`'s, a separate scripted step).
+   a type keeps its name when it moves into the header (the `ld_*` and
+   `elf_*` names are `doc/quality/rename-ld.tsv`'s, applied by #198).
 2. **Route: the final spelling first, the parameter later.**  Until every
    function takes the context, `ld.c` defines the process's one context and
    a constant pointer to it:
