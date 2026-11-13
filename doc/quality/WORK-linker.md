@@ -220,6 +220,14 @@ resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
 
+Status: PR 1 of `DESIGN-linker-core.md` (Mach-O state in a context) is
+done: `struct macho_context` holds the Mach-O linker's 24 per-link
+variables, `macho_link_locked` creates it and `macho_context_destroy` frees
+it (`macho_state_reset` is gone); the name sort that read the table from a
+qsort comparator sorts (name, id) pairs.  Left at file scope in
+`macho-linker.c`: the libSystem export table (process-wide, read once) and
+the link lock (PR 2).
+
 ## Known problem: two LDCMP cases (cause found, decision open)
 
 `VCC_LDCMP=1 bench/vcc-ctests.py --no-cache` on a macOS host fails two cases
