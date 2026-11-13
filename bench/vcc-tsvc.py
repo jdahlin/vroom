@@ -12,7 +12,7 @@ import os, re, shutil, subprocess, sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 arg = lambda f, d: sys.argv[sys.argv.index(f) + 1] if f in sys.argv else d
-bind = os.path.abspath(arg('--bin-dir', os.environ.get('VCC_BIN', os.path.join(root, 'build/ccs'))))
+bind = os.path.abspath(arg('--bin-dir', os.environ.get('VCC_BIN', os.path.join(root, 'build/src'))))
 iters = int(arg('--iterations', '256'))
 src = os.path.join(root, 'work/testsuites/TSVC_2/src')
 out = os.path.join(root, 'work/build-tsvc')

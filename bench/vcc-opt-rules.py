@@ -1073,7 +1073,7 @@ def main():
         for rule, (filename, check) in selected.items():
             if rule == 'localjmp' and arch != 'x86_64':
                 continue
-            source = Path(R) / 'ccs/vcc/tests/vcc' / filename
+            source = Path(R) / 'src/tests/vcc' / filename
             for level in range(4):
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',

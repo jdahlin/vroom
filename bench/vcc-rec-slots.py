@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/rec/slots.c"
+#include "emit/rec/slots.c"
 typedef struct { uint32_t id; int64_t off; uint32_t size; } test_access;
 static uint32_t seed = 0x11223344;
 static unsigned next(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
@@ -139,21 +139,21 @@ def main():
         binary = Path(tmp) / 'slots'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
         if args.check_mutation:
-            implementation=(Path(R)/'ccs/vcc/emit/rec/slots.c').read_text()
+            implementation=(Path(R)/'src/emit/rec/slots.c').read_text()
             implementation=implementation.replace('#include "../emitimpl.h"',
-                '#include "'+str(Path(R)/'ccs/vcc/emit/emitimpl.h')+'"')
+                '#include "'+str(Path(R)/'src/emit/emitimpl.h')+'"')
             mutations = [
                 ('streaming first-range', implementation.replace('if (before == 1)', 'if (false)')),
                 ('poison width', implementation.replace(' && s->w[s->nw - 1].size == size', '')),
             ]
             for name, dropped in mutations:
                 assert dropped != implementation
-                source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.c"',dropped))
-                subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'ccs'),
+                source.write_text(SOURCE.replace('#include "emit/rec/slots.c"',dropped))
+                subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'src'),
                                 *flags,str(source),'-o',str(binary)],check=True,timeout=30)
                 result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)
                 if result.returncode==0 or b'Assertion' not in result.stderr:

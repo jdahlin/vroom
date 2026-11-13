@@ -27,13 +27,13 @@ macOS, from an empty tree to a bootable `Image`, with a target of under
   and there is an in-browser build for a compiler-explorer page.
 - **Optimisation:** `-O0`/`-O1` use a fast direct emitter with a peephole
   and register pass.  `-O2` goes through **VIR**, an SSA IR with its own
-  register allocator and loop vectorizer ([SPEC-vir.md](docs/SPEC-vir.md)).
+  register allocator and loop vectorizer ([SPEC-vir.md](doc/SPEC-vir.md)).
 - **Diagnostics:** clang-compatible locations and flags are the minimum.
   On top of that, vcc has its own text styles, JSON, SARIF and HTML
   output, `--fix`, and `vcc --explain ID`.
 
 vcc is not at 1.0 yet.  [TODO.md](TODO.md) lists what is left, ordered by
-risk, and [PLAN-release.md](docs/PLAN-release.md) defines the release gates G0-G9.
+risk, and [PLAN-release.md](doc/PLAN-release.md) defines the release gates G0-G9.
 
 ## How it is fast
 
@@ -62,17 +62,17 @@ make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd
 
 | Path | What |
 |---|---|
-| [ccs/vcc/](ccs/vcc/) | the toolchain: `lex/`, `pp/`, `cc/` (parser + sema), `emit/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
-| `ccs/vcc/arch/<cpu>/` | per-CPU code: `a64`, `x64`, `wasm` |
-| `ccs/vcc/platform/<os>/` | per-OS object formats: `linux` (ELF), `darwin` (Mach-O), `wasm` |
-| [ccs/vcc/tests/](ccs/vcc/tests/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |
-| [ccs/fuzz/](ccs/fuzz/) | libFuzzer targets for the lexer, preprocessor and diagnostics |
-| [ccs/wasm/](ccs/wasm/) | vcc built as WebAssembly for the browser |
-| [ccs/phase1/](ccs/phase1/) | phase 1's clang-based tools (`vroomd`, `vroom-cc`) |
+| [src/](src/) | the toolchain: `lex/`, `pp/`, `cc/` (parser + sema), `emit/`, `vir/`, `as/`, `obj/`, `ld/`, `driver/`, `vccd/`, `lib/` |
+| `src/arch/<cpu>/` | per-CPU code: `a64`, `x64`, `wasm` |
+| `src/platform/<os>/` | per-OS object formats: `linux` (ELF), `darwin` (Mach-O), `wasm` |
+| [src/tests/](src/tests/) | test suites (own, plus vendored gcc c-torture, tcc tests2 and others) |
+| [src/fuzz/](src/fuzz/) | libFuzzer targets for the lexer, preprocessor and diagnostics |
+| [contrib/wasm/](contrib/wasm/) | vcc built as WebAssembly for the browser |
+| [contrib/phase1/](contrib/phase1/) | phase 1's clang-based tools (`vroomd`, `vroom-cc`) |
 | [bench/](bench/) | harnesses: parity against clang, test runners, benchmarks, kernel build and boot |
 | [ci/](ci/), [env/](env/) | CI scripts, kernel configs and the Linux/macOS environments |
 | [patches/](patches/) | kernel build patches |
-| [docs/](docs/) | plans, specs, research notes and reviews |
+| [doc/](doc/) | plans, specs, research notes and reviews |
 
 [AGENTS.md](AGENTS.md) has the full per-file map.
 
@@ -84,25 +84,25 @@ taken from clang once (capabilities, predefined macros, `__has_*` answers)
 are generated files in the tree.
 
 ```bash
-make -C ccs -j 6 vcc
+make -C src -j 6 vcc
 ```
 
-The tools are written to `build/ccs/`: `vpp` (one compile job, the test
+The tools are written to `build/src/`: `vpp` (one compile job, the test
 driver), `vccd` and its `vcc`/`vas`/`vld`/`var`/`vsh` shims, `vlink`,
 `vasm`, `vnm`, `vobjcopy`, `virtest`.
 
 Other variants:
 
 ```bash
-make -C ccs -j 6 vcc-asan     # ASan + UBSan -> build/ccs-asan/
+make -C src -j 6 vcc-asan     # ASan + UBSan -> build/src-asan/
 ```
 
 ```bash
-make -C ccs -j 6 vcc-tsan     # TSan -> build/ccs-tsan/
+make -C src -j 6 vcc-tsan     # TSan -> build/src-tsan/
 ```
 
 ```bash
-make -C ccs -j 6 vcc VCC_UNITY= OUT=../build/ccs-parts   # file by file instead of one TU per module
+make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file instead of one TU per module
 ```
 
 ## Using it
@@ -166,20 +166,20 @@ setup, and the working conventions.
 Plans and status notes are written in Swedish; the specs, research notes
 and agent notes are in English.
 
-- [PLAN.md](docs/PLAN.md), [PLAN-fas2.md](docs/PLAN-fas2.md): phase 1 (measurement, clang-based) and phase 2 (own toolchain), with measured status per step
-- [PLAN-release.md](docs/PLAN-release.md): what vcc 1.0 is and its release gates
-- [PLAN-vir.md](docs/PLAN-vir.md), [SPEC-vir.md](docs/SPEC-vir.md): the SSA IR used at `-O2`
-- [PLAN-x86.md](docs/PLAN-x86.md), [PLAN-wasm.md](docs/PLAN-wasm.md), [PLAN-diag.md](docs/PLAN-diag.md): further targets and diagnostics
-- `docs/RESEARCH-*.md`: preprocessor, VIR, register allocation, vectors, diagnostics
-- [TEST.plan](docs/TEST.plan): external C test suites and how vcc is validated against them
+- [PLAN.md](doc/PLAN.md), [PLAN-fas2.md](doc/PLAN-fas2.md): phase 1 (measurement, clang-based) and phase 2 (own toolchain), with measured status per step
+- [PLAN-release.md](doc/PLAN-release.md): what vcc 1.0 is and its release gates
+- [PLAN-vir.md](doc/PLAN-vir.md), [SPEC-vir.md](doc/SPEC-vir.md): the SSA IR used at `-O2`
+- [PLAN-x86.md](doc/PLAN-x86.md), [PLAN-wasm.md](doc/PLAN-wasm.md), [PLAN-diag.md](doc/PLAN-diag.md): further targets and diagnostics
+- `doc/RESEARCH-*.md`: preprocessor, VIR, register allocation, vectors, diagnostics
+- [TEST.plan](doc/TEST.plan): external C test suites and how vcc is validated against them
 - [TODO.md](TODO.md): what is left before a production compiler, each item with its validation
 
 ## License
 
 vroom and vcc are released under the [MIT License](LICENSE).
 
-The vendored test suites under `ccs/vcc/tests/` keep their own licenses
+The vendored test suites under `src/tests/` keep their own licenses
 (for example GPL-3.0 for gcc c-torture and LGPL-2.1 for tcc tests2).
-[ccs/vcc/tests/README.md](ccs/vcc/tests/README.md) lists each suite with
+[src/tests/README.md](src/tests/README.md) lists each suite with
 its source and license.  The kernel patches in [patches/](patches/) apply
 to Linux and fall under its license (GPL-2.0).

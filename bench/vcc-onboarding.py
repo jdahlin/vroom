@@ -26,7 +26,7 @@ import tomllib
 from hostenv import BUILD, llvm
 
 ROOT = Path(__file__).resolve().parent.parent
-CORPUS = ROOT / 'ccs/vcc/tests/onboarding'
+CORPUS = ROOT / 'src/tests/onboarding'
 
 
 def module(name, path):

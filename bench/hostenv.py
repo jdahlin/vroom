@@ -9,7 +9,7 @@
          host tools) or work/build-linux (Linux: clang, glibc host tools);
          override with $VCC_KTREE.  PPREF/ASREF: clang's reference outputs
          for that tree (work/ppref, work/asref; -linux suffix on Linux)
-  BUILD  where `make -C ccs` puts vcc: build/ccs on macOS, build/linux/ccs
+  BUILD  where `make -C src` puts vcc: build/src on macOS, build/linux/src
          on Linux (the tree may be shared with a Mac through a bind mount);
          override with $VCC_BUILD
 """
@@ -29,7 +29,7 @@ def _llvm_bin():
 
 
 LLVM_BIN = _llvm_bin()
-BUILD = os.environ.get('VCC_BUILD', f'{R}/build/linux/ccs' if LINUX else f'{R}/build/ccs')
+BUILD = os.environ.get('VCC_BUILD', f'{R}/build/linux/src' if LINUX else f'{R}/build/src')
 
 
 def llvm(tool):

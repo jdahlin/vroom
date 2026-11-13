@@ -244,7 +244,7 @@ def main():
                         'wasm32-unknown-emscripten', 'wasm64-unknown-emscripten'])
     parser.add_argument('--check-mutation', action='store_true')
     args = parser.parse_args()
-    source = args.source_root / 'ccs/vcc/tests/vcc/stack_cells.c'
+    source = args.source_root / 'src/tests/vcc/stack_cells.c'
     targets = args.target or ['x86_64-linux-gnu', 'aarch64-linux-gnu',
                              'wasm32-unknown-emscripten', 'wasm64-unknown-emscripten']
     with tempfile.TemporaryDirectory(prefix='vcc-slot-observable-') as tmp:

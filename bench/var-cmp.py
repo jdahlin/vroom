@@ -25,11 +25,11 @@ def main():
     b = os.path.abspath(sys.argv[1])
     tmp = tempfile.mkdtemp(prefix='varcmp', dir=os.environ.get('TMPDIR', '/tmp'))
     sock = os.path.join(tmp, 's')
-    d = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock],
+    d = subprocess.Popen([f'{R}/build/src/vccd', '--sock', sock],
                          stderr=subprocess.DEVNULL)
     time.sleep(0.3)
-    env = dict(os.environ, VCC_SOCK=sock, PATH=f'{R}/build/ccs:' + os.environ['PATH'])
-    var = f'{R}/build/ccs/var'
+    env = dict(os.environ, VCC_SOCK=sock, PATH=f'{R}/build/src:' + os.environ['PATH'])
+    var = f'{R}/build/src/var'
     cmds = []
     for f in glob.glob(f'{b}/**/.*.a.cmd', recursive=True):
         m = re.match(r'savedcmd_(\S+) := (.*)', open(f).read().split('\n')[0])
@@ -113,7 +113,7 @@ def main():
     # the same sequences with SYM64_THRESHOLD=0 (llvm-ar's test knob, read by vccd from its own
     # environment): /SYM64/ and __.SYMDEF_64 instead of the 32-bit tables
     sock64 = sock + '64'
-    d64 = subprocess.Popen([f'{R}/build/ccs/vccd', '--sock', sock64],
+    d64 = subprocess.Popen([f'{R}/build/src/vccd', '--sock', sock64],
                            stderr=subprocess.DEVNULL, env=dict(os.environ, SYM64_THRESHOLD='0'))
     time.sleep(0.3)
     env64 = dict(env, VCC_SOCK=sock64)

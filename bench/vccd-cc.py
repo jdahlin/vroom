@@ -5,7 +5,7 @@
 
 Exercises vccd's own request path (socket, worker threads, cc-own jobs) without
 a kernel build; meant for the sanitizer variants (AGENTS.md, "Sanitizers").
-vccd comes from --bin-dir (or VCC_BIN), the shim from build/ccs.  There is no
+vccd comes from --bin-dir (or VCC_BIN), the shim from build/src.  There is no
 backend: vcc does every job.  vccd's
 stderr, with any sanitizer report, goes to $LOG (default $TMPDIR/vccd-cc.log).
 """

@@ -1,5 +1,5 @@
 # arm64 (aarch64-linux-gnu) target: vcc built natively on an arm64 Linux
-# runner, the C suites (gcc torture, tcc tests2, ccs/vcc/tests/vcc) run under
+# runner, the C suites (gcc torture, tcc tests2, src/tests/vcc) run under
 # qemu-system-aarch64 against clang's build, plus the fast harnesses.  ASan
 # and TSan builds are jobs of their own, alongside; TSan's runs on an x86-64
 # runner for now (the same arm64 target, vcc as an x86-64 program).  No
@@ -38,9 +38,9 @@ jobs:
         with:
           path: |
             ~/.cache/ccache
-            build/linux/ccs/ctests/ref
-            build/linux/ccs/ctests/pass
-            build/linux/ccs/dwarfref
+            build/linux/src/ctests/ref
+            build/linux/src/ctests/pass
+            build/linux/src/dwarfref
           key: ci-${{ matrix.job }}-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
           restore-keys: ci-${{ matrix.job }}-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-
       - run: ci/premerge.sh ${{ matrix.job }}

@@ -64,7 +64,7 @@ def main():
     args.node_flags = []
     if not args.compile_only and '--experimental-wasm-memory64' in opt.run([args.node, '--v8-options']):
         args.node_flags = ['--experimental-wasm-memory64']
-    source = Path(R) / 'ccs/vcc/tests/vcc/wasm_frame_flow.c'
+    source = Path(R) / 'src/tests/vcc/wasm_frame_flow.c'
     for arch in (['wasm32', 'wasm64'] if args.target == 'all' else [args.target]):
         args.target = arch + '-unknown-emscripten'
         with tempfile.TemporaryDirectory(prefix='vcc-wasm-flow-') as tmp:

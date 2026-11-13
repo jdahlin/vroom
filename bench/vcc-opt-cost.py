@@ -150,27 +150,27 @@ def main():
         revision = getattr(args, label + '_revision')
         head = subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD'], text=True).strip()
         resolved = subprocess.check_output(['git', '-C', str(tree), 'rev-parse', revision], text=True).strip()
-        dirty = subprocess.run(['git', '-C', str(tree), 'diff', '--quiet', 'HEAD', '--', 'ccs'], check=False)
-        untracked = subprocess.check_output(['git', '-C', str(tree), 'ls-files', '--others', '--exclude-standard', '--', 'ccs'], text=True)
+        dirty = subprocess.run(['git', '-C', str(tree), 'diff', '--quiet', 'HEAD', '--', 'src'], check=False)
+        untracked = subprocess.check_output(['git', '-C', str(tree), 'ls-files', '--others', '--exclude-standard', '--', 'src'], text=True)
         if dirty.returncode or untracked:
             parser.error(f'{label}: compiler/source changes must be committed before measurement')
         if head != resolved:
             parser.error(f'{label}: worktree HEAD {head} differs from asserted revision {resolved}')
         info = dict(path=str(binary), sha256=digest(binary), revision=head, worktree=str(tree),
-                    ccs_tree=subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD:ccs'], text=True).strip(),
+                    ccs_tree=subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD:src'], text=True).strip(),
                     worktree_status=subprocess.check_output(['git', '-C', str(tree), 'status', '--short'], text=True))
         log = getattr(args, label + '_build_log')
         if log:
             info['build_log'] = dict(path=str(log.resolve()), sha256=digest(log))
         report['binary'][label] = info
     for name in SOURCES:
-        path = Path(R) / 'ccs/vcc/tests/vcc' / (name + '.c')
+        path = Path(R) / 'src/tests/vcc' / (name + '.c')
         report['sources'][name] = dict(path=str(path), sha256=digest(path))
     report['resource_dir'] = str(resources.resolve())
     report['resource_headers_sha256'] = {str(path.relative_to(resources)): digest(path)
                                          for path in sorted(resources.rglob('*.h'))}
     report['runtime_headers_sha256'] = {str(path.relative_to(Path(R))): digest(path)
-                                        for path in sorted((Path(R) / 'ccs/vcc/tests/rt/include').rglob('*')) if path.is_file()}
+                                        for path in sorted((Path(R) / 'src/tests/rt/include').rglob('*')) if path.is_file()}
     report['versions'] = {name: invoke(command, env) for name, command in
                           [('clang', [llvm('clang'), '--version']), ('valgrind', [args.valgrind, '--version'])]}
     result_path = output / ('preflight.json' if args.preflight_only else 'result.json')
@@ -178,7 +178,7 @@ def main():
         for name in SOURCES:
             row = dict(target=target, source=name, sides={})
             flags = [f'--target={target}', '-O2', '-ffreestanding', '-fno-stack-protector', '-std=c23',
-                     '-isystem', str(resources), '-I' + str(Path(R) / 'ccs/vcc/tests/rt/include')]
+                     '-isystem', str(resources), '-I' + str(Path(R) / 'src/tests/rt/include')]
             source = report['sources'][name]['path']
             for label in labels:
                 stem = output / f'{target}-{name}-{label}'

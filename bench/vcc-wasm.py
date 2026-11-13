@@ -11,19 +11,19 @@ passes when its program prints what clang's prints and exits the same way.
 vcc's side: `vpp -S` (the assembly text) assembled by clang; with --obj,
 `vpp -c` (vcc's own assembler and object writer, W5); with --objcmp, both,
 and `vpp -c`'s object must be byte-identical to clang's for the same text.
-With --vlink, emcc links vcc's side with vlink (W8: build/ccs/vlink as
+With --vlink, emcc links vcc's side with vlink (W8: build/src/vlink as
 wasm-ld, through a directory of emscripten's LLVM tools with that one
 replaced); --obj --vlink is vcc's whole chain.
 Failures by stage: emit (vpp fails), as (clang rejects vcc's assembly),
 objcmp, link (emcc), run.
-The test runtime headers (ccs/vcc/tests/rt/include) are used on both sides,
+The test runtime headers (src/tests/rt/include) are used on both sides,
 emscripten's libc behind them.  Clang's results are cached in
-build/ccs/wasmtests/ref (keyed by the source and flags).  A vcc object
-byte-identical to one that passed before (build/ccs/wasmtests/pass, keyed by
+build/src/wasmtests/ref (keyed by the source and flags).  A vcc object
+byte-identical to one that passed before (build/src/wasmtests/pass, keyed by
 the object, the link and the reference) is not linked or run again;
 --no-cache runs all.
 --wasm32: wasm32-unknown-emscripten (ILP32, emcc without -sMEMORY64), in
-build/ccs/wasmtests32 (PLAN-wasm.md W7).
+build/src/wasmtests32 (PLAN-wasm.md W7).
 """
 import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
@@ -52,7 +52,7 @@ WASM_SKIP = {}
 _WOPT = 'wasm: no inliner or dead-code removal (TODO.md)'
 WASM_XFAIL = {n: _WOPT for n in ('20020720-1', '20030216-1', '20041114-1', 'compare-3',
                                  'pure-1', 'shiftopt-1', 'bcp-1')}
-# ... and tests of our own suite (ccs/vcc/tests/vcc) the wasm emitter does not handle yet
+# ... and tests of our own suite (src/tests/vcc) the wasm emitter does not handle yet
 WASM_XFAIL.update({
     'fp_class_runtime': 'wasm: __builtin_isfpclass/__builtin_fpclassify not lowered (PLAN-wasm.md W4)',
     'inline_walk': 'wasm: inlining (const parameters, labels per instance) only in the shared walker, not the wasm emitter',

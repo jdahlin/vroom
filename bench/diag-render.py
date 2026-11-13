@@ -6,7 +6,7 @@ text shows.  Reads `-fdiagnostics-format=json` lines and the source files
 they name (physical "path", relative to --cwd), never "rendered", and
 prints what vcc's text output prints, byte for byte, including the
 "In file included from" lines and the "N errors generated." summary.
-Two styles, as vcc's: "vcc" (the default, ccs/vcc/pp/diagtext.c: several
+Two styles, as vcc's: "vcc" (the default, src/pp/diagtext.c: several
 lines, labels, folded notes, help) and "clang" (-fdiagnostics-style=clang).
 A change to either renderer in C changes this file too.
 
@@ -195,7 +195,7 @@ class Renderer:
         if fixes:
             out += b' ' * (width + 2) + b'| ' + bytes(fl) + b'\n'
 
-    # ---- vcc's style (ccs/vcc/pp/diagtext.c) ----
+    # ---- vcc's style (src/pp/diagtext.c) ----
 
     def head(self, d, out):
         """the first line (and include stack); the source and the location's offset, or None"""

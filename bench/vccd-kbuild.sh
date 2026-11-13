@@ -10,7 +10,7 @@
 # which is bash on macOS).  VSH=1 (default): make's SHELL is vsh (vccd runs kbuild's object
 # and archive recipes itself, rsh.c; the rest goes to $KB_SHELL), CONFIG_SHELL
 # stays $KB_SHELL.
-# VCCD_ARGS: more vccd options (e.g. "--ld ccs/phase1/vroom-ld" to link with lld).
+# VCCD_ARGS: more vccd options (e.g. "--ld contrib/phase1/vroom-ld" to link with lld).
 # KB_OPTS: more kbuild.py options (e.g. "--keep --dotconfig F" for a rebuild).
 # vccd's log goes to OUT.vccd.log (VCC_LOG=1); its counts are printed at the end.
 set -e
@@ -19,9 +19,9 @@ OUT=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); shift
 J=14
 [ "$1" = "-j" ] && { J=$2; shift 2; }
 S=${TMPDIR:-/tmp}/vk.$$
-B=$R/build/ccs
+B=$R/build/src
 KSRC_DEFAULT=/Users/johandahlin/dev/vroom/work/linux-pf
-[ "$(uname -s)" = Linux ] && { B=$R/build/linux/ccs; KSRC_DEFAULT=$R/work/linux-pf; }
+[ "$(uname -s)" = Linux ] && { B=$R/build/linux/src; KSRC_DEFAULT=$R/work/linux-pf; }
 mkdir -p "$S"
 VCC_LOG=1 "$B/vccd" --sock "$S/vccd.sock" $VCCD_ARGS >"$OUT.vccd.log" 2>&1 &
 CP=$!

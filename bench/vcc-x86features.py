@@ -28,7 +28,7 @@ if a.vpp:
   cases.extend([('x86-64',['+'+feature,'-'+feature]),('haswell',['-'+feature,'+'+feature])])
 if a.vpp:cases=[(cpu,opts) for cpu,opts in cases if all(o[1:] in data['cli_features'] or o[1:]=='general-regs-only' for o in opts)]
 if a.all_features:
- names=re.search(r'x86_feature_names\[\] = \{(.*?)\};',(ROOT/'ccs/vcc/lib/x86features-data.inc').read_text()).group(1)
+ names=re.search(r'x86_feature_names\[\] = \{(.*?)\};',(ROOT/'src/lib/x86features-data.inc').read_text()).group(1)
  for name in json.loads('['+names+']'):
   if name!='64bit' and (not a.vpp or name in data['cli_features']):cases.extend([('x86-64',['+'+name]),('haswell',['-'+name])])
 with tempfile.TemporaryDirectory() as td:
@@ -39,11 +39,11 @@ with tempfile.TemporaryDirectory() as td:
  if not a.vpp:
   src=pathlib.Path(td)/'probe.c'
   src.write_text(r'''
-#include "ccs/vcc/lib/buf.h"
+#include "src/lib/buf.h"
 typedef vbuf buf;
 #define bstr vbuf_s
-#include "ccs/vcc/driver/x86predefines.h"
-#include "ccs/vcc/lib/x86native.h"
+#include "src/driver/x86predefines.h"
+#include "src/lib/x86native.h"
 static void apply(x86_features *f,x86_features *disabled,const char *s) {
  bool en=*s++=='+';
  if (!strcmp(s,"general-regs-only")) { if(en){apply(f,disabled,"-x87");apply(f,disabled,"-mmx");apply(f,disabled,"-sse");} return; }

@@ -2,7 +2,7 @@
 """
 VIR's own tests (SPEC-vir.md 17; PLAN-vir.md step V1).
 
-Every ccs/vcc/tests/vir/**/*.vir is a unit with directives in comments at the
+Every src/tests/vir/**/*.vir is a unit with directives in comments at the
 top (`; PASSES: canon`), a line `; ---`, and the expected output of
 `virtest FILE`: the unit printed, or the errors.  virtest runs from the test
 directory (so the file names in syntax errors are stable).  A test passes
@@ -18,17 +18,17 @@ print-parse-print must be identical, SPEC 11.1.)
   bench/vir-test.py --bless PATTERN         rewrite the expected part of the matching tests
   bench/vir-test.py --mutate N [--seed S]   N random mutants of the test units: virtest must exit 0 or 1
                                             (never crash, hang or report a sanitizer error), alone and
-                                            with --no-verify; run it with --bin-dir build/ccs-asan
+                                            with --no-verify; run it with --bin-dir build/src-asan
 """
 import difflib, os, random, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/ccs/vcc/tests/vir'
+D = f'{R}/src/tests/vir'
 
 
 def bin_dir():
-    d = os.environ.get('VCC_BIN', f'{R}/build/ccs')
+    d = os.environ.get('VCC_BIN', f'{R}/build/src')
     if '--bin-dir' in sys.argv:
         k = sys.argv.index('--bin-dir'); d = sys.argv[k + 1]; del sys.argv[k:k + 2]
     return os.path.abspath(d)
@@ -172,7 +172,7 @@ def main():
         mutate_all(mut, seed, jobs)
     ts = tests(pat)
     if not os.path.exists(VIRTEST):
-        sys.exit(f'{VIRTEST} not built: make -C ccs vcc')
+        sys.exit(f'{VIRTEST} not built: make -C src vcc')
     if bless:
         if not pat:
             sys.exit('--bless needs a PATTERN (a part of the test path)')

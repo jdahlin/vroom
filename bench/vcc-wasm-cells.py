@@ -48,7 +48,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix='vcc-wasm-cells-') as tmp:
             directory = Path(tmp)
             for filename in ['wasm_frame_cells.c', 'stack_cells.c']:
-                source = Path(R) / 'ccs/vcc/tests/vcc' / filename
+                source = Path(R) / 'src/tests/vcc' / filename
                 for level in range(4):
                     assembly = directory / f'{filename}-O{level}.s'
                     opt.run([args.vpp, f'--target={args.target}', f'-O{level}', '-ffreestanding',

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vccd-sample.py: where vccd's CPU goes, from a macOS `sample` call tree.
 
-    sample $(pgrep -f "build/ccs/vccd --sock") 25 1 -mayDie -file OUT.sample   # during a build
+    sample $(pgrep -f "build/src/vccd --sock") 25 1 -mayDie -file OUT.sample   # during a build
     bench/vccd-sample.py OUT.sample [N]
 
 Self samples of blocked frames (cvwait, kevent, read, mutex waits) are dropped;

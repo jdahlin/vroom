@@ -3,7 +3,7 @@
 Diagnostics: vcc's own expected output, with clang as the reference point
 (PLAN-diag.md test layers 1 and 4).
 
-Every ccs/vcc/tests/diag/*.c is a small piece of broken C.  vcc runs
+Every src/tests/diag/*.c is a small piece of broken C.  vcc runs
 -fsyntax-only on it (no colours, same target) from that directory; a test
 passes when
   - layer 4: vcc's stderr is exactly X.c.stderr (vcc's own snapshot: the text
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/ccs/vcc/tests/diag'
+D = f'{R}/src/tests/diag'
 CL = llvm('clang')
 # --bin-dir DIR or VCC_BIN=DIR: the tools of a sanitizer build (PLAN-diag layer 9)
 _BIN = os.environ.get('VCC_BIN', BUILD)

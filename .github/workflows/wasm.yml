@@ -24,8 +24,8 @@ jobs:
           path: |
             ~/.cache/ccache
             /opt/emsdk/upstream/emscripten/cache
-            build/linux/ccs/wasmtests/ref
-            build/linux/ccs/wasmtests/pass
+            build/linux/src/wasmtests/ref
+            build/linux/src/wasmtests/pass
           key: ci-wasm-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
           restore-keys: ci-wasm-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-
       - run: ci/premerge.sh wasm

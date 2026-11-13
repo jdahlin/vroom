@@ -5,7 +5,7 @@
 
 --target x86_64-linux-gnu: the same for x86-64 (vasm --target=...).
 
-Every C file under ccs/vcc/tests (or those matching PAT) is compiled by
+Every C file under src/tests (or those matching PAT) is compiled by
 clang --target=aarch64-linux-gnu -S at each -O level (default -O0 -O2);
 clang -c and vasm assemble the .s and the objects must be byte-identical.
 Prints the failing files and a count of the mnemonics/directives vasm
@@ -46,7 +46,7 @@ def main():
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
     opts = [o if o.startswith('-O') else '-O' + o for o in (a.opts or ['0', '2'])]
-    files = sorted(glob.glob(f'{R}/ccs/vcc/tests/**/*.c', recursive=True))
+    files = sorted(glob.glob(f'{R}/src/tests/**/*.c', recursive=True))
     if a.pat: files = [f for f in files if a.pat in f]
     if a.limit: files = files[:a.limit]
     jobs = [(f, o, a.target) for f in files for o in opts]

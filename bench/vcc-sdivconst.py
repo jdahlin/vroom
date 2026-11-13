@@ -10,10 +10,10 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "vcc/emit/opt/sdivconst.c"
-#include "vcc/arch/x64/emit/x64impl.h"
-#include "vcc/emit/walk/sdivconst.c"
-#include "vcc/arch/a64/emit/sdivconst.c"
+#include "emit/opt/sdivconst.c"
+#include "arch/x64/emit/x64impl.h"
+#include "emit/walk/sdivconst.c"
+#include "arch/a64/emit/sdivconst.c"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }
 VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
@@ -126,7 +126,7 @@ def main():
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
         subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal',
-                        '-I', str(Path(R) / 'ccs'), *flags, str(source), '-o', str(binary)],
+                        '-I', str(Path(R) / 'src'), *flags, str(source), '-o', str(binary)],
                        check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('signed32/64 reciprocal arithmetic and pressure contracts: PASS')

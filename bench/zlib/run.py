@@ -30,7 +30,7 @@ W = os.path.join(os.environ.get('VROOM_WORK') or os.path.join(ROOT, 'work'), 'zl
 SRC = os.path.join(W, f'zlib-{VER}')
 TAR = os.path.join(W, f'zlib-{VER}.tar')
 CLANG = os.environ.get('CLANG') or ('/opt/homebrew/opt/llvm/bin/clang' if os.path.exists('/opt/homebrew/opt/llvm/bin/clang') else 'clang')
-VPP = os.environ.get('VPP') or os.path.join(ROOT, 'build', 'ccs', 'vpp')
+VPP = os.environ.get('VPP') or os.path.join(ROOT, 'build', 'src', 'vpp')
 LIB = ['adler32', 'compress', 'crc32', 'deflate', 'gzclose', 'gzlib', 'gzread', 'gzwrite',
        'infback', 'inffast', 'inflate', 'inftrees', 'trees', 'uncompr', 'zutil']
 FLAGS = ['-O2', '-DHAVE_UNISTD_H', '-DHAVE_STDARG_H', '-DHAVE_HIDDEN']

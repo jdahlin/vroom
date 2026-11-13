@@ -3,7 +3,7 @@
 
   bench/vcc-cfi.py [-j N] [-v] [PAT]
 
-For every C file in ccs/vcc/tests/vcc and tests/gcc-torture/execute (matching
+For every C file in src/tests/vcc and tests/gcc-torture/execute (matching
 PAT), compiled for aarch64 Linux with -fasynchronous-unwind-tables:
   - llvm-dwarfdump --eh-frame parses it, with one FDE per function symbol,
     each covering exactly that function;
@@ -19,7 +19,7 @@ from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 DD, OC, NM = llvm('llvm-dwarfdump'), llvm('llvm-objcopy'), llvm('llvm-nm')
-RT = f'{R}/ccs/vcc/tests/rt/include'
+RT = f'{R}/src/tests/rt/include'
 FL = ['--target=aarch64-linux-gnu', '-w', '-ffreestanding', '-I', RT]
 
 def run(cmd, **kw):
@@ -73,7 +73,7 @@ def main():
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
-    files = sorted(glob.glob(f'{R}/ccs/vcc/tests/vcc/*.c') + glob.glob(f'{R}/ccs/vcc/tests/gcc-torture/execute/*.c'))
+    files = sorted(glob.glob(f'{R}/src/tests/vcc/*.c') + glob.glob(f'{R}/src/tests/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
     with Pool(a.j) as p: res = p.map(one, files, chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}

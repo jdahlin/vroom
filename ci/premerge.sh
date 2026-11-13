@@ -45,7 +45,7 @@ step() {	# step NAME CMD...: run, log, report; keep going on failure
 
 build() {	# build MAKE-TARGET: a build failure ends the job
 	echo "::group::make $1"
-	if ! make -C ccs -j "$J" "$1" > "$LOGS/make-$1.log" 2>&1; then
+	if ! make -C src -j "$J" "$1" > "$LOGS/make-$1.log" 2>&1; then
 		tail -n 60 "$LOGS/make-$1.log"; echo "::endgroup::"
 		echo "FAIL make $1"; exit 1
 	fi
@@ -132,7 +132,7 @@ arm64)
 	;;
 asan)
 	build vcc-asan
-	B=$(dirname "$BUILD")/ccs-asan
+	B=$(dirname "$BUILD")/src-asan
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
@@ -149,7 +149,7 @@ asan)
 	;;
 tsan)
 	build vcc-tsan
-	B=$(dirname "$BUILD")/ccs-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step vir-x86-tsan python3 bench/vcc-vir-x86.py --bin-dir "$B"
 	fi

@@ -25,7 +25,7 @@ always validates its original message contract before the test is counted.
       -v: every failure's missing/unexpected diagnostics
       --show CAT: the tests of one category (fail, crash, skip:REASON, ...)
       --match-messages: additionally compare vcc wording to clang directives
-Clang's side is cached under build/ccs/verify/ (by file content and line);
+Clang's side is cached under build/src/verify/ (by file content and line);
 Separate results.locations.json and results.messages.json baselines are
 compared with the previous run of the same policy: tests that changed
 from pass to fail (and back) are listed.

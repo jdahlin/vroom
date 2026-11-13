@@ -9,9 +9,9 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/emit/rec/copies.c"
-#include "vcc/arch/x64/emit/copies.c"
+#include "arch/x64/emit/effects.c"
+#include "emit/rec/copies.c"
+#include "arch/x64/emit/copies.c"
 #define OP(op_,sz_,d_,a_,b_) ((rec){ .op=op_, .sz=sz_, .r={d_,a_,b_,XNOREG} })
 #define CP(d,s) OP(X_MOV,8,d,s,XNOREG)
 #define IMM(d) OP(X_MOVI,8,d,XNOREG,XNOREG)
@@ -97,7 +97,7 @@ def main():
         binary = Path(tmp) / 'copies'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('machine record forward-copy contracts: PASS')

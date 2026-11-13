@@ -8,7 +8,7 @@ x86_64-linux-gnu twice: by clang (the oracle) and by vcc, each linked by
 clang against this host's glibc and run natively (an x86-64 Linux host).
 vcc passes when its program prints what clang's prints and exits the same
 way.  vcc's side: `vpp -S`, assembled by clang (vcc writes no x86 objects
-yet, X5).  The test runtime headers (ccs/vcc/tests/rt/include) are used on
+yet, X5).  The test runtime headers (src/tests/rt/include) are used on
 both sides, glibc behind them, with rt/wasm.c's __rt_assert.
 
 Failures by stage: emit (vpp fails; "not supported yet" names the plan

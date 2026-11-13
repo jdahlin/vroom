@@ -2,7 +2,7 @@
 
 Fast cold arm64 Linux kernel build on macOS (M1 Pro: 8 P + 2 E cores) that
 boots Debian.  Phase 1 used clang; phase 2 (`PLAN-fas2.md`) replaces it with
-our own toolchain, `ccs/vcc/`: lexer, preprocessor, parser, emitter,
+our own toolchain, `src/`: lexer, preprocessor, parser, emitter,
 assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 
 ## Goals and constraints (from the user)
@@ -10,13 +10,13 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`ccs/vcc/vccd/caps.c`, `ccs/vcc/pp/ppdata*.inc` via `gen-ppdata.sh`).
+  (`src/vccd/caps.c`, `src/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
 
 ## Layout
-Plans, specs, research notes and reviews are in `docs/` (names below are
+Plans, specs, research notes and reviews are in `doc/` (names below are
 relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
   (x86-64 Linux as a target): plans
@@ -34,10 +34,10 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `ccs/vcc/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `src/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
-- `ccs/vcc/emit/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
+- `src/emit/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
   rotation), `VCC_VIR_SHRINK=0` the prologue at the function's entry (no shrink-wrapping); `VCC_VL_PROBE=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
@@ -47,7 +47,7 @@ relative to it); `TODO.md` stays at the top.
 - `RESEARCH-regalloc.md`: register allocation (GCC, LLVM, SSA-based, linear
   scan and its descendants, optimal and learned methods) and the allocator
   `SPEC-vir.md` section 15 specifies for VIR, with its fallback.
-- `ccs/`: our code; `ccs/Makefile` builds into `build/ccs/`.  Under `ccs/vcc/`
+- `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  Under `src/`
   generic code is in the component directories, code for one target CPU in
   `arch/<cpu>/<component>/`, code for one target OS in `platform/<os>/`
   (target, not host: host SIMD and host-OS `#ifdef`s stay with their code).
@@ -95,7 +95,7 @@ relative to it); `TODO.md` stays at the top.
     the capability table (`caps.c`), and what runs inside vccd: kbuild's
     fixdep, the archiver (`ar.c`: thin archives, llvm-ar-identical, so the
     build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
-    `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
+    `vsh` (`build/src/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
     Without `--backend-sock` vccd runs the whole kernel build itself: probes,
     `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
@@ -147,9 +147,9 @@ relative to it); `TODO.md` stays at the top.
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
     VCC_UNITY=` compiles file by file, and every file must compile alone.
-  - `phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
+- `contrib/phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
     prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
-- `ccs/wasm/`: vcc (vpp) as WebAssembly for a compiler-explorer page
+- `contrib/wasm/`: vcc (vpp) as WebAssembly for a compiler-explorer page
   (`build.sh`, emscripten memory64 -> `build/wasm/site/`); `mman.c` turns the
   big reservations into small sbrk stretches, `compat/` maps ACLE CRC to SIMDe.
 - `bench/`: harnesses.  `bench/vcc-diff.py` compares `vpp` with `clang -E`;
@@ -161,8 +161,8 @@ relative to it); `TODO.md` stays at the top.
 
 ## Build and test
 ```
-make -C ccs -j 6 vcc                # all vcc tools (pp/ cc/ emit/ one TU each, ccache if installed)
-make -C ccs -j 6 vcc VCC_UNITY= OUT=../build/ccs-parts   # file by file: each file compiles alone
+make -C src -j 6 vcc                # all vcc tools (pp/ cc/ emit/ one TU each, ccache if installed)
+make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
 bench/vcc-diff.py cmp -j 6          # ... including host tools (scripts/)
@@ -188,28 +188,28 @@ bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fai
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (tests/volatile, <1 s)
-bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)
+bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/tests/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
-bench/vir-test.py --mutate 3000 --bin-dir build/ccs-asan   # random mutants of those units: virtest never crashes (~1 min)
-bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (ccs/vcc/tests/vcc), ~1 s
-bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (ccs/vcc/tests/inline); VCC_VIR=bl for VIR's inliner
+bench/vir-test.py --mutate 3000 --bin-dir build/src-asan   # random mutants of those units: virtest never crashes (~1 min)
+bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (src/tests/vcc), ~1 s
+bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (src/tests/inline); VCC_VIR=bl for VIR's inliner
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
-bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (ccs/vcc/tests/abi, ~3 s)
+bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (src/tests/abi, ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively
 bench/vcc-abi.py --target wasm64    # ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
 bench/vcc-self.py -j 6              # vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # tests/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
-bench/vcc-diag.py --bin-dir build/ccs-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/ccs-asan)
+bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 bench/gen-diagids.py [--check]      # pp/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
 vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
-bench/vcc-diag-catalog.py           # build/ccs/diag-catalog.html: every tests/diag case, clang/vcc/narrated/JSON side by side
+bench/vcc-diag-catalog.py           # build/src/diag-catalog.html: every tests/diag case, clang/vcc/narrated/JSON side by side
 vpp -fdiagnostics-style=vcc|clang|narrated -fdiagnostics-text-art-charset=ascii|unicode   # text styles (vcc default)
 bench/sarif-check.py F.sarif        # SARIF structure (+ the official schema once `fetch`ed)
 bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c runs as clang's (~2 min)
@@ -221,11 +221,11 @@ bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: co
 bench/vcc-mutate.py -j 6             # one injected error per valid TU, vcc vs clang: first error, follow-ons (~25 s warm)
 bench/vcc-mutate.py show firstloc     # ... the mutants of one category with both compilers' errors
 bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: never worse for clang
-bench/vcc-explain.py                # docs/diag pages: the wrong example gives the id, the fixed one nothing
-bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
+bench/vcc-explain.py                # doc/diag pages: the wrong example gives the id, the fixed one nothing
+bench/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
 bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
-build/ccs/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
-bench/vir-alloc.py [--bless]        # ccs/vcc/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
+build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
+bench/vir-alloc.py [--bless]        # src/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
@@ -241,9 +241,9 @@ bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host:
 bench/vcc-wasm.py -j 6 --objcmp     # ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
-python3 bench/virgen-test.py --bin-dir build/linux/ccs  # generated VIR integer/control-flow units verify and round-trip
-bench/vas-enc.py $PWD/ccs/vcc/tests/vas   # vas encodings vs llvm-mc
-bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (ccs/vcc/tests/vas-obj, <1 s)
+python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/control-flow units verify and round-trip
+bench/vas-enc.py $PWD/src/tests/vas   # vas encodings vs llvm-mc
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/tests/vas-obj, <1 s)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
@@ -266,7 +266,7 @@ does, so before a commit also run the per-process `cmp` and `run`.
 PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
 native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
 links; the reference is Homebrew clang, and both builds must pass the same
-`meson test` set.  A bug found there gets a test in `ccs/vcc/tests/vcc/`.
+`meson test` set.  A bug found there gets a test in `src/tests/vcc/`.
 `TODO.md` lists what is left before vcc is a production compiler, each item
 with how it is validated.  The vcc suite, stress and vccd tests mark known bugs
 `xfail` with their TODO.md item; a fix that makes one pass turns it into an
@@ -292,13 +292,13 @@ fast-forwards main when everything is green).  A new harness belongs in
 
 ## Sanitizers
 ```
-make -C ccs -j 6 vcc-asan           # -fsanitize=address,undefined -> build/ccs-asan/
-make -C ccs -j 6 vcc-tsan           # -fsanitize=thread            -> build/ccs-tsan/
+make -C src -j 6 vcc-asan           # -fsanitize=address,undefined -> build/src-asan/
+make -C src -j 6 vcc-tsan           # -fsanitize=thread            -> build/src-tsan/
 export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1   # UB fails the TU
-bench/vcc-sema.py run -j 6 --bin-dir build/ccs-asan       # any harness importing vcc-diff.py
-bench/vcc-diff.py batch -j 6 --cmp --kernel --bin-dir build/ccs-tsan   # shared header cache, 6 threads
-bench/vcc-cbatch.py -j 6 --bin-dir build/ccs-tsan         # -c in one process, as vccd
-bench/vccd-cc.py --bin-dir build/ccs-tsan                 # vccd itself, 150 TUs; report in $LOG
+bench/vcc-sema.py run -j 6 --bin-dir build/src-asan       # any harness importing vcc-diff.py
+bench/vcc-diff.py batch -j 6 --cmp --kernel --bin-dir build/src-tsan   # shared header cache, 6 threads
+bench/vcc-cbatch.py -j 6 --bin-dir build/src-tsan         # -c in one process, as vccd
+bench/vccd-cc.py --bin-dir build/src-tsan                 # vccd itself, 150 TUs; report in $LOG
 ```
 Both variants are `-O1 -g` with their own `obj/`; the normal build is
 unchanged.  `--bin-dir DIR` (or `VCC_BIN=DIR`) picks the tools in every
@@ -312,12 +312,12 @@ not see over-reads inside our own mmap'ed arenas (they are never poisoned),
 only in malloc, globals and the stack.  Contract that ASan checks: strings
 handed to `vintern*`/`vlex_get` must be readable 16 (or 8) bytes past their
 length (`vintern_cstr` pads a literal).  No suppressions are needed today;
-put any in `ccs/tsan.supp`, one reason per entry, and run with
-`TSAN_OPTIONS=suppressions=$PWD/ccs/tsan.supp`.
+put any in `src/tsan.supp`, one reason per entry, and run with
+`TSAN_OPTIONS=suppressions=$PWD/src/tsan.supp`.
 
-## Fuzzing (`ccs/fuzz/`)
+## Fuzzing (`src/fuzz/`)
 Targets build with Homebrew LLVM's libFuzzer and ASan+UBSan into
-`build/ccs/fuzz/` (without libFuzzer, `driver.c` gives the same command line
+`build/src/fuzz/` (without libFuzzer, `driver.c` gives the same command line
 minus coverage feedback).
 - `fuzz-lex`: vlex on raw bytes; checks token-array invariants, spelling,
   interning, NEON vs a scalar build of lex.c (`lexref.c`), buffer alignment.
@@ -328,14 +328,14 @@ minus coverage feedback).
   `\x01` b.h `\x01` sys/c.h, leading `\x02` for asm mode.
   `FUZZ_PP_PRINT=1` prints output and diagnostics.
 ```
-make -C ccs fuzz                    # build the targets
-ccs/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/ccs/fuzz/corpus
-cd build/ccs/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../ccs/fuzz/c.dict \
+make -C src fuzz                    # build the targets
+src/fuzz/gen-corpus.py              # seed corpora from work/linux headers -> build/src/fuzz/corpus
+cd build/src/fuzz && ./fuzz-pp -fork=2 -max_total_time=180 -dict=../../../src/fuzz/c.dict \
     -max_len=4096 -timeout=5 -artifact_prefix=art/ run-pp corpus/pp   # same for fuzz-lex
-make -C ccs fuzz-regress            # replay ccs/fuzz/regress/{lex,pp,diag}
-make -C ccs fuzz-diff               # vpp vs clang -E -P on regress + seeds
-ccs/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
-ccs/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/ccs/fuzz/diff/
+make -C src fuzz-regress            # replay src/fuzz/regress/{lex,pp,diag}
+make -C src fuzz-diff               # vpp vs clang -E -P on regress + seeds
+src/fuzz/pp-diff.py -j 4 --text DIR # ... byte for byte (spacing, indentation, blank lines)
+src/fuzz/pp-diff.py -j 4 DIR...     # ... on any corpus; mismatches -> build/src/fuzz/diff/
 ```
 Keep runs to minutes with `-fork=2`.  Every fixed finding gets a minimal
 input in `regress/lex` or `regress/pp`.

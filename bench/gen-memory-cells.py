@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / 'ccs/vcc/tests/vcc/generated_memory_cells.c'
+OUTPUT = ROOT / 'src/tests/vcc/generated_memory_cells.c'
 MASK = (1 << 32) - 1
 INPUTS = (0x12345678, 0xfffffedc)
 SEED = 0x6d656d35

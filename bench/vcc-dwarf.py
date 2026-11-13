@@ -3,14 +3,14 @@
 
   bench/vcc-dwarf.py [-j N] [-O LEVEL] [PAT]
 
-For every C file in ccs/vcc/tests/vcc and tests/gcc-torture/execute
+For every C file in src/tests/vcc and tests/gcc-torture/execute
 (matching PAT), compiled for aarch64 Linux:
   - vpp -g -c passes llvm-dwarfdump --verify;
   - -g does not change the code: .text is byte-identical with and without -g;
   - vpp -g -c equals clang -c of vpp -g -S (the line table from the text);
   - rows at lines clang -g has no row for are counted (-v lists them): clang
     -O0 drops an if whose condition folds, vcc -O0 keeps its code.
-Clang's side (whether it compiles, its rows) is cached in build/ccs/dwarfref,
+Clang's side (whether it compiles, its rows) is cached in build/src/dwarfref,
 keyed by the source, the flags and clang's version; --no-cache ignores it.
 """
 import argparse, glob, hashlib, json, os, re, subprocess, sys, tempfile
@@ -20,7 +20,7 @@ from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 CL, DD, OC = llvm('clang'), llvm('llvm-dwarfdump'), llvm('llvm-objcopy')
-RT = f'{R}/ccs/vcc/tests/rt/include'
+RT = f'{R}/src/tests/rt/include'
 FL = ['--target=aarch64-linux-gnu', '-w', '-ffreestanding', '-I', RT]
 REF = f'{BUILD}/dwarfref'
 CLV = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout
@@ -111,7 +111,7 @@ def main():
     a = ap.parse_args()
     global NOCACHE
     NOCACHE = a.no_cache
-    files = sorted(glob.glob(f'{R}/ccs/vcc/tests/vcc/*.c') + glob.glob(f'{R}/ccs/vcc/tests/gcc-torture/execute/*.c'))
+    files = sorted(glob.glob(f'{R}/src/tests/vcc/*.c') + glob.glob(f'{R}/src/tests/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
     with Pool(a.j, initializer=_init, initargs=(a.no_cache,)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}

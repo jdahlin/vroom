@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the `vcc --explain` pages (ccs/vcc/docs/diag/ID.md, PLAN-diag.md D6).
+"""Check the `vcc --explain` pages (doc/diag/ID.md, PLAN-diag.md D6).
 
   bench/vcc-explain.py [-v] [PATTERN]
 
@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOCS = f'{R}/ccs/vcc/docs/diag'
+DOCS = f'{R}/doc/diag'
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics', '-fdiagnostics-show-id']
 
@@ -26,9 +26,9 @@ def known_ids():
     spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/bench/gen-diagids.py')
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
-    s = open(f'{R}/ccs/vcc/pp/diagids.inc').read()
+    s = open(f'{R}/src/pp/diagids.inc').read()
     got = set(re.findall(r'^DID\((\w+),', s, re.M)) | g.explicit_ids()
-    for root, _, files in os.walk(f'{R}/ccs/vcc/cc'):	# ids passed as strings ("ext_...")
+    for root, _, files in os.walk(f'{R}/src/cc'):	# ids passed as strings ("ext_...")
         for f in files:
             if f.endswith('.c'):
                 got |= set(re.findall(r'"((?:err|ext|warn|note)_\w+)"', open(os.path.join(root, f), errors='replace').read()))

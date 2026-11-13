@@ -28,7 +28,7 @@ def main():
     arch = args.target.split('-')[0]
     if arch == 'wasm64' and '--experimental-wasm-memory64' in opt.run([args.node, '--v8-options']):
         args.node_flags = ['--experimental-wasm-memory64']
-    source = Path(R)/'ccs/vcc/tests/vcc/constant_control.c'
+    source = Path(R)/'src/tests/vcc/constant_control.c'
     with tempfile.TemporaryDirectory(prefix='vcc-constant-control-') as tmp:
         directory = Path(tmp)
         for level in range(4):

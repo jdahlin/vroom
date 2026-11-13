@@ -9,10 +9,10 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/emit/flow/graph.c"
-#include "vcc/emit/flow/maskflow.c"
-#include "vcc/arch/x64/emit/dead.c"
+#include "arch/x64/emit/effects.c"
+#include "emit/flow/graph.c"
+#include "emit/flow/maskflow.c"
+#include "arch/x64/emit/dead.c"
 #define OP(o,s,d,a,b) ((rec){.op=o,.sz=s,.r={d,a,b,XNOREG}})
 #define IMM(r) OP(X_MOVI,8,r,XNOREG,XNOREG)
 #define MOV(d,a) OP(X_MOV,8,d,a,XNOREG)
@@ -136,7 +136,7 @@ def main():
         binary = Path(tmp) / 'dead'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('machine record dead-result contracts: PASS')

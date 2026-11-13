@@ -3,12 +3,12 @@
 
   bench/vcc-ctests.py [-j N] [--suite gcc|tcc|vcc|inline] [--fe] [--cpu QEMU_CPU] [-v] [--show CAT] [PAT]
 
-Suites (ccs/vcc/tests/, see the README there):
+Suites (src/tests/, see the README there):
   gcc  gcc.c-torture/execute: exits 0 on success, abort()s on failure
   tcc  tinycc tests2: prints output, compared with clang's (and tcc's .expect)
   inline  inlining and IPA tests: gcc.dg/ipa, gcc.dg/torture, c-c++-common and
-       llvm-test-suite run tests (ccs/vcc/tests/inline): as gcc, output vs clang's
-  vcc  our own regression tests (ccs/vcc/tests/vcc): exit 0 (or abort()) and
+       llvm-test-suite run tests (src/tests/inline): as gcc, output vs clang's
+  vcc  our own regression tests (src/tests/vcc): exit 0 (or abort()) and
        print what clang's build prints.  Comments in a test steer the runner:
          /* vcc-flags: -std=c23 ... */   extra flags for both compilers
          /* vcc-noref: reason */         clang rejects it (a GNU extension): no
@@ -28,7 +28,7 @@ Suites (ccs/vcc/tests/, see the README there):
 Exit status 1 when anything fails or XPASSes.
 
 Every test is built twice: by clang (the oracle) and by vcc (vpp -c), each
-linked with the bare-metal runtime in ccs/vcc/tests/rt (built by clang) and
+linked with the bare-metal runtime in src/tests/rt (built by clang) and
 run under qemu-system-aarch64 -M virt with semihosting.  vcc passes when its
 binary prints what clang's prints and exits with the same status (0 for gcc).
 
@@ -41,9 +41,9 @@ undefined link_error/link_failure: the test checks that the optimizer removed
 a call, and vcc has no such pass), run.
 
 --fe stops after the front end (no code, no qemu): fe pass rate only.
-Clang reference results are cached in build/ccs/ctests/ref (keyed by the
+Clang reference results are cached in build/src/ctests/ref (keyed by the
 source, flags and runtime), so a rerun only builds and runs vcc's side.  A vcc object byte-identical
-to one that passed before (build/ccs/ctests/pass, keyed by the object, the
+to one that passed before (build/src/ctests/pass, keyed by the object, the
 runtime and the reference) is not linked or run again; --no-cache runs all.
 """
 import hashlib, json, os, re, shutil, subprocess, sys, time
@@ -53,12 +53,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-T = f'{R}/ccs/vcc/tests'
+T = f'{R}/src/tests'
 RT = f'{T}/rt'
 CL = llvm('clang')
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 OBJCOPY = llvm('llvm-objcopy')
-LLD = os.environ.get('VCC_LD') or shutil.which('ld.lld') or llvm('ld.lld')	# VCC_LD=build/ccs/vlink: link with vlink
+LLD = os.environ.get('VCC_LD') or shutil.which('ld.lld') or llvm('ld.lld')	# VCC_LD=build/src/vlink: link with vlink
 QEMU = shutil.which('qemu-system-aarch64') or '/opt/homebrew/bin/qemu-system-aarch64'
 OUT = f'{BUILD}/ctests'
 RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'

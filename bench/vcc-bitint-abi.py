@@ -15,7 +15,7 @@ os.environ['VCC_BIN'] = str(pathlib.Path(a.bin_dir).resolve())
 os.environ['VCC_BUILD'] = str(a.output.resolve() / 'runtime')
 a.output.mkdir(parents=True, exist_ok=True)
 bench = pathlib.Path(__file__).resolve().parent
-source = bench.parent / 'ccs/vcc/tests/bitint-abi'
+source = bench.parent / 'src/tests/bitint-abi'
 
 def module(name, filename):
     spec = importlib.util.spec_from_file_location(name, bench / filename)

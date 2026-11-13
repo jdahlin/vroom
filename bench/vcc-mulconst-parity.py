@@ -31,7 +31,7 @@ def main():
         for target in ['x86_64-linux-gnu', 'aarch64-linux-gnu',
                        'wasm32-unknown-emscripten', 'wasm64-unknown-emscripten']:
             for level in range(4):
-                for source in [Path(R) / 'ccs/vcc/tests/vcc' / args.source, overflow]:
+                for source in [Path(R) / 'src/tests/vcc' / args.source, overflow]:
                     # Real noopt policy is the VCC_NOOPT environment, not an
                     # optnone attribute (which this compiler currently ignores).
                     for noopt in ([False, True] if source != overflow else [False]):

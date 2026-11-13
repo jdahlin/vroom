@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clangdiag
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-V = f'{R}/ccs/vcc'
+V = f'{R}/src'
 DIRS = ['pp', 'cc', 'emit', 'arch/a64/emit', 'driver', 'lex']
 # function: (index of the format argument, kind or index of the kind argument)
 CALLS = {'cc_error': (2, 'error'), 'fatal': (2, 'error'), 'note': (2, 'note'), 'report': (7, 1),
