@@ -36,7 +36,7 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `src/codegen/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa.c`, `lower-*.c`, `promote.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/codegen/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
@@ -92,7 +92,7 @@ relative to it); `TODO.md` stays at the top.
     and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
-    conditionals, expressions; internal header `asimpl.h`; one module with
+    conditionals, expressions; internal header `as-internal.h`; one module with
     `arch/<cpu>/as/parse.c`, `as_SRC`).
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
     and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
@@ -247,7 +247,7 @@ bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs a
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
-src/tools/gen-diagids.py [--check]      # frontend/diag/diagids.inc: each diagnostic format's id (clang's name or vcc_*)
+src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)
 VCC_TRACK_DIAG=1 vpp ... -fdiagnostics-show-id   # each diagnostic's id and where vcc reported it
 bench/vcc-mutate.py -j 6 --formats  # ... and every mutant's JSON rebuilds its text (diag-render.py), SARIF checked, HTML page has the text
 vpp ... -fdiagnostics-add-output=html:file=F   # a standalone page of the TU's diagnostics, vcc style in colour
@@ -334,7 +334,8 @@ Locally, as CI: `env/linux/run.sh ci/premerge.sh arm64`.  main is not
 protected (private repo, free plan), so the gate is the workflow: push to
 main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
 fast-forwards main when everything is green).  A new harness belongs in
-`ci/premerge.sh` when it is fast and needs only the checkout.
+`ci/premerge.sh` when it is fast and needs only the checkout.  The asan job also
+builds the fuzz targets and replays `test/fuzz/regress` (`make -C src fuzz-regress`).
 
 ## Sanitizers
 ```

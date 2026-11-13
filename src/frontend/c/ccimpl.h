@@ -143,6 +143,9 @@ typedef struct fscratch {
 /* tu.c */
 VPRIV void *halloc(cc *c, size_t n);
 VPRIV void drcov_boundary(cc *c);
+VPRIV void drcov_finish(cc *c);
+VPRIV void drcov_init(void);
+VPRIV bool drcov_active(void);
 VPRIV void dr_read(cc *c, int ns, uint32_t id, uint32_t s);
 VPRIV uint32_t dr_intern(cc *c, const ctype *t);
 VPRIV void dr_pragma(cc *c, int kind);
@@ -490,7 +493,23 @@ static inline bool attrs_empty(const attrs *a);
 /* the 64-bit integer type: long, or long long under ILP32 */
 #define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? TY_ULLONG : TY_LLONG) : ((uns) ? TY_ULONG : TY_LONG))
 VPRIV void merge_attrs(attrs *to, const attrs *from);
-/* flow.c */
+/* flow.c: reach.c */
+typedef struct flw {
+	cc *c;
+	uint8_t *lab;		/* label reached, from first */
+	uint32_t first, nlab;
+	bool changed;
+	bool brk, cont;		/* the innermost loop/switch: reached by break/continue */
+	bool sw_in;		/* the innermost switch: its condition reached */
+	bool sw_const;		/* ... with a constant condition */
+	i128 sw_val;
+	bool sw_hit;		/* ... that some case matches */
+	bool live_ret, fake;	/* a reachable return; a reachable noreturn call */
+} flw;
+VPRIV int fl_const(flw *f, uint32_t n);
+VPRIV bool fl_noreturn(flw *f, uint32_t e);
+VPRIV bool fl_case_match(flw *f, uint32_t n, i128 v);
+VPRIV bool fl_has_default(flw *f, uint32_t n);
 VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label);
 VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label);
 /* fmt.c */
@@ -499,6 +518,7 @@ VPRIV uint32_t expr_tdef(cc *c, uint32_t n);
 VPRIV void format_check(cc *c, uint32_t fs, const uint32_t *args, const qty *aty, const uint32_t *atd, uint32_t nargs);
 VPRIV void c23_word_help(cc *c, vdiag *d, uint32_t id);
 VPRIV void asm_label(cc *c, attrs *a);
+VPRIV void target_attr(cc *c, attrs *a, uint32_t str, uint32_t loc);
 /* declspec.c */
 VPRIV void unknown_type(cc *c, dspec *ds, bool allow_sc);
 VPRIV bool is_type_start(cc *c, const ptok *t);
@@ -540,6 +560,7 @@ VPRIV uint32_t implicit_lib_func(cc *c, uint32_t id, uint32_t loc, qty t);
 VPRIV qty sig_func_type(cc *c, const char *sig);
 VPRIV uint32_t fold_strncmp_zero(cc *c, const vec *args, uint32_t loc);
 VPRIV void declaration(cc *c, vec *out, bool file);
+VPRIV uint32_t declare(cc *c, const dspec *ds, declr *d, qty t, bool file);
 /* stmt.c */
 VPRIV uint32_t label_ref(cc *c, uint32_t name, uint32_t loc);
 VPRIV bool lib_builtin_disabled(const cc_opts *o, const char *name, size_t len);
@@ -548,6 +569,7 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel);
 VPRIV bool at_asm(cc *c);
 VPRIV uint32_t compound_stmt(cc *c, qty *last);
 VPRIV uint32_t statement(cc *c);
+VPRIV void return_stack_addr(cc *c, uint32_t e, bool addr);
 /* lazy.c */
 VPRIV bool lazy_ok(cc *c, uint32_t s, const declr *d);
 VPRIV void lazy_capture(cc *c, uint32_t s, const declr *d);
@@ -556,6 +578,10 @@ VPRIV void lazy_closure(cc *c);
 /* func.c */
 VPRIV void function_def(cc *c, uint32_t s, const declr *d);
 VPRIV void translation_unit(cc *c);
+VPRIV uint32_t instrument(cc *c, uint32_t fn, uint32_t body);
+VPRIV void object_size_locals(cc *c, uint32_t sym0, uint32_t node0);
+VPRIV void fold_local_builtins(cc *c, uint32_t sym0, uint32_t node0);
+VPRIV void return_type_warn(cc *c, uint32_t s, uint32_t body, uint32_t rbrace, uint32_t lab0, int k);
 VPRIV bool enum_covered(cc *c, const node *sw);
 /* type-name.c, layout-check.c */
 VPRIV const char *tyname(cc *c, qty t);

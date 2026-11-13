@@ -324,19 +324,19 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	R.pt = pt;
 	elf_set_machine(R.o, X86(c) ? EM_X86_64 : EM_AARCH64);
 	as_begin(R.as, R.o, "<vcc>");
-	if (as_snippet(R.as, hp, hn))
+	if (as_snippet_assemble(R.as, hp, hn))
 		r = -1;
 	for (uint32_t i = 0; !r && i < nch; i++)
 		r = r_chunk(&R, ch[i].p, ch[i].n);
 	ser = R.ser;
-	if (!r && (as_snippet(R.as, tp, tn) || as_end(R.as)))
+	if (!r && (as_snippet_assemble(R.as, tp, tn) || as_end(R.as)))
 		r = -1;
 	vjob_region_release(&rr[0], VJOB_REGION_SCRATCH);
 	vjob_region_release(&rr[1], VJOB_REGION_SCRATCH);
 	vjob_region_release(&rr[2], need * sizeof(uint32_t));
 	vjob_region_pool_give(&rpool, rr);
-	if (r || R.o->has_err || as_failed(R.as)) {
-		as_error(c, "assembler: %s", as_failed(R.as) ? as_msg(R.as) : R.o->err);
+	if (r || R.o->has_err || as_is_failed(R.as)) {
+		as_error(c, "assembler: %s", as_is_failed(R.as) ? as_message_get(R.as) : R.o->err);
 		return -1;
 	}
 	return 0;

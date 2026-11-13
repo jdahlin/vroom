@@ -60,7 +60,7 @@ VPRIV uint32_t r_sym(rctx *R, uint32_t ref)
 	ref_name(R->c, &R->nb, ref);
 	/* ref_name quotes non-ASCII x86 symbols for the text printer. */
 	bool quoted = R->nb.n >= 2 && R->nb.p[0] == '"' && R->nb.p[R->nb.n - 1] == '"';
-	y = as_sym(R->as, R->nb.p + quoted, R->nb.n - 2 * quoted);
+	y = as_symbol_by_name(R->as, R->nb.p + quoted, R->nb.n - 2 * quoted);
 	if (slot)
 		*slot = y;
 	return y;
@@ -77,7 +77,7 @@ static int r_data(rctx *R, const data_hdr *h)
 	const ireloc *rel = (const ireloc *)(h + 1);
 	const uint8_t *d = (const uint8_t *)(rel + h->nrel);
 	ElfObj *o = R->o;
-	uint32_t frag = as_frag(R->as);
+	uint32_t frag = as_fragment_current(R->as);
 	uint64_t at = 0;
 
 	if (!h->size)
@@ -103,10 +103,10 @@ static int r_data(rctx *R, const data_hdr *h)
 			uint32_t sz = rel[k].sz ? rel[k].sz : 8;
 			uint64_t off = elf_frag(o, frag)->size;
 			uint8_t *p = elf_grow(o, frag, sz);
-			ElfVal v = as_val(R->as, r_sym(R, rel[k].ref), rel[k].add);
+			ElfVal v = as_symbol_value(R->as, r_sym(R, rel[k].ref), rel[k].add);
 
 			if (rel[k].sub) {
-				ElfVal s = as_val(R->as, r_sym(R, rel[k].sub - 1), 0);
+				ElfVal s = as_symbol_value(R->as, r_sym(R, rel[k].sub - 1), 0);
 
 				v.sub = s.add, v.c -= s.c;
 			}
@@ -139,18 +139,18 @@ static int r_symhdr(rctx *R, const symhdr *h)
 		elf_vis(o, y, h->vis);
 		elf_symp(o, y)->flags &= ~ESYM_TEMP;
 	}
-	frag = as_frag(R->as);
+	frag = as_fragment_current(R->as);
 	if (X86(R->c)) {
 		/* x86 alignment participates in branch relaxation, including when
 		 * an earlier branch has split the current subsection into frags. */
 		R->nb.n = 0;
 		vtext_format_append(&R->nb, "\t.p2align %u\n", h->p2);
-		if (as_snippet(R->as, R->nb.p, R->nb.n)) return -1;
+		if (as_snippet_assemble(R->as, R->nb.p, R->nb.n)) return -1;
 	} else
 		elf_align(o, frag, h->p2, (elf_sec(o, elf_frag(o, frag)->sec)->flags & SHF_EXECINSTR) != 0, 0, 0);
 	elf_reg(o, y);
 	elf_type(o, y, h->fn ? STT_FUNC : STT_OBJECT);
-	return as_label(R->as, y);
+	return as_label_define_symbol(R->as, y);
 }
 
 static int r_fend(rctx *R, uint32_t s)
@@ -162,12 +162,12 @@ static int r_fend(rctx *R, uint32_t s)
 	R->nb.n = 0;
 	vtext_string_append(&R->nb, ".Lfe");
 	vtext_unsigned_append(&R->nb, s);
-	l = as_sym(R->as, R->nb.p, R->nb.n);
-	if (as_label(R->as, l))
+	l = as_symbol_by_name(R->as, R->nb.p, R->nb.n);
+	if (as_label_define_symbol(R->as, l))
 		return -1;
 	/* .size s, .Lfe<s>-s: the operands as the expression parser sees them, then folded */
-	a = as_val(R->as, l, 0);
-	b = as_val(R->as, y, 0);
+	a = as_symbol_value(R->as, l, 0);
+	b = as_symbol_value(R->as, y, 0);
 	if (a.sub || b.sub || (!b.add && b.c))
 		return r_fail(R, "vcc: unexpected .size operands");
 	{
@@ -202,7 +202,7 @@ VPRIV int r_chunk(rctx *R, const char *p, size_t n)
 
 		switch (it->kind) {
 		case IT_TEXT:
-			r = as_snippet(R->as, q, it->len);
+			r = as_snippet_assemble(R->as, q, it->len);
 			break;
 		case IT_X64:
 			r = x64_replay(R, q, it->len);
@@ -214,7 +214,7 @@ VPRIV int r_chunk(rctx *R, const char *p, size_t n)
 			r = r_data(R, (const data_hdr *)q);
 			break;
 		case IT_LABEL:
-			r = as_label(R->as, r_sym(R, *(const uint32_t *)q));
+			r = as_label_define_symbol(R->as, r_sym(R, *(const uint32_t *)q));
 			break;
 		case IT_SYMHDR:
 			r = r_symhdr(R, (const symhdr *)q);
@@ -232,12 +232,12 @@ VPRIV int r_chunk(rctx *R, const char *p, size_t n)
 		}
 		case IT_BYTES:
 			if (it->len) {
-				elf_data(R->o, as_frag(R->as));
-				elf_bytes(R->o, as_frag(R->as), q, it->len);
+				elf_data(R->o, as_fragment_current(R->as));
+				elf_bytes(R->o, as_fragment_current(R->as), q, it->len);
 			}
 			break;
 		}
-		if (r || R->o->has_err || as_failed(R->as))
+		if (r || R->o->has_err || as_is_failed(R->as))
 			return -1;
 		p = q + ((it->len + 7) & ~7u);
 	}

@@ -86,8 +86,8 @@ o = $(patsubst %.c,$(OBJ)/%.o,$(1))
 # sources are not built and a wasm target is an error.  `make VCC_WASM=1` builds it.
 VCC_WASM ?=
 AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
-as_SRC   = as/as.c as/sym.c as/expr.c as/section.c as/data.c as/macro.c as/cond.c as/cfi.c as/relax.c \
-           as/dwline.c platform/darwin/astext.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
+as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c as/macro.c as/conditional.c as/call-frame-information.c as/variable-items.c \
+           as/dwarf-line-table.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 DIGEST_SRC = common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
 LEX_SRC = frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c
@@ -111,7 +111,7 @@ cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard fro
 # the compile job (ppd_run); ccsnap.c stays a TU of its own
 driver_SRC = $(filter-out driver/ccsnap.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses ppimpl.h)
-pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard frontend/diag/*.c)
+pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard diag/*.c)
 codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c codegen/vir/*.c)
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
@@ -274,10 +274,10 @@ $(FUZZ_OUT):
 $(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h frontend/diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_SRC) -o $@
 
 # replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass

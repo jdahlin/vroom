@@ -19,7 +19,7 @@ for m in as obj cc pp emit driver; do
 	as) f="as/as.c arch/a64/as/parse.c";;
 	obj) f="obj/obj.c arch/a64/obj/fixup.c platform/linux/elf.c";;
 	cc) f=$(ls frontend/c/*.c);;
-	pp) f="$(ls frontend/pp/*.c | grep -v dircache) $(ls frontend/diag/*.c)";;
+	pp) f="$(ls frontend/pp/*.c | grep -v dircache) $(ls diag/*.c)";;
 	emit) f=$(ls codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/wasm/codegen/*.c);;
 	driver) f=$(ls driver/*.c | grep -v ccsnap);;
 	esac

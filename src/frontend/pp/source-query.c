@@ -1,0 +1,174 @@
+/* The parser's source-text queries: limits, include point, token text and extent, `defined`. */
+#include "../pp/ppimpl.h"
+#include "common/buffer.h"
+#include <ctype.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+int pp_error_limit(const pp *p) { return p->o->error_limit; }
+int pp_spell_limit(const pp *p) { return p->o->spell_limit; }
+
+uint32_t pp_main_eof(const pp *p)
+{
+	const fent *e = &p->fe[0];
+	uint32_t n = e->f->size;
+
+	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
+}
+
+/* where an #include for a diagnostic at loc goes: the start of the line after the last
+   #include before loc in loc's file, else the file's first line; UINT32_MAX: not in a file */
+uint32_t pp_include_point(const pp *p, uint32_t loc)
+{
+	const fent *e;
+	const char *s;
+	uint32_t end, at = 0, i = 0;
+
+	if (!loc_ok(p, loc, &e))
+		return UINT32_MAX;
+	s = e->f->src;
+	end = loc - e->base;
+	while (i < end) {
+		uint32_t j = i;
+
+		while (j < end && (s[j] == ' ' || s[j] == '\t'))
+			j++;
+		if (j < end && s[j] == '#') {
+			j++;
+			while (j < end && (s[j] == ' ' || s[j] == '\t'))
+				j++;
+			if (end - j > 7 && !memcmp(s + j, "include", 7)) {
+				const char *nl = memchr(s + j, '\n', end - j);
+
+				if (!nl)
+					break;
+				at = (uint32_t)(nl - s) + 1;
+			}
+		}
+		{
+			const char *nl = memchr(s + i, '\n', end - i);
+
+			if (!nl)
+				break;
+			i = (uint32_t)(nl - s) + 1;
+		}
+	}
+	return e->base + at;
+}
+
+const char *pp_src(const pp *p, uint32_t b, uint32_t e, size_t *len)
+{
+	const fent *f;
+
+	if (e < b || !loc_ok(p, b, &f) || e - f->base > f->f->size)
+		return NULL;
+	*len = e - b;
+	return f->f->src + (b - f->base);
+}
+
+/* -Winvalid-pp-token: an unknown token that is an unterminated character constant or string */
+void pp_invalid_tok(pp *p, const char *s, uint32_t len, uint32_t loc)
+{
+	uint32_t i = 0;
+
+	if (i < len && (s[i] == 'L' || s[i] == 'U' || s[i] == 'u'))
+		i++;
+	if (i < len && s[0] == 'u' && s[i] == '8')
+		i++;
+	if (i >= len || (s[i] != '\'' && s[i] != '"'))
+		return;
+	{
+		pp_dinfo d = { "warning", loc + i, NULL, 0, NULL, 0, NULL, 0 };
+
+		pp_warnx(p, "invalid-pp-token", true, NULL, &d, "missing terminating %s character", s[i] == '"' ? "'\"'" : "'");
+	}
+}
+
+/* the source at loc spells s[0, n) as a whole token (not a macro's expansion of it) */
+int pp_spells(const pp *p, uint32_t loc, const char *s, uint32_t n)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base + n > e->f->size || memcmp(e->f->src + (loc - e->base), s, n))
+		return 0;
+	return pp_tok_end(p, loc) == loc + n;
+}
+
+/* the source character at loc, -1 if none */
+int pp_loc_char(const pp *p, uint32_t loc)
+{
+	const fent *e;
+
+	if (!loc_ok(p, loc, &e) || loc - e->base >= e->f->size)
+		return -1;
+	return (unsigned char)e->f->src[loc - e->base];
+}
+
+const char *pp_src_rest(const pp *p, uint32_t b, size_t *len)
+{
+	const fent *f;
+
+	if (!loc_ok(p, b, &f))
+		return NULL;
+	*len = f->f->size - (b - f->base);
+	return f->f->src + (b - f->base);
+}
+
+uint32_t pp_tok_end(const pp *p, uint32_t loc)
+{
+	const fent *e;
+	const char *s, *end;
+	uint32_t off;
+
+	if (!loc_ok(p, loc, &e))
+		return loc + 1;
+	s = e->f->src, off = loc - e->base, end = s + e->f->size;
+	if (s + off >= end)
+		return loc + 1;
+	{
+		const char *q = s + off;
+		unsigned char ch = (unsigned char)*q;
+
+		if (ch == '_' || ch == '$' || ch >= 0x80 || (ch | 0x20) - 'a' < 26u || ch - '0' < 10u) {
+			/* identifier or pp-number (1e+5, 0x1p-3) */
+			bool num = ch - '0' < 10u;
+
+			for (q++; q < end; q++) {
+				unsigned char d = (unsigned char)*q;
+
+				if (d == '_' || d == '$' || d >= 0x80 || (d | 0x20) - 'a' < 26u || d - '0' < 10u || (num && d == '.'))
+					continue;
+				if (num && (d == '+' || d == '-') && strchr("eEpP", q[-1]))
+					continue;
+				break;
+			}
+			return loc + (uint32_t)(q - (s + off));
+		}
+		if (ch == '"' || ch == '\'') {
+			for (q++; q < end && *q != (char)ch && *q != '\n'; q++)
+				if (*q == '\\')
+					q++;
+			return loc + (uint32_t)(q + 1 - (s + off));
+		}
+		{
+			static const char *const ops[] = { "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=",
+							   "&&", "||", "*=", "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##" };
+
+			for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); i++) {
+				size_t l = strlen(ops[i]);
+
+				if ((size_t)(end - q) >= l && !memcmp(q, ops[i], l))
+					return loc + (uint32_t)l;
+			}
+		}
+	}
+	return loc + 1;
+}
+
+int pp_defined(pp *p, uint32_t id)
+{
+	return mdefined(p, id);
+}
