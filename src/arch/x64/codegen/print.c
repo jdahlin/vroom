@@ -331,6 +331,33 @@ static void x64w_epilogue(ecx *e, tbuf *b, uint64_t saves, bool aftercall)
 			     : "\tleaq\t0(%rbp), %rsp\n\tpopq\t%rbp\n");
 }
 
+/* Windows: the function's jump tables (a label, then X_JTE words) in .rdata, as clang: the unwinder
+   decodes .text, and a table there could read as an epilogue */
+static void x64w_tables(ecx *e, tbuf *b, uint32_t s)
+{
+	xst *X = e->x64;
+	bool any = false;
+
+	for (uint32_t k = 0; k < X->nin; k++) {
+		const rec *i = &X->in[k];
+
+		if (i->op == X_LABEL && k + 1 < X->nin && X->in[k + 1].op == X_JTE) {
+			if (!any)
+				vtext_string_append(b, "\t.section\t.rdata,\"dr\"\n");
+			any = true;
+			vtext_string_append(b, "\t.p2align\t2\n");
+			x64_lbl(b, s, i->label);
+			vtext_string_append(b, ":\n");
+		} else if (i->op == X_JTE) {
+			vtext_string_append(b, "\t.long\t");
+			x64_lbl(b, s, i->label);
+			vtext_char_append(b, '-');
+			x64_lbl(b, s, i->ref);
+			vtext_char_append(b, '\n');
+		}
+	}
+}
+
 /* Windows: the pointer a symbol is reached through (__imp_NAME, .refptr.NAME; the tail emits the
    .refptr. stubs this marks) */
 static void x64w_indirect(ecx *e, tbuf *b, uint32_t ref)
@@ -505,6 +532,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			}
 		}
 
+		if (WIN64(c) && (i->op == X_JTE || (i->op == X_LABEL && k + 1 < X->nin && X->in[k + 1].op == X_JTE)))
+			continue;	/* Windows: jump tables in .rdata after the function (x64w_tables), code only in .text */
 		switch (i->op) {
 		case X_LABEL:
 			x64_lbl(b, s, i->label);
@@ -1045,6 +1074,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	vtext_unsigned_append(b, s);
 	if (WIN64(c)) {	/* (COFF: no .size) */
 		vtext_string_append(b, ":\n");
+		x64w_tables(e, b, s);
 		it_close(e, objitem);
 		return;
 	}

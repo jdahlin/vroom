@@ -87,13 +87,17 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 {
 	vwst *V = e->vw;
 	vir_fn *f = &V->f;
-	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt;
+	/* Windows (PLAN-win64.md): the Microsoft convention, rsi, rdi and xmm6-xmm15 callee-saved
+	   too, and always a frame pointer (print.c's Windows frame; the unwinder reads rbp) */
+	bool ms = WIN64(e->c);
+	bool spframe=e->E->o->omit_frame_pointer && !e->E->noopt && !ms;
 	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
-	vx L = { .e = e, .f = f, .o = &V->ao };
+	if (ms) cs |= (1u << RSI) | (1u << RDI);
+	vx L = { .e = e, .f = f, .o = &V->ao, .ms = ms };
 	vir_regs regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
-		.callee = { cs, 0 }, .fixed = vx_fixed, .ctx=&L };
+		.callee = { cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0 }, .fixed = vx_fixed, .ctx=&L };
 	*why = VIRFAIL(x64_unsupported_target_option);
 	if (e->E->o->debug || e->E->o->sprot || x64_nosimd(e)) return false;
 	const attrs *attrs = sym_attrs(e->c, sym);
@@ -177,8 +181,10 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		.order=L.order, .position=L.position, .rotation=L.rotation, .chase=L.chase, .path=layout+4*f->nblk,
 		.block_label=L.label, .optimize=!e->E->noopt };
 
-	for (int r = 0; r < 16; r++)
+	for (int r = 0; r < 16; r++) {
 		if (V->ao.callee[0] >> r & 1) x64_csused(e, r);
+		if (V->ao.callee[1] >> r & 1) x64_csused(e, XMM0 + r);
+	}
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
 	x64_finish(e, sym);

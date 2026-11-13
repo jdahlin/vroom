@@ -2,7 +2,7 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|inline] [--ref-only] [--obj] [--objcmp]
-                     [-v] [--show CAT] [--no-cache] [PAT]
+                     [--vir] [--seh] [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
 own; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
@@ -11,7 +11,11 @@ llvm-mingw sysroot (UCRT, static: no DLL beyond the system's) and run under
 Wine.  vcc passes when its program prints what clang's prints and exits the
 same way.  By default vcc's side uses `vpp -S`, assembled by clang; --obj
 uses the direct `vpp -c` path, and --objcmp compares both with clang's
-assembler.  --ref-only builds and runs clang's side only (WIN0).
+assembler.  --ref-only builds and runs clang's side only (WIN0).  --vir:
+vcc's side through VIR (VCC_VIR=l: -O2's SSA path, falling back per
+function to the direct emitter).  --seh: also check every vcc object's
+unwind data (seh_check below: each function's epilogue decoded as the
+Windows unwinder does, llvm-readobj --unwind against the bytes).
 
 The chain (bench/hostenv.py: MINGW_SYSROOT, WINE): the host's clang compiles
 with the test runtime headers (src/test/rt/include-win64 before
@@ -135,6 +139,145 @@ WIN64_WHY = {
 
 def sh(cmd, timeout=60, **kw):
     return ct.sh(cmd, timeout=timeout, **kw)
+
+
+# ---------------- --seh: the unwind data of vcc's objects ----------------
+#
+# What the Windows unwinder relies on (PLAN-win64.md WIN3): every function that
+# moves rsp has a RUNTIME_FUNCTION; its prolog codes describe its first
+# PrologSize bytes exactly (push -> PUSH_NONVOL, sub rsp -> ALLOC, mov to
+# [rsp] -> SAVE_NONVOL, movaps to [rsp] -> SAVE_XMM128, lea/mov rbp ->
+# SET_FPREG, each at the offset after its instruction); and an epilogue is
+# found by decoding, so every ret or tail jmp must follow the canonical form:
+# add rsp/lea rsp from the frame register, pops, then the ret/jmp.  A
+# function without unwind data must be a leaf that never moves rsp.
+
+OBJDUMP = hostenv.llvm('llvm-objdump')
+READOBJ = hostenv.llvm('llvm-readobj')
+_X86REG = {'RAX': 'rax', 'RCX': 'rcx', 'RDX': 'rdx', 'RBX': 'rbx', 'RSP': 'rsp', 'RBP': 'rbp', 'RSI': 'rsi', 'RDI': 'rdi',
+           **{f'R{k}': f'r{k}' for k in range(8, 16)}, **{f'XMM{k}': f'xmm{k}' for k in range(16)}}
+
+
+def _num(t):
+    t = t.strip().lstrip('$')
+    neg = t.startswith('-')
+    v = int(t.lstrip('-'), 0) if t.lstrip('-') else 0
+    return -v if neg else v
+
+
+def seh_functions(obj):
+    """{start symbol: (end offset, prolog size, [(offset, op, reg, value)])} from llvm-readobj --unwind"""
+    rc, out, err = sh([READOBJ, '--unwind', obj], timeout=60)
+    fns, cur = {}, None
+    for line in out.decode(errors='replace').splitlines():
+        line = line.strip()
+        m = re.match(r'StartAddress: (\S+)', line)
+        if m:
+            cur = {'sym': m.group(1), 'codes': []}
+            continue
+        if cur is None:
+            continue
+        m = re.match(r'EndAddress: (\S+)(?: \+(0x[0-9A-Fa-f]+))?', line)
+        if m:
+            cur['end'] = int(m.group(2), 16) if m.group(2) else 0
+            continue
+        m = re.match(r'PrologSize: (\d+)', line)
+        if m:
+            cur['prolog'] = int(m.group(1))
+            continue
+        m = re.match(r'0x([0-9A-Fa-f]+): (\w+)(.*)', line)
+        if m:
+            off, op, rest = int(m.group(1), 16), m.group(2), m.group(3)
+            reg = re.search(r'reg=(\w+)', rest)
+            val = re.search(r'(?:size|offset)=(0x[0-9A-Fa-f]+|\d+)', rest)
+            cur['codes'].append((off, op, _X86REG.get(reg.group(1), reg.group(1).lower()) if reg else None,
+                                 int(val.group(1), 0) if val else 0))
+            continue
+        if line.startswith('}') and 'end' in cur and 'prolog' in cur:
+            fns[cur['sym']] = cur
+            cur = None
+    return fns
+
+
+def seh_check(obj):
+    """the problems of OBJ's unwind data and epilogues (empty: none)"""
+    fns = seh_functions(obj)
+    rc, out, err = sh([OBJDUMP, '-d', '--no-show-raw-insn', obj], timeout=60)
+    if rc:
+        return ['llvm-objdump failed']
+    funcs, name = {}, None
+    for line in out.decode(errors='replace').splitlines():
+        m = re.match(r'^[0-9a-f]+ <(.+)>:$', line)
+        if m:
+            name = m.group(1)
+            funcs[name] = []
+            continue
+        m = re.match(r'^\s+([0-9a-f]+):\s+(\S+)\s*(.*?)\s*(?:#.*)?$', line)
+        if m and name is not None:
+            funcs[name].append((int(m.group(1), 16), m.group(2), m.group(3)))
+    bad = []
+    for fn, ins in funcs.items():
+        if not ins:
+            continue
+        base = ins[0][0]
+        while ins and ins[-1][1] in ('nop', 'nopw', 'nopl', 'int3', 'data16', 'cs'):
+            ins = ins[:-1]	# (alignment padding after the function)
+        u = fns.get(fn)
+        moves = [i for i in ins if i[1] in ('pushq', 'popq', 'callq') or re.search(r',\s*%rsp$', i[2])]
+        if not u:
+            if moves:
+                bad.append(f'{fn}: moves rsp ({moves[0][1]} {moves[0][2]}) without unwind data')
+            continue
+        # the prolog: each instruction its code, at the offset after it
+        want = sorted(u['codes'], key=lambda c: c[0])
+        got = []
+        for k, (a, mn, ops) in enumerate(ins):
+            if a - base >= u['prolog']:
+                break
+            after = (ins[k + 1][0] if k + 1 < len(ins) else a + 1) - base
+            if mn == 'pushq':
+                got.append((after, 'PUSH_NONVOL', ops.lstrip('%'), 0))
+            elif mn == 'subq' and ops.endswith('%rsp'):
+                got.append((after, 'ALLOC', None, _num(ops.split(',')[0])))
+            elif mn in ('movq', 'movaps') and re.search(r'\(%rsp\)$', ops):
+                r, mem = ops.split(',', 1)
+                got.append((after, 'SAVE_NONVOL' if mn == 'movq' else 'SAVE_XMM128', r.strip().lstrip('%'),
+                            _num(mem.strip().split('(')[0] or '0')))
+            elif (mn == 'leaq' and ops.endswith('%rbp')) or (mn == 'movq' and ops == '%rsp, %rbp'):
+                got.append((after, 'SET_FPREG', 'rbp', _num(ops.split('(')[0]) if mn == 'leaq' else 0))
+            elif mn == 'callq' and '___chkstk_ms' in ops:
+                continue
+            elif mn in ('movl', 'movabsq') and ops.endswith(('%eax', '%rax')):
+                continue	# (___chkstk_ms's size)
+            else:
+                bad.append(f'{fn}: {mn} {ops} in the prolog')
+        norm = [(o, 'ALLOC' if op.startswith('ALLOC') else op, r, v) for o, op, r, v in want]
+        if [(o, op, r) for o, op, r, _ in norm] != [(o, op, r) for o, op, r, _ in got] or \
+           any(op in ('ALLOC', 'SAVE_NONVOL', 'SAVE_XMM128', 'SET_FPREG') and gv != wv
+               for (_, op, _, wv), (_, _, _, gv) in zip(norm, got)):
+            bad.append(f'{fn}: prolog codes {norm} do not describe its instructions {got}')
+        # the epilogues: what precedes each ret and each jump out of the function
+        end = base + u['end'] if u['end'] else ins[-1][0] + 1
+        pushed = sum(1 for c in want if c[1] == 'PUSH_NONVOL')
+        for k, (a, mn, ops) in enumerate(ins):
+            # a jump out of the function (a tail call; an indirect jump through a register is a
+            # switch or computed goto inside it)
+            out_jump = mn in ('jmp', 'jmpq') and (ops.startswith('*(') or ops.startswith('*0x') or
+                                                  (not ops.startswith('*') and not re.search(r'<' + re.escape(fn) + r'[+>]', ops)))
+            if mn not in ('retq', 'ret') and not out_jump:
+                continue
+            j, pops = k - 1, 0
+            while j >= 0 and ins[j][1] == 'popq':
+                j, pops = j - 1, pops + 1
+            restore = j >= 0 and ((ins[j][1] == 'leaq' and re.match(r'-?(0x[0-9a-f]+)?\(%rbp\), %rsp$', ins[j][2])) or
+                                  (ins[j][1] == 'addq' and ins[j][2].endswith(', %rsp')))
+            if pops != pushed:
+                bad.append(f'{fn}+{a - base:#x}: {pops} pops before {mn}, the prolog pushes {pushed}')
+            elif pushed and not restore and any(c[1] in ('ALLOC_SMALL', 'ALLOC_LARGE', 'SET_FPREG') for c in want):
+                bad.append(f'{fn}+{a - base:#x}: epilogue without add/lea rsp ({ins[j][1] if j >= 0 else "-"} {ins[j][2] if j >= 0 else ""})')
+            if a >= end:
+                bad.append(f'{fn}+{a - base:#x}: {mn} past the RUNTIME_FUNCTION end')
+    return bad
 
 
 def rt_obj():
@@ -296,7 +439,7 @@ def one(t):
         e = err.decode(errors='replace')
         return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
-    pf = f'{OUT}/pass{"-obj" if OBJ else ""}/{suite}/{name}'
+    pf = f'{OUT}/pass{"-obj" if OBJ else ""}{"-seh" if SEH else ""}/{suite}/{name}'
     if not NOCACHE:
         try:
             if open(pf).read() == pk:
@@ -308,6 +451,11 @@ def one(t):
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
+    if SEH:
+        bad = seh_check(f'{wd}/vcc.o')
+        if bad:
+            open(f'{wd}/seh.txt', 'w').write('\n'.join(bad) + '\n')
+            return t, 'fail', 'seh', bad[0][:150]
     rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
     if rc:
         m = re.search(r"undefined (?:symbol|reference to):? ['`]?(\w+)", err)
@@ -361,21 +509,23 @@ def objcmp(t):
     return t, 'pass', '', ''
 
 
-NOCACHE = REF_ONLY = OBJ = False
+NOCACHE = REF_ONLY = OBJ = SEH = False
 
 
-def init(nocache, ref_only, obj):
-    global NOCACHE, REF_ONLY, OBJ
-    NOCACHE, REF_ONLY, OBJ = nocache, ref_only, obj
+def init(nocache, ref_only, obj, seh=False):
+    global NOCACHE, REF_ONLY, OBJ, SEH
+    NOCACHE, REF_ONLY, OBJ, SEH = nocache, ref_only, obj, seh
 
 
 if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh')}
     av = [a for a in av if a not in flags]
-    nocache, ref_only, obj, ocmode, verbose = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v'))
+    nocache, ref_only, obj, ocmode, verbose, vir, seh = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh'))
+    if vir:
+        os.environ['VCC_VIR'] = 'l'	# (inherited by every vpp the workers run)
     for opt in ('-j', '--suite', '--show'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -392,7 +542,7 @@ if __name__ == '__main__':
     t0 = time.time()
     rt_obj()
     hostenv.wine_start(PREFIX)
-    with Pool(j, initializer=init, initargs=(nocache, ref_only, obj)) as pool:
+    with Pool(j, initializer=init, initargs=(nocache, ref_only, obj, seh)) as pool:
         res = pool.map(objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)

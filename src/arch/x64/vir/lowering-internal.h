@@ -20,6 +20,7 @@ typedef struct vx {
 	const vir_loops *lp;
 	uint32_t *order,*position,*rotation,*chase,at;
 	unsigned dup;bool fallok,r10;
+	bool ms;	/* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
 	uint32_t memv, memskip, scaledv, scaledskip; int membase, memindex, scaleindex; uint8_t memsh, scalesh; bool indexed; int64_t memoff;
 	uint32_t bev; int bebase,beindex; uint8_t besh,bewidth; bool beindexed; int64_t beoff;
 	uint32_t cmpmemv; uint8_t cmpmemsize; bool cmpmemside;
@@ -31,7 +32,7 @@ VPRIV void *vx_grow(void *p, uint32_t *cap, uint32_t n, size_t size);
 VPRIV int vx_reg(uint8_t r);
 VPRIV int vx_size(uint32_t t);
 VPRIV int64_t vx_bits(const vir_ins *i);
-VPRIV uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack);
+VPRIV uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack, bool ms);
 VPRIV bool vx_imm(const vir_fn *f, uint32_t v, int64_t *value);
 VPRIV bool vx_smallmem(const vir_fn *f,const vir_ins *i);
 VPRIV bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint64_t *range);

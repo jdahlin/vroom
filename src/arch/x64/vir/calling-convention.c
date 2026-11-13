@@ -1,13 +1,22 @@
-/* x86-64 lowering of VIR: the SysV argument registers and the fixed operands of calls, parameters, switches and block copies. */
+/* x86-64 lowering of VIR: the SysV argument registers and the fixed operands of calls, parameters, switches and block copies.
+ * ms: the Microsoft convention (Windows x64; PLAN-win64.md WIN2): argument g in its position's register (rcx rdx r8 r9 or
+ * xmm0-xmm3), else at 16 + 8g above the frame base (the caller's 32 bytes of shadow space below it). */
 
 #include "lowering-internal.h"
 
 /* Only one-piece scalar ABI groups reach this target. */
-VPRIV uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack)
+VPRIV uint8_t vx_arg(const vir_fn *f, uint32_t sig, uint32_t g, int *stack, bool ms)
 {
 	uint32_t ni = 0, nf = 0;
 	int off = 16;
 	uint8_t r = VR_NONE;
+
+	if (ms) {
+		bool fp = VG_CLASS(f->extra[sig + 3 + 2 * g], 0) != VC_INT;
+
+		*stack = 16 + 8 * (int)g;
+		return g >= 4 ? VR_NONE : fp ? VR_MAKE(1, g) : (uint8_t)x64w_argreg((int)g);
+	}
 	for (uint32_t k = 0; k <= g; k++) {
 		bool fp = VG_CLASS(f->extra[sig + 3 + 2 * k], 0) != VC_INT;
 		r = fp ? (nf < 8 ? VR_MAKE(1, nf++) : VR_NONE) : (ni < 6 ? (uint8_t)x64_argreg(ni++) : VR_NONE);
@@ -21,10 +30,10 @@ VPRIV void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
 	const vx *target=ctx;
-	bool r10=target && target->r10;
+	bool r10=target && target->r10, ms=target && target->ms;
 	if (i->op == VO_PARAM) {
 		int stack;
-		x->res = vx_arg(f, f->sig, i->a, &stack);
+		x->res = vx_arg(f, f->sig, i->a, &stack, ms);
 	} else if(i->op==VO_SWITCH && r10) {
 		/* A private dense selector can be produced directly in the dispatch
 		 * register. Range chains and shared selectors keep their original. */
@@ -43,13 +52,17 @@ VPRIV void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 		x->nopnd = n + 1;
 		for (uint32_t k = 0; k < n; k++) {
 			int stack;
-			x->opnd[k + 1] = vx_arg(f, i->b, k, &stack);
+			x->opnd[k + 1] = vx_arg(f, i->b, k, &stack, ms);
 			if (x->opnd[k + 1] == VR_NONE) x->mem |= 1u << (k + 1);
 		}
 		const vir_ins *callee = &f->ins[i->a];
 		if (callee->op == VO_SYMADDR && !callee->b && !callee->c) x->mem |= 1;
 		x->clob[0] = r10?X_TEMPS:X_TEMPS & ~(1u << R10);
 		x->clob[1] = (1u << 14) - 1;
+		if (ms) {	/* a Microsoft callee keeps rsi, rdi and xmm6-xmm15 */
+			x->clob[0] &= ~((1u << RSI) | (1u << RDI));
+			x->clob[1] = (1u << 6) - 1;
+		}
 		if (i->ty != VT_VOID) x->res = vir_rclass(i->ty) ? VR_MAKE(1, 0) : RAX;
 	} else if (i->op == VO_RET && f->extra[i->c]) {
 		x->nopnd = 1;

@@ -177,15 +177,16 @@ VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, u
 		int total = 0, nf = 0;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			uint8_t r = vx_arg(L->f, i->b, k, &off);
+			uint8_t r = vx_arg(L->f, i->b, k, &off, L->ms);
 			if (r == VR_NONE) total = off - 8;
 			else if (VR_CLASS(r)) nf++;
 		}
+		if (L->ms && total < 32) total = 32;	/* the shadow space */
 		total = (total + 15) & ~15;
 		if (total) x64_put(e, X_ADJSP)->imm = -total;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			if (vx_arg(L->f, i->b, k, &off) != VR_NONE) continue;
+			if (vx_arg(L->f, i->b, k, &off, L->ms) != VR_NONE) continue;
 			uint32_t value = L->f->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
 			if (r == VR_NONE) {
@@ -198,20 +199,29 @@ VPRIV void vx_ins(vx *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, u
 		}
 		bool indirect = p[0] != VR_NONE;
 		if (indirect) x64_mov(e, R11, a); /* al is set for variadic calls */
-		if (VSIG_VARIADIC(L->f->extra[i->b])) x64_movi(e, RAX, nf);
-		if (indirect) x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
+		if (L->ms && VSIG_VARIADIC(L->f->extra[i->b]))
+			for (uint32_t k = 0; k < ng && k < 4; k++) {	/* a float also in its integer register */
+				int off;
+				uint8_t r = vx_arg(L->f, i->b, k, &off, true);
+				if (VR_CLASS(r)) x64_op3(e, X_MOV, 8, x64w_argreg((int)k), vx_reg(r), XNOREG);
+			}
+		else if (VSIG_VARIADIC(L->f->extra[i->b])) x64_movi(e, RAX, nf);
+		rec *call;
+		if (indirect) call = x64_op3(e, X_CALLR, 8, XNOREG, R11, XNOREG);
 		else {
 			const vir_ins *callee = &L->f->ins[i->a];
 			note_ref(e, callee->a);
-			x64_put(e, X_CALL)->ref = callee->a;
+			call = x64_put(e, X_CALL);
+			call->ref = callee->a;
 		}
+		call->sh = L->ms;	/* (a Microsoft callee: print.c's save set) */
 		if (total) x64_put(e, X_ADJSP)->imm = total;
 		e->calls = true;
 		return;
 	}
 	case VO_PARAM: {
 		int stack;
-		if (vx_arg(L->f, L->f->sig, i->a, &stack) == VR_NONE) {
+		if (vx_arg(L->f, L->f->sig, i->a, &stack, L->ms) == VR_NONE) {
 			lval at = { .k = L_FRAME, .off = stack };
 			x64_mem(e, X_LD, sz, d, &at, false);
 		}

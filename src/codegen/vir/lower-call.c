@@ -91,6 +91,8 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool var
 
 	if (r)
 		vw_fail(e, VIRFAIL(record_result));
+	if (X86(c) && e->msabi != WIN64(c))	/* (the lowering knows the target's own convention only) */
+		vw_fail(e, VIRFAIL(x64_calling_convention));
 	for (int k = 0; k < n; k++)
 		if (a[k].mem || a[k].n != 1)
 			vw_fail(e, VIRFAIL(record_argument));
@@ -151,6 +153,8 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		vw_fail(e, VIRFAIL(record_result));
 	if (variadic && !DARWIN(c))
 		vw_fail(e, VIRFAIL(variadic_function));
+	if (X86(c) && e->msabi != WIN64(c))
+		vw_fail(e, VIRFAIL(x64_calling_convention));
 	uint32_t pv0 = V->np;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
@@ -191,6 +195,11 @@ VPRIV void vw_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 		uint32_t rpc;
 
 		V->fsig = vw_sig(e, a, n, variadic, e->wk->rty, &rpc);
+	}
+	if (WIN64(c) && c->syms[e->wk->fsym].sc != SC_STATIC && EM_IDENT_IS(c->syms[e->wk->fsym].name, "main")) {
+		/* MinGW: main calls __main first (the constructors), as clang */
+		e->calls = true;
+		vw_call(e, FIXED(FN___MAIN), NULL, NULL, 0, false, NULL, prim(TY_VOID));
 	}
 }
 

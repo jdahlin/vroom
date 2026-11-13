@@ -104,7 +104,8 @@
 	X(x64_loop_analysis, "VIR x86-64: loop analysis failed") \
 	X(x64_allocation_failed, "VIR x86-64: allocation failed") \
 	X(x64_allocation_check_failed, "VIR x86-64: allocation check failed") \
-	X(x64_lowering_failed, "VIR x86-64: lowering failed")
+	X(x64_lowering_failed, "VIR x86-64: lowering failed") \
+	X(x64_calling_convention, "VIR x86-64: ms_abi/sysv_abi other than the target's")
 
 typedef enum {
 #define X(name, message) VIRFAIL_##name,
