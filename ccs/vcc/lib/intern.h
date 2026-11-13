@@ -134,7 +134,7 @@ static inline __attribute__((always_inline)) uint32_t vintern_fast(vintern_cache
 		return vintern_long(s, len);
 	}
 	vintern_words16(s, len, &w0, &w1);
-	h = __crc32cd(__crc32cd((uint32_t)len, w0), w1) * 0x9E3779B1u;
+	h = vcrc32c_two((uint32_t)len, w0, w1) * 0x9E3779B1u;
 	{
 		__typeof__(&c->e[0]) e = &c->e[h & ((1u << VIC_BITS) - 1)];
 

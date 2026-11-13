@@ -1,0 +1,169 @@
+{
+  "host": "AMD Ryzen 7 9700X, Linux x86-64, clang 23",
+  "build": "-O3 -march=x86-64 -mtune=generic; SIMD/CRC functions have target attributes",
+  "lexer": {
+    "scalar": "9.3 MB, 1.14 M tokens: best of 7 32.2 ms = 0.29 GB/s, 28.3 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n",
+    "avx2": "9.3 MB, 1.14 M tokens: best of 7 6.7 ms = 1.39 GB/s, 5.8 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n",
+    "auto": "9.3 MB, 1.14 M tokens: best of 7 6.0 ms = 1.56 GB/s, 5.2 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n"
+  },
+  "compilation": [
+    {
+      "target": "x86_64",
+      "mode": "pp",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.052826,
+        0.052679000000000004,
+        0.05400199999999998
+      ],
+      "min_cpu_seconds": 0.052679000000000004,
+      "sha256": "196d76723b52bb5b1fef07418e09a0fedc940ff9fff6886df2236bbf3330ad3a"
+    },
+    {
+      "target": "x86_64",
+      "mode": "pp",
+      "crc": "software",
+      "cpu_seconds": [
+        0.066004,
+        0.06478199999999999,
+        0.067678
+      ],
+      "min_cpu_seconds": 0.06478199999999999,
+      "sha256": "196d76723b52bb5b1fef07418e09a0fedc940ff9fff6886df2236bbf3330ad3a"
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.275323,
+        0.267136,
+        0.26208299999999995
+      ],
+      "min_cpu_seconds": 0.26208299999999995,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "crc": "software",
+      "cpu_seconds": [
+        0.272226,
+        0.284097,
+        0.2776279999999998
+      ],
+      "min_cpu_seconds": 0.272226,
+      "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.5440099999999999,
+        0.5406389999999999,
+        0.5342040000000002
+      ],
+      "min_cpu_seconds": 0.5342040000000002,
+      "sha256": "f5fe1eb36b8d415685f97823511391a78e1c6a1caf5a89e7a19787ea9d6292c3"
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "crc": "software",
+      "cpu_seconds": [
+        0.5500879999999997,
+        0.5489459999999998,
+        0.5571499999999998
+      ],
+      "min_cpu_seconds": 0.5489459999999998,
+      "sha256": "f5fe1eb36b8d415685f97823511391a78e1c6a1caf5a89e7a19787ea9d6292c3"
+    },
+    {
+      "target": "aarch64",
+      "mode": "pp",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.05124799999999985,
+        0.05292800000000031,
+        0.05274099999999948
+      ],
+      "min_cpu_seconds": 0.05124799999999985,
+      "sha256": "332476bb3dd145adb2ef4d062cc8374933866dcb8351fe8186c2000de855e6cb"
+    },
+    {
+      "target": "aarch64",
+      "mode": "pp",
+      "crc": "software",
+      "cpu_seconds": [
+        0.06459000000000092,
+        0.06448399999999954,
+        0.06488100000000085
+      ],
+      "min_cpu_seconds": 0.06448399999999954,
+      "sha256": "332476bb3dd145adb2ef4d062cc8374933866dcb8351fe8186c2000de855e6cb"
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.1371349999999989,
+        0.1408350000000007,
+        0.14642799999999934
+      ],
+      "min_cpu_seconds": 0.1371349999999989,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "crc": "software",
+      "cpu_seconds": [
+        0.1561400000000004,
+        0.15384899999999968,
+        0.15195499999999984
+      ],
+      "min_cpu_seconds": 0.15195499999999984,
+      "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "crc": "auto",
+      "cpu_seconds": [
+        0.43382200000000104,
+        0.4307200000000002,
+        0.4267899999999991
+      ],
+      "min_cpu_seconds": 0.4267899999999991,
+      "sha256": "08713674e87cfa50fb883fb5be81da55b866ab4a1ad842ecf5401a9d4f7c0308"
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "crc": "software",
+      "cpu_seconds": [
+        0.44140699999999966,
+        0.45013300000000056,
+        0.4429440000000011
+      ],
+      "min_cpu_seconds": 0.44140699999999966,
+      "sha256": "08713674e87cfa50fb883fb5be81da55b866ab4a1ad842ecf5401a9d4f7c0308"
+    }
+  ],
+  "method": "Best of 7 warm lexer passes; best of 3 fresh-process CPU times. Whole compiler timings include concurrent backend changes, not an isolated before/after result.",
+  "dispatch_tests": "host: all six CRC/lexer combinations identical\nConroe: all six CRC/lexer combinations identical\nNehalem: all six CRC/lexer combinations identical\nHaswell,-hle,-rtm: all six CRC/lexer combinations identical\nHaswell,-hle,-rtm,-xsave: all six CRC/lexer combinations identical\n",
+  "parity": "329/329 files identical, 1379848 clang tokens\n329/329 files identical, 1379848 clang tokens\n329/329 files identical, 1379848 clang tokens\n",
+  "fuzz": {
+    "scalar": "Done 498992 runs in 16 second(s)",
+    "avx2": "Done 559223 runs in 16 second(s)",
+    "auto": "Done 475152 runs in 16 second(s)"
+  },
+  "suite": [
+    "vcc  318/318 pass (100.0%), 8 skipped   skip:clang-rejects=5 skip:noref=1 skip:ref-fail=2",
+    "all  318/318 pass (100.0%), 8 skipped   skip:clang-rejects=5 skip:noref=1 skip:ref-fail=2",
+    "1.9 s"
+  ],
+  "remaining": "Full kernel parity not run."
+}

@@ -1297,3 +1297,40 @@ SQLite `-E` och direkt/VIR-objekt byteidentiska före/efter för båda målen;
 Clang-preprocessorparitet för SQLite och nio accepterade pp-regressioner
 (två avvisas av Clang). Arm64-jämförelsen normaliserar Clangs patchversion.
 Full kärnparitet och X0:s återstående värdvalidering är fortfarande öppna.
+
+
+### X0 (2026-11-13): runtimeval för lexer och CRC32C
+
+Standardbygget på x86 använder nu `-march=x86-64 -mtune=generic`.
+SSE4.2 är inte längre ett minimikrav: CRC32C väljer hårdvaruinstruktioner
+eller en bitidentisk mjukvaruväg vid processstart. Korta identifierares
+två CRC-ord går genom ett gemensamt anrop. AVX2- och AVX-512 VBMI/BW-lexrar
+byggs med funktionsspecifika target-attribut och väljs en gång under
+lexerns befintliga initlås. CPU-detekteringen kontrollerar även OS-stöd
+för vektorregistren. ARM:s ACLE/NEON-vägar är oförändrade.
+
+`VCC_LEX_SIMD=scalar|avx2|auto` begränsar valet utan att slå på saknade
+CPU-features; `VCC_CRC=software` tvingar mjukvaruhashning. Normalt lämnas
+båda osatta. `HOST_CPU=-march=native` kan fortfarande användas för ett
+maskinlokalt bygge i en separat OUT-katalog. Objekt beror nu på Makefile,
+så ändringen av standardflaggorna också bygger om gamla native-objekt.
+
+Samma baselinebinär verifierad på värden och via qemu-x86_64 med Conroe
+(utan SSE4.2/AVX), Nehalem, Haswell och Haswell utan XSAVE. Alla sex
+CRC/lexer-kombinationer ger identiska hashar, tokens, `-E` och objekt.
+`bench/vcc-host-dispatch.py` har en oberoende bitvis CRC-referens, ett känt
+CRC32C-testvärde och 10 000 ordpar; värdtestet ingår i premerge.
+Clang-tokenparitet: 329/329 filer i alla tre lexerlägen. ASan/UBSan:
+498 992 skalära, 559 223 AVX2- och 475 152 auto-fuzzfall, 16 s per läge;
+mjukvaru-CRC klarar lexerregressionerna. SQLite matchar Clangs preprocessade
+tokens med båda CRC-vägarna (samma normalisering av patchversion som ovan).
+Direkt/VIR-objekt är identiska mellan CRC-vägarna för båda målen.
+x86-vcc-sviten: 318/318, åtta befintliga skippar.
+
+SQLite på samma Ryzen: bästa av sju varma lexerpass **6,0 ms** auto och
+**6,7 ms** AVX2, jämfört med tidigare nativebygges **4,9/5,9 ms**.
+Portabilitet och runtimeanrop kostar alltså något i lexern. Hela aktuella
+baselinebygget: bästa av tre processers CPU-tid **262,1 ms** direkt x86
+objekt, **534,2 ms** VIR. Dessa helprogramtal är inte en isolerad
+före/efterjämförelse eftersom annat backend-arbete pågår i samma checkout.
+Rådata: `results/host-dispatch-20261113.json`. Full kärnparitet återstår.

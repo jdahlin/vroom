@@ -1,13 +1,17 @@
-/* CRC32C for string hashes on the host: ACLE on arm64, SSE4.2 on x86-64 (the
- * same polynomial, so the same hashes); header-only */
+/* CRC32C for host string hashes. x86 dispatches once at startup; the
+ * software and SSE4.2 implementations use the same polynomial as ACLE. */
 #ifndef VCC_LIB_HOSTCRC_H
 #define VCC_LIB_HOSTCRC_H
 #if defined(__x86_64__)
-#include <nmmintrin.h>
 #include <stdint.h>
-#define __crc32cd(h, w) ((uint32_t)_mm_crc32_u64((h), (w)))
-#define __crc32cb(h, b) _mm_crc32_u8((h), (b))
+extern uint32_t (*vcrc32cd)(uint32_t, uint64_t);
+extern uint32_t (*vcrc32cb)(uint32_t, uint8_t);
+extern uint32_t (*vcrc32c_pair)(uint32_t, uint64_t, uint64_t);
+#define __crc32cd(h, w) vcrc32cd((h), (w))
+#define __crc32cb(h, b) vcrc32cb((h), (b))
+#define vcrc32c_two(h, a, b) vcrc32c_pair((h), (a), (b))
 #else
 #include <arm_acle.h>
+#define vcrc32c_two(h, a, b) __crc32cd(__crc32cd((h), (a)), (b))
 #endif
 #endif
