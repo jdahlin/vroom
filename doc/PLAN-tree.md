@@ -203,9 +203,18 @@ How each step was checked:
 - `bench/vbench.py gate --base` (mkbase 579245f6): instructions within
   ±0.11 % in every mode.
 
-Not run: the Linux premerge (Docker was down; CI runs it through
-`ci/premerge-push`), `vccd-kbuild.sh` + `boot-test.py`, and the x86-64 host
-build.
+After merging main (54383659, main's English plans and x86 host dispatch):
+- Both builds and the fast harnesses as above.
+- `bench/vccd-kbuild.sh work/build-tree -j 6`: 925 TUs compiled by vcc, 0
+  failed, 0 fell back to clang, 12.7 s.  `boot-test.py`: Debian 13
+  reaches `running` with 0 failed units.
+- Premerge on the PR's CI (run 43418993945): arm64, asan, tsan, wasm and
+  gate all pass.  tsan and wasm run on x86-64 ubuntu-24.04, so this also
+  covers the x86-64 host build.
+- The local `env/linux/run.sh` image is older than `ci/setup-debian.sh`: it
+  has no compiler-rt sanitizer runtimes and no `qemu-aarch64`.  22 arm64
+  steps fail there: 12 link against the missing `libclang_rt.asan`, and 10
+  find no qemu binary.  Every other step passes.
 
 Already broken on main and unchanged here:
 - `make fuzz`: `fuzz-pp.c` uses `pp_opts.nsys`, and `fuzz-lex` has a
