@@ -32,7 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../lib/buf.h"
+#include "../common/buf.h"
 
 /* ---- 4: types ---- */
 enum { VT_VOID, VT_I32, VT_I64, VT_F32, VT_F64, VT_PTR, VT_MULTI,

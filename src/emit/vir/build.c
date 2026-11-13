@@ -35,7 +35,7 @@
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "../../vir/vir.h"
-#include "../../lib/vstack.h"
+#include "../../port/vstack.h"
 #include "vw.h"
 
 /* ---------------- state ---------------- */

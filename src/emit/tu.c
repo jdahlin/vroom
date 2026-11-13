@@ -1,8 +1,8 @@
 /* vcc code generator: emitter state, the work queue and threads, emit_tu */
 #include "emitimpl.h"
 #include "../arch/wasm/as/wasmas.h"
-#include "../lib/buf.h"
-#include "../lib/defer.h"
+#include "../common/buf.h"
+#include "../common/defer.h"
 
 VPRIV void *reserve(size_t n) { return vreserve(n, MAP_NORESERVE, "vcc: mmap"); }
 

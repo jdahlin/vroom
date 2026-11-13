@@ -37,11 +37,24 @@ STEPS = {
            ('ccs/wasm/', 'contrib/wasm/'),
            ('ccs/fuzz/', 'src/fuzz/'),
            ('docs/', 'doc/')],
+    # data structures for every tool -> common/; host glue -> port/; the x86
+    # target's feature table -> arch/x64/
+    'T2': [*[(f'src/lib/{f}', f'src/common/{f}') for f in (
+               'arena.h', 'attr.h', 'bigint.h', 'buf.h', 'ckd.h', 'defer.h', 'f128.h', 'hash.h',
+               'intern.c', 'intern.h', 'ldhash.c', 'ldhash.h', 'tbuf.h', 'vec.h')],
+           *[(f'src/lib/{f}', f'src/port/{f}') for f in (
+               'hostcrc.h', 'mapfile.h', 'vperf.h', 'vstack.h',
+               'x86native.h', 'x86native-data.inc', 'x86native-LICENSE.txt')],
+           ('src/lib/x86features.h', 'src/arch/x64/x86features.h'),
+           ('src/lib/x86features-data.inc', 'src/arch/x64/x86features-data.inc'),
+           ('src/platform/darwin/pmc.c', 'src/port/darwin/pmc.c'),
+           ('contrib/wasm/mman.c', 'src/port/wasm/mman.c'),
+           ('contrib/wasm/compat/', 'src/port/wasm/compat/')],
 }
 TEXT = {'T1': T1_TEXT}
 
 # never rewritten: the plan that describes the old paths, logs
-SKIP_TEXT = re.compile(r'^(doc/PLAN-tree\.md|docs/PLAN-tree\.md|results/|patches/)')
+SKIP_TEXT = re.compile(r'^(doc/PLAN-tree\.md|docs/PLAN-tree\.md|results/|patches/|src/tools/retarget-paths\.py)')
 C_EXT = ('.c', '.h', '.inc', '.cpp', '.cc', '.S', '.def')
 PATHCH = r'A-Za-z0-9_.\-'
 

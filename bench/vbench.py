@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vbench: small, load-independent benchmarks of the vcc tools, one per module.
 
-The metric is *instructions retired* by the measured threads (src/lib/vperf.h,
+The metric is *instructions retired* by the measured threads (src/port/vperf.h,
 no root needed): it hardly moves with machine load (~0.5 % noise), so many
 agents can measure at the same time on a shared machine.  Cycles and wall time
 are printed too but are only trustworthy in an A/B run (`ab`, alternating).

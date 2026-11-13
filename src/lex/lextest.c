@@ -26,10 +26,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "lex.h"
 #include "../platform/darwin/pmc.h"
-#include "../lib/vperf.h"
+#include "../port/vperf.h"
 
 static double now(clockid_t c)
 {

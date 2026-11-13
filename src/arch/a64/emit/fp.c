@@ -1,6 +1,6 @@
 /* vcc code generator: floating point (long double through libcalls) */
 #include "../../../emit/emitimpl.h"
-#include "../../../lib/f128.h"
+#include "../../../common/f128.h"
 
 enum { FV0 = 16, FV1 = 17 };
 

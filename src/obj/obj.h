@@ -33,7 +33,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../lib/arena.h"
+#include "../common/arena.h"
 
 /* ELF constants used by callers */
 enum {

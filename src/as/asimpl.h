@@ -3,7 +3,7 @@
 #define VCC_ASIMPL_H
 
 #include "as.h"
-#include "../lib/arena.h"
+#include "../common/arena.h"
 #include "../arch/a64/a64.h"
 #include <fcntl.h>
 #include <stdarg.h>

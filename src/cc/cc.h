@@ -28,7 +28,7 @@
 #include <stdint.h>
 
 #include "../pp/pp.h"
-#include "../lib/x86features.h"
+#include "../arch/x64/x86features.h"
 
 /* ---------------- types ---------------- */
 

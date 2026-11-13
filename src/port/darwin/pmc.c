@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pmc.h"
+#include "../../platform/darwin/pmc.h"
 
 typedef struct kpep_db kpep_db;
 typedef struct kpep_config kpep_config;
@@ -111,7 +111,7 @@ void pmc_read(uint64_t v[PMC_N])
 #else
 /* Linux: no kperf; counters are not available (perf_event_open is a TODO) */
 #include <stdint.h>
-#include "pmc.h"
+#include "../../platform/darwin/pmc.h"
 
 const char *pmc_names[PMC_N] = { "cycles", "instructions" };
 int pmc_n = 2;

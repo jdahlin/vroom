@@ -24,7 +24,7 @@
 #include <sys/stat.h>
 
 #include "dircache.h"
-#include "../lib/intern.h"
+#include "../common/intern.h"
 
 enum { D_UNKNOWN, D_PROBING, D_EXISTS, D_MISSING };
 

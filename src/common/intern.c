@@ -1,4 +1,4 @@
-#include "hostcrc.h"
+#include "../port/hostcrc.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -280,7 +280,7 @@ vintern_cache *vintern_local(void)
 
 
 /* ---------------- stack guard (vstack.h) ---------------- */
-#include "vstack.h"
+#include "../port/vstack.h"
 
 _Thread_local uintptr_t vstack_lim;
 

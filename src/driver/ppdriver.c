@@ -32,7 +32,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "../pp/pp.h"
 #include "../cc/cc.h"
 #include "ppdriver.h"
@@ -41,10 +41,10 @@
 #include "../pp/ppdata-predef.inc"
 #define PPDATA_X86_PREDEF
 #include "../pp/ppdata-x86.inc"
-#include "../lib/arena.h"
-#include "../lib/ldhash.h"
-#include "../lib/buf.h"
-#include "../lib/defer.h"
+#include "../common/arena.h"
+#include "../common/ldhash.h"
+#include "../common/buf.h"
+#include "../common/defer.h"
 
 #ifdef __APPLE__
 #define ST_MTIME_NS(st) ((unsigned long long)(st)->st_mtimespec.tv_sec * 1000000000ull + (unsigned long long)(st)->st_mtimespec.tv_nsec)
@@ -96,7 +96,7 @@ put:
 
 static void bstr(buf *b, const char *s) { bput(b, s, strlen(s)); }
 #include "x86predefines.h"
-#include "../lib/x86native.h"
+#include "../port/x86native.h"
 
 static void define_arg(buf *b, const char *d)
 {

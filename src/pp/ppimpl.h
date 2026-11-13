@@ -22,7 +22,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
-#include "../lib/vstack.h"
+#include "../port/vstack.h"
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -37,9 +37,9 @@
 #include <unistd.h>
 
 #include "dircache.h"
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "pp.h"
-#include "../lib/arena.h"
+#include "../common/arena.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

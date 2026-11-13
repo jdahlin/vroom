@@ -18,7 +18,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "../lex/lex.h"
 #include "fuzz.h"
 

@@ -2,7 +2,7 @@
 # vcc's compiler (vpp) as WebAssembly (emscripten, memory64), for the
 # compiler explorer page (contrib/wasm/explorer/).  Output: build/wasm/, the page
 # with the compiler in build/wasm/site/.  Needs emscripten (brew install
-# emscripten).  contrib/wasm/mman.c says what is different from the native build.
+# emscripten).  src/port/wasm/mman.c says what is different from the native build.
 # VCC=path/to/vpp: vcc compiles itself (PLAN-wasm.md W6), every object from
 # vcc's wasm64 generator and assembler with emscripten's libc headers; emcc
 # only links.  vcc's own <arm_neon.h>/<arm_acle.h> give the intrinsics in C.
@@ -11,9 +11,9 @@ cd "$(dirname "$0")/../../src"
 W=../contrib/wasm
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
-CFLAGS="-I$W/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="driver/vpp.c lex/lex.c lib/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
- pp/dircache.c driver/ppdriver.c driver/ccsnap.c lib/ldhash.c"
+CFLAGS="-Iport/wasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
+SRC="driver/vpp.c lex/lex.c common/intern.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
+ pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c"
 for m in as obj cc pp emit; do
 	case $m in
 	as) f="as/as.c arch/a64/as/parse.c";;
@@ -36,7 +36,7 @@ else
 fi
 OBJS=
 pids=
-for s in $SRC $W/mman.c; do
+for s in $SRC port/wasm/mman.c; do
 	o=$OUT/obj/$(echo $s | sed 's,.*/,,; s,\.c$,.o,')
 	OBJS="$OBJS $o"
 	$COMPILE -c $s -o $o &

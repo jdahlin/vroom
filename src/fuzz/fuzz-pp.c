@@ -21,7 +21,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "../lex/lex.h"
 #include "../pp/pp.h"
 #include "fuzz.h"

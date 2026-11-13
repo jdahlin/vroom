@@ -21,7 +21,7 @@
  * error path runs any of this.
  */
 #include "ppimpl.h"
-#include "../lib/buf.h"
+#include "../common/buf.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>

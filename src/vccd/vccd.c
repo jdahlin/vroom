@@ -83,7 +83,7 @@
 #include "../driver/ccsnap.h"
 #include "../pp/pp.h"
 #include "../lex/lex.h"
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "../pp/dircache.h"
 #include "../driver/ppdriver.h"
 #include "fixdep.h"
@@ -91,7 +91,7 @@
 #include "ar.h"
 #include "rsh.h"
 #include "../ld/ld.h"
-#include "../lib/defer.h"
+#include "../common/defer.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
 

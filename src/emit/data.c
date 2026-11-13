@@ -1,6 +1,6 @@
 /* vcc code generator: data: initialised objects and strings */
 #include "emitimpl.h"
-#include "../lib/f128.h"
+#include "../common/f128.h"
 
 /* ---------------- data ---------------- */
 

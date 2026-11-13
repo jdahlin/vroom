@@ -6,7 +6,7 @@
  */
 #include <setjmp.h>
 #include "cc.h"
-#include "../lib/intern.h"
+#include "../common/intern.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)

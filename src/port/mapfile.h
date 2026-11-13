@@ -11,7 +11,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "attr.h"
+#include "../common/attr.h"
 
 typedef struct vmapped {
 	const unsigned char *p;

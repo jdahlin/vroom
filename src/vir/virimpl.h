@@ -12,8 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../lib/arena.h"
-#include "../lib/buf.h"
+#include "../common/arena.h"
+#include "../common/buf.h"
 #include "vir.h"
 
 #ifndef VPRIV

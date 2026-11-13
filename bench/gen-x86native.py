@@ -45,5 +45,5 @@ t=re.sub(r'Features\["([^"]+)"\]',lambda m:'values[X86_FEATURE_'+re.sub('[^A-Z0-
 t=t.replace('return Features;','return true;')
 out+='static bool x86_native_values(const x86_native_io *io, bool values[X86_FEATURE_COUNT]) '+calls(t)+'\n'
 out+='static const unsigned x86_native_known[] = {\n'+','.join('X86_FEATURE_'+re.sub('[^A-Z0-9]','_',f.upper()) for f in known)+'\n};\n'
-(root/'src/lib/x86native-data.inc').write_text('\n'.join(line.rstrip() for line in out.splitlines())+'\n')
+(root/'src/port/x86native-data.inc').write_text('\n'.join(line.rstrip() for line in out.splitlines())+'\n')
 print(len(known),'CPUID feature values generated')

@@ -22,9 +22,9 @@
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
 #include "ld.h"
-#include "../lib/hash.h"
-#include "../lib/defer.h"
-#include "../lib/ckd.h"
+#include "../common/hash.h"
+#include "../common/defer.h"
+#include "../common/ckd.h"
 #include "ldelf.h"
 
 #include <ctype.h>

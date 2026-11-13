@@ -23,7 +23,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "../lib/ckd.h"
+#include "../common/ckd.h"
 #include <unistd.h>
 
 int wasm_ld_main(int argc, char **argv);

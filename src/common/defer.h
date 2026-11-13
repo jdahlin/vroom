@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "mapfile.h"
+#include "../port/mapfile.h"
 
 #define VCLEANUP(f) __attribute__((cleanup(f)))
 

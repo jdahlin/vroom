@@ -1,7 +1,7 @@
 /* Wide constant values are constructed only while parsing. Published AST words
  * are immutable, including while emitters concurrently evaluate initializers. */
 #include "ccimpl.h"
-#include "../lib/bigint.h"
+#include "../common/bigint.h"
 
 static bool big_valid(cc*c,const cval*v) { return v->kind==CV_BIGINT && v->nbig && v->big<=c->nlist && v->nbig<=c->nlist-v->big; }
 VPRIV bool big_nonzero(cc*c,const cval*v) { return big_valid(c,v)&&vbi_nz(c->lists+v->big,v->nbig); }

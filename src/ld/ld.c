@@ -32,12 +32,12 @@
  */
 #include "ld.h"
 #include "../arch/x64/reloc.h"
-#include "../lib/buf.h"
-#include "../lib/defer.h"
-#include "../lib/ckd.h"
-#include "../lib/vec.h"
-#include "../lib/ldhash.h"
-#include "../lib/vperf.h"
+#include "../common/buf.h"
+#include "../common/defer.h"
+#include "../common/ckd.h"
+#include "../common/vec.h"
+#include "../common/ldhash.h"
+#include "../port/vperf.h"
 
 #include <ctype.h>
 #include <errno.h>

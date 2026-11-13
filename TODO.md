@@ -515,17 +515,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
 - [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
-  done: `lib/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  done: `port/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
   and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
   on these inputs).  Overflow is a per-TU error now too: pp's
   token stack via fatal(), as/elf regions via `vjob_fail` (obj/obj.h, a longjmp
   the driver sets); vcc-stress 19/19, --vccd 20/20.  Audited the rest: input-driven
   ones are errors now (front-end heap: fatal; labels: efatal; pp shared region,
-  identifier table: `vjob_escape` in lib/intern.c; ELF sections: vjob_fail); the
+  identifier table: `vjob_escape` in common/intern.c; ELF sections: vjob_fail); the
   remaining aborts are mmap failures and internal invariants.  No stress case
   yet for the front-end heap, labels or sections.)
   Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as/as.c:107`;
-  `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `lib/intern.c:96,195`;
+  `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `common/intern.c:96,195`;
   `lex/lex.c:1318,1394`; `driver/ppdriver.c:65`.  Recursion without depth limit: cc.c
   expression/declarator parser, pp `#if` evaluator and argument
   pre-expansion.  Turn arena/limit failures into per-TU fatal errors
@@ -1083,7 +1083,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
   `classify` and the three searches in `lex/lex.c` have a scalar version
-  for hosts without NEON, CRC32C is SSE4.2 (`lib/hostcrc.h`), `pause` for
+  for hosts without NEON, CRC32C is SSE4.2 (`port/hostcrc.h`), `pause` for
   `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
   and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
   at a time), and the kernel parity runs on this host (no `work/` here).

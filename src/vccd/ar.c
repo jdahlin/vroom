@@ -49,9 +49,9 @@
 #include <unistd.h>
 
 #include "ar.h"
-#include "../lib/buf.h"
-#include "../lib/mapfile.h"
-#include "../lib/defer.h"
+#include "../common/buf.h"
+#include "../port/mapfile.h"
+#include "../common/defer.h"
 
 /* ---------------- growable buffer ---------------- */
 

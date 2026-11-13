@@ -1,6 +1,6 @@
 /* vcc front end: record layout (clang's ItaniumRecordLayoutBuilder, AArch64) and the layout checks clang verifies */
 #include "ccimpl.h"
-#include "../lib/buf.h"
+#include "../common/buf.h"
 
 /* ---------------- record layout (clang ItaniumRecordLayoutBuilder, AArch64) ---------------- */
 

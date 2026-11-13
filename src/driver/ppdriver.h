@@ -29,7 +29,7 @@ extern _Atomic unsigned long long ppd_tok_out, ppd_tok_skip;
 /* per-thread instruction/cycle totals by phase (vperf.h), summed over the
  * jobs this thread ran: cc_run (pp + parse + sema + codegen), emit_tu alone
  * (codegen + assembler, calling thread only), object layout + write */
-#include "../lib/vperf.h"
+#include "../port/vperf.h"
 enum { PPD_PH_CC, PPD_PH_EMIT, PPD_PH_OBJ, PPD_NPH };
 extern _Thread_local vperf ppd_ph[PPD_NPH];
 static inline void ppd_ph_add(int ph, vperf t0)

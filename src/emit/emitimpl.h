@@ -68,8 +68,8 @@
 #include "../as/as.h"
 #include "../obj/obj.h"
 #include "../driver/ppdriver.h"
-#include "../lib/arena.h"
-#include "../lib/tbuf.h"
+#include "../common/arena.h"
+#include "../common/tbuf.h"
 
 #include "name.h"
 

@@ -19,7 +19,7 @@
  * (miette's narratable mode, for screen readers); =clang is clang's text.
  */
 #include "ppimpl.h"
-#include "../lib/buf.h"
+#include "../common/buf.h"
 #include <ctype.h>
 
 #define DC_RESET "\033[0m"

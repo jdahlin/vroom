@@ -21,10 +21,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../lib/intern.h"
+#include "../common/intern.h"
 #include "../lex/lex.h"
 #include "fixdep.h"
-#include "../lib/buf.h"
+#include "../common/buf.h"
 
 /* ---------------- output buffer ---------------- */
 

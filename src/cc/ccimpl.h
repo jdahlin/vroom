@@ -17,7 +17,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
-#include "../lib/vstack.h"
+#include "../port/vstack.h"
 #include <math.h>
 #include <pthread.h>
 #include <setjmp.h>
@@ -33,8 +33,8 @@
 #include "ccint.h"
 #include "../emit/emit.h"
 #include "../driver/ccsnap.h"
-#include "../lib/arena.h"
-#include "../lib/f128.h"
+#include "../common/arena.h"
+#include "../common/f128.h"
 
 /* functions one file defines and another calls: static when the directory is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */
@@ -545,7 +545,7 @@ VPRIV void layout_checks(cc *c);
 static inline bool is_int_kind(int k) { return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_BITINT || k == TY_UBITINT; }
 static inline bool is_flt_kind(int k) { return k >= TY_BFLOAT16 && k <= TY_FLOAT128; }
 /* long double as binary128 (aarch64 Linux; Apple's is double) or x87 extended (x86-64), in
-   binary128's layout (lib/f128.h) */
+   binary128's layout (common/f128.h) */
 static inline bool is_q(cc *c, qty t) { return (KIND(c, t) == TY_LDOUBLE && c->ty[QI(t)].size == 16) || KIND(c, t) == TY_FLOAT128; }
 /* the fraction bits a wide constant of type t is rounded to: 112, or x87's 63 */
 static inline int q_prec(cc *c, qty t) { return c->o->target == PP_LINUX_X86_64 && KIND(c, t) == TY_LDOUBLE ? Q_P80 : 112; }

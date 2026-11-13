@@ -1,6 +1,6 @@
 /* vcc code generator: expressions */
 #include "../../../emit/emitimpl.h"
-#include "../../../lib/vstack.h"
+#include "../../../port/vstack.h"
 
 /* ---------------- expressions ---------------- */
 

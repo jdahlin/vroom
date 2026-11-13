@@ -1,5 +1,5 @@
 /*
- * lib/f128.h's x87 extended arithmetic (the ...p functions at Q_P80) against
+ * common/f128.h's x87 extended arithmetic (the ...p functions at Q_P80) against
  * the host's x87 long double, bit for bit: + - * /, comparison, integer and
  * double conversions, decimal and hex parsing, over random values (normal,
  * subnormal, infinite, NaN, short significands).  x86-64 hosts only:
@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
-#include "../../lib/f128.h"
+#include "../../common/f128.h"
 typedef unsigned __int128 U;
 /* host x87 long double -> held layout */
 static U of_ld(long double x) {

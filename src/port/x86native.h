@@ -2,7 +2,7 @@
  * data include; instruction execution is confined to the matching host build. */
 #ifndef VCC_X86NATIVE_H
 #define VCC_X86NATIVE_H
-#include "x86features.h"
+#include "../arch/x64/x86features.h"
 /* Injectable reads let tests exercise missing leaves and OS-save masks without
  * executing unsupported instructions on the test machine. Return true on error. */
 typedef struct x86_native_io {

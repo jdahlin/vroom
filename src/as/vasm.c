@@ -7,7 +7,7 @@
 #include "as.h"
 #include "../arch/wasm/as/wasmas.h"
 #include "../obj/obj.h"
-#include "../lib/vperf.h"
+#include "../port/vperf.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>

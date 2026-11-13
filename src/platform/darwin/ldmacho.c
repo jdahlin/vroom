@@ -24,7 +24,7 @@
  * does, so local data needs no rebase.
  */
 #include "../../ld/ld.h"
-#include "../../lib/ldhash.h"
+#include "../../common/ldhash.h"
 
 #include <errno.h>
 #include <fcntl.h>

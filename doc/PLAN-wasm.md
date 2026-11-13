@@ -106,7 +106,7 @@ satser blir wasm:s strukturerade kontrollflöde rakt av:
 | W3 | **Minne och data.** Globala variabler, strängar, initierare, pekararitmetik, skuggstack för adresstagna lokala variabler, arrayer och structs, `memcpy`/`memset` för aggregat | `vcc-ctests.py --suite vcc` med `--target wasm64` i node |
 | W4 | **Hela C.** Structs som värden (ABI ovan), varargs, `switch` med `br_table`, `goto` med stackifier, flyttal, bit-fält, VLA/`alloca`, `__int128` och `long double` via compiler-rt, atomics, `setjmp`/`longjmp` | gcc-torture och tcc-tests2 i node via emcc: samma godkända som clang; `bench/vcc-abi.py --target wasm64` (clang/vcc × anropare/anropad) |
 | W5 | **Objektfiler.** `arch/wasm/as/enc.c`, `arch/wasm/obj/fixup.c`, `platform/wasm/wasm.c`; `-c` direkt utan text; `vas` läser wasm-`.s` | Länkas av `wasm-ld` och körs: allt från W4 med `-c`; kodare mot `llvm-mc` (`bench/vas-enc.py`); `wasm-objdump -x` jämförs mot clangs objekt för samma `.s` |
-| W6 | **vcc kompilerar sig själv till wasm64.** NEON-lexern som skalär `VLEX_SCALAR`, CRC32C i mjukvara, `contrib/wasm/mman.c` som i dag; emcc länkar bara | `-S`-utdata från den självbyggda `vcc.wasm` byte-identisk med emscripten-byggets på testfilerna; explorern använder den |
+| W6 | **vcc kompilerar sig själv till wasm64.** NEON-lexern som skalär `VLEX_SCALAR`, CRC32C i mjukvara, `src/port/wasm/mman.c` som i dag; emcc länkar bara | `-S`-utdata från den självbyggda `vcc.wasm` byte-identisk med emscripten-byggets på testfilerna; explorern använder den |
 | W7 | **wasm32 (ILP32).** Typtabell per mål, pekarbredd 4 genom emittern och objektskrivaren, wasi-libc | Samma sviter som W4 med `--target=wasm32-wasip1` |
 | W8 | **Egen wasm-länkare** i `ld/` (valfritt; regeln om inget LLVM) | Ett program länkat av `vlink` körs som det länkat av `wasm-ld`; tider mot `wasm-ld` |
 
@@ -168,7 +168,7 @@ Kodinventering: `bench/vcc-wasm.py` använder emcc för `rt/wasm.c` och
 slutlänk/JS; `rt/wasm.c` är bara assert-adaptern mot extern libc.
 `contrib/wasm/build.sh` använder Emscriptens sysroot och JS-fil-/processglue.
 `explorer/worker.js` och `selfrun.mjs` använder VccModule, FS och callMain.
-`contrib/wasm/mman.c` äger redan reservationspolicyn men behöver sbrk, pread,
+`src/port/wasm/mman.c` äger redan reservationspolicyn men behöver sbrk, pread,
 errno och standardbiblioteksfunktioner. Wasm-generatorn emitterar
 compiler-rt-anrop och EH-ramar men levererar ännu inte deras runtime.
 

@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 #include "obj.h"
-#include "../lib/hash.h"
+#include "../common/hash.h"
 
 /* functions one file defines and another calls: static when the module is
    compiled as one TU (VCC_UNITY, the default build), so they stay internal */

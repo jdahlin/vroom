@@ -81,8 +81,8 @@ o = $(patsubst %.c,$(OBJ)/%.o,$(1))
 AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
 as_SRC   = as/as.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
-LEX_SRC = lex/lex.c lib/intern.c
-PP_SRC  = pp/dircache.c driver/ppdriver.c driver/ccsnap.c lib/ldhash.c
+LEX_SRC = lex/lex.c common/intern.c
+PP_SRC  = pp/dircache.c driver/ppdriver.c driver/ccsnap.c common/ldhash.c
 VCCD_SRC = vccd/vccd.c vccd/dstore.c vccd/caps.c vccd/fixdep.c vccd/ar.c vccd/rsh.c
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
 # each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
@@ -107,7 +107,7 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c lib/ldhash.c ld/objcopy.c ld/wasmld.c platform/darwin/ldmacho.c
+LD_SRC  = ld/ld.c common/ldhash.c ld/objcopy.c ld/wasmld.c platform/darwin/ldmacho.c
 
 $(OBJ)/%.o: %.c | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -147,7 +147,7 @@ $(OUT)/vpp: $(call o,driver/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-$(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,lex/lextest.c platform/darwin/pmc.c $(LEX_SRC))
+$(OUT)/lextest: $(patsubst %.c,$(OBJ)/no/%.o,lex/lextest.c port/darwin/pmc.c $(LEX_SRC))
 	$(VCC_CC) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,as/vasm.c) $(AS_OBJ)
@@ -250,7 +250,7 @@ FUZZ_CFLAGS = -std=gnu11 -g -O1 $(HOST_CPU) $(HOST_DEFS) -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
 	-Wall -Wno-unused-parameter
 FUZZ_OUT = $(OUT)/fuzz
-FUZZ_HDR = lex/lex.h lib/intern.h pp/pp.h pp/dircache.h
+FUZZ_HDR = lex/lex.h common/intern.h pp/pp.h pp/dircache.h
 
 fuzz: $(FUZZ_OUT)/fuzz-lex $(FUZZ_OUT)/fuzz-pp $(FUZZ_OUT)/fuzz-diag
 
