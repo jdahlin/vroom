@@ -19,7 +19,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 Plans, specs, research notes and reviews are in `doc/` (names below are
 relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
-  (x86-64 Linux as a target): plans
+  (x86-64 Linux as a target), `PLAN-win64.md` (Windows x64 through MinGW-w64,
+  steps WIN0-WIN10): plans
   and per-step status.  Update the
   status section of a step when it changes.
 - `PLAN-quality.md`: the code quality work before C++ (duplication, one
