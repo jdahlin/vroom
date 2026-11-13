@@ -4,7 +4,7 @@
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
-#ifdef __AVX2__
+#ifdef __x86_64__
 #include <immintrin.h>
 #endif
 #include <errno.h>
@@ -261,10 +261,13 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 	}
 }
 
-#elif defined(__AVX2__) && !defined(VLEX_SCALAR)
+#else /* !__ARM_NEON */
 
-#if defined(__AVX512VBMI__) && defined(__AVX512BW__)
-static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#define LEX_AVX2 __attribute__((target("avx2")))
+#define LEX_AVX512 __attribute__((target("avx2,avx512f,avx512bw,avx512vbmi")))
+
+static LEX_AVX512 void classify_avx512(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
 	const __m512i lo = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lo_tab));
 	const __m512i hi = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)hi_tab));
@@ -291,10 +294,9 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		m[M_NS][b] = _mm512_movepi8_mask(gn);
 	}
 }
-#else
 /* PSHUFB looks up sixteen bytes within each lane. Select the ASCII row
  * by the high nibble; bytes outside the table produce zero, as on ARM. */
-static inline __m256i lookup_ascii(const uint8_t *table, int rows, __m256i v)
+static inline LEX_AVX2 __m256i lookup_ascii(const uint8_t *table, int rows, __m256i v)
 {
 	__m256i low = _mm256_and_si256(v, _mm256_set1_epi8(15));
 	__m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), _mm256_set1_epi8(15));
@@ -308,13 +310,13 @@ static inline __m256i lookup_ascii(const uint8_t *table, int rows, __m256i v)
 	return result;
 }
 
-static inline uint32_t avx_test(__m256i v, int bits)
+static inline LEX_AVX2 uint32_t avx_test(__m256i v, int bits)
 {
 	return ~(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
 		_mm256_and_si256(v, _mm256_set1_epi8((char)bits)), _mm256_setzero_si256()));
 }
 
-static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+static LEX_AVX2 void classify_avx2(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
 	const __m256i lo = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lo_tab));
 	const __m256i hi = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)hi_tab));
@@ -343,9 +345,8 @@ static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COU
 		for (int j = 0; j < M_COUNT; j++) m[j][b] = masks[j];
 	}
 }
-#endif
 
-static inline size_t find_cend(const char *s, size_t p)
+static LEX_AVX2 size_t find_cend_avx2(const char *s, size_t p)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -358,7 +359,7 @@ static inline size_t find_cend(const char *s, size_t p)
 	}
 }
 
-static inline size_t find_nl(const char *s, size_t p)
+static LEX_AVX2 size_t find_nl_avx2(const char *s, size_t p)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -369,7 +370,7 @@ static inline size_t find_nl(const char *s, size_t p)
 	}
 }
 
-static inline size_t find_quote(const char *s, size_t p, uint8_t q)
+static LEX_AVX2 size_t find_quote_avx2(const char *s, size_t p, uint8_t q)
 {
 	for (;; p += 32) {
 		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
@@ -381,7 +382,16 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 	}
 }
 
-#else	/* Portable fallback; also independent searches for the scalar oracle. */
+#endif /* x86 SIMD implementations */
+
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#define classify classify_scalar
+#define find_cend find_cend_scalar
+#define find_nl find_nl_scalar
+#define find_quote find_quote_scalar
+#endif
+
+/* Portable fallback; also independent searches for the scalar oracle. */
 
 static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
@@ -443,7 +453,37 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 			return p;
 	}
 }
-#endif	/* host SIMD */
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#undef classify
+#undef find_cend
+#undef find_nl
+#undef find_quote
+static void (*classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
+static size_t (*find_cend)(const char *, size_t) = find_cend_scalar;
+static size_t (*find_nl)(const char *, size_t) = find_nl_scalar;
+static size_t (*find_quote)(const char *, size_t, uint8_t) = find_quote_scalar;
+
+/* Called under tables_once, before the lexer publishes its dispatch table.
+ * The compiler's CPU detector checks OSXSAVE/XCR0 as well as CPUID, so a
+ * CPU feature is usable only when the OS preserves the required registers.
+ * VCC_LEX_SIMD caps the choice for testing; it cannot enable unsupported ISA. */
+static void init_x86_simd(void)
+{
+	const char *cap = getenv("VCC_LEX_SIMD");
+	__builtin_cpu_init();
+	if (cap && !strcmp(cap, "scalar")) return;
+	if (!__builtin_cpu_supports("avx2")) return;
+	classify = classify_avx2;
+	find_cend = find_cend_avx2;
+	find_nl = find_nl_avx2;
+	find_quote = find_quote_avx2;
+	if (cap && !strcmp(cap, "avx2")) return;
+	if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+	    __builtin_cpu_supports("avx512vbmi"))
+		classify = classify_avx512;
+}
+#endif
+#endif /* host SIMD */
 
 /* ---- pass 2: tokens ------------------------------------------------- */
 
@@ -466,6 +506,9 @@ static uint8_t ktab[1 << 16];		/* punctuator kind by its first two bytes (LE) */
 
 static void init_tables(void)
 {
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+	init_x86_simd();
+#endif
 	for (int c = 0; c < 256; c++) {
 		uint8_t k = C_OTHER;
 

@@ -57,6 +57,7 @@ case $JOB in
 arm64)
 	build vcc
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+		step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
 		step interrupt python3 bench/vcc-interrupt.py
 		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
 	fi
