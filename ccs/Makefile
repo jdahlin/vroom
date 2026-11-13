@@ -48,7 +48,9 @@ HOST_LIBS  = -lm
 # CPU part, so -mcpu=native falls back to generic; name the core instead.
 HOST_CPU_A64 =  $(if $(shell grep -qm1 'implementer.*0x61' /proc/cpuinfo && echo y),-mcpu=apple-m1,-mcpu=native)
 ifeq ($(shell uname -m),x86_64)
-HOST_CPU  ?= -march=native -msse4.2
+# CRC32C and AVX lexer paths dispatch at runtime.
+# Override HOST_CPU=-march=native only for a machine-local build.
+HOST_CPU  ?= -march=x86-64 -mtune=generic
 else
 HOST_CPU  ?= $(HOST_CPU_A64)
 endif
@@ -109,7 +111,7 @@ AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
 LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
 
-$(OBJ)/%.o: vcc/%.c | $(OBJ)
+$(OBJ)/%.o: vcc/%.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
@@ -120,7 +122,7 @@ $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
-$(UNITY_C:.c=.o): %.o: %.c
+$(UNITY_C:.c=.o): %.o: %.c Makefile
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 
 FORCE:
@@ -129,7 +131,7 @@ FORCE:
 
 # lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
 # since -mno-outline is a code generator option the bitcode does not keep
-$(OBJ)/no/%.o: vcc/%.c | $(OBJ)
+$(OBJ)/no/%.o: vcc/%.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
 
@@ -137,7 +139,7 @@ $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
 # the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
 VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c)
-$(OBJ)/ld/ldlib.o: vcc/ld/ld.c | $(OBJ)
+$(OBJ)/ld/ldlib.o: vcc/ld/ld.c Makefile | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 

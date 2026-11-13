@@ -897,7 +897,7 @@ the change; the nine earlier functional gaps remain.
   `-S -O0`, `-E` of the vcc, gcc-torture and tcc suites (1903 files)
   byte-identical between the x86-64 build and an arm64 cross build (NEON) run in
   qemu-aarch64.
-- Remaining: SSE2/AVX2 `classify` (the scalar one takes one byte at a time),
+- SIMD classification completed 2026-11-13 (see X0/X5 update below). Remaining:
   `vcc-diff.py cmp` and `vcc-ctests.py` here (no `work/` tree; qemu-system-aarch64
   missing).
 
@@ -1282,3 +1282,62 @@ bytes, as for ordinary mnemonics. Direct assembler regression added. Full
 DWARF rig 1591/1591 and assembler objects 62/62, also ASan/UBSan and
 file-by-file build, green. The SQLite binary is unchanged against the latest
 measurement build; the 5 % goal is still open.
+
+### X0/X5 (2026-11-13): compilation speed and portable host dispatch
+
+X0 now has runtime-selected AVX-512 VBMI/BW, AVX2 and scalar lexer paths.
+The CPU detector also checks OS support for vector state. CRC32C selects
+SSE4.2 or an identical software implementation once at process startup.
+The default host build is baseline `-march=x86-64 -mtune=generic`;
+`HOST_CPU=-march=native` remains available for machine-local builds in a
+separate output directory. `VCC_LEX_SIMD=scalar|avx2|auto` caps selection,
+and `VCC_CRC=software` exercises the fallback without enabling unsupported
+features. ARM's NEON and ACLE paths are unchanged.
+
+X5 steps 1–2 and shared data replay are implemented. X86 `-c` now passes
+compact records and structured operands to the existing assembler encoder,
+relocation logic and branch relaxation. The item stream, data objects and
+symbol replay have moved from `arch/a64/emit/obj.c` into `emit/obj.c` and
+are shared by ARM and x86. Inline assembly, prologues, epilogues, CFI/DWARF
+directives and unconverted instruction records remain text snippets in the
+same session. `-S` is unchanged; `VCC_OBJ_TEXT=1` retains the full text path
+for comparison. Further instruction conversions should follow profiling.
+
+Assembler layout now uses dense fragment ranks and Fenwick sums instead
+of repeatedly walking preceding fragments during relaxation. Fixed-layout
+CFI and DWARF offset queries reuse a fragment-base snapshot.
+
+Measured on the shared Ryzen 7 9700X host, using SQLite's 9.28 MB
+amalgamation, with no GCC/Clang compile-speed comparison:
+
+- The assembler indexing change reduced direct x86 compile CPU time from
+  9.005 s to 0.292 s, and VIR from 28.315 s to 0.571 s, preserving objects.
+- Native SIMD lexing took 4.9 ms versus 30.5 ms scalar; AVX2 took 5.9 ms.
+  The final portable runtime-dispatched build took 6.0 ms automatically
+  and 6.7 ms with AVX2 capped selection.
+- Direct object emission, seven alternating process pairs using the same
+  pinned compiler: median CPU 442.7 → 391.4 ms (11.6% less) for direct
+  code generation and 904.6 → 833.9 ms (7.8% less) for VIR. These runs had
+  substantial concurrent load and are not comparable to earlier absolute
+  timings. Objects matched with debug info, PIC, separate function/data
+  sections and patchable function entries.
+
+Original checkout validation: 2,213 byte-identical x86 object comparisons
+against Clang, 322 focused comparisons with VIR and ASan/UBSan, 319 native
+x86 executions and 326 ARM tests (one existing xfail). Raw lexer parity
+passed on 329 files in each runtime mode; sanitizer fuzzing passed against
+the scalar oracle. Runtime dispatch passed all six CRC/lexer combinations
+on the host and emulated Conroe, Nehalem, Haswell and XSAVE-disabled
+Haswell. Fast dispatch and direct-object comparisons are in premerge.
+The isolated PR branch is revalidated separately after integration.
+Full kernel parity remains outstanding.
+
+Raw measurements and validation logs are in
+`results/sqlite-compile-20261113.json`, `results/lexer-simd-20261113.json`,
+`results/host-dispatch-20261113.json` and `results/x64-direct-20261113.json`.
+
+PR integration validation on current main: clean build, **321/321** focused
+x86 direct-object comparisons (five existing input skips), **63/63** assembler
+object fixtures, and all six runtime-dispatch combinations on the host and
+four emulated CPU configurations. The one-test difference from the original
+checkout reflects the unrelated VIR regression kept out of this PR.

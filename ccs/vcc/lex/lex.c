@@ -4,6 +4,9 @@
 #ifdef __ARM_NEON
 #include <arm_neon.h>
 #endif
+#ifdef __x86_64__
+#include <immintrin.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -49,7 +52,7 @@ const char *vtok_name(int kind)
 	return kind >= 0 && kind < T_NKINDS ? names[kind] : "?";
 }
 
-/* ---- pass 1: NEON classification into bitmasks ---------------------- */
+/* ---- pass 1: SIMD classification into bitmasks ---------------------- */
 
 /*
  * Byte classes by nibble lookup: class = lo[c & 15] & hi[c >> 4].
@@ -258,7 +261,137 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 	}
 }
 
-#else	/* !__ARM_NEON: the same masks and searches a byte at a time (SSE/AVX2: TODO.md) */
+#else /* !__ARM_NEON */
+
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#define LEX_AVX2 __attribute__((target("avx2")))
+#define LEX_AVX512 __attribute__((target("avx2,avx512f,avx512bw,avx512vbmi")))
+
+static LEX_AVX512 void classify_avx512(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+{
+	const __m512i lo = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)lo_tab));
+	const __m512i hi = _mm512_broadcast_i32x4(_mm_loadu_si128((const __m128i *)hi_tab));
+	const __m512i t0 = _mm512_loadu_si512(ttab), t1 = _mm512_loadu_si512(ttab + 64);
+	const __m512i g = _mm512_loadu_si512(gtab), nib = _mm512_set1_epi8(15);
+
+	for (size_t b = from; b < to; b++) {
+		const uint8_t *q = s + 64 * b;
+		__m512i v = _mm512_loadu_si512(q), vn = _mm512_loadu_si512(q + 1);
+		__m512i t = _mm512_maskz_mov_epi8(~_mm512_movepi8_mask(v), _mm512_permutex2var_epi8(t0, v, t1));
+		__m512i gn = _mm512_maskz_mov_epi8(_mm512_cmplt_epu8_mask(vn, _mm512_set1_epi8(64)), _mm512_permutexvar_epi8(vn, g));
+		__m512i tg = _mm512_and_si512(t, gn);
+		__m512i c = _mm512_and_si512(_mm512_shuffle_epi8(lo, _mm512_and_si512(v, nib)),
+			_mm512_shuffle_epi8(hi, _mm512_and_si512(_mm512_srli_epi16(v, 4), nib)));
+
+		m[M_P][b] = _mm512_test_epi8_mask(t, _mm512_set1_epi8(16));
+		m[M_PAIR][b] = _mm512_test_epi8_mask(tg, _mm512_set1_epi8(14)) |
+			(_mm512_test_epi8_mask(t, _mm512_set1_epi8(1)) & _mm512_cmpeq_epi8_mask(v, vn));
+		m[M_X][b] = _mm512_movepi8_mask(_mm512_or_si512(t, v)) | _mm512_test_epi8_mask(tg, _mm512_set1_epi8(64));
+		m[M_ID][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(31));
+		m[M_WS][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8((char)0xe0));
+		m[M_NL][b] = _mm512_movepi8_mask(c);
+		m[M_DIG][b] = _mm512_test_epi8_mask(c, _mm512_set1_epi8(4));
+		m[M_NS][b] = _mm512_movepi8_mask(gn);
+	}
+}
+/* PSHUFB looks up sixteen bytes within each lane. Select the ASCII row
+ * by the high nibble; bytes outside the table produce zero, as on ARM. */
+static inline LEX_AVX2 __m256i lookup_ascii(const uint8_t *table, int rows, __m256i v)
+{
+	__m256i low = _mm256_and_si256(v, _mm256_set1_epi8(15));
+	__m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), _mm256_set1_epi8(15));
+	__m256i result = _mm256_setzero_si256();
+
+	for (int i = 0; i < rows; i++) {
+		__m256i row = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)(table + 16 * i)));
+		result = _mm256_or_si256(result, _mm256_and_si256(_mm256_shuffle_epi8(row, low),
+			_mm256_cmpeq_epi8(high, _mm256_set1_epi8((char)i))));
+	}
+	return result;
+}
+
+static inline LEX_AVX2 uint32_t avx_test(__m256i v, int bits)
+{
+	return ~(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+		_mm256_and_si256(v, _mm256_set1_epi8((char)bits)), _mm256_setzero_si256()));
+}
+
+static LEX_AVX2 void classify_avx2(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
+{
+	const __m256i lo = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)lo_tab));
+	const __m256i hi = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)hi_tab));
+	const __m256i nib = _mm256_set1_epi8(15);
+
+	for (size_t b = from; b < to; b++) {
+		uint64_t masks[M_COUNT] = { 0 };
+		for (int k = 0; k < 2; k++) {
+			const uint8_t *q = s + 64 * b + 32 * k;
+			__m256i v = _mm256_loadu_si256((const __m256i *)q), vn = _mm256_loadu_si256((const __m256i *)(q + 1));
+			__m256i t = lookup_ascii(ttab, 8, v), gn = lookup_ascii(gtab, 4, vn);
+			__m256i tg = _mm256_and_si256(t, gn);
+			__m256i c = _mm256_and_si256(_mm256_shuffle_epi8(lo, _mm256_and_si256(v, nib)),
+				_mm256_shuffle_epi8(hi, _mm256_and_si256(_mm256_srli_epi16(v, 4), nib)));
+#define MASK(j, expr) masks[j] |= (uint64_t)(uint32_t)(expr) << (32 * k)
+			MASK(M_P, avx_test(t, 16));
+			MASK(M_PAIR, avx_test(tg, 14) | (avx_test(t, 1) & (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, vn))));
+			MASK(M_X, (uint32_t)_mm256_movemask_epi8(_mm256_or_si256(t, v)) | avx_test(tg, 64));
+			MASK(M_ID, avx_test(c, 31));
+			MASK(M_WS, avx_test(c, 0xe0));
+			MASK(M_NL, _mm256_movemask_epi8(c));
+			MASK(M_DIG, avx_test(c, 4));
+			MASK(M_NS, _mm256_movemask_epi8(gn));
+#undef MASK
+		}
+		for (int j = 0; j < M_COUNT; j++) m[j][b] = masks[j];
+	}
+}
+
+static LEX_AVX2 size_t find_cend_avx2(const char *s, size_t p)
+{
+	for (;; p += 32) {
+		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
+		__m256i vn = _mm256_loadu_si256((const __m256i *)(s + p + 1));
+		__m256i hit = _mm256_or_si256(_mm256_and_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('*')),
+			_mm256_cmpeq_epi8(vn, _mm256_set1_epi8('/'))), _mm256_or_si256(
+			_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')), _mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
+		if (mask) return p + (unsigned)__builtin_ctz(mask);
+	}
+}
+
+static LEX_AVX2 size_t find_nl_avx2(const char *s, size_t p)
+{
+	for (;; p += 32) {
+		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
+		__m256i hit = _mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\n')),
+			_mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\r')), _mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
+		if (mask) return p + (unsigned)__builtin_ctz(mask);
+	}
+}
+
+static LEX_AVX2 size_t find_quote_avx2(const char *s, size_t p, uint8_t q)
+{
+	for (;; p += 32) {
+		__m256i v = _mm256_loadu_si256((const __m256i *)(s + p));
+		__m256i hit = _mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8((char)q)),
+			_mm256_or_si256(_mm256_cmpeq_epi8(v, _mm256_set1_epi8('\\')),
+			_mm256_cmpeq_epi8(_mm256_min_epu8(v, _mm256_set1_epi8('\r')), v)));
+		uint32_t mask = (uint32_t)_mm256_movemask_epi8(hit);
+		if (mask) return p + (unsigned)__builtin_ctz(mask);
+	}
+}
+
+#endif /* x86 SIMD implementations */
+
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#define classify classify_scalar
+#define find_cend find_cend_scalar
+#define find_nl find_nl_scalar
+#define find_quote find_quote_scalar
+#endif
+
+/* Portable fallback; also independent searches for the scalar oracle. */
 
 static void classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[M_COUNT])
 {
@@ -320,7 +453,37 @@ static inline size_t find_quote(const char *s, size_t p, uint8_t q)
 			return p;
 	}
 }
-#endif	/* __ARM_NEON */
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+#undef classify
+#undef find_cend
+#undef find_nl
+#undef find_quote
+static void (*classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
+static size_t (*find_cend)(const char *, size_t) = find_cend_scalar;
+static size_t (*find_nl)(const char *, size_t) = find_nl_scalar;
+static size_t (*find_quote)(const char *, size_t, uint8_t) = find_quote_scalar;
+
+/* Called under tables_once, before the lexer publishes its dispatch table.
+ * The compiler's CPU detector checks OSXSAVE/XCR0 as well as CPUID, so a
+ * CPU feature is usable only when the OS preserves the required registers.
+ * VCC_LEX_SIMD caps the choice for testing; it cannot enable unsupported ISA. */
+static void init_x86_simd(void)
+{
+	const char *cap = getenv("VCC_LEX_SIMD");
+	__builtin_cpu_init();
+	if (cap && !strcmp(cap, "scalar")) return;
+	if (!__builtin_cpu_supports("avx2")) return;
+	classify = classify_avx2;
+	find_cend = find_cend_avx2;
+	find_nl = find_nl_avx2;
+	find_quote = find_quote_avx2;
+	if (cap && !strcmp(cap, "avx2")) return;
+	if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
+	    __builtin_cpu_supports("avx512vbmi"))
+		classify = classify_avx512;
+}
+#endif
+#endif /* host SIMD */
 
 /* ---- pass 2: tokens ------------------------------------------------- */
 
@@ -343,6 +506,9 @@ static uint8_t ktab[1 << 16];		/* punctuator kind by its first two bytes (LE) */
 
 static void init_tables(void)
 {
+#if defined(__x86_64__) && !defined(VLEX_SCALAR)
+	init_x86_simd();
+#endif
 	for (int c = 0; c < 256; c++) {
 		uint8_t k = C_OTHER;
 

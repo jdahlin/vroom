@@ -207,6 +207,8 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	bool cfi = e->E->o->cfi;	/* unwind tables: .cfi_* as clang writes them */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);
+	size_t objitem = it_open(e, IT_TEXT);
+	bool objcode = false;
 	if(X->spframe && (frame || e->calls))frame+=8;
 	X->framesz=frame;X->spdelta=0;
 
@@ -292,10 +294,33 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		const rec *i = &X->in[k];
 		int sz = i->sz;
 
+		if (objcode && dj < e->ndl && e->dl[dj].k == k) {
+			it_close(e, objitem);
+			objitem = it_open(e, IT_TEXT);
+			objcode = false;
+		}
 		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
 			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
 				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
+
+		if (direct(e)) {
+			rec encoded;
+			bool code = x64_obj_record(e, i, &encoded);
+			if (code != objcode) {
+				it_close(e, objitem);
+				objitem = it_open(e, code ? IT_X64 : IT_TEXT);
+				if (code) {
+					uint32_t *h = it_room(e, 8);
+					h[0] = s; h[1] = 0;
+				}
+				objcode = code;
+			}
+			if (code) {
+				*(rec *)it_room(e, sizeof(rec)) = encoded;
+				continue;
+			}
+		}
 
 		switch (i->op) {
 		case X_LABEL:
@@ -720,6 +745,10 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 		}
 		tb_c(b, '\n');
 	}
+	if (objcode) {
+		it_close(e, objitem);
+		objitem = it_open(e, IT_TEXT);
+	}
 	if(X->spframe && X->spdelta)efatal(e,e->curloc,"internal error: unbalanced VIR outgoing arguments");
 	if (e->wk->spneed) {
 		x64_guard(e, b);
@@ -782,4 +811,5 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 	tb_c(b, '-');
 	sym_name(c, b, s);
 	tb_c(b, '\n');
+	it_close(e, objitem);
 }
