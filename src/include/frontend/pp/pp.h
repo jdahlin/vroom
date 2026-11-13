@@ -36,7 +36,7 @@ typedef struct ptok {
 	uint32_t len;
 	uint32_t id;		/* interned id (LEX_TOKEN_IDENTIFIER) */
 	uint32_t loc;		/* TU source location (file base + offset) */
-	uint8_t kind, flags;	/* vtok_kind / P_*, TF_* | PF_* */
+	uint8_t kind, flags;	/* lex_token_kind / PP_TOKEN_KIND_*, LEX_TOKEN_FLAG_* | PP_TOKEN_FLAG_* */
 	uint16_t ctr;		/* pp internal: __COUNTER__ digits in the spelling (header cache) */
 } ptok;
 

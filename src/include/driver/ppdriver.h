@@ -23,7 +23,7 @@ int ppd_compare(const char *ours, size_t on, const char *refpath);
 /* -c phase totals (ns): cc_run (pp + parse + codegen; ppd_ns_emit: codegen
  * + assembler alone), finishing and writing objects; object bytes */
 extern _Atomic unsigned long long ppd_ns_cc, ppd_ns_emit, ppd_ns_obj, ppd_bytes_obj;
-/* -c totals: tokens the parser took from pp_next, tokens skipped (decl cache) */
+/* -c totals: tokens the parser took from pp_token_next, tokens skipped (decl cache) */
 extern _Atomic unsigned long long ppd_tok_out, ppd_tok_skip;
 
 /* per-thread instruction/cycle totals by phase (vperf.h), summed over the

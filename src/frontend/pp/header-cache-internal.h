@@ -82,9 +82,9 @@ typedef struct pp_header_cache_child {
 } pp_header_cache_child;
 
 /*
- * A stored token (12 bytes; ptok is 24).  T_IDENT: sp is the id and the
+ * A stored token (12 bytes; ptok is 24).  LEX_TOKEN_IDENTIFIER: sp is the id and the
  * spelling the id's.  Others: sp - 1 is the spelling's offset / 16 in the
- * shared region (pp_header_cache_blob_get: stored once).  HF_X: sp indexes the entry's
+ * shared region (pp_header_cache_blob_get: stored once).  PP_HEADER_CACHE_TOKEN_ESCAPE: sp indexes the entry's
  * escapes (full ptoks: spliced identifiers, long spellings, odd ids).
  */
 typedef struct pp_header_cache_token {

@@ -262,7 +262,7 @@ def main():
         def sub(m, words_f=words_f, paths_f=paths_f):
             o = m.group(1)
             n = words_f.get(o) or paths_f.get(o)
-            if o in words_f and scoped and 'field' not in kinds.get(o, '') and re.search(r'(->|\.)\s*$', m.string[:m.start()]):
+            if o in words_f and scoped and 'field' not in kinds.get(o, '') and re.search(r'(->|\.)$', m.string[:m.start()]):
                 return o        # a member of some struct: only field rows rename those
             if o in words_f and re.search(r'#\s*$', m.string[:m.start()]):
                 return o        # a preprocessor directive's name (include, define, error ...)
