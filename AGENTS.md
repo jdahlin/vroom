@@ -114,6 +114,9 @@ relative to it); `TODO.md` stays at the top.
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
     `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
     and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
+    Passes on VIR: `include/vir/pass.h` (interface, registry, `vir_pass_run`'s check of
+    `keeps`), `pass-list.c` (the registry), `compact.c` (`vir_function_compact`), one pass
+    per file in `pass/`; `virtest --passes` runs them (`doc/quality/DESIGN-vir-optimizer.md`).
     Depends on nothing in `frontend/`, `codegen/` or `arch/`.
     `bin/virtest/` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
