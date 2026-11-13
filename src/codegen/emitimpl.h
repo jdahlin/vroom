@@ -967,7 +967,13 @@ VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
 VPRIV bool x64_vir_function_lower(ecx *e, uint32_t s, const char **why);
 VPRIV bool a64_vir_function_lower(ecx *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
+/* data, not a function: without VCC_UNITY a declaration without extern would
+   be a tentative definition in every file that includes this header */
+#ifdef VCC_UNITY
 VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
+#else
+extern const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
+#endif
 VPRIV void virbuild_statistics_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
 VPRIV bool virbuild_function_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
 VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
