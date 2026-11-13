@@ -38,16 +38,20 @@ What could not be cut, and stays as it is:
 
 - **The part files do not compile alone.**  They use statics and types
   defined in the files before them.  `VCC_UNITY=` therefore changes nothing
-  for the linker.  Step 2 removes this.
+  for the linker.  Step 2 removes this.  (Done: see step 2's status.)
 - **The arch fragments stay in `arch/*/ld/*.inc`, included from `ld.c` at
   their old positions** (`thunks.inc` after `eh-frame.c`; `scan.inc` and
   `thunkpass.inc` after `string-merge.c`; `relocate.inc`, `got_seen` and
   `x64.inc` after `symbol-table-locals.c`): they define types and statics
   that later files use, and declare functions of earlier ones (`fits_int`,
-  `pic`, `reladyn_buf` in the review).
+  `pic`, `reladyn_buf` in the review).  (Done in step 2: they are
+  `arch/*/ld/*.c`, parts like the others.)
 - **`ld.c` is compiled twice** (`src/Makefile`: `ld/ld.o` with `-DVLD_MAIN`,
   `ld/ldlib.o` without) because `main()` is in `vlink-main.c`, under
-  `VLD_MAIN`.  Unchanged here.
+  `VLD_MAIN`.  Unchanged here.  (Step 2 keeps the two unity objects; with
+  `VCC_UNITY=` the parts are compiled once and `vlink-main.c` alone with
+  `-DVLD_MAIN`.  `link-run.c`'s own `VLD_MAIN` test became the process-wide
+  `ld_standalone`, set by `main()`.)
 - Jobs the old file interleaves stay in file order and are named for the
   part they hold: the symbol table is `symbol-table-locals.c` and
   `symbol-table-write.c`; the PHDRS handling is `program-headers.c` and
@@ -159,9 +163,22 @@ sections); step 3 the input side (script, symbols, inputs, options), which
 deletes `ld_state_reset` and moves the data model into `ld-internal.h`.  No
 per-link state is left at file scope; step 4 passes the context as a
 parameter to every function that uses it and `ld_main` creates one per link
-(`link-context.md` section 5).  Left of step 2: prototypes for the part files
-(so that each compiles alone), and the refreshed opening comments and `ld.c`
-header.
+(`link-context.md` section 5).
+
+The part files compile alone (step 2's last piece): `ld-internal.h` holds
+everything they share, with the includes and `LD_NONE` that `ld.c` had, the
+types and constants two parts use, the process-wide objects (`LD_SHARED`:
+`ld_keep_mappings`, `ld_thread_count`, `ld_standalone`, the script lexer's
+character table), a prototype for each of the 172 functions one part defines
+and another calls (`VPRIV`, static in the unity build), and the small inline
+helpers (`word-access.c` is gone; the others moved from their parts).  The
+ad-hoc forward declarations are gone.  `ld_link_lock` moved to its only user,
+`link-entry.c`.  The arch fragments are `arch/*/ld/*.c`.  `src/Makefile` reads
+`ld_SRC` from `ld.c`'s include list.  Decision: the parts keep their order in
+`ld.c` and the unity build stays the default (the inline helpers and the
+hot static functions stay visible to the optimizer); `ldlib.o` is
+byte-identical.  The opening comments of `ld.c` and `ld-internal.h` are
+rewritten; step 2 is done.
 
 ### 3. The shared layer
 

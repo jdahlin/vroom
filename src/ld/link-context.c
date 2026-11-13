@@ -1,8 +1,10 @@
 /* One link's context: its creation, all zero but the fields named here, and its end. */
 
+#include "ld-internal.h"
+
 /* a new context for one link: every field starts at zero but these; NULL
    when out of memory */
-static struct ld_context *ld_context_create(FILE *error_stream, int directory_fd)
+VPRIV struct ld_context *ld_context_create(FILE *error_stream, int directory_fd)
 {
 	struct ld_context *ctx = calloc(1, sizeof *ctx);
 
@@ -22,7 +24,7 @@ static struct ld_context *ld_context_create(FILE *error_stream, int directory_fd
 
 /* the end of a link: the context's own memory (the rest of the link's memory
    is in the regions, which ld_regions_free unmaps) */
-static void ld_context_destroy(struct ld_context *ctx)
+VPRIV void ld_context_destroy(struct ld_context *ctx)
 {
 	free(ctx->inputs.lazy_symbols.v);	/* the one malloc'ed field */
 	free(ctx);

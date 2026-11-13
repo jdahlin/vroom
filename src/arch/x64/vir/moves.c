@@ -28,6 +28,37 @@ VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 	vtext_string_append(&L->context->raw, s);
 }
 
+/* ARM-compatible probe bits 0..7; bit 8 is a definition store, 10 an edge
+ * exchange. Bit 9 only maps ordinary lowering (which may branch).
+ * Mapping brackets emitted sites (including
+ * layout duplicates), not just the allocator's static edit list. Raw records
+ * deliberately stop folds: compare probes to a similarly mapped control. */
+VPRIV void vx_mark(x64_vir_context *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
+		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to)
+{
+	if (!L->map) return;
+	char text[384];
+	if (!begin) { x64_vir_text_append(L,"\t# vl-end\n"); return; }
+	uint32_t slot=v?L->allocation->slot[v]:VIR_BLOCK_NONE;
+	uint32_t param=0;
+	if(to!=VIR_BLOCK_NONE)for(uint32_t j=0;j<L->function->blocks[to].parameter_count;j++) {
+		uint32_t q=L->function->blocks[to].first+j;
+		uint32_t loc=L->allocation->operand_registers[L->allocation->block_offsets[to]+j];
+		if(loc==VIR_REGISTER_NONE && L->allocation->slot[q]!=VIR_BLOCK_NONE)loc=VIR_LOCATION_SLOT|L->allocation->slot[q];
+		if(loc==dst){param=q;break;}
+	}
+	snprintf(text,sizeof text,"\t# vl-site id=%u bit=%u b=%u pos=%u v=%u dst=%u src=%u to=%u param=%u slot=%u off=%lld op=%s ty=%s bits=%llu\n",
+		L->site++,bit,b,pos,v,dst,src,to,param,slot,
+		(long long)(slot==VIR_BLOCK_NONE?0:L->spill[slot]),
+		v?vir_opcode_table[L->function->insns[v].op].name:"none",
+		v?vir_type_names[L->function->insns[v].type]:"void",
+		(unsigned long long)(v && v<L->function->constant_count?x64_vir_constant_bits(&L->function->insns[v]):0));
+	x64_vir_text_append(L,text);
+}
+VPRIV void vx_probe(x64_vir_context *L,unsigned bit)
+{
+	if (L->probe & (1u<<bit)) x64_vir_text_append(L,"\tnop\n");
+}
 VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a, int b)
 {
 	char s[160];
@@ -67,6 +98,8 @@ VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint3
 
 VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 {
+	unsigned bit=x->kind==VIR_EDIT_RELOAD?0:x->kind==VIR_EDIT_REMATERIALIZE?1:x->kind==VIR_EDIT_MOVE?2:3;
+	vx_mark(L,true,bit,L->map_block,x->pos,x->value,x->dst,x->src,VIR_BLOCK_NONE);
 	switch (x->kind) {
 	case VIR_EDIT_REMATERIALIZE: x64_vir_constant_materialize(L, x->dst, x->value); break;
 	case VIR_EDIT_RELOAD: x64_vir_slot_access(L, true, x->dst, L->allocation->slot[x->value]); break;
@@ -74,6 +107,8 @@ VPRIV void vx_edit(x64_vir_context *L, const vir_edit *x)
 	case VIR_EDIT_MOVE: x64_mov(L->context, x64_vir_register_number(x->dst), x64_vir_register_number(x->src)); break;
 	default: abort(); /* no swapped/tied operands in x64_vir_fixed_registers_get */
 	}
+	vx_probe(L,bit);
+	vx_mark(L,false,bit,0,0,0,0,0,0);
 }
 
 VPRIV void x64_vir_edge_emit(x64_vir_context *L, uint32_t b, uint32_t k)
@@ -92,6 +127,8 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
 		bool ds = m->dst & VIR_LOCATION_SLOT, ss = m->src & VIR_LOCATION_SLOT;
 		uint32_t d = m->dst & ~VIR_LOCATION_SLOT, s = m->src & ~VIR_LOCATION_SLOT;
 		uint8_t tmp = vir_register_class(L->function->insns[m->value].type) ? VIR_REGISTER_MAKE(1, 14) : L->general_temporary;
+		unsigned bit=m->kind==VIR_EDIT_REMATERIALIZE?4:m->kind==VIR_EDIT_EXCHANGE?10:ds?5:ss?6:7;
+		vx_mark(L,true,bit,ed->from,ed->first+j,m->value,m->dst,m->src,ed->to);
 		if (m->kind == VIR_EDIT_REMATERIALIZE) {
 			x64_vir_constant_materialize(L, ds ? tmp : d, m->value);
 			if (ds) x64_vir_slot_access(L, false, tmp, d);
@@ -106,6 +143,8 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
 		} else if (ds) x64_vir_slot_access(L, false, s, d);
 		else if (ss) x64_vir_slot_access(L, true, d, s);
 		else x64_mov(L->context, x64_vir_register_number(d), x64_vir_register_number(s));
+		vx_probe(L,bit);
+		vx_mark(L,false,bit,0,0,0,0,0,0);
 	}
 }
 

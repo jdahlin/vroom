@@ -19,6 +19,9 @@ typedef struct x64_vir_context {
 	uint8_t *uses;
 	const vir_loops *loops;
 	uint32_t *order,*position,*rotations,*chase,block_current;
+	bool map;
+	unsigned probe, site;
+	uint32_t map_block, map_value;
 	unsigned dup;bool may_fall_through,scratch_register10;
 	uint32_t memory_value, memory_skip, scaled_value, scaled_skip; int memory_base, memory_index, scaled_index; uint8_t memory_shift, scaled_shift; bool memory_is_indexed; int64_t memory_offset;
 	uint32_t big_endian_value; int big_endian_base,big_endian_index; uint8_t big_endian_shift,big_endian_width; bool big_endian_is_indexed; int64_t big_endian_offset;
@@ -37,6 +40,9 @@ VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,const vir_insn *i
 VPRIV bool x64_vir_switch_is_dense(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range);
 VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx);
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s);
+VPRIV void vx_mark(x64_vir_context *L, bool begin, unsigned bit, uint32_t b, uint32_t pos,
+		    uint32_t v, uint32_t dst, uint32_t src, uint32_t to);
+VPRIV void vx_probe(x64_vir_context *L, unsigned bit);
 VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a, int b);
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst, uint32_t v);
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg, uint32_t s);

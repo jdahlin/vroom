@@ -54,6 +54,29 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         if threaded.read_bytes() != asm.read_bytes():
             raise SystemExit('assembly differs with six emitter threads')
         text = asm.read_text()
+        if lvl == '-O2':
+            # The allocator's map and probes (-fvir-map, -fvir-probe) observe the
+            # final allocation; -fvir-map-function must never change the code of
+            # another function.  Exercise probes through both assemblers.
+            baseline = d / 'diagnostic-base.o'
+            run([vpp, *flags, lvl, '-c', str(source), '-o', str(baseline)], env=testenv)
+            for mode in ('filtered', 'map', 'probe'):
+                dflags = ['-fvir-map', '-fvir-probe=' + ('255' if mode == 'probe' else '0'),
+                          '-fvir-map-function=' + ('absent_function' if mode == 'filtered' else 'vx_stack')]
+                mapped = d / (mode + '.s')
+                diagnostic = run([vpp, *flags, lvl, *dflags, '-S', str(source), '-o', str(mapped)], env=testenv)
+                objfile = d / (mode + '.o')
+                run([vpp, *flags, lvl, *dflags, '-c', str(source), '-o', str(objfile)], env=testenv)
+                if mode == 'filtered':
+                    if mapped.read_bytes() != asm.read_bytes() or objfile.read_bytes() != baseline.read_bytes():
+                        raise SystemExit('-fvir-map-function changed unselected code')
+                elif '# vl-site' not in mapped.read_text() or 'vl-function vx_stack ' not in diagnostic.stderr:
+                    raise SystemExit('missing allocator site/decision mapping')
+                for inp in (mapped, objfile):
+                    exe = d / 'diagnostic-run'
+                    run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
+                    if run([str(exe)]).stdout != expected:
+                        raise SystemExit('allocator diagnostics changed program results')
         if lvl == '-O3':
             for name, opcode in vector.items():
                 body = text.split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
@@ -85,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_inline_context.c', {'wrapped', 'layer1', 'layer2', 'constant0', 'constant1', 'general', 'ignored0', 'ignored1'}, {}),
         ('vir_inline_large.c', {'helper', 'large', 'reference'}, {}),
         ('vir_slot_width.c', {'mix32', 'signed32', 'mix16', 'mix8', 'loop32'}, {}),
+        ('vir_pointer_load.c', {'chain', 'bits', 'mixed', 'alias', 'across', 'volatile_root'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
         ('vir_x86_index.c', {'load8', 'load4', 'load2', 'load1', 'store8', 'store4', 'cast8', 'cast4', 'cast2', 'caststore4', 'castmod', 'cast3', 'sharedcast'}, {}),
         ('vir_vector_stride.c', {'stride', 'intstride', 'wide', 'reverse', 'ordered', 'residue', 'gather', 'carry', 'chain', 'maxval', 'maxindex', 'lastnegative'}, {'stride': 'mulps', 'intstride': 'mulps', 'reverse': 'addpd', 'ordered': 'mulps', 'residue': 'addps', 'gather': 'mulps', 'carry': 'mulps'}),

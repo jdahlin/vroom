@@ -98,10 +98,14 @@ VPRIV bool driver_optimization_option(struct driver_job *job, const char *a)
 		char *end;
 		long mask = strtol(name + 10, &end, 0);
 
-		if (end == name + 10 || *end || mask < 0 || mask > 255)
+		if (end == name + 10 || *end || mask < 0 || mask > 0xffff)
 			job->bad_value_option = a;
 		v->probe = (int)mask;
-	} else if (!no && !strncmp(name, "vir-passes=", 11))
+	} else if (!strcmp(name, "vir-map"))
+		v->map = !no;
+	else if (!no && !strncmp(name, "vir-map-function=", 17))
+		v->map_function = name + 17;
+	else if (!no && !strncmp(name, "vir-passes=", 11))
 		v->passes = name + 11;
 	else if (!no && !strncmp(name, "vir-functions=", 14))
 		v->functions = name + 14;

@@ -1,5 +1,7 @@
 /* Program header creation (lld's createPhdrs) and finishing. */
 
+#include "ld-internal.h"
+
 /* ---------------- phdrs (lld createPhdrs) ---------------- */
 
 /* lld isRelroSection */
@@ -22,7 +24,7 @@ static bool ld_output_section_is_relro(struct ld_context *ctx, uint32_t oi)
 	       !strcmp(n, ".fini_array") || !strcmp(n, ".init_array") || !strcmp(n, ".preinit_array");
 }
 
-static void ld_program_headers_create(struct ld_context *ctx)
+VPRIV void ld_program_headers_create(struct ld_context *ctx)
 {
 	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = 0;
 	ld_segment_create(ctx, PT_PHDR, PF_R);
@@ -118,7 +120,7 @@ static void ld_program_headers_create(struct ld_context *ctx)
 }
 
 /* allocateHeaders() + removeEmptyPTLoad() */
-static void ld_program_headers_finish(struct ld_context *ctx)
+VPRIV void ld_program_headers_finish(struct ld_context *ctx)
 {
 	uint64_t min = UINT64_MAX;
 	for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {

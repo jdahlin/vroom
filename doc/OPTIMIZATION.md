@@ -156,7 +156,9 @@ kbuild's probes do not see them.  They have no effect below `-O2`.
 | `-fvir-functions=FILE` | only the functions named in FILE, one per line, are lowered (bisecting a miscompile) |
 | `-fvir-vectorize-report` | a line per innermost loop the vectorizer looked at: vectorized, or why not |
 | `-fvir-ccmp=select\|all\|none` | which compare pairs the condition merge joins: where if-conversion follows (default), every pair, none |
-| `-fvir-probe=MASK` | arm64: a `nop` after each allocator edit of the kinds in MASK, to count them by instructions retired (`arch/a64/vir/moves.c`) |
+| `-fvir-probe=MASK` | a `nop` after each allocator edit of the kinds in MASK (bits 0-7 on both targets; x86-64 adds 8 definition store, 9 lowering, 10 edge exchange), to count them by instructions retired (`arch/a64/vir/moves.c`, `arch/x64/vir/moves.c`) |
+| `-fvir-map` | x86-64: each allocator edit between `# vl-site` and `# vl-end` comments in the assembly, and the allocator's decisions (`vl-function`, `vl-entry`, `vl-slot`) on stderr (`bench/sqlite/vir-edits.py`) |
+| `-fvir-map-function=NAME` | x86-64: `-fvir-map` and `-fvir-probe` in function NAME alone; never changes another function's code |
 
 The harnesses take the level as an option: `bench/vcc-ctests.py -O1|-O2|-O3`
 (vcc's level; clang's reference stays at `-O2`) and `--vflags` for vcc-only

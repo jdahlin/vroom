@@ -1,5 +1,7 @@
 /* Validation of a relocatable ELF input (every offset and size is checked before use) and its parsing into an Obj. */
 
+#include "ld-internal.h"
+
 /* the bytes of a relocation's field (0: none, 4: an instruction) */
 static uint32_t ld_relocation_width(uint32_t type, uint16_t machine)
 {
@@ -31,7 +33,7 @@ static bool ld_string_table_is_valid(const ld_object *o, uint32_t k)
 
 /* every offset, index and size the later passes use, checked once (as lld's
  * ObjFile: the message names what is wrong; the object is then dropped) */
-static bool ld_object_is_valid(struct ld_context *ctx, ld_object *o, const elf_file_header *eh)
+VPRIV bool ld_object_is_valid(struct ld_context *ctx, ld_object *o, const elf_file_header *eh)
 {
 #define LD_OBJECT_INVALID(...) do { if (!ctx->inputs.quiet) ld_error_report(ctx, __VA_ARGS__); return false; } while (0)
 	uint64_t n = o->size;
@@ -131,7 +133,7 @@ static bool ld_object_is_valid(struct ld_context *ctx, ld_object *o, const elf_f
 #undef LD_OBJECT_INVALID
 }
 
-static void ld_object_parse(void *arg, size_t i)
+VPRIV void ld_object_parse(void *arg, size_t i)
 {
 	struct ld_context *ctx = arg;
 	ld_object *o = ctx->inputs.objects.v[i];

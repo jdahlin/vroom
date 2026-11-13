@@ -1,9 +1,11 @@
 /* The section name table, the ELF and section headers, synthetic contents and the build id. */
 
+#include "ld-internal.h"
+
 /* ---------------- output ---------------- */
 
 
-static void ld_section_name_table_build(struct ld_context *ctx)
+VPRIV void ld_section_name_table_build(struct ld_context *ctx)
 {
 	/* deduplicated, in section header order (StringTableBuilder in insertion order) */
 	size_t cap = 1;
@@ -31,7 +33,7 @@ static void ld_section_name_table_build(struct ld_context *ctx)
 	ctx->inputs.sections.v[ctx->output.shstrtab_section].size = n;
 }
 
-static void ld_headers_write(struct ld_context *ctx)
+VPRIV void ld_headers_write(struct ld_context *ctx)
 {
 	elf_file_header *eh = (elf_file_header *)ctx->output.image;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
@@ -72,7 +74,7 @@ static void ld_headers_write(struct ld_context *ctx)
 	}
 }
 
-static void ld_synthetic_sections_write(struct ld_context *ctx)
+VPRIV void ld_synthetic_sections_write(struct ld_context *ctx)
 {
 	/* .rela.dyn, .symtab and .strtab were written in place */
 	ld_input_section *is = &ctx->inputs.sections.v[ctx->output.shstrtab_section];
@@ -80,7 +82,7 @@ static void ld_synthetic_sections_write(struct ld_context *ctx)
 }
 
 /* --build-id: lld's "sha1"/"tree" ids are a BLAKE3 tree over 1 MiB chunks */
-static void ld_build_id_write(struct ld_context *ctx)
+VPRIV void ld_build_id_write(struct ld_context *ctx)
 {
 	if (ctx->output.build_id_section == LD_NONE)
 		return;

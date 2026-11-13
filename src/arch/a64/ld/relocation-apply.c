@@ -1,4 +1,6 @@
-/* arm64 relocation application: values into instruction fields, range checks, .rela.dyn; part of ld/ld.c (#included there) */
+/* arm64 relocation application: values into instruction fields, range checks, .rela.dyn (a part of the ELF linker, ld/ld-internal.h) */
+
+#include "../../../ld/ld-internal.h"
 
 
 static void a64_ld_instruction_immediate_store(uint8_t *loc, uint32_t mask, uint32_t v)
@@ -6,20 +8,20 @@ static void a64_ld_instruction_immediate_store(uint8_t *loc, uint32_t mask, uint
 	ld_u32_store(loc, (ld_u32_load(loc) & ~mask) | v);
 }
 
-static int a64_ld_relocation_error_report(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, const char *what, int64_t v)
+VPRIV int a64_ld_relocation_error_report(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, const char *what, int64_t v)
 {
 	ld_error_report(ctx, "%s:(%s+0x%llx): relocation %u %s (value 0x%llx)", o->path, is->name,
 	      (unsigned long long)rl->r_offset, (unsigned)rl->r_info, what, (unsigned long long)v);
 	return 0;
 }
 
-static bool ld_value_fits_signed(int64_t v, int bits)
+VPRIV bool ld_value_fits_signed(int64_t v, int bits)
 { return v >= -(INT64_C(1) << (bits - 1)) && v < (INT64_C(1) << (bits - 1)); }
 /* checkIntUInt: representable as either signed or unsigned */
 static bool ld_value_fits_signed_or_unsigned(int64_t v, int bits) { return ld_value_fits_signed(v, bits) || (uint64_t)v < (UINT64_C(1) << bits); }
 
 
-static void a64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
+VPRIV void a64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
 {
 	ld_input_section *is = &ctx->inputs.sections.v[si];
 	ld_object *o = ctx->inputs.objects.v[is->object];

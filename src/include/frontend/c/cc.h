@@ -300,7 +300,7 @@ enum { CC_CCMP_SELECT, CC_CCMP_ALL, CC_CCMP_NONE };
 
 /* The developer's aids for VIR (-fvir-*, doc/OPTIMIZATION.md): what the tests and the
  * measuring harnesses ask for.  All zero by default; none changes the code of a function
- * that goes through VIR, except build_only, functions, passes, ccmp and probe. */
+ * that goes through VIR, except build_only, functions, passes, ccmp, probe and map. */
 typedef struct cc_vir_aids {
 	bool build_only;	/* -fno-vir-lower: VIR is built (verified, printed), the direct emitter makes the code */
 	bool verify;		/* -fvir-verify: the verifier runs on every function built; a rejected one falls back */
@@ -310,7 +310,9 @@ typedef struct cc_vir_aids {
 	bool stats;		/* -fvir-stats: per TU on stderr, functions through VIR and the reasons the others were not */
 	bool vectorize_report;	/* -fvir-vectorize-report: a line per innermost loop the vectorizer looked at */
 	uint8_t ccmp;		/* -fvir-ccmp=select|all|none: CC_CCMP_* */
-	int probe;		/* -fvir-probe=MASK: arm64, a nop after each allocator edit of the kinds in MASK */
+	int probe;		/* -fvir-probe=MASK: a nop after each allocator edit of the kinds in MASK */
+	bool map;		/* -fvir-map: x86-64, each allocator edit between # vl-site and # vl-end, its decisions on stderr */
+	const char *map_function;	/* -fvir-map-function=NAME: x86-64, the map and probes in NAME alone */
 	const char *passes;	/* -fvir-passes=ITEMS: time, leave out or check the builder's passes (codegen/vir/pass-table.c) */
 	const char *functions;	/* -fvir-functions=FILE: only the functions named in FILE, one per line, are lowered */
 } cc_vir_aids;

@@ -1,9 +1,9 @@
 /* The linker script's expression parser (precedence climbing) and its primaries. */
 
-static uint32_t ld_output_section_find(struct ld_context *ctx, const char *name);
-static ld_expression *ld_script_expression_parse(struct ld_context *ctx);
+#include "ld-internal.h"
 
-static ld_expression *ld_script_expression_create(uint8_t op)
+
+VPRIV ld_expression *ld_script_expression_create(uint8_t op)
 {
 	ld_expression *e = ld_region_alloc(sizeof *e);
 	e->operation = op;
@@ -38,7 +38,7 @@ static int ld_script_operator_precedence(const char *op)
 }
 /* peek an operator token (longest match of << >> <= >= == != && || op= and
  * the single-character operators); returns length or 0 */
-static int ld_script_operator_peek(struct ld_context *ctx, char out[4])
+VPRIV int ld_script_operator_peek(struct ld_context *ctx, char out[4])
 {
 	ld_script_whitespace_skip(ctx);
 	size_t left = (size_t)(ctx->script.end - ctx->script.cursor);
@@ -60,7 +60,6 @@ static int ld_script_operator_peek(struct ld_context *ctx, char out[4])
 	return n;
 }
 
-static ld_expression *ld_script_primary_expression_parse(struct ld_context *ctx);
 static ld_expression *ld_script_expression_climb(struct ld_context *ctx, ld_expression *lhs, int minp)
 {
 	char op1[4], op2[4];
@@ -98,9 +97,9 @@ static ld_expression *ld_script_expression_climb(struct ld_context *ctx, ld_expr
 	}
 	return lhs;
 }
-static ld_expression *ld_script_expression_parse(struct ld_context *ctx) { return ld_script_expression_climb(ctx, ld_script_primary_expression_parse(ctx), 0); }
+VPRIV ld_expression *ld_script_expression_parse(struct ld_context *ctx) { return ld_script_expression_climb(ctx, ld_script_primary_expression_parse(ctx), 0); }
 
-static ld_expression *ld_script_parenthesized_expression_parse(struct ld_context *ctx)
+VPRIV ld_expression *ld_script_parenthesized_expression_parse(struct ld_context *ctx)
 {
 	ld_script_character_expect(ctx, '(');
 	ld_expression *e = ld_script_expression_parse(ctx);
@@ -115,7 +114,7 @@ static uint32_t ld_script_parenthesized_output_section_parse(struct ld_context *
 	return ld_output_section_find(ctx, n);
 }
 
-static ld_expression *ld_script_primary_expression_parse(struct ld_context *ctx)
+VPRIV ld_expression *ld_script_primary_expression_parse(struct ld_context *ctx)
 {
 	ld_script_whitespace_skip(ctx);
 	if (ld_script_character_peek(ctx, '('))
