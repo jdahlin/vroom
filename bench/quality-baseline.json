@@ -12,7 +12,7 @@
  "environment_knobs": 59,
  "files_without_header_comment": 11,
  "functions_over_300_lines": 30,
- "files_over_2000_lines": 10,
+ "files_over_2000_lines": 9,
  "includes_of_another_modules_internal_header": 7,
- "module_pairs_including_each_other": 6
+ "module_pairs_including_each_other": 7
 }
