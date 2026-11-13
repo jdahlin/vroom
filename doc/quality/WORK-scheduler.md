@@ -340,3 +340,24 @@ the A/B above measures it; (c) is left for later (3).
 
 Per stage: the PR, the proof commands with results, measurements before and
 after with the machine's load, and anything this order got wrong.
+
+## Status
+
+### Stage 1 (2026-11-13): the facility, `vpp --batch`, vlink
+
+`src/port/task.c` as in 1.2-1.3; `vpp --batch` and vlink on it.  Proofs:
+`task-test` ok (also TSan); `vcc-sema.py batch` 878/879; `vcc-diff.py batch
+--cmp --kernel` 873/873; `vlink-opts.py` 66/66, `vlink-bad.py` 34/34;
+`VCC_LDCMP=1 vcc-ctests.py --no-cache` 2127/2129 (the two vlink-vs-lld image
+differences of the base, `data_sections` and `tls_static`); `vccd-test.py`
+28 pass, `vcc-stress.py --vccd` 36/36, `vccd-cc.py` 174/174; TSan:
+`vcc-cbatch.py` 840/840 at `-j 6` and at `-j 3` with `VCC_THREADS=4`,
+`vccd-cc.py` 174/174, 0 reports.  Measurements (`sched-measure.py`, load
+4.6-5.8): A at `-j 6` 0.61 s (base 0.66), CPU equal, busy 100 % (83 %); E
+unchanged within noise, outputs byte-identical.
+
+Found on the way: under TSan, a thread that once ran a deeply nested input
+can crash later in `vcc-stress.py --vccd` (`pp-if-parens-200k`, "nested bug
+in the same thread"); vccd's old workers do the same with `-j 1`, so it is
+TSan's per-thread shadow stack and not the pool, which only reuses threads
+more often (LIFO).

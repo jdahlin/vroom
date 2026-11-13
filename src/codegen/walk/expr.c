@@ -1,7 +1,7 @@
 /* vcc code generator, AST walker: expressions, lvalues, conditions (walk.h) */
 #include "walk.h"
-#include "port/vstack.h"
-#include "common/f128.h"
+#include "port/stack-guard.h"
+#include "common/softfloat.h"
 
 /* ---------------- types and values ---------------- */
 
@@ -2698,7 +2698,7 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 		if (wk_quad(c, t)) {
 			lo = (uint64_t)q, hi = (uint64_t)(q >> 64);
 		} else {
-			q_to_x87(q, b);
+			vsoftfloat_to_x87(q, b);
 			memcpy(&lo, b, 8);
 			hi = (uint64_t)b[8] | (uint64_t)b[9] << 8;
 		}
@@ -2717,15 +2717,15 @@ static val wk_fpconst(ecx *e, qty t, double d, u128 q)
 	{
 		float f = (float)d;
 		uint64_t bits = 0;
-		if (q_isnan(q)) {
+		if (vsoftfloat_is_nan(q)) {
 			int sz = wk_size(c, t);
-			return LO(fconst)(e, q_nan_storage(q, KIND(c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11), sz);
+			return LO(fconst)(e, vsoftfloat_nan_storage(q, KIND(c, t) == TY_BFLOAT16 ? 7 : sz == 2 ? 10 : sz == 4 ? 23 : 52, KIND(c, t) == TY_BFLOAT16 ? 8 : sz == 2 ? 5 : sz == 4 ? 8 : 11), sz);
 		}
 
 		if (KIND(c, t) == TY_BFLOAT16)
-			return LO(fconst)(e, q_to_bf(q_of_d(d)), 2);
+			return LO(fconst)(e, vsoftfloat_to_bfloat16(vsoftfloat_of_double(d)), 2);
 		if (KIND(c, t) == TY_FLOAT16)
-			return LO(fconst)(e, q_to_h(q_of_d(d)), 2);
+			return LO(fconst)(e, vsoftfloat_to_half(vsoftfloat_of_double(d)), 2);
 		if (KIND(c, t) == TY_FLOAT)
 			memcpy(&bits, &f, 4);
 		else
@@ -3256,7 +3256,7 @@ static val wk_builtin(ecx *e, uint32_t n)
 				return vconst(cv.i);	/* __builtin_classify_type ... */
 			if (cv.kind == CV_FLT) {
 				wk_scalar(e, n, x->ty);
-				return wk_fpconst(e, x->ty, cv.f, cv.ld ? cv.q : q_of_d(cv.f));
+				return wk_fpconst(e, x->ty, cv.f, cv.ld ? cv.q : vsoftfloat_of_double(cv.f));
 			}
 		}
 		break;
@@ -3307,7 +3307,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 
-	if (unlikely(vstack_low()))
+	if (unlikely(vstack_guard_low()))
 		efatal(e, x->loc, "expression nested too deeply");
 	switch (x->op) {
 	case N_BIGNUM:
@@ -3538,7 +3538,7 @@ static bool wk_ival(ecx *e, uint32_t n, i128 *out)
 			const sym *y = &c->syms[N(x->a)->a];
 			if ((QQ(y->ty) & (Q_CONST | Q_VOLATILE)) != Q_CONST || (y->flags & SF_WEAK) || !y->body ||
 			    !cc_eval(c, y->body, &cv) || cv.kind != CV_FLT) return false;
-			*out = em_trunc_to(c, q_to_int(cv.ld ? cv.q : q_of_d(cv.f),
+			*out = em_trunc_to(c, vsoftfloat_to_integer_saturating(cv.ld ? cv.q : vsoftfloat_of_double(cv.f),
 				(int)(tsize(c, x->ty) * 8), wk_signed(c, x->ty)), x->ty);
 			return true;
 		}

@@ -3,8 +3,8 @@
  * reports msg on vjob_escape_fd, sets vtables_full and calls the job's hook
  * (the driver's: an error for this TU, longjmp); without a hook it aborts.
  */
-#ifndef VCC_FAIL_H
-#define VCC_FAIL_H
+#ifndef VCC_COMMON_FAIL_H
+#define VCC_COMMON_FAIL_H
 
 /* called (in the thread) when the table is full; must not return to the caller */
 extern void (*vintern_full_hook)(void);	/* (the job's escape, see vjob_escape) */

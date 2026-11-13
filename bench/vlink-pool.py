@@ -12,7 +12,8 @@ byte-identical.  Run it when `uptime` shows a low load.
 """
 import os, sys, subprocess, tempfile, time, statistics, filecmp, shutil
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-B = f'{root}/work/build-o0'
+sys.path.insert(0, f'{root}/bench'); import hostenv
+B = hostenv.KTREE
 reps = 3; dirs = []
 av = sys.argv[1:]
 while av:

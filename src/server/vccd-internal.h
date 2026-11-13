@@ -63,7 +63,7 @@
 #include "utils/ar.h"
 #include "utils/rsh.h"
 #include "ld/ld.h"
-#include "common/defer.h"
+#include "common/scoped-cleanup.h"
 #include "port/task.h"
 
 #define MAX_STRS	(VROOM_MAX_PAYLOAD / 2)
@@ -85,7 +85,7 @@ struct worker {
 	char **strs;
 };
 
-/* compiles recurse (parser, emitter): vstack_low() ends a TU that nests too
+/* compiles recurse (parser, emitter): vstack_guard_low() ends a TU that nests too
    deeply.  TSan keeps a fixed shadow call stack (64K frames) per thread and
    corrupts its state past it, so under TSan the guard must fire sooner. */
 #if defined(__has_feature)

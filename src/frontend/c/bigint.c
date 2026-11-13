@@ -51,10 +51,10 @@ static bool big_to_float(cc *c, const cval *a, qty from, qty to, cval *v)
   for(int bit=0;bit<shift;bit++)if((words[bit/32]>>(bit%32))&1){m|=1;break;}
  }
  free(words);memset(v,0,sizeof(*v));v->kind=CV_FLT;
- if(is_q(c,to)){v->ld=true;v->q=q_rndp(neg,16383+(int)bits-1,m,q_prec(c,to));v->f=q_to_d(v->q);return true;}
+ if(is_q(c,to)){v->ld=true;v->q=vsoftfloat_round_with_precision(neg,16383+(int)bits-1,m,q_prec(c,to));v->f=vsoftfloat_to_double(v->q);return true;}
  int k=KIND(c,to),p=k==TY_FLOAT?23:k==TY_FLOAT16?10:k==TY_BFLOAT16?7:52;
  int bias=k==TY_FLOAT16?15:k==TY_FLOAT||k==TY_BFLOAT16?127:1023;
- uint64_t raw=(uint64_t)q_round(neg,bias+(int)bits-1-(112-p),m,p,2*bias+1);
+ uint64_t raw=(uint64_t)vsoftfloat_round_to_integral(neg,bias+(int)bits-1-(112-p),m,p,2*bias+1);
  if(k==TY_FLOAT){uint32_t u=(uint32_t)raw;float f;memcpy(&f,&u,4);v->f=f;}
  else if(k==TY_FLOAT16)v->f=h_to_d((uint16_t)raw);
  else if(k==TY_BFLOAT16)v->f=bf_to_d((uint16_t)raw);
@@ -66,10 +66,10 @@ static bool big_to_float(cc *c, const cval *a, qty from, qty to, cval *v)
  * constexpr/ICE provenance. */
 static bool big_from_float(uint32_t *out,size_t n,unsigned bits,bool sign,u128 q)
 {
- int neg,e;u128 m;q_un(q,&neg,&e,&m);e-=16383;
- bool range=!q_isnan(q)&&!q_isinf(q);
+ int neg,e;u128 m;vsoftfloat_unpack(q,&neg,&e,&m);e-=16383;
+ bool range=!vsoftfloat_is_nan(q)&&!vsoftfloat_is_infinity(q);
  memset(out,0,n*4);
- if(q_isnan(q)||e<0)return range;
+ if(vsoftfloat_is_nan(q)||e<0)return range;
  if(neg&&!sign)range=false;
  if(e>=(int)bits-(sign?1:0)){
   bool minimum=sign&&neg&&e==(int)bits-1&&m==((u128)1<<112);
@@ -151,7 +151,7 @@ VPRIV uint32_t big_fold_node(cc*c,uint32_t node_index) {
  if(!large||!eval(c,x->a,&a)||(a.kind!=CV_INT&&a.kind!=CV_BIGINT&&!(x->op==N_CAST&&a.kind==CV_FLT)))return node_index;
  size_t n=(size_t)(ty_size(c,to)/4);uint32_t*buf=calloc(n*4+2,4);if(!buf)fatal(c,x->loc,"out of memory");uint32_t*l=buf,*r=l+n,*out=r+n,*scratch=out+n;
  if(a.kind!=CV_FLT)big_operand(c,l,n,&a,N(x->a)->ty);bool ok=true,ice=a.ice;
- if(x->op==N_CAST&&a.kind==CV_FLT){bool valid=big_from_float(out,n,int_bits(c,to),is_signed(c,to),a.ld?a.q:q_of_d(a.f));ice=N(x->a)->op==N_FNUM&&valid;grammar&=valid;}
+ if(x->op==N_CAST&&a.kind==CV_FLT){bool valid=big_from_float(out,n,int_bits(c,to),is_signed(c,to),a.ld?a.q:vsoftfloat_of_double(a.f));ice=N(x->a)->op==N_FNUM&&valid;grammar&=valid;}
  else if(x->op==N_CAST)memcpy(out,l,n*4);
  else if(x->op==N_UNARY){switch(x->aux){case T_PLUS:memcpy(out,l,n*4);break;case T_MINUS:vbi_neg(out,l,n);break;case T_TILDE:for(size_t i=0;i<n;i++)out[i]=~l[i];break;default:ok=false;}}
  else if(!eval(c,x->b,&b)||(b.kind!=CV_INT&&b.kind!=CV_BIGINT))ok=false;

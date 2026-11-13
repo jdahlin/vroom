@@ -3,7 +3,7 @@
 
   bench/vcc-explain.py [-v] [PATTERN]
 
-For every page: ID is a diagnostic id vcc has (frontend/diag/diagids.inc); the page has one `c wrong`
+For every page: ID is a diagnostic id vcc has (diag/diagnostic-ids.inc); the page has one `c wrong`
 and one `c fixed` example; vpp gives the wrong one a diagnostic with that id
 (-fdiagnostics-show-id) and the fixed one none with it, and no error; `vpp --explain ID`
 prints the page (the compiled-in table is up to date).  Both examples use the page's
@@ -21,12 +21,12 @@ FL = ['--target=aarch64-linux-gnu', '-fsyntax-only', '-fno-color-diagnostics', '
 
 
 def known_ids():
-    """frontend/diag/diagids.inc's ids and the ones the code sets itself (gen-diagids.py explicit_ids)"""
+    """diag/diagnostic-ids.inc's ids and the ones the code sets itself (gen-diagids.py explicit_ids)"""
     import importlib.util
     spec = importlib.util.spec_from_file_location('gendiagids', f'{R}/src/tools/gen-diagids.py')
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
-    s = open(f'{R}/src/frontend/diag/diagids.inc').read()
+    s = open(f'{R}/src/diag/diagnostic-ids.inc').read()
     got = set(re.findall(r'^DID\((\w+),', s, re.M)) | g.explicit_ids()
     for root, _, files in os.walk(f'{R}/src/frontend/c'):	# ids passed as strings ("ext_...")
         for f in files:

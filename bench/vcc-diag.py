@@ -120,7 +120,7 @@ def one(name, bless=False):
         why.append('locations/levels/flags differ from clang')
     if (rc_c == 0) != (rc_v == 0):
         why.append(f'exit {rc_v}, clang {rc_c}')
-    # layer 2: every diagnostic carries an id from frontend/diag/diagids.inc (clang's name or vcc_*)
+    # layer 2: every diagnostic carries an id from diag/diagnostic-ids.inc (clang's name or vcc_*)
     _, out_i = run([VPP], name, ['-fdiagnostics-show-id'])
     noid = [l for l in out_i.splitlines() if HEAD.match(l) and (not re.search(r' \[(\w+)\]$', l) or l.endswith('[vcc_unknown]'))]
     if noid:
