@@ -27,7 +27,7 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen
 		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	default: virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));
 	}
-	virbuild_register_write(e, r, virbuild_insn_append(e, op, ty, 0, x, 0, 0));
+	virbuild_register_write(e, r, virbuild_insn_append(e, op, ty, op == VIR_OP_CTZ || op == VIR_OP_CLZ ? VIR_INSN_FLAG_NZ : 0, x, 0, 0));
 	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 }
 
@@ -150,5 +150,25 @@ VPRIV void virbuild_label(codegen_context *e, uint32_t l)
 }
 
 VPRIV void virbuild_jump(codegen_context *e, uint32_t l) { virbuild_branch_emit(e, virbuild_label_block(e, l)); }
-VPRIV void virbuild_jumpr(codegen_context *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(computed_goto)); }
-VPRIV void virbuild_named(codegen_context *e, uint32_t ref) { (void)ref; virbuild_fail(e, VIRBUILD_FAILURE(label_address)); }
+VPRIV void virbuild_jumpr(codegen_context *e, int r)
+{
+	virbuild_context *V = e->vir_builder;
+	if (!CODEGEN_IS_X64(e->compile_context) || e->walk_state->instance)
+		virbuild_fail(e, VIRBUILD_FAILURE(computed_goto));
+	if (V->indirect_dispatch == VIRBUILD_BLOCK_NONE)
+		V->indirect_dispatch = virbuild_block_new(e);
+	uint32_t target = virbuild_register_read(e, r, VIR_TYPE_PTR);
+	virbuild_tfree(e, r);
+	virbuild_variable_write(e, VIRBUILD_JUMP_VARIABLE, V->current_block, target);
+	virbuild_branch_emit(e, V->indirect_dispatch);
+}
+
+VPRIV void virbuild_named(codegen_context *e, uint32_t ref)
+{
+	if (!CODEGEN_IS_X64(e->compile_context) || e->walk_state->instance)
+		virbuild_fail(e, VIRBUILD_FAILURE(label_address));
+	virbuild_context *V = e->vir_builder;
+	VIRBUILD_ARRAY_GROW(V->indirect_targets, V->indirect_count, V->indirect_capacity, 1);
+	V->indirect_targets[V->indirect_count].reference = ref;
+	V->indirect_targets[V->indirect_count++].block = V->current_block;
+}

@@ -248,6 +248,8 @@ VPRIV void virbuild_begin(codegen_context *e, uint32_t s)
 	virbuild_context *V = virbuild_context_get(e);
 
 	(void)s;
+	V->indirect_dispatch = VIRBUILD_BLOCK_NONE;
+	V->indirect_count = 0;
 	V->insn_count = 1;	/* (0 is no instruction) */
 	VIRBUILD_ARRAY_GROW(V->insns, 0, V->insn_capacity, 1);
 	V->insns[0] = (virbuild_preir_insn){ 0 };
@@ -292,6 +294,20 @@ VPRIV void virbuild_finish(codegen_context *e, uint32_t s)
 			V->extra[V->extra_count++] = rv;
 		V->blocks[V->current_block].terminator = virbuild_preir_insn_add(e, VIR_OP_RET, VIR_TYPE_VOID, 0, 0, 0, o, V->current_block);
 	}
+	/* Give all computed gotos one dispatch block. Incoming branches reconcile
+	 * their SSA values before the indirect jump, so each public label has
+	 * exactly one incoming allocator state from indirect control flow. */
+	if (V->indirect_dispatch != VIRBUILD_BLOCK_NONE) {
+		uint32_t targets = virbuild_extra_append(e, &V->indirect_count, 1);
+		VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, V->indirect_count);
+		for (uint32_t k = 0; k < V->indirect_count; k++)
+			V->extra[V->extra_count++] = V->indirect_targets[k].block;
+		uint32_t dispatch = V->indirect_dispatch;
+		uint32_t addr = virbuild_variable_read(e, VIRBUILD_JUMP_VARIABLE, dispatch, VIR_TYPE_PTR);
+		V->blocks[dispatch].terminator = virbuild_preir_insn_add(e, VIR_OP_IBR, VIR_TYPE_VOID, 0, addr, 0, targets, dispatch);
+	} else if (V->indirect_count) {
+		virbuild_fail(e, VIRBUILD_FAILURE(label_address));
+	}
 	if (!virbuild_function_emit(e))
 		virbuild_fail(e, V->failure_reason ? V->failure_reason : VIRBUILD_FAILURE(build_failed));
 }
@@ -302,6 +318,7 @@ VPRIV void virbuild_ecx_free(codegen_context *e)
 
 	if (!V)
 		return;
+	free(V->indirect_targets);
 	free(V->insns), free(V->blocks), free(V->extra), free(V->variable_entries), free(V->local_hash), free(V->forward), free(V->labels), free(V->slots), free(V->active_slots);
 	free(V->stores), free(V->locations), free(V->variable_types), free(V->variable_is_signed), free(V->predecessors), free(V->value_map), free(V->block_order), free(V->block_map);
 	free(V->lowering_slots), free(V->lowering_spills), free(V->lowering_labels), free(V->lowering_uses), free(V->lowering_edge_labels);

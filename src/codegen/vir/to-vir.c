@@ -83,6 +83,13 @@ VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b)
 	case VIR_OP_BRIF:
 		w[1] = virbuild_to_vir_block(V, in.b), w[2] = virbuild_to_vir_block(V, in.c);
 		break;
+	case VIR_OP_IBR: {
+		uint32_t n = V->extra[in.c];
+		w[2] = vir_extra_add(f, &V->extra[in.c], n + 1);
+		for (uint32_t k = 0; k < n; k++)
+			f->extra[w[2] + 1 + k] = virbuild_to_vir_block(V, V->extra[in.c + 1 + k]);
+		break;
+	}
 	case VIR_OP_SWITCH: {
 		uint32_t n = V->extra[in.c], st = V->insns[in.a].insn.type == VIR_TYPE_I64 ? 5 : 3, o = vir_extra_add(f, &V->extra[in.c], 1 + n * st);
 

@@ -1374,6 +1374,34 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Computed goto (2026-11-14).** The x86-64 bootstrap lowers lex_tokenize_mode
+through VIR with 4,408 instructions, 908 blocks and 60 allocator spills.
+Computed goto sites merge their live values at a common indirect branch.
+Each address-taken C label gets an entry that performs the appropriate
+allocator edge moves, including for labels named in static initializers.
+Other architectures and indirect jumps inside inline expansions use the
+direct emitter. The x86 lexer scans masks low bit first using BSF.
+
+On the SQLite 3.50.4 compile described in PLAN-fas2, seven warm runs per
+configuration alternated forward/reverse order, pinned to CPU 7 with one
+emitter thread. The pre-change baseline includes the previous bootstrap
+optimizations ported onto 9d322868.
+
+| Compiler | Compile CPU ms | User instructions, billions | Lexer core ms |
+| --- | ---: | ---: | ---: |
+| Baseline self-built | 247.09 | 3.204 | 12.9 |
+| Updated self-built | 244.10 | 3.099 | 8.5 |
+| Baseline clang-built | 157.05 | 1.481 | 7.0 |
+| Updated clang-built | 156.45 | 1.470 | 6.7 |
+
+Core time is the median of lextest's best of three passes in a separate
+series. An additional same-source control changed only the lowering of
+lex_tokenize_mode. Direct, VIR and clang produced 32,403, 27,945 and
+10,925 bytes respectively. Disassembly showed four, one and three indirect
+jump sites respectively. The control measured 13.4, 11.0 and 9.6 ms for
+the lexer. Wall time on the shared host varied considerably. The updated
+compilers produced the original token hash and SQLite object SHA256.
+
 The 2026-11-13 bootstrap profile added x86-64 local-exec TLS addresses,
 frame-relative slot stores, and 32-bit moves for zero-extendable constants.
 The local-exec address uses %fs:0 and a TPOFF displacement, preserving flags
