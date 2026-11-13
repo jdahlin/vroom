@@ -72,5 +72,5 @@ void vjob_region_debug_release(vjob_region *r, size_t used)
 	vjob_region_debug_table[i].bad += bad;
 	pthread_mutex_unlock(&vjob_region_debug_mutex);
 	if (bad && (vjob_region_debug_mode & 1))
-		abort();
+		VBUG("a job region holds a nonzero byte past the bytes given back (VCC_VMREG_CHECK)");
 }

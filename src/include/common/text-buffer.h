@@ -38,10 +38,8 @@ static inline void vtext_region_init(tbuf *b, vjob_region *r, size_t cap, const 
 
 static inline VNONNULL(1) void vtext_need(tbuf *b, size_t n)
 {
-	if (__builtin_expect(b->n + n > b->cap, 0)) {
-		fputs("vcc: emitter buffer overflow\n", stderr);
-		abort();
-	}
+	if (__builtin_expect(b->n + n > b->cap, 0))
+		vjob_fail("emitter text buffer full");
 }
 
 static inline VNONNULL(1) void vtext_append(tbuf *b, const char *s, size_t n)
