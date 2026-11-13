@@ -69,7 +69,7 @@
 #include "obj/obj.h"
 #include "driver/ppdriver.h"
 #include "port/job-regions.h"
-#include "common/tbuf.h"
+#include "common/text-buffer.h"
 
 #include "name.h"
 
@@ -441,10 +441,10 @@ enum { FN_MEMCPY, FN_MEMSET, FN_MEMMOVE, FN_UDIVTI3, FN_DIVTI3, FN_UMODTI3, FN_M
  * With cc_opts.emit == 2 a chunk is a stream of items instead of text:
  *
  *   IT_TEXT   directives (section switches, .globl/.type/.size, aliases,
- *             top-level asm), run by the TU's assembler (as_snippet);
+ *             top-level asm), run by the TU's assembler (as_snippet_assemble);
  *   IT_CODE   a function's records (prologue and epilogue included) and its
  *             inline asm text, encoded here with a64.h straight into the
- *             current frag; asm statements go through as_snippet in place;
+ *             current frag; asm statements go through as_snippet_assemble in place;
  *   IT_X64    x86 records, using the assembler encoder and relaxation;
  *             unhandled records, prologues, CFI and DWARF remain IT_TEXT.
  *   IT_DATA   an object's bytes and relocations; IT_LABEL + IT_BYTES: a
@@ -474,7 +474,7 @@ typedef struct osize { uint32_t sym, pad; uint64_t size; } osize;
 /* replay state: one per TU */
 typedef struct rctx {
 	cc *c;
-	As *as;
+	as_context *as;
 	ElfObj *o;
 	uint32_t *symc, *strc, *lblc;	/* ref -> ElfSym (0: not yet) */
 	uint32_t *loff;			/* direct labels: word offset in the function */
@@ -923,6 +923,9 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t);
 VPRIV val gen(ecx *e, uint32_t n);
 /* cond.c */
 VPRIV int cond_fold(ecx *e, uint32_t n);
+/* known-bits.c */
+VPRIV bool imm_fits(int ch, i128 v);
+VPRIV void kbits(ecx *e, uint32_t n, uint64_t *k, uint64_t *v);
 VPRIV void gen_cond(ecx *e, uint32_t n, bool jump_if, uint32_t l);
 /* stmt.c */
 VPRIV void gen_init_local(ecx *e, const lval *dst, qty ty, uint32_t init);
@@ -940,6 +943,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n);
 /* func.c */
 VPRIV void out_chunk(ecx *e, uint64_t key, size_t start);
 VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align);
+VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);
 VPRIV void emit_function(ecx *e, uint32_t s);
 /* data.c */
 VPRIV void emit_object(ecx *e, uint32_t s);

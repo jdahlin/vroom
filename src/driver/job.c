@@ -78,13 +78,13 @@ static void driver_assemble_source(struct driver_job *job, const ppd_env *env)
 			job->status = 1;
 			return;
 		}
-		as_set_dir(tl_as, env->cwd);
+		as_include_directory_set(tl_as, env->cwd);
 		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);
 		size_t tn = (size_t)got;
 
 		if (job->darwin) {
 			/* Apple's dialect, then the Mach-O writer */
-			char *d = as_darwin_text(t, tn, &tn);
+			char *d = macho_dialect_translate(t, tn, &tn);
 
 			free(t);
 			t = d;
@@ -210,7 +210,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 		}
 		{
 			unsigned long long t1 = nsnow();
-			vperf v1 = vperf_now();
+			vperf v1 = vperformance_now();
 
 			job->status = cc_run(p, &co) || pp_errors(p) ? 1 : 0;
 			ppd_ns_cc += nsnow() - t1;
@@ -276,13 +276,13 @@ static void job_preprocess(struct driver_job *job, pp *p, const ppd_env *env)
 	} else if (job->objmode) {
 		const char *msg;
 
-		as_set_dir(tl_as, env->cwd);
+		as_include_directory_set(tl_as, env->cwd);
 		elf_set_machine(tl_obj, job->x86 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		char *dt = NULL;
 		size_t dn = o.n;
 
 		if (job->darwin)
-			dt = as_darwin_text(o.p, o.n, &dn);
+			dt = macho_dialect_translate(o.p, o.n, &dn);
 		if (as_run(tl_as, tl_obj, dt ? dt : o.p, dn, job->main_file, &msg)) {
 			dprintf(job->errfd, "vcc: error: %s\n", msg);
 			job->status = 1;
@@ -314,7 +314,7 @@ int ppd_run(int argc, char **argv, const ppd_env *env)
 
 static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_env *env)
 {
-	vmreg *br = bufr = vmpool_take(&bufpool);
+	vjob_region *br = bufr = vjob_region_pool_take(&bufpool);
 	struct driver_job jobstore = {
 		.errfd = env->errfd, .hosted = 1, .raw_asm = -1, .march_lse = -1, .mcpu_lse = -1, .pie = -1, .cfi = -1,
 		.x86_cpu = "x86-64", .omit_frame_pointer = -1, .uchar = -1, .tri = -1, .gnu89_inline = -1,
@@ -430,7 +430,7 @@ out:
 	bfree(&job->cmdl);
 	bfree(&job->incl);
 	bfree(&job->imac);
-	vmpool_give(&bufpool, br);
+	vjob_region_pool_give(&bufpool, br);
 	bufr = NULL;
 	obj_release();
 	return job->status;

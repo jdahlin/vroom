@@ -3,133 +3,6 @@
 
 /* ---------------- functions ---------------- */
 
-VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
-{
-	emitter *E = e->E;
-
-	pthread_mutex_lock(&E->cmu);
-	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
-					  (uint32_t)((e->nrlog - e->rlog0) / 2) };
-	pthread_mutex_unlock(&E->cmu);
-}
-
-VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
-{
-	cc *c = e->c;
-	const sym *y = &c->syms[s];
-	const attrs *a = sym_attrs(c, s);
-	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
-	size_t h = it_open(e, IT_TEXT);
-
-	if (a->section) {
-		const char *sn = c->strs[a->section - 1].s;
-		bool bss = !strncmp(sn, ".bss", 4) || !strncmp(sn, ".tbss", 5);
-
-		tb_s(b, "\t.section\t\"");
-		tb_s(b, sn);
-		tb_s(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
-			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
-	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
-		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
-		static const struct { const char *def, *base, *rest; } m[] = {
-			{ "\t.text\n", ".text.", ",\"ax\",@progbits\n" },
-			{ "\t.data\n", ".data.", ",\"aw\",@progbits\n" },
-			{ "\t.bss\n", ".bss.", ",\"aw\",@nobits\n" },
-		};
-		const char *base = NULL, *rest = NULL;
-		char nb[16];
-
-		for (size_t k = 0; k < sizeof m / sizeof *m && !base; k++)
-			if (!strcmp(defsec, m[k].def))
-				base = m[k].base, rest = m[k].rest;
-		if (!base && !strncmp(defsec, "\t.section\t.", 10)) {
-			/* "\t.section\t.rodata,..." -> ".rodata." and ",..." */
-			const char *cm = strchr(defsec + 10, ',');
-			size_t n = cm ? (size_t)(cm - (defsec + 10)) : 0;
-
-			if (cm && n + 2 <= sizeof nb) {
-				memcpy(nb, defsec + 10, n);
-				nb[n] = '.', nb[n + 1] = 0;
-				base = nb, rest = cm;
-			}
-		}
-		if (base) {
-			tb_s(b, "\t.section\t");
-			tb_s(b, base);
-			sym_name(c, b, s);
-			tb_s(b, rest);
-		} else {
-			tb_s(b, defsec);
-		}
-	} else {
-		tb_s(b, defsec);
-	}
-	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m)) {
-		symhdr *sh;
-
-		it_close(e, h);
-		h = it_open(e, IT_SYMHDR);
-		sh = it_room(e, sizeof *sh);
-		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
-		if (global) {
-			sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
-			if (a->visibility) {
-				const char *v = c->strs[a->visibility - 1].s;
-
-				sh->vis = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
-			}
-		}
-		it_close(e, h);
-		return;
-	}
-	if (global) {
-		tb_s(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
-		sym_name(c, b, s);
-		tb_c(b, '\n');
-		if (a->visibility) {
-			const char *v = c->strs[a->visibility - 1].s;
-
-			if (!strcmp(v, "hidden") || !strcmp(v, "protected")) {
-				tb_s(b, !strcmp(v, "hidden") ? "\t.hidden\t" : "\t.protected\t");
-				sym_name(c, b, s);
-				tb_c(b, '\n');
-			}
-		}
-	}
-	tb_s(b, "\t.p2align\t");
-	tb_u(b, (uint64_t)__builtin_ctz(align ? align : 1));
-	tb_s(b, fn ? "\n\t.type\t" : "\n\t.type\t");
-	sym_name(c, b, s);
-	tb_s(b, fn ? ",@function\n" : ",@object\n");
-	if (fn && X86(c) && c->o->pfe_m) {
-		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
-		tb_s(b, ".Lpfe");
-		tb_u(b, s);
-		tb_s(b, ":\n");
-		for (int k = 0; k < c->o->pfe_m; k++)
-			tb_s(b, "\tnop\n");
-	}
-	sym_name(c, b, s);
-	tb_s(b, ":\n");
-	it_close(e, h);
-}
-
-/* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
-VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
-{
-	const attrs *a = sym_attrs(c, s);
-
-	tb_s(b, fini ? "\t.section\t.fini_array" : "\t.section\t.init_array");
-	if (a && a->prio) {
-		tb_c(b, '.');
-		tb_u(b, a->prio);
-	}
-	tb_s(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
-	tb_s(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
-	sym_name(c, b, s);
-	tb_c(b, '\n');
-}
-
 /*
  * VIR's functions (e->vlow) get two more frame shapes: a function that calls nothing and
  * does not touch x29/x30 but has slots or callee-saved registers keeps no frame record
@@ -317,7 +190,7 @@ static void expand_tables(ecx *e, uint32_t fid)
 				int len = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x", fid, target, fid, j->tab);
 
 				o[6 + n] = (ins){ .op = I_RAW, .off = (int32_t)e->raw.n, .ref = (uint32_t)len };
-				tb_put(&e->raw, b, (size_t)len);
+				vtext_append(&e->raw, b, (size_t)len);
 			} else {
 				o[6 + n] = (ins){ .op = I_JTE, .off = (int32_t)target, .ref = j->tab };
 			}
@@ -630,13 +503,13 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 
 		/* clang: the line of the body's '{', column 0 */
 		if (dbg_where(e, c->syms[s].body ? N(c->syms[s].body)->loc : c->syms[s].loc, &f, &l, &cl))
-			tb_f(b, "\t.loc\t%u %u 0\n", f, l);
+			vtext_format_append(b, "\t.loc\t%u %u 0\n", f, l);
 	}
 	/* prologue; with unwind tables the CFA is x29 + 16 once the frame is set up (as clang) */
 	bool cfi = e->E->o->cfi && !DARWIN(c);
 
 	if (cfi)
-		tb_s(b, "\t.cfi_startproc\n");
+		vtext_string_append(b, "\t.cfi_startproc\n");
 	/* text has no relaxation (the object writer's r_relax): in a function that
 	 * may pass b.cond/cbz's +-1 MB, every one is the inverted branch over a b */
 	bool far = e->nin > (1u << 17);
@@ -650,8 +523,8 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 
 				print_ins(c, b, &i, s, e->raw.p);
 				if (cfi)
-					tb_f(b, "\t.cfi_def_cfa_offset %d\n", (int)FK.fsz);
-			} else if (tb_s(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
+					vtext_format_append(b, "\t.cfi_def_cfa_offset %d\n", (int)FK.fsz);
+			} else if (vtext_string_append(b, cfi ? "\tstp\tx29, x30, [sp, #-16]!\n\t.cfi_def_cfa_offset 16\n\tmov\tx29, sp\n"
 					      "\t.cfi_def_cfa w29, 16\n\t.cfi_offset w30, -8\n\t.cfi_offset w29, -16\n" :
 					      "\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n"), e->falign > 16) {
 				ins i = { .op = I_SUBI, .sz = 1, .rd = R_X16, .rn = SP, .imm = total - 16 };
@@ -665,14 +538,14 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 				print_ins(c, b, &i, s, e->raw.p);
 			}
 			for (int j = 0; j + 1 < ncs; j += 2)
-				tb_f(b, "\tstp\tx%d, x%d, [%s, #%d]\n", cs[j], cs[j + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, j));
+				vtext_format_append(b, "\tstp\tx%d, x%d, [%s, #%d]\n", cs[j], cs[j + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, j));
 			if (ncs & 1)
-				tb_f(b, "\tstr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
+				vtext_format_append(b, "\tstr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
 			if (cfi)
 				for (int j = 0; j < ncs; j++)
-					tb_f(b, "\t.cfi_offset w%d, %d\n", cs[j], -csave + 8 * j - (FK.sleaf ? 0 : 16));
+					vtext_format_append(b, "\t.cfi_offset w%d, %d\n", cs[j], -csave + 8 * j - (FK.sleaf ? 0 : 16));
 			if (bp)
-				tb_s(b, "\tmov\tx28, sp\n");
+				vtext_string_append(b, "\tmov\tx28, sp\n");
 		}
 		if (k == e->nin)
 			break;
@@ -682,7 +555,7 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 
 		for (; dj < e->ndl && e->dl[dj].k == k; dj++)
 			if (dj + 1 == e->ndl || e->dl[dj + 1].k != k)	/* the last of several at one place */
-				tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 		if (far && ((i->op == I_BC && i->cond < 14) || i->op == I_CBZ || i->op == I_CBNZ)) {
 			ins n = *i;
@@ -700,23 +573,23 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 				while (l && b->p[l - 1] != '\t' && b->p[l - 1] != ' ')
 					l--;
 				b->n = l;
-				tb_s(b, "1f\n\tb\t");
+				vtext_string_append(b, "1f\n\tb\t");
 				p_lbl(b, s, i->label);
-				tb_s(b, "\n1:\n");
+				vtext_string_append(b, "\n1:\n");
 			}
 			continue;
 		}
 		if (i->op == I_NOP && cfi && i->cond >= NOP_CFI_REMEMBER) {
 			if (i->cond == NOP_CFI_REMEMBER) {
-				tb_s(b, "\t.cfi_remember_state\n");
+				vtext_string_append(b, "\t.cfi_remember_state\n");
 			} else if (i->cond == NOP_CFI_RESTORE) {
-				tb_s(b, "\t.cfi_restore_state\n");
+				vtext_string_append(b, "\t.cfi_restore_state\n");
 			} else {
 				for (int k = 0; k < ncs; k++)
-					tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+					vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k]);
 				if (!leaf && !FK.sleaf)
-					tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
-				tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
+					vtext_string_append(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+				vtext_string_append(b, "\t.cfi_def_cfa wsp, 0\n");
 			}
 			continue;
 		}
@@ -724,13 +597,13 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 	}
 	for (; dj < e->ndl; dj++)
 		if (dj + 1 == e->ndl)
-			tb_f(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
+			vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 			     e->dl[dj].file, e->dl[dj].line, e->dl[dj].col);
 	/* epilogue */
 	for (int k = 0; k + 1 < ncs; k += 2)
-		tb_f(b, "\tldp\tx%d, x%d, [%s, #%d]\n", cs[k], cs[k + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, k));
+		vtext_format_append(b, "\tldp\tx%d, x%d, [%s, #%d]\n", cs[k], cs[k + 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, k));
 	if (ncs & 1)
-		tb_f(b, "\tldr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
+		vtext_format_append(b, "\tldr\tx%d, [%s, #%d]\n", cs[ncs - 1], FK.sleaf ? "sp" : "x29", (int)cs_off(csave, ncs - 1));
 	uint32_t tail = a64_tail_ref(e);
 
 	if (leaf)
@@ -740,32 +613,32 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 
 		print_ins(c, b, &i, s, e->raw.p);
 	} else
-		tb_s(b, FK.nomov ? "\tldp\tx29, x30, [sp], #16\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
+		vtext_string_append(b, FK.nomov ? "\tldp\tx29, x30, [sp], #16\n" : "\tmov\tsp, x29\n\tldp\tx29, x30, [sp], #16\n");
 	if (tail) {
 		if (cfi) {
 			for (int k = 0; k < ncs; k++)
-				tb_f(b, "\t.cfi_restore w%d\n", cs[k]);
+				vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k]);
 			if (!leaf && !FK.sleaf)
-				tb_s(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
-			tb_s(b, "\t.cfi_def_cfa wsp, 0\n");
+				vtext_string_append(b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
+			vtext_string_append(b, "\t.cfi_def_cfa wsp, 0\n");
 		}
 		ins i = { .op = I_TAIL, .cond = 1, .ref = tail };
 
 		print_ins(c, b, &i, s, e->raw.p);
 	} else {
-		tb_s(b, "\tret\n");
+		vtext_string_append(b, "\tret\n");
 	}
 	if (cfi)
-		tb_s(b, "\t.cfi_endproc\n");
-	tb_s(b, ".Lfe");
-	tb_u(b, s);
-	tb_s(b, ":\n\t.size\t");
+		vtext_string_append(b, "\t.cfi_endproc\n");
+	vtext_string_append(b, ".Lfe");
+	vtext_unsigned_append(b, s);
+	vtext_string_append(b, ":\n\t.size\t");
 	sym_name(c, b, s);
-	tb_s(b, ", .Lfe");
-	tb_u(b, s);
-	tb_c(b, '-');
+	vtext_string_append(b, ", .Lfe");
+	vtext_unsigned_append(b, s);
+	vtext_char_append(b, '-');
 	sym_name(c, b, s);
-	tb_c(b, '\n');
+	vtext_char_append(b, '\n');
 	if (a->constructor) {
 		ctor_entry(c, b, s, false);
 	}

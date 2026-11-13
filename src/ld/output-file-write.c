@@ -27,5 +27,5 @@ static void hash_chunk(void *arg, size_t i)
 {
 	uint8_t *hashes = arg;
 	uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
-	ld_blake3(out + b, n, hashes + i * 20, 20);
+	vdigest_blake3(out + b, n, hashes + i * 20, 20);
 }

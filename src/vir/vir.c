@@ -145,6 +145,7 @@ static uint32_t ins_push(vir_fn *f, uint32_t op, uint32_t ty, uint32_t fl, uint3
 	p->c = c;
 	if (open_block(f))
 		f->blk[f->nblk - 1].n++;
+	vir_analyses_invalidate(f);
 	return f->nins++;
 }
 
@@ -187,6 +188,7 @@ uint32_t vir_blk_add(vir_fn *f, uint16_t fl)
 	b->first = f->nins;
 	b->fl = fl;
 	b->idom = VIR_NOBLK;
+	vir_analyses_invalidate(f);
 	return f->nblk++;
 }
 
@@ -399,6 +401,8 @@ bool vir_cfg(vir_fn *f)
 	vir_ctx *x = vir_ctx_get();
 	uint32_t *off = x->bs[0], *cnt = x->bs[1], *succ = x->sc, ne, n = f->nblk;
 
+	if (f->valid & VIR_VALID_CFG)
+		return true;
 	if (x->cfg_end == f->nextra && x->cfg_end > x->cfg_mark)
 		f->nextra = x->cfg_mark;	/* the lists of the last call: replaced */
 	x->cfg_mark = x->cfg_end = f->nextra;
@@ -423,6 +427,7 @@ bool vir_cfg(vir_fn *f)
 		}
 	f->nextra += ne;
 	x->cfg_end = f->nextra;
+	f->valid |= VIR_VALID_CFG;
 	return true;
 }
 
@@ -474,11 +479,16 @@ bool vir_dom(vir_fn *f)
 	vir_ctx *x = vir_ctx_get();
 	uint32_t n = f->nblk, np, *rpo = x->bs[2], *stk = x->bs[3], *rn = x->bs[4], *id = x->bs[5];
 	uint32_t *off = x->bs[0], *succ = x->sc, *sz = x->bs[1], *nx = x->bs[3];
-	bool ch = true;
+	bool ch = true, fresh = !(f->valid & VIR_VALID_CFG);
 
+	if (f->valid & VIR_VALID_DOM)
+		return vir_cfg(f);	/* vir_dom has always left the predecessor lists behind; canon's renumbering did not */
 	if (!n || !vir_cfg(f))
 		return false;
-	/* vir_cfg left the successors in off/succ; stk and nx share bs[3] (the DFS is over) */
+	/* the successors must be in off/succ: vir_cfg left them unless it returned a cached result;
+	 * stk and nx share bs[3] (the DFS is over) */
+	if (!fresh && !vir_succ_csr(f, off, succ))
+		return false;
 	np = rpo_order(f, off, succ, rpo, stk, rn);
 	for (uint32_t b = 0; b < n; b++)
 		id[b] = VIR_NOBLK;
@@ -538,6 +548,7 @@ bool vir_dom(vir_fn *f)
 		nx[b] = f->blk[b].pre + 1;
 		f->blk[b].post = f->blk[b].pre + sz[b] - 1;
 	}
+	f->valid |= VIR_VALID_DOM;
 	return true;
 }
 
@@ -590,6 +601,7 @@ bool vir_canon(vir_fn *f)
 	uint32_t nc = 1, k;
 	bool keep = true;
 
+	vir_analyses_invalidate(f);	/* the order is read from this run's scratch (bs[2]), not from a cached result */
 	if (!n || !f->nins || !vir_dom(f))
 		return false;
 	rpo = x->bs[2];
@@ -681,6 +693,7 @@ bool vir_canon(vir_fn *f)
 			uint32_t first = k;
 
 			*o = *kb;
+			o->idom = nb[kb->idom];	/* the tree over the reachable blocks only changes names; pre and post stay */
 			o->first = first;
 			o->nparam = 0;
 			o->npred = o->pred = 0;
@@ -735,7 +748,8 @@ bool vir_canon(vir_fn *f)
 	vir_ctab_rebuild(f);
 	f->nextra = x->cfg_mark;	/* the old predecessor lists */
 	x->cfg_end = x->cfg_mark;
-	return vir_dom(f);
+	f->valid = VIR_VALID_DOM;	/* renumbered above; the predecessor lists are built when asked for */
+	return true;
 }
 
 /* ---------------- units ---------------- */

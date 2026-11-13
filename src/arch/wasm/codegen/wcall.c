@@ -1,6 +1,6 @@
 /* vcc code generator for WebAssembly: calls, variadic arguments, builtins (wimpl.h) */
 #include "wimpl.h"
-#include "common/f128.h"
+#include "common/softfloat.h"
 
 /* the direct callee of a call: its reference (0: an indirect call) */
 static uint32_t wcallee(cc *c, uint32_t fn)
@@ -293,7 +293,7 @@ static int wlongjmp(ecx *e, uint32_t n)
 	wexpr(e, a1, true);
 	if (wty(c, N(a1)->ty) != WT_I32)
 		wconv(e, N(a1)->ty, prim(TY_INT));
-	tb_s(&e->w->decl, WASM32(c) ? "__wasm_longjmp\t(i32, i32) -> ()\n" : "__wasm_longjmp\t(i64, i32) -> ()\n");
+	vtext_string_append(&e->w->decl, WASM32(c) ? "__wasm_longjmp\t(i32, i32) -> ()\n" : "__wasm_longjmp\t(i64, i32) -> ()\n");
 	wi(e, "call\t__wasm_longjmp");
 	wflow_reject(e);
 	wi(e, "unreachable");
@@ -578,40 +578,40 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
 	/* the signature as called */
 	sig->n = 0;
 	if (lib) {
-		tb_c(sig, '(');
+		vtext_char_append(sig, '(');
 		for (uint32_t i = 0; i < lg.np; i++) {
 			if (i)
-				tb_s(sig, ", ");
-			tb_s(sig, wt_name[lg.p[i]]);
+				vtext_string_append(sig, ", ");
+			vtext_string_append(sig, wt_name[lg.p[i]]);
 		}
 		if (lg.va) {
 			if (lg.np)
-				tb_s(sig, ", ");
-			tb_s(sig, wt_name[WPT(c)]);
+				vtext_string_append(sig, ", ");
+			vtext_string_append(sig, wt_name[WPT(c)]);
 		}
-		tb_s(sig, ") -> (");
-		tb_s(sig, wt_name[lg.r]);
-		tb_c(sig, ')');
+		vtext_string_append(sig, ") -> (");
+		vtext_string_append(sig, wt_name[lg.r]);
+		vtext_char_append(sig, ')');
 	} else {
 		wsig(e, sig, ft, noproto && !def ? n : 0, def, NULL);
 	}
-	tb_c(sig, 0);
+	vtext_char_append(sig, 0);
 	sp = sig->p;
 	if (ref) {
 		tbuf *b = &e->w->b;
 
 		claim_ref(e, ref);
 		wdecl(e, ref, ft, noproto || lib ? sp : NULL);
-		tb_s(b, "\tcall\t");
+		vtext_string_append(b, "\tcall\t");
 		wfname(c, b, ref);
-		tb_c(b, '\n');
+		vtext_char_append(b, '\n');
 	} else {
 		tbuf *b = &e->w->b;
 
 		wexpr(e, x->a, true);
-		tb_s(b, "\tcall_indirect\t__indirect_function_table, ");
-		tb_s(b, sp);
-		tb_c(b, '\n');
+		vtext_string_append(b, "\tcall_indirect\t__indirect_function_table, ");
+		vtext_string_append(b, sp);
+		vtext_char_append(b, '\n');
 	}
 	if (r.k == WA_IND) {
 		if (!want)
@@ -1365,7 +1365,7 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 		if (cv.kind == CV_FLT && k == WT_MEM) {
 			/* Binary128 builtins use the same address-valued representation
 			   as N_FNUM, including infinities and exact NaN payloads. */
-			u128 q = cv.ld ? cv.q : q_of_d(cv.f);
+			u128 q = cv.ld ? cv.q : vsoftfloat_of_double(cv.f);
 			uint64_t sl = wslot(e, 16, 16);
 			wslot_addr(e, sl);
 			wconst(e, WT_I64, (int64_t)(uint64_t)q);
@@ -1376,13 +1376,13 @@ VPRIV int wbuiltin(ecx *e, uint32_t n, bool want)
 			wslot_addr(e, sl);
 			return WPT(c);
 		}
-		if (cv.kind == CV_FLT && cv.ld && q_isnan(cv.q) && (k == WT_F32 || k == WT_F64)) {
+		if (cv.kind == CV_FLT && cv.ld && vsoftfloat_is_nan(cv.q) && (k == WT_F32 || k == WT_F64)) {
 			/* Host floating conversions can quiet a signaling NaN. */
 			wconst(e, k == WT_F32 ? WT_I32 : WT_I64,
-			       (int64_t)q_nan_storage(cv.q, k == WT_F32 ? 23 : 52, k == WT_F32 ? 8 : 11));
+			       (int64_t)vsoftfloat_nan_storage(cv.q, k == WT_F32 ? 23 : 52, k == WT_F32 ? 8 : 11));
 			wi(e, k == WT_F32 ? "f32.reinterpret_i32" : "f64.reinterpret_i64");
 		} else if (k == WT_F32 || k == WT_F64)
-			wfconst(e, k, cv.kind == CV_FLT ? cv.ld ? q_to_d(cv.q) : cv.f : (double)cv.i);
+			wfconst(e, k, cv.kind == CV_FLT ? cv.ld ? vsoftfloat_to_double(cv.q) : cv.f : (double)cv.i);
 		else if (k == WT_I32 || k == WT_I64)
 			wconst(e, k, (int64_t)em_trunc_to(c, cv.i, x->ty));
 		else if (k == WT_NONE)
