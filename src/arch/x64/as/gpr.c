@@ -400,10 +400,11 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
 	/* ---- movz/movs: movzbl, movsbq, movslq ... ---- */
-	if ((!strncmp(mn, "movz", 4) || !strncmp(mn, "movs", 4)) && nops == 2 && strlen(mn) == 6) {
-		int from = sfxsize(mn[4]), to = sfxsize(mn[5]), sx = mn[3] == 's';
+	if ((!strncmp(mn, "movz", 4) || !strncmp(mn, "movs", 4)) && nops == 2 &&
+	    o[1].kind == XK_REG && o[1].cls == XR_GPR && (strlen(mn) == 5 || strlen(mn) == 6)) {
+		int from = sfxsize(mn[4]), to = mn[5] ? sfxsize(mn[5]) : o[1].size, sx = mn[3] == 's';
 
-		if (from && to) {
+		if (from && from < to && to == o[1].size && (from < 4 || (from == 4 && sx))) {
 			if (o[0].kind == XK_EXPR)
 				o[0].kind = XK_MEM;
 			if (from == 4 && sx)

@@ -1341,3 +1341,12 @@ x86 direct-object comparisons (five existing input skips), **63/63** assembler
 object fixtures, and all six runtime-dispatch combinations on the host and
 four emulated CPU configurations. The one-test difference from the original
 checkout reflects the unrelated VIR regression kept out of this PR.
+
+### X6 (2026-11-13) — FFmpeg 8.1.3 på Linux x86-64
+
+`CLANG=clang-23 bench/ffmpeg/linux-x86.sh` bygger den oförändrade
+utgåvan i två träd och kör FATE utan externa testdata. I det första
+bygger NASM de fristående assemblerfilerna och vpp hanterar inline asm.
+Det andra använder `--disable-asm` för att köra DSP-kodens C-varianter.
+Make använder vpp för CC och HOSTCC, även för testverktygen. Clang kör
+konfigurationsproberna och anropar systemlänkaren.

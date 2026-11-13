@@ -396,6 +396,16 @@ static void wk_decl(ecx *e, const node *x)
 		}
 	}
 	e->wk->kgen[s] = 0;
+	/* A read of a never-written automatic integer has an indeterminate
+	   value. Choose zero without allocating or reading a stack slot. */
+	if (e->E->o->opt && !x->b && is_integer(c, y->ty) && !wk_mem(e, y->ty) &&
+	    !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE | SA_CMULTI)) && !e->E->lnoreg[s] &&
+	    !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) && !(T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+	    !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && y->sc != AST_STORAGE_REGISTER && !sym_attrs(c, s)->cleanup) {
+		e->wk->kgen[s] = e->wk->gen;
+		e->wk->kval[s] = vconst(0);
+		return;
+	}
 	if (e->E->o->opt && x->b && !side_effects(c, x->b) && !sym_attrs(c, s)->cleanup) {
 		/* A side-effect-free constant initializer for a local never written. */
 		cc_value cv;
