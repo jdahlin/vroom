@@ -372,9 +372,30 @@ own.
   resolve, is a `static_assert` on sizeof and alignof compiled by clang++
   with the TU: 20 242 over the 71 TUs, all agree.  C unchanged
   (`vcc-same.py` as in the first step; vcc-x86 320/320; vcc-diag 229/229).
-- X1 next: constant expressions (array bounds such as `buf[len]`, enumerator
-  values), base classes and virtual functions in the layout, then
-  instantiation of class templates (X4), which is where most of json's
-  classes are.  Code: the shared builders move to a module of their own
-  taking `struct ast *` (cxx/ is compiled in the cc module for now).  X5-X7:
-  not started.
+- X4, first form (2026-11-14): class and alias templates are instantiated
+  (`src/frontend/cxx/instantiate.c`).  The token array is immutable (`>>`,
+  `>=`, `>>=` are split when read; the expression parser joins adjacent
+  pieces), so an instance re-parses its template's tokens: a scope binds
+  each parameter to its argument and the class head and body (an alias's
+  type-id) are parsed again with no template around; function bodies are
+  skipped.  Lazy, as C++ is: naming `X<args>` makes an incomplete record and
+  a cache entry; the body is parsed when the class must be complete (a
+  member or variable by value, `X<args>::name`).  Eager instantiation ran
+  valarray's expression templates into the depth limit thousands of times.
+  The cache, keyed by the template and its complete argument list, is the
+  first form of X5's: explicit specializations are entered there (as written
+  and with defaults completed), and default arguments may come from an
+  earlier declaration of the template.  Simple constants: an integer
+  literal, `true`/`false`, a value template argument, a const/constexpr
+  integer initialized with one (array bounds, value arguments).  Answered
+  "unknown" instead of guessed: templates with partial specializations
+  (matching is not written), packs, template template parameters, other
+  constant expressions.  `bench/cxx-layout.py`: 26 014 layouts over the 71
+  TUs, all agree with clang (instances spelled `ns::X<int, ns::A<int>>`);
+  `bench/cxx-parse-tests.py` also has clang check its cases' layouts; 71/71
+  parse under ASan.  unit-32bit: 59 instances, 433 of 1 876 classes laid out.
+- Next: base classes (124 classes in unit-32bit skipped for them) and
+  partial specialization matching (most of libc++'s traits), then packs;
+  vptr layouts; enumerator values.  Code: the shared builders move to a
+  module of their own taking `struct ast *` (cxx/ is compiled in the cc
+  module for now).  X5-X7: not started.
