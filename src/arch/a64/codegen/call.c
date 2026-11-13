@@ -50,6 +50,24 @@ static void park(ecx *e, carg *a)
 	}
 }
 
+/* a parked argument back in a register (aggregates: their copy's address) */
+static void unpark(ecx *e, carg *a)
+{
+	if (a->slot == 1)
+		return;
+	if (is_agg(e->c, a->t)) {
+		int r = treg(e);
+
+		opi(e, I_ADDI, 1, r, FRAME, a->slot);
+		a->v = vreg(r);
+	} else {
+		lval l = { .k = L_FRAME, .off = a->slot, .align = 8 };
+
+		a->v = load(e, &l, a->t);
+	}
+	a->slot = 1;
+}
+
 /* put 8-byte word k of argument a into register rd */
 static void arg_word(ecx *e, const carg *a, int k, int rd)
 {
@@ -502,19 +520,8 @@ VPRIV val inline_call(ecx *e, uint32_t s, carg *args, int n, uint32_t call)
 		bind *b = binding(e, p);
 		/* Reload only this parameter: restoring all parked values together
 		 * exhausts temporaries for wide or numerous inline arguments. */
-		if (i < n && args[i].slot != 1) {	/* parked: back in a register */
-			if (is_agg(c, args[i].t)) {
-				int r = treg(e);
-
-				opi(e, I_ADDI, 1, r, FRAME, args[i].slot);
-				args[i].v = vreg(r);
-			} else {
-				lval l = { .k = L_FRAME, .off = args[i].slot, .align = 8 };
-
-				args[i].v = load(e, &l, args[i].t);
-			}
-			args[i].slot = 1;
-		}
+		if (i < n)
+			unpark(e, &args[i]);
 		val v = i < n ? args[i].v : vconst(0);
 
 		if (const_var(e, p, &v) && !is_agg(c, ps->ty) &&
@@ -664,6 +671,10 @@ static bool mem_inline(ecx *e, int kind, carg *args, val *res)
 	n = (uint64_t)args[2].v.i;
 	if (n > 128 || (kind == 2 && n & (n - 1)) || (kind == 2 && n > 8) || (kind == 3 && args[1].v.k != V_CONST))
 		return false;	/* memmove: one load before one store (overlap) */
+	/* parked while many registers were live: their v is a freed register */
+	unpark(e, &args[0]);
+	if (kind < 3)
+		unpark(e, &args[1]);
 	d = toreg(e, &args[0].v);
 	if (kind < 3) {
 		int sr = toreg(e, &args[1].v);
@@ -761,6 +772,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 	if (!s && RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && na == 1 &&
 	    is_ld(c, x->ty) && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
 		/* Clear binary128's sign without touching a signaling NaN payload. */
+		unpark(e, &args[0]);
 		r = args[0].v;
 		if (r.k == V_CONST)
 			r.i = (i128)((u128)r.i & ~((u128)1 << 127));
