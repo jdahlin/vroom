@@ -271,6 +271,7 @@ bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and swe
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
+bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (VCC_VIR_PASSES=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)

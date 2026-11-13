@@ -1,4 +1,4 @@
-/* The builder's passes in order, and the emission of the function. */
+/* The builder's pipeline: the pass table run in order (pass-table.c), sealing, the dead-slot scan and the emission into VIR. */
 #define WK_PREFIX vw_
 #define LO_PREFIX vw_
 #include "../walk/walk.h"
@@ -6,9 +6,10 @@
 #include "preir.h"
 #include "simplify.h"
 #include "vectorize.h"
+#include "pass-table.h"
 
 /* seal: every placeholder gets its operands, then trivial ones go */
-static void vw_seal(ecx *e)
+VPRIV void vw_seal(ecx *e)
 {
 	vwst *V = e->vw;
 
@@ -26,7 +27,7 @@ static void vw_seal(ecx *e)
 }
 
 /* stores to a slot that is not exposed and that nothing reads are dead */
-static void vw_slot_uses(ecx *e)
+VPRIV void vw_slot_uses(ecx *e)
 {
 	vwst *V = e->vw;
 
@@ -39,7 +40,7 @@ static void vw_slot_uses(ecx *e)
 }
 
 /* emission */
-static bool vw_to_vir(ecx *e)
+VPRIV bool vw_to_vir(ecx *e)
 {
 	vwst *V = e->vw;
 	cc *c = e->c;
@@ -89,37 +90,29 @@ static bool vw_to_vir(ecx *e)
 	return true;
 }
 
+/* the passes of the table (pass-table.c) in order; with VCC_VIR_PASSES set, through the instrumented
+   step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
 VPRIV bool vw_emit(ecx *e)
 {
-	vwst *V = e->vw;
+	const vir_pass_switch *w = vir_pass_switch_get();
+	uint32_t n, valid = 0;
+	const vir_pass *t = vir_pass_list(&n);
+	bool last = false;	/* what the last row without PASS_IF_PREVIOUS_CHANGED returned */
 
-	vw_thread(e);
-	vw_rpo(e);
-	vw_preds(e);
-	vw_seal(e);
-	vw_promote(e);
-	while (vw_trivial(e))
-		;
-	vw_deadparams(e);
-	vw_simplify(e);
-	/* simplifying can free a slot's address (an inlined call's pointer argument parked as an
-	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
-	if (vw_promote(e)) {
-		while (vw_trivial(e))
-			;
-		vw_deadparams(e);
-		vw_simplify(e);
+	for (uint32_t i = 0; i < n; i++) {
+		const vir_pass *p = &t[i];
+		bool changed;
+
+		if ((p->flags & PASS_IF_PREVIOUS_CHANGED) && !last)
+			continue;
+		if (!w->active)
+			changed = vir_pass_step(e, p);
+		else if (w->skip >> i & 1)
+			changed = false;
+		else
+			changed = vir_pass_step_instrumented(e, i, &valid);
+		if (!(p->flags & PASS_IF_PREVIOUS_CHANGED))
+			last = changed;
 	}
-	if (vw_condmerge(e))
-		while (vw_trivial(e))
-			;
-	if (vw_ifconv(e))
-		while (vw_trivial(e))
-			;
-	vw_vectorize(e);
-	vw_split(e);
-	vw_slot_uses(e);
-	if (!vw_to_vir(e))
-		return false;
-	return vir_canon(&V->f);
+	return true;
 }
