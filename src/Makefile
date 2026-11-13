@@ -94,7 +94,7 @@ as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
-common_SRC = common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
+common_SRC = common/archive-reader.c common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
 port_SRC   = port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_ASM = $(if $(filter x86_64,$(HOST_ARCH)),frontend/lex/x86-simd.S)
