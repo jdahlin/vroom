@@ -1,4 +1,4 @@
-/* The loop vectorizer (VIR at -O2, emit/vir/vec.inc): every loop below is run for the trip
+/* The loop vectorizer (VIR at -O2, codegen/vir/vectorize.c): every loop below is run for the trip
    counts 0-9 and 37, from offsets that leave room on both sides, and what it leaves in the
    arrays (and returns) is printed; clang's scalar result is the reference.  The cases are the
    ones a vectorizer gets wrong: a remainder of 0-3, a count below 4, a loop that runs down, two

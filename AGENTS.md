@@ -36,7 +36,7 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `src/codegen/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa.c`, `lower-*.c`, `promote.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/codegen/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop

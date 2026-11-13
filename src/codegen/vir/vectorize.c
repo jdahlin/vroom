@@ -1,5 +1,5 @@
 /*
- * The loop vectorizer (RESEARCH-vectors.md 6; SPEC-vir.md 7.5), #included by build.c: it works
+ * The loop vectorizer (RESEARCH-vectors.md 6; SPEC-vir.md 7.5), codegen/vir/vectorize.c; it works
  * on the pre-IR, after if-conversion and before the edges are split, where blocks and
  * instructions can still be added.
  *
@@ -34,47 +34,13 @@
  * need it, lanes do not.
  */
 
-enum { VK_NONE, VK_INV, VK_LIN, VK_VEC, VK_MASK, VK_RED, VK_REDUPD, VK_BAD,
-       VK_W32, VK_SCALAR, VK_CARRY, VK_FOLD };	/* an i64 that is an i32 lane widened (ext, or a select of such): only its trunc is a lane */
-enum { VJ_NONE, VJ_SYM, VJ_PTR };
-
-typedef struct vvi {
-	uint8_t kind, exact, objk;
-	uint8_t uns;		/* an i32 whose form is its unsigned value (zero-extends; a signed operation on it is not exact) */
-	uint16_t nuse;		/* uses by the loop's instructions and terminators */
-	int64_t c;		/* what one iteration adds */
-	uint32_t objv, bv;	/* the object addressed (a symbol ref, a pointer value); an invariant term */
-	int64_t bs, k;		/* ... its factor; the constant term */
-	uint32_t sce, scb, sc0, vec;	/* its value at entry (in VPRE), in the vector body or VPH, at t = 0 (in VPH), its lanes */
-} vvi;
-
-typedef struct vvacc { uint32_t q, pos; bool store; } vvacc;
-typedef struct vvred { uint32_t p, upd, x, acc, accnext; } vvred;
-
-typedef struct vvs {
-	ecx *e;
-	vvi *I; uint32_t n0;			/* per value below n0 */
-	uint32_t *touch; uint32_t ntouch, ctouch;
-	uint8_t *inl;				/* per block: in the loop */
-	uint32_t lb[64], nlb;			/* the loop's blocks, H first */
-	uint32_t H, P, L, X, jP, jL;		/* header, entry predecessor, latch, exit; their slots in H's predecessors */
-	uint32_t VPRE, VPH, VB, VX, J;
-	vvacc acc[64]; uint32_t nacc;
-	uint32_t gather[64], ngather;
-	uint32_t invld[64], ninvld;		/* loads taken as invariant */
-	vvred red[8]; uint32_t nred;
-	struct { uint32_t p, next, acc, last, cur; } fold[8]; uint32_t nfold;
-	struct { uint32_t p, next, par, last; bool busy; } carry[8]; uint32_t ncarry;
-	uint32_t ind[32], indb[32], indn[32], nind;	/* H's inductions; VB's parameter and its next value */
-	int64_t indk[32];			/* ... what an iteration adds */
-	uint32_t one[8], none;			/* steps that are values: the vector loop runs when each is 1 */
-	uint32_t stepv[4]; int64_t stepc[4]; uint32_t nstep;	/* lanes 0, c, 2c, 3c (in VPH) */
-	struct { uint32_t a, b; } chk[8]; uint32_t nchk;	/* pairs whose ranges must not meet (run time): an access's index, or 64 + an invariant load's */
-	struct { uint32_t a, par; bool rev; } pin[32]; uint32_t npin;	/* per address: VB's pointer to its four elements */
-	uint32_t vf, esz, lg, ity, fty;		/* lanes; a lane's bytes, their log2; its integer and float types */
-	uint32_t pos;
-	const char *why;			/* why not (NULL: so far, yes) */
-} vvs;
+#define WK_PREFIX vw_
+#define LO_PREFIX vw_
+#include "../walk/walk.h"
+#include "../walk/proto.h"
+#include "preir.h"
+#include "simplify.h"
+#include "vectorize.h"
 
 static bool vv_no(vvs *S, const char *why)
 {
@@ -167,7 +133,7 @@ static void vv_opaque(vvs *S, uint32_t q, vvi *r)
 	}
 }
 
-static bool vv_skip(vwst *V, uint32_t q)
+VPRIV bool vv_skip(vwst *V, uint32_t q)
 {
 	return vw_find(V, q) != q || vw_promdead(V, q) || (V->p[q].in.op == VO_MEMSET && (V->p[q].in.fl & VW_LIFETIME));
 }
@@ -498,7 +464,6 @@ static uint32_t vv_ins(vvs *S, uint32_t b, uint32_t op, uint32_t ty, uint32_t fl
 	return vw_ins_in(S->e, b, op, ty, fl, a, bb, c);
 }
 
-enum { VM_ENTRY, VM_BODY, VM_T0 };
 static uint32_t vv_scalar(vvs *S, uint32_t v, int mode);
 
 /* a copy of pure instruction or load v in block b, its operands through vv_scalar */
@@ -1398,83 +1363,6 @@ static void vv_place(vvs *S)
 	V->norder += 5;
 }
 
-/* The loop's constants that cost instructions each time round, made once in front of it (block
- * pre, which only the loop follows): a symbol's address, a float constant, a compare's bound
- * that is no immediate.  Only in a loop without calls (they would need callee-saved registers),
- * at most 6, and only as the operands named here: a call's callee and a block copy's size stay
- * constants.  This is the one place VIR hoists anything (PLAN-vir.md: no LICM in 1.0);
- * VCC_VIR_VEC=n turns it off */
-static void vv_pin(vvs *S, uint32_t pre)
-{
-	ecx *e = S->e;
-	vwst *V = e->vw;
-	uint32_t from[6], to[6], n = 0;
-
-	for (uint32_t i = 0; i < S->nlb; i++)
-		for (uint32_t q = V->b[S->lb[i]].head; q; q = V->p[q].next)
-			if (!vv_skip(V, q) && vir_optab[V->p[q].in.op].eff & (EF_C | EF_A | EF_T))
-				return;
-	for (uint32_t i = 0; i < S->nlb; i++)
-		for (uint32_t q = V->b[S->lb[i]].head; q; q = V->p[q].next) {
-			vir_ins in = V->p[q].in;
-			uint32_t m = 0;	/* the operands that may be pinned: bit 0 a, 1 b, 2 c */
-
-			if (q >= S->n0 || vv_skip(V, q))
-				continue;
-			switch (in.op) {
-			case VO_LOAD: case VO_PTRADD: m = 1; break;
-			case VO_STORE: m = (in.fl & VIF_VOL) ? 0 : 3; break;
-			case VO_FADD: case VO_FSUB: case VO_FMUL: case VO_FDIV: case VO_FCMP: m = 3; break;
-			case VO_FMA: m = 7; break;
-			case VO_SELECT: m = V->p[q].in.ty == VT_F32 || V->p[q].in.ty == VT_F64 ? 6 : 0; break;
-			case VO_ICMP: m = 2; break;
-			default: break;
-			}
-			if (in.op == VO_LOAD && (in.fl & VIF_VOL))
-				m = 0;
-			for (int k = 0; k < 3; k++) {
-				uint32_t *w = k == 0 ? &V->p[q].in.a : k == 1 ? &V->p[q].in.b : &V->p[q].in.c, v, x = 0, j;
-				vir_ins c;
-
-				if (!(m >> k & 1))
-					continue;
-				v = vw_find(V, *w);
-				c = V->p[v].in;
-				if (V->p[v].blk != VW_NOBLK)
-					continue;
-				if (c.op == VO_ICONST) {	/* (a compare's bound: add and sub take 12 bits, or 12 shifted by 12) */
-					uint64_t u = c.ty == VT_I32 ? (uint64_t)(int64_t)(int32_t)c.b : (uint64_t)c.b | (uint64_t)c.c << 32;
-					uint64_t a = (int64_t)u < 0 ? 0 - u : u;
-
-					if (in.op != VO_ICMP || c.ty == VT_PTR || !(a & ~0xfffull) || !(a & ~0xfff000ull))
-						continue;
-				} else if (c.op == VO_FCONST) {
-					if (!c.b && !c.c)
-						continue;
-				} else if (c.op != VO_SYMADDR) {
-					continue;
-				}
-				for (j = 0; j < n && from[j] != v; j++)
-					;
-				if (j == n) {
-					if (n == 6)
-						continue;
-					if (c.op == VO_SYMADDR)
-						x = vw_ins_in(e, pre, VO_PTRADD, VT_PTR, 0, v, vw_iconst(e, VT_I64, 0), 0);
-					else if (c.op == VO_ICONST)
-						x = vw_ins_in(e, pre, VO_ADD, c.ty, 0, v, vw_iconst(e, c.ty, 0), 0);
-					else if (c.ty == VT_F32)
-						x = vw_ins_in(e, pre, VO_BITCAST, VT_F32, 0, vw_iconst(e, VT_I32, (int32_t)c.b), 0, 0);
-					else
-						x = vw_ins_in(e, pre, VO_BITCAST, VT_F64, 0, vw_iconst(e, VT_I64, (int64_t)((uint64_t)c.b | (uint64_t)c.c << 32)), 0, 0);
-					from[n] = v, to[n++] = x;
-				}
-				w = k == 0 ? &V->p[q].in.a : k == 1 ? &V->p[q].in.b : &V->p[q].in.c;	/* (V->p may have moved) */
-				*w = to[j];
-			}
-		}
-}
-
 static int vv_env(void)
 {
 	static _Thread_local int m = -1;
@@ -1487,7 +1375,7 @@ static int vv_env(void)
 	return m;
 }
 
-static void vw_vectorize(ecx *e)
+VPRIV void vw_vectorize(ecx *e)
 {
 	vwst *V = e->vw;
 	vvs S = { .e = e, .n0 = V->np };

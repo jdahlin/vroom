@@ -19,7 +19,7 @@
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
 #include "../emitimpl.h"
-#include "vw.h"
+#include "preir.h"
 #include "vir/layout.h"
 
 #define VL_MAXOP 512
