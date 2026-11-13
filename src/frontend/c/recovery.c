@@ -17,7 +17,7 @@ VPRIV void expect_match_fail(cc *c, int kind, uint32_t open)
 
 	if (c->miss_loc != tok(c)->loc) {	/* nested ones missing at the same token: once */
 		c->miss_loc = tok(c)->loc;
-		report(c, "error", tok(c)->kind == LEX_TOKEN_EOF ? pp_main_eof(c->p) : tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
+		report(c, "error", tok(c)->kind == LEX_TOKEN_EOF ? pp_main_file_end(c->p) : tok(c)->loc, NULL, 0, NULL, 0, "expected '%s'", cl);
 		note(c, open, "to match this '%s'", op);
 	}
 	skip_close(c, kind);
@@ -56,15 +56,15 @@ VPRIV void delayed_bug(cc *c, uint32_t loc, const char *what)
 /* at the end of the TU: a delayed bug with no error reported is vcc's bug */
 VPRIV void delayed_bug_check(cc *c)
 {
-	vdiag *d;
+	diag_record *d;
 
 	if (!c->dbug || c->errors || pp_error_count(c->p))
 		return;
-	d = pp_diag_begin(c->p, VDL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
+	d = diag_record_begin(c->p, DIAG_LEVEL_ERROR, c->dbug_loc, "internal error: %s (vcc stopped short here, expecting an error)",
 			  c->dbug);
 	d->id = "vcc_internal_delayed_bug";
-	pp_diag_help(c->p, d, "this is a bug in vcc, not in your code: please report it with this file (vcc -E output)");
-	pp_diag_emit(c->p, d);
+	diag_record_help_set(c->p, d, "this is a bug in vcc, not in your code: please report it with this file (vcc -E output)");
+	diag_record_emit(c->p, d);
 	c->errors++;
 }
 
@@ -158,7 +158,7 @@ static void skip_for_head(cc *c)
 static bool stray_rbrace(cc *c)
 {
 	size_t n;
-	const char *s = pp_src(c->p, c->prevloc, c->prevloc + 1, &n);
+	const char *s = pp_source_text(c->p, c->prevloc, c->prevloc + 1, &n);
 
 	return s && n == 1 && !strchr(";{}:,", *s);
 }

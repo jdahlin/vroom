@@ -34,9 +34,9 @@ VPRIV void pp_macro_note_at(pp *p, const pp_macro *m, uint32_t before, const cha
 				loc = p->fe[i].base + q[k].off, len = q[k].len, src = f->src + q[k].off;
 	}
 	if (src) {
-		pp_dinfo d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
+		diag_info d = { "note", loc, NULL, 0, NULL, 0, NULL, 0 };
 
-		pp_diagx(p, &d, msg, (int)len, src);
+		diag_report_extended(p, &d, msg, (int)len, src);
 	}
 }
 

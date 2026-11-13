@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void html_text(vbuffer *b, const char *s, size_t n)
+static void diag_html_text_escape(vbuffer *b, const char *s, size_t n)
 {
 	bool open = false, link = false;
 
@@ -25,7 +25,7 @@ static void html_text(vbuffer *b, const char *s, size_t n)
 			link = j > u;
 			if (link) {
 				vbuffer_string_append(b, "<a href=\"");
-				html_text(b, s + u, j - u);
+				diag_html_text_escape(b, s + u, j - u);
 				vbuffer_string_append(b, "\">");
 			}
 			i = j < n && s[j] == '\033' ? j + 1 : j;	/* (ESC \\ or BEL ends it) */
@@ -77,17 +77,17 @@ static void html_text(vbuffer *b, const char *s, size_t n)
 
 /* the TU's records as one standalone page: a summary, then each record as the vcc style
    shows it (source lines, labels, notes, help, diagrams), in colour */
-VPRIV void html_page(pp *p, vbuffer *b)
+VPRIV void diag_html_page_write(pp *p, vbuffer *b)
 {
 	unsigned ne = 0, nw = 0;
 	const char *main = p->o->main ? p->o->main : "";
 
-	for (const vdiag *d = p->dhead; d; d = d->next)
+	for (const diag_record *d = p->dhead; d; d = d->next)
 		if (!d->dup)
-			ne += d->level >= VDL_ERROR, nw += d->level == VDL_WARNING;
+			ne += d->level >= DIAG_LEVEL_ERROR, nw += d->level == DIAG_LEVEL_WARNING;
 	vbuffer_string_append(b, "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
 		  "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>vcc: ");
-	html_text(b, main, strlen(main));
+	diag_html_text_escape(b, main, strlen(main));
 	vbuffer_string_append(b, "</title>\n<style>\n"
 		  ":root{--bg:#fbfbfa;--fg:#1d1d1b;--mut:#6b6b66;--card:#fff;--line:#e4e3df;"
 		  "--err:#b42318;--warn:#a15c00;--note:#1f5fbf;--ok:#1a7f37;--mag:#8e3ba8}\n"
@@ -105,17 +105,17 @@ VPRIV void html_page(pp *p, vbuffer *b)
 		  ".b{font-weight:700}.c31{color:var(--err)}.c32{color:var(--ok)}.c33{color:var(--warn)}"
 		  ".c34{color:var(--note)}.c35{color:var(--mag)}.c36{color:var(--note)}\n"
 		  "</style></head><body><main>\n<h1>");
-	html_text(b, main, strlen(main));
+	diag_html_text_escape(b, main, strlen(main));
 	vbuffer_format_append(b, "</h1>\n<p class=\"sum\">%u error%s, %u warning%s</p>\n", ne, ne == 1 ? "" : "s", nw,
 	       nw == 1 ? "" : "s");
-	for (vdiag *d = p->dhead; d; d = d->next) {
+	for (diag_record *d = p->dhead; d; d = d->next) {
 		vbuffer r = { 0 };
 
 		if (d->dup)
 			continue;
-		diag_render_color(p, &r, d);
-		vbuffer_format_append(b, "<section class=\"%s\"><pre>", d->level >= VDL_ERROR ? "error" : d->level == VDL_WARNING ? "warning" : "note");
-		html_text(b, r.p ? r.p : "", r.n);
+		diag_record_render_color(p, &r, d);
+		vbuffer_format_append(b, "<section class=\"%s\"><pre>", d->level >= DIAG_LEVEL_ERROR ? "error" : d->level == DIAG_LEVEL_WARNING ? "warning" : "note");
+		diag_html_text_escape(b, r.p ? r.p : "", r.n);
 		vbuffer_string_append(b, "</pre></section>\n");
 		free(r.p);
 	}

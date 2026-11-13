@@ -157,7 +157,7 @@ pp *pp_open(const pp_opts *o)
 
 		p->fatal_jump = &jb;
 		if (setjmp(jb)) {
-			pp_diag_summary(p);	/* ("1 error generated.", as clang) */
+			diag_summary_print(p);	/* ("1 error generated.", as clang) */
 			pp_close(p);
 			return NULL;
 		}
@@ -231,7 +231,7 @@ size_t pp_file_names(const pp *p, const char **lex_token_kind_names, size_t max,
 
 void pp_close(pp *p)
 {
-	diag_text_flush(p);	/* a record still waiting for its notes (no summary ran) */
+	diag_vcc_flush(p);	/* a record still waiting for its notes (no summary ran) */
 	/* back to the thread: the stacks and tmp (reused all along the TU) as they are */
 	vjob_region_release(&pp_translation_unit_regions[1], VJOB_REGION_SCRATCH);
 	vjob_region_release(&pp_translation_unit_regions[2], p->perm.used + 64);

@@ -150,7 +150,7 @@ struct cc {
 	uint32_t dead;		/* inside if (0) ... (and the like): no runtime-behaviour warnings */
 	uint8_t defer_rt;	/* parsing a static initializer: -Wdivision-by-zero waits (clang's DiagRuntimeBehavior) */
 	uint8_t ndefer;
-	struct { uint32_t loc; pp_span r; uint8_t rem; } defer[8];
+	struct { uint32_t loc; diag_span r; uint8_t rem; } defer[8];
 	uint32_t unk_loc;	/* the last unknown token given -Winvalid-pp-token */
 	uint8_t se_direct;	/* the next statement is one of a statement expression's body */
 	uint8_t uv_any;		/* -Wuninitialized: 1 the body declares a tracked variable without an initializer, 2 a self-reference, 4 a read before an assignment, 8 a goto or case after a tracked declaration */
@@ -185,7 +185,7 @@ struct cc {
 	sym *syms;
 	uint32_t nsym;
 	node *nodes;
-	pp_span *span;		/* per node: first and last token (start locations), 0: unknown */
+	diag_span *span;		/* per node: first and last token (start locations), 0: unknown */
 	struct cparen { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 	uint32_t nnode;
 	uint32_t *lists;
@@ -229,7 +229,7 @@ struct cc {
 	uint32_t args_rp;	/* args_list's ')' (where it was expected, if missing) */
 	uint32_t fnconv;	/* nconv when the function's body began */
 	int fnerr;		/* errors when the function's body began: none since, its unused-variable warnings */
-	vdiag **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
+	diag_record **rtq;		/* clang's DiagRuntimeBehavior in a function: emitted at the body's end */
 	uint32_t nrtq, rtqcap;
 	bool has_depr_tag;
 	uint32_t nnparam;	/* parameters declared nonnull so far */
@@ -237,7 +237,7 @@ struct cc {
 	bool next_v[16];
 	uint32_t next_n;
 	const char *dms;	/* the next record's diagnosed token, spelled, if a macro may hold it (set just before) */
-	pp_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
+	diag_fixit dfx;		/* ... and a fix-it for it (s != NULL; machine-applicable), as dms */
 	int8_t ext_off;		/* 1: no extension warning is on (command line); -1: not known yet */
 	const uint32_t *nenable;	/* pp's "#pragma diagnostic warning|error" count (ext_off holds while 0) */
 	int bcp;		/* in __builtin_constant_p's argument: unevaluated, but its names are used */

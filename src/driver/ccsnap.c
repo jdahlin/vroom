@@ -91,7 +91,7 @@ static char *abase(const cc *c, int k, size_t *n)
 	case A_SSTACK: *n = c->nsstack * sizeof(uint32_t); return (char *)c->sstack;
 	case A_TOPLEVEL: *n = c->ntoplevel * sizeof(uint32_t); return (char *)c->toplevel;
 	case A_TLASM: *n = c->ntlasm * sizeof(uint32_t); return (char *)c->tlasm;
-	case A_SPAN: *n = c->nnode * sizeof(pp_span); return (char *)c->span;
+	case A_SPAN: *n = c->nnode * sizeof(diag_span); return (char *)c->span;
 	case A_LZT: *n = c->nlzt * sizeof(lztok); return (char *)c->lzt;
 	case A_LZF: *n = c->nlzf * sizeof(lzfn); return (char *)c->lzf;
 	case A_LZS: *n = c->nlzs; return c->lzs;
@@ -147,7 +147,7 @@ static inline uint32_t dec_loc(const coder *k, uint32_t l)
 		node *nd_ = (node *)(img)[A_NODES];                                              \
 		tag *tg_ = (tag *)(img)[A_TAGS];                                                 \
 		label *lb_ = (label *)(img)[A_LABELS];                                           \
-		pp_span *sp_ = (pp_span *)(img)[A_SPAN];                                         \
+		diag_span *sp_ = (diag_span *)(img)[A_SPAN];                                         \
 		lztok *lt_ = (lztok *)(img)[A_LZT];                                              \
 		lzfn *lf_ = (lzfn *)(img)[A_LZF];                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlzt; i_++)                                      \

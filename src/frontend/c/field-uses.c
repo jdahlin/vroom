@@ -226,7 +226,7 @@ static void fu_where(cc *c, uint32_t loc, char *b, size_t n, bool with_col)
 	const char *name;
 	uint32_t nl, line, col;
 
-	pp_where(c->p, loc, &name, &nl, &line, &col);
+	pp_location_describe(c->p, loc, &name, &nl, &line, &col);
 	if (with_col)
 		snprintf(b, n, "%.*s:%u:%u", (int)nl, name, line, col);
 	else
@@ -287,7 +287,7 @@ static void fu_line(cc *c, const char *kind, const fu_use *x, const char *owner,
 	char ex[600];
 	int rc = pp_token_spelling_find(c->p, &x->t, &f, &off);
 
-	pp_where(c->p, x->t.loc, &name, &nl, &el, &ec);
+	pp_location_describe(c->p, x->t.loc, &name, &nl, &el, &ec);
 	snprintf(ex, sizeof ex, "%.*s:%u:%u", (int)nl, name, el, ec);
 	if (rc == PP_SPELLING_FILE || rc == PP_SPELLING_MACRO) {
 		for (uint32_t i = 0; i < off; i++)
@@ -388,7 +388,7 @@ VPRIV void cc_field_uses_finish(cc *c)
 				continue;
 			for (uint32_t j = 0; j < i; j++)
 				dup |= (!u->sel[j].star && !strcmp(u->sel[j].field, names[k])) || (u->sel[j].neu && !strcmp(u->sel[j].neu, names[k]));
-			if (!dup && pp_defined(c->p, vintern_cstr(names[k])))
+			if (!dup && pp_macro_id_is_defined(c->p, vintern_cstr(names[k])))
 				fu_printf(u, "macro\t%s\n", names[k]);
 		}
 	}

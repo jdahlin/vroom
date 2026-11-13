@@ -23,8 +23,8 @@ static void fscr_grow(fscratch *x, uint32_t need)
    were there), else an error and the rest of the member skipped */
 static __attribute__((noinline, cold)) void member_semi(cc *c)
 {
-	uint32_t e = pp_tok_end(c->p, c->prevloc);
-	pp_fixit fx = { e, e, ";", semi_app(c) };
+	uint32_t e = pp_token_end_find(c->p, c->prevloc);
+	diag_fixit fx = { e, e, ";", semi_app(c) };
 	bool end = is(c, LEX_TOKEN_RIGHT_BRACE);
 
 	report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1, "expected ';' at end of declaration list");
@@ -63,7 +63,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 		dspec ds;
 
 		if (is(c, LEX_TOKEN_EOF)) {
-			cc_error(c, pp_tok_end(c->p, c->prevloc), "expected '}'");
+			cc_error(c, pp_token_end_find(c->p, c->prevloc), "expected '}'");
 			longjmp(c->bail, 1);
 		}
 		if (is(c, LEX_TOKEN_SEMICOLON)) {
@@ -129,10 +129,10 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 				i128 w;
 				uint32_t wn = 0;
 				uint64_t bits = KIND(c, t) == TY_BOOL ? 1 : int_bits(c, t);
-				pp_span wr;
+				diag_span wr;
 
 				const_expr(c, &w, &wn);
-				wr = wn ? rng(c, wn) : (pp_span){ d.loc, d.loc };
+				wr = wn ? rng(c, wn) : (diag_span){ d.loc, d.loc };
 				if (!complete(c, t))
 					;	/* clang: only "field has incomplete type", below */
 				else if (!is_integer(c, t))
