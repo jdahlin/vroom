@@ -156,7 +156,7 @@ static inline uint64_t lex_mask_pack(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2
  *   NS    the next byte is + or - (maybe a sign inside a pp-number)
  * Blocks [from, to) of the file at s.
  */
-static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
+static void lex_bytes_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
@@ -271,7 +271,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 #else /* !__ARM_NEON */
 
 #ifdef LEX_X86_SIMD
-#define pp_paste_result_classify classify_scalar
+#define lex_bytes_classify classify_scalar
 #define lex_comment_end_find find_cend_scalar
 #define lex_line_end_find find_nl_scalar
 #define lex_quote_find find_quote_scalar
@@ -279,7 +279,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 
 /* Portable fallback; also independent searches for the scalar oracle. */
 
-static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
+static void lex_bytes_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
@@ -340,11 +340,11 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 	}
 }
 #ifdef LEX_X86_SIMD
-#undef pp_paste_result_classify
+#undef lex_bytes_classify
 #undef lex_comment_end_find
 #undef lex_line_end_find
 #undef lex_quote_find
-static void (*pp_paste_result_classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
+static void (*lex_bytes_classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
 static size_t (*lex_comment_end_find)(const char *, size_t) = find_cend_scalar;
 static size_t (*lex_line_end_find)(const char *, size_t) = find_nl_scalar;
 static size_t (*lex_quote_find)(const char *, size_t, uint8_t) = find_quote_scalar;
@@ -366,14 +366,14 @@ static void lex_simd_init_x86(void)
 	const char *cpu;
 	if (cap && !strcmp(cap, "scalar")) return;
 	if (!x86_native_features(&features, &disabled, &cpu) || !x86_feature_has(features, X86_FEATURE_AVX2)) return;
-	pp_paste_result_classify = lex_bytes_classify_avx2;
+	lex_bytes_classify = lex_bytes_classify_avx2;
 	lex_comment_end_find = lex_comment_end_find_avx2;
 	lex_line_end_find = lex_line_end_find_avx2;
 	lex_quote_find = lex_quote_find_avx2;
 	if (cap && !strcmp(cap, "avx2")) return;
 	if (x86_feature_has(features, X86_FEATURE_AVX512F) && x86_feature_has(features, X86_FEATURE_AVX512BW) &&
 	    x86_feature_has(features, X86_FEATURE_AVX512VBMI))
-		pp_paste_result_classify = lex_bytes_classify_avx512;
+		lex_bytes_classify = lex_bytes_classify_avx512;
 }
 #endif
 #endif /* host SIMD */
@@ -873,7 +873,7 @@ static size_t lex_blocks_classify(const char *s, size_t n, size_t nblk, size_t f
 {
 	if (to > nblk)
 		to = nblk;
-	pp_paste_result_classify((const uint8_t *)s, from, to, m);
+	lex_bytes_classify((const uint8_t *)s, from, to, m);
 	if (from <= (n >> 6) && (n >> 6) < to) {
 		for (int j = 0; j < LEX_MASK_COUNT; j++)
 			if (j != LEX_MASK_HANDLER)
@@ -1063,7 +1063,7 @@ fast:
 		const uint64_t NS = lex_mask_window(m[LEX_MASK_SIGN_NEXT], p);
 
 		/*
-		 * Left to the handlers (besides the X of pp_paste_result_classify(), which has
+		 * Left to the handlers (besides the X of lex_bytes_classify(), which has
 		 * every ".." with ellipses, "..5" and "..\<newline>."):
 		 * overlapping pairs (<<=, ->=) and a number before + or -: in
 		 * 1e+5 the sign belongs to it (numbers before a sign are rare).
@@ -1691,7 +1691,7 @@ static bool lex_cache_entry_claim(lex_cache_entry *e, int from, int to)
 			memory_order_acq_rel, memory_order_acquire);
 }
 
-static void pp_header_cache_entry_publish(lex_cache_entry *e, bool ok)
+static void lex_cache_entry_publish(lex_cache_entry *e, bool ok)
 {
 	atomic_store_explicit(&e->state, ok ? LEX_CACHE_OK : LEX_CACHE_MISSING, memory_order_release);
 }
@@ -1886,7 +1886,7 @@ const lex_file *lex_file_get(const char *path, size_t len)
 	if (ins) {
 		bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-		pp_header_cache_entry_publish(e, ok);
+		lex_cache_entry_publish(e, ok);
 		return ok ? &e->f : NULL;
 	}
 	for (int spin = 0;; spin++) {
@@ -1908,12 +1908,12 @@ const lex_file *lex_file_get(const char *path, size_t len)
 			/* not reached by the I/O threads yet: do it here */
 			bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-			pp_header_cache_entry_publish(e, ok);
+			lex_cache_entry_publish(e, ok);
 			return ok ? &e->f : NULL;
 		}
 		if (st == LEX_CACHE_READ && lex_cache_entry_claim(e, LEX_CACHE_READ, LEX_CACHE_LOADING)) {
 			lex_source_tokenize(&e->f, e->f.src, e->f.size);
-			pp_header_cache_entry_publish(e, true);
+			lex_cache_entry_publish(e, true);
 			return &e->f;
 		}
 #if defined(__aarch64__)
@@ -1970,7 +1970,7 @@ static void *lex_prefetch_thread_run(void *arg)
 				e->f.size = (uint32_t)size;
 				atomic_store_explicit(&e->state, LEX_CACHE_READ, memory_order_release);
 			} else {
-				pp_header_cache_entry_publish(e, false);
+				lex_cache_entry_publish(e, false);
 			}
 		}
 	}
