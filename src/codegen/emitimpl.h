@@ -123,6 +123,7 @@ static inline bool inline_only(const sym *y)
 #include "rec/rec.h"
 #include "flow/flow.h"
 #include "flow/values.h"
+#include "vir/failure.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
 enum { RK_SYM = 0, RK_STR = 1, RK_LBL = 2, RK_NAME = 3, RK_TABLE = 4 };
@@ -221,6 +222,14 @@ typedef struct emitter {
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
 	const keep *K;			/* the previous round's functions, or NULL */
 	bool stats;
+	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/try.c) */
+	bool vstats;
+	_Atomic uint64_t vattempted, vlowered, vbuilt;	/* vbuilt: built but not lowered (VCC_VIR without l) */
+	struct {
+		_Atomic uint32_t count;
+		uint32_t sym;		/* the first function that failed so (under emu) */
+		char detail[96];	/* ... and what the reason leaves out */
+	} vfailed[VIRFAIL_COUNT];
 	/* VCC_REC_STATS: what each record clean-up pass did, [0 direct, 1 VIR][pass][runs, changed, removed, added] (func.c) */
 	bool rstats;
 	_Atomic uint64_t rpass[2][REC_PASS_MAX][4];
@@ -942,6 +951,8 @@ VPRIV void wk_function(ecx *e, uint32_t s);
 VPRIV void wk_ecx_free(ecx *e);
 VPRIV bool vw_x64(ecx *e, uint32_t s, const char **why);
 VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
+VPRIV const vir_failure_info vir_failure_table[VIRFAIL_COUNT];
+VPRIV void vw_stats_print(emitter *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
 VPRIV bool vw_try(ecx *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
 VPRIV bool vw_enabled(const cc_opts *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
 VPRIV void vw_wk_ecx_free(ecx *e);
