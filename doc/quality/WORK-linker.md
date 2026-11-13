@@ -228,7 +228,7 @@ and 13 spaces); a corrupt name field is classified by one rule
 else a short name), so the three tools no longer disagree on it; and a thin
 archive whose `//` member goes past the end of the file is "malformed"
 instead of an over-read.  Valid GNU and thin archives give byte-identical
-results.  Next: the diagnostics function.
+results.
 
 ### 4. One linker core
 
@@ -241,8 +241,16 @@ Design (2026-11-13): `DESIGN-linker-core.md`.  The core is the entry, the
 context, inputs and archives, and diagnostics; resolution, layout, the ELF
 symbol table and the output writer stay per format, with the reasons and two
 questions for the owner there.  PRs: a Mach-O comparison harness, Mach-O
-state in a context, one entry and lock, Mach-O names on
+state in a context, no lock for Mach-O links, Mach-O names on
 `common/string-index.h`.
+
+Status: PR 1 of `DESIGN-linker-core.md` (Mach-O state in a context) is
+done: `struct macho_context` holds the Mach-O linker's 24 per-link
+variables, `macho_link_locked` creates it and `macho_context_destroy` frees
+it (`macho_state_reset` is gone); the name sort that read the table from a
+qsort comparator sorts (name, id) pairs.  Left at file scope in
+`macho-linker.c`: the libSystem export table (process-wide, read once) and
+the link lock (PR 2).
 
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 
