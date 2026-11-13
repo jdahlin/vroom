@@ -136,10 +136,12 @@ def cases(d):
     files.update({f'b{i}.c': '#include "h.h"\nint x = ;\n' for i in range(6)})
     case('decl-cache-error-after-restore', 'batch', files, [f for f in files if f.endswith('.c')])
     # batch workers have the main thread's stack: deep nesting and long flat sequences
-    # compile in a batch as alone (a 512 KB thread stack failed at ~2 300 parentheses)
+    # compile in a batch as alone (a 512 KB thread stack failed at ~2 300 parentheses).
+    # 5 000, not more: the sanitizer builds' frames are larger (ASan on Linux and vccd's
+    # 2 MB TSan workers end 50 000 with "nested too deeply")
     flat = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'test', 'vcc',
                              'flat_declarators_labels.c')).read()
-    case('batch-stack', 'batch-ok', {'p.c': 'int x = ' + nest('(', ')', 50000, '1') + ';\n', 'f.c': flat},
+    case('batch-stack', 'batch-ok', {'p.c': 'int x = ' + nest('(', ')', 5000, '1') + ';\n', 'f.c': flat},
          ['p.c', 'f.c'])
     # control: a normal TU
     case('normal', 'ok', {'a.c': 'int f(int a) { return a * 2 + 1; }\n'}, 'a.c')

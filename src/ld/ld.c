@@ -5517,7 +5517,8 @@ static void collect_stubs(void)
 		}
 	}
 	for_assigns(mark_target);	/* idempotent */
-	qsort(names.v, names.n, sizeof(char *), cmp_str);
+	if (names.n)	/* (no stubs: names.v is NULL, and qsort's base is nonnull) */
+		qsort(names.v, names.n, sizeof(char *), cmp_str);
 	stub_names = names.v;
 	nstubs = names.n;
 	for (uint32_t i = 0; i < nstubs; i++)
