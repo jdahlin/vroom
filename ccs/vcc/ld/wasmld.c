@@ -188,6 +188,19 @@ static span rbytes(rd *r, uint64_t n)
 
 static span rname(rd *r) { return rbytes(r, ruleb(r)); }
 
+/* a vector's count: each entry takes a byte at least, so a count past the rest of
+   the section is malformed (and count + 1 cannot wrap) */
+static uint32_t rcount(rd *r)
+{
+	uint64_t v = ruleb(r);
+
+	if (v > (uint64_t)(r->e - r->p)) {
+		r->bad = true;
+		return 0;
+	}
+	return (uint32_t)v;
+}
+
 /* a constant expression (init expressions): skip to its end */
 static span rexpr(rd *r)
 {
@@ -450,7 +463,7 @@ static void parse_linking(obj *o, rd *r)
 
 		r->p += len;
 		if (t == 8) {
-			uint32_t n = (uint32_t)ruleb(&s);
+			uint32_t n = rcount(&s);
 
 			o->sym = calloc(n + 1, sizeof(isym));
 			o->nsym = n;
@@ -492,7 +505,7 @@ static void parse_linking(obj *o, rd *r)
 				}
 			}
 		} else if (t == 5) {
-			uint32_t n = (uint32_t)ruleb(&s);
+			uint32_t n = rcount(&s);
 
 			for (uint32_t i = 0; i < n && !s.bad; i++) {
 				span nm = rname(&s);
@@ -505,7 +518,7 @@ static void parse_linking(obj *o, rd *r)
 				}
 			}
 		} else if (t == 6) {
-			uint32_t n = (uint32_t)ruleb(&s);
+			uint32_t n = rcount(&s);
 
 			o->init = calloc(n + 1, sizeof *o->init);
 			for (uint32_t i = 0; i < n && !s.bad; i++) {
@@ -527,6 +540,83 @@ static int cmp_rel(const void *a, const void *b)
 	const irel *x = a, *y = b;
 
 	return x->off < y->off ? -1 : x->off > y->off;
+}
+
+/* the bytes apply() writes for a relocation */
+static uint32_t rel_field(uint8_t t)
+{
+	switch (t) {
+	case R_FUNCTION_INDEX_LEB: case R_TYPE_INDEX_LEB: case R_GLOBAL_INDEX_LEB: case R_TABLE_NUMBER_LEB:
+	case R_MEMORY_ADDR_LEB: case R_TAG_INDEX_LEB: case R_TABLE_INDEX_SLEB: case R_MEMORY_ADDR_SLEB:
+	case R_MEMORY_ADDR_TLS_SLEB:
+		return 5;
+	case R_MEMORY_ADDR_LEB64: case R_TABLE_INDEX_SLEB64: case R_MEMORY_ADDR_SLEB64: case R_MEMORY_ADDR_TLS_SLEB64:
+		return 10;
+	case R_TABLE_INDEX_I32: case R_MEMORY_ADDR_I32: case R_FUNCTION_INDEX_I32: case R_GLOBAL_INDEX_I32:
+	case R_FUNCTION_OFFSET_I32: case R_SECTION_OFFSET_I32:
+		return 4;
+	default:
+		return 8;
+	}
+}
+
+/* r's field ends by end (the end of its function or segment); else an error, and nothing applies */
+static bool rel_fits(obj *o, const irel *r, uint32_t end)
+{
+	if ((uint64_t)r->off + rel_field(r->type) <= end)
+		return true;
+	err("%s: relocation at 0x%x runs past its function or segment", o->name, r->off);
+	o->nsym = o->nfn = o->ngl = o->ntag = o->nseg = o->ninit = o->ncrel = o->ndrel = 0;
+	return false;
+}
+
+/* every index the file gives is in range (types, symbols, init functions, type relocations) */
+static bool obj_indices_ok(obj *o)
+{
+#define BAD(...) do { err(__VA_ARGS__); return false; } while (0)
+	for (uint32_t i = 0; i < o->nfn; i++)
+		if (o->fn[i].type >= o->ntypes)
+			BAD("%s: function %u: type index %u out of range", o->name, i, o->fn[i].type);
+	for (uint32_t i = 0; i < o->ntag; i++)
+		if (o->tag[i].type >= o->ntypes)
+			BAD("%s: tag %u: type index %u out of range", o->name, i, o->tag[i].type);
+	for (uint32_t i = 0; i < o->nimp; i++)
+		if ((o->imp[i].kind == 0 || o->imp[i].kind == 4) && o->imp[i].type >= o->ntypes)
+			BAD("%s: import %u: type index %u out of range", o->name, i, o->imp[i].type);
+	for (uint32_t i = 0; i < o->nsym; i++) {
+		const isym *y = &o->sym[i];
+		bool undef = (y->flags & F_UNDEFINED) != 0;
+		uint32_t nimp = y->kind == K_FUNCTION ? o->nfimp : y->kind == K_GLOBAL ? o->ngimp : o->ntagimp;
+		uint32_t ndef = y->kind == K_FUNCTION ? o->nfn : y->kind == K_GLOBAL ? o->ngl : o->ntag;
+
+		switch (y->kind) {
+		case K_FUNCTION: case K_GLOBAL: case K_TAG:
+			if (undef ? y->index >= nimp : y->index < nimp || y->index - nimp >= ndef)
+				BAD("%s: symbol %u: index %u out of range", o->name, i, y->index);
+			break;
+		case K_DATA:
+			if (!undef && (y->seg >= o->nseg || y->off > o->seg[y->seg].data.n ||
+				       y->size > o->seg[y->seg].data.n - y->off))
+				BAD("%s: data symbol %u: segment %u offset 0x%llx size 0x%llx out of range", o->name, i,
+				    y->seg, (unsigned long long)y->off, (unsigned long long)y->size);
+			break;
+		default:
+			break;
+		}
+	}
+	for (uint32_t i = 0; i < o->ninit; i++)
+		if (o->init[i].sym >= o->nsym)
+			BAD("%s: init function %u: symbol %u out of range", o->name, i, o->init[i].sym);
+	for (int c = 0; c < 2; c++) {
+		const irel *v = c ? o->drel : o->crel;
+		uint32_t n = c ? o->ndrel : o->ncrel;
+
+		for (uint32_t i = 0; i < n; i++)
+			if (v[i].type == R_TYPE_INDEX_LEB ? v[i].idx >= o->ntypes : v[i].idx >= o->nsym)
+				BAD("%s: relocation at 0x%x: index %u out of range", o->name, v[i].off, v[i].idx);
+	}
+	return true;
+#undef BAD
 }
 
 static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
@@ -572,7 +662,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 1: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			o->types = calloc(k + 1, sizeof(span));
 			o->ntypes = k;
@@ -589,7 +679,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 2: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			o->imp = calloc(k + 1, sizeof(iimp));
 			o->fimp = calloc(k + 1, sizeof(uint32_t));
@@ -644,18 +734,18 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 3: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			o->fn = calloc(k + 1, sizeof(ifunc));
 			o->nfn = k;
-			for (uint32_t i = 0; i < k; i++) {
+			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				o->fn[i].type = (uint32_t)ruleb(&s);
 				o->fn[i].out = -1;
 			}
 			break;
 		}
 		case 6: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			o->gl = calloc(k + 1, sizeof(iglob));
 			o->ngl = k;
@@ -668,7 +758,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 10: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			code_idx = secidx;
 			code0 = s.p - 0;	/* the payload starts at the count */
@@ -684,7 +774,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 11: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			data_idx = secidx;
 			data0 = r.p - len;
@@ -709,7 +799,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			break;
 		}
 		case 13: {
-			uint32_t k = (uint32_t)ruleb(&s);
+			uint32_t k = rcount(&s);
 
 			o->tag = calloc(k + 1, sizeof *o->tag);
 			o->ntag = k;
@@ -730,11 +820,14 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			r.bad = true;
 		secidx++;
 	}
-	if (r.bad)
+	if (r.bad) {
 		err("%s: malformed object", name);
+		o->nsym = o->nfn = o->ngl = o->ntag = o->nseg = o->ninit = 0;
+		return o;
+	}
 	for (uint32_t k = 0; k < nrels; k++) {
 		rd s = { rels[k].p, rels[k].e, false };
-		uint32_t cnt = (uint32_t)ruleb(&s);
+		uint32_t cnt = rcount(&s);
 		irel *v = calloc(cnt + 1, sizeof(irel));
 
 		for (uint32_t i = 0; i < cnt && !s.bad; i++) {
@@ -743,6 +836,10 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			v[i].idx = (uint32_t)ruleb(&s);
 			if (rel_addend(v[i].type))
 				v[i].addend = rsleb(&s);
+		}
+		if (s.bad) {
+			err("%s: malformed relocation section", name);
+			r.bad = true;
 		}
 		qsort(v, cnt, sizeof(irel), cmp_rel);
 		if (rels[k].sec == code_idx) {
@@ -755,21 +852,33 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 			free(v);	/* debug sections: dropped */
 		}
 	}
+	if (!r.bad && !obj_indices_ok(o))
+		r.bad = true;
+	if (r.bad) {	/* (the error is reported: nothing of it is used) */
+		o->nsym = o->nfn = o->ngl = o->ntag = o->nseg = o->ninit = o->ncrel = o->ndrel = 0;
+		return o;
+	}
 	/* each function's and segment's relocations */
 	for (uint32_t i = 0, j = 0; i < o->nfn; i++) {
 		while (j < o->ncrel && o->crel[j].off < o->fn[i].off)
 			j++;
 		o->fn[i].rel0 = j;
-		while (j < o->ncrel && o->crel[j].off < o->fn[i].off + o->fn[i].body.n)
+		while (j < o->ncrel && o->crel[j].off < o->fn[i].off + o->fn[i].body.n) {
+			if (!rel_fits(o, &o->crel[j], o->fn[i].off + o->fn[i].body.n))
+				return o;
 			j++;
+		}
 		o->fn[i].nrel = j - o->fn[i].rel0;
 	}
 	for (uint32_t i = 0, j = 0; i < o->nseg; i++) {
 		while (j < o->ndrel && o->drel[j].off < o->seg[i].off)
 			j++;
 		o->seg[i].rel0 = j;
-		while (j < o->ndrel && o->drel[j].off < o->seg[i].off + o->seg[i].data.n)
+		while (j < o->ndrel && o->drel[j].off < o->seg[i].off + o->seg[i].data.n) {
+			if (!rel_fits(o, &o->drel[j], o->seg[i].off + o->seg[i].data.n))
+				return o;
 			j++;
+		}
 		o->seg[i].nrel = j - o->seg[i].rel0;
 	}
 	return o;

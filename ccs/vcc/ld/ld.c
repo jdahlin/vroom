@@ -1823,8 +1823,17 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
 }
 
 /* the bytes of a relocation's field (0: none, 4: an instruction) */
-static uint32_t rel_width(uint32_t type)
+static uint32_t rel_width(uint32_t type, uint16_t machine)
 {
+	if (machine == 62)	/* x86-64: the fields x64.inc writes */
+		switch (type) {
+		case R_X86_64_NONE: return 0;
+		case R_X86_64_64: case R_X86_64_PC64: case R_X86_64_TPOFF64: case R_X86_64_DTPOFF64:
+		case R_X86_64_SIZE64: return 8;
+		case R_X86_64_16: case R_X86_64_PC16: return 2;
+		case R_X86_64_8: case R_X86_64_PC8: return 1;
+		default: return 4;
+		}
 	switch (type) {
 	case R_AARCH64_NONE: return 0;
 	case R_AARCH64_ABS64: case R_AARCH64_PREL64: return 8;
@@ -1934,7 +1943,7 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 		for (uint64_t k = 0; k < h->sh_size / sizeof(Rela); k++) {
 			if ((r[k].r_info >> 32) >= nsym && (r[k].r_info >> 32))
 				BAD("%s: invalid symbol index in relocation section %u", o->path, s);
-			uint32_t w = rel_width((uint32_t)r[k].r_info);
+			uint32_t w = rel_width((uint32_t)r[k].r_info, eh->e_machine);
 
 			if (t->sh_type != SHT_NOBITS && (r[k].r_offset > t->sh_size || t->sh_size - r[k].r_offset < w))
 				BAD("%s: relocation at 0x%llx is past the end of section %u", o->path,

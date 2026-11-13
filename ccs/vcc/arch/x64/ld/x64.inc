@@ -31,8 +31,8 @@ static int x64_relax_kind(const Obj *o, const ISec *is, const Rela *rl, const Ta
 			return 1;
 		if (op == 0xff && (modrm == 0x15 || modrm == 0x25))
 			return 1;
-		if (type == R_X86_64_GOTPCRELX)
-			return 0;
+		if (type == R_X86_64_GOTPCRELX || rl->r_offset < 3)
+			return 0;	/* (the immediate form rewrites the REX byte too) */
 		return pic ? 0 : 2;
 	}
 }
@@ -232,12 +232,13 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			break;
 		case R_X86_64_GOTTPOFF: {
 			/* initial-exec -> local-exec (lld's relaxTlsIeToLe) */
-			uint8_t *in = loc - 3, reg = (uint8_t)((loc[-1] >> 3) & 7);
+			uint8_t *in = loc - 3, reg;
 
 			if (rl->r_offset < 3) {
 				reloc_error(o, is, rl, "GOTTPOFF at the start of a section", 0);
 				break;
 			}
+			reg = (uint8_t)((loc[-1] >> 3) & 7);
 			if (in[0] == 0x48 && in[1] == 0x03 && in[2] == 0x25)
 				in[0] = 0x48, in[1] = 0x81, in[2] = 0xc4;
 			else if (in[0] == 0x4c && in[1] == 0x03 && in[2] == 0x25)
