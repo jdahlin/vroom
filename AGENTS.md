@@ -257,6 +257,7 @@ bench/vcc-abi.py --target wasm64    # [needs VCC_WASM=1; not maintained] ... for
 bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
+bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)

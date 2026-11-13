@@ -19,6 +19,31 @@ uint32_t pp_main_eof(const pp *p)
 	return e->base + (n && e->f->src[n - 1] == '\n' ? n - 1 : n);
 }
 
+void pp_macro_text_keep(pp *p) { p->keep_macro_text = true; }
+
+/* pp_token_spelling_find (pp.h): the file whose text holds the token's bytes, by pointer */
+int pp_token_spelling_find(const pp *p, const ptok *t, const lex_file **file, uint32_t *offset)
+{
+	static _Thread_local uint32_t last;
+	const pp_file_entry *e;
+	const lex_file *f = NULL;
+
+	if (t->flags & LEX_TOKEN_FLAG_SPLICED)
+		return PP_SPELLING_DIRTY;
+	for (uint32_t k = 0; k < p->nfe && !f; k++) {
+		uint32_t i = (last + k) % p->nfe;
+		const lex_file *g = p->fe[i].f;
+
+		if (g && t->s >= g->src && t->s < g->src + g->size)
+			f = g, last = i;
+	}
+	if (!f)
+		return PP_SPELLING_NONE;
+	*file = f;
+	*offset = (uint32_t)(t->s - f->src);
+	return loc_ok(p, t->loc, &e) && e->f == f && t->loc - e->base == *offset ? PP_SPELLING_FILE : PP_SPELLING_MACRO;
+}
+
 /* where an #include for a diagnostic at loc goes: the start of the line after the last
    #include before loc in loc's file, else the file's first line; UINT32_MAX: not in a file */
 uint32_t pp_include_point(const pp *p, uint32_t loc)

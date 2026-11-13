@@ -114,6 +114,8 @@ VPRIV uint32_t offsetof_expr(cc *c, uint32_t loc)
 				next(c);
 				break;
 			}
+			if (unlikely(c->field_uses))
+				cc_field_uses_path_record(c, FU_OFFSETOF, ti, path, d);
 			for (int i = 0; i < d; i++) {
 				const field *f = &c->tags[ti].f[path[i]];
 

@@ -160,6 +160,20 @@ static void job_pp_opts_second(struct driver_job *job, const ppd_env *env, int a
 /* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
 static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 {
+		const char *field_uses = ppd_getenv(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
+
+		if (__builtin_expect(field_uses != NULL, 0)) {
+			if (!job->syntax || job->emit || job->layout) {
+				dprintf(job->errfd, "vcc: error: VCC_FIELD_USES needs -fsyntax-only\n");
+				job->status = 1;
+				return;
+			}
+			if (!getenv("VCC_EAGER") || !getenv("VCC_NODC") || !getenv("VPP_NOHC")) {
+				dprintf(job->errfd, "vcc: error: VCC_FIELD_USES needs VCC_EAGER=1 VCC_NODC=1 VPP_NOHC=1\n");
+				job->status = 1;
+				return;
+			}
+		}
 		cc_opts co = { .target = job->po.target, .unsigned_char = job->po.unsigned_char, .dump_layouts = job->layout, .ms_anon = job->ms_anon, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->std, .c2y = job->std == 23 && job->stdver && !strcmp(job->stdver, "202400L"), .implicit_int = job->std == 89 || job->wimpl_int, .implicit_fn = job->std == 89 || job->wimpl_fn, .conv_warn = job->conv_warn,
 				.strict_std = job->strict,
@@ -176,6 +190,7 @@ static void job_compile(struct driver_job *job, pp *p, const ppd_env *env)
 
 		memcpy(co.disabled_builtins, job->disabled_builtins, sizeof job->disabled_builtins);
 		co.emit = job->emit;
+		co.field_uses = field_uses;
 		char dbgdir[4096];
 		if (job->debug)
 			co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);

@@ -232,6 +232,8 @@ int cc_run(pp *p, const cc_opts *o)
 	if (drcov_active())
 		drcov_boundary(c), c->ndrb = 0;	/* (allocates) */
 	dr_begin(c);
+	if (unlikely(o->field_uses))
+		cc_field_uses_begin(c, o->field_uses);
 	if (!setjmp(c->bail)) {
 		dc_begin(c);
 		fetch(c, &c->tk[0]);
@@ -258,6 +260,8 @@ int cc_run(pp *p, const cc_opts *o)
 		layout_checks(c);
 	if (o->emit && !c->errors && !pp_error_count(p))
 		c->errors += emit_tu(c, o);
+	if (unlikely(c->field_uses))
+		cc_field_uses_finish(c);
 	errors = c->errors;
 	if (c->drb)
 		drcov_finish(c);

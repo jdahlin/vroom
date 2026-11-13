@@ -193,6 +193,7 @@ struct pp {
 	pp_context *cx;
 	int depth, nfile;
 	varena perm, tmp;
+	bool keep_macro_text;		/* VCC_FIELD_USES: a main-file macro keeps its body in the file text (no canonical copy) */
 	bool temporary_held;		/* the consumer holds earlier tokens: tmp is not reset (pp_temporary_hold) */
 	ptok *sv;		/* scratch token stack */
 	size_t scratch_token_count;
