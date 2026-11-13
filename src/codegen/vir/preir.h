@@ -204,7 +204,7 @@ VPRIV void vw_set(ecx *e, int r, uint32_t v);
 VPRIV uint32_t vw_ity(int size);
 VPRIV uint32_t vw_val(ecx *e, const val *v, uint32_t ty);
 VPRIV int vw_resname(ecx *e, const val *a, const val *b);
-VPRIV uint32_t vw_fty(ecx *e, qty t);
+VPRIV uint32_t vw_fty(ecx *e, ast_qualified_type t);
 
 /* lower-memory.c */
 VPRIV uint32_t vw_slotat(ecx *e, int64_t off, uint64_t size, int64_t *rel);

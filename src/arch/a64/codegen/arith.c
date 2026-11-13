@@ -20,7 +20,7 @@ VPRIV void extend(ecx *e, int rd, int rs, int from, bool sgn)
 	}
 }
 
-VPRIV val fold_int_bin(ecx *e, int op, qty ot, qty rt, i128 l, i128 r, bool *ok)
+VPRIV val fold_int_bin(ecx *e, int op, ast_qualified_type ot, ast_qualified_type rt, i128 l, i128 r, bool *ok)
 {
 	cc *c = e->c;
 	bool sg = is_signed(c, ot);
@@ -134,7 +134,7 @@ VPRIV int emit_cmp2(ecx *e, int op, bool sg, val *a, val *b)
 /* ---------------- truth tests ---------------- */
 
 /* branch to l if (v != 0) == nz; consumes v.  Returns the constant truth or -1. */
-VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
+VPRIV int test_zero(ecx *e, val *v, ast_qualified_type t, uint32_t l, bool nz)
 {
 	cc *c = e->c;
 	uint64_t sz = tsize(c, t);
@@ -142,11 +142,11 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 
 	if (em_bigint(c, t)) {
 		*v = a64_bigbool(e, *v, t);
-		t = prim(TY_INT); sz = 4;
+		t = prim(AST_TYPE_INT); sz = 4;
 	}
-	if (KIND(c, t) == TY_FLOAT16 || KIND(c, t) == TY_BFLOAT16) {
+	if (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) {
 		*v = f_tobool(e, *v, t);
-		t = prim(TY_INT);
+		t = prim(AST_TYPE_INT);
 		sz = 4;
 	}
 	if (v->k == V_CONST || v->k == V_ADDR) {
@@ -160,7 +160,7 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 		return -1;
 	if (is_ld(c, t)) {
 		*v = ld_compare(e, LEX_TOKEN_EXCLAMATION_EQUAL, t, *v, vconst(0));
-		t = prim(TY_INT);
+		t = prim(AST_TYPE_INT);
 		sz = 4;
 	}
 	if (is_flt(c, t)) {
@@ -200,7 +200,7 @@ VPRIV int test_zero(ecx *e, val *v, qty t, uint32_t l, bool nz)
 }
 
 /* v as 0/1 (int) */
-VPRIV val tobool(ecx *e, val v, qty t)
+VPRIV val tobool(ecx *e, val v, ast_qualified_type t)
 {
 	cc *c = e->c;
 	uint64_t sz = tsize(c, t);
@@ -220,7 +220,7 @@ VPRIV val tobool(ecx *e, val v, qty t)
 		sz = 8;
 	}
 	r = toreg(e, &v);
-	if (KIND(c, t) == TY_BOOL || last_cset(e, &v) >= 0)
+	if (KIND(c, t) == AST_TYPE_BOOL || last_cset(e, &v) >= 0)
 		return v;
 	if (is_ptr(c, t) || sz == 8)
 		op3(e, I_SUBS, 1, ZR, r, ZR);
@@ -234,36 +234,36 @@ VPRIV val tobool(ecx *e, val v, qty t)
 
 /* ---------------- casts ---------------- */
 
-VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
+VPRIV val cast(ecx *e, val v, ast_qualified_type from, ast_qualified_type to, int kind)
 {
 	cc *c = e->c;
 	uint64_t fs = tsize(c, from), ts = tsize(c, to);
 
-	if ((em_bigint(c, from) || em_bigint(c, to)) && kind != CK_VOID) {
-		if (kind == CK_BOOL) return tobool(e, v, from);
+	if ((em_bigint(c, from) || em_bigint(c, to)) && kind != AST_CAST_VOID) {
+		if (kind == AST_CAST_BOOL) return tobool(e, v, from);
 		if (is_flt(c, from) || is_flt(c, to)) efatal(e, 0, "arbitrary-width ARM floating conversion is not supported yet");
 		return a64_bigcvt(e, v, from, to);
 	}
-	if ((is_flt(c, from) || is_flt(c, to)) && kind != CK_VOID)
+	if ((is_flt(c, from) || is_flt(c, to)) && kind != AST_CAST_VOID)
 		return f_cast(e, v, from, to);
 	switch (kind) {
-	case CK_NOP:
-	case CK_P2P:
+	case AST_CAST_NOP:
+	case AST_CAST_POINTER_TO_POINTER:
 		if (v.k == V_CONST && !is_ptr(c, to))
 			v.i = em_trunc_to(c, v.i, to);
 		return v;
-	case CK_BOOL:
+	case AST_CAST_BOOL:
 		return tobool(e, v, from);
-	case CK_NULL:
+	case AST_CAST_NULL_POINTER:
 		val_free(e, &v);
 		return vconst(0);
-	case CK_INT:
-	case CK_P2I:
-	case CK_I2P:
+	case AST_CAST_INTEGER:
+	case AST_CAST_POINTER_TO_INTEGER:
+	case AST_CAST_INTEGER_TO_POINTER:
 		if (v.k == V_CONST) {
-			if (kind == CK_I2P)
+			if (kind == AST_CAST_INTEGER_TO_POINTER)
 				return vconst((i128)(uint64_t)em_trunc_to(c, v.i, from));
-			return vconst(em_trunc_to(c, v.i, kind == CK_P2I && ts == 16 ? prim(TY_UINT128) : to));
+			return vconst(em_trunc_to(c, v.i, kind == AST_CAST_POINTER_TO_INTEGER && ts == 16 ? prim(AST_TYPE_UINT128) : to));
 		}
 		if (v.k == V_ADDR) {
 			if (ts == 8)
@@ -273,7 +273,7 @@ VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
 		if (v.k == V_NONE)
 			return v;
 		if (ts == 16 && fs < 16) {
-			bool sg = kind == CK_INT && is_signed(c, from);
+			bool sg = kind == AST_CAST_INTEGER && is_signed(c, from);
 			int r = toreg(e, &v);
 
 			if (fs < 8)
@@ -291,10 +291,10 @@ VPRIV val cast(ecx *e, val v, qty from, qty to, int kind)
 		if (ts > fs && last_cset(e, &v) < 0) {	/* a cset's 0/1 is already extended */
 			int r = toreg(e, &v);
 
-			extend(e, r, r, (int)fs, kind != CK_P2I && is_signed(c, from));
+			extend(e, r, r, (int)fs, kind != AST_CAST_POINTER_TO_INTEGER && is_signed(c, from));
 		}
 		return v;
-	case CK_VOID:
+	case AST_CAST_VOID:
 		val_free(e, &v);
 		return vnone();
 	default:
@@ -317,7 +317,7 @@ VPRIV void shift_imm(ecx *e, int op, int x, int rd, int rn, int k)
 		opbf(e, I_UBFM, x, rd, rn, k, w - 1);
 }
 
-VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
+VPRIV val arith(ecx *e, int op, ast_qualified_type ty, val a, val b)
 {
 	cc *c = e->c;
 	int x = X(c, ty), ra, rb;
@@ -435,7 +435,7 @@ VPRIV val arith(ecx *e, int op, qty ty, val a, val b)
 }
 
 /* 128-bit arithmetic on register pairs */
-VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
+VPRIV val arith2(ecx *e, int op, ast_qualified_type ty, val a, val b)
 {
 	cc *c = e->c;
 	bool sg = is_signed(c, ty);
@@ -510,7 +510,7 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 	}
 	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) {
 		val args[2] = { a, b };
-		qty tys[2] = { ty, ty };
+		ast_qualified_type tys[2] = { ty, ty };
 		int fn = op == LEX_TOKEN_SLASH ? (sg ? FN_DIVTI3 : FN_UDIVTI3) : (sg ? FN_MODTI3 : FN_UMODTI3);
 
 		return call_named(e, FIXED(fn), args, tys, 2, ty, false);
@@ -544,7 +544,7 @@ VPRIV val arith2(ecx *e, int op, qty ty, val a, val b)
 }
 
 /* The top storage limb is extended from the declared precision. */
-static void a64_bignorm(ecx *e, qty t, int r)
+static void a64_bignorm(ecx *e, ast_qualified_type t, int r)
 {
 	unsigned bits = T(e->c, t)->n & 63;
 	if (bits) opbf(e, is_signed(e->c, t) ? I_SBFM : I_UBFM, 1, r, r, 0, bits - 1);
@@ -556,7 +556,7 @@ static val a64_bigslot(ecx *e, int64_t sl)
 	return laddr(e, &l);
 }
 
-VPRIV val a64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small)
+VPRIV val a64_bigconst(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small)
 {
 	unsigned count = (unsigned)(tsize(e->c, t) / 8);
 	int64_t sl = slot(e, count * 8, 8);
@@ -572,7 +572,7 @@ VPRIV val a64_bigconst(ecx *e, qty t, const uint32_t *words, i128 small)
 	return a64_bigslot(e, sl);
 }
 
-VPRIV val a64_bigcopy(ecx *e, val v, qty t)
+VPRIV val a64_bigcopy(ecx *e, val v, ast_qualified_type t)
 {
 	unsigned count = (unsigned)(tsize(e->c, t) / 8);
 	int64_t sl = slot(e, count * 8, 8);
@@ -586,11 +586,11 @@ VPRIV val a64_bigcopy(ecx *e, val v, qty t)
 	return a64_bigslot(e, sl);
 }
 
-VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to)
+VPRIV val a64_bigcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool src = em_bigint(c, from), dst = em_bigint(c, to);
-	if (src && QUNQ(from) == QUNQ(to)) return v;
+	if (src && AST_QUALIFIED_TYPE_UNQUALIFIED(from) == AST_QUALIFIED_TYPE_UNQUALIFIED(to)) return v;
 	if (!dst) {
 		int p = toreg(e, &v), lo = treg(e);
 		mem(e, I_LD, 3, 0, lo, p, 0);
@@ -633,7 +633,7 @@ VPRIV val a64_bigcvt(ecx *e, val v, qty from, qty to)
 	return a64_bigslot(e, sl);
 }
 
-VPRIV val a64_bigbool(ecx *e, val v, qty t)
+VPRIV val a64_bigbool(ecx *e, val v, ast_qualified_type t)
 {
 	int p = toreg(e, &v), r = treg(e), limb = treg(e);
 	movi(e, 1, r, 0);
@@ -647,7 +647,7 @@ VPRIV val a64_bigbool(ecx *e, val v, qty t)
 	return vreg(r);
 }
 
-VPRIV val a64_bigcmp(ecx *e, int op, qty t, val a, val b)
+VPRIV val a64_bigcmp(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	if (a.k == V_CONST) a = a64_bigconst(e, t, NULL, a.i);
 	if (b.k == V_CONST) b = a64_bigconst(e, t, NULL, b.i);
@@ -686,7 +686,7 @@ static void a64_bigword(ecx *e, int rd, int ptr, unsigned n, int index, bool sig
 	deflabel(e, done);
 }
 
-static val a64_bigshift(ecx *e, int op, qty t, val a, val b)
+static val a64_bigshift(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	unsigned n = (unsigned)tsize(e->c, t)/8;
 	bool right = op == LEX_TOKEN_GREATER_GREATER, sign = right && is_signed(e->c, t);
@@ -739,7 +739,7 @@ static void a64_bigneg_if(ecx *e, int ptr, unsigned n, int sign)
 
 /* Restoring unsigned division of magnitudes. The extra remainder limb
 	* retains the carry when the divisor occupies the full storage precision. */
-static val a64_bigdiv(ecx *e, int op, qty t, val a, val b)
+static val a64_bigdiv(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	unsigned n = (unsigned)tsize(e->c, t)/8;
 	a = a64_bigcopy(e, a, t);
@@ -802,7 +802,7 @@ static val a64_bigdiv(ecx *e, int op, qty t, val a, val b)
 	return vreg(result);
 }
 
-VPRIV val a64_bigbin(ecx *e, int op, qty t, val a, val b)
+VPRIV val a64_bigbin(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	if (a.k == V_CONST) a = a64_bigconst(e, t, NULL, a.i);
 	if (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)

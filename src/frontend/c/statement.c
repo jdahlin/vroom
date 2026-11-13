@@ -21,7 +21,7 @@ CC_PRIVATE uint32_t cc_label_reference(cc *c, uint32_t name, uint32_t loc)
 
 CC_PRIVATE uint32_t cc_statement_new(cc *c, int op, uint32_t loc, uint32_t a, uint32_t b, uint32_t cc_)
 {
-	uint32_t n = cc_node_new(c, op, cc_type_basic(TY_VOID), loc);
+	uint32_t n = cc_node_new(c, op, cc_type_basic(AST_TYPE_VOID), loc);
 
 	AST_NODE(n)->a = a, AST_NODE(n)->b = b, AST_NODE(n)->c = cc_;
 	return n;
@@ -30,7 +30,7 @@ CC_PRIVATE uint32_t cc_statement_new(cc *c, int op, uint32_t loc, uint32_t a, ui
 /* -Wparentheses: "if (x = 1)" */
 static void cc_statement_assignment_condition_warn(cc *c, uint32_t e)
 {
-	if (AST_NODE(e)->op == N_ASSIGN && !AST_NODE(e)->aux && !(AST_NODE(e)->flags & (NF_PAREN | NF_MACRO | NF_ERR))) {
+	if (AST_NODE(e)->op == AST_NODE_ASSIGN && !AST_NODE(e)->aux && !(AST_NODE(e)->flags & (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO | AST_NODE_FLAG_ERROR))) {
 		uint32_t op = AST_NODE(e)->loc;
 		diag_span r[2] = { cc_node_range(c, AST_NODE(e)->a), cc_node_range(c, AST_NODE(e)->b) };
 		diag_span all = { r[0].b, r[1].e };
@@ -50,7 +50,7 @@ static void cc_statement_assignment_condition_warn(cc *c, uint32_t e)
 /* Large switches are checked with a sorted interval sweep, rather than a
  * quadratic scan at every label. Keep the small-switch diagnostic order. */
 typedef struct cc_switch_case_order {
-	struct swcase v;
+	struct cc_switch_case v;
 	uint32_t index;
 } cc_switch_case_order;
 
@@ -72,7 +72,7 @@ static void cc_statement_switch_duplicates_check(cc *c)
 		return;
 	a = cc_heap_allocate(c, n * sizeof(*a));
 	for (uint32_t i = 0; i < n; i++) {
-		struct swcase v = c->cases[c->case_base + i];
+		struct cc_switch_case v = c->cases[c->case_base + i];
 
 		if (v.lo <= v.hi)
 			a[count++] = (cc_switch_case_order){v, i};
@@ -104,7 +104,7 @@ static void cc_statement_switch_duplicates_check(cc *c)
 }
 
 /* -Wswitch: "enumeration value 'CC_COMPLEX_BINARY' not handled in switch" (no default label) */
-static void cc_statement_switch_enum_warn(cc *c, qty et, uint32_t cnd)
+static void cc_statement_switch_enum_warn(cc *c, ast_qualified_type et, uint32_t cnd)
 {
 	const tag *t = &c->tags[AST_TYPE(c, et)->aux];
 	uint32_t miss[3], nmiss = 0;
@@ -181,7 +181,7 @@ static void cc_asm_operands_parse(cc *c, cc_id_list *ops, bool out)
 		e = expr(c);
 		cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
 		if (out) {
-			if (!(AST_NODE(e)->flags & NF_LVALUE))
+			if (!(AST_NODE(e)->flags & AST_NODE_FLAG_LVALUE))
 				cc_report_error(c, AST_NODE(e)->loc, "invalid lvalue in asm output");
 		} else
 			e = cc_conversion_decay(c, e);
@@ -212,7 +212,7 @@ static int cc_asm_colons_parse(cc *c, int *pending)
 CC_PRIVATE uint32_t cc_asm_statement_parse(cc *c, bool toplevel)
 {
 	uint32_t loc = tok(c)->loc, ai = c->nasm++, n;
-	casm *a = &c->asms[ai];
+	ast_asm_statement *a = &c->asms[ai];
 
 	if (cc_token_keyword(tok(c)) == KW_asm)	/* (clang -pedantic: the GNU spelling) */
 		CC_REPORT_EXTENSION_MICROSOFT(c, "asm", "language-extension-token", cc_warning_group_pedantic, loc, "extension used");
@@ -267,11 +267,11 @@ CC_PRIVATE uint32_t cc_asm_statement_parse(cc *c, bool toplevel)
 	a = &c->asms[ai];
 	a->nout = outs.n / 3;
 	a->nin = ins.n / 3;
-	a->ops = cc_heap_allocate(c, (a->nout + a->nin + 1) * sizeof(asmop));
+	a->ops = cc_heap_allocate(c, (a->nout + a->nin + 1) * sizeof(ast_asm_operand));
 	for (uint32_t i = 0; i < a->nout; i++)
-		a->ops[i] = (asmop){ outs.v[3 * i], outs.v[3 * i + 1], outs.v[3 * i + 2] };
+		a->ops[i] = (ast_asm_operand){ outs.v[3 * i], outs.v[3 * i + 1], outs.v[3 * i + 2] };
 	for (uint32_t i = 0; i < a->nin; i++)
-		a->ops[a->nout + i] = (asmop){ ins.v[3 * i], ins.v[3 * i + 1], ins.v[3 * i + 2] };
+		a->ops[a->nout + i] = (ast_asm_operand){ ins.v[3 * i], ins.v[3 * i + 1], ins.v[3 * i + 2] };
 	a->nclob = clob.n;
 	a->clob = cc_heap_allocate(c, (clob.n + 1) * sizeof(uint32_t));
 	memcpy(a->clob, clob.v, clob.n * sizeof(uint32_t));
@@ -279,7 +279,7 @@ CC_PRIVATE uint32_t cc_asm_statement_parse(cc *c, bool toplevel)
 	a->labels = cc_heap_allocate(c, (labs.n + 1) * sizeof(uint32_t));
 	memcpy(a->labels, labs.v, labs.n * sizeof(uint32_t));
 	cc_token_expect_semicolon(c, "after asm statement");
-	n = cc_statement_new(c, N_ASM, loc, ai, 0, 0);
+	n = cc_statement_new(c, AST_NODE_ASM, loc, ai, 0, 0);
 	return n;
 }
 
@@ -361,9 +361,9 @@ static void cc_compound_statement_item_parse(cc *c, uint32_t loc, cc_id_list *it
 	if (se && items->n > *sedone) {	/* a statement expression: the one before was not the last */
 		uint32_t ls = items->v[items->n - 1];
 
-		while (AST_NODE(ls)->op == N_LABEL)
+		while (AST_NODE(ls)->op == AST_NODE_LABEL)
 			ls = AST_NODE(ls)->c;
-		if (AST_NODE(ls)->op == N_EXPR && AST_NODE(ls)->a)
+		if (AST_NODE(ls)->op == AST_NODE_EXPRESSION && AST_NODE(ls)->a)
 			cc_unused_set_only_check(c, AST_NODE(ls)->a), cc_unused_value_check(c, AST_NODE(ls)->a, false);
 		*sedone = items->n;
 	}
@@ -401,7 +401,7 @@ static void cc_compound_statement_item_parse(cc *c, uint32_t loc, cc_id_list *it
 	c->se_direct = se;
 	uint32_t n = cc_statement_parse(c);
 
-	if (AST_NODE(n)->op == N_BLOCK && AST_NODE(n)->aux == 1) {
+	if (AST_NODE(n)->op == AST_NODE_BLOCK && AST_NODE(n)->aux == 1) {
 		/* A flat label list is part of this block: in particular, its last
 		 * labeled expression still supplies a statement expression's value. */
 		for (uint32_t i = 0; i < AST_NODE(n)->c; i++)
@@ -411,7 +411,7 @@ static void cc_compound_statement_item_parse(cc *c, uint32_t loc, cc_id_list *it
 	}
 }
 
-CC_PRIVATE uint32_t cc_compound_statement_parse(cc *c, qty *last)
+CC_PRIVATE uint32_t cc_compound_statement_parse(cc *c, ast_qualified_type *last)
 {
 	uint32_t loc = tok(c)->loc, n, sedone = 0;
 	cc_id_list items, locals;
@@ -441,7 +441,7 @@ CC_PRIVATE uint32_t cc_compound_statement_parse(cc *c, qty *last)
 		cc_token_expect_semicolon(c, "at end of declaration");
 	}
 	{
-		recov r;
+		cc_recovery_point r;
 
 		if (CC_RECOVERY_ARM(c, &r))
 			cc_recovery_restore(c, &r, CC_RECOVERY_BLOCK);	/* after a parse error: on with the next statement */
@@ -451,15 +451,15 @@ CC_PRIVATE uint32_t cc_compound_statement_parse(cc *c, qty *last)
 	}
 	next(c);
 	if (last) {
-		*last = cc_type_basic(TY_VOID);
+		*last = cc_type_basic(AST_TYPE_VOID);
 		uint32_t ls = items.n ? items.v[items.n - 1] : 0;
 
-		while (ls && AST_NODE(ls)->op == N_LABEL)	/* clang: a labeled statement gives its value */
+		while (ls && AST_NODE(ls)->op == AST_NODE_LABEL)	/* clang: a labeled statement gives its value */
 			ls = AST_NODE(ls)->c;
-		if (ls && AST_NODE(ls)->op == N_EXPR && AST_NODE(ls)->a) {
+		if (ls && AST_NODE(ls)->op == AST_NODE_EXPRESSION && AST_NODE(ls)->a) {
 			uint32_t e = cc_conversion_decay(c, AST_NODE(ls)->a);
 
-			*last = QUNQ(AST_NODE(e)->ty);
+			*last = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(e)->ty);
 		}
 	}
 	for (uint32_t i = locals.n; i-- > 0;) {
@@ -468,7 +468,7 @@ CC_PRIVATE uint32_t cc_compound_statement_parse(cc *c, qty *last)
 		*cc_scope_slot(c, c->ldir, l->name) = l->shadow;
 	}
 	cc_scope_close(c);
-	n = cc_statement_new(c, N_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
+	n = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
 	return n;
 }
 
@@ -487,7 +487,7 @@ static uint32_t cc_statement_sub_parse(cc *c)
 static uint32_t cc_labeled_statement_body_parse(cc *c, uint32_t loc)
 {
 	if (cc_token_is(c, LEX_TOKEN_RIGHT_BRACE))	/* label at end of compound statement (C23) */
-		return cc_statement_new(c, N_EXPR, loc, 0, 0, 0);
+		return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0, 0);
 	uint32_t dl = tok(c)->loc;
 	bool pend = false;
 
@@ -496,7 +496,7 @@ static uint32_t cc_labeled_statement_body_parse(cc *c, uint32_t loc)
 
 		cc_attribute_list_parse(c, &a);
 		if (cc_token_accept(c, LEX_TOKEN_SEMICOLON))
-			return cc_statement_new(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough; */
+			return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0, 0);	/* fallthrough; */
 		if (!cc_token_is_declaration_start(c, tok(c)))
 			return cc_statement_parse(c);
 		c->pend = a, c->has_pend = true, pend = true;	/* __attribute__((unused)) int x; */
@@ -510,7 +510,7 @@ static uint32_t cc_labeled_statement_body_parse(cc *c, uint32_t loc)
 		cc_id_list_init(&items);
 		cc_declaration_parse(c, &items, false);
 		/* Declaration packing does not introduce a lexical scope. */
-		uint32_t n = cc_statement_new(c, N_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
+		uint32_t n = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
 
 		AST_NODE(n)->aux = 1;
 		return n;
@@ -553,7 +553,7 @@ static uint32_t cc_labeled_statement_head_parse(cc *c)
 			if (c->labels[l].defined)
 				cc_report_error(c, loc, "redefinition of label '%.*s'", CC_IDENTIFIER(c->labels[l].name));
 			s = 0;
-			n = cc_statement_new(c, N_LABEL, loc, l, 0, s);
+			n = cc_statement_new(c, AST_NODE_LABEL, loc, l, 0, s);
 			c->labels[l].defined = n;
 			return n;
 		}
@@ -600,14 +600,14 @@ static uint32_t cc_labeled_statement_head_parse(cc *c)
 				c->capcase = c->capcase ? c->capcase * 2 : 64;
 				c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
 			}
-			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
+			c->cases[c->ncase++] = (struct cc_switch_case){ lo, hi, vloc };
 		}
 		s = 0;
 		c->ipool[c->nipool] = lo;
 		c->ipool[c->nipool + 1] = hi;
 		if (c->uv_any & 1)
 			c->uv_any |= 8;	/* (a jump from the switch: run the analysis) */
-		n = cc_statement_new(c, N_CASE, loc, c->nipool, c->nipool + 1, s);
+		n = cc_statement_new(c, AST_NODE_CASE, loc, c->nipool, c->nipool + 1, s);
 		c->nipool += 2;
 		return n;
 	}
@@ -622,7 +622,7 @@ static uint32_t cc_labeled_statement_head_parse(cc *c)
 		s = 0;
 		if (c->uv_any & 1)
 			c->uv_any |= 8;
-		return cc_statement_new(c, N_DEFAULT, loc, 0, 0, s);
+		return cc_statement_new(c, AST_NODE_DEFAULT, loc, 0, 0, s);
 	}
 	default: return 0;
 	}
@@ -637,12 +637,12 @@ static uint32_t cc_labeled_statement_parse(cc *c, bool sed)
 	cc_id_list_init(&labels);
 	do {
 		last = cc_labeled_statement_head_parse(c);
-		named &= AST_NODE(last)->op == N_LABEL;
+		named &= AST_NODE(last)->op == AST_NODE_LABEL;
 		cc_id_list_append(c, &labels, last);
 	} while (cc_token_at_label(c));
 	c->se_direct = sed;
 	body = cc_labeled_statement_body_parse(c, AST_NODE(last)->loc);
-	if (AST_NODE(body)->op == N_BLOCK && AST_NODE(body)->aux == 1) {
+	if (AST_NODE(body)->op == AST_NODE_BLOCK && AST_NODE(body)->aux == 1) {
 		/* Keep labeled declarations in the enclosing block, including all
 		 * declarators and their cleanup/stack lifetimes. */
 		for (uint32_t i = 0; i < AST_NODE(body)->c; i++)
@@ -656,7 +656,7 @@ static uint32_t cc_labeled_statement_parse(cc *c, bool sed)
 	}
 	if (labels.n == 1)
 		return last;
-	uint32_t n = cc_statement_new(c, N_BLOCK, loc, 0, cc_id_list_freeze(c, &labels), labels.n);
+	uint32_t n = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &labels), labels.n);
 
 	AST_NODE(n)->aux = 1; /* synthetic label list, flattened by cc_compound_statement_item_parse */
 	return n;
@@ -687,7 +687,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		break;
 	case LEX_TOKEN_SEMICOLON:
 		next(c);
-		return cc_statement_new(c, N_EXPR, loc, 0, 0, 0);
+		return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0, 0);
 	default:
 		break;
 	}
@@ -700,8 +700,8 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		cnd = cc_statement_condition_parse(c, "if");
 		{
 			/* clang: runtime-behaviour warnings only in reachable code */
-			cval cv;
-			int k = cc_eval(c, cnd, &cv) && cv.kind == CV_INT ? cv.i != 0 : -1;
+			cc_value cv;
+			int k = cc_eval(c, cnd, &cv) && cv.kind == CC_VALUE_INTEGER ? cv.i != 0 : -1;
 			uint32_t rp = c->prevloc, tb = tok(c)->loc, eb, n;
 
 			c->cnd++;
@@ -719,7 +719,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 			}
 			c->cnd--;
 			if (c->o->std != 89) cc_scope_close(c);
-			n = cc_statement_new(c, N_IF, loc, cnd, th, el);
+			n = cc_statement_new(c, AST_NODE_IF, loc, cnd, th, el);
 			c->span[n] = (diag_span){ loc, rp };
 			return n;
 		}
@@ -734,7 +734,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		c->cnd++, body = cc_statement_sub_parse(c), c->cnd--;
 		c->in_loop--;
 		if (c->o->std != 89) cc_scope_close(c);
-		return cc_statement_new(c, N_WHILE, loc, cnd, body, 0);
+		return cc_statement_new(c, AST_NODE_WHILE, loc, cnd, body, 0);
 	}
 	case KW_do: {
 		uint32_t cnd, body;
@@ -750,12 +750,12 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		cnd = cc_statement_condition_parse(c, "while");
 		if (c->o->std != 89) cc_scope_close(c);
 		cc_token_expect_semicolon(c, "after do/while statement");
-		return cc_statement_new(c, N_DO, loc, cnd, body, 0);
+		return cc_statement_new(c, AST_NODE_DO, loc, cnd, body, 0);
 	}
 	case KW_for: {
 		uint32_t init = 0, cnd = 0, step = 0, body, n;
 		cc_id_list sb;
-		recov r;
+		cc_recovery_point r;
 		uint32_t open;
 
 		next(c);
@@ -775,12 +775,12 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 
 			cc_id_list_init(&items);
 			cc_declaration_parse(c, &items, false);
-			init = cc_statement_new(c, N_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
+			init = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &items), items.n);
 		} else {
 			uint32_t e = 0;
 
 			if (!cc_token_is(c, LEX_TOKEN_SEMICOLON))
-				init = cc_statement_new(c, N_EXPR, loc, e = expr(c), 0, 0);
+				init = cc_statement_new(c, AST_NODE_EXPRESSION, loc, e = expr(c), 0, 0);
 			cc_statement_for_semicolon_expect(c, e);
 		}
 		if (!cc_token_is(c, LEX_TOKEN_SEMICOLON)) {
@@ -798,7 +798,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		c->in_loop++;
 		c->cnd++, body = cc_statement_sub_parse(c), c->cnd--;
 		c->in_loop--;
-		if (init && AST_NODE(init)->op == N_EXPR && AST_NODE(init)->a)	/* clang's ActOnForStmt: the first and third clauses */
+		if (init && AST_NODE(init)->op == AST_NODE_EXPRESSION && AST_NODE(init)->a)	/* clang's ActOnForStmt: the first and third clauses */
 			cc_unused_set_only_check(c, AST_NODE(init)->a), cc_unused_value_check(c, AST_NODE(init)->a, false);
 		if (step)
 			cc_unused_set_only_check(c, step);
@@ -806,13 +806,13 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		cc_id_list_init(&sb);
 		cc_id_list_append(c, &sb, step);
 		cc_id_list_append(c, &sb, body);
-		n = cc_statement_new(c, N_FOR, loc, init, cnd, cc_id_list_freeze(c, &sb));
+		n = cc_statement_new(c, AST_NODE_FOR, loc, init, cnd, cc_id_list_freeze(c, &sb));
 		return n;
 	}
 	case KW_switch: {
 		uint32_t cnd, body, open;
-		qty et;
-		qty saved = c->switch_ty;
+		ast_qualified_type et;
+		ast_qualified_type saved = c->switch_ty;
 
 		next(c);
 		if (c->o->std != 89) cc_scope_open(c);
@@ -822,7 +822,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		next(c);
 		cnd = expr(c);
 		et = AST_NODE(cnd)->ty;
-		while (AST_NODE(cnd)->op == N_CAST && AST_NODE(cnd)->a && !c->span[cnd].e && AST_TYPE_KIND(c, AST_NODE(AST_NODE(cnd)->a)->ty) == TY_ENUM)
+		while (AST_NODE(cnd)->op == AST_NODE_CAST && AST_NODE(cnd)->a && !c->span[cnd].e && AST_TYPE_KIND(c, AST_NODE(AST_NODE(cnd)->a)->ty) == AST_TYPE_ENUM)
 			cnd = AST_NODE(cnd)->a, et = AST_NODE(cnd)->ty;	/* -Wswitch looks at the enum before promotion */
 		cnd = cc_node_rvalue(c, cnd);
 		cc_token_expect_close(c, LEX_TOKEN_RIGHT_PAREN, open, cnd);
@@ -841,12 +841,12 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 			c->case_base = c->ncase;
 			c->sw_default = false;
 			c->cnd++, body = cc_statement_sub_parse(c), c->cnd--;
-			if (!c->sw_default && AST_TYPE_KIND(c, et) == TY_ENUM)
+			if (!c->sw_default && AST_TYPE_KIND(c, et) == AST_TYPE_ENUM)
 				cc_statement_switch_enum_warn(c, et, cnd);
 			if (!c->sw_default) {
-				cval cv;
+				cc_value cv;
 
-				if (cc_eval(c, cnd, &cv) && cv.kind == CV_INT) {
+				if (cc_eval(c, cnd, &cv) && cv.kind == CC_VALUE_INTEGER) {
 					bool hit = false;
 
 					for (uint32_t i = c->case_base; i < c->ncase && !hit; i++)
@@ -867,30 +867,30 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		c->in_switch--;
 		c->switch_ty = saved;
 		if (c->o->std != 89) cc_scope_close(c);
-		return cc_statement_new(c, N_SWITCH, loc, cnd, body, 0);
+		return cc_statement_new(c, AST_NODE_SWITCH, loc, cnd, body, 0);
 	}
 	case KW_break:
 		next(c);
 		if (!c->in_loop && !c->in_switch)
 			cc_report_error(c, loc, "'break' statement not in loop or switch statement");
 		cc_token_expect_semicolon(c, "after break statement");
-		return cc_statement_new(c, N_BREAK, loc, 0, 0, 0);
+		return cc_statement_new(c, AST_NODE_BREAK, loc, 0, 0, 0);
 	case KW_continue:
 		next(c);
 		if (!c->in_loop)
 			cc_report_error(c, loc, "'continue' statement not in loop statement");
 		cc_token_expect_semicolon(c, "after continue statement");
-		return cc_statement_new(c, N_CONTINUE, loc, 0, 0, 0);
+		return cc_statement_new(c, AST_NODE_CONTINUE, loc, 0, 0, 0);
 	case KW_return: {
 		uint32_t e = 0;
-		qty rt = c->fn ? AST_TYPE(c, c->syms[c->fn].ty)->base : cc_type_basic(TY_INT);
+		ast_qualified_type rt = c->fn ? AST_TYPE(c, c->syms[c->fn].ty)->base : cc_type_basic(AST_TYPE_INT);
 
 		next(c);
 		if (!cc_token_is(c, LEX_TOKEN_SEMICOLON)) {
 			e = cc_conversion_decay(c, expr(c));
 			if (!cc_type_is_void(c, rt) && !cc_type_is_void(c, AST_NODE(e)->ty))
 				e = cc_type_is_record(c, rt) && !cc_type_is_complex(c, rt) ? e : cc_conversion_apply_as(c, e, rt, CC_CONVERSION_CONTEXT_RETURN, loc);
-			else if (!cc_type_is_void(c, rt) && cc_type_is_void(c, AST_NODE(e)->ty) && !(AST_NODE(e)->flags & NF_ERR)) {
+			else if (!cc_type_is_void(c, rt) && cc_type_is_void(c, AST_NODE(e)->ty) && !(AST_NODE(e)->flags & AST_NODE_FLAG_ERROR)) {
 				diag_span r = cc_node_range(c, e);
 				char f[256];
 
@@ -898,7 +898,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 				report(c, "error", r.b, &r, 1, NULL, 0, "returning '%s' from a function with incompatible result type '%s'", f,
 				       tyname(c, rt));
 			}
-			else if (cc_type_is_void(c, rt) && !cc_type_is_void(c, AST_NODE(e)->ty) && c->fn && !(AST_NODE(e)->flags & NF_ERR)) {
+			else if (cc_type_is_void(c, rt) && !cc_type_is_void(c, AST_NODE(e)->ty) && c->fn && !(AST_NODE(e)->flags & AST_NODE_FLAG_ERROR)) {
 				diag_span r = cc_node_range(c, e);
 
 				cc_report_flag_error(c, "return-mismatch", (const char *const[]){"return-type", NULL}, loc, &r, 1, "void function '%.*s' should not return a value",
@@ -916,10 +916,10 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 			cc_token_expect_semicolon(c, "after return statement");
 		if (e && c->fn && !AST_NODE_IS_ERROR(e))
 			cc_return_stack_address_check(c, e, false);
-		if (c->fn && (c->syms[c->fn].flags & SF_NORETURN))
+		if (c->fn && (c->syms[c->fn].flags & AST_SYMBOL_FLAG_NORETURN))
 			cc_report_warning(c, "invalid-noreturn", true, NULL, loc, NULL, 0, NULL, 0, "function '%.*s' declared 'noreturn' should not return",
 				 CC_IDENTIFIER(c->syms[c->fn].name));
-		return cc_statement_new(c, N_RETURN, loc, e, 0, 0);
+		return cc_statement_new(c, AST_NODE_RETURN, loc, e, 0, 0);
 	}
 	case KW_goto:
 		next(c);
@@ -931,7 +931,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 			e = cc_conversion_decay(c, expr(c));
 
 			cc_token_expect_semicolon(c, "after goto statement");
-			return cc_statement_new(c, N_GOTO_IND, loc, e, 0, 0);
+			return cc_statement_new(c, AST_NODE_GOTO_INDIRECT, loc, e, 0, 0);
 		}
 		if (!cc_token_is(c, LEX_TOKEN_IDENTIFIER))
 			cc_report_fatal(c, tok(c)->loc, "expected identifier");
@@ -942,7 +942,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 			cc_token_expect_semicolon(c, "after goto statement");
 			if (c->uv_any & 1)
 				c->uv_any |= 8;	/* (a jump past a later assignment: run the analysis) */
-			return cc_statement_new(c, N_GOTO, loc, l, 0, 0);
+			return cc_statement_new(c, AST_NODE_GOTO, loc, l, 0, 0);
 		}
 	case KW_asm: case KW___asm__: case KW___asm:
 		return cc_asm_statement_parse(c, false);
@@ -951,7 +951,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 
 		cc_attribute_list_parse(c, &a);
 		if (cc_token_accept(c, LEX_TOKEN_SEMICOLON))
-			return cc_statement_new(c, N_EXPR, loc, 0, 0, 0);	/* fallthrough etc. */
+			return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0, 0);	/* fallthrough etc. */
 		return cc_statement_parse(c);
 	}
 	default:
@@ -966,7 +966,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 		while (!cc_token_is(c, LEX_TOKEN_SEMICOLON) && !cc_token_is(c, LEX_TOKEN_RIGHT_BRACE) && !cc_token_is(c, LEX_TOKEN_EOF))
 			next(c);
 		cc_token_accept(c, LEX_TOKEN_SEMICOLON);
-		return cc_statement_new(c, N_EXPR, loc, 0, 0, 0);
+		return cc_statement_new(c, AST_NODE_EXPRESSION, loc, 0, 0, 0);
 	}
 	{
 		int er = c->errors;
@@ -979,14 +979,14 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
 				cc_unused_result_check(c, e, true);
 			if (!sed)
 				cc_unused_set_only_check(c, e);
-			if (!sed && !cmp && !(c->in_stmtexpr && AST_NODE(e)->op == N_BINARY && cc_operator_is_comparison(AST_NODE(e)->aux) &&
-					      !(AST_NODE(e)->flags & (NF_PAREN | NF_MACRO))))
+			if (!sed && !cmp && !(c->in_stmtexpr && AST_NODE(e)->op == AST_NODE_BINARY && cc_operator_is_comparison(AST_NODE(e)->aux) &&
+					      !(AST_NODE(e)->flags & (AST_NODE_FLAG_PARENTHESIZED | AST_NODE_FLAG_FROM_MACRO))))
 				cc_unused_value_check(c, e, false);
 		}
 		if (unlikely(!cc_token_is(c, LEX_TOKEN_SEMICOLON)) && AST_NODE_IS_ERROR(e))
 			cc_recovery_skip_semicolon(c);	/* clang: after an invalid expression, silently to the ';' */
 		else
 			cc_token_expect_semicolon(c, "after expression");
-		return cc_statement_new(c, N_EXPR, loc, e, 0, 0);
+		return cc_statement_new(c, AST_NODE_EXPRESSION, loc, e, 0, 0);
 	}
 }

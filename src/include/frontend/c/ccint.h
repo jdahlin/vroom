@@ -1,5 +1,5 @@
-#ifndef VCC_CCINT_H
-#define VCC_CCINT_H
+#ifndef VCC_FRONTEND_C_CCINT_H
+#define VCC_FRONTEND_C_CCINT_H
 /*
  * vcc front end internals shared by frontend/c/ (parser + sema) and codegen/ (code
  * generator): the per-TU state and the AST side tables.
@@ -17,9 +17,9 @@ typedef unsigned __int128 u128;
 
 /* ---------------- per-TU state ---------------- */
 
-#define DIR_BITS 11
-#define DIR_PAGE (1u << DIR_BITS)
-#define NDIR ((1u << VINTERN_ID_BITS) >> DIR_BITS)
+#define CC_DIRECTORY_BITS 11
+#define CC_DIRECTORY_PAGE (1u << CC_DIRECTORY_BITS)
+#define CC_DIRECTORY_COUNT ((1u << VINTERN_ID_BITS) >> CC_DIRECTORY_BITS)
 
 typedef struct cstr {		/* a string literal */
 	const char *s;		/* bytes, element size each, zero terminated */
@@ -30,7 +30,7 @@ typedef struct cstr {		/* a string literal */
 
 typedef struct label {
 	uint32_t name, loc;
-	uint32_t defined;	/* node of the N_LABEL, 0 if only referenced */
+	uint32_t defined;	/* node of the AST_NODE_LABEL, 0 if only referenced */
 	uint32_t shadow;	/* __label__ scoping */
 	uint32_t depth;
 	uint8_t local;		/* declared with __label__ */
@@ -39,10 +39,10 @@ typedef struct label {
 
 /* Call-site restrictions kept with declaration attributes, including redeclarations. */
 enum {
-	AF_TAIL_RETURNS_TWICE = 1u << 0,
-	AF_TAIL_DISABLE = 1u << 1,
-	AF_TAIL_NOT_CALLED = 1u << 2,
-	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
+	CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE = 1u << 0,
+	CC_ATTRIBUTE_FLAG_TAIL_DISABLE = 1u << 1,
+	CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED = 1u << 2,
+	CC_ATTRIBUTE_FLAG_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
 };
 
 typedef struct attrs {		/* the attributes of one declaration */
@@ -77,36 +77,36 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
 } attrs;
 
-typedef struct asmop {
+typedef struct ast_asm_operand {
 	uint32_t name;		/* [name] id, 0 */
 	uint32_t constraint;	/* string index */
 	uint32_t expr;		/* node */
-} asmop;
+} ast_asm_operand;
 
-typedef struct casm {
+typedef struct ast_asm_statement {
 	uint32_t tmpl;		/* string index */
 	uint32_t nout, nin, nclob, nlabel;
-	asmop *ops;		/* outputs then inputs */
+	ast_asm_operand *ops;		/* outputs then inputs */
 	uint32_t *clob;		/* string indices */
 	uint32_t *labels;	/* label indices */
 	uint8_t vol, go, inl, extended;
-} casm;
+} ast_asm_statement;
 
 /*
  * Lazy function bodies: a static function defined in a header keeps its
  * body as tokens (lztok, spellings of non-identifiers in lzs) and is parsed
- * after the TU only if something names it (SF_REF), like clang's deferred
+ * after the TU only if something names it (AST_SYMBOL_FLAG_REFERENCED), like clang's deferred
  * emission one step earlier.  Most of a kernel TU's tokens are such bodies.
  */
-typedef struct lztok {
+typedef struct cc_lazy_token {
 	uint32_t loc;
 	uint32_t v;		/* LEX_TOKEN_IDENTIFIER: interned id; otherwise: offset of the spelling in lzs */
 	uint32_t len;
 	uint8_t kind, flags;
 	uint16_t _pad;
-} lztok;
+} cc_lazy_token;
 
-typedef struct lzfn {
+typedef struct cc_lazy_function {
 	uint32_t sym;
 	uint32_t tk, ntk;	/* its tokens in lzt, '{' to '}' */
 	uint32_t wm;		/* nsym at the definition: later file-scope syms are not visible */
@@ -114,17 +114,17 @@ typedef struct lzfn {
 	uint8_t done;
 	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
 	pp_lazy z;
-} lzfn;
+} cc_lazy_function;
 
 
 struct cc {
 	pp *p;
-	const cc_opts *o;
+	const cc_options *o;
 	struct cc_type_name *tyb;	/* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
 	unsigned tyk;
 	jmp_buf bail;
 	int errors;
-	struct recov *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */
+	struct cc_recovery_point *rec;	/* the innermost parser recovery point (diag.c), NULL: errors end the TU */
 	bool for_head;		/* parsing a for (...;...;...) header: clang's form of "expected ';'" */
 	int ibr;		/* initializer '{'s open: after an error the skip closes them first */
 	const char *dbug;	/* the first delayed bug: an error was due, and must have come by the end */
@@ -159,7 +159,7 @@ struct cc {
 	uint32_t in_proto;
 	uint32_t nconv;		/* conversion errors (clang's DefaultError warnings): later checks still run */
 	uint32_t constexpr_init;	/* symbol being initialized as a C23 constant object, 0 otherwise */
-	bool sie;		/* static_init_ok looks through NF_ERR (after such an error) */
+	bool sie;		/* static_init_ok looks through AST_NODE_FLAG_ERROR (after such an error) */
 	uint32_t tn_tdef;	/* the last type_name's typedef (sym), 0: none */
 	uint32_t *ptag, nptag, cptag;	/* tags declared in the outermost parameter list: a definition's body sees them */	/* parameter declarations being parsed: a new tag there is -Wvisibility */
 	uint32_t uv_asg;	/* the variable an '=' being parsed assigns */		/* if/loop/switch bodies being parsed */
@@ -173,7 +173,7 @@ struct cc {
 	uint32_t nty;
 	uint32_t *tyhash;	/* interning, open addressing */
 	uint32_t tyhcap;
-	qty *params;
+	ast_qualified_type *params;
 	uint32_t nparams;
 	uint32_t *fnhash, fnhcap, nfn;
 	uint32_t *ptrc;		/* qty -> type index of a pointer to it (a cache, checked on use) */
@@ -181,12 +181,12 @@ struct cc {
 
 	tag *tags;
 	uint32_t ntag;
-	uint32_t cplx[TY_NKINDS];	/* _Complex <kind>: its record type (0: not made yet) */
+	uint32_t cplx[AST_TYPE_KIND_COUNT];	/* _Complex <kind>: its record type (0: not made yet) */
 	sym *syms;
 	uint32_t nsym;
 	node *nodes;
 	diag_span *span;		/* per node: first and last token (start locations), 0: unknown */
-	struct cparen { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
+	struct cc_node_parentheses { uint16_t l, r; } *paren;	/* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 	uint32_t nnode;
 	uint32_t *lists;
 	uint32_t nlist;
@@ -200,15 +200,15 @@ struct cc {
 	uint32_t nlabel;
 	attrs *attr;
 	uint32_t nattr;
-	casm *asms;
+	ast_asm_statement *asms;
 	uint32_t nasm;
 
 	char *heap, *hp, *hend;	/* bump allocator for everything else */
-	struct dop *dops;	/* declarator op stack (frontend/c/declarator.c) */
+	struct cc_declarator_operation *dops;	/* declarator op stack (frontend/c/declarator.c) */
 	uint32_t ndops, capdops;
 
 	/* scopes: identifier id -> innermost binding (sym index) */
-	uint32_t *odir[NDIR], *tdir[NDIR], *ldir[NDIR];
+	uint32_t *odir[CC_DIRECTORY_COUNT], *tdir[CC_DIRECTORY_COUNT], *ldir[CC_DIRECTORY_COUNT];
 	uint32_t *sstack;	/* syms bound in open scopes */
 	uint32_t nsstack;
 	uint32_t smark[4096];
@@ -217,12 +217,12 @@ struct cc {
 	/* the function being parsed */
 	uint32_t fn;		/* sym */
 	uint32_t fn_labels;	/* first label of this function */
-	uint32_t *switch_cases;	/* N_CASE/N_DEFAULT nodes of the innermost switch */
+	uint32_t *switch_cases;	/* AST_NODE_CASE/AST_NODE_DEFAULT nodes of the innermost switch */
 	int in_loop, in_switch, in_stmtexpr;
 	bool sw_default;	/* the innermost switch has a default label */
-	struct swcase { i128 lo, hi; uint32_t loc; } *cases;	/* the open switches' case labels */
+	struct cc_switch_case { i128 lo, hi; uint32_t loc; } *cases;	/* the open switches' case labels */
 	uint32_t ncase, capcase, case_base;
-	qty switch_ty;
+	ast_qualified_type switch_ty;
 	int unevaluated;	/* sizeof / typeof / _Alignof operand */
 	int cexpr;
 	uint32_t *utd, nutd;	/* block-scope typedefs never named: -Wunused-local-typedef at the TU's end */
@@ -257,7 +257,7 @@ struct cc {
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
 
 	/* builtin types */
-	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;
+	ast_qualified_type t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;
 	uint32_t valist_tag;
 	uint32_t id_func, id_FUNCTION, id_PRETTY, id_main;
 	uint32_t id_int128_t, id_uint128_t, id_valist;
@@ -265,15 +265,15 @@ struct cc {
 	uint32_t func_name_sym;
 	uint32_t ntoplevel;
 	uint32_t *toplevel;	/* file-scope syms in declaration order */
-	uint32_t *tlasm;	/* file-scope asm("...") statements (N_ASM nodes) */
+	uint32_t *tlasm;	/* file-scope asm("...") statements (AST_NODE_ASM nodes) */
 	uint32_t ntlasm;
 	uint32_t ndiag;		/* diagnostics reported */
 	struct driver_declaration_cache_state *dc;	/* declaration cache (declaration-cache.c), NULL: off */
 
 	/* lazy bodies */
-	lztok *lzt;
+	cc_lazy_token *lzt;
 	uint32_t nlzt;
-	lzfn *lzf;
+	cc_lazy_function *lzf;
 	uint32_t nlzf;
 	char *lzs;
 	uint32_t nlzs;
@@ -293,90 +293,90 @@ struct cc {
 
 
 enum {
-	BI_NONE,
+	CC_BUILTIN_NONE,
 	/* special forms (own parsing) */
-	BI_CONSTANT_P, BI_EXPECT, BI_EXPECT_PROB, BI_CHOOSE, BI_TYPES_COMPAT, BI_OFFSETOF,
-	BI_VA_START, BI_VA_END, BI_VA_COPY, BI_VA_ARG,
-	BI_CLZ, BI_CLZL, BI_CLZLL, BI_CTZ, BI_CTZL, BI_CTZLL, BI_FFS, BI_FFSL, BI_FFSLL,
-	BI_POPCOUNT, BI_POPCOUNTL, BI_POPCOUNTLL, BI_PARITY, BI_PARITYL, BI_PARITYLL,
-	BI_CLRSB, BI_CLRSBL, BI_CLRSBLL, BI_CLZG, BI_CTZG, BI_POPCOUNTG, BI_SHUFFLEVECTOR, BI_CONVERTVECTOR,
-	BI_BSWAP16, BI_BSWAP32, BI_BSWAP64, BI_BITREVERSE8, BI_BITREVERSE16, BI_BITREVERSE32, BI_BITREVERSE64,
-	BI_UNREACHABLE, BI_TRAP, BI_DEBUGTRAP, BI_RETURN_ADDRESS, BI_FRAME_ADDRESS, BI_EXTRACT_RETURN_ADDR,
-	BI_ADD_OVERFLOW, BI_SUB_OVERFLOW, BI_MUL_OVERFLOW, BI_ADDC, BI_SUBC,
-	BI_OBJECT_SIZE, BI_DYNAMIC_OBJECT_SIZE, BI_COUNTED_BY_REF,
-	BI_ALLOCA, BI_ALLOCA_UNINIT, BI_PREFETCH, BI_ASSUME_ALIGNED, BI_ASSUME,
-	BI_CLASSIFY_TYPE, BI_IS_CONSTANT_EVALUATED, BI_STRLEN,
-	BI_HUGE_VAL, BI_HUGE_VALF, BI_INF, BI_INFF, BI_NAN, BI_NANF,
-	BI_ISNAN, BI_ISINF, BI_ISFINITE, BI_SIGNBIT, BI_FPCLASSIFY, BI_ISINF_SIGN, BI_ISNORMAL,
-	BI_ISGREATER, BI_ISGREATEREQUAL, BI_ISLESS, BI_ISLESSEQUAL, BI_ISLESSGREATER, BI_ISUNORDERED,
-	BI_CPU_SUPPORTS, BI_ARM_RSR, BI_FLT_ROUNDS, BI_OS_LOG_FORMAT, BI_OS_LOG_SIZE,
+	CC_BUILTIN_CONSTANT_P, CC_BUILTIN_EXPECT, CC_BUILTIN_EXPECT_PROB, CC_BUILTIN_CHOOSE_EXPR, CC_BUILTIN_TYPES_COMPATIBLE, CC_BUILTIN_OFFSETOF,
+	CC_BUILTIN_VA_START, CC_BUILTIN_VA_END, CC_BUILTIN_VA_COPY, CC_BUILTIN_VA_ARG,
+	CC_BUILTIN_CLZ, CC_BUILTIN_CLZL, CC_BUILTIN_CLZLL, CC_BUILTIN_CTZ, CC_BUILTIN_CTZL, CC_BUILTIN_CTZLL, CC_BUILTIN_FFS, CC_BUILTIN_FFSL, CC_BUILTIN_FFSLL,
+	CC_BUILTIN_POPCOUNT, CC_BUILTIN_POPCOUNTL, CC_BUILTIN_POPCOUNTLL, CC_BUILTIN_PARITY, CC_BUILTIN_PARITYL, CC_BUILTIN_PARITYLL,
+	CC_BUILTIN_CLRSB, CC_BUILTIN_CLRSBL, CC_BUILTIN_CLRSBLL, CC_BUILTIN_CLZG, CC_BUILTIN_CTZG, CC_BUILTIN_POPCOUNTG, CC_BUILTIN_SHUFFLEVECTOR, CC_BUILTIN_CONVERTVECTOR,
+	CC_BUILTIN_BSWAP16, CC_BUILTIN_BSWAP32, CC_BUILTIN_BSWAP64, CC_BUILTIN_BITREVERSE8, CC_BUILTIN_BITREVERSE16, CC_BUILTIN_BITREVERSE32, CC_BUILTIN_BITREVERSE64,
+	CC_BUILTIN_UNREACHABLE, CC_BUILTIN_TRAP, CC_BUILTIN_DEBUGTRAP, CC_BUILTIN_RETURN_ADDRESS, CC_BUILTIN_FRAME_ADDRESS, CC_BUILTIN_EXTRACT_RETURN_ADDRESS,
+	CC_BUILTIN_ADD_OVERFLOW, CC_BUILTIN_SUB_OVERFLOW, CC_BUILTIN_MUL_OVERFLOW, CC_BUILTIN_ADDC, CC_BUILTIN_SUBC,
+	CC_BUILTIN_OBJECT_SIZE, CC_BUILTIN_DYNAMIC_OBJECT_SIZE, CC_BUILTIN_COUNTED_BY_REF,
+	CC_BUILTIN_ALLOCA, CC_BUILTIN_ALLOCA_UNINITIALIZED, CC_BUILTIN_PREFETCH, CC_BUILTIN_ASSUME_ALIGNED, CC_BUILTIN_ASSUME,
+	CC_BUILTIN_CLASSIFY_TYPE, CC_BUILTIN_IS_CONSTANT_EVALUATED, CC_BUILTIN_STRLEN,
+	CC_BUILTIN_HUGE_VAL, CC_BUILTIN_HUGE_VALF, CC_BUILTIN_INF, CC_BUILTIN_INFF, CC_BUILTIN_NAN, CC_BUILTIN_NANF,
+	CC_BUILTIN_ISNAN, CC_BUILTIN_ISINF, CC_BUILTIN_ISFINITE, CC_BUILTIN_SIGNBIT, CC_BUILTIN_FPCLASSIFY, CC_BUILTIN_ISINF_SIGN, CC_BUILTIN_ISNORMAL,
+	CC_BUILTIN_ISGREATER, CC_BUILTIN_ISGREATEREQUAL, CC_BUILTIN_ISLESS, CC_BUILTIN_ISLESSEQUAL, CC_BUILTIN_ISLESSGREATER, CC_BUILTIN_ISUNORDERED,
+	CC_BUILTIN_CPU_SUPPORTS, CC_BUILTIN_ARM_RSR, CC_BUILTIN_FLT_ROUNDS, CC_BUILTIN_OS_LOG_FORMAT, CC_BUILTIN_OS_LOG_SIZE,
 	/* GNU __atomic_* (memory orders are evaluated, the code is always seq_cst) */
-	BI_ATOMIC_LOAD_N, BI_ATOMIC_STORE_N, BI_ATOMIC_EXCHANGE_N, BI_ATOMIC_CMPXCHG_N,
-	BI_ATOMIC_LOAD, BI_ATOMIC_STORE, BI_ATOMIC_EXCHANGE, BI_ATOMIC_CMPXCHG,
-	BI_ATOMIC_FETCH_ADD, BI_ATOMIC_FETCH_SUB, BI_ATOMIC_FETCH_AND, BI_ATOMIC_FETCH_OR, BI_ATOMIC_FETCH_XOR,
-	BI_ATOMIC_FETCH_NAND, BI_ATOMIC_FETCH_MAX, BI_ATOMIC_FETCH_MIN,	/* order as the _FETCH forms (emit: base) */
-	BI_ATOMIC_ADD_FETCH, BI_ATOMIC_SUB_FETCH, BI_ATOMIC_AND_FETCH, BI_ATOMIC_OR_FETCH, BI_ATOMIC_XOR_FETCH,
-	BI_ATOMIC_NAND_FETCH, BI_ATOMIC_MAX_FETCH, BI_ATOMIC_MIN_FETCH, BI_ATOMIC_TEST_AND_SET, BI_ATOMIC_CLEAR,
-	BI_ATOMIC_THREAD_FENCE, BI_ATOMIC_SIGNAL_FENCE, BI_ATOMIC_LOCK_FREE,
+	CC_BUILTIN_ATOMIC_LOAD_N, CC_BUILTIN_ATOMIC_STORE_N, CC_BUILTIN_ATOMIC_EXCHANGE_N, CC_BUILTIN_ATOMIC_CMPXCHG_N,
+	CC_BUILTIN_ATOMIC_LOAD, CC_BUILTIN_ATOMIC_STORE, CC_BUILTIN_ATOMIC_EXCHANGE, CC_BUILTIN_ATOMIC_CMPXCHG,
+	CC_BUILTIN_ATOMIC_FETCH_ADD, CC_BUILTIN_ATOMIC_FETCH_SUB, CC_BUILTIN_ATOMIC_FETCH_AND, CC_BUILTIN_ATOMIC_FETCH_OR, CC_BUILTIN_ATOMIC_FETCH_XOR,
+	CC_BUILTIN_ATOMIC_FETCH_NAND, CC_BUILTIN_ATOMIC_FETCH_MAX, CC_BUILTIN_ATOMIC_FETCH_MIN,	/* order as the _FETCH forms (emit: base) */
+	CC_BUILTIN_ATOMIC_ADD_FETCH, CC_BUILTIN_ATOMIC_SUB_FETCH, CC_BUILTIN_ATOMIC_AND_FETCH, CC_BUILTIN_ATOMIC_OR_FETCH, CC_BUILTIN_ATOMIC_XOR_FETCH,
+	CC_BUILTIN_ATOMIC_NAND_FETCH, CC_BUILTIN_ATOMIC_MAX_FETCH, CC_BUILTIN_ATOMIC_MIN_FETCH, CC_BUILTIN_ATOMIC_TEST_AND_SET, CC_BUILTIN_ATOMIC_CLEAR,
+	CC_BUILTIN_ATOMIC_THREAD_FENCE, CC_BUILTIN_ATOMIC_SIGNAL_FENCE, CC_BUILTIN_ATOMIC_LOCK_FREE,
 	/* legacy __sync_* without an __atomic_* form (the others map onto __atomic_*) */
-	BI_SYNC_VAL_CAS, BI_SYNC_BOOL_CAS, BI_SYNC_LOCK_RELEASE, BI_SYNC_SYNCHRONIZE,
-	BI_CONJ, BI_CREAL, BI_CIMAG,	/* complex parts (the element type is the signature's return) */
-	BI_ROTL8, BI_ROTL16, BI_ROTL32, BI_ROTL64, BI_ROTR8, BI_ROTR16, BI_ROTR32, BI_ROTR64,
-	/* ACLE hints and barriers (side effects: BI_ARM_NOP..BI_ARM_TRAP) */
-	BI_ARM_NOP, BI_ARM_YIELD, BI_ARM_WFE, BI_ARM_WFI, BI_ARM_SEV, BI_ARM_SEVL, BI_ARM_CLREX,
-	BI_ARM_ISB, BI_ARM_DMB, BI_ARM_DSB, BI_ARM_TRAP,
-	BI_SETJMP, BI_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
-	BI_LIB,	/* plain library call with a prototype */
-	BI_NANS, BI_ISSIGNALING,
-	BI_ISFPCLASS, BI_ISSUBNORMAL, BI_ISZERO,
-	BI_X86_SIMD, BI_X86_PCMPSTR, BI_X86_BLENDVB,
-	BI_ELEMENTWISE_ABS,
-	BI_STDC_ROTL, BI_STDC_ROTR,
-	BI_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
-	BI_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
-	BI_COMPLEX,
-	BI_COUNT
+	CC_BUILTIN_SYNC_VAL_CAS, CC_BUILTIN_SYNC_BOOL_CAS, CC_BUILTIN_SYNC_LOCK_RELEASE, CC_BUILTIN_SYNC_SYNCHRONIZE,
+	CC_BUILTIN_CONJ, CC_BUILTIN_CREAL, CC_BUILTIN_CIMAG,	/* complex parts (the element type is the signature's return) */
+	CC_BUILTIN_ROTL8, CC_BUILTIN_ROTL16, CC_BUILTIN_ROTL32, CC_BUILTIN_ROTL64, CC_BUILTIN_ROTR8, CC_BUILTIN_ROTR16, CC_BUILTIN_ROTR32, CC_BUILTIN_ROTR64,
+	/* ACLE hints and barriers (side effects: CC_BUILTIN_ARM_NOP..BI_ARM_TRAP) */
+	CC_BUILTIN_ARM_NOP, CC_BUILTIN_ARM_YIELD, CC_BUILTIN_ARM_WFE, CC_BUILTIN_ARM_WFI, CC_BUILTIN_ARM_SEV, CC_BUILTIN_ARM_SEVL, CC_BUILTIN_ARM_CLREX,
+	CC_BUILTIN_ARM_ISB, CC_BUILTIN_ARM_DMB, CC_BUILTIN_ARM_DSB, CC_BUILTIN_ARM_TRAP,
+	CC_BUILTIN_SETJMP, CC_BUILTIN_LONGJMP,	/* GCC's __builtin_setjmp/__builtin_longjmp: buf[0] frame, [1] resume address, [2] sp */
+	CC_BUILTIN_LIBRARY,	/* plain library call with a prototype */
+	CC_BUILTIN_NANS, CC_BUILTIN_ISSIGNALING,
+	CC_BUILTIN_ISFPCLASS, CC_BUILTIN_ISSUBNORMAL, CC_BUILTIN_ISZERO,
+	CC_BUILTIN_X86_SIMD, CC_BUILTIN_X86_PCMPSTR, CC_BUILTIN_X86_BLENDVB,
+	CC_BUILTIN_ELEMENTWISE_ABS,
+	CC_BUILTIN_STDC_ROTL, CC_BUILTIN_STDC_ROTR,
+	CC_BUILTIN_FAST_SQRT,	/* internal hardware sqrt, full fast-math only */
+	CC_BUILTIN_FAST_ROOT4,	/* internal double sqrt(sqrt(x)), full fast-math only */
+	CC_BUILTIN_COMPLEX,
+	CC_BUILTIN_COUNT
 };
 
-enum { CV_NONE, CV_INT, CV_FLT, CV_ADDR, CV_BIGINT };
+enum { CC_VALUE_NONE, CC_VALUE_INTEGER, CC_VALUE_FLOAT, CC_VALUE_ADDRESS, CC_VALUE_BITINT };
 
-typedef struct cval {
+typedef struct cc_value {
 	int kind;
-	uint32_t big, nbig;	/* CV_BIGINT: immutable LE32 storage words in lists */
+	uint32_t big, nbig;	/* CC_VALUE_BITINT: immutable LE32 storage words in lists */
 	bool ice;		/* integer constant expression (C11 6.6p6, clang's rules) */
-	i128 i;			/* CV_INT; CV_ADDR: byte offset */
-	double f;		/* CV_FLT; with ld, the nearest double of q */
-	u128 q;			/* CV_FLT with ld: the binary128 value (16-byte long double) */
+	i128 i;			/* CC_VALUE_INTEGER; CC_VALUE_ADDRESS: byte offset */
+	double f;		/* CC_VALUE_FLOAT; with ld, the nearest double of q */
+	u128 q;			/* CC_VALUE_FLOAT with ld: the binary128 value (16-byte long double) */
 	bool ld;
-	uint32_t sym, str;	/* CV_ADDR base: sym or string literal */
-	uint32_t label;		/* CV_ADDR base: &&label */
-	uint32_t sublabel;	/* CV_ADDR: minus &&sublabel (GNU label difference: a constant once laid out) */
-} cval;
+	uint32_t sym, str;	/* CC_VALUE_ADDRESS base: sym or string literal */
+	uint32_t label;		/* CC_VALUE_ADDRESS base: &&label */
+	uint32_t sublabel;	/* CC_VALUE_ADDRESS: minus &&sublabel (GNU label difference: a constant once laid out) */
+} cc_value;
 
-#define CT(c, t) (&(c)->ty[QI(t)])
-#define CKIND(c, t) ((c)->ty[QI(t)].kind)
-#define CN(c, i) (&(c)->nodes[i])
+#define AST_TYPE_OF(c, t) (&(c)->ty[AST_QUALIFIED_TYPE_INDEX(t)])
+#define AST_TYPE_KIND_OF(c, t) ((c)->ty[AST_QUALIFIED_TYPE_INDEX(t)].kind)
+#define AST_NODE_OF(c, i) (&(c)->nodes[i])
 
-bool cc_eval(cc *c, uint32_t n, cval *v);
-bool cc_init_subobject(cc *c, uint32_t n, uint32_t *init);
+bool cc_eval(cc *c, uint32_t n, cc_value *v);
+bool cc_initializer_subobject_find(cc *c, uint32_t n, uint32_t *init);
 /* Constant object representation, little-endian bytes plus a known-bit mask. */
-bool cc_bitcast_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned char *data, unsigned char *known);
-bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
-void dr_restored(cc *c);
-bool cc_is_signed(cc *c, qty t);
+bool cc_bit_cast_object_read(cc *c, uint32_t n, uint64_t off, unsigned len, unsigned char *data, unsigned char *known);
+bool cc_builtin_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
+void cc_replay_restored(cc *c);
+bool cc_is_signed(cc *c, ast_qualified_type t);
 /* Kinds for library builtins that the emitter treats specially. Other
  * builtins retain their normal call path. */
-enum { CC_LIB_OTHER, CC_LIB_MEMCPY, CC_LIB_MEMMOVE, CC_LIB_MEMSET,
-       CC_LIB_STRCMP, CC_LIB_FABSL, CC_LIB_CHK };
-int cc_builtin_libkind(int64_t i);
-int64_t cc_builtin_plain(int64_t i);
-int64_t cc_chk_simplify(int64_t bi, int na, bool osz_const, uint64_t osz, bool len_const, uint64_t len);
-const char *cc_builtin_name(int64_t i);
-const char *cc_lib_sig(const char *name, int *clang_enc);
-uint32_t cc_global_named(cc *c, const char *s);
+enum { CC_LIBRARY_KIND_OTHER, CC_LIBRARY_KIND_MEMCPY, CC_LIBRARY_KIND_MEMMOVE, CC_LIBRARY_KIND_MEMSET,
+       CC_LIBRARY_KIND_STRCMP, CC_LIBRARY_KIND_FABSL, CC_LIBRARY_KIND_CHECKED };
+int cc_builtin_library_kind(int64_t i);
+int64_t cc_builtin_unchecked(int64_t i);
+int64_t cc_builtin_checked_simplify(int64_t bi, int na, bool osz_const, uint64_t osz, bool len_const, uint64_t len);
+const char *cc_builtin_name_get(int64_t i);
+const char *cc_builtin_library_signature(const char *name, int *clang_enc);
+uint32_t cc_symbol_global_find(cc *c, const char *s);
 
 /* A declaration's target state overrides the translation-unit default. */
-static inline x86_features cc_x86_features(const cc *c, uint32_t fn)
+static inline x86_features cc_x86_features_get(const cc *c, uint32_t fn)
 {
 	if (fn && c->syms[fn].attrs && c->attr[c->syms[fn].attrs].x86_target)
 		return c->attr[c->syms[fn].attrs].x86_features;

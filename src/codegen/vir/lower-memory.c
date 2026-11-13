@@ -283,7 +283,7 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 {
 	vwst *V = e->vw;
 	cc *c = e->c;
-	qty t = c->syms[s].ty;
+	ast_qualified_type t = c->syms[s].ty;
 	uint32_t ty, inst = e->wk->inst, lj;
 
 	if (!em_local_eligible(e, s))
@@ -292,9 +292,9 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 		ty = VIR_TYPE_PTR;
 	else if (is_integer(c, t) && !is_wide(c, t) && tsize(c, t) - 1 < 8)
 		ty = tsize(c, t) == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
-	else if (KIND(c, t) == TY_FLOAT)
+	else if (KIND(c, t) == AST_TYPE_FLOAT)
 		ty = VIR_TYPE_F32;
-	else if (KIND(c, t) == TY_DOUBLE)
+	else if (KIND(c, t) == AST_TYPE_DOUBLE)
 		ty = VIR_TYPE_F64;
 	else
 		return false;

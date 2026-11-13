@@ -163,7 +163,7 @@ static bool vw_listed(ecx *e, uint32_t s)
 	return strstr(list, nm) != NULL;
 }
 
-VPRIV bool vw_enabled(const cc_opts *o)
+VPRIV bool vw_enabled(const cc_options *o)
 {
 	return (vw_mode() & 16) && o->opt >= 2;
 }

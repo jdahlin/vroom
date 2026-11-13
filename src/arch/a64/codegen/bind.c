@@ -8,7 +8,7 @@ VPRIV int regvar_reg(cc *c, uint32_t s)
 	const attrs *a = sym_attrs(c, s);
 	const char *n;
 
-	if (c->syms[s].sc != SC_REGISTER || !a->asmname)
+	if (c->syms[s].sc != AST_STORAGE_REGISTER || !a->asmname)
 		return -1;
 	n = c->strs[a->asmname - 1].s;
 	if (!strcmp(n, "sp"))
@@ -22,7 +22,7 @@ VPRIV int64_t bind_slot(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	bind *b = binding(e, s);
-	qty t = c->syms[s].ty;
+	ast_qualified_type t = c->syms[s].ty;
 	uint32_t al = talign(c, t);
 
 	if (c->syms[s].align > al)
@@ -31,7 +31,7 @@ VPRIV int64_t bind_slot(ecx *e, uint32_t s)
 	b->kind = B_SLOT;
 	b->kv = 0;
 	b->reg = 0xff;
-	if (c->syms[s].sc == SC_REGISTER) {
+	if (c->syms[s].sc == AST_STORAGE_REGISTER) {
 		int rr = regvar_reg(c, s);
 
 		if (rr >= 0)
@@ -72,7 +72,7 @@ VPRIV lval local_lval(ecx *e, uint32_t s)
 	cc *c = e->c;
 	bind *b = binding(e, s);
 	lval l = { 0 };
-	qty t = c->syms[s].ty;
+	ast_qualified_type t = c->syms[s].ty;
 
 	l.align = talign(c, t);
 	if (b->kind == B_LREG && b->inst) {

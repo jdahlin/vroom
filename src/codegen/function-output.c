@@ -26,7 +26,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const attrs *a = sym_attrs(c, s);
-	bool global = y->sc != SC_STATIC && y->depth == 0 && y->name;
+	bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 	size_t h = it_open(e, IT_TEXT);
 
 	if (a->section) {
@@ -36,7 +36,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		vtext_string_append(b, "\t.section\t\"");
 		vtext_string_append(b, sn);
 		vtext_string_append(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
-			 (QQ(y->ty) & Q_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
+			 (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
 	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
 		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
 		static const struct { const char *def, *base, *rest; } m[] = {
@@ -80,7 +80,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		sh = it_room(e, sizeof *sh);
 		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
 		if (global) {
-			sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
+			sh->bind = (y->flags & AST_SYMBOL_FLAG_WEAK) ? STB_WEAK : STB_GLOBAL;
 			if (a->visibility) {
 				const char *v = c->strs[a->visibility - 1].s;
 
@@ -91,7 +91,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		return;
 	}
 	if (global) {
-		vtext_string_append(b, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+		vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
 		sym_name(c, b, s);
 		vtext_char_append(b, '\n');
 		if (a->visibility) {

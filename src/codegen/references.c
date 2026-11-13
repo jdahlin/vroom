@@ -38,25 +38,25 @@ VPRIV void claim_ref(ecx *e, uint32_t ref)
 		uint32_t s = canon_sym(c, RIDX(ref));
 		const sym *y = &c->syms[s];
 
-		if (unlikely((y->flags & SF_WEAK) && !(y->flags & SF_DEFINED)) &&
+		if (unlikely((y->flags & AST_SYMBOL_FLAG_WEAK) && !(y->flags & AST_SYMBOL_FLAG_DEFINED)) &&
 		    !atomic_load_explicit(&E->extref[s], memory_order_relaxed) &&
 		    !atomic_exchange(&E->extref[s], 1))
 			e->weakref[e->nweakref++] = s;
 		if (atomic_load_explicit(&E->claimed[s], memory_order_relaxed))
 			return;
-		if (y->kind == S_FUNC) {
-			if (unlikely(y->flags & SF_LAZY))
+		if (y->kind == AST_SYMBOL_FUNCTION) {
+			if (unlikely(y->flags & AST_SYMBOL_FLAG_LAZY))
 				efatal(e, y->loc, "internal error: '%s' is referenced but its body was never parsed",
 				       vintern_ents[y->name].s);
-			if (!(y->flags & SF_DEFINED) || !y->body || (y->sc != SC_STATIC && !(WASM(c) && inline_only(y))))
+			if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body || (y->sc != AST_STORAGE_STATIC && !(WASM(c) && inline_only(y))))
 				return;
-		} else if (y->kind == S_VAR) {
-			bool local_static = y->depth > 0 && y->sc == SC_STATIC;
-			bool file_static = y->depth == 0 && y->sc == SC_STATIC;
+		} else if (y->kind == AST_SYMBOL_VARIABLE) {
+			bool local_static = y->depth > 0 && y->sc == AST_STORAGE_STATIC;
+			bool file_static = y->depth == 0 && y->sc == AST_STORAGE_STATIC;
 
 			if (!(local_static || file_static || !y->name))
 				return;
-			if (!(y->flags & (SF_DEFINED | SF_TENTATIVE)) && !local_static && y->name)
+			if (!(y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)) && !local_static && y->name)
 				return;
 		} else {
 			return;

@@ -212,12 +212,12 @@ static void do_item(ecx *e, uint32_t it)
 		emit_string(e, it & 0x7fffffffu);
 		return;
 	}
-	if (WASM(c) && c->syms[it].kind == S_FUNC) {
+	if (WASM(c) && c->syms[it].kind == AST_SYMBOL_FUNCTION) {
 		wasm_emit_function(e, it);
-	} else if (c->syms[it].kind == S_FUNC && X86(c)) {
+	} else if (c->syms[it].kind == AST_SYMBOL_FUNCTION && X86(c)) {
 		if (!vw_try(e, it))
 			wk_function(e, it);
-	} else if (c->syms[it].kind == S_FUNC) {
+	} else if (c->syms[it].kind == AST_SYMBOL_FUNCTION) {
 		if (!reuse(e, it) && !vw_try(e, it))
 			emit_function(e, it);
 	} else {
@@ -270,27 +270,27 @@ static bool is_root(cc *c, uint32_t s)
 	const sym *y = &c->syms[s];
 	const attrs *a = sym_attrs(c, s);
 
-	if (y->depth != 0 && !(y->kind == S_VAR && y->sc == SC_STATIC && a->used))
+	if (y->depth != 0 && !(y->kind == AST_SYMBOL_VARIABLE && y->sc == AST_STORAGE_STATIC && a->used))
 		return false;
 	if (a->alias)
 		return false;	/* .set in the tail; its target is a root (emit_tu) */
-	if (y->kind == S_FUNC) {
-		if (!(y->flags & SF_DEFINED) || !y->body)
+	if (y->kind == AST_SYMBOL_FUNCTION) {
+		if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body)
 			return false;
-		if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
+		if ((y->flags & AST_SYMBOL_FLAG_GNU_INLINE) && !(y->flags & AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN))
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
-		if (y->sc == SC_STATIC)
+		if (y->sc == AST_STORAGE_STATIC)
 			return a->used || a->constructor || a->destructor;
-		if ((y->flags & SF_INLINE) && !(y->flags & (SF_GNU_INLINE | SF_EXTDECL)) && y->sc != SC_EXTERN)
+		if ((y->flags & AST_SYMBOL_FLAG_INLINE) && !(y->flags & (AST_SYMBOL_FLAG_GNU_INLINE | AST_SYMBOL_FLAG_EXTERNAL_DECLARATION)) && y->sc != AST_STORAGE_EXTERN)
 			return false;	/* C99 inline definition */
 		return true;
 	}
-	if (y->kind == S_VAR) {
-		if (!(y->flags & (SF_DEFINED | SF_TENTATIVE)))
+	if (y->kind == AST_SYMBOL_VARIABLE) {
+		if (!(y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)))
 			return false;
-		if (!y->name || y->sc == SC_REGISTER)
+		if (!y->name || y->sc == AST_STORAGE_REGISTER)
 			return false;	/* global register variables have no storage */
-		if (y->sc == SC_STATIC)
+		if (y->sc == AST_STORAGE_STATIC)
 			return a->used;
 		return true;
 	}
@@ -310,7 +310,7 @@ static void as_error(cc *c, const char *fmt, ...)
 /* the object backend: header text, chunks (items), tail text */
 static vjob_region_pool rpool = VJOB_REGION_POOL_INIT(3);
 
-static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
+static int replay(cc *c, const cc_options *o, const char *hp, size_t hn, const char *tp, size_t tn, const chunk *ch, uint32_t nch)
 {
 	/* per function, written before read: reserved once per thread */
 	static _Thread_local uint32_t *wb, *lsym, *lser, ser;
@@ -423,7 +423,7 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 /* emit_tu1's per-TU tables (E.*) and text buffers */
 static vjob_region_pool erpool = VJOB_REGION_POOL_INIT(18);
 
-static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *again, bool last,
+static int emit_tu1(cc *c, const cc_options *o, bool write_out, uint8_t *mf, bool *again, bool last,
 		    const keep *K, keep *next)
 {
 	emitter E;
@@ -484,7 +484,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	   emitted here); publish conservative immutable facts before workers start.
 	   In particular, never infer a TU-wide constant from one function's writes. */
 	for (uint32_t s = 1; s < c->nsym; s++)
-		if (c->syms[s].kind == S_VAR && !is_local_var(c, s)) {
+		if (c->syms[s].kind == AST_SYMBOL_VARIABLE && !is_local_var(c, s)) {
 			E.sflags[s] = SA_WRITTEN | SA_AESC;
 			E.ffacts[s] = FF_BAD;
 		}
@@ -503,10 +503,10 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		}
 		if (unlikely(sym_attrs(c, s)->alias)) {
 			/* an alias keeps its target, static or not */
-			uint32_t t = cc_global_named(c, c->strs[sym_attrs(c, s)->alias - 1].s);
+			uint32_t t = cc_symbol_global_find(c, c->strs[sym_attrs(c, s)->alias - 1].s);
 
-			if (t && !E.claimed[t] && (c->syms[t].flags & (SF_DEFINED | SF_TENTATIVE)) &&
-			    (c->syms[t].kind == S_FUNC ? c->syms[t].body != 0 : true)) {
+			if (t && !E.claimed[t] && (c->syms[t].flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)) &&
+			    (c->syms[t].kind == AST_SYMBOL_FUNCTION ? c->syms[t].body != 0 : true)) {
 				E.claimed[t] = 1;
 				E.q[E.qt++] = t;
 			}
@@ -559,7 +559,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 		free(E.dfile);
 	}
 	for (uint32_t i = 0; i < c->ntlasm; i++) {
-		const casm *a = &c->asms[N(c->tlasm[i])->a];
+		const ast_asm_statement *a = &c->asms[N(c->tlasm[i])->a];
 
 		vtext_string_append(&hdr, c->strs[a->tmpl - 1].s);
 		vtext_string_append(&hdr, WASM(c) ? "\n" : "\n\t.text\n");
@@ -600,14 +600,14 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 
 				/* Darwin: clang's (#pragma weak) aliases are local, .weak_reference on a definition */
 				/* clang: an ifunc is global even when static */
-				vtext_string_append(&tail, DARWIN(c) ? "" : (y->flags & SF_WEAK) ? "\t.weak\t" : y->sc == SC_STATIC && !a->ifunc ? "" : "\t.globl\t");
-				if (!DARWIN(c) && (y->sc != SC_STATIC || (y->flags & SF_WEAK) || a->ifunc)) {
+				vtext_string_append(&tail, DARWIN(c) ? "" : (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : y->sc == AST_STORAGE_STATIC && !a->ifunc ? "" : "\t.globl\t");
+				if (!DARWIN(c) && (y->sc != AST_STORAGE_STATIC || (y->flags & AST_SYMBOL_FLAG_WEAK) || a->ifunc)) {
 					sym_name(c, &tail, s);
 					vtext_char_append(&tail, '\n');
 				}
 				vtext_string_append(&tail, "\t.type\t");
 				sym_name(c, &tail, s);
-				vtext_string_append(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == S_FUNC ? ",@function\n" : ",@object\n");
+				vtext_string_append(&tail, a->ifunc ? ",@gnu_indirect_function\n" : y->kind == AST_SYMBOL_FUNCTION ? ",@function\n" : ",@object\n");
 				vtext_string_append(&tail, "\t.set\t");
 				sym_name(c, &tail, s);
 				vtext_string_append(&tail, DARWIN(c) ? ", _" : ", ");	/* (an assembler name: Mach-O's prefix) */
@@ -783,7 +783,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
  */
 extern _Atomic unsigned long long driver_emit_nanoseconds;
 
-int emit_tu(cc *c, const cc_opts *o)
+int emit_tu(cc *c, const cc_options *o)
 {
 	if (!sve_codegen_ok(c) || !bitint_codegen_ok(c))
 		return 1;

@@ -326,8 +326,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		L.e = e, L.f = f;
 		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->insn_count + 1, 1);
 		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->insn_count + 1, 1);
-		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
-		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
+		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+		L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
 		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
 			memset(VLT.nf, 0, f->insn_count);
 			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
@@ -379,8 +379,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		.block_label = L.lbl, .optimize = !e->E->noopt,
 		.operand_value = L.ov, .operand_reg = L.opr, .max_operands = VL_MAXOP, .skip_at = &L.skip,
 	};
-	L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
-	L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
+	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
+	L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);	/* (lo32: scratch until it is filled) */
 	vir_uses_count(f, L.uses);
 	vir_demand_low32_compute(f, L.ret32, L.lo32);
 
@@ -404,7 +404,7 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 	e->top = s;
 	e->asmk = 0;
 	e->inline_depth = 0;
-	e->vararg = (ft->flags & TF_VARIADIC) != 0;
+	e->vararg = (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0;
 	e->nlr = 0;
 	e->f = NULL;
 	e->vfail = NULL;

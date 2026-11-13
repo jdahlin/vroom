@@ -9,7 +9,7 @@ VPRIV bool wsdivpow2_ok(const em_sdivpow2_recipe *r)
 }
 
 /* stack: [lhs]. Callers have already checked wsdivpow2_ok(). */
-VPRIV void wsdivpow2(ecx *e, qty ty, const em_sdivpow2_recipe *r)
+VPRIV void wsdivpow2(ecx *e, ast_qualified_type ty, const em_sdivpow2_recipe *r)
 {
 	int k = wty(e->c, ty);
 

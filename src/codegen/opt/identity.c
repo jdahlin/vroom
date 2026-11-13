@@ -11,7 +11,7 @@
 #include "../emitimpl.h"
 
 /* A recipe only: callers retain effects and normalize the retained value to ty. */
-VPRIV int em_bin_identity(cc *c, qty ty, int op, i128 rhs)
+VPRIV int em_bin_identity(cc *c, ast_qualified_type ty, int op, i128 rhs)
 {
 	if (!is_integer(c, ty) || em_bitint(c, ty) || !tsize(c, ty) || tsize(c, ty) > 8)
 		return EM_ID_NONE;

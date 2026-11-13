@@ -434,24 +434,24 @@ VPRIV bool vw_i128mem(void) { return true; }
 #define VW_NO(name, ...) VPRIV val vw_##name(ecx *e, __VA_ARGS__) { vw_fail(e, VIRFAIL(unsupported_builtin)); }
 VPRIV val vw_wconst(ecx *e, i128 v) { (void)v; vw_fail(e, VIRFAIL(wide_integer)); }
 VPRIV val vw_wbitint(ecx *e, val v, unsigned bits, bool sgn) { (void)v, (void)bits, (void)sgn; vw_fail(e, VIRFAIL(bit_precise_integer)); }
-VPRIV val vw_bigconst(ecx *e, qty t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; vw_fail(e, VIRFAIL(bit_precise_integer)); }
-VPRIV val vw_bigbin(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
-VPRIV val vw_bigcmp(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
-VPRIV val vw_bigcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigconst(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigbin(ecx *e, int op, ast_qualified_type t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigcmp(ecx *e, int op, ast_qualified_type t, val a, val b) { (void)op, (void)t, (void)a, (void)b; vw_fail(e, VIRFAIL(bit_precise_integer)); }
+VPRIV val vw_bigcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(bit_precise_integer)); }
 VPRIV val vw_wbin(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, VIRFAIL(wide_integer)); }
 VPRIV val vw_wun(ecx *e, int op, val a) { (void)op, (void)a; vw_fail(e, VIRFAIL(wide_integer)); }
 VPRIV val vw_wcmp(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; vw_fail(e, VIRFAIL(wide_integer)); }
-VPRIV val vw_wcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(wide_integer)); }
+VPRIV val vw_wcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to) { (void)v, (void)from, (void)to; vw_fail(e, VIRFAIL(wide_integer)); }
 
 /* ---------------- floating point ---------------- */
 
-VPRIV uint32_t vw_fty(ecx *e, qty t)
+VPRIV uint32_t vw_fty(ecx *e, ast_qualified_type t)
 {
 	int k = KIND(e->c, t);
 
-	if (k == TY_FLOAT)
+	if (k == AST_TYPE_FLOAT)
 		return VIR_TYPE_F32;
-	if (k == TY_DOUBLE || (k == TY_LDOUBLE && tsize(e->c, t) == 8))
+	if (k == AST_TYPE_DOUBLE || (k == AST_TYPE_LONG_DOUBLE && tsize(e->c, t) == 8))
 		return VIR_TYPE_F64;
 	vw_fail(e, VIRFAIL(unsupported_floating_type));
 }
@@ -494,7 +494,7 @@ static uint32_t vw_fprod(ecx *e, const val *a, uint32_t x, uint32_t ty, uint32_t
 	return m;
 }
 
-VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
+VPRIV val vw_fbin(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty), y = vw_val(e, &b, ty);
 	int r = vw_fres(e, &a, &b);
@@ -529,7 +529,7 @@ VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val vw_fneg(ecx *e, qty t, val a)
+VPRIV val vw_fneg(ecx *e, ast_qualified_type t, val a)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty);
 	int r = vw_fres(e, &a, NULL);
@@ -543,7 +543,7 @@ VPRIV val vw_fneg(ecx *e, qty t, val a)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val vw_fsqrt(ecx *e, qty t, val a)
+VPRIV val vw_fsqrt(ecx *e, ast_qualified_type t, val a)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty);
 	int r = vw_fres(e, &a, NULL);
@@ -555,7 +555,7 @@ VPRIV val vw_fsqrt(ecx *e, qty t, val a)
 VPRIV val vw_root4(ecx *e, val a) { (void)a; vw_fail(e, VIRFAIL(root4)); }
 VPRIV val vw_pcmpstr(ecx *e, uint32_t n) { (void)n; vw_fail(e, VIRFAIL(string_compare)); }
 
-VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
+VPRIV val vw_fcmp(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	uint32_t ty = vw_fty(e, t), x = vw_val(e, &a, ty), y = vw_val(e, &b, ty), cc;
 	int r;
@@ -578,7 +578,7 @@ VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
+VPRIV val vw_cvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool ff = is_flt(c, from), tf = is_flt(c, to);
@@ -616,7 +616,7 @@ VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
 		vw_set(e, r, vw_ins(e, sg ? VIR_OP_S2F : VIR_OP_U2F, b, 0, x, 0, 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
 	}
-	if (KIND(c, to) == TY_BOOL) {
+	if (KIND(c, to) == AST_TYPE_BOOL) {
 		uint32_t a = vw_fty(e, from);
 
 		x = vw_val(e, &v, a);

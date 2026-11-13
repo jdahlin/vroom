@@ -8,7 +8,7 @@
  */
 #include "../emitimpl.h"
 
-VPRIV bool em_divpow2(cc *c, qty ty, int *op, i128 *rhs)
+VPRIV bool em_divpow2(cc *c, ast_qualified_type ty, int *op, i128 *rhs)
 {
 	uint64_t d;
 

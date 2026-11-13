@@ -1,4 +1,4 @@
-/* vcc front end: the per-TU tables and the entry points (cc_translation_unit_init, cc_run, cc_translation_unit_free), the translation unit */
+/* vcc front end: the per-TU tables and the entry points (cc_translation_unit_init, cc_translation_unit_run, cc_translation_unit_free), the translation unit */
 #include <stdatomic.h>
 
 #include "cc-internal.h"
@@ -21,7 +21,7 @@ CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n)
 
 /* ---------------- driver ---------------- */
 
-static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
+static void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 {
 	memset(c, 0, sizeof(*c));
 	c->ptr_lo = 1;
@@ -53,7 +53,7 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 	c->paren = vjob_region_acquire(&cc_regions[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->capdops = 4096;
-	c->dops = cc_heap_allocate(c, c->capdops * sizeof(dop));
+	c->dops = cc_heap_allocate(c, c->capdops * sizeof(cc_declarator_operation));
 	c->ndops = 0;
 	cc_record_scratch_thread.n = 0;
 	c->tyhcap = 1 << 16;
@@ -67,20 +67,20 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 	memset(c->cplx, 0, sizeof(c->cplx));
 	c->nlist = 1;
 	/* basic types: index == kind */
-	for (int k = 0; k < TY_PTR; k++) {
+	for (int k = 0; k < AST_TYPE_POINTER; k++) {
 		ctype t = { .kind = (uint8_t)k, .size = cc_basic_types[k].size, .align = cc_basic_types[k].align };
 
-		if (k == TY_LDOUBLE && o->target == PP_DARWIN)
+		if (k == AST_TYPE_LONG_DOUBLE && o->target == PP_DARWIN)
 			t.size = 8, t.align = 8;
-		if (k == TY_LDOUBLE && PP_IS_WASM(o->target))
+		if (k == AST_TYPE_LONG_DOUBLE && PP_IS_WASM(o->target))
 			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
-		if ((k == TY_LONG || k == TY_ULONG) && o->target == PP_WASM32)
+		if ((k == AST_TYPE_LONG || k == AST_TYPE_UNSIGNED_LONG) && o->target == PP_WASM32)
 			t.size = 4, t.align = 4;	/* ILP32 */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
 	}
-	for (int k = 0; k < TY_PTR; k++) {	/* make them findable by cc_type_intern */
+	for (int k = 0; k < AST_TYPE_POINTER; k++) {	/* make them findable by cc_type_intern */
 		uint32_t h = cc_type_hash(&c->ty[k]), m = c->tyhcap - 1, i;
 
 		for (i = h & m; c->tyhash[i]; i = (i + 1) & m)
@@ -88,11 +88,11 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 		if (k)
 			c->tyhash[i] = (uint32_t)k;
 	}
-	c->t_size = cc_type_basic(TY_ULONG);
-	c->t_ptrdiff = cc_type_basic(TY_LONG);
-	c->t_wchar = o->short_wchar ? cc_type_basic(TY_USHORT) : o->target != PP_LINUX_AARCH64 ? cc_type_basic(TY_INT) : cc_type_basic(TY_UINT);
-	c->t_char16 = cc_type_basic(TY_USHORT);
-	c->t_char32 = cc_type_basic(TY_UINT);
+	c->t_size = cc_type_basic(AST_TYPE_UNSIGNED_LONG);
+	c->t_ptrdiff = cc_type_basic(AST_TYPE_LONG);
+	c->t_wchar = o->short_wchar ? cc_type_basic(AST_TYPE_UNSIGNED_SHORT) : o->target != PP_LINUX_AARCH64 ? cc_type_basic(AST_TYPE_INT) : cc_type_basic(AST_TYPE_UNSIGNED_INT);
+	c->t_char16 = cc_type_basic(AST_TYPE_UNSIGNED_SHORT);
+	c->t_char32 = cc_type_basic(AST_TYPE_UNSIGNED_INT);
 	c->id_func = vintern_copy("__func__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 8);
 	c->id_FUNCTION = vintern_copy("__FUNCTION__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 12);
 	c->id_PRETTY = vintern_copy("__PRETTY_FUNCTION__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 19);
@@ -104,50 +104,50 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 	/* predeclared: __builtin_va_list, __int128_t, __uint128_t */
 	{
 		uint32_t s;
-		qty vl;
+		ast_qualified_type vl;
 
 		if (o->target == PP_DARWIN) {
-			vl = cc_type_pointer(c, cc_type_basic(TY_CHAR));
+			vl = cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
 		} else if (PP_IS_WASM(o->target)) {
-			vl = cc_type_pointer(c, cc_type_basic(TY_VOID));
+			vl = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 		} else if (o->target == PP_LINUX_X86_64) {
 			/* System V: struct __va_list_tag { unsigned gp_offset, fp_offset; void *overflow_arg_area,
 			   *reg_save_area; } __builtin_va_list[1] */
-			uint32_t ti = cc_tag_new(c, TY_STRUCT, vintern_copy("__va_list_tag\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 13), 0);
+			uint32_t ti = cc_tag_new(c, AST_TYPE_STRUCT, vintern_copy("__va_list_tag\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 13), 0);
 			tag *r = &c->tags[ti];
-			qty vp = cc_type_pointer(c, cc_type_basic(TY_VOID));
+			ast_qualified_type vp = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 
 			r->f = cc_heap_allocate(c, 4 * sizeof(field));
 			memset(r->f, 0, 4 * sizeof(field));
 			r->nfield = 4;
-			r->f[0].ty = r->f[1].ty = cc_type_basic(TY_UINT);
+			r->f[0].ty = r->f[1].ty = cc_type_basic(AST_TYPE_UNSIGNED_INT);
 			r->f[2].ty = r->f[3].ty = vp;
 			cc_layout_record(c, r, NULL, NULL);
-			r->flags |= RF_COMPLETE;
+			r->flags |= AST_RECORD_FLAG_COMPLETE;
 			c->valist_tag = ti;
-			vl = cc_type_array(c, QT(r->ty, 0), 1, 0);
+			vl = cc_type_array(c, AST_QUALIFIED_TYPE(r->ty, 0), 1, 0);
 		} else {
 			/* struct __va_list { void *__stack, *__gr_top, *__vr_top; int __gr_offs, __vr_offs; } */
-			uint32_t ti = cc_tag_new(c, TY_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
+			uint32_t ti = cc_tag_new(c, AST_TYPE_STRUCT, vintern_copy("__va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 9), 0);
 			tag *r = &c->tags[ti];
-			qty vp = cc_type_pointer(c, cc_type_basic(TY_VOID));
+			ast_qualified_type vp = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 
 			r->f = cc_heap_allocate(c, 5 * sizeof(field));
 			memset(r->f, 0, 5 * sizeof(field));
 			r->nfield = 5;
 			r->f[0].ty = r->f[1].ty = r->f[2].ty = vp;
-			r->f[3].ty = r->f[4].ty = cc_type_basic(TY_INT);
+			r->f[3].ty = r->f[4].ty = cc_type_basic(AST_TYPE_INT);
 			cc_layout_record(c, r, NULL, NULL);
-			r->flags |= RF_COMPLETE;
+			r->flags |= AST_RECORD_FLAG_COMPLETE;
 			c->valist_tag = ti;
-			vl = QT(r->ty, 0);
+			vl = AST_QUALIFIED_TYPE(r->ty, 0);
 		}
 		c->t_valist = vl;
-		s = cc_symbol_new(c, S_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), vl, 0);
+		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), vl, 0);
 		cc_symbol_bind(c, s);
-		s = cc_symbol_new(c, S_TYPEDEF, vintern_copy("__int128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 10), cc_type_basic(TY_INT128), 0);
+		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__int128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 10), cc_type_basic(AST_TYPE_INT128), 0);
 		cc_symbol_bind(c, s);
-		s = cc_symbol_new(c, S_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), cc_type_basic(TY_UINT128), 0);
+		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), cc_type_basic(AST_TYPE_UINT128), 0);
 		cc_symbol_bind(c, s);
 		/* Clang exposes these builtin types even without +sve: libc uses them
 		   in declarations. They are distinct sizeless types, not fixed vectors. */
@@ -165,9 +165,9 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_opts *o)
 				   emitter's frame slot: the architectural maximum, a 2048-bit Z
 				   register or its 256-bit predicate. */
 				bool pred = i >= 13;
-				ctype t = { .kind = TY_SVE, .size = pred ? 32 : 256, .align = pred ? 2 : 16, .aux = name };
+				ctype t = { .kind = AST_TYPE_SVE_BUILTIN, .size = pred ? 32 : 256, .align = pred ? 2 : 16, .aux = name };
 
-				s = cc_symbol_new(c, S_TYPEDEF, name, QT(cc_type_intern(c, &t), 0), 0);
+				s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, name, AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0), 0);
 				cc_symbol_bind(c, s);
 			}
 		}
@@ -217,7 +217,7 @@ static void cc_tables_init(void)
 	cc_attribute_table_init();
 }
 
-int cc_run(pp *p, const cc_opts *o)
+int cc_translation_unit_run(pp *p, const cc_options *o)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
 	cc *c = malloc(sizeof(cc));
@@ -246,8 +246,8 @@ int cc_run(pp *p, const cc_opts *o)
 		for (uint32_t i = 1; i < c->nsym; i++) {
 			const sym *y = &c->syms[i];
 
-			if ((y->flags & (SF_TENTATIVE | SF_DEFINED | SF_INVALID)) == SF_TENTATIVE && y->kind == S_VAR &&
-			    (cc_type_is_record(c, y->ty) || AST_TYPE_KIND(c, y->ty) == TY_ENUM) && !cc_type_complete(c, y->ty) && cc_symbol_lookup(c, y->name) == i) {
+			if ((y->flags & (AST_SYMBOL_FLAG_TENTATIVE | AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_INVALID)) == AST_SYMBOL_FLAG_TENTATIVE && y->kind == AST_SYMBOL_VARIABLE &&
+			    (cc_type_is_record(c, y->ty) || AST_TYPE_KIND(c, y->ty) == AST_TYPE_ENUM) && !cc_type_complete(c, y->ty) && cc_symbol_lookup(c, y->name) == i) {
 				cc_report_error(c, y->loc, "tentative definition has type '%s' that is never completed", tyname(c, y->ty));
 				cc_report_note(c, c->tags[AST_TYPE(c, y->ty)->aux].loc, "forward declaration of '%s'", tyname(c, y->ty));
 			}
@@ -279,7 +279,7 @@ int cc_run(pp *p, const cc_opts *o)
 
 CC_PRIVATE void cc_translation_unit_parse(cc *c)
 {
-	recov r;
+	cc_recovery_point r;
 
 	if (CC_RECOVERY_ARM(c, &r))
 		cc_recovery_restore(c, &r, CC_RECOVERY_TOP_LEVEL);	/* after a parse error: on with the next declaration */

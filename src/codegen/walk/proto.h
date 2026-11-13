@@ -29,7 +29,7 @@ VPRIV bool wk_const_sym(ecx *e, uint32_t s, val *v);	/* s is bound to the consta
 VPRIV void wk_ael_clear(ecx *e, uint32_t s);	/* UINT32_MAX: every array */
 VPRIV bool wk_pk_get(ecx *e, uint32_t s, val *v);	/* a provisional constant of parameter s (wkst.pk) */
 VPRIV bool wk_weak0(cc *c, val v);	/* the address of a weak undefined symbol (may be 0) */
-VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
+VPRIV val wk_conv(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
 VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s);	/* the call n to s, inlined (wk_can_inline) */
 VPRIV bool wk_can_inline(ecx *e, uint32_t s, uint32_t call);
 VPRIV void wk_function(ecx *e, uint32_t s);	/* codegen/walk/func.c: what codegen/tu.c calls for x86-64 */
@@ -40,28 +40,28 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s);	/* a local's slot, made on first use
 VPRIV uint32_t wk_newlabel(ecx *e);
 VPRIV val wk_gen(ecx *e, uint32_t n);
 VPRIV lval wk_lval(ecx *e, uint32_t n);
-VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r);
+VPRIV val wk_sdivpow2(ecx *e, ast_qualified_type t, val a, const em_sdivpow2_recipe *r);
 VPRIV bool wk_udivconst_ok(ecx *e, val a, const em_udivconst_recipe *r);
-VPRIV val wk_udivconst(ecx *e, qty ty, val a, const em_udivconst_recipe *r);
-VPRIV int wk_reg(ecx *e, val *v, qty t);
+VPRIV val wk_udivconst(ecx *e, ast_qualified_type ty, val a, const em_udivconst_recipe *r);
+VPRIV int wk_reg(ecx *e, val *v, ast_qualified_type t);
 VPRIV void wk_free(ecx *e, const val *v);
 VPRIV void wk_cond(ecx *e, uint32_t n, bool jump_if, uint32_t lbl);
 VPRIV void wk_stmt(ecx *e, uint32_t n);
-VPRIV void wk_init(ecx *e, const lval *dst, qty t, uint32_t init);
-VPRIV void wk_bfinit(ecx *e, const lval *l, qty t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
-VPRIV int wk_size(cc *c, qty t);
-VPRIV bool wk_mem(ecx *e, qty t);	/* values of t are held by address (records, arrays, x87 long double) */
-VPRIV val wk_conv(ecx *e, val v, qty from, qty to);
-VPRIV void wk_store(ecx *e, const lval *l, qty t, val *v);
-VPRIV val wk_reload(ecx *e, const lval *l, qty t);	/* l's value again (a new register or address) */
-VPRIV val wk_putmem(ecx *e, lval *l, qty t, val v);	/* v's bytes (held by address) into l: l's address */
+VPRIV void wk_init(ecx *e, const lval *dst, ast_qualified_type t, uint32_t init);
+VPRIV void wk_bfinit(ecx *e, const lval *l, ast_qualified_type t, uint32_t init);	/* a bit-field initialized */	/* an object initialized by init (0: none) */
+VPRIV int wk_size(cc *c, ast_qualified_type t);
+VPRIV bool wk_mem(ecx *e, ast_qualified_type t);	/* values of t are held by address (records, arrays, x87 long double) */
+VPRIV val wk_conv(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
+VPRIV void wk_store(ecx *e, const lval *l, ast_qualified_type t, val *v);
+VPRIV val wk_reload(ecx *e, const lval *l, ast_qualified_type t);	/* l's value again (a new register or address) */
+VPRIV val wk_putmem(ecx *e, lval *l, ast_qualified_type t, val v);	/* v's bytes (held by address) into l: l's address */
 VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini);	/* arch/a64/codegen/func.c (shared) */
-VPRIV bool wk_signed(cc *c, qty t);
-VPRIV void wk_vla_fix(ecx *e, qty t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
-VPRIV val wk_vla_bytes(ecx *e, qty t);		/* sizeof t (a VLA: computed) */
+VPRIV bool wk_signed(cc *c, ast_qualified_type t);
+VPRIV void wk_vla_fix(ecx *e, ast_qualified_type t, bool pure);	/* the VLA sizes in t evaluated now, into slots */
+VPRIV val wk_vla_bytes(ecx *e, ast_qualified_type t);		/* sizeof t (a VLA: computed) */
 VPRIV void wk_vla_decl(ecx *e, uint32_t s, bool zero);	/* a VLA's storage below sp */
 VPRIV uint32_t wk_userlabel(ecx *e, uint32_t l);
-VPRIV void wk_put(ecx *e, const lval *l, qty t, int r);
+VPRIV void wk_put(ecx *e, const lval *l, ast_qualified_type t, int r);
 VPRIV void wk_goto(ecx *e, uint32_t label);
 VPRIV void wk_cleanups(ecx *e, int to);	/* the cleanups above depth `to` run, innermost first (not popped) */
 
@@ -85,7 +85,7 @@ VPRIV void LO(zero)(ecx *e, int rdst, uint64_t n);
 VPRIV val LO(umulhi)(ecx *e, val a, val b);	/* high64(a*b), consumes both, returns a register */
 VPRIV val LO(smulhi)(ecx *e, val a, val b);	/* signed high64(a*b), same ownership as umulhi */
 VPRIV bool wk_sdivconst_ok(ecx *e, val a, const em_sdivconst_recipe *r);
-VPRIV val wk_sdivconst(ecx *e, qty ty, val a, const em_sdivconst_recipe *r);
+VPRIV val wk_sdivconst(ecx *e, ast_qualified_type ty, val a, const em_sdivconst_recipe *r);
 VPRIV val LO(bin)(ecx *e, int op, int size, bool sgn, val a, val b);	/* LEX_TOKEN_PLUS LEX_TOKEN_MINUS LEX_TOKEN_STAR LEX_TOKEN_SLASH LEX_TOKEN_PERCENT LEX_TOKEN_AMPERSAND LEX_TOKEN_PIPE LEX_TOKEN_CARET LEX_TOKEN_LESS_LESS LEX_TOKEN_GREATER_GREATER */
 VPRIV void LO(switch_bitset)(ecx *e, int r, int size, const em_switch_bitset_recipe *recipe,
 			   uint32_t target, uint32_t dflt);
@@ -103,22 +103,22 @@ VPRIV bool LO(i128mem)(void);
 VPRIV val LO(wconst)(ecx *e, i128 v);
 VPRIV val LO(wbitint)(ecx *e, val v, unsigned bits, bool sgn);
 /* Integer objects wider than 128 bits, canonical little-endian limbs. */
-VPRIV val LO(bigconst)(ecx *e, qty t, const uint32_t *words, i128 small);
-VPRIV val LO(bigbin)(ecx *e, int op, qty t, val a, val b);
-VPRIV val LO(bigcmp)(ecx *e, int op, qty t, val a, val b);
-VPRIV val LO(bigcvt)(ecx *e, val v, qty from, qty to);
+VPRIV val LO(bigconst)(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small);
+VPRIV val LO(bigbin)(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val LO(bigcmp)(ecx *e, int op, ast_qualified_type t, val a, val b);
+VPRIV val LO(bigcvt)(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);
 VPRIV val LO(wbin)(ecx *e, int op, bool sgn, val a, val b);	/* b an int for << >> */
 VPRIV val LO(wun)(ecx *e, int op, val a);			/* LEX_TOKEN_MINUS LEX_TOKEN_TILDE */
 VPRIV val LO(wcmp)(ecx *e, int op, bool sgn, val a, val b);
-VPRIV val LO(wcvt)(ecx *e, val v, qty from, qty to);	/* __int128 on either side */
+VPRIV val LO(wcvt)(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);	/* __int128 on either side */
 VPRIV int LO(ftreg)(ecx *e);				/* a free float temporary */
 VPRIV val LO(fconst)(ecx *e, uint64_t bits, int size);	/* a float (4) or double (8) constant */
-VPRIV val LO(fbin)(ecx *e, int op, qty t, val a, val b);	/* + - * / */
-VPRIV val LO(fneg)(ecx *e, qty t, val a);
-VPRIV val LO(fsqrt)(ecx *e, qty t, val a);
+VPRIV val LO(fbin)(ecx *e, int op, ast_qualified_type t, val a, val b);	/* + - * / */
+VPRIV val LO(fneg)(ecx *e, ast_qualified_type t, val a);
+VPRIV val LO(fsqrt)(ecx *e, ast_qualified_type t, val a);
 VPRIV val LO(root4)(ecx *e, val a);
-VPRIV val LO(fcmp)(ecx *e, int op, qty t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
-VPRIV val LO(cvt)(ecx *e, val v, qty from, qty to);	/* a float on either side (to may be _Bool) */
+VPRIV val LO(fcmp)(ecx *e, int op, ast_qualified_type t, val a, val b);	/* 0 or 1, false when unordered (but !=) */
+VPRIV val LO(cvt)(ecx *e, val v, ast_qualified_type from, ast_qualified_type to);	/* a float on either side (to may be _Bool) */
 /* builtins the CPU does */
 VPRIV void LO(trap)(ecx *e);				/* __builtin_trap, __builtin_unreachable */
 VPRIV void LO(asm)(ecx *e, uint32_t n);
@@ -126,7 +126,7 @@ VPRIV void LO(barrier)(ecx *e);			/* compiler barrier: no machine instruction */
 VPRIV val LO(setjmp)(ecx *e, int rbuf);
 VPRIV void LO(longjmp)(ecx *e, int rbuf);
 VPRIV val LO(frame)(ecx *e, bool ret, uint32_t level);			/* the return address (ret) or the frame address */
-VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* BI_CLZ.. BI_BSWAP64: a nonzero where the builtin requires it */
+VPRIV val LO(bitop)(ecx *e, int bi, int size, val a);	/* CC_BUILTIN_CLZ.. CC_BUILTIN_BSWAP64: a nonzero where the builtin requires it */
 VPRIV val LO(alloca)(ecx *e, val n);			/* n bytes on the stack, 16-aligned */
 VPRIV int LO(tlsaddr)(ecx *e, uint32_t ref, int model);	/* a thread-local's address: 0 local-exec, 1 initial-exec, 2 general dynamic */
 /* atomics at [rp], size 1, 2, 4, 8, sequentially consistent; the operand registers stay
@@ -144,18 +144,18 @@ VPRIV void LO(jump)(ecx *e, uint32_t l);
 VPRIV void LO(jumpr)(ecx *e, int r);			/* to the address in r (computed goto) */
 VPRIV void LO(named)(ecx *e, uint32_t ref);		/* a label with a symbol name here (ref: RK_LBL, an address taken) */
 /* calls: the arguments are in frame slots (8 bytes each, extended); ref: a direct callee, else fn */
-VPRIV void LO(classify)(ecx *e, qty t, wkarg *a, bool unnamed);
+VPRIV void LO(classify)(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed);
 /* r: a record result (its slot receives it), NULL otherwise; retsize/retsgn: a scalar result */
-VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt);
+VPRIV val LO(call)(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt);
 /* Incoming arguments to their slots or selected register homes; a parameter
    left on the stack keeps the caller's location as its slot. */
 VPRIV void LO(params)(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
 VPRIV bool LO(tail_return)(ecx *e, uint32_t expr);
-VPRIV void LO(ret)(ecx *e, val *v, qty t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
+VPRIV void LO(ret)(ecx *e, val *v, ast_qualified_type t, uint32_t lbl);	/* a scalar result of type t (v may be NULL), then to lbl */
 VPRIV void LO(retrec)(ecx *e, int raddr, const wkarg *r, uint32_t lbl);	/* a record result from the object at raddr */
 VPRIV val LO(pcmpstr)(ecx *e, uint32_t n);
 VPRIV void LO(va_start)(ecx *e, int rap);			/* the va_list at rap */
-VPRIV int LO(va_arg)(ecx *e, int rap, qty t);		/* the next argument's address */
+VPRIV int LO(va_arg)(ecx *e, int rap, ast_qualified_type t);		/* the next argument's address */
 /* the function: before its body, and once it is generated (frame, prologue, output) */
 VPRIV void LO(begin)(ecx *e, uint32_t s);
 VPRIV void LO(locals_begin)(ecx *e, uint32_t s);

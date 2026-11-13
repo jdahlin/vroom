@@ -5,13 +5,13 @@
 
 CC_PRIVATE uint32_t *cc_scope_slot(cc *c, uint32_t **dir, uint32_t id)
 {
-	uint32_t **pg = &dir[id >> DIR_BITS];
+	uint32_t **pg = &dir[id >> CC_DIRECTORY_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = cc_heap_allocate(c, DIR_PAGE * sizeof(uint32_t));
-		memset(*pg, 0, DIR_PAGE * sizeof(uint32_t));
+		*pg = cc_heap_allocate(c, CC_DIRECTORY_PAGE * sizeof(uint32_t));
+		memset(*pg, 0, CC_DIRECTORY_PAGE * sizeof(uint32_t));
 	}
-	return &(*pg)[id & (DIR_PAGE - 1)];
+	return &(*pg)[id & (CC_DIRECTORY_PAGE - 1)];
 }
 
 CC_PRIVATE void cc_scope_open(cc *c)
@@ -36,7 +36,7 @@ static inline __attribute__((always_inline)) void cc_scope_pop(cc *c, bool chk)
 		sym *y = &c->syms[s];
 
 		/* (bind allocated the page) */
-		(y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
+		(y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir)[y->name >> CC_DIRECTORY_BITS][y->name & (CC_DIRECTORY_PAGE - 1)] = y->shadow;
 	}
 	c->depth--;
 }
@@ -69,7 +69,7 @@ CC_PRIVATE void cc_scope_prototype_bindings_save(cc *c, uint32_t s)
 	c->ptag[c->nptag++] = s;
 }
 
-CC_PRIVATE uint32_t cc_symbol_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_symbol_new(cc *c, int kind, uint32_t name, ast_qualified_type ty, uint32_t loc)
 {
 	uint32_t i = c->nsym++;
 	sym *s = &c->syms[i];

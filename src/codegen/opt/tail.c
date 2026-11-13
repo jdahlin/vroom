@@ -12,11 +12,11 @@
  */
 #include "../emitimpl.h"
 
-static bool em_tail_word(cc *c, qty t)
+static bool em_tail_word(cc *c, ast_qualified_type t)
 {
 	uint64_t size = tsize(c, t);
 
-	return !(QQ(t) & Q_VOLATILE) && !(T(c, t)->flags & (TF_ATOMIC | TF_VLA)) &&
+	return !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) && !(T(c, t)->flags & (AST_TYPE_FLAG_ATOMIC | AST_TYPE_FLAG_VLA)) &&
 	       !em_bitint(c, t) && (is_ptr(c, t) || is_integer(c, t)) &&
 	       (size == 4 || size == 8);
 }
@@ -26,7 +26,7 @@ VPRIV bool em_tail_caller_ok(ecx *e, uint32_t fn)
 {
 	return e->E->o->opt && !e->E->noopt && e->E->o->sibling_calls >= 0 && !e->E->o->instrument &&
 	       !sym_attrs(e->c, fn)->interrupt &&
-	       !(sym_attrs(e->c, fn)->flags & (AF_TAIL_DISABLE | AF_TAIL_RETURNS_TWICE | AF_OPTNONE));
+	       !(sym_attrs(e->c, fn)->flags & (CC_ATTRIBUTE_FLAG_TAIL_DISABLE | CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE | CC_ATTRIBUTE_FLAG_OPTNONE));
 }
 
 /* function s may be a sibling call's target (as for its attributes) */
@@ -35,9 +35,9 @@ VPRIV bool em_tail_target_ok(ecx *e, uint32_t s)
 	cc *c = e->c;
 	const sym *target = &c->syms[s];
 
-	if (target->kind != S_FUNC || (target->flags & SF_NORETURN) ||
+	if (target->kind != AST_SYMBOL_FUNCTION || (target->flags & AST_SYMBOL_FLAG_NORETURN) ||
 	    sym_attrs(c, s)->error_fn || sym_attrs(c, s)->ifunc || sym_attrs(c, s)->interrupt ||
-	    (sym_attrs(c, s)->flags & (AF_TAIL_RETURNS_TWICE | AF_TAIL_NOT_CALLED)))
+	    (sym_attrs(c, s)->flags & (CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE | CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED)))
 		return false;
 	/* The standard nonlocal-jump entry points are special even when a caller
 	   supplies a plain prototype without the usual returns_twice attribute. */
@@ -57,28 +57,28 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 	const ctype *ct;
 	uint32_t s;
 
-	if (!em_tail_caller_ok(e, fn) || !expr || body->op != N_BLOCK || body->c != 1 || body->aux > maxargs ||
-	    (ft->flags & (TF_VARIADIC | TF_NOPROTO)))
+	if (!em_tail_caller_ok(e, fn) || !expr || body->op != AST_NODE_BLOCK || body->c != 1 || body->aux > maxargs ||
+	    (ft->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)))
 		return false;
 	ret = N(c->lists[body->b]);
-	if (ret->op != N_RETURN || ret->a != expr || N(expr)->op != N_CALL)
+	if (ret->op != AST_NODE_RETURN || ret->a != expr || N(expr)->op != AST_NODE_CALL)
 		return false;
 	call = N(expr);
-	if (call->c > maxargs || QUNQ(call->ty) != QUNQ(ft->base) ||
-	    (KIND(c, ft->base) != TY_VOID && !em_tail_word(c, ft->base)))
+	if (call->c > maxargs || AST_QUALIFIED_TYPE_UNQUALIFIED(call->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(ft->base) ||
+	    (KIND(c, ft->base) != AST_TYPE_VOID && !em_tail_word(c, ft->base)))
 		return false;
 	/* Exactly the function-to-pointer decay, with no function-pointer casts. */
 	fdec = N(call->a);
-	if (fdec->op != N_CAST || fdec->aux != CK_FDECAY || N(fdec->a)->op != N_VAR)
+	if (fdec->op != AST_NODE_CAST || fdec->aux != AST_CAST_FUNCTION_DECAY || N(fdec->a)->op != AST_NODE_VARIABLE)
 		return false;
 	name = N(fdec->a);
 	s = canon_sym(c, name->a);
 	target = &c->syms[s];
-	if ((target->flags & (SF_ALWAYS_INLINE | SF_INLINE)) || !em_tail_target_ok(e, s))
+	if ((target->flags & (AST_SYMBOL_FLAG_ALWAYS_INLINE | AST_SYMBOL_FLAG_INLINE)) || !em_tail_target_ok(e, s))
 		return false;
 	ct = T(c, target->ty);
-	if (ct->kind != TY_FUNC || (ct->flags & (TF_VARIADIC | TF_NOPROTO)) ||
-	    ct->n != call->c || QUNQ(ct->base) != QUNQ(ft->base))
+	if (ct->kind != AST_TYPE_FUNCTION || (ct->flags & (AST_TYPE_FLAG_VARIADIC | AST_TYPE_FLAG_NO_PROTOTYPE)) ||
+	    ct->n != call->c || AST_QUALIFIED_TYPE_UNQUALIFIED(ct->base) != AST_QUALIFIED_TYPE_UNQUALIFIED(ft->base))
 		return false;
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
@@ -92,14 +92,14 @@ VPRIV bool em_tail_candidate(ecx *e, uint32_t fn, uint32_t expr, uint32_t maxarg
 	}
 	for (uint32_t i = 0; i < call->c; i++) {
 		const node *a = N(c->lists[call->b + i]);
-		qty pt = c->params[ct->aux + i];
+		ast_qualified_type pt = c->params[ct->aux + i];
 		bool formal = false;
 
-		if (!em_tail_word(c, pt) || QUNQ(a->ty) != QUNQ(pt))
+		if (!em_tail_word(c, pt) || AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(pt))
 			return false;
-		if (a->op == N_NUM || (a->op == N_UNARY && a->aux == LEX_TOKEN_MINUS && N(a->a)->op == N_NUM))
+		if (a->op == AST_NODE_NUMBER || (a->op == AST_NODE_UNARY && a->aux == LEX_TOKEN_MINUS && N(a->a)->op == AST_NODE_NUMBER))
 			continue;
-		if (a->op != N_VAR)
+		if (a->op != AST_NODE_VARIABLE)
 			return false;
 		for (uint32_t j = 0; j < body->aux; j++)
 			formal |= a->a == c->lists[body->a + j];

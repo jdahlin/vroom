@@ -4,7 +4,7 @@
  *
  * em_cmpbounds(e, n, &operand) returns 0 or 1 when the comparison n is constant, else -1; operand
  * is the non-constant side, which the caller must still evaluate and discard (it may have effects).
- * Only 4- and 8-byte integers, and only at -O1 and up (cc_opts.opt, not VCC_NOOPT).  em_bound_constant
+ * Only 4- and 8-byte integers, and only at -O1 and up (cc_options.opt, not VCC_NOOPT).  em_bound_constant
  * proves a small expression pure and constant within a budget before asking the constant evaluator,
  * so enumerators and casts of them fold but nothing with a call or a volatile read is traversed.
  * Called by the shared walker (walk/expr.c), arm64's and wasm's emitters.
@@ -25,17 +25,17 @@ static bool em_bound_pure(cc *c, uint32_t n, unsigned *budget)
 	if (!is_integer(c, x->ty) || em_bitint(c, x->ty) || tsize(c, x->ty) > 8)
 		return false;
 	switch (x->op) {
-	case N_NUM:
+	case AST_NODE_NUMBER:
 		return true;
-	case N_VAR:
-		return c->syms[x->a].kind == S_ENUMCONST;
-	case N_CAST:
-		return (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_BOOL) &&
+	case AST_NODE_VARIABLE:
+		return c->syms[x->a].kind == AST_SYMBOL_ENUMERATOR;
+	case AST_NODE_CAST:
+		return (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_BOOL) &&
 		       em_bound_pure(c, x->a, budget);
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		return (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_TILDE || x->aux == LEX_TOKEN_EXCLAMATION) &&
 		       em_bound_pure(c, x->a, budget);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		return (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_STAR ||
 		        x->aux == LEX_TOKEN_SLASH || x->aux == LEX_TOKEN_PERCENT || x->aux == LEX_TOKEN_LESS_LESS ||
 		        x->aux == LEX_TOKEN_GREATER_GREATER || x->aux == LEX_TOKEN_AMPERSAND ||
@@ -50,18 +50,18 @@ VPRIV bool em_bound_constant(cc *c, uint32_t n, i128 *value)
 {
 	const node *x = N(n);
 	unsigned budget = 16;
-	cval cv;
+	cc_value cv;
 
-	if (x->op == N_NUM) {
+	if (x->op == AST_NODE_NUMBER) {
 		*value = c->ipool[x->a];
 		return true;
 	}
-	if (x->op == N_VAR && c->syms[x->a].kind == S_ENUMCONST) {
+	if (x->op == AST_NODE_VARIABLE && c->syms[x->a].kind == AST_SYMBOL_ENUMERATOR) {
 		*value = c->syms[x->a].val;
 		return true;
 	}
-	if ((x->op != N_CAST && x->op != N_UNARY && x->op != N_BINARY) ||
-	    !em_bound_pure(c, n, &budget) || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
+	if ((x->op != AST_NODE_CAST && x->op != AST_NODE_UNARY && x->op != AST_NODE_BINARY) ||
+	    !em_bound_pure(c, n, &budget) || !cc_eval(c, n, &cv) || cv.kind != CC_VALUE_INTEGER)
 		return false;
 	*value = cv.i;
 	return true;
@@ -75,13 +75,13 @@ VPRIV int em_cmpbounds(ecx *e, uint32_t n, uint32_t *operand)
 	i128 v, min, max;
 	uint64_t sz;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY)
+	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY)
 		return -1;
 	op = x->aux;
 	if (op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL)
 		return -1;
 	a = N(x->a); b = N(x->b);
-	if (QUNQ(a->ty) != QUNQ(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
 		return -1;
 	sz = tsize(c, a->ty);
 	if (sz != 4 && sz != 8)

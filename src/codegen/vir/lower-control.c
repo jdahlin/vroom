@@ -13,15 +13,15 @@ VPRIV val vw_bitop(ecx *e, int bi, int size, val a)
 	int r = vw_resname(e, &a, NULL);
 
 	switch (bi) {
-	case BI_CLZ: case BI_CLZL: case BI_CLZLL: op = VIR_OP_CLZ; break;
-	case BI_CTZ: case BI_CTZL: case BI_CTZLL: op = VIR_OP_CTZ; break;
-	case BI_POPCOUNT: case BI_POPCOUNTL: case BI_POPCOUNTLL: op = VIR_OP_POPCNT; break;
-	case BI_BSWAP32: case BI_BSWAP64: op = VIR_OP_BSWAP; break;
-	case BI_BSWAP16:
+	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL: op = VIR_OP_CLZ; break;
+	case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL: op = VIR_OP_CTZ; break;
+	case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL: op = VIR_OP_POPCNT; break;
+	case CC_BUILTIN_BSWAP32: case CC_BUILTIN_BSWAP64: op = VIR_OP_BSWAP; break;
+	case CC_BUILTIN_BSWAP16:
 		x = vw_ins(e, VIR_OP_BSWAP, VIR_TYPE_I32, 0, vw_conv(e, x, VIR_TYPE_I32), 0, 0);
 		vw_set(e, r, vw_ins(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x, vw_iconst(e, VIR_TYPE_I32, 16), 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
-	case BI_PARITY: case BI_PARITYL: case BI_PARITYLL:
+	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
 		x = vw_ins(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
 		vw_set(e, r, vw_ins(e, VIR_OP_AND, ty, 0, x, vw_iconst(e, ty, 1), 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
@@ -79,7 +79,7 @@ VPRIV void vw_va_start(ecx *e, int rap)
 /* the address of the next argument of va_list *rap, which moves past it (as va_arg_ in
  * arch/a64/codegen/builtin.c); Apple's va_list is a pointer into the stack arguments,
  * 8 bytes each (16-aligned ones aligned first, records over 16 bytes by reference) */
-VPRIV int vw_va_arg(ecx *e, int rap, qty t)
+VPRIV int vw_va_arg(ecx *e, int rap, ast_qualified_type t)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);

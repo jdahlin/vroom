@@ -48,12 +48,12 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 		longjmp(c->bail, 1);
 	}
 	CC_REPLAY_TAG_WRITE_LOG(c, ti);
-	c->tags[ti].flags |= RF_BEING_DEFINED;
+	c->tags[ti].flags |= AST_RECORD_FLAG_BEING_DEFINED;
 	c->in_struct++;
 	if (unlikely(c->field_uses))
 		cc_field_uses_def(c, ti);
 	cc_token_expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
-	recov rv;
+	cc_recovery_point rv;
 
 	if (CC_RECOVERY_ARM(c, &rv)) {
 		cc_recovery_restore(c, &rv, CC_RECOVERY_BLOCK);	/* after a parse error: on with the next member */
@@ -68,7 +68,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 		}
 		if (cc_token_is(c, LEX_TOKEN_SEMICOLON)) {
 			CC_REPORT_EXTENSION_DELETE(c, ";", tok(c)->flags, "extra-semi", cc_warning_group_pedantic, tok(c)->loc, "extra ';' inside a %s",
-				 c->tags[ti].flags & RF_UNION ? "union" : "struct");
+				 c->tags[ti].flags & AST_RECORD_FLAG_UNION ? "union" : "struct");
 			next(c);
 			continue;
 		}
@@ -85,7 +85,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 				/* clang: "struct { a, b; }": int members */
 				cc_report_error(c, tok(c)->loc, "type name requires a specifier or qualifier");
 				memset(&ds, 0, sizeof(ds));
-				ds.ty = cc_type_basic(TY_INT);
+				ds.ty = cc_type_basic(AST_TYPE_INT);
 				ds.loc = tok(c)->loc;
 				ds.invalid = true;
 			} else {
@@ -112,7 +112,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 		for (;;) {
 			cc_declarator d;
 			uint32_t first = 0, nops = 0;
-			qty t = ds.ty;
+			ast_qualified_type t = ds.ty;
 			field f = { 0 };
 
 			if (!cc_token_is(c, LEX_TOKEN_COLON)) {
@@ -128,7 +128,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 			if (cc_token_accept(c, LEX_TOKEN_COLON)) {
 				i128 w;
 				uint32_t wn = 0;
-				uint64_t bits = AST_TYPE_KIND(c, t) == TY_BOOL ? 1 : cc_type_integer_bits(c, t);
+				uint64_t bits = AST_TYPE_KIND(c, t) == AST_TYPE_BOOL ? 1 : cc_type_integer_bits(c, t);
 				diag_span wr;
 
 				cc_constant_expression_parse(c, &w, &wn);
@@ -171,11 +171,11 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 			f.depr = unlikely(d.at.depr) ? cc_attribute_new(c, &d.at) : 0;
 			if (cc_type_is_function(c, t))
 				cc_report_error(c, d.loc, "field '%.*s' declared as a function", CC_IDENTIFIER(d.name));
-			else if (AST_TYPE_KIND(c, t) == TY_SVE) {
+			else if (AST_TYPE_KIND(c, t) == AST_TYPE_SVE_BUILTIN) {
 				cc_report_error(c, d.loc, "field has sizeless type '%s'", tyname(c, t));
 				f.invalid = 1;
 			}
-			else if (!ds.invalid && !cc_type_complete(c, t) && !(cc_type_is_array(c, t) && (AST_TYPE(c, t)->flags & TF_INCOMPLETE))) {
+			else if (!ds.invalid && !cc_type_complete(c, t) && !(cc_type_is_array(c, t) && (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE))) {
 				cc_report_error(c, d.loc, "field has incomplete type '%s'", tyname(c, t));
 				cc_report_forward_note(c, t);
 				f.invalid = 1;
@@ -215,24 +215,24 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c, uint32_t t
 	cc_tag_deprecate(c, ti, &post);
 	r = &c->tags[ti];
 	if (post.ms_struct)
-		r->flags |= RF_MS_STRUCT;
+		r->flags |= AST_RECORD_FLAG_MS_STRUCT;
 	if (post.packed)
-		r->flags |= RF_PACKED;
+		r->flags |= AST_RECORD_FLAG_PACKED;
 	if (post.aligned > r->maxalign)
 		r->maxalign = post.aligned;
 	if (post.transparent)
-		c->ty[r->ty].flags |= TF_TRANSPARENT;
+		c->ty[r->ty].flags |= AST_TYPE_FLAG_TRANSPARENT;
 	for (uint32_t i = 0; i < nf; i++)
-		if (cc_type_is_array(c, fs[i].ty) && (AST_TYPE(c, fs[i].ty)->flags & TF_INCOMPLETE)) {
-			if (!(r->flags & RF_UNION) && i + 1 < nf) {
+		if (cc_type_is_array(c, fs[i].ty) && (AST_TYPE(c, fs[i].ty)->flags & AST_TYPE_FLAG_INCOMPLETE)) {
+			if (!(r->flags & AST_RECORD_FLAG_UNION) && i + 1 < nf) {
 				cc_report_error(c, fs[i].loc, "flexible array member '%.*s' with type '%s' is not at the end of struct",
 					 CC_IDENTIFIER(fs[i].name), tyname(c, fs[i].ty));
 				cc_report_note(c, fs[i + 1].loc, "next field declaration is here");
 			}
-			r->flags |= RF_FLEX;
+			r->flags |= AST_RECORD_FLAG_FLEXIBLE;
 		}
 	cc_layout_record(c, r, &x->fa[base], &x->fp[base]);
-	r->flags = (r->flags | RF_COMPLETE) & ~(uint32_t)RF_BEING_DEFINED;
+	r->flags = (r->flags | AST_RECORD_FLAG_COMPLETE) & ~(uint32_t)AST_RECORD_FLAG_BEING_DEFINED;
 	x->n = base;
 }
 
@@ -241,7 +241,7 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 	i128 v = -1, mn = 0, mx = 0;
 	bool any = false;
 	cc_id_list cs;
-	qty fixed = 0;
+	ast_qualified_type fixed = 0;
 
 	CC_REPLAY_TAG_WRITE_LOG(c, ti);
 	cc_id_list_init(&cs);
@@ -249,33 +249,33 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 		cc_declaration_specifiers ds;
 		uint32_t baseloc = tok(c)->loc, colon = c->prevloc;
 		tag *r = &c->tags[ti];
-		qty old = c->ty[r->ty].base;
+		ast_qualified_type old = c->ty[r->ty].base;
 
 		if (!cc_declaration_specifiers_parse(c, &ds, false))
 			cc_report_fatal(c, baseloc, "expected an integer underlying type");
 		fixed = ds.ty;
-		if (AST_TYPE(c, fixed)->flags & TF_ATOMIC) {
+		if (AST_TYPE(c, fixed)->flags & AST_TYPE_FLAG_ATOMIC) {
 			cc_report_error(c, baseloc, "atomic enumeration underlying type is not supported");
-			fixed = QT(AST_TYPE(c, fixed)->n, QQ(fixed));
+			fixed = AST_QUALIFIED_TYPE(AST_TYPE(c, fixed)->n, AST_QUALIFIED_TYPE_QUALIFIERS(fixed));
 		}
-		if (!cc_type_is_integer(c, fixed) || AST_TYPE_KIND(c, fixed) == TY_ENUM ||
+		if (!cc_type_is_integer(c, fixed) || AST_TYPE_KIND(c, fixed) == AST_TYPE_ENUM ||
 		    (cc_type_kind_is_integer(AST_TYPE_KIND(c, fixed)) && AST_TYPE(c, fixed)->n)) {
 			cc_report_error(c, baseloc, "'%s' is an invalid underlying type", tyname(c, fixed));
-			fixed = cc_type_basic(TY_INT);
+			fixed = cc_type_basic(AST_TYPE_INT);
 		}
-		if (QQ(fixed))
+		if (AST_QUALIFIED_TYPE_QUALIFIERS(fixed))
 			cc_report_warning(c, "ignored-qualifiers", true, NULL, baseloc, NULL, 0, NULL, 0,
 				 "qualifiers in enumeration underlying type are ignored");
-		fixed = QUNQ(fixed);
-		if ((r->flags & RF_ENUM_DECLARED) && !(r->flags & RF_ENUM_FIXED)) {
+		fixed = AST_QUALIFIED_TYPE_UNQUALIFIED(fixed);
+		if ((r->flags & AST_RECORD_FLAG_ENUM_DECLARED) && !(r->flags & AST_RECORD_FLAG_ENUM_FIXED)) {
 			cc_report_error(c, loc, "enumeration previously declared with nonfixed underlying type");
 			cc_report_note(c, r->loc, "previous declaration is here");
-		} else if ((r->flags & RF_ENUM_FIXED) && !cc_type_is_compatible(c, fixed, old)) {
+		} else if ((r->flags & AST_RECORD_FLAG_ENUM_FIXED) && !cc_type_is_compatible(c, fixed, old)) {
 			cc_report_error(c, loc, "enumeration redeclared with different underlying type '%s' (was '%s')",
 				 tyname(c, fixed), tyname(c, old));
 			cc_report_note(c, r->loc, "previous declaration is here");
 		}
-		r->flags |= RF_ENUM_FIXED | RF_COMPLETE;
+		r->flags |= AST_RECORD_FLAG_ENUM_FIXED | AST_RECORD_FLAG_COMPLETE;
 		c->ty[r->ty].base = fixed;
 		c->ty[r->ty].size = r->size = cc_type_size(c, fixed);
 		c->ty[r->ty].align = r->align = cc_type_alignment(c, fixed);
@@ -291,17 +291,17 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 				cc_report_error(c, colon, "non-defining declaration of enumeration with a fixed underlying type must be standalone [-Welaborated-enum-base]");
 			return;
 		}
-	} else if (c->tags[ti].flags & RF_ENUM_FIXED) {
+	} else if (c->tags[ti].flags & AST_RECORD_FLAG_ENUM_FIXED) {
 		cc_report_error(c, loc, "enumeration previously declared with fixed underlying type");
 		cc_report_note(c, c->tags[ti].loc, "previous declaration is here");
 		fixed = c->ty[c->tags[ti].ty].base;
 	}
-	if (c->tags[ti].flags & RF_ENUM_DEFINED) {
+	if (c->tags[ti].flags & AST_RECORD_FLAG_ENUM_DEFINED) {
 		cc_report_error(c, loc, "redefinition of enumeration");
 		cc_report_note(c, c->tags[ti].loc, "previous definition is here");
 	}
 	cc_token_expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
-	c->tags[ti].flags |= RF_BEING_DEFINED;
+	c->tags[ti].flags |= AST_RECORD_FLAG_BEING_DEFINED;
 	while (!cc_token_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		uint32_t name, loc, s;
 		attrs ea = { 0 };
@@ -318,7 +318,7 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 		else
 			v++;
 		if (fixed) {
-			unsigned bits = AST_TYPE_KIND(c, fixed) == TY_BOOL ? 1 : (unsigned)cc_type_size(c, fixed) * 8;
+			unsigned bits = AST_TYPE_KIND(c, fixed) == AST_TYPE_BOOL ? 1 : (unsigned)cc_type_size(c, fixed) * 8;
 			bool sign = cc_type_is_signed(c, fixed);
 			i128 lo = sign && bits < 128 ? -((i128)1 << (bits - 1)) : 0;
 			u128 hi = bits == 128 ? ~(u128)0 >> sign : ((u128)1 << (bits - sign)) - 1;
@@ -342,7 +342,7 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 			uint32_t o = cc_symbol_lookup(c, name);
 
 			if (o && c->syms[o].depth == c->depth && c->syms[o].kind != CC_SYMBOL_NAMESPACE_TAG) {
-				if (c->syms[o].kind == S_ENUMCONST)
+				if (c->syms[o].kind == AST_SYMBOL_ENUMERATOR)
 					cc_report_error(c, loc, "redefinition of enumerator '%.*s'", CC_IDENTIFIER(name));
 				else
 					cc_report_error(c, loc, "redefinition of '%.*s' as different kind of symbol", CC_IDENTIFIER(name));
@@ -356,8 +356,8 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 			CC_REPORT_EXTENSION(c, "c23-extensions", cc_warning_group_pedantic, loc, "enumerator value which exceeds the range of 'int' is a C23 extension "
 				 "(%s is too %s)", b, v < 0 ? "small" : "large");
 		}
-		s = cc_symbol_new(c, S_ENUMCONST, name, fixed ? QT(c->tags[ti].ty, 0) : v >= INT32_MIN && v <= INT32_MAX ? cc_type_basic(TY_INT) :
-						 v >= 0 && v <= UINT32_MAX ? cc_type_basic(TY_UINT) : v >= INT64_MIN && v <= INT64_MAX ? cc_type_basic(CC_I64(c, false)) : cc_type_basic(CC_I64(c, true)), loc);
+		s = cc_symbol_new(c, AST_SYMBOL_ENUMERATOR, name, fixed ? AST_QUALIFIED_TYPE(c->tags[ti].ty, 0) : v >= INT32_MIN && v <= INT32_MAX ? cc_type_basic(AST_TYPE_INT) :
+						 v >= 0 && v <= UINT32_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_INT) : v >= INT64_MIN && v <= INT64_MAX ? cc_type_basic(CC_I64(c, false)) : cc_type_basic(CC_I64(c, true)), loc);
 		if (unlikely(ea.depr))
 			cc_attribute_apply_symbol(c, &c->syms[s], &ea);
 		c->syms[s].val = (int64_t)v;
@@ -370,27 +370,27 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 	cc_token_expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'");
 	cc_attribute_list_parse(c, after);
 	{
-		qty best;
+		ast_qualified_type best;
 		ctype *et = &c->ty[c->tags[ti].ty];
 
 		if (fixed) {
-			best = QUNQ(fixed);
+			best = AST_QUALIFIED_TYPE_UNQUALIFIED(fixed);
 		} else if (after->packed) {
 			if (mn < 0)
-				best = mn >= INT8_MIN && mx <= INT8_MAX ? cc_type_basic(TY_SCHAR) : mn >= INT16_MIN && mx <= INT16_MAX ? cc_type_basic(TY_SHORT) :
-				       mn >= INT32_MIN && mx <= INT32_MAX ? cc_type_basic(TY_INT) : cc_type_basic(CC_I64(c, false));
+				best = mn >= INT8_MIN && mx <= INT8_MAX ? cc_type_basic(AST_TYPE_SIGNED_CHAR) : mn >= INT16_MIN && mx <= INT16_MAX ? cc_type_basic(AST_TYPE_SHORT) :
+				       mn >= INT32_MIN && mx <= INT32_MAX ? cc_type_basic(AST_TYPE_INT) : cc_type_basic(CC_I64(c, false));
 			else
-				best = mx <= UINT8_MAX ? cc_type_basic(TY_UCHAR) : mx <= UINT16_MAX ? cc_type_basic(TY_USHORT) :
-				       mx <= UINT32_MAX ? cc_type_basic(TY_UINT) : cc_type_basic(CC_I64(c, true));
+				best = mx <= UINT8_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_CHAR) : mx <= UINT16_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_SHORT) :
+				       mx <= UINT32_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_INT) : cc_type_basic(CC_I64(c, true));
 		} else if (mn < 0) {
-			best = mn >= INT32_MIN && mx <= INT32_MAX ? cc_type_basic(TY_INT) : cc_type_basic(CC_I64(c, false));
+			best = mn >= INT32_MIN && mx <= INT32_MAX ? cc_type_basic(AST_TYPE_INT) : cc_type_basic(CC_I64(c, false));
 		} else {
-			best = mx <= UINT32_MAX ? cc_type_basic(TY_UINT) : cc_type_basic(CC_I64(c, true));
+			best = mx <= UINT32_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_INT) : cc_type_basic(CC_I64(c, true));
 		}
 		et->base = best;
 		et->size = cc_type_size(c, best);
 		et->align = cc_type_alignment(c, best);
-		c->tags[ti].flags = (c->tags[ti].flags | RF_COMPLETE | RF_ENUM_DEFINED) & ~(uint32_t)RF_BEING_DEFINED;
+		c->tags[ti].flags = (c->tags[ti].flags | AST_RECORD_FLAG_COMPLETE | AST_RECORD_FLAG_ENUM_DEFINED) & ~(uint32_t)AST_RECORD_FLAG_BEING_DEFINED;
 		c->tags[ti].size = et->size;
 		c->tags[ti].align = et->align;
 		/* clang: if every value fits int the enumerators are int, else all of
@@ -399,9 +399,9 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after, uint32_t lo
 			sym *y = &c->syms[cs.v[i]];
 
 			if (fixed || mn < INT32_MIN || mx > INT32_MAX)
-				y->ty = QT(c->tags[ti].ty, 0);
+				y->ty = AST_QUALIFIED_TYPE(c->tags[ti].ty, 0);
 			else
-				y->ty = cc_type_basic(TY_INT);
+				y->ty = cc_type_basic(AST_TYPE_INT);
 		}
 		c->tags[ti].enums = cc_id_list_freeze(c, &cs);
 		c->tags[ti].nenum = cs.n;

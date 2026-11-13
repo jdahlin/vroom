@@ -8,13 +8,13 @@ static val const_global(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
-	cval cv;
+	cc_value cv;
 
-	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_integer(c, y->ty) && !em_bigint(c, y->ty) && y->body &&
-	    N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+	if (y->kind == AST_SYMBOL_VARIABLE && (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE)) == AST_QUALIFIER_CONST && is_integer(c, y->ty) && !em_bigint(c, y->ty) && y->body &&
+	    N(y->body)->op != AST_NODE_INITIALIZER && cc_eval(c, y->body, &cv) && cv.kind == CC_VALUE_INTEGER)
 		return vconst(em_trunc_to(c, cv.i, y->ty));
-	if (y->kind == S_VAR && (QQ(y->ty) & (Q_CONST | Q_VOLATILE)) == Q_CONST && is_flt(c, y->ty) &&
-	    tsize(c, y->ty) != 2 && y->body && N(y->body)->op != N_INIT && cc_eval(c, y->body, &cv) && cv.kind == CV_FLT)
+	if (y->kind == AST_SYMBOL_VARIABLE && (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE)) == AST_QUALIFIER_CONST && is_flt(c, y->ty) &&
+	    tsize(c, y->ty) != 2 && y->body && N(y->body)->op != AST_NODE_INITIALIZER && cc_eval(c, y->body, &cv) && cv.kind == CC_VALUE_FLOAT)
 		return f_const_cv(e, y->ty, &cv);
 	return vnone();
 }
@@ -28,7 +28,7 @@ static val gen_var(ecx *e, uint32_t n)
 	lval l;
 	val v;
 
-	if (y->kind == S_FUNC) {
+	if (y->kind == AST_SYMBOL_FUNCTION) {
 		uint32_t r = REF(RK_SYM, canon_sym(c, s));
 
 		note_ref(e, r);
@@ -40,7 +40,7 @@ static val gen_var(ecx *e, uint32_t n)
 		}
 		return vaddr(r, 0);
 	}
-	if (y->kind == S_BUILTIN)
+	if (y->kind == AST_SYMBOL_BUILTIN)
 		return vaddr(REF(RK_NAME, (uint32_t)y->val), 0);
 	if (is_local_var(c, s)) {
 		bind *b = binding(e, s);
@@ -68,7 +68,7 @@ static val gen_var(ecx *e, uint32_t n)
 }
 
 /* result of a load through l, freeing the lvalue's base unless it became the value */
-static val load_free(ecx *e, lval *l, qty t)
+static val load_free(ecx *e, lval *l, ast_qualified_type t)
 {
 	val v = load(e, l, t);
 
@@ -78,7 +78,7 @@ static val load_free(ecx *e, lval *l, qty t)
 }
 
 /* move v into the fixed register r (for joins) */
-VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t)
+VPRIV void move_to(ecx *e, int r, int r2, val *v, ast_qualified_type t)
 {
 	cc *c = e->c;
 
@@ -107,7 +107,7 @@ VPRIV void move_to(ecx *e, int r, int r2, val *v, qty t)
 
 /* In the pressure retry, a conditional's merge value waits in the frame
  * instead of reserving temporaries across arbitrarily nested alternatives. */
-static void cond_spill_value(ecx *e, int64_t sl, qty t, val *v)
+static void cond_spill_value(ecx *e, int64_t sl, ast_qualified_type t, val *v)
 {
 	bool wide = is_wide(e->c, t);
 
@@ -124,7 +124,7 @@ static val gen_cond_spill(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = x->ty;
+	ast_qualified_type t = x->ty;
 	bool wide = is_wide(c, t);
 	int64_t sl = slot(e, wide ? 16 : 8, 8);
 	uint32_t lelse = newlabel(e), lend = newlabel(e);
@@ -161,7 +161,7 @@ static val gen_cond_expr(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = x->ty;
+	ast_qualified_type t = x->ty;
 	bool vd = is_void(c, t), wide = is_wide(c, t);
 	uint32_t lelse = newlabel(e), lend = newlabel(e);
 	int r = -1, r2 = -1;
@@ -244,7 +244,7 @@ static val gen_logical(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	bool isand = x->op == N_LOGAND;
+	bool isand = x->op == AST_NODE_LOGICAL_AND;
 	val a = gen(e, x->a), b;
 	uint32_t lshort, lend;
 	int r;
@@ -272,7 +272,7 @@ static val gen_logical(ecx *e, uint32_t n)
 		tfree(e, r);
 		return vconst(isand ? 0 : 1);
 	}
-	move_to(e, r, -1, &b, prim(TY_INT));
+	move_to(e, r, -1, &b, prim(AST_TYPE_INT));
 	jump(e, lend);
 	deflabel(e, lshort);
 	movi(e, 0, r, isand ? 0 : 1);
@@ -281,11 +281,11 @@ static val gen_logical(ecx *e, uint32_t n)
 }
 
 /* a lane-wise vector operation on the vectors at ra and rb into a new frame temporary; returns its address */
-static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
+static val gen_vbin(ecx *e, int op, int ra, int rb, ast_qualified_type t, uint32_t loc)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
-	qty et = T(c, t)->base;
+	ast_qualified_type et = T(c, t)->base;
 	unsigned es = (unsigned)tsize(c, et);
 	bool q = size == 16;
 	const char *mn, *arr;
@@ -340,12 +340,12 @@ static val gen_vbin(ecx *e, int op, int ra, int rb, qty t, uint32_t loc)
 }
 
 /* operand k of a lane-wise operation: lane i of a vector at ra, or the scalar in rs (copied) */
-static val vlane(ecx *e, qty t, int r, unsigned i)
+static val vlane(ecx *e, ast_qualified_type t, int r, unsigned i)
 {
 	cc *c = e->c;
 
 	if (is_vec(c, t)) {
-		qty et = T(c, t)->base;
+		ast_qualified_type et = T(c, t)->base;
 		lval l = { .k = L_REG, .r = (uint8_t)r, .off = (int64_t)i * (int64_t)tsize(c, et), .align = talign(c, et) };
 
 		if (is_bvec(c, t)) l.off = i / 8, l.bf = 1, l.width = 1, l.bitoff = i % 8;
@@ -364,10 +364,10 @@ static val vlane(ecx *e, qty t, int r, unsigned i)
  * other sizes, *, /, %, shifts, comparisons (-1 / 0 lanes), floating-point
  * lanes, a scalar operand (each lane against it), unary - and ~ (b NULL).
  */
-static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bool unary)
+static val gen_vlanes(ecx *e, int op, ast_qualified_type at, val *a, ast_qualified_type bt, val *b, ast_qualified_type rt, bool unary)
 {
 	cc *c = e->c;
-	qty vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
+	ast_qualified_type vt = is_vec(c, at) ? at : bt, et = T(c, vt)->base, rte = T(c, rt)->base;
 	unsigned n = T(c, vt)->n;
 	int ra = toreg(e, a), rb = unary ? -1 : toreg(e, b), rd;
 	int64_t sl = slot(e, tsize(c, rt), 16);
@@ -376,7 +376,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 	opi(e, I_ADDI, 1, rd, FRAME, sl);
 	for (unsigned i = 0; i < n; i++) {
 		val x = vlane(e, at, ra, i), y = unary ? vconst(0) : vlane(e, bt, rb, i), r;
-		qty yt = unary ? et : is_vec(c, bt) ? T(c, bt)->base : bt;
+		ast_qualified_type yt = unary ? et : is_vec(c, bt) ? T(c, bt)->base : bt;
 
 		if (unary) {
 			if (op == LEX_TOKEN_MINUS)
@@ -430,7 +430,7 @@ static val gen_vlanes(ecx *e, int op, qty at, val *a, qty bt, val *b, qty rt, bo
 	return vreg(rd);
 }
 
-static bool vbin_fast(cc *c, int op, qty lt, qty rt, qty ty)
+static bool vbin_fast(cc *c, int op, ast_qualified_type lt, ast_qualified_type rt, ast_qualified_type ty)
 {
 	uint64_t size = tsize(c, ty);
 
@@ -443,7 +443,7 @@ static val gen_binary(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n);
 	int op = x->aux;
-	qty lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
+	ast_qualified_type lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
 	int known = em_is_cmp(op) ? cond_fold(e, n) : -1;
 	val a, b;
 	uint32_t operand;
@@ -481,7 +481,7 @@ static val gen_binary(ecx *e, uint32_t n)
 		efatal(e, x->loc, "expression nested too deeply");
 	a = gen(e, x->a);
 	if (unlikely(e->spill) && (a.k == V_REG || a.k == V_REG2) && tidx(a.r) >= 0 &&
-	    !is_vec(c, lt) && N(x->b)->op != N_NUM && N(x->b)->op != N_VAR) {
+	    !is_vec(c, lt) && N(x->b)->op != AST_NODE_NUMBER && N(x->b)->op != AST_NODE_VARIABLE) {
 		/* out of registers before: the left value waits in the frame while the right is computed */
 		int64_t sl = slot(e, 16, 8);
 		bool two = a.k == V_REG2;
@@ -512,7 +512,7 @@ static val gen_binary(ecx *e, uint32_t n)
 	}
 
 	if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
-		b = cast(e, b, rt, prim(TY_INT), CK_INT);
+		b = cast(e, b, rt, prim(AST_TYPE_INT), AST_CAST_INTEGER);
 	if (em_bigint(c, lt))
 		return em_is_cmp(op) ? a64_bigcmp(e, op, lt, a, b) : a64_bigbin(e, op, ty, a, b);
 	if (is_flt(c, lt) || is_flt(c, ty))
@@ -557,7 +557,7 @@ static val gen_binary(ecx *e, uint32_t n)
 
 		if (a.k == V_CONST && b.k == V_CONST) {
 			bool ok;
-			val v = fold_int_bin(e, op, is_ptr(c, lt) ? prim(TY_ULONG) : lt, ty, a.i, b.i, &ok);
+			val v = fold_int_bin(e, op, is_ptr(c, lt) ? prim(AST_TYPE_UNSIGNED_LONG) : lt, ty, a.i, b.i, &ok);
 
 			if (ok)
 				return v;
@@ -567,7 +567,7 @@ static val gen_binary(ecx *e, uint32_t n)
 			if (a.k == V_ADDR && b.k == V_ADDR) {
 				bool ok;
 
-				return fold_int_bin(e, op, prim(TY_LONG), ty, a.i, b.i, &ok);
+				return fold_int_bin(e, op, prim(AST_TYPE_LONG), ty, a.i, b.i, &ok);
 			}
 			if (op == LEX_TOKEN_EQUAL_EQUAL)
 				return vconst(0);
@@ -618,7 +618,7 @@ static val gen_unary(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = N(x->a)->ty;
+	ast_qualified_type t = N(x->a)->ty;
 	uint32_t operand = em_double_unary(e, n);
 	val v;
 
@@ -673,20 +673,20 @@ static val gen_unary(ecx *e, uint32_t n)
 }
 
 /* convert v from type `from` to `to` the way an assignment back to an integer lvalue does */
-static val conv_back(ecx *e, val v, qty from, qty to)
+static val conv_back(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 
-	if (KIND(c, to) == TY_BOOL)
+	if (KIND(c, to) == AST_TYPE_BOOL)
 		return tobool(e, v, from);
 	if (is_ptr(c, to) || is_ptr(c, from))
 		return v;
-	return cast(e, v, from, to, CK_INT);
+	return cast(e, v, from, to, AST_CAST_INTEGER);
 }
 
 /* Normalize a value loaded outside gen(), before a compound operation can
  * move padding into value bits or interpret it as a signed high word. */
-static val bitint_value(ecx *e, val v, qty t)
+static val bitint_value(ecx *e, val v, ast_qualified_type t)
 {
 	cc *c = e->c;
 	{
@@ -710,10 +710,10 @@ static val bitint_value(ecx *e, val v, qty t)
 
 /* old op= v (x a compound assignment to an lvalue of type lt): the new value, of type lt */
 
-static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
+static val assign_op(ecx *e, const node *x, ast_qualified_type lt, val old, val v)
 {
 	cc *c = e->c;
-	qty pt = x->c;
+	ast_qualified_type pt = x->c;
 	int op = x->aux;
 
 	if (em_bitint(c, lt) && !em_bigint(c, lt))
@@ -721,9 +721,9 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 	if (em_bigint(c, pt)) {
 		if (em_bigint(c, lt)) old = a64_bigcopy(e, old, lt);
 		old = a64_bigcvt(e, old, lt, pt);
-		qty rt = N(x->b)->ty;
+		ast_qualified_type rt = N(x->b)->ty;
 		if ((op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER) && (em_bigint(c, rt) || is_wide(c, rt)))
-			v = cast(e, v, rt, prim(TY_INT), CK_INT);
+			v = cast(e, v, rt, prim(AST_TYPE_INT), AST_CAST_INTEGER);
 		old = a64_bigbin(e, op, pt, old, v);
 		return a64_bigcvt(e, old, pt, lt);
 	}
@@ -731,9 +731,9 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 		old = ptr_to_vla(c, lt) ? ptr_add_vla(e, old, v, lt, op == LEX_TOKEN_MINUS)
 					: ptr_add(e, old, v, (int64_t)elem_size(c, lt), op == LEX_TOKEN_MINUS);
 	} else if (is_flt(c, pt) || is_flt(c, lt)) {
-		old = cast(e, old, lt, pt, CK_INT);
+		old = cast(e, old, lt, pt, AST_CAST_INTEGER);
 		old = is_flt(c, pt) ? f_arith(e, op, pt, old, v) : arith(e, op, pt, old, v);
-		old = cast(e, old, pt, lt, CK_INT);
+		old = cast(e, old, pt, lt, AST_CAST_INTEGER);
 	} else {
 		old = conv_back(e, old, lt, pt);
 		if (old.k == V_CONST && v.k == V_CONST) {
@@ -752,13 +752,13 @@ static val assign_op(ecx *e, const node *x, qty lt, val old, val v)
 	return old;
 }
 
-static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old);
+static val incdec_op(ecx *e, ast_qualified_type t, bool inc, bool post, val *old);
 
 /* an assignment operator or ++/-- whose operand is an _Atomic object */
-static inline bool atomic_target(ecx *e, uint32_t a, qty t)
+static inline bool atomic_target(ecx *e, uint32_t a, ast_qualified_type t)
 {
 	(void)a;
-	return unlikely(T(e->c, t)->flags & TF_ATOMIC);
+	return unlikely(T(e->c, t)->flags & AST_TYPE_FLAG_ATOMIC);
 }
 
 /*
@@ -776,8 +776,8 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	bool asg = x->op == N_ASSIGN;
-	qty t = N(x->a)->ty;
+	bool asg = x->op == AST_NODE_ASSIGN;
+	ast_qualified_type t = N(x->a)->ty;
 	val v = vnone(), old, nv;
 	lval l;
 	int sz, ra, ob, cmp, nb;
@@ -841,7 +841,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 		val_free(e, &nv);
 		return old;
 	}
-	if (!asg && KIND(c, t) == TY_BOOL)
+	if (!asg && KIND(c, t) == AST_TYPE_BOOL)
 		val_free(e, &old);
 	return nv;
 }
@@ -849,7 +849,7 @@ static val atomic_rmw(ecx *e, uint32_t n, bool inc, bool post)
 /* Updating a wide scalar keeps its lvalue alive through the final store.
  * Aggregate-style loads return its address, so give the arithmetic value
  * separate register ownership before normalization or arithmetic consumes it. */
-static val load_for_update(ecx *e, lval *l, qty t)
+static val load_for_update(ecx *e, lval *l, ast_qualified_type t)
 {
 	val v = load(e, l, t);
 	if (em_bigint(e->c, t) && l->k == L_REG && v.k == V_REG && v.r == l->r) {
@@ -864,7 +864,7 @@ static val gen_assign(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty lt = N(x->a)->ty;
+	ast_qualified_type lt = N(x->a)->ty;
 	lval l;
 	val v, old;
 
@@ -880,7 +880,7 @@ static val gen_assign(ecx *e, uint32_t n)
 			av = laddr(e, &l2);
 		}
 		if (!vbin_fast(c, x->aux, lt, N(x->b)->ty, lt)) {
-			qty bt = N(x->b)->ty;
+			ast_qualified_type bt = N(x->b)->ty;
 
 			r = gen_vlanes(e, x->aux, lt, &av, bt, &w, lt, false);
 			store(e, &l, lt, &r);
@@ -910,7 +910,7 @@ static val gen_assign(ecx *e, uint32_t n)
 			}
 			return v;
 		}
-		if (N(x->a)->op == N_VAR && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
+		if (N(x->a)->op == AST_NODE_VARIABLE && (e->E->sflags[N(x->a)->a] & SA_CWRITE)) {
 			bind *b = binding(e, N(x->a)->a);
 
 			if (b->kind == B_CONST && b->inst) {
@@ -961,7 +961,7 @@ static val gen_assign(ecx *e, uint32_t n)
 }
 
 /* ++/-- on *old (of type t): returns the new value; *old becomes what a postfix operator yields */
-static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
+static val incdec_op(ecx *e, ast_qualified_type t, bool inc, bool post, val *old)
 {
 	cc *c = e->c;
 	val nv;
@@ -978,7 +978,7 @@ static val incdec_op(ecx *e, qty t, bool inc, bool post, val *old)
 		*old = nv;
 		return nv;
 	}
-	if (KIND(c, t) == TY_BOOL) {
+	if (KIND(c, t) == AST_TYPE_BOOL) {
 		nv = vconst(1);
 		if (!inc) {
 			/* --b: b = b - 1 != 0, i.e. !b */
@@ -1059,8 +1059,8 @@ static val gen_incdec(ecx *e, uint32_t n)
 {
 	cc *c = e->c;
 	const node *x = N(n);
-	qty t = N(x->a)->ty;
-	bool inc = x->op == N_PREINC || x->op == N_POSTINC, post = x->op == N_POSTINC || x->op == N_POSTDEC;
+	ast_qualified_type t = N(x->a)->ty;
+	bool inc = x->op == AST_NODE_PRE_INCREMENT || x->op == AST_NODE_POST_INCREMENT, post = x->op == AST_NODE_POST_INCREMENT || x->op == AST_NODE_POST_DECREMENT;
 	lval l;
 	val old, nv;
 
@@ -1075,7 +1075,7 @@ static val gen_incdec(ecx *e, uint32_t n)
 		val_free(e, &nv);
 		return old;
 	}
-	if (KIND(c, t) == TY_BOOL)
+	if (KIND(c, t) == AST_TYPE_BOOL)
 		val_free(e, &old);
 	else if (l.bf && l.width < 64 && nv.k != V_REG2) {
 		/* the value of ++/-- on a bit-field is the truncated value */
@@ -1093,13 +1093,13 @@ VPRIV val gen(ecx *e, uint32_t n)
 {
 	if (n && n == e->reuse_from) n = e->reuse_to;
 	cc *c = e->c;
-	qty t = N(n)->ty;
+	ast_qualified_type t = N(n)->ty;
 
 	if (em_bigint(c, t)) {
 		val v = gen_inner(e, n);
 		switch (N(n)->op) {
-		case N_VAR: case N_MEMBER: case N_INDEX: case N_DEREF: case N_COMPLIT:
-		case N_CALL: case N_VAARG:
+		case AST_NODE_VARIABLE: case AST_NODE_MEMBER: case AST_NODE_INDEX: case AST_NODE_DEREFERENCE: case AST_NODE_COMPOUND_LITERAL:
+		case AST_NODE_CALL: case AST_NODE_VA_ARG:
 			return a64_bigcopy(e, v, t);
 		default: return v;
 		}
@@ -1116,11 +1116,11 @@ static val gen_inner(ecx *e, uint32_t n)
 	const node *x = N(n);
 
 	switch (x->op) {
-	case N_BIGNUM:
+	case AST_NODE_BITINT_NUMBER:
 		return a64_bigconst(e, x->ty, &c->lists[x->a], 0);
-	case N_NUM:
+	case AST_NODE_NUMBER:
 		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, c->ipool[x->a]) : vconst(c->ipool[x->a]);
-	case N_FNUM:
+	case AST_NODE_FLOAT_NUMBER:
 		if (is_ld(c, x->ty)) {
 			u128 q;
 
@@ -1128,15 +1128,15 @@ static val gen_inner(ecx *e, uint32_t n)
 			return vconst((i128)q);
 		}
 		return f_const_t(e, x->ty, c->fpool[x->a]);
-	case N_STR:
+	case AST_NODE_STRING:
 		note_ref(e, REF(RK_STR, x->a));
 		return vaddr(REF(RK_STR, x->a), 0);
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		return gen_var(e, n);
-	case N_MEMBER:
-	case N_INDEX:
-	case N_DEREF: {
-		int k = x->op == N_INDEX ? ael_slot(e, n, false) : -1;
+	case AST_NODE_MEMBER:
+	case AST_NODE_INDEX:
+	case AST_NODE_DEREFERENCE: {
+		int k = x->op == AST_NODE_INDEX ? ael_slot(e, n, false) : -1;
 
 		if (k >= 0 && (e->kvalid >> k & 1))
 			return vconst(e->kval[k]);
@@ -1144,23 +1144,23 @@ static val gen_inner(ecx *e, uint32_t n)
 
 		return load_free(e, &l, x->ty);
 	}
-	case N_COMPLIT: {
+	case AST_NODE_COMPOUND_LITERAL: {
 		lval l = gen_lval(e, n);
 
 		return load_free(e, &l, x->ty);
 	}
-	case N_ADDR: {
+	case AST_NODE_ADDRESS: {
 		const node *a = N(x->a);
 		lval l;
 
-		if (a->op == N_LABELADDR || is_func(c, a->ty))
+		if (a->op == AST_NODE_LABEL_ADDRESS || is_func(c, a->ty))
 			return gen(e, x->a);
 		l = gen_lval(e, x->a);
 		if (l.k == L_SYM)
 			note_ref(e, l.ref);
 		return laddr(e, &l);
 	}
-	case N_LABELADDR: {
+	case AST_NODE_LABEL_ADDRESS: {
 		uint32_t l = x->a;
 		lbl *m = &e->lm[l];
 		int r = treg(e);
@@ -1179,24 +1179,24 @@ static val gen_inner(ecx *e, uint32_t n)
 		e->lrefc[m->id] |= LREF_EXT;
 		return vreg(r);
 	}
-	case N_CAST:
+	case AST_NODE_CAST:
 		if (x->c) return gen(e, x->c);
 		switch (x->aux) {
-		case CK_DECAY: {
+		case AST_CAST_ARRAY_DECAY: {
 			lval l = gen_lval(e, x->a);
 
 			if (l.k == L_SYM)
 				note_ref(e, l.ref);
 			return laddr(e, &l);
 		}
-		case CK_FDECAY:
+		case AST_CAST_FUNCTION_DECAY:
 			return gen(e, x->a);
-		case CK_VADDR:
+		case AST_CAST_VECTOR_ADDRESS:
 			return gen(e, x->a);	/* a vector value is its address */
-		case CK_BITS: {
-			qty from = N(x->a)->ty;
+		case AST_CAST_BIT_CAST: {
+			ast_qualified_type from = N(x->a)->ty;
 			lval d = { .k = L_FRAME, .off = slot(e, tsize(c, x->ty), talign(c, x->ty)), .align = talign(c, x->ty) };
-			if (N(x->a)->flags & NF_LVALUE) {
+			if (N(x->a)->flags & AST_NODE_FLAG_LVALUE) {
 				lval src = gen_lval(e, x->a);
 				if (src.dynbit_slot) {
 					val v = load(e, &src, from);
@@ -1216,9 +1216,9 @@ static val gen_inner(ecx *e, uint32_t n)
 							part.bitoff = (src.bitoff + start) % 8;
 							part.width = bit >= src.width ? 1 : src.width - bit < 8 ? src.width - bit : 8;
 							part.sgn = src.sgn && bit + 8 >= src.width;
-							v = load(e, &part, prim(TY_UCHAR));
+							v = load(e, &part, prim(AST_TYPE_UNSIGNED_CHAR));
 						}
-						store(e, &byte, prim(TY_UCHAR), &v); val_free(e, &v);
+						store(e, &byte, prim(AST_TYPE_UNSIGNED_CHAR), &v); val_free(e, &v);
 					}
 					lfree(e, &src);
 
@@ -1234,7 +1234,7 @@ static val gen_inner(ecx *e, uint32_t n)
 			if (is_agg(c, x->ty)) return laddr(e, &d);
 			return load(e, &d, x->ty);
 		}
-		case CK_VBITS: {
+		case AST_CAST_VECTOR_BITS: {
 			/* the vector's bits as a scalar: load from its address */
 			val v = gen(e, x->a);
 			lval l = { .k = L_REG, .align = talign(c, N(x->a)->ty) };
@@ -1244,8 +1244,8 @@ static val gen_inner(ecx *e, uint32_t n)
 			lfree(e, &l);
 			return v;
 		}
-		case CK_SPLAT: {	/* the scalar into every lane of a new vector */
-			qty et = T(c, x->ty)->base;
+		case AST_CAST_SPLAT: {	/* the scalar into every lane of a new vector */
+			ast_qualified_type et = T(c, x->ty)->base;
 			uint64_t es = tsize(c, et), nl = T(c, x->ty)->n;
 			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			val v = gen(e, x->a);
@@ -1262,7 +1262,7 @@ static val gen_inner(ecx *e, uint32_t n)
 			opi(e, I_ADDI, 1, r, FRAME, sl);
 			return vreg(r);
 		}
-		case CK_UNION: {
+		case AST_CAST_UNION: {
 			int64_t sl = slot(e, tsize(c, x->ty), talign(c, x->ty));
 			lval l = { .k = L_FRAME, .off = sl, .align = talign(c, x->ty) };
 			val v = gen(e, x->a);
@@ -1283,20 +1283,20 @@ static val gen_inner(ecx *e, uint32_t n)
 			return cast(e, v, N(x->a)->ty, x->ty, x->aux);
 		}
 		}
-	case N_UNARY:
+	case AST_NODE_UNARY:
 		return gen_unary(e, n);
-	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT:
 		return gen_incdec(e, n);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		return gen_binary(e, n);
-	case N_LOGAND:
-	case N_LOGOR:
+	case AST_NODE_LOGICAL_AND:
+	case AST_NODE_LOGICAL_OR:
 		return gen_logical(e, n);
-	case N_ASSIGN:
+	case AST_NODE_ASSIGN:
 		return gen_assign(e, n);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return gen_cond_expr(e, n);
-	case N_COMMA: {
+	case AST_NODE_COMMA: {
 		if (side_effects(c, x->a)) {
 			val v = gen(e, x->a);
 
@@ -1304,18 +1304,18 @@ static val gen_inner(ecx *e, uint32_t n)
 		}
 		return gen(e, x->b);
 	}
-	case N_CALL:
+	case AST_NODE_CALL:
 		return gen_call(e, n);
-	case N_BUILTIN:
+	case AST_NODE_BUILTIN:
 		return gen_builtin(e, n);
-	case N_STMTEXPR:
+	case AST_NODE_STATEMENT_EXPRESSION:
 		return gen_block(e, x->a, true);
-	case N_VAARG:
+	case AST_NODE_VA_ARG:
 		return va_arg_(e, x);
-	case N_ZERO:
+	case AST_NODE_ZERO:
 		return em_bigint(c, x->ty) ? a64_bigconst(e, x->ty, NULL, 0) : vconst(0);
-	case N_CPLX: {	/* a _Complex value: both parts into a temporary, its address */
-		qty et = c->tags[T(c, x->ty)->aux].f[0].ty;
+	case AST_NODE_COMPLEX: {	/* a _Complex value: both parts into a temporary, its address */
+		ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
 		uint64_t es = tsize(c, et);
 		int64_t sl = slot(e, 2 * es, talign(c, x->ty));
 		lval d = { .k = L_FRAME, .off = sl, .align = talign(c, et) };
@@ -1332,15 +1332,15 @@ static val gen_inner(ecx *e, uint32_t n)
 		opi(e, I_ADDI, 1, r, FRAME, sl);
 		return vreg(r);
 	}
-	case N_SIZEOF_VLA: {
+	case AST_NODE_SIZEOF_VLA: {
 		if (x->aux == 1) {
 			vla_fix(e, x->b, false);
 			return vla_bytes(e, x->b);
 		}
-		const sym *y = x->a && N(x->a)->op == N_VAR ? &c->syms[N(x->a)->a] : NULL;
+		const sym *y = x->a && N(x->a)->op == AST_NODE_VARIABLE ? &c->syms[N(x->a)->a] : NULL;
 
-		if (y && y->kind == S_VAR && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
-		    binding(e, N(x->a)->a)->inst == e->f->inst && (T(c, y->ty)->flags & TF_VLA)) {
+		if (y && y->kind == AST_SYMBOL_VARIABLE && binding(e, N(x->a)->a)->kind == B_INDIRECT &&
+		    binding(e, N(x->a)->a)->inst == e->f->inst && (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
 			int r = treg(e);
 
 			mem(e, I_LD, 3, 0, r, FRAME, binding(e, N(x->a)->a)->slot + 16);

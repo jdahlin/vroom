@@ -4,7 +4,7 @@
    ((n+bias) & (|d|-1)) - bias. Callers retain operand evaluation. */
 #include "../emitimpl.h"
 
-VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r)
+VPRIV bool em_sdivpow2(cc *c, ast_qualified_type ty, int op, i128 rhs, em_sdivpow2_recipe *r)
 {
 	i128 d;
 	uint64_t mag;

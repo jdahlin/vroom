@@ -17,7 +17,7 @@ typedef struct cc_initializer_run {
 } cc_initializer_run;
 
 typedef struct cc_initializer_list {
-	qty ty;
+	ast_qualified_type ty;
 	bool array, isunion, unknown;
 	bool shared;		/* range elements share this list until a later write */
 	uint64_t n;		/* fields, or array length (unknown: grows) */
@@ -32,7 +32,7 @@ typedef struct cc_initializer_list {
 	uint32_t ubase;	/* union expanded from this value (cc_initializer_list_expand), 0: none */
 } cc_initializer_list;
 
-static cc_initializer_list *cc_initializer_list_new(cc *c, qty ty)
+static cc_initializer_list *cc_initializer_list_new(cc *c, ast_qualified_type ty)
 {
 	cc_initializer_list *l = cc_heap_allocate(c, sizeof(cc_initializer_list));
 
@@ -43,12 +43,12 @@ static cc_initializer_list *cc_initializer_list_new(cc *c, qty ty)
 		l->n = AST_TYPE(c, ty)->n;
 	} else if (cc_type_is_array(c, ty)) {
 		l->array = true;
-		l->unknown = (AST_TYPE(c, ty)->flags & TF_INCOMPLETE) != 0;
+		l->unknown = (AST_TYPE(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE) != 0;
 		l->n = l->unknown ? 0 : cc_type_array_length(c, ty);
 	} else {
 		const tag *r = &c->tags[AST_TYPE(c, ty)->aux];
 
-		l->isunion = (r->flags & RF_UNION) != 0;
+		l->isunion = (r->flags & AST_RECORD_FLAG_UNION) != 0;
 		l->n = r->nfield;
 		l->slot = cc_heap_allocate(c, (r->nfield + 1) * sizeof(uint32_t));
 		l->sub = cc_heap_allocate(c, (r->nfield + 1) * sizeof(cc_initializer_list *));
@@ -81,7 +81,7 @@ static cc_initializer_list *cc_initializer_list_copy(cc *c, const cc_initializer
 	return s;
 }
 
-static qty cc_initializer_list_element_type(cc *c, const cc_initializer_list *l, uint64_t i)
+static ast_qualified_type cc_initializer_list_element_type(cc *c, const cc_initializer_list *l, uint64_t i)
 {
 	if (l->array)
 		return AST_TYPE(c, l->ty)->base;
@@ -142,10 +142,10 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 
 static void cc_initializer_list_put(cc *c, cc_initializer_list *s, uint64_t k, uint32_t m)
 {
-	qty ft = AST_NODE(m)->ty;
+	ast_qualified_type ft = AST_NODE(m)->ty;
 
-	if (cc_type_is_array(c, ft) && AST_NODE(m)->op != N_STR) {
-		cc_initializer_list *t = cc_initializer_list_new(c, QUNQ(ft));
+	if (cc_type_is_array(c, ft) && AST_NODE(m)->op != AST_NODE_STRING) {
+		cc_initializer_list *t = cc_initializer_list_new(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft));
 
 		cc_initializer_list_expand(c, t, m);
 		cc_initializer_list_set(c, s, k, 0, t);
@@ -158,9 +158,9 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 {
 	uint32_t loc = AST_NODE(v)->loc;
 
-	if (s->array && AST_NODE(v)->op == N_STR) {
+	if (s->array && AST_NODE(v)->op == AST_NODE_STRING) {
 		const cstr *str = &c->strs[AST_NODE(v)->a];
-		qty et = AST_TYPE(c, s->ty)->base;
+		ast_qualified_type et = AST_TYPE(c, s->ty)->base;
 
 		for (uint32_t k = 0; k < str->n && (s->unknown || k < s->n); k++) {
 			i128 x = 0;
@@ -177,22 +177,22 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 		return;
 	}
 	if (s->array) {
-		qty et = AST_TYPE(c, s->ty)->base;
+		ast_qualified_type et = AST_TYPE(c, s->ty)->base;
 
 		if (s->unknown || cc_type_is_vector(c, s->ty)) {
 			cc_report_error(c, loc, "unsupported: a designator overrides part of this initializer");
 			return;
 		}
 		for (uint64_t k = 0; k < s->n; k++) {
-			uint32_t e = cc_node_new_operands(c, N_INDEX, et, loc, cc_node_rvalue(c, v), cc_node_integer_new(c, (i128)k, cc_type_basic(TY_LONG), loc));
+			uint32_t e = cc_node_new_operands(c, AST_NODE_INDEX, et, loc, cc_node_rvalue(c, v), cc_node_integer_new(c, (i128)k, cc_type_basic(AST_TYPE_LONG), loc));
 
-			AST_NODE(e)->flags = NF_LVALUE;
+			AST_NODE(e)->flags = AST_NODE_FLAG_LVALUE;
 			cc_initializer_list_put(c, s, k, e);
 		}
 		return;
 	}
 	{
-		qty bt = AST_NODE(v)->ty;
+		ast_qualified_type bt = AST_NODE(v)->ty;
 		const tag *r = &c->tags[AST_TYPE(c, bt)->aux];
 
 		for (uint32_t k = 0; k < r->nfield; k++) {
@@ -201,9 +201,9 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 
 			if (f->bitfield && !f->name)
 				continue;
-			m = cc_node_new(c, N_MEMBER, cc_type_qualify(c, f->ty, QQ(bt)), loc);
+			m = cc_node_new(c, AST_NODE_MEMBER, cc_type_qualify(c, f->ty, AST_QUALIFIED_TYPE_QUALIFIERS(bt)), loc);
 			AST_NODE(m)->a = v, AST_NODE(m)->b = AST_TYPE(c, bt)->aux, AST_NODE(m)->c = k;
-			AST_NODE(m)->flags = (uint8_t)((AST_NODE(v)->flags & NF_LVALUE) | (f->bitfield ? NF_BITFIELD : 0));
+			AST_NODE(m)->flags = (uint8_t)((AST_NODE(v)->flags & AST_NODE_FLAG_LVALUE) | (f->bitfield ? AST_NODE_FLAG_BITFIELD : 0));
 			cc_initializer_list_put(c, s, k, m);
 			if (s->isunion)
 				break;	/* (its first member; cc_initializer_list_child reads another through v) */
@@ -216,7 +216,7 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 /* the sub-list at i, created (replacing a plain value) if needed */
 static cc_initializer_list *cc_initializer_list_child(cc *c, cc_initializer_list *l, uint64_t i)
 {
-	qty et = cc_initializer_list_element_type(c, l, i);
+	ast_qualified_type et = cc_initializer_list_element_type(c, l, i);
 	uint32_t old = 0;
 
 	if (l->array) {
@@ -244,11 +244,11 @@ static cc_initializer_list *cc_initializer_list_child(cc *c, cc_initializer_list
 		old = l->slot[i];
 	} else if (l->ubase) {	/* the same bytes through the member the designator picks */
 		uint32_t v = l->ubase;
-		qty bt = AST_NODE(v)->ty;
+		ast_qualified_type bt = AST_NODE(v)->ty;
 
-		old = cc_node_new(c, N_MEMBER, cc_type_qualify(c, c->tags[AST_TYPE(c, bt)->aux].f[i].ty, QQ(bt)), AST_NODE(v)->loc);
+		old = cc_node_new(c, AST_NODE_MEMBER, cc_type_qualify(c, c->tags[AST_TYPE(c, bt)->aux].f[i].ty, AST_QUALIFIED_TYPE_QUALIFIERS(bt)), AST_NODE(v)->loc);
 		AST_NODE(old)->a = v, AST_NODE(old)->b = AST_TYPE(c, bt)->aux, AST_NODE(old)->c = (uint32_t)i;
-		AST_NODE(old)->flags = (uint8_t)(AST_NODE(v)->flags & NF_LVALUE);
+		AST_NODE(old)->flags = (uint8_t)(AST_NODE(v)->flags & AST_NODE_FLAG_LVALUE);
 	}
 	{
 		cc_initializer_list *s = cc_initializer_list_new(c, et);
@@ -285,7 +285,7 @@ static uint64_t cc_initializer_list_next_position(cc *c, const cc_initializer_li
 static uint32_t cc_initializer_list_finish(cc *c, cc_initializer_list *l, uint32_t loc);
 static void cc_initializer_list_continue(cc *c, cc_initializer_list *l, uint64_t pos, bool st);
 static void cc_initializer_list_fill(cc *c, cc_initializer_list *l, uint64_t pos, bool braced, uint32_t first, bool st);
-static uint32_t cc_initializer_braced_scalar_parse(cc *c, qty ty, bool st);
+static uint32_t cc_initializer_braced_scalar_parse(cc *c, ast_qualified_type ty, bool st);
 
 /* a braced initializer skipped (excess elements): its range */
 static diag_span cc_initializer_braces_skip(cc *c)
@@ -308,14 +308,14 @@ static diag_span cc_initializer_braces_skip(cc *c)
 }
 
 /* a string literal for a char array of known size: longer than it (the terminator may go) */
-static void cc_initializer_string_fit_check(cc *c, qty arr, uint32_t s)
+static void cc_initializer_string_fit_check(cc *c, ast_qualified_type arr, uint32_t s)
 {
-	if (unlikely(c->constexpr_init) && cc_type_is_array(c, arr) && AST_NODE(s)->op == N_STR) {
+	if (unlikely(c->constexpr_init) && cc_type_is_array(c, arr) && AST_NODE(s)->op == AST_NODE_STRING) {
 		const cstr *str = &c->strs[AST_NODE(s)->a];
-		qty from = AST_TYPE(c, AST_NODE(s)->ty)->base, to = AST_TYPE(c, arr)->base;
+		ast_qualified_type from = AST_TYPE(c, AST_NODE(s)->ty)->base, to = AST_TYPE(c, arr)->base;
 		uint64_t count = str->n;
 
-		if (!(AST_TYPE(c, arr)->flags & TF_INCOMPLETE) && count > cc_type_array_length(c, arr))
+		if (!(AST_TYPE(c, arr)->flags & AST_TYPE_FLAG_INCOMPLETE) && count > cc_type_array_length(c, arr))
 			count = cc_type_array_length(c, arr);
 		for (uint64_t i = 0; i < count; i++) {
 			i128 value = 0;
@@ -332,7 +332,7 @@ static void cc_initializer_string_fit_check(cc *c, qty arr, uint32_t s)
 			}
 		}
 	}
-	if (cc_type_is_array(c, arr) && !(AST_TYPE(c, arr)->flags & (TF_INCOMPLETE | TF_VLA)) && AST_NODE(s)->op == N_STR &&
+	if (cc_type_is_array(c, arr) && !(AST_TYPE(c, arr)->flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA)) && AST_NODE(s)->op == AST_NODE_STRING &&
 	    c->strs[AST_NODE(s)->a].esz == 1 && c->strs[AST_NODE(s)->a].n - 1 > AST_TYPE(c, arr)->n) {
 		diag_span r = cc_node_range(c, s);
 
@@ -341,9 +341,9 @@ static void cc_initializer_string_fit_check(cc *c, qty arr, uint32_t s)
 }
 
 /* clang's -Wexcess-initializers, once per list: at the first excess element */
-static void cc_initializer_excess_warn(cc *c, qty ty, bool *done, diag_span r)
+static void cc_initializer_excess_warn(cc *c, ast_qualified_type ty, bool *done, diag_span r)
 {
-	const char *k = cc_type_is_array(c, ty) ? "array" : cc_type_is_vector(c, ty) ? "vector" : AST_TYPE_KIND(c, ty) == TY_UNION ? "union" :
+	const char *k = cc_type_is_array(c, ty) ? "array" : cc_type_is_vector(c, ty) ? "vector" : AST_TYPE_KIND(c, ty) == AST_TYPE_UNION ? "union" :
 			cc_type_is_record(c, ty) ? "struct" : "scalar";
 
 	if (*done)
@@ -352,21 +352,21 @@ static void cc_initializer_excess_warn(cc *c, qty ty, bool *done, diag_span r)
 	cc_report_warning(c, "excess-initializers", true, NULL, r.b, &r, 1, NULL, 0, "excess elements in %s initializer", k);
 }
 
-static bool cc_type_is_char_array(cc *c, qty t)
+static bool cc_type_is_char_array(cc *c, ast_qualified_type t)
 {
 	if (!cc_type_is_array(c, t))
 		return false;
 	t = AST_TYPE(c, t)->base;
-	return cc_type_is_integer(c, t) && (cc_type_size(c, t) == 1 || cc_type_size(c, t) == 2 || cc_type_size(c, t) == 4) && AST_TYPE_KIND(c, t) != TY_BOOL;
+	return cc_type_is_integer(c, t) && (cc_type_size(c, t) == 1 || cc_type_size(c, t) == 2 || cc_type_size(c, t) == 4) && AST_TYPE_KIND(c, t) != AST_TYPE_BOOL;
 }
 
-static bool cc_initializer_string_initializes(cc *c, qty arr, uint32_t v)
+static bool cc_initializer_string_initializes(cc *c, ast_qualified_type arr, uint32_t v)
 {
 	uint32_t s = v;
 
-	while (AST_NODE(s)->flags & NF_PAREN && AST_NODE(s)->op != N_STR)
+	while (AST_NODE(s)->flags & AST_NODE_FLAG_PARENTHESIZED && AST_NODE(s)->op != AST_NODE_STRING)
 		break;
-	return AST_NODE(s)->op == N_STR && cc_type_is_char_array(c, arr) &&
+	return AST_NODE(s)->op == AST_NODE_STRING && cc_type_is_char_array(c, arr) &&
 	       c->strs[AST_NODE(s)->a].esz == cc_type_size(c, AST_TYPE(c, arr)->base);
 }
 
@@ -389,7 +389,7 @@ static bool cc_initializer_is_braced_string(cc *c)
 /* one element at pos: braces, a value, or brace elision into a sub-aggregate */
 static void cc_initializer_list_element_parse(cc *c, cc_initializer_list *l, uint64_t pos, uint32_t v, bool st)
 {
-	qty et = cc_initializer_list_element_type(c, l, pos);
+	ast_qualified_type et = cc_initializer_list_element_type(c, l, pos);
 
 	if (!v && cc_token_is(c, LEX_TOKEN_LEFT_BRACE)) {
 		if (cc_type_is_char_array(c, et) && cc_initializer_is_braced_string(c)) {	/* { "string" } */
@@ -559,7 +559,7 @@ static uint64_t cc_initializer_list_designation_path(cc *c, cc_initializer_list 
 		cc_initializer_list_element_parse(c, l, lo, 0, st);
 	} else {
 		/* [lo ... hi] = v: one value for the whole range */
-		qty et = cc_initializer_list_element_type(c, l, lo);
+		ast_qualified_type et = cc_initializer_list_element_type(c, l, lo);
 		uint32_t v;
 
 		if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE)) {
@@ -590,7 +590,7 @@ static uint64_t cc_initializer_list_designation_path(cc *c, cc_initializer_list 
 						cc_constexpr_conversion_check(c, cc_conversion_decay(c, v), et);
 					v = cc_conversion_apply(c, cc_conversion_decay(c, v), et);
 				}
-				cc_initializer_list_run_set(c, l, lo, hi, (AST_TYPE(c, AST_NODE(v)->ty)->flags & TF_ATOMIC) ? cc_conversion_decay(c, v) : v, NULL);
+				cc_initializer_list_run_set(c, l, lo, hi, (AST_TYPE(c, AST_NODE(v)->ty)->flags & AST_TYPE_FLAG_ATOMIC) ? cc_conversion_decay(c, v) : v, NULL);
 			}
 		}
 	}
@@ -682,17 +682,17 @@ static void cc_initializer_list_fill(cc *c, cc_initializer_list *l, uint64_t pos
 	}
 }
 
-/* N_INIT: struct/union: aux 0, list of nfield values; array: aux 1, list of (lo, hi, value) */
+/* AST_NODE_INITIALIZER: struct/union: aux 0, list of nfield values; array: aux 1, list of (lo, hi, value) */
 static uint32_t cc_initializer_list_finish(cc *c, cc_initializer_list *l, uint32_t loc)
 {
 	uint32_t n;
-	qty ty = l->ty;
+	ast_qualified_type ty = l->ty;
 	cc_id_list v;
 
 	cc_id_list_init(&v);
 	if (l->array && l->unknown)
 		ty = cc_type_array(c, AST_TYPE(c, ty)->base, l->max, 0);
-	n = cc_node_new(c, N_INIT, ty, loc);
+	n = cc_node_new(c, AST_NODE_INITIALIZER, ty, loc);
 	if (l->array) {
 		for (uint32_t i = 0; i < l->nrun; i++) {
 			cc_initializer_run *r = &l->runs[i];
@@ -716,7 +716,7 @@ static uint32_t cc_initializer_list_finish(cc *c, cc_initializer_list *l, uint32
 }
 
 /* { ... } for a scalar: the first element */
-static uint32_t cc_initializer_braced_scalar_parse(cc *c, qty ty, bool st)
+static uint32_t cc_initializer_braced_scalar_parse(cc *c, ast_qualified_type ty, bool st)
 {
 	uint32_t v = 0, loc = tok(c)->loc;
 
@@ -724,7 +724,7 @@ static uint32_t cc_initializer_braced_scalar_parse(cc *c, qty ty, bool st)
 	cc_token_expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
 	if (cc_token_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		next(c);
-		return cc_node_new(c, N_ZERO, QUNQ(ty), loc);
+		return cc_node_new(c, AST_NODE_ZERO, AST_QUALIFIED_TYPE_UNQUALIFIED(ty), loc);
 	}
 	c->ibr++;
 	if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE))
@@ -754,37 +754,37 @@ static bool cc_initializer_array_copy_has_effects(cc *c, uint32_t n, bool load, 
 	if (!n) return false;
 	if (depth > 128) return true;
 	const node *x = AST_NODE(n);
-	if (load && (x->flags & NF_LVALUE) && (QQ(x->ty) & Q_VOLATILE))
+	if (load && (x->flags & AST_NODE_FLAG_LVALUE) && (AST_QUALIFIED_TYPE_QUALIFIERS(x->ty) & AST_QUALIFIER_VOLATILE))
 		return true;
 	switch (x->op) {
-	case N_INIT:
+	case AST_NODE_INITIALIZER:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (cc_initializer_array_copy_has_effects(c, c->lists[x->b + (x->aux == 1 ? 3 * i + 2 : i)], true, depth + 1))
 				return true;
 		return false;
-	case N_COMPLIT: case N_UNARY: case N_DEREF:
+	case AST_NODE_COMPOUND_LITERAL: case AST_NODE_UNARY: case AST_NODE_DEREFERENCE:
 		return cc_initializer_array_copy_has_effects(c, x->a, true, depth + 1);
-	case N_ADDR: case N_MEMBER:
+	case AST_NODE_ADDRESS: case AST_NODE_MEMBER:
 		return cc_initializer_array_copy_has_effects(c, x->a, false, depth + 1);
-	case N_CAST:
-		return cc_initializer_array_copy_has_effects(c, x->a, x->aux != CK_DECAY && x->aux != CK_FDECAY, depth + 1);
-	case N_CALL: {
+	case AST_NODE_CAST:
+		return cc_initializer_array_copy_has_effects(c, x->a, x->aux != AST_CAST_ARRAY_DECAY && x->aux != AST_CAST_FUNCTION_DECAY, depth + 1);
+	case AST_NODE_CALL: {
 		uint32_t fn = x->a;
-		while (AST_NODE(fn)->op == N_CAST) fn = AST_NODE(fn)->a;
-		if (AST_NODE(fn)->op != N_VAR) return true;
+		while (AST_NODE(fn)->op == AST_NODE_CAST) fn = AST_NODE(fn)->a;
+		if (AST_NODE(fn)->op != AST_NODE_VARIABLE) return true;
 		const sym *f = &c->syms[AST_NODE(fn)->a];
 		if (!f->attrs || !c->attr[f->attrs].pure) return true;
 		for (uint32_t i = 0; i < x->c; i++)
 			if (cc_initializer_array_copy_has_effects(c, c->lists[x->b + i], true, depth + 1)) return true;
 		return false;
 	}
-	case N_BUILTIN: {
-		cval v;
+	case AST_NODE_BUILTIN: {
+		cc_value v;
 		return !cc_constant_eval(c, n, &v);
 	}
-	case N_INDEX: case N_BINARY: case N_LOGAND: case N_LOGOR: case N_COMMA: case N_CPLX:
+	case AST_NODE_INDEX: case AST_NODE_BINARY: case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_COMMA: case AST_NODE_COMPLEX:
 		return cc_initializer_array_copy_has_effects(c, x->a, true, depth + 1) || cc_initializer_array_copy_has_effects(c, x->b, true, depth + 1);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return cc_initializer_array_copy_has_effects(c, x->a, true, depth + 1) || cc_initializer_array_copy_has_effects(c, x->b, true, depth + 1) ||
 		       cc_initializer_array_copy_has_effects(c, x->c, true, depth + 1);
 	default:
@@ -792,10 +792,10 @@ static bool cc_initializer_array_copy_has_effects(cc *c, uint32_t n, bool load, 
 	}
 }
 
-CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
+CC_PRIVATE uint32_t cc_initializer_parse(cc *c, ast_qualified_type *ty, bool st)
 {
 	uint32_t loc = tok(c)->loc;
-	qty t = *ty;
+	ast_qualified_type t = *ty;
 
 	if (cc_token_is(c, LEX_TOKEN_LEFT_BRACE)) {
 		if (cc_type_is_char_array(c, t) && cc_initializer_is_braced_string(c)) {
@@ -806,8 +806,8 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 			cc_token_accept(c, LEX_TOKEN_COMMA);
 			cc_token_expect(c, LEX_TOKEN_RIGHT_BRACE, "'}'"), c->ibr--;
 			cc_initializer_string_fit_check(c, t, s);
-			if (AST_TYPE(c, t)->flags & TF_INCOMPLETE)
-				*ty = QT(QI(cc_type_array(c, AST_TYPE(c, t)->base, c->strs[AST_NODE(s)->a].n, 0)), QQ(t));
+			if (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE)
+				*ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_array(c, AST_TYPE(c, t)->base, c->strs[AST_NODE(s)->a].n, 0)), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 			return s;
 		}
 		if (cc_type_is_initializer_aggregate(c, t)) {
@@ -818,9 +818,9 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 				cc_report_error(c, c->cv_what == CC_CONVERSION_CONTEXT_INITIALIZER ? c->cv_loc : loc, "variable has incomplete type '%s'", tyname(c, t));
 				cc_report_forward_note(c, t);
 				cc_token_skip_balanced(c);
-				return cc_node_new(c, N_ZERO, t, loc);
+				return cc_node_new(c, AST_NODE_ZERO, t, loc);
 			}
-			l = cc_initializer_list_new(c, QUNQ(t));
+			l = cc_initializer_list_new(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 			uint32_t ob = tok(c)->loc;
 
 			cc_initializer_empty_extension_check(c);
@@ -828,7 +828,7 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 			cc_initializer_list_fill(c, l, 0, true, 0, st);
 			cc_token_expect_match(c, LEX_TOKEN_RIGHT_BRACE, ob), c->ibr--;
 			n = cc_initializer_list_finish(c, l, loc);
-			*ty = QT(QI(AST_NODE(n)->ty), QQ(t));
+			*ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_NODE(n)->ty), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 			return n;
 		}
 		return cc_initializer_braced_scalar_parse(c, t, st);
@@ -837,7 +837,7 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 		uint32_t v = cc_assignment_parse(c);
 
 		if (cc_type_is_array(c, t)) {
-			if (AST_NODE(v)->op == N_COMPLIT && cc_type_is_array(c, AST_NODE(v)->ty)) {
+			if (AST_NODE(v)->op == AST_NODE_COMPOUND_LITERAL && cc_type_is_array(c, AST_NODE(v)->ty)) {
 				uint32_t at = c->cv_what == CC_CONVERSION_CONTEXT_INITIALIZER ? c->cv_loc : loc;
 				if (!cc_type_is_compatible(c, t, AST_NODE(v)->ty)) {
 					cc_report_error(c, at, "cannot initialize array of type '%s' with array of type '%s'",
@@ -852,8 +852,8 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 				CC_REPORT_EXTENSION(c, "gnu-compound-literal-initializer", cc_warning_group_gnu, at,
 					 "initialization of an array of type '%s' from a compound literal of type '%s' is a GNU extension",
 					 tyname(c, t), tyname(c, AST_NODE(v)->ty));
-				if (AST_TYPE(c, t)->flags & TF_INCOMPLETE)
-					*ty = QT(QI(AST_NODE(v)->ty), QQ(t));
+				if (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE)
+					*ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_NODE(v)->ty), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 				return v;
 			}
 			if (!cc_initializer_string_initializes(c, t, v)) {
@@ -861,8 +861,8 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 				return v;
 			}
 			cc_initializer_string_fit_check(c, t, v);
-			if (AST_TYPE(c, t)->flags & TF_INCOMPLETE)
-				*ty = QT(QI(cc_type_array(c, AST_TYPE(c, t)->base, c->strs[AST_NODE(v)->a].n, 0)), QQ(t));
+			if (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE)
+				*ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_array(c, AST_TYPE(c, t)->base, c->strs[AST_NODE(v)->a].n, 0)), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 			return v;
 		}
 		if (cc_type_is_record(c, t) && !cc_type_is_complex(c, t)) {
@@ -877,9 +877,9 @@ CC_PRIVATE uint32_t cc_initializer_parse(cc *c, qty *ty, bool st)
 /* clang's location for a diagnostic about expression n (getExprLoc: a call's callee) */
 CC_PRIVATE uint32_t cc_expression_location(cc *c, uint32_t n)
 {
-	while (AST_NODE(n)->op == N_CAST && AST_NODE(n)->a && !c->span[n].e)
+	while (AST_NODE(n)->op == AST_NODE_CAST && AST_NODE(n)->a && !c->span[n].e)
 		n = AST_NODE(n)->a;
-	if (AST_NODE(n)->op == N_CALL && AST_NODE(n)->a)
+	if (AST_NODE(n)->op == AST_NODE_CALL && AST_NODE(n)->a)
 		return cc_node_range(c, AST_NODE(n)->a).b;
 	return AST_NODE(n)->loc;
 }
@@ -890,17 +890,17 @@ CC_PRIVATE uint32_t cc_expression_location(cc *c, uint32_t n)
  * comes from the front end, also for an object never emitted (clang Sema).
  * *bad: the first element that is not a constant.
  */
-CC_PRIVATE bool cc_initializer_static_is_ok(cc *c, qty ty, uint32_t init, uint32_t *bad)
+CC_PRIVATE bool cc_initializer_static_is_ok(cc *c, ast_qualified_type ty, uint32_t init, uint32_t *bad)
 {
 	const node *x;
-	cval cv;
+	cc_value cv;
 
 	if (!init)
 		return true;
 	x = AST_NODE(init);
-	if (x->op == N_ZERO || ((x->flags & NF_ERR) && !c->sie))
+	if (x->op == AST_NODE_ZERO || ((x->flags & AST_NODE_FLAG_ERROR) && !c->sie))
 		return true;
-	if (x->op == N_INIT) {
+	if (x->op == AST_NODE_INITIALIZER) {
 		const uint32_t *v = &c->lists[x->b];
 
 		if (x->aux == 1) {
@@ -917,7 +917,7 @@ CC_PRIVATE bool cc_initializer_static_is_ok(cc *c, qty ty, uint32_t init, uint32
 			if ((x->aux == 2 && i != x->a) || !v[i])
 				continue;
 			if (f->bitfield) {
-				if (!cc_constant_eval(c, v[i], &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT)) {
+				if (!cc_constant_eval(c, v[i], &cv) || (cv.kind != CC_VALUE_INTEGER && cv.kind != CC_VALUE_BITINT)) {
 					*bad = v[i];
 					return false;
 				}
@@ -928,7 +928,7 @@ CC_PRIVATE bool cc_initializer_static_is_ok(cc *c, qty ty, uint32_t init, uint32
 		}
 		return true;
 	}
-	if (x->op == N_COMMA) {
+	if (x->op == AST_NODE_COMMA) {
 		if (cc_initializer_static_is_ok(c, AST_NODE(x->a)->ty, x->a, bad) && cc_initializer_static_is_ok(c, ty, x->b, bad))
 			return true;
 		*bad = init;
@@ -937,31 +937,31 @@ CC_PRIVATE bool cc_initializer_static_is_ok(cc *c, qty ty, uint32_t init, uint32
 	{
 		uint32_t selected;
 
-		if (cc_init_subobject(c, init, &selected))
+		if (cc_initializer_subobject_find(c, init, &selected))
 			return cc_initializer_static_is_ok(c, ty, selected, bad);
 	}
-	if (x->op == N_STR && cc_type_is_array(c, ty))
+	if (x->op == AST_NODE_STRING && cc_type_is_array(c, ty))
 		return true;
-	if (x->op == N_COMPLIT)
+	if (x->op == AST_NODE_COMPOUND_LITERAL)
 		return cc_initializer_static_is_ok(c, ty, x->a, bad);
-	if (x->op == N_CPLX) {
-		qty et = c->tags[AST_TYPE(c, x->ty)->aux].f[0].ty;
+	if (x->op == AST_NODE_COMPLEX) {
+		ast_qualified_type et = c->tags[AST_TYPE(c, x->ty)->aux].f[0].ty;
 
 		return cc_initializer_static_is_ok(c, et, x->a, bad) && cc_initializer_static_is_ok(c, et, x->b, bad);
 	}
-	if (x->op == N_CAST && x->aux == CK_NOP && (cc_type_is_record(c, ty) || cc_type_is_array(c, ty) || cc_type_is_vector(c, ty)))
+	if (x->op == AST_NODE_CAST && x->aux == AST_CAST_NOP && (cc_type_is_record(c, ty) || cc_type_is_array(c, ty) || cc_type_is_vector(c, ty)))
 		return cc_initializer_static_is_ok(c, ty, x->a, bad);
 	if ((cc_type_is_record(c, ty) || cc_type_is_array(c, ty) || cc_type_is_vector(c, ty))) {
 		uint32_t m = init;
 
-		while (AST_NODE(m)->op == N_CAST)
+		while (AST_NODE(m)->op == AST_NODE_CAST)
 			m = AST_NODE(m)->a;
-		if (AST_NODE(m)->op == N_VAR && c->syms[AST_NODE(m)->a].body)
+		if (AST_NODE(m)->op == AST_NODE_VARIABLE && c->syms[AST_NODE(m)->a].body)
 			return true;
 		*bad = init;
 		return false;
 	}
-	if (!cc_constant_eval(c, init, &cv) || (cv.kind != CV_INT && cv.kind != CV_BIGINT && cv.kind != CV_FLT && cv.kind != CV_ADDR)) {
+	if (!cc_constant_eval(c, init, &cv) || (cv.kind != CC_VALUE_INTEGER && cv.kind != CC_VALUE_BITINT && cv.kind != CC_VALUE_FLOAT && cv.kind != CC_VALUE_ADDRESS)) {
 		*bad = init;
 		return false;
 	}
