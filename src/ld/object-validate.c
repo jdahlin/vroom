@@ -1,8 +1,17 @@
 /* Validation of a relocatable ELF input (every offset and size is checked before use) and its parsing into an Obj. */
 
 /* the bytes of a relocation's field (0: none, 4: an instruction) */
-static uint32_t rel_width(uint32_t type)
+static uint32_t rel_width(uint32_t type, uint16_t machine)
 {
+	if (machine == 62)	/* x86-64: the fields x64.inc writes */
+		switch (type) {
+		case R_X86_64_NONE: return 0;
+		case R_X86_64_64: case R_X86_64_PC64: case R_X86_64_TPOFF64: case R_X86_64_DTPOFF64:
+		case R_X86_64_SIZE64: return 8;
+		case R_X86_64_16: case R_X86_64_PC16: return 2;
+		case R_X86_64_8: case R_X86_64_PC8: return 1;
+		default: return 4;
+		}
 	switch (type) {
 	case R_AARCH64_NONE: return 0;
 	case R_AARCH64_ABS64: case R_AARCH64_PREL64: return 8;
@@ -112,7 +121,7 @@ static bool obj_valid(Obj *o, const Ehdr *eh)
 		for (uint64_t k = 0; k < h->sh_size / sizeof(Rela); k++) {
 			if ((r[k].r_info >> 32) >= nsym && (r[k].r_info >> 32))
 				BAD("%s: invalid symbol index in relocation section %u", o->path, s);
-			uint32_t w = rel_width((uint32_t)r[k].r_info);
+			uint32_t w = rel_width((uint32_t)r[k].r_info, eh->e_machine);
 
 			if (t->sh_type != SHT_NOBITS && (r[k].r_offset > t->sh_size || t->sh_size - r[k].r_offset < w))
 				BAD("%s: relocation at 0x%llx is past the end of section %u", o->path,
@@ -152,8 +161,16 @@ static void parse_obj(void *arg, size_t i)
 		o->buf = NULL;
 		return;
 	}
+	uint16_t m0 = 0;
+
+	if (!atomic_compare_exchange_strong(&ld_machine, &m0, eh->e_machine) && m0 != eh->e_machine) {
+		error("%s is incompatible with the other inputs (%s, not %s)", o->path,
+		      eh->e_machine == 62 ? "x86-64" : "AArch64", m0 == 62 ? "x86-64" : "AArch64");
+		o->buf = NULL;
+		return;
+	}
 	if (eh->e_machine == 62)
-		x86_ld = true;	/* (one machine for all inputs: checked once loaded) */
+		x86_ld = true;	/* (one machine for all inputs: checked above) */
 	if (!obj_valid(o, eh)) {
 		o->buf = NULL;
 		return;

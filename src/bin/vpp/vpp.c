@@ -85,10 +85,33 @@ static void *worker(void *arg)
 static void run_pass(int nthr)
 {
 	pthread_t th[64];
+	pthread_attr_t at;
+	/* the parser and emitter recurse with the input's nesting and stop at vstack_low():
+	 * a worker gets the main thread's stack, so that a TU compiles in a batch as it
+	 * does alone (Darwin's default for a new thread is 512 KB; as emit/tu.c) */
+	size_t ss = (size_t)8 << 20;
 
+#ifdef __APPLE__
+	ss = pthread_get_stacksize_np(pthread_self());
+#else
+	{
+		pthread_attr_t me;
+		void *addr;
+
+		if (!pthread_getattr_np(pthread_self(), &me)) {
+			pthread_attr_getstack(&me, &addr, &ss);
+			pthread_attr_destroy(&me);
+		}
+	}
+#endif
+	if (ss < ((size_t)1 << 20))
+		ss = (size_t)1 << 20;
+	pthread_attr_init(&at);
+	pthread_attr_setstacksize(&at, ss);
 	atomic_store(&nextjob, 0);
 	for (int i = 0; i < nthr; i++)
-		pthread_create(&th[i], NULL, worker, NULL);
+		pthread_create(&th[i], &at, worker, NULL);
+	pthread_attr_destroy(&at);
 	for (int i = 0; i < nthr; i++)
 		pthread_join(th[i], NULL);
 }

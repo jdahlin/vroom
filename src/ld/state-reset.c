@@ -39,6 +39,8 @@ static void reset_state(void)
 	memset(&stop_syms, 0, sizeof stop_syms);
 	ehhdr_isec = NONE;	/* set only while NONE */
 	has_tls = headers_loaded = false;
+	x86_ld = false;
+	atomic_store(&ld_machine, 0);
 	tls_tp = tbss_off = 0;
 	stub_names = NULL;
 	nstubs = 0;

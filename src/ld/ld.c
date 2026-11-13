@@ -63,6 +63,7 @@
 #define NONE 0xffffffffu
 
 static bool x86_ld;		/* the inputs are x86-64 (arch/x64/ld/x64.inc) */
+static _Atomic uint16_t ld_machine;	/* e_machine of the first object loaded (parse_obj) */
 static uint64_t tls_start;	/* x86: the PT_TLS start (dtpoff) */
 
 #include "ldelf.h"
