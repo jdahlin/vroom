@@ -440,7 +440,8 @@ def measure(sc, N):
     notlib = lambda f: not inlib(f)
     m['realloc_calls'] = len(calls('realloc', notlib))
     m['mmap_calls'] = len(calls('mmap', notlib))
-    leb = sorted({(fn, f.rel) for f in files for fn, *_ in f.funcs if 'leb' in fn.lower()})
+    # (the library's own, common/leb128.h, is the one the others are counted against)
+    leb = sorted({(fn, f.rel) for f in files for fn, *_ in f.funcs if 'leb' in fn.lower() and not f.rel.endswith('include/common/leb128.h')})
     m['leb128_functions'] = len(leb)
     lists['leb128_functions'] = [f'{r}: {fn}' for fn, r in leb]
     where = defaultdict(set)
