@@ -104,6 +104,7 @@ arm64)
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
 	step task-test    "$BUILD/task-test"
+	step common-test  env CC="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/common-test.py -j "$J"
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
