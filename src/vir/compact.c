@@ -3,9 +3,10 @@
  * instructions into nops calls before it returns (DESIGN-vir-optimizer.md 3).
  * Two sweeps in place instead of a second vir_canon (which costs a dominator
  * tree and a copy): mark the constants still used, then shift the block
- * region over the nops, renumbering operands through f->tmp.  The order of
- * constants (by first use) and of instructions stays, so the result is
- * canonical again, and no block, edge or terminator moves: f->valid stays
+ * region over the nops, renumbering operands through f->tmp.  Constants are
+ * numbered by first use again (a removed instruction may have been the first
+ * user of one) and instructions keep their order, so the result is canonical,
+ * and no block, edge or terminator moves: f->valid stays
  * (predecessor lists hold block ids; idom, pre and post do not change).
  *
  * The input is canonical except that instructions in the block region may be
@@ -26,39 +27,38 @@ uint32_t vir_function_compact(vir_fn *f)
 		return 0;
 	for (uint32_t i = 0; i < nins; i++)
 		tmp[i] = VIR_COMPACT_NONE;
-	/* 1. the constants an instruction still uses (tmp = 0) */
+	/* 1. the constants an instruction still uses, numbered in order of first use (SPEC-vir 2.4: a removed instruction
+	      may have been the first user of a constant, so the old order is not kept) */
+	tmp[0] = 0;
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		const vir_blk *kb = &f->blk[b];
 
 		for (uint32_t i = kb->first; i < kb->first + kb->n && i < nins; i++) {
-			vir_ins y = f->ins[i];
+			const vir_ins *y = &f->ins[i];
 			uint8_t m;
 
-			if (y.op == VO_NOP)
+			if (y->op == VO_NOP)
 				continue;
-			m = vir_value_fields(y.op);
-			if (m & 1 && y.a - 1 < nconst - 1)	/* (unsigned: 1 <= a < nconst) */
-				tmp[y.a] = 0;
-			if (m & 2 && y.b - 1 < nconst - 1)
-				tmp[y.b] = 0;
-			if (m & 4 && y.c - 1 < nconst - 1)
-				tmp[y.c] = 0;
+			m = vir_value_fields(y->op);
+			if (m & 1 && y->a - 1 < nconst - 1 && tmp[y->a] == VIR_COMPACT_NONE)	/* (unsigned: 1 <= a < nconst) */
+				tmp[y->a] = nc++;
+			if (m & 2 && y->b - 1 < nconst - 1 && tmp[y->b] == VIR_COMPACT_NONE)
+				tmp[y->b] = nc++;
+			if (m & 4 && y->c - 1 < nconst - 1 && tmp[y->c] == VIR_COMPACT_NONE)
+				tmp[y->c] = nc++;
 			if (m & VIR_FIELDS_LIST) {
+				vir_ins z = *y;
 				vir_oit it;
 				uint32_t *p;
 
-				vir_oit_init_list(&it, f, &y);
+				vir_oit_init_list(&it, f, &z);
 				while ((p = vir_oit_next(&it)))
-					if (*p - 1 < nconst - 1)
-						tmp[*p] = 0;
+					if (*p - 1 < nconst - 1 && tmp[*p] == VIR_COMPACT_NONE)
+						tmp[*p] = nc++;
 			}
 		}
 	}
-	/* 2. the new index of every kept value */
-	tmp[0] = 0;
-	for (uint32_t i = 1; i < nconst; i++)
-		if (tmp[i] == 0)
-			tmp[i] = nc++;
+	/* 2. the new index of every kept instruction */
 	k = nc;
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		const vir_blk *kb = &f->blk[b];
@@ -95,9 +95,19 @@ uint32_t vir_function_compact(vir_fn *f)
 	}
 	/* 4. move the constants, then the block instructions, renumbering operands (never reading ins[] of a
 	      value, so that overwriting an old slot is safe: kept values only move down) */
-	for (uint32_t i = 1; i < nconst; i++)
-		if (tmp[i] != VIR_COMPACT_NONE && tmp[i] != i)
-			f->ins[tmp[i]] = f->ins[i];
+	{
+		vir_ins *old = vir_ctx_get()->ins[vir_ctx_get()->cur ^ 1];	/* (the array vir_canon copies into: free between passes) */
+		bool moved = false;
+
+		for (uint32_t i = 1; i < nconst && !moved; i++)
+			moved = tmp[i] != VIR_COMPACT_NONE && tmp[i] != i;
+		if (moved) {
+			memcpy(old + 1, f->ins + 1, (size_t)(nconst - 1) * sizeof *old);
+			for (uint32_t i = 1; i < nconst; i++)
+				if (tmp[i] != VIR_COMPACT_NONE)
+					f->ins[tmp[i]] = old[i];
+		}
+	}
 	for (uint32_t b = 0; b < f->nblk; b++) {
 		vir_blk *kb = &f->blk[b];
 		uint32_t o = 0, end = kb->first + kb->n;
