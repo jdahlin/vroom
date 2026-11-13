@@ -1,4 +1,12 @@
-/* apple-dialect-translate.c: Apple's assembler dialect to GNU's, text to text; uses nothing of the assembler's state. */
+/* apple-dialect-translate.c: Apple's assembler dialect to the GNU/ELF one the assembler parses, text
+ * to text (macho_dialect_translate, declared in as/as.h): the inverse of the code generator's Darwin
+ * text output (sections, x@PAGE/@PAGEOFF operands, Lname, .private_extern, ';' comments), dropping
+ * directives that have no meaning for the Mach-O writer.
+ *
+ * It uses nothing of the assembler's state and keeps none, so any thread may call it.  It reads a
+ * range and returns a malloc'ed copy that the caller frees (padded with zero bytes after the end, as
+ * the assembler's SIMD scanning needs).  Callers: driver/job.c (-c and assembler jobs for Darwin) and
+ * bin/vasm. */
 #include "as/as.h"
 #include <ctype.h>
 #include <stdbool.h>

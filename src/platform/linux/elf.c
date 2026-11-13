@@ -1,6 +1,13 @@
 /*
- * elf.c: in-memory ELF64 relocatable writer, byte-compatible with LLVM MC.
- * See elf.h for the model.
+ * elf.c: in-memory ELF64 relocatable writer (arm64 and x86-64), byte-compatible with LLVM MC.
+ * See obj/obj.h for the model.
+ *
+ * elf_finish lays the object out (elf_layout), resolves every fixup in layout order (the per-CPU
+ * code in arch/<cpu>/obj/fixup.c either patches the bytes or calls elf_reloc), builds the tables and
+ * returns the file size; elf_emit then writes that many bytes into a caller buffer, so the caller
+ * decides whether the object goes to a file, a pipe or memory.  Errors (an undefined temporary
+ * symbol, a write failure) are recorded in o->err and make elf_finish return 0; the ELF bytes must
+ * stay identical to clang's, so any change here is checked with bench/vas-obj.py.
  *
  * Output layout (as ELFObjectWriter writes it):
  *   ELF header | section data in section order, each aligned |
