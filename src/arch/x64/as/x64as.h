@@ -7,7 +7,7 @@
 #ifndef VCC_X64AS_H
 #define VCC_X64AS_H
 #include <stdbool.h>
-#include "../../../as/asimpl.h"
+#include "../../../as/as-internal.h"
 
 #include "operand.h"
 

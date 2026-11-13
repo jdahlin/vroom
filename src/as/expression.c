@@ -1,5 +1,5 @@
-/* expr.c: expressions, GNU as's operators and precedence, folded to a constant or a symbol plus offset, or deferred. */
-#include "asimpl.h"
+/* expression.c: expressions, GNU as's operators and precedence, folded to a constant or a symbol plus offset, or deferred. */
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- expressions */
 

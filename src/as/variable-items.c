@@ -1,5 +1,5 @@
-/* relax.c: variable-size items (.prefalign, alignment after one, LEB128 of a label difference, .skip, x86-64 jumps) and their relaxation at the end of assembly. */
-#include "asimpl.h"
+/* variable-items.c: variable-size items (.prefalign, alignment after one, LEB128 of a label difference, .skip, x86-64 jumps) and their relaxation at the end of assembly. */
+#include "as-internal.h"
 
 /* After relaxation, debug encoders only read the layout until they append
  * their completed table. Cache the offsets once for that immutable interval. */

@@ -1,6 +1,6 @@
-/* sym.c: symbols of the object as the assembler names them: lookup, temporaries, numeric labels, .set variables,
+/* symbol.c: symbols of the object as the assembler names them: lookup, temporaries, numeric labels, .set variables,
  * the attribute directives (.globl, .type, .size ...), assignments, .symver and .weakref. */
-#include "asimpl.h"
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- symbols */
 

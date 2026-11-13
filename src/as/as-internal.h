@@ -1,6 +1,6 @@
 /* the assembler's files (as/, arch/<cpu>/as/) share this header: what one of them defines and another uses */
-#ifndef VCC_ASIMPL_H
-#define VCC_ASIMPL_H
+#ifndef VCC_AS_INTERNAL_H
+#define VCC_AS_INTERNAL_H
 
 #include "as/as.h"
 #include "port/job-regions.h"
@@ -200,25 +200,25 @@ static inline uint32_t as_alias_hash(const char *s, size_t n)
 VPRIV as_text as_text_duplicate(as_context *a, const char *s, size_t n);
 VPRIV uint32_t as_line_current(as_context *a);
 VPRIV int as_error_report(as_context *a, const char *fmt, ...);
-/* sym.c */
+/* symbol.c */
 VPRIV uint32_t as_symbol_temporary(as_context *a);
 VPRIV const char *as_register_alias_find(as_context *a, uint32_t y);
-/* expr.c */
+/* expression.c */
 VPRIV void as_value_fold(as_context *a, as_value *v);
 VPRIV int as_expression_absolute_parse(as_context *a, const char **pp, const char *e, int64_t *out);
 VPRIV int as_expression_value_parse(as_context *a, const char **pp, const char *e, as_value *v);
-/* data.c */
+/* data-directives.c */
 VPRIV int as_value_emit(as_context *a, int size, as_value *v);
 /* arch/<cpu>/as/parse.c */
 VPRIV void as_alias_rehash(as_context *a);
 VPRIV int a64_as_pools_flush(as_context *a);
 VPRIV int a64_as_pools_ltorg(as_context *a);
 VPRIV int a64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
-/* dwline.c */
+/* dwarf-line-table.c */
 VPRIV void as_dwarf_row_emit(as_context *a);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
 VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
-/* relax.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
+/* variable-items.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
 VPRIV int as_variable_item_branch_add(as_context *a, int cc, as_value v, int mod);
 
 /* what the files of as/ define for each other, by the file that defines it */
@@ -239,14 +239,14 @@ static inline void as_leb128_signed_append(as_byte_span *b, int64_t v)
 VPRIV size_t as_statement_next(as_context *a, as_frame *f, const char **raw, const char **s);
 VPRIV void as_frame_pop(as_context *a);
 VPRIV int as_frame_push(as_context *a, const char *p, size_t n, int kind, size_t mark);
-/* cfi.c */
+/* call-frame-information.c */
 VPRIV void as_cfi_frame_emit(as_context *a);
 VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *e);
-/* cond.c */
+/* conditional.c */
 VPRIV int as_directive_conditional(as_context *a, as_text w, const char *p, const char *e, int *rc);
 VPRIV int as_condition_is_ignored(as_context *a);
 VPRIV as_text as_text_trim(const char *p, const char *e);
-/* data.c */
+/* data-directives.c */
 VPRIV int as_directive_align(as_context *a, const char *p, const char *e, int p2);
 VPRIV int as_directive_align_width(as_context *a, const char *p, const char *e, int p2, int fsz);
 VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z);
@@ -263,11 +263,11 @@ VPRIV int as_directive_org(as_context *a, const char *p, const char *e);
 VPRIV int as_directive_reloc(as_context *a, const char *p, const char *e);
 VPRIV int as_directive_space(as_context *a, const char *p, const char *e);
 VPRIV int as_string_parse(as_context *a, const char **pp, const char *e, char *out, size_t *n);
-/* dwline.c */
+/* dwarf-line-table.c */
 VPRIV int as_directive_file(as_context *a, const char *p, const char *e);
 VPRIV int as_directive_loc(as_context *a, const char *p, const char *e);
 VPRIV void as_dwarf_line_finish(as_context *a);
-/* expr.c */
+/* expression.c */
 VPRIV int as_value_is_deferrable(as_context *a, const as_value *v);
 VPRIV int as_value_is_absolute(as_context *a, as_value *v);
 /* macro.c */
@@ -279,7 +279,7 @@ VPRIV int as_directive_rept(as_context *a, const char *p, const char *e);
 VPRIV as_macro *as_macro_find(as_context *a, const char *s, size_t n);
 VPRIV as_text as_text_first_word(const char *p, const char *e);
 VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p, const char *e);
-/* relax.c */
+/* variable-items.c */
 VPRIV int as_directive_prefalign(as_context *a, const char *p, const char *e);
 VPRIV void as_fragment_offsets_cache(ElfObj *o);
 VPRIV void as_variable_items_finish(as_context *a);
@@ -289,7 +289,7 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 VPRIV int as_name_parse(as_context *a, const char **pp, const char *e, as_text *out);
 VPRIV uint32_t as_section_standard_find(as_context *a, const char *name);
 VPRIV void as_fragment_switch(as_context *a, uint32_t frag);
-/* sym.c */
+/* symbol.c */
 VPRIV int as_directive_size(as_context *a, const char *p, const char *e);
 VPRIV int as_directive_symbol_attribute(as_context *a, const char *p, const char *e, int what);
 VPRIV int as_directive_symver(as_context *a, const char *p, const char *e);

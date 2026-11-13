@@ -1,4 +1,4 @@
-/* astext.c: Apple's assembler dialect to GNU's, text to text; uses nothing of the assembler's state. */
+/* apple-dialect-translate.c: Apple's assembler dialect to GNU's, text to text; uses nothing of the assembler's state. */
 #include "as/as.h"
 #include <ctype.h>
 #include <stdbool.h>

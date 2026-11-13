@@ -1,5 +1,5 @@
-/* cond.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives. */
-#include "asimpl.h"
+/* conditional.c: conditional assembly: .if, .ifdef, .ifc, .elseif, .else, .endif and their relatives. */
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- conditionals */
 

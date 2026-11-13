@@ -1,5 +1,5 @@
-/* data.c: data directives: values, strings, floats, alignment, .comm, .space, .fill, .org, .incbin, .reloc, .inst. */
-#include "asimpl.h"
+/* data-directives.c: data directives: values, strings, floats, alignment, .comm, .space, .fill, .org, .incbin, .reloc, .inst. */
+#include "as-internal.h"
 #include <ctype.h>
 
 /* ---------------------------------------------------------------- data */

@@ -1,5 +1,5 @@
-/* cfi.c: the .cfi_* directives, and .eh_frame as MC's FrameEmitterImpl writes it. */
-#include "asimpl.h"
+/* call-frame-information.c: the .cfi_* directives, and .eh_frame as MC's FrameEmitterImpl writes it. */
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- CFI */
 

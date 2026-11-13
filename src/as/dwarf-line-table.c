@@ -1,5 +1,5 @@
-/* dwline.c: the DWARF line table: .file N, .loc and the .debug_line section (MC's MCDwarfLineTable, version 5). */
-#include "asimpl.h"
+/* dwarf-line-table.c: the DWARF line table: .file N, .loc and the .debug_line section (MC's MCDwarfLineTable, version 5). */
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- DWARF lines */
 

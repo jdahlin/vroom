@@ -1,5 +1,5 @@
 /* arm64 instructions in GNU as syntax: registers and .req aliases, operands, literal pools, the statement */
-#include "../../../as/asimpl.h"
+#include "../../../as/as-internal.h"
 
 /* ---------------------------------------------------------------- instructions */
 

@@ -1,5 +1,5 @@
 /* section.c: .section, .text, .data and the standard sections, and the parsing of section and symbol names. */
-#include "asimpl.h"
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- sections */
 

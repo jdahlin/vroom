@@ -2,7 +2,7 @@
  * (the input, macro and .rept expansions), the statement scanner, directive dispatch, the
  * instruction hand-off, and the lifecycle (as_new, as_begin, as_snippet_assemble, as_end).
  * Everything else is in the files beside it, one job each; as_SRC in the Makefile lists them. */
-#include "asimpl.h"
+#include "as-internal.h"
 #include <ctype.h>
 #include <stdbool.h>
 

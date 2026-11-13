@@ -1,5 +1,5 @@
 /* macro.c: .macro, its arguments and templates, .rept, .irp and .exitm: expansion as text, as MC does. */
-#include "asimpl.h"
+#include "as-internal.h"
 
 /* ---------------------------------------------------------------- macros */
 
