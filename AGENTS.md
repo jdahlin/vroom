@@ -308,7 +308,11 @@ bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C s
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
 bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
 bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
-bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md)
+bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md; ~40 s, <2 s cached)
+bench/vcc-win64.py -j 6 --vir --seh # ... through VIR (VCC_VIR=l); --seh: every object's .pdata/.xdata against its prologs, canonical epilogues
+bench/vcc-win64.py -j 6 --suite win64   # src/test/win64: Windows' convention rules, TLS, dllimport, ctors; stack walk, unwinding longjmp, VEH unwinding out of vcc frames
+bench/vcc-abi.py --target win64 [--vir]  # src/test/abi clang/vcc x caller/callee for x86_64-w64-mingw32 under Wine (~3 min); msabi_calls also natively (--target x86_64)
+VROOM_WORK=DIR bench/vcc-abi-generated.py --target x86_64-w64-mingw32 --count 100   # generated GCC/LLVM ABI cases under Wine (DIR/testsuites: fetch-testsuites.sh gcc llvm)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV; arm64, Darwin and x86-64 Linux modes), ~80 s

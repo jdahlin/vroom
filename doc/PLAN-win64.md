@@ -305,8 +305,121 @@ is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
   vcc without the inner parentheses; `#pragma message(MACRO)` is printed as
   written (clang expands it); `-nostdlibinc`/`-nobuiltininc` are not handled.
 
-### WIN1-WIN10 (2026-11-13): planned
+### WIN2 (2026-11-14): calling convention done, both code generators
 
-Nothing implemented.  The reference chain was checked by hand (clang 23 ->
-COFF -> `ld.lld -m i386pep` -> Wine 11 exit code); the sysroot is not
-installed.
+- **One interface, two classifiers.** The walker sets `e->msabi` from
+  `cc_func_abi` right before every `LO(classify/call/params/va_*)` (`em_abi`
+  in `walk/walk.h`; argument evaluation may make other calls in between), so
+  `ms_abi` on Linux and `sysv_abi` on Windows choose per call and per
+  function.  `arch/x64/codegen/abi.c` stays System V's and dispatches to
+  `abi-win64.c` (`x64w_*`); the result tail is shared (`x64_call_park`,
+  `x64_call_value`, `x64_call_xmms`).
+- **Microsoft's rules, each checked against clang -S:** positions in
+  rcx/rdx/r8/r9 or xmm0-3, the rest at `16 + 8p`, 32 bytes of shadow space at
+  every call; records of 1/2/4/8 bytes as integers, all others (empty ones,
+  `long double`, `__int128`, `__float128`, `_BitInt(65..)`, vectors) by
+  reference to the caller's copy, which the callee uses in place
+  (`LO(byref)`: the walker treats the slot as holding the address, as for a
+  VLA); `__int128` and vectors returned in xmm0 (a short vector stored and
+  loaded no wider than it is; one-lane vectors as their element, as LLVM),
+  32/64-byte vectors split in 16-byte halves by reference, each its own
+  position, returned in xmm0.. (LLVM without AVX); other records, `long
+  double`, `__float128` through the hidden pointer in rcx; `ms_abi` off
+  Windows returns `long double` in st(0), and `sysv_abi` on Windows returns it
+  through the hidden pointer (clang).  Varargs: a float in both registers; the
+  callee homes rcx..r9; `va_list` a `char *`, by-reference types read as a
+  pointer; `__builtin_ms_va_list` on Linux.  The runtime helpers (`__divti3`,
+  `__addtf3`, `__fixdfti`, ...) through the same convention
+  (`x64w_helper`); `__bf16` to `float` inline (MinGW's compiler-rt takes
+  `__extendbfsf2`'s argument in an integer register).  A declared `alloca` is
+  the builtin on Windows; `main` calls `__main` first.
+- **Callee-saved** rbx rbp rdi rsi r12-r15 xmm6-xmm15: print.c saves what the
+  body writes (WIN3); a call to a Microsoft callee is marked (`rec.sh`) so
+  rsi/rdi/xmm6-15 are not counted as clobbered; the direct emitter's pushes of
+  live temporaries leave rsi/rdi out for such calls.  Tail calls only between
+  functions of the same convention, not through `__imp_`/`.refptr.`.
+- **VIR** (`arch/x64/vir/`): `vx_arg` by position on Windows, shadow space,
+  a variadic call's floats copied to the integer registers, calls clobber
+  rax rcx rdx r8-r11 xmm0-5, rsi/rdi and xmm6-13 allocatable as callee-saved,
+  always a frame pointer; `main`'s `__main` call built in VIR; a convention
+  other than the target's falls back (`x64_calling_convention`).  Lowered over
+  the suites: 17375 of 18820 functions (x86-64 Linux: 17362 of 18834), the
+  rest the same reasons as on Linux (records, variadic definitions, asm).
+- **Front end fixes found here:** `ms_abi`/`sysv_abi` on a parameter's
+  function pointer (`int (OTHER *f)(...)`) reach the function type
+  (`declarator.c`); `ms_struct` (MinGW's default) aligns a builtin scalar
+  field to its size whatever a typedef says, not enums (clang's
+  `IsMsStruct` rule; `record-layout.c`).
+- **Verified:** `bench/vcc-abi.py --target win64` 28 pass, 3 xfail (packed
+  boolean vectors, TODO.md), 4 skipped (clang's own build fails or LP64),
+  the same with `--vir`; `--target x86_64` 35/35 (the new `msabi_calls`:
+  ms_abi functions natively against clang, sysv_abi ones under Wine);
+  `bench/vcc-abi-generated.py --target x86_64-w64-mingw32 --count 100`:
+  gcc 92 pass, 8 unsupported (decimal float), llvm 100/100 (before the
+  `ms_struct` fix gcc's case 36, an under-aligned enum typedef, failed).
+
+### WIN3 (2026-11-14): frames and -S done
+
+- **The Windows frame** (print.c, for Windows and for `ms_abi` functions):
+  `push rbp`; one `sub` for a save area of the callee-saved registers the body
+  writes (scanned from the final records, asm texts' register names and asm
+  clobbers, calls by their callee's convention); `movaps`/`movq` saves with
+  `.seh_savexmm`/`.seh_savereg`; `lea S(%rsp), %rbp` with `.seh_setframe %rbp,
+  S` (S <= 224 < 240); `.seh_endprologue`; then in the body the realignment
+  (r12) and the locals (`___chkstk_ms` for a page or more).  Locals sit below
+  the area (the printer rebases negative rbp offsets; asm texts carry a marker
+  for it).  Epilogue: the restores, then `leaq 0(%rbp), %rsp; popq %rbp`
+  between `.seh_startepilogue`/`.seh_endepilogue`, `retq` or the tail `jmp`;
+  `nop` after a call right before it.  Leaf functions without saves keep no
+  frame and no unwind data.  `__builtin_frame_address(0)` is the establisher
+  frame (rbp less the area, as clang), which MinGW's unwinding setjmp needs.
+  alloca/VLA probe with `___chkstk_ms` (`X_PROBE`).  Jump tables in `.rdata`
+  after the function (code only in `.text`).
+- **COFF text:** `.def/.scl 2|3/.type 32/.endef` per function, no
+  `.type/.size/.note.GNU-stack`; `.data .bss .rdata,"dr" .tls$,"dw"`, a named
+  section `"xr"/"dr"/"dw"`; -ffunction-/-fdata-sections as `one_only`
+  COMDATs; `.ctors/.dtors` (`.ctors.NNNNN` for a priority); extern data
+  through `.refptr.NAME` (discard COMDATs in the tail, exactly for
+  non-hidden extern variables not defined here and weak undefined symbols),
+  dllimport through `__imp_NAME` (`callq *__imp_f(%rip)`); native TLS
+  (`_tls_index`, `%gs:88`, `NAME@SECREL32`); no PIC/GOT; -g: `"dr"` DWARF
+  sections and `.secrel32` (enough for clang's assembler; WIN6).
+- **Verified:** `bench/vcc-win64.py -j 6 --seh` 2012/2016 (gcc 1612/1612,
+  tcc 105/106, vcc 291/294, win64 4/4), and the same with `--vir`; the SEH
+  checker passes on every object but one naked function.  Remaining:
+  `tcc/95_bitfields_ms` (MS layout of a packed record after `:0`, TODO.md),
+  `vcc/float128` and `vcc/asm_flag_out` (our tests assume a 64-bit `long`:
+  an out-of-range conversion; `btq` on a 32-bit register), `vcc/dead_results`
+  under `--seh` (`naked` is not implemented on x86-64 at all: the asm's
+  `retq` sits inside a frame; the function is never called).  Wine timeouts
+  under load (`gcc/20000217-1`, `20000113-1`) pass alone.  `src/test/win64`:
+  `unwind_walk` (RtlVirtualUnwind and RtlCaptureStackBackTrace through no
+  saves, GPR and XMM saves, pages, alloca, realigned, variadic frames),
+  `unwind_longjmp` (UCRT longjmp with a frame through vcc frames that clobber
+  every callee-saved register), `unwind_veh` (a vectored handler unwinds out
+  of faults in leaf, saving, paged and alloca frames and resumes the caller),
+  `conventions`; all pass with both code generators, clang's build too.
+  Existing targets: `vcc-same.py` identical in every mode (and x2/xc with
+  `VCC_VIR=l`) except `-E` line markers naming vcc's headers by the base
+  tree's path; `vcc-x86.py` 2123/2128 as the base (5 `inline` failures
+  there too); `vcc-diag.py` 229/229; `vcc-bflayout.py` 0 rejected on every
+  target; `quality.py --check` 22/22.
+- **Not done:** `-c` for the target (WIN5: obj.c rebases frame offsets but the
+  COFF writer is not here); stack protector uses `__stack_chk_guard`
+  directly (untested); `naked`; packed boolean vectors at Windows calls;
+  `vectorcall`.  Runtime helper calls vcc emits (for WIN7R): `___chkstk_ms`,
+  `__main`, `__udivti3 __divti3 __umodti3 __modti3 __ashlti3 __lshrti3
+  __ashrti3`, `__floattisf __floattidf __floatuntisf __floatuntidf __fixsfti
+  __fixdfti __fixunssfti __fixunsdfti __floattixf __floatuntixf __fixxfti
+  __fixunsxfti`, the `__float128` set (`__addtf3 __subtf3 __multf3 __divtf3
+  __eqtf2 __netf2 __lttf2 __letf2 __gttf2 __getf2 __unordtf2 __extenddftf2
+  __extendsftf2 __extendxftf2 __trunctfdf2 __trunctfsf2 __trunctfxf2
+  __floatsitf __floatditf __floatunsitf __floatunditf __floattitf
+  __floatuntitf __fixtfsi __fixtfdi __fixunstfsi __fixunstfdi __fixtfti
+  __fixunstfti`), the half/bfloat16 set (`__extendhfsf2 __truncsfhf2
+  __truncdfhf2 __truncxfhf2 __trunctfhf2 __truncsfbf2 __truncdfbf2
+  __truncxfbf2 __trunctfbf2`), and from the C library `memcpy memset memmove
+  strlen floorf ceilf truncf roundf rintf nearbyintf fabsf`
+  (`__stack_chk_guard`/`__stack_chk_fail` under -fstack-protector).
+
+### WIN4-WIN10: planned
