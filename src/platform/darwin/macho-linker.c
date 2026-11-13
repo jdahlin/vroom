@@ -25,6 +25,7 @@
  */
 #include "ld/ld.h"
 #include "common/digest.h"
+#include "common/string-index.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -116,8 +117,7 @@ struct macho_context {
 	uint32_t text_section, stubs_section, got_section;	/* output sections, or MACHO_NONE */
 	macho_global_symbol *globals;
 	uint32_t global_count, global_capacity;
-	uint32_t *global_hash_slots;		/* open addressing: id + 1 */
-	uint32_t global_hash_mask;
+	vstring_index global_index;		/* name -> id */
 	macho_fixup *fixups;
 	uint32_t fixup_count, fixup_capacity;
 	uint32_t *imports;			/* global ids */
@@ -180,44 +180,27 @@ static uint32_t macho_output_section_get(struct macho_context *ctx, const char *
 
 /* globals */
 
-static uint32_t macho_name_hash(const char *s)
+/* a global's name, for the name table */
+static const char *macho_global_name(const void *globals, uint32_t id, uint32_t *length)
 {
-	uint32_t h = 2166136261u;
-	for (; *s; s++)
-		h = (h ^ (uint8_t)*s) * 16777619u;
-	return h;
+	const char *s = ((const macho_global_symbol *)globals)[id].name;
+	*length = (uint32_t)strlen(s);
+	return s;
 }
+/* the id of the global called name; a new one when add, else MACHO_NONE */
 static uint32_t macho_global_find_or_add(struct macho_context *ctx, const char *name, bool add)
 {
-	uint32_t h = macho_name_hash(name) & ctx->global_hash_mask;
-	for (;; h = (h + 1) & ctx->global_hash_mask) {
-		uint32_t v = ctx->global_hash_slots[h];
-		if (!v)
-			break;
-		if (!strcmp(ctx->globals[v - 1].name, name))
-			return v - 1;
-	}
+	uint32_t id = vstring_index_find(&ctx->global_index, ctx->globals, macho_global_name, name, (uint32_t)strlen(name));
+	if (id != VSTRING_INDEX_NONE)
+		return id;
 	if (!add)
 		return MACHO_NONE;
-	if (2 * (ctx->global_count + 1) > ctx->global_hash_mask) {	/* grow and rehash */
-		uint32_t nm = 2 * (ctx->global_hash_mask + 1) - 1, *nh = macho_alloc(ctx, (nm + 1) * sizeof(uint32_t));
-		for (uint32_t i = 0; i < ctx->global_count; i++) {
-			uint32_t k = macho_name_hash(ctx->globals[i].name) & nm;
-			while (nh[k])
-				k = (k + 1) & nm;
-			nh[k] = i + 1;
-		}
-		free(ctx->global_hash_slots);
-		ctx->global_hash_slots = nh;
-		ctx->global_hash_mask = nm;
-		return macho_global_find_or_add(ctx, name, add);
-	}
 	MACHO_VECTOR_GROW(ctx->globals, ctx->global_count, ctx->global_capacity);
 	macho_global_symbol *g = &ctx->globals[ctx->global_count];
 	memset(g, 0, sizeof *g);
 	g->name = name;
 	g->object = g->symbol = g->import_index = g->got_slot = g->stub_slot = g->first_reference_object = MACHO_NONE;
-	ctx->global_hash_slots[h] = ctx->global_count + 1;
+	vstring_index_add(&ctx->global_index, ctx->globals, macho_global_name, ctx->global_count);
 	return ctx->global_count++;
 }
 
@@ -230,7 +213,15 @@ static const char *macho_sdk_root_find(void)
 }
 
 static char *macho_libsystem_text;			/* libSystem.B.tbd, NUL-terminated */
-static uint32_t *macho_export_hash_slots, macho_export_hash_mask;	/* exported names: offsets into tbd + 1 */
+static vstring_index macho_export_index;	/* exported names, by their offset in the tbd text */
+
+/* an exported name: its offset in the tbd text, where it ends in a NUL */
+static const char *macho_export_name(const void *text, uint32_t offset, uint32_t *length)
+{
+	const char *s = (const char *)text + offset;
+	*length = (uint32_t)strlen(s);
+	return s;
+}
 static uint32_t macho_sdk_version;		/* SDKSettings "Version", xxxx.yy.zz */
 
 static char *macho_file_read(struct macho_context *ctx, const char *path, size_t *n)
@@ -288,9 +279,6 @@ static bool macho_libsystem_read(struct macho_context *ctx)
 	const char *v = js ? strstr(js, "\"Version\":\"") : NULL;
 	macho_sdk_version = v ? macho_version_parse(v + 11) : 0;
 	free(js);
-	macho_export_hash_mask = (1u << 15) - 1;
-	macho_export_hash_slots = macho_alloc(ctx, (macho_export_hash_mask + 1) * sizeof(uint32_t));
-	uint32_t count = 0;
 	bool arm = false;
 	char *p = macho_libsystem_text, *end = macho_libsystem_text + n;
 	while (p < end) {
@@ -340,26 +328,9 @@ static bool macho_libsystem_read(struct macho_context *ctx)
 			char save = *e;
 			*e = 0;
 			if (arm && e > b) {
-				if (2 * (count + 1) > macho_export_hash_mask) {
-					uint32_t nm = 2 * (macho_export_hash_mask + 1) - 1, *nh = macho_alloc(ctx, (nm + 1) * sizeof(uint32_t));
-					for (uint32_t i = 0; i <= macho_export_hash_mask; i++)
-						if (macho_export_hash_slots[i]) {
-							uint32_t h = macho_name_hash(macho_libsystem_text + macho_export_hash_slots[i] - 1) & nm;
-							while (nh[h])
-								h = (h + 1) & nm;
-							nh[h] = macho_export_hash_slots[i];
-						}
-					free(macho_export_hash_slots);
-					macho_export_hash_slots = nh;
-					macho_export_hash_mask = nm;
-				}
-				uint32_t h = macho_name_hash(b) & macho_export_hash_mask;
-				while (macho_export_hash_slots[h] && strcmp(macho_libsystem_text + macho_export_hash_slots[h] - 1, b))
-					h = (h + 1) & macho_export_hash_mask;
-				if (!macho_export_hash_slots[h]) {
-					macho_export_hash_slots[h] = (uint32_t)(b - macho_libsystem_text) + 1;
-					count++;
-				}
+				uint32_t at = (uint32_t)(b - macho_libsystem_text);
+				if (vstring_index_find(&macho_export_index, macho_libsystem_text, macho_export_name, b, (uint32_t)(e - b)) == VSTRING_INDEX_NONE)
+					vstring_index_add(&macho_export_index, macho_libsystem_text, macho_export_name, at);
 			}
 			if (save == ']') {
 				break;
@@ -385,11 +356,8 @@ static bool macho_libsystem_load(struct macho_context *ctx)
 
 static bool macho_libsystem_is_exported(const char *name)
 {
-	uint32_t h = macho_name_hash(name) & macho_export_hash_mask;
-	for (; macho_export_hash_slots[h]; h = (h + 1) & macho_export_hash_mask)
-		if (!strcmp(macho_libsystem_text + macho_export_hash_slots[h] - 1, name))
-			return true;
-	return false;
+	return vstring_index_find(&macho_export_index, macho_libsystem_text, macho_export_name, name, (uint32_t)strlen(name)) !=
+	       VSTRING_INDEX_NONE;
 }
 
 /* ---------------- reading objects ---------------- */
@@ -740,7 +708,7 @@ static void macho_context_destroy(struct macho_context *ctx)
 	free(ctx->objects);
 	free(ctx->output_sections);
 	free(ctx->globals);
-	free(ctx->global_hash_slots);
+	vstring_index_free(&ctx->global_index);
 	free(ctx->fixups);
 	free(ctx->imports);
 	free(ctx->got_globals);
@@ -872,8 +840,6 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
 	}
 
 	/* symbols */
-	ctx->global_hash_mask = 1023;
-	ctx->global_hash_slots = macho_alloc(ctx, (ctx->global_hash_mask + 1) * sizeof(uint32_t));
 	for (uint32_t oi = 0; oi < ctx->object_count; oi++) {
 		macho_object *o = &ctx->objects[oi];
 		o->global_ids = macho_alloc(ctx, (o->symbol_count + 1) * sizeof(uint32_t));

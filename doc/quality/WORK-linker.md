@@ -201,6 +201,18 @@ The VLD_TIME phase timer moved out of the diagnostics into
 track I, held by the owner; `utils/ar.c` keeps `ar_error_report`, which
 writes to vccd's request descriptor, until then.
 
+Left in step 3 (2026-11-13), with the reason:
+- One ELF validator: `ld_object_is_valid` (relocatable inputs, extended
+  section numbering, a message per check) and `objcopy_elf_is_valid`
+  (executables too, program headers, one message) check the same section
+  header, string table and symbol table rules.  The shared part would be a
+  checker in `platform/linux/` that returns which rule failed, so each tool
+  keeps its messages; not started.
+- One option table per tool: track I, held by the owner.
+- Arena and thread pool to the shared library and the scheduler: the
+  scheduler's track (one scheduler, PLAN-quality.md); the linker's
+  `region.c` and `thread-pool.c` stay until it lands.
+
 Status (2026-11-13): the file mappings of the ELF linker (`ld_file_map`) and
 of objcopy and nm (`objcopy_elf_open`, `nm_inputs_collect`) go through
 `port/file.h` (`vfile_map_fd`, now public: the callers open the file
@@ -258,6 +270,11 @@ ELF links), Mach-O's own lock is gone and Mach-O links run concurrently;
 the libSystem table is read once under a lock of its own
 (`macho_libsystem_load`).  `ld_main` stays the one entry; the ELF lock is
 unchanged.
+
+PR 3 is done: the Mach-O linker's two name tables (globals, libSystem
+exports) are `common/string-index.h` tables; its private FNV hash and the
+hand-written probing and growth are gone.  Ids stay in insertion order, so
+the output is the same.
 
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 
