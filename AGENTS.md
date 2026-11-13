@@ -265,6 +265,7 @@ src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's fu
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
+bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
 bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/f128.h) vs this x86-64 host's FPU (~3 s)

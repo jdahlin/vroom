@@ -1851,6 +1851,79 @@ static void copies(ecx *e)
 			backward(e, k);
 }
 
+/* ---------------- VCC_REC_STATS: the clean-up passes' counters ---------------- */
+
+static const char *const rp_names[RP_N] = {
+	[RP_FUNC] = "functions", [RP_UNREACHABLE] = "unreachable", [RP_FALLTHROUGH] = "fallthrough",
+	[RP_LIVENESS] = "liveness", [RP_SPILL_PAIRS] = "spill_pairs", [RP_COPIES1] = "copies_1",
+	[RP_SLOTS] = "slots", [RP_EXTS] = "exts", [RP_COPIES2] = "copies_2", [RP_DEAD] = "dead",
+	[RP_FOLD] = "fold", [RP_FLAGS] = "flags", [RP_OPT_REGS] = "opt_regs",
+	[RP_EXPAND_TABLES] = "expand_tables", [RP_NOFRAME] = "opt_noframe", [RP_TAIL_EXPAND] = "tail_expand",
+	[RP_FRAME_REWRITE] = "frame_rewrite", [RP_TBZ_RELAX] = "tbz_relax",
+};
+static _Thread_local ins *rp_buf;
+static _Thread_local uint32_t rp_cap, rp_n;
+
+/* the records before a pass (only with VCC_REC_STATS) */
+VPRIV void rp_snap(ecx *e)
+{
+	if (e->nin > rp_cap) {
+		free(rp_buf);
+		rp_cap = e->nin + 1024;
+		rp_buf = malloc((size_t)rp_cap * sizeof(ins));
+		if (!rp_buf)
+			abort();
+	}
+	rp_n = e->nin;
+	memcpy(rp_buf, e->in, (size_t)e->nin * sizeof(ins));
+}
+
+/*
+ * One run of `pass`, compared with the snapshot: a record that became DELETED or that the
+ * pass dropped (the count shrank) is removed, one whose bytes differ is changed, one the pass
+ * inserted (the count grew) is added.  rp_count without a snapshot of the pass (RP_FUNC)
+ * counts the run only: callers pass rp_n = nin first.
+ */
+VPRIV void rp_count(ecx *e, int pass)
+{
+	_Atomic uint64_t *c = e->E->rpass[e->vlow][pass];
+	uint64_t ch = 0, rm = 0, ad = 0;
+
+	if (pass != RP_FUNC) {
+		if (e->nin == rp_n) {
+			for (uint32_t k = 0; k < rp_n; k++) {
+				if (rp_buf[k].op == DELETED)
+					continue;
+				if (e->in[k].op == DELETED)
+					rm++;
+				else if (memcmp(&rp_buf[k], &e->in[k], sizeof(ins)))
+					ch++;
+			}
+		} else if (e->nin < rp_n) {
+			rm = rp_n - e->nin;
+		} else {
+			ad = e->nin - rp_n;
+		}
+	}
+	atomic_fetch_add_explicit(&c[0], 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&c[1], ch, memory_order_relaxed);
+	atomic_fetch_add_explicit(&c[2], rm, memory_order_relaxed);
+	atomic_fetch_add_explicit(&c[3], ad, memory_order_relaxed);
+}
+
+/* one line per pass and path: "vcc rec-pass: path=vir pass=copies_1 runs=N changed=N removed=N added=N" */
+VPRIV void rp_print(emitter *E)
+{
+	for (int v = 0; v < 2; v++)
+		for (int p = 0; p < RP_N; p++) {
+			unsigned long long r = E->rpass[v][p][0], ch = E->rpass[v][p][1], rm = E->rpass[v][p][2], ad = E->rpass[v][p][3];
+
+			if (r)
+				fprintf(stderr, "vcc rec-pass: path=%s pass=%s runs=%llu changed=%llu removed=%llu added=%llu\n",
+					v ? "vir" : "direct", rp_names[p], r, ch, rm, ad);
+		}
+}
+
 VPRIV void opt_function(ecx *e)
 {
 	ins *in = e->in;
@@ -1870,9 +1943,14 @@ VPRIV void opt_function(ecx *e)
 		else if ((is_integer(e->c, rt) || is_ptr(e->c, rt)) && tsize(e->c, rt) <= 8)
 			retreads = RB(0);
 	}
-	if (!liveness(e))
+	RP_BEGIN(e);
+	bool lv = liveness(e);
+
+	RP_END(e, RP_LIVENESS);
+	if (!lv)
 		return;
 	/* a temporary saved around a call and dead after its restore: neither */
+	RP_BEGIN(e);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (in[k].op == I_LD && in[k].sh == SPILL_REC && !(W.la[k] & RB(in[k].rd))) {
 			for (uint32_t j = k; j-- > W.bs[W.blk[k]];)
@@ -1882,15 +1960,30 @@ VPRIV void opt_function(ecx *e)
 				}
 			in[k].op = DELETED;
 		}
+	RP_END(e, RP_SPILL_PAIRS);
 	/* copies first, so slots sees the registers values really stay in */
+	RP_BEGIN(e);
 	copies(e);
+	RP_END(e, RP_COPIES1);
+	RP_BEGIN(e);
 	slots(e);
+	RP_END(e, RP_SLOTS);
+	RP_BEGIN(e);
 	exts(e);
+	RP_END(e, RP_EXTS);
+	RP_BEGIN(e);
 	copies(e);
+	RP_END(e, RP_COPIES2);
+	RP_BEGIN(e);
 	dead(e);
+	RP_END(e, RP_DEAD);
 	if (e->vlow) {
+		RP_BEGIN(e);
 		fold(e);
+		RP_END(e, RP_FOLD);
+		RP_BEGIN(e);
 		flags(e);
+		RP_END(e, RP_FLAGS);
 	}
 	uint32_t dj = 0;
 

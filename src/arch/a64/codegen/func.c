@@ -491,9 +491,16 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		uint64_t u;
 		const uint32_t csm = (1u << 29) - (1u << 19);	/* x19-x28 */
 
-		if (!e->E->noopt)
+		if (unlikely(e->E->rstats))
+			rp_count(e, RP_FUNC);
+		if (!e->E->noopt) {
+			RP_BEGIN(e);
 			a64_unreachable(e);
+			RP_END(e, RP_UNREACHABLE);
+		}
+		RP_BEGIN(e);
 		drop_fallthrough(e);
+		RP_END(e, RP_FALLTHROUGH);
 		if (!e->E->noopt)
 			opt_function(e);
 		/*
@@ -503,7 +510,9 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		 * that needs nothing of a frame has none (as clang: leaf frame
 		 * pointers omitted).
 		 */
+		RP_BEGIN(e);
 		u = opt_regs(e, &fl);
+		RP_END(e, RP_OPT_REGS);
 		if (!(fl & OPF_ALL)) {
 			e->usedcs &= ((uint32_t)u & csm) | ~csm;
 			if (!(fl & OPF_FRAME) && !e->dyn && e->falign <= 16)
@@ -515,7 +524,9 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 		}
 	}
 
+	RP_BEGIN(e);
 	expand_tables(e, s);
+	RP_END(e, RP_EXPAND_TABLES);
 	/*
 	 * Frame below x29: callee saves, locals, outgoing arguments.  Slots are
 	 * addressed from sp, so with locals over-aligned (falign > 16) the
@@ -550,6 +561,7 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 	 * there when there is a plain frame to set up and the records in front need none of it */
 	uint32_t kpro = UINT32_MAX;
 
+	RP_BEGIN(e);
 	for (uint32_t k = 0; k < e->nin; k++)
 		if (e->in[k].op == I_NOP && e->in[k].cond == NOP_PROLOG) {
 			if (!leaf && !bp && !e->dyn && e->falign <= 16 && !e->E->o->debug && !(e->E->o->cfi && !DARWIN(c)) &&
@@ -559,15 +571,19 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 				e->in[k].cond = 0;
 			break;
 		}
+	RP_END(e, RP_NOFRAME);
+	RP_BEGIN(e);
 	if (kpro == UINT32_MAX)
 		for (uint32_t k = 0; k < e->nin; k++)
 			if (e->in[k].op == I_TAIL)
 				e->in[k].sh = 0;
 	tail_expand(e, cs, ncs, csave, leaf, e->E->o->cfi && !DARWIN(c));
+	RP_END(e, RP_TAIL_EXPAND);
 	if (kpro != UINT32_MAX)
 		for (kpro = 0; e->in[kpro].op != I_NOP || e->in[kpro].cond != NOP_PROLOG; kpro++)
 			;
 	/* rewrite frame-slot references */
+	RP_BEGIN(e);
 	for (uint32_t k = 0; k < e->nin; k++) {
 		ins *i = &e->in[k];
 
@@ -592,11 +608,14 @@ VPRIV void finish_function(ecx *e, uint32_t s)
 			i->imm = i->imm - csave + (total - 16);
 		}
 	}
+	RP_END(e, RP_FRAME_REWRITE);
 	if (a->aligned > align)
 		align = a->aligned;
 	if (c->syms[s].align > align)
 		align = c->syms[s].align;
+	RP_BEGIN(e);
 	tbz_relax(e);
+	RP_END(e, RP_TBZ_RELAX);
 	if (direct(e)) {
 		finish_direct(e, s, align, cs, ncs, csave, total, (a->constructor != 0) | (a->destructor != 0) << 1 | bp << 2 | leaf << 3,
 			      kpro);
