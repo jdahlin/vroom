@@ -1,23 +1,20 @@
 # vroom
 
-**vroom** started as one question: how fast can a cold arm64 Linux kernel
-build run on a laptop?  The target is a build from an empty tree to a
-bootable `Image` in **under 2 seconds** on an M1 Pro (8 P + 2 E cores), with
-the result booting Debian 13.
+**vcc** is a fast C toolchain: preprocessor, compiler, assembler, linker
+and archiver, written from scratch.  It runs as a long-lived server (vccd),
+so work that translation units share is done once.  It is meant to be used
+as a drop-in compiler with `CC=vcc`.
 
-Answering that question produced **vcc**: a complete C toolchain written from
-scratch, with preprocessor, compiler, assembler, linker and archiver, that
-runs as a long-lived server so work shared between translation units is done
-once.  vcc is on its way to becoming a general-purpose C compiler you can
-use with `CC=vcc` (see [PLAN-release.md](docs/PLAN-release.md)).
+**vroom** is the project around it: a cold arm64 Linux kernel build on
+macOS, from an empty tree to a bootable `Image`, with a target of under
+2 seconds on an M1 Pro.
 
 ## Where it stands
 
 - **The kernel builds without clang, LLVM or binutils.**  Every `.c` and `.S`
   file is compiled by vcc, linked by vcc's linker and archived by vcc's
   `ar`.  The kernel boots Debian to `is-system-running = running`.
-- **A cold kernel build takes about 10 s** with vccd alone (from about 23 s
-  with clang in phase 1).  Most of the remaining time is make and Kbuild,
+- **A cold kernel build takes about 10 s** with vccd alone.  Most of the remaining time is make and Kbuild,
   not the compiler.
 - **Preprocessor parity with clang:** `vcc -E` matches `clang -E`
   token for token on the kernel's TUs, and `-dM`, `-M`, `-H`, `-dD` and
