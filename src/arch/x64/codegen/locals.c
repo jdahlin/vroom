@@ -9,15 +9,15 @@ static bool x64_local_profitable(ecx *e, uint32_t s)
 {
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
-	cval cv;
+	cc_value cv;
 
 	if (e->E->luse[s] < 4)
 		return false;
 	/* wk_decl binds these constants without any storage. Reserving a physical
 	   home would add callee saves while removing no memory accesses. */
-	if (!(y->flags & SF_PARAM) && y->sc != SC_REGISTER && y->body &&
+	if (!(y->flags & AST_SYMBOL_FLAG_PARAMETER) && y->sc != AST_STORAGE_REGISTER && y->body &&
 	    !(e->E->sflags[s] & (SA_WRITTEN | SA_CWRITE)) &&
-	    !side_effects(c, y->body) && cc_eval(c, y->body, &cv) && cv.kind == CV_INT)
+	    !side_effects(c, y->body) && cc_eval(c, y->body, &cv) && cv.kind == CC_VALUE_INTEGER)
 		return false;
 	return true;
 }

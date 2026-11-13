@@ -17,16 +17,16 @@ VPRIV bool em_local_eligible(ecx *e, uint32_t s)
 	cc *c = e->c;
 	const sym *y = &c->syms[s];
 	const attrs *a = sym_attrs(c, s);
-	qty t = y->ty;
+	ast_qualified_type t = y->ty;
 
-	return is_local_var(c, s) && y->sc != SC_STATIC && y->sc != SC_EXTERN &&
-	       !e->E->lnoreg[s] && !(y->flags & SF_ADDR_TAKEN) && !(QQ(t) & Q_VOLATILE) &&
-	       !(T(c, t)->flags & (TF_VLA | TF_ATOMIC)) && !a->cleanup &&
-	       !(y->sc == SC_REGISTER && a->asmname);
+	return is_local_var(c, s) && y->sc != AST_STORAGE_STATIC && y->sc != AST_STORAGE_EXTERN &&
+	       !e->E->lnoreg[s] && !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) && !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) &&
+	       !(T(c, t)->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_ATOMIC)) && !a->cleanup &&
+	       !(y->sc == AST_STORAGE_REGISTER && a->asmname);
 }
 
 /* Native whole-function GPR bindings currently hold one integer/pointer word. */
-VPRIV bool em_local_gpr_type(cc *c, qty t)
+VPRIV bool em_local_gpr_type(cc *c, ast_qualified_type t)
 {
 	return (is_integer(c, t) || is_ptr(c, t)) && !is_wide(c, t) && tsize(c, t) - 1 < 8;
 }
@@ -34,7 +34,7 @@ VPRIV bool em_local_gpr_type(cc *c, qty t)
 /* Reuse the prepass's weighted references and symbol span. Equal weights retain
  * symbol order, including when the bounded list is full. The caller owns cand. */
 VPRIV unsigned em_select_locals(ecx *e, uint32_t fn, uint32_t *cand, unsigned max,
-			       bool (*target_ok)(cc *, qty))
+			       bool (*target_ok)(cc *, ast_qualified_type))
 {
 	emitter *E = e->E;
 	uint32_t lo = E->lspan[2 * fn], hi = E->lspan[2 * fn + 1];

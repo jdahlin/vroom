@@ -15,23 +15,23 @@ VPRIV int em_repeated_integer(ecx *e, uint32_t n)
 	cc *c = e->c;
 	const node *x = N(n), *a, *b;
 	const sym *s;
-	qty t;
+	ast_qualified_type t;
 	uint64_t size;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY ||
+	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY ||
 	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_CARET && x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE &&
 	     x->aux != LEX_TOKEN_EQUAL_EQUAL && x->aux != LEX_TOKEN_EXCLAMATION_EQUAL && x->aux != LEX_TOKEN_LESS &&
 	     x->aux != LEX_TOKEN_GREATER && x->aux != LEX_TOKEN_LESS_EQUAL && x->aux != LEX_TOKEN_GREATER_EQUAL))
 		return EM_ID_NONE;
 	a = N(x->a); b = N(x->b);
-	if (a->op != N_VAR || b->op != N_VAR || a->a != b->a || QUNQ(a->ty) != QUNQ(b->ty) ||
+	if (a->op != AST_NODE_VARIABLE || b->op != AST_NODE_VARIABLE || a->a != b->a || AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) ||
 	    !is_integer(c, a->ty) || em_bitint(c, a->ty))
 		return EM_ID_NONE;
 	s = &c->syms[a->a];
 	t = s->ty;
 	size = tsize(c, t);
-	if (!is_local_var(c, a->a) || s->kind != S_VAR || s->sc == SC_STATIC || s->sc == SC_EXTERN ||
-	    (s->flags & SF_ADDR_TAKEN) || (QQ(t) & Q_VOLATILE) || (T(c, t)->flags & TF_ATOMIC) ||
+	if (!is_local_var(c, a->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
+	    (s->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) || (T(c, t)->flags & AST_TYPE_FLAG_ATOMIC) ||
 	    !size || size > 8 || sym_attrs(c, a->a)->asmname)
 		return EM_ID_NONE;
 	switch (x->aux) {

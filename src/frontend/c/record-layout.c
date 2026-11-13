@@ -121,7 +121,7 @@ static void cc_layout_field_place(cc *c, cc_record_layout *l, field *f, uint32_t
 	l->unfilled = 0;
 	l->last_unit = 0;
 	falign = (uint64_t)cc_type_alignment(c, f->ty) * 8;
-	fsize = cc_type_is_array(c, f->ty) && (AST_TYPE(c, f->ty)->flags & TF_INCOMPLETE) ? 0 : cc_type_size(c, f->ty) * 8;
+	fsize = cc_type_is_array(c, f->ty) && (AST_TYPE(c, f->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) ? 0 : cc_type_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
 	ualign = falign;
 	if (fattr_align) {
@@ -154,8 +154,8 @@ static void cc_layout_field_place(cc *c, cc_record_layout *l, field *f, uint32_t
 /* fa[i]/fp[i]: per-field aligned() and packed attributes */
 CC_PRIVATE void cc_layout_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
-	cc_record_layout l = { .is_union = (r->flags & RF_UNION) != 0, .packed = (r->flags & RF_PACKED) != 0,
-		     .ms_struct = (r->flags & RF_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
+	cc_record_layout l = { .is_union = (r->flags & AST_RECORD_FLAG_UNION) != 0, .packed = (r->flags & AST_RECORD_FLAG_PACKED) != 0,
+		     .ms_struct = (r->flags & AST_RECORD_FLAG_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;

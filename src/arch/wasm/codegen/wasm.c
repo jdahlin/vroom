@@ -66,22 +66,22 @@ VPRIV void wasm_ecx_free(ecx *e)
 /* ---------------- the C ABI ---------------- */
 
 /* the one element a record is passed as (clang's isSingleElementStruct), or 0 */
-static qty wsingle(cc *c, qty t)
+static ast_qualified_type wsingle(cc *c, ast_qualified_type t)
 {
 	for (;;) {
 		const ctype *y = T(c, t);
 
-		if (y->kind == TY_ARRAY && y->n == 1 && !(y->flags & (TF_VLA | TF_INCOMPLETE))) {
+		if (y->kind == AST_TYPE_ARRAY && y->n == 1 && !(y->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE))) {
 			t = y->base;
 			continue;
 		}
-		if (y->kind != TY_STRUCT && y->kind != TY_UNION)
+		if (y->kind != AST_TYPE_STRUCT && y->kind != AST_TYPE_UNION)
 			return t;
 		{
 			const tag *r = &c->tags[y->aux];
-			qty found = 0;
+			ast_qualified_type found = 0;
 
-			if (r->flags & (RF_FLEX | RF_COMPLEX))
+			if (r->flags & (AST_RECORD_FLAG_FLEXIBLE | AST_RECORD_FLAG_COMPLEX))
 				return 0;
 			for (uint32_t i = 0; i < r->nfield; i++) {
 				const field *f = &r->f[i];
@@ -101,14 +101,14 @@ static qty wsingle(cc *c, qty t)
 	}
 }
 
-VPRIV wabi wclassify(cc *c, qty t)
+VPRIV wabi wclassify(cc *c, ast_qualified_type t)
 {
 	int k = wty(c, t);
 
 	if (k != WT_MEM)
 		return (wabi){ WA_SCALAR, (uint8_t)k, t, 0 };
 	if (is_record(c, t)) {
-		qty s;
+		ast_qualified_type s;
 
 		if (tsize(c, t) == 0)
 			return (wabi){ WA_IGNORE, 0, 0, 0 };
@@ -128,14 +128,14 @@ VPRIV wabi wclassify(cc *c, qty t)
 		return (wabi){ WA_PAIR, WT_I64, t, 2 };
 	if (is_vec(c, t)) {
 		/* lane by lane (no simd128), as clang */
-		qty b = T(c, t)->base;
+		ast_qualified_type b = T(c, t)->base;
 
 		return (wabi){ WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t, T(c, t)->ext ?: T(c, t)->n };
 	}
 	return (wabi){ WA_IND, (uint8_t)WPT(c), t, 0 };
 }
 
-VPRIV wabi wclassify_ret(cc *c, qty t)
+VPRIV wabi wclassify_ret(cc *c, ast_qualified_type t)
 {
 	wabi a;
 
@@ -150,16 +150,16 @@ VPRIV wabi wclassify_ret(cc *c, qty t)
 }
 
 /* K&R: what a caller without a prototype passes for a parameter of type t */
-VPRIV qty wpromote(cc *c, qty t)
+VPRIV ast_qualified_type wpromote(cc *c, ast_qualified_type t)
 {
-	if (KIND(c, t) == TY_FLOAT)
-		return prim(TY_DOUBLE);
+	if (KIND(c, t) == AST_TYPE_FLOAT)
+		return prim(AST_TYPE_DOUBLE);
 	if (is_integer(c, t) && tsize(c, t) < 4)
-		return prim(TY_INT);
+		return prim(AST_TYPE_INT);
 	return t;
 }
 
-static void wsig_param(cc *c, tbuf *b, qty t, bool *first)
+static void wsig_param(cc *c, tbuf *b, ast_qualified_type t, bool *first)
 {
 	wabi a = wclassify(c, t);
 
@@ -175,11 +175,11 @@ static void wsig_param(cc *c, tbuf *b, qty t, bool *first)
 
 /*
  * The signature "(params) -> (results)": of the function type ft, or with
- * call (an N_CALL node) of the call's arguments (no prototype: the default
+ * call (an AST_NODE_CALL node) of the call's arguments (no prototype: the default
  * promotions; variadic: the named ones and the argument buffer's address);
  * def: a K&R definition of ft (its parameters, promoted).
  */
-VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret)
+VPRIV void wsig(ecx *e, tbuf *b, ast_qualified_type ft, uint32_t call, uint32_t def, bool *sret)
 {
 	cc *c = e->c;
 	const ctype *f = T(c, ft);
@@ -193,12 +193,12 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 	}
 	if (sret)
 		*sret = r.k == WA_IND;
-	if ((f->flags & TF_NOPROTO) && call) {
+	if ((f->flags & AST_TYPE_FLAG_NO_PROTOTYPE) && call) {
 		const node *x = N(call);
 
 		for (uint32_t i = 0; i < x->c; i++)
 			wsig_param(c, b, N(c->lists[x->b + i])->ty, &first);
-	} else if ((f->flags & TF_NOPROTO) && def && c->syms[def].body && N(c->syms[def].body)->op == N_BLOCK) {
+	} else if ((f->flags & AST_TYPE_FLAG_NO_PROTOTYPE) && def && c->syms[def].body && N(c->syms[def].body)->op == AST_NODE_BLOCK) {
 		const node *bd = N(c->syms[def].body);
 
 		for (uint32_t i = 0; i < bd->aux; i++)
@@ -207,7 +207,7 @@ VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret
 		for (uint32_t i = 0; i < f->n; i++)
 			wsig_param(c, b, c->params[f->aux + i], &first);
 	}
-	if (f->flags & TF_VARIADIC) {
+	if (f->flags & AST_TYPE_FLAG_VARIADIC) {
 		if (!first)
 			vtext_string_append(b, ", ");
 		vtext_string_append(b, wt_name[WPT(c)]);
@@ -222,7 +222,7 @@ VPRIV bool wis_main(cc *c, uint32_t s)
 {
 	const sym *y = &c->syms[s];
 
-	return y->depth == 0 && y->kind == S_FUNC && EM_IDENT_IS(y->name, "main");
+	return y->depth == 0 && y->kind == AST_SYMBOL_FUNCTION && EM_IDENT_IS(y->name, "main");
 }
 
 /* a function's assembler name (main is renamed as clang does for emscripten) */
@@ -234,7 +234,7 @@ VPRIV void wfname(cc *c, tbuf *b, uint32_t ref)
 		if (wis_main(c, canon_sym(c, RIDX(ref))) && !sym_attrs(c, RIDX(ref))->asmname) {
 			uint32_t np = T(c, y->ty)->n;
 
-			if (!np && y->body && N(y->body)->op == N_BLOCK)
+			if (!np && y->body && N(y->body)->op == AST_NODE_BLOCK)
 				np = N(y->body)->aux;	/* K&R */
 			vtext_string_append(b, np ? "__main_argc_argv" : "__original_main");
 			return;
@@ -249,14 +249,14 @@ VPRIV void wasm_data_ref(ecx *e, uint32_t ref)
 {
 	cc *c = e->c;
 
-	if (RKIND(ref) != RK_SYM || c->syms[RIDX(ref)].kind != S_FUNC)
+	if (RKIND(ref) != RK_SYM || c->syms[RIDX(ref)].kind != AST_SYMBOL_FUNCTION)
 		return;
 	if (!e->w)
 		w_state(e);
 	wdecl(e, ref, c->syms[RIDX(ref)].ty, NULL);
 }
 
-VPRIV void wdecl(ecx *e, uint32_t ref, qty ft, const char *sig)
+VPRIV void wdecl(ecx *e, uint32_t ref, ast_qualified_type ft, const char *sig)
 {
 	cc *c = e->c;
 	tbuf *d = &e->w->decl;
@@ -312,7 +312,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 		uint32_t s = c->toplevel[ti];
 		const attrs *a = sym_attrs(c, s);
 
-		if (c->syms[s].kind != S_FUNC || !a || !a->destructor || !c->syms[s].body || !claimed[s])
+		if (c->syms[s].kind != AST_SYMBOL_FUNCTION || !a || !a->destructor || !c->syms[s].body || !claimed[s])
 			continue;
 		if (n == cap) {
 			cap = cap ? 2 * cap : 16;
@@ -438,13 +438,13 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 	/* the incoming locals first (their indices come before every other local) */
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
-		qty pt = (ft->flags & TF_NOPROTO) ? wpromote(c, c->syms[p].ty) : c->syms[p].ty;
+		ast_qualified_type pt = (ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) ? wpromote(c, c->syms[p].ty) : c->syms[p].ty;
 		wabi a = wclassify(c, pt);
 
 		for (uint32_t j = 0; j < wparts(a); j++)
 			W->lt[idx++] = a.st;
 	}
-	if (ft->flags & TF_VARIADIC) {
+	if (ft->flags & AST_TYPE_FLAG_VARIADIC) {
 		W->lt[idx] = (uint8_t)WPT(c);
 		W->vap = idx++;
 	}
@@ -455,7 +455,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];
 		const sym *y = &c->syms[p];
-		qty pt = (ft->flags & TF_NOPROTO) ? wpromote(c, y->ty) : y->ty;
+		ast_qualified_type pt = (ft->flags & AST_TYPE_FLAG_NO_PROTOTYPE) ? wpromote(c, y->ty) : y->ty;
 		wabi a = wclassify(c, pt);
 		wbind *b = &W->sb[p];
 
@@ -474,7 +474,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		}
 		if (a.k == WA_SCALAR && !is_record(c, y->ty) && wreg_ok(e, p)) {
 			b->k = WB_LOC;
-			if (QUNQ(pt) != QUNQ(y->ty)) {
+			if (AST_QUALIFIED_TYPE_UNQUALIFIED(pt) != AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty)) {
 				/* K&R: received promoted, kept as declared */
 				b->loc = wnewloc(e, wty(c, y->ty));
 				wget(e, idx);
@@ -490,7 +490,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 		b->off = wslot(e, tsize(c, y->ty), sym_align(c, p));
 		b->cellid = wmem_id(e, b->off);
 		if (a.k == WA_PAIR) {
-			qty pt1 = wpart_ty(c, a);
+			ast_qualified_type pt1 = wpart_ty(c, a);
 			uint64_t es = tsize(c, pt1);
 
 			for (uint32_t j = 0; j < a.n; j++) {
@@ -511,7 +511,7 @@ static void wparams(ecx *e, uint32_t s, uint32_t *np)
 			wmem_lval(e, &l, b->off);
 			wslot_addr(e, b->off);
 			wget(e, idx++);
-			if (QUNQ(pt) != QUNQ(y->ty) && !is_record(c, y->ty))
+			if (AST_QUALIFIED_TYPE_UNQUALIFIED(pt) != AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) && !is_record(c, y->ty))
 				wconv(e, pt, y->ty);
 			wstore(e, &l, is_record(c, y->ty) ? a.ft : y->ty);
 		}
@@ -612,11 +612,11 @@ VPRIV void wasm_emit_function(ecx *e, uint32_t s)
 
 	/* the function: header, locals, prologue, body, epilogue */
 	{
-		bool global = y->sc != SC_STATIC && y->name && !inline_only(y);
+		bool global = y->sc != AST_STORAGE_STATIC && y->name && !inline_only(y);
 
 		wsection(e, f, s, ".text.");
 		if (global) {
-			vtext_string_append(f, (y->flags & SF_WEAK) ? "\t.weak\t" : "\t.globl\t");
+			vtext_string_append(f, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
 			wfname(c, f, REF(RK_SYM, s));
 			vtext_char_append(f, '\n');
 		}

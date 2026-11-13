@@ -172,7 +172,7 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				return;
 			}
 		}
-		cc_opts co = { .target = job->pp_options.target, .unsigned_char = job->pp_options.unsigned_char, .dump_layouts = job->layout_checks, .lint = job->lint, .ms_anon = job->ms_anonymous_structs, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
+		cc_options co = { .target = job->pp_options.target, .unsigned_char = job->pp_options.unsigned_char, .dump_layouts = job->layout_checks, .lint = job->lint, .ms_anon = job->ms_anonymous_structs, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->standard, .c2y = job->standard == 23 && job->standard_version && !strcmp(job->standard_version, "202400L"), .implicit_int = job->standard == 89 || job->allow_implicit_int, .implicit_fn = job->standard == 89 || job->allow_implicit_function, .conv_warn = job->conversion_warning_flags,
 				.strict_std = job->strict_standard,
 				.fast_math = job->fast_math && (job->math_flags & 7) == 7, .no_fp_contract = job->no_fp_contract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->no_builtin, .no_jump_tables = job->no_jump_tables, .instrument = job->instrument_functions, .wasm_sjlj = job->sjlj,
@@ -219,7 +219,7 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 			unsigned long long t1 = driver_clock_nanoseconds();
 			vperf v1 = vperformance_now();
 
-			job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
+			job->status = cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
 			driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
 			driver_phase_add(DRIVER_PHASE_COMPILE, v1);
 			driver_tokens_taken += pp_token_count(p);

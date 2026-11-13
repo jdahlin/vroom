@@ -70,7 +70,7 @@ CC_PRIVATE void cc_report_delayed_bug_check(cc *c)
 
 /* ---------------- parser recovery ---------------- */
 
-CC_PRIVATE void cc_recovery_save(cc *c, recov *r)
+CC_PRIVATE void cc_recovery_save(cc *c, cc_recovery_point *r)
 {
 	r->prev = c->rec;
 	r->depth = c->depth, r->ndops = c->ndops, r->ncase = c->ncase, r->case_base = c->case_base;
@@ -167,7 +167,7 @@ static bool cc_recovery_is_stray_right_brace(cc *c)
    skipped: through a ';' or a block ('{ ... }') it opened, or up to a '}' that closes
    the one r is in (CC_RECOVERY_TOP_LEVEL: at file scope that '}' is skipped too; CC_RECOVERY_FOR_HEAD: in a for
    header, through its ')': the body is parsed) */
-CC_PRIVATE void cc_recovery_restore(cc *c, recov *r, int mode)
+CC_PRIVATE void cc_recovery_restore(cc *c, cc_recovery_point *r, int mode)
 {
 	bool top = mode == CC_RECOVERY_TOP_LEVEL;
 
@@ -189,8 +189,8 @@ CC_PRIVATE void cc_recovery_restore(cc *c, recov *r, int mode)
 		uint32_t s = cc_symbol_lookup(c, c->decl_name);
 
 		if (!s || c->syms[s].depth != c->depth) {
-			s = cc_symbol_new(c, S_VAR, c->decl_name, cc_type_basic(TY_INT), c->decl_loc);
-			c->syms[s].flags |= SF_INVALID;
+			s = cc_symbol_new(c, AST_SYMBOL_VARIABLE, c->decl_name, cc_type_basic(AST_TYPE_INT), c->decl_loc);
+			c->syms[s].flags |= AST_SYMBOL_FLAG_INVALID;
 			cc_report_delayed_bug(c, c->decl_loc, "an invalid declaration without an error");
 			cc_symbol_bind(c, s);
 		}

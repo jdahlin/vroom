@@ -10,7 +10,7 @@ VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee)
 	if (callee->op != VIR_OP_SYMADDR || RKIND(callee->a) != RK_SYM)
 		return false;
 	s = canon_sym(c, RIDX(callee->a));
-	return (sym_attrs(c, s)->flags & AF_TAIL_RETURNS_TWICE) ||
+	return (sym_attrs(c, s)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
 	       EM_IDENT_IS(c->syms[s].name, "setjmp") || EM_IDENT_IS(c->syms[s].name, "_setjmp") ||
 	       EM_IDENT_IS(c->syms[s].name, "sigsetjmp") || EM_IDENT_IS(c->syms[s].name, "__sigsetjmp");
 }

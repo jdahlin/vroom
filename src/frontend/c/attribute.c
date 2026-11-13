@@ -29,7 +29,7 @@ static const char *const cc_attribute_names[CC_ATTRIBUTE_COUNT] = {
 	[CC_ATTRIBUTE_DEPRECATED] = "deprecated", [CC_ATTRIBUTE_WUR] = "warn_unused_result", [CC_ATTRIBUTE_NODISCARD] = "nodiscard", [CC_ATTRIBUTE_IFUNC] = "ifunc", [CC_ATTRIBUTE_NONNULL] = "nonnull", [CC_ATTRIBUTE_FORMAT] = "format", [CC_ATTRIBUTE_FORMAT_ARG] = "format_arg",
 };
 
-static uint32_t *cc_attribute_directory[NDIR];
+static uint32_t *cc_attribute_directory[CC_DIRECTORY_COUNT];
 
 CC_PRIVATE void cc_attribute_table_init(void)
 {
@@ -49,9 +49,9 @@ CC_PRIVATE void cc_attribute_table_init(void)
 		for (int k = 0; k < 2; k++) {
 			uint32_t id = vintern_copy(b[k], k ? l + 4 : l);
 
-			if (!cc_attribute_directory[id >> DIR_BITS])
-				cc_attribute_directory[id >> DIR_BITS] = calloc(DIR_PAGE, sizeof(uint32_t));
-			cc_attribute_directory[id >> DIR_BITS][id & (DIR_PAGE - 1)] = (uint32_t)i;
+			if (!cc_attribute_directory[id >> CC_DIRECTORY_BITS])
+				cc_attribute_directory[id >> CC_DIRECTORY_BITS] = calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t));
+			cc_attribute_directory[id >> CC_DIRECTORY_BITS][id & (CC_DIRECTORY_PAGE - 1)] = (uint32_t)i;
 		}
 	}
 	__atomic_store_n(&done, true, __ATOMIC_RELEASE);
@@ -59,9 +59,9 @@ CC_PRIVATE void cc_attribute_table_init(void)
 
 static int cc_attribute_lookup(uint32_t id)
 {
-	uint32_t *pg = cc_attribute_directory[id >> DIR_BITS];
+	uint32_t *pg = cc_attribute_directory[id >> CC_DIRECTORY_BITS];
 
-	return pg ? (int)pg[id & (DIR_PAGE - 1)] : 0;
+	return pg ? (int)pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 }
 
 CC_PRIVATE uint32_t cc_token_skip_balanced(cc *c)
@@ -119,14 +119,14 @@ CC_PRIVATE int cc_attribute_mode_kind(cc *c, uint32_t id, bool sgn)
 		return 0;
 	memcpy(b, s, (size_t)l);
 	(void)c;
-	if (!strcmp(b, "SF")) return TY_FLOAT;
-	if (!strcmp(b, "DF")) return TY_DOUBLE;
-	if (!strcmp(b, "QI")) return sgn ? TY_SCHAR : TY_UCHAR;
-	if (!strcmp(b, "HI")) return sgn ? TY_SHORT : TY_USHORT;
-	if (!strcmp(b, "SI")) return sgn ? TY_INT : TY_UINT;
+	if (!strcmp(b, "SF")) return AST_TYPE_FLOAT;
+	if (!strcmp(b, "DF")) return AST_TYPE_DOUBLE;
+	if (!strcmp(b, "QI")) return sgn ? AST_TYPE_SIGNED_CHAR : AST_TYPE_UNSIGNED_CHAR;
+	if (!strcmp(b, "HI")) return sgn ? AST_TYPE_SHORT : AST_TYPE_UNSIGNED_SHORT;
+	if (!strcmp(b, "SI")) return sgn ? AST_TYPE_INT : AST_TYPE_UNSIGNED_INT;
 	if (!strcmp(b, "DI")) return CC_I64(c, !sgn);
-	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? TY_LONG : TY_ULONG;	/* the pointer's width */
-	if (!strcmp(b, "TI")) return sgn ? TY_INT128 : TY_UINT128;
+	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? AST_TYPE_LONG : AST_TYPE_UNSIGNED_LONG;	/* the pointer's width */
+	if (!strcmp(b, "TI")) return sgn ? AST_TYPE_INT128 : AST_TYPE_UINT128;
 	return 0;
 }
 
@@ -408,7 +408,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, at
 						else next(c);
 					}
 				} else if (si) {
-					uint8_t model = (uint8_t)vcc_tls_model(c->strs[si - 1].s);
+					uint8_t model = (uint8_t)cc_tls_model_parse(c->strs[si - 1].s);
 
 					if (!model)
 						cc_report_error(c, argloc, "tls_model must be \"global-dynamic\", \"local-dynamic\", \"initial-exec\" or \"local-exec\"");
@@ -430,11 +430,11 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, at
 				if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
 					uint32_t s = cc_symbol_lookup(c, tok(c)->id);
 
-					if (!s || c->syms[s].kind != S_FUNC)
+					if (!s || c->syms[s].kind != AST_SYMBOL_FUNCTION)
 						cc_report_error(c, tok(c)->loc, "'cleanup' argument is not a function");
 					a->cleanup = s;
 					if (s)
-						c->syms[s].flags |= SF_REF | SF_USED;
+						c->syms[s].flags |= AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED;
 				}
 				next(c);
 				cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
@@ -549,10 +549,10 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, at
 			case CC_ATTRIBUTE_INTERRUPT: a->interrupt = 1; a->noinline = 1; break;
 			case CC_ATTRIBUTE_NOINLINE: a->noinline = 1; break;
 			case CC_ATTRIBUTE_NOINSTR: a->noinstr = 1; break;
-			case CC_ATTRIBUTE_RETURNS_TWICE: a->flags |= AF_TAIL_RETURNS_TWICE; break;
-			case CC_ATTRIBUTE_DISABLE_TAIL_CALLS: a->flags |= AF_TAIL_DISABLE; break;
-			case CC_ATTRIBUTE_NOT_TAIL_CALLED: a->flags |= AF_TAIL_NOT_CALLED; break;
-			case CC_ATTRIBUTE_OPTNONE: a->flags |= AF_OPTNONE; break;
+			case CC_ATTRIBUTE_RETURNS_TWICE: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE; break;
+			case CC_ATTRIBUTE_DISABLE_TAIL_CALLS: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_DISABLE; break;
+			case CC_ATTRIBUTE_NOT_TAIL_CALLED: a->flags |= CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED; break;
+			case CC_ATTRIBUTE_OPTNONE: a->flags |= CC_ATTRIBUTE_FLAG_OPTNONE; break;
 			case CC_ATTRIBUTE_OVERLOADABLE: a->overloadable = 1; break;
 			case CC_ATTRIBUTE_GNU_INLINE: a->gnu_inline = 1; break;
 			case CC_ATTRIBUTE_TRANSPARENT_UNION: a->transparent = 1; break;

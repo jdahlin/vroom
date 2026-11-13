@@ -9,7 +9,7 @@
 #include "walk.h"
 
 /* All operations consume their input register; retain a separate bias for %. */
-VPRIV val wk_sdivpow2(ecx *e, qty t, val a, const em_sdivpow2_recipe *r)
+VPRIV val wk_sdivpow2(ecx *e, ast_qualified_type t, val a, const em_sdivpow2_recipe *r)
 {
 	int size = r->bits / 8, ra = wk_reg(e, &a, t), rb;
 	val bias;

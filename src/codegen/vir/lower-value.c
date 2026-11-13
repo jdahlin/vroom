@@ -434,24 +434,24 @@ VPRIV bool virbuild_i128mem(void) { return true; }
 #define VIRBUILD_STUB_UNSUPPORTED(name, ...) VPRIV val virbuild_##name(ecx *e, __VA_ARGS__) { virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin)); }
 VPRIV val virbuild_wconst(ecx *e, i128 v) { (void)v; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
 VPRIV val virbuild_wbitint(ecx *e, val v, unsigned bits, bool sgn) { (void)v, (void)bits, (void)sgn; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
-VPRIV val virbuild_bigconst(ecx *e, qty t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
-VPRIV val virbuild_bigbin(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
-VPRIV val virbuild_bigcmp(ecx *e, int op, qty t, val a, val b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
-VPRIV val virbuild_bigcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
+VPRIV val virbuild_bigconst(ecx *e, ast_qualified_type t, const uint32_t *words, i128 small) { (void)t, (void)words, (void)small; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
+VPRIV val virbuild_bigbin(ecx *e, int op, ast_qualified_type t, val a, val b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
+VPRIV val virbuild_bigcmp(ecx *e, int op, ast_qualified_type t, val a, val b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
+VPRIV val virbuild_bigcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to) { (void)v, (void)from, (void)to; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
 VPRIV val virbuild_wbin(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
 VPRIV val virbuild_wun(ecx *e, int op, val a) { (void)op, (void)a; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
 VPRIV val virbuild_wcmp(ecx *e, int op, bool sgn, val a, val b) { (void)op, (void)sgn, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
-VPRIV val virbuild_wcvt(ecx *e, val v, qty from, qty to) { (void)v, (void)from, (void)to; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
+VPRIV val virbuild_wcvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to) { (void)v, (void)from, (void)to; virbuild_fail(e, VIRBUILD_FAILURE(wide_integer)); }
 
 /* ---------------- floating point ---------------- */
 
-VPRIV uint32_t virbuild_float_type(ecx *e, qty t)
+VPRIV uint32_t virbuild_float_type(ecx *e, ast_qualified_type t)
 {
 	int k = KIND(e->c, t);
 
-	if (k == TY_FLOAT)
+	if (k == AST_TYPE_FLOAT)
 		return VIR_TYPE_F32;
-	if (k == TY_DOUBLE || (k == TY_LDOUBLE && tsize(e->c, t) == 8))
+	if (k == AST_TYPE_DOUBLE || (k == AST_TYPE_LONG_DOUBLE && tsize(e->c, t) == 8))
 		return VIR_TYPE_F64;
 	virbuild_fail(e, VIRBUILD_FAILURE(unsupported_floating_type));
 }
@@ -494,7 +494,7 @@ static uint32_t virbuild_float_product(ecx *e, const val *a, uint32_t x, uint32_
 	return m;
 }
 
-VPRIV val virbuild_fbin(ecx *e, int op, qty t, val a, val b)
+VPRIV val virbuild_fbin(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	uint32_t ty = virbuild_float_type(e, t), x = virbuild_walker_value_get(e, &a, ty), y = virbuild_walker_value_get(e, &b, ty);
 	int r = virbuild_float_result_register(e, &a, &b);
@@ -529,7 +529,7 @@ VPRIV val virbuild_fbin(ecx *e, int op, qty t, val a, val b)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val virbuild_fneg(ecx *e, qty t, val a)
+VPRIV val virbuild_fneg(ecx *e, ast_qualified_type t, val a)
 {
 	uint32_t ty = virbuild_float_type(e, t), x = virbuild_walker_value_get(e, &a, ty);
 	int r = virbuild_float_result_register(e, &a, NULL);
@@ -543,7 +543,7 @@ VPRIV val virbuild_fneg(ecx *e, qty t, val a)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val virbuild_fsqrt(ecx *e, qty t, val a)
+VPRIV val virbuild_fsqrt(ecx *e, ast_qualified_type t, val a)
 {
 	uint32_t ty = virbuild_float_type(e, t), x = virbuild_walker_value_get(e, &a, ty);
 	int r = virbuild_float_result_register(e, &a, NULL);
@@ -555,7 +555,7 @@ VPRIV val virbuild_fsqrt(ecx *e, qty t, val a)
 VPRIV val virbuild_root4(ecx *e, val a) { (void)a; virbuild_fail(e, VIRBUILD_FAILURE(root4)); }
 VPRIV val virbuild_pcmpstr(ecx *e, uint32_t n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(string_compare)); }
 
-VPRIV val virbuild_fcmp(ecx *e, int op, qty t, val a, val b)
+VPRIV val virbuild_fcmp(ecx *e, int op, ast_qualified_type t, val a, val b)
 {
 	uint32_t ty = virbuild_float_type(e, t), x = virbuild_walker_value_get(e, &a, ty), y = virbuild_walker_value_get(e, &b, ty), cc;
 	int r;
@@ -578,7 +578,7 @@ VPRIV val virbuild_fcmp(ecx *e, int op, qty t, val a, val b)
 	return (val){ .k = V_REG, .r = (uint8_t)r };
 }
 
-VPRIV val virbuild_cvt(ecx *e, val v, qty from, qty to)
+VPRIV val virbuild_cvt(ecx *e, val v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->c;
 	bool ff = is_flt(c, from), tf = is_flt(c, to);
@@ -616,7 +616,7 @@ VPRIV val virbuild_cvt(ecx *e, val v, qty from, qty to)
 		virbuild_register_write(e, r, virbuild_insn_append(e, sg ? VIR_OP_S2F : VIR_OP_U2F, b, 0, x, 0, 0));
 		return (val){ .k = V_REG, .r = (uint8_t)r };
 	}
-	if (KIND(c, to) == TY_BOOL) {
+	if (KIND(c, to) == AST_TYPE_BOOL) {
 		uint32_t a = virbuild_float_type(e, from);
 
 		x = virbuild_walker_value_get(e, &v, a);

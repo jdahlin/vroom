@@ -76,7 +76,7 @@ VPRIV void x64_dead_budget(ecx *e, uint32_t budget)
 	/* The normal epilogue contract below does not cover interrupt returns.
 	 * Opaque asm (including valid naked bodies) is rejected by the scan.
 	 */
-	if (x->interrupt || (e->c && e->wk->fsym && (e->c->syms[e->wk->fsym].flags & SF_NORETURN)) ||
+	if (x->interrupt || (e->c && e->wk->fsym && (e->c->syms[e->wk->fsym].flags & AST_SYMBOL_FLAG_NORETURN)) ||
 	    n < 2 || n > X_DEAD_RECORDS)
 		return;
 	start[0] = 0;

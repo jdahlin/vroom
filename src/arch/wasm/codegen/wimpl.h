@@ -78,7 +78,7 @@ typedef struct wst {
 	bool dyn;		/* alloca / VLA: __stack_pointer moves during the function */
 	int depth;		/* open blocks, loops and ifs */
 	int brk, cont;		/* innermost targets: block index, -1 none */
-	qty rty;
+	ast_qualified_type rty;
 	int rt;			/* the wasm result: WT_NONE for void and sret */
 	uint32_t fsym;
 	wswc *sw;		/* switch case scratch */
@@ -132,7 +132,7 @@ typedef struct wgd {
 	uint32_t node;
 	int parent;		/* gd it is in (a compound, if or loop), -1: none */
 	uint32_t pidx;		/* its statement index there; in an if 1 then, 2 else */
-	int op;			/* N_BLOCK, N_IF, N_WHILE, N_DO, N_FOR */
+	int op;			/* AST_NODE_BLOCK, AST_NODE_IF, AST_NODE_WHILE, AST_NODE_DO, AST_NODE_FOR */
 	uint32_t seg, nseg;	/* segment starts: gp[seg ..] (.i) */
 	uint32_t st;		/* the state local (i32): segment to start in; if: branch; loop: skip the test */
 	int loop;		/* block index of the dispatch loop while emitted, -1 */
@@ -156,19 +156,19 @@ static const char *const wt_name[] = { "", "i32", "i64", "f32", "f64", "i64" };
 /* ---------------- types ---------------- */
 
 /* the wasm type of a C value of type t */
-static inline int wty(cc *c, qty t)
+static inline int wty(cc *c, ast_qualified_type t)
 {
 	const ctype *y = T(c, t);
 
 	switch (y->kind) {
-	case TY_VOID:
+	case AST_TYPE_VOID:
 		return WT_NONE;
-	case TY_FLOAT:
+	case AST_TYPE_FLOAT:
 		return WT_F32;
-	case TY_DOUBLE:
+	case AST_TYPE_DOUBLE:
 		return WT_F64;
-	case TY_PTR:
-	case TY_FUNC:
+	case AST_TYPE_POINTER:
+	case AST_TYPE_FUNCTION:
 		return WPT(c);
 	default:
 		if (k_int(y->kind))
@@ -188,7 +188,7 @@ VPRIV void wmem_lval(ecx *e, wlv *l, uint64_t off);
 VPRIV void wmem_escape(ecx *e, uint32_t id);
 VPRIV void wmem_fence(ecx *e);
 VPRIV void wmem_control_fence(ecx *e);
-VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin);
+VPRIV void wmem_access(ecx *e, const wlv *l, ast_qualified_type t, bool store, size_t begin);
 VPRIV void wmem_poison(ecx *e, const wlv *l, uint64_t size);
 VPRIV void wmem_optimize(ecx *e);
 VPRIV void wmem_render(ecx *e, tbuf *out);
@@ -398,42 +398,42 @@ enum { WA_IGNORE, WA_SCALAR, WA_IND, WA_PAIR };
  * WA_SCALAR: wasm type st, loaded as C type ft; WA_PAIR: n parts of wasm type
  * st (an __int128 or long double: two i64; a vector: its lanes), ft the type
  */
-typedef struct wabi { uint8_t k, st; qty ft; uint32_t n; } wabi;
+typedef struct wabi { uint8_t k, st; ast_qualified_type ft; uint32_t n; } wabi;
 
 /* the wasm values an argument of class a takes */
 static inline uint32_t wparts(wabi a) { return a.k == WA_PAIR ? a.n : a.k == WA_IGNORE ? 0 : 1; }
 
 /* a WA_PAIR part's C type */
-static inline qty wpart_ty(cc *c, wabi a) { return is_vec(c, a.ft) ? T(c, a.ft)->base : prim(TY_ULLONG); }
+static inline ast_qualified_type wpart_ty(cc *c, wabi a) { return is_vec(c, a.ft) ? T(c, a.ft)->base : prim(AST_TYPE_UNSIGNED_LONG_LONG); }
 
 /* wasm.c */
 VPRIV bool wis_main(cc *c, uint32_t s);
 VPRIV void wfname(cc *c, tbuf *b, uint32_t ref);
 VPRIV bool wreg_ok(ecx *e, uint32_t s);
-VPRIV wabi wclassify(cc *c, qty t);
-VPRIV wabi wclassify_ret(cc *c, qty t);
-VPRIV void wdecl(ecx *e, uint32_t ref, qty ft, const char *sig);
-VPRIV void wsig(ecx *e, tbuf *b, qty ft, uint32_t call, uint32_t def, bool *sret);
-VPRIV qty wpromote(cc *c, qty t);
+VPRIV wabi wclassify(cc *c, ast_qualified_type t);
+VPRIV wabi wclassify_ret(cc *c, ast_qualified_type t);
+VPRIV void wdecl(ecx *e, uint32_t ref, ast_qualified_type ft, const char *sig);
+VPRIV void wsig(ecx *e, tbuf *b, ast_qualified_type ft, uint32_t call, uint32_t def, bool *sret);
+VPRIV ast_qualified_type wpromote(cc *c, ast_qualified_type t);
 /* wexpr.c */
 VPRIV wbind *wlocal(ecx *e, uint32_t s);
-VPRIV void wto_ptr(ecx *e, qty t);
+VPRIV void wto_ptr(ecx *e, ast_qualified_type t);
 VPRIV int wexpr(ecx *e, uint32_t n, bool want);
 VPRIV void wtruth(ecx *e, uint32_t n);
-VPRIV void wlval(ecx *e, uint32_t n, wlv *l, qty t);
-VPRIV void wload(ecx *e, wlv *l, qty t);
-VPRIV void wstore(ecx *e, wlv *l, qty t);
+VPRIV void wlval(ecx *e, uint32_t n, wlv *l, ast_qualified_type t);
+VPRIV void wload(ecx *e, wlv *l, ast_qualified_type t);
+VPRIV void wstore(ecx *e, wlv *l, ast_qualified_type t);
 VPRIV void wfold_off(ecx *e, wlv *l);
 VPRIV void wcopy(ecx *e, uint64_t n);
 VPRIV void wst_sxval(ecx *e, uint32_t v);
 VPRIV void wsplit(ecx *e);
-VPRIV void wconv(ecx *e, qty from, qty to);
-VPRIV int w16(cc *c, qty t);
-VPRIV void w16arith(ecx *e, int op, qty ty, qty rty);
-VPRIV void w16cmp(ecx *e, int op, qty t);
-VPRIV void w16conv(ecx *e, qty from, qty to);
-VPRIV void warith(ecx *e, int op, qty ty, qty rty);
-VPRIV void wcompare(ecx *e, int op, qty t);
+VPRIV void wconv(ecx *e, ast_qualified_type from, ast_qualified_type to);
+VPRIV int w16(cc *c, ast_qualified_type t);
+VPRIV void w16arith(ecx *e, int op, ast_qualified_type ty, ast_qualified_type rty);
+VPRIV void w16cmp(ecx *e, int op, ast_qualified_type t);
+VPRIV void w16conv(ecx *e, ast_qualified_type from, ast_qualified_type to);
+VPRIV void warith(ecx *e, int op, ast_qualified_type ty, ast_qualified_type rty);
+VPRIV void wcompare(ecx *e, int op, ast_qualified_type t);
 /* wcall.c */
 VPRIV int wcall(ecx *e, uint32_t n, bool want);
 VPRIV int wbuiltin(ecx *e, uint32_t n, bool want);
@@ -443,7 +443,7 @@ VPRIV void wsj_begin(ecx *e);
 VPRIV void wsj_end(ecx *e);
 /* sdivpow2.c */
 VPRIV bool wsdivpow2_ok(const em_sdivpow2_recipe *r);
-VPRIV void wsdivpow2(ecx *e, qty ty, const em_sdivpow2_recipe *r);
+VPRIV void wsdivpow2(ecx *e, ast_qualified_type ty, const em_sdivpow2_recipe *r);
 /* udivconst.c */
 VPRIV bool wudivconst_ok(const em_udivconst_recipe *r);
 VPRIV void wudivconst(ecx *e, const em_udivconst_recipe *r);
@@ -454,9 +454,9 @@ VPRIV bool wterm(cc *c, uint32_t n);
 VPRIV bool wswitch_bitset(ecx *e, uint32_t body, uint32_t sw0, uint32_t ncase,
 			 uint32_t nlabels, uint32_t t, int k, bool sg, int dflt, const int *sb);
 VPRIV void wgoto_scan(ecx *e, uint32_t body);
-VPRIV void wvla_bytes(ecx *e, qty t);
+VPRIV void wvla_bytes(ecx *e, ast_qualified_type t);
 VPRIV int wknown(ecx *e, uint32_t n);
-VPRIV void wvla_fix(ecx *e, qty t, bool pure);
+VPRIV void wvla_fix(ecx *e, ast_qualified_type t, bool pure);
 VPRIV void wstmt(ecx *e, uint32_t n);
-VPRIV void winit(ecx *e, uint64_t off, qty ty, uint32_t init, bool zeroed);
+VPRIV void winit(ecx *e, uint64_t off, ast_qualified_type ty, uint32_t init, bool zeroed);
 #endif

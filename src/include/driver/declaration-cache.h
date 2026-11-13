@@ -34,7 +34,7 @@ void driver_declaration_cache_materialize(cc *c);
 void driver_declaration_cache_kill(cc *c);
 void driver_declaration_cache_statistics_format(char *buf, size_t n);
 /* frontend/c/token.c: the next token, pragmas applied */
-void cc_fetch(cc *c, ptok *t);
+void cc_token_fetch_out_of_line(cc *c, ptok *t);
 
 /* at a file-scope declaration boundary (tk[0] fetched, nothing parsed of it) */
 static inline void driver_declaration_cache_boundary(cc *c)

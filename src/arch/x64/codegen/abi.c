@@ -22,12 +22,12 @@ static int x64_merge(int a, int b)
 }
 
 /* the classes of the eightbytes of t at byte offset off; false: memory */
-static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
+static bool x64_cls(cc *c, ast_qualified_type t, uint64_t off, int cls[2])
 {
 	const ctype *x = T(c, t);
 	int k = x->kind;
 
-	if (k == TY_STRUCT || k == TY_UNION) {
+	if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION) {
 		const tag *r = &c->tags[x->aux];
 
 		for (uint32_t i = 0; i < r->nfield; i++) {
@@ -53,7 +53,7 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 	uint32_t align = c->ty[x->canon].align;
 	if (align && off % align)
 		return false;
-	if (k == TY_ARRAY) {
+	if (k == AST_TYPE_ARRAY) {
 		uint64_t es = tsize(c, x->base), n = es ? tsize(c, t) / es : 0;
 
 		for (uint64_t i = 0; i < n; i++)
@@ -61,7 +61,7 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 				return false;
 		return true;
 	}
-	if (k == TY_VECTOR) {
+	if (k == AST_TYPE_VECTOR) {
 		/* clang's classes for vectors: up to 4 bytes INTEGER; 8 bytes SSE (<1 x double>
 		   memory, <1 x i64> SSE); 16 bytes SSE + SSEUP; larger: memory (no AVX) */
 		uint64_t sz = tsize(c, t), es = tsize(c, x->base);
@@ -87,19 +87,19 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 		}
 		return false;	/* (a 32-byte vector alone: see x64_classify) */
 	}
-	if (k == TY_FLOAT128) {
+	if (k == AST_TYPE_FLOAT128) {
 		if (off % 16 || cls[off / 8] != XC_NONE)
 			return false;
 		cls[off / 8] = XC_SSE, cls[off / 8 + 1] = XC_SSEUP;
 		return true;
 	}
-	if (k == TY_LDOUBLE && off == 0) {
+	if (k == AST_TYPE_LONG_DOUBLE && off == 0) {
 		cls[0] = x64_merge(cls[0], XC_X87);
 		cls[1] = x64_merge(cls[1], XC_X87UP);
 		return true;
 	}
-	if (k == TY_LDOUBLE || k == TY_INT128 || k == TY_UINT128)
-		return k == TY_INT128 || k == TY_UINT128 ? (cls[off / 8] = x64_merge(cls[off / 8], XC_INT),
+	if (k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_INT128 || k == AST_TYPE_UINT128)
+		return k == AST_TYPE_INT128 || k == AST_TYPE_UINT128 ? (cls[off / 8] = x64_merge(cls[off / 8], XC_INT),
 							    cls[off / 8 + 1] = x64_merge(cls[off / 8 + 1], XC_INT), true) : false;
 	if (tsize(c, t) == 0)
 		return true;
@@ -110,14 +110,14 @@ static bool x64_cls(cc *c, qty t, uint64_t off, int cls[2])
 /* Wide records use AVX registers only for SSE followed entirely by SSEUP.
    Track all eightbytes, including union merges and padding, without changing
    the existing two-eightbyte transport classifier. */
-static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
+static bool x64_wide_cls(cc *c, ast_qualified_type t, uint64_t off, int cls[8])
 {
 	const ctype *x = T(c, t);
 	uint64_t size = tsize(c, t);
 
 	if (off + size > 64)
 		return false;
-	if (x->kind == TY_STRUCT || x->kind == TY_UNION) {
+	if (x->kind == AST_TYPE_STRUCT || x->kind == AST_TYPE_UNION) {
 		const tag *r = &c->tags[x->aux];
 		int fields[8] = {0};
 
@@ -126,7 +126,7 @@ static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
 			uint64_t fo = off + f->off / 8;
 
 			if (f->bitfield && !f->name) continue;
-			if (size > 16 && x->kind != TY_UNION && tsize(c, f->ty) != size)
+			if (size > 16 && x->kind != AST_TYPE_UNION && tsize(c, f->ty) != size)
 				return false;
 			if (f->bitfield) {
 				if (f->width) {
@@ -150,7 +150,7 @@ static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
 	uint32_t align = c->ty[x->canon].align;
 	if (align && off % align)
 		return false;
-	if (x->kind == TY_ARRAY) {
+	if (x->kind == AST_TYPE_ARRAY) {
 		uint64_t es = tsize(c, x->base);
 
 		/* Clang's wide-array early exit leaves NoClass after resetting
@@ -163,7 +163,7 @@ static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
 		return true;
 	}
 	if (!size) return true;
-	if (x->kind == TY_VECTOR && size >= 16) {
+	if (x->kind == AST_TYPE_VECTOR && size >= 16) {
 		if (off % 8 || size % 8) return false;
 		for (uint64_t i = 0; i < size / 8; i++)
 			cls[off / 8 + i] = x64_merge(cls[off / 8 + i], i ? XC_SSEUP : XC_SSE);
@@ -177,7 +177,7 @@ static bool x64_wide_cls(cc *c, qty t, uint64_t off, int cls[8])
 	return true;
 }
 
-static bool x64_wide_record(cc *c, qty t)
+static bool x64_wide_record(cc *c, ast_qualified_type t)
 {
 	uint64_t size = tsize(c, t);
 	int cls[8] = {0};
@@ -199,7 +199,7 @@ static void x64_check_vector_abi(ecx *e, uint64_t size, bool vector, bool wide_r
 }
 
 /* Clang retains the i1-vector ABI through singleton aggregate wrappers. */
-static uint32_t x64_bool_lanes(cc *c, qty t)
+static uint32_t x64_bool_lanes(cc *c, ast_qualified_type t)
 {
 	const ctype *ty = T(c, t);
 	if (is_bvec(c, t)) return ty->n;
@@ -219,24 +219,24 @@ static uint32_t x64_bool_lanes(cc *c, qty t)
 	return 0;
 }
 
-VPRIV void x64_classify0(ecx *e, qty t, wkarg *a);
+VPRIV void x64_classify0(ecx *e, ast_qualified_type t, wkarg *a);
 
 /* -mgeneral-regs-only, -mno-sse: no value may travel in a vector or x87 register */
-VPRIV void x64_classify(ecx *e, qty t, wkarg *a, bool unnamed)
+VPRIV void x64_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed)
 {
 	x64_classify0(e, t, a);
 	a->unnamed = unnamed;
 	uint32_t fn = e->wk->inl ? e->wk->inl->fn : e->wk->fsym;
 	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
 	if (!unnamed)
-		x64_check_vector_abi(e, a->size, a->vector, a->wide_record, cc_x86_features(e->c, fn));
+		x64_check_vector_abi(e, a->size, a->vector, a->wide_record, cc_x86_features_get(e->c, fn));
 	if (x64_nosimd(e) && a->mem && a->up)
 		a->up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
 	if (x64_nosimd(e) && (a->x87 || (!a->mem && a->n && (a->cls[0] == WA_SSE || (a->n > 1 && a->cls[1] == WA_SSE)))))
 		x64_nofp(e);
 }
 
-VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
+VPRIV void x64_classify0(ecx *e, ast_qualified_type t, wkarg *a)
 {
 	cc *c = e->c;
 	uint64_t size = tsize(c, t);
@@ -257,9 +257,9 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 	if (!is_record(c, t) && !is_array(c, t) && !is_vec(c, t)) {
 		a->n = size > 8 ? 2 : 1;
 		a->cls[0] = a->cls[1] = is_flt(c, t) ? WA_SSE : WA_INT;
-		if (KIND(c, t) == TY_LDOUBLE)
+		if (KIND(c, t) == AST_TYPE_LONG_DOUBLE)
 			a->mem = true, a->n = 0, a->x87 = true;	/* passed in memory, returned in st(0) */
-		if (KIND(c, t) == TY_FLOAT128)
+		if (KIND(c, t) == AST_TYPE_FLOAT128)
 			a->n = 1, a->cls[0] = WA_SSE, a->up = true;	/* SSE + SSEUP: one xmm register */
 		return;
 	}
@@ -279,7 +279,7 @@ VPRIV void x64_classify0(ecx *e, qty t, wkarg *a)
 		a->mem = true, a->up = true;
 		return;
 	}
-	if (is_record(c, t) && (c->tags[T(c, t)->aux].flags & RF_COMPLEX) && KIND(c, c->tags[T(c, t)->aux].f[0].ty) == TY_LDOUBLE) {
+	if (is_record(c, t) && (c->tags[T(c, t)->aux].flags & AST_RECORD_FLAG_COMPLEX) && KIND(c, c->tags[T(c, t)->aux].f[0].ty) == AST_TYPE_LONG_DOUBLE) {
 		a->mem = true, a->x87 = true;	/* COMPLEX_X87: passed in memory, returned in st(0) (real), st(1) */
 		return;
 	}
@@ -324,12 +324,12 @@ VPRIV void x64_x87st(ecx *e, const lval *l);
 
 static lval x64_fr(int64_t off) { return (lval){ .k = L_FRAME, .off = off, .align = 8 }; }
 
-VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, qty rt)
+VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt)
 {
 	cc *c = e->c;
 
 	if (RKIND(ref) == RK_SYM) {
-		x86_features features = cc_x86_features(c, RIDX(ref));
+		x86_features features = cc_x86_features_get(c, RIDX(ref));
 		for (int k = 0; k < n; k++)
 			if (!a[k].unnamed) x64_check_vector_abi(e, a[k].size, a[k].vector, a[k].wide_record, features);
 		x64_check_vector_abi(e, tsize(c, rt), is_vec(c, rt), x64_wide_record(c, rt), features);
@@ -345,7 +345,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	/* An explicit builtin needs no libm symbol. Copy the x87 representation
 	 * and clear only its sign, without an FP load that could alter a NaN. */
 	if (RKIND(ref) == RK_NAME && RIDX(ref) < 0x8000000u && n == 1 && r && r->x87 &&
-	    KIND(c, rt) == TY_LDOUBLE && cc_builtin_libkind(RIDX(ref)) == CC_LIB_FABSL) {
+	    KIND(c, rt) == AST_TYPE_LONG_DOUBLE && cc_builtin_library_kind(RIDX(ref)) == CC_LIBRARY_KIND_FABSL) {
 		int q = x64_treg(e);
 		lval src = x64_fr(a[0].slot), dst = x64_fr(r->slot);
 
@@ -361,7 +361,7 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	}
 	xst *X = e->x64;
 	uint32_t saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
-	int retsize = KIND(c, rt) == TY_VOID ? 0 : wk_size(c, rt);
+	int retsize = KIND(c, rt) == AST_TYPE_VOID ? 0 : wk_size(c, rt);
 	bool retsgn = wk_signed(c, rt), retf = is_flt(c, rt) && !r;
 	int gp = r && r->mem && !r->x87 && !r->up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
@@ -604,7 +604,7 @@ VPRIV void x64_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic)
 	for (int k = 0; k < n; k++) {
 		int ng = x64_need(&a[k], WA_INT), nf = x64_need(&a[k], WA_SSE);
 		uint32_t sym = c->lists[body->a + (uint32_t)k];
-		qty ty = c->syms[sym].ty;
+		ast_qualified_type ty = c->syms[sym].ty;
 		lval home;
 		bool local = x64_local(e, sym, &home);
 
@@ -767,7 +767,7 @@ VPRIV void x64_va_start(ecx *e, int rap)
 /* the address of the next argument of type t, in a temporary (System V 3.5.7):
    from the register save area while its registers last (the words gathered
    into a slot, general and vector ones apart there), else the overflow area */
-VPRIV int x64_va_arg(ecx *e, int rap, qty t)
+VPRIV int x64_va_arg(ecx *e, int rap, ast_qualified_type t)
 {
 	wkarg a;
 	lval gpo = { .k = L_REG, .r = (uint8_t)rap, .off = 0 }, fpo = { .k = L_REG, .r = (uint8_t)rap, .off = 4 };
@@ -842,7 +842,7 @@ VPRIV int x64_va_arg(ecx *e, int rap, qty t)
 	return ra;
 }
 
-VPRIV void x64_ret(ecx *e, val *v, qty t, uint32_t lbl)
+VPRIV void x64_ret(ecx *e, val *v, ast_qualified_type t, uint32_t lbl)
 {
 	cc *c = e->c;
 	int size = wk_size(c, t);

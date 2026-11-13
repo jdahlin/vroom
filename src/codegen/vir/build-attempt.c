@@ -2,8 +2,8 @@
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
  * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
- * VIR is -O2's code generator: cc_opts.optimize.vir (driver/optimization.c,
- * doc/OPTIMIZATION.md).  The developer's aids, cc_opts.vir_aid:
+ * VIR is -O2's code generator: cc_options.optimize.vir (driver/optimization.c,
+ * doc/OPTIMIZATION.md).  The developer's aids, cc_options.vir_aid:
  *   -fno-vir-lower         build VIR, then emit the function as before
  *   -fvir-verify           run the verifier on it (failures to stderr)
  *   -fvir-dump             print it to stderr
@@ -106,7 +106,7 @@ enum {
 	VIRBUILD_MODE_LOWER = 16,
 };
 
-static int virbuild_mode_get(const cc_opts *o)
+static int virbuild_mode_get(const cc_options *o)
 {
 	const cc_vir_aids *v = &o->vir_aid;
 
@@ -161,7 +161,7 @@ static bool virbuild_function_is_listed(ecx *e, uint32_t s)
 	return strstr(e->E->vlist, nm) != NULL;
 }
 
-VPRIV bool virbuild_is_enabled(const cc_opts *o)
+VPRIV bool virbuild_is_enabled(const cc_options *o)
 {
 	return (virbuild_mode_get(o) & VIRBUILD_MODE_LOWER) != 0;
 }

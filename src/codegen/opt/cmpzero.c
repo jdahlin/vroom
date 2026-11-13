@@ -16,13 +16,13 @@ VPRIV bool em_cmpzero(ecx *e, uint32_t n, uint32_t *operand)
 	uint64_t size;
 	i128 value;
 
-	if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY)
+	if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY)
 		return false;
 	op = x->aux;
 	if (op != LEX_TOKEN_EQUAL_EQUAL && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER_EQUAL)
 		return false;
 	a = N(x->a); b = N(x->b);
-	if (QUNQ(a->ty) != QUNQ(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) || !is_integer(c, a->ty) || em_bitint(c, a->ty))
 		return false;
 	size = tsize(c, a->ty);
 	if (size != 4 && size != 8)

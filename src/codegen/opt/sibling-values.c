@@ -35,27 +35,27 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  x = N(n);
  if (!is_integer(c, x->ty) || em_bitint(c, x->ty) ||
      (tsize(c, x->ty) != 4 && tsize(c, x->ty) != 8)) return 0;
- if (x->op == N_VAR) {
+ if (x->op == AST_NODE_VARIABLE) {
   if (s->check_killed)
    for (uint32_t i = 0; i < s->nkilled; i++)
     if (s->killed[i] == x->a) return 0;
   sym = &c->syms[x->a];
-  if (!is_local_var(c, x->a) || sym->kind != S_VAR || sym->sc == SC_STATIC || sym->sc == SC_EXTERN ||
-      (sym->flags & SF_ADDR_TAKEN) || (QQ(sym->ty) & Q_VOLATILE) ||
-      (T(c, sym->ty)->flags & TF_ATOMIC) || sym_attrs(c, x->a)->asmname) return 0;
+  if (!is_local_var(c, x->a) || sym->kind != AST_SYMBOL_VARIABLE || sym->sc == AST_STORAGE_STATIC || sym->sc == AST_STORAGE_EXTERN ||
+      (sym->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(sym->ty) & AST_QUALIFIER_VOLATILE) ||
+      (T(c, sym->ty)->flags & AST_TYPE_FLAG_ATOMIC) || sym_attrs(c, x->a)->asmname) return 0;
   if (s->target && x->a == s->symbol) s->symnode = n;
   return x->a + 1;
  }
- key.type = QUNQ(x->ty);
- if (x->op == N_NUM) {
+ key.type = AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty);
+ if (x->op == AST_NODE_NUMBER) {
   key.operation = 1;
   key.immediate = (uint64_t)em_trunc_to(c, c->ipool[x->a], x->ty);
- } else if (x->op == N_CAST && (x->aux == CK_INT || x->aux == CK_NOP || x->aux == CK_BOOL)) {
+ } else if (x->op == AST_NODE_CAST && (x->aux == AST_CAST_INTEGER || x->aux == AST_CAST_NOP || x->aux == AST_CAST_BOOL)) {
   left = em_sibling_value(c, s, x->a);
   if (!left) return 0;
   key.operation = UINT32_C(0x80000000) | x->aux;
   key.left = left;
- } else if (x->op == N_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_STAR ||
+ } else if (x->op == AST_NODE_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS || x->aux == LEX_TOKEN_STAR ||
                                   x->aux == LEX_TOKEN_AMPERSAND || x->aux == LEX_TOKEN_PIPE || x->aux == LEX_TOKEN_CARET)) {
   left = em_sibling_value(c, s, x->a);
   right = em_sibling_value(c, s, x->b);
@@ -72,11 +72,11 @@ static uint32_t em_sibling_value(cc *c, em_sibling_state *s, uint32_t n)
  if (s->target && key.operation == s->target_key.operation && key.type == s->target_key.type &&
      key.left == s->target_key.left && key.right == s->target_key.right &&
      key.immediate == s->target_key.immediate) {
-  if (x->op == N_BINARY) s->match = n;
+  if (x->op == AST_NODE_BINARY) s->match = n;
   return s->target;
  }
  if (value) {
-  if (s->target && value == s->target && x->op == N_BINARY) s->match = n;
+  if (s->target && value == s->target && x->op == AST_NODE_BINARY) s->match = n;
   return value;
  }
  if (!s->next || !em_values_insert(&s->table, key, s->next)) return 0;
@@ -98,12 +98,12 @@ VPRIV bool em_sibling_values(ecx *e, uint32_t n)
 {
  cc *c = e->c;
  const node *x = N(n), *a, *b;
- if (!e->E->o->opt || e->E->noopt || x->op != N_BINARY ||
+ if (!e->E->o->opt || e->E->noopt || x->op != AST_NODE_BINARY ||
      (x->aux != LEX_TOKEN_PLUS && x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_STAR &&
       x->aux != LEX_TOKEN_AMPERSAND && x->aux != LEX_TOKEN_PIPE && x->aux != LEX_TOKEN_CARET)) return false;
  a = N(x->a); b = N(x->b);
- if (a->op != N_BINARY || b->op != N_BINARY || QUNQ(a->ty) != QUNQ(x->ty) ||
-     QUNQ(b->ty) != QUNQ(x->ty) || c->nsym >= UINT32_MAX - 32) return false;
+ if (a->op != AST_NODE_BINARY || b->op != AST_NODE_BINARY || AST_QUALIFIED_TYPE_UNQUALIFIED(a->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) ||
+     AST_QUALIFIED_TYPE_UNQUALIFIED(b->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) || c->nsym >= UINT32_MAX - 32) return false;
  return em_sibling_match(c, x->a, x->b);
 }
 
@@ -138,42 +138,42 @@ VPRIV bool em_decl_reuse_values(ecx *e, uint32_t decl, uint32_t consumer,
  uint32_t expr;
  if (!e->E->o->opt || e->E->noopt || !decl || !consumer) return false;
  d = N(decl); r = N(consumer);
- if (d->op != N_DECL || !d->b || N(d->b)->op != N_BINARY || c->nsym >= UINT32_MAX - 32) return false;
+ if (d->op != AST_NODE_DECLARATION || !d->b || N(d->b)->op != AST_NODE_BINARY || c->nsym >= UINT32_MAX - 32) return false;
  s = &c->syms[d->a];
  for (uint32_t i = 0; i < nkilled; i++) if (killed[i] == d->a) return false;
- if (!is_local_var(c, d->a) || s->kind != S_VAR || s->sc == SC_STATIC || s->sc == SC_EXTERN ||
-     (s->flags & SF_ADDR_TAKEN) || (QQ(s->ty) & Q_VOLATILE) || (T(c, s->ty)->flags & TF_ATOMIC) ||
+ if (!is_local_var(c, d->a) || s->kind != AST_SYMBOL_VARIABLE || s->sc == AST_STORAGE_STATIC || s->sc == AST_STORAGE_EXTERN ||
+     (s->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(s->ty) & AST_QUALIFIER_VOLATILE) || (T(c, s->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname ||
-     QUNQ(s->ty) != QUNQ(N(d->b)->ty)) return false;
- if (r->op == N_RETURN) {
+     AST_QUALIFIED_TYPE_UNQUALIFIED(s->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(d->b)->ty)) return false;
+ if (r->op == AST_NODE_RETURN) {
   expr = r->a;
- } else if (r->op == N_DECL && r->a != d->a) {
+ } else if (r->op == AST_NODE_DECLARATION && r->a != d->a) {
   const sym *out = &c->syms[r->a];
-  if (!is_local_var(c, r->a) || out->kind != S_VAR || out->sc == SC_STATIC || out->sc == SC_EXTERN ||
-      (out->flags & SF_ADDR_TAKEN) || (QQ(out->ty) & Q_VOLATILE) || (T(c, out->ty)->flags & TF_ATOMIC) ||
+  if (!is_local_var(c, r->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
+      (out->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(out->ty) & AST_QUALIFIER_VOLATILE) || (T(c, out->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
       sym_attrs(c, r->a)->cleanup || sym_attrs(c, r->a)->asmname || !r->b ||
-      QUNQ(out->ty) != QUNQ(N(r->b)->ty)) return false;
+      AST_QUALIFIED_TYPE_UNQUALIFIED(out->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(r->b)->ty)) return false;
   expr = r->b;
- } else if (r->op == N_EXPR && r->a) {
+ } else if (r->op == AST_NODE_EXPRESSION && r->a) {
   const node *assign = N(r->a), *lhs;
   const sym *out;
-  if (assign->op != N_ASSIGN || !assign->a || !assign->b ||
+  if (assign->op != AST_NODE_ASSIGN || !assign->a || !assign->b ||
       (assign->aux && assign->aux != LEX_TOKEN_PLUS && assign->aux != LEX_TOKEN_MINUS && assign->aux != LEX_TOKEN_STAR &&
        assign->aux != LEX_TOKEN_AMPERSAND && assign->aux != LEX_TOKEN_PIPE && assign->aux != LEX_TOKEN_CARET)) return false;
   lhs = N(assign->a);
-  if (lhs->op != N_VAR) return false;
+  if (lhs->op != AST_NODE_VARIABLE) return false;
   out = &c->syms[lhs->a];
-  if (!is_local_var(c, lhs->a) || out->kind != S_VAR || out->sc == SC_STATIC || out->sc == SC_EXTERN ||
-      (out->flags & SF_ADDR_TAKEN) || (QQ(out->ty) & Q_VOLATILE) || (T(c, out->ty)->flags & TF_ATOMIC) ||
-      sym_attrs(c, lhs->a)->asmname || QUNQ(out->ty) != QUNQ(N(assign->b)->ty)) return false;
+  if (!is_local_var(c, lhs->a) || out->kind != AST_SYMBOL_VARIABLE || out->sc == AST_STORAGE_STATIC || out->sc == AST_STORAGE_EXTERN ||
+      (out->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(out->ty) & AST_QUALIFIER_VOLATILE) || (T(c, out->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
+      sym_attrs(c, lhs->a)->asmname || AST_QUALIFIED_TYPE_UNQUALIFIED(out->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(assign->b)->ty)) return false;
   expr = assign->b;
  } else return false;
- if (!expr || N(expr)->op != N_BINARY) return false;
+ if (!expr || N(expr)->op != AST_NODE_BINARY) return false;
  /* Common two-variable expressions need no table when an operand was written. */
  if (nkilled) {
   const node *init = N(d->b), *a = N(init->a), *b = N(init->b);
   for (uint32_t i = 0; i < nkilled; i++)
-   if ((a->op == N_VAR && a->a == killed[i]) || (b->op == N_VAR && b->a == killed[i])) return false;
+   if ((a->op == AST_NODE_VARIABLE && a->a == killed[i]) || (b->op == AST_NODE_VARIABLE && b->a == killed[i])) return false;
  }
  return em_decl_reuse_match(c, d->b, expr, d->a, killed, nkilled, from, to);
 }
@@ -186,14 +186,14 @@ static __attribute__((noinline)) bool em_value_pure_decl(ecx *e, uint32_t n)
  const node *d = N(n);
  const sym *y;
  em_sibling_state s = {0};
- if (d->op != N_DECL) return false;
+ if (d->op != AST_NODE_DECLARATION) return false;
  y = &c->syms[d->a];
- if (!is_local_var(c, d->a) || y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
-     (y->flags & SF_ADDR_TAKEN) || (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) ||
+ if (!is_local_var(c, d->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
+     (y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) || (T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
      sym_attrs(c, d->a)->cleanup || sym_attrs(c, d->a)->asmname || !is_integer(c, y->ty) ||
      em_bitint(c, y->ty) || (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8)) return false;
  if (!d->b) return true;
- if (QUNQ(y->ty) != QUNQ(N(d->b)->ty) || c->nsym >= UINT32_MAX - 32) return false;
+ if (AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(d->b)->ty) || c->nsym >= UINT32_MAX - 32) return false;
  s.next = c->nsym + 1; s.nodes = 32;
  em_values_reset(&s.table, 64);
  return em_sibling_value(c, &s, d->b) != 0;
@@ -207,21 +207,21 @@ static bool em_value_local_write(ecx *e, uint32_t n, uint32_t *written)
  const node *stmt = N(n), *a, *lhs;
  const sym *y;
  bool increment;
- if (stmt->op != N_EXPR || !stmt->a) return false;
+ if (stmt->op != AST_NODE_EXPRESSION || !stmt->a) return false;
  a = N(stmt->a);
- increment = a->op == N_PREINC || a->op == N_PREDEC || a->op == N_POSTINC || a->op == N_POSTDEC;
- if (!increment && (a->op != N_ASSIGN || !a->b ||
+ increment = a->op == AST_NODE_PRE_INCREMENT || a->op == AST_NODE_PRE_DECREMENT || a->op == AST_NODE_POST_INCREMENT || a->op == AST_NODE_POST_DECREMENT;
+ if (!increment && (a->op != AST_NODE_ASSIGN || !a->b ||
      (a->aux && a->aux != LEX_TOKEN_PLUS && a->aux != LEX_TOKEN_MINUS && a->aux != LEX_TOKEN_STAR &&
       a->aux != LEX_TOKEN_AMPERSAND && a->aux != LEX_TOKEN_PIPE && a->aux != LEX_TOKEN_CARET))) return false;
  if (!a->a) return false;
  lhs = N(a->a);
- if (lhs->op != N_VAR) return false;
+ if (lhs->op != AST_NODE_VARIABLE) return false;
  y = &c->syms[lhs->a];
- if (!is_local_var(c, lhs->a) || y->kind != S_VAR || y->sc == SC_STATIC || y->sc == SC_EXTERN ||
-     (y->flags & SF_ADDR_TAKEN) || (QQ(y->ty) & Q_VOLATILE) || (T(c, y->ty)->flags & TF_ATOMIC) ||
+ if (!is_local_var(c, lhs->a) || y->kind != AST_SYMBOL_VARIABLE || y->sc == AST_STORAGE_STATIC || y->sc == AST_STORAGE_EXTERN ||
+     (y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) || (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) || (T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) ||
      sym_attrs(c, lhs->a)->asmname || !is_integer(c, y->ty) || em_bitint(c, y->ty) ||
      (tsize(c, y->ty) != 4 && tsize(c, y->ty) != 8) || c->nsym >= UINT32_MAX - 32 ||
-     (!increment && QUNQ(y->ty) != QUNQ(N(a->b)->ty))) return false;
+     (!increment && AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(N(a->b)->ty))) return false;
  *written = lhs->a;
  return true;
 }
@@ -232,7 +232,7 @@ static __attribute__((noinline)) bool em_value_local_assignment(ecx *e, uint32_t
  cc *c = e->c;
  const node *a = N(N(n)->a);
  em_sibling_state s = {0};
- if (a->op != N_ASSIGN) return true; /* preflight accepted an increment */
+ if (a->op != AST_NODE_ASSIGN) return true; /* preflight accepted an increment */
  s.next = c->nsym + 1; s.nodes = 32;
  em_values_reset(&s.table, 64);
  return em_sibling_value(c, &s, a->b) != 0;
@@ -247,24 +247,24 @@ VPRIV bool em_block_value_reuse(ecx *e, const node *block, uint32_t first, uint3
  uint32_t consumer, count = 0, killed[8], writes[8], nkilled = 0;
  if (!e->E->o->opt || e->E->noopt || i <= first) return false;
  consumer = c->lists[block->b + i];
- if (N(consumer)->op == N_EXPR) {
+ if (N(consumer)->op == AST_NODE_EXPRESSION) {
   const node *stmt = N(consumer), *assign, *rhs;
-  if (!stmt->a || N(stmt->a)->op != N_ASSIGN) return false;
+  if (!stmt->a || N(stmt->a)->op != AST_NODE_ASSIGN) return false;
   assign = N(stmt->a);
-  if (!assign->b || N(assign->b)->op != N_BINARY) return false;
+  if (!assign->b || N(assign->b)->op != AST_NODE_BINARY) return false;
   rhs = N(assign->b);
-  if (N(rhs->a)->op != N_BINARY && N(rhs->b)->op != N_BINARY) return false;
- } else if (N(consumer)->op != N_RETURN && N(consumer)->op != N_DECL) return false;
+  if (N(rhs->a)->op != AST_NODE_BINARY && N(rhs->b)->op != AST_NODE_BINARY) return false;
+ } else if (N(consumer)->op != AST_NODE_RETURN && N(consumer)->op != AST_NODE_DECLARATION) return false;
  while (i > first && count++ < 8) {
   uint32_t prev = c->lists[block->b + --i];
-  if (N(prev)->op == N_EXPR) {
+  if (N(prev)->op == AST_NODE_EXPRESSION) {
    uint32_t written;
    if (!em_value_local_write(e, prev, &written)) break;
    writes[nkilled] = prev;
    killed[nkilled++] = written;
    continue;
   }
-  if (N(prev)->op != N_DECL) break;
+  if (N(prev)->op != AST_NODE_DECLARATION) break;
   if (em_decl_reuse_values(e, prev, consumer, killed, nkilled, from, to)) {
    for (uint32_t j = 0; j < nkilled; j++)
     if (!em_value_local_assignment(e, writes[j])) return false;

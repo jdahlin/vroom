@@ -204,7 +204,7 @@ VPRIV void virbuild_register_write(ecx *e, int r, uint32_t v);
 VPRIV uint32_t virbuild_integer_type(int size);
 VPRIV uint32_t virbuild_walker_value_get(ecx *e, const val *v, uint32_t ty);
 VPRIV int virbuild_result_register_pick(ecx *e, const val *a, const val *b);
-VPRIV uint32_t virbuild_float_type(ecx *e, qty t);
+VPRIV uint32_t virbuild_float_type(ecx *e, ast_qualified_type t);
 
 /* lower-memory.c */
 VPRIV uint32_t virbuild_slot_find(ecx *e, int64_t off, uint64_t size, int64_t *rel);
