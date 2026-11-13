@@ -1,0 +1,256 @@
+# Rename table for WORK-diag step 2 (doc/quality/WORK-diag.md).  Document only: nothing is applied by this file yet.
+# Columns: old, new, kind, where.  Whole-word identifiers, for src/tools/rename-table.py (see rename-common.tsv).
+# Kinds:
+#   function  file-scope function, static or VPRIV, used inside the diag module (and pp for the three pp files) only
+#   public    declared in src/include/frontend/pp/pp.h (or ppimpl.h shared with other modules) and used by cc, codegen,
+#             driver or server: touches other modules, so the script run edits them too (WORK-diag step 2/4)
+#   state     file-scope variable or table
+#   type      struct, typedef or enum tag
+#   constant  enumerator or constant macro
+#   macro     macro
+#   field     struct field with a word name already or renamed to one; fields are renamed by whole word, so a
+#             field is listed only when its name is not a one-letter or generic word
+#   unsafe    a name a whole-word script cannot rename safely: one-letter fields (b, e, s, f, v, n, m, k) or
+#             names that are also used for other things in the same files; rename by hand with the compiler's help
+# Names follow doc/STYLE.md: module_noun_verb in full words; diag_ in src/diag/, pp_ in the three pp files
+# (source-map.c, source-query.c, macro-backtrace.c).  Where two old names do the same job (lvname/lvjson, line_of/lstart,
+# sn_ls/lstart) they get distinct new names here and step 6 of the work order merges them.
+# Checked: every old name occurs in src/ bench/ ci/ contrib/ (no stale row), no new name occurs there already and no two
+# rows share a new name.  Rows of kind unsafe are commented out below, so that the script never applies them.
+#
+# --- src/diag/fixit-apply.c
+fix_add	diag_fixit_edit_add	function	diag/fixit-apply.c
+fedit_cmp	diag_fixit_edit_compare	function	diag/fixit-apply.c
+fix_collect	diag_fixit_edits_collect	function	diag/fixit-apply.c
+# fix_apply	diag_fixit_edits_apply	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/fixit-apply.c
+# line_of	diag_fixit_line_number	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/fixit-apply.c
+line_start	diag_fixit_line_offset	function	diag/fixit-apply.c
+put_lines	diag_fixit_patch_lines_append	function	diag/fixit-apply.c
+# nlines	diag_fixit_lines_count	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/fixit-apply.c
+fix_patch	diag_fixit_patch_format	function	diag/fixit-apply.c
+fix_write	diag_fixit_file_write	function	diag/fixit-apply.c
+diag_fixits_out	diag_fixit_output	function	diag/fixit-apply.c, called from report.c and the pp driver
+fedit	diag_fixit_edit	type	diag/fixit-apply.c
+fedits	diag_fixit_edit_list	type	diag/fixit-apply.c
+# seq	sequence	unsafe	diag/fixit-apply.c: field of fedit; "seq" is also a local elsewhere in pp
+# fedit fields f, b, e, s and fedits fields v, n, cap: one-letter or generic, rename by hand to file, begin, end, text, edits, count, capacity
+# f	file	unsafe	diag/fixit-apply.c: fedit.f (a name used by dozens of locals)
+# b	begin	unsafe	diag/fixit-apply.c, render-vcc.c, pp.h: pp_span.b, pp_fixit.b, mark.b, fedit.b
+# e	end	unsafe	same files: the matching end offset
+# s	text	unsafe	diag/fixit-apply.c: fedit.s, pp_fixit.s
+# v	edits	unsafe	diag/fixit-apply.c: fedits.v
+# n	count	unsafe	diag/fixit-apply.c: fedits.n, xstr.n
+# cap	capacity	unsafe	diag/fixit-apply.c: fedits.cap
+# --- src/diag/output-html.c
+html_text	diag_html_text_escape	function	diag/output-html.c
+html_page	diag_html_page_write	function	diag/output-html.c, called from report.c
+# --- src/diag/output-json.c
+jstr	diag_json_string_append	function	diag/output-json.c, output-sarif.c
+jcstr	diag_json_cstring_append	function	diag/output-json.c, output-sarif.c
+jloc	diag_json_location_append	function	diag/output-json.c
+jincludes	diag_json_include_stack_append	function	diag/output-json.c
+json_rec	diag_json_record_append	function	diag/output-json.c
+diag_json_flush	diag_json_record_flush	function	diag/output-json.c, called from the pp driver
+dsink_records	diag_sink_records_send	function	diag/output-json.c, called from report.c
+lvjson	diag_json_level_names	state	diag/output-json.c (same table as lvname; step 6 merges)
+appname	diag_json_applicability_names	state	diag/output-json.c
+# --- src/diag/output-sarif.c
+juri_path	diag_sarif_uri_path_append	function	diag/output-sarif.c
+jartifact	diag_sarif_artifact_append	function	diag/output-sarif.c
+sarif_pos	diag_sarif_position_find	function	diag/output-sarif.c
+jphys	diag_sarif_physical_location_append	function	diag/output-sarif.c
+sarif_result	diag_sarif_result_append	function	diag/output-sarif.c
+sarif_log	diag_sarif_log_write	function	diag/output-sarif.c, called from report.c
+# --- src/diag/record.c
+dfmts	diag_format_ids	state	diag/record.c
+dfmt	diag_format_id_entry	type	diag/record.c
+fmt_id	diag_format_id_lookup	function	diag/record.c
+# dstr	diag_string_duplicate	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/record.c
+vec_suffix	diag_message_vector_suffix_append	function	diag/record.c
+lvname	diag_level_names	state	diag/record.c
+level_of	diag_level_from_name	function	diag/record.c, report.c, render-clang.c
+kid_add	diag_record_note_append	function	diag/record.c, report.c
+kid_after	diag_record_note_insert	function	diag/record.c, macro-backtrace.c
+pp_diag_fmt_id	diag_format_id_find	public	pp.h: used by cc and driver
+pp_diag_pc	diag_report_site_pc	public	pp.h: thread-local set by cc, report and the pp reporters
+pp_diag_next_id	diag_next_id	public	pp.h: thread-local set by callers before a report
+pp_diag_level	diag_level_name	public	pp.h
+pp_diag_vbegin	diag_record_begin_va	public	pp.h: used by cc
+pp_diag_begin	diag_record_begin	public	pp.h: used by cc, driver
+pp_diag_label	diag_record_label_add	public	pp.h: used by cc
+pp_diag_art_on	diag_art_style	public	pp.h: used by cc
+pp_diag_art	diag_record_art_set	public	pp.h: used by cc
+pp_diag_help	diag_record_help_set	public	pp.h: used by cc
+pp_diag_fix	diag_record_fixit_add	public	pp.h: used by cc
+pp_diag_flag	diag_record_flag_set	public	pp.h: used by cc
+pp_diag_macro	diag_record_macro_set	public	pp.h: used by cc
+pp_diag_note	diag_record_note_add	public	pp.h: used by cc
+pp_diag_records	diag_records_first	public	pp.h: used by driver and server (the record list)
+# --- src/diag/render-clang.c
+db_c	diag_text_char_repeat	function	diag/render-clang.c, render-vcc.c
+# dcolor	diag_color_for_level	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-clang.c
+diag_where	diag_location_presumed	function	diag/render-clang.c, render-vcc.c, report.c, output-json.c
+include_stack	diag_include_stack_render	function	diag/render-clang.c, render-vcc.c
+pp_pad_at	diag_snippet_is_padded_at	function	diag/render-clang.c, render-vcc.c (a pp_ name in the diag module)
+sn_ls	diag_snippet_line_start	function	diag/render-clang.c (same job as lstart; step 6 merges)
+sn_line	diag_snippet_line_render	function	diag/render-clang.c
+snippet	diag_snippet_render	function	diag/render-clang.c
+render_head	diag_head_render	function	diag/render-clang.c, render-vcc.c
+# esc	diag_fixit_text_escape	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-clang.c
+parseable_fixits	diag_fixits_parseable_render	function	diag/render-clang.c, render-vcc.c
+render_text	diag_clang_record_render	function	diag/render-clang.c, record.c
+render_clang	diag_clang_render	function	diag/render-clang.c, report.c (a one-line wrapper; step 6 removes it)
+DC_RESET	DIAG_COLOR_RESET	macro	diag/render-clang.c, render-vcc.c (defined twice; step 6 shares one)
+DC_BOLD	DIAG_COLOR_BOLD	macro	diag/render-clang.c
+DC_CARET	DIAG_COLOR_CARET	macro	diag/render-clang.c
+DC_FIXIT	DIAG_COLOR_FIXIT	macro	diag/render-clang.c, render-vcc.c
+DC_MARK	DIAG_COLOR_MARK	macro	diag/render-vcc.c
+DC_NOTE	DIAG_COLOR_NOTE	macro	diag/render-vcc.c
+DC_OLD	DIAG_COLOR_TYPE_OLD	macro	diag/type-diff.c
+DC_NEW	DIAG_COLOR_TYPE_NEW	macro	diag/type-diff.c
+# --- src/diag/render-narrated.c
+say_place	diag_narrated_place_say	function	diag/render-narrated.c
+render_narr	diag_narrated_record_render	function	diag/render-narrated.c, render-vcc.c
+diag_narrate	diag_narrated_render	function	diag/render-narrated.c, render-vcc.c
+# --- src/diag/render-vcc.c
+# lstart	diag_line_start_find	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c, render-narrated.c
+# lend	diag_line_end_find	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c, render-narrated.c
+lnext	diag_line_next_find	function	diag/render-vcc.c
+lcount	diag_lines_count	function	diag/render-vcc.c
+add_line	diag_snippet_line_add	function	diag/render-vcc.c
+cmp_line	diag_snippet_line_compare	function	diag/render-vcc.c
+# mk	diag_mark_make	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c
+# foldable	diag_note_is_foldable	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c
+gutter	diag_gutter_render	function	diag/render-vcc.c
+# bar	diag_gutter_bar_render	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c
+one_line	diag_vcc_snippet_line_render	function	diag/render-vcc.c
+snippet_vcc	diag_vcc_snippet_render	function	diag/render-vcc.c
+help_only	diag_vcc_help_render	function	diag/render-vcc.c
+is_macro_note	diag_note_is_macro	function	diag/render-vcc.c
+is_skip_note	diag_note_is_skipped	function	diag/render-vcc.c
+macro_run_last	diag_note_macro_run_last	function	diag/render-vcc.c
+render_vcc	diag_vcc_record_render	function	diag/render-vcc.c
+diag_text_flush	diag_vcc_flush	function	diag/render-vcc.c, called from report.c and the pp driver
+diag_render_rec	diag_record_render_plain	function	diag/render-vcc.c, called from output-json.c
+diag_render_color	diag_record_render_color	function	diag/render-vcc.c, called from output-html.c
+# mark	diag_mark	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/render-vcc.c
+MAXLINES	DIAG_SNIPPET_LINES_MAX	constant	diag/render-vcc.c
+MAXMARKS	DIAG_MARKS_MAX	constant	diag/render-vcc.c
+CONTEXT	DIAG_CONTEXT_LINES	constant	diag/render-vcc.c
+# lb	line_begin	unsafe	diag/render-vcc.c: mark.lb (also a local in several files)
+# le	line_end	unsafe	diag/render-vcc.c: mark.le
+# ch	character	unsafe	diag/render-vcc.c: mark.ch
+# pri	priority	unsafe	diag/render-vcc.c: mark.pri; `priority` is already a word elsewhere in src/
+# --- src/diag/type-diff.c
+diag_typediff	diag_type_diff_render	function	diag/type-diff.c, render-vcc.c
+# --- src/diag/report-site.c
+track_str	diag_report_site_text	function	diag/report-site.c, render-clang.c
+# --- src/diag/report.c
+pp_diag	diag_report	public	pp.h: the pp's own reporter, used in pp, cc, driver (hundreds of call sites)
+pp_diagx	diag_report_extended	public	pp.h: used by cc, driver
+pp_vdiagx	diag_report_extended_va	public	pp.h
+pp_vdiag	diag_report_va	public	pp.h
+pp_warnings	diag_warning_count	public	pp.h: used by driver
+pp_diag_emit	diag_record_emit	public	pp.h: used by cc
+pp_diag_summary	diag_summary_print	public	pp.h: used by driver
+pp_diag_finish	diag_finish	public	pp.h: used by driver
+dsink_dup	diag_sink_is_duplicate	function	diag/report.c
+# write_file	diag_file_write	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/report.c
+# DH	DIAG_HASH_FEED	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: diag/report.c (local to pp_diag_emit)
+# --- src/diag/source-line.c
+cp_width	diag_codepoint_width	function	diag/source-line.c
+dcols	diag_columns_width	function	diag/source-line.c, render-*.c
+# --- src/diag/warning-state.c
+dtrans	diag_pragma_state_push	function	diag/warning-state.c
+diag_pragma	diag_pragma_handle	function	diag/warning-state.c, called from the pp directive code
+dstate_at	diag_pragma_state_at	function	diag/warning-state.c
+diag_file_end	diag_pragma_file_end	function	diag/warning-state.c, called from the pp include code
+dpragma	diag_pragma_level	function	diag/warning-state.c
+wstate	diag_warning_state_compute	function	diag/warning-state.c
+pp_wc_fill	diag_warning_cache_fill	function	diag/warning-state.c, ppimpl.h (inline pp_wc_maybe)
+PD_IGNORED	DIAG_PRAGMA_IGNORED	constant	diag/warning-state.c
+PD_WARNING	DIAG_PRAGMA_WARNING	constant	diag/warning-state.c
+PD_ERROR	DIAG_PRAGMA_ERROR	constant	diag/warning-state.c
+pp_diag_npragma	diag_pragma_count	public	pp.h: used by cc
+pp_diag_wargs	diag_warning_arguments	public	pp.h: used by cc and driver
+pp_diag_nenable_ref	diag_warning_enabled_count_reference	public	pp.h: used by cc
+pp_wstate	diag_warning_state	public	pp.h: used by cc
+pp_diag_wlevel	diag_warning_level	public	pp.h: used by cc
+pp_diag_elevel	diag_error_level	public	pp.h: used by cc
+pp_diag_pragmas	diag_pragma_active	public	pp.h: used by cc
+pp_werror_named	diag_warning_error_named	public	pp.h: used by cc
+pp_warnx	diag_warning_report	public	pp.h: used by cc and pp
+# --- src/frontend/pp/source-map.c
+loc_fent	pp_location_file_entry	function	frontend/pp/source-map.c and the diag files
+loc_line	pp_location_line	function	frontend/pp/source-map.c, directive.c, builtin.c
+presumed_name	pp_location_presumed_name	function	frontend/pp/source-map.c and the diag files
+loc_ok	pp_location_is_valid	function	frontend/pp/source-map.c and the diag files
+pp_in_system_header	pp_location_is_in_system_header	public	pp.h: used by cc
+pp_in_main_file	pp_location_is_in_main_file	public	pp.h: used by cc
+pp_where	pp_location_describe	public	pp.h: used by cc and driver
+# --- src/frontend/pp/source-query.c (all public: the parser's source-text queries)
+pp_error_limit	pp_option_error_limit	public	pp.h: used by cc
+pp_spell_limit	pp_option_spell_limit	public	pp.h: used by cc
+pp_main_eof	pp_main_file_end	public	pp.h: used by cc
+pp_include_point	pp_include_point_find	public	pp.h: used by cc
+pp_src	pp_source_text	public	pp.h: used by cc
+pp_invalid_tok	pp_token_invalid_report	public	pp.h: used by cc
+pp_spells	pp_location_spells	public	pp.h: used by cc
+pp_loc_char	pp_location_char	public	pp.h: used by cc
+pp_src_rest	pp_source_rest	public	pp.h: used by cc
+pp_tok_end	pp_token_end_find	public	pp.h: used by cc
+pp_defined	pp_macro_id_is_defined	public	pp.h: used by cc (by interned id; macro-backtrace's pp_macro_defined is by name)
+# --- src/frontend/pp/macro-backtrace.c
+tok_at	pp_expansion_token_at	function	frontend/pp/macro-backtrace.c
+expansion_at	pp_expansion_find	function	frontend/pp/macro-backtrace.c
+obj_macro_at	pp_location_is_object_macro	function	frontend/pp/macro-backtrace.c, ppimpl.h, expand.c
+expansion_note_scan	pp_expansion_note_scan	function	frontend/pp/macro-backtrace.c
+mdef_cmp	pp_macro_definition_compare	function	frontend/pp/macro-backtrace.c
+mdx_update	pp_macro_definition_index_update	function	frontend/pp/macro-backtrace.c
+mdef_body	pp_macro_definition_body	function	frontend/pp/macro-backtrace.c
+xchain	pp_expansion_chain_build	function	frontend/pp/macro-backtrace.c
+arg_spans	pp_expansion_argument_spans	function	frontend/pp/macro-backtrace.c
+xput	pp_expansion_text_append	function	frontend/pp/macro-backtrace.c
+xtext	pp_expansion_text_build	function	frontend/pp/macro-backtrace.c
+# xargs	pp_expansion_arguments_substitute	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: frontend/pp/macro-backtrace.c
+xhelp	pp_expansion_help_build	function	frontend/pp/macro-backtrace.c
+expansion_note	pp_expansion_note_add	function	frontend/pp/macro-backtrace.c
+fix_in_macro	pp_fixit_is_in_macro	function	frontend/pp/macro-backtrace.c, record.c
+macro_adjust	pp_expansion_notes_adjust	function	frontend/pp/macro-backtrace.c, report.c
+pp_loc_macro	pp_location_is_in_macro	public	pp.h: used by cc
+pp_macro_defined	pp_macro_name_is_defined	public	pp.h: used by cc
+xframe	pp_expansion_frame	type	frontend/pp/macro-backtrace.c
+# mdef	pp_macro_definition	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: frontend/pp/macro-backtrace.c
+# xstr	pp_expansion_text	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: frontend/pp/macro-backtrace.c
+XA	PP_EXPANSION_ARGUMENTS_MAX	constant	frontend/pp/macro-backtrace.c
+# XS	PP_EXPANSION_TEXT_MAX	unsafe	the same word also names unrelated things elsewhere in src/ (locals, other types or fields); rename by hand in: frontend/pp/macro-backtrace.c
+# ft	first_token	unsafe	frontend/pp/macro-backtrace.c: xframe.ft (two letters, also a local in expand.c)
+# bi	body_index	unsafe	frontend/pp/macro-backtrace.c: xframe.bi
+# m	macro	unsafe	frontend/pp/macro-backtrace.c: xframe.m (one letter; a local almost everywhere)
+# k	kind	unsafe	frontend/pp/macro-backtrace.c: mdef.k
+# --- public types and constants of the engine (src/include/frontend/pp/pp.h), part of the same interface
+vdiag	diag_record	public	pp.h: type, used by cc, driver, server
+pp_span	diag_span	public	pp.h: type, used by cc
+pp_fixit	diag_fixit	public	pp.h: type, used by cc
+pp_dinfo	diag_info	public	pp.h: type, used by cc
+pp_dsink	diag_sink	public	pp.h: type, used by server (vccd)
+pp_drec	diag_sink_record	public	pp.h: type, used by server
+vdspan	diag_record_span	public	pp.h: type, used by cc, render files
+vdfix	diag_record_fixit	public	pp.h: type, used by render files
+VDL_NOTE	DIAG_LEVEL_NOTE	public	pp.h: enumerator, used by cc
+VDL_REMARK	DIAG_LEVEL_REMARK	public	pp.h
+VDL_WARNING	DIAG_LEVEL_WARNING	public	pp.h
+VDL_ERROR	DIAG_LEVEL_ERROR	public	pp.h
+VDL_FATAL	DIAG_LEVEL_FATAL	public	pp.h
+VDA_UNSPEC	DIAG_APPLICABILITY_UNSPECIFIED	public	pp.h: enumerator, used by cc
+VDA_MACHINE	DIAG_APPLICABILITY_MACHINE	public	pp.h
+VDA_MAYBE	DIAG_APPLICABILITY_MAYBE	public	pp.h
+VDA_PLACEHOLDER	DIAG_APPLICABILITY_PLACEHOLDER	public	pp.h
+VDA_NAME	DIAG_APPLICABILITY_NAME	public	pp.h
+PP_DIAG_TEXT	DIAG_FORMAT_TEXT	public	pp.h: used by driver
+PP_DIAG_JSON	DIAG_FORMAT_JSON	public	pp.h
+PP_DIAG_SARIF	DIAG_FORMAT_SARIF	public	pp.h
+PP_DSTYLE_VCC	DIAG_STYLE_VCC	public	pp.h: used by driver
+PP_DSTYLE_CLANG	DIAG_STYLE_CLANG	public	pp.h
+PP_DSTYLE_NARRATED	DIAG_STYLE_NARRATED	public	pp.h
+# engine fields of struct pp / pp_options (pp.h, ppimpl.h): become diag_context fields in step 4, not renamed by this table
