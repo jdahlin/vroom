@@ -1939,3 +1939,20 @@ std::map fungerar med vcc ensamt (emplace, `operator[]`, find, iteration: mp.cpp
 Ny test `run/arrow-convert.cpp`.  cxx-strict: 347 funktioner utan kod (330 förut), men jämfört funktion
 för funktion med förra binären: 262 nya kompileras, 11 saknas som förut aldrig nåddes (inga regressioner).
 Ny lucka sedd: en arraymedlem från en klammerlista i en mem-initierare (`x{a, 0, 0}`).
+
+## Status 110 (2026-11-14)
+- En explicit specialisering deklarerad efter att klassen namngetts (`std::char_traits<char>` via
+  string_views standardargument i `__fwd/string_view.h`) definierar den klass namnet gjorde
+  (`cxx_instance_named`), i stället för att lämna den som en ofullständig instans av primärmallen:
+  `_Traits::compare(...)` hittade ingenting, så varje strängjämförelse föll.
+- `__is_trivially_equality_comparable` svarar 0 för alla typer.  Clangs ja skulle välja
+  `__find_vectorized` och liknande på `ext_vector_type`-vektorer, som C++-fronten inte har än;
+  nej tar elementvisa slingor, som alltid är rätt.  (Vektortyper i C++-fronten: egen uppgift.)
+- C: en vektor av const-element är inte själv const (`ext_vector_type` och `vector_size`, som clang).
+- `static_cast<T>(x)` till en klass: ett temporärt objekt direktinitierat från x; ett prvalue av T är
+  objektet självt (`static_cast<strong_ordering>(a <=> 0)`).  Bara static_cast: `T(x)` och `(T)x`
+  bygger sina på annat håll.
+- `T(x)` genom T:s kopieringskonstruktor från en klass som konverterar till T: objektet är
+  konverteringsfunktionens resultat ([dcl.init.general]/16.6.1), ingen kopia (string_view(str)).
+Tester: `run/spec-after-use.cpp`, `vcc/vector_const_element.c`.  cxx-strict 338 (347): 140 funktioner
+kompileras nu, 10 nya saknas (strömmar och binärformat som inte nåddes förut).

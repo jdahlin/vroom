@@ -100,6 +100,7 @@ VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc);
 VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, qty to, uint32_t loc);
 VPRIV uint32_t cxx_gen_empty_object(cxx *c, qty t, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
 VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc);

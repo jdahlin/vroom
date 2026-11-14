@@ -28,7 +28,9 @@ CC_PRIVATE qty cc_declarator_vector_attribute_apply(cc *c, qty t, uint32_t size,
 		cc_report_error(c, loc, "invalid vector element type '%s'", tyname(c, t));
 		return t;
 	}
-	return QT(QI(cc_type_vector(c, t, size)), QQ(t));
+	/* (the element's qualifiers are not the vector's: clang assigns to a vector of const short, and libc++'s
+	   __simd_vector<const char16_t, N> is one) */
+	return QT(QI(cc_type_vector(c, t, size)), 0);
 }
 
 /* false when the list did not end in its ')' (the declaration is invalid, clang) */

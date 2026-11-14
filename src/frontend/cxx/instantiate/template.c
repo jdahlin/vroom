@@ -167,6 +167,29 @@ VPRIV void cxx_instance_put(cxx *c, cxx_template *t, cxx_entity *te, const cxx_t
 		cxx_tag_info_set(c, AST_TYPE(c->ast, inst->ty)->aux, x);	/* (an explicit specialization: matchable) */
 }
 
+/* template<> struct X<args> { ... } after X<args> was named (typedef X<char> t;, a default template argument):
+   the class that name made, not yet complete, which the specialization defines ([temp.expl.spec]/7: it is
+   not instantiated from the primary); NULL: none */
+VPRIV cxx_entity *cxx_instance_named(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs)
+{
+	cxx_template *t = te ? cxx_template_of(te) : NULL;
+	cxx_instance *x;
+
+	if (!t || nargs > 32)
+		return NULL;
+	for (uint32_t i = 0; i < nargs; i++)
+		if (!args[i].kind)
+			return NULL;
+	x = cxx_instance_find(c, t, args, nargs, cxx_instance_hash(t, args, nargs));
+	if (!x || !x->inst || x->inst->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, x->inst->ty) ||
+	    (c->ast->tags[AST_TYPE(c->ast, x->inst->ty)->aux].flags & RF_COMPLETE))
+		return NULL;
+	/* (defined by the specialization, not completed from the primary: its members are its own) */
+	x->late = 0, x->state = 2;
+	x->inst->instance = NULL;
+	return x->inst;
+}
+
 VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst)
 {
 	cxx_template *t;

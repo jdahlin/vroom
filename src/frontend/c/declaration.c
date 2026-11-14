@@ -145,7 +145,7 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 				v.n = at.extvec;
 				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
 			}
-			t = QT(cc_type_intern(c, &v), QQ(t));
+			t = QT(cc_type_intern(c, &v), 0);	/* (the element's qualifiers are not the vector's, as clang) */
 		}
 	}
 	if (ds->sc == SC_TYPEDEF) {

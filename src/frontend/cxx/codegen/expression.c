@@ -207,6 +207,43 @@ VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc)
 	c->enode = n;
 }
 
+/* static_cast<T>(x) for a class T: a temporary direct-initialized from x ([expr.static.cast]/4); a prvalue of T
+   is that object already (static_cast<strong_ordering>(a <=> 0)).  (T(x) and (T)x build theirs elsewhere.) */
+VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, qty to, uint32_t loc)
+{
+	cc *a = c->ast;
+
+	if (!cxx_gen_on(c) || !x || to == CXX_TY_UNKNOWN || !cc_type_is_record(a, to) || AST_TYPE_KIND(a, to) == TY_ARRAY ||
+	    !cxx_gen_object_type_ok(c, QUNQ(to)))
+		return;
+	{
+		qty xt = QUNQ(AST_NODE_AT(a, x)->ty), at[1];
+		bool prv = cxx_gen_prv_find(c, x) || !(AST_NODE_AT(a, x)->flags & NF_LVALUE);
+		uint8_t lv[1] = { !prv };
+		qty etype = c->etype;
+		uint8_t elval = c->elval;
+
+		if (xt == QUNQ(to) && prv) {
+			c->enode = x;
+			return;
+		}
+		at[0] = xt;
+		if (AST_TYPE_KIND(a, xt) == TY_ARRAY)
+			at[0] = cc_type_pointer(a, AST_TYPE(a, xt)->base), lv[0] = 0;
+		cxx_ctor_use(c, QUNQ(to), at, lv, 1, false);
+		if ((c->ctor_found && c->ctor_picked) || xt == QUNQ(to)) {	/* (a copy: the implicit copy constructor too) */
+			c->enode = 0;
+			cxx_gen_construct_temp(c, QUNQ(to), &x, 1, loc);
+		} else if (cc_type_is_record(a, xt) && AST_TYPE_KIND(a, xt) != TY_ARRAY) {
+			uint32_t v = cxx_gen_convert_class(c, x, QUNQ(to), loc);	/* (its conversion function to T) */
+
+			c->enode = v && QUNQ(AST_NODE_AT(a, v)->ty) == QUNQ(to) ? v : 0;
+		} else
+			c->enode = 0;
+		c->etype = etype, c->elval = elval;
+	}
+}
+
 /* (T)x, static_cast<T>(x), T(x) between scalar types */
 VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 {

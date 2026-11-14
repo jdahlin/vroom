@@ -1699,6 +1699,14 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		}
 		return false;
 	}
+	/* is a == b the comparison of their bytes (clang's builtin; for clang: integers, characters, bool,
+	   enumerations, pointers, a class with a defaulted operator== and no padding).  vcc says no for every type:
+	   what libc++ does with yes is __find_vectorized and the like, on ext_vector_type vectors, which vcc's
+	   C++ front end does not have yet; no takes its element-by-element loops, which are always right */
+	if (IS("__is_trivially_equality_comparable")) {
+		*v = 0;
+		return true;
+	}
 	/* what a type can do trivially: yes for scalars and arrays of them, and for a class vcc laid out as POD
 	   (one that is not POD for layout may still be trivially copyable: not known) */
 	{

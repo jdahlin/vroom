@@ -265,6 +265,19 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *
 	}
 	if (ctor && ctor->member_of != cls)
 		ctor = NULL, found = false;	/* (a base's constructor, found by name: not this class's) */
+	uint32_t conv[1];
+
+	if (ctor && nargs == 1 && args[0] && cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != TY_ARRAY &&
+	    QUNQ(AST_NODE_AT(a, args[0])->ty) != QUNQ(t) && ctor->ty != CXX_TY_UNKNOWN && AST_TYPE(a, ctor->ty)->n >= 1 &&
+	    cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) &&
+	    QUNQ(AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->base) == QUNQ(t)) {
+		/* T(x) through T's copy or move constructor from an object of another class that converts to T: the
+		   object is the conversion function's result itself ([dcl.init.general]/16.6.1, C++17); no copy */
+		uint32_t v = cxx_gen_convert_class(c, args[0], QUNQ(t), loc);
+
+		if (v && QUNQ(AST_NODE_AT(a, v)->ty) == QUNQ(t))
+			conv[0] = v, args = conv;
+	}
 	if (ctor && nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t)) {
 		/* from an object of the class: only a copy or move constructor takes it (not one found through a
 		   conversion of the object to something else) */

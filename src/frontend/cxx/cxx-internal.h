@@ -654,6 +654,7 @@ VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc);
 VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, qty to, uint32_t loc);
 VPRIV void cxx_gen_index(cxx *c, uint32_t base, uint32_t index, uint32_t loc);
 typedef struct cxx_gen_range { cc_id_list pre, body; void *outer; uint32_t p, i, n, loc, cond, step, elem; bool ok, cls; } cxx_gen_range;
 VPRIV uint32_t cxx_gen_var_node_public(cxx *c, uint32_t s, uint32_t loc);
@@ -772,6 +773,7 @@ VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);	/* i < 0: back to the whole pack */
 VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst);
+VPRIV cxx_entity *cxx_instance_named(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs);
 VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
 VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);
 VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s);
