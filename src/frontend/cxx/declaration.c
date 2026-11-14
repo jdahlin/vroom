@@ -977,7 +977,7 @@ static int64_t cxx_literal_value(cxx *c)
 }
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; } cxx_suffix;
+typedef struct cxx_suffix { uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed; } cxx_suffix;
 
 /*
  * A declarator (abstract if allowed); returns the declared name's id (0: none) and sets
@@ -1119,6 +1119,11 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 				x->params = c->fn_nparams && !c->fn_unknown ? malloc(c->fn_nparams * sizeof(qty)) : NULL;
 				if (x->params)
 					memcpy(x->params, c->fn_params, c->fn_nparams * sizeof(qty));
+				/* the names, for the body (the parameters' own types, unknown ones too) */
+				x->nnamed = c->fn_nparams;
+				x->named = c->fn_nparams ? malloc(c->fn_nparams * sizeof *x->named) : NULL;
+				for (uint32_t k = 0; k < c->fn_nparams; k++)
+					x->named[k].name = c->fn_pnames[k], x->named[k].ty = c->fn_params[k];
 				nsfx++;
 			} else
 				too_many = true;
@@ -1129,6 +1134,17 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		break;
 	}
 	c->scope = outer;
+	/* the body's parameters: the first suffix's, when it is a function (not a pointer to one) */
+	if (nsfx && sfx[0].is_function && !nested && !c->tentative) {
+		if (sfx[0].nnamed > c->cdecl_params)
+			c->decl_params = realloc(c->decl_params, (c->cdecl_params = sfx[0].nnamed) * sizeof *c->decl_params);
+		if (sfx[0].nnamed)
+			memcpy(c->decl_params, sfx[0].named, sfx[0].nnamed * sizeof *c->decl_params);
+		c->ndecl_params = sfx[0].nnamed;
+	}
+	for (uint32_t i = 0; i < nsfx; i++)
+		if (sfx[i].is_function)
+			free(sfx[i].named);
 	/* the type: suffixes from the last (innermost) to the first */
 	for (uint32_t i = nsfx; i-- > 0;) {
 		if (too_many)
@@ -1179,6 +1195,7 @@ static void cxx_parameter_clause_parse(cxx *c)
 static void cxx_parameter_clause_body_parse(cxx *c)
 {
 	qty *types = NULL;
+	uint32_t *names = NULL;
 	uint32_t n = 0, cap = 0;
 	uint8_t variadic = 0, unknown = 0;
 
@@ -1195,8 +1212,10 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 			cxx_attributes_skip(c);
 			if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 				cxx_fail(c, "expected a parameter type");
+			uint32_t pname;
+
 			c->type_in = c->ds_type;
-			cxx_declarator_parse(c, true, &q, &f, NULL);
+			pname = cxx_declarator_parse(c, true, &q, &f, NULL);
 			t = cxx_type_parameter_adjust(c, c->type_out);
 			if (cxx_accept(c, LEX_TOKEN_EQUAL))
 				cxx_initializer_parse(c);
@@ -1208,8 +1227,12 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 				unknown = 1;
 			/* (void): no parameters */
 			if (!(n == 0 && t == cc_type_basic(TY_VOID) && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
-				if (n == cap)
-					types = realloc(types, (cap = cap ? cap * 2 : 8) * sizeof *types);
+				if (n == cap) {
+					cap = cap ? cap * 2 : 8;
+					types = realloc(types, cap * sizeof *types);
+					names = realloc(names, cap * sizeof *names);
+				}
+				names[n] = pname;
 				types[n++] = t;
 			}
 			if (variadic || !cxx_accept(c, LEX_TOKEN_COMMA))
@@ -1217,12 +1240,18 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 		}
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 	}
-	if (n > c->fn_cparams)
-		c->fn_params = realloc(c->fn_params, (c->fn_cparams = n) * sizeof(qty));
-	if (n)
+	if (n > c->fn_cparams) {
+		c->fn_cparams = n;
+		c->fn_params = realloc(c->fn_params, n * sizeof(qty));
+		c->fn_pnames = realloc(c->fn_pnames, n * sizeof(uint32_t));
+	}
+	if (n) {
 		memcpy(c->fn_params, types, n * sizeof(qty));
+		memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
+	}
 	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown;
 	free(types);
+	free(names);
 }
 
 static void cxx_noexcept_parse(cxx *c)
@@ -1378,10 +1407,26 @@ static void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
 	if (c->nlate == c->clate)
 		c->late = realloc(c->late, (c->clate = c->clate ? c->clate * 2 : 64) * sizeof *c->late);
 	c->late[c->nlate].begin = begin, c->late[c->nlate].end = end, c->late[c->nlate].scope = c->scope;
+	c->late[c->nlate].nparams = c->ndecl_params;
+	c->late[c->nlate].params = c->ndecl_params ? malloc(c->ndecl_params * sizeof(cxx_param)) : NULL;
+	if (c->ndecl_params)
+		memcpy(c->late[c->nlate].params, c->decl_params, c->ndecl_params * sizeof(cxx_param));
 	c->late[c->nlate++].what = (uint8_t)what;
 }
 
 static void cxx_function_body_inner_parse(cxx *c);
+
+/* a function's parameters, declared (with their types) in its body's scope */
+static void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps, uint32_t n)
+{
+	for (uint32_t i = 0; i < n; i++)
+		if (ps[i].name > 1) {
+			cxx_entity *e = cxx_declare(c, fs, ps[i].name, CXX_ENTITY_VALUE);
+
+			if (e)
+				e->ty = ps[i].ty;
+		}
+}
 
 /* : mem-initializers, then { body } (or a function-try-block) */
 static void cxx_function_body_parse(cxx *c)
@@ -1479,6 +1524,8 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		c->class_depth = 0;
 		fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 		cxx_scope_push(c, fs);
+		cxx_params_declare(c, fs, l.params, l.nparams);
+		free(l.params);
 		cxx_function_body_parse(c);
 		if (c->pos != l.end)
 			cxx_fail(c, "member function body ended early");
@@ -2378,6 +2425,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				if (type_of_typedef && type_of_typedef->members && !typedef_dependent)
 					e->members = type_of_typedef->members, e->specs = type_of_typedef->specs, e->nspecs = type_of_typedef->nspecs;
 			}
+			if (e && kind == CXX_ENTITY_VALUE)
+				e->ty = t;	/* a variable's, a data member's, a function's type */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc);
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
@@ -2439,6 +2488,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 							cxx_scope_use(c, fs, qs->owner->specs[i]);
 				}
 				cxx_scope_push(c, fs);
+				cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
 				cxx_function_body_parse(c);
 				c->scope = outer;
 			}

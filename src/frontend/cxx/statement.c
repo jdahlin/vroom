@@ -359,5 +359,9 @@ VPRIV void cxx_statement_parse(cxx *c)
 		return;
 	}
 	cxx_expression_parse(c);
+	if (!c->tentative && !c->template_depth && !c->instantiating) {
+		c->stats.expressions++;	/* (an expression statement outside templates: its type known?) */
+		c->stats.expressions_typed += c->etype != CXX_TY_UNKNOWN;
+	}
 	cxx_expect(c, LEX_TOKEN_SEMICOLON);
 }

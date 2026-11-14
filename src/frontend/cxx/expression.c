@@ -102,6 +102,24 @@ static void cxx_unqualified_id_rest_parse(cxx *c)
 	cxx_fail(c, "expected an identifier");
 }
 
+/* what a name used as a value is: a variable's type (an lvalue), or a set of functions for a call */
+static void cxx_name_type(cxx *c, cxx_entity *e)
+{
+	cxx_entity *v = NULL;
+
+	for (cxx_entity *x = e; x; x = x->next) {
+		if (x->kind == CXX_ENTITY_FUNCTION_TEMPLATE || (x->kind == CXX_ENTITY_VALUE && x->ty != CXX_TY_UNKNOWN &&
+								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC)) {
+			cxx_et(c, CXX_TY_UNKNOWN, false);
+			c->ecallee = e;	/* functions: the call picks one */
+			return;
+		}
+		if (x->kind == CXX_ENTITY_VALUE && !v)
+			v = x;
+	}
+	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, true);
+}
+
 /*
  * id-expression (possibly qualified, a template-id), or a type followed by ( or { (a
  * functional cast).  Called at an identifier, :: or a keyword that may start one.
@@ -114,18 +132,21 @@ static void cxx_id_expression_parse(cxx *c)
 	cxx_entity *e;
 	cxx_token *t;
 
+	cxx_et(c, CXX_TY_UNKNOWN, false);
 	cxx_nested_name_parse(c, &q, &dep);
 	template_kw = cxx_accept_kw(c, CXX_KW_template);
 	t = cxx_peek(c, 0);
 	if (t->kind != LEX_TOKEN_IDENTIFIER || (t->kw && t->kw != CXX_KW_operator)) {
 		if (t->kind == LEX_TOKEN_TILDE || t->kw == CXX_KW_operator) {
 			cxx_unqualified_id_rest_parse(c);
+			cxx_et(c, CXX_TY_UNKNOWN, false);
 			return;
 		}
 		cxx_fail(c, "expected an expression");
 	}
 	if (t->kw == CXX_KW_operator) {
 		cxx_unqualified_id_rest_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	}
 	if (dep)
@@ -146,9 +167,16 @@ static void cxx_id_expression_parse(cxx *c)
 		if (!is_template && !q && !dep && (!e || cxx_entity_kind_find(e, CXX_ENTITY_VALUE)) &&
 		    cxx_lookahead_fn(c, cxx_template_arguments_then_call))
 			is_template = true;
-		if (is_template)
+		if (is_template) {
 			cxx_template_arguments_parse(c);
+			cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a template-id: deduction and instances, not yet) */
+			return;
+		}
 	}
+	if (!dep && e)
+		cxx_name_type(c, e);
+	else
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 	(void)save;
 }
 
@@ -199,16 +227,31 @@ static void cxx_type_then_init(cxx *c)
 }
 
 
+/* ( arguments ): their types in c->cargs (unknown if any is a pack expansion) */
 static void cxx_call_arguments_parse(cxx *c)
 {
+	qty args[16];
+	uint32_t n = 0;
+	bool unknown = false;
+
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		cxx_initializer_parse(c);
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		if (n < 16)
+			args[n] = c->etype == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN : c->etype;
+		n++;
+		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+			unknown = true;
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	if (n > 16)
+		unknown = true;
+	if (n > c->ccargs)
+		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs);
+	memcpy(c->cargs, args, (n < 16 ? n : 16) * sizeof *args);
+	c->ncargs = unknown ? UINT32_MAX : n;
 }
 
 /* a builtin trait: __is_same(T, U), __builtin_xxx(args); arguments are types or expressions */
@@ -469,16 +512,38 @@ static void cxx_primary_expression_parse(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
 
+	cxx_et(c, CXX_TY_UNKNOWN, false);
 	switch (t->kind) {
-	case LEX_TOKEN_NUMBER: case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER:
+	case LEX_TOKEN_NUMBER:
+		cxx_advance(c);
+		if (!c->tentative)
+			cxx_et(c, cxx_number_type(c, t), false);
+		return;
+	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER:
 	case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
 		cxx_advance(c);
+		if (t->kind == LEX_TOKEN_CHARACTER && t->s[t->len - 1] == '\'')	/* (no user-defined suffix) */
+			cxx_et(c, cc_type_basic(TY_CHAR), false);
 		return;
 	case LEX_TOKEN_STRING: case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_UTF8_STRING: case LEX_TOKEN_UTF16_STRING:
-	case LEX_TOKEN_UTF32_STRING:
-		while (cxx_kind(c) >= LEX_TOKEN_STRING && cxx_kind(c) <= LEX_TOKEN_UTF32_STRING)
+	case LEX_TOKEN_UTF32_STRING: {
+		uint32_t len = 0;
+		bool plain = true;
+
+		while (cxx_kind(c) >= LEX_TOKEN_STRING && cxx_kind(c) <= LEX_TOKEN_UTF32_STRING) {
+			const cxx_token *x = cxx_peek(c, 0);
+
+			plain &= x->kind == LEX_TOKEN_STRING && x->s[0] == '"' && x->s[x->len - 1] == '"';
+			for (uint32_t i = 1; i + 1 < x->len; i++)
+				plain &= x->s[i] != '\\';	/* (escapes: the length is not counted here) */
+			len += x->len - 2;
 			cxx_advance(c);
+		}
+		/* "abc": an lvalue of const char[4] */
+		if (plain && !c->tentative)
+			cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST), len + 1, 0), true);
 		return;
+	}
 	case LEX_TOKEN_LEFT_PAREN:
 		cxx_paren_expression_parse(c);
 		return;
@@ -500,6 +565,14 @@ static void cxx_primary_expression_parse(cxx *c)
 		cxx_advance(c);
 		if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && cxx_is(c, LEX_TOKEN_LEFT_PAREN))
 			cxx_skip_balanced(c);
+		if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
+			cxx_et(c, cc_type_basic(TY_BOOL), false);
+		else if (t->kw == CXX_KW___null)
+			cxx_et(c, cc_type_basic(TY_LONG), false);
+		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative)
+			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
+		else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
+			cxx_et(c, cc_type_basic(TY_UINT), false);
 		return;
 	case CXX_KW___builtin_source_location:
 		cxx_advance(c);
@@ -508,16 +581,19 @@ static void cxx_primary_expression_parse(cxx *c)
 	case CXX_KW_static_cast: case CXX_KW_dynamic_cast: case CXX_KW_const_cast: case CXX_KW_reinterpret_cast:
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_LESS);
+		qty cast_to;
 		{
 			uint32_t targs = c->in_template_args;
 
 			c->in_template_args = 0;
 			cxx_type_id_parse(c);
+			cast_to = c->type_out;
 			c->in_template_args = targs;
 		}
 		if (!cxx_accept_greater(c))
 			cxx_fail(c, "expected '>'");
 		cxx_paren_expression_parse(c);
+		cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
 		return;
 	case CXX_KW_typeid:
 		cxx_advance(c);
@@ -546,10 +622,13 @@ static void cxx_primary_expression_parse(cxx *c)
 	case CXX_KW_typename: case CXX_KW_decltype: case CXX_KW___decltype:
 		if (cxx_lookahead_fn(c, cxx_type_then_init)) {
 			cxx_type_specifiers_parse(c);
+			qty cast_to = c->ds_type;
+
 			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 				cxx_braced_init_list_parse(c);
 			else
 				cxx_call_arguments_parse(c);
+			cxx_et(c, cast_to, false);
 			return;
 		}
 		if (t->kw == CXX_KW_decltype || t->kw == CXX_KW___decltype) {	/* decltype(x)::member */
@@ -563,10 +642,13 @@ static void cxx_primary_expression_parse(cxx *c)
 		/* a simple type keyword: int(x), unsigned{x} */
 		if (cxx_starts_type(c) && cxx_lookahead_fn(c, cxx_type_then_init)) {
 			cxx_type_specifiers_parse(c);
+			qty cast_to = c->ds_type;
+
 			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 				cxx_braced_init_list_parse(c);
 			else
 				cxx_call_arguments_parse(c);
+			cxx_et(c, cast_to, false);
 			return;
 		}
 		cxx_fail(c, "unexpected '%.*s' in an expression", (int)t->len, t->s);
@@ -575,6 +657,7 @@ static void cxx_primary_expression_parse(cxx *c)
 	if (t->kind == LEX_TOKEN_IDENTIFIER && !t->kw && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN &&
 	    cxx_builtin_kind(t->id) == CXX_BUILTIN_TRAIT && !cxx_lookup(c, t->id)) {
 		cxx_builtin_call_parse(c);
+		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6)) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
 		return;
 	}
 	{
@@ -603,10 +686,13 @@ static void cxx_primary_expression_parse(cxx *c)
 		}
 		if (is_type) {
 			cxx_type_specifiers_parse(c);
+			qty cast_to = c->ds_type;
+
 			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 				cxx_braced_init_list_parse(c);
 			else
 				cxx_call_arguments_parse(c);
+			cxx_et(c, cast_to, false);
 			return;
 		}
 	}
@@ -624,6 +710,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 			cxx_advance(c);
 			{
 				uint32_t targs = c->in_template_args;
+				qty base = c->etype;
 
 				c->in_template_args = 0;
 				if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
@@ -631,19 +718,38 @@ static void cxx_postfix_expression_parse(cxx *c)
 				else
 					cxx_expression_parse(c);
 				c->in_template_args = targs;
+				/* a[i]: an element of an array or pointer (a class's operator[]: not resolved yet) */
+				cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
+					  !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 			continue;
 		case LEX_TOKEN_LEFT_PAREN:
 			{
 				uint32_t targs = c->in_template_args;
+				cxx_entity *set = c->ecallee;
+				qty callee = c->etype;
 
 				c->in_template_args = 0;
 				cxx_call_arguments_parse(c);
 				c->in_template_args = targs;
+				if (c->ncargs == UINT32_MAX || c->tentative)
+					cxx_et(c, CXX_TY_UNKNOWN, false);
+				else
+					cxx_call_type(c, set, callee, c->cargs, c->ncargs);
 			}
 			continue;
-		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW:
+		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {
+			/* the object's class: its scope, for the member's lookup */
+			qty obj = c->etype;
+			cxx_scope *cls = NULL;
+
+			if (cxx_is(c, LEX_TOKEN_ARROW))
+				obj = obj != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, obj) == TY_PTR && !AST_TYPE(c->ast, obj)->ext ?
+				      AST_TYPE(c->ast, obj)->base : CXX_TY_UNKNOWN;
+			if (obj != CXX_TY_UNKNOWN && !c->tentative)
+				cls = cxx_type_class_scope(c, QUNQ(obj));
+			cxx_et(c, CXX_TY_UNKNOWN, false);
 			cxx_advance(c);
 			{
 				/* a member: names are looked up in the object's class, which the parser does not know;
@@ -657,6 +763,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 				template_kw |= cxx_accept_kw(c, CXX_KW_template);
 				if (cxx_is(c, LEX_TOKEN_TILDE) || cxx_is_kw(c, CXX_KW_operator)) {
 					cxx_unqualified_id_rest_parse(c);
+					cxx_et(c, CXX_TY_UNKNOWN, false);
 					continue;
 				}
 				if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
@@ -664,13 +771,25 @@ static void cxx_postfix_expression_parse(cxx *c)
 				id = cxx_peek(c, 0)->id;
 				cxx_advance(c);
 				/* the object's type is not known here: name<...>( is a member template call if it parses */
-				if (cxx_is(c, LEX_TOKEN_LESS) && (template_kw || cxx_lookahead_fn(c, cxx_template_arguments_then_call)))
+				if (cxx_is(c, LEX_TOKEN_LESS) && (template_kw || cxx_lookahead_fn(c, cxx_template_arguments_then_call))) {
 					cxx_template_arguments_parse(c);
-				(void)id;
+					cxx_et(c, CXX_TY_UNKNOWN, false);
+					continue;
+				}
+				/* the member: a data member's type, or the member functions for the call */
+				if (cls && !q && !dep) {
+					cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
+
+					if (m && m->kind != CXX_ENTITY_DEPENDENT)
+						cxx_name_type(c, m);
+				}
 			}
 			continue;
+		}
 		case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
 			cxx_advance(c);
+			cxx_et(c, c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) ||
+								 AST_TYPE_KIND(c->ast, c->etype) == TY_PTR) ? QUNQ(c->etype) : CXX_TY_UNKNOWN, false);
 			continue;
 		}
 		return;
@@ -720,12 +839,19 @@ static void cxx_unary_expression_parse(cxx *c)
 				return;
 			}
 		}
-		cxx_advance(c);
-		cxx_cast_expression_parse(c);
+		{
+			int op = cxx_kind(c);
+
+			cxx_advance(c);
+			cxx_cast_expression_parse(c);
+			if (!c->tentative)
+				cxx_unary_type(c, op, c->etype, c->elval);
+		}
 		return;
 	case LEX_TOKEN_AMPERSAND_AMPERSAND:	/* GNU &&label */
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_IDENTIFIER);
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_COLON_COLON:
 		if (cxx_peek(c, 1)->kw == CXX_KW_new) {
@@ -745,15 +871,13 @@ static void cxx_unary_expression_parse(cxx *c)
 			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-			return;
-		}
-		if (cxx_paren_type_id_follows(c)) {
+		} else if (cxx_paren_type_id_follows(c)) {
 			cxx_advance(c);
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-			return;
-		}
-		cxx_unary_expression_parse(c);
+		} else
+			cxx_unary_expression_parse(c);
+		cxx_et(c, cc_type_basic(TY_ULONG), false);	/* size_t */
 		return;
 	case CXX_KW_alignof: case CXX_KW__Alignof: case CXX_KW___alignof__: case CXX_KW___alignof:
 		cxx_advance(c);
@@ -761,26 +885,30 @@ static void cxx_unary_expression_parse(cxx *c)
 			cxx_advance(c);
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-			return;
-		}
-		cxx_unary_expression_parse(c);
+		} else
+			cxx_unary_expression_parse(c);
+		cxx_et(c, cc_type_basic(TY_ULONG), false);
 		return;
 	case CXX_KW_noexcept:
 		cxx_advance(c);
 		cxx_paren_expression_parse(c);
+		cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
 	case CXX_KW_new:
 		cxx_new_expression_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (the new-type-id's pointer: not built yet) */
 		return;
 	case CXX_KW_delete:
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_LEFT_SQUARE))
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 		cxx_cast_expression_parse(c);
+		cxx_et(c, cc_type_basic(TY_VOID), false);
 		return;
 	case CXX_KW_co_await:
 		cxx_advance(c);
 		cxx_cast_expression_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	}
 	cxx_postfix_expression_parse(c);
@@ -824,14 +952,19 @@ static void cxx_cast_expression_parse(cxx *c)
 {
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_paren_type_id_follows(c) && cxx_cast_operand_follows(c)) {
 		/* (T)x, (T){...}; but (T)(...) is also a call of a parenthesized value: the type wins */
+		qty cast_to;
+
 		cxx_advance(c);
 		cxx_type_id_parse(c);
+		cast_to = c->type_out;
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {	/* compound literal */
 			cxx_braced_init_list_parse(c);
+			cxx_et(c, cast_to, false);
 			return;
 		}
 		cxx_cast_expression_parse(c);
+		cxx_et(c, cast_to, false);
 		return;
 	}
 	cxx_unary_expression_parse(c);
@@ -871,9 +1004,17 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 		/* a fold: e op ... (the caller, a parenthesized expression, takes it) */
 		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;
-		while (n--)
-			cxx_advance(c);
-		cxx_binary_expression_parse(c, p + 1);
+		{
+			qty l = c->etype;
+			uint32_t k;
+			int op = cxx_operator_at(c, &k);
+
+			while (n--)
+				cxx_advance(c);
+			cxx_binary_expression_parse(c, p + 1);
+			if (!c->tentative)
+				cxx_binary_type(c, op, l, c->etype);
+		}
 	}
 }
 
@@ -883,12 +1024,25 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 	if (cxx_accept(c, LEX_TOKEN_QUESTION)) {
 		uint32_t targs = c->in_template_args;
 
+		qty t2 = c->etype;	/* (GNU ?: : the condition's) */
+		bool l2 = c->elval;
+
 		c->in_template_args = 0;
 		if (!cxx_is(c, LEX_TOKEN_COLON))	/* GNU ?: */
-			cxx_expression_parse(c);
+			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval;
 		c->in_template_args = targs;
 		cxx_expect(c, LEX_TOKEN_COLON);
 		cxx_assignment_expression_parse(c);
+		{
+			qty t3 = c->etype;
+
+			if (t2 != CXX_TY_UNKNOWN && t2 == t3)
+				cxx_et(c, t2, l2 && c->elval);
+			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t2) && cc_type_is_arithmetic(c->ast, t3))
+				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
+			else
+				cxx_et(c, CXX_TY_UNKNOWN, false);
+		}
 	}
 }
 
@@ -923,11 +1077,15 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 	uint32_t n;
 
 	if (cxx_is_assignment_operator(c, &n)) {
+		qty l = c->etype;
+		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == TY_PTR);
+
 		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;	/* a fold over = */
 		while (n--)
 			cxx_advance(c);
 		cxx_initializer_parse(c);
+		cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);	/* (a class's operator=: not resolved yet) */
 	}
 }
 

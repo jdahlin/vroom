@@ -156,7 +156,10 @@ struct cxx_scope {
 typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
 
 /* a member function body, default argument or initializer parsed once its class is complete */
-typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; } cxx_late;
+/* a function parameter: its name (0: unnamed) and type, declared in the body's scope */
+typedef struct cxx_param { uint32_t name; qty ty; } cxx_param;
+
+typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams; } cxx_late;
 
 typedef struct cxx {
 	pp *p;
@@ -187,6 +190,9 @@ typedef struct cxx {
 	/* types (types.c): the decl-specifiers' type, a declarator's base and result */
 	qty ds_type, type_in, type_out;
 	qty *fn_params;			/* the last parameter clause's types (types.c) */
+	uint32_t *fn_pnames;		/* ... and names */
+	cxx_param *decl_params;		/* the last declarator's function parameters (its body's names) */
+	uint32_t ndecl_params, cdecl_params;
 	uint32_t fn_nparams, fn_cparams;
 	uint8_t fn_variadic, fn_unknown;
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
@@ -197,7 +203,7 @@ typedef struct cxx {
 	uint32_t nclass_info;
 	struct cxx_stats {
 		uint32_t classes, classes_laid_out, classes_skipped[16];	/* (by CXX_SKIP_*) */
-		uint32_t declarations, declarations_typed, symbols;
+		uint32_t declarations, declarations_typed, symbols, expressions, expressions_typed;
 	} stats;
 	/* instantiation (instantiate.c) */
 	cxx_targ *targs;		/* the last template argument list's arguments */
@@ -227,6 +233,13 @@ typedef struct cxx {
 	struct cxx_entity *packs_seen[8];	/* the packs lookups found since the last reset (an expansion's) */
 	uint32_t npacks_seen;
 	uint8_t packs_overflow;
+	/* expressions' types (typing.c) */
+	qty etype;			/* the last expression's type (CXX_TY_UNKNOWN: not known) */
+	uint8_t elval;			/* ... an lvalue */
+	cxx_entity *ecallee;		/* a name that is a set of functions: for the call that follows */
+	qty *cargs;			/* the last call's argument types */
+	uint32_t ncargs, ccargs;
+	qty this_type;			/* in a member function's body: the class (this is a pointer to it) */
 	uint8_t in_template_argument;	/* parsing a template argument's type-id: a trailing ... is an expansion */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
 } cxx;
 
@@ -317,6 +330,13 @@ VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);
 VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s);
 VPRIV void cxx_class_specifier_for_instance(cxx *c);
 VPRIV bool cxx_template_id_spell(cxx *c, cxx_entity *te, const cxx_targ *a, uint32_t n, char *buf, size_t cap, size_t *len);
+
+/* expressions' types (typing.c) */
+VPRIV void cxx_et(cxx *c, qty t, bool lvalue);
+VPRIV qty cxx_number_type(cxx *c, const cxx_token *t);
+VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r);
+VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue);
+VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, uint32_t nargs);
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);
