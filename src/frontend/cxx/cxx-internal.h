@@ -100,7 +100,9 @@ typedef struct cxx_tparam {
 
 /* a template argument, as far as it is known: a type or an integer value */
 typedef struct cxx_targ {
-	uint8_t kind;		/* 0 unknown, 1 type, 2 value, 3 a value placeholder (v: the parameter's index) */
+	const struct cxx_targ *list;	/* kind 6: the argument list the deduced pack is a slice of (not hashed) */
+	uint8_t kind;		/* 0 unknown, 1 type, 2 value, 3 a value placeholder (v: its parameter's index), 4 a template
+			   (v: its entity), 5 a pack placeholder's expansion (v: index), 6 a deduced pack (t: first, v: count) */
 	qty t;
 	int64_t v;
 } cxx_targ;
@@ -119,6 +121,13 @@ typedef struct cxx_entity {
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
+	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
+	   per element, pack_index then the element (ty, value) */
+	struct cxx_targ *pack;
+	uint32_t npack;
+	int32_t pack_index;
+	uint8_t is_pack;
+	uint16_t pack_placeholder;	/* a partial specialization's pack parameter: its index + 1 */
 	uint8_t has_value;
 	cxx_scope **specs;		/* class template: its partial and explicit specializations' scopes */
 	uint32_t nspecs;
@@ -214,7 +223,11 @@ typedef struct cxx {
 	char name_path[512];		/* the qualified name of the scope being parsed (for the layout dump) */
 	uint32_t name_path_len;
 	uint8_t name_path_valid;	/* every enclosing scope is nameable (no anonymous namespace, no function) */
-	uint32_t implicit_typename;	/* > 0: C++20 P0634 contexts, where a dependent qualified name is a type */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
+	uint32_t implicit_typename;	/* > 0: C++20 P0634 contexts, where a dependent qualified name is a type */
+	struct cxx_entity *packs_seen[8];	/* the packs lookups found since the last reset (an expansion's) */
+	uint32_t npacks_seen;
+	uint8_t packs_overflow;
+	uint8_t in_template_argument;	/* parsing a template argument's type-id: a trailing ... is an expansion */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
 } cxx;
 
 /* tokens (token.c) */
@@ -297,6 +310,7 @@ VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
+VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);	/* i < 0: back to the whole pack */
 VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst);
 VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
 VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);

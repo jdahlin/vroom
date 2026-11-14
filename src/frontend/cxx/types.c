@@ -5,8 +5,8 @@
  *
  * References are TY_PTR types with ext 1 (T&) or 2 (T&&): distinct when
  * interned, passed as pointers (their ABI).  wchar_t, char8_t, char16_t and
- * char32_t get the C kinds of the same size and signedness for now (they
- * are distinct types in C++: overloading and mangling need that later).
+ * char32_t are the C kinds of their size and signedness with ext 1: distinct
+ * types (X<wchar_t> is its own instance), the same code.
  *
  * A class becomes a C record and is laid out by cc_layout_record when C's
  * rules are C++'s for it: no base classes, no virtual functions, every data
@@ -27,10 +27,15 @@ VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
 	if (s->v_void) k = TY_VOID;
 	else if (s->v_bool) k = TY_BOOL;
 	else if (s->v_char) k = s->v_unsigned ? TY_UCHAR : s->v_signed ? TY_SCHAR : TY_CHAR;
-	else if (s->v_char8) k = TY_UCHAR;
-	else if (s->v_char16) k = TY_USHORT;
-	else if (s->v_char32) k = TY_UINT;
-	else if (s->v_wchar) k = TY_INT;
+	else if (s->v_char8 || s->v_char16 || s->v_char32 || s->v_wchar) {
+		/* distinct types (X<wchar_t> is not X<int>): the C kind of their size and signedness, ext 1 */
+		ctype t = c->ast->ty[s->v_char8 ? TY_UCHAR : s->v_char16 ? TY_USHORT : s->v_char32 ? TY_UINT : TY_INT];
+
+		if (c->tentative)
+			return CXX_TY_UNKNOWN;
+		t.ext = 1;
+		return cc_type_qualify(c->ast, QT(cc_type_intern(c->ast, &t), 0), s->quals);
+	}
 	else if (s->v_float) k = TY_FLOAT;
 	else if (s->v_double) k = s->v_long ? TY_LDOUBLE : TY_DOUBLE;
 	else if (s->v_float128) k = TY_FLOAT128;

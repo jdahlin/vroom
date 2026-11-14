@@ -77,6 +77,7 @@ VPRIV cxx_entity *cxx_declare(cxx *c, cxx_scope *s, uint32_t name, int kind)
 	e = calloc(1, sizeof *e);
 	e->name = name, e->kind = (uint8_t)kind;
 	e->ty = CXX_TY_UNKNOWN;
+	e->pack_index = -1;
 	if (!*slot)
 		s->nnames++;
 	/* types and templates first: a name that is both (struct stat and stat()) is a value
@@ -141,6 +142,19 @@ VPRIV cxx_entity *cxx_lookup(cxx *c, uint32_t name)
 		if (e) {
 			if (e->dependent || e->kind == CXX_ENTITY_DEPENDENT)
 				c->dependent_seen = 1;
+			for (cxx_entity *x = e; x; x = x->next)
+				if (x->is_pack && x->pack_index < 0) {	/* a pack: an enclosing expansion's */
+					uint32_t k = 0;
+
+					while (k < c->npacks_seen && c->packs_seen[k] != x)
+						k++;
+					if (k == c->npacks_seen) {
+						if (k < 8)
+							c->packs_seen[c->npacks_seen++] = x;
+						else
+							c->packs_overflow = 1;
+					}
+				}
 			return e;
 		}
 	}

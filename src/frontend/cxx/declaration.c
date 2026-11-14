@@ -242,20 +242,74 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 
 static int64_t cxx_literal_value(cxx *c);
 
+/* does the token `ahead` end a template argument: a comma, or a > that is not the first piece of >= */
+static bool cxx_ends_argument(cxx *c, uint32_t ahead)
+{
+	const cxx_token *t = cxx_peek(c, ahead), *n = cxx_peek(c, ahead + 1);
+
+	if (t->kind == LEX_TOKEN_COMMA)
+		return true;
+	return t->kind == LEX_TOKEN_GREATER && !(n->kind == LEX_TOKEN_EQUAL && n->s == t->s + 1);
+}
+static void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a, uint32_t n);
+
 /* one template argument; *out: what it is, as far as known (a type, an integer literal) */
 static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 {
 	cxx_token *t = cxx_peek(c, 0), *n = cxx_peek(c, 1);
 
 	out->kind = 0, out->t = 0, out->v = 0;	/* (all of it hashed by the instance cache) */
+	/* a template name alone (possibly qualified): a template template argument */
+	if ((t->kind == LEX_TOKEN_IDENTIFIER && !t->kw) || t->kind == LEX_TOKEN_COLON_COLON) {
+		uint32_t save = c->pos;
+		cxx_scope *q;
+		bool dep;
+		cxx_token *id, *after;
+
+		cxx_nested_name_parse(c, &q, &dep);
+		id = cxx_peek(c, 0), after = cxx_peek(c, 1);
+		if (id->kind == LEX_TOKEN_IDENTIFIER && !id->kw && !dep &&
+		    (cxx_ends_argument(c, 1) || after->kind == LEX_TOKEN_ELLIPSIS)) {
+			cxx_entity *e = q ? cxx_lookup_in(c, q, id->id, 0) : cxx_lookup(c, id->id);
+
+			e = e ? cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE) : NULL;
+			if (e && e->kind == CXX_ENTITY_TEMPLATE && !e->is_pack) {
+				cxx_advance(c);
+				if (e->tmpl && !e->dependent)
+					out->kind = 4, out->v = (int64_t)(intptr_t)e;
+				return;
+			}
+		}
+		c->pos = save;	/* (no tokens were edited: they are immutable) */
+	}
+	/* sizeof...(pack): its length */
+	if (t->kw == CXX_KW_sizeof && n->kind == LEX_TOKEN_ELLIPSIS && cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN &&
+	    cxx_peek(c, 3)->kind == LEX_TOKEN_IDENTIFIER && cxx_peek(c, 4)->kind == LEX_TOKEN_RIGHT_PAREN &&
+	    cxx_ends_argument(c, 5)) {
+		cxx_entity *e = cxx_lookup(c, cxx_peek(c, 3)->id);
+
+		for (int k = 0; k < 5; k++)
+			cxx_advance(c);
+		for (; e; e = e->next)
+			if (e->is_pack && !e->pack_placeholder) {
+				out->kind = 2, out->v = e->npack;
+				break;
+			}
+		c->npacks_seen = 0;	/* (sizeof... is not an expansion) */
+		return;
+	}
 	/* a type-id if it parses as one and ends the argument, else an expression */
 	if (cxx_try_type_id(c)) {
+		uint8_t saved = c->in_template_argument;
+
+		c->in_template_argument = 1;
 		cxx_type_id_parse(c);
+		c->in_template_argument = saved;
 		if (c->type_out != CXX_TY_UNKNOWN)
 			out->kind = 1, out->t = c->type_out;
 		return;
 	}
-	if (n->kind == LEX_TOKEN_COMMA || n->kind == LEX_TOKEN_GREATER) {
+	if (cxx_ends_argument(c, 1)) {
 		int64_t v = cxx_literal_value(c);
 		cxx_entity *e = t->kind == LEX_TOKEN_IDENTIFIER && !t->kw ? cxx_lookup(c, t->id) : NULL;
 
@@ -284,10 +338,79 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 	if (!cxx_accept_greater(c)) {
 		for (;;) {
 			cxx_targ a;
+			uint32_t start = c->pos, nseen = c->npacks_seen;
+			cxx_entity *seen[8];
 
+			memcpy(seen, c->packs_seen, sizeof seen);
+			c->npacks_seen = 0, c->packs_overflow = 0;
 			cxx_template_argument_parse(c, &a);
-			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
-				a.kind = 0;	/* a pack expansion: not yet */
+			if (cxx_is(c, LEX_TOKEN_ELLIPSIS)) {
+				/* a pack expansion: once per element (an instance's packs), a pattern's trailing
+				   pack (Rest...: kind 5), or unknown */
+				uint32_t end = c->pos;
+
+				cxx_advance(c);
+				if (c->npacks_seen == 1 && c->packs_seen[0]->pack_placeholder) {
+					if (end == start + 1)
+						a.kind = 5, a.v = c->packs_seen[0]->pack_placeholder - 1, a.t = 0;
+					else
+						a.kind = 0;	/* (a pattern Ts*... : not matched yet) */
+				} else if (c->npacks_seen && !c->packs_overflow && c->instantiating && !c->tentative) {
+					cxx_entity *packs[8];
+					uint32_t np = c->npacks_seen, len = c->packs_seen[0]->npack, after = c->pos;
+					bool ok = true;
+
+					memcpy(packs, c->packs_seen, sizeof packs);
+					for (uint32_t k = 0; k < np; k++)
+						ok &= packs[k]->npack == len && !packs[k]->pack_placeholder;
+					for (uint32_t i = 0; ok && i < len; i++) {
+						cxx_targ e;
+
+						for (uint32_t k = 0; k < np; k++)
+							cxx_pack_element(c, packs[k], (int32_t)i);
+						c->pos = start;
+						cxx_template_argument_parse(c, &e);
+						ok = c->pos == end;
+						if (n < 32)
+							args[n++] = e;
+						else
+							args[31].kind = 0;
+					}
+					for (uint32_t k = 0; k < np; k++)
+						cxx_pack_element(c, packs[k], -1);
+					c->pos = after;
+					if (!ok && n)
+						args[n - 1].kind = 0;
+					c->npacks_seen = nseen;
+					memcpy(c->packs_seen, seen, sizeof seen);
+					if (!cxx_accept(c, LEX_TOKEN_COMMA))
+						break;
+					continue;
+				} else
+					a.kind = 0;	/* (outside an instance: not known) */
+				c->npacks_seen = nseen;	/* (the expansion used its packs) */
+				memcpy(c->packs_seen, seen, sizeof seen);
+			} else {
+				/* not expanded here: its packs belong to an enclosing expansion (leaf<Is, Ts>...) */
+				cxx_entity *mine[8];
+				uint32_t nmine = c->npacks_seen;
+
+				memcpy(mine, c->packs_seen, sizeof mine);
+				c->npacks_seen = nseen;
+				memcpy(c->packs_seen, seen, sizeof seen);
+				for (uint32_t k = 0; k < nmine; k++) {
+					uint32_t j = 0;
+
+					while (j < c->npacks_seen && c->packs_seen[j] != mine[k])
+						j++;
+					if (j == c->npacks_seen) {
+						if (j < 8)
+							c->packs_seen[c->npacks_seen++] = mine[k];
+						else
+							c->packs_overflow = 1;
+					}
+				}
+			}
 			if (n < 32)
 				args[n++] = a;
 			else
@@ -398,9 +521,13 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 			return true;
 		}
 		if (b == CXX_BUILTIN_TEMPLATE && cxx_peek(c, 1)->kind == LEX_TOKEN_LESS) {
+			uint32_t id = t->id;
+
 			cxx_advance(c);
 			cxx_template_arguments_parse(c);
 			c->last_type = NULL, c->last_type_dependent = 1;
+			if (!c->template_depth && !c->tentative)
+				cxx_builtin_template(c, id, c->targs, c->ntargs);
 			return true;
 		}
 	}
@@ -464,6 +591,37 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 no:
 	cxx_rewind(c, save, save_undo);
 	return false;
+}
+
+/*
+ * clang's builtin templates, as far as libc++ uses them:
+ *   __make_integer_seq<Seq, T, N>     Seq<T, 0, 1, ..., N-1>
+ *   __type_pack_element<I, Ts...>     the I-th of Ts
+ * The result goes to c->last_type (unknown otherwise).
+ */
+static void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a, uint32_t n)
+{
+	const vident *v = &vintern_ents[id];
+
+	if (v->len == 18 && !memcmp(v->s, "__make_integer_seq", 18) && n == 3 && a[0].kind == 4 && a[1].kind == 1 && a[2].kind == 2 &&
+	    a[2].v >= 0 && a[2].v < 31) {
+		cxx_targ args[32];
+		cxx_entity *inst;
+
+		args[0] = a[1];
+		for (int64_t i = 0; i < a[2].v; i++)
+			args[i + 1] = (cxx_targ){ .kind = 2, .v = i };
+		inst = cxx_instantiate(c, (cxx_entity *)(intptr_t)a[0].v, args, (uint32_t)a[2].v + 1, false);
+		if (inst)
+			c->last_type = inst, c->last_type_dependent = 0;
+	} else if (v->len == 19 && !memcmp(v->s, "__type_pack_element", 19) && n >= 2 && a[0].kind == 2 && a[0].v >= 0 &&
+		   a[0].v + 1 < n && a[a[0].v + 1].kind == 1) {
+		cxx_entity *r = calloc(1, sizeof *r);	/* (a type with no name: an entity of its own) */
+
+		r->kind = CXX_ENTITY_TYPE, r->ty = a[a[0].v + 1].t, r->pack_index = -1;
+		r->members = cxx_type_class_scope(c, r->ty);
+		c->last_type = r, c->last_type_dependent = 0;
+	}
 }
 
 /* decl-specifier-seq; returns DS_* flags (0: nothing was consumed) */
@@ -791,7 +949,8 @@ static int64_t cxx_literal_value(cxx *c)
 	uint32_t i = 0;
 	int next = cxx_peek(c, 1)->kind;
 	bool ends = next == LEX_TOKEN_RIGHT_SQUARE || next == LEX_TOKEN_SEMICOLON || next == LEX_TOKEN_COMMA || next == LEX_TOKEN_EQUAL ||
-		    next == LEX_TOKEN_LEFT_BRACE || next == LEX_TOKEN_GREATER || next == LEX_TOKEN_RIGHT_PAREN || next == LEX_TOKEN_RIGHT_BRACE;
+		    next == LEX_TOKEN_LEFT_BRACE || (next == LEX_TOKEN_GREATER && cxx_ends_argument(c, 1)) || next == LEX_TOKEN_RIGHT_PAREN ||
+		    next == LEX_TOKEN_RIGHT_BRACE;
 
 	if (!ends)
 		return -1;	/* an expression that starts here */
@@ -842,7 +1001,10 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 	while (cxx_ptr_operator_parse(c, &t))
 		;
 	cxx_attributes_skip(c);
-	cxx_accept(c, LEX_TOKEN_ELLIPSIS);	/* a pack */
+	/* a pack declarator (Ts... ts, Ts&&...): not T... in a template argument list, that is an expansion */
+	if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && (cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN ||
+					      cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE || !c->in_template_argument))
+		cxx_advance(c);
 	if (!abstract_ok && cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER) {
 		/* a structured binding: auto [a, b, ...c] */
 		cxx_advance(c);
@@ -1747,73 +1909,118 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 
 static void cxx_class_body_parse(cxx *c, cxx_scope *cs);
 
+/* one base-specifier: its type (CXX_TY_UNKNOWN if not known), and whether it is virtual */
+static qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
+{
+	cxx_scope *q;
+	bool dep;
+	cxx_entity *base = NULL;
+	qty base_ty = CXX_TY_UNKNOWN;
+	bool is_virtual = false;
+
+	cxx_attributes_skip(c);
+	while (cxx_is_kw(c, CXX_KW_virtual) || cxx_is_kw(c, CXX_KW_public) || cxx_is_kw(c, CXX_KW_protected) ||
+	       cxx_is_kw(c, CXX_KW_private)) {
+		is_virtual |= cxx_is_kw(c, CXX_KW_virtual);
+		cxx_advance(c);
+	}
+	if (cxx_is_kw(c, CXX_KW_decltype)) {
+		cxx_advance(c);
+		cxx_skip_balanced(c);
+		cs->has_dependent_base = 1;
+	} else {
+		cxx_accept_kw(c, CXX_KW_typename);
+		cxx_nested_name_parse(c, &q, &dep);
+		cxx_accept_kw(c, CXX_KW_template);
+		if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
+			cxx_fail(c, "expected a base class name");
+		base = cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id);
+		cxx_advance(c);
+		if (cxx_is(c, LEX_TOKEN_LESS)) {
+			uint8_t seen = c->dependent_seen;
+
+			c->dependent_seen = 0;
+			cxx_template_arguments_parse(c);
+			/* a template-id base: inside a template it may depend on its parameters; elsewhere an
+			   instance (completed: a base must be complete), else the primary's members */
+			cxx_entity *te = base ? cxx_entity_template(base) : NULL;
+			cxx_entity *inst = te && !c->template_depth && !c->dependent_seen && !dep ?
+					   cxx_instantiate(c, te, c->targs, c->ntargs, true) : NULL;
+
+			c->dependent_seen |= seen;
+			base_ty = inst ? inst->ty : CXX_TY_UNKNOWN;
+			if (inst && inst->members)
+				cxx_scope_use(c, cs, inst->members);
+			else if (c->template_depth || !te || !te->members)
+				cs->has_dependent_base = 1;
+			else {
+				cxx_scope_use(c, cs, te->members);
+				for (uint32_t i = 0; i < te->nspecs; i++)
+					cxx_scope_use(c, cs, te->specs[i]);
+			}
+		} else {
+			base = base ? cxx_entity_prefer(base, CXX_ENTITY_TYPE) : NULL;
+			if (base && base->kind == CXX_ENTITY_TYPE && !base->dependent && base->ty != CXX_TY_UNKNOWN && !c->tentative) {
+				cxx_scope *bs = cxx_type_class_scope(c, base->ty);	/* (an instance's typedef: completed) */
+
+				base_ty = base->ty;
+				if (bs && !base->members)
+					base->members = bs;
+			}
+			if (dep || !base || base->kind == CXX_ENTITY_DEPENDENT || base->dependent || !base->members)
+				cs->has_dependent_base = 1;
+			else
+				cxx_scope_use(c, cs, base->members);
+		}
+	}
+	*virtual_out = is_virtual;
+	return base_ty;
+}
+
 static void cxx_base_clause_parse(cxx *c, cxx_scope *cs)
 {
 	do {
-		cxx_scope *q;
-		bool dep;
-		cxx_entity *base = NULL;
-		qty base_ty = CXX_TY_UNKNOWN;
-		bool is_virtual = false;
+		uint32_t start = c->pos, nseen = c->npacks_seen;
+		cxx_entity *seen[8];
+		bool is_virtual;
+		qty base_ty;
 
-		cxx_attributes_skip(c);
-		while (cxx_is_kw(c, CXX_KW_virtual) || cxx_is_kw(c, CXX_KW_public) || cxx_is_kw(c, CXX_KW_protected) ||
-		       cxx_is_kw(c, CXX_KW_private)) {
-			is_virtual |= cxx_is_kw(c, CXX_KW_virtual);
-			cxx_advance(c);
-		}
-		if (cxx_is_kw(c, CXX_KW_decltype)) {
-			cxx_advance(c);
-			cxx_skip_balanced(c);
-			cs->has_dependent_base = 1;
-		} else {
-			cxx_accept_kw(c, CXX_KW_typename);
-			cxx_nested_name_parse(c, &q, &dep);
-			cxx_accept_kw(c, CXX_KW_template);
-			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
-				cxx_fail(c, "expected a base class name");
-			base = cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id);
-			cxx_advance(c);
-			if (cxx_is(c, LEX_TOKEN_LESS)) {
-				uint8_t seen = c->dependent_seen;
+		memcpy(seen, c->packs_seen, sizeof seen);
+		c->npacks_seen = 0, c->packs_overflow = 0;
+		base_ty = cxx_base_specifier_parse(c, cs, &is_virtual);
+		if (cxx_is(c, LEX_TOKEN_ELLIPSIS)) {
+			/* Bases...: one base per element of the packs it names (in an instance), else unknown */
+			uint32_t end = c->pos, after;
 
-				c->dependent_seen = 0;
-				cxx_template_arguments_parse(c);
-				/* a template-id base: inside a template it may depend on its parameters; elsewhere an
-				   instance (completed: a base must be complete), else the primary's members */
-				cxx_entity *te = base ? cxx_entity_template(base) : NULL;
-				cxx_entity *inst = te && !c->template_depth && !c->dependent_seen && !dep ?
-						   cxx_instantiate(c, te, c->targs, c->ntargs, true) : NULL;
+			cxx_advance(c);
+			after = c->pos;
+			if (c->npacks_seen && !c->packs_overflow && c->instantiating && !c->tentative) {
+				cxx_entity *packs[8];
+				uint32_t np = c->npacks_seen, len = c->packs_seen[0]->npack;
+				bool ok = true;
 
-				c->dependent_seen |= seen;
-				base_ty = inst ? inst->ty : CXX_TY_UNKNOWN;
-				if (inst && inst->members)
-					cxx_scope_use(c, cs, inst->members);
-				else if (c->template_depth || !te || !te->members)
-					cs->has_dependent_base = 1;
-				else {
-					cxx_scope_use(c, cs, te->members);
-					for (uint32_t i = 0; i < te->nspecs; i++)
-						cxx_scope_use(c, cs, te->specs[i]);
+				memcpy(packs, c->packs_seen, sizeof packs);
+				for (uint32_t k = 0; k < np; k++)
+					ok &= packs[k]->npack == len && !packs[k]->pack_placeholder;
+				for (uint32_t i = 0; ok && i < len; i++) {
+					for (uint32_t k = 0; k < np; k++)
+						cxx_pack_element(c, packs[k], (int32_t)i);
+					c->pos = start;
+					base_ty = cxx_base_specifier_parse(c, cs, &is_virtual);
+					ok = c->pos == end;
+					cxx_class_base(c, ok ? base_ty : CXX_TY_UNKNOWN, is_virtual);
 				}
-			} else {
-				base = base ? cxx_entity_prefer(base, CXX_ENTITY_TYPE) : NULL;
-				if (base && base->kind == CXX_ENTITY_TYPE && !base->dependent && base->ty != CXX_TY_UNKNOWN && !c->tentative) {
-					cxx_scope *bs = cxx_type_class_scope(c, base->ty);	/* (an instance's typedef: completed) */
-
-					base_ty = base->ty;
-					if (bs && !base->members)
-						base->members = bs;
-				}
-				if (dep || !base || base->kind == CXX_ENTITY_DEPENDENT || base->dependent || !base->members)
-					cs->has_dependent_base = 1;
-				else
-					cxx_scope_use(c, cs, base->members);
-			}
-		}
-		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
-			base_ty = CXX_TY_UNKNOWN;	/* (a pack of bases) */
-		cxx_class_base(c, base_ty, is_virtual);
+				for (uint32_t k = 0; k < np; k++)
+					cxx_pack_element(c, packs[k], -1);
+				if (!ok)
+					cxx_class_base(c, CXX_TY_UNKNOWN, false);
+				c->pos = after;
+			} else
+				cxx_class_base(c, CXX_TY_UNKNOWN, is_virtual);	/* (a pack of bases outside an instance) */
+		} else
+			cxx_class_base(c, base_ty, is_virtual);
+		c->npacks_seen = nseen;
+		memcpy(c->packs_seen, seen, sizeof seen);
 	} while (cxx_accept(c, LEX_TOKEN_COMMA));
 }
 
