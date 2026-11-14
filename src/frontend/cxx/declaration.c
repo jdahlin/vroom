@@ -1601,6 +1601,7 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 	uint8_t variadic = 0, unknown = 0;
 
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+	c->cpack_n = UINT32_MAX;	/* (this list's) */
 	if (!cxx_accept(c, LEX_TOKEN_RIGHT_PAREN)) {
 		for (;;) {
 			bool q, f;
@@ -1611,13 +1612,58 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 				break;
 			}
 			cxx_attributes_skip(c);
+			uint32_t spec_pos = c->pos;
+
 			if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 				cxx_fail(c, "expected a parameter type");
-			uint32_t pname;
+			uint32_t pname, decl_pos = c->pos;
 
 			c->type_in = c->ds_type;
 			c->decl_pack = 0;
 			pname = cxx_declarator_parse(c, true, &q, &f, NULL);
+			if (c->decl_pack && !c->template_depth && !c->tentative && !c->sig_own_pack) {	/* (a function template instance's own pack: expanded below) */
+				/* Ts... args (Ts&&..., const Ts&...) in an instance, Ts a bound type pack: a parameter per
+				   element, the declarator applied to each (std::function's operator()(_ArgTypes... __arg)) */
+				uint32_t k0 = spec_pos;
+				cxx_entity *pe;
+
+				while (k0 < decl_pos && (c->tok[k0].kw == CXX_KW_const || c->tok[k0].kw == CXX_KW_volatile))
+					k0++;
+				pe = k0 < decl_pos && c->tok[k0].kind == LEX_TOKEN_IDENTIFIER && !c->tok[k0].kw ? cxx_lookup(c, c->tok[k0].id) : NULL;
+				if (pe && pe->is_pack && !pe->pack_placeholder && pe->pack && pe->pack_index < 0) {	/* (its elements types: checked below) */
+					bool all = true, cq = k0 > spec_pos || (k0 + 1 < decl_pos && c->tok[k0 + 1].kw == CXX_KW_const);
+					uint32_t end = c->pos;
+
+					for (uint32_t k = 0; k < pe->npack && all; k++)
+						all = pe->pack[k].kind == 1 && pe->pack[k].t != CXX_TY_UNKNOWN;
+					if (all && !cxx_is(c, LEX_TOKEN_EQUAL) && pe->npack <= 32) {
+						c->cpack_name = pname, c->cpack_at = n, c->cpack_n = pe->npack;
+						for (uint32_t k = 0; k < pe->npack; k++) {
+							bool q2, f2;
+							qty et = pe->pack[k].t;
+
+							if (cq)
+								et = QT(QI(et), QQ(et) | Q_CONST);
+							c->pos = decl_pos, c->type_in = et, c->decl_pack = 0;
+							cxx_declarator_parse(c, true, &q2, &f2, NULL);
+							if (n == cap) {
+								cap = cap ? cap * 2 : 8;
+								types = realloc(types, cap * sizeof *types);
+								names = realloc(names, cap * sizeof *names);
+								decls = realloc(decls, cap * sizeof *decls);
+							}
+							names[n] = 0;
+							decls[n] = types[n] = cxx_type_parameter_adjust(c, c->type_out);
+							c->cpack_types[k] = types[n];
+							n++;
+						}
+						c->pos = end, c->decl_pack = 0;
+						if (!cxx_accept(c, LEX_TOKEN_COMMA))
+							break;
+						continue;
+					}
+				}
+			}
 			if (c->decl_pack)
 				pack = n;	/* a parameter pack: Ts&&... ts */
 			t = cxx_type_parameter_adjust(c, c->type_out);
@@ -1955,7 +2001,29 @@ static void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
 	c->late[c->nlate].params = c->ndecl_params ? malloc(c->ndecl_params * sizeof(cxx_param)) : NULL;
 	if (c->ndecl_params)
 		memcpy(c->late[c->nlate].params, c->decl_params, c->ndecl_params * sizeof(cxx_param));
+	c->late[c->nlate].pack_n = UINT32_MAX, c->late[c->nlate].pack_types = NULL;
+	if (c->cpack_n != UINT32_MAX && c->cpack_name > 1 && c->cpack_at + c->cpack_n <= c->ndecl_params) {
+		c->late[c->nlate].pack_name = c->cpack_name, c->late[c->nlate].pack_at = c->cpack_at, c->late[c->nlate].pack_n = c->cpack_n;
+		c->late[c->nlate].pack_types = malloc((c->cpack_n ? c->cpack_n : 1) * sizeof(qty));
+		memcpy(c->late[c->nlate].pack_types, c->cpack_types, c->cpack_n * sizeof(qty));
+	}
 	c->late[c->nlate++].what = (uint8_t)what;
+}
+
+/* a late body's parameter pack of a class's type pack (As... a): a, a pack of those parameters; code generation
+   fills its symbols (cxx_gen_function_begin) */
+static void cxx_late_pack_declare(cxx *c, const cxx_late *l, cxx_scope *fs)
+{
+	cxx_entity *pe;
+
+	if (l->pack_n == UINT32_MAX || !l->pack_types || !(pe = cxx_declare(c, fs, l->pack_name, CXX_ENTITY_VALUE)))
+		return;
+	pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN, pe->npack = l->pack_n;
+	pe->pack = calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack);
+	for (uint32_t i = 0; i < l->pack_n; i++)
+		pe->pack[i].kind = 1, pe->pack[i].t = l->pack_types[i];
+	pe->pack_syms = calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack_syms);
+	c->gen_pack_entity = pe, c->gen_pack_from = l->pack_at, c->gen_pack_n = l->pack_n;
 }
 
 static void cxx_function_body_inner_parse(cxx *c);
@@ -2118,7 +2186,9 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 
 			if (gen) {
 				l.fn->fn_inline = 1;
+				cxx_late_pack_declare(c, &l, fs);
 				gen = cxx_gen_function_begin(c, l.fn, fs, l.params, l.nparams);
+				c->gen_pack_entity = NULL;
 			}
 			free(l.params);
 			cxx_function_body_parse(c);
@@ -4165,7 +4235,17 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	if (any_return && c->type_in == CXX_TY_UNKNOWN)
 		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
 	c->decl_return = CXX_TY_UNKNOWN;
+	c->cpack_n = UINT32_MAX;
+	uint8_t own_pack = c->sig_own_pack;
+
+	c->sig_own_pack = pack_n != UINT32_MAX;
 	cxx_declarator_parse(c, false, &q, &f, NULL);
+	c->sig_own_pack = own_pack;
+	uint32_t cpack_name = c->cpack_name, cpack_at = c->cpack_at, cpack_n = c->cpack_n;
+	qty cpack_types[32];
+
+	if (cpack_n != UINT32_MAX)
+		memcpy(cpack_types, c->cpack_types, cpack_n * sizeof *cpack_types);
 	t = f ? c->type_out : CXX_TY_UNKNOWN;
 	c->sig_is_function = f;
 	c->sig_auto = 0;
@@ -4264,8 +4344,21 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				}
 				if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
 				    pack_n == UINT32_MAX && !cxx_is_kw(c, CXX_KW_try)) {
+					cxx_entity *pe = NULL;
+
+					if (cpack_n != UINT32_MAX && cpack_name > 1 && cpack_at + cpack_n <= c->ndecl_params &&
+					    (pe = cxx_declare(c, fs, cpack_name, CXX_ENTITY_VALUE))) {
+						/* As... a of a class's pack, expanded: a, a pack of the parameters (a... in the body) */
+						pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN, pe->npack = cpack_n;
+						pe->pack = calloc(cpack_n ? cpack_n : 1, sizeof *pe->pack);
+						for (uint32_t i = 0; i < cpack_n; i++)
+							pe->pack[i].kind = 1, pe->pack[i].t = cpack_types[i];
+						pe->pack_syms = calloc(cpack_n ? cpack_n : 1, sizeof *pe->pack_syms);
+						c->gen_pack_entity = pe, c->gen_pack_from = cpack_at, c->gen_pack_n = cpack_n;
+					}
 					gi->ty = t;
 					gen = cxx_gen_function_begin(c, gi, fs, c->decl_params, c->ndecl_params);
+					c->gen_pack_entity = NULL;
 				} else if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
 					   pack_n != UINT32_MAX && c->decl_pack_param < c->ndecl_params && !cxx_is_kw(c, CXX_KW_try) &&
 					   AST_TYPE(c->ast, t)->n == c->ndecl_params - 1 + pack_n && AST_TYPE(c->ast, t)->n <= 32) {
@@ -4342,7 +4435,9 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 
 		if (gen) {
 			l->fn->fn_inline = 1;
+			cxx_late_pack_declare(c, l, fs);
 			gen = cxx_gen_function_begin(c, l->fn, fs, l->params, l->nparams);
+			c->gen_pack_entity = NULL;
 		}
 		cxx_function_body_parse(c);
 		if (gen)

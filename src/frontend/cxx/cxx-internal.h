@@ -238,7 +238,8 @@ typedef struct cxx_gen_lambda {
 	} cap[32];
 } cxx_gen_lambda;
 
-typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn; } cxx_late;
+typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn;
+	uint32_t pack_name, pack_at, pack_n; qty *pack_types; } cxx_late;	/* pack_*: a class pack expanded in the parameters (As... a; pack_n UINT32_MAX: none) */
 
 typedef struct cxx {
 	pp *p;
@@ -467,7 +468,10 @@ typedef struct cxx {
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;
-	uint32_t attr_align;		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
+	uint32_t attr_align;
+	uint32_t cpack_name, cpack_at, cpack_n;	/* the last parameter list's pack of a class's bound type pack (As... a), expanded: its name, first parameter, count */
+	qty cpack_types[32];
+	uint8_t sig_own_pack;		/* the function whose declarator is parsed is an instance with a pack of its own (sig_pack_n) */		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */

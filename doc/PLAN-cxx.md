@@ -1672,3 +1672,10 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   (flytt om kopian är borttagen), skalärer och arrayer kopieras (const-medlemmar via sin adress).
   `throw ex;` med `const E& ex` (json:s parse_error, ~500 funktioner) får kod.
 - Test: implicit-copy; run 76/76.  Fork 68/70, 7,7 s CPU, 23 218 funktioner, 24 testkroppar.
+
+### Status 77 (2026-11-14): klasspaket i medlemsfunktioners parametrar
+
+- `R operator()(As... a)`, `const As&... a`, `As&&... a` i en klassmallsinstans (std::function:s
+  operator()): deklaratorn tillämpas på varje element, och i kroppen är `a` ett paket av de parametrarna
+  (sparas i den sena kroppens post; en funktionsmallsinstans egna paket expanderas som förut).
+- Test: class-pack-params; run 77/77.  Fork 68/70, 7,8 s CPU, 23 240 funktioner.
