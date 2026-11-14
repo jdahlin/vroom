@@ -113,7 +113,7 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, qty pt, uint32_t loc)
 				return 0;
 		}
 	}
-	c->skip_explicit = QUNQ(at[0]) != t;
+	c->skip_explicit = QUNQ(at[0]) != t ? 2 : 0;
 	cxx_ctor_use(c, t, at, lv, 1, false);
 	c->skip_explicit = 0;
 	picked = c->ctor_picked, found = c->ctor_found, none = c->ctor_none;
@@ -250,7 +250,7 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 			/* a reference to a class bound to a value of another type ("text" for a const std::string &): a
 			   temporary made by the class's converting constructor */
 			qty at[1] = { AST_NODE_AT(a, x)->ty };
-			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 };
+			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, x) };
 			uint32_t saved = c->enode, tmp;
 
 			if (AST_TYPE(a, to)->ext == 1 && !(QQ(rt) & Q_CONST))
@@ -262,8 +262,10 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 				if (!(x = cxx_gen_nullptr_object(c, x, loc)))
 					return 0;
 			}
+			c->skip_explicit = 2;
 			cxx_ctor_use(c, QUNQ(rt), at, lv, 1, false);
-			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
+			c->skip_explicit = 0;
+			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit == 1)
 				return 0;
 			c->enode = 0;
 			cxx_gen_construct_temp(c, QUNQ(rt), &x, 1, loc);
@@ -328,7 +330,7 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 		{
 			/* a value of another type: the class's converting constructor (0 for _CmpUnspecifiedParam) */
 			qty at[1] = { AST_NODE_AT(a, x)->ty };
-			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 };
+			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, x) };
 			uint32_t saved = c->enode, tmp;
 
 			if (AST_TYPE_KIND(a, at[0]) == TY_ARRAY)
@@ -338,8 +340,10 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 				if (!(x = cxx_gen_nullptr_object(c, x, loc)))
 					return 0;
 			}
+			c->skip_explicit = 2;
 			cxx_ctor_use(c, QUNQ(to), at, lv, 1, false);
-			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
+			c->skip_explicit = 0;
+			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit == 1)
 				return 0;
 			c->enode = 0;
 			cxx_gen_construct_temp(c, QUNQ(to), &x, 1, loc);

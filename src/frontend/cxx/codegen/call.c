@@ -234,7 +234,22 @@ VPRIV bool cxx_gen_defaulted_copy_trivial(cxx *c, qty t)
 	return true;
 }
 
+static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
+
+/* the call f(args) on object (0: none): its node in c->enode.  The expression's type stays the parser's:
+   building the call may instantiate bodies (the callee's, a temporary's destructor) whose expressions
+   reuse c->etype */
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	qty etype = c->etype;
+	uint8_t elval = c->elval, econst = c->econst;
+	int64_t evalue = c->evalue;
+
+	cxx_gen_call_impl(c, f, object, arrow, args, nargs, loc);
+	c->etype = etype, c->elval = elval, c->econst = econst, c->evalue = evalue;
+}
+
+static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
 	const ctype *ft;
@@ -474,6 +489,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		n = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), n, loc);
 		n = cc_node_new_operands(a, N_COMMA, cc_type_pointer(a, QUNQ(ft->base)), loc, n, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc));
 		n = cc_dereference_build(a, n, loc);
+		cxx_gen_prv_add(c, n, 0, 0, tmp);	/* (a prvalue still: T&& binds it, U(T&&) is picked for it) */
 	}
 	if (cxx_gen_is_reference(c, ft->base))
 		n = cxx_gen_referent(c, n, loc);

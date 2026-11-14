@@ -257,6 +257,7 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint
 VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f);
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_np(cxx *c, cxx_ftemplate *f);

@@ -328,6 +328,35 @@ VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f)
 		f->defined = 1;
 }
 
+/*
+ * template<class K> R X::f(const K& v) { ... } for a member template a class X (not a class template)
+ * declared: the same template ([temp.over.link]/6).  The declaration takes the definition's record, so
+ * that the calls deduced through it instantiate this body.  The same function: the name, the number of
+ * template and function parameters, const, the shape of the parameters; vcc does not compare them token
+ * for token, so only when one declaration is like that (two such overloads told apart by enable_if: neither).
+ * A call before the definition has made its instance from the declaration already: not redone.
+ */
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const)
+{
+	cxx_entity def = { .kind = CXX_ENTITY_FUNCTION_TEMPLATE, .ftmpl = f }, *one = NULL;
+	int bare;
+	uint32_t n = 0;
+
+	if (!f || !f->p.params)
+		return;
+	bare = cxx_ftemplate_bare_params(c, &def, nparams);
+	for (cxx_entity *x = set; x; x = x->next) {
+		cxx_ftemplate *g = x->ftmpl;
+
+		if (x->kind != CXX_ENTITY_FUNCTION_TEMPLATE || !g || g == f || x->fn_const != is_const || !g->p.params ||
+		    g->p.params->ntparams != f->p.params->ntparams || cxx_ftemplate_np(c, g) != nparams || (bare >= 0 && cxx_ftemplate_bare_params(c, x, nparams) != bare))
+			continue;
+		one = x, n++;
+	}
+	if (n == 1 && !one->ftmpl->defined)
+		one->ftmpl = f;
+}
+
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e)
 {
 	return e->ftmpl && e->ftmpl->defined;

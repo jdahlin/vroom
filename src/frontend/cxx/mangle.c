@@ -75,6 +75,13 @@ static bool mg_substitution(cxx_mangler *m, int kind, const void *p, qty t)
 	return false;
 }
 
+/* a template as a substitution candidate: the template itself, whichever of its entities names it (the
+   class's own name inside it is another entity of the same template) */
+static const void *mg_tkey(const cxx_entity *e)
+{
+	return e && e->kind == CXX_ENTITY_TEMPLATE && e->tmpl ? (const void *)e->tmpl : (const void *)e;
+}
+
 static void mg_remember(cxx_mangler *m, int kind, const void *p, qty t)
 {
 	if (m->nsubs == 128) {
@@ -417,10 +424,10 @@ static bool mt_type(mg_tok *k)
 			found = found->parent;	/* (a template's own parameter scope: the namespace it is in) */
 		if (e && e->kind == CXX_ENTITY_TEMPLATE && found) {
 			mg_str(k->m, "N");
-			if (!mg_substitution(k->m, CXX_SUB_TEMPLATE, e, 0)) {
+			if (!mg_substitution(k->m, CXX_SUB_TEMPLATE, mg_tkey(e), 0)) {
 				mg_prefix(k->m, (cxx_scope *)found);
 				mg_source_name(k->m, e->name);
-				mg_remember(k->m, CXX_SUB_TEMPLATE, e, 0);
+				mg_remember(k->m, CXX_SUB_TEMPLATE, mg_tkey(e), 0);
 			}
 			k->p++;
 			if (mt_targs(k) && !k->m->bad && mt_is(k, LEX_TOKEN_COLON_COLON) && k->p + 1 < k->e &&
@@ -837,7 +844,7 @@ static int mg_trailing_requires(cxx_mangler *m, uint32_t pos)
 						mg_prefix(m, ce->home);
 					}
 					mg_source_name(m, ce->name);
-					mg_remember(m, CXX_SUB_TEMPLATE, ce, 0);
+					mg_remember(m, CXX_SUB_TEMPLATE, mg_tkey(ce), 0);
 					if (mt_is(&k, LEX_TOKEN_LESS) && !mt_targs(&k))
 						goto bad;
 					if (mg_nested(m, ce->home))
@@ -1171,9 +1178,9 @@ static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, boo
 		return false;
 	mg_str(m, "N");
 	mg_prefix(m, cxx_template_home(ei));
-	if (!mg_substitution(m, CXX_SUB_TEMPLATE, ei, 0)) {
+	if (!mg_substitution(m, CXX_SUB_TEMPLATE, mg_tkey(ei), 0)) {
 		mg_source_name(m, ei->name);
-		mg_remember(m, CXX_SUB_TEMPLATE, ei, 0);
+		mg_remember(m, CXX_SUB_TEMPLATE, mg_tkey(ei), 0);
 	}
 	if (!mt_is(&k, LEX_TOKEN_LESS))
 		goto bad;
@@ -1297,7 +1304,7 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 			m->bad = true;
 			return;
 		}
-		if (mg_substitution(m, CXX_SUB_TEMPLATE, te, 0))
+		if (mg_substitution(m, CXX_SUB_TEMPLATE, mg_tkey(te), 0))
 			return;
 		if (mg_nested(m, home)) {
 			mg_str(m, "N");
@@ -1309,7 +1316,7 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 				mg_str(m, "St");
 			mg_source_name(m, te->name);
 		}
-		mg_remember(m, CXX_SUB_TEMPLATE, te, 0);
+		mg_remember(m, CXX_SUB_TEMPLATE, mg_tkey(te), 0);
 	} else
 		m->bad = true;	/* (an argument not known) */
 }
@@ -1363,13 +1370,13 @@ static void mg_class_component(cxx_mangler *m, cxx_scope *s, qty t)
 	if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 		return;
 	if (cxx_instance_template(m->c, t, &of, &args, &nargs, &pack_at, &home)) {
-		if (!mg_substitution(m, CXX_SUB_TEMPLATE, of, 0)) {
+		if (!mg_substitution(m, CXX_SUB_TEMPLATE, mg_tkey(of), 0)) {
 			if (mg_scope_is_std(m, home))
 				mg_str(m, "St");
 			else
 				mg_prefix(m, home);
 			mg_source_name(m, of->name);
-			mg_remember(m, CXX_SUB_TEMPLATE, of, 0);
+			mg_remember(m, CXX_SUB_TEMPLATE, mg_tkey(of), 0);
 		}
 		mg_template_args(m, args, nargs, pack_at, cxx_instance_tparams(m->c, t));
 	} else {
@@ -1701,7 +1708,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_source_name(&m, f->name);
 		mg_abi_tag(&m, f->abi_tag);
 		if (f->is_instance)
-			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
+			mg_remember(&m, CXX_SUB_TEMPLATE, mg_tkey(f), 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
 			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
 		mg_str(&m, "E");
@@ -1716,7 +1723,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_source_name(&m, f->name);
 		mg_abi_tag(&m, f->abi_tag);
 		if (f->is_instance)
-			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
+			mg_remember(&m, CXX_SUB_TEMPLATE, mg_tkey(f), 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
 			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
 	}

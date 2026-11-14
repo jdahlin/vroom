@@ -489,7 +489,8 @@ typedef struct cxx {
 	int64_t bvalue;
 #define CXX_BRACE_MAX 256
 	uint32_t brace_nodes[CXX_BRACE_MAX], brace_n;	/* the last braced list's element nodes (flat lists) */
-	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
+	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates (2: code
+					   generation, of code accepted already: an explicit(expr) one is, the conversion it makes is implicit) */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;
 	uint32_t attr_align;
@@ -727,6 +728,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, struct cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV qty cxx_nullptr_type(cxx *c);

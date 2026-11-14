@@ -153,6 +153,18 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
 			bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
 
+			/* x->m on an object of class type: (x.operator->())->m, again while the result is a class
+			   ([over.ref]: p->m is interpreted as (p.operator->())->m) */
+			for (uint32_t hop = 0; arrow && hop < 8 && !c->tentative && obj != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, obj) &&
+			     AST_TYPE_KIND(c->ast, obj) != TY_ARRAY; hop++) {
+				if (!cxx_operator_call_type(c, vintern_cstr("operator->"), obj, NULL, 0) || c->etype == CXX_TY_UNKNOWN) {
+					obj = CXX_TY_UNKNOWN;
+					break;
+				}
+				if (c->call_resolved && c->call_picked)
+					cxx_gen_operator_call(c, obj_node, NULL, 0, mloc);
+				obj = c->etype, obj_node = c->call_resolved && c->call_picked ? c->enode : 0;
+			}
 			if (cxx_is(c, LEX_TOKEN_ARROW))
 				obj = obj != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, obj) == TY_PTR && !AST_TYPE(c->ast, obj)->ext ?
 				      AST_TYPE(c->ast, obj)->base : CXX_TY_UNKNOWN;

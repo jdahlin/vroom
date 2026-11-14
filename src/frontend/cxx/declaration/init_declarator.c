@@ -446,6 +446,17 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		}
 		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK) && fn_template)
 			cxx_ftemplate_defined(fn_template->ftmpl);
+		if (f && cxx_is_function_body_start(c) && context == CXX_CONTEXT_NAMESPACE && q && qs && qs->kind == CXX_SCOPE_CLASS &&
+		    qs->owner && !qs->owner->tmpl && !qs->dependent && c->template_depth == 1 && c->scope == c->ftmpl_scope && name > 1 &&
+		    !c->tentative && !c->instantiating && !c->class_depth) {
+			/* template<...> R X::f(...) { }: a member template of a class (not of a class template) defined outside
+			   it: its declarations in the class instantiate this body (its scope the class's) */
+			struct cxx_ftemplate *df = cxx_ftemplate_new(c, c->scope, qs, c->ftmpl_begin, NULL);
+
+			cxx_ftemplate_requires(df, c->ftmpl_req);
+			cxx_ftemplate_defined(df);
+			cxx_ftemplate_join_declarations(c, df, cxx_lookup_in(c, qs, name, 0), c->ndecl_params, c->decl_const);
+		}
 		if (f && cxx_is_function_body_start(c) && context == CXX_CONTEXT_NAMESPACE && q && qs && qs->owner && qs->owner->tmpl &&
 		    c->template_depth == 2 && c->scope == c->ftmpl_scope && c->scope->parent && c->scope->parent->kind == CXX_SCOPE_TEMPLATE &&
 		    !c->tentative && !c->instantiating && !c->class_depth)

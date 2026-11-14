@@ -1917,3 +1917,25 @@ annan instans signatur (`explicit(!__is_implicit<...>())` i pair:s konstruktor) 
 instansen aldrig fick sin typ, beroende på vilken kod som först namngav den.  `construct_at<pair<const int,
 int>, int, int>` byggs nu i std::map:s väg.  Kvar för map: lambdan med `__args2`; fold-uttryck
 (`(a + ...)`) saknas.  cxx-strict 330.
+
+## Status 109 (2026-11-14)
+std::map fungerar med vcc ensamt (emplace, `operator[]`, find, iteration: mp.cpp ger 8).  Det som saknades:
+- `x->m` på ett objekt av klasstyp: `operator->` anropas (igen så länge resultatet är en klass,
+  [over.ref]); förut blev objektets typ okänd, så `__h->__get_value()` och varje `it->first` föll.
+- `return g();` till en annan klass (`pair<__tree_iterator, bool>` till `pair<__map_iterator, bool>`):
+  den konverterande konstruktorn, i registret och via adress.  Ett anropsresultat i register är ett
+  prvalue (`cxx_gen_prv_add` utan anrop att sikta), så `pair(pair<U1, U2>&&)` väljs.  Vid kodgenerering
+  (`skip_explicit = 2`) räknas en `explicit(expr)`-konstruktor som konverterande: koden är redan godtagen.
+- `f()` före `f() const` avgörs före mallreglerna (implicita objektargumentet, [over.match.best]/2.1):
+  regeln "definitionen står för deklarationen" valde den const inline-versionen framför den icke-const
+  som definieras utanför klassen, och `__find_equal` const anropade sig själv i oändlighet.
+- `cxx_gen_call` behåller uttryckets typ: att bygga anropet instansierar kroppar som skrev över
+  `c->etype`, så `auto [__dummy, __match] = __find_equal(__key)` saknade typ.
+- En medlemsmall i en vanlig klass definierad utanför den (`template<class K> int T::f(...) {}`) ger
+  deklarationen sin kropp (`cxx_ftemplate_join_declarations`, bara när en deklaration passar).  Kvar:
+  ett anrop före definitionen (m2/m3-fallen) har redan gjort sin instans av deklarationen.
+- Mangling: en mall som substitutionskandidat nycklas på mallen, inte entiteten (klassens eget namn i
+  den är en annan entitet): `Pr<MI,bool>::Pr(Pr<U,V>&&)` blir `...OS_IT_T0_E` som clangs.
+Ny test `run/arrow-convert.cpp`.  cxx-strict: 347 funktioner utan kod (330 förut), men jämfört funktion
+för funktion med förra binären: 262 nya kompileras, 11 saknas som förut aldrig nåddes (inga regressioner).
+Ny lucka sedd: en arraymedlem från en klammerlista i en mem-initierare (`x{a, 0, 0}`).

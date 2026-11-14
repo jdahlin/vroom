@@ -441,7 +441,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	static const uint8_t none[16];
 	cxx_entity *first = NULL;
 	uint32_t viable = 0;
-	bool skip_explicit = c->skip_explicit, no_literal = c->no_literal;
+	uint8_t skip_explicit = c->skip_explicit;
+	bool no_literal = c->no_literal;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
 	/* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
 	bool own_args = args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs && (args == c->cargs || !memcmp(args, c->cargs, nargs * sizeof *args));
@@ -556,7 +557,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			return;
 		}
-		if (skip_explicit && e->fn_explicit) {
+		if (skip_explicit && e->fn_explicit && !(skip_explicit == 2 && e->fn_explicit == 2)) {
 			unknown |= e->fn_explicit == 2;
 			continue;	/* (copy-initialization: not through an explicit constructor) */
 		}
@@ -732,6 +733,12 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 						worse = true;
 				}
 			}
+			if (!better && !worse && obj == 1 && cand[a].e->fn_const != cand[b].e->fn_const && !cand[a].e->fn_static && !cand[b].e->fn_static) {
+				/* the implicit object argument is one of the conversions ranked: a non-const object binds to
+				   the f() better than to the f() const ([over.match.best]/2.1, [over.ics.rank]/3.2.6), before
+				   anything about templates */
+				better = !cand[a].e->fn_const, worse = !better;
+			}
 			if (!better && !worse) {
 				if (!cand[a].tmpl && cand[b].tmpl)
 					better = true;
@@ -757,10 +764,6 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 							better = cxx_ftemplate_params(cand[a].e->ftmpl)->ntparams < cxx_ftemplate_params(cand[b].e->ftmpl)->ntparams, worse = !better;
 					}
 				}
-				if (better || worse)
-					;
-				else if (cand[a].tmpl == cand[b].tmpl && obj == 1 && !cand[a].e->fn_const && cand[b].e->fn_const)
-					better = true;
 			}
 			wins = better && !worse;
 		}
