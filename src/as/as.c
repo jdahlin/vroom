@@ -651,6 +651,7 @@ void as_free(as_context *a)
 }
 
 void as_include_directory_set(as_context *a, const char *dir) { a->incbin_directory = dir; }
+void as_dwarf_version_set(as_context *a, int version) { a->dwarf_version_option = version; }
 
 /*
  * A persistent assembler bound to one ElfObj for a whole TU: as_begin()
@@ -670,6 +671,7 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
 	a->cfi_instruction_count = a->cfi_instruction_capacity = a->frame_description_count = a->frame_description_capacity = 0; a->in_frame_description = 0; a->cfi_eh_frame_selected = 0; a->symver_count = a->symver_capacity = 0; a->addrsig_symbol_count = a->addrsig_symbol_capacity = 0;
 	a->dwarf_file_count = a->dwarf_file_capacity = a->dwarf_directory_count = a->dwarf_directory_capacity = a->dwarf_row_count = a->dwarf_row_capacity = 0; a->variable_item_count = a->variable_item_capacity = 0; a->dwarf_row_is_pending = a->dwarf_table_is_due = 0;
 	a->variable_rank = NULL;
+	a->dwarf_version = a->dwarf_version_option ? a->dwarf_version_option : o->format == OBJ_COFF ? 4 : 5;
 	memset(&a->dwarf_row_pending, 0, sizeof a->dwarf_row_pending); a->dwarf_row_pending.flags = 1;
 	a->macro_mask = 255; a->macro_count = 0;
 	a->macro_table = as_region_alloc(&a->definitions, sizeof(as_macro *) * (a->macro_mask + 1));

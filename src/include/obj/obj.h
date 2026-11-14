@@ -311,6 +311,10 @@ uint32_t coff_section(ElfObj *o, const char *name, uint32_t len, uint32_t charac
 /* the same with ",unique,N" (MC's UniqueID: a section of its own per (name, COMDAT symbol, N)) */
 uint32_t coff_section_unique(ElfObj *o, const char *name, uint32_t len, uint32_t characteristics, uint32_t comdat_sym, int selection,
 			     uint32_t unique_id);
+/* sec is placed after the sections coff_finish creates (.pdata, .llvm_addrsig), in the order of
+ * the calls: MC's .debug_line and .debug_line_str, which its streamer creates at the end when the
+ * source did not; at most 4 per object */
+void coff_section_late(ElfObj *o, uint32_t sec);
 /* .file "name": a .file symbol with the name in its auxiliary records (each call adds one) */
 void coff_file_name(ElfObj *o, const char *name, uint32_t len);
 /* .comm with an alignment: MinGW's " -aligncomm:"NAME",LOG2" in .drectve (MC) */

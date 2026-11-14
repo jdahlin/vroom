@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """vas-corpus.py: vasm on compiler-generated assembly (TODO T7).
 
-  bench/vas-corpus.py [-j N] [-O LEVEL...] [--limit N] [--target T] [PAT]
+  bench/vas-corpus.py [-j N] [-O LEVEL...] [-g] [--limit N] [--target T] [PAT]
 
 --target x86_64-linux-gnu: the same for x86-64 (vasm --target=...).
+-g: clang -S -g at each level (DWARF line tables, .debug_* sections: version 4 for
+MinGW, 5 for Linux; -O '0 -gdwarf-5' picks a version).
 --target x86_64-w64-mingw32: Windows x64, COFF objects (WIN4/WIN5): no sysroot,
 the test runtime's headers (src/test/rt/include-win64, rt/include) and clang's
 resource headers, as bench/vcc-win64.py compiles.
@@ -51,12 +53,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=6)
     ap.add_argument('-O', action='append', dest='opts')
+    ap.add_argument('-g', action='store_true', help='clang -S -g')
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('-v', action='store_true', help='list every failing file')
     ap.add_argument('--target', default='aarch64-linux-gnu')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
-    opts = [o if o.startswith('-O') else '-O' + o for o in (a.opts or ['0', '2'])]
+    opts = [(o if o.startswith('-O') else '-O' + o) + (' -g' if a.g else '') for o in (a.opts or ['0', '2'])]
     files = sorted(glob.glob(f'{R}/src/test/**/*.c', recursive=True))
     if a.pat: files = [f for f in files if a.pat in f]
     if a.limit: files = files[:a.limit]

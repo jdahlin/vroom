@@ -119,7 +119,9 @@ struct as_context {
 	int in_frame_description, cfi_eh_frame_selected;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *symvers; uint32_t symver_count, symver_capacity;	/* .symver */
 	uint32_t *addrsig_symbols; uint32_t addrsig_symbol_count, addrsig_symbol_capacity;	/* .addrsig_sym */
-	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
+	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 4 or 5) */
+	int dwarf_version_option;	/* -gdwarf-N (as_dwarf_version_set; 0: the target's default) */
+	int dwarf_version;		/* this run's: the option, else 4 for COFF and 5 otherwise; .file 0 makes it 5 */
 	struct as_dwarf_file { as_text name; uint32_t directory; uint8_t md5[16]; uint8_t is_set, has_md5; } *dwarf_files;
 	uint32_t dwarf_file_count, dwarf_file_capacity;		/* file slots by number (0 = root) */
 	as_text *dwarf_directories; uint32_t dwarf_directory_count, dwarf_directory_capacity;	/* directories; [0] is the root file's */

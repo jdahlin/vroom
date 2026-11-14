@@ -1,5 +1,7 @@
 /* dwarf-line-table.c: the DWARF line table: .file N and .loc directives and the .debug_line (and
- * .debug_line_str) sections they produce, MC's MCDwarfLineTable, DWARF version 5.
+ * .debug_line_str) sections they produce, MC's MCDwarfLineTable, DWARF version 5 or 4 (a->dwarf_version:
+ * MinGW's default is 4, Linux's 5; a .file 0 selects 5).  Version 4 has no file 0: the directories are MC's
+ * list of the others (1-based) and the strings are in the table itself.
  *
  * A .loc does not emit anything: it sets a pending row, which the statement loop turns into a row
  * (as_dwarf_row_emit) at the position of the next instruction.  The section is encoded once, from
@@ -72,8 +74,10 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 			hasmd5 = 1;
 		} else return as_error_report(a, "unexpected token in '.file' directive");
 	}
+	if (n == 0 && a->dwarf_version < 5) a->dwarf_version = 5;	/* (MC: .file 0 is DWARF 5's) */
+	int v5 = a->dwarf_version >= 5;
 	/* MC: a file named as the root file (file 0) is the root: N stays unassigned */
-	if (n && a->dwarf_file_count && a->dwarf_files[0].is_set && !hasmd5 && !a->dwarf_files[0].has_md5 && name.length == a->dwarf_files[0].name.length &&
+	if (v5 && n && a->dwarf_file_count && a->dwarf_files[0].is_set && !hasmd5 && !a->dwarf_files[0].has_md5 && name.length == a->dwarf_files[0].name.length &&
 	    !memcmp(name.text, a->dwarf_files[0].name.text, name.length))
 		return 0;
 	if (n >= a->dwarf_file_capacity) {
@@ -109,7 +113,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 	f->name = name; f->is_set = 1; f->has_md5 = (uint8_t)hasmd5;
 	if (hasmd5) memcpy(f->md5, md5, 16);
 	/* (a directory split from the name goes in MC's list of the others: never entry 0) */
-	f->directory = n == 0 || !dir.length ? 0 : split && a->object->machine == EM_X86_64 ? as_dwarf_directory_find_from(a, dir, 1) : as_dwarf_directory_find(a, dir);
+	/* (version 4: the compilation directory is no entry of MC's list, a directory equal to it gets one) */
+	f->directory = n == 0 || !dir.length ? 0 : (split && a->object->machine == EM_X86_64) || !v5 ? as_dwarf_directory_find_from(a, dir, 1) : as_dwarf_directory_find(a, dir);
 	if (!two && n && f->directory == 0 && dir.length) f->directory = as_dwarf_directory_find(a, dir);
 	a->dwarf_table_is_due = 1;
 	return 0;
@@ -212,8 +217,9 @@ static uint32_t as_dwarf_string_add(ElfObj *o, uint32_t ls, as_text s)
 VPRIV void as_dwarf_line_finish(as_context *a)
 {
 	ElfObj *o = a->object;
+	int v5 = a->dwarf_version >= 5, coff = o->format == OBJ_COFF;
 	if (a->dwarf_row_is_pending) a->dwarf_row_is_pending = 0;
-	if (!a->dwarf_file_count || !a->dwarf_files[0].is_set) {
+	if (v5 && (!a->dwarf_file_count || !a->dwarf_files[0].is_set)) {
 		if (a->dwarf_file_count > 1 && a->dwarf_files[1].is_set) {	/* no root file: file 1 is (MC) */
 			if (!a->dwarf_file_count) a->dwarf_file_count = 1;
 			a->dwarf_files[0] = a->dwarf_files[1];
@@ -227,21 +233,50 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 			as_error_report(a, "%s", m);
 			return;
 		}
-	uint32_t sec = elf_section(o, ".debug_line", 11, SHT_PROGBITS, 0, 0, 0);
+	/* (COFF: MC's "dr" sections, 1-aligned) */
+	enum { COFF_DEBUG = COFF_SCN_INIT_DATA | COFF_SCN_READ | COFF_SCN_DISCARDABLE };
+	int declared = coff && elf_find_section(o, ".debug_line", 11, 0);
+	uint32_t sec = coff ? coff_section(o, ".debug_line", 11, COFF_DEBUG, 0, 0) : elf_section(o, ".debug_line", 11, SHT_PROGBITS, 0, 0, 0);
+	if (coff && !declared) coff_section_late(o, sec);	/* (MC creates it after .pdata and .llvm_addrsig) */
 	elf_data(o, sec);
-	uint32_t ls = elf_section(o, ".debug_line_str", 15, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
-	elf_data(o, ls);
-	int md5 = 1;
+	uint32_t ls = 0;
+	if (v5) {
+		int str_declared = coff && elf_find_section(o, ".debug_line_str", 15, 0);
+		ls = coff ? coff_section(o, ".debug_line_str", 15, COFF_DEBUG, 0, 0) : elf_section(o, ".debug_line_str", 15, SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, 0);
+		if (coff && !str_declared) coff_section_late(o, ls);
+		elf_data(o, ls);
+	}
+	int md5 = v5;
 	for (uint32_t i = 0; i < a->dwarf_file_count; i++) if (a->dwarf_files[i].is_set && !a->dwarf_files[i].has_md5) md5 = 0;
 	size_t cap = 256 + 32 * (size_t)(a->dwarf_file_count + a->dwarf_directory_count) + 48 * (size_t)a->dwarf_row_count;
+	if (!v5) {	/* the strings are in the table */
+		for (uint32_t i = 1; i < a->dwarf_directory_count; i++) cap += a->dwarf_directories[i].length;
+		for (uint32_t i = 1; i < a->dwarf_file_count; i++) cap += a->dwarf_files[i].name.length;
+	}
 	as_byte_span b = { as_region_alloc(&a->definitions, cap), 0 };
 	uint32_t *sfix = as_region_alloc(&a->definitions, sizeof(uint32_t) * 2 * (a->dwarf_file_count + a->dwarf_directory_count + 1));
 	uint32_t nsfix = 0;
 	b.n = 4;
-	b.p[b.n++] = 5; b.p[b.n++] = 0; b.p[b.n++] = 8; b.p[b.n++] = 0;
+	b.p[b.n++] = (uint8_t)a->dwarf_version; b.p[b.n++] = 0;
+	if (v5) { b.p[b.n++] = 8; b.p[b.n++] = 0; }	/* address and segment selector sizes */
 	size_t hl = b.n; b.n += 4;
 	static const uint8_t std[] = { 1, 1, 1, 0xfb, 14, 13, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 };
 	memcpy(b.p + b.n, std, sizeof std); b.n += sizeof std;
+	if (!v5) {	/* MC's emitV2FileDirTables: the directories but the compilation one, the files from 1 */
+		for (uint32_t i = 1; i < a->dwarf_directory_count; i++) {
+			memcpy(b.p + b.n, a->dwarf_directories[i].text, a->dwarf_directories[i].length);
+			b.n += a->dwarf_directories[i].length; b.p[b.n++] = 0;
+		}
+		b.p[b.n++] = 0;
+		for (uint32_t i = 1; i < a->dwarf_file_count; i++) {
+			struct as_dwarf_file *f = &a->dwarf_files[i];
+			memcpy(b.p + b.n, f->name.text, f->name.length); b.n += f->name.length; b.p[b.n++] = 0;
+			as_leb128_unsigned_append(&b, f->directory);
+			b.p[b.n++] = 0; b.p[b.n++] = 0;	/* modification time, length */
+		}
+		b.p[b.n++] = 0;
+		goto program;
+	}
 	b.p[b.n++] = 1; b.p[b.n++] = 1; b.p[b.n++] = 0x1f;
 	as_leb128_unsigned_append(&b, a->dwarf_directory_count);
 	for (uint32_t i = 0; i < a->dwarf_directory_count; i++) {
@@ -259,6 +294,7 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 		as_leb128_unsigned_append(&b, f->directory);
 		if (md5) { memcpy(b.p + b.n, f->md5, 16); b.n += 16; }
 	}
+program:;
 	uint32_t hlen = (uint32_t)(b.n - hl - 4);
 	memcpy(b.p + hl, &hlen, 4);
 	/* sequences: one per section, in order of first row */
@@ -311,9 +347,9 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 	uint64_t at = elf_frag(o, sec)->size;
 	uint8_t *q = elf_grow(o, sec, b.n);
 	memcpy(q, b.p, b.n);
-	uint32_t lsym = elf_sec(o, elf_frag(o, ls)->sec)->sym;
-	for (uint32_t i = 0; i < nsfix; i++)
-		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], o->machine == EM_X86_64 ? R_X86_64_32 : R_AARCH64_ABS32,
+	uint32_t lsym = v5 ? elf_sec(o, elf_frag(o, ls)->sec)->sym : 0;
+	for (uint32_t i = 0; i < nsfix; i++)	/* (COFF: section-relative, MC's emitCOFFSecRel32) */
+		elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i], coff ? R_VCC_COFF_SECREL32 : o->machine == EM_X86_64 ? R_X86_64_32 : R_AARCH64_ABS32,
 			  (as_value){ lsym, 0, (int64_t)sfix[2 * i + 1] });
 	for (uint32_t i = 0; i < nafix; i++) {
 		struct as_dwarf_row *l = &a->dwarf_rows[afix[2 * i + 1]];

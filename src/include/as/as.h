@@ -32,6 +32,9 @@ uint32_t as_symbol_by_name(as_context *a, const char *name, size_t len);	/* find
 ElfVal as_symbol_value(as_context *a, uint32_t sym, int64_t c);	/* sym + c, .set variables substituted, folded */
 int as_label_define_symbol(as_context *a, uint32_t sym);		/* define sym at the current position */
 
+/* DWARF version of the line table (clang -c's -dwarf-version=N): 0 is the target's default,
+ * 4 for COFF (MinGW) and 5 otherwise; a .file 0 makes it 5 as in MC */
+void as_dwarf_version_set(as_context *a, int version);
 /* directory for relative .incbin paths (NULL: the process cwd) */
 void as_include_directory_set(as_context *a, const char *dir);
 /* Apple's assembler dialect (as vcc -S and clang write it for Mach-O) as the
