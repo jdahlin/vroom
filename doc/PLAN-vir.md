@@ -1374,6 +1374,55 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite flag tests, directive scanning and host compiler profiles (2026-11-14).**
+VIR now branches directly on a masked unsigned load with a memory TEST. Clang
+used testb/jcc where vcc loaded the byte, masked it and tested the register.
+This applies to lex_tokenize_mode, pp_token_next and codegen_prepass_node_walk.
+VIR also eliminates repeated boolean normalization and lowers small constant
+scales to shifts or scaled LEA when an addressing-mode fold is unavailable.
+The memory-test fold alone retired about 16M fewer instructions per SQLite
+compile, with no reproducible time win in isolation.
+
+Both compilers spent cycles finding directive starts twice. Collect the
+positions in the first scan and build directive spans from those positions.
+Five pinned cycle profiles (period 75,001) gave 951 → 350 exclusive samples
+self-hosted and 755 → 307 clang-built for pp_file_enter and pp_skeleton_build
+combined, accounting for different inlining. pp_token_next measured 1206 → 1059
+self-hosted and 883 → 880 clang-built.
+
+| SQLite 3.50.4 median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 165.68 / 162.89 ms | 134.80 / 133.40 ms | 1.229× / 1.221× |
+| 21 runs alternating order | 168.14 / 165.36 ms | 137.06 / 135.30 ms | 1.227× / 1.222× |
+
+One thread, CPU 7, one warm-up per binary. On the same revision four host
+builds used the same clang, x86-64 tuning and unity settings. Training compiled
+the assembler, C parser, preprocessor and codegen unity units with one worker
+and the usual SQLite benchmark backend settings. SQLite was held out.
+
+| Clang-built vpp | Median task-clock (24 rotated runs) | Instructions |
+| --- | ---: | ---: |
+| Clang -O3 | 139.20 ms | 1139.9M |
+| ThinLTO | 139.03 ms | 1135.0M |
+| PGO | 132.81 ms | 1010.1M |
+| ThinLTO + PGO | 132.06 ms | 987.0M |
+
+Build the instrumented host vpp with VCC_PGO=-fprofile-instr-generate and
+collect profiles with LLVM_PROFILE_FILE containing %p. Merge with llvm-profdata
+merge and use VCC_PGO=-fprofile-instr-use=/absolute/path/to/merged.profdata in
+a fresh OUT. Add VCC_LTO=-flto=thin for the combined build. Bootstrap stages
+generate native objects; LLVM bitcode LTO and clang profile consumption apply
+to the clang host stage.
+
+Separately, train perf on the same compiler modules, compile the self-host
+with -ffunction-sections and link with lld, ordering input function symbols
+by descending user-cycle sample count. Median times were 163.18
+ms for the ordinary self-host, 162.94 ms for sections + lld
+and 163.81 ms for the profile-ordered link (24 rotated runs).
+This experiment changes function placement only. LLVM 23 perf2bolt crashed
+during conversion of the self-hosted branch trace. Every timed build emitted
+the identical SQLite object (SHA-256 prefix c4d3896fefc9).
+
 **SQLite with promotable two-word copies (2026-11-14).** In five pinned
 compiles, codegen_integer_truncate and cc_constant_truncate spent most of
 their exclusive cycle samples at the vector copy immediately after two

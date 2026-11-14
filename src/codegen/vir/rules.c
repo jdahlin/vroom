@@ -104,6 +104,13 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e, virbuild_simplify_state *S
 		}
 		return false;
 	}
+	case VIR_OP_ICMP:
+		/* Comparisons already produce an i32 zero or one. This also
+		 * preserves unordered floating comparison results verbatim. */
+		if ((in.flags & 15) == 1 /* ne */ && virbuild_value_integer_constant(V, in.b, &k) && !k &&
+		    (V->insns[in.a].insn.op == VIR_OP_ICMP || V->insns[in.a].insn.op == VIR_OP_FCMP))
+			*r = in.a;
+		return false;
 	case VIR_OP_EXT: {
 		uint32_t x = in.a, K = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags), ts = vir_type_size(in.type);
 		bool s = in.flags & VIR_INSN_FLAG_MS;

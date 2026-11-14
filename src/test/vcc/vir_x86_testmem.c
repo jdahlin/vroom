@@ -4,6 +4,10 @@ NI int flag16(const unsigned short *p) {return (*p&0x9000u)==0;}
 NI int flag32(const unsigned *p) {return (*p&0x80000001u)!=0;}
 NI int flag64(const unsigned long long *p) {return (*p&0xffffffff80000000ULL)==0;}
 NI int indexed(const unsigned short *p,long long i) {return (p[i]&0x9000u)!=0;}
+NI int branch8(const unsigned char *p, volatile int *taken) {
+ if (*p & 0x80u) ++*taken;
+ return *taken;
+}
 NI int vol(const volatile unsigned char *p) {return (*p&0x80u)!=0;}
 NI int sign(const signed char *p) {return (*p&0x100)!=0;}
 NI unsigned shared(const unsigned char *p) {unsigned x=*p;return (x&0x80)?x:0;}
@@ -15,6 +19,8 @@ int main(void) {
  for(unsigned i=0;i<256;i++) {
   unsigned char a=i;unsigned short b=i*257;unsigned c=i*0x01010101u;
   unsigned long long d=((unsigned long long)c<<32)|c;
+  volatile int taken=7;
+  if(branch8(&a,&taken)!=7+(i>=128)) return 8;
   if(flag8(&a)!=(int)(i>=128)||vol(&a)!=(int)(i>=128))return 1;
   if(flag16(&b)!=((b&0x9000u)==0)||indexed(&b,0)!=!!(b&0x9000u))return 2;
   if(flag32(&c)!=!!(c&0x80000001u)||flag64(&d)!=!(d&0xffffffff80000000ULL))return 3;

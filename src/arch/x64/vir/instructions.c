@@ -17,9 +17,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		if(v==L->test_value) {
 			record *r=x64_record_emit_three_registers(e,X64_OP_TESTM,L->test_size,X64_REGISTER_NONE,L->memory_base,X64_REGISTER_NONE);
 			r->registers[3]=L->memory_is_indexed?L->memory_index:X64_REGISTER_NONE;r->shift=L->memory_shift;r->offset=L->memory_offset;r->reference=(uint32_t)L->test_immediate;
-			L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->record_count;
-			x64_record_emit_three_registers(e,X64_OP_SETCC,4,d,X64_REGISTER_NONE,X64_REGISTER_NONE)->condition=(i->flags&15)?X64_CONDITION_NE:X64_CONDITION_E;
-			L->test_value=0;return;
+			if (i->op != VIR_OP_BRIF) {
+				L->test_value=0;
+				L->compare_condition=v;L->compare_block=b;L->setcc_record=e->x64_context->record_count;
+				x64_record_emit_three_registers(e,X64_OP_SETCC,4,d,X64_REGISTER_NONE,X64_REGISTER_NONE)->condition=(i->flags&15)?X64_CONDITION_NE:X64_CONDITION_E;
+				return;
+			}
 		}
 	}
 	if(L->memory_skip==v){L->memory_skip=0;return;}
@@ -34,15 +37,16 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 			x64_record_emit_three_registers(e,X64_OP_BSWAP,L->big_endian_width,d,d,X64_REGISTER_NONE);L->big_endian_value=0;return;
 		}
 	}
-	/* A single-use ordinary unsigned load, constant mask and zero comparison
-	 * can test the exact source width in memory. Preserve the address until
+	/* A single-use ordinary unsigned load, constant mask and zero test
+	 * (a comparison or direct branch) can test memory. Preserve the address until
 	 * the comparison; neither skipped definition may spill or have edits. */
 	if(i->op==VIR_OP_LOAD && (i->type==VIR_TYPE_I32 || i->type==VIR_TYPE_I64) && !(i->flags&(VIR_INSN_FLAG_VOL|VIR_INSN_FLAG_MS)) &&
 	   v+2<L->function->blocks[b].first+L->function->blocks[b].insn_count && L->uses[v]==1 && L->allocation->slot[v]==VIR_BLOCK_NONE) {
 		const vir_insn *mask=&L->function->insns[v+1],*cmp=&L->function->insns[v+2];int64_t k,zero;
 		if(mask->op==VIR_OP_AND && mask->type==i->type && mask->a==v && x64_vir_value_immediate(L->function,mask->b,&k) &&
-		   L->uses[v+1]==1 && L->allocation->slot[v+1]==VIR_BLOCK_NONE && cmp->op==VIR_OP_ICMP &&
-		   (cmp->flags&15)<2 && cmp->a==v+1 && x64_vir_value_immediate(L->function,cmp->b,&zero) && !zero &&
+		   L->uses[v+1]==1 && L->allocation->slot[v+1]==VIR_BLOCK_NONE && cmp->a==v+1 &&
+		   (cmp->op==VIR_OP_BRIF || (cmp->op==VIR_OP_ICMP && (cmp->flags&15)<2 &&
+		    x64_vir_value_immediate(L->function,cmp->b,&zero) && !zero)) &&
 		   x64_vir_fold_edits_check(L,b,v+1,X64_REGISTER_NONE) && x64_vir_fold_edits_check(L,b,v+2,X64_REGISTER_NONE)) {
 			L->test_value=v+2;L->test_size=1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags);L->test_immediate=k;
 			if(L->memory_value==i->a)L->memory_value=0;
@@ -149,6 +153,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 			int64_t k;x64_vir_value_immediate(L->function,i->b,&k);
 			if(i->op==VIR_OP_PTRADD || i->op==VIR_OP_ADD) {
 				codegen_lvalue at={.kind=CODEGEN_LVALUE_REGISTER,.register_number=(uint8_t)a,.offset=k};x64_record_emit_memory(e,X64_OP_LEA,sz,d,&at,false);
+			} else if (i->op == VIR_OP_MUL && k > 1 && !(k & (k - 1))) {
+				x64_record_emit_three_registers(e, X64_OP_SHLI, sz, d, a, X64_REGISTER_NONE)->immediate = __builtin_ctzll(k);
+			} else if (i->op == VIR_OP_MUL && (k == 3 || k == 5 || k == 9)) {
+				x64_record_emit_three_registers(e, X64_OP_LEASCALE, sz, d, a, a)->shift = __builtin_ctzll(k - 1);
 			} else x64_record_emit_three_registers(e,immop[i->op],sz,d,a,X64_REGISTER_NONE)->immediate=k;
 			return;
 		}
@@ -513,7 +521,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 	case VIR_OP_BRIF: {
 		uint32_t yes = x64_vir_edge_target(L,b,0,i->b), no=x64_vir_edge_target(L,b,1,i->c), nt=i->c;
 		uint32_t next=x64_vir_block_next(L);
-		uint8_t cc=x64_vir_condition_lower(L,b,v,i->a,a);
+		uint8_t cc=L->test_value==v ? X64_CONDITION_NE : x64_vir_condition_lower(L,b,v,i->a,a);
+		L->test_value=0;
 		/* Let the next placed block fall through, including the true edge.
 		 * A deferred edge-copy stub is a different label and cannot fall through. */
 		if(next!=VIR_BLOCK_NONE && yes==L->label[next]) {

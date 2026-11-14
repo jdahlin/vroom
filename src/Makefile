@@ -69,17 +69,20 @@ VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
+# For an instrumented host build use VCC_PGO=-fprofile-instr-generate;
+# after training use -fprofile-instr-use=/absolute/path/to/merged.profdata.
+# Use a separate OUT for each set of flags.
+VCC_PGO   ?=
 VCC_LTO   ?=
 ifeq ($(HOST_OS),Darwin)
 LTO_LINK   = -Wl,-cache_path_lto,$(OBJ)/lto-cache
 else
 LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache -fuse-ld=lld
-LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache
 endif
-VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
+VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) $(VCC_PGO) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 # (and, with LTO, optimises and generates the code itself)
-VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
+VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
@@ -189,7 +192,7 @@ else
 LEXTEST_OBJ = $(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC))
 endif
 $(OUT)/lextest: $(LEXTEST_OBJ) $(LEX_OBJECT)
-	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
+	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,bin/vasm/vasm.c $(LIB_SRC)) $(AS_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
@@ -274,7 +277,7 @@ SELF_ENV = $(if $(and $(filter Linux-x86_64,$(HOST_OS)-$(HOST_ARCH)),$(filter un
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_CC="$(SELF_ENV) $(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_ENV) $(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
