@@ -222,6 +222,19 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *
 
 	if (!target || !cls || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS)
 		return false;
+	uint32_t sliced;
+	if (nargs == 1 && args[0] && (AST_NODE_AT(a, args[0])->flags & NF_LVALUE) && cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) &&
+	    AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != TY_ARRAY && QUNQ(AST_NODE_AT(a, args[0])->ty) != QUNQ(t)) {
+		/* from an object of a class derived from this one (B(d) in D's copy constructor, json_base_class_t(other)):
+		   its base subobject, copied or moved as this class's own */
+		uint64_t off;
+
+		if (cxx_class_base_offset(c, QUNQ(AST_NODE_AT(a, args[0])->ty), QUNQ(t), &off, 0)) {
+			if (!(sliced = cxx_gen_base_object(c, args[0], QUNQ(t), loc)))
+				return false;
+			args = &sliced;
+		}
+	}
 	if (c->ctor_ilist && c->ctor_ilist->member_of == cls && c->ctor_ilist->ty != CXX_TY_UNKNOWN) {
 		/* T{a, b} with an initializer_list constructor: it, from the list (its other parameters defaulted) */
 		cxx_entity *ilc = c->ctor_ilist;

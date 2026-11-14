@@ -1751,3 +1751,10 @@ element är en braced-lista (`M m{{nullptr, 3}, 4}`, nästlat, `{}`) initierar m
 cxx-strict: 686 saknade funktioner (850).  Överst nu: basklass via alias i konstruktorinitierare (87),
 CTAD i `__unwrap_range` (79), `__libcpp_is_trivially_relocatable<T>::value` (79), kroppar vcc aldrig
 tolkade (67), `filldata<T>::fill` (38).
+
+## Status 85 (2026-11-14)
+Konstruktion från ett objekt av härledd klass använder basdelobjektet (`B(o)` i D:s kopieringskonstruktor,
+json:s `json_base_class_t(other)`); `__is_trivially_copyable`/`__is_trivially_relocatable`/`__is_trivial`
+är falska för en klass med icke-trivial kopierings-/flyttkonstruktor eller destruktor (förut okända:
+`__libcpp_is_trivially_relocatable<string>` i vector).  cxx-strict: 541 saknade (686).  Överst: kroppar
+vcc aldrig tolkade (87), CTAD i `__unwrap_range` (79), `filldata<T>::fill` (38).

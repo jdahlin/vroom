@@ -499,7 +499,8 @@ typedef struct cxx {
 /* tokens (token.c) */
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
-VPRIV void cxx_gen_write_missing(cxx *c);	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
+VPRIV void cxx_gen_write_missing(cxx *c);
+VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
 static inline cxx_token *cxx_peek(cxx *c, uint32_t ahead) { uint32_t i = c->pos + ahead; return &c->tok[i < c->ntok ? i : c->ntok]; }

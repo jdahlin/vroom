@@ -1621,6 +1621,13 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 					return true;
 				}
 			}
+			if ((IS("__is_trivially_copyable") || IS("__is_trivially_relocatable") || IS("__is_trivial")) && cc_type_is_record(c->ast, e) &&
+			    cxx_gen_trivial_abi(c, e, 0) == 0) {
+				/* a copy or move constructor or destructor that is not trivial: not trivially copyable (nor
+				   relocatable: [[clang::trivial_abi]] is not read) */
+				*v = 0;
+				return true;
+			}
 			return false;
 		}
 	}
