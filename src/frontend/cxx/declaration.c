@@ -57,6 +57,15 @@ static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 	}
 }
 
+/* is the keyword among tokens [b, e) */
+static bool cxx_tokens_have_kw(cxx *c, uint32_t b, uint32_t e, int kw)
+{
+	for (uint32_t i = b; i < e && i < c->ntok; i++)
+		if (c->tok[i].kw == kw || (kw == CXX_KW_thread_local && (c->tok[i].kw == CXX_KW___thread || c->tok[i].kw == CXX_KW__Thread_local)))
+			return true;
+	return false;
+}
+
 /* __attribute__((__abi_tag__("x"))) or [[gnu::abi_tag("x")]] in tokens [b, e): the tag (interned; 0: none) */
 static uint32_t cxx_abi_tag_scan(cxx *c, uint32_t b, uint32_t e)
 {
@@ -3039,6 +3048,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
 		cxx_entity *decl_fn = NULL;	/* the function it declares (= delete, = default follow the declarator) */
 		uint32_t gen_local = 0;		/* code generation: the local variable's symbol */
+		cxx_entity *unsized_e = NULL;	/* ... an array of unknown bound, made after its initializer */
+		bool unsized_static = false;
 		cxx_entity *gen_var = NULL;	/* ... a variable at namespace scope */
 		uint32_t gen_after_declarator = c->pos;
 		bool gen_declared = false, auto_gen = false;
@@ -3139,6 +3150,15 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && kind == CXX_ENTITY_VALUE && !f && context == CXX_CONTEXT_BLOCK && cxx_gen_on(c)) {
 				if (auto_e && !(flags & (DS_STATIC | DS_CONSTEXPR)))
 					auto_gen = true;	/* (auto: its symbol once the initializer gave its type) */
+				else if (!auto_e && (flags & (DS_STATIC | DS_CONSTEXPR)) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local) && t != CXX_TY_UNKNOWN &&
+					 !(AST_TYPE_KIND(c->ast, t) == TY_ARRAY && !AST_TYPE(c->ast, t)->n) &&
+					 (!cc_type_is_record(c->ast, t) || !cxx_gen_needs_construction_public(c, t)))
+					/* static int n = 3; constexpr char t[] = ...: in static storage, initialized by a constant (C's
+					   function-scope static); one with a dynamic initializer (a guard) is not built yet */
+					gen_local = e->sym = cxx_gen_local_static(c, name, t, name_loc);
+				else if (!auto_e && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY && !AST_TYPE(c->ast, t)->n &&
+					 cxx_is(c, LEX_TOKEN_EQUAL) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local))
+					unsized_e = e, unsized_static = (flags & (DS_STATIC | DS_CONSTEXPR)) != 0;	/* T a[] = {...}: its symbol once the initializer gave the bound */
 				else if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
 					cxx_gen_fail(c);
 				else
@@ -3406,6 +3426,19 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				bool gen_global = global && gen_var && !f && !(flags & DS_CONSTEXPR) && !auto_e && cxx_gen_global_begin(c, gen_var);
 
 				cxx_initializer_parse(c);
+				if (unsized_e && cxx_gen_on(c)) {
+					/* the bound: the list's elements, or the string literal's length */
+					uint64_t n = braced ? (c->brace_n != UINT32_MAX ? c->brace_n : 0) :
+						     c->enode && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, c->enode)->ty) == TY_ARRAY ?
+						     AST_TYPE(c->ast, AST_NODE_AT(c->ast, c->enode)->ty)->n : 0;
+
+					if (n) {
+						t = cc_type_array(c->ast, AST_TYPE(c->ast, t)->base, n, 0);
+						unsized_e->ty = t;
+						gen_local = unsized_e->sym = unsized_static ? cxx_gen_local_static(c, name, t, name_loc) : cxx_gen_local(c, name, t, name_loc);
+					} else
+						cxx_gen_fail(c);
+				}
 				if (gen_global) {
 					cxx_gen_global_end(c, gen_var, braced ? cxx_gen_array_initializer(c, t, name_loc) : c->enode, true);
 					gen_declared = true;

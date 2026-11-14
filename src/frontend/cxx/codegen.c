@@ -1855,6 +1855,16 @@ static const struct cxx_builtin_function *cxx_builtin_function_find(const char *
 	return NULL;
 }
 
+/* __builtin_isnan, isinf, isfinite, isnormal: 1 2 3 4 (0: not one) */
+static int cxx_float_class_builtin(const char *name, size_t len)
+{
+	if (len == 15 && !memcmp(name, "__builtin_isnan", 15)) return 1;
+	if (len == 15 && !memcmp(name, "__builtin_isinf", 15)) return 2;
+	if (len == 18 && !memcmp(name, "__builtin_isfinite", 18)) return 3;
+	if (len == 18 && !memcmp(name, "__builtin_isnormal", 18)) return 4;
+	return 0;
+}
+
 /* a builtin call's type, for the builtins vcc knows as functions or simple operations (arg0: the first argument's type) */
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret)
 {
@@ -1874,6 +1884,11 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 		return true;
 	}
 	if (len == 20 && !memcmp(name, "__builtin_constant_p", 20) && nargs == 1) {
+		*ret = cc_type_basic(TY_INT);
+		return true;
+	}
+	if (nargs == 1 && arg0 != CXX_TY_UNKNOWN && cxx_float_class_builtin(name, len) &&
+	    (AST_TYPE_KIND(c->ast, arg0) == TY_FLOAT || AST_TYPE_KIND(c->ast, arg0) == TY_DOUBLE || AST_TYPE_KIND(c->ast, arg0) == TY_LDOUBLE)) {
 		*ret = cc_type_basic(TY_INT);
 		return true;
 	}
@@ -1904,6 +1919,43 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 	}
 	if (len == 20 && !memcmp(name, "__builtin_constant_p", 20)) {
 		c->enode = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);	/* (not folded here: never a constant) */
+		return;
+	}
+	if (cxx_float_class_builtin(name, len) && nargs == 1 && args[0]) {
+		/* by comparisons: NaN is not equal to itself; x - x is NaN for an infinity or a NaN, else 0 */
+		int k = cxx_float_class_builtin(name, len);
+		qty ft;
+		uint32_t (*x)(cc *, uint32_t) = cc_node_rvalue;
+		uint32_t v, r;
+
+		v = x(a, args[0]);
+		ft = QUNQ(AST_NODE_AT(a, v)->ty);
+		if (AST_TYPE_KIND(a, ft) != TY_FLOAT && AST_TYPE_KIND(a, ft) != TY_DOUBLE && AST_TYPE_KIND(a, ft) != TY_LDOUBLE)
+			return;
+		if (k == 4 && AST_TYPE_KIND(a, ft) == TY_LDOUBLE)
+			return;	/* (its smallest normal: not a double) */
+#define ARG() x(a, args[0])
+#define DIFF() cc_binary_build(a, LEX_TOKEN_MINUS, ARG(), ARG(), loc)
+		if (k == 1)
+			r = cc_binary_build(a, LEX_TOKEN_EXCLAMATION_EQUAL, ARG(), ARG(), loc);
+		else if (k == 2)
+			r = cc_binary_build(a, LEX_TOKEN_AMPERSAND_AMPERSAND, cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, ARG(), ARG(), loc),
+					    cc_binary_build(a, LEX_TOKEN_EXCLAMATION_EQUAL, DIFF(), DIFF(), loc), loc);
+		else {
+			r = cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, DIFF(), DIFF(), loc);
+			if (k == 4) {
+				/* finite and |x| >= the smallest normal */
+				double mn = AST_TYPE_KIND(a, ft) == TY_FLOAT ? 0x1p-126 : 0x1p-1022;
+				uint32_t lo = cc_node_float_new(a, mn, ft, loc), nlo = cc_node_float_new(a, -mn, ft, loc);
+
+				r = cc_binary_build(a, LEX_TOKEN_AMPERSAND_AMPERSAND, r,
+						    cc_binary_build(a, LEX_TOKEN_PIPE_PIPE, cc_binary_build(a, LEX_TOKEN_GREATER_EQUAL, ARG(), lo, loc),
+								    cc_binary_build(a, LEX_TOKEN_LESS_EQUAL, ARG(), nlo, loc), loc), loc);
+			}
+		}
+#undef ARG
+#undef DIFF
+		c->enode = cc_conversion_apply(a, r, cc_type_basic(TY_INT));
 		return;
 	}
 	if (len == 19 && !memcmp(name, "__builtin_addressof", 19)) {
@@ -3877,6 +3929,22 @@ VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc)
 	return s;
 }
 
+/* a local variable in static storage (static or constexpr): C's function-scope static, initialized by a
+   constant (cxx_gen_local_declare checks it) */
+VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, qty t, uint32_t loc)
+{
+	uint32_t s = cxx_gen_local(c, name, t, loc);
+
+	if (s)
+		c->ast->syms[s].sc = SC_STATIC;
+	return s;
+}
+
+VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t)
+{
+	return cxx_gen_needs_construction(c, t, 0) || cxx_gen_needs_destruction(c, t, 0);
+}
+
 /* its declaration statement, with the initializer's node (0: none), appended to the block being built */
 VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_init, uint32_t loc)
 {
@@ -3893,7 +3961,8 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
 		cxx_gen_fail(c);	/* (a declaration that is not a block's statement: a condition's) */
 		return;
 	}
-	if (has_init && AST_NODE_AT(a, init)->op != N_INIT && !cxx_gen_type_ok(c, a->syms[s].ty)) {
+	if (has_init && AST_NODE_AT(a, init)->op != N_INIT && !cxx_gen_type_ok(c, a->syms[s].ty) &&
+	    !(AST_NODE_AT(a, init)->op == N_STR && AST_TYPE_KIND(a, a->syms[s].ty) == TY_ARRAY)) {	/* (char s[] = "text": C's) */
 		cxx_gen_fail(c);	/* (an array from something that is not a list) */
 		return;
 	}
@@ -3902,10 +3971,10 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
 		return;
 	}
 	if (has_init) {
-		if (AST_NODE_AT(a, init)->op != N_INIT)
-			init = cxx_gen_bind(c, init, a->syms[s].ty, loc);
-		if (!init) {
-			cxx_gen_fail(c);
+		if (AST_NODE_AT(a, init)->op != N_INIT && !(AST_NODE_AT(a, init)->op == N_STR && AST_TYPE_KIND(a, a->syms[s].ty) == TY_ARRAY))
+			init = cxx_gen_bind(c, init, a->syms[s].ty, loc);	/* (char s[] = "text": the literal, as C's initializer takes it) */
+		if (!init || (a->syms[s].sc == SC_STATIC && !cxx_gen_static_ok(a, a->syms[s].ty, init))) {
+			cxx_gen_fail(c);	/* (a static local's dynamic initializer: its guard, not built yet) */
 			return;
 		}
 		a->syms[s].body = init;

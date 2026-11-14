@@ -1195,7 +1195,30 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
 			cxx_gen_this(c, t->loc);
 		}
-		else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
+		else if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && !c->tentative) {
+			/* the builtin's own location (clang's: the caller's in a default argument; only messages differ) */
+			const char *name = "";
+			uint32_t nl = 0, line = 0, col = 0;
+
+			pp_location_describe(c->p, t->loc, &name, &nl, &line, &col);
+			if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
+				cxx_ec(c, cc_type_basic(TY_UINT), t->kw == CXX_KW___builtin_LINE ? line : col);
+			else {
+				const char *s = name;
+				size_t n = nl;
+
+				if (t->kw == CXX_KW___builtin_FILE_NAME)
+					for (size_t i = 0; i < nl; i++)
+						if (name[i] == '/')
+							s = name + i + 1, n = nl - i - 1;
+				if (t->kw == CXX_KW___builtin_FUNCTION)
+					s = "", n = 0;	/* (the enclosing function's name: not kept here) */
+				cxx_et(c, cc_type_pointer(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST)), false);
+				cxx_gen_string(c, s, n, t->loc);
+				if (c->enode)
+					c->enode = cc_conversion_decay(c->ast, c->enode);
+			}
+		} else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
 			cxx_et(c, cc_type_basic(TY_UINT), false);
 		return;
 	case CXX_KW___builtin_source_location:
