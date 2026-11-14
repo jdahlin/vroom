@@ -553,11 +553,11 @@ typedef struct codegen_lvalue {
 	uint8_t register_number;		/* CODEGEN_LVALUE_REGISTER: base register (a temp, owned); CODEGEN_LVALUE_GLOBAL_REGISTER: the register */
 	uint8_t is_bitfield;		/* bit-field */
 	uint8_t is_signed;		/* bit-field signedness */
+	uint32_t align;		/* known alignment of the address */
 	int64_t dynamic_bit_slot;	/* packed vector lane: saved dynamic bit index, 0 for static */
 	uint16_t bit_offset, width;	/* bit-field: bits from the byte at off */
 	uint32_t reference;		/* CODEGEN_LVALUE_SYMBOL */
 	int64_t offset;		/* byte offset (CODEGEN_LVALUE_FRAME: slot offset) */
-	uint32_t align;		/* known alignment of the address */
 } codegen_lvalue;
 
 enum { A64_ABI_ARGUMENT_IGNORE, A64_ABI_ARGUMENT_REGISTER, A64_ABI_ARGUMENT_STACK, A64_ABI_ARGUMENT_REFERENCE_REGISTER, A64_ABI_ARGUMENT_REFERENCE_STACK, A64_ABI_ARGUMENT_VECTOR_REGISTER, A64_ABI_ARGUMENT_HFA, A64_ABI_ARGUMENT_BOOL_LANES };	/* A64_ABI_ARGUMENT_VECTOR_REGISTER: float/double in v<reg>; A64_ABI_ARGUMENT_HFA: nreg members of fsz bytes in v<reg>.. */

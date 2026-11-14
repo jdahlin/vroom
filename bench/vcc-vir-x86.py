@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_tls.c', {'tls_member', 'tls_update'}, {}),
         ('vir_x86_computed_goto.c', {'dispatch'}, {}),
         ('vir_x86_cas.c', {'cas32', 'cas64', 'fetch_update'}, {}),
-        ('vir_x86_struct_call.c', {'swap_pair', 'change_mixed', 'crowded', 'change_large', 'main'}, {}),
+        ('vir_x86_struct_call.c', {'swap_pair', 'change_mixed', 'crowded', 'change_large', 'separate', 'main'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
          {'eq': 'cmpps', 'ne': 'cmpps', 'lt': 'cmpps', 'le': 'cmpps', 'gt': 'cmpps', 'ge': 'cmpps',
@@ -139,6 +139,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
+            if filename == 'vir_x86_struct_call.c':
+                body = asm.read_text().split('separate:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if 'movups' in body or 'rep movs' in body:
+                    raise SystemExit('separate: incoming by-value arguments were copied again')
             if filename == 'vir_record_words.c':
                 text = asm.read_text()
                 body = text.split('token_copy:\n', 1)[1].split('.Lfunc_end', 1)[0]

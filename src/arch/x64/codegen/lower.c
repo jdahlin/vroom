@@ -200,11 +200,10 @@ VPRIV int x64_ftreg(codegen_context *e)
 VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
 VPRIV int x64_nffree(codegen_context *e) { return XMM15 - XMM8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_FLOAT_TEMPORARIES); }
 
-VPRIV int x64_toreg(codegen_context *e, codegen_value *v, int size)
+VPRIV int x64_toreg(codegen_context *e, codegen_value *v)
 {
 	int r;
 
-	(void)size;
 	if (v->kind == CODEGEN_VALUE_REGISTER)
 		return v->register_number;
 	r = x64_treg(e);
@@ -382,7 +381,7 @@ static bool x64_imm32(codegen_value v) { return v.kind == CODEGEN_VALUE_CONSTANT
 static codegen_value x64_div(codegen_context *e, int op, int size, bool sgn, codegen_value a, codegen_value b)
 {
 	x64_lowering_context *X = e->x64_context;
-	int ra = x64_toreg(e, &a, size), rb = x64_toreg(e, &b, size), d = rb;
+	int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b), d = rb;
 	bool sv[2] = { false, false };
 	static const uint8_t fx[2] = { RAX, RDX };
 
@@ -419,7 +418,7 @@ static codegen_value x64_div(codegen_context *e, int op, int size, bool sgn, cod
 static codegen_value x64_shift(codegen_context *e, int op, int size, codegen_value a, codegen_value b)
 {
 	x64_lowering_context *X = e->x64_context;
-	int ra = x64_toreg(e, &a, size), rb = x64_toreg(e, &b, size), dst = ra == RCX ? R11 : ra;
+	int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b), dst = ra == RCX ? R11 : ra;
 	bool sv = false;
 
 	if (dst == R11)
@@ -461,7 +460,7 @@ VPRIV codegen_value x64_bin(codegen_context *e, int op, int size, bool sgn, code
 		if (b.kind == CODEGEN_VALUE_CONSTANT) {
 			record *i;
 
-			ra = x64_toreg(e, &a, size);
+			ra = x64_toreg(e, &a);
 			i = x64_record_emit_three_registers(e, op == LEX_TOKEN_LESS_LESS ? X64_OP_SHLI : sgn ? X64_OP_SARI : X64_OP_SHRI, size, ra, ra, X64_REGISTER_NONE);
 			i->immediate = (int64_t)(b.integer & (size * 8 - 1));
 			return a;
@@ -476,7 +475,7 @@ VPRIV codegen_value x64_bin(codegen_context *e, int op, int size, bool sgn, code
 
 		a = b, b = t;
 	}
-	ra = x64_toreg(e, &a, size);
+	ra = x64_toreg(e, &a);
 	if (op == LEX_TOKEN_STAR && b.kind == CODEGEN_VALUE_CONSTANT && x64_mulconst(e, size, ra, b.integer))
 		return a;
 	if (x64_imm32(b)) {
@@ -485,7 +484,7 @@ VPRIV codegen_value x64_bin(codegen_context *e, int op, int size, bool sgn, code
 		i->immediate = (int64_t)b.integer;
 		return a;
 	}
-	rb = x64_toreg(e, &b, size);
+	rb = x64_toreg(e, &b);
 	x64_record_emit_three_registers(e, xop, size, ra, ra, rb);
 	if (rb != ra)
 		x64_tfree(e, rb);
@@ -494,7 +493,7 @@ VPRIV codegen_value x64_bin(codegen_context *e, int op, int size, bool sgn, code
 
 VPRIV codegen_value x64_un(codegen_context *e, int op, int size, codegen_value a)
 {
-	int ra = x64_toreg(e, &a, size);
+	int ra = x64_toreg(e, &a);
 
 	x64_record_emit_three_registers(e, op == LEX_TOKEN_MINUS ? X64_OP_NEG : X64_OP_NOT, size, ra, ra, X64_REGISTER_NONE);
 	return a;
@@ -528,7 +527,7 @@ static int x64_flags(codegen_context *e, int op, int size, bool sgn, codegen_val
 		*a = *b, *b = t;
 		op = x64_swapop(op);
 	}
-	*ra = x64_toreg(e, a, size);
+	*ra = x64_toreg(e, a);
 	if (x64_imm32(*b) && b->integer == 0 && (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL)) {
 		x64_record_emit_three_registers(e, X64_OP_TEST, size, X64_REGISTER_NONE, *ra, X64_REGISTER_NONE);
 	} else if (x64_imm32(*b)) {
@@ -536,7 +535,7 @@ static int x64_flags(codegen_context *e, int op, int size, bool sgn, codegen_val
 
 		i->immediate = (int64_t)b->integer;
 	} else {
-		int rb = x64_toreg(e, b, size);
+		int rb = x64_toreg(e, b);
 
 		x64_record_emit_three_registers(e, X64_OP_CMP, size, X64_REGISTER_NONE, *ra, rb);
 		if (rb != *ra)
@@ -566,7 +565,7 @@ VPRIV void x64_cmpbr(codegen_context *e, int op, int size, bool sgn, codegen_val
 
 VPRIV void x64_brz(codegen_context *e, codegen_value a, int size, bool nz, uint32_t lbl)
 {
-	int ra = x64_toreg(e, &a, size);
+	int ra = x64_toreg(e, &a);
 	record *i;
 
 	x64_record_emit_three_registers(e, X64_OP_TEST, size, X64_REGISTER_NONE, ra, X64_REGISTER_NONE);
@@ -893,7 +892,7 @@ static void x64_popcount(codegen_context *e, int r, int size)
 
 VPRIV codegen_value x64_bitop(codegen_context *e, int bi, int size, codegen_value a)
 {
-	int r = x64_toreg(e, &a, size), bits = size * 8;
+	int r = x64_toreg(e, &a), bits = size * 8;
 
 	if (size == 4)
 		x64_ext(e, r, 4, false);	/* (the count sees the 32 bits only) */
@@ -942,7 +941,7 @@ VPRIV codegen_value x64_bitop(codegen_context *e, int bi, int size, codegen_valu
 /* n bytes below the stack pointer (nothing is pushed here: the stack stays 16-aligned) */
 VPRIV codegen_value x64_alloca(codegen_context *e, codegen_value n)
 {
-	int r = x64_toreg(e, &n, 8);
+	int r = x64_toreg(e, &n);
 
 	x64_record_emit_three_registers(e, X64_OP_ADDI, 8, r, r, X64_REGISTER_NONE)->immediate = 15;
 	x64_record_emit_three_registers(e, X64_OP_ANDI, 8, r, r, X64_REGISTER_NONE)->immediate = -16;
@@ -1008,9 +1007,9 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 			codegen_fatal_report(e, x->loc, "builtin requires target feature '%s'", "crc32");
 		int size = walk_type_size(c, N(arg[1])->ty);
 		codegen_value a = walk_value_emit(e, arg[0]);
-		int ra = walk_value_to_register(e, &a, N(arg[0])->ty);
+		int ra = walk_value_to_register(e, &a);
 		codegen_value d = walk_value_emit(e, arg[1]);
-		int rd = walk_value_to_register(e, &d, N(arg[1])->ty);
+		int rd = walk_value_to_register(e, &d);
 		x64_record_emit_three_registers(e, X64_OP_CRC32, size, ra, ra, rd);
 		x64_tfree(e, rd);
 		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
@@ -1037,7 +1036,7 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 		if (vector) {
 			v = walk_lvalue_store_memory(e, &l, N(arg[i])->ty, v);
 		} else {
-			int r = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_INT));
+			int r = walk_value_to_register(e, &v);
 			x64_store(e, r, &l, 4);
 		}
 		walk_value_free(e, &v);

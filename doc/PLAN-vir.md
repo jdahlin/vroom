@@ -1445,6 +1445,84 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite codegen object swap (2026-11-14, 2c88c830).**
+Relinked vpp in both directions, replacing only obj/unity/codegen.o in
+the original ordered list of 29 objects. Both control relinks reproduced
+their original executable byte for byte. CPU 7, VCC_THREADS=1, SQLite
+3.50.4 -O2 -c, one warmup per binary followed by 32 measured compiles
+per binary with balanced run order. Medians from perf stat:
+
+| Other 28 objects | codegen.o | Retired user instructions | CPU ms |
+| --- | --- | ---: | ---: |
+| Self-hosted | Self-hosted | 1,678.60M | 156.550 |
+| Self-hosted | Clang | 1,460.70M | 146.820 |
+| Clang | Self-hosted | 1,318.97M | 142.170 |
+| Clang | Clang | 1,099.51M | 131.255 |
+
+Clang's codegen.o saved 217.90M instructions and 9.73 ms in the
+self-hosted binary. The reverse swap added 219.47M and 10.92 ms to
+the Clang-built binary. The object therefore accounts for 37.6–37.9%
+of the 579.09M instruction gap and 38–43% of the 25.30 ms CPU gap.
+The earlier emitter boundary count includes calls into separately
+compiled objects such as the assembler.
+
+The Clang host normally links as PIE and gains text relocations with
+the self-hosted object. A second balanced experiment linking all four
+as non-PIE (16 measured runs each) gave instruction shares of 37.6%
+and 37.9% and CPU shares of 41% and 37%. Every compile in both
+experiments produced the same SQLite object as the previous benchmark.
+
+**SQLite emitter instruction profile (2026-11-14).**
+On the #284 baseline the emitter accounted for 343.1M of the 588.9M
+extra retired user instructions on SQLite 3.50.4. The counts below
+come from reading a thread-local hardware counter at function entry and
+return with the compiler pinned to CPU 7 and VCC_THREADS=1. The walker
+and finish counts cover the same 1,924 functions in both builds.
+
+| Emitter region (exclusive, millions) | Self-hosted | Clang-built | Excess |
+| --- | ---: | ---: | ---: |
+| AST walker excluding x64_finish | 422.4 | 253.2 | 169.2 |
+| Committing chunks, including assembly | 406.4 | 285.2 | 121.3 |
+| x64_finish | 152.1 | 106.6 | 45.5 |
+| Other emitter work | 21.0 | 13.8 | 7.1 |
+
+In walk_lvalue_from_value, VCC reserved 120 stack bytes and copied a
+32-byte by-value operand from its incoming argument area. Clang read
+that area directly. VIR now uses the SysV incoming object for by-value
+memory parameters with sufficient alignment. The shared walker also
+skips register materialization for register values and drops the type
+width argument both materializers ignored. Clang had eliminated those
+width calculations in the inspected code. Compact lvalue and ABI records
+and guarded target-feature lookups reduce work in other walker paths.
+
+Instruction sampling also found x64_mov and as_x64_op under chunk commit.
+The compiler now encodes common numeric integer ModRM operands directly
+in the fragment. This benefits both builds. Chunk commit fell to 376.8M
+self-hosted and 254.8M Clang-built. Total emitter counts fell to 958.1M
+and 623.5M, reducing its excess from 343.1M to 334.7M.
+
+Medians of 24 rotated runs per binary after warmup, perf stat
+instructions:u and task-clock, on the same pinned SQLite -O2 -c compile:
+
+| Compiler | Instructions before | After | CPU ms before | After |
+| --- | ---: | ---: | ---: | ---: |
+| Self-hosted | 1,723.80M | 1,679.38M | 159.655 | 156.620 |
+| Clang-built | 1,134.88M | 1,099.57M | 133.465 | 131.935 |
+
+The absolute gap fell by 9.11M to 579.81M. The CPU ratio moved from
+1.196x to 1.187x. A second run measured 1.193x to 1.191x. All four
+binaries produced the same SQLite object, and its recursive query returned
+500500. Stage 2 and stage 3 matched. The x86 ABI suite passed all 35
+cases including cross-compiler calls. The VIR regression checks two
+independently mutated by-value arguments and inspects the lowered code.
+
+Integration review updates the existing CRC intrinsic to the materializer's
+new signature and initializes the new incoming-object slot field explicitly.
+Verified on the integrated stack: native x86 object parity 345/345, checked
+VIR own-object runtime tests 342/342, dedicated VIR assembly/object checks,
+x86 ABI cross-calls through VIR 35/35, feature macros 371/371, and sanitized
+machine-record effect contracts.
+
 **SQLite emitter and short literal comparisons (2026-11-14).**
 Five pinned SQLite 3.50.4 compiles per binary, sampling every 75,001 user
 cycles with call stacks. At the #283 baseline, a function from the codegen

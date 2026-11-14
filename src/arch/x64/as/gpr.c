@@ -491,12 +491,77 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
+/* Scalar ModRM instructions from compiler records have a known width and
+ * register class. Write their numeric operands straight to the fragment.
+ * Symbolic displacements and immediates still use the relocation encoder. */
+static bool x64_numeric_modrm(as_context *a, enum X64Op op, int size, const XOp *o)
+{
+	if (o[0].kind == XK_IMM || a->x64_lock_prefix)
+		return false;
+	bool extend = op == X64O_MOVSX || op == X64O_MOVZX;
+	bool load = extend || o[0].kind == XK_MEM;
+	const XOp *rm = &o[load ? 0 : 1];
+	const XOp *reg = &o[load ? 1 : 0];
+	bool memory = rm->kind == XK_MEM;
+	if (memory && ((unsigned)rm->base >= 16 || rm->v.add || rm->v.sub || rm->mod || rm->addr32 || rm->seg))
+		return false;
+
+	uint8_t opcode;
+	bool escape = false;
+	if (op <= X64O_CMP)
+		opcode = op * 8 + 2 * load + (size != 1);
+	else if (op == X64O_MOV)
+		opcode = 0x88 + 2 * load + (size != 1);
+	else if (op == X64O_TEST)
+		opcode = 0x84 + (size != 1);
+	else if (op == X64O_LEA)
+		opcode = 0x8d;
+	else if (extend) {
+		escape = size != 4;
+		opcode = escape ? (op == X64O_MOVSX ? 0xbe : 0xb6) + (size == 2) : 0x63;
+	} else {
+		return false;
+	}
+
+	int width = extend ? reg->size : size;
+	unsigned base = memory ? rm->base : rm->reg;
+	unsigned rex = 0x40 | ((width == 8) << 3) | ((reg->reg & 8) >> 1) | (base >> 3);
+	bool byte_rex = reg->needrex || (!memory && rm->needrex);
+	unsigned mod = 3, disp_size = 0;
+	bool sib = false;
+	if (memory) {
+		if (rm->index >= 8) rex |= 2;
+		sib = rm->index >= 0 || (base & 7) == 4;
+		int64_t displacement = rm->v.c;
+		mod = !displacement && (base & 7) != 5 ? 0 : fits8(displacement) ? 1 : 2;
+		disp_size = mod == 2 ? 4 : mod;
+	}
+	bool emit_rex = rex != 0x40 || byte_rex;
+	size_t length = (width == 2) + emit_rex + escape + 2 + sib + disp_size;
+	uint32_t frag = a->fragment_current;
+	elf_code(a->object, frag);
+	uint8_t *p = elf_grow(a->object, frag, length);
+	if (width == 2) *p++ = 0x66;
+	if (emit_rex) *p++ = rex;
+	if (escape) *p++ = 0x0f;
+	*p++ = opcode;
+	*p++ = (mod << 6) | ((reg->reg & 7) << 3) | (sib ? 4 : base & 7);
+	if (sib) {
+		unsigned shift = rm->scale == 8 ? 3 : rm->scale == 4 ? 2 : rm->scale == 2;
+		*p++ = (shift << 6) | ((rm->index < 0 ? 4 : rm->index & 7) << 3) | (base & 7);
+	}
+	if (disp_size == 1) *p = (uint8_t)rm->v.c;
+	if (disp_size == 4) vbytes_store_u32(p, (uint32_t)rm->v.c);
+	return true;
+}
+
 /* Restricted to the compiler's well-formed integer operands. Other forms
  * continue through as_x64_insn and its full mnemonic/operand dispatch. */
 int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
 {
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
+	if (x64_numeric_modrm(a, op, size, o)) return 0;
 	if (op <= X64O_CMP) return x64_alu(a, op, size, o, 2);
 	if (op == X64O_TEST) return x64_test_register(a, size, &o[0], &o[1]);
 	if (op == X64O_MOV) return x64_mov(a, size, o);
