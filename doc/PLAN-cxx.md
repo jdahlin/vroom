@@ -1986,3 +1986,11 @@ anrop från nyss byggd kod till funktioner vcc aldrig instansierar ("no body see
 - `__builtin_lt_synthesizes_from_spaceship(const L&, const R&)` som clangs: binäroperatorns val.
 Test: `run/auto-members.cpp`.  cxx-strict 345 (348): 36 fler kompileras, 1 ny (`auto __res = __lhs <=> __rhs`).
 Sedda luckor: en instans av en C-variadisk funktionsmall (`f(Arg, ...)`) definieras aldrig.
+
+## Status 113 (2026-11-14)
+- Byggfunktioner som C-tabellen känner men C++-tabellen inte: biblioteksfunktioner (`__builtin_ceill` anropar
+  `ceill`; clangs Builtins.def-signaturer via `cc_library_builtin_info`), oändlighet och tyst NaN som
+  konstanter (`__builtin_huge_valf`, `__builtin_inf`, `__builtin_nan("")`).  Kvar: `__builtin_nans`.
+- En funktion som namnges utan att anropas direkt (`(std::numeric_limits<T>::min)()`, `&X::f`) är använd:
+  en instans medlemskropp instansieras (`cxx_gen_function_value`).
+cxx-strict 338 (345): 190 funktioner till kompileras (mest `<cmath>`/`<limits>`), inga nya fel.

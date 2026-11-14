@@ -108,6 +108,30 @@ VPRIV int cxx_atomic_builtin(const char *name, size_t len, uint32_t nargs)
 	return 0;
 }
 
+/* a builtin C's table knows that the C++ table does not: a library function (__builtin_ceill: ceill) or a
+   constant (__builtin_huge_valf, __builtin_inf, __builtin_nan("")); its fixed signature (NULL: not one) */
+static const cc_builtin *cxx_c_builtin(const char *name, size_t len, uint32_t nargs)
+{
+	char nb[64];
+	const cc_builtin *b;
+	size_t n;
+
+	if (len < 11 || len >= sizeof nb || memcmp(name, "__builtin_", 10))
+		return NULL;
+	memcpy(nb, name, len), nb[len] = 0;
+	cc_builtin_table_init();
+	b = cc_builtin_lookup(vintern_cstr(nb));
+	if (!b || !b->sig || strchr(b->sig, '.') || strpbrk(b->sig, "FBHV"))
+		return NULL;
+	n = strlen(b->sig);
+	if (n - 1 != nargs)
+		return NULL;
+	if (b->id == BI_LIB || ((b->id == BI_HUGE_VAL || b->id == BI_HUGE_VALF || b->id == BI_INF || b->id == BI_INFF) && nargs == 0) ||
+	    ((b->id == BI_NAN || b->id == BI_NANF) && nargs == 1))
+		return b;
+	return NULL;
+}
+
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret)
 {
 	const struct cxx_builtin_function *b;
@@ -148,6 +172,25 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 
 		if (k && arg0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, arg0) == TY_PTR && !AST_TYPE(c->ast, arg0)->ext) {
 			*ret = k == 2 ? cc_type_basic(TY_VOID) : QUNQ(AST_TYPE(c->ast, arg0)->base);
+			return true;
+		}
+	}
+	{
+		const cc_builtin *cb = cxx_c_builtin(name, len, nargs);
+
+		if (cb) {
+			*ret = cc_builtin_signature_type(c->ast, cb->sig[0]);
+			return true;
+		}
+	}
+	{
+		/* a library builtin of clang's (__builtin_expl, __builtin_frexpf): the library function's type */
+		qty ft;
+		const char *lib;
+
+		if (len > 10 && !memcmp(name, "__builtin_", 10) && cc_library_builtin_info(c->ast, name, len, &ft, &lib) &&
+		    !(AST_TYPE(c->ast, ft)->flags & TF_VARIADIC) && AST_TYPE(c->ast, ft)->n == nargs) {
+			*ret = AST_TYPE(c->ast, ft)->base;
 			return true;
 		}
 	}
@@ -254,8 +297,78 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 			c->enode = cc_cast_insert(a, p, cc_type_pointer(a, cc_type_basic(TY_VOID)), CK_NOP);
 		return;
 	}
-	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 128)
+	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 128) {
+		const cc_builtin *cb = cxx_c_builtin(name, len, nargs);
+		qty rt;
+
+		for (uint32_t k = 0; k < nargs; k++)
+			if (!args[k])
+				return;
+		if (!cb) {
+			/* a library builtin of clang's: a call of the library function */
+			qty ft;
+			const char *lib;
+			uint32_t s = 0, fn, n, id;
+			cc_id_list list;
+			const ctype *f;
+
+			if (!(len > 10 && !memcmp(name, "__builtin_", 10) && cc_library_builtin_info(a, name, len, &ft, &lib)))
+				return;
+			f = AST_TYPE(a, ft);
+			if ((f->flags & TF_VARIADIC) || f->n != nargs)
+				return;
+			id = vintern_cstr(lib);
+			for (uint32_t k = 0; k < c->ngen_lib && !s; k++)
+				if (c->gen_lib_name[k] == id)
+					s = c->gen_lib_sym[k];
+			if (!s) {
+				s = cc_symbol_new(a, S_FUNC, id, ft, loc);
+				a->syms[s].flags |= SF_GLOBAL;
+				a->syms[s].depth = 0;
+				if (c->ngen_lib < 64)
+					c->gen_lib_name[c->ngen_lib] = id, c->gen_lib_sym[c->ngen_lib++] = s;
+			}
+			cc_id_list_init(&list);
+			for (uint32_t k = 0; k < nargs; k++)
+				cc_id_list_append(a, &list, cc_conversion_apply(a, cc_conversion_decay(a, args[k]), QUNQ(a->params[f->aux + k])));
+			fn = cc_node_rvalue(a, cxx_gen_var_node(c, s, loc));
+			n = cc_node_new(a, N_CALL, f->base, loc);
+			AST_NODE_AT(a, n)->a = fn;
+			AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &list);
+			AST_NODE_AT(a, n)->c = nargs;
+			c->enode = n;
+			return;
+		}
+		rt = cc_builtin_signature_type(a, cb->sig[0]);
+		if (cb->id != BI_LIB) {
+			/* an infinity, or a quiet NaN (its payload string not read: "" in the library's uses) */
+			c->enode = cc_node_float_new(a, cb->id == BI_NAN || cb->id == BI_NANF ? __builtin_nan("") : __builtin_inf(), rt, loc);
+			return;
+		}
+		uint32_t s = 0, fn, n, id = vintern_cstr(cb->name + 10);
+		cc_id_list list;
+
+		for (uint32_t k = 0; k < c->ngen_lib && !s; k++)
+			if (c->gen_lib_name[k] == id)
+				s = c->gen_lib_sym[k];
+		if (!s) {
+			s = cc_symbol_new(a, S_FUNC, id, cc_builtin_type(a, cb), loc);
+			a->syms[s].flags |= SF_GLOBAL;
+			a->syms[s].depth = 0;
+			if (c->ngen_lib < 64)
+				c->gen_lib_name[c->ngen_lib] = id, c->gen_lib_sym[c->ngen_lib++] = s;
+		}
+		cc_id_list_init(&list);
+		for (uint32_t k = 0; k < nargs; k++)
+			cc_id_list_append(a, &list, cc_conversion_apply(a, cc_conversion_decay(a, args[k]), cc_builtin_signature_type(a, cb->sig[k + 1])));
+		fn = cc_node_rvalue(a, cxx_gen_var_node(c, s, loc));
+		n = cc_node_new(a, N_CALL, rt, loc);
+		AST_NODE_AT(a, n)->a = fn;
+		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &list);
+		AST_NODE_AT(a, n)->c = nargs;
+		c->enode = n;
 		return;
+	}
 	if (!c->gen_builtin_syms[i]) {
 		qty ps[4];
 		uint32_t s;

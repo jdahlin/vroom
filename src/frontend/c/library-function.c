@@ -172,6 +172,19 @@ CC_PRIVATE const char *cc_library_builtin_signature(const char *n)
 	return b ? b->sig : NULL;
 }
 
+/* a library builtin by name (__builtin_expl): its function type and the library function it calls (expl);
+   false: not one, or a signature not readable (C++ calls it so: cxx_gen_builtin) */
+CC_PRIVATE bool cc_library_builtin_info(cc *c, const char *name, size_t len, qty *fty, const char **lib)
+{
+	const struct cc_library_builtin_entry *b = cc_library_builtin_find(name, len);
+	qty ret;
+
+	if (!b || !b->lib || !cc_library_signature_function_type(c, b->sig, fty, &ret))
+		return false;
+	*lib = b->lib;
+	return true;
+}
+
 CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc)
 {
 	const struct cc_library_builtin_entry *b = cc_library_builtin_find(cc_identifier_string(id), cc_identifier_length(id));

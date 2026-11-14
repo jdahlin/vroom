@@ -9,6 +9,7 @@ VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc)
 
 	if (!cxx_gen_on(c))
 		return;
+	cxx_member_body_use(c, f);	/* (named, it is used: (numeric_limits<T>::min)(), &X::f; an instance's member body) */
 	c->enode = 0;
 	if (!cxx_gen_name(c, f) || !f->sym)
 		return;
