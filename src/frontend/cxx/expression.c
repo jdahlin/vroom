@@ -303,6 +303,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 		uint32_t start = c->pos, seen = c->npacks_seen;
 		cxx_entity *saved[8];
 
+		uint8_t was_invalid = c->einvalid, was_unsure = c->eunsure, was_missing = c->member_missing;
+
 		memcpy(saved, c->packs_seen, sizeof saved);
 		c->npacks_seen = 0, c->packs_overflow = 0;
 		cxx_initializer_parse(c);
@@ -317,6 +319,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 			for (uint32_t k = 0; k < np; k++)
 				ok &= packs[k]->npack == len && !packs[k]->pack_placeholder;
 			if (ok) {
+				/* (what the pattern said with its packs unexpanded says nothing of the elements) */
+				c->einvalid = was_invalid, c->eunsure = was_unsure, c->member_missing = was_missing;
 				for (uint32_t i = 0; i < len; i++) {
 					for (uint32_t k = 0; k < np; k++)
 						cxx_pack_element(c, packs[k], (int32_t)i);
@@ -1571,6 +1575,9 @@ VPRIV void cxx_expression_parse(cxx *c)
 	while (cxx_is(c, LEX_TOKEN_COMMA) && !c->in_template_args) {
 		if (cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS)
 			return;	/* fold over , */
+		/* a, b: b's type whatever a is; whether a is valid is then not known (decltype(f(x), void())) */
+		if (c->etype == CXX_TY_UNKNOWN && !c->tentative && !c->template_depth)
+			c->eunsure = 1;
 		cxx_advance(c);
 		cxx_assignment_expression_parse(c);
 	}

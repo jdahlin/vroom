@@ -1490,7 +1490,22 @@ static void cxx_noexcept_parse(cxx *c)
 static void cxx_function_tail_parse(cxx *c)
 {
 	bool is_const = false;
+	cxx_scope *outer = c->scope;
 
+	/* The parameters are in scope in a noexcept-specifier and a trailing return type: -> decltype(a < b).
+	   Declared from here, before either is parsed: what a noexcept(...) instantiates has declarators of
+	   its own, which leave their parameters in c->fn_*. */
+	if (!c->tentative && !c->template_depth && c->fn_nparams && !c->fn_variadic) {
+		cxx_scope *ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+		uint32_t n = c->fn_nparams;
+		cxx_param *save = malloc(n * sizeof *save);
+
+		for (uint32_t i = 0; i < n; i++)
+			save[i].name = c->fn_pnames[i], save[i].ty = c->fn_pdecl[i];
+		cxx_scope_push(c, ps);
+		cxx_params_declare(c, ps, save, n);
+		free(save);
+	}
 	for (;;) {
 		if (cxx_kw_is_cv(cxx_kw(c)) || cxx_is(c, LEX_TOKEN_AMPERSAND) || cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
 			is_const |= cxx_is_kw(c, CXX_KW_const);
@@ -1512,26 +1527,13 @@ static void cxx_function_tail_parse(cxx *c)
 		break;
 	}
 	if (cxx_accept(c, LEX_TOKEN_ARROW)) {
-		/* the parameters are in scope in a trailing return type: -> decltype(a < b) */
-		cxx_scope *outer = c->scope;
-
-		if (!c->tentative && !c->template_depth && c->fn_nparams && !c->fn_variadic) {
-			cxx_scope *ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
-			uint32_t n = c->fn_nparams;
-			cxx_param *save = malloc(n * sizeof *save);
-
-			for (uint32_t i = 0; i < n; i++)
-				save[i].name = c->fn_pnames[i], save[i].ty = c->fn_pdecl[i];
-			cxx_scope_push(c, ps);
-			cxx_params_declare(c, ps, save, n);
-			free(save);
-		}
 		cxx_type_id_parse(c);
 		c->scope = outer;
 		c->fn_trailing = c->type_out;	/* auto f() -> T: the return type */
 		c->fn_const = is_const, c->fn_has_trailing = 1;
 		return;
 	}
+	c->scope = outer;
 	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const, c->fn_has_trailing = 0;
 }
 

@@ -316,6 +316,25 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	uint32_t ncand = 0;
 	int best = -1;
 
+	/* a call on a pattern's placeholders: a type perhaps, but whether it is valid depends on what they stand
+	   for (a partial specialization's X<T, decltype(f(std::declval<T>()))> is substituted when matching) */
+	for (uint32_t i = 0; i < nargs && i < 16 && !c->tentative; i++)
+		if (args[i] != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, args[i]))
+			c->eunsure = 1;
+	if (trace) {
+		fprintf(stderr, "call %.*s/%u tentative=%d unevaluated=%d args:", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs,
+			c->tentative, c->unevaluated);
+		for (uint32_t i = 0; i < nargs && i < 16; i++) {
+			char buf[160];
+			size_t len = 0;
+
+			if (args[i] != CXX_TY_UNKNOWN && cxx_type_spell(c, args[i], buf, sizeof buf, &len))
+				fprintf(stderr, " [%.*s]%s", (int)len, buf, lval[i] ? "&" : "");
+			else
+				fprintf(stderr, " [%s]", args[i] == CXX_TY_UNKNOWN ? "?" : "unspellable");
+		}
+		fputc('\n', stderr);
+	}
 	for (cxx_entity *e = set; e; e = e->next) {
 		qty r;
 		const ctype *sig = NULL;
@@ -525,6 +544,16 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, NULL, nargs, true);
 		if (!c->none_viable)
 			return true;
+		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
+		   to function aside) */
+		if (vintern_ents[id].len == 10 && !memcmp(vintern_ents[id].s, "operator()", 10) && !c->tentative) {
+			bool known = true;
+
+			for (uint32_t i = 0; i < nargs; i++)
+				known &= args[i] != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, args[i]);
+			if (known)
+				c->einvalid = 1;
+		}
 	}
 	set = nargs <= 2 ? cxx_lookup(c, id) : NULL;	/* (operator() and operator[] are members) */
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {

@@ -778,3 +778,33 @@ evaluated, 6 instances failed, 0.13 s (clang -fsyntax-only 0.58 s).  C++20:
 223 + 486 + 38, 0.17 s (clang 0.80 s).  clang -O0 emits about 1,670
 functions for the file in either mode.  json: 96,270 layouts clang agrees
 with, 71/71 parse; parse tests 23/23 (ok-check-detector).
+
+### Status 2026-11-14 (20): to_json detection, klassers kopiering/flytt
+
+libc++:s `swap` och nlohmanns `has_to_json`-kedja (basic_json:s
+konverterande konstruktor) avgörs nu.  Det som saknades:
+- `__is_constructible(T, T&&/const T&)` och `__is_assignable(T&, ...)` för
+  klasser: deklarerade kopierings-/flyttkonstruktorer och `operator=`
+  (`= delete`, `= default`, implicita: baser och datamedlemmar).
+- Funktionsmallskandidater vars parameterform inte kan passa sorteras bort;
+  platshållare för paket och mallmallparametrar; `R(Args...)`-mönster.
+- Parametrarna är i scope redan i `noexcept(...)`, och deklareras innan den
+  tolkas (det `noexcept` instansierar skrev över `c->fn_*`, så parametrarna
+  i den efterföljande `-> decltype(...)` saknade typ).
+- Giltighetsflaggorna (`einvalid`, `eunsure`, `member_missing`) läcker inte
+  längre ut ur en klassinstans som kompletteras mitt i ett uttryck, och inte
+  från ett paketmönster som tolkats oexpanderat.
+- Ett anrop på platshållare i en partiell specialiserings mönster
+  (`X<T, decltype(f(std::declval<T>()))>`) substitueras vid matchning i
+  stället för att alltid passa; `a, b` med otypat `a` är "okänt"; `obj(args)`
+  utan passande `operator()` är ogiltigt.
+- `bench/cxx-layout.py` lägger den sist byggda klassen först (basic_json och
+  dess komparator behöver varandra; clang måste börja utifrån).
+unit-32bit, C++11: 273 funktionsmallar + 451 medlems- + 42 out-of-class-
+kroppar, 4646 av 5161 anrop typade, static_asserts 111 sanna / 0 falska / 13
+ej utvärderade, 0 misslyckade instanser.  json: 113 380 layouter som clang
+håller med om (0 fel), 71/71 parse; parse-tester 28/28 (ok-check-serializer,
+ok-check-detection-calls, ok-check-detection-comma, ok-check-pack-calls).
+Kvar före mätningen mot clang -O2: resterande otypade anrop (none viable 138,
+callee unknown 135, unbound 104), kodgenerering för C++ från det delade
+AST:t, länkning och körning av testerna.

@@ -1356,8 +1356,21 @@ static bool cxx_instance_parse(cxx *c, cxx_instance *x)
 	return ok;
 }
 
-/* an instance's class, completed: its body parsed (once) */
+static void cxx_instance_complete_body(cxx *c, cxx_entity *inst);
+
+/* an instance's class, completed: its body parsed (once).  What its members' declarations leave in the
+   validity flags is not the verdict on the expression that needed the class. */
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst)
+{
+	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
+
+	if (!inst || !inst->instance || inst->instance->state)
+		return;
+	cxx_instance_complete_body(c, inst);
+	c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
+}
+
+static void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 {
 	cxx_instance *x = inst ? inst->instance : NULL;
 
