@@ -601,8 +601,11 @@ VPRIV void x64_begin(codegen_context *e, uint32_t s)
 {
 	x64_lowering_context *X = x64_context_get(e);
 
-	(void)s;
 	X->record_count = 0;
+	X->msfn = cc_func_abi(e->compile_context, e->compile_context->syms[s].ty) == CC_FNABI_MS;
+	X->winframe = CODEGEN_IS_WIN64(e->compile_context) || X->msfn;
+	X->csmask = 0;
+	X->wsave = 0;
 	X->stack_pointer_frame = false;
 	X->frame_size = X->stack_pointer_delta = 0;
 	X->temporaries_in_use = 0;
@@ -652,7 +655,7 @@ VPRIV void x64_finish(codegen_context *e, uint32_t s)
 	codegen_symbol_header_append(e, b, s, true, "\t.text\n", 16);
 	x64_function_print(e, b, s);
 	size_t text = codegen_item_open(e, CODEGEN_ITEM_TEXT);
-	if (e->unit->options->pfe_n) {
+	if (e->unit->options->pfe_n && !CODEGEN_IS_WIN64(e->compile_context)) {
 		/* the patchable entry's address (the M nops before it, else the entry itself) */
 		vtext_string_append(b, "\t.pushsection\t__patchable_function_entries,\"awo\",@progbits,");
 		codegen_symbol_name_append(e->compile_context, b, s);
@@ -687,12 +690,12 @@ VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model)
 	int r;
 	record *i;
 
-	if (model < 2) {
+	if (model < 2 || CODEGEN_IS_WIN64(e->compile_context)) {	/* (Windows: one model, _tls_index and the TEB's array) */
 		r = x64_treg(e);
 		i = x64_record_emit(e, X64_OP_TLS);
 		i->registers[0] = (uint8_t)r;
 		i->reference = ref;
-		i->condition = (uint8_t)model;
+		i->condition = CODEGEN_IS_WIN64(e->compile_context) ? 0 : (uint8_t)model;
 		return r;
 	}
 	/* general dynamic: a call; the live temporaries saved around it, rsp 16-aligned */
@@ -842,6 +845,10 @@ VPRIV codegen_value x64_frame(codegen_context *e, bool ret, uint32_t level)
 	if (ret) {
 		l.offset = 8;
 		x64_record_emit_memory(e, X64_OP_LD, 8, r, &l, false);
+	} else if (!level && e->x64_context->winframe) {
+		/* Windows: the frame's establisher frame (rbp less the save area, as clang's
+		   llvm.frameaddress), which MinGW's setjmp hands UCRT's unwinding longjmp */
+		x64_record_emit_three_registers(e, X64_OP_FRAMEADDR, 8, r, X64_REGISTER_NONE, X64_REGISTER_NONE);
 	}
 	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 }
@@ -930,6 +937,23 @@ VPRIV codegen_value x64_alloca(codegen_context *e, codegen_value n)
 
 	x64_record_emit_three_registers(e, X64_OP_ADDI, 8, r, r, X64_REGISTER_NONE)->immediate = 15;
 	x64_record_emit_three_registers(e, X64_OP_ANDI, 8, r, r, X64_REGISTER_NONE)->immediate = -16;
+	if (CODEGEN_IS_WIN64(e->compile_context)) {
+		/* Windows commits the stack a guard page at a time: touch every page first,
+		   ___chkstk_ms with rax the size (as clang) */
+		bool keep = r != RAX && (e->x64_context->temporaries_in_use & (1u << RAX));
+
+		if (keep) {
+			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, RAX, X64_REGISTER_NONE);
+			e->x64_context->outstanding_pushes++;
+		}
+		if (r != RAX)
+			x64_mov(e, RAX, r);
+		x64_record_emit(e, X64_OP_PROBE);
+		if (keep) {
+			x64_record_emit_three_registers(e, X64_OP_POP, 8, RAX, X64_REGISTER_NONE, X64_REGISTER_NONE);
+			e->x64_context->outstanding_pushes--;
+		}
+	}
 	x64_record_emit_three_registers(e, X64_OP_SUB, 8, RSP, RSP, r);
 	x64_mov(e, r, RSP);
 	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };

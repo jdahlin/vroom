@@ -119,13 +119,30 @@ struct as_context {
 	int in_frame_description, cfi_eh_frame_selected;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *symvers; uint32_t symver_count, symver_capacity;	/* .symver */
 	uint32_t *addrsig_symbols; uint32_t addrsig_symbol_count, addrsig_symbol_capacity;	/* .addrsig_sym */
-	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 5) */
+	/* .file N / .loc: DWARF line table (MC's MCDwarfLineTable, version 4 or 5) */
+	int dwarf_version_option;	/* -gdwarf-N (as_dwarf_version_set; 0: the target's default) */
+	const char *debug_directory;	/* -g: the compilation directory (as_debug_directory_set; NULL without -g) */
+	int dwarf_version;		/* this run's: the option, else 4 for COFF and 5 otherwise; .file 0 makes it 5 */
 	struct as_dwarf_file { as_text name; uint32_t directory; uint8_t md5[16]; uint8_t is_set, has_md5; } *dwarf_files;
 	uint32_t dwarf_file_count, dwarf_file_capacity;		/* file slots by number (0 = root) */
 	as_text *dwarf_directories; uint32_t dwarf_directory_count, dwarf_directory_capacity;	/* directories; [0] is the root file's */
 	struct as_dwarf_row { uint32_t fragment, file, line, column, discriminator, isa; uint64_t offset; uint8_t flags; } *dwarf_rows, dwarf_row_pending;
 	uint32_t dwarf_row_count, dwarf_row_capacity;
 	int dwarf_row_is_pending, dwarf_table_is_due;
+	/* -g on an assembler source (MC's GenDwarfForAssembly): on from as_begin while debug_directory is
+	   set and no .file N was seen; a row per instruction and a DW_TAG_label per label in its sections */
+	int is_coff;			/* object->format == OBJ_COFF, set by as_begin: the per-statement tests read this one flag */
+	int gen_dwarf;			/* 0 off, 1 on, 2 on and the main file still to register (first snippet) */
+	uint32_t gen_file;		/* the file number of its rows and labels */
+	uint32_t *gen_sections, gen_section_count, gen_section_capacity;	/* in order: .text first */
+	uint8_t *gen_section_code;		/* per gen_sections entry: it has an instruction */
+	struct as_gen_label { as_text name; uint32_t file, line, symbol; } *gen_labels;
+	uint32_t gen_label_count, gen_label_capacity;
+	struct as_gen_name { as_text name; uint32_t file; } *gen_names;	/* cpp files given a number */
+	uint32_t gen_name_count, gen_name_capacity;
+	const char *cpp_file;		/* the last cpp line marker's file (NULL: none seen) */
+	int64_t cpp_line_delta;		/* raw line - marker-adjusted line of the main file */
+	const char *dwarf_producer;	/* DW_AT_producer (as_dwarf_producer_set; NULL: "vcc") */
 	/* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
 	struct as_variable_item { uint32_t fragment, end_symbol; uint8_t kind, log2_alignment, code, fill; uint64_t max, size; as_value value; } *variable_items;
@@ -134,6 +151,7 @@ struct as_context {
 	uint64_t *variable_size_tree, *variable_offsets_previous;	/* live sizes (Fenwick), previous-pass offsets */
 	struct { uint32_t sym; char reg[8]; } *register_aliases;	/* x86: name = %reg, the register by another name */
 	uint32_t register_alias_count, register_alias_capacity;
+	uint32_t coff_symbol_definition;	/* COFF: the symbol of the open .def, 0 none */
 	int x64_lock_prefix, x64_operand_size;	/* x86: "lock insn" on one line (after 0x66, as MC); the operation's size (a constant immediate is taken at it) */
 	char messages[4096];		/* the errors so far, one per line group (clang goes on after one) */
 	uint32_t message_length, error_count;
@@ -219,6 +237,24 @@ VPRIV int as_expression_absolute_parse(as_context *a, const char **pp, const cha
 VPRIV int as_expression_value_parse(as_context *a, const char **pp, const char *e, as_value *v);
 /* data-directives.c */
 VPRIV int as_value_emit(as_context *a, int size, as_value *v);
+VPRIV int as_value_emit_relocation(as_context *a, int size, as_value *v, uint32_t type);	/* with this fixup type */
+/* coff-directives.c: a COFF object's directives (1: taken, the result in *rc) */
+VPRIV int as_directive_coff(as_context *a, as_text w, const char *p, const char *e, int *rc);
+
+/* COFF (AllowAtInName): '@' is part of a name unless what follows is a relocation specifier (sym@IMGREL) */
+static inline int as_at_is_specifier(const char *p, const char *e)
+{
+	static const char *const names[] = { "plt", "gotpcrel", "gotpcrel_norelax", "tpoff", "gottpoff", "tlsgd", "tlsld", "tlsldm",
+		"dtpoff", "ntpoff", "gotntpoff", "indntpoff", "gotoff", "got", "gotpc", "pltoff", "size", "imgrel", "secrel32", "abs8" };
+	const char *s = p;
+	while (p < e && as_char_is_identifier((unsigned char)*p) && *p != '.' && *p != '$') p++;
+	size_t n = (size_t)(p - s);
+	if (p < e && (*p == '@' || *p == '.' || *p == '$')) return 0;
+	for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+		if (as_text_equals_ignore_case(s, n, names[i])) return 1;
+	return 0;
+}
+static inline int as_names_have_at(const as_context *a) { return a->is_coff; }
 /* arch/<cpu>/as/parse.c */
 VPRIV void as_alias_rehash(as_context *a);
 VPRIV int a64_as_pools_flush(as_context *a);
@@ -226,6 +262,12 @@ VPRIV int a64_as_pools_ltorg(as_context *a);
 VPRIV int a64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* dwarf-line-table.c */
 VPRIV void as_dwarf_row_emit(as_context *a);
+VPRIV void as_gen_dwarf_start(as_context *a, const char *text, size_t len);
+VPRIV int as_gen_dwarf_instruction(as_context *a);
+VPRIV void as_gen_dwarf_prefix(as_context *a, as_text w, const char *e);
+VPRIV void as_gen_dwarf_label(as_context *a, const char *s, size_t n);
+VPRIV void as_gen_dwarf_section(as_context *a, uint32_t sec);
+VPRIV void as_gen_dwarf_finish(as_context *a);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
 VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* variable-items.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */

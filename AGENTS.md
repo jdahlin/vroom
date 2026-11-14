@@ -19,7 +19,8 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
 Plans, specs, research notes and reviews are in `doc/` (names below are
 relative to it); `TODO.md` stays at the top.
 - `PLAN.md`, `PLAN-fas2.md`, `PLAN-wasm.md` (WebAssembly as a target), `PLAN-x86.md`
-  (x86-64 Linux as a target): plans
+  (x86-64 Linux as a target), `PLAN-win64.md` (Windows x64 through MinGW-w64,
+  steps WIN0-WIN10): plans
   and per-step status.  Update the
   status section of a step when it changes.
 - `PLAN-quality.md`: the code quality work before C++ (duplication, one
@@ -68,7 +69,8 @@ relative to it); `TODO.md` stays at the top.
     `test/common/`, `bench/common-test.py`).  One failure path (`fail.h`:
     `vjob_fail`, `vout_of_memory`, `VBUG`); regions (`region.h`), the byte
     buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
-    (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
+    (`text-buffer.h`), growable arrays (`vector.h`), tail-merged string tables
+    (`string-table.h`: ELF, COFF and PE), `string-index.h` and the
     string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
     `leb128.h`, `format.h`, the ar archive reader (`archive-reader.c`), digests (`digest-xxh3.c`, `digest-blake3.c`,
     `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
@@ -89,7 +91,12 @@ relative to it); `TODO.md` stays at the top.
     reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
   - `headers/`: vcc's own `<arm_neon.h>`, `<arm_acle.h>`, `<arm_sve.h>`,
-    `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`).
+    `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`);
+    `freestanding/` (`float.h`, `stdbool.h`, `stdalign.h`, `stdnoreturn.h`,
+    `iso646.h`, `stdckdint.h`, `stdatomic.h`) and `x86/` (only what MinGW-w64's
+    `windows.h` and `malloc.h` reach: `x86intrin.h`, `emmintrin.h`,
+    `xmmintrin.h`, `mm_malloc.h`) are Windows x64's compiler headers in place
+    of clang's resource directory (`-resource-dir=DIR` selects clang's).
   - `frontend/`: the language side, from bytes to a typed AST.
     - `lex/`: SIMD lexer and token cache (`bin/lextest/` drives it).
     - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
@@ -129,7 +136,10 @@ relative to it); `TODO.md` stays at the top.
     main in `vlink-main.c`; also linked into vccd, which calls `ld_main` per
     link, each link with its own `struct ld_context`) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
-  - `driver/`: one compile job from a clang command line (`job.c` calls the
+  - `driver/`: `link-mingw.c`: `vcc x.c -o x.exe` for Windows x64 (compile
+    each source, then vlink with clang's MinGW link line, libvccrt.a in place
+    of compiler-rt; vpp spawns the vlink beside it, vccd calls ld_main).
+    One compile job from a clang command line (`job.c` calls the
     pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
     `driver-internal.h`), the declaration cache (`declaration-cache.c`), `--explain` pages (`explain.inc`).
   - `server/`: vccd (`vccd.c`, with its main; one file per job beside it,
@@ -165,7 +175,9 @@ relative to it); `TODO.md` stays at the top.
     frame slots, labels, the call sequence; it calls a CPU only through
     `LO()`) and the machine records with their per-CPU op table (`rec.h`),
     PLAN-x86.md's layers 1 and 3; `arch/x64/codegen/`: x86-64's lowering
-    (`x64-internal.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    (`x64-internal.h`, `lower.c`), two-address pass and AT&T printer (`print.c`;
+    also the Windows frame and its `.seh_*`), calls by System V's rules
+    (`abi.c`) and Microsoft's (`abi-win64.c`, chosen per call by `e->msabi`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
     `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under
@@ -173,7 +185,7 @@ relative to it); `TODO.md` stays at the top.
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
     operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
     (shared header `x64as.h`), one file per instruction family (`sys.c`,
-    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.  The
+    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s` (ELF) and `win64-*.s` (COFF).  The
     x86-64 target's feature table is `include/arch/x64/x86features.h`.
   - `arch/wasm/codegen/`: the WebAssembly (wasm64) code generator, AST to
     LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
@@ -189,6 +201,29 @@ relative to it); `TODO.md` stays at the top.
     when the first input is Mach-O; the kernel's host programs).
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
+  - `platform/win/`: Windows x64 (x86_64-w64-mingw32, doc/PLAN-win64.md).
+    COFF objects (`coff.c`: the writer, as MC's WinCOFFObjectWriter;
+    `unwind.c`: `.xdata`/`.pdata` from the SEH frames, as Win64EH), in the
+    obj module; `obj_set_format(o, OBJ_COFF)` selects it (obj.h, "COFF"),
+    which the code generator's `-c` (codegen/unit-emit.c) and the driver's
+    `.s`/`.S` path do for the target.  The assembler's COFF directives
+    (`.def`, `.section` flags and COMDAT, `.seh_*`, ...) are
+    `as/coff-directives.c`.  vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
+    one TU like `ld/ld.c` that #includes `pe-options.c`, `pe-input.c`,
+    `pe-resolve.c`, `pe-export.c`, `pe-layout.c`, `pe-write.c`; model in
+    `pe-linker-internal.h`, COFF/PE constants in `include/platform/win/coff-format.h`, shared with `coff.c`): chosen
+    when the first input is COFF x86-64 or by `-m i386pep`; ld.lld's MinGW
+    command line, output byte-identical to lld's (doc/PLAN-win64.md WIN7).
+  - `runtime/`: vcc's run-time support library for x86_64-w64-mingw32
+    (`libvccrt.a`, WIN7R; `make -C src vccrt` runs `runtime/build.sh`, CC and
+    AR as parameters, default vcc's own vpp and var: no LLVM tool): the helpers generated code calls (`__int128` division
+    and shifts, `__int128` <-> float conversions, `__float128` soft float,
+    `_Float16`/`__bf16` narrowings, complex `*` and `/`, powi) and
+    `___chkstk_ms` (`stack-probe.S`), our own code from the helpers'
+    specifications (no compiler-rt or libgcc source); one rounding routine
+    (`float-rounding.c`) and one bit-layout module (`float-encoding.c`) for
+    every format, internal names `__vccrt_*`, no libc or libm.  Rules that
+    keep it buildable by vcc are in `runtime-internal.h`.
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
     files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `codegen-internal.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
@@ -236,16 +271,20 @@ bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
+bench/var-cmp.py coff -j 4 [-n N]   # ... no kernel tree: COFF (MinGW) and ELF members, generated, import records, N mutants (~15 s)
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
 bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
-bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
+bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s; Windows: vcc -v's vlink line = clang -###'s ld.lld line, code-generation flags vs clang -S (WIN6)
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
+bench/vcc-dwarf.py -j 6 --target x86_64-w64-mingw32|x86_64-linux-gnu [--gflag=-gdwarf-5] [--cflags=-ffunction-sections]   # ... for x86-64 (COFF: DWARF 4 by default), also vasm of -S = -c
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
+bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, -g objects (clang's, vcc's) with -s/--strip-debug/--gc-sections, byte-identical (~15 s; --run: under Wine)
+bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
@@ -295,10 +334,13 @@ bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations;
 bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
 bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (VCC_VIR_PASSES=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
-bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
-bench/vcc-ldconst.py                # generated long double literals and folds, bits vs clang (~2 s)
+bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple + x86-64 + Windows (MS layout, ms_struct/gcc_struct) (~2 s)
+bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, bits vs clang (~2 s; T x86_64-linux-gnu / x86_64-w64-mingw32: x87)
+bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)
+bench/vcc-sema.py run|layout -j 6 --win64   # the same TUs: -fsyntax-only, layout claims checked by clang (layout ~5 min)
+src/tools/gen-win64data.sh          # Windows x64's predefines, -dD order, __has_* and attribute names from clang (ppdata-win64.inc, attrnames-win64.inc)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
-bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation, a file rewritten within a build, the win64 shim (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
@@ -308,13 +350,33 @@ bench/quality.py [--clones N]       # source quality numbers: duplication, priva
 bench/quality.py --check            # ... none above bench/quality-baseline.json (--bless rewrites it)
 bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C suites for wasm64: vcc -S, clang -c, emcc, node vs clang's build (~2 min)
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
+bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
+bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
+bench/vcc-win64.py -j 6 [--own] [--vir] [--seh]   # ... and vcc's side, by default vcc only: vpp -c, vcc's driver links (vlink + libvccrt.a built by vcc + the CRT), PATH empty on vcc's side, no foreign input in the map (doc/PLAN-win64.md; ~40 s, <2 s cached)
+bench/vcc-win64.py -j 6 --clang-as|--obj|--objcmp   # vpp -S + clang -c + lld; vpp -c + lld; --objcmp: vpp -c = vasm(-S) = clang -c(-S) byte for byte
+vpp --target=x86_64-w64-mingw32 --sysroot=S -v x.c -o x.exe   # compile and link with vlink + libvccrt.a; -v prints the link line (WIN5/WIN8)
+bench/vcc-win64.py -j 6 --vir --seh # ... through VIR (VCC_VIR=l); --seh: every object's .pdata/.xdata against its prologs, canonical epilogues
+bench/vcc-win64.py -j 6 --suite win64   # src/test/win64: Windows' convention rules, TLS, dllimport, ctors; stack walk, unwinding longjmp, VEH unwinding out of vcc frames
+bench/vcc-abi.py --target win64 [--vir]  # src/test/abi clang/vcc x caller/callee for x86_64-w64-mingw32 under Wine (~3 min); msabi_calls also natively (--target x86_64)
+VROOM_WORK=DIR bench/vcc-abi-generated.py --target x86_64-w64-mingw32 --count 100   # generated GCC/LLVM ABI cases under Wine (DIR/testsuites: fetch-testsuites.sh gcc llvm)
+bench/vcc-win64.py -j 4 --vlink-ref # WIN7: clang's objects linked by lld and by vlink (same line): runs under Wine, file byte-identical (~2 min cold)
+VCC_CFLAGS=-g bench/vcc-win64.py -j 4 [--vlink-ref]   # WIN6: -g for both sides; every linked image passes llvm-dwarfdump --verify, llvm-symbolizer names each vcc function with a line
+bench/vcc-win64.py -j 4 --vccrt-ref # WIN7R: clang's objects linked with libvccrt.a instead of compiler-rt, by lld and by vlink, run under Wine; no compiler-rt/libgcc/libunwind input in the map
+bench/vccrt-test.py needs -j 4      # WIN7R: helpers the target needs (test objects -O0/-O2, the CRT, vcc's codegen) vs what libvccrt.a defines (<2 s cached)
+bench/vccrt-test.py [-n N] [HELPER] # every helper of libvccrt.a vs compiler-rt under Wine, bit for bit on generated inputs (~2 s; -n 300000: 17 M calls, ~20 s)
+bench/vccrt-test.py chkstk          # ___chkstk_ms: registers kept, every page written (write watch), big frames on a 1 MiB thread, under Wine (<1 s)
+bench/vccrt-test.py native          # the same C sources for x86-64 Linux vs the host's compiler-rt and libgcc (known differences listed) (<1 s)
+bench/vcc-win64.py -j 6 --vasm-ref  # clang -S, vasm's COFF object (= clang -c's), lld, Wine vs the references (~70 s, cached after)
 bench/vcc-wasm.py -j 6 --objcmp     # [VCC_WASM=1] ... and vpp -c's object byte-identical to clang's for the same .s
 bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp -c and vlink as emcc's wasm-ld (~9 min)
-bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV), ~80 s
+bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV; arm64, Darwin and x86-64 Linux modes), ~80 s
 python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/control-flow units verify and round-trip
 bench/vas-enc.py $PWD/src/test/vas   # vas encodings vs llvm-mc
-bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s)
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s); each also with -g (MC's debug info for assembler sources)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
+bench/vas-corpus.py -j 6 --target x86_64-w64-mingw32   # ... COFF objects (test runtime headers, no sysroot; ~2 min)
+bench/vas-corpus.py -j 6 -g [--as-g] --target x86_64-w64-mingw32   # ... clang -S -g (DWARF 4 line tables; -O '0 -gdwarf-5'); --as-g: -g to both assemblers too
+bench/vas-mutate.py -n 20000 --bin-dir build/linux/src-asan   # mutated win64-*.s: vasm (ASan) never crashes (~1 min)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
@@ -322,6 +384,11 @@ bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0,
 bench/sqlite/run.py all            # SQLite (macOS): vcc/clang/gcc builds, TCL testrunner (no vcc-only fails), speedtest1 (~4 min)
 bench/zlib/run.py all              # zlib 1.4 (macOS): clang/vcc/vir/gcc builds, self-tests, same bytes as clang's, zbench CPU time (~30 s)
 bench/ffmpeg/run.py all            # ffmpeg n8.1.3 without assembly (macOS): clang/vcc/vir builds, FATE (2740 tests, no samples), compile time, codec/filter CPU time (~15 min)
+bench/zlib/run.py --target win64 all     # WIN8: zlib for x86_64-w64-mingw32 by clang, vcc, vir and zlib's ./configure through the vcc shim + vccd; self-tests under Wine, bytes = clang's (~30 s)
+bench/sqlite/run.py --target win64 all   # WIN8: amalgamation, shell, speedtest1, fuzzcheck, mptester, threadtest3 by clang/vcc/vir; SQL corpus output = clang's under Wine (~3 min; --full: all threadtests)
+                                   # (bench/win64proj.py: their shared chains, the emptied PATH of vcc's side, link-map and -H checks; trees in build/linux/win64-projects)
+bench/ffmpeg/run.py --target win64 all   # WIN8: FFmpeg C fallbacks for mingw32 by clang/vcc/vir (vcc's tools only), sample-free FATE under Wine, no vcc-only failures
+bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import records vs llvm-nm (the sysroot's libraries; ~8 s)
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR, loops vectorized (~15 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
@@ -360,6 +427,26 @@ main through `ci/premerge-push [--watch]` (pushes to `premerge`; job `gate`
 fast-forwards main when everything is green).  A new harness belongs in
 `ci/premerge.sh` when it is fast and needs only the checkout.  The asan job also
 builds the fuzz targets and replays `test/fuzz/regress` (`make -C src fuzz-regress`).
+
+`win64.yml` (Windows x64, doc/PLAN-win64.md WIN9) has two jobs.  `wine`
+(ubuntu-24.04, Debian container; `ci/setup-debian.sh win64` adds Debian's
+Wine and unpacks the pinned llvm-mingw into `work/llvm-mingw`, its tarball
+cached on the pin) runs `ci/premerge.sh win64`: `vcc-win64.py --ref-only`,
+`--vlink-ref`, `--vccrt-ref`, `vlink-pe.py --run`, `vccrt-test.py diff` and
+`chkstk`, `var-cmp.py coff`, then packs `build/linux/win64-exes.tar.xz`: the
+programs that passed (`--export DIR` of those harnesses) with
+`*.manifest.json` (argv, stdin, expected stdout and exit code, timeout).
+`native` (windows-2025, Python only) runs them with `bench/win64-native.py`;
+`ci/win64-native-allow.txt` names, with a reason, a test that legitimately
+differs on Windows (an entry that passes is an error).  The job also runs
+vcc's own toolchain (`vcc-win64.py --own`, `--own --vir`), `vcc-abi.py
+--target win64`, vasm's COFF cases and WIN8's zlib and SQLite builds; the
+export holds vcc's programs.  Those steps are still guarded in
+`ci/premerge.sh` (`has FILE TEXT`, else `skip NAME (why)`), which today always
+finds them.  Locally: `CI_JOBS=4 ci/premerge.sh win64` (Wine and
+work/llvm-mingw on the host, clang 23 on PATH), then
+`bench/win64-native.py build/linux/win64-exes.tar.xz --wrapper wine`.
+`vlink-pe-bad.py` runs in the asan job.
 
 ## Sanitizers
 ```

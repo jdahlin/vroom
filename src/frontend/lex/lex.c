@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "common/intern.h"
@@ -1602,6 +1603,7 @@ typedef struct lex_cache_entry {
 	_Atomic int state;
 	_Atomic uint32_t epoch;	/* the cache epoch this entry was last known to match the file system in */
 	_Atomic int dead;	/* found changed: later lookups skip it (the file is read again) */
+	_Atomic int racy;	/* modified just before it was read: checked at every lookup (below) */
 	uint64_t sm[2];		/* size and mtime (ns) of the file as read */
 	char path[];
 } lex_cache_entry;
@@ -1691,8 +1693,31 @@ static bool lex_cache_entry_claim(lex_cache_entry *e, int from, int to)
 			memory_order_acq_rel, memory_order_acquire);
 }
 
+/*
+ * Racy entries.  Within one build (one epoch) a cached file is trusted
+ * without a stat, which holds for sources and headers; but a configure script
+ * writes conftest.c, compiles it, rewrites it and compiles again, all in one
+ * process group (zlib's ./configure through the vcc shim: the second compile
+ * got the first file's bytes).  So, as git's racy-index rule: a file whose
+ * mtime was less than LEX_RACY_NANOSECONDS before it was read may still be
+ * being written, and every lookup checks it (a stat) until it is older; a
+ * changed one is read again.  Files that old trees and generated headers
+ * consist of are never racy, so a kernel build pays nothing.
+ */
+#define LEX_RACY_NANOSECONDS 3000000000ull
+
+static uint64_t lex_now_nanoseconds(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_REALTIME, &t);
+	return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
+
 static void lex_cache_entry_publish(lex_cache_entry *e, bool ok)
 {
+	if (ok && e->sm[1] + LEX_RACY_NANOSECONDS > lex_now_nanoseconds())
+		atomic_store_explicit(&e->racy, 1, memory_order_relaxed);
 	atomic_store_explicit(&e->state, ok ? LEX_CACHE_OK : LEX_CACHE_MISSING, memory_order_release);
 }
 
@@ -1895,9 +1920,13 @@ const lex_file *lex_file_get(const char *path, size_t len)
 		if (st == LEX_CACHE_OK || st == LEX_CACHE_MISSING) {
 			uint32_t cur = vcache_epoch();
 
-			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur))
+			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur) &&
+			    likely(!atomic_load_explicit(&e->racy, memory_order_relaxed)))
 				return st == LEX_CACHE_OK ? &e->f : NULL;
 			if (entry_fresh(e, st)) {	/* (no lock: threads that race each stat once) */
+				if (atomic_load_explicit(&e->racy, memory_order_relaxed) &&
+				    e->sm[1] + LEX_RACY_NANOSECONDS <= lex_now_nanoseconds())
+					atomic_store_explicit(&e->racy, 0, memory_order_relaxed);	/* old enough now */
 				atomic_store_explicit(&e->epoch, cur, memory_order_relaxed);
 				return st == LEX_CACHE_OK ? &e->f : NULL;
 			}

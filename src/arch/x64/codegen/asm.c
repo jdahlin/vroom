@@ -37,7 +37,7 @@ static int x64_asm_constraint_register(int ch)
 }
 
 /* the register a clobber or register variable names (with or without %), -1 for none */
-static int x64_asm_register_find(const char *s)
+VPRIV int x64_asm_register_find(const char *s)
 {
 	if (*s == '%')
 		s++;
@@ -122,14 +122,17 @@ static void x64_asm_label_append(codegen_context *e, tbuf *b, uint32_t l)
 	vtext_unsigned_append(b, l);
 }
 
-/* a memory operand as AT&T text */
-static void x64_asm_memory_append(cc *c, tbuf *b, const codegen_lvalue *l)
+/* a memory operand as AT&T text; mark: a local's displacement is the printer's to place (the
+   Windows frame: X_ASMFRAME, then the offset below the save area) */
+static void x64_asm_memory_append(cc *c, tbuf *b, const codegen_lvalue *l, bool mark)
 {
 	if (l->kind == CODEGEN_LVALUE_SYMBOL) {
 		codegen_reference_offset_append(c, b, l->reference, l->offset);
 		vtext_string_append(b, "(%rip)");
 		return;
 	}
+	if (mark && l->kind == CODEGEN_LVALUE_FRAME && l->offset < 0)
+		vtext_char_append(b, X_ASMFRAME);
 	if (l->offset)
 		vtext_signed_append(b, l->offset);
 	vtext_char_append(b, '(');
@@ -207,9 +210,12 @@ VPRIV void x64_callee_save_use(codegen_context *e, int r)
 {
 	x64_lowering_context *X = e->x64_context;
 
+	X->csmask |= UINT64_C(1) << r;
+	if (r == R12 && e->walk_state->frame_alignment > 16)
+		codegen_fatal_report(e, e->current_location, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
+	if (X->winframe)
+		return;	/* (print.c saves what the body writes) */
 	if (r == RBX || (r == RBP && X->stack_pointer_frame) || (r >= R12 && r <= R15)) {
-		if (r == R12 && e->walk_state->frame_alignment > 16)
-			codegen_fatal_report(e, e->current_location, "x86-64: asm using r12 in a function with locals aligned above 16 is not supported");
 		if (!X->callee_save_slots[r])
 			X->callee_save_slots[r] = walk_slot_permanent(e, 8, 8);
 	}
@@ -680,7 +686,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 					break;
 				}
 				case X64_ASM_OPERAND_MEMORY:
-					x64_asm_memory_append(c, rb, &o->lvalue);
+					x64_asm_memory_append(c, rb, &o->lvalue, X->winframe && e->walk_state->frame_alignment <= 16);
 					break;
 				case X64_ASM_OPERAND_X87:
 					vtext_string_append(rb, o->register_number ? "%st(1)" : "%st");

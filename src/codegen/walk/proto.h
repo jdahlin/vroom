@@ -160,6 +160,9 @@ VPRIV int WALK_LOWER(va_arg)(codegen_context *e, int rap, ast_qualified_type t);
 VPRIV void WALK_LOWER(begin)(codegen_context *e, uint32_t s);
 VPRIV void WALK_LOWER(locals_begin)(codegen_context *e, uint32_t s);
 VPRIV bool WALK_LOWER(local)(codegen_context *e, uint32_t s, codegen_lvalue *l);
+/* a parameter of the function (not of an inlined copy) whose frame slot holds its address: the
+   Microsoft convention's by-reference arguments, used in place (PLAN-win64.md WIN2) */
+VPRIV bool WALK_LOWER(byref)(codegen_context *e, uint32_t s);
 #ifdef WALK_PREFIX
 /* VIR: a local declared without an initializer: its value is indeterminate from here (C11 6.2.4) */
 VPRIV void WALK_LOWER(undecl)(codegen_context *e, const codegen_lvalue *l, uint64_t size);

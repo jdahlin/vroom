@@ -1,7 +1,7 @@
 /*
  * vcc code generator, x86-64 (PLAN-x86.md): the lowering of the walker's
  * operations (layer 2) to records (codegen/rec/record.h), the two-address pass
- * and the printer of clang's AT&T syntax.  System V ABI, Linux ELF.
+ * and the printer of clang's AT&T syntax.  System V ABI, Linux ELF; Windows x64.
  *
  * Registers are physical, numbered as the encoding does (rax 0 .. r15 15).
  * Temporaries come from the caller-saved rax rcx rdx rsi rdi r8 r9 r10;
@@ -10,7 +10,8 @@
  * around themselves; a call saves the live temporaries.  Records are
  * three-address (r[0] = r[1] op r[2]) until twoaddr.c.  Frame slots are
  * rbp-relative.  Part of the codegen unity TU: every name starts with x64_
- * or X_.
+ * or X_.  Windows x64 and the Microsoft convention (PLAN-win64.md): abi-win64.c,
+ * the frame in print.c.
  */
 #ifndef VCC_X64_INTERNAL_H
 #define VCC_X64_INTERNAL_H
@@ -88,6 +89,8 @@ enum {
 	X64_OP_CMOV,		/* r0 = flags[cond] ? r2 : r1 */
 	X64_OP_TESTM,		/* flags: [r1 + (r3 << sh) + off] & (int32_t)ref; r3 optional */
 	X64_OP_CMPM,		/* compare memory r1+(r3<<sh)+off with r2 (X64_REGISTER_NONE: immediate ref); cond reverses operands */
+	X64_OP_PROBE,	/* Windows: the stack pages rax bytes below rsp touched (callq ___chkstk_ms; it keeps every register) */
+	X64_OP_FRAMEADDR,	/* the Windows frame: r0 = rbp less its save area (print.c), the unwinder's establisher frame */
 	X64_OP_COUNT
 };
 
@@ -118,7 +121,19 @@ typedef struct x64_lowering_context {
 	int64_t result_pointer_slot;		/* frame slot of the hidden result pointer (0: none) */
 	int64_t variadic_save_slot;		/* variadic: the register save area's slot (0: none) */
 	int64_t callee_save_slots[16];	/* callee saves for asm and register locals: prologue/epilogue + CFI */
+	/* PLAN-win64.md: the function's convention is Microsoft's (msfn); its frame is the Windows
+	   one (winframe: Windows, or an ms_abi function: print.c saves the callee-saved registers
+	   the body writes, below rbp, and Windows gets the .seh_* directives); csmask: registers
+	   asm and register locals take (x64_callee_save_use); wsave: the bytes of that save area, which the
+	   printer puts between rbp and the locals */
+	bool msfn, winframe;
+	uint64_t csmask;
+	int64_t wsave;
 } x64_lowering_context;
+
+/* in an X64_OP_RAW text: the next number is a local's frame displacement, which print.c moves below the
+   Windows frame's save area */
+#define X_ASMFRAME '\001'
 
 /* the integer argument registers, in order */
 static inline int x64_argument_register(int i) { static const uint8_t r[6] = { RDI, RSI, RDX, RCX, R8, R9 }; return r[i]; }
@@ -131,6 +146,7 @@ VPRIV uint32_t x64_save(codegen_context *e, const uint8_t *regs, int n, int k0, 
 VPRIV void x64_restore(codegen_context *e, uint32_t sv);
 VPRIV int x64_ftreg(codegen_context *e);
 VPRIV void x64_callee_save_use(codegen_context *e, int r);	/* a callee-saved register used: the prologue saves it */
+VPRIV int x64_asm_register_find(const char *s);	/* asm.c: a register name (with or without %), -1 for none */
 VPRIV record *x64_record_emit(codegen_context *e, int op);
 VPRIV void x64_two_address_convert(codegen_context *e);
 VPRIV bool x64_mulconst(codegen_context *e, int size, int r, i128 rhs);
@@ -145,6 +161,7 @@ VPRIV void x64_dead(codegen_context *e);
 VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget);	/* internal bounded-fallback contracts */
 VPRIV void x64_locals_begin(codegen_context *e, uint32_t s);
 VPRIV bool x64_local(codegen_context *e, uint32_t s, codegen_lvalue *l);
+VPRIV bool x64_byref(codegen_context *e, uint32_t s);
 /* effects.c: logical records before or after two-address expansion. */
 VPRIV const uint8_t *x64_flow_table(void);
 /* Prepared for shared copy/liveness passes; also exercised by contract tests. */
@@ -160,5 +177,19 @@ VPRIV int x64_memory_base_register(codegen_context *e, const codegen_lvalue *l, 
 VPRIV bool x64_target_has_no_simd(codegen_context *e);
 VPRIV void x64_nofp(codegen_context *e);
 VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
+VPRIV void x64_call_xmms(codegen_context *e, const walk_argument *r);	/* abi.c, both conventions: a result in xmm0, xmm1, ... */
+VPRIV void x64_call_park(codegen_context *e, ast_qualified_type rt);	/* abi.c, both conventions: a call's integer result to r11 */
+VPRIV codegen_value x64_call_value(codegen_context *e, codegen_value *fn, ast_qualified_type rt, const walk_argument *r);	/* ... and its value as the walker takes it */
+/* abi-win64.c: the Microsoft x64 convention */
+VPRIV int x64w_argreg(int i);
+VPRIV void x64w_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed);
+VPRIV codegen_value x64w_call(codegen_context *e, uint32_t ref, codegen_value *fn, const walk_argument *a, int n, bool variadic, const walk_argument *r, ast_qualified_type rt);
+VPRIV void x64w_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic);
+VPRIV void x64w_va_start(codegen_context *e, int rap);
+VPRIV int x64w_va_arg(codegen_context *e, int rap, ast_qualified_type t);
+VPRIV void x64w_helper(codegen_context *e, int fn, const int64_t *in, const ast_qualified_type *types, int n, int64_t res, ast_qualified_type rt);
+VPRIV void x64w_xmm_part(codegen_context *e, int op, int64_t off, int size);
+/* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
+static inline bool x64w_helpers(const codegen_context *e) { return CODEGEN_IS_WIN64(e->compile_context); }
 
 #endif

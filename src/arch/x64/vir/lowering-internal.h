@@ -23,6 +23,7 @@ typedef struct x64_vir_context {
 	unsigned probe, site;
 	uint32_t map_block, map_value;
 	unsigned dup;bool may_fall_through,scratch_register10;
+	bool ms;	/* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
 	uint32_t memory_value, memory_skip, scaled_value, scaled_skip; int memory_base, memory_index, scaled_index; uint8_t memory_shift, scaled_shift; bool memory_is_indexed; int64_t memory_offset;
 	uint32_t big_endian_value; int big_endian_base,big_endian_index; uint8_t big_endian_shift,big_endian_width; bool big_endian_is_indexed; int64_t big_endian_offset;
 	uint32_t compare_memory_value; uint8_t compare_memory_size; bool compare_memory_side;
@@ -34,7 +35,7 @@ VPRIV void *x64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t size);
 VPRIV int x64_vir_register_number(uint8_t r);
 VPRIV int x64_vir_type_size(uint32_t t);
 VPRIV int64_t x64_vir_constant_bits(const vir_insn *i);
-VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack);
+VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack, bool ms);
 VPRIV bool x64_vir_value_immediate(const vir_function *f, uint32_t v, int64_t *value);
 VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,const vir_insn *i);
 VPRIV bool x64_vir_switch_is_dense(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range);

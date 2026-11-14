@@ -304,8 +304,20 @@ VPRIV int pp_pragma_run(pp *p, const char *s, size_t n, uint32_t loc, ptok *out,
 	{
 		const char *r = q;
 
-		if (pp_pragma_word_match(&r, e, "GCC") && (pp_pragma_word_match(&r, e, "system_header") || pp_pragma_word_match(&r, e, "poison") ||
-					    pp_pragma_word_match(&r, e, "dependency")))
+		if (pp_pragma_word_match(&r, e, "GCC") && pp_pragma_word_match(&r, e, "system_header")) {
+			/* -E with line markers: clang's FileChanged(SystemHeaderPragma), a marker for the
+			   next line with the system flag (from here on the file is a system header) */
+			const pp_context *fc = unlikely(p->markers_on) && sloc ? pp_file_context_current(p) : NULL;
+
+			if (fc && fc->lex_file != &p->builtin_file && !pp_location_is_in_main_file(p, loc)) {
+				if (!p->files[fc->file_index].is_system)
+					p->files[fc->file_index].is_system = 1, p->marker_is_system = 1;
+				pp_line_marker_file_rename(p, NULL, 0, pp_location_line(p, loc) + 1);
+			}
+			return 0;
+		}
+		r = q;
+		if (pp_pragma_word_match(&r, e, "GCC") && (pp_pragma_word_match(&r, e, "poison") || pp_pragma_word_match(&r, e, "dependency")))
 			return 0;
 		r = q;
 		if ((pp_pragma_word_match(&r, e, "clang") || pp_pragma_word_match(&r, e, "GCC")) && pp_pragma_word_match(&r, e, "diagnostic")) {
@@ -461,8 +473,14 @@ VPRIV int pp_directive_run(pp *p, pp_context *c, ptok *out)
 		pp_directive_extra_tokens_check(p, c, d);
 		if (b + 1 < e && c->lexed_tokens[b + 1].kind == LEX_TOKEN_IDENTIFIER)
 {
+			/* -dD: the predefines' #undef of a macro they never defined (x86's feature macros) is
+			   not clang's: it prints the predefined macros, not how vcc builds them */
+			bool shown = unlikely(p->options->dump_defines) &&
+				     (c->lex_file != &p->builtin_file || c->lexed_tokens[b + 1].off >= p->options->predef_cmdl ||
+				      (pp_macro_table_get(p, c->lexed_tokens[b + 1].id) & ~(uintptr_t)1));
+
 			pp_macro_define_record(p, c->lexed_tokens[b + 1].id, NULL);
-			if (unlikely(p->options->dump_defines))
+			if (shown)
 				pp_macro_define_event_record(p, c->lexed_tokens[b + 1].id, NULL, c->lex_file == &p->builtin_file);
 		}
 		else

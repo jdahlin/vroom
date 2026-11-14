@@ -47,6 +47,15 @@ static const cc_builtin cc_builtin_table[] = {
 	{ "__builtin_stdc_rotate_right", CC_BUILTIN_STDC_ROTR, 0, "u.." },
 	{ "__builtin_va_end", CC_BUILTIN_VA_END, 0, "vV" },
 	{ "__builtin_va_copy", CC_BUILTIN_VA_COPY, 0, "vVV" },
+	/* x86-64: the Microsoft va_list (a char *) in any function, as clang; the same nodes as the
+	   target's own, told apart by the type of the va_list argument (cc_valist_is_ms) */
+	{ "__builtin_ms_va_start", CC_BUILTIN_VA_START, 0, "vM." },
+	{ "__builtin_ms_va_end", CC_BUILTIN_VA_END, 0, "vM" },
+	{ "__builtin_ms_va_copy", CC_BUILTIN_VA_COPY, 0, "vMM" },
+	/* x86 fences (MinGW-w64's intrin-impl.h): a full barrier, as __sync_synchronize */
+	{ "__builtin_ia32_sfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v" },
+	{ "__builtin_ia32_lfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v" },
+	{ "__builtin_ia32_mfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v" },
 	{ "__builtin_clz", CC_BUILTIN_CLZ, 1, "iu" }, { "__builtin_clzl", CC_BUILTIN_CLZL, 1, "iL" }, { "__builtin_clzll", CC_BUILTIN_CLZLL, 1, "iW" },
 	{ "__builtin_ctz", CC_BUILTIN_CTZ, 1, "iu" }, { "__builtin_ctzl", CC_BUILTIN_CTZL, 1, "iL" }, { "__builtin_ctzll", CC_BUILTIN_CTZLL, 1, "iW" },
 	{ "__builtin_ffs", CC_BUILTIN_FFS, 1, "ii" }, { "__builtin_ffsl", CC_BUILTIN_FFSL, 1, "il" }, { "__builtin_ffsll", CC_BUILTIN_FFSLL, 1, "iw" },
@@ -352,6 +361,8 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
 	case 'P': return cc_type_pointer(c, AST_QUALIFIED_TYPE(AST_TYPE_VOID, AST_QUALIFIER_CONST));
 	case 's': return cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
 	case 'S': return cc_type_pointer(c, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST));
+	case 'M':	/* x86-64: __builtin_ms_va_list, a char * (as Darwin's va_list: the emitter takes the operand's address) */
+		return cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
 	case 'V':	/* a parameter: x86-64's array type is adjusted to the element pointer */
 		return AST_TYPE_KIND(c, c->t_valist) == AST_TYPE_ARRAY ? cc_type_pointer(c, AST_TYPE(c, c->t_valist)->base) : c->t_valist;
 	default: abort();
@@ -387,6 +398,10 @@ static uint32_t *cc_builtin_directory[CC_DIRECTORY_COUNT];
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
 static int cc_builtin_is_known(const char *n)
 {
+	/* x86-64 only: answered by the x86 tables (ppdata-x86.inc, ppdata-win64.inc), not for other targets */
+	if (!strncmp(n, "__builtin_ms_va_", 16) || !strcmp(n, "__builtin_ia32_sfence") || !strcmp(n, "__builtin_ia32_lfence") ||
+	    !strcmp(n, "__builtin_ia32_mfence"))
+		return 0;
 	for (uint32_t i = 0; cc_builtin_table[i].name; i++)
 		if (!strcmp(cc_builtin_table[i].name, n))
 			return cc_builtin_table[i].id != CC_BUILTIN_IS_CONSTANT_EVALUATED;	/* clang: C++ only */

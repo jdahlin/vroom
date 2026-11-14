@@ -1,0 +1,33 @@
+	.section .rdata,"dr"
+	.byte 1
+	.section .foo,"x"
+	.byte 2
+	.section .ab,"b"
+	.section .ac,"n"
+	.section .ad,"y"
+	.section .ae,"s"
+	.section .af,"D"
+	.section .ag,"i"
+	.section .debug_info,"dr"
+	.byte 3
+	.section .ah,"rw"
+	.section .ai,"xw"
+	.section .aj,"wx"
+	.section .ak
+	.section .al,""
+	.section .text$foo,"xr",discard,foo
+foo:
+	ret
+	.section .am,"dr",one_only,am
+	.section .an,"dr",same_size,an1
+	.section .ao,"dr",same_contents,ao
+	.section .ap,"dr",associative,foo
+	.section .aq,"dr",largest,aq
+	.section .ar,"dr",newest,ar
+	.section .as,"dr"
+	.linkonce discard
+	.section .at,"dr"
+	.linkonce same_size
+	.section .verylongsectionname_abc,"dr"
+	.section .text
+	.byte 5

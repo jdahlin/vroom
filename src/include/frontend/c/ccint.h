@@ -63,7 +63,12 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t interrupt;	/* x86 interrupt calling convention */
-	uint32_t ms_struct;	/* Microsoft record layout */
+	uint32_t ms_struct;	/* Microsoft record layout: the attribute's location */
+	uint32_t gcc_struct;	/* gcc_struct: GCC's record layout even under -mms-bitfields; its location */
+	uint32_t fnabi;		/* x86-64 ms_abi / sysv_abi as written (CC_FNABI_MS, CC_FNABI_SYSV), 0: none;
+				   declare() puts it on the function type (cc_func_abi) */
+	uint32_t fnabi_loc;
+	uint32_t dll;		/* Windows: CC_DLLIMPORT or CC_DLLEXPORT (sym_attrs(c, s)->dll), 0: neither */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
 	uint32_t flags;		/* AF_* declaration/call restrictions */
@@ -114,6 +119,7 @@ typedef struct cc_lazy_function {
 	uint8_t done;
 	uint8_t hc;		/* the tokens are z's, in a header cache entry (ntk 0) */
 	pp_lazy z;
+	uint32_t pack;		/* #pragma pack in force at the definition (bytes, 0: none): its local records */
 } cc_lazy_function;
 
 
@@ -384,6 +390,37 @@ static inline x86_features cc_x86_features_get(const cc *c, uint32_t fn)
 	x86_features features = {0};
 	x86_cpu_features("x86-64", &features);
 	return features;
+}
+
+/*
+ * x86-64: the calling convention of function type t (or of the function a pointer type points to),
+ * CC_FNABI_MS (Microsoft x64) or CC_FNABI_SYSV: the target's own unless ms_abi/sysv_abi said
+ * otherwise (PLAN-win64.md WIN2).  Other targets: CC_FNABI_DEFAULT.
+ */
+static inline int cc_func_abi(const cc *c, ast_qualified_type t)
+{
+	const ctype *f = &c->ty[AST_QUALIFIED_TYPE_INDEX(t)];
+
+	if (f->kind == AST_TYPE_POINTER)
+		f = &c->ty[AST_QUALIFIED_TYPE_INDEX(f->base)];
+	if (!PP_IS_X86_64(c->o->target))
+		return CC_FNABI_DEFAULT;
+	if (f->kind == AST_TYPE_FUNCTION && f->ext)
+		return f->ext;
+	return c->o->target == PP_WIN64 ? CC_FNABI_MS : CC_FNABI_SYSV;
+}
+
+/* x86-64: a va_list operand of type t (the va_start/va_copy/va_end argument, or va_arg's) is the
+   Microsoft one (a char *: Windows' __builtin_va_list, or __builtin_ms_va_list), not System V's */
+static inline bool cc_valist_is_ms(const cc *c, ast_qualified_type t)
+{
+	const ctype *p = &c->ty[AST_QUALIFIED_TYPE_INDEX(t)];
+
+	if (!PP_IS_X86_64(c->o->target))
+		return false;
+	if (p->kind == AST_TYPE_ARRAY)	/* (System V's struct __va_list_tag[1], not decayed) */
+		return false;
+	return p->kind == AST_TYPE_POINTER && c->ty[AST_QUALIFIED_TYPE_INDEX(p->base)].kind != AST_TYPE_STRUCT;
 }
 
 #endif

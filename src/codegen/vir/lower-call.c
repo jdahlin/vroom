@@ -91,6 +91,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 
 	if (r)
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
+	if (CODEGEN_IS_X64(c) && e->msabi != CODEGEN_IS_WIN64(c))	/* (the lowering knows the target's own convention only) */
+		virbuild_fail(e, VIRBUILD_FAILURE(x64_calling_convention));
 	for (int k = 0; k < n; k++)
 		if (a[k].is_in_memory || a[k].eightbyte_count != 1)
 			virbuild_fail(e, VIRBUILD_FAILURE(record_argument));
@@ -138,6 +140,9 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 	}
 }
 
+/* (records are not VIR's yet: no by-reference parameters) */
+VPRIV bool virbuild_byref(codegen_context *e, uint32_t s) { (void)e, (void)s; return false; }
+
 VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic)
 {
 	virbuild_context *V = e->vir_builder;
@@ -148,6 +153,8 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 		virbuild_fail(e, VIRBUILD_FAILURE(record_result));
 	if (variadic && !CODEGEN_IS_DARWIN(c))
 		virbuild_fail(e, VIRBUILD_FAILURE(variadic_function));
+	if (CODEGEN_IS_X64(c) && e->msabi != CODEGEN_IS_WIN64(c))
+		virbuild_fail(e, VIRBUILD_FAILURE(x64_calling_convention));
 	uint32_t pv0 = V->insn_count;	/* the params first (SPEC 15.2: the allocator reads them from the ABI registers) */
 
 	for (int k = 0; k < n; k++) {
@@ -188,6 +195,11 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 		uint32_t rpc;
 
 		V->function_signature = virbuild_call_signature_make(e, a, n, variadic, e->walk_state->return_type, &rpc);
+	}
+	if (CODEGEN_IS_WIN64(c) && c->syms[e->walk_state->function_symbol].sc != AST_STORAGE_STATIC && CODEGEN_IDENTIFIER_IS(c->syms[e->walk_state->function_symbol].name, "main")) {
+		/* MinGW: main calls __main first (the constructors), as clang */
+		e->has_calls = true;
+		virbuild_call(e, CODEGEN_FIXED_REFERENCE(FN___MAIN), NULL, NULL, 0, false, NULL, codegen_type_primitive(AST_TYPE_VOID));
 	}
 }
 

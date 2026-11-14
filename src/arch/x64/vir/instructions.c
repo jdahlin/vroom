@@ -177,15 +177,16 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		int total = 0, nf = 0;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off);
+			uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off, L->ms);
 			if (r == VIR_REGISTER_NONE) total = off - 8;
 			else if (VIR_REGISTER_CLASS(r)) nf++;
 		}
+		if (L->ms && total < 32) total = 32;	/* the shadow space */
 		total = (total + 15) & ~15;
 		if (total) x64_record_emit(e, X64_OP_ADJSP)->immediate = -total;
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
-			if (x64_vir_argument_register(L->function, i->b, k, &off) != VIR_REGISTER_NONE) continue;
+			if (x64_vir_argument_register(L->function, i->b, k, &off, L->ms) != VIR_REGISTER_NONE) continue;
 			uint32_t value = L->function->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
 			if (r == VIR_REGISTER_NONE) {
@@ -198,20 +199,29 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		}
 		bool indirect = p[0] != VIR_REGISTER_NONE;
 		if (indirect) x64_mov(e, R11, a); /* al is set for variadic calls */
-		if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b])) x64_record_emit_move_immediate(e, RAX, nf);
-		if (indirect) x64_record_emit_three_registers(e, X64_OP_CALLR, 8, X64_REGISTER_NONE, R11, X64_REGISTER_NONE);
+		if (L->ms && VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b]))
+			for (uint32_t k = 0; k < ng && k < 4; k++) {	/* a float also in its integer register */
+				int off;
+				uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off, true);
+				if (VIR_REGISTER_CLASS(r)) x64_record_emit_three_registers(e, X64_OP_MOV, 8, x64w_argreg((int)k), x64_vir_register_number(r), X64_REGISTER_NONE);
+			}
+		else if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b])) x64_record_emit_move_immediate(e, RAX, nf);
+		record *call;
+		if (indirect) call = x64_record_emit_three_registers(e, X64_OP_CALLR, 8, X64_REGISTER_NONE, R11, X64_REGISTER_NONE);
 		else {
 			const vir_insn *callee = &L->function->insns[i->a];
 			codegen_reference_note(e, callee->a);
-			x64_record_emit(e, X64_OP_CALL)->reference = callee->a;
+			call = x64_record_emit(e, X64_OP_CALL);
+			call->reference = callee->a;
 		}
+		call->shift = L->ms;	/* (a Microsoft callee: print.c's save set) */
 		if (total) x64_record_emit(e, X64_OP_ADJSP)->immediate = total;
 		e->has_calls = true;
 		return;
 	}
 	case VIR_OP_PARAM: {
 		int stack;
-		if (x64_vir_argument_register(L->function, L->function->signature, i->a, &stack) == VIR_REGISTER_NONE) {
+		if (x64_vir_argument_register(L->function, L->function->signature, i->a, &stack, L->ms) == VIR_REGISTER_NONE) {
 			codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = stack };
 			x64_record_emit_memory(e, X64_OP_LD, sz, d, &at, false);
 		}

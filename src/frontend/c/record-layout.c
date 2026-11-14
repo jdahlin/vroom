@@ -121,6 +121,23 @@ static void cc_layout_field_place(cc *c, cc_record_layout *l, field *f, uint32_t
 	l->unfilled = 0;
 	l->last_unit = 0;
 	falign = (uint64_t)cc_type_alignment(c, f->ty) * 8;
+	if (l->ms_struct) {
+		/* ms_struct (MinGW's default): a builtin scalar type, arrays and typedefs resolved, is
+		   aligned to its size when that is a power of 2, whatever a typedef says (clang: not an
+		   enum, pointer, _BitInt, _Atomic or record) */
+		ast_qualified_type b = f->ty;
+		int k;
+
+		while (cc_type_is_array(c, b))
+			b = AST_TYPE(c, b)->base;
+		k = AST_TYPE_KIND(c, b);
+		if (k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128 && !AST_TYPE(c, b)->n && !(AST_TYPE(c, b)->flags & AST_TYPE_FLAG_ATOMIC)) {
+			uint64_t sz = cc_type_size(c, b) * 8u;
+
+			if (sz > falign && !(sz & (sz - 1)))
+				falign = sz;
+		}
+	}
 	fsize = cc_type_is_array(c, f->ty) && (AST_TYPE(c, f->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) ? 0 : cc_type_size(c, f->ty) * 8;
 	packed = l->packed || fpacked;
 	ualign = falign;
@@ -154,8 +171,11 @@ static void cc_layout_field_place(cc *c, cc_record_layout *l, field *f, uint32_t
 /* fa[i]/fp[i]: per-field aligned() and packed attributes */
 CC_PRIVATE void cc_layout_record(cc *c, tag *r, const uint32_t *fa, const uint8_t *fp)
 {
+	/* clang's RecordDecl::isMsStruct: ms_struct, #pragma ms_struct on or -mms-bitfields (Windows'
+	   default), unless gcc_struct */
+	bool ms = !(r->flags & AST_RECORD_FLAG_GCC_STRUCT) && ((r->flags & AST_RECORD_FLAG_MS_STRUCT) || c->o->ms_bitfields);
 	cc_record_layout l = { .is_union = (r->flags & AST_RECORD_FLAG_UNION) != 0, .packed = (r->flags & AST_RECORD_FLAG_PACKED) != 0,
-		     .ms_struct = (r->flags & AST_RECORD_FLAG_MS_STRUCT) != 0, .align = 8, .unpacked_align = 8 };
+		     .ms_struct = ms, .align = 8, .unpacked_align = 8 };
 
 	if (c->npack && c->pack[c->npack - 1])
 		l.max_field_align = (uint64_t)c->pack[c->npack - 1] * 8;

@@ -710,7 +710,8 @@ again:
 					cc_declaration_specifiers_tag_body_end(c, kind);
 				} else {
 					CC_REPLAY_TAG_WRITE_LOG(c, ti);
-					c->tags[ti].flags |= (pre.packed ? AST_RECORD_FLAG_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? AST_RECORD_FLAG_MS_STRUCT : 0);
+					c->tags[ti].flags |= (pre.packed ? AST_RECORD_FLAG_PACKED : 0) | ((pre.ms_struct || c->ms_struct) ? AST_RECORD_FLAG_MS_STRUCT : 0) |
+						      (pre.gcc_struct ? AST_RECORD_FLAG_GCC_STRUCT : 0);
 					c->tags[ti].maxalign = pre.aligned;
 					cc_record_body_parse(c, ti);
 					if (kind == AST_TYPE_UNION && pre.transparent)
@@ -789,9 +790,9 @@ done:
 	} else if (base == KW_double) {
 		ds->ty = cc_type_basic(nlong ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE);
 	} else if (base == KW___float128) {
-		if (c->o->target != PP_LINUX_X86_64)
+		if (!CC_X86_64(c))
 			cc_report_error(c, ds->loc, "__float128 is not supported on this target");
-		ds->ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
+		ds->ty = cc_type_basic(CC_X86_64(c) ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
 	} else {
 		if (unlikely(!any)) {
 			if (c23auto && !nlong && !sgn && !cplx) {

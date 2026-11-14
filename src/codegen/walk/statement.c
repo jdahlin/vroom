@@ -278,7 +278,7 @@ static void walk_initializer_elements_store(codegen_context *e, const codegen_lv
 	if (walk_type_is_in_memory(e, ty)) {
 		/* another object's bytes (a struct variable, a call's result ...) */
 		codegen_value v = walk_value_emit(e, init);
-		int rs = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)), rd = walk_lvalue_address_get(e, d);
+		int rs = walk_value_to_register(e, &v, e->compile_context->t_size), rd = walk_lvalue_address_get(e, d);
 
 		uint64_t bytes = codegen_type_size(c, ty);
 		if (codegen_type_is_record(c, ty) && (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC)) {
@@ -351,7 +351,8 @@ VPRIV void walk_cleanups_run(codegen_context *e, int to)
 		walk_argument a;
 		codegen_value r;
 
-		WALK_LOWER(classify)(e, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), &a, false);
+		em_abi(e, c->syms[fn].ty);
+		WALK_LOWER(classify)(e, e->compile_context->t_size, &a, false);
 		a.slot = walk_slot_temporary(e, 8, 8);
 		{
 			int ra = WALK_LOWER(laddr)(e, &l);
@@ -362,6 +363,7 @@ VPRIV void walk_cleanups_run(codegen_context *e, int to)
 		}
 		codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn));
 		e->has_calls = true;
+		em_abi(e, c->syms[fn].ty);
 		r = WALK_LOWER(call)(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a, 1, false, NULL, codegen_type_primitive(AST_TYPE_VOID));
 		walk_value_free(e, &r);
 	}
@@ -1191,7 +1193,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 		if (x->a && walk_type_is_in_memory(e, W->return_type)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			codegen_value v = walk_value_emit(e, x->a);
-			int r = walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG));
+			int r = walk_value_to_register(e, &v, e->compile_context->t_size);
 
 			if (W->cleanup_count) {
 				/* the cleanups run after the value is taken: a copy, except of a local
@@ -1264,7 +1266,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 	case AST_NODE_GOTO_INDIRECT: {
 		codegen_value v = walk_value_emit(e, x->a);
 
-		WALK_LOWER(jumpr)(e, walk_value_to_register(e, &v, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG)));
+		WALK_LOWER(jumpr)(e, walk_value_to_register(e, &v, e->compile_context->t_size));
 		return;
 	}
 	default:
@@ -1611,6 +1613,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 	}
 	W->return_label = walk_label_new(e);
 	WALK_LOWER(locals_begin)(e, s);
+	em_abi(e, y->ty);
 	if (walk_type_is_in_memory(e, W->return_type)) {
 		WALK_LOWER(classify)(e, W->return_type, &W->return_record, false);
 		W->return_record.slot = walk_slot_temporary(e, 8, 8);	/* (memory: the hidden pointer's slot) */
@@ -1627,9 +1630,10 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 			pt = codegen_type_primitive(AST_TYPE_DOUBLE);	/* K&R: received as the caller promoted it */
 		WALK_LOWER(classify)(e, pt, &pa[i], false);
 		codegen_lvalue home;
-		pa[i].slot = WALK_LOWER(local)(e, p, &home) ? 0 :
+		pa[i].slot = WALK_LOWER(local)(e, p, &home) ? 0 : WALK_LOWER(byref)(e, p) ? walk_slot_permanent_kind(e, 8, 8, WALK_SLOT_PARAMETER) :
 			walk_slot_permanent_kind(e, pa[i].size > 8 ? (pa[i].size + 7) & ~(uint64_t)7 : 8, pa[i].align, WALK_SLOT_PARAMETER);	/* (sdepth is 0: walk_slot_temporary was walk_slot_permanent) */
 	}
+	em_abi(e, y->ty);
 	WALK_LOWER(params)(e, pa, (int)body->aux, walk_type_is_in_memory(e, W->return_type) ? &W->return_record : NULL, (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0);
 	for (uint32_t i = 0; i < body->aux; i++) {
 		uint32_t p = c->lists[body->a + i];

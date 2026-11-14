@@ -76,9 +76,9 @@ CC_PRIVATE uint32_t cc_builtin_fp_sign_build(cc *c, const char *name, size_t len
 		return ((q ^ sign) >> 127) ? neg(c, args->v[0]) : args->v[0];
 	}
 	if (extended) return 0;
-	if (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)
+	if (!CC_X86_64(c) && c->o->target != PP_LINUX_AARCH64)
 		return 0;
-	if (c->o->target == PP_LINUX_X86_64 ?
+	if (CC_X86_64(c) ?
 	    !x86_feature_has(cc_x86_features_get(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
 		cc_report_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
 		return cc_node_error_new(c, loc);
@@ -113,7 +113,7 @@ CC_PRIVATE uint32_t cc_builtin_fp_sign_build(cc *c, const char *name, size_t len
  * by the caller; builtin spelling is an explicit request for these semantics. */
 CC_PRIVATE uint32_t cc_builtin_fast_math_build(cc *c, const char *name, size_t len, ast_qualified_type ft, const cc_id_list *args, uint32_t loc)
 {
-	if (!c->o->fast_math || (c->o->target != PP_LINUX_X86_64 && c->o->target != PP_LINUX_AARCH64)) return 0;
+	if (!c->o->fast_math || (!CC_X86_64(c) && c->o->target != PP_LINUX_AARCH64)) return 0;
 	bool power = len == 3 && !memcmp(name, "pow", 3);
 	bool root = (len == 4 && !memcmp(name, "sqrt", 4)) || (len == 5 && !memcmp(name, "sqrtf", 5));
 	if (!power && !root) return 0;
@@ -129,7 +129,7 @@ CC_PRIVATE uint32_t cc_builtin_fast_math_build(cc *c, const char *name, size_t l
 		e = exponent.f;
 		if (e != 0.25 && e != 0.5 && !(e >= -64 && e <= 64 && e == (int)e)) return 0;
 	}
-	if (c->o->target == PP_LINUX_X86_64 ?
+	if (CC_X86_64(c) ?
 	    !x86_feature_has(cc_x86_features_get(c, c->fn), single ? X86_FEATURE_SSE : X86_FEATURE_SSE2) : c->o->general_regs_only) {
 		cc_report_error(c, loc, "%s floating point is not supported", "-mgeneral-regs-only:");
 		return cc_node_error_new(c, loc);

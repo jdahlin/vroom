@@ -34,7 +34,11 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 
 #include "frontend/pp/pp.h"
 #include "driver/declaration-cache.h"
@@ -224,6 +228,31 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 	return bad != 0;
 }
 
+/* the link of driver_mingw_link_run: the vlink beside this program */
+static int vpp_vlink_spawn(int argc, char **argv, void *ctx)
+{
+	char self[4096], path[4200];
+	ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+	pid_t pid;
+	int st;
+
+	(void)argc, (void)ctx;
+	if (n <= 0 || !strrchr((self[n] = 0, self), '/')) {
+		fprintf(stderr, "vcc: error: cannot find vlink\n");
+		return 1;
+	}
+	*strrchr(self, '/') = 0;
+	snprintf(path, sizeof path, "%s/vlink", self);
+	argv[0] = path;
+	if (posix_spawn(&pid, path, NULL, NULL, argv, environ)) {
+		fprintf(stderr, "vcc: error: cannot run %s\n", path);
+		return 1;
+	}
+	while (waitpid(pid, &st, 0) < 0)
+		;
+	return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+}
+
 int main(int argc, char **argv)
 {
 	driver_environment e = { .outfd = 1, .errfd = 2 };
@@ -269,5 +298,7 @@ int main(int argc, char **argv)
 		av[n] = NULL;
 		driver_job_run(n, av, &q);
 	}
+	if (driver_mingw_link_wanted(argc, argv))
+		return driver_mingw_link_run(argc, argv, &e, vpp_vlink_spawn, NULL);
 	return driver_job_run(argc, argv, &e);
 }

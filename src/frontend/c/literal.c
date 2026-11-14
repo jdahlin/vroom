@@ -6,8 +6,8 @@
 /* the type of an integer literal (C11 6.4.4.1p5) */
 static inline ast_qualified_type cc_literal_integer_type(cc *c, u128 v, int l, bool u, bool dec)
 {
-	/* long: 64 bits, or 32 under ILP32 */
-	u128 lmax = CC_ILP32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_ILP32(c) ? UINT32_MAX : UINT64_MAX;
+	/* long: 64 bits, or 32 under ILP32 and LLP64 */
+	u128 lmax = CC_LONG32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_LONG32(c) ? UINT32_MAX : UINT64_MAX;
 
 	if (l == 0 && !u && v <= INT32_MAX)
 		return cc_type_basic(AST_TYPE_INT);
@@ -19,7 +19,7 @@ static inline ast_qualified_type cc_literal_integer_type(cc *c, u128 v, int l, b
 		return cc_type_basic(AST_TYPE_UNSIGNED_LONG);
 	if (!u && v <= INT64_MAX)
 		return cc_type_basic(AST_TYPE_LONG_LONG);
-	return l <= 1 && !CC_ILP32(c) ? cc_type_basic(AST_TYPE_UNSIGNED_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+	return l <= 1 && !CC_LONG32(c) ? cc_type_basic(AST_TYPE_UNSIGNED_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
 }
 
 static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s, size_t n);
@@ -125,7 +125,7 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 		if (k < n && (s[k] == 'f' || s[k] == 'F'))
 			ty = cc_type_basic(AST_TYPE_FLOAT);
 		else if (k < n && (s[k] == 'q' || s[k] == 'Q'))	/* __float128 (x86-64; binary128 long double elsewhere) */
-			ty = cc_type_basic(c->o->target == PP_LINUX_X86_64 ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
+			ty = cc_type_basic(CC_X86_64(c) ? AST_TYPE_FLOAT128 : AST_TYPE_LONG_DOUBLE);
 		else if (k < n)
 			ty = cc_type_basic(AST_TYPE_LONG_DOUBLE);
 		if (k >= sizeof(buf))

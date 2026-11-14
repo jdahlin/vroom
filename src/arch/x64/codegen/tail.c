@@ -11,8 +11,13 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
 	codegen_value values[6];
 	const node *call;
 
+	bool ms = e->x64_context->msfn;
+
 	if (e->x64_context->interrupt || W->inline_call || W->instance || W->cleanup_count || W->vla_count || W->stack_pointer_needed || e->unit->options->sprot ||
-	    W->frame_alignment > 16 || !em_tail_candidate(e, W->function_symbol, expr, 6, &callee))
+	    W->frame_alignment > 16 || !em_tail_candidate(e, W->function_symbol, expr, ms ? 4 : 6, &callee))
+		return false;
+	/* the same convention on both sides; Windows: not through __imp_ or .refptr. */
+	if ((cc_func_abi(c, c->syms[callee].ty) == CC_FNABI_MS) != ms || (CODEGEN_IS_WIN64(c) && codegen_symbol_needs_got(c, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, callee))))
 		return false;
 	call = N(expr);
 	/* Snapshot every argument before writing any ABI register. This handles
@@ -36,9 +41,9 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
 		if (slots[i]) {
 			codegen_lvalue from = { .kind = CODEGEN_LVALUE_FRAME, .offset = slots[i], .align = 8 };
 
-			x64_load(e, x64_argument_register((int)i), &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
+			x64_load(e, ms ? x64w_argreg((int)i) : x64_argument_register((int)i), &from, walk_type_size(c, ty), walk_type_is_signed(c, ty));
 		} else {
-			x64_record_emit_three_registers(e, X64_OP_MOVI, walk_type_size(c, ty), x64_argument_register((int)i), X64_REGISTER_NONE, X64_REGISTER_NONE)->immediate =
+			x64_record_emit_three_registers(e, X64_OP_MOVI, walk_type_size(c, ty), ms ? x64w_argreg((int)i) : x64_argument_register((int)i), X64_REGISTER_NONE, X64_REGISTER_NONE)->immediate =
 				(int64_t)codegen_integer_truncate(c, values[i].integer, ty);
 		}
 	}

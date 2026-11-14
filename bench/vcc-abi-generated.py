@@ -2,7 +2,9 @@
 """Run pinned GCC/LLVM ABI generators through real Linux cross-compiler calls.
 
 LLVM=/usr/lib/llvm-23 bench/vcc-abi-generated.py --count 1000 -j 6
-Repeat with --target aarch64-linux-gnu (qemu-aarch64 + cross glibc).
+Repeat with --target aarch64-linux-gnu (qemu-aarch64 + cross glibc), or
+--target x86_64-w64-mingw32 (the MinGW-w64 sysroot of bench/hostenv.py,
+linked by lld, run under Wine; PLAN-win64.md WIN2).
 Each generated case compiles both halves independently, then runs clang/clang,
 clang/vcc, vcc/clang and vcc/vcc. The clang-only program is the output oracle.
 Unsupported clang inputs are counted separately, never as compiler passes.
@@ -21,6 +23,7 @@ import re
 import subprocess
 import sys
 
+import hostenv
 from hostenv import BUILD, WORK, llvm
 
 CLANG = llvm('clang')
@@ -30,11 +33,14 @@ GCC = SUITES / 'gcc/gcc/testsuite/gcc.dg/compat'
 LLVM = SUITES / 'llvm/clang/utils/ABITest/ABITestGen.py'
 
 
-def command(cmd, cwd, log, timeout=30):
+LINK, LIBS, RUNENV = ['-fuse-ld=lld', '-no-pie'], ['-lm'], None
+
+
+def command(cmd, cwd, log, timeout=30, env=None):
     with (cwd / 'commands.jsonl').open('a') as f:
         f.write(json.dumps([str(s) for s in cmd]) + '\n')
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout, env=env)
         (cwd / (log + '.stderr')).write_bytes(p.stderr)
         (cwd / (log + '.stdout')).write_bytes(p.stdout)
         return p.returncode, p.stdout, p.stderr.decode(errors='replace')
@@ -113,13 +119,15 @@ def one(suite, index, args, base, runner, gcc):
         pairs = [('clang', 'clang')] if compiler == 'clang' else [('clang', 'vcc'), ('vcc', 'clang'), ('vcc', 'vcc')]
         for caller, callee in pairs:
             name = caller + '-' + callee
-            exe = wd / name
-            rc, _, err = command([CLANG, '--target=' + args.target, '-fuse-ld=lld', '-no-pie',
+            exe = wd / (name + ('.exe' if RUNENV else ''))	# (the MinGW driver adds .exe anyway)
+            rc, _, err = command([CLANG, '--target=' + args.target, *LINK,
                 str(objects['driver', 'clang']), str(objects['caller', caller]), str(objects['callee', callee]),
-                '-lm', '-o', str(exe)], wd, name + '.link')
+                *LIBS, '-o', str(exe)], wd, name + '.link')
             if rc != 0:
                 return result('error' if compiler == 'clang' else 'fail', name + ' link: ' + detail(err))
-            rc, out, err = command([*runner, str(exe)], wd, name + '.run', args.timeout)
+            rc, out, err = command([*runner, str(exe)], wd, name + '.run', args.timeout, env=RUNENV)
+            if rc is None and RUNENV:	# (once more: Wine's first start in a fresh prefix is slow)
+                rc, out, err = command([*runner, str(exe)], wd, name + '.run', args.timeout, env=RUNENV)
             if rc != 0:
                 return result('error' if compiler == 'clang' else 'fail', f'{name} execution: {rc}: {detail(err or out.decode(errors="replace"))}')
             if compiler == 'clang':
@@ -131,7 +139,7 @@ def one(suite, index, args, base, runner, gcc):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--target', choices=['x86_64-linux-gnu', 'aarch64-linux-gnu'], default='x86_64-linux-gnu')
+    ap.add_argument('--target', choices=['x86_64-linux-gnu', 'aarch64-linux-gnu', 'x86_64-w64-mingw32'], default='x86_64-linux-gnu')
     ap.add_argument('--suite', choices=['gcc', 'llvm', 'all'], default='all')
     ap.add_argument('--count', type=int, default=100)
     ap.add_argument('--start', type=int, default=0)
@@ -146,13 +154,30 @@ def main():
     suites = ['gcc', 'llvm'] if args.suite == 'all' else [args.suite]
     if any(not (GCC if s == 'gcc' else LLVM).exists() for s in suites):
         ap.error('fetch pinned testsuites first: bench/fetch-testsuites.sh gcc llvm')
-    p = subprocess.run([CLANG, '--target=' + args.target, '-E', '-x', 'c', '-v', os.devnull], capture_output=True, text=True, check=True)
-    listing = p.stderr.split('#include <...> search starts here:', 1)[1].split('End of search list.', 1)[0]
-    includes = [a for line in listing.splitlines() if line.strip() for a in ('-isystem', line.strip())]
+    win = 'mingw' in args.target
+    if win:
+        global LINK, LIBS, RUNENV
+        why = hostenv.mingw_missing()
+        if why:
+            ap.error(why)
+        # the sysroot's headers by --sysroot (both compilers), linked as bench/vcc-win64.py links
+        includes = ['--sysroot=' + hostenv.MINGW_SYSROOT]
+        LINK = ['--sysroot=' + hostenv.MINGW_SYSROOT, '-resource-dir=' + hostenv.mingw_resource_dir(),
+                '-rtlib=compiler-rt', '--unwindlib=none', '-fuse-ld=lld', '-static']
+        LIBS = []
+        prefix = os.environ.get('VCC_WINEPREFIX', f'{BUILD}/wine')
+        RUNENV = hostenv.wine_env(prefix)
+        RUNENV['WINEDLLOVERRIDES'] += ';winedbg.exe=d'
+        hostenv.wine_start(prefix)
+    else:
+        p = subprocess.run([CLANG, '--target=' + args.target, '-E', '-x', 'c', '-v', os.devnull], capture_output=True, text=True, check=True)
+        listing = p.stderr.split('#include <...> search starts here:', 1)[1].split('End of search list.', 1)[0]
+        includes = [a for line in listing.splitlines() if line.strip() for a in ('-isystem', line.strip())]
     base = ['--target=' + args.target, '-O0', '-fno-pie', '-std=gnu11', '-w', *includes]
     if args.target.startswith('x86_64'):
         base += ['-mno-mmx']  # GCC generator's x86 DejaGNU option.
-    runner = ['qemu-aarch64', '-L', '/usr/aarch64-linux-gnu'] if args.target.startswith('aarch64') else []
+    runner = ['qemu-aarch64', '-L', '/usr/aarch64-linux-gnu'] if args.target.startswith('aarch64') else \
+        [hostenv.WINE] if win else []
     gcc = generate_gcc(args.output, args.start + args.count) if 'gcc' in suites else None
     jobs = [(s, i) for s in suites for i in range(args.start, args.start + args.count)]
     with ThreadPoolExecutor(max_workers=args.j) as pool:

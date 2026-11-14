@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 static_assert(sizeof(int) == 4);
-static_assert(alignof(long) == 8, "alignof");
+static_assert(alignof(long long) == 8, "alignof");
 extern thread_local int tl;	/* (declared only: ELF TLS is a TODO.md item of its own) */
 
 #if true
@@ -21,13 +21,13 @@ int main(void)
 	typeof_unqual(const int) x = 3;
 	constexpr int k = 5;
 	alignas(16) int al = 1;
-	long big = 1'000'000, hex = 0xFF'FF;
+	long long big = 1'000'000, hex = 0xFF'FF;
 	double d = 1'0.2'5;
 	int z[2] = {};
 
 	x++;	/* typeof_unqual dropped the const */
-	printf("%d %d %d %d %d %d %ld %ld %g %d %d %d\n", b, f, p == 0, x, k, al, big, hex, d, z[1],
+	printf("%d %d %d %d %d %d %lld %lld %g %d %d %d\n", b, f, p == 0, x, k, al, big, hex, d, z[1],
 	       TRUE_IN_IF, (int)sizeof(tl));
-	printf("%zu %d\n", sizeof(b), (int)(((unsigned long)&al) % 16));
+	printf("%zu %d\n", sizeof(b), (int)(((unsigned long long)&al) % 16));
 	return !true;
 }

@@ -70,6 +70,7 @@ static codegen_value x64_half_call(codegen_context *e, int name, codegen_value v
 	walk_argument a;
 	codegen_lvalue slot = x64_tmpslot(e, 16);
 
+	e->msabi = x64w_helpers(e);	/* (the runtime's convention) */
 	x64_classify(e, from, &a, false);
 	a.slot = slot.offset;
 	if (x64_isld(e->compile_context, from)) {
@@ -243,6 +244,38 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 	codegen_lvalue out = { 0 };
 	record *i;
 
+	if (x64w_helpers(e)) {
+		/* Microsoft's convention: the 16-byte types by reference to a copy in the frame,
+		   __float128 and long double results through a hidden pointer, __int128 in xmm0 */
+		static const int kinds[] = { [TQ] = AST_TYPE_FLOAT128, [TX] = AST_TYPE_LONG_DOUBLE, [TD] = AST_TYPE_DOUBLE, [TF] = AST_TYPE_FLOAT,
+					     [TI] = AST_TYPE_LONG_LONG, [TW] = AST_TYPE_INT128 };
+		int64_t in[2];
+		ast_qualified_type ty[2];
+
+		for (int k = 0; k < n; k++) {
+			codegen_lvalue d = x64_tmpslot(e, a[k].k == TQ || a[k].k == TX || a[k].k == TW ? 16 : 8);
+
+			ty[k] = codegen_type_primitive(kinds[a[k].k]);
+			in[k] = d.offset;
+			if (a[k].k == TQ || a[k].k == TX || a[k].k == TW) {
+				int rd = x64_laddr(e, &d);
+
+				x64_copy(e, rd, a[k].r, 16);
+				x64_tfree(e, rd);
+			} else {
+				x64_record_emit_memory(e, X64_OP_ST, 8, a[k].r, &d, false);
+			}
+		}
+		for (int k = 0; k < n; k++)
+			x64_tfree(e, a[k].r);
+		out = x64_tmpslot(e, 16);
+		x64w_helper(e, fn, in, ty, n, out.offset, codegen_type_primitive(kinds[rk]));
+		if (rk == TQ || rk == TX || rk == TW)
+			return x64_vr(x64_laddr(e, &out));
+		res = rk == TI ? x64_treg(e) : x64_ftreg(e);
+		x64_record_emit_memory(e, X64_OP_LD, rk == TF ? 4 : 8, res, &out, false);
+		return x64_vr(res);
+	}
 	for (int k = 0; k < n; k++)
 		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
 	saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
@@ -516,6 +549,18 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 
 	if (KIND(c, from) == AST_TYPE_BFLOAT16) {
 		if (KIND(c, to) == AST_TYPE_BFLOAT16) return v;
+		if (CODEGEN_IS_WIN64(c) && v.kind == CODEGEN_VALUE_REGISTER) {
+			/* the float with the same top 16 bits, as clang (MinGW's compiler-rt takes
+			   __extendbfsf2's argument in an integer register) */
+			int r = x64_treg(e), q = x64_ftreg(e);
+
+			x64_record_emit_three_registers(e, X64_OP_MOV, 4, r, v.register_number, X64_REGISTER_NONE);
+			x64_record_emit_three_registers(e, X64_OP_SHLI, 4, r, r, X64_REGISTER_NONE)->immediate = 16;
+			x64_record_emit_three_registers(e, X64_OP_MOV, 4, q, r, X64_REGISTER_NONE);
+			x64_tfree(e, r);
+			x64_tfree(e, v.register_number);
+			return x64_cvt(e, x64_vr(q), codegen_type_primitive(AST_TYPE_FLOAT), to);
+		}
 		v = x64_half_call(e, CODEGEN_LIBRARY_EXTENDBFSF2, v, from, codegen_type_primitive(AST_TYPE_FLOAT));
 		return x64_cvt(e, v, codegen_type_primitive(AST_TYPE_FLOAT), to);
 	}

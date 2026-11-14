@@ -75,6 +75,37 @@ static void x64_lcall(codegen_context *e, int fn, const int64_t *words, int nw, 
 	int pad;
 	record *i;
 
+	if (x64w_helpers(e)) {
+		/* Microsoft's convention: an __int128 by reference (its two words into one object),
+		   returned in xmm0; a float in xmm0 */
+		int64_t in[2];
+		ast_qualified_type ty[2], ti = codegen_type_primitive(AST_TYPE_INT128);
+		int na = 0;
+		bool single = fn == CODEGEN_LIBRARY_FIXSFTI || fn == CODEGEN_LIBRARY_FIXUNSSFTI || fn == CODEGEN_LIBRARY_FLOATTISF || fn == CODEGEN_LIBRARY_FLOATUNTISF;
+
+		(void)resw;
+		if (xmmarg == 0) {
+			in[na] = words[0], ty[na++] = codegen_type_primitive(single ? AST_TYPE_FLOAT : AST_TYPE_DOUBLE);
+		} else {
+			for (int k = 0; k + 1 < nw; k += 2) {
+				codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 16, 16), .align = 16 };
+
+				for (int w = 0; w < 2; w++) {
+					codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = words[k + w], .align = 8 }, dw = d;
+
+					dw.offset += 8 * w;
+					x64_record_emit_memory(e, X64_OP_LD, 8, R11, &s, false);
+					x64_record_emit_memory(e, X64_OP_ST, 8, R11, &dw, false);
+				}
+				in[na] = d.offset, ty[na++] = ti;
+			}
+			if (nw == 3)	/* a shift's count */
+				in[na] = words[2], ty[na++] = codegen_type_primitive(AST_TYPE_INT);
+		}
+		x64w_helper(e, fn, in, ty, na, res, fres ? codegen_type_primitive(single ? AST_TYPE_FLOAT : AST_TYPE_DOUBLE) : ti);
+		return;
+	}
+
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
 			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
@@ -394,6 +425,7 @@ VPRIV codegen_value x64_wcvt(codegen_context *e, codegen_value v, ast_qualified_
 		int fn = tw ? (walk_type_is_signed(c, to) ? CODEGEN_LIBRARY_FIXXFTI : CODEGEN_LIBRARY_FIXUNSXFTI) :
 			(walk_type_is_signed(c, from) ? CODEGEN_LIBRARY_FLOATTIXF : CODEGEN_LIBRARY_FLOATUNTIXF);
 
+		e->msabi = x64w_helpers(e);	/* (the runtime's convention) */
 		x64_classify(e, from, &arg, false);
 		arg.slot = walk_slot_temporary(e, 16, 16);
 		for (int w = 0; w < 2; w++) {

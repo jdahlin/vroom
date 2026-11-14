@@ -44,7 +44,9 @@ VPRIV void x64_locals_begin(codegen_context *e, uint32_t s)
 			X->local_symbols[X->local_register_count++] = X->local_symbols[i];
 	for (unsigned i = 0; i < X->local_register_count; i++) {
 		X->local_registers[i] = regs[i];
-		if (!X->callee_save_slots[X->local_registers[i]])
+		if (X->winframe)
+			X->csmask |= UINT64_C(1) << regs[i];	/* (the Windows frame's save area, print.c) */
+		else if (!X->callee_save_slots[X->local_registers[i]])
 			X->callee_save_slots[X->local_registers[i]] = walk_slot_permanent(e, 8, 8);
 	}
 }
@@ -72,4 +74,15 @@ VPRIV bool x64_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
 			return true;
 		}
 	return false;
+}
+
+/* the Microsoft convention: a by-reference parameter's slot holds the address of the caller's copy */
+VPRIV bool x64_byref(codegen_context *e, uint32_t s)
+{
+	walk_argument a;
+
+	if (!e->x64_context->msfn || e->walk_state->instance || !(e->compile_context->syms[s].flags & AST_SYMBOL_FLAG_PARAMETER))
+		return false;
+	x64w_classify(e, e->compile_context->syms[s].ty, &a, false);
+	return (a.is_in_memory || a.is_sse_up) && !(a.is_in_memory && a.is_sse_up);	/* (a split vector is copied: its halves come apart) */
 }

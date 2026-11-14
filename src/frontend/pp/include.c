@@ -415,8 +415,10 @@ static bool pp_include_guard_is_known(const pp *p, const lex_file *f)
 {
 	bool seen = false;
 
+	/* clang: an entry whose #ifndef found its macro undefined (one that found it defined, its
+	   body skipped, does not make the guard known: Preprocessor::HandleIfdefDirective) */
 	for (uint32_t i = 0; i < p->file_count && !seen; i++)
-		seen = p->files[i].lex_file == f;
+		seen = p->files[i].lex_file == f && p->files[i].guard_open;
 	for (int i = 0; i < p->context_depth && seen; i++)
 		if (p->contexts[i].type == PP_CONTEXT_FILE && p->contexts[i].lex_file == f)
 			return false;
@@ -629,6 +631,7 @@ VPRIV void pp_file_enter(pp *p, const lex_file *f, const char *path, int32_t sdi
 	pp_file_entry_add(p, c, f, path);
 	p->files[c->file_index].comment_position = f->src;
 	p->files[c->file_index].is_system = sys;
+	p->files[c->file_index].guard_open = fi->guard_macro && !pp_macro_guard_is_defined(p, fi->guard_macro);
 	if (unlikely(p->markers_on) && f != &p->builtin_file)
 		pp_line_marker_file_enter(p, &p->files[c->file_index]);
 	p->files[c->file_index].included_from = from && from->lex_file != &p->builtin_file && from->index ? from->location + from->lexed_tokens[from->index - 1].off : 0;

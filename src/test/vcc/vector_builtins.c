@@ -5,7 +5,7 @@ typedef int v4si __attribute__((vector_size(16)));
 typedef unsigned v4su __attribute__((vector_size(16)));
 typedef float v4sf __attribute__((vector_size(16)));
 typedef double v2df __attribute__((vector_size(16)));
-typedef long v2di __attribute__((vector_size(16)));
+typedef long long v2di __attribute__((vector_size(16)));
 typedef int v2si __attribute__((vector_size(8)));
 typedef signed char v8qi __attribute__((vector_size(8)));
 typedef short v8hi __attribute__((vector_size(16)));
@@ -35,7 +35,7 @@ int main(void)
 	v8qi q = rev((v8qi){ 1, 2, 3, 4, 5, 6, 7, -8 });
 	v4sf f = i2f(a), u = u2f((v4su){ 0, 1, 0x80000000u, 0xffffffffu });
 	v4si g = f2i((v4sf){ 1.5f, -2.5f, 3.9f, 7 });
-	v2df d = l2d((v2di){ -3, 1L << 40 });
+	v2df d = l2d((v2di){ -3, 1LL << 40 });
 	v8hi h = q2h(q);
 
 	printf("%d %d %d %d | %d %d | %d %d %d %d\n", r[0], r[1], r[2], r[3], l[0], l[1], w[0], w[1], w[2], w[3]);

@@ -8,7 +8,8 @@ that must leave arm64 alone, PLAN-wasm.md): every C file of the test suites
 (src/test: gcc-torture, tcc-tests2, vcc) is compiled by DIR/vpp and by
 this tree's vpp in each mode, and the outputs (exit status, object or text)
 are compared.  Modes (default all): c0 c1 c2 (-c -O0/-O1/-O2, Linux), s2 (-S
--O2, Linux), e (-E), d2 (-c -O2, arm64 Darwin), ds (-S -O2, Darwin).  The flags
+-O2, Linux), e (-E), d2 (-c -O2, arm64 Darwin), ds (-S -O2, Darwin), x0 x2
+(-S -O0/-O2, x86-64 Linux), xc (-c -O2, x86-64 Linux), xe (-E, x86-64 Linux).  The flags
 are vcc-ctests.py's (its freestanding runtime headers), so no system headers
 are involved.  The kernel side is `bench/vbench.py check --base DIR`.
 
@@ -26,10 +27,11 @@ VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 RES = subprocess.run([llvm('clang'), '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 COMMON = ['-nostdinc', '-I', f'{T}/rt/include', '-isystem', RES, '-fno-PIE', '-fno-asynchronous-unwind-tables',
           '-fno-stack-protector', '-w', '-fno-strict-aliasing', '-ffp-contract=off']
-LNX, DAR = '--target=aarch64-linux-gnu', '--target=arm64-apple-darwin'
+LNX, DAR, X86 = '--target=aarch64-linux-gnu', '--target=arm64-apple-darwin', '--target=x86_64-linux-gnu'
 MODES = {
     'c0': [LNX, '-c', '-O0'], 'c1': [LNX, '-c', '-O1'], 'c2': [LNX, '-c', '-O2'], 's2': [LNX, '-S', '-O2'],
     'e': [LNX, '-E', '-O2'], 'd2': [DAR, '-c', '-O2'], 'ds': [DAR, '-S', '-O2'],
+    'x0': [X86, '-S', '-O0'], 'x2': [X86, '-S', '-O2'], 'xc': [X86, '-c', '-O2'], 'xe': [X86, '-E', '-O2'],
 }
 
 

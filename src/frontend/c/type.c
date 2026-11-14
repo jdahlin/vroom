@@ -122,7 +122,7 @@ CC_PRIVATE ast_qualified_type cc_type_bitint(cc *c, unsigned bits, bool unsign)
 	}
 	unsigned size = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : bits <= 64 ? 8 : 16;
 	int kind = size == 1 ? AST_TYPE_SIGNED_CHAR : size == 2 ? AST_TYPE_SHORT : size == 4 ? AST_TYPE_INT : size == 8 ? AST_TYPE_LONG_LONG : AST_TYPE_INT128;
-	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (c->o->target == PP_LINUX_X86_64 || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
+	ctype t = { .kind = (uint8_t)(kind + unsign), .size = size, .align = size > 8 && (CC_X86_64(c) || PP_IS_WASM(c->o->target)) ? 8 : size, .n = bits };
 
 	return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);
 }
@@ -225,7 +225,7 @@ CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, co
 			idx = cc_type_new(c, AST_TYPE_FUNCTION);
 			ctype *t = &c->ty[idx];
 
-			t->flags = (uint8_t)flags, t->base = ret, t->n = n, t->size = 1, t->align = 4;
+			t->flags = (uint8_t)flags, t->ext = (uint16_t)(flags >> 8), t->base = ret, t->n = n, t->size = 1, t->align = 4;
 			t->aux = c->nparams;
 			if (n)	/* par is NULL for an implicit or unprototyped function: memcpy(_, NULL, 0) is UB */
 				memcpy(&c->params[c->nparams], par, n * sizeof(ast_qualified_type));
@@ -241,7 +241,7 @@ CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, co
 
 					if (!x)
 						continue;
-					for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags) & (ncap - 1); nh[k];
+					for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & (ncap - 1); nh[k];
 					     k = (k + 1) & (ncap - 1))
 						;
 					nh[k] = x;
@@ -254,7 +254,7 @@ CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, co
 		{
 			const ctype *x = &c->ty[e];
 
-			if (x->base == ret && x->n == n && x->flags == flags) {
+			if (x->base == ret && x->n == n && (x->flags | x->ext << 8) == flags) {
 				const ast_qualified_type *xp = &c->params[x->aux];	/* (short lists: no memcmp call) */
 				uint32_t k = 0;
 
@@ -267,13 +267,31 @@ CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, co
 	}
 }
 
+/*
+ * t with the function type in it (t itself, or what a pointer points to, through pointers) given
+ * x86-64 calling convention conv (CC_FNABI_*, 0: the target's own); 0 if t has no function type
+ */
+CC_PRIVATE ast_qualified_type ty_fnabi(cc *c, ast_qualified_type t, int conv)
+{
+	const ctype *x = AST_TYPE(c, t);
+
+	if (x->kind == AST_TYPE_FUNCTION)
+		return AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_function(c, x->base, &c->params[x->aux], x->n, (x->flags & 0xff) | conv << 8)), AST_QUALIFIED_TYPE_QUALIFIERS(t));
+	if (x->kind == AST_TYPE_POINTER && !(x->flags & AST_TYPE_FLAG_BLOCK)) {
+		ast_qualified_type b = ty_fnabi(c, x->base, conv);
+
+		return b ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_pointer(c, b)), AST_QUALIFIED_TYPE_QUALIFIERS(t)) : 0;
+	}
+	return 0;
+}
+
 /* GNU vector of total size bytes with elements elem */
 CC_PRIVATE ast_qualified_type cc_type_vector(cc *c, ast_qualified_type elem, uint32_t size)
 {
 	const ctype *e = AST_TYPE(c, elem);
 	/* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
 	ctype t = { .kind = AST_TYPE_VECTOR, .base = AST_QUALIFIED_TYPE_UNQUALIFIED(elem), .size = size,
-		    .align = size > 16 && !PP_IS_WASM(c->o->target) && c->o->target != PP_LINUX_X86_64 ? 16 : size };
+		    .align = size > 16 && !PP_IS_WASM(c->o->target) && !CC_X86_64(c) ? 16 : size };
 
 	t.n = e->size ? (uint32_t)(size / e->size) : 0;
 	return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);
@@ -528,8 +546,8 @@ CC_PRIVATE bool cc_type_is_compatible(cc *c, ast_qualified_type a, ast_qualified
 		}
 		return x->n == y->n && x->aux == y->aux;
 	case AST_TYPE_FUNCTION:
-		if (!cc_type_is_compatible(c, x->base, y->base) || AST_QUALIFIED_TYPE_QUALIFIERS(x->base) != AST_QUALIFIED_TYPE_QUALIFIERS(y->base))
-			return false;
+		if (!cc_type_is_compatible(c, x->base, y->base) || AST_QUALIFIED_TYPE_QUALIFIERS(x->base) != AST_QUALIFIED_TYPE_QUALIFIERS(y->base) || x->ext != y->ext)
+			return false;	/* (ext: the x86-64 calling convention, ms_abi/sysv_abi) */
 		if ((x->flags | y->flags) & AST_TYPE_FLAG_NO_PROTOTYPE)
 			return true;
 		if (x->n != y->n || (x->flags & AST_TYPE_FLAG_VARIADIC) != (y->flags & AST_TYPE_FLAG_VARIADIC))

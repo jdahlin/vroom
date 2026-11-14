@@ -50,6 +50,7 @@ static const char *const codegen_fixed_function_names[] = {
 	"__extendhfsf2", "__truncsfhf2", "__truncdfhf2", "__truncxfhf2", "__trunctfhf2",
 	"__floattixf", "__floatuntixf", "__fixxfti", "__fixunsxfti",
 	"floorf", "ceilf", "truncf", "roundf", "rintf", "nearbyintf", "fabsf",
+	"__main",
 };
 
 VPRIV uint32_t codegen_symbol_canonical(cc *c, uint32_t s)

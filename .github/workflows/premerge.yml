@@ -11,7 +11,7 @@
 # them too (a merged PR; gate's own fast-forward triggers nothing), which is
 # what fills the caches (arm64.yml) every new PR starts from.
 #
-# One reusable workflow per target (arm64.yml, x86 later; wasm.yml is manual-only): a new
+# One reusable workflow per target (arm64.yml, win64.yml, x86 later; wasm.yml is manual-only): a new
 # target is its own file plus a line under jobs and gate's needs.
 name: premerge
 on:
@@ -28,9 +28,12 @@ permissions:
 jobs:
   arm64:
     uses: ./.github/workflows/arm64.yml
+  # Windows x64 under Wine, then the same programs on windows-2025 (doc/PLAN-win64.md WIN9)
+  win64:
+    uses: ./.github/workflows/win64.yml
   # wasm is disabled (2026-11-13, doc/PLAN-wasm.md): wasm.yml is manual-only
   gate:
-    needs: [arm64]
+    needs: [arm64, win64]
     if: always()
     runs-on: ubuntu-24.04-arm
     permissions:

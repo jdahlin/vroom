@@ -14,13 +14,16 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 	case X64_OP_SHLI: case X64_OP_SHRI: case X64_OP_SARI: case X64_OP_SHL: case X64_OP_SHR: case X64_OP_SAR:
 	case X64_OP_IMULI: case X64_OP_NEG: case X64_OP_NOT: case X64_OP_CMP: case X64_OP_CMPI:
 	case X64_OP_TEST: case X64_OP_CMOV: case X64_OP_SETCC: case X64_OP_JMP: case X64_OP_JCC:
-	case X64_OP_CALL: case X64_OP_PUSH: case X64_OP_POP: case X64_OP_CQO:
+	case X64_OP_PUSH: case X64_OP_POP: case X64_OP_CQO:
 	case X64_OP_LEAL: case X64_OP_MFENCE: case X64_OP_UD2: case X64_OP_BSF: case X64_OP_BSR:
 	case X64_OP_MULW: case X64_OP_SMULW: case X64_OP_DIV: case X64_OP_IDIV: case X64_OP_EXT:
 	case X64_OP_FADD: case X64_OP_FSUB: case X64_OP_FMUL: case X64_OP_FDIV: case X64_OP_FXOR:
 		break;
 	case X64_OP_CALLR: case X64_OP_JMPR:
 		if (e->unit->options->xcf & 4) return false;
+		break;
+	case X64_OP_CALL:
+		if (CODEGEN_IS_WIN64(e->compile_context) && codegen_symbol_needs_got(e->compile_context, i->reference)) return false;	/* (callq *__imp_f(%rip): text) */
 		break;
 	default: return false;
 	}
@@ -33,6 +36,8 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 			out->registers[1] = RSP; out->offset = (int32_t)off;
 		} else if (i->registers[1] == RBP && i->offset < 0 && e->walk_state->frame_alignment > 16)
 			out->registers[1] = R12;
+		else if (i->registers[1] == RBP && i->offset < 0)
+			out->offset = (int32_t)(i->offset - e->x64_context->wsave);	/* (the Windows frame's save area, print.c) */
 	}
 	return true;
 }

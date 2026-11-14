@@ -114,6 +114,16 @@ static bool cc_declarator_parameter_list_parse(cc *c, cc_declarator_operation *o
 
 				if (vs) t = cc_declarator_vector_attribute_apply(c, t, vs, d.loc);
 			}
+			{
+				/* ms_abi int (*f)(int): on the function type through the pointer, as declare() */
+				uint32_t fa = d.at.fnabi ? d.at.fnabi : ds.at.fnabi;
+
+				if (unlikely(fa)) {
+					ast_qualified_type ft = ty_fnabi(c, t, fa == (CC_WIN64(c) ? CC_FNABI_MS : CC_FNABI_SYSV) ? CC_FNABI_DEFAULT : (int)fa);
+
+					if (ft) t = ft;
+				}
+			}
 			/* adjustments (C11 6.7.6.3p7-8) */
 			uint32_t vsize = 0;
 
@@ -477,7 +487,7 @@ CC_PRIVATE ast_qualified_type cc_declarator_apply(cc *c, ast_qualified_type t, u
 				t = cc_type_vla(c, t, o->a);
 			else if ((AST_TYPE(c, t)->flags & AST_TYPE_FLAG_VLA) && !(o->fl & AST_TYPE_FLAG_INCOMPLETE))
 				/* int a[6][n]: an array of VLAs is one too (its size is known only at run time) */
-				t = cc_type_vla(c, t, cc_node_integer_new(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), cc_type_basic(AST_TYPE_UNSIGNED_LONG), o->np));
+				t = cc_type_vla(c, t, cc_node_integer_new(c, (i128)((uint64_t)o->a | (uint64_t)o->b << 32), c->t_size, o->np));
 			else
 				t = cc_type_array(c, t, (uint64_t)o->a | (uint64_t)o->b << 32, o->fl);
 			break;

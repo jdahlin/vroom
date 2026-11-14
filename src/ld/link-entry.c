@@ -12,6 +12,8 @@ int ld_main(int argc, char **argv, int dirfd, FILE *err)
 	int rc;
 	if (ld_first_input_is_macho(argc, argv, dirfd)) {
 		rc = macho_link(argc, argv, dirfd, err);
+	} else if (pe_link_wanted(argc, argv, dirfd)) {
+		rc = pe_link(argc, argv, dirfd, err);
 	} else {
 		FILE *error_stream = err ? err : stderr;
 

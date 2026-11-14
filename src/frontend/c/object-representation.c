@@ -333,7 +333,7 @@ static bool cc_bit_cast_encode(cc *c, ast_qualified_type t, cc_value cv, u128 *v
 		uint64_t bits;
 		memcpy(&bits, &cv.f, 8);
 		*v = bits;
-	} else if (c->o->target == PP_LINUX_X86_64 && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE) {
+	} else if (CC_X86_64(c) && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE) {
 		uint8_t b[10];
 		vsoftfloat_to_x87(q, b);
 		*v = 0;
@@ -546,7 +546,7 @@ static bool cc_bit_cast_bytes_read(cc_bit_cast_state *state, cc *c, uint32_t n, 
 static bool cc_bit_cast_decode(cc *c, ast_qualified_type t, u128 raw, cc_value *v)
 {
 	unsigned bits = (unsigned)(cc_type_size(c, t) * 8), valid = cc_type_is_integer(c, t) ? cc_type_integer_bits(c, t) : bits;
-	if (c->o->target == PP_LINUX_X86_64 && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE)
+	if (CC_X86_64(c) && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE)
 		valid = 80;
 	memset(v, 0, sizeof(*v));
 	v->ice = true;
@@ -625,7 +625,7 @@ static bool cc_bit_cast_value_read(cc_bit_cast_state *state, cc *c, uint32_t n, 
 		return false;
 	if (AST_TYPE_KIND(c, t) == AST_TYPE_BOOL)
 		valid = 8;
-	if (c->o->target == PP_LINUX_X86_64 && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE)
+	if (CC_X86_64(c) && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE)
 		valid = 80;
 	u128 raw, known;
 	if (!cc_bit_cast_read(state, c, n, t, 0, bits, &raw, &known, 0) || (known & cc_bit_cast_mask(valid)) != cc_bit_cast_mask(valid))
@@ -673,14 +673,14 @@ static bool cc_bit_cast_check(cc_bit_cast_state *state, cc *c, uint32_t n, ast_q
 	unsigned bits = (unsigned)cc_type_size(c, t) * 8;
 	if (cc_type_is_integer(c, t) && AST_TYPE_KIND(c, t) != AST_TYPE_BOOL)
 		bits = cc_type_integer_bits(c, t);
-	if (c->o->target == PP_LINUX_X86_64 && k == AST_TYPE_LONG_DOUBLE)
+	if (CC_X86_64(c) && k == AST_TYPE_LONG_DOUBLE)
 		bits = 80;
 	u128 v, known;
 	if (bits > 128 || !cc_bit_cast_read(state, c, n, AST_NODE(n)->ty, off, bits, &v, &known, 0))
 		return false;
 	if (known != cc_bit_cast_mask(bits))
 		return carry && (k == AST_TYPE_UNSIGNED_CHAR || (k == AST_TYPE_CHAR && !cc_type_is_signed(c, t)));
-	if (c->o->target == PP_LINUX_X86_64 && k == AST_TYPE_LONG_DOUBLE) {
+	if (CC_X86_64(c) && k == AST_TYPE_LONG_DOUBLE) {
 		unsigned exp = (unsigned)(v >> 64) & 0x7fff;
 		if ((exp != 0) != (((uint64_t)v >> 63) != 0))
 			return false;

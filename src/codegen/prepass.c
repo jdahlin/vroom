@@ -78,7 +78,7 @@ VPRIV bool codegen_target_supports_sve(cc *c)
    explicit until their runtime precision and calling conventions are checked. */
 VPRIV bool codegen_target_supports_bitint(cc *c)
 {
-	if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+	if (PP_IS_X86_64(c->o->target) || c->o->target == PP_LINUX_AARCH64)
 		return true;
 	for (uint32_t i = 1; i < c->nsym; i++) {
 		const sym *s = &c->syms[i];

@@ -16,6 +16,14 @@ done by vpp itself (it lexes the reference with vcc's lexer).
 
 --bin-dir DIR (or VCC_BIN=DIR) runs the tools from DIR instead of build/src,
 e.g. build/src-asan or build/src-tsan (AGENTS.md, "Sanitizers").
+
+--win64 (or VCC_WIN64=1): instead of the kernel's TUs, one TU per top-level
+header of the MinGW-w64 sysroot (x86_64-w64-mingw32/include/*.h, those clang
+-fsyntax-only accepts; PLAN-win64.md WIN1), plus a few flag variants, compiled
+with --target=x86_64-w64-mingw32 --sysroot=SYSROOT in build/win64-headers
+(references in its ref/).  SYSROOT: hostenv.MINGW_SYSROOT
+($VCC_MINGW_SYSROOT).  Every mode works on them, and so do the harnesses
+that import this module (vcc-sema.py run/layout/warn).
 """
 import glob, hashlib, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
@@ -23,6 +31,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD, KTREE, PPREF
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 B = KTREE; REF = PPREF
+if '--win64' in sys.argv or os.environ.get('VCC_WIN64') == '1':	# (see win64_tus)
+    B = f'{R}/build/win64-headers'; REF = f'{B}/ref'
+    os.makedirs(REF, exist_ok=True)
 CL = llvm('clang')
 
 def bin_dir():
@@ -34,6 +45,54 @@ def bin_dir():
         os.environ['VCC_BIN'] = os.path.abspath(d)
     return os.path.abspath(d)
 BIN = bin_dir(); VPP = os.environ.get('VPP', f'{BIN}/vpp')
+
+if '--win64' in sys.argv:
+    sys.argv.remove('--win64')
+    os.environ['VCC_WIN64'] = '1'	# (spawned workers import this module after argv was consumed)
+WIN64 = os.environ.get('VCC_WIN64') == '1'
+WIN64_TARGET = '--target=x86_64-w64-mingw32'
+# a few flag variants of the headers most programs include
+WIN64_VARIANTS = [('windows.h', ['-DUNICODE', '-D_UNICODE']), ('windows.h', ['-DWIN32_LEAN_AND_MEAN', '-O2']),
+                  ('windows.h', ['-D_WIN32_WINNT=0x0601', '-std=gnu99']), ('stdio.h', ['-D__USE_MINGW_ANSI_STDIO=1']),
+                  ('stdlib.h', ['-std=c23']), ('math.h', ['-ffast-math', '-O2']), ('intrin.h', ['-march=haswell']),
+                  ('winsock2.h', ['-municode'])]
+
+def win64_sysroot():
+    """the MinGW-w64 sysroot (llvm-mingw's tree): hostenv.MINGW_SYSROOT ($VCC_MINGW_SYSROOT)"""
+    from hostenv import MINGW_SYSROOT as d
+    if not d or not os.path.isdir(f'{d}/x86_64-w64-mingw32/include'):
+        sys.exit('vcc-diff.py --win64: no MinGW-w64 sysroot (VCC_MINGW_SYSROOT; bench/fetch-testsuites.sh llvm-mingw)')
+    return d
+
+def win64_tus(pat=None):
+    """one TU per top-level sysroot header clang accepts (+ WIN64_VARIANTS), files written into B/hdr"""
+    sr = win64_sysroot()
+    inc = f'{sr}/x86_64-w64-mingw32/include'
+    os.makedirs(f'{B}/hdr', exist_ok=True)
+    # clang's resource headers on both sides: vcc's default for the target is its own
+    # (src/headers/freestanding, x86), parity is with clang's (PLAN-win64.md WIN8)
+    res = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip()
+    out = []
+    for i, (h, fl) in enumerate([(h, []) for h in sorted(os.listdir(inc)) if h.endswith('.h') and os.path.isfile(f'{inc}/{h}')] + WIN64_VARIANTS):
+        name = h[:-2] + (f'.v{i}' if fl else '')
+        f = f'hdr/{name}.c'
+        if not os.path.exists(f'{B}/{f}'):
+            open(f'{B}/{f}', 'w').write(f'#include <{h}>\n')
+        out.append((f'win64/{name}.o', [WIN64_TARGET, f'--sysroot={sr}', f'-resource-dir={res}'] + fl + [f]))
+    # what clang itself accepts (cached by clang's binary and the sysroot)
+    key = hashlib.sha1(repr((os.stat(CL).st_mtime_ns, sr, os.stat(inc).st_mtime_ns, len(out))).encode()).hexdigest()[:16]
+    acc = f'{B}/accepted-{key}'
+    try:
+        ok = set(open(acc).read().split())
+    except OSError:
+        with Pool(int(os.environ.get('JOBS', 6))) as pool:
+            ok = {o for o, good in pool.map(_win64_accepts, out, chunksize=8) if good}
+        open(acc, 'w').write('\n'.join(sorted(ok)) + '\n')
+    return [t for t in out if t[0] in ok and (not pat or re.search(pat, t[0]))]
+
+def _win64_accepts(t):
+    obj, a = t
+    return obj, subprocess.run([CL, '-fsyntax-only', '-w'] + a, cwd=B, capture_output=True).returncode == 0
 
 def tu_args(cmd):
     """(object, clang args without -c/-E/-o/-MMD) for a C TU, a .S file, or a
@@ -49,6 +108,8 @@ def tu_args(cmd):
     return m.group(1), a
 
 def tus(pat=None):
+    if WIN64:
+        return win64_tus(pat)
     out = []
     cmds = []
     for d, dirs, files in os.walk(B):	# no symlinks: build-o0/source leads to other trees
