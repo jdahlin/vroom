@@ -276,7 +276,8 @@ static int as_symbol_assign(as_context *a, as_text n, const char *p, const char 
 	return 0;
 }
 
-static int as_directive_dispatch(as_context *a, as_text w, const char *p, const char *e)
+/* Keep the directive handlers out of the per-instruction statement loop. */
+static __attribute__((noinline)) int as_directive_dispatch(as_context *a, as_text w, const char *p, const char *e)
 {
 	const char *d = w.text + 1;
 	size_t n = w.length - 1;
@@ -624,7 +625,7 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 		a->alias_count++;
 		return 0;
 	}
-	as_macro *m = as_macro_find(a, w.text, w.length);
+	as_macro *m = a->macro_count ? as_macro_find(a, w.text, w.length) : NULL;
 	if (m) return as_macro_invoke(a, m, w.text + w.length, e);
 	if (w.text[0] == '.') return as_directive_dispatch(a, w, w.text + w.length, e);
 	int generated = __builtin_expect(a->gen_dwarf, 0) && as_gen_dwarf_instruction(a);
