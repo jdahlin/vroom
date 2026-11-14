@@ -65,7 +65,7 @@ static const char *driver_target_features_parse(int argc, char **argv,
 	!strncmp(name, "stack-protector-guard", 21) || !strcmp(name, "64") || !strcmp(name, "red-zone") ||
 	!strcmp(name, "stackrealign") || !strcmp(name, "omit-leaf-frame-pointer") ||
 	!strcmp(name, "stack-arg-probe") || !strcmp(name, "accumulate-outgoing-args") ||
-	!strcmp(name, "outline-atomics") || !strcmp(name, "strict-align") ||
+	!strcmp(name, "outline-atomics") || !strcmp(name, "outline") || !strcmp(name, "strict-align") ||
 	/* Windows (MinGW): record layout and the driver's (link) switches */
 	!strcmp(name, "ms-bitfields") || !strcmp(name, "unicode") || !strcmp(name, "windows") ||
 	!strcmp(name, "console") || !strcmp(name, "threads") || !strcmp(name, "dll") ||

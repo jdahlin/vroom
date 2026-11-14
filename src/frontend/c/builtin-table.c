@@ -15,6 +15,8 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want, const
 }
 
 static const cc_builtin cc_builtin_table[] = {
+	{ "__builtin_ia32_crc32qi", CC_BUILTIN_X86_CRC32, 1, "uuC" }, { "__builtin_ia32_crc32hi", CC_BUILTIN_X86_CRC32, 1, "uuh" },
+	{ "__builtin_ia32_crc32si", CC_BUILTIN_X86_CRC32, 1, "uuu" }, { "__builtin_ia32_crc32di", CC_BUILTIN_X86_CRC32, 1, "WWW" },
 	{ "__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB" },
 	{ "__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i." },
 	{ "__builtin_ia32_movmskps", CC_BUILTIN_X86_SIMD, 1, "iF" },

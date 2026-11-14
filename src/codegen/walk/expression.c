@@ -2900,7 +2900,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 	char b[64];
 
 	switch (x->aux) {
-	case CC_BUILTIN_X86_PCMPSTR: case CC_BUILTIN_X86_BLENDVB: return WALK_LOWER(pcmpstr)(e, n);
+	case CC_BUILTIN_X86_PCMPSTR: case CC_BUILTIN_X86_BLENDVB: case CC_BUILTIN_X86_CRC32: return WALK_LOWER(pcmpstr)(e, n);
 	case CC_BUILTIN_FAST_SQRT:
 		return WALK_LOWER(fsqrt)(e, x->ty, walk_value_emit(e, arg[0]));
 	case CC_BUILTIN_FAST_ROOT4:
