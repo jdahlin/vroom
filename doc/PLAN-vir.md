@@ -1374,6 +1374,34 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after rebasing onto 87f85d5b (2026-11-14).** The paired x86-64
+test used the same SQLite 3.50.4 amalgamation, flags and headers as below,
+with four executables, one warmup and seven alternating-order measurements
+per executable. Times are median perf task-clock on CPU 7 with one emitter
+thread. Both builds use the same compiler source within each row.
+
+| Revision | Clang-built CPU ms | Self-built CPU ms | Self / clang | Clang-built instructions | Self-built instructions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rebased computed goto | 154.19 | 244.19 | 1.58 | 1.478B | 3.123B |
+| Direct operand encoding, extension reuse and VIR atomics | 152.39 | 231.98 | 1.52 | 1.315B | 2.780B |
+
+The encoder now fills memory operands in place and sends LEA and extending
+moves directly to the shared numeric encoders. The self-built memory operand
+helper fell from 523 to 364 bytes. The direct emitter omits an immediately
+repeated extension of the same width and sign. Full-width 32/64-bit
+compare-exchange, fetch-add and exchange lower through VIR. This allows the
+preprocessor's skeleton builder to inline into pp_file_enter, which lowers
+with 134 spills. Both final executables emitted the same SQLite object
+(c4d3896fefc93dca709598910795c84ab65403ca45020b260292d57b777d3258),
+and the linked object ran a recursive SQL sum.
+
+In the final self-built cycle sample strcmp accounted for 4.1%, x64_emit
+3.3%, codegen_prepass_node_walk 2.5% and lex_tokenize_mode 2.2%.
+The prepass and walk_value_emit_inner both report an unsupported aggregate
+argument or result during VIR construction. The lexer still has 60 spills
+and occupies 27,945 bytes against clang's 10,925. The time ratios vary
+with shared-host load.
+
 **Computed goto (2026-11-14).** The x86-64 bootstrap lowers lex_tokenize_mode
 through VIR with 4,408 instructions, 908 blocks and 60 allocator spills.
 Computed goto sites merge their live values at a common indirect branch.

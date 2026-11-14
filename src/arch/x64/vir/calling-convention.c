@@ -34,6 +34,11 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 	if (i->op == VIR_OP_PARAM) {
 		int stack;
 		x->result = x64_vir_argument_register(f, f->signature, i->a, &stack, ms);
+	} else if (i->op == VIR_OP_ACAS) {
+		x->operand_count = 3;
+		x->operands[1] = RAX;
+		x->result = RAX;
+		x->clobbered[0] = 1u << RAX;
 	} else if (i->op == VIR_OP_STORE && f->insns[i->a].op == VIR_OP_SLOTADDR) {
 		/* The frame displacement is part of the store's addressing mode. */
 		x->operand_count = 2;

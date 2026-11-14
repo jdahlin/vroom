@@ -113,6 +113,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_dispatch.c', {'dense', 'byte_switch', 'signed_range', 'high', 'shigh', 'atom'}, {}),
         ('vir_x86_tls.c', {'tls_member', 'tls_update'}, {}),
         ('vir_x86_computed_goto.c', {'dispatch'}, {}),
+        ('vir_x86_cas.c', {'cas32', 'cas64', 'fetch_update'}, {}),
         ('vir_x86_calls.c', {'ints', 'floats', 'caller', 'indirect', 'variadic_caller'}, {}),
         ('vir_x86_vectors.c', {'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'compare', 'mul', 'cvt', 'cvt64', 'negate'},
          {'eq': 'cmpps', 'ne': 'cmpps', 'lt': 'cmpps', 'le': 'cmpps', 'gt': 'cmpps', 'ge': 'cmpps',

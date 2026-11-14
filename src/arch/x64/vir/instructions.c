@@ -450,6 +450,15 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		}
 		x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, (XMM0 + 14), X64_REGISTER_NONE); return;
 	}
+	case VIR_OP_AXADD: case VIR_OP_AXCHG:
+		x64_record_emit_three_registers(e, X64_OP_MOV, sz, L->general_temporary, c, X64_REGISTER_NONE);
+		x64_record_emit_three_registers(e, i->op == VIR_OP_AXADD ? X64_OP_XADD : X64_OP_XCHG,
+			sz, L->general_temporary, a, X64_REGISTER_NONE);
+		x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, L->general_temporary, X64_REGISTER_NONE);
+		return;
+	case VIR_OP_ACAS:
+		x64_record_emit_three_registers(e, X64_OP_CMPXCHG, sz, X64_REGISTER_NONE, a, x64_vir_register_number(p[2]));
+		return;
 	case VIR_OP_AFENCE: x64_record_emit(e,X64_OP_MFENCE); return;
 	case VIR_OP_ASTORE:
 		x64_record_emit_three_registers(e,X64_OP_MOV,sz=x64_vir_type_size(L->function->insns[i->b].type),L->general_temporary,c,X64_REGISTER_NONE);
