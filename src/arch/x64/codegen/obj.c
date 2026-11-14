@@ -15,7 +15,7 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 	case X64_OP_IMULI: case X64_OP_NEG: case X64_OP_NOT: case X64_OP_CMP: case X64_OP_CMPI:
 	case X64_OP_TEST: case X64_OP_CMOV: case X64_OP_SETCC: case X64_OP_JMP: case X64_OP_JCC:
 	case X64_OP_PUSH: case X64_OP_POP: case X64_OP_CQO:
-	case X64_OP_LEAL: case X64_OP_MFENCE: case X64_OP_UD2: case X64_OP_BSF: case X64_OP_BSR:
+	case X64_OP_LEAL: case X64_OP_MFENCE: case X64_OP_UD2: case X64_OP_BSF: case X64_OP_BSR: case X64_OP_POPCNT:
 	case X64_OP_MULW: case X64_OP_SMULW: case X64_OP_DIV: case X64_OP_IDIV: case X64_OP_EXT:
 	case X64_OP_FADD: case X64_OP_FSUB: case X64_OP_FMUL: case X64_OP_FDIV: case X64_OP_FXOR:
 		break;
@@ -186,6 +186,7 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 		case X64_OP_CQO: mn=sz==8?"cqto":"cltd";sz=0;count=0;break;
 		case X64_OP_MFENCE: case X64_OP_UD2: mn=i->opcode==X64_OP_MFENCE?"mfence":"ud2";sz=0;count=0;break;
 		case X64_OP_BSF: case X64_OP_BSR: mn=i->opcode==X64_OP_BSF?"bsf":"bsr";break;
+		case X64_OP_POPCNT: mn="popcnt";break;
 		case X64_OP_MULW: case X64_OP_SMULW: case X64_OP_DIV: case X64_OP_IDIV:
 			mn=i->opcode==X64_OP_MULW?"mul":i->opcode==X64_OP_SMULW?"imul":i->opcode==X64_OP_DIV?"div":"idiv";count=1;break;
 		case X64_OP_FADD: case X64_OP_FSUB: case X64_OP_FMUL: case X64_OP_FDIV: {

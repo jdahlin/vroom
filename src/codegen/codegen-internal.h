@@ -254,6 +254,10 @@ typedef struct codegen_unit {
 	/* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
 	bool vir_statistics;
 	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vir_built: built but not lowered (-fno-vir-lower) */
+	/* -fvir-stats: instructions spent per outcome (port/performance-counters.h): the build and
+	   the lowering of lowered functions, the build of those that failed in it, and the build
+	   plus lowering of those the lowering refused */
+	_Atomic uint64_t vir_cost_build_ok, vir_cost_lower_ok, vir_cost_build_failed, vir_cost_lower_failed;
 	virbuild_pass_switch vir_pass_switch;	/* -fvir-passes */
 	char *vir_function_list;		/* -fvir-functions: "\nNAME\nNAME\n", or NULL: every function */
 	struct {

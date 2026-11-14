@@ -74,8 +74,8 @@ VPRIV bool virbuild_arm_is_hoistable(virbuild_context *V, uint32_t a, uint32_t b
 		/* cheap and without effects: computed whichever way the branch went (at most 2) */
 		if ((op != VIR_OP_ADD && op != VIR_OP_SUB && op != VIR_OP_AND && op != VIR_OP_OR && op != VIR_OP_XOR && op != VIR_OP_SHL && op != VIR_OP_LSHR &&
 		     op != VIR_OP_ASHR && op != VIR_OP_EXT && op != VIR_OP_TRUNC && op != VIR_OP_I2P && op != VIR_OP_P2I && op != VIR_OP_PTRADD) ||
-		    V->insns[q].insn.a == cond || V->insns[q].insn.b == cond || ++*n > 2)
-			return false;
+		    virbuild_value_resolve(V, V->insns[q].insn.a) == cond || virbuild_value_resolve(V, V->insns[q].insn.b) == cond || ++*n > 2)
+			return false;	/* (resolved: virbuild_arm_values_reuse may have made an operand cond, and the hoist puts the arm before cond) */
 	}
 	return true;
 }

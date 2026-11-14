@@ -71,6 +71,7 @@ enum {
 	X64_OP_NAMED,	/* ref's name as a label here */
 	X64_OP_BSF, X64_OP_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X64_OP_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
+	X64_OP_POPCNT,	/* r0 = number of one bits of r1 (sz 4, 8; POPCNT) */
 	X64_OP_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
 	X64_OP_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
 	/* SSE (X64_OP_LD/X64_OP_ST/X64_OP_MOV take xmm registers too) */

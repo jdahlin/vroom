@@ -130,6 +130,11 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 		} else if (f->insns[i].op == VIR_OP_CALL && virbuild_call_returns_twice(e, &f->insns[f->insns[i].a])) {
 			*why = VIRBUILD_FAILURE(x64_returns_twice);
 			return false;
+		} else if (f->insns[i].op == VIR_OP_POPCNT &&
+			   !x86_feature_has(cc_x86_features_get(e->compile_context, sym), X86_FEATURE_POPCNT)) {
+			snprintf(V->failure_detail, sizeof V->failure_detail, "popcnt without POPCNT");
+			*why = VIRBUILD_FAILURE(x64_unsupported_instruction);
+			return false;
 		} else if (!x64_vir_value_is_supported(f, i)) {
 			snprintf(V->failure_detail, sizeof V->failure_detail, "%s.%s", vir_opcode_table[f->insns[i].op].name, vir_type_names[f->insns[i].type]);
 			*why = VIRBUILD_FAILURE(x64_unsupported_instruction);
