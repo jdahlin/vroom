@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 for name in required_more:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     wide = re.search(r'movups\s+[^\n]*\([^)]*\),', body)
-                    if bool(wide) != (vec != '0' and name in ('one_vector', 'with_tail')):
+                    if bool(wide) != (lvl == '-O3' and name in ('one_vector', 'with_tail')):
                         raise SystemExit(f'{name}: unexpected byte reduction load width')
             if filename == 'vir_slot_width.c':
                 for name in ('mix32', 'signed32', 'mix16', 'mix8'):
