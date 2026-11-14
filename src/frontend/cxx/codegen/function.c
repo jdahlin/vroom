@@ -259,6 +259,14 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			at.weak = f->fn_inline;
 			cc_attribute_apply_symbol(a, &a->syms[other], &at);
 			a->syms[other].flags |= AST_SYMBOL_FLAG_DEFINED;
+			a->syms[f->sym].flags &= ~AST_SYMBOL_FLAG_LINKONCE;	/* (the alias's target is emitted: the alias refers to it) */
+			{
+				attrs ut;
+
+				memset(&ut, 0, sizeof ut);
+				ut.used = 1;	/* (an internal one too) */
+				cc_attribute_apply_symbol(a, &a->syms[f->sym], &ut);
+			}
 			a->toplevel[a->ntoplevel++] = other;
 		}
 	}
@@ -272,6 +280,15 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		memset(&at, 0, sizeof at);
 		at.alias = a->attr[y->attrs].asmname;
 		cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
+		if (a->syms[f->sym].sc == AST_STORAGE_STATIC || (a->syms[f->sym].flags & AST_SYMBOL_FLAG_LINKONCE)) {
+			/* (an internal or linkonce target: emitted, the alias refers to it) */
+			attrs ut;
+
+			memset(&ut, 0, sizeof ut);
+			ut.used = 1;
+			a->syms[f->sym].flags &= ~AST_SYMBOL_FLAG_LINKONCE;
+			cc_attribute_apply_symbol(a, &a->syms[f->sym], &ut);
+		}
 		a->syms[f->sym1].flags |= AST_SYMBOL_FLAG_DEFINED;
 		a->toplevel[a->ntoplevel++] = f->sym1;
 	}

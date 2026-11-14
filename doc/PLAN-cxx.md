@@ -2120,3 +2120,14 @@ TU räknat, 257 förut), ingen länkning misslyckas (1 förut).
 - Ett sammansatt krav `{ E } -> C` ger C `decltype((E))` även för ett xvalue (T&& från ett anrop:
   `ranges::iter_move`), som `decltype` själv redan gjorde.
 Kvar: `std::stringstream` och `std::ifstream` i samma TU.
+
+## Status 124 (2026-11-14)
+`std::stringstream` och `std::ifstream` kör med vcc:s objekt ensamt.
+- En extern template-instans med virtuella baser och två baser med vtabeller (`basic_iostream`:
+  `istream`, `ostream`) har bibliotekets vtabellgrupp; anrop av basernas virtuella funktioner går genom
+  deras delobjekts vptr:er, så klassen kan användas (förut "vt_bad").
+- Efter sammanslagningen med main: ett alias (D1 -> D2) vars mål är internt eller linkonce: målet emitteras
+  (används), annars ett alias till en aldrig emitterad symbol (`unit-allocator`, en typ i en anonym
+  namnrymd).
+cxx-strict: alla 70 TU:er kompileras (en föll efter sammanslagningen), 3 passerar, 308 funktioner saknas
+(summerat per TU); vcc 30,6 s summerat per TU (43,2 s förut).

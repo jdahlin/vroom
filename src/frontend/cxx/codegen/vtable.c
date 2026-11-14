@@ -140,8 +140,10 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
 	if (!cls || cls->kind != CXX_SCOPE_CLASS || !cls->owner || cls->owner->ty == CXX_TY_UNKNOWN || cls->dependent)
 		return false;
 	cxx_vtable_init(c, cls);
-	if (cls->vt_bad || !cls->nvfuncs)
-		return false;
+	if ((cls->vt_bad && !(cls->is_extern_inst && cxx_gen_class_has_vbases(c, cls))) || !cls->nvfuncs)
+		return false;	/* (vt_bad: secondary vtables with thunks, not built here; an extern template's instance with
+				   virtual bases has the library's vtable group, and calls of its bases' virtual functions go
+				   through their subobjects' own vptrs) */
 	if (cxx_class_vbases(c, cls->owner->ty, NULL, NULL, 0) && !cls->is_extern_inst)
 		return false;	/* (vbase offsets, construction vtables and a VTT: not built here; an extern template's
 				   instance has the library's) */

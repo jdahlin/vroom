@@ -199,7 +199,7 @@ VPRIV bool cxx_gen_class_ok2(cxx *c, ast_qualified_type t, bool objects)
 	cxx_scope *cls;
 	bool pod, empty;
 
-#define CK(x, why) do { if (x) return false; } while (0)
+#define CK(x, why) do { if (x) return false; } while (0)	/* (why: what VCC_CXX_GEN would say) */
 	CK(t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT && AST_TYPE_KIND(a, t) != AST_TYPE_UNION), "kind");
 	CK(!cxx_class_layout_info(c, t, &pod, &empty), "layout");
 	CK(!(a->tags[AST_TYPE(a, t)->aux].flags & AST_RECORD_FLAG_COMPLETE), "incomplete");
