@@ -1507,6 +1507,7 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			return;
 		{
 			qty l = c->etype;
+			bool ll = c->elval;
 			uint32_t k;
 			int op = cxx_operator_at(c, &k);
 			uint32_t opid = cxx_operator_id_at(c, k);
@@ -1519,12 +1520,10 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			cxx_binary_expression_parse(c, p + 1);
 			rk = c->econst, rv = c->evalue;
 			qty rt = c->etype;
-			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1)) {
-				qty r = c->etype;
-
-				if (!cxx_operator_call_type(c, opid, r, (qty[]){ l }, 1) || c->etype == CXX_TY_UNKNOWN)
-					cxx_binary_type(c, op, l, r);
-			}
+			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
+			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1))
+				cxx_binary_type(c, op, l, rt);
+			c->op_lv_set = 0;
 			/* constants: both operands, or the left alone when it decides && and || */
 			if (lk && rk) {
 				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&

@@ -313,6 +313,7 @@ typedef struct cxx {
 	qty constructing;		/* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
 	uint8_t no_literal, rank_no_literal;	/* the next call's arguments are types, not expressions (a trait's): an integer is no null pointer constant; while ranking */
 	uint32_t einvalid_at;		/* where einvalid was last set (VCC_CXX_SIG) */
+	uint8_t op_lv_set, op_lv[4];	/* the next operator call's operands: lvalues or not (the object first) */
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */

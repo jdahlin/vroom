@@ -403,7 +403,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		if (args[i] != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, args[i]))
 			*verdict |= 2;
 	if (trace) {
-		fprintf(stderr, "call %.*s/%u tentative=%d unevaluated=%d args:", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs,
+		fprintf(stderr, "call %.*s/%u implicit=%d constructing=%d tentative=%d unevaluated=%d args:", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs, skip_explicit, c->constructing != 0,
 			c->tentative, c->unevaluated);
 		for (uint32_t i = 0; i < nargs && i < 16; i++) {
 			char buf[160];
@@ -576,7 +576,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	if (result == CXX_TY_UNKNOWN && !c->template_depth && !(c->none_viable && operator_call) && getenv("VCC_CXX_WHY"))
 		fprintf(stderr, "why@%u %s %.*s/%u\n", c->tok[c->pos ? c->pos - 1 : 0].loc, best >= 0 || (viable && same && !unknown) ? "return" :
 			unknown ? "unknown" : !viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
-	if (result == CXX_TY_UNKNOWN && !c->template_depth && !c->instantiating && !c->unevaluated && getenv("VCC_CXX_WHY_TOP")) {
+	if (result == CXX_TY_UNKNOWN && !c->template_depth && !c->instantiating && !c->unevaluated && !(c->none_viable && operator_call) &&
+	    getenv("VCC_CXX_WHY_TOP")) {
 		fprintf(stderr, "top %s %.*s/%u:", best >= 0 || (viable && same && !unknown) ? "return" : unknown ? "unknown" : !viable ? "none" : "ambiguous",
 			(int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
 		for (uint32_t i = c->pos > 10 ? c->pos - 10 : 0; i < c->pos && i < c->ntok; i++)
@@ -651,19 +652,28 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cxx_scope *cls;
 	cxx_entity *set;
 	qty all[4], acopy[16];
+	bool have_lv = c->op_lv_set && nargs <= 2;
+	uint8_t lv[4];
+	bool any_class = false;
 
+	memcpy(lv, c->op_lv, sizeof lv);
+	c->op_lv_set = 0;
 	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
 		return false;
 	memcpy(acopy, args, nargs * sizeof *args);	/* (often &c->etype, which the first lookup's call resets) */
 	args = acopy;
-	cls = cxx_type_class_scope(c, QUNQ(obj));
-	if (!cls)
+	cls = cc_type_is_record(c->ast, obj) && AST_TYPE_KIND(c->ast, obj) != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(obj)) : NULL;
+	/* (1 + x, "a" + s: the left operand is no class; the operator functions of the right one's) */
+	for (uint32_t i = 0; i < nargs && nargs <= 2; i++)
+		any_class |= args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]) && AST_TYPE_KIND(c->ast, args[i]) != TY_ARRAY &&
+			     cxx_type_class_scope(c, QUNQ(args[i]));
+	if (!cls && !any_class)
 		return false;
 	/* (no candidate fits: the next place, in the end the built-in operator: &x, a = b, a, b) */
-	set = cxx_lookup_in(c, cls, id, 0);
+	set = cls ? cxx_lookup_in(c, cls, id, 0) : NULL;
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
-		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, NULL, nargs, true);
+		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
 		if (!c->none_viable)
 			return true;
 		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
@@ -682,7 +692,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
-		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 		if (!c->none_viable)
 			return true;
 	}
@@ -717,7 +727,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 			set = cxx_lookup_in(c, ns, id, 0);
 			if (!set || set->kind == CXX_ENTITY_DEPENDENT)
 				continue;
-			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 			if (!c->none_viable)
 				return true;
 		}
@@ -726,7 +736,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 			set = cxx_friend_lookup(c, all[i], id, 0);
 			if (!set)
 				continue;
-			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 			if (!c->none_viable)
 				return true;
 		}
@@ -735,6 +745,34 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	   a conversion to a built-in type) */
 	if (vintern_ents[id].len == 9 && !memcmp(vintern_ents[id].s, "operator&", 9) && nargs == 0)
 		return false;
+	/* No operator function takes the operands.  The built-in operator is left, for operands their classes
+	   convert to something it takes: with no conversion function in them the expression is ill-formed
+	   (os << x for a class with no operator<<).  Assignment and the comma have implicit meanings. */
+	{
+		const vident *v = &vintern_ents[id];
+		bool implicit = (v->len == 9 && (v->s[8] == '=' || v->s[8] == ',')) || (v->len == 10 && !memcmp(v->s + 8, "->", 2));
+		bool known = !implicit && !c->tentative && nargs <= 2, stuck = false;
+
+		all[0] = obj;
+		for (uint32_t i = 0; i < nargs && nargs <= 2; i++)
+			all[i + 1] = args[i];
+		/* (one class operand that converts to nothing is enough: the built-in operator takes no class) */
+		for (uint32_t i = 0; known && i <= nargs; i++) {
+			qty t = all[i];
+			cxx_scope *os;
+
+			if (t == CXX_TY_UNKNOWN || cxx_type_has_placeholder(c, t)) {
+				known = false;
+				break;
+			}
+			if (!cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+				continue;
+			os = cxx_type_class_scope(c, QUNQ(t));
+			stuck |= os && !cxx_class_converts(c, os, 0);
+		}
+		if (known && stuck)
+			CXX_INVALID(c);
+	}
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	return true;
 }
@@ -799,6 +837,7 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 		}
 	}
 	/* (from an object of the same class with no constructor that fits: the implicit copy or move) */
+	c->call_obj = 0;	/* (a constructor has no object: what a member access in the arguments left) */
 	if (set)
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, nargs,
 				   nargs == 1 && args[0] != CXX_TY_UNKNOWN && QUNQ(args[0]) == QUNQ(t));
@@ -1330,6 +1369,7 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 		uint8_t nl = c->no_literal;
 
 		c->skip_explicit = implicit;
+		c->call_obj = 0;
 		c->no_literal = nl;
 		c->constructing = n == 1 && !same && !derived ? QUNQ(to) : 0;
 		cxx_call_type_impl(c, own, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, n, true);
