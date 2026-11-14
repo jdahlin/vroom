@@ -520,3 +520,15 @@ Parameters and expressions carry types (`typing.c`); unit-32bit types 319 of
 unit-32bit vcc 0.12 s vs clang 0.80 s (6.6x), unit-allocator 0.12 s vs 0.99 s
 (7.9x).  vcc does not yet instantiate function bodies or resolve overloads
 fully, so the ratio will fall; the 4.5x threshold still has headroom.
+
+### Status 2026-11-14 (2): deduction
+Function templates keep their declaration; the first call parses the
+signature with placeholder parameters, each call deduces from the argument
+types (by value: decay and top-level cv; T&& with an lvalue: T = A&) and gets
+the return type by re-parsing the signature with the arguments bound.  Fixed
+on the way: `typename X::y` was always dependent, so instances lost such
+member types; `f(x);` with f a function template parsed as a declaration.
+unit-32bit: 337/378 expression statements typed, 539 classes laid out (was
+501), 228 instances (was 119); json: 34,617 layouts clang agrees with (was
+32,028), 71/71 parse.  Not yet: packs, explicit template arguments, default
+template arguments, deduction against base classes.

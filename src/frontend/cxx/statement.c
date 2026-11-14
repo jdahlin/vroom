@@ -56,8 +56,14 @@ static bool cxx_declaration_statement_try(cxx *c)
 		if (n == LEX_TOKEN_PERIOD || n == LEX_TOKEN_ARROW || n == LEX_TOKEN_EQUAL || n == LEX_TOKEN_PLUS_PLUS ||
 		    n == LEX_TOKEN_MINUS_MINUS || n == LEX_TOKEN_LEFT_SQUARE || n == LEX_TOKEN_PLUS_EQUAL || n == LEX_TOKEN_SEMICOLON)
 			return false;
-		if (e && e->kind == CXX_ENTITY_VALUE && !e->next)
-			return false;
+		if (e) {	/* functions, variables, function templates: an expression */
+			bool values = true;
+
+			for (cxx_entity *x = e; x && values; x = x->next)
+				values = x->kind == CXX_ENTITY_VALUE || x->kind == CXX_ENTITY_FUNCTION_TEMPLATE;
+			if (values)
+				return false;
+		}
 		if (!e && n != LEX_TOKEN_COLON_COLON && n != LEX_TOKEN_LESS)
 			return false;
 	}

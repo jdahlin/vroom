@@ -1061,3 +1061,168 @@ VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x)
 	}
 	c->tag_instance[tag] = x;
 }
+
+/* ---- function templates: deduction from a call's argument types -------------------------- */
+
+typedef struct cxx_ftemplate {
+	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
+	uint32_t pos;		/* its decl-specifiers */
+	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
+	uint8_t evaluated, packs;
+} cxx_ftemplate;
+
+VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos)
+{
+	cxx_ftemplate *f = calloc(1, sizeof *f);
+
+	(void)c;
+	f->p.params = params, f->p.home = home, f->pos = pos, f->sig = CXX_TY_UNKNOWN;
+	return f;
+}
+
+/* parse the signature once, the parameters bound to placeholders */
+static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
+{
+	cxx_partial *p = &f->p;
+	cxx_saved s;
+	jmp_buf jb;
+	cxx_scope *binding;
+
+	if (f->evaluated)
+		return;
+	f->evaluated = 1;
+	if (p->params->ntparams > 64)
+		return;
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	p->ph = calloc(p->params->ntparams + 1, sizeof *p->ph);
+	for (uint32_t i = 0; i < p->params->ntparams; i++) {
+		const cxx_tparam *tp = &p->params->tparams[i];
+		cxx_entity *e;
+
+		if (tp->kind == 3 || !tp->name || tp->pack) {
+			f->packs = 1;	/* (packs and template template parameters: not deduced yet) */
+			return;
+		}
+		e = cxx_declare(c, binding, tp->name, tp->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
+		if (!e)
+			return;
+		e->dependent = 0;
+		if (tp->kind == 1) {
+			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
+
+			if (tag >= c->ntag_placeholder) {
+				uint32_t nn = tag + 1024;
+
+				c->tag_placeholder = realloc(c->tag_placeholder, nn * sizeof *c->tag_placeholder);
+				memset(c->tag_placeholder + c->ntag_placeholder, 0, (nn - c->ntag_placeholder) * sizeof *c->tag_placeholder);
+				c->ntag_placeholder = nn;
+			}
+			c->tag_placeholder[tag].owner = p, c->tag_placeholder[tag].index = i + 1;
+			p->ph[i] = e->ty = QT(c->ast->tags[tag].ty, 0);
+		} else
+			e->placeholder = (uint16_t)(i + 1);
+	}
+	cxx_state_save(c, &s);
+	c->instantiating++;
+	c->fail = &jb;
+	c->pos = f->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb))
+		f->sig = cxx_function_signature_parse(c, true);
+	c->instantiating--;
+	cxx_state_restore(c, &s);
+	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
+		f->sig = CXX_TY_UNKNOWN;
+}
+
+/* the return type with the deduced arguments: the signature re-parsed with them bound (member typedefs,
+   partial specializations: as for a real instance) */
+static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
+{
+	cxx_partial *p = &f->p;
+	cxx_saved s;
+	jmp_buf jb;
+	cxx_scope *binding;
+	volatile qty r = CXX_TY_UNKNOWN;
+
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	for (uint32_t i = 0; i < p->params->ntparams; i++)
+		cxx_bind(c, binding, &p->params->tparams[i], &bind[i]);
+	cxx_state_save(c, &s);
+	c->instantiating++;
+	c->fail = &jb;
+	c->pos = f->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		qty t = cxx_function_signature_parse(c, false);
+
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
+			r = AST_TYPE(c->ast, t)->base;
+	}
+	c->instantiating--;
+	cxx_state_restore(c, &s);
+	return r;
+}
+
+/*
+ * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
+ * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
+ */
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uint8_t *lval, uint32_t nargs, qty *ret)
+{
+	cxx_ftemplate *f = e->ftmpl;
+	cxx_partial *p;
+	const ctype *ft;
+	cxx_targ bind[64];
+
+	*ret = CXX_TY_UNKNOWN;
+	if (!f)
+		return -1;
+	cxx_ftemplate_evaluate(c, f);
+	if (f->sig == CXX_TY_UNKNOWN || f->packs)
+		return -1;
+	p = &f->p;
+	ft = AST_TYPE(c->ast, f->sig);
+	if (nargs > ft->n && !(ft->flags & TF_VARIADIC))
+		return 0;
+	if (nargs + e->ndefaults < ft->n)
+		return 0;
+	memset(bind, 0, p->params->ntparams * sizeof *bind);
+	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
+		qty P = c->ast->params[ft->aux + i], A = args[i];
+
+		if (!cxx_mentions_placeholder(c, P, 0))
+			continue;	/* (non-deduced: its conversion is not checked here) */
+		if (A == CXX_TY_UNKNOWN)
+			return -1;
+		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
+			int ext = AST_TYPE(c->ast, P)->ext;
+			void *owner;
+
+			P = AST_TYPE(c->ast, P)->base;
+			/* T&& with an lvalue: a forwarding reference deduces T as A& */
+			if (ext == 2 && !QQ(P) && lval[i] && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
+				A = cxx_type_reference(c, A, false);
+		} else {
+			/* by value: arrays and functions decay, top-level cv goes */
+			const ctype *at = AST_TYPE(c->ast, A);
+
+			if (at->kind == TY_ARRAY)
+				A = cc_type_pointer(c->ast, at->base);
+			else if (at->kind == TY_FUNC)
+				A = cc_type_pointer(c->ast, A);
+			A = QUNQ(A);
+		}
+		if (!cxx_match_type(c, p, P, A, bind, 0)) {
+			/* (deduction against a base class, or a conversion: not tried; a failure here may be wrong) */
+			return AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT ? -1 : 0;
+		}
+	}
+	for (uint32_t i = 0; i < p->params->ntparams; i++)
+		if (!bind[i].kind)
+			return -1;	/* (default template arguments, explicit ones: not yet) */
+	*ret = cxx_ftemplate_return(c, f, bind);
+	return 1;
+}

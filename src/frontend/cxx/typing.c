@@ -138,11 +138,33 @@ VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
  * A call of the function set `set` (an entity chain: the functions among its entries) with the
  * argument types args: the return type of the one function it selects, else unknown.
  */
-VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, uint32_t nargs)
+/* does a non-template's parameter list take exactly these argument types (references seen through)? */
+static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
 {
-	cxx_entity *pick = NULL;
-	uint32_t viable = 0;
-	bool templates = false, same_result = true;
+	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
+		qty p = c->ast->params[ft->aux + i];
+
+		if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext)
+			p = AST_TYPE(c->ast, p)->base;
+		if (args[i] == CXX_TY_UNKNOWN || QUNQ(p) != QUNQ(args[i]))
+			return false;
+	}
+	return true;
+}
+
+/*
+ * A call's type.  set: the functions the callee names (NULL: callee_type, a function or a pointer
+ * to one).  The candidates are the non-templates whose arity fits and the templates whose
+ * arguments deduce; the call's type is known when one exact non-template matches, or when every
+ * viable candidate returns the same type (a simplification of overload resolution).
+ */
+VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs)
+{
+	static const uint8_t none[16];
+	cxx_entity *exact = NULL;
+	uint32_t viable = 0, nexact = 0;
+	qty result = CXX_TY_UNKNOWN;
+	bool same = true, unknown = false;
 
 	if (!set) {
 		/* a pointer to a function, a function's type */
@@ -153,75 +175,44 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 		cxx_et(c, f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_FUNC ? AST_TYPE(c->ast, f)->base : CXX_TY_UNKNOWN, false);
 		return;
 	}
-	/* by the number of parameters (no defaults known yet: exact count, or variadic) */
+	if (!lval)
+		lval = none;
 	for (cxx_entity *e = set; e; e = e->next) {
-		const ctype *ft;
+		qty r;
 
 		if (e->kind == CXX_ENTITY_DEPENDENT) {
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			return;
 		}
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
-			templates = true;	/* (deduction: not yet; an exact non-template still wins) */
-			continue;
-		}
-		if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
-			continue;
-		ft = AST_TYPE(c->ast, e->ty);
-		if ((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & TF_VARIADIC) && nargs >= ft->n)) {
-			viable++;
-			if (!pick)
-				pick = e;
-			else if (AST_TYPE(c->ast, pick->ty)->base != ft->base)
-				same_result = false;
-		}
-	}
-	if (viable > 1) {
-		/* then by exact argument types (unqualified, references seen through) */
-		cxx_entity *exact = NULL;
-		uint32_t nexact = 0;
+			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, args, lval, nargs, &r) : -1;
 
-		for (cxx_entity *e = set; e; e = e->next) {
+			if (d < 0)
+				unknown = true;	/* (a template vcc cannot deduce might be the best) */
+			if (d <= 0)
+				continue;
+		} else {
 			const ctype *ft;
-			bool ok = true;
 
 			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
-			if (nargs > ft->n || nargs + e->ndefaults < ft->n)
+			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & TF_VARIADIC) && nargs >= ft->n)))
 				continue;
-			for (uint32_t i = 0; i < nargs && ok; i++) {
-				qty p = c->ast->params[ft->aux + i];
-
-				if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext)
-					p = AST_TYPE(c->ast, p)->base;
-				ok = args[i] != CXX_TY_UNKNOWN && QUNQ(p) == QUNQ(args[i]);
-			}
-			if (ok) {
-				nexact++;
-				exact = e;
-			}
+			r = ft->base;
+			if (cxx_exact(c, ft, args, nargs))
+				nexact++, exact = e;
 		}
-		/* one exact match; else, without templates, overloads that all return the same type */
-		pick = nexact == 1 ? exact : same_result && !templates ? pick : NULL;
-	} else if (viable == 1 && templates) {
-		/* one non-template and some templates: the template may be better, unless the non-template is exact */
-		const ctype *ft = AST_TYPE(c->ast, pick->ty);
-
-		for (uint32_t i = 0; i < nargs && pick; i++) {
-			qty p = c->ast->params[ft->aux + i];
-
-			if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext)
-				p = AST_TYPE(c->ast, p)->base;
-			if (args[i] == CXX_TY_UNKNOWN || QUNQ(p) != QUNQ(args[i]))
-				pick = NULL;
-		}
+		if (!viable++)
+			result = r;
+		else if (r != result)
+			same = false;
 	}
-	if (!pick || viable == 0) {
-		cxx_et(c, CXX_TY_UNKNOWN, false);
-		return;
-	}
-	cxx_et(c, AST_TYPE(c->ast, pick->ty)->base, false);
+	if (nexact == 1)
+		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
+	else if (!viable || !same || unknown)
+		result = CXX_TY_UNKNOWN;
+	cxx_et(c, result, false);
 }
 
 /*
@@ -242,7 +233,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		return false;
 	set = cxx_lookup_in(c, cls, id, 0);
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, args, nargs);
+		cxx_call_type(c, set, CXX_TY_UNKNOWN, args, NULL, nargs);
 		return true;
 	}
 	set = cxx_lookup(c, id);
@@ -250,7 +241,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, all, nargs + 1);
+		cxx_call_type(c, set, CXX_TY_UNKNOWN, all, NULL, nargs + 1);
 		return true;
 	}
 	cxx_et(c, CXX_TY_UNKNOWN, false);

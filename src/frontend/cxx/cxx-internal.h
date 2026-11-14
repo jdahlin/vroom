@@ -120,6 +120,7 @@ typedef struct cxx_entity {
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
+	struct cxx_ftemplate *ftmpl;	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
@@ -241,7 +242,10 @@ typedef struct cxx {
 	uint8_t elval;			/* ... an lvalue */
 	cxx_entity *ecallee;		/* a name that is a set of functions: for the call that follows */
 	qty *cargs;			/* the last call's argument types */
+	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint32_t ftmpl_begin;		/* a template declaration: where the declaration after its parameters starts */
+	cxx_scope *ftmpl_scope;		/* ... and its template scope */
 	qty this_type;			/* in a member function's body: the class (this is a pointer to it) */
 	uint8_t in_template_argument;	/* parsing a template argument's type-id: a trailing ... is an expansion */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
 } cxx;
@@ -322,6 +326,9 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
 VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
+VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos);
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uint8_t *lval, uint32_t nargs, qty *ret);
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
@@ -341,7 +348,7 @@ VPRIV void cxx_et(cxx *c, qty t, bool lvalue);
 VPRIV qty cxx_number_type(cxx *c, const cxx_token *t);
 VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r);
 VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue);
-VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, uint32_t nargs);
+VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs);
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);

@@ -541,7 +541,9 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 	e = cxx_name_lookup(c, q, dep, t->id);
 	if (c->implicit_typename && dep && e && e->kind == CXX_ENTITY_DEPENDENT && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_PAREN)
 		typename_kw = true;	/* C++20: typename is implied here */
-	if (typename_kw || (e && e->kind == CXX_ENTITY_DEPENDENT && typename_kw)) {
+	/* typename names a dependent type; a name that lookup resolves (an instance's) is that type */
+	if (typename_kw && (dep || !e || e->kind == CXX_ENTITY_DEPENDENT || (!cxx_entity_is_type(cxx_entity_prefer(e, CXX_ENTITY_TYPE)) &&
+				 cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE)->kind != CXX_ENTITY_TEMPLATE))) {
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LESS))
 			cxx_template_arguments_parse(c);
@@ -1977,6 +1979,10 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 	}
 	c->implicit_typename = implicit;
 	cxx_requires_clause_parse(c);
+	uint32_t fbegin = c->ftmpl_begin;
+	cxx_scope *fscope = c->ftmpl_scope;
+
+	c->ftmpl_begin = c->pos, c->ftmpl_scope = ts;	/* (a function template: its signature is re-parsed to deduce) */
 	if (cxx_is_kw(c, CXX_KW_concept)) {
 		uint32_t name;
 
@@ -1990,8 +1996,24 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 	} else
 		cxx_declaration_parse(c, context);
+	c->ftmpl_begin = fbegin, c->ftmpl_scope = fscope;
 	c->template_depth--;
 	cxx_scope_pop(c);
+}
+
+/* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return)
+{
+	bool q, f;
+
+	cxx_attributes_skip(c);
+	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+		return CXX_TY_UNKNOWN;
+	c->type_in = c->ds_type;
+	if (any_return && c->type_in == CXX_TY_UNKNOWN)
+		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
+	cxx_declarator_parse(c, false, &q, &f, NULL);
+	return f ? c->type_out : CXX_TY_UNKNOWN;
 }
 
 /* ---- classes and enums ------------------------------------------------------------------- */
@@ -2461,6 +2483,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 
 			if ((flags & DS_FRIEND) && f && kind == CXX_ENTITY_FUNCTION_TEMPLATE)
 				e = NULL;	/* (a friend template: found by ADL only) */
+			/* a function template (one level of parameters): its signature, for deduction at calls */
+			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
+			    !c->tentative && !c->instantiating)
+				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin);
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
 				e->ty = t;

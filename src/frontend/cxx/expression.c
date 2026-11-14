@@ -236,6 +236,7 @@ static void cxx_type_then_init(cxx *c)
 static void cxx_call_arguments_parse(cxx *c)
 {
 	qty args[16];
+	uint8_t lval[16];
 	uint32_t n = 0;
 	bool unknown = false;
 
@@ -243,7 +244,7 @@ static void cxx_call_arguments_parse(cxx *c)
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		cxx_initializer_parse(c);
 		if (n < 16)
-			args[n] = c->etype == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN : c->etype;
+			args[n] = c->etype, lval[n] = c->elval;
 		n++;
 		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
 			unknown = true;
@@ -254,8 +255,11 @@ static void cxx_call_arguments_parse(cxx *c)
 	if (n > 16)
 		unknown = true;
 	if (n > c->ccargs)
-		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs);
+		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
+		c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
 	memcpy(c->cargs, args, (n < 16 ? n : 16) * sizeof *args);
+	if (n)
+		memcpy(c->cargs_lval, lval, n < 16 ? n : 16);
 	c->ncargs = unknown ? UINT32_MAX : n;
 }
 
@@ -745,7 +749,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 				else if (!set && c->ncargs <= 2 && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
 				else
-					cxx_call_type(c, set, callee, c->cargs, c->ncargs);
+					cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 			}
 			continue;
 		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {
