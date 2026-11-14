@@ -377,7 +377,7 @@ static void cxx_lambda_parse(cxx *c)
 					cxx_entity *e = cxx_declare(c, ls, c->fn_pnames[i], CXX_ENTITY_VALUE);
 
 					if (e)
-						e->ty = c->fn_params[i];
+						e->ty = c->fn_pdecl[i];
 				}
 			}
 		} else

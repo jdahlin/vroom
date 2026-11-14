@@ -1234,7 +1234,7 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 				x->nnamed = c->fn_nparams, x->ndefaults = c->fn_ndefaults;
 				x->named = c->fn_nparams ? malloc(c->fn_nparams * sizeof *x->named) : NULL;
 				for (uint32_t k = 0; k < c->fn_nparams; k++)
-					x->named[k].name = c->fn_pnames[k], x->named[k].ty = c->fn_params[k];
+					x->named[k].name = c->fn_pnames[k], x->named[k].ty = c->fn_pdecl[k];
 				nsfx++;
 			} else
 				too_many = true;
@@ -1314,7 +1314,7 @@ static void cxx_parameter_clause_parse(cxx *c)
 
 static void cxx_parameter_clause_body_parse(cxx *c)
 {
-	qty *types = NULL;
+	qty *types = NULL, *decls = NULL;
 	uint32_t *names = NULL;
 	uint32_t n = 0, cap = 0, ndefaults = 0;
 	uint8_t variadic = 0, unknown = 0;
@@ -1337,6 +1337,10 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 			c->type_in = c->ds_type;
 			pname = cxx_declarator_parse(c, true, &q, &f, NULL);
 			t = cxx_type_parameter_adjust(c, c->type_out);
+			/* in the body: the adjusted type with the declaration's own const (not part of the function's type) */
+			qty dt = t == CXX_TY_UNKNOWN || c->type_out == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, c->type_out) == TY_ARRAY ||
+				 AST_TYPE_KIND(c->ast, c->type_out) == TY_FUNC ? t : QT(QI(t), QQ(t) | (QQ(c->type_out) & (Q_CONST | Q_VOLATILE)));
+
 			if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
 				uint32_t inner = ndefaults;
 
@@ -1355,8 +1359,10 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 					cap = cap ? cap * 2 : 8;
 					types = realloc(types, cap * sizeof *types);
 					names = realloc(names, cap * sizeof *names);
+					decls = realloc(decls, cap * sizeof *decls);
 				}
 				names[n] = pname;
+				decls[n] = dt;
 				types[n++] = t;
 			}
 			if (variadic || !cxx_accept(c, LEX_TOKEN_COMMA))
@@ -1368,14 +1374,17 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 		c->fn_cparams = n;
 		c->fn_params = realloc(c->fn_params, n * sizeof(qty));
 		c->fn_pnames = realloc(c->fn_pnames, n * sizeof(uint32_t));
+		c->fn_pdecl = realloc(c->fn_pdecl, n * sizeof(qty));
 	}
 	if (n) {
 		memcpy(c->fn_params, types, n * sizeof(qty));
 		memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
+		memcpy(c->fn_pdecl, decls, n * sizeof(qty));
 	}
 	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown, c->fn_ndefaults = ndefaults;
 	free(types);
 	free(names);
+	free(decls);
 }
 
 static void cxx_noexcept_parse(cxx *c)
@@ -1426,7 +1435,7 @@ static void cxx_function_tail_parse(cxx *c)
 			cxx_param *save = malloc(n * sizeof *save);
 
 			for (uint32_t i = 0; i < n; i++)
-				save[i].name = c->fn_pnames[i], save[i].ty = c->fn_params[i];
+				save[i].name = c->fn_pnames[i], save[i].ty = c->fn_pdecl[i];
 			cxx_scope_push(c, ps);
 			cxx_params_declare(c, ps, save, n);
 			free(save);
@@ -1904,12 +1913,26 @@ static void cxx_using_parse(cxx *c)
 
 static void cxx_static_assert_parse(cxx *c)
 {
+	static int check = -1;
+	bool known, value;
+
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	cxx_assignment_expression_parse(c);
+	known = c->econst && !c->tentative && !c->template_depth, value = c->evalue != 0;
 	if (cxx_accept(c, LEX_TOKEN_COMMA))
 		cxx_assignment_expression_parse(c);	/* a string literal (or, in C++26, an expression) */
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	/* evaluated; a false one is an error only on request for now (VCC_CXX_STATIC_ASSERT=1, the tests): a
+	   type or constant vcc gets wrong must not reject valid code while its semantics are incomplete */
+	if (check < 0)
+		check = getenv("VCC_CXX_STATIC_ASSERT") != NULL;
+	if (check && !c->tentative && !c->template_depth && !c->instantiating) {
+		if (!known)
+			cxx_fail(c, "static assertion not evaluated");
+		if (!value)
+			cxx_fail(c, "static assertion failed");
+	}
 	cxx_expect(c, LEX_TOKEN_SEMICOLON);
 }
 

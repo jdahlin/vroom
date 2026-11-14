@@ -200,6 +200,7 @@ typedef struct cxx {
 	qty ds_type, type_in, type_out;
 	qty *fn_params;			/* the last parameter clause's types (types.c) */
 	uint32_t *fn_pnames;		/* ... and names */
+	qty *fn_pdecl;			/* ... and the parameters' own types in the body (a by-value const stays const) */
 	cxx_param *decl_params;		/* the last declarator's function parameters (its body's names) */
 	uint32_t ndecl_params, cdecl_params;
 	uint32_t decl_ndefaults;	/* ... and how many of them have default arguments */
