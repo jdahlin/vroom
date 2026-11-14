@@ -1366,6 +1366,21 @@ VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst)
 
 	if (!inst || !inst->instance || inst->instance->state)
 		return;
+	if (getenv("VCC_CXX_TRACE_COMPLETE")) {
+		/* where an instance whose spelling contains the given text is completed, and the instantiations it is in */
+		char sp[512];
+		size_t sl;
+		cxx_instance *x = inst->instance;
+
+		if (cxx_instance_spell(c, x->t, x->args, x->nargs, sp, sizeof sp, &sl) && strstr(sp, getenv("VCC_CXX_TRACE_COMPLETE"))) {
+			fprintf(stderr, "instance %s completed (instantiating %u, unevaluated %u) at:", sp, c->instantiating, c->unevaluated);
+			for (uint32_t i = c->pos > 30 ? c->pos - 30 : 0; i < c->pos + 6 && i < c->ntok; i++)
+				fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+			fputc('\n', stderr);
+			if (getenv("VCC_CXX_TRACE_ABORT") && !strncmp(sp, getenv("VCC_CXX_TRACE_COMPLETE"), strlen(getenv("VCC_CXX_TRACE_COMPLETE"))))
+				abort();	/* (a debugger shows who asked) */
+		}
+	}
 	cxx_instance_complete_body(c, inst);
 	c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
 }
@@ -2095,8 +2110,23 @@ static qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int dep
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
  */
+static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+				 uint32_t nargs, qty *ret, bool body);
+
+/* (a candidate that does not deduce, or whose default arguments or constraints fail, is not an error
+   in the expression that calls: what its evaluation left in the validity flags goes with it) */
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
 			      uint32_t nargs, qty *ret, bool body)
+{
+	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
+	int r = cxx_ftemplate_deduce1(c, e, xargs, nxargs, args, lval, nargs, ret, body);
+
+	c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
+	return r;
+}
+
+static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+				 uint32_t nargs, qty *ret, bool body)
 {
 	cxx_ftemplate *f = e->ftmpl;
 	cxx_partial *p;
@@ -2234,20 +2264,29 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
 		int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
 
+		if (r <= 0 && getenv("VCC_CXX_SIG"))
+			fprintf(stderr, "deduce: argument %u: %d\n", i, r);
 		if (r <= 0)
 			return r;
 	}
 	{
 		int k = cxx_ftemplate_complete(c, f, bind);
 
-		if (k > 0)
+		if (k <= 0 && getenv("VCC_CXX_SIG"))
+			fprintf(stderr, "deduce: complete: %d\n", k);
+		if (k > 0) {
 			k = cxx_ftemplate_constraints(c, f, bind);
+			if (k <= 0 && getenv("VCC_CXX_SIG"))
+				fprintf(stderr, "deduce: constraints: %d\n", k);
+		}
 		if (k <= 0) {
 			c->why = CXX_WHY_UNBOUND;
 			return k;
 		}
 	}
 	*ret = cxx_ftemplate_return(c, f, bind, body);
+	if (c->sig_requires != 1 && getenv("VCC_CXX_SIG"))
+		fprintf(stderr, "deduce: signature: %d\n", c->sig_requires);
 	if (c->sig_requires != 1) {
 		c->why = CXX_WHY_UNBOUND;
 		return c->sig_requires;	/* its trailing requires-clause: false, or not known */

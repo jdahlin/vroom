@@ -128,6 +128,7 @@ typedef struct cxx_entity {
 	uint8_t late_done;
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
+	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
@@ -308,6 +309,11 @@ typedef struct cxx {
 	cxx_entity *call_picked;	/* ... and which */
 	uint8_t carg_const;		/* the argument list was one integer constant expression */
 	int64_t carg_value;		/* ... its value */
+	qty constructing;		/* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
+	uint8_t no_literal, rank_no_literal;	/* the next call's arguments are types, not expressions (a trait's): an integer is no null pointer constant; while ranking */
+	uint32_t einvalid_at;		/* where einvalid was last set (VCC_CXX_SIG) */
+	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
+	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
@@ -408,6 +414,18 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+/* the expression is ill-formed for sure (VCC_CXX_SIG=2: where vcc decided so) */
+#define CXX_INVALID(c) cxx_invalid_note(c, __FILE__, __LINE__)
+static inline void cxx_invalid_note(cxx *c, const char *file, int line)
+{
+	static __thread int trace = -1;
+
+	if (trace < 0)
+		trace = getenv("VCC_CXX_SIG") && atoi(getenv("VCC_CXX_SIG")) > 1;
+	c->einvalid = 1, c->einvalid_at = c->pos;
+	if (trace)
+		fprintf(stderr, "invalid at token %u (%s:%d)\n", c->pos, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
+}
 VPRIV qty cxx_auto_type(cxx *c);
 VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);

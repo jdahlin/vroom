@@ -577,7 +577,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template);
 static void cxx_enum_specifier_parse(cxx *c);
 
 enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32, DS_STATIC = 64,
-       DS_VIRTUAL = 128 };
+       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512 };
 
 static bool cxx_kw_is_simple_type(int kw)
 {
@@ -840,8 +840,10 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 				cxx_advance(c);
 				cxx_constant_expression_parse(c);
+				flags |= !c->econst || c->template_depth ? DS_EXPLICIT_MAYBE : c->evalue ? DS_EXPLICIT : 0;
 				cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-			}
+			} else
+				flags |= DS_EXPLICIT;
 		} else if (cxx_kw_is_decl_specifier(kw) || cxx_kw_is_cv(kw)) {
 			if (cxx_kw_is_cv(kw))
 				cxx_spec_keyword(&sp, kw);
@@ -2868,6 +2870,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				known = (ps[i] = c->decl_params[i].ty) != CXX_TY_UNKNOWN;
 			if (e)
 				e->member_of = cxx_declaration_scope(c);
+			if (e)
+				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0;
 			if (e && !tmpl)
 				decl_fn = e;
 			if (e && !tmpl) {
@@ -3405,6 +3409,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	c->sig_requires = 1;
 	if (f && cxx_is_kw(c, CXX_KW_requires))
 		c->sig_requires = (int8_t)(any_return ? (cxx_requires_clause_parse(c), 1) : cxx_requires_clause_value(c));
+	if ((c->member_missing || c->einvalid) && !any_return && getenv("VCC_CXX_SIG")) {
+		fprintf(stderr, "signature fails: missing %u invalid %u (%u):", c->member_missing, c->einvalid, c->einvalid_at);
+		for (uint32_t i = c->einvalid_at > 12 ? c->einvalid_at - 12 : 0; i < c->einvalid_at + 3 && i < c->ntok; i++)
+			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+		fputc('\n', stderr);
+	}
 	if ((c->member_missing || c->einvalid) && !any_return)
 		c->sig_requires = 0;	/* a substitution failure in the return or a parameter type */
 	c->member_missing = missing, c->einvalid = invalid;

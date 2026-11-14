@@ -808,3 +808,34 @@ ok-check-detection-calls, ok-check-detection-comma, ok-check-pack-calls).
 Kvar före mätningen mot clang -O2: resterande otypade anrop (none viable 138,
 callee unknown 135, unbound 104), kodgenerering för C++ från det delade
 AST:t, länkning och körning av testerna.
+
+### Status 2026-11-14 (21): libc++-behållarna får layout, json(int) avgörs
+
+Mätt med sonder (`static_assert` mot json.hpp/libc++ som clang godkänner,
+`VCC_CXX_STATIC_ASSERT=2` rapporterar varje falsk/okänd och fortsätter):
+av 36 + 39 + 12 påståenden om json:s byggstenar var 11 rätt i början av
+steget; nu är alla utom fyra avgjorda och lika med clang.
+- Layout: `[[no_unique_address]]` (tom medlem tar ingen plats; en som inte
+  är POD för layout lämnar sin svansutfyllnad), packade klasser, namnlösa
+  klasser efter attribut, bitfältsbredder som konstantuttryck,
+  `__builtin_offsetof` som konstant, `__datasizeof`, `__is_final`.
+  `std::string` 24, `vector` 24, `map` 24, `unique_ptr` 8, `shared_ptr` 16,
+  `basic_json` 16: som clang.
+- Egenskaper: `__is_constructible`/`__is_convertible` för klasser genom
+  överlagringsupplösning av konstruktorerna (explicit, borttagna, implicita
+  default/kopia/flytt); användardefinierad konvertering som egen rang;
+  en klass utan konverteringsfunktion konverterar inte till skalär/pekare;
+  ett heltal av en typ (inte ett uttryck) är ingen nollpekarkonstant.
+- Konstanter: `T(x)`/`T()` av heltalskonstanter, jämförelser med osignerade
+  operander, `constexpr`-variabler är const, `static constexpr auto`.
+- Upplösning: giltighetsflaggorna hålls isär per anrop (kandidater som inte
+  deduceras, klasser och signaturer som instansieras på vägen); ett gammalt
+  "ingen passar" från ett inre anrop gjorde `obj(args)` ogiltigt.
+  `T&` (inte const) kompletterar inte parameterns klass
+  (`basic_string<unsigned char>` är ogiltig i libc++ och får inte röras).
+unit-32bit, C++11: 280 funktionsmallar + 422 medlems- + 38 out-of-class-
+kroppar, 4984 av 5497 anrop typade, 0.12 s.  json: 130 116 layouter som
+clang håller med om (0 fel), 71/71 parse; parse-tester 33/33.
+Kvar före mätningen mot clang -O2: `begin/end`-sonderna, strängoperatorer
+(`operator+`, `==` som fria mallar), vptr-layout (undantagshierarkin),
+kodgenerering för C++, länkning och körning.

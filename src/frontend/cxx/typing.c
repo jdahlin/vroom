@@ -177,15 +177,18 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
  */
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
 
 static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
+	bool binds_object = false;	/* T& (not const): binds an object, never a temporary made by a constructor */
 
 	if (p == CXX_TY_UNKNOWN || a == CXX_TY_UNKNOWN)
 		return 2;
 	pt = AST_TYPE(c->ast, p);
 	if (pt->kind == TY_PTR && pt->ext) {
+		binds_object = pt->ext == 1 && !(QQ(pt->base) & Q_CONST);
 		/* T&& does not bind an lvalue; T& (not const) does not bind an rvalue */
 		if (have_lvalue && (pt->ext == 2 ? lvalue : !lvalue && !(QQ(pt->base) & Q_CONST)))
 			return 3;
@@ -224,8 +227,8 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 				return 2;
 			cxx_type_require_complete(c, QUNQ(a));
 			return cxx_class_converts(c, as, 0) ? 2 : 3;
-		} else
-			return at->kind >= TY_BOOL && at->kind <= TY_ULLONG ? 2 : 3;
+		} else	/* (an integer: the literal 0 only, which the type does not tell) */
+			return at->kind >= TY_BOOL && at->kind <= TY_ULLONG && !c->rank_no_literal && !(have_lvalue && lvalue) ? 2 : 3;
 		if (QUNQ(pt->base) == QUNQ(ab))
 			return 0;
 		if (pb->kind == TY_VOID)
@@ -240,7 +243,7 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 		/* through a class: a conversion function of the argument's class or a constructor of the
 		   parameter's.  Neither declared: no conversion. */
 		cxx_scope *as = cc_type_is_record(c->ast, a) ? cxx_type_class_scope(c, QUNQ(a)) : NULL;
-		cxx_scope *ps = cc_type_is_record(c->ast, p) ? cxx_type_class_scope(c, QUNQ(p)) : NULL;
+		cxx_scope *ps = cc_type_is_record(c->ast, p) && !binds_object ? cxx_type_class_scope(c, QUNQ(p)) : NULL;
 		bool by_ctor = false, by_conv = false;
 
 		if (cc_type_is_record(c->ast, a)) {
@@ -249,7 +252,7 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 			cxx_type_require_complete(c, QUNQ(a));
 			by_conv = cxx_class_converts(c, as, 0);
 		}
-		if (cc_type_is_record(c->ast, p)) {
+		if (cc_type_is_record(c->ast, p) && !binds_object) {
 			if (!ps)
 				return 2;
 			cxx_type_require_complete(c, QUNQ(p));
@@ -258,7 +261,28 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 			for (cxx_entity *e = cxx_lookup_in(c, ps, cxx_ctor_id(), 0); e; e = e->next)
 				by_ctor |= e->member_of == ps;
 		}
-		return by_ctor || by_conv ? 2 : 3;
+		if (!by_ctor && !by_conv)
+			return 3;
+		/* T(const T&) for an argument that is not a T: converting it to T first is this conversion again */
+		if (c->constructing && QUNQ(p) == c->constructing && !by_conv)
+			return 3;
+		/* a constructor of the parameter's class takes the argument (implicitly): a user-defined
+		   conversion (5: worse than any standard one) */
+		if (by_ctor && !by_conv && c->construct_depth < 2) {
+			uint8_t lv = lvalue;
+			int r;
+
+			uint8_t nl = c->rank_no_literal;
+
+			c->construct_depth++;
+			c->no_literal = nl;
+			r = cxx_class_constructs(c, QUNQ(p), &a, &lv, 1, true);
+			c->construct_depth--;
+			c->rank_no_literal = nl;
+			if (r >= 0)
+				return r ? 5 : 3;
+		}
+		return 2;
 	}
 	return 3;
 }
@@ -271,6 +295,9 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 {
 	int r = cxx_arg_rank0(c, p, a, lvalue, have_lvalue) * 2;
+
+	if (r == 10)
+		return 3;	/* a user-defined conversion */
 
 	if (!r && p != CXX_TY_UNKNOWN && a != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext &&
 	    (QQ(AST_TYPE(c->ast, p)->base) & ~QQ(a) & Q_CONST))
@@ -299,16 +326,38 @@ VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint3
 	cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, xargs, nxargs, args, lval, nargs, false);
 }
 
+static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+				const uint8_t *lval, uint32_t nargs, bool operator_call, uint8_t *verdict);
+
+/*
+ * (What deciding the call left in the validity flags -- candidates that failed to deduce, the classes and
+ * signatures instantiated on the way -- is not the expression's: only the call's own verdict is, no
+ * function fits (set by the call itself) or its arguments are a pattern's placeholders.)
+ */
 static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
 			       const uint8_t *lval, uint32_t nargs, bool operator_call)
+{
+	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
+
+	uint8_t verdict = 0;	/* 1: no function fits; 2: validity not known (placeholder arguments) */
+
+	cxx_call_type_impl1(c, set, callee_type, xargs, nxargs, args, lval, nargs, operator_call, &verdict);
+	c->einvalid = invalid | (verdict & 1), c->eunsure = unsure | ((verdict & 2) != 0);
+	c->member_missing = missing, c->einvalid_unsure = adl;
+}
+
+static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+				const uint8_t *lval, uint32_t nargs, bool operator_call, uint8_t *verdict)
 {
 	static const uint8_t none[16];
 	cxx_entity *first = NULL;
 	uint32_t viable = 0;
+	bool skip_explicit = c->skip_explicit, no_literal = c->no_literal;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
 	bool have_lval = lval != NULL;
 
 	c->none_viable = 0, c->call_obj = 0;
+	c->skip_explicit = 0, c->no_literal = 0;	/* (this call's; the calls made while deducing are their own) */
 	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
 	if (!obj && set && c->this_type != CXX_TY_UNKNOWN && c->this_type) {
 		bool any_const = false;
@@ -352,7 +401,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	   for (a partial specialization's X<T, decltype(f(std::declval<T>()))> is substituted when matching) */
 	for (uint32_t i = 0; i < nargs && i < 16 && !c->tentative; i++)
 		if (args[i] != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, args[i]))
-			c->eunsure = 1;
+			*verdict |= 2;
 	if (trace) {
 		fprintf(stderr, "call %.*s/%u tentative=%d unevaluated=%d args:", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs,
 			c->tentative, c->unevaluated);
@@ -363,7 +412,11 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			if (args[i] != CXX_TY_UNKNOWN && cxx_type_spell(c, args[i], buf, sizeof buf, &len))
 				fprintf(stderr, " [%.*s]%s", (int)len, buf, lval[i] ? "&" : "");
 			else
-				fprintf(stderr, " [%s]", args[i] == CXX_TY_UNKNOWN ? "?" : "unspellable");
+				fprintf(stderr, " [%s kind %d ext %d placeholder %d record %d]", args[i] == CXX_TY_UNKNOWN ? "?" : "unspellable",
+					args[i] == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE_KIND(c->ast, args[i]),
+					args[i] == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE(c->ast, args[i])->ext,
+					args[i] != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, args[i]),
+					args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]));
 		}
 		fputc('\n', stderr);
 	}
@@ -377,6 +430,10 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 				c->stats.calls++, c->stats.why[CXX_WHY_DEPENDENT]++;
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			return;
+		}
+		if (skip_explicit && e->fn_explicit) {
+			unknown |= e->fn_explicit == 2;
+			continue;	/* (copy-initialization: not through an explicit constructor) */
 		}
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
@@ -420,11 +477,13 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (k->ranked) {
 			bool fits = true;
 
+			c->rank_no_literal = no_literal;
 			for (uint32_t a = 0; a < nargs && fits; a++) {
 				/* (an argument for the ...: any) */
 				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 5;	/* (...: last) */
 				fits = k->rank[a] < 6;
 			}
+			c->rank_no_literal = 0;
 			if (!fits)
 				continue;	/* (T&& from an lvalue, a pointer from a class: not viable) */
 		}
@@ -497,6 +556,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (!exact)
 			best = -1;
 	}
+	c->none_viable = 0;	/* (this call's verdict, not that of the calls made while deducing its candidates) */
 	c->call_resolved = best >= 0;
 	c->call_picked = best >= 0 ? cand[best].e : NULL;
 	if (best >= 0)
@@ -504,7 +564,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	else if (!viable || !same || unknown) {
 		c->none_viable = !viable && !unknown;
 		if (c->none_viable && !operator_call)
-			c->einvalid = 1;	/* no function fits these arguments (a requirement fails) */
+			*verdict |= 1, CXX_INVALID(c);	/* no function fits these arguments (a requirement fails) */
 		if (!c->template_depth && !(c->none_viable && operator_call))
 			c->stats.why[unknown ? c->why : !viable ? CXX_WHY_NONE_VIABLE : CXX_WHY_AMBIGUOUS]++;
 		result = CXX_TY_UNKNOWN;
@@ -586,7 +646,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 			for (uint32_t i = 0; i < nargs; i++)
 				known &= args[i] != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, args[i]);
 			if (known)
-				c->einvalid = 1;
+				CXX_INVALID(c);
 		}
 	}
 	set = nargs <= 2 ? cxx_lookup(c, id) : NULL;	/* (operator() and operator[] are members) */
@@ -779,7 +839,7 @@ VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v)
 	return false;
 }
 
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n);
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
 
 /*
@@ -824,7 +884,7 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 
 				if (rank == 2)
 					return false;
-				*v = rank < 3;
+				*v = rank < 3 || rank == 5;
 				return true;
 			}
 		}
@@ -877,7 +937,11 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		}
 		if (cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR &&
 		    (nt == 1 || (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID))) {
-			int r = cxx_class_constructs(c, to, &from, &lv, nt - 1);
+			int r;
+
+			c->no_literal = 1;
+			r = cxx_class_constructs(c, to, &from, &lv, nt - 1, conv);
+			c->no_literal = 0;
 
 			if (r < 0 || (r && nothrow))
 				return false;
@@ -936,10 +1000,12 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			*v = 0;
 			return true;
 		}
+		c->rank_no_literal = 1;
 		rank = cxx_arg_rank0(c, to, from, lv, true);
+		c->rank_no_literal = 0;
 		if (rank == 2)
 			return false;	/* (through a class: its constructors and conversion functions decide) */
-		*v = rank < 3;
+		*v = rank < 3 || rank == 5;
 		return true;
 	}
 	if (nt != 1)
@@ -1139,7 +1205,7 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth)
  * Can an object of the class `to` be made from n arguments, T(args)?  1 yes, 0 no, -1 not known.
  * Its constructors by overload resolution; with none declared the implicit ones.
  */
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n)
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit)
 {
 	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to)), *from_cls = NULL;
 	cxx_entity *set, *own = NULL;
@@ -1178,7 +1244,15 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 		uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
 		bool resolved, none;
 
+		qty outer = c->constructing;
+
+		uint8_t nl = c->no_literal;
+
+		c->skip_explicit = implicit;
+		c->no_literal = nl;
+		c->constructing = n == 1 && !same && !derived ? QUNQ(to) : 0;
 		cxx_call_type_impl(c, own, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, n, true);
+		c->constructing = outer;
 		resolved = c->call_resolved, none = c->none_viable, picked = c->call_picked;
 		c->etype = et, c->elval = el, c->ecallee = callee;
 		c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
@@ -1206,7 +1280,7 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 			else if (AST_TYPE_KIND(c->ast, cls->field_types[i]) == TY_PTR && AST_TYPE(c->ast, cls->field_types[i])->ext)
 				return 0;
 			else if (cc_type_is_record(c->ast, cls->field_types[i]) && AST_TYPE_KIND(c->ast, cls->field_types[i]) != TY_ARRAY) {
-				int f = cxx_class_constructs(c, cls->field_types[i], NULL, NULL, 0);
+				int f = cxx_class_constructs(c, cls->field_types[i], NULL, NULL, 0, false);
 
 				if (f <= 0)
 					return f;
@@ -1215,7 +1289,7 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 			cxx_scope *b = cls->used[i];
 
 			if (b && b->kind == CXX_SCOPE_CLASS && b->owner && b->owner->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b->owner->ty)) {
-				int f = cxx_class_constructs(c, b->owner->ty, NULL, NULL, 0);
+				int f = cxx_class_constructs(c, b->owner->ty, NULL, NULL, 0, false);
 
 				if (f <= 0)
 					return f;

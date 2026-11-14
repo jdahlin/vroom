@@ -216,7 +216,7 @@ static void cxx_id_expression_parse(cxx *c)
 		ename = t->id;
 	/* X::y with X a complete class that has no y: ill-formed (a substitution fails) */
 	if (q && !dep && !e && q->kind == CXX_SCOPE_CLASS && !q->dependent && !q->has_dependent_base && !c->template_depth)
-		c->einvalid = 1;
+		CXX_INVALID(c);
 	if (!dep && e)
 		cxx_name_type(c, e);
 	else if (!e && !q && t->len > 10 && !memcmp(t->s, "__builtin_", 10) && !c->tentative &&
@@ -1155,6 +1155,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
 						/* nothing by that name fits, here or in the arguments' namespaces */
 						c->einvalid = was || (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure);
+						if (c->einvalid && !was)
+							c->einvalid_at = c->pos;
 					}
 				}
 			}
@@ -1170,7 +1172,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 			if (obj != CXX_TY_UNKNOWN && !c->tentative)
 				cls = cxx_type_class_scope(c, QUNQ(obj));
 			if (obj != CXX_TY_UNKNOWN && !c->tentative && !cc_type_is_record(c->ast, obj) && !cxx_is(c, LEX_TOKEN_TILDE))
-				c->einvalid = 1;	/* x.m on what is not a class (a requirement fails) */
+				CXX_INVALID(c);	/* x.m on what is not a class (a requirement fails) */
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			cxx_advance(c);
 			{
@@ -1210,7 +1212,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 							cxx_name_type(c, m);
 							c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
 						} else if (!m && !cls->dependent && !cls->has_dependent_base)
-							c->einvalid = 1;
+							CXX_INVALID(c);
 					}
 					continue;
 				}
@@ -1232,7 +1234,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 						cxx_name_type(c, m);
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
 					} else if (!m && !cls->dependent && !cls->has_dependent_base)
-						c->einvalid = 1;	/* no such member (a requirement fails) */
+						CXX_INVALID(c);	/* no such member (a requirement fails) */
 				}
 			}
 			continue;
