@@ -169,7 +169,14 @@ static void cxx_id_expression_parse(cxx *c)
 			is_template = true;
 		if (is_template) {
 			cxx_template_arguments_parse(c);
-			cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a template-id: deduction and instances, not yet) */
+			cxx_et(c, CXX_TY_UNKNOWN, false);
+			/* f<args>: a call takes the explicit arguments (a function template's) */
+			if (!dep && e && cxx_entity_kind_find(e, CXX_ENTITY_FUNCTION_TEMPLATE) && !c->tentative) {
+				if (c->ntargs > c->cxargs)
+					c->xargs = realloc(c->xargs, (c->cxargs = c->ntargs + 8) * sizeof *c->xargs);
+				memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
+				c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = e;
+			}
 			return;
 		}
 	}
@@ -780,12 +787,21 @@ static void cxx_postfix_expression_parse(cxx *c)
 				uint32_t targs = c->in_template_args;
 				cxx_entity *set = c->ecallee;
 				qty callee = c->etype;
+				cxx_targ xa[8];
+				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
+
+				if (c->xargs_set && nx == UINT32_MAX)
+					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
+				if (nx != UINT32_MAX)
+					memcpy(xa, c->xargs, nx * sizeof *xa);
 
 				c->in_template_args = 0;
 				cxx_call_arguments_parse(c);
 				c->in_template_args = targs;
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
+				else if (nx != UINT32_MAX && set)
+					cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 				else if (!set && c->ncargs <= 2 && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
 				else

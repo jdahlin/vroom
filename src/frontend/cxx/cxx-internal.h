@@ -248,6 +248,9 @@ typedef struct cxx {
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
 	uint32_t body_depth;
+	cxx_targ *xargs;		/* the callee's explicit template arguments f<A, B> (when xargs_set) */
+	uint32_t nxargs, cxargs;
+	uint8_t xargs_set;
 	cxx_entity *last_fn;		/* the member function just declared (its deferred body's) */		/* function template bodies being instantiated (nested) */
 	uint32_t ftmpl_begin;		/* a template declaration: where the declaration after its parameters starts */
 	cxx_scope *ftmpl_scope;		/* ... and its template scope */
@@ -332,7 +335,8 @@ VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
 VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
 VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos);
-VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uint8_t *lval, uint32_t nargs, qty *ret);
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+			      uint32_t nargs, qty *ret);
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
@@ -358,6 +362,8 @@ VPRIV qty cxx_number_type(cxx *c, const cxx_token *t);
 VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r);
 VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue);
 VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs);
+VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+			   uint32_t nargs);
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);

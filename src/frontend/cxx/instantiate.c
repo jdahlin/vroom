@@ -1216,7 +1216,8 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
  */
-VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uint8_t *lval, uint32_t nargs, qty *ret)
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+			      uint32_t nargs, qty *ret)
 {
 	cxx_ftemplate *f = e->ftmpl;
 	cxx_partial *p;
@@ -1227,15 +1228,38 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uin
 	if (!f)
 		return -1;
 	cxx_ftemplate_evaluate(c, f);
-	if (f->sig == CXX_TY_UNKNOWN || f->packs)
-		return -1;
 	p = &f->p;
+	if (f->packs || p->params->ntparams > 64)
+		return -1;
+	memset(bind, 0, p->params->ntparams * sizeof *bind);
+	/* every parameter given explicitly: the placeholder signature is not needed (its parameter types may
+	   not parse with placeholders: typename remove_reference<T>::type&) */
+	if (xargs && nxargs == p->params->ntparams) {
+		for (uint32_t i = 0; i < nxargs; i++) {
+			if (!xargs[i].kind || xargs[i].kind > 2 || (xargs[i].kind == 1) != (p->params->tparams[i].kind == 1))
+				return xargs[i].kind ? 0 : -1;
+			bind[i] = xargs[i];
+		}
+		*ret = cxx_ftemplate_return(c, f, bind);
+		return 1;	/* (its arity is not checked: the signature with the arguments bound would tell) */
+	}
+	if (f->sig == CXX_TY_UNKNOWN)
+		return -1;
 	ft = AST_TYPE(c->ast, f->sig);
 	if (nargs > ft->n && !(ft->flags & TF_VARIADIC))
 		return 0;
 	if (nargs + e->ndefaults < ft->n)
 		return 0;
-	memset(bind, 0, p->params->ntparams * sizeof *bind);
+	/* explicit arguments: the first parameters (all of them: nothing left to deduce) */
+	if (xargs) {
+		if (nxargs > p->params->ntparams)
+			return 0;
+		for (uint32_t i = 0; i < nxargs; i++) {
+			if (!xargs[i].kind || xargs[i].kind > 2 || (xargs[i].kind == 1) != (p->params->tparams[i].kind == 1))
+				return xargs[i].kind ? 0 : -1;
+			bind[i] = xargs[i];
+		}
+	}
 	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
 		qty P = c->ast->params[ft->aux + i], A = args[i];
 
@@ -1268,7 +1292,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uin
 	}
 	for (uint32_t i = 0; i < p->params->ntparams; i++)
 		if (!bind[i].kind)
-			return -1;	/* (default template arguments, explicit ones: not yet) */
+			return -1;	/* (default template arguments: not yet) */
 	*ret = cxx_ftemplate_return(c, f, bind);
 	return 1;
 }

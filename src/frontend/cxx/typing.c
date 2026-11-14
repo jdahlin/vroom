@@ -15,7 +15,7 @@
 
 VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
-	c->ecallee = NULL;
+	c->ecallee = NULL, c->xargs_set = 0;
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
 		/* a reference: its referent, an lvalue (T&& names are lvalues too) */
 		c->etype = AST_TYPE(c->ast, t)->base, c->elval = 1;
@@ -158,7 +158,23 @@ static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
  * arguments deduce; the call's type is known when one exact non-template matches, or when every
  * viable candidate returns the same type (a simplification of overload resolution).
  */
+static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+			       const uint8_t *lval, uint32_t nargs);
+
 VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs)
+{
+	cxx_call_type_impl(c, set, callee_type, NULL, UINT32_MAX, args, lval, nargs);
+}
+
+/* f<xargs>(args): only templates are candidates, their first parameters given */
+VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+			   uint32_t nargs)
+{
+	cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, xargs, nxargs, args, lval, nargs);
+}
+
+static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+			       const uint8_t *lval, uint32_t nargs)
 {
 	static const uint8_t none[16];
 	cxx_entity *exact = NULL, *first = NULL;
@@ -192,7 +208,7 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 			return;
 		}
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
-			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, args, lval, nargs, &r) : -1;
+			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r) : -1;
 
 			if (d < 0)
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
@@ -201,6 +217,8 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 		} else {
 			const ctype *ft;
 
+			if (xargs)
+				continue;	/* (f<...>: not a non-template) */
 			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
