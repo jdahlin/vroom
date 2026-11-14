@@ -83,6 +83,28 @@ The levers, by size:
 Not counted: driver and process overhead per job (71 jobs), the cache's
 lookups and checks, writing the objects (the COMDAT bytes are copies).
 
+The threshold, and the C++ evidence for it.  With the back end at 2.1x,
+30x needs the front end at F with 29 x (0.77/F + 0.23/2.1) <= 8.1: **F >=
+4.5**.  vcc's C++ front end as it is (parse, name lookup, class templates,
+no expression semantics), `-fsyntax-only` CPU against clang's, mean of 3:
+
+| TU | clang | vcc | ratio |
+|---|---|---|---|
+| the shared headers only (declarations, class templates, inline bodies) | 0.660 s | 0.103 s | 6.4x |
+| unit-32bit (clang also instantiates function bodies; vcc not yet) | 0.733 s | 0.103 s | 7.1x (upper bound) |
+| unit-algorithms (likewise) | 1.247 s | 0.103 s | 12.1x (upper bound) |
+
+**Determination.**  30x with caches keyed on tokens alone is on the edge:
+the evidence brackets the front end between 4.4x (vcc's full C front end,
+semantics included) and 6.4x (vcc's C++ front end without expression
+semantics), around the 4.5x needed, so 29.6x to about 34x.  It is not a
+safe target as it stands.  With the 23 reconfiguring TUs sharing json
+(their unique work falls to about 13 s at clang speed), the requirement
+falls to 1.6x and the evidence clears it by a wide margin: **30x is
+reachable if and only if those TUs share, or the C++ front end with
+semantics stays at least 4.5x faster than clang's.**  The semantic
+analysis is therefore to be measured against that 4.5x as it is built.
+
 ## Targets
 
 Two targets, the first a stepping stone to the second.  Both have test
