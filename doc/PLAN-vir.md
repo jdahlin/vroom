@@ -1374,6 +1374,25 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with returns_twice in x86 VIR (2026-11-14).** Direct calls to
+setjmp and functions declared returns_twice now evict live registers at the call.
+Each spilled SSA value has a private slot in these functions, since longjmp can
+resume after an ordinary live range has ended. With allocation checking enabled,
+cc_statement_parse, cc_compound_statement_parse and cc_record_body_parse all lower.
+Their combined self-hosted machine code shrank from 63,937 to 31,738 bytes.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 172.78 / 170.51 ms | 137.72 / 137.55 ms | 1.254× / 1.240× |
+| 21 runs alternating order | 169.25 / 167.51 ms | 135.64 / 135.07 ms | 1.248× / 1.240× |
+
+One emitter thread on CPU 7, one warm-up excluded per binary. The rotating run
+retired 19.1M fewer instructions self-hosted. Every build produced the same
+SQLite object (SHA-256 prefix c4d3896fefc9), which passed the recursive-query
+smoke test. Self-host stages 2 and 3 matched. Repeated parser recovery in records,
+nested blocks and for headers produced the parent's diagnostics byte for byte.
+A nested two-checkpoint runtime test exercises private spills across both jumps.
+
 **SQLite after profiling whole-function VIR fallbacks (2026-11-14).** Matched the
 self-hosted cycle profile against bootstrap VIR diagnostics. One unsupported
 instruction in an infrequent branch or inlined callee sent the entire function to

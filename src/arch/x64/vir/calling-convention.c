@@ -121,6 +121,12 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 			x->clobbered[0] &= ~((1u << RSI) | (1u << RDI));
 			x->clobbered[1] = (1u << 6) - 1;
 		}
+		/* The second return resumes at this call. Keep every live value
+		 * recoverable from its own frame slot or by rematerialization. */
+		if (target && target->has_returns_twice && virbuild_call_returns_twice(target->context, callee)) {
+			x->clobbered[0] = UINT16_MAX;
+			x->clobbered[1] = (1u << 14) - 1;
+		}
 		if (i->type != VIR_TYPE_VOID && i->type != VIR_TYPE_MULTI) x->result = vir_register_class(i->type) ? VIR_REGISTER_MAKE(1, 0) : RAX;
 	} else if (i->op == VIR_OP_PROJ) {
 		x->result = x64_vir_return_register(f->extra[f->insns[i->a].b + 1], i->b);

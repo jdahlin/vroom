@@ -24,6 +24,7 @@ typedef struct x64_vir_context {
 	unsigned probe, site;
 	uint32_t map_block, map_value;
 	unsigned dup;bool may_fall_through,scratch_register10;
+	bool has_returns_twice;
 	bool ms;	/* the Microsoft x64 convention (Windows): arguments by position, rcx rdx r8 r9 / xmm0-3, shadow space */
 	uint32_t memory_value, memory_skip, scaled_value, scaled_skip; int memory_base, memory_index, scaled_index; uint8_t memory_shift, scaled_shift; bool memory_is_indexed; int64_t memory_offset;
 	uint32_t big_endian_value; int big_endian_base,big_endian_index; uint8_t big_endian_shift,big_endian_width; bool big_endian_is_indexed; int64_t big_endian_offset;

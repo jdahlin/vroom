@@ -96,7 +96,6 @@
 	X(x64_constant_kind, "VIR x86-64: a constant of a kind it cannot place") \
 	X(x64_constant_range, "VIR x86-64: a symbol or slot address beyond the 32-bit range") \
 	X(x64_too_many_call_arguments, "VIR x86-64: too many call arguments") \
-	X(x64_returns_twice, "VIR x86-64: returns_twice") \
 	X(x64_unsupported_instruction, "VIR x86-64: an instruction it does not lower") \
 	X(x64_slot_size, "VIR x86-64: an over-aligned or huge slot") \
 	X(x64_frame_size, "VIR x86-64: a frame beyond the 32-bit range") \

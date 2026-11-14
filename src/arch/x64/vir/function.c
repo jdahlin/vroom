@@ -134,18 +134,19 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	for (uint32_t i = 1; i < f->constant_count; i++)
 		if ((f->insns[i].op == VIR_OP_SYMADDR || f->insns[i].op == VIR_OP_SLOTADDR) &&
 		    (x64_vir_constant_bits(&f->insns[i]) < INT32_MIN / 2 || x64_vir_constant_bits(&f->insns[i]) > INT32_MAX / 2)) { *why = VIRBUILD_FAILURE(x64_constant_range); return false; }
-	for (uint32_t i = f->constant_count; i < f->insn_count; i++)
+	for (uint32_t i = f->constant_count; i < f->insn_count; i++) {
 		if (f->insns[i].op == VIR_OP_CALL && f->extra[f->insns[i].c] >= VIR_REGISTER_CONSTRAINT_MAX) {
 			*why = VIRBUILD_FAILURE(x64_too_many_call_arguments);
 			return false;
 		} else if (f->insns[i].op == VIR_OP_CALL && virbuild_call_returns_twice(e, &f->insns[f->insns[i].a])) {
-			*why = VIRBUILD_FAILURE(x64_returns_twice);
-			return false;
-		} else if (!x64_vir_value_is_supported(f, i)) {
+			L.has_returns_twice = true;
+		}
+		if (!x64_vir_value_is_supported(f, i)) {
 			snprintf(V->failure_detail, sizeof V->failure_detail, "%s.%s", vir_opcode_table[f->insns[i].op].name, vir_type_names[f->insns[i].type]);
 			*why = VIRBUILD_FAILURE(x64_unsupported_instruction);
 			return false;
 		}
+	}
 	uint64_t framesz = (uint64_t)f->insn_count * 16; /* worst-case spill slots */
 	for (uint32_t i = 0; i < f->slot_count; i++) {
 		if (f->slot[i].align > 16 || f->slot[i].size > INT32_MAX / 4) { *why = VIRBUILD_FAILURE(x64_slot_size); return false; }
@@ -162,8 +163,9 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	L.map=selected && vx_diag_env.mapping && *vx_diag_env.mapping && *vx_diag_env.mapping!='0';
 	L.probe=selected && vx_diag_env.probe?(unsigned)strtoul(vx_diag_env.probe,NULL,0):0;
 	vbuffer entries={0};
-	vir_alloc_options diagnostic={.entry=vx_entry,.entry_context=&entries};
-	const vir_alloc_options *dopt=L.map?&diagnostic:NULL;
+	vir_alloc_options options = { .private_spills = L.has_returns_twice,
+		.entry = L.map ? vx_entry : NULL, .entry_context = &entries };
+	const vir_alloc_options *dopt = L.map || L.has_returns_twice ? &options : NULL;
 	bool allocated=vir_alloc(f,&V->loops,&regs,dopt,&V->allocation),scratch=false;
 	if(allocated && r10)for(uint32_t k=0;k<V->allocation.move_count;k++) {
 		const vir_edge_move *m=&V->allocation.move[k];
