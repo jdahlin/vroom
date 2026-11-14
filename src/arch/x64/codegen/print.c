@@ -91,7 +91,7 @@ static char x64_size_suffix(int sz) { return sz == 8 ? 'q' : sz == 4 ? 'l' : sz 
 
 VPRIV void x64_label_name_append(tbuf *b, uint32_t s, uint32_t l)
 {
-	vtext_string_append(b, ".LBB");
+	vtext_append(b, ".LBB", sizeof ".LBB" - 1);
 	vtext_unsigned_append(b, s);
 	vtext_char_append(b, '_');
 	vtext_unsigned_append(b, l);

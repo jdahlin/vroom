@@ -1374,6 +1374,39 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling x86 local branches (2026-11-14).** In the preceding
+five-compile cycle profile, as_x64_direct_branch and its callees accounted
+for 830 samples self-hosted and 179 clang-built (about 9.77M excess cycles
+per compile). The wrapper is present in both binaries. Larger raw differences
+for individual functions included inlining and tail calls; for example, clang
+tail-jumps from as_x64_op into x64_mov. At a direct branch, clang forwards
+as_symbol_value's two return registers to x64_branch. Vcc stores them,
+copies the 16-byte value with MOVUPS, then reloads the argument registers.
+For the local label name prefix, vcc also called strlen and memcpy where
+clang stored the four literal bytes with a single MOV.
+
+Ordinary generated jumps now register the symbol directly in a short-branch
+item for relaxation. Calls, absolute symbols and assembler variables retain
+expression handling. Cache recent local-label symbol IDs per TU, keyed by
+both function and label; a miss uses the same assembler name lookup so
+text snippets and structured records share symbols. Fresh five-compile
+profiles put inclusive branch samples at 831 → 360 self-hosted and 186 → 169
+clang-built (period 75,001 user cycles).
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 178.96 ms | 176.16 ms |
+| Clang-built vcc CPU time | 136.13 ms | 135.74 ms |
+| Self-hosted / clang-built | 1.315× | 1.298× |
+| Self-hosted retired instructions | 2.0152B | 2.0004B |
+| Clang-built retired instructions | 1.1801B | 1.1696B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order and warm-up
+excluded. The previous round measured this baseline at 1.309×. All four
+objects had SHA-256 prefix `c4d3896fefc9`. A separate 1,800-label test
+reused label numbers across functions and exceeded the cache size; its
+object matched the baseline and all targets executed correctly.
+
 **SQLite after profiling lvalue loads (2026-11-14).** Among comparable
 exclusive symbols from the previous profile, walk_lvalue_load had 569
 self-hosted samples versus 41 clang-built. The self-hosted scalar path

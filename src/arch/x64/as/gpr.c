@@ -509,6 +509,8 @@ int as_x64_direct_branch(as_context *a, int condition, uint32_t symbol, int mod)
 {
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
+	if (condition >= 0 && !a->variable_count && !(elf_symp(a->object, symbol)->flags & ESYM_ABS))
+		return as_variable_item_label_branch_add(a, condition, symbol);
 	return x64_branch(a, condition, as_symbol_value(a, symbol, 0), mod);
 }
 

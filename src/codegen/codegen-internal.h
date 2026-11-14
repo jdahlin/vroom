@@ -506,6 +506,7 @@ typedef struct codegen_commit_context {
 	uint32_t *label_symbols, *label_serials, serial;	/* functions with inline asm: label -> .LBB symbol (valid if lser == ser) */
 	struct codegen_commit_label *labels;		/* ... label state */
 	struct codegen_commit_pending_branch *pending;		/* ... branches waiting for their label */
+	struct { uint32_t function, label, symbol; } x64_labels[256]; /* recent .LBB lookups in this TU */
 	tbuf name_buffer;			/* name scratch */
 } codegen_commit_context;
 

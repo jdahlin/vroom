@@ -43,21 +43,32 @@ VPRIV struct as_variable_item *as_variable_item_add(as_context *a, int kind)
 	return v;
 }
 
-/* an x86-64 jump to v (cc 16: jmp): short while a local target in this section is
- * in range, else the near form with a fixup (MC's relaxation) */
+/* Start the branch in its short form; relaxation chooses its final width. */
+static struct as_variable_item *as_short_branch_add(as_context *a, int cc)
+{
+	struct as_variable_item *it = as_variable_item_add(a, AS_VARIABLE_ITEM_X64_BRANCH);
+	it->code = (uint8_t)cc;
+	it->size = 2;
+	return it;
+}
+
+/* Compiler jump to an ordinary label. The fresh item is already zeroed. */
+VPRIV int as_variable_item_label_branch_add(as_context *a, int cc, uint32_t symbol)
+{
+	elf_code(a->object, a->fragment_current);
+	elf_reg(a->object, symbol);
+	as_short_branch_add(a, cc)->value.add = symbol;
+	return 0;
+}
+
 VPRIV int as_variable_item_branch_add(as_context *a, int cc, as_value v, int mod)
 {
-	struct as_variable_item *it;
-
 	(void)mod;
 	elf_code(a->object, a->fragment_current);
 	as_value_fold(a, &v);
-	elf_reg(a->object, v.add);	/* (the symbol table's order: where the fixup would be made, MC) */
+	elf_reg(a->object, v.add);	/* register in fixup order, as LLVM MC does */
 	elf_reg(a->object, v.sub);
-	it = as_variable_item_add(a, AS_VARIABLE_ITEM_X64_BRANCH);
-	it->code = (uint8_t)cc;
-	it->value = v;
-	it->size = 2;
+	as_short_branch_add(a, cc)->value = v;
 	return 0;
 }
 
