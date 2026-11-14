@@ -117,7 +117,7 @@ vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir
 VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
 # with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
-cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c $(wildcard frontend/cxx/*.c) $(wildcard frontend/cxx/codegen/*.c)
+cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c $(wildcard frontend/cxx/*.c) $(wildcard frontend/cxx/codegen/*.c) $(wildcard frontend/cxx/declaration/*.c) $(wildcard frontend/cxx/expression/*.c) $(wildcard frontend/cxx/instantiate/*.c)
 # the compile job (driver_job_run); declaration-cache.c stays a TU of its own
 driver_SRC = $(filter-out driver/declaration-cache.c,$(wildcard driver/*.c))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)

@@ -1851,3 +1851,10 @@ mot `function(function&&)`), ett klasspack i parametrarna (`_ArgTypes... __arg`)
 parametrarna, och en partiell specialiserings medlemsmallar hittas och binds (deducerade pack expanderas).
 cxx-strict: 3/70, 342 saknade (373).  (Ett försök att bygga `std::addressof(x)` som `&x` direkt bröt
 libc++:s `__static_fancy_pointer_cast` i json-testerna och togs bort.)
+
+## Status 100 (2026-11-14)
+`declaration.c` (4 900 rader), `expression.c` (2 600) och `instantiate.c` (3 500) delade som codegen/ i
+`frontend/cxx/declaration/` (14 filer), `expression/` (9) och `instantiate/` (12), högst 751 rader per fil,
+gemensamma typer och prototyper i `declaration.h`, `expression.h`, `instantiate.h`.  Ren flytt: -S-utdata
+byte för byte lika med bygget före delningen på unit-algorithms, unit-hash, unit-noexcept; varje fil
+kompilerar ensam (`VCC_UNITY=`).  cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36; cxx-strict oförändrat.
