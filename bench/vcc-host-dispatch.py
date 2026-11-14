@@ -55,10 +55,30 @@ def main():
     with tempfile.TemporaryDirectory(prefix='vcc-host-dispatch-') as tmp:
         d = Path(tmp)
         (d/'crc.c').write_text(PROBE)
+        crc_source = ROOT/'src/port/crc32c.c'
+        crc_input = crc_source
+        link_flags = []
+        if platform.system() == 'Linux':
+            # Exercise the self-host code path in the arithmetic oracle below.
+            clang = hostenv.llvm('clang')
+            resource = subprocess.check_output([clang, '-print-resource-dir'], text=True).strip()
+            flags = ['--target=x86_64-linux-gnu', '-O2', '-D_GNU_SOURCE',
+                     '-I'+str(ROOT/'src/include'), '-isystem', resource+'/include']
+            multiarch = Path('/usr/include/x86_64-linux-gnu')
+            if multiarch.is_dir():
+                flags += ['-isystem', str(multiarch)]
+            flags += ['-isystem', '/usr/include']
+            crc_input = d/'crc32c.o'
+            link_flags = ['-no-pie']
+            compiled = subprocess.run([bins/'vpp', *flags, '-c', crc_source, '-o', crc_input],
+                                      env=dict(os.environ, VCC_VIR='bls', VCC_VIR_CHECK='1'),
+                                      capture_output=True, text=True)
+            if compiled.returncode or 'crc_word_hw: lowered, 0 spills' not in compiled.stderr:
+                raise RuntimeError('CRC word helper did not lower spill-free:\n'+compiled.stderr)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
                         '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
                         str(ROOT/'src/common/intern.c'), str(ROOT/'src/common/fail.c'),
-                        str(ROOT/'src/port/crc32c.c'), str(ROOT/'src/port/job-regions.c'), '-pthread', '-o', str(d/'crc')], check=True)
+                        str(crc_input), str(ROOT/'src/port/job-regions.c'), '-pthread', *link_flags, '-o', str(d/'crc')], check=True)
         src = d/'input.c'
         src.write_text(''.join('/*'+'x'*n+'*/\nconst char *s%d="%s\\\"";\n' % (n,'y'*n)
                                for n in (15,16,17,31,32,33,63,64,65,127,128,129)) +

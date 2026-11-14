@@ -146,7 +146,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 	}
 	/* Prefer the dying first input for x86's destructive operations. */
 	switch(i->op) {
-	case VIR_OP_SUB: case VIR_OP_PSUB: case VIR_OP_MUL: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
+	case VIR_OP_CRC32C64: case VIR_OP_SUB: case VIR_OP_PSUB: case VIR_OP_MUL: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
 	case VIR_OP_NEG: case VIR_OP_NOT: case VIR_OP_SHL: case VIR_OP_LSHR: case VIR_OP_ASHR:
 	case VIR_OP_EXT: case VIR_OP_TRUNC: case VIR_OP_P2I: case VIR_OP_I2P:
 	case VIR_OP_FADD: case VIR_OP_FSUB: case VIR_OP_FMUL: case VIR_OP_FDIV:

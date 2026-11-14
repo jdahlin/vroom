@@ -362,6 +362,7 @@ other than to equal values, must clear its UB flags (R2).
 | 70 | `frameaddr` | ptr | # level | - | - | R | `__builtin_frame_address(level)` |
 | 71 | `retaddr` | ptr | # level | - | - | R | `__builtin_return_address(level)` |
 | 80-86 | terminators | | | | | T | Section 8 |
+| 89 | `crc32c64` | i64 | v:i64 | v:i64 | - | P | CRC32C update of the low 32 bits of `a` with the eight bytes of `b`, least significant first. Zero-extended result, no initial or final complement. |
 
 `U*`: only when a UB flag is set. `P/F`: pure, unless the function has
 `VF_FENV`; then it reads and writes the floating-point environment and is
