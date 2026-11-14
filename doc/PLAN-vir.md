@@ -1445,6 +1445,64 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Sharing x86 index calculations across branches (2026-11-14).**
+Instruction sampling the two binaries with the same 28 self-hosted objects
+and different codegen.o identified walk_lvalue_emit, walk_call_emit and
+the local-symbol paths. Clang inlines walk_call_emit and x64_local on
+this build, so their out-of-line sample counts cannot measure the gap.
+In walk_local_slot VCC multiplied the same symbol index by 80 and rebuilt
+the type-table address in successor blocks. Clang reused the scaled index.
+x86 VIR now numbers integer extensions, shifts, multiply, add and pointer
+conversions in the dominator tree. A repeated expression can use its
+dominating SSA definition. Load reuse still depends on the memory state.
+
+Static machine instructions from objdump on the same codegen TU:
+
+| Function | Previous VCC | New VCC | Clang |
+| --- | ---: | ---: | ---: |
+| walk_local_slot | 462 | 388 | 201 |
+| walk_lvalue_emit | 3,089 | 2,946 | 1,969 |
+| x64_call | 2,443 | 2,368 | 1,898 |
+| walk_call_emit | 2,116 | 2,060 | inlined |
+
+The longer live ranges have a cost. The allocator reported 1 to 3 spills
+in walk_local_slot and 43 to 55 in x64_call. A regression checks all three
+branch outcomes and aliased row pointers; the generated code computes the
+80-byte index once, down from three multiplies.
+
+Integration review confirms the value-number table follows the dominator
+walk and removes each block's entries on exit. Cross-block generation zero
+therefore reuses only a dominating definition, while memory generations
+still distinguish writes. Extra regressions cover sibling branches meeting
+at a join and aliased row updates through a loop induction variable.
+Verified: dedicated VIR x86 harness with assembly/own objects, vectorization
+on/off and one/six threads, and checked VIR own-object suite 342/342.
+
+SQLite 3.50.4 -O2 -c, pinned to CPU 7, VCC_THREADS=1. Medians of 32
+balanced runs per binary after warmup, perf stat instructions:u and task-clock:
+
+| Build | Instructions (millions) | CPU ms |
+| --- | ---: | ---: |
+| Previous full self-host | 1,678.82 | 157.66 |
+| New full self-host | 1,658.42 | 155.90 |
+| Previous full Clang build | 1,099.38 | 132.25 |
+| New full Clang build | 1,099.31 | 132.09 |
+
+A separate balanced experiment fixed the 28 other objects at their new
+self-hosted versions and compiled identical codegen.c source three ways:
+
+| Generator for codegen.o | Instructions (millions) | CPU ms |
+| --- | ---: | ---: |
+| Previous VCC | 1,675.73 | 156.66 |
+| New VCC | 1,658.43 | 155.34 |
+| Clang | 1,457.01 | 146.58 |
+
+The isolated excess fell from 218.73M to 201.43M (7.9% closed).
+An independent 24-run series saved 17.08M instructions and 0.64 ms
+in isolation, and 20.31M and 1.51 ms in the complete self-host.
+Every timed run produced the prior byte-identical SQLite object. A
+linked recursive query returned 500500, and bootstrap stages 2/3 matched.
+
 **SQLite codegen object swap (2026-11-14, 2c88c830).**
 Relinked vpp in both directions, replacing only obj/unity/codegen.o in
 the original ordered list of 29 objects. Both control relinks reproduced
