@@ -562,6 +562,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 /* the expression is ill-formed for sure (VCC_CXX_SIG=2: where vcc decided so) */
 #define CXX_INVALID(c) cxx_invalid_note(c, __FILE__, __LINE__)
 static inline void cxx_invalid_note(cxx *c, const char *file, int line)

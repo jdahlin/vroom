@@ -111,6 +111,7 @@ static bool cxx_gen_needs_destruction(cxx *c, qty t, int depth);
 static bool cxx_gen_needs_construction(cxx *c, qty t, int depth);
 static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
 static cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth);
+static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
@@ -2335,6 +2336,37 @@ static bool cxx_gen_needs_construction(cxx *c, qty t, int depth)
 			return true;
 	}
 	return false;
+}
+
+/* a destructor about to be parsed: the destructors its end runs (its members' and bases' classes) have
+   their bodies parsed first, not from inside its code generation */
+VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d)
+{
+	cxx_scope *cls = d ? d->member_of : NULL;
+	qty bases[16];
+	uint32_t nb;
+
+	if (!cls || !cls->owner || cls->owner->ty == CXX_TY_UNKNOWN)
+		return;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
+			ft = AST_TYPE(c->ast, ft)->base;
+		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, ft)) {
+			cxx_entity *md = cxx_gen_declared_destructor(c, ft);
+
+			if (md && md != d)
+				cxx_member_body_use(c, md);
+		}
+	}
+	nb = cxx_class_bases(c, cls->owner->ty, bases, 16);
+	for (uint32_t i = 0; i < nb; i++) {
+		cxx_entity *bd = cxx_gen_declared_destructor(c, bases[i]);
+
+		if (bd && bd != d)
+			cxx_member_body_use(c, bd);
+	}
 }
 
 /* the destructor the class declares (NULL: none) */

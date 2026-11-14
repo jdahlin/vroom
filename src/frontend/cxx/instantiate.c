@@ -2850,6 +2850,8 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64 || c->unevaluated)
 		return;
 	e->late_done = 1;
+	if (vintern_ents[e->name].len == 5 && !memcmp(vintern_ents[e->name].s, " dtor", 5))
+		cxx_gen_destructor_parts_use(c, e);	/* (the destructors its end calls: their bodies first) */
 	if (getenv("VCC_CXX_BODIES") && e->late->scope && e->late->scope->owner)
 		fprintf(stderr, "body %.*s::%.*s\n", (int)vintern_ents[e->late->scope->owner->name].len, vintern_ents[e->late->scope->owner->name].s,
 			(int)vintern_ents[e->name].len, vintern_ents[e->name].s);

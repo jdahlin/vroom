@@ -1480,3 +1480,9 @@ finns blir alias vid TU:ns slut.  Gissade namn i unit-testsuites 249 -> 221.  cx
 cxx-fork 68/70: unit-regression1 anropar `data::~data` för `basic_json<..., long double>`, vars
 kropp vcc aldrig tolkar (den nästlade klassens medlemmar i den instansen får inga sena kroppar;
 syns som en stubbe, i ett bygge med bara vcc ett länkfel).  Kvar att utreda.
+
+### Status (60): destruktorer som körs implicit får sina kroppar
+När en destruktors kropp begärs begärs först kropparna för de destruktorer dess slut kör (medlemmars
+och basers klasser): de tolkas före, inte inifrån dess kodgenerering (som bröt den yttre).
+`basic_json<..., long double>::data::~data` byggs nu.  cxx-run 50/50; cxx-fork 69/70, 5,2 s CPU
+(46,7x), 2 666 funktioner från vcc (från 2 551).
