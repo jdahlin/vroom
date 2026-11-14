@@ -1517,6 +1517,25 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 				}
 			}
 		}
+		if (conv && nt == 2 && from != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, from) && cc_type_is_record(c->ast, to) &&
+		    AST_TYPE_KIND(c->ast, from) != TY_ARRAY && AST_TYPE_KIND(c->ast, to) != TY_ARRAY && QUNQ(from) != QUNQ(to)) {
+			/* one class to another: only derived to base, a constructor of To or a conversion function of From;
+			   none of them (iterator tags: random_access_iterator_tag to contiguous_iterator_tag): no */
+			cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from)), *ts = cxx_type_class_scope(c, QUNQ(to));
+
+			if (fs && ts && !fs->has_dependent_base && !ts->has_dependent_base) {
+				bool any_ctor = false;
+
+				cxx_type_require_complete(c, QUNQ(from)), cxx_type_require_complete(c, QUNQ(to));
+				for (cxx_entity *e = cxx_lookup_in(c, ts, cxx_ctor_id(), 0); e; e = e->next)
+					if (e->member_of == ts && !e->fn_implicit && !e->fn_defaulted)
+						any_ctor = true;
+				if (!any_ctor && !cxx_derives(c, from, to, 0) && !cxx_class_converts(c, fs, 0)) {
+					*v = 0;
+					return true;
+				}
+			}
+		}
 		if (cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR &&
 		    (nt == 1 || (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID))) {
 			int r;

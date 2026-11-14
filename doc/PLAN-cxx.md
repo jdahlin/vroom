@@ -1772,3 +1772,11 @@ Den första konstruktionen av en klassinstans i en TU (`pair<int, double>(x, 2.5
 anrops argumenttyper: att komplettera klassen (i cxx_type_class_scope/require_complete) tolkar dess
 medlemmar och skriver över c->cargs, som argumenten pekar på; cxx_ctor_use kopierar nu argumenten
 först.  cxx-strict 546 (541: fler anropare byggs nu och når nya luckor).
+
+## Status 88 (2026-11-14)
+`__is_convertible(A, B)` mellan två klasser är falskt när B inte är A:s bas, B inte deklarerar egna
+konstruktorer och A inga konverteringsfunktioner (iteratortaggar: `__libcpp_is_contiguous_iterator` för
+vector-iteratorn blir känd).  En use-after-free i `cxx_gen_symbol_named`: en uppslagning växte tabellen
+som `cxx_gen_complete_object_aliases` gick igenom (unit-comparison kraschade, hittad med ASan); nu växer
+den bara vid insättning.  cxx-strict 550; överst: kroppar vcc aldrig tolkade (86), `_Algorithm()(...)`
+i `__copy_move_unwrap_iters` (79), `filldata<T>::fill` (38).

@@ -162,7 +162,7 @@ VPRIV uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s)
 
 	for (const char *p = name; *p; p++)
 		h = (h ^ (unsigned char)*p) * 16777619u;
-	if (c->nsym_names * 2 >= c->csym_names) {
+	if (s && c->nsym_names * 2 >= c->csym_names) {	/* (grown on insertion only: a lookup leaves the table, which a caller may be walking) */
 		uint32_t ncap = c->csym_names ? c->csym_names * 2 : 1024;
 		void *old = c->sym_names;
 		uint32_t ocap = c->csym_names;
@@ -177,6 +177,8 @@ VPRIV uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s)
 		}
 		free(old);
 	}
+	if (!c->csym_names)
+		return 0;	/* (a lookup in no table yet) */
 	mask = c->csym_names - 1;
 	for (i = h & mask; c->sym_names[i].name; i = (i + 1) & mask)
 		if (!strcmp(c->sym_names[i].name, name))
