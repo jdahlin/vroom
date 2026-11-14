@@ -1,5 +1,5 @@
 /* One scaled LEA for the shared 3/5/9 multiplication recipe. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 VPRIV bool x64_mulconst(codegen_context *e, int size, int r, i128 rhs)
 {
@@ -8,6 +8,6 @@ VPRIV bool x64_mulconst(codegen_context *e, int size, int r, i128 rhs)
 	unsigned shift = em_mulconst((unsigned)size * 8, rhs);
 	if (!shift)
 		return false;
-	x64_op3(e, X_LEASCALE, size, r, r, r)->shift = (uint8_t)shift;
+	x64_record_emit_three_registers(e, X64_OP_LEASCALE, size, r, r, r)->shift = (uint8_t)shift;
 	return true;
 }

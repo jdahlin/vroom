@@ -122,10 +122,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	if(spframe)cs|=1u<<RBP;
 	if (ms) cs |= (1u << RSI) | (1u << RDI);
 	x64_vir_context L = { .context = e, .function = f, .allocation = &V->allocation, .ms = ms };
-	vir_target_registers regs = { .alloc = { (X_TEMPS & ~(1u << R10)) | cs, (1u << 14) - 1 },
+	vir_target_registers regs = { .alloc = { (X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
-	if (e->unit->options->debug || e->unit->options->sprot || x64_nosimd(e)) return false;
+	if (e->unit->options->debug || e->unit->options->sprot || x64_target_has_no_simd(e)) return false;
 	const attrs *attrs = codegen_symbol_attributes(e->compile_context, sym);
 	if (attrs && attrs->interrupt) { *why = VIRBUILD_FAILURE(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->constant_count; i++)
@@ -210,8 +210,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	}
 	e->is_reachable = true;
 	x64_begin(e, sym);
-	e->x64_context->spframe=spframe;
-	e->x64_context->interrupt = e->x64_context->nlreg = 0;
+	e->x64_context->stack_pointer_frame=spframe;
+	e->x64_context->interrupt = e->x64_context->local_register_count = 0;
 	e->walk_state->statement_depth = e->walk_state->temporary_slot_in_use_count = e->walk_state->temporary_slot_free_count = 0;
 	e->walk_state->frame_offset = 0; e->walk_state->frame_alignment = 16; e->walk_state->label_count = 0;
 	e->walk_state->stack_pointer_needed = false; e->walk_state->canary = 0;
@@ -226,8 +226,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 		.block_label=L.label, .optimize=!e->unit->cleanups_disabled };
 
 	for (int r = 0; r < 16; r++) {
-		if (V->allocation.callee[0] >> r & 1) x64_csused(e, r);
-		if (V->allocation.callee[1] >> r & 1) x64_csused(e, XMM0 + r);
+		if (V->allocation.callee[0] >> r & 1) x64_callee_save_use(e, r);
+		if (V->allocation.callee[1] >> r & 1) x64_callee_save_use(e, XMM0 + r);
 	}
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);

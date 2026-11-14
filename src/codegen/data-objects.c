@@ -507,7 +507,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		return;
 	}
 	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !CODEGEN_IS_DARWIN(c)) {
-		/* ELF: .tdata/.tbss; code reaches it through I_TLV (lval.c) */
+		/* ELF: .tdata/.tbss; code reaches it through A64_OP_TLV (lval.c) */
 		const char *sec = zero && !e->relocation_count ? "\t.section\t.tbss,\"awT\",@nobits\n" : "\t.section\t.tdata,\"awT\",@progbits\n";
 
 		if (codegen_context_is_direct(e)) {
@@ -544,7 +544,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 	if (!a->section && (y->flags & AST_SYMBOL_FLAG_THREAD) && !codegen_context_is_direct(e) && !CODEGEN_IS_DARWIN(e->compile_context))
 		codegen_fatal_report(e, y->loc, "thread-local storage is not supported");
 	if (!codegen_context_is_direct(e) && CODEGEN_IS_DARWIN(e->compile_context) && (y->flags & AST_SYMBOL_FLAG_THREAD)) {
-		/* the same TLV layout as text; darwin_text names the sections */
+		/* the same TLV layout as text; a64_darwin_text_translate names the sections */
 		bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
 		vtext_string_append(b, zero ? "\t.section\t.tbss,\"aw\",@nobits\n" : "\t.section\t.tdata,\"aw\",@progbits\n");

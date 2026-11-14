@@ -19,7 +19,7 @@ VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uin
 	}
 	for (uint32_t k = 0; k <= g; k++) {
 		bool fp = VIR_GROUP_CLASS(f->extra[sig + 3 + 2 * k], 0) != VIR_CLASS_INT;
-		r = fp ? (nf < 8 ? VIR_REGISTER_MAKE(1, nf++) : VIR_REGISTER_NONE) : (ni < 6 ? (uint8_t)x64_argreg(ni++) : VIR_REGISTER_NONE);
+		r = fp ? (nf < 8 ? VIR_REGISTER_MAKE(1, nf++) : VIR_REGISTER_NONE) : (ni < 6 ? (uint8_t)x64_argument_register(ni++) : VIR_REGISTER_NONE);
 		if (k == g) *stack = off;
 		if (r == VIR_REGISTER_NONE) off += 8;
 	}
@@ -57,7 +57,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 		}
 		const vir_insn *callee = &f->insns[i->a];
 		if (callee->op == VIR_OP_SYMADDR && !callee->b && !callee->c) x->mem |= 1;
-		x->clobbered[0] = r10?X_TEMPS:X_TEMPS & ~(1u << R10);
+		x->clobbered[0] = r10?X64_TEMPORARIES:X64_TEMPORARIES & ~(1u << R10);
 		x->clobbered[1] = (1u << 14) - 1;
 		if (ms) {	/* a Microsoft callee keeps rsi, rdi and xmm6-xmm15 */
 			x->clobbered[0] &= ~((1u << RSI) | (1u << RDI));

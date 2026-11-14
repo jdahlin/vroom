@@ -27,16 +27,16 @@ static void a64_vir_constant_materialize(a64_vir_context *L, uint32_t v, int rd)
 
 	switch (k->op) {
 	case VIR_OP_ICONST:
-		movi(e, 1, rd, k->type == VIR_TYPE_I32 ? (int64_t)(uint32_t)k->b : a64_vir_constant_bits(k));
+		a64_record_emit_move_immediate(e, 1, rd, k->type == VIR_TYPE_I32 ? (int64_t)(uint32_t)k->b : a64_vir_constant_bits(k));
 		return;
 	case VIR_OP_FCONST:
-		movi(e, 1, rd, a64_vir_constant_bits(k));
+		a64_record_emit_move_immediate(e, 1, rd, a64_vir_constant_bits(k));
 		return;
 	case VIR_OP_SYMADDR:
-		addr_of_ref(e, rd, k->a, a64_vir_constant_bits(&(vir_insn){ .b = k->b, .c = k->c }));
+		a64_reference_address_emit(e, rd, k->a, a64_vir_constant_bits(&(vir_insn){ .b = k->b, .c = k->c }));
 		return;
 	case VIR_OP_SLOTADDR:
-		opi(e, I_ADDI, 1, rd, FRAME, L->slot_offsets[k->a] + a64_vir_constant_bits(&(vir_insn){ .b = k->b, .c = k->c }));
+		a64_record_emit_immediate(e, A64_OP_ADDI, 1, rd, A64_REGISTER_FRAME, L->slot_offsets[k->a] + a64_vir_constant_bits(&(vir_insn){ .b = k->b, .c = k->c }));
 		return;
 	default:
 		a64_vir_fail(L, VIRBUILD_FAILURE(constant_not_materializable));
@@ -52,11 +52,11 @@ static void a64_vir_float_constant_materialize(a64_vir_context *L, uint32_t v, i
 	if (k->op != VIR_OP_FCONST)
 		a64_vir_fail(L, VIRBUILD_FAILURE(float_constant_not_fconst));
 	if (!k->b && !k->c) {
-		word(L->context, f_in(d, vd, ZR));
+		a64_record_emit_word(L->context, a64_word_fmov_to_vector(d, vd, ZR));
 		return;
 	}
 	a64_vir_constant_materialize(L, v, t);
-	word(L->context, f_in(d, vd, t));
+	a64_record_emit_word(L->context, a64_word_fmov_to_vector(d, vd, t));
 }
 
 /* operand k as a general register: its register, else the constant or its slot in t */
@@ -74,7 +74,7 @@ VPRIV int a64_vir_operand_general_register(a64_vir_context *L, uint32_t k, int t
 		return t;
 	}
 	if (L->allocation->slot[v] != VIR_BLOCK_NONE) {
-		mem(L->context, I_LD, a64_vir_slot_size_log2(L, L->allocation->slot[v]), 0, t, FRAME, L->spill_offsets[L->allocation->slot[v]]);
+		a64_record_emit_memory(L->context, A64_OP_LD, a64_vir_slot_size_log2(L, L->allocation->slot[v]), 0, t, A64_REGISTER_FRAME, L->spill_offsets[L->allocation->slot[v]]);
 		return t;
 	}
 	a64_vir_fail(L, VIRBUILD_FAILURE(operand_without_location));
@@ -94,16 +94,16 @@ static void a64_vir_register_move(a64_vir_context *L, uint8_t dst, uint8_t src)
 	if (a64_vir_register_is_float(dst) != a64_vir_register_is_float(src))
 		a64_vir_fail(L, VIRBUILD_FAILURE(move_between_register_classes));
 	if (a64_vir_register_is_float(dst))
-		word(L->context, 0x4ea01c00u | (unsigned)a64_vir_vector_register(src) << 16 | (unsigned)a64_vir_vector_register(src) << 5 | (unsigned)a64_vir_vector_register(dst));	/* mov v.16b, v.16b (a vector's upper half too) */
+		a64_record_emit_word(L->context, 0x4ea01c00u | (unsigned)a64_vir_vector_register(src) << 16 | (unsigned)a64_vir_vector_register(src) << 5 | (unsigned)a64_vir_vector_register(dst));	/* mov v.16b, v.16b (a vector's upper half too) */
 	else
-		mov(L->context, 1, a64_vir_general_register(dst), a64_vir_general_register(src));
+		a64_record_emit_move(L->context, 1, a64_vir_general_register(dst), a64_vir_general_register(src));
 }
 
 /* a vector register and its 16-byte spill slot: the slot's address in t, then ldr/str q */
 static void a64_vir_vector_slot_access(a64_vir_context *L, bool load, int v, uint32_t s, int t)
 {
-	opi(L->context, I_ADDI, 1, t, FRAME, L->spill_offsets[s]);
-	word(L->context, (load ? 0x3dc00000u : 0x3d800000u) | (unsigned)t << 5 | (unsigned)v);
+	a64_record_emit_immediate(L->context, A64_OP_ADDI, 1, t, A64_REGISTER_FRAME, L->spill_offsets[s]);
+	a64_record_emit_word(L->context, (load ? 0x3dc00000u : 0x3d800000u) | (unsigned)t << 5 | (unsigned)v);
 }
 
 /* register dst <- spill slot s, through general register t for a float */
@@ -114,9 +114,9 @@ static void a64_vir_register_reload(a64_vir_context *L, uint8_t dst, uint32_t s,
 	if (L->allocation->slot_sizes[s] == 16) {
 		a64_vir_vector_slot_access(L, true, a64_vir_vector_register(dst), s, t);
 	} else if (a64_vir_register_is_float(dst)) {
-		mem(L->context, I_LDF, sz, 0, a64_vir_vector_register(dst), FRAME, L->spill_offsets[s]);
+		a64_record_emit_memory(L->context, A64_OP_LDF, sz, 0, a64_vir_vector_register(dst), A64_REGISTER_FRAME, L->spill_offsets[s]);
 	} else {
-		mem(L->context, I_LD, sz, 0, a64_vir_general_register(dst), FRAME, L->spill_offsets[s]);
+		a64_record_emit_memory(L->context, A64_OP_LD, sz, 0, a64_vir_general_register(dst), A64_REGISTER_FRAME, L->spill_offsets[s]);
 	}
 }
 
@@ -127,9 +127,9 @@ VPRIV void a64_vir_register_spill(a64_vir_context *L, uint8_t src, uint32_t s, i
 	if (L->allocation->slot_sizes[s] == 16) {
 		a64_vir_vector_slot_access(L, false, a64_vir_vector_register(src), s, t);
 	} else if (a64_vir_register_is_float(src)) {
-		mem(L->context, I_STF, sz, 0, a64_vir_vector_register(src), FRAME, L->spill_offsets[s]);
+		a64_record_emit_memory(L->context, A64_OP_STF, sz, 0, a64_vir_vector_register(src), A64_REGISTER_FRAME, L->spill_offsets[s]);
 	} else {
-		mem(L->context, I_ST, sz, 0, a64_vir_general_register(src), FRAME, L->spill_offsets[s]);
+		a64_record_emit_memory(L->context, A64_OP_ST, sz, 0, a64_vir_general_register(src), A64_REGISTER_FRAME, L->spill_offsets[s]);
 	}
 }
 
@@ -154,7 +154,7 @@ static int a64_vir_probe_mask_get(void)
 	return m;
 }
 
-#define A64_VIR_PROBE(bit) do { if (a64_vir_probe_mask_get() >> (bit) & 1) word(L->context, 0xd503201f); } while (0)
+#define A64_VIR_PROBE(bit) do { if (a64_vir_probe_mask_get() >> (bit) & 1) a64_record_emit_word(L->context, 0xd503201f); } while (0)
 
 /* one allocator edit, before the instruction it is positioned at */
 VPRIV void vl_edit(a64_vir_context *L, const vir_edit *x)
@@ -204,7 +204,7 @@ VPRIV void a64_vir_edge_moves_emit(a64_vir_context *L, uint32_t g)
 		case VIR_EDIT_REMATERIALIZE:
 			if (ds) {
 				a64_vir_constant_materialize(L, mv->value, t);
-				mem(L->context, I_ST, a64_vir_slot_size_log2(L, dn), 0, t, FRAME, L->spill_offsets[dn]);
+				a64_record_emit_memory(L->context, A64_OP_ST, a64_vir_slot_size_log2(L, dn), 0, t, A64_REGISTER_FRAME, L->spill_offsets[dn]);
 			} else {
 				a64_vir_register_rematerialize(L, (uint8_t)dn, mv->value, t);
 			}
@@ -221,8 +221,8 @@ VPRIV void a64_vir_edge_moves_emit(a64_vir_context *L, uint32_t g)
 				a64_vir_vector_slot_access(L, true, 31, sn, t);
 				a64_vir_vector_slot_access(L, false, 31, dn, t);
 			} else if (ds && ss) {
-				mem(L->context, I_LD, a64_vir_slot_size_log2(L, sn), 0, t, FRAME, L->spill_offsets[sn]);
-				mem(L->context, I_ST, a64_vir_slot_size_log2(L, dn), 0, t, FRAME, L->spill_offsets[dn]);
+				a64_record_emit_memory(L->context, A64_OP_LD, a64_vir_slot_size_log2(L, sn), 0, t, A64_REGISTER_FRAME, L->spill_offsets[sn]);
+				a64_record_emit_memory(L->context, A64_OP_ST, a64_vir_slot_size_log2(L, dn), 0, t, A64_REGISTER_FRAME, L->spill_offsets[dn]);
 			} else if (ds) {
 				a64_vir_register_spill(L, (uint8_t)sn, dn, t); A64_VIR_PROBE(5);
 			} else if (ss) {
@@ -237,15 +237,15 @@ VPRIV void a64_vir_edge_moves_emit(a64_vir_context *L, uint32_t g)
 			if (a64_vir_register_is_float((uint8_t)dn)) {
 				unsigned a = (unsigned)a64_vir_vector_register((uint8_t)dn), b = (unsigned)a64_vir_vector_register((uint8_t)sn);
 
-				word(L->context, 0x6e201c00u | b << 16 | a << 5 | a);	/* eor a.16b, a.16b, b.16b */
-				word(L->context, 0x6e201c00u | a << 16 | b << 5 | b);
-				word(L->context, 0x6e201c00u | b << 16 | a << 5 | a);
+				a64_record_emit_word(L->context, 0x6e201c00u | b << 16 | a << 5 | a);	/* eor a.16b, a.16b, b.16b */
+				a64_record_emit_word(L->context, 0x6e201c00u | a << 16 | b << 5 | b);
+				a64_record_emit_word(L->context, 0x6e201c00u | b << 16 | a << 5 | a);
 			} else {
 				int a = a64_vir_general_register((uint8_t)dn), b = a64_vir_general_register((uint8_t)sn);
 
-				op3(L->context, I_EOR, 1, a, a, b);
-				op3(L->context, I_EOR, 1, b, b, a);
-				op3(L->context, I_EOR, 1, a, a, b);
+				a64_record_emit_three_registers(L->context, A64_OP_EOR, 1, a, a, b);
+				a64_record_emit_three_registers(L->context, A64_OP_EOR, 1, b, b, a);
+				a64_record_emit_three_registers(L->context, A64_OP_EOR, 1, a, a, b);
 			}
 			break;
 		default:
@@ -261,7 +261,7 @@ VPRIV uint32_t a64_vir_block_label(a64_vir_context *L, uint32_t t)
 {
 	if (L->save_point != VIR_BLOCK_NONE && !L->is_before_save_point && !vir_block_dominates(L->function, L->save_point, t)) {
 		if (!a64_vir_thread_state_instance.epilogue_labels[t])
-			a64_vir_thread_state_instance.epilogue_labels[t] = newlabel(L->context);
+			a64_vir_thread_state_instance.epilogue_labels[t] = a64_label_new(L->context);
 		return a64_vir_thread_state_instance.epilogue_labels[t];
 	}
 	return L->labels[t];
@@ -293,7 +293,7 @@ VPRIV uint32_t a64_vir_successor_label(a64_vir_context *L, uint32_t b, uint32_t 
 		return a64_vir_block_label(L, a64_vir_block_chase(L, to));
 	if (L->edge_branch_count == sizeof L->edge_branches / sizeof L->edge_branches[0])
 		a64_vir_fail(L, VIRBUILD_FAILURE(too_many_edge_moves));
-	L->edge_branches[L->edge_branch_count].l = newlabel(L->context);
+	L->edge_branches[L->edge_branch_count].l = a64_label_new(L->context);
 	L->edge_branches[L->edge_branch_count].e = g;
 	L->edge_branches[L->edge_branch_count].to = to;
 	return L->edge_branches[L->edge_branch_count++].l;

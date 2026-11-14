@@ -1,5 +1,5 @@
 /* High products, using implicit RDX:RAX unsigned/signed multiplication. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_value b, int op)
 {
@@ -15,7 +15,7 @@ static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_valu
 		src = R11;
 	}
 	x64_mov(e, RAX, ra);
-	x64_op3(e, op, 8, XNOREG, src, XNOREG);
+	x64_record_emit_three_registers(e, op, 8, X64_REGISTER_NONE, src, X64_REGISTER_NONE);
 	x64_mov(e, ra, RDX);
 	x64_restore(e, saved);
 	/* The result retains a's register ownership, even when both inputs alias. */
@@ -26,10 +26,10 @@ static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_valu
 
 VPRIV codegen_value x64_umulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
-	return x64_mulhi(e, a, b, X_MULW);
+	return x64_mulhi(e, a, b, X64_OP_MULW);
 }
 
 VPRIV codegen_value x64_smulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
-	return x64_mulhi(e, a, b, X_SMULW);
+	return x64_mulhi(e, a, b, X64_OP_SMULW);
 }

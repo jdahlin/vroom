@@ -137,7 +137,7 @@ static inline bool codegen_symbol_is_inline_only(const sym *y)
 #define T(c, t) AST_TYPE_OF(c, t)
 #define KIND(c, t) AST_TYPE_KIND_OF(c, t)
 
-#include "../arch/a64/codegen/ins.h"
+#include "../arch/a64/codegen/instruction.h"
 #include "rec/record.h"
 #include "flow/flow.h"
 #include "flow/values.h"
@@ -239,7 +239,7 @@ typedef struct codegen_unit {
 	_Atomic uint64_t print_nanoseconds, walk_nanoseconds, walk_total;
 	uint8_t *inline_everywhere;			/* per sym: static function to inline everywhere (kept across rounds) */
 	_Atomic uint32_t newly_marked_count;		/* marked this round */
-	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in finish_function */
+	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in a64_function_finish */
 	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
 	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
@@ -334,16 +334,16 @@ typedef struct codegen_slot_allocation {
 } codegen_slot_allocation;
 #define CODEGEN_SLOT_ALLOCATION_CAPACITY (1u << 20)
 /*
- * At -O1 and up a record addressing a frame slot (I_LD/I_ST, add/sub
- * immediate with rn FRAME) names the live allocation it is inside in
+ * At -O1 and up a record addressing a frame slot (A64_OP_LD/A64_OP_ST, add/sub
+ * immediate with rn A64_REGISTER_FRAME) names the live allocation it is inside in
  * rm | ra << 8 (index + 1; 0: none found, or past 65535).  Slots are
  * reused once a scope ends, so this tells opt.c which accesses belong to
  * one object.  An address at the start of an allocation that is also just
  * past the end of the live one below names that one too, in cond | sh << 8
- * (CODEGEN_SLOT_TAG_SECOND).  finish_function clears the tags before the frame layout.
+ * (CODEGEN_SLOT_TAG_SECOND).  a64_function_finish clears the tags before the frame layout.
  */
 #define CODEGEN_SLOT_TAG(i) ((uint32_t)(i)->rm | (uint32_t)(i)->ra << 8)
-#define CODEGEN_SLOT_TAG_SECOND(i) ((uint32_t)(i)->cond | (uint32_t)(i)->sh << 8)
+#define CODEGEN_SLOT_TAG_SECOND(i) ((uint32_t)(i)->condition | (uint32_t)(i)->shift << 8)
 
 #define CODEGEN_VLA_SIZE_MAX 64		/* VLA size expressions live at once in a function */
 
@@ -351,7 +351,7 @@ typedef struct codegen_context {
 	codegen_unit *unit;
 	cc *compile_context;
 	/* records of the function being emitted */
-	ins *records;
+	a64_record *records;
 	uint32_t record_count, record_capacity;
 	codegen_slot_allocation *slot_allocations;		/* the function's slot() allocations */
 	uint32_t slot_allocation_count;
@@ -373,7 +373,7 @@ typedef struct codegen_context {
 	codegen_binding *bindings;		/* per sym */
 	codegen_label *label_map;		/* per label */
 	uint32_t *case_labels;	/* per node (AST_NODE_CASE / AST_NODE_DEFAULT): local label */
-	uint32_t *label_reference_counts;	/* per local label: branches to it; LREF_EXT: also reached from outside the records */
+	uint32_t *label_reference_counts;	/* per local label: branches to it; CODEGEN_LABEL_EXTERNAL: also reached from outside the records */
 	uint32_t label_count, label_capacity;
 	/*
 	 * Known values of locals only ever assigned constants (CODEGEN_SYMBOL_CONSTANT_WRITTEN):
@@ -437,10 +437,10 @@ typedef struct codegen_context {
 	jmp_buf bail_jump;
 	struct wst *wasm_state;		/* WASM: arch/wasm/codegen/ state (wimpl.h) */
 	struct walk_state *walk_state;	/* X86: the walker's state (codegen/walk/walk.h) */
-	struct xst *x64_context;	/* X86: arch/x64/codegen/ state (x64impl.h) */
+	struct x64_lowering_context *x64_context;	/* X86: arch/x64/codegen/ state (x64-internal.h) */
 	struct virbuild_context *vir_builder;	/* the VIR builder's state (codegen/vir/, PLAN-vir.md) */
 	bool vir_try;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
-	bool vir_lowering;		/* the records are VIR's lowering (finish_function's clean-ups for it) */
+	bool vir_lowering;		/* the records are VIR's lowering (a64_function_finish's clean-ups for it) */
 	const char *vir_failure_reason;	/* ... and why (NULL: it did not fail) */
 	bool msabi;		/* X86: the next WALK_LOWER(classify/call/params/va_*) uses the Microsoft x64 convention
 				   (the walker sets it from cc_func_abi right before each; PLAN-win64.md WIN2) */
@@ -511,7 +511,7 @@ typedef struct codegen_commit_context {
 
 /* a pending fixup on word k of an instruction */
 typedef struct codegen_commit_fixup { uint8_t word_index, label_flag; uint32_t type, reference; int64_t offset; } codegen_commit_fixup;
-typedef struct codegen_commit_patch { uint32_t record_index, word_position; codegen_commit_fixup fixup; uint8_t is_relaxed; } codegen_commit_patch;	/* record k at word at; lng: relaxed (r_relax) */
+typedef struct codegen_commit_patch { uint32_t record_index, word_position; codegen_commit_fixup fixup; uint8_t is_relaxed; } codegen_commit_patch;	/* record k at word at; lng: relaxed (a64_commit_relax) */
 typedef struct codegen_commit_label { uint32_t serial, flags, fragment, offset, pending; } codegen_commit_label;
 typedef struct codegen_commit_pending_branch { uint32_t next, record_index, fragment, offset; uint8_t *bytes; } codegen_commit_pending_branch;	/* a branch waiting for its label */
 
@@ -545,7 +545,7 @@ typedef struct a64_abi_argument {
 
 /* ---------------- spilling caller-saved temporaries around calls ---------------- */
 
-/* ins.sh of the I_ST/I_LD pair spill_live/unspill put around a call (opt.c drops dead ones) */
+/* ins.sh of the A64_OP_ST/A64_OP_LD pair a64_abi_temporaries_spill/unspill put around a call (opt.c drops dead ones) */
 #define A64_SPILL_RECORD 1
 
 typedef struct a64_abi_spill {
@@ -726,10 +726,10 @@ typedef struct record_copy_scan {
 	void *ctx;
 } record_copy_scan;
 VPRIV bool record_copy_forward(const record_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v);
-/* insn.c */
-extern const char cond_name[][8];
-VPRIV bool logimm_ok(uint64_t v, int x);
-static inline void reg(tbuf *b, int r, int x);
+/* logical-immediate.c */
+extern const char a64_condition_names[][8];
+VPRIV bool a64_logical_immediate_is_encodable(uint64_t v, int x);
+static inline void a64_register_name_append(tbuf *b, int r, int x);
 /* tu.c */
 extern const uint8_t codegen_temporary_registers[CODEGEN_TEMPORARY_COUNT];
 
@@ -771,85 +771,85 @@ VPRIV bool codegen_symbol_name_is_quoted(cc *c, uint32_t s);
 VPRIV void codegen_reference_name_append(cc *c, tbuf *b, uint32_t r);
 VPRIV void codegen_reference_offset_append(cc *c, tbuf *b, uint32_t r, int64_t off);
 /* darwin.c */
-VPRIV void darwin_text(tbuf *o, const char *t, size_t tn);
+VPRIV void a64_darwin_text_translate(tbuf *o, const char *t, size_t tn);
 /* print.c */
-VPRIV void p_lbl(tbuf *b, uint32_t fid, uint32_t l);
-VPRIV void print_ins(cc *c, tbuf *b, const ins *i, uint32_t fid, const char *raw);
+VPRIV void a64_print_label(tbuf *b, uint32_t fid, uint32_t l);
+VPRIV void a64_record_print(cc *c, tbuf *b, const a64_record *i, uint32_t fid, const char *raw);
 /* obj.c */
 static inline bool codegen_context_is_direct(const codegen_context *e);
 VPRIV size_t codegen_item_open(codegen_context *e, uint32_t kind);
 VPRIV void codegen_item_close(codegen_context *e, size_t h);
 VPRIV void *codegen_item_room_need(codegen_context *e, size_t n);
-VPRIV int a64_replay(codegen_commit_context *R, const codegen_code_header *h);
+VPRIV int a64_function_commit(codegen_commit_context *R, const codegen_code_header *h);
 VPRIV int codegen_commit_fail(codegen_commit_context *R, const char *msg);
 VPRIV uint32_t codegen_commit_symbol_find(codegen_commit_context *R, uint32_t ref);
-VPRIV bool x64_obj_record(codegen_context *e, const record *i, record *out);
-VPRIV int x64_replay(codegen_commit_context *R, const char *p, size_t n);
+VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record *out);
+VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n);
 VPRIV int codegen_commit_chunk(codegen_commit_context *R, const char *p, size_t n);
 /* label.c */
-static inline ins *put(codegen_context *e, int op);
-static inline void op3(codegen_context *e, int op, int x, int rd, int rn, int rm);
-static inline void op3s(codegen_context *e, int op, int x, int rd, int rn, int rm, int kind, int sh);
-static inline void op4(codegen_context *e, int op, int x, int rd, int rn, int rm, int ra);
-static inline void opi(codegen_context *e, int op, int x, int rd, int rn, int64_t imm);
-static inline void opbf(codegen_context *e, int op, int x, int rd, int rn, int immr, int imms);
-static inline void movi(codegen_context *e, int x, int rd, int64_t v);
-static inline void mov(codegen_context *e, int x, int rd, int rn);
-static inline void cset(codegen_context *e, int rd, int cond);
-static inline int last_cset(codegen_context *e, const codegen_value *v);
-static inline void mem(codegen_context *e, int op, int sz, int ext, int rd, int base, int64_t off);
-static inline void symop(codegen_context *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off);
-VPRIV uint32_t newlabel(codegen_context *e);
-VPRIV void kv_edge(codegen_context *e, uint32_t l);
+static inline a64_record *a64_record_emit(codegen_context *e, int op);
+static inline void a64_record_emit_three_registers(codegen_context *e, int op, int x, int rd, int rn, int rm);
+static inline void a64_record_emit_three_registers_shifted(codegen_context *e, int op, int x, int rd, int rn, int rm, int kind, int sh);
+static inline void a64_record_emit_four_registers(codegen_context *e, int op, int x, int rd, int rn, int rm, int ra);
+static inline void a64_record_emit_immediate(codegen_context *e, int op, int x, int rd, int rn, int64_t imm);
+static inline void a64_record_emit_bitfield(codegen_context *e, int op, int x, int rd, int rn, int immr, int imms);
+static inline void a64_record_emit_move_immediate(codegen_context *e, int x, int rd, int64_t v);
+static inline void a64_record_emit_move(codegen_context *e, int x, int rd, int rn);
+static inline void a64_record_emit_condition_set(codegen_context *e, int rd, int cond);
+static inline int a64_record_condition_set_last(codegen_context *e, const codegen_value *v);
+static inline void a64_record_emit_memory(codegen_context *e, int op, int sz, int ext, int rd, int base, int64_t off);
+static inline void a64_record_emit_symbol(codegen_context *e, int op, int sz, int ext, int rd, int rn, uint32_t ref, int64_t off);
+VPRIV uint32_t a64_label_new(codegen_context *e);
+VPRIV void a64_label_edge_add(codegen_context *e, uint32_t l);
 VPRIV void deflabel(codegen_context *e, uint32_t l);
 VPRIV void deflabel_loop(codegen_context *e, uint32_t l, bool forced);
-VPRIV void deflabel_forced(codegen_context *e, uint32_t l);
+VPRIV void a64_label_define_forced(codegen_context *e, uint32_t l);
 /* builtin.c: atomics, LSE or ldaxr/stlxr loops */
 VPRIV void at_cas(codegen_context *e, unsigned sz, int rs, int rt, int rn);
 VPRIV void at_swp(codegen_context *e, unsigned sz, int rs, int rt, int rn);
 VPRIV void at_ldop(codegen_context *e, unsigned sz, unsigned opc, int rs, int rt, int rn);
-VPRIV void jump(codegen_context *e, uint32_t l);
-VPRIV void bcond(codegen_context *e, int cond, uint32_t l);
-VPRIV void cbz(codegen_context *e, bool nz, int x, int r, uint32_t l);
-VPRIV void tbz(codegen_context *e, bool nz, int r, int bit, uint32_t l);
-VPRIV uint32_t a64_words(const ins *i);
+VPRIV void a64_jump_emit(codegen_context *e, uint32_t l);
+VPRIV void a64_branch_condition_emit(codegen_context *e, int cond, uint32_t l);
+VPRIV void a64_branch_compare_zero_emit(codegen_context *e, bool nz, int x, int r, uint32_t l);
+VPRIV void a64_branch_test_bit_emit(codegen_context *e, bool nz, int r, int bit, uint32_t l);
+VPRIV uint32_t a64_record_word_count(const a64_record *i);
 /* value.c */
 VPRIV int treg(codegen_context *e);
 VPRIV void tfree(codegen_context *e, int r);
 VPRIV void val_free(codegen_context *e, const codegen_value *v);
-VPRIV int64_t slot(codegen_context *e, uint64_t size, uint32_t align);
-VPRIV void slot_tag(codegen_context *e, ins *i, int64_t off, int64_t len);
+VPRIV int64_t a64_frame_slot_allocate(codegen_context *e, uint64_t size, uint32_t align);
+VPRIV void a64_record_slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len);
 static inline codegen_value codegen_value_constant(i128 i);
 static inline codegen_value codegen_value_register(int r);
 static inline codegen_value codegen_value_address(uint32_t ref, i128 off);
 static inline codegen_value codegen_value_none(void);
-VPRIV void addr_of_ref(codegen_context *e, int rd, uint32_t ref, int64_t off);
+VPRIV void a64_reference_address_emit(codegen_context *e, int rd, uint32_t ref, int64_t off);
 VPRIV int toreg(codegen_context *e, codegen_value *v);
 VPRIV void toreg2(codegen_context *e, codegen_value *v, bool sgn);
 VPRIV void lfree(codegen_context *e, const codegen_lvalue *l);
-VPRIV int lbase(codegen_context *e, const codegen_lvalue *l, int64_t *off, int size);
-VPRIV int log2sz(uint64_t n);
-VPRIV void load_n(codegen_context *e, int rd, const codegen_lvalue *l, int n, int ext);
-VPRIV void store_n(codegen_context *e, int rs, const codegen_lvalue *l, int64_t extra, int n);
+VPRIV int a64_lvalue_base_register(codegen_context *e, const codegen_lvalue *l, int64_t *off, int size);
+VPRIV int a64_size_log2(uint64_t n);
+VPRIV void a64_lvalue_load(codegen_context *e, int rd, const codegen_lvalue *l, int n, int ext);
+VPRIV void a64_lvalue_store(codegen_context *e, int rs, const codegen_lvalue *l, int64_t extra, int n);
 VPRIV codegen_value laddr(codegen_context *e, codegen_lvalue *l);
 VPRIV codegen_lvalue lfromval(codegen_context *e, codegen_value v, uint32_t align);
 VPRIV void copy_mem(codegen_context *e, int dst, int src, uint64_t n);
 VPRIV void zero_mem(codegen_context *e, int dst, uint64_t n);
 /* abi.c */
-VPRIV int hfa(cc *c, ast_qualified_type t, int *n);
-VPRIV bool vec_small(cc *c, ast_qualified_type t);
-VPRIV void bvec_ret(codegen_context *e, ast_qualified_type t, int rs);
-VPRIV void bvec_res(codegen_context *e, ast_qualified_type t, int64_t sl);
-VPRIV void vec_small_ret(codegen_context *e, ast_qualified_type t, int rs);
-VPRIV void vec_small_res(codegen_context *e, ast_qualified_type t, int64_t sl);
-VPRIV bool is_sret(cc *c, ast_qualified_type t);
-VPRIV void classify_va(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a);
-VPRIV uint32_t abi_align(cc *c, ast_qualified_type t);
-VPRIV void classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a);
-VPRIV void spill_live(codegen_context *e, a64_abi_spill *s);
-VPRIV void unspill(codegen_context *e, const a64_abi_spill *s);
-VPRIV void call_fixed(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n);
-VPRIV void finish_function(codegen_context *e, uint32_t s);	/* arch/a64/codegen/func.c: optimise, lay out and print the records */
+VPRIV int a64_abi_hfa_classify(cc *c, ast_qualified_type t, int *n);
+VPRIV bool a64_abi_vector_is_small(cc *c, ast_qualified_type t);
+VPRIV void a64_abi_bool_vector_return(codegen_context *e, ast_qualified_type t, int rs);
+VPRIV void a64_abi_bool_vector_result_store(codegen_context *e, ast_qualified_type t, int64_t sl);
+VPRIV void a64_abi_small_vector_return(codegen_context *e, ast_qualified_type t, int rs);
+VPRIV void a64_abi_small_vector_result_store(codegen_context *e, ast_qualified_type t, int64_t sl);
+VPRIV bool a64_abi_result_is_indirect(cc *c, ast_qualified_type t);
+VPRIV void a64_abi_variadic_argument_classify(codegen_context *e, ast_qualified_type t, int *nsaa, a64_abi_argument *a);
+VPRIV uint32_t a64_abi_type_alignment(cc *c, ast_qualified_type t);
+VPRIV void a64_abi_argument_classify(codegen_context *e, ast_qualified_type t, int *ngrn, int *nsaa, a64_abi_argument *a);
+VPRIV void a64_abi_temporaries_spill(codegen_context *e, a64_abi_spill *s);
+VPRIV void a64_abi_temporaries_restore(codegen_context *e, const a64_abi_spill *s);
+VPRIV void a64_call_memory_function_emit(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n);
+VPRIV void a64_function_finish(codegen_context *e, uint32_t s);	/* arch/a64/codegen/func.c: optimise, lay out and print the records */
 VPRIV bool codegen_symbol_needs_got(cc *c, uint32_t ref);
 enum { WIN64_IMP = 1, WIN64_REFPTR };
 VPRIV int sym_win64_indirect(cc *c, uint32_t ref);	/* Windows: __imp_NAME, .refptr.NAME or direct (0) */
@@ -882,10 +882,10 @@ VPRIV void extend(codegen_context *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(codegen_context *e, uint32_t s);
 VPRIV void opt_function(codegen_context *e);
 /* arch/a64/codegen/unreachable.c */
-VPRIV void a64_unreachable(codegen_context *e);
+VPRIV void a64_unreachable_remove(codegen_context *e);
 enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
-VPRIV uint64_t opt_regs(codegen_context *e, unsigned *fl);
-VPRIV bool opt_noframe(codegen_context *e, uint32_t n);
+VPRIV uint64_t a64_registers_used(codegen_context *e, unsigned *fl);
+VPRIV bool a64_function_is_frameless(codegen_context *e, uint32_t n);
 VPRIV codegen_lvalue bind_lreg(codegen_context *e, uint32_t s);
 VPRIV codegen_value fold_int_bin(codegen_context *e, int op, ast_qualified_type ot, ast_qualified_type rt, i128 l, i128 r, bool *ok);
 VPRIV bool codegen_operator_is_comparison(int op);
@@ -898,13 +898,13 @@ VPRIV int emit_cmp2(codegen_context *e, int op, bool sg, codegen_value *a, codeg
 VPRIV int test_zero(codegen_context *e, codegen_value *v, ast_qualified_type t, uint32_t l, bool nz);
 VPRIV codegen_value tobool(codegen_context *e, codegen_value v, ast_qualified_type t);
 /* fp.c */
-static inline void word(codegen_context *e, uint32_t w);
+static inline void a64_record_emit_word(codegen_context *e, uint32_t w);
 VPRIV int fpk(codegen_context *e, ast_qualified_type t);
-static inline uint32_t f_in(int d, int vr, int r);
-static inline uint32_t f_out(int d, int r, int vr);
+static inline uint32_t a64_word_fmov_to_vector(int d, int vr, int r);
+static inline uint32_t a64_word_fmov_from_vector(int d, int r, int vr);
 VPRIV codegen_value f_const(int d, double x);
-static inline uint32_t q_in_hi(int vr, int r);
-static inline uint32_t q_out_hi(int r, int vr);
+static inline uint32_t a64_word_fmov_high_to_vector(int vr, int r);
+static inline uint32_t a64_word_fmov_high_from_vector(int r, int vr);
 VPRIV void vr_store(codegen_context *e, int sz, int vr, int base, int64_t off);
 VPRIV void vr_load(codegen_context *e, int sz, int vr, int base, int64_t off);
 VPRIV i128 ld_of_d(double x);
@@ -964,7 +964,7 @@ VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc, uint32_t
 VPRIV void codegen_debug_row_add(codegen_context *e, uint32_t loc);	/* -g: a line-table row at the next record */
 VPRIV void codegen_debug_rows_remap(codegen_context *e, uint32_t *j, uint32_t k, uint32_t n);	/* compaction, k ascending */
 /* asm.c */
-VPRIV void gen_asm(codegen_context *e, uint32_t n);
+VPRIV void a64_asm_emit(codegen_context *e, uint32_t n);
 /* func.c */
 VPRIV void codegen_chunk_add(codegen_context *e, uint64_t key, size_t start);
 VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align);
@@ -1100,6 +1100,6 @@ static inline void codegen_log_append(codegen_context *e, uint32_t tag, uint32_t
 	e->round_log[e->round_log_count++] = v;
 }
 
-#include "../arch/a64/codegen/a64impl.h"
+#include "../arch/a64/codegen/a64-internal.h"
 
 #endif

@@ -201,6 +201,18 @@ The VLD_TIME phase timer moved out of the diagnostics into
 track I, held by the owner; `utils/ar.c` keeps `ar_error_report`, which
 writes to vccd's request descriptor, until then.
 
+Left in step 3 (2026-11-13), with the reason:
+- One ELF validator: `ld_object_is_valid` (relocatable inputs, extended
+  section numbering, a message per check) and `objcopy_elf_is_valid`
+  (executables too, program headers, one message) check the same section
+  header, string table and symbol table rules.  The shared part would be a
+  checker in `platform/linux/` that returns which rule failed, so each tool
+  keeps its messages; not started.
+- One option table per tool: track I, held by the owner.
+- Arena and thread pool to the shared library and the scheduler: the
+  scheduler's track (one scheduler, PLAN-quality.md); the linker's
+  `region.c` and `thread-pool.c` stay until it lands.
+
 Status (2026-11-13): the file mappings of the ELF linker (`ld_file_map`) and
 of objcopy and nm (`objcopy_elf_open`, `nm_inputs_collect`) go through
 `port/file.h` (`vfile_map_fd`, now public: the callers open the file
@@ -228,7 +240,7 @@ and 13 spaces); a corrupt name field is classified by one rule
 else a short name), so the three tools no longer disagree on it; and a thin
 archive whose `//` member goes past the end of the file is "malformed"
 instead of an over-read.  Valid GNU and thin archives give byte-identical
-results.  Next: the diagnostics function.
+results.
 
 ### 4. One linker core
 
@@ -241,8 +253,28 @@ Design (2026-11-13): `DESIGN-linker-core.md`.  The core is the entry, the
 context, inputs and archives, and diagnostics; resolution, layout, the ELF
 symbol table and the output writer stay per format, with the reasons and two
 questions for the owner there.  PRs: a Mach-O comparison harness, Mach-O
-state in a context, one entry and lock, Mach-O names on
+state in a context, no lock for Mach-O links, Mach-O names on
 `common/string-index.h`.
+
+Status: PR 1 of `DESIGN-linker-core.md` (Mach-O state in a context) is
+done: `struct macho_context` holds the Mach-O linker's 24 per-link
+variables, `macho_link_locked` creates it and `macho_context_destroy` frees
+it (`macho_state_reset` is gone); the name sort that read the table from a
+qsort comparator sorts (name, id) pairs.  Left at file scope in
+`macho-linker.c`: the libSystem export table (process-wide, read once).
+
+PR 2 (one entry), done differently from the design: with the state in its
+context, a Mach-O link needs no lock at all, so instead of taking the ELF
+link lock for both formats (which would serialise host-program links with
+ELF links), Mach-O's own lock is gone and Mach-O links run concurrently;
+the libSystem table is read once under a lock of its own
+(`macho_libsystem_load`).  `ld_main` stays the one entry; the ELF lock is
+unchanged.
+
+PR 3 is done: the Mach-O linker's two name tables (globals, libSystem
+exports) are `common/string-index.h` tables; its private FNV hash and the
+hand-written probing and growth are gone.  Ids stay in insertion order, so
+the output is the same.
 
 ## Decisions (coordinator, on the owner's behalf, 2026-11-13)
 

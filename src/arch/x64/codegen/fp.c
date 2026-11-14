@@ -1,7 +1,7 @@
-/* vcc code generator, x86-64: floating point (x64impl.h).  float and double
+/* vcc code generator, x86-64: floating point (x64-internal.h).  float and double
  * in SSE registers (scalar ss/sd); long double on the x87 stack, its values
  * in 16-byte frame slots (the walker holds their addresses, as for records). */
-#include "x64impl.h"
+#include "x64-internal.h"
 
 VPRIV bool x64_ldmem(void) { return true; }
 
@@ -15,18 +15,18 @@ VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz)
 {
 	x64_nofp(e);
 	if (l && (l->offset < INT32_MIN || l->offset > INT32_MAX)) {
-		uint32_t live = e->x64_context->live;
-		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->live |= 1u << l->register_number;
+		uint32_t live = e->x64_context->temporaries_in_use;
+		if (l->kind == CODEGEN_LVALUE_REGISTER && l->register_number < 32) e->x64_context->temporaries_in_use |= 1u << l->register_number;
 		int address = x64_treg(e);
-		x64_mem(e, X_LEA, 8, address, l, false);
+		x64_record_emit_memory(e, X64_OP_LEA, 8, address, l, false);
 		codegen_lvalue at = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)address };
 		x64_x87(e, xf, &at, sz);
-		e->x64_context->live = live;
+		e->x64_context->temporaries_in_use = live;
 		return;
 	}
 	uint32_t ref = 0;
-	int base = l ? x64_base(e, l, &ref) : 0;
-	record *i = x64_put(e, X_X87);
+	int base = l ? x64_memory_base_register(e, l, &ref) : 0;
+	record *i = x64_record_emit(e, X64_OP_X87);
 
 	i->condition = (uint8_t)xf;
 	i->size = (uint8_t)sz;
@@ -37,8 +37,8 @@ VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz)
 	}
 }
 
-VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l) { x64_x87(e, XF_LDT, l, 10); }
-VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l) { x64_x87(e, XF_STPT, l, 10); }
+VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l) { x64_x87(e, X64_X87_LDT, l, 10); }
+VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l) { x64_x87(e, X64_X87_STPT, l, 10); }
 
 static codegen_lvalue x64_at(int r) { return (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r, .align = 16 }; }
 static codegen_lvalue x64_tmpslot(codegen_context *e, uint64_t n) { return (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, n, n >= 16 ? 16 : 8), .align = 8 }; }
@@ -53,7 +53,7 @@ static int x64_ldnew(codegen_context *e)
 
 static void x64_jcc(codegen_context *e, int cc, uint32_t l)
 {
-	record *i = x64_put(e, X_JCC);
+	record *i = x64_record_emit(e, X64_OP_JCC);
 
 	i->condition = (uint8_t)cc;
 	i->label = l;
@@ -89,8 +89,8 @@ VPRIV codegen_value x64_fconst(codegen_context *e, uint64_t bits, int size)
 	x64_nofp(e);
 	int r = x64_ftreg(e);
 
-	x64_movi(e, R11, (int64_t)bits);
-	x64_op3(e, X_MOV, size <= 4 ? 4 : 8, r, R11, XNOREG);
+	x64_record_emit_move_immediate(e, R11, (int64_t)bits);
+	x64_record_emit_three_registers(e, X64_OP_MOV, size <= 4 ? 4 : 8, r, R11, X64_REGISTER_NONE);
 	return x64_vr(r);
 }
 
@@ -108,34 +108,34 @@ VPRIV codegen_value x64_fbin(codegen_context *e, int op, ast_qualified_type t, c
 	}
 
 	if (x64_isld(c, t)) {
-		static const int xf[4] = { XF_ADD, XF_SUB, XF_MUL, XF_DIV };
+		static const int xf[4] = { X64_X87_ADD, X64_X87_SUB, X64_X87_MUL, X64_X87_DIV };
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), rd = x64_ldnew(e);
 		codegen_lvalue ma = x64_at(ra), mb = x64_at(rb), md = x64_at(rd);
 
-		x64_x87(e, XF_LDT, &ma, 10);
-		x64_x87(e, XF_LDT, &mb, 10);
+		x64_x87(e, X64_X87_LDT, &ma, 10);
+		x64_x87(e, X64_X87_LDT, &mb, 10);
 		x64_x87(e, xf[k], NULL, 0);
-		x64_x87(e, XF_STPT, &md, 10);
+		x64_x87(e, X64_X87_STPT, &md, 10);
 		x64_tfree(e, ra);
 		x64_tfree(e, rb);
 		return x64_vr(rd);
 	}
-	x64_op3(e, X_FADD + k, x64_fsz(c, t), a.register_number, a.register_number, b.register_number);
+	x64_record_emit_three_registers(e, X64_OP_FADD + k, x64_fsz(c, t), a.register_number, a.register_number, b.register_number);
 	x64_tfree(e, b.register_number);
 	return a;
 }
 
 VPRIV codegen_value x64_fsqrt(codegen_context *e, ast_qualified_type t, codegen_value a)
 {
-	x64_op3(e, X_FSQRT, x64_fsz(e->compile_context, t), a.register_number, a.register_number, XNOREG);
+	x64_record_emit_three_registers(e, X64_OP_FSQRT, x64_fsz(e->compile_context, t), a.register_number, a.register_number, X64_REGISTER_NONE);
 	return a;
 }
 
 VPRIV codegen_value x64_root4(codegen_context *e, codegen_value a)
 {
 	/* walk_value_emit materializes double values in an SSE temporary. */
-	x64_op3(e, X_FSQRT, 8, a.register_number, a.register_number, XNOREG);
-	x64_op3(e, X_FSQRT, 8, a.register_number, a.register_number, XNOREG);
+	x64_record_emit_three_registers(e, X64_OP_FSQRT, 8, a.register_number, a.register_number, X64_REGISTER_NONE);
+	x64_record_emit_three_registers(e, X64_OP_FSQRT, 8, a.register_number, a.register_number, X64_REGISTER_NONE);
 	return a;
 }
 
@@ -153,9 +153,9 @@ VPRIV codegen_value x64_fneg(codegen_context *e, ast_qualified_type t, codegen_v
 			codegen_lvalue hi = x64_at(rd);
 
 			hi.offset = 15;
-			x64_mem(e, X_LD, 1, R11, &hi, false);
-			x64_op3(e, X_XORI, 4, R11, R11, XNOREG)->immediate = 0x80;
-			x64_mem(e, X_ST, 1, R11, &hi, false);
+			x64_record_emit_memory(e, X64_OP_LD, 1, R11, &hi, false);
+			x64_record_emit_three_registers(e, X64_OP_XORI, 4, R11, R11, X64_REGISTER_NONE)->immediate = 0x80;
+			x64_record_emit_memory(e, X64_OP_ST, 1, R11, &hi, false);
 		}
 		return x64_vr(rd);
 	}
@@ -164,15 +164,15 @@ VPRIV codegen_value x64_fneg(codegen_context *e, ast_qualified_type t, codegen_v
 		int ra = x64_toreg(e, &a, 8), rd = x64_ldnew(e);
 		codegen_lvalue ma = x64_at(ra), md = x64_at(rd);
 
-		x64_x87(e, XF_LDT, &ma, 10);
-		x64_x87(e, XF_CHS, NULL, 0);
-		x64_x87(e, XF_STPT, &md, 10);
+		x64_x87(e, X64_X87_LDT, &ma, 10);
+		x64_x87(e, X64_X87_CHS, NULL, 0);
+		x64_x87(e, X64_X87_STPT, &md, 10);
 		x64_tfree(e, ra);
 		return x64_vr(rd);
 	}
-	x64_movi(e, R11, (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
-	x64_op3(e, X_MOV, x64_fsz(c, t), XMM15, R11, XNOREG);
-	x64_op3(e, X_FXOR, 8, a.register_number, a.register_number, XMM15);
+	x64_record_emit_move_immediate(e, R11, (KIND(c, t) == AST_TYPE_FLOAT16 || KIND(c, t) == AST_TYPE_BFLOAT16) ? 0x8000 : x64_fsz(c, t) == 4 ? (int64_t)0x80000000 : INT64_MIN);
+	x64_record_emit_three_registers(e, X64_OP_MOV, x64_fsz(c, t), XMM15, R11, X64_REGISTER_NONE);
+	x64_record_emit_three_registers(e, X64_OP_FXOR, 8, a.register_number, a.register_number, XMM15);
 	return a;
 }
 
@@ -181,7 +181,7 @@ VPRIV codegen_value x64_fcmp(codegen_context *e, int op, ast_qualified_type t, c
 {
 	cc *c = e->compile_context;
 	bool swap = op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL;	/* a < b is b > a: "above" is false for NaN */
-	int cc = op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ? CC_A : CC_AE;
+	int cc = op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ? X64_CONDITION_A : X64_CONDITION_AE;
 	int rd;
 
 	if (x64_isq(c, t))
@@ -192,33 +192,33 @@ VPRIV codegen_value x64_fcmp(codegen_context *e, int op, ast_qualified_type t, c
 		return x64_fcmp(e, op, codegen_type_primitive(AST_TYPE_FLOAT), a, b);
 	}
 	if (op == WALK_FLOAT_COMPARE_UNORDERED)
-		cc = CC_P;
+		cc = X64_CONDITION_P;
 	else if (op == WALK_FLOAT_COMPARE_ORDERED_NOT_EQUAL)
-		cc = CC_NE;
+		cc = X64_CONDITION_NE;
 	if (x64_isld(c, t)) {
 		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
 		codegen_lvalue ma = x64_at(ra), mb = x64_at(rb);
 
 		/* fucomip compares st0 with st1: st0 is the left of the comparison */
-		x64_x87(e, XF_LDT, swap ? &ma : &mb, 10);
-		x64_x87(e, XF_LDT, swap ? &mb : &ma, 10);
-		x64_x87(e, XF_UCOMIP, NULL, 0);
-		x64_x87(e, XF_POP, NULL, 0);
+		x64_x87(e, X64_X87_LDT, swap ? &ma : &mb, 10);
+		x64_x87(e, X64_X87_LDT, swap ? &mb : &ma, 10);
+		x64_x87(e, X64_X87_UCOMIP, NULL, 0);
+		x64_x87(e, X64_X87_POP, NULL, 0);
 		x64_tfree(e, ra);
 		x64_tfree(e, rb);
 	} else {
 		if (swap)
-			x64_op3(e, X_FCMP, x64_fsz(c, t), XNOREG, b.register_number, a.register_number);
+			x64_record_emit_three_registers(e, X64_OP_FCMP, x64_fsz(c, t), X64_REGISTER_NONE, b.register_number, a.register_number);
 		else
-			x64_op3(e, X_FCMP, x64_fsz(c, t), XNOREG, a.register_number, b.register_number);
+			x64_record_emit_three_registers(e, X64_OP_FCMP, x64_fsz(c, t), X64_REGISTER_NONE, a.register_number, b.register_number);
 		x64_tfree(e, a.register_number);
 		x64_tfree(e, b.register_number);
 	}
 	rd = x64_treg(e);
 	if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL)
-		x64_op3(e, X_FSETCC, 4, rd, XNOREG, XNOREG)->condition = op == LEX_TOKEN_EXCLAMATION_EQUAL;
+		x64_record_emit_three_registers(e, X64_OP_FSETCC, 4, rd, X64_REGISTER_NONE, X64_REGISTER_NONE)->condition = op == LEX_TOKEN_EXCLAMATION_EQUAL;
 	else
-		x64_op3(e, X_SETCC, 4, rd, XNOREG, XNOREG)->condition = (uint8_t)cc;
+		x64_record_emit_three_registers(e, X64_OP_SETCC, 4, rd, X64_REGISTER_NONE, X64_REGISTER_NONE)->condition = (uint8_t)cc;
 	return x64_vr(rd);
 }
 
@@ -238,7 +238,7 @@ typedef struct { int k, r; } tfarg;
 static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int n, int rk)
 {
 	x64_nofp(e);
-	xst *X = e->x64_context;
+	x64_lowering_context *X = e->x64_context;
 	uint32_t saved, fsaved;
 	int nx = 0, ng = 0, pad, stk = 0, res;
 	codegen_lvalue out = { 0 };
@@ -263,7 +263,7 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 				x64_copy(e, rd, a[k].r, 16);
 				x64_tfree(e, rd);
 			} else {
-				x64_mem(e, X_ST, 8, a[k].r, &d, false);
+				x64_record_emit_memory(e, X64_OP_ST, 8, a[k].r, &d, false);
 			}
 		}
 		for (int k = 0; k < n; k++)
@@ -273,72 +273,72 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 		if (rk == TQ || rk == TX || rk == TW)
 			return x64_vr(x64_laddr(e, &out));
 		res = rk == TI ? x64_treg(e) : x64_ftreg(e);
-		x64_mem(e, X_LD, rk == TF ? 4 : 8, res, &out, false);
+		x64_record_emit_memory(e, X64_OP_LD, rk == TF ? 4 : 8, res, &out, false);
 		return x64_vr(res);
 	}
 	for (int k = 0; k < n; k++)
 		x64_tfree(e, a[k].r);	/* (the values stay in their registers until loaded below) */
-	saved = X->live & X_TEMPS, fsaved = X->live & X_FTEMPS;
+	saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
 	if (rk == TQ || rk == TX || rk == TW)
 		out = x64_tmpslot(e, 16);
 	e->has_calls = true;
 	for (int q = 0; q < 16; q++)
 		if (saved & (1u << q)) {
-			x64_op3(e, X_PUSH, 8, XNOREG, q, XNOREG);
-			X->pushes++;
+			x64_record_emit_three_registers(e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
+			X->outstanding_pushes++;
 		}
 	for (int q = XMM8; q < XMM15; q++)
 		if (fsaved & (1u << q)) {
 			codegen_lvalue d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP };
 
-			x64_put(e, X_ADJSP)->immediate = -8;
-			x64_mem(e, X_ST, 8, q, &d, false);
-			X->pushes++;
+			x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
+			x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
+			X->outstanding_pushes++;
 		}
 	for (int k = 0; k < n; k++)
 		stk += a[k].k == TX ? 16 : 0;
-	pad = X->pushes & 1 ? 8 : 0;
+	pad = X->outstanding_pushes & 1 ? 8 : 0;
 	if (pad + stk)
-		x64_put(e, X_ADJSP)->immediate = -(pad + stk);
+		x64_record_emit(e, X64_OP_ADJSP)->immediate = -(pad + stk);
 	for (int k = 0, so = 0; k < n; k++) {
 		codegen_lvalue m = x64_at(a[k].r);
 
 		switch (a[k].k) {
 		case TQ:
-			x64_mem(e, X_LD, 16, XMM0 + nx++, &m, false);
+			x64_record_emit_memory(e, X64_OP_LD, 16, XMM0 + nx++, &m, false);
 			break;
 		case TX:
 			for (int w = 0; w < 2; w++) {
 				codegen_lvalue s = m, d = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP, .offset = so + 8 * w };
 
 				s.offset = 8 * w;
-				x64_mem(e, X_LD, 8, R11, &s, false);
-				x64_mem(e, X_ST, 8, R11, &d, false);
+				x64_record_emit_memory(e, X64_OP_LD, 8, R11, &s, false);
+				x64_record_emit_memory(e, X64_OP_ST, 8, R11, &d, false);
 			}
 			so += 16;
 			break;
 		case TD: case TF:
-			x64_op3(e, X_MOV, 8, XMM0 + nx++, a[k].r, XNOREG);
+			x64_record_emit_three_registers(e, X64_OP_MOV, 8, XMM0 + nx++, a[k].r, X64_REGISTER_NONE);
 			break;
 		case TI:
-			x64_mov(e, x64_argreg(ng++), a[k].r);
+			x64_mov(e, x64_argument_register(ng++), a[k].r);
 			break;
 		case TW: {
 			codegen_lvalue hi = m;
 
 			hi.offset = 8;
-			x64_mem(e, X_LD, 8, x64_argreg(ng + 1), &hi, false);
-			x64_mem(e, X_LD, 8, x64_argreg(ng), &m, false);
+			x64_record_emit_memory(e, X64_OP_LD, 8, x64_argument_register(ng + 1), &hi, false);
+			x64_record_emit_memory(e, X64_OP_LD, 8, x64_argument_register(ng), &m, false);
 			ng += 2;
 			break;
 		}
 		}
 	}
-	i = x64_put(e, X_CALL);
+	i = x64_record_emit(e, X64_OP_CALL);
 	i->reference = CODEGEN_FIXED_REFERENCE(fn);
 	switch (rk) {
 	case TQ:
-		x64_mem(e, X_ST, 16, XMM0, &out, false);
+		x64_record_emit_memory(e, X64_OP_ST, 16, XMM0, &out, false);
 		break;
 	case TX:
 		x64_x87st(e, &out);
@@ -347,37 +347,37 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 		codegen_lvalue hi = out;
 
 		hi.offset += 8;
-		x64_mem(e, X_ST, 8, RAX, &out, false);
-		x64_mem(e, X_ST, 8, RDX, &hi, false);
+		x64_record_emit_memory(e, X64_OP_ST, 8, RAX, &out, false);
+		x64_record_emit_memory(e, X64_OP_ST, 8, RDX, &hi, false);
 		break;
 	}
 	case TD: case TF:
-		x64_op3(e, X_MOV, 8, XMM15, XMM0, XNOREG);
+		x64_record_emit_three_registers(e, X64_OP_MOV, 8, XMM15, XMM0, X64_REGISTER_NONE);
 		break;
 	default:
 		x64_mov(e, R11, RAX);
 		break;
 	}
 	if (pad + stk)
-		x64_put(e, X_ADJSP)->immediate = pad + stk;
+		x64_record_emit(e, X64_OP_ADJSP)->immediate = pad + stk;
 	for (int q = XMM15 - 1; q >= XMM8; q--)
 		if (fsaved & (1u << q)) {
 			codegen_lvalue s2 = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP };
 
-			x64_mem(e, X_LD, 8, q, &s2, false);
-			x64_put(e, X_ADJSP)->immediate = 8;
-			X->pushes--;
+			x64_record_emit_memory(e, X64_OP_LD, 8, q, &s2, false);
+			x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
+			X->outstanding_pushes--;
 		}
 	for (int q = 15; q >= 0; q--)
 		if (saved & (1u << q)) {
-			x64_op3(e, X_POP, 8, q, XNOREG, XNOREG);
-			X->pushes--;
+			x64_record_emit_three_registers(e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
+			X->outstanding_pushes--;
 		}
 	if (rk == TQ || rk == TX || rk == TW)
 		return x64_vr(x64_laddr(e, &out));
 	if (rk == TD || rk == TF) {
 		res = x64_ftreg(e);
-		x64_op3(e, X_MOV, 8, res, XMM15, XNOREG);
+		x64_record_emit_three_registers(e, X64_OP_MOV, 8, res, XMM15, X64_REGISTER_NONE);
 		return x64_vr(res);
 	}
 	res = x64_treg(e);
@@ -406,19 +406,19 @@ static codegen_value x64_qcmp(codegen_context *e, int op, codegen_value a, codeg
 		x64_mov(e, bc, br);
 		codegen_value lt = x64_qcmp(e, LEX_TOKEN_LESS, x64_vr(ac), x64_vr(bc));
 		codegen_value gt = x64_qcmp(e, LEX_TOKEN_GREATER, a, b);
-		x64_op3(e, X_OR, 4, lt.register_number, lt.register_number, gt.register_number);
+		x64_record_emit_three_registers(e, X64_OP_OR, 4, lt.register_number, lt.register_number, gt.register_number);
 		x64_tfree(e, gt.register_number);
 		return lt;
 	}
 	int fn = op == WALK_FLOAT_COMPARE_UNORDERED ? CODEGEN_LIBRARY_UNORDTF2 : op == LEX_TOKEN_EQUAL_EQUAL ? CODEGEN_LIBRARY_EQTF2 : op == LEX_TOKEN_EXCLAMATION_EQUAL ? CODEGEN_LIBRARY_NETF2 : op == LEX_TOKEN_LESS ? CODEGEN_LIBRARY_LTTF2 :
 		 op == LEX_TOKEN_LESS_EQUAL ? CODEGEN_LIBRARY_LETF2 : op == LEX_TOKEN_GREATER ? CODEGEN_LIBRARY_GTTF2 : CODEGEN_LIBRARY_GETF2;
-	int cc = op == WALK_FLOAT_COMPARE_UNORDERED ? CC_NE : op == LEX_TOKEN_EQUAL_EQUAL ? CC_E : op == LEX_TOKEN_EXCLAMATION_EQUAL ? CC_NE : op == LEX_TOKEN_LESS ? CC_L :
-		 op == LEX_TOKEN_LESS_EQUAL ? CC_LE : op == LEX_TOKEN_GREATER ? CC_G : CC_GE;
+	int cc = op == WALK_FLOAT_COMPARE_UNORDERED ? X64_CONDITION_NE : op == LEX_TOKEN_EQUAL_EQUAL ? X64_CONDITION_E : op == LEX_TOKEN_EXCLAMATION_EQUAL ? X64_CONDITION_NE : op == LEX_TOKEN_LESS ? X64_CONDITION_L :
+		 op == LEX_TOKEN_LESS_EQUAL ? X64_CONDITION_LE : op == LEX_TOKEN_GREATER ? X64_CONDITION_G : X64_CONDITION_GE;
 	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
 	codegen_value r = x64_tfcall(e, fn, ar, 2, TI);
 
-	x64_op3(e, X_TEST, 4, XNOREG, r.register_number, XNOREG);
-	x64_op3(e, X_SETCC, 4, r.register_number, XNOREG, XNOREG)->condition = (uint8_t)cc;
+	x64_record_emit_three_registers(e, X64_OP_TEST, 4, X64_REGISTER_NONE, r.register_number, X64_REGISTER_NONE);
+	x64_record_emit_three_registers(e, X64_OP_SETCC, 4, r.register_number, X64_REGISTER_NONE, X64_REGISTER_NONE)->condition = (uint8_t)cc;
 	return r;
 }
 
@@ -488,22 +488,22 @@ static codegen_value x64_i2f(codegen_context *e, int r, int size, bool sgn, int 
 	if (sgn || size < 8) {
 		if (!sgn && size == 4)
 			x64_ext(e, r, 4, false);	/* (zero-extended: converted as 64 bits) */
-		x64_op3(e, X_CVTI2F, fs, x, r, XNOREG)->shift = (uint8_t)(sgn && size <= 4 ? 4 : 8);
+		x64_record_emit_three_registers(e, X64_OP_CVTI2F, fs, x, r, X64_REGISTER_NONE)->shift = (uint8_t)(sgn && size <= 4 ? 4 : 8);
 	} else {
 		/* unsigned 64 bits: halved (keeping the low bit) and doubled when the top bit is set */
 		uint32_t lbig = walk_label_new(e), ldone = walk_label_new(e);
 
-		x64_op3(e, X_TEST, 8, XNOREG, r, XNOREG);
-		x64_jcc(e, CC_S, lbig);
-		x64_op3(e, X_CVTI2F, fs, x, r, XNOREG)->shift = 8;
+		x64_record_emit_three_registers(e, X64_OP_TEST, 8, X64_REGISTER_NONE, r, X64_REGISTER_NONE);
+		x64_jcc(e, X64_CONDITION_S, lbig);
+		x64_record_emit_three_registers(e, X64_OP_CVTI2F, fs, x, r, X64_REGISTER_NONE)->shift = 8;
 		x64_jump(e, ldone);
 		x64_label(e, lbig);
 		x64_mov(e, R11, r);
-		x64_op3(e, X_SHRI, 8, R11, R11, XNOREG)->immediate = 1;
-		x64_op3(e, X_ANDI, 8, r, r, XNOREG)->immediate = 1;
-		x64_op3(e, X_OR, 8, R11, R11, r);
-		x64_op3(e, X_CVTI2F, fs, x, R11, XNOREG)->shift = 8;
-		x64_op3(e, X_FADD, fs, x, x, x);
+		x64_record_emit_three_registers(e, X64_OP_SHRI, 8, R11, R11, X64_REGISTER_NONE)->immediate = 1;
+		x64_record_emit_three_registers(e, X64_OP_ANDI, 8, r, r, X64_REGISTER_NONE)->immediate = 1;
+		x64_record_emit_three_registers(e, X64_OP_OR, 8, R11, R11, r);
+		x64_record_emit_three_registers(e, X64_OP_CVTI2F, fs, x, R11, X64_REGISTER_NONE)->shift = 8;
+		x64_record_emit_three_registers(e, X64_OP_FADD, fs, x, x, x);
 		x64_label(e, ldone);
 	}
 	x64_tfree(e, r);
@@ -516,22 +516,22 @@ static codegen_value x64_f2i(codegen_context *e, int x, int fs, int ts, bool sgn
 	int r = x64_treg(e);
 
 	if (sgn || ts < 8) {
-		x64_op3(e, X_CVTF2I, ts > 4 || !sgn ? 8 : 4, r, x, XNOREG)->shift = (uint8_t)fs;
+		x64_record_emit_three_registers(e, X64_OP_CVTF2I, ts > 4 || !sgn ? 8 : 4, r, x, X64_REGISTER_NONE)->shift = (uint8_t)fs;
 	} else {
 		/* unsigned 64 bits: values from 2^63 up are converted less 2^63, the top bit set after */
 		uint32_t lbig = walk_label_new(e), ldone = walk_label_new(e);
 
-		x64_movi(e, R11, fs == 4 ? 0x5f000000 : 0x43e0000000000000);
-		x64_op3(e, X_MOV, fs, XMM15, R11, XNOREG);
-		x64_op3(e, X_FCMP, fs, XNOREG, x, XMM15);
-		x64_jcc(e, CC_AE, lbig);
-		x64_op3(e, X_CVTF2I, 8, r, x, XNOREG)->shift = (uint8_t)fs;
+		x64_record_emit_move_immediate(e, R11, fs == 4 ? 0x5f000000 : 0x43e0000000000000);
+		x64_record_emit_three_registers(e, X64_OP_MOV, fs, XMM15, R11, X64_REGISTER_NONE);
+		x64_record_emit_three_registers(e, X64_OP_FCMP, fs, X64_REGISTER_NONE, x, XMM15);
+		x64_jcc(e, X64_CONDITION_AE, lbig);
+		x64_record_emit_three_registers(e, X64_OP_CVTF2I, 8, r, x, X64_REGISTER_NONE)->shift = (uint8_t)fs;
 		x64_jump(e, ldone);
 		x64_label(e, lbig);
-		x64_op3(e, X_FSUB, fs, x, x, XMM15);
-		x64_op3(e, X_CVTF2I, 8, r, x, XNOREG)->shift = (uint8_t)fs;
-		x64_movi(e, R11, INT64_MIN);
-		x64_op3(e, X_XOR, 8, r, r, R11);
+		x64_record_emit_three_registers(e, X64_OP_FSUB, fs, x, x, XMM15);
+		x64_record_emit_three_registers(e, X64_OP_CVTF2I, 8, r, x, X64_REGISTER_NONE)->shift = (uint8_t)fs;
+		x64_record_emit_move_immediate(e, R11, INT64_MIN);
+		x64_record_emit_three_registers(e, X64_OP_XOR, 8, r, r, R11);
 		x64_label(e, ldone);
 	}
 	x64_tfree(e, x);
@@ -554,9 +554,9 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			   __extendbfsf2's argument in an integer register) */
 			int r = x64_treg(e), q = x64_ftreg(e);
 
-			x64_op3(e, X_MOV, 4, r, v.register_number, XNOREG);
-			x64_op3(e, X_SHLI, 4, r, r, XNOREG)->immediate = 16;
-			x64_op3(e, X_MOV, 4, q, r, XNOREG);
+			x64_record_emit_three_registers(e, X64_OP_MOV, 4, r, v.register_number, X64_REGISTER_NONE);
+			x64_record_emit_three_registers(e, X64_OP_SHLI, 4, r, r, X64_REGISTER_NONE)->immediate = 16;
+			x64_record_emit_three_registers(e, X64_OP_MOV, 4, q, r, X64_REGISTER_NONE);
 			x64_tfree(e, r);
 			x64_tfree(e, v.register_number);
 			return x64_cvt(e, x64_vr(q), codegen_type_primitive(AST_TYPE_FLOAT), to);
@@ -599,24 +599,24 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			int ra = x64_toreg(e, &v, 8);
 			codegen_lvalue m = x64_at(ra);
 
-			x64_x87(e, XF_LDZ, NULL, 0);
-			x64_x87(e, XF_LDT, &m, 10);
-			x64_x87(e, XF_UCOMIP, NULL, 0);
-			x64_x87(e, XF_POP, NULL, 0);
+			x64_x87(e, X64_X87_LDZ, NULL, 0);
+			x64_x87(e, X64_X87_LDT, &m, 10);
+			x64_x87(e, X64_X87_UCOMIP, NULL, 0);
+			x64_x87(e, X64_X87_POP, NULL, 0);
 			x64_tfree(e, ra);
 		} else {
-			x64_op3(e, X_FXOR, 8, XMM15, XMM15, XMM15);
-			x64_op3(e, X_FCMP, x64_fsz(c, from), XNOREG, v.register_number, XMM15);
+			x64_record_emit_three_registers(e, X64_OP_FXOR, 8, XMM15, XMM15, XMM15);
+			x64_record_emit_three_registers(e, X64_OP_FCMP, x64_fsz(c, from), X64_REGISTER_NONE, v.register_number, XMM15);
 			x64_tfree(e, v.register_number);
 		}
 		rd = x64_treg(e);
-		x64_op3(e, X_FSETCC, 4, rd, XNOREG, XNOREG)->condition = 1;
+		x64_record_emit_three_registers(e, X64_OP_FSETCC, 4, rd, X64_REGISTER_NONE, X64_REGISTER_NONE)->condition = 1;
 		return x64_vr(rd);
 	}
 	if (ff && tf) {
 		if (fl == tl) {
 			if (!fl && fs != ts)
-				x64_op3(e, X_CVTF2F, ts, v.register_number, v.register_number, XNOREG);
+				x64_record_emit_three_registers(e, X64_OP_CVTF2F, ts, v.register_number, v.register_number, X64_REGISTER_NONE);
 			return v;
 		}
 		if (tl) {
@@ -625,21 +625,21 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			int rd = x64_ldnew(e);
 			codegen_lvalue md = x64_at(rd);
 
-			x64_mem(e, X_ST, fs, v.register_number, &t, false);
+			x64_record_emit_memory(e, X64_OP_ST, fs, v.register_number, &t, false);
 			x64_tfree(e, v.register_number);
-			x64_x87(e, XF_LD, &t, fs);
-			x64_x87(e, XF_STPT, &md, 10);
+			x64_x87(e, X64_X87_LD, &t, fs);
+			x64_x87(e, X64_X87_STPT, &md, 10);
 			return x64_vr(rd);
 		}
 		{
 			int ra = x64_toreg(e, &v, 8), x;
 			codegen_lvalue m = x64_at(ra), t = x64_tmpslot(e, 8);
 
-			x64_x87(e, XF_LDT, &m, 10);
-			x64_x87(e, XF_STP, &t, ts);
+			x64_x87(e, X64_X87_LDT, &m, 10);
+			x64_x87(e, X64_X87_STP, &t, ts);
 			x64_tfree(e, ra);
 			x = x64_ftreg(e);
-			x64_mem(e, X_LD, ts, x, &t, false);
+			x64_record_emit_memory(e, X64_OP_LD, ts, x, &t, false);
 			return x64_vr(x);
 		}
 	}
@@ -665,24 +665,24 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 
 			if (fs < 8)
 				x64_ext(e, r, fs, sg);
-			x64_mem(e, X_ST, 8, r, &t, false);
-			x64_x87(e, XF_ILD, &t, 8);
+			x64_record_emit_memory(e, X64_OP_ST, 8, r, &t, false);
+			x64_x87(e, X64_X87_ILD, &t, 8);
 			if (!sg && fs == 8) {
 				/* fild took the top bit as a sign: add 2^64 back */
 				codegen_lvalue k = x64_tmpslot(e, 8);
 
-				x64_op3(e, X_TEST, 8, XNOREG, r, XNOREG);
-				x64_jcc(e, CC_NS, ldone);
-				x64_movi(e, R11, 0x5f800000);
-				x64_mem(e, X_ST, 4, R11, &k, false);
-				x64_x87(e, XF_LD, &k, 4);
-				x64_x87(e, XF_ADD, NULL, 0);
+				x64_record_emit_three_registers(e, X64_OP_TEST, 8, X64_REGISTER_NONE, r, X64_REGISTER_NONE);
+				x64_jcc(e, X64_CONDITION_NS, ldone);
+				x64_record_emit_move_immediate(e, R11, 0x5f800000);
+				x64_record_emit_memory(e, X64_OP_ST, 4, R11, &k, false);
+				x64_x87(e, X64_X87_LD, &k, 4);
+				x64_x87(e, X64_X87_ADD, NULL, 0);
 				x64_label(e, ldone);
 			}
 			x64_tfree(e, r);
 			rd = x64_ldnew(e);
 			md = x64_at(rd);
-			x64_x87(e, XF_STPT, &md, 10);
+			x64_x87(e, X64_X87_STPT, &md, 10);
 			return x64_vr(rd);
 		}
 		{
@@ -699,12 +699,12 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 		int ra = x64_toreg(e, &v, 8), r;
 		codegen_lvalue m = x64_at(ra), cw = x64_tmpslot(e, 8), cw2 = x64_tmpslot(e, 8), t = x64_tmpslot(e, 8);
 
-		x64_x87(e, XF_STCW, &cw, 2);
-		x64_mem(e, X_LD, 2, R11, &cw, false);
-		x64_op3(e, X_ORI, 4, R11, R11, XNOREG)->immediate = 0xc00;
-		x64_mem(e, X_ST, 2, R11, &cw2, false);
-		x64_x87(e, XF_LDCW, &cw2, 2);
-		x64_x87(e, XF_LDT, &m, 10);
+		x64_x87(e, X64_X87_STCW, &cw, 2);
+		x64_record_emit_memory(e, X64_OP_LD, 2, R11, &cw, false);
+		x64_record_emit_three_registers(e, X64_OP_ORI, 4, R11, R11, X64_REGISTER_NONE)->immediate = 0xc00;
+		x64_record_emit_memory(e, X64_OP_ST, 2, R11, &cw2, false);
+		x64_x87(e, X64_X87_LDCW, &cw2, 2);
+		x64_x87(e, X64_X87_LDT, &m, 10);
 		x64_tfree(e, ra);
 		r = x64_treg(e);
 		if (ts == 8 && !walk_type_is_signed(c, to)) {
@@ -713,27 +713,27 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			codegen_lvalue bias = x64_tmpslot(e, 8);
 			uint32_t low = walk_label_new(e), done = walk_label_new(e);
 
-			x64_movi(e, R11, 0x5f000000); /* float 2^63 */
-			x64_mem(e, X_ST, 4, R11, &bias, false);
-			x64_x87(e, XF_LD, &bias, 4);
-			x64_x87(e, XF_UCOMIP, NULL, 0); /* bias > input; leaves input */
-			x64_jcc(e, CC_A, low);
-			x64_x87(e, XF_LD, &bias, 4);
-			x64_x87(e, XF_SUB, NULL, 0);
-			x64_x87(e, XF_ISTP, &t, 8);
-			x64_mem(e, X_LD, 8, r, &t, false);
-			x64_movi(e, R11, UINT64_C(1) << 63);
-			x64_op3(e, X_XOR, 8, r, r, R11);
+			x64_record_emit_move_immediate(e, R11, 0x5f000000); /* float 2^63 */
+			x64_record_emit_memory(e, X64_OP_ST, 4, R11, &bias, false);
+			x64_x87(e, X64_X87_LD, &bias, 4);
+			x64_x87(e, X64_X87_UCOMIP, NULL, 0); /* bias > input; leaves input */
+			x64_jcc(e, X64_CONDITION_A, low);
+			x64_x87(e, X64_X87_LD, &bias, 4);
+			x64_x87(e, X64_X87_SUB, NULL, 0);
+			x64_x87(e, X64_X87_ISTP, &t, 8);
+			x64_record_emit_memory(e, X64_OP_LD, 8, r, &t, false);
+			x64_record_emit_move_immediate(e, R11, UINT64_C(1) << 63);
+			x64_record_emit_three_registers(e, X64_OP_XOR, 8, r, r, R11);
 			x64_jump(e, done);
 			x64_label(e, low);
-			x64_x87(e, XF_ISTP, &t, 8);
-			x64_mem(e, X_LD, 8, r, &t, false);
+			x64_x87(e, X64_X87_ISTP, &t, 8);
+			x64_record_emit_memory(e, X64_OP_LD, 8, r, &t, false);
 			x64_label(e, done);
 		} else {
-			x64_x87(e, XF_ISTP, &t, 8);
-			x64_mem(e, X_LD, 8, r, &t, false);
+			x64_x87(e, X64_X87_ISTP, &t, 8);
+			x64_record_emit_memory(e, X64_OP_LD, 8, r, &t, false);
 		}
-		x64_x87(e, XF_LDCW, &cw, 2);
+		x64_x87(e, X64_X87_LDCW, &cw, 2);
 		if (ts < 8)
 			x64_ext(e, r, ts, walk_type_is_signed(c, to));
 		return x64_vr(r);

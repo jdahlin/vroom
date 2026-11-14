@@ -2,9 +2,9 @@
 
 #include "lowering-internal.h"
 
-VPRIV const uint8_t a64_vir_integer_condition_codes[10] = { C_EQ, C_NE, C_LT, C_LE, C_GT, C_GE, C_LO, C_LS, C_HI, C_HS };
+VPRIV const uint8_t a64_vir_integer_condition_codes[10] = { A64_CONDITION_EQ, A64_CONDITION_NE, A64_CONDITION_LT, A64_CONDITION_LE, A64_CONDITION_GT, A64_CONDITION_GE, A64_CONDITION_LO, A64_CONDITION_LS, A64_CONDITION_HI, A64_CONDITION_HS };
 
-VPRIV const int8_t a64_vir_float_condition_codes[8] = { C_EQ, C_NE, C_MI, C_LS, C_GT, C_GE, C_VS, -1 };
+VPRIV const int8_t a64_vir_float_condition_codes[8] = { A64_CONDITION_EQ, A64_CONDITION_NE, A64_CONDITION_MI, A64_CONDITION_LS, A64_CONDITION_GT, A64_CONDITION_GE, A64_CONDITION_VS, -1 };
 
 VPRIV const uint8_t a64_vir_condition_swapped[10] = { 0, 1, 4, 5, 2, 3, 8, 9, 6, 7 };	/* icmp codes, operands swapped */
 
@@ -14,16 +14,16 @@ VPRIV int a64_vir_integer_compare_lower(a64_vir_context *L, const vir_insn *in)	
 	int x = a64_vir_value_is_64_bit(L->function, in->a), a;
 
 	if (L->operand_registers[0] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->a) && L->operand_registers[1] != VIR_REGISTER_NONE) {
-		opi(e, I_SUBSI, x, ZR, a64_vir_general_register(L->operand_registers[1]), a64_vir_constant_integer(&L->function->insns[in->a]));
+		a64_record_emit_immediate(e, A64_OP_SUBSI, x, ZR, a64_vir_general_register(L->operand_registers[1]), a64_vir_constant_integer(&L->function->insns[in->a]));
 		return a64_vir_condition_swapped[in->flags & 15];
 	}
 	a = a64_vir_operand_general_register(L, 0, R_X16);
 	if (L->operand_registers[1] == VIR_REGISTER_NONE && a64_vir_value_is_integer_constant(L->function, in->b)) {
 		int64_t k = a64_vir_constant_integer(&L->function->insns[in->b]);
 
-		opi(e, I_SUBSI, x, ZR, a, k);
+		a64_record_emit_immediate(e, A64_OP_SUBSI, x, ZR, a, k);
 	} else {
-		op3(e, I_SUBS, x, ZR, a, a64_vir_operand_general_register(L, 1, R_X17));
+		a64_record_emit_three_registers(e, A64_OP_SUBS, x, ZR, a, a64_vir_operand_general_register(L, 1, R_X17));
 	}
 	return in->flags & 15;
 }
@@ -32,7 +32,7 @@ VPRIV void a64_vir_float_compare_lower(a64_vir_context *L, const vir_insn *in)
 {
 	int d = L->function->insns[in->a].type == VIR_TYPE_F64;
 
-	word(L->context, 0x1e202000u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 | (unsigned)a64_vir_operand_float_register(L, 0) << 5);
+	a64_record_emit_word(L->context, 0x1e202000u | (unsigned)d << 22 | (unsigned)a64_vir_operand_float_register(L, 1) << 16 | (unsigned)a64_vir_operand_float_register(L, 0) << 5);
 }
 
 /*
@@ -88,7 +88,7 @@ VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in,
 	}
 	if (imm && (k < -31 || k > 31)) {
 		rm = rn == R_X17 ? R_X16 : R_X17;
-		movi(e, 1, rm, k);
+		a64_record_emit_move_immediate(e, 1, rm, k);
 		imm = false;
 	}
 	cc = a64_vir_integer_condition_codes[code];
@@ -98,7 +98,7 @@ VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in,
 		w |= 0x800u | (unsigned)(k < 0 ? -k : k) << 16;
 	else
 		w |= (unsigned)(rm & 31) << 16;
-	word(e, w);
+	a64_record_emit_word(e, w);
 	L->chain_condition = cc;
 }
 
@@ -111,8 +111,8 @@ VPRIV int a64_vir_condition_flags_get(a64_vir_context *L, const vir_insn *in)
 		L->flag_condition = -1;
 		return c;
 	}
-	opi(L->context, I_SUBSI, a64_vir_value_is_64_bit(L->function, in->a), ZR, a64_vir_operand_general_register(L, 0, R_X16), 0);	/* (a condition of either width) */
-	return C_NE;
+	a64_record_emit_immediate(L->context, A64_OP_SUBSI, a64_vir_value_is_64_bit(L->function, in->a), ZR, a64_vir_operand_general_register(L, 0, R_X16), 0);	/* (a condition of either width) */
+	return A64_CONDITION_NE;
 }
 
 VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const vir_insn *in)
@@ -123,7 +123,7 @@ VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L, const v
 		L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
 		return c;
 	}
-	return (a64_vir_condition){ C_NE, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_value_is_64_bit(L->function, in->a), -1 };
+	return (a64_vir_condition){ A64_CONDITION_NE, a64_vir_operand_general_register(L, 0, R_X16), a64_vir_value_is_64_bit(L->function, in->a), -1 };
 }
 
 VPRIV void a64_vir_branch_conditional_emit(codegen_context *e, a64_vir_condition c, bool inv, uint32_t l)
@@ -131,11 +131,11 @@ VPRIV void a64_vir_branch_conditional_emit(codegen_context *e, a64_vir_condition
 	int cc = inv ? c.code ^ 1 : c.code;
 
 	if (c.register_number >= 0 && c.bit >= 0)
-		tbz(e, cc == C_NE, c.register_number, c.bit, l);
+		a64_branch_test_bit_emit(e, cc == A64_CONDITION_NE, c.register_number, c.bit, l);
 	else if (c.register_number >= 0)
-		cbz(e, cc == C_NE, c.is_64_bit, c.register_number, l);
+		a64_branch_compare_zero_emit(e, cc == A64_CONDITION_NE, c.is_64_bit, c.register_number, l);
 	else
-		bcond(e, cc, l);
+		a64_branch_condition_emit(e, cc, l);
 }
 
 /* register r (VIR's) is still there at instruction upto: no edit after the current
@@ -166,7 +166,7 @@ VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 	const vir_function *f = L->function;
 	const vir_insn *in = &f->insns[i];
 	uint32_t j = i;
-	int x = in->type != VIR_TYPE_I32, cc = C_NE, k = 0;
+	int x = in->type != VIR_TYPE_I32, cc = A64_CONDITION_NE, k = 0;
 	uint64_t wm = x ? ~0ull : 0xffffffffull, m, tm = ~0ull;
 
 	if (L->operand_registers[0] == VIR_REGISTER_NONE || !a64_vir_value_is_used_by_next(L, b, i))
@@ -185,14 +185,14 @@ VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 		tm = 0xffffffffull, j++;
 	if (f->insns[j].op == VIR_OP_ICMP && (f->insns[j].flags & 15) <= 1 && a64_vir_value_is_integer_constant(f, f->insns[j].b) &&
 	    !a64_vir_constant_integer(&f->insns[f->insns[j].b]) && a64_vir_value_is_used_by_next(L, b, j))
-		cc = f->insns[j].flags & 15 ? C_NE : C_EQ, j++;
+		cc = f->insns[j].flags & 15 ? A64_CONDITION_NE : A64_CONDITION_EQ, j++;
 	if (f->insns[j].op != VIR_OP_BRIF || f->insns[j].a != j - 1)
 		return false;
 	m &= tm;
 	if (in->op == VIR_OP_ASHR && k && (m >> ((x ? 64 : 32) - k)))
 		return false;	/* (it would test copies of the sign) */
 	m = (m << k) & wm;
-	if (!m || !logimm_ok(m, x))
+	if (!m || !a64_logical_immediate_is_encodable(m, x))
 		return false;
 	L->flag_condition = cc;
 	L->flag_value = j - 1;
@@ -203,6 +203,6 @@ VPRIV bool a64_vir_test_branch_fold(a64_vir_context *L, uint32_t b, uint32_t i)
 		L->test_bit = __builtin_ctzll(m);
 		return true;
 	}
-	opi(L->context, I_ANDSI, x, ZR, a64_vir_general_register(L->operand_registers[0]), (int64_t)m);
+	a64_record_emit_immediate(L->context, A64_OP_ANDSI, x, ZR, a64_vir_general_register(L->operand_registers[0]), (int64_t)m);
 	return true;
 }

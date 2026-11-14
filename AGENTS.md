@@ -175,7 +175,7 @@ relative to it); `TODO.md` stays at the top.
     frame slots, labels, the call sequence; it calls a CPU only through
     `LO()`) and the machine records with their per-CPU op table (`rec.h`),
     PLAN-x86.md's layers 1 and 3; `arch/x64/codegen/`: x86-64's lowering
-    (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    (`x64-internal.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
     `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under

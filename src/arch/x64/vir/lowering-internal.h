@@ -3,7 +3,7 @@
 #ifndef VCC_ARCH_X64_VIR_LOWERING_INTERNAL_H
 #define VCC_ARCH_X64_VIR_LOWERING_INTERNAL_H
 
-#include "../codegen/x64impl.h"
+#include "../codegen/x64-internal.h"
 #include "../../../codegen/walk/proto.h"
 #include "../../../codegen/vir/preir.h"
 #include "../../../codegen/vir/lowering-driver.h"
