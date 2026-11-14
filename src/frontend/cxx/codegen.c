@@ -1954,7 +1954,13 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		fn = cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, vptr,
 				cc_node_integer_new(a, f->vslot - 1, cc_type_basic(TY_LONG), loc), loc), loc));
 	} else {
-		uint32_t target = f->sym1 ? f->sym1 : f->sym;	/* (a constructor or destructor: the complete object's) */
+		/* (a constructor or destructor: the complete object's; a base subobject's: the base object's, C2/D2) */
+		bool base_obj = c->gen_base_type && cxx_gen_is_special(f) && f->member_of && f->member_of->owner &&
+				QUNQ(f->member_of->owner->ty) == c->gen_base_type;
+		uint32_t target = base_obj ? f->sym : f->sym1 ? f->sym1 : f->sym;
+
+		if (base_obj)
+			c->gen_base_type = 0;
 
 		fn = cc_node_new(a, N_VAR, a->syms[target].ty, loc);
 		AST_NODE_AT(a, fn)->a = target;
@@ -2659,11 +2665,13 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 		if (QUNQ(class_type) == QUNQ(own))
 			target = self, c->gen_delegates = 1;
 		else
-			target = cxx_gen_base_object(c, self, QUNQ(class_type), loc);
+			target = cxx_gen_base_object(c, self, QUNQ(class_type), loc), c->gen_base_type = QUNQ(class_type);
 		if (!target || !cxx_gen_construct_at(c, target, QUNQ(class_type), args, nargs, c->gen_pre, loc)) {
+			c->gen_base_type = 0;
 			cxx_gen_fail(c);
 			return;
 		}
+		c->gen_base_type = 0;
 		if (c->ngen_init_bases < 16)
 			c->gen_init_bases[c->ngen_init_bases++] = QUNQ(class_type);
 		return;
@@ -2901,8 +2909,12 @@ static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc
 		if (named || !cxx_gen_needs_construction(c, bases[i], 0))
 			continue;
 		cxx_ctor_use(c, bases[i], NULL, NULL, 0, false);
-		if (!cxx_gen_construct_at(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], NULL, 0, first, loc))
+		c->gen_base_type = QUNQ(bases[i]);
+		if (!cxx_gen_construct_at(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], NULL, 0, first, loc)) {
+			c->gen_base_type = 0;
 			return false;
+		}
+		c->gen_base_type = 0;
 	}
 	return cxx_gen_constructor_member_defaults(c, cxx_tag_scope_get(c, QUNQ(own)), &a->tags[AST_TYPE(a, own)->aux], first, loc, 0);
 }
@@ -3088,8 +3100,12 @@ static bool cxx_gen_destructor_rest(cxx *c, cc_id_list *after, uint32_t loc)
 	for (uint32_t i = nb; i-- > 0;) {
 		if (!cxx_gen_needs_destruction(c, bases[i], 0))
 			continue;
-		if (!cxx_gen_destroy(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], after, loc))
+		c->gen_base_type = QUNQ(bases[i]);
+		if (!cxx_gen_destroy(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], after, loc)) {
+			c->gen_base_type = 0;
 			return false;
+		}
+		c->gen_base_type = 0;
 	}
 	return true;
 }

@@ -372,7 +372,8 @@ typedef struct cxx {
 	qty range_type;
 	uint8_t range_auto;
 	uint8_t ds_auto, ds_quals;	/* the last decl-specifiers were auto (with these cv-qualifiers) */
-	uint8_t vt_making;		/* code generation: implicit destructors being made for vtables (a bound on recursion) */
+	uint8_t vt_making;
+	qty gen_base_type;		/* code generation: the base class whose subobject is being constructed or destroyed (its C2/D2) */		/* code generation: implicit destructors being made for vtables (a bound on recursion) */
 	qty nullptr_ty;			/* std::nullptr_t, the type of nullptr (0: not made yet) */
 	qty auto_ty;			/* auto's placeholder type (0: not made yet) */
 	struct cxx_partial *auto_owner;

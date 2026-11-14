@@ -1512,3 +1512,11 @@ En polymorf klass utan egen destruktor vars medlemmar ska förstöras (json:s `p
 behövs; den ersätter basens i vtabellen, så klassen kan returneras som värde.  `delete p` av ett
 polymorft objekt anropar den raderande destruktorn (D0) genom vtabellen, inte om p är null.
 cxx-run 55/55; cxx-fork 69/70, 2 728 funktioner (json:s create-kedja stannar ännu på annat).
+
+### Status (64): medlemsåtkomst i lambdor, basobjektens C2/D2 (2026-11-14)
+Fel: `x.m` där m är en datamedlem byggde först `this->m` när det fanns ett this (en
+medlemsfunktion, en lambdas operator()); i en lambda misslyckades det (this fångades inte), så
+doctests `INFO` (`mb.m_stream = s` i en lambda) fick ingen kod.  Nu inte efter `.` och `->`.
+Ett basobjekt konstrueras och förstörs med basobjektets variant (C2, D2), inte hela objektets
+(C1, D1), som Itanium vill (doctests `ContextScopeBase` definierar bara C2).
+cxx-run 56/56; cxx-fork 69/70, 3 014 funktioner från vcc (från 2 728).

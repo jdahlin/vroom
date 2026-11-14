@@ -102,6 +102,20 @@ static void cxx_unqualified_id_rest_parse(cxx *c)
 	cxx_fail(c, "expected an identifier");
 }
 
+/* is the name just read the member in x.m or p->m (x.B::m, p->template m too)?  Not a member of this then */
+static bool cxx_after_member_access(cxx *c)
+{
+	uint32_t p = c->pos ? c->pos - 1 : 0;
+
+	while (p >= 2 && c->tok[p - 1].kind == LEX_TOKEN_COLON_COLON && c->tok[p - 2].kind == LEX_TOKEN_IDENTIFIER)
+		p -= 2;
+	if (p >= 1 && c->tok[p - 1].kind == LEX_TOKEN_IDENTIFIER && c->tok[p - 1].len == 8 && !memcmp(c->tok[p - 1].s, "template", 8))
+		p--;
+	if (p >= 1 && c->tok[p - 1].kind == LEX_TOKEN_TILDE)
+		p--;
+	return p >= 1 && (c->tok[p - 1].kind == LEX_TOKEN_PERIOD || c->tok[p - 1].kind == LEX_TOKEN_ARROW);
+}
+
 /* what a name used as a value is: a variable's type (an lvalue), or a set of functions for a call */
 VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 {
@@ -151,7 +165,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 	if (v && !v->field_of && v->nsdmi_pos && !c->enode && cxx_gen_on(c) &&
 	    (!v->sym || by_value || (v->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, v->ty))))
 		c->enode = cxx_gen_static_member_value(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);	/* (a static constant member: its initializer) */
-	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
+	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c) && !cxx_after_member_access(c)) {	/* a data member of this */
 		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
 		cxx_gen_this(c, loc);
