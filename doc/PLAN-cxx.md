@@ -1505,3 +1505,10 @@ gissning som förut.  `x = v` för en trivialt kopierbar klass (en union) med ko
 konstruktorer: den matchande konstruktorns temporära, kopierad (json:s `m_value = val`).
 unit-32bit misslyckas likadant med clangs eget bygge (8 påståenden på en 64-bitarsvärd): inget vcc-fel.
 Gissade namn i unit-testsuites 174 -> 163; cxx-run 54/54; cxx-fork 69/70, 2 728 funktioner.
+
+### Status (63): polymorfa klasser utan egen destruktor, virtuell delete (2026-11-14)
+En polymorf klass utan egen destruktor vars medlemmar ska förstöras (json:s `parse_error`: en
+`std::exception` med en `std::runtime_error`) får sin implicita destruktor gjord när vtabellen
+behövs; den ersätter basens i vtabellen, så klassen kan returneras som värde.  `delete p` av ett
+polymorft objekt anropar den raderande destruktorn (D0) genom vtabellen, inte om p är null.
+cxx-run 55/55; cxx-fork 69/70, 2 728 funktioner (json:s create-kedja stannar ännu på annat).

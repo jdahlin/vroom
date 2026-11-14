@@ -3235,8 +3235,38 @@ VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc)
 	t = AST_TYPE(a, pt)->base;
 	if (AST_TYPE_KIND(a, t) == TY_VOID || (array && cc_type_is_record(a, t) && cxx_gen_needs_destruction(c, t, 0)))
 		return;	/* (an array of objects with destructors: its count cookie, not built yet) */
-	if (cc_type_is_record(a, t) && cxx_class_polymorphic(c, t))
-		return;	/* (a virtual destructor's deleting variant: through the vtable, not built yet) */
+	if (cc_type_is_record(a, t) && cxx_class_polymorphic(c, t)) {
+		/* a polymorphic object: its deleting destructor (D0) through the vtable, the slot after the complete
+		   one's -- tmp = p, tmp ? (*(F ***)tmp)[slot](tmp) : (void)0 */
+		cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+		qty pf, ppf, pppf;
+		uint32_t vptr, fn, call, cond;
+
+		d = array ? NULL : cxx_gen_effective_destructor(c, t, 0);
+		if (!d || !d->fn_virtual || !d->vslot || !cls || !cxx_vtable_usable(c, cls) || !cxx_gen_name(c, d) || !d->sym0)
+			return;
+		if (!(tmp = cxx_gen_temporary(c, pt, loc)))
+			return;
+		pf = cc_type_pointer(a, a->syms[d->sym0].ty), ppf = cc_type_pointer(a, pf), pppf = cc_type_pointer(a, ppf);
+		vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), pppf, CK_NOP), loc));
+		fn = cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, vptr,
+				cc_node_integer_new(a, d->vslot, cc_type_basic(TY_LONG), loc), loc), loc));
+		call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+		{
+			cc_id_list al;
+
+			cc_id_list_init(&al);
+			cc_id_list_append(a, &al, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)));
+			AST_NODE_AT(a, call)->a = fn;
+			AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &al);
+			AST_NODE_AT(a, call)->c = al.n;
+		}
+		cond = cc_conditional_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), call,
+					    cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), cc_type_basic(TY_VOID), CK_VOID), loc);
+		c->enode = cc_node_new_operands(a, N_COMMA, cc_type_basic(TY_VOID), loc,
+						cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), p, loc), cond);
+		return;
+	}
 	if (!(tmp = cxx_gen_temporary(c, pt, loc)))
 		return;
 	cc_id_list_init(&l);
@@ -3415,8 +3445,22 @@ static bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
 
 			while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
 				ft = AST_TYPE(c->ast, ft)->base;
-			if (ft == CXX_TY_UNKNOWN || (cc_type_is_record(c->ast, ft) && cxx_gen_needs_destruction(c, ft, 0)))
+			if (ft == CXX_TY_UNKNOWN)
 				return false;
+			if (cc_type_is_record(c->ast, ft) && cxx_gen_needs_destruction(c, ft, 0)) {
+				/* (members to destroy: the class's own implicit destructor, made now; it overrides the
+				   base's in the vtable) */
+				cxx_entity *d;
+
+				if (c->tentative || c->unevaluated || c->vt_making > 2)
+					return false;
+				c->vt_making++;
+				d = cxx_gen_effective_destructor(c, cls->owner->ty, 0);
+				c->vt_making--;
+				if (!d || d->member_of != cls || !d->fn_virtual)
+					return false;
+				return cxx_vtable_usable(c, cls);
+			}
 		}
 	}
 	return true;
