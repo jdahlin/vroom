@@ -29,14 +29,16 @@ def symbols(obj):
 def one(path, tmp, verbose):
     name = os.path.basename(path)[:-4]
     obj, ref, exe = (os.path.join(tmp, name + s) for s in (".o", ".ref.o", ""))
-    r = subprocess.run([VPP, "-x", "c++", "-std=c++17", "-c", path, "-o", obj], capture_output=True, text=True,
+    m = re.search(r"^// std: (\S+)", open(path).read(), re.M)	# (a test of a later standard says so)
+    std = "-std=" + (m.group(1) if m else "c++17")
+    r = subprocess.run([VPP, "-x", "c++", std, "-c", path, "-o", obj], capture_output=True, text=True,
                        env={**os.environ, "VCC_CXX_PROGRESS": "1"})
     if r.returncode:
         return "vcc failed: " + (r.stderr.strip().splitlines() or ["?"])[-1]
     m = re.search(r"function definitions (\d+), with code (\d+)", r.stderr)
     if not m or m.group(1) != m.group(2):
         return "not every function got code: " + (m.group(0) if m else "no count")
-    if subprocess.run([CLANG, "-std=c++17", "-c", path, "-o", ref], capture_output=True).returncode:
+    if subprocess.run([CLANG, std, "-c", path, "-o", ref], capture_output=True).returncode:
         return "clang++ rejects the test"
     # the test itself must be right: clang's build of it exits 0
     if subprocess.run([CLANG, ref, "-o", exe + ".ref"], capture_output=True).returncode or subprocess.run([exe + ".ref"]).returncode:

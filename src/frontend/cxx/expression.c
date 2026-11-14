@@ -2144,10 +2144,33 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			uint32_t rn = c->enode;
 
 			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
-			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1))
+			bool rewritten = false;	/* a != b as !(a == b) (C++20's rewritten candidates) */
+
+			bool found = !c->tentative && cxx_operator_call_type(c, opid, l, &c->etype, 1);
+
+			if (!c->tentative && (!found || !c->call_resolved) && op == LEX_TOKEN_EXCLAMATION_EQUAL && l != CXX_TY_UNKNOWN &&
+			    rt != CXX_TY_UNKNOWN && (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
+				/* no operator!= that fits: operator== (C++20 rewrites a != b as !(a == b)) */
+				qty ra = rt;
+
+				c->op_lv_set = 1, c->op_lv[0] = ll;
+				if (cxx_operator_call_type(c, vintern_cstr("operator=="), l, &ra, 1) && c->call_resolved)
+					rewritten = true, found = true;
+			}
+			if (!c->tentative && !found)
 				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;
-			if (built_in && op == CXX_TOKEN_SPACESHIP)
+			if (rewritten) {
+				cxx_entity *eq = c->call_picked;
+
+				cxx_et(c, cc_type_basic(TY_BOOL), false);	/* (first: it clears the node) */
+				c->call_resolved = 1, c->call_picked = eq;
+				if (eq) {
+					cxx_gen_operator_call(c, ln, &rn, 1, oploc);
+					if (c->enode)
+						cxx_gen_unary(c, LEX_TOKEN_EXCLAMATION, c->enode, oploc);
+				}
+			} else if (built_in && op == CXX_TOKEN_SPACESHIP)
 				cxx_gen_spaceship(c, ln, rn, c->etype, oploc);
 			else if (built_in)
 				cxx_gen_binary(c, op, ln, rn, oploc);
