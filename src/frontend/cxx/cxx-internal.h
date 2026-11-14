@@ -333,6 +333,8 @@ typedef struct cxx {
 	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
 	qty gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
+	char **gen_names;		/* the mangled names of the functions defined so far (a second definition by the same name gets no code) */
+	uint32_t ngen_names, cgen_names;
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */

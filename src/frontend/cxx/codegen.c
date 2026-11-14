@@ -154,6 +154,12 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 	bt = AST_NODE_AT(a, base)->ty;
 	if (!cc_type_is_record(a, bt) || !(a->tags[AST_TYPE(a, bt)->aux].flags & RF_COMPLETE))
 		return;
+	{
+		uint64_t bits;
+
+		if (!cxx_class_field_offset(c, bt, name, &bits, 0))
+			return;	/* (a base class's member, a static one: not a field of this record) */
+	}
 	c->enode = member(a, base, name, loc);
 	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))
 		c->enode = cxx_gen_referent(c, c->enode, loc);
@@ -724,6 +730,21 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 			return false;
 	if (!cxx_gen_name(c, f) || !f->sym)
 		return false;
+	{
+		/* Two definitions with one symbol name: char16_t and unsigned short (and wchar_t, char32_t,
+		   char8_t) are one type here for now, so overloads on them mangle alike.  The first has the code. */
+		const sym *y = &a->syms[f->sym];
+		const char *nm = y->attrs && a->attr[y->attrs].asmname ? a->strs[a->attr[y->attrs].asmname - 1].s : NULL;
+
+		for (uint32_t i = 0; nm && i < c->ngen_names; i++)
+			if (!strcmp(c->gen_names[i], nm))
+				return false;
+		if (nm) {
+			if (c->ngen_names == c->cgen_names)
+				c->gen_names = realloc(c->gen_names, (c->cgen_names = c->cgen_names ? c->cgen_names * 2 : 256) * sizeof *c->gen_names);
+			c->gen_names[c->ngen_names++] = (char *)nm;
+		}
+	}
 	ft = AST_TYPE(a, f->ty);
 	cc_scope_open(a);
 	cc_id_list_init(&psyms);
