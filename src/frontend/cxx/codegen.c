@@ -671,8 +671,33 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 			x = cc_address_of_build(a, x, loc);
 		return cc_cast_insert(a, x, QUNQ(to), CK_NOP);
 	}
-	if (cc_type_is_record(a, to))
-		return QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(to) ? cc_node_rvalue(a, x) : 0;
+	if (cc_type_is_record(a, to)) {
+		if (QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(to))
+			return cc_node_rvalue(a, x);
+		if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != TY_ARRAY) {
+			/* another class's object: its conversion function to this class (strong_ordering to partial_ordering) */
+			uint32_t v = cxx_gen_convert_class(c, x, QUNQ(to), loc);
+
+			return v && QUNQ(AST_NODE_AT(a, v)->ty) == QUNQ(to) ? cc_node_rvalue(a, v) : 0;
+		}
+		{
+			/* a value of another type: the class's converting constructor (0 for _CmpUnspecifiedParam) */
+			qty at[1] = { AST_NODE_AT(a, x)->ty };
+			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 };
+			uint32_t saved = c->enode, tmp;
+
+			if (AST_TYPE_KIND(a, at[0]) == TY_ARRAY)
+				at[0] = cc_type_pointer(a, AST_TYPE(a, at[0])->base), lv[0] = 0;
+			cxx_ctor_use(c, QUNQ(to), at, lv, 1, false);
+			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
+				return 0;
+			c->enode = 0;
+			cxx_gen_construct_temp(c, QUNQ(to), &x, 1, loc);
+			tmp = c->enode;
+			c->enode = saved;
+			return tmp ? cc_node_rvalue(a, tmp) : 0;
+		}
+	}
 	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != TY_ARRAY) {
 		x = cxx_gen_convert_class(c, x, to, loc);	/* a class to a scalar: its conversion function to that type */
 		if (!x)
@@ -1285,22 +1310,42 @@ VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t
 	volatile uint32_t node = 0;
 	static __thread int depth;
 
-	if (!cxx_gen_on(c) || !v->nsdmi_pos || !v->nsdmi_scope || v->ty == CXX_TY_UNKNOWN || !cxx_gen_type_ok(c, v->ty) ||
-	    cxx_gen_is_reference(c, v->ty) || depth > 8)
+	bool record = v->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, v->ty) && AST_TYPE_KIND(c->ast, v->ty) != TY_ARRAY;
+
+	if (!cxx_gen_on(c) || !v->nsdmi_pos || !v->nsdmi_scope || v->ty == CXX_TY_UNKNOWN || (!record && !cxx_gen_type_ok(c, v->ty)) ||
+	    cxx_gen_is_reference(c, v->ty) || depth > 8 || (record && !cxx_gen_class_ok2(c, v->ty, true)))
 		return 0;
 	depth++;
-	c->pos = v->nsdmi_pos + 1, c->scope = v->nsdmi_scope, c->fail = &jb;
+	c->pos = v->nsdmi_pos + (c->tok[v->nsdmi_pos].kind == LEX_TOKEN_EQUAL), c->scope = v->nsdmi_scope, c->fail = &jb;
 	if (!setjmp(jb)) {
-		cxx_assignment_expression_parse(c);
-		if (c->enode && (cxx_is(c, LEX_TOKEN_SEMICOLON) || cxx_is(c, LEX_TOKEN_COMMA)))
-			node = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, c->enode), QUNQ(v->ty));
+		if (record && (cxx_is(c, LEX_TOKEN_LEFT_PAREN) || cxx_is(c, LEX_TOKEN_LEFT_BRACE))) {
+			/* T X::m(args), T X::m{args}: a temporary made the same way (a value use: its copy is the object's) */
+			uint32_t an[16], n;
+			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
+			if (braced)
+				cxx_braced_arguments_parse(c);
+			else
+				cxx_call_arguments_parse(c);
+			n = c->ncargs;
+			if (n <= 16) {
+				memcpy(an, c->carg_nodes, n * sizeof *an);
+				cxx_ctor_use(c, QUNQ(v->ty), c->cargs, c->cargs_lval, n, braced);
+				cxx_gen_construct_temp(c, QUNQ(v->ty), an, n, loc);
+				node = c->enode;
+			}
+		} else {
+			cxx_assignment_expression_parse(c);
+			if (c->enode && (cxx_is(c, LEX_TOKEN_SEMICOLON) || cxx_is(c, LEX_TOKEN_COMMA)))
+				node = record ? (QUNQ(AST_NODE_AT(c->ast, c->enode)->ty) == QUNQ(v->ty) ? c->enode : 0) :
+					cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, c->enode), QUNQ(v->ty));
+		}
 	}
 	depth--;
 	c->fail = outer_fail, c->pos = pos, c->scope = scope;
 	c->enode = enode, c->eobj_node = eobj, c->eobj_arrow = eobj_arrow, c->etype = etype, c->elval = elval, c->econst = econst;
 	c->evalue = evalue, c->einvalid = einvalid, c->eunsure = eunsure, c->call_resolved = call_resolved, c->none_viable = none_viable;
 	c->call_picked = call_picked, c->ecallee = ecallee, c->edecl_name = edecl;
-	(void)loc;
 	return node;
 }
 
@@ -1462,8 +1507,45 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 
 	if (!cxx_gen_on(c) || !cond || !x || !y || cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
 		return;
+	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) != cc_type_is_record(a, AST_NODE_AT(a, y)->ty) ||
+	    (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && (QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(AST_NODE_AT(a, y)->ty) ||
+							      cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) != 1)))
+		return;	/* (a class's: both of one class that copies as bytes, as C's ?: of structs) */
 	cond = cc_condition_scalar(a, cc_conversion_decay(a, cond), "'?:'");
 	c->enode = cc_conditional_build(a, cond, x, y, loc);
+}
+
+/* a <=> b of scalars: a std::strong_ordering or partial_ordering object (libc++'s: one signed char,
+   -1 0 1, -127 unordered) in a temporary */
+VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc)
+{
+	cc *a = c->ast;
+	const tag *rec;
+	uint32_t tmp, v, lt, gt, node;
+	bool partial;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !l || !r || t == CXX_TY_UNKNOWN || !cc_type_is_record(a, t))
+		return;
+	rec = &a->tags[AST_TYPE(a, QUNQ(t))->aux];
+	if (rec->nfield < 1 || !rec->f[0].name || AST_TYPE(a, rec->f[0].ty)->size != 1 || AST_TYPE(a, QUNQ(t))->size != 1)
+		return;	/* (not libc++'s layout) */
+	partial = !cc_type_is_integer(a, AST_NODE_AT(a, cc_node_rvalue(a, l))->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, cc_node_rvalue(a, l))->ty) != TY_PTR;
+	if (!(tmp = cxx_gen_temporary(c, QUNQ(t), loc)))
+		return;
+	/* (each operand read twice: the operands are values here, as a built-in comparison's are) */
+	lt = cc_binary_build(a, LEX_TOKEN_LESS, cc_node_rvalue(a, l), cc_node_rvalue(a, r), loc);
+	gt = cc_binary_build(a, LEX_TOKEN_GREATER, cc_node_rvalue(a, l), cc_node_rvalue(a, r), loc);
+	v = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);
+	if (partial)
+		v = cc_conditional_build(a, cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, l), cc_node_rvalue(a, r), loc), v,
+					 cc_node_integer_new(a, -127, cc_type_basic(TY_INT), loc), loc);
+	v = cc_conditional_build(a, gt, cc_node_integer_new(a, 1, cc_type_basic(TY_INT), loc), v, loc);
+	v = cc_conditional_build(a, lt, cc_node_integer_new(a, -1, cc_type_basic(TY_INT), loc), v, loc);
+	v = cc_assignment_build(a, 0, member(a, cxx_gen_var_node(c, tmp, loc), rec->f[0].name, loc),
+				cc_conversion_apply(a, v, QUNQ(rec->f[0].ty)), loc);
+	node = cc_node_new_operands(a, N_COMMA, cc_type_pointer(a, QUNQ(t)), loc, v, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc));
+	c->enode = cc_dereference_build(a, node, loc);
 }
 
 /* x, y */

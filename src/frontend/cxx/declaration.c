@@ -3128,6 +3128,40 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
+		{
+		uint32_t sm_init = !f && (cxx_is(c, LEX_TOKEN_LEFT_PAREN) || cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_EQUAL)) ? c->pos : 0;
+
+		if (f && q && qs && qs->kind == CXX_SCOPE_CLASS && c->pos && c->tok[c->pos - 1].kind == LEX_TOKEN_RIGHT_PAREN && !c->tentative) {
+			/* T X::m(e): parsed as a function's declarator; when the class's m is a variable, its initializer */
+			bool var = false;
+
+			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
+				var |= m->kind == CXX_ENTITY_VALUE && !m->field_of && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != TY_FUNC;
+			if (var) {
+				int depth = 0;
+
+				for (uint32_t i = c->pos - 1; i > start; i--) {
+					if (c->tok[i].kind == LEX_TOKEN_RIGHT_PAREN)
+						depth++;
+					else if (c->tok[i].kind == LEX_TOKEN_LEFT_PAREN && !--depth) {
+						sm_init = i;
+						break;
+					}
+				}
+			}
+		}
+		if (sm_init && q && qs && qs->kind == CXX_SCOPE_CLASS && !c->tentative && !c->template_depth) {
+			uint32_t keep = c->pos;
+
+			c->pos = sm_init;
+			/* a static member's definition: its initializer, on the member the class declares (and this
+			   declaration's entity), for cxx_gen_static_member_value */
+			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
+				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && !m->nsdmi_pos && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != TY_FUNC)
+					m->nsdmi_pos = c->pos, m->nsdmi_scope = c->scope;
+			c->pos = keep;
+		}
+		}
 		if (name > 1 && !q && !(cs && cs->owner && cs->owner->name == name)) {
 			int kind = (flags & DS_TYPEDEF) ? CXX_ENTITY_TYPE :
 				   c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE ? (f ? CXX_ENTITY_FUNCTION_TEMPLATE : CXX_ENTITY_VARIABLE_TEMPLATE)
@@ -3143,6 +3177,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cs->friends = cxx_scope_new(c, CXX_SCOPE_BLOCK, cs, NULL);
 				e = cxx_declare(c, cs->friends, name, kind);
 				is_friend = e != NULL;
+				/* (it is the enclosing namespace's function; defined in the class: inline) */
+				if (e && kind == CXX_ENTITY_VALUE && !e->home)
+					e->home = cxx_enclosing_namespace(c), e->fn_inline = 1;
 			}
 			/* a function template (one level of parameters): its signature, for deduction at calls */
 			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
@@ -3201,7 +3238,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 						}
 				}
 			}
-			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS && !is_friend ? e : NULL;
+			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;	/* (a friend's body too) */
 			if (e && f)
 				e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept;
 			if (e && f && kind == CXX_ENTITY_VALUE)
@@ -3400,7 +3437,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 
 					/* (a member function's body is parsed later, for this function: what came after the
 					   declarator, a noexcept(...) that completed a class, may have declared others since) */
-					if (context == CXX_CONTEXT_CLASS && decl_fn && !(flags & DS_FRIEND))
+					if (context == CXX_CONTEXT_CLASS && decl_fn)
 						c->last_fn = decl_fn;
 					cxx_function_body_parse(c);
 					if (gen)

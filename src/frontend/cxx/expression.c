@@ -143,7 +143,8 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 
 		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	}
-	if (v && !v->field_of && !v->sym && v->nsdmi_pos && !c->enode && cxx_gen_on(c))
+	if (v && !v->field_of && v->nsdmi_pos && !c->enode && cxx_gen_on(c) &&
+	    (!v->sym || (v->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, v->ty))))
 		c->enode = cxx_gen_static_member_value(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);	/* (a static constant member: its initializer) */
 	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
 		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;
@@ -2146,7 +2147,9 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1))
 				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;
-			if (built_in)
+			if (built_in && op == CXX_TOKEN_SPACESHIP)
+				cxx_gen_spaceship(c, ln, rn, c->etype, oploc);
+			else if (built_in)
 				cxx_gen_binary(c, op, ln, rn, oploc);
 			else if (!c->tentative && c->call_resolved && c->call_picked)
 				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
@@ -2213,7 +2216,8 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's
 			   builder finds no lvalue and the function gets no code) */
 			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR ||
-							   AST_TYPE_KIND(c->ast, c->etype) == TY_VOID))	/* (c ? void(0) : f(): assert) */
+							   AST_TYPE_KIND(c->ast, c->etype) == TY_VOID ||	/* (c ? void(0) : f(): assert) */
+							   cc_type_is_record(c->ast, c->etype)))	/* (of one class: cxx_gen_conditional checks) */
 				cxx_gen_conditional(c, cn, n2, n3, qloc);
 			if (ck && (cv ? k2 : k3))
 				c->evalue = cv ? v2 : v3, c->econst = 1;	/* a constant condition: the branch taken */

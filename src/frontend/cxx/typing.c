@@ -81,6 +81,23 @@ static qty cxx_decay(cxx *c, qty t)
 }
 
 /* a binary operator's result (kind: the operator), from the operands' types */
+/* std::name (a class of <compare> and the like, in libc++'s inline namespace too): its type, complete;
+   CXX_TY_UNKNOWN if not declared */
+VPRIV qty cxx_std_class(cxx *c, const char *name)
+{
+	cxx_entity *std = cxx_lookup_in(c, c->global, vintern_cstr("std"), 0), *e;
+
+	while (std && !(std->kind == CXX_ENTITY_NAMESPACE && std->members))
+		std = std->next;
+	e = std ? cxx_lookup_in(c, std->members, vintern_cstr(name), 0) : NULL;
+	while (e && e->kind != CXX_ENTITY_TYPE)
+		e = e->next;
+	if (!e || e->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, e->ty))
+		return CXX_TY_UNKNOWN;
+	cxx_type_require_complete(c, QUNQ(e->ty));
+	return QUNQ(e->ty);
+}
+
 VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 {
 	/* two values of one enumeration compared: bool (a scoped one has no other built-in operators) */
@@ -104,6 +121,15 @@ VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 		return;
 	case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER:
 		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_promote(c->ast, QUNQ(l)) : CXX_TY_UNKNOWN, false);
+		return;
+	case CXX_TOKEN_SPACESHIP:
+		/* built in: std::partial_ordering for floating point, std::strong_ordering for integers and pointers */
+		if ((cxx_is_arith(c, l) || cxx_is_ptr(c, l)) && (cxx_is_arith(c, r) || cxx_is_ptr(c, r))) {
+			bool fl = (cxx_is_arith(c, l) && !cc_type_is_integer(c->ast, QUNQ(l))) || (cxx_is_arith(c, r) && !cc_type_is_integer(c->ast, QUNQ(r)));
+
+			cxx_et(c, cxx_std_class(c, fl ? "partial_ordering" : "strong_ordering"), false);
+		} else
+			cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS:
 		if (cxx_is_ptr(c, l) && cxx_is_arith(c, r)) {

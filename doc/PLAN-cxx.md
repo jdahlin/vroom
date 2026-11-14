@@ -1354,3 +1354,16 @@ konstruktorer inte gör det (rekursivt; `std::runtime_error` som medlem).
 Kontrollerat mot clang med static_assert (`nothrow-traits.cpp`).
 json: 69/70, 4,2 s CPU, 2 406 funktioner, 11 av 118 testfunktioner
 (unit-noexcept:s testfunktion får nu vcc:s kod).
+
+### Status (48): `<=>` och `<compare>` genom vcc enbart (2026-11-14)
+Inbyggt `<=>` på skalärer typas `std::strong_ordering`/`partial_ordering`
+och byggs som ett objekt av den klassen (libc++:s: en `signed char`, -127
+för oordnat; förut ett hårt fel som fällde hela TU:n).  Vänfunktioner
+definierade i en klass får kod (de tillhör den omgivande namnrymden och är
+inline); en klass till en annan som värde genom konverteringsfunktion eller
+konverterande konstruktor (`0` till `_CmpUnspecifiedParam`); statiska
+medlemmar av klasstyp definierade efter klassen (`partial_ordering::less`,
+även när `T X::m(e)` tolkas som en funktionsdeklarator) som temporärer från
+sin initierare; `?:` av en klass.  Ett program med `std::is_lt(a <=> b)`,
+`std::is_gt`, `partial_ordering::unordered` kompileras, länkas och körs
+med enbart vcc:s kod.  json oförändrad: 69/70, 2 406 funktioner, 11 av 118.

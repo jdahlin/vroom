@@ -629,6 +629,8 @@ VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, qty t, uint32_t loc);
 VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t);
 VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc);
 VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
+VPRIV qty cxx_std_class(cxx *c, const char *name);
+VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
