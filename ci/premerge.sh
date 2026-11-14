@@ -59,6 +59,7 @@ arm64)
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step interrupt python3 bench/vcc-interrupt.py
 		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
+		step vlink-dyn python3 bench/vlink-dyn.py
 	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
