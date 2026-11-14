@@ -99,6 +99,8 @@ CASES = [
     ('--disable-tsaware', ['main'], ['--disable-tsaware'], False, []),
     ('--disable-large-address-aware', ['main'], ['--disable-large-address-aware'], False, []),
     ('--no-seh', ['main'], ['--no-seh'], False, []),
+    ('--pic-executable (FFmpeg configure)', ['main'], ['--pic-executable', '-e', 'mainCRTStartup', '--image-base', '0x140000000'], False, []),
+    ('ignored options of lld', ['main'], ['--sort-common', '--full-shutdown', '-O2', '--as-needed', '--no-undefined'], False, []),
     ('--disable-reloc-section', ['main'], ['--disable-reloc-section'], False, []),
     ('--no-insert-timestamp', ['main'], ['--no-insert-timestamp'], False, []),
     ('--build-id=none', ['main'], ['--build-id=none'], False, []),

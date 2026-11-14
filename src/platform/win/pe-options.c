@@ -322,6 +322,7 @@ static const char *const pe_ignored_flags[] = {
 	"sort-common", "no-seh", "disable-no-seh", "no-copy-dt-needed-entries", "eh-frame-hdr",
 	"enable-stdcall-fixup", "disable-stdcall-fixup", "no-relax", "relax", "warn-common", "no-warn-mismatch",
 	"enable-long-section-names", "disable-long-section-names", "full-shutdown", "no-allow-shlib-undefined",
+	"pic-executable",
 	NULL,
 };
 static const char *const pe_ignored_values[] = {
