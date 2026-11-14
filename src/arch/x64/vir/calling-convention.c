@@ -4,26 +4,75 @@
 
 #include "lowering-internal.h"
 
-/* Only one-piece scalar ABI groups reach this target. */
-VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack, bool ms)
+/* Call words start with the hidden destination for a memory result. */
+VPRIV uint32_t x64_vir_param_word(const vir_function *f, const vir_insn *i)
 {
-	uint32_t ni = 0, nf = 0;
-	int off = 16;
-	uint8_t r = VIR_REGISTER_NONE;
+	if (i->a == VIR_GROUP_RESULT) return 0;
+	uint32_t word = i->b + (VIR_GROUP_KIND(f->extra[f->signature + 1]) == VIR_GROUP_SRET);
+	for (uint32_t k = 0; k < i->a; k++) {
+		uint32_t group = f->extra[f->signature + 3 + 2*k];
+		word += VIR_GROUP_KIND(group) == VIR_GROUP_MEM ? 1 : VIR_GROUP_PIECE_COUNT(group);
+	}
+	return word;
+}
 
+VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t word, int *stack, bool ms)
+{
+	bool sret = VIR_GROUP_KIND(f->extra[sig + 1]) == VIR_GROUP_SRET;
+	uint32_t ni = sret, nf = 0;
+	int off = 16;
+	if (sret && !word) return RDI;
+	uint32_t g = word - sret;
 	if (ms) {
 		bool fp = VIR_GROUP_CLASS(f->extra[sig + 3 + 2 * g], 0) != VIR_CLASS_INT;
-
 		*stack = 16 + 8 * (int)g;
 		return g >= 4 ? VIR_REGISTER_NONE : fp ? VIR_REGISTER_MAKE(1, g) : (uint8_t)x64w_argreg((int)g);
 	}
-	for (uint32_t k = 0; k <= g; k++) {
-		bool fp = VIR_GROUP_CLASS(f->extra[sig + 3 + 2 * k], 0) != VIR_CLASS_INT;
-		r = fp ? (nf < 8 ? VIR_REGISTER_MAKE(1, nf++) : VIR_REGISTER_NONE) : (ni < 6 ? (uint8_t)x64_argument_register(ni++) : VIR_REGISTER_NONE);
-		if (k == g) *stack = off;
-		if (r == VIR_REGISTER_NONE) off += 8;
+	for (uint32_t k = 0; k < VIR_SIGNATURE_GROUP_COUNT(f->extra[sig]); k++) {
+		uint32_t w0 = f->extra[sig + 3 + 2*k], w1 = f->extra[sig + 4 + 2*k];
+		uint32_t pieces = VIR_GROUP_PIECE_COUNT(w0), gp = 0;
+		for (uint32_t j = 0; j < pieces; j++) gp += VIR_GROUP_CLASS(w0, j) == VIR_CLASS_INT;
+		bool memory = VIR_GROUP_KIND(w0) == VIR_GROUP_MEM;
+		uint32_t words = memory ? 1 : pieces;
+		if (memory || ni + gp > 6 || nf + pieces - gp > 8) {
+			int align = 1 << VIR_GROUP_ALIGN_LOG2(w1);
+			off = (off + align - 1) & -align;
+			if (g < words) {
+				*stack = off + 8 * g;
+				return VIR_REGISTER_NONE;
+			}
+			off += (VIR_GROUP_SIZE(w1) + 7) & ~7u;
+		} else {
+			for (uint32_t j = 0; j < pieces; j++) {
+				uint8_t reg = VIR_GROUP_CLASS(w0, j) == VIR_CLASS_INT ? x64_argument_register(ni++) : VIR_REGISTER_MAKE(1, nf++);
+				if (j == g) return reg;
+			}
+		}
+		g -= words;
 	}
-	return r;
+	return VIR_REGISTER_NONE;
+}
+
+VPRIV uint32_t x64_vir_stack_object_size(const vir_function *f, uint32_t sig, uint32_t word)
+{
+	bool sret = VIR_GROUP_KIND(f->extra[sig + 1]) == VIR_GROUP_SRET;
+	if (sret && !word) return 0;
+	word -= sret;
+	for (uint32_t k = 0; k < VIR_SIGNATURE_GROUP_COUNT(f->extra[sig]); k++) {
+		uint32_t at = sig + 3 + 2*k;
+		bool mem = VIR_GROUP_KIND(f->extra[at]) == VIR_GROUP_MEM;
+		uint32_t n = mem ? 1 : VIR_GROUP_PIECE_COUNT(f->extra[at]);
+		if (word < n) return mem ? VIR_GROUP_SIZE(f->extra[at+1]) : 0;
+		word -= n;
+	}
+	return 0;
+}
+
+static uint8_t x64_vir_return_register(uint32_t group, uint32_t piece)
+{
+	bool fp = VIR_GROUP_CLASS(group, piece) != VIR_CLASS_INT;
+	bool second = piece && (VIR_GROUP_CLASS(group, 0) != VIR_CLASS_INT) == fp;
+	return fp ? VIR_REGISTER_MAKE(1, second) : second ? RDX : RAX;
 }
 
 VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx)
@@ -33,7 +82,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 	bool r10=target && target->scratch_register10, ms=target && target->ms;
 	if (i->op == VIR_OP_PARAM) {
 		int stack;
-		x->result = x64_vir_argument_register(f, f->signature, i->a, &stack, ms);
+		x->result = x64_vir_argument_register(f, f->signature, x64_vir_param_word(f, i), &stack, ms);
 	} else if (i->op == VIR_OP_ACAS) {
 		x->operand_count = 3;
 		x->operands[1] = RAX;
@@ -62,20 +111,23 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 		for (uint32_t k = 0; k < n; k++) {
 			int stack;
 			x->operands[k + 1] = x64_vir_argument_register(f, i->b, k, &stack, ms);
-			if (x->operands[k + 1] == VIR_REGISTER_NONE) x->mem |= 1u << (k + 1);
+			if (x->operands[k + 1] == VIR_REGISTER_NONE && !x64_vir_stack_object_size(f, i->b, k)) x->mem |= 1u << (k + 1);
 		}
 		const vir_insn *callee = &f->insns[i->a];
-		if (callee->op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(callee->a) != CODEGEN_REFERENCE_TLS_LE && !callee->b && !callee->c) x->mem |= 1;
+		if (callee->op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(callee->a) < CODEGEN_REFERENCE_TLS_LE && !callee->b && !callee->c) x->mem |= 1;
 		x->clobbered[0] = r10?X64_TEMPORARIES:X64_TEMPORARIES & ~(1u << R10);
 		x->clobbered[1] = (1u << 14) - 1;
 		if (ms) {	/* a Microsoft callee keeps rsi, rdi and xmm6-xmm15 */
 			x->clobbered[0] &= ~((1u << RSI) | (1u << RDI));
 			x->clobbered[1] = (1u << 6) - 1;
 		}
-		if (i->type != VIR_TYPE_VOID) x->result = vir_register_class(i->type) ? VIR_REGISTER_MAKE(1, 0) : RAX;
+		if (i->type != VIR_TYPE_VOID && i->type != VIR_TYPE_MULTI) x->result = vir_register_class(i->type) ? VIR_REGISTER_MAKE(1, 0) : RAX;
+	} else if (i->op == VIR_OP_PROJ) {
+		x->result = x64_vir_return_register(f->extra[f->insns[i->a].b + 1], i->b);
 	} else if (i->op == VIR_OP_RET && f->extra[i->c]) {
-		x->operand_count = 1;
-		x->operands[0] = vir_register_class(f->insns[f->extra[i->c + 1]].type) ? VIR_REGISTER_MAKE(1, 0) : RAX;
+		x->operand_count = f->extra[i->c];
+		for (uint32_t j = 0; j < x->operand_count; j++)
+			x->operands[j] = x64_vir_return_register(f->extra[f->signature + 1], j);
 	} else if (i->op == VIR_OP_SDIV || i->op == VIR_OP_UDIV || i->op == VIR_OP_SREM || i->op == VIR_OP_UREM || i->op == VIR_OP_SMULHI || i->op == VIR_OP_UMULHI) {
 		x->operand_count = 2;
 		x->operands[0] = RAX;

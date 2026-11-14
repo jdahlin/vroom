@@ -56,7 +56,8 @@ enum {
 	X64_OP_SMULW,	/* rdx:rax = rax * r1 (signed, 64 x 64 -> 128) */
 	X64_OP_UD2,
 	X64_OP_TLS,		/* r0 = the address of ref, thread-local: cond 0 local-exec, 1 initial-exec;
-			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call) */
+			   2 general dynamic: rax = __tls_get_addr(ref's descriptor) (a call);
+			   3 thread pointer and 4 GOT offset are flag-preserving initial-exec components */
 	X64_OP_GOT,		/* r0 = ref's address from the GOT */
 	X64_OP_XCHG,		/* r0 <-> [r1 + off] (sz; locked) */
 	X64_OP_XADD,		/* lock xadd: r0 = [r1 + off], [r1 + off] += old r0 */
