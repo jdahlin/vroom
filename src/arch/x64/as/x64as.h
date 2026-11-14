@@ -11,16 +11,6 @@
 
 #include "operand.h"
 
-typedef struct {
-	uint8_t b[24];
-	int n;
-	int fixat, fixtype, fixsize;	/* one fixup (the displacement or the immediate) */
-	as_value fixv;
-	int fix2at, fix2type;	/* a second one: an immediate symbol after a displacement */
-	as_value fix2v;
-	int x87;		/* (unused) */
-} XEnc;
-
 /*
  * prefixes, REX, the opcode bytes, ModRM (+ SIB, displacement) for reg field
  * `reg` (a register number or /digit) and the r/m operand rm, then an
@@ -44,8 +34,6 @@ typedef struct {
 #define OPB(...) ((const uint8_t[]){ __VA_ARGS__ })
 enum { X64_NEXT = -2 };	/* a family's answer: not one of mine */
 
-VPRIV void eb(XEnc *x, int v);
-VPRIV void ew(XEnc *x, int64_t v, int n);
 VPRIV int fits8(int64_t v);
 VPRIV int fits32(int64_t v);
 VPRIV int isconst(as_context *a, as_value *v, int64_t *c);

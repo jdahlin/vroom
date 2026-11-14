@@ -1374,6 +1374,27 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling x64_emit (2026-11-14).** Eight pinned SQLite
+3.50.4 compiles sampled with perf cycles:u put the self-hosted encoder at
+16.57M exclusive cycles per compile versus 9.93M clang-built. Vcc's byte
+loops repeatedly loaded and stored the scratch-buffer position; clang unrolled
+the ModRM copy and inlined symbol folding. The self build also copied numeric
+displacements to a stack temporary and called as_value_fold. Emitting ModRM
+and SIB directly, storing fields at their final width in the fragment and
+folding only symbolic displacements cut the samples to 10.65M and 8.63M
+cycles respectively.
+
+| Same single-emitter SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 189.66 ms | 187.38 ms |
+| Clang-built vcc CPU time | 140.34 ms | 140.29 ms |
+| Self-hosted / clang-built | 1.351× | 1.336× |
+| Self-hosted retired instructions | 2.207B | 2.180B |
+
+CPU 7, warm-up excluded, alternating run order. All four compilers produced
+the same SQLite object. The assembler parity suite includes two relocations
+in one instruction and literal RIP displacement followed by an immediate.
+
 **SQLite with both CRC32C word updates inlined (2026-11-14).** The VIR
 inliner admits the same register-only CRC32Q asm that the builder recognizes.
 The self-hosted two-word wrapper is 15 bytes: MOV, CRC32Q, CRC32Q, RET.
