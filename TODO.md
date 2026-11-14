@@ -637,7 +637,25 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   :4, z:3`): clang starts the unit after `:0` at the byte where the previous
   unit ends, vcc aligns it to the type (`frontend/c/record-layout.c`); found
   by `bench/vcc-win64.py`.
-  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes.
+  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes (XPASS: remove
+  its `XFAIL` entry in `bench/vcc-win64.py`).
+- [ ] **x86-64: `naked` functions** [C].  `__attribute__((naked))` is not
+  implemented for x86-64: the body gets a frame, so the asm's `retq` sits
+  inside it; on Windows the epilogue checker of `vcc-win64.py --seh` flags
+  `vcc/dead_results` (`XFAIL`, stage seh; the function is never called).
+  *Validate:* `bench/vcc-win64.py --seh vcc dead_results` XPASSes.
+- [ ] **Windows x64: `-c` without text for the frame and sections** [P].
+  `vpp -c` for the target encodes records directly but hands the `.def`
+  records, sections/COMDAT, `.seh_*`, data and strings to the TU's assembler
+  as text items (as x86-64 ELF does for its directives); the `coff_section`,
+  `elf_reg` + `coff_class`, `coff_seh_*` calls of obj.h could take them
+  directly.  *Validate:* `vcc-win64.py --objcmp` stays 2105/2106; emit time
+  per TU drops.
+- [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
+  `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
+  vccd, checked by hand); `vcc-win64.py` drives vpp only.
+  *Validate:* a `vcc-win64.py --vccd` mode (private vccd, the shim as CC)
+  gives the same pass set as `--own`.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,

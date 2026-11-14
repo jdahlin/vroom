@@ -422,7 +422,7 @@ is wired (`vpp -S`, `--obj`, `--objcmp`) and fails at `as` until WIN1-WIN3.
   strlen floorf ceilf truncf roundf rintf nearbyintf fabsf`
   (`__stack_chk_guard`/`__stack_chk_fail` under -fstack-protector).
 
-### WIN4, WIN5 (2026-11-13): the standalone assembler done; `vpp -c` waits for WIN1-WIN3
+### WIN4, WIN5 (2026-11-13): the standalone assembler done (integrated 2026-11-14; `vpp -c`: below)
 
 `vasm --target=x86_64-w64-mingw32 x.s -o x.o` writes the COFF object clang
 -c writes, byte for byte.  Nothing from LLVM: `src/platform/win/coff.c` (the
@@ -487,7 +487,7 @@ of obj.h, each with a temporary label the encoder defines at the
 instruction boundary (`coff_seh_proc` at the entry, one call per prologue
 instruction after it, `coff_seh_end_prologue`, `coff_seh_end`).
 
-### WIN7 (2026-11-13): vlink writes PE, byte-identical to lld for clang's objects
+### WIN7 (2026-11-13): vlink writes PE, byte-identical to lld for clang's objects (integrated 2026-11-14)
 
 `src/platform/win/pe-linker.c` (one TU like `ld/ld.c`, #including
 `pe-options.c`, `pe-input.c`, `pe-resolve.c`, `pe-export.c`,
@@ -570,7 +570,7 @@ image-identical 2012/2012 (134 s cold); `vlink-pe-bad.py` (ASan) 530/530;
 `vlink-opts.py` 66/66; `vlink-bad.py` 34/34; `vcc-x86.py --suite vcc
 --vlink` 295/295.
 
-### WIN7R (2026-11-14): vcc's runtime library; programs link without compiler-rt
+### WIN7R (2026-11-14): vcc's runtime library; programs link without compiler-rt (integrated 2026-11-14)
 
 `src/runtime/` (internal header `runtime-internal.h`, 12 C files and
 `stack-probe.S`, about 1900 lines) builds `libvccrt.a` with
@@ -757,4 +757,114 @@ difference shows up as a `native` failure, to be fixed or added to
 `ci/win64-native-allow.txt` with its reason; `chkstk`'s strict page check
 on a real guard-page stack; `vlink-pe-bad.py` on the arm64 runner.
 
-### WIN4-WIN10: planned
+### Integration (2026-11-14): WIN1-WIN7R and WIN9 on current main
+
+Merged into worktree-win64, in this order: main 2b7ef4d4 (the front end's
+private and public renames, VIR's and the build's names, the linker split),
+WIN7+WIN7R, WIN4+WIN5, then the var-for-COFF branch (main 9d322868: the
+code generator's file and field renames of #241) and WIN9's CI branch.
+WIN1-WIN3's code was renamed by learning main's renames from its diff (per
+file, per directory, names that vanished there) and applying them to our
+side and the base before a three-way merge; struct field renames came from
+the compiler's errors with each struct's old and new definition aligned;
+about 30 hunks were resolved by hand.  `X86(c)` is `CODEGEN_IS_X64(c)`,
+`WIN64(c)` became `CODEGEN_IS_WIN64(c)`; main's asm frame operands (a 0 byte
+the printer turns into rbp or r12) and the Windows frame's `X_ASMFRAME`
+displacement are both read by the printer.  The COFF/PE constants are one
+header, `include/platform/win/coff-format.h` (was `pe-definitions.h`; coff.c
+dropped its own); the tail-merged string table of `elf.c`, `coff.c` and
+`pe-write.c` is `common/string-table.h`; the object writers share
+`elf_section_bytes_copy` and `ELF_EACH_FIXUP_IN_LAYOUT` (obj.h); vlink-PE's
+arrays use `common/vector.h`, its hash `vhash_string`, coff.c's LEB128
+`common/leb128.h` (quality.py: what is left is blessed with its reason in
+the commit).
+
+Measured after the merges (before = the Status entries above):
+
+| harness | before | after |
+|---|---|---|
+| `vcc-win64.py --seh` / `--vir --seh` | 2012/2016 | 2014/2018 (the 4 known; main added 2 tests) |
+| `--vasm-ref` | 2011/2012 | 2017/2018 (`debug_asm`, WIN6) |
+| `--vlink-ref` | 2012/2012 | 2018/2018 image-identical |
+| `--vccrt-ref` | 2014/2014 | 2018/2018, 0 foreign |
+| `vcc-abi.py --target win64` | 28 pass, 3 xfail, 4 skip | the same |
+| `vas-obj.py` | 77/77 | 77/77 |
+| `vas-corpus.py --target x86_64-w64-mingw32` | 4494/4494 | 4514/4514 (more test files) |
+| `vlink-pe.py --run` | 57/57 | 57/57 |
+| `vccrt-test.py diff` | 70/70 | 70/70 (1194507 calls) |
+| `var-cmp.py coff` | 230/230 | 230/230, 300/300 mutants |
+| `vcc-diff.py --win64` cmp/text/textc/dm/deps/hdr, lines, dd | 990, 989, 988 | the same |
+| `vcc-sema.py --win64` run/batch/layout | 990/990 | 990/990 (21.1 M claims) |
+| `vcc-bflayout.py` | 0 rejected | 0 rejected (6467 claims each MinGW mode) |
+| `vcc-driver.py` | 229/304 | 229/304 (the arm64 tables' version macros) |
+| `vcc-same.py` vs main | identical but -E markers | 23943/23958 vs 9d322868: the 15 are -E markers naming the base tree's headers |
+| `vcc-x86.py` | 2123/2128 | 2125/2130 (the 5 `inline` failures of main too) |
+| `vcc-x86.py --suite vcc --objcmp` / `--vlink` | 323/323, 293/293 | 325/325, 295/295 |
+| `vcc-diag.py`, `vlink-opts.py`, `quality.py --check` | 229, 66, 22/22 | 229, 66, 22/22 |
+| unity and file-by-file builds | file-by-file vccd link failed | both build and link |
+
+### WIN5 (2026-11-14): `vpp -c` for the target, the driver's link, own toolchain end to end
+
+- **`-c`.** The code generator's object path selects COFF for the target
+  (`codegen_object_target_set` in `codegen/unit-emit.c`; the driver's
+  `.s`/`.S` path in `driver/job.c`).  Records are encoded directly, as for
+  x86-64 ELF; the text items (`.def` records, sections and COMDAT, the
+  `.seh_*` frame, jump tables in `.rdata`, data objects and strings) go to the
+  TU's own assembler in place, which writes them through WIN4/WIN5's COFF
+  directives and `coff_seh_*`.  Not done: emitting those through the
+  `coff_*` calls without text; the ELF path has the same split.
+- **The driver links.** `driver/link-mingw.c`: without `-c/-S/-E` a Windows
+  command line compiles each source and links with vlink and the line clang's
+  MinGW toolchain gives ld.lld (checked with `clang -###` for the default,
+  `-shared`, `-static`, `-mwindows`, `-mconsole`, `-municode`, `-mthreads`,
+  `-pthread`, `-s`, `-nostdlib`, `-nodefaultlibs`, `-nostartfiles`, `-L/-l`,
+  `-Wl,`, `-Xlinker`), with `libvccrt.a` in place of compiler-rt and never
+  libgcc or libunwind; `-v` prints it.  `libvccrt.a` is `VCC_VCCRT` or
+  `vccrt/libvccrt.a` beside the program (`make -C src vccrt`).  vpp spawns
+  the vlink beside it; vccd runs `ld_main` in process and takes Windows
+  `-c/-S` as its own compile (the shim `vcc --target=x86_64-w64-mingw32 x.c
+  -o x.exe` works against a private vccd; not in a harness yet).
+- **libvccrt.a is built by vcc**: `runtime/build.sh` defaults to `vpp
+  --target=x86_64-w64-mingw32` (stack-probe.S through vcc's assembler) and
+  `var`, so the library needs no LLVM tool.
+- **`vcc-win64.py --own`, now the default** (`--clang-as` the former one):
+  vpp -c for the test and the test runtime, vcc's driver links, PATH an empty
+  directory on vcc's side; `fail foreign` if the vlink line names
+  compiler-rt, libgcc, libunwind, clang's `lib/` or an LLVM tool, or the
+  link map has an input that is not ours, the sysroot's CRT files and archive
+  members, or libvccrt.a's members.
+- **Tests:** float128 and asm_flag_out and 17 of the 20 LP64-excluded
+  `src/test/vcc` tests moved to `long long` (mechanically; their -S for x86-64
+  and aarch64 Linux, with and without VIR, is unchanged but for format and
+  assert strings); asm_clobber_all, asm_imm_knownbits and bit_cast stay
+  excluded with their real reasons.
+
+Measured: `--objcmp` 2105/2106 objects of `vpp -c` byte-identical to clang -c
+and to vasm of `vpp -S` (so `llvm-readobj --unwind` is equal too; the one
+left is `vcc/debug_asm`, -g, WIN6); `--obj --seh` 2014/2018 before the test
+changes; `--own --seh` 2032/2034 and `--own --vir --seh` 2032/2034 after
+them (left: `tcc/95_bitfields_ms`, MS layout of a packed record after `:0`,
+and `vcc/dead_results`, `naked` not implemented); `--clang-as --seh` the
+same 2032/2034; `vcc-win64.py --suite vcc` 312/313 (was 291/294);
+`vccrt-test.py diff` 70/70 with the vcc-built library, `chkstk` ok,
+`needs` 70/70; `vcc-x86.py --suite vcc` 324/324, `vcc-ctests.py --suite vcc`
+331/331, `vcc-vir-x86.py` green.
+
+CI locally (`CI_JOBS=4 ci/premerge.sh win64`, this host): every guarded
+step that can run does and passes: win64-ref, win64-vlink (2034/2034
+image-identical), win64-vccrt, **win64-own** and **win64-own-vir**
+(2033/2033 + 1 xfail each), vlink-pe, vccrt-diff, vccrt-chkstk, var-coff,
+**abi-win64**, **vas-obj-coff**, win64-pack; zlib-win64 and sqlite-win64 skip
+(WIN8).  The export now holds vcc's own programs: `bench/win64-native.py
+build/linux/win64-exes.tar.xz --wrapper wine` 2035/2035 (2033 vcc-built
+test programs, the two vccrt-test programs).  Known failures are `XFAIL` in
+vcc-win64.py with their TODO.md items (95_bitfields_ms at run, dead_results
+at seh); a pass of one is an error.
+
+What still comes from LLVM on vcc's side: no tool.  The resource headers
+(`stddef.h`, `stdarg.h`, the x86 intrinsic headers) are clang's
+(`VCC_RESDIR`, as for every target; the harness passes clang's include
+directory with -isystem to both sides), and the sysroot is llvm-mingw's
+packaging of mingw-w64.
+
+### WIN6, WIN8, WIN10: planned
