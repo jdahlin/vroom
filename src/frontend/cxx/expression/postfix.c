@@ -138,6 +138,12 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 						for (uint32_t i = 0; i < c->ncargs && i < 16; i++)
 							known &= c->cargs[i] != CXX_TY_UNKNOWN;
 						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
+						/* code generation: the function found there, called (no object: a namespace's
+						   function, or a friend the class declares) */
+						if (c->etype != CXX_TY_UNKNOWN && c->call_resolved && c->call_picked && an != UINT32_MAX &&
+						    (!c->call_picked->member_of || c->call_picked->fn_static || c->call_picked->member_of->kind != CXX_SCOPE_CLASS))
+							c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace),
+							cxx_gen_call(c, c->call_picked, 0, false, anodes, an, cloc), c->gen_vmode = 0;
 						/* nothing by that name fits, here or in the arguments' namespaces */
 						c->einvalid = was || (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure);
 						if (c->einvalid && !was)

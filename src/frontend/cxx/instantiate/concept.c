@@ -27,6 +27,8 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (f->done[i].n == n && cxx_args_equal(f->done[i].args, args, n))
 			return f->done[i].viable;
+	uint32_t given = n;	/* (the cache's key: the arguments as written) */
+
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, f->p.home, NULL);
 	for (uint32_t i = 0; i < ps->ntparams; i++) {
 		const cxx_tparam *tp = &ps->tparams[i];
@@ -37,17 +39,24 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_
 			cxx_bind_pack(c, binding, tp, args + i, n - i);
 			break;
 		}
+		if (i >= n && tp->def_b && n < 32) {
+			/* a default argument (three_way_comparable<T> is <T, partial_ordering>), from the ones before it */
+			memset(&acopy[n], 0, sizeof acopy[n]);
+			if (!cxx_default_argument(c, tp, binding, &acopy[n]) || !acopy[n].kind || (acopy[n].kind == 1) != (tp->kind == 1))
+				return -1;
+			n++;
+		}
 		if (i >= n || (args[i].kind == 1) != (tp->kind == 1))
-			return -1;	/* (default arguments of a concept: not yet) */
+			return -1;
 		cxx_bind(c, binding, tp, &args[i]);
 	}
 	if (f->ndone == f->cdone)
 		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
 	at = f->ndone++;
 	memset(&f->done[at], 0, sizeof f->done[at]);
-	f->done[at].args = malloc((n ? n : 1) * sizeof *args);
-	memcpy(f->done[at].args, args, n * sizeof *args);
-	f->done[at].n = n, f->done[at].viable = -1;	/* (a concept that names itself: not known) */
+	f->done[at].args = malloc((given ? given : 1) * sizeof *args);
+	memcpy(f->done[at].args, args, given * sizeof *args);
+	f->done[at].n = given, f->done[at].viable = -1;	/* (a concept that names itself: not known) */
 	cxx_outer_save(c, &o);
 	c->instantiating++, c->body_depth++, c->unevaluated++;
 	c->fail = &jb;
@@ -355,6 +364,12 @@ VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity 
 	}
 	if (n == 1 && !one->ftmpl->defined)
 		one->ftmpl = f;
+}
+
+/* has the function template a requires-clause (in its template head) */
+VPRIV bool cxx_ftemplate_constrained(const cxx_entity *e)
+{
+	return e->ftmpl && e->ftmpl->req_pos;
 }
 
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e)

@@ -147,8 +147,9 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 	if (v && v->has_value && !v->placeholder && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN &&
 	    (AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM || (AST_TYPE_KIND(c->ast, v->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= TY_ULLONG))) {
 		/* an enumerator (or a constant with no object, or one whose object was not made: a static constexpr
-		   member): its value, of the enumeration's underlying type */
-		qty vt = AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM ? AST_TYPE(c->ast, v->ty)->base : QUNQ(v->ty);
+		   member): its value, of the enumeration's type (errc::x converts to error_condition by the
+		   constructor template for enumerations; C's rules make it an integer where one is wanted) */
+		qty vt = QUNQ(v->ty);
 
 		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	}

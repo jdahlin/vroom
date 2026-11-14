@@ -265,6 +265,51 @@ VPRIV bool cxx_instance_parse(cxx *c, cxx_instance *x)
 	return ok;
 }
 
+/* is the scope std, or a namespace inline in it (std::__1) */
+static bool cxx_scope_in_std(const cxx_scope *s)
+{
+	for (int i = 0; s && i < 3; i++, s = s->parent)
+		if (s->kind == CXX_SCOPE_NAMESPACE && s->owner && vintern_ents[s->owner->name].len == 3 &&
+		    !memcmp(vintern_ents[s->owner->name].s, "std", 3))
+			return true;
+	return false;
+}
+
+/*
+ * A standard type trait vcc computes from its definition in the standard instead of from the library's
+ * body, which needs constant evaluation vcc does not have (a loop over an array in a constexpr function):
+ * std::common_comparison_category<Ts...>::type ([cmp.common]): void if a T is not a comparison category
+ * type, else partial_ordering if one is, else weak_ordering if one is, else strong_ordering.
+ */
+static bool cxx_instance_known_type(cxx *c, cxx_instance *x)
+{
+	static uint32_t ccc, type;
+	cxx_entity *m;
+	qty po, wo, so, r;
+	int worst = 3;	/* 3 strong, 2 weak, 1 partial, 0 none */
+
+	if (!ccc)
+		ccc = vintern_cstr("common_comparison_category"), type = vintern_cstr("type");
+	if (!x->of || x->of->name != ccc || !x->inst || !x->inst->members || !x->t || !cxx_scope_in_std(x->t->home))
+		return false;
+	po = cxx_std_class(c, "partial_ordering"), wo = cxx_std_class(c, "weak_ordering"), so = cxx_std_class(c, "strong_ordering");
+	if (po == CXX_TY_UNKNOWN || wo == CXX_TY_UNKNOWN || so == CXX_TY_UNKNOWN)
+		return false;
+	for (uint32_t i = 0; i < x->nargs; i++) {
+		qty t = x->args[i].kind == 1 ? x->args[i].t : CXX_TY_UNKNOWN;
+		int k = t == CXX_TY_UNKNOWN ? -1 : QUNQ(t) == so && !QQ(t) ? 3 : QUNQ(t) == wo && !QQ(t) ? 2 : QUNQ(t) == po && !QQ(t) ? 1 : 0;
+
+		if (k < 0)
+			return false;
+		worst = k < worst ? k : worst;
+	}
+	r = worst == 3 ? so : worst == 2 ? wo : worst == 1 ? po : cc_type_basic(TY_VOID);
+	for (m = cxx_lookup_in(c, x->inst->members, type, 0); m; m = m->next)
+		if (m->kind == CXX_ENTITY_TYPE)
+			m->ty = r, m->dependent = 0, m->members = cc_type_is_record(c->ast, r) ? cxx_type_class_scope(c, r) : NULL;
+	return true;
+}
+
 VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst);
 
 /* an instance's class, completed: its body parsed (once).  What its members' declarations leave in the
@@ -357,7 +402,13 @@ VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 		x->binding = binding;
 	}
 	x->state = 1;
-	x->state = cxx_instance_parse(c, x) ? 2 : 3;
+	{
+		uint8_t mm = c->member_missing, iv = c->einvalid;
+
+		x->state = cxx_instance_parse(c, x) ? 2 : 3;
+		if (x->state == 2 && cxx_instance_known_type(c, x))
+			c->member_missing = mm, c->einvalid = iv;	/* (what its body's parse could not tell does not count) */
+	}
 	c->tentative = tentative;
 }
 

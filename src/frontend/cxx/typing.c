@@ -748,6 +748,11 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 
 					if (ga >= 0 && gb >= 0 && ga != gb)
 						better = ga < gb, worse = ga > gb;
+					/* as specialized as each other, one with a requires-clause (satisfied: it is a
+					   candidate) and the other without: the constrained one ([temp.func.order]/6.2.2) */
+					else if (cxx_ftemplate_constrained(cand[a].e) != cxx_ftemplate_constrained(cand[b].e) &&
+						 ga >= 0 && ga == gb && cxx_ftemplate_has_body(cand[a].e) == cxx_ftemplate_has_body(cand[b].e))
+						better = cxx_ftemplate_constrained(cand[a].e), worse = !better;
 					/* as specialized as each other: a declaration and its definition are one function, the
 					   definition stands for it */
 					else if (cxx_ftemplate_has_body(cand[a].e) != cxx_ftemplate_has_body(cand[b].e) && cand[a].r == cand[b].r)
@@ -1831,7 +1836,7 @@ VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem)
 	return true;
 }
 
-/* argument-dependent lookup: name in the namespace of each argument's class (the first that has it) */
+/* argument-dependent lookup: name in the namespace of each argument's class or enumeration (the first that has it) */
 VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs)
 {
 	qty acopy[16];
@@ -1852,6 +1857,21 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 			continue;
 		if (AST_TYPE_KIND(c->ast, t) == TY_PTR)
 			t = AST_TYPE(c->ast, t)->base;
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ENUM) {
+			/* an enumeration: the innermost namespace of its declaration ([basic.lookup.argdep]/3.3; a member
+			   enumeration's class too, not looked in here) */
+			s = cxx_tag_home(c, QUNQ(t));
+			while (s && s->kind != CXX_SCOPE_NAMESPACE)
+				s = s->parent;
+			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
+				continue;
+			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			if (c->etype != CXX_TY_UNKNOWN)
+				return;
+			if (!c->none_viable)
+				c->einvalid_unsure = 1;
+			continue;
+		}
 		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))))
 			continue;
 		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */

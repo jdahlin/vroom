@@ -1956,3 +1956,18 @@ Ny lucka sedd: en arraymedlem från en klammerlista i en mem-initierare (`x{a, 0
   konverteringsfunktionens resultat ([dcl.init.general]/16.6.1), ingen kopia (string_view(str)).
 Tester: `run/spec-after-use.cpp`, `vcc/vector_const_element.c`.  cxx-strict 338 (347): 140 funktioner
 kompileras nu, 10 nya saknas (strömmar och binärformat som inte nåddes förut).
+
+## Status 111 (2026-11-14)
+- Anrop som hittas genom argumentberoende uppslagning byggdes aldrig (bara typades): nu
+  `cxx_gen_call` på det ADL valde, för klassers namnrymder och dolda vänner.  ADL tittar även i en
+  uppräkningstyps namnrymd ([basic.lookup.argdep]/3.3: `make_error_condition(errc)`).
+- En uppräknares nod har uppräkningstypen (inte den underliggande): `ec == errc::x` konverterar via
+  `error_condition`s konstruktormall för uppräkningar.
+- `std::common_comparison_category<Ts...>::type` räknas ut från standardens definition ([cmp.common]):
+  libc++:s kropp behöver konstantevaluering vcc saknar (en slinga över en array i en constexpr-funktion).
+  Därmed `three_way_comparable`, `compare_three_way` och `<=>` på pekare.
+- Koncept med standardargument (`three_way_comparable<T>` = `<T, partial_ordering>`).
+- Två mallar som är lika specialiserade, den ena med requires-klausul: den begränsade väljs
+  ([temp.func.order]/6.2.2).  Kvar: clang manglar requires-klausulen (`IiQ5same2IT_EE`), vcc inte.
+Test: `run/adl-calls.cpp`.  cxx-strict 348 funktioner (338): 43 fler kompileras, inga nya fel; ökningen är
+anrop från nyss byggd kod till funktioner vcc aldrig instansierar ("no body seen", 44, nu störst).
