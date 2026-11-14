@@ -1374,6 +1374,40 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite emitter and short literal comparisons (2026-11-14).**
+Five pinned SQLite 3.50.4 compiles per binary, sampling every 75,001 user
+cycles with call stacks. At the #283 baseline, a function from the codegen
+unity object appeared on 20,098/37,798 self-hosted samples (53.2%) and
+16,200/30,417 Clang-built samples (53.3%). The leaf itself belonged to
+codegen in 11,711 and 8,847 samples respectively. Inclusive counts include
+assembly and object writing called by the emitter.
+
+In the x86 two-address traversal VCC copied each 16-byte record to its
+stack and classified opcodes with a chain of range and equality branches.
+Clang inlined the traversal in x64_finish and used bit tests for membership.
+Both builds now index a byte table for operand constraints and copy ordinary
+records directly to the destination. Self-hosted samples whose leaf was
+x64_two_address_convert fell from 383 to 218.
+
+VIR now replaces a short literal memcmp whose sole result use tests equality
+with an unaligned word load at the original call and a literal comparison.
+Widths are 1, 2, 4 and 8 bytes. The directive macro passes the literal length
+explicitly. VCC emits the same memory/immediate compare as Clang for ".req"
+and "cfi_". Self-hosted libc memcmp samples called by as_snippet_assemble
+and as_directive_dispatch went from 117 and 114 to 0 and 24.
+
+CPU 7, one worker, same SQLite compile as #283. In 24 rotated repetitions the
+median task-clock was 167.335 → 164.415 ms self-hosted and 139.905 → 138.215 ms
+Clang-built (1.196× → 1.190×). Retired user instructions fell by 11.675 M
+and 4.647 M respectively. A repeat with no concurrent validation ran in
+159.360 → 158.905 ms and 133.510 → 133.635 ms (1.194× → 1.189×);
+retired instructions fell by 11.796 M and 4.364 M. The size of the timing
+gain is sensitive to host load. A 21-repetition alternating run was noisier
+(179.78 → 172.27 ms and 144.79 → 145.97 ms, final 1.180×). Every output had
+SHA-256 c4d3896fefc93dca709598910795c84ab65403ca45020b260292d57b777d3258.
+The linked object passed the recursive SQL sum check. Stage 2 and stage 3
+bootstrap objects matched.
+
 **Forwarding padded ABI words and aggregate call results (2026-11-14).**
 In `as_snippet_assemble`, VIR zeroed a 16-byte stack token, stored a
 pointer and a 32-bit length, and immediately reloaded both as 64-bit
