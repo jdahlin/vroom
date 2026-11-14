@@ -887,6 +887,7 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 static void cxx_parameter_clause_parse(cxx *c);
 static void cxx_parameter_clause_body_parse(cxx *c);
 static void cxx_function_tail_parse(cxx *c);
+static void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps, uint32_t n);
 
 /* ptr-operator: * cv, &, &&, X::* cv (with attributes); false if none.  t (may be NULL): the type it applies to */
 static bool cxx_ptr_operator_parse(cxx *c, qty *t)
@@ -1416,7 +1417,22 @@ static void cxx_function_tail_parse(cxx *c)
 		break;
 	}
 	if (cxx_accept(c, LEX_TOKEN_ARROW)) {
+		/* the parameters are in scope in a trailing return type: -> decltype(a < b) */
+		cxx_scope *outer = c->scope;
+
+		if (!c->tentative && !c->template_depth && c->fn_nparams && !c->fn_variadic) {
+			cxx_scope *ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+			uint32_t n = c->fn_nparams;
+			cxx_param *save = malloc(n * sizeof *save);
+
+			for (uint32_t i = 0; i < n; i++)
+				save[i].name = c->fn_pnames[i], save[i].ty = c->fn_params[i];
+			cxx_scope_push(c, ps);
+			cxx_params_declare(c, ps, save, n);
+			free(save);
+		}
 		cxx_type_id_parse(c);
+		c->scope = outer;
 		c->fn_trailing = c->type_out;	/* auto f() -> T: the return type */
 		c->fn_const = is_const;
 		return;

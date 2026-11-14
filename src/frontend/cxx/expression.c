@@ -135,6 +135,8 @@ static void cxx_id_expression_parse(cxx *c)
 	cxx_entity *e;
 	cxx_token *t;
 
+	uint32_t ename = 0;
+
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	cxx_nested_name_parse(c, &q, &dep);
 	template_kw = cxx_accept_kw(c, CXX_KW_template);
@@ -183,6 +185,8 @@ static void cxx_id_expression_parse(cxx *c)
 			return;
 		}
 	}
+	if (!q && !dep && !template_kw)
+		ename = t->id;
 	if (!dep && e)
 		cxx_name_type(c, e);
 	else if (!e && !q && t->len > 10 && !memcmp(t->s, "__builtin_", 10) && !c->tentative &&
@@ -193,6 +197,7 @@ static void cxx_id_expression_parse(cxx *c)
 	else
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 	(void)save;
+	c->ename = ename;	/* (after the cxx_et calls above, which clear it) */
 }
 
 /* is this the start of a type (for casts, sizeof, functional casts)? */
@@ -888,6 +893,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 				cxx_targ xa[8];
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
 				uint8_t call_obj = c->call_obj;
+				uint32_t ename = c->ename;
 
 				if (c->xargs_set && nx == UINT32_MAX)
 					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
@@ -903,8 +909,13 @@ static void cxx_postfix_expression_parse(cxx *c)
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 				else if (!set && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
-				else
+				else {
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					/* f(x) with no f that fits: the functions named f in the namespaces of the
+					   arguments' classes (argument-dependent lookup) */
+					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable))
+						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
+				}
 			}
 			continue;
 		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {

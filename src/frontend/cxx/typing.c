@@ -589,3 +589,34 @@ VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem)
 	*elem = c->etype;
 	return true;
 }
+
+/* argument-dependent lookup: name in the namespace of each argument's class (the first that has it) */
+VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs)
+{
+	qty acopy[16];
+	uint8_t lcopy[16];
+
+	if (nargs > 16 || c->tentative)
+		return;
+	memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
+	for (uint32_t i = 0; i < nargs; i++) {
+		qty t = acopy[i];
+		cxx_scope *s;
+		cxx_entity *set;
+
+		if (t == CXX_TY_UNKNOWN)
+			continue;
+		if (AST_TYPE_KIND(c->ast, t) == TY_PTR)
+			t = AST_TYPE(c->ast, t)->base;
+		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))))
+			continue;
+		while (s && s->kind != CXX_SCOPE_NAMESPACE)
+			s = s->parent;
+		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
+			continue;
+		cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+		if (c->etype != CXX_TY_UNKNOWN)
+			return;
+	}
+	cxx_et(c, CXX_TY_UNKNOWN, false);
+}

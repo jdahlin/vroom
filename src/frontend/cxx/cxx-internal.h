@@ -263,6 +263,7 @@ typedef struct cxx {
 	uint32_t ncargs, ccargs;
 	qty edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
 	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
+	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
 	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
 	qty lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
 	uint8_t ret_seen;		/* ... and a return with a value was seen (its type perhaps not known) */
@@ -371,6 +372,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs);
 VPRIV void cxx_lambda_parameters_parse(cxx *c);
 VPRIV void cxx_class_unverifiable(cxx *c);
 VPRIV void cxx_for_range_declaration_parse(cxx *c);
