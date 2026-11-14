@@ -313,7 +313,7 @@ uint32_t coff_section_unique(ElfObj *o, const char *name, uint32_t len, uint32_t
 			     uint32_t unique_id);
 /* sec is placed after the sections coff_finish creates (.pdata, .llvm_addrsig), in the order of
  * the calls: MC's .debug_line and .debug_line_str, which its streamer creates at the end when the
- * source did not; at most 4 per object */
+ * source did not; at most 8 per object */
 void coff_section_late(ElfObj *o, uint32_t sec);
 /* .file "name": a .file symbol with the name in its auxiliary records (each call adds one) */
 void coff_file_name(ElfObj *o, const char *name, uint32_t len);

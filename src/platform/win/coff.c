@@ -119,7 +119,7 @@ uint32_t coff_section_unique(ElfObj *o, const char *name, uint32_t len, uint32_t
 void coff_section_late(ElfObj *o, uint32_t sec)
 {
 	CoffState *c = coff_state(o);
-	if (c->late_count < 4) c->late_sections[c->late_count++] = sec;
+	if (c->late_count < 8) c->late_sections[c->late_count++] = sec;
 }
 
 void coff_file_name(ElfObj *o, const char *name, uint32_t len)

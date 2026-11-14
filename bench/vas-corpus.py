@@ -47,7 +47,7 @@ def one(job):
                           cwd=os.path.dirname(f)).returncode:
             return ('skip', f, opt, '')
         march = [o for o in opt.split() if o.startswith(('-march=', '-mcpu='))]	# the .s has no .arch
-        if subprocess.run([CL, f'--target={TGT}', *march, *ASG, '-c', s, '-o', c], capture_output=True).returncode:
+        if subprocess.run([CL, f'--target={TGT}', *march, *ASG[:1], '-c', s, '-o', c], capture_output=True).returncode:
             return ('skip', f, opt, '')
         q = subprocess.run([VAS] + ([f'--target={TGT}'] if TGT.startswith('x86_64') else []) + ASG + [s, '-o', v], capture_output=True, text=True)
         if q.returncode:
@@ -71,7 +71,8 @@ def main():
     if a.pat: files = [f for f in files if a.pat in f]
     if a.limit: files = files[:a.limit]
     jobs = [(f, o, a.target) for f in files for o in opts]
-    with Pool(a.j, initializer=_init, initargs=(['-g'] if a.as_g else [],)) as p: res = p.map(one, jobs, chunksize=4)
+    producer = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout.splitlines()[0]	# (cc1as's -dwarf-debug-producer)
+    with Pool(a.j, initializer=_init, initargs=(['-g', '-dwarf-debug-producer', producer] if a.as_g else [],)) as p: res = p.map(one, jobs, chunksize=4)
     cnt = collections.Counter(r[0] for r in res)
     why = collections.Counter()
     for k, f, o, m in res:

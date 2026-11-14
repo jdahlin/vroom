@@ -36,9 +36,12 @@ int as_label_define_symbol(as_context *a, uint32_t sym);		/* define sym at the c
  * 4 for COFF (MinGW) and 5 otherwise; a .file 0 makes it 5 as in MC */
 void as_dwarf_version_set(as_context *a, int version);
 /* -g as clang -c of a .s: the line table knows the compilation directory (cc1as's
- * -fdebug-compilation-dir with -debug-info-kind); NULL: no -g.  (MC's debug information for an
- * assembler source without .file is not generated: TODO.md WIN6.) */
+ * -fdebug-compilation-dir with -debug-info-kind), and a source without .file N gets MC's debug
+ * information for assembler sources (a row per instruction, a compile unit with a DW_TAG_label per
+ * label, .debug_aranges); NULL: no -g */
 void as_debug_directory_set(as_context *a, const char *dir);
+/* that compile unit's DW_AT_producer (cc1as's -dwarf-debug-producer); NULL: "vcc" */
+void as_dwarf_producer_set(as_context *a, const char *producer);
 /* directory for relative .incbin paths (NULL: the process cwd) */
 void as_include_directory_set(as_context *a, const char *dir);
 /* Apple's assembler dialect (as vcc -S and clang write it for Mach-O) as the

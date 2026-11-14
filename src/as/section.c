@@ -186,6 +186,7 @@ VPRIV int as_directive_section(as_context *a, const char *p, const char *e, int 
 	{	/* MC: a code section is at least 4-aligned once switched to */
 		ElfSec *se = elf_sec(a->object, s);
 		if ((se->flags & SHF_EXECINSTR) && se->align < 2 && a->object->machine != EM_X86_64) se->align = 2;
+		if (a->gen_dwarf && (se->flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR)) as_gen_dwarf_section(a, s);	/* (MC: ELF's .section only) */
 	}
 	as_fragment_switch(a, elf_subsection(a->object, s, (int32_t)sub));
 	return 0;

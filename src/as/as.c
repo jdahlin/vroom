@@ -104,9 +104,9 @@ static __attribute__((noinline)) size_t as_statement_next_copy(as_context *a, as
 					if (q < e && *q == '"') {
 						const char *r = ++q;
 						while (q < e && *q != '"' && *q != '\n') q++;
-						a->file_name = as_text_duplicate(a, r, (size_t)(q - r)).text;
+						a->file_name = a->cpp_file = as_text_duplicate(a, r, (size_t)(q - r)).text;
 					}
-					if (ln) f->line = ln - 1;	/* the marker's newline makes it ln */
+					if (ln) a->cpp_line_delta += (int64_t)f->line - (ln - 1), f->line = ln - 1;	/* the marker's newline makes it ln */
 				}
 				while (p < e && *p != '\n') p++;
 				continue;
@@ -194,12 +194,14 @@ static int as_label_define(as_context *a, const char *s, size_t n)
 		nl->forward = 0;
 		nl->current = y;
 		elf_define(a->object, y, a->fragment_current, elf_frag(a->object, a->fragment_current)->size);
+		if (a->gen_dwarf) as_gen_dwarf_label(a, s, n);	/* (no DW_TAG_label: a temporary) */
 		return 0;
 	}
 	uint32_t y = as_symbol_intern(a, s, n);
 	ElfSym *ys = elf_symp(a->object, y);
 	if (ys->flags & ESYM_DEFINED) return as_error_report(a, "invalid symbol redefinition");
 	elf_define(a->object, y, a->fragment_current, elf_frag(a->object, a->fragment_current)->size);
+	if (a->gen_dwarf) as_gen_dwarf_label(a, s, n);
 	return 0;
 }
 
@@ -625,9 +627,13 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 	as_macro *m = as_macro_find(a, w.text, w.length);
 	if (m) return as_macro_invoke(a, m, w.text + w.length, e);
 	if (w.text[0] == '.') return as_directive_dispatch(a, w, w.text + w.length, e);
+	int generated = a->gen_dwarf && as_gen_dwarf_instruction(a);
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
-	if (a->object->machine == EM_X86_64)
-		return x64_as_instruction_assemble(a, w.text, e, w.length);
+	if (a->object->machine == EM_X86_64) {
+		int r = x64_as_instruction_assemble(a, w.text, e, w.length);
+		if (generated && !r) as_gen_dwarf_prefix(a, w, e);
+		return r;
+	}
 	return a64_as_instruction_assemble(a, w.text, e, w.length);
 }
 
@@ -653,6 +659,7 @@ void as_free(as_context *a)
 void as_include_directory_set(as_context *a, const char *dir) { a->incbin_directory = dir; }
 void as_dwarf_version_set(as_context *a, int version) { a->dwarf_version_option = version; }
 void as_debug_directory_set(as_context *a, const char *dir) { a->debug_directory = dir; }
+void as_dwarf_producer_set(as_context *a, const char *producer) { a->dwarf_producer = producer; }
 
 /*
  * A persistent assembler bound to one ElfObj for a whole TU: as_begin()
@@ -673,6 +680,8 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
 	a->dwarf_file_count = a->dwarf_file_capacity = a->dwarf_directory_count = a->dwarf_directory_capacity = a->dwarf_row_count = a->dwarf_row_capacity = 0; a->variable_item_count = a->variable_item_capacity = 0; a->dwarf_row_is_pending = a->dwarf_table_is_due = 0;
 	a->variable_rank = NULL;
 	a->dwarf_version = a->dwarf_version_option ? a->dwarf_version_option : o->format == OBJ_COFF ? 4 : 5;
+	a->gen_dwarf = a->debug_directory ? 2 : 0; a->gen_file = 0; a->cpp_file = NULL; a->cpp_line_delta = 0;
+	a->gen_section_count = a->gen_section_capacity = a->gen_label_count = a->gen_label_capacity = a->gen_name_count = a->gen_name_capacity = 0;
 	memset(&a->dwarf_row_pending, 0, sizeof a->dwarf_row_pending); a->dwarf_row_pending.flags = 1;
 	a->macro_mask = 255; a->macro_count = 0;
 	a->macro_table = as_region_alloc(&a->definitions, sizeof(as_macro *) * (a->macro_mask + 1));
@@ -699,6 +708,7 @@ int as_snippet_assemble(as_context *a, const char *text, size_t len)
 {
 	ElfObj *o = a->object;
 	if (a->failed) return -1;
+	if (a->gen_dwarf == 2) as_gen_dwarf_start(a, text, len);
 	as_frame_push(a, text, len, AS_FRAME_FILE, 0);
 	while (a->frame_count && !a->failed) {
 		as_frame *f = &a->frames[a->frame_count - 1];
@@ -759,6 +769,7 @@ int as_end(as_context *a)
 	}
 	if (!a->failed && a->variable_item_count) as_variable_items_finish(a);
 	if (!a->failed && a->frame_description_count) as_cfi_frame_emit(a);
+	if (!a->failed && a->gen_dwarf) as_gen_dwarf_finish(a);
 	if (!a->failed && a->dwarf_table_is_due) as_dwarf_line_finish(a);
 	if (!a->failed && a->symver_count) as_symver_finish(a);
 	if (!a->failed && a->addrsig_symbol_count) {

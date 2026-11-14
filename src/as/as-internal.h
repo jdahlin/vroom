@@ -129,6 +129,19 @@ struct as_context {
 	struct as_dwarf_row { uint32_t fragment, file, line, column, discriminator, isa; uint64_t offset; uint8_t flags; } *dwarf_rows, dwarf_row_pending;
 	uint32_t dwarf_row_count, dwarf_row_capacity;
 	int dwarf_row_is_pending, dwarf_table_is_due;
+	/* -g on an assembler source (MC's GenDwarfForAssembly): on from as_begin while debug_directory is
+	   set and no .file N was seen; a row per instruction and a DW_TAG_label per label in its sections */
+	int gen_dwarf;			/* 0 off, 1 on, 2 on and the main file still to register (first snippet) */
+	uint32_t gen_file;		/* the file number of its rows and labels */
+	uint32_t *gen_sections, gen_section_count, gen_section_capacity;	/* in order: .text first */
+	uint8_t *gen_section_code;		/* per gen_sections entry: it has an instruction */
+	struct as_gen_label { as_text name; uint32_t file, line, symbol; } *gen_labels;
+	uint32_t gen_label_count, gen_label_capacity;
+	struct as_gen_name { as_text name; uint32_t file; } *gen_names;	/* cpp files given a number */
+	uint32_t gen_name_count, gen_name_capacity;
+	const char *cpp_file;		/* the last cpp line marker's file (NULL: none seen) */
+	int64_t cpp_line_delta;		/* raw line - marker-adjusted line of the main file */
+	const char *dwarf_producer;	/* DW_AT_producer (as_dwarf_producer_set; NULL: "vcc") */
 	/* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
 	struct as_variable_item { uint32_t fragment, end_symbol; uint8_t kind, log2_alignment, code, fill; uint64_t max, size; as_value value; } *variable_items;
@@ -248,6 +261,12 @@ VPRIV int a64_as_pools_ltorg(as_context *a);
 VPRIV int a64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* dwarf-line-table.c */
 VPRIV void as_dwarf_row_emit(as_context *a);
+VPRIV void as_gen_dwarf_start(as_context *a, const char *text, size_t len);
+VPRIV int as_gen_dwarf_instruction(as_context *a);
+VPRIV void as_gen_dwarf_prefix(as_context *a, as_text w, const char *e);
+VPRIV void as_gen_dwarf_label(as_context *a, const char *s, size_t n);
+VPRIV void as_gen_dwarf_section(as_context *a, uint32_t sec);
+VPRIV void as_gen_dwarf_finish(as_context *a);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
 VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* variable-items.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */

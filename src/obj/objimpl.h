@@ -78,7 +78,7 @@ typedef struct CoffState {
 	CoffSehFrame *frames; uint32_t frame_count, frame_capacity;
 	CoffSehCode *codes; uint32_t code_count, code_capacity;
 	int32_t current;		/* the open frame, -1 none */
-	uint32_t late_sections[4], late_count;	/* written after the sections coff_finish creates (coff_section_late) */
+	uint32_t late_sections[8], late_count;	/* written after the sections coff_finish creates (coff_section_late) */
 	char message[320];		/* a message with a name in it (coff_seh_*) */
 } CoffState;
 /* platform/win/coff.c */

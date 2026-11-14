@@ -89,6 +89,7 @@ int main(int argc, char **argv)
 	int wasm = 0, macho = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
+		else if (!strcmp(argv[i], "-dwarf-debug-producer") && i + 1 < argc) as_dwarf_producer_set(a, argv[++i]);	/* (cc1as's) */
 		else if (!strcmp(argv[i], "-g")) {	/* (clang -g -c: the line table knows the compilation directory) */
 			static char cwd[4096];
 			as_debug_directory_set(a, getcwd(cwd, sizeof cwd));
@@ -104,7 +105,7 @@ int main(int argc, char **argv)
 							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu|x86_64-w64-mingw32] [-g] [-gdwarf-N] [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu|x86_64-w64-mingw32] [-g [-dwarf-debug-producer S]] [-gdwarf-N] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = vasm_file_map(in, &n);
 	const char *msg;
 #ifndef VCC_WASM

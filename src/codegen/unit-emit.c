@@ -353,6 +353,7 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 	R.patches = pt;
 	codegen_object_target_set(c, R.object);
 	as_dwarf_version_set(R.assembler, o->dbg_version);
+	as_debug_directory_set(R.assembler, NULL);	/* (the line table is the printer's .loc rows) */
 	as_begin(R.assembler, R.object, "<vcc>");
 	if (as_snippet_assemble(R.assembler, hp, hn))
 		r = -1;
@@ -769,7 +770,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 					}
 				} else
 #endif
-				if (codegen_object_target_set(c, o->obj), as_dwarf_version_set(o->as, o->dbg_version),
+				if (codegen_object_target_set(c, o->obj), as_dwarf_version_set(o->as, o->dbg_version), as_debug_directory_set(o->as, NULL),
 					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					codegen_assembler_error_report(c, "assembler: %s", msg);
 					E.errors++;
