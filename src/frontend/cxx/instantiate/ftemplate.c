@@ -362,7 +362,7 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 	c->pos = d->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
-	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst->fn_const;
+	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst->fn_const & 1;
 	c->sig_pack_types = ptypes, c->sig_pack_n = pack_from != UINT32_MAX ? pn : UINT32_MAX;
 	cxx_entity *outer_gen_instance = c->gen_instance;	/* (an enclosing signature's, being parsed: kept) */
 	c->gen_instance = inst;

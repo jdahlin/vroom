@@ -118,6 +118,25 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 						CXX_INVALID(c);
 				}
 			}
+			if (!c->tentative && (!found || (!c->call_resolved && !c->call_picked && c->etype == CXX_TY_UNKNOWN)) &&
+			    !rewritten && !spaceship && !ss_reversed && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE) {
+				/* a class operand of a built-in operator: its conversion function to a scalar, then the
+				   operator ([over.match.oper]/7: atomic<int> == 4) */
+				qty cl = cxx_class_scalar_conversion(c, l), cr = cxx_class_scalar_conversion(c, rt);
+	
+				if (cl != CXX_TY_UNKNOWN) {
+					l = cl;
+					if (ln)
+						ln = cxx_gen_convert_class(c, ln, cl, oploc);
+				}
+				if (cr != CXX_TY_UNKNOWN) {
+					rt = cr;
+					if (rn)
+						rn = cxx_gen_convert_class(c, rn, cr, oploc);
+				}
+				if (cl != CXX_TY_UNKNOWN || cr != CXX_TY_UNKNOWN)
+					found = false;
+			}
 			if (!c->tentative && !found)
 				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;

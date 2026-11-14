@@ -67,7 +67,7 @@ VPRIV qty cxx_gen_this_type(cxx *c, const cxx_entity *f)
 
 	if (ct == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
-	return cc_type_pointer(c->ast, f->fn_const ? QT(QI(ct), QQ(ct) | Q_CONST) : ct);
+	return cc_type_pointer(c->ast, f->fn_const ? QT(QI(ct), QQ(ct) | (f->fn_const & 1 ? Q_CONST : 0) | (f->fn_const & 2 ? Q_VOLATILE : 0)) : ct);
 }
 
 /* a string of the AST (an assembler name) */
@@ -246,7 +246,7 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 		return true;
 	}
 	c->mangle_guess = 0, c->mangle_internal = 0;
-	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, special ? 2 : 0, name, sizeof name))
+	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of ? f->fn_const : 0, special ? 2 : 0, name, sizeof name))
 		return false;
 	bool internal_name = c->mangle_internal;	/* (an instance over a local or unnamed namespace's type: internal, as clang's) */
 	f->name_guess = c->mangle_guess;
@@ -347,7 +347,7 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc)
 }
 
 /* the member function of class cls named name with these parameter types and constness (an out-of-class definition's) */
-VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const)
+VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, uint8_t is_const)
 {
 	cc *a = c->ast;
 
@@ -358,7 +358,7 @@ VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name
 		if (e->kind != CXX_ENTITY_VALUE || e->member_of != cls || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != TY_FUNC)
 			continue;
 		ft = AST_TYPE(a, e->ty);
-		if (ft->n != nps || (bool)e->fn_const != is_const)
+		if (ft->n != nps || e->fn_const != is_const)
 			continue;
 		for (uint32_t i = 0; i < nps && same; i++)
 			same = ps[i].ty != CXX_TY_UNKNOWN && QUNQ(a->params[ft->aux + i]) == QUNQ(ps[i].ty);

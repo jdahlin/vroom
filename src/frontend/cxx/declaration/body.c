@@ -183,7 +183,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		cxx_late_deduce(c, &l);	/* (auto f(): its type, before its code is built) */
 
 		c->pos = l.begin;
-		c->this_const = l.fn && l.fn->fn_const;
+		c->this_const = l.fn && (l.fn->fn_const & 1);
 		c->template_depth = l.template_depth;	/* a member template's body: names may be dependent */
 		qty this_save = c->this_type;
 

@@ -148,7 +148,24 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, qty to, uint32_t loc)
 		return 0;
 	snprintf(nm, 32, "operator #%u", (unsigned)QUNQ(to));
 	f = cxx_lookup_in(c, cls, vintern_cstr(nm), 0);
-	if (!f || f->kind != CXX_ENTITY_VALUE || f->next || f->fn_deleted)
+	if (f && f->next) {
+		/* overloads that differ in cv (operator T() const and const volatile: std::atomic): the one with
+		   the fewest qualifiers the object's binds to */
+		uint8_t oq = QQ(AST_NODE_AT(a, x)->ty) & (Q_CONST | Q_VOLATILE);
+		cxx_entity *best = NULL;
+
+		for (cxx_entity *e = f; e; e = e->next) {
+			if (e->kind != CXX_ENTITY_VALUE || !e->member_of || (e->fn_const & oq) != oq)
+				continue;
+			if (best && (best->fn_const & e->fn_const) != best->fn_const && (best->fn_const & e->fn_const) != e->fn_const)
+				return 0;	/* (neither has fewer: not chosen here) */
+			if (!best || (best->fn_const & e->fn_const) == e->fn_const)
+				best = e;
+		}
+		f = best;
+		if (!f || f->fn_deleted)
+			return 0;
+	} else if (!f || f->kind != CXX_ENTITY_VALUE || f->fn_deleted)
 		return 0;
 	if (f->late && !f->late_done)
 		cxx_member_body_use(c, f);

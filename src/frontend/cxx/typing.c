@@ -723,6 +723,25 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 						worse = true;
 				}
 			}
+			if (!better && !worse) {
+				/* T * against cv T *: the one adding fewer qualifiers is better ([over.ics.rank]/3.2.6:
+				   const base * over const volatile base *, libc++'s __cxx_atomic_load) */
+				for (uint32_t n = 0; n < nargs && n < 16; n++) {
+					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || cand[a].rank[n] != cand[b].rank[n] ||
+					    AST_TYPE_KIND(c->ast, pa) != TY_PTR || AST_TYPE_KIND(c->ast, pb) != TY_PTR ||
+					    AST_TYPE(c->ast, pa)->ext != AST_TYPE(c->ast, pb)->ext)
+						continue;
+					pa = AST_TYPE(c->ast, pa)->base, pb = AST_TYPE(c->ast, pb)->base;
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || QUNQ(pa) != QUNQ(pb) || QQ(pa) == QQ(pb))
+						continue;
+					if ((QQ(pa) & QQ(pb)) == QQ(pa))
+						better = true;
+					else if ((QQ(pa) & QQ(pb)) == QQ(pb))
+						worse = true;
+				}
+			}
 			if (!better && !worse && args) {
 				/* derived to base: to a nearer base is better (B over A for a C : B : A [over.ics.rank]; json's
 				   priority_tag<N>) */
@@ -744,11 +763,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 						worse = true;
 				}
 			}
-			if (!better && !worse && obj == 1 && cand[a].e->fn_const != cand[b].e->fn_const && !cand[a].e->fn_static && !cand[b].e->fn_static) {
+			if (!better && !worse && (obj == 1 || obj == 2) && cand[a].e->fn_const != cand[b].e->fn_const && !cand[a].e->fn_static &&
+			    !cand[b].e->fn_static && (cand[a].e->fn_const & cand[b].e->fn_const) == (cand[a].e->fn_const < cand[b].e->fn_const ? cand[a].e->fn_const : cand[b].e->fn_const) &&
+			    (obj == 1 || ((cand[a].e->fn_const & cand[b].e->fn_const) & 1))) {
 				/* the implicit object argument is one of the conversions ranked: a non-const object binds to
 				   the f() better than to the f() const ([over.match.best]/2.1, [over.ics.rank]/3.2.6), before
 				   anything about templates */
-				better = !cand[a].e->fn_const, worse = !better;
+				better = cand[a].e->fn_const < cand[b].e->fn_const, worse = !better;	/* (and f() const over f() const volatile) */
 			}
 			if (!better && !worse) {
 				if (!cand[a].tmpl && cand[b].tmpl)
@@ -2009,6 +2030,49 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
  * Does one of the class's conversion functions (or a base's) convert to `to`, a type that is not a
  * class: 1 yes (its type converts to `to` by a standard conversion), 0 no, -1 not known.
  */
+/* the one scalar type (arithmetic, an enumeration, a pointer) class t's conversion functions (or a base's)
+   give, for a built-in operator its object is an operand of (atomic<int> == 4); CXX_TY_UNKNOWN: none, several
+   or not known */
+static qty cxx_class_scalar_conversion_in(cxx *c, cxx_scope *cls, int depth, bool *several)
+{
+	qty found = CXX_TY_UNKNOWN;
+
+	if (!cls || cls->has_dependent_base || depth > 8 || cls->conv_unknown) {
+		*several = true;
+		return CXX_TY_UNKNOWN;
+	}
+	for (uint32_t i = 0; cls->has_conversion && i < cls->nconv; i++) {
+		qty t = cls->conv_types[i];
+
+		if (t == CXX_TY_UNKNOWN) {
+			*several = true;
+			continue;
+		}
+		if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+			t = AST_TYPE(c->ast, t)->base;
+		if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
+			continue;
+		if (found != CXX_TY_UNKNOWN && QUNQ(found) != QUNQ(t))
+			*several = true;
+		found = QUNQ(t);
+	}
+	for (uint32_t i = 0; found == CXX_TY_UNKNOWN && i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS)
+			found = cxx_class_scalar_conversion_in(c, cls->used[i], depth + 1, several);
+	return found;
+}
+
+VPRIV qty cxx_class_scalar_conversion(cxx *c, qty t)
+{
+	bool several = false;
+	qty r;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return CXX_TY_UNKNOWN;
+	r = cxx_class_scalar_conversion_in(c, cxx_type_class_scope(c, QUNQ(t)), 0, &several);
+	return several ? CXX_TY_UNKNOWN : r;
+}
+
 static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
 {
 	int r = 0;

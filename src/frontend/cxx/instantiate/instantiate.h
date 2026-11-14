@@ -239,9 +239,9 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 
 /* member.c */
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
-					    uint32_t nparams, bool is_const, bool partial);
+					    uint32_t nparams, uint8_t is_const, bool partial);
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner,
-						     cxx_scope *home, uint32_t pos, uint32_t nparams, bool is_const);
+						     cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const);
 VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e);
 VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
@@ -262,7 +262,7 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f);
-VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, uint8_t is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV bool cxx_ftemplate_constrained(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);

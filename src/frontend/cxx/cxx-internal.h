@@ -148,7 +148,7 @@ typedef struct cxx_entity {
 	uint8_t has_ret_pattern, ret_deducing, ret_variadic;	/* a function declared auto f(...): its return type from its body */
 	qty ret_pattern;		/* ... the declared return type, with auto's placeholder (auto, const auto &, auto *) */
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
-	uint8_t fn_const;		/* a member function declared const */
+	uint8_t fn_const;		/* a member function declared const (bit 0), volatile (bit 1) */
 	uint8_t fn_noexcept;		/* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
 	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
 	struct cxx_scope *field_of;	/* a non-static data member: its class */
@@ -646,7 +646,7 @@ VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint3
 VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, uint8_t is_const, int variant, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);
 VPRIV void cxx_gen_unwind(cxx *c, uint32_t depth);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
@@ -717,12 +717,13 @@ VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t);
 VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc);
 VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
 VPRIV qty cxx_std_class(cxx *c, const char *name);
+VPRIV qty cxx_class_scalar_conversion(cxx *c, qty t);
 VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
-VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const);
+VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, uint8_t is_const);
 VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);
 VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e);
@@ -737,15 +738,15 @@ VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
-VPRIV void cxx_ftemplate_join_declarations(cxx *c, struct cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, struct cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, uint8_t is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV bool cxx_ftemplate_constrained(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV qty cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
-VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner, cxx_scope *home, uint32_t pos, uint32_t nparams, bool is_const);
+VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner, cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
-					    uint32_t nparams, bool is_const, bool partial);
+					    uint32_t nparams, uint8_t is_const, bool partial);
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);
 VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);

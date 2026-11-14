@@ -2061,3 +2061,15 @@ funktionsmall funnen två gånger är en kandidat (`std::signbit`), constexpr-va
 evalueras (förut fel kod), byggfunktionsargument upp till 8.  Test: `run/builtins-table.cpp`.
 Kvar för `std::atomic<T>`: en `_Atomic(T)`-medlem läggs inte ut.  cxx-strict 257 (274): 22 fler
 kompileras, 53 nya i `std::map`-kod som nu nås och stannar vid `std::tuple` (annan session).
+
+## Status 121 (2026-11-14)
+`std::atomic<int>` kör med vcc:s objekt ensamt (load, fetch_add/sub, `|=`, `at == 4`).
+- En klassoperand till en inbyggd operator konverteras med sin konverteringsfunktion till en skalär typ
+  ([over.match.oper]/7: `c == 4` för `operator int()`), också genom en bas (`cxx_class_scalar_conversion`).
+- Medlemsfunktioner kvalificerade med volatile: biten 1 i `fn_const` (som `Q_VOLATILE`), manglas `V`
+  (`_ZNVK...`); `f() const` väljs före `f() const volatile` för ett icke-volatilt objekt, och
+  `cxx_gen_convert_class` väljer bland `operator T() const` och `const volatile` (libc++:s `__atomic_base`).
+- `_Atomic(T)` typas som T; `constexpr auto x = E::b` för uppräkningar; vid lika rang och samma pekade typ
+  är pekarparametern med färre kvalifierare bättre ([over.ics.rank]/3.2.6).
+Kvar: anrop på ett volatilt objekt får ingen kod; ett uttryckligt `b.operator int()` typas inte.
+Test: `run/class-scalar-operand.cpp`.  cxx-strict 257 (oförändrat: json använder knappt atomic).

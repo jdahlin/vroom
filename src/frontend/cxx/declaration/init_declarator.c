@@ -592,7 +592,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						const vident *fv = &vintern_ents[decl_fn->name];
 
 						if (cxx_mangle_function(c, decl_fn, decl_fn->member_of ? decl_fn->member_of : decl_fn->home, decl_fn->ty,
-									decl_fn->member_of && decl_fn->fn_const, 1, mn, sizeof mn))
+									decl_fn->member_of ? decl_fn->fn_const : 0, 1, mn, sizeof mn))
 							dprintf(c->mangle_fd, "%s\n", mn);
 						else
 							dprintf(c->mangle_fd, "?%.*s\n", (int)fv->len, fv->s);
@@ -733,8 +733,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					}
 					if (auto_e->ty != CXX_TY_UNKNOWN && !(QQ(auto_e->ty) & Q_CONST))
 						k = false;
-					if (k && AST_TYPE_KIND(c->ast, auto_e->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= TY_ULLONG)
-						auto_e->value = v, auto_e->has_value = 1;	/* const auto n = 4; */
+					if (k && ((AST_TYPE_KIND(c->ast, auto_e->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= TY_ULLONG) ||
+						  AST_TYPE_KIND(c->ast, auto_e->ty) == TY_ENUM))
+						auto_e->value = v, auto_e->has_value = 1;	/* const auto n = 4; constexpr auto o = memory_order::seq_cst */
 				}
 				if (const_e && c->econst) {
 					const_e->value = c->evalue, const_e->has_value = 1;

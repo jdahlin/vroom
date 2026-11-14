@@ -266,7 +266,7 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	cxx_late_deduce(c, l);
 
 	c->pos = l->begin;
-	c->this_const = l->fn && l->fn->fn_const;
+	c->this_const = l->fn && (l->fn->fn_const & 1);
 	c->template_depth = l->template_depth;
 	c->this_type = l->scope->kind == CXX_SCOPE_CLASS && l->scope->owner && l->scope->owner->ty ? l->scope->owner->ty : CXX_TY_UNKNOWN;
 	c->scope = l->scope;

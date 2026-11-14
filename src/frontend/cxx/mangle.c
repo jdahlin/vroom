@@ -1464,7 +1464,7 @@ static void mg_class_type(cxx_mangler *m, qty t)
 			char enc[2048];
 			cxx_scope *fh = fn->member_of ? fn->member_of : fn->home ? fn->home : m->c->global;
 
-			if (!cxx_mangle_function(m->c, fn, fh, fn->ty, fn->member_of && fn->fn_const, (vintern_ents[fn->name].len && vintern_ents[fn->name].s[0] == ' ') ? 1 : 0, enc, sizeof enc) ||
+			if (!cxx_mangle_function(m->c, fn, fh, fn->ty, fn->member_of ? fn->fn_const : 0, (vintern_ents[fn->name].len && vintern_ents[fn->name].s[0] == ' ') ? 1 : 0, enc, sizeof enc) ||
 			    strncmp(enc, "_Z", 2)) {
 				m->bad = true;
 				return;
@@ -1654,7 +1654,7 @@ static const char *mg_operator(const vident *v, uint32_t nparams, bool member)
  * complete-object or base-object function.  Written to buf (NUL-terminated); false if some part of it is
  * not mangled yet.
  */
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap)
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, uint8_t is_const, int variant, char *buf, size_t cap)
 {
 	cc *a = c->ast;
 	cxx_mangler m;
@@ -1694,7 +1694,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	mg_str(&m, "_Z");
 	if (mg_nested(&m, home)) {
 		mg_str(&m, "N");
-		if (member && is_const)
+		if (member && (is_const & 2))
+			mg_str(&m, "V");
+		if (member && (is_const & 1))
 			mg_str(&m, "K");
 		mg_prefix(&m, home);
 		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */

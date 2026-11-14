@@ -229,7 +229,7 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
 	volatile bool known = false;
 	volatile int64_t v = 0;
 	uint32_t at, pos, depth = 0;
-	bool is_constexpr = false;
+	uint8_t is_constexpr = false;
 
 	if (!f || !f->defined || n > 32 || c->body_depth >= 64 || c->tentative || f->ctor_class)
 		return false;
@@ -374,7 +374,7 @@ VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f)
  * for token, so only when one declaration is like that (two such overloads told apart by enable_if: neither).
  * A call before the definition has made its instance from the declaration already: not redone.
  */
-VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const)
+VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, uint8_t is_const)
 {
 	cxx_entity def = { .kind = CXX_ENTITY_FUNCTION_TEMPLATE, .ftmpl = f }, *one = NULL;
 	int bare;

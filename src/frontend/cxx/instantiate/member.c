@@ -2,7 +2,7 @@
 #include "instantiate.h"
 
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
-					    uint32_t nparams, bool is_const, bool partial)
+					    uint32_t nparams, uint8_t is_const, bool partial)
 {
 	cxx_template *t = cxx_template_of(te);
 
@@ -13,7 +13,7 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 
 /* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner,
-						     cxx_scope *home, uint32_t pos, uint32_t nparams, bool is_const)
+						     cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const)
 {
 	cxx_template *t = cxx_template_of(te);
 
@@ -156,7 +156,7 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 	c->pos = d->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
-	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = e->fn_const;
+	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = e->fn_const & 1;
 	c->ooc_target = e;	/* (its code: this member's, cxx_init_declarators_parse) */
 	e->fn_inline = 1;	/* (an instance's member: defined in every TU that uses it, emitted weak) */
 	if (!setjmp(jb)) {
@@ -200,7 +200,7 @@ VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l)
 		cxx_scope *fs;
 
 		c->pos = l->begin;
-		c->this_const = f->fn_const;
+		c->this_const = f->fn_const & 1;
 		c->template_depth = 0;
 		c->this_type = l->scope->kind == CXX_SCOPE_CLASS && l->scope->owner && l->scope->owner->ty ? l->scope->owner->ty : CXX_TY_UNKNOWN;
 		c->scope = l->scope;

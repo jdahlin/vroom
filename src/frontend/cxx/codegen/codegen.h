@@ -150,7 +150,7 @@ VPRIV uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s);
 VPRIV bool cxx_gen_variable_name(cxx *c, cxx_entity *v, bool internal);
 VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
-VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const);
+VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, uint8_t is_const);
 
 /* new.c */
 VPRIV void cxx_gen_new(cxx *c, qty t, const uint32_t *place, uint32_t nplace, uint32_t count, bool array, const uint32_t *init,

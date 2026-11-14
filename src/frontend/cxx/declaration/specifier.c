@@ -340,7 +340,12 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			flags |= DS_TYPE;
-			sp.v_unknown = 1;
+			/* _Atomic(T): T's representation (the lock-free sizes libc++ uses; the operations are the
+			   __c11_atomic builtins' nodes) */
+			if (c->type_out != CXX_TY_UNKNOWN)
+				sp.v_named = 1, sp.named = c->type_out;
+			else
+				sp.v_unknown = 1;
 		} else if (kw == CXX_KW__Atomic) {
 			sp.v_unknown = 1;
 			cxx_advance(c);

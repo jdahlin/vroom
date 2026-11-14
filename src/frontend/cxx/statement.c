@@ -666,7 +666,7 @@ static void cxx_statement_parse1(cxx *c)
 	switch (cxx_kw(c)) {
 	case CXX_KW_if:
 		cxx_advance(c);
-		bool is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
+		uint8_t is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
 		int taken = -1;	/* if constexpr with a known condition: 1 the first statement, 0 the else */
 		uint32_t gen_cond = 0, gen_then = 0, gen_else = 0;
 		/* code generation: what the condition declares (a variable, temporaries) lives in a block around the if */
