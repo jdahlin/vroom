@@ -294,6 +294,30 @@ static void mg_type(cxx_mangler *m, qty t)
 	case TY_STRUCT: case TY_UNION:
 		mg_class_type(m, QUNQ(t));
 		return;
+	case TY_ENUM: {
+		/* a named enumeration: its name where it is declared */
+		cxx_scope *home = cxx_tag_home(m->c, t);
+		uint32_t name = a->tags[x->aux].name;
+
+		if (!home || name <= 1) {
+			m->bad = true;
+			return;
+		}
+		if (mg_substitution(m, CXX_SUB_TYPE, NULL, QUNQ(t)))
+			return;
+		if (mg_nested(m, home)) {
+			mg_str(m, "N");
+			mg_prefix(m, home);
+			mg_source_name(m, name);
+			mg_str(m, "E");
+		} else {
+			if (mg_scope_is_std(m, home))
+				mg_str(m, "St");
+			mg_source_name(m, name);
+		}
+		mg_remember(m, CXX_SUB_TYPE, NULL, QUNQ(t));
+		return;
+	}
 	}
 	m->bad = true;	/* (enumerations, vectors: not mangled yet) */
 }

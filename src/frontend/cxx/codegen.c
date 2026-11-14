@@ -53,7 +53,7 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 		return cxx_gen_object_type_ok(c, AST_TYPE(c->ast, t)->base);
 	if (k == TY_STRUCT || k == TY_UNION)
 		return (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE) && cxx_class_layout_info(c, t, &pod, &empty) && pod;
-	return (k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_PTR;
+	return (k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_PTR || k == TY_ENUM;
 }
 
 /* ... or an array of them (a variable's type; a parameter's has decayed) */
@@ -551,6 +551,40 @@ VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e)
 		return 0;
 	}
 	return cc_condition_scalar(c->ast, cc_conversion_decay(c->ast, e), "statement");
+}
+
+/* switch (e): the value switched on */
+VPRIV uint32_t cxx_gen_switch_value(cxx *c, uint32_t e)
+{
+	cc *a = c->ast;
+
+	if (!cxx_gen_on(c))
+		return 0;
+	if (!e) {
+		cxx_gen_fail(c);
+		return 0;
+	}
+	e = cc_node_rvalue(a, e);
+	if (AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == TY_ENUM)
+		e = cc_cast_insert(a, e, QUNQ(AST_TYPE(a, AST_NODE_AT(a, e)->ty)->base), CK_NOP);
+	if (!cc_type_is_integer(a, AST_NODE_AT(a, e)->ty)) {
+		cxx_gen_fail(c);
+		return 0;
+	}
+	return cc_conversion_apply(a, e, cc_node_promoted_type(a, e));
+}
+
+/* case lo ... hi: stmt */
+VPRIV uint32_t cxx_gen_case(cxx *c, int64_t lo, int64_t hi, uint32_t stmt, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t n;
+
+	a->ipool[a->nipool] = lo;
+	a->ipool[a->nipool + 1] = hi;
+	n = cc_statement_new(a, N_CASE, loc, a->nipool, a->nipool + 1, stmt);
+	a->nipool += 2;
+	return n;
 }
 
 /* return e; (e: 0 for return;) converted to the function's return type */

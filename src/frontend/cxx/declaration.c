@@ -2769,6 +2769,8 @@ static void cxx_enum_specifier_parse(cxx *c)
 
 		if (!c->template_depth && (cxx_is(c, LEX_TOKEN_LEFT_BRACE) || underlying != CXX_TY_UNKNOWN || scoped))
 			cxx_enum_type(c, e, name, loc, underlying);
+		if (e && e->ty != CXX_TY_UNKNOWN && !c->tentative)
+			cxx_tag_home_set(c, e->ty, cxx_declaration_scope(c));
 		cxx_scope *es = NULL;
 
 		if (e && !e->members) {

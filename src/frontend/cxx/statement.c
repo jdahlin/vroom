@@ -385,12 +385,12 @@ static void cxx_statement_parse1(cxx *c)
 		cxx_advance(c);
 		cxx_scope_push(c, s);
 		cxx_condition_parse(c);
-		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : 0;
+		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : cxx_gen_switch_value(c, c->enode);
 		cxx_statement_parse(c);
 		gen_body = cxx_gen_nested(c, sloc);
 		c->scope = outer;
 		if (gen_cond && gen_body && cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, N_WHILE, sloc, gen_cond, gen_body, 0));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, is_while ? N_WHILE : N_SWITCH, sloc, gen_cond, gen_body, 0));
 		return;
 	}
 	case CXX_KW_do: {
@@ -456,20 +456,33 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		return;
-	case CXX_KW_case:
+	case CXX_KW_case: {
+		bool known;
+		int64_t lo, hi;
+
 		cxx_advance(c);
 		cxx_constant_expression_parse(c);
-		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))	/* GNU case ranges */
+		known = c->econst, lo = hi = c->evalue;
+		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {	/* GNU case ranges */
 			cxx_constant_expression_parse(c);
+			known &= c->econst, hi = c->evalue;
+		}
 		cxx_expect(c, LEX_TOKEN_COLON);
+		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
 			cxx_statement_parse(c);
+		if (known && cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_case(c, lo, hi, cxx_gen_nested(c, sloc), sloc));
 		return;
+	}
 	case CXX_KW_default:
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_COLON);
+		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
 			cxx_statement_parse(c);
+		if (cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DEFAULT, sloc, 0, 0, cxx_gen_nested(c, sloc)));
 		return;
 	case CXX_KW_try:
 		cxx_advance(c);

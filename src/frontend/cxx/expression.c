@@ -123,6 +123,12 @@ static void cxx_name_type(cxx *c, cxx_entity *e)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	if (v)
 		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	if (v && v->has_value && !v->placeholder && !v->sym && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN) {
+		/* an enumerator (or a constant with no object): its value, of the enumeration's underlying type */
+		qty vt = AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM ? AST_TYPE(c->ast, v->ty)->base : QUNQ(v->ty);
+
+		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	}
 	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
 		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
@@ -867,8 +873,24 @@ static void cxx_primary_expression_parse(cxx *c)
 	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER:
 	case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
 		cxx_advance(c);
-		if (t->kind == LEX_TOKEN_CHARACTER && t->s[t->len - 1] == '\'')	/* (no user-defined suffix) */
-			cxx_et(c, cc_type_basic(TY_CHAR), false);
+		if (t->kind == LEX_TOKEN_CHARACTER && t->s[t->len - 1] == '\'') {	/* (no user-defined suffix) */
+			int64_t cv = -1;
+
+			/* 'x' and the simple escapes: a constant (the others: a char of a value not computed here) */
+			if (t->len == 3 && t->s[1] != '\\')
+				cv = (signed char)t->s[1];
+			else if (t->len == 4 && t->s[1] == '\\') {
+				static const char from[] = "ntr0\\'\"abfv", to[] = "\n\t\r\0\\'\"\a\b\f\v";
+				const char *p = memchr(from, t->s[2], sizeof from - 1);
+
+				if (p)
+					cv = to[p - from];
+			}
+			if (cv != -1 || (t->len == 4 && t->s[2] == '0'))
+				cxx_ec(c, cc_type_basic(TY_CHAR), cv == -1 ? 0 : cv);
+			else
+				cxx_et(c, cc_type_basic(TY_CHAR), false);
+		}
 		return;
 	case LEX_TOKEN_STRING: case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_UTF8_STRING: case LEX_TOKEN_UTF16_STRING:
 	case LEX_TOKEN_UTF32_STRING: {

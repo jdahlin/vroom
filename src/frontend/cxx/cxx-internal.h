@@ -262,6 +262,8 @@ typedef struct cxx {
 	uint32_t instantiating;		/* > 0: re-parsing a template's tokens (function bodies are skipped) */
 	cxx_entity *instantiation_target;	/* the class an instantiation's class-specifier defines */
 	cxx_entity *instantiation_template;	/* ... and the template it instantiates */
+	cxx_scope **tag_home;		/* per AST tag of an enumeration: the scope it is declared in (its mangled name) */
+	uint32_t ntag_home;
 	cxx_scope **tag_scope;		/* per AST tag: the class's scope (a type parameter bound to it: T::member) */
 	uint32_t ntag_scope;
 	void **tag_instance;		/* per AST tag: an instance not completed yet (instantiate.c) */
@@ -484,6 +486,8 @@ VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name
 VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);
 VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e);
+VPRIV uint32_t cxx_gen_switch_value(cxx *c, uint32_t e);
+VPRIV uint32_t cxx_gen_case(cxx *c, int64_t lo, int64_t hi, uint32_t stmt, uint32_t loc);
 VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc);
 VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc);
 VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_init, uint32_t loc);
@@ -524,6 +528,8 @@ VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
 VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t);
+VPRIV void cxx_tag_home_set(cxx *c, qty t, cxx_scope *home);
+VPRIV cxx_scope *cxx_tag_home(cxx *c, qty t);
 VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);

@@ -1502,6 +1502,28 @@ VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t)
 	return tag < c->ntag_scope ? c->tag_scope[tag] : NULL;
 }
 
+/* an enumeration's declaring scope, by its type */
+VPRIV void cxx_tag_home_set(cxx *c, qty t, cxx_scope *home)
+{
+	uint32_t tag;
+
+	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != TY_ENUM)
+		return;
+	tag = AST_TYPE(c->ast, t)->aux;
+	cxx_tag_grow((void ***)&c->tag_home, &c->ntag_home, tag);
+	c->tag_home[tag] = home;
+}
+
+VPRIV cxx_scope *cxx_tag_home(cxx *c, qty t)
+{
+	uint32_t tag;
+
+	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != TY_ENUM)
+		return NULL;
+	tag = AST_TYPE(c->ast, t)->aux;
+	return tag < c->ntag_home ? c->tag_home[tag] : NULL;
+}
+
 /* ... as it is: not completed for the asking (the name mangler: a type's name needs no body) */
 VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t)
 {
