@@ -1806,3 +1806,7 @@ specialisering definierar en med samma namn (`vector<bool, A>::__construct_at_en
 `::__builtin_x(...)` är inbyggnaden (ingen deklaration i globala namnrymden).  Partiell ordning med
 arrayer vars längd är en platshållare (`F<const char[N]>` mot `F<T[N]>`: den förra mer specialiserad;
 förut föll båda och primärmallen valdes, doctests `filldata<const char[N]>`).  cxx-strict 413 (465).
+
+## Status 93 (2026-11-14)
+`return "text";` (eller 0, nullptr) från en funktion som returnerar en klass via adress: kopieringsinitiering
+i anroparens objekt med en konverterande konstruktor.  cxx-strict 392 (413).

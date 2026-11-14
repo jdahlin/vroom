@@ -339,6 +339,32 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 		cc_id_list l;
 		uint32_t target = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc);
 
+		if (QUNQ(en->ty) != t && !cc_type_is_record(a, en->ty)) {
+			/* return "text" (or 0, nullptr) for a class: copy-initialized in the caller's object by a
+			   converting constructor (not an explicit one) */
+			qty ct[1] = { en->ty };
+			uint8_t cl[1] = { (en->flags & NF_LVALUE) != 0 };
+
+			if (AST_TYPE_KIND(a, ct[0]) == TY_ARRAY)
+				ct[0] = cc_type_pointer(a, AST_TYPE(a, ct[0])->base), cl[0] = 0;
+			if (cxx_gen_is_nullptr_node(c, e)) {
+				ct[0] = c->nullptr_ty, cl[0] = 0;
+				if (!(e = cxx_gen_nullptr_object(c, e, loc))) {
+					cxx_gen_fail(c);
+					return 0;
+				}
+			}
+			c->skip_explicit = 1;
+			cxx_ctor_use(c, t, ct, cl, 1, false);
+			c->skip_explicit = 0;
+			cc_id_list_init(&l);
+			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit || !cxx_gen_construct_at(c, target, t, &e, 1, &l, loc)) {
+				cxx_gen_fail(c);
+				return 0;
+			}
+			cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
+			return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+		}
 		if (QUNQ(en->ty) != t || !(en->flags & NF_LVALUE)) {
 			cxx_gen_fail(c);	/* (a conversion to the class: not built yet) */
 			return 0;
