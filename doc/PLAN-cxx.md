@@ -1425,3 +1425,14 @@ kropparna och manglingen kommer ikapp.
 klassen (samma post oavsett hur typen stavas), `return f();` i en
 void-funktion.  Ett program med `std::map<int, int>` kompileras, länkas och
 körs med enbart vcc:s kod.  json: 69/70, 2 484 funktioner, 11 av 118.
+
+### Status (54): virtuell destruktor ensam, using-deklarationer, inline utanför klassen (2026-11-14)
+- En klass vars enda virtuella funktion är destruktorn (`std::ios_base`)
+  fick ingen vtable-post: destruktorn registreras nu, så klassens medlemmar
+  kan namnges och anropas (`ios_base::setf`).
+- En using-deklaration (`using ::memcpy;` i `std`) kopierar namnets
+  hemvist och länkning; `std::memcpy` kan anropas.
+- `inline X::f() {...}` utanför klassen är svag (som clangs), emitteras där
+  den används; förut stark (två TU:er hade krockat).
+json: 69/70, 4,9 s CPU, 2 204 funktioner (färre: de felaktigt starka
+inline-definitionerna utan användning försvinner), 11 av 118.

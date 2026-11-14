@@ -2227,6 +2227,11 @@ static void cxx_using_parse(cxx *c)
 						   evaluations of it need */
 						e->ftmpl = t->ftmpl, e->ndefaults = t->ndefaults, e->fn_const = t->fn_const;
 						e->late = t->late, e->late_done = t->late_done, e->member_of = t->member_of;
+						/* (its name too: where it is declared, its linkage, as the original's) */
+						e->home = t->home, e->c_linkage = t->c_linkage, e->global_ns = t->global_ns, e->mangled = t->mangled;
+						e->fn_inline = t->fn_inline, e->fn_internal = t->fn_internal, e->abi_tag = t->abi_tag;
+						e->fn_noexcept = t->fn_noexcept, e->fn_static = t->fn_static, e->defs = t->defs, e->def_scope = t->def_scope;
+						e->field_of = t->field_of, e->sym1 = t->sym1, e->fn_defaulted = t->fn_defaulted, e->fn_deleted = t->fn_deleted;
 					}
 				}
 			} else if (dep || is_typename) {
@@ -3116,6 +3121,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0, e->fn_noexcept = c->decl_noexcept;
 			if (e && !e->abi_tag && ds_from < c->pos)
 				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);
+			if (e && !tmpl && dtor && !e->vslot)
+				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);	/* (virtual ~X(), or overriding a base's) */
 			if (e && !tmpl)
 				decl_fn = e;
 			if (e && !tmpl) {
@@ -3426,6 +3433,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					    !c->template_depth && (!decl_fn || decl_fn->member_of != qs))
 						decl_fn = c->ooc_target;
 					c->ooc_target = NULL;
+					if (decl_fn && (flags & (DS_INLINE | DS_CONSTEXPR)))
+						decl_fn->fn_inline = 1;	/* (inline X::f() {...} outside its class: weak, as clang's) */
 					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
 					      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
 
