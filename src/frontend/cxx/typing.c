@@ -541,3 +541,40 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 #undef IS
 	return true;
 }
+
+/* a range-for's element: *begin(r) for an array or a class with begin() (an lvalue's type; ADL begin: not yet) */
+VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem)
+{
+	const ctype *x;
+	cxx_scope *cls;
+	cxx_entity *set;
+	qty it;
+
+	if (r == CXX_TY_UNKNOWN)
+		return false;
+	x = AST_TYPE(c->ast, r);
+	if (x->kind == TY_ARRAY) {
+		*elem = x->base;
+		return true;
+	}
+	if (!(cls = cxx_type_class_scope(c, QUNQ(r))))
+		return false;
+	set = cxx_lookup_in(c, cls, vintern_cstr("begin"), 0);
+	if (!set || set->kind == CXX_ENTITY_DEPENDENT)
+		return false;
+	c->call_obj = (QQ(r) & Q_CONST) ? 2 : 1;
+	cxx_call_type(c, set, CXX_TY_UNKNOWN, NULL, NULL, 0);
+	it = c->etype;
+	if (it == CXX_TY_UNKNOWN)
+		return false;
+	x = AST_TYPE(c->ast, it);
+	if (x->kind == TY_PTR && !x->ext) {
+		*elem = x->base;
+		return true;
+	}
+	/* an iterator class: its operator*() */
+	if (!cxx_operator_call_type(c, vintern_cstr("operator*"), it, NULL, 0) || c->etype == CXX_TY_UNKNOWN)
+		return false;
+	*elem = c->etype;
+	return true;
+}

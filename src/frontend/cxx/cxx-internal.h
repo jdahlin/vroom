@@ -261,6 +261,12 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint32_t range_name;		/* a range-for's declaration: its name, type (auto: a pattern over the placeholder) */
+	qty range_type;
+	uint8_t range_auto;
+	uint8_t ds_auto, ds_quals;	/* the last decl-specifiers were auto (with these cv-qualifiers) */
+	qty auto_ty;			/* auto's placeholder type (0: not made yet) */
+	struct cxx_partial *auto_owner;
 	uint8_t member_missing;		/* typename X::y named no member of a complete class X (deduction: not viable) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
@@ -321,7 +327,7 @@ enum { CXX_SKIP_TEMPLATE, CXX_SKIP_BASES, CXX_SKIP_VIRTUAL, CXX_SKIP_UNKNOWN_MEM
        CXX_SKIP_ATTRIBUTE, CXX_SKIP_EMPTY_BASE, CXX_SKIP_COUNT };
 typedef struct cxx_spec {
 	uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int, v_float, v_double;
-	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals;
+	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals, v_auto;
 	qty named;			/* a type name's type (0 with v_named unset) */
 	uint8_t v_named;
 } cxx_spec;
@@ -357,6 +363,10 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV qty cxx_auto_type(cxx *c);
+VPRIV void cxx_for_range_declaration_parse(cxx *c);
+VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem);
+VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);
 VPRIV void cxx_ec(cxx *c, qty t, int64_t v);
 VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align);
 VPRIV bool cxx_number_value(const cxx_token *t, int64_t *v);

@@ -102,7 +102,20 @@ static void cxx_for_parse(cxx *c)
 		if (range) {
 			/* decl-specifiers declarator (or a structured binding [a, b]) : range */
 			uint32_t colon = i, last_id = 0;
+			cxx_entity *var = NULL;
+			qty var_type = CXX_TY_UNKNOWN;
+			bool var_auto = false;
 
+			/* the declaration, when it is a plain one outside templates: its name and type */
+			if (!c->template_depth && !c->tentative && !cxx_is(c, LEX_TOKEN_SEMICOLON) &&
+			    cxx_lookahead_fn(c, cxx_for_range_declaration_parse)) {
+				cxx_for_range_declaration_parse(c);
+				if (c->range_name > 1 && c->pos == colon) {
+					var = cxx_declare(c, fs, c->range_name, CXX_ENTITY_VALUE);
+					var_type = c->range_type, var_auto = c->range_auto;
+				}
+				c->pos = colon;
+			}
 			for (uint32_t k = c->pos; k < colon; k++)
 				if (c->tok[k].kind == LEX_TOKEN_IDENTIFIER && !c->tok[k].kw)
 					last_id = c->tok[k].id;
@@ -110,13 +123,22 @@ static void cxx_for_parse(cxx *c)
 				/* (a C++20 init-statement before the declaration is not handled) */
 				c->pos = colon;
 			}
-			if (last_id)
+			if (last_id && !var)
 				cxx_declare(c, fs, last_id, CXX_ENTITY_VALUE);
 			for (uint32_t k = colon - 1; k > 0 && c->tok[k].kind != LEX_TOKEN_LEFT_PAREN; k--)
 				if (c->tok[k].kind == LEX_TOKEN_IDENTIFIER && !c->tok[k].kw && c->tok[k - 1].kind == LEX_TOKEN_COMMA)
 					cxx_declare(c, fs, c->tok[k].id, CXX_ENTITY_VALUE);	/* structured bindings */
 			cxx_expect(c, LEX_TOKEN_COLON);
 			cxx_initializer_parse(c);
+			if (var) {
+				/* auto: deduced from *begin(range), an lvalue; else as declared */
+				qty elem;
+
+				if (!var_auto)
+					var->ty = var_type;
+				else if (cxx_range_element_type(c, c->etype, &elem))
+					var->ty = cxx_auto_deduce(c, var_type, elem, true);
+			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			cxx_statement_parse(c);
 			c->scope = outer;

@@ -719,7 +719,8 @@ static void cxx_spec_keyword(cxx_spec *sp, int kw)
 	case CXX_KW_const: case CXX_KW___const: case CXX_KW___const__: sp->quals |= Q_CONST; break;
 	case CXX_KW_volatile: case CXX_KW___volatile: case CXX_KW___volatile__: sp->quals |= Q_VOLATILE; break;
 	case CXX_KW___restrict: case CXX_KW___restrict__: sp->quals |= Q_RESTRICT; break;
-	default: sp->v_unknown = 1;	/* auto, __auto_type, _Complex: not built yet */
+	case CXX_KW_auto: case CXX_KW___auto_type: sp->v_auto = 1, sp->v_unknown = 1; break;	/* (deduced by the declaration) */
+	default: sp->v_unknown = 1;	/* _Complex: not built yet */
 	}
 }
 
@@ -867,6 +868,7 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 	}
 	(void)any;
 	c->ds_type = flags & (DS_TYPE | DS_MODIFIER) ? cxx_spec_type(c, &sp) : CXX_TY_UNKNOWN;
+	c->ds_auto = sp.v_auto, c->ds_quals = sp.quals;
 	return flags;
 }
 
@@ -2513,6 +2515,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 	cxx_entity *type_of_typedef = c->last_type;
 	uint8_t typedef_dependent = c->last_type_dependent;
 	qty base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
+	/* auto x = init: the declarator is parsed over auto's placeholder, deduced from the initializer */
+	bool is_auto = c->ds_auto && base == CXX_TY_UNKNOWN && !c->template_depth && !c->tentative && context != CXX_CONTEXT_CLASS &&
+		       !(flags & (DS_TYPEDEF | DS_FRIEND));
+	int auto_quals = c->ds_quals;
 	/* a data member of the class being built: a class body, not a template's or a function's */
 	bool member = context == CXX_CONTEXT_CLASS && c->build && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND));
 	bool global = context == CXX_CONTEXT_NAMESPACE && !c->template_depth && !(flags & (DS_TYPEDEF | DS_FRIEND));
@@ -2533,10 +2539,18 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_class_field(c, 0, base, c->tok[start].loc, w < 0 ? -2 : (int)w);
 			goto next;
 		}
-		c->type_in = base;
+		c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), auto_quals) : base;
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
 		qty t = c->type_out;
+		qty auto_pattern = CXX_TY_UNKNOWN;
+		cxx_entity *auto_e = NULL;
 		uint32_t name_loc = c->tok[start].loc;
+
+		if (is_auto && t != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, t)) {
+			if (!f)
+				auto_pattern = t;	/* (a function's auto return type: its body would tell) */
+			t = CXX_TY_UNKNOWN;	/* until the initializer is seen (it may not name the variable) */
+		}
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
 		cxx_entity *const_e = NULL;	/* a const integer whose initializer is evaluated */
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
@@ -2607,6 +2621,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */
+			if (e && kind == CXX_ENTITY_VALUE && auto_pattern != CXX_TY_UNKNOWN)
+				auto_e = e;
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
 			if (e && f)
 				e->fn_const = c->decl_const;
@@ -2695,7 +2711,20 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_braced_arguments_parse(c);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 			} else {
+				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
 				cxx_initializer_parse(c);
+				/* auto x = expr: its type from the initializer's */
+				if (auto_e && !braced && c->etype != CXX_TY_UNKNOWN) {
+					bool k = c->econst;
+					int64_t v = c->evalue;
+
+					auto_e->ty = cxx_auto_deduce(c, auto_pattern, c->etype, c->elval);
+					if (auto_e->ty != CXX_TY_UNKNOWN && !(QQ(auto_e->ty) & Q_CONST))
+						k = false;
+					if (k && AST_TYPE_KIND(c->ast, auto_e->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= TY_ULLONG)
+						auto_e->value = v, auto_e->has_value = 1;	/* const auto n = 4; */
+				}
 				if (const_e && c->econst) {
 					const_e->value = c->evalue, const_e->has_value = 1;
 					if (AST_TYPE_KIND(c->ast, t) == TY_BOOL)
@@ -2982,4 +3011,21 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	cxx_function_body_parse(c);
 	if (c->pos != l->end)
 		cxx_fail(c, "member function body ended early");
+}
+
+/* for (decl-specifiers declarator : range): the declaration (not a structured binding), up to the colon */
+VPRIV void cxx_for_range_declaration_parse(cxx *c)
+{
+	bool q, f, is_auto;
+	int quals;
+
+	cxx_attributes_skip(c);
+	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+		cxx_fail(c, "expected a type");
+	is_auto = c->ds_auto && c->ds_type == CXX_TY_UNKNOWN, quals = c->ds_quals;
+	c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), quals) : c->ds_type;
+	c->range_name = cxx_declarator_parse(c, false, &q, &f, NULL);
+	c->range_type = c->type_out, c->range_auto = is_auto;
+	if (!cxx_is(c, LEX_TOKEN_COLON))
+		cxx_fail(c, "expected ':'");
 }

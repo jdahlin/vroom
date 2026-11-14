@@ -577,3 +577,13 @@ hits.  sizeof(expr) is a constant.  unit-32bit: 1428 of 1721 calls typed;
 267 function template bodies and 195 member bodies instantiated, none
 failed (clang emits 1,692 functions); 0.12 s.  json: 47,236 layouts clang
 agrees with, 71/71 parse.  Tests: ok-constant-expressions, ok-sfinae-deduction.
+
+### Status 2026-11-14 (7): auto
+`auto x = init` (with const, &, &&, *) is deduced from the initializer as a
+one-parameter template deduction; a range-for's variable from *begin(range)
+(arrays, classes with begin() returning a pointer or an iterator with
+operator*).  Before this no auto variable had a type.  unit-32bit: 1943 of
+2450 calls typed; 441 function template bodies and 196 member bodies, none
+failed (clang emits 1,692 functions); 0.12 s.  json: 47,512 layouts clang
+agrees with, 71/71 parse.  Not deduced yet: auto return types (the body's
+return statements), structured bindings, auto x{...}, generic lambdas.
