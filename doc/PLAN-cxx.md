@@ -2014,3 +2014,8 @@ cxx-strict 322 (338): 82 fler kompileras, 6 nya som nyss nåddes.
 - Aggregat på namnrymdsnivå från klammerlista (`const P p = {1, 2};`, `const O O::a{-1};`): initierarlistan
   (`cxx_gen_record_initializer`, medlemmar som är skalärer); förut definierades variabeln aldrig.
 Test: `run/reversed-packs.cpp`.  cxx-strict 322.
+
+## Status 116 (2026-11-14)
+- `c ? &x : nullptr` har pekarens typ ([expr.cond]/7.3), `c ? p : q` med `T *` och `const T *` den mer
+  kvalificerade: json:s `get_impl_ptr` (statement.c:331, förut den vanligaste orsaken).
+cxx-strict 291 (322): 59 fler kompileras, inga nya fel.

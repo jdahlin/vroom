@@ -213,7 +213,27 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 				cxx_et(c, QT(QI(t2), QQ(t2) | QQ(t3)), l2 && c->elval);	/* (one class, cv as the more qualified) */
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t2) && cc_type_is_arithmetic(c->ast, t3))
 				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
-			else
+			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && c->nullptr_ty &&
+				 ((AST_TYPE_KIND(c->ast, t2) == TY_PTR && !AST_TYPE(c->ast, t2)->ext && QUNQ(t3) == c->nullptr_ty) ||
+				  (AST_TYPE_KIND(c->ast, t3) == TY_PTR && !AST_TYPE(c->ast, t3)->ext && QUNQ(t2) == c->nullptr_ty))) {
+				/* a pointer and nullptr: the pointer's type ([expr.cond]/7.3) */
+				qty pt = QUNQ(QUNQ(t3) == c->nullptr_ty ? t2 : t3);
+
+				cxx_et(c, pt, false);
+				if (cxx_gen_on(c) && n2 && n3) {
+					if (QUNQ(t2) == c->nullptr_ty)
+						n2 = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, n2), pt);
+					else
+						n3 = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, n3), pt);
+				}
+			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t2) == TY_PTR && AST_TYPE_KIND(c->ast, t3) == TY_PTR &&
+				   !AST_TYPE(c->ast, t2)->ext && !AST_TYPE(c->ast, t3)->ext &&
+				   QUNQ(AST_TYPE(c->ast, t2)->base) == QUNQ(AST_TYPE(c->ast, t3)->base)) {
+				/* T * and const T *: the more qualified (the composite pointer type, [expr.type]/4) */
+				qty b2 = AST_TYPE(c->ast, t2)->base, b3 = AST_TYPE(c->ast, t3)->base;
+
+				cxx_et(c, cc_type_pointer(c->ast, QT(QI(b2), QQ(b2) | QQ(b3))), false);
+			} else
 				cxx_et(c, CXX_TY_UNKNOWN, false);
 			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's
 			   builder finds no lvalue and the function gets no code) */

@@ -1,6 +1,6 @@
 // std: c++20
 // a <=> b through the reversed candidate 0 <=> (b <=> a) (an ordering type shaped as libc++'s, its
-// value in __value_), and a pack after unnamed template parameters given explicitly
+// value in __value_), a pack after unnamed template parameters given explicitly, c ? &x : nullptr
 struct ord {
 	signed char __value_;
 	static const ord less, equal, greater;
@@ -18,6 +18,14 @@ struct S {
 template <class K, bool, class R, class... A> R count(A &&...) { return sizeof...(A); }
 template <class K, class, class... A> int count2(A &&...) { return sizeof...(A); }
 
+struct V { long n; };
+struct J {
+	int t;
+	V v;
+	long *get() { return t == 1 ? &v.n : nullptr; }
+	const long *cget() const { return t == 1 ? &v.n : nullptr; }
+};
+
 int main()
 {
 	S s{5};
@@ -26,5 +34,8 @@ int main()
 		return 1;
 	if (count<int, true, int>(1, 2, 3) != 3 || count2<int, long>('a') != 1)
 		return 2;
+	J j{1, {5}}, k{0, {6}};
+	if (*j.get() != 5 || k.get() != nullptr || *j.cget() != 5)
+		return 3;
 	return 0;
 }
