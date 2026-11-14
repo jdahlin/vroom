@@ -94,6 +94,8 @@ VPRIV bool vccd_request_is_compile(const struct vccd_request *r)
 			c = true;
 		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
 			linux_target = target = true;
+		else if (!strncmp(a, "--target=x86_64-", 16) && (strstr(a, "-mingw32") || strstr(a, "-windows-gnu")))
+			linux_target = target = true;	/* (Windows x64, PLAN-win64.md: vcc's own too) */
 		else if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target") || !strcmp(a, "-arch"))
 			target = true;
 		else if (!strcmp(a, "-S"))

@@ -15,6 +15,12 @@
 
 static int vccd_request_dispatch(const struct vccd_request *r, const char **kind);
 
+/* driver_mingw_link_run's linker: ld_main with the request's cwd and stderr */
+static int vccd_mingw_link(int argc, char **argv, void *ctx)
+{
+	return vccd_linker_run_in_process(ctx, argc, argv);
+}
+
 VPRIV int vccd_request_handle(const struct vccd_request *r, const char **kind)
 {
 	int status;
@@ -220,6 +226,15 @@ static int vccd_request_dispatch(const struct vccd_request *r, const char **kind
 		return vccd_backend_forward(r, vccd_backend_socket);
 	}
 plain:
+	if (driver_mingw_link_wanted(r->argc, r->argv)) {
+		/* Windows x64: vcc compiles, vlink (ld_main, this process) links with libvccrt.a */
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+		int status = driver_mingw_link_run(r->argc, r->argv, &e, vccd_mingw_link, (void *)r);
+
+		*kind = "cc-link";
+		atomic_fetch_add(status ? &vccd_failure_count : &vccd_link_count, 1);
+		return status;
+	}
 	if (vccd_request_is_compile(r) && !vccd_backend_socket) {
 		/* no fallback: what vcc cannot compile fails, with vcc's diagnostics */
 		int status = vccd_compile_in_process(r, NULL, 0, true);
