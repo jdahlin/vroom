@@ -944,10 +944,12 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	cxx_entity *callee = c->ecallee, *set, *dtor;
 	cxx_scope *cls;
 
+	c->ctor_picked = NULL, c->ctor_found = 0, c->ctor_none = 0;
 	if (c->tentative || nargs == UINT32_MAX || t == CXX_TY_UNKNOWN || !(cls = cxx_type_class_scope(c, QUNQ(t))))
 		return;
 	cxx_type_require_complete(c, QUNQ(t));
 	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
+	c->ctor_none = !set;
 	if (set && braced) {
 		/* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted) */
 		for (cxx_entity *e = set; e; e = e->next) {
@@ -965,9 +967,12 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	}
 	/* (from an object of the same class with no constructor that fits: the implicit copy or move) */
 	c->call_obj = 0;	/* (a constructor has no object: what a member access in the arguments left) */
-	if (set)
+	if (set) {
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, nargs,
 				   nargs == 1 && args[0] != CXX_TY_UNKNOWN && QUNQ(args[0]) == QUNQ(t));
+		c->ctor_found = c->call_resolved && c->call_picked && c->call_picked->kind == CXX_ENTITY_VALUE;
+		c->ctor_picked = c->ctor_found ? c->call_picked : NULL;
+	}
 	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
 	if (dtor && dtor->kind == CXX_ENTITY_VALUE)
 		cxx_member_body_use(c, dtor);

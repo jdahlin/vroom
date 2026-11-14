@@ -1779,19 +1779,37 @@ static void cxx_function_body_inner_parse(cxx *c)
 			cxx_nested_name_parse(c, &q, &dep);
 			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_is_kw(c, CXX_KW_decltype))
 				cxx_fail(c, "expected a member or base name");
+			uint32_t mname = 0, mloc = cxx_peek(c, 0)->loc;
+			bool plain;
+
 			if (cxx_is_kw(c, CXX_KW_decltype)) {
 				cxx_advance(c);
 				cxx_skip_balanced(c);
 			} else {
+				mname = cxx_peek(c, 0)->id;
 				cxx_advance(c);
 				if (cxx_is(c, LEX_TOKEN_LESS))
-					cxx_template_arguments_parse(c);
+					cxx_template_arguments_parse(c), mname = 0;
 			}
-			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
+			plain = mname && !q && !dep;
+			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 				cxx_braced_init_list_parse(c);
-			else
+				if (cxx_gen_on(c)) {	/* code generation: this->member = value */
+					if (plain)
+						cxx_gen_member_initializer(c, mname, c->brace_nodes, c->brace_n, mloc);
+					else
+						cxx_gen_fail(c);
+				}
+			} else if (cxx_gen_on(c)) {
+				cxx_call_arguments_parse(c);
+				if (plain)
+					cxx_gen_member_initializer(c, mname, c->carg_nodes, c->ncargs, mloc);
+				else
+					cxx_gen_fail(c);
+			} else
 				cxx_expression_list_parse(c);
-			cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+				cxx_gen_fail(c);
 		} while (cxx_accept(c, LEX_TOKEN_COMMA));
 	}
 	cxx_compound_statement_parse(c);
@@ -1860,7 +1878,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		{
 			/* code generation: a member function defined in its class (not a template's) */
 			bool gen = l.what == 0 && l.fn && !l.template_depth && l.scope->kind == CXX_SCOPE_CLASS && !l.scope->dependent &&
-				   l.scope->owner && !l.scope->owner->instance && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON);
+				   l.scope->owner && !l.scope->owner->instance && !cxx_is_kw(c, CXX_KW_try);
 
 			if (gen) {
 				l.fn->fn_inline = 1;
@@ -3157,9 +3175,20 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					/* (a member defined outside its class: the member its class declares) */
 					if (context == CXX_CONTEXT_NAMESPACE && qs && qs->kind == CXX_SCOPE_CLASS && !qs->dependent && !decl_fn && name > 1 &&
 					    !c->tentative && !c->template_depth && qs->owner && !qs->owner->instance)
-						decl_fn = cxx_member_function_find(c, qs, name, c->decl_params, c->ndecl_params, c->decl_const);
+					{
+						/* (X::X and X::~X: the constructor or destructor, under its own name) */
+						uint32_t mname = name;
+
+						if (qs->owner->name == name) {
+							mname = cxx_ctor_id();
+							for (uint32_t k = start; k < start + 8 && k < c->pos && c->tok[k].kind != LEX_TOKEN_LEFT_PAREN; k++)
+								if (c->tok[k].kind == LEX_TOKEN_TILDE)
+									mname = cxx_dtor_id();
+						}
+						decl_fn = cxx_member_function_find(c, qs, mname, c->decl_params, c->ndecl_params, c->decl_const);
+					}
 					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
-					      !cxx_is(c, LEX_TOKEN_COLON) && cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+					      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
 
 					/* VCC_CXX_MANGLE=file: each function defined at namespace scope by its mangled name
 					   ("?name": not mangled yet), for bench/cxx-mangle.py to compare with clang's */
@@ -3169,7 +3198,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 						const vident *fv = &vintern_ents[decl_fn->name];
 
 						if (cxx_mangle_function(c, decl_fn, decl_fn->member_of ? decl_fn->member_of : decl_fn->home, decl_fn->ty,
-									decl_fn->member_of && decl_fn->fn_const, mn, sizeof mn))
+									decl_fn->member_of && decl_fn->fn_const, 1, mn, sizeof mn))
 							dprintf(c->mangle_fd, "%s\n", mn);
 						else
 							dprintf(c->mangle_fd, "?%.*s\n", (int)fv->len, fv->s);
@@ -3193,13 +3222,15 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cxx_skip_balanced(c);
 			} else if (object && !cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
-				if (gen_local) {	/* (a class code is generated for: copied as C copies it) */
+				{
 					uint32_t in = c->enode;
 
-					cxx_gen_local_declare(c, gen_local, c->etype != CXX_TY_UNKNOWN && QUNQ(c->etype) == QUNQ(t) ? in : 0, true, name_loc);
-					gen_declared = true;
+					cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
+					if (gen_local) {	/* code generation: the constructor's call, or a copy */
+						cxx_gen_construct_local(c, gen_local, t, &in, 1, name_loc);
+						gen_declared = true;
+					}
 				}
-				cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
 			} else if (object) {
 				cxx_braced_arguments_parse(c);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
@@ -3236,18 +3267,39 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
+				uint32_t an[16], n;
+
 				cxx_braced_arguments_parse(c);
+				n = c->ncargs;
+				memcpy(an, c->carg_nodes, sizeof an);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
+				if (gen_local) {
+					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					gen_declared = true;
+				}
 			} else
 				cxx_braced_init_list_parse(c);
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			if (object) {
+				uint32_t an[16], n;
+
 				cxx_call_arguments_parse(c);	/* direct-initialization */
+				n = c->ncargs;
+				memcpy(an, c->carg_nodes, sizeof an);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, false);
+				if (gen_local) {
+					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					gen_declared = true;
+				}
 			} else
 				cxx_expression_list_parse(c);
-		} else if (object)
+		} else if (object) {
 			cxx_ctor_use(c, t, NULL, NULL, 0, false);	/* default-initialization */
+			if (gen_local) {
+				cxx_gen_construct_local(c, gen_local, t, NULL, 0, name_loc);
+				gen_declared = true;
+			}
+		}
 	next:
 		/* code generation: a local with no initializer; one with a form of initializer not built yet */
 		if (gen_local && !gen_declared) {
@@ -3630,7 +3682,7 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	{
 		/* code generation: a member function defined in its class (not a template's, not an instance's yet) */
 		bool gen = l->what == 0 && l->fn && !l->template_depth && l->scope->kind == CXX_SCOPE_CLASS && !l->scope->dependent &&
-			   l->scope->owner && !l->scope->owner->instance && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON);
+			   l->scope->owner && !l->scope->owner->instance && !cxx_is_kw(c, CXX_KW_try);
 
 		if (gen) {
 			l->fn->fn_inline = 1;

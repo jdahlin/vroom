@@ -121,6 +121,7 @@ typedef struct cxx_entity {
 	cxx_template *tmpl;		/* a class or alias template: what instantiating it needs (instantiate.c) */
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
+	uint32_t sym1;			/* a constructor or destructor: the complete-object function's symbol (C1, D1; sym is C2, D2) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	struct cxx_entity *bound_template;	/* a template template parameter bound to a template: that template (its identity) */
 	struct cxx_ftemplate *ftmpl;
@@ -337,6 +338,10 @@ typedef struct cxx {
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
 	char **gen_names;		/* the mangled names of the functions defined so far (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
+	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
+	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
+	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
+	uint8_t ctor_none;
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
@@ -459,7 +464,7 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 }
 VPRIV qty cxx_auto_type(cxx *c);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, char *buf, size_t cap);
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
 #define cxx_gen_fail(c) cxx_gen_fail_at(c, __FILE__, __LINE__)
@@ -482,6 +487,9 @@ VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
+VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
+VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const);
 VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);

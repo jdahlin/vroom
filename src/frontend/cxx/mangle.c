@@ -363,10 +363,11 @@ static const char *mg_operator(const vident *v, uint32_t nparams, bool member)
 
 /*
  * The mangled name of the function f declared in scope home (a namespace, or the class it is a member
- * of), of type ft; is_const: a const member function.  Written to buf (NUL-terminated); false if some
- * part of it is not mangled yet.
+ * of), of type ft; is_const: a const member function; variant: 1 or 2 for a constructor's or destructor's
+ * complete-object or base-object function.  Written to buf (NUL-terminated); false if some part of it is
+ * not mangled yet.
  */
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, char *buf, size_t cap)
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap)
 {
 	cc *a = c->ast;
 	cxx_mangler m;
@@ -382,8 +383,12 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	op = mg_operator(v, x->n, member);
 	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op)
 		return false;	/* (conversion functions, new/delete, literal operators: later) */
-	if (v->len && v->s[0] == ' ')
-		return false;	/* (constructors and destructors: later) */
+	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
+	if (v->len && v->s[0] == ' ') {
+		if (!member || (variant != 1 && variant != 2))
+			return false;
+		op = v->s[1] == 'c' ? (variant == 1 ? "C1" : "C2") : (variant == 1 ? "D1" : "D2");
+	}
 	mg_str(&m, "_Z");
 	if (mg_nested(&m, home)) {
 		mg_str(&m, "N");
