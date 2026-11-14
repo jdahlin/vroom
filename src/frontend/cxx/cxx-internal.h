@@ -209,6 +209,7 @@ struct cxx_scope {
 	uint32_t nfield_types;
 	cxx_tparam *tparams;		/* a template scope: its parameters */
 	uint32_t ntparams;
+	struct cxx_entity *fn;		/* a function body's block: the function (its local classes mangle Z <it> E <name>) */
 };
 
 typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
@@ -471,7 +472,8 @@ typedef struct cxx {
 	uint32_t attr_align;
 	uint32_t cpack_name, cpack_at, cpack_n;	/* the last parameter list's pack of a class's bound type pack (As... a), expanded: its name, first parameter, count */
 	qty cpack_types[32];
-	uint8_t sig_own_pack;		/* the function whose declarator is parsed is an instance with a pack of its own (sig_pack_n) */		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
+	uint8_t sig_own_pack;
+	uint8_t mangle_internal;	/* the last name mangled names an unnamed namespace's or a local entity: internal linkage */		/* the function whose declarator is parsed is an instance with a pack of its own (sig_pack_n) */		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
@@ -631,6 +633,7 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
 VPRIV bool cxx_is_initializer_list(cxx *c, qty t);
+VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);

@@ -2177,6 +2177,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		c->scope = l.scope;
 		c->class_depth = 0;
 		fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+		fs->fn = l.fn;
 		cxx_scope_push(c, fs);
 		cxx_params_declare(c, fs, l.params, l.nparams);
 		{
@@ -3745,6 +3746,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					c->ooc_target = NULL;
 					if (decl_fn && (flags & (DS_INLINE | DS_CONSTEXPR)))
 						decl_fn->fn_inline = 1;	/* (inline X::f() {...} outside its class: weak, as clang's) */
+					fs->fn = decl_fn;
 					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
 					      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
 
@@ -4313,6 +4315,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 			cxx_scope *fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 			cxx_scope *outer = c->scope;
 
+			fs->fn = c->gen_instance;
 			cxx_scope_push(c, fs);
 			cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
 			/* the parameter pack: a pack of values, one type per element (args... expands with Args...) */
@@ -4426,6 +4429,7 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	c->scope = l->scope;
 	c->class_depth = 0;
 	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+	fs->fn = l->fn;
 	cxx_scope_push(c, fs);
 	cxx_params_declare(c, fs, l->params, l->nparams);
 	{

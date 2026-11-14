@@ -1679,3 +1679,14 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   operator()): deklaratorn tillämpas på varje element, och i kroppen är `a` ett paket av de parametrarna
   (sparas i den sena kroppens post; en funktionsmallsinstans egna paket expanderas som förut).
 - Test: class-pack-params; run 77/77.  Fork 68/70, 7,8 s CPU, 23 240 funktioner.
+
+## Status 78 (2026-11-14)
+Täckning: braced default-argument (`= {}`), städfunktion för initializer_list-arrayer av klasser med
+destruktor, inbyggd binär operator med klassoperand utan skalärkonvertering blir ogiltig (överlagringen
+väljer då operatorn), lokala klassers mangling (`Z <funktion> E namn`) och intern länkning för namn i
+anonyma namnrymder/lokala klasser.  nullptr till en klass via konverterande konstruktor (en referens-
+parameter, `k(ordered_json(nullptr))`) väljer nu `basic_json(nullptr_t)` i stället för mallkonstruktorn
+med `void *` (unit-hash).  Mätt: cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36; cxx-fork 68/70 TU:s
+klarar testerna (kvar: unit-32bit, som också fallerar med clang, och unit-allocator, en statisk variabel
+dubblerad mellan vcc:s och clangs objekt: en artefakt av weak-fill), 8,2 s CPU, 29,7x mot clang -O2.
+vcc genererar 27 av 118 testkroppar och 24 545 funktioner; nästa steg är fler testkroppar.

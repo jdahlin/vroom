@@ -117,6 +117,7 @@ static bool cxx_gen_object_type_ok(cxx *c, qty t);
 static uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc);
 static uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
 static uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc);
+static bool cxx_gen_is_nullptr_node(cxx *c, uint32_t x);
 static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
 static bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
 static bool cxx_gen_value_ok(cxx *c, qty t);
@@ -583,10 +584,7 @@ static uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, qty pt, uint32_t loc)
 	at[0] = AST_NODE_AT(a, x)->ty, lv[0] = (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, x);
 	{
 		/* nullptr (vcc's node: 0 as a void *): a std::nullptr_t prvalue (std::function cb = nullptr) */
-		const struct node *nx = AST_NODE_AT(a, x);
-
-		if (c->nullptr_ty && nx->op == N_CAST && AST_TYPE_KIND(a, nx->ty) == TY_PTR && AST_TYPE(a, nx->ty)->base == cc_type_basic(TY_VOID) &&
-		    nx->a && AST_NODE_AT(a, nx->a)->op == N_NUM && a->ipool[AST_NODE_AT(a, nx->a)->a] == 0) {
+		if (cxx_gen_is_nullptr_node(c, x)) {
 			at[0] = c->nullptr_ty, lv[0] = 0;
 			if (!(x = cxx_gen_nullptr_object(c, x, loc)))
 				return 0;
@@ -643,6 +641,16 @@ static uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, qty to, uint32_t loc)
  * and for a reference the address of the lvalue it binds to (for a const T& or T&& bound to a value: of a
  * temporary holding it).  0: not built.
  */
+/* nullptr (vcc's node: 0 cast to void *) */
+static bool cxx_gen_is_nullptr_node(cxx *c, uint32_t x)
+{
+	cc *a = c->ast;
+	const struct node *nx = AST_NODE_AT(a, x);
+
+	return c->nullptr_ty && nx->op == N_CAST && AST_TYPE_KIND(a, nx->ty) == TY_PTR && AST_TYPE(a, nx->ty)->base == cc_type_basic(TY_VOID) &&
+	       nx->a && AST_NODE_AT(a, nx->a)->op == N_NUM && a->ipool[AST_NODE_AT(a, nx->a)->a] == 0;
+}
+
 /* a nullptr_t object holding pointer value x (a temporary, an lvalue): *(void **)&tmp = x, tmp */
 static uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc)
 {
@@ -709,6 +717,11 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 				return 0;	/* (T& does not bind a temporary) */
 			if (AST_TYPE_KIND(a, at[0]) == TY_ARRAY)	/* ("text": a pointer, as for a call) */
 				at[0] = cc_type_pointer(a, AST_TYPE(a, at[0])->base), lv[0] = 0;
+			if (cxx_gen_is_nullptr_node(c, x)) {	/* (nullptr: a std::nullptr_t, not a void *) */
+				at[0] = c->nullptr_ty, lv[0] = 0;
+				if (!(x = cxx_gen_nullptr_object(c, x, loc)))
+					return 0;
+			}
 			cxx_ctor_use(c, QUNQ(rt), at, lv, 1, false);
 			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
 				return 0;
@@ -778,6 +791,11 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 
 			if (AST_TYPE_KIND(a, at[0]) == TY_ARRAY)
 				at[0] = cc_type_pointer(a, AST_TYPE(a, at[0])->base), lv[0] = 0;
+			if (cxx_gen_is_nullptr_node(c, x)) {	/* (nullptr: a std::nullptr_t, not a void *) */
+				at[0] = c->nullptr_ty, lv[0] = 0;
+				if (!(x = cxx_gen_nullptr_object(c, x, loc)))
+					return 0;
+			}
 			cxx_ctor_use(c, QUNQ(to), at, lv, 1, false);
 			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
 				return 0;
@@ -1118,9 +1136,10 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		f->mangled = 1;
 		return true;
 	}
-	c->mangle_guess = 0;
+	c->mangle_guess = 0, c->mangle_internal = 0;
 	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, special ? 2 : 0, name, sizeof name))
 		return false;
+	bool internal_name = c->mangle_internal;	/* (an instance over a local or unnamed namespace's type: internal, as clang's) */
 	f->name_guess = c->mangle_guess;
 	if (f->name_guess && getenv("VCC_CXX_MANGLE_WHY"))
 		fprintf(stderr, "name guessed: %s\n", name);	/* (VCC_CXX_MANGLE_WHY: the names only vcc gives) */
@@ -1154,7 +1173,7 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 			a->syms[f->sym].flags |= SF_GLOBAL;	/* (in an unnamed namespace, a class's member too: internal) */
 		a->syms[f->sym].depth = 0;	/* (made while a body is being built: a file-scope symbol all the same) */
 	}
-	if (cxx_scope_in_unnamed_namespace(c, home)) {
+	if (cxx_scope_in_unnamed_namespace(c, home) || internal_name) {
 		a->syms[f->sym].flags &= ~SF_GLOBAL;	/* (internal linkage, however the symbol was made) */
 		a->syms[f->sym].sc = SC_STATIC;
 	}
@@ -1168,7 +1187,10 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 1, name, sizeof name))
 			return false;
 		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
-		a->syms[f->sym1].flags |= SF_GLOBAL;
+		if (a->syms[f->sym].flags & SF_GLOBAL)
+			a->syms[f->sym1].flags |= SF_GLOBAL;
+		else
+			a->syms[f->sym1].sc = SC_STATIC;	/* (internal as the other) */
 		a->syms[f->sym1].depth = 0;
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
@@ -1959,6 +1981,62 @@ static bool cxx_gen_std_cast_function(cxx *c, const cxx_entity *f)
 	return std_ns;
 }
 
+/* a cleanup function for a local array of n objects of class E whose destructor is dsym: void f(E (*p)[n]),
+   the elements destroyed last to first (an initializer_list's array as an argument: __attribute__((cleanup)));
+   one per destructor and length */
+static uint32_t cxx_gen_array_cleanup(cxx *c, qty et, uint32_t n, uint32_t dsym, uint32_t loc)
+{
+	static __thread struct { cc *a; uint32_t dsym, n, fn; } cache[64];
+	static __thread uint32_t ncache;
+	cc *a = c->ast;
+	qty at = cc_type_array(a, QUNQ(et), n, 0), pt = cc_type_pointer(a, at), ept = cc_type_pointer(a, QUNQ(et));
+	uint32_t fsym, ps, body, saved_fn = a->fn;
+	cc_id_list psyms, stmts;
+	char name[48];
+
+	for (uint32_t i = 0; i < ncache; i++)
+		if (cache[i].a == a && cache[i].dsym == dsym && cache[i].n == n)
+			return cache[i].fn;
+	snprintf(name, sizeof name, "__vcc_ilc_%u_%u", dsym, n);
+	fsym = cc_symbol_new(a, S_FUNC, vintern_cstr(name), cxx_type_function(c, cc_type_basic(TY_VOID), &pt, 1, false), loc);
+	a->syms[fsym].sc = SC_STATIC;
+	a->syms[fsym].depth = 0;
+	cc_scope_open(a);
+	a->fn = fsym;
+	ps = cc_symbol_new(a, S_VAR, vintern_cstr("p"), pt, loc);
+	a->syms[ps].flags |= SF_PARAM;
+	a->syms[ps].sc = SC_AUTO;
+	cc_id_list_init(&psyms);
+	cc_id_list_append(a, &psyms, ps);
+	cc_id_list_init(&stmts);
+	for (uint32_t i = n; i-- > 0;) {
+		uint32_t base = cc_node_rvalue(a, cxx_gen_var_node(c, ps, loc)), el, call;
+		cc_id_list args;
+
+		base = cc_cast_insert(a, base, ept, cc_conversion_cast_kind(a, pt, ept, base));
+		el = cc_binary_build(a, LEX_TOKEN_PLUS, base, cc_node_integer_new(a, i, cc_type_basic(TY_LONG), loc), loc);
+		cc_id_list_init(&args);
+		cc_id_list_append(a, &args, el);
+		call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+		AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, dsym, loc);
+		AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
+		AST_NODE_AT(a, call)->c = 1;
+		cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	}
+	body = cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n);
+	cc_scope_close(a);
+	a->fn = saved_fn;
+	a->syms[fsym].body = body;
+	a->syms[fsym].flags |= SF_DEFINED;
+	a->syms[fsym].defloc = loc;
+	AST_NODE_AT(a, body)->a = cc_id_list_freeze(a, &psyms);
+	AST_NODE_AT(a, body)->aux = 1;
+	a->toplevel[a->ntoplevel++] = fsym;
+	if (ncache < 64)
+		cache[ncache].a = a, cache[ncache].dsym = dsym, cache[ncache].n = n, cache[ncache++].fn = fsym;
+	return fsym;
+}
+
 /* f({...}): a temporary of class type t constructed from the braced list at token `pos` (its arguments
    parsed again here for their code: the list's first parse was unevaluated), as an lvalue (0: not built) */
 static uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc)
@@ -1990,9 +2068,21 @@ static uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc)
 		if (!c->gen_block)
 			return 0;
 		il = cxx_gen_initializer_list(c, t, an, n, c->gen_block, loc, &arr);	/* (before the call, in its block) */
-		if (!il || (arr && cc_type_is_record(a, AST_TYPE(a, a->syms[arr].ty)->base) &&
-			    cxx_gen_needs_destruction(c, AST_TYPE(a, a->syms[arr].ty)->base, 0)))
+		if (!il)
 			return 0;
+		if (arr && cc_type_is_record(a, AST_TYPE(a, a->syms[arr].ty)->base) && cxx_gen_needs_destruction(c, AST_TYPE(a, a->syms[arr].ty)->base, 0)) {
+			/* its class elements: destroyed at the block's end (as the temporaries are, later than C++ says) */
+			qty et = AST_TYPE(a, a->syms[arr].ty)->base;
+			cxx_entity *d = cxx_gen_effective_destructor(c, et, 0);
+			attrs at;
+
+			if (!d || d->fn_deleted || !cxx_gen_name(c, d) || !d->sym1 || c->gen_notemp || (cxx_member_body_use(c, d), 0))
+				return 0;
+			memset(&at, 0, sizeof at);
+			at.cleanup = cxx_gen_array_cleanup(c, et, (uint32_t)AST_TYPE(a, a->syms[arr].ty)->n, cxx_gen_dtor_sym(d), loc);
+			cc_attribute_apply_symbol(a, &a->syms[arr], &at);
+			c->gen_block_temps++;
+		}
 		return il;
 	}
 	cxx_ctor_use(c, t, at, al, n, true);
@@ -2124,8 +2214,26 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 
 		memcpy(all, args, nargs * sizeof *args);
 		for (uint32_t i = nargs; i < n; i++)
-			if (!(all[i] = cxx_gen_default_argument(c, f, i - first)))
-				{ CXX_CALL_WHY(); return; }
+			if (!(all[i] = cxx_gen_default_argument(c, f, i - first))) {
+				/* = {} or = {a, b}: a temporary of the parameter's class from that list, parsed where the
+				   default is (initializer_list_t init = {}) */
+				uint32_t dp = f->defs ? f->defs[2 * (i - first)] : 0;
+				qty pt = a->params[ft->aux + i];
+
+				if (dp && dp < c->ntok && c->tok[dp].kind == LEX_TOKEN_LEFT_BRACE && pt != CXX_TY_UNKNOWN) {
+					cxx_scope *saved = c->scope;
+					uint32_t sdone = c->sdone, snode = c->snode;
+
+					if (AST_TYPE_KIND(a, pt) == TY_PTR && AST_TYPE(a, pt)->ext)
+						pt = AST_TYPE(a, pt)->base;
+					if (f->def_scope)
+						c->scope = f->def_scope;
+					all[i] = cxx_gen_braced_temp(c, pt, dp, loc);
+					c->scope = saved, c->sdone = sdone, c->snode = snode, c->enode = 0;
+				}
+				if (!all[i])
+					{ CXX_CALL_WHY(); return; }
+			}
 		args = all, nargs = n;
 		ft = AST_TYPE(a, f->ty);
 	}

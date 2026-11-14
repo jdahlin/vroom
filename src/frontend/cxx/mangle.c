@@ -1379,7 +1379,7 @@ static void mg_prefix(cxx_mangler *m, cxx_scope *s)
 	if (s->owner)
 		mg_source_name(m, s->owner->name);
 	else
-		mg_str(m, "12_GLOBAL__N_1");	/* an unnamed namespace */
+		mg_str(m, "12_GLOBAL__N_1"), m->c->mangle_internal = 1;	/* an unnamed namespace */
 	mg_remember(m, CXX_SUB_SCOPE, s, 0);
 }
 
@@ -1414,6 +1414,31 @@ static void mg_class_type(cxx_mangler *m, qty t)
 		return;
 	}
 	outer = instance ? home : mg_enclosing(m, s);
+	if (!instance && s && s->owner && s->owner->name > 1) {
+		/* a local class: Z <its function's encoding> E <name> ([class.local]; the first of its name only) */
+		const cxx_scope *b;
+		cxx_entity *fn = NULL;
+
+		for (b = s->parent; b && b->kind != CXX_SCOPE_NAMESPACE && b->kind != CXX_SCOPE_CLASS && !fn; b = b->parent)
+			fn = b->fn;
+		if (fn) {
+			char enc[2048];
+			cxx_scope *fh = fn->member_of ? fn->member_of : fn->home ? fn->home : m->c->global;
+
+			if (!cxx_mangle_function(m->c, fn, fh, fn->ty, fn->member_of && fn->fn_const, (vintern_ents[fn->name].len && vintern_ents[fn->name].s[0] == ' ') ? 1 : 0, enc, sizeof enc) ||
+			    strncmp(enc, "_Z", 2)) {
+				m->bad = true;
+				return;
+			}
+			m->c->mangle_internal = 1;	/* (a local class: internal linkage, and what names it) */
+			mg_str(m, "Z");
+			mg_str(m, enc + 2);
+			mg_str(m, "E");
+			mg_source_name(m, s->owner->name);
+			mg_remember(m, CXX_SUB_TYPE, NULL, t);
+			return;
+		}
+	}
 	if (mg_nested(m, outer)) {
 		mg_str(m, "N");
 		mg_class_component(m, s, t);

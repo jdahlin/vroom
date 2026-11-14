@@ -2254,6 +2254,19 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 						spaceship = 2, ss_pick = c->call_picked, found = true;
 				}
 			}
+			if ((!found || (c->none_viable && !c->call_resolved)) && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE && op != CXX_TOKEN_SPACESHIP &&
+			    !c->template_depth && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN) {
+				/* a class operand, no operator function that fits, and no conversion of the class to anything:
+				   ill-formed (std::string < int: a substitution failure in decltype(a < b)) */
+				for (int k = 0; k < 2; k++) {
+					qty o = k ? rt : l;
+					cxx_scope *os = cc_type_is_record(c->ast, o) && AST_TYPE_KIND(c->ast, o) != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(o)) : NULL;
+
+					if (os && !os->has_dependent_base && !os->dependent && !cxx_class_converts_public(c, os) &&
+					    !(c->nullptr_ty && QUNQ(o) == c->nullptr_ty))
+						CXX_INVALID(c);
+				}
+			}
 			if (!c->tentative && !found)
 				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;

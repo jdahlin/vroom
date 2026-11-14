@@ -1148,6 +1148,46 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	c->etype = et, c->elval = el, c->ecallee = callee;
 }
 
+/* does the class have a conversion function to a type a built-in operator takes (arithmetic, an enumeration,
+   a pointer; a conversion template: perhaps): std::string's to string_view does not count */
+static bool cxx_class_converts_scalar(cxx *c, cxx_scope *cls, int depth)
+{
+	if (!cls || cls->has_dependent_base || depth > 12)
+		return true;
+	if (cls->has_conversion)
+		for (uint32_t i = 0; i < cls->nslots; i++)
+			for (cxx_entity *e = cls->slots[i]; e; e = e->next) {
+				const vident *v = &vintern_ents[e->name];
+				qty t;
+
+				if (v->len < 10 || memcmp(v->s, "operator ", 9))
+					continue;
+				if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE)
+					return true;
+				if (v->s[9] != '#')
+					continue;
+				t = (qty)strtoul(v->s + 10, NULL, 10);
+				if (t == CXX_TY_UNKNOWN || t == 0)
+					return true;
+				if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+					t = AST_TYPE(c->ast, t)->base;
+				int k = AST_TYPE_KIND(c->ast, t);
+
+				if ((k >= TY_BOOL && k <= TY_FLOAT128) || k == TY_ENUM || k == TY_PTR)
+					return true;
+			}
+	for (uint32_t i = 0; i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS && cxx_class_converts_scalar(c, cls->used[i], depth + 1))
+			return true;
+	return false;
+}
+
+VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls)
+{
+	cxx_type_require_complete(c, QUNQ(cls->owner ? cls->owner->ty : CXX_TY_UNKNOWN));
+	return cxx_class_converts_scalar(c, cls, 0);
+}
+
 /* ---- integer constant expressions ---------------------------------------------------------- */
 
 /* an expression of type t with the constant value v */
