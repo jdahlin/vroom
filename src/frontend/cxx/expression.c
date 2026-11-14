@@ -1552,6 +1552,7 @@ static void cxx_primary_expression_parse(cxx *c)
 		/* a type followed by ( or { */
 		cxx_mark m;
 		bool is_type;
+		cxx_entity *ctad_te = NULL;	/* a class template named without its arguments: Name{args} deduces them */
 
 		cxx_mark_set(c, &m);
 		is_type = cxx_lookahead_fn(c, cxx_type_then_init);
@@ -1570,6 +1571,13 @@ static void cxx_primary_expression_parse(cxx *c)
 				is_type = cxx_entity_kind_find(e, CXX_ENTITY_TYPE) && !cxx_entity_kind_find(e, CXX_ENTITY_VALUE);
 			if (e && e->kind == CXX_ENTITY_TEMPLATE && e->next)
 				is_type = true;
+			if (e && is_type) {
+				cxx_entity *te = cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE);
+
+				if (te && te->kind == CXX_ENTITY_TEMPLATE && te->nguides &&
+				    (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN))
+					ctad_te = te;
+			}
 			cxx_mark_rewind(c, &m);
 		}
 		if (is_type) {
@@ -1586,6 +1594,8 @@ static void cxx_primary_expression_parse(cxx *c)
 					cxx_braced_arguments_parse(c);
 				else
 					cxx_call_arguments_parse(c);
+				if (cast_to == CXX_TY_UNKNOWN && ctad_te && c->ncargs != UINT32_MAX && c->ncargs <= 8)
+					cast_to = cxx_ctad(c, ctad_te, c->cargs, c->cargs_lval, c->ncargs);
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
 					uint32_t an[CXX_MAX_ARGS], n = c->ncargs;
 

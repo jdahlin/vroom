@@ -1758,3 +1758,11 @@ json:s `json_base_class_t(other)`); `__is_trivially_copyable`/`__is_trivially_re
 är falska för en klass med icke-trivial kopierings-/flyttkonstruktor eller destruktor (förut okända:
 `__libcpp_is_trivially_relocatable<string>` i vector).  cxx-strict: 541 saknade (686).  Överst: kroppar
 vcc aldrig tolkade (87), CTAD i `__unwrap_range` (79), `filldata<T>::fill` (38).
+
+## Status 86 (2026-11-14)
+CTAD för deduktionsguider av den enkla formen `Name(T1, const T2 &, T3 &&) -> Name<T...>` (pair{a, b}):
+guiderna sparas på klassmallen (förut tolkade och kastade), `Name{args}`/`Name(args)` utan mallargument
+deducerar från dem; implicita guider från konstruktorer saknas.  cxx-strict oförändrat 541: de 79
+funktionerna i `__unwrap_range` stannar nu vid nästa sak, `__libcpp_is_contiguous_iterator<_Iter>::value`
+(86).  Känt: den första konstruktionen av en `pair<A, B>` i en TU misslyckas (anropet byggs innan
+konstruktorinstansens typ finns), senare lyckas.

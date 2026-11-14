@@ -103,6 +103,14 @@ typedef struct cxx_tparam {
 } cxx_tparam;
 
 /* a template argument, as far as it is known: a type or an integer value */
+/* a deduction guide Name(P1, ..., Pn) -> Name<T...>; each Pi is Tk, const Tk & or Tk && of the guide's own
+   type parameters; the result names them in some order (pair(T1, T2) -> pair<T1, T2>) */
+typedef struct cxx_guide {
+	uint8_t np, nres;
+	uint8_t pidx[8], mode[8];	/* parameter i: its template parameter, and 0 by value (decays), 1 const T &, 2 T && */
+	uint8_t res[8];			/* the result's arguments: template parameter indexes */
+} cxx_guide;
+
 typedef struct cxx_targ {
 	const struct cxx_targ *list;	/* kind 6: the argument list the deduced pack is a slice of (not hashed) */
 	uint8_t kind;		/* 0 unknown, 1 type, 2 value, 3 a value placeholder (v: its parameter's index), 4 a template
@@ -173,6 +181,8 @@ typedef struct cxx_entity {
 	uint16_t pack_placeholder;	/* a partial specialization's pack parameter: its index + 1 */
 	uint8_t has_value;
 	cxx_scope **specs;		/* class template: its partial and explicit specializations' scopes */
+	struct cxx_guide *guides;	/* class template: its deduction guides of the simple form vcc deduces from (cxx_ctad) */
+	uint32_t nguides;
 	uint32_t nspecs;
 	struct cxx_entity *next;	/* the next entity with the same name in the same scope */
 } cxx_entity;
@@ -500,6 +510,7 @@ typedef struct cxx {
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);
+VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval, uint32_t nargs);	/* declaration.c: Name{args} of a class template */
 VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
