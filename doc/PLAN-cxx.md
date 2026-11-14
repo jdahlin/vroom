@@ -866,3 +866,36 @@ unit-32bit, C++11: 0,16 s; json: 145 462 layouter som clang håller med om
 (0 fel), 71/71 parse; parse-tester 37/37.
 Kvar före mätningen mot clang -O2: `j.get<T>()`, vptr-layout,
 kodgenerering för C++ från det delade AST:t, länkning och körning.
+
+### Status 2026-11-14 (23): mätt gräns för 30x med dagens front end
+
+Hela sviten (71 TU:er, en i taget, `-fsyntax-only`, CPU-sekunder på den
+här maskinen), med dagens C++-front end (tolkning, instansiering av det
+som nås, typning; ingen AST för kroppar, ingen kod):
+
+| Mätning | Värde |
+|---|---|
+| clang -O2 (baslinjen) | 243 s; 30x är **8,1 s** |
+| vcc, C++20-flaggor (som baslinjen) | **13,7 s** |
+| vcc, C++11 (json:s egen CMake) | 10,2 s |
+| vcc, en TU med bara de delade huvudena (json, doctest, libc++) | 0,155 s; x 71 = **11,0 s** av de 13,7 |
+| vcc, det som är TU:ernas eget (13,7 - 11,0) | **2,7 s** |
+
+Slutsatser som mätningen bär:
+- Utan delning mellan TU:er går 30x inte: front end ensam tar 13,7 s, mer
+  än hela budgeten på 8,1 s, och den instansierar ännu bara ca 45 % av
+  funktionerna clang emitterar (747 av ca 1 670 i unit-32bit).
+- Med huvudena tolkade en gång (vccd, X5) är front end ca 0,16 + 2,7 =
+  **2,9 s**; då återstår ca 5,2 s av budgeten för resten av
+  instansieringen, AST, kodgenerering och objektfiler för 71 TU:er.  De 23
+  TU:er som konfigurerar om json delar bara libc++ och kostar mer än så.
+- Mätningen ände-till-ände (kompilera, länka, köra testerna) finns inte:
+  kodgenerering för C++ är inte påbörjad.
+
+Samma steg: operatorer skrivna som anrop (`operator<<(a, b)`), verklig
+tvetydighet (två kandidater som inget slår och som konverterar ett argument
+till olika typer i samma rang) är ogiltig, och en gemensam returtyp hos
+kandidater vcc inte kan ordna gör inte längre anropet giltigt (vcc sade att
+doctests `has_insertion_operator<int>` var sann; clang: falsk).
+`j.get<int>()` har sin typ.  Parse-tester 38/38; 148 440 layouter som
+clang håller med om.
