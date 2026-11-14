@@ -637,6 +637,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 						k->rank[a] = 0;
 					else if (cc_type_is_record(c->ast, P) && AST_TYPE_KIND(c->ast, P) != AST_TYPE_ARRAY)
 						k->rank[a] = 3;
+					else if (own_brace[a] < c->ntok && c->tok[own_brace[a]].kind == LEX_TOKEN_LEFT_BRACE &&
+						 own_brace[a] + 1 < c->ntok && c->tok[own_brace[a] + 1].kind == LEX_TOKEN_RIGHT_BRACE)
+						k->rank[a] = 0;	/* (a scalar from {}: value-initialized, an identity conversion) */
 					else
 						k->rank[a] = 6;	/* (a scalar from {x}: rare, not told apart here) */
 					k->pt[a] = c->ast->params[sig->aux + a];

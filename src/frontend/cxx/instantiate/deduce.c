@@ -382,6 +382,9 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		if ((xargs[i].kind == 1 || xargs[i].kind == 2) && p->params->tparams[i].kind != 3 &&
 		    (xargs[i].kind == 1) != (p->params->tparams[i].kind == 1))
 			return 0;
+	if (f->packs && f->has_pt && !f->variadic && !f->pack_param &&
+	    (nargs > f->np || nargs + e->ndefaults < f->np))
+		return 0;	/* (too many or too few arguments: not viable, packs or not; pair's piecewise constructor for pair()) */
 	if (f->packs || p->params->ntparams > 64) {
 		/* not deduced, but a parameter whose shape the argument cannot have rules it out: swap(tuple<Ts...>&,
 		   tuple<Ts...>&) for two ints */

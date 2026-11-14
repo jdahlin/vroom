@@ -2221,3 +2221,12 @@ En TU: hela -c 0,8 s, varav framänden 0,6 s; bara headrarna (json, doctest, lib
 mer än forken: att instansieringar delas mellan TU:erna (json upprepar enligt X0 85 % av dem) eller en
 snabbare instansiering och kodgenerering.  Forkobjekten: 69 av 70 definierar samma funktioner som TU för
 TU; `unit-assert_macro` färre (487 mot 662), inte utrett.
+
+## Status 134 (2026-11-15)
+`std::pair<A, B> p;` (libc++:s villkorade standardkonstruktor) byggs:
+- `{}` som argument till en skalär parameter (eller `const T&` till en) rangordnas som identitet
+  (värdeinitiering): `__test_implicit_default_constructible<const long&>({})` i decltype.
+- En funktionsmall med paket och fast antal funktionsparametrar är inte livskraftig för för många eller för få
+  argument (förut "inte känd": `pair`:s piecewise-konstruktor gjorde `pair()` okänd).
+Kvar: kod för `f({})` utanför ett overvärderat sammanhang.  cxx-strict: 90 funktioner till, inga nya; 212
+summerat per TU, 3 av 70 TU:er klarar sina tester med vcc ensamt.
