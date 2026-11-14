@@ -24,17 +24,17 @@ VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops)
 				o[0].kind = o[0].kind == XK_EXPR ? XK_MEM : o[0].kind;
 				return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 4, .rm = &o[0], .gotx = 2));
 			}
-			return x64_branch(a, 16, &o[0], 0);
+			return x64_branch(a, 16, o[0].v, o[0].mod);
 		}
 		if ((cc = x64_cc(c)) >= 0)
-			return x64_branch(a, cc, &o[0], 0);
+			return x64_branch(a, cc, o[0].v, o[0].mod);
 	}
 	if ((!strcmp(mn, "call") || !strcmp(mn, "callq")) && nops == 1) {
 		if (o[0].star || o[0].kind == XK_REG || o[0].kind == XK_MEM) {
 			o[0].kind = o[0].kind == XK_EXPR ? XK_MEM : o[0].kind;
 			return x64_emit(a, &F(.op = OPB(0xff), .nop = 1, .reg = 2, .rm = &o[0], .gotx = 2));
 		}
-		return x64_branch(a, -1, &o[0], 1);
+		return x64_branch(a, -1, o[0].v, o[0].mod);
 	}
 	return X64_NEXT;
 }
@@ -453,11 +453,11 @@ int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
 	return as_error_report(a, "invalid structured integer operation");
 }
 
-int as_x64_direct_branch(as_context *a, int condition, XOp *target)
+int as_x64_direct_branch(as_context *a, int condition, uint32_t symbol, int mod)
 {
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
-	return x64_branch(a, condition, target, condition < 0);
+	return x64_branch(a, condition, as_symbol_value(a, symbol, 0), mod);
 }
 
 int as_x64_condition(as_context *a, enum X64ConditionOp op, int condition, int size, XOp *operands)

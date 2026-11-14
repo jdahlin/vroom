@@ -122,6 +122,20 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 			if (as_label_define_symbol(R->assembler, x64_encode_label(R, fid, i->label))) return -1;
 			continue;
 		}
+		if (i->opcode == X64_OP_JMP || i->opcode == X64_OP_JCC) {
+			uint32_t target = x64_encode_label(R, fid, i->label);
+			if (as_x64_direct_branch(R->assembler, i->opcode == X64_OP_JMP ? 16 : i->condition, target, XM_NONE))
+				return -1;
+			continue;
+		}
+		if (i->opcode == X64_OP_CALL) {
+			uint32_t target = codegen_commit_symbol_find(R, i->reference);
+			bool plt = R->compile_context->o->pic && (CODEGEN_REFERENCE_KIND(i->reference) == CODEGEN_REFERENCE_NAME ||
+			                                          codegen_symbol_needs_got(R->compile_context, i->reference));
+			if (as_x64_direct_branch(R->assembler, -1, target, plt ? XM_PLT : XM_NONE))
+				return -1;
+			continue;
+		}
 		x64_encode_register(&o[0], i->registers[1], sz);
 		x64_encode_register(&o[1], i->registers[0], sz);
 		switch (i->opcode) {
@@ -176,19 +190,12 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 			if (as_x64_condition(R->assembler, X64O_SETCC, i->condition, 1, o)) return -1;
 			x64_encode_register(&o[1], i->registers[0], 4);
 			op = X64O_MOVZX; sz = 1; break;
-		case X64_OP_JMP: case X64_OP_JCC: case X64_OP_LEAL:
-			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,x64_encode_label(R,fid,i->label),0),.hasv=1 };
-			if (i->opcode==X64_OP_LEAL) { op=X64O_LEA;sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
-			else {
-				if (as_x64_direct_branch(R->assembler, i->opcode == X64_OP_JMP ? 16 : i->condition, o)) return -1;
-				continue;
-			}
+		case X64_OP_LEAL:
+			op = X64O_LEA;
+			sz = 8;
+			o[0] = (XOp){ .kind = XK_MEM, .base = 16, .index = -1, .scale = 1, .hasv = 1,
+			              .v = as_symbol_value(R->assembler, x64_encode_label(R, fid, i->label), 0) };
 			break;
-		case X64_OP_CALL:
-			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,codegen_commit_symbol_find(R,i->reference),0),.hasv=1 };
-			if(R->compile_context->o->pic&&(CODEGEN_REFERENCE_KIND(i->reference)==CODEGEN_REFERENCE_NAME||codegen_symbol_needs_got(R->compile_context,i->reference)))o[0].mod=XM_PLT;
-			if (as_x64_direct_branch(R->assembler, -1, o)) return -1;
-			continue;
 		case X64_OP_CALLR: case X64_OP_JMPR: mn=i->opcode==X64_OP_CALLR?"callq":"jmpq";sz=0;count=1;x64_encode_register(&o[0], i->registers[1],8);o[0].star=1;break;
 		case X64_OP_PUSH: case X64_OP_POP: mn=i->opcode==X64_OP_PUSH?"pushq":"popq";sz=0;count=1;x64_encode_register(&o[0], i->opcode==X64_OP_PUSH?i->registers[1]:i->registers[0],8);break;
 		case X64_OP_CQO: mn=sz==8?"cqto":"cltd";sz=0;count=0;break;

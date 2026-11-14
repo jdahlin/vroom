@@ -1374,6 +1374,32 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling x86 branch operands (2026-11-14).** On eight
+single-emitter SQLite 3.50.4 compiles per binary, the largest attributable
+exclusive cycle gap was in `codegen_chunks_commit`, which inlines
+`x64_function_commit` in both builds. The larger raw difference in
+`pp_file_enter` includes skeleton construction that clang keeps out of line.
+One MOVUPS in the self-hosted branch-operand copy accounted for 19% of
+samples in the commit function. Clang stored the returned symbol-expression
+registers straight into its operand. Passing the symbol ID and relocation
+modifier directly removes the operand construction from both builds.
+Ordinary symbols now resolve directly, and a substituted expression is
+folded once. Exclusive cycles per compile in the commit function fell from
+11.68M to 7.95M self-hosted and from 5.38M to 5.18M clang-built. Some cost
+moved into the assembler helpers.
+
+| SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.31 ms | 190.50 ms |
+| Clang-built vcc CPU time | 142.87 ms | 142.83 ms |
+| Self-hosted / clang-built | 1.339× | 1.334× |
+| Self-hosted retired instructions | 2.1810B | 2.1766B |
+| Clang-built retired instructions | 1.2438B | 1.2423B |
+
+CPU 7, `VCC_THREADS=1`, `-O2 -c`, alternating order and one warm-up excluded.
+All four builds produced the same object (SHA-256 prefix `c4d3896fefc9`).
+The previous round measured the same baseline at 1.336×.
+
 **SQLite after profiling x64_emit (2026-11-14).** Eight pinned SQLite
 3.50.4 compiles sampled with perf cycles:u put the self-hosted encoder at
 16.57M exclusive cycles per compile versus 9.93M clang-built. Vcc's byte
