@@ -90,7 +90,7 @@ o = $(patsubst %.c,$(OBJ)/%.o,$(1))
 VCC_WASM ?=
 AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
 as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c as/macro.c as/conditional.c as/call-frame-information.c as/variable-items.c \
-           as/dwarf-line-table.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
+           as/dwarf-line-table.c as/coff-directives.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
@@ -115,7 +115,7 @@ SPLIT_MODS = cc pp codegen driver
 # compiler for codegen/vir/ (VIR, -O2 and up)
 vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c vir/compact.c vir/pass-list.c $(wildcard vir/pass/*.c)
 VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
-obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
+obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c platform/win/coff.c platform/win/unwind.c
 cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c
 # the compile job (driver_job_run); declaration-cache.c stays a TU of its own
 driver_SRC = $(filter-out driver/declaration-cache.c,$(wildcard driver/*.c))
@@ -135,7 +135,7 @@ AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
 # on its own, and vlink-main.c (main, under VLD_MAIN) only for vlink
 ld_SRC  = $(shell sed -n 's|^\#include "\.\./\(.*\.c\)"$$|\1|p; s|^\#include "\([a-z][^"/]*\.c\)"$$|ld/\1|p' ld/ld.c)
 LD_PARTS = $(filter-out ld/vlink-main.c,$(ld_SRC))
-LD_SRC  = $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
+LD_SRC  = $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c platform/win/pe-linker.c
 
 $(OBJ)/%.o: %.S Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -170,7 +170,7 @@ $(OBJ)/ld/ld.o $(OBJ)/ld/vlink-main.o: XFLAGS = -DVLD_MAIN
 # the ELF linker with main() for vlink, and without it for vccd (links, nm and
 # objcopy run in its worker threads)
 VLINK_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ld.o,$(call o,$(LD_PARTS) ld/vlink-main.c))
-VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
+VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.c platform/darwin/macho-linker.c platform/win/pe-linker.c)
 $(OBJ)/ld/ldlib.o: ld/ld.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
@@ -250,6 +250,14 @@ vcc-tsan:
 		VCC_SAN="$(SAN_COMMON) -fsanitize=thread"
 
 .PHONY: vcc-asan vcc-tsan
+
+# vcc's run-time support library for x86_64-w64-mingw32 (runtime/, libvccrt.a;
+# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters; by default it
+# compiles with our vpp and archives with our var (and vccd): no LLVM tool
+vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/var $(OUT)/vccd)
+	sh runtime/build.sh $(OUT)/vccrt
+
+.PHONY: vccrt
 
 # Reuse the normal target graph so each stage gets the same objects and make
 # can schedule independent compilation jobs across the recursive invocation.

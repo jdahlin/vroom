@@ -284,7 +284,8 @@ CC_PRIVATE ast_qualified_type cc_type_array(cc *c, ast_qualified_type elem, uint
 CC_PRIVATE uint64_t cc_type_array_length(cc *c, ast_qualified_type t);
 CC_PRIVATE ast_qualified_type cc_type_vla(cc *c, ast_qualified_type elem, uint32_t sizenode);
 CC_PRIVATE ast_qualified_type cc_type_qualify(cc *c, ast_qualified_type t, int q);
-CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, const ast_qualified_type *par, uint32_t n, int flags);
+CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret, const ast_qualified_type *par, uint32_t n, int flags);	/* flags: TF_*, | CC_FNABI_* << 8 */
+CC_PRIVATE ast_qualified_type ty_fnabi(cc *c, ast_qualified_type t, int conv);
 CC_PRIVATE ast_qualified_type cc_type_vector(cc *c, ast_qualified_type elem, uint32_t size);
 CC_PRIVATE ast_qualified_type cc_type_aligned(cc *c, ast_qualified_type t, uint32_t align);
 CC_PRIVATE ast_qualified_type cc_type_atomic(cc *c, ast_qualified_type t, uint32_t loc);
@@ -521,11 +522,20 @@ static inline bool cc_token_at_standard_attribute(cc *c);
 CC_PRIVATE __attribute__((noinline)) void cc_attribute_list_parse_slow(cc *c, attrs *a);
 static inline void cc_attribute_list_parse(cc *c, attrs *a);
 static inline bool cc_attribute_is_empty(const attrs *a);
-/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) */
+/* the data model: LP64, but ILP32 for wasm32 (long and pointers 4 bytes) and
+   LLP64 for Windows x64 (long 4 bytes, pointers 8: size_t is unsigned long long) */
 #define CC_ILP32(c) ((c)->o->target == PP_WASM32)
+#define CC_LLP64(c) ((c)->o->target == PP_WIN64)
+#define CC_LONG32(c) (CC_ILP32(c) || CC_LLP64(c))	/* long is 4 bytes */
 #define CC_PTRSIZE(c) (CC_ILP32(c) ? 4u : 8u)
-/* the 64-bit integer type: long, or long long under ILP32 */
-#define CC_I64(c, uns) (CC_ILP32(c) ? ((uns) ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG) : ((uns) ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG))
+/* the 64-bit integer type: long, or long long where long is 32 bits */
+#define CC_I64(c, uns) (CC_LONG32(c) ? ((uns) ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG) : ((uns) ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG))
+/* the integer type as wide as a pointer (intptr_t; size_t and ptrdiff_t are c->t_size, c->t_ptrdiff) */
+#define CC_INTPTR(c, uns) (CC_LLP64(c) ? ((uns) ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG) : ((uns) ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG))
+/* the x86-64 CPU (x86-64 Linux or Windows x64): builtins, target attributes, x87 long double */
+#define CC_X86_64(c) PP_IS_X86_64((c)->o->target)
+/* Windows x64 (MinGW-w64): the OS and its ABI defaults (ms_abi, MS bit-fields, va_list char *) */
+#define CC_WIN64(c) ((c)->o->target == PP_WIN64)
 CC_PRIVATE void cc_attribute_merge(attrs *to, const attrs *from);
 /* flow.c: reach.c */
 typedef struct cc_reach_state {
@@ -630,7 +640,7 @@ static inline bool cc_type_kind_is_float(int k) { return k >= AST_TYPE_BFLOAT16 
    binary128's layout (include/common/softfloat.h) */
 static inline bool cc_type_is_float128(cc *c, ast_qualified_type t) { return (AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE && c->ty[AST_QUALIFIED_TYPE_INDEX(t)].size == 16) || AST_TYPE_KIND(c, t) == AST_TYPE_FLOAT128; }
 /* the fraction bits a wide constant of type t is rounded to: 112, or x87's 63 */
-static inline int cc_float_precision_bits(cc *c, ast_qualified_type t) { return c->o->target == PP_LINUX_X86_64 && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE ? VSOFTFLOAT_X87_80 : 112; }
+static inline int cc_float_precision_bits(cc *c, ast_qualified_type t) { return CC_X86_64(c) && AST_TYPE_KIND(c, t) == AST_TYPE_LONG_DOUBLE ? VSOFTFLOAT_X87_80 : 112; }
 /* the binary128 bits of a 16-byte long double constant: the two pool slots after its double */
 static inline void cc_float_pool_append_float128(cc *c, u128 q) { memcpy(&c->fpool[c->nfpool], &q, 16); c->nfpool += 2; }
 static inline u128 cc_float_pool_float128(const cc *c, uint32_t a) { u128 q; memcpy(&q, &c->fpool[a + 1], 16); return q; }
@@ -735,12 +745,14 @@ static inline uint32_t cc_scope_get(uint32_t **dir, uint32_t id)
 	return pg ? pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 }
 
+CC_PRIVATE bool ms_valist_typedef(cc *c, uint32_t id);
+
 /* an identifier (not a keyword) */
 static inline bool cc_symbol_is_typedef_identifier(cc *c, uint32_t id)
 {
 	uint32_t s = cc_symbol_lookup(c, id);
 
-	return s && c->syms[s].kind == AST_SYMBOL_TYPEDEF;
+	return s ? c->syms[s].kind == AST_SYMBOL_TYPEDEF : unlikely(vintern_ents[id].len == 20) && ms_valist_typedef(c, id);
 }
 
 /* the source range of node n began at token loc b and ends at the previous token */

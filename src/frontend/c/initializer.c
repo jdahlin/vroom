@@ -184,7 +184,7 @@ static void cc_initializer_list_expand(cc *c, cc_initializer_list *s, uint32_t v
 			return;
 		}
 		for (uint64_t k = 0; k < s->n; k++) {
-			uint32_t e = cc_node_new_operands(c, AST_NODE_INDEX, et, loc, cc_node_rvalue(c, v), cc_node_integer_new(c, (i128)k, cc_type_basic(AST_TYPE_LONG), loc));
+			uint32_t e = cc_node_new_operands(c, AST_NODE_INDEX, et, loc, cc_node_rvalue(c, v), cc_node_integer_new(c, (i128)k, c->t_ptrdiff, loc));
 
 			AST_NODE(e)->flags = AST_NODE_FLAG_LVALUE;
 			cc_initializer_list_put(c, s, k, e);

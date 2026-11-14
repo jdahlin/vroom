@@ -625,6 +625,93 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+- [ ] **Windows x64: packed boolean vectors at calls** [C].  clang passes an
+  `ext_vector_type` `_Bool` vector of N lanes on the Microsoft convention one
+  lane per argument position (results through a hidden pointer, the bits
+  packed), as it does for System V; `arch/x64/codegen/abi-win64.c` passes it
+  as one by-reference vector.  `src/test/abi/packed_bool`, `packed_bool_4096`
+  and `packed_bool_variadic_fixed` are `vcc-xfail-win64`.
+  *Validate:* `bench/vcc-abi.py --target win64 packed_bool` XPASSes; remove the markers.
+- [ ] **Windows x64: MS bit-field layout of a packed record with `:0`** [C].
+  `tcc/95_bitfields_ms` TEST 6 (`__attribute__((packed))`, `int x:12, y:4, :0,
+  :4, z:3`): clang starts the unit after `:0` at the byte where the previous
+  unit ends, vcc aligns it to the type (`frontend/c/record-layout.c`); found
+  by `bench/vcc-win64.py`.
+  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes (XPASS: remove
+  its `XFAIL` entry in `bench/vcc-win64.py`).
+- [ ] **x86-64: `naked` functions** [C].  `__attribute__((naked))` is not
+  implemented for x86-64: the body gets a frame, so the asm's `retq` sits
+  inside it; on Windows the epilogue checker of `vcc-win64.py --seh` flags
+  `vcc/dead_results` (`XFAIL`, stage seh; the function is never called).
+  *Validate:* `bench/vcc-win64.py --seh vcc dead_results` XPASSes.
+- [ ] **Windows x64: `-c` without text for the frame and sections** [P].
+  `vpp -c` for the target encodes records directly but hands the `.def`
+  records, sections/COMDAT, `.seh_*`, data and strings to the TU's assembler
+  as text items (as x86-64 ELF does for its directives); the `coff_section`,
+  `elf_reg` + `coff_class`, `coff_seh_*` calls of obj.h could take them
+  directly.  *Validate:* `vcc-win64.py --objcmp` stays 2105/2106; emit time
+  per TU drops.
+- [ ] **`-g` on `.S` sources: clang's file names and rows** [C].  vasm/vcc
+  write MC's assembler debug information for a `.s` byte for byte (but the
+  producer), and follow cpp line markers in the text they are given; for a
+  `.S` clang assembles a temporary file named by `-main-file-name` and its
+  rows follow the preprocessor's markers into included files, vcc's `-c x.S`
+  path hands the assembler text whose rows are the `.S` file's own lines.
+  *Validate:* `clang -g -c x.S` = `vpp -g -c x.S` but DW_AT_producer for the
+  vas-corpus `.S` files (a new mode).
+- [ ] **vasm -g: `.symver` symbols after the debug sections' symbols** [C].
+  MC creates the `.symver` names in the ELF writer, after the
+  `-g`-generated sections; vasm registers them at the directive.
+  *Validate:* `bench/vas-obj.py` `symver.s` -g XPASSes (remove `G_XFAIL`).
+- [ ] **Windows x64: clang's `.debug$S` with `-g`** [C].  clang's `-g -S`
+  for MinGW also writes a CodeView `.debug$S` (S_OBJNAME, S_COMPILE3 with
+  its version); vcc writes only DWARF (assembled, it is clang's text either
+  way, so objects compare equal).  Nothing reads it for MinGW.
+  *Validate:* decide whether to write it; then a `vcc-dwarf.py` check.
+- [ ] **Windows x64: stack-protector failure path** [T].  The guard and
+  `-lssp` match clang (`src/test/win64/stack_protector.c`, vcc-driver.py
+  rows); a smashed canary reaching `__stack_chk_fail` is not tested (where
+  the canary sits relative to an overflowed buffer differs from clang's
+  layout).  *Validate:* a test that overwrites the canary slot itself and
+  exits through libssp's message, compared with clang's.
+- [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
+  `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
+  vccd); `bench/vccd-test.py win64-cross-build-through-the-shim` and
+  `bench/zlib/run.py --target win64` (zlib's ./configure and Makefile through
+  the shim) cover it since WIN8, but `vcc-win64.py` drives vpp only.
+  *Validate:* a `vcc-win64.py --vccd` mode (private vccd, the shim as CC)
+  gives the same pass set as `--own`.
+- [ ] **Windows x64: the x86 SIMD intrinsic headers** [C].  vcc's own
+  `src/headers/x86/` has only what MinGW-w64's `windows.h`/`malloc.h` reach
+  (`x86intrin.h`, `emmintrin.h`, `xmmintrin.h`, `mm_malloc.h`: the vector
+  types, fences, pause, clflush, MXCSR, rdtsc); no `immintrin.h`, no SSE/AVX
+  arithmetic intrinsics, no `cpuid.h`, so `<intrin.h>` (which includes
+  `pmmintrin.h` and the rest) does not compile without `-resource-dir`.  The
+  WIN8 projects are configured without them (FFmpeg `--disable-asm`).
+  *Validate:* `vcc-diff.py --win64` with vcc's headers on the intrinsic TUs
+  (`intrin.h`, `-march=haswell`) and a test calling SSE2/AVX2 intrinsics
+  under Wine against clang's build.
+- [ ] **Windows x64: `<tgmath.h>` and `<stdbit.h>`** [C].  Neither MinGW-w64
+  nor `src/headers/freestanding/` has them (clang's resource directory has
+  `tgmath.h`; C23's `stdbit.h` neither).  *Validate:* a `src/test/vcc` case per
+  header compiled for x86_64-w64-mingw32 without `-resource-dir`.
+- [ ] **`-fcommon` and `__attribute__((common))` are ignored** [C].  vcc
+  emits a tentative definition as `.bss` (`B`) on every target where clang's
+  `-fcommon` or the attribute gives a common symbol (`C`), found in WIN8's
+  vnm comparison; a program that defines the same tentative variable in two
+  TUs and relies on `-fcommon` fails to link.  *Validate:* `vnm` of a TU with
+  both shows `C`, as clang's, for ELF and COFF; a two-TU test links with
+  `-fcommon`.
+- [ ] **`-coverage` is accepted and ignored** [C].  zlib's Makefile builds
+  `infcover` with `-coverage`; clang instruments and links the profile
+  runtime, vcc compiles normally (the program runs, no `.gcda`).
+  *Validate:* either an error ("unsupported option") or gcov-compatible
+  counters; decide which.
+- [ ] **Windows x64: FFmpeg with NASM, SQLite's TCL suite** [T].  WIN8 ran
+  FFmpeg's C fallbacks only (`--disable-asm`) and SQLite without its TCL
+  testrunner (no tclsh for Windows on the host; testfixture.exe needs one).
+  *Validate:* `bench/ffmpeg/run.py --target win64` with x86asm (NASM objects
+  linked by vlink) and a Windows Tcl to build testfixture.exe.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,
@@ -736,7 +823,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without a prologue, as clang), `.file 0` the main file, a v5 CU with
   low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
   `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
-  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.
+  Windows x64 (WIN6): DWARF 4 by default as clang, `-gdwarf-2..5` on every
+  target, COFF unit ranges for functions outside `.text`; Linux keeps the
+  `.text`-only pc range, so `-ffunction-sections -g` functions are outside
+  the unit there (llvm-symbolizer finds no unit for them).  No
+  `DW_TAG_subprogram`: winedbg names vcc's frames only by module+offset.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `test/vcc`; later a scripted lldb
   session (break at file:line, print local).

@@ -61,7 +61,7 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a)
 		return;		/* (no record: sym_attrs() in emit.c reads attrs 0 as none) */
 	if (a->interrupt) {
 		const ctype *ft = AST_TYPE(c, s->ty);
-		if (c->o->target != PP_LINUX_X86_64)
+		if (!CC_X86_64(c))
 			cc_report_error(c, s->loc, "interrupt calling convention is supported only for x86-64 Linux");
 		else if (s->kind != AST_SYMBOL_FUNCTION || ft->kind != AST_TYPE_FUNCTION)
 			cc_report_error(c, s->loc, "'interrupt' attribute only applies to functions");
@@ -74,6 +74,8 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a)
 	}
 	if (a->tlsmodel && (s->kind != AST_SYMBOL_VARIABLE || !(s->flags & AST_SYMBOL_FLAG_THREAD)))
 		cc_report_error(c, a->tlsloc, "'tls_model' attribute only applies to thread-local variables");
+	if (unlikely(a->dll == CC_DLLIMPORT) && s->sc == AST_STORAGE_STATIC)
+		cc_report_error(c, s->loc, "'%.*s' must have external linkage when declared 'dllimport'", CC_IDENTIFIER(s->name));
 	if (s->attrs)
 		cc_attribute_merge(&c->attr[s->attrs], a);
 	else
@@ -129,6 +131,17 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			t = AST_QUALIFIED_TYPE(k, AST_QUALIFIED_TYPE_QUALIFIERS(t));
 	}
 	if (at.vecsize) t = cc_declarator_vector_attribute_apply(c, t, at.vecsize, d->loc);
+	if (unlikely(at.fnabi)) {
+		/* ms_abi / sysv_abi: on the function type (through pointers), the target's own as 0 */
+		int conv = at.fnabi == (CC_WIN64(c) ? CC_FNABI_MS : CC_FNABI_SYSV) ? CC_FNABI_DEFAULT : (int)at.fnabi;
+		ast_qualified_type ft = ty_fnabi(c, t, conv);
+
+		if (ft)
+			t = ft;
+		else
+			cc_report_warning(c, "ignored-attributes", true, NULL, at.fnabi_loc, NULL, 0, NULL, 0,
+				 "'%s' only applies to function types; type here is '%s'", at.fnabi == CC_FNABI_MS ? "ms_abi" : "sysv_abi", tyname(c, t));
+	}
 	if (at.extvec && ds->sc == AST_STORAGE_TYPEDEF && cc_type_is_bitint(c, t))
 		cc_report_error(c, d->loc, "vector integer elements wider than 128 bits are not supported");
 	else if (at.extvec && ds->sc == AST_STORAGE_TYPEDEF && cc_type_is_arithmetic(c, t) && !cc_type_is_complex(c, t)) {
@@ -143,7 +156,7 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 			v.ext = (uint16_t)at.extvec;
 			if (AST_TYPE_KIND(c, t) == AST_TYPE_BOOL) {
 				v.n = at.extvec;
-				if (c->o->target == PP_LINUX_X86_64) v.align = (uint32_t)p;
+				if (CC_X86_64(c)) v.align = (uint32_t)p;
 			}
 			t = AST_QUALIFIED_TYPE(cc_type_intern(c, &v), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 		}
@@ -245,6 +258,18 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 	}
 	if (prev && unlikely(c->syms[prev].flags & AST_SYMBOL_FLAG_INVALID) && c->syms[prev].kind != kind)
 		prev = 0;	/* a placeholder left by parser recovery (cc_recovery_restore): replaced */
+	if (unlikely(prev && kind == AST_SYMBOL_FUNCTION && cc_type_is_function(c, c->syms[prev].ty) && cc_type_is_function(c, t)) &&
+	    AST_TYPE(c, c->syms[prev].ty)->ext != AST_TYPE(c, t)->ext) {
+		/* x86-64 ms_abi / sysv_abi: a redeclaration without one keeps the earlier's (clang) */
+		if (!AST_TYPE(c, t)->ext)
+			t = ty_fnabi(c, t, AST_TYPE(c, c->syms[prev].ty)->ext);
+		else if (!AST_TYPE(c, c->syms[prev].ty)->ext) {
+			cc_report_error(c, d->loc, "function declared '%s' here was previously declared without calling convention",
+				 AST_TYPE(c, t)->ext == CC_FNABI_MS ? "ms_abi" : "sysv_abi");
+			cc_report_note(c, c->syms[prev].loc, "previous declaration is here");
+			t = ty_fnabi(c, t, 0);
+		}
+	}
 	if (prev) {
 		sym *y = &c->syms[prev];
 
@@ -543,11 +568,13 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 				if (c->syms[c->lists[d.psyms + i]].flags & AST_SYMBOL_FLAG_NONNULL)
 					c->syms[s].flags |= AST_SYMBOL_FLAG_NONNULL;
 		}
-		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode)
-			t = c->syms[s].ty;	/* declare made it a vector / applied mode: initialize that */
+		if (d.at.vecsize || ds.at.vecsize || d.at.mode || ds.at.mode || d.at.fnabi || ds.at.fnabi)
+			t = c->syms[s].ty;	/* declare made it a vector / applied mode or ms_abi/sysv_abi: initialize that */
 		if (cc_type_is_function(c, t) && cc_token_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (!file)
 				cc_report_fatal(c, tok(c)->loc, "function definition is not allowed here");
+			if (unlikely(c->syms[s].attrs && c->attr[c->syms[s].attrs].dll == CC_DLLIMPORT) && !ds.inline_)
+				cc_report_error(c, d.loc, "dllimport cannot be applied to non-inline function definition");
 			if (cc_lazy_body_eligible(c, s, &d))
 				cc_lazy_body_capture(c, s, &d);
 			else
@@ -574,6 +601,8 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 
 			if (ds.sc == AST_STORAGE_TYPEDEF || cc_type_is_function(c, t))
 				cc_report_error(c, d.loc, "illegal initializer");
+			else if (unlikely(y->attrs && c->attr[y->attrs].dll == CC_DLLIMPORT))
+				cc_report_error(c, d.loc, "definition of dllimport data");
 			if (!file && ds.sc == AST_STORAGE_EXTERN)
 				cc_report_error(c, d.loc, "declaration of block scope identifier with linkage cannot have an initializer");
 			if (unlikely(AST_TYPE(c, t)->flags & AST_TYPE_FLAG_VLA)) {
@@ -676,7 +705,9 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 			if (ds.constexpr_ && y->kind == AST_SYMBOL_VARIABLE)
 				cc_report_error(c, d.loc, "constexpr variable '%.*s' must be initialized by a constant expression", CC_IDENTIFIER(d.name));
 			if (y->kind == AST_SYMBOL_VARIABLE && ds.sc != AST_STORAGE_EXTERN && ds.sc != AST_STORAGE_TYPEDEF) {
-				if (file)
+				if (file && unlikely(y->attrs && c->attr[y->attrs].dll == CC_DLLIMPORT && !(y->flags & AST_SYMBOL_FLAG_DEFINED)))
+					y->sc = y->sc == AST_STORAGE_NONE ? AST_STORAGE_EXTERN : y->sc;	/* Windows: dllimport int x; declares, as extern */
+				else if (file)
 					y->flags |= AST_SYMBOL_FLAG_TENTATIVE;
 				else if (!cc_type_complete(c, y->ty) && ds.sc != AST_STORAGE_STATIC) {
 					if (cc_type_is_array(c, y->ty))

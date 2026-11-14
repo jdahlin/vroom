@@ -38,7 +38,7 @@ CC_PRIVATE uint32_t cc_cast_insert(cc *c, uint32_t n, ast_qualified_type to, int
 			 * The emitter uses its already rounded floating value. */
 			AST_NODE(r)->c = v.ld ? cc_node_float128_new(c, v.q, to, AST_NODE(n)->loc) : cc_node_float_new(c, v.f, to, AST_NODE(n)->loc);
 		} else {
-			if (c->o->target == PP_LINUX_X86_64 || c->o->target == PP_LINUX_AARCH64)
+			if (CC_X86_64(c) || c->o->target == PP_LINUX_AARCH64)
 				return cc_bitint_float_cast_build(c, n, to);
 		}
 	}

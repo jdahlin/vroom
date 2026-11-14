@@ -14,6 +14,8 @@
  */
 #ifndef VCC_PPDRIVER_H
 #define VCC_PPDRIVER_H
+
+#include <stdbool.h>
 typedef struct driver_environment {
 	const char *cwd;	/* relative paths are relative to this (NULL: process cwd) */
 	int outfd, errfd;	/* output without -o; diagnostics */
@@ -32,6 +34,11 @@ extern _Thread_local int driver_client_connection;
 
 /* one -E job; argv[0] is ignored.  Returns the exit status. */
 int driver_job_run(int argc, char **argv, const driver_environment *env);
+/* x86_64-w64-mingw32 without -c/-S/-E: compile the sources (driver_job_run) and link them with the
+ * MinGW-w64 CRT and libvccrt.a (driver/link-mingw.c); LINK runs the linker on the vlink argv it is given */
+typedef int driver_linker_function(int argc, char **argv, void *ctx);
+bool driver_mingw_link_wanted(int argc, char **argv);
+int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, driver_linker_function *link, void *ctx);
 /* token-by-token comparison of ours[0..on) with the file refpath (0: same) */
 int driver_tokens_compare(const char *ours, size_t on, const char *refpath);
 /* -c phase totals (ns): cc_run (pp + parse + codegen; driver_emit_nanoseconds: codegen

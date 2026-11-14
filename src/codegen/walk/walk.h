@@ -125,6 +125,15 @@ typedef struct walk_state {
 	bool stack_pointer_needed;
 } walk_state;
 
+/* x86-64: the calling convention of the call, function or va_list the next WALK_LOWER(classify), WALK_LOWER(call),
+   WALK_LOWER(params), WALK_LOWER(va_start) or WALK_LOWER(va_arg) is for (e->msabi; PLAN-win64.md WIN2): fty a function
+   type or a pointer to one, 0 the target's own (library helpers).  Set right before each: the
+   evaluation of an argument may make other calls in between.  (em_: one copy for both walkers) */
+static inline void em_abi(codegen_context *e, ast_qualified_type fty)
+{
+	e->msabi = CODEGEN_IS_X64(e->compile_context) && (fty ? cc_func_abi(e->compile_context, fty) == CC_FNABI_MS : CODEGEN_IS_WIN64(e->compile_context));
+}
+
 enum { WALK_FLOAT_COMPARE_UNORDERED = 0x10000, WALK_FLOAT_COMPARE_ORDERED_NOT_EQUAL };
 enum { WALK_ATOMIC_LOAD, WALK_ATOMIC_STORE, WALK_ATOMIC_EXCHANGE, WALK_ATOMIC_ADD, WALK_ATOMIC_COMPARE_EXCHANGE, WALK_ATOMIC_FENCE };
 enum { WALK_SLOT_TEMPORARY, WALK_SLOT_LOCAL, WALK_SLOT_PARAMETER, WALK_SLOT_FUNCTION };	/* WALK_SLOT_FUNCTION: lives for the whole function */

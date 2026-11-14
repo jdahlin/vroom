@@ -74,7 +74,7 @@ CC_PRIVATE uint32_t cc_builtin_vector_build(cc *c, bool shuffle, uint32_t loc)
 CC_PRIVATE uint32_t cc_builtin_vector_lane(cc *c, uint32_t v, ast_qualified_type et, unsigned i, uint32_t loc)
 {
 	uint32_t p = cc_cast_insert(c, cc_node_rvalue(c, v), cc_type_pointer(c, et), AST_CAST_VECTOR_ADDRESS);
-	uint32_t n = cc_node_new_operands(c, AST_NODE_INDEX, et, loc, p, cc_node_integer_new(c, i, cc_type_basic(AST_TYPE_LONG), loc));
+	uint32_t n = cc_node_new_operands(c, AST_NODE_INDEX, et, loc, p, cc_node_integer_new(c, i, c->t_ptrdiff, loc));
 	AST_NODE(n)->flags = AST_NODE_FLAG_LVALUE;
 	return n;
 }

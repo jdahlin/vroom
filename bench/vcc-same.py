@@ -9,8 +9,9 @@ that must leave arm64 alone, PLAN-wasm.md): every C file of the test suites
 this tree's vpp in each mode, and the outputs (exit status, object or text)
 are compared.  Modes (default all): c0 c1 c2 c3 (-c -O0/-O1/-O2/-O3, Linux),
 s2 s3 (-S -O2/-O3, Linux), e (-E), d2 (-c -O2, arm64 Darwin), ds (-S -O2,
-Darwin).  c0 and c1 are the direct emitter, the -O2 and -O3 modes VIR
-(doc/OPTIMIZATION.md).  --vflags 'F' adds flags to this tree's vpp alone,
+Darwin), x0 x2 (-S -O0/-O2, x86-64 Linux), xc (-c -O2, x86-64 Linux), xe (-E,
+x86-64 Linux).  c0, c1 and x0 are the direct emitter, the -O2 and -O3 modes
+VIR (doc/OPTIMIZATION.md).  --vflags 'F' adds flags to this tree's vpp alone,
 --base-vflags to DIR's (an option's effect against the base: --vflags
 '-fno-rotate-loops' --modes s2 shows what rotation changes).  The flags
 are vcc-ctests.py's (its freestanding runtime headers), so no system headers
@@ -30,11 +31,12 @@ VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 RES = subprocess.run([llvm('clang'), '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
 COMMON = ['-nostdinc', '-I', f'{T}/rt/include', '-isystem', RES, '-fno-PIE', '-fno-asynchronous-unwind-tables',
           '-fno-stack-protector', '-w', '-fno-strict-aliasing', '-ffp-contract=off']
-LNX, DAR = '--target=aarch64-linux-gnu', '--target=arm64-apple-darwin'
+LNX, DAR, X86 = '--target=aarch64-linux-gnu', '--target=arm64-apple-darwin', '--target=x86_64-linux-gnu'
 MODES = {
     'c0': [LNX, '-c', '-O0'], 'c1': [LNX, '-c', '-O1'], 'c2': [LNX, '-c', '-O2'], 'c3': [LNX, '-c', '-O3'],
     's2': [LNX, '-S', '-O2'], 's3': [LNX, '-S', '-O3'],
     'e': [LNX, '-E', '-O2'], 'd2': [DAR, '-c', '-O2'], 'ds': [DAR, '-S', '-O2'],
+    'x0': [X86, '-S', '-O0'], 'x2': [X86, '-S', '-O2'], 'xc': [X86, '-c', '-O2'], 'xe': [X86, '-E', '-O2'],
 }
 
 

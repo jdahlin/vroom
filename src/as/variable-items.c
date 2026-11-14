@@ -260,11 +260,14 @@ VPRIV void as_variable_items_finish(as_context *a)
 
 					uint64_t pend;
 
-					/* every jump against the previous pass's layout, its own place too (MC's
-					   relaxOnce relaxes a section's fragments, then lays it out again) */
-					as_variable_sizes_previous = prev;
+					/* MC's relaxOnce walks the section with live offsets: a backward jump sees the
+					   live layout; a forward one the previous pass's for both ends (its Stretch keeps
+					   "old target - old source") */
+					if (y && (y->flags & ESYM_DEFINED) && !(y->flags & ESYM_ABS) &&
+					    a->variable_rank[as_variable_item_index(o, y->frag)] > a->variable_rank[as_variable_item_index(o, v->fragment)])
+						as_variable_sizes_previous = prev;
 					pend = as_fragment_base(a, v->fragment) + elf_frag(o, v->fragment)->size;
-					r = !y || t.sub || y->bind != STB_LOCAL || as_symbol_section_offset(a, t.add, &sc, &to) || sc != elf_frag(o, v->fragment)->sec;
+					r = !y || t.sub || !obj_pcrel_resolves_locally(o, y) || as_symbol_section_offset(a, t.add, &sc, &to) || sc != elf_frag(o, v->fragment)->sec;
 					as_variable_sizes_previous = NULL;
 					if (r || !as_value_fits_int8(to + t.c - (int64_t)(pend + 2)))
 						ns = big;

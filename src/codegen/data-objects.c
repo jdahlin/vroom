@@ -350,7 +350,7 @@ static void codegen_data_directives_append(codegen_context *e, tbuf *b, uint64_t
 		if (ri < e->relocation_count && o == e->relocations[ri].offset) {
 			uint32_t sz = e->relocations[ri].size_bytes ? e->relocations[ri].size_bytes : 8;
 
-			vtext_string_append(b, sz == 4 ? (WASM(e->c) ? "\t.int32\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.long\t" : "\t.word\t") : WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
+			vtext_string_append(b, sz == 4 ? (WASM(e->compile_context) ? "\t.int32\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.long\t" : "\t.word\t") : WASM(e->compile_context) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
 			codegen_reference_offset_append(e->compile_context, b, e->relocations[ri].reference, e->relocations[ri].addend);
 			if (e->relocations[ri].subtrahend) {
 				vtext_char_append(b, '-');
@@ -380,7 +380,7 @@ static void codegen_data_directives_append(codegen_context *e, tbuf *b, uint64_t
 
 				/* o < data.n here; past it the bytes are zero, not what the buffer holds */
 				memcpy(&w, d + o, o + 8 <= e->data.n ? 8 : e->data.n - o);
-				vtext_string_append(b, WASM(e->c) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
+				vtext_string_append(b, WASM(e->compile_context) ? "\t.int64\t" : CODEGEN_IS_X64(e->compile_context) ? "\t.quad\t" : "\t.xword\t");
 				vtext_hex_prefixed_append(b, w);
 				vtext_char_append(b, '\n');
 				o += 8;
@@ -477,6 +477,31 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		vtext_string_append(b, ", ");
 		vtext_unsigned_append(b, size ? size : 1);
 		vtext_char_append(b, '\n');
+		e->unit->object_total++;
+		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
+		return;
+	}
+	if (CODEGEN_IS_WIN64(c)) {
+		/* COFF (clang's sections): .data, .bss, .rdata; thread-locals in .tls$, which the
+		   linker puts between the CRT's __tls_start and __tls_end; no .type or .size.  -c: the
+		   same text, as items the TU's assembler reads in place (codegen_item_open) */
+		size_t h;
+
+		if (codegen_context_is_direct(e)) {
+			b->n = (b->n + 7) & ~(size_t)7;
+			start = b->n;
+		}
+		codegen_symbol_header_append(e, b, s, false, (y->flags & AST_SYMBOL_FLAG_THREAD) && !a->section ? "\t.section\t.tls$,\"dw\"\n" :
+			   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rdata,\"dr\"\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
+		if (zero && !e->relocation_count) {
+			vtext_string_append(b, "\t.zero\t");
+			vtext_unsigned_append(b, size ? size : 1);
+			vtext_char_append(b, '\n');
+		} else {
+			codegen_data_directives_append(e, b, size);
+		}
+		codegen_item_close(e, h);
 		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
@@ -646,7 +671,7 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 			break;
 		}
 	}
-	if (codegen_context_is_direct(e)) {
+	if (codegen_context_is_direct(e) && !CODEGEN_IS_WIN64(c)) {	/* (COFF: the text below, assembled in place) */
 		size_t h;
 		uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, i);
 		bool asciz = s->esz == 1 && !nul;
@@ -675,8 +700,17 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 		codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 		return;
 	}
+	size_t th = SIZE_MAX;
+
+	if (codegen_context_is_direct(e)) {	/* (COFF -c: the text as an item) */
+		b->n = (b->n + 7) & ~(size_t)7;
+		start = b->n;
+		th = codegen_item_open(e, CODEGEN_ITEM_TEXT);
+	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
+	else if (CODEGEN_IS_WIN64(c))
+		vtext_string_append(b, "\t.section\t.rdata,\"dr\"\n");
 	else if (nul)
 		vtext_string_append(b, "\t.section\t.rodata,\"a\",@progbits\n");
 	else
@@ -716,5 +750,7 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
+	if (th != SIZE_MAX)
+		codegen_item_close(e, th);
 	codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 }

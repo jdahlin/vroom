@@ -1,5 +1,20 @@
 /* vcc front end: the record layout self-check (-fdump-record-layouts) that clang verifies */
 #include "cc-internal.h"
+
+/* x86-64: functions clang 23 declares itself (TARGET_HEADER_BUILTIN): naming one other than in a
+   call is an error there ("builtin functions must be directly called"), so no claim about its type */
+static bool x86_header_builtin(cc *c, uint32_t name)
+{
+	static const char *const names[] = { "__rdtsc", "_m_prefetch", "_m_prefetchw", "_mm_clflush", "_mm_getcsr",
+		"_mm_lfence", "_mm_mfence", "_mm_pause", "_mm_prefetch", "_mm_setcsr", "_mm_sfence" };
+
+	if (!CC_X86_64(c))
+		return false;
+	for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
+		if ((size_t)cc_identifier_length(name) == strlen(names[i]) && !memcmp(cc_identifier_string(name), names[i], cc_identifier_length(name)))
+			return true;
+	return false;
+}
 #include "common/buffer.h"
 
 /* ---------------- layout checks (clang verifies them) ---------------- */
@@ -79,7 +94,7 @@ CC_PRIVATE void cc_layout_check(cc *c)
 			vbuffer_format_append(&o, "_Static_assert(sizeof(%.*s) == %llu, \"vcc\");\n", CC_IDENTIFIER(s->name),
 				(unsigned long long)cc_type_size(c, s->ty));
 		}
-		if (s->kind == AST_SYMBOL_VARIABLE || s->kind == AST_SYMBOL_FUNCTION) {
+		if ((s->kind == AST_SYMBOL_VARIABLE || s->kind == AST_SYMBOL_FUNCTION) && !(s->kind == AST_SYMBOL_FUNCTION && x86_header_builtin(c, s->name))) {
 			char b_bytes[4096];
 			vbuffer b;
 			bool ok = true;

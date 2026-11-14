@@ -32,6 +32,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "port/job-regions.h"
 #include "common/region.h"
@@ -91,6 +92,7 @@ typedef struct {
 	uint64_t size;		/* after layout */
 	uint32_t linksec;	/* SHF_LINK_ORDER: the section it follows (sh_link), 0 none */
 	uint32_t linksym;	/* ... and the symbol named (one section per symbol, as MC) */
+	uint32_t unique;	/* COFF ".section ..., unique, N": N + 1 (never found by name alone), 0 none */
 } ElfSec;
 
 typedef struct {
@@ -106,6 +108,10 @@ typedef struct {
 	uint8_t reg;		/* registered (MC's Asm.symbols(): symbol-table order) */
 	uint8_t common;		/* 1 .comm: SHN_COMMON, value = alignment; 2 undefined group
 				   signature: defined in section value's SHT_GROUP */
+	/* COFF (o->format == OBJ_COFF): .def/.scl/.type and weak externals */
+	uint16_t coff_type;	/* .type N: IMAGE_SYM_DTYPE_* << 4 | base type (32: a function) */
+	uint8_t coff_class;	/* .scl N: IMAGE_SYM_CLASS_* (0: not given, external or static by binding) */
+	uint8_t coff_weak;	/* weak external characteristics: 3 .weak (search alias), 4 .weak_anti_dep */
 } ElfSym;
 
 enum {				/* ElfSym.flags */
@@ -138,12 +144,19 @@ typedef struct ElfObj {
 	char err[256];
 	int has_err;
 	uint16_t machine;	/* EM_AARCH64 (183, the default) or EM_X86_64 (62): elf_set_machine */
+	uint8_t format;		/* OBJ_ELF (the default) or OBJ_COFF: obj_set_format, kept across elf_reset */
+	struct CoffState *coff;	/* COFF: .file names, SEH frames (platform/win), in the arena; 0 after elf_reset */
 } ElfObj;
 
 ElfObj *elf_new(void);
 void elf_reset(ElfObj *o);
 enum { EM_X86_64 = 62, EM_AARCH64 = 183 };
 static inline void elf_set_machine(ElfObj *o, int m) { o->machine = (uint16_t)m; }	/* kept across elf_reset */
+/* The file format the object is written in.  OBJ_COFF (x86-64 only, the Windows x64 target): elf_finish,
+ * elf_emit and elf_write_file write a COFF object (platform/win/coff.c) and the model's sections and
+ * symbols carry COFF meanings, see "COFF" below. */
+enum { OBJ_ELF = 0, OBJ_COFF = 1 };
+static inline void obj_set_format(ElfObj *o, int f) { o->format = (uint8_t)f; }	/* kept across elf_reset */
 #include "common/fail.h"	/* vjob_fail: input-driven overflow (an arena or region full) ends the job */
 void elf_free(ElfObj *o);
 void elf_error(ElfObj *o, const char *fmt, ...);
@@ -156,6 +169,8 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 uint32_t elf_section_lo(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize,
 			uint32_t group, uint32_t linksec, uint32_t linksym);
 uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t group_sym);
+/* a new section even when one of the name exists */
+uint32_t elf_section_create(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize, uint32_t group_sym);
 uint32_t elf_subsection(ElfObj *o, uint32_t sec, int32_t sub);	/* frag id */
 /* a new frag right after `frag` in its section and subsection: what follows
  * goes there, so bytes can still be appended to `frag` (variable padding) */
@@ -163,6 +178,27 @@ uint32_t elf_split(ElfObj *o, uint32_t frag);
 static inline ElfSec *elf_sec(ElfObj *o, uint32_t s) { return (ElfSec *)o->secs.base + s; }
 static inline ElfFrag *elf_frag(ElfObj *o, uint32_t f) { return (ElfFrag *)o->frags.base + f; }
 static inline ElfSym *elf_symp(ElfObj *o, uint32_t s) { return (ElfSym *)o->syms.base + s; }
+
+/* the object writers (ELF, Mach-O, COFF): section s's laid-out bytes (its frags at their bases) to d */
+static inline void elf_section_bytes_copy(ElfObj *o, uint32_t s, uint8_t *d)
+{
+	for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
+		ElfFrag *fr = elf_frag(o, f);
+		uint8_t *q = d + fr->base;
+
+		for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
+			memcpy(q, ch->data, ch->used);
+			q += ch->used;
+		}
+	}
+}
+
+/* ... and every fixup in layout order (section, frag, fixup): `for` heads, the body follows;
+   I names the fixup's index in FX, the fixup array (ElfFix *)o->fixes.base */
+#define ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i) \
+	for (uint32_t elf_s_ = 1; elf_s_ < (o)->nsec; elf_s_++) \
+		for (uint32_t elf_f_ = elf_s_; elf_f_; elf_f_ = elf_frag(o, elf_f_)->next) \
+			for (uint32_t i = elf_frag(o, elf_f_)->fix_head; i; i = (fx)[i].next)
 
 /* Emission.  elf_grow() returns room for n contiguous bytes at the end of
  * the frag (frag offset elf_frag(o,f)->size before the call). */
@@ -239,6 +275,83 @@ void elf_patch(ElfObj *o, ElfFix *x, int64_t v);
  * names are written as they are (the code generator adds the '_'). */
 size_t macho_finish(ElfObj *o);
 void macho_emit(ElfObj *o, uint8_t *out);
+
+/*
+ * COFF (o->format == OBJ_COFF; platform/win/coff.c and unwind.c), byte-compatible with LLVM MC's
+ * WinCOFFObjectWriter and Win64EH for x86_64-w64-mingw32.
+ *
+ *   sections  ElfSec.flags holds the IMAGE_SCN_* characteristics without the alignment bits (those
+ *             come from ElfSec.align), type is SHT_NOBITS for uninitialized data, group is the COMDAT
+ *             symbol (0 none) and comdat the IMAGE_COMDAT_SELECT_* selection (0 none).  coff_section
+ *             finds or creates one.  The model's section symbols (a section's name used as a
+ *             symbol) stand for the writer's own, written with the section-definition records.
+ *   symbols   bind STB_GLOBAL/STB_WEAK is "external"; coff_class/coff_type are .scl/.type
+ *             (coff_type 32 is a function: pc-relative references to it always keep a relocation, as
+ *             MC); coff_weak makes a weak external (with a ".weak.NAME.default" definition when it is
+ *             defined here); common symbols are written with their size; .L names are temporaries
+ *             (relocations use the section symbol) unless .scl 3 put them in the table.
+ *   fixups    the R_X86_64_* types are mapped: PC32/PLT32/GOTPCREL* -> REL32 (the addend in place, +4),
+ *             32/32S -> ADDR32, 64 -> ADDR64, and the COFF-only R_VCC_COFF_* kinds of arch/x64/reloc.h
+ *             (IMGREL32 -> ADDR32NB, SECREL32 -> SECREL, SECTION -> SECTION, SYMIDX: the symbol's table
+ *             index, no relocation).
+ */
+size_t coff_finish(ElfObj *o);
+void coff_emit(ElfObj *o, uint8_t *out);
+enum {				/* IMAGE_SCN_* characteristics used by callers */
+	COFF_SCN_CODE = 0x20, COFF_SCN_INIT_DATA = 0x40, COFF_SCN_UNINIT_DATA = 0x80, COFF_SCN_LNK_INFO = 0x200,
+	COFF_SCN_LNK_REMOVE = 0x800, COFF_SCN_LNK_COMDAT = 0x1000, COFF_SCN_DISCARDABLE = 0x2000000,
+	COFF_SCN_SHARED = 0x10000000, COFF_SCN_EXECUTE = 0x20000000, COFF_SCN_READ = 0x40000000,
+	COFF_SCN_WRITE = 0x80000000u,
+};
+enum { COFF_SELECT_NODUPLICATES = 1, COFF_SELECT_ANY, COFF_SELECT_SAME_SIZE, COFF_SELECT_EXACT_MATCH,
+       COFF_SELECT_ASSOCIATIVE, COFF_SELECT_LARGEST, COFF_SELECT_NEWEST };
+enum { COFF_CLASS_EXTERNAL = 2, COFF_CLASS_STATIC = 3, COFF_TYPE_FUNCTION = 0x20 };
+/* the section (name, COMDAT symbol); created with characteristics and selection when new */
+uint32_t coff_section(ElfObj *o, const char *name, uint32_t len, uint32_t characteristics, uint32_t comdat_sym, int selection);
+/* the same with ",unique,N" (MC's UniqueID: a section of its own per (name, COMDAT symbol, N)) */
+uint32_t coff_section_unique(ElfObj *o, const char *name, uint32_t len, uint32_t characteristics, uint32_t comdat_sym, int selection,
+			     uint32_t unique_id);
+/* sec is placed after the sections coff_finish creates (.pdata, .llvm_addrsig), in the order of
+ * the calls: MC's .debug_line and .debug_line_str, which its streamer creates at the end when the
+ * source did not; at most 8 per object */
+void coff_section_late(ElfObj *o, uint32_t sec);
+/* .file "name": a .file symbol with the name in its auxiliary records (each call adds one) */
+void coff_file_name(ElfObj *o, const char *name, uint32_t len);
+/* .comm with an alignment: MinGW's " -aligncomm:"NAME",LOG2" in .drectve (MC) */
+void coff_align_common(ElfObj *o, uint32_t sym, unsigned log2_align);
+/* a pc-relative reference to sym from its own section resolves in place (ELF: a local symbol;
+ * COFF: anything but a function, MC) */
+int obj_pcrel_resolves_locally(ElfObj *o, const ElfSym *y);
+
+/*
+ * Windows x64 unwind information (platform/win/unwind.c, as MC's Win64EH, UNWIND_INFO version 1): the
+ * .seh_* directives as calls.  Each call that stands for a position takes `label`, a temporary symbol
+ * the caller has defined there (in the function's section); the unwind codes are label - start
+ * differences, resolved at layout.  coff_seh_end writes the function's UNWIND_INFO to .xdata (or the
+ * .xdata of its section: ".xdata$NAME" COMDAT for a ".text$NAME" COMDAT section, a .xdata of its own for
+ * any other section but .text); coff_finish writes .pdata.  The functions return 0 or a message (MC's
+ * wording) and change nothing on error.
+ */
+enum { SEH_PUSH_NONVOL = 0, SEH_ALLOC_LARGE = 1, SEH_ALLOC_SMALL = 2, SEH_SET_FPREG = 3, SEH_SAVE_NONVOL = 4,
+       SEH_SAVE_NONVOL_FAR = 5, SEH_SAVE_XMM128 = 8, SEH_SAVE_XMM128_FAR = 9, SEH_PUSH_MACHFRAME = 10 };
+const char *coff_seh_proc(ElfObj *o, uint32_t function_sym, uint32_t label);
+/* .seh_pushreg reg; .seh_stackalloc size; .seh_setframe reg, off; .seh_savereg reg, off;
+ * .seh_savexmm reg, off; .seh_pushframe [@code] (reg = 1 for @code): pick the opcode from these */
+const char *coff_seh_push_reg(ElfObj *o, uint32_t label, unsigned reg);
+const char *coff_seh_alloc(ElfObj *o, uint32_t label, uint64_t size);
+const char *coff_seh_set_frame(ElfObj *o, uint32_t label, unsigned reg, uint64_t offset);
+const char *coff_seh_save_reg(ElfObj *o, uint32_t label, unsigned reg, uint64_t offset);
+const char *coff_seh_save_xmm(ElfObj *o, uint32_t label, unsigned reg, uint64_t offset);
+const char *coff_seh_push_frame(ElfObj *o, uint32_t label, int code);
+const char *coff_seh_end_prologue(ElfObj *o, uint32_t label);
+const char *coff_seh_epilogue(ElfObj *o, int start, uint32_t label);	/* .seh_startepilogue / .seh_endepilogue */
+const char *coff_seh_check(ElfObj *o);					/* 0 inside an open frame */
+const char *coff_seh_handler(ElfObj *o, uint32_t handler_sym, int unwind, int except);
+/* .seh_handlerdata: the UNWIND_INFO now; *section is the .xdata section the handler's data follows in */
+const char *coff_seh_handler_data(ElfObj *o, uint32_t *section);
+/* .seh_endproc: *section is the function's section (MC switches back to it) */
+const char *coff_seh_end(ElfObj *o, uint32_t label, uint32_t *section);
+int coff_seh_open(ElfObj *o);						/* a frame without .seh_endproc */
 
 /* Section-relative value of a defined symbol after layout (valid only in
  * elf_finish and later); for same-frag symbols at any time. */

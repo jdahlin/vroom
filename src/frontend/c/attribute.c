@@ -9,6 +9,9 @@ enum {
 	CC_ATTRIBUTE_CONSTRUCTOR, CC_ATTRIBUTE_DESTRUCTOR, CC_ATTRIBUTE_COUNTED_BY, CC_ATTRIBUTE_VECTOR_SIZE, CC_ATTRIBUTE_COLD, CC_ATTRIBUTE_NONSTRING, CC_ATTRIBUTE_MAY_ALIAS,
 	CC_ATTRIBUTE_WEAKREF, CC_ATTRIBUTE_NAKED, CC_ATTRIBUTE_NOCF, CC_ATTRIBUTE_ERROR, CC_ATTRIBUTE_OVERLOADABLE, CC_ATTRIBUTE_NOINSTR, CC_ATTRIBUTE_TLS_MODEL, CC_ATTRIBUTE_EXT_VECTOR, CC_ATTRIBUTE_DEPRECATED, CC_ATTRIBUTE_WUR, CC_ATTRIBUTE_NODISCARD, CC_ATTRIBUTE_IFUNC, CC_ATTRIBUTE_NONNULL, CC_ATTRIBUTE_FORMAT, CC_ATTRIBUTE_FORMAT_ARG,
 	CC_ATTRIBUTE_PURE, CC_ATTRIBUTE_CONST, CC_ATTRIBUTE_UNAVAILABLE, CC_ATTRIBUTE_TARGET, CC_ATTRIBUTE_RETURNS_TWICE, CC_ATTRIBUTE_DISABLE_TAIL_CALLS, CC_ATTRIBUTE_NOT_TAIL_CALLED, CC_ATTRIBUTE_OPTNONE,
+	/* from here on only where clang knows them for the target (cc_attribute_is_known): else "unknown attribute" */
+	CC_ATTRIBUTE_GCC_STRUCT, CC_ATTRIBUTE_MS_ABI, CC_ATTRIBUTE_SYSV_ABI, CC_ATTRIBUTE_DLLIMPORT, CC_ATTRIBUTE_DLLEXPORT,
+	CC_ATTRIBUTE_CDECL, CC_ATTRIBUTE_STDCALL, CC_ATTRIBUTE_FASTCALL, CC_ATTRIBUTE_THISCALL, CC_ATTRIBUTE_VECTORCALL, CC_ATTRIBUTE_PASCAL, CC_ATTRIBUTE_REGCALL,
 	CC_ATTRIBUTE_COUNT
 };
 
@@ -26,6 +29,9 @@ static const char *const cc_attribute_names[CC_ATTRIBUTE_COUNT] = {
 	[CC_ATTRIBUTE_TARGET] = "target", [CC_ATTRIBUTE_PURE] = "pure", [CC_ATTRIBUTE_CONST] = "const", [CC_ATTRIBUTE_UNAVAILABLE] = "unavailable",
 	[CC_ATTRIBUTE_RETURNS_TWICE] = "returns_twice", [CC_ATTRIBUTE_DISABLE_TAIL_CALLS] = "disable_tail_calls",
 	[CC_ATTRIBUTE_NOT_TAIL_CALLED] = "not_tail_called", [CC_ATTRIBUTE_OPTNONE] = "optnone",
+	[CC_ATTRIBUTE_GCC_STRUCT] = "gcc_struct", [CC_ATTRIBUTE_MS_ABI] = "ms_abi", [CC_ATTRIBUTE_SYSV_ABI] = "sysv_abi", [CC_ATTRIBUTE_DLLIMPORT] = "dllimport",
+	[CC_ATTRIBUTE_DLLEXPORT] = "dllexport", [CC_ATTRIBUTE_CDECL] = "cdecl", [CC_ATTRIBUTE_STDCALL] = "stdcall", [CC_ATTRIBUTE_FASTCALL] = "fastcall",
+	[CC_ATTRIBUTE_THISCALL] = "thiscall", [CC_ATTRIBUTE_VECTORCALL] = "vectorcall", [CC_ATTRIBUTE_PASCAL] = "pascal", [CC_ATTRIBUTE_REGCALL] = "regcall",
 	[CC_ATTRIBUTE_DEPRECATED] = "deprecated", [CC_ATTRIBUTE_WUR] = "warn_unused_result", [CC_ATTRIBUTE_NODISCARD] = "nodiscard", [CC_ATTRIBUTE_IFUNC] = "ifunc", [CC_ATTRIBUTE_NONNULL] = "nonnull", [CC_ATTRIBUTE_FORMAT] = "format", [CC_ATTRIBUTE_FORMAT_ARG] = "format_arg",
 };
 
@@ -125,15 +131,16 @@ CC_PRIVATE int cc_attribute_mode_kind(cc *c, uint32_t id, bool sgn)
 	if (!strcmp(b, "HI")) return sgn ? AST_TYPE_SHORT : AST_TYPE_UNSIGNED_SHORT;
 	if (!strcmp(b, "SI")) return sgn ? AST_TYPE_INT : AST_TYPE_UNSIGNED_INT;
 	if (!strcmp(b, "DI")) return CC_I64(c, !sgn);
-	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return sgn ? AST_TYPE_LONG : AST_TYPE_UNSIGNED_LONG;	/* the pointer's width */
+	if (!strcmp(b, "word") || !strcmp(b, "pointer")) return CC_INTPTR(c, !sgn);	/* the pointer's width */
 	if (!strcmp(b, "TI")) return sgn ? AST_TYPE_INT128 : AST_TYPE_UINT128;
 	return 0;
 }
 
 #include "attrnames.inc"
 #include "attrnames-x86.inc"
+#include "attrnames-win64.inc"
 
-/* x86-64: name in one of its sorted lists (gen-x86data.sh) */
+/* x86-64: name in one of its sorted lists (gen-x86data.sh, gen-win64data.sh) */
 static bool cc_attribute_x86_is_known(const char *const *tab, size_t n, const char *k, size_t kn)
 {
 	size_t lo = 0, hi = n;
@@ -180,7 +187,9 @@ static bool cc_attribute_is_known(cc *c, int scope, const char *s, size_t n)
 
 		if (l < 0 || (size_t)l >= sizeof(k))
 			return false;
-		if (c->o->target == PP_LINUX_X86_64)
+		if (CC_WIN64(c))
+			return cc_attribute_x86_is_known(c_attrs_win64, sizeof(c_attrs_win64) / sizeof(*c_attrs_win64), k, (size_t)l);
+		if (CC_X86_64(c))
 			return cc_attribute_x86_is_known(cc_attribute_c_x86_names, sizeof(cc_attribute_c_x86_names) / sizeof(*cc_attribute_c_x86_names), k, (size_t)l);
 		while (lo < hi) {
 			size_t mid = (lo + hi) / 2;
@@ -195,7 +204,9 @@ static bool cc_attribute_is_known(cc *c, int scope, const char *s, size_t n)
 		}
 		return false;
 	}
-	if (c->o->target == PP_LINUX_X86_64)
+	if (CC_WIN64(c))
+		return cc_attribute_x86_is_known(gnu_attrs_win64, sizeof(gnu_attrs_win64) / sizeof(*gnu_attrs_win64), s, n);
+	if (CC_X86_64(c))
 		return cc_attribute_x86_is_known(cc_attribute_gnu_x86_names, sizeof(cc_attribute_gnu_x86_names) / sizeof(*cc_attribute_gnu_x86_names), s, n);
 	while (lo < hi) {
 		size_t mid = (lo + hi) / 2;
@@ -344,6 +355,8 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, at
 				an = CC_ATTRIBUTE_NONE;
 			const uint32_t tid = t->id;	/* t is the queue head: stale after next() */
 
+			if (an >= CC_ATTRIBUTE_GCC_STRUCT && !cc_attribute_is_known(c, scope, vintern_ents[tid].s, vintern_ents[tid].len))
+				an = CC_ATTRIBUTE_NONE;	/* (dllimport on Linux, ms_abi on arm64: clang's unknown attribute) */
 			next(c);
 			switch (an) {
 			case CC_ATTRIBUTE_ALIGNED:
@@ -539,7 +552,35 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c, at
 					a->extvec = (uint32_t)v;
 				continue;
 			}
-			case CC_ATTRIBUTE_MS_STRUCT: a->ms_struct = 1; break;
+			case CC_ATTRIBUTE_MS_STRUCT:
+			case CC_ATTRIBUTE_GCC_STRUCT:
+				if (an == CC_ATTRIBUTE_MS_STRUCT ? a->gcc_struct : a->ms_struct) {
+					cc_report_error(c, loc, "'%s' and '%s' attributes are not compatible", an == CC_ATTRIBUTE_MS_STRUCT ? "ms_struct" : "gcc_struct",
+						 an == CC_ATTRIBUTE_MS_STRUCT ? "gcc_struct" : "ms_struct");
+					cc_report_note(c, an == CC_ATTRIBUTE_MS_STRUCT ? a->gcc_struct : a->ms_struct, "conflicting attribute is here");
+				} else if (an == CC_ATTRIBUTE_MS_STRUCT) {
+					a->ms_struct = loc;
+				} else {
+					a->gcc_struct = loc;
+				}
+				break;
+			case CC_ATTRIBUTE_MS_ABI:
+			case CC_ATTRIBUTE_SYSV_ABI:
+				a->fnabi = an == CC_ATTRIBUTE_MS_ABI ? CC_FNABI_MS : CC_FNABI_SYSV, a->fnabi_loc = loc;
+				break;
+			case CC_ATTRIBUTE_DLLIMPORT: if (a->dll != CC_DLLEXPORT) a->dll = CC_DLLIMPORT; break;	/* (dllexport wins, as clang) */
+			case CC_ATTRIBUTE_DLLEXPORT: a->dll = CC_DLLEXPORT; break;
+			case CC_ATTRIBUTE_STDCALL: case CC_ATTRIBUTE_FASTCALL: case CC_ATTRIBUTE_THISCALL: case CC_ATTRIBUTE_PASCAL:
+				/* x86-64: 32-bit conventions; Windows ignores all but pascal silently (clang) */
+				if (an == CC_ATTRIBUTE_PASCAL || !CC_WIN64(c)) {
+					const vident *nm = &vintern_ents[tid];
+					diag_span r = { loc, pp_token_end_find(c->p, loc) };
+
+					cc_report_warning(c, "ignored-attributes", true, NULL, loc, &r, 1, NULL, 0,
+						 "'%.*s' calling convention is not supported for this target", (int)nm->len, nm->s);
+				}
+				break;
+			case CC_ATTRIBUTE_CDECL: case CC_ATTRIBUTE_VECTORCALL: case CC_ATTRIBUTE_REGCALL: break;	/* x86-64: the target's own convention */
 			case CC_ATTRIBUTE_PACKED: a->packed = 1; break;
 			case CC_ATTRIBUTE_WEAK: a->weak = 1; break;
 			case CC_ATTRIBUTE_USED: a->used = 1; break;
@@ -638,6 +679,9 @@ CC_PRIVATE void cc_attribute_merge(attrs *to, const attrs *from)
 		to->aligned = from->aligned;
 	if (from->interrupt) to->interrupt = from->interrupt;
 	if (from->ms_struct) to->ms_struct = from->ms_struct;
+	if (from->gcc_struct) to->gcc_struct = from->gcc_struct;
+	if (from->fnabi) to->fnabi = from->fnabi, to->fnabi_loc = from->fnabi_loc;
+	if (from->dll > to->dll) to->dll = from->dll;
 	if (from->section) to->section = from->section;
 	if (from->alias) to->alias = from->alias;
 	if (from->asmname) to->asmname = from->asmname;

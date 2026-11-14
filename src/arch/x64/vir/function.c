@@ -102,13 +102,17 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 {
 	virbuild_context *V = e->vir_builder;
 	vir_function *f = &V->f;
-	bool spframe=e->unit->options->omit_frame_pointer && !e->unit->cleanups_disabled;
+	/* Windows (PLAN-win64.md): the Microsoft convention, rsi, rdi and xmm6-xmm15 callee-saved
+	   too, and always a frame pointer (print.c's Windows frame; the unwinder reads rbp) */
+	bool ms = CODEGEN_IS_WIN64(e->compile_context);
+	bool spframe=e->unit->options->omit_frame_pointer && !e->unit->cleanups_disabled && !ms;
 	bool r10=true;
 	uint64_t cs = (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
 	if(spframe)cs|=1u<<RBP;
-	x64_vir_context L = { .context = e, .function = f, .allocation = &V->allocation };
+	if (ms) cs |= (1u << RSI) | (1u << RDI);
+	x64_vir_context L = { .context = e, .function = f, .allocation = &V->allocation, .ms = ms };
 	vir_target_registers regs = { .alloc = { (X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1 },
-		.callee = { cs, 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
+		.callee = { cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
 	if (e->unit->options->sprot || x64_target_has_no_simd(e)) return false;
 	const attrs *attrs = codegen_symbol_attributes(e->compile_context, sym);
@@ -212,8 +216,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 		.block_label=L.label, .optimize=!e->unit->cleanups_disabled, .rotate=e->unit->options->optimize.rotate_loops,
 		.row=e->unit->options->debug?x64_dbgrow:NULL, .row_e=e };
 
-	for (int r = 0; r < 16; r++)
+	for (int r = 0; r < 16; r++) {
 		if (V->allocation.callee[0] >> r & 1) x64_callee_save_use(e, r);
+		if (V->allocation.callee[1] >> r & 1) x64_callee_save_use(e, XMM0 + r);
+	}
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
 	x64_finish(e, sym);

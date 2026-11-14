@@ -264,7 +264,7 @@ static pp_header_cache_entry *pp_header_cache_entry_publish(pp *p, const pp_head
 		const pp_file_entry *f = &p->files[L->files_at_start + i];
 
 		fe[i] = (pp_header_cache_file){ f->lex_file, f->skeleton, pp_header_cache_string_share(p, f->name, f->name_length), pp_header_cache_string_share(p, f->spelled_path, strlen(f->spelled_path)),
-				 f->name_length, f->location_base - L->location_base_at_start, f->is_system };
+				 f->name_length, f->location_base - L->location_base_at_start, f->is_system, f->guard_open };
 	}
 	e->files = fe;
 	e->token_span = p->next_location_base - L->location_base_at_start;

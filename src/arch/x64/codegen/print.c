@@ -109,6 +109,8 @@ static void x64_memory_operand_append(codegen_context *e, tbuf *b, const record 
 	/* Incoming stack arguments retain rbp; local slots use the realigned base. */
 	if (base == RBP && i->offset < 0 && e->walk_state->frame_alignment > 16)
 		base = R12;
+	else if (base == RBP && i->offset < 0)
+		off -= e->x64_context->wsave;	/* (the Windows frame: below the save area) */
 	if (i->registers[1] == RIP) {
 		codegen_reference_offset_append(c, b, i->reference, i->offset);
 		vtext_string_append(b, "(%rip)");
@@ -146,7 +148,12 @@ static void x64_stack_guard_append(codegen_context *e, tbuf *b)
 {
 	const cc_options *o = e->unit->options;
 
-	if (o->sp_sym)
+	if (CODEGEN_IS_WIN64(e->compile_context) && !o->sp_sym && !o->sp_gs) {
+		/* MinGW: libssp's variable, extern data through its .refptr. pointer as clang */
+		vtext_string_append(b, "\tmovq\t.refptr.__stack_chk_guard(%rip), %r11\n\tmovq\t(%r11), %r11\n");
+		atomic_store_explicit(&e->unit->stack_guard_refptr, 1, memory_order_relaxed);
+	}
+	else if (o->sp_sym)
 		vtext_format_append(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
 	else
 		vtext_format_append(b, "\tmovq\t%%%s:40, %%r11\n", o->sp_gs ? "gs" : "fs");
@@ -190,6 +197,189 @@ static void x64_callee_save_cfi_append(tbuf *b, int r, int64_t off)
 	vtext_char_append(b, '\n');
 }
 
+/* ---------------- the Windows frame (PLAN-win64.md WIN3) ---------------- */
+
+#define XW_BIT(r) (UINT64_C(1) << (r))
+/* callee-saved: Microsoft's rbx rsi rdi r12-r15 xmm6-xmm15; System V's rbx r12-r15 (rbp: the frame) */
+#define XW_SYSV_CS (XW_BIT(RBX) | XW_BIT(R12) | XW_BIT(R13) | XW_BIT(R14) | XW_BIT(R15))
+#define XW_MS_CS (XW_SYSV_CS | XW_BIT(RSI) | XW_BIT(RDI) | (UINT64_C(0x3ff) << (XMM0 + 6)))
+
+/* the registers an asm text names (%rsi, %esi, %xmm7, %ymm7 ...): it may write them */
+static uint64_t x64w_textregs(const char *p, size_t n)
+{
+	uint64_t m = 0;
+
+	for (size_t k = 0; k + 1 < n; k++) {
+		char nm[8];
+		size_t j = 0;
+		int r;
+
+		if (p[k] != '%')
+			continue;
+		while (j < sizeof nm - 1 && k + 1 + j < n && ((p[k + 1 + j] >= 'a' && p[k + 1 + j] <= 'z') || (p[k + 1 + j] >= '0' && p[k + 1 + j] <= '9')))
+			nm[j] = p[k + 1 + j], j++;
+		nm[j] = 0;
+		if ((nm[0] == 'y' || nm[0] == 'z') && nm[1] == 'm' && nm[2] == 'm')
+			nm[0] = 'x';	/* (a ymm/zmm write changes its xmm) */
+		r = x64_asm_register_find(nm);
+		if (r >= 0)
+			m |= XW_BIT(r);
+	}
+	return m;
+}
+
+/* the callee-saved registers (of the function's convention) the body writes: the Windows
+   prologue saves them; a call writes what its callee's convention does not preserve */
+static uint64_t x64w_saves(codegen_context *e)
+{
+	x64_lowering_context *X = e->x64_context;
+	uint64_t def = X->csmask;
+
+	for (uint32_t k = 0; k < X->record_count; k++) {
+		const record *i = &X->records[k];
+		record_effects f;
+
+		if (i->opcode == X64_OP_RAW) {
+			def |= x64w_textregs(e->raw.p + i->offset, i->reference);
+			continue;
+		}
+		f = x64_record_effects(e, i);
+		if ((f.flags & RECORD_EFFECT_CALL) && (i->opcode == X64_OP_CALL || i->opcode == X64_OP_CALLR) && i->shift)
+			continue;	/* a Microsoft callee keeps them all */
+		def |= f.defines;
+	}
+	if (e->walk_state->frame_alignment > 16)
+		def |= XW_BIT(R12);	/* the realigned frame base */
+	return def & (X->msfn ? XW_MS_CS : XW_SYSV_CS);
+}
+
+/* the save area's size: the XMM registers first (16-aligned), then the GPRs */
+static int64_t x64w_area(uint64_t saves)
+{
+	int nx = __builtin_popcountll(saves >> XMM0), ng = __builtin_popcountll(saves & 0xffff);
+
+	return (16 * nx + 8 * ng + 15) & ~(int64_t)15;
+}
+
+/*
+ * The prologue in the shape the Windows unwinder decodes: push rbp; one allocation for the save
+ * area; the saves (mov, movaps); rbp = the entry's frame base (rsp + the area: .seh_setframe's
+ * offset is at most 240, which the area never exceeds); .seh_endprologue.  The locals and any
+ * realignment come after, in the body, where rbp is the frame register the unwinder reads.
+ * Without seh (an ms_abi function on another OS) the same code without the directives.
+ */
+static void x64w_prologue(codegen_context *e, tbuf *b, uint32_t s, uint64_t saves, int64_t frame, uint32_t A)
+{
+	cc *c = e->compile_context;
+	bool win = CODEGEN_IS_WIN64(c), seh = win && !c->o->no_seh;	/* (seh: the unwind directives) */
+	int64_t S = e->x64_context->wsave, off = 0;
+
+	(void)s;
+	vtext_string_append(b, seh ? "\tpushq\t%rbp\n\t.seh_pushreg %rbp\n" : "\tpushq\t%rbp\n");
+	if (S) {
+		vtext_format_append(b, "\tsubq\t$%lld, %%rsp\n", (long long)S);
+		if (seh) vtext_format_append(b, "\t.seh_stackalloc %lld\n", (long long)S);
+		for (int r = XMM0; r <= XMM15; r++)
+			if (saves & XW_BIT(r)) {
+				vtext_format_append(b, "\tmovaps\t%%xmm%d, %lld(%%rsp)\n", r - XMM0, (long long)off);
+				if (seh) vtext_format_append(b, "\t.seh_savexmm %%xmm%d, %lld\n", r - XMM0, (long long)off);
+				off += 16;
+			}
+		for (int r = 0; r < 16; r++)
+			if (saves & XW_BIT(r)) {
+				vtext_format_append(b, "\tmovq\t%%%s, %lld(%%rsp)\n", x64_register_names_64[r], (long long)off);
+				if (seh) vtext_format_append(b, "\t.seh_savereg %%%s, %lld\n", x64_register_names_64[r], (long long)off);
+				off += 8;
+			}
+		vtext_format_append(b, "\tleaq\t%lld(%%rsp), %%rbp\n", (long long)S);
+	} else {
+		vtext_string_append(b, "\tmovq\t%rsp, %rbp\n");
+	}
+	if (seh)
+		vtext_format_append(b, "\t.seh_setframe %%rbp, %lld\n\t.seh_endprologue\n", (long long)S);
+	if (A > 16) {
+		vtext_format_append(b, "\tandq\t$%lld, %%rsp\n\tmovq\t%%rsp, %%r12\n", -(long long)A);
+	}
+	if (win && frame >= 4096) {
+		/* a page or more: committed a page at a time (clang's sequence) */
+		if (frame > UINT32_MAX)
+			vtext_format_append(b, "\tmovabsq\t$%lld, %%rax\n", (long long)frame);
+		else
+			vtext_format_append(b, "\tmovl\t$%lld, %%eax\n", (long long)frame);
+		vtext_string_append(b, "\tcallq\t___chkstk_ms\n\tsubq\t%rax, %rsp\n");
+	} else if (frame > INT32_MAX) {
+		vtext_format_append(b, "\tmovabsq\t$%lld, %%r11\n\tsubq\t%%r11, %%rsp\n", (long long)frame);
+	} else if (frame) {
+		vtext_format_append(b, "\tsubq\t$%lld, %%rsp\n", (long long)frame);
+	}
+}
+
+/* the saved registers back, then the epilogue the unwinder recognizes: lea rsp from rbp, pop */
+static void x64w_epilogue(codegen_context *e, tbuf *b, uint64_t saves, bool aftercall)
+{
+	bool seh = CODEGEN_IS_WIN64(e->compile_context) && !e->compile_context->o->no_seh;
+	int64_t S = e->x64_context->wsave, off = 0;
+
+	for (int r = XMM0; r <= XMM15; r++)
+		if (saves & XW_BIT(r)) {
+			vtext_format_append(b, "\tmovaps\t%lld(%%rbp), %%xmm%d\n", (long long)(off - S), r - XMM0);
+			off += 16;
+		}
+	for (int r = 0; r < 16; r++)
+		if (saves & XW_BIT(r)) {
+			vtext_format_append(b, "\tmovq\t%lld(%%rbp), %%%s\n", (long long)(off - S), x64_register_names_64[r]);
+			off += 8;
+		}
+	if (seh && !saves && aftercall)
+		vtext_string_append(b, "\tnop\n");	/* (a return address is never an epilogue's first instruction, as LLVM) */
+	vtext_string_append(b, seh ? "\t.seh_startepilogue\n\tleaq\t0(%rbp), %rsp\n\tpopq\t%rbp\n\t.seh_endepilogue\n"
+			     : "\tleaq\t0(%rbp), %rsp\n\tpopq\t%rbp\n");
+}
+
+/* Windows: the function's jump tables (a label, then X64_OP_JTE words) in .rdata, as clang: the unwinder
+   decodes .text, and a table there could read as an epilogue */
+static void x64w_tables(codegen_context *e, tbuf *b, uint32_t s)
+{
+	x64_lowering_context *X = e->x64_context;
+	bool any = false;
+
+	for (uint32_t k = 0; k < X->record_count; k++) {
+		const record *i = &X->records[k];
+
+		if (i->opcode == X64_OP_LABEL && k + 1 < X->record_count && X->records[k + 1].opcode == X64_OP_JTE) {
+			if (!any)
+				vtext_string_append(b, "\t.section\t.rdata,\"dr\"\n");
+			any = true;
+			vtext_string_append(b, "\t.p2align\t2\n");
+			x64_label_name_append(b, s, i->label);
+			vtext_string_append(b, ":\n");
+		} else if (i->opcode == X64_OP_JTE) {
+			vtext_string_append(b, "\t.long\t");
+			x64_label_name_append(b, s, i->label);
+			vtext_char_append(b, '-');
+			x64_label_name_append(b, s, i->reference);
+			vtext_char_append(b, '\n');
+		}
+	}
+}
+
+/* Windows: the pointer a symbol is reached through (__imp_NAME, .refptr.NAME; the tail emits the
+   .refptr. stubs this marks) */
+static void x64w_indirect(codegen_context *e, tbuf *b, uint32_t reference)
+{
+	cc *c = e->compile_context;
+	uint32_t s = codegen_symbol_canonical(c, CODEGEN_REFERENCE_INDEX(reference));
+
+	if (sym_win64_indirect(c, reference) == WIN64_IMP) {
+		vtext_string_append(b, "__imp_");
+	} else {
+		vtext_string_append(b, ".refptr.");
+		if (e->unit->refptr && !atomic_load_explicit(&e->unit->refptr[s], memory_order_relaxed))
+			atomic_store_explicit(&e->unit->refptr[s], 1, memory_order_relaxed);
+	}
+	codegen_reference_name_append(c, b, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
+}
+
 /* R12 first keeps its incoming value at -8(%rbp), as for normal realignment. */
 static const int x64_interrupt_saved_registers[14] = { R12, RAX, RCX, RDX, RBX, RSI, RDI, R8, R9, R10, R11, R13, R14, R15 };
 
@@ -204,13 +394,30 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 	int64_t frame = (e->walk_state->frame_offset + 15) & ~(int64_t)15;
 	uint32_t A = e->walk_state->frame_alignment;
 	bool uintr = x86_feature_has(cc_x86_features_get(c, s), X86_FEATURE_UINTR);
-	bool cfi = e->unit->options->cfi;	/* unwind tables: .cfi_* as clang writes them */
+	bool cfi = e->unit->options->cfi && !X->winframe;	/* unwind tables: .cfi_* as clang writes them (Windows: .seh_*) */
 	uint32_t dj = 0;		/* -g: the next row */
 	uint32_t tail = x64_tail_ref(e);
 	size_t objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	bool objcode = false;
 	if(X->stack_pointer_frame && (frame || e->has_calls))frame+=8;
 	X->frame_size=frame;X->stack_pointer_delta=0;
+	uint64_t wsaves = 0;	/* the Windows frame's saved registers */
+	bool seh = false, aftercall = false;
+	X->wsave = 0;
+	if (X->winframe && !X->interrupt) {
+		if (X->stack_pointer_frame)
+			codegen_fatal_report(e, e->current_location, "internal error: x86-64: a Windows frame without a frame pointer");
+		wsaves = x64w_saves(e);
+		if (wsaves)
+			X->frame_free = false;
+		X->wsave = x64w_area(wsaves);
+		seh = CODEGEN_IS_WIN64(c) && !X->frame_free && !c->o->no_seh;
+	}
+	if (seh) {
+		vtext_string_append(b, ".seh_proc ");
+		codegen_symbol_name_append(c, b, s);
+		vtext_char_append(b, '\n');
+	}
 
 	if (unlikely(e->unit->options->debug)) {
 		/* the function's own line (its body's '{', column 0), as clang */
@@ -255,6 +462,9 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		vtext_string_append(b, "\tmovq\t%rsp, %r12\n\tcld\n");
 		if (cfi && !x64_target_has_no_simd(e))
 			for (int k = 0; k < 16; k++) x64_callee_save_cfi_append(b, 17 + k, 160 + 16 * k);
+	} else if (X->winframe) {
+		if (!X->frame_free)
+			x64w_prologue(e, b, s, wsaves, frame, A);
 	} else {
 		if (!X->frame_free && !X->stack_pointer_frame)
 			vtext_string_append(b, cfi ? "\tpushq\t%rbp\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %rbp, -16\n"
@@ -267,7 +477,9 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 			vtext_string_append(b, ", %rsp\n\tmovq\t%rsp, %r12\n");
 		}
 	}
-	if (frame > INT32_MAX) {
+	if (X->winframe && !X->interrupt) {
+		/* (x64w_prologue) */
+	} else if (frame > INT32_MAX) {
 		vtext_string_append(b, "\tmovabsq\t$");
 		vtext_signed_append(b, frame);
 		vtext_string_append(b, ", %r11\n\tsubq\t%r11, %rsp\n");
@@ -280,7 +492,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 	if (e->walk_state->stack_pointer_needed) {
 		/* -fstack-protector: the guard into the canary slot (r11: no argument lives there) */
 		x64_stack_guard_append(e, b);
-		vtext_format_append(b, "\tmovq\t%%r11, %d(%s)\n", e->walk_state->canary, A > 16 ? "%r12" : "%rbp");
+		vtext_format_append(b, "\tmovq\t%%r11, %lld(%s)\n", (long long)(e->walk_state->canary - (A > 16 ? 0 : X->wsave)), A > 16 ? "%r12" : "%rbp");
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->callee_save_slots[r]) {
@@ -294,6 +506,9 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		const record *i = &X->records[k];
 		int sz = i->size;
 
+		if (i->opcode != X64_OP_LABEL && i->opcode != X64_OP_TAIL)
+			aftercall = i->opcode == X64_OP_CALL || i->opcode == X64_OP_CALLR;
+
 		if (objcode && dj < e->debug_row_count && e->debug_rows[dj].record_index == k) {
 			codegen_item_close(e, objitem);
 			objitem = codegen_item_open(e, CODEGEN_ITEM_TEXT);
@@ -304,6 +519,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
 
+		if (CODEGEN_IS_WIN64(c) && (i->opcode == X64_OP_JTE || (i->opcode == X64_OP_LABEL && k + 1 < X->record_count && X->records[k + 1].opcode == X64_OP_JTE)))
+			continue;	/* Windows: jump tables in .rdata after the function (x64w_tables), code only in .text */
 		if (codegen_context_is_direct(e)) {
 			record encoded;
 			bool code = x64_record_object_prepare(e, i, &encoded);
@@ -494,6 +711,12 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		case X64_OP_TAIL:
 			continue; /* argument uses stay in records; branch follows the epilogue */
 		case X64_OP_CALL:
+			if (CODEGEN_IS_WIN64(c) && codegen_symbol_needs_got(c, i->reference)) {
+				vtext_string_append(b, "\tcallq\t*");
+				x64w_indirect(e, b, i->reference);
+				vtext_string_append(b, "(%rip)");
+				break;
+			}
 			vtext_string_append(b, "\tcallq\t");
 			codegen_reference_name_append(c, b, i->reference);
 			if (c->o->pic && (CODEGEN_REFERENCE_KIND(i->reference) == CODEGEN_REFERENCE_NAME || codegen_symbol_needs_got(c, i->reference)))
@@ -565,13 +788,29 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 			if (i->condition && e->walk_state->frame_alignment > 16)
 				codegen_fatal_report(e, e->current_location, "inline asm r12 operand or clobber conflicts with aligned frame base");
 			vtext_string_append(b, "#APP\n");
+			/* a local's base register is the printer's (0: rbp, or r12 when realigned); on Windows
+			   X_ASMFRAME and its displacement, placed below the save area */
 			const char *p = e->raw.p + i->offset, *end = p + i->reference;
+			bool realigned = e->walk_state->frame_alignment > 16;
+
 			while (p < end) {
-				const char *frame = memchr(p, 0, end - p);
-				vtext_append(b, p, (frame ? frame : end) - p);
-				if (!frame) break;
-				x64_register_name_append(b, e->walk_state->frame_alignment > 16 ? R12 : RBP, 8);
-				p = frame + 1;
+				const char *q = p;
+
+				while (q < end && *q && *q != X_ASMFRAME)
+					q++;
+				vtext_append(b, p, q - p);
+				if (q == end)
+					break;
+				if (*q == X_ASMFRAME) {
+					char *t;
+					long long v = strtoll(q + 1, &t, 10);
+
+					vtext_signed_append(b, X->winframe && !realigned ? v - X->wsave : v);
+					p = t;
+				} else {
+					x64_register_name_append(b, realigned ? R12 : RBP, 8);
+					p = q + 1;
+				}
 			}
 			vtext_string_append(b, "\n#NO_APP");
 			break;
@@ -606,13 +845,44 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		case X64_OP_BARRIER:
 			vtext_string_append(b, "\t# compiler barrier");
 			break;
+		case X64_OP_PROBE:
+			vtext_string_append(b, "\tcallq\t___chkstk_ms");
+			break;
+		case X64_OP_FRAMEADDR:
+			vtext_format_append(b, "\tleaq\t%lld(%%rbp), ", -(long long)X->wsave);
+			x64_register_name_append(b, i->registers[0], 8);
+			break;
 		case X64_OP_GOT:
+			if (CODEGEN_IS_WIN64(c)) {
+				vtext_string_append(b, "\tmovq\t");
+				x64w_indirect(e, b, i->reference);
+				vtext_string_append(b, "(%rip), ");
+				x64_register_name_append(b, i->registers[0], 8);
+				break;
+			}
 			vtext_string_append(b, "\tmovq\t");
 			codegen_reference_offset_append(c, b, i->reference, 0);
 			vtext_string_append(b, "@GOTPCREL(%rip), ");
 			x64_register_name_append(b, i->registers[0], 8);
 			break;
 		case X64_OP_TLS:
+			if (CODEGEN_IS_WIN64(c)) {
+				/* the module's block from the TEB's ThreadLocalStoragePointer, then the
+				   variable's offset in the .tls section (clang's sequence) */
+				vtext_string_append(b, "\tmovl\t_tls_index(%rip), %r11d\n\tmovq\t%gs:88, ");
+				x64_register_name_append(b, i->registers[0], 8);
+				vtext_string_append(b, "\n\tmovq\t(");
+				x64_register_name_append(b, i->registers[0], 8);
+				vtext_string_append(b, ",%r11,8), ");
+				x64_register_name_append(b, i->registers[0], 8);
+				vtext_string_append(b, "\n\tleaq\t");
+				codegen_reference_offset_append(c, b, i->reference, 0);
+				vtext_string_append(b, "@SECREL32(");
+				x64_register_name_append(b, i->registers[0], 8);
+				vtext_string_append(b, "), ");
+				x64_register_name_append(b, i->registers[0], 8);
+				break;
+			}
 			if (i->condition == 2) {
 				vtext_string_append(b, "\tdata16\n\tleaq\t");
 				codegen_reference_offset_append(c, b, i->reference, 0);
@@ -760,7 +1030,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 	if(X->stack_pointer_frame && X->stack_pointer_delta)codegen_fatal_report(e,e->current_location,"internal error: unbalanced VIR outgoing arguments");
 	if (e->walk_state->stack_pointer_needed) {
 		x64_stack_guard_append(e, b);
-		vtext_format_append(b, "\tcmpq\t%d(%s), %%r11\n\tjne\t.Lspfail%u\n", e->walk_state->canary, e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
+		vtext_format_append(b, "\tcmpq\t%lld(%s), %%r11\n\tjne\t.Lspfail%u\n",
+				    (long long)(e->walk_state->canary - (e->walk_state->frame_alignment > 16 ? 0 : X->wsave)), e->walk_state->frame_alignment > 16 ? "%r12" : "%rbp", s);
 	}
 	for (int r = 0; r < 16; r++)
 		if (X->callee_save_slots[r]) {
@@ -789,11 +1060,14 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		/* Encodings accepted by the integrated assembler as well as GNU as. */
 		vtext_string_append(b, uintr ? "\t.byte 0xf3, 0x0f, 0x01, 0xec # uiret\n" : "\t.byte 0x48, 0xcf # iretq\n");
 	} else {
-		if (e->walk_state->frame_alignment > 16) {
+		if (e->walk_state->frame_alignment > 16 && !X->winframe) {
 			vtext_string_append(b, "\tmovq\t-8(%rbp), %r12\n");
 			if (cfi) vtext_string_append(b, "\t.cfi_same_value %r12\n");
 		}
-		if(X->stack_pointer_frame) {
+		if (X->winframe) {
+			if (!X->frame_free)
+				x64w_epilogue(e, b, wsaves, aftercall);
+		} else if(X->stack_pointer_frame) {
 			if(frame)vtext_format_append(b,"\taddq\t$%lld, %%rsp\n",(long long)frame);
 			if(cfi && frame)vtext_string_append(b,"\t.cfi_def_cfa_offset 8\n");
 		} else if (!X->frame_free)
@@ -810,8 +1084,16 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 	}
 	if (e->walk_state->stack_pointer_needed)
 		vtext_format_append(b, ".Lspfail%u:\n\tcallq\t__stack_chk_fail%s\n", s, e->unit->options->pic ? "@PLT" : "");
+	if (seh)
+		vtext_string_append(b, "\t.seh_endproc\n");
 	vtext_string_append(b, cfi ? "\t.cfi_endproc\n.Lfunc_end" : ".Lfunc_end");
 	vtext_unsigned_append(b, s);
+	if (CODEGEN_IS_WIN64(c)) {	/* (COFF: no .size) */
+		vtext_string_append(b, ":\n");
+		x64w_tables(e, b, s);
+		codegen_item_close(e, objitem);
+		return;
+	}
 	vtext_string_append(b, ":\n\t.size\t");
 	codegen_symbol_name_append(c, b, s);
 	vtext_string_append(b, ", .Lfunc_end");

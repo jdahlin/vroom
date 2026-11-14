@@ -122,6 +122,7 @@ extern atomic_ulong vccd_probe_count, vccd_probe_compile_count, vccd_forward_cou
 VPRIV const char *vccd_request_input_find(const struct vccd_request *r);
 VPRIV bool vccd_request_is_compile(const struct vccd_request *r);
 VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r);
+VPRIV bool vccd_request_is_version_banner(const struct vccd_request *r);
 VPRIV int vccd_compile_in_process(const struct vccd_request *r, const char *src, size_t len, bool final);
 VPRIV int vccd_probe_cc_answer(const struct vccd_request *r, int kind);
 VPRIV int vccd_probe_kind_classify(const struct vccd_request *r);

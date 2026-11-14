@@ -56,6 +56,7 @@ void elf_reset(ElfObj *o)
 	memset(o->htab, 0, (o->hmask + 1) * 4);
 	o->has_err = 0; o->err[0] = 0;
 	o->addrsig = 0; o->naddrsig = 0; o->has_addrsig = 0;
+	o->coff = 0;
 }
 
 static const char *copyname(ElfObj *o, const char *s, uint32_t n)
@@ -210,7 +211,7 @@ uint32_t elf_find_section(ElfObj *o, const char *name, uint32_t len, uint32_t gr
 {
 	for (uint32_t i = 1; i < o->nsec; i++) {
 		ElfSec *s = elf_sec(o, i);
-		if (s->len == len && s->group == group && !s->linksec && !memcmp(s->name, name, len)) return i;
+		if (s->len == len && s->group == group && !s->linksec && !s->unique && !memcmp(s->name, name, len)) return i;
 	}
 	return 0;
 }
@@ -249,7 +250,12 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 {
 	uint32_t i = elf_find_section(o, name, len, group);
 	if (i) return i;
-	i = o->nsec++;
+	return elf_section_create(o, name, len, type, flags, entsize, group);
+}
+
+uint32_t elf_section_create(ElfObj *o, const char *name, uint32_t len, uint32_t type, uint64_t flags, uint32_t entsize, uint32_t group)
+{
+	uint32_t i = o->nsec++;
 	ElfSec *s = rpush(&o->secs, sizeof *s, 8);
 	(void)s; s = elf_sec(o, i);
 	memset(s, 0, sizeof *s);
@@ -260,7 +266,7 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 	newfrag(o, i, i, 0);
 	/* MC registers the section symbol under the section's name unless a
 	 * defined symbol has it; an undefined one becomes the section symbol */
-	uint32_t y = elf_sym_lookup(o, name, len);
+	uint32_t y = elf_sym_lookup(o, name, len);	/* (COFF too: .secrel32 .debug_abbrev names the section) */
 	if (!y) y = elf_sym(o, name, len);
 	else if (elf_symp(o, y)->flags & ESYM_DEFINED) y = elf_sym_anon(o, s->name, len);
 	ElfSym *ys = elf_symp(o, y);
@@ -408,6 +414,13 @@ void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type
 	if (f->fix_tail) ((ElfFix *)o->fixes.base)[f->fix_tail].next = id; else f->fix_head = id;
 	f->fix_tail = id;
 	elf_reg(o, v.add); elf_reg(o, v.sub);
+}
+
+int obj_pcrel_resolves_locally(ElfObj *o, const ElfSym *y)
+{
+	if (o->format == OBJ_COFF)	/* MC keeps relocations to functions (incremental linking, /GUARD:CF) */
+		return y->coff_type >> 4 != COFF_TYPE_FUNCTION >> 4;
+	return y->bind == STB_LOCAL;
 }
 
 int elf_sym_frag_off(ElfObj *o, uint32_t s, uint32_t *frag, uint64_t *off)

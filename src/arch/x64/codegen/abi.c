@@ -1,5 +1,6 @@
 /* vcc code generator, x86-64: the System V ABI: classification, calls,
- * parameters, results, varargs (x64-internal.h) */
+ * parameters, results, varargs (x64-internal.h).  The walker's entry points
+ * dispatch to abi-win64.c when e->msabi says the convention is Microsoft's. */
 #include "x64-internal.h"
 
 /* ---------------- classification (System V 3.2.3) ---------------- */
@@ -224,7 +225,13 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t, walk
 /* -mgeneral-regs-only, -mno-sse: no value may travel in a vector or x87 register */
 VPRIV void x64_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed)
 {
+	if (e->msabi) {
+		x64w_classify(e, t, a, unnamed);
+		return;
+	}
 	x64_abi_classify_named(e, t, a);
+	if (CODEGEN_IS_WIN64(e->compile_context) && a->is_x87)
+		a->is_x87 = false;	/* sysv_abi on Windows: long double results through the hidden pointer too (clang) */
 	a->is_unnamed = unnamed;
 	uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
 	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
@@ -328,6 +335,9 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 {
 	cc *c = e->compile_context;
 
+	if (e->msabi)
+		return x64w_call(e, ref, fn, a, n, variadic, r, rt);
+
 	if (CODEGEN_REFERENCE_KIND(ref) == CODEGEN_REFERENCE_SYMBOL) {
 		x86_features features = cc_x86_features_get(c, CODEGEN_REFERENCE_INDEX(ref));
 		for (int k = 0; k < n; k++)
@@ -361,8 +371,6 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 	}
 	x64_lowering_context *X = e->x64_context;
 	uint32_t saved = X->temporaries_in_use & X64_TEMPORARIES, fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
-	int retsize = KIND(c, rt) == AST_TYPE_VOID ? 0 : walk_type_size(c, rt);
-	bool retsgn = walk_type_is_signed(c, rt), retf = codegen_type_is_float(c, rt) && !r;
 	int gp = r && r->is_in_memory && !r->is_x87 && !r->is_sse_up ? 1 : 0, fp = 0;
 	int64_t total = 0, pad;
 	uint32_t stackalign = 16;
@@ -517,11 +525,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 			x64_x87st(e, &d);	/* _Complex long double: the imaginary part from st(1) */
 		}
 	} else if (r && r->is_in_memory && r->is_sse_up) {
-		for (int w = 0; w < (int)(r->size / 16); w++) {
-			codegen_lvalue d = x64_fr(r->slot + 16 * w);
-
-			x64_record_emit_memory(e, X64_OP_ST, 16, XMM0 + w, &d, false);
-		}
+		x64_call_xmms(e, r);
 	} else if (r && !r->is_in_memory && r->eightbyte_count) {
 		/* a record in rax, rdx / xmm0, xmm1 (by class, in order) into its slot */
 		int ng = 0, nf = 0;
@@ -531,9 +535,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 
 			x64_record_emit_memory(e, X64_OP_ST, r->is_sse_up ? 16 : 8, r->classes[w] == WALK_ARGUMENT_SSE ? XMM0 + nf++ : (ng++ ? RDX : RAX), &d, false);
 		}
-	} else if (retsize && !retf && !r) {
-		x64_mov(e, R11, RAX);
-		x64_ext(e, R11, retsize, retsgn);
+	} else if (!r) {
+		x64_call_park(e, rt);
 	}
 	for (int q = XMM15 - 1; q >= XMM8; q--)
 		if (fsaved & (1u << q)) {
@@ -548,11 +551,40 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 			x64_record_emit_three_registers(e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
 			X->outstanding_pushes--;
 		}
+	return x64_call_value(e, fn, rt, r);
+}
+
+/* both conventions: a result in xmm0, xmm1, ... (a wide vector) to its slot */
+VPRIV void x64_call_xmms(codegen_context *e, const walk_argument *r)
+{
+	for (int w = 0; w < (int)(r->size / 16); w++) {
+		codegen_lvalue d = x64_fr(r->slot + 16 * w);
+
+		x64_record_emit_memory(e, X64_OP_ST, 16, XMM0 + w, &d, false);
+	}
+}
+
+/* both conventions: an integer result parked (extended) in r11 before the saved temporaries come
+   back, which may include rax */
+VPRIV void x64_call_park(codegen_context *e, ast_qualified_type rt)
+{
+	cc *c = e->compile_context;
+
+	if (KIND(c, rt) != AST_TYPE_VOID && !codegen_type_is_float(c, rt)) {
+		x64_mov(e, R11, RAX);
+		x64_ext(e, R11, walk_type_size(c, rt), walk_type_is_signed(c, rt));
+	}
+}
+
+/* ... and the call's value once they are back: a float from xmm0, an integer from r11; nothing
+   for a record result (r) or none */
+VPRIV codegen_value x64_call_value(codegen_context *e, codegen_value *fn, ast_qualified_type rt, const walk_argument *r)
+{
 	if (fn && fn->kind == CODEGEN_VALUE_REGISTER)
 		x64_tfree(e, fn->register_number);
-	if (!retsize || r)
+	if (KIND(e->compile_context, rt) == AST_TYPE_VOID || r)
 		return codegen_value_constant(0);
-	if (retf) {
+	if (codegen_type_is_float(e->compile_context, rt)) {
 		int q = x64_ftreg(e);
 
 		x64_mov(e, q, XMM0);
@@ -575,6 +607,11 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
 	const node *body = N(c->syms[e->walk_state->function_symbol].body);
 	int gp = 0, fp = 0;
 	int64_t stk = 0;
+
+	if (e->msabi) {
+		x64w_params(e, a, n, r, variadic);
+		return;
+	}
 
 	const attrs *fa = codegen_symbol_attributes(e->compile_context, e->walk_state->function_symbol);
 	X->interrupt = fa && fa->interrupt ? n : 0;
@@ -700,7 +737,9 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n, const walk_ar
    copied to the caller's object (the hidden pointer, also the result) */
 VPRIV void x64_retrec(codegen_context *e, int raddr, const walk_argument *r, uint32_t lbl)
 {
-	if (r->is_x87) {
+	if (e->x64_context->msfn && r->is_sse_up && !r->is_in_memory && r->size < 16) {
+		x64w_xmm_part(e, X64_OP_LD, raddr, (int)r->size);	/* (Microsoft: a short vector, not over-read) */
+	} else if (r->is_x87) {
 		codegen_lvalue s = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)raddr };
 
 		if (r->size == 32) {
@@ -754,6 +793,10 @@ VPRIV void x64_va_start(codegen_context *e, int rap)
 
 	if (!X->variadic_save_slot)
 		codegen_fatal_report(e, e->current_location, "va_start in a function that is not variadic");
+	if (e->msabi) {
+		x64w_va_start(e, rap);
+		return;
+	}
 	x64_record_emit_move_immediate(e, R11, 8 * X->general_register_arguments);
 	x64_record_emit_memory(e, X64_OP_ST, 4, R11, &gpo, false);
 	x64_record_emit_move_immediate(e, R11, 48 + 16 * X->float_register_arguments);
@@ -772,9 +815,12 @@ VPRIV int x64_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 	walk_argument a;
 	codegen_lvalue gpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 0 }, fpo = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 4 };
 	codegen_lvalue ov = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 8 }, rsa = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rap, .offset = 16 };
-	int ra = x64_treg(e), ng, nf;
-	uint32_t lstk = walk_label_new(e), ldone = walk_label_new(e);
+	int ra, ng, nf;
+	uint32_t lstk, ldone;
 
+	if (e->msabi)
+		return x64w_va_arg(e, rap, t);
+	ra = x64_treg(e), lstk = walk_label_new(e), ldone = walk_label_new(e);
 	x64_classify(e, t, &a, true);
 	if (a.bool_lane_count)
 		codegen_fatal_report(e, e->current_location, "x86-64: variadic transport of 65..128-lane packed boolean vectors is not supported");

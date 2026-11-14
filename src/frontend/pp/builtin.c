@@ -4,6 +4,8 @@
 #include "ppdata.inc"
 #define PPDATA_X86_HAS
 #include "ppdata-x86.inc"
+#define PPDATA_WIN64_HAS
+#include "ppdata-win64.inc"
 
 /* ---------------- builtin macros ---------------- */
 
@@ -168,17 +170,19 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 
 	if (b == PP_BUILTIN_BUILDING_MODULE)
 		return 0;	/* no modules */
-	if (p->options->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
-		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
+	if (PP_IS_X86_64(p->options->target)) {	/* its own table (gen-x86data.sh, gen-win64data.sh) */
+		bool win = p->options->target == PP_WIN64;
+		size_t xl = 0, xh = win ? sizeof(has_tab_win64) / sizeof(has_tab_win64[0]) : sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
 
 		while (xl < xh) {
 			size_t mid = (xl + xh) / 2;
-			int c = strcmp(has_tab_x86[mid].q, q[b]);
+			const char *mq = win ? has_tab_win64[mid].q : has_tab_x86[mid].q, *mn = win ? has_tab_win64[mid].name : has_tab_x86[mid].name;
+			int c = strcmp(mq, q[b]);
 
 			if (!c)
-				c = strcmp(has_tab_x86[mid].name, name);
+				c = strcmp(mn, name);
 			if (!c)
-				return has_tab_x86[mid].v;
+				return win ? has_tab_win64[mid].v : has_tab_x86[mid].v;
 			if (c < 0)
 				xl = mid + 1;
 			else
@@ -268,6 +272,11 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 		} else {
 			pp_token_number_make(p, t, p->counter_value++);
 		}
+		break;
+	case PP_BUILTIN_FLT_EVAL_METHOD:
+		/* clang: a builtin macro, 0 on every target vcc has (SSE on x86-64; -ffp-eval-method and
+		   #pragma clang fp eval_method are not supported).  float.h's FLT_EVAL_METHOD names it. */
+		pp_token_number_make(p, t, 0);
 		break;
 	case PP_BUILTIN_INCLUDE_LEVEL:
 		for (int i = 0; i < p->recording.level_count; i++)

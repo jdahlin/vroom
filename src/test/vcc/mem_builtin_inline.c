@@ -67,7 +67,7 @@ int main(void)
 
 	/* get/put_unaligned as the kernel spells them */
 	{
-		unsigned long v = 0x1122334455667788ul, w;
+		unsigned long long v = 0x1122334455667788ULL, w;
 		unsigned char buf[16] = { 0 };
 
 		__builtin_memcpy(buf + 1, &v, sizeof(v));

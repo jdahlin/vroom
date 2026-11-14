@@ -408,10 +408,8 @@ size_t macho_finish(ElfObj *o)
 	}
 	{
 		ElfFix *fx = (ElfFix *)o->fixes.base;
-		for (uint32_t s = 1; s < ns; s++)
-			for (uint32_t f = s; f; f = elf_frag(o, f)->next)
-				for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
-					resolve(o, m, &fx[i]);
+		ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i)
+			resolve(o, m, &fx[i]);
 	}
 	if (o->has_err) return 0;
 	/* symbols: locals, external definitions, undefined */
@@ -548,12 +546,7 @@ void macho_emit(ElfObj *o, uint8_t *b)
 		int k = m->map[s];
 		ElfSec *se = elf_sec(o, s);
 		if (k < 0 || !m->moff[k] || se->type == SHT_NOBITS) continue;
-		uint8_t *d = b + m->moff[k] + (m->vaddr[s] - m->maddr[k]);
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
-			ElfFrag *fr = elf_frag(o, f);
-			uint8_t *q = d + fr->base;
-			for (ElfChunk *ch = fr->head; ch; ch = ch->next) { memcpy(q, ch->data, ch->used); q += ch->used; }
-		}
+		elf_section_bytes_copy(o, s, b + m->moff[k] + (m->vaddr[s] - m->maddr[k]));
 	}
 	/* relocations: symbol ids -> nlist indices */
 	for (int k = 0; k < M_N; k++) {

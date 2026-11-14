@@ -12,24 +12,24 @@ static int f(int x)
 big:
 	return -y;
 }
-static long g(long *p)
+static long long g(long long *p)
 {
-	asm goto("addq $5, %0\n\ttestq $1, %0\n\tjnz %l[odd]" : "+r"(*p) : "r"(0L) : "cc" : odd);
+	asm goto("addq $5, %0\n\ttestq $1, %0\n\tjnz %l[odd]" : "+r"(*p) : "r"(0LL) : "cc" : odd);
 	return 0;
 odd:
 	return 1;
 }
 #else
 static int f(int x) { int y = x + 1; return y > 10 ? -y : y; }
-static long g(long *p) { *p += 5; return *p & 1; }
+static long long g(long long *p) { *p += 5; return *p & 1; }
 #endif
 
 int main(void)
 {
-	long v = 2, w = 3;
+	long long v = 2, w = 3;
 	int a = f(3), b = f(20);
-	long c = g(&v), d = g(&w);
+	long long c = g(&v), d = g(&w);
 
-	printf("%d %d %ld %ld %ld %ld\n", a, b, c, v, d, w);
+	printf("%d %d %lld %lld %lld %lld\n", a, b, c, v, d, w);
 	return 0;
 }

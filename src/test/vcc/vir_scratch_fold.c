@@ -6,18 +6,18 @@
    multiplier the fold turns into shifts (no x17) alongside one it does not. */
 #define NI __attribute__((noinline))
 
-NI long h(long a, long b) { long m = a * 7; long t = b + 0x12345678; return m + t; }
-NI long h2(long a, long b) { long t = b + 0x12345678; long m = a * 7; return t + m; }
-NI long h3(long a, long b) { long m = a * 11; long t = b - 0x7654321; return t - m; }
+NI long long h(long long a, long long b) { long long m = a * 7; long long t = b + 0x12345678; return m + t; }
+NI long long h2(long long a, long long b) { long long t = b + 0x12345678; long long m = a * 7; return t + m; }
+NI long long h3(long long a, long long b) { long long m = a * 11; long long t = b - 0x7654321; return t - m; }
 NI int h4(int a, int b) { int m = a * 13; int t = b + 0x1234567; return m + t; }
-NI long h5(long a, long b) { long m = a * 100; long t = b ^ 0x123456789abL; return m + t; }
-NI long far(long a)
+NI long long h5(long long a, long long b) { long long m = a * 100; long long t = b ^ 0x123456789abLL; return m + t; }
+NI long long far(long long a)
 {
-	volatile long big[6000];
+	volatile long long big[6000];
 
 	big[5999] = a;
-	long m = a * 7;
-	long t = big[5999];
+	long long m = a * 7;
+	long long t = big[5999];
 	return m + t;
 }
 
@@ -27,7 +27,7 @@ int main(void)
 	if (h2(3, 4) != 21 + 4 + 0x12345678) return 2;
 	if (h3(3, 4) != 4 - 0x7654321 - 33) return 3;
 	if (h4(3, 4) != 39 + 4 + 0x1234567) return 4;
-	if (h5(3, 4) != 300 + (4 ^ 0x123456789abL)) return 5;
+	if (h5(3, 4) != 300 + (4 ^ 0x123456789abLL)) return 5;
 	if (far(5) != 40) return 6;
 	return 0;
 }

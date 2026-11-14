@@ -32,6 +32,12 @@ FF_CFLAGS=-ffp-contract=off FF_TAG=-nc ... builds, tests and measures a second
 set of trees with extra C flags (work/ffmpeg/b-NAME-nc, bench-nc): without
 contraction the floating-point workloads must give clang's bytes too.
 Override with CLANG, VPP, VROOM_WORK, JOBS.
+
+  bench/ffmpeg/run.py --target win64 [build|fate|all] [clang vcc vir] [--ignore T,...]
+
+Windows x64 (doc/PLAN-win64.md WIN8): the same C fallbacks cross-built for
+x86_64-w64-mingw32 by clang and by vcc's own toolchain, FATE under Wine
+(bench/ffmpeg/win64.py has the configuration).
 """
 import concurrent.futures, hashlib, os, resource, shlex, shutil, subprocess, sys, time
 
@@ -305,6 +311,18 @@ def speed(names, n, pat):
 
 def main():
     a = sys.argv[1:]
+    if '--target' in a:
+        i = a.index('--target'); tgt = a[i + 1]; del a[i:i + 2]
+        if tgt != 'win64':
+            sys.exit(f'--target {tgt}: only win64')
+        ignore = []
+        if '--ignore' in a:
+            i = a.index('--ignore'); ignore = a[i + 1].split(','); del a[i:i + 2]
+        if not a or a[0] not in ('build', 'fate', 'all'):
+            sys.exit(__doc__)
+        sys.path.insert(0, HERE)
+        import win64
+        return win64.main(a[0], a[1:], ignore)
     if not a:
         sys.exit(__doc__)
     cmd, a = a[0], a[1:]

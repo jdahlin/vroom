@@ -29,7 +29,7 @@ static uint32_t cc_bitint_cast_finish(cc_bitint_cast_builder*b,uint32_t result,a
 CC_PRIVATE uint32_t cc_bitint_float_cast_build(cc*c,uint32_t input,ast_qualified_type to)
 {
  ast_qualified_type from=AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(input)->ty),fp=cc_type_is_float(c,to)?to:from;
- bool into=cc_type_is_float(c,to),x87=AST_TYPE_KIND(c,fp)==AST_TYPE_LONG_DOUBLE&&c->o->target==PP_LINUX_X86_64;
+ bool into=cc_type_is_float(c,to),x87=AST_TYPE_KIND(c,fp)==AST_TYPE_LONG_DOUBLE&&CC_X86_64(c);
  int k=AST_TYPE_KIND(c,fp),p=k==AST_TYPE_FLOAT16?10:k==AST_TYPE_BFLOAT16?7:k==AST_TYPE_FLOAT?23:k==AST_TYPE_DOUBLE?52:x87?63:112;
  int bias=k==AST_TYPE_FLOAT16?15:k==AST_TYPE_BFLOAT16||k==AST_TYPE_FLOAT?127:k==AST_TYPE_DOUBLE?1023:16383;
  int eb=k==AST_TYPE_FLOAT16?5:k==AST_TYPE_BFLOAT16||k==AST_TYPE_FLOAT?8:k==AST_TYPE_DOUBLE?11:15;

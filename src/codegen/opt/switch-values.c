@@ -201,10 +201,10 @@ VPRIV void em_switch_values_emit(codegen_context *e)
   uint32_t ref=CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE,t->node);
   unsigned p2=t->bytes==8?3:t->bytes==4?2:t->bytes==2?1:0;
   size_t len=(size_t)t->slots*t->bytes, h=codegen_item_open(e,CODEGEN_ITEM_TEXT);
-  if (WASM(e->c)) {
+  if (WASM(e->compile_context)) {
    vtext_string_append(&e->out,"\t.section\t.rodata.");codegen_reference_name_append(e->compile_context,&e->out,ref);
    vtext_string_append(&e->out,",\"\",@\n");
-  } else vtext_string_append(&e->out,"\t.section\t.rodata,\"a\",@progbits\n");
+  } else vtext_string_append(&e->out,CODEGEN_IS_WIN64(e->compile_context)?"\t.section\t.rdata,\"dr\"\n":"\t.section\t.rodata,\"a\",@progbits\n");
   vtext_format_append(&e->out,"\t.p2align\t%u\n",p2);
   codegen_item_close(e,h);
   if (codegen_context_is_direct(e)) {
@@ -217,7 +217,7 @@ VPRIV void em_switch_values_emit(codegen_context *e)
     vtext_unsigned_append(&e->out,t->data[i]);
     vtext_char_append(&e->out,'\n');
    }
-   if (WASM(e->c)) {
+   if (WASM(e->compile_context)) {
     vtext_string_append(&e->out,"\t.size\t");codegen_reference_name_append(e->compile_context,&e->out,ref);
     vtext_format_append(&e->out,", %llu\n",(unsigned long long)len);
    }

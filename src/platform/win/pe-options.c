@@ -1,0 +1,641 @@
+/*
+ * The command line: GNU ld's options as lld's MinGW driver (lld/MinGW)
+ * accepts them, with its defaults for x86-64 (-m i386pep).  Long options take
+ * one or two dashes, values after '=' or as the next argument.  Inputs and
+ * -l libraries keep their order; the library search is the driver's
+ * (lib<name>.dll.a, <name>.dll.a, lib<name>.a, <name>.lib, ... per -L
+ * directory, the .dll.a forms only under -Bdynamic).
+ */
+
+typedef struct {
+	const char *path;
+	bool whole_archive;
+} pe_input_arg;
+
+static pe_input_arg *pe_inputs;
+static uint32_t pe_input_count, pe_input_capacity;
+static const char **pe_search_dirs;
+static uint32_t pe_search_dir_count, pe_search_dir_capacity;
+static const char *pe_sysroot;
+static const char *pe_machine_name;	/* -m other than i386pep: the machine every x64 input conflicts with */
+
+/* matches -NAME / --NAME exactly */
+static bool pe_flag(const char *a, const char *name)
+{
+	if (a[0] != '-')
+		return false;
+	a += a[1] == '-' ? 2 : 1;
+	return !strcmp(a, name);
+}
+
+/* -NAME=V, --NAME=V, -NAME V, --NAME V: the value, or NULL */
+static const char *pe_value(int argc, char **argv, int *i, const char *name)
+{
+	const char *a = argv[*i];
+	if (a[0] != '-')
+		return NULL;
+	a += a[1] == '-' ? 2 : 1;
+	size_t n = strlen(name);
+	if (strncmp(a, name, n))
+		return NULL;
+	if (a[n] == '=')
+		return a + n + 1;
+	if (a[n])
+		return NULL;
+	if (*i + 1 >= argc) {
+		pe_error("-%s: missing argument", name);
+		return "";
+	}
+	return argv[++*i];
+}
+
+/* single-letter options: -oX or -o X */
+static const char *pe_short(int argc, char **argv, int *i, char c)
+{
+	const char *a = argv[*i];
+	if (a[0] != '-' || a[1] != c)
+		return NULL;
+	if (a[2])
+		return a + 2;
+	if (*i + 1 >= argc) {
+		pe_error("-%c: missing argument", c);
+		return "";
+	}
+	return argv[++*i];
+}
+
+static bool pe_parse_u64(const char *s, uint64_t *v)
+{
+	if (!*s)
+		return false;
+	char *end;
+	errno = 0;
+	unsigned long long x = strtoull(s, &end, 0);
+	if (errno || *end)
+		return false;
+	*v = x;
+	return true;
+}
+
+/* "R[,C]" */
+static void pe_parse_reserve_commit(const char *opt, const char *s, uint64_t *reserve, uint64_t *commit)
+{
+	const char *comma = strchr(s, ',');
+	char *a = pe_strndup(s, comma ? (size_t)(comma - s) : strlen(s));
+	if (!pe_parse_u64(a, reserve))
+		pe_error("%s: invalid number: %s", opt, a);
+	if (comma && !pe_parse_u64(comma + 1, commit))
+		pe_error("%s: invalid number: %s", opt, comma + 1);
+}
+
+/* "MAJOR[.MINOR]" */
+static void pe_parse_version(const char *opt, const char *s, uint16_t *major, uint16_t *minor)
+{
+	const char *dot = strchr(s, '.');
+	char *a = pe_strndup(s, dot ? (size_t)(dot - s) : strlen(s));
+	uint64_t v;
+	if (!pe_parse_u64(a, &v) || v > 0xffff)
+		pe_error("%s: invalid number: %s", opt, a);
+	else
+		*major = (uint16_t)v;
+	if (dot) {
+		if (!pe_parse_u64(dot + 1, &v) || v > 0xffff)
+			pe_error("%s: invalid number: %s", opt, dot + 1);
+		else
+			*minor = (uint16_t)v;
+	} else
+		*minor = 0;
+}
+
+static bool pe_file_exists(const char *p)
+{
+	struct stat st;
+	return fstatat(pe_dirfd, p, &st, 0) == 0 && S_ISREG(st.st_mode);
+}
+
+static const char *pe_path_join(const char *dir, const char *name)
+{
+	size_t n = strlen(dir);
+	if (n && dir[n - 1] == '/')
+		return pe_format("%s%s", dir, name);
+	return pe_format("%s/%s", dir, name);
+}
+
+/* lld/MinGW searchLibrary */
+static const char *pe_library_search(const char *name, bool bstatic)
+{
+	if (name[0] == ':') {
+		for (uint32_t d = 0; d < pe_search_dir_count; d++) {
+			const char *p = pe_path_join(pe_search_dirs[d], name + 1);
+			if (pe_file_exists(p))
+				return p;
+		}
+		pe_error("unable to find library -l%s", name);
+		return NULL;
+	}
+	for (uint32_t d = 0; d < pe_search_dir_count; d++) {
+		const char *dir = pe_search_dirs[d], *p;
+		if (!bstatic) {
+			if (pe_file_exists(p = pe_path_join(dir, pe_format("lib%s.dll.a", name))))
+				return p;
+			if (pe_file_exists(p = pe_path_join(dir, pe_format("%s.dll.a", name))))
+				return p;
+		}
+		if (pe_file_exists(p = pe_path_join(dir, pe_format("lib%s.a", name))))
+			return p;
+		if (pe_file_exists(p = pe_path_join(dir, pe_format("%s.lib", name))))
+			return p;
+		if (!bstatic) {
+			if (pe_file_exists(p = pe_path_join(dir, pe_format("lib%s.lib", name))))
+				return p;
+			if (pe_file_exists(p = pe_path_join(dir, pe_format("%s.a", name)))) {
+				pe_warn("found library file %s for -l%s, which doesn't follow the naming convention", p, name);
+				return p;
+			}
+		}
+	}
+	pe_error("unable to find library -l%s", name);
+	return NULL;
+}
+
+static void pe_input_add(const char *path, bool whole)
+{
+	pe_input_arg a = { path, whole };
+	PE_PUSH(pe_inputs, pe_input_count, pe_input_capacity, a);
+}
+
+static void pe_export_add(const pe_export *e)
+{
+	PE_PUSH(cfg.exports, cfg.nexports, cfg.export_capacity, *e);
+}
+
+/* "NAME[,data]" or "NAME=OTHER[,data]" as in a .def file or -export: (lld parseExport) */
+static void pe_export_parse(const char *spec, bool from_directive)
+{
+	pe_export e = {0};
+	e.from_directive = from_directive;
+	const char *comma = strchr(spec, ',');
+	char *name = pe_strndup(spec, comma ? (size_t)(comma - spec) : strlen(spec));
+	char *eq = strchr(name, '=');
+	if (eq) {
+		*eq = 0;
+		e.name = name;
+		e.symbol_name = eq + 1;
+	} else
+		e.name = e.symbol_name = name;
+	while (comma) {
+		const char *next = strchr(comma + 1, ',');
+		char *tok = pe_strndup(comma + 1, next ? (size_t)(next - comma - 1) : strlen(comma + 1));
+		for (char *c = tok; *c; c++)
+			*c = (char)tolower((unsigned char)*c);
+		if (!strcmp(tok, "data"))
+			e.data = true;
+		else if (!strcmp(tok, "constant"))
+			e.constant = true;
+		else if (!strcmp(tok, "private"))
+			e.private_ = true;
+		else if (!strcmp(tok, "noname"))
+			e.no_name = true;
+		else if (tok[0] == '@') {
+			uint64_t v;
+			if (pe_parse_u64(tok + 1, &v) && v && v < 0x10000)
+				e.ordinal = (uint16_t)v;
+			else
+				pe_error("invalid /export: %s", spec);
+		} else
+			pe_error("invalid /export: %s", spec);
+		comma = next;
+	}
+	pe_export_add(&e);
+}
+
+/* a module-definition file named as an input (lld's -def:): LIBRARY and EXPORTS */
+static void pe_def_file_read(const char *path)
+{
+	int fd = openat(pe_dirfd, path, O_RDONLY | O_CLOEXEC);
+	struct stat st;
+	if (fd < 0 || fstat(fd, &st) < 0) {
+		pe_error("could not open '%s': %s", path, strerror(errno));
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+	char *text = pe_alloc((size_t)st.st_size + 1);
+	ssize_t got = read(fd, text, (size_t)st.st_size);
+	close(fd);
+	if (got < 0)
+		got = 0;
+	text[got] = 0;
+	bool in_exports = false;
+	for (char *line = text; line && *line;) {
+		char *nl = strchr(line, '\n');
+		if (nl)
+			*nl = 0;
+		char *semi = strchr(line, ';');
+		if (semi)
+			*semi = 0;
+		/* tokens: words, '=', '@N' */
+		char *tok[16];
+		int nt = 0;
+		for (char *p = line; *p && nt < 16;) {
+			while (*p == ' ' || *p == '\t' || *p == '\r')
+				p++;
+			if (!*p)
+				break;
+			if (*p == '=') {
+				tok[nt++] = "=";
+				p++;
+				continue;
+			}
+			char *b = p;
+			if (*p == '"') {
+				b = ++p;
+				while (*p && *p != '"')
+					p++;
+			} else
+				while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '=')
+					p++;
+			char c = *p;
+			tok[nt++] = pe_strndup(b, (size_t)(p - b));
+			if (c == '"')
+				p++;
+		}
+		line = nl ? nl + 1 : NULL;
+		if (!nt)
+			continue;
+		if (!strcasecmp(tok[0], "EXPORTS")) {
+			in_exports = true;
+			continue;
+		}
+		if (!strcasecmp(tok[0], "LIBRARY") || !strcasecmp(tok[0], "NAME") || !strcasecmp(tok[0], "HEAPSIZE") ||
+		    !strcasecmp(tok[0], "STACKSIZE") || !strcasecmp(tok[0], "VERSION") || !strcasecmp(tok[0], "SECTIONS") ||
+		    !strcasecmp(tok[0], "DESCRIPTION")) {
+			in_exports = false;
+			continue;
+		}
+		if (!in_exports) {
+			pe_error("%s: unknown directive: %s", path, tok[0]);
+			continue;
+		}
+		pe_export e = {0};
+		e.name = e.symbol_name = tok[0];
+		int k = 1;
+		if (k + 1 < nt && !strcmp(tok[k], "=")) {
+			e.symbol_name = tok[k + 1];
+			k += 2;
+		}
+		for (; k < nt; k++) {
+			if (tok[k][0] == '@') {
+				uint64_t v;
+				if (pe_parse_u64(tok[k] + 1, &v) && v && v < 0x10000)
+					e.ordinal = (uint16_t)v;
+				else
+					pe_error("%s: invalid ordinal: %s", path, tok[k]);
+			} else if (!strcasecmp(tok[k], "NONAME"))
+				e.no_name = true;
+			else if (!strcasecmp(tok[k], "DATA"))
+				e.data = true;
+			else if (!strcasecmp(tok[k], "CONSTANT"))
+				e.constant = true;
+			else if (!strcasecmp(tok[k], "PRIVATE"))
+				e.private_ = true;
+			else
+				pe_error("%s: invalid export attribute: %s", path, tok[k]);
+		}
+		if (strchr(e.symbol_name, '.') && e.symbol_name != e.name)
+			e.forward_to = e.symbol_name;	/* NAME = DLL.FUNC */
+		pe_export_add(&e);
+	}
+}
+
+static const char *pe_with_sysroot(const char *p)
+{
+	if (p[0] == '=' && pe_sysroot)
+		return pe_format("%s%s", pe_sysroot, p + 1);
+	return p;
+}
+
+/* options lld's MinGW driver accepts and ignores */
+static const char *const pe_ignored_flags[] = {
+	"start-group", "end-group", "(", ")", "no-undefined", "enable-auto-image-base", "disable-auto-image-base",
+	"nxcompat", "no-keep-memory", "as-needed", "no-as-needed",
+	"sort-common", "no-seh", "disable-no-seh", "no-copy-dt-needed-entries", "eh-frame-hdr",
+	"enable-stdcall-fixup", "disable-stdcall-fixup", "no-relax", "relax", "warn-common", "no-warn-mismatch",
+	"enable-long-section-names", "disable-long-section-names", "full-shutdown", "no-allow-shlib-undefined",
+	"pic-executable",
+	NULL,
+};
+static const char *const pe_ignored_values[] = {
+	"plugin", "plugin-opt", "threads", "error-limit", "O", "mllvm", "lto-O", "lto-CGO", "thinlto-cache-dir",
+	"exclude-modules-for-implib", "sort-section", "hash-style", "dependent-load-flag",
+	NULL,
+};
+
+static bool pe_subsystem_parse(const char *s)
+{
+	const char *colon = strchr(s, ':');
+	char *n = pe_strndup(s, colon ? (size_t)(colon - s) : strlen(s));
+	static const struct { const char *name; uint16_t v; } tab[] = {
+		{ "windows", IMAGE_SUBSYSTEM_WINDOWS_GUI }, { "console", IMAGE_SUBSYSTEM_WINDOWS_CUI },
+		{ "native", IMAGE_SUBSYSTEM_NATIVE }, { "posix", IMAGE_SUBSYSTEM_POSIX_CUI },
+		{ "wince", IMAGE_SUBSYSTEM_WINDOWS_CE_GUI }, { "efi_application", IMAGE_SUBSYSTEM_EFI_APPLICATION },
+		{ "efi_boot_service_driver", IMAGE_SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER },
+		{ "efi_rom", IMAGE_SUBSYSTEM_EFI_ROM }, { "efi_runtime_driver", IMAGE_SUBSYSTEM_EFI_RUNTIME_DRIVER },
+		{ "boot_application", IMAGE_SUBSYSTEM_WINDOWS_BOOT_APPLICATION }, { "xbox", IMAGE_SUBSYSTEM_XBOX },
+	};
+	for (char *c = n; *c; c++)
+		*c = (char)tolower((unsigned char)*c);
+	for (size_t i = 0; i < sizeof tab / sizeof tab[0]; i++)
+		if (!strcmp(n, tab[i].name)) {
+			cfg.subsystem = tab[i].v;
+			if (colon) {
+				pe_parse_version("--subsystem", colon + 1, &cfg.major_subsystem, &cfg.minor_subsystem);
+				cfg.subsystem_version_set = true;
+				cfg.major_os = cfg.major_subsystem;
+				cfg.minor_os = cfg.minor_subsystem;
+			}
+			return true;
+		}
+	pe_error("unknown subsystem: %s", n);
+	return false;
+}
+
+/* (no capacity kept: these lists are short, each append reallocates) */
+#define PE_PUSH_STR(v, n, x) do { uint32_t pe_cap_ = (n); VVECTOR_APPEND(v, n, pe_cap_, x); } while (0)
+
+/* the options that set one bool of cfg */
+static const struct { const char *name; bool *field; bool value; } pe_bool_options[] = {
+	{ "gc-sections", &cfg.gc, true },
+	{ "no-gc-sections", &cfg.gc, false },
+	{ "verbose", &cfg.verbose, true },
+	{ "dynamicbase", &cfg.dynamic_base, true },
+	{ "disable-dynamicbase", &cfg.dynamic_base, false },
+	{ "no-dynamicbase", &cfg.dynamic_base, false },
+	{ "high-entropy-va", &cfg.high_entropy_va, true },
+	{ "disable-high-entropy-va", &cfg.high_entropy_va, false },
+	{ "disable-nxcompat", &cfg.nx_compat, false },
+	{ "tsaware", &cfg.ts_aware, true },
+	{ "disable-tsaware", &cfg.ts_aware, false },
+	{ "large-address-aware", &cfg.large_address_aware, true },
+	{ "appcontainer", &cfg.appcontainer, true },
+	{ "disable-appcontainer", &cfg.appcontainer, false },
+	{ "disable-reloc-section", &cfg.relocatable, false },
+	{ "enable-reloc-section", &cfg.relocatable, true },
+	{ "insert-timestamp", &cfg.insert_timestamp, true },
+	{ "no-insert-timestamp", &cfg.insert_timestamp, false },
+	{ "enable-auto-import", &cfg.auto_import, true },
+	{ "disable-auto-import", &cfg.auto_import, false },
+	{ "enable-runtime-pseudo-reloc", &cfg.pseudo_relocs, true },
+	{ "disable-runtime-pseudo-reloc", &cfg.pseudo_relocs, false },
+	{ "exclude-all-symbols", &cfg.exclude_all, true },
+	{ "allow-multiple-definition", &cfg.allow_multiple, true },
+	{ "no-allow-multiple-definition", &cfg.allow_multiple, false },
+	{ "kill-at", &cfg.kill_at, true },
+	{ "demangle", &cfg.demangle, true },
+	{ "no-demangle", &cfg.demangle, false },
+	{ "fatal-warnings", &cfg.fatal_warnings, true },
+	{ "no-fatal-warnings", &cfg.fatal_warnings, false },
+};
+
+static bool pe_bool_option(const char *a)
+{
+	for (size_t k = 0; k < sizeof pe_bool_options / sizeof *pe_bool_options; k++)
+		if (pe_flag(a, pe_bool_options[k].name)) {
+			*pe_bool_options[k].field = pe_bool_options[k].value;
+			return true;
+		}
+	return false;
+}
+
+/* false: stop without linking (--version) */
+static bool pe_options_parse(int argc, char **argv)
+{
+	cfg.output = NULL;
+	cfg.subsystem = IMAGE_SUBSYSTEM_UNKNOWN;
+	cfg.major_subsystem = 6;
+	cfg.major_os = 6;
+	cfg.stack_reserve = 1 << 20;
+	cfg.stack_commit = 4096;
+	cfg.heap_reserve = 1 << 20;
+	cfg.heap_commit = 4096;
+	cfg.file_align = 512;
+	cfg.section_align = 4096;
+	cfg.dynamic_base = cfg.high_entropy_va = cfg.nx_compat = cfg.ts_aware = cfg.large_address_aware = true;
+	cfg.relocatable = true;
+	cfg.debug = 2;
+	int build_id = -1;	/* default: with DWARF (not -s, not -S) */
+	cfg.insert_timestamp = true;
+	cfg.auto_import = cfg.pseudo_relocs = true;
+	cfg.demangle = true;
+	cfg.allow_duplicate_weak = true;
+	bool bstatic = false, whole = false, have_m = false;
+	const char *m = NULL;
+
+	for (int i = 1; i < argc; i++) {
+		const char *a = argv[i], *v;
+		if (a[0] != '-' || !a[1]) {
+			size_t al = strlen(a);
+			if (al > 4 && !strcasecmp(a + al - 4, ".def"))
+				pe_def_file_read(a);
+			else
+				pe_input_add(pe_with_sysroot(a), whole);
+			continue;
+		}
+		/* static/dynamic library search */
+		if (pe_flag(a, "Bstatic") || pe_flag(a, "static") || pe_flag(a, "dn") || pe_flag(a, "non_shared")) { bstatic = true; continue; }
+		if (pe_flag(a, "Bdynamic") || pe_flag(a, "dy") || pe_flag(a, "call_shared")) { bstatic = false; continue; }
+		if (pe_flag(a, "whole-archive")) { whole = true; continue; }
+		if (pe_flag(a, "no-whole-archive")) { whole = false; continue; }
+		if (pe_flag(a, "shared") || pe_flag(a, "dll")) { cfg.dll = true; continue; }
+		if (pe_bool_option(a)) continue;
+		if (pe_flag(a, "strip-all")) { cfg.debug = 0; continue; }
+		if (pe_flag(a, "strip-debug")) { if (cfg.debug) cfg.debug = 1; continue; }
+		if (pe_flag(a, "version")) {
+			fprintf(stdout, "vlink (compatible with GNU linkers)\n");
+			return false;
+		}
+		if (pe_flag(a, "export-all-symbols")) { cfg.export_all = cfg.export_all_set = true; continue; }
+		if (pe_flag(a, "build-id")) { build_id = 1; continue; }
+		if ((v = pe_value(argc, argv, &i, "build-id"))) {
+			if (!strcmp(v, "none"))
+				build_id = 0;
+			else {
+				if (*v && strcmp(v, "fast") && strcmp(v, "md5") && strcmp(v, "sha1") && strcmp(v, "tree") && strcmp(v, "uuid"))
+					pe_warn("unsupported build id hashing: %s, using default hashing.", v);
+				build_id = 1;
+			}
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "entry"))) { cfg.entry = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "subsystem"))) { pe_subsystem_parse(v); continue; }
+		if ((v = pe_value(argc, argv, &i, "image-base"))) {
+			if (!pe_parse_u64(v, &cfg.image_base))
+				pe_error("--image-base: invalid number: %s", v);
+			cfg.image_base_set = true;
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "stack"))) { pe_parse_reserve_commit("--stack", v, &cfg.stack_reserve, &cfg.stack_commit); continue; }
+		if ((v = pe_value(argc, argv, &i, "heap"))) { pe_parse_reserve_commit("--heap", v, &cfg.heap_reserve, &cfg.heap_commit); continue; }
+		if ((v = pe_value(argc, argv, &i, "file-alignment"))) {
+			uint64_t x;
+			if (!pe_parse_u64(v, &x) || !x || (x & (x - 1)))
+				pe_error("--file-alignment: invalid number: %s", v);
+			else
+				cfg.file_align = (uint32_t)x;
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "section-alignment"))) {
+			uint64_t x;
+			if (!pe_parse_u64(v, &x) || !x || (x & (x - 1)))
+				pe_error("--section-alignment: invalid number: %s", v);
+			else
+				cfg.section_align = (uint32_t)x;
+			continue;
+		}
+		uint16_t *vmaj = NULL, *vmin = NULL;
+		bool is_major = false;
+		if ((v = pe_value(argc, argv, &i, "major-os-version"))) { vmaj = &cfg.major_os; is_major = true; }
+		else if ((v = pe_value(argc, argv, &i, "minor-os-version"))) vmin = &cfg.minor_os;
+		else if ((v = pe_value(argc, argv, &i, "major-image-version"))) { vmaj = &cfg.major_image; is_major = true; }
+		else if ((v = pe_value(argc, argv, &i, "minor-image-version"))) vmin = &cfg.minor_image;
+		else if ((v = pe_value(argc, argv, &i, "major-subsystem-version"))) { vmaj = &cfg.major_subsystem; is_major = true; cfg.subsystem_version_set = true; }
+		else if ((v = pe_value(argc, argv, &i, "minor-subsystem-version"))) { vmin = &cfg.minor_subsystem; cfg.subsystem_version_set = true; }
+		if (v) {
+			uint64_t x;
+			if (!pe_parse_u64(v, &x) || x > 0xffff)
+				pe_error("invalid number: %s", v);
+			else if (vmaj == &cfg.major_image || vmin == &cfg.minor_image)
+				;	/* lld 23 accepts the image version and writes 0.0: so does vlink */
+			else if (is_major)
+				*vmaj = (uint16_t)x;
+			else
+				*vmin = (uint16_t)x;
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "out-implib"))) { cfg.implib = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "output-def"))) { pe_error("--output-def is not supported by vlink"); continue; }
+		if ((v = pe_value(argc, argv, &i, "Map"))) { cfg.map_file = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "require-defined"))) { PE_PUSH_STR(cfg.includes, cfg.nincludes, v); continue; }
+		if ((v = pe_value(argc, argv, &i, "undefined"))) { PE_PUSH_STR(cfg.optional_includes, cfg.noptional_includes, v); continue; }
+		if ((v = pe_value(argc, argv, &i, "sysroot"))) { pe_sysroot = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "output"))) { cfg.output = v; continue; }
+		if ((v = pe_value(argc, argv, &i, "library-path"))) { PE_PUSH_STR(pe_search_dirs, pe_search_dir_count, pe_with_sysroot(v)); continue; }
+		if ((v = pe_value(argc, argv, &i, "library"))) {
+			const char *p = pe_library_search(v, bstatic);
+			if (p)
+				pe_input_add(p, whole);
+			continue;
+		}
+		if ((pe_flag(a, "exclude-libs") && (v = pe_value(argc, argv, &i, "exclude-libs")))) {
+			for (const char *s = v; *s;) {
+				size_t n = strcspn(s, ",:");
+				char *lib = pe_strndup(s, n);
+				if (!strcmp(lib, "ALL"))
+					cfg.exclude_libs_all = true;
+				else if (*lib)
+					PE_PUSH_STR(cfg.exclude_libs, cfg.nexclude_libs, lib);
+				s += n;
+				if (*s)
+					s++;
+			}
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "exclude-symbols"))) {
+			for (const char *s = v; *s;) {
+				size_t n = strcspn(s, ",:");
+				if (n)
+					PE_PUSH_STR(cfg.exclude_symbols, cfg.nexclude_symbols, pe_strndup(s, n));
+				s += n;
+				if (*s)
+					s++;
+			}
+			continue;
+		}
+		if ((v = pe_value(argc, argv, &i, "icf"))) {
+			if (strcmp(v, "none"))
+				pe_error("--icf=%s is not supported by vlink", v);
+			continue;
+		}
+		/* things lld implements that this linker does not (yet): a clear error */
+		{
+			static const char *const unsupported_values[] = {
+				"wrap", "defsym", "delayload", "pdb", "reproduce", "Xlink", "guard-cf", "guard-longjmp",
+				"version-script", "retain-symbols-file", "dependency-file", "lto-emit-asm", "use-temp-file", NULL,
+			};
+			bool done = false;
+			for (const char *const *u = unsupported_values; *u && !done; u++)
+				if ((v = pe_value(argc, argv, &i, *u))) {
+					pe_error("-%s%s is not supported by vlink", a[1] == '-' ? "-" : "", *u);
+					done = true;
+				}
+			if (done)
+				continue;
+			if (pe_flag(a, "guard-cf") || pe_flag(a, "guard-longjmp") || pe_flag(a, "pdb") || pe_flag(a, "Xlink")) {
+				pe_error("%s is not supported by vlink", a);
+				continue;
+			}
+			if (pe_flag(a, "no-guard-cf") || pe_flag(a, "no-guard-longjmp"))
+				continue;
+		}
+		bool ignored = false;
+		for (const char *const *f = pe_ignored_flags; *f && !ignored; f++)
+			ignored = pe_flag(a, *f);
+		for (const char *const *f = pe_ignored_values; *f && !ignored; f++)
+			ignored = pe_value(argc, argv, &i, *f) != NULL;
+		if (ignored)
+			continue;
+		if (a[1] == '-') {
+			pe_error("unknown argument: %s", a);
+			continue;
+		}
+		/* single-letter options (-o -l -L -e -u -m -s -S -O -v), after the long ones */
+		switch (a[1]) {
+		case 'o': cfg.output = pe_short(argc, argv, &i, 'o'); continue;
+		case 'l': {
+			v = pe_short(argc, argv, &i, 'l');
+			const char *p = pe_library_search(v, bstatic);
+			if (p)
+				pe_input_add(p, whole);
+			continue;
+		}
+		case 'L': v = pe_short(argc, argv, &i, 'L'); PE_PUSH_STR(pe_search_dirs, pe_search_dir_count, pe_with_sysroot(v)); continue;
+		case 'e': cfg.entry = pe_short(argc, argv, &i, 'e'); continue;
+		case 'u': v = pe_short(argc, argv, &i, 'u'); PE_PUSH_STR(cfg.optional_includes, cfg.noptional_includes, v); continue;
+		case 'm': m = pe_short(argc, argv, &i, 'm'); have_m = true; continue;
+		case 's': if (!a[2]) { cfg.debug = 0; continue; } break;
+		case 'S': if (!a[2]) { if (cfg.debug) cfg.debug = 1; continue; } break;
+		case 'O': continue;	/* -O<level>: ignored */
+		case 'v': if (!a[2]) { fprintf(stdout, "vlink (compatible with GNU linkers)\n"); continue; } break;
+		case '(': case ')': if (!a[2]) continue; break;
+		}
+		pe_error("unknown argument: %s", a);
+	}
+	cfg.build_id = build_id < 0 ? cfg.debug == 2 : build_id;
+
+	if (have_m && strcmp(m, "i386pep")) {
+		/* other machines are known to lld; their inputs then conflict with x64 objects */
+		if (!strcmp(m, "i386pe"))
+			pe_machine_name = "x86";
+		else if (!strcmp(m, "thumb2pe"))
+			pe_machine_name = "arm";
+		else if (!strcmp(m, "arm64pe"))
+			pe_machine_name = "arm64";
+		else if (!strcmp(m, "arm64ecpe"))
+			pe_machine_name = "arm64ec";
+		else if (!strcmp(m, "arm64xpe"))
+			pe_machine_name = "arm64x";
+		else
+			pe_error("unknown parameter: -m%s", m);
+	}
+	if (!cfg.output)
+		cfg.output = cfg.dll ? "a.dll" : "a.exe";
+	if (!cfg.image_base_set)
+		cfg.image_base = cfg.dll ? 0x180000000ull : 0x140000000ull;
+	if (cfg.dll)
+		cfg.ts_aware = false;
+	if (!cfg.relocatable)
+		cfg.dynamic_base = false;	/* (lld-link -fixed) */
+	if (!pe_input_count && !pe_error_count)
+		pe_error("no input files");
+	return true;
+}

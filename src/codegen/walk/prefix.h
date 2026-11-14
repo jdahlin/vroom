@@ -12,6 +12,7 @@
 #define walk_array_element_drop WALK_NAME(walk_array_element_drop)
 #define walk_array_element_find WALK_NAME(walk_array_element_find)
 #define walk_array_element_of WALK_NAME(walk_array_element_of)
+#define wk_alloca WALK_NAME(wk_alloca)
 #define walk_array_elements_clear WALK_NAME(walk_array_elements_clear)
 #define walk_assignment_emit WALK_NAME(walk_assignment_emit)
 #define walk_assignment_emit_inner WALK_NAME(walk_assignment_emit_inner)

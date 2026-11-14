@@ -144,7 +144,7 @@ static uint32_t cc_vector_swizzle_build(cc *c, uint32_t n, uint32_t id, uint32_t
 			b = cc_cast_insert(c, cc_address_of_build(c, n, loc), cc_type_pointer(c, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(et), AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE(n)->ty))), AST_CAST_POINTER_TO_POINTER);
 		else
 			b = cc_cast_insert(c, cc_node_rvalue(c, n), cc_type_pointer(c, et), AST_CAST_VECTOR_ADDRESS);
-		b = cc_node_new_operands(c, AST_NODE_INDEX, AST_TYPE(c, AST_NODE(b)->ty)->base, loc, cc_node_rvalue(c, b), cc_node_integer_new(c, ix[0], cc_type_basic(AST_TYPE_LONG), loc));
+		b = cc_node_new_operands(c, AST_NODE_INDEX, AST_TYPE(c, AST_NODE(b)->ty)->base, loc, cc_node_rvalue(c, b), cc_node_integer_new(c, ix[0], c->t_ptrdiff, loc));
 		AST_NODE(b)->flags = AST_NODE_FLAG_LVALUE;
 		AST_NODE(b)->c = vt;
 		return b;
@@ -235,7 +235,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r, uint3
 	}
 	if ((op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) && cc_type_is_pointer(c, lt) && cc_type_is_integer(c, rt)) {
 		cc_pointer_void_arithmetic_check(c, lt, loc, false);
-		r = cc_conversion_apply(c, r, cc_type_basic(AST_TYPE_LONG));
+		r = cc_conversion_apply(c, r, c->t_ptrdiff);
 		return cc_node_binary_new(c, op, lt, l, r, loc);
 	}
 	if (op == LEX_TOKEN_MINUS && cc_type_is_pointer(c, lt) && cc_type_is_pointer(c, rt)) {
@@ -289,7 +289,7 @@ CC_PRIVATE uint32_t cc_assignment_build(cc *c, int op, uint32_t l, uint32_t r, u
 		rt = AST_NODE(r)->ty;
 		if (cc_type_is_pointer(c, lt) && (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS)) {
 			cc_pointer_void_arithmetic_check(c, lt, loc, false);
-			r = cc_conversion_apply(c, r, cc_type_basic(AST_TYPE_LONG));
+			r = cc_conversion_apply(c, r, c->t_ptrdiff);
 			pt = lt;
 		} else if (cc_type_is_vector(c, lt)) {
 			if (cc_type_is_bool_vector(c, lt) && op != LEX_TOKEN_AMPERSAND && op != LEX_TOKEN_PIPE && op != LEX_TOKEN_CARET)
@@ -1096,7 +1096,7 @@ CC_PRIVATE __attribute__((noinline)) uint32_t cc_postfix_operators_parse(cc *c, 
 			}
 			if (AST_TYPE_KIND(c, AST_TYPE(c, at)->base) == AST_TYPE_SVE_BUILTIN)
 				cc_pointer_void_arithmetic_check(c, at, loc, false);
-			r = cc_node_new_operands(c, AST_NODE_INDEX, AST_TYPE(c, at)->base, loc, n, cc_conversion_apply(c, ix, cc_type_basic(AST_TYPE_LONG)));
+			r = cc_node_new_operands(c, AST_NODE_INDEX, AST_TYPE(c, at)->base, loc, n, cc_conversion_apply(c, ix, c->t_ptrdiff));
 			AST_NODE(r)->flags = AST_NODE_FLAG_LVALUE;
 			AST_NODE(r)->c = vector_type;
 			if (vector_type && cc_type_is_bool_vector(c, vector_type)) AST_NODE(r)->aux = 1;

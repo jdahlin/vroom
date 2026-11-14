@@ -109,6 +109,8 @@ static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
 	[X64_OP_X87] = X_DESC(X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
 	[X64_OP_RESUME_FRAME] = { .flags = RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X64_REGISTER_BIT(R12), .implicit_used = X64_REGISTER_BIT(RBP) },
+	[X64_OP_PROBE] = { .flags = RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER | X_W, .implicit_used = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RSP) },
+	[X64_OP_FRAMEADDR] = { .registers = X_D, .flags = X_P, .implicit_used = X64_REGISTER_BIT(RBP) },
 };
 
 static record_register_mask x64_effect_register_mask(unsigned r)
@@ -161,6 +163,8 @@ VPRIV record_effects x64_record_effects(const codegen_context *e, const record *
 		} else if (i->condition) {
 			f.flags |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
+		if (e && CODEGEN_IS_WIN64(e->compile_context))
+			f.defines |= X64_REGISTER_BIT(R11); /* Windows: _tls_index through r11 */
 	} else if (i->opcode == X64_OP_REP) {
 		if (i->condition) f.used |= X64_REGISTER_BIT(RAX);
 		else f.defines |= X64_REGISTER_BIT(RSI), f.used |= X64_REGISTER_BIT(RSI);
@@ -265,6 +269,8 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X64_OP_CVTF2F] = RECORD_FLOW_NEXT,
 		[X64_OP_X87] = RECORD_FLOW_NEXT,
 		[X64_OP_RESUME_FRAME] = RECORD_FLOW_NEXT,
+		[X64_OP_PROBE] = RECORD_FLOW_NEXT,
+		[X64_OP_FRAMEADDR] = RECORD_FLOW_NEXT,
 	};
 	return flow;
 }

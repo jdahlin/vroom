@@ -11,7 +11,7 @@
 enum { XR_NONE, XR_GPR, XR_XMM, XR_ST, XR_SEG, XR_RIP, XR_CR, XR_DR, XR_ZMM, XR_MASK, XR_MM };
 enum { XK_REG, XK_IMM, XK_MEM, XK_EXPR };	/* XK_EXPR: a bare expression (branch target, absolute memory) */
 /* relocation modifiers: sym@MOD */
-enum { XM_NONE, XM_PLT, XM_GOTPCREL, XM_TPOFF, XM_GOTTPOFF, XM_TLSGD, XM_TLSLD, XM_DTPOFF, XM_GOTOFF, XM_GOT };
+enum { XM_NONE, XM_PLT, XM_GOTPCREL, XM_TPOFF, XM_GOTTPOFF, XM_TLSGD, XM_TLSLD, XM_DTPOFF, XM_GOTOFF, XM_GOT, XM_IMGREL, XM_SECREL };	/* (the last two: COFF) */
 
 typedef struct {
 	uint8_t kind, cls, reg, size, hi8, star, needrex;	/* register: class, number, size; hi8: ah..bh */

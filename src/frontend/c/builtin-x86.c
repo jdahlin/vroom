@@ -8,7 +8,7 @@ CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b, cc_
 	bool explicit = strstr(b->name, "pcmpestr") != NULL;
 	unsigned count = explicit ? 5 : 3;
 	i128 imm;
-	if (c->o->target != PP_LINUX_X86_64) {
+	if (!CC_X86_64(c)) {
 		cc_report_error(c, loc, "'%s' requires an x86-64 target", b->name);
 		return cc_node_error_new(c, loc);
 	}

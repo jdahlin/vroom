@@ -1015,7 +1015,7 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 
 			if (!x)
 				continue;
-			for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags) & (ncap - 1); nh[k];
+			for (k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & (ncap - 1); nh[k];
 			     k = (k + 1) & (ncap - 1))
 				;
 			nh[k] = x;
@@ -1028,7 +1028,7 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 	{
 		const ctype *f = &c->ty[idx];
 
-		for (uint32_t k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags) & m;; k = (k + 1) & m)
+		for (uint32_t k = cc_type_function_hash(f->base, &c->params[f->aux], f->n, f->flags | f->ext << 8) & m;; k = (k + 1) & m)
 			if (!r->rf[k]) {
 				r->rf[k] = idx, r->rfn++;
 				return;
@@ -1049,7 +1049,7 @@ CC_PRIVATE __attribute__((noinline)) ast_qualified_type cc_replay_type_function(
 	c->fnhash = r->rf, c->fnhcap = r->rfcap, c->nfn = nfn;
 	rf_insert(r, c, AST_QUALIFIED_TYPE_INDEX(q));
 	o.a = AST_QUALIFIED_TYPE_INDEX(q);
-	o.t.kind = AST_TYPE_FUNCTION, o.t.flags = (uint8_t)flags, o.t.base = ret, o.t.n = n;
+	o.t.kind = AST_TYPE_FUNCTION, o.t.flags = (uint8_t)flags, o.t.ext = (uint16_t)(flags >> 8), o.t.base = ret, o.t.n = n;
 	VGROW(r->opar, n);
 	if (n)	/* par may be NULL (implicit, unprototyped): memcpy(_, NULL, 0) is UB */
 		memcpy(r->opar.v + r->opar.n, par, n * sizeof(ast_qualified_type));
@@ -1361,10 +1361,11 @@ static uint64_t opt_sig(const cc_options *o)
 	       (uint64_t)!!o->short_wchar << 10 | (uint64_t)o->std << 11 | (uint64_t)!!o->implicit_int << 20 |
 	       (uint64_t)!!o->gnu89_inline << 21 | (uint64_t)!!o->instrument << 22 |
 	       (uint64_t)!!o->general_regs_only << 23 | (uint64_t)!!o->no_builtin << 24 |
-	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28 | (uint64_t)o->strict_flex_arrays << 29;
+	       (uint64_t)!!o->implicit_fn << 25 | (uint64_t)!!o->emit << 26 | (uint64_t)!!o->fast_math << 27 | (uint64_t)!!o->c2y << 28 | (uint64_t)o->strict_flex_arrays << 29 |
+	       (uint64_t)!!o->ms_bitfields << 31;
 	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
 		sig = (sig ^ o->disabled_builtins[i]) * UINT64_C(1099511628211);
-	if (o->target == PP_LINUX_X86_64) {
+	if (PP_IS_X86_64(o->target)) {
 		const x86_features *sets[] = {&o->x86_features, &o->x86_disabled, &o->x86_raw, &o->x86_override_on, &o->x86_override_off};
 		sig = (sig ^ (uint64_t)o->x86_features_set) * UINT64_C(1099511628211);
 		for (unsigned k = 0; k < sizeof(sets)/sizeof(*sets); k++)
@@ -1720,7 +1721,7 @@ static bool lz_eq(const cc_lazy_function *a, const cc_lazy_function *b)
 	       a->loc == b->loc && (!a->npsyms || a->psyms == b->psyms) && a->npsyms == b->npsyms && a->plb == b->plb &&
 	       a->ple == b->ple && a->done == b->done && a->hc == b->hc && a->z.e == b->z.e && a->z.open == b->z.open &&
 	       a->z.close == b->z.close && a->z.base == b->z.base && a->z.cbase == b->z.cbase && a->z.ci == b->z.ci &&
-	       a->z.k == b->z.k && a->z.rloc == b->z.rloc && a->z.rflags == b->z.rflags;
+	       a->z.k == b->z.k && a->z.rloc == b->z.rloc && a->z.rflags == b->z.rflags && a->pack == b->pack;
 }
 
 /* what the region's own tokens did that stops an entry (all: also diagnostics and _Complex) */
@@ -2783,7 +2784,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 			VGROW(r->tpar, o->t.n);
 			for (uint32_t k = 0; k < o->t.n; k++)
 				r->tpar.v[k] = (ast_qualified_type)tr(&x, K_TYPE, e->opar[o->po + k]);
-			b = AST_QUALIFIED_TYPE_INDEX(cc_type_function(c, (ast_qualified_type)tr(&x, K_TYPE, o->t.base), r->tpar.v, o->t.n, o->t.flags));
+			b = AST_QUALIFIED_TYPE_INDEX(cc_type_function(c, (ast_qualified_type)tr(&x, K_TYPE, o->t.base), r->tpar.v, o->t.n, o->t.flags | o->t.ext << 8));
 		} else {
 			ctype t = o->t;
 

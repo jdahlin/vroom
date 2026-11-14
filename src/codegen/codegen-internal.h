@@ -109,8 +109,14 @@
 #define WASM(c) 0	/* wasm is not built (make VCC_WASM=1): the branches vanish */
 #endif
 #define WASM32(c) ((c)->o->target == PP_WASM32)
-/* x86-64 Linux: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md) */
-#define CODEGEN_IS_X64(c) ((c)->o->target == PP_LINUX_X86_64)
+/* the x86-64 CPU: codegen/walk/ and arch/x64/codegen/ generate the functions (PLAN-x86.md), for
+ * x86-64 Linux and Windows x64 */
+#define CODEGEN_IS_X64(c) PP_IS_X86_64((c)->o->target)
+/* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, SEH unwind directives, the
+ * Microsoft calling convention, LLP64) */
+#define CODEGEN_IS_WIN64(c) ((c)->o->target == PP_WIN64)
+/* -g's DWARF version: -gdwarf-N, else clang's default (MinGW 4, else 5); below 5 the main file is .file 1 */
+#define CODEGEN_DWARF_VERSION(c) ((c)->o->dbg_version ? (c)->o->dbg_version : CODEGEN_IS_WIN64(c) ? 4 : 5)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU
@@ -204,6 +210,8 @@ typedef struct codegen_unit {
 	_Atomic uint8_t *claimed;	/* per sym: queued for emission */
 	_Atomic uint8_t *strings_done;	/* per string: emitted */
 	_Atomic uint8_t *symbol_referenced;	/* per sym: referenced (for .weak of undefined syms) */
+	_Atomic uint8_t *refptr;	/* WIN64, per sym: reached through .refptr.NAME (the stub in the tail) */
+	_Atomic uint8_t stack_guard_refptr;	/* WIN64: -fstack-protector read .refptr.__stack_chk_guard */
 	_Atomic uint8_t *walked;
 	uint16_t *function_node_counts;		/* per function: AST nodes (prepass) */
 	uint8_t *inline_parameter_reads; /* parameter references outside a direct (void)param discard */
@@ -445,6 +453,8 @@ typedef struct codegen_context {
 	bool vir_try;		/* the VIR walker runs: an error is not reported, it makes the function fall back */
 	bool vir_lowering;		/* the records are VIR's lowering (a64_function_finish's clean-ups for it) */
 	const char *vir_failure_reason;	/* ... and why (NULL: it did not fail) */
+	bool msabi;		/* X86: the next WALK_LOWER(classify/call/params/va_*) uses the Microsoft x64 convention
+				   (the walker sets it from cc_func_abi right before each; PLAN-win64.md WIN2) */
 	struct em_switch_values_data *switch_values; /* accepted tables of this real function */
 } codegen_context;
 enum { CODEGEN_LIBRARY_MEMCPY, CODEGEN_LIBRARY_MEMSET, CODEGEN_LIBRARY_MEMMOVE, CODEGEN_LIBRARY_UDIVTI3, CODEGEN_LIBRARY_DIVTI3, CODEGEN_LIBRARY_UMODTI3, CODEGEN_LIBRARY_MODTI3, CODEGEN_LIBRARY_STRLEN,
@@ -455,7 +465,8 @@ enum { CODEGEN_LIBRARY_MEMCPY, CODEGEN_LIBRARY_MEMSET, CODEGEN_LIBRARY_MEMMOVE, 
        CODEGEN_LIBRARY_FLOATUNDITF, CODEGEN_LIBRARY_FLOATTITF, CODEGEN_LIBRARY_FLOATUNTITF, CODEGEN_LIBRARY_FIXTFSI, CODEGEN_LIBRARY_FIXTFDI, CODEGEN_LIBRARY_FIXUNSTFSI, CODEGEN_LIBRARY_FIXUNSTFDI,
        CODEGEN_LIBRARY_FIXTFTI, CODEGEN_LIBRARY_FIXUNSTFTI, CODEGEN_LIBRARY_EXTENDXFTF2, CODEGEN_LIBRARY_TRUNCTFXF2, CODEGEN_LIBRARY_EXTENDBFSF2, CODEGEN_LIBRARY_TRUNCSFBF2, CODEGEN_LIBRARY_TRUNCDFBF2, CODEGEN_LIBRARY_TRUNCXFBF2, CODEGEN_LIBRARY_TRUNCTFBF2, CODEGEN_LIBRARY_EXTENDHFSF2, CODEGEN_LIBRARY_TRUNCSFHF2, CODEGEN_LIBRARY_TRUNCDFHF2, CODEGEN_LIBRARY_TRUNCXFHF2, CODEGEN_LIBRARY_TRUNCTFHF2,
        CODEGEN_LIBRARY_FLOATTIXF, CODEGEN_LIBRARY_FLOATUNTIXF, CODEGEN_LIBRARY_FIXXFTI, CODEGEN_LIBRARY_FIXUNSXFTI,
-       CODEGEN_LIBRARY_FLOORF, CODEGEN_LIBRARY_CEILF, CODEGEN_LIBRARY_TRUNCF, CODEGEN_LIBRARY_ROUNDF, CODEGEN_LIBRARY_RINTF, CODEGEN_LIBRARY_NEARBYINTF, CODEGEN_LIBRARY_FABSF };
+       CODEGEN_LIBRARY_FLOORF, CODEGEN_LIBRARY_CEILF, CODEGEN_LIBRARY_TRUNCF, CODEGEN_LIBRARY_ROUNDF, CODEGEN_LIBRARY_RINTF, CODEGEN_LIBRARY_NEARBYINTF, CODEGEN_LIBRARY_FABSF,
+       FN___MAIN };	/* (MinGW: main calls __main first) */
 #define CODEGEN_FIXED_REFERENCE(k) CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_NAME, 0x8000000u + (k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
@@ -851,6 +862,8 @@ VPRIV void a64_abi_temporaries_restore(codegen_context *e, const a64_abi_spill *
 VPRIV void a64_call_memory_function_emit(codegen_context *e, int fn, int a0, int a1, int a2, int64_t n);
 VPRIV void a64_function_finish(codegen_context *e, uint32_t s);	/* arch/a64/codegen/func.c: optimise, lay out and print the records */
 VPRIV bool codegen_symbol_needs_got(cc *c, uint32_t ref);
+enum { WIN64_IMP = 1, WIN64_REFPTR };
+VPRIV int sym_win64_indirect(cc *c, uint32_t ref);	/* Windows: __imp_NAME, .refptr.NAME or direct (0) */
 /* bind.c */
 static inline int64_t codegen_compound_literal_keep(const codegen_context *e, int64_t mark);
 static inline int X(cc *c, ast_qualified_type t);
@@ -978,7 +991,13 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s);
 VPRIV void walk_context_free(codegen_context *e);
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t s, const char **why);
 VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **why);	/* codegen/vir/a64.c: the built VIR as arm64 records */
+/* data, not a function: without VCC_UNITY a declaration without extern would
+   be a tentative definition in every file that includes this header */
+#ifdef VCC_UNITY
 VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
+#else
+extern const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
+#endif
 VPRIV void virbuild_statistics_print(codegen_unit *E);	/* -fvir-stats: one line of totals, one per reason (stderr) */
 VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s);	/* codegen/vir/: s through VIR (-O2: cc_options.optimize.vir); false: emit it as before */
 VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (-O2, and not -fno-vir or -fno-vir-lower) */

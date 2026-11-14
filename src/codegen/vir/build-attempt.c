@@ -174,7 +174,7 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 	uint32_t npass;
 	vperf t0 = { 0, 0 };
 
-	if (!m || WASM(e->c))
+	if (!m || WASM(e->compile_context))
 		return false;
 	e->vir_try = true;
 	e->vir_failure_reason = NULL;

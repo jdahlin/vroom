@@ -6,7 +6,7 @@
 CC_PRIVATE bool cc_atomic_wide_type_is_wide(cc *c, ast_qualified_type t)
 {
 	uint64_t n = cc_type_size(c, t);
-	return (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64) &&
+	return (c->o->target == PP_LINUX_AARCH64 || CC_X86_64(c)) &&
 	       n && (n != 1 && n != 2 && n != 4 && n != 8);
 }
 

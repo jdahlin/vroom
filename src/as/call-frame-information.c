@@ -180,15 +180,18 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	ElfObj *o = a->object;
 	if (a->in_frame_description) { as_error_report(a, "unfinished frame"); return; }
 	if (!a->frame_description_count || a->cfi_eh_frame_selected) return;
-	int x86 = o->machine == EM_X86_64;
-	uint32_t sec = elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
+	int x86 = o->machine == EM_X86_64, coff = o->format == OBJ_COFF;
+	/* COFF (MC for x86_64-w64-mingw32): a data alignment factor of -4 and absolute 8-byte FDE addresses */
+	int daf = x86 && !coff ? -8 : -4;
+	uint32_t sec = coff ? coff_section(o, ".eh_frame", 9, COFF_SCN_INIT_DATA | COFF_SCN_READ, 0, 0)
+			    : elf_section(o, ".eh_frame", 9, x86 ? 0x70000001u /* SHT_X86_64_UNWIND */ : SHT_PROGBITS, SHF_ALLOC, 0, 0);
 	uint32_t fr = sec;
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
 	as_fragment_offsets_cache(o);
 	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
 	size_t cap = 64;
-	for (uint32_t i = 0; i < a->frame_description_count; i++) cap += 64 + 16 * (size_t)a->frame_descriptions[i].instruction_count;
+	for (uint32_t i = 0; i < a->frame_description_count; i++) cap += 72 + 16 * (size_t)a->frame_descriptions[i].instruction_count;
 	for (uint32_t i = 0; i < a->cfi_instruction_count; i++) if (a->cfi_instructions[i].operation == AS_CFI_ESCAPE) cap += (size_t)a->cfi_instructions[i].offset;
 	as_byte_span b = { as_region_alloc(&a->definitions, cap), 0 };
 	size_t *pcbs = as_region_alloc(&a->definitions, sizeof(size_t) * a->frame_description_count);
@@ -223,12 +226,12 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 			if (f->is_signal) b.p[b.n++] = 'S';
 			if (f->uses_b_key) b.p[b.n++] = 'B';
 			b.p[b.n++] = 0;
-			as_leb128_unsigned_append(&b, 1); as_leb128_signed_append(&b, x86 ? -8 : -4);
+			as_leb128_unsigned_append(&b, 1); as_leb128_signed_append(&b, daf);
 			b.p[b.n++] = (uint8_t)f->return_register;
-			as_leb128_unsigned_append(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
+			as_leb128_unsigned_append(&b, 1); b.p[b.n++] = coff ? 0 : 0x1b;	/* augmentation: absptr / pcrel sdata4 */
 			if (!f->is_simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
 				b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 7); as_leb128_unsigned_append(&b, 8);
-				b.p[b.n++] = 0x80 | 16; as_leb128_unsigned_append(&b, 1);
+				b.p[b.n++] = 0x80 | 16; as_leb128_unsigned_append(&b, (uint64_t)(8 / -daf));
 			} else if (!f->is_simple) { b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 31); as_leb128_unsigned_append(&b, 0); }
 			while ((b.n - st) & 3) b.p[b.n++] = 0;
 			uint32_t len = (uint32_t)(b.n - st - 4);
@@ -239,9 +242,9 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 		uint32_t cptr = (uint32_t)(b.n - cies[ci].off);
 		memcpy(b.p + b.n, &cptr, 4); b.n += 4;
 		size_t pcb = b.n;
-		memset(b.p + b.n, 0, 8); b.n += 8;	/* pc_begin, pc_range: fixups */
+		memset(b.p + b.n, 0, coff ? 16 : 8); b.n += coff ? 16 : 8;	/* pc_begin, pc_range: fixups */
 		as_leb128_unsigned_append(&b, 0);
-		int64_t cfa = 0;
+		int64_t cfa = x86 && !f->is_simple ? 8 : 0;	/* the CIE's rsp + 8 (MC tracks the CFA offset from it) */
 		uint32_t base = f->start;
 		for (uint32_t k = f->first_instruction; k < f->first_instruction + f->instruction_count; k++) {
 			struct as_cfi_instruction *c = &a->cfi_instructions[k];
@@ -261,13 +264,13 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 			switch (c->operation) {
 			case AS_CFI_DEF_CFA: b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, c->register_first); cfa = c->offset; as_leb128_unsigned_append(&b, (uint64_t)cfa); break;
 			case AS_CFI_DEF_CFA_OFFSET: case AS_CFI_ADJUST:
-				cfa = c->operation == AS_CFI_ADJUST ? cfa + c->offset : c->offset;
+				cfa = c->operation == AS_CFI_ADJUST ? (int64_t)((uint64_t)cfa + (uint64_t)c->offset) : c->offset;
 				b.p[b.n++] = 0x0e; as_leb128_unsigned_append(&b, (uint64_t)cfa); break;
 			case AS_CFI_DEF_CFA_REGISTER: b.p[b.n++] = 0x0d; as_leb128_unsigned_append(&b, c->register_first); break;
 			case AS_CFI_OFFSET: case AS_CFI_REL_OFFSET: {
 				int64_t v = c->offset;
-				if (c->operation == AS_CFI_REL_OFFSET) v -= cfa;
-				v /= x86 ? -8 : -4;
+				if (c->operation == AS_CFI_REL_OFFSET) v = (int64_t)((uint64_t)v - (uint64_t)cfa);	/* (wraps on absurd input) */
+				v /= daf;
 				if (v < 0) { b.p[b.n++] = 0x11; as_leb128_unsigned_append(&b, c->register_first); as_leb128_signed_append(&b, v); }
 				else if (c->register_first < 64) { b.p[b.n++] = (uint8_t)(0x80 | c->register_first); as_leb128_unsigned_append(&b, (uint64_t)v); }
 				else { b.p[b.n++] = 0x05; as_leb128_unsigned_append(&b, c->register_first); as_leb128_unsigned_append(&b, (uint64_t)v); }
@@ -298,6 +301,11 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	for (uint32_t oi = 0; oi < a->frame_description_count; oi++) {
 		uint32_t i = ord[oi];
 		struct as_frame_description *f = &a->frame_descriptions[i];
+		if (coff) {
+			elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_X86_64_64, (as_value){ f->start, 0, 0 });
+			elf_fixup(o, fr, at + pcbs[i] + 8, q + pcbs[i] + 8, R_X86_64_64, (as_value){ f->end, f->start, 0 });
+			continue;
+		}
 		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, (as_value){ f->start, 0, 0 });
 		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (as_value){ f->end, f->start, 0 });
 	}

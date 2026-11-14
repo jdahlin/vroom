@@ -41,8 +41,9 @@ CC_PRIVATE bool cc_lazy_body_eligible(cc *c, uint32_t s, const cc_declarator *d)
 		return false;
 	if (a && (a->used || a->constructor || a->destructor || a->alias))
 		return false;
-	if (c->npack || c->lz_on || c->ntk != 1)
-		return false;	/* (lookahead past the '{': never at a definition) */	/* (#pragma pack: the body's local structs would see the TU's end) */
+	if (c->lz_on || c->ntk != 1)
+		return false;	/* (lookahead past the '{': never at a definition) */
+	/* (#pragma pack: cc_lazy_body_parse gives the body the value in force here, cc_lazy_function.pack) */
 	return !pp_location_is_in_main_file(c->p, d->loc);
 }
 
@@ -89,7 +90,7 @@ CC_PRIVATE void cc_lazy_body_capture(cc *c, uint32_t s, const cc_declarator *d)
 	ptok t;
 	bool eof = false;
 
-	*L = (cc_lazy_function){ s, c->nlzt, 0, c->nsym, d->name, d->loc, d->psyms, d->npsyms, d->plb, d->ple, 0, 0, { 0 } };
+	*L = (cc_lazy_function){ s, c->nlzt, 0, c->nsym, d->name, d->loc, d->psyms, d->npsyms, d->plb, d->ple, 0, 0, { 0 }, c->npack ? c->pack[c->npack - 1] : 0 };
 	if (pp_lazy_body_skip(c->p, &c->tk[0], &L->z)) {
 		/* replayed from the header cache: the entry has the tokens, nothing passes through */
 		L->hc = 1;
@@ -139,6 +140,8 @@ static void cc_lazy_body_parse(cc *c, uint32_t i)
 	cc_lazy_function *L = &c->lzf[i];
 	ptok tk[4];
 	int ntk = c->ntk, npack = c->npack;
+	uint32_t pack0 = c->pack[0];
+	uint64_t packid0 = c->packid[0];
 	uint32_t prevloc = c->prevloc, s = L->sym;
 	uint8_t prevflags = c->prevflags;
 	cc_declarator d;
@@ -153,7 +156,8 @@ static void cc_lazy_body_parse(cc *c, uint32_t i)
 	c->lzz = L->z;
 	c->lzc = L->tk, c->lze = L->hc ? L->z.base : L->tk + L->ntk;
 	c->lz_wm = L->wm;
-	c->npack = 0;
+	c->npack = L->pack ? 1 : 0;	/* the #pragma pack of the definition (MinGW-w64's headers are inside one) */
+	c->pack[0] = L->pack, c->packid[0] = 0;
 	cc_token_fetch(c, &c->tk[0]);
 	c->ntk = 1;
 	c->syms[s].flags &= ~(AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY);
@@ -170,6 +174,7 @@ static void cc_lazy_body_parse(cc *c, uint32_t i)
 	c->lz_hc = false;
 	c->lz_wm = 0;
 	c->npack = npack;
+	c->pack[0] = pack0, c->packid[0] = packid0;
 	memcpy(c->tk, tk, sizeof(tk));
 	c->ntk = ntk;
 	c->prevloc = prevloc;

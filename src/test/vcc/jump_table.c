@@ -19,11 +19,11 @@ __attribute__((noinline)) static int sw_neg(int x)
  switch (x) { case -2: return 1; case -1: return 2; case 0: return 3; case 1: return 4; case 3: return 5; }
  return 0;
 }
-__attribute__((noinline)) static int sw_u64(unsigned long x)
+__attribute__((noinline)) static int sw_u64(unsigned long long x)
 {
  switch (x) {
- case 0x100000000ul: return 1; case 0x100000001ul: return 2; case 0x100000002ul: return 3;
- case 0x100000003ul: return 4; case 0x100000005ul: return 5;
+ case 0x100000000ULL: return 1; case 0x100000001ULL: return 2; case 0x100000002ULL: return 3;
+ case 0x100000003ULL: return 4; case 0x100000005ULL: return 5;
  }
  return 0;
 }
@@ -53,11 +53,11 @@ int main(void)
   if (sw_neg(i) != e) return 2;
  }
  if (sw_neg(-2147483647 - 1) || sw_neg(2147483647)) return 3;
- for (unsigned long i = 0xfffffffffful; i < 0x100000009ul; i++) {
-  int e = i == 0x100000000ul ? 1 : i == 0x100000001ul ? 2 : i == 0x100000002ul ? 3 : i == 0x100000003ul ? 4 : i == 0x100000005ul ? 5 : 0;
+ for (unsigned long long i = 0xffffffffffULL; i < 0x100000009ULL; i++) {
+  int e = i == 0x100000000ULL ? 1 : i == 0x100000001ULL ? 2 : i == 0x100000002ULL ? 3 : i == 0x100000003ULL ? 4 : i == 0x100000005ULL ? 5 : 0;
   if (sw_u64(i) != e) return 4;
  }
- if (sw_u64(1) || sw_u64(~0ul) || sw_u64(5)) return 5;
+ if (sw_u64(1) || sw_u64(~0ULL) || sw_u64(5)) return 5;
  if (sw_char('a') != 1 || sw_char('d') != 9 || sw_char('f') != 5 || sw_char(-1) != 9 || sw_char(-128) != 9) return 6;
  if (sw_fall(3) != 7 || sw_fall(4) != 6 || sw_fall(5) != 4 || sw_fall(6) != 24 || sw_fall(7) != 0 ||
      sw_fall(8) != 16 || sw_fall(2) != 0 || sw_fall(0xffffffffu) != 0) return 7;

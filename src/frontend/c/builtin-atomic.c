@@ -201,7 +201,7 @@ CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_build(cc *c, const cc_builtin *b
 		return cc_node_integer_new(c, 1, cc_type_basic(AST_TYPE_BOOL), loc);
 	args.n = 0;
 	cc_id_list_append(c, &args, size); cc_id_list_append(c, &args, pointer);
-	if (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_LINUX_X86_64)
+	if (c->o->target == PP_LINUX_AARCH64 || CC_X86_64(c))
 		return cc_atomic_wide_lock_free_runtime_build(c, &args, loc);
 	return cc_builtin_node_new(c, CC_BUILTIN_ATOMIC_LOCK_FREE, cc_type_basic(AST_TYPE_BOOL), loc, &args);
 }

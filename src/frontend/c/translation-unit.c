@@ -74,8 +74,8 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 			t.size = 8, t.align = 8;
 		if (k == AST_TYPE_LONG_DOUBLE && PP_IS_WASM(o->target))
 			t.align = 8;	/* emscripten: binary128, 8-byte aligned */
-		if ((k == AST_TYPE_LONG || k == AST_TYPE_UNSIGNED_LONG) && o->target == PP_WASM32)
-			t.size = 4, t.align = 4;	/* ILP32 */
+		if ((k == AST_TYPE_LONG || k == AST_TYPE_UNSIGNED_LONG) && (o->target == PP_WASM32 || o->target == PP_WIN64))
+			t.size = 4, t.align = 4;	/* ILP32, LLP64 */
 		c->ty[k] = t;
 		c->ty[k].canon = (uint32_t)k;
 		c->nty++;
@@ -88,9 +88,9 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 		if (k)
 			c->tyhash[i] = (uint32_t)k;
 	}
-	c->t_size = cc_type_basic(AST_TYPE_UNSIGNED_LONG);
-	c->t_ptrdiff = cc_type_basic(AST_TYPE_LONG);
-	c->t_wchar = o->short_wchar ? cc_type_basic(AST_TYPE_UNSIGNED_SHORT) : o->target != PP_LINUX_AARCH64 ? cc_type_basic(AST_TYPE_INT) : cc_type_basic(AST_TYPE_UNSIGNED_INT);
+	c->t_size = cc_type_basic(o->target == PP_WIN64 ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_UNSIGNED_LONG);	/* LLP64: unsigned long long */
+	c->t_ptrdiff = cc_type_basic(o->target == PP_WIN64 ? AST_TYPE_LONG_LONG : AST_TYPE_LONG);
+	c->t_wchar = o->short_wchar || o->target == PP_WIN64 ? cc_type_basic(AST_TYPE_UNSIGNED_SHORT) : o->target != PP_LINUX_AARCH64 ? cc_type_basic(AST_TYPE_INT) : cc_type_basic(AST_TYPE_UNSIGNED_INT);
 	c->t_char16 = cc_type_basic(AST_TYPE_UNSIGNED_SHORT);
 	c->t_char32 = cc_type_basic(AST_TYPE_UNSIGNED_INT);
 	c->id_func = vintern_copy("__func__\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 8);
@@ -106,8 +106,8 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 		uint32_t s;
 		ast_qualified_type vl;
 
-		if (o->target == PP_DARWIN) {
-			vl = cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
+		if (o->target == PP_DARWIN || o->target == PP_WIN64) {
+			vl = cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));	/* Windows x64: the Microsoft va_list */
 		} else if (PP_IS_WASM(o->target)) {
 			vl = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 		} else if (o->target == PP_LINUX_X86_64) {
@@ -145,6 +145,10 @@ static void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 		c->t_valist = vl;
 		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__builtin_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 17), vl, 0);
 		cc_symbol_bind(c, s);
+		if (o->target == PP_WIN64) {	/* clang: the Microsoft va_list on every x86-64 OS (Linux: ms_valist_typedef) */
+			s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__builtin_ms_va_list\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20), cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR)), 0);
+			cc_symbol_bind(c, s);
+		}
 		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__int128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 10), cc_type_basic(AST_TYPE_INT128), 0);
 		cc_symbol_bind(c, s);
 		s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, vintern_copy("__uint128_t\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 11), cc_type_basic(AST_TYPE_UINT128), 0);
