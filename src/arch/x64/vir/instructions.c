@@ -166,6 +166,9 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		return;
 	}
 	switch (i->op) {
+	case VIR_OP_CRC32C64:
+		x64_record_emit_three_registers(e, X64_OP_CRC32Q, 8, d, a, c);
+		return;
 	case VIR_OP_PROJ: case VIR_OP_NOP: case VIR_OP_BPARAM: return;
 	case VIR_OP_BARRIER: x64_record_emit(e, X64_OP_BARRIER); return;
 	case VIR_OP_MEMCPY: case VIR_OP_MEMSET:

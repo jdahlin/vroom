@@ -26,7 +26,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 	const vir_insn *i = &f->insns[v];
 	bool vec = vir_type_is_vector(i->type);
 	switch (i->op) {
-	case VIR_OP_AXADD: case VIR_OP_AXCHG: return true;
+	case VIR_OP_CRC32C64: case VIR_OP_AXADD: case VIR_OP_AXCHG: return true;
 	case VIR_OP_ACAS:
 		return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) == x64_vir_type_size(i->type);
 	case VIR_OP_CTZ: case VIR_OP_CLZ: return (i->flags & VIR_INSN_FLAG_NZ) != 0;
@@ -126,6 +126,7 @@ VPRIV bool x64_vir_value_upper_half_is_clear(const vir_function *f,uint32_t v)
 	if(i->type!=VIR_TYPE_I32)return false;
 	switch(i->op) {
 	case VIR_OP_ICONST:return !(i->b>>31);
+	case VIR_OP_TRUNC:return f->insns[i->a].op == VIR_OP_CRC32C64; /* CRC32Q clears the upper half. */
 	case VIR_OP_LOAD: case VIR_OP_EXT:return !(i->flags&VIR_INSN_FLAG_MS);
 	case VIR_OP_ADD: case VIR_OP_SUB: case VIR_OP_MUL: case VIR_OP_AND: case VIR_OP_OR: case VIR_OP_XOR:
 	case VIR_OP_NEG: case VIR_OP_NOT: case VIR_OP_ICMP: case VIR_OP_FCMP: case VIR_OP_F2S: case VIR_OP_F2U:

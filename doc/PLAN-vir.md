@@ -1374,6 +1374,25 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with spill-free CRC32C word updates (2026-11-14).** The x86 VIR
+builder recognizes the nonvolatile register-only CRC32Q template used by the
+host identifier hash. The allocator sees the accumulator as a tied operand.
+The self-hosted word helper shrank from 17 instructions (57 bytes, including
+a 32-byte frame) to the same nine bytes as clang: MOV EAX,EDI; CRC32 RAX,RSI;
+RET. The two-word wrapper still calls the word helper twice in the self build.
+
+| Same SQLite 3.50.4 compile, median of 7 | Before | After |
+| --- | ---: | ---: |
+| clang-built vcc, CPU ms | 146.65 | 145.08 |
+| self-hosted vcc, CPU ms | 197.29 | 195.11 |
+| self-hosted / clang-built | 1.345× | 1.345× |
+| self-hosted retired instructions | 2.229B | 2.213B |
+
+Pinned to CPU 7 with one emitter thread and alternating order after warm-up.
+All four SQLite objects matched and the linked smoke query passed. The
+host-dispatch regression runs the vcc-built CRC object against a bitwise
+reference on Linux, including software fallback and hardware dispatch.
+
 **SQLite with structured x86 control-flow emission (2026-11-14).**
 The object emitter now passes direct calls, jumps, SETcc, CMOVcc and register
 TEST records to the assembler without formatting and matching mnemonics.

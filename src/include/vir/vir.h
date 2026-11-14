@@ -76,6 +76,7 @@ enum {
 	VIR_OP_VREDUCE = 79,	/* the lanes' sum (i32x4 -> i32, i64x2 -> i64) */
 	VIR_OP_VINSERT = 87, VIR_OP_VEXTRACT = 88, /* constant lane insert/extract */
 	VIR_OP_BR = 80, VIR_OP_BRIF = 81, VIR_OP_SWITCH = 82, VIR_OP_IBR = 83, VIR_OP_ASMGOTO = 84, VIR_OP_RET = 85, VIR_OP_TRAP = 86,
+	VIR_OP_CRC32C64 = 89, /* update a CRC32C with eight low-to-high bytes */
 	VIR_OP_TARGET_FIRST = 128,	/* 128-255: target instructions introduced by lowering */
 	VIR_OP_COUNT = 256
 };
