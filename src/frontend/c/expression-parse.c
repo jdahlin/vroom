@@ -270,7 +270,7 @@ static __attribute__((noinline)) uint32_t cc_unary_operator_parse(cc *c)
 		return n;
 	}
 	default:
-		return cc_postfix_parse(c, cc_primary_parse(c));
+		return cc_primary_postfix_parse(c, loc);
 	}
 }
 
@@ -291,13 +291,11 @@ static uint32_t unary(cc *c)
 			n = cc_unary_operator_parse(c);
 			break;
 		default:
-			n = cc_postfix_parse(c, cc_primary_parse(c));
-			break;
+			return cc_primary_postfix_parse(c, b);
 		}
 		break;
 	default:
-		n = cc_postfix_parse(c, cc_primary_parse(c));
-		break;
+		return cc_primary_postfix_parse(c, b);
 	}
 	cc_node_span_set(c, n, b);	/* the whole unary expression, for diagnostics */
 	return n;
@@ -492,7 +490,7 @@ CC_PRIVATE uint32_t cc_cast_expression_parse(cc *c)
 		else
 			n = cc_postfix_parse(c, cc_parenthesized_parse(c, b));
 	} else {
-		n = unary(c);
+		return unary(c);
 	}
 	cc_node_span_set(c, n, b);	/* the whole cast expression, for diagnostics */
 	return n;

@@ -866,17 +866,7 @@ CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc)
 	AST_NODE(n)->flags |= AST_NODE_FLAG_PARENTHESIZED;
 	return n;
 }
-static uint32_t cc_primary_parse_slow(cc *c);
-
-CC_PRIVATE uint32_t cc_primary_parse(cc *c)
-{
-	uint32_t b = tok(c)->loc, n = cc_primary_parse_slow(c);
-
-	cc_node_span_set(c, n, b);
-	return n;
-}
-
-static uint32_t cc_primary_parse_slow(cc *c)
+static uint32_t cc_primary_parse(cc *c)
 {
 	ptok *t = tok(c);
 	uint32_t loc = t->loc;
@@ -920,6 +910,18 @@ static uint32_t cc_primary_parse_slow(cc *c)
 	default:
 		cc_primary_invalid_report(c, t);
 	}
+}
+
+CC_PRIVATE uint32_t cc_primary_postfix_parse(cc *c, uint32_t begin)
+{
+	uint32_t n = cc_primary_parse(c);
+
+	cc_node_span_set(c, n, begin);
+	if (cc_token_starts_postfix(tok(c)->kind)) {
+		n = cc_postfix_operators_parse(c, n);
+		cc_node_span_set(c, n, begin);
+	}
+	return n;
 }
 
 /* overloadable: how well argument n converts to parameter type p (clang's C ranks:

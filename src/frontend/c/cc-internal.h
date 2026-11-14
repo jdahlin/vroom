@@ -491,7 +491,7 @@ CC_PRIVATE uint32_t cc_builtin_narrow_math_build(cc *c, const char *name, size_t
 CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b, uint32_t loc);
 /* expression.c, call.c */
 CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc);
-CC_PRIVATE uint32_t cc_primary_parse(cc *c);
+CC_PRIVATE uint32_t cc_primary_postfix_parse(cc *c, uint32_t begin);
 CC_PRIVATE __attribute__((noinline)) uint32_t cc_postfix_operators_parse(cc *c, uint32_t n);
 static inline uint32_t cc_postfix_parse(cc *c, uint32_t n);
 CC_PRIVATE __attribute__((noinline)) uint32_t cc_overload_pick(cc *c, uint32_t head, const cc_id_list *args, uint32_t loc);
@@ -758,8 +758,13 @@ static inline bool cc_symbol_is_typedef_identifier(cc *c, uint32_t id)
 /* the source range of node n began at token loc b and ends at the previous token */
 static inline void cc_node_span_set(cc *c, uint32_t n, uint32_t b)
 {
-	if (n && !c->span[n].e)
-		c->span[n] = (diag_span){ b, c->prevloc };
+	if (!n)
+		return;
+	diag_span *span = &c->span[n];
+	if (!span->e) {
+		span->b = b;
+		span->e = c->prevloc;
+	}
 }
 
 /* the tracked variable s is assigned inside an if/loop/switch nested deeper than its declaration */
@@ -812,11 +817,18 @@ static inline uint32_t cc_conversion_apply(cc *c, uint32_t n, ast_qualified_type
 	return cc_conversion_apply_slow(c, n, to);
 }
 
+static inline bool cc_token_starts_postfix(uint8_t kind)
+{
+	static const uint8_t starts[256] = {
+		[LEX_TOKEN_LEFT_SQUARE] = 1, [LEX_TOKEN_LEFT_PAREN] = 1, [LEX_TOKEN_PERIOD] = 1,
+		[LEX_TOKEN_ARROW] = 1, [LEX_TOKEN_PLUS_PLUS] = 1, [LEX_TOKEN_MINUS_MINUS] = 1
+	};
+	return starts[kind];
+}
+
 static inline uint32_t cc_postfix_parse(cc *c, uint32_t n)
 {
-	int k = tok(c)->kind;
-
-	if (likely(k != LEX_TOKEN_LEFT_SQUARE && k != LEX_TOKEN_LEFT_PAREN && k != LEX_TOKEN_PERIOD && k != LEX_TOKEN_ARROW && k != LEX_TOKEN_PLUS_PLUS && k != LEX_TOKEN_MINUS_MINUS))
+	if (likely(!cc_token_starts_postfix(tok(c)->kind)))
 		return n;
 	return cc_postfix_operators_parse(c, n);
 }
