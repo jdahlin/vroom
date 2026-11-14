@@ -1834,3 +1834,9 @@ En trivialt kopierbar klass med basklass skickas och returneras som värde när 
 flyttalsdata (basens bytes klassas då som heltal, som clang; anrop över kompilatorgränsen kontrollerade).
 `B::operator=(x)` för en klass utan egen tilldelning: den implicita, basdelobjektets bytes
 (json_base_class_t).  cxx-strict 377 (386).
+
+## Status 98 (2026-11-14)
+Medlemmar av en partiell specialisering definierade utanför klassen (`template<class A> void
+V<bool, A>::push(...)`, libc++:s vector<bool>) registreras åtskilda från primärmallens; en instans av den
+partiella specialiseringen binder definitionens parametrar till det matchningen deducerade (sparat på
+instansen).  cxx-strict 373 (377).

@@ -3718,9 +3718,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 						}
 						primary &= k == c->scope->ntparams;
 					}
-					if (primary)
-						cxx_template_member_definition(c, qs->owner, mname, c->scope, c->scope->parent, c->ftmpl_begin,
-									       c->ndecl_params, c->decl_const);
+					/* (a partial specialization's members: kept apart, for its instances) */
+					cxx_template_member_definition(c, qs->owner, mname, c->scope, c->scope->parent, c->ftmpl_begin,
+								       c->ndecl_params, c->decl_const, !primary);
 				}
 			}
 			if (context == CXX_CONTEXT_CLASS || c->class_depth)

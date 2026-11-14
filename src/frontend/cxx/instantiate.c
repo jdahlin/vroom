@@ -47,7 +47,7 @@ struct cxx_template {
 	uint8_t is_alias, has_partial;
 	char *path;		/* its qualified name (the layout dump), NULL: not nameable */
 	/* its members defined outside the class: template<...> R X<...>::f(...) { } */
-	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const; } *oocs;	/* (inner: a member template's own parameters) */
+	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const, partial; } *oocs;	/* (inner: a member template's own parameters) */
 	uint32_t noocs;
 };
 
@@ -63,6 +63,8 @@ typedef struct cxx_instance {
 	uint8_t state;		/* 0 declared (an incomplete record), 1 being completed, 2 complete, 3 failed */
 	uint8_t selecting;	/* its partial specialization is being chosen (asked for again meanwhile: not known) */
 	uint8_t no_definition;	/* completion found no partial specialization matching and no primary definition */
+	cxx_targ *pargs;	/* made from a partial specialization: its parameters' arguments (its members' definitions bind them) */
+	uint32_t npargs;
 	uint8_t late;		/* named while its template was only declared (using json = basic_json<>;): bound at completion */
 	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
@@ -1592,6 +1594,9 @@ static void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 				else
 					cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
 			x->pos = pick->key_pos;
+			x->npargs = pick->params->ntparams;
+			x->pargs = malloc((x->npargs ? x->npargs : 1) * sizeof *x->pargs);
+			memcpy(x->pargs, bind, x->npargs * sizeof *bind);
 		} else {
 			binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, t->home, NULL);
 			for (uint32_t i = 0; i < t->params->ntparams; i++) {
@@ -2850,14 +2855,14 @@ static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, u
 }
 
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
-					    uint32_t nparams, bool is_const)
+					    uint32_t nparams, bool is_const, bool partial)
 {
 	cxx_template *t = cxx_template_of(te);
 
 	(void)c;
 	t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
 	t->oocs[t->noocs++] = (struct cxx_ooc){ .name = name, .pos = pos, .nparams = nparams, .params = params, .home = home,
-						.is_const = is_const };
+						.is_const = is_const, .partial = partial };
 }
 
 /* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
@@ -2891,11 +2896,20 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 
 	if (!t || !t->noocs || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
 		return;
-	if (x->pos)
-		return;	/* (an instance of a partial specialization: its members' definitions are not the primary's) */
+	const cxx_targ *bargs = x->args;
+	uint32_t nbargs = x->nargs;
+
+	if (x->pos) {
+		/* an instance of a partial specialization: the definitions of its members (template<class A> void
+		   V<bool, A>::f), the partial's parameters bound to what matching it deduced (vector<bool>) */
+		if (!x->pargs)
+			return;
+		bargs = x->pargs, nbargs = x->npargs;
+	}
 	nparams = AST_TYPE(c->ast, e->ty)->n;
 	for (uint32_t i = 0; i < t->noocs; i++)
-		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner)
+		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner &&
+		    (x->pos ? t->oocs[i].partial && t->oocs[i].params->ntparams == nbargs : !t->oocs[i].partial))
 			d = &t->oocs[i], matches++;
 	if (!matches)
 		return;	/* (declared only: defined in another TU, or = default) */
@@ -2910,14 +2924,14 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		const cxx_tparam *tp = &d->params->tparams[i];
 
 		if (tp->pack) {
-			if (i + 1 != d->params->ntparams || i > x->nargs)
+			if (i + 1 != d->params->ntparams || i > nbargs)
 				return;
-			cxx_bind_pack(c, binding, tp, x->args + i, x->nargs - i);
+			cxx_bind_pack(c, binding, tp, bargs + i, nbargs - i);
 			break;
 		}
-		if (i >= x->nargs)
+		if (i >= nbargs)
 			return;
-		cxx_bind(c, binding, tp, &x->args[i]);
+		cxx_bind(c, binding, tp, &bargs[i]);
 	}
 	cxx_outer_save(c, &o);
 	c->instantiating++, c->body_depth++;
