@@ -78,6 +78,7 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
 	if (c->body_depth > c->stats.body_depth_max)
 		c->stats.body_depth_max = c->body_depth;
 	c->sig_auto = 0;
+	c->sig_pack_types = NULL, c->sig_pack_n = UINT32_MAX;	/* (no pack of its own: not one a failed parse before left) */
 	if (want_body)
 		c->unevaluated = 0;	/* (the body is evaluated code, whatever the call was in) */
 	c->gen_instance = inst;
@@ -98,6 +99,7 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
 	c->body_depth--;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
+	c->sig_pack_types = NULL, c->sig_pack_n = UINT32_MAX;
 	cxx_gen_unwind(c, g_depth);
 	c->enode = g_enode, c->snode = g_snode, c->sdone = g_sdone, c->sdepth = g_sdepth, c->gen_block = g_block;
 	if (want_body)

@@ -20,6 +20,7 @@ VPRIV void cxx_outer_save(cxx *c, cxx_outer *o)
 VPRIV void cxx_outer_restore(cxx *c, cxx_outer *o)
 {
 	cxx_state_restore(c, &o->s);
+	c->sig_pack_types = NULL, c->sig_pack_n = UINT32_MAX;	/* (a pack signature's: consumed, or left by a parse that failed) */
 	memcpy(c->targs, o->targs, o->ntargs * sizeof *o->targs), c->ntargs = o->ntargs;
 	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
 	free(o->targs), free(o->dp);

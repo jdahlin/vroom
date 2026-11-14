@@ -523,7 +523,7 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		if (k > 0) {
 			k = cxx_ftemplate_constraints(c, f, bind);
 			if (k <= 0 && getenv("VCC_CXX_SIG"))
-				fprintf(stderr, "deduce: constraints: %d\n", k);
+				fprintf(stderr, "deduce: constraints: %d %.*s at %u\n", k, (int)vintern_ents[e->name].len, vintern_ents[e->name].s, f->req_pos);
 		}
 		if (k <= 0) {
 			c->why = CXX_WHY_UNBOUND;
