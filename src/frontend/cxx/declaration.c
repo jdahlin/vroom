@@ -1100,16 +1100,32 @@ static uint32_t cxx_operator_name_parse(cxx *c)
 		return 1;
 	}
 	/* conversion: operator type-specifiers ptr-operators */
+	cxx_scope *conv_class = NULL;
+	bool ptr = false;
+
 	for (cxx_scope *cs = c->scope; cs; cs = cs->parent)
 		if (cs->kind == CXX_SCOPE_CLASS) {
 			cs->has_conversion = 1;
+			conv_class = cs;
 			break;
 		} else if (cs->kind == CXX_SCOPE_NAMESPACE)
 			break;
 	if (!cxx_decl_specifiers_parse(c, NULL, false))
 		cxx_fail(c, "expected an operator or a type after 'operator'");
-	while (cxx_ptr_operator_parse(c, NULL))
-		;
+	qty conv_to = c->ds_type;
+
+	while (cxx_ptr_operator_parse(c, conv_to != CXX_TY_UNKNOWN ? &conv_to : NULL))
+		ptr = true;
+	(void)ptr;
+	/* the type it converts to, for is_convertible and the like (a class's, not a template's) */
+	if (conv_class && !c->tentative) {
+		if (conv_to == CXX_TY_UNKNOWN || c->template_depth || cxx_type_has_placeholder(c, conv_to))
+			conv_class->conv_unknown = 1;
+		else {
+			conv_class->conv_types = realloc(conv_class->conv_types, (conv_class->nconv + 1) * sizeof(qty));
+			conv_class->conv_types[conv_class->nconv++] = conv_to;
+		}
+	}
 	return 1;
 }
 

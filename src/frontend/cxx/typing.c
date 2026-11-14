@@ -177,6 +177,7 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
  */
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
+static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth);
 static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
 
 static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
@@ -226,7 +227,11 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 			if (!as)
 				return 2;
 			cxx_type_require_complete(c, QUNQ(a));
-			return cxx_class_converts(c, as, 0) ? 2 : 3;
+			{
+				int k = cxx_class_converts_to(c, as, QUNQ(p), 0);
+
+				return k > 0 ? 5 : k < 0 ? 2 : 3;
+			}
 		} else	/* (an integer: the literal 0 only, which the type does not tell) */
 			return at->kind >= TY_BOOL && at->kind <= TY_ULLONG && !c->rank_no_literal && !(have_lvalue && lvalue) ? 2 : 3;
 		if (QUNQ(pt->base) == QUNQ(ab))
@@ -251,6 +256,13 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 				return 2;
 			cxx_type_require_complete(c, QUNQ(a));
 			by_conv = cxx_class_converts(c, as, 0);
+			/* to something that is not a class: one of its conversion functions' types converts to it, or not */
+			if (by_conv && !cc_type_is_record(c->ast, p)) {
+				int k = cxx_class_converts_to(c, as, QUNQ(p), 0);
+
+				if (k >= 0)
+					return k ? 5 : 3;
+			}
 		}
 		if (cc_type_is_record(c->ast, p) && !binds_object) {
 			if (!ps)
@@ -417,6 +429,19 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 					args[i] == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE(c->ast, args[i])->ext,
 					args[i] != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, args[i]),
 					args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]));
+		}
+		if (xargs && nxargs != UINT32_MAX) {
+			fprintf(stderr, " explicit:");
+			for (uint32_t i = 0; i < nxargs; i++) {
+				char buf[160];
+				size_t len = 0;
+
+				if (xargs[i].kind == 1 && xargs[i].t != CXX_TY_UNKNOWN && cxx_type_spell(c, xargs[i].t, buf, sizeof buf, &len))
+					fprintf(stderr, " <%.*s>", (int)len, buf);
+				else
+					fprintf(stderr, " <kind %u%s>", xargs[i].kind, xargs[i].kind == 1 && xargs[i].t == CXX_TY_UNKNOWN ? " unknown" :
+						xargs[i].kind == 1 && cxx_type_has_placeholder(c, xargs[i].t) ? " placeholder" : "");
+			}
 		}
 		fputc('\n', stderr);
 	}
@@ -652,8 +677,8 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cxx_scope *cls;
 	cxx_entity *set;
 	qty all[4], acopy[16];
-	bool have_lv = c->op_lv_set && nargs <= 2;
-	uint8_t lv[4];
+	bool have_lv = c->op_lv_set && nargs <= 16;
+	uint8_t lv[17];
 	bool any_class = false;
 
 	memcpy(lv, c->op_lv, sizeof lv);
@@ -1067,9 +1092,15 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 
 			if (fs)
 				cxx_type_require_complete(c, QUNQ(from));
-			if (!fs || fs->has_dependent_base || cxx_class_converts(c, fs, 0))
+			if (!fs || fs->has_dependent_base)
 				return false;
-			*v = 0;
+			{
+				int k = cxx_class_converts_to(c, fs, QUNQ(to), 0);
+
+				if (k < 0)
+					return false;
+				*v = k;
+			}
 			return true;
 		}
 	}
@@ -1308,6 +1339,53 @@ VPRIV qty cxx_nullptr_type(cxx *c)
 		c->nullptr_ty = QT(c->ast->tags[tag].ty, 0);
 	}
 	return c->nullptr_ty;
+}
+
+/*
+ * Does one of the class's conversion functions (or a base's) convert to `to`, a type that is not a
+ * class: 1 yes (its type converts to `to` by a standard conversion), 0 no, -1 not known.
+ */
+static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
+{
+	int r = 0;
+
+	if (!cls || cls->has_dependent_base || depth > 8)
+		return -1;
+	if (cls->has_conversion) {
+		if (cls->conv_unknown || !cls->nconv)
+			r = -1;
+		for (uint32_t i = 0; i < cls->nconv; i++) {
+			qty t = cls->conv_types[i];
+			const ctype *x = AST_TYPE(c->ast, t);
+			int k;
+
+			if (x->kind == TY_PTR && x->ext)
+				t = x->base;
+			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
+				continue;	/* (to a class: a second user-defined conversion would be needed) */
+			{
+				uint8_t nl = c->rank_no_literal;
+
+				c->rank_no_literal = 1;	/* (what a conversion function returns is no literal 0) */
+				k = cxx_arg_rank0(c, to, t, false, false);
+				c->rank_no_literal = nl;
+			}
+			if (k <= 1)
+				return 1;
+			if (k == 2)
+				r = -1;
+		}
+	}
+	for (uint32_t i = 0; i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS) {
+			int k = cxx_class_converts_to(c, cls->used[i], to, depth + 1);
+
+			if (k > 0)
+				return 1;
+			if (k < 0)
+				r = -1;
+		}
+	return r;
 }
 
 /* does the class, or a base of it, declare a conversion function? */

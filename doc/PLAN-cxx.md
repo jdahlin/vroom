@@ -839,3 +839,30 @@ clang håller med om (0 fel), 71/71 parse; parse-tester 33/33.
 Kvar före mätningen mot clang -O2: `begin/end`-sonderna, strängoperatorer
 (`operator+`, `==` som fria mallar), vptr-layout (undantagshierarkin),
 kodgenerering för C++, länkning och körning.
+
+### Status 2026-11-14 (22): operatorer, dolda vänner, medlemsmallar med explicita argument
+
+Sonderna (nu även `std::string`/`vector`-operatorer, `ostream <<`,
+doctest och json på användningsnivå: `j[0]`, `j == 1`, `j.at("k")`,
+`json{1, 2, 3}`, `os << j`, `j = 1`) stämmer med clang utom
+`j.get<int>()` och doctests `has_insertion_operator`.
+- Operatorer: ADL i operandernas klassers namnrymder; dolda vänner
+  (funktioner deklarerade `friend` i klassen hålls per klass och hittas
+  genom ett argument); operandernas värdekategorier följer med (ett
+  lvalue-`ostream` är inte libc++:s rvalue-ström-överlagring); vänster
+  operand som inte är en klass; en operator som ingen funktion tar på en
+  klass utan konverteringsfunktion är ogiltig (`__is_ostreamable`).
+- Partiella specialiseringar väljs när instansen måste vara komplett, inte
+  när den namnges (`std::_And<A, X<args>>` rör aldrig `X<args>` när `A` är
+  falsk): tidigt val fick `__is_ostreamable` att fråga efter sig själv
+  utan slut (120 s och 12 GB på en TU; nu 0,16 s).
+- `x.f<args>(...)` med medlemsmallar (json:s `get<T>()` genom
+  `priority_tag`); en explicit specialiserings scope är dess egen klass
+  (`tag<4>` konverterar till `tag<0>`); en ogiltig aliasinstans är ogiltig
+  även ur cachen; paketsubstitution avbryts vid första ogiltiga element.
+- Konverteringsfunktioners måltyper sparas per klass:
+  `is_assignable<int&, const std::string>` är falsk i stället för okänd.
+unit-32bit, C++11: 0,16 s; json: 145 462 layouter som clang håller med om
+(0 fel), 71/71 parse; parse-tester 37/37.
+Kvar före mätningen mot clang -O2: `j.get<T>()`, vptr-layout,
+kodgenerering för C++ från det delade AST:t, länkning och körning.

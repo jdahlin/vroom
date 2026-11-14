@@ -1911,8 +1911,11 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 		jmp_buf jb;
 		volatile bool failed = false;
 
-		if (!bind[i].kind && !tp->def_b)
+		if (!bind[i].kind && !tp->def_b) {
+			if (getenv("VCC_CXX_SIG"))
+				fprintf(stderr, "complete: parameter %u of %u: not bound, no default\n", i, p->params->ntparams);
 			return -1;
+		}
 		if (bind[i].kind && !check)
 			continue;
 		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
@@ -1937,13 +1940,22 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 			cxx_outer_restore(c, &o);
 			if (c->member_missing)
 				return 0;
+			if ((failed || got == CXX_TY_UNKNOWN) && getenv("VCC_CXX_SIG")) {
+				fprintf(stderr, "complete: parameter %u: its type is not known (failed %d):", i, failed);
+				for (uint32_t k = tp->type_b; k < tp->type_b + 14 && k < c->ntok; k++)
+					fprintf(stderr, " %.*s", (int)c->tok[k].len, c->tok[k].s);
+				fputc('\n', stderr);
+			}
 			if (failed || got == CXX_TY_UNKNOWN)
 				return -1;	/* (enable_if_t<cond, int> with a cond vcc cannot evaluate: not known, not fine) */
 		}
 		if (!bind[i].kind) {
 			c->member_missing = 0;
-			if (!cxx_default_argument(c, tp, binding, &bind[i]))
+			if (!cxx_default_argument(c, tp, binding, &bind[i])) {
+				if (!c->member_missing && getenv("VCC_CXX_SIG"))
+					fprintf(stderr, "complete: parameter %u: its default is not known\n", i);
 				return c->member_missing ? 0 : -1;
+			}
 			if (c->member_missing)
 				return 0;
 		}
