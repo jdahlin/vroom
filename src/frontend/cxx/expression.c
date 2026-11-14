@@ -232,16 +232,28 @@ static void cxx_type_then_init(cxx *c)
 }
 
 
-/* ( arguments ): their types in c->cargs (unknown if any is a pack expansion) */
-static void cxx_call_arguments_parse(cxx *c)
+/* ( arguments ) or { arguments }: their types in c->cargs (unknown if any is a pack expansion) */
+static void cxx_arguments_parse(cxx *c, int open, int close);
+
+VPRIV void cxx_call_arguments_parse(cxx *c)
+{
+	cxx_arguments_parse(c, LEX_TOKEN_LEFT_PAREN, LEX_TOKEN_RIGHT_PAREN);
+}
+
+VPRIV void cxx_braced_arguments_parse(cxx *c)
+{
+	cxx_arguments_parse(c, LEX_TOKEN_LEFT_BRACE, LEX_TOKEN_RIGHT_BRACE);
+}
+
+static void cxx_arguments_parse(cxx *c, int open, int close)
 {
 	qty args[16];
 	uint8_t lval[16];
 	uint32_t n = 0;
 	bool unknown = false;
 
-	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
-	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
+	cxx_expect(c, open);
+	while (!cxx_is(c, close)) {
 		cxx_initializer_parse(c);
 		if (n < 16)
 			args[n] = c->etype, lval[n] = c->elval;
@@ -251,7 +263,7 @@ static void cxx_call_arguments_parse(cxx *c)
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
-	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	cxx_expect(c, close);
 	if (n > 16)
 		unknown = true;
 	if (n > c->ccargs)
@@ -633,10 +645,16 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
-			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
-				cxx_braced_init_list_parse(c);
-			else
-				cxx_call_arguments_parse(c);
+			{
+				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
+				if (braced)
+					cxx_braced_arguments_parse(c);
+				else
+					cxx_call_arguments_parse(c);
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+			}
 			cxx_et(c, cast_to, false);
 			return;
 		}
@@ -653,10 +671,16 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
-			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
-				cxx_braced_init_list_parse(c);
-			else
-				cxx_call_arguments_parse(c);
+			{
+				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
+				if (braced)
+					cxx_braced_arguments_parse(c);
+				else
+					cxx_call_arguments_parse(c);
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+			}
 			cxx_et(c, cast_to, false);
 			return;
 		}
@@ -697,10 +721,16 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
-			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
-				cxx_braced_init_list_parse(c);
-			else
-				cxx_call_arguments_parse(c);
+			{
+				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
+				if (braced)
+					cxx_braced_arguments_parse(c);
+				else
+					cxx_call_arguments_parse(c);
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+			}
 			cxx_et(c, cast_to, false);
 			return;
 		}

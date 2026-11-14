@@ -532,3 +532,14 @@ unit-32bit: 337/378 expression statements typed, 539 classes laid out (was
 501), 228 instances (was 119); json: 34,617 layouts clang agrees with (was
 32,028), 71/71 parse.  Not yet: packs, explicit template arguments, default
 template arguments, deduction against base classes.
+
+### Status 2026-11-14 (3): bodies on use
+Function template bodies are instantiated when a call deduces them; class
+template member bodies when a call picks them; constructors and destructors
+are declared (under names no source spells) and used by variable definitions
+and T(args).  unit-32bit: 43 template bodies + 103 member bodies, none
+failed, 0.12 s.  The measure of what is left: clang -O0 emits 1,692
+functions for unit-32bit (1,529 linkonce_odr), so vcc instantiates about a
+tenth of what code generation will need.  Missing: implicit special members,
+calls whose overload vcc cannot choose, operators on dependent operands
+inside instances, explicit template arguments, packs.

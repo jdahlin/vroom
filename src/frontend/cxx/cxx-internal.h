@@ -336,6 +336,8 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced);
+VPRIV uint32_t cxx_ctor_id(void), cxx_dtor_id(void);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
@@ -371,6 +373,8 @@ VPRIV void cxx_conditional_expression_parse(cxx *c);
 VPRIV void cxx_constant_expression_parse(cxx *c);
 VPRIV void cxx_initializer_parse(cxx *c);
 VPRIV void cxx_braced_init_list_parse(cxx *c);
+VPRIV void cxx_call_arguments_parse(cxx *c);
+VPRIV void cxx_braced_arguments_parse(cxx *c);
 VPRIV void cxx_compound_statement_parse(cxx *c);
 VPRIV void cxx_statement_parse(cxx *c);
 VPRIV void cxx_template_arguments_parse(cxx *c);

@@ -2446,6 +2446,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
 		qty t = c->type_out;
 		uint32_t name_loc = c->tok[start].loc;
+		/* an object of class type defined here (not in a template): its constructor and destructor are used */
+		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
+			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
 			c->stats.declarations++;
 			c->stats.declarations_typed += t != CXX_TY_UNKNOWN;
@@ -2469,6 +2472,24 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			while (AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
 				et = AST_TYPE(c->ast, et)->base;
 			cxx_type_require_complete(c, et);
+		}
+		/* a constructor or destructor: declared under a name no source spells (cxx_ctor_use finds it) */
+		if (f && name > 1 && !q && cs && cs->owner && cs->owner->name == name && context == CXX_CONTEXT_CLASS &&
+		    !(flags & DS_FRIEND) && !c->tentative) {
+			bool dtor = c->tok[start].kind == LEX_TOKEN_TILDE;
+			bool tmpl = c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE;
+			cxx_entity *e = cxx_declare(c, cxx_declaration_scope(c), dtor ? cxx_dtor_id() : cxx_ctor_id(),
+						    tmpl ? CXX_ENTITY_FUNCTION_TEMPLATE : CXX_ENTITY_VALUE);
+			qty ps[32];
+			bool known = c->ndecl_params <= 32;
+
+			for (uint32_t i = 0; known && i < c->ndecl_params; i++)
+				known = (ps[i] = c->decl_params[i].ty) != CXX_TY_UNKNOWN;
+			if (e && !tmpl) {
+				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
+				e->ndefaults = (uint16_t)c->decl_ndefaults;
+				c->last_fn = e;	/* (its body: parsed when used) */
+			}
 		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
 		if (name > 1 && !q && !(cs && cs->owner && cs->owner->name == name)) {
@@ -2567,13 +2588,28 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_advance(c);
 				if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))	/* = delete("reason") */
 					cxx_skip_balanced(c);
+			} else if (object && !cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
+				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
+				cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
+			} else if (object) {
+				cxx_braced_arguments_parse(c);
+				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 			} else
 				cxx_initializer_parse(c);
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
-			cxx_braced_init_list_parse(c);
+			if (object) {
+				cxx_braced_arguments_parse(c);
+				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
+			} else
+				cxx_braced_init_list_parse(c);
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
-			cxx_expression_list_parse(c);	/* direct-initialization */
-		}
+			if (object) {
+				cxx_call_arguments_parse(c);	/* direct-initialization */
+				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, false);
+			} else
+				cxx_expression_list_parse(c);
+		} else if (object)
+			cxx_ctor_use(c, t, NULL, NULL, 0, false);	/* default-initialization */
 	next:
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;

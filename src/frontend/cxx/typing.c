@@ -261,3 +261,70 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	return true;
 }
+
+VPRIV uint32_t cxx_ctor_id(void)
+{
+	static uint32_t id;
+
+	return id ? id : (id = vintern_cstr(" ctor"));
+}
+
+VPRIV uint32_t cxx_dtor_id(void)
+{
+	static uint32_t id;
+
+	return id ? id : (id = vintern_cstr(" dtor"));
+}
+
+/* is t an instance of a template named initializer_list (std::initializer_list<E>)? */
+static bool cxx_is_initializer_list(cxx *c, qty t)
+{
+	cxx_scope *s;
+
+	if (t == CXX_TY_UNKNOWN)
+		return false;
+	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+		t = AST_TYPE(c->ast, t)->base;
+	if (!cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))) || !s->owner)
+		return false;
+	return vintern_ents[s->owner->name].len == 16 && !memcmp(vintern_ents[s->owner->name].s, "initializer_list", 16);
+}
+
+/*
+ * An object of class type t is initialized from args (braced: a braced-init-list): the constructor
+ * chosen (an initializer_list one first for braces), then the destructor; their bodies are
+ * instantiated when t is an instance.  The expression's type is left as it was.
+ */
+VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced)
+{
+	qty et = c->etype;
+	bool el = c->elval;
+	cxx_entity *callee = c->ecallee, *set, *dtor;
+	cxx_scope *cls;
+
+	if (c->tentative || nargs == UINT32_MAX || t == CXX_TY_UNKNOWN || !(cls = cxx_type_class_scope(c, QUNQ(t))))
+		return;
+	cxx_type_require_complete(c, QUNQ(t));
+	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
+	if (set && braced) {
+		/* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted) */
+		for (cxx_entity *e = set; e; e = e->next) {
+			const ctype *ft;
+
+			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN)
+				continue;
+			ft = AST_TYPE(c->ast, e->ty);
+			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux])) {
+				cxx_member_body_use(c, e);
+				set = NULL;
+				break;
+			}
+		}
+	}
+	if (set)
+		cxx_call_type(c, set, CXX_TY_UNKNOWN, args, lval, nargs);
+	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
+	if (dtor && dtor->kind == CXX_ENTITY_VALUE)
+		cxx_member_body_use(c, dtor);
+	c->etype = et, c->elval = el, c->ecallee = callee;
+}
