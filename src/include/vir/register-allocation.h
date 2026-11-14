@@ -141,6 +141,7 @@ typedef struct vir_alloc_out {
 /* tuning and tests */
 typedef struct vir_alloc_options {
 	uint64_t pool;		/* live-in pool limit in words (0: the reservation) */
+	bool private_spills;	/* a resumed call can observe a spill after its ordinary live range */
 	bool shrink;		/* look for a save point (15.12) */
 	const uint8_t *no_frame;	/* with shrink, per instruction: a call that needs no frame (a sibling call); or NULL */
 	/* Optional diagnostic observer, never consulted by allocation policy. v=0 is

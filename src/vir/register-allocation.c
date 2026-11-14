@@ -708,6 +708,13 @@ static void vir_alloc_spill_slot_assign(vir_allocator *a, uint32_t v)
 	if (ax.slot[v] != VIR_BLOCK_NONE || vir_alloc_value_is_constant(f, v))
 		return;
 	c = vir_type_size(f->insns[v].type) == 4 ? 0 : vir_type_size(f->insns[v].type) == 16 ? 2 : 1;
+	if (a->options && a->options->private_spills) {
+		s = a->spill_count++;
+		ax.ssz[s] = (uint8_t)(4u << c);
+		ax.slot[v] = s;
+		a->out->statistics.spills++;
+		return;
+	}
 	{
 		uint32_t w = vir_alloc_web_is_valid(a, v);
 
@@ -930,6 +937,9 @@ static void vir_alloc_clobbers_apply(vir_allocator *a, const vir_register_constr
 	for (int c = 0; c < 2; c++) {
 		uint64_t m = (fx->clobbered[c] | fx->edge_clobbered[c]) & a->registers->alloc[c];
 
+		/* An explicit clobber also overwrites the caller's incoming value
+		 * when this function has never allocated the register itself. */
+		a->used_callee[c] |= m & a->registers->callee[c];
 		while (m) {
 			uint32_t r = VIR_REGISTER_MAKE(c, vir_alloc_mask_lowest_bit(m));
 
