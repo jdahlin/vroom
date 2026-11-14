@@ -2,7 +2,7 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|win64|inline] [--ref-only] [--obj] [--objcmp]
-                     [--own] [--vir] [--seh] [--vasm-ref] [--vlink-ref] [--vccrt-ref] [--export DIR]
+                     [--own (the default)] [--clang-as] [--vir] [--seh] [--vasm-ref] [--vlink-ref] [--vccrt-ref] [--export DIR]
                      [-v] [--show CAT] [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
@@ -12,7 +12,8 @@ resuming out of vcc's frames; --suite inline adds the inlining suite) is built f
 twice: by clang (the oracle) and by vcc, each linked by lld against the
 llvm-mingw sysroot (UCRT, static: no DLL beyond the system's) and run under
 Wine.  vcc passes when its program prints what clang's prints and exits the
-same way.  By default vcc's side uses `vpp -S`, assembled by clang; --obj
+same way.  By default vcc's side is vcc's own toolchain (--own, below);
+--clang-as uses `vpp -S`, assembled by clang and linked by lld; --obj
 uses the direct `vpp -c` path, and --objcmp compares both with clang's
 assembler.  --ref-only builds and runs clang's side only (WIN0).  --vir:
 vcc's side through VIR (VCC_VIR=l: -O2's SSA path, falling back per
@@ -364,12 +365,12 @@ def _file_hash(f):
 def own_link(objs, exe):
     """--own: vcc's driver links (vlink, libvccrt.a, the CRT); (rc, stderr, foreign inputs)"""
     mp = exe + '.map'
-    rc, _, err = sh([VPP, TGT, f'--sysroot={MINGW_SYSROOT}', '-static'] + objs + [RTO_OWN, '-o', exe, f'-Wl,-Map={mp}'],
-                    timeout=60, env=dict(own_env(), SOURCE_DATE_EPOCH='1700000000', VCC_LINK_VERBOSE='1'))
+    rc, _, err = sh([VPP, TGT, f'--sysroot={MINGW_SYSROOT}', '-static', '-v'] + objs + [RTO_OWN, '-o', exe, f'-Wl,-Map={mp}'],
+                    timeout=60, env=dict(own_env(), SOURCE_DATE_EPOCH='1700000000'))
     err = err.decode(errors='replace')
     bad = []
     if not rc:
-        line = next((l for l in err.splitlines() if '/vlink ' in l), '').replace(MINGW_SYSROOT, 'SYSROOT')	# (llvm-mingw: only its sysroot)
+        line = next((l for l in err.splitlines() if l.startswith('vlink ')), '').replace(MINGW_SYSROOT, 'SYSROOT')	# (llvm-mingw: only its sysroot)
         bad = sorted({m.group(0) for m in re.finditer(r'\S*(?:clang_rt|libgcc|libunwind|compiler-rt|lib/clang/|llvm)\S*', line, re.I)})
         if not line:
             bad.append('(no link line)')
@@ -429,6 +430,7 @@ def write_manifest(export_dir, mode):
             with open(os.path.join(directory, f)) as e:
                 tests.append(json.load(e))
     shutil.rmtree(f'{export_dir}/entries', ignore_errors=True)
+    os.makedirs(export_dir, exist_ok=True)
     with open(f'{export_dir}/vcc-win64.manifest.json', 'w') as f:
         json.dump({'version': 1, 'producer': f'bench/vcc-win64.py {mode}', 'target': 'x86_64-w64-mingw32',
                    'tests': tests}, f, indent=0)
@@ -911,7 +913,7 @@ if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh', '--vasm-ref', '--vlink-ref', '--vccrt-ref', '--own')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh', '--vasm-ref', '--vlink-ref', '--vccrt-ref', '--own', '--clang-as')}
     av = [a for a in av if a not in flags]
     nocache, ref_only, obj, ocmode, verbose, vir, seh = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh'))
     vlmode = '--vlink-ref' in flags
@@ -919,7 +921,8 @@ if __name__ == '__main__':
     rtmode = '--vccrt-ref' in flags
     if vir:
         os.environ['VCC_VIR'] = 'l'	# (inherited by every vpp the workers run)
-    export_dir, own = None, '--own' in flags
+    # the default is --own (vcc's toolchain only); --clang-as: vpp -S assembled by clang, linked by lld
+    export_dir, own = None, '--own' in flags or not flags & {'--obj', '--objcmp', '--ref-only', '--vasm-ref', '--vlink-ref', '--vccrt-ref', '--clang-as'}
     for opt in ('-j', '--suite', '--show', '--export'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]

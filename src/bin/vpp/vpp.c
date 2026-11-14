@@ -244,9 +244,6 @@ static int vpp_vlink_spawn(int argc, char **argv, void *ctx)
 	*strrchr(self, '/') = 0;
 	snprintf(path, sizeof path, "%s/vlink", self);
 	argv[0] = path;
-	if (getenv("VCC_LINK_VERBOSE"))
-		for (int i = 0; i < argc; i++)
-			fprintf(stderr, "%s%s", argv[i], i + 1 < argc ? " " : "\n");
 	if (posix_spawn(&pid, path, NULL, NULL, argv, environ)) {
 		fprintf(stderr, "vcc: error: cannot run %s\n", path);
 		return 1;

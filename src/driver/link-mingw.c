@@ -15,7 +15,7 @@
  *         S/x86_64-w64-mingw32/lib/crtend.o
  *
  * -nostdlib drops both the start files and the libraries, -nodefaultlibs the libraries,
- * -nostartfiles the start files.  libvccrt.a is VCC_VCCRT, else vccrt/libvccrt.a beside the running
+ * -nostartfiles the start files; -v prints the line.  libvccrt.a is VCC_VCCRT, else vccrt/libvccrt.a beside the running
  * program (make -C src vccrt puts it there).  The linker itself is the caller's: vpp spawns the vlink
  * beside it, vccd calls ld_main in its own process.
  */
@@ -110,7 +110,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 {
 	const char *out = "a.exe", *sysroot = NULL;
 	bool shared = false, static_ = false, nostdlib = false, nodefaultlibs = false, nostartfiles = false;
-	bool unicode = false, threads = false, pthread = false, strip = false;
+	bool unicode = false, threads = false, pthread = false, strip = false, verbose = false;
 	const char *subsystem = NULL;
 	int nsrc = 0, errfd = env->errfd >= 0 ? env->errfd : 2;
 
@@ -141,6 +141,8 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 			pthread = true;
 		else if (!strcmp(a, "-s"))
 			strip = true;
+		else if (!strcmp(a, "-v"))
+			verbose = true;
 		else if (!strcmp(a, "-mwindows"))
 			subsystem = "windows";
 		else if (!strcmp(a, "-mconsole"))
@@ -189,7 +191,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 		    !strcmp(a, "-mdll") || !strcmp(a, "-static") || !strcmp(a, "-nostdlib") || !strcmp(a, "-nodefaultlibs") ||
 		    !strcmp(a, "-nostartfiles") || !strcmp(a, "-s") || !strcmp(a, "-mwindows") || !strcmp(a, "-mconsole") ||
 		    !strncmp(a, "-fuse-ld=", 9) || !strncmp(a, "-rtlib=", 7) || !strncmp(a, "--unwindlib=", 12) ||
-		    !strcmp(a, "-static-libgcc") || !strcmp(a, "-rdynamic"))
+		    !strcmp(a, "-static-libgcc") || !strcmp(a, "-rdynamic") || !strcmp(a, "-v"))
 			continue;
 		if (a[0] == '-' && a[1]) {
 			cav[nc++] = (char *)a;
@@ -320,6 +322,9 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 		lav[nl++] = OWN("%s/x86_64-w64-mingw32/lib/crtend.o", sysroot);
 	lav[nl] = NULL;
 #undef OWN
+	if (verbose && !status)	/* -v: the link line, as clang's driver prints its commands */
+		for (int i = 0; i < nl; i++)
+			dprintf(errfd, "%s%s", lav[i], i + 1 < nl ? " " : "\n");
 	if (!status)
 		status = link(nl, lav, ctx);
 	for (int t = 0; t < ntmp; t++) {

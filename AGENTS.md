@@ -69,7 +69,8 @@ relative to it); `TODO.md` stays at the top.
     `test/common/`, `bench/common-test.py`).  One failure path (`fail.h`:
     `vjob_fail`, `vout_of_memory`, `VBUG`); regions (`region.h`), the byte
     buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
-    (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
+    (`text-buffer.h`), growable arrays (`vector.h`), tail-merged string tables
+    (`string-table.h`: ELF, COFF and PE), `string-index.h` and the
     string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
     `leb128.h`, `format.h`, the ar archive reader (`archive-reader.c`), digests (`digest-xxh3.c`, `digest-blake3.c`,
     `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
@@ -130,7 +131,10 @@ relative to it); `TODO.md` stays at the top.
     main in `vlink-main.c`; also linked into vccd, which calls `ld_main` per
     link, each link with its own `struct ld_context`) and `vobjcopy`/`vnm`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
-  - `driver/`: one compile job from a clang command line (`job.c` calls the
+  - `driver/`: `link-mingw.c`: `vcc x.c -o x.exe` for Windows x64 (compile
+    each source, then vlink with clang's MinGW link line, libvccrt.a in place
+    of compiler-rt; vpp spawns the vlink beside it, vccd calls ld_main).
+    One compile job from a clang command line (`job.c` calls the
     pieces: `cmdline.c`, `searchpath.c`, `predef.c`, `depfile.c`, `output.c`, ...;
     `driver-internal.h`), the declaration cache (`declaration-cache.c`), `--explain` pages (`explain.inc`).
   - `server/`: vccd (`vccd.c`, with its main; one file per job beside it,
@@ -188,14 +192,16 @@ relative to it); `TODO.md` stays at the top.
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
     (`macho-linker.c`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs).
-  - `platform/win/`: COFF for x86_64-w64-mingw32 (`coff.c`: the writer, as
-    MC's WinCOFFObjectWriter; `unwind.c`: `.xdata`/`.pdata` from the SEH
-    frames, as Win64EH), in the obj module; `obj_set_format(o, OBJ_COFF)`
-    selects it (obj.h, "COFF").  The assembler's COFF directives (`.def`,
-    `.section` flags and COMDAT, `.seh_*`, ...) are `as/coff-directives.c`.
   - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
-  - `platform/win/`: vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
+  - `platform/win/`: Windows x64 (x86_64-w64-mingw32, doc/PLAN-win64.md).
+    COFF objects (`coff.c`: the writer, as MC's WinCOFFObjectWriter;
+    `unwind.c`: `.xdata`/`.pdata` from the SEH frames, as Win64EH), in the
+    obj module; `obj_set_format(o, OBJ_COFF)` selects it (obj.h, "COFF"),
+    which the code generator's `-c` (codegen/unit-emit.c) and the driver's
+    `.s`/`.S` path do for the target.  The assembler's COFF directives
+    (`.def`, `.section` flags and COMDAT, `.seh_*`, ...) are
+    `as/coff-directives.c`.  vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
     one TU like `ld/ld.c` that #includes `pe-options.c`, `pe-input.c`,
     `pe-resolve.c`, `pe-export.c`, `pe-layout.c`, `pe-write.c`; model in
     `pe-linker-internal.h`, COFF/PE constants in `include/platform/win/coff-format.h`, shared with `coff.c`): chosen
@@ -203,7 +209,7 @@ relative to it); `TODO.md` stays at the top.
     command line, output byte-identical to lld's (doc/PLAN-win64.md WIN7).
   - `runtime/`: vcc's run-time support library for x86_64-w64-mingw32
     (`libvccrt.a`, WIN7R; `make -C src vccrt` runs `runtime/build.sh`, CC and
-    AR as parameters): the helpers generated code calls (`__int128` division
+    AR as parameters, default vcc's own vpp and var: no LLVM tool): the helpers generated code calls (`__int128` division
     and shifts, `__int128` <-> float conversions, `__float128` soft float,
     `_Float16`/`__bf16` narrowings, complex `*` and `/`, powi) and
     `___chkstk_ms` (`stack-probe.S`), our own code from the helpers'
@@ -338,7 +344,9 @@ bench/vcc-wasm.py -j 6              # [needs VCC_WASM=1; not maintained] the C s
 bench/vcc-x86.py -j 6               # the C suites for x86-64 on an x86-64 host: vcc -S, clang -c, glibc, native (~10 s; first run ~10 min for the references)
 bench/fetch-testsuites.sh llvm-mingw # the pinned MinGW-w64 sysroot (UCRT) -> work/llvm-mingw (SHA-256 checked; no-op when there)
 bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang + lld + llvm-mingw sysroot, run under Wine (~60 s cold, <1 s cached)
-bench/vcc-win64.py -j 6 [--obj|--objcmp]   # ... and vcc's side (vpp -S, clang -c, lld, Wine) vs those references (doc/PLAN-win64.md; ~40 s, <2 s cached)
+bench/vcc-win64.py -j 6 [--own] [--vir] [--seh]   # ... and vcc's side, by default vcc only: vpp -c, vcc's driver links (vlink + libvccrt.a built by vcc + the CRT), PATH empty on vcc's side, no foreign input in the map (doc/PLAN-win64.md; ~40 s, <2 s cached)
+bench/vcc-win64.py -j 6 --clang-as|--obj|--objcmp   # vpp -S + clang -c + lld; vpp -c + lld; --objcmp: vpp -c = vasm(-S) = clang -c(-S) byte for byte
+vpp --target=x86_64-w64-mingw32 --sysroot=S -v x.c -o x.exe   # compile and link with vlink + libvccrt.a; -v prints the link line (WIN5/WIN8)
 bench/vcc-win64.py -j 6 --vir --seh # ... through VIR (VCC_VIR=l); --seh: every object's .pdata/.xdata against its prologs, canonical epilogues
 bench/vcc-win64.py -j 6 --suite win64   # src/test/win64: Windows' convention rules, TLS, dllimport, ctors; stack walk, unwinding longjmp, VEH unwinding out of vcc frames
 bench/vcc-abi.py --target win64 [--vir]  # src/test/abi clang/vcc x caller/callee for x86_64-w64-mingw32 under Wine (~3 min); msabi_calls also natively (--target x86_64)
