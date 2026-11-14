@@ -125,6 +125,7 @@ typedef struct cxx_entity {
 	struct cxx_ftemplate *ftmpl;
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
+	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
@@ -227,6 +228,7 @@ typedef struct cxx {
 		uint32_t declarations, declarations_typed, symbols, expressions, expressions_typed;
 		uint32_t asserts_true, asserts_false, asserts_unknown;	/* static_asserts outside templates */
 		uint32_t calls, calls_typed, why[12];	/* calls outside templates; why a call has no type (CXX_WHY_*) */
+		uint32_t ooc_bodies, ooc_failed, ooc_ambiguous;	/* class template members defined outside the class, instantiated */
 		uint32_t bodies, bodies_failed, bodies_cached, body_depth_max, member_bodies, member_bodies_failed;	/* function template bodies instantiated */
 	} stats;
 	/* instantiation (instantiate.c) */
@@ -384,6 +386,8 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
+					    uint32_t nparams, bool is_const);
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);

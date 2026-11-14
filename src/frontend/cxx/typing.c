@@ -398,6 +398,13 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	if (result == CXX_TY_UNKNOWN && !c->template_depth && !(c->none_viable && operator_call) && getenv("VCC_CXX_WHY"))
 		fprintf(stderr, "why@%u %s %.*s/%u\n", c->tok[c->pos ? c->pos - 1 : 0].loc, best >= 0 || (viable && same && !unknown) ? "return" :
 			unknown ? "unknown" : !viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
+	if (result == CXX_TY_UNKNOWN && !c->template_depth && !c->instantiating && !c->unevaluated && getenv("VCC_CXX_WHY_TOP")) {
+		fprintf(stderr, "top %s %.*s/%u:", best >= 0 || (viable && same && !unknown) ? "return" : unknown ? "unknown" : !viable ? "none" : "ambiguous",
+			(int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
+		for (uint32_t i = c->pos > 10 ? c->pos - 10 : 0; i < c->pos && i < c->ntok; i++)
+			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+		fputc('\n', stderr);
+	}
 	if (result == CXX_TY_UNKNOWN && !c->template_depth && getenv("VCC_CXX_WHY_TOKENS")) {
 		const char *want = getenv("VCC_CXX_WHY_TOKENS");
 
@@ -408,6 +415,10 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			fputc('\n', stderr);
 		}
 	}
+	if (getenv("VCC_CXX_PICK") && !c->template_depth && result != CXX_TY_UNKNOWN)
+		fprintf(stderr, "pick %s %s %s %.*s\n", best < 0 ? "shared-type" : cand[best].tmpl ? "template" : cand[best].e->late ? "member-late" : "plain",
+			c->unevaluated ? "unevaluated" : "evaluated", best >= 0 && cand[best].e->late && cand[best].e->late_done ? "done" : "-",
+			(int)vintern_ents[set->name].len, vintern_ents[set->name].s);
 	/* the function called (when known): its body is instantiated, in evaluated code */
 	if (best >= 0) {
 		cxx_entity *called = cand[best].e;

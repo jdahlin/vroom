@@ -91,6 +91,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		dprintf(o->errfd, "cxx: calls %u, typed %u; untyped: dependent %u, none viable %u, ambiguous %u, template not recorded %u, packs %u, "
 			"signature %u, argument %u, unbound %u, class match %u, return type %u, callee unknown %u\n", st->calls, st->calls_typed,
 			st->why[0], st->why[1], st->why[2], st->why[3], st->why[4], st->why[5], st->why[6], st->why[7], st->why[8], st->why[9], st->why[10]);
+		dprintf(o->errfd, "cxx: out-of-class member bodies %u, failed %u, ambiguous %u\n", st->ooc_bodies, st->ooc_failed, st->ooc_ambiguous);
 		dprintf(o->errfd, "cxx: static_asserts true %u, false %u, not evaluated %u\n", st->asserts_true, st->asserts_false, st->asserts_unknown);
 		dprintf(o->errfd, "cxx: instance member bodies %u, failed %u\n", st->member_bodies, st->member_bodies_failed);
 		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u; partial specializations: %u matched, %u unknown\n",

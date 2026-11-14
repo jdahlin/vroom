@@ -41,6 +41,9 @@ struct cxx_template {
 	uint32_t pos, end;	/* class: its class-key token; alias: its type-id [pos, end) */
 	uint8_t is_alias, has_partial;
 	char *path;		/* its qualified name (the layout dump), NULL: not nameable */
+	/* its members defined outside the class: template<...> R X<...>::f(...) { } */
+	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home; uint8_t is_const; } *oocs;
+	uint32_t noocs;
 };
 
 typedef struct cxx_instance {
@@ -1567,12 +1570,91 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	return 1;
 }
 
+VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
+					    uint32_t nparams, bool is_const)
+{
+	cxx_template *t = cxx_template_of(te);
+
+	(void)c;
+	t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
+	t->oocs[t->noocs++] = (struct cxx_ooc){ .name = name, .pos = pos, .nparams = nparams, .params = params, .home = home,
+						.is_const = is_const };
+}
+
+/*
+ * A call uses e, a member function of a class template's instance declared without a body: its
+ * definition outside the class (matched by name, parameter count and const), parsed as an ordinary
+ * out-of-class member definition with the definition's template parameters bound to the instance's
+ * arguments.
+ */
+static void cxx_member_definition_use(cxx *c, cxx_entity *e)
+{
+	cxx_scope *cs = e->member_of;
+	cxx_instance *x = cs && cs->kind == CXX_SCOPE_CLASS && cs->owner ? cs->owner->instance : NULL;
+	cxx_template *t = x ? x->t : NULL;
+	const struct cxx_ooc *d = NULL;
+	uint32_t nparams, matches = 0;
+	cxx_scope *binding;
+	cxx_outer o;
+	jmp_buf jb;
+
+	if (!t || !t->noocs || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+		return;
+	nparams = AST_TYPE(c->ast, e->ty)->n;
+	for (uint32_t i = 0; i < t->noocs; i++)
+		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const)
+			d = &t->oocs[i], matches++;
+	if (!matches)
+		return;	/* (declared only: defined in another TU, or = default) */
+	e->late_done = 1;
+	if (matches > 1) {
+		c->stats.ooc_ambiguous++;	/* (overloads with the same parameter count: their types would tell) */
+		return;
+	}
+	/* the definition's own template parameters are the class template's, in order */
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
+	for (uint32_t i = 0; i < d->params->ntparams; i++) {
+		const cxx_tparam *tp = &d->params->tparams[i];
+
+		if (tp->pack) {
+			if (i + 1 != d->params->ntparams || i > x->nargs)
+				return;
+			cxx_bind_pack(c, binding, tp, x->args + i, x->nargs - i);
+			break;
+		}
+		if (i >= x->nargs)
+			return;
+		cxx_bind(c, binding, tp, &x->args[i]);
+	}
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++;
+	if (c->body_depth > c->stats.body_depth_max)
+		c->stats.body_depth_max = c->body_depth;
+	c->unevaluated = 0;
+	c->fail = &jb;
+	c->pos = d->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = e->fn_const;
+	if (!setjmp(jb)) {
+		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
+		c->stats.ooc_bodies++;
+	} else
+		c->stats.ooc_failed++;
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+}
+
 /* a call uses e: an instance's member function, its body parsed now (once) */
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 {
 	cxx_outer o;
 	jmp_buf jb;
 
+	if (e && !e->late && !e->late_done && !c->tentative && c->body_depth < 64 && !c->unevaluated && e->member_of) {
+		cxx_member_definition_use(c, e);
+		return;
+	}
 	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64 || c->unevaluated)
 		return;
 	e->late_done = 1;

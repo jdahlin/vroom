@@ -2686,6 +2686,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 
 			for (uint32_t i = 0; known && i < c->ndecl_params; i++)
 				known = (ps[i] = c->decl_params[i].ty) != CXX_TY_UNKNOWN;
+			if (e)
+				e->member_of = cxx_declaration_scope(c);
 			if (e && !tmpl) {
 				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
@@ -2746,6 +2748,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
 			if (e && f)
 				e->fn_const = c->decl_const;
+			if (e && f && context == CXX_CONTEXT_CLASS)
+				e->member_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
@@ -2797,6 +2801,26 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			cxx_attributes_skip(c);
 		}
 		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK)) {
+			/* template<...> R X<...>::f(...) { }: a class template's member defined outside it, instantiated
+			   for an instance when a call uses that member */
+			if (q && qs && qs->owner && qs->owner->tmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope && !c->tentative &&
+			    !c->instantiating && !c->class_depth && context != CXX_CONTEXT_CLASS) {
+				uint32_t mname = name;
+				int depth = 0;
+
+				if (name == qs->owner->name) {
+					mname = cxx_ctor_id();
+					for (uint32_t i = start; i < c->pos; i++) {
+						int k = c->tok[i].kind;
+
+						depth += k == LEX_TOKEN_LEFT_PAREN ? 1 : k == LEX_TOKEN_RIGHT_PAREN ? -1 : 0;
+						if (k == LEX_TOKEN_TILDE && !depth)
+							mname = cxx_dtor_id();
+					}
+				}
+				cxx_template_member_definition(c, qs->owner, mname, c->scope, c->scope->parent, c->ftmpl_begin, c->ndecl_params,
+							       c->decl_const);
+			}
 			if (context == CXX_CONTEXT_CLASS || c->class_depth)
 				cxx_function_body_defer(c);
 			else {
