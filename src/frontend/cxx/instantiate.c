@@ -1241,8 +1241,8 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uin
 
 		if (!cxx_mentions_placeholder(c, P, 0))
 			continue;	/* (non-deduced: its conversion is not checked here) */
-		if (A == CXX_TY_UNKNOWN)
-			return -1;
+		if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID)
+			return -1;	/* (void: a type vcc got wrong; no argument has it) */
 		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
 			int ext = AST_TYPE(c->ast, P)->ext;
 			void *owner;

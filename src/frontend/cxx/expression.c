@@ -570,9 +570,11 @@ static void cxx_primary_expression_parse(cxx *c)
 		return;
 	case LEX_TOKEN_LEFT_SQUARE:
 		cxx_lambda_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a closure type: not built; not its body's last expression's) */
 		return;
 	case LEX_TOKEN_LEFT_BRACE:
 		cxx_braced_init_list_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_IDENTIFIER: case LEX_TOKEN_COLON_COLON: case LEX_TOKEN_TILDE:
 		break;
@@ -624,22 +626,30 @@ static void cxx_primary_expression_parse(cxx *c)
 		else
 			cxx_expression_parse(c);
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (const std::type_info: not looked up) */
 		return;
 	case CXX_KW_requires:
 		cxx_requires_expression_parse(c);
+		cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
 	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_offsetof: case CXX_KW___builtin_bit_cast:
 	case CXX_KW___builtin_convertvector: case CXX_KW___builtin_types_compatible_p: case CXX_KW___builtin_choose_expr:
 	case CXX_KW___builtin_shufflevector: case CXX_KW___builtin_addressof: case CXX_KW___is_identifier:
 		cxx_builtin_call_parse(c);
+		cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
 	case CXX_KW_operator:
 		cxx_id_expression_parse(c);
 		return;
-	case CXX_KW___real__: case CXX_KW___imag__: case CXX_KW___extension__:
+	case CXX_KW___real__: case CXX_KW___imag__: case CXX_KW___extension__: {
+		bool ext = t->kw == CXX_KW___extension__;
+
 		cxx_advance(c);
 		cxx_cast_expression_parse(c);
+		if (!ext)
+			cxx_et(c, CXX_TY_UNKNOWN, false);
 		return;
+	}
 	case CXX_KW_typename: case CXX_KW_decltype: case CXX_KW___decltype:
 		if (cxx_lookahead_fn(c, cxx_type_then_init)) {
 			cxx_type_specifiers_parse(c);
