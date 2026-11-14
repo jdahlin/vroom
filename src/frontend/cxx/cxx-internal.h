@@ -271,6 +271,7 @@ typedef struct cxx {
 	uint8_t einvalid;		/* the expression is ill-formed for sure (no function fits, no such member): a requirement fails */
 	int8_t req_value;		/* the last requires-expression: 1 true, 0 false, -1 not known */
 	int8_t sig_requires;		/* the last signature's trailing requires-clause: 1, 0, -1 not known (1: none) */
+	uint32_t decl_less;		/* the last declarator-id's template arguments name<...> (its '<', 0: none) */
 	uint32_t ftmpl_req;		/* a template declaration's requires-clause (its token, 0: none) */
 	uint32_t unevaluated;		/* > 0: in an unevaluated operand or a discarded statement (calls instantiate no body) */
 	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
@@ -383,6 +384,8 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);
+VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);
 VPRIV void cxx_ftemplate_requires(struct cxx_ftemplate *f, uint32_t pos);
 VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c);

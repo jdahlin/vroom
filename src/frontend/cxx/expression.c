@@ -175,6 +175,22 @@ static void cxx_id_expression_parse(cxx *c)
 		if (is_template) {
 			cxx_template_arguments_parse(c);
 			cxx_et(c, CXX_TY_UNKNOWN, false);
+			/* a variable template: its value for these arguments */
+			if (!dep && e && !c->tentative && !c->template_depth) {
+				cxx_entity *ve = NULL;
+				int64_t v;
+
+				for (cxx_entity *x = e; x && !ve; x = x->next)
+					if (x->kind == CXX_ENTITY_VARIABLE_TEMPLATE && x->ftmpl)
+						ve = x;
+				if (ve && cxx_vtemplate_value(c, ve, c->targs, c->ntargs, &v)) {
+					if (ve->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ve->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, ve->ty) <= TY_ULLONG)
+						cxx_ec(c, QUNQ(ve->ty), v);
+					else
+						c->evalue = v, c->econst = 1;	/* (its type: the parameter's, not known here) */
+					return;
+				}
+			}
 			/* Concept<args>: a bool, its value when the arguments are known */
 			if (!dep && e && cxx_entity_kind_find(e, CXX_ENTITY_CONCEPT)) {
 				int v = c->template_depth || c->tentative ? -1 :

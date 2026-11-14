@@ -1165,12 +1165,15 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			name = cxx_peek(c, 0)->id;
 			cxx_advance(c);
 			/* an explicit specialization's or a qualified template's arguments */
+			c->decl_less = 0;
 			if (cxx_is(c, LEX_TOKEN_LESS)) {
 				cxx_entity *e = cxx_lookup(c, name);
 
 				if (((*qualified || c->template_depth || c->explicit_specialization) && (*qualified || (e && cxx_entity_template(e)))) ||
-				    (e && cxx_entity_template(e) && cxx_lookahead(c, cxx_template_arguments_then_paren)))
+				    (e && cxx_entity_template(e) && cxx_lookahead(c, cxx_template_arguments_then_paren))) {
+					c->decl_less = c->pos;
 					cxx_template_arguments_parse(c);	/* a specialization, or an explicit instantiation's */
+				}
 			}
 		} else if (!abstract_ok || *qualified)
 			cxx_fail(c, "expected a declarator name");
@@ -1926,8 +1929,15 @@ static void cxx_static_assert_parse(cxx *c)
 	cxx_assignment_expression_parse(c);
 	known = c->econst && !c->tentative && !c->template_depth, value = c->evalue != 0;
 	if (!c->tentative && !c->template_depth && !c->unevaluated) {
-		if (!known)
+		if (!known) {
 			c->stats.asserts_unknown++;
+			if (getenv("VCC_CXX_WHY")) {
+				fprintf(stderr, "static_assert unknown:");
+				for (uint32_t i = start + 2; i < c->pos && i < start + 16; i++)
+					fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+				fputc('\n', stderr);
+			}
+		}
 		else if (value)
 			c->stats.asserts_true++;
 		else {
@@ -2713,6 +2723,26 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->ty = t;	/* a variable's, a data member's, a function's type */
 			if (e && kind == CXX_ENTITY_VALUE && auto_pattern != CXX_TY_UNKNOWN)
 				auto_e = e;
+			/* a variable template: its initializer, evaluated with arguments (cxx_vtemplate_value); a partial
+			   or explicit specialization joins the primary */
+			if (e && !f && !c->tentative && !c->instantiating && !(flags & DS_TYPEDEF) && cxx_is(c, LEX_TOKEN_EQUAL)) {
+				uint32_t less = c->decl_less;
+				bool in_template = c->template_depth == 1 && c->scope == c->ftmpl_scope;
+
+				if (kind == CXX_ENTITY_VARIABLE_TEMPLATE && !less && in_template && !e->ftmpl) {
+					e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->pos + 1, NULL);
+					e->ty = t;
+				} else if (less && ((kind == CXX_ENTITY_VARIABLE_TEMPLATE && in_template) ||
+						    (kind == CXX_ENTITY_VALUE && c->explicit_specialization && !c->template_depth))) {
+					for (cxx_entity *x = e->next; x; x = x->next)
+						if (x->kind == CXX_ENTITY_VARIABLE_TEMPLATE && x->ftmpl) {
+							cxx_vtemplate_special(c, x->ftmpl, kind == CXX_ENTITY_VARIABLE_TEMPLATE ? c->scope : NULL,
+									      kind == CXX_ENTITY_VARIABLE_TEMPLATE ? c->scope->parent : c->scope,
+									      less, c->pos + 1);
+							break;
+						}
+				}
+			}
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
 			if (e && f)
 				e->fn_const = c->decl_const;

@@ -1114,7 +1114,10 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; } cxx_fdone;
+
+/* a variable template's partial or explicit specialization: its pattern and its initializer */
+typedef struct cxx_vspec { cxx_partial p; uint32_t init_pos; } cxx_vspec;
 
 typedef struct cxx_ftemplate {
 	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
@@ -1123,6 +1126,8 @@ typedef struct cxx_ftemplate {
 	uint32_t pos;		/* its decl-specifiers */
 	cxx_scope *ctor_class;	/* a constructor template: its class (no return type to parse) */
 	uint32_t req_pos;	/* its template header's requires-clause (0: none) */
+	cxx_vspec **vspecs;	/* a variable template: its specializations */
+	uint32_t nvspecs;
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
 } cxx_ftemplate;
@@ -1704,8 +1709,12 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_
 	volatile int v = -1;
 	uint32_t at;
 
+	cxx_targ acopy[32];
+
 	if (!f || n > 32 || c->body_depth >= 64 || c->tentative)
 		return -1;
+	memcpy(acopy, args, n * sizeof *args);	/* (often c->targs, which the parse below reuses) */
+	args = acopy;
 	ps = f->p.params;
 	for (uint32_t i = 0; i < n; i++)
 		if (!args[i].kind || args[i].kind == 3 || args[i].kind == 5 || (args[i].kind == 1 && cxx_mentions_placeholder(c, args[i].t, 0)))
@@ -1749,4 +1758,116 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_
 	cxx_outer_restore(c, &o);
 	f->done[at].viable = (int8_t)v;
 	return v;
+}
+
+/* ---- variable templates -------------------------------------------------------------------- */
+
+VPRIV void cxx_vtemplate_special(cxx *c, cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos)
+{
+	cxx_vspec *sp = calloc(1, sizeof *sp);
+
+	/* (an explicit specialization: no parameters) */
+	sp->p.params = params ? params : cxx_scope_new(c, CXX_SCOPE_TEMPLATE, home, NULL);
+	sp->p.home = home, sp->p.less_pos = less_pos, sp->init_pos = init_pos;
+	f->vspecs = realloc(f->vspecs, (f->nvspecs + 1) * sizeof *f->vspecs);
+	f->vspecs[f->nvspecs++] = sp;
+}
+
+/*
+ * name<args> for a variable template: the initializer of the specialization the arguments select (the
+ * most specialized partial or explicit one that matches, else the primary), as a constant.  false: not
+ * known.
+ */
+VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out)
+{
+	cxx_ftemplate *f = e ? e->ftmpl : NULL;
+	cxx_scope *ps, *binding;
+	cxx_vspec *pick = NULL;
+	cxx_targ bind[64], tmp[64];
+	cxx_outer o;
+	jmp_buf jb;
+	volatile bool known = false;
+	volatile int64_t v = 0;
+	uint32_t at, pos;
+
+	cxx_targ acopy[32];
+
+	if (!f || n > 32 || c->body_depth >= 64 || c->tentative)
+		return false;
+	memcpy(acopy, args, n * sizeof *args);	/* (often c->targs, which the parses below reuse) */
+	args = acopy;
+	ps = f->p.params;
+	for (uint32_t i = 0; i < n; i++)
+		if (!args[i].kind || args[i].kind == 3 || args[i].kind == 5 || (args[i].kind == 1 && cxx_mentions_placeholder(c, args[i].t, 0)))
+			return false;
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (f->done[i].n == n && cxx_args_equal(f->done[i].args, args, n)) {
+			*out = f->done[i].value;
+			return f->done[i].viable == 1;
+		}
+	/* the specialization: every pattern must be one vcc can match */
+	for (uint32_t i = 0; i < f->nvspecs; i++) {
+		cxx_vspec *sp = f->vspecs[i];
+
+		cxx_partial_evaluate(c, &sp->p);
+		if (!sp->p.ok || sp->p.params->ntparams > 64)
+			return false;
+		if (!cxx_partial_matches(c, &sp->p, args, n, tmp))
+			continue;
+		if (pick && !(cxx_partial_at_least_as_specialized(c, &sp->p, &pick->p) && !cxx_partial_at_least_as_specialized(c, &pick->p, &sp->p))) {
+			if (!(cxx_partial_at_least_as_specialized(c, &pick->p, &sp->p) && !cxx_partial_at_least_as_specialized(c, &sp->p, &pick->p)))
+				return false;	/* (neither is more specialized: not decided here) */
+			continue;
+		}
+		pick = sp;
+		memcpy(bind, tmp, sp->p.params->ntparams * sizeof *bind);
+	}
+	if (pick) {
+		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, pick->p.home, NULL);
+		for (uint32_t i = 0; i < pick->p.params->ntparams; i++)
+			if (bind[i].kind == 6)
+				cxx_bind_pack(c, binding, &pick->p.params->tparams[i], bind[i].list + bind[i].t, (uint32_t)bind[i].v);
+			else
+				cxx_bind(c, binding, &pick->p.params->tparams[i], &bind[i]);
+		pos = pick->init_pos;
+	} else {
+		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, f->p.home, NULL);
+		for (uint32_t i = 0; i < ps->ntparams; i++) {
+			const cxx_tparam *tp = &ps->tparams[i];
+
+			if (tp->pack) {
+				if (i + 1 != ps->ntparams || i > n)
+					return false;
+				cxx_bind_pack(c, binding, tp, args + i, n - i);
+				break;
+			}
+			if (i >= n || (args[i].kind == 1) != (tp->kind == 1))
+				return false;	/* (default arguments: not yet) */
+			cxx_bind(c, binding, tp, &args[i]);
+		}
+		pos = f->pos;
+	}
+	if (f->ndone == f->cdone)
+		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
+	at = f->ndone++;
+	memset(&f->done[at], 0, sizeof f->done[at]);
+	f->done[at].args = malloc((n ? n : 1) * sizeof *args);
+	memcpy(f->done[at].args, args, n * sizeof *args);
+	f->done[at].n = n, f->done[at].viable = -1;
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++, c->unevaluated++;
+	c->fail = &jb;
+	c->pos = pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_conditional_expression_parse(c);
+		if (c->econst)
+			known = true, v = c->evalue;
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	f->done[at].viable = known ? 1 : -1, f->done[at].value = v;
+	*out = v;
+	return known;
 }
