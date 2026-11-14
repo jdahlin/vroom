@@ -653,9 +653,42 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   per TU drops.
 - [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
   `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
-  vccd, checked by hand); `vcc-win64.py` drives vpp only.
+  vccd); `bench/vccd-test.py win64-cross-build-through-the-shim` and
+  `bench/zlib/run.py --target win64` (zlib's ./configure and Makefile through
+  the shim) cover it since WIN8, but `vcc-win64.py` drives vpp only.
   *Validate:* a `vcc-win64.py --vccd` mode (private vccd, the shim as CC)
   gives the same pass set as `--own`.
+- [ ] **Windows x64: the x86 SIMD intrinsic headers** [C].  vcc's own
+  `src/headers/x86/` has only what MinGW-w64's `windows.h`/`malloc.h` reach
+  (`x86intrin.h`, `emmintrin.h`, `xmmintrin.h`, `mm_malloc.h`: the vector
+  types, fences, pause, clflush, MXCSR, rdtsc); no `immintrin.h`, no SSE/AVX
+  arithmetic intrinsics, no `cpuid.h`, so `<intrin.h>` (which includes
+  `pmmintrin.h` and the rest) does not compile without `-resource-dir`.  The
+  WIN8 projects are configured without them (FFmpeg `--disable-asm`).
+  *Validate:* `vcc-diff.py --win64` with vcc's headers on the intrinsic TUs
+  (`intrin.h`, `-march=haswell`) and a test calling SSE2/AVX2 intrinsics
+  under Wine against clang's build.
+- [ ] **Windows x64: `<tgmath.h>` and `<stdbit.h>`** [C].  Neither MinGW-w64
+  nor `src/headers/freestanding/` has them (clang's resource directory has
+  `tgmath.h`; C23's `stdbit.h` neither).  *Validate:* a `src/test/vcc` case per
+  header compiled for x86_64-w64-mingw32 without `-resource-dir`.
+- [ ] **`-fcommon` and `__attribute__((common))` are ignored** [C].  vcc
+  emits a tentative definition as `.bss` (`B`) on every target where clang's
+  `-fcommon` or the attribute gives a common symbol (`C`), found in WIN8's
+  vnm comparison; a program that defines the same tentative variable in two
+  TUs and relies on `-fcommon` fails to link.  *Validate:* `vnm` of a TU with
+  both shows `C`, as clang's, for ELF and COFF; a two-TU test links with
+  `-fcommon`.
+- [ ] **`-coverage` is accepted and ignored** [C].  zlib's Makefile builds
+  `infcover` with `-coverage`; clang instruments and links the profile
+  runtime, vcc compiles normally (the program runs, no `.gcda`).
+  *Validate:* either an error ("unsupported option") or gcov-compatible
+  counters; decide which.
+- [ ] **Windows x64: FFmpeg with NASM, SQLite's TCL suite** [T].  WIN8 ran
+  FFmpeg's C fallbacks only (`--disable-asm`) and SQLite without its TCL
+  testrunner (no tclsh for Windows on the host; testfixture.exe needs one).
+  *Validate:* `bench/ffmpeg/run.py --target win64` with x86asm (NASM objects
+  linked by vlink) and a Windows Tcl to build testfixture.exe.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,

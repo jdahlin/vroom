@@ -867,4 +867,122 @@ What still comes from LLVM on vcc's side: no tool.  The resource headers
 directory with -isystem to both sides), and the sysroot is llvm-mingw's
 packaging of mingw-w64.
 
-### WIN6, WIN8, WIN10: planned
+### WIN8 (2026-11-14): zlib, SQLite and FFmpeg's C fallbacks by vcc's own toolchain, under Wine
+
+The runners take `--target win64` (`bench/zlib/run.py`, `bench/sqlite/run.py`
+with `bench/sqlite/win64.py`, `bench/ffmpeg/run.py` with
+`bench/ffmpeg/win64.py`); what they share is `bench/win64proj.py`: clang's
+reference chain (clang 23, lld, llvm-mingw's compiler-rt, clang's headers),
+vcc's (vpp or the vcc shim against a private vccd, `var`, `vnm`, vcc's driver
+linking with vlink and libvccrt.a), and three checks on vcc's side: every
+command runs with a PATH of the host's `/usr/bin` and `/bin` minus every
+compiler, assembler, linker, archiver and object tool (clang*, llvm-*, lld,
+gcc, cc, as, ld, ar, nm, ranlib, strip, objcopy, windres, dlltool, any cross
+tool), each program's link map has only our objects, the sysroot's CRT and
+libvccrt.a's members and its `-v` link line no LLVM path, and `-H` of a
+compile reads nothing under `lib/clang`.  Trees go to
+`build/linux/win64-projects/`; a runner skips (exit 0, with the reason)
+without the sysroot, Wine or vcc's tools, or when its source cannot be
+fetched (zlib.net and sqlite.org with pinned SHA-256s, FFmpeg's release
+tarball).  `ci/premerge.sh win64` now runs the zlib and SQLite steps.
+
+**Headers.**  For this target the driver's default search path no longer has
+clang's resource directory: `src/headers/freestanding/` (`float.h`,
+`stdbool.h`, `stdalign.h`, `stdnoreturn.h`, `iso646.h`, `stdckdint.h`,
+`stdatomic.h`), `src/headers/x86/`, then the sysroot.  MinGW-w64 ships
+`stddef.h`, `stdarg.h`, `limits.h`, `stdint.h`, `inttypes.h`, `varargs.h`,
+`unwind.h` and the CRT half of `float.h` (which `#include_next`s the
+compiler's: ours defines the standard macros and then includes it).
+`winnt.h` includes `x86intrin.h` and `emmintrin.h` unconditionally and
+`malloc.h` includes `mm_malloc.h`, so `x86/` has those with what the headers
+reach (vector types, fences, pause, clflush, MXCSR, rdtsc, `_mm_malloc`);
+no `immintrin.h` or SSE arithmetic (TODO.md), and the projects are configured
+without them.  `-resource-dir=DIR` gives clang's order with DIR/include
+(`vcc-diff.py --win64` passes clang's to both sides; cmp 990/990 after the
+change), `-nobuiltininc` drops them.  Result: in every vcc build of the three
+projects `-H` shows no file under `lib/clang`.  Still clang's on purpose:
+`bench/vcc-win64.py` passes clang's include directory with `-isystem` to both
+sides (its test runtime uses `-nostdinc`).
+
+**Bugs found and fixed** (each with its test, failing before):
+- pp: `__FLT_EVAL_METHOD__` was missing (clang's builtin macro; MinGW-w64's
+  and clang's `float.h` define `FLT_EVAL_METHOD` as it): `src/test/vcc/
+  flt_eval_method.c`.
+- vccd: within one build a file rewritten by a configure script was compiled
+  with its earlier bytes (zlib's configure: `#error` probe, then the real
+  one); entries whose mtime is within 3 s of their read are now checked at
+  every lookup (`lex.c`, racy entries): `vccd-test.py
+  file-rewritten-within-one-build`.
+- vccd and the driver: `vcc [--target=T] -v` without input gave "no input
+  file" ("host programs need --backend-sock" through vccd); it prints the
+  banner configure scripts read (zlib's looks for `clang`).
+- vlink-PE: `--pic-executable` (FFmpeg's configure) is one of lld's ignored
+  MinGW options: `vlink-pe.py` cases, 59/59.
+- vnm read only ELF; it reads COFF objects and short import records as
+  llvm-nm 23 (FFmpeg's configure runs `$nm test.o`): `bench/vnm-coff.py`,
+  7776/7776 identical (972 sysroot/vccrt/test files x 8 option sets).
+- bench: `hostenv.wine_start` starts Wine's services without pipes (the
+  first captured program of a new server waited 60 s for them).
+
+**zlib 1.4** (`bench/zlib/run.py --target win64 all`, 27 s): clang, vcc,
+vir (VCC_VIR=l) and `vccd` (zlib's own `./configure --static` and Makefile,
+CC = the vcc shim, AR = var, RANLIB = `var s`, against a private vccd that
+compiled 29 files and linked 6 programs itself).  All four: example,
+infcover, minigzip -1/-6/-9 round trips (decompressed by the program and by
+the host's gzip) pass under Wine; zbench's sizes and CRCs and minigzip -9's
+bytes equal to clang's build; nothing foreign.  zbench under Wine (wall,
+best of 3): vcc 1.72x clang's time, vir 1.08x (crc32 4.9x / 1.8x).
+
+**SQLite 3.50.4** (`bench/sqlite/run.py --target win64 all`, ~3 min):
+the amalgamation (threadsafe, Windows VFS, FTS5, R-Tree, math functions,
+bytecode/stmt/dbstat vtabs), sqlite3.exe, speedtest1, mptester,
+threadtest3 and fuzzcheck (its own sqlite3.c build), by clang, vcc and vir.
+Under Wine: `bench/sqlite/win64-corpus.sql` through the shell on a WAL file
+database and on :memory:: 255 lines, stdout and stderr byte-identical to
+clang's for vcc and vir; speedtest1 mix1 --verify hash 2617257 on all three;
+fuzzcheck 0 errors of 46391; threadtest3 0/4 (`--full`: all 15); mptester 4
+runs, the two WAL ones report `winUnlockReadLock ... Lock violation` at the
+end with clang's build too (Wine's, not counted).  The TCL suite is not run:
+there is no tclsh for Windows here.  sqlite3.c -O2: clang 12.9 s, vcc
+0.25 s, vir 0.6 s; speedtest1 --size 100 under Wine: vcc 1.73x, vir 1.15x.
+
+**FFmpeg 8.1.3, C fallbacks** (`bench/ffmpeg/run.py --target win64 all`,
+~7 min): `--enable-cross-compile --target-os=mingw32 --arch=x86_64
+--disable-asm --disable-autodetect --enable-w32threads --disable-doc
+--disable-debug --disable-stripping --windres=false`, Wine as
+`--target-exec`; vcc's trees with vpp as `--cc`/`--ld`, var, vnm, `true` as
+ranlib/strip.  FATE's host tools (tests/tiny_psnr, videogen, ...) are built
+by the host's gcc in every tree: they run on Linux.  make -j 6 of 2029 C
+files: clang 43 s, vcc 8.8 s, vir 9.6 s; nothing foreign in ffmpeg_g.exe's
+or ffprobe_g.exe's map.  Sample-free FATE under Wine: 2738/2739 for clang,
+vcc and vir; the failure is `source` in every tree (the tarball is not a git
+checkout); no vcc-only failure.  No compiler bug showed up.
+
+**vccd for the cross target:** zlib's configure build above, and
+`bench/vccd-test.py win64-cross-build-through-the-shim` (compile to COFF,
+link in vccd, map clean, `-v` banner, the program runs under Wine).
+
+**What on vcc's side still uses another tool:** nothing of LLVM or binutils.
+FFmpeg's FATE host tools are built by the host gcc (they run on Linux; vcc
+has no Linux user-program link); zlib's configure, make and the shells come
+from the host.
+
+**Regressions** (after the changes above): `vcc-win64.py --seh` and `--vir
+--seh` 2033/2033 + 2 xfail each; `vcc-abi.py --target win64` 28 pass, 3
+xfail; `vcc-x86.py --suite vcc` 325/325; `vcc-ctests.py --suite vcc` 332/332;
+`vcc-same.py` against the starting commit 23943/23969: the 26 are the new
+`flt_eval_method` test (11 modes; the base cannot compile it) and the known
+15 `-E` markers naming the base tree's own headers; `vlink-pe.py --run` 59/59;
+`vccrt-test.py diff` 70/70; `vccd-test.py` 33 pass; `vcc-diff.py --win64`
+cmp/hdr/deps/dm 990/990, `vcc-sema.py run --win64` 990/990; `vcc-driver.py`
+229/304 (as before); `vlink-opts.py` 66/66; `vcc-diag.py` 229/229;
+`quality.py --check` 22/22 (one blessed: the include pair ld and platform/win,
+vnm reading COFF); unity and file-by-file builds.  `CI_JOBS=4 ci/premerge.sh
+win64`: every step ok, zlib-win64 26 s and sqlite-win64 121 s now running
+(6 min 19 s in all); the export holds 2036 programs.
+
+**Not done:** FFmpeg with NASM; SQLite's TCL suite; the x86 SIMD intrinsic
+headers, `tgmath.h`, `stdbit.h`; `-fcommon`/`__attribute__((common))` and
+`-coverage` are ignored (seen here, TODO.md); a `vcc-win64.py --vccd` mode.
+
+### WIN6, WIN10: planned

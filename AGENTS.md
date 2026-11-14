@@ -91,7 +91,12 @@ relative to it); `TODO.md` stays at the top.
     reservations as small sbrk stretches) and `wasm/compat/` (ACLE CRC
     through SIMDe).
   - `headers/`: vcc's own `<arm_neon.h>`, `<arm_acle.h>`, `<arm_sve.h>`,
-    `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`).
+    `<stdatomic.h>`, the compiled program's resource headers (`VCC_INCDIR`);
+    `freestanding/` (`float.h`, `stdbool.h`, `stdalign.h`, `stdnoreturn.h`,
+    `iso646.h`, `stdckdint.h`, `stdatomic.h`) and `x86/` (only what MinGW-w64's
+    `windows.h` and `malloc.h` reach: `x86intrin.h`, `emmintrin.h`,
+    `xmmintrin.h`, `mm_malloc.h`) are Windows x64's compiler headers in place
+    of clang's resource directory (`-resource-dir=DIR` selects clang's).
   - `frontend/`: the language side, from bytes to a typed AST.
     - `lex/`: SIMD lexer and token cache (`bin/lextest/` drives it).
     - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
@@ -332,7 +337,7 @@ bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+
 bench/vcc-sema.py run|layout -j 6 --win64   # the same TUs: -fsyntax-only, layout claims checked by clang (layout ~5 min)
 src/tools/gen-win64data.sh          # Windows x64's predefines, -dD order, __has_* and attribute names from clang (ppdata-win64.inc, attrnames-win64.inc)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
-bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation (~11 s)
+bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation, a file rewritten within a build, the win64 shim (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
 VCC_DIAG_DEDUP=1 make ...           # under vccd: a header warning another TU of the build printed is left out
 bench/vccd-kbuild.sh work/build-X -j 6   # cold kernel build, vccd only (no clang/vroomd/lld; ~10 s)
@@ -374,6 +379,11 @@ bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0,
 bench/sqlite/run.py all            # SQLite (macOS): vcc/clang/gcc builds, TCL testrunner (no vcc-only fails), speedtest1 (~4 min)
 bench/zlib/run.py all              # zlib 1.4 (macOS): clang/vcc/vir/gcc builds, self-tests, same bytes as clang's, zbench CPU time (~30 s)
 bench/ffmpeg/run.py all            # ffmpeg n8.1.3 without assembly (macOS): clang/vcc/vir builds, FATE (2740 tests, no samples), compile time, codec/filter CPU time (~15 min)
+bench/zlib/run.py --target win64 all     # WIN8: zlib for x86_64-w64-mingw32 by clang, vcc, vir and zlib's ./configure through the vcc shim + vccd; self-tests under Wine, bytes = clang's (~30 s)
+bench/sqlite/run.py --target win64 all   # WIN8: amalgamation, shell, speedtest1, fuzzcheck, mptester, threadtest3 by clang/vcc/vir; SQL corpus output = clang's under Wine (~3 min; --full: all threadtests)
+                                   # (bench/win64proj.py: their shared chains, the emptied PATH of vcc's side, link-map and -H checks; trees in build/linux/win64-projects)
+bench/ffmpeg/run.py --target win64 all   # WIN8: FFmpeg C fallbacks for mingw32 by clang/vcc/vir (vcc's tools only), sample-free FATE under Wine, no vcc-only failures
+bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import records vs llvm-nm (the sysroot's libraries; ~8 s)
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR, loops vectorized (~15 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
