@@ -878,9 +878,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		else if (called->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !c->unevaluated && !c->tentative && nargs <= 16) {
 			qty r, et = result;
 
+			c->call_instance = NULL;
 			cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs, &r, true);
 			result = et != CXX_TY_UNKNOWN ? et : r;
 			called_instance = c->call_instance;	/* (code generation: the function this call calls) */
+			if (called_instance && called_instance->inst_ftmpl != called->ftmpl) {
+				called_instance = NULL;	/* (an instance an inner call made, not this one's) */
+			}
 		}
 	}
 	(void)first;
@@ -1111,10 +1115,28 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	cxx_entity *callee = c->ecallee, *set, *dtor;
 	cxx_scope *cls;
 
+	qty acopy[CXX_MAX_ARGS];
+	uint8_t lcopy[CXX_MAX_ARGS];
+	uint32_t bcopy[CXX_MAX_ARGS];
+
 	c->ctor_picked = NULL, c->ctor_found = 0, c->ctor_none = 0, c->ctor_ilist = NULL;
-	if (c->tentative || nargs == UINT32_MAX || t == CXX_TY_UNKNOWN || !(cls = cxx_type_class_scope(c, QUNQ(t))))
+	if (c->tentative || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS || t == CXX_TY_UNKNOWN)
 		return;
+	/* (completing the class parses its members' declarations, their argument lists into c->cargs, which args
+	   may be: the first T(a, b) of an instance in a TU saw another call's arguments) */
+	if (nargs) {
+		if (args)
+			memcpy(acopy, args, nargs * sizeof *args), args = acopy;
+		if (lval)
+			memcpy(lcopy, lval, nargs), lval = lcopy;
+	}
+	memcpy(bcopy, c->carg_brace, sizeof bcopy);
+	if (!(cls = cxx_type_class_scope(c, QUNQ(t)))) {
+		memcpy(c->carg_brace, bcopy, sizeof bcopy);
+		return;
+	}
 	cxx_type_require_complete(c, QUNQ(t));
+	memcpy(c->carg_brace, bcopy, sizeof bcopy);
 	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
 	c->ctor_none = !set;
 	if (set && braced && nargs) {

@@ -1766,3 +1766,9 @@ deducerar från dem; implicita guider från konstruktorer saknas.  cxx-strict of
 funktionerna i `__unwrap_range` stannar nu vid nästa sak, `__libcpp_is_contiguous_iterator<_Iter>::value`
 (86).  Känt: den första konstruktionen av en `pair<A, B>` i en TU misslyckas (anropet byggs innan
 konstruktorinstansens typ finns), senare lyckas.
+
+## Status 87 (2026-11-14)
+Den första konstruktionen av en klassinstans i en TU (`pair<int, double>(x, 2.5)`) använde en annan
+anrops argumenttyper: att komplettera klassen (i cxx_type_class_scope/require_complete) tolkar dess
+medlemmar och skriver över c->cargs, som argumenten pekar på; cxx_ctor_use kopierar nu argumenten
+först.  cxx-strict 546 (541: fler anropare byggs nu och når nya luckor).
