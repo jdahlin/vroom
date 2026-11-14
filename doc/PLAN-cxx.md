@@ -1880,3 +1880,10 @@ Pekare till medlem (`R C::*`) får en egen opak (ofullständig) typ i stället f
 sådant mönster mot ett argument som inte är en medlemspekare misslyckas (förut "inte känt", vilket
 blockerade libc++:s `__function::__is_null`).  `std::function<bool(int,int)> f = cb; g(f); g(1,3)` går
 nu igenom med bara vcc:s kod.  cxx-strict 342 (oförändrat i summa).
+
+## Status 104 (2026-11-14)
+Structured bindings `auto [a, b] = e;` (även `auto &[...]`, `const auto &[...]`): en dold variabel
+`__vcc_sb_N` med deklarationens typ och initierare, och varje namn en lokal referens till nästa egna,
+namngivna medlem (std::pair:s first/second, ett aggregats medlemmar; en referensmedlem: det den refererar
+till).  Tupel-lika klasser via get<i> och arrayer: inte än.  libc++:s `__tree` (map/set-insättning) går
+förbi `auto [__parent, __child] = __find_equal(...)`.  cxx-strict 338 (342).

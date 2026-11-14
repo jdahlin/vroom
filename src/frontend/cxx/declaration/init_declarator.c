@@ -16,6 +16,50 @@ VPRIV bool cxx_declarator_is_assignment(cxx *c, uint32_t start)
 }
 
 /* the declarators after decl-specifiers, to the ; (or a function body) */
+/*
+ * auto [a, b] = e: its variable v is made (named var); each name is v's next public member (a class whose
+ * members are its own and named, in order: std::pair's first and second, an aggregate's), an lvalue referring
+ * to it.  Tuple-like classes (get<i>) and arrays: the names stay untyped.
+ */
+static void cxx_structured_bindings_declare(cxx *c, uint32_t var, uint32_t loc)
+{
+	uint32_t n = c->sb_n;
+	cxx_entity *v = cxx_lookup_in(c, cxx_declaration_scope(c), var, 0);
+	qty t = v ? v->ty : CXX_TY_UNKNOWN, ct;
+	cxx_scope *cls;
+	const tag *r;
+	uint32_t k = 0;
+
+	c->sb_n = 0;
+	if (t == CXX_TY_UNKNOWN)
+		return;
+	ct = AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext ? AST_TYPE(c->ast, t)->base : t;
+	if (!cc_type_is_record(c->ast, ct) || AST_TYPE_KIND(c->ast, ct) == TY_ARRAY || !(cls = cxx_type_class_scope(c, QUNQ(ct))))
+		return;
+	r = &c->ast->tags[AST_TYPE(c->ast, QUNQ(ct))->aux];
+	for (uint32_t i = 0; i < r->nfield && k < n; i++) {
+		cxx_entity *e;
+
+		if (!r->f[i].name)
+			continue;	/* (a base's bytes) */
+		e = cxx_lookup_in(c, cxx_declaration_scope(c), c->sb_names[k], 0);
+		while (e && e->kind != CXX_ENTITY_VALUE)
+			e = e->next;
+		if (e) {
+			qty ft = r->f[i].ty;
+
+			/* (a reference member: the name is what it refers to, as the member's own type says) */
+			if (AST_TYPE_KIND(c->ast, ft) == TY_PTR && AST_TYPE(c->ast, ft)->ext)
+				e->ty = AST_TYPE(c->ast, ft)->base;
+			else
+				e->ty = QT(QI(ft), QQ(ft) | (QQ(ct) & (Q_CONST | Q_VOLATILE)));
+			cxx_gen_bind_name(c, e, v->sym, r->f[i].name, c->sb_locs[k]);
+		}
+		k++;
+	}
+	(void)loc;
+}
+
 VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope *cs)
 {
 	cxx_entity *type_of_typedef = c->last_type;
@@ -743,6 +787,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		/* ... a variable at namespace scope with no initializer: zero-initialized */
 		if (gen_var && !gen_declared && c->pos == gen_after_declarator && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var))
 			cxx_gen_global_end(c, gen_var, 0, false);
+		if (c->sb_n && name == c->sb_var && name)
+			cxx_structured_bindings_declare(c, name, name_loc);
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}

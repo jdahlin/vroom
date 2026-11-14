@@ -494,3 +494,27 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
 }
 
 /* ---- variables at namespace scope ------------------------------------------------------------ */
+
+/* a structured binding's name e: a local reference to member field of the variable object (its symbol),
+   initialized with that member's address */
+VPRIV void cxx_gen_bind_name(cxx *c, cxx_entity *e, uint32_t object, uint32_t field, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t x, m, s;
+	qty rt;
+
+	if (!cxx_gen_on(c) || !object || e->ty == CXX_TY_UNKNOWN)
+		return;
+	x = cxx_gen_var_node(c, object, loc);
+	if (cxx_gen_is_reference(c, a->syms[object].ty))
+		x = cc_dereference_build(a, cc_node_rvalue(a, x), loc);
+	if (!(m = member(a, x, field, loc)))
+		return;
+	if (cxx_gen_is_reference(c, AST_NODE_AT(a, m)->ty))
+		m = cc_dereference_build(a, cc_node_rvalue(a, m), loc);	/* (a reference member: its referent) */
+	rt = cxx_type_reference(c, e->ty, false);
+	if (!(s = cxx_gen_local(c, e->name, rt, loc)))
+		return;
+	e->sym = s;
+	cxx_gen_local_declare(c, s, m, true, loc);	/* (bound as a reference is: the member lvalue) */
+}

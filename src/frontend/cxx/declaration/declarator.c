@@ -107,20 +107,36 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 		c->decl_pack = 1;
 	}
 	if (!abstract_ok && cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER) {
-		/* a structured binding: auto [a, b, ...c] */
+		/* a structured binding: auto [a, b, ...c]: the declaration declares a variable of its own (__vcc_sb_N, the
+		   type and initializer as written); the names refer to its members once it is made
+		   (cxx_structured_bindings_declare) */
+		bool pack = false;
+		char nm[32];
+
 		cxx_advance(c);
+		c->sb_n = 0;
 		do {
-			cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+			pack |= cxx_accept(c, LEX_TOKEN_ELLIPSIS);
 			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
 				cxx_fail(c, "expected a name in a structured binding");
 			cxx_declare(c, cxx_declaration_scope(c), cxx_peek(c, 0)->id, CXX_ENTITY_VALUE);
+			if (c->sb_n < 8)
+				c->sb_names[c->sb_n] = cxx_peek(c, 0)->id, c->sb_locs[c->sb_n] = cxx_peek(c, 0)->loc;
+			c->sb_n++;
 			cxx_advance(c);
 			cxx_attributes_skip(c);
 		} while (cxx_accept(c, LEX_TOKEN_COMMA));
 		cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 		cxx_attributes_skip(c);
-		c->type_out = CXX_TY_UNKNOWN;
-		return 0;
+		if (pack || c->sb_n > 8 || abstract_ok) {
+			c->sb_n = 0;
+			c->type_out = CXX_TY_UNKNOWN;
+			return 0;
+		}
+		snprintf(nm, sizeof nm, "__vcc_sb_%u", c->sb_serial++);
+		c->sb_var = vintern_cstr(nm);
+		c->type_out = t;
+		return c->sb_var;
 	}
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_paren_is_nested_declarator(c)) {
 		nested = c->pos;	/* parsed after the suffixes (their type is its base) */
