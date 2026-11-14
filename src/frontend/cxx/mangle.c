@@ -334,7 +334,8 @@ static bool mt_type(mg_tok *k)
 	if (mt_word(k, "std") && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON &&
 	    k->m->c->tok[k->p + 2].len == 6 && !memcmp(k->m->c->tok[k->p + 2].s, "size_t", 6))
 		k->p += 2;
-	if ((bt = mt_builtin(k)) && !(k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER)) {
+	if ((bt = mt_builtin(k)) && !(k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER &&
+				      (k->p++, mt_builtin(k) != NULL) + (k->p--, 0))) {	/* (not unsigned long, ...: two words) */
 		k->p++;
 		mg_str(k->m, bt);
 		return true;
@@ -582,6 +583,126 @@ static bool mt_binary(mg_tok *k, int level)
 }
 
 static bool mt_expr(mg_tok *k) { return mt_binary(k, 0); }
+
+/* the declarator's parameters from a declaration's first token: each one's type tokens [b, e) (its name
+   excluded); false: not found, an unnamed parameter or more than 16 */
+static bool mg_param_ranges(cxx *c, uint32_t pos, uint32_t *b, uint32_t *e, uint32_t *n)
+{
+	uint32_t p, open = 0, depth = 0, start;
+	int d = 0;
+
+	*n = 0;
+	for (p = pos; p < c->ntok && p < pos + 512; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_BRACE || kd == LEX_TOKEN_SEMICOLON)
+			return false;
+		if (kd == LEX_TOKEN_LESS)
+			depth++;
+		else if (kd == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p > pos && c->tok[p - 1].kind == LEX_TOKEN_IDENTIFIER &&
+			 !(c->tok[p - 1].len == 8 && (!memcmp(c->tok[p - 1].s, "operator", 8) || !memcmp(c->tok[p - 1].s, "decltype", 8) ||
+						      !memcmp(c->tok[p - 1].s, "noexcept", 8)))) {
+			open = p;
+			break;
+		} else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p >= pos + 3 && c->tok[p - 1].kind == LEX_TOKEN_RIGHT_PAREN &&
+			   c->tok[p - 2].kind == LEX_TOKEN_LEFT_PAREN && c->tok[p - 3].len == 8 && !memcmp(c->tok[p - 3].s, "operator", 8)) {
+			open = p;
+			break;
+		}
+	}
+	if (!open)
+		return false;
+	start = open + 1;
+	for (p = open + 1; p < c->ntok; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS || kd == LEX_TOKEN_LEFT_SQUARE)
+			d++;
+		else if ((kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_GREATER || kd == LEX_TOKEN_RIGHT_SQUARE) && d)
+			d--;
+		else if (kd == LEX_TOKEN_GREATER_GREATER && d >= 2)
+			d -= 2;
+		else if (!d && (kd == LEX_TOKEN_COMMA || kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_EQUAL)) {
+			uint32_t end = p;
+
+			if (kd == LEX_TOKEN_RIGHT_PAREN && p == open + 1)
+				return true;	/* () */
+			if (end > start && c->tok[end - 1].kind == LEX_TOKEN_IDENTIFIER && end - 1 > start &&
+			    !(c->tok[end - 2].kind == LEX_TOKEN_COLON_COLON))
+				end--;	/* (its name) */
+			else
+				return false;
+			if (*n == 16)
+				return false;
+			b[*n] = start, e[*n] = end, (*n)++;
+			if (kd == LEX_TOKEN_EQUAL) {	/* (a default argument: up to the next , or )) */
+				int dd = 0;
+
+				for (p++; p < c->ntok; p++) {
+					int x = c->tok[p].kind;
+
+					if (x == LEX_TOKEN_LEFT_PAREN || x == LEX_TOKEN_LESS)
+						dd++;
+					else if ((x == LEX_TOKEN_RIGHT_PAREN || x == LEX_TOKEN_GREATER) && dd)
+						dd--;
+					else if (!dd && (x == LEX_TOKEN_COMMA || x == LEX_TOKEN_RIGHT_PAREN))
+						break;
+				}
+				if (p >= c->ntok || c->tok[p].kind == LEX_TOKEN_RIGHT_PAREN)
+					return true;
+			} else if (kd == LEX_TOKEN_RIGHT_PAREN)
+				return true;
+			start = p + 1;
+		}
+	}
+	return false;
+}
+
+/* a parameter's type from its tokens [b, e): [const] <type> [const] [& | && | *] (T::name and the forms
+   mt_type knows); false: another form */
+static bool mg_tok_param(cxx_mangler *m, uint32_t b, uint32_t e)
+{
+	cxx *c = m->c;
+	mg_tok k = { m, b, e, false, { 0 }, 0 };
+	bool cst = false;
+	int ref = 0;
+	char base[512];
+	size_t mark = m->n, bl;
+
+	if (mt_word(&k, "const"))
+		k.p++, cst = true;
+	if (!mt_type(&k))
+		return false;
+	bl = m->n - mark;
+	if (bl >= sizeof base)
+		return false;
+	memcpy(base, m->b + mark, bl);
+	m->n = mark;
+	while (k.p < e) {
+		if (mt_word(&k, "const"))
+			cst = true;
+		else if (mt_is(&k, LEX_TOKEN_AMPERSAND) && !ref)
+			ref = 1;
+		else if (mt_is(&k, LEX_TOKEN_AMPERSAND_AMPERSAND) && !ref)
+			ref = 2;
+		else
+			return false;
+		k.p++;
+	}
+	/* (each composite a candidate: K <type>, then R/O of it) */
+	if (ref)
+		mg_str(m, ref == 1 ? "R" : "O");
+	if (cst)
+		mg_str(m, "K");
+	mg_text(m, base, bl);
+	if (cst)
+		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (qty)1);
+	if (ref)
+		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (qty)2);
+	return true;
+}
 
 /*
  * A function template's trailing return type decltype(e): DT <expression> E, e from its tokens (commas,
@@ -1249,10 +1370,10 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	}
 	if (f->is_instance) {
 		/* (a value parameter's declared type in the template arguments refers to the template's parameters: T_, ...) */
-		const qty *tph;
-		uint32_t ntph, tpp;
+		uint32_t ntph = 0;
+		const qty *tph = cxx_instance_placeholders(c, f, &ntph);
 
-		if (cxx_instance_declared_sig(c, f, &tph, &ntph, &tpp) != CXX_TY_UNKNOWN || tph)
+		if (tph)
 			m.tph = tph, m.ntph = ntph, m.tps = f->inst_params;
 	}
 	mg_str(&m, "_Z");
@@ -1294,8 +1415,8 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	/* A function template's instance: its return type and its parameters as the template declares them
 	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
 	   among vcc's objects, not clang's name). */
-	uint32_t pack_param = 0;
-	bool dt_guess = false;
+	uint32_t pack_param = 0, tok_b[16], tok_e[16], ntok = 0;
+	bool dt_guess = false, tok_params = false, tok_sig = false;
 
 	if (f->is_instance) {
 		const qty *ph;
@@ -1307,14 +1428,47 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
 		bool known = ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC;
+		bool all_tok = known && !pp && mg_param_ranges(c, cxx_instance_decl_pos(f), tok_b, tok_e, &ntok) && ntok == AST_TYPE(a, ds)->n;
 
 		for (uint32_t i = 0; known && i < AST_TYPE(a, ds)->n; i++)
-			known = a->params[AST_TYPE(a, ds)->aux + i] != CXX_TY_UNKNOWN;
+			if (a->params[AST_TYPE(a, ds)->aux + i] == CXX_TY_UNKNOWN)
+				known = all_tok, tok_params = true;	/* (a dependent member type: from its tokens) */
 		if (known && AST_TYPE(a, ds)->n == want && (!pp || pp <= want) &&
 		    (AST_TYPE(a, ds)->flags & TF_VARIADIC) == (x->flags & TF_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
 			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph, pack_param = f->inst_pack_at != UINT32_MAX ? pp : 0;
+		else if (ds == CXX_TY_UNKNOWN && !pp && m.tph && f->inst_pack_at == UINT32_MAX &&
+			 mg_param_ranges(c, cxx_instance_decl_pos(f), tok_b, tok_e, &ntok) && ntok == x->n &&
+			 !(x->flags & TF_VARIADIC) && !cxx_instance_uses_decltype(c, f))
+			tok_sig = true;	/* (the signature did not parse with placeholders: from its tokens) */
 		else
 			c->mangle_guess = 1;	/* (the instance's own types: a name of vcc's, not clang's) */
+	}
+	if (tok_sig) {
+		/* return type and parameters from the declaration's tokens (else, as before, the instance's own
+		   types under a name that is vcc's guess) */
+		mg_tok k = { &m, cxx_instance_decl_pos(f), c->ntok, false, { 0 }, 0 };
+		size_t save_n = m.n;
+		uint32_t save_subs = m.nsubs;
+		const qty *ph0 = m.ph;
+		uint32_t nph0 = m.nph;
+		bool ok = true;
+
+		m.ph = m.tph, m.nph = m.ntph;
+		if (!(v->len && v->s[0] == ' ')) {
+			while (mt_word(&k, "static") || mt_word(&k, "inline") || mt_word(&k, "constexpr") || mt_word(&k, "friend") ||
+			       mt_word(&k, "explicit") || mt_word(&k, "virtual"))
+				k.p++;
+			ok = mt_type(&k);
+		}
+		for (uint32_t i = 0; i < ntok && ok; i++)
+			ok = mg_tok_param(&m, tok_b[i], tok_e[i]);
+		if (ok && !m.bad) {
+			if (!ntok)
+				mg_str(&m, "v");
+			goto params_done;
+		}
+		m.n = save_n, m.nsubs = save_subs, m.bad = false, m.ph = ph0, m.nph = nph0;
+		c->mangle_guess = 1;
 	}
 	if (f->is_instance && !(v->len && v->s[0] == ' ')) {
 		const qty *ph0 = m.ph;
@@ -1338,12 +1492,22 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	for (uint32_t i = 0; i < x->n; i++) {
 		if (pack_param && i + 1 == pack_param)
 			mg_str(&m, "Dp");	/* (a pack expansion; its pattern is a substitution candidate, then the expansion) */
-		mg_parameter(&m, a->params[x->aux + i]);
+		if (tok_params && a->params[x->aux + i] == CXX_TY_UNKNOWN) {
+			const qty *tph0 = m.tph;
+			uint32_t ntph0 = m.ntph;
+
+			m.tph = m.ph, m.ntph = m.nph;
+			if (!mg_tok_param(&m, tok_b[i], tok_e[i]))
+				m.bad = true;
+			m.tph = tph0, m.ntph = ntph0;
+		} else
+			mg_parameter(&m, a->params[x->aux + i]);
 		if (pack_param && i + 1 == pack_param)
 			mg_remember(&m, CXX_SUB_TEMPLATE, &m.ph[0] + 0x1000 + i, 0);	/* (Dp T itself: a candidate) */
 	}
 	if (x->flags & TF_VARIADIC)
 		mg_str(&m, "z");
+params_done:
 	if (m.bad && getenv("VCC_CXX_MANGLE_WHY"))
 		fprintf(stderr, "not mangled: %.*s (so far: %.*s)\n", (int)v->len, v->s, (int)m.n, m.b);
 	if (m.bad || m.n + 1 > cap)

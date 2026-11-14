@@ -1754,6 +1754,20 @@ VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **
 
 /* does the template's declaration (its return type or parameters) use decltype? (clang mangles the
    expression, DT ... E: not written by vcc yet) */
+/* the template's parameters as placeholders (T_, ...), even when its signature did not parse (NULL: none) */
+VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n)
+{
+	cxx_ftemplate *f = inst->inst_ftmpl;
+
+	if (!f)
+		return NULL;
+	cxx_ftemplate_evaluate(c, f);
+	if (f->packs || !f->p.ph)
+		return NULL;
+	*n = f->p.params->ntparams;
+	return f->p.ph;
+}
+
 /* the template's declaration's first token (its decl-specifiers; 0: not known) */
 VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst)
 {

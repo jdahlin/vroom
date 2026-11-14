@@ -1715,6 +1715,14 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 	}
 	if (!(AST_NODE_AT(c->ast, l)->flags & NF_LVALUE))
 		return;
+	if (!base && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) != TY_ARRAY &&
+	    QUNQ(AST_NODE_AT(c->ast, l)->ty) != QUNQ(AST_NODE_AT(c->ast, r)->ty) && cxx_gen_trivial_abi(c, AST_NODE_AT(c->ast, l)->ty, 0) == 1) {
+		/* x = v of a trivially copyable class from another type: the converting constructor's temporary,
+		   copied (what the implicit operator= does) */
+		r = cxx_gen_bind(c, r, QUNQ(AST_NODE_AT(c->ast, l)->ty), loc);
+		if (!r || QUNQ(AST_NODE_AT(c->ast, r)->ty) != QUNQ(AST_NODE_AT(c->ast, l)->ty))
+			return;
+	}
 	if (cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) &&
 	    (base || QUNQ(AST_NODE_AT(c->ast, l)->ty) != QUNQ(AST_NODE_AT(c->ast, r)->ty) || cxx_gen_trivial_abi(c, AST_NODE_AT(c->ast, l)->ty, 0) != 1))
 		return;	/* (a class whose assignment is not a copy of its bytes: the implicit operator=, not built yet) */

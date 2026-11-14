@@ -1496,3 +1496,12 @@ konstruktormalls prefix (`...C2`) är en substitutionskandidat.  Ett anropat obj
 nod (json:s `::nlohmann::to_json`, en constexpr-referens till ett funktionsobjekt) blir ett temporärt
 objekt av klassen.  Gissade namn i unit-testsuites 221 -> 174; json:s konstruktor `basic_json(T&&)`
 och `adl_serializer::to_json` har clangs namn.  cxx-run 52/52; cxx-fork 69/70, 2 725 funktioner.
+
+### Status (62): beroende medlemstyper i signaturer, konverterande tilldelning (2026-11-14)
+En funktionsmall vars signatur inte går att tolka med platshållare (`typename J::int_t` som
+parametertyp: json:s `external_constructor<...>::construct`) manglas ur sina tokens: returtyp och
+parametrar, `[const] T [const] [&|&&]`, `T::namn` som `N T_ <namn> E`; går det inte blir namnet en
+gissning som förut.  `x = v` för en trivialt kopierbar klass (en union) med konverterande
+konstruktorer: den matchande konstruktorns temporära, kopierad (json:s `m_value = val`).
+unit-32bit misslyckas likadant med clangs eget bygge (8 påståenden på en 64-bitarsvärd): inget vcc-fel.
+Gissade namn i unit-testsuites 174 -> 163; cxx-run 54/54; cxx-fork 69/70, 2 728 funktioner.

@@ -581,6 +581,7 @@ VPRIV cxx_scope *cxx_template_home(const cxx_entity *te);
 VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
 VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e);
 VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst);
+VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
 VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
