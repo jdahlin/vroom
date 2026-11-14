@@ -465,8 +465,19 @@ static uint32_t cxx_gen_chain(cxx *c, const cc_id_list *l, uint32_t last, uint32
 	uint32_t x = 0;
 
 	for (uint32_t i = 0; i < l->n; i++) {
-		uint32_t e = AST_NODE_AT(a, l->v[i])->a;
+		const struct node *st = AST_NODE_AT(a, l->v[i]);
+		uint32_t e;
 
+		if (st->op == N_DECL && !st->b && c->gen_block && (cc_id_list *)c->gen_block != l) {
+			/* a local the statements declare (an initializer_list's array): declared in the enclosing block */
+			cc_id_list_append(a, (cc_id_list *)c->gen_block, l->v[i]);
+			continue;
+		}
+		if (st->op != N_EXPR) {
+			cxx_gen_fail(c);	/* (a statement that is no expression: not one expression's part) */
+			return 0;
+		}
+		e = st->a;
 		x = x ? cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, e)->ty, loc, x, e) : e;
 	}
 	if (!last)
@@ -1799,6 +1810,12 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 	}
 	if (!(AST_NODE_AT(c->ast, l)->flags & NF_LVALUE))
 		return;
+	if (!base && c->nullptr_ty && QUNQ(AST_NODE_AT(c->ast, r)->ty) == c->nullptr_ty && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) == TY_PTR) {
+		/* p = v of a std::nullptr_t object (std::__exchange(p, nullptr)): the null pointer it holds */
+		r = cxx_gen_bind(c, r, QUNQ(AST_NODE_AT(c->ast, l)->ty), loc);
+		if (!r)
+			return;
+	}
 	if (!base && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) != TY_ARRAY &&
 	    QUNQ(AST_NODE_AT(c->ast, l)->ty) != QUNQ(AST_NODE_AT(c->ast, r)->ty) && cxx_gen_trivial_abi(c, AST_NODE_AT(c->ast, l)->ty, 0) == 1) {
 		/* x = v of a trivially copyable class from another type: the converting constructor's temporary,

@@ -1613,3 +1613,14 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   `f(x);` kunde bli `x;` (nu nollställs noden i cxx_gen_call); positioner för klammerargument som
   inte konsumerades nollställs.
 - Test: braced-args; run 70/70.  Fork 69/70, 6,6 s CPU (37x), 21 069 funktioner, 17 testkroppar.
+
+### Status 72 (2026-11-14): asm, const-medlemmar, nullptr_t-tilldelning
+
+- `asm("text")` / `asm volatile("text" : :)` utan operander blir C-frontens asm-post (doctests
+  `DOCTEST_BREAK_INTO_DEBUGGER`: 10 testkroppar); med operander: ingen kod.
+- En datamedlem i ett const-objekt är const: `x.__layout_.__begin_ptr()` på en const vector väljer
+  const-versionen (som clang); `f(const T*)` är mer specialiserad än `f(T*)`.
+- `p = v` med ett std::nullptr_t-objekt (std::__exchange(p, nullptr), always_inline hos clang).
+- cxx_gen_chain tar bara uttryckssatser (en deklaration flyttas till blocket): ett N_BLOCK i ett uttryck
+  stoppade x86-64-lägret för unit-cbor.
+- Test: asm-simple, const-members; run 72/72.  Fork 69/70, 6,6 s CPU (36,6x), 21 603 funktioner, 20 testkroppar.

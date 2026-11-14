@@ -949,13 +949,58 @@ static void cxx_statement_parse1(cxx *c)
 		}
 		return;
 	}
-	case CXX_KW_asm: case CXX_KW___asm__: case CXX_KW___asm:
+	case CXX_KW_asm: case CXX_KW___asm__: case CXX_KW___asm: {
+		/* asm("text") or asm volatile("text" : : : ) with no operands: the C front end's asm record (a
+		   statement with operands: not built yet) */
+		uint32_t aloc = cxx_peek(c, 0)->loc;
+		bool vol = false, simple = true;
+		uint32_t tmpl = 0;
+
 		cxx_advance(c);
-		while (cxx_kw_is_asm_qualifier(c))
+		while (cxx_kw_is_asm_qualifier(c)) {
+			vol |= cxx_is_kw(c, CXX_KW_volatile) || cxx_is_kw(c, CXX_KW___volatile__) || cxx_is_kw(c, CXX_KW___volatile);
 			cxx_advance(c);
+		}
+		if (cxx_gen_on(c) && cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_peek(c, 1)->kind >= LEX_TOKEN_STRING &&
+		    cxx_peek(c, 1)->kind <= LEX_TOKEN_UTF32_STRING) {
+			uint32_t save = c->pos;
+
+			cxx_advance(c);
+			cxx_assignment_expression_parse(c);
+			{
+				uint32_t n = c->enode;
+
+				while (n && AST_NODE_AT(c->ast, n)->op != N_STR && AST_NODE_AT(c->ast, n)->a &&
+				       (AST_NODE_AT(c->ast, n)->op == N_CAST || AST_NODE_AT(c->ast, n)->op == N_ADDR))
+					n = AST_NODE_AT(c->ast, n)->a;
+				tmpl = n && AST_NODE_AT(c->ast, n)->op == N_STR ? AST_NODE_AT(c->ast, n)->a + 1 : 0;
+			}
+			while (cxx_is(c, LEX_TOKEN_COLON) || cxx_is(c, LEX_TOKEN_COLON_COLON))
+				cxx_advance(c);
+			simple = tmpl && cxx_is(c, LEX_TOKEN_RIGHT_PAREN);
+			c->pos = save;
+		} else
+			simple = false;
 		cxx_skip_balanced(c);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
+		if (cxx_gen_on(c)) {
+			if (!simple) {
+				cxx_gen_fail(c);
+				return;
+			}
+			cc *a = c->ast;
+			uint32_t ai = a->nasm++;
+			casm *r = &a->asms[ai];
+
+			memset(r, 0, sizeof *r);
+			r->tmpl = tmpl, r->vol = vol, r->extended = 0;
+			r->ops = cc_heap_allocate(a, sizeof(asmop));
+			r->clob = cc_heap_allocate(a, sizeof(uint32_t));
+			r->labels = cc_heap_allocate(a, sizeof(uint32_t));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, N_ASM, aloc, ai, 0, 0));
+		}
 		return;
+	}
 	case CXX_KW___label__:
 		while (!cxx_accept(c, LEX_TOKEN_SEMICOLON))
 			cxx_advance(c);

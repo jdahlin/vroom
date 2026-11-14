@@ -1852,6 +1852,16 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						/* a data member of a const object is const (not a mutable one, not a reference):
+						   x.layout.begin_ptr() on a const x calls the const overload */
+						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee && (QQ(obj) & Q_CONST)) {
+							cxx_entity *fe = m;
+
+							while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
+								fe = fe->next;
+							if (fe && !fe->is_mutable && !(AST_TYPE_KIND(c->ast, c->etype) == TY_PTR && AST_TYPE(c->ast, c->etype)->ext))
+								c->etype = QT(QI(c->etype), QQ(c->etype) | Q_CONST);
+						}
 						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee)
 							cxx_gen_member(c, obj_node, arrow, id, mloc);	/* a data member */
 						else

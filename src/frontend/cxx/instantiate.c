@@ -3326,9 +3326,13 @@ VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs)
 			return -1;
 		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
 			P = AST_TYPE(c->ast, P)->base;
-		/* (a bare T counts 2, const T 1: f(const T&) is more specialized than f(T&)) */
+		/* (a bare T counts 2, const T 1: f(const T&) is more specialized than f(T&); so for T* and
+		   const T*, counted apart from bare T's: f(T) is less specialized than f(T*)) */
 		if (cxx_placeholder_of(c, P, &owner) >= 0)
-			n += (QQ(P) & Q_CONST) ? 1 : 2;
+			n += (QQ(P) & Q_CONST) ? 100 : 200;
+		else if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext &&
+			 cxx_placeholder_of(c, AST_TYPE(c->ast, P)->base, &owner) >= 0)
+			n += (QQ(AST_TYPE(c->ast, P)->base) & Q_CONST) ? 1 : 2;
 	}
 	return n;
 }
