@@ -574,13 +574,18 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		out_chunk(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
+	/* a constant that needs relocations under -fpie/-fpic: .data.rel.ro, as clang (the
+	   dynamic linker relocates it, then RELRO makes it read-only) */
+	const char *csec = e->nrel && c->o->pic && !DARWIN(c) ? "\t.section\t.data.rel.ro,\"aw\",@progbits\n"
+							       : "\t.section\t.rodata,\"a\",@progbits\n";
+
 	if (direct(e)) {
 		size_t h;
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
 		sym_header(e, b, s, false,
-			   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+			   all_const(c, y->ty) ? csec : zero ? "\t.bss\n" : "\t.data\n", align);
 		data_item(e, zero && !e->nrel ? (size ? size : 1) : size, zero && !e->nrel);
 		h = it_open(e, IT_OSIZE);
 		*(osize *)it_room(e, sizeof(osize)) = (osize){ .sym = s, .size = size };
@@ -590,7 +595,7 @@ VPRIV void emit_object(ecx *e, uint32_t s)
 		return;
 	}
 	sym_header(e, b, s, false,
-		   all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		   all_const(c, y->ty) ? csec : zero ? "\t.bss\n" : "\t.data\n", align);
 	if (zero && !e->nrel) {
 		if (a->section && !strncmp(c->strs[a->section - 1].s, ".bss", 4)) {
 			tb_s(b, "\t.zero\t");
