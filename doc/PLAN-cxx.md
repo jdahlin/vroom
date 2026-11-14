@@ -1168,3 +1168,24 @@ och testregistreringen kräver dynamisk initiering av globala variabler
 `cxx-run-tests.py` 21/21 (ny `globals.cpp`: ordning, konstruktion och
 destruktion i omvänd ordning vid exit); `cxx-coverage.py` 10 247 av
 146 663 (7,0 %).
+
+### Status (37): mot en länkande `std::string` (2026-11-14)
+Mål för stunden: ett program med tre funktioner som bara konstruerar
+`std::string` ska länka och köra.  Odefinierade symboler: 27 → 9.
+- Onamngivna uppräkningar (`enum { cap = ... };`) ger sina uppräknare typ
+  och värde (förut otypade: `std::string::__min_cap`).
+- Tomma `[[no_unique_address]]`-medlemmar konstrueras i initierarlistor
+  (på objektets egen adress).
+- `T() = default` utförs på plats (baser, medlemmar, vptr; ingenting för en
+  union); tilldelning utan deklarerad `operator=` är en bytekopia när
+  klassen tillåter det.
+- Standardargument för funktionsmallars instanser (sparas när instansens
+  signatur tolkas); kopieringsinitiering från en array (`T x = "text"`)
+  ser en pekare.
+- `if constexpr`: bara den tagna grenen blir kod; fel i oevaluerad kod
+  fäller inte längre funktionen.
+Kvar för `std::string`-programmet: `basic_string()` och
+`basic_string(const char*, const allocator&)` (kroppar utan kod),
+konstanter på namnrymdsnivå (`__not_found`, `__ambiguous`: måste få en
+definition eller vikas), `__fill_n`, och de breda `__constexpr_w*`.
+`cxx-run-tests.py` 21/21; `cxx-coverage.py` 10 403 av 146 663 (7,1 %).

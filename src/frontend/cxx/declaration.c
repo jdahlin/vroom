@@ -2864,6 +2864,16 @@ static void cxx_enum_specifier_parse(cxx *c)
 		bool known = !c->template_depth;
 		qty et = e && !c->template_depth ? e->ty : CXX_TY_UNKNOWN;
 
+		if (!e && !c->template_depth && !c->tentative) {
+			/* an unnamed enumeration: its enumerators have its type all the same */
+			cxx_entity anon;
+
+			memset(&anon, 0, sizeof anon);
+			anon.ty = CXX_TY_UNKNOWN;
+			cxx_enum_type(c, &anon, 0, loc, underlying);
+			et = anon.ty;
+		}
+
 		while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 			uint32_t en = cxx_peek(c, 0)->id;
 			cxx_entity *e1, *e2;
@@ -3292,8 +3302,12 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
 				{
 					uint32_t in = c->enode;
+					qty it = c->etype;
+					uint8_t ilv = c->elval;
 
-					cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
+					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == TY_ARRAY)	/* (an array, "text": a pointer to its first element) */
+						it = cc_type_pointer(c->ast, AST_TYPE(c->ast, it)->base), ilv = 0;
+					cxx_ctor_use(c, t, &it, &ilv, 1, false);
 					if (gen_local) {	/* code generation: the constructor's call, or a copy */
 						cxx_gen_construct_local(c, gen_local, t, &in, 1, name_loc);
 						gen_declared = true;
@@ -3766,6 +3780,14 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				bool gen = false;
 
 				c->gen_instance = NULL;	/* (this body's: not a body instantiated inside it) */
+				if (gi && c->decl_ndefaults && !gi->defs && c->fn_ndefs == c->decl_ndefaults && !c->tentative) {
+					/* its default arguments, for the calls that leave them out: parsed again in this scope
+					   (the template's parameters are bound in it) */
+					gi->ndefaults = (uint16_t)c->decl_ndefaults;
+					gi->defs = malloc(2 * c->fn_ndefs * sizeof *gi->defs);
+					memcpy(gi->defs, c->fn_defs, 2 * c->fn_ndefs * sizeof *gi->defs);
+					gi->def_scope = fs;
+				}
 				if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
 				    pack_n == UINT32_MAX && !cxx_is_kw(c, CXX_KW_try)) {
 					gi->ty = t;

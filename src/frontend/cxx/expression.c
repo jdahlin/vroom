@@ -2045,8 +2045,10 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
 			if (built_in)
 				cxx_gen_assignment(c, optok, ln, rn, oploc);
-			else if (!c->tentative)
+			else if (!c->tentative && c->call_resolved && c->call_picked)
 				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
+			else if (!c->tentative)
+				cxx_gen_assignment(c, optok, ln, rn, oploc);	/* (no operator= declared: the implicit one, a copy of the bytes where that is what it does) */
 		}
 	}
 }

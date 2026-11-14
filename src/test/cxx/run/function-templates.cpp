@@ -15,7 +15,29 @@ struct P { int x; int y; };
 template <class S> int total(const S &s) { return s.x + s.y; }
 struct Acc { int n; template <class T> void add(T v) { n += (int)v; } template <class T> T get() const { return (T)n; } };
 namespace util { template <class T> T clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); } }
+// if constexpr: only the branch taken is code
+template <class T> int width(T v)
+{
+	if constexpr (sizeof(T) == 1)
+		return 1;
+	else if constexpr (sizeof(T) == 4)
+		return 4 + (v > 0);
+	else {
+		return 8;
+	}
+}
+template <class T> int only_then(T v)
+{
+	int r = 0;
+
+	if constexpr (sizeof(T) > 4)
+		r = 100;
+	return r + (int)v;
+}
+static int constexpr_ifs() { return width('a') + width(5) + width(5L) + only_then(1) + only_then(2L); }
+
 int main() {
+	if (constexpr_ifs() != 1 + 5 + 8 + 1 + 102) return 20;
 	if (max_(3, 7) != 7 || max_(2.5, 1.5) != 2.5 || max_<long>(3, 9L) != 9) return 1;
 	if (sum_squares(3, 4) != 25) return 2;
 	if (mix(1, 2L) != 12 || mix('a', 3) != 973) return 3;

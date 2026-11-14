@@ -89,8 +89,8 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 {
 	static __thread int trace = -1;
 
-	if (!c->gen || c->tentative || c->template_depth || c->instantiating != c->gen_level)
-		return;
+	if (!c->gen || c->tentative || c->template_depth || c->unevaluated || c->instantiating != c->gen_level)
+		return;	/* (unevaluated: a discarded if constexpr branch, sizeof's operand) */
 	if (trace < 0)
 		trace = getenv("VCC_CXX_GEN") != NULL;
 	if (trace && !c->gen_failed) {	/* VCC_CXX_GEN=1: the first thing in each function that is not built, and where vcc gave up */
@@ -1793,6 +1793,7 @@ static bool cxx_gen_needs_destruction(cxx *c, qty t, int depth)
  * or nothing for a class that needs no construction.  The statements go to `out`.  False: not built yet.
  */
 static bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth);
+static bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth);
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -1822,6 +1823,8 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 			return true;
 		}
 	}
+	if (found && ctor && ctor->fn_defaulted && !nargs)	/* T() = default: what the implicit one does, in place */
+		return !cxx_class_has_member_initializer(c, t) && cxx_gen_default_construct_parts(c, target, t, out, loc, 0);
 	if (found && ctor) {
 		cxx_gen_call(c, ctor, target, false, args, nargs, loc);
 		if (!c->enode)
@@ -1918,6 +1921,24 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 				}
 			}
 		if (!found) {
+			/* not in the record: an empty [[no_unique_address]] member, which takes no space (an allocator, a
+			   comparator): constructed all the same, at the object's own address */
+			cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(AST_NODE_AT(a, self)->ty));
+			cxx_entity *fe = cls ? cxx_lookup_local(cls, name) : NULL;
+			bool pod, empty;
+
+			if (fe && fe->kind == CXX_ENTITY_VALUE && fe->field_of == cls && fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(a, fe->ty) &&
+			    AST_TYPE_KIND(a, fe->ty) != TY_ARRAY && cxx_class_layout_info(c, fe->ty, &pod, &empty) && empty) {
+				qty pt = cc_type_pointer(a, QUNQ(fe->ty));
+				uint32_t addr = cc_address_of_build(a, self, loc);
+
+				target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+				if (c->ngen_init_names < 32)
+					c->gen_init_names[c->ngen_init_names++] = name;
+				if (!cxx_gen_construct_at(c, target, QUNQ(fe->ty), args, nargs, c->gen_pre, loc))
+					cxx_gen_fail(c);
+				return;
+			}
 			cxx_gen_fail(c);	/* (a member of an anonymous union) */
 			return;
 		}
@@ -2379,11 +2400,7 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 
 static bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth)
 {
-	cc *a = c->ast;
 	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
-	qty bases[16];
-	uint32_t nb;
-	const tag *r;
 
 	if (!target)
 		return false;
@@ -2397,6 +2414,22 @@ static bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list
 	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
 		if (e->member_of == cls)
 			return false;	/* (constructors, none of them for no arguments) */
+	return cxx_gen_default_construct_parts(c, target, t, out, loc, depth);
+}
+
+/* ... what the implicit default constructor does: the bases, the members of class type, the vptr */
+static bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+	const tag *r;
+
+	if (!target || !cls || depth > 8)
+		return false;
+	if (AST_TYPE_KIND(a, QUNQ(t)) == TY_UNION)
+		return true;	/* (a union: no member is made active) */
 	nb = cxx_class_bases(c, t, bases, 16);
 	for (uint32_t i = 0; i < nb; i++)
 		if (!cxx_gen_default_construct(c, cxx_gen_base_object(c, target, bases[i], loc), bases[i], out, loc, depth + 1))

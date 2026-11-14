@@ -532,7 +532,16 @@ static void cxx_statement_parse1(cxx *c)
 			c->unevaluated -= taken == 1;
 			gen_else = cxx_gen_nested(c, sloc);
 		}
-		if (gen_cond && gen_then && cxx_gen_on(c)) {
+		if (is_constexpr && cxx_gen_on(c)) {
+			/* if constexpr: the branch taken is the statement (the other one was not built); a condition
+			   not known here: not built */
+			uint32_t st = taken == 1 ? gen_then : taken == 0 ? (gen_else ? gen_else : cxx_gen_new_statement(c, N_BLOCK, sloc, 0, 0, 0)) : 0;
+
+			if (st && !(cond_gen && cpre.n))
+				cxx_gen_statement(c, st);
+			else
+				cxx_gen_fail(c);
+		} else if (gen_cond && gen_then && cxx_gen_on(c)) {
 			uint32_t st = cxx_gen_new_statement(c, N_IF, sloc, gen_cond, gen_then, gen_else);
 
 			if (cond_gen && cpre.n) {
