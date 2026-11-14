@@ -533,7 +533,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (member && is_const)
 			mg_str(&m, "K");
 		mg_prefix(&m, home);
-		if (f->fn_internal && !member && !op)
+		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
 			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);
@@ -551,7 +551,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	} else {
 		if (mg_scope_is_std(&m, home))
 			mg_str(&m, "St");
-		if (f->fn_internal && !member && !op)
+		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
 			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);
@@ -600,6 +600,37 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		mg_str(&m, "z");
 	if (m.bad && getenv("VCC_CXX_MANGLE_WHY"))
 		fprintf(stderr, "not mangled: %.*s (so far: %.*s)\n", (int)v->len, v->s, (int)m.n, m.b);
+	if (m.bad || m.n + 1 > cap)
+		return false;
+	memcpy(buf, m.b, m.n);
+	buf[m.n] = 0;
+	return true;
+}
+
+/* a variable of a namespace or a class's static data member: _ZN <prefix> <name> E (_Z <name> in a namespace
+   at the global scope's level, St for std::) */
+VPRIV bool cxx_mangle_variable(cxx *c, const cxx_entity *v, cxx_scope *home, bool internal, char *buf, size_t cap)
+{
+	cxx_mangler m;
+
+	if (!home)
+		return false;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
+	mg_str(&m, "_Z");
+	if (mg_nested(&m, home)) {
+		mg_str(&m, "N");
+		mg_prefix(&m, home);
+		if (internal && !cxx_scope_in_unnamed_namespace(c, home))
+			mg_str(&m, "L");
+		mg_source_name(&m, v->name);
+		mg_abi_tag(&m, v->abi_tag);
+		mg_str(&m, "E");
+	} else {
+		if (mg_scope_is_std(&m, home))
+			mg_str(&m, "St");
+		mg_source_name(&m, v->name);
+		mg_abi_tag(&m, v->abi_tag);
+	}
 	if (m.bad || m.n + 1 > cap)
 		return false;
 	memcpy(buf, m.b, m.n);

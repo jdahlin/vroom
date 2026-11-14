@@ -1448,3 +1448,13 @@ förvalet när den varken deduceras eller ges.  json: 69/70, 5,1 s CPU,
 cxx-run får en rad `// std:` per test (rewritten-ne.cpp, c++20); 40/40.  cxx-fork: 4,9 s CPU,
 49x mot clang -O2, 69/70 test går igenom; vcc definierar 2 255 funktioner.  Målet (30x med bara
 vccs kod) är inte uppfyllt: det mesta av json-koden kommer fortfarande från clang.
+
+### Status (57): variabler i namnrymder och statiska datamedlemmar (2026-11-14)
+Fel kod rättad: `n::x` fick symbolen `x` (krock med varje annan `x`); nu `_ZN1n1xE`, med `L` för
+intern länkning (static, const) utom i en namnlös namnrymd (`_ZN12_GLOBAL__N_11vE`, också för
+funktioner).  Statiska datamedlemmar i vanliga klasser har en egen variabel (`_ZN1D3gotE`),
+definierad av `T X::m = ...;`; en konstant med initierare i klassen används som värde.  Inline-
+variabler är svaga; explicita specialiseringar av variabelmallar får ingen symbol än.  constexpr
+som inte är heltal (double) får ett objekt.  `T()` för pekare och flyttal är 0, std::nullptr_t är
+en void * i genererad kod.  cxx-run 44/44; cxx-fork 69/70, 5,1 s CPU (47,5x), 2 556 funktioner
+från vcc.  Kvar här: index i en arrayvariabel i en namnrymd, variabelmallar.

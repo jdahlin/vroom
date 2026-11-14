@@ -3170,6 +3170,20 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					m->nsdmi_pos = c->pos, m->nsdmi_scope = c->scope;
 			c->pos = keep;
 		}
+		if (q && qs && qs->kind == CXX_SCOPE_CLASS && !f && global && !c->tentative && !(flags & DS_TYPEDEF) && !c->explicit_specialization &&
+		    (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_LEFT_PAREN) || sm_init == 0)) {
+			/* T X::m = ...;: the definition of the static data member's variable (made where the class declares it) */
+			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
+				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && m->sym && c->ast->syms[m->sym].kind == S_VAR &&
+				    !(m->nsdmi_pos && m->nsdmi_pos < c->pos - 1 && !cxx_is(c, LEX_TOKEN_EQUAL) && !cxx_is(c, LEX_TOKEN_LEFT_BRACE) &&
+				      !cxx_is(c, LEX_TOKEN_LEFT_PAREN))) {
+					/* (T X::m; of a member initialized in its class: the definition has that initializer, not
+					   built here: left to the uses, which take the value) */
+					c->ast->syms[m->sym].sc = SC_NONE;
+					gen_var = m;
+					break;
+				}
+		}
 		}
 		if (name > 1 && !q && !(cs && cs->owner && cs->owner->name == name)) {
 			int kind = (flags & DS_TYPEDEF) ? CXX_ENTITY_TYPE :
@@ -3275,6 +3289,49 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				gen_var = e;
 			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
 				c->ast->syms[e->sym].sc = SC_STATIC;	/* (internal linkage) */
+			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !(flags & (DS_TYPEDEF | DS_FRIEND)) &&
+			    !e->sym && !c->tentative && !c->template_depth && !c->explicit_specialization && t != CXX_TY_UNKNOWN) {
+				/* a static data member: a variable of its own, named in its class (defined where the class's
+				   definition outside it is, or inline) */
+				e->sym = cxx_symbol(c, S_VAR, name, t, name_loc), e->home = cxx_declaration_scope(c);
+				if (e->sym)
+					c->ast->syms[e->sym].sc = SC_EXTERN;
+				e->mangled_var = 1;
+				cxx_gen_variable_name(c, e, false);
+			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && e->home == c->global && (flags & DS_INLINE) &&
+				   !e->mangled_var) {
+				attrs at;	/* an inline variable at the global scope: weak (its plain name) */
+
+				e->mangled_var = 1;
+				memset(&at, 0, sizeof at);
+				at.weak = 1;
+				cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
+				c->ast->syms[e->sym].flags |= SF_LINKONCE;
+			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && e->home != c->global && !e->c_linkage &&
+				   c->ast->syms[e->sym].ty == t && !e->mangled_var) {
+				/* a namespace's variable: internal linkage written L (static, or const and not extern) */
+				bool internal = (flags & DS_STATIC) || cxx_scope_in_unnamed_namespace(c, e->home) ||
+						(t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
+
+				e->mangled_var = 1;
+				if (c->explicit_specialization) {
+					e->sym = 0;	/* (a variable template's explicit specialization: its name is the template-id's, not mangled yet) */
+					goto named;
+				}
+				if ((flags & DS_INLINE) && e->sym) {
+					/* an inline variable: weak, every TU that uses it defines it */
+					attrs at;
+
+					memset(&at, 0, sizeof at);
+					at.weak = 1;
+					cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
+					c->ast->syms[e->sym].flags |= SF_LINKONCE;
+				}
+				if (internal && e->sym)
+					c->ast->syms[e->sym].sc = SC_STATIC, c->ast->syms[e->sym].flags &= ~SF_GLOBAL;
+				cxx_gen_variable_name(c, e, internal);
+			named:;
+			}
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL) && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !c->tentative && !c->template_depth)
 				e->nsdmi_pos = c->pos, e->nsdmi_scope = c->scope;	/* (a static constant member's initializer: cxx_gen_static_member_value) */
@@ -3499,7 +3556,11 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			} else {
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 				/* code generation: a variable defined at namespace scope, its initializer's node */
-				bool gen_global = global && gen_var && !f && !(flags & DS_CONSTEXPR) && !auto_e && cxx_gen_global_begin(c, gen_var);
+				/* (a constexpr one too when it is not an integer, whose uses are its value: a floating constant or an
+				   array has an object) */
+				bool cx_object = (flags & DS_CONSTEXPR) && t != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, t) &&
+						 !cc_type_is_integer(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ENUM;
+				bool gen_global = global && gen_var && !f && (!(flags & DS_CONSTEXPR) || cx_object) && !auto_e && cxx_gen_global_begin(c, gen_var);
 
 				cxx_initializer_parse(c);
 				if (unsized_e && cxx_gen_on(c)) {

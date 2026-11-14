@@ -133,7 +133,12 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 	c->edecl_name = 1;
 	if (v && v->has_value && !v->placeholder)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
-	if (v)
+	/* a constant static data member with its initializer in the class and no definition seen: its value (the
+	   symbol may be defined nowhere) */
+	bool by_value = v && v->mangled_var && v->nsdmi_pos && v->sym && v->ty != CXX_TY_UNKNOWN && (QQ(v->ty) & Q_CONST) &&
+			c->ast->syms[v->sym].sc == SC_EXTERN;
+
+	if (v && !by_value)
 		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	if (v && v->has_value && !v->placeholder && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN &&
 	    (AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM || (AST_TYPE_KIND(c->ast, v->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= TY_ULLONG))) {
@@ -144,7 +149,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	}
 	if (v && !v->field_of && v->nsdmi_pos && !c->enode && cxx_gen_on(c) &&
-	    (!v->sym || (v->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, v->ty))))
+	    (!v->sym || by_value || (v->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, v->ty))))
 		c->enode = cxx_gen_static_member_value(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);	/* (a static constant member: its initializer) */
 	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
 		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;

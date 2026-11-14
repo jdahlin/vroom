@@ -856,7 +856,7 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 }
 
 /* is the scope in an unnamed namespace (itself one, or inside one: its names have internal linkage) */
-static bool cxx_scope_in_unnamed_namespace(cxx *c, const cxx_scope *s)
+VPRIV bool cxx_scope_in_unnamed_namespace(cxx *c, const cxx_scope *s)
 {
 	for (; s; s = s->parent)
 		if (s->kind == CXX_SCOPE_NAMESPACE && !s->owner && s != c->global)
@@ -972,6 +972,37 @@ static uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s)
 		c->nsym_names++;
 	}
 	return 0;
+}
+
+/* a variable's symbol named as C++ mangles it (a namespace's variable, a static data member; one at the
+   global scope or extern "C" keeps its plain name).  False: not mangled (its symbol is dropped: a use of
+   it builds no code, rather than code under the wrong name). */
+VPRIV bool cxx_gen_variable_name(cxx *c, cxx_entity *v, bool internal)
+{
+	cc *a = c->ast;
+	char name[1024];
+	attrs at;
+	cxx_scope *home = v->home;
+
+	if (!v->sym || v->c_linkage || !home || home == c->global)
+		return true;
+	if (!cxx_mangle_variable(c, v, home, internal, name, sizeof name)) {
+		v->sym = 0;
+		return false;
+	}
+	{
+		uint32_t have = cxx_gen_symbol_named(c, name, 0);
+
+		if (have) {	/* (another declaration of the same variable) */
+			v->sym = have;
+			return true;
+		}
+	}
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, name) + 1;
+	cc_attribute_apply_symbol(a, &a->syms[v->sym], &at);
+	cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, v->sym);
+	return true;
 }
 
 /*
@@ -4302,7 +4333,7 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
 	char nm[64];
 	attrs at;
 
-	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || c->gen || !v || !v->sym || !v->global_ns ||
+	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || c->gen || !v || !v->sym || !(v->global_ns || v->mangled_var) ||
 	    !cxx_gen_object_type_ok(c, v->ty))
 		return false;
 	/* The initializer is built inside a function of its own: if it turns out not to be a constant, that
