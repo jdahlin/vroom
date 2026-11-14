@@ -372,7 +372,13 @@ static void cxx_functional_cast_type(cxx *c, qty cast_to)
 	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
 	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
 		cxx_ec(c, cast_to, v);
-	else
+	else if (zero && cast_to != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, cast_to) == TY_PTR || cc_type_is_arithmetic(c->ast, cast_to))) {
+		/* T() of a pointer or floating type: 0 converted (a null pointer, 0.0) */
+		cxx_ec(c, cc_type_basic(TY_INT), 0);
+		xn = c->enode;
+		cxx_et(c, cast_to, false);
+		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	} else
 		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
 }
 

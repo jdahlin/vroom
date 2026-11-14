@@ -1554,16 +1554,6 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 }
 
-/* std::nullptr_t: a type of its own (a class no source declares; it converts to any pointer) */
-VPRIV qty cxx_nullptr_type(cxx *c)
-{
-	if (!c->nullptr_ty) {
-		uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("nullptr_t"), 0);
-
-		c->nullptr_ty = QT(c->ast->tags[tag].ty, 0);
-	}
-	return c->nullptr_ty;
-}
 
 /*
  * Does one of the class's conversion functions (or a base's) convert to `to`, a type that is not a

@@ -623,6 +623,27 @@ done:
 	free(b);
 }
 
+/* std::nullptr_t: a type of its own (a class no source declares; it converts to any pointer) */
+VPRIV qty cxx_nullptr_type(cxx *c)
+{
+	if (!c->nullptr_ty) {
+		uint32_t ti = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("nullptr_t"), 0);
+		tag *r = &c->ast->tags[ti];
+		field *f = cc_heap_allocate(c->ast, sizeof *f);
+		cxx_class_info *bi;
+
+		/* (laid out as one void *, as clang's: code passes and stores it as such a struct) */
+		memset(f, 0, sizeof *f);
+		f->ty = cc_type_pointer(c->ast, cc_type_basic(TY_VOID)), f->align = 64;
+		r->nfield = 1, r->f = f, r->size = 8, r->align = 8, r->flags |= RF_COMPLETE;
+		c->ast->ty[r->ty].size = 8, c->ast->ty[r->ty].align = 8;
+		bi = cxx_info_of(c, ti);
+		bi->valid = 1, bi->pod = 1, bi->dsize = 8;
+		c->nullptr_ty = QT(r->ty, 0);
+	}
+	return c->nullptr_ty;
+}
+
 VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty underlying)
 {
 	uint32_t ti;

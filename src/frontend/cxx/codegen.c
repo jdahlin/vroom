@@ -598,12 +598,50 @@ static uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, qty to, uint32_t loc)
  * and for a reference the address of the lvalue it binds to (for a const T& or T&& bound to a value: of a
  * temporary holding it).  0: not built.
  */
+/* a nullptr_t object holding pointer value x (a temporary, an lvalue): *(void **)&tmp = x, tmp */
+static uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	uint32_t tmp = cxx_gen_temporary(c, c->nullptr_ty, loc), tv, slot, asg;
+
+	if (!tmp)
+		return 0;
+	tv = cc_node_new(a, N_VAR, a->syms[tmp].ty, loc);
+	AST_NODE_AT(a, tv)->a = tmp, AST_NODE_AT(a, tv)->flags = NF_LVALUE;
+	slot = cc_dereference_build(a, cc_cast_insert(a, cc_address_of_build(a, tv, loc), cc_type_pointer(a, vp), CK_NOP), loc);
+	asg = cc_assignment_build(a, 0, slot, cc_conversion_apply(a, cc_node_rvalue(a, x), vp), loc);
+	tv = cc_node_new(a, N_VAR, a->syms[tmp].ty, loc);
+	AST_NODE_AT(a, tv)->a = tmp, AST_NODE_AT(a, tv)->flags = NF_LVALUE;
+	x = cc_node_new_operands(a, N_COMMA, a->syms[tmp].ty, loc, asg, tv);
+	AST_NODE_AT(a, x)->flags |= NF_LVALUE;
+	return x;
+}
+
 static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 {
 	cc *a = c->ast;
 
 	if (!x)
 		return 0;
+	if (c->nullptr_ty && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_PTR && !AST_TYPE(a, AST_NODE_AT(a, x)->ty)->ext &&
+	    QUNQ(cxx_gen_is_reference(c, to) ? AST_TYPE(a, to)->base : to) == c->nullptr_ty) {
+		/* nullptr (a void * here) to a std::nullptr_t parameter: an object of that type */
+		x = cxx_gen_nullptr_object(c, x, loc);
+		if (!x)
+			return 0;
+		if (!cxx_gen_is_reference(c, to))
+			return cc_node_rvalue(a, x);
+		return cc_cast_insert(a, cc_address_of_build(a, x, loc), QUNQ(to), CK_NOP);
+	}
+	if (c->nullptr_ty && QUNQ(AST_NODE_AT(a, x)->ty) == c->nullptr_ty && (AST_NODE_AT(a, x)->flags & NF_LVALUE) &&
+	    AST_TYPE_KIND(a, to) == TY_PTR && !cxx_gen_is_reference(c, to)) {
+		/* a std::nullptr_t object to a pointer: the void * it holds */
+		qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+
+		x = cc_dereference_build(a, cc_cast_insert(a, cc_address_of_build(a, x, loc), cc_type_pointer(a, vp), CK_NOP), loc);
+		return cc_conversion_apply(a, cc_node_rvalue(a, x), QUNQ(to));
+	}
 	if (cxx_gen_is_reference(c, to)) {
 		qty rt = AST_TYPE(a, to)->base;
 
