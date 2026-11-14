@@ -2200,3 +2200,11 @@ Test: `run/ttp-patterns-vdtor.cpp`.  cxx-strict: 40 funktioner till, 2 nya (`ost
 Kvar för `std::pair<A, B> p;`: en funktionsmall vars enda parameter är ett onamngivet paket
 (`template <int&...> static constexpr bool __enable_default()`) deduceras inte (paketet ska vara tomt).
 cxx-strict: inga nya; 213 summerat per TU.
+
+## Status 132 (2026-11-15)
+En funktionsmall vars enda parameter är ett onamngivet paket, anropad utan mallargument, deduceras med
+paketet tomt (förut "inte deducerad": `template <int&...> static constexpr bool __enable_default()` i
+libc++:s `pair`); i ett konstantuttryck viks anropet genom mallen själv (`cxx_const_call`).  Kvar: ett
+sådant anrop utanför ett konstantuttryck får ingen kod (ingen instans görs på den vägen), och
+`std::pair<A, B> p;` väljer ännu ingen konstruktor: `__test_implicit_default_constructible<const long&>({})`
+(en tom klammerlista till `const long&`) är inte livskraftig hos vcc.  Test: `run/empty-pack-constexpr.cpp`.

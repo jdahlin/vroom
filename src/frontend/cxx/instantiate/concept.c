@@ -229,10 +229,20 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
 	volatile int64_t v = 0;
 	uint32_t pos, depth = 0;
 
-	bool tmpl_member = f && !f->fn_constexpr && f->inst_ftmpl && f->member_of && !f->late && !f->body_end;
+	cxx_ftemplate *ftm = !f ? NULL : f->inst_ftmpl ? f->inst_ftmpl : f->kind == CXX_ENTITY_FUNCTION_TEMPLATE ? f->ftmpl : NULL;
+	bool tmpl_member = f && !f->fn_constexpr && ftm && f->member_of && !f->late && !f->body_end;
+	bool whole_template = f && f->kind == CXX_ENTITY_FUNCTION_TEMPLATE;
 
-	if (!f || !(f->fn_constexpr || tmpl_member) || c->tentative || c->body_depth >= 64 || f->ty == CXX_TY_UNKNOWN ||
-	    AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || AST_TYPE(c->ast, f->ty)->n)
+	if (whole_template) {
+		/* the template itself (template <int&...> f(): its pack empty, its body names no parameter of it) */
+		if (!ftm || !ftm->p.params || !f->member_of)
+			return false;
+		for (uint32_t i = 0; i < ftm->p.params->ntparams; i++)
+			if (!ftm->p.params->tparams[i].pack || ftm->p.params->tparams[i].name)
+				return false;
+	}
+	if (!f || !(f->fn_constexpr || tmpl_member) || c->tentative || c->body_depth >= 64 ||
+	    (!whole_template && (f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || AST_TYPE(c->ast, f->ty)->n)))
 		return false;
 	if (f->cx_state == 1)
 		return *out = f->cx_value, true;	/* (a failure is not kept: tried too early, a later use may succeed) */
@@ -246,7 +256,7 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
 		bool cx = false;
 		uint32_t d = 0, q;
 
-		for (q = f->inst_ftmpl->pos; q < c->ntok; q++) {
+		for (q = ftm->pos; q < c->ntok; q++) {
 			int k = c->tok[q].kind;
 
 			if (c->tok[q].kw == CXX_KW_constexpr)

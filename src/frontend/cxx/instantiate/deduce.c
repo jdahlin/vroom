@@ -355,7 +355,12 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		for (uint32_t i = 0; i < f->np && nothing_deduced; i++)
 			nothing_deduced = f->pt[i] != CXX_TY_UNKNOWN && !cxx_mentions_placeholder(c, f->pt[i], 0);
 	}
-	if (nothing_deduced && xargs && p->params->ntparams && p->params->ntparams <= 32) {
+	bool none_given = !xargs && (!nxargs || nxargs == UINT32_MAX) && p->params->ntparams == 1;	/* (UINT32_MAX: none written) */
+
+	if (nothing_deduced && (xargs || none_given) && p->params->ntparams && p->params->ntparams <= 32) {
+		/* (no explicit argument and the one parameter a pack: it is empty, template <int&...> f()) */
+		if (none_given)
+			nxargs = 0;
 		/* f<A, Ps...>(args) with the last parameter a pack and every argument explicit (libc++'s
 		   __and_helper<_Pred...>(0)): the signature with them bound */
 		uint32_t np = p->params->ntparams;

@@ -207,7 +207,9 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 
 		if (tp->pack && !tp->name) {
 			f->packs = 1;	/* (unnamed packs: not deduced yet) */
-			return;
+			if (i + 1 != p->params->ntparams)
+				return;
+			continue;	/* (a trailing one, template <int&...>: named by nothing, empty unless given) */
 		}
 		if (tp->kind == 3) {
 			/* a template template parameter: not deduced; its name in a parameter's type is a template
