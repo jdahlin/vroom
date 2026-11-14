@@ -163,11 +163,10 @@ VPRIV void virbuild_mov(codegen_context *e, int rd, int rs)
 	virbuild_register_write(e, rd, virbuild_register_read_raw(e, rs));
 }
 
-VPRIV int virbuild_toreg(codegen_context *e, codegen_value *v, int size)
+VPRIV int virbuild_toreg(codegen_context *e, codegen_value *v)
 {
 	int r;
 
-	(void)size;
 	if (v->kind == CODEGEN_VALUE_REGISTER)
 		return v->register_number;
 	r = virbuild_treg(e);
@@ -617,7 +616,7 @@ VPRIV codegen_value virbuild_wcvt(codegen_context *e, codegen_value v, ast_quali
 	if (codegen_type_is_float(c, from) || codegen_type_is_float(c, to) || (!fw && !tw))
 		virbuild_fail(e, VIRBUILD_FAILURE(wide_integer));
 	if (tw) {
-		int q = virbuild_toreg(e, &v, 8);
+		int q = virbuild_toreg(e, &v);
 		bool sign = walk_type_is_signed(c, from);
 		if (walk_type_size(c, from) < 8) virbuild_ext(e, q, walk_type_size(c, from), sign);
 		uint32_t lo = virbuild_register_read(e, q, VIR_TYPE_I64);

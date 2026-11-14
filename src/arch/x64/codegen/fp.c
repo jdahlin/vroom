@@ -74,7 +74,7 @@ static codegen_value x64_half_call(codegen_context *e, int name, codegen_value v
 	x64_classify(e, from, &a, false);
 	a.slot = slot.offset;
 	if (x64_isld(e->compile_context, from)) {
-		codegen_lvalue src = x64_at(x64_toreg(e, &v, 8));
+		codegen_lvalue src = x64_at(x64_toreg(e, &v));
 
 		x64_x87ld(e, &src);
 		x64_x87st(e, &slot);
@@ -109,7 +109,7 @@ VPRIV codegen_value x64_fbin(codegen_context *e, int op, ast_qualified_type t, c
 
 	if (x64_isld(c, t)) {
 		static const int xf[4] = { X64_X87_ADD, X64_X87_SUB, X64_X87_MUL, X64_X87_DIV };
-		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), rd = x64_ldnew(e);
+		int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b), rd = x64_ldnew(e);
 		codegen_lvalue ma = x64_at(ra), mb = x64_at(rb), md = x64_at(rd);
 
 		x64_x87(e, X64_X87_LDT, &ma, 10);
@@ -145,7 +145,7 @@ VPRIV codegen_value x64_fneg(codegen_context *e, ast_qualified_type t, codegen_v
 
 	if (x64_isq(c, t)) {
 		/* the sign bit flipped in a copy */
-		int ra = x64_toreg(e, &a, 8), rd = x64_ldnew(e);
+		int ra = x64_toreg(e, &a), rd = x64_ldnew(e);
 
 		x64_copy(e, rd, ra, 16);
 		x64_tfree(e, ra);
@@ -161,7 +161,7 @@ VPRIV codegen_value x64_fneg(codegen_context *e, ast_qualified_type t, codegen_v
 	}
 
 	if (x64_isld(c, t)) {
-		int ra = x64_toreg(e, &a, 8), rd = x64_ldnew(e);
+		int ra = x64_toreg(e, &a), rd = x64_ldnew(e);
 		codegen_lvalue ma = x64_at(ra), md = x64_at(rd);
 
 		x64_x87(e, X64_X87_LDT, &ma, 10);
@@ -196,7 +196,7 @@ VPRIV codegen_value x64_fcmp(codegen_context *e, int op, ast_qualified_type t, c
 	else if (op == WALK_FLOAT_COMPARE_ORDERED_NOT_EQUAL)
 		cc = X64_CONDITION_NE;
 	if (x64_isld(c, t)) {
-		int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8);
+		int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b);
 		codegen_lvalue ma = x64_at(ra), mb = x64_at(rb);
 
 		/* fucomip compares st0 with st1: st0 is the left of the comparison */
@@ -389,7 +389,7 @@ static codegen_value x64_tfcall(codegen_context *e, int fn, const tfarg *a, int 
 static codegen_value x64_qbin(codegen_context *e, int k, codegen_value a, codegen_value b)
 {
 	static const int fn[4] = { CODEGEN_LIBRARY_ADDTF3, CODEGEN_LIBRARY_SUBTF3, CODEGEN_LIBRARY_MULTF3, CODEGEN_LIBRARY_DIVTF3 };
-	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
+	tfarg ar[2] = { { TQ, x64_toreg(e, &a) }, { TQ, x64_toreg(e, &b) } };
 
 	return x64_tfcall(e, fn[k], ar, 2, TQ);
 }
@@ -400,7 +400,7 @@ static codegen_value x64_qcmp(codegen_context *e, int op, codegen_value a, codeg
 	if (op == WALK_FLOAT_COMPARE_ORDERED_NOT_EQUAL) {
 		/* Both ordered inequalities are false for NaN. Keep the original
 		   addresses live across the first helper call for the second one. */
-		int ar = x64_toreg(e, &a, 8), br = x64_toreg(e, &b, 8);
+		int ar = x64_toreg(e, &a), br = x64_toreg(e, &b);
 		int ac = x64_treg(e), bc = x64_treg(e);
 		x64_mov(e, ac, ar);
 		x64_mov(e, bc, br);
@@ -414,7 +414,7 @@ static codegen_value x64_qcmp(codegen_context *e, int op, codegen_value a, codeg
 		 op == LEX_TOKEN_LESS_EQUAL ? CODEGEN_LIBRARY_LETF2 : op == LEX_TOKEN_GREATER ? CODEGEN_LIBRARY_GTTF2 : CODEGEN_LIBRARY_GETF2;
 	int cc = op == WALK_FLOAT_COMPARE_UNORDERED ? X64_CONDITION_NE : op == LEX_TOKEN_EQUAL_EQUAL ? X64_CONDITION_E : op == LEX_TOKEN_EXCLAMATION_EQUAL ? X64_CONDITION_NE : op == LEX_TOKEN_LESS ? X64_CONDITION_L :
 		 op == LEX_TOKEN_LESS_EQUAL ? X64_CONDITION_LE : op == LEX_TOKEN_GREATER ? X64_CONDITION_G : X64_CONDITION_GE;
-	tfarg ar[2] = { { TQ, x64_toreg(e, &a, 8) }, { TQ, x64_toreg(e, &b, 8) } };
+	tfarg ar[2] = { { TQ, x64_toreg(e, &a) }, { TQ, x64_toreg(e, &b) } };
 	codegen_value r = x64_tfcall(e, fn, ar, 2, TI);
 
 	x64_record_emit_three_registers(e, X64_OP_TEST, 4, X64_REGISTER_NONE, r.register_number, X64_REGISTER_NONE);
@@ -445,7 +445,7 @@ static codegen_value x64_qcvt(codegen_context *e, codegen_value v, ast_qualified
 		return v;
 	if (codegen_type_is_float(c, o)) {
 		tfarg a = { k == AST_TYPE_LONG_DOUBLE ? TX : fq ? TQ : k == AST_TYPE_FLOAT ? TF : TD,
-			    v.kind == CODEGEN_VALUE_REGISTER ? v.register_number : x64_toreg(e, &v, 8) };
+			    v.kind == CODEGEN_VALUE_REGISTER ? v.register_number : x64_toreg(e, &v) };
 
 		if (fq)
 			return x64_tfcall(e, k == AST_TYPE_LONG_DOUBLE ? CODEGEN_LIBRARY_TRUNCTFXF2 : k == AST_TYPE_FLOAT ? CODEGEN_LIBRARY_TRUNCTFSF2 : CODEGEN_LIBRARY_TRUNCTFDF2,
@@ -454,13 +454,13 @@ static codegen_value x64_qcvt(codegen_context *e, codegen_value v, ast_qualified
 				  &a, 1, TQ);
 	}
 	if (k == AST_TYPE_INT128 || k == AST_TYPE_UINT128) {
-		tfarg a = { fq ? TQ : TW, x64_toreg(e, &v, 8) };
+		tfarg a = { fq ? TQ : TW, x64_toreg(e, &v) };
 
 		return x64_tfcall(e, fq ? (sg ? CODEGEN_LIBRARY_FIXTFTI : CODEGEN_LIBRARY_FIXUNSTFTI) : (sg ? CODEGEN_LIBRARY_FLOATTITF : CODEGEN_LIBRARY_FLOATUNTITF), &a, 1, fq ? TW : TQ);
 	}
 	if (fq) {
 		/* to an integer: through 32 or 64 bits, unsigned 32 by the 64-bit fix */
-		tfarg a = { TQ, x64_toreg(e, &v, 8) };
+		tfarg a = { TQ, x64_toreg(e, &v) };
 		int fn = os == 8 ? (sg ? CODEGEN_LIBRARY_FIXTFDI : CODEGEN_LIBRARY_FIXUNSTFDI) : os == 4 && !sg ? CODEGEN_LIBRARY_FIXTFDI : CODEGEN_LIBRARY_FIXTFSI;
 		codegen_value r = x64_tfcall(e, fn, &a, 1, TI);
 
@@ -469,7 +469,7 @@ static codegen_value x64_qcvt(codegen_context *e, codegen_value v, ast_qualified
 		return r;
 	}
 	{
-		int r = x64_toreg(e, &v, 8);
+		int r = x64_toreg(e, &v);
 		tfarg a = { TI, r };
 
 		if (os < 8)
@@ -567,7 +567,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 	if (KIND(c, to) == AST_TYPE_BFLOAT16) {
 		if (x64_isq(c, from))
 			return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFBF2,
-					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
+					  &(tfarg){ TQ, x64_toreg(e, &v) }, 1, TF);
 		if (KIND(c, from) == AST_TYPE_FLOAT16)
 			v = x64_cvt(e, v, from, codegen_type_primitive(AST_TYPE_FLOAT)), from = codegen_type_primitive(AST_TYPE_FLOAT);
 		if (!ff)
@@ -583,7 +583,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 	if (KIND(c, to) == AST_TYPE_FLOAT16) {
 		if (x64_isq(c, from))
 			return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFHF2,
-					  &(tfarg){ TQ, x64_toreg(e, &v, 8) }, 1, TF);
+					  &(tfarg){ TQ, x64_toreg(e, &v) }, 1, TF);
 		if (!ff)
 			v = x64_cvt(e, v, from, codegen_type_primitive(AST_TYPE_DOUBLE)), from = codegen_type_primitive(AST_TYPE_DOUBLE);
 		return x64_half_call(e, x64_isld(c, from) ? CODEGEN_LIBRARY_TRUNCXFHF2 : KIND(c, from) == AST_TYPE_FLOAT ? CODEGEN_LIBRARY_TRUNCSFHF2 : CODEGEN_LIBRARY_TRUNCDFHF2, v, from, to);
@@ -596,7 +596,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 		int rd;
 
 		if (fl) {
-			int ra = x64_toreg(e, &v, 8);
+			int ra = x64_toreg(e, &v);
 			codegen_lvalue m = x64_at(ra);
 
 			x64_x87(e, X64_X87_LDZ, NULL, 0);
@@ -632,7 +632,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			return x64_vr(rd);
 		}
 		{
-			int ra = x64_toreg(e, &v, 8), x;
+			int ra = x64_toreg(e, &v), x;
 			codegen_lvalue m = x64_at(ra), t = x64_tmpslot(e, 8);
 
 			x64_x87(e, X64_X87_LDT, &m, 10);
@@ -659,7 +659,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			return x64_fconst(e, bits, ts);
 		}
 		if (tl) {
-			int r = x64_toreg(e, &v, 8), rd;
+			int r = x64_toreg(e, &v), rd;
 			codegen_lvalue t = x64_tmpslot(e, 8), md;
 			uint32_t ldone = walk_label_new(e);
 
@@ -686,7 +686,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 			return x64_vr(rd);
 		}
 		{
-			int r = x64_toreg(e, &v, 8);
+			int r = x64_toreg(e, &v);
 
 			if (fs < 4)
 				x64_ext(e, r, fs, sg);
@@ -696,7 +696,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v, ast_qualified_t
 	/* float -> integer */
 	if (fl) {
 		/* truncation: the control word's rounding set to zero around fistp */
-		int ra = x64_toreg(e, &v, 8), r;
+		int ra = x64_toreg(e, &v), r;
 		codegen_lvalue m = x64_at(ra), cw = x64_tmpslot(e, 8), cw2 = x64_tmpslot(e, 8), t = x64_tmpslot(e, 8);
 
 		x64_x87(e, X64_X87_STCW, &cw, 2);

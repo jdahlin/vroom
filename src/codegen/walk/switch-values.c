@@ -16,9 +16,8 @@ VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n)
      CODEGEN_IS_DARWIN(c) || WALK_LOWER(nfree)(e)<3) return false;
  em_switch_values_recipe p;
  if (!em_switch_values_plan(c,n,&p) || !em_switch_values_queue(e,n,&p)) return false;
- ast_qualified_type ct=N(N(n)->a)->ty;
  codegen_value v=walk_value_emit(e,N(n)->a);
- int r=walk_value_to_register(e,&v,ct), w=p.selector_bits/8;
+ int r=walk_value_to_register(e,&v), w=p.selector_bits/8;
  if (p.lo) v=WALK_LOWER(bin)(e,LEX_TOKEN_MINUS,w,false,v,codegen_value_constant(p.lo));
  r=v.register_number;
  uint32_t fallback=walk_label_new(e), done=walk_label_new(e);
@@ -36,7 +35,7 @@ VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n)
  WALK_LOWER(jump)(e,done);
  walk_label_place(e,fallback);
  codegen_value d=codegen_value_constant(p.fallback);
- int dr=WALK_LOWER(toreg)(e,&d,p.element_bytes);
+ int dr=WALK_LOWER(toreg)(e,&d);
  WALK_LOWER(mov)(e,r,dr);
  WALK_LOWER(tfree)(e,dr);
  walk_label_place(e,done);

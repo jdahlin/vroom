@@ -19,7 +19,7 @@ VPRIV bool walk_division_signed_constant_check(codegen_context *e, codegen_value
 
 VPRIV codegen_value walk_division_signed_constant_emit(codegen_context *e, ast_qualified_type ty, codegen_value a, const em_sdivconst_recipe *r)
 {
-	int size = r->bits / 8, input = walk_value_to_register(e, &a, ty), saved = -1;
+	int size = r->bits / 8, input = walk_value_to_register(e, &a), saved = -1;
 	codegen_value q;
 
 	if (r->bits == 32)

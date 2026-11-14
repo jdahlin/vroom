@@ -20,8 +20,8 @@ static int expected_op;
 /* A small interpreter for the lowering interface, not x86 assembly text.
  * save/restore have their existing interface semantics; register moves and
  * the MULW/SMULW instructions execute immediately in this fixture. */
-VPRIV int x64_toreg(codegen_context *e,codegen_value *v,int size)
-{ (void)e;assert(size==8 && v->kind==CODEGEN_VALUE_REGISTER);return v->register_number; }
+VPRIV int x64_toreg(codegen_context *e,codegen_value *v)
+{ (void)e;assert(v->kind==CODEGEN_VALUE_REGISTER);return v->register_number; }
 VPRIV void x64_tfree(codegen_context *e,int r) { e->x64_context->temporaries_in_use &= ~(1u<<r); }
 VPRIV void x64_mov(codegen_context *e,int rd,int rs) { (void)e;regs[rd]=regs[rs]; }
 VPRIV record *x64_record_emit_three_registers(codegen_context *e,int op,int sz,int rd,int rs,int rt)

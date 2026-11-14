@@ -1445,6 +1445,50 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite emitter instruction profile (2026-11-14).**
+On the #284 baseline the emitter accounted for 343.1M of the 588.9M
+extra retired user instructions on SQLite 3.50.4. The counts below
+come from reading a thread-local hardware counter at function entry and
+return with the compiler pinned to CPU 7 and VCC_THREADS=1. The walker
+and finish counts cover the same 1,924 functions in both builds.
+
+| Emitter region (exclusive, millions) | Self-hosted | Clang-built | Excess |
+| --- | ---: | ---: | ---: |
+| AST walker excluding x64_finish | 422.4 | 253.2 | 169.2 |
+| Committing chunks, including assembly | 406.4 | 285.2 | 121.3 |
+| x64_finish | 152.1 | 106.6 | 45.5 |
+| Other emitter work | 21.0 | 13.8 | 7.1 |
+
+In walk_lvalue_from_value, VCC reserved 120 stack bytes and copied a
+32-byte by-value operand from its incoming argument area. Clang read
+that area directly. VIR now uses the SysV incoming object for by-value
+memory parameters with sufficient alignment. The shared walker also
+skips register materialization for register values and drops the type
+width argument both materializers ignored. Clang had eliminated those
+width calculations in the inspected code. Compact lvalue and ABI records
+and guarded target-feature lookups reduce work in other walker paths.
+
+Instruction sampling also found x64_mov and as_x64_op under chunk commit.
+The compiler now encodes common numeric integer ModRM operands directly
+in the fragment. This benefits both builds. Chunk commit fell to 376.8M
+self-hosted and 254.8M Clang-built. Total emitter counts fell to 958.1M
+and 623.5M, reducing its excess from 343.1M to 334.7M.
+
+Medians of 24 rotated runs per binary after warmup, perf stat
+instructions:u and task-clock, on the same pinned SQLite -O2 -c compile:
+
+| Compiler | Instructions before | After | CPU ms before | After |
+| --- | ---: | ---: | ---: | ---: |
+| Self-hosted | 1,723.80M | 1,679.38M | 159.655 | 156.620 |
+| Clang-built | 1,134.88M | 1,099.57M | 133.465 | 131.935 |
+
+The absolute gap fell by 9.11M to 579.81M. The CPU ratio moved from
+1.196x to 1.187x. A second run measured 1.193x to 1.191x. All four
+binaries produced the same SQLite object, and its recursive query returned
+500500. Stage 2 and stage 3 matched. The x86 ABI suite passed all 35
+cases including cross-compiler calls. The VIR regression checks two
+independently mutated by-value arguments and inspects the lowered code.
+
 **SQLite emitter and short literal comparisons (2026-11-14).**
 Five pinned SQLite 3.50.4 compiles per binary, sampling every 75,001 user
 cycles with call stacks. At the #283 baseline, a function from the codegen
