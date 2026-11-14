@@ -497,6 +497,7 @@ typedef struct cxx {
 
 /* tokens (token.c) */
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
+VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);

@@ -92,7 +92,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 		return;	/* (unevaluated: a discarded if constexpr branch, sizeof's operand) */
 	if (trace < 0)
 		trace = getenv("VCC_CXX_GEN") != NULL || getenv("VCC_CXX_MISSING") != NULL;
-	if (trace && !c->gen_failed) {	/* VCC_CXX_GEN=4: kept for the function's name (cxx_gen_function_end) */
+	if (trace && !c->gen_failed && !cxx_gen_why[0]) {	/* VCC_CXX_GEN=4: kept for the function's name (cxx_gen_function_end) */
 		int k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "%s:%d:", strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 
 		for (uint32_t i = c->pos > 6 ? c->pos - 6 : 0; i < c->pos + 3 && i < c->ntok && k > 0 && k < (int)sizeof cxx_gen_why - 40; i++)
@@ -474,4 +474,20 @@ VPRIV uint32_t cxx_gen_chain(cxx *c, const cc_id_list *l, uint32_t last, uint32_
 	if (!last)
 		return x;
 	return x ? cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, last)->ty, loc, x, last) : last;
+}
+
+/* an expression code generation gave no node (tokens start to here): the function's reason, unless one is
+   known (VCC_CXX_GEN=4, VCC_CXX_MISSING: the innermost cause, not the statement that then has no node) */
+VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
+{
+	int k;
+
+	if (c->gen_failed || cxx_gen_why[0])
+		return;
+	k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "no node:");
+	for (uint32_t i = start; i < c->pos && i < start + 14 && k > 0 && k < (int)sizeof cxx_gen_why - 50; i++)
+		k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s", (int)(c->tok[i].len < 30 ? c->tok[i].len : 30), c->tok[i].s);
+	if (k > 0 && k < (int)sizeof cxx_gen_why - 12)
+		snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " -> %s", c->etype == CXX_TY_UNKNOWN ? "untyped" :
+			 cc_type_is_record(c->ast, c->etype) ? "class" : "typed");
 }

@@ -1621,8 +1621,10 @@ static void cxx_postfix_expression_parse(cxx *c)
 
 	cxx_postfix_expression_parse1(c);
 	if (trace < 0)
-		trace = getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 2;
-	if (trace && !c->enode && cxx_gen_on(c) && !c->gen_why) {
+		trace = (getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 2) ? 1 : getenv("VCC_CXX_MISSING") ? 2 : 0;
+	if (trace && !c->enode && cxx_gen_on(c))
+		cxx_gen_note_no_node(c, start);	/* (the function's reason, unless one is known) */
+	if (trace == 1 && !c->enode && cxx_gen_on(c) && !c->gen_why) {
 		c->gen_why = 1;
 		fprintf(stderr, "no node:");
 		for (uint32_t i = start; i < c->pos && i < start + 12; i++)
