@@ -1887,3 +1887,10 @@ Structured bindings `auto [a, b] = e;` (även `auto &[...]`, `const auto &[...]`
 namngivna medlem (std::pair:s first/second, ett aggregats medlemmar; en referensmedlem: det den refererar
 till).  Tupel-lika klasser via get<i> och arrayer: inte än.  libc++:s `__tree` (map/set-insättning) går
 förbi `auto [__parent, __child] = __find_equal(...)`.  cxx-strict 338 (342).
+
+## Status 105 (2026-11-14)
+En lambdas parametrar kan vara ett pack av ett omgivande pack (`[this](_Args&&... __args2)`): ett pack av
+värden för kroppen, och för koden ett pack av parametrarnas symboler.  Rätt i leksaksfall (lambda i en
+medlemsmall av en klassmall, skickad till en mall); libc++:s `__tree::__emplace_unique` via
+`__try_key_extraction` stannar ändå vid `__args2` (orsaken inte funnen än), så std::map::emplace och
+operator[] saknas fortfarande.  cxx-strict 338.

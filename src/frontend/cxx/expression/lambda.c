@@ -58,6 +58,7 @@ VPRIV void cxx_lambda_parse(cxx *c)
 	/* a closure type is built for a lambda outside templates whose parameter types are known */
 	bool typed = false, generic = false;
 	qty params[16], ret = CXX_TY_UNKNOWN;
+	uint32_t lp_name = 0, lp_at = 0, lp_n = UINT32_MAX;	/* a parameter pack of an enclosing template's pack (its parameters, expanded) */
 	uint32_t nparams = 0;
 	uint8_t o_capture = c->ret_capture, o_lval = c->ret_lval, o_seen = c->ret_seen;
 	qty o_type = c->ret_type;
@@ -105,16 +106,29 @@ VPRIV void cxx_lambda_parse(cxx *c)
 			cxx_lambda_parameters_parse(c);
 			typed = !c->fn_unknown && c->fn_nparams <= 16 && !c->fn_variadic;
 			nparams = c->fn_nparams;
+			lp_name = c->cpack_name, lp_at = c->cpack_at, lp_n = c->cpack_n;	/* (_Args&&... __args2 of the enclosing pack) */
 			for (uint32_t i = 0; i < nparams && i < 16; i++) {
 				params[i] = c->fn_params[i];
 				gen_pnames[i] = c->fn_pnames[i];
-				if (c->fn_pnames[i] > 1) {
+				if (c->fn_pnames[i] > 1 && !(lp_n != UINT32_MAX && c->fn_pnames[i] == lp_name)) {
 					cxx_entity *e = cxx_declare(c, ls, c->fn_pnames[i], CXX_ENTITY_VALUE);
 
 					if (e)
 						e->ty = c->fn_pdecl[i];
 				}
 			}
+			if (lp_n != UINT32_MAX && lp_name > 1 && lp_at + lp_n <= nparams && nparams <= 16) {
+				/* the parameters of a pack: a pack of values (its elements' types), for the body */
+				cxx_entity *pe = cxx_declare(c, ls, lp_name, CXX_ENTITY_VALUE);
+
+				if (pe) {
+					pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN, pe->npack = lp_n;
+					pe->pack = calloc(lp_n ? lp_n : 1, sizeof *pe->pack);
+					for (uint32_t j = 0; j < lp_n; j++)
+						pe->pack[j].kind = 1, pe->pack[j].t = c->fn_pdecl[lp_at + j];
+				}
+			} else
+				lp_n = UINT32_MAX;
 		} else
 			typed = true;	/* [] { ... }: no parameters */
 	} else if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
@@ -251,18 +265,34 @@ VPRIV void cxx_lambda_parse(cxx *c)
 				else
 					ok = false;	/* (an init-capture, *this, a pack: not built yet) */
 			}
+			cxx_entity *gpe = NULL;
+
 			for (uint32_t i = 0; i < nparams && ok; i++) {
 				ps[i].name = gen_pnames[i], ps[i].ty = params[i];
-				if (gen_pnames[i] > 1) {
+				if (gen_pnames[i] > 1 && !(lp_n != UINT32_MAX && gen_pnames[i] == lp_name)) {
 					cxx_entity *e = cxx_declare(c, fs, gen_pnames[i], CXX_ENTITY_VALUE);
 
 					if (e)
 						e->ty = params[i];
 				}
 			}
+			if (ok && lp_n != UINT32_MAX && (gpe = cxx_declare(c, fs, lp_name, CXX_ENTITY_VALUE))) {
+				/* (the pack's parameters, for the code: a pack of their symbols) */
+				gpe->is_pack = 1, gpe->pack_index = -1, gpe->ty = CXX_TY_UNKNOWN, gpe->npack = lp_n;
+				gpe->pack = calloc(lp_n ? lp_n : 1, sizeof *gpe->pack);
+				for (uint32_t j = 0; j < lp_n; j++)
+					gpe->pack[j].kind = 1, gpe->pack[j].t = params[lp_at + j];
+				gpe->pack_syms = calloc(lp_n ? lp_n : 1, sizeof *gpe->pack_syms);
+				for (uint32_t j = 0; j < lp_n; j++)
+					ps[lp_at + j].name = 0;
+				c->gen_pack_entity = gpe, c->gen_pack_from = lp_at, c->gen_pack_n = lp_n;
+			}
 			if (ok && cxx_gen_lambda_symbol(c, call, serial)) {
 				l.floor = c->ast->nsym;
-				if (cxx_gen_function_begin(c, call, fs, ps, nparams)) {
+				bool begun = cxx_gen_function_begin(c, call, fs, ps, nparams);
+
+				c->gen_pack_entity = NULL;
+				if (begun) {
 					uint8_t g_capture = c->ret_capture, g_seen = c->ret_seen, g_lval = c->ret_lval;
 					qty g_type = c->ret_type;
 
