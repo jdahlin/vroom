@@ -3927,12 +3927,17 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				uint32_t an[CXX_MAX_ARGS], n;
 				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
+				uint32_t pbr[CXX_MAX_ARGS];
+
 				cxx_call_arguments_parse(c);	/* direct-initialization */
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
+				memcpy(pbr, c->carg_brace, sizeof pbr);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, false);
 				if (gen_local) {
+					memcpy(c->gen_call_brace, pbr, sizeof pbr);	/* (T x({...}, v): the list a temporary of its parameter's class) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
 					gen_declared = true;
 				}
 				if (gobj) {

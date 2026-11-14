@@ -1810,3 +1810,8 @@ förut föll båda och primärmallen valdes, doctests `filldata<const char[N]>`)
 ## Status 93 (2026-11-14)
 `return "text";` (eller 0, nullptr) från en funktion som returnerar en klass via adress: kopieringsinitiering
 i anroparens objekt med en konverterande konstruktor.  cxx-strict 392 (413).
+
+## Status 94 (2026-11-14)
+`T x({}, v)`: en braced-lista som argument i direktinitiering blir en temporär av parameterns klass
+(listornas positioner skickas till konstruktoranropet; ett anrop utan sådana argument tar dem inte).
+cxx-strict 392 (oförändrat: de funktionerna stannar vid nästa sak).

@@ -232,8 +232,15 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	cc_id_list list;
 	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[2 * CXX_MAX_ARGS], br[CXX_MAX_ARGS];
 
-	memcpy(br, c->gen_call_brace, sizeof br);	/* (this call's alone: taken at once) */
-	memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+	bool holes = false;
+
+	for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS && !holes; i++)
+		holes = !args[i];
+	if (holes) {
+		memcpy(br, c->gen_call_brace, sizeof br);	/* (this call's alone: taken at once) */
+		memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+	} else
+		memset(br, 0, sizeof br);	/* (no braced argument: the lists are a later call's, T x({}, v)'s constructor) */
 	c->enode = 0;	/* (a call that is not built has no node: not its last argument's, which the parse left here) */
 
 	if (f && f->fn_defaulted && cxx_gen_on(c) && f->name == vintern_cstr("operator==")) {
