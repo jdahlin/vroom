@@ -446,6 +446,8 @@ static void cxx_builtin_call_parse(cxx *c)
 {
 	qty types[2];
 	uint32_t n = 0;
+	uint32_t bn[4], nb = 0;	/* (code generation: the expression arguments' nodes) */
+	qty first = CXX_TY_UNKNOWN;
 
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -503,14 +505,24 @@ static void cxx_builtin_call_parse(cxx *c)
 				n = 3;
 		} else {
 			cxx_initializer_parse(c);
+			if (!nb && n == 0)
+				first = c->etype;
+			if (nb < 4 && nb != UINT32_MAX)
+				bn[nb++] = c->enode;
+			else
+				nb = UINT32_MAX;
 			n = 3;
 		}
 		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
-			n = 3;
+			n = 3, nb = UINT32_MAX;
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	c->nbnodes = n == 3 || n == 0 ? nb : UINT32_MAX;
+	if (c->nbnodes != UINT32_MAX)
+		memcpy(c->bnodes, bn, sizeof bn);
+	c->bfirst = first;
 	/* the type arguments, for the traits that are evaluated (3: something else) */
 	c->nbtypes = n;
 	if (n <= 2)
@@ -1102,6 +1114,18 @@ static void cxx_primary_expression_parse(cxx *c)
 	    cxx_builtin_kind(t->id) == CXX_BUILTIN_TRAIT && !cxx_lookup(c, t->id)) {
 		cxx_builtin_call_parse(c);
 		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6)) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		{
+			/* a builtin that is a library function or a simple operation: its type, and its code */
+			qty rt;
+			uint32_t bn[4], nb = c->nbnodes;
+
+			memcpy(bn, c->bnodes, sizeof bn);
+			if (nb != UINT32_MAX && !c->tentative && cxx_builtin_function_type(c, t->s, t->len, nb, c->bfirst, &rt)) {
+				cxx_et(c, rt, false);
+				cxx_gen_builtin(c, t->s, t->len, bn, nb, t->loc);
+				return;
+			}
+		}
 		{
 			int64_t v;
 

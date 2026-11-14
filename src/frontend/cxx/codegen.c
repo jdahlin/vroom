@@ -521,7 +521,19 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 	cc *a = c->ast;
 
 	(void)loc;
-	if (!cxx_gen_on(c) || !x || !cxx_gen_type_ok(c, to) || cxx_gen_is_reference(c, to) || cc_type_is_record(a, to))
+	if (!cxx_gen_on(c) || !x || to == CXX_TY_UNKNOWN)
+		return;
+	if (AST_TYPE_KIND(a, to) == TY_VOID) {	/* (void)x */
+		c->enode = cc_cast_insert(a, cc_node_rvalue(a, x), cc_type_basic(TY_VOID), CK_VOID);
+		return;
+	}
+	if (cxx_gen_is_reference(c, to)) {
+		/* static_cast<T&&>(x), static_cast<T&>(x) of an lvalue of that type: the same object */
+		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(AST_TYPE(a, to)->base))
+			c->enode = x;
+		return;
+	}
+	if (!cxx_gen_type_ok(c, to) || cc_type_is_record(a, to))
 		return;
 	x = cc_conversion_decay(a, x);
 	if (!cxx_gen_type_ok(c, AST_NODE_AT(a, x)->ty) || cc_type_is_record(a, AST_NODE_AT(a, x)->ty))
@@ -654,7 +666,122 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	c->enode = n;
 }
 
+static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
+
+/* ---- builtins -------------------------------------------------------------------------------- */
+
+/* the builtins that are a C library function (or operator new/delete) by another name */
+static const struct cxx_builtin_function {
+	const char *name, *symbol;
+	char ret, params[4];	/* v void, p void *, q const void *, s const char *, z size_t, i int */
+} cxx_builtin_functions[] = {
+	{ "__builtin_memcpy", "memcpy", 'p', "pqz" }, { "__builtin_memmove", "memmove", 'p', "pqz" },
+	{ "__builtin_memset", "memset", 'p', "piz" }, { "__builtin_memcmp", "memcmp", 'i', "qqz" },
+	{ "__builtin_strlen", "strlen", 'z', "s" }, { "__builtin_memchr", "memchr", 'p', "qiz" },
+	{ "__builtin_strcmp", "strcmp", 'i', "ss" }, { "__builtin_unreachable", "abort", 'v', "" },
+	{ "__builtin_trap", "abort", 'v', "" }, { "__builtin_abort", "abort", 'v', "" },
+	{ "__builtin_operator_new", "_Znwm", 'p', "z" }, { "__builtin_operator_delete", "_ZdlPv", 'v', "p" },
+};
+
+static qty cxx_builtin_code_type(cxx *c, char code)
+{
+	cc *a = c->ast;
+
+	switch (code) {
+	case 'p': return cc_type_pointer(a, cc_type_basic(TY_VOID));
+	case 'q': return cc_type_pointer(a, cc_type_qualify(a, cc_type_basic(TY_VOID), Q_CONST));
+	case 's': return cc_type_pointer(a, cc_type_qualify(a, cc_type_basic(TY_CHAR), Q_CONST));
+	case 'z': return cc_type_basic(TY_ULONG);
+	case 'i': return cc_type_basic(TY_INT);
+	}
+	return cc_type_basic(TY_VOID);
+}
+
+static const struct cxx_builtin_function *cxx_builtin_function_find(const char *name, size_t len, uint32_t nargs, size_t *index)
+{
+	for (size_t i = 0; i < sizeof cxx_builtin_functions / sizeof *cxx_builtin_functions; i++)
+		if (strlen(cxx_builtin_functions[i].name) == len && !memcmp(cxx_builtin_functions[i].name, name, len) &&
+		    strlen(cxx_builtin_functions[i].params) == nargs) {
+			*index = i;
+			return &cxx_builtin_functions[i];
+		}
+	return NULL;
+}
+
+/* a builtin call's type, for the builtins vcc knows as functions or simple operations (arg0: the first argument's type) */
+VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret)
+{
+	const struct cxx_builtin_function *b;
+	size_t i;
+
+	if ((b = cxx_builtin_function_find(name, len, nargs, &i))) {
+		*ret = cxx_builtin_code_type(c, b->ret);
+		return true;
+	}
+	if (len == 31 && !memcmp(name, "__builtin_is_constant_evaluated", 31) && nargs == 0) {
+		*ret = cc_type_basic(TY_BOOL);
+		return true;
+	}
+	if (len == 16 && !memcmp(name, "__builtin_expect", 16) && nargs == 2 && arg0 != CXX_TY_UNKNOWN) {
+		*ret = cc_type_basic(TY_LONG);
+		return true;
+	}
+	return false;
+}
+
+/* ... and its code: a call of the library function, or the operation */
+VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	const struct cxx_builtin_function *b;
+	size_t i;
+
+	if (!cxx_gen_on(c))
+		return;
+	if (len == 31 && !memcmp(name, "__builtin_is_constant_evaluated", 31)) {
+		c->enode = cc_node_integer_new(a, 0, cc_type_basic(TY_BOOL), loc);	/* (code that runs: not a constant evaluation) */
+		return;
+	}
+	if (len == 16 && !memcmp(name, "__builtin_expect", 16)) {
+		if (args[0])
+			c->enode = cc_conversion_apply(a, cc_conversion_decay(a, args[0]), cc_type_basic(TY_LONG));
+		return;
+	}
+	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 16)
+		return;
+	if (!c->gen_builtin_syms[i]) {
+		qty ps[4];
+		uint32_t s;
+
+		for (uint32_t k = 0; k < nargs; k++)
+			ps[k] = cxx_builtin_code_type(c, b->params[k]);
+		s = cc_symbol_new(a, S_FUNC, vintern_cstr(b->symbol), cxx_type_function(c, cxx_builtin_code_type(c, b->ret), ps, nargs, false), loc);
+		a->syms[s].flags |= SF_GLOBAL;
+		a->syms[s].depth = 0;
+		c->gen_builtin_syms[i] = s;
+	}
+	{
+		cc_id_list list;
+		uint32_t s = c->gen_builtin_syms[i], fn, n;
+
+		cc_id_list_init(&list);
+		for (uint32_t k = 0; k < nargs; k++) {
+			if (!args[k])
+				return;
+			cc_id_list_append(a, &list, cc_conversion_apply(a, cc_conversion_decay(a, args[k]), cxx_builtin_code_type(c, b->params[k])));
+		}
+		fn = cc_node_rvalue(a, cxx_gen_var_node(c, s, loc));
+		n = cc_node_new(a, N_CALL, cxx_builtin_code_type(c, b->ret), loc);
+		AST_NODE_AT(a, n)->a = fn;
+		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &list);
+		AST_NODE_AT(a, n)->c = nargs;
+		c->enode = n;
+	}
+}
+
 /* ---- constructors and destructors ------------------------------------------------------------ */
+
+static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
 
 static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc)
 {

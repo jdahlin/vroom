@@ -351,6 +351,9 @@ typedef struct cxx {
 	struct cxx_entity *gen_instance;	/* the function template instance whose signature and body are parsed next (NULL: none) */
 	struct cxx_entity *call_instance;	/* ... the one the last body instantiation was for */
 	struct cxx_entity *ftmpl_te;	/* the function template being deduced (its entity) */
+	qty bfirst;			/* ... its first expression argument's type */
+	uint32_t bnodes[4], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
+	uint32_t gen_builtin_syms[16];	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
@@ -497,6 +500,8 @@ VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
+VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
+VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
