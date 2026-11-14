@@ -790,15 +790,18 @@ uint32_t as_symbol_by_name(as_context *a, const char *name, size_t len) { return
 /* sym + c as an operand expression: .set variables substituted, folded */
 ElfVal as_symbol_value(as_context *a, uint32_t y, int64_t c)
 {
-	as_value v = { y, 0, 0 };
 	if (a->variable_count) {
 		as_variable *vr = as_variable_slot_find(a, y, 0);
-		if (vr && vr->value.add != (uint32_t)-1) v = vr->value;
+		if (vr && vr->value.add != (uint32_t)-1) {
+			as_value v = vr->value;
+			as_value_fold(a, &v);
+			v.c += c;
+			return v;
+		}
 	}
-	as_value_fold(a, &v);
-	v.c += c;
-	as_value_fold(a, &v);
-	return v;
+	if (y && (elf_symp(a->object, y)->flags & ESYM_ABS))
+		return (ElfVal){ 0, 0, (int64_t)elf_symp(a->object, y)->value + c };
+	return (ElfVal){ y, 0, c };
 }
 
 /* "y:" at the current position */

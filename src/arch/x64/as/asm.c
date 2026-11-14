@@ -606,26 +606,25 @@ VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops)
 }
 
 /* a jump or call to a target expression: jumps relax (as.c), calls are rel32 */
-VPRIV int x64_branch(as_context *a, int cc, XOp *t, int call)
+VPRIV int x64_branch(as_context *a, int cc, ElfVal target, int mod)
 {
-	if (call) {
+	if (cc < 0) {
 		uint32_t fr = a->fragment_current;
 		uint64_t off;
 		uint8_t *p;
-		as_value v = t->v;
 
 		elf_code(a->object, fr);
 		off = elf_frag(a->object, fr)->size;
 		p = elf_grow(a->object, fr, 5);
 		p[0] = 0xe8;
 		vbytes_store_u32(p + 1, 0);
-		v.c -= 4;
-		elf_fixup(a->object, fr, off + 1, p + 1, R_X86_64_PLT32, v);
-		if (t->mod == XM_PLT)
+		target.c -= 4;
+		elf_fixup(a->object, fr, off + 1, p + 1, R_X86_64_PLT32, target);
+		if (mod == XM_PLT)
 			((ElfFix *)a->object->fixes.base)[a->object->nfix - 1].pad = 1;	/* sym@PLT: never resolved in place (MC) */
 		return 0;
 	}
-	return as_variable_item_branch_add(a, cc, t->v, t->mod);
+	return as_variable_item_branch_add(a, cc, target, mod);
 }
 
 /* SSE: [prefix] [REX] 0f op ModRM */
