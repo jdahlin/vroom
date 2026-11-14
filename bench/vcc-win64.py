@@ -132,6 +132,14 @@ def _toolfp():
 RTHASH = _runtime_hash()
 TOOLFP = _toolfp()
 
+# vcc's known failures for the target, each with its TODO.md item: a failure of
+# vcc's side is `xfail`, a pass of one is an XPASS error (remove the entry);
+# (suite/name, run|seh): the stage it fails at
+XFAIL = {
+    ('tcc/95_bitfields_ms', 'run'): 'MS layout of a packed record after :0 (TODO.md)',
+    ('vcc/dead_results', 'seh'): 'naked is not implemented on x86-64: its asm retq sits in a frame (TODO.md)',
+}
+
 # tcc tests2 that vcc-ctests.py skips but that mean something here
 TCC_RUN = {'x86 asm', 'win32', 'msvc layout'}
 # tests that cannot work on Windows for a reason the reference run does not show
@@ -955,6 +963,17 @@ if __name__ == '__main__':
     hostenv.wine_start(PREFIX)
     with Pool(j, initializer=init, initargs=(nocache, ref_only, obj, seh, export_dir, own)) as pool:
         res = pool.map(vasmref if vamode else vccrtref if rtmode else vlinkref if vlmode else objcmp if ocmode else one, ts, chunksize=1)
+    if not (ref_only or vlmode or rtmode or vamode or ocmode):	# modes that build vcc's side
+        known = {k[0] for k in XFAIL}
+        def judged(r):
+            (s, n, p), st, cat, why = r
+            k = f'{s}/{n}'
+            if st == 'fail' and (k, cat) in XFAIL:
+                return (s, n, p), 'xfail', cat, XFAIL[(k, cat)]
+            if st == 'pass' and k in known and any(c == 'run' or (c == 'seh' and seh) for kk, c in XFAIL if kk == k):
+                return (s, n, p), 'error', 'xpass', 'a known failure passes: remove it from XFAIL'
+            return r
+        res = [judged(r) for r in res]
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
     for (s, n, _), st, cat, why in res:
@@ -981,7 +1000,8 @@ if __name__ == '__main__':
             print(f'{s:4s} {c["pass"] + c["fail"] + c["error"] + c["skip"]} tests, {c["pass"]} reference-ok, '
                   f'{c["skip"]} excluded, {c["error"]} oracle errors   {det}')
         else:
-            print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%), {c["skip"]} skipped   {det}')
+            xf = f', {c["xfail"]} xfail' if c['xfail'] else ''
+            print(f'{s:4s} {c["pass"]}/{run_} pass ({100 * c["pass"] / max(run_, 1):.1f}%){xf}, {c["skip"]} skipped   {det}')
     if rtmode:
         print(f'vccrt: runs-ok with lld and with vlink {tot["pass"]}/{tot["pass"] + tot["fail"]}, '
               f'linked from compiler-rt/libgcc/libunwind {tot["fail:foreign"]}')
