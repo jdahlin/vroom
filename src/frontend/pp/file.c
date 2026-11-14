@@ -1,5 +1,6 @@
 /* vcc preprocessor: process-wide allocation, the per-file token skeleton, arenas */
 #include "pp-internal.h"
+#include "common/vector.h"
 
 /* ---------------- shared (process-wide) allocation ---------------- */
 
@@ -77,23 +78,38 @@ static uint32_t pp_directive_kind_find(const lex_file *f, uint32_t i, uint32_t e
 	return PP_DIRECTIVE_OTHER;
 }
 
+/* Kind and flags occupy adjacent bytes. Check both with one unaligned
+ * word load while scanning every token for preprocessing directives. */
+static inline bool pp_token_starts_directive(const lex_token *t)
+{
+	_Static_assert(offsetof(lex_token, flags) == offsetof(lex_token, kind) + 1, "token header layout");
+	uint16_t tag;
+	memcpy(&tag, (const unsigned char *)t + offsetof(lex_token, kind), sizeof tag);
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	tag = __builtin_bswap16(tag);
+#endif
+	return (tag & (0xffu | (LEX_TOKEN_FLAG_LINE_START << 8))) == (LEX_TOKEN_HASH | (LEX_TOKEN_FLAG_LINE_START << 8));
+}
+
 static pp_skeleton *pp_skeleton_build(const lex_file *f)
 {
 	const lex_token *t = f->tok;
-	uint32_t n = f->ntok, nd = 0, sp = 0, *stk;
+	uint32_t n = f->ntok, count = 0, sp = 0, *stk;
 	pp_skeleton *fi = pp_shared_allocate(sizeof(*fi));
 	pp_directive_span *d;
 
+	/* Keep just the directive positions. The second pass only needs
+	 * these tokens and their lines, even in a large amalgamation. */
+	uint32_t *positions = NULL;
+	size_t capacity = 0;
 	for (uint32_t i = 0; i < n; i++)
-		nd += (t[i].flags & LEX_TOKEN_FLAG_LINE_START) && t[i].kind == LEX_TOKEN_HASH;
-	d = pp_shared_allocate((nd + 1) * sizeof(*d));
-	stk = malloc((nd + 1) * sizeof(*stk));
-	nd = 0;
-	for (uint32_t i = 0; i < n; i++) {
-		uint32_t e, k;
+		if (pp_token_starts_directive(&t[i]))
+			VVECTOR_APPEND(positions, count, capacity, i);
+	d = pp_shared_allocate(((size_t)count + 1) * sizeof(*d));
+	stk = malloc(((size_t)count + 1) * sizeof(*stk));
+	for (uint32_t nd = 0; nd < count; nd++) {
+		uint32_t i = positions[nd], e, k;
 
-		if (!((t[i].flags & LEX_TOKEN_FLAG_LINE_START) && t[i].kind == LEX_TOKEN_HASH))
-			continue;
 		for (e = i + 1; e < n && !(t[e].flags & LEX_TOKEN_FLAG_LINE_START); e++)
 			;
 		k = pp_directive_kind_find(f, i + 1, e);
@@ -112,21 +128,20 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
 			d[stk[--sp]].next_in_group = nd;
 			break;
 		}
-		nd++;
-		i = e - 1;
 	}
 	if (sp && !fi->unbalanced)
 		fi->unbalanced = 2, fi->unbalanced_token = d[stk[sp - 1]].hash_token + 1;
 	free(stk);
+	free(positions);
 	fi->directives = d;
-	fi->macros = pp_shared_allocate((nd + 1) * sizeof(*fi->macros));	/* fresh: zero */
-	fi->include_answers = pp_shared_allocate((nd + 1) * sizeof(*fi->include_answers));
-	fi->directive_count = nd;
+	fi->macros = pp_shared_allocate(((size_t)count + 1) * sizeof(*fi->macros));	/* fresh: zero */
+	fi->include_answers = pp_shared_allocate(((size_t)count + 1) * sizeof(*fi->include_answers));
+	fi->directive_count = count;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
 	 * (no #else/#elif) with nothing before or after it.
 	 */
-	if (!fi->unbalanced && nd >= 2 && d[0].hash_token == 0) {
+	if (!fi->unbalanced && count >= 2 && d[0].hash_token == 0) {
 		uint32_t g = 0, e = d[0].end_token;
 
 		if (d[0].kind == PP_DIRECTIVE_IFNDEF && e == 3 && t[2].kind == LEX_TOKEN_IDENTIFIER)
