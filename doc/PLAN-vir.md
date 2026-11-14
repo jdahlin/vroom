@@ -1374,6 +1374,38 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Forwarding padded ABI words and aggregate call results (2026-11-14).**
+In `as_snippet_assemble`, VIR zeroed a 16-byte stack token, stored a
+pointer and a 32-bit length, and immediately reloaded both as 64-bit
+words. Clang kept the fields in registers. VIR now forwards a full word
+from a zero fill and the most recent store to its low bytes when all
+other bytes in that word are known zero. It leaves overlapping field
+updates and volatile loads alone.
+
+The expression walker also copied a callee's 32-byte result out of a
+temporary after the call. Clang passed the enclosing function's result
+buffer on the direct-return path. VIR now passes the final buffer for a
+matching full-object copy if the temporary has just those two uses. A
+local destination must be private and suitably aligned. On the direct
+return from `walk_value_emit_inner` this removes two vector loads and
+two vector stores; Clang also makes this particular call a tail jump.
+
+Exclusive samples across five pinned SQLite 3.50.4 compiles (period
+75,001 user cycles), in `as_snippet_assemble`, `walk_value_emit` and
+`walk_value_emit_inner` respectively: self-hosted 458/354/771 →
+249/276/398; clang-built 219/160/612 → 223/174/644.
+
+| Median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 161.92 / 160.735 ms | 135.05 / 134.02 ms | 1.199× / 1.199× |
+| 21 runs alternating order | 164.88 / 163.13 ms | 136.92 / 137.17 ms | 1.204× / 1.189× |
+
+One worker, CPU 7, ordinary host builds, one warm-up per binary. The
+self-hosted binary retired 3.0–5.0M fewer instructions per compile.
+Its median time improved in both series; the ratio was flat in the
+rotated series. All four SQLite objects matched (SHA-256 prefix
+`c4d3896fefc9`); the recursive-query smoke test passed.
+
 **Packed byte OR reductions on SQLite (2026-11-14).**
 The inlined attribute emptiness scan dominated the excess samples in both
 `cc_attribute_merge` and `cc_attribute_apply_symbol`. Clang used SSE2
