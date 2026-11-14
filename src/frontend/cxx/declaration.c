@@ -4644,12 +4644,38 @@ VPRIV void cxx_lambda_parameters_parse(cxx *c)
 VPRIV int cxx_requires_clause_value(cxx *c)
 {
 	int v;
+	uint8_t invalid = c->einvalid, missing = c->member_missing;
+	uint32_t b;
 
 	cxx_expect_kw(c, CXX_KW_requires);
+	b = c->pos;
+	c->einvalid = 0, c->member_missing = 0;
 	c->unevaluated++;
 	cxx_conditional_expression_parse(c);
 	c->unevaluated--;
 	v = c->econst ? c->evalue != 0 : -1;
+	if (v < 0 && (c->einvalid || c->member_missing)) {
+		/* a substitution failure in an atomic constraint: not satisfied ([temp.constr.atomic]/3); in a
+		   conjunction the whole is then false (one with || at its top: not decided here) */
+		bool disj = false;
+		int depth = 0;
+
+		for (uint32_t i = b; i < c->pos && !disj; i++) {
+			int k = c->tok[i].kind;
+
+			if (k == LEX_TOKEN_LEFT_PAREN && i == b)
+				continue;	/* (requires (A && B): its own parentheses) */
+			if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE || k == LEX_TOKEN_LESS)
+				depth++;
+			else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_GREATER) && depth)
+				depth--;
+			else if (!depth && k == LEX_TOKEN_PIPE_PIPE)
+				disj = true;
+		}
+		if (!disj)
+			v = 0;
+	}
+	c->einvalid = invalid, c->member_missing = missing;
 	return v;
 }
 

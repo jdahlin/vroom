@@ -1789,3 +1789,10 @@ definition och utan matchande partiell specialisering) är ett substitutionsfel:
 argumentlistan medan klassen instansieras (`std::pair{x, 2.5}` får kod, rätt värde).  cxx-strict
 oförändrat 550: för `json*` är valet av partiell specialisering av `__segmented_iterator_traits` okänt
 (begränsningar över `iterator_traits<json*>`), så `_Algorithm()(...)` (79) står kvar.
+
+## Status 90 (2026-11-14)
+Ett substitutionsfel i en atomär begränsning gör den ouppfylld ([temp.constr.atomic]/3): en requires-sats
+där `T::x` med T utan klass (member_missing) eller ett annat substitutionsfel (einvalid) inträffar är falsk
+när den är en konjunktion (med `||` överst: inte avgjort).  Därmed väljs `__segmented_iterator_traits`
+för `json*` (join_views begränsade specialisering faller), och `std::copy`/`std::move` över json-vektorer
+får kod.  cxx-strict: 3 av 70 TU:s klarar testerna med bara vcc:s kod, inga länkfel, 473 saknade (550).
