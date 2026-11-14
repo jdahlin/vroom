@@ -136,6 +136,7 @@ typedef struct cxx_entity {
 	uint8_t late_done;
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
+	uint8_t fn_noexcept;		/* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
 	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
 	struct cxx_scope *field_of;	/* a non-static data member: its class */
 	uint8_t fn_static;		/* a static member function */
@@ -442,6 +443,8 @@ typedef struct cxx {
 	struct cxx_entity *gen_pack_entity;
 	struct cxx_entity *ooc_target;	/* an instance's member whose out-of-class definition is being parsed */
 	struct cxx_entity *fn_set_seen;	/* the last name of functions parsed (an overload set a cast picks from) */
+	uint8_t fn_noexcept, decl_noexcept;	/* the function declarator's noexcept (cxx_noexcept_parse) */
+	int8_t constructs_nothrow;	/* cxx_class_constructs: the constructor it found is noexcept (1, 0; -1 not known) */
 	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;

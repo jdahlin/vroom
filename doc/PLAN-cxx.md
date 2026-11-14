@@ -1344,3 +1344,13 @@ json: 69/70, 4,1 s CPU (59x), 2 395 funktioner (från 2 230), 10 av 118
 testfunktioner.  Nästa stopp i testkroppar: typdrag som
 `__is_nothrow_constructible` på klasser (noexcept på konstruktorer följs
 inte), `<=>`, virtuella baser.
+
+### Status (47): noexcept följs; nothrow-typdrag för klasser (2026-11-14)
+`noexcept`, `noexcept(e)` (konstant), `throw()` registreras på funktioner och
+konstruktorer.  `__is_nothrow_constructible` och vänner svarar för klasser:
+den valda konstruktorns noexcept, och för implicita och `= default`
+konstruktorer: inget kastar om basernas och medlemmarnas motsvarande
+konstruktorer inte gör det (rekursivt; `std::runtime_error` som medlem).
+Kontrollerat mot clang med static_assert (`nothrow-traits.cpp`).
+json: 69/70, 4,2 s CPU, 2 406 funktioner, 11 av 118 testfunktioner
+(unit-noexcept:s testfunktion får nu vcc:s kod).

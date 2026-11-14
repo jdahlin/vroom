@@ -1275,7 +1275,7 @@ static int64_t cxx_literal_value(cxx *c)
 }
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { qty trailing; uint32_t pack; uint8_t is_const; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
+typedef struct cxx_suffix { qty trailing; uint32_t pack; uint8_t is_const, is_noexcept; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
 
 /*
  * A declarator (abstract if allowed); returns the declared name's id (0: none) and sets
@@ -1442,7 +1442,7 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 				too_many = true;
 			cxx_function_tail_parse(c);
 			if (x)
-				x->trailing = c->fn_trailing, x->is_const = c->fn_const;
+				x->trailing = c->fn_trailing, x->is_const = c->fn_const, x->is_noexcept = c->fn_noexcept;
 			if (!nested)
 				c->decl_has_trailing = c->fn_has_trailing;
 			*is_function = true;
@@ -1459,9 +1459,10 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			memcpy(c->decl_params, sfx[0].named, sfx[0].nnamed * sizeof *c->decl_params);
 		c->ndecl_params = sfx[0].nnamed;
 		c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const, c->decl_variadic = sfx[0].variadic;
+		c->decl_noexcept = sfx[0].is_noexcept;
 		c->decl_pack_param = sfx[0].pack;
 	} else if (!nested && !c->tentative)
-		c->decl_ndefaults = 0, c->decl_const = 0;
+		c->decl_ndefaults = 0, c->decl_const = 0, c->decl_noexcept = 0;
 	for (uint32_t i = 0; i < nsfx; i++)
 		if (sfx[i].is_function)
 			free(sfx[i].named);
@@ -1610,25 +1611,33 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 	free(decls);
 }
 
-static void cxx_noexcept_parse(cxx *c)
+/* noexcept, noexcept(e), throw(...): 1 not throwing, 0 throwing, 2 not known (a condition not evaluated) */
+static int cxx_noexcept_parse(cxx *c)
 {
+	int r = 0;
+
 	if (cxx_accept_kw(c, CXX_KW_noexcept)) {
+		r = 1;
 		if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			cxx_advance(c);
 			c->unevaluated++;	/* (noexcept(noexcept(f(x))): what it calls is not used) */
 			cxx_constant_expression_parse(c);
 			c->unevaluated--;
+			r = c->econst ? c->evalue != 0 : 2;
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		}
 	} else if (cxx_accept_kw(c, CXX_KW_throw)) {
+		r = cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN;	/* (throw(): not throwing) */
 		cxx_skip_balanced(c);
 	}
+	return r;
 }
 
 /* cv, ref-qualifier, noexcept, attributes, -> trailing return type */
 static void cxx_function_tail_parse(cxx *c)
 {
 	bool is_const = false;
+	uint8_t is_noexcept = 0;
 	cxx_scope *outer = c->scope;
 
 	/* The parameters are in scope in a noexcept-specifier and a trailing return type: -> decltype(a < b).
@@ -1652,7 +1661,7 @@ static void cxx_function_tail_parse(cxx *c)
 			continue;
 		}
 		if (cxx_is_kw(c, CXX_KW_noexcept) || cxx_is_kw(c, CXX_KW_throw)) {
-			cxx_noexcept_parse(c);
+			is_noexcept = (uint8_t)cxx_noexcept_parse(c);
 			continue;
 		}
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE) {
@@ -1669,11 +1678,11 @@ static void cxx_function_tail_parse(cxx *c)
 		cxx_type_id_parse(c);
 		c->scope = outer;
 		c->fn_trailing = c->type_out;	/* auto f() -> T: the return type */
-		c->fn_const = is_const, c->fn_has_trailing = 1;
+		c->fn_const = is_const, c->fn_noexcept = is_noexcept, c->fn_has_trailing = 1;
 		return;
 	}
 	c->scope = outer;
-	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const, c->fn_has_trailing = 0;
+	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const, c->fn_noexcept = is_noexcept, c->fn_has_trailing = 0;
 }
 
 /* the type of a functional cast T(x) / T{x}: type-specifiers only, no declarator */
@@ -3102,7 +3111,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e)
 				e->member_of = cxx_declaration_scope(c);
 			if (e)
-				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0;
+				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0, e->fn_noexcept = c->decl_noexcept;
 			if (e && !e->abi_tag && ds_from < c->pos)
 				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);
 			if (e && !tmpl)
@@ -3194,7 +3203,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS && !is_friend ? e : NULL;
 			if (e && f)
-				e->fn_const = c->decl_const;
+				e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept;
 			if (e && f && kind == CXX_ENTITY_VALUE)
 				decl_fn = e;
 			if (e && f && context == CXX_CONTEXT_CLASS && !is_friend)

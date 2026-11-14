@@ -1275,9 +1275,9 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			r = cxx_class_constructs(c, to, &from, &lv, nt - 1, conv);
 			c->no_literal = 0;
 
-			if (r < 0 || (r && nothrow))
+			if (r < 0 || (r && nothrow && c->constructs_nothrow < 0))
 				return false;
-			*v = r;
+			*v = r && (!nothrow || c->constructs_nothrow == 1);	/* (nothrow: the constructor found is noexcept) */
 			return true;
 		}
 		/* a class to something that is not one: its conversion functions (none: no) */
@@ -1622,9 +1622,53 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth)
  * Can an object of the class `to` be made from n arguments, T(args)?  1 yes, 0 no, -1 not known.
  * Its constructors by overload resolution; with none declared the implicit ones.
  */
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
+
+/* does the implicit (or = default) constructor throw nothing: copying (copy: from a const lvalue of the class,
+   moving: from an rvalue; 0 default) each base and member does not.  1 yes, 0 no, -1 not known */
+static int cxx_class_parts_nothrow(cxx *c, cxx_scope *cls, int copy, int depth)
+{
+	int r = 1;
+
+	if (!cls || depth > 8)
+		return -1;
+	for (uint32_t i = 0, nb = cls->nused, nf = cls->nfield_types; i < nb + nf && r != 0; i++) {
+		qty ft;
+
+		if (i < nb) {
+			cxx_scope *b = cls->used[i];
+
+			if (!b || b->kind != CXX_SCOPE_CLASS)
+				continue;
+			ft = b->owner ? b->owner->ty : CXX_TY_UNKNOWN;
+		} else
+			ft = cls->field_types[i - nb];
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
+			ft = AST_TYPE(c->ast, ft)->base;
+		if (ft == CXX_TY_UNKNOWN)
+			return -1;
+		if (!cc_type_is_record(c->ast, ft))
+			continue;	/* (a scalar, a pointer, a reference: copied without throwing) */
+		{
+			qty a = copy == 1 ? QT(QI(ft), Q_CONST) : QUNQ(ft);
+			uint8_t lv = copy == 1;
+			int k = cxx_class_constructs(c, ft, copy ? &a : NULL, copy ? &lv : NULL, copy ? 1 : 0, false);
+
+			if (k <= 0 || c->constructs_nothrow < 0)
+				r = -1;
+			else if (!c->constructs_nothrow)
+				r = 0;
+		}
+	}
+	return r;
+}
+
+
 static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit)
 {
 	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to)), *from_cls = NULL;
+
+	c->constructs_nothrow = -1;
 	cxx_entity *set, *own = NULL;
 	bool same = false, derived = false;
 	int r = -1;
@@ -1674,8 +1718,13 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 		resolved = c->call_resolved, none = c->none_viable, picked = c->call_picked;
 		c->etype = et, c->elval = el, c->ecallee = callee;
 		c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
-		if (resolved)
+		if (resolved) {
+			/* (whether it throws: as declared; = default and implicit ones: not throwing when the members
+			   are scalars) */
+			c->constructs_nothrow = !picked || picked->kind != CXX_ENTITY_VALUE ? -1 : picked->fn_noexcept == 1 ? 1 :
+						picked->fn_noexcept == 2 ? -1 : picked->fn_defaulted || picked->fn_implicit ? cxx_class_parts_nothrow(c, cls, n == 0 ? 0 : 1, 0) : 0;
 			return !(picked && picked->kind == CXX_ENTITY_VALUE && picked->fn_deleted);
+		}
 		if (!none && !same && !derived)
 			return -1;
 		r = 0;	/* (none of the declared ones; the implicit copy and move remain) */
@@ -1683,6 +1732,7 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 	if (same || derived) {
 		int s = cxx_class_special(c, to, 0, !lval[0] && !(QQ(args[0]) & Q_CONST), 0);
 
+		c->constructs_nothrow = same && s == 1 ? cxx_class_parts_nothrow(c, cls, lval[0] || (QQ(args[0]) & Q_CONST) ? 1 : 2, 0) : -1;	/* (the implicit copy or move) */
 		return s;
 	}
 	if (n == 1 && from_cls && cxx_class_converts_class(c, from_cls, QUNQ(to), 0))
