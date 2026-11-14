@@ -1469,3 +1469,14 @@ funktionsmall med `decltype` i deklarationen räknas som gissat namn (clang skri
 cxx-run 45/45 (nytt: varje svag definition vcc ger har ett namn clang också definierar);
 cxx-fork 69/70, 5,1 s CPU, 2 553 funktioner.  json:s `concat_into` stannar i stället på typningen:
 `detect_string_can_append<...>::value` (is_detected över decltype) ger inget svar.
+
+### Status (59): std::forward/move som inbyggda, Tn i medlemsmallar (2026-11-14)
+`std::forward`, `std::move`, `std::move_if_noexcept` och `std::as_const` av ett lvärde ger objektet
+självt, som clangs inbyggda (inget anrop, ingen funktion; tidigare ett gissat namn för varje
+instans).  Tn: en klassmalls parameter skrivs som sitt argument, en okvalificerad variabelmall utan
+`sr`, och ingen Tn när villkoret bara nämner klassens parametrar (`C2ILi0EE`).  En destruktor som
+körs implicit begär sin kropp (som ett anrop gör).  Ett C1/D1 som ingen definierar men vars C2/D2
+finns blir alias vid TU:ns slut.  Gissade namn i unit-testsuites 249 -> 221.  cxx-run 49/49;
+cxx-fork 68/70: unit-regression1 anropar `data::~data` för `basic_json<..., long double>`, vars
+kropp vcc aldrig tolkar (den nästlade klassens medlemmar i den instansen får inga sena kroppar;
+syns som en stubbe, i ett bygge med bara vcc ett länkfel).  Kvar att utreda.

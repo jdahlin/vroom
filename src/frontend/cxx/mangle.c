@@ -174,7 +174,7 @@ static const char *mg_value_type(cxx_mangler *m, const cxx_scope *ps, uint32_t i
  * sizeof(T), integer literals and [ns::]X<args>::value / [ns::]x_v<args> (unresolved names, sr ... E).
  * False: another form (the caller's name is then a guess of vcc's).
  */
-typedef struct { cxx_mangler *m; uint32_t p, e; } mg_tok;
+typedef struct { cxx_mangler *m; uint32_t p, e; bool own; } mg_tok;	/* own: the function template's parameters were named (else no Tn) */
 
 static const cxx_token *mt_t(mg_tok *k) { return k->p < k->e ? &k->m->c->tok[k->p] : NULL; }
 static bool mt_is(mg_tok *k, int kind) { const cxx_token *t = mt_t(k); return t && t->kind == kind; }
@@ -231,7 +231,21 @@ static bool mt_type(mg_tok *k)
 	int i = mt_tparam(k);
 	const char *bt;
 
+	if (i < 0 && mt_t(k) && mt_t(k)->kind == LEX_TOKEN_IDENTIFIER && k->m->tps) {
+		/* an enclosing class template's parameter (bound in its instance): the argument's type */
+		const cxx_entity *e = NULL;
+
+		for (const cxx_scope *sc = k->m->tps->parent; sc && !e; sc = sc->parent)
+			e = cxx_lookup_in(k->m->c, (cxx_scope *)sc, mt_t(k)->id, 0);
+		if (e && e->kind == CXX_ENTITY_TYPE && e->ty != CXX_TY_UNKNOWN && !e->dependent && !e->placeholder &&
+		    !(k->p + 1 < k->e && (k->m->c->tok[k->p + 1].kind == LEX_TOKEN_LESS || k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON))) {
+			k->p++;
+			mg_type(k->m, e->ty);
+			return true;
+		}
+	}
 	if (i >= 0) {
+		k->own = true;
 		if (!k->m->tph || (uint32_t)i >= k->m->ntph || !k->m->tph[i])
 			return false;
 		const qty *ph = k->m->ph;
@@ -359,7 +373,17 @@ static bool mt_primary(mg_tok *k)
 					char tail[512];
 					size_t tl = k->m->n - mark;
 
-					if (!levels || tl >= sizeof tail)
+					if (!levels) {
+						/* (unqualified: the name and its arguments, no sr) */
+						if (tl >= sizeof tail || k->m->n < mark || mark < 2)
+							return false;
+						memcpy(tail, k->m->b + mark, tl);
+						k->m->n = mark - 2;	/* (drop the "sr") */
+						mg_text(k->m, tail, tl);
+						named = true;
+						break;
+					}
+					if (tl >= sizeof tail)
 						return false;
 					memcpy(tail, k->m->b + mark, tl);
 					k->m->n = mark;
@@ -429,10 +453,10 @@ static bool mt_binary(mg_tok *k, int level)
 static bool mt_expr(mg_tok *k) { return mt_binary(k, 0); }
 
 /* the type's tokens from p: enable_if's forms; *lit: the literal's type code (the second argument) */
-static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap)
+static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, bool *own)
 {
 	cxx *c = m->c;
-	mg_tok k = { m, p, c->ntok };
+	mg_tok k = { m, p, c->ntok, false };
 	bool alias, typename_ = false;
 	cxx_entity *ns, *ei = NULL;
 	size_t save_n = m->n;
@@ -508,8 +532,12 @@ static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap)
 	(void)member;
 	mg_str(m, "4typeE");
 	mg_remember(m, CXX_SUB_TYPE, ei, (qty)0x7fff0002);
-	if (!m->bad)
+	if (!m->bad) {
+		*own = k.own;
+		if (!k.own)	/* (not dependent on the function template's own parameters: no Tn, nothing remembered) */
+			m->n = save_n, m->nsubs = save_subs;
 		return true;
+	}
 bad:
 	m->n = save_n, m->nsubs = save_subs, m->bad = false;
 	return false;
@@ -552,10 +580,14 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 		    ps->tparams[i].type_b) {
 			size_t at = m->n;
 
+			bool own = false;
+
 			mg_str(m, "Tn");
-			if (mg_tn_type(m, ps->tparams[i].type_b, lit, sizeof lit))
+			if (mg_tn_type(m, ps->tparams[i].type_b, lit, sizeof lit, &own)) {
 				vt = lit;
-			else
+				if (!own)
+					m->n = at;	/* (the "Tn" too) */
+			} else
 				m->n = at;
 		}
 		int tk = !(*x).t && !vt && all ? mg_value_type_param(m, ps, i) : -1;

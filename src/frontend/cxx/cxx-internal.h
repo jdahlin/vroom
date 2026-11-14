@@ -627,6 +627,7 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
 VPRIV void cxx_gen_vtables_emit(cxx *c);
+VPRIV void cxx_gen_complete_object_aliases(cxx *c);
 VPRIV bool cxx_mangle_variable(cxx *c, const cxx_entity *v, cxx_scope *home, bool internal, char *buf, size_t cap);
 VPRIV bool cxx_gen_variable_name(cxx *c, cxx_entity *v, bool internal);
 VPRIV bool cxx_scope_in_unnamed_namespace(cxx *c, const cxx_scope *s);

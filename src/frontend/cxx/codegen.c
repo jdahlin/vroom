@@ -426,7 +426,7 @@ static uint32_t cxx_gen_class_temp(cxx *c, qty t, uint32_t loc)
 	cxx_entity *dtor = needs ? cxx_gen_effective_destructor(c, t, 0) : NULL;
 	uint32_t s;
 
-	if (needs && (!dtor || dtor->fn_deleted || c->gen_notemp || !cxx_gen_name(c, dtor) || !dtor->sym1))
+	if (needs && (!dtor || dtor->fn_deleted || c->gen_notemp || !cxx_gen_name(c, dtor) || !dtor->sym1 || (cxx_member_body_use(c, dtor), 0)))
 		return 0;
 	if (!c->gen_block)
 		return 0;
@@ -1785,6 +1785,25 @@ static uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t lo
 	return e ? cc_conversion_apply(a, e, cc_type_basic(TY_BOOL)) : cc_node_integer_new(a, 1, cc_type_basic(TY_BOOL), loc);
 }
 
+/* is f std::forward, std::move, std::move_if_noexcept or std::as_const (in std or libc++'s std::__1)? */
+static bool cxx_gen_std_cast_function(cxx *c, const cxx_entity *f)
+{
+	const vident *v = &vintern_ents[f->name];
+	const cxx_scope *s = f->home;
+	bool std_ns = false;
+
+	if (!((v->len == 7 && !memcmp(v->s, "forward", 7)) || (v->len == 4 && !memcmp(v->s, "move", 4)) ||
+	      (v->len == 16 && !memcmp(v->s, "move_if_noexcept", 16)) || (v->len == 8 && !memcmp(v->s, "as_const", 8))))
+		return false;
+	if (!s || f->member_of || s->kind != CXX_SCOPE_NAMESPACE || !s->owner)
+		return false;
+	if (s->parent == c->global)
+		std_ns = vintern_ents[s->owner->name].len == 3 && !memcmp(vintern_ents[s->owner->name].s, "std", 3);
+	else if (s->parent && s->parent->kind == CXX_SCOPE_NAMESPACE && s->parent->owner && s->parent->parent == c->global)
+		std_ns = vintern_ents[s->parent->owner->name].len == 3 && !memcmp(vintern_ents[s->parent->owner->name].s, "std", 3);
+	return std_ns;
+}
+
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -1821,6 +1840,13 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	}
 	if ((ft->flags & TF_VARIADIC) ? nargs < ft->n || nargs > 32 : ft->n != nargs)
 		{ CXX_CALL_WHY(); return; }	/* (default arguments not recorded: not built yet) */
+	if (nargs == 1 && f->is_instance && cxx_gen_is_reference(c, ft->base) && (AST_NODE_AT(a, args[0])->flags & NF_LVALUE) &&
+	    cxx_gen_std_cast_function(c, f)) {
+		/* std::forward, std::move, std::move_if_noexcept, std::as_const of an lvalue: that object (clang's
+		   builtins: no function called, none emitted) */
+		c->enode = args[0];
+		return;
+	}
 	if (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID)
 		{ CXX_CALL_WHY(); return; }
 	for (uint32_t i = 0; i < nargs; i++)
@@ -3029,7 +3055,7 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 	if (dtor) {
 		attrs at;
 
-		if (dtor->fn_deleted || !cxx_gen_name(c, dtor) || !dtor->sym1) {
+		if (dtor->fn_deleted || !cxx_gen_name(c, dtor) || !dtor->sym1 || (cxx_member_body_use(c, dtor), 0)) {
 			cxx_gen_fail(c);
 			return;
 		}
@@ -3529,6 +3555,47 @@ static void cxx_gen_deleting_destructor(cxx *c, cxx_entity *f)
  * template's instance too) in every TU that names it, weak.  The type info slot is null for now (RTTI:
  * not built yet).
  */
+/*
+ * At the end of the TU: a complete-object constructor or destructor (C1, D1) referred to and not defined,
+ * whose base-object one (C2, D2: the same code without virtual bases) is defined here, is an alias of it
+ * (two declarations of one inline member, one of them naming the C1 apart).
+ */
+VPRIV void cxx_gen_complete_object_aliases(cxx *c)
+{
+	cc *a = c->ast;
+	struct { const char *name; uint32_t sym; } *t = (void *)c->sym_names;
+
+	for (uint32_t k = 0; k < c->csym_names; k++) {
+		const char *nm = t[k].name;
+		uint32_t s = t[k].sym;
+		size_t l;
+
+		if (!nm || !s || (a->syms[s].flags & SF_DEFINED) || a->syms[s].kind != S_FUNC || (l = strlen(nm)) >= 2048)
+			continue;
+		for (size_t i = 3; i + 1 < l; i++) {
+			char two[2048];
+			uint32_t d;
+
+			if ((nm[i] != 'C' && nm[i] != 'D') || nm[i + 1] != '1')
+				continue;
+			memcpy(two, nm, l + 1);
+			two[i + 1] = '2';
+			d = cxx_gen_symbol_named(c, two, 0);
+			if (d && d != s && (a->syms[d].flags & SF_DEFINED) && a->syms[d].attrs) {
+				attrs at;
+
+				memset(&at, 0, sizeof at);
+				at.alias = a->attr[a->syms[d].attrs].asmname;
+				at.weak = 1;
+				cc_attribute_apply_symbol(a, &a->syms[s], &at);
+				a->syms[s].flags |= SF_DEFINED;
+				a->toplevel[a->ntoplevel++] = s;
+				break;
+			}
+		}
+	}
+}
+
 VPRIV void cxx_gen_vtables_emit(cxx *c)
 {
 	cc *a = c->ast;
@@ -3884,7 +3951,7 @@ VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
 		init = cxx_gen_chain(c, &l, 0, loc);
 		d = cxx_gen_effective_destructor(c, t, 0);
 		if (cxx_gen_needs_destruction(c, t, 0)) {
-			if (!d || d->fn_deleted || !cxx_gen_name(c, d) || !d->sym1)
+			if (!d || d->fn_deleted || !cxx_gen_name(c, d) || !d->sym1 || (cxx_member_body_use(c, d), 0))
 				return;
 			dtor = d->sym1;
 		}
@@ -4427,7 +4494,7 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, qty t, const uint3
 
 	if (ok && needs) {
 		dtor = cxx_gen_effective_destructor(c, t, 0);
-		ok = dtor && !dtor->fn_deleted && cxx_gen_name(c, dtor) && dtor->sym1;
+		ok = dtor && !dtor->fn_deleted && cxx_gen_name(c, dtor) && dtor->sym1 && (cxx_member_body_use(c, dtor), 1);
 	}
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 	ok = ok && cxx_gen_construct_at(c, cxx_gen_var_node(c, v->sym, loc), QUNQ(t), args, nargs, c->ginit_list, loc);
@@ -4742,6 +4809,26 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	AST_NODE_AT(a, body)->a = psyms;
 	AST_NODE_AT(a, body)->aux = (uint16_t)npsyms;
 	a->toplevel[a->ntoplevel++] = f->sym;	/* (the TU's definitions, in order: what emit_tu walks) */
+	if (f->sym1 == f->sym && cxx_gen_is_special(f) && f->sym) {
+		/* (an inline one with one symbol for both names: another declaration's complete-object symbol, made
+		   apart and referred to, is an alias of this one) */
+		char n1[2048];
+		cxx_scope *home = f->member_of ? f->member_of : f->home;
+		uint32_t other;
+
+		if (cxx_mangle_function(c, f, home, f->ty, false, 1, n1, sizeof n1) && (other = cxx_gen_symbol_named(c, n1, 0)) &&
+		    other != f->sym && !(a->syms[other].flags & SF_DEFINED)) {
+			const sym *y = &a->syms[f->sym];
+			attrs at;
+
+			memset(&at, 0, sizeof at);
+			at.alias = a->attr[y->attrs].asmname;
+			at.weak = f->fn_inline;
+			cc_attribute_apply_symbol(a, &a->syms[other], &at);
+			a->syms[other].flags |= SF_DEFINED;
+			a->toplevel[a->ntoplevel++] = other;
+		}
+	}
 	if (f->sym1 && f->sym1 != f->sym) {
 		/* a constructor or destructor: the complete-object function is the same code (no virtual bases) */
 		const sym *y = &a->syms[f->sym];
