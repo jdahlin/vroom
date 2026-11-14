@@ -1664,3 +1664,11 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   clangs objekt och läses sektionsrelativt, så de två halvorna ser var sin kopia (en artefakt av det
   blandade bygget, inte vcc:s kod).
 - Test: enable-if-overloads; run 75/75.  Fork 68/70, 7,7 s CPU (31,8x), 23 166 funktioner, 24 testkroppar.
+
+### Status 76 (2026-11-14): implicita kopieringskonstruktorer
+
+- Den implicita (eller defaulted) kopierings-/flyttkonstruktorn för en klass med konstruktorer byggs
+  medlem för medlem: baserna från källans basobjekt (C2), vptr, klassmedlemmar med sina konstruktorer
+  (flytt om kopian är borttagen), skalärer och arrayer kopieras (const-medlemmar via sin adress).
+  `throw ex;` med `const E& ex` (json:s parse_error, ~500 funktioner) får kod.
+- Test: implicit-copy; run 76/76.  Fork 68/70, 7,7 s CPU, 23 218 funktioner, 24 testkroppar.

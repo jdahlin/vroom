@@ -114,6 +114,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 }
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
+static uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc);
 static uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
 static uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc);
 static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
@@ -2950,6 +2951,101 @@ fail:
 	return 0;
 }
 
+/*
+ * T(const T&) or T(T&&) that is implicit (or defaulted) and not trivial, done in place: the bases from the
+ * source's base subobjects, the vptr, then each member (a class one by its constructor, the others copied).
+ * src: the source object (an lvalue).
+ */
+static bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target, qty t, uint32_t src, cc_id_list *out, uint32_t loc, int depth)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+	const tag *r;
+
+	if (!target || !src || !cls || depth > 8 || AST_TYPE_KIND(a, QUNQ(t)) == TY_UNION || 0)
+		return false;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++) {
+		uint32_t tb = cxx_gen_base_object(c, target, bases[i], loc), sb = cxx_gen_base_object(c, src, bases[i], loc);
+		qty at[1] = { QT(QI(QUNQ(bases[i])), Q_CONST) };
+		uint8_t lv[1] = { 1 };
+		bool ok;
+
+		if (!tb || !sb)
+			return false;
+		cxx_ctor_use(c, QUNQ(bases[i]), at, lv, 1, false);
+		c->gen_base_type = QUNQ(bases[i]);	/* (a base subobject: C2) */
+		ok = cxx_gen_construct_at(c, tb, QUNQ(bases[i]), &sb, 1, out, loc);
+		c->gen_base_type = 0;
+		if (!ok)
+			return false;
+	}
+	if (cxx_class_polymorphic(c, t)) {
+		uint32_t st = cxx_gen_vptr_store_at(c, cls, cc_address_of_build(a, target, loc), loc);
+
+		if (!st)
+			return false;
+		cc_id_list_append(a, out, st);
+	}
+	r = &a->tags[AST_TYPE(a, QUNQ(t))->aux];
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		qty ft = r->f[i].ty, et = ft;
+		uint32_t tm, sm;
+
+		if (!r->f[i].name)
+			continue;	/* (the bases' bytes, done above) */
+		while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+			et = AST_TYPE(a, et)->base;
+		tm = member(a, target, r->f[i].name, loc), sm = member(a, src, r->f[i].name, loc);
+		if (!tm || !sm)
+			return false;
+		if (cc_type_is_record(a, et) && cxx_gen_trivial_abi(c, et, 0) != 1) {
+			qty at[1] = { QT(QI(QUNQ(ft)), Q_CONST) };
+			uint8_t lv[1] = { 1 };
+
+			if (et != ft)
+				return false;	/* (an array of such a class: not built yet) */
+			cxx_ctor_use(c, QUNQ(ft), at, lv, 1, false);
+			if (c->ctor_picked && c->ctor_picked->fn_deleted) {
+				lv[0] = 0, at[0] = QUNQ(ft);	/* (a move-only member: moved) */
+				cxx_ctor_use(c, QUNQ(ft), at, lv, 1, false);
+			}
+			if (!cxx_gen_construct_at(c, tm, QUNQ(ft), &sm, 1, out, loc))
+				return false;
+		} else {
+			if (cxx_gen_is_reference(c, ft))
+				return false;
+			if (QQ(AST_NODE_AT(a, tm)->ty) & (Q_CONST | Q_VOLATILE)) {
+				/* (a const member: initialized, through its address as the unqualified type) */
+				qty pt = cc_type_pointer(a, QUNQ(AST_NODE_AT(a, tm)->ty));
+				uint32_t addr = cc_address_of_build(a, tm, loc);
+
+				tm = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+			}
+			if (AST_TYPE_KIND(a, ft) == TY_ARRAY) {
+				/* (an array of scalars: its bytes, as a struct of the same size would be) */
+				uint32_t zargs[3], saved = c->enode;
+
+				zargs[0] = cc_address_of_build(a, tm, loc), zargs[1] = cc_address_of_build(a, sm, loc);
+				zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, ft)->size, cc_type_basic(TY_ULONG), loc);
+				c->enode = 0;
+				cxx_gen_builtin(c, "__builtin_memcpy", 16, zargs, 3, loc);
+				if (!c->enode) {
+					c->enode = saved;
+					return false;
+				}
+				cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, c->enode, 0, 0));
+				c->enode = saved;
+				continue;
+			}
+			cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, tm, cc_node_rvalue(a, sm), loc), 0, 0));
+		}
+	}
+	return true;
+}
+
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -3052,6 +3148,25 @@ bitwise:
 	}
 	if (!found && !(nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t)))
 		return cxx_gen_aggregate_init(c, target, t, args, nargs, out, loc);
+	if (nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t) && (AST_NODE_AT(a, args[0])->flags & NF_LVALUE) &&
+	    (!found || (ctor && ctor->fn_defaulted))) {
+		/* the implicit (or defaulted) copy or move constructor of a class with constructors: member by member */
+		uint32_t src = args[0];
+
+		if (AST_NODE_AT(a, src)->ty != QUNQ(t)) {
+			qty pt = cc_type_pointer(a, QUNQ(t));
+			uint32_t addr = cc_address_of_build(a, src, loc);
+
+			src = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		}
+		if (AST_NODE_AT(a, target)->ty != QUNQ(t)) {
+			qty pt = cc_type_pointer(a, QUNQ(t));
+			uint32_t addr = cc_address_of_build(a, target, loc);
+
+			target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		}
+		return cxx_gen_copy_construct_parts(c, target, t, src, out, loc, 0);
+	}
 	return false;	/* (an implicit copy of a class with constructors: not built yet) */
 }
 
