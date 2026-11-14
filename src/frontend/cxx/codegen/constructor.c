@@ -27,6 +27,15 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 			cxx_gen_fail(c);
 			return;
 		}
+		{
+			uint32_t vk;
+			uint64_t voff;
+
+			if (QUNQ(class_type) != QUNQ(own) && cxx_class_vbase_path(c, QUNQ(own), QUNQ(class_type), &vk, &voff)) {
+				cxx_gen_fail(c);	/* (a virtual base named: constructed by C1 with these arguments, not built yet) */
+				return;
+			}
+		}
 		if (QUNQ(class_type) == QUNQ(own))
 			target = self, c->gen_delegates = 1;
 		else

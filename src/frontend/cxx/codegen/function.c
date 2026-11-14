@@ -50,7 +50,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	ft = AST_TYPE(a, f->ty);
 	/* (from here the body is being built: what was, if anything, is set aside until cxx_gen_function_end) */
 	cxx_gen_push(c);
-	c->gen = 0, c->gen_failed = 0, c->gen_this = 0, c->gen_pre = NULL, c->gen_level = c->instantiating;
+	c->gen = 0, c->gen_failed = 0, c->gen_this = 0, c->gen_vtt = 0, c->gen_pre = NULL, c->gen_level = c->instantiating;
 	c->gen_sret = 0, c->gen_notemp = 0, c->gen_block_temps = 0;
 	c->gen_lambda = NULL;	/* (a lambda's operator(): set by its caller after this) */
 	cc_scope_open(a);
@@ -71,6 +71,14 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 		a->syms[s].sc = SC_AUTO;
 		cc_id_list_append(a, &psyms, s);
 		c->gen_this = s;
+		c->gen_vtt = 0;
+		if (cxx_gen_is_special(f) && f->has_vtt && !c->gen_abi_complete) {
+			s = cc_symbol_new(a, S_VAR, vintern_cstr("vtt"), cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(TY_VOID))), a->syms[f->sym].loc);
+			a->syms[s].flags |= SF_PARAM;
+			a->syms[s].sc = SC_AUTO;
+			cc_id_list_append(a, &psyms, s);
+			c->gen_vtt = s;
+		}
 	}
 	for (uint32_t i = 0; i < nps; i++) {
 		/* (a class passed by address: the parameter names the caller's temporary, as a reference would) */
@@ -119,7 +127,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	if (!ok)
 		cxx_gen_why[0] = 0;
 
-	if (ok && cxx_gen_is_special(f) && c->gen_this) {
+	if (ok && cxx_gen_is_special(f) && c->gen_this && !c->gen_wrapper) {
 		const vident *fv = &vintern_ents[f->name];
 		uint32_t bloc = AST_NODE_AT(a, body)->loc;
 		cc_id_list all;
@@ -138,9 +146,11 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			if (ok && !c->gen_delegates && cxx_class_polymorphic(c, f->member_of->owner->ty)) {
 				/* the object is of this class from here: its vptr (members initialized by calls of virtual
 				   functions would want it before them) */
-				uint32_t st = cxx_gen_vptr_store(c, f->member_of, bloc);
+				uint32_t st = f->has_vtt ? 0 : cxx_gen_vptr_store(c, f->member_of, bloc);
 
-				if (st)
+				if (f->has_vtt)
+					ok = cxx_gen_vtt_vptrs(c, f->member_of, &all, bloc);
+				else if (st)
 					cc_id_list_append(a, &all, st);
 				else
 					ok = false;
@@ -153,7 +163,9 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			/* a destructor: its body, then its members and bases (a return in the body would skip them) */
 			uint32_t before;
 
-			if (cxx_class_polymorphic(c, f->member_of->owner->ty)) {
+			if (f->has_vtt)
+				ok = cxx_gen_vtt_vptrs(c, f->member_of, &all, bloc);
+			else if (cxx_class_polymorphic(c, f->member_of->owner->ty)) {
 				uint32_t st = cxx_gen_vptr_store(c, f->member_of, bloc);	/* (the body sees an object of this class) */
 
 				if (st)
@@ -250,7 +262,9 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			a->toplevel[a->ntoplevel++] = other;
 		}
 	}
-	if (f->sym1 && f->sym1 != f->sym) {
+	if (f->has_vtt && !c->gen_wrapper)
+		cxx_gen_complete_object_function(c, f);	/* (C1, D1: their own code) */
+	else if (f->sym1 && f->sym1 != f->sym && !c->gen_wrapper) {
 		/* a constructor or destructor: the complete-object function is the same code (no virtual bases) */
 		const sym *y = &a->syms[f->sym];
 		attrs at;
@@ -261,7 +275,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		a->syms[f->sym1].flags |= SF_DEFINED;
 		a->toplevel[a->ntoplevel++] = f->sym1;
 	}
-	if (f->fn_virtual && f->member_of) {
+	if (f->fn_virtual && f->member_of && !c->gen_wrapper) {
 		if (f->sym0)
 			cxx_gen_deleting_destructor(c, f);
 		cxx_vtable_symbol(c, f->member_of);	/* (the key function's TU defines the vtable) */

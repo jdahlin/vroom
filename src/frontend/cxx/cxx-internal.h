@@ -160,6 +160,7 @@ typedef struct cxx_entity {
 	uint32_t sym0;			/* a virtual destructor: the deleting destructor's symbol (D0) */
 	uint8_t fn_internal;		/* a function declared static at namespace scope: internal linkage */
 	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
+	uint8_t has_vtt;		/* a constructor or destructor of a class with virtual bases: C2/D2 take a VTT, C1/D1 apart */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_implicit;		/* a destructor vcc made for a class that declares none (its members and bases need one) */
@@ -207,6 +208,8 @@ struct cxx_scope {
 	uint8_t has_dependent_base;
 	struct cxx_scope *friends;	/* a class: the functions it declares friend (found through an argument of the class) */
 	uint8_t is_final;		/* a class declared final */
+	uint32_t vtt_sym;		/* the class's VTT (_ZTT...), once named */
+	uint8_t is_extern_inst;		/* a class instance an extern template class declaration names */
 	uint32_t ti_sym;		/* the class's type info object (_ZTI...), once named */
 	uint8_t ti_listed;
 	uint8_t is_lambda;		/* a closure type (its name is the TU's own: $_N) */
@@ -470,6 +473,9 @@ typedef struct cxx {
 	uint32_t bnodes[8], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
 	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
+	uint32_t gen_vtt;		/* ... a base-object constructor or destructor of a class with virtual bases: its VTT parameter */
+	uint8_t gen_wrapper;		/* cxx_gen_function_end: a C1/D1 built whole (no members, bases or vptrs added) */
+	uint8_t gen_abi_complete;	/* cxx_gen_abi_type: the complete-object function's type (no VTT parameter) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[CXX_MAX_ARGS];	/* the last argument list's nodes */
@@ -718,6 +724,14 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc);
 VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
 VPRIV qty cxx_std_class(cxx *c, const char *name);
 VPRIV qty cxx_class_scalar_conversion(cxx *c, qty t);
+VPRIV uint32_t cxx_class_vbases(cxx *c, qty t, qty *vbases, uint64_t *offs, uint32_t cap);
+VPRIV bool cxx_class_vbase_path(cxx *c, qty derived, qty base, uint32_t *k, uint64_t *off);
+/* a class's VTT (Itanium ABI 2.6.2) without its virtual VTTs: its size, where each direct non-virtual base's
+   sub-VTT starts in it, and its secondary virtual pointers (each a base subobject: reached through the
+   virtual base vbase, 0 for none, at offset off from it or from the class) */
+typedef struct cxx_vtt { uint32_t size, nsub, nvp; qty sub[16]; uint32_t sub_at[16]; qty vp_vbase[32]; uint64_t vp_off[32]; } cxx_vtt;
+VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v);
+VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls);
 VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);

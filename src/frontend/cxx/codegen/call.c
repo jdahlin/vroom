@@ -462,6 +462,18 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 
 		if (base_obj)
 			c->gen_base_type = 0;
+		if (base_obj && f->has_vtt) {
+			/* a base subobject's C2/D2 of a class with virtual bases: its sub-VTT, after this */
+			cxx_scope *own = c->gen_this && c->gen_vtt ? cxx_tag_scope_get(c, QUNQ(AST_TYPE(a, a->syms[c->gen_this].ty)->base)) : NULL;
+			uint32_t vt = own ? cxx_gen_vtt_for_base(c, own, f->member_of->owner->ty, loc) : 0;
+
+			if (!vt || list.n < 1 || list.n >= 33)
+				{ CXX_CALL_WHY(); goto fail; }
+			cc_id_list_append(a, &list, 0);
+			for (uint32_t i = list.n - 1; i > self_at + 1; i--)
+				list.v[i] = list.v[i - 1];
+			list.v[self_at + 1] = vt;
+		}
 
 		fn = cc_node_new(a, N_VAR, a->syms[target].ty, loc);
 		AST_NODE_AT(a, fn)->a = target;

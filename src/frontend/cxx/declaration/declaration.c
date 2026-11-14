@@ -167,6 +167,23 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 			cxx_advance(c);
 			if (cxx_peek(c, 1)->kw != CXX_KW_class && cxx_peek(c, 1)->kw != CXX_KW_struct)
 				cxx_extern_member_record(c);	/* extern template R X<args>::f(params); */
+			else if (!c->tentative && !c->template_depth) {
+				/* extern template class X<args>;: its vtable, VTT and type info are the library's (the name
+				   parsed here, then again by the declaration) */
+				uint32_t save = c->pos, save_undo = c->nundo;
+
+				cxx_advance(c), cxx_advance(c);	/* (template class) */
+				cxx_attributes_skip(c);
+				c->type_out = CXX_TY_UNKNOWN;
+				cxx_type_id_parse(c);
+				if (c->type_out != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->type_out) && AST_TYPE_KIND(c->ast, c->type_out) != TY_ARRAY) {
+					cxx_scope *cs = cxx_type_class_scope(c, QUNQ(c->type_out));
+
+					if (cs)
+						cs->is_extern_inst = 1;
+				}
+				cxx_rewind(c, save, save_undo);
+			}
 			cxx_template_declaration_parse(c, context);
 			return;
 		}

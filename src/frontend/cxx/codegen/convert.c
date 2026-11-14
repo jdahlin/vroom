@@ -299,7 +299,9 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 			qty from = QUNQ(AST_NODE_AT(a, x)->ty);
 			uint64_t off;
 
-			if (cxx_class_base_offset(c, from, QUNQ(rt), &off, 0))
+			uint32_t vk;
+
+			if (cxx_class_base_offset(c, from, QUNQ(rt), &off, 0) || cxx_class_vbase_path(c, from, QUNQ(rt), &vk, &off))
 				x = cxx_gen_base_object(c, x, QUNQ(rt), loc);
 			else
 				x = cxx_gen_convert_class(c, x, QUNQ(rt), loc);
@@ -413,8 +415,26 @@ VPRIV uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, qty to, uint32_t loc)
 	from = AST_TYPE(a, pt)->base;
 	if (QUNQ(from) == QUNQ(to))
 		return cc_cast_insert(a, p, cc_type_pointer(a, to), CK_NOP);
-	if (!cxx_class_base_offset(c, QUNQ(from), QUNQ(to), &off, 0))
-		return 0;
+	if (!cxx_class_base_offset(c, QUNQ(from), QUNQ(to), &off, 0)) {
+		/* through a virtual base: its offset from the object's vtable (p + ((long *)*(char **)p)[-3 - k]), then
+		   the base's in it */
+		uint32_t k, tmp, tv, asg, vptr, slot;
+		qty cp = cc_type_pointer(a, cc_type_basic(TY_CHAR)), lp = cc_type_pointer(a, cc_type_basic(TY_LONG));
+
+		if (!cxx_class_vbase_path(c, QUNQ(from), QUNQ(to), &k, &off) || !(tmp = cxx_gen_temporary(c, cp, loc)))
+			return 0;
+		tv = cxx_gen_var_node(c, tmp, loc);
+		asg = cc_assignment_build(a, 0, tv, cc_cast_insert(a, p, cp, CK_NOP), loc);
+		vptr = cc_dereference_build(a, cc_cast_insert(a, cxx_gen_var_node(c, tmp, loc), cc_type_pointer(a, cp), CK_NOP), loc);
+		slot = cc_binary_build(a, LEX_TOKEN_PLUS, cc_cast_insert(a, cc_node_rvalue(a, vptr), lp, CK_NOP),
+				       cc_node_integer_new(a, -3 - (i128)k, cc_type_basic(TY_LONG), loc), loc);
+		p = cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)),
+				    cc_node_rvalue(a, cc_dereference_build(a, slot, loc)), loc);
+		if (off)
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off, cc_type_basic(TY_LONG), loc), loc);
+		p = cc_node_new_operands(a, N_COMMA, cp, loc, asg, p);
+		return cc_cast_insert(a, p, cc_type_pointer(a, to), CK_NOP);
+	}
 	if (off) {
 		p = cc_cast_insert(a, p, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP);
 		p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off, cc_type_basic(TY_LONG), loc), loc);
@@ -452,6 +472,15 @@ VPRIV uint32_t cxx_gen_member_of(cxx *c, uint32_t x, uint32_t name, uint32_t loc
 		uint32_t sub = cxx_gen_base_object(c, x, bases[i], loc), m;
 
 		if (sub && (m = cxx_gen_member_of(c, sub, name, loc, depth + 1)))
+			return m;
+	}
+	nb = cxx_class_vbases(c, bt, bases, NULL, 16);
+	for (uint32_t i = 0; i < nb && i < 16; i++) {
+		uint32_t sub, m;
+
+		if (!cxx_class_field_offset(c, bases[i], name, &bits, 0))
+			continue;	/* (a virtual base's own bases are virtual bases of this class too) */
+		if ((sub = cxx_gen_base_object(c, x, bases[i], loc)) && (m = member(a, sub, name, loc)))
 			return m;
 	}
 	return 0;

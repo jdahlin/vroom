@@ -38,7 +38,7 @@ VPRIV uint32_t cxx_gen_dtor_sym(const cxx_entity *d)
 {
 	bool inl = d->fn_inline || (d->member_of && d->member_of->owner && d->member_of->owner->instance);
 
-	return inl && d->sym ? d->sym : d->sym1;
+	return inl && d->sym && !d->has_vtt ? d->sym : d->sym1;
 }
 
 /* is the scope in an unnamed namespace (itself one, or inside one: its names have internal linkage) */
@@ -113,6 +113,8 @@ VPRIV qty cxx_gen_abi_type(cxx *c, const cxx_entity *f)
 		if (tt == CXX_TY_UNKNOWN || (cxx_class_polymorphic(c, AST_TYPE(a, tt)->base) && !cxx_vtable_usable(c, f->member_of)))
 			return CXX_TY_UNKNOWN;	/* (a class with virtual functions whose vtable is not built yet) */
 		ps[np++] = tt, any = true;
+		if (!c->gen_abi_complete && cxx_gen_is_special(f) && cxx_gen_class_has_vbases(c, f->member_of))
+			ps[np++] = cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(TY_VOID)));	/* the VTT (C2, D2) */
 	}
 	for (uint32_t i = 0; i < ft->n; i++) {
 		qty p = a->params[ft->aux + i];
@@ -290,12 +292,17 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 	at.asmname = cxx_gen_text(c, name) + 1;
 	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
 	cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, f->sym);
-	if (special && f->fn_inline)
+	if (special && cxx_gen_class_has_vbases(c, f->member_of))
+		f->has_vtt = 1;	/* (C1 and D1 apart from C2 and D2, which take the VTT) */
+	if (special && f->fn_inline && !f->has_vtt)
 		f->sym1 = f->sym;	/* (an inline one: every TU that uses it has its own, so the one function, C2 or D2, does for both names) */
-	if (special && !f->fn_inline) {
+	if (special && (!f->fn_inline || f->has_vtt)) {
+		qty t1;
+
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 1, name, sizeof name))
 			return false;
-		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
+		c->gen_abi_complete = 1, t1 = cxx_gen_abi_type(c, f), c->gen_abi_complete = 0;
+		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, t1, 0);
 		if (a->syms[f->sym].flags & SF_GLOBAL)
 			a->syms[f->sym1].flags |= SF_GLOBAL;
 		else
@@ -310,7 +317,7 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 		/* a virtual destructor: the deleting destructor too */
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 3, name, sizeof name))
 			return false;
-		f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
+		f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym1 ? f->sym1 : f->sym].ty, 0);	/* (this alone: no VTT) */
 		a->syms[f->sym0].flags |= SF_GLOBAL;
 		a->syms[f->sym0].depth = 0;
 		memset(&at, 0, sizeof at);

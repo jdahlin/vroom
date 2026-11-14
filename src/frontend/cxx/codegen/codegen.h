@@ -209,6 +209,9 @@ VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_k
 VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
 VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls);
 VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc);
+VPRIV bool cxx_gen_vtt_vptrs(cxx *c, cxx_scope *cls, cc_id_list *out, uint32_t loc);
+VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, qty base, uint32_t loc);
+VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f);
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
 VPRIV uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc);
 VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth);

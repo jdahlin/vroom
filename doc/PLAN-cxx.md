@@ -2089,3 +2089,24 @@ kompileras, 53 nya i `std::map`-kod som nu nås och stannar vid `std::tuple` (an
   är pekarparametern med färre kvalifierare bättre ([over.ics.rank]/3.2.6).
 Kvar: anrop på ett volatilt objekt får ingen kod; ett uttryckligt `b.operator int()` typas inte.
 Test: `run/class-scalar-operand.cpp`.  cxx-strict 257 (oförändrat: json använder knappt atomic).
+
+## Status 122 (2026-11-14)
+Virtuella basklasser (Itanium ABI), för libc++:s strömmar (`basic_ios` är en virtuell bas till
+`basic_istream`/`basic_ostream`):
+- Layout: de virtuella baserna (direkta och ärvda, i arvsgrafens ordning) läggs efter den icke-virtuella
+  delen, var och en vid datastorleken justerad till sin nvalign; en bas med virtuella baser bidrar med sin
+  nvsize.  Storlek och justering lika med clangs för testhierarkier och `ostream`, `iostream`,
+  `ostringstream`, `stringstream`, `istringstream`, `ifstream`, `ofstream` (körtidsjämförelse).
+- Konvertering till en virtuell bas genom vtabellens vbase-offset (adresspunkten - 24 - 8k, k i arvsgrafens
+  ordning, kontrollerat mot clangs vtabelldump); medlemmar och anrop genom en virtuell bas.
+- `extern template class X<args>;` noteras: en sådan instans vtabeller och VTT är bibliotekets.
+- VTT-layout (2.6.2, som clangs VTTBuilder: sub-VTT:er, sekundära vptr:er; inga virtuella VTT:er än).
+  C2/D2 för en klass med virtuella baser tar VTT:n efter this, sätter vptr:erna ur den och ger basernas
+  C2/D2 deras sub-VTT; C1/D1 är egna funktioner: C1 konstruerar de virtuella baserna och anropar C2 med
+  klassens `_ZTT`, D1 anropar D2 och förstör de virtuella baserna.
+- En överskuggning av en virtuell bas funktion får en egen plats i den primära vtabellen.
+Kvar: en mem-initializer som namnger en virtuell bas, virtuella VTT:er, egna vtabellgrupper (klasser med
+virtuella baser som inte är bibliotekets), null vid pekarkonvertering till en virtuell bas; för
+`ostringstream` i `main`: `basic_string_view(It, End)` (begreppsbegränsad konstruktor) väljs inte.
+cxx-strict: 87 funktioner kompileras nu som inte gjorde det, 6 nya i `basic_filebuf` som nu nås (266 per
+TU räknat, 257 förut), ingen länkning misslyckas (1 förut).

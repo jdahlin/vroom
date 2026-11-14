@@ -137,6 +137,8 @@ typedef struct cxx_class_build {
 	/* the Itanium ABI's inputs: base subobjects, and whether the class is POD for layout (a non-POD
 	   base's tail padding is reused by the derived class's members) */
 	uint32_t bases[16], nbases;
+	uint32_t order[32], norder;	/* every direct base in declaration order, the virtual ones with bit 31 set */
+	uint32_t vbases[16], nvbases;	/* the direct virtual bases */
 	uint8_t pod, access_private, public_data, private_data;
 	uint8_t virt;			/* it declares a virtual function */
 	uint8_t nsdmi;			/* a member has a default initializer */
@@ -151,6 +153,14 @@ typedef struct cxx_class_info {
 	/* its direct base classes: their tags and offsets (code generation: a derived object as its base) */
 	uint8_t nbases;
 	uint32_t base_tag[16], base_off[16];
+	/* virtual bases (Itanium ABI): the non-virtual part's size and alignment (what a class derived from this
+	   one lays out of it), the direct bases in declaration order (bit 31: virtual), and every virtual base of
+	   the class (direct or not) in inheritance graph order with its offset in a complete object */
+	uint64_t nvsize;
+	uint32_t nvalign;
+	uint8_t ndirect, nvb;
+	uint32_t direct[32];
+	uint32_t vb_tag[16], vb_off[16];
 } cxx_class_info;
 
 static cxx_class_info *cxx_info_of(cxx *c, uint32_t tag)
@@ -291,6 +301,161 @@ VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, i
 	return false;
 }
 
+/* how many virtual bases (direct or not) a class laid out has; their types and offsets in a complete object */
+VPRIV uint32_t cxx_class_vbases(cxx *c, qty t, qty *vbases, uint64_t *offs, uint32_t cap)
+{
+	const cxx_class_info *i;
+	uint32_t n = 0;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return 0;
+	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
+	if (!i->valid)
+		return 0;
+	for (; n < i->nvb && n < cap; n++) {
+		if (vbases)
+			vbases[n] = QT(c->ast->tags[i->vb_tag[n]].ty, 0);
+		if (offs)
+			offs[n] = i->vb_off[n];
+	}
+	return i->nvb;
+}
+
+/* `base` reached through a virtual base of `derived`: the virtual base's index k (its offset is in derived's
+   vtable at address point - 24 - 8k) and base's offset in it; false: not so (or a non-virtual base) */
+VPRIV bool cxx_class_vbase_path(cxx *c, qty derived, qty base, uint32_t *k, uint64_t *off)
+{
+	const cxx_class_info *i;
+	uint32_t bt;
+
+	if (derived == CXX_TY_UNKNOWN || base == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, derived) || !cc_type_is_record(c->ast, base) ||
+	    AST_TYPE_KIND(c->ast, derived) == TY_ARRAY || AST_TYPE_KIND(c->ast, base) == TY_ARRAY)
+		return false;
+	i = cxx_info_of(c, AST_TYPE(c->ast, derived)->aux), bt = AST_TYPE(c->ast, base)->aux;
+	if (!i->valid)
+		return false;
+	for (uint32_t j = 0; j < i->nvb; j++) {
+		if (i->vb_tag[j] == bt) {
+			*k = j, *off = 0;
+			return true;
+		}
+		if (cxx_class_base_offset(c, QT(c->ast->tags[i->vb_tag[j]].ty, 0), base, off, 1)) {
+			*k = j;
+			return true;
+		}
+	}
+	return false;
+}
+
+/* the secondary virtual pointers of base subobject rd (clang's VTTBuilder::LayoutSecondaryVirtualPointers):
+   every dynamic base that has virtual bases or is reached through a virtual one, but no non-virtual primary
+   base; each virtual base once */
+static bool cxx_vtt_vptrs(cxx *c, uint32_t rd, bool morally_virtual, uint32_t vbase, uint64_t off, cxx_vtt *v, uint32_t *seen,
+			  uint32_t *nseen, int depth)
+{
+	const cxx_class_info *i = cxx_info_of(c, rd);
+	int primary = -1;
+
+	if (depth > 16)
+		return false;
+	if (!i->nvb && !morally_virtual)
+		return true;
+	for (uint32_t k = 0; k < i->nbases && primary < 0; k++)
+		if (cxx_info_of(c, i->base_tag[k])->polymorphic)
+			primary = (int)k;	/* (vcc's primary base: the first dynamic non-virtual one) */
+	for (uint32_t k = 0; k < i->ndirect; k++) {
+		uint32_t bd = i->direct[k] & 0x7fffffffu, bvb = vbase;
+		const cxx_class_info *ib = cxx_info_of(c, bd);
+		bool mv = morally_virtual, nv_primary = false;
+		uint64_t boff = off;
+
+		if (!ib->polymorphic)
+			continue;
+		if (i->direct[k] & 0x80000000u) {
+			bool dup = false;
+
+			for (uint32_t j = 0; j < *nseen; j++)
+				dup |= seen[j] == bd;
+			if (dup)
+				continue;
+			if (*nseen == 16)
+				return false;
+			seen[(*nseen)++] = bd;
+			bvb = bd, boff = 0, mv = true;
+		} else {
+			uint32_t j = 0;
+
+			while (j < i->nbases && i->base_tag[j] != bd)
+				j++;
+			if (j == i->nbases)
+				return false;
+			boff = off + i->base_off[j];
+			nv_primary = (int)j == primary;
+		}
+		if (!nv_primary && (ib->nvb || mv)) {
+			if (v->nvp == 32)
+				return false;
+			v->vp_vbase[v->nvp] = bvb ? QT(c->ast->tags[bvb].ty, 0) : 0, v->vp_off[v->nvp] = boff;
+			v->nvp++;
+		}
+		if (!cxx_vtt_vptrs(c, bd, mv, bvb, boff, v, seen, nseen, depth + 1))
+			return false;
+	}
+	return true;
+}
+
+/* the VTT's size for class tag t, without virtual VTTs (a sub-VTT) */
+static uint32_t cxx_vtt_size(cxx *c, uint32_t t, int depth)
+{
+	const cxx_class_info *i = cxx_info_of(c, t);
+	cxx_vtt v;
+	uint32_t n = 1, seen[16], nseen = 0;
+
+	if (!i->nvb || depth > 8)
+		return 0;
+	for (uint32_t k = 0; k < i->nbases; k++) {
+		uint32_t m = cxx_info_of(c, i->base_tag[k])->nvb ? cxx_vtt_size(c, i->base_tag[k], depth + 1) : 0;
+
+		if (cxx_info_of(c, i->base_tag[k])->nvb && !m)
+			return 0;
+		n += m;
+	}
+	memset(&v, 0, sizeof v);
+	if (!cxx_vtt_vptrs(c, t, false, 0, 0, &v, seen, &nseen, 0))
+		return 0;
+	return n + v.nvp;
+}
+
+VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v)
+{
+	const cxx_class_info *i;
+	uint32_t at = 1, seen[16], nseen = 0, tg;
+
+	memset(v, 0, sizeof *v);
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return false;
+	tg = AST_TYPE(c->ast, t)->aux, i = cxx_info_of(c, tg);
+	if (!i->valid || !i->nvb)
+		return false;
+	for (uint32_t k = 0; k < i->nvb; k++)
+		if (cxx_info_of(c, i->vb_tag[k])->nvb)
+			return false;	/* (a virtual base with virtual bases: virtual VTTs, not built yet) */
+	for (uint32_t k = 0; k < i->nbases; k++) {
+		uint32_t m;
+
+		if (!cxx_info_of(c, i->base_tag[k])->nvb)
+			continue;
+		if (!(m = cxx_vtt_size(c, i->base_tag[k], 1)))
+			return false;
+		v->sub[v->nsub] = QT(c->ast->tags[i->base_tag[k]].ty, 0), v->sub_at[v->nsub] = at;
+		v->nsub++, at += m;
+	}
+	if (!cxx_vtt_vptrs(c, tg, false, 0, 0, v, seen, &nseen, 0))
+		return false;
+	v->size = at + v->nvp;
+	return true;
+}
+
 /* a class's direct bases: how many, and the k-th one's type */
 VPRIV uint32_t cxx_class_bases(cxx *c, qty t, qty *bases, uint32_t cap)
 {
@@ -321,7 +486,65 @@ VPRIV void cxx_class_member_traits(cxx *c, int what)
 		c->build->nsdmi = 1;
 }
 
-/* a base class: complete, non-virtual (a virtual base: a vtable layout, not built yet) */
+/* the virtual bases reached through the direct bases (bit 31: virtual) in inheritance graph order, each once */
+static void cxx_class_vbases_collect(cxx *c, const uint32_t *direct, uint32_t n, uint32_t *out, uint32_t *nout, int depth)
+{
+	for (uint32_t k = 0; k < n && depth < 16; k++) {
+		uint32_t t = direct[k] & 0x7fffffffu;
+		const cxx_class_info *i = cxx_info_of(c, t);
+		bool seen = false;
+
+		if (direct[k] & 0x80000000u) {
+			for (uint32_t j = 0; j < *nout; j++)
+				seen |= out[j] == t;
+			if (seen)
+				continue;
+			if (*nout < 16)
+				out[(*nout)++] = t;
+		}
+		cxx_class_vbases_collect(c, i->direct, i->ndirect, out, nout, depth + 1);
+	}
+}
+
+/*
+ * The virtual bases of a class laid out without them (its non-virtual part: nvsize, nvalign): each one at
+ * the data size so far aligned to its nvalign, in inheritance graph order (Itanium ABI 2.4 III); the class's
+ * size and alignment grow to hold them.  False: one vcc does not place (an empty one, more than 16).
+ */
+static bool cxx_class_vbases_place(cxx *c, uint32_t tagi, tag *r)
+{
+	cxx_class_info *bi = cxx_info_of(c, tagi);
+	uint32_t vb[16], nvb = 0, al = r->align;
+	uint64_t end = bi->dsize, size;
+
+	cxx_class_vbases_collect(c, bi->direct, bi->ndirect, vb, &nvb, 0);
+	if (!nvb)
+		return true;
+	bi->nvsize = bi->dsize, bi->nvalign = r->align;
+	for (uint32_t k = 0; k < nvb; k++) {
+		const cxx_class_info *iv = cxx_info_of(c, vb[k]);
+
+		if (!iv->valid || iv->empty || !iv->nvalign)
+			return false;
+		end = (end + iv->nvalign - 1) / iv->nvalign * iv->nvalign;
+		bi->vb_tag[k] = vb[k], bi->vb_off[k] = (uint32_t)end;
+		end += iv->nvsize;
+		if (iv->nvalign > al)
+			al = iv->nvalign;
+	}
+	bi->nvb = (uint8_t)nvb;
+	size = (end + al - 1) / al * al;
+	if (size < r->size)
+		size = r->size;
+	bi->dsize = end;
+	r->size = size, r->align = al;
+	if (al > r->maxalign)
+		r->maxalign = al;
+	c->ast->ty[r->ty].size = size, c->ast->ty[r->ty].align = al;
+	return true;
+}
+
+/* a base class: complete; a virtual one is laid out after the non-virtual part (cxx_class_vbases_place) */
 VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
 {
 	cxx_class_build *b = c->build;
@@ -329,19 +552,24 @@ VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
 
 	if (!b || b->skip >= 0 || c->tentative)
 		return;
-	if (is_virtual) {
-		b->skip = CXX_SKIP_VIRTUAL;
-		return;
-	}
 	if (t != CXX_TY_UNKNOWN)
 		cxx_type_require_complete(c, t);
 	tag = cxx_record_tag(c, t);
 	if (!tag || AST_TYPE_KIND(c->ast, t) == TY_ARRAY || !(c->ast->tags[tag].flags & RF_COMPLETE) || !cxx_info_of(c, tag)->valid ||
-	    b->nbases == 16) {
-		b->skip = CXX_SKIP_BASES;	/* (a base vcc did not lay out) */
+	    b->nbases == 16 || b->nvbases == 16 || b->norder == 32) {
+		b->skip = is_virtual ? CXX_SKIP_VIRTUAL : CXX_SKIP_BASES;	/* (a base vcc did not lay out) */
 		return;
 	}
-	b->bases[b->nbases++] = tag;
+	for (uint32_t k = 0; k < b->norder; k++)
+		if ((b->order[k] & 0x7fffffffu) == tag) {
+			b->skip = CXX_SKIP_BASES;	/* (one class twice as a direct base: ill-formed) */
+			return;
+		}
+	b->order[b->norder++] = tag | (is_virtual ? 0x80000000u : 0);
+	if (is_virtual)
+		b->vbases[b->nvbases++] = tag;
+	else
+		b->bases[b->nbases++] = tag;
 }
 
 /* the class declares a virtual function */
@@ -476,16 +704,21 @@ VPRIV void cxx_class_end(cxx *c)
 					primary = (int)i;
 				polymorphic = true;
 			}
+		polymorphic |= b->nvbases > 0;	/* (a virtual base: a vptr, for its offset; a base's are its own vptr's) */
+		for (uint32_t i = 0; i < b->nvbases; i++)
+			if (cxx_info_of(c, b->vbases[i])->polymorphic && cxx_info_of(c, b->vbases[i])->nvsize == 8 && primary < 0) {
+				ok = false;	/* (a nearly empty virtual base: the primary base, not done here) */
+				goto vb_bad;
+			}
 		if (polymorphic && primary < 0)
 			off = 8, balign = 8, nonempty++;
 		for (uint32_t k = 0; k < b->nbases; k++) {
 			uint32_t i = primary < 0 ? k : k == 0 ? (uint32_t)primary : k <= (uint32_t)primary ? k - 1 : k;
-			const tag *br = &c->ast->tags[b->bases[i]];
 			cxx_class_info *ib = cxx_info_of(c, b->bases[i]);
 
 			all_bases_pod &= ib->pod;
-			if (br->align > balign)
-				balign = br->align;
+			if (ib->nvalign > balign)
+				balign = ib->nvalign;
 			if (ib->empty) {
 				for (uint32_t k = 0; k < nempty; k++)
 					ok &= empty_tags[k] != b->bases[i];	/* two of a type at one address: not here */
@@ -497,9 +730,9 @@ VPRIV void cxx_class_end(cxx *c)
 			}
 			if (any_empty_base && (nonempty == 0 && (ib->has_empty_base || ib->empty)))
 				ok = false;	/* (an empty base and a subobject at 0 that may hold the same type) */
-			off = (off + br->align - 1) / br->align * br->align;
+			off = (off + ib->nvalign - 1) / ib->nvalign * ib->nvalign;
 			base_offs[i] = (uint32_t)off;
-			off += ib->pod ? br->size : ib->dsize;
+			off += ib->nvsize;	/* (the base without its virtual bases; a non-POD one's tail padding reused) */
 			nonempty++;
 		}
 		/* (the first member that takes space: an empty [[no_unique_address]] one is checked with them below) */
@@ -517,6 +750,7 @@ VPRIV void cxx_class_end(cxx *c)
 				ok = false;
 		}
 		if (!ok) {
+		vb_bad:
 			c->stats.classes_skipped[CXX_SKIP_EMPTY_BASE]++;
 			if (getenv("VCC_CXX_WHY_LAYOUT"))
 				fprintf(stderr, "no layout: %.*s: empty base\n", c->name_path_valid ? (int)c->name_path_len : 1, c->name_path_valid ? c->name_path : "?");
@@ -612,6 +846,12 @@ VPRIV void cxx_class_end(cxx *c)
 		/* POD for layout: trivial and standard-layout, as far as the parser sees it */
 		bi->pod = !polymorphic && b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&
 			  !(r->flags & RF_UNION ? 0 : 0);
+		bi->ndirect = (uint8_t)b->norder;
+		memcpy(bi->direct, b->order, b->norder * sizeof *b->order);
+		bi->nvb = 0;
+		bi->nvsize = bi->pod ? r->size : bi->dsize, bi->nvalign = r->align;
+		if (b->norder && !cxx_class_vbases_place(c, b->tag, r))
+			bi->valid = 0;	/* (a virtual base vcc does not place: no layout, as before) */
 		if (bi->empty) {	/* C++: an empty class has size 1 */
 			uint32_t ea = r->maxalign > 1 ? r->maxalign : 1;	/* (struct alignas(N) E {}, or empty bases that are: N bytes, aligned N) */
 
@@ -652,7 +892,7 @@ VPRIV qty cxx_nullptr_type(cxx *c)
 		r->nfield = 1, r->f = f, r->size = 8, r->align = 8, r->flags |= RF_COMPLETE;
 		c->ast->ty[r->ty].size = 8, c->ast->ty[r->ty].align = 8;
 		bi = cxx_info_of(c, ti);
-		bi->valid = 1, bi->pod = 1, bi->dsize = 8;
+		bi->valid = 1, bi->pod = 1, bi->dsize = 8, bi->nvsize = 8, bi->nvalign = 8;
 		c->nullptr_ty = QT(r->ty, 0);
 	}
 	return c->nullptr_ty;

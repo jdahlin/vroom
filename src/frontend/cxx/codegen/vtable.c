@@ -33,6 +33,27 @@ VPRIV void cxx_vt_push(cxx_scope *cls, cxx_entity *e)
 	cls->vfuncs[cls->nvfuncs++] = e;
 }
 
+/* does the class have virtual bases (its constructors and destructors take a VTT) */
+VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls)
+{
+	return cls && cls->kind == CXX_SCOPE_CLASS && cls->owner && cls->owner->ty && cxx_class_vbases(c, cls->owner->ty, NULL, NULL, 0) > 0;
+}
+
+/* is b one of the class's virtual bases (direct or not) */
+static bool cxx_vt_is_vbase(cxx *c, cxx_scope *cls, cxx_scope *b)
+{
+	qty vb[16];
+	uint32_t n;
+
+	if (!cls->owner || !cls->owner->ty || !b->owner || !b->owner->ty)
+		return false;
+	n = cxx_class_vbases(c, cls->owner->ty, vb, NULL, 16);
+	for (uint32_t i = 0; i < n && i < 16; i++)
+		if (QUNQ(vb[i]) == QUNQ(b->owner->ty))
+			return true;
+	return false;
+}
+
 /* the class's vtable starts as its primary base's (the one base with a vtable) */
 VPRIV void cxx_vtable_init(cxx *c, cxx_scope *cls)
 {
@@ -44,6 +65,8 @@ VPRIV void cxx_vtable_init(cxx *c, cxx_scope *cls)
 
 		if (!b || b->kind != CXX_SCOPE_CLASS)
 			continue;
+		if (cxx_vt_is_vbase(c, cls, b))
+			continue;	/* (a virtual base's functions are in its own vtable, not the primary one) */
 		cxx_vtable_init(c, b);
 		if (b->vt_bad)
 			cls->vt_bad = 1;
@@ -73,8 +96,23 @@ VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_k
 			cls->vfuncs[i] = e;
 			found = true;
 		}
-	if (!found && !virt_kw)
-		return;
+	if (!found && !virt_kw) {
+		/* an override of a virtual base's function: a slot of its own in this vtable (the virtual base's
+		   vtable reaches it through a thunk) */
+		bool over = false;
+
+		for (uint32_t i = 0; i < cls->nused && !over; i++) {
+			cxx_scope *b = cls->used[i];
+
+			if (!b || b->kind != CXX_SCOPE_CLASS)
+				continue;
+			cxx_vtable_init(c, b);
+			for (uint32_t k = 0; k < b->nvfuncs && !over; k++)
+				over = cxx_vt_same(c, b->vfuncs[k], e);
+		}
+		if (!over)
+			return;
+	}
 	if (!found) {
 		e->vslot = cls->nvfuncs + 1;
 		cxx_vt_push(cls, e);
@@ -104,6 +142,9 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
 	cxx_vtable_init(c, cls);
 	if (cls->vt_bad || !cls->nvfuncs)
 		return false;
+	if (cxx_class_vbases(c, cls->owner->ty, NULL, NULL, 0) && !cls->is_extern_inst)
+		return false;	/* (vbase offsets, construction vtables and a VTT: not built here; an extern template's
+				   instance has the library's) */
 	for (uint32_t i = 0; i < cls->nvfuncs; i++) {
 		const cxx_entity *e = cls->vfuncs[i];
 
@@ -128,7 +169,7 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
 				c->vt_making++;
 				d = cxx_gen_effective_destructor(c, cls->owner->ty, 0);
 				c->vt_making--;
-				if (!d || d->member_of != cls || !d->fn_virtual)
+							if (!d || d->member_of != cls || !d->fn_virtual)
 					return false;
 				return cxx_vtable_usable(c, cls);
 			}
@@ -172,8 +213,11 @@ VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint
 {
 	cc *a = c->ast;
 	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), vppp = cc_type_pointer(a, cc_type_pointer(a, vp));
-	uint32_t vs = cxx_vtable_symbol(c, cls), addr, target;
+	uint32_t vs, addr, target;
 
+	if (cxx_gen_class_has_vbases(c, cls))
+		return 0;	/* (its vptrs come from a VTT: cxx_gen_vtt_vptrs, in its constructors) */
+	vs = cxx_vtable_symbol(c, cls);
 	if (!vs || !self)
 		return 0;
 	addr = cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, vs, loc)),
@@ -199,6 +243,181 @@ VPRIV uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc)
 	self = c->enode;
 	c->enode = 0;
 	return cxx_gen_vptr_store_at(c, cls, self, loc);
+}
+
+/* the class's VTT symbol (_ZTT..., the library's: an extern template's instance), 0: none */
+static uint32_t cxx_gen_vtt_symbol(cxx *c, cxx_scope *cls)
+{
+	char name[2048];
+	cxx_vtt v;
+
+	if (cls->vtt_sym)
+		return cls->vtt_sym;
+	if (!cls->is_extern_inst || !cxx_vtt_layout(c, cls->owner->ty, &v) || !cxx_mangle_class_data(c, "TT", cls->owner->ty, name, sizeof name))
+		return 0;
+	cls->vtt_sym = cxx_gen_data_symbol(c, name, v.size);
+	return cls->vtt_sym;
+}
+
+/* vtt[k], the VTT parameter's k-th entry */
+static uint32_t cxx_gen_vtt_entry(cxx *c, uint32_t k, uint32_t loc)
+{
+	cc *a = c->ast;
+
+	return cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_vtt, loc)),
+								     cc_node_integer_new(a, (i128)k, cc_type_basic(TY_LONG), loc), loc), loc));
+}
+
+/* the VTT for base subobject `base` of the class whose C2/D2 is being built: vtt + its sub-VTT's index (0: base
+   has no virtual bases, or not built) */
+VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, qty base, uint32_t loc)
+{
+	cc *a = c->ast;
+	cxx_vtt v;
+
+	if (!c->gen_vtt || !cls || !cxx_vtt_layout(c, cls->owner->ty, &v))
+		return 0;
+	for (uint32_t i = 0; i < v.nsub; i++)
+		if (QUNQ(v.sub[i]) == QUNQ(base))
+			return cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_vtt, loc)),
+					       cc_node_integer_new(a, (i128)v.sub_at[i], cc_type_basic(TY_LONG), loc), loc);
+	return 0;
+}
+
+/*
+ * A C2's or D2's vptrs from its VTT (Itanium ABI 2.6.2): this's own from vtt[0], then each secondary virtual
+ * pointer's from its entry (a subobject in a virtual base found through the vptr just stored, which is a
+ * construction vtable's where this is a base subobject).  False: not built.
+ */
+VPRIV bool cxx_gen_vtt_vptrs(cxx *c, cxx_scope *cls, cc_id_list *out, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), vpp = cc_type_pointer(a, vp), cp = cc_type_pointer(a, cc_type_basic(TY_CHAR));
+	cxx_vtt v;
+	uint32_t self, at;
+
+	if (!c->gen_vtt || !cxx_vtt_layout(c, cls->owner->ty, &v))
+		return false;
+	at = v.size - v.nvp;	/* (the secondary vptrs follow the sub-VTTs) */
+	cxx_gen_this(c, loc);
+	self = c->enode, c->enode = 0;
+	if (!self)
+		return false;
+	cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, self, vpp, CK_NOP), loc),
+										     cxx_gen_vtt_entry(c, 0, loc), loc), 0, 0));
+	for (uint32_t i = 0; i < v.nvp; i++) {
+		uint32_t p;
+
+		cxx_gen_this(c, loc);
+		p = cc_cast_insert(a, c->enode, cp, CK_NOP), c->enode = 0;
+		if (v.vp_vbase[i]) {
+			/* this + ((long *)*(char **)this)[-3 - k]: the virtual base through the vptr just stored (this is
+			   a parameter: read again, no temporary) */
+			qty lp = cc_type_pointer(a, cc_type_basic(TY_LONG));
+			uint32_t k, t2, vptr, slot;
+			uint64_t inner;
+
+			if (!cxx_class_vbase_path(c, cls->owner->ty, v.vp_vbase[i], &k, &inner))
+				return false;
+			cxx_gen_this(c, loc);
+			t2 = c->enode, c->enode = 0;
+			vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, t2, cc_type_pointer(a, cp), CK_NOP), loc));
+			slot = cc_binary_build(a, LEX_TOKEN_PLUS, cc_cast_insert(a, vptr, lp, CK_NOP), cc_node_integer_new(a, -3 - (i128)k, cc_type_basic(TY_LONG), loc), loc);
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_rvalue(a, cc_dereference_build(a, slot, loc)), loc);
+			if (inner)
+				p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)inner, cc_type_basic(TY_LONG), loc), loc);
+		}
+		if (v.vp_off[i])
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)v.vp_off[i], cc_type_basic(TY_LONG), loc), loc);
+		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, p, vpp, CK_NOP), loc),
+											     cxx_gen_vtt_entry(c, at + i, loc), loc), 0, 0));
+	}
+	return true;
+}
+
+/*
+ * C1 or D1 of a class with virtual bases, apart from C2 or D2 (which take the VTT): C1 constructs the virtual
+ * bases (by their default constructors) at their offsets in the complete object and calls C2 with the class's
+ * own VTT; D1 calls D2 with it and destroys the virtual bases, last first.
+ */
+VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
+{
+	cc *a = c->ast;
+	bool ctor = vintern_ents[f->name].s[1] == 'c';
+	cxx_scope *cls = f->member_of;
+	uint32_t vtt = cxx_gen_vtt_symbol(c, cls), loc = a->syms[f->sym].loc, nvb, call;
+	const ctype *ft = AST_TYPE(a, f->ty);
+	qty vb[16];
+	uint64_t off[16];
+	cxx_entity *w;
+	cxx_param ps[32];
+	cc_id_list args, stmts;
+	cxx_scope *fs;
+
+	if (!vtt || !f->sym1 || f->sym1 == f->sym || (a->syms[f->sym1].flags & SF_DEFINED) || ft->n > 32 || (ft->flags & TF_VARIADIC))
+		return;
+	nvb = cxx_class_vbases(c, cls->owner->ty, vb, off, 16);
+	w = calloc(1, sizeof *w);
+	*w = *f;
+	w->sym = f->sym1, w->sym1 = 0, w->sym0 = 0, w->fn_virtual = 0, w->has_vtt = 0;
+	for (uint32_t i = 0; i < ft->n; i++)
+		ps[i].name = 0, ps[i].ty = a->params[ft->aux + i];
+	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, cls, NULL);
+	c->gen_abi_complete = 1;
+	if (!cxx_gen_function_begin(c, w, fs, ps, ft->n)) {
+		c->gen_abi_complete = 0;
+			return;
+	}
+	c->gen_abi_complete = 0;
+	cc_id_list_init(&stmts);
+	if (ctor)
+		for (uint32_t i = 0; i < nvb && cxx_gen_on(c); i++) {
+			uint32_t p, x;
+
+			cxx_gen_this(c, loc);
+			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP), c->enode = 0;
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(TY_LONG), loc), loc);
+			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), CK_NOP), loc);
+			if (!cxx_gen_needs_construction(c, vb[i], 0))
+				continue;
+			cxx_ctor_use(c, vb[i], NULL, NULL, 0, false);
+			c->gen_base_type = QUNQ(vb[i]);
+			if (!cxx_gen_construct_at(c, x, vb[i], NULL, 0, &stmts, loc))
+				cxx_gen_fail(c);
+			c->gen_base_type = 0;
+		}
+	cc_id_list_init(&args);
+	{
+		const uint32_t *pv = &a->lists[c->gen_psyms];
+
+		cc_id_list_append(a, &args, cc_node_rvalue(a, cxx_gen_var_node(c, pv[0], loc)));	/* this */
+		cc_id_list_append(a, &args, cxx_gen_data_address(c, vtt, 0));
+		for (uint32_t i = 1; i < c->gen_npsyms; i++)
+			cc_id_list_append(a, &args, cc_node_rvalue(a, cxx_gen_var_node(c, pv[i], loc)));
+	}
+	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, f->sym, loc);
+	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
+	AST_NODE_AT(a, call)->c = args.n;
+	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	if (!ctor)
+		for (uint32_t i = nvb; i-- > 0 && cxx_gen_on(c);) {
+			uint32_t p, x;
+
+			if (!cxx_gen_needs_destruction(c, vb[i], 0))
+				continue;
+			cxx_gen_this(c, loc);
+			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP), c->enode = 0;
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(TY_LONG), loc), loc);
+			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), CK_NOP), loc);
+			c->gen_base_type = QUNQ(vb[i]);
+			if (!cxx_gen_destroy(c, x, vb[i], &stmts, loc))
+				cxx_gen_fail(c);
+			c->gen_base_type = 0;
+		}
+	c->gen_wrapper = 1;
+	cxx_gen_function_end(c, w, cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n));
+	c->gen_wrapper = 0;
 }
 
 /*
@@ -392,6 +611,8 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 				key = cls->vown[k];
 		if (key && !(key->sym && (a->syms[key->sym].flags & SF_DEFINED)))
 			continue;	/* (the TU that defines the key function has it) */
+		if (cls->is_extern_inst && cxx_gen_class_has_vbases(c, cls))
+			continue;	/* (an extern template's instance: the library's vtable group) */
 		cc_id_list_init(&v);
 		for (uint32_t k = 0; k < cls->nvfuncs + 2 && ok; k++) {
 			cxx_entity *e = k >= 2 ? cls->vfuncs[k - 2] : NULL;
