@@ -49,11 +49,79 @@ static void virbuild_address_offsets_fold(codegen_context *e, virbuild_simplify_
 	}
 }
 
+/* A single-use memcmp result tested against zero needs only byte equality.
+ * Replace the call at its own position so intervening stores cannot move
+ * ahead of the read. The compared word is exactly the requested length. */
+static void virbuild_literal_memcmp_fold(codegen_context *e, const virbuild_simplify_state *S, uint32_t q)
+{
+	virbuild_context *V = e->vir_builder;
+	vir_insn cmp = V->insns[q].insn;
+	int64_t zero, size;
+	bool branch = cmp.op == VIR_OP_BRIF;
+	if (!branch && (cmp.flags > 1 || !virbuild_value_integer_constant(V, cmp.b, &zero) || zero))
+		return;
+	uint32_t trunc = virbuild_value_resolve(V, cmp.a);
+	if (trunc >= S->constant_start || S->use_counts[trunc] != 1 || V->insns[trunc].insn.op != VIR_OP_TRUNC)
+		return;
+	uint32_t id = virbuild_value_resolve(V, V->insns[trunc].insn.a);
+	vir_insn call = V->insns[id].insn;
+	if (id >= S->constant_start || S->use_counts[id] != 1 || call.op != VIR_OP_CALL || V->extra[call.c] != 3)
+		return;
+	vir_insn fn = V->insns[call.a].insn;
+	if (fn.op != VIR_OP_SYMADDR || CODEGEN_REFERENCE_KIND(fn.a) != CODEGEN_REFERENCE_SYMBOL || fn.b || fn.c)
+		return;
+	cc *c = e->compile_context;
+	uint32_t symid = CODEGEN_REFERENCE_INDEX(fn.a);
+	const sym *y = &c->syms[symid];
+	if (!CODEGEN_IDENTIFIER_IS(y->name, "memcmp") || y->kind != AST_SYMBOL_FUNCTION || y->body ||
+	    y->sc == AST_STORAGE_STATIC || !(y->flags & AST_SYMBOL_FLAG_GLOBAL) ||
+	    codegen_symbol_attributes(c, symid)->asmname || e->unit->options->no_builtin)
+		return;
+	for (unsigned i = 0; i < CC_DISABLED_BUILTIN_WORDS; i++)
+		if (e->unit->options->disabled_builtins[i])
+			return;
+	const ctype *ft = T(c, y->ty);
+	if (ft->kind != AST_TYPE_FUNCTION || ft->n != 3 || (ft->flags & (AST_TYPE_FLAG_NO_PROTOTYPE | AST_TYPE_FLAG_VARIADIC)) ||
+	    KIND(c, ft->base) != AST_TYPE_INT || !codegen_type_is_pointer(c, c->params[ft->aux]) ||
+	    !codegen_type_is_pointer(c, c->params[ft->aux + 1]) ||
+	    KIND(c, T(c, c->params[ft->aux])->base) != AST_TYPE_VOID ||
+	    KIND(c, T(c, c->params[ft->aux + 1])->base) != AST_TYPE_VOID ||
+	    KIND(c, c->params[ft->aux + 2]) != (CODEGEN_IS_WIN64(c) ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_UNSIGNED_LONG) ||
+	    !virbuild_value_integer_constant(V, V->extra[call.c + 3], &size) ||
+	    (size != 1 && size != 2 && size != 4 && size != 8))
+		return;
+	for (unsigned side = 0; side < 2; side++) {
+		uint32_t ptr = V->extra[call.c + 1 + side];
+		vir_insn literal = V->insns[V->extra[call.c + 2 - side]].insn;
+		if (V->insns[ptr].insn.type != VIR_TYPE_PTR || literal.op != VIR_OP_SYMADDR ||
+		    CODEGEN_REFERENCE_KIND(literal.a) != CODEGEN_REFERENCE_STRING || literal.b || literal.c)
+			continue;
+		const cstr *str = &c->strs[CODEGEN_REFERENCE_INDEX(literal.a)];
+		if (str->esz != 1 || size > str->n)
+			continue;
+		uint64_t bits = 0;
+		for (int i = 0; i < size; i++)
+			bits |= (uint64_t)(unsigned char)str->s[i] << (8 * i);
+		uint32_t type = size == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
+		uint32_t value = virbuild_constant_integer(e, type, bits);
+		V->insns[id].insn = (vir_insn){ VIR_OP_LOAD, type, size == 8 ? 3 : size == 4 ? 2 : size == 2, ptr, 0, 0 };
+		if (branch) {
+			V->insns[trunc].insn = (vir_insn){ VIR_OP_ICMP, VIR_TYPE_I32, 1, id, value, 0 };
+		} else {
+			V->insns[trunc].insn = (vir_insn){ VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0 };
+			V->insns[q].insn.a = id;
+			V->insns[q].insn.b = value;
+		}
+		return;
+	}
+}
+
 VPRIV void virbuild_function_simplify(codegen_context *e)
 {
 	virbuild_context *V = e->vir_builder;
 	virbuild_simplify_state S = { 0 };
 	uint32_t *stk, ns = 0;
+	bool has_memcmp = false;
 
 	S.constant_start = V->insn_count;
 	S.use_counts = calloc(2 * ((size_t)S.constant_start + 1), sizeof *S.use_counts);
@@ -86,6 +154,11 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
 			if (virbuild_value_resolve(V, x) == x &&
 			    !virbuild_promote_store_is_dead(V, x)) {
 				VIRBUILD_FOR_EACH_OPERAND(V, x, o, virbuild_use_count_increment(V, &S, virbuild_value_resolve(V, *o)));
+				if (!has_memcmp && V->insns[x].insn.op == VIR_OP_CALL) {
+					vir_insn fn = V->insns[virbuild_value_resolve(V, V->insns[x].insn.a)].insn;
+					if (fn.op == VIR_OP_SYMADDR && CODEGEN_REFERENCE_KIND(fn.a) == CODEGEN_REFERENCE_SYMBOL)
+						has_memcmp = CODEGEN_IDENTIFIER_IS(e->compile_context->syms[CODEGEN_REFERENCE_INDEX(fn.a)].name, "memcmp");
+				}
 				if (V->insns[x].insn.op == VIR_OP_I2P) pointer_copies[virbuild_value_resolve(V, V->insns[x].insn.a)]++;
 			}
 			if (!q)
@@ -155,6 +228,15 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
 				stk[ns++] = x;
 		});
 		V->forward[q] = virbuild_simplify_undefined_value(e, &S, V->insns[q].insn.type);
+	}
+	for (uint32_t i = 0; has_memcmp && i < V->block_order_count; i++) {
+		const virbuild_preir_block *block = &V->blocks[V->block_order[i]];
+		for (uint32_t q = block->first_insn; q; q = V->insns[q].next)
+			if (V->insns[q].insn.op == VIR_OP_ICMP && V->forward[q] == q)
+				virbuild_literal_memcmp_fold(e, &S, q);
+		uint32_t term = block->terminator;
+		if (term && V->insns[term].insn.op == VIR_OP_BRIF)
+			virbuild_literal_memcmp_fold(e, &S, term);
 	}
 	free(S.value_table), free(S.table_log), free(S.end_generations), free(S.constant_table);
 	free(S.immediate_dominators), free(S.dominator_first_child), free(S.dominator_next_sibling);

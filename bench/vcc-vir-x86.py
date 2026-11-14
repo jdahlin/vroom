@@ -107,6 +107,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_inline.c', {'work'}, {}),
         ('vir_inline_context.c', {'wrapped', 'layer1', 'layer2', 'constant0', 'constant1', 'general', 'ignored0', 'ignored1'}, {}),
         ('vir_inline_large.c', {'helper', 'large', 'reference'}, {}),
+        ('vir_short_memcmp.c', {'word', 'reversed', 'ordered', 'changed'}, {}),
         ('vir_slot_width.c', {'mix32', 'signed32', 'mix16', 'mix8', 'loop32'}, {}),
         ('vir_pointer_load.c', {'chain', 'bits', 'mixed', 'alias', 'across', 'volatile_root'}, {}),
         ('vir_x86_nsw_index.c', {'be16p', 'be16cast', 'be32cast', 'be64cast', 'load4signed', 'store4signed', 'shared', 'keep_input', 'rawshift', 'vol', 'min32', 'min64', 'clean16', 'clean8', 'change', 'pressure_indices'}, {}),
@@ -150,6 +151,11 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     wide = re.search(r'movups\s+[^\n]*\([^)]*\),', body)
                     if bool(wide) != (vec != '0' and name in ('one_vector', 'with_tail')):
                         raise SystemExit(f'{name}: unexpected byte reduction load width')
+            if filename == 'vir_short_memcmp.c':
+                for name in required_more:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    if ('memcmp' in body) != (name == 'ordered'):
+                        raise SystemExit(f'{name}: unexpected memcmp lowering')
             if filename == 'vir_slot_width.c':
                 for name in ('mix32', 'signed32', 'mix16', 'mix8'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
