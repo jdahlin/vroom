@@ -1374,6 +1374,30 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling x86 register parsing (2026-11-14).** The prior
+eight-compile profile showed 5.01M more exclusive cycles in libc strcmp
+per compile for self-hosted vcc. In fresh call-chain profiles covering five compiles per
+binary, its largest caller difference was x64_reg. Clang unrolled the
+legacy GPR name scan into immediate comparisons (`cmp $0x786172,%eax` for
+rax). Vcc called strcmp up to 36 times before considering numbered or SIMD
+registers. Decode the legacy aliases by width and register letters instead.
+At a period of 75,001 cycles, strcmp samples directly from x64_reg went
+from 248 to 1 self-hosted and stayed at zero clang-built. Samples with
+x64_reg anywhere on the stack went from 463 to 123 and 170 to 123,
+respectively (sampled estimates, five compiles total per binary).
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.35 ms | 189.40 ms |
+| Clang-built vcc CPU time | 143.20 ms | 142.90 ms |
+| Self-hosted / clang-built | 1.336× | 1.325× |
+| Self-hosted retired instructions | 2.1758B | 2.1517B |
+| Clang-built retired instructions | 1.2430B | 1.2414B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+All four compilers emitted the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`), and a linked recursive SQL query returned 500500.
+
 **SQLite after profiling x86 branch operands (2026-11-14).** On eight
 single-emitter SQLite 3.50.4 compiles per binary, the largest attributable
 exclusive cycle gap was in `codegen_chunks_commit`, which inlines

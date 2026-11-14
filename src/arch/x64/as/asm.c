@@ -9,13 +9,43 @@
 
 /* ---------------------------------------------------------------- operands */
 
+/* The first eight GPRs have a two-letter word name, reused by the
+ * 32/64-bit forms. Their byte names are AL..BH and SPL..DIL. */
+static int x64_legacy_gpr(const char *b, size_t n, XOp *o)
+{
+	if (n < 2 || n > 3) return -1;
+	int size = 2;
+	if (n == 3 && (*b == 'r' || *b == 'e')) {
+		size = *b++ == 'r' ? 8 : 4;
+	} else if (n == 3) {
+		if (b[2] != 'l') return -1;
+		size = 1;
+	}
+	unsigned reg;
+	switch (b[0]) {
+	case 'a': reg = 0; break;
+	case 'c': reg = 1; break;
+	case 'd': reg = b[1] == 'i' ? 7 : 2; break;
+	case 'b': reg = b[1] == 'p' ? 5 : 3; break;
+	case 's': reg = b[1] == 'i' ? 6 : 4; break;
+	default: return -1;
+	}
+	if (reg < 4) {
+		if (n == 2 && (b[1] == 'h' || b[1] == 'l')) {
+			size = 1;
+			if (b[1] == 'h') { reg += 4; o->hi8 = 1; }
+		} else if (b[1] != 'x' || size == 1) return -1;
+	} else {
+		if (b[1] != (reg < 6 ? 'p' : 'i')) return -1;
+		o->needrex = size == 1;
+	}
+	o->reg = reg;
+	o->size = size;
+	return 0;
+}
+
 static int x64_regname(const char *s, size_t n, XOp *o)
 {
-	static const char *const r64[] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi" };
-	static const char *const r32[] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
-	static const char *const r16[] = { "ax", "cx", "dx", "bx", "sp", "bp", "si", "di" };
-	static const char *const r8[] = { "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil" };
-	static const char *const r8h[] = { "ah", "ch", "dh", "bh" };
 	char b[16];
 
 	if (n >= sizeof b)
@@ -26,14 +56,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 	o->cls = XR_GPR;
 	o->hi8 = 0;
 	o->needrex = 0;
-	for (int i = 0; i < 8; i++) {
-		if (!strcmp(b, r64[i])) { o->reg = (uint8_t)i, o->size = 8; return 0; }
-		if (!strcmp(b, r32[i])) { o->reg = (uint8_t)i, o->size = 4; return 0; }
-		if (!strcmp(b, r16[i])) { o->reg = (uint8_t)i, o->size = 2; return 0; }
-		if (!strcmp(b, r8[i])) { o->reg = (uint8_t)i, o->size = 1, o->needrex = i >= 4; return 0; }
-	}
-	for (int i = 0; i < 4; i++)
-		if (!strcmp(b, r8h[i])) { o->reg = (uint8_t)(i + 4), o->size = 1, o->hi8 = 1; return 0; }
+	if (!x64_legacy_gpr(b, n, o)) return 0;
 	if (b[0] == 'r' && as_char_is_digit((unsigned char)b[1])) {
 		int r = atoi(b + 1);
 		const char *t = b + 1;
