@@ -147,6 +147,17 @@ VPRIV bool x64_vir_value_is_sign_extended(x64_vir_context *L,uint32_t v)
 	return x64_vir_value_upper_half_is_clear(L->function,v) && !(vir_value_possible_bits(L->function,v,8)>>31);
 }
 
+/* Fold a frame operand into the memory record. Keeping it as a frame
+ * reference lets frame layout select the base even for realigned locals. */
+VPRIV codegen_lvalue x64_vir_memory_operand(x64_vir_context *L, uint32_t value, int reg)
+{
+	const vir_insn *addr = &L->function->insns[value];
+	if (x64_vir_is_frame_operand(L->function, value))
+		return (codegen_lvalue){ .kind = CODEGEN_LVALUE_FRAME,
+			.offset = L->slot[addr->a] + x64_vir_constant_bits(addr) };
+	return (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = reg };
+}
+
 /* Small constant blocks do not need REP's fixed registers or their clobbers.
  * SSE2 handles complete 16-byte pieces; scalar tails never overread. */
 VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int dst,int src)
@@ -158,12 +169,17 @@ VPRIV void x64_vir_memory_block_lower(x64_vir_context *L,const vir_insn *i,int d
 		if(n>=16)x64_record_emit_three_registers(e,X64_OP_FXOR,16,XMM0+14,XMM0+14,XMM0+14);
 		if(n&15)x64_record_emit_move_immediate(e,L->general_temporary,0);
 	}
+	codegen_lvalue to = x64_vir_memory_operand(L, i->a, dst), from = { 0 };
+	if (copy) from = x64_vir_memory_operand(L, i->b, src);
 	for(uint64_t off=0;off<n;) {
 		unsigned width=n-off>=16?16:n-off>=8?8:n-off>=4?4:n-off>=2?2:1;
 		int scratch=width==16?XMM0+14:L->general_temporary;
-		codegen_lvalue from={.kind=CODEGEN_LVALUE_REGISTER,.register_number=src,.offset=(int64_t)off},to={.kind=CODEGEN_LVALUE_REGISTER,.register_number=dst,.offset=(int64_t)off};
+
 		if(copy)x64_record_emit_memory(e,X64_OP_LD,width,scratch,&from,false);
-		x64_record_emit_memory(e,X64_OP_ST,width,scratch,&to,false);off+=width;
+		x64_record_emit_memory(e,X64_OP_ST,width,scratch,&to,false);
+		from.offset += width;
+		to.offset += width;
+		off += width;
 	}
 }
 

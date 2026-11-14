@@ -1374,6 +1374,32 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Frame operands and two-word records on SQLite (2026-11-14).**
+The x86 VIR path repeatedly computed a local address with LEA immediately
+before reading it or copying a record. The static counts of RSP-relative
+LEAs in `as_snippet_assemble`, `walk_value_emit` and `x64_record_effects`
+were 351, 36 and 21; Clang emitted 4, 2 and 0. Let the allocator leave an
+in-slot constant address in the memory operand of a load, test, comparison,
+short copy or zero fill. The counts fell to 117, 13 and 0.
+
+`cc_primary_parse` initialized two words on the stack and reloaded them with
+MOVUPS for a 16-byte copy into the parser arena. Exposing the two fields to
+promotion when either copy operand is a local lets VIR store both words
+directly into the arena. A trial forcing scalar moves for all small copies
+added 16M retired instructions with no time gain and was discarded.
+
+| SQLite 3.50.4 median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 163.95 / 162.30 ms | 134.25 / 134.04 ms | 1.221× / 1.211× |
+| 21 runs alternating order | 166.49 / 165.55 ms | 136.84 / 137.36 ms | 1.217× / 1.205× |
+
+One worker on CPU 7, ordinary builds, one warm-up per binary. Self-hosted
+vcc retired 16.0–16.4M fewer instructions. Five compiles sampled every
+75,001 user cycles gave 507 → 337 exclusive samples in `cc_primary_parse`
+and 390 → 339 in `walk_value_emit`; `as_snippet_assemble` was flat
+(456 → 457). All four binaries produced the same SQLite object
+(SHA-256 prefix `c4d3896fefc9`); the recursive-query smoke test passed.
+
 **Forwarding small record initializers to their destination (2026-11-14).**
 On the SQLite 3.50.4 compile, 78% of the self-hosted cycle samples in
 `walk_lvalue_load` landed on the copy out of a freshly initialized stack

@@ -247,6 +247,17 @@ VPRIV int virbuild_laddr(codegen_context *e, const codegen_lvalue *l)
 	return r;
 }
 
+static uint32_t virbuild_copy_high_word(codegen_context *e, uint32_t value)
+{
+	vir_insn base = e->vir_builder->insns[value].insn;
+	if (base.op == VIR_OP_SLOTADDR) {
+		uint64_t offset = (uint64_t)base.c << 32 | base.b;
+		return virbuild_slot_address(e, base.a, (int64_t)(offset + 8));
+	}
+	return virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, value,
+				    virbuild_constant_integer(e, VIR_TYPE_I64, 8), 0);
+}
+
 VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 {
 	uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR), s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
@@ -256,17 +267,12 @@ VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 
 		virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d, virbuild_insn_append(e, VIR_OP_LOAD, n == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32, fl, s, 0, 0), 0);
 	} else if (n == 16 && !e->volatile_untag_depth &&
-		   e->vir_builder->insns[s].insn.op == VIR_OP_SLOTADDR &&
-		   e->vir_builder->insns[d].insn.op == VIR_OP_SLOTADDR) {
-		/* The walker represents wide integers as two machine words.
-		 * Expose both fields to slot promotion instead of copying
-		 * through memory between their producers and consumers. */
+		   (e->vir_builder->insns[s].insn.op == VIR_OP_SLOTADDR ||
+		    e->vir_builder->insns[d].insn.op == VIR_OP_SLOTADDR)) {
+		/* A local on either side can become two SSA fields. Read both
+		 * words before writing either, including for self-assignment. */
 		uint32_t fl = virbuild_memory_flags_make(8, 1, false);
-		vir_insn src = e->vir_builder->insns[s].insn, dst = e->vir_builder->insns[d].insn;
-		uint64_t src_offset = (uint64_t)src.b | (uint64_t)src.c << 32;
-		uint64_t dst_offset = (uint64_t)dst.b | (uint64_t)dst.c << 32;
-		uint32_t sh = virbuild_slot_address(e, src.a, (int64_t)(src_offset + 8));
-		uint32_t dh = virbuild_slot_address(e, dst.a, (int64_t)(dst_offset + 8));
+		uint32_t sh = virbuild_copy_high_word(e, s), dh = virbuild_copy_high_word(e, d);
 		uint32_t lo = virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I64, fl, s, 0, 0);
 		uint32_t hi = virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I64, fl, sh, 0, 0);
 

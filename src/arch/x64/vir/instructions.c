@@ -2,6 +2,21 @@
 
 #include "lowering-internal.h"
 
+/* Carry a folded load address through its comparison or endian conversion. */
+static void x64_vir_load_address(x64_vir_context *L, uint32_t value, int reg)
+{
+	if (L->memory_value == value) {
+		L->memory_value = 0;
+		return;
+	}
+	codegen_lvalue at = x64_vir_memory_operand(L, value, reg);
+	uint32_t reference;
+	L->memory_base = x64_memory_base_register(L->context, &at, &reference);
+	L->memory_offset = at.offset;
+	L->memory_is_indexed = false;
+	L->memory_shift = 0;
+}
+
 VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const uint8_t *p, uint32_t n, uint8_t res)
 {
 	codegen_context *e = L->context;
@@ -49,8 +64,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		    x64_vir_value_immediate(L->function,cmp->b,&zero) && !zero)) &&
 		   x64_vir_fold_edits_check(L,b,v+1,X64_REGISTER_NONE) && x64_vir_fold_edits_check(L,b,v+2,X64_REGISTER_NONE)) {
 			L->test_value=v+2;L->test_size=1<<VIR_INSN_FLAG_WIDTH_LOG2(i->flags);L->test_immediate=k;
-			if(L->memory_value==i->a)L->memory_value=0;
-			else {L->memory_base=a;L->memory_offset=0;L->memory_is_indexed=false;L->memory_shift=0;}
+			x64_vir_load_address(L, i->a, a);
 			return;
 		}
 	}
@@ -73,19 +87,17 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		}
 		if(ok) {
 			L->compare_memory_value=v+1;L->compare_memory_size=width;L->compare_memory_side=side;
-			if(L->memory_value==i->a)L->memory_value=0;
-			else {L->memory_base=a;L->memory_offset=0;L->memory_is_indexed=false;L->memory_shift=0;}
+			x64_vir_load_address(L, i->a, a);
 			return;
 		}
 	}
 	if(i->op==VIR_OP_LOAD) {
 		uint32_t end;unsigned width=x64_vir_word_read_match(L,b,v,&end);
 		if(width) {
-			L->big_endian_value=end;L->big_endian_width=width;L->big_endian_base=a;L->big_endian_offset=0;L->big_endian_is_indexed=false;
-			if(L->memory_value==i->a) {
-				L->big_endian_base=L->memory_base;L->big_endian_offset=L->memory_offset;L->big_endian_is_indexed=L->memory_is_indexed;
-				L->big_endian_index=L->memory_index;L->big_endian_shift=L->memory_shift;L->memory_value=0;
-			}
+			x64_vir_load_address(L, i->a, a);
+			L->big_endian_value=end;L->big_endian_width=width;
+			L->big_endian_base=L->memory_base;L->big_endian_offset=L->memory_offset;L->big_endian_is_indexed=L->memory_is_indexed;
+			L->big_endian_index=L->memory_index;L->big_endian_shift=L->memory_shift;
 			return;
 		}
 	}
@@ -258,12 +270,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		return;
 	}
 	case VIR_OP_ALOAD: case VIR_OP_LOAD: case VIR_OP_STORE: {
-		codegen_lvalue at = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = a };
-		const vir_insn *addr = &L->function->insns[i->a];
-		if (i->op == VIR_OP_STORE && addr->op == VIR_OP_SLOTADDR) {
-			at.kind = CODEGEN_LVALUE_FRAME;
-			at.offset = L->slot[addr->a] + x64_vir_constant_bits(addr);
-		}
+		codegen_lvalue at = x64_vir_memory_operand(L, i->a, a);
 		bool folded=L->memory_value==i->a;
 		if(folded) {at.register_number=L->memory_base;at.offset=L->memory_offset;L->memory_value=0;}
 		bool load = i->op != VIR_OP_STORE;

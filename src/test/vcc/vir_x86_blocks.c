@@ -9,7 +9,21 @@ NI void nonzero(void *d) {__builtin_memset(d,-37,24);}
 NI void lowzero(void *d) {__builtin_memset(d,256,17);}
 NI int readbyte(const unsigned char *p,unsigned i) {return p[i];}
 NI int zero_local(unsigned i) {unsigned char data[256]={0};return readbyte(data,i);}
+struct words { unsigned long lo, hi; };
+NI unsigned long frame_words(struct words *out, unsigned long x) {
+ struct words local = { x, ~x };
+ *out = local;
+ return local.hi;
+}
+NI int frame_test(unsigned char x) {
+ unsigned char data[24] = {0};
+ copy24(data, (unsigned char[24]){[9] = x});
+ return (data[9] & 8) != 0;
+}
 int main(void) {
+ struct words w;
+ if(frame_words(&w,43) != ~43UL || w.lo != 43 || w.hi != ~43UL)return 7;
+ if(frame_test(0) || !frame_test(8))return 8;
  unsigned char s[540],d[540];
  void (*copies[])(void *,const void *)={copy0,copy1,copy2,copy3,copy7,copy8,copy15,copy16,
   copy17,copy24,copy31,copy32,copy63,copy64,copy65,copy127,copy128,copy129};
