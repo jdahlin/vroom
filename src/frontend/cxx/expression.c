@@ -1670,6 +1670,8 @@ static void cxx_postfix_expression_parse1(cxx *c)
 						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))) {
 					/* an object of class type: its operator() (the arguments as parsed: typing the call may
 					   instantiate its body, whose own calls reuse c->ncargs and c->carg_nodes) */
+					if (!callee_node && c->gen)
+						callee_node = cxx_gen_empty_object(c, callee, c->tok[c->pos ? c->pos - 1 : 0].loc);
 					cxx_gen_operator_call(c, callee_node, on_nodes, on_args, c->tok[c->pos ? c->pos - 1 : 0].loc);
 				}
 				else {

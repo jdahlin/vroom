@@ -1486,3 +1486,13 @@ När en destruktors kropp begärs begärs först kropparna för de destruktorer 
 och basers klasser): de tolkas före, inte inifrån dess kodgenerering (som bröt den yttre).
 `basic_json<..., long double>::data::~data` byggs nu; long double (x87, binary128) i genererad kod.  cxx-run 51/51; cxx-fork 69/70, 5,2 s CPU
 (46,7x), 2 666 funktioner från vcc (från 2 551).
+
+### Status (61): decltype-returtyper (DT), json:s egen enable_if_t, T::namn (2026-11-14)
+En funktionsmall med efterställd `-> decltype(e)` får clangs namn: `DT <uttryck> E` ur tokens (komma
+`cm`, anrop `cl ... E`, funktionsparametrar `fp_`, `fp0_`, en namnrymds variabel `L_Z...E`, olösta
+namn `sr`, `T()` som `cv<typ>_E`).  Tn: ett biblioteks eget alias för enable_if bakom namnrymder
+(`nlohmann::detail::enable_if_t`), `T::namn` som `N T_ <namn> E` (en egen kandidat), och en
+konstruktormalls prefix (`...C2`) är en substitutionskandidat.  Ett anropat objekt av tom klass utan
+nod (json:s `::nlohmann::to_json`, en constexpr-referens till ett funktionsobjekt) blir ett temporärt
+objekt av klassen.  Gissade namn i unit-testsuites 221 -> 174; json:s konstruktor `basic_json(T&&)`
+och `adl_serializer::to_json` har clangs namn.  cxx-run 52/52; cxx-fork 69/70, 2 725 funktioner.

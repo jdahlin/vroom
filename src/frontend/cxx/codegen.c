@@ -1561,6 +1561,20 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 	c->enode = cc_cast_insert(a, x, QUNQ(to), cc_conversion_cast_kind(a, AST_NODE_AT(a, x)->ty, QUNQ(to), x));
 }
 
+/* an object of an empty class with no node (a constexpr reference to a function object, json's to_json):
+   a temporary of it does as well, nothing in it being read (0: not an empty class) */
+VPRIV uint32_t cxx_gen_empty_object(cxx *c, qty t, uint32_t loc)
+{
+	bool pod, empty;
+	uint32_t tmp;
+
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY ||
+	    !cxx_class_layout_info(c, QUNQ(t), &pod, &empty) || !empty || !pod)
+		return 0;
+	tmp = cxx_gen_temporary(c, QUNQ(t), loc);
+	return tmp ? cxx_gen_var_node(c, tmp, loc) : 0;
+}
+
 /* nullptr: a null void pointer (it converts to any pointer type) */
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc)
 {

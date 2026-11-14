@@ -174,7 +174,7 @@ static const char *mg_value_type(cxx_mangler *m, const cxx_scope *ps, uint32_t i
  * sizeof(T), integer literals and [ns::]X<args>::value / [ns::]x_v<args> (unresolved names, sr ... E).
  * False: another form (the caller's name is then a guess of vcc's).
  */
-typedef struct { cxx_mangler *m; uint32_t p, e; bool own; } mg_tok;	/* own: the function template's parameters were named (else no Tn) */
+typedef struct { cxx_mangler *m; uint32_t p, e; bool own; uint32_t fp[16]; uint32_t nfp; } mg_tok;	/* fp: a decltype's function parameters (their names) */	/* own: the function template's parameters were named (else no Tn) */
 
 static const cxx_token *mt_t(mg_tok *k) { return k->p < k->e ? &k->m->c->tok[k->p] : NULL; }
 static bool mt_is(mg_tok *k, int kind) { const cxx_token *t = mt_t(k); return t && t->kind == kind; }
@@ -213,6 +213,58 @@ static int mt_tparam(mg_tok *k)
 static bool mt_type(mg_tok *k);
 static bool mt_expr(mg_tok *k);
 
+/* [::]ns::...::v naming a namespace's variable (not a function, nothing dependent): L <its mangled name> E */
+static bool mt_resolved_variable(mg_tok *k)
+{
+	cxx *c = k->m->c;
+	uint32_t p = k->p;
+	cxx_scope *sc = NULL;
+	cxx_entity *e = NULL;
+	bool qualified = false;
+
+	if (c->tok[p].kind == LEX_TOKEN_COLON_COLON)
+		sc = c->global, p++, qualified = true;
+	while (p < k->e && c->tok[p].kind == LEX_TOKEN_IDENTIFIER) {
+		uint32_t id = c->tok[p].id;
+
+		if (!sc) {
+			for (const cxx_scope *s = k->m->tps; s && !e; s = s->parent)
+				e = cxx_lookup_in(c, (cxx_scope *)s, id, 0);
+		} else
+			e = cxx_lookup_in(c, sc, id, 0);
+		p++;
+		if (p + 1 < k->e && c->tok[p].kind == LEX_TOKEN_COLON_COLON) {
+			while (e && e->kind != CXX_ENTITY_NAMESPACE)
+				e = e->next;
+			if (!e || !e->members)
+				return false;
+			sc = e->members, e = NULL, p++, qualified = true;
+			continue;
+		}
+		break;
+	}
+	if (!qualified || !e || e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) == TY_FUNC || e->next ||
+	    !e->home || (p < k->e && c->tok[p].kind == LEX_TOKEN_LESS))
+		return false;
+	mg_str(k->m, "L_Z");
+	if (mg_nested(k->m, e->home)) {
+		mg_str(k->m, "N");
+		mg_prefix(k->m, e->home);
+		mg_source_name(k->m, e->name);
+		mg_str(k->m, "E");
+	} else {
+		if (mg_scope_is_std(k->m, e->home))
+			mg_str(k->m, "St");
+		mg_source_name(k->m, e->name);
+	}
+	mg_str(k->m, "E");
+	k->p = p;
+	return true;
+}
+
+static bool mt_binary(mg_tok *k, int level);
+
+
 /* a builtin type written as words */
 static const char *mt_builtin(mg_tok *k)
 {
@@ -228,7 +280,11 @@ static const char *mt_builtin(mg_tok *k)
 
 static bool mt_type(mg_tok *k)
 {
-	int i = mt_tparam(k);
+	int i;
+
+	if (mt_word(k, "typename"))
+		k->p++;
+	i = mt_tparam(k);
 	const char *bt;
 
 	if (i < 0 && mt_t(k) && mt_t(k)->kind == LEX_TOKEN_IDENTIFIER && k->m->tps) {
@@ -243,6 +299,24 @@ static bool mt_type(mg_tok *k)
 			mg_type(k->m, e->ty);
 			return true;
 		}
+	}
+	if (i >= 0 && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON && k->m->c->tok[k->p + 2].kind == LEX_TOKEN_IDENTIFIER &&
+	    k->m->tph && (uint32_t)i < k->m->ntph && k->m->tph[i]) {
+		/* T::name (a member type of a template parameter): N T_ <name> E */
+		const qty *ph = k->m->ph;
+		uint32_t nph = k->m->nph;
+
+		k->own = true;
+		mg_str(k->m, "N");
+		k->m->ph = k->m->tph, k->m->nph = k->m->ntph;
+		mg_type(k->m, k->m->tph[i]);
+		k->m->ph = ph, k->m->nph = nph;
+		k->p += 2;
+		mt_src(k->m, mt_t(k));
+		mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[k->p], 0);	/* (T::name: a candidate of its own) */
+		k->p++;
+		mg_str(k->m, "E");
+		return true;
 	}
 	if (i >= 0) {
 		k->own = true;
@@ -334,6 +408,34 @@ static bool mt_primary(mg_tok *k)
 		k->p++;
 		return true;
 	}
+	if (t->kind == LEX_TOKEN_IDENTIFIER)
+		for (uint32_t j = 0; j < k->nfp; j++)
+			if (k->fp[j] == t->id) {	/* a function parameter: fp_, fp0_, ... */
+				char num[16];
+
+				k->p++;
+				if (j)
+					mg_text(k->m, num, (size_t)snprintf(num, sizeof num, "fp%u_", j - 1));
+				else
+					mg_str(k->m, "fp_");
+				return true;
+			}
+	if (k->nfp && t->kind == LEX_TOKEN_IDENTIFIER && (mt_builtin(k) && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_LEFT_PAREN &&
+							  k->m->c->tok[k->p + 2].kind == LEX_TOKEN_RIGHT_PAREN)) {
+		/* T(): cv <type> _ E */
+		mg_str(k->m, "cv");
+		mg_str(k->m, mt_builtin(k));
+		mg_str(k->m, "_E");
+		k->p += 3;
+		return true;
+	}
+	if (k->nfp && (t->kind == LEX_TOKEN_COLON_COLON || t->kind == LEX_TOKEN_IDENTIFIER) && mt_resolved_variable(k))
+		return true;
+	if (k->nfp && t->kind == LEX_TOKEN_IDENTIFIER && mt_tparam(k) < 0 && k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_LEFT_PAREN) {
+		mt_src(k->m, t);	/* an unqualified name called (found by argument-dependent lookup) */
+		k->p++;
+		return true;
+	}
 	if (t->kind != LEX_TOKEN_IDENTIFIER || mt_tparam(k) >= 0)
 		return false;
 	/* [ns::]... X<args>::value (sr <levels> E <name>), or [ns::] x<args> (sr <levels> E <name><args>) */
@@ -408,7 +510,36 @@ static bool mt_unary(mg_tok *k)
 		mg_str(k->m, "nt");
 		return mt_unary(k);
 	}
-	return mt_primary(k);
+	{
+		size_t mark = k->m->n;
+
+		if (!mt_primary(k))
+			return false;
+		while (k->nfp && mt_is(k, LEX_TOKEN_LEFT_PAREN)) {
+			/* a call: cl <callee> <args> E */
+			char callee[1024];
+			size_t cl = k->m->n - mark;
+
+			if (cl >= sizeof callee)
+				return false;
+			memcpy(callee, k->m->b + mark, cl);
+			k->m->n = mark;
+			mg_str(k->m, "cl");
+			mg_text(k->m, callee, cl);
+			k->p++;
+			while (!mt_is(k, LEX_TOKEN_RIGHT_PAREN)) {
+				if (!mt_binary(k, 0))
+					return false;
+				if (mt_is(k, LEX_TOKEN_COMMA))
+					k->p++;
+				else if (!mt_is(k, LEX_TOKEN_RIGHT_PAREN))
+					return false;
+			}
+			k->p++;
+			mg_str(k->m, "E");
+		}
+		return true;
+	}
 }
 
 /* binary operators, by precedence: their codes written before both operands */
@@ -452,11 +583,145 @@ static bool mt_binary(mg_tok *k, int level)
 
 static bool mt_expr(mg_tok *k) { return mt_binary(k, 0); }
 
+/*
+ * A function template's trailing return type decltype(e): DT <expression> E, e from its tokens (commas,
+ * calls, its function parameters fp_ ..., namespace variables, unresolved names, T()).  False: not that
+ * form (the caller then mangles the evaluated type and calls the name a guess).
+ */
+static bool mg_decltype_return(cxx_mangler *m, uint32_t pos)
+{
+	cxx *c = m->c;
+	mg_tok k = { m, pos, c->ntok, false, { 0 }, 0 };
+	size_t save_n = m->n;
+	uint32_t save_subs = m->nsubs, p, open = 0, depth = 0;
+
+	if (!pos)
+		return false;
+	/* the declarator's parameters: the first ( at depth 0 after a name, its parameters' names */
+	for (p = pos; p < c->ntok && p < pos + 512; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_BRACE || kd == LEX_TOKEN_SEMICOLON)
+			return false;
+		if (kd == LEX_TOKEN_LESS)
+			depth++;
+		else if (kd == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p > pos) {
+			const cxx_token *prev = &c->tok[p - 1];
+
+			if (prev->kind == LEX_TOKEN_IDENTIFIER && !(prev->len == 8 && !memcmp(prev->s, "operator", 8)) &&
+			    !(prev->len == 8 && !memcmp(prev->s, "decltype", 8)) && !(prev->len == 8 && !memcmp(prev->s, "noexcept", 8))) {
+				open = p;
+				break;
+			}
+			if (prev->kind == LEX_TOKEN_RIGHT_PAREN && p >= pos + 3 && c->tok[p - 2].kind == LEX_TOKEN_LEFT_PAREN &&
+			    c->tok[p - 3].len == 8 && !memcmp(c->tok[p - 3].s, "operator", 8)) {
+				open = p;	/* operator()( */
+				break;
+			}
+		}
+	}
+	if (!open)
+		return false;
+	{
+		int d = 0;
+		uint32_t last = 0;
+
+		for (p = open + 1; p < c->ntok; p++) {
+			int kd = c->tok[p].kind;
+
+			if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS || kd == LEX_TOKEN_LEFT_SQUARE)
+				d++;
+			else if ((kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_GREATER || kd == LEX_TOKEN_RIGHT_SQUARE) && d)
+				d--;
+			else if (!d && (kd == LEX_TOKEN_COMMA || kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_EQUAL)) {
+				if (last && k.nfp < 16)
+					k.fp[k.nfp++] = c->tok[last].id;
+				else if (!last && kd != LEX_TOKEN_RIGHT_PAREN)
+					return false;	/* (an unnamed parameter: fp numbering not kept here) */
+				last = 0;
+				if (kd == LEX_TOKEN_EQUAL) {	/* (a default argument: up to the next , or )) */
+					int dd = 0;
+
+					for (p++; p < c->ntok; p++) {
+						int x = c->tok[p].kind;
+
+						if (x == LEX_TOKEN_LEFT_PAREN || x == LEX_TOKEN_LESS)
+							dd++;
+						else if ((x == LEX_TOKEN_RIGHT_PAREN || x == LEX_TOKEN_GREATER) && dd)
+							dd--;
+						else if (!dd && (x == LEX_TOKEN_COMMA || x == LEX_TOKEN_RIGHT_PAREN))
+							break;
+					}
+					if (p >= c->ntok || c->tok[p].kind == LEX_TOKEN_RIGHT_PAREN)
+						break;
+					continue;
+				}
+				if (kd == LEX_TOKEN_RIGHT_PAREN)
+					break;
+				continue;
+			}
+			if (!d && kd == LEX_TOKEN_IDENTIFIER)
+				last = p;
+			else if (!d && kd != LEX_TOKEN_IDENTIFIER)
+				last = kd == LEX_TOKEN_AMPERSAND || kd == LEX_TOKEN_AMPERSAND_AMPERSAND || kd == LEX_TOKEN_STAR ? 0 : last;
+		}
+		if (!k.nfp)
+			return false;
+		/* after the parameters: [const] [noexcept(...)] -> decltype ( */
+		for (p++, d = 0; p < c->ntok && p < open + 2048; p++) {
+			int kd = c->tok[p].kind;
+
+			if (kd == LEX_TOKEN_LEFT_PAREN)
+				d++;
+			else if (kd == LEX_TOKEN_RIGHT_PAREN)
+				d--;
+			else if (!d && (kd == LEX_TOKEN_LEFT_BRACE || kd == LEX_TOKEN_SEMICOLON || kd == LEX_TOKEN_EQUAL))
+				return false;
+			else if (!d && kd == LEX_TOKEN_ARROW)
+				break;
+		}
+		if (p + 2 >= c->ntok || c->tok[p].kind != LEX_TOKEN_ARROW || c->tok[p + 1].len != 8 || memcmp(c->tok[p + 1].s, "decltype", 8) ||
+		    c->tok[p + 2].kind != LEX_TOKEN_LEFT_PAREN)
+			return false;
+		k.p = p + 3;
+	}
+	mg_str(m, "DT");
+	{
+		size_t mark = m->n;
+
+		if (!mt_binary(&k, 0))
+			goto bad;
+		while (mt_is(&k, LEX_TOKEN_COMMA)) {
+			char lhs[2048];
+			size_t ll = m->n - mark;
+
+			if (ll >= sizeof lhs)
+				goto bad;
+			memcpy(lhs, m->b + mark, ll);
+			m->n = mark;
+			mg_str(m, "cm");
+			mg_text(m, lhs, ll);
+			k.p++;
+			if (!mt_binary(&k, 0))
+				goto bad;
+		}
+	}
+	if (!mt_is(&k, LEX_TOKEN_RIGHT_PAREN) || m->bad)
+		goto bad;
+	mg_str(m, "E");
+	return true;
+bad:
+	m->n = save_n, m->nsubs = save_subs, m->bad = false;
+	return false;
+}
+
 /* the type's tokens from p: enable_if's forms; *lit: the literal's type code (the second argument) */
 static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, bool *own)
 {
 	cxx *c = m->c;
-	mg_tok k = { m, p, c->ntok, false };
+	mg_tok k = { m, p, c->ntok, false, { 0 }, 0 };
 	bool alias, typename_ = false;
 	cxx_entity *ns, *ei = NULL;
 	size_t save_n = m->n;
@@ -469,6 +734,11 @@ static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, boo
 		k.p++, typename_ = true;
 	if (mt_word(&k, "std") && k.p + 1 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_COLON_COLON)
 		k.p += 2, in_std = true;
+	/* (a library's own alias of std::enable_if behind its namespaces: nlohmann::detail::enable_if_t) */
+	while (!in_std && mt_is(&k, LEX_TOKEN_IDENTIFIER) && k.p + 2 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_COLON_COLON &&
+	       c->tok[k.p + 2].kind == LEX_TOKEN_IDENTIFIER && (k.p + 3 >= k.e || c->tok[k.p + 3].kind == LEX_TOKEN_COLON_COLON ||
+	       (c->tok[k.p + 2].len == 11 && !memcmp(c->tok[k.p + 2].s, "enable_if_t", 11))))
+		k.p += 2;
 	alias = mt_word(&k, "enable_if_t") || mt_word(&k, "__enable_if_t");
 	if (!alias && !typename_)
 		return false;
@@ -1001,7 +1271,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		} else
 			mg_source_name(&m, f->name);
 		mg_abi_tag(&m, f->abi_tag);
-		if (f->is_instance && !(v->len && v->s[0] == ' '))
+		if (f->is_instance)
 			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
 			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
@@ -1025,14 +1295,14 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
 	   among vcc's objects, not clang's name). */
 	uint32_t pack_param = 0;
+	bool dt_guess = false;
 
 	if (f->is_instance) {
 		const qty *ph;
 		uint32_t nph, pp = 0;
 		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph, &pp);
 
-		if (cxx_instance_uses_decltype(c, f))
-			c->mangle_guess = 1;	/* (decltype in its declaration: clang writes the expression, DT ... E) */
+		dt_guess = cxx_instance_uses_decltype(c, f);
 		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
 		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
@@ -1046,8 +1316,23 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		else
 			c->mangle_guess = 1;	/* (the instance's own types: a name of vcc's, not clang's) */
 	}
-	if (f->is_instance && !(v->len && v->s[0] == ' '))
-		mg_type(&m, x->base);
+	if (f->is_instance && !(v->len && v->s[0] == ' ')) {
+		const qty *ph0 = m.ph;
+		uint32_t nph0 = m.nph;
+
+		if (dt_guess) {
+			/* decltype(...) as written: the template's parameters are its placeholders there too */
+			m.ph = m.tph, m.nph = m.ntph;
+			if (mg_decltype_return(&m, cxx_instance_decl_pos(f)))
+				dt_guess = false;
+			else
+				mg_type(&m, x->base);
+			m.ph = ph0, m.nph = nph0;
+		} else
+			mg_type(&m, x->base);
+		if (dt_guess)
+			c->mangle_guess = 1;	/* (decltype in its declaration: clang writes the expression, DT ... E) */
+	}
 	if (!x->n && !(x->flags & TF_VARIADIC))
 		mg_str(&m, "v");
 	for (uint32_t i = 0; i < x->n; i++) {

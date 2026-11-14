@@ -1754,6 +1754,12 @@ VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **
 
 /* does the template's declaration (its return type or parameters) use decltype? (clang mangles the
    expression, DT ... E: not written by vcc yet) */
+/* the template's declaration's first token (its decl-specifiers; 0: not known) */
+VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst)
+{
+	return inst->inst_ftmpl ? inst->inst_ftmpl->pos : 0;
+}
+
 VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst)
 {
 	const cxx_ftemplate *f = inst->inst_ftmpl;
