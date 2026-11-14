@@ -14,6 +14,9 @@ typedef struct cxx_mangler {
 	cxx *c;
 	const qty *ph;		/* a function template instance's signature: its parameters' placeholders, mangled T_, T0_, ... */
 	uint32_t nph;
+	const qty *tph;		/* ... the same for a value parameter's declared type (Tn <type>), while the template arguments are mangled */
+	uint32_t ntph;
+	const cxx_scope *tps;	/* ... and the template's parameters (their names) */
 	char b[2048];
 	size_t n;
 	bool bad;
@@ -164,62 +167,451 @@ static const char *mg_value_type(cxx_mangler *m, const cxx_scope *ps, uint32_t i
 	return NULL;
 }
 
+/*
+ * Tn <type>: a value parameter whose declared type is dependent (clang 23 writes it before the argument).
+ * Mangled from the type's tokens, for the forms libc++ and json use: [typename] [std::](enable_if_t |
+ * __enable_if_t)<E, T> and typename [std::]enable_if<E, T>::type, E made of !, &&, ||, comparisons,
+ * sizeof(T), integer literals and [ns::]X<args>::value / [ns::]x_v<args> (unresolved names, sr ... E).
+ * False: another form (the caller's name is then a guess of vcc's).
+ */
+typedef struct { cxx_mangler *m; uint32_t p, e; } mg_tok;
+
+static const cxx_token *mt_t(mg_tok *k) { return k->p < k->e ? &k->m->c->tok[k->p] : NULL; }
+static bool mt_is(mg_tok *k, int kind) { const cxx_token *t = mt_t(k); return t && t->kind == kind; }
+static bool mt_word(mg_tok *k, const char *w)
+{
+	const cxx_token *t = mt_t(k);
+	size_t l = strlen(w);
+
+	return t && t->kind == LEX_TOKEN_IDENTIFIER && t->len == l && !memcmp(t->s, w, l);
+}
+static void mt_src(cxx_mangler *m, const cxx_token *t)
+{
+	char num[16];
+
+	mg_text(m, num, (size_t)snprintf(num, sizeof num, "%u", (unsigned)t->len));
+	mg_text(m, t->s, t->len);
+}
+
+/* a template parameter's name: its index (-1: not one) */
+static int mt_tparam(mg_tok *k)
+{
+	const cxx_token *t = mt_t(k);
+	const cxx_scope *ps = k->m->tps;
+
+	if (!t || t->kind != LEX_TOKEN_IDENTIFIER || !ps)
+		return -1;
+	for (uint32_t i = 0; i < ps->ntparams; i++) {
+		const vident *v = &vintern_ents[ps->tparams[i].name];
+
+		if (ps->tparams[i].name > 1 && v->len == t->len && !memcmp(v->s, t->s, t->len))
+			return (int)i;
+	}
+	return -1;
+}
+
+static bool mt_type(mg_tok *k);
+static bool mt_expr(mg_tok *k);
+
+/* a builtin type written as words */
+static const char *mt_builtin(mg_tok *k)
+{
+	static const struct { const char *w; const char *code; } b[] = {
+		{ "int", "i" }, { "bool", "b" }, { "char", "c" }, { "void", "v" }, { "long", "l" }, { "unsigned", "j" },
+		{ "short", "s" }, { "double", "d" }, { "float", "f" }, { "size_t", "m" },
+	};
+	for (size_t i = 0; i < sizeof b / sizeof *b; i++)
+		if (mt_word(k, b[i].w))
+			return b[i].code;
+	return NULL;
+}
+
+static bool mt_type(mg_tok *k)
+{
+	int i = mt_tparam(k);
+	const char *bt;
+
+	if (i >= 0) {
+		if (!k->m->tph || (uint32_t)i >= k->m->ntph || !k->m->tph[i])
+			return false;
+		const qty *ph = k->m->ph;
+		uint32_t nph = k->m->nph;
+
+		k->p++;
+		k->m->ph = k->m->tph, k->m->nph = k->m->ntph;
+		mg_type(k->m, k->m->tph[i]);
+		k->m->ph = ph, k->m->nph = nph;
+		return true;
+	}
+	if (mt_word(k, "std") && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON &&
+	    k->m->c->tok[k->p + 2].len == 6 && !memcmp(k->m->c->tok[k->p + 2].s, "size_t", 6))
+		k->p += 2;
+	if ((bt = mt_builtin(k)) && !(k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER)) {
+		k->p++;
+		mg_str(k->m, bt);
+		return true;
+	}
+	return false;
+}
+
+/* <template-args> of an unresolved name: < type, ... > */
+static bool mt_targs(mg_tok *k)
+{
+	if (!mt_is(k, LEX_TOKEN_LESS))
+		return false;
+	k->p++;
+	mg_str(k->m, "I");
+	while (!mt_is(k, LEX_TOKEN_GREATER)) {
+		if (!mt_type(k))
+			return false;
+		if (mt_is(k, LEX_TOKEN_COMMA))
+			k->p++;
+		else if (!mt_is(k, LEX_TOKEN_GREATER))
+			return false;
+	}
+	k->p++;
+	mg_str(k->m, "E");
+	return true;
+}
+
+static bool mt_primary(mg_tok *k)
+{
+	const cxx_token *t = mt_t(k);
+
+	if (!t)
+		return false;
+	if (t->kind == LEX_TOKEN_LEFT_PAREN) {
+		k->p++;
+		if (!mt_expr(k) || !mt_is(k, LEX_TOKEN_RIGHT_PAREN))
+			return false;
+		k->p++;
+		return true;
+	}
+	if (t->kind == LEX_TOKEN_NUMBER) {
+		char num[32];
+		size_t l = 0;
+
+		for (uint32_t j = 0; j < t->len && l < 30; j++)
+			if (t->s[j] >= '0' && t->s[j] <= '9')
+				num[l++] = t->s[j];
+			else if (t->s[j] != 'u' && t->s[j] != 'U' && t->s[j] != 'l' && t->s[j] != 'L')
+				return false;
+		if (!l || (l > 1 && num[0] == '0'))
+			return false;
+		k->p++;
+		mg_str(k->m, "Li");
+		mg_text(k->m, num, l);
+		mg_str(k->m, "E");
+		return true;
+	}
+	if (mt_word(k, "true") || mt_word(k, "false")) {
+		mg_str(k->m, mt_word(k, "true") ? "Lb1E" : "Lb0E");
+		k->p++;
+		return true;
+	}
+	if (mt_word(k, "sizeof")) {
+		k->p++;
+		if (!mt_is(k, LEX_TOKEN_LEFT_PAREN))
+			return false;
+		k->p++;
+		mg_str(k->m, "st");
+		if (!mt_type(k) || !mt_is(k, LEX_TOKEN_RIGHT_PAREN))
+			return false;
+		k->p++;
+		return true;
+	}
+	if (t->kind != LEX_TOKEN_IDENTIFIER || mt_tparam(k) >= 0)
+		return false;
+	/* [ns::]... X<args>::value (sr <levels> E <name>), or [ns::] x<args> (sr <levels> E <name><args>) */
+	{
+		uint32_t start = k->p, levels = 0;
+		bool named = false;
+
+		mg_str(k->m, "sr");
+		while (mt_is(k, LEX_TOKEN_IDENTIFIER)) {
+			const cxx_token *id = mt_t(k);
+			uint32_t at = k->p;
+
+			k->p++;
+			if (mt_is(k, LEX_TOKEN_COLON_COLON)) {	/* a namespace level */
+				k->p++;
+				mt_src(k->m, id);
+				levels++;
+				continue;
+			}
+			if (mt_is(k, LEX_TOKEN_LESS)) {
+				size_t mark = k->m->n;
+
+				mt_src(k->m, id);
+				if (!mt_targs(k))
+					return false;
+				if (mt_is(k, LEX_TOKEN_COLON_COLON) && k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER) {
+					/* X<args>::name: X<args> a level, then E and the name */
+					k->p++;
+					mg_str(k->m, "E");
+					mt_src(k->m, mt_t(k));
+					k->p++;
+					named = true;
+					break;
+				}
+				/* a variable template x<args>: E between the levels and it */
+				{
+					char tail[512];
+					size_t tl = k->m->n - mark;
+
+					if (!levels || tl >= sizeof tail)
+						return false;
+					memcpy(tail, k->m->b + mark, tl);
+					k->m->n = mark;
+					mg_str(k->m, "E");
+					mg_text(k->m, tail, tl);
+				}
+				named = true;
+				break;
+			}
+			(void)at;
+			return false;
+		}
+		(void)start;
+		return named;
+	}
+}
+
+static bool mt_unary(mg_tok *k)
+{
+	if (mt_is(k, LEX_TOKEN_EXCLAMATION)) {
+		k->p++;
+		mg_str(k->m, "nt");
+		return mt_unary(k);
+	}
+	return mt_primary(k);
+}
+
+/* binary operators, by precedence: their codes written before both operands */
+static bool mt_binary(mg_tok *k, int level)
+{
+	static const struct { int lvl, kind; const char *code; } ops[] = {
+		{ 0, LEX_TOKEN_PIPE_PIPE, "oo" }, { 1, LEX_TOKEN_AMPERSAND_AMPERSAND, "aa" },
+		{ 2, LEX_TOKEN_EQUAL_EQUAL, "eq" }, { 2, LEX_TOKEN_EXCLAMATION_EQUAL, "ne" },
+		{ 3, LEX_TOKEN_LESS, "lt" }, { 3, LEX_TOKEN_GREATER, "gt" }, { 3, LEX_TOKEN_LESS_EQUAL, "le" }, { 3, LEX_TOKEN_GREATER_EQUAL, "ge" },
+	};
+	char lhs[1024];
+	size_t mark, ll;
+
+	if (level > 3)
+		return mt_unary(k);
+	mark = k->m->n;
+	if (!mt_binary(k, level + 1))
+		return false;
+	for (;;) {
+		const char *code = NULL;
+		const cxx_token *t = mt_t(k);
+
+		for (size_t i = 0; t && i < sizeof ops / sizeof *ops; i++)
+			if (ops[i].lvl == level && ops[i].kind == t->kind)
+				code = ops[i].code;
+		if (!code)
+			return true;
+		/* (the operator's code goes before the left operand already written) */
+		ll = k->m->n - mark;
+		if (ll >= sizeof lhs)
+			return false;
+		memcpy(lhs, k->m->b + mark, ll);
+		k->m->n = mark;
+		mg_str(k->m, code);
+		mg_text(k->m, lhs, ll);
+		k->p++;
+		if (!mt_binary(k, level + 1))
+			return false;
+	}
+}
+
+static bool mt_expr(mg_tok *k) { return mt_binary(k, 0); }
+
+/* the type's tokens from p: enable_if's forms; *lit: the literal's type code (the second argument) */
+static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap)
+{
+	cxx *c = m->c;
+	mg_tok k = { m, p, c->ntok };
+	bool alias, typename_ = false;
+	cxx_entity *ns, *ei = NULL;
+	size_t save_n = m->n;
+	uint32_t save_subs = m->nsubs;
+
+	bool in_std = false;
+	uint32_t member = 0;
+
+	if (mt_word(&k, "typename"))
+		k.p++, typename_ = true;
+	if (mt_word(&k, "std") && k.p + 1 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_COLON_COLON)
+		k.p += 2, in_std = true;
+	alias = mt_word(&k, "enable_if_t") || mt_word(&k, "__enable_if_t");
+	if (!alias && !typename_)
+		return false;
+	if (!mt_is(&k, LEX_TOKEN_IDENTIFIER))
+		return false;
+	{
+		/* the class template: std's enable_if for the aliases (in libc++'s inline namespace), else the name
+		   looked up where the template is (typename X<E, T>::type) */
+		const cxx_token *t = mt_t(&k);
+		uint32_t name = alias ? vintern_cstr("enable_if") : t->id;
+
+		if (alias || in_std) {
+			ns = cxx_lookup_local(c->global, vintern_cstr("std"));
+			while (ns && ns->kind != CXX_ENTITY_NAMESPACE)
+				ns = ns->next;
+			if (ns && ns->members)
+				ei = cxx_lookup_in(c, ns->members, name, 0);
+		} else
+			for (cxx_scope *sc = (cxx_scope *)m->tps; sc && !ei; sc = sc->parent)
+				ei = cxx_lookup_in(c, sc, name, 0);
+	}
+	k.p++;
+	while (ei && ei->kind != CXX_ENTITY_TEMPLATE)
+		ei = ei->next;
+	if (!ei || !cxx_template_home(ei))
+		return false;
+	mg_str(m, "N");
+	mg_prefix(m, cxx_template_home(ei));
+	if (!mg_substitution(m, CXX_SUB_TEMPLATE, ei, 0)) {
+		mg_source_name(m, ei->name);
+		mg_remember(m, CXX_SUB_TEMPLATE, ei, 0);
+	}
+	if (!mt_is(&k, LEX_TOKEN_LESS))
+		goto bad;
+	k.p++;
+	mg_str(m, "IX");
+	if (!mt_expr(&k) || !mt_is(&k, LEX_TOKEN_COMMA))
+		goto bad;
+	k.p++;
+	mg_str(m, "E");
+	{
+		size_t at = m->n;
+
+		if (!mt_type(&k) || m->n - at >= litcap || m->n - at != 1)
+			goto bad;	/* (a builtin type: the argument's literal is of it) */
+		memcpy(lit, m->b + at, m->n - at), lit[m->n - at] = 0;
+	}
+	if (!mt_is(&k, LEX_TOKEN_GREATER))
+		goto bad;
+	k.p++;
+	mg_str(m, "E");
+	mg_remember(m, CXX_SUB_TYPE, ei, (qty)0x7fff0001);	/* (enable_if<...>: a candidate of its own) */
+	if (!alias) {
+		if (!mt_is(&k, LEX_TOKEN_COLON_COLON))
+			goto bad;
+		k.p++;
+		if (!mt_word(&k, "type"))
+			goto bad;	/* (X<E, T>::type: of T, the argument's literal) */
+		k.p++;
+	}
+	(void)member;
+	mg_str(m, "4typeE");
+	mg_remember(m, CXX_SUB_TYPE, ei, (qty)0x7fff0002);
+	if (!m->bad)
+		return true;
+bad:
+	m->n = save_n, m->nsubs = save_subs, m->bad = false;
+	return false;
+}
+
+/* one template argument; i: its parameter's index in ps */
+static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps)
+{
+	if ((*x).kind == 1 && (*x).t != CXX_TY_UNKNOWN)
+		mg_type(m, (*x).t);
+	else if ((*x).kind == 2) {
+		/* a value: L <type> <value> E; the type is the parameter's, known here for enumerations only:
+		   others as int (not clang's name for a size_t or bool argument yet) */
+		char num[32];
+
+		const char *vt = (*x).t ? NULL : mg_value_type(m, ps, i);
+		char lit[8];
+
+
+		if (!(*x).t && !vt && ps && m->tph && i < ps->ntparams && ps->tparams[i].kind == 2 && !ps->tparams[i].pack &&
+		    ps->tparams[i].type_b) {
+			size_t at = m->n;
+
+			mg_str(m, "Tn");
+			if (mg_tn_type(m, ps->tparams[i].type_b, lit, sizeof lit))
+				vt = lit;
+			else
+				m->n = at;
+		}
+		mg_str(m, "L");
+		if ((*x).t)
+			mg_type(m, (*x).t);
+		else
+			mg_str(m, vt ? vt : "i");
+		if (!(*x).t && !vt)
+			m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
+		if (vt && vt[0] == 'b')
+			mg_str(m, (*x).v ? "1" : "0");
+		else
+		mg_text(m, num, (size_t)snprintf(num, sizeof num, (*x).v < 0 ? "n%llu" : "%llu",
+						 (unsigned long long)((*x).v < 0 ? 0 - (uint64_t)(*x).v : (uint64_t)(*x).v)));
+		mg_str(m, "E");
+	} else if ((*x).kind == 4 && (*x).v) {
+		/* a template as the argument (std::map for basic_json's ObjectType): its name, a substitution
+		   candidate (S0_ the next time) */
+		const cxx_entity *te = (const cxx_entity *)(intptr_t)(*x).v;
+		cxx_scope *home;
+
+		if (te->bound_template)
+			te = te->bound_template;
+		home = cxx_template_home(te);
+		if (!home) {
+			m->bad = true;
+			return;
+		}
+		if (mg_substitution(m, CXX_SUB_TEMPLATE, te, 0))
+			return;
+		if (mg_nested(m, home)) {
+			mg_str(m, "N");
+			mg_prefix(m, home);
+			mg_source_name(m, te->name);
+			mg_str(m, "E");
+		} else {
+			if (mg_scope_is_std(m, home))
+				mg_str(m, "St");
+			mg_source_name(m, te->name);
+		}
+		mg_remember(m, CXX_SUB_TEMPLATE, te, 0);
+	} else
+		m->bad = true;	/* (an argument not known) */
+}
+
 static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t nargs, uint32_t pack_at, const cxx_scope *ps)
 {
+	uint32_t pidx = UINT32_MAX, npost = 0;
+
+	/* (parameters declared after a pack (pack_at: its elements last) are kept before its elements: in the
+	   declaration's order here) */
+	for (uint32_t j = 0; ps && j < ps->ntparams; j++)
+		if (ps->tparams[j].pack) {
+			pidx = j;
+			break;
+		}
+	if (ps && pidx != UINT32_MAX && pack_at <= nargs && pidx < pack_at && pack_at == ps->ntparams - 1)
+		npost = pack_at - pidx;
 	mg_str(m, "I");
+	if (npost) {
+		for (uint32_t j = 0; j < pidx; j++)
+			mg_template_arg(m, &args[j], j, ps);
+		mg_str(m, "J");
+		for (uint32_t j = pack_at; j < nargs; j++)
+			mg_template_arg(m, &args[j], pidx, ps);
+		mg_str(m, "E");
+		for (uint32_t j = 0; j < npost; j++)
+			mg_template_arg(m, &args[pidx + j], pidx + 1 + j, ps);
+		mg_str(m, "E");
+		return;
+	}
 	for (uint32_t i = 0; i < nargs; i++) {
 		if (i == pack_at)
 			mg_str(m, "J");
-		if (args[i].kind == 1 && args[i].t != CXX_TY_UNKNOWN)
-			mg_type(m, args[i].t);
-		else if (args[i].kind == 2) {
-			/* a value: L <type> <value> E; the type is the parameter's, known here for enumerations only:
-			   others as int (not clang's name for a size_t or bool argument yet) */
-			char num[32];
-
-			const char *vt = args[i].t ? NULL : mg_value_type(m, ps, i);
-
-			mg_str(m, "L");
-			if (args[i].t)
-				mg_type(m, args[i].t);
-			else
-				mg_str(m, vt ? vt : "i");
-			if (!args[i].t && !vt)
-				m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
-			if (vt && vt[0] == 'b')
-				mg_str(m, args[i].v ? "1" : "0");
-			else
-			mg_text(m, num, (size_t)snprintf(num, sizeof num, args[i].v < 0 ? "n%llu" : "%llu",
-							 (unsigned long long)(args[i].v < 0 ? 0 - (uint64_t)args[i].v : (uint64_t)args[i].v)));
-			mg_str(m, "E");
-		} else if (args[i].kind == 4 && args[i].v) {
-			/* a template as the argument (std::map for basic_json's ObjectType): its name, a substitution
-			   candidate (S0_ the next time) */
-			const cxx_entity *te = (const cxx_entity *)(intptr_t)args[i].v;
-			cxx_scope *home;
-
-			if (te->bound_template)
-				te = te->bound_template;
-			home = cxx_template_home(te);
-			if (!home) {
-				m->bad = true;
-				continue;
-			}
-			if (mg_substitution(m, CXX_SUB_TEMPLATE, te, 0))
-				continue;
-			if (mg_nested(m, home)) {
-				mg_str(m, "N");
-				mg_prefix(m, home);
-				mg_source_name(m, te->name);
-				mg_str(m, "E");
-			} else {
-				if (mg_scope_is_std(m, home))
-					mg_str(m, "St");
-				mg_source_name(m, te->name);
-			}
-			mg_remember(m, CXX_SUB_TEMPLATE, te, 0);
-		} else
-			m->bad = true;	/* (an argument not known) */
+		mg_template_arg(m, &args[i], i, ps);
 	}
 	if (pack_at == nargs)
 		mg_str(m, "J");	/* (an empty pack: J E) */
@@ -511,7 +903,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	if (ft == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ft) != TY_FUNC)
 		return false;
 	x = AST_TYPE(a, ft);
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
 	op = mg_operator(v, x->n, member);
 	conv = v->len > 10 && !memcmp(v->s, "operator #", 10);
 	if (!op && v->len >= 12 && !memcmp(v->s, "operator ", 9) && !conv) {
@@ -526,6 +918,14 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))
 			return false;
 		op = v->s[1] == 'c' ? (variant == 1 ? "C1" : "C2") : (variant == 1 ? "D1" : variant == 3 ? "D0" : "D2");
+	}
+	if (f->is_instance) {
+		/* (a value parameter's declared type in the template arguments refers to the template's parameters: T_, ...) */
+		const qty *tph;
+		uint32_t ntph, tpp;
+
+		if (cxx_instance_declared_sig(c, f, &tph, &ntph, &tpp) != CXX_TY_UNKNOWN || tph)
+			m.tph = tph, m.ntph = ntph, m.tps = f->inst_params;
 	}
 	mg_str(&m, "_Z");
 	if (mg_nested(&m, home)) {
@@ -572,6 +972,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		const qty *ph;
 		uint32_t nph, pp = 0;
 		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph, &pp);
+
+		if (cxx_instance_uses_decltype(c, f))
+			c->mangle_guess = 1;	/* (decltype in its declaration: clang writes the expression, DT ... E) */
 		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
 		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
@@ -615,7 +1018,7 @@ VPRIV bool cxx_mangle_variable(cxx *c, const cxx_entity *v, cxx_scope *home, boo
 
 	if (!home)
 		return false;
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
 	mg_str(&m, "_Z");
 	if (mg_nested(&m, home)) {
 		mg_str(&m, "N");
@@ -643,7 +1046,7 @@ VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, s
 {
 	cxx_mangler m;
 
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
 	mg_str(&m, "_Z");
 	mg_str(&m, kind);
 	mg_type(&m, QUNQ(cls));
@@ -659,7 +1062,7 @@ VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap)
 {
 	cxx_mangler m;
 
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
 	mg_type(&m, t);
 	if (m.bad || m.n + 1 > cap)
 		return false;

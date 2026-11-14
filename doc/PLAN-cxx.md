@@ -1458,3 +1458,14 @@ variabler är svaga; explicita specialiseringar av variabelmallar får ingen sym
 som inte är heltal (double) får ett objekt.  `T()` för pekare och flyttal är 0, std::nullptr_t är
 en void * i genererad kod.  cxx-run 44/44; cxx-fork 69/70, 5,1 s CPU (47,5x), 2 556 funktioner
 från vcc.  Kvar här: index i en arrayvariabel i en namnrymd, variabelmallar.
+
+### Status (58): Tn för värdeparametrar av beroende typ (2026-11-14)
+clang 23 skriver `Tn <typ>` före ett värdeargument vars parameter har beroende typ
+(`enable_if_t<villkor, int> = 0`).  mangle.c läser nu parameterns tokens: `[std::]enable_if_t`,
+`__enable_if_t` och `typename X<E, T>::type`, villkoret som uttryck (`sr`-namn med nivåer, `nt`,
+`aa`, `oo`, jämförelser, `sizeof`, heltal); mallparametrarna blir `T_`, `T0_` med clangs
+substitutioner.  Parametrar efter en pack står i deklarationens ordning (`J ... E` först).  En
+funktionsmall med `decltype` i deklarationen räknas som gissat namn (clang skriver uttrycket, `DT`).
+cxx-run 45/45 (nytt: varje svag definition vcc ger har ett namn clang också definierar);
+cxx-fork 69/70, 5,1 s CPU, 2 553 funktioner.  json:s `concat_into` stannar i stället på typningen:
+`detect_string_can_append<...>::value` (is_detected över decltype) ger inget svar.

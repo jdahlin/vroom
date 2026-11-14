@@ -1033,6 +1033,8 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, special ? 2 : 0, name, sizeof name))
 		return false;
 	f->name_guess = c->mangle_guess;
+	if (f->name_guess && getenv("VCC_CXX_MANGLE_WHY"))
+		fprintf(stderr, "name guessed: %s\n", name);	/* (VCC_CXX_MANGLE_WHY: the names only vcc gives) */
 	{
 		/* another entity for the same function (the same mangled name) has the symbol already */
 		uint32_t have = cxx_gen_symbol_named(c, name, 0);

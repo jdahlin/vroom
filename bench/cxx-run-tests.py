@@ -26,6 +26,16 @@ def symbols(obj):
                   and "__cxx_global_var_init" not in l and "_GLOBAL__sub_I_" not in l)
 
 
+def weak(obj):
+    r = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True)
+    return set(l.split()[-1] for l in r.stdout.splitlines() if " W " in l and "$_" not in l and "__vcc_" not in l)
+
+
+def defined_all(obj):
+    r = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True)
+    return [l.split()[-1] for l in r.stdout.splitlines()]
+
+
 def one(path, tmp, verbose):
     name = os.path.basename(path)[:-4]
     obj, ref, exe = (os.path.join(tmp, name + s) for s in (".o", ".ref.o", ""))
@@ -45,6 +55,10 @@ def one(path, tmp, verbose):
         return "the test fails when clang++ builds it"
     if symbols(obj) != symbols(ref):
         return "symbols differ: vcc %s, clang %s" % (symbols(obj), symbols(ref))
+    # every weak definition vcc gives (inline functions, template instances) under a name clang gives too
+    extra = sorted(w for w in weak(obj) - set(defined_all(ref)) if not re.search(r"[CD][0-2]E", w))	# (an implicit constructor clang did not need)
+    if extra:
+        return "weak names clang does not define: %s" % extra[:4]
     r = subprocess.run([CLANG, obj, "-o", exe], capture_output=True, text=True)
     if r.returncode:
         return "link failed: " + (r.stderr.strip().splitlines() or ["?"])[0]

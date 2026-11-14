@@ -1752,6 +1752,30 @@ VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **
 	return f->sig;
 }
 
+/* does the template's declaration (its return type or parameters) use decltype? (clang mangles the
+   expression, DT ... E: not written by vcc yet) */
+VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst)
+{
+	const cxx_ftemplate *f = inst->inst_ftmpl;
+	int depth = 0;
+
+	if (!f || !f->pos)
+		return false;
+	for (uint32_t p = f->pos; p < c->ntok && p < f->pos + 4096; p++) {
+		const cxx_token *t = &c->tok[p];
+
+		if (t->kind == LEX_TOKEN_LEFT_PAREN || t->kind == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if (t->kind == LEX_TOKEN_RIGHT_PAREN || t->kind == LEX_TOKEN_RIGHT_SQUARE)
+			depth--;
+		else if (!depth && (t->kind == LEX_TOKEN_LEFT_BRACE || t->kind == LEX_TOKEN_SEMICOLON))
+			return false;
+		else if (t->kind == LEX_TOKEN_IDENTIFIER && t->len == 8 && !memcmp(t->s, "decltype", 8))
+			return true;
+	}
+	return false;
+}
+
 /* parse the signature once, the parameters bound to placeholders */
 static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 {
