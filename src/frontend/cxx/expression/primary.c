@@ -164,20 +164,36 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
 		cxx_advance(c);
 		if (t->kind == LEX_TOKEN_CHARACTER && t->s[t->len - 1] == '\'') {	/* (no user-defined suffix) */
-			int64_t cv = -1;
+			int64_t cv = 0;
+			bool known = false;
 
-			/* 'x' and the simple escapes: a constant (the others: a char of a value not computed here) */
+			/* 'x', the simple escapes, and the hex and octal ones ('\x1F', '\101': one byte, a char's value, signed
+			   as clang's): a constant (the others: a char of a value not computed here) */
 			if (t->len == 3 && t->s[1] != '\\')
-				cv = (signed char)t->s[1];
-			else if (t->len == 4 && t->s[1] == '\\') {
-				static const char from[] = "ntr0\\'\"abfv", to[] = "\n\t\r\0\\'\"\a\b\f\v";
+				cv = (signed char)t->s[1], known = true;
+			else if (t->len == 4 && t->s[1] == '\\' && !(t->s[2] >= '0' && t->s[2] <= '7')) {
+				static const char from[] = "ntr\\'\"abfv?", to[] = "\n\t\r\\'\"\a\b\f\v?";
 				const char *p = memchr(from, t->s[2], sizeof from - 1);
 
 				if (p)
-					cv = to[p - from];
+					cv = to[p - from], known = true;
 			}
-			if (cv != -1 || (t->len == 4 && t->s[2] == '0'))
-				cxx_ec(c, cc_type_basic(AST_TYPE_CHAR), cv == -1 ? 0 : cv);
+			if (!known && t->len >= 4 && t->s[1] == '\\' && (t->s[2] == 'x' || (t->s[2] >= '0' && t->s[2] <= '7'))) {
+				bool hex = t->s[2] == 'x';
+				uint32_t v = 0, i = hex ? 3 : 2, n = 0;
+
+				for (; i + 1 < t->len && (hex ? isxdigit((unsigned char)t->s[i]) != 0 : (t->s[i] >= '0' && t->s[i] <= '7' && n < 3)); i++, n++) {
+					unsigned char d = (unsigned char)t->s[i];
+
+					v = hex ? v * 16 + (d <= '9' ? d - '0' : (d | 32) - 'a' + 10) : v * 8 + (d - '0');
+					if (v > 255)
+						break;
+				}
+				if (n && i + 1 == t->len && v <= 255)
+					cv = (signed char)v, known = true;
+			}
+			if (known)
+				cxx_ec(c, cc_type_basic(AST_TYPE_CHAR), cv);
 			else
 				cxx_et(c, cc_type_basic(AST_TYPE_CHAR), false);
 		}

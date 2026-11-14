@@ -66,6 +66,38 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
 
 			if (fe && fe->has_nsdmi && k >= nargs)
 				return false;
+			if (k < nargs && !args[k] && have_braces && braces[k]) {
+				/* the array's own braced list (std::array<char, 4> t = {{'t', 'r', 'u', 'e'}}): parsed again here,
+				   its elements in order, the rest keep their zero */
+				uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;
+
+				c->pos = braces[k];
+				cxx_braced_arguments_parse(c);
+				c->pos = pos;
+				n = c->ncargs;
+				if (n == UINT32_MAX || n > CXX_MAX_ARGS || n > AST_TYPE(a, ft)->n)
+					return false;
+				memcpy(an, c->carg_nodes, n * sizeof *an);
+				for (uint32_t j = 0; j < n; j++) {
+					uint32_t el, v;
+
+					if (!an[j] || cc_type_is_record(a, AST_NODE_AT(a, an[j])->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, an[j])->ty) == AST_TYPE_ARRAY)
+						return false;
+					el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, target, r->f[i].name, loc)),
+									cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+					if (et != AST_QUALIFIED_TYPE_UNQUALIFIED(et)) {
+						ast_qualified_type pt = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(et));
+						uint32_t addr = cc_address_of_build(a, el, loc);
+
+						el = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+					}
+					if (!(v = cxx_gen_bind(c, an[j], AST_QUALIFIED_TYPE_UNQUALIFIED(et), loc)))
+						return false;
+					cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, el, v, loc), 0, 0));
+				}
+				k++;
+				continue;
+			}
 			for (uint64_t j = 0; j < AST_TYPE(a, ft)->n && k < nargs; j++, k++) {
 				uint32_t el, v;
 

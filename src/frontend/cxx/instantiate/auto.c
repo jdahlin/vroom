@@ -96,6 +96,17 @@ VPRIV ast_qualified_type cxx_auto_deduce(cxx *c, ast_qualified_type pattern, ast
 		else if (at->kind == AST_TYPE_FUNCTION)
 			a = cc_type_pointer(c->ast, a);
 		a = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(a), AST_QUALIFIED_TYPE_QUALIFIERS(P));	/* by value: the initializer's cv goes, the declaration's stays */
+		if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, a) == AST_TYPE_POINTER &&
+		    !AST_TYPE(c->ast, a)->ext) {
+			/* const auto *p = q (q a T *): the pointee may gain the pattern's cv, a qualification conversion
+			   ([temp.deduct.call]/4.2: localeconv()'s lconv * for const auto *) */
+			ast_qualified_type pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, a)->base;
+			int extra = AST_QUALIFIED_TYPE_QUALIFIERS(pb) & ~AST_QUALIFIED_TYPE_QUALIFIERS(ab) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE);
+
+			if (extra)
+				a = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_pointer(c->ast, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ab), AST_QUALIFIED_TYPE_QUALIFIERS(ab) | extra))),
+						       AST_QUALIFIED_TYPE_QUALIFIERS(a));
+		}
 	}
 	if (!cxx_match_type(c, c->auto_owner, P, a, bind, 0) || bind[0].kind != 1)
 		return CXX_TY_UNKNOWN;

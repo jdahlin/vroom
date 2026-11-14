@@ -2142,3 +2142,12 @@ cxx-strict: alla 70 TU:er kompileras (en föll efter sammanslagningen), 3 passer
   (`__uninitialized_allocator_relocate` när en vector växer).
 Test: `run/enumerator-prvalue.cpp`.  cxx-strict: 113 funktioner kompileras nu, 2 nya nås; 288 saknas
 summerat per TU.
+
+## Status 126 (2026-11-15)
+- Teckenkonstanter med hex- och oktalescape (`'\x1F'` i json:s `get_token_string`, `'\101'`, `'\?'`): en
+  byte, värdet som signed char (clangs); förut ingen kod.
+- `const auto *p = q` för en `T *`: den pekade typen får mönstrets cv (en kvalifikationskonvertering,
+  [temp.deduct.call]/4.2: `const auto* loc = localeconv()`).
+- En aggregats array-medlem från sin egen klammerlista (`std::array<char, 4> t = {{'t', 'r', 'u', 'e'}}` i
+  lexerns `scan_literal`, `B b = {5, {1, 2}}`); på namnrymdsnivå inte än.
+Test: `run/literals-auto-arrays.cpp`.  cxx-strict: 87 funktioner till, inga nya; 258 saknas summerat per TU.
