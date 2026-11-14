@@ -1445,6 +1445,7 @@ static void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
 	c->late[c->nlate].begin = begin, c->late[c->nlate].end = end, c->late[c->nlate].scope = c->scope;
 	c->late[c->nlate].nparams = c->ndecl_params;
 	c->late[c->nlate].template_depth = c->template_depth;
+	c->late[c->nlate].fn = c->last_fn, c->last_fn = NULL;
 	c->late[c->nlate].params = c->ndecl_params ? malloc(c->ndecl_params * sizeof(cxx_param)) : NULL;
 	if (c->ndecl_params)
 		memcpy(c->late[c->nlate].params, c->decl_params, c->ndecl_params * sizeof(cxx_param));
@@ -2327,8 +2328,17 @@ static void cxx_class_body_parse(cxx *c, cxx_scope *cs)
 	c->implicit_typename = implicit;
 	if (!c->class_depth && !c->tentative && !c->instantiating)
 		cxx_late_parse_all(c, late_from);	/* the outermost class is complete */
-	else if (c->instantiating && !c->class_depth)
-		c->nlate = late_from;	/* an instance: types and layout only, its function bodies are not parsed */
+	else if (c->instantiating && !c->class_depth) {
+		/* an instance: its member functions' bodies wait for a call that uses them */
+		for (uint32_t i = late_from; i < c->nlate; i++)
+			if (c->late[i].fn && !c->late[i].fn->late) {
+				c->late[i].fn->late = malloc(sizeof(cxx_late));
+				*c->late[i].fn->late = c->late[i];
+				c->late[i].fn->late->template_depth = 0;
+			} else
+				free(c->late[i].params);
+		c->nlate = late_from;
+	}
 }
 
 static void cxx_enum_specifier_parse(cxx *c)
@@ -2481,6 +2491,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */
+			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
@@ -2806,4 +2817,22 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body)
 		}
 	}
 	return t;
+}
+
+/* one deferred member function body (an instance's, on use): as cxx_late_parse_all does */
+VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
+{
+	cxx_scope *fs;
+
+	c->pos = l->begin;
+	c->template_depth = l->template_depth;
+	c->this_type = l->scope->kind == CXX_SCOPE_CLASS && l->scope->owner && l->scope->owner->ty ? l->scope->owner->ty : CXX_TY_UNKNOWN;
+	c->scope = l->scope;
+	c->class_depth = 0;
+	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+	cxx_scope_push(c, fs);
+	cxx_params_declare(c, fs, l->params, l->nparams);
+	cxx_function_body_parse(c);
+	if (c->pos != l->end)
+		cxx_fail(c, "member function body ended early");
 }

@@ -1272,3 +1272,60 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uin
 	*ret = cxx_ftemplate_return(c, f, bind);
 	return 1;
 }
+
+/* what an enclosing parse still uses while a body is instantiated inside it */
+typedef struct cxx_outer {
+	cxx_saved s;
+	cxx_targ *targs;
+	uint32_t ntargs, ndp, ndd;
+	cxx_param *dp;
+	qty this_type, etype;
+	bool elval;
+	cxx_entity *ecallee, *last_fn;
+} cxx_outer;
+
+static void cxx_outer_save(cxx *c, cxx_outer *o)
+{
+	cxx_state_save(c, &o->s);
+	o->ntargs = c->ntargs, o->ndp = c->ndecl_params, o->ndd = c->decl_ndefaults;
+	o->targs = malloc((o->ntargs ? o->ntargs : 1) * sizeof *o->targs);
+	memcpy(o->targs, c->targs, o->ntargs * sizeof *o->targs);
+	o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
+	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
+	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
+}
+
+static void cxx_outer_restore(cxx *c, cxx_outer *o)
+{
+	cxx_state_restore(c, &o->s);
+	memcpy(c->targs, o->targs, o->ntargs * sizeof *o->targs), c->ntargs = o->ntargs;
+	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
+	free(o->targs), free(o->dp);
+	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
+}
+
+/* a call uses e: an instance's member function, its body parsed now (once) */
+VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
+{
+	cxx_outer o;
+	jmp_buf jb;
+
+	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64)
+		return;
+	e->late_done = 1;
+	cxx_outer_save(c, &o);
+	c->instantiating++;
+	c->body_depth++;
+	if (c->body_depth > c->stats.body_depth_max)
+		c->stats.body_depth_max = c->body_depth;
+	c->fail = &jb;
+	c->in_template_args = 0, c->explicit_specialization = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_late_parse_one(c, e->late);
+		c->stats.member_bodies++;
+	} else
+		c->stats.member_bodies_failed++;
+	c->body_depth--;
+	c->instantiating--;
+	cxx_outer_restore(c, &o);
+}

@@ -161,7 +161,7 @@ static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
 VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs)
 {
 	static const uint8_t none[16];
-	cxx_entity *exact = NULL;
+	cxx_entity *exact = NULL, *first = NULL;
 	uint32_t viable = 0, nexact = 0;
 	qty result = CXX_TY_UNKNOWN;
 	bool same = true, unknown = false;
@@ -211,7 +211,7 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 				nexact++, exact = e;
 		}
 		if (!viable++)
-			result = r;
+			result = r, first = e;
 		else if (r != result)
 			same = false;
 	}
@@ -219,6 +219,13 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
 	else if (!viable || !same || unknown)
 		result = CXX_TY_UNKNOWN;
+	/* the function called (when known): an instance's member body is instantiated */
+	{
+		cxx_entity *called = nexact == 1 ? exact : viable == 1 && !unknown ? first : NULL;
+
+		if (called && called->kind == CXX_ENTITY_VALUE)
+			cxx_member_body_use(c, called);
+	}
 	cxx_et(c, result, false);
 }
 
