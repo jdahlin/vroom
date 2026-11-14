@@ -1994,3 +1994,14 @@ Sedda luckor: en instans av en C-variadisk funktionsmall (`f(Arg, ...)`) definie
 - En funktion som namnges utan att anropas direkt (`(std::numeric_limits<T>::min)()`, `&X::f`) är använd:
   en instans medlemskropp instansieras (`cxx_gen_function_value`).
 cxx-strict 338 (345): 190 funktioner till kompileras (mest `<cmath>`/`<limits>`), inga nya fel.
+
+## Status 114 (2026-11-14)
+- `ptr != nullptr` har typen bool (std::nullptr_t är en struct här; == och != jämför som en nollpekare,
+  [expr.eq]/2): `__builtin_expect(!!(ptr != nullptr), 1)` i json:s `get_ref_impl`.
+- Deduktion `const T *` från `int *` (kvalifikationskonvertering, [temp.deduct.call]/4.2):
+  `exception::diagnostics(const BasicJsonType *)`.
+- `__is_trivially_assignable`/`__is_trivially_constructible` för en klass från sig själv: nej med en
+  användarskriven kopierings- eller flyttoperation ([class.copy.ctor]/11, [class.copy.assign]/9) eller en
+  defaultad som inte är trivial; förut sa POD-layout ja (`pair<const string, json>`, `std::string`, json),
+  och `pair<int, int>`s tilldelning var okänd, så `__uninitialized_allocator_copy_impl` föll.  Nu som clang.
+cxx-strict 322 (338): 82 fler kompileras, 6 nya som nyss nåddes.

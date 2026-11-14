@@ -252,6 +252,14 @@ VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue,
 			A = cc_type_pointer(c->ast, A);
 		A = QUNQ(A);
 		P = QUNQ(P);	/* (a by-value parameter's own const is not part of the function's type) */
+		/* const T * from int *: a qualification conversion, the pointee as const as P's ([temp.deduct.call]/4.2) */
+		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == TY_PTR &&
+		    !AST_TYPE(c->ast, A)->ext && AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE(c->ast, A)->base != CXX_TY_UNKNOWN) {
+			qty pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
+
+			if ((QQ(pb) & QQ(ab)) == QQ(ab) && QQ(pb) != QQ(ab))
+				A = cc_type_pointer(c->ast, QT(QI(ab), QQ(ab) | QQ(pb)));
+		}
 	}
 	if (!cxx_match_type(c, p, P, A, bind, 0)) {
 		/* X<T> against a class derived from X<int>: its bases, nearest first */

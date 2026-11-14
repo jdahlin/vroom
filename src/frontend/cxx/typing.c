@@ -155,9 +155,16 @@ VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 	switch (op) {
 	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL:
 	case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL: case LEX_TOKEN_AMPERSAND_AMPERSAND: case LEX_TOKEN_PIPE_PIPE:
-		/* built in on arithmetic and pointers: bool (a class's operator: not resolved yet) */
-		cxx_et(c, (cxx_is_arith(c, l) || cxx_is_ptr(c, l)) && (cxx_is_arith(c, r) || cxx_is_ptr(c, r)) ?
-			  cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		/* built in on arithmetic and pointers: bool (a class's operator: not resolved yet); std::nullptr_t (a
+		   struct here) compares as a null pointer, == and != ([expr.eq]/2), && and || as false */
+		{
+			bool ln = l != CXX_TY_UNKNOWN && c->nullptr_ty && QUNQ(l) == c->nullptr_ty;
+			bool rn = r != CXX_TY_UNKNOWN && c->nullptr_ty && QUNQ(r) == c->nullptr_ty;
+			bool np = op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL;
+
+			cxx_et(c, (cxx_is_arith(c, l) || cxx_is_ptr(c, l) || (ln && np)) && (cxx_is_arith(c, r) || cxx_is_ptr(c, r) || (rn && np)) ?
+				  cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		}
 		return;
 	case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER:
 		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_promote(c->ast, QUNQ(l)) : CXX_TY_UNKNOWN, false);
@@ -1383,6 +1390,34 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
  * clang's type trait builtins that depend on the type's form only (those that ask what a class can
  * do, __is_constructible and the like, are not known).  t: the type arguments.
  */
+/* does class t declare a user-provided (not defaulted, not deleted) member named id taking one t (by value or
+   by reference: a copy or move constructor, assignment), which makes the operation not trivial
+   ([class.copy.ctor]/11, [class.copy.assign]/9) */
+static bool cxx_class_user_special(cxx *c, qty t, uint32_t id)
+{
+	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(t));
+
+	if (!cls)
+		return false;
+	for (cxx_entity *e = cxx_lookup_local(cls, id); e; e = e->next) {
+		const ctype *ft;
+		qty p0;
+
+		if (e->kind != CXX_ENTITY_VALUE || e->fn_defaulted || e->fn_deleted || e->ty == CXX_TY_UNKNOWN ||
+		    AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+			continue;
+		ft = AST_TYPE(c->ast, e->ty);
+		if (ft->n < 1 || ft->n > 1u + e->ndefaults)
+			continue;
+		p0 = c->ast->params[ft->aux];
+		if (p0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p0) == TY_PTR && AST_TYPE(c->ast, p0)->ext)
+			p0 = AST_TYPE(c->ast, p0)->base;
+		if (p0 != CXX_TY_UNKNOWN && QUNQ(p0) == QUNQ(t))
+			return true;
+	}
+	return false;
+}
+
 VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v)
 {
 	const ctype *x;
@@ -1459,6 +1494,10 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		if (cc_type_is_record(c->ast, l) && lk != TY_ARRAY && l == r) {
 			bool pod, empty;
 
+			if (!nothrow && cxx_class_user_special(c, l, vintern_cstr("operator="))) {
+				*v = 0;	/* (a user-provided copy or move assignment: not trivial) */
+				return true;
+			}
 			if (cxx_class_layout_info(c, l, &pod, &empty) && pod) {
 				*v = 1;
 				return true;
@@ -1694,6 +1733,20 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			return false;	/* (the derived class's bases: not known) */
 		*v = cxx_derives(c, t[1], t[0], 0);
 		return true;
+	}
+	/* T from one T (a copy or a move): not trivial with a user-provided copy or move constructor */
+	if (nt == 2 && IS("__is_trivially_constructible") && t[0] != CXX_TY_UNKNOWN && t[1] != CXX_TY_UNKNOWN &&
+	    cc_type_is_record(c->ast, t[0]) && AST_TYPE_KIND(c->ast, t[0]) != TY_ARRAY) {
+		qty from = t[1];
+
+		if (AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext)
+			from = AST_TYPE(c->ast, from)->base;
+		/* (or a defaulted one that is not trivial: a member's or a base's is not, vcc's trivial-ABI test; it
+		   counts a destructor that is not trivial too) */
+		if (QUNQ(from) == QUNQ(t[0]) && (cxx_class_user_special(c, t[0], cxx_ctor_id()) || cxx_gen_trivial_abi(c, QUNQ(t[0]), 0) == 0)) {
+			*v = 0;
+			return true;
+		}
 	}
 	if (nt == 2 && (IS("__is_convertible") || IS("__is_convertible_to") || IS("__is_nothrow_convertible") || IS("__is_constructible") ||
 			IS("__is_nothrow_constructible") || IS("__is_trivially_constructible"))) {
