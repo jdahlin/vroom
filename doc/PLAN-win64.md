@@ -1087,4 +1087,78 @@ CodeView `.debug$S`, DW_TAG_subprogram and the rest of DWARF (as on Linux),
 Linux's unit ranges for functions outside `.text`, a stack-protector failure
 test.
 
+### Branch state at PR (2026-11-14)
+
+Steps: WIN0-WIN9 done (WIN9's CI run locally, never yet on GitHub);
+WIN10 planned, after the PR.  The branch is merged with main d604f888
+(#243-#249: the arm64 and x86-64 code generators' renames, vld Mach-O's
+context).  Main's renames were learned from its own diff (424 words that
+vanished from main's tree, e.g. `X_MOV` -> `X64_OP_MOV`, `xst` ->
+`x64_lowering_context`, `x64impl.h` -> `x64-internal.h`) and applied to the
+base and this branch's side before the three-way merge; this branch's new
+ops are `X64_OP_PROBE` and `X64_OP_FRAMEADDR`; 21 context fields from the
+old and new struct definitions; seven hunks by hand (the Windows frame in
+print.c, lower.c's per-function state, the Windows va_start, asm operands).
+Fixes after it: `vcc-driver.py`'s WIN6 code-generation rows compile with
+the sysroot (WIN8's own headers leave `<stddef.h>` to MinGW-w64; 20 rows
+failed), `win64-native.py` unpacks a newer archive again (a local rerun ran
+the previous set), the quality baseline.
+
+Measured on the merged tree (this host, Wine 11.0, clang 23.1.6, llvm-mingw
+20261104, `-j 6`; CI script `CI_JOBS=4`):
+
+| harness | expected (Status above) | measured |
+|---|---|---|
+| unity, file-by-file, ASan builds; `make vccrt` | build and link | build and link |
+| `vcc-win64.py` (own toolchain) | 2037 + 2 xfail | 2039/2039 + 1 xfail (`--seh` off) |
+| `--seh`, `--vir --seh` | 2037/2037 + 2 xfail | 2038/2038 + 2 xfail each |
+| `--objcmp` | 2120/2120 | 2121/2121 |
+| `--vasm-ref`, `--vlink-ref` (image-identical), `--vccrt-ref` | 2039 (WIN6), 2018 (integration; 2038 with -g, WIN6), 2018 | 2040/2040, 2040/2040, 2035/2035 (0 foreign) |
+| `VCC_CFLAGS=-g --seh` | 2036/2037 (oracle timeout) | 2037/2038, the same `tcc/101_cleanup` clang -g -O2 timeout |
+| `vcc-abi.py --target win64` | 28 pass, 3 xfail, 4 skip | the same |
+| `vas-obj.py` | 81/81, -g 70/70 + 1 xfail | the same |
+| `vas-corpus.py --target x86_64-w64-mingw32`, `-g` | 4530/4530 | 4542/4542 each |
+| `vlink-pe.py --run`; `vlink-pe-bad.py` (ASan) | 72/72 + WIN8's; 530/530 | 74/74; 530/530 |
+| `vccrt-test.py diff`, `chkstk` | 70/70, ok | 70/70 (1194507 calls), ok |
+| `var-cmp.py coff`; `vnm-coff.py` | 230/230; 7776/7776 | 230/230, 300/300 mutants; 7776/7776 |
+| `vcc-dwarf.py --target x86_64-w64-mingw32` -O0, -O2 | 1847, 1846 | 1848/1848, 1847/1847 |
+| `vcc-diff.py --win64` cmp text textc dm deps hdr; lines; dd | 990; 989; 988 | the same (lines: ompx.h's `_Pragma` marker, dd: `__FSGSBASE__` order) |
+| `vcc-sema.py --win64` run, batch, layout | 990/990 | 990/990 (21100817 claims) |
+| `vcc-bflayout.py` | 0 rejected | 0 rejected on all six targets |
+| `vcc-driver.py` | 287/362 | 287/362 (after the fix; the 75 are the arm64 tables' clang 23.1.4 version macros) |
+| `vccd-test.py` | 33 pass | 33 pass, 1 skip (sudo) |
+| `zlib/run.py --target win64 all` | ok | ok (zbench vcc 1.72x, vir 1.09x of clang) |
+| `sqlite/run.py --target win64 all` | ok | ok (speedtest1 vcc 1.71x, vir 1.16x) |
+| `ffmpeg/run.py --target win64 all` | 2738/2739 each, no vcc-only failure | ok: FATE 2738/2739 for clang, vcc and vir (`source`: not a git checkout), no vcc-only failure; nothing foreign; make -j 6 clang 46.5 s, vcc 8.5 s, vir 8.8 s |
+| `vcc-same.py` vs main d604f888 | 23943/23969 | 23943/23969: 11 = `flt_eval_method.c` (the base cannot compile it), 15 = `-E` markers naming the base tree's headers |
+| `vcc-x86.py` | the base's failures | 2128/2133, the 5 `inline` failures main's build has too |
+| `vcc-x86.py --suite vcc --objcmp`, `--vlink` | 327/327, 295/295 | 328/328, 298/298 |
+| `vcc-ctests.py --suite vcc`, `vcc-diag.py` | 332/332, 229/229 | 332/332 + 1 xfail, 229/229 |
+| `vlink-opts.py`, `vlink-bad.py` (ASan) | 66/66, 34/34 | 66/66, 34/34 |
+| `vcc-dwarf.py` aarch64, x86-64 Linux | 1594, 1596 | 1594/1594, 1596/1596 |
+| `quality.py --check` | 22/22 | 22/22 (re-blessed: main's new comparator in macho-linker.c equals pe-export.c's, +60 tokens, +1 run) |
+| `CI_JOBS=4 ci/premerge.sh win64` | every step ok | every step ok (19), 7 min 15 s; export 2041 programs, 6.0 MB packed |
+| `win64-native.py ... --wrapper wine` | 2036/2036 | 2041/2041 |
+| `ci/premerge.sh arm64` (on this x86-64 host) | - | 97 steps ok, 2 min 6 s |
+| workflows | | `yaml.safe_load` of every file; premerge.yml calls win64.yml and `gate` needs it; main changed no workflow or CI file |
+
+**Not done** (TODO.md items for the target): packed boolean vectors at
+Windows calls; MS layout of a packed record after `:0`
+(`tcc/95_bitfields_ms`, XFAIL); `naked` on x86-64 (`vcc/dead_results` under
+`--seh`, XFAIL); `-c` without text for the frame and sections; clang's
+CodeView `.debug$S`; the stack-protector failure path; `--own` under vccd in
+`vcc-win64.py`; the x86 SIMD intrinsic headers, `<tgmath.h>`, `<stdbit.h>`;
+FFmpeg with NASM and SQLite's TCL suite; `-fcommon` and `-coverage`
+ignored; `-g` on `.S` through the driver; `vectorcall`; `-fms-extensions`.
+WIN10 (vcc running on Windows) is after the PR.
+
+**Only the first GitHub Actions run can show:** the workflow as a whole
+(`workflow_call`, the caches with a glob path in the container, the artifact
+hand-over); the runner times; every program on real Windows Server 2025,
+whose expected results come from clang's build under Wine, so a `native`
+failure on the first run may be a Wine difference to triage (fix, or
+`ci/win64-native-allow.txt` with its reason) rather than a vcc bug;
+`chkstk`'s page check on a real guard-page stack; `vlink-pe-bad.py` on the
+arm64 runner.
+
 ### WIN10: planned

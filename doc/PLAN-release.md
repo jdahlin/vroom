@@ -12,7 +12,8 @@ reference user, not the product.
 - Code: reasonable -O1 (register allocation, simple inlining, constant propagation).
 - Diagnostics: better than clang; clang parity is the floor.
 - Platforms: macOS arm64, Linux arm64, cross-compiling mac->Linux, Linux x86-64
-  (ELF, SysV), macOS x86-64 (Mach-O) and wasm.
+  (ELF, SysV), macOS x86-64 (Mach-O), wasm, and Windows x64 (MinGW-w64, COFF/PE,
+  cross-compiled from Linux; PLAN-win64.md).
 - Drop-in: `CC=vcc` is enough.  configure, meson and cmake get through, and
   unknown gcc/clang flags give a warning, not an error.
 - vccd: default and transparent.  The shim starts the server itself.
@@ -34,7 +35,7 @@ applies to.  Each gate must have a script with a clear green/red result
 | G1 | Correctness | TODO.md tiers 1-3 empty, no `xfail` left that points there. Csmith and YARPGen differentially against clang: N CPU hours per target and optimization level without a diff |
 | G2 | Corpus | The Linux kernel boots Debian to `running`; PostgreSQL `meson test`, SQLite (the TCL tests) and vcc self-built (stage 2 = stage 3) green; the Debian selection builds and passes its own tests with `CC=vcc` |
 | G3 | Drop-in | autoconf, meson and cmake configure with `CC=vcc` for the whole corpus without project patches. Unknown flags give a warning. Flag table against gcc and clang (`bench/vcc-driver.py` extended) |
-| G4 | Platforms | G1-G3 run on every target: macOS arm64, Linux arm64, mac->Linux arm64, Linux x86-64, macOS x86-64, wasm. ABI tests (`bench/vcc-abi.py`) clang/vcc × caller/callee on every target |
+| G4 | Platforms | G1-G3 run on every target: macOS arm64, Linux arm64, mac->Linux arm64, Linux x86-64, macOS x86-64, wasm, Windows x64 (x86_64-w64-mingw32 from Linux; run under Wine and on windows-2025 in CI). ABI tests (`bench/vcc-abi.py`) clang/vcc × caller/callee on every target |
 | G5 | Code quality | `-O1`: run time within X % of clang -O1 on a fixed benchmark suite; `-O0` unchanged in compile speed (the SSA path `-O2` is owned by `PLAN-vir.md`; G5 measures `-O1` and stays with the non-SSA optimizer) |
 | G6 | Diagnostics | `bench/vcc-diag.py` without regressions against clang, and a suite of its own with cases where vcc is provably better than clang (spans through macros, fix-its, explanations) |
 | G7 | Speed | `bench/` publishes compile time per TU and for whole projects: vcc against tcc and clang -O0 (vcc -O0) and against clang -O1 (vcc -O1), both cold in its own process and with vccd. The numbers are in the README |
@@ -767,3 +768,17 @@ builtin gaps (TODO T13); CPython additionally has link errors, even without VIR.
 PostgreSQL's explicitly labeled mixed build gives 81 passed/0 failures/249
 skipped tests and does not count as green G2.  No gate is closed by these
 subsets.  Coverage, per-function retreats and measurements in PLAN-vir.md.
+
+### Status 2026-11-14: G4, Windows x64 (MinGW-w64)
+
+A seventh target, `x86_64-w64-mingw32`, cross-compiled from Linux by vcc's
+own toolchain (PLAN-win64.md WIN0-WIN9): the front end with LLP64 and
+clang's MinGW predefines, the Microsoft x64 convention in both code
+generators, Windows frames with SEH unwind data, COFF objects byte-identical
+to clang -c, vlink writing PE byte-identical to lld, vcc's own runtime
+library in place of compiler-rt, DWARF 4.  `bench/vcc-abi.py --target win64`
+runs clang/vcc x caller/callee under Wine (28 pass, 3 xfail); the C suites
+(2039 tests), zlib, SQLite and FFmpeg's C fallbacks pass under Wine; CI
+(`win64.yml`) runs them under Wine and the same programs on windows-2025,
+which has not run on GitHub yet.  G4 stays open: G1-G3 are not run per
+target.

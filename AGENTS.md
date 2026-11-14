@@ -175,7 +175,9 @@ relative to it); `TODO.md` stays at the top.
     frame slots, labels, the call sequence; it calls a CPU only through
     `LO()`) and the machine records with their per-CPU op table (`rec.h`),
     PLAN-x86.md's layers 1 and 3; `arch/x64/codegen/`: x86-64's lowering
-    (`x64-internal.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    (`x64-internal.h`, `lower.c`), two-address pass and AT&T printer (`print.c`;
+    also the Windows frame and its `.seh_*`), calls by System V's rules
+    (`abi.c`) and Microsoft's (`abi-win64.c`, chosen per call by `e->msabi`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
     `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under
@@ -436,13 +438,14 @@ programs that passed (`--export DIR` of those harnesses) with
 `*.manifest.json` (argv, stdin, expected stdout and exit code, timeout).
 `native` (windows-2025, Python only) runs them with `bench/win64-native.py`;
 `ci/win64-native-allow.txt` names, with a reason, a test that legitimately
-differs on Windows (an entry that passes is an error).  Steps whose feature is
-not merged yet are guarded in `ci/premerge.sh` (`has FILE TEXT`) and print
-`skip NAME (why)`: `--own`/`--vir`, `vcc-abi.py --target win64`, vasm's COFF
-cases, WIN8's zlib/SQLite hook; with `--own` present the export switches to
-vcc's programs.  Locally: `CI_JOBS=4 ci/premerge.sh win64` (Wine and
+differs on Windows (an entry that passes is an error).  The job also runs
+vcc's own toolchain (`vcc-win64.py --own`, `--own --vir`), `vcc-abi.py
+--target win64`, vasm's COFF cases and WIN8's zlib and SQLite builds; the
+export holds vcc's programs.  Those steps are still guarded in
+`ci/premerge.sh` (`has FILE TEXT`, else `skip NAME (why)`), which today always
+finds them.  Locally: `CI_JOBS=4 ci/premerge.sh win64` (Wine and
 work/llvm-mingw on the host, clang 23 on PATH), then
-`bench/win64-native.py build/linux/win64-exes --wrapper wine`.
+`bench/win64-native.py build/linux/win64-exes.tar.xz --wrapper wine`.
 `vlink-pe-bad.py` runs in the asan job.
 
 ## Sanitizers
