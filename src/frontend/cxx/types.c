@@ -81,6 +81,14 @@ VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n)
 {
 	if (elem == CXX_TY_UNKNOWN || c->tentative)
 		return CXX_TY_UNKNOWN;
+	if (n <= -3) {
+		/* a pattern's T[N]: an incomplete array that remembers which value parameter is its bound (ext: its
+		   index + 1); deduction binds it to an argument array's length */
+		ctype t = { .kind = TY_ARRAY, .size = 0, .align = AST_TYPE(c->ast, elem)->align, .base = elem, .flags = TF_INCOMPLETE,
+			    .ext = (uint16_t)(-3 - n + 1) };
+
+		return QT(cc_type_intern(c->ast, &t), 0);
+	}
 	if (n < 0)
 		return cc_type_array(c->ast, elem, 0, TF_INCOMPLETE);
 	return cc_type_array(c->ast, elem, (uint64_t)n, 0);

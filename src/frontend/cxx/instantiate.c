@@ -592,7 +592,11 @@ static bool cxx_mentions_placeholder(cxx *c, qty t, int depth)
 		return true;
 	x = AST_TYPE(c->ast, t);
 	switch (x->kind) {
-	case TY_PTR: case TY_ARRAY:
+	case TY_ARRAY:
+		if (x->ext)
+			return true;	/* T[N]: the bound is a placeholder */
+		return cxx_mentions_placeholder(c, x->base, depth + 1);
+	case TY_PTR:
 		return cxx_mentions_placeholder(c, x->base, depth + 1);
 	case TY_FUNC:
 		if (cxx_mentions_placeholder(c, x->base, depth + 1))
@@ -661,6 +665,19 @@ static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *b
 	case TY_PTR:
 		return pt->ext == at->ext && cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
 	case TY_ARRAY:
+		if (pt->ext) {
+			/* T[N]: N is the argument array's length */
+			uint32_t vi = pt->ext - 1u;
+
+			if (at->ext || (at->flags & TF_INCOMPLETE) || !at->n || vi >= p->params->ntparams)
+				return false;
+			if (bind[vi].kind) {
+				if (bind[vi].kind != 2 || bind[vi].v != (int64_t)at->n)
+					return false;
+			} else
+				bind[vi].kind = 2, bind[vi].v = (int64_t)at->n, bind[vi].t = 0;
+			return cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
+		}
 		return pt->flags == at->flags && pt->n == at->n && pt->aux == at->aux && cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
 	case TY_FUNC:
 		if (pt->n != at->n || pt->flags != at->flags || !cxx_match_type(c, p, pt->base, at->base, bind, depth + 1))
@@ -863,6 +880,10 @@ static int cxx_partial_substitute(cxx *c, cxx_partial *p, const cxx_targ *bind, 
 	c->instantiating--, c->unevaluated--;
 	cxx_state_restore(c, &s);
 	invalid = c->einvalid || c->member_missing, unsure = c->eunsure;
+	if (getenv("VCC_CXX_SUBST"))
+		fprintf(stderr, "substitute: invalid %u missing %u unsure %u parsed %d args %u first kind %u last kind %u\n", c->einvalid, c->member_missing,
+			c->eunsure, ngot != UINT32_MAX, (unsigned)ngot, ngot && ngot != UINT32_MAX ? got[0].kind : 9,
+			ngot && ngot != UINT32_MAX ? got[ngot - 1].kind : 9);
 	c->einvalid = o_invalid, c->member_missing = o_missing, c->eunsure = o_unsure;
 	if (invalid)
 		return 0;
@@ -1886,9 +1907,9 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			/* X<T> against a class derived from X<int>: its bases, nearest first */
 			if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
 				continue;
-			/* (a conversion: not tried; a failure here may be wrong for a class) */
+			/* (deduction does not convert: a pattern that matches neither the argument nor a base of it fails) */
 			c->why = CXX_WHY_CLASS_MATCH;
-			return AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT ? -1 : 0;
+			return 0;
 		}
 	}
 	{
@@ -2344,7 +2365,9 @@ VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs)
 			return -1;
 		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
 			P = AST_TYPE(c->ast, P)->base;
-		n += cxx_placeholder_of(c, P, &owner) >= 0;
+		/* (a bare T counts 2, const T 1: f(const T&) is more specialized than f(T&)) */
+		if (cxx_placeholder_of(c, P, &owner) >= 0)
+			n += (QQ(P) & Q_CONST) ? 1 : 2;
 	}
 	return n;
 }

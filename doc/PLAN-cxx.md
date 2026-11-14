@@ -718,3 +718,26 @@ evaluate true, 0 false; _Or, common_type_t and __underlying_type do not yet.
 unit-32bit: 179 + 337 + 23 bodies, 2503 of 2885 calls typed, static_asserts
 177 true / 0 false / 22 not evaluated, 0.16 s; json 72,738 layouts clang
 agrees with, 71/71 parse; parse tests 22/22.
+
+### Status 2026-11-14 (17): arrays, reference binding, the first break in from_bjdata
+T[N] with N deduced (function templates and specializations); f(C&) over
+f(const C&) for an object that is not const and f(const T&) as the more
+specialized template for one that is; deduction never converts a class (a
+pattern that matches neither the argument nor a base fails: std::begin's
+initializer_list overload no longer leaves begin(v) undecided);
+using-declarations carry a function template's data; a comma inside
+decltype( ) is the operator; an expression ill-formed for sure in a signature
+makes the candidate not viable.  Fixed: X<args>::m with no instance (a
+specialization vcc could not decide) looked in the primary template and
+returned its constants; a pack expansion's first, unexpanded parse marked the
+enclosing type dependent.
+unit-32bit: 189 + 343 + 23 bodies, 2615 of 3056 calls typed, no false
+static_assert; json 73,003 layouts clang agrees with, 71/71 parse; parse
+tests 22/22.
+What stops json's own code: from_bjdata -> input_adapter(container) ->
+input_adapter(first, last) -> iterator_input_adapter_factory<It>, whose
+specialization asks std::iterator_traits<It>::value_type; libc++ (C++20)
+defines __iterator_traits by partial specializations constrained with
+concepts, which vcc does not evaluate for class templates yet.  Next:
+constraints on class template partial specializations (constrained
+parameters and requires-clauses), then binary_reader's members.

@@ -53,3 +53,19 @@ static_assert(sizeof(is_bj<bj<vec, char>>::num) == 1, "");
 template<class T, class = void> struct reloc { static constexpr bool value = false; };
 template<class T> struct reloc<T, void_t<typename T::value_type>> { static constexpr bool value = true; };
 static_assert(!reloc<int>::value && !reloc<int *>::value && reloc<A>::value, "");
+
+// T[N] with N deduced: function templates and specializations
+template<class T, unsigned long N> char (&count_of(T (&)[N]))[N];
+template<class T> long count_of(const T &);
+template<class T> constexpr int rank_v = 0;
+template<class T, unsigned long N> constexpr int rank_v<T[N]> = 1 + rank_v<T>;
+template<class T> struct extent { static constexpr unsigned long value = 0; };
+template<class T, unsigned long N> struct extent<T[N]> { static constexpr unsigned long value = N; };
+void arrays(int a[], B b)
+{
+	int five[5];
+	char two[2][3];
+	static_assert(sizeof(count_of(five)) == 5 && sizeof(count_of(two)) == 2 && sizeof(count_of(b)) == 8, "");
+	static_assert(rank_v<int> == 0 && rank_v<int[3]> == 1 && rank_v<int[2][4]> == 2, "");
+	static_assert(extent<int[7]>::value == 7 && extent<int>::value == 0, "");
+}

@@ -60,3 +60,16 @@ void hn(int *ip)
 	static_assert(sizeof(np(nullptr)) == 2 && sizeof(np(ip)) == 1 && sizeof(np(1L)) == 8, "");
 	static_assert(sizeof(a.n) == 4, "");
 }
+
+// reference binding: the less const-qualified reference for an object that is not const, T&& for an rvalue
+struct RB { };
+template<class C> char  rb(C &);
+template<class C> short rb(const C &);
+char  rv(RB &&);
+long  rv(const RB &);
+RB make();
+void hr(RB o, const RB co)
+{
+	static_assert(sizeof(rb(o)) == 1 && sizeof(rb(co)) == 2, "");
+	static_assert(sizeof(rv(make())) == 1 && sizeof(rv(o)) == 8, "");
+}

@@ -265,6 +265,10 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 					*qualifier = inst->members, te = inst;	/* the instance's own members */
 				else if (!te || te->kind != CXX_ENTITY_TEMPLATE || !te->members || args_dependent || te->dependent)
 					*dependent = true, *qualifier = NULL;
+				else if (!c->template_depth && !c->tentative && !c->explicit_specialization)
+					/* known arguments, and no instance (a specialization vcc could not decide, an argument it
+					   could not form): not the primary's members, whose constants are not this instance's */
+					*dependent = true, *qualifier = NULL;
 				else
 					*qualifier = te->members;	/* X<args>:: looks in the primary and its specializations */
 				c->qualifier_hint = te && te->members ? te->members : NULL;
@@ -413,6 +417,8 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 			uint32_t start = c->pos, nseen = c->npacks_seen;
 			cxx_entity *seen[8];
 
+			uint8_t dseen = c->dependent_seen;	/* (before the pattern's first, unexpanded parse) */
+
 			memcpy(seen, c->packs_seen, sizeof seen);
 			c->npacks_seen = 0, c->packs_overflow = 0;
 			cxx_template_argument_parse(c, &a);
@@ -435,6 +441,9 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 					memcpy(packs, c->packs_seen, sizeof packs);
 					for (uint32_t k = 0; k < np; k++)
 						ok &= packs[k]->npack == len && !packs[k]->pack_placeholder;
+					/* the unexpanded parse only found the packs: what it could not resolve (Ps::value with Ps
+					   the whole pack) says nothing about the elements */
+					c->dependent_seen = dseen;
 					for (uint32_t i = 0; ok && i < len; i++) {
 						cxx_targ e;
 
@@ -800,9 +809,13 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			else if (kw != CXX_KW_decltype && kw != CXX_KW___decltype && cxx_try_type_id(c))
 				cxx_type_id_parse(c);
 			else {
+				uint32_t targs = c->in_template_args;
+
+				c->in_template_args = 0;	/* (inside the parentheses a comma is the operator: decltype(a, b)) */
 				c->unevaluated++;
 				cxx_expression_parse(c);
 				c->unevaluated--;
+				c->in_template_args = targs;
 				/* decltype: a name's declared type; a call's or cast's type with its reference; T& for
 				   another lvalue; else the prvalue's type */
 				if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->template_depth && (kw == CXX_KW_decltype || kw == CXX_KW___decltype)) {
@@ -1226,10 +1239,18 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 
 			cxx_advance(c);
 			if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE)) {
+				cxx_entity *be = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE ?
+						 cxx_lookup(c, cxx_peek(c, 0)->id) : NULL;
+
 				n = cxx_literal_value(c);
 				if (n < 0)
 					n = -2;	/* a bound not evaluated yet: the type is unknown */
+				/* T[N] in a pattern, N a value parameter's placeholder: an array whose bound is deduced */
+				if (be && be->kind == CXX_ENTITY_VALUE && be->placeholder)
+					n = -3 - (int64_t)(be->placeholder - 1);
 				cxx_expression_parse(c);
+				if (n == -2 && c->econst && !c->tentative && !c->template_depth && c->evalue > 0)
+					n = c->evalue;	/* (a constant expression: int a[N * 2]) */
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 			cxx_attributes_skip(c);
@@ -1915,6 +1936,10 @@ static void cxx_using_parse(cxx *c)
 						e->specs = t->specs, e->nspecs = t->nspecs;
 						e->ty = t->ty, e->tmpl = t->tmpl, e->sym = t->sym, e->instance = t->instance;
 						e->value = t->value, e->has_value = t->has_value;
+						/* a function, a function or variable template, a concept: what calls and
+						   evaluations of it need */
+						e->ftmpl = t->ftmpl, e->ndefaults = t->ndefaults, e->fn_const = t->fn_const;
+						e->late = t->late, e->late_done = t->late_done, e->member_of = t->member_of;
 					}
 				}
 			} else if (dep || is_typename) {
@@ -3159,13 +3184,14 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	bool q, f;
 	qty t;
 
-	uint8_t missing = c->member_missing;
+	uint8_t missing = c->member_missing, invalid = c->einvalid;
 
 	c->member_missing = 0;	/* (typename X::y with no y in the signature: the candidate is not viable) */
+	c->einvalid = 0;	/* (and an expression that is ill-formed for sure: -> decltype(c.begin()) for an int) */
 	c->sig_requires = 1;
 	cxx_attributes_skip(c);
 	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class) {
-		c->member_missing = missing;
+		c->member_missing = missing, c->einvalid = invalid;
 		return CXX_TY_UNKNOWN;
 	}
 	c->type_in = ctor_class ? cc_type_basic(TY_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
@@ -3204,9 +3230,9 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	c->sig_requires = 1;
 	if (f && cxx_is_kw(c, CXX_KW_requires))
 		c->sig_requires = (int8_t)(any_return ? (cxx_requires_clause_parse(c), 1) : cxx_requires_clause_value(c));
-	if (c->member_missing && !any_return)
+	if ((c->member_missing || c->einvalid) && !any_return)
 		c->sig_requires = 0;	/* a substitution failure in the return or a parameter type */
-	c->member_missing = missing;
+	c->member_missing = missing, c->einvalid = invalid;
 	/* body: the definition's body too (an instance's), its parameters declared */
 	if (body) {
 		*body = false;

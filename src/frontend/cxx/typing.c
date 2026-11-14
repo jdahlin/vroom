@@ -175,7 +175,7 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  * to pointer, a qualification), 1 a standard conversion (arithmetic, derived to base, to void *),
  * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
  */
-static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
+static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
 
@@ -197,6 +197,9 @@ static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 		return (pt->kind == TY_PTR && !pt->ext) || pt->kind == TY_BOOL ? 1 : cc_type_is_record(c->ast, p) ? 2 : 3;
 	if (c->nullptr_ty && QUNQ(p) == c->nullptr_ty)
 		return 3;
+	/* an array bound to a reference to array: the same length and element (its cv may differ) */
+	if (pt->kind == TY_ARRAY && at->kind == TY_ARRAY)
+		return pt->n == at->n && QUNQ(pt->base) == QUNQ(at->base) ? 0 : 3;
 	if (((pt->kind >= TY_BOOL && pt->kind <= TY_FLOAT128) || pt->kind == TY_ENUM) &&
 	    ((at->kind >= TY_BOOL && at->kind <= TY_FLOAT128) || at->kind == TY_ENUM))
 		return pt->kind == TY_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
@@ -225,6 +228,21 @@ static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 	if (cc_type_is_record(c->ast, p) || cc_type_is_record(c->ast, a))
 		return 2;
 	return 3;
+}
+
+/*
+ * The rank used to compare candidates: 0 exact, 1 exact but bound to a reference that adds const (f(C&)
+ * is better than f(const C&) for an object that is not const, f(T&&) than f(const T&) for an rvalue),
+ * 2 a standard conversion, 4 perhaps, 6 not at all.
+ */
+static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
+{
+	int r = cxx_arg_rank0(c, p, a, lvalue, have_lvalue) * 2;
+
+	if (!r && p != CXX_TY_UNKNOWN && a != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext &&
+	    (QQ(AST_TYPE(c->ast, p)->base) & ~QQ(a) & Q_CONST))
+		r = 1;
+	return r;
 }
 
 /*
@@ -348,8 +366,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 
 			for (uint32_t a = 0; a < nargs && fits; a++) {
 				/* (an argument for the ...: any) */
-				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 2;
-				fits = k->rank[a] < 3;
+				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 5;	/* (...: last) */
+				fits = k->rank[a] < 6;
 			}
 			if (!fits)
 				continue;	/* (T&& from an lvalue, a pointer from a class: not viable) */
@@ -419,7 +437,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		bool exact = !cand[best].tmpl && cand[best].ranked;
 
 		for (uint32_t n = 0; n < nargs && exact; n++)
-			exact = cand[best].rank[n] == 0;
+			exact = cand[best].rank[n] <= 1;
 		if (!exact)
 			best = -1;
 	}
@@ -747,7 +765,7 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			*v = 0;
 			return true;
 		}
-		rank = cxx_arg_rank(c, to, from, lv, true);
+		rank = cxx_arg_rank0(c, to, from, lv, true);
 		if (rank == 2)
 			return false;	/* (through a class: its constructors and conversion functions decide) */
 		*v = rank < 3;
