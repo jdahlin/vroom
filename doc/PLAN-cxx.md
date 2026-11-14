@@ -1035,3 +1035,27 @@ funktionsdefinitioner har kod.  Inget json-test länkar ännu.
 `cxx-run-tests.py` 14/14 (ny `class-values.cpp`: clangs antal kopior och
 flyttar).  69 json-testfiler går igenom `-c` utan fel: 63 608 av 92 500
 betraktade funktionsdefinitioner har kod.  Inget json-test länkar ännu.
+
+### Status (30): rätt mått och delade headers (2026-11-14)
+- Nytt mått, `bench/cxx-coverage.py`: de funktioner clang -O0 definierar
+  för ett json-test (allt testet använder, mallinstanser inräknade) mot dem
+  vcc definierar, efter avmangling utan libc++:s `[abi:…]`-taggar.
+  Hela sviten: **146 663 funktioner behövs, vcc har 9 023 (6,2 %)**; vcc:s
+  övriga 55 966 är inline-funktioner i headers som inget test använder.
+  "N av M funktionsdefinitioner har kod" i status 22-29 mätte alltså fel
+  mängd.  unit-32bit: 115 av 1 664.
+- Orsaker, i ordning: testkropparna (doctest) får ingen kod (lambdas,
+  undantag), så det mesta under dem byggs aldrig; 16 % av anropen saknar
+  typ (153 773 anrop, 129 368 typade i en sammanslagen TU), så deras
+  mallkroppar instansieras inte ens; manglingen saknar `abi_tag` och skiljer
+  inte wchar_t/char16_t/char32_t från heltalstyperna.
+  Framändens tider (13,7 s CPU för `-fsyntax-only`) är därmed en
+  underskattning: den gör ännu inte allt arbete clang gör.
+- Delade headers, övre gräns: alla 69 testfiler i en TU ger 1,47 s vägg
+  (1,30 s user) för `-fsyntax-only` och 1,54 s för `-c`, mot 13,7 s som
+  separata processer.  Siffran är optimistisk: några tester definierar om
+  makron före json.hpp (`#define private public`), så clang avvisar samma
+  sammanslagna fil, och vcc kontrollerar inte åtkomst.
+- Slutsats hittills: 30x (8,1 s) nås inte med en process per TU ens för
+  framänden ensam; med delade headers finns utrymmet, men ingen mätning
+  hela vägen finns förrän testerna länkar.
