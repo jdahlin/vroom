@@ -15,7 +15,7 @@
 
 VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
-	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0;
+	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0, c->econst = 0;
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
 		/* a reference: its referent, an lvalue (T&& names are lvalues too) */
 		c->etype = AST_TYPE(c->ast, t)->base, c->elval = 1;
@@ -387,4 +387,155 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	if (dtor && dtor->kind == CXX_ENTITY_VALUE)
 		cxx_member_body_use(c, dtor);
 	c->etype = et, c->elval = el, c->ecallee = callee;
+}
+
+/* ---- integer constant expressions ---------------------------------------------------------- */
+
+/* an expression of type t with the constant value v */
+VPRIV void cxx_ec(cxx *c, qty t, int64_t v)
+{
+	cxx_et(c, t, false);
+	if (t != CXX_TY_UNKNOWN) {
+		int k = AST_TYPE_KIND(c->ast, t);
+		uint64_t size = AST_TYPE(c->ast, t)->size;
+
+		/* the value in t: bool is 0 or 1, a narrower integer wraps (sign- or zero-extended) */
+		if (k == TY_BOOL)
+			v = v != 0;
+		else if (k >= TY_CHAR && k <= TY_ULLONG && size && size < 8) {
+			int sh = (int)(64 - size * 8);
+
+			v = cc_type_is_signed(c->ast, t) ? (int64_t)((uint64_t)v << sh) >> sh : (int64_t)(((uint64_t)v << sh) >> sh);
+		}
+	}
+	c->evalue = v, c->econst = 1;
+}
+
+/* an integer literal's value (decimal, hex, octal, binary, ' separators, u/l suffixes) */
+VPRIV bool cxx_number_value(const cxx_token *t, int64_t *out)
+{
+	uint64_t v = 0;
+	uint32_t i = 0, base = 10, digits = 0;
+
+	if (t->len > 1 && t->s[0] == '0') {
+		if (t->s[1] == 'x' || t->s[1] == 'X')
+			base = 16, i = 2;
+		else if (t->s[1] == 'b' || t->s[1] == 'B')
+			base = 2, i = 2;
+		else
+			base = 8, i = 1, digits = 1;
+	}
+	for (; i < t->len; i++) {
+		char ch = t->s[i];
+		uint32_t d;
+
+		if (ch == '\'')
+			continue;
+		if (ch >= '0' && ch <= '9')
+			d = (uint32_t)(ch - '0');
+		else if (base == 16 && ((ch | 32) >= 'a' && (ch | 32) <= 'f'))
+			d = (uint32_t)((ch | 32) - 'a' + 10);
+		else
+			break;
+		if (d >= base)
+			return false;
+		v = v * base + d, digits++;
+	}
+	if (!digits)
+		return false;
+	for (; i < t->len; i++)
+		if (t->s[i] != 'u' && t->s[i] != 'U' && t->s[i] != 'l' && t->s[i] != 'L')
+			return false;	/* (a floating literal, a user-defined suffix) */
+	*out = (int64_t)v;
+	return true;
+}
+
+VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v)
+{
+	uint64_t ul = (uint64_t)l, ur = (uint64_t)r;
+
+	switch (op) {
+	case LEX_TOKEN_PLUS: *v = (int64_t)(ul + ur); return true;
+	case LEX_TOKEN_MINUS: *v = (int64_t)(ul - ur); return true;
+	case LEX_TOKEN_STAR: *v = (int64_t)(ul * ur); return true;
+	case LEX_TOKEN_SLASH:
+		if (!r || (!uns && l == INT64_MIN && r == -1))
+			return false;
+		*v = uns ? (int64_t)(ul / ur) : l / r;
+		return true;
+	case LEX_TOKEN_PERCENT:
+		if (!r || (!uns && l == INT64_MIN && r == -1))
+			return false;
+		*v = uns ? (int64_t)(ul % ur) : l % r;
+		return true;
+	case LEX_TOKEN_AMPERSAND: *v = l & r; return true;
+	case LEX_TOKEN_PIPE: *v = l | r; return true;
+	case LEX_TOKEN_CARET: *v = l ^ r; return true;
+	case LEX_TOKEN_LESS_LESS:
+		if (r < 0 || r > 63)
+			return false;
+		*v = (int64_t)(ul << r);
+		return true;
+	case LEX_TOKEN_GREATER_GREATER:
+		if (r < 0 || r > 63)
+			return false;
+		*v = uns ? (int64_t)(ul >> r) : l >> r;
+		return true;
+	case LEX_TOKEN_EQUAL_EQUAL: *v = l == r; return true;
+	case LEX_TOKEN_EXCLAMATION_EQUAL: *v = l != r; return true;
+	case LEX_TOKEN_LESS: *v = uns ? ul < ur : l < r; return true;
+	case LEX_TOKEN_GREATER: *v = uns ? ul > ur : l > r; return true;
+	case LEX_TOKEN_LESS_EQUAL: *v = uns ? ul <= ur : l <= r; return true;
+	case LEX_TOKEN_GREATER_EQUAL: *v = uns ? ul >= ur : l >= r; return true;
+	case LEX_TOKEN_AMPERSAND_AMPERSAND: *v = l && r; return true;
+	case LEX_TOKEN_PIPE_PIPE: *v = l || r; return true;
+	}
+	return false;
+}
+
+/*
+ * clang's type trait builtins that depend on the type's form only (those that ask what a class can
+ * do, __is_constructible and the like, are not known).  t: the type arguments.
+ */
+VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v)
+{
+	const ctype *x;
+	int k;
+	bool ref;
+#define IS(s) (len == sizeof s - 1 && !memcmp(n, s, len))
+
+	if (nt == 2 && IS("__is_same")) {
+		*v = t[0] == t[1];
+		return true;
+	}
+	if (nt != 1)
+		return false;
+	x = AST_TYPE(c->ast, t[0]);
+	k = x->kind;
+	ref = k == TY_PTR && x->ext;
+	if (IS("__is_void")) *v = k == TY_VOID;
+	else if (IS("__is_integral")) *v = (k >= TY_BOOL && k <= TY_UINT128);
+	else if (IS("__is_floating_point")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128);
+	else if (IS("__is_arithmetic")) *v = (k >= TY_BOOL && k <= TY_FLOAT128);
+	else if (IS("__is_pointer")) *v = k == TY_PTR && !x->ext;
+	else if (IS("__is_reference")) *v = ref;
+	else if (IS("__is_lvalue_reference")) *v = ref && x->ext == 1;
+	else if (IS("__is_rvalue_reference")) *v = ref && x->ext == 2;
+	else if (IS("__is_const")) *v = !ref && (QQ(t[0]) & Q_CONST) != 0;
+	else if (IS("__is_volatile")) *v = !ref && (QQ(t[0]) & Q_VOLATILE) != 0;
+	else if (IS("__is_array")) *v = k == TY_ARRAY;
+	else if (IS("__is_function")) *v = k == TY_FUNC;
+	else if (IS("__is_enum")) *v = k == TY_ENUM;
+	else if (IS("__is_union")) *v = k == TY_UNION;
+	else if (IS("__is_class")) *v = k == TY_STRUCT;
+	else if (IS("__is_signed")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128) || (k >= TY_CHAR && k <= TY_UINT128 && cc_type_is_signed(c->ast, t[0]));
+	else if (IS("__is_unsigned")) *v = k == TY_BOOL || (k >= TY_CHAR && k <= TY_UINT128 && !cc_type_is_signed(c->ast, t[0]));
+	else if (IS("__is_fundamental")) *v = k <= TY_FLOAT128;
+	else if (IS("__is_scalar")) *v = (k >= TY_BOOL && k <= TY_FLOAT128) || (k == TY_PTR && !x->ext) || k == TY_ENUM;
+	else if (IS("__is_object")) *v = k != TY_FUNC && k != TY_VOID && !ref;
+	else if (IS("__is_compound")) *v = k > TY_FLOAT128;
+	else
+		return false;
+#undef IS
+	return true;
 }

@@ -215,6 +215,7 @@ VPRIV void cxx_mark_set(cxx *c, cxx_mark *m)
 {
 	m->pos = c->pos, m->nundo = c->nundo, m->fail = c->fail, m->scope = c->scope;
 	m->template_depth = c->template_depth, m->in_template_args = c->in_template_args;
+	m->dependent_seen = c->dependent_seen;
 }
 
 VPRIV void cxx_mark_rewind(cxx *c, const cxx_mark *m)
@@ -225,6 +226,7 @@ VPRIV void cxx_mark_rewind(cxx *c, const cxx_mark *m)
 	}
 	c->pos = m->pos, c->fail = m->fail, c->scope = m->scope;
 	c->template_depth = m->template_depth, c->in_template_args = m->in_template_args;
+	c->dependent_seen = m->dependent_seen;	/* (what a rewound parse looked up does not count) */
 }
 
 /* back to pos, undoing the token edits made since (the undo log's length then) */

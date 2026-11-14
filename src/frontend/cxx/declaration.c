@@ -255,6 +255,9 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 				cxx_entity *inst = te && te->kind == CXX_ENTITY_TEMPLATE && !args_dependent && !c->template_depth && !*dependent ?
 						   cxx_instantiate(c, te, c->targs, c->ntargs, true) : NULL;
 
+				/* an alias template's instance: the class it names (completed), its members */
+				if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty))
+					inst->members = cxx_type_class_scope(c, QUNQ(inst->ty));
 				if (inst && inst->members)
 					*qualifier = inst->members, te = inst;	/* the instance's own members */
 				else if (!te || te->kind != CXX_ENTITY_TEMPLATE || !te->members || args_dependent || te->dependent)
@@ -345,7 +348,11 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 		return;
 	}
 	/* a type-id if it parses as one and ends the argument, else an expression */
-	if (cxx_try_type_id(c)) {
+	uint8_t dseen = c->dependent_seen;
+
+	if (!cxx_try_type_id(c))
+		c->dependent_seen = dseen;	/* (what the failed attempt looked up does not count) */
+	else {
 		uint8_t saved = c->in_template_argument;
 
 		c->in_template_argument = 1;
@@ -368,6 +375,10 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 	c->in_template_args++;
 	cxx_conditional_expression_parse(c);
 	c->in_template_args--;
+	/* a constant expression: its value */
+	/* (negative: its value in the parameter's type is not known here, size_t(-1) for one) */
+	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0)
+		out->kind = 2, out->v = c->evalue;
 }
 
 /* after the <: arguments, then > */
@@ -2117,6 +2128,9 @@ static qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
 
 			c->dependent_seen |= seen;
 			base_ty = inst ? inst->ty : CXX_TY_UNKNOWN;
+			/* an alias template's instance: the class it names (completed), its members */
+			if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty) && !c->tentative)
+				inst->members = cxx_type_class_scope(c, QUNQ(inst->ty));
 			if (inst && inst->members)
 				cxx_scope_use(c, cs, inst->members);
 			else if (c->template_depth || !te || !te->members)
@@ -2517,6 +2531,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		qty t = c->type_out;
 		uint32_t name_loc = c->tok[start].loc;
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
+		cxx_entity *const_e = NULL;	/* a const integer whose initializer is evaluated */
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
 			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
@@ -2601,6 +2616,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				c->pos--;
 				if (v >= 0 && !c->tentative)
 					e->value = v, e->has_value = 1;
+				else if (!c->tentative && !c->template_depth && t != CXX_TY_UNKNOWN &&
+					 AST_TYPE_KIND(c->ast, t) >= TY_BOOL && AST_TYPE_KIND(c->ast, t) <= TY_ULLONG)
+					const_e = e;	/* (its initializer: a constant expression, evaluated below) */
 			}
 		}
 		if (member && !f && name > 1) {
@@ -2669,8 +2687,14 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			} else if (object) {
 				cxx_braced_arguments_parse(c);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
-			} else
+			} else {
 				cxx_initializer_parse(c);
+				if (const_e && c->econst) {
+					const_e->value = c->evalue, const_e->has_value = 1;
+					if (AST_TYPE_KIND(c->ast, t) == TY_BOOL)
+						const_e->value = c->evalue != 0;
+				}
+			}
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
 				cxx_braced_arguments_parse(c);

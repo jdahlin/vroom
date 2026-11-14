@@ -442,3 +442,36 @@ VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid)
 	c->name_path_len = saved_len;
 	c->name_path_valid = saved_valid;
 }
+
+/* sizeof and alignof t, when vcc knows them: scalars, pointers, arrays of those, classes it laid out */
+VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align)
+{
+	const ctype *x;
+
+	if (t == CXX_TY_UNKNOWN)
+		return false;
+	x = AST_TYPE(c->ast, t);
+	if (x->kind == TY_PTR && x->ext)	/* a reference: its referent's */
+		return cxx_type_size_known(c, x->base, size, align);
+	if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || x->kind == TY_PTR) {
+		*size = x->size, *align = x->align;
+		return x->size != 0;
+	}
+	if (x->kind == TY_ARRAY) {
+		uint64_t es;
+
+		if (!x->n || !cxx_type_size_known(c, x->base, &es, align) || x->size != es * x->n)
+			return false;
+		*size = x->size;
+		return true;
+	}
+	if (x->kind == TY_STRUCT || x->kind == TY_UNION) {
+		cxx_type_require_complete(c, QUNQ(t));
+		x = AST_TYPE(c->ast, t);
+		if (!cxx_info_of(c, x->aux)->valid || !x->size)
+			return false;
+		*size = x->size, *align = x->align;
+		return true;
+	}
+	return false;
+}

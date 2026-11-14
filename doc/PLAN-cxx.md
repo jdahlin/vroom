@@ -555,3 +555,15 @@ untyped calls (84) is SFINAE templates: an unnamed parameter whose type is
 enable_if_t<cond, int>, which needs the parameter's type parsed with the
 others bound and `X<T>::value` evaluated as a constant.  Then: implicit
 special members, packs, closure types, conversions in overload resolution.
+
+### Status 2026-11-14 (5): constant expressions
+Expressions carry an integer constant value next to their type: literals,
+const/constexpr integers and value parameters, unary and binary operators
+(&& and || decided by a constant left operand), ?:, casts, sizeof/alignof of
+types vcc sizes, and the type-trait builtins that read only a type's form
+(__is_same, __is_integral, ...).  Template arguments and constant members
+(`static constexpr bool value = ...`) take it.  Fixed on the way: an alias
+template's instance had no members at `::` or as a base; a rewound tentative
+parse left dependent_seen set.  Negative template arguments stay unknown (a
+value parameter's type is not recorded).  json: 42,955 layouts clang agrees
+with (was 38,352), 71/71 parse; unit-32bit classes laid out 662 (was 540).

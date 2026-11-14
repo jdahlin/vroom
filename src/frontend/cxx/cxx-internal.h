@@ -207,6 +207,10 @@ typedef struct cxx {
 	uint32_t fn_ndefaults;
 	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
 	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */
+	int64_t evalue;			/* the expression's value, when econst (an integer constant expression) */
+	uint8_t econst;
+	qty btypes[2];			/* the last builtin call's type arguments (nbtypes: 3 if it had other arguments) */
+	uint32_t nbtypes;
 	uint8_t this_const;		/* the member function being parsed is const */
 	uint8_t call_obj;		/* the callee is a member of an object: 1 not const, 2 const (0: not known) */
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
@@ -289,7 +293,7 @@ VPRIV void cxx_skip_balanced(cxx *c);	/* from an opening ( [ { to after its clos
 VPRIV uint32_t cxx_keyword_of(uint32_t id);
 
 /* tentative parsing: CXX_TRY(c) { ... } returns true if the block parsed without error */
-typedef struct cxx_mark { uint32_t pos, nundo; jmp_buf *fail; cxx_scope *scope; uint32_t template_depth, in_template_args; } cxx_mark;
+typedef struct cxx_mark { uint32_t pos, nundo; jmp_buf *fail; cxx_scope *scope; uint32_t template_depth, in_template_args; uint8_t dependent_seen; } cxx_mark;
 VPRIV void cxx_mark_set(cxx *c, cxx_mark *m);
 VPRIV void cxx_mark_rewind(cxx *c, const cxx_mark *m);
 VPRIV uint32_t cxx_operator_id_at(cxx *c, uint32_t n);
@@ -351,6 +355,11 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV void cxx_ec(cxx *c, qty t, int64_t v);
+VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align);
+VPRIV bool cxx_number_value(const cxx_token *t, int64_t *v);
+VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v);
+VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v);
 VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);
 VPRIV cxx_entity *cxx_type_entity(cxx *c, qty t);
 VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced);

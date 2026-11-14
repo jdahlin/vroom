@@ -337,7 +337,7 @@ typedef struct cxx_saved {
 	uint8_t name_path_valid;
 	char name_path[512];
 	cxx_entity *target, *target2, *last_type;
-	uint8_t last_type_dependent;
+	uint8_t last_type_dependent, dependent_seen;
 	qty ds_type, type_in, type_out;
 } cxx_saved;
 
@@ -351,6 +351,7 @@ static void cxx_state_save(cxx *c, cxx_saved *s)
 	s->target2 = c->instantiation_template;
 	s->target = c->instantiation_target, s->last_type = c->last_type, s->last_type_dependent = c->last_type_dependent;
 	s->ds_type = c->ds_type, s->type_in = c->type_in, s->type_out = c->type_out;
+	s->dependent_seen = c->dependent_seen;
 }
 
 static void cxx_state_restore(cxx *c, const cxx_saved *s)
@@ -371,6 +372,7 @@ static void cxx_state_restore(cxx *c, const cxx_saved *s)
 	c->instantiation_template = s->target2;
 	c->instantiation_target = s->target, c->last_type = s->last_type, c->last_type_dependent = s->last_type_dependent;
 	c->ds_type = s->ds_type, c->type_in = s->type_in, c->type_out = s->type_out;
+	c->dependent_seen = s->dependent_seen;	/* (what the instance's own parse saw is not the enclosing one's) */
 }
 
 /* a default template argument: its tokens, parsed with the parameters bound so far */

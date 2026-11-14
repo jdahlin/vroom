@@ -118,6 +118,8 @@ static void cxx_name_type(cxx *c, cxx_entity *e)
 			v = x;
 	}
 	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, true);
+	if (v && v->has_value && !v->placeholder)
+		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 }
 
 /*
@@ -285,18 +287,32 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 /* a builtin trait: __is_same(T, U), __builtin_xxx(args); arguments are types or expressions */
 static void cxx_builtin_call_parse(cxx *c)
 {
+	qty types[2];
+	uint32_t n = 0;
+
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
-		if (cxx_try_type_id(c))
+		if (cxx_try_type_id(c)) {
 			cxx_type_id_parse(c);
-		else
+			if (n < 2 && c->type_out != CXX_TY_UNKNOWN)
+				types[n++] = c->type_out;
+			else
+				n = 3;
+		} else {
 			cxx_initializer_parse(c);
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+			n = 3;
+		}
+		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+			n = 3;
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	/* the type arguments, for the traits that are evaluated (3: something else) */
+	c->nbtypes = n;
+	if (n <= 2)
+		memcpy(c->btypes, types, n * sizeof *types);
 }
 
 /* ---- lambdas and requires-expressions ---------------------------------------------------- */
@@ -544,8 +560,15 @@ static void cxx_primary_expression_parse(cxx *c)
 	switch (t->kind) {
 	case LEX_TOKEN_NUMBER:
 		cxx_advance(c);
-		if (!c->tentative)
-			cxx_et(c, cxx_number_type(c, t), false);
+		{
+			int64_t v;
+			qty nt = cxx_number_type(c, t);
+
+			if (cxx_number_value(t, &v))
+				cxx_ec(c, nt, v);
+			else if (!c->tentative)
+				cxx_et(c, nt, false);
+		}
 		return;
 	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER:
 	case LEX_TOKEN_UTF16_CHARACTER: case LEX_TOKEN_UTF32_CHARACTER:
@@ -596,7 +619,7 @@ static void cxx_primary_expression_parse(cxx *c)
 		if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && cxx_is(c, LEX_TOKEN_LEFT_PAREN))
 			cxx_skip_balanced(c);
 		if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
-			cxx_et(c, cc_type_basic(TY_BOOL), false);
+			cxx_ec(c, cc_type_basic(TY_BOOL), t->kw == CXX_KW_true);
 		else if (t->kw == CXX_KW___null)
 			cxx_et(c, cc_type_basic(TY_LONG), false);
 		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative)
@@ -623,7 +646,14 @@ static void cxx_primary_expression_parse(cxx *c)
 		if (!cxx_accept_greater(c))
 			cxx_fail(c, "expected '>'");
 		cxx_paren_expression_parse(c);
-		cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
+		{
+			bool k = c->econst;
+			int64_t v = c->evalue;
+
+			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
+				cxx_ec(c, cast_to, v);
+		}
 		return;
 	case CXX_KW_typeid:
 		cxx_advance(c);
@@ -708,6 +738,15 @@ static void cxx_primary_expression_parse(cxx *c)
 	    cxx_builtin_kind(t->id) == CXX_BUILTIN_TRAIT && !cxx_lookup(c, t->id)) {
 		cxx_builtin_call_parse(c);
 		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6)) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		{
+			int64_t v;
+
+			/* a trait of known types (not a template's, not a pattern's placeholders): its value */
+			if (!c->template_depth && !c->tentative && c->nbtypes && c->nbtypes <= 2 &&
+			    !cxx_type_has_placeholder(c, c->btypes[0]) && !(c->nbtypes == 2 && cxx_type_has_placeholder(c, c->btypes[1])) &&
+			    cxx_trait_value(c, t->s, t->len, c->btypes, c->nbtypes, &v))
+				cxx_ec(c, cc_type_basic(TY_BOOL), v);
+		}
 		return;
 	}
 	{
@@ -918,8 +957,18 @@ static void cxx_unary_expression_parse(cxx *c)
 
 			cxx_advance(c);
 			cxx_cast_expression_parse(c);
-			if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0))
-				cxx_unary_type(c, op, c->etype, c->elval);
+			{
+				bool k = c->econst;
+				int64_t v = c->evalue;
+
+				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0))
+					cxx_unary_type(c, op, c->etype, c->elval);
+				if (k && (op == LEX_TOKEN_EXCLAMATION || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_PLUS || op == LEX_TOKEN_TILDE)) {
+					c->evalue = op == LEX_TOKEN_EXCLAMATION ? !v : op == LEX_TOKEN_MINUS ? (int64_t)(0 - (uint64_t)v) :
+						    op == LEX_TOKEN_TILDE ? ~v : v;
+					c->econst = 1;
+				}
+			}
 		}
 		return;
 	case LEX_TOKEN_AMPERSAND_AMPERSAND:	/* GNU &&label */
@@ -946,9 +995,16 @@ static void cxx_unary_expression_parse(cxx *c)
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		} else if (cxx_paren_type_id_follows(c)) {
+			uint64_t size;
+			uint32_t align;
+
 			cxx_advance(c);
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->type_out, &size, &align)) {
+				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
+				return;
+			}
 		} else
 			cxx_unary_expression_parse(c);
 		cxx_et(c, cc_type_basic(TY_ULONG), false);	/* size_t */
@@ -956,9 +1012,16 @@ static void cxx_unary_expression_parse(cxx *c)
 	case CXX_KW_alignof: case CXX_KW__Alignof: case CXX_KW___alignof__: case CXX_KW___alignof:
 		cxx_advance(c);
 		if (cxx_paren_type_id_follows(c)) {
+			uint64_t size;
+			uint32_t align;
+
 			cxx_advance(c);
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->type_out, &size, &align)) {
+				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)align);
+				return;
+			}
 		} else
 			cxx_unary_expression_parse(c);
 		cxx_et(c, cc_type_basic(TY_ULONG), false);
@@ -1038,7 +1101,14 @@ static void cxx_cast_expression_parse(cxx *c)
 			return;
 		}
 		cxx_cast_expression_parse(c);
-		cxx_et(c, cast_to, false);
+		{
+			bool k = c->econst;
+			int64_t v = c->evalue;
+
+			cxx_et(c, cast_to, false);
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
+				cxx_ec(c, cast_to, v);
+		}
 		return;
 	}
 	cxx_unary_expression_parse(c);
@@ -1086,13 +1156,26 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 
 			while (n--)
 				cxx_advance(c);
+			bool lk = c->econst, rk;
+			int64_t lv = c->evalue, rv, v;
+
 			cxx_binary_expression_parse(c, p + 1);
+			rk = c->econst, rv = c->evalue;
 			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1)) {
 				qty r = c->etype;
 
 				if (!cxx_operator_call_type(c, opid, r, (qty[]){ l }, 1) || c->etype == CXX_TY_UNKNOWN)
 					cxx_binary_type(c, op, l, r);
 			}
+			/* constants: both operands, or the left alone when it decides && and || */
+			if (lk && rk) {
+				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&
+					   AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128 && !cc_type_is_signed(c->ast, c->etype);
+
+				if (cxx_binary_value(op, lv, rv, uns, &v))
+					c->evalue = v, c->econst = 1;
+			} else if (lk && ((op == LEX_TOKEN_AMPERSAND_AMPERSAND && !lv) || (op == LEX_TOKEN_PIPE_PIPE && lv)))
+				c->evalue = lv != 0, c->econst = 1;
 		}
 	}
 }
@@ -1105,13 +1188,16 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 
 		qty t2 = c->etype;	/* (GNU ?: : the condition's) */
 		bool l2 = c->elval;
+		bool ck = c->econst, k2 = c->econst, k3;
+		int64_t cv = c->evalue, v2 = c->evalue, v3;
 
 		c->in_template_args = 0;
 		if (!cxx_is(c, LEX_TOKEN_COLON))	/* GNU ?: */
-			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval;
+			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval, k2 = c->econst, v2 = c->evalue;
 		c->in_template_args = targs;
 		cxx_expect(c, LEX_TOKEN_COLON);
 		cxx_assignment_expression_parse(c);
+		k3 = c->econst, v3 = c->evalue;
 		{
 			qty t3 = c->etype;
 
@@ -1121,6 +1207,8 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
 			else
 				cxx_et(c, CXX_TY_UNKNOWN, false);
+			if (ck && (cv ? k2 : k3))
+				c->evalue = cv ? v2 : v3, c->econst = 1;	/* a constant condition: the branch taken */
 		}
 	}
 }

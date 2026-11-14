@@ -1,0 +1,13 @@
+template<class T, T v> struct ic { static constexpr T value = v; };
+template<bool b> using bc = ic<bool, b>;
+template<class T> struct is_int : bc<__is_integral(T)> {};
+template<class T> struct both : bc<is_int<T>::value && sizeof(T) == 4 || !true> {};
+template<bool B, class T = void> struct en {};
+template<class T> struct en<true, T> { typedef T type; };
+template<int N> struct A { char c[N]; };
+A<(2 + 3) * 2> a10;
+A<both<int>::value ? 7 : 9> a7;
+A<both<long>::value ? 7 : 9> a9;
+A<is_int<float>::value + 1> a1;
+en<is_int<int>::value, long>::type el;
+static_assert(sizeof(a10) == 10 && sizeof(a7) == 7 && sizeof(a9) == 9 && sizeof(a1) == 1 && sizeof(el) == 8, "");
