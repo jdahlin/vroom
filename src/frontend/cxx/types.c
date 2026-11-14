@@ -22,8 +22,12 @@ VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
 
 	if (s->v_unknown)
 		return CXX_TY_UNKNOWN;
-	if (s->v_named)
+	if (s->v_named) {
+		/* (const T with T a reference type, a template argument: the qualifier is dropped) */
+		if (s->named != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, s->named) == TY_PTR && AST_TYPE(c->ast, s->named)->ext)
+			return s->named;
 		return s->named == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN : cc_type_qualify(c->ast, s->named, s->quals);
+	}
 	if (s->v_void) k = TY_VOID;
 	else if (s->v_bool) k = TY_BOOL;
 	else if (s->v_char) k = s->v_unsigned ? TY_UCHAR : s->v_signed ? TY_SCHAR : TY_CHAR;
@@ -174,6 +178,8 @@ VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, b
 	cxx_class_build *b = calloc(1, sizeof *b);
 
 	b->outer = c->build;
+	/* (a class nested in a non-public part of another, or in one clang cannot check: not checked either) */
+	b->unverifiable = b->outer && c->class_depth > 0 && (b->outer->access_private || b->outer->unverifiable);	/* (class_depth: inside a class body, not an instance completed while one is being built) */
 	b->skip = skip;
 	b->pod = 1;
 	b->access_private = is_class;

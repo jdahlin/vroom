@@ -142,6 +142,8 @@ typedef struct cxx_entity {
 	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
+	uint8_t fn_implicit;		/* a destructor vcc made for a class that declares none (its members and bases need one) */
+	uint8_t gen_tried;		/* a defaulted or implicit special member: its body was asked for */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint32_t *defs;			/* ... their tokens (begin, end pairs), parsed again where a call leaves them out; NULL: not recorded */

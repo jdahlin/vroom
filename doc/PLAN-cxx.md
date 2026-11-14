@@ -1134,3 +1134,23 @@ lambdas, standardargument.
   undantag passerar en funktion (inga städplattor).
 `cxx-run-tests.py` 19/19 (ny `exceptions.cpp`); `cxx-coverage.py` 9 430 av
 146 663 (6,4 %).
+
+### Status (35): referensmedlemmar, implicita destruktorer (2026-11-14)
+- Referensmedlemmar: en pekare i objektet, bunden av konstruktorns
+  initierare, avrefererad vid åtkomst.
+- Implicita destruktorer byggs som riktiga funktioner när en klass utan
+  egen destruktor har medlemmar eller flera baser som behöver förstöras;
+  `~T() = default` får sin kropp där den först används.
+- `= nullptr` som standardvärde för en mallparameter är nu ett känt värde
+  (`enable_if<...>::type* = nullptr`): doctests `operator<<` väljs, och
+  fler mallar instansieras.  `const T` med T en referenstyp tappar `const`.
+- `if (T x __attribute__((unused)) = e)` känns igen som deklaration.
+- `VCC_CXX_GEN=3`: var `cxx_gen_call` gav upp om ett anrop.
+- Layoutkontrollen hoppar över klasser nästlade i en icke-publik del
+  (clang kan inte namnge dem): 157 172 layouter, 0 fel.
+`cxx-run-tests.py` 20/20 (ny `members.cpp`); `cxx-coverage.py` 10 243 av
+146 663 (7,0 %).  Ett minimalt doctest-test kommer nu förbi alla
+doctest-makron men stannar i libc++: `std::string`s konstruktorer
+(`[[no_unique_address]]`-medlemmar i initierare, `__min_cap` utan typ),
+och testregistreringen kräver dynamisk initiering av globala variabler
+(`.init_array`), som inte finns än.

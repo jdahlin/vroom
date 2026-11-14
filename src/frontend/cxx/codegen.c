@@ -111,6 +111,8 @@ static bool cxx_gen_needs_destruction(cxx *c, qty t, int depth);
 static bool cxx_gen_needs_construction(cxx *c, qty t, int depth);
 static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
 static cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth);
+VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
+VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
 static bool cxx_gen_name(cxx *c, cxx_entity *f);
 static int cxx_gen_capture(cxx *c, cxx_gen_lambda *l, const cxx_entity *v, uint32_t loc);
@@ -197,8 +199,8 @@ static bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft)) {
 			if (!cxx_gen_class_ok2(c, ft, objects))
 				return false;
-		} else if (!cxx_gen_type_ok(c, ft) || cxx_gen_is_reference(c, ft))
-			return false;
+		} else if (!cxx_gen_type_ok(c, ft))
+			return false;	/* (a reference member is a pointer in the object: its referent's type must do) */
 	}
 	return true;
 }
@@ -1368,6 +1370,15 @@ static uint32_t cxx_gen_default_argument(cxx *c, const cxx_entity *f, uint32_t k
 }
 
 /* f(args): the function overload resolution picked, the arguments converted to its parameters' types */
+/* VCC_CXX_GEN=3: where cxx_gen_call gave up on a call, and the function called */
+#define CXX_CALL_WHY() do { \
+		static __thread int why_ = -1; \
+		if (why_ < 0) \
+			why_ = getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 3; \
+		if (why_ && f && cxx_gen_on(c)) \
+			fprintf(stderr, "no call (codegen.c:%d): %.*s/%u\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s, nargs); \
+	} while (0)
+
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -1376,7 +1387,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32];
 
 	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
-		return;
+		{ CXX_CALL_WHY(); return; }
 	ft = AST_TYPE(a, f->ty);
 	if (nargs < ft->n && ft->n <= 32 && ft->n - nargs <= f->ndefaults && f->defs && !(ft->flags & TF_VARIADIC)) {
 		/* the arguments left out: the parameters' default arguments */
@@ -1385,24 +1396,24 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		memcpy(all, args, nargs * sizeof *args);
 		for (uint32_t i = nargs; i < n; i++)
 			if (!(all[i] = cxx_gen_default_argument(c, f, i - first)))
-				return;
+				{ CXX_CALL_WHY(); return; }
 		args = all, nargs = n;
 		ft = AST_TYPE(a, f->ty);
 	}
 	if (ft->n != nargs || (ft->flags & TF_VARIADIC) || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
-		return;	/* (variadic functions, default arguments not recorded: not built yet) */
+		{ CXX_CALL_WHY(); return; }	/* (variadic functions, default arguments not recorded: not built yet) */
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i] || !cxx_gen_value_ok(c, a->params[ft->aux + i]))
-			return;
+			{ CXX_CALL_WHY(); return; }
 	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
-		return;
+		{ CXX_CALL_WHY(); return; }
 	ft = AST_TYPE(a, f->ty);
 	cc_id_list_init(&list);
 	if (cxx_gen_by_address(c, ft->base)) {
 		/* a class returned by address: in a temporary (whoever takes the value may aim it elsewhere) */
 		ret_tmp = cxx_gen_class_temp(c, QUNQ(ft->base), loc);
 		if (!ret_tmp)
-			return;
+			{ CXX_CALL_WHY(); return; }
 		cc_id_list_append(a, &list, cc_address_of_build(a, cxx_gen_var_node(c, ret_tmp, loc), loc));
 		self_at = 1;
 	}
@@ -1418,10 +1429,10 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 			c->enode = 0;
 		}
 		if (!self || tt == CXX_TY_UNKNOWN)
-			goto fail;	/* (a member called on a value: a temporary, not built yet) */
+			{ CXX_CALL_WHY(); goto fail; }	/* (a member called on a value: a temporary, not built yet) */
 		self = cxx_gen_base_pointer(c, self, AST_TYPE(a, tt)->base, loc);	/* (a base class's member: on the base subobject) */
 		if (!self)
-			goto fail;
+			{ CXX_CALL_WHY(); goto fail; }
 		cc_id_list_append(a, &list, self);
 	}
 	for (uint32_t i = 0; i < nargs; i++) {
@@ -1429,7 +1440,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		uint32_t arg = cxx_gen_by_address(c, pt) ? cxx_gen_class_argument(c, args[i], pt, loc) : cxx_gen_bind(c, args[i], pt, loc);
 
 		if (!arg)
-			goto fail;
+			{ CXX_CALL_WHY(); goto fail; }
 		cc_id_list_append(a, &list, arg);
 	}
 	if (f->fn_virtual && !cxx_gen_is_special(f) && c->gen_vmode != 1) {
@@ -1439,10 +1450,10 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		uint32_t tmp, tn, vptr;
 
 		if (c->gen_vmode == 2 || !f->vslot || !self)
-			goto fail;
+			{ CXX_CALL_WHY(); goto fail; }
 		tmp = cxx_gen_temporary(c, st, loc);
 		if (!tmp)
-			goto fail;
+			{ CXX_CALL_WHY(); goto fail; }
 		pre = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), self, loc);
 		list.v[self_at] = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
 		tn = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
@@ -1475,7 +1486,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		uint32_t tmp = cxx_gen_temporary(c, QUNQ(ft->base), loc);
 
 		if (!tmp)
-			goto fail;
+			{ CXX_CALL_WHY(); goto fail; }
 		n = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), n, loc);
 		n = cc_node_new_operands(a, N_COMMA, cc_type_pointer(a, QUNQ(ft->base)), loc, n, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc));
 		n = cc_dereference_build(a, n, loc);
@@ -1881,7 +1892,16 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 			if (r->f[i].name == name) {
 				found = true;
 				if (cxx_gen_is_reference(c, r->f[i].ty)) {
-					cxx_gen_fail(c);
+					/* a reference member: bound to its initializer (the member holds the address) */
+					uint32_t raw = member(a, self, name, loc), v = nargs == 1 && args[0] ? cxx_gen_bind(c, args[0], r->f[i].ty, loc) : 0;
+
+					if (!v) {
+						cxx_gen_fail(c);
+						return;
+					}
+					if (c->ngen_init_names < 32)
+						c->gen_init_names[c->ngen_init_names++] = name;
+					cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, raw, v, loc), 0, 0));
 					return;
 				}
 			}
@@ -1975,6 +1995,44 @@ static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc
 }
 
 /*
+ * A destructor with no body of its own gets one: one defaulted in its class (~T() = default), or the
+ * implicit one of a class that declares none though its members and bases need destruction (made here: an
+ * entity in the class like a declared one).  Its body is empty; cxx_gen_function_end adds the members'
+ * and bases' destruction.  NULL: not built.
+ */
+static cxx_entity *cxx_gen_destructor_body(cxx *c, qty t, cxx_entity *d)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t)), *fs;
+	uint32_t body;
+
+	if (!cls || !cls->owner || cls->dependent || !a->o->emit || c->tentative || c->unevaluated)
+		return NULL;
+	if (!d) {
+		d = cxx_declare(c, cls, cxx_dtor_id(), CXX_ENTITY_VALUE);
+		if (!d)
+			return NULL;
+		d->ty = cxx_type_function(c, cc_type_basic(TY_VOID), NULL, 0, false);
+		d->member_of = cls;
+		d->fn_defaulted = 1, d->fn_implicit = 1, d->fn_inline = 1;
+		cxx_vtable_declare(c, cls, d, false);	/* (it overrides a base's virtual destructor) */
+	}
+	if (d->gen_tried || d->fn_deleted)
+		return d->sym && (a->syms[d->sym].flags & SF_DEFINED) ? d : d->gen_tried == 2 ? d : NULL;
+	d->gen_tried = 2;	/* (being built: a member of its own type further in asks again) */
+	d->fn_inline = 1;
+	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, cls, NULL);
+	if (!cxx_gen_function_begin(c, d, fs, NULL, 0)) {
+		d->gen_tried = 1;
+		return NULL;
+	}
+	body = cc_statement_new(a, N_BLOCK, 0, 0, 0, 0);
+	cxx_gen_function_end(c, d, body);
+	d->gen_tried = 1;
+	return d->sym && (a->syms[d->sym].flags & SF_DEFINED) ? d : NULL;
+}
+
+/*
  * The destructor that destroying an object of the class runs: the one it declares; with none declared,
  * the one of its only base that needs destruction, when that base is at offset 0 and no member needs
  * destruction (the implicit destructor does just that).  NULL: none, or an implicit one not built yet.
@@ -1987,27 +2045,33 @@ static cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth)
 	qty bases[16], only = CXX_TY_UNKNOWN;
 	uint32_t nb;
 	uint64_t off;
+	bool members = false;
 
+	if (d && d->fn_defaulted && !d->fn_deleted && !(d->sym && (a->syms[d->sym].flags & SF_DEFINED)))
+		return cxx_gen_destructor_body(c, t, d);	/* ~T() = default: its body is made where it is first used */
 	if (d || !cls || depth > 8)
 		return d;
+	if (!cxx_gen_needs_destruction(c, t, 0))
+		return NULL;
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
 		qty ft = cls->field_types[i];
 
 		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
-		if (ft == CXX_TY_UNKNOWN || (cc_type_is_record(a, ft) && cxx_gen_needs_destruction(c, ft, 0)))
+		if (ft == CXX_TY_UNKNOWN)
 			return NULL;
+		members |= cc_type_is_record(a, ft) && cxx_gen_needs_destruction(c, ft, 0);
 	}
 	nb = cxx_class_bases(c, t, bases, 16);
-	for (uint32_t i = 0; i < nb; i++)
+	for (uint32_t i = 0; i < nb && !members; i++)
 		if (cxx_gen_needs_destruction(c, bases[i], 0)) {
 			if (only != CXX_TY_UNKNOWN)
-				return NULL;
+				members = true;
 			only = bases[i];
 		}
-	if (only == CXX_TY_UNKNOWN || !cxx_class_base_offset(c, t, only, &off, 0) || off)
-		return NULL;
-	return cxx_gen_effective_destructor(c, only, depth + 1);
+	if (!members && only != CXX_TY_UNKNOWN && cxx_class_base_offset(c, t, only, &off, 0) && !off && !cxx_class_polymorphic(c, t))
+		return cxx_gen_effective_destructor(c, only, depth + 1);	/* (the base's does all there is to do) */
+	return cxx_gen_destructor_body(c, t, NULL);	/* the implicit destructor, made */
 }
 
 /* ~T(): the destructor's call on the lvalue x (the class declares it); the statement goes to `out` */

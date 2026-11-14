@@ -424,7 +424,8 @@ static bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding
 				out->kind = 2, out->v = c->evalue;
 				if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)
 					out->t = QUNQ(c->etype);
-			}
+			} else if (c->pos == p->def_b + 1 && (c->tok[p->def_b].kw == CXX_KW_nullptr || c->tok[p->def_b].kw == CXX_KW___nullptr))
+				out->kind = 2, out->v = 0;	/* = nullptr (enable_if<...>::type * = nullptr): a null pointer */
 		}
 		ok = c->pos == p->def_e && out->kind;
 	}

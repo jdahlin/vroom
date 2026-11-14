@@ -253,9 +253,25 @@ static bool cxx_condition_declaration_parse(cxx *c)
 				break;
 		} else if (!d && k == LEX_TOKEN_SEMICOLON)
 			return false;	/* (an init-statement first) */
-		else if (!d && !name && k == LEX_TOKEN_IDENTIFIER && !c->tok[close].kw &&
-			 (c->tok[close + 1].kind == LEX_TOKEN_EQUAL || c->tok[close + 1].kind == LEX_TOKEN_LEFT_BRACE))
-			name = c->tok[close].id, at = close;
+		else if (!d && !name && k == LEX_TOKEN_IDENTIFIER && !c->tok[close].kw) {
+			/* the name: before = or {, perhaps with __attribute__((...)) in between */
+			uint32_t after = close + 1;
+
+			while (after < c->ntok && c->tok[after].kw == CXX_KW___attribute__ && c->tok[after + 1].kind == LEX_TOKEN_LEFT_PAREN) {
+				int ad = 0;
+
+				for (after++; after < c->ntok; after++) {
+					if (c->tok[after].kind == LEX_TOKEN_LEFT_PAREN)
+						ad++;
+					else if (c->tok[after].kind == LEX_TOKEN_RIGHT_PAREN && !--ad) {
+						after++;
+						break;
+					}
+				}
+			}
+			if (after < c->ntok && (c->tok[after].kind == LEX_TOKEN_EQUAL || c->tok[after].kind == LEX_TOKEN_LEFT_BRACE))
+				name = c->tok[close].id, at = close;
+		}
 	}
 	if (!name || at == start || close >= c->ntok || c->tok[close].kind != LEX_TOKEN_RIGHT_PAREN)
 		return false;
