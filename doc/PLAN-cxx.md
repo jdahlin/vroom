@@ -899,3 +899,25 @@ kandidater vcc inte kan ordna gör inte längre anropet giltigt (vcc sade att
 doctests `has_insertion_operator<int>` var sann; clang: falsk).
 `j.get<int>()` har sin typ.  Parse-tester 38/38; 148 440 layouter som
 clang håller med om.
+
+### Status 2026-11-14 (24): första C++-koden genom vcc:s emitter
+
+`vpp -x c++ -c` ger nu ett objekt.  Medan en funktionskropp tolkas bygger
+C++-parsern det delade AST:t med C-front-endens byggare (samma noder,
+konverteringar och satser som C ger emittern; `src/frontend/cxx/codegen.c`)
+och `cxx_run` lämnar TU:n till `emit_tu`.  Byggt hittills: funktioner i
+globala namnrymden över skalära typer (heltal, flyttal, pekare): literaler,
+variabler, de inbyggda operatorerna (binära, unära, tilldelning, `++`/`--`),
+anrop av sådana funktioner efter överlagringsupplösning, `if`/`while`/
+`return`/`break`/`continue`, lokala variabler.  Namnen manglas (C:s
+Itanium-manglare för `overloadable`; `main` och `extern "C"` som de är).
+En funktion vars kropp har något annat lämnas odefinierad (deklarerad, inte
+emitterad): `VCC_CXX_GEN=1` säger var vcc gav upp, och
+`VCC_CXX_PROGRESS=1` räknar "function definitions N, with code M".
+`bench/cxx-run-tests.py` (`src/test/cxx/run/`): vcc kompilerar, clang++
+länkar, programmet ska ge 0, alla funktioner ska ha fått kod och objektets
+definierade symboler ska vara de clang++ definierar: 2/2 (rekursion, tre
+överlagringar, `bool`, `double`, slingor).
+Saknas för json: klasser (medlemmar, `this`, konstruktorer/destruktorer),
+referenser, namnrymder och klassnamn i mangling, mallinstansers kroppar,
+undantag, vtabeller/RTTI, strängliteraler, `for`/`switch`/`do`.

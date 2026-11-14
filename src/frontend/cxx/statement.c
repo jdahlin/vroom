@@ -214,6 +214,7 @@ static void cxx_condition_parse(cxx *c)
 					}
 					cxx_advance(c);
 				}
+				cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a condition declaration: no node yet) */
 				break;
 			}
 		}
@@ -229,20 +230,61 @@ VPRIV void cxx_compound_statement_parse(cxx *c)
 {
 	cxx_scope *bs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 	cxx_scope *outer = c->scope;
+	/* code generation: the block's statements, in a list of its own */
+	cc_id_list list;
+	void *outer_block = c->gen_block;
+	bool gen = cxx_gen_on(c);
+	uint32_t loc = cxx_peek(c, 0)->loc;
 
+	if (gen) {
+		cc_id_list_init(&list);
+		c->gen_block = &list;
+	}
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
 	cxx_scope_push(c, bs);
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		if (cxx_is(c, LEX_TOKEN_EOF))
 			cxx_fail(c, "expected '}'");
 		cxx_statement_parse(c);
+		if (gen && c->snode && cxx_gen_on(c))
+			cc_id_list_append(c->ast, &list, c->snode);
 	}
 	cxx_advance(c);
 	c->scope = outer;
+	if (gen) {
+		c->gen_block = outer_block;
+		cxx_gen_statement(c, cxx_gen_on(c) ? cxx_gen_new_statement(c, N_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n) : 0);
+	}
 }
 
+static void cxx_statement_parse1(cxx *c);
+
+/* (code generation: a statement whose own case did not give its node is one not built yet) */
 VPRIV void cxx_statement_parse(cxx *c)
 {
+	uint32_t depth = ++c->sdepth;
+
+	c->snode = 0;
+	cxx_statement_parse1(c);
+	if (c->gen && c->sdone != depth) {
+		cxx_gen_fail(c);
+		c->snode = 0;
+	}
+	c->sdepth = depth - 1;
+}
+
+/* a nested statement's node, or an empty block for an empty statement */
+static uint32_t cxx_gen_nested(cxx *c, uint32_t loc)
+{
+	if (!cxx_gen_on(c))
+		return 0;
+	return c->snode ? c->snode : cxx_gen_new_statement(c, N_BLOCK, loc, 0, 0, 0);
+}
+
+static void cxx_statement_parse1(cxx *c)
+{
+	uint32_t sloc = cxx_peek(c, 0)->loc;
+
 	cxx_attributes_skip(c);
 	switch (cxx_kind(c)) {
 	case LEX_TOKEN_LEFT_BRACE:
@@ -250,6 +292,7 @@ VPRIV void cxx_statement_parse(cxx *c)
 		return;
 	case LEX_TOKEN_SEMICOLON:
 		cxx_advance(c);
+		cxx_gen_statement(c, 0);
 		return;
 	case LEX_TOKEN_IDENTIFIER:
 		if (!cxx_kw(c) && cxx_peek(c, 1)->kind == LEX_TOKEN_COLON) {	/* label */
@@ -266,6 +309,7 @@ VPRIV void cxx_statement_parse(cxx *c)
 		cxx_advance(c);
 		bool is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
 		int taken = -1;	/* if constexpr with a known condition: 1 the first statement, 0 the else */
+		uint32_t gen_cond = 0, gen_then = 0, gen_else = 0;
 
 		if (cxx_is(c, LEX_TOKEN_EXCLAMATION) || cxx_is_kw(c, CXX_KW_consteval)) {	/* if !consteval / if consteval */
 			cxx_accept(c, LEX_TOKEN_EXCLAMATION);
@@ -276,28 +320,39 @@ VPRIV void cxx_statement_parse(cxx *c)
 
 			cxx_scope_push(c, s);
 			cxx_condition_parse(c);
+			gen_cond = is_constexpr ? 0 : cxx_gen_condition(c, c->enode);
 			if (is_constexpr && c->econst && !c->tentative && !c->template_depth)
 				taken = c->evalue != 0;
 			/* the discarded statement is parsed, not instantiated: what it calls is not used */
 			c->unevaluated += taken == 0;
 			cxx_statement_parse(c);
 			c->unevaluated -= taken == 0;
+			gen_then = cxx_gen_nested(c, sloc);
 			c->scope = outer;
 		}
 		if (cxx_accept_kw(c, CXX_KW_else)) {
 			c->unevaluated += taken == 1;
 			cxx_statement_parse(c);
 			c->unevaluated -= taken == 1;
+			gen_else = cxx_gen_nested(c, sloc);
 		}
+		if (gen_cond && gen_then && cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_new_statement(c, N_IF, sloc, gen_cond, gen_then, gen_else));
 		return;
 	case CXX_KW_switch: case CXX_KW_while: {
 		cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
+		bool is_while = cxx_is_kw(c, CXX_KW_while);
+		uint32_t gen_cond, gen_body;
 
 		cxx_advance(c);
 		cxx_scope_push(c, s);
 		cxx_condition_parse(c);
+		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : 0;
 		cxx_statement_parse(c);
+		gen_body = cxx_gen_nested(c, sloc);
 		c->scope = outer;
+		if (gen_cond && gen_body && cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_new_statement(c, N_WHILE, sloc, gen_cond, gen_body, 0));
 		return;
 	}
 	case CXX_KW_do:
@@ -313,12 +368,16 @@ VPRIV void cxx_statement_parse(cxx *c)
 		cxx_advance(c);
 		cxx_for_parse(c);
 		return;
-	case CXX_KW_return: case CXX_KW_co_return:
+	case CXX_KW_return: case CXX_KW_co_return: {
+		bool is_return = cxx_is_kw(c, CXX_KW_return), has_value = false;
+		uint32_t value = 0;
+
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
-			cxx_braced_init_list_parse(c);
+			cxx_braced_init_list_parse(c), has_value = true;
 		else if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
 			cxx_expression_parse(c);
+			has_value = true, value = c->enode;
 			if (c->ret_capture)
 				c->ret_seen = 1;
 			/* an auto return type: the first return's (the others must agree) */
@@ -327,11 +386,23 @@ VPRIV void cxx_statement_parse(cxx *c)
 		} else if (c->ret_capture && c->ret_type == CXX_TY_UNKNOWN && !c->tentative)
 			c->ret_type = cc_type_basic(TY_VOID), c->ret_lval = 0;
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
+		if (is_return && cxx_gen_on(c)) {
+			uint32_t r = cxx_gen_return(c, value, has_value, sloc);
+
+			if (r)
+				cxx_gen_statement(c, r);
+		}
 		return;
-	case CXX_KW_break: case CXX_KW_continue:
+	}
+	case CXX_KW_break: case CXX_KW_continue: {
+		int op = cxx_is_kw(c, CXX_KW_break) ? N_BREAK : N_CONTINUE;
+
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
+		if (cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_new_statement(c, op, sloc, 0, 0, 0));
 		return;
+	}
 	case CXX_KW_goto:
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_STAR))
@@ -401,11 +472,14 @@ VPRIV void cxx_statement_parse(cxx *c)
 	}
 	if (cxx_declaration_statement_try(c)) {
 		cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
+		cxx_gen_statement(c, 0);	/* (its variables' declarations were appended to the block) */
 		return;
 	}
 	uint32_t start = c->pos;
 
 	cxx_expression_parse(c);
+	if (cxx_gen_on(c) && c->enode)
+		cxx_gen_statement(c, cxx_gen_new_statement(c, N_EXPR, sloc, c->enode, 0, 0));
 	if (!c->tentative && !c->template_depth && !c->instantiating) {
 		static int dump = -1;
 

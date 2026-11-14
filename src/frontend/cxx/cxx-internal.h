@@ -128,6 +128,7 @@ typedef struct cxx_entity {
 	uint8_t late_done;
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
+	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
@@ -246,6 +247,7 @@ typedef struct cxx {
 		uint32_t asserts_true, asserts_false, asserts_unknown;	/* static_asserts outside templates */
 		uint32_t calls, calls_typed, why[12];	/* calls outside templates; why a call has no type (CXX_WHY_*) */
 		uint32_t ooc_bodies, ooc_failed, ooc_ambiguous;	/* class template members defined outside the class, instantiated */
+		uint32_t functions, functions_generated;	/* function definitions at namespace scope; with code */
 		uint32_t bodies, bodies_failed, bodies_cached, body_depth_max, member_bodies, member_bodies_failed;	/* function template bodies instantiated */
 	} stats;
 	/* instantiation (instantiate.c) */
@@ -317,6 +319,16 @@ typedef struct cxx {
 	uint8_t no_literal, rank_no_literal;	/* the next call's arguments are types, not expressions (a trait's): an integer is no null pointer constant; while ranking */
 	uint32_t einvalid_at;		/* where einvalid was last set (VCC_CXX_SIG) */
 	uint8_t op_lv_set, op_lv[17];	/* the next operator call's operands: lvalues or not (the object first) */
+	/* code generation (codegen.c): the AST of the function body being parsed */
+	uint32_t c_linkage;		/* > 0: inside extern "C" */
+	uint8_t gen, gen_failed;	/* building it; something in it is not built yet (the function stays undefined) */
+	uint32_t enode;			/* the expression's AST node (0: not built) */
+	uint32_t snode, sdone, sdepth;	/* the statement's node; the statement depth that set it; the depth now */
+	void *gen_block;		/* the block being built: its statements (a cc_id_list) */
+	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
+	qty gen_ret;			/* its return type */
+	uint32_t gen_fn;		/* (the AST's current function, restored after) */
+	uint32_t carg_nodes[16];	/* the last argument list's nodes */
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */
@@ -432,6 +444,26 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 		fprintf(stderr, "invalid at token %u (%s:%d)\n", c->pos, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 }
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV bool cxx_gen_on(cxx *c);
+VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
+#define cxx_gen_fail(c) cxx_gen_fail_at(c, __FILE__, __LINE__)
+VPRIV bool cxx_gen_type_ok(cxx *c, qty t);
+VPRIV void cxx_gen_integer(cxx *c, int64_t v, qty t, uint32_t loc);
+VPRIV void cxx_gen_floating(cxx *c, const char *text, size_t len, qty t, uint32_t loc);
+VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc);
+VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
+VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
+VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
+VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);
+VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e);
+VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc);
+VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc);
+VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_init, uint32_t loc);
+VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
+VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);

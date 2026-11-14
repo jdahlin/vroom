@@ -121,6 +121,8 @@ static void cxx_name_type(cxx *c, cxx_entity *e)
 	c->edecl_name = 1;
 	if (v && v->has_value && !v->placeholder)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
+	if (v)
+		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
 }
 
 /*
@@ -331,6 +333,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	qty args[16];
 	uint8_t lval[16];
 	uint32_t n = 0;
+	uint32_t nodes[16] = { 0 };
 	bool unknown = false, first_const = false;
 	int64_t first_value = 0;
 
@@ -400,7 +403,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
 		if (n < 16)
-			args[n] = c->etype, lval[n] = c->elval;
+			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode;
 		if (!n)
 			first_const = c->econst, first_value = c->evalue;
 		n++;
@@ -413,6 +416,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	if (n > 16)
 		unknown = true;
 	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
+	memcpy(c->carg_nodes, nodes, sizeof nodes);
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
 		c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
@@ -845,8 +849,10 @@ static void cxx_primary_expression_parse(cxx *c)
 
 			if (cxx_number_value(t, &v))
 				cxx_ec(c, nt, v);
-			else if (!c->tentative)
+			else if (!c->tentative) {
 				cxx_et(c, nt, false);
+				cxx_gen_floating(c, t->s, t->len, nt, t->loc);
+			}
 		}
 		return;
 	case LEX_TOKEN_CHARACTER: case LEX_TOKEN_WIDE_CHARACTER: case LEX_TOKEN_UTF8_CHARACTER:
@@ -1169,8 +1175,12 @@ static void cxx_postfix_expression_parse(cxx *c)
 					;	/* an object of class type: its operator() */
 				else {
 					uint8_t was = c->einvalid;	/* (an earlier part of the expression may be ill-formed already) */
+					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
+					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					if (set && c->call_resolved && c->call_picked && !call_obj && c->etype != CXX_TY_UNKNOWN)
+						cxx_gen_call(c, c->call_picked, anodes, an, cloc);
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
 					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {
@@ -1276,11 +1286,17 @@ static void cxx_postfix_expression_parse(cxx *c)
 			}
 			continue;
 		}
-		case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
+		case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS: {
+			int op = cxx_kind(c);
+			uint32_t xn = c->enode, oploc = cxx_peek(c, 0)->loc;
+			bool built_in = c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR);
+
 			cxx_advance(c);
-			cxx_et(c, c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) ||
-								 AST_TYPE_KIND(c->ast, c->etype) == TY_PTR) ? QUNQ(c->etype) : CXX_TY_UNKNOWN, false);
+			cxx_et(c, built_in ? QUNQ(c->etype) : CXX_TY_UNKNOWN, false);
+			if (built_in)
+				cxx_gen_postfix(c, op, xn, oploc);
 			continue;
+		}
 		}
 		return;
 	}
@@ -1334,14 +1350,19 @@ static void cxx_unary_expression_parse(cxx *c)
 
 			uint32_t opid = cxx_operator_id_at(c, 1);
 
+			uint32_t oploc = cxx_peek(c, 0)->loc;
+
 			cxx_advance(c);
 			cxx_cast_expression_parse(c);
 			{
 				bool k = c->econst;
 				int64_t v = c->evalue;
+				uint32_t xn = c->enode;
 
-				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0))
+				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0)) {
 					cxx_unary_type(c, op, c->etype, c->elval);
+					cxx_gen_unary(c, op, xn, oploc);
+				}
 				if (k && (op == LEX_TOKEN_EXCLAMATION || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_PLUS || op == LEX_TOKEN_TILDE)) {
 					c->evalue = op == LEX_TOKEN_EXCLAMATION ? !v : op == LEX_TOKEN_MINUS ? (int64_t)(0 - (uint64_t)v) :
 						    op == LEX_TOKEN_TILDE ? ~v : v;
@@ -1545,6 +1566,8 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 		{
 			qty l = c->etype;
 			bool ll = c->elval;
+			uint32_t ln = c->enode, oploc = cxx_peek(c, 0)->loc;
+			bool built_in = false;
 			uint32_t k;
 			int op = cxx_operator_at(c, &k);
 			uint32_t opid = cxx_operator_id_at(c, k);
@@ -1557,10 +1580,14 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			cxx_binary_expression_parse(c, p + 1);
 			rk = c->econst, rv = c->evalue;
 			qty rt = c->etype;
+			uint32_t rn = c->enode;
+
 			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
 			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1))
-				cxx_binary_type(c, op, l, rt);
+				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;
+			if (built_in)
+				cxx_gen_binary(c, op, ln, rn, oploc);
 			/* constants: both operands, or the left alone when it decides && and || */
 			if (lk && rk) {
 				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&
@@ -1654,6 +1681,8 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 	if (cxx_is_assignment_operator(c, &n)) {
 		qty l = c->etype;
 		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == TY_PTR);
+		uint32_t ln = c->enode, oploc = cxx_peek(c, 0)->loc, ntok = n;
+		int optok = cxx_operator_at(c, &ntok);
 
 		uint32_t opid = cxx_operator_id_at(c, n);
 
@@ -1662,8 +1691,14 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 		while (n--)
 			cxx_advance(c);
 		cxx_initializer_parse(c);
-		if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, &c->etype, 1))
-			cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
+		{
+			uint32_t rn = c->enode;
+
+			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, &c->etype, 1))
+				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
+			if (built_in)
+				cxx_gen_assignment(c, optok, ln, rn, oploc);
+		}
 	}
 }
 

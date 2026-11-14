@@ -16,6 +16,7 @@
 VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
 	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0, c->econst = 0;
+	c->enode = 0;	/* (built by what follows the typing, where code is generated for it) */
 	c->edecl = t, c->edecl_name = 0;
 	c->ename = 0, c->ename_missing = 0;	/* (a name only until something is done with it) */
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
@@ -992,6 +993,8 @@ VPRIV void cxx_ec(cxx *c, qty t, int64_t v)
 		}
 	}
 	c->evalue = v, c->econst = 1;
+	if (c->gen)	/* (code generation: the constant's node) */
+		cxx_gen_integer(c, v, t, c->tok[c->pos ? c->pos - 1 : 0].loc);
 }
 
 /* an integer literal's value (decimal, hex, octal, binary, ' separators, u/l suffixes) */

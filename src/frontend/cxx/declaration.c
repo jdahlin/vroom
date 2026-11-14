@@ -2853,6 +2853,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		cxx_entity *const_e = NULL;	/* a const integer whose initializer is evaluated */
 		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
 		cxx_entity *decl_fn = NULL;	/* the function it declares (= delete, = default follow the declarator) */
+		uint32_t gen_local = 0;		/* code generation: the local variable's symbol */
+		uint32_t gen_after_declarator = c->pos;
+		bool gen_declared = false;
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
 			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
@@ -2944,6 +2947,13 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->ty = t;	/* a variable's, a data member's, a function's type */
 			if (e && kind == CXX_ENTITY_VALUE && auto_pattern != CXX_TY_UNKNOWN)
 				auto_e = e;
+			/* code generation: a local variable of the function body being built */
+			if (e && kind == CXX_ENTITY_VALUE && !f && context == CXX_CONTEXT_BLOCK && cxx_gen_on(c)) {
+				if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
+					cxx_gen_fail(c);
+				else
+					gen_local = e->sym = cxx_gen_local(c, name, t, name_loc);
+			}
 			/* a variable template: its initializer, evaluated with arguments (cxx_vtemplate_value); a partial
 			   or explicit specialization joins the primary */
 			if (e && !f && !c->tentative && !c->instantiating && !(flags & DS_TYPEDEF) && cxx_is(c, LEX_TOKEN_EQUAL)) {
@@ -2974,7 +2984,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
-				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc);
+				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
+				e->global_ns = cxx_declaration_scope(c) == c->global;
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL)) {
 				int64_t v;
@@ -3089,7 +3100,15 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				}
 				cxx_scope_push(c, fs);
 				cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
-				cxx_function_body_parse(c);
+				{
+					/* code generation: a function at namespace scope that is no template and no member */
+					bool gen = context == CXX_CONTEXT_NAMESPACE && !qs && decl_fn && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON) &&
+						   cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+
+					cxx_function_body_parse(c);
+					if (gen)
+						cxx_gen_function_end(c, decl_fn, c->snode);
+				}
 				c->scope = outer;
 			}
 			return;
@@ -3112,6 +3131,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 
 				cxx_initializer_parse(c);
+				if (gen_local) {
+					cxx_gen_local_declare(c, gen_local, braced ? 0 : c->enode, true, name_loc);
+					gen_declared = true;
+				}
 				/* auto x = expr: its type from the initializer's */
 				if (auto_e && !braced && c->etype != CXX_TY_UNKNOWN) {
 					bool k = c->econst;
@@ -3144,6 +3167,13 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		} else if (object)
 			cxx_ctor_use(c, t, NULL, NULL, 0, false);	/* default-initialization */
 	next:
+		/* code generation: a local with no initializer; one with a form of initializer not built yet */
+		if (gen_local && !gen_declared) {
+			if (c->pos == gen_after_declarator)
+				cxx_gen_local_declare(c, gen_local, 0, false, c->tok[c->pos ? c->pos - 1 : 0].loc);
+			else
+				cxx_gen_fail(c);
+		}
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
@@ -3325,6 +3355,10 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 		return;
 	case CXX_KW_extern:
 		if (cxx_peek(c, 1)->kind == LEX_TOKEN_STRING) {	/* extern "C" */
+			const cxx_token *ls = cxx_peek(c, 1);
+			uint32_t outer = c->c_linkage;
+
+			c->c_linkage = ls->len == 3 && ls->s[1] == 'C' ? outer + 1 : 0;	/* (extern "C++" inside extern "C": C++ again) */
 			cxx_advance(c);
 			cxx_advance(c);
 			if (cxx_accept(c, LEX_TOKEN_LEFT_BRACE)) {
@@ -3333,6 +3367,7 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 				cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
 			} else
 				cxx_declaration_parse(c, context);
+			c->c_linkage = outer;
 			return;
 		}
 		if (cxx_peek(c, 1)->kw == CXX_KW_template) {	/* extern template class X<int>; */

@@ -97,6 +97,12 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u; partial specializations: %u matched, %u unknown\n",
 			c.instances_made, c.instances_failed, c.ninstances, c.partial_matches, c.partial_unknown);
 	}
+	/* code generation: the functions whose bodies were built (codegen.c), through C's emitter */
+	if (!status && co->emit && !pp_error_count(p)) {
+		if (o->progress)
+			dprintf(o->errfd, "cxx: function definitions %u, with code %u\n", c.stats.functions, c.stats.functions_generated);
+		status = emit_tu(c.ast, co) != 0;
+	}
 	if (c.layout_fd >= 0)
 		close(c.layout_fd);
 	cxx_free(&c);
