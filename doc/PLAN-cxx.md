@@ -1291,3 +1291,18 @@ går genom `std::ostream`: libc++:s `basic_ostream` har en virtuell bas
 Nästa steg för att vcc själv ska generera json-sviten: virtuella baser
 (layout, VTT, konstruktorer), sedan jämförelseoperatorerna.  `cxx-fork.py`
 oförändrat: 69/70, 3,8 s CPU, 2 215 funktioner.
+
+### Status (43): referenser till alla klasser; nästa hinder är packar och virtuella baser (2026-11-14)
+En referens är en adress som en pekare: `std::ostream &` som parameter
+fäller inte längre funktionen (`put(std::ostream &, int)` får kod; vad som
+görs genom referensen kontrolleras där det görs).  json-sviten oförändrad
+(69/70, 3,8 s, 2 215 funktioner, 10 av 118 testfunktioner): testkropparna
+stoppas av allmänna luckor, i ordning efter hur ofta de syns:
+- funktionsmallar med parameterpackar (`std::tie(Args&...)`,
+  `__construct_at_end`): instansens typ beräknas inte, anropet blir otypat;
+- virtuella baser (`basic_ostream`: `operator<<(ostream&, char)` och allt
+  som skriver till en ström);
+- `operator()` på en temporär (`__destroy_vector(*this)()` i `~vector`);
+- `<=>` med `std::is_lt`, `static_cast<const Bas &>(*this)`.
+Fel som hittades: medlemsfunktioner definierade utanför en explicit
+specialisering med `inline` (`__bitset<0, 0>`) blir starka symboler.

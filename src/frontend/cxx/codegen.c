@@ -159,8 +159,15 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 	if (t == CXX_TY_UNKNOWN)
 		return false;
 	k = AST_TYPE_KIND(c->ast, t);
-	if (k == TY_PTR && AST_TYPE(c->ast, t)->ext)
-		return cxx_gen_object_type_ok(c, AST_TYPE(c->ast, t)->base);
+	if (k == TY_PTR && AST_TYPE(c->ast, t)->ext) {
+		/* a reference is an address, as a pointer is: a class it refers to need not be one code is built for
+		   (std::ostream &, a virtual base's class); what is done through it is checked where it is done */
+		qty b = AST_TYPE(c->ast, t)->base;
+
+		if (b != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b) && AST_TYPE_KIND(c->ast, b) != TY_ARRAY)
+			return true;
+		return cxx_gen_object_type_ok(c, b);
+	}
 	if (k == TY_STRUCT || k == TY_UNION)
 		return cxx_class_layout_info(c, t, &pod, &empty) && pod &&	/* (an instance is completed here if it was not yet) */
 		       (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE);
