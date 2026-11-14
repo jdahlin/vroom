@@ -263,6 +263,9 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
 			const char *m = strstr(a, "-macos");
 
+			if (a[1] == '-')
+				job->target_name = a + 9;
+
 			job->wasm_bits = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
 #ifndef VCC_WASM
 			if (job->wasm_bits) {
@@ -289,6 +292,10 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 				job->macos_minimum_version = strchr(a, '=') + 1, job->macos_minimum_source = 1;
 		}
 		else if (!strcmp(a, "-nostdinc")) job->no_standard_includes = 1;
+		else if (!strcmp(a, "-nobuiltininc")) job->no_builtin_includes = 1;
+		else if (!strcmp(a, "-v")) job->verbose = 1;
+		else if (!strncmp(a, "-resource-dir=", 14)) job->resource_dir = a + 14;
+		else if (!strcmp(a, "-resource-dir") && i + 1 < argc) job->resource_dir = argv[++i];
 		else if (!strncmp(a, "--sysroot=", 10)) job->sysroot = a + 10;
 		else if (!strcmp(a, "--sysroot") && i + 1 < argc) job->sysroot = argv[++i];
 		else if (!strcmp(a, "-mms-bitfields")) job->ms_bitfields = 1;
@@ -397,6 +404,15 @@ VPRIV int driver_cmdline_check(struct driver_job *job)
 
 		dprintf(job->errfd, "vcc: error: invalid value '%s' in '%.*s'\n", eq + 1, (int)(eq + 1 - job->bad_value_option), job->bad_value_option);
 		job->status = 1;
+		return 1;
+	}
+	if (!job->main_file && job->verbose) {
+		/* `cc -v` alone: the banner, as clang's (to stderr, status 0); configure scripts
+		   tell compilers apart by it (zlib's looks for "gcc" or "clang") */
+		dprintf(job->errfd, "vcc version 1.0 (clang %d compatible)\nTarget: %s\nThread model: posix\n", 23,
+			job->target_name ? job->target_name : job->target_x64 ? "x86_64-unknown-linux-gnu" :
+			job->darwin ? "arm64-apple-darwin" : "aarch64-unknown-linux-gnu");
+		job->status = 0;
 		return 1;
 	}
 	if (!job->main_file) {

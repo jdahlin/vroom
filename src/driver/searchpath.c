@@ -123,14 +123,24 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environm
 			job->depfile_first_input = NULL;
 	}
 	(void)job->hosted;
-#ifdef VCC_RESDIR
-	/* Windows (MinGW-w64), as clang's MinGW toolchain: the resource headers, then the sysroot's
+	/* Windows (MinGW-w64), in clang's MinGW order: the compiler's headers, then the sysroot's
 	   <triple>/include, <triple>/usr/include (if it exists) and include; no sysroot: only the
-	   resource headers.  None of them is an extern "C" directory. */
+	   compiler's.  The compiler's are vcc's own (VCC_INCDIR's freestanding/ and x86/: what the
+	   sysroot leaves to the compiler, PLAN-win64.md WIN8), never clang's resource directory
+	   unless -resource-dir names one (then DIR/include, as clang); -nobuiltininc drops them.
+	   None of them is an extern "C" directory. */
 	if (job->target_win64 && !job->no_standard_includes) {
 		char (*win)[4200] = job->sysroot_directories;
 
-		ADD(VCC_RESDIR);
+		if (job->no_builtin_includes)
+			;
+		else if (job->resource_dir) {
+			snprintf(win[3], sizeof(win[3]), "%s/include", job->resource_dir);
+			ADD(win[3]);
+		} else {
+			ADD(VCC_INCDIR "/freestanding");
+			ADD(VCC_INCDIR "/x86");
+		}
 		if (job->sysroot && *job->sysroot) {
 			snprintf(win[0], sizeof(win[0]), "%s/x86_64-w64-mingw32/include", job->sysroot);
 			snprintf(win[1], sizeof(win[1]), "%s/x86_64-w64-mingw32/usr/include", job->sysroot);
@@ -140,9 +150,10 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environm
 				ADD(win[1]);
 			ADD(win[2]);
 		}
-	} else
+	}
+#ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
-	if (job->hosted && !job->darwin && !job->no_standard_includes) {
+	else if (job->hosted && !job->darwin && !job->no_standard_includes) {
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
 		job->pp_options.xc0 = job->search_count;	/* clang: extern "C" system directories (" 3 4" in line markers) */

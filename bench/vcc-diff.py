@@ -69,13 +69,16 @@ def win64_tus(pat=None):
     sr = win64_sysroot()
     inc = f'{sr}/x86_64-w64-mingw32/include'
     os.makedirs(f'{B}/hdr', exist_ok=True)
+    # clang's resource headers on both sides: vcc's default for the target is its own
+    # (src/headers/freestanding, x86), parity is with clang's (PLAN-win64.md WIN8)
+    res = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip()
     out = []
     for i, (h, fl) in enumerate([(h, []) for h in sorted(os.listdir(inc)) if h.endswith('.h') and os.path.isfile(f'{inc}/{h}')] + WIN64_VARIANTS):
         name = h[:-2] + (f'.v{i}' if fl else '')
         f = f'hdr/{name}.c'
         if not os.path.exists(f'{B}/{f}'):
             open(f'{B}/{f}', 'w').write(f'#include <{h}>\n')
-        out.append((f'win64/{name}.o', [WIN64_TARGET, f'--sysroot={sr}'] + fl + [f]))
+        out.append((f'win64/{name}.o', [WIN64_TARGET, f'--sysroot={sr}', f'-resource-dir={res}'] + fl + [f]))
     # what clang itself accepts (cached by clang's binary and the sysroot)
     key = hashlib.sha1(repr((os.stat(CL).st_mtime_ns, sr, os.stat(inc).st_mtime_ns, len(out))).encode()).hexdigest()[:16]
     acc = f'{B}/accepted-{key}'
