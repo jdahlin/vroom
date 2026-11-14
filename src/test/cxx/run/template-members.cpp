@@ -11,7 +11,7 @@ template <class T> struct L {
 	class D { L &l; public: D(L &x) : l(x) {} void operator()() { hits += (int)l.n; } };
 	~L() { D(*this)(); }
 };
-template <class T> constexpr typename L<T>::size_type L<T>::size() const noexcept { calls++; return n; }
+template <class T> typename L<T>::size_type L<T>::size() const noexcept { calls++; return n; }
 template <class T> int L<T>::other() const { return calls; }
 struct V;
 struct R { V &v; R(V &x) : v(x) {} };
