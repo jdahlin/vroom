@@ -1374,6 +1374,33 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling the assembler statement parser (2026-11-14).**
+The assembler statement path was the next large cycle gap once clang's inlining was
+accounted for. In five baseline compiles, as_snippet_assemble and its callees took
+1,837 self-hosted vs 1,500 clang-built samples (period 75,001 user cycles), or about
+5.1M excess cycles per compile. An unsupported 128-bit multiply in the inlined .octa
+directive made the whole statement parser fall back to direct emission. The identifier
+loop repeatedly spilled the cursor. Clang used a six-instruction loop including a
+memory TESTB.
+
+Lower the low 128 bits of a product in SysV x86 VIR with UMULHI and the two cross
+products. Keep directive dispatch out of the statement loop and skip the macro hash
+when no macros are defined. With wide multiply alone, inlining produced a 119 KiB
+as_snippet_assemble. Keeping directive dispatch separate reduced it to 34 KiB. The
+self-hosted identifier loop now walks the cursor in a register in nine instructions.
+The five-compile inclusive counts after the change were 1,474 self-hosted and 1,478
+clang-built.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 175.64 / 173.35 ms | 135.16 / 135.22 ms | 1.299× / 1.282× |
+| 21 runs alternating order | 176.43 / 174.12 ms | 135.56 / 135.55 ms | 1.301× / 1.285× |
+
+Same -O2 -c workload, CPU 7, one emitter thread, warm-up excluded. Median retired
+instructions fell by 38.0M self-hosted and 2.0M clang-built in the rotating run. All
+four binaries emitted the same SQLite object, and the linked recursive SQL query
+returned 500500.
+
 **SQLite after profiling x86 record operands (2026-11-14).** Among the
 comparable exclusive functions, codegen_chunks_commit had the largest gap
 after the previously optimized walk_lvalue_load (911 vs 506 samples, five

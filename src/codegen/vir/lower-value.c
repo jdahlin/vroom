@@ -508,6 +508,16 @@ VPRIV codegen_value virbuild_wbin(codegen_context *e, int op, bool sgn, codegen_
 		return virbuild_wide_pack(e, left ? outer : inner, left ? inner : outer);
 	}
 	virbuild_wide_unpack(e, b, y);
+	if (op == LEX_TOKEN_STAR) {
+		/* Modulo 2^128, only the low product and the two cross terms survive. */
+		lo = virbuild_insn_append(e, VIR_OP_MUL, VIR_TYPE_I64, 0, x[0], y[0], 0);
+		hi = virbuild_insn_append(e, VIR_OP_UMULHI, VIR_TYPE_I64, 0, x[0], y[0], 0);
+		uint32_t cross0 = virbuild_insn_append(e, VIR_OP_MUL, VIR_TYPE_I64, 0, x[0], y[1], 0);
+		uint32_t cross1 = virbuild_insn_append(e, VIR_OP_MUL, VIR_TYPE_I64, 0, x[1], y[0], 0);
+		hi = virbuild_insn_append(e, VIR_OP_ADD, VIR_TYPE_I64, 0, hi, cross0, 0);
+		hi = virbuild_insn_append(e, VIR_OP_ADD, VIR_TYPE_I64, 0, hi, cross1, 0);
+		return virbuild_wide_pack(e, lo, hi);
+	}
 	uint32_t opcode;
 	switch (op) {
 	case LEX_TOKEN_AMPERSAND: opcode = VIR_OP_AND; break;
