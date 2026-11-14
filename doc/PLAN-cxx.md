@@ -1858,3 +1858,9 @@ libc++:s `__static_fancy_pointer_cast` i json-testerna och togs bort.)
 gemensamma typer och prototyper i `declaration.h`, `expression.h`, `instantiate.h`.  Ren flytt: -S-utdata
 byte för byte lika med bygget före delningen på unit-algorithms, unit-hash, unit-noexcept; varje fil
 kompilerar ensam (`VCC_UNITY=`).  cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36; cxx-strict oförändrat.
+
+## Status 101 (2026-11-14)
+Konstruktormallar definierade utanför en partiell specialisering (`function<_Rp(_ArgTypes...)>::function(_Fp)`)
+hittas (registrerade under klassens namn), även när primärmallen bara är deklarerad, och tolkas som
+konstruktorer (ingen returtyp).  Kroppar vcc aldrig tolkade: 53 → 24; summan oförändrad 342 (de tolkas nu och
+stannar vid nästa sak: std::function når `typeid(_Fp)` i `__func::target_type`, typeid saknas).

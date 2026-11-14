@@ -267,14 +267,16 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 	jmp_buf jb;
 	uint32_t matches = 0;
 
-	if (!t || !inst || (x->pos && (!x->pargs || !t->params || x->npargs == t->params->ntparams)))
+	if (!t || !inst || (x->pos && (!x->pargs || (t->params && x->npargs == t->params->ntparams))))
 		return false;	/* (a partial specialization's instance: its definitions told apart by their parameter count) */
 	const cxx_targ *bargs = x->pos ? x->pargs : x->args;
 	uint32_t nbargs = x->pos ? x->npargs : x->nargs;
 
 	for (uint32_t i = 0; i < t->noocs; i++)
-		if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams &&
-		    (!t->params || (x->pos ? t->oocs[i].params->ntparams == nbargs : t->oocs[i].params->ntparams == t->params->ntparams)))
+		if (t->oocs[i].inner && (t->oocs[i].name == inst->name ||	/* (a constructor template: X<...>::X, by the class's name) */
+					 (inst->name == cxx_ctor_id() && cs->owner && t->oocs[i].name == cs->owner->name)) &&
+		    t->oocs[i].inner->ntparams == f->p.params->ntparams &&
+		    (x->pos ? t->oocs[i].params->ntparams == nbargs : !t->params || t->oocs[i].params->ntparams == t->params->ntparams))
 			d = &t->oocs[i], matches++;	/* (the primary's: a partial specialization's definitions, vector<bool, A>'s, have its parameters) */
 	if (matches != 1 || d->params->ntparams > nbargs + 1)
 		return false;
@@ -321,7 +323,8 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 		bool b = false;
 
 		inst->ty = CXX_TY_UNKNOWN;	/* (its type again, from the definition: the body's code takes it) */
-		(void)cxx_function_signature_parse(c, false, &b, NULL);
+		/* (a constructor template: no return type to parse, its class says what it constructs) */
+		(void)cxx_function_signature_parse(c, false, &b, f->ctor_class ? f->ctor_class : inst->name == cxx_ctor_id() ? cs : NULL);
 		c->stats.ooc_bodies++;
 	} else
 		c->stats.ooc_failed++;
