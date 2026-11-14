@@ -148,8 +148,8 @@ static int cc_builtin_os_log_layout(cc *c, const char *f, size_t len, const uint
 static uint32_t cc_builtin_os_log_argument(cc *c, uint32_t a)
 {
 	a = cc_node_rvalue(c, cc_conversion_decay(c, a));
-	if (AST_TYPE_KIND(c, AST_NODE(a)->ty) == TY_FLOAT)
-		return cc_cast_insert(c, a, cc_type_basic(TY_DOUBLE), CK_F2F);
+	if (AST_TYPE_KIND(c, AST_NODE(a)->ty) == AST_TYPE_FLOAT)
+		return cc_cast_insert(c, a, cc_type_basic(AST_TYPE_DOUBLE), AST_CAST_FLOAT_TO_FLOAT);
 	if (cc_type_is_integer(c, AST_NODE(a)->ty))
 		return cc_conversion_apply(c, a, cc_type_promote(c, AST_NODE(a)->ty));
 	return a;
@@ -159,15 +159,15 @@ CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc)
 {
 	cc_id_list args;
 	cc_builtin_arguments_parse(c, &args);
-	unsigned first = id == BI_OS_LOG_FORMAT ? 1 : 0;
+	unsigned first = id == CC_BUILTIN_OS_LOG_FORMAT ? 1 : 0;
 	if (args.n < first + 1) {
 		cc_builtin_arity_check(c, loc, first + 1, &args);
 		return cc_node_error_new(c, loc);
 	}
 	uint32_t s = args.v[first];
-	while (AST_NODE(s)->op == N_CAST)
+	while (AST_NODE(s)->op == AST_NODE_CAST)
 		s = AST_NODE(s)->a;
-	if (AST_NODE(s)->op != N_STR) {
+	if (AST_NODE(s)->op != AST_NODE_STRING) {
 		cc_report_error(c, AST_NODE(args.v[first])->loc, "os_log() format must be a string literal");
 		return cc_node_error_new(c, loc);
 	}
@@ -189,21 +189,21 @@ CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc)
 		if (it[i].desc >> 4)
 			summary |= 2;
 	}
-	if (id == BI_OS_LOG_SIZE)
+	if (id == CC_BUILTIN_OS_LOG_SIZE)
 		return cc_node_integer_new(c, size, c->t_size, loc);
 
 	/* ({ unsigned char *p = buf; p[0] = summary; ...; *(AST_TYPE *)(p + k) = arg; ...; (void *)p; }) */
 	cc_id_list body;
 	cc_id_list_init(&body);
-	qty u8p = cc_type_pointer(c, cc_type_basic(TY_UCHAR));
+	ast_qualified_type u8p = cc_type_pointer(c, cc_type_basic(AST_TYPE_UNSIGNED_CHAR));
 	uint32_t buf = cc_node_rvalue(c, cc_conversion_decay(c, args.v[0]));
 	if (!cc_type_is_pointer(c, AST_NODE(buf)->ty)) {
 		cc_report_error(c, AST_NODE(args.v[0])->loc, "os_log() buffer must be a pointer");
 		return cc_node_error_new(c, loc);
 	}
-	uint32_t p = cc_lowering_local_new(c, &body, u8p, cc_cast_insert(c, buf, u8p, CK_NOP), loc);
-#define CC_BUILTIN_OS_LOG_AT(OFF) cc_dereference_build(c, cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (OFF), cc_type_basic(TY_LONG), loc), loc), loc)
-#define CC_BUILTIN_OS_LOG_BYTE(OFF, V) cc_lowering_statement_append(c, &body, cc_assignment_build(c, 0, CC_BUILTIN_OS_LOG_AT(OFF), cc_node_integer_new(c, (V), cc_type_basic(TY_UCHAR), loc), loc), loc)
+	uint32_t p = cc_lowering_local_new(c, &body, u8p, cc_cast_insert(c, buf, u8p, AST_CAST_NOP), loc);
+#define CC_BUILTIN_OS_LOG_AT(OFF) cc_dereference_build(c, cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (OFF), cc_type_basic(AST_TYPE_LONG), loc), loc), loc)
+#define CC_BUILTIN_OS_LOG_BYTE(OFF, V) cc_lowering_statement_append(c, &body, cc_assignment_build(c, 0, CC_BUILTIN_OS_LOG_AT(OFF), cc_node_integer_new(c, (V), cc_type_basic(AST_TYPE_UNSIGNED_CHAR), loc), loc), loc)
 	CC_BUILTIN_OS_LOG_BYTE(0, summary);
 	CC_BUILTIN_OS_LOG_BYTE(1, (unsigned)n);
 	uint64_t off = 2;
@@ -213,10 +213,10 @@ CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc)
 		off += 2;
 		if (it[i].size) {
 			uint32_t v = it[i].arg >= 0 ? va[it[i].arg]
-			           : cc_node_integer_new(c, (i128)it[i].imm, it[i].size == 8 ? cc_type_basic(TY_ULLONG) : cc_type_basic(TY_UINT), loc);
-			qty t = AST_NODE(v)->ty;
-			uint32_t at = cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (i128)off, cc_type_basic(TY_LONG), loc), loc);
-			uint32_t dst = cc_dereference_build(c, cc_cast_insert(c, at, cc_type_pointer(c, QUNQ(t)), CK_NOP), loc);
+			           : cc_node_integer_new(c, (i128)it[i].imm, it[i].size == 8 ? cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG) : cc_type_basic(AST_TYPE_UNSIGNED_INT), loc);
+			ast_qualified_type t = AST_NODE(v)->ty;
+			uint32_t at = cc_binary_build(c, LEX_TOKEN_PLUS, cc_node_rvalue(c, p), cc_node_integer_new(c, (i128)off, cc_type_basic(AST_TYPE_LONG), loc), loc);
+			uint32_t dst = cc_dereference_build(c, cc_cast_insert(c, at, cc_type_pointer(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), AST_CAST_NOP), loc);
 			cc_lowering_statement_append(c, &body, cc_assignment_build(c, 0, dst, v, loc), loc);
 			off += it[i].size;
 		}
@@ -224,10 +224,10 @@ CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc)
 	/* an argument without a conversion is not evaluated (clang) */
 #undef CC_BUILTIN_OS_LOG_BYTE
 #undef CC_BUILTIN_OS_LOG_AT
-	qty vp = cc_type_pointer(c, cc_type_basic(TY_VOID));
-	cc_lowering_statement_append(c, &body, cc_cast_insert(c, cc_node_rvalue(c, p), vp, CK_NOP), loc);
-	uint32_t block = cc_statement_new(c, N_BLOCK, loc, 0, cc_id_list_freeze(c, &body), body.n);
-	uint32_t out = cc_node_new(c, N_STMTEXPR, vp, loc);
+	ast_qualified_type vp = cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
+	cc_lowering_statement_append(c, &body, cc_cast_insert(c, cc_node_rvalue(c, p), vp, AST_CAST_NOP), loc);
+	uint32_t block = cc_statement_new(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c, &body), body.n);
+	uint32_t out = cc_node_new(c, AST_NODE_STATEMENT_EXPRESSION, vp, loc);
 	AST_NODE(out)->a = block;
 	return out;
 }

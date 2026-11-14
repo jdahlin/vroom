@@ -11,7 +11,7 @@ VPRIV void cxx_for_range_declaration_parse(cxx *c)
 	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 		cxx_fail(c, "expected a type");
 	is_auto = c->ds_auto && c->ds_type == CXX_TY_UNKNOWN, quals = c->ds_quals;
-	c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), quals) : c->ds_type;
+	c->type_in = is_auto ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cxx_auto_type(c)), quals) : c->ds_type;
 	c->range_name = cxx_declarator_parse(c, false, &q, &f, NULL);
 	c->range_type = c->type_out, c->range_auto = is_auto;
 	if (!cxx_is(c, LEX_TOKEN_COLON))

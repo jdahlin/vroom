@@ -35,6 +35,23 @@ VPRIV int x64_i_sse(as_context *a, char *mn, XOp *o, int nops)
 						o[0].kind = XK_MEM;
 					return x64_sse(a, sse[i].pfx, sse[i].op, 0, o[1].reg, &o[0]);
 				}
+		if (nops == 2 && (o[0].cls == XR_MM || o[1].cls == XR_MM)) {
+			int dst = o[1].kind == XK_REG && o[1].cls == XR_MM;
+			XOp *rm = &o[dst ? 0 : 1];
+			int reg = o[dst ? 1 : 0].reg;
+			if (rm->kind == XK_EXPR) rm->kind = XK_MEM;
+			if (!strcmp(mn, "movntq") && !dst && rm->kind == XK_MEM)
+				return x64_sse(a, 0, 0xe7, 0, reg, rm);
+			if (!strcmp(mn, "movq") && (rm->kind == XK_MEM || rm->cls == XR_MM))
+				return x64_sse(a, 0, dst ? 0x6f : 0x7f, 0, reg, rm);
+			int wide = !strcmp(mn, "movq");
+			if ((!strcmp(mn, "movd") || wide) && (rm->kind == XK_MEM ||
+			    (rm->kind == XK_REG && rm->cls == XR_GPR && rm->size == (wide ? 8 : 4))))
+				return x64_sse(a, 0, dst ? 0x6e : 0x7e, wide, reg, rm);
+		}
+		if (nops == 2 && !strcmp(mn, "movntdq") && o[0].kind == XK_REG &&
+		    o[0].cls == XR_XMM && (o[1].kind == XK_MEM || o[1].kind == XK_EXPR))
+			return x64_sse(a, 0x66, 0xe7, 0, o[0].reg, &o[1]);
 		/* moves: load (reg dest) / store forms */
 		{
 			static const struct { const char *n; uint8_t pfx, ld, st; } mv[] = {
@@ -141,7 +158,8 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
 	{
 		static const struct { const char *n; uint8_t pfx, map, op, imm; } x3[] = {
 			{ "pshufb", 0x66, 0x38, 0x00, 0 }, { "phaddw", 0x66, 0x38, 0x01, 0 }, { "phaddd", 0x66, 0x38, 0x02, 0 },
-			{ "pmaddubsw", 0x66, 0x38, 0x04, 0 }, { "psignb", 0x66, 0x38, 0x08, 0 }, { "pmulhrsw", 0x66, 0x38, 0x0b, 0 },
+			{ "pmaddubsw", 0x66, 0x38, 0x04, 0 }, { "psignb", 0x66, 0x38, 0x08, 0 }, { "psignw", 0x66, 0x38, 0x09, 0 }, { "psignd", 0x66, 0x38, 0x0a, 0 },
+			{ "pmulhrsw", 0x66, 0x38, 0x0b, 0 },
 			{ "pabsb", 0x66, 0x38, 0x1c, 0 }, { "pabsw", 0x66, 0x38, 0x1d, 0 }, { "pabsd", 0x66, 0x38, 0x1e, 0 },
 			{ "pmovzxbw", 0x66, 0x38, 0x30, 0 }, { "pmovzxbd", 0x66, 0x38, 0x31, 0 }, { "pmovzxbq", 0x66, 0x38, 0x32, 0 },
 			{ "pmovzxwd", 0x66, 0x38, 0x33, 0 }, { "pmovzxwq", 0x66, 0x38, 0x34, 0 }, { "pmovzxdq", 0x66, 0x38, 0x35, 0 },
@@ -248,7 +266,7 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
 		static const struct { const char *n; uint8_t pfx, op; } pk[] = {
 			{ "paddb", 0x66, 0xfc }, { "paddw", 0x66, 0xfd }, { "paddd", 0x66, 0xfe }, { "paddq", 0x66, 0xd4 },
 			{ "psubb", 0x66, 0xf8 }, { "psubw", 0x66, 0xf9 }, { "psubd", 0x66, 0xfa }, { "psubq", 0x66, 0xfb },
-			{ "pand", 0x66, 0xdb }, { "pandn", 0x66, 0xdf }, { "por", 0x66, 0xeb },
+			{ "pxor", 0x66, 0xef }, { "pand", 0x66, 0xdb }, { "pandn", 0x66, 0xdf }, { "por", 0x66, 0xeb },
 			{ "pcmpeqb", 0x66, 0x74 }, { "pcmpeqw", 0x66, 0x75 }, { "pcmpeqd", 0x66, 0x76 },
 			{ "pcmpgtb", 0x66, 0x64 }, { "pcmpgtw", 0x66, 0x65 }, { "pcmpgtd", 0x66, 0x66 },
 			{ "punpcklbw", 0x66, 0x60 }, { "punpcklwd", 0x66, 0x61 }, { "punpckldq", 0x66, 0x62 }, { "punpcklqdq", 0x66, 0x6c },
@@ -274,13 +292,14 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
 			{ "pslld", 0x72, 6 }, { "psrlq", 0x73, 2 }, { "psllq", 0x73, 6 }, { "psrldq", 0x73, 3 }, { "pslldq", 0x73, 7 },
 		};
 
-		if (nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_XMM) {
+		bool mm = nops == 2 && o[1].kind == XK_REG && o[1].cls == XR_MM;
+		if (nops == 2 && o[1].kind == XK_REG && (mm || o[1].cls == XR_XMM)) {
 			if (o[0].kind == XK_IMM) {
 				for (size_t i = 0; i < sizeof pki / sizeof *pki; i++)
-					if (!strcmp(mn, pki[i].n)) {
+					if (!strcmp(mn, pki[i].n) && !(mm && pki[i].op == 0x73 && (pki[i].d & 1))) {
 						int64_t c = 0;
 						uint8_t ops[2] = { 0x0f, pki[i].op };
-						XForm f = F(.opsz16 = 1, .op = ops, .nop = 2, .reg = pki[i].d, .rm = &o[1], .isz = 1);
+						XForm f = F(.opsz16 = !mm, .op = ops, .nop = 2, .reg = pki[i].d, .rm = &o[1], .isz = 1);
 
 						x64_imm(a, &o[0], &f, &c);
 						f.imm = c;
@@ -288,21 +307,23 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
 					}
 			}
 			for (size_t i = 0; i < sizeof pk / sizeof *pk; i++)
-				if (!strcmp(mn, pk[i].n)) {
+				if (!strcmp(mn, pk[i].n) && (!mm || (mn[0] == 'p' && pk[i].op != 0x6c && pk[i].op != 0x6d)) &&
+				    (o[0].kind != XK_REG || o[0].cls == o[1].cls) && o[0].kind != XK_IMM) {
 					if (o[0].kind == XK_EXPR)
 						o[0].kind = XK_MEM;
-					return x64_sse(a, pk[i].pfx, pk[i].op, 0, o[1].reg, &o[0]);
+					return x64_sse(a, mm ? 0 : pk[i].pfx, pk[i].op, 0, o[1].reg, &o[0]);
 				}
 		}
 		/* with an immediate: pshufd $k, src, dst; shufps; cmpXXss as cmpss $pred */
-		if (nops == 3 && o[0].kind == XK_IMM && o[2].kind == XK_REG && o[2].cls == XR_XMM) {
+		if (nops == 3 && o[0].kind == XK_IMM && o[2].kind == XK_REG && (o[2].cls == XR_XMM || o[2].cls == XR_MM)) {
 			static const struct { const char *n; uint8_t pfx, op; } si[] = {
-				{ "pshufd", 0x66, 0x70 }, { "pshuflw", 0xf2, 0x70 }, { "pshufhw", 0xf3, 0x70 }, { "shufps", 0, 0xc6 },
+				{ "pshufw", 0, 0x70 }, { "pshufd", 0x66, 0x70 }, { "pshuflw", 0xf2, 0x70 }, { "pshufhw", 0xf3, 0x70 }, { "shufps", 0, 0xc6 },
 				{ "shufpd", 0x66, 0xc6 }, { "cmpss", 0xf3, 0xc2 }, { "cmpsd", 0xf2, 0xc2 }, { "cmpps", 0, 0xc2 }, { "cmppd", 0x66, 0xc2 },
 			};
 
 			for (size_t i = 0; i < sizeof si / sizeof *si; i++)
-				if (!strcmp(mn, si[i].n)) {
+				if (!strcmp(mn, si[i].n) && (o[2].cls == XR_MM) == !strcmp(mn, "pshufw") &&
+				    (o[1].kind != XK_REG || o[1].cls == o[2].cls)) {
 					int64_t c = 0;
 					uint8_t ops[2] = { 0x0f, si[i].op };
 					XForm f = F(.rep = si[i].pfx == 0x66 ? 0 : si[i].pfx, .opsz16 = si[i].pfx == 0x66, .op = ops, .nop = 2,

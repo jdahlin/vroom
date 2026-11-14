@@ -47,6 +47,14 @@ VPRIV int as_value_emit(as_context *a, int size, as_value *v)
 
 
 
+VPRIV int as_value_emit_relocation(as_context *a, int size, as_value *v, uint32_t type)
+{
+	as_data_relocation_type = type;
+	int r = as_value_emit(a, size, v);
+	as_data_relocation_type = 0;
+	return r;
+}
+
 /* .octa: 16-byte integer literals (only literals: 128-bit expressions do not exist here) */
 VPRIV int as_directive_octa(as_context *a, const char *p, const char *e)
 {
@@ -175,6 +183,13 @@ VPRIV int as_directive_data(as_context *a, const char *p, const char *e, int siz
 				   as_text_equals(w, "TPOFF") ? (size == 8 ? R_X86_64_TPOFF64 : R_X86_64_TPOFF32) :
 				   as_text_equals(w, "GOTOFF") ? R_X86_64_GOTOFF64 : as_text_equals(w, "GOTPCREL") ? R_X86_64_GOTPCREL :
 				   as_text_equals(w, "PLT") ? R_X86_64_PLT32 : 0;
+			if (a->object->format == OBJ_COFF) {
+				/* (MC: only @IMGREL and @SECREL32 change a 4-byte field's relocation; the rest is ignored) */
+				int k = as_text_equals(w, "IMGREL") ? 1 : as_text_equals(w, "SECREL32") ? 2 : 0;
+				as_data_relocation_type = size == 8 ? R_X86_64_64 : size == 2 ? R_X86_64_16 : size == 1 ? R_X86_64_8 :
+							  k == 1 ? R_VCC_COFF_IMGREL32 : k == 2 ? R_VCC_COFF_SECREL32 : R_X86_64_32;
+				if (!k && !as_at_is_specifier(m, e)) as_data_relocation_type = 0;
+			}
 			if (!as_data_relocation_type) return as_error_report(a, "invalid variant '%.*s'", (int)w.length, w.text);
 			p = as_whitespace_skip(p, e);
 			if (p < e && (*p == '+' || *p == '-')) {
@@ -318,7 +333,7 @@ VPRIV int as_directive_base64(as_context *a, const char *p, const char *e)
 	return 0;
 }
 
-static int as_section_is_code(as_context *a) { return (elf_sec(a->object, elf_frag(a->object, a->fragment_current)->sec)->flags & SHF_EXECINSTR) != 0; }
+static int as_section_is_code(as_context *a) { return (elf_sec(a->object, elf_frag(a->object, a->fragment_current)->sec)->flags & (a->object->format == OBJ_COFF ? COFF_SCN_CODE : SHF_EXECINSTR)) != 0; }
 
 /* .align/.p2align (p2 = 1) or .balign (p2 = 0); .balignw/.p2alignl..: a
  * fill of fsz bytes (little-endian pattern) */
@@ -388,6 +403,12 @@ VPRIV int as_directive_comm(as_context *a, const char *p, const char *e, int loc
 	p = as_whitespace_skip(p, e);
 	if (p < e && *p == ',') { p++; if (as_expression_absolute_parse(a, &p, e, &al)) return -1; }
 	if (size < 0) return as_error_report(a, "invalid '.comm' or '.lcomm' directive size");
+	int coff = a->object->format == OBJ_COFF;
+	if (coff && !local) {	/* COFF: .comm's alignment is a power of two's exponent */
+		if (al < 0) return as_error_report(a, "invalid '.comm' or '.lcomm' directive alignment, can't be less than zero");
+		if (al > 31) return as_error_report(a, "alignment too large");
+		al = (int64_t)1 << al;
+	}
 	if (al < 0 || (al & (al - 1))) return as_error_report(a, "alignment must be a power of 2");
 	uint32_t y = as_symbol_intern(a, nm.text, nm.length);
 	ElfSym *s = elf_symp(a->object, y);
@@ -405,6 +426,7 @@ VPRIV int as_directive_comm(as_context *a, const char *p, const char *e, int loc
 	}
 	s->common = 1;
 	s->value = (uint64_t)(al ? al : 1);
+	if (coff && al > 1) coff_align_common(a->object, y, (unsigned)__builtin_ctzll((uint64_t)al));	/* -aligncomm (MinGW) */
 	return 0;
 }
 

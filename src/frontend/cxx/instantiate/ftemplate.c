@@ -68,9 +68,9 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ 
 	for (uint32_t i = 0; p->params && i < nargs && i < p->params->ntparams && !c->tentative; i++) {
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_scope *b;
-		qty pt;
+		ast_qualified_type pt;
 
-		if (tp->kind != 2 || tp->pack || copy[i].kind != 2 || !tp->type_b || (copy[i].t && AST_TYPE_KIND(c->ast, copy[i].t) == TY_ENUM))
+		if (tp->kind != 2 || tp->pack || copy[i].kind != 2 || !tp->type_b || (copy[i].t && AST_TYPE_KIND(c->ast, copy[i].t) == AST_TYPE_ENUM))
 			continue;
 		/* (only a type named by one identifier, size_type N: one written with arguments or a qualifier,
 		   enable_if_t<...> = 0, is mangled as written, Tn <type>, by the mangler) */
@@ -83,8 +83,8 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ 
 				cxx_bind(c, b, &p->params->tparams[j], &copy[j]);
 			pt = cxx_bind_value_type(c, b, tp->type_b);
 		}
-		if (pt != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, pt) >= TY_BOOL && AST_TYPE_KIND(c->ast, pt) <= TY_UINT128)
-			copy[i].t = QUNQ(pt);
+		if (pt != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, pt) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, pt) <= AST_TYPE_UINT128)
+			copy[i].t = AST_QUALIFIED_TYPE_UNQUALIFIED(pt);
 	}
 	inst->targs = copy, inst->ntargs = nargs, inst->inst_pack_at = UINT32_MAX, inst->inst_params = p->params, inst->abi_tag = te->abi_tag, inst->inst_ftmpl = te->ftmpl;
 	return inst;
@@ -123,7 +123,7 @@ VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e)
 	return !f || f->packs || f->pack_tp || f->pack_param || f->variadic;
 }
 
-VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param)
+VPRIV ast_qualified_type cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const ast_qualified_type **ph, uint32_t *nph, uint32_t *pack_param)
 {
 	cxx_ftemplate *f = inst->inst_ftmpl;
 
@@ -140,7 +140,7 @@ VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **
 /* does the template's declaration (its return type or parameters) use decltype? (clang mangles the
    expression, DT ... E: not written by vcc yet) */
 /* the template's parameters as placeholders (T_, ...), even when its signature did not parse (NULL: none) */
-VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n)
+VPRIV const ast_qualified_type *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n)
 {
 	cxx_ftemplate *f = inst->inst_ftmpl;
 
@@ -240,7 +240,7 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		if (tp->pack)	/* tuple<Ts...> in a parameter's type: a pattern whose arguments end in the pack */
 			e->is_pack = 1, e->pack_index = -1, e->pack_placeholder = (uint16_t)(i + 1), e->npack = 0;
 		if (tp->kind == 1) {
-			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
+			uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, tp->name, 0);
 
 			if (tag >= c->ntag_placeholder) {
 				uint32_t nn = tag + 1024;
@@ -250,7 +250,7 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 				c->ntag_placeholder = nn;
 			}
 			c->tag_placeholder[tag].owner = p, c->tag_placeholder[tag].index = i + 1;
-			p->ph[i] = e->ty = QT(c->ast->tags[tag].ty, 0);
+			p->ph[i] = e->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0);
 		} else
 			e->placeholder = (uint16_t)(i + 1);
 	}
@@ -281,7 +281,7 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 				   only explicit; with them known, tuple<Ts...>& deduces it, cxx_ftemplate_deduce) */
 	c->instantiating--;
 	cxx_state_restore(c, &s);
-	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
+	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != AST_TYPE_FUNCTION)
 		f->sig = CXX_TY_UNKNOWN;
 }
 
@@ -297,7 +297,7 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
  * elements' parameter types), its code generated for inst.  False: no such definition.
  */
 VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *inst, const cxx_targ *bind, uint32_t nbind,
-					 uint32_t pack_from, qty *ptypes, uint32_t pn)
+					 uint32_t pack_from, ast_qualified_type *ptypes, uint32_t pn)
 {
 	cxx_scope *cs = f->p.home;
 	cxx_instance *x = cs && cs->kind == CXX_SCOPE_CLASS && cs->owner ? cs->owner->instance : NULL;
@@ -371,7 +371,7 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 	c->sig_pack_types = ptypes, c->sig_pack_n = pack_from != UINT32_MAX ? pn : UINT32_MAX;
 	cxx_entity *outer_gen_instance = c->gen_instance;	/* (an enclosing signature's, being parsed: kept) */
 	c->gen_instance = inst;
-	qty was = inst->ty;
+	ast_qualified_type was = inst->ty;
 
 	if (!setjmp(jb)) {
 		bool b = false;
@@ -398,7 +398,7 @@ VPRIV uint32_t cxx_ftemplate_np(cxx *c, cxx_ftemplate *f)
 	return f->has_pt ? f->np : 0;
 }
 
-VPRIV qty cxx_ftemplate_pt(cxx_ftemplate *f, uint32_t i)
+VPRIV ast_qualified_type cxx_ftemplate_pt(cxx_ftemplate *f, uint32_t i)
 {
 	return f->has_pt && i < f->np ? f->pt[i] : CXX_TY_UNKNOWN;
 }

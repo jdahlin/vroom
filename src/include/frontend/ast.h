@@ -27,7 +27,7 @@ typedef struct cstr {		/* a string literal */
 
 typedef struct label {
 	uint32_t name, loc;
-	uint32_t defined;	/* node of the N_LABEL, 0 if only referenced */
+	uint32_t defined;	/* node of the AST_NODE_LABEL, 0 if only referenced */
 	uint32_t shadow;	/* __label__ scoping */
 	uint32_t depth;
 	uint8_t local;		/* declared with __label__ */
@@ -36,10 +36,10 @@ typedef struct label {
 
 /* Call-site restrictions kept with declaration attributes, including redeclarations. */
 enum {
-	AF_TAIL_RETURNS_TWICE = 1u << 0,
-	AF_TAIL_DISABLE = 1u << 1,
-	AF_TAIL_NOT_CALLED = 1u << 2,
-	AF_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
+	CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE = 1u << 0,
+	CC_ATTRIBUTE_FLAG_TAIL_DISABLE = 1u << 1,
+	CC_ATTRIBUTE_FLAG_TAIL_NOT_CALLED = 1u << 2,
+	CC_ATTRIBUTE_FLAG_OPTNONE = 1u << 3,	/* currently prevents the new sibling-call transformation */
 };
 
 typedef struct attrs {		/* the attributes of one declaration */
@@ -60,7 +60,12 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint32_t counted_by;	/* identifier id */
 	uint32_t errmsg;	/* error("..."): string index + 1, 0: none */
 	uint32_t interrupt;	/* x86 interrupt calling convention */
-	uint32_t ms_struct;	/* Microsoft record layout */
+	uint32_t ms_struct;	/* Microsoft record layout: the attribute's location */
+	uint32_t gcc_struct;	/* gcc_struct: GCC's record layout even under -mms-bitfields; its location */
+	uint32_t fnabi;		/* x86-64 ms_abi / sysv_abi as written (CC_FNABI_MS, CC_FNABI_SYSV), 0: none;
+				   declare() puts it on the function type (cc_func_abi) */
+	uint32_t fnabi_loc;
+	uint32_t dll;		/* Windows: CC_DLLIMPORT or CC_DLLEXPORT (sym_attrs(c, s)->dll), 0: neither */
 	uint32_t tlsloc;		/* tls_model attribute location */
 	uint32_t visibility;
 	uint32_t flags;		/* AF_* declaration/call restrictions */
@@ -74,20 +79,20 @@ typedef struct attrs {		/* the attributes of one declaration */
 	uint8_t tlsmodel;	/* tls_model(): VCC_TLS_*, 0: none */
 } attrs;
 
-typedef struct asmop {
+typedef struct ast_asm_operand {
 	uint32_t name;		/* [name] id, 0 */
 	uint32_t constraint;	/* string index */
 	uint32_t expr;		/* node */
-} asmop;
+} ast_asm_operand;
 
-typedef struct casm {
+typedef struct ast_asm_statement {
 	uint32_t tmpl;		/* string index */
 	uint32_t nout, nin, nclob, nlabel;
-	asmop *ops;		/* outputs then inputs */
+	ast_asm_operand *ops;		/* outputs then inputs */
 	uint32_t *clob;		/* string indices */
 	uint32_t *labels;	/* label indices */
 	uint8_t vol, go, inl, extended;
-} casm;
+} ast_asm_statement;
 
 /*
  * The fields, in this order (the measurement's): the per-node tables first.
@@ -96,10 +101,10 @@ typedef struct casm {
  */
 #define AST_FIELDS \
 	pp *p;			/* diagnostics */ \
-	const cc_opts *o; \
+	const cc_options *o; \
 	ctype *ty; \
 	uint32_t nty; \
-	qty *params; \
+	ast_qualified_type *params; \
 	uint32_t nparams; \
 	tag *tags; \
 	uint32_t ntag; \
@@ -119,12 +124,12 @@ typedef struct casm {
 	uint32_t nlabel; \
 	attrs *attr; \
 	uint32_t nattr; \
-	casm *asms; \
+	ast_asm_statement *asms; \
 	uint32_t nasm; \
-	qty t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;	/* the TU's builtin types */ \
+	ast_qualified_type t_size, t_ptrdiff, t_wchar, t_char16, t_char32, t_valist;	/* the TU's builtin types */ \
 	uint32_t ntoplevel; \
 	uint32_t *toplevel;	/* file-scope syms in declaration order */ \
-	uint32_t *tlasm;	/* file-scope asm("...") statements (N_ASM nodes) */ \
+	uint32_t *tlasm;	/* file-scope asm("...") statements (AST_NODE_ASM nodes) */ \
 	uint32_t ntlasm;
 
 struct ast { AST_FIELDS };

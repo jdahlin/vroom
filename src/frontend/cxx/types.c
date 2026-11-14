@@ -3,7 +3,7 @@
  * (frontend/ast.h) with the C front end's code: type interning, record
  * layout, symbols (PLAN-cxx.md X1).
  *
- * References are TY_PTR types with ext 1 (T&) or 2 (T&&): distinct when
+ * References are AST_TYPE_POINTER types with ext 1 (T&) or 2 (T&&): distinct when
  * interned, passed as pointers (their ABI).  wchar_t, char8_t, char16_t and
  * char32_t are the C kinds of their size and signedness with ext 1: distinct
  * types (X<wchar_t> is its own instance), the same code.
@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include "cxx-internal.h"
 
-VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
+VPRIV ast_qualified_type cxx_spec_type(cxx *c, const cxx_spec *s)
 {
 	int k;
 
@@ -24,98 +24,98 @@ VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
 		return CXX_TY_UNKNOWN;
 	if (s->v_named) {
 		/* (const T with T a reference type, a template argument: the qualifier is dropped) */
-		if (s->named != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, s->named) == TY_PTR && AST_TYPE(c->ast, s->named)->ext)
+		if (s->named != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, s->named) == AST_TYPE_POINTER && AST_TYPE(c->ast, s->named)->ext)
 			return s->named;
 		return s->named == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN : cc_type_qualify(c->ast, s->named, s->quals);
 	}
-	if (s->v_void) k = TY_VOID;
-	else if (s->v_bool) k = TY_BOOL;
-	else if (s->v_char) k = s->v_unsigned ? TY_UCHAR : s->v_signed ? TY_SCHAR : TY_CHAR;
+	if (s->v_void) k = AST_TYPE_VOID;
+	else if (s->v_bool) k = AST_TYPE_BOOL;
+	else if (s->v_char) k = s->v_unsigned ? AST_TYPE_UNSIGNED_CHAR : s->v_signed ? AST_TYPE_SIGNED_CHAR : AST_TYPE_CHAR;
 	else if (s->v_char8 || s->v_char16 || s->v_char32 || s->v_wchar) {
 		/* distinct types (X<wchar_t> is not X<int>): the C kind of their size and signedness, ext 1 */
-		ctype t = c->ast->ty[s->v_char8 ? TY_UCHAR : s->v_char16 ? TY_USHORT : s->v_char32 ? TY_UINT : TY_INT];
+		ctype t = c->ast->ty[s->v_char8 ? AST_TYPE_UNSIGNED_CHAR : s->v_char16 ? AST_TYPE_UNSIGNED_SHORT : s->v_char32 ? AST_TYPE_UNSIGNED_INT : AST_TYPE_INT];
 
 		t.ext = 1;
-		return cc_type_qualify(c->ast, QT(cc_type_intern(c->ast, &t), 0), s->quals);
+		return cc_type_qualify(c->ast, AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0), s->quals);
 	}
-	else if (s->v_float) k = TY_FLOAT;
-	else if (s->v_double) k = s->v_long ? TY_LDOUBLE : TY_DOUBLE;
-	else if (s->v_float128) k = TY_FLOAT128;
-	else if (s->v_float16) k = TY_FLOAT16;
-	else if (s->v_bf16) k = TY_BFLOAT16;
-	else if (s->v_int128) k = s->v_unsigned ? TY_UINT128 : TY_INT128;
-	else if (s->v_short) k = s->v_unsigned ? TY_USHORT : TY_SHORT;
-	else if (s->v_long >= 2) k = s->v_unsigned ? TY_ULLONG : TY_LLONG;
-	else if (s->v_long) k = s->v_unsigned ? TY_ULONG : TY_LONG;
-	else if (s->v_int || s->v_signed || s->v_unsigned) k = s->v_unsigned ? TY_UINT : TY_INT;
+	else if (s->v_float) k = AST_TYPE_FLOAT;
+	else if (s->v_double) k = s->v_long ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE;
+	else if (s->v_float128) k = AST_TYPE_FLOAT128;
+	else if (s->v_float16) k = AST_TYPE_FLOAT16;
+	else if (s->v_bf16) k = AST_TYPE_BFLOAT16;
+	else if (s->v_int128) k = s->v_unsigned ? AST_TYPE_UINT128 : AST_TYPE_INT128;
+	else if (s->v_short) k = s->v_unsigned ? AST_TYPE_UNSIGNED_SHORT : AST_TYPE_SHORT;
+	else if (s->v_long >= 2) k = s->v_unsigned ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG;
+	else if (s->v_long) k = s->v_unsigned ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG;
+	else if (s->v_int || s->v_signed || s->v_unsigned) k = s->v_unsigned ? AST_TYPE_UNSIGNED_INT : AST_TYPE_INT;
 	else
 		return CXX_TY_UNKNOWN;	/* (no type specifier: a constructor, auto) */
 	return cc_type_qualify(c->ast, cc_type_basic(k), s->quals);
 }
 
-VPRIV qty cxx_type_pointer(cxx *c, qty base, int quals)
+VPRIV ast_qualified_type cxx_type_pointer(cxx *c, ast_qualified_type base, int quals)
 {
 	if (base == CXX_TY_UNKNOWN)	/* (in a tentative parse too: a type is interned, nothing to undo) */
 		return CXX_TY_UNKNOWN;
 	return cc_type_qualify(c->ast, cc_type_pointer(c->ast, base), quals);
 }
 
-VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue)
+VPRIV ast_qualified_type cxx_type_reference(cxx *c, ast_qualified_type base, bool rvalue)
 {
 	if (base == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	/* a reference to a reference (T& with T = U&&, through a typedef or a template argument) collapses:
 	   an rvalue reference only if both are */
-	if (AST_TYPE_KIND(c->ast, base) == TY_PTR && AST_TYPE(c->ast, base)->ext) {
+	if (AST_TYPE_KIND(c->ast, base) == AST_TYPE_POINTER && AST_TYPE(c->ast, base)->ext) {
 		if (rvalue || AST_TYPE(c->ast, base)->ext == 1)
-			return QUNQ(base);
+			return AST_QUALIFIED_TYPE_UNQUALIFIED(base);
 		base = AST_TYPE(c->ast, base)->base;
 	}
 	{
-		ctype t = { .kind = TY_PTR, .size = CC_PTRSIZE(c->ast), .align = CC_PTRSIZE(c->ast), .base = base,
+		ctype t = { .kind = AST_TYPE_POINTER, .size = CC_PTRSIZE(c->ast), .align = CC_PTRSIZE(c->ast), .base = base,
 			    .ext = (uint16_t)(rvalue ? 2 : 1) };
 
-		return QT(cc_type_intern(c->ast, &t), 0);
+		return AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0);
 	}
 }
 
-VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n)
+VPRIV ast_qualified_type cxx_type_array(cxx *c, ast_qualified_type elem, int64_t n)
 {
 	if (elem == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	if (n <= -3) {
 		/* a pattern's T[N]: an incomplete array that remembers which value parameter is its bound (ext: its
 		   index + 1); deduction binds it to an argument array's length */
-		ctype t = { .kind = TY_ARRAY, .size = 0, .align = AST_TYPE(c->ast, elem)->align, .base = elem, .flags = TF_INCOMPLETE,
+		ctype t = { .kind = AST_TYPE_ARRAY, .size = 0, .align = AST_TYPE(c->ast, elem)->align, .base = elem, .flags = AST_TYPE_FLAG_INCOMPLETE,
 			    .ext = (uint16_t)(-3 - n + 1) };
 
-		return QT(cc_type_intern(c->ast, &t), 0);
+		return AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0);
 	}
 	if (n < 0)
-		return cc_type_array(c->ast, elem, 0, TF_INCOMPLETE);
+		return cc_type_array(c->ast, elem, 0, AST_TYPE_FLAG_INCOMPLETE);
 	return cc_type_array(c->ast, elem, (uint64_t)n, 0);
 }
 
-VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic)
+VPRIV ast_qualified_type cxx_type_function(cxx *c, ast_qualified_type ret, const ast_qualified_type *params, uint32_t n, bool variadic)
 {
 	if (ret == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	for (uint32_t i = 0; i < n; i++)
 		if (params[i] == CXX_TY_UNKNOWN)
 			return CXX_TY_UNKNOWN;
-	return cc_type_function(c->ast, ret, params, n, variadic ? TF_VARIADIC : 0);
+	return cc_type_function(c->ast, ret, params, n, variadic ? AST_TYPE_FLAG_VARIADIC : 0);
 }
 
 /* a parameter's type: arrays and functions become pointers, top-level cv goes */
-VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t)
+VPRIV ast_qualified_type cxx_type_parameter_adjust(cxx *c, ast_qualified_type t)
 {
 	if (t == CXX_TY_UNKNOWN)
 		return t;
-	if (AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return cc_type_pointer(c->ast, AST_TYPE(c->ast, t)->base);
-	if (AST_TYPE_KIND(c->ast, t) == TY_FUNC)
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION)
 		return cc_type_pointer(c->ast, t);
-	return QUNQ(t);
+	return AST_QUALIFIED_TYPE_UNQUALIFIED(t);
 }
 
 /* ---- classes ----------------------------------------------------------------------------- */
@@ -178,9 +178,9 @@ static cxx_class_info *cxx_info_of(cxx *c, uint32_t tag)
 	return c->class_info ? (cxx_class_info *)c->class_info + tag : &none;
 }
 
-static uint32_t cxx_record_tag(cxx *c, qty t)
+static uint32_t cxx_record_tag(cxx *c, ast_qualified_type t)
 {
-	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		t = AST_TYPE(c->ast, t)->base;
 	return t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) ? AST_TYPE(c->ast, t)->aux : 0;
 }
@@ -203,19 +203,19 @@ VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, b
 	if (skip >= 0)
 		return;
 	if (e && e->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, e->ty) &&
-	    !(c->ast->tags[AST_TYPE(c->ast, e->ty)->aux].flags & RF_COMPLETE)) {
+	    !(c->ast->tags[AST_TYPE(c->ast, e->ty)->aux].flags & AST_RECORD_FLAG_COMPLETE)) {
 		b->tag = AST_TYPE(c->ast, e->ty)->aux;	/* declared before: its record, completed now */
-		if (is_union && !(c->ast->tags[b->tag].flags & RF_UNION)) {	/* (an instance is declared as a struct) */
-			c->ast->tags[b->tag].flags |= RF_UNION;
-			c->ast->ty[c->ast->tags[b->tag].ty].kind = TY_UNION;
+		if (is_union && !(c->ast->tags[b->tag].flags & AST_RECORD_FLAG_UNION)) {	/* (an instance is declared as a struct) */
+			c->ast->tags[b->tag].flags |= AST_RECORD_FLAG_UNION;
+			c->ast->ty[c->ast->tags[b->tag].ty].kind = AST_TYPE_UNION;
 		}
 		if (c->tag_instance && b->tag < c->ntag_instance)
 			c->tag_instance[b->tag] = NULL;	/* (being completed: not again) */
 		return;
 	}
-	b->tag = cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, loc);
+	b->tag = cc_tag_new(c->ast, is_union ? AST_TYPE_UNION : AST_TYPE_STRUCT, name, loc);
 	if (e)
-		e->ty = QT(c->ast->tags[b->tag].ty, 0);
+		e->ty = AST_QUALIFIED_TYPE(c->ast->tags[b->tag].ty, 0);
 }
 
 VPRIV void cxx_class_packed(cxx *c)
@@ -225,13 +225,13 @@ VPRIV void cxx_class_packed(cxx *c)
 }
 
 /* a class's data size (bytes before its tail padding); a type that is not a class: its size */
-VPRIV bool cxx_class_data_size(cxx *c, qty t, uint64_t *dsize)
+VPRIV bool cxx_class_data_size(cxx *c, ast_qualified_type t, uint64_t *dsize)
 {
 	const cxx_class_info *i;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
-	cxx_type_require_complete(c, QUNQ(t));
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
 	if (!i->valid)
 		return false;
@@ -242,16 +242,16 @@ VPRIV bool cxx_class_data_size(cxx *c, qty t, uint64_t *dsize)
 
 /* the offset in bits of the data member `name` of the laid-out class t (in an anonymous struct or union
    member too; not in a base) */
-VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, int depth)
+VPRIV bool cxx_class_field_offset(cxx *c, ast_qualified_type t, uint32_t name, uint64_t *bits, int depth)
 {
 	const tag *r;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY || depth > 8)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY || depth > 8)
 		return false;
 	if (!depth)
-		cxx_type_require_complete(c, QUNQ(t));
+		cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	r = &c->ast->tags[AST_TYPE(c->ast, t)->aux];
-	if (!(r->flags & RF_COMPLETE))
+	if (!(r->flags & AST_RECORD_FLAG_COMPLETE))
 		return false;
 	for (uint32_t i = 0; i < r->nfield; i++) {
 		uint64_t inner;
@@ -272,16 +272,16 @@ VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, 
  * The offset of the base class subobject `base` in an object of class `derived` (a direct or indirect
  * base, the first found); false: not a base of it, or a layout not known.
  */
-VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, int depth)
+VPRIV bool cxx_class_base_offset(cxx *c, ast_qualified_type derived, ast_qualified_type base, uint64_t *off, int depth)
 {
 	const cxx_class_info *i;
 	uint32_t dt, bt;
 
 	if (derived == CXX_TY_UNKNOWN || base == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, derived) || !cc_type_is_record(c->ast, base) ||
-	    AST_TYPE_KIND(c->ast, derived) == TY_ARRAY || AST_TYPE_KIND(c->ast, base) == TY_ARRAY || depth > 8)
+	    AST_TYPE_KIND(c->ast, derived) == AST_TYPE_ARRAY || AST_TYPE_KIND(c->ast, base) == AST_TYPE_ARRAY || depth > 8)
 		return false;
 	if (!depth)
-		cxx_type_require_complete(c, QUNQ(derived));
+		cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(derived));
 	dt = AST_TYPE(c->ast, derived)->aux, bt = AST_TYPE(c->ast, base)->aux;
 	i = cxx_info_of(c, dt);
 	if (!i->valid)
@@ -293,7 +293,7 @@ VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, i
 			*off = i->base_off[k];
 			return true;
 		}
-		if (cxx_class_base_offset(c, QT(c->ast->tags[i->base_tag[k]].ty, 0), base, &inner, depth + 1)) {
+		if (cxx_class_base_offset(c, AST_QUALIFIED_TYPE(c->ast->tags[i->base_tag[k]].ty, 0), base, &inner, depth + 1)) {
 			*off = i->base_off[k] + inner;
 			return true;
 		}
@@ -302,19 +302,19 @@ VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, i
 }
 
 /* how many virtual bases (direct or not) a class laid out has; their types and offsets in a complete object */
-VPRIV uint32_t cxx_class_vbases(cxx *c, qty t, qty *vbases, uint64_t *offs, uint32_t cap)
+VPRIV uint32_t cxx_class_vbases(cxx *c, ast_qualified_type t, ast_qualified_type *vbases, uint64_t *offs, uint32_t cap)
 {
 	const cxx_class_info *i;
 	uint32_t n = 0;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return 0;
 	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
 	if (!i->valid)
 		return 0;
 	for (; n < i->nvb && n < cap; n++) {
 		if (vbases)
-			vbases[n] = QT(c->ast->tags[i->vb_tag[n]].ty, 0);
+			vbases[n] = AST_QUALIFIED_TYPE(c->ast->tags[i->vb_tag[n]].ty, 0);
 		if (offs)
 			offs[n] = i->vb_off[n];
 	}
@@ -323,13 +323,13 @@ VPRIV uint32_t cxx_class_vbases(cxx *c, qty t, qty *vbases, uint64_t *offs, uint
 
 /* `base` reached through a virtual base of `derived`: the virtual base's index k (its offset is in derived's
    vtable at address point - 24 - 8k) and base's offset in it; false: not so (or a non-virtual base) */
-VPRIV bool cxx_class_vbase_path(cxx *c, qty derived, qty base, uint32_t *k, uint64_t *off)
+VPRIV bool cxx_class_vbase_path(cxx *c, ast_qualified_type derived, ast_qualified_type base, uint32_t *k, uint64_t *off)
 {
 	const cxx_class_info *i;
 	uint32_t bt;
 
 	if (derived == CXX_TY_UNKNOWN || base == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, derived) || !cc_type_is_record(c->ast, base) ||
-	    AST_TYPE_KIND(c->ast, derived) == TY_ARRAY || AST_TYPE_KIND(c->ast, base) == TY_ARRAY)
+	    AST_TYPE_KIND(c->ast, derived) == AST_TYPE_ARRAY || AST_TYPE_KIND(c->ast, base) == AST_TYPE_ARRAY)
 		return false;
 	i = cxx_info_of(c, AST_TYPE(c->ast, derived)->aux), bt = AST_TYPE(c->ast, base)->aux;
 	if (!i->valid)
@@ -339,7 +339,7 @@ VPRIV bool cxx_class_vbase_path(cxx *c, qty derived, qty base, uint32_t *k, uint
 			*k = j, *off = 0;
 			return true;
 		}
-		if (cxx_class_base_offset(c, QT(c->ast->tags[i->vb_tag[j]].ty, 0), base, off, 1)) {
+		if (cxx_class_base_offset(c, AST_QUALIFIED_TYPE(c->ast->tags[i->vb_tag[j]].ty, 0), base, off, 1)) {
 			*k = j;
 			return true;
 		}
@@ -395,7 +395,7 @@ static bool cxx_vtt_vptrs(cxx *c, uint32_t rd, bool morally_virtual, uint32_t vb
 		if (!nv_primary && (ib->nvb || mv)) {
 			if (v->nvp == 32)
 				return false;
-			v->vp_vbase[v->nvp] = bvb ? QT(c->ast->tags[bvb].ty, 0) : 0, v->vp_off[v->nvp] = boff;
+			v->vp_vbase[v->nvp] = bvb ? AST_QUALIFIED_TYPE(c->ast->tags[bvb].ty, 0) : 0, v->vp_off[v->nvp] = boff;
 			v->nvp++;
 		}
 		if (!cxx_vtt_vptrs(c, bd, mv, bvb, boff, v, seen, nseen, depth + 1))
@@ -426,13 +426,13 @@ static uint32_t cxx_vtt_size(cxx *c, uint32_t t, int depth)
 	return n + v.nvp;
 }
 
-VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v)
+VPRIV bool cxx_vtt_layout(cxx *c, ast_qualified_type t, cxx_vtt *v)
 {
 	const cxx_class_info *i;
 	uint32_t at = 1, seen[16], nseen = 0, tg;
 
 	memset(v, 0, sizeof *v);
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
 	tg = AST_TYPE(c->ast, t)->aux, i = cxx_info_of(c, tg);
 	if (!i->valid || !i->nvb)
@@ -447,7 +447,7 @@ VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v)
 			continue;
 		if (!(m = cxx_vtt_size(c, i->base_tag[k], 1)))
 			return false;
-		v->sub[v->nsub] = QT(c->ast->tags[i->base_tag[k]].ty, 0), v->sub_at[v->nsub] = at;
+		v->sub[v->nsub] = AST_QUALIFIED_TYPE(c->ast->tags[i->base_tag[k]].ty, 0), v->sub_at[v->nsub] = at;
 		v->nsub++, at += m;
 	}
 	if (!cxx_vtt_vptrs(c, tg, false, 0, 0, v, seen, &nseen, 0))
@@ -457,18 +457,18 @@ VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v)
 }
 
 /* a class's direct bases: how many, and the k-th one's type */
-VPRIV uint32_t cxx_class_bases(cxx *c, qty t, qty *bases, uint32_t cap)
+VPRIV uint32_t cxx_class_bases(cxx *c, ast_qualified_type t, ast_qualified_type *bases, uint32_t cap)
 {
 	const cxx_class_info *i;
 	uint32_t n = 0;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return 0;
 	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
 	if (!i->valid)
 		return 0;
 	for (; n < i->nbases && n < cap; n++)
-		bases[n] = QT(c->ast->tags[i->base_tag[n]].ty, 0);
+		bases[n] = AST_QUALIFIED_TYPE(c->ast->tags[i->base_tag[n]].ty, 0);
 	return n;
 }
 
@@ -545,7 +545,7 @@ static bool cxx_class_vbases_place(cxx *c, uint32_t tagi, tag *r)
 }
 
 /* a base class: complete; a virtual one is laid out after the non-virtual part (cxx_class_vbases_place) */
-VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
+VPRIV void cxx_class_base(cxx *c, ast_qualified_type t, bool is_virtual)
 {
 	cxx_class_build *b = c->build;
 	uint32_t tag;
@@ -555,7 +555,7 @@ VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
 	if (t != CXX_TY_UNKNOWN)
 		cxx_type_require_complete(c, t);
 	tag = cxx_record_tag(c, t);
-	if (!tag || AST_TYPE_KIND(c->ast, t) == TY_ARRAY || !(c->ast->tags[tag].flags & RF_COMPLETE) || !cxx_info_of(c, tag)->valid ||
+	if (!tag || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY || !(c->ast->tags[tag].flags & AST_RECORD_FLAG_COMPLETE) || !cxx_info_of(c, tag)->valid ||
 	    b->nbases == 16 || b->nvbases == 16 || b->norder == 32) {
 		b->skip = is_virtual ? CXX_SKIP_VIRTUAL : CXX_SKIP_BASES;	/* (a base vcc did not lay out) */
 		return;
@@ -580,17 +580,17 @@ VPRIV void cxx_class_virtual(cxx *c)
 }
 
 /* does a member of the class have a default initializer? */
-VPRIV bool cxx_class_has_member_initializer(cxx *c, qty t)
+VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t)
 {
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
 	return cxx_info_of(c, AST_TYPE(c->ast, t)->aux)->nsdmi;
 }
 
 /* does the class have a vptr (a virtual function of its own or of a base)? */
-VPRIV bool cxx_class_polymorphic(cxx *c, qty t)
+VPRIV bool cxx_class_polymorphic(cxx *c, ast_qualified_type t)
 {
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
 	return cxx_info_of(c, AST_TYPE(c->ast, t)->aux)->polymorphic;
 }
@@ -601,7 +601,7 @@ VPRIV void cxx_class_skip(cxx *c, int reason)
 		c->build->skip = reason;
 }
 
-VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width)
+VPRIV void cxx_class_field(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc, int bitfield_width)
 {
 	cxx_class_build *b = c->build;
 	field *f;
@@ -613,24 +613,24 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 		b->skip_name = name;
 		return;
 	}
-	if (AST_TYPE_KIND(c->ast, t) == TY_VOID || AST_TYPE_KIND(c->ast, t) == TY_FUNC) {
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_VOID || AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION) {
 		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* (ill-formed: never laid out) */
 		return;
 	}
 	{
-		qty et = t;	/* (an array's element must be complete too) */
+		ast_qualified_type et = t;	/* (an array's element must be complete too) */
 
-		while (AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+		while (AST_TYPE_KIND(c->ast, et) == AST_TYPE_ARRAY)
 			et = AST_TYPE(c->ast, et)->base;
-		if (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & RF_COMPLETE))
+		if (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & AST_RECORD_FLAG_COMPLETE))
 			cxx_type_require_complete(c, et);	/* a member by value: an instance is completed now */
-		if (AST_TYPE_KIND(c->ast, et) == TY_VOID || AST_TYPE_KIND(c->ast, et) == TY_FUNC ||
-		    (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & RF_COMPLETE))) {
+		if (AST_TYPE_KIND(c->ast, et) == AST_TYPE_VOID || AST_TYPE_KIND(c->ast, et) == AST_TYPE_FUNCTION ||
+		    (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & AST_RECORD_FLAG_COMPLETE))) {
 			b->skip = CXX_SKIP_UNKNOWN_MEMBER;
 			return;
 		}
 	}
-	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE)) {
+	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & AST_RECORD_FLAG_COMPLETE)) {
 		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* a member of a class that was not laid out */
 		return;
 	}
@@ -648,7 +648,7 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 		b->private_data = 1;
 	else
 		b->public_data = 1;
-	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 		b->pod = 0;	/* a reference member */
 	{
 		uint32_t mt = cxx_record_tag(c, t);
@@ -738,7 +738,7 @@ VPRIV void cxx_class_end(cxx *c)
 		/* (the first member that takes space: an empty [[no_unique_address]] one is checked with them below) */
 		uint32_t first = 0;
 
-		while (first < b->nf && b->nua[first] && AST_TYPE_KIND(c->ast, b->f[first].ty) != TY_ARRAY && cxx_record_tag(c, b->f[first].ty) &&
+		while (first < b->nf && b->nua[first] && AST_TYPE_KIND(c->ast, b->f[first].ty) != AST_TYPE_ARRAY && cxx_record_tag(c, b->f[first].ty) &&
 		       cxx_info_of(c, cxx_record_tag(c, b->f[first].ty))->empty)
 			first++;
 		if (any_empty_base && !nonempty && first < b->nf) {
@@ -762,16 +762,16 @@ VPRIV void cxx_class_end(cxx *c)
 		uint32_t nlay = 0, nfields_nonempty = 0;
 		field *lay = malloc((b->nf + 2) * sizeof *lay);
 		uint32_t *fa = calloc(b->nf + 2, sizeof *fa), *at = malloc((b->nf + 2) * sizeof *at);
-		qty *orig = malloc((b->nf + 2) * sizeof *orig);
+		ast_qualified_type *orig = malloc((b->nf + 2) * sizeof *orig);
 
 		if (off) {
 			memset(&lay[0], 0, sizeof *lay);
-			lay[0].ty = cc_type_array(c->ast, cc_type_basic(TY_CHAR), off, 0);
+			lay[0].ty = cc_type_array(c->ast, cc_type_basic(AST_TYPE_CHAR), off, 0);
 			orig[0] = lay[0].ty, at[0] = UINT32_MAX;
 			nlay = 1;
 		}
 		for (uint32_t i = 0; i < b->nf; i++) {
-			uint32_t mt = b->nua[i] && AST_TYPE_KIND(c->ast, b->f[i].ty) != TY_ARRAY ? cxx_record_tag(c, b->f[i].ty) : 0;
+			uint32_t mt = b->nua[i] && AST_TYPE_KIND(c->ast, b->f[i].ty) != AST_TYPE_ARRAY ? cxx_record_tag(c, b->f[i].ty) : 0;
 			const cxx_class_info *mi = mt ? cxx_info_of(c, mt) : NULL;
 
 			if (mi && mi->valid && mi->empty) {
@@ -788,7 +788,7 @@ VPRIV void cxx_class_end(cxx *c)
 			lay[nlay] = b->f[i], orig[nlay] = b->f[i].ty, at[nlay] = i;
 			fa[nlay] = b->falign[i];	/* alignas/aligned on the member */
 			if (mi && mi->valid && !mi->pod && mi->dsize && mi->dsize < AST_TYPE(c->ast, b->f[i].ty)->size) {
-				lay[nlay].ty = cc_type_array(c->ast, cc_type_basic(TY_CHAR), mi->dsize, 0);
+				lay[nlay].ty = cc_type_array(c->ast, cc_type_basic(AST_TYPE_CHAR), mi->dsize, 0);
 				fa[nlay] = AST_TYPE(c->ast, b->f[i].ty)->align > fa[nlay] ? AST_TYPE(c->ast, b->f[i].ty)->align : fa[nlay];
 			}
 			nlay++, nfields_nonempty++;
@@ -805,7 +805,7 @@ VPRIV void cxx_class_end(cxx *c)
 		r->nfield = nlay;
 		r->f = lay;
 		if (b->packed)
-			r->flags |= RF_PACKED;
+			r->flags |= AST_RECORD_FLAG_PACKED;
 		if (balign > 1 && balign > r->maxalign)
 			r->maxalign = balign;	/* (the bases' alignment) */
 		if (b->align > r->maxalign)
@@ -845,7 +845,7 @@ VPRIV void cxx_class_end(cxx *c)
 		bi->dsize = (data_end + 7) / 8;
 		/* POD for layout: trivial and standard-layout, as far as the parser sees it */
 		bi->pod = !polymorphic && b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&
-			  !(r->flags & RF_UNION ? 0 : 0);
+			  !(r->flags & AST_RECORD_FLAG_UNION ? 0 : 0);
 		bi->ndirect = (uint8_t)b->norder;
 		memcpy(bi->direct, b->order, b->norder * sizeof *b->order);
 		bi->nvb = 0;
@@ -859,13 +859,13 @@ VPRIV void cxx_class_end(cxx *c)
 			c->ast->ty[r->ty].size = ea, c->ast->ty[r->ty].align = ea;
 			bi->dsize = 0;
 		}
-		r->flags |= RF_COMPLETE;
+		r->flags |= AST_RECORD_FLAG_COMPLETE;
 		c->stats.classes_laid_out++;
 		if (!r->name)
-			c->anonymous_class = QT(r->ty, 0);
+			c->anonymous_class = AST_QUALIFIED_TYPE(r->ty, 0);
 		if (c->layout_fd >= 0 && c->name_path_valid && c->name_path_len && !b->unverifiable) {
 			/* elaborated: struct stat / struct timezone share their names with a function or variable */
-			const char *key = r->flags & RF_UNION ? "union" : "struct";
+			const char *key = r->flags & AST_RECORD_FLAG_UNION ? "union" : "struct";
 
 			dprintf(c->layout_fd, "static_assert(sizeof(%s %.*s) == %llu && alignof(%s %.*s) == %u, \"vcc layout\");\n",
 				key, (int)c->name_path_len, c->name_path, (unsigned long long)r->size, key, (int)c->name_path_len,
@@ -878,53 +878,53 @@ done:
 }
 
 /* std::nullptr_t: a type of its own (a class no source declares; it converts to any pointer) */
-VPRIV qty cxx_nullptr_type(cxx *c)
+VPRIV ast_qualified_type cxx_nullptr_type(cxx *c)
 {
 	if (!c->nullptr_ty) {
-		uint32_t ti = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("nullptr_t"), 0);
+		uint32_t ti = cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("nullptr_t"), 0);
 		tag *r = &c->ast->tags[ti];
 		field *f = cc_heap_allocate(c->ast, sizeof *f);
 		cxx_class_info *bi;
 
 		/* (laid out as one void *, as clang's: code passes and stores it as such a struct) */
 		memset(f, 0, sizeof *f);
-		f->ty = cc_type_pointer(c->ast, cc_type_basic(TY_VOID)), f->align = 64;
-		r->nfield = 1, r->f = f, r->size = 8, r->align = 8, r->flags |= RF_COMPLETE;
+		f->ty = cc_type_pointer(c->ast, cc_type_basic(AST_TYPE_VOID)), f->align = 64;
+		r->nfield = 1, r->f = f, r->size = 8, r->align = 8, r->flags |= AST_RECORD_FLAG_COMPLETE;
 		c->ast->ty[r->ty].size = 8, c->ast->ty[r->ty].align = 8;
 		bi = cxx_info_of(c, ti);
 		bi->valid = 1, bi->pod = 1, bi->dsize = 8, bi->nvsize = 8, bi->nvalign = 8;
-		c->nullptr_ty = QT(r->ty, 0);
+		c->nullptr_ty = AST_QUALIFIED_TYPE(r->ty, 0);
 	}
 	return c->nullptr_ty;
 }
 
-VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty underlying)
+VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, ast_qualified_type underlying)
 {
 	uint32_t ti;
 	ctype *t;
 
 	if (c->tentative || !e || e->ty != CXX_TY_UNKNOWN)
 		return;
-	ti = cc_tag_new(c->ast, TY_ENUM, name, loc);
+	ti = cc_tag_new(c->ast, AST_TYPE_ENUM, name, loc);
 	t = &c->ast->ty[c->ast->tags[ti].ty];
 	if (underlying != CXX_TY_UNKNOWN && underlying != 0) {
 		const ctype *u = AST_TYPE(c->ast, underlying);
 
-		t->base = QUNQ(underlying), t->size = u->size, t->align = u->align;
+		t->base = AST_QUALIFIED_TYPE_UNQUALIFIED(underlying), t->size = u->size, t->align = u->align;
 	} else
-		t->base = cc_type_basic(TY_INT);	/* (C++: int unless the values need more: not evaluated yet) */
-	c->ast->tags[ti].flags |= RF_COMPLETE;
-	e->ty = QT(c->ast->tags[ti].ty, 0);
+		t->base = cc_type_basic(AST_TYPE_INT);	/* (C++: int unless the values need more: not evaluated yet) */
+	c->ast->tags[ti].flags |= AST_RECORD_FLAG_COMPLETE;
+	e->ty = AST_QUALIFIED_TYPE(c->ast->tags[ti].ty, 0);
 }
 
-VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, qty t, uint32_t loc)
+VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, ast_qualified_type t, uint32_t loc)
 {
 	uint32_t s;
 
 	if (c->tentative || t == CXX_TY_UNKNOWN)
 		return 0;
 	s = cc_symbol_new(c->ast, kind, name, t, loc);
-	c->ast->syms[s].flags |= SF_GLOBAL;
+	c->ast->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	c->stats.symbols++;
 	return s;
 }
@@ -961,20 +961,20 @@ VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid)
 }
 
 /* sizeof and alignof t, when vcc knows them: scalars, pointers, arrays of those, classes it laid out */
-VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align)
+VPRIV bool cxx_type_size_known(cxx *c, ast_qualified_type t, uint64_t *size, uint32_t *align)
 {
 	const ctype *x;
 
 	if (t == CXX_TY_UNKNOWN)
 		return false;
 	x = AST_TYPE(c->ast, t);
-	if (x->kind == TY_PTR && x->ext)	/* a reference: its referent's */
+	if (x->kind == AST_TYPE_POINTER && x->ext)	/* a reference: its referent's */
 		return cxx_type_size_known(c, x->base, size, align);
-	if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || x->kind == TY_PTR || x->kind == TY_ENUM) {
+	if ((x->kind >= AST_TYPE_BOOL && x->kind <= AST_TYPE_FLOAT128) || x->kind == AST_TYPE_POINTER || x->kind == AST_TYPE_ENUM) {
 		*size = x->size, *align = x->align;
 		return x->size != 0;
 	}
-	if (x->kind == TY_ARRAY) {
+	if (x->kind == AST_TYPE_ARRAY) {
 		uint64_t es;
 
 		if (!x->n || !cxx_type_size_known(c, x->base, &es, align) || x->size != es * x->n)
@@ -982,8 +982,8 @@ VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align)
 		*size = x->size;
 		return true;
 	}
-	if (x->kind == TY_STRUCT || x->kind == TY_UNION) {
-		cxx_type_require_complete(c, QUNQ(t));
+	if (x->kind == AST_TYPE_STRUCT || x->kind == AST_TYPE_UNION) {
+		cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		x = AST_TYPE(c->ast, t);
 		if (!cxx_info_of(c, x->aux)->valid || !x->size)
 			return false;
@@ -1002,13 +1002,13 @@ VPRIV void cxx_class_unverifiable(cxx *c)
 }
 
 /* a class vcc laid out: is it POD for layout (trivial and standard-layout, as far as vcc sees), is it empty? */
-VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty)
+VPRIV bool cxx_class_layout_info(cxx *c, ast_qualified_type t, bool *pod, bool *empty)
 {
 	const cxx_class_info *i;
 
 	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t))
 		return false;
-	cxx_type_require_complete(c, QUNQ(t));
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
 	if (!i->valid) {
 		/* a closure type, laid out by code generation (its captures): a POD when they are all scalars, pointers or
@@ -1017,12 +1017,12 @@ VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty)
 		const struct tag *r = &c->ast->tags[ti];
 		cxx_scope *cs = ti < c->ntag_scope ? c->tag_scope[ti] : NULL;
 
-		if (!cs || !cs->is_lambda || !(r->flags & RF_COMPLETE))
+		if (!cs || !cs->is_lambda || !(r->flags & AST_RECORD_FLAG_COMPLETE))
 			return false;
 		for (uint32_t k = 0; k < r->nfield; k++) {
 			int fk = AST_TYPE_KIND(c->ast, r->f[k].ty);
 
-			if (!((fk >= TY_BOOL && fk <= TY_LDOUBLE) || fk == TY_PTR || fk == TY_ENUM))
+			if (!((fk >= AST_TYPE_BOOL && fk <= AST_TYPE_LONG_DOUBLE) || fk == AST_TYPE_POINTER || fk == AST_TYPE_ENUM))
 				return false;
 		}
 		*pod = true, *empty = r->nfield == 0;

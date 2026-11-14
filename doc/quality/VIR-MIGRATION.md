@@ -1,10 +1,10 @@
 # VIR as the only path: what moves, what goes
 
 **Decision (Johan, 2026-11-13):** VIR is used for everything.  A full kernel
-build with `VCC_VIR=1` took 81.2 s against 79.1 s without, the same 36 247
-of 36 269 jobs passing; the run with real lowering (`VCC_VIR=bl`) was under
-way when this was written.  A loss of 2-3 % of build time on VIR is
-accepted.  Optimizations that live outside VIR move into it, as long as CPU
+build with VIR built but not lowered (`-O2 -fno-vir-lower`) took 81.2 s
+against 79.1 s without, the same 36 247 of 36 269 jobs passing; the run with
+real lowering (`-O2`) was under way when this was written.  A loss of 2-3 %
+of build time on VIR is accepted.  Optimizations that live outside VIR move into it, as long as CPU
 time does not grow significantly.
 
 This replaces three decisions of `PLAN-quality.md`: the arm64 pilot on the
@@ -39,7 +39,7 @@ control flow.  wasm's walker is already switched off.
 | # | Gate | Today |
 |---|---|---|
 | G1 | Every function compiles through VIR: no fallback | 834 of 2 210 kernel functions in the sample were walked by VIR to failure and then again by the direct emitter (`quality-passes.md`) |
-| G2 | The kernel builds with `VCC_VIR=bl` within 3 % of the direct build, and boots | run under way |
+| G2 | The kernel builds through VIR (its `-O2`) within 3 % of the direct build (`-O1`), and boots | run under way |
 | G3 | PostgreSQL, SQLite and the C suites pass with VIR only, on arm64 and x86-64 | each exists as a harness |
 | G4 | `-O0` debugging is no worse: `-g` line tables and variable locations (`vcc-dwarf.py`) | today `-g` is tested after the build, so a function is walked twice (`Q-VIRB-11`) |
 | G5 | Everything the direct path handles and VIR stubs: inline asm (`build.c:1338` stubs it), `setjmp`, wide integers, complex, vectors, variadics, computed goto | list to be made from the reasons VIR fails (G1) |
@@ -110,8 +110,8 @@ worse (18 jobs, about 20 sweeps, the vectorizer by `#include`).  Before any
 pass moves:
 
 1. **A pass table**: name, function, what it needs and invalidates; a switch
-   to time, disable and verify each pass by name (`VCC_VIR_PASSES` is in
-   SPEC-vir 22.6 and has no code).
+   to time, disable and verify each pass by name (`VCC_VIR_PASSES`, now
+   `-fvir-passes`, was in SPEC-vir 22.6 and had no code).
 2. **One pass per file**, the pre-IR in its own header (`Q-VIRB-01`).
 3. **Analysis validity recorded**, so dominators (3 runs per function today)
    and the CFG (5) are computed once (`Q-vir-ir-01`, `Q-passes-03`).

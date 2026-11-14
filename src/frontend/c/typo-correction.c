@@ -78,7 +78,7 @@ static uint32_t cc_typo_symbol_find(cc *c, uint32_t id, bool types, int kws, uin
 		int m, d;
 		const char *t;
 
-		if (!y->name || y->name == id || (y->kind == S_TYPEDEF) != types || y->kind == S_BUILTIN)
+		if (!y->name || y->name == id || (y->kind == AST_SYMBOL_TYPEDEF) != types || y->kind == AST_SYMBOL_BUILTIN)
 			continue;
 		t = cc_identifier_name(y->name, &m);
 		if (m > 1 && t[0] == '_' && (t[1] == '_' || (t[1] >= 'A' && t[1] <= 'Z')))

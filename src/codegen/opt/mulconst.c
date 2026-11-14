@@ -5,7 +5,7 @@
  * multiplication unless their machine has a profitable shifted-operand add (arm64 and x86-64's lea
  * use it; wasm keeps mul).  Used by arch/a64/codegen and arch/x64/codegen.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV unsigned em_mulconst(unsigned bits, i128 rhs)
 {

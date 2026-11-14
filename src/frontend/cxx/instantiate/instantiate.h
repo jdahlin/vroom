@@ -36,7 +36,7 @@ typedef struct cxx_partial {
 					   substituting the deduced parameters and comparing */
 	cxx_targ *pattern;		/* the pattern, placeholders for the parameters */
 	uint32_t npattern;
-	qty *ph;			/* per parameter: its placeholder type (a type parameter) */
+	ast_qualified_type *ph;			/* per parameter: its placeholder type (a type parameter) */
 } cxx_partial;
 
 struct cxx_template {
@@ -81,7 +81,7 @@ typedef struct cxx_saved {
 	char name_path[512];
 	cxx_entity *target, *target2, *last_type;
 	uint8_t last_type_dependent, dependent_seen;
-	qty ds_type, type_in, type_out;
+	ast_qualified_type ds_type, type_in, type_out;
 } cxx_saved;
 
 /* what an enclosing parse still uses while a body is instantiated inside it */
@@ -90,18 +90,18 @@ typedef struct cxx_outer {
 	cxx_targ *targs;
 	uint32_t ntargs, ndp, ndd;
 	cxx_param *dp;
-	qty this_type, etype;
+	ast_qualified_type this_type, etype;
 	bool elval;
 	cxx_entity *ecallee, *last_fn;
 	uint32_t unevaluated;
 	uint8_t this_const, ret_capture, ret_lval;
-	qty ret_type;
+	ast_qualified_type ret_type;
 	/* code generation: the expression and statement being built, and how many bodies are being built */
 	uint32_t enode, snode, sdone, sdepth, gen_stack_depth;
 	void *gen_block;
 } cxx_outer;
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; cxx_entity *inst; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; ast_qualified_type ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; cxx_entity *inst; } cxx_fdone;
 
 /* a variable template's partial or explicit specialization: its pattern and its initializer */
 typedef struct cxx_vspec { cxx_partial p; uint32_t init_pos; } cxx_vspec;
@@ -113,7 +113,7 @@ typedef struct cxx_ftemplate {
 	uint32_t pos;		/* its decl-specifiers */
 	cxx_scope *ctor_class;	/* a constructor template: its class (no return type to parse) */
 	uint32_t req_pos;	/* its template header's requires-clause (0: none) */
-	qty *pt;		/* its parameters' types, placeholders for the template's (one may be unknown: not deduced from) */
+	ast_qualified_type *pt;		/* its parameters' types, placeholders for the template's (one may be unknown: not deduced from) */
 	uint32_t np;
 	uint8_t has_pt, variadic;
 	uint32_t pack_tp, pack_param;	/* a trailing type pack Ts... and the parameter Ts&&... ts that expands it (index + 1; 0: none) */
@@ -121,7 +121,7 @@ typedef struct cxx_ftemplate {
 	uint8_t is_friend;	/* a friend declared in a class: its instances are not members (their scope: the class's namespace) */
 	cxx_vspec **vspecs;	/* a variable template: its specializations */
 	uint32_t nvspecs;
-	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
+	ast_qualified_type sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
 	cxx_fdone *consts;	/* constexpr calls f<args>() evaluated (cxx_ftemplate_const_call): value, viable 1 known, -1 not */
 	uint32_t nconsts, cconsts;
@@ -145,13 +145,13 @@ VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, u
 VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s);
 VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);
 VPRIV bool cxx_spell_append(char *buf, size_t cap, size_t *len, const char *s);
-VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
+VPRIV bool cxx_type_spell(cxx *c, ast_qualified_type t, char *buf, size_t cap, size_t *len);
 
 /* binding.c */
 VPRIV void cxx_state_save(cxx *c, cxx_saved *s);
 VPRIV void cxx_state_restore(cxx *c, const cxx_saved *s);
 VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding, cxx_targ *out);
-VPRIV qty cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b);
+VPRIV ast_qualified_type cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b);
 VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *a);
 VPRIV void cxx_bind_pack(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *list, uint32_t n);
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);
@@ -161,17 +161,17 @@ VPRIV bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a, 
 /* tag.c */
 VPRIV void cxx_tag_grow(void ***arr, uint32_t *n, uint32_t tag);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
-VPRIV cxx_instance *cxx_tag_info(cxx *c, qty t);
-VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
-VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
+VPRIV cxx_instance *cxx_tag_info(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_instance_template(cxx *c, ast_qualified_type t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
+VPRIV ast_qualified_type cxx_simple_type_at(cxx *c, uint32_t pos);
 VPRIV cxx_scope *cxx_template_home(const cxx_entity *te);
-VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
+VPRIV cxx_scope *cxx_instance_tparams(cxx *c, ast_qualified_type t);
 
 /* match.c */
-VPRIV int cxx_placeholder_of(cxx *c, qty t, void **owner);
-VPRIV bool cxx_mentions_placeholder(cxx *c, qty t, int depth);
+VPRIV int cxx_placeholder_of(cxx *c, ast_qualified_type t, void **owner);
+VPRIV bool cxx_mentions_placeholder(cxx *c, ast_qualified_type t, int depth);
 VPRIV bool cxx_args_mention_placeholder(cxx *c, const cxx_targ *a, uint32_t n);
-VPRIV bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *bind, int depth);
+VPRIV bool cxx_match_type(cxx *c, cxx_partial *p, ast_qualified_type pat, ast_qualified_type arg, cxx_targ *bind, int depth);
 VPRIV bool cxx_match_list(cxx *c, cxx_partial *p, const cxx_targ *pat, uint32_t np, const cxx_targ *args, uint32_t n, cxx_targ *bind,
 			   int depth);
 VPRIV bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx_targ *arg, cxx_targ *bind, int depth);
@@ -193,12 +193,12 @@ VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *ar
 VPRIV bool cxx_instance_parse(cxx *c, cxx_instance *x);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst);
-VPRIV void cxx_type_require_complete(cxx *c, qty t);
-VPRIV bool cxx_type_definitely_incomplete(cxx *c, qty t);
-VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
-VPRIV void cxx_tag_home_set(cxx *c, qty t, cxx_scope *home);
-VPRIV cxx_scope *cxx_tag_home(cxx *c, qty t);
-VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t);
+VPRIV void cxx_type_require_complete(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_type_definitely_incomplete(cxx *c, ast_qualified_type t);
+VPRIV cxx_scope *cxx_type_class_scope(cxx *c, ast_qualified_type t);
+VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
+VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
+VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 
 /* ftemplate.c */
@@ -209,33 +209,33 @@ VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *hom
 VPRIV void cxx_ftemplate_requires(cxx_ftemplate *f, uint32_t pos);
 VPRIV void cxx_ftemplate_friend(cxx_ftemplate *f);
 VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e);
-VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
-VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
+VPRIV ast_qualified_type cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const ast_qualified_type **ph, uint32_t *nph, uint32_t *pack_param);
+VPRIV const ast_qualified_type *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
 VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst);
 VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst);
 VPRIV const cxx_scope *cxx_ftemplate_params(const cxx_ftemplate *f);
 VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f);
 VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *inst, const cxx_targ *bind, uint32_t nbind,
-					 uint32_t pack_from, qty *ptypes, uint32_t pn);
+					 uint32_t pack_from, ast_qualified_type *ptypes, uint32_t pn);
 
 /* return.c */
-VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body);
-VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx, bool want_body, qty *ptypes,
+VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body);
+VPRIV ast_qualified_type cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx, bool want_body, ast_qualified_type *ptypes,
 				     uint32_t pn);
 
 /* deduce.c */
-VPRIV bool cxx_match_bases(cxx *c, cxx_partial *p, qty P, qty A, cxx_targ *bind, int depth);
+VPRIV bool cxx_match_bases(cxx *c, cxx_partial *p, ast_qualified_type P, ast_qualified_type A, cxx_targ *bind, int depth);
 VPRIV int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind);
 VPRIV int cxx_constraint_parse(cxx *c, cxx_partial *p, const cxx_targ *bind, uint32_t pos, const cxx_targ *first);
 VPRIV int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *bind);
-VPRIV bool cxx_instance_of(cxx *c, qty a, const cxx_template *t, int depth);
-VPRIV bool cxx_shape_mismatch(cxx *c, qty P, qty A);
-VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue, cxx_targ *bind);
-VPRIV qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int depth);
-VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-			      uint32_t nargs, qty *ret, bool body);
-VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-				 uint32_t nargs, qty *ret, bool body);
+VPRIV bool cxx_instance_of(cxx *c, ast_qualified_type a, const cxx_template *t, int depth);
+VPRIV bool cxx_shape_mismatch(cxx *c, ast_qualified_type P, ast_qualified_type A);
+VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, ast_qualified_type P, ast_qualified_type A, bool lvalue, cxx_targ *bind);
+VPRIV ast_qualified_type cxx_placeholder_subst(cxx *c, cxx_partial *p, ast_qualified_type pat, ast_qualified_type t, int depth);
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+			      uint32_t nargs, ast_qualified_type *ret, bool body);
+VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+				 uint32_t nargs, ast_qualified_type *ret, bool body);
 
 /* member.c */
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
@@ -248,11 +248,11 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l);
 
 /* auto.c */
-VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);
-VPRIV cxx_entity *cxx_type_entity(cxx *c, qty t);
-VPRIV qty cxx_auto_type(cxx *c);
-VPRIV qty cxx_auto_subst(cxx *c, qty pat, qty t, int depth);
-VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);
+VPRIV bool cxx_type_has_placeholder(cxx *c, ast_qualified_type t);
+VPRIV cxx_entity *cxx_type_entity(cxx *c, ast_qualified_type t);
+VPRIV ast_qualified_type cxx_auto_type(cxx *c);
+VPRIV ast_qualified_type cxx_auto_subst(cxx *c, ast_qualified_type pat, ast_qualified_type t, int depth);
+VPRIV ast_qualified_type cxx_auto_deduce(cxx *c, ast_qualified_type pattern, ast_qualified_type a, bool lvalue);
 
 /* concept.c */
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);
@@ -267,6 +267,6 @@ VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV bool cxx_ftemplate_constrained(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_np(cxx *c, cxx_ftemplate *f);
-VPRIV qty cxx_ftemplate_pt(cxx_ftemplate *f, uint32_t i);
+VPRIV ast_qualified_type cxx_ftemplate_pt(cxx_ftemplate *f, uint32_t i);
 
 #endif

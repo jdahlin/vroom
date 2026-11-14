@@ -16,6 +16,12 @@ failures (interrupt2.test: timing) show up on both sides.
 best of N, interleaved; the verification hash must agree.  It also times
 compiling sqlite3.c with each compiler.
 
+  bench/sqlite/run.py --target win64 [build|test|speed|all] [clang vcc vir] [--full]
+
+Windows x64 (doc/PLAN-win64.md WIN8): the amalgamation, the shell and the test
+programs cross-built for x86_64-w64-mingw32 by clang and by vcc's own
+toolchain, run under Wine (bench/sqlite/win64.py has the details).
+
 Needs Tcl >= 8.6 (brew install tcl-tk; Apple's tclsh is 8.5) and, for gcc,
 a real GCC (brew install gcc; /usr/bin/gcc is clang).  Override with
 SQLITE_TCL (prefix), GCC, CLANG, VPP.
@@ -25,7 +31,9 @@ import glob, os, re, shutil, sqlite3, subprocess, sys, time
 VER, YEAR = '3500400', '2025'
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-W = os.path.join(os.environ.get('VROOM_WORK') or os.path.join(ROOT, 'work'), 'sqlite')
+sys.path.insert(0, os.path.dirname(HERE))
+import hostenv	# work/ of this checkout or of the main one (a worktree has none), or VROOM_WORK
+W = os.path.join(hostenv.WORK, 'sqlite')
 SRC = os.path.join(W, f'sqlite-src-{VER}')
 TCL = os.environ.get('SQLITE_TCL') or '/opt/homebrew/opt/tcl-tk'
 CLANG = os.environ.get('CLANG') or ('/opt/homebrew/opt/llvm/bin/clang' if os.path.exists('/opt/homebrew/opt/llvm/bin/clang') else 'clang')
@@ -144,6 +152,19 @@ def speed(names, n, size):
 
 def main():
     a = sys.argv[1:]
+    if '--target' in a:
+        i = a.index('--target'); tgt = a[i + 1]; del a[i:i + 2]
+        if tgt != 'win64':
+            sys.exit(f'--target {tgt}: only win64')
+        n, full = 3, '--full' in a
+        a = [x for x in a if x != '--full']
+        if '-n' in a:
+            i = a.index('-n'); n = int(a[i + 1]); del a[i:i + 2]
+        if not a or a[0] not in ('build', 'test', 'speed', 'all'):
+            sys.exit(__doc__)
+        sys.path.insert(0, HERE)
+        import win64
+        return win64.main(a[0], a[1:], n, full)
     if not a:
         sys.exit(__doc__)
     cmd, a = a[0], a[1:]

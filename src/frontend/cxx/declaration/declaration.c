@@ -176,8 +176,8 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 				cxx_attributes_skip(c);
 				c->type_out = CXX_TY_UNKNOWN;
 				cxx_type_id_parse(c);
-				if (c->type_out != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->type_out) && AST_TYPE_KIND(c->ast, c->type_out) != TY_ARRAY) {
-					cxx_scope *cs = cxx_type_class_scope(c, QUNQ(c->type_out));
+				if (c->type_out != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->type_out) && AST_TYPE_KIND(c->ast, c->type_out) != AST_TYPE_ARRAY) {
+					cxx_scope *cs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(c->type_out));
 
 					if (cs)
 						cs->is_extern_inst = 1;
@@ -326,7 +326,7 @@ VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f)
 	cxx_scope *home;
 
 	if (!c->nexterns || !cls || !cls->owner || !cls->owner->ty || f->no_explicit_inst || f->inst_ftmpl || f->ty == CXX_TY_UNKNOWN ||
-	    AST_TYPE_KIND(c->ast, f->ty) != TY_FUNC || !cxx_instance_template(c, cls->owner->ty, &of, &ta, &nta, &pk, &home))
+	    AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || !cxx_instance_template(c, cls->owner->ty, &of, &ta, &nta, &pk, &home))
 		return false;	/* (a member template's instance: an extern template of the class names none) */
 	for (uint32_t i = 0; i < c->nexterns; i++) {
 		const struct cxx_extern_member *m = &c->externs[i];

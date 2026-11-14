@@ -8,7 +8,7 @@
 /* VCC_CXX_GEN=3: why a function definition was not even started (cxx_gen_function_begin) */
 #define CXX_BEGIN_WHY() do { \
 		if (getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 3 && f && !c->tentative && !c->template_depth && !c->unevaluated && \
-		    !(f->sym && (c->ast->syms[f->sym].flags & SF_DEFINED))) \
+		    !(f->sym && (c->ast->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))) \
 			fprintf(stderr, "no begin (codegen.c:%d): %.*s\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s); \
 	} while (0)
 
@@ -28,10 +28,10 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	if (f && cxx_member_is_extern(c, f))
 		return false;	/* (an extern template's member: defined in the library, called there) */
 	if (!a->o->emit || c->tentative || c->template_depth || c->unevaluated || !f || f->ty == CXX_TY_UNKNOWN ||
-	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)) || c->gen_stack_depth > 48)
+	    AST_TYPE_KIND(a, f->ty) != AST_TYPE_FUNCTION || (f->sym && (a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED)) || c->gen_stack_depth > 48)
 		{ CXX_BEGIN_WHY(); return false; }
 	ft = AST_TYPE(a, f->ty);
-	if ((ft->flags & TF_VARIADIC) || ft->n != nps || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
+	if ((ft->flags & AST_TYPE_FLAG_VARIADIC) || ft->n != nps || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != AST_TYPE_VOID))
 		{ CXX_BEGIN_WHY(); return false; }
 	for (uint32_t i = 0; i < nps; i++)	/* (the parser's record of a parameter may lack its type: the function type has it) */
 		if (!cxx_gen_value_ok(c, ps[i].ty != CXX_TY_UNKNOWN ? ps[i].ty : a->params[ft->aux + i]))
@@ -57,38 +57,38 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	cc_id_list_init(&psyms);
 	if (cxx_gen_by_address(c, ft->base)) {
 		/* the result object's address, first of all */
-		uint32_t s = cc_symbol_new(a, S_VAR, 0, cc_type_pointer(a, QUNQ(ft->base)), a->syms[f->sym].loc);
+		uint32_t s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(ft->base)), a->syms[f->sym].loc);
 
-		a->syms[s].flags |= SF_PARAM;
-		a->syms[s].sc = SC_AUTO;
+		a->syms[s].flags |= AST_SYMBOL_FLAG_PARAMETER;
+		a->syms[s].sc = AST_STORAGE_AUTO;
 		cc_id_list_append(a, &psyms, s);
 		c->gen_sret = s;
 	}
 	if (cxx_gen_has_this(f)) {
-		uint32_t s = cc_symbol_new(a, S_VAR, vintern_cstr("this"), cxx_gen_this_type(c, f), a->syms[f->sym].loc);
+		uint32_t s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("this"), cxx_gen_this_type(c, f), a->syms[f->sym].loc);
 
-		a->syms[s].flags |= SF_PARAM;
-		a->syms[s].sc = SC_AUTO;
+		a->syms[s].flags |= AST_SYMBOL_FLAG_PARAMETER;
+		a->syms[s].sc = AST_STORAGE_AUTO;
 		cc_id_list_append(a, &psyms, s);
 		c->gen_this = s;
 		c->gen_vtt = 0;
 		if (cxx_gen_is_special(f) && f->has_vtt && !c->gen_abi_complete) {
-			s = cc_symbol_new(a, S_VAR, vintern_cstr("vtt"), cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(TY_VOID))), a->syms[f->sym].loc);
-			a->syms[s].flags |= SF_PARAM;
-			a->syms[s].sc = SC_AUTO;
+			s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("vtt"), cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID))), a->syms[f->sym].loc);
+			a->syms[s].flags |= AST_SYMBOL_FLAG_PARAMETER;
+			a->syms[s].sc = AST_STORAGE_AUTO;
 			cc_id_list_append(a, &psyms, s);
 			c->gen_vtt = s;
 		}
 	}
 	for (uint32_t i = 0; i < nps; i++) {
 		/* (a class passed by address: the parameter names the caller's temporary, as a reference would) */
-		qty pin = ps[i].ty != CXX_TY_UNKNOWN ? ps[i].ty : a->params[AST_TYPE(a, f->ty)->aux + i];
-		qty pty = cxx_gen_by_address(c, pin) ? cxx_type_reference(c, QUNQ(pin), false) : QUNQ(pin);
-		uint32_t s = cc_symbol_new(a, S_VAR, ps[i].name > 1 ? ps[i].name : 0, pty, a->syms[f->sym].loc);
+		ast_qualified_type pin = ps[i].ty != CXX_TY_UNKNOWN ? ps[i].ty : a->params[AST_TYPE(a, f->ty)->aux + i];
+		ast_qualified_type pty = cxx_gen_by_address(c, pin) ? cxx_type_reference(c, AST_QUALIFIED_TYPE_UNQUALIFIED(pin), false) : AST_QUALIFIED_TYPE_UNQUALIFIED(pin);
+		uint32_t s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, ps[i].name > 1 ? ps[i].name : 0, pty, a->syms[f->sym].loc);
 		cxx_entity *pe = ps[i].name > 1 ? cxx_lookup_in(c, fs, ps[i].name, 0) : NULL;
 
-		a->syms[s].flags |= SF_PARAM;
-		a->syms[s].sc = SC_AUTO;
+		a->syms[s].flags |= AST_SYMBOL_FLAG_PARAMETER;
+		a->syms[s].sc = AST_STORAGE_AUTO;
 		cc_id_list_append(a, &psyms, s);
 		if (c->gen_pack_entity && i >= c->gen_pack_from && i < c->gen_pack_from + c->gen_pack_n)
 			c->gen_pack_entity->pack_syms[i - c->gen_pack_from] = s;	/* (a pack's element: found through the pack) */
@@ -108,7 +108,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	return true;
 }
 
-/* ... after its body (body: the compound statement's node): defined, for emit_tu, if all of it was built */
+/* ... after its body (body: the compound statement's node): defined, for codegen_unit_emit, if all of it was built */
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 {
 	cc *a = c->ast;
@@ -157,7 +157,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			}
 			if (ok && all.n) {
 				cc_id_list_append(a, &all, body);
-				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
+				body = cc_statement_new(a, AST_NODE_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
 			}
 		} else {
 			/* a destructor: its body, then its members and bases (a return in the body would skip them) */
@@ -179,7 +179,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			if (ok && all.n > before)
 				ok = !c->gen_returns;
 			if (ok && all.n > 1) {
-				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
+				body = cc_statement_new(a, AST_NODE_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
 			}
 		}
 	}
@@ -230,18 +230,18 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		if (f->sym1 && f->sym1 != f->sym)
 			cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);	/* (named before it was known to be inline: the alias below needs its target, which stays) */
 		else
-			a->syms[f->sym].flags |= SF_LINKONCE;	/* (emitted only if the TU refers to it) */
+			a->syms[f->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;	/* (emitted only if the TU refers to it) */
 		if (f->sym0) {
 			cc_attribute_apply_symbol(a, &a->syms[f->sym0], &at);
-			a->syms[f->sym0].flags |= SF_LINKONCE;
+			a->syms[f->sym0].flags |= AST_SYMBOL_FLAG_LINKONCE;
 		}
 	}
 	a->syms[f->sym].body = body;
-	a->syms[f->sym].flags |= SF_DEFINED;
+	a->syms[f->sym].flags |= AST_SYMBOL_FLAG_DEFINED;
 	a->syms[f->sym].defloc = a->syms[f->sym].loc;
 	AST_NODE_AT(a, body)->a = psyms;
 	AST_NODE_AT(a, body)->aux = (uint16_t)npsyms;
-	a->toplevel[a->ntoplevel++] = f->sym;	/* (the TU's definitions, in order: what emit_tu walks) */
+	a->toplevel[a->ntoplevel++] = f->sym;	/* (the TU's definitions, in order: what codegen_unit_emit walks) */
 	if (f->sym1 == f->sym && cxx_gen_is_special(f) && f->sym) {
 		/* (an inline one with one symbol for both names: another declaration's complete-object symbol, made
 		   apart and referred to, is an alias of this one) */
@@ -250,7 +250,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		uint32_t other;
 
 		if (cxx_mangle_function(c, f, home, f->ty, false, 1, n1, sizeof n1) && (other = cxx_gen_symbol_named(c, n1, 0)) &&
-		    other != f->sym && !(a->syms[other].flags & SF_DEFINED)) {
+		    other != f->sym && !(a->syms[other].flags & AST_SYMBOL_FLAG_DEFINED)) {
 			const sym *y = &a->syms[f->sym];
 			attrs at;
 
@@ -258,7 +258,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			at.alias = a->attr[y->attrs].asmname;
 			at.weak = f->fn_inline;
 			cc_attribute_apply_symbol(a, &a->syms[other], &at);
-			a->syms[other].flags |= SF_DEFINED;
+			a->syms[other].flags |= AST_SYMBOL_FLAG_DEFINED;
 			a->toplevel[a->ntoplevel++] = other;
 		}
 	}
@@ -272,7 +272,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		memset(&at, 0, sizeof at);
 		at.alias = a->attr[y->attrs].asmname;
 		cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
-		a->syms[f->sym1].flags |= SF_DEFINED;
+		a->syms[f->sym1].flags |= AST_SYMBOL_FLAG_DEFINED;
 		a->toplevel[a->ntoplevel++] = f->sym1;
 	}
 	if (f->fn_virtual && f->member_of && !c->gen_wrapper) {
@@ -300,7 +300,7 @@ VPRIV void cxx_gen_write_missing(cxx *c)
 		for (int k = 0; k < 2; k++) {
 			uint32_t s = k ? c->missing[i].sym1 : c->missing[i].sym;
 
-			if (!s || (a->syms[s].flags & SF_DEFINED))
+			if (!s || (a->syms[s].flags & AST_SYMBOL_FLAG_DEFINED))
 				continue;
 			fprintf(f, "%s\t%s\n", cxx_gen_symbol_asm_name(c, s), c->missing[i].why);
 		}

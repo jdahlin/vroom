@@ -5,7 +5,7 @@ vpp counts per pass, with VCC_REC_STATS=1, the records it changes, removes or
 adds, separately for functions that came through VIR's lowering and through
 the direct emitter (stderr: "vcc rec-pass: path=vir pass=copies_1 runs=N
 changed=N removed=N added=N", src/arch/a64/codegen/opt.c).  This harness runs
-vpp -O2 -c over TU sets twice, with the default path and with VCC_VIR=bl,
+vpp -c over TU sets twice, at -O1 (the direct emitter) and at -O2 (VIR),
 and prints per pass the records changed (changed + removed + added) in each
 mode, most active in VIR's mode first: the top of the table moves into VIR
 first, a pass at the bottom only needs deleting.
@@ -18,8 +18,8 @@ bench/hostenv.py, a seeded random sample of -n, default 300), `sqlite` (the
 amalgamation of work/sqlite, bench/sqlite/run.py).  A set that is not there is
 reported and left out.  A TU that vpp rejects is counted and left out.
 
-Columns: `direct` the default run (the direct emitter); `vir` and `fallback`
-the VCC_VIR=bl run, functions lowered by VIR and functions VIR gave up on that
+Columns: `direct` the -O1 run (the direct emitter); `vir` and `fallback`
+the -O2 run, functions lowered by VIR and functions VIR gave up on that
 the direct emitter then did.  `-v` adds the changed/removed/added split.
 """
 import importlib.util, os, random, re, subprocess, sys
@@ -58,8 +58,8 @@ BIN = os.environ.get('VCC_BIN', BUILD)
 VPP = os.environ.get('VPP', f'{BIN}/vpp')
 T = f'{R}/src/test'
 LINE = re.compile(rb'^vcc rec-pass: path=(\w+) pass=(\w+) runs=(\d+) changed=(\d+) removed=(\d+) added=(\d+)$')
-MODES = [('direct', {}), ('bl', {'VCC_VIR': 'bl'})]
-COLS = [('direct', 'direct'), ('bl', 'vir'), ('bl', 'direct')]	# (mode, path)
+MODES = [('direct', ['-O1']), ('O2', ['-O2'])]	# (the level after the TU's own -O)
+COLS = [('direct', 'direct'), ('O2', 'vir'), ('O2', 'direct')]	# (mode, path)
 HEAD = ['direct', 'vir', 'fallback']
 LENIENT = ['-w', '-Wno-error=implicit-function-declaration', '-Wno-error=implicit-int',
            '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types', '-Wno-error=return-type',
@@ -109,8 +109,8 @@ def run1(job):
     name, a, cwd = job
     res = []
     for mode, extra in MODES:
-        env = dict(os.environ, VCC_REC_STATS='1', **extra)
-        p = subprocess.run([VPP, '-c'] + a + ['-o', os.devnull], cwd=cwd, env=env, capture_output=True)
+        env = dict(os.environ, VCC_REC_STATS='1')
+        p = subprocess.run([VPP, '-c'] + a + extra + ['-o', os.devnull], cwd=cwd, env=env, capture_output=True)
         if p.returncode:
             res.append(None)
             continue
@@ -144,8 +144,8 @@ def run_set(name, tus):
 
 
 def table(name, tot, ok, bad):
-    print(f'\n== {name}: {ok["direct"]} TUs compiled (default), {ok["bl"]} (VCC_VIR=bl); '
-          f'rejected: {bad["direct"]} / {bad["bl"]}')
+    print(f'\n== {name}: {ok["direct"]} TUs compiled (-O1), {ok["O2"]} (-O2); '
+          f'rejected: {bad["direct"]} / {bad["O2"]}')
     cols = [tot[m] for m, _ in COLS]
     keys = [(m, pth) for m, pth in COLS]
 

@@ -100,7 +100,7 @@ nice -n 10 make -C src -j 3 vcc OUT=$PWD/build/u                     # unity
 nice -n 10 make -C src -j 3 vcc VCC_UNITY= OUT=$PWD/build/p          # file by file: each file compiles alone
 bench/vbench.py mkbase REV                                           # base from the branch point
 bench/vcc-same.py --base DIR -j 3                   (VCC_BIN=$PWD/build/u)
-VCC_VIR=bl bench/vcc-same.py --base DIR -j 3        # VIR's output goes through the same tail
+                                                    # its c2/s2/d2 modes are VIR (-O2), c1 the direct emitter: both go through the same tail
 bench/vcc-ctests.py -j 3 --suite vcc --no-cache --bin-dir build/u
 python3 bench/vcc-x86.py -j 3 --suite vcc           # x86-64 (CI's x86-64 job); and CI's wasm job
 ```

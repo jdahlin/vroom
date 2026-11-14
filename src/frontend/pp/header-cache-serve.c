@@ -212,6 +212,7 @@ static void pp_header_cache_entry_apply(pp *p, const pp_header_cache_entry *e)
 		d->name_length = h->namelen;
 		d->spelled_path = h->spath;
 		d->is_system = h->sys;
+		d->guard_open = h->guard_open;
 	}
 	p->next_location_base += e->token_span;
 	pp_header_cache_delta_apply(p, e);

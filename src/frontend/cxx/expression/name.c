@@ -115,7 +115,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		if (x->kind == CXX_ENTITY_VALUE && x->ty == CXX_TY_UNKNOWN && x->has_ret_pattern && x->late)
 			cxx_late_deduce(c, x->late);	/* (auto f(): its type from its body) */
 		if (x->kind == CXX_ENTITY_FUNCTION_TEMPLATE || (x->kind == CXX_ENTITY_VALUE && x->ty != CXX_TY_UNKNOWN &&
-								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC) ||
+								  AST_TYPE_KIND(c->ast, x->ty) == AST_TYPE_FUNCTION) ||
 		    (x->kind == CXX_ENTITY_VALUE && x->ty == CXX_TY_UNKNOWN && x->has_ret_pattern)) {	/* (one not deduced yet: a function still) */
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			c->ecallee = e;	/* functions: the call picks one */
@@ -124,7 +124,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 
 
 			for (cxx_entity *y = x->next; y && one; y = y->next)	/* (redeclarations: the same function) */
-				one = y->kind != CXX_ENTITY_VALUE || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, y->ty) != TY_FUNC ? y->kind != CXX_ENTITY_FUNCTION_TEMPLATE && y->kind != CXX_ENTITY_VALUE : y->ty == x->ty;
+				one = y->kind != CXX_ENTITY_VALUE || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, y->ty) != AST_TYPE_FUNCTION ? y->kind != CXX_ENTITY_FUNCTION_TEMPLATE && y->kind != CXX_ENTITY_VALUE : y->ty == x->ty;
 			if (!cxx_is(c, LEX_TOKEN_LEFT_PAREN) && !cxx_is(c, LEX_TOKEN_LESS) && one &&
 			    (!x->member_of || x->fn_static) && !c->template_depth) {
 				/* one function, not called: the function, an lvalue (it decays to a pointer to it) */
@@ -142,17 +142,17 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	/* a constant static data member with its initializer in the class and no definition seen: its value (the
 	   symbol may be defined nowhere) */
-	bool by_value = v && v->mangled_var && v->nsdmi_pos && v->sym && v->ty != CXX_TY_UNKNOWN && (QQ(v->ty) & Q_CONST) &&
-			c->ast->syms[v->sym].sc == SC_EXTERN;
+	bool by_value = v && v->mangled_var && v->nsdmi_pos && v->sym && v->ty != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(v->ty) & AST_QUALIFIER_CONST) &&
+			c->ast->syms[v->sym].sc == AST_STORAGE_EXTERN;
 
 	if (v && !by_value)
 		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	if (v && v->has_value && !v->placeholder && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN &&
-	    (AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM || (AST_TYPE_KIND(c->ast, v->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= TY_ULLONG))) {
+	    (AST_TYPE_KIND(c->ast, v->ty) == AST_TYPE_ENUM || (AST_TYPE_KIND(c->ast, v->ty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= AST_TYPE_UNSIGNED_LONG_LONG))) {
 		/* an enumerator (or a constant with no object, or one whose object was not made: a static constexpr
 		   member): its value, of the enumeration's type (errc::x converts to error_condition by the
 		   constructor template for enumerations; C's rules make it an integer where one is wanted) */
-		qty vt = QUNQ(v->ty);
+		ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(v->ty);
 
 		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	}
@@ -197,7 +197,7 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 	    cxx_peek(c, 1)->kind == LEX_TOKEN_EQUAL && cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN &&
 	    !cxx_lookup_in(c, q, vintern_cstr("operator="), 0)) {
 		/* B::operator=(x) of a class that declares none: its implicit assignment (json_base_class_t::operator=) */
-		qty bt = q->owner->ty;
+		ast_qualified_type bt = q->owner->ty;
 		uint32_t n;
 
 		cxx_advance(c), cxx_advance(c);
@@ -275,8 +275,8 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 					if (x->kind == CXX_ENTITY_VARIABLE_TEMPLATE && x->ftmpl)
 						ve = x;
 				if (ve && cxx_vtemplate_value(c, ve, c->targs, c->ntargs, &v)) {
-					if (ve->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ve->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, ve->ty) <= TY_ULLONG)
-						cxx_ec(c, QUNQ(ve->ty), v);
+					if (ve->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ve->ty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, ve->ty) <= AST_TYPE_UNSIGNED_LONG_LONG)
+						cxx_ec(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ve->ty), v);
 					else
 						c->evalue = v, c->econst = 1;	/* (its type: the parameter's, not known here) */
 					return;
@@ -288,9 +288,9 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 					cxx_concept_value(c, cxx_entity_kind_find(e, CXX_ENTITY_CONCEPT), c->targs, c->ntargs);
 
 				if (v >= 0)
-					cxx_ec(c, cc_type_basic(TY_BOOL), v);
+					cxx_ec(c, cc_type_basic(AST_TYPE_BOOL), v);
 				else
-					cxx_et(c, cc_type_basic(TY_BOOL), false);
+					cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 				return;
 			}
 			/* f<args>: a call takes the explicit arguments (a function template's) */
@@ -314,7 +314,7 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 		 ((t->len == 18 && !memcmp(t->s + 10, "va_start", 8)) || (t->len == 16 && !memcmp(t->s + 10, "va_end", 6)) ||
 		  (t->len == 17 && !memcmp(t->s + 10, "va_copy", 7)) || (t->len == 21 && !memcmp(t->s + 10, "unreachable", 11)) ||
 		  (t->len == 14 && !memcmp(t->s + 10, "trap", 4)) || (t->len == 18 && !memcmp(t->s + 10, "prefetch", 8))))
-		cxx_et(c, cxx_type_function(c, cc_type_basic(TY_VOID), NULL, 0, true), false);	/* builtins that return void */
+		cxx_et(c, cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), NULL, 0, true), false);	/* builtins that return void */
 	else if (!e && !q && !c->tentative && ((t->len == 8 && !memcmp(t->s, "__func__", 8)) || (t->len == 12 && !memcmp(t->s, "__FUNCTION__", 12)) ||
 					       (t->len == 19 && !memcmp(t->s, "__PRETTY_FUNCTION__", 19)))) {
 		/* the function's name, a static const char[] (here its symbol's name: clang's spells the signature;
@@ -324,7 +324,7 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 
 		if (c->ast->fn && cxx_gen_on(c))
 			fn = vintern_ents[c->ast->syms[c->ast->fn].name].s, fl = vintern_ents[c->ast->syms[c->ast->fn].name].len;
-		cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST), fl + 1, 0), true);
+		cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(AST_TYPE_CHAR), AST_QUALIFIER_CONST), fl + 1, 0), true);
 		cxx_gen_string(c, fn, fl, t->loc);
 	} else
 		cxx_et(c, CXX_TY_UNKNOWN, false);

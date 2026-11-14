@@ -26,10 +26,14 @@ static void pp_macro_dump_token(char **b, size_t *n, size_t *cap, const char *sr
 {
 	char tmp[256];
 
-	if ((t->flags & LEX_TOKEN_FLAG_SPLICED) && t->len <= sizeof(tmp)) {
-		size_t l = lex_token_spell(src, t, tmp);
+	if (t->flags & LEX_TOKEN_FLAG_SPLICED) {
+		/* without the line splices, as clang (a long string literal: a heap copy) */
+		char *w = t->len <= sizeof(tmp) ? tmp : malloc(t->len + 16);
+		size_t l = lex_token_spell(src, t, w);
 
-		pp_macro_dump_append(b, n, cap, tmp, l);
+		pp_macro_dump_append(b, n, cap, w, l);
+		if (w != tmp)
+			free(w);
 	} else {
 		pp_macro_dump_append(b, n, cap, src + t->off, t->len);
 	}

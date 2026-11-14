@@ -1,9 +1,9 @@
 /* Remove an unconditional jump when its destination labels the next instruction.
  * Records remain opaque: arm64's ins and x86's rec are distinct C types.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
-VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_layout *layout,
+VPRIV uint32_t record_fallthrough_drop(void *records, uint32_t count, const record_layout *layout,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx)
 {
 	unsigned char *base = records;

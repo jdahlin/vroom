@@ -5,7 +5,7 @@
 VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty bt;
+	ast_qualified_type bt;
 
 	c->enode = 0;
 	if (!cxx_gen_on(c) || !base)
@@ -14,15 +14,15 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 		base = cc_dereference_build(a, cc_conversion_decay(a, base), loc);
 	(void)bt;
 	c->enode = cxx_gen_member_of(c, base, name, loc, 0);	/* (0: a static member, or one of a class not laid out) */
-	if (c->enode && (QQ(AST_NODE_AT(a, c->enode)->ty) & Q_CONST) && cc_type_is_record(a, AST_NODE_AT(a, base)->ty)) {
+	if (c->enode && (AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE_AT(a, c->enode)->ty) & AST_QUALIFIER_CONST) && cc_type_is_record(a, AST_NODE_AT(a, base)->ty)) {
 		/* a mutable member of a const object: not const */
-		cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(AST_NODE_AT(a, base)->ty));
+		cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, base)->ty));
 		cxx_entity *fe = cls ? cxx_lookup_in(c, cls, name, 0) : NULL;
 
 		while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
 			fe = fe->next;
-		if (fe && fe->is_mutable && fe->ty != CXX_TY_UNKNOWN && !(QQ(fe->ty) & Q_CONST)) {
-			qty pt = cc_type_pointer(a, QUNQ(AST_NODE_AT(a, c->enode)->ty));
+		if (fe && fe->is_mutable && fe->ty != CXX_TY_UNKNOWN && !(AST_QUALIFIED_TYPE_QUALIFIERS(fe->ty) & AST_QUALIFIER_CONST)) {
+			ast_qualified_type pt = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, c->enode)->ty));
 			uint32_t addr = cc_address_of_build(a, c->enode, loc);
 
 			c->enode = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
@@ -61,13 +61,13 @@ VPRIV bool cxx_gen_has_this(const cxx_entity *f)
 }
 
 /* the class a member function belongs to (its this is a pointer to it, const for a const member) */
-VPRIV qty cxx_gen_this_type(cxx *c, const cxx_entity *f)
+VPRIV ast_qualified_type cxx_gen_this_type(cxx *c, const cxx_entity *f)
 {
-	qty ct = f->member_of->owner ? f->member_of->owner->ty : CXX_TY_UNKNOWN;
+	ast_qualified_type ct = f->member_of->owner ? f->member_of->owner->ty : CXX_TY_UNKNOWN;
 
 	if (ct == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
-	return cc_type_pointer(c->ast, f->fn_const ? QT(QI(ct), QQ(ct) | (f->fn_const & 1 ? Q_CONST : 0) | (f->fn_const & 2 ? Q_VOLATILE : 0)) : ct);
+	return cc_type_pointer(c->ast, f->fn_const ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ct), AST_QUALIFIED_TYPE_QUALIFIERS(ct) | (f->fn_const & 1 ? AST_QUALIFIER_CONST : 0) | (f->fn_const & 2 ? AST_QUALIFIER_VOLATILE : 0)) : ct);
 }
 
 /* a string of the AST (an assembler name) */
@@ -93,40 +93,40 @@ VPRIV bool cxx_gen_is_special(const cxx_entity *f)
  * for calls is passed by the address of a temporary, and returned in an object whose address comes first
  * of all (x86-64's convention written out: the pointer in rdi, returned in rax).
  */
-VPRIV qty cxx_gen_abi_type(cxx *c, const cxx_entity *f)
+VPRIV ast_qualified_type cxx_gen_abi_type(cxx *c, const cxx_entity *f)
 {
 	cc *a = c->ast;
 	const ctype *ft = AST_TYPE(a, f->ty);
-	qty ps[34], ret = ft->base;
+	ast_qualified_type ps[34], ret = ft->base;
 	uint32_t np = 0;
 	bool any = false;
 
 	if (ft->n > 31)
 		return CXX_TY_UNKNOWN;
 	if (cxx_gen_by_address(c, ret)) {
-		ps[np++] = cc_type_pointer(a, QUNQ(ret));
+		ps[np++] = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(ret));
 		ret = ps[0], any = true;
 	}
 	if (cxx_gen_has_this(f)) {
-		qty tt = cxx_gen_this_type(c, f);
+		ast_qualified_type tt = cxx_gen_this_type(c, f);
 
 		if (tt == CXX_TY_UNKNOWN || (cxx_class_polymorphic(c, AST_TYPE(a, tt)->base) && !cxx_vtable_usable(c, f->member_of)))
 			return CXX_TY_UNKNOWN;	/* (a class with virtual functions whose vtable is not built yet) */
 		ps[np++] = tt, any = true;
 		if (!c->gen_abi_complete && cxx_gen_is_special(f) && cxx_gen_class_has_vbases(c, f->member_of))
-			ps[np++] = cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(TY_VOID)));	/* the VTT (C2, D2) */
+			ps[np++] = cc_type_pointer(a, cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)));	/* the VTT (C2, D2) */
 	}
 	for (uint32_t i = 0; i < ft->n; i++) {
-		qty p = a->params[ft->aux + i];
+		ast_qualified_type p = a->params[ft->aux + i];
 
 		if (cxx_gen_by_address(c, p))
-			p = cc_type_pointer(a, QUNQ(p)), any = true;
+			p = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(p)), any = true;
 		ps[np++] = p;
 	}
 	if (!any)
 		return f->ty;
 	ft = AST_TYPE(a, f->ty);
-	return cxx_type_function(c, ret, ps, np, (ft->flags & TF_VARIADIC) != 0);
+	return cxx_type_function(c, ret, ps, np, (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0);
 }
 
 /* has a function by this mangled name been begun already (else it is entered): a hash set, open addressing
@@ -241,7 +241,7 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 
 	if (f->mangled || f->c_linkage)
 		return true;
-	if (!home || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC)
+	if (!home || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != AST_TYPE_FUNCTION)
 		return false;
 	if (home == c->global && v->len == 4 && !memcmp(v->s, "main", 4)) {
 		f->mangled = 1;
@@ -275,18 +275,18 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 		}
 	}
 	if (!f->sym || cxx_gen_abi_type(c, f) != f->ty) {
-		qty st = cxx_gen_abi_type(c, f);
+		ast_qualified_type st = cxx_gen_abi_type(c, f);
 
 		if (st == CXX_TY_UNKNOWN)
 			return false;
-		f->sym = cc_symbol_new(a, S_FUNC, f->name, st, 0);
+		f->sym = cc_symbol_new(a, AST_SYMBOL_FUNCTION, f->name, st, 0);
 		if ((!f->fn_internal || f->member_of) && !cxx_scope_in_unnamed_namespace(c, home))
-			a->syms[f->sym].flags |= SF_GLOBAL;	/* (in an unnamed namespace, a class's member too: internal) */
+			a->syms[f->sym].flags |= AST_SYMBOL_FLAG_GLOBAL;	/* (in an unnamed namespace, a class's member too: internal) */
 		a->syms[f->sym].depth = 0;	/* (made while a body is being built: a file-scope symbol all the same) */
 	}
 	if (cxx_scope_in_unnamed_namespace(c, home) || internal_name) {
-		a->syms[f->sym].flags &= ~SF_GLOBAL;	/* (internal linkage, however the symbol was made) */
-		a->syms[f->sym].sc = SC_STATIC;
+		a->syms[f->sym].flags &= ~AST_SYMBOL_FLAG_GLOBAL;	/* (internal linkage, however the symbol was made) */
+		a->syms[f->sym].sc = AST_STORAGE_STATIC;
 	}
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;
@@ -297,16 +297,16 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 	if (special && f->fn_inline && !f->has_vtt)
 		f->sym1 = f->sym;	/* (an inline one: every TU that uses it has its own, so the one function, C2 or D2, does for both names) */
 	if (special && (!f->fn_inline || f->has_vtt)) {
-		qty t1;
+		ast_qualified_type t1;
 
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 1, name, sizeof name))
 			return false;
 		c->gen_abi_complete = 1, t1 = cxx_gen_abi_type(c, f), c->gen_abi_complete = 0;
-		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, t1, 0);
-		if (a->syms[f->sym].flags & SF_GLOBAL)
-			a->syms[f->sym1].flags |= SF_GLOBAL;
+		f->sym1 = cc_symbol_new(a, AST_SYMBOL_FUNCTION, f->name, t1, 0);
+		if (a->syms[f->sym].flags & AST_SYMBOL_FLAG_GLOBAL)
+			a->syms[f->sym1].flags |= AST_SYMBOL_FLAG_GLOBAL;
 		else
-			a->syms[f->sym1].sc = SC_STATIC;	/* (internal as the other) */
+			a->syms[f->sym1].sc = AST_STORAGE_STATIC;	/* (internal as the other) */
 		a->syms[f->sym1].depth = 0;
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
@@ -317,8 +317,8 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 		/* a virtual destructor: the deleting destructor too */
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 3, name, sizeof name))
 			return false;
-		f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym1 ? f->sym1 : f->sym].ty, 0);	/* (this alone: no VTT) */
-		a->syms[f->sym0].flags |= SF_GLOBAL;
+		f->sym0 = cc_symbol_new(a, AST_SYMBOL_FUNCTION, f->name, a->syms[f->sym1 ? f->sym1 : f->sym].ty, 0);	/* (this alone: no VTT) */
+		a->syms[f->sym0].flags |= AST_SYMBOL_FLAG_GLOBAL;
 		a->syms[f->sym0].depth = 0;
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
@@ -347,9 +347,9 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc)
 		c->enode = cc_node_rvalue(c->ast, cxx_gen_var_node(c, c->gen_lambda->cap[k].local, loc));
 		return;
 	}
-	n = cc_node_new(c->ast, N_VAR, c->ast->syms[c->gen_this].ty, loc);
+	n = cc_node_new(c->ast, AST_NODE_VARIABLE, c->ast->syms[c->gen_this].ty, loc);
 	AST_NODE_AT(c->ast, n)->a = c->gen_this;
-	AST_NODE_AT(c->ast, n)->flags = NF_LVALUE;
+	AST_NODE_AT(c->ast, n)->flags = AST_NODE_FLAG_LVALUE;
 	c->enode = cc_node_rvalue(c->ast, n);
 }
 
@@ -362,13 +362,13 @@ VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name
 		const ctype *ft;
 		bool same = true;
 
-		if (e->kind != CXX_ENTITY_VALUE || e->member_of != cls || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != TY_FUNC)
+		if (e->kind != CXX_ENTITY_VALUE || e->member_of != cls || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != AST_TYPE_FUNCTION)
 			continue;
 		ft = AST_TYPE(a, e->ty);
 		if (ft->n != nps || e->fn_const != is_const)
 			continue;
 		for (uint32_t i = 0; i < nps && same; i++)
-			same = ps[i].ty != CXX_TY_UNKNOWN && QUNQ(a->params[ft->aux + i]) == QUNQ(ps[i].ty);
+			same = ps[i].ty != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(a->params[ft->aux + i]) == AST_QUALIFIED_TYPE_UNQUALIFIED(ps[i].ty);
 		if (same)
 			return e;
 	}

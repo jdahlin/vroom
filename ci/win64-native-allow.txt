@@ -1,0 +1,5 @@
+# Tests whose program legitimately behaves differently on real Windows than
+# under Wine (the expected results come from clang's reference build run under
+# Wine).  One per line: NAME  reason.  bench/win64-native.py: an entry whose
+# test fails is reported but allowed; an entry whose test passes is an error
+# (remove it).  Empty: every exported program gives the Wine result.

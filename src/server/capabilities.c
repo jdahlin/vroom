@@ -38,7 +38,7 @@ static const char *const vccd_capabilities_cc_with_argument[] = {
 
 static const char *const vccd_capabilities_cc_exact[] = {
 	"-c", "-S", "-E", "-P", "-C", "-nostdinc", "-pipe", "-g0",
-	"-O0", "-O1", "-O2", "-Os",
+	"-O0", "-O1", "-O2", "-O3", "-Os",
 	"--target=aarch64-linux-gnu", "-fintegrated-as",
 	/* code generation model */
 	"-mlittle-endian", "-mgeneral-regs-only", "-mstrict-align", "-m64",

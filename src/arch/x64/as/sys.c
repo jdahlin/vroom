@@ -61,7 +61,7 @@ VPRIV int x64_i_zero(as_context *a, char *mn, XOp *o, int nops)
 	{
 		static const struct { const char *n; uint8_t b[4]; int k; } zero[] = {
 			{ "retq", { 0xc3 }, 1 }, { "ret", { 0xc3 }, 1 }, { "leave", { 0xc9 }, 1 }, { "leaveq", { 0xc9 }, 1 },
-			{ "cltd", { 0x99 }, 1 }, { "cqto", { 0x48, 0x99 }, 2 }, { "cltq", { 0x48, 0x98 }, 2 }, { "cwtl", { 0x98 }, 1 },
+			{ "cdq", { 0x99 }, 1 }, { "cltd", { 0x99 }, 1 }, { "cqto", { 0x48, 0x99 }, 2 }, { "cltq", { 0x48, 0x98 }, 2 }, { "cwtl", { 0x98 }, 1 },
 			{ "cwtd", { 0x66, 0x99 }, 2 }, { "cbtw", { 0x66, 0x98 }, 2 }, { "nop", { 0x90 }, 1 }, { "ud2", { 0x0f, 0x0b }, 2 }, { "hlt", { 0xf4 }, 1 },
 			{ "mfence", { 0x0f, 0xae, 0xf0 }, 3 }, { "lfence", { 0x0f, 0xae, 0xe8 }, 3 }, { "sfence", { 0x0f, 0xae, 0xf8 }, 3 },
 			{ "pause", { 0xf3, 0x90 }, 2 }, { "int3", { 0xcc }, 1 }, { "cpuid", { 0x0f, 0xa2 }, 2 }, { "rdtsc", { 0x0f, 0x31 }, 2 },

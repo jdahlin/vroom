@@ -1,0 +1,102 @@
+{
+  "llvm-InlineCost.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Analysis/InlineCost.cpp",
+    "bytes": 135033,
+    "sha256": "894aaf8f656f8b97ebd046868f64a120cce8fa4da269e8a33b86fb5a1bed5b61"
+  },
+  "llvm-InlineCost.h": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/include/llvm/Analysis/InlineCost.h",
+    "bytes": 14625,
+    "sha256": "51654b7efd39b574d3287c4ddceb80e8bfa613c4d69758160a120cde66a3ebe4"
+  },
+  "llvm-RegAllocGreedy.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/CodeGen/RegAllocGreedy.cpp",
+    "bytes": 114755,
+    "sha256": "8f9e21589a0346ac1f427b0ebd1ec072f8c86614800ca559efae3fda9fd0999e"
+  },
+  "llvm-CalcSpillWeights.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/CodeGen/CalcSpillWeights.cpp",
+    "bytes": 13885,
+    "sha256": "1b71be7b905dee64a4264fb34b1d18e17e358e8f940fd9d51df2f6931438da57"
+  },
+  "llvm-LoopUnrollPass.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/LoopUnrollPass.cpp",
+    "bytes": 78032,
+    "sha256": "a2200a5ab73e14e621bcbaf4cb05fa88858f243018b2254f34a2fe44f4e870de"
+  },
+  "llvm-LoopVectorize.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Vectorize/LoopVectorize.cpp",
+    "bytes": 364140,
+    "sha256": "4f50b2d6a49578e27278733aac5de2d360fd3e8312f134ab302cff620b9a940e"
+  },
+  "llvm-LICM.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/LICM.cpp",
+    "bytes": 127843,
+    "sha256": "c3cc663f944d9070728ba6ff090a66fecc554a911b8875f5077aceba308d4c4c"
+  },
+  "llvm-DeadStoreElimination.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/DeadStoreElimination.cpp",
+    "bytes": 118566,
+    "sha256": "530f19b7038c89197d055c940d3836b501457ad95a6f141eb4c433d99f6c1748"
+  },
+  "llvm-GVN.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/GVN.cpp",
+    "bytes": 154160,
+    "sha256": "3dfb30a1e44c90fca104c9832d4f703e2cf0fefc1f62d42fd11ded2a53c4122f"
+  },
+  "llvm-SimplifyCFG.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Utils/SimplifyCFG.cpp",
+    "bytes": 359625,
+    "sha256": "01d500eb9082284c19dd2b04f4cdb120dd36d4b9cdc5e50cf1769e866eec88f5"
+  },
+  "llvm-MachineBlockPlacement.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/CodeGen/MachineBlockPlacement.cpp",
+    "bytes": 162446,
+    "sha256": "43174bec682745e2a88ac624fd0a66143f9f33c0b3bd41ec549adf25d874a3e3"
+  },
+  "llvm-BranchProbabilityInfo.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Analysis/BranchProbabilityInfo.cpp",
+    "bytes": 59244,
+    "sha256": "00a08c61d62f71628c2ba236121c61fe3a40021c1523c3057b214a2453543995"
+  },
+  "llvm-SROA.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/SROA.cpp",
+    "bytes": 258236,
+    "sha256": "a6f5ed53b7808bcf24dcf16895be2670189ff04dd45a1e810c8a076a81931b1e"
+  },
+  "llvm-InstructionCombining.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/InstCombine/InstructionCombining.cpp",
+    "bytes": 249354,
+    "sha256": "9df7af07a0cf705ad952e6364103103157e46870253e33bad437e38295da076e"
+  },
+  "llvm-TargetLowering.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/CodeGen/SelectionDAG/TargetLowering.cpp",
+    "bytes": 584445,
+    "sha256": "da3f14344404c64648d41c0f66f7c6db422056d8fb164e8e938f0b11a469c23f"
+  },
+  "llvm-LoopRotation.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/LoopRotation.cpp",
+    "bytes": 4283,
+    "sha256": "588d7aeeeec276f7ac22aec46c6fb515fe2da2febb5bf02b1c139081aa0d9076"
+  },
+  "llvm-JumpThreading.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/Transforms/Scalar/JumpThreading.cpp",
+    "bytes": 129818,
+    "sha256": "735bdb11bc0a10b549a430eb69863dce4f64a4be48f878f47c380b6898caaf62"
+  },
+  "gcc-params.opt": {
+    "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-15.2.0/gcc/params.opt",
+    "bytes": 65621,
+    "sha256": "f67f34c5171cc8978625abf91fbd6e2d42e8c5d6c5b444aeb8c13c06da6f951e"
+  },
+  "gcc-opts.cc": {
+    "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-15.2.0/gcc/opts.cc",
+    "bytes": 124966,
+    "sha256": "b6ee76db2c8f23997f1c6ddb39c89de3b9b1f7379b8baca9975f2b2d7c94db7b"
+  },
+  "llvm-RegAllocScore.cpp": {
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/c47d7823685a/llvm/lib/CodeGen/RegAllocScore.cpp",
+    "bytes": 4753,
+    "sha256": "2492ca42eaed804af2554162b37b1ea6bd60591c9d56633b6365ebf0cbc564f0"
+  }
+}

@@ -11,16 +11,6 @@
 
 #include "operand.h"
 
-typedef struct {
-	uint8_t b[24];
-	int n;
-	int fixat, fixtype, fixsize;	/* one fixup (the displacement or the immediate) */
-	as_value fixv;
-	int fix2at, fix2type;	/* a second one: an immediate symbol after a displacement */
-	as_value fix2v;
-	int x87;		/* (unused) */
-} XEnc;
-
 /*
  * prefixes, REX, the opcode bytes, ModRM (+ SIB, displacement) for reg field
  * `reg` (a register number or /digit) and the r/m operand rm, then an
@@ -44,8 +34,6 @@ typedef struct {
 #define OPB(...) ((const uint8_t[]){ __VA_ARGS__ })
 enum { X64_NEXT = -2 };	/* a family's answer: not one of mine */
 
-VPRIV void eb(XEnc *x, int v);
-VPRIV void ew(XEnc *x, int64_t v, int n);
 VPRIV int fits8(int64_t v);
 VPRIV int fits32(int64_t v);
 VPRIV int isconst(as_context *a, as_value *v, int64_t *c);
@@ -60,7 +48,7 @@ VPRIV int x64_size(as_context *a, int sfx, const XOp *s, const XOp *d);
 VPRIV int rex8(const XOp *o);
 VPRIV int split_sfx(const char *mn, char *stem, int *sz);
 VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops);
-VPRIV int x64_branch(as_context *a, int cc, XOp *t, int call);
+VPRIV int x64_branch(as_context *a, int cc, ElfVal target, int mod);
 VPRIV int x64_sse(as_context *a, int pfx, int op, int w, int reg, const XOp *rm);
 VPRIV int x64_x87m(as_context *a, int op, int digit, const XOp *m);
 VPRIV int x64_x87r(as_context *a, int op, int base, int i);
@@ -79,6 +67,7 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_bits(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_x87ar(as_context *a, char *mn, XOp *o, int nops);
+VPRIV int x64_scalar_sized(as_context *a, const char *mn, XOp *o, int nops);
 VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops);
 #endif

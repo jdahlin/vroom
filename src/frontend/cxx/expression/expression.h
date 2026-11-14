@@ -32,8 +32,8 @@ VPRIV bool cxx_starts_type(cxx *c);
 VPRIV void cxx_type_id_then_close(cxx *c);
 VPRIV bool cxx_paren_type_id_follows(cxx *c);
 VPRIV void cxx_type_then_init(cxx *c);
-VPRIV bool cxx_const_widens(cxx *c, qty from, qty to, int64_t v);
-VPRIV void cxx_functional_cast_type(cxx *c, qty cast_to);
+VPRIV bool cxx_const_widens(cxx *c, ast_qualified_type from, ast_qualified_type to, int64_t v);
+VPRIV void cxx_functional_cast_type(cxx *c, ast_qualified_type cast_to);
 
 /* argument.c */
 VPRIV void cxx_call_arguments_parse(cxx *c);

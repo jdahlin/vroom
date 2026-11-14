@@ -76,7 +76,7 @@ VPRIV bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 
 		if (b == CXX_BUILTIN_TYPE_TRANSFORM && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
 			const vident *v = &vintern_ents[t->id];
-			qty r;
+			ast_qualified_type r;
 
 			cxx_advance(c);
 			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -221,9 +221,9 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
 	case CXX_KW_long: sp->v_long++; break;
 	case CXX_KW_signed: case CXX_KW___signed: case CXX_KW___signed__: sp->v_signed = 1; break;
 	case CXX_KW_unsigned: sp->v_unsigned = 1; break;
-	case CXX_KW_const: case CXX_KW___const: case CXX_KW___const__: sp->quals |= Q_CONST; break;
-	case CXX_KW_volatile: case CXX_KW___volatile: case CXX_KW___volatile__: sp->quals |= Q_VOLATILE; break;
-	case CXX_KW___restrict: case CXX_KW___restrict__: sp->quals |= Q_RESTRICT; break;
+	case CXX_KW_const: case CXX_KW___const: case CXX_KW___const__: sp->quals |= AST_QUALIFIER_CONST; break;
+	case CXX_KW_volatile: case CXX_KW___volatile: case CXX_KW___volatile__: sp->quals |= AST_QUALIFIER_VOLATILE; break;
+	case CXX_KW___restrict: case CXX_KW___restrict__: sp->quals |= AST_QUALIFIER_RESTRICT; break;
 	case CXX_KW_auto: case CXX_KW___auto_type: sp->v_auto = 1, sp->v_unknown = 1; break;	/* (deduced by the declaration) */
 	default: sp->v_unknown = 1;	/* _Complex: not built yet */
 	}
@@ -301,7 +301,7 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 			   !(cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN && cxx_peek(c, 2)->kind != LEX_TOKEN_RIGHT_PAREN &&
 			     false)) {
 			uint32_t save = c->pos, save_undo = c->nundo;
-			qty known = CXX_TY_UNKNOWN;
+			ast_qualified_type known = CXX_TY_UNKNOWN;
 
 			cxx_advance(c);
 			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -320,7 +320,7 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 				/* decltype: a name's declared type; a call's or cast's type with its reference; T& for
 				   another lvalue; else the prvalue's type */
 				if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->template_depth && (kw == CXX_KW_decltype || kw == CXX_KW___decltype)) {
-					bool ref = c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == TY_PTR && AST_TYPE(c->ast, c->edecl)->ext;
+					bool ref = c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == AST_TYPE_POINTER && AST_TYPE(c->ast, c->edecl)->ext;
 
 					if (ref && AST_TYPE(c->ast, c->edecl)->base == c->etype)
 						known = c->edecl;	/* (as declared: T& or T&&) */
@@ -426,7 +426,7 @@ VPRIV void cxx_function_tail_parse(cxx *c);
 VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps, uint32_t n);
 
 /* ptr-operator: * cv, &, &&, X::* cv (with attributes); false if none.  t (may be NULL): the type it applies to */
-VPRIV bool cxx_ptr_operator_parse(cxx *c, qty *t)
+VPRIV bool cxx_ptr_operator_parse(cxx *c, ast_qualified_type *t)
 {
 	if (cxx_is(c, LEX_TOKEN_STAR) || cxx_is(c, LEX_TOKEN_AMPERSAND) || cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
 		int k = cxx_kind(c), quals = 0;
@@ -437,9 +437,9 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, qty *t)
 		       cxx_is_kw(c, CXX_KW__Null_unspecified)) {
 			int kw = cxx_kw(c);
 
-			quals |= kw == CXX_KW_const || kw == CXX_KW___const || kw == CXX_KW___const__ ? Q_CONST :
-				 kw == CXX_KW_volatile || kw == CXX_KW___volatile || kw == CXX_KW___volatile__ ? Q_VOLATILE :
-				 kw == CXX_KW___restrict || kw == CXX_KW___restrict__ ? Q_RESTRICT : 0;
+			quals |= kw == CXX_KW_const || kw == CXX_KW___const || kw == CXX_KW___const__ ? AST_QUALIFIER_CONST :
+				 kw == CXX_KW_volatile || kw == CXX_KW___volatile || kw == CXX_KW___volatile__ ? AST_QUALIFIER_VOLATILE :
+				 kw == CXX_KW___restrict || kw == CXX_KW___restrict__ ? AST_QUALIFIER_RESTRICT : 0;
 			cxx_advance(c);
 			cxx_attributes_skip(c);
 		}
@@ -461,7 +461,7 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, qty *t)
 				cxx_advance(c);
 			if (t) {
 				if (!c->memptr_ty)
-					c->memptr_ty = QT(c->ast->tags[cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("__vcc_member_pointer"), 0)].ty, 0);
+					c->memptr_ty = AST_QUALIFIED_TYPE(c->ast->tags[cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("__vcc_member_pointer"), 0)].ty, 0);
 				*t = c->memptr_ty;
 			}
 			return true;
@@ -574,7 +574,7 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 			break;
 	if (!cxx_decl_specifiers_parse(c, NULL, false))
 		cxx_fail(c, "expected an operator or a type after 'operator'");
-	qty conv_to = c->ds_type;
+	ast_qualified_type conv_to = c->ds_type;
 
 	while (cxx_ptr_operator_parse(c, conv_to != CXX_TY_UNKNOWN ? &conv_to : NULL))
 		ptr = true;
@@ -587,9 +587,9 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 			/* (its name in the class: "operator #" and the type's number; mangle.c writes cv <type>) */
 			char nm[64] = { 0 };
 
-			conv_class->conv_types = realloc(conv_class->conv_types, (conv_class->nconv + 1) * sizeof(qty));
+			conv_class->conv_types = realloc(conv_class->conv_types, (conv_class->nconv + 1) * sizeof(ast_qualified_type));
 			conv_class->conv_types[conv_class->nconv++] = conv_to;
-			snprintf(nm, 32, "operator #%u", (unsigned)QUNQ(conv_to));
+			snprintf(nm, 32, "operator #%u", (unsigned)AST_QUALIFIED_TYPE_UNQUALIFIED(conv_to));
 			c->conv_last = conv_to;
 			return vintern_cstr(nm);
 		}

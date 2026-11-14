@@ -40,7 +40,7 @@ VPRIV void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 				continue;	/* (a type pack: a placeholder type too, for R(A...): cxx_match_type) */
 		}
 		if (tp->kind == 1) {
-			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
+			uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, tp->name, 0);
 
 			if (tag >= c->ntag_placeholder) {
 				uint32_t nn = tag + 1024;
@@ -50,7 +50,7 @@ VPRIV void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 				c->ntag_placeholder = nn;
 			}
 			c->tag_placeholder[tag].owner = p, c->tag_placeholder[tag].index = i + 1;
-			p->ph[i] = e->ty = QT(c->ast->tags[tag].ty, 0);
+			p->ph[i] = e->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0);
 		} else
 			e->placeholder = (uint16_t)(i + 1);
 	}

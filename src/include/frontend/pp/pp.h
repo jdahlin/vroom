@@ -59,7 +59,7 @@ typedef struct pp_opts {
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
 	int cxx;			/* C++ (its standard's year): true/false in #if, __has_cpp_attribute */
-	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32 or PP_LINUX_X86_64 (column of the feature table; x86-64: has_tab_x86) */
+	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 or PP_WIN64 (column of the feature table; x86-64: has_tab_x86, Windows: has_tab_win64) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
 	int diag_show_id;		/* -fdiagnostics-show-id: " [id]" after the flag */
@@ -97,9 +97,12 @@ typedef struct pp_opts {
 	int imacros;			/* predef has -imacros (#__include_macros): no header cache */		/* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
-enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 };
+enum { PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64, PP_WIN64 };
 /* WebAssembly, either width (wasm32: ILP32, PLAN-wasm.md W7) */
 #define PP_IS_WASM(t) ((t) == PP_WASM64 || (t) == PP_WASM32)
+/* the x86-64 CPU, any OS: x86-64 Linux, or Windows x64 through MinGW-w64
+   (PP_WIN64: x86_64-w64-mingw32, LLP64; PLAN-win64.md) */
+#define PP_IS_X86_64(t) ((t) == PP_LINUX_X86_64 || (t) == PP_WIN64)
 
 /* set by the front end (a constructor): __has_builtin is 1 for a name it implements */
 extern int (*pp_builtin_known)(const char *name);
@@ -269,7 +272,7 @@ void diag_record_emit(pp *p, diag_record *d);
 const diag_record *diag_records_first(const pp *p);
 /*
  * VCC_TRACK_DIAG=1 prints with each diagnostic where in vcc it was reported
- * (rustc's -Z track-diagnostics): each reporting function (cc_error, report,
+ * (rustc's -Z track-diagnostics): each reporting function (cc_report_error, report,
  * diag_report_extended, ...) leaves its return address here, and the record keeps it;
  * it is symbolized (atos) only when printed.  Nothing at the call sites:
  * a __FILE_NAME__:__LINE__ argument or a thread-local store there changed

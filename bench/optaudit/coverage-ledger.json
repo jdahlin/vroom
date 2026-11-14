@@ -143,9 +143,9 @@
           "arch/a64/codegen/udivconst.c"
         ],
         "x64": [
-          "codegen/walk/expr.c",
-          "codegen/walk/sdivpow2.c",
-          "codegen/walk/udivconst.c"
+          "codegen/walk/expression.c",
+          "codegen/walk/division-signed-power-of-two.c",
+          "codegen/walk/division-unsigned-constant.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wexpr.c",
@@ -599,7 +599,7 @@
           "arch/a64/codegen/stmt.c"
         ],
         "x64": [
-          "codegen/walk/stmt.c"
+          "codegen/walk/statement.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wstmt.c",
@@ -773,7 +773,7 @@
           "arch/a64/codegen/stmt.c"
         ],
         "x64": [
-          "codegen/walk/stmt.c"
+          "codegen/walk/statement.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wstmt.c"
@@ -865,7 +865,7 @@
           "arch/a64/codegen/stmt.c"
         ],
         "x64": [
-          "codegen/walk/stmt.c"
+          "codegen/walk/statement.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wstmt.c"
@@ -914,13 +914,13 @@
       "status": "partial-explicit-only",
       "evidence": {
         "shared": [
-          "codegen/walk/expr.c"
+          "codegen/walk/expression.c"
         ],
         "a64": [
           "arch/a64/codegen/expr.c"
         ],
         "x64": [
-          "codegen/walk/expr.c",
+          "codegen/walk/expression.c",
           "arch/x64/codegen/lower.c"
         ],
         "wasm": [
@@ -1033,8 +1033,8 @@
           "arch/a64/codegen/call.c"
         ],
         "x64": [
-          "codegen/walk/stmt.c",
-          "codegen/walk/expr.c"
+          "codegen/walk/statement.c",
+          "codegen/walk/expression.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wcall.c"
@@ -1253,7 +1253,7 @@
           "arch/a64/codegen/call.c"
         ],
         "x64": [
-          "codegen/walk/stmt.c"
+          "codegen/walk/statement.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wcall.c"
@@ -1346,7 +1346,7 @@
           "arch/a64/codegen/builtin.c"
         ],
         "x64": [
-          "codegen/walk/expr.c"
+          "codegen/walk/expression.c"
         ],
         "wasm": [
           "arch/wasm/codegen/wcall.c"
@@ -2169,10 +2169,10 @@
     "src/codegen/rec/slots.c": "bbfb54859b2991eb5f69480c9ab7634441d28b7da59e22b505356ca7b2585b49",
     "src/codegen/rec/unreachable.c": "fe40ec8f0f44f184b31ed9cae774dfc8192df01a40eb6b659d43a554c31ebbb3",
     "src/codegen/tu.c": "d681127a4e205d5348e4fd6c2958770da5bb43f62d5f4a3590a133a2e4ca6d9c",
-    "src/codegen/walk/expr.c": "c9e18280a95b6ed40e379eb08fda699c9613fcb98585701e97e5e2323a833adb",
-    "src/codegen/walk/sdivpow2.c": "10acb9477b962f7b1b8a44dddb822b19c9059f4789f2c7a8cbdac43255c8681d",
-    "src/codegen/walk/stmt.c": "ba6d14fe8fe44afeb936d35833ec702a5c4116683a97d94f32f61d159253cbdc",
-    "src/codegen/walk/udivconst.c": "170673af87fcb5d1c600a02fa429817213c35766f672f10a13180e96a85b0b8e",
+    "src/codegen/walk/expression.c": "c9e18280a95b6ed40e379eb08fda699c9613fcb98585701e97e5e2323a833adb",
+    "src/codegen/walk/division-signed-power-of-two.c": "10acb9477b962f7b1b8a44dddb822b19c9059f4789f2c7a8cbdac43255c8681d",
+    "src/codegen/walk/statement.c": "ba6d14fe8fe44afeb936d35833ec702a5c4116683a97d94f32f61d159253cbdc",
+    "src/codegen/walk/division-unsigned-constant.c": "170673af87fcb5d1c600a02fa429817213c35766f672f10a13180e96a85b0b8e",
     "src/include/common/softfloat.h": "236f6e4f8739d8460eb65e8d704179ca5a1c858d9673fe9cfd0489a76ae8d616"
   },
   "inventory_flags": [

@@ -1,3 +1,4 @@
+/* vcc-xfail-win64: Windows x64: packed boolean vectors at calls (TODO.md) */
 #include "types.h"
 int main(void) {
 { B1 a={},b={}; for(int i=0;i<1;i++){a[i]=i%3==0;b[i]=i%2==0;}

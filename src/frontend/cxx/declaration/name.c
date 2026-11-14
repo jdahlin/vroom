@@ -14,77 +14,77 @@ VPRIV bool cxx_entity_is_template(const cxx_entity *e)
 
 /* t without the qualifiers in `drop`: an array's are its elements' ([basic.type.qualifier]: remove_cv<const char[2]>
    is char[2]) */
-VPRIV qty cxx_type_drop_quals(cxx *c, qty t, unsigned drop)
+VPRIV ast_qualified_type cxx_type_drop_quals(cxx *c, ast_qualified_type t, unsigned drop)
 {
-	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY) {
+	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY) {
 		const ctype *x = AST_TYPE(c->ast, t);
-		qty e = cxx_type_drop_quals(c, x->base, drop);
+		ast_qualified_type e = cxx_type_drop_quals(c, x->base, drop);
 
-		return e == x->base ? QT(QI(t), QQ(t) & ~drop) : QT(QI(cc_type_array(c->ast, e, x->n, x->flags & TF_INCOMPLETE)), QQ(t) & ~drop);
+		return e == x->base ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) & ~drop) : AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_array(c->ast, e, x->n, x->flags & AST_TYPE_FLAG_INCOMPLETE)), AST_QUALIFIED_TYPE_QUALIFIERS(t) & ~drop);
 	}
-	return QT(QI(t), QQ(t) & ~drop);
+	return AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) & ~drop);
 }
 
 /* clang's type transform builtins (__remove_reference_t(T), ...): CXX_TY_UNKNOWN for those not done */
-VPRIV qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t)
+VPRIV ast_qualified_type cxx_type_transform(cxx *c, const char *n, size_t len, ast_qualified_type t)
 {
 	const ctype *x = AST_TYPE(c->ast, t);
-	bool ref = x->kind == TY_PTR && x->ext;
-	qty base = ref ? x->base : t;
+	bool ref = x->kind == AST_TYPE_POINTER && x->ext;
+	ast_qualified_type base = ref ? x->base : t;
 #define IS(s) (len == sizeof s - 1 && !memcmp(n, s, len))
 
 	if (IS("__remove_reference_t"))
 		return base;
 	if (IS("__remove_cvref"))
-		return cxx_type_drop_quals(c, base, Q_CONST | Q_VOLATILE | Q_RESTRICT);
+		return cxx_type_drop_quals(c, base, AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE | AST_QUALIFIER_RESTRICT);
 	if (IS("__remove_cv"))
-		return ref ? t : cxx_type_drop_quals(c, t, Q_CONST | Q_VOLATILE | Q_RESTRICT);
+		return ref ? t : cxx_type_drop_quals(c, t, AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE | AST_QUALIFIER_RESTRICT);
 	if (IS("__remove_const"))
-		return ref ? t : cxx_type_drop_quals(c, t, Q_CONST);
+		return ref ? t : cxx_type_drop_quals(c, t, AST_QUALIFIER_CONST);
 	if (IS("__remove_volatile"))
-		return ref ? t : cxx_type_drop_quals(c, t, Q_VOLATILE);
+		return ref ? t : cxx_type_drop_quals(c, t, AST_QUALIFIER_VOLATILE);
 	if (IS("__add_lvalue_reference"))
-		return x->kind == TY_VOID ? t : cxx_type_reference(c, base, false);
+		return x->kind == AST_TYPE_VOID ? t : cxx_type_reference(c, base, false);
 	if (IS("__add_rvalue_reference"))
-		return ref || x->kind == TY_VOID ? t : cxx_type_reference(c, t, true);
+		return ref || x->kind == AST_TYPE_VOID ? t : cxx_type_reference(c, t, true);
 	if (IS("__add_pointer"))
-		return x->kind == TY_FUNC ? cc_type_pointer(c->ast, t) : cc_type_pointer(c->ast, base);
+		return x->kind == AST_TYPE_FUNCTION ? cc_type_pointer(c->ast, t) : cc_type_pointer(c->ast, base);
 	if (IS("__remove_pointer"))
-		return x->kind == TY_PTR && !x->ext ? x->base : t;
+		return x->kind == AST_TYPE_POINTER && !x->ext ? x->base : t;
 	if (IS("__decay")) {
 		const ctype *b = AST_TYPE(c->ast, base);
 
-		if (b->kind == TY_ARRAY)
+		if (b->kind == AST_TYPE_ARRAY)
 			return cc_type_pointer(c->ast, b->base);
-		if (b->kind == TY_FUNC)
+		if (b->kind == AST_TYPE_FUNCTION)
 			return cc_type_pointer(c->ast, base);
-		return QUNQ(base);
+		return AST_QUALIFIED_TYPE_UNQUALIFIED(base);
 	}
 	if (IS("__remove_extent"))
-		return x->kind == TY_ARRAY ? x->base : t;
+		return x->kind == AST_TYPE_ARRAY ? x->base : t;
 	if (IS("__remove_all_extents")) {
-		while (AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		while (AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 			t = AST_TYPE(c->ast, t)->base;
 		return t;
 	}
 	if (IS("__underlying_type"))
-		return x->kind == TY_ENUM ? x->base : CXX_TY_UNKNOWN;
+		return x->kind == AST_TYPE_ENUM ? x->base : CXX_TY_UNKNOWN;
 	if (IS("__make_signed") || IS("__make_unsigned")) {
 		/* the integer type of the same size and the other signedness (cv kept); an enumeration's by its size */
 		bool to_unsigned = n[7] == 'u';
-		int k = x->kind == TY_ENUM ? AST_TYPE_KIND(c->ast, x->base) : x->kind, r;
+		int k = x->kind == AST_TYPE_ENUM ? AST_TYPE_KIND(c->ast, x->base) : x->kind, r;
 
-		if (ref || k < TY_CHAR || k > TY_UINT128)
+		if (ref || k < AST_TYPE_CHAR || k > AST_TYPE_UINT128)
 			return CXX_TY_UNKNOWN;
 		switch (k) {
-		case TY_CHAR: case TY_SCHAR: case TY_UCHAR: r = to_unsigned ? TY_UCHAR : TY_SCHAR; break;
-		case TY_SHORT: case TY_USHORT: r = to_unsigned ? TY_USHORT : TY_SHORT; break;
-		case TY_INT: case TY_UINT: r = to_unsigned ? TY_UINT : TY_INT; break;
-		case TY_LONG: case TY_ULONG: r = to_unsigned ? TY_ULONG : TY_LONG; break;
-		case TY_LLONG: case TY_ULLONG: r = to_unsigned ? TY_ULLONG : TY_LLONG; break;
-		default: r = to_unsigned ? TY_UINT128 : TY_INT128; break;
+		case AST_TYPE_CHAR: case AST_TYPE_SIGNED_CHAR: case AST_TYPE_UNSIGNED_CHAR: r = to_unsigned ? AST_TYPE_UNSIGNED_CHAR : AST_TYPE_SIGNED_CHAR; break;
+		case AST_TYPE_SHORT: case AST_TYPE_UNSIGNED_SHORT: r = to_unsigned ? AST_TYPE_UNSIGNED_SHORT : AST_TYPE_SHORT; break;
+		case AST_TYPE_INT: case AST_TYPE_UNSIGNED_INT: r = to_unsigned ? AST_TYPE_UNSIGNED_INT : AST_TYPE_INT; break;
+		case AST_TYPE_LONG: case AST_TYPE_UNSIGNED_LONG: r = to_unsigned ? AST_TYPE_UNSIGNED_LONG : AST_TYPE_LONG; break;
+		case AST_TYPE_LONG_LONG: case AST_TYPE_UNSIGNED_LONG_LONG: r = to_unsigned ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG; break;
+		default: r = to_unsigned ? AST_TYPE_UINT128 : AST_TYPE_INT128; break;
 		}
-		return QT(QI(cc_type_basic(r)), QQ(t));
+		return AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cc_type_basic(r)), AST_QUALIFIED_TYPE_QUALIFIERS(t));
 	}
 #undef IS
 	return CXX_TY_UNKNOWN;	/* (__remove_restrict) */
@@ -207,11 +207,11 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 
 				/* an alias template's instance: the class it names (completed), its members */
 				if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty))
-					inst->members = cxx_type_class_scope(c, QUNQ(inst->ty));
+					inst->members = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(inst->ty));
 				/* ... one that is not a class (__remove_const_ref_t<unsigned char>::first_type): ill-formed, a
 				   substitution failure ([temp.deduct.general]/11.2) */
 				if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, inst->ty) &&
-				    AST_TYPE_KIND(c->ast, inst->ty) != TY_ENUM && !c->template_depth)
+				    AST_TYPE_KIND(c->ast, inst->ty) != AST_TYPE_ENUM && !c->template_depth)
 					c->member_missing = 1;
 				if (inst && inst->members)
 					*qualifier = inst->members, te = inst;	/* the instance's own members */
@@ -249,7 +249,7 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 				c->unevaluated--;
 				c->in_template_args = targs;
 				if (c->pos + 1 == after && c->etype != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->etype))
-					cls = cxx_type_class_scope(c, QUNQ(c->etype));
+					cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype));
 				c->pos = after;
 			}
 			cxx_advance(c);
@@ -357,8 +357,8 @@ VPRIV void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 			out->kind = 2, out->v = v;
 			/* an enumerator, a constant of enumeration type: X<e> is not X<its value> */
 			for (cxx_entity *x = e; x; x = x->next)
-				if (x->kind == CXX_ENTITY_VALUE && x->has_value && x->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, x->ty) == TY_ENUM) {
-					out->t = QUNQ(x->ty);
+				if (x->kind == CXX_ENTITY_VALUE && x->has_value && x->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, x->ty) == AST_TYPE_ENUM) {
+					out->t = AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty);
 					break;
 				}
 		}
@@ -371,8 +371,8 @@ VPRIV void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 	/* (negative: its value in the parameter's type is not known here, size_t(-1) for one) */
 	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0) {
 		out->kind = 2, out->v = c->evalue;
-		if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)
-			out->t = QUNQ(c->etype);	/* (its enumeration: part of the argument) */
+		if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)
+			out->t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);	/* (its enumeration: part of the argument) */
 	}
 }
 

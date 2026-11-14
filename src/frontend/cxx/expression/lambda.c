@@ -10,14 +10,14 @@
 VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out)
 {
 	uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial), loc = cxx_peek(c, 0)->loc, bnode;
-	uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, lname, 0);
+	uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
 	cxx_entity *owner = calloc(1, sizeof *owner), *call;
 	cxx_scope *outer = c->scope, *cs, *fs;
 	cxx_gen_lambda l;
 
 	*closure_node = 0, *call_out = NULL;
 	owner->kind = CXX_ENTITY_TYPE, owner->name = lname, owner->pack_index = -1;
-	owner->ty = QT(c->ast->tags[tag].ty, 0);
+	owner->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0);
 	cs = cxx_scope_new(c, CXX_SCOPE_CLASS, outer, owner);
 	cs->is_lambda = 1;
 	owner->members = cs;
@@ -27,7 +27,7 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call
 	memset(&l, 0, sizeof l);
 	l.def = 1, l.is_try = 1;
 	if (call) {
-		call->ty = cxx_type_function(c, cc_type_basic(TY_INT), NULL, 0, false);
+		call->ty = cxx_type_function(c, cc_type_basic(AST_TYPE_INT), NULL, 0, false);
 		call->fn_const = 1, call->member_of = cs;
 	}
 	if (!call || !cxx_gen_lambda_symbol(c, call, serial) || (l.floor = c->ast->nsym, !cxx_gen_function_begin(c, call, fs, NULL, 0))) {
@@ -42,7 +42,7 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call
 		cxx_gen_fail(c);
 	cxx_gen_function_end(c, call, bnode);
 	c->scope = outer;
-	if (!(c->ast->syms[call->sym].flags & SF_DEFINED))
+	if (!(c->ast->syms[call->sym].flags & AST_SYMBOL_FLAG_DEFINED))
 		return false;
 	cxx_gen_lambda_object(c, &l, owner->ty, loc);
 	*closure_node = c->enode, *call_out = call;
@@ -57,11 +57,11 @@ VPRIV void cxx_lambda_parse(cxx *c)
 	uint32_t depth = c->class_depth, targs = c->in_template_args;
 	/* a closure type is built for a lambda outside templates whose parameter types are known */
 	bool typed = false, generic = false;
-	qty params[16], ret = CXX_TY_UNKNOWN;
+	ast_qualified_type params[16], ret = CXX_TY_UNKNOWN;
 	uint32_t lp_name = 0, lp_at = 0, lp_n = UINT32_MAX;	/* a parameter pack of an enclosing template's pack (its parameters, expanded) */
 	uint32_t nparams = 0;
 	uint8_t o_capture = c->ret_capture, o_lval = c->ret_lval, o_seen = c->ret_seen;
-	qty o_type = c->ret_type;
+	ast_qualified_type o_type = c->ret_type;
 
 	/* code generation: the body is parsed for its types first, then again as the closure's operator() */
 	bool want_gen = cxx_gen_on(c) && c->gen_block != NULL;
@@ -206,9 +206,9 @@ VPRIV void cxx_lambda_parse(cxx *c)
 		c->gen = was_gen;
 	if (typed && ret == CXX_TY_UNKNOWN) {
 		if (c->ret_type == CXX_TY_UNKNOWN && !c->ret_seen)
-			ret = cc_type_basic(TY_VOID);
+			ret = cc_type_basic(AST_TYPE_VOID);
 		else if (c->ret_type != CXX_TY_UNKNOWN)
-			ret = AST_TYPE_KIND(c->ast, c->ret_type) == TY_VOID ? c->ret_type :
+			ret = AST_TYPE_KIND(c->ast, c->ret_type) == AST_TYPE_VOID ? c->ret_type :
 			      cxx_auto_deduce(c, cxx_auto_type(c), c->ret_type, c->ret_lval);
 	}
 	c->ret_capture = o_capture, c->ret_lval = o_lval, c->ret_seen = o_seen, c->ret_type = o_type;
@@ -222,9 +222,9 @@ VPRIV void cxx_lambda_parse(cxx *c)
 		cxx_entity *owner = calloc(1, sizeof *owner), *call;
 		cxx_scope *cs;
 
-		tag = cc_tag_new(c->ast, TY_STRUCT, lname, 0);
+		tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
 		owner->kind = CXX_ENTITY_TYPE, owner->name = lname, owner->pack_index = -1;
-		owner->ty = QT(c->ast->tags[tag].ty, 0);
+		owner->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0);
 		cs = cxx_scope_new(c, CXX_SCOPE_CLASS, outer, owner);
 		cs->is_lambda = 1;
 		owner->members = cs;
@@ -294,7 +294,7 @@ VPRIV void cxx_lambda_parse(cxx *c)
 				c->gen_pack_entity = NULL;
 				if (begun) {
 					uint8_t g_capture = c->ret_capture, g_seen = c->ret_seen, g_lval = c->ret_lval;
-					qty g_type = c->ret_type;
+					ast_qualified_type g_type = c->ret_type;
 
 					c->gen_lambda = &l;
 					c->pos = body_b;
@@ -311,7 +311,7 @@ VPRIV void cxx_lambda_parse(cxx *c)
 					c->scope = outer;
 					c->pos = end;
 					c->lambda_node = 0;
-					if (c->ast->syms[call->sym].flags & SF_DEFINED) {
+					if (c->ast->syms[call->sym].flags & AST_SYMBOL_FLAG_DEFINED) {
 						cxx_gen_lambda_object(c, &l, owner->ty, lloc);
 						c->lambda_node = c->enode;
 					}

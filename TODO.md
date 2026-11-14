@@ -136,7 +136,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
   zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
-  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  (`-O3`) pass example, infcover and the minigzip round trips, and
   deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
   are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
   source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x
@@ -227,7 +227,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **arm64: the hardening options are accepted and ignored.**
   `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
   (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
-  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  are implemented for x86-64 (cc_options.xcf ...); arm64 accepts them silently,
   so a kernel built with them lacks the protection.
   *Validate:* `src/test/vcc/autoinit_zero.c` (xfail on arm64).
 
@@ -274,7 +274,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Wider atomic operations on other targets remain unsupported.
 
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
-  (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
+  (also `T *_Atomic`) make a type of its own (`AST_TYPE_FLAG_ATOMIC`, `ty_atomic()` in
   frontend/c/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
@@ -433,7 +433,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
 - [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
-  `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
+  `cc_options` field before `outfd` (cc.h says parse options go there) plus emit;
   `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
   cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
   `driver/declaration-cache.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
@@ -625,6 +625,93 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+- [ ] **Windows x64: packed boolean vectors at calls** [C].  clang passes an
+  `ext_vector_type` `_Bool` vector of N lanes on the Microsoft convention one
+  lane per argument position (results through a hidden pointer, the bits
+  packed), as it does for System V; `arch/x64/codegen/abi-win64.c` passes it
+  as one by-reference vector.  `src/test/abi/packed_bool`, `packed_bool_4096`
+  and `packed_bool_variadic_fixed` are `vcc-xfail-win64`.
+  *Validate:* `bench/vcc-abi.py --target win64 packed_bool` XPASSes; remove the markers.
+- [ ] **Windows x64: MS bit-field layout of a packed record with `:0`** [C].
+  `tcc/95_bitfields_ms` TEST 6 (`__attribute__((packed))`, `int x:12, y:4, :0,
+  :4, z:3`): clang starts the unit after `:0` at the byte where the previous
+  unit ends, vcc aligns it to the type (`frontend/c/record-layout.c`); found
+  by `bench/vcc-win64.py`.
+  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes (XPASS: remove
+  its `XFAIL` entry in `bench/vcc-win64.py`).
+- [ ] **x86-64: `naked` functions** [C].  `__attribute__((naked))` is not
+  implemented for x86-64: the body gets a frame, so the asm's `retq` sits
+  inside it; on Windows the epilogue checker of `vcc-win64.py --seh` flags
+  `vcc/dead_results` (`XFAIL`, stage seh; the function is never called).
+  *Validate:* `bench/vcc-win64.py --seh vcc dead_results` XPASSes.
+- [ ] **Windows x64: `-c` without text for the frame and sections** [P].
+  `vpp -c` for the target encodes records directly but hands the `.def`
+  records, sections/COMDAT, `.seh_*`, data and strings to the TU's assembler
+  as text items (as x86-64 ELF does for its directives); the `coff_section`,
+  `elf_reg` + `coff_class`, `coff_seh_*` calls of obj.h could take them
+  directly.  *Validate:* `vcc-win64.py --objcmp` stays 2105/2106; emit time
+  per TU drops.
+- [ ] **`-g` on `.S` sources: clang's file names and rows** [C].  vasm/vcc
+  write MC's assembler debug information for a `.s` byte for byte (but the
+  producer), and follow cpp line markers in the text they are given; for a
+  `.S` clang assembles a temporary file named by `-main-file-name` and its
+  rows follow the preprocessor's markers into included files, vcc's `-c x.S`
+  path hands the assembler text whose rows are the `.S` file's own lines.
+  *Validate:* `clang -g -c x.S` = `vpp -g -c x.S` but DW_AT_producer for the
+  vas-corpus `.S` files (a new mode).
+- [ ] **vasm -g: `.symver` symbols after the debug sections' symbols** [C].
+  MC creates the `.symver` names in the ELF writer, after the
+  `-g`-generated sections; vasm registers them at the directive.
+  *Validate:* `bench/vas-obj.py` `symver.s` -g XPASSes (remove `G_XFAIL`).
+- [ ] **Windows x64: clang's `.debug$S` with `-g`** [C].  clang's `-g -S`
+  for MinGW also writes a CodeView `.debug$S` (S_OBJNAME, S_COMPILE3 with
+  its version); vcc writes only DWARF (assembled, it is clang's text either
+  way, so objects compare equal).  Nothing reads it for MinGW.
+  *Validate:* decide whether to write it; then a `vcc-dwarf.py` check.
+- [ ] **Windows x64: stack-protector failure path** [T].  The guard and
+  `-lssp` match clang (`src/test/win64/stack_protector.c`, vcc-driver.py
+  rows); a smashed canary reaching `__stack_chk_fail` is not tested (where
+  the canary sits relative to an overflowed buffer differs from clang's
+  layout).  *Validate:* a test that overwrites the canary slot itself and
+  exits through libssp's message, compared with clang's.
+- [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
+  `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
+  vccd); `bench/vccd-test.py win64-cross-build-through-the-shim` and
+  `bench/zlib/run.py --target win64` (zlib's ./configure and Makefile through
+  the shim) cover it since WIN8, but `vcc-win64.py` drives vpp only.
+  *Validate:* a `vcc-win64.py --vccd` mode (private vccd, the shim as CC)
+  gives the same pass set as `--own`.
+- [ ] **Windows x64: the x86 SIMD intrinsic headers** [C].  vcc's own
+  `src/headers/x86/` has only what MinGW-w64's `windows.h`/`malloc.h` reach
+  (`x86intrin.h`, `emmintrin.h`, `xmmintrin.h`, `mm_malloc.h`: the vector
+  types, fences, pause, clflush, MXCSR, rdtsc); no `immintrin.h`, no SSE/AVX
+  arithmetic intrinsics, no `cpuid.h`, so `<intrin.h>` (which includes
+  `pmmintrin.h` and the rest) does not compile without `-resource-dir`.  The
+  WIN8 projects are configured without them (FFmpeg `--disable-asm`).
+  *Validate:* `vcc-diff.py --win64` with vcc's headers on the intrinsic TUs
+  (`intrin.h`, `-march=haswell`) and a test calling SSE2/AVX2 intrinsics
+  under Wine against clang's build.
+- [ ] **Windows x64: `<tgmath.h>` and `<stdbit.h>`** [C].  Neither MinGW-w64
+  nor `src/headers/freestanding/` has them (clang's resource directory has
+  `tgmath.h`; C23's `stdbit.h` neither).  *Validate:* a `src/test/vcc` case per
+  header compiled for x86_64-w64-mingw32 without `-resource-dir`.
+- [ ] **`-fcommon` and `__attribute__((common))` are ignored** [C].  vcc
+  emits a tentative definition as `.bss` (`B`) on every target where clang's
+  `-fcommon` or the attribute gives a common symbol (`C`), found in WIN8's
+  vnm comparison; a program that defines the same tentative variable in two
+  TUs and relies on `-fcommon` fails to link.  *Validate:* `vnm` of a TU with
+  both shows `C`, as clang's, for ELF and COFF; a two-TU test links with
+  `-fcommon`.
+- [ ] **`-coverage` is accepted and ignored** [C].  zlib's Makefile builds
+  `infcover` with `-coverage`; clang instruments and links the profile
+  runtime, vcc compiles normally (the program runs, no `.gcda`).
+  *Validate:* either an error ("unsupported option") or gcov-compatible
+  counters; decide which.
+- [ ] **Windows x64: FFmpeg with NASM, SQLite's TCL suite** [T].  WIN8 ran
+  FFmpeg's C fallbacks only (`--disable-asm`) and SQLite without its TCL
+  testrunner (no tclsh for Windows on the host; testfixture.exe needs one).
+  *Validate:* `bench/ffmpeg/run.py --target win64` with x86asm (NASM objects
+  linked by vlink) and a Windows Tcl to build testfixture.exe.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
   wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,
@@ -693,7 +780,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
   and Node 24; every named probe must become XPASS when repaired, then remove
   its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
-- [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
+- [ ] **PIC/PIE** [P]: done: `cc_options.pic` from the driver (PIE the hosted
   default, `-fno-pic`), `sym_needs_got` (arch/a64/codegen/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
   defined in the TU, hidden/protected direct, calls direct; checked by
@@ -736,7 +823,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without a prologue, as clang), `.file 0` the main file, a v5 CU with
   low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
   `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
-  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.
+  Windows x64 (WIN6): DWARF 4 by default as clang, `-gdwarf-2..5` on every
+  target, COFF unit ranges for functions outside `.text`; Linux keeps the
+  `.text`-only pc range, so `-ffunction-sections -g` functions are outside
+  the unit there (llvm-symbolizer finds no unit for them).  No
+  `DW_TAG_subprogram`: winedbg names vcc's frames only by module+offset.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `test/vcc`; later a scripted lldb
   session (break at file:line, print local).
@@ -1211,9 +1303,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-mX` checked against lld's AArch64 emulations ("unknown emulation");
   `-zX` as `-z X` (`-znotext` was swallowed); `--version`/`-v` with "LLD
   23.1.4" for `scripts/ld-version.sh`; `-static`/`-Bstatic`/`-Bdynamic`,
-  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (archives only, "unable to find
-  library"); `-pie` and `--dynamic-linker` a clear error until dynamic
-  linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
+  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (`libNAME.so` before `.a` unless
+  `-Bstatic`); `-pie`, `--dynamic-linker`, `--no-dynamic-linker`,
+  `--as-needed`, `-E`, `--hash-style`, `-z now|lazy`, `-m elf_x86_64` (x86-64
+  dynamic executables, below); `--build-id` no longer takes the next argument.
+  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
   `--gc-sections` as lld's MarkLive (roots: entry, KEEP, SHF_GNU_RETAIN,
   non-alloc, init/fini arrays, notes outside groups, .ctors/.init/...,
   exported symbols under -shared; relocations, groups and SHF_LINK_ORDER
@@ -1231,14 +1325,38 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   getRankProximity, then back past sections without inputs (findOrphanPos).
   `--eh-frame-hdr` as lld's EhFrameHeader (sorted table, duplicate
   locations dropped) and PT_GNU_EH_FRAME: 4 cases.
-  Left: `--emit-relocs`, `-z now` (no effect without dynamic linking).
+  Left: `--emit-relocs`, `-rpath`/`DT_RUNPATH`, `--sysroot`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
+- [ ] **Dynamic executables (x86-64)** (done 2026-11-14: `ld/dso.c` reads
+  shared objects (.dynsym, default versions, DT_SONAME) and GNU ld input
+  scripts (glibc's libc.so, libgcc_s.so: GROUP/INPUT/AS_NEEDED, relative names
+  by the script's directory and -L); their definitions resolve globals no
+  object defines and stop lazy archive extraction.  `ld/dynamic-executable.c`: PLT (lazy,
+  lld's x86-64 PLT0/entries) and .got.plt, GLOB_DAT, symbolic R_X86_64_64 in
+  writable data, copy relocations with every alias exported (environ,
+  __environ), canonical PLT entries for addresses taken from code, RELATIVE
+  under -pie (read-only R_X86_64_64 and R_X86_64_32 in a PIE are errors as
+  lld), .dynsym/.gnu.hash/.hash/.gnu.version/.gnu.version_r/.dynamic (NEEDED,
+  INIT/FINI(_ARRAY), FLAGS_1 PIE/NOW), PT_INTERP, PT_DYNAMIC; without `-T`
+  lld's default layout (image base 0x200000 / 0 for PIE, headers in the first
+  PT_LOAD, segments at the next page at the same offset, .text.* -> .text as
+  getOutputSectionName); linker-defined __ehdr_start, _GLOBAL_OFFSET_TABLE_,
+  _DYNAMIC, __init_array_start..., _etext, _edata, __bss_start, _end.  The
+  .got, PLT and copies follow the symbol table order (ids depended on the
+  threads: a link was not reproducible).  `bench/vlink-dyn.py`: 24/24, clang's
+  and vpp's objects in PIE, no-PIE and -z now run as with lld; vcc built by
+  vpp and linked by vlink (no clang in the link) passes the vcc suite, and
+  rebuilds itself to byte-identical objects.)  Left: arm64; `-shared` on
+  x86-64; TLS relocations against shared-object symbols; IFUNC/IRELATIVE (a
+  static glibc link); versioned references (foo@V); lld byte identity of the
+  dynamic sections; `--gc-sections` with shared objects.
+  *Validate:* `bench/vlink-dyn.py`; vcc linked by vlink (`make VCC_CC=` a vpp + vlink wrapper).
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
   RELATIVE under -pie/-shared; `test/vcc/got_pic.c`, `pragma_weak.c`; locals
-  after the globals by file as lld's postScanRelocations (`vlink-opts.py`); not:
-  GLOB_DAT for preemptible symbols (dynamic linking)),
+  after the globals by file as lld's postScanRelocations (`vlink-opts.py`);
+  GLOB_DAT for x86-64 imported symbols (dynamic executables, above); not on arm64),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
   for `test/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,
@@ -1361,6 +1479,23 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 4: quality
 
+- [ ] **VIR's code shape against the direct emitter's rules** [P].  Since
+  -O2 is VIR (doc/OPTIMIZATION.md), `bench/vcc-opt-rules.py` checks code shape
+  at -O0/-O1 alone (`DIRECT_LEVELS`) and `bench/vcc-tail-controls.py` runs with
+  `-fno-vir`; -O2/-O3 are compiled and run, their shape unchecked.  Where VIR
+  falls short of the rules (2026-11-13; the code is correct in each case):
+  x86-64 makes no sibling calls (`tails`, tail-controls); arm64 leaves a dead
+  `ret` after a sibling call (`tails`: the return block keeps its label, and
+  `em_rec_unreachable` treats every label as an entry); x86-64 repeats a zero
+  extension (`extensions`, `ke_index`), loads a global through `leaq`+`movl`
+  instead of a RIP-relative `movl` (`bitrules`, `br_volatile`), misses
+  `mc_u32_3`'s LEA (`mulconst`), keeps `rl_bind`'s locals and `cp_stores`'
+  copies in memory (`locals`, `copies`); arm64 `ud_pressure` (`udivconst`).
+  Others differ from the rule and are no worse (`localvalues` reuses `a+b`,
+  `unusedinit` drops an unused non-volatile load): those rules need a VIR form.
+  *Validate:* the rule passes at -O2 and -O3 (add the level to
+  `DIRECT_LEVELS`'s check, or give the rule a VIR expectation).
+
 - [ ] **IPA constant propagation.** A static function's parameter that every
   call passes the same constant is that constant in the body (clang's IPSCCP,
   gcc's IPA-CP), noinline functions included: `__builtin_constant_p` of it is 1
@@ -1448,7 +1583,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `diag_warning_error_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
-  whose exact value does not fit (innermost only, `NF_OVF`), value with
+  whose exact value does not fit (innermost only, `AST_NODE_FLAG_OVERFLOW_REPORTED`), value with
   clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
   overflow inside casts/conditionals reached through other operators.
 - [x] **-Wunused-variable**, `-Wunused-const-variable`: block-scope
@@ -1462,7 +1597,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the taken one when the condition is constant; a comma's right operand).
   Narrowing waits for the end of the function as clang's
   DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
-  leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
+  leading 0 (`AST_NODE_NUMBER` aux) and chars in braces.  Done: diag `const_conv.c`,
   kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
   the deferred ones in unreachable code (vcc: only under a constant-false
   condition, `c->dead`); a member
@@ -1589,7 +1724,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "; dereference with *" hint and fix-it (simple operands), `int *const`
   spelled as clang, a decayed array named `int[2]`, and "not a compile-time
   constant" after a conversion error: diag `ptr_discards_quals.c`,
-  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (CK_SPLAT),
+  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (AST_CAST_SPLAT),
   the scalar-to-vector truncation error, `.xyzw`/`.rgba`/`.sN`/`.hi`/`.lo`/
   `.even`/`.odd` swizzles: `test/vcc/ext_swizzle.c`, diag
   `ext_vector_splat.c`, `vector_scalar_trunc.c`, `ext_swizzle_range.c`.)
@@ -1680,7 +1815,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   OOM policy for code inside vccd (fail the request, never abort) decides
   the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
   `bench/vbench.py gate`.
-- [ ] **The linker as a split module** (restructure 2026-11-09).  `ld/ld.c`
+- [x] **The linker as a split module** (restructure 2026-11-09; done 2026-11-13:
+  `ld-internal.h`, the link context, the fragments as `arch/*/ld/*.c`, each part
+  compiles alone with `make VCC_UNITY=`; doc/quality/WORK-linker.md step 2).  `ld/ld.c`
   is one TU of ~4400 lines over process-wide globals (`objs`, `isecs`,
   `gsyms`, ... of anonymous `VVEC` types); its arm64 parts are fragments
   (`arch/a64/ld/*.inc`) it #includes.  Make it files by topic with an

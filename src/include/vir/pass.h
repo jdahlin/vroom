@@ -24,7 +24,8 @@ typedef struct vir_pass_context {
 	const vir_unit *unit;	/* virtest: the unit the function came from; the compiler: NULL */
 	uint32_t budget;	/* SPEC-vir 10.4: rounds a fixed point may take (default 4) */
 	uint64_t changes;	/* the pass adds the instructions it rewrote or removed */
-	bool checked;		/* VCC_VIR_PASSES=verify or virtest: the pass may check its own invariants */
+	bool checked;		/* -fvir-passes=verify or virtest: the pass may check its own invariants */
+	bool check_analyses;	/* -fvir-passes=analyses: vir_pass_run checks the pass's `keeps` (checked asks for it too) */
 } vir_pass_context;
 
 enum { VIR_PASS_BUDGET = 4 };
@@ -35,7 +36,7 @@ enum {
 };
 
 typedef struct vir_pass_info {
-	const char *name;	/* stable: VCC_VIR_PASSES, `; PASSES:`, virtest --passes, the statistics */
+	const char *name;	/* stable: -fvir-passes, `; PASSES:`, virtest --passes, the statistics */
 	bool (*run)(vir_function *f, vir_pass_context *ctx);	/* canonical in, canonical out; whether it changed f */
 	uint8_t needs;		/* VIR_VALID_*: the analyses it asks for (it calls the getters itself) */
 	uint8_t keeps;		/* VIR_VALID_*: still valid after it if they were valid before */
@@ -45,7 +46,7 @@ typedef struct vir_pass_info {
 const vir_pass_info *vir_pass_find(const char *name, size_t n);	/* NULL: no such pass */
 const vir_pass_info *vir_pass_list(uint32_t *n);
 
-/* Runs p on f.  Returns whether it changed f.  When ctx->checked or VCC_VIR_CHECK_ANALYSES=1, then
+/* Runs p on f.  Returns whether it changed f.  When ctx->checked or ctx->check_analyses, then
  * after the run every analysis in p->keeps that is still valid in f->valid is computed again and
  * compared with the one the pass left; on a mismatch *err names it (err has n bytes) and f is left as
  * the pass made it.  *err is the empty string otherwise. */

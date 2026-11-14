@@ -1,0 +1,331 @@
+{
+  "date": "2026-11-13",
+  "baseline_commit": "7e166718",
+  "production_predecessor_policy_changed": false,
+  "verdict": "Experimental only: useful mapped edge traffic decreases after deferred-fetch refinement, but runtime benefit is not repeatable.",
+  "candidate_pool": "up to four distinct legacy-ranked fingerprints plus the current choice; loop depth, coldness and adjacency rank pool/ties, never measured frequencies",
+  "ranking": "lexicographic noncold memory then noncold total work, cold memory then cold total work; current choice wins equal estimates",
+  "scope": "inherited live-in register contract plus one projected fetch per omitted nonconstant live-in per earlier incoming edge; no exact phi placement or parallel-copy-cycle model",
+  "bounds": {
+    "pool": 4,
+    "extra_current_comparison": 1,
+    "hash_slots": 512,
+    "input_union_limit": 256,
+    "fallback_on_input_limit": "current legacy choice",
+    "complexity": "fixed candidate bound times earlier-predecessor snapshot words plus bounded input union, not predecessor pairs"
+  },
+  "unavailable_states": "Only earlier source blocks are estimated. Later source blocks, including backedges, are counted separately in dynamic validation.",
+  "victim_sha256": "401bc2d8e0d8d86b3d3e3a2a85341d7e26d24eb6b9e64d8f6800131310d6db2c",
+  "map_limit": "Raw mapping records stop folds. Dynamic counts are measured against equally mapped, internally unaligned controls, and bound work surviving in unmodified binaries. Runtime uses unmodified binaries only.",
+  "mapped_dynamic_mean": {
+    "prior": {
+      "reload": 151008198.5,
+      "remat": 212542922,
+      "move": 46105760,
+      "store": 100103078,
+      "earlier-edge-remat": 31044644,
+      "later-edge-move": 1852914,
+      "earlier-edge-move": 118168266,
+      "earlier-edge-store": 270675975,
+      "earlier-edge-reload": 258900056,
+      "later-edge-remat": 165577440.5,
+      "later-edge-reload": 1522460,
+      "later-edge-store": 3362662,
+      "all_memory": 785572429.5,
+      "earlier_edge_memory": 529576031,
+      "later_edge_memory": 4885122
+    },
+    "candidate": {
+      "reload": 170620739.5,
+      "remat": 212532681,
+      "move": 48814889.5,
+      "store": 105549384,
+      "earlier-edge-remat": 31039514,
+      "later-edge-move": 1847750.5,
+      "earlier-edge-move": 134449957,
+      "earlier-edge-store": 286806016.5,
+      "earlier-edge-reload": 256614741.5,
+      "later-edge-remat": 165572356.5,
+      "later-edge-reload": 1512183.5,
+      "later-edge-store": 3352393.5,
+      "all_memory": 824455458.5,
+      "earlier_edge_memory": 543420758.0,
+      "later_edge_memory": 4864577.0,
+      "delta_vs_prior": {
+        "reload": 19612541.0,
+        "remat": -10241,
+        "move": 2709129.5,
+        "store": 5446306,
+        "earlier-edge-remat": -5130,
+        "later-edge-move": -5163.5,
+        "earlier-edge-move": 16281691,
+        "earlier-edge-store": 16130041.5,
+        "earlier-edge-reload": -2285314.5,
+        "later-edge-remat": -5084.0,
+        "later-edge-reload": -10276.5,
+        "later-edge-store": -10268.5,
+        "all_memory": 38883029.0,
+        "earlier_edge_memory": 13844727.0,
+        "later_edge_memory": -20545.0
+      }
+    },
+    "future": {
+      "reload": 144336397,
+      "remat": 212537798.5,
+      "move": 46961749,
+      "store": 111218491,
+      "earlier-edge-remat": 31039055,
+      "later-edge-move": 1842772.5,
+      "earlier-edge-move": 119969347.5,
+      "earlier-edge-store": 264400232.5,
+      "earlier-edge-reload": 254009669.5,
+      "later-edge-remat": 165582498,
+      "later-edge-reload": 1522453.5,
+      "later-edge-store": 3357484,
+      "all_memory": 778844727.5,
+      "earlier_edge_memory": 518409902.0,
+      "later_edge_memory": 4879937.5,
+      "delta_vs_prior": {
+        "reload": -6671801.5,
+        "remat": -5123.5,
+        "move": 855989,
+        "store": 11115413,
+        "earlier-edge-remat": -5589,
+        "later-edge-move": -10141.5,
+        "earlier-edge-move": 1801081.5,
+        "earlier-edge-store": -6275742.5,
+        "earlier-edge-reload": -4890386.5,
+        "later-edge-remat": 5057.5,
+        "later-edge-reload": -6.5,
+        "later-edge-store": -5178,
+        "all_memory": -6727702.0,
+        "earlier_edge_memory": -11166129.0,
+        "later_edge_memory": -5184.5
+      }
+    }
+  },
+  "raw_count_sources": {
+    "prior": "work/vir-entry-choice/counts-prior/counts.json",
+    "candidate": "work/vir-entry-choice/counts-candidate/counts.json",
+    "future": "work/vir-entry-choice/counts-future/counts.json"
+  },
+  "runtime": {
+    "edges-only": [
+      {
+        "source": "work/vir-x86-perf/entry-choice/results100/summary.json",
+        "medians": {
+          "clang": {
+            "cycles:u": 5918321608.0,
+            "instructions:u": 16675504371.0,
+            "task-clock:u": 1112.08
+          },
+          "prior": {
+            "cycles:u": 6409668913.0,
+            "instructions:u": 20495602214.0,
+            "task-clock:u": 1205.41
+          },
+          "candidate": {
+            "cycles:u": 6512186015.0,
+            "instructions:u": 20560384819.0,
+            "task-clock:u": 1222.98
+          }
+        },
+        "sha256": {
+          "clang": "646fbf0323706cb9d2de746c17597a08d1be62dc3413c9657ad7b62bd6a69c6a",
+          "prior": "63d0eb93ed07a3e3fbc4333b72c400800d5ec4e1462713f29027f2593fc69f63",
+          "candidate": "e9278687e534fbf0daa838c4078809c951a41b779d527ba397848d1145bdec33"
+        },
+        "candidate_vs_prior_cpu": 1.014575953410043
+      }
+    ],
+    "immediate-fetch": [
+      {
+        "source": "work/vir-x86-perf/entry-choice-body/results100/summary.json",
+        "medians": {
+          "clang": {
+            "cycles:u": 5955518965.0,
+            "instructions:u": 16675504402.0,
+            "task-clock:u": 1122.83
+          },
+          "prior": {
+            "cycles:u": 6420251993.0,
+            "instructions:u": 20495602207.0,
+            "task-clock:u": 1210.78
+          },
+          "candidate": {
+            "cycles:u": 6415533106.0,
+            "instructions:u": 20558029403.0,
+            "task-clock:u": 1210.77
+          }
+        },
+        "sha256": {
+          "clang": "646fbf0323706cb9d2de746c17597a08d1be62dc3413c9657ad7b62bd6a69c6a",
+          "prior": "63d0eb93ed07a3e3fbc4333b72c400800d5ec4e1462713f29027f2593fc69f63",
+          "candidate": "3e951df54b1baeb7fa29910e1077e50487094d8bf03d43690e39b639a7298cb4"
+        },
+        "candidate_vs_prior_cpu": 0.999991740861263
+      },
+      {
+        "source": "work/vir-x86-perf/entry-choice-body/repeat100/summary.json",
+        "medians": {
+          "clang": {
+            "cycles:u": 5973728286.0,
+            "instructions:u": 16675514676.0,
+            "task-clock:u": 1127.08
+          },
+          "prior": {
+            "cycles:u": 6463312571.0,
+            "instructions:u": 20495602227.0,
+            "task-clock:u": 1220.35
+          },
+          "candidate": {
+            "cycles:u": 6407519059.0,
+            "instructions:u": 20558039677.0,
+            "task-clock:u": 1210.58
+          }
+        },
+        "sha256": {
+          "clang": "646fbf0323706cb9d2de746c17597a08d1be62dc3413c9657ad7b62bd6a69c6a",
+          "prior": "63d0eb93ed07a3e3fbc4333b72c400800d5ec4e1462713f29027f2593fc69f63",
+          "candidate": "3e951df54b1baeb7fa29910e1077e50487094d8bf03d43690e39b639a7298cb4"
+        },
+        "candidate_vs_prior_cpu": 0.9919941000532634
+      }
+    ],
+    "deferred-fetch": [
+      {
+        "source": "work/vir-x86-perf/entry-choice-future/results100/summary.json",
+        "medians": {
+          "clang": {
+            "cycles:u": 6177540961.0,
+            "instructions:u": 16675504984.0,
+            "task-clock:u": 1174.76
+          },
+          "prior": {
+            "cycles:u": 6730928048.0,
+            "instructions:u": 20495592046.0,
+            "task-clock:u": 1278.68
+          },
+          "candidate": {
+            "cycles:u": 6737206990.0,
+            "instructions:u": 20469978354.0,
+            "task-clock:u": 1284.03
+          }
+        },
+        "sha256": {
+          "clang": "646fbf0323706cb9d2de746c17597a08d1be62dc3413c9657ad7b62bd6a69c6a",
+          "prior": "63d0eb93ed07a3e3fbc4333b72c400800d5ec4e1462713f29027f2593fc69f63",
+          "candidate": "ee2534fa501dc46a4021648348564c415b9606955744c5f66aa373daff685460"
+        },
+        "candidate_vs_prior_cpu": 1.0041840022523227
+      },
+      {
+        "source": "work/vir-x86-perf/entry-choice-future/repeat100/summary.json",
+        "medians": {
+          "clang": {
+            "cycles:u": 5934056546.0,
+            "instructions:u": 16675504394.0,
+            "task-clock:u": 1116.51
+          },
+          "prior": {
+            "cycles:u": 6474653465.0,
+            "instructions:u": 20495592134.0,
+            "task-clock:u": 1219.76
+          },
+          "candidate": {
+            "cycles:u": 6448095295.0,
+            "instructions:u": 20469978395.0,
+            "task-clock:u": 1215.18
+          }
+        },
+        "sha256": {
+          "clang": "646fbf0323706cb9d2de746c17597a08d1be62dc3413c9657ad7b62bd6a69c6a",
+          "prior": "63d0eb93ed07a3e3fbc4333b72c400800d5ec4e1462713f29027f2593fc69f63",
+          "candidate": "ee2534fa501dc46a4021648348564c415b9606955744c5f66aa373daff685460"
+        },
+        "candidate_vs_prior_cpu": 0.9962451629828819
+      }
+    ]
+  },
+  "validation": {
+    "allocator_fixture_checks_and_sweeps": 21,
+    "golden_snapshot_differences": [
+      "critical.vir"
+    ],
+    "random_functions": 480,
+    "random_seeds": [
+      17,
+      76
+    ],
+    "arm_vir": [
+      50,
+      50
+    ],
+    "x86_own": [
+      319,
+      319
+    ],
+    "gcc": [
+      1615,
+      1615
+    ],
+    "tcc": [
+      105,
+      105
+    ],
+    "inline": [
+      83,
+      88
+    ],
+    "known_inline_failures": [
+      "gcc.dg-ipa-inline-8",
+      "gcc.dg-ipa-ipa-sra-1",
+      "gcc.dg-ipa-pr92497-1",
+      "gcc.dg-torture-matrix-2",
+      "gcc.dg-torture-matrix-6"
+    ],
+    "size100_hash": "23674002 573a4409d3d2efb9a2072aff97c6cefa6111b1b90cc7a0ef"
+  },
+  "scaling_seconds": {
+    "500": {
+      "prior": 0.002625466790050268,
+      "future": 0.002520337700843811
+    },
+    "2000": {
+      "prior": 0.009104955941438675,
+      "future": 0.009256382938474417
+    },
+    "8000": {
+      "prior": 0.05289090005680919,
+      "future": 0.053069899789988995
+    }
+  },
+  "dispatch": {
+    "block": 17,
+    "only_processed_predecessor": 16,
+    "unavailable_predecessor": 3051,
+    "entry_selection_unchanged": true
+  },
+  "bad_boundary_example": {
+    "block": 1500,
+    "legacy_source": 1499,
+    "immediate_model_source": 1486,
+    "legacy_estimated_earlier_reloads": 4,
+    "alternative_estimated_earlier_reloads": 2,
+    "deferred_fetch_refinement_adds": 3,
+    "value": 7274,
+    "reload_block": 1515,
+    "site": 11809,
+    "site_dynamic_samples": [
+      26571147,
+      26581396
+    ],
+    "plain_assembly": "body candidate adds movl 328(%rsp), %r14d before compare; control and deferred refinement compare %edi directly"
+  },
+  "patches": {
+    "edges-only": "work/vir-entry-choice/edges-only.patch",
+    "immediate-fetch": "work/vir-entry-choice/immediate-fetch.patch",
+    "deferred-fetch": "work/vir-entry-choice/deferred-fetch.patch"
+  },
+  "replay_patch": "results/vir-entry-choice-20261113.patch"
+}

@@ -196,7 +196,7 @@ CC_PRIVATE void cc_field_uses_member(cc *c, uint32_t n, uint32_t id)
 {
 	fu *u = c->field_uses;
 
-	if (AST_NODE(n)->op != N_MEMBER || !fu_wanted(u, id))
+	if (AST_NODE(n)->op != AST_NODE_MEMBER || !fu_wanted(u, id))
 		return;
 	if (AST_NODE(n)->b < c->ntag && AST_NODE(n)->c < c->tags[AST_NODE(n)->b].nfield && c->tags[AST_NODE(n)->b].f[AST_NODE(n)->c].name == id)
 		fu_add(c, FU_MEMBER, AST_NODE(n)->b, AST_NODE(n)->c, &u->pend);
@@ -218,7 +218,7 @@ CC_PRIVATE void cc_field_uses_path_record(cc *c, int role, uint32_t tag, const u
 
 static bool fu_complete(const cc *c, uint32_t ti)
 {
-	return ti < c->ntag && (c->tags[ti].flags & RF_COMPLETE) && !(c->tags[ti].flags & RF_ENUM);
+	return ti < c->ntag && (c->tags[ti].flags & AST_RECORD_FLAG_COMPLETE) && !(c->tags[ti].flags & AST_RECORD_FLAG_ENUM);
 }
 
 static void fu_where(cc *c, uint32_t loc, char *b, size_t n, bool with_col)
@@ -326,7 +326,7 @@ CC_PRIVATE void cc_field_uses_finish(cc *c)
 		if (!fu_complete(c, ti))
 			continue;
 		for (uint32_t i = 0; i < c->tags[ti].nfield; i++) {
-			qty t = c->tags[ti].f[i].ty;
+			ast_qualified_type t = c->tags[ti].f[i].ty;
 
 			while (cc_type_is_array(c, t))
 				t = AST_TYPE(c, t)->base;

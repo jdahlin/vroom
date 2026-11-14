@@ -1,5 +1,5 @@
 /* Dense-ID CSR topology, shared by native records and typed wasm events. */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV bool em_flow_build(em_flow_graph *g, uint32_t blocks,
 		const em_flow_edge *edges, uint32_t count, bool predecessors)

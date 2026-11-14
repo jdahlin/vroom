@@ -18,8 +18,8 @@ against main at ddbb6413 (after PRs #140, #141, #154, #167, #172 and #175).
   removes arm64's walker, its record optimizer or x86-64's direct lowering.
 - **Nothing changes at `-O0` or on the direct path.**  VIR passes run only
   inside `vw_emit` (`src/codegen/vir/pipeline.c`), which `vw_try` reaches
-  only at `-O2` with `VCC_VIR` set.  Every PR from this design proves it
-  with `bench/vcc-same.py --base DIR -j 3` in the default environment
+  only at `-O2` and up (`doc/OPTIMIZATION.md`).  Every PR from this design
+  proves it with `bench/vcc-same.py --base DIR -j 3 --modes c0,c1`
   (byte-identical).
 - **A pass on VIR depends on nothing in `frontend/`, `codegen/` or
   `arch/`** (the rule of `src/vir/`, stated in `vir.h`'s opening comment).
@@ -69,11 +69,11 @@ typedef struct vir_pass_context {
 	const vir_unit *unit;	/* virtest: the unit the function came from; the compiler: NULL */
 	uint32_t budget;	/* SPEC-vir 10.4: rounds a fixed point may take (default 4) */
 	uint64_t changes;	/* the pass adds the instructions it rewrote or removed */
-	bool checked;		/* VCC_VIR_PASSES=verify or virtest: the pass may check its own invariants */
+	bool checked;		/* -fvir-passes=verify or virtest: the pass may check its own invariants */
 } vir_pass_context;
 
 typedef struct vir_pass_info {
-	const char *name;	/* stable: VCC_VIR_PASSES, `; PASSES:`, virtest --passes, the statistics */
+	const char *name;	/* stable: -fvir-passes, `; PASSES:`, virtest --passes, the statistics */
 	bool (*run)(vir_fn *f, vir_pass_context *ctx);	/* canonical in, canonical out; whether it changed f */
 	uint8_t needs;		/* VIR_VALID_*: the analyses it asks for (it calls the getters itself) */
 	uint8_t keeps;		/* VIR_VALID_*: still valid after it if they were valid before */
@@ -111,8 +111,8 @@ leaves `f->valid` as it is (predecessor lists hold block ids; `idom`, `pre`
 and `post` do not move), and the row's `keeps` says so.  Checked runs test
 that claim: after a pass whose `keeps` has a bit that is still set in
 `f->valid`, the runner recomputes that analysis into scratch and compares.
-The check is `VCC_VIR_CHECK_ANALYSES=1` from WORK-vir 2c.  It is not on main
-yet; it comes with step 4.0 of WORK-vir.  A mismatch is reported as a
+The check is `-fvir-passes=analyses` from WORK-vir 2c (`verify` asks for it
+too).  A mismatch is reported as a
 failure of that pass, by name.
 
 **Change.**  `run` returns whether it changed the function, and adds to
@@ -182,7 +182,7 @@ Whether to allow this interface at all is Q3.
 and the proof includes `bench/vcc-vir-x86.py`.
 
 **Decision: one table for the user, two lists in the code.**
-`VCC_VIR_PASSES`, the `time` statistics and `bench/vir-passes.py` see one
+`-fvir-passes`, the `time` statistics and `bench/vir-passes.py` see one
 ordered table: the builder's rows, then the VIR rows.  Pass names are unique
 across both.  In the code:
 
@@ -207,7 +207,7 @@ static bool virbuild_pass_vir_run(ecx *e, const virbuild_pass *p)
 
 	if (vir_failed())
 		vw_fail(e, VIRFAIL(build_failed));
-	/* ctx.changes goes to the row's counter when VCC_VIR_PASSES=time */
+	/* ctx.changes goes to the row's counter with -fvir-passes=time */
 	return changed;
 }
 ```
@@ -230,8 +230,8 @@ static bool virbuild_pass_vir_run(ecx *e, const virbuild_pass *p)
 
 **Porting a pre-IR pass** keeps both rows for a while.  The VIR row is added
 after `canon` under its own name (for example `if-conversion-vir`) and is
-off by default (a new flag, `PASS_OFF_BY_DEFAULT`; `VCC_VIR_PASSES` turns it
-on with `+NAME` or `only=...`).  `VCC_VIR_PASSES` then gives the A/B, for
+off by default (a new flag, `PASS_OFF_BY_DEFAULT`; `-fvir-passes` turns it
+on with `+NAME` or `only=...`).  `-fvir-passes` then gives the A/B, for
 example `-if-conversion,+if-conversion-vir`.  When the VIR row wins on the
 proof below, one PR turns it on, deletes the pre-IR row and its file, and
 renames the VIR row to the old name.
@@ -299,7 +299,7 @@ SPEC-vir 17.2's rule holds: positive cases, plus a negative case for every
 
 ## 5. Verification and measurement
 
-**Checked runs.**  `VCC_VIR_PASSES=verify` (PR #175) already runs
+**Checked runs.**  `-fvir-passes=verify` (PR #175) already runs
 `vir_verify` after every `PASS_ON_VIR` row.  A function that fails falls
 back with `verifier_rejected`, and the compiler prints
 `vcc vir-verify: pass=NAME function=F: ...`.  VIR rows inherit this, and the
@@ -310,17 +310,17 @@ the normal path (SPEC-vir 22.7).
 identical output cannot prove it):
 
 ```
-bench/vcc-same.py --base DIR -j 3                                   # default env: -O0 and the direct path byte-identical
-VCC_VIR=bl VCC_VIR_PASSES=verify bench/vcc-ctests.py -j 3 --no-cache   # all C suites under qemu, no vir-verify line
-VCC_VIR=bl bench/vcc-ctests.py -j 3 --no-cache --cpu cortex-a53
-VCC_VIR=bl bench/vcc-ctests.py -j 3 --no-cache --suite inline
-VCC_VIR=bl bench/vcc-abi.py ; VCC_VIR=bl bench/vcc-abi.py --host
+bench/vcc-same.py --base DIR -j 3 --modes c0,c1                     # -O0 and the direct path (-O1) byte-identical
+bench/vcc-ctests.py -j 3 --no-cache -O3 --vflags -fvir-passes=verify   # all C suites under qemu, no vir-verify line
+bench/vcc-ctests.py -j 3 --no-cache -O3 --cpu cortex-a53
+bench/vcc-ctests.py -j 3 --no-cache -O3 --suite inline
+bench/vcc-abi.py ; bench/vcc-abi.py --host                          # at -O2: through VIR
 python3 bench/vcc-vir-x86.py --bin-dir build/u                      # x86-64's VIR lowering sees the pass's output
 bench/vir-test.py -j 3 ; bench/vir-test.py --mutate 3000 --bin-dir build/src-asan
-VCC_VIR=bl VCC_VIR_PASSES=verify bench/vcc-ctests.py -j 3 --suite vcc --bin-dir build/src-asan
+bench/vcc-ctests.py -j 3 -O3 --vflags -fvir-passes=verify --suite vcc --bin-dir build/src-asan
 bench/vcc-tsvc.py                                                   # if work/testsuites/TSVC_2 is fetched: 151 checksums, vectorized count
-bench/zlib/run.py all ; VCC_VIR=bl bench/sqlite/run.py all          # same bytes; testrunner: no vcc-only failures
-VCC_VIR=bl bench/pg/build.sh vcc                                    # when work/ is usable
+bench/zlib/run.py all ; bench/sqlite/run.py all                     # same bytes; testrunner: no vcc-only failures
+bench/pg/build.sh vcc                                               # when work/ is usable
 bench/record-passes.py -j 3 -n 200                                  # the counters the pass should move (section 6)
 bench/vir-passes.py -j 3                                            # the pass's own row: runs, changed, instructions, share
 ```
@@ -328,28 +328,29 @@ bench/vir-passes.py -j 3                                            # the pass's
 Some measurements need a quiet machine.  The integrator runs them, and the
 PR lists them under "Proof not run":
 
-- `VCC_VIR=bl bench/vbench.py ab cc emit --base DIR --per-tu` on the kernel
-  sample and SQLite;
-- `bench/vbench.py gate`, with and without `VCC_VIR=bl`;
+- `bench/vbench.py ab cc emit --base DIR --per-tu` on the kernel
+  sample and SQLite (their `-O2`: through VIR);
+- `bench/vbench.py gate`;
 - `speedtest1` and `zbench` run time.
 
 **Compile-time budget.**  Measured in instructions retired, two ways:
 
-1. **The pass's own cost:** its row in `bench/vir-passes.py` (`VCC_VIR=bl
-   VCC_VIR_STATS=1 VCC_VIR_PASSES=time`), as a share of `@build` +
+1. **The pass's own cost:** its row in `bench/vir-passes.py` (`-O3
+   -fvir-stats -fvir-passes=time`), as a share of `@build` +
    `@lower`, on SQLite and the kernel sample.  The first pass's budget is
    at most 0.3 %.
 2. **The net effect**, which can be smaller or negative (fewer records to
-   allocate, lower and clean up): `VCC_VIR=bl bench/vbench.py ab cc emit
-   --base DIR --per-tu`.  This percentage is the pass's row in
+   allocate, lower and clean up): `bench/vbench.py ab cc emit
+   --base DIR --per-tu` (the TUs' `-O2`: through VIR).  This percentage is the pass's row in
    VIR-MIGRATION.md's "Budget used" table, whose running sum must stay
    under the owner's 3 %.
 
-**CI.**  premerge runs the C suites on the direct path only
-(`ci/premerge.sh arm64` runs `ctests`, plus `vir-x86` on x86-64 hosts).  A
-pass that changes VIR output needs VIR in the gate.  That means a step
-`vir-ctests: VCC_VIR=bl VCC_VIR_PASSES=verify python3 bench/vcc-ctests.py -j "$J" --suite vcc`
-in the arm64 job.  `ci/premerge.sh` is not WORK-vir's file: see Q4.
+**CI.**  premerge runs the C suites at `-O2` (VIR), `-O1` (the direct
+emitter) and `-O3 -fvir-verify -fvir-check` (`ci/premerge.sh arm64` runs
+`ctests`, `ctests-O1` and `ctests-O3`, plus `vir-x86` on x86-64 hosts), so
+VIR is in the gate.  The pass verifier is not: that needs
+`--vflags -fvir-passes=verify` in a step of the arm64 job.
+`ci/premerge.sh` is not WORK-vir's file: see Q4.
 
 ## 6. The first pass: `redundant-extensions`
 
@@ -371,7 +372,7 @@ from VIR-MIGRATION's table of what happens to each pass:
 
 `exts` is the largest counter whose fate is "moves to VIR".  For this note,
 what it removes was measured with a local, uncommitted counter in `exts`
-(`VCC_VIR=bl vpp -O2 -S`), by the kind of record it finds redundant:
+(`vpp -O3 -S`), by the kind of record it finds redundant:
 
 | Record found redundant | 1 500 suite TUs | SQLite (`b-gcc/sqlite3.c`) | Where it belongs |
 |---|---|---|---|
@@ -566,7 +567,7 @@ whether the pass stays.
 This pass **changes generated code at `-O2` with VIR**, on arm64 and on
 x86-64.  The proof is therefore section 5's list, not byte identity:
 
-- the C suites with `VCC_VIR=bl VCC_VIR_PASSES=verify`: no `vir-verify`
+- the C suites with `-O3 --vflags -fvir-passes=verify`: no `vir-verify`
   line and no new failure, including the gcc-torture, tcc and inline suites;
 - `--cpu cortex-a53`, the ABI checks and `bench/vcc-vir-x86.py`;
 - `bench/vcc-tsvc.py` when TSVC is fetched, zlib's same bytes and SQLite's
@@ -576,10 +577,11 @@ x86-64.  The proof is therefore section 5's list, not byte identity:
 
 Two byte-identity checks still apply:
 
-- `bench/vcc-same.py --base DIR` in the default environment is
-  byte-identical (nothing at `-O0` or on the direct path moved);
-- `VCC_VIR=bl VCC_VIR_PASSES=-redundant-extensions bench/vcc-same.py --base
-  DIR` is byte-identical too: with the pass off, VIR output is what it was
+- `bench/vcc-same.py --base DIR --modes c0,c1` is byte-identical
+  (nothing at `-O0` or on the direct path moved);
+- VIR's output with `-fvir-passes=-redundant-extensions` is byte-identical
+  to the base's VIR output too (`bench/vcc-same.py --base DIR --modes c2,s3
+  --vflags -fvir-passes=-redundant-extensions`): with the pass off, VIR output is what it was
   before, so step 4.0's infrastructure changed nothing.
 
 ### What could go wrong
@@ -611,7 +613,7 @@ second:
   (`vir_ctx.ins[cur ^ 1]`, the array `vir_canon` copies into), with
   insertion, block removal and the replacement map, ending in `vir_canon`.
   That layer gets its own short design in the PR before any code (Q6).
-- **The A/B is cheap and exact:** `VCC_VIR_PASSES=-if-conversion,+if-conversion-vir`
+- **The A/B is cheap and exact:** `-fvir-passes=-if-conversion,+if-conversion-vir`
   against today, with the proof of section 5.
 
 The third pass, VIR-MIGRATION.md's trial of the walker's recipes, is
@@ -631,7 +633,7 @@ constant only after promotion.
 3. **Target facts in `src/vir/`.**  Allow the data-only table of section 2
    (`vir_target_facts_get`, keyed by `VTG_*`) for passes that need ABI
    facts, or require every such pass to stay in the lowering?
-4. **CI.**  Add `VCC_VIR=bl VCC_VIR_PASSES=verify bench/vcc-ctests.py
+4. **CI.**  Add `bench/vcc-ctests.py -O3 --vflags -fvir-passes=verify
    --suite vcc` to `ci/premerge.sh`'s arm64 job (and the asan job) along
    with the first pass?  `ci/premerge.sh` is not in WORK-vir's file list.
 5. **The lowering half of `exts`** (about 57 %: `mov w` for `ext.4u` of a

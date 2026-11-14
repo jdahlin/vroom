@@ -68,7 +68,7 @@ static void cxx_free(cxx *c)
 	/* (scopes and entities are leaked with the TU for now: the AST step gives them an arena) */
 }
 
-int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
+int cxx_run(pp *p, const cc_options *co, const cxx_options *o)
 {
 	cxx c;
 	jmp_buf top;
@@ -101,7 +101,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			if (e && i == 0)
 				e->ty = c.ast->t_valist;
 			else if (e && (i == 1 || i == 2))
-				e->ty = cc_type_basic(i == 1 ? TY_INT128 : TY_UINT128);
+				e->ty = cc_type_basic(i == 1 ? AST_TYPE_INT128 : AST_TYPE_UINT128);
 		}
 	}
 	{
@@ -110,11 +110,11 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			{ "operator new", 1, 1 }, { "operator new[]", 1, 1 }, { "operator delete", 0, 1 },
 			{ "operator delete[]", 0, 1 }, { "operator delete", 0, 2 }, { "operator delete[]", 0, 2 },
 		};
-		qty vp = cc_type_pointer(c.ast, cc_type_basic(TY_VOID)), sz = cc_type_basic(TY_ULONG);
+		ast_qualified_type vp = cc_type_pointer(c.ast, cc_type_basic(AST_TYPE_VOID)), sz = cc_type_basic(AST_TYPE_UNSIGNED_LONG);
 
 		for (size_t i = 0; i < sizeof alloc / sizeof *alloc; i++) {
 			cxx_entity *e = cxx_declare(&c, c.global, vintern_cstr(alloc[i].name), CXX_ENTITY_VALUE);
-			qty ps[2];
+			ast_qualified_type ps[2];
 
 			if (!e)
 				continue;
@@ -122,7 +122,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 				ps[0] = sz;
 			else
 				ps[0] = vp, ps[1] = sz;
-			e->ty = cxx_type_function(&c, alloc[i].ret ? vp : cc_type_basic(TY_VOID), ps, (uint32_t)alloc[i].nparams, false);
+			e->ty = cxx_type_function(&c, alloc[i].ret ? vp : cc_type_basic(AST_TYPE_VOID), ps, (uint32_t)alloc[i].nparams, false);
 			e->global_ns = 1, e->home = c.global;
 		}
 	}
@@ -184,7 +184,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		cxx_gen_vtables_emit(&c);
 		cxx_gen_complete_object_aliases(&c);
 		cxx_gen_write_missing(&c);
-		status = emit_tu(c.ast, co) != 0;
+		status = codegen_unit_emit(c.ast, co) != 0;
 	}
 	if (c.layout_fd >= 0)
 		close(c.layout_fd);

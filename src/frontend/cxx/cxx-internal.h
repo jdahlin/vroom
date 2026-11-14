@@ -115,19 +115,19 @@ typedef struct cxx_targ {
 	const struct cxx_targ *list;	/* kind 6: the argument list the deduced pack is a slice of (not hashed) */
 	uint8_t kind;		/* 0 unknown, 1 type, 2 value, 3 a value placeholder (v: its parameter's index), 4 a template
 			   (v: its entity), 5 a pack placeholder's expansion (v: index), 6 a deduced pack (t: first, v: count) */
-	qty t;
+	ast_qualified_type t;
 	int64_t v;
 } cxx_targ;
 
 /* a type the parser cannot give yet (dependent, a template-id, auto, decltype): qty 0 is void */
-#define CXX_TY_UNKNOWN ((qty)0xFFFFFFFFu)
+#define CXX_TY_UNKNOWN ((ast_qualified_type)0xFFFFFFFFu)
 
 typedef struct cxx_entity {
 	uint32_t name;			/* interned id */
 	uint8_t kind;
 	uint8_t dependent;		/* a type that depends on template parameters (its members are unknown) */
 	cxx_scope *members;		/* namespace or class: its scope; a typedef to a class: that class's scope */
-	qty ty;				/* a type: its AST type (CXX_TY_UNKNOWN: not known yet) */
+	ast_qualified_type ty;				/* a type: its AST type (CXX_TY_UNKNOWN: not known yet) */
 	cxx_template *tmpl;		/* a class or alias template: what instantiating it needs (instantiate.c) */
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
@@ -146,7 +146,7 @@ typedef struct cxx_entity {
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
 	uint8_t has_ret_pattern, ret_deducing, ret_variadic;	/* a function declared auto f(...): its return type from its body */
-	qty ret_pattern;		/* ... the declared return type, with auto's placeholder (auto, const auto &, auto *) */
+	ast_qualified_type ret_pattern;		/* ... the declared return type, with auto's placeholder (auto, const auto &, auto *) */
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const (bit 0), volatile (bit 1) */
 	uint8_t fn_noexcept;		/* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
@@ -219,11 +219,11 @@ struct cxx_scope {
 	uint32_t nvfuncs, cvfuncs, nvown, cvown;
 	uint8_t vt_init, vt_bad, vt_listed;	/* vt_bad: more than one base with a vtable (thunks: not built yet) */
 	uint32_t vt_sym;		/* the vtable's AST symbol (_ZTV...) */
-	qty *conv_types;		/* ... the types its conversion functions convert to */
+	ast_qualified_type *conv_types;		/* ... the types its conversion functions convert to */
 	uint32_t nconv;
 	uint8_t conv_unknown;		/* ... one of them to a type not recorded (a template's, a pointer) */
 	uint8_t has_conversion;		/* a class: it declares a conversion function (operator T) */
-	qty *field_types;		/* a class: its non-static data members' types, for its implicit special members */
+	ast_qualified_type *field_types;		/* a class: its non-static data members' types, for its implicit special members */
 	uint32_t nfield_types;
 	cxx_tparam *tparams;		/* a template scope: its parameters */
 	uint32_t ntparams;
@@ -234,7 +234,7 @@ typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
 
 /* a member function body, default argument or initializer parsed once its class is complete */
 /* a function parameter: its name (0: unnamed) and type, declared in the body's scope */
-typedef struct cxx_param { uint32_t name; qty ty; } cxx_param;
+typedef struct cxx_param { uint32_t name; ast_qualified_type ty; } cxx_param;
 
 enum { CXX_WHY_DEPENDENT, CXX_WHY_NONE_VIABLE, CXX_WHY_AMBIGUOUS, CXX_WHY_NO_FTMPL, CXX_WHY_PACKS, CXX_WHY_SIG, CXX_WHY_ARG,
        CXX_WHY_UNBOUND, CXX_WHY_CLASS_MATCH, CXX_WHY_RETURN, CXX_WHY_NO_SET, CXX_WHY_N };
@@ -253,12 +253,12 @@ typedef struct cxx_gen_lambda {
 		const struct cxx_entity *e;
 		uint8_t by_ref, is_this;
 		uint32_t local;			/* in operator(): a pointer to the captured object (this: its value) */
-		qty fty;			/* the closure's member */
+		ast_qualified_type fty;			/* the closure's member */
 	} cap[32];
 } cxx_gen_lambda;
 
 typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn;
-	uint32_t pack_name, pack_at, pack_n; qty *pack_types; } cxx_late;	/* pack_*: a class pack expanded in the parameters (As... a; pack_n UINT32_MAX: none) */
+	uint32_t pack_name, pack_at, pack_n; ast_qualified_type *pack_types; } cxx_late;	/* pack_*: a class pack expanded in the parameters (As... a; pack_n UINT32_MAX: none) */
 
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
 #define CXX_MAX_ARGS 256
@@ -292,10 +292,10 @@ typedef struct cxx {
 	cxx_scope *qualifier_hint;
 	uint8_t dependent_seen;
 	/* types (types.c): the decl-specifiers' type, a declarator's base and result */
-	qty ds_type, type_in, type_out;
-	qty *fn_params;			/* the last parameter clause's types (types.c) */
+	ast_qualified_type ds_type, type_in, type_out;
+	ast_qualified_type *fn_params;			/* the last parameter clause's types (types.c) */
 	uint32_t *fn_pnames;		/* ... and names */
-	qty *fn_pdecl;			/* ... and the parameters' own types in the body (a by-value const stays const) */
+	ast_qualified_type *fn_pdecl;			/* ... and the parameters' own types in the body (a by-value const stays const) */
 	cxx_param *decl_params;		/* the last declarator's function parameters (its body's names) */
 	uint32_t ndecl_params, cdecl_params;
 	uint32_t decl_ndefaults;	/* ... and how many of them have default arguments */
@@ -304,21 +304,21 @@ typedef struct cxx {
 	uint32_t fn_ndefaults;
 	uint32_t fn_defs[16], fn_ndefs;	/* the last parameter list's default arguments: begin, end token pairs (8 at most) */
 	uint8_t fn_has_trailing, decl_has_trailing;	/* the last function tail / declarator wrote -> type (known or not) */
-	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
+	ast_qualified_type fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
 	uint8_t decl_pack;		/* the last declarator was a pack's (Ts&&... ts) */
 	uint32_t fn_pack, decl_pack_param;	/* the last parameter clause's / declarator's pack parameter (its index, UINT32_MAX: none) */
-	qty *sig_pack_types;		/* a signature parsed with a body: its parameter pack's element types (sig_pack_n of them; UINT32_MAX: none) */
+	ast_qualified_type *sig_pack_types;		/* a signature parsed with a body: its parameter pack's element types (sig_pack_n of them; UINT32_MAX: none) */
 	uint32_t sig_pack_n;
 	uint8_t decl_variadic, sig_is_function;	/* the last declarator's function is variadic; the last signature parsed was a function's */
 	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */
 	int64_t evalue;			/* the expression's value, when econst (an integer constant expression) */
 	uint8_t econst;
-	qty btypes[2];			/* the last builtin call's type arguments (nbtypes: 3 if it had other arguments) */
+	ast_qualified_type btypes[2];			/* the last builtin call's type arguments (nbtypes: 3 if it had other arguments) */
 	uint32_t nbtypes;
 	uint8_t this_const;		/* the member function being parsed is const */
 	uint8_t call_obj;		/* the callee is a member of an object: 1 not const, 2 const (0: not known) */
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
-	qty anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
+	ast_qualified_type anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
 	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */
 	uint32_t layout_attributes;	/* attributes seen that change a layout (aligned, packed, no_unique_address) */
 	void *class_info;		/* per AST tag: a laid-out class's data size, POD-ness, emptiness (types.c) */
@@ -365,14 +365,14 @@ typedef struct cxx {
 	uint8_t packs_overflow;
 	/* expressions' types (typing.c) */
 	uint32_t sb_names[8], sb_locs[8], sb_n, sb_var, sb_serial;	/* a structured binding being declared: its names, its variable */
-	qty memptr_ty;		/* T C::*: one opaque (incomplete) type for every pointer to member, not built yet */
-	qty etype;			/* the last expression's type (CXX_TY_UNKNOWN: not known) */
+	ast_qualified_type memptr_ty;		/* T C::*: one opaque (incomplete) type for every pointer to member, not built yet */
+	ast_qualified_type etype;			/* the last expression's type (CXX_TY_UNKNOWN: not known) */
 	uint8_t elval;			/* ... an lvalue */
 	cxx_entity *ecallee;		/* a name that is a set of functions: for the call that follows */
-	qty *cargs;			/* the last call's argument types */
+	ast_qualified_type *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
-	qty edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
+	ast_qualified_type edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
 	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
 	uint8_t einvalid_unsure;	/* argument-dependent lookup found candidates it could not decide between */
 	uint8_t ename_missing;		/* ... and ordinary lookup found nothing by that name */
@@ -386,28 +386,28 @@ typedef struct cxx {
 	uint8_t sig_fake;		/* the last signature's function type stands for an unknown parameter list (only its return type is right) */
 	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
 	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
-	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
+	ast_qualified_type bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
 	uint32_t lambda_node;		/* ... code generation: the closure object's node (0: not built) */
 	uint32_t lambda_serial;		/* closure types so far (their names: $_N) */
 	struct cxx_gen_lambda *gen_lambda;	/* the lambda whose operator() is being built (NULL: an ordinary function) */
-	qty lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
+	ast_qualified_type lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
 	uint8_t ret_seen;		/* ... and a return with a value was seen (its type perhaps not known) */
 	uint8_t ret_capture, ret_lval;	/* the body being parsed returns auto: its first return's type is wanted */
-	qty ret_type;
+	ast_qualified_type ret_type;
 	uint32_t range_name;		/* a range-for's declaration: its name, type (auto: a pattern over the placeholder) */
-	qty range_type;
+	ast_qualified_type range_type;
 	uint8_t range_auto;
 	uint8_t ds_auto, ds_quals;	/* the last decl-specifiers were auto (with these cv-qualifiers) */
 	uint8_t vt_making;
-	qty gen_base_type;		/* code generation: the base class whose subobject is being constructed or destroyed (its C2/D2) */		/* code generation: implicit destructors being made for vtables (a bound on recursion) */
-	qty nullptr_ty;			/* std::nullptr_t, the type of nullptr (0: not made yet) */
-	qty auto_ty;			/* auto's placeholder type (0: not made yet) */
+	ast_qualified_type gen_base_type;		/* code generation: the base class whose subobject is being constructed or destroyed (its C2/D2) */		/* code generation: implicit destructors being made for vtables (a bound on recursion) */
+	ast_qualified_type nullptr_ty;			/* std::nullptr_t, the type of nullptr (0: not made yet) */
+	ast_qualified_type auto_ty;			/* auto's placeholder type (0: not made yet) */
 	struct cxx_partial *auto_owner;
 	uint8_t member_missing;		/* typename X::y named no member of a complete class X (deduction: not viable) */
 	cxx_entity *call_picked;	/* ... and which */
 	uint8_t carg_const;		/* the argument list was one integer constant expression */
 	int64_t carg_value;		/* ... its value */
-	qty constructing;		/* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
+	ast_qualified_type constructing;		/* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
 	uint8_t no_literal, rank_no_literal;	/* the next call's arguments are types, not expressions (a trait's): an integer is no null pointer constant; while ranking */
 	uint32_t einvalid_at;		/* where einvalid was last set (VCC_CXX_SIG) */
 	uint8_t op_lv_set, op_lv[17];	/* the next operator call's operands: lvalues or not (the object first) */
@@ -421,17 +421,17 @@ typedef struct cxx {
 	uint32_t snode, sdone, sdepth;	/* the statement's node; the statement depth that set it; the depth now */
 	void *gen_block;		/* the block being built: its statements (a cc_id_list) */
 	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
-	qty gen_ret;			/* its return type */
+	ast_qualified_type gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
 	char **gen_names;		/* the mangled names of the functions defined so far, a hash set (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
 	/* a constructor's initializers so far: the members (names) and bases (types) they construct */
 	uint32_t gen_init_names[32], ngen_init_names;
-	qty gen_init_bases[16];
+	ast_qualified_type gen_init_bases[16];
 	uint32_t ngen_init_bases;
 	uint8_t gen_delegates, gen_returns, gen_why;
 	uint8_t cond_decl;		/* parsing an if's or a switch's condition: a declaration there is a real one (code generation) */
-	qty conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
+	ast_qualified_type conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
 	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
 	uint32_t gen_notemp;		/* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
 	uint32_t gen_block_temps;	/* such temporaries declared in the block being built (a case label after one: not built) */
@@ -459,7 +459,7 @@ typedef struct cxx {
 	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_ilist;	/* ... for a braced list: its std::initializer_list constructor (NULL: none) */
-	qty ctor_ilist_types[CXX_MAX_ARGS];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
+	ast_qualified_type ctor_ilist_types[CXX_MAX_ARGS];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
 	uint8_t ctor_ilist_lval[CXX_MAX_ARGS];
 	uint32_t ctor_ilist_brace[CXX_MAX_ARGS];	/* ... an element that is a braced list: its '{' (carg_brace) */
 	uint32_t ctor_ilist_n;
@@ -469,7 +469,7 @@ typedef struct cxx {
 	struct cxx_entity *gen_instance;	/* the function template instance whose signature and body are parsed next (NULL: none) */
 	struct cxx_entity *call_instance;	/* ... the one the last body instantiation was for */
 	struct cxx_entity *ftmpl_te;	/* the function template being deduced (its entity) */
-	qty bfirst;			/* ... its first expression argument's type */
+	ast_qualified_type bfirst;			/* ... its first expression argument's type */
 	uint32_t bnodes[8], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
 	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
@@ -503,12 +503,12 @@ typedef struct cxx {
 	uint8_t attr_nua, attr_packed;
 	uint32_t attr_align;
 	uint32_t cpack_name, cpack_at, cpack_n;	/* the last parameter list's pack of a class's bound type pack (As... a), expanded: its name, first parameter, count */
-	qty cpack_types[32];
+	ast_qualified_type cpack_types[32];
 	uint8_t sig_own_pack;
 	uint8_t mangle_internal;	/* the last name mangled names an unnamed namespace's or a local entity: internal linkage */		/* the function whose declarator is parsed is an instance with a pack of its own (sig_pack_n) */		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
-	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
+	ast_qualified_type decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
 	uint32_t body_depth;
 	cxx_targ *xargs;		/* the callee's explicit template arguments f<A, B> (when xargs_set) */
 	uint32_t nxargs, cxargs;
@@ -516,7 +516,7 @@ typedef struct cxx {
 	cxx_entity *last_fn;		/* the member function just declared (its deferred body's) */		/* function template bodies being instantiated (nested) */
 	uint32_t ftmpl_begin;		/* a template declaration: where the declaration after its parameters starts */
 	cxx_scope *ftmpl_scope;		/* ... and its template scope */
-	qty this_type;			/* in a member function's body: the class (this is a pointer to it) */
+	ast_qualified_type this_type;			/* in a member function's body: the class (this is a pointer to it) */
 	uint8_t in_template_argument;	/* parsing a template argument's type-id: a trailing ... is an expansion */		/* a lookup found something that depends on template parameters */	/* the class the last nested-name-specifier named, even if dependent */
 } cxx;
 
@@ -525,15 +525,15 @@ VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);
 VPRIV uint32_t cxx_ftemplate_np(cxx *c, struct cxx_ftemplate *f);	/* instantiate/ftemplate.c */
-VPRIV qty cxx_ftemplate_pt(struct cxx_ftemplate *f, uint32_t i);
+VPRIV ast_qualified_type cxx_ftemplate_pt(struct cxx_ftemplate *f, uint32_t i);
 VPRIV void cxx_gen_bind_name(cxx *c, cxx_entity *e, uint32_t object, uint32_t field, uint32_t loc);	/* codegen/statement.c: a structured binding's name */
-VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc);	/* codegen/vtable.c: typeid of a static type */
+VPRIV void cxx_gen_typeid(cxx *c, ast_qualified_type t, ast_qualified_type ti_type, uint32_t loc);	/* codegen/vtable.c: typeid of a static type */
 VPRIV cxx_entity *cxx_entity_prefer(cxx_entity *e, int kind);	/* declaration/name.c: of a set, the entity of that kind */
-VPRIV void cxx_gen_base_assign(cxx *c, qty base, uint32_t x, uint32_t loc);	/* codegen/expression.c: B::operator=(x), the implicit one */
+VPRIV void cxx_gen_base_assign(cxx *c, ast_qualified_type base, uint32_t x, uint32_t loc);	/* codegen/expression.c: B::operator=(x), the implicit one */
 VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);	/* declaration.c: an extern template covers it */
-VPRIV bool cxx_type_definitely_incomplete(cxx *c, qty t);	/* instantiate.c: an instance with no definition to complete it */
-VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval, uint32_t nargs);	/* declaration.c: Name{args} of a class template */
-VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
+VPRIV bool cxx_type_definitely_incomplete(cxx *c, ast_qualified_type t);	/* instantiate.c: an instance with no definition to complete it */
+VPRIV ast_qualified_type cxx_ctad(cxx *c, cxx_entity *te, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs);	/* declaration.c: Name{args} of a class template */
+VPRIV int cxx_gen_trivial_abi(cxx *c, ast_qualified_type t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
 static inline cxx_token *cxx_peek(cxx *c, uint32_t ahead) { uint32_t i = c->pos + ahead; return &c->tok[i < c->ntok ? i : c->ntok]; }
@@ -580,33 +580,33 @@ enum { CXX_SKIP_TEMPLATE, CXX_SKIP_BASES, CXX_SKIP_VIRTUAL, CXX_SKIP_UNKNOWN_MEM
 typedef struct cxx_spec {
 	uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int, v_float, v_double;
 	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals, v_auto;
-	qty named;			/* a type name's type (0 with v_named unset) */
+	ast_qualified_type named;			/* a type name's type (0 with v_named unset) */
 	uint8_t v_named;
 } cxx_spec;
-VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s);
-VPRIV qty cxx_type_pointer(cxx *c, qty base, int quals);
-VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue);
-VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n);	/* n < 0: unknown bound */
-VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic);
-VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t);
+VPRIV ast_qualified_type cxx_spec_type(cxx *c, const cxx_spec *s);
+VPRIV ast_qualified_type cxx_type_pointer(cxx *c, ast_qualified_type base, int quals);
+VPRIV ast_qualified_type cxx_type_reference(cxx *c, ast_qualified_type base, bool rvalue);
+VPRIV ast_qualified_type cxx_type_array(cxx *c, ast_qualified_type elem, int64_t n);	/* n < 0: unknown bound */
+VPRIV ast_qualified_type cxx_type_function(cxx *c, ast_qualified_type ret, const ast_qualified_type *params, uint32_t n, bool variadic);
+VPRIV ast_qualified_type cxx_type_parameter_adjust(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip, bool is_class);
 VPRIV void cxx_class_packed(cxx *c);
-VPRIV bool cxx_class_data_size(cxx *c, qty t, uint64_t *dsize);
-VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, int depth);
-VPRIV uint32_t cxx_class_bases(cxx *c, qty t, qty *bases, uint32_t cap);
-VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, int depth);
+VPRIV bool cxx_class_data_size(cxx *c, ast_qualified_type t, uint64_t *dsize);
+VPRIV bool cxx_class_base_offset(cxx *c, ast_qualified_type derived, ast_qualified_type base, uint64_t *off, int depth);
+VPRIV uint32_t cxx_class_bases(cxx *c, ast_qualified_type t, ast_qualified_type *bases, uint32_t cap);
+VPRIV bool cxx_class_field_offset(cxx *c, ast_qualified_type t, uint32_t name, uint64_t *bits, int depth);
 VPRIV void cxx_class_skip(cxx *c, int reason);
-VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
+VPRIV void cxx_class_field(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc, int bitfield_width);
 VPRIV void cxx_class_end(cxx *c);
-VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual);
+VPRIV void cxx_class_base(cxx *c, ast_qualified_type t, bool is_virtual);
 VPRIV void cxx_class_virtual(cxx *c);
-VPRIV bool cxx_class_polymorphic(cxx *c, qty t);
-VPRIV bool cxx_class_has_member_initializer(cxx *c, qty t);
+VPRIV bool cxx_class_polymorphic(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
-VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty underlying);
-VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, qty t, uint32_t loc);
+VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, ast_qualified_type underlying);
+VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);
 VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid);
 
@@ -620,9 +620,9 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 VPRIV void cxx_tparams_inherit_defaults(cxx *c, cxx_scope *ps, cxx_scope *in, uint32_t name);
 VPRIV const cxx_scope *cxx_ftemplate_params(const struct cxx_ftemplate *f);
 VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class);
-VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-			      uint32_t nargs, qty *ret, bool body);
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+			      uint32_t nargs, ast_qualified_type *ret, bool body);
+VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l);
 VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps, uint32_t n);	/* declaration/ */
@@ -642,101 +642,101 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 	if (trace)
 		fprintf(stderr, "invalid at token %u (%s:%d)\n", c->pos, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 }
-VPRIV qty cxx_auto_type(cxx *c);
-VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
+VPRIV ast_qualified_type cxx_auto_type(cxx *c);
+VPRIV cxx_scope *cxx_instance_tparams(cxx *c, ast_qualified_type t);
 VPRIV cxx_scope *cxx_template_home(const cxx_entity *te);
-VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
+VPRIV ast_qualified_type cxx_simple_type_at(cxx *c, uint32_t pos);
 VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e);
 VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst);
-VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
+VPRIV const ast_qualified_type *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
 VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst);
-VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
-VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, uint8_t is_const, int variant, char *buf, size_t cap);
+VPRIV ast_qualified_type cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const ast_qualified_type **ph, uint32_t *nph, uint32_t *pack_param);
+VPRIV bool cxx_instance_template(cxx *c, ast_qualified_type t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast_qualified_type ft, uint8_t is_const, int variant, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);
 VPRIV void cxx_gen_unwind(cxx *c, uint32_t depth);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
 #define cxx_gen_fail(c) cxx_gen_fail_at(c, __FILE__, __LINE__)
-VPRIV bool cxx_gen_type_ok(cxx *c, qty t);
-VPRIV void cxx_gen_integer(cxx *c, int64_t v, qty t, uint32_t loc);
-VPRIV void cxx_gen_floating(cxx *c, const char *text, size_t len, qty t, uint32_t loc);
+VPRIV bool cxx_gen_type_ok(cxx *c, ast_qualified_type t);
+VPRIV void cxx_gen_integer(cxx *c, int64_t v, ast_qualified_type t, uint32_t loc);
+VPRIV void cxx_gen_floating(cxx *c, const char *text, size_t len, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc);
 VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc);
-VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc);
-VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
+VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
 VPRIV void cxx_gen_index(cxx *c, uint32_t base, uint32_t index, uint32_t loc);
 typedef struct cxx_gen_range { cc_id_list pre, body; void *outer; uint32_t p, i, n, loc, cond, step, elem; bool ok, cls; } cxx_gen_range;
 VPRIV uint32_t cxx_gen_var_node_public(cxx *c, uint32_t s, uint32_t loc);
 VPRIV uint32_t cc_unary_build_public(cxx *c, int op, uint32_t x, uint32_t loc);
-VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, const uint32_t *elems, uint32_t nelems, qty elem, uint32_t loc);
+VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, const uint32_t *elems, uint32_t nelems, ast_qualified_type elem, uint32_t loc);
 VPRIV uint32_t cxx_gen_range_for_element(cxx *c, cxx_gen_range *r);
 VPRIV void cxx_gen_range_for_end(cxx *c, cxx_gen_range *r);
 VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, uint32_t loc);
 VPRIV void cxx_gen_comma(cxx *c, uint32_t x, uint32_t y, uint32_t loc);
-VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc);
-VPRIV uint32_t cxx_gen_record_initializer(cxx *c, qty t, const uint32_t *nodes, uint32_t n, uint32_t loc);
+VPRIV uint32_t cxx_gen_array_initializer(cxx *c, ast_qualified_type t, uint32_t loc);
+VPRIV uint32_t cxx_gen_record_initializer(cxx *c, ast_qualified_type t, const uint32_t *nodes, uint32_t n, uint32_t loc);
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool has_init);
 VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
-VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, qty t, uint32_t loc);
-VPRIV bool cxx_is_initializer_list(cxx *c, qty t);
+VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, ast_qualified_type t, uint32_t loc);
+VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t);
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
-VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
+VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, ast_qualified_type arg0, ast_qualified_type *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
-VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc);
-VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t);
+VPRIV uint32_t cxx_gen_typeinfo(cxx *c, ast_qualified_type t);
 VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc);
-VPRIV uint32_t cxx_gen_scratch(cxx *c, qty t, uint32_t loc);
+VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
 VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out);
-VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, qty decl_type, uint32_t *var, cc_id_list *list, uint32_t loc);
-VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap);
+VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, ast_qualified_type decl_type, uint32_t *var, cc_id_list *list, uint32_t loc);
+VPRIV bool cxx_mangle_type(cxx *c, ast_qualified_type t, char *buf, size_t cap);
 VPRIV bool cxx_gen_lambda_symbol(cxx *c, cxx_entity *call, uint32_t serial);
 VPRIV bool cxx_gen_lambda_finish(cxx *c, cxx_gen_lambda *l, cxx_entity *owner, uint32_t *body, uint32_t loc);
-VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, qty t, uint32_t loc);
+VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_name_type(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uint32_t nargs, uint32_t loc);
-VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
 VPRIV void cxx_gen_vtables_emit(cxx *c);
 VPRIV void cxx_gen_complete_object_aliases(cxx *c);
 VPRIV bool cxx_mangle_variable(cxx *c, const cxx_entity *v, cxx_scope *home, bool internal, char *buf, size_t cap);
 VPRIV bool cxx_gen_variable_name(cxx *c, cxx_entity *v, bool internal);
 VPRIV bool cxx_scope_in_unnamed_namespace(cxx *c, const cxx_scope *s);
-VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap);
-VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, ast_qualified_type cls, char *buf, size_t cap);
+VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
 VPRIV void cxx_gen_indirect_call(cxx *c, uint32_t callee, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t loc);
-VPRIV void cxx_gen_new(cxx *c, qty t, const uint32_t *place, uint32_t nplace, uint32_t count, bool array, const uint32_t *init, int ninit, uint32_t loc);
-VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, qty t, uint32_t loc);
-VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t);
+VPRIV void cxx_gen_new(cxx *c, ast_qualified_type t, const uint32_t *place, uint32_t nplace, uint32_t count, bool array, const uint32_t *init, int ninit, uint32_t loc);
+VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc);
+VPRIV bool cxx_gen_needs_construction_public(cxx *c, ast_qualified_type t);
 VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc);
 VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
-VPRIV qty cxx_std_class(cxx *c, const char *name);
-VPRIV qty cxx_class_scalar_conversion(cxx *c, qty t);
-VPRIV uint32_t cxx_class_vbases(cxx *c, qty t, qty *vbases, uint64_t *offs, uint32_t cap);
-VPRIV bool cxx_class_vbase_path(cxx *c, qty derived, qty base, uint32_t *k, uint64_t *off);
+VPRIV ast_qualified_type cxx_std_class(cxx *c, const char *name);
+VPRIV ast_qualified_type cxx_class_scalar_conversion(cxx *c, ast_qualified_type t);
+VPRIV uint32_t cxx_class_vbases(cxx *c, ast_qualified_type t, ast_qualified_type *vbases, uint64_t *offs, uint32_t cap);
+VPRIV bool cxx_class_vbase_path(cxx *c, ast_qualified_type derived, ast_qualified_type base, uint32_t *k, uint64_t *off);
 /* a class's VTT (Itanium ABI 2.6.2) without its virtual VTTs: its size, where each direct non-virtual base's
    sub-VTT starts in it, and its secondary virtual pointers (each a base subobject: reached through the
    virtual base vbase, 0 for none, at offset off from it or from the class) */
-typedef struct cxx_vtt { uint32_t size, nsub, nvp; qty sub[16]; uint32_t sub_at[16]; qty vp_vbase[32]; uint64_t vp_off[32]; } cxx_vtt;
-VPRIV bool cxx_vtt_layout(cxx *c, qty t, cxx_vtt *v);
+typedef struct cxx_vtt { uint32_t size, nsub, nvp; ast_qualified_type sub[16]; uint32_t sub_at[16]; ast_qualified_type vp_vbase[32]; uint64_t vp_off[32]; } cxx_vtt;
+VPRIV bool cxx_vtt_layout(cxx *c, ast_qualified_type t, cxx_vtt *v);
 VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls);
-VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc);
+VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
-VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
-VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
-VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, ast_qualified_type class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV bool cxx_gen_class_ok(cxx *c, ast_qualified_type t);
+VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, uint8_t is_const);
 VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);
@@ -744,11 +744,11 @@ VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e);
 VPRIV uint32_t cxx_gen_switch_value(cxx *c, uint32_t e);
 VPRIV uint32_t cxx_gen_case(cxx *c, int64_t lo, int64_t hi, uint32_t stmt, uint32_t loc);
 VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc);
-VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc);
+VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_init, uint32_t loc);
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
-VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
+VPRIV int cxx_class_special(cxx *c, ast_qualified_type t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
@@ -756,7 +756,7 @@ VPRIV void cxx_ftemplate_join_declarations(cxx *c, struct cxx_ftemplate *f, cxx_
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
 VPRIV bool cxx_ftemplate_constrained(const cxx_entity *e);
 VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
-VPRIV qty cxx_nullptr_type(cxx *c);
+VPRIV ast_qualified_type cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner, cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
@@ -769,49 +769,49 @@ VPRIV void cxx_ftemplate_requires(struct cxx_ftemplate *f, uint32_t pos);
 VPRIV void cxx_ftemplate_friend(struct cxx_ftemplate *f);
 VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c);
 VPRIV int cxx_requires_clause_value(cxx *c);
-VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs);
+VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs);
 VPRIV void cxx_lambda_parameters_parse(cxx *c);
 VPRIV void cxx_class_unverifiable(cxx *c);
 VPRIV void cxx_for_range_declaration_parse(cxx *c);
-VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem);
-VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);
-VPRIV void cxx_ec(cxx *c, qty t, int64_t v);
-VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align);
+VPRIV bool cxx_range_element_type(cxx *c, ast_qualified_type r, ast_qualified_type *elem);
+VPRIV ast_qualified_type cxx_auto_deduce(cxx *c, ast_qualified_type pattern, ast_qualified_type a, bool lvalue);
+VPRIV void cxx_ec(cxx *c, ast_qualified_type t, int64_t v);
+VPRIV bool cxx_type_size_known(cxx *c, ast_qualified_type t, uint64_t *size, uint32_t *align);
 VPRIV bool cxx_paren_type_id_follows(cxx *c);
-VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty);
-VPRIV uint32_t cxx_gen_empty_object(cxx *c, qty t, uint32_t loc);
+VPRIV bool cxx_class_layout_info(cxx *c, ast_qualified_type t, bool *pod, bool *empty);
+VPRIV uint32_t cxx_gen_empty_object(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV bool cxx_number_value(const cxx_token *t, int64_t *v);
 VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v);
-VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v);
-VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);
-VPRIV cxx_entity *cxx_type_entity(cxx *c, qty t);
-VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced);
+VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualified_type *t, uint32_t nt, int64_t *v);
+VPRIV bool cxx_type_has_placeholder(cxx *c, ast_qualified_type t);
+VPRIV cxx_entity *cxx_type_entity(cxx *c, ast_qualified_type t);
+VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs, bool braced);
 VPRIV uint32_t cxx_ctor_id(void), cxx_dtor_id(void);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
-VPRIV void cxx_type_require_complete(cxx *c, qty t);
-VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
-VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t);
-VPRIV void cxx_tag_home_set(cxx *c, qty t, cxx_scope *home);
-VPRIV cxx_scope *cxx_tag_home(cxx *c, qty t);
-VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs);
+VPRIV void cxx_type_require_complete(cxx *c, ast_qualified_type t);
+VPRIV cxx_scope *cxx_type_class_scope(cxx *c, ast_qualified_type t);
+VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
+VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
+VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, const ast_qualified_type *args, uint32_t nargs);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);	/* i < 0: back to the whole pack */
 VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst);
 VPRIV cxx_entity *cxx_instance_named(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs);
-VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
+VPRIV bool cxx_type_spell(cxx *c, ast_qualified_type t, char *buf, size_t cap, size_t *len);
 VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);
 VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s);
 VPRIV void cxx_class_specifier_for_instance(cxx *c);
 VPRIV bool cxx_template_id_spell(cxx *c, cxx_entity *te, const cxx_targ *a, uint32_t n, char *buf, size_t cap, size_t *len);
 
 /* expressions' types (typing.c) */
-VPRIV void cxx_et(cxx *c, qty t, bool lvalue);
-VPRIV qty cxx_number_type(cxx *c, const cxx_token *t);
-VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r);
-VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue);
-VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs);
-VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue);
+VPRIV ast_qualified_type cxx_number_type(cxx *c, const cxx_token *t);
+VPRIV void cxx_binary_type(cxx *c, int op, ast_qualified_type l, ast_qualified_type r);
+VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue);
+VPRIV void cxx_call_type(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs);
+VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
 			   uint32_t nargs);
 
 /* parsing (declaration.c, expression.c, statement.c) */

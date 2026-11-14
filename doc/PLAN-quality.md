@@ -124,7 +124,7 @@ where the two differ.
 | Open branches | Ignored: no aliases, no windows |
 | Pilot | The shared library (`lib/` to `common/`) |
 | Order after it | Bottom-up by layer, with VIR moved up: lex and pp, diagnostics, C front end, VIR and its builder, what survives of the code generators (ABI, op tables, printers, encoders), assembler and object, linker, driver and server.  Modules that do not include each other run in parallel once `common/` has landed |
-| Code generation | **VIR for everything** (2026-11-13, after a full kernel build with `VCC_VIR=1` at 81.2 s against 79.1 s; 2-3 % loss accepted).  The direct emitters are scheduled for deletion and get no quality pass; optimizations outside VIR move into it.  Gates, pass-by-pass fate and order: `doc/quality/VIR-MIGRATION.md`.  This replaces the earlier decision (safe moves, then a pilot of arm64 on the shared walker) |
+| Code generation | **VIR for everything** (2026-11-13, after a full kernel build with `-O2 -fno-vir-lower` (VIR built, not lowered) at 81.2 s against 79.1 s; 2-3 % loss accepted).  The direct emitters are scheduled for deletion and get no quality pass; optimizations outside VIR move into it.  Gates, pass-by-pass fate and order: `doc/quality/VIR-MIGRATION.md`.  This replaces the earlier decision (safe moves, then a pilot of arm64 on the shared walker) |
 | Passes | One pass per file and a named pass table (time, disable, verify by name), identical output.  Fusing walks comes later, from the per-pass timings |
 | Linker | One linker core with output formats, not three linkers.  (Not the recommendation; it fits the one-binary requirement) |
 | Scheduler | Now only the measured waste: cache flush between process groups, vlink waking every thread for a small link, batch worker stacks.  One scheduler is its own plan after the readability pass |
@@ -178,9 +178,15 @@ Wave 2's tracks:
 
 #### Wave 2, decided by the owner during the wave
 
-- Track G (the linker's context struct and the one linker core) is held by
-  owner, wave 2.  Draft PR #183 (branch `quality/ld-context-1`: the design in
-  `link-context.md` and step 1) stays open and unmerged.
+- Track G (the linker's context struct and the one linker core): released
+  later in the wave.  The link context is done in four PRs (#183 design and
+  step 1, #220 output side, #222 input side, then the context as a parameter):
+  no per-link state is left at file scope, `ld_main` creates one context per
+  link.  Then the field renames of `rename-ld.tsv` (#225) and the part files
+  compiling alone (#230); WORK-linker step 3, the shared layer, is under way
+  (#231: file mappings through `port/file.h`; one archive reader in
+  `common/archive-reader.c` for vlink, vnm and ar), then step 4, one linker
+  core (`doc/quality/WORK-linker.md`).
 - Track I (diagnostics as their own module; one option table per tool) is held
   by owner, wave 2, and not started.
 - The field-use mode (track D) stays a plain rename helper; its output is not

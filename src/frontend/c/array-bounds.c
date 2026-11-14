@@ -125,23 +125,23 @@ CC_PRIVATE void cc_array_bounds_warn(cc *c, uint32_t n, bool addr)
 	const node *x = AST_NODE(n);
 	uint32_t a, s = 0;
 	const ctype *at;
-	cval cv;
+	cc_value cv;
 	i128 i;
 
-	if (x->op != N_INDEX || (x->flags & NF_BOUNDS) || c->dead)
+	if (x->op != AST_NODE_INDEX || (x->flags & AST_NODE_FLAG_BOUNDS_CHECKED) || c->dead)
 		return;
-	AST_NODE(n)->flags |= NF_BOUNDS;
+	AST_NODE(n)->flags |= AST_NODE_FLAG_BOUNDS_CHECKED;
 	a = x->a;
-	if (AST_NODE(a)->op != N_CAST || AST_NODE(a)->aux != CK_DECAY)
+	if (AST_NODE(a)->op != AST_NODE_CAST || AST_NODE(a)->aux != AST_CAST_ARRAY_DECAY)
 		return;
 	a = AST_NODE(a)->a;
 	at = AST_TYPE(c, AST_NODE(a)->ty);
-	if (at->kind != TY_ARRAY || (at->flags & (TF_VLA | TF_INCOMPLETE)) || at->n < 2 ||
-	    !cc_eval(c, x->b, &cv) || cv.kind != CV_INT)
+	if (at->kind != AST_TYPE_ARRAY || (at->flags & (AST_TYPE_FLAG_VLA | AST_TYPE_FLAG_INCOMPLETE)) || at->n < 2 ||
+	    !cc_eval(c, x->b, &cv) || cv.kind != CC_VALUE_INTEGER)
 		return;
-	if (AST_NODE(a)->op == N_VAR)
+	if (AST_NODE(a)->op == AST_NODE_VARIABLE)
 		s = AST_NODE(a)->a;
-	else if (AST_NODE(a)->op != N_MEMBER)
+	else if (AST_NODE(a)->op != AST_NODE_MEMBER)
 		return;
 	i = cv.i;
 	if (i >= 0 && (i < (i128)at->n || (addr && i == (i128)at->n)))

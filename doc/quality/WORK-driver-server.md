@@ -127,11 +127,11 @@ cases, a kernel build, `vcc-diff.py cmp/dm/deps`.
 
 ### 3. Knobs, registry, job context (Q-drv-03, 10, 14, 20)
 
-The 14 product knobs (`VCC_VIR=bl`, `VCC_DIAG_DOCS`, `SDKROOT`, ...) become
+The 14 product knobs (`VCC_DIAG_DOCS`, `SDKROOT`, ...; `VCC_VIR=bl` is now `-O3`) become
 options that travel with the job, so a job under vccd does not depend on
 the environment of whichever client started the server.  The test aids go
 in one registry read from the job's environment, each name documented;
-finished experiments (`VCC_CCMP`, ...) are deleted; a premerge check
+finished experiments (`-fvir-ccmp`, formerly `VCC_CCMP`, ...) are deleted; a premerge check
 requires every `getenv` name to be in the registry.  The job context
 (`ppd_env`, the thread-locals, `getenv`) becomes one struct with a `dirfd`;
 output files take the client's umask in one place.

@@ -1,9 +1,9 @@
 /* High products, using implicit RDX:RAX unsigned/signed multiplication. */
-#include "x64impl.h"
+#include "x64-internal.h"
 
-static val x64_mulhi(ecx *e, val a, val b, int op)
+static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_value b, int op)
 {
-	int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), src = rb;
+	int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b), src = rb;
 	static const uint8_t fixed[2] = { RAX, RDX };
 	/* Both operands are consumed; only unrelated live fixed registers survive. */
 	uint32_t saved = x64_save(e, fixed, 2, ra, rb);
@@ -15,21 +15,21 @@ static val x64_mulhi(ecx *e, val a, val b, int op)
 		src = R11;
 	}
 	x64_mov(e, RAX, ra);
-	x64_op3(e, op, 8, XNOREG, src, XNOREG);
+	x64_record_emit_three_registers(e, op, 8, X64_REGISTER_NONE, src, X64_REGISTER_NONE);
 	x64_mov(e, ra, RDX);
 	x64_restore(e, saved);
 	/* The result retains a's register ownership, even when both inputs alias. */
 	if (rb != ra)
 		x64_tfree(e, rb);
-	return (val){ .k = V_REG, .r = (uint8_t)ra };
+	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
 }
 
-VPRIV val x64_umulhi(ecx *e, val a, val b)
+VPRIV codegen_value x64_umulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
-	return x64_mulhi(e, a, b, X_MULW);
+	return x64_mulhi(e, a, b, X64_OP_MULW);
 }
 
-VPRIV val x64_smulhi(ecx *e, val a, val b)
+VPRIV codegen_value x64_smulhi(codegen_context *e, codegen_value a, codegen_value b)
 {
-	return x64_mulhi(e, a, b, X_SMULW);
+	return x64_mulhi(e, a, b, X64_OP_SMULW);
 }

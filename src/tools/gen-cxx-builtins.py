@@ -30,7 +30,7 @@ def fail(msg):
     sys.exit(f'gen-cxx-builtins.py: {msg}')
 
 
-ctable = set(re.findall(r'\{ "(__[A-Za-z0-9_]+)", BI_', open(os.path.join(SRC, 'c', 'builtin-table.c')).read()))
+ctable = set(re.findall(r'\{ "(__[A-Za-z0-9_]+)", CC_BUILTIN_', open(os.path.join(SRC, 'c', 'builtin-table.c')).read()))
 libtable = set(re.findall(r'\{ "(__builtin_[A-Za-z0-9_]+)", "', open(os.path.join(SRC, 'c', 'libbuiltins.inc')).read()))
 entries, seen, listed = [], set(), set()
 for n, line in enumerate(open(LIST), 1):

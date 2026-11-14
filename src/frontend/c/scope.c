@@ -5,13 +5,13 @@
 
 CC_PRIVATE uint32_t *cc_scope_slot(cc *c, uint32_t **dir, uint32_t id)
 {
-	uint32_t **pg = &dir[id >> DIR_BITS];
+	uint32_t **pg = &dir[id >> CC_DIRECTORY_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = cc_heap_allocate(c, DIR_PAGE * sizeof(uint32_t));
-		memset(*pg, 0, DIR_PAGE * sizeof(uint32_t));
+		*pg = cc_heap_allocate(c, CC_DIRECTORY_PAGE * sizeof(uint32_t));
+		memset(*pg, 0, CC_DIRECTORY_PAGE * sizeof(uint32_t));
 	}
-	return &(*pg)[id & (DIR_PAGE - 1)];
+	return &(*pg)[id & (CC_DIRECTORY_PAGE - 1)];
 }
 
 CC_PRIVATE void cc_scope_open(cc *c)
@@ -36,7 +36,7 @@ static inline __attribute__((always_inline)) void cc_scope_pop(cc *c, bool chk)
 		sym *y = &c->syms[s];
 
 		/* (bind allocated the page) */
-		(y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir)[y->name >> DIR_BITS][y->name & (DIR_PAGE - 1)] = y->shadow;
+		(y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir)[y->name >> CC_DIRECTORY_BITS][y->name & (CC_DIRECTORY_PAGE - 1)] = y->shadow;
 	}
 	c->depth--;
 }
@@ -69,7 +69,7 @@ CC_PRIVATE void cc_scope_prototype_bindings_save(cc *c, uint32_t s)
 	c->ptag[c->nptag++] = s;
 }
 
-CC_PRIVATE uint32_t cc_symbol_new(cc *c, int kind, uint32_t name, qty ty, uint32_t loc)
+CC_PRIVATE uint32_t cc_symbol_new(cc *c, int kind, uint32_t name, ast_qualified_type ty, uint32_t loc)
 {
 	uint32_t i = c->nsym++;
 	sym *s = &c->syms[i];
@@ -126,4 +126,23 @@ CC_PRIVATE uint32_t cc_tag_lookup(cc *c, uint32_t id)
 	uint32_t s = cc_scope_get(c->tdir, id);
 
 	return unlikely(c->lz_wm | c->dr_on) ? cc_symbol_lookup_slow(c, 1, id, s) : s;
+}
+
+/*
+ * x86-64 Linux: __builtin_ms_va_list, the Microsoft va_list (char *) of ms_abi functions, declared
+ * where it is first named (cc_symbol_is_typedef_identifier) rather than with the TU's other builtin types, so that the
+ * symbol numbers of a TU without it, and with them the code generator's local names, stay as they
+ * were.  Windows declares it with __builtin_va_list (translation-unit.c).
+ */
+CC_PRIVATE __attribute__((noinline, cold)) bool ms_valist_typedef(cc *c, uint32_t id)
+{
+	uint32_t s;
+
+	if (c->o->target != PP_LINUX_X86_64 || memcmp(vintern_ents[id].s, "__builtin_ms_va_list", 20))
+		return false;
+	if (unlikely(c->dr_on))
+		cc_replay_pragma_log(c, 2);	/* (a declaration-cache region does not replay this) */
+	s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, id, cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR)), 0);
+	cc_symbol_bind(c, s);
+	return true;
 }

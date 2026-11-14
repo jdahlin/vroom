@@ -64,8 +64,8 @@ VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding,
 			c->in_template_args--;
 			if (c->econst && c->evalue >= 0) {
 				out->kind = 2, out->v = c->evalue;
-				if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)
-					out->t = QUNQ(c->etype);
+				if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)
+					out->t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);
 			} else if (c->pos == p->def_b + 1 && (c->tok[p->def_b].kw == CXX_KW_nullptr || c->tok[p->def_b].kw == CXX_KW___nullptr))
 				out->kind = 2, out->v = 0;	/* = nullptr (enable_if<...>::type * = nullptr): a null pointer */
 		}
@@ -77,11 +77,11 @@ VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding,
 
 /* a value template parameter's type, its tokens parsed in the binding's scope (the earlier parameters
    bound, the template's own class for a member template: template <size_type A>); CXX_TY_UNKNOWN: not known */
-VPRIV qty cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b)
+VPRIV ast_qualified_type cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b)
 {
 	cxx_outer o;
 	jmp_buf jb;
-	volatile qty got = CXX_TY_UNKNOWN;
+	volatile ast_qualified_type got = CXX_TY_UNKNOWN;
 
 	if (c->body_depth >= 64)
 		return CXX_TY_UNKNOWN;
@@ -97,10 +97,10 @@ VPRIV qty cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b)
 	}
 	c->instantiating--, c->body_depth--;
 	cxx_outer_restore(c, &o);
-	if (got != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, got) >= TY_BOOL && AST_TYPE_KIND(c->ast, got) <= TY_UINT128) &&
-	    AST_TYPE_KIND(c->ast, got) != TY_ENUM && AST_TYPE_KIND(c->ast, got) != TY_PTR)
+	if (got != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, got) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, got) <= AST_TYPE_UINT128) &&
+	    AST_TYPE_KIND(c->ast, got) != AST_TYPE_ENUM && AST_TYPE_KIND(c->ast, got) != AST_TYPE_POINTER)
 		return CXX_TY_UNKNOWN;	/* (a class type, auto: not here) */
-	return got != CXX_TY_UNKNOWN ? QUNQ(got) : got;
+	return got != CXX_TY_UNKNOWN ? AST_QUALIFIED_TYPE_UNQUALIFIED(got) : got;
 }
 
 VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *a)
@@ -125,7 +125,7 @@ VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_t
 	e->dependent = 0;
 	if (p->kind == 2) {
 		e->value = a->v, e->has_value = 1;
-		if (a->kind == 2 && a->t && AST_TYPE_KIND(c->ast, a->t) == TY_ENUM)
+		if (a->kind == 2 && a->t && AST_TYPE_KIND(c->ast, a->t) == AST_TYPE_ENUM)
 			e->ty = a->t;	/* (a value of an enumeration: the parameter's type is that) */
 		else if (p->type_b) {
 			e->ty = cxx_simple_type_at(c, p->type_b);	/* (size_t N, bool B: the integer type spelled) */
@@ -213,7 +213,7 @@ VPRIV bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a, 
 			return false;
 		else {
 			/* an enumeration's value: (E)4 */
-			if (a[i].t && a[i].t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, a[i].t) == TY_ENUM &&
+			if (a[i].t && a[i].t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, a[i].t) == AST_TYPE_ENUM &&
 			    !(cxx_spell_append(buf, cap, len, "(") && cxx_type_spell(c, a[i].t, buf, cap, len) && cxx_spell_append(buf, cap, len, ")")))
 				return false;
 			snprintf(num, sizeof num, "%lld", (long long)a[i].v);

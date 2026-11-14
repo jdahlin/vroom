@@ -1,5 +1,5 @@
 /* Monotone backward may-liveness with explicit edge/work budget. */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 static bool em_flow_live_grow(em_flow_live *live, uint32_t blocks)
 {

@@ -30,6 +30,20 @@ static bool driver_input_is_source(const char *a)
 
 /* 0 to go on; 1: the job ends (status and message set); 2: return 1 at once, as the loop did on
    an invalid -ftls-model= (without the job's cleanup) */
+/* NAME=VALUE or NAME VALUE (the next argument): the value, else NULL */
+static const char *driver_cmdline_value_eq(const char *a, const char *name, int argc, char **argv, int *i)
+{
+	size_t n = strlen(name);
+
+	if (strncmp(a, name, n))
+		return NULL;
+	if (a[n] == '=')
+		return a + n + 1;
+	if (!a[n] && *i + 1 < argc)
+		return argv[++*i];
+	return NULL;
+}
+
 VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job, int argc, char **argv)
 {
 	for (int i = 1; i < argc; i++) {
@@ -291,6 +305,9 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target")) {
 			const char *m = strstr(a, "-macos");
 
+			if (a[1] == '-')
+				job->target_name = a + 9;
+
 			job->wasm_bits = strstr(a, "wasm64") ? 64 : strstr(a, "wasm32") ? 32 : 0;
 #ifndef VCC_WASM
 			if (job->wasm_bits) {
@@ -301,6 +318,13 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 #endif
 			job->darwin = !job->wasm_bits && (strstr(a, "darwin") || strstr(a, "apple"));
 			job->target_x64 = !job->wasm_bits && !job->darwin && strstr(a, "x86_64");
+			/* Windows x64, the MinGW-w64 flavour: x86_64-w64-mingw32, x86_64-w64-windows-gnu, x86_64-pc-windows-gnu */
+			job->target_win64 = job->target_x64 && (strstr(a, "mingw32") || strstr(a, "windows") || strstr(a, "win32"));
+			if (job->target_win64 && strstr(a, "msvc")) {
+				dprintf(job->errfd, "vcc: error: unsupported target '%s' (MSVC environment; use x86_64-w64-mingw32)\n", a + 9);
+				job->status = 1;
+				return 1;
+			}
 			job->hosted = 0;
 			if (m && m[6] >= '0' && m[6] <= '9')
 				job->macos_minimum_version = m + 6, job->macos_minimum_source = 2;	/* arm64-apple-macos14.2: wins over the flag */
@@ -310,6 +334,13 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 				job->macos_minimum_version = strchr(a, '=') + 1, job->macos_minimum_source = 1;
 		}
 		else if (!strcmp(a, "-nostdinc")) job->no_standard_includes = 1;
+		else if (!strcmp(a, "-nobuiltininc")) job->no_builtin_includes = 1;
+		else if (!strcmp(a, "-v")) job->verbose = 1;
+		else if ((v = driver_cmdline_value_eq(a, "-resource-dir", argc, argv, &i))) job->resource_dir = v;
+		else if ((v = driver_cmdline_value_eq(a, "--sysroot", argc, argv, &i))) job->sysroot = v;
+		else if (!strcmp(a, "-mms-bitfields")) job->ms_bitfields = 1;
+		else if (!strcmp(a, "-mno-ms-bitfields")) job->ms_bitfields = 0;
+		else if (!strcmp(a, "-municode")) job->unicode = 1;
 		else if (!strcmp(a, "-undef")) job->undefine_predefined = 1;
 		else if (!strcmp(a, "-x") && i + 1 < argc) {
 			i++;
@@ -321,24 +352,31 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			job->raw_assembler = !strcmp(argv[i], "assembler") ? 1 : 0;
 			job->language_given = strcmp(argv[i], "none") != 0;
 		}
-		else if (!strcmp(a, "-O0")) job->optimize = 0, job->optimize_size = 0, job->optimization_level = 0;
-		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { job->optimize = 2; job->optimize_size = 1; job->optimization_level = 2; }
-		else if (!strncmp(a, "-O", 2)) job->optimize = 2, job->optimize_size = 0, job->optimization_level = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
+		/* optimize: __OPTIMIZE__ (predef.c); optimization_level: the code generator's level, 0-3 (optimization.c) */
+		else if (!strncmp(a, "-O", 2)) {
+			job->optimization_level = driver_optimization_level(a + 2);
+			job->optimize = job->optimization_level ? 2 : 0;
+			job->optimize_size = !strcmp(a, "-Os") || !strcmp(a, "-Oz");
+		}
+		else if (driver_optimization_option(job, a)) ;
 		else if (!strcmp(a, "-fpie")) job->pie = 1, job->pic = 0;
 		else if (!strcmp(a, "-fPIE")) job->pie = 2, job->pic = 0;
 		else if (!strcmp(a, "-fpic")) job->pic = 1, job->pie = 0;
 		else if (!strcmp(a, "-fPIC")) job->pic = 2, job->pie = 0;
 		else if (!strcmp(a, "-g") || !strcmp(a, "-g1") || !strcmp(a, "-g2") || !strcmp(a, "-g3") ||
 			 !strncmp(a, "-ggdb", 5) || !strncmp(a, "-gdwarf", 7) || !strcmp(a, "-gline-tables-only") ||
-			 !strcmp(a, "-glldb") || !strcmp(a, "-gfull"))
+			 !strcmp(a, "-glldb") || !strcmp(a, "-gfull")) {
 			job->debug = 1;	/* line tables (the rest of DWARF: TODO.md) */
+			if (!strncmp(a, "-gdwarf-", 8) && a[8] >= '2' && a[8] <= '5' && !a[9])
+				job->dwarf_version = a[8] - '0';	/* (-gdwarf, -gdwarf32: the default) */
+		}
 		else if (!strcmp(a, "-g0")) job->debug = 0;
 		else if (!strcmp(a, "-ffunction-sections")) job->function_data_sections |= 1;
 		else if (!strcmp(a, "-fno-function-sections")) job->function_data_sections &= ~1;
 		else if (!strcmp(a, "-fdata-sections")) job->function_data_sections |= 2;
 		else if (!strcmp(a, "-fno-data-sections")) job->function_data_sections &= ~2;
 		else if (!strncmp(a, "-ftls-model=", 12)) {
-			if (!(job->tls_model = vcc_tls_model(a + 12))) {
+			if (!(job->tls_model = cc_tls_model_parse(a + 12))) {
 				fprintf(stderr, "vcc: error: invalid value '%s' in '%s'\n", a + 12, a);
 				return 2;	/* (Q-drv-07: the one exit that skips the job's cleanup) */
 			}
@@ -349,7 +387,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fno-builtin")) job->no_builtin = 1;
 		else if (!strcmp(a, "-fno-jump-tables")) job->no_jump_tables = 1;
 		else if (!strcmp(a, "-fjump-tables")) job->no_jump_tables = 0;
-		else if (!strncmp(a, "-fno-builtin-", 13)) cc_disable_builtin(job->disabled_builtins, a + 13);
+		else if (!strncmp(a, "-fno-builtin-", 13)) cc_builtin_disable(job->disabled_builtins, a + 13);
 		else if (!strcmp(a, "-mllvm") && i + 1 < argc) {
 			/* emcc -sSUPPORT_LONGJMP=wasm: setjmp/longjmp through wasm exceptions */
 			if (!strcmp(argv[++i], "-wasm-enable-sjlj"))
@@ -362,6 +400,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fno-optimize-sibling-calls")) job->sibling_calls = -1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) job->cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) job->cfi = 0;
+		else if (!strcmp(a + (a[2] == 'n' ? 5 : 2), "unwind-tables") && a[1] == 'f') job->unwind_tables = a[2] != 'n';	/* -f[no-]unwind-tables (Windows: keeps SEH; elsewhere ignored) */
 		else if (!strcmp(a, "-mstrict-align")) job->strict_align = 1;
 		else if (!strcmp(a, "-fwrapv") || !strcmp(a, "-fno-strict-overflow")) job->wrapv = 1;
 		else if (!strcmp(a, "-fno-wrapv") || !strcmp(a, "-fstrict-overflow")) job->wrapv = 0;
@@ -438,6 +477,15 @@ VPRIV int driver_cmdline_check(struct driver_job *job)
 
 		dprintf(job->errfd, "vcc: error: invalid value '%s' in '%.*s'\n", eq + 1, (int)(eq + 1 - job->bad_value_option), job->bad_value_option);
 		job->status = 1;
+		return 1;
+	}
+	if (!job->main_file && job->verbose) {
+		/* `cc -v` alone: the banner, as clang's (to stderr, status 0); configure scripts
+		   tell compilers apart by it (zlib's looks for "gcc" or "clang") */
+		dprintf(job->errfd, "vcc version 1.0 (clang %d compatible)\nTarget: %s\nThread model: posix\n", 23,
+			job->target_name ? job->target_name : job->target_x64 ? "x86_64-unknown-linux-gnu" :
+			job->darwin ? "arm64-apple-darwin" : "aarch64-unknown-linux-gnu");
+		job->status = 0;
 		return 1;
 	}
 	if (!job->main_file) {

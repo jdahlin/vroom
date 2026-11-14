@@ -1,5 +1,5 @@
 /*
- * vcc's <stdatomic.h> (Darwin target): C11 atomics on the GNU __atomic_*
+ * vcc's <stdatomic.h> (Darwin; Windows x64 through freestanding/): C11 atomics on the GNU __atomic_*
  * builtins, as GCC's header does.  _Atomic types have clang's layout, and
  * plain loads, stores and operators on them are atomic (seq_cst).
  */

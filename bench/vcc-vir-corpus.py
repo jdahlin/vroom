@@ -2,8 +2,9 @@
 """VPP wrapper for native x86-64 corpus builds; retain per-TU diagnostics and VIR coverage.
 
 VPP=$PWD/bench/vcc-vir-corpus.py VCC_VIR_CORPUS_LOG=DIR bench/pg/build.sh ...
-VCC_VIR_CORPUS_VPP selects vpp; VCC_VIR_CORPUS_MODE is bvls (default) or 0.
-Compile jobs explicitly use x86-64, -O2 and -g0 so debug fallback cannot hide coverage.
+VCC_VIR_CORPUS_VPP selects vpp; VCC_VIR_CORPUS_LEVEL is the level, -O3 (default), -O2
+or -O1 (no VIR).  Compile jobs explicitly use x86-64, the level and -g0 so debug fallback
+cannot hide coverage; VIR's verifier, report and allocation check are on.
 The surrounding build may use bench/pg/cc to link with clang. No compiler fallback here.
 Summarize a run with: bench/vcc-vir-corpus.py --summary DIR
 """
@@ -55,9 +56,7 @@ def main():
     directory = Path(os.environ['VCC_VIR_CORPUS_LOG']).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     vpp = os.environ.get('VCC_VIR_CORPUS_VPP', str(ROOT / 'build/linux/src/vpp'))
-    mode = os.environ.get('VCC_VIR_CORPUS_MODE', os.environ.get('VCC_VIR', 'bvls'))
-    if mode != '0':
-        mode += 'vs'
+    mode = os.environ.get('VCC_VIR_CORPUS_LEVEL', '-O3')
     argv = sys.argv[1:]
     includes = []
     system = os.environ.get('VCC_VIR_CORPUS_SYSINCLUDES')
@@ -68,10 +67,10 @@ def main():
     for path in system.split(os.pathsep):
         if path:
             includes += ['-isystem', path]
-    cmd = [vpp, *argv, *includes, '--target=x86_64-linux-gnu', '-O2', '-g0', '-fdiagnostics-color=never']
-    env = dict(os.environ, VCC_VIR=mode, VCC_VIR_CHECK='1', VCC_VIR_VEC='r')
+    cmd = [vpp, *argv, *includes, '--target=x86_64-linux-gnu', mode, '-g0', '-fdiagnostics-color=never',
+           '-fvir-verify', '-fvir-report', '-fvir-check', '-fvir-vectorize-report']
     start = time.monotonic()
-    p = subprocess.run(cmd, stderr=subprocess.PIPE, env=env)
+    p = subprocess.run(cmd, stderr=subprocess.PIPE)
     diagnostics = p.stderr.decode(errors='replace')
     path = directory / f'{time.time_ns()}-{os.getpid()}.stderr'
     path.write_text(diagnostics)

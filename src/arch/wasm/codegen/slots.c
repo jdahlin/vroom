@@ -137,7 +137,7 @@ VPRIV void wmem_poison(ecx *e, const wlv *l, uint64_t size)
 	}
 }
 
-VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin)
+VPRIV void wmem_access(ecx *e, const wlv *l, ast_qualified_type t, bool store, size_t begin)
 {
 	wst *W = e->w;
 	uint64_t sz;
@@ -149,7 +149,7 @@ VPRIV void wmem_access(ecx *e, const wlv *l, qty t, bool store, size_t begin)
 		return;
 	sz = tsize(e->c, t);
 	type = wty(e->c, t);
-	if (l->vol || (QQ(t) & Q_VOLATILE) || (T(e->c, t)->flags & TF_ATOMIC)) {
+	if (l->vol || (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) || (T(e->c, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
 		wmem_poison(e, l, sz);
 		return;
 	}

@@ -77,7 +77,7 @@ static char *driver_snapshot_array_base(const cc *c, int k, size_t *n)
 {
 	switch (k) {
 	case DRIVER_SNAPSHOT_ARRAY_TYPES: *n = c->nty * sizeof(ctype); return (char *)c->ty;
-	case DRIVER_SNAPSHOT_ARRAY_PARAMETERS: *n = c->nparams * sizeof(qty); return (char *)c->params;
+	case DRIVER_SNAPSHOT_ARRAY_PARAMETERS: *n = c->nparams * sizeof(ast_qualified_type); return (char *)c->params;
 	case DRIVER_SNAPSHOT_ARRAY_TAGS: *n = c->ntag * sizeof(tag); return (char *)c->tags;
 	case DRIVER_SNAPSHOT_ARRAY_SYMBOLS: *n = c->nsym * sizeof(sym); return (char *)c->syms;
 	case DRIVER_SNAPSHOT_ARRAY_NODES: *n = c->nnode * sizeof(node); return (char *)c->nodes;
@@ -87,13 +87,13 @@ static char *driver_snapshot_array_base(const cc *c, int k, size_t *n)
 	case DRIVER_SNAPSHOT_ARRAY_STRINGS: *n = c->nstr * sizeof(cstr); return (char *)c->strs;
 	case DRIVER_SNAPSHOT_ARRAY_LABELS: *n = c->nlabel * sizeof(label); return (char *)c->labels;
 	case DRIVER_SNAPSHOT_ARRAY_ATTRIBUTES: *n = c->nattr * sizeof(attrs); return (char *)c->attr;
-	case DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS: *n = c->nasm * sizeof(casm); return (char *)c->asms;
+	case DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS: *n = c->nasm * sizeof(ast_asm_statement); return (char *)c->asms;
 	case DRIVER_SNAPSHOT_ARRAY_SCOPE_STACK: *n = c->nsstack * sizeof(uint32_t); return (char *)c->sstack;
 	case DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL: *n = c->ntoplevel * sizeof(uint32_t); return (char *)c->toplevel;
 	case DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL_ASM: *n = c->ntlasm * sizeof(uint32_t); return (char *)c->tlasm;
 	case DRIVER_SNAPSHOT_ARRAY_SPANS: *n = c->nnode * sizeof(diag_span); return (char *)c->span;
-	case DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES: *n = c->nlzt * sizeof(lztok); return (char *)c->lzt;
-	case DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS: *n = c->nlzf * sizeof(lzfn); return (char *)c->lzf;
+	case DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES: *n = c->nlzt * sizeof(cc_lazy_token); return (char *)c->lzt;
+	case DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS: *n = c->nlzf * sizeof(cc_lazy_function); return (char *)c->lzf;
 	case DRIVER_SNAPSHOT_ARRAY_LAZY_SYMBOLS: *n = c->nlzs; return c->lzs;
 	case DRIVER_SNAPSHOT_ARRAY_PARENTHESES: *n = c->nnode * sizeof(*c->paren); return (char *)c->paren;
 	default: *n = (size_t)(c->hp - c->heap); return c->heap;
@@ -148,8 +148,8 @@ static inline uint32_t driver_snapshot_location_decode(const driver_snapshot_cod
 		tag *tg_ = (tag *)(img)[DRIVER_SNAPSHOT_ARRAY_TAGS];                                                 \
 		label *lb_ = (label *)(img)[DRIVER_SNAPSHOT_ARRAY_LABELS];                                           \
 		diag_span *sp_ = (diag_span *)(img)[DRIVER_SNAPSHOT_ARRAY_SPANS];                                         \
-		lztok *lt_ = (lztok *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES];                                              \
-		lzfn *lf_ = (lzfn *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS];                                                \
+		cc_lazy_token *lt_ = (cc_lazy_token *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES];                                              \
+		cc_lazy_function *lf_ = (cc_lazy_function *)(img)[DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS];                                                \
 		for (uint32_t i_ = 0; i_ < (c)->nlzt; i_++)                                      \
 			lt_[i_].loc = FIX(lt_[i_].loc);                                          \
 		for (uint32_t i_ = 0; i_ < (c)->nlzf; i_++) {                                    \
@@ -186,7 +186,7 @@ static void driver_snapshot_pointers_translate(driver_snapshot_coder *k, char **
 {
 	tag *tg = (tag *)img[DRIVER_SNAPSHOT_ARRAY_TAGS];
 	cstr *st = (cstr *)img[DRIVER_SNAPSHOT_ARRAY_STRINGS];
-	casm *as = (casm *)img[DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS];
+	ast_asm_statement *as = (ast_asm_statement *)img[DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS];
 
 #define P(x) ((x) = enc ? driver_snapshot_pointer_encode(k, (x)) : driver_snapshot_pointer_decode(k, (x)))
 	for (uint32_t i = 0; i < c->ntag; i++)
@@ -208,7 +208,7 @@ static void driver_snapshot_state_translate(driver_snapshot_coder *k, cc *s, boo
 	P(s->ptag);
 	P(s->tyhash);
 	P(s->fnhash);	/* (dops: the TU keeps its own, see driver_snapshot_restore) */
-	for (uint32_t i = 0; i < NDIR; i++) {
+	for (uint32_t i = 0; i < CC_DIRECTORY_COUNT; i++) {
 		P(s->odir[i]);
 		P(s->tdir[i]);
 		P(s->ldir[i]);
@@ -370,19 +370,19 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s, uint32_t ba
 	DRIVER_SNAPSHOT_LOCATIONS(img, c, DEC);	/* (first: the tags' f is still coded) */
 #undef DEC
 	driver_snapshot_pointers_translate(&k, img, c, false);
-	dr_restored(c);
+	cc_replay_restored(c);
 }
 
 /* ---------------- the trie ---------------- */
 
 /* every option before outfd can change what a header parses to (cc.h), so all
    of them key the trie, plus emit (code generation keeps more per decl) */
-static uint64_t driver_snapshot_options_signature(const cc_opts *o)
+static uint64_t driver_snapshot_options_signature(const cc_options *o)
 {
 	const unsigned char *p = (const unsigned char *)o;
 	uint64_t h = 1469598103934665603ull;
 
-	for (size_t i = 0; i < offsetof(cc_opts, outfd); i++)
+	for (size_t i = 0; i < offsetof(cc_options, outfd); i++)
 		h = (h ^ p[i]) * 1099511628211ull;
 	return (h ^ (uint64_t)o->emit) * 1099511628211ull;
 }
@@ -536,7 +536,7 @@ void driver_declaration_cache_boundary_slow(cc *c)
 				d->stale = true;
 				d->target = x;
 				atomic_fetch_add_explicit(&driver_snapshot_region_count, 1, memory_order_relaxed);
-				cc_fetch(c, &c->tk[0]);	/* (a pragma restores first) */
+				cc_token_fetch_out_of_line(c, &c->tk[0]);	/* (a pragma restores first) */
 				continue;
 			}
 		}

@@ -49,14 +49,14 @@ static bool cc_expression_is_noreturn(cc *c, uint32_t n, bool reach, cc_return_p
 		return false;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_CAST:
+	case AST_NODE_CAST:
 		return cc_expression_is_noreturn(c, x->a, reach, f);
-	case N_CALL: {
+	case AST_NODE_CALL: {
 		const node *g = AST_NODE(x->a);
 
-		while (g->op == N_CAST)
+		while (g->op == AST_NODE_CAST)
 			g = AST_NODE(g->a);
-		if (g->op == N_VAR && (c->syms[g->a].flags & SF_NORETURN))
+		if (g->op == AST_NODE_VARIABLE && (c->syms[g->a].flags & AST_SYMBOL_FLAG_NORETURN))
 			return true;
 		if (cc_expression_is_noreturn(c, x->a, reach, f))
 			return true;
@@ -65,14 +65,14 @@ static bool cc_expression_is_noreturn(cc *c, uint32_t n, bool reach, cc_return_p
 				return true;
 		return false;
 	}
-	case N_BUILTIN:
-		return x->aux == BI_UNREACHABLE || x->aux == BI_TRAP;
-	case N_COMMA:
+	case AST_NODE_BUILTIN:
+		return x->aux == CC_BUILTIN_UNREACHABLE || x->aux == CC_BUILTIN_TRAP;
+	case AST_NODE_COMMA:
 		return cc_expression_is_noreturn(c, x->a, reach, f) || cc_expression_is_noreturn(c, x->b, reach, f);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return cc_expression_is_noreturn(c, x->a, reach, f) ||
 		       (x->b && cc_expression_is_noreturn(c, x->b, reach, f) && cc_expression_is_noreturn(c, x->c, reach, f));
-	case N_STMTEXPR:
+	case AST_NODE_STATEMENT_EXPRESSION:
 		return !cc_return_path_statement_expression(c, x->a, reach, f);
 	default:
 		return false;
@@ -84,36 +84,36 @@ static bool cc_expression_is_noreturn(cc *c, uint32_t n, bool reach, cc_return_p
 CC_PRIVATE int cc_condition_value(cc *c, uint32_t n)
 {
 	const node *x;
-	cval v;
+	cc_value v;
 
 	if (!n)
 		return 1;	/* for (;;) */
 	if (cc_eval(c, n, &v))
-		return v.kind == CV_INT ? v.i != 0 : -1;
+		return v.kind == CC_VALUE_INTEGER ? v.i != 0 : -1;
 	/* clang's CFG (tryEvaluateBool): one decided side of || / &&, and a const variable
 	   with a constant initializer ("static const bool f = false;") */
 	x = AST_NODE(n);
-	while (x->op == N_CAST)
+	while (x->op == AST_NODE_CAST)
 		x = AST_NODE(x->a);
 	switch (x->op) {
-	case N_LOGOR:
-	case N_LOGAND: {
-		int a = cc_condition_value(c, x->a), b = cc_condition_value(c, x->b), d = x->op == N_LOGOR;
+	case AST_NODE_LOGICAL_OR:
+	case AST_NODE_LOGICAL_AND: {
+		int a = cc_condition_value(c, x->a), b = cc_condition_value(c, x->b), d = x->op == AST_NODE_LOGICAL_OR;
 
 		if (a == d || b == d)
 			return d;
 		return a == !d && b == !d ? !d : -1;
 	}
-	case N_UNARY: {
+	case AST_NODE_UNARY: {
 		int a = x->aux == LEX_TOKEN_EXCLAMATION ? cc_condition_value(c, x->a) : -1;
 
 		return a < 0 ? -1 : !a;
 	}
-	case N_VAR: {
+	case AST_NODE_VARIABLE: {
 		const sym *y = &c->syms[x->a];
 
-		if (y->kind == S_VAR && (QQ(y->ty) & Q_CONST) && y->body && cc_type_is_integer(c, y->ty) && cc_eval(c, y->body, &v) &&
-		    v.kind == CV_INT)
+		if (y->kind == AST_SYMBOL_VARIABLE && (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_CONST) && y->body && cc_type_is_integer(c, y->ty) && cc_eval(c, y->body, &v) &&
+		    v.kind == CC_VALUE_INTEGER)
 			return v.i != 0;
 		return -1;
 	}
@@ -131,27 +131,27 @@ static void cc_switch_case_values(cc *c, uint32_t n, i128 *v, uint32_t *nv, uint
 		return;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_CASE:
+	case AST_NODE_CASE:
 		if (c->ipool[x->a] == c->ipool[x->b] && *nv < max)
 			v[(*nv)++] = c->ipool[x->a];
 		else
 			*nv = max + 1;	/* a range: not counted */
 		cc_switch_case_values(c, x->c, v, nv, max);
 		return;
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			cc_switch_case_values(c, c->lists[x->b + i], v, nv, max);
 		return;
-	case N_LABEL: case N_DEFAULT:
+	case AST_NODE_LABEL: case AST_NODE_DEFAULT:
 		cc_switch_case_values(c, x->c, v, nv, max);
 		return;
-	case N_IF:
+	case AST_NODE_IF:
 		cc_switch_case_values(c, x->b, v, nv, max), cc_switch_case_values(c, x->c, v, nv, max);
 		return;
-	case N_WHILE: case N_DO:
+	case AST_NODE_WHILE: case AST_NODE_DO:
 		cc_switch_case_values(c, x->b, v, nv, max);
 		return;
-	case N_FOR:
+	case AST_NODE_FOR:
 		cc_switch_case_values(c, c->lists[x->c + 1], v, nv, max);
 		return;
 	default:
@@ -168,20 +168,20 @@ CC_PRIVATE bool cc_switch_has_default(cc *c, uint32_t n)
 		return false;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_DEFAULT:
+	case AST_NODE_DEFAULT:
 		return true;
-	case N_CASE: case N_LABEL:
+	case AST_NODE_CASE: case AST_NODE_LABEL:
 		return cc_switch_has_default(c, x->c);
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			if (cc_switch_has_default(c, c->lists[x->b + i]))
 				return true;
 		return false;
-	case N_IF:
+	case AST_NODE_IF:
 		return cc_switch_has_default(c, x->b) || cc_switch_has_default(c, x->c);
-	case N_WHILE: case N_DO:
+	case AST_NODE_WHILE: case AST_NODE_DO:
 		return cc_switch_has_default(c, x->b);
-	case N_FOR:
+	case AST_NODE_FOR:
 		return cc_switch_has_default(c, c->lists[x->c + 1]);
 	default:
 		return false;
@@ -196,9 +196,9 @@ CC_PRIVATE bool cc_switch_is_enum_covered(cc *c, const node *sw)
 	i128 v[256];
 	uint32_t nv = 0;
 
-	while (x->op == N_CAST)
+	while (x->op == AST_NODE_CAST)
 		x = AST_NODE(x->a);
-	if (AST_TYPE_KIND(c, x->ty) != TY_ENUM)
+	if (AST_TYPE_KIND(c, x->ty) != AST_TYPE_ENUM)
 		return false;
 	g = &c->tags[AST_TYPE(c, x->ty)->aux];
 	if (!g->nenum)
@@ -239,49 +239,49 @@ static bool cc_return_path_reach(cc *c, uint32_t n, bool reach, cc_return_path_r
 		return reach;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			reach = cc_return_path_reach(c, c->lists[x->b + i], reach, f);
 		return reach;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		return cc_return_path_reach(c, x->c, reach || cc_return_path_label_is_reached(f, x->a), f);
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		return cc_return_path_reach(c, x->c, reach || f->sw, f);
-	case N_RETURN:
+	case AST_NODE_RETURN:
 		if (reach)
 			f->ret = true;
 		if (reach && x->a)
 			cc_expression_is_noreturn(c, x->a, reach, f);	/* (its statement expressions' gotos) */
 		return false;
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		if (reach)
 			cc_return_path_goto_label(f, x->a);
 		return false;
-	case N_GOTO_IND:
+	case AST_NODE_GOTO_INDIRECT:
 		if (reach)
 			f->unsure = true;
 		return false;
-	case N_BREAK:
+	case AST_NODE_BREAK:
 		if (reach)
 			f->brk = true;
 		return false;
-	case N_CONTINUE:
+	case AST_NODE_CONTINUE:
 		if (reach)
 			f->cont = true;
 		return false;
-	case N_EXPR:
+	case AST_NODE_EXPRESSION:
 		return !cc_expression_is_noreturn(c, x->a, reach, f) && reach;
-	case N_DECL:
+	case AST_NODE_DECLARATION:
 		return !cc_expression_is_noreturn(c, x->b, reach, f) && reach;
-	case N_ASM: {
-		const casm *a = &c->asms[x->a];
+	case AST_NODE_ASM: {
+		const ast_asm_statement *a = &c->asms[x->a];
 
 		if (reach)
 			for (uint32_t i = 0; i < a->nlabel; i++)
 				cc_return_path_goto_label(f, a->labels[i]);
 		return reach;
 	}
-	case N_IF: {
+	case AST_NODE_IF: {
 		int k = cc_condition_value(c, x->a);
 		bool t, e;
 
@@ -291,22 +291,22 @@ static bool cc_return_path_reach(cc *c, uint32_t n, bool reach, cc_return_path_r
 		e = x->c ? cc_return_path_reach(c, x->c, reach && k != 1, f) : reach && k != 1;
 		return t || e;
 	}
-	case N_WHILE: {
+	case AST_NODE_WHILE: {
 		int k = cc_condition_value(c, x->a);
 		bool brk, cont, end = cc_return_path_loop_body(c, x->b, reach && k != 0, f, &brk, &cont);
 
 		/* the condition: from the entry, the body's end, a continue */
 		return ((reach || end || cont) && k != 1) || brk;
 	}
-	case N_FOR: {
+	case AST_NODE_FOR: {
 		const node *init = x->a ? AST_NODE(x->a) : NULL;
 		uint32_t body = c->lists[x->c + 1], step = c->lists[x->c];
 		int k = cc_condition_value(c, x->b);
 		bool brk, cont, end, again;
 
-		if (init && init->op != N_BLOCK && init->op != N_DECL && cc_expression_is_noreturn(c, x->a, reach, f))
+		if (init && init->op != AST_NODE_BLOCK && init->op != AST_NODE_DECLARATION && cc_expression_is_noreturn(c, x->a, reach, f))
 			reach = false;
-		else if (init && (init->op == N_BLOCK || init->op == N_DECL))
+		else if (init && (init->op == AST_NODE_BLOCK || init->op == AST_NODE_DECLARATION))
 			reach = cc_return_path_reach(c, x->a, reach, f);
 		end = cc_return_path_loop_body(c, body, reach && k != 0, f, &brk, &cont);
 		again = end || cont;	/* the step runs */
@@ -314,14 +314,14 @@ static bool cc_return_path_reach(cc *c, uint32_t n, bool reach, cc_return_path_r
 			again = false;
 		return ((reach || again) && k != 1) || brk;
 	}
-	case N_DO: {
+	case AST_NODE_DO: {
 		int k = cc_condition_value(c, x->a);
 		bool brk, cont, end = cc_return_path_loop_body(c, x->b, reach, f, &brk, &cont);
 
 		/* the condition: from the body's end or a continue */
 		return ((end || cont) && k != 1) || brk;
 	}
-	case N_SWITCH: {
+	case AST_NODE_SWITCH: {
 		bool ob = f->brk, os = f->sw, end, brk, dflt;
 
 		if (cc_expression_is_noreturn(c, x->a, reach, f))
@@ -391,7 +391,7 @@ static bool cc_return_path_self_entry(cc *c, uint32_t n, const cc_return_path_re
 {
 	const node *x = AST_NODE(n);
 
-	return ((x->op == N_CASE || x->op == N_DEFAULT) && f->sw) || (x->op == N_LABEL && cc_return_path_label_is_reached(f, x->a));
+	return ((x->op == AST_NODE_CASE || x->op == AST_NODE_DEFAULT) && f->sw) || (x->op == AST_NODE_LABEL && cc_return_path_label_is_reached(f, x->a));
 }
 
 /* the block's statements from the latest entry before i up to i, the last one to brk */
@@ -432,7 +432,7 @@ static bool cc_return_path_walk(cc *c, uint32_t n, bool reach, bool brk, cc_retu
 		return false;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_BLOCK: {
+	case AST_NODE_BLOCK: {
 		bool in = reach;
 
 		if (!x->c)
@@ -454,22 +454,22 @@ static bool cc_return_path_walk(cc *c, uint32_t n, bool reach, bool brk, cc_retu
 		}
 		return false;
 	}
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		if (!reach && cc_return_path_label_is_reached(P->f, x->a))
 			P->fail = true;	/* reached by a goto */
 		return cc_return_path_walk(c, x->c, true, brk, P);
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		if (!reach && P->f->sw)
-			cc_return_path_step_add(c, P, x->loc, pp_token_end_find(c->p, x->loc), x->op == N_CASE ? "the switch jumps to this case"
+			cc_return_path_step_add(c, P, x->loc, pp_token_end_find(c->p, x->loc), x->op == AST_NODE_CASE ? "the switch jumps to this case"
 					      : "the switch jumps to 'default'", 0);
 		return cc_return_path_walk(c, x->c, true, brk, P);
-	case N_BREAK:
+	case AST_NODE_BREAK:
 		if (!reach || !brk)
 			return false;
 		cc_return_path_step_add(c, P, x->loc, pp_token_end_find(c->p, x->loc), P->brk && P->brk[0] == 's' ? "this 'break' leaves the switch"
 				      : "this 'break' leaves the loop", 0);
 		return true;
-	case N_IF: {
+	case AST_NODE_IF: {
 		bool t, e, tb, eb;
 
 		k = cc_condition_value(c, x->a);
@@ -495,18 +495,18 @@ static bool cc_return_path_walk(cc *c, uint32_t n, bool reach, bool brk, cc_retu
 		}
 		return false;
 	}
-	case N_WHILE: case N_FOR: case N_DO: {
-		uint32_t cnd = x->op == N_FOR ? x->b : x->a, body = x->op == N_FOR ? c->lists[x->c + 1] : x->b;
+	case AST_NODE_WHILE: case AST_NODE_FOR: case AST_NODE_DO: {
+		uint32_t cnd = x->op == AST_NODE_FOR ? x->b : x->a, body = x->op == AST_NODE_FOR ? c->lists[x->c + 1] : x->b;
 		const char *ob = P->brk;
 		bool ok = false, b;
 
 		if (brk || !reach)
 			return false;	/* (a break inside is this loop's) */
 		k = cc_condition_value(c, cnd);
-		if (x->op == N_FOR && x->a && (AST_NODE(x->a)->op == N_BLOCK || AST_NODE(x->a)->op == N_DECL) &&
+		if (x->op == AST_NODE_FOR && x->a && (AST_NODE(x->a)->op == AST_NODE_BLOCK || AST_NODE(x->a)->op == AST_NODE_DECLARATION) &&
 		    !cc_return_path_end_of(c, x->a, true, P->f, NULL))
 			return false;
-		if (k != 1 && x->op != N_DO) {	/* the first test fails */
+		if (k != 1 && x->op != AST_NODE_DO) {	/* the first test fails */
 			if (k < 0)
 				cc_return_path_step_add(c, P, 0, 0, "is false, so the loop ends", cnd);
 			return true;
@@ -527,7 +527,7 @@ static bool cc_return_path_walk(cc *c, uint32_t n, bool reach, bool brk, cc_retu
 			P->n = mark;
 		return ok;
 	}
-	case N_SWITCH: {
+	case AST_NODE_SWITCH: {
 		const char *ob = P->brk;
 		bool os = P->f->sw, ok;
 
@@ -548,7 +548,7 @@ static bool cc_return_path_walk(cc *c, uint32_t n, bool reach, bool brk, cc_retu
 			P->n = mark;
 		return ok;
 	}
-	case N_RETURN: case N_GOTO: case N_GOTO_IND: case N_CONTINUE:
+	case AST_NODE_RETURN: case AST_NODE_GOTO: case AST_NODE_GOTO_INDIRECT: case AST_NODE_CONTINUE:
 		return false;
 	default:
 		return !brk && cc_return_path_end_of(c, n, reach, P->f, NULL);

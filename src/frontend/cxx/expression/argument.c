@@ -13,7 +13,7 @@ VPRIV void cxx_braced_arguments_parse(cxx *c)
 
 VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 {
-	qty args[CXX_MAX_ARGS];
+	ast_qualified_type args[CXX_MAX_ARGS];
 	uint8_t lval[CXX_MAX_ARGS];
 	uint32_t n = 0;
 	uint32_t nodes[CXX_MAX_ARGS] = { 0 }, braces[CXX_MAX_ARGS] = { 0 }, zero = 0;
@@ -96,7 +96,7 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 		if (n < CXX_MAX_ARGS)
 			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode, braces[n] = brace ? start : 0,
 			zero |= (uint32_t)(c->econst && !c->evalue && !brace && c->etype != CXX_TY_UNKNOWN &&
-					   AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128) << n;
+					   AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UINT128) << n;
 		if (!n)
 			first_const = c->econst, first_value = c->evalue;
 		n++;
@@ -124,10 +124,10 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 /* a builtin trait: __is_same(T, U), __builtin_xxx(args); arguments are types or expressions */
 VPRIV void cxx_builtin_call_parse(cxx *c)
 {
-	qty types[2];
+	ast_qualified_type types[2];
 	uint32_t n = 0;
 	uint32_t bn[8], nb = 0;	/* (code generation: the expression arguments' nodes) */
-	qty first = CXX_TY_UNKNOWN;
+	ast_qualified_type first = CXX_TY_UNKNOWN;
 
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);

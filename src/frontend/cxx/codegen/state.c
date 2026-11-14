@@ -22,10 +22,10 @@ typedef struct cxx_gen_saved {
 	uint8_t gen, gen_failed;
 	uint32_t gen_level, enode, snode, sdone, sdepth, gen_psyms, gen_npsyms, gen_fn, gen_this, gen_vtt, ast_fn, ast_depth;
 	void *gen_block, *gen_pre;
-	qty gen_ret;
+	ast_qualified_type gen_ret;
 	uint32_t gen_sret, gen_notemp, gen_block_temps;
 	uint32_t init_names[32], ninit_names, ninit_bases;
-	qty init_bases[16];
+	ast_qualified_type init_bases[16];
 	uint8_t delegates, returns, why;
 	struct cxx_gen_lambda *gen_lambda;
 	char why_text[256];
@@ -107,36 +107,36 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 	c->gen_failed = 1;
 }
 
-VPRIV bool cxx_gen_object_type_ok(cxx *c, qty t);
+VPRIV bool cxx_gen_object_type_ok(cxx *c, ast_qualified_type t);
 VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc);
 VPRIV uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
 VPRIV uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc);
 VPRIV bool cxx_gen_is_nullptr_node(cxx *c, uint32_t x);
-VPRIV uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
+VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
 VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
-VPRIV bool cxx_gen_value_ok(cxx *c, qty t);
-VPRIV bool cxx_gen_by_address(cxx *c, qty t);
-VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth);
-VPRIV bool cxx_gen_needs_destruction(cxx *c, qty t, int depth);
-VPRIV bool cxx_gen_needs_construction(cxx *c, qty t, int depth);
-VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
-VPRIV cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth);
-VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
-VPRIV cxx_entity *cxx_gen_destructor_body(cxx *c, qty t, cxx_entity *d);
+VPRIV bool cxx_gen_value_ok(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_gen_by_address(cxx *c, ast_qualified_type t);
+VPRIV int cxx_gen_trivial_abi(cxx *c, ast_qualified_type t, int depth);
+VPRIV bool cxx_gen_needs_destruction(cxx *c, ast_qualified_type t, int depth);
+VPRIV bool cxx_gen_needs_construction(cxx *c, ast_qualified_type t, int depth);
+VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t);
+VPRIV cxx_entity *cxx_gen_effective_destructor(cxx *c, ast_qualified_type t, int depth);
+VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t);
+VPRIV cxx_entity *cxx_gen_destructor_body(cxx *c, ast_qualified_type t, cxx_entity *d);
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
-VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
-VPRIV bool cxx_gen_construct_by_body(cxx *c, uint32_t target, qty t, cxx_entity *d, cc_id_list *out, uint32_t loc);
+VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
+VPRIV bool cxx_gen_construct_by_body(cxx *c, uint32_t target, ast_qualified_type t, cxx_entity *d, cc_id_list *out, uint32_t loc);
 VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f);
 VPRIV int cxx_gen_capture(cxx *c, cxx_gen_lambda *l, const cxx_entity *v, uint32_t loc);
-VPRIV qty cxx_gen_abi_type(cxx *c, const cxx_entity *f);
+VPRIV ast_qualified_type cxx_gen_abi_type(cxx *c, const cxx_entity *f);
 VPRIV uint32_t cxx_gen_text(cxx *c, const char *text);
 VPRIV uint32_t cxx_gen_data_address(cxx *c, uint32_t s, uint32_t index);
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
 VPRIV void cxx_gen_typeinfos_emit(cxx *c);
 
 /* is init a constant initializer for an object of type ty (cc_initializer_static_is_ok reports where not) */
-VPRIV bool cxx_gen_static_ok(cc *a, qty ty, uint32_t init)
+VPRIV bool cxx_gen_static_ok(cc *a, ast_qualified_type ty, uint32_t init)
 {
 	uint32_t bad = 0;
 
@@ -148,16 +148,16 @@ VPRIV uint32_t cxx_gen_to_void_pointer(cxx *c, uint32_t n);
 VPRIV uint32_t cxx_gen_runtime_call(cxx *c, uint32_t fs, const uint32_t *args, uint32_t nargs, uint32_t loc);
 
 VPRIV uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
-VPRIV bool cxx_gen_is_reference(cxx *c, qty t);
-VPRIV uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, qty to, uint32_t loc);
-VPRIV uint32_t cxx_gen_base_object(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV bool cxx_gen_is_reference(cxx *c, ast_qualified_type t);
+VPRIV uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, ast_qualified_type to, uint32_t loc);
+VPRIV uint32_t cxx_gen_base_object(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
 
 /*
  * A type code is generated for so far, as a value (a parameter, a result, an operand): a scalar, a
  * reference to an object type that is, or a class that C's rules pass and copy as C++'s do (laid out,
  * POD for layout: no constructor, destructor or assignment of its own).
  */
-VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
+VPRIV bool cxx_gen_type_ok(cxx *c, ast_qualified_type t)
 {
 	int k;
 	bool pod, empty;
@@ -165,19 +165,19 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 	if (t == CXX_TY_UNKNOWN)
 		return false;
 	k = AST_TYPE_KIND(c->ast, t);
-	if (k == TY_PTR && AST_TYPE(c->ast, t)->ext) {
+	if (k == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext) {
 		/* a reference is an address, as a pointer is: a class it refers to need not be one code is built for
 		   (std::ostream &, a virtual base's class); what is done through it is checked where it is done */
-		qty b = AST_TYPE(c->ast, t)->base;
+		ast_qualified_type b = AST_TYPE(c->ast, t)->base;
 
-		if (b != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b) && AST_TYPE_KIND(c->ast, b) != TY_ARRAY)
+		if (b != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b) && AST_TYPE_KIND(c->ast, b) != AST_TYPE_ARRAY)
 			return true;
 		return cxx_gen_object_type_ok(c, b);
 	}
-	if (k == TY_STRUCT || k == TY_UNION)
+	if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION)
 		return cxx_class_layout_info(c, t, &pod, &empty) && pod &&	/* (an instance is completed here if it was not yet) */
-		       (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE);
-	return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_LDOUBLE || k == TY_PTR || k == TY_ENUM;
+		       (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & AST_RECORD_FLAG_COMPLETE);
+	return (k >= AST_TYPE_BOOL && k <= AST_TYPE_UINT128) || k == AST_TYPE_FLOAT || k == AST_TYPE_DOUBLE || k == AST_TYPE_LONG_DOUBLE || k == AST_TYPE_POINTER || k == AST_TYPE_ENUM;
 }
 
 /*
@@ -185,31 +185,31 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
  * classes too, its other members scalars or arrays of them.  It may declare constructors and a
  * destructor; passing it by value is then not built yet (cxx_gen_type_ok).
  */
-VPRIV bool cxx_gen_class_ok2(cxx *c, qty t, bool objects);
+VPRIV bool cxx_gen_class_ok2(cxx *c, ast_qualified_type t, bool objects);
 
-__attribute__((unused)) VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
+__attribute__((unused)) VPRIV bool cxx_gen_class_ok(cxx *c, ast_qualified_type t)
 {
 	return cxx_gen_class_ok2(c, t, false);
 }
 
 /* objects: as an object in memory (a class with virtual functions too: never copied as a value here) */
-VPRIV bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
+VPRIV bool cxx_gen_class_ok2(cxx *c, ast_qualified_type t, bool objects)
 {
 	cc *a = c->ast;
 	cxx_scope *cls;
 	bool pod, empty;
 
 #define CK(x, why) do { if (x) return false; } while (0)
-	CK(t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != TY_STRUCT && AST_TYPE_KIND(a, t) != TY_UNION), "kind");
+	CK(t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT && AST_TYPE_KIND(a, t) != AST_TYPE_UNION), "kind");
 	CK(!cxx_class_layout_info(c, t, &pod, &empty), "layout");
-	CK(!(a->tags[AST_TYPE(a, t)->aux].flags & RF_COMPLETE), "incomplete");
+	CK(!(a->tags[AST_TYPE(a, t)->aux].flags & AST_RECORD_FLAG_COMPLETE), "incomplete");
 	if (pod)
 		return true;
-	cls = cxx_tag_scope_get(c, QUNQ(t));
+	cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	CK(!cls || cls->has_dependent_base, "dependent base");
 	CK(cxx_class_polymorphic(c, t) && (!objects || !cxx_vtable_usable(c, cls)), "vtable");
 	{
-		qty bases[16];
+		ast_qualified_type bases[16];
 		uint32_t nb = cxx_class_bases(c, t, bases, 16);
 
 		for (uint32_t i = 0; i < nb; i++)
@@ -217,9 +217,9 @@ VPRIV bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 				return false;
 	}
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
-		qty ft = cls->field_types[i];
+		ast_qualified_type ft = cls->field_types[i];
 
-		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
 		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft)) {
 			if (!cxx_gen_class_ok2(c, ft, objects))
@@ -231,22 +231,22 @@ VPRIV bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 }
 
 /* ... or an array of them (a variable's type; a parameter's has decayed), or such a class */
-VPRIV bool cxx_gen_object_type_ok(cxx *c, qty t)
+VPRIV bool cxx_gen_object_type_ok(cxx *c, ast_qualified_type t)
 {
-	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY && AST_TYPE(c->ast, t)->n)
+	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && AST_TYPE(c->ast, t)->n)
 		t = AST_TYPE(c->ast, t)->base;
-	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
+	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
 		return cxx_gen_class_ok2(c, t, true);
-	return t != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) && cxx_gen_type_ok(c, t);
+	return t != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext) && cxx_gen_type_ok(c, t);
 }
 
-VPRIV bool cxx_gen_is_reference(cxx *c, qty t)
+VPRIV bool cxx_gen_is_reference(cxx *c, ast_qualified_type t)
 {
-	return t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext;
+	return t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext;
 }
 
 /* a temporary of the function body: a local of type t, declared in the block being built (0: no block) */
-VPRIV uint32_t cxx_gen_temporary(cxx *c, qty t, uint32_t loc)
+VPRIV uint32_t cxx_gen_temporary(cxx *c, ast_qualified_type t, uint32_t loc)
 {
 	cc *a = c->ast;
 	uint32_t s, n;
@@ -255,20 +255,20 @@ VPRIV uint32_t cxx_gen_temporary(cxx *c, qty t, uint32_t loc)
 		cxx_gen_fail(c);
 		return 0;
 	}
-	s = cc_symbol_new(a, S_VAR, 0, QUNQ(t), loc);
-	a->syms[s].sc = SC_AUTO;
-	n = cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, 0);
+	s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
+	a->syms[s].sc = AST_STORAGE_AUTO;
+	n = cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, 0);
 	cc_id_list_append(a, (cc_id_list *)c->gen_block, n);
 	return s;
 }
 
 /* does the class, or a class inside it, have a base class that takes space?  (C's view of the record has
    plain bytes there: its classification for registers would not be the ABI's) */
-VPRIV bool cxx_gen_has_base_bytes(cxx *c, qty t, int depth)
+VPRIV bool cxx_gen_has_base_bytes(cxx *c, ast_qualified_type t, int depth)
 {
 	cc *a = c->ast;
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
-	qty bases[16];
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+	ast_qualified_type bases[16];
 	uint32_t nb;
 	bool pod, empty;
 
@@ -279,9 +279,9 @@ VPRIV bool cxx_gen_has_base_bytes(cxx *c, qty t, int depth)
 		if (!cxx_class_layout_info(c, bases[i], &pod, &empty) || !empty)
 			return true;
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
-		qty ft = cls->field_types[i];
+		ast_qualified_type ft = cls->field_types[i];
 
-		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
 		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft) && cxx_gen_has_base_bytes(c, ft, depth + 1))
 			return true;
@@ -294,12 +294,12 @@ VPRIV bool cxx_gen_has_base_bytes(cxx *c, qty t, int depth)
  * destructor that is not trivial, not all of them deleted?  1 yes (passed and returned as C does), 0 no
  * (by address), -1 not known.
  */
-VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth)
+VPRIV int cxx_gen_trivial_abi(cxx *c, ast_qualified_type t, int depth)
 {
 	cc *a = c->ast;
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	cxx_entity *d;
-	qty bases[16];
+	ast_qualified_type bases[16];
 	uint32_t nb, deleted = 0, usable = 0;
 	bool pod, empty;
 
@@ -316,15 +316,15 @@ VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth)
 		return 0;
 	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next) {
 		const ctype *ft;
-		qty p;
+		ast_qualified_type p;
 
-		if (e->member_of != cls || e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != TY_FUNC)
+		if (e->member_of != cls || e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != AST_TYPE_FUNCTION)
 			continue;
 		ft = AST_TYPE(a, e->ty);
 		if (!ft->n || ft->n > (uint32_t)e->ndefaults + 1)
 			continue;
 		p = a->params[ft->aux];
-		if (p == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, p) != TY_PTR || !AST_TYPE(a, p)->ext || QUNQ(AST_TYPE(a, p)->base) != QUNQ(t))
+		if (p == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, p) != AST_TYPE_POINTER || !AST_TYPE(a, p)->ext || AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, p)->base) != AST_QUALIFIED_TYPE_UNQUALIFIED(t))
 			continue;
 		/* a copy or move constructor */
 		if (e->fn_deleted)
@@ -344,9 +344,9 @@ VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth)
 			return r;
 	}
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
-		qty ft = cls->field_types[i];
+		ast_qualified_type ft = cls->field_types[i];
 
-		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
 		if (ft == CXX_TY_UNKNOWN)
 			return -1;
@@ -361,9 +361,9 @@ VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth)
 }
 
 /* a class passed and returned by address */
-VPRIV bool cxx_gen_by_address(cxx *c, qty t)
+VPRIV bool cxx_gen_by_address(cxx *c, ast_qualified_type t)
 {
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
 	return cxx_gen_trivial_abi(c, t, 0) == 0;
 }
@@ -371,11 +371,11 @@ VPRIV bool cxx_gen_by_address(cxx *c, qty t)
 /* a type as a parameter or a result: cxx_gen_type_ok's, and classes with constructors and destructors */
 /* does the class hold floating-point data (its members, bases', arrays'): a base's bytes would pass it in
    integer registers where the ABI uses SSE ones */
-static bool cxx_gen_has_floating(cxx *c, qty t, int depth)
+static bool cxx_gen_has_floating(cxx *c, ast_qualified_type t, int depth)
 {
 	cc *a = c->ast;
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
-	qty bases[16];
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+	ast_qualified_type bases[16];
 	uint32_t nb;
 
 	if (!cls || depth > 8)
@@ -385,29 +385,29 @@ static bool cxx_gen_has_floating(cxx *c, qty t, int depth)
 		if (cxx_gen_has_floating(c, bases[i], depth + 1))
 			return true;
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
-		qty ft = cls->field_types[i];
+		ast_qualified_type ft = cls->field_types[i];
 
-		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
 		if (ft == CXX_TY_UNKNOWN)
 			return true;
 		if (cc_type_is_record(a, ft) ? cxx_gen_has_floating(c, ft, depth + 1) :
-		    (AST_TYPE_KIND(a, ft) >= TY_BFLOAT16 && AST_TYPE_KIND(a, ft) <= TY_FLOAT128) || AST_TYPE_KIND(a, ft) == TY_VECTOR)
+		    (AST_TYPE_KIND(a, ft) >= AST_TYPE_BFLOAT16 && AST_TYPE_KIND(a, ft) <= AST_TYPE_FLOAT128) || AST_TYPE_KIND(a, ft) == AST_TYPE_VECTOR)
 			return true;
 	}
 	return false;
 }
 
-VPRIV bool cxx_gen_value_ok(cxx *c, qty t)
+VPRIV bool cxx_gen_value_ok(cxx *c, ast_qualified_type t)
 {
 	cc *a = c->ast;
 	int tr;
 
 	if (cxx_gen_type_ok(c, t))
 		return true;
-	if (t != CXX_TY_UNKNOWN && cc_type_is_record(a, t) && AST_TYPE_KIND(a, t) != TY_ARRAY)
-		cxx_type_require_complete(c, QUNQ(t));	/* (a result type an instance names, tuple<int&>: completed now) */
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(a, t) || AST_TYPE_KIND(a, t) == TY_ARRAY || !cxx_gen_class_ok2(c, t, true))
+	if (t != CXX_TY_UNKNOWN && cc_type_is_record(a, t) && AST_TYPE_KIND(a, t) != AST_TYPE_ARRAY)
+		cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));	/* (a result type an instance names, tuple<int&>: completed now) */
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(a, t) || AST_TYPE_KIND(a, t) == AST_TYPE_ARRAY || !cxx_gen_class_ok2(c, t, true))
 		return false;
 	tr = cxx_gen_trivial_abi(c, t, 0);
 	if (tr == 1)
@@ -455,7 +455,7 @@ VPRIV uint32_t cxx_gen_prv_aim(cxx *c, cxx_prv *p, uint32_t address)
  * than C++ says, the end of the full-expression).  0: not built: no destructor to call, or a place that
  * runs more than once or not at all for one entry of the block (a loop's condition, x && y's y).
  */
-VPRIV uint32_t cxx_gen_class_temp(cxx *c, qty t, uint32_t loc)
+VPRIV uint32_t cxx_gen_class_temp(cxx *c, ast_qualified_type t, uint32_t loc)
 {
 	cc *a = c->ast;
 	bool needs = cxx_gen_needs_destruction(c, t, 0);
@@ -490,21 +490,21 @@ VPRIV uint32_t cxx_gen_chain(cxx *c, const cc_id_list *l, uint32_t last, uint32_
 		const struct node *st = AST_NODE_AT(a, l->v[i]);
 		uint32_t e;
 
-		if (st->op == N_DECL && !st->b && c->gen_block && (cc_id_list *)c->gen_block != l) {
+		if (st->op == AST_NODE_DECLARATION && !st->b && c->gen_block && (cc_id_list *)c->gen_block != l) {
 			/* a local the statements declare (an initializer_list's array): declared in the enclosing block */
 			cc_id_list_append(a, (cc_id_list *)c->gen_block, l->v[i]);
 			continue;
 		}
-		if (st->op != N_EXPR) {
+		if (st->op != AST_NODE_EXPRESSION) {
 			cxx_gen_fail(c);	/* (a statement that is no expression: not one expression's part) */
 			return 0;
 		}
 		e = st->a;
-		x = x ? cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, e)->ty, loc, x, e) : e;
+		x = x ? cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, e)->ty, loc, x, e) : e;
 	}
 	if (!last)
 		return x;
-	return x ? cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, last)->ty, loc, x, last) : last;
+	return x ? cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, last)->ty, loc, x, last) : last;
 }
 
 /* an expression code generation gave no node (tokens start to here): the function's reason, unless one is

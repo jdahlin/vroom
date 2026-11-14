@@ -20,7 +20,7 @@
  *       --warm N   N untimed passes over all jobs first (warm token cache,
  *                  header cache and declaration cache; outputs discarded)
  *       --stats F  one line per job to F: status, ms, instructions, cycles,
- *                  and instructions in cc_run / emit_tu / object write
+ *                  and instructions in cc_translation_unit_run / codegen_unit_emit / object write
  *                  (tab separated, last column the main file); vbench.py
  *   VPP_WARM=N   N untimed passes first (fills the token cache; profiling)
  */
@@ -34,7 +34,11 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 
 #include "frontend/pp/pp.h"
 #include "driver/declaration-cache.h"
@@ -169,16 +173,16 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 		printf("%s\n", hs);
 		driver_declaration_cache_statistics_format(hs, sizeof(hs));
 		printf("%s\n", hs);
-		cc_lz_stats(hs, sizeof(hs));
+		cc_lazy_body_statistics(hs, sizeof(hs));
 		printf("%s\n", hs);
-		cc_drcov_stats(hs, sizeof(hs));
+		cc_replay_coverage_statistics(hs, sizeof(hs));
 		if (*hs)
 			printf("%s\n", hs);
 	}
 	{
 		char ds[2048];
 
-		cc_dr_stats(ds, sizeof(ds));
+		cc_replay_statistics(ds, sizeof(ds));
 		if (*ds)
 			printf("%s\n", ds);
 	}
@@ -222,6 +226,31 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
 		fclose(f);
 	}
 	return bad != 0;
+}
+
+/* the link of driver_mingw_link_run: the vlink beside this program */
+static int vpp_vlink_spawn(int argc, char **argv, void *ctx)
+{
+	char self[4096], path[4200];
+	ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+	pid_t pid;
+	int st;
+
+	(void)argc, (void)ctx;
+	if (n <= 0 || !strrchr((self[n] = 0, self), '/')) {
+		fprintf(stderr, "vcc: error: cannot find vlink\n");
+		return 1;
+	}
+	*strrchr(self, '/') = 0;
+	snprintf(path, sizeof path, "%s/vlink", self);
+	argv[0] = path;
+	if (posix_spawn(&pid, path, NULL, NULL, argv, environ)) {
+		fprintf(stderr, "vcc: error: cannot run %s\n", path);
+		return 1;
+	}
+	while (waitpid(pid, &st, 0) < 0)
+		;
+	return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
 }
 
 int main(int argc, char **argv)
@@ -269,5 +298,7 @@ int main(int argc, char **argv)
 		av[n] = NULL;
 		driver_job_run(n, av, &q);
 	}
+	if (driver_mingw_link_wanted(argc, argv))
+		return driver_mingw_link_run(argc, argv, &e, vpp_vlink_spawn, NULL);
 	return driver_job_run(argc, argv, &e);
 }

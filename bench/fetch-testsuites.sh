@@ -8,8 +8,46 @@
 # REV=HEAD fetches the upstream tip instead (then update the pins).
 # work/testsuites/MANIFEST lists name, url, commit and file counts.
 # Nothing downloaded is built or run by this script.
+#
+#   bench/fetch-testsuites.sh llvm-mingw   # not part of the default set
+#
+# llvm-mingw is not a suite but the MinGW-w64 sysroot of doc/PLAN-win64.md
+# (headers, UCRT CRT, import libraries, compiler-rt builtins): the pinned
+# release tarball, checked against its SHA-256 and unpacked into
+# work/llvm-mingw/ (work/ of the main checkout when run in a git worktree);
+# nothing is done when it is already there.
 set -eu
 cd "$(dirname "$0")/.."
+
+MINGW_REL=20261104
+MINGW_NAME=llvm-mingw-$MINGW_REL-ucrt-ubuntu-22.04-x86_64
+MINGW_URL=https://github.com/mstorsjo/llvm-mingw/releases/download/$MINGW_REL/$MINGW_NAME.tar.xz
+MINGW_SHA256=919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
+
+if [ "$*" = llvm-mingw ]; then
+  w=work
+  if [ ! -d work ] && c=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    [ -d "$(dirname "$c")/work" ] && w="$(dirname "$c")/work"
+  fi
+  d="$w/llvm-mingw"
+  if [ -d "$d/$MINGW_NAME/x86_64-w64-mingw32/lib" ]; then
+    echo "llvm-mingw $MINGW_REL: $d/$MINGW_NAME (present)"
+    exit 0
+  fi
+  mkdir -p "$d"
+  t="$d/$MINGW_NAME.tar.xz"
+  if ! echo "$MINGW_SHA256  $t" | sha256sum -c --status 2>/dev/null; then
+    curl -fsSL --retry 3 -o "$t.part" "$MINGW_URL"
+    echo "$MINGW_SHA256  $t.part" | sha256sum -c --status || { echo "llvm-mingw: SHA-256 mismatch" >&2; rm -f "$t.part"; exit 1; }
+    mv "$t.part" "$t"
+  fi
+  rm -rf "$d/$MINGW_NAME.tmp" && mkdir "$d/$MINGW_NAME.tmp"
+  tar -xJf "$t" -C "$d/$MINGW_NAME.tmp"
+  mv "$d/$MINGW_NAME.tmp/$MINGW_NAME" "$d/$MINGW_NAME" && rmdir "$d/$MINGW_NAME.tmp"
+  echo "llvm-mingw $MINGW_REL: $d/$MINGW_NAME"
+  exit 0
+fi
+
 DST=work/testsuites
 mkdir -p "$DST"
 

@@ -62,8 +62,8 @@ VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
 			depth--;
 		else if (!depth && (kd == LEX_TOKEN_COMMA || kd == LEX_TOKEN_RIGHT_PAREN)) {
 			if (k < ft->n) {
-				qty pt = c->ast->params[ft->aux + k];
-				int want = AST_TYPE_KIND(c->ast, pt) == TY_PTR ? AST_TYPE(c->ast, pt)->ext : 0;
+				ast_qualified_type pt = c->ast->params[ft->aux + k];
+				int want = AST_TYPE_KIND(c->ast, pt) == AST_TYPE_POINTER ? AST_TYPE(c->ast, pt)->ext : 0;
 
 				if (want != ref)
 					return false;
@@ -96,7 +96,7 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 	cxx_outer o;
 	jmp_buf jb;
 
-	if (!t || !t->noocs || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+	if (!t || !t->noocs || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != AST_TYPE_FUNCTION)
 		return;
 	const cxx_targ *bargs = x->args;
 	uint32_t nbargs = x->nargs;
@@ -181,9 +181,9 @@ VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l)
 	cxx_entity *f = l ? l->fn : NULL;
 	cxx_outer o;
 	jmp_buf jb;
-	volatile qty rt = CXX_TY_UNKNOWN;
+	volatile ast_qualified_type rt = CXX_TY_UNKNOWN;
 	volatile uint8_t rl = 0, done = 0;
-	qty ps[32], r;
+	ast_qualified_type ps[32], r;
 
 	if (!f || !f->has_ret_pattern || f->ty != CXX_TY_UNKNOWN || f->ret_deducing || c->body_depth >= 64 || c->tentative ||
 	    l->nparams > 32 || l->template_depth)
@@ -218,8 +218,8 @@ VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l)
 	f->ret_deducing = 0;
 	if (!done)
 		return;
-	if (rt == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, rt) == TY_VOID)
-		r = QUNQ(f->ret_pattern) == cxx_auto_type(c) ? cc_type_basic(TY_VOID) : CXX_TY_UNKNOWN;	/* (auto: void; auto&: none) */
+	if (rt == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, rt) == AST_TYPE_VOID)
+		r = AST_QUALIFIED_TYPE_UNQUALIFIED(f->ret_pattern) == cxx_auto_type(c) ? cc_type_basic(AST_TYPE_VOID) : CXX_TY_UNKNOWN;	/* (auto: void; auto&: none) */
 	else
 		r = cxx_auto_deduce(c, f->ret_pattern, rt, rl);
 	if (rt == CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN) {

@@ -16,7 +16,7 @@ enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR
        DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024, DS_INLINE = 2048, DS_MUTABLE = 4096 };
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { qty trailing; uint32_t pack; uint8_t is_const, is_noexcept; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
+typedef struct cxx_suffix { ast_qualified_type trailing; uint32_t pack; uint8_t is_const, is_noexcept; uint8_t is_function, variadic; int64_t n; ast_qualified_type *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
 
 /* the functions of declaration/, by file */
 
@@ -33,8 +33,8 @@ VPRIV void cxx_attributes_skip(cxx *c);
 /* name.c */
 VPRIV bool cxx_entity_is_type(const cxx_entity *e);
 VPRIV bool cxx_entity_is_template(const cxx_entity *e);
-VPRIV qty cxx_type_drop_quals(cxx *c, qty t, unsigned drop);
-VPRIV qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t);
+VPRIV ast_qualified_type cxx_type_drop_quals(cxx *c, ast_qualified_type t, unsigned drop);
+VPRIV ast_qualified_type cxx_type_transform(cxx *c, const char *n, size_t len, ast_qualified_type t);
 VPRIV cxx_entity *cxx_name_lookup(cxx *c, cxx_scope *qualifier, bool dependent, uint32_t id);
 VPRIV cxx_entity *cxx_entity_prefer(cxx_entity *e, int kind);
 VPRIV cxx_entity *cxx_entity_template(cxx_entity *e);
@@ -52,7 +52,7 @@ VPRIV bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class);
 VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a, uint32_t n);
 VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw);
 VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_template);
-VPRIV bool cxx_ptr_operator_parse(cxx *c, qty *t);
+VPRIV bool cxx_ptr_operator_parse(cxx *c, ast_qualified_type *t);
 VPRIV void cxx_template_arguments_then_paren(cxx *c);
 VPRIV uint32_t cxx_operator_id_at(cxx *c, uint32_t n);
 VPRIV void cxx_defaults_record(cxx *c, cxx_entity *e);
@@ -101,7 +101,7 @@ VPRIV void cxx_requires_clause_parse(cxx *c);
 VPRIV void cxx_template_declaration_parse(cxx *c, int context);
 
 /* class.c */
-VPRIV qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out);
+VPRIV ast_qualified_type cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out);
 VPRIV void cxx_base_clause_parse(cxx *c, cxx_scope *cs);
 VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template);
 VPRIV uint32_t cxx_class_body_parse(cxx *c, cxx_scope *cs);
@@ -115,7 +115,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 /* guide.c */
 VPRIV int cxx_guide_tparam(cxx *c, uint32_t i);
 VPRIV void cxx_guide_record(cxx *c, cxx_entity *te, uint32_t i);
-VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval, uint32_t nargs);
+VPRIV ast_qualified_type cxx_ctad(cxx *c, cxx_entity *te, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs);
 VPRIV bool cxx_deduction_guide_try(cxx *c);
 
 /* declaration.c */
@@ -130,7 +130,7 @@ VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);
 /* signature.c */
 VPRIV void cxx_class_specifier_for_instance(cxx *c);
 VPRIV void cxx_translation_unit_parse(cxx *c);
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
+VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 
 /* constraint.c */

@@ -14,7 +14,7 @@
 #ifndef VCC_VIR_LOWERING_DRIVER_H
 #define VCC_VIR_LOWERING_DRIVER_H
 
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 #include "vir/layout.h"
 
 typedef struct virbuild_lowering_target {
@@ -46,7 +46,6 @@ typedef struct virbuild_lowering_target {
 	bool params_in_loop;		/* x86-64: block parameters go through instruction(); arm64: result_spill(), here, in the order of the operand registers */
 	bool edits_at_block_end;	/* x86-64: the edits at pos = first + n run after the last instruction; arm64: none */
 	bool skip_multi_operands;	/* arm64: a VIR_TYPE_MULTI operand has no register and instruction() reads them from ov/opr; x86-64 rejects such functions */
-	bool rotation_cached;		/* arm64 reads VCC_VIR_ROT once (static); x86-64 per function */
 } virbuild_lowering_target;
 
 /* the driver's inputs for one function; the target fills it, the driver reads it */
@@ -59,13 +58,17 @@ typedef struct virbuild_lowering {
 	/* arrays of f->block_count entries the layout fills: order, position, rotation, chase; path is scratch of f->block_count, block_label is the target's */
 	uint32_t *order, *position, *rotation, *chase, *path;
 	const uint32_t *block_label;
-	bool optimize;			/* loop rotation and entry duplication are allowed (not -O0) */
+	bool optimize;			/* loop rotation and entry duplication are allowed (not VCC_NOOPT) */
+	bool rotate;			/* -frotate-loops: the layout puts a loop's test at its end (else VIR's block order) */
 	/* skip_multi_operands: where the operands' values and registers go, and the room (arm64) */
 	uint32_t *operand_value;
 	uint8_t *operand_reg;
 	uint32_t max_operands;
 	/* an instruction at which the block's lowering stops (a sibling call left the ret: arm64), none when *skip_at is 0; NULL: never */
 	const uint32_t *skip_at;
+	/* -g: a line-table row at the next record, called at each block and wherever f->locations starts a run; NULL: none */
+	void (*row)(codegen_context *e, uint32_t loc);
+	codegen_context *row_e;
 } virbuild_lowering;
 
 /* the chases, the layout, then each block in it that is not chased away, then after_blocks */
@@ -75,6 +78,6 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b);
 /* an edge's block: its label, then the edge's moves (the caller ends it with a jump) */
 VPRIV void virbuild_lower_edge_block(const virbuild_lowering *d, uint32_t label, uint32_t g);
 /* callee (a symbol's address) returns twice: setjmp and the like */
-VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee);
+VPRIV bool virbuild_call_returns_twice(codegen_context *e, const vir_insn *callee);
 
 #endif

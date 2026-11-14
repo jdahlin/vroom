@@ -477,7 +477,79 @@ resource headers and the host glibc headers.
 All configurations produced token hash `fc9fb9fabfbd44b5` and object SHA256
 `7766fa6e549b19c987d563f3c4f8f1217f6b6f1115659cdc646df2e1ccd97f54`.
 The pre-change clang-built binary measured 6.2 and 235.7 ms in this series.
-The self-built compiler still takes 1.95 times as long on the full compile.
+The self-built compiler took 1.95 times as long on that full compile.
+
+**SQLite host compiler profile (2026-11-13).** On the workload above,
+three original self-built compilations sampled with Linux perf attributed
+12.9% of user cycles to assembler directive dispatch (the hot loop followed
+fragment continuations), 9.0% to libc strcmp, 5.5% to x64_i_int and 3.1% to
+pp_file_line_of_offset. The corresponding clang-built shares were 15.8%,
+14.0%, 2.4% and 1.8%, with about half as many total sampled cycles. The
+annotated self-built code repeatedly spilled pointers and indices in the
+fragment walk and the two scalar scans of the amalgamation for newlines.
+
+Cache the last continuation in each fragment, encode common integer records
+by opcode, populate register operands in place and find newlines using bounded
+memchr. Linux x86-64 bootstrap builds now use VIR for the compiler executable
+(its -O3; since VIR became -O2's code generator, on every host: VCC_OPT=-O1
+builds a direct-emitter stage for comparison). Compiling SQLite
+with the resulting executable uses the same options as before.
+
+| Compiler | Wall ms | CPU ms | User instructions, billions |
+| --- | ---: | ---: | ---: |
+| Baseline clang-built | 450.7 | 371.4 | 2.53 |
+| Baseline self-built | 851.2 | 801.8 | 7.86 |
+| Optimized clang-built | 293.2 | 258.3 | 1.57 |
+| Optimized self-built | 533.8 | 458.3 | 3.58 |
+
+Baseline and optimized builds used c99084de and 687693c6 respectively. Each
+series used one warmup and seven runs with the four configurations in alternating
+forward/reverse order. Wall time and perf stat counters were collected in
+separate series. The shared machine was busy and wall times varied substantially.
+[Individual measurements and command line](../results/sqlite-self-profile-20261113.json).
+Intermediate self-builds retired 5.10B instructions after the assembler changes,
+4.75B after the newline changes and 3.63B with VIR before the final operand
+change. The final profile samples 6.6% in libc strcmp, 3.9% in x64_emit and
+3.6% in lex_tokenize_mode. Every timed object had the original SHA256.
+The final bootstrap reproduced all 47 objects and vpp. All 324 eligible native
+direct-object comparisons and 65 assembler fixtures passed. The kernel parity
+run reproduced the seven baseline assembly failures and passed all 494 C jobs.
+
+**SQLite self-hosted x86 code generation (2026-11-13).** DWARF call stacks
+traced the earlier strcmp samples to mnemonic lookup in x64_i_int during
+object replay. Checking the first character before the ALU and shift name
+comparisons avoids most calls. Clang inlined xo_reg into its caller, while
+vcc built a temporary 40-byte operand and copied it to the destination.
+Building the operand in place reduced the self-built routine from 224 to 132 bytes.
+
+| Function | Previous self-built bytes | New self-built bytes | New clang-built bytes |
+| --- | ---: | ---: | ---: |
+| x64_emit | 8,971 | 4,302 | 3,722 |
+| as_fragment_base | 1,542 | 633 | 418 |
+| lex_tokenize_mode | 41,393 | 35,486 | 11,312 |
+
+Passing the encoder's fixup value by address lets VIR allocate x64_emit
+(seven spills). Local-exec TLS lowering lets it allocate as_fragment_base
+(zero spills). The lexer still falls back on computed goto, but branching
+through __builtin_expect now removes the repeated setcc, zero extensions and
+stack traffic for its likely/unlikely tests. Frame-relative stores and
+32-bit immediate moves also reduce VIR's generated code.
+
+| Compiler | Median wall ms | Median CPU ms | User cycles, billions | User instructions, billions |
+| --- | ---: | ---: | ---: | ---: |
+| Previous clang-built | 179.0 | 178.84 | 0.716 | 1.563 |
+| Previous self-built | 285.2 | 295.43 | 1.328 | 3.581 |
+| New clang-built | 174.4 | 189.87 | 0.759 | 1.480 |
+| New self-built | 274.2 | 267.96 | 1.200 | 3.193 |
+
+The paired rerun used 428d07d1 as the baseline, the same SQLite source,
+flags, CPU pin, warmup and seven alternating runs described above. Wall and
+perf counters came from separate series. The wall-time ratio fell from 1.59
+to 1.57 and the CPU-time ratio from 1.65 to 1.41. Host load varied across
+series. Every timed compile produced the original object hash. In the final
+self-built profile strcmp accounted for 5.3% of user cycles, the lexer 3.3%,
+x64_emit 2.8% and x64_replay 2.2%. Both x64_replay and walk still fall back
+on aggregate calls or returns.
 
 ### Status 2.12 (2026-11-10): kernel build without clang, vroomd and lld
 Ported from the branch `claude/parallel-compiler-optimization-2bb32f` (2026-11-08) to main's layout.

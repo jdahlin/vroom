@@ -8,7 +8,7 @@
 VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty t, vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), pt;
+	ast_qualified_type t, vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), pt;
 	uint32_t ti, tmp, alloc, target, init, args[3], dtor = 0, n;
 	cxx_entity *d;
 
@@ -21,27 +21,27 @@ VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
 	}
 	if (!x)
 		return;
-	if (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_ARRAY)
+	if (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_ARRAY)
 		x = cc_conversion_decay(a, x);	/* (an array, a function: a pointer is thrown) */
-	t = QUNQ(AST_NODE_AT(a, x)->ty);
+	t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
 	ti = cxx_gen_typeinfo(c, t);
 	if (!ti)
 		return;
 	tmp = cxx_gen_temporary(c, vp, loc);
 	if (!tmp)
 		return;
-	n = cc_node_integer_new(a, (i128)AST_TYPE(a, t)->size, cc_type_basic(TY_ULONG), loc);
+	n = cc_node_integer_new(a, (i128)AST_TYPE(a, t)->size, cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
 	alloc = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 0), &n, 1, loc), loc);
 	pt = cc_type_pointer(a, t);
 	n = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
 	target = cc_dereference_build(a, cc_cast_insert(a, n, pt, cc_conversion_cast_kind(a, vp, pt, n)), loc);
 	if (cc_type_is_record(a, t)) {
 		/* a class: copied or moved by its constructor (a prvalue: made there in the first place) */
-		qty at[1] = { AST_NODE_AT(a, x)->ty };
+		ast_qualified_type at[1] = { AST_NODE_AT(a, x)->ty };
 		uint8_t lv[1] = { 1 };
 		cc_id_list l;
 
-		if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE))
+		if (!(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE))
 			return;
 		if (!cxx_gen_prv_find(c, x))
 			cxx_ctor_use(c, t, at, lv, 1, false);
@@ -62,11 +62,11 @@ VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
 	if (dtor)
 		args[2] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, dtor, loc));
 	else
-		args[2] = cxx_gen_to_void_pointer(c, cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), loc));
+		args[2] = cxx_gen_to_void_pointer(c, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_LONG), loc));
 	n = cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 1), args, 3, loc);
 	if (init)
-		n = cc_node_new_operands(a, N_COMMA, cc_type_basic(TY_VOID), loc, init, n);
-	c->enode = cc_node_new_operands(a, N_COMMA, cc_type_basic(TY_VOID), loc, alloc, n);
+		n = cc_node_new_operands(a, AST_NODE_COMMA, cc_type_basic(AST_TYPE_VOID), loc, init, n);
+	c->enode = cc_node_new_operands(a, AST_NODE_COMMA, cc_type_basic(AST_TYPE_VOID), loc, alloc, n);
 }
 
 /*
@@ -79,19 +79,19 @@ VPRIV void cxx_gen_declare_with(cxx *c, cc_id_list *list, uint32_t s, uint32_t i
 {
 	cc *a = c->ast;
 
-	a->syms[s].sc = SC_AUTO;
+	a->syms[s].sc = AST_STORAGE_AUTO;
 	if (init) {
 		a->syms[s].body = init;
-		a->syms[s].flags |= SF_DEFINED;
+		a->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED;
 	}
-	cc_id_list_append(a, list, cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, init));
+	cc_id_list_append(a, list, cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, init));
 }
 
-VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, qty decl_type, uint32_t *var, cc_id_list *list, uint32_t loc)
+VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, ast_qualified_type decl_type, uint32_t *var, cc_id_list *list, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
-	uint32_t obj = cc_symbol_new(a, S_VAR, 0, vp, loc), guard = cc_symbol_new(a, S_VAR, 0, cc_type_basic(TY_CHAR), loc), n, arg, s, init;
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
+	uint32_t obj = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, vp, loc), guard = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, cc_type_basic(AST_TYPE_CHAR), loc), n, arg, s, init;
 	attrs at;
 
 	*var = 0;
@@ -106,17 +106,17 @@ VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, qty decl_type, uint32_t
 	n = cc_node_rvalue(a, cxx_gen_var_node(c, obj, loc));
 	if (cxx_gen_is_reference(c, decl_type)) {
 		/* T &e: the exception object itself */
-		s = cc_symbol_new(a, S_VAR, 0, decl_type, loc);
+		s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, decl_type, loc);
 		init = cc_cast_insert(a, n, decl_type, cc_conversion_cast_kind(a, vp, decl_type, n));
-	} else if (AST_TYPE_KIND(a, decl_type) == TY_PTR) {
+	} else if (AST_TYPE_KIND(a, decl_type) == AST_TYPE_POINTER) {
 		/* a pointer: the runtime hands the pointer's value */
-		s = cc_symbol_new(a, S_VAR, 0, QUNQ(decl_type), loc);
-		init = cc_cast_insert(a, n, QUNQ(decl_type), cc_conversion_cast_kind(a, vp, QUNQ(decl_type), n));
-	} else if (cxx_gen_type_ok(c, QUNQ(decl_type)) || (cc_type_is_record(a, decl_type) && cxx_gen_trivial_abi(c, decl_type, 0) == 1)) {
+		s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type), loc);
+		init = cc_cast_insert(a, n, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type), cc_conversion_cast_kind(a, vp, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type), n));
+	} else if (cxx_gen_type_ok(c, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type)) || (cc_type_is_record(a, decl_type) && cxx_gen_trivial_abi(c, decl_type, 0) == 1)) {
 		/* a copy of a scalar, or of a class copied as its bytes */
-		qty pt = cc_type_pointer(a, QUNQ(decl_type));
+		ast_qualified_type pt = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type));
 
-		s = cc_symbol_new(a, S_VAR, 0, QUNQ(decl_type), loc);
+		s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, AST_QUALIFIED_TYPE_UNQUALIFIED(decl_type), loc);
 		init = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, n, pt, cc_conversion_cast_kind(a, vp, pt, n)), loc));
 	} else
 		return 0;	/* (a class copied by its constructor: not built yet) */
@@ -144,10 +144,10 @@ VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, u
  * i < N; i++) { decl = p[i]; body } }.  begin/end of a class: not built yet.  The parts as the parser has
  * them: elems/nelems for a braced list (else range, an lvalue array), the variable's symbol made here.
  */
-VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, const uint32_t *elems, uint32_t nelems, qty elem, uint32_t loc)
+VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, const uint32_t *elems, uint32_t nelems, ast_qualified_type elem, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty lt = cc_type_basic(TY_LONG), et, pt;
+	ast_qualified_type lt = cc_type_basic(AST_TYPE_LONG), et, pt;
 	uint32_t arr, n;
 
 	memset(r, 0, sizeof *r);
@@ -159,7 +159,7 @@ VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, con
 		/* a braced list: a local array of its elements, converted to their type */
 		if (!nelems || elem == CXX_TY_UNKNOWN || !cxx_gen_type_ok(c, elem))
 			return false;
-		et = QUNQ(elem);
+		et = AST_QUALIFIED_TYPE_UNQUALIFIED(elem);
 		arr = cxx_gen_local(c, 0, cc_type_array(a, et, nelems, 0), loc);
 		if (!arr)
 			return false;
@@ -172,17 +172,17 @@ VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, con
 				goto fail;
 			slot = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)),
 								   cc_node_integer_new(a, i, lt, loc), loc), loc);
-			cc_id_list_append(a, &r->pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, slot, x, loc), 0, 0));
+			cc_id_list_append(a, &r->pre, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, slot, x, loc), 0, 0));
 		}
 		range = cxx_gen_var_node(c, arr, loc);
 		n = nelems;
 	} else {
 		const ctype *x;
 
-		if (!range || !(AST_NODE_AT(a, range)->flags & NF_LVALUE) || AST_TYPE_KIND(a, AST_NODE_AT(a, range)->ty) != TY_ARRAY)
+		if (!range || !(AST_NODE_AT(a, range)->flags & AST_NODE_FLAG_LVALUE) || AST_TYPE_KIND(a, AST_NODE_AT(a, range)->ty) != AST_TYPE_ARRAY)
 			return false;
 		x = AST_TYPE(a, AST_NODE_AT(a, range)->ty);
-		if ((x->flags & TF_INCOMPLETE) || !x->n || !cxx_gen_object_type_ok(c, x->base))
+		if ((x->flags & AST_TYPE_FLAG_INCOMPLETE) || !x->n || !cxx_gen_object_type_ok(c, x->base))
 			return false;
 		et = x->base, n = (uint32_t)x->n;
 		c->gen_block = &r->pre;
@@ -244,19 +244,19 @@ VPRIV void cxx_gen_range_for_end(cxx *c, cxx_gen_range *r)
 		return;
 	if (c->snode)
 		cc_id_list_append(a, &r->body, c->snode);
-	body = cc_statement_new(a, N_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->body), r->body.n);
+	body = cc_statement_new(a, AST_NODE_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->body), r->body.n);
 	if (r->cls)
 		cond = r->cond, step = r->step;
 	else {
 		cond = cc_binary_build(a, LEX_TOKEN_LESS, cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)),
-				       cc_node_integer_new(a, r->n, cc_type_basic(TY_LONG), r->loc), r->loc);
-		step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node(c, r->i, r->loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), r->loc), r->loc);
+				       cc_node_integer_new(a, r->n, cc_type_basic(AST_TYPE_LONG), r->loc), r->loc);
+		step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node(c, r->i, r->loc), cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_LONG), r->loc), r->loc);
 	}
 	cc_id_list_init(&sb);
 	cc_id_list_append(a, &sb, step);
 	cc_id_list_append(a, &sb, body);
-	cc_id_list_append(a, &r->pre, cc_statement_new(a, N_FOR, r->loc, 0, cond, cc_id_list_freeze(a, &sb)));
-	cxx_gen_statement(c, cc_statement_new(a, N_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->pre), r->pre.n));
+	cc_id_list_append(a, &r->pre, cc_statement_new(a, AST_NODE_FOR, r->loc, 0, cond, cc_id_list_freeze(a, &sb)));
+	cxx_gen_statement(c, cc_statement_new(a, AST_NODE_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->pre), r->pre.n));
 }
 
 /* a condition: the expression's node as a scalar truth value (0: not built) */
@@ -265,7 +265,7 @@ VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e)
 	if (!cxx_gen_on(c))
 		return 0;
 	if (e && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, e)->ty))
-		e = cxx_gen_convert_class(c, e, cc_type_basic(TY_BOOL), 0);	/* a class as a condition: its operator bool */
+		e = cxx_gen_convert_class(c, e, cc_type_basic(AST_TYPE_BOOL), 0);	/* a class as a condition: its operator bool */
 	if (!e || cc_type_is_record(c->ast, AST_NODE_AT(c->ast, e)->ty)) {
 		cxx_gen_fail(c);
 		return 0;
@@ -285,8 +285,8 @@ VPRIV uint32_t cxx_gen_switch_value(cxx *c, uint32_t e)
 		return 0;
 	}
 	e = cc_node_rvalue(a, e);
-	if (AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == TY_ENUM)
-		e = cc_cast_insert(a, e, QUNQ(AST_TYPE(a, AST_NODE_AT(a, e)->ty)->base), CK_NOP);
+	if (AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == AST_TYPE_ENUM)
+		e = cc_cast_insert(a, e, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, AST_NODE_AT(a, e)->ty)->base), AST_CAST_NOP);
 	if (!cc_type_is_integer(a, AST_NODE_AT(a, e)->ty)) {
 		cxx_gen_fail(c);
 		return 0;
@@ -302,7 +302,7 @@ VPRIV uint32_t cxx_gen_case(cxx *c, int64_t lo, int64_t hi, uint32_t stmt, uint3
 
 	a->ipool[a->nipool] = lo;
 	a->ipool[a->nipool + 1] = hi;
-	n = cc_statement_new(a, N_CASE, loc, a->nipool, a->nipool + 1, stmt);
+	n = cc_statement_new(a, AST_NODE_CASE, loc, a->nipool, a->nipool + 1, stmt);
 	a->nipool += 2;
 	return n;
 }
@@ -318,35 +318,35 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 		cxx_gen_fail(c);	/* (a return out of a try block: not built yet) */
 		return 0;
 	}
-	if (has_value && e && AST_TYPE_KIND(a, c->gen_ret) == TY_VOID && AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == TY_VOID) {
+	if (has_value && e && AST_TYPE_KIND(a, c->gen_ret) == AST_TYPE_VOID && AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == AST_TYPE_VOID) {
 		/* return f(); in a void function (C++ allows it, C does not): f(), then return */
 		cc_id_list l;
 
 		cc_id_list_init(&l);
-		cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, e, 0, 0));
-		cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, 0, 0, 0));
-		return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, e, 0, 0));
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, 0, 0, 0));
+		return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 	}
-	if (has_value && (!e || AST_TYPE_KIND(a, c->gen_ret) == TY_VOID)) {
+	if (has_value && (!e || AST_TYPE_KIND(a, c->gen_ret) == AST_TYPE_VOID)) {
 		cxx_gen_fail(c);
 		return 0;
 	}
 	if (has_value && c->gen_sret) {
 		/* a class returned by address: constructed in the object the caller gave, whose address is returned */
-		qty t = QUNQ(c->gen_ret), at[1];
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret), at[1];
 		uint8_t lv[1];
 		const node *en = AST_NODE_AT(a, e);
 		cc_id_list l;
 		uint32_t target = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc);
 
-		if (QUNQ(en->ty) != t) {
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(en->ty) != t) {
 			/* return "text" (or 0, nullptr, an object of another class: pair<U, V> for pair<T, W>) for a
 			   class: copy-initialized in the caller's object by a converting constructor (not an explicit
 			   one) [stmt.return]/2, [dcl.init.general]/16.6.2 */
-			qty ct[1] = { en->ty };
-			uint8_t cl[1] = { (en->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, e) };
+			ast_qualified_type ct[1] = { en->ty };
+			uint8_t cl[1] = { (en->flags & AST_NODE_FLAG_LVALUE) != 0 && !cxx_gen_prv_find(c, e) };
 
-			if (AST_TYPE_KIND(a, ct[0]) == TY_ARRAY)
+			if (AST_TYPE_KIND(a, ct[0]) == AST_TYPE_ARRAY)
 				ct[0] = cc_type_pointer(a, AST_TYPE(a, ct[0])->base), cl[0] = 0;
 			if (cxx_gen_is_nullptr_node(c, e)) {
 				ct[0] = c->nullptr_ty, cl[0] = 0;
@@ -363,16 +363,16 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 				cxx_gen_fail(c);
 				return 0;
 			}
-			cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
-			return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+			cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
+			return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 		}
-		if (QUNQ(en->ty) != t || !(en->flags & NF_LVALUE)) {
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(en->ty) != t || !(en->flags & AST_NODE_FLAG_LVALUE)) {
 			cxx_gen_fail(c);	/* (a conversion to the class: not built yet) */
 			return 0;
 		}
 		/* a local variable named alone is moved from; any other object is copied */
 		at[0] = en->ty;
-		lv[0] = !(en->op == N_VAR && a->syms[en->a].sc == SC_AUTO && !cxx_gen_is_reference(c, a->syms[en->a].ty));
+		lv[0] = !(en->op == AST_NODE_VARIABLE && a->syms[en->a].sc == AST_STORAGE_AUTO && !cxx_gen_is_reference(c, a->syms[en->a].ty));
 		if (!cxx_gen_prv_find(c, e))
 			cxx_ctor_use(c, t, at, lv, 1, false);
 		cc_id_list_init(&l);
@@ -380,8 +380,8 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 			cxx_gen_fail(c);
 			return 0;
 		}
-		cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
-		return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
+		return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 	}
 	if (has_value) {
 		e = cxx_gen_bind(c, e, c->gen_ret, loc);
@@ -390,11 +390,11 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 			return 0;
 		}
 	}
-	return cc_statement_new(a, N_RETURN, loc, e, 0, 0);
+	return cc_statement_new(a, AST_NODE_RETURN, loc, e, 0, 0);
 }
 
 /* a local variable of the body: its symbol (0: a type not generated yet) */
-VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc)
+VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc)
 {
 	cc *a = c->ast;
 	uint32_t s;
@@ -405,23 +405,23 @@ VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc)
 		cxx_gen_fail(c);
 		return 0;
 	}
-	s = cc_symbol_new(a, S_VAR, name, t, loc);
-	a->syms[s].sc = SC_AUTO;
+	s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, name, t, loc);
+	a->syms[s].sc = AST_STORAGE_AUTO;
 	return s;
 }
 
 /* a local variable in static storage (static or constexpr): C's function-scope static, initialized by a
    constant (cxx_gen_local_declare checks it) */
-VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, qty t, uint32_t loc)
+VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc)
 {
 	uint32_t s = cxx_gen_local(c, name, t, loc);
 
 	if (s)
-		c->ast->syms[s].sc = SC_STATIC;
+		c->ast->syms[s].sc = AST_STORAGE_STATIC;
 	return s;
 }
 
-VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t)
+VPRIV bool cxx_gen_needs_construction_public(cxx *c, ast_qualified_type t)
 {
 	return cxx_gen_needs_construction(c, t, 0) || cxx_gen_needs_destruction(c, t, 0);
 }
@@ -442,8 +442,8 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
 		cxx_gen_fail(c);	/* (a declaration that is not a block's statement: a condition's) */
 		return;
 	}
-	if (has_init && AST_NODE_AT(a, init)->op != N_INIT && !cxx_gen_type_ok(c, a->syms[s].ty) &&
-	    !(AST_NODE_AT(a, init)->op == N_STR && AST_TYPE_KIND(a, a->syms[s].ty) == TY_ARRAY)) {	/* (char s[] = "text": C's) */
+	if (has_init && AST_NODE_AT(a, init)->op != AST_NODE_INITIALIZER && !cxx_gen_type_ok(c, a->syms[s].ty) &&
+	    !(AST_NODE_AT(a, init)->op == AST_NODE_STRING && AST_TYPE_KIND(a, a->syms[s].ty) == AST_TYPE_ARRAY)) {	/* (char s[] = "text": C's) */
 		cxx_gen_fail(c);	/* (an array from something that is not a list) */
 		return;
 	}
@@ -452,16 +452,16 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
 		return;
 	}
 	if (has_init) {
-		if (AST_NODE_AT(a, init)->op != N_INIT && !(AST_NODE_AT(a, init)->op == N_STR && AST_TYPE_KIND(a, a->syms[s].ty) == TY_ARRAY))
+		if (AST_NODE_AT(a, init)->op != AST_NODE_INITIALIZER && !(AST_NODE_AT(a, init)->op == AST_NODE_STRING && AST_TYPE_KIND(a, a->syms[s].ty) == AST_TYPE_ARRAY))
 			init = cxx_gen_bind(c, init, a->syms[s].ty, loc);	/* (char s[] = "text": the literal, as C's initializer takes it) */
-		if (!init || (a->syms[s].sc == SC_STATIC && !cxx_gen_static_ok(a, a->syms[s].ty, init))) {
+		if (!init || (a->syms[s].sc == AST_STORAGE_STATIC && !cxx_gen_static_ok(a, a->syms[s].ty, init))) {
 			cxx_gen_fail(c);	/* (a static local's dynamic initializer: its guard, not built yet) */
 			return;
 		}
 		a->syms[s].body = init;
-		a->syms[s].flags |= SF_DEFINED;
+		a->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED;
 	}
-	n = cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, has_init ? init : 0);
+	n = cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, has_init ? init : 0);
 	cc_id_list_append(a, (cc_id_list *)c->gen_block, n);
 }
 
@@ -469,14 +469,14 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
  * T a[N] = { x, y, ... } with scalar elements: the initializer list's node from the last braced list's
  * elements (0: not built: nested lists, an array of unknown bound, too many elements).
  */
-VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
+VPRIV uint32_t cxx_gen_array_initializer(cxx *c, ast_qualified_type t, uint32_t loc)
 {
 	cc *a = c->ast;
 	const ctype *x;
 	cc_id_list v;
 	uint32_t n;
 
-	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) != TY_ARRAY || c->brace_n == UINT32_MAX)
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) != AST_TYPE_ARRAY || c->brace_n == UINT32_MAX)
 		return 0;
 	x = AST_TYPE(a, t);
 	if (!x->n || c->brace_n > x->n || !cxx_gen_type_ok(c, x->base))
@@ -485,9 +485,9 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
 	for (uint32_t i = 0; i < c->brace_n; i++) {
 		cc_id_list_append(a, &v, i);
 		cc_id_list_append(a, &v, i);
-		cc_id_list_append(a, &v, cc_conversion_apply(a, cc_conversion_decay(a, c->brace_nodes[i]), QUNQ(x->base)));
+		cc_id_list_append(a, &v, cc_conversion_apply(a, cc_conversion_decay(a, c->brace_nodes[i]), AST_QUALIFIED_TYPE_UNQUALIFIED(x->base)));
 	}
-	n = cc_node_new(a, N_INIT, t, loc);
+	n = cc_node_new(a, AST_NODE_INITIALIZER, t, loc);
 	AST_NODE_AT(a, n)->aux = 1;
 	AST_NODE_AT(a, n)->c = v.n / 3;
 	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
@@ -499,7 +499,7 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
  * bit-field, no constructor to run): its initializer list's node, a value per member, the ones not given
  * zero ([dcl.init.aggr]/5: their default member initializer: none here) (0: not built)
  */
-VPRIV uint32_t cxx_gen_record_initializer(cxx *c, qty t, const uint32_t *nodes, uint32_t n, uint32_t loc)
+VPRIV uint32_t cxx_gen_record_initializer(cxx *c, ast_qualified_type t, const uint32_t *nodes, uint32_t n, uint32_t loc)
 {
 	cc *a = c->ast;
 	const tag *r;
@@ -507,27 +507,27 @@ VPRIV uint32_t cxx_gen_record_initializer(cxx *c, qty t, const uint32_t *nodes, 
 	cc_id_list v;
 	uint32_t init;
 
-	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) != TY_STRUCT || n == UINT32_MAX || !cxx_gen_type_ok(c, QUNQ(t)) ||
-	    cxx_gen_needs_construction(c, QUNQ(t), 0) || !(cls = cxx_tag_scope_get(c, QUNQ(t))) || cls->nused)
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT || n == UINT32_MAX || !cxx_gen_type_ok(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) ||
+	    cxx_gen_needs_construction(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), 0) || !(cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))) || cls->nused)
 		return 0;
 	r = &a->tags[AST_TYPE(a, t)->aux];
 	if (n > r->nfield)
 		return 0;
 	cc_id_list_init(&v);
 	for (uint32_t i = 0; i < r->nfield; i++) {
-		qty ft = r->f[i].ty;
+		ast_qualified_type ft = r->f[i].ty;
 		cxx_entity *fe;
 
-		if (r->f[i].bitfield || !r->f[i].name || ft == CXX_TY_UNKNOWN || cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == TY_ARRAY)
+		if (r->f[i].bitfield || !r->f[i].name || ft == CXX_TY_UNKNOWN || cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			return 0;
 		fe = cxx_lookup_local(cls, r->f[i].name);
 		if (fe && fe->nsdmi_pos && i >= n)
 			return 0;	/* (a default member initializer: not read here) */
 		if (i < n && !nodes[i])
 			return 0;
-		cc_id_list_append(a, &v, i < n ? cc_conversion_apply(a, cc_conversion_decay(a, nodes[i]), QUNQ(ft)) : 0);
+		cc_id_list_append(a, &v, i < n ? cc_conversion_apply(a, cc_conversion_decay(a, nodes[i]), AST_QUALIFIED_TYPE_UNQUALIFIED(ft)) : 0);
 	}
-	init = cc_node_new(a, N_INIT, QUNQ(t), loc);
+	init = cc_node_new(a, AST_NODE_INITIALIZER, AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
 	AST_NODE_AT(a, init)->aux = 0;
 	AST_NODE_AT(a, init)->c = v.n;
 	AST_NODE_AT(a, init)->b = cc_id_list_freeze(a, &v);
@@ -542,7 +542,7 @@ VPRIV void cxx_gen_bind_name(cxx *c, cxx_entity *e, uint32_t object, uint32_t fi
 {
 	cc *a = c->ast;
 	uint32_t x, m, s;
-	qty rt;
+	ast_qualified_type rt;
 
 	if (!cxx_gen_on(c) || !object || e->ty == CXX_TY_UNKNOWN)
 		return;

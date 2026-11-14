@@ -4,12 +4,12 @@
 static void cc_conversion_parameter_note(cc *c);
 
 /* clang's message for a value of type from that cannot become to */
-CC_PRIVATE void cc_conversion_invalid_report(cc *c, uint32_t n, qty to)
+CC_PRIVATE void cc_conversion_invalid_report(cc *c, uint32_t n, ast_qualified_type to)
 {
 	diag_span r = cc_node_range(c, n);
 	const char *f = tyname(c, AST_NODE(n)->ty), *t = tyname(c, to);
 
-	if (AST_NODE(n)->flags & NF_ERR)
+	if (AST_NODE(n)->flags & AST_NODE_FLAG_ERROR)
 		return;
 	if (c->cv_what == CC_CONVERSION_CONTEXT_ARGUMENT) {
 		report(c, "error", r.b, &r, 1, NULL, 0, "passing '%s' to parameter of incompatible type '%s'", f, t);
@@ -50,32 +50,32 @@ static void cc_conversion_parameter_note(cc *c)
 }
 
 /* the source type clang names: an array or function before its decay */
-static qty cc_conversion_source_type(cc *c, uint32_t n)
+static ast_qualified_type cc_conversion_source_type(cc *c, uint32_t n)
 {
-	if (AST_NODE(n)->op == N_CAST && (AST_NODE(n)->aux == CK_DECAY || AST_NODE(n)->aux == CK_FDECAY))
+	if (AST_NODE(n)->op == AST_NODE_CAST && (AST_NODE(n)->aux == AST_CAST_ARRAY_DECAY || AST_NODE(n)->aux == AST_CAST_FUNCTION_DECAY))
 		return AST_NODE(AST_NODE(n)->a)->ty;
 	return AST_NODE(n)->ty;
 }
 
 /* "... initializing 'AST_TYPE' with an expression of type 'F'" and the like, per context */
-static void cc_conversion_error_report(cc *c, uint32_t n, qty to, const char *what, const char *flag, const char *id)
+static void cc_conversion_error_report(cc *c, uint32_t n, ast_qualified_type to, const char *what, const char *flag, const char *id)
 {
 	diag_span r = cc_node_range(c, n);
 	const char *f = cc_type_array_name(c, cc_conversion_source_type(c, n)), *t = tyname(c, to);
 	uint32_t loc = c->cv_what == CC_CONVERSION_CONTEXT_ARGUMENT || c->cv_what == CC_CONVERSION_CONTEXT_RETURN ? r.b : c->cv_loc;
 	int bit = !strcmp(flag, "-Wint-conversion") ? 1 : !strcmp(flag, "-Wincompatible-pointer-types") ? 2 : 4;
 	char msg[1024];
-	qty ft = AST_NODE(n)->ty;
+	ast_qualified_type ft = AST_NODE(n)->ty;
 	int op = AST_NODE(n)->op;
 	/* clang: "; dereference with *" when *n has the target type (a fix-it; vcc: simple operands only) */
-	bool dr = bit != 4 && cc_type_is_pointer(c, ft) && cc_type_is_compatible(c, QUNQ(AST_TYPE(c, ft)->base), QUNQ(to));
+	bool dr = bit != 4 && cc_type_is_pointer(c, ft) && cc_type_is_compatible(c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base), AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 	/* a simple or parenthesized operand takes '*', another '*(' ... ')' */
-	bool wrap = dr && !(op == N_VAR || op == N_MEMBER || op == N_CALL || op == N_INDEX || (AST_NODE(n)->flags & NF_PAREN) ||
+	bool wrap = dr && !(op == AST_NODE_VARIABLE || op == AST_NODE_MEMBER || op == AST_NODE_CALL || op == AST_NODE_INDEX || (AST_NODE(n)->flags & AST_NODE_FLAG_PARENTHESIZED) ||
 			    (c->paren[n].l | c->paren[n].r));
 	/* "; take the address with &" when &n has the target type (an lvalue; vcc: simple operands) */
-	bool ad = !dr && bit != 4 && cc_type_is_pointer(c, to) && cc_type_is_compatible(c, QUNQ(ft), QUNQ(AST_TYPE(c, to)->base)) &&
-		  (op == N_VAR || op == N_MEMBER || op == N_INDEX) && (AST_NODE(n)->flags & NF_LVALUE) &&
-		  !(AST_NODE(n)->flags & NF_BITFIELD) && !(op == N_VAR && c->syms[AST_NODE(n)->a].sc == SC_REGISTER);
+	bool ad = !dr && bit != 4 && cc_type_is_pointer(c, to) && cc_type_is_compatible(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft), AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, to)->base)) &&
+		  (op == AST_NODE_VARIABLE || op == AST_NODE_MEMBER || op == AST_NODE_INDEX) && (AST_NODE(n)->flags & AST_NODE_FLAG_LVALUE) &&
+		  !(AST_NODE(n)->flags & AST_NODE_FLAG_BITFIELD) && !(op == AST_NODE_VARIABLE && c->syms[AST_NODE(n)->a].sc == AST_STORAGE_REGISTER);
 	diag_fixit fx[2] = { { r.b, r.b, wrap ? "*(" : dr ? "*" : "&", DIAG_APPLICABILITY_MAYBE }, { r.e, r.e, ")", DIAG_APPLICABILITY_MAYBE } };
 	const char *h = dr ? "; dereference with *" : ad ? "; take the address with &" : "";
 	int nfx = wrap ? 2 : dr || ad;
@@ -84,9 +84,9 @@ static void cc_conversion_error_report(cc *c, uint32_t n, qty to, const char *wh
 	if (bit == 1 && dr) {	/* clang's tryToFixConversion: "; remove &" before "; dereference with *" */
 		uint32_t m = n;
 
-		while (AST_NODE(m)->op == N_CAST && !c->span[m].e)
+		while (AST_NODE(m)->op == AST_NODE_CAST && !c->span[m].e)
 			m = AST_NODE(m)->a;
-		if (!cc_type_is_pointer(c, to) && AST_NODE(m)->op == N_ADDR && cc_type_is_compatible(c, QUNQ(AST_NODE(AST_NODE(m)->a)->ty), QUNQ(to)))
+		if (!cc_type_is_pointer(c, to) && AST_NODE(m)->op == AST_NODE_ADDRESS && cc_type_is_compatible(c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(AST_NODE(m)->a)->ty), AST_QUALIFIED_TYPE_UNQUALIFIED(to)))
 			h = "; remove &", fx[0] = (diag_fixit){ cc_node_range_bare(c, m).b, cc_node_range_bare(c, m).b + 1, "", DIAG_APPLICABILITY_MAYBE }, nfx = 1;
 	}
 	snprintf(fl, sizeof fl, "%s [%s", h, flag);
@@ -131,43 +131,43 @@ err:
 
 /* pointee types that clang's -Wincompatible-pointer-types accepts: compatible once
    qualifiers (at every level) and integer signedness are ignored, or one is void */
-static bool cc_conversion_pointer_target_is_ok_nested(cc *c, qty a, qty b, bool top)
+static bool cc_conversion_pointer_target_is_ok_nested(cc *c, ast_qualified_type a, ast_qualified_type b, bool top)
 {
 	int ka, kb;
 
-	a = QUNQ(a), b = QUNQ(b);
+	a = AST_QUALIFIED_TYPE_UNQUALIFIED(a), b = AST_QUALIFIED_TYPE_UNQUALIFIED(b);
 	ka = AST_TYPE_KIND(c, a), kb = AST_TYPE_KIND(c, b);
-	if (cc_type_is_compatible(c, a, b) || (top && (ka == TY_VOID || kb == TY_VOID)))
+	if (cc_type_is_compatible(c, a, b) || (top && (ka == AST_TYPE_VOID || kb == AST_TYPE_VOID)))
 		return true;
-	if ((AST_TYPE(c, a)->flags ^ AST_TYPE(c, b)->flags) & TF_ATOMIC)
+	if ((AST_TYPE(c, a)->flags ^ AST_TYPE(c, b)->flags) & AST_TYPE_FLAG_ATOMIC)
 		return false;
-	if (ka == TY_PTR && kb == TY_PTR)
+	if (ka == AST_TYPE_POINTER && kb == AST_TYPE_POINTER)
 		return cc_conversion_pointer_target_is_ok_nested(c, AST_TYPE(c, a)->base, AST_TYPE(c, b)->base, false);
-	if (top && (cc_type_is_integer(c, a) || ka == TY_ENUM) && (cc_type_is_integer(c, b) || kb == TY_ENUM))
+	if (top && (cc_type_is_integer(c, a) || ka == AST_TYPE_ENUM) && (cc_type_is_integer(c, b) || kb == AST_TYPE_ENUM))
 		return cc_type_size(c, a) == cc_type_size(c, b);	/* -Wpointer-sign (a warning; only the pointee itself) */
-	if (ka == TY_ARRAY && kb == TY_ARRAY)
+	if (ka == AST_TYPE_ARRAY && kb == AST_TYPE_ARRAY)
 		return cc_conversion_pointer_target_is_ok_nested(c, AST_TYPE(c, a)->base, AST_TYPE(c, b)->base, false);
 	return false;
 }
 
-static bool cc_conversion_pointer_target_is_ok(cc *c, qty a, qty b) { return cc_conversion_pointer_target_is_ok_nested(c, a, b, true); }
+static bool cc_conversion_pointer_target_is_ok(cc *c, ast_qualified_type a, ast_qualified_type b) { return cc_conversion_pointer_target_is_ok_nested(c, a, b, true); }
 
 /* -Wincompatible-pointer-types-discards-qualifiers: the pointee loses const/volatile/restrict */
 /* const char ** from char **: the levels below the pointee differ in qualifiers (clang's
    IncompatibleNestedPointerQualifiers: the types otherwise the same) */
-static bool cc_conversion_nested_qualifiers_differ(cc *c, qty a, qty b)
+static bool cc_conversion_nested_qualifiers_differ(cc *c, ast_qualified_type a, ast_qualified_type b)
 {
 	bool d = false;
 
 	while (cc_type_is_pointer(c, a) && cc_type_is_pointer(c, b)) {
 		a = AST_TYPE(c, a)->base, b = AST_TYPE(c, b)->base;
-		d |= (QQ(a) & Q_MASK) != (QQ(b) & Q_MASK);
+		d |= (AST_QUALIFIED_TYPE_QUALIFIERS(a) & AST_QUALIFIER_MASK) != (AST_QUALIFIED_TYPE_QUALIFIERS(b) & AST_QUALIFIER_MASK);
 	}
-	return d && cc_type_is_compatible(c, QUNQ(a), QUNQ(b));
+	return d && cc_type_is_compatible(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a), AST_QUALIFIED_TYPE_UNQUALIFIED(b));
 }
 
 /* a warning about the implicit conversion of n to to, in clang's words for the context */
-static void conv_warn(cc *c, uint32_t n, qty to, const char *flag, const char *const *g, const char *what)
+static void conv_warn(cc *c, uint32_t n, ast_qualified_type to, const char *flag, const char *const *g, const char *what)
 {
 	diag_span r = cc_node_range(c, n);
 	const char *f = cc_type_array_name(c, cc_conversion_source_type(c, n)), *t = tyname(c, to);
@@ -191,7 +191,7 @@ static void conv_warn(cc *c, uint32_t n, qty to, const char *flag, const char *c
 		cc_conversion_parameter_note(c);
 }
 
-static void cc_conversion_qualifiers_discarded_report(cc *c, uint32_t n, qty to, bool nested)
+static void cc_conversion_qualifiers_discarded_report(cc *c, uint32_t n, ast_qualified_type to, bool nested)
 {
 	static const char *const g[] = { "incompatible-pointer-types", NULL };
 
@@ -200,17 +200,17 @@ static void cc_conversion_qualifiers_discarded_report(cc *c, uint32_t n, qty to,
 }
 
 /* clang's implicit-conversion errors (int-conversion, incompatible pointer types) */
-CC_PRIVATE uint32_t cc_conversion_check(cc *c, uint32_t n, qty to)
+CC_PRIVATE uint32_t cc_conversion_check(cc *c, uint32_t n, ast_qualified_type to)
 {
-	qty from = AST_NODE(n)->ty;
+	ast_qualified_type from = AST_NODE(n)->ty;
 
-	if (AST_NODE(n)->flags & NF_ERR)
+	if (AST_NODE(n)->flags & AST_NODE_FLAG_ERROR)
 		return n;
-	if (cc_type_is_pointer(c, to) && (cc_type_is_integer(c, from) || AST_TYPE_KIND(c, from) == TY_ENUM) && !cc_expression_is_null_pointer_constant(c, n) && AST_TYPE_KIND(c, from) != TY_BOOL) {
+	if (cc_type_is_pointer(c, to) && (cc_type_is_integer(c, from) || AST_TYPE_KIND(c, from) == AST_TYPE_ENUM) && !cc_expression_is_null_pointer_constant(c, n) && AST_TYPE_KIND(c, from) != AST_TYPE_BOOL) {
 		cc_conversion_error_report(c, n, to, "incompatible integer to pointer conversion", "-Wint-conversion", "ext_typecheck_convert_int_pointer");
-	} else if ((cc_type_is_integer(c, to) || AST_TYPE_KIND(c, to) == TY_ENUM) && AST_TYPE_KIND(c, to) != TY_BOOL && cc_type_is_pointer(c, from)) {
+	} else if ((cc_type_is_integer(c, to) || AST_TYPE_KIND(c, to) == AST_TYPE_ENUM) && AST_TYPE_KIND(c, to) != AST_TYPE_BOOL && cc_type_is_pointer(c, from)) {
 		cc_conversion_error_report(c, n, to, "incompatible pointer to integer conversion", "-Wint-conversion", "ext_typecheck_convert_pointer_int");
-	} else if (cc_type_is_pointer(c, to) && cc_type_is_pointer(c, from) && !(AST_TYPE(c, to)->flags & TF_BLOCK) && !(AST_TYPE(c, from)->flags & TF_BLOCK) &&
+	} else if (cc_type_is_pointer(c, to) && cc_type_is_pointer(c, from) && !(AST_TYPE(c, to)->flags & AST_TYPE_FLAG_BLOCK) && !(AST_TYPE(c, from)->flags & AST_TYPE_FLAG_BLOCK) &&
 		   !cc_conversion_pointer_target_is_ok(c, AST_TYPE(c, to)->base, AST_TYPE(c, from)->base)) {
 		if (cc_type_is_function(c, AST_TYPE(c, to)->base) && cc_type_is_function(c, AST_TYPE(c, from)->base))
 			cc_conversion_error_report(c, n, to, "incompatible function pointer types", "-Wincompatible-function-pointer-types", "ext_typecheck_convert_incompatible_function_pointer");
@@ -218,19 +218,19 @@ CC_PRIVATE uint32_t cc_conversion_check(cc *c, uint32_t n, qty to)
 			cc_conversion_error_report(c, n, to, "incompatible pointer types", "-Wincompatible-pointer-types", "ext_typecheck_convert_incompatible_pointer");
 	} else {
 		if (cc_type_is_pointer(c, to) && cc_type_is_pointer(c, from) && !cc_type_is_function(c, AST_TYPE(c, to)->base) && !cc_type_is_function(c, AST_TYPE(c, from)->base) &&
-		    (QQ(AST_TYPE(c, from)->base) & ~QQ(AST_TYPE(c, to)->base) & Q_MASK))
+		    (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, from)->base) & ~AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, to)->base) & AST_QUALIFIER_MASK))
 			cc_conversion_qualifiers_discarded_report(c, n, to, false);
 		else if (cc_type_is_pointer(c, to) && cc_type_is_pointer(c, from) && cc_conversion_nested_qualifiers_differ(c, AST_TYPE(c, to)->base, AST_TYPE(c, from)->base))
 			cc_conversion_qualifiers_discarded_report(c, n, to, true);
 		else if (cc_type_is_pointer(c, to) && cc_type_is_pointer(c, from) && cc_type_is_integer(c, AST_TYPE(c, to)->base) && cc_type_is_integer(c, AST_TYPE(c, from)->base) &&
-			 !cc_type_is_compatible(c, QUNQ(AST_TYPE(c, to)->base), QUNQ(AST_TYPE(c, from)->base))) {
+			 !cc_type_is_compatible(c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, to)->base), AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, from)->base))) {
 			static const char *const g[] = { "pointer-sign", NULL };
 
 			conv_warn(c, n, to, "pointer-sign", g, "converts between pointers to integer types with different sign");
 		}
 		return n;
 	}
-	AST_NODE(n)->flags |= NF_ERR;	/* no second message from convert */
+	AST_NODE(n)->flags |= AST_NODE_FLAG_ERROR;	/* no second message from convert */
 	return n;
 }
 
@@ -301,23 +301,23 @@ static void cc_conversion_float_format(char *o, double v, int prec)
 }
 
 /* -Wliteral-conversion: a floating literal (or its negation) converted to an integer type */
-static void cc_conversion_literal_check(cc *c, uint32_t n, qty to)
+static void cc_conversion_literal_check(cc *c, uint32_t n, ast_qualified_type to)
 {
 	uint32_t e = n, lit;
 	double v, t;
 	char vs[64], ts[48];
 	const char *what = NULL;
 
-	while (AST_NODE(e)->op == N_CAST && !c->span[e].e && AST_NODE(e)->a)
+	while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e && AST_NODE(e)->a)
 		e = AST_NODE(e)->a;
-	lit = AST_NODE(e)->op == N_UNARY && AST_NODE(e)->aux == LEX_TOKEN_MINUS ? AST_NODE(e)->a : e;
-	if (AST_NODE(lit)->op != N_FNUM || cc_type_is_float128(c, AST_NODE(lit)->ty) || cc_type_size(c, AST_NODE(lit)->ty) > 8)
+	lit = AST_NODE(e)->op == AST_NODE_UNARY && AST_NODE(e)->aux == LEX_TOKEN_MINUS ? AST_NODE(e)->a : e;
+	if (AST_NODE(lit)->op != AST_NODE_FLOAT_NUMBER || cc_type_is_float128(c, AST_NODE(lit)->ty) || cc_type_size(c, AST_NODE(lit)->ty) > 8)
 		return;
 	v = c->fpool[AST_NODE(lit)->a];
 	if (lit != e)
 		v = -v;
 	t = trunc(v);
-	if (AST_TYPE_KIND(c, to) == TY_BOOL) {
+	if (AST_TYPE_KIND(c, to) == AST_TYPE_BOOL) {
 		if (v == 0 || v == 1)
 			return;
 		snprintf(ts, sizeof ts, "%s", v != 0 ? "true" : "false");
@@ -359,21 +359,21 @@ static bool cc_conversion_object_size_is_unknown(cc *c, uint32_t n, int depth)
 {
 	const node *x = AST_NODE(n);
 	i128 sz;
-	cval mode;
+	cc_value mode;
 
 	if (!n || depth > 32)
 		return false;
 	switch (x->op) {
-	case N_BUILTIN:
-		if (x->aux != BI_OBJECT_SIZE && x->aux != BI_DYNAMIC_OBJECT_SIZE)
+	case AST_NODE_BUILTIN:
+		if (x->aux != CC_BUILTIN_OBJECT_SIZE && x->aux != CC_BUILTIN_DYNAMIC_OBJECT_SIZE)
 			return false;
-		return x->c != 2 || !cc_eval(c, c->lists[x->b + 1], &mode) || mode.kind != CV_INT ||
-		       !cc_object_size(c, c->lists[x->b], (unsigned)mode.i, &sz);
-	case N_CAST: case N_UNARY:
+		return x->c != 2 || !cc_eval(c, c->lists[x->b + 1], &mode) || mode.kind != CC_VALUE_INTEGER ||
+		       !cc_builtin_object_size(c, c->lists[x->b], (unsigned)mode.i, &sz);
+	case AST_NODE_CAST: case AST_NODE_UNARY:
 		return cc_conversion_object_size_is_unknown(c, x->a, depth + 1);
-	case N_BINARY:
+	case AST_NODE_BINARY:
 		return cc_conversion_object_size_is_unknown(c, x->a, depth + 1) || cc_conversion_object_size_is_unknown(c, x->b, depth + 1);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return cc_conversion_object_size_is_unknown(c, x->a, depth + 1) || cc_conversion_object_size_is_unknown(c, x->b, depth + 1) ||
 		       cc_conversion_object_size_is_unknown(c, x->c, depth + 1);
 	default:
@@ -381,30 +381,30 @@ static bool cc_conversion_object_size_is_unknown(cc *c, uint32_t n, int depth)
 	}
 }
 
-CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n, qty to)
+CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n, ast_qualified_type to)
 {
-	qty from = AST_NODE(n)->ty;
-	cval cv;
+	ast_qualified_type from = AST_NODE(n)->ty;
+	cc_value cv;
 	int tw, sw, lw;
 	bool tnn, lnn, deferred;
 	i128 v, t;
 
-	if (AST_NODE(n)->op == N_COND && AST_NODE(n)->b && AST_NODE(n)->c) {	/* clang: each arm (the taken one), in its own type */
-		cval cc0;
+	if (AST_NODE(n)->op == AST_NODE_CONDITIONAL && AST_NODE(n)->b && AST_NODE(n)->c) {	/* clang: each arm (the taken one), in its own type */
+		cc_value cc0;
 		int k0 = 0, k1 = 2;
 
-		if (cc_eval(c, AST_NODE(n)->a, &cc0) && cc0.kind == CV_INT)
+		if (cc_eval(c, AST_NODE(n)->a, &cc0) && cc0.kind == CC_VALUE_INTEGER)
 			k0 = cc0.i == 0, k1 = k0 + 1;
 		for (int k = k0; k < k1; k++) {
 			uint32_t e = k ? AST_NODE(n)->c : AST_NODE(n)->b;
 
-			while (AST_NODE(e)->op == N_CAST && !c->span[e].e && AST_NODE(e)->a)
+			while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e && AST_NODE(e)->a)
 				e = AST_NODE(e)->a;
 			cc_conversion_constant_check(c, e, to);
 		}
 		return;
 	}
-	if (AST_NODE(n)->op == N_COMMA) {	/* clang: the right operand, at the comma */
+	if (AST_NODE(n)->op == AST_NODE_COMMA) {	/* clang: the right operand, at the comma */
 		uint32_t sl = c->cv_loc;
 		uint8_t sw = c->cv_what;
 
@@ -417,8 +417,8 @@ CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n, qty to)
 		cc_conversion_literal_check(c, n, to);
 		return;
 	}
-	if (!cc_type_is_integer(c, to) || !cc_type_is_integer(c, from) || AST_TYPE_KIND(c, to) == TY_BOOL || AST_TYPE_KIND(c, from) == TY_BOOL ||
-	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CV_INT)
+	if (!cc_type_is_integer(c, to) || !cc_type_is_integer(c, from) || AST_TYPE_KIND(c, to) == AST_TYPE_BOOL || AST_TYPE_KIND(c, from) == AST_TYPE_BOOL ||
+	    c->unevaluated || !cc_eval(c, n, &cv) || cv.kind != CC_VALUE_INTEGER)
 		return;
 	tw = (int)cc_type_integer_bits(c, to), sw = (int)cc_type_integer_bits(c, from);
 	if (tw >= sw || tw > 64)
@@ -442,15 +442,15 @@ CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n, qty to)
 		/* clang's isSameWidthConstantConversion: not a hex/octal literal, not a char in braces */
 		uint32_t e = n;
 
-		while (AST_NODE(e)->op == N_CAST && !c->span[e].e && AST_NODE(e)->a)
+		while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e && AST_NODE(e)->a)
 			e = AST_NODE(e)->a;
 		uint32_t b = cc_node_range(c, e).b;
 		int ch;
 
 		while ((ch = pp_location_char(c->p, b)) == '(' || ch == ' ' || ch == '\t')
 			b++;
-		if ((AST_NODE(e)->op == N_NUM ? (AST_NODE(e)->aux & NUM_RADIX) : ch == '0') ||
-		    ((AST_TYPE_KIND(c, to) == TY_CHAR || AST_TYPE_KIND(c, to) == TY_SCHAR) && pp_location_char(c->p, c->cv_loc) == '{'))
+		if ((AST_NODE(e)->op == AST_NODE_NUMBER ? (AST_NODE(e)->aux & AST_NUMBER_RADIX) : ch == '0') ||
+		    ((AST_TYPE_KIND(c, to) == AST_TYPE_CHAR || AST_TYPE_KIND(c, to) == AST_TYPE_SIGNED_CHAR) && pp_location_char(c->p, c->cv_loc) == '{'))
 			return;
 		deferred = false;
 	}
@@ -503,13 +503,13 @@ CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n, qty to)
 CC_PRIVATE void cc_conversion_bitfield_constant_check(cc *c, const field *f, uint32_t v, uint32_t op)
 {
 	static const char *const g[] = { "bitfield-constant-conversion", "constant-conversion", "conversion", NULL };
-	cval cv;
+	cc_value cv;
 	int w = f->width;
 	bool sg = cc_type_is_signed(c, f->ty);
 	i128 x, t;
 
-	if (AST_TYPE_KIND(c, f->ty) == TY_BOOL || !cc_type_is_integer(c, AST_NODE(v)->ty) || AST_TYPE_KIND(c, AST_NODE(v)->ty) == TY_BOOL || w <= 0 || w > 64 ||
-	    c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CV_INT)
+	if (AST_TYPE_KIND(c, f->ty) == AST_TYPE_BOOL || !cc_type_is_integer(c, AST_NODE(v)->ty) || AST_TYPE_KIND(c, AST_NODE(v)->ty) == AST_TYPE_BOOL || w <= 0 || w > 64 ||
+	    c->unevaluated || !cc_eval(c, v, &cv) || cv.kind != CC_VALUE_INTEGER)
 		return;
 	x = cv.i;
 	if (!cc_type_is_signed(c, AST_NODE(v)->ty) && cc_type_size(c, AST_NODE(v)->ty) <= 8)
@@ -534,7 +534,7 @@ CC_PRIVATE void cc_conversion_bitfield_constant_check(cc *c, const field *f, uin
 
 
 /* clang spells the array type of this warning without the space: 'int[4]' */
-CC_PRIVATE const char *cc_type_array_name(cc *c, qty t)
+CC_PRIVATE const char *cc_type_array_name(cc *c, ast_qualified_type t)
 {
 	const char *s = tyname(c, t), *sp = strstr(s, " [");
 	char *o;
@@ -571,9 +571,9 @@ CC_PRIVATE void cc_format_i128(char *b, size_t n, i128 v)
 }
 
 /* plain 'char' in a range help: its sign is the target's, so the warning may be one target's only */
-CC_PRIVATE const char *cc_conversion_char_signedness(cc *c, qty t)
+CC_PRIVATE const char *cc_conversion_char_signedness(cc *c, ast_qualified_type t)
 {
-	if (AST_TYPE_KIND(c, t) != TY_CHAR)
+	if (AST_TYPE_KIND(c, t) != AST_TYPE_CHAR)
 		return "";
 	return c->o->target == PP_DARWIN ? " (plain 'char' is signed on Apple and x86, unsigned on Arm and RISC-V Linux)"
 					 : " (plain 'char' is unsigned on Arm and RISC-V Linux, signed on Apple and x86)";

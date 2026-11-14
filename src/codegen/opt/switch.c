@@ -5,9 +5,9 @@
  * A jump table needs at least 4 cases, no ranges, a target that has tables, and a span under
  * 4 * cases + 8 and under 65536 entries; 8 or more cases otherwise get a tree.  Comparisons are in
  * 128 bits so that extreme 64-bit case values cannot overflow.  No allocation and no AST walk.
- * Called by the shared walker (walk/stmt.c) and by arm64's and wasm's statement lowering.
+ * Called by the shared walker (walk/statement.c) and by arm64's and wasm's statement lowering.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables)
 {
@@ -63,18 +63,18 @@ VPRIV bool em_switch_bitset_plan(cc *c, uint32_t body, uint32_t nlabels,
 	 * traversal. Count agreement with the existing collector rejects any case
 	 * hidden in a nested statement. Allocation and sorting are unnecessary. */
 	if ((bits != 32 && bits != 64) || nlabels < 4 || nlabels > 65 ||
-	    b->op != N_BLOCK || b->c > 128)
+	    b->op != AST_NODE_BLOCK || b->c > 128)
 		return false;
 	for (uint32_t i = 0; i < b->c; i++) {
 		uint32_t id = c->lists[b->b + i];
 		const node *s = &c->nodes[id];
 
-		if (s->op != N_CASE) {
-			defaults += s->op == N_DEFAULT;
+		if (s->op != AST_NODE_CASE) {
+			defaults += s->op == AST_NODE_DEFAULT;
 			if (cases) {
 				/* A default in the empty label run shares its destination;
 				 * membership then adds no useful dispatch. */
-				if (!ended && s->op == N_DEFAULT)
+				if (!ended && s->op == AST_NODE_DEFAULT)
 					return false;
 				ended = true;
 			}

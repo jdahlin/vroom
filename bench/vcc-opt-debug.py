@@ -69,8 +69,8 @@ def main():
                 row = re.match(r'\s*\.loc\s+\d+\s+(\d+)\b', line)
                 if row:
                     active = int(row[1])
-                for value, want in expected.items():
-                    if re.search(r'\$' + str(value) + r'\b', line):
+                for value, want in expected.items():	# an immediate ($N) or, folded by VIR, a displacement (N(%reg))
+                    if re.match(r'\t[a-z]', line) and re.search(r'(\$' + str(value) + r'\b|(?<![\w$.])' + str(value) + r'\()', line):
                         if active != want:
                             raise AssertionError(f'-O{level}: {value} has source line {active}, expected {want}')
                         seen.add(value)

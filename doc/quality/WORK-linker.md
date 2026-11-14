@@ -38,16 +38,20 @@ What could not be cut, and stays as it is:
 
 - **The part files do not compile alone.**  They use statics and types
   defined in the files before them.  `VCC_UNITY=` therefore changes nothing
-  for the linker.  Step 2 removes this.
+  for the linker.  Step 2 removes this.  (Done: see step 2's status.)
 - **The arch fragments stay in `arch/*/ld/*.inc`, included from `ld.c` at
   their old positions** (`thunks.inc` after `eh-frame.c`; `scan.inc` and
   `thunkpass.inc` after `string-merge.c`; `relocate.inc`, `got_seen` and
   `x64.inc` after `symbol-table-locals.c`): they define types and statics
   that later files use, and declare functions of earlier ones (`fits_int`,
-  `pic`, `reladyn_buf` in the review).
+  `pic`, `reladyn_buf` in the review).  (Done in step 2: they are
+  `arch/*/ld/*.c`, parts like the others.)
 - **`ld.c` is compiled twice** (`src/Makefile`: `ld/ld.o` with `-DVLD_MAIN`,
   `ld/ldlib.o` without) because `main()` is in `vlink-main.c`, under
-  `VLD_MAIN`.  Unchanged here.
+  `VLD_MAIN`.  Unchanged here.  (Step 2 keeps the two unity objects; with
+  `VCC_UNITY=` the parts are compiled once and `vlink-main.c` alone with
+  `-DVLD_MAIN`.  `link-run.c`'s own `VLD_MAIN` test became the process-wide
+  `ld_standalone`, set by `main()`.)
 - Jobs the old file interleaves stay in file order and are named for the
   part they hold: the symbol table is `symbol-table-locals.c` and
   `symbol-table-write.c`; the PHDRS handling is `program-headers.c` and
@@ -143,18 +147,38 @@ mode of `rename-table.py`): 521 whole-word rows (functions, types,
 enumerators, macros, per-link and process-wide globals) in `src/ld/*.c`
 without `wasmld.c`, `src/arch/*/ld/*.inc` and the Mach-O linker, plus the
 file moves (`elf-definitions.h`, `region.c`, `macho-linker.c`, the five arch
-fragments).  Not done: the 290 field rows (`field,deferred`, they wait for the
-front-end field-use tool) and the link context itself, so the file-scope
-per-link variables keep their names and the part files still do not compile
-alone.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
+fragments).  The 290 field rows followed with `rename-table.py --fields`
+(front-end field uses; the rows name each record by its new type, since the
+short names `Obj`, `G`, `OSec` were shared by ELF, Mach-O and objcopy records;
+objcopy's options struct got the tag `objcopy_option_set` so that it has a
+name): the four objects (`ld.o`, `ldlib.o`, `objcopy.o`, `macho-linker.o`) are
+byte-identical.  Names the owner may revisit: `macho-linker.c` and `macho_link`,
 `elf-definitions.h` with `elf_*` types, `region.c`.
 
 The link context (the other half): the design is decided and its first step
 is applied (`link-context.md`, "Design (decided)": the diagnostics and layout
 groups are fields of `struct ld_context`, #183); step 2 of the context moves
 the output side (relocation scan, `ld -r`, output, symbol table, dynamic
-sections); the input side and the parameter series follow (`link-context.md`
-section 5).
+sections); step 3 the input side (script, symbols, inputs, options), which
+deletes `ld_state_reset` and moves the data model into `ld-internal.h`.  No
+per-link state is left at file scope; step 4 passes the context as a
+parameter to every function that uses it and `ld_main` creates one per link
+(`link-context.md` section 5).
+
+The part files compile alone (step 2's last piece): `ld-internal.h` holds
+everything they share, with the includes and `LD_NONE` that `ld.c` had, the
+types and constants two parts use, the process-wide objects (`LD_SHARED`:
+`ld_keep_mappings`, `ld_thread_count`, `ld_standalone`, the script lexer's
+character table), a prototype for each of the 172 functions one part defines
+and another calls (`VPRIV`, static in the unity build), and the small inline
+helpers (`word-access.c` is gone; the others moved from their parts).  The
+ad-hoc forward declarations are gone.  `ld_link_lock` moved to its only user,
+`link-entry.c`.  The arch fragments are `arch/*/ld/*.c`.  `src/Makefile` reads
+`ld_SRC` from `ld.c`'s include list.  Decision: the parts keep their order in
+`ld.c` and the unity build stays the default (the inline helpers and the
+hot static functions stay visible to the optimizer); `ldlib.o` is
+byte-identical.  The opening comments of `ld.c` and `ld-internal.h` are
+rewritten; step 2 is done.
 
 ### 3. The shared layer
 
@@ -164,12 +188,105 @@ one diagnostics function through the diagnostics module, one ELF validator,
 one option table per tool.  Arena and thread pool go to the shared library
 and the scheduler.
 
+One diagnostics function for the linker tools: `struct ld_diagnostics` and
+`ld_diagnostic_report` (`ld/ld.h`, `ld/diagnostics.c`) print lld's
+"PROGRAM: error: MESSAGE" lines for the ELF linker (its context's member),
+the Mach-O linker and vobjcopy/vnm (a static instance each, set per run,
+replacing their own stream, count and name variables).  Each keeps its
+behaviour through the struct's fields: ELF announces the limit ("too many
+errors emitted") and puts lld's blank line after a multi-line message;
+Mach-O stops printing after 20 errors without a word; objcopy has no limit.
+The VLD_TIME phase timer moved out of the diagnostics into
+`struct ld_phase_timing`.  Not through the diagnostics module: that is
+track I, held by the owner; `utils/ar.c` keeps `ar_error_report`, which
+writes to vccd's request descriptor, until then.
+
+Left in step 3 (2026-11-13), with the reason:
+- One ELF validator: `ld_object_is_valid` (relocatable inputs, extended
+  section numbering, a message per check) and `objcopy_elf_is_valid`
+  (executables too, program headers, one message) check the same section
+  header, string table and symbol table rules.  The shared part would be a
+  checker in `platform/linux/` that returns which rule failed, so each tool
+  keeps its messages; not started.
+- One option table per tool: track I, held by the owner.
+- Arena and thread pool to the shared library and the scheduler: the
+  scheduler's track (one scheduler, PLAN-quality.md); the linker's
+  `region.c` and `thread-pool.c` stay until it lands.
+
+Status (2026-11-13): the file mappings of the ELF linker (`ld_file_map`) and
+of objcopy and nm (`objcopy_elf_open`, `nm_inputs_collect`) go through
+`port/file.h` (`vfile_map_fd`, now public: the callers open the file
+themselves, because their messages tell an open failure from a mapping
+failure, and an unchanged message is the rule).  Left, with the reason:
+the Mach-O linker reads its inputs into its arena with 8 bytes of padding
+(`vfile_read` gives 1); objcopy's `-I binary`, `--add-section` and
+`--add-gnu-debuglink` reads print "short read", which `vfile_read` cannot
+tell apart; `wasmld.c` is not built.
+
+One archive reader, `common/archive-reader.c` (`varchive_*`): magic, member
+headers, the `//` table, thin archives and BSD `#1/` names, decoded in place
+and never read past the file.  It reports what it found (`header_valid`,
+`data_fits`, a long name it cannot find), and the ELF linker
+(`ld_archive_add`), nm (`nm_inputs_collect`) and ar (`ar_thin_archive_read`,
+`ar_regular_archive_read`) keep their own messages and their own choice of
+what is fatal.  The Mach-O linker reads no archives (its inputs are objects
+only), so it has no reader to replace; `wasmld.c` keeps its own until wasm is
+built again.  Behaviour that moves, all on inputs the old readers misread,
+and each now as llvm-ar/llvm-nm/lld: BSD archives (`#1/` names, `__.SYMDEF`)
+are read by vlink and vnm (they failed with "not an ELF64 file"); a short
+name without a `/` loses its trailing spaces in nm and ar `t` (`a.o`, not `a.o`
+and 13 spaces); a corrupt name field is classified by one rule
+(`/ ` symbol table, `// ` names, `/DIGITS` long name, `#1/` BSD, anything
+else a short name), so the three tools no longer disagree on it; and a thin
+archive whose `//` member goes past the end of the file is "malformed"
+instead of an over-read.  Valid GNU and thin archives give byte-identical
+results.
+
 ### 4. One linker core
 
 ELF, wasm and Mach-O become output formats of one core: one symbol table,
 resolution and section assignment, with a format writer each.  The decision
 of `PLAN-quality.md` ("one linker core, not three linkers") applies; the
 step is designed when 2 and 3 are done.
+
+Design (2026-11-13): `DESIGN-linker-core.md`.  The core is the entry, the
+context, inputs and archives, and diagnostics; resolution, layout, the ELF
+symbol table and the output writer stay per format, with the reasons and two
+questions for the owner there.  PRs: a Mach-O comparison harness, Mach-O
+state in a context, no lock for Mach-O links, Mach-O names on
+`common/string-index.h`.
+
+Status: PR 1 of `DESIGN-linker-core.md` (Mach-O state in a context) is
+done: `struct macho_context` holds the Mach-O linker's 24 per-link
+variables, `macho_link_locked` creates it and `macho_context_destroy` frees
+it (`macho_state_reset` is gone); the name sort that read the table from a
+qsort comparator sorts (name, id) pairs.  Left at file scope in
+`macho-linker.c`: the libSystem export table (process-wide, read once).
+
+PR 2 (one entry), done differently from the design: with the state in its
+context, a Mach-O link needs no lock at all, so instead of taking the ELF
+link lock for both formats (which would serialise host-program links with
+ELF links), Mach-O's own lock is gone and Mach-O links run concurrently;
+the libSystem table is read once under a lock of its own
+(`macho_libsystem_load`).  `ld_main` stays the one entry; the ELF lock is
+unchanged.
+
+PR 3 is done: the Mach-O linker's two name tables (globals, libSystem
+exports) are `common/string-index.h` tables; its private FNV hash and the
+hand-written probing and growth are gone.  Ids stay in insertion order, so
+the output is the same.
+
+## Decisions (coordinator, on the owner's behalf, 2026-11-13)
+
+- The `vld: error: out of memory` message when the context allocation fails
+  (#224) is accepted.
+- This chain changes no output bytes.  In particular `vlink` does not take
+  lld 23's TLS local-exec `add` to `nop` relaxation (the two LDCMP cases
+  below): that is a separate question for the owner.
+- The step-3 remainders that would change a message or the allocator (the
+  Mach-O linker's inputs read into its arena with 8 bytes of padding;
+  objcopy's "short read" paths) stay as they are, listed in step 3 with the
+  reason.
 
 ## Known problem: two LDCMP cases (cause found, decision open)
 

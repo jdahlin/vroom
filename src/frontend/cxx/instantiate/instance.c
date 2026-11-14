@@ -186,11 +186,11 @@ VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *ar
 	/* a class: an incomplete record now; its body when it must be complete (C++ is lazy too: naming
 	   X<args> does not instantiate it; a member of that type, a base, X<args>::name do) */
 	{
-		uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, te->name, 0);
+		uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, te->name, 0);
 		char spelled[512];
 		size_t sl;
 
-		inst->ty = QT(c->ast->tags[tag].ty, 0);
+		inst->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0);
 		cxx_tag_instance_set(c, tag, x);
 		cxx_tag_info_set(c, tag, x);
 		if (cxx_instance_spell(c, t, full, n, spelled, sizeof spelled, &sl))
@@ -285,7 +285,7 @@ static bool cxx_instance_known_type(cxx *c, cxx_instance *x)
 {
 	static uint32_t ccc, type;
 	cxx_entity *m;
-	qty po, wo, so, r;
+	ast_qualified_type po, wo, so, r;
 	int worst = 3;	/* 3 strong, 2 weak, 1 partial, 0 none */
 
 	if (!ccc)
@@ -296,14 +296,14 @@ static bool cxx_instance_known_type(cxx *c, cxx_instance *x)
 	if (po == CXX_TY_UNKNOWN || wo == CXX_TY_UNKNOWN || so == CXX_TY_UNKNOWN)
 		return false;
 	for (uint32_t i = 0; i < x->nargs; i++) {
-		qty t = x->args[i].kind == 1 ? x->args[i].t : CXX_TY_UNKNOWN;
-		int k = t == CXX_TY_UNKNOWN ? -1 : QUNQ(t) == so && !QQ(t) ? 3 : QUNQ(t) == wo && !QQ(t) ? 2 : QUNQ(t) == po && !QQ(t) ? 1 : 0;
+		ast_qualified_type t = x->args[i].kind == 1 ? x->args[i].t : CXX_TY_UNKNOWN;
+		int k = t == CXX_TY_UNKNOWN ? -1 : AST_QUALIFIED_TYPE_UNQUALIFIED(t) == so && !AST_QUALIFIED_TYPE_QUALIFIERS(t) ? 3 : AST_QUALIFIED_TYPE_UNQUALIFIED(t) == wo && !AST_QUALIFIED_TYPE_QUALIFIERS(t) ? 2 : AST_QUALIFIED_TYPE_UNQUALIFIED(t) == po && !AST_QUALIFIED_TYPE_QUALIFIERS(t) ? 1 : 0;
 
 		if (k < 0)
 			return false;
 		worst = k < worst ? k : worst;
 	}
-	r = worst == 3 ? so : worst == 2 ? wo : worst == 1 ? po : cc_type_basic(TY_VOID);
+	r = worst == 3 ? so : worst == 2 ? wo : worst == 1 ? po : cc_type_basic(AST_TYPE_VOID);
 	for (m = cxx_lookup_in(c, x->inst->members, type, 0); m; m = m->next)
 		if (m->kind == CXX_ENTITY_TYPE)
 			m->ty = r, m->dependent = 0, m->members = cc_type_is_record(c->ast, r) ? cxx_type_class_scope(c, r) : NULL;
@@ -413,7 +413,7 @@ VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 }
 
 /* a type that must be complete (a member by value, a base, X::name): an instance's body is parsed now */
-VPRIV void cxx_type_require_complete(cxx *c, qty t)
+VPRIV void cxx_type_require_complete(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 
@@ -426,21 +426,21 @@ VPRIV void cxx_type_require_complete(cxx *c, qty t)
 
 /* is the record type incomplete for good: an instance of a template that has no definition and no partial
    specialization that matches it (sizeof of it: a substitution failure, __has_specialization_v in libc++) */
-VPRIV bool cxx_type_definitely_incomplete(cxx *c, qty t)
+VPRIV bool cxx_type_definitely_incomplete(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return false;
 	cxx_type_require_complete(c, t);
 	tag = AST_TYPE(c->ast, t)->aux;
-	if (c->ast->tags[tag].flags & RF_COMPLETE)
+	if (c->ast->tags[tag].flags & AST_RECORD_FLAG_COMPLETE)
 		return false;
 	return tag < c->ntag_instance && c->tag_instance[tag] && ((cxx_instance *)c->tag_instance[tag])->no_definition;
 }
 
 /* the class scope of a record type (an instance: completed first), NULL if none */
-VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t)
+VPRIV cxx_scope *cxx_type_class_scope(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 
@@ -452,29 +452,29 @@ VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t)
 }
 
 /* an enumeration's declaring scope, by its type */
-VPRIV void cxx_tag_home_set(cxx *c, qty t, cxx_scope *home)
+VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home)
 {
 	uint32_t tag;
 
-	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != TY_ENUM)
+	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != AST_TYPE_ENUM)
 		return;
 	tag = AST_TYPE(c->ast, t)->aux;
 	cxx_tag_grow((void ***)&c->tag_home, &c->ntag_home, tag);
 	c->tag_home[tag] = home;
 }
 
-VPRIV cxx_scope *cxx_tag_home(cxx *c, qty t)
+VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 
-	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != TY_ENUM)
+	if (t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != AST_TYPE_ENUM)
 		return NULL;
 	tag = AST_TYPE(c->ast, t)->aux;
 	return tag < c->ntag_home ? c->tag_home[tag] : NULL;
 }
 
 /* ... as it is: not completed for the asking (the name mangler: a type's name needs no body) */
-VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t)
+VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 

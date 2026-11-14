@@ -14,14 +14,14 @@ VPRIV bool cxx_vt_same(cxx *c, const cxx_entity *x, const cxx_entity *y)
 
 	if (cxx_vt_is_dtor(x) || cxx_vt_is_dtor(y))
 		return cxx_vt_is_dtor(x) && cxx_vt_is_dtor(y);
-	if (x->name != y->name || x->ty == CXX_TY_UNKNOWN || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, x->ty) != TY_FUNC ||
-	    AST_TYPE_KIND(a, y->ty) != TY_FUNC || x->fn_const != y->fn_const)
+	if (x->name != y->name || x->ty == CXX_TY_UNKNOWN || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, x->ty) != AST_TYPE_FUNCTION ||
+	    AST_TYPE_KIND(a, y->ty) != AST_TYPE_FUNCTION || x->fn_const != y->fn_const)
 		return false;
 	fx = AST_TYPE(a, x->ty), fy = AST_TYPE(a, y->ty);
 	if (fx->n != fy->n)
 		return false;
 	for (uint32_t i = 0; i < fx->n; i++)
-		if (QUNQ(a->params[fx->aux + i]) != QUNQ(a->params[fy->aux + i]))
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(a->params[fx->aux + i]) != AST_QUALIFIED_TYPE_UNQUALIFIED(a->params[fy->aux + i]))
 			return false;
 	return true;
 }
@@ -42,14 +42,14 @@ VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls)
 /* is b one of the class's virtual bases (direct or not) */
 static bool cxx_vt_is_vbase(cxx *c, cxx_scope *cls, cxx_scope *b)
 {
-	qty vb[16];
+	ast_qualified_type vb[16];
 	uint32_t n;
 
 	if (!cls->owner || !cls->owner->ty || !b->owner || !b->owner->ty)
 		return false;
 	n = cxx_class_vbases(c, cls->owner->ty, vb, NULL, 16);
 	for (uint32_t i = 0; i < n && i < 16; i++)
-		if (QUNQ(vb[i]) == QUNQ(b->owner->ty))
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(vb[i]) == AST_QUALIFIED_TYPE_UNQUALIFIED(b->owner->ty))
 			return true;
 	return false;
 }
@@ -153,9 +153,9 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
 		/* a base's virtual destructor and none declared here: the implicit one is the base's if this class's
 		   own members need no destruction (else: an implicit destructor, not built yet) */
 		for (uint32_t k = 0; k < cls->nfield_types; k++) {
-			qty ft = cls->field_types[k];
+			ast_qualified_type ft = cls->field_types[k];
 
-			while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
+			while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == AST_TYPE_ARRAY)
 				ft = AST_TYPE(c->ast, ft)->base;
 			if (ft == CXX_TY_UNKNOWN)
 				return false;
@@ -190,10 +190,10 @@ VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
 		return cls->vt_sym;
 	if (!cxx_vtable_usable(c, cls) || !cxx_mangle_class_data(c, "TV", cls->owner->ty, name, sizeof name))
 		return 0;
-	s = cc_symbol_new(a, S_VAR, cls->owner->name, cc_type_array(a, cc_type_pointer(a, cc_type_basic(TY_VOID)), cls->nvfuncs + 2, 0), 0);
-	a->syms[s].flags |= SF_GLOBAL;
+	s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, cls->owner->name, cc_type_array(a, cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), cls->nvfuncs + 2, 0), 0);
+	a->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	a->syms[s].depth = 0;
-	a->syms[s].sc = SC_EXTERN;
+	a->syms[s].sc = AST_STORAGE_EXTERN;
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;
 	cc_attribute_apply_symbol(a, &a->syms[s], &at);
@@ -212,7 +212,7 @@ VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
 VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), vppp = cc_type_pointer(a, cc_type_pointer(a, vp));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), vppp = cc_type_pointer(a, cc_type_pointer(a, vp));
 	uint32_t vs, addr, target;
 
 	if (cxx_gen_class_has_vbases(c, cls))
@@ -221,17 +221,17 @@ VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint
 	if (!vs || !self)
 		return 0;
 	addr = cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, vs, loc)),
-			       cc_node_integer_new(a, 2, cc_type_basic(TY_LONG), loc), loc);
+			       cc_node_integer_new(a, 2, cc_type_basic(AST_TYPE_LONG), loc), loc);
 	target = cc_dereference_build(a, cc_cast_insert(a, self, vppp, cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, vppp, self)), loc);
-	return cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, addr, loc), 0, 0);
+	return cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, target, addr, loc), 0, 0);
 }
 
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc)
 {
-	uint32_t fn = cc_node_new(c->ast, N_VAR, c->ast->syms[s].ty, loc);
+	uint32_t fn = cc_node_new(c->ast, AST_NODE_VARIABLE, c->ast->syms[s].ty, loc);
 
 	AST_NODE_AT(c->ast, fn)->a = s;
-	AST_NODE_AT(c->ast, fn)->flags = NF_LVALUE;
+	AST_NODE_AT(c->ast, fn)->flags = AST_NODE_FLAG_LVALUE;
 	return cc_node_rvalue(c->ast, fn);
 }
 
@@ -265,12 +265,12 @@ static uint32_t cxx_gen_vtt_entry(cxx *c, uint32_t k, uint32_t loc)
 	cc *a = c->ast;
 
 	return cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_vtt, loc)),
-								     cc_node_integer_new(a, (i128)k, cc_type_basic(TY_LONG), loc), loc), loc));
+								     cc_node_integer_new(a, (i128)k, cc_type_basic(AST_TYPE_LONG), loc), loc), loc));
 }
 
 /* the VTT for base subobject `base` of the class whose C2/D2 is being built: vtt + its sub-VTT's index (0: base
    has no virtual bases, or not built) */
-VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, qty base, uint32_t loc)
+VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, ast_qualified_type base, uint32_t loc)
 {
 	cc *a = c->ast;
 	cxx_vtt v;
@@ -278,9 +278,9 @@ VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, qty base, uint32_t l
 	if (!c->gen_vtt || !cls || !cxx_vtt_layout(c, cls->owner->ty, &v))
 		return 0;
 	for (uint32_t i = 0; i < v.nsub; i++)
-		if (QUNQ(v.sub[i]) == QUNQ(base))
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(v.sub[i]) == AST_QUALIFIED_TYPE_UNQUALIFIED(base))
 			return cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_vtt, loc)),
-					       cc_node_integer_new(a, (i128)v.sub_at[i], cc_type_basic(TY_LONG), loc), loc);
+					       cc_node_integer_new(a, (i128)v.sub_at[i], cc_type_basic(AST_TYPE_LONG), loc), loc);
 	return 0;
 }
 
@@ -292,7 +292,7 @@ VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, qty base, uint32_t l
 VPRIV bool cxx_gen_vtt_vptrs(cxx *c, cxx_scope *cls, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), vpp = cc_type_pointer(a, vp), cp = cc_type_pointer(a, cc_type_basic(TY_CHAR));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), vpp = cc_type_pointer(a, vp), cp = cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR));
 	cxx_vtt v;
 	uint32_t self, at;
 
@@ -303,17 +303,17 @@ VPRIV bool cxx_gen_vtt_vptrs(cxx *c, cxx_scope *cls, cc_id_list *out, uint32_t l
 	self = c->enode, c->enode = 0;
 	if (!self)
 		return false;
-	cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, self, vpp, CK_NOP), loc),
+	cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, self, vpp, AST_CAST_NOP), loc),
 										     cxx_gen_vtt_entry(c, 0, loc), loc), 0, 0));
 	for (uint32_t i = 0; i < v.nvp; i++) {
 		uint32_t p;
 
 		cxx_gen_this(c, loc);
-		p = cc_cast_insert(a, c->enode, cp, CK_NOP), c->enode = 0;
+		p = cc_cast_insert(a, c->enode, cp, AST_CAST_NOP), c->enode = 0;
 		if (v.vp_vbase[i]) {
 			/* this + ((long *)*(char **)this)[-3 - k]: the virtual base through the vptr just stored (this is
 			   a parameter: read again, no temporary) */
-			qty lp = cc_type_pointer(a, cc_type_basic(TY_LONG));
+			ast_qualified_type lp = cc_type_pointer(a, cc_type_basic(AST_TYPE_LONG));
 			uint32_t k, t2, vptr, slot;
 			uint64_t inner;
 
@@ -321,15 +321,15 @@ VPRIV bool cxx_gen_vtt_vptrs(cxx *c, cxx_scope *cls, cc_id_list *out, uint32_t l
 				return false;
 			cxx_gen_this(c, loc);
 			t2 = c->enode, c->enode = 0;
-			vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, t2, cc_type_pointer(a, cp), CK_NOP), loc));
-			slot = cc_binary_build(a, LEX_TOKEN_PLUS, cc_cast_insert(a, vptr, lp, CK_NOP), cc_node_integer_new(a, -3 - (i128)k, cc_type_basic(TY_LONG), loc), loc);
+			vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, t2, cc_type_pointer(a, cp), AST_CAST_NOP), loc));
+			slot = cc_binary_build(a, LEX_TOKEN_PLUS, cc_cast_insert(a, vptr, lp, AST_CAST_NOP), cc_node_integer_new(a, -3 - (i128)k, cc_type_basic(AST_TYPE_LONG), loc), loc);
 			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_rvalue(a, cc_dereference_build(a, slot, loc)), loc);
 			if (inner)
-				p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)inner, cc_type_basic(TY_LONG), loc), loc);
+				p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)inner, cc_type_basic(AST_TYPE_LONG), loc), loc);
 		}
 		if (v.vp_off[i])
-			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)v.vp_off[i], cc_type_basic(TY_LONG), loc), loc);
-		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, p, vpp, CK_NOP), loc),
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)v.vp_off[i], cc_type_basic(AST_TYPE_LONG), loc), loc);
+		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cc_dereference_build(a, cc_cast_insert(a, p, vpp, AST_CAST_NOP), loc),
 											     cxx_gen_vtt_entry(c, at + i, loc), loc), 0, 0));
 	}
 	return true;
@@ -347,14 +347,14 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
 	cxx_scope *cls = f->member_of;
 	uint32_t vtt = cxx_gen_vtt_symbol(c, cls), loc = a->syms[f->sym].loc, nvb, call;
 	const ctype *ft = AST_TYPE(a, f->ty);
-	qty vb[16];
+	ast_qualified_type vb[16];
 	uint64_t off[16];
 	cxx_entity *w;
 	cxx_param ps[32];
 	cc_id_list args, stmts;
 	cxx_scope *fs;
 
-	if (!vtt || !f->sym1 || f->sym1 == f->sym || (a->syms[f->sym1].flags & SF_DEFINED) || ft->n > 32 || (ft->flags & TF_VARIADIC))
+	if (!vtt || !f->sym1 || f->sym1 == f->sym || (a->syms[f->sym1].flags & AST_SYMBOL_FLAG_DEFINED) || ft->n > 32 || (ft->flags & AST_TYPE_FLAG_VARIADIC))
 		return;
 	nvb = cxx_class_vbases(c, cls->owner->ty, vb, off, 16);
 	w = calloc(1, sizeof *w);
@@ -375,13 +375,13 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
 			uint32_t p, x;
 
 			cxx_gen_this(c, loc);
-			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP), c->enode = 0;
-			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(TY_LONG), loc), loc);
-			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), CK_NOP), loc);
+			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR)), AST_CAST_NOP), c->enode = 0;
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(AST_TYPE_LONG), loc), loc);
+			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), AST_CAST_NOP), loc);
 			if (!cxx_gen_needs_construction(c, vb[i], 0))
 				continue;
 			cxx_ctor_use(c, vb[i], NULL, NULL, 0, false);
-			c->gen_base_type = QUNQ(vb[i]);
+			c->gen_base_type = AST_QUALIFIED_TYPE_UNQUALIFIED(vb[i]);
 			if (!cxx_gen_construct_at(c, x, vb[i], NULL, 0, &stmts, loc))
 				cxx_gen_fail(c);
 			c->gen_base_type = 0;
@@ -395,11 +395,11 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
 		for (uint32_t i = 1; i < c->gen_npsyms; i++)
 			cc_id_list_append(a, &args, cc_node_rvalue(a, cxx_gen_var_node(c, pv[i], loc)));
 	}
-	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	call = cc_node_new(a, AST_NODE_CALL, cc_type_basic(AST_TYPE_VOID), loc);
 	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, f->sym, loc);
 	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
 	AST_NODE_AT(a, call)->c = args.n;
-	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	cc_id_list_append(a, &stmts, cc_statement_new(a, AST_NODE_EXPRESSION, loc, call, 0, 0));
 	if (!ctor)
 		for (uint32_t i = nvb; i-- > 0 && cxx_gen_on(c);) {
 			uint32_t p, x;
@@ -407,16 +407,16 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
 			if (!cxx_gen_needs_destruction(c, vb[i], 0))
 				continue;
 			cxx_gen_this(c, loc);
-			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP), c->enode = 0;
-			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(TY_LONG), loc), loc);
-			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), CK_NOP), loc);
-			c->gen_base_type = QUNQ(vb[i]);
+			p = cc_cast_insert(a, c->enode, cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR)), AST_CAST_NOP), c->enode = 0;
+			p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off[i], cc_type_basic(AST_TYPE_LONG), loc), loc);
+			x = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, vb[i]), AST_CAST_NOP), loc);
+			c->gen_base_type = AST_QUALIFIED_TYPE_UNQUALIFIED(vb[i]);
 			if (!cxx_gen_destroy(c, x, vb[i], &stmts, loc))
 				cxx_gen_fail(c);
 			c->gen_base_type = 0;
 		}
 	c->gen_wrapper = 1;
-	cxx_gen_function_end(c, w, cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n));
+	cxx_gen_function_end(c, w, cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n));
 	c->gen_wrapper = 0;
 }
 
@@ -425,11 +425,11 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
  * lvalue naming it, without side effects): its bases and members of class type, then its vptr.  False: not
  * built (members with default initializers, arrays of classes with constructors).
  */
-VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
+VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
 
-VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth)
+VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth)
 {
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 
 	if (!target)
 		return false;
@@ -437,9 +437,9 @@ VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list 
 		return true;
 	if (!cls || depth > 8)
 		return false;
-	cxx_ctor_use(c, QUNQ(t), NULL, NULL, 0, false);
+	cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), NULL, NULL, 0, false);
 	if (c->ctor_found && c->ctor_picked && c->ctor_picked->member_of == cls)
-		return cxx_gen_construct_at(c, target, QUNQ(t), NULL, 0, out, loc);
+		return cxx_gen_construct_at(c, target, AST_QUALIFIED_TYPE_UNQUALIFIED(t), NULL, 0, out, loc);
 	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
 		if (e->member_of == cls)
 			return false;	/* (constructors, none of them for no arguments) */
@@ -449,27 +449,27 @@ VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list 
 }
 
 /* ... what the implicit default constructor does: the bases, the members of class type, the vptr */
-VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth)
+VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth)
 {
 	cc *a = c->ast;
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
-	qty bases[16];
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+	ast_qualified_type bases[16];
 	uint32_t nb;
 	const tag *r;
 
 	if (!target || !cls || depth > 8)
 		return false;
-	if (AST_TYPE_KIND(a, QUNQ(t)) == TY_UNION)
+	if (AST_TYPE_KIND(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) == AST_TYPE_UNION)
 		return true;	/* (a union: no member is made active) */
 	nb = cxx_class_bases(c, t, bases, 16);
 	for (uint32_t i = 0; i < nb; i++)
 		if (!cxx_gen_default_construct(c, cxx_gen_base_object(c, target, bases[i], loc), bases[i], out, loc, depth + 1))
 			return false;
-	r = &a->tags[AST_TYPE(a, QUNQ(t))->aux];
+	r = &a->tags[AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->aux];
 	for (uint32_t i = 0; i < r->nfield; i++) {
-		qty ft = r->f[i].ty, et = ft;
+		ast_qualified_type ft = r->f[i].ty, et = ft;
 
-		while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+		while (AST_TYPE_KIND(a, et) == AST_TYPE_ARRAY)
 			et = AST_TYPE(a, et)->base;
 		if (!cc_type_is_record(a, et) || !cxx_gen_needs_construction(c, et, 0))
 			continue;
@@ -492,10 +492,10 @@ VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, qty t, cc_id
 VPRIV uint32_t cxx_gen_runtime_symbol(cxx *c, const char *name, bool pointer_param)
 {
 	cc *a = c->ast;
-	qty ps[1] = { cc_type_pointer(a, cc_type_basic(TY_VOID)) };
-	uint32_t s = cc_symbol_new(a, S_FUNC, vintern_cstr(name), cxx_type_function(c, cc_type_basic(TY_VOID), ps, pointer_param ? 1 : 0, false), 0);
+	ast_qualified_type ps[1] = { cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)) };
+	uint32_t s = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr(name), cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), ps, pointer_param ? 1 : 0, false), 0);
 
-	a->syms[s].flags |= SF_GLOBAL;
+	a->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	a->syms[s].depth = 0;
 	return s;
 }
@@ -504,42 +504,42 @@ VPRIV uint32_t cxx_gen_runtime_symbol(cxx *c, const char *name, bool pointer_par
 VPRIV void cxx_gen_deleting_destructor(cxx *c, cxx_entity *f)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 	uint32_t loc = a->syms[f->sym].loc, ps, self, call, body, saved_fn = a->fn;
 	cc_id_list psyms, stmts, args;
 
-	if (!f->sym0 || !f->sym1 || (a->syms[f->sym0].flags & SF_DEFINED))
+	if (!f->sym0 || !f->sym1 || (a->syms[f->sym0].flags & AST_SYMBOL_FLAG_DEFINED))
 		return;
 	if (!c->gen_delete_sym)
 		c->gen_delete_sym = cxx_gen_runtime_symbol(c, "_ZdlPv", true);
 	cc_scope_open(a);
 	a->fn = f->sym0;
-	ps = cc_symbol_new(a, S_VAR, vintern_cstr("this"), cxx_gen_this_type(c, f), loc);
-	a->syms[ps].flags |= SF_PARAM;
-	a->syms[ps].sc = SC_AUTO;
+	ps = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("this"), cxx_gen_this_type(c, f), loc);
+	a->syms[ps].flags |= AST_SYMBOL_FLAG_PARAMETER;
+	a->syms[ps].sc = AST_STORAGE_AUTO;
 	cc_id_list_init(&psyms);
 	cc_id_list_append(a, &psyms, ps);
 	cc_id_list_init(&stmts);
 	cc_id_list_init(&args);
 	cc_id_list_append(a, &args, cc_node_rvalue(a, cxx_gen_var_node(c, ps, loc)));
-	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	call = cc_node_new(a, AST_NODE_CALL, cc_type_basic(AST_TYPE_VOID), loc);
 	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, f->sym1, loc);
 	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
 	AST_NODE_AT(a, call)->c = 1;
-	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	cc_id_list_append(a, &stmts, cc_statement_new(a, AST_NODE_EXPRESSION, loc, call, 0, 0));
 	cc_id_list_init(&args);
 	self = cc_node_rvalue(a, cxx_gen_var_node(c, ps, loc));
 	cc_id_list_append(a, &args, cc_cast_insert(a, self, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, vp, self)));
-	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	call = cc_node_new(a, AST_NODE_CALL, cc_type_basic(AST_TYPE_VOID), loc);
 	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, c->gen_delete_sym, loc);
 	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
 	AST_NODE_AT(a, call)->c = 1;
-	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
-	body = cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n);
+	cc_id_list_append(a, &stmts, cc_statement_new(a, AST_NODE_EXPRESSION, loc, call, 0, 0));
+	body = cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n);
 	cc_scope_close(a);
 	a->fn = saved_fn;
 	a->syms[f->sym0].body = body;
-	a->syms[f->sym0].flags |= SF_DEFINED;
+	a->syms[f->sym0].flags |= AST_SYMBOL_FLAG_DEFINED;
 	a->syms[f->sym0].defloc = loc;
 	AST_NODE_AT(a, body)->a = cc_id_list_freeze(a, &psyms);
 	AST_NODE_AT(a, body)->aux = 1;
@@ -567,7 +567,7 @@ VPRIV void cxx_gen_complete_object_aliases(cxx *c)
 		uint32_t s = t[k].sym;
 		size_t l;
 
-		if (!nm || !s || (a->syms[s].flags & SF_DEFINED) || a->syms[s].kind != S_FUNC || (l = strlen(nm)) >= 2048)
+		if (!nm || !s || (a->syms[s].flags & AST_SYMBOL_FLAG_DEFINED) || a->syms[s].kind != AST_SYMBOL_FUNCTION || (l = strlen(nm)) >= 2048)
 			continue;
 		for (size_t i = 3; i + 1 < l; i++) {
 			char two[2048];
@@ -578,14 +578,14 @@ VPRIV void cxx_gen_complete_object_aliases(cxx *c)
 			memcpy(two, nm, l + 1);
 			two[i + 1] = '2';
 			d = cxx_gen_symbol_named(c, two, 0);
-			if (d && d != s && (a->syms[d].flags & SF_DEFINED) && a->syms[d].attrs) {
+			if (d && d != s && (a->syms[d].flags & AST_SYMBOL_FLAG_DEFINED) && a->syms[d].attrs) {
 				attrs at;
 
 				memset(&at, 0, sizeof at);
 				at.alias = a->attr[a->syms[d].attrs].asmname;
 				at.weak = 1;
 				cc_attribute_apply_symbol(a, &a->syms[s], &at);
-				a->syms[s].flags |= SF_DEFINED;
+				a->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED;
 				a->toplevel[a->ntoplevel++] = s;
 				break;
 			}
@@ -596,7 +596,7 @@ VPRIV void cxx_gen_complete_object_aliases(cxx *c)
 VPRIV void cxx_gen_vtables_emit(cxx *c)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 
 	for (uint32_t i = 0; i < c->nvt_list; i++) {
 		cxx_scope *cls = c->vt_list[i];
@@ -609,7 +609,7 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 		for (uint32_t k = 0; k < cls->nvown && !key && !(cls->owner && cls->owner->instance); k++)
 			if (!cls->vown[k]->fn_pure && !cls->vown[k]->fn_inline && !cls->vown[k]->fn_defaulted && !cls->vown[k]->fn_deleted)
 				key = cls->vown[k];
-		if (key && !(key->sym && (a->syms[key->sym].flags & SF_DEFINED)))
+		if (key && !(key->sym && (a->syms[key->sym].flags & AST_SYMBOL_FLAG_DEFINED)))
 			continue;	/* (the TU that defines the key function has it) */
 		if (cls->is_extern_inst && cxx_gen_class_has_vbases(c, cls))
 			continue;	/* (an extern template's instance: the library's vtable group) */
@@ -621,7 +621,7 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 			if (k == 1 && cls->owner && (s = cxx_gen_typeinfo(c, cls->owner->ty)) != 0)
 				val = cxx_gen_data_address(c, s, 0);	/* the class's type info */
 			else if (!e)
-				val = cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), 0);
+				val = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_LONG), 0);
 			else {
 				if (e->fn_pure) {
 					if (!c->gen_pure_sym)
@@ -645,7 +645,7 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 		}
 		if (!ok)
 			continue;
-		n = cc_node_new(a, N_INIT, y->ty, 0);
+		n = cc_node_new(a, AST_NODE_INITIALIZER, y->ty, 0);
 		AST_NODE_AT(a, n)->aux = 1;
 		AST_NODE_AT(a, n)->c = v.n / 3;
 		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
@@ -654,14 +654,14 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 		y = &a->syms[cls->vt_sym];
 		y->sc = 0;
 		y->body = n;
-		y->flags |= SF_DEFINED;
+		y->flags |= AST_SYMBOL_FLAG_DEFINED;
 		if (!key) {
 			attrs at;
 
 			memset(&at, 0, sizeof at);
 			at.weak = 1;
 			cc_attribute_apply_symbol(a, y, &at);
-			y->flags |= SF_LINKONCE;	/* (emitted only if the TU's code refers to it) */
+			y->flags |= AST_SYMBOL_FLAG_LINKONCE;	/* (emitted only if the TU's code refers to it) */
 		}
 		a->toplevel[a->ntoplevel++] = cls->vt_sym;
 	}
@@ -675,11 +675,11 @@ VPRIV uint32_t cxx_gen_data_symbol(cxx *c, const char *name, uint32_t n)
 {
 	cc *a = c->ast;
 	attrs at;
-	uint32_t s = cc_symbol_new(a, S_VAR, vintern_cstr("__ti"), cc_type_array(a, cc_type_pointer(a, cc_type_basic(TY_VOID)), n ? n : 1, 0), 0);
+	uint32_t s = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("__ti"), cc_type_array(a, cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), n ? n : 1, 0), 0);
 
-	a->syms[s].flags |= SF_GLOBAL;
+	a->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	a->syms[s].depth = 0;
-	a->syms[s].sc = SC_EXTERN;
+	a->syms[s].sc = AST_STORAGE_EXTERN;
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;
 	cc_attribute_apply_symbol(a, &a->syms[s], &at);
@@ -691,10 +691,10 @@ VPRIV uint32_t cxx_gen_data_symbol(cxx *c, const char *name, uint32_t n)
  * user defines them weak, as clang): its name _ZTS..., then the object of the runtime's class vtname
  * (__function_type_info: vptr, name; __pointer_type_info: also flags 0 and the pointee's type info).
  */
-static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint32_t pointee)
+static uint32_t cxx_gen_typeinfo_define(cxx *c, ast_qualified_type t, const char *vtname, uint32_t pointee)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 	char name[2048] = "_ZTI", tsname[2048] = "_ZTS";
 	uint32_t ti, ts, si, n, vals[4], words = 0;
 	cc_id_list v;
@@ -707,26 +707,26 @@ static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint3
 		return ti;
 	/* the name: a weak array of char */
 	si = cxx_gen_text(c, name + 4);
-	ts = cc_symbol_new(a, S_VAR, vintern_cstr("__ts"), cc_type_array(a, QT(TY_CHAR, Q_CONST), strlen(name + 4) + 1, 0), 0);
-	a->syms[ts].flags |= SF_GLOBAL;
+	ts = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("__ts"), cc_type_array(a, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST), strlen(name + 4) + 1, 0), 0);
+	a->syms[ts].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	a->syms[ts].depth = 0;
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, tsname) + 1;
 	at.weak = 1;
 	cc_attribute_apply_symbol(a, &a->syms[ts], &at);
-	a->syms[ts].flags |= SF_LINKONCE;
-	n = cc_node_new(a, N_STR, a->syms[ts].ty, 0);
+	a->syms[ts].flags |= AST_SYMBOL_FLAG_LINKONCE;
+	n = cc_node_new(a, AST_NODE_STRING, a->syms[ts].ty, 0);
 	AST_NODE_AT(a, n)->a = si;
-	AST_NODE_AT(a, n)->flags = NF_LVALUE;
+	AST_NODE_AT(a, n)->flags = AST_NODE_FLAG_LVALUE;
 	a->syms[ts].body = n;
-	a->syms[ts].flags |= SF_DEFINED;
+	a->syms[ts].flags |= AST_SYMBOL_FLAG_DEFINED;
 	a->toplevel[a->ntoplevel++] = ts;
 	/* the object */
 	vals[words++] = cxx_gen_data_address(c, cxx_gen_data_symbol(c, vtname, 0), 2);
 	vals[words++] = cxx_gen_data_address(c, ts, 0);
 	if (pointee) {
-		n = cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), 0);	/* (flags: none, then padding) */
-		vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+		n = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_LONG), 0);	/* (flags: none, then padding) */
+		vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(AST_TYPE_LONG), vp, n));
 		vals[words++] = cxx_gen_data_address(c, pointee, 0);
 	}
 	cc_id_list_init(&v);
@@ -735,10 +735,10 @@ static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint3
 		cc_id_list_append(a, &v, k);
 		cc_id_list_append(a, &v, vals[k]);
 	}
-	ti = cc_symbol_new(a, S_VAR, vintern_cstr("__ti"), cc_type_array(a, vp, words, 0), 0);
-	a->syms[ti].flags |= SF_GLOBAL;
+	ti = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("__ti"), cc_type_array(a, vp, words, 0), 0);
+	a->syms[ti].flags |= AST_SYMBOL_FLAG_GLOBAL;
 	a->syms[ti].depth = 0;
-	n = cc_node_new(a, N_INIT, a->syms[ti].ty, 0);
+	n = cc_node_new(a, AST_NODE_INITIALIZER, a->syms[ti].ty, 0);
 	AST_NODE_AT(a, n)->aux = 1;
 	AST_NODE_AT(a, n)->c = words;
 	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
@@ -746,7 +746,7 @@ static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint3
 	at.asmname = cxx_gen_text(c, name) + 1;
 	at.weak = 1;
 	cc_attribute_apply_symbol(a, &a->syms[ti], &at);
-	a->syms[ti].flags |= SF_LINKONCE | SF_DEFINED;
+	a->syms[ti].flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_DEFINED;
 	a->syms[ti].body = n;
 	a->toplevel[a->ntoplevel++] = ti;
 	cxx_gen_symbol_named(c, cxx_gen_symbol_asm_name(c, ti), ti);
@@ -755,21 +755,21 @@ static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint3
 
 /* typeid(T), typeid(e) of a type that is not a polymorphic class: its type info object, a const std::type_info
    lvalue (ti_type: that class) */
-VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc)
+VPRIV void cxx_gen_typeid(cxx *c, ast_qualified_type t, ast_qualified_type ti_type, uint32_t loc)
 {
 	cc *a = c->ast;
 	uint32_t s;
-	qty pt;
+	ast_qualified_type pt;
 
 	c->enode = 0;
 	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || ti_type == CXX_TY_UNKNOWN)
 		return;
-	if (AST_TYPE_KIND(a, t) == TY_PTR && AST_TYPE(a, t)->ext)
+	if (AST_TYPE_KIND(a, t) == AST_TYPE_POINTER && AST_TYPE(a, t)->ext)
 		t = AST_TYPE(a, t)->base;	/* (typeid of a reference type: the referred type's) */
-	if (!(s = cxx_gen_typeinfo(c, QUNQ(t))))
+	if (!(s = cxx_gen_typeinfo(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))))
 		return;
-	pt = cc_type_pointer(a, QT(QI(ti_type), Q_CONST));
-	c->enode = cc_dereference_build(a, cc_cast_insert(a, cxx_gen_data_address(c, s, 0), pt, CK_NOP), loc);
+	pt = cc_type_pointer(a, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ti_type), AST_QUALIFIER_CONST));
+	c->enode = cc_dereference_build(a, cc_cast_insert(a, cxx_gen_data_address(c, s, 0), pt, AST_CAST_NOP), loc);
 }
 
 /*
@@ -777,7 +777,7 @@ VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc)
  * it belongs to this TU; a fundamental type's (and a pointer to one's) is the C++ runtime's.  0: not built
  * (pointers to classes, functions, members).
  */
-VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
+VPRIV uint32_t cxx_gen_typeinfo(cxx *c, ast_qualified_type t)
 {
 	cc *a = c->ast;
 	char name[2048] = "_ZTI";
@@ -787,9 +787,9 @@ VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
 
 	if (t == CXX_TY_UNKNOWN)
 		return 0;
-	t = QUNQ(t);
+	t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
 	k = AST_TYPE_KIND(a, t);
-	if (k == TY_STRUCT || k == TY_UNION) {
+	if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION) {
 		cls = cxx_tag_scope_get(c, t);
 		if (!cls || !cxx_class_layout_info(c, t, &pod, &empty))
 			return 0;
@@ -803,21 +803,21 @@ VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
 		c->ti_list[c->nti_list++] = cls;
 		return cls->ti_sym;
 	}
-	if (k == TY_FUNC)
+	if (k == AST_TYPE_FUNCTION)
 		return cxx_gen_typeinfo_define(c, t, "_ZTVN10__cxxabiv120__function_type_infoE", 0);
-	if (k == TY_PTR && !AST_TYPE(a, t)->ext && AST_TYPE(a, t)->base != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, AST_TYPE(a, t)->base) == TY_FUNC) {
+	if (k == AST_TYPE_POINTER && !AST_TYPE(a, t)->ext && AST_TYPE(a, t)->base != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, AST_TYPE(a, t)->base) == AST_TYPE_FUNCTION) {
 		uint32_t f = cxx_gen_typeinfo(c, AST_TYPE(a, t)->base);
 
 		return f ? cxx_gen_typeinfo_define(c, t, "_ZTVN10__cxxabiv119__pointer_type_infoE", f) : 0;
 	}
-	if (k == TY_PTR && !AST_TYPE(a, t)->ext) {
+	if (k == AST_TYPE_POINTER && !AST_TYPE(a, t)->ext) {
 		/* the runtime has void *, char * and the like (and their const forms) */
-		qty b = AST_TYPE(a, t)->base;
+		ast_qualified_type b = AST_TYPE(a, t)->base;
 		int bk = b == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE_KIND(a, b);
 
-		if (!(bk == TY_VOID || (bk >= TY_BOOL && bk <= TY_ULLONG) || bk == TY_FLOAT || bk == TY_DOUBLE))
+		if (!(bk == AST_TYPE_VOID || (bk >= AST_TYPE_BOOL && bk <= AST_TYPE_UNSIGNED_LONG_LONG) || bk == AST_TYPE_FLOAT || bk == AST_TYPE_DOUBLE))
 			return 0;
-	} else if (!((k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE))
+	} else if (!((k >= AST_TYPE_BOOL && k <= AST_TYPE_UNSIGNED_LONG_LONG) || k == AST_TYPE_FLOAT || k == AST_TYPE_DOUBLE))
 		return 0;
 	if (!cxx_mangle_type(c, t, name + 4, sizeof name - 4))
 		return 0;
@@ -828,11 +828,11 @@ VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
 VPRIV uint32_t cxx_gen_data_address(cxx *c, uint32_t s, uint32_t index)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 	uint32_t n = cc_conversion_decay(a, cxx_gen_var_node(c, s, 0));
 
 	if (index)
-		n = cc_binary_build(a, LEX_TOKEN_PLUS, n, cc_node_integer_new(a, index, cc_type_basic(TY_LONG), 0), 0);
+		n = cc_binary_build(a, LEX_TOKEN_PLUS, n, cc_node_integer_new(a, index, cc_type_basic(AST_TYPE_LONG), 0), 0);
 	return cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, n)->ty, vp, n));
 }
 
@@ -845,7 +845,7 @@ VPRIV bool cxx_gen_class_data_here(cxx *c, cxx_scope *cls)
 	for (uint32_t k = 0; k < cls->nvown && !key && !(cls->owner && cls->owner->instance); k++)
 		if (!cls->vown[k]->fn_pure && !cls->vown[k]->fn_inline && !cls->vown[k]->fn_defaulted && !cls->vown[k]->fn_deleted)
 			key = cls->vown[k];
-	return !key || (key->sym && (a->syms[key->sym].flags & SF_DEFINED));
+	return !key || (key->sym && (a->syms[key->sym].flags & AST_SYMBOL_FLAG_DEFINED));
 }
 
 /*
@@ -856,12 +856,12 @@ VPRIV bool cxx_gen_class_data_here(cxx *c, cxx_scope *cls)
 VPRIV void cxx_gen_typeinfos_emit(cxx *c)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 	uint32_t vt_class = 0, vt_si = 0, vt_vmi = 0;
 
 	for (uint32_t i = 0; i < c->nti_list; i++) {	/* (the list grows: a base's type info) */
 		cxx_scope *cls = c->ti_list[i];
-		qty t = cls->owner->ty, bases[16];
+		ast_qualified_type t = cls->owner->ty, bases[16];
 		uint32_t nb = cxx_class_bases(c, t, bases, 16), bti[16], n, words = 0, ts, si, vals[40];
 		char name[2048] = "_ZTS";
 		uint64_t off[16];
@@ -880,19 +880,19 @@ VPRIV void cxx_gen_typeinfos_emit(cxx *c)
 			continue;
 		/* the name: a weak array of char */
 		si = cxx_gen_text(c, name + 4);
-		ts = cc_symbol_new(a, S_VAR, vintern_cstr("__ts"), cc_type_array(a, QT(TY_CHAR, Q_CONST), strlen(name + 4) + 1, 0), 0);
-		a->syms[ts].flags |= SF_GLOBAL;
+		ts = cc_symbol_new(a, AST_SYMBOL_VARIABLE, vintern_cstr("__ts"), cc_type_array(a, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST), strlen(name + 4) + 1, 0), 0);
+		a->syms[ts].flags |= AST_SYMBOL_FLAG_GLOBAL;
 		a->syms[ts].depth = 0;
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
 		at.weak = 1;
 		cc_attribute_apply_symbol(a, &a->syms[ts], &at);
-		a->syms[ts].flags |= SF_LINKONCE;
-		n = cc_node_new(a, N_STR, a->syms[ts].ty, 0);
+		a->syms[ts].flags |= AST_SYMBOL_FLAG_LINKONCE;
+		n = cc_node_new(a, AST_NODE_STRING, a->syms[ts].ty, 0);
 		AST_NODE_AT(a, n)->a = si;
-		AST_NODE_AT(a, n)->flags = NF_LVALUE;
+		AST_NODE_AT(a, n)->flags = AST_NODE_FLAG_LVALUE;
 		a->syms[ts].body = n;
-		a->syms[ts].flags |= SF_DEFINED;
+		a->syms[ts].flags |= AST_SYMBOL_FLAG_DEFINED;
 		a->toplevel[a->ntoplevel++] = ts;
 		/* the object's words */
 		if (!nb) {
@@ -912,12 +912,12 @@ VPRIV void cxx_gen_typeinfos_emit(cxx *c)
 			vals[words++] = cxx_gen_data_address(c, vt_vmi, 2);
 			vals[words++] = cxx_gen_data_address(c, ts, 0);
 			/* flags (none) and the number of bases, two unsigned ints; then each base and its offset << 8 | public */
-			n = cc_node_integer_new(a, (i128)((uint64_t)nb << 32), cc_type_basic(TY_LONG), 0);
-			vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+			n = cc_node_integer_new(a, (i128)((uint64_t)nb << 32), cc_type_basic(AST_TYPE_LONG), 0);
+			vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(AST_TYPE_LONG), vp, n));
 			for (uint32_t k = 0; k < nb; k++) {
 				vals[words++] = cxx_gen_data_address(c, bti[k], 0);
-				n = cc_node_integer_new(a, (i128)((off[k] << 8) | 2), cc_type_basic(TY_LONG), 0);
-				vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+				n = cc_node_integer_new(a, (i128)((off[k] << 8) | 2), cc_type_basic(AST_TYPE_LONG), 0);
+				vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(AST_TYPE_LONG), vp, n));
 			}
 		}
 		cc_id_list_init(&v);
@@ -928,7 +928,7 @@ VPRIV void cxx_gen_typeinfos_emit(cxx *c)
 		}
 		y = &a->syms[cls->ti_sym];
 		y->ty = cc_type_array(a, vp, words, 0);
-		n = cc_node_new(a, N_INIT, y->ty, 0);
+		n = cc_node_new(a, AST_NODE_INITIALIZER, y->ty, 0);
 		AST_NODE_AT(a, n)->aux = 1;
 		AST_NODE_AT(a, n)->c = words;
 		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
@@ -937,11 +937,11 @@ VPRIV void cxx_gen_typeinfos_emit(cxx *c)
 		y = &a->syms[cls->ti_sym];
 		y->sc = 0;
 		y->body = n;
-		y->flags |= SF_DEFINED;
+		y->flags |= AST_SYMBOL_FLAG_DEFINED;
 		memset(&at, 0, sizeof at);
 		at.weak = 1;
 		cc_attribute_apply_symbol(a, y, &at);
-		y->flags |= SF_LINKONCE;
+		y->flags |= AST_SYMBOL_FLAG_LINKONCE;
 		a->toplevel[a->ntoplevel++] = cls->ti_sym;
 	}
 }
@@ -954,15 +954,15 @@ VPRIV uint32_t cxx_gen_eh_symbol(cxx *c, int which)
 		{ "__cxa_begin_catch", 'p', 1 }, { "__cxa_end_catch", 'v', 1 },	/* (called as a scope's cleanup: with its address) */
 	};
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), ps[3] = { vp, vp, vp };
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)), ps[3] = { vp, vp, vp };
 
 	if (!c->gen_eh_syms[which]) {
 		uint32_t s;
 
 		if (which == 0)
-			ps[0] = cc_type_basic(TY_ULONG);
-		s = cc_symbol_new(a, S_FUNC, vintern_cstr(fns[which].name), cxx_type_function(c, fns[which].ret == 'p' ? vp : cc_type_basic(TY_VOID), ps, (uint32_t)fns[which].np, false), 0);
-		a->syms[s].flags |= SF_GLOBAL;
+			ps[0] = cc_type_basic(AST_TYPE_UNSIGNED_LONG);
+		s = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr(fns[which].name), cxx_type_function(c, fns[which].ret == 'p' ? vp : cc_type_basic(AST_TYPE_VOID), ps, (uint32_t)fns[which].np, false), 0);
+		a->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
 		a->syms[s].depth = 0;
 		c->gen_eh_syms[which] = s;
 	}
@@ -978,7 +978,7 @@ VPRIV uint32_t cxx_gen_runtime_call(cxx *c, uint32_t fs, const uint32_t *args, u
 	cc_id_list_init(&l);
 	for (uint32_t i = 0; i < nargs; i++)
 		cc_id_list_append(a, &l, args[i]);
-	n = cc_node_new(a, N_CALL, AST_TYPE(a, a->syms[fs].ty)->base, loc);
+	n = cc_node_new(a, AST_NODE_CALL, AST_TYPE(a, a->syms[fs].ty)->base, loc);
 	AST_NODE_AT(a, n)->a = cxx_gen_function_node(c, fs, loc);
 	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &l);
 	AST_NODE_AT(a, n)->c = nargs;
@@ -988,7 +988,7 @@ VPRIV uint32_t cxx_gen_runtime_call(cxx *c, uint32_t fs, const uint32_t *args, u
 VPRIV uint32_t cxx_gen_to_void_pointer(cxx *c, uint32_t n)
 {
 	cc *a = c->ast;
-	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	ast_qualified_type vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
 
 	return cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, n)->ty, vp, n));
 }

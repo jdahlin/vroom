@@ -2,9 +2,9 @@
 #include "instantiate.h"
 
 /* P against the base classes of the class A (cv as A's): true if one matches (bind then holds it) */
-VPRIV bool cxx_match_bases(cxx *c, cxx_partial *p, qty P, qty A, cxx_targ *bind, int depth)
+VPRIV bool cxx_match_bases(cxx *c, cxx_partial *p, ast_qualified_type P, ast_qualified_type A, cxx_targ *bind, int depth)
 {
-	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(A)) : NULL;
+	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(A)) : NULL;
 	cxx_targ save[64];
 
 	if (!cls || p->params->ntparams > 64)
@@ -12,11 +12,11 @@ VPRIV bool cxx_match_bases(cxx *c, cxx_partial *p, qty P, qty A, cxx_targ *bind,
 	memcpy(save, bind, p->params->ntparams * sizeof *bind);
 	for (uint32_t i = 0; i < cls->nused; i++) {
 		cxx_scope *b = cls->used[i];
-		qty bt;
+		ast_qualified_type bt;
 
 		if (!b || b->kind != CXX_SCOPE_CLASS || !b->owner || b->owner->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, b->owner->ty))
 			continue;
-		bt = QT(QI(b->owner->ty), QQ(A));
+		bt = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(b->owner->ty), AST_QUALIFIED_TYPE_QUALIFIERS(A));
 		if (cxx_match_type(c, p, P, bt, bind, 0) || cxx_match_bases(c, p, P, bt, bind, depth + 1))
 			return true;
 		memcpy(bind, save, p->params->ntparams * sizeof *bind);	/* (a partial match binds nothing) */
@@ -60,7 +60,7 @@ VPRIV int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 			c->scope = binding;
 			c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 			c->member_missing = 0;
-			volatile qty got = CXX_TY_UNKNOWN;
+			volatile ast_qualified_type got = CXX_TY_UNKNOWN;
 
 			if (!setjmp(jb)) {
 				cxx_type_specifiers_parse(c);
@@ -153,14 +153,14 @@ VPRIV int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *bi
 }
 
 /* is the class a an instance of the template t, or derived from one? */
-VPRIV bool cxx_instance_of(cxx *c, qty a, const cxx_template *t, int depth)
+VPRIV bool cxx_instance_of(cxx *c, ast_qualified_type a, const cxx_template *t, int depth)
 {
 	cxx_instance *ia = cxx_tag_info(c, a);
 	cxx_scope *cls;
 
 	if (ia && ia->t == t)
 		return true;
-	cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(a)) : NULL;
+	cls = depth < 8 ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a)) : NULL;
 	if (!cls || cls->has_dependent_base)
 		return cls != NULL;	/* (bases not known: it may be) */
 	for (uint32_t i = 0; i < cls->nused; i++) {
@@ -175,7 +175,7 @@ VPRIV bool cxx_instance_of(cxx *c, qty a, const cxx_template *t, int depth)
 
 /* can no argument of type A match the pattern P, whatever its parameters are?  X<...> against what is not
    an X (or derived from one), a pointer or array pattern against what is not one */
-VPRIV bool cxx_shape_mismatch(cxx *c, qty P, qty A)
+VPRIV bool cxx_shape_mismatch(cxx *c, ast_qualified_type P, ast_qualified_type A)
 {
 	const ctype *pt, *at;
 	void *owner;
@@ -183,17 +183,17 @@ VPRIV bool cxx_shape_mismatch(cxx *c, qty P, qty A)
 	if (P == CXX_TY_UNKNOWN || A == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
 		return false;
 	pt = AST_TYPE(c->ast, P);
-	if (pt->kind == TY_PTR && pt->ext)
+	if (pt->kind == AST_TYPE_POINTER && pt->ext)
 		P = pt->base, pt = AST_TYPE(c->ast, P);
 	if (cxx_placeholder_of(c, P, &owner) >= 0)
 		return false;	/* a bare T: anything */
 	at = AST_TYPE(c->ast, A);
-	if (pt->kind == TY_STRUCT || pt->kind == TY_UNION) {
+	if (pt->kind == AST_TYPE_STRUCT || pt->kind == AST_TYPE_UNION) {
 		cxx_instance *ip = cxx_tag_info(c, P);
 
 		if (!ip)
 			return false;
-		if (at->kind != TY_STRUCT && at->kind != TY_UNION)
+		if (at->kind != AST_TYPE_STRUCT && at->kind != AST_TYPE_UNION)
 			return true;
 		if (!cxx_instance_of(c, A, ip->t, 0))
 			return true;
@@ -212,68 +212,68 @@ VPRIV bool cxx_shape_mismatch(cxx *c, qty P, qty A)
 		}
 		return false;
 	}
-	if (pt->kind == TY_PTR)
-		return !((at->kind == TY_PTR && !at->ext) || at->kind == TY_ARRAY || at->kind == TY_FUNC);
-	if (pt->kind == TY_ARRAY)
-		return at->kind != TY_ARRAY;
+	if (pt->kind == AST_TYPE_POINTER)
+		return !((at->kind == AST_TYPE_POINTER && !at->ext) || at->kind == AST_TYPE_ARRAY || at->kind == AST_TYPE_FUNCTION);
+	if (pt->kind == AST_TYPE_ARRAY)
+		return at->kind != AST_TYPE_ARRAY;
 	return false;
 }
 
 /* one argument (type A, an lvalue or not) against a parameter's pattern P: 1 deduced or nothing to deduce,
    0 no match, -1 not known */
-VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue, cxx_targ *bind)
+VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, ast_qualified_type P, ast_qualified_type A, bool lvalue, cxx_targ *bind)
 {
-	if (c->memptr_ty && P != CXX_TY_UNKNOWN && QUNQ(P) == QUNQ(c->memptr_ty) && A != CXX_TY_UNKNOWN &&
-	    QUNQ(A) != QUNQ(c->memptr_ty) && !cc_type_is_record(c->ast, A))
+	if (c->memptr_ty && P != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(P) == AST_QUALIFIED_TYPE_UNQUALIFIED(c->memptr_ty) && A != CXX_TY_UNKNOWN &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(A) != AST_QUALIFIED_TYPE_UNQUALIFIED(c->memptr_ty) && !cc_type_is_record(c->ast, A))
 		return 0;	/* (R C::* from something that is no pointer to member: no deduction) */
 	if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
 		return 1;	/* (non-deduced: its conversion is not checked here) */
-	if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {
+	if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == AST_TYPE_VOID) {
 		c->why = CXX_WHY_ARG;
 		return -1;	/* (void: a type vcc got wrong; no argument has it) */
 	}
-	if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
+	if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext) {
 		int ext = AST_TYPE(c->ast, P)->ext;
 		void *owner;
 
 		P = AST_TYPE(c->ast, P)->base;
 		/* T&& with an lvalue: a forwarding reference deduces T as A& */
-		if (ext == 2 && !QQ(P) && lvalue && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
+		if (ext == 2 && !AST_QUALIFIED_TYPE_QUALIFIERS(P) && lvalue && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
 			A = cxx_type_reference(c, A, false);
 		else
-			A = QT(QI(A), QQ(A) | QQ(P));	/* (const T& binds what is not const too) */
+			A = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(A), AST_QUALIFIED_TYPE_QUALIFIERS(A) | AST_QUALIFIED_TYPE_QUALIFIERS(P));	/* (const T& binds what is not const too) */
 	} else {
 		/* by value: arrays and functions decay, top-level cv goes */
 		const ctype *at = AST_TYPE(c->ast, A);
 
-		if (at->kind == TY_ARRAY)
+		if (at->kind == AST_TYPE_ARRAY)
 			A = cc_type_pointer(c->ast, at->base);
-		else if (at->kind == TY_FUNC)
+		else if (at->kind == AST_TYPE_FUNCTION)
 			A = cc_type_pointer(c->ast, A);
-		A = QUNQ(A);
-		P = QUNQ(P);	/* (a by-value parameter's own const is not part of the function's type) */
+		A = AST_QUALIFIED_TYPE_UNQUALIFIED(A);
+		P = AST_QUALIFIED_TYPE_UNQUALIFIED(P);	/* (a by-value parameter's own const is not part of the function's type) */
 		/* const T * from int *: a qualification conversion, the pointee as const as P's ([temp.deduct.call]/4.2) */
-		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == TY_PTR &&
+		if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == AST_TYPE_POINTER &&
 		    !AST_TYPE(c->ast, A)->ext && AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE(c->ast, A)->base != CXX_TY_UNKNOWN) {
-			qty pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
+			ast_qualified_type pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
 
-			if ((QQ(pb) & QQ(ab)) == QQ(ab) && QQ(pb) != QQ(ab))
-				A = cc_type_pointer(c->ast, QT(QI(ab), QQ(ab) | QQ(pb)));
+			if ((AST_QUALIFIED_TYPE_QUALIFIERS(pb) & AST_QUALIFIED_TYPE_QUALIFIERS(ab)) == AST_QUALIFIED_TYPE_QUALIFIERS(ab) && AST_QUALIFIED_TYPE_QUALIFIERS(pb) != AST_QUALIFIED_TYPE_QUALIFIERS(ab))
+				A = cc_type_pointer(c->ast, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ab), AST_QUALIFIED_TYPE_QUALIFIERS(ab) | AST_QUALIFIED_TYPE_QUALIFIERS(pb)));
 		}
 	}
 	if (!cxx_match_type(c, p, P, A, bind, 0)) {
 		/* X<T> against a class derived from X<int>: its bases, nearest first */
-		if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
+		if (AST_TYPE_KIND(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(A)) == AST_TYPE_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
 			return 1;
 		/* ... X<T> * against a pointer to one ([temp.deduct.call]/4.3): the pointee's bases, as const and
 		   volatile as P's pointee (__cxx_atomic_load(const volatile __cxx_atomic_base_impl<T> *) for a
 		   __cxx_atomic_impl<bool> *) */
-		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == TY_PTR && !AST_TYPE(c->ast, A)->ext &&
+		if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == AST_TYPE_POINTER && !AST_TYPE(c->ast, A)->ext &&
 		    AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE(c->ast, A)->base != CXX_TY_UNKNOWN &&
-		    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, A)->base) == TY_STRUCT) {
-			qty pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
+		    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, A)->base) == AST_TYPE_STRUCT) {
+			ast_qualified_type pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
 
-			if ((QQ(pb) & QQ(ab)) == QQ(ab) && cxx_match_bases(c, p, pb, QT(QI(ab), QQ(pb)), bind, 0))
+			if ((AST_QUALIFIED_TYPE_QUALIFIERS(pb) & AST_QUALIFIED_TYPE_QUALIFIERS(ab)) == AST_QUALIFIED_TYPE_QUALIFIERS(ab) && cxx_match_bases(c, p, pb, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ab), AST_QUALIFIED_TYPE_QUALIFIERS(pb)), bind, 0))
 				return 1;
 		}
 		/* (deduction does not convert: a pattern that matches neither the argument nor a base of it fails) */
@@ -284,7 +284,7 @@ VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue,
 }
 
 /* pat with p's placeholder (the pack's) replaced by t: T, const T, T&, T&&, T* */
-VPRIV qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int depth)
+VPRIV ast_qualified_type cxx_placeholder_subst(cxx *c, cxx_partial *p, ast_qualified_type pat, ast_qualified_type t, int depth)
 {
 	const ctype *x;
 	void *owner;
@@ -292,17 +292,17 @@ VPRIV qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int dept
 	if (pat == CXX_TY_UNKNOWN || depth > 16)
 		return CXX_TY_UNKNOWN;
 	if (cxx_placeholder_of(c, pat, &owner) >= 0)
-		return owner == p ? (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext ? t : cc_type_qualify(c->ast, t, QQ(pat))) :
+		return owner == p ? (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext ? t : cc_type_qualify(c->ast, t, AST_QUALIFIED_TYPE_QUALIFIERS(pat))) :
 				    CXX_TY_UNKNOWN;
 	x = AST_TYPE(c->ast, pat);
-	if (x->kind == TY_PTR) {
-		qty b = cxx_placeholder_subst(c, p, x->base, t, depth + 1);
+	if (x->kind == AST_TYPE_POINTER) {
+		ast_qualified_type b = cxx_placeholder_subst(c, p, x->base, t, depth + 1);
 
 		if (b == CXX_TY_UNKNOWN)
 			return b;
 		if (x->ext)
 			return cxx_type_reference(c, b, x->ext == 2);	/* (collapses) */
-		return cc_type_qualify(c->ast, cc_type_pointer(c->ast, b), QQ(pat));
+		return cc_type_qualify(c->ast, cc_type_pointer(c->ast, b), AST_QUALIFIED_TYPE_QUALIFIERS(pat));
 	}
 	return cxx_mentions_placeholder(c, pat, 0) ? CXX_TY_UNKNOWN : pat;
 }
@@ -311,13 +311,13 @@ VPRIV qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int dept
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
  */
-VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-				 uint32_t nargs, qty *ret, bool body);
+VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+				 uint32_t nargs, ast_qualified_type *ret, bool body);
 
 /* (a candidate that does not deduce, or whose default arguments or constraints fail, is not an error
    in the expression that calls: what its evaluation left in the validity flags goes with it) */
-VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-			      uint32_t nargs, qty *ret, bool body)
+VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+			      uint32_t nargs, ast_qualified_type *ret, bool body)
 {
 	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
 	cxx_entity *outer_te = c->ftmpl_te;
@@ -332,8 +332,8 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	return r;
 }
 
-VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-				 uint32_t nargs, qty *ret, bool body)
+VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
+				 uint32_t nargs, ast_qualified_type *ret, bool body)
 {
 	cxx_ftemplate *f = e->ftmpl;
 	cxx_partial *p;
@@ -434,7 +434,7 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		bool inside = !f->pack_param;
 		uint32_t ntp = p->params->ntparams, fixed = inside ? f->np : f->np - 1, pk = f->pack_tp - 1, ne = 0;
 		cxx_targ flat[32];
-		qty etypes[16];
+		ast_qualified_type etypes[16];
 
 		if (nargs < fixed && !(inside && nargs + e->ndefaults >= fixed))
 			return 0;
@@ -513,7 +513,7 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 					cxx_outer o;
 					jmp_buf jb;
 					volatile bool failed = false;
-					volatile qty got = CXX_TY_UNKNOWN;
+					volatile ast_qualified_type got = CXX_TY_UNKNOWN;
 
 					cxx_outer_save(c, &o);
 					c->instantiating++;

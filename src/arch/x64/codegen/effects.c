@@ -1,174 +1,180 @@
 /* Physical-register and observable effects of x86 records. Keep this alongside
  * the printer: several records expand into multiple machine instructions.
  */
-#include "x64impl.h"
+#include "x64-internal.h"
 
-#define X_BIT(r) (UINT64_C(1) << (r))
-#define X_GP_ARGS (X_BIT(RDI) | X_BIT(RSI) | X_BIT(RDX) | X_BIT(RCX) | X_BIT(R8) | X_BIT(R9))
-#define X_FP_ARGS (UINT64_C(0xff) << XMM0)
-#define X_CALL_DEF (X_TEMPS | X_BIT(R11) | (UINT64_C(0xffff) << XMM0))
-#define X_CALL_USE (X_GP_ARGS | X_FP_ARGS | X_BIT(RAX) | X_BIT(R10) | X_BIT(RSP))
-#define X_ALL_REGS ((UINT64_C(1) << (XMM15 + 1)) - 1)
-#define X_D OD_DEF0
-#define X_U OD_USE1
-#define X_V OD_USE2
-#define X_P OD_PURE
-#define X_W OD_WFLAGS
-#define X_R OD_RFLAGS
-#define X_MEM (OD_LOAD | OD_STORE | OD_TRAP)
-#define X_CALL_FLAGS (X_MEM | OD_CALL | X_W | OD_FP | OD_BARRIER)
-#define X_DESC(regs_, flags_) { .regs = (regs_), .fl = (flags_) }
+#define X64_REGISTER_BIT(r) (UINT64_C(1) << (r))
+#define X64_GENERAL_ARGUMENT_REGISTERS (X64_REGISTER_BIT(RDI) | X64_REGISTER_BIT(RSI) | X64_REGISTER_BIT(RDX) | X64_REGISTER_BIT(RCX) | X64_REGISTER_BIT(R8) | X64_REGISTER_BIT(R9))
+#define X64_FLOAT_ARGUMENT_REGISTERS (UINT64_C(0xff) << XMM0)
+#define X64_CALL_DEFINED_REGISTERS (X64_TEMPORARIES | X64_REGISTER_BIT(R11) | (UINT64_C(0xffff) << XMM0))
+#define X64_CALL_USED_REGISTERS (X64_GENERAL_ARGUMENT_REGISTERS | X64_FLOAT_ARGUMENT_REGISTERS | X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(R10) | X64_REGISTER_BIT(RSP))
+#define X64_ALL_REGISTERS ((UINT64_C(1) << (XMM15 + 1)) - 1)
+#define X_D RECORD_OPERAND_DEFINES_0
+#define X_U RECORD_OPERAND_USES_1
+#define X_V RECORD_OPERAND_USES_2
+#define X_P RECORD_EFFECT_PURE
+#define X_W RECORD_EFFECT_WRITES_FLAGS
+#define X_R RECORD_EFFECT_READS_FLAGS
+#define X_MEM (RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP)
+#define X_CALL_FLAGS (X_MEM | RECORD_EFFECT_CALL | X_W | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER)
+#define X_DESC(regs_, flags_) { .registers = (regs_), .flags = (flags_) }
 
-static const opdesc x64_desc[X_NOPS] = {
-	[X_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
-	[X_CMPM] = X_DESC(X_U | X_V | OD_USE3, OD_LOAD | OD_TRAP | X_W),
-	[X_TESTM] = X_DESC(X_U | OD_USE3, OD_LOAD | OD_TRAP | X_W),
-	[X_LDX] = X_DESC(X_D | X_U | OD_USE3, OD_LOAD | OD_TRAP),
-	[X_STX] = X_DESC(X_U | X_V | OD_USE3, OD_STORE | OD_TRAP),
-	[X_LABEL] = X_DESC(0, OD_LABEL),
-	[X_MOV] = X_DESC(X_D | X_U, X_P),
-	[X_MOVI] = X_DESC(X_D, X_P),
-	[X_LD] = X_DESC(X_D | X_U, OD_LOAD | OD_TRAP),
-	[X_ST] = X_DESC(X_U | X_V, OD_STORE | OD_TRAP),
-	[X_LEA] = X_DESC(X_D | X_U, X_P),
-	[X_LEASCALE] = X_DESC(X_D | X_U | X_V, X_P),
-	[X_ADD] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_SUB] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_AND] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_OR] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_XOR] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_IMUL] = X_DESC(X_D | X_U | X_V, X_P | X_W),
-	[X_ADC] = X_DESC(X_D | X_U | X_V, X_P | X_R | X_W),
-	[X_SBB] = X_DESC(X_D | X_U | X_V, X_P | X_R | X_W),
-	[X_ADDI] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_SUBI] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_ANDI] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_ORI] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_XORI] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_IMULI] = X_DESC(X_D | X_U, X_P | X_W),
+static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
+	[X64_OP_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
+	[X64_OP_CMPM] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
+	[X64_OP_TESTM] = X_DESC(X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
+	[X64_OP_LDX] = X_DESC(X_D | X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X64_OP_STX] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP),
+	[X64_OP_LABEL] = X_DESC(0, RECORD_EFFECT_LABEL),
+	[X64_OP_MOV] = X_DESC(X_D | X_U, X_P),
+	[X64_OP_MOVI] = X_DESC(X_D, X_P),
+	[X64_OP_LD] = X_DESC(X_D | X_U, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X64_OP_ST] = X_DESC(X_U | X_V, RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP),
+	[X64_OP_LEA] = X_DESC(X_D | X_U, X_P),
+	[X64_OP_LEASCALE] = X_DESC(X_D | X_U | X_V, X_P),
+	[X64_OP_ADD] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_SUB] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_AND] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_OR] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_XOR] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_IMUL] = X_DESC(X_D | X_U | X_V, X_P | X_W),
+	[X64_OP_ADC] = X_DESC(X_D | X_U | X_V, X_P | X_R | X_W),
+	[X64_OP_SBB] = X_DESC(X_D | X_U | X_V, X_P | X_R | X_W),
+	[X64_OP_ADDI] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_SUBI] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_ANDI] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_ORI] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_XORI] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_IMULI] = X_DESC(X_D | X_U, X_P | X_W),
 	/* A zero (possibly variable) shift count preserves flags. */
-	[X_SHLI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
-	[X_SHRI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
-	[X_SARI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
-	[X_SHL] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SHR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_SAR] = { .regs = X_D | X_U | X_V, .fl = X_P | X_R | X_W, .iuse = X_BIT(RCX) },
-	[X_NEG] = X_DESC(X_D | X_U, X_P | X_W),
-	[X_NOT] = X_DESC(X_D | X_U, X_P),
-	[X_CMP] = X_DESC(X_U | X_V, X_P | X_W),
-	[X_CMPI] = X_DESC(X_U, X_P | X_W),
-	[X_TEST] = X_DESC(X_U, X_P | X_W),
-	[X_SETCC] = X_DESC(X_D, X_P | X_R),
-	[X_JMP] = { .br = RB_JUMP },
-	[X_JCC] = { .br = RB_COND, .fl = X_R },
-	[X_CALL] = { .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_CALLR] = { .regs = X_U, .fl = X_CALL_FLAGS, .idef = X_CALL_DEF, .iuse = X_CALL_USE },
-	[X_TAIL] = { .br = RB_RET, .fl = OD_BARRIER, .iuse = X_GP_ARGS },
-	[X_PUSH] = { .regs = X_U, .fl = OD_STORE | OD_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_POP] = { .regs = X_D, .fl = OD_LOAD | OD_TRAP, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_ADJSP] = { .fl = X_P | X_W, .idef = X_BIT(RSP), .iuse = X_BIT(RSP) },
-	[X_CQO] = { .fl = X_P, .idef = X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_IDIV] = { .regs = X_U, .fl = OD_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_DIV] = { .regs = X_U, .fl = OD_TRAP | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) | X_BIT(RDX) },
-	[X_MULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_SMULW] = { .regs = X_U, .fl = X_P | X_W, .idef = X_BIT(RAX) | X_BIT(RDX), .iuse = X_BIT(RAX) },
-	[X_UD2] = X_DESC(0, OD_TRAP | OD_BARRIER),
-	[X_TLS] = X_DESC(X_D, OD_LOAD | OD_TRAP), /* dynamic model below */
-	[X_GOT] = X_DESC(X_D, OD_LOAD | OD_TRAP),
-	[X_XCHG] = X_DESC(X_D | OD_USE0 | X_U, X_MEM | OD_BARRIER),
-	[X_XADD] = X_DESC(X_D | OD_USE0 | X_U, X_MEM | OD_BARRIER | X_W),
-	[X_CMPXCHG] = { .regs = X_U | X_V, .fl = X_MEM | OD_BARRIER | X_W, .idef = X_BIT(RAX), .iuse = X_BIT(RAX) },
-	[X_MFENCE] = X_DESC(0, OD_BARRIER),
-	[X_BLENDVB] = { .fl = X_P, .idef = X_BIT(XMM0 + 1),
-		.iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) | X_BIT(XMM0 + 2) },
-	[X_PCMPSTR] = { .fl = X_P | X_W, .iuse = X_BIT(XMM0) | X_BIT(XMM0 + 1) },
-	[X_RAW] = { .br = RB_INDIRECT, .fl = X_MEM | OD_BARRIER | X_R | X_W | OD_FP, .idef = X_ALL_REGS, .iuse = X_ALL_REGS },
-	[X_BARRIER] = X_DESC(0, OD_LOAD | OD_STORE | OD_BARRIER | X_R | X_W),
-	[X_LEAL] = X_DESC(X_D, X_P),
-	[X_JMPR] = { .regs = X_U, .br = RB_INDIRECT },
-	[X_JTE] = X_DESC(0, OD_BARRIER),
-	[X_NAMED] = X_DESC(0, OD_LABEL | OD_BARRIER),
+	[X64_OP_SHLI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
+	[X64_OP_SHRI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
+	[X64_OP_SARI] = X_DESC(X_D | X_U, X_P | X_R | X_W),
+	[X64_OP_SHL] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X64_REGISTER_BIT(RCX) },
+	[X64_OP_SHR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X64_REGISTER_BIT(RCX) },
+	[X64_OP_SAR] = { .registers = X_D | X_U | X_V, .flags = X_P | X_R | X_W, .implicit_used = X64_REGISTER_BIT(RCX) },
+	[X64_OP_NEG] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_NOT] = X_DESC(X_D | X_U, X_P),
+	[X64_OP_CMP] = X_DESC(X_U | X_V, X_P | X_W),
+	[X64_OP_CMPI] = X_DESC(X_U, X_P | X_W),
+	[X64_OP_TEST] = X_DESC(X_U, X_P | X_W),
+	[X64_OP_SETCC] = X_DESC(X_D, X_P | X_R),
+	[X64_OP_JMP] = { .branch = RECORD_BRANCH_JUMP },
+	[X64_OP_JCC] = { .branch = RECORD_BRANCH_CONDITIONAL, .flags = X_R },
+	[X64_OP_CALL] = { .flags = X_CALL_FLAGS, .implicit_defined = X64_CALL_DEFINED_REGISTERS, .implicit_used = X64_CALL_USED_REGISTERS },
+	[X64_OP_CALLR] = { .registers = X_U, .flags = X_CALL_FLAGS, .implicit_defined = X64_CALL_DEFINED_REGISTERS, .implicit_used = X64_CALL_USED_REGISTERS },
+	[X64_OP_TAIL] = { .branch = RECORD_BRANCH_RETURN, .flags = RECORD_EFFECT_BARRIER, .implicit_used = X64_GENERAL_ARGUMENT_REGISTERS },
+	[X64_OP_PUSH] = { .registers = X_U, .flags = RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP, .implicit_defined = X64_REGISTER_BIT(RSP), .implicit_used = X64_REGISTER_BIT(RSP) },
+	[X64_OP_POP] = { .registers = X_D, .flags = RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP, .implicit_defined = X64_REGISTER_BIT(RSP), .implicit_used = X64_REGISTER_BIT(RSP) },
+	[X64_OP_ADJSP] = { .flags = X_P | X_W, .implicit_defined = X64_REGISTER_BIT(RSP), .implicit_used = X64_REGISTER_BIT(RSP) },
+	[X64_OP_CQO] = { .flags = X_P, .implicit_defined = X64_REGISTER_BIT(RDX), .implicit_used = X64_REGISTER_BIT(RAX) },
+	[X64_OP_IDIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX), .implicit_used = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX) },
+	[X64_OP_DIV] = { .registers = X_U, .flags = RECORD_EFFECT_TRAP | X_W, .implicit_defined = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX), .implicit_used = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX) },
+	[X64_OP_MULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX), .implicit_used = X64_REGISTER_BIT(RAX) },
+	[X64_OP_SMULW] = { .registers = X_U, .flags = X_P | X_W, .implicit_defined = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX), .implicit_used = X64_REGISTER_BIT(RAX) },
+	[X64_OP_UD2] = X_DESC(0, RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
+	[X64_OP_TLS] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP), /* dynamic model below */
+	[X64_OP_GOT] = X_DESC(X_D, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP),
+	[X64_OP_XCHG] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER),
+	[X64_OP_XADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_MEM | RECORD_EFFECT_BARRIER | X_W),
+	[X64_OP_CMPXCHG] = { .registers = X_U | X_V, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X64_REGISTER_BIT(RAX), .implicit_used = X64_REGISTER_BIT(RAX) },
+	[X64_OP_MFENCE] = X_DESC(0, RECORD_EFFECT_BARRIER),
+	[X64_OP_BLENDVB] = { .flags = X_P, .implicit_defined = X64_REGISTER_BIT(XMM0 + 1),
+		.implicit_used = X64_REGISTER_BIT(XMM0) | X64_REGISTER_BIT(XMM0 + 1) | X64_REGISTER_BIT(XMM0 + 2) },
+	[X64_OP_PCMPSTR] = { .flags = X_P | X_W, .implicit_used = X64_REGISTER_BIT(XMM0) | X64_REGISTER_BIT(XMM0 + 1) },
+	[X64_OP_RAW] = { .branch = RECORD_BRANCH_INDIRECT, .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R | X_W | RECORD_EFFECT_FLOAT, .implicit_defined = X64_ALL_REGISTERS, .implicit_used = X64_ALL_REGISTERS },
+	[X64_OP_BARRIER] = X_DESC(0, RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_BARRIER | X_R | X_W),
+	[X64_OP_LEAL] = X_DESC(X_D, X_P),
+	[X64_OP_JMPR] = { .registers = X_U, .branch = RECORD_BRANCH_INDIRECT },
+	[X64_OP_JTE] = X_DESC(0, RECORD_EFFECT_BARRIER),
+	[X64_OP_NAMED] = X_DESC(0, RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER),
 	/* Undefined destination for zero input is conservatively an old value. */
-	[X_BSF] = X_DESC(X_D | OD_USE0 | X_U, X_P | X_W),
-	[X_BSR] = X_DESC(X_D | OD_USE0 | X_U, X_P | X_W),
-	[X_BSWAP] = X_DESC(X_D | OD_USE0 | X_U, X_P),
-	[X_EXT] = X_DESC(X_D | X_U, X_P),
+	[X64_OP_BSF] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
+	[X64_OP_POPCNT] = X_DESC(X_D | X_U, X_P | X_W),
+	[X64_OP_BSR] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
+	[X64_OP_BSWAP] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P),
+	[X64_OP_CRC32] = X_DESC(X_D | X_U | X_V, X_P),
+	[X64_OP_EXT] = X_DESC(X_D | X_U, X_P),
 	/* Direction flag is an input even though REP leaves arithmetic flags alone. */
-	[X_REP] = { .fl = X_MEM | OD_BARRIER | X_R, .idef = X_BIT(RCX) | X_BIT(RDI), .iuse = X_BIT(RCX) | X_BIT(RDI) },
-	[X_FADD] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FSUB] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FMUL] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FDIV] = X_DESC(X_D | OD_USE0 | X_U | X_V, OD_FP | OD_TRAP),
-	[X_FXOR] = X_DESC(X_D | X_U | X_V, X_P),
-	[X_FSQRT] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
-	[X_FCMP] = X_DESC(X_U | X_V, OD_FP | OD_TRAP | X_W),
-	[X_FSETCC] = { .regs = X_D, .fl = X_P | X_R | X_W, .idef = X_BIT(R11), .iuse = X_BIT(R11) },
-	[X_CVTI2F] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
-	[X_CVTF2I] = X_DESC(X_D | X_U, OD_FP | OD_TRAP),
-	[X_CVTF2F] = X_DESC(X_D | OD_USE0 | X_U, OD_FP | OD_TRAP),
+	[X64_OP_REP] = { .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R, .implicit_defined = X64_REGISTER_BIT(RCX) | X64_REGISTER_BIT(RDI), .implicit_used = X64_REGISTER_BIT(RCX) | X64_REGISTER_BIT(RDI) },
+	[X64_OP_FADD] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_FSUB] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_FMUL] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_FDIV] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_FXOR] = X_DESC(X_D | X_U | X_V, X_P),
+	[X64_OP_FSQRT] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_FCMP] = X_DESC(X_U | X_V, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | X_W),
+	[X64_OP_FSETCC] = { .registers = X_D, .flags = X_P | X_R | X_W, .implicit_defined = X64_REGISTER_BIT(R11), .implicit_used = X64_REGISTER_BIT(R11) },
+	[X64_OP_CVTI2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_CVTF2I] = X_DESC(X_D | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
+	[X64_OP_CVTF2F] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP),
 	/* x87 stack and control/status state are not physical GPR/XMM bits. */
-	[X_X87] = X_DESC(X_U, OD_FP | OD_TRAP | OD_BARRIER),
-	[X_RESUME_FRAME] = { .fl = OD_BARRIER | X_W, .idef = X_BIT(R12), .iuse = X_BIT(RBP) },
+	[X64_OP_X87] = X_DESC(X_U, RECORD_EFFECT_FLOAT | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER),
+	[X64_OP_RESUME_FRAME] = { .flags = RECORD_EFFECT_BARRIER | X_W, .implicit_defined = X64_REGISTER_BIT(R12), .implicit_used = X64_REGISTER_BIT(RBP) },
+	[X64_OP_PROBE] = { .flags = RECORD_EFFECT_LOAD | RECORD_EFFECT_STORE | RECORD_EFFECT_TRAP | RECORD_EFFECT_BARRIER | X_W, .implicit_used = X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RSP) },
+	[X64_OP_FRAMEADDR] = { .registers = X_D, .flags = X_P, .implicit_used = X64_REGISTER_BIT(RBP) },
 };
 
-static rmask x64_effect_reg(unsigned r)
+static record_register_mask x64_effect_register_mask(unsigned r)
 {
-	if(r==XFRAME)return X_BIT(RSP);
-	return r <= XMM15 ? X_BIT(r) : 0; /* RIP is not a mutable register. */
+	if(r==X64_REGISTER_FRAME)return X64_REGISTER_BIT(RSP);
+	return r <= XMM15 ? X64_REGISTER_BIT(r) : 0; /* RIP is not a mutable register. */
 }
 
-VPRIV receffects x64_effects(const ecx *e, const rec *i)
+VPRIV record_effects x64_record_effects(const codegen_context *e, const record *i)
 {
-	if (i->op >= X_NOPS)
-		return (receffects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | OD_FP | OD_BARRIER | X_R | X_W, .br = RB_INDIRECT };
-	const opdesc *d = &x64_desc[i->op];
+	if (i->opcode >= X64_OP_COUNT)
+		return (record_effects){ .defines = X64_ALL_REGISTERS, .used = X64_ALL_REGISTERS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	const record_op_descriptor *d = &x64_op_descriptors[i->opcode];
 	/* A newly added opcode without metadata must be opaque, never a no-op. */
-	if (!d->regs && !d->br && !d->fl && !d->idef && !d->iuse)
-		return (receffects){ .def = X_ALL_REGS, .use = X_ALL_REGS,
-			.fl = X_MEM | OD_FP | OD_BARRIER | X_R | X_W, .br = RB_INDIRECT };
-	receffects f = { .def = d->idef, .use = d->iuse, .fl = d->fl, .br = d->br };
-	if(i->op==X_BSWAP && i->sz==2)f.fl|=OD_WFLAGS; /* byte rotate */
-	if (d->regs & OD_DEF0) f.def |= x64_effect_reg(i->r[0]);
-	if (d->regs & OD_USE0) f.use |= x64_effect_reg(i->r[0]);
-	if (d->regs & OD_USE1) f.use |= x64_effect_reg(i->r[1]);
-	if (d->regs & OD_USE2) f.use |= x64_effect_reg(i->r[2]);
-	if (d->regs & OD_USE3) f.use |= x64_effect_reg(i->r[3]);
+	if (!d->registers && !d->branch && !d->flags && !d->implicit_defined && !d->implicit_used)
+		return (record_effects){ .defines = X64_ALL_REGISTERS, .used = X64_ALL_REGISTERS,
+			.flags = X_MEM | RECORD_EFFECT_FLOAT | RECORD_EFFECT_BARRIER | X_R | X_W, .branch = RECORD_BRANCH_INDIRECT };
+	record_effects f = { .defines = d->implicit_defined, .used = d->implicit_used, .flags = d->flags, .branch = d->branch };
+	if(i->opcode==X64_OP_BSWAP && i->size==2)f.flags|=RECORD_EFFECT_WRITES_FLAGS; /* byte rotate */
+	if (d->registers & RECORD_OPERAND_DEFINES_0) f.defines |= x64_effect_register_mask(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_0) f.used |= x64_effect_register_mask(i->registers[0]);
+	if (d->registers & RECORD_OPERAND_USES_1) f.used |= x64_effect_register_mask(i->registers[1]);
+	if (d->registers & RECORD_OPERAND_USES_2) f.used |= x64_effect_register_mask(i->registers[2]);
+	if (d->registers & RECORD_OPERAND_USES_3) f.used |= x64_effect_register_mask(i->registers[3]);
 
 	/* Only MOV and narrow ALU/atomic operations can leave GPR high bits.
 	 * SETCC and EXT contain a widening move; LD also always widens GPRs.
 	 */
-	if ((d->regs & OD_DEF0) && i->sz < 4 && i->r[0] < XMM0 &&
-	    i->op != X_LD && i->op != X_LDX && i->op != X_EXT && i->op != X_SETCC && i->op != X_FSETCC)
-		f.use |= x64_effect_reg(i->r[0]);
-	if ((i->op == X_LD || i->op == X_ST || i->op == X_LDX || i->op == X_STX || i->op == X_TESTM || i->op == X_CMPM || i->op == X_LEA ||
-	     i->op == X_XCHG || i->op == X_XADD || i->op == X_CMPXCHG || i->op == X_X87) &&
-	    i->r[1] == RBP && i->off < 0 && (!e || e->wk->falign > 16))
-		f.use |= X_BIT(R12); /* printer's realigned local-frame base */
-	if (i->op == X_RESUME_FRAME) {
-		if (e && e->wk && e->wk->falign <= 16)
-			f = (receffects){ .fl = OD_BARRIER }; /* printer emits nothing */
-		else if (!e || !e->wk)
-			f.use |= X_BIT(R12); /* unknown alignment may preserve its old value */
-	} else if (i->op == X_PCMPSTR) {
-		f.def |= X_BIT((i->cond & 1) ? RCX : XMM0);
-		if (!(i->cond & 2)) f.use |= X_BIT(RAX) | X_BIT(RDX);
-	} else if (i->op == X_TLS) {
-		if (i->cond == 2) {
-			f.def = X_CALL_DEF;
-			f.use = X_CALL_USE & ~X_BIT(RDI); /* descriptor overwrites RDI */
-			f.fl = X_CALL_FLAGS;
-		} else if (i->cond) {
-			f.fl |= X_W; /* initial-exec uses addq, local-exec LEA does not */
+	if ((d->registers & RECORD_OPERAND_DEFINES_0) && i->size < 4 && i->registers[0] < XMM0 &&
+	    i->opcode != X64_OP_LD && i->opcode != X64_OP_LDX && i->opcode != X64_OP_EXT && i->opcode != X64_OP_SETCC && i->opcode != X64_OP_FSETCC)
+		f.used |= x64_effect_register_mask(i->registers[0]);
+	if ((i->opcode == X64_OP_LD || i->opcode == X64_OP_ST || i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX || i->opcode == X64_OP_TESTM || i->opcode == X64_OP_CMPM || i->opcode == X64_OP_LEA ||
+	     i->opcode == X64_OP_XCHG || i->opcode == X64_OP_XADD || i->opcode == X64_OP_CMPXCHG || i->opcode == X64_OP_X87) &&
+	    i->registers[1] == RBP && i->offset < 0 && (!e || e->walk_state->frame_alignment > 16))
+		f.used |= X64_REGISTER_BIT(R12); /* printer's realigned local-frame base */
+	if (i->opcode == X64_OP_RESUME_FRAME) {
+		if (e && e->walk_state && e->walk_state->frame_alignment <= 16)
+			f = (record_effects){ .flags = RECORD_EFFECT_BARRIER }; /* printer emits nothing */
+		else if (!e || !e->walk_state)
+			f.used |= X64_REGISTER_BIT(R12); /* unknown alignment may preserve its old value */
+	} else if (i->opcode == X64_OP_PCMPSTR) {
+		f.defines |= X64_REGISTER_BIT((i->condition & 1) ? RCX : XMM0);
+		if (!(i->condition & 2)) f.used |= X64_REGISTER_BIT(RAX) | X64_REGISTER_BIT(RDX);
+	} else if (i->opcode == X64_OP_TLS) {
+		if (i->condition == 2) {
+			f.defines = X64_CALL_DEFINED_REGISTERS;
+			f.used = X64_CALL_USED_REGISTERS & ~X64_REGISTER_BIT(RDI); /* descriptor overwrites RDI */
+			f.flags = X_CALL_FLAGS;
+		} else if (i->condition == 1) {
+			f.flags |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
-	} else if (i->op == X_REP) {
-		if (i->cond) f.use |= X_BIT(RAX);
-		else f.def |= X_BIT(RSI), f.use |= X_BIT(RSI);
-	} else if (i->op == X_X87) {
-		switch (i->cond) {
-		case XF_LDT: case XF_LD: case XF_ILD: case XF_LDCW: f.fl |= OD_LOAD; break;
-		case XF_STPT: case XF_STP: case XF_ISTP: case XF_STCW: f.fl |= OD_STORE; break;
-		case XF_UCOMIP: f.fl |= X_W; break;
+		if (e && CODEGEN_IS_WIN64(e->compile_context))
+			f.defines |= X64_REGISTER_BIT(R11); /* Windows: _tls_index through r11 */
+	} else if (i->opcode == X64_OP_REP) {
+		if (i->condition) f.used |= X64_REGISTER_BIT(RAX);
+		else f.defines |= X64_REGISTER_BIT(RSI), f.used |= X64_REGISTER_BIT(RSI);
+	} else if (i->opcode == X64_OP_X87) {
+		switch (i->condition) {
+		case X64_X87_LDT: case X64_X87_LD: case X64_X87_ILD: case X64_X87_LDCW: f.flags |= RECORD_EFFECT_LOAD; break;
+		case X64_X87_STPT: case X64_X87_STP: case X64_X87_ISTP: case X64_X87_STCW: f.flags |= RECORD_EFFECT_STORE; break;
+		case X64_X87_UCOMIP: f.flags |= X_W; break;
 		default: break;
 		}
 	}
@@ -180,91 +186,95 @@ VPRIV receffects x64_effects(const ecx *e, const rec *i)
  */
 VPRIV const uint8_t *x64_flow_table(void)
 {
-	static const uint8_t flow[X_NOPS] = {
-		[X_LABEL] = EM_FLOW_ENTRY,
-		[X_MOV] = EM_FLOW_NEXT,
-		[X_CMOV] = EM_FLOW_NEXT,
-		[X_TESTM] = EM_FLOW_NEXT,
-		[X_MOVI] = EM_FLOW_NEXT,
-		[X_LD] = EM_FLOW_NEXT,
-		[X_LDX] = EM_FLOW_NEXT,
-		[X_STX] = EM_FLOW_NEXT,
-		[X_ST] = EM_FLOW_NEXT,
-		[X_LEA] = EM_FLOW_NEXT,
-		[X_LEASCALE] = EM_FLOW_NEXT,
-		[X_ADD] = EM_FLOW_NEXT,
-		[X_SUB] = EM_FLOW_NEXT,
-		[X_AND] = EM_FLOW_NEXT,
-		[X_OR] = EM_FLOW_NEXT,
-		[X_XOR] = EM_FLOW_NEXT,
-		[X_IMUL] = EM_FLOW_NEXT,
-		[X_ADC] = EM_FLOW_NEXT,
-		[X_SBB] = EM_FLOW_NEXT,
-		[X_ADDI] = EM_FLOW_NEXT,
-		[X_SUBI] = EM_FLOW_NEXT,
-		[X_ANDI] = EM_FLOW_NEXT,
-		[X_ORI] = EM_FLOW_NEXT,
-		[X_XORI] = EM_FLOW_NEXT,
-		[X_IMULI] = EM_FLOW_NEXT,
-		[X_SHLI] = EM_FLOW_NEXT,
-		[X_SHRI] = EM_FLOW_NEXT,
-		[X_SARI] = EM_FLOW_NEXT,
-		[X_SHL] = EM_FLOW_NEXT,
-		[X_SHR] = EM_FLOW_NEXT,
-		[X_SAR] = EM_FLOW_NEXT,
-		[X_NEG] = EM_FLOW_NEXT,
-		[X_NOT] = EM_FLOW_NEXT,
-		[X_CMP] = EM_FLOW_NEXT,
-		[X_CMPM] = EM_FLOW_NEXT,
-		[X_CMPI] = EM_FLOW_NEXT,
-		[X_TEST] = EM_FLOW_NEXT,
-		[X_SETCC] = EM_FLOW_NEXT,
-		[X_JMP] = EM_FLOW_STOP,
-		[X_JCC] = EM_FLOW_NEXT,
-		[X_CALL] = EM_FLOW_NEXT,
-		[X_CALLR] = EM_FLOW_NEXT,
-		[X_TAIL] = EM_FLOW_STOP,
-		[X_PUSH] = EM_FLOW_NEXT,
-		[X_POP] = EM_FLOW_NEXT,
-		[X_ADJSP] = EM_FLOW_NEXT,
-		[X_CQO] = EM_FLOW_NEXT,
-		[X_IDIV] = EM_FLOW_NEXT,
-		[X_DIV] = EM_FLOW_NEXT,
-		[X_MULW] = EM_FLOW_NEXT,
-		[X_SMULW] = EM_FLOW_NEXT,
-		[X_UD2] = EM_FLOW_NEXT,
-		[X_TLS] = EM_FLOW_NEXT,
-		[X_GOT] = EM_FLOW_NEXT,
-		[X_XCHG] = EM_FLOW_NEXT,
-		[X_XADD] = EM_FLOW_NEXT,
-		[X_CMPXCHG] = EM_FLOW_NEXT,
-		[X_MFENCE] = EM_FLOW_NEXT,
-		[X_BLENDVB] = EM_FLOW_NEXT,
-		[X_PCMPSTR] = EM_FLOW_NEXT,
-		[X_RAW] = EM_FLOW_ENTRY,
-		[X_BARRIER] = EM_FLOW_ENTRY,
-		[X_LEAL] = EM_FLOW_NEXT,
-		[X_JMPR] = EM_FLOW_ENTRY,
-		[X_JTE] = EM_FLOW_ENTRY,
-		[X_NAMED] = EM_FLOW_ENTRY,
-		[X_BSF] = EM_FLOW_NEXT,
-		[X_BSR] = EM_FLOW_NEXT,
-		[X_BSWAP] = EM_FLOW_NEXT,
-		[X_EXT] = EM_FLOW_NEXT,
-		[X_REP] = EM_FLOW_NEXT,
-		[X_FADD] = EM_FLOW_NEXT,
-		[X_FSUB] = EM_FLOW_NEXT,
-		[X_FMUL] = EM_FLOW_NEXT,
-		[X_FDIV] = EM_FLOW_NEXT,
-		[X_FXOR] = EM_FLOW_NEXT,
-		[X_FSQRT] = EM_FLOW_NEXT,
-		[X_FCMP] = EM_FLOW_NEXT,
-		[X_FSETCC] = EM_FLOW_NEXT,
-		[X_CVTI2F] = EM_FLOW_NEXT,
-		[X_CVTF2I] = EM_FLOW_NEXT,
-		[X_CVTF2F] = EM_FLOW_NEXT,
-		[X_X87] = EM_FLOW_NEXT,
-		[X_RESUME_FRAME] = EM_FLOW_NEXT,
+	static const uint8_t flow[X64_OP_COUNT] = {
+		[X64_OP_LABEL] = RECORD_FLOW_ENTRY,
+		[X64_OP_MOV] = RECORD_FLOW_NEXT,
+		[X64_OP_CMOV] = RECORD_FLOW_NEXT,
+		[X64_OP_TESTM] = RECORD_FLOW_NEXT,
+		[X64_OP_MOVI] = RECORD_FLOW_NEXT,
+		[X64_OP_LD] = RECORD_FLOW_NEXT,
+		[X64_OP_LDX] = RECORD_FLOW_NEXT,
+		[X64_OP_STX] = RECORD_FLOW_NEXT,
+		[X64_OP_ST] = RECORD_FLOW_NEXT,
+		[X64_OP_LEA] = RECORD_FLOW_NEXT,
+		[X64_OP_LEASCALE] = RECORD_FLOW_NEXT,
+		[X64_OP_ADD] = RECORD_FLOW_NEXT,
+		[X64_OP_SUB] = RECORD_FLOW_NEXT,
+		[X64_OP_AND] = RECORD_FLOW_NEXT,
+		[X64_OP_OR] = RECORD_FLOW_NEXT,
+		[X64_OP_XOR] = RECORD_FLOW_NEXT,
+		[X64_OP_IMUL] = RECORD_FLOW_NEXT,
+		[X64_OP_ADC] = RECORD_FLOW_NEXT,
+		[X64_OP_SBB] = RECORD_FLOW_NEXT,
+		[X64_OP_ADDI] = RECORD_FLOW_NEXT,
+		[X64_OP_SUBI] = RECORD_FLOW_NEXT,
+		[X64_OP_ANDI] = RECORD_FLOW_NEXT,
+		[X64_OP_ORI] = RECORD_FLOW_NEXT,
+		[X64_OP_XORI] = RECORD_FLOW_NEXT,
+		[X64_OP_IMULI] = RECORD_FLOW_NEXT,
+		[X64_OP_SHLI] = RECORD_FLOW_NEXT,
+		[X64_OP_SHRI] = RECORD_FLOW_NEXT,
+		[X64_OP_SARI] = RECORD_FLOW_NEXT,
+		[X64_OP_SHL] = RECORD_FLOW_NEXT,
+		[X64_OP_SHR] = RECORD_FLOW_NEXT,
+		[X64_OP_SAR] = RECORD_FLOW_NEXT,
+		[X64_OP_NEG] = RECORD_FLOW_NEXT,
+		[X64_OP_NOT] = RECORD_FLOW_NEXT,
+		[X64_OP_CMP] = RECORD_FLOW_NEXT,
+		[X64_OP_CMPM] = RECORD_FLOW_NEXT,
+		[X64_OP_CMPI] = RECORD_FLOW_NEXT,
+		[X64_OP_TEST] = RECORD_FLOW_NEXT,
+		[X64_OP_SETCC] = RECORD_FLOW_NEXT,
+		[X64_OP_JMP] = RECORD_FLOW_STOP,
+		[X64_OP_JCC] = RECORD_FLOW_NEXT,
+		[X64_OP_CALL] = RECORD_FLOW_NEXT,
+		[X64_OP_CALLR] = RECORD_FLOW_NEXT,
+		[X64_OP_TAIL] = RECORD_FLOW_STOP,
+		[X64_OP_PUSH] = RECORD_FLOW_NEXT,
+		[X64_OP_POP] = RECORD_FLOW_NEXT,
+		[X64_OP_ADJSP] = RECORD_FLOW_NEXT,
+		[X64_OP_CQO] = RECORD_FLOW_NEXT,
+		[X64_OP_IDIV] = RECORD_FLOW_NEXT,
+		[X64_OP_DIV] = RECORD_FLOW_NEXT,
+		[X64_OP_MULW] = RECORD_FLOW_NEXT,
+		[X64_OP_SMULW] = RECORD_FLOW_NEXT,
+		[X64_OP_UD2] = RECORD_FLOW_NEXT,
+		[X64_OP_TLS] = RECORD_FLOW_NEXT,
+		[X64_OP_GOT] = RECORD_FLOW_NEXT,
+		[X64_OP_XCHG] = RECORD_FLOW_NEXT,
+		[X64_OP_XADD] = RECORD_FLOW_NEXT,
+		[X64_OP_CMPXCHG] = RECORD_FLOW_NEXT,
+		[X64_OP_MFENCE] = RECORD_FLOW_NEXT,
+		[X64_OP_BLENDVB] = RECORD_FLOW_NEXT,
+		[X64_OP_PCMPSTR] = RECORD_FLOW_NEXT,
+		[X64_OP_RAW] = RECORD_FLOW_ENTRY,
+		[X64_OP_BARRIER] = RECORD_FLOW_ENTRY,
+		[X64_OP_LEAL] = RECORD_FLOW_NEXT,
+		[X64_OP_JMPR] = RECORD_FLOW_ENTRY,
+		[X64_OP_JTE] = RECORD_FLOW_ENTRY,
+		[X64_OP_NAMED] = RECORD_FLOW_ENTRY,
+		[X64_OP_BSF] = RECORD_FLOW_NEXT,
+		[X64_OP_POPCNT] = RECORD_FLOW_NEXT,
+		[X64_OP_BSR] = RECORD_FLOW_NEXT,
+		[X64_OP_BSWAP] = RECORD_FLOW_NEXT,
+		[X64_OP_CRC32] = RECORD_FLOW_NEXT,
+		[X64_OP_EXT] = RECORD_FLOW_NEXT,
+		[X64_OP_REP] = RECORD_FLOW_NEXT,
+		[X64_OP_FADD] = RECORD_FLOW_NEXT,
+		[X64_OP_FSUB] = RECORD_FLOW_NEXT,
+		[X64_OP_FMUL] = RECORD_FLOW_NEXT,
+		[X64_OP_FDIV] = RECORD_FLOW_NEXT,
+		[X64_OP_FXOR] = RECORD_FLOW_NEXT,
+		[X64_OP_FSQRT] = RECORD_FLOW_NEXT,
+		[X64_OP_FCMP] = RECORD_FLOW_NEXT,
+		[X64_OP_FSETCC] = RECORD_FLOW_NEXT,
+		[X64_OP_CVTI2F] = RECORD_FLOW_NEXT,
+		[X64_OP_CVTF2I] = RECORD_FLOW_NEXT,
+		[X64_OP_CVTF2F] = RECORD_FLOW_NEXT,
+		[X64_OP_X87] = RECORD_FLOW_NEXT,
+		[X64_OP_RESUME_FRAME] = RECORD_FLOW_NEXT,
+		[X64_OP_PROBE] = RECORD_FLOW_NEXT,
+		[X64_OP_FRAMEADDR] = RECORD_FLOW_NEXT,
 	};
 	return flow;
 }

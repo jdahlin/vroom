@@ -36,35 +36,35 @@ int main(void)
     };
     char spelling[32];
     for (unsigned i = 0; i < sizeof legacy / sizeof *legacy; i++) {
-        assert(x64_rname(legacy[i].name) == legacy[i].reg);
+        assert(x64_asm_register_find(legacy[i].name) == legacy[i].reg);
         snprintf(spelling, sizeof spelling, "%%%s", legacy[i].name);
-        assert(x64_rname(spelling) == legacy[i].reg);
+        assert(x64_asm_register_find(spelling) == legacy[i].reg);
     }
     for (int i = 8; i <= 15; i++) {
         const char *suffixes[] = {"", "d", "w", "b"};
         for (unsigned j = 0; j < 4; j++) {
             snprintf(spelling, sizeof spelling, "r%d%s", i, suffixes[j]);
-            assert(x64_rname(spelling) == i);
+            assert(x64_asm_register_find(spelling) == i);
         }
     }
     for (int i = 0; i <= 15; i++) {
         snprintf(spelling, sizeof spelling, "%%xmm%d", i);
-        assert(x64_rname(spelling) == XMM0 + i);
+        assert(x64_asm_register_find(spelling) == XMM0 + i);
     }
     const char *invalid[] = {"", "a", "r", "e", "x", "rip", "r7", "r16", "xmm16", "raxz", "dp", "bil"};
     for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; i++)
-        assert(x64_rname(invalid[i]) == -1);
+        assert(x64_asm_register_find(invalid[i]) == -1);
     /* Preserve existing atoi-based acceptance of suffixes on numbered names. */
-    assert(x64_rname("r8junk") == R8 && x64_rname("xmm") == XMM0);
+    assert(x64_asm_register_find("r8junk") == R8 && x64_asm_register_find("xmm") == XMM0);
 
     vintern_ents = names;
-    assert(!EM_IDENT_IS(0, "main"));
-    setname("main"); assert(EM_IDENT_IS(1, "main") && !EM_IDENT_IS(1, "mains"));
-    setname("setjmp"); assert(EM_IDENT_IS(1, "setjmp") && !EM_IDENT_IS(1, "longjmp"));
-    setname("12345678"); assert(EM_IDENT_IS(1, "12345678") && !EM_IDENT_IS(1, "12345679"));
-    setname("123456789"); assert(EM_IDENT_IS(1, "123456789") && !EM_IDENT_IS(1, "123456780"));
-    setname("123456789abcdefg"); assert(EM_IDENT_IS(1, "123456789abcdefg") && !EM_IDENT_IS(1, "123456789abcdefh"));
-    assert(!EM_IDENT_IS(1, "123456789abcdefgh"));
+    assert(!CODEGEN_IDENTIFIER_IS(0, "main"));
+    setname("main"); assert(CODEGEN_IDENTIFIER_IS(1, "main") && !CODEGEN_IDENTIFIER_IS(1, "mains"));
+    setname("setjmp"); assert(CODEGEN_IDENTIFIER_IS(1, "setjmp") && !CODEGEN_IDENTIFIER_IS(1, "longjmp"));
+    setname("12345678"); assert(CODEGEN_IDENTIFIER_IS(1, "12345678") && !CODEGEN_IDENTIFIER_IS(1, "12345679"));
+    setname("123456789"); assert(CODEGEN_IDENTIFIER_IS(1, "123456789") && !CODEGEN_IDENTIFIER_IS(1, "123456780"));
+    setname("123456789abcdefg"); assert(CODEGEN_IDENTIFIER_IS(1, "123456789abcdefg") && !CODEGEN_IDENTIFIER_IS(1, "123456789abcdefh"));
+    assert(!CODEGEN_IDENTIFIER_IS(1, "123456789abcdefgh"));
     puts("emitter identifier and x86 register-name contracts pass");
     return 0;
 }
@@ -77,19 +77,19 @@ int (*pp_builtin_known)(const char *);
 bool cc_library_builtin_is_known(const char *name) { (void)name; return false; }
 int main(void) {
  unsigned count = 0;
- for (int i = 0; cc_builtin_name(i); i++) {
-  const char *s = cc_builtin_name(i);
-  int want = !strcmp(s,"__builtin_memcpy") ? CC_LIB_MEMCPY :
-             !strcmp(s,"__builtin_memmove") ? CC_LIB_MEMMOVE :
-             !strcmp(s,"__builtin_memset") ? CC_LIB_MEMSET :
-             !strcmp(s,"__builtin_strcmp") ? CC_LIB_STRCMP :
-             !strcmp(s,"__builtin_fabsl") ? CC_LIB_FABSL :
+ for (int i = 0; cc_builtin_name_get(i); i++) {
+  const char *s = cc_builtin_name_get(i);
+  int want = !strcmp(s,"__builtin_memcpy") ? CC_LIBRARY_KIND_MEMCPY :
+             !strcmp(s,"__builtin_memmove") ? CC_LIBRARY_KIND_MEMMOVE :
+             !strcmp(s,"__builtin_memset") ? CC_LIBRARY_KIND_MEMSET :
+             !strcmp(s,"__builtin_strcmp") ? CC_LIBRARY_KIND_STRCMP :
+             !strcmp(s,"__builtin_fabsl") ? CC_LIBRARY_KIND_FABSL :
              !strcmp(s,"__builtin___memcpy_chk") || !strcmp(s,"__builtin___memmove_chk") ||
              !strcmp(s,"__builtin___memset_chk") || !strcmp(s,"__builtin___strcpy_chk") ||
              !strcmp(s,"__builtin___strcat_chk") || !strcmp(s,"__builtin___strncpy_chk") ||
-             !strcmp(s,"__builtin___strncat_chk") ? CC_LIB_CHK : CC_LIB_OTHER;
-  assert(cc_builtin_libkind(i) == want);
-  if (want) { count++; assert((cc_builtin_table[i].flags & 1) == (want == CC_LIB_FABSL)); }
+             !strcmp(s,"__builtin___strncat_chk") ? CC_LIBRARY_KIND_CHECKED : CC_LIBRARY_KIND_OTHER;
+  assert(cc_builtin_library_kind(i) == want);
+  if (want) { count++; assert((cc_builtin_table[i].flags & 1) == (want == CC_LIBRARY_KIND_FABSL)); }
  }
  assert(count == 12);
  return 0;

@@ -53,7 +53,7 @@ typedef struct pp_header_cache_file {
 	const pp_skeleton *fi;
 	const char *name, *spath;
 	uint32_t namelen, record_base;
-	uint8_t sys;
+	uint8_t sys, guard_open;
 } pp_header_cache_file;
 
 /* __COUNTER__ digits: in a token's spelling (cprov) or in an entry's own text (hctr) */

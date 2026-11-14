@@ -63,13 +63,13 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
 			cxx_type_id_parse(c);
 			r = c->member_missing ? 0 : c->type_out != CXX_TY_UNKNOWN ? 1 : -1;
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {	/* compound requirement */
-			qty et;
+			ast_qualified_type et;
 			bool lv;
 
 			cxx_advance(c);
 			cxx_expression_parse(c);
 			et = c->etype, lv = c->elval;
-			qty xv = !lv && c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == TY_PTR && AST_TYPE(c->ast, c->edecl)->ext == 2 &&
+			ast_qualified_type xv = !lv && c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == AST_TYPE_POINTER && AST_TYPE(c->ast, c->edecl)->ext == 2 &&
 				 AST_TYPE(c->ast, c->edecl)->base == et ? c->edecl : CXX_TY_UNKNOWN;	/* (an xvalue: decltype((e)) is T&&) */
 			r = c->einvalid ? 0 : et != CXX_TY_UNKNOWN ? 1 : -1;
 			cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);

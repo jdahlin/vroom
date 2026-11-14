@@ -2,12 +2,12 @@
 #include "declaration.h"
 
 /* one base-specifier: its type (CXX_TY_UNKNOWN if not known), and whether it is virtual */
-VPRIV qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
+VPRIV ast_qualified_type cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
 {
 	cxx_scope *q;
 	bool dep;
 	cxx_entity *base = NULL;
-	qty base_ty = CXX_TY_UNKNOWN;
+	ast_qualified_type base_ty = CXX_TY_UNKNOWN;
 	bool is_virtual = false;
 
 	cxx_attributes_skip(c);
@@ -43,7 +43,7 @@ VPRIV qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
 			base_ty = inst ? inst->ty : CXX_TY_UNKNOWN;
 			/* an alias template's instance: the class it names (completed), its members */
 			if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty) && !c->tentative)
-				inst->members = cxx_type_class_scope(c, QUNQ(inst->ty));
+				inst->members = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(inst->ty));
 			if (inst && inst->members)
 				cxx_scope_use(c, cs, inst->members);
 			else if (c->template_depth || !te || !te->members)
@@ -78,7 +78,7 @@ VPRIV void cxx_base_clause_parse(cxx *c, cxx_scope *cs)
 		uint32_t start = c->pos, nseen = c->npacks_seen;
 		cxx_entity *seen[8];
 		bool is_virtual;
-		qty base_ty;
+		ast_qualified_type base_ty;
 
 		memcpy(seen, c->packs_seen, sizeof seen);
 		c->npacks_seen = 0, c->packs_overflow = 0;
@@ -175,9 +175,9 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
 						e->members = cxx_scope_new(c, CXX_SCOPE_CLASS, c->scope, e);
 					/* the AST record, incomplete until the definition (which reuses it): T* needs it */
 					if (e && !is_template && !c->template_depth && e->ty == CXX_TY_UNKNOWN && !c->tentative) {
-						uint32_t tg = cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, key_loc);
+						uint32_t tg = cc_tag_new(c->ast, is_union ? AST_TYPE_UNION : AST_TYPE_STRUCT, name, key_loc);
 
-						e->ty = QT(c->ast->tags[tg].ty, 0);
+						e->ty = AST_QUALIFIED_TYPE(c->ast->tags[tg].ty, 0);
 						if (e->members && !cxx_tag_scope_get(c, e->ty))
 							cxx_tag_scope_set(c, tg, e->members);	/* (its name and where it is: a mangled name may need them first) */
 					}
@@ -392,7 +392,7 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
 		cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 	}
 	cxx_attributes_skip(c);
-	qty underlying = CXX_TY_UNKNOWN;
+	ast_qualified_type underlying = CXX_TY_UNKNOWN;
 	uint32_t loc = cxx_peek(c, 0)->loc;
 
 	if (cxx_is(c, LEX_TOKEN_COLON) && (cxx_peek(c, 1)->kind != LEX_TOKEN_COLON)) {	/* underlying type */
@@ -420,7 +420,7 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
 		/* enumerators: the enumeration's type, and their values (the previous one's + 1, or = a constant) */
 		int64_t next = 0;
 		bool known = !c->template_depth;
-		qty et = e && !c->template_depth ? e->ty : CXX_TY_UNKNOWN;
+		ast_qualified_type et = e && !c->template_depth ? e->ty : CXX_TY_UNKNOWN;
 
 		if (!e && !c->template_depth && !c->tentative) {
 			/* an unnamed enumeration: its enumerators have its type all the same */

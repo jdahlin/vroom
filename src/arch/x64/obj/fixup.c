@@ -3,7 +3,7 @@
  * writer).  Every x86 field is a little-endian integer at the fixup. */
 #include "../../../obj/objimpl.h"
 
-static int x64_pcrel(uint32_t t)
+VPRIV int x64_pcrel(uint32_t t)
 {
 	switch (t) {
 	case R_X86_64_PC8: case R_X86_64_PC16: case R_X86_64_PC32: case R_X86_64_PC64: case R_X86_64_PLT32:
@@ -25,6 +25,8 @@ static int x64_fsize(uint32_t t)
 		return 2;
 	case R_X86_64_8: case R_X86_64_PC8:
 		return 1;
+	case R_VCC_COFF_SECTION:
+		return 2;
 	default:
 		return 4;
 	}

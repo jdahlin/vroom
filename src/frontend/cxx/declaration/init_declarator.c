@@ -25,7 +25,7 @@ static void cxx_structured_bindings_declare(cxx *c, uint32_t var, uint32_t loc)
 {
 	uint32_t n = c->sb_n;
 	cxx_entity *v = cxx_lookup_in(c, cxx_declaration_scope(c), var, 0);
-	qty t = v ? v->ty : CXX_TY_UNKNOWN, ct;
+	ast_qualified_type t = v ? v->ty : CXX_TY_UNKNOWN, ct;
 	cxx_scope *cls;
 	const tag *r;
 	uint32_t k = 0;
@@ -33,10 +33,10 @@ static void cxx_structured_bindings_declare(cxx *c, uint32_t var, uint32_t loc)
 	c->sb_n = 0;
 	if (t == CXX_TY_UNKNOWN)
 		return;
-	ct = AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext ? AST_TYPE(c->ast, t)->base : t;
-	if (!cc_type_is_record(c->ast, ct) || AST_TYPE_KIND(c->ast, ct) == TY_ARRAY || !(cls = cxx_type_class_scope(c, QUNQ(ct))))
+	ct = AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext ? AST_TYPE(c->ast, t)->base : t;
+	if (!cc_type_is_record(c->ast, ct) || AST_TYPE_KIND(c->ast, ct) == AST_TYPE_ARRAY || !(cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ct))))
 		return;
-	r = &c->ast->tags[AST_TYPE(c->ast, QUNQ(ct))->aux];
+	r = &c->ast->tags[AST_TYPE(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(ct))->aux];
 	for (uint32_t i = 0; i < r->nfield && k < n; i++) {
 		cxx_entity *e;
 
@@ -46,13 +46,13 @@ static void cxx_structured_bindings_declare(cxx *c, uint32_t var, uint32_t loc)
 		while (e && e->kind != CXX_ENTITY_VALUE)
 			e = e->next;
 		if (e) {
-			qty ft = r->f[i].ty;
+			ast_qualified_type ft = r->f[i].ty;
 
 			/* (a reference member: the name is what it refers to, as the member's own type says) */
-			if (AST_TYPE_KIND(c->ast, ft) == TY_PTR && AST_TYPE(c->ast, ft)->ext)
+			if (AST_TYPE_KIND(c->ast, ft) == AST_TYPE_POINTER && AST_TYPE(c->ast, ft)->ext)
 				e->ty = AST_TYPE(c->ast, ft)->base;
 			else
-				e->ty = QT(QI(ft), QQ(ft) | (QQ(ct) & (Q_CONST | Q_VOLATILE)));
+				e->ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ft), AST_QUALIFIED_TYPE_QUALIFIERS(ft) | (AST_QUALIFIED_TYPE_QUALIFIERS(ct) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE)));
 			cxx_gen_bind_name(c, e, v->sym, r->f[i].name, c->sb_locs[k]);
 		}
 		k++;
@@ -64,7 +64,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 {
 	cxx_entity *type_of_typedef = c->last_type;
 	uint8_t typedef_dependent = c->last_type_dependent;
-	qty base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
+	ast_qualified_type base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
 	/* auto x = init: the declarator is parsed over auto's placeholder, deduced from the initializer */
 	/* (in a class: static constexpr auto value = ..., and member functions auto f(): a non-static data
 	   member cannot be auto) */
@@ -91,28 +91,28 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cxx_class_field(c, 0, base, c->tok[start].loc, w < 0 ? -2 : (int)w);
 			goto next;
 		}
-		c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), auto_quals | ((flags & DS_CONSTEXPR) ? Q_CONST : 0)) : base;
+		c->type_in = is_auto ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cxx_auto_type(c)), auto_quals | ((flags & DS_CONSTEXPR) ? AST_QUALIFIER_CONST : 0)) : base;
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
 		if (q && context == CXX_CONTEXT_BLOCK && c->tentative)
 			cxx_fail(c, "a block declares no qualified name");	/* (X<T>::f(a, b); is a call, not a declaration) */
-		qty t = c->type_out;
+		ast_qualified_type t = c->type_out;
 		/* a constexpr variable is const (not a reference; an array's elements are) */
-		if ((flags & DS_CONSTEXPR) && !f && t != CXX_TY_UNKNOWN && !c->tentative && AST_TYPE_KIND(c->ast, t) != TY_ARRAY &&
-		    AST_TYPE_KIND(c->ast, t) != TY_FUNC && !(AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext))
-			t = QT(QI(t), QQ(t) | Q_CONST);
-		qty auto_pattern = CXX_TY_UNKNOWN;
+		if ((flags & DS_CONSTEXPR) && !f && t != CXX_TY_UNKNOWN && !c->tentative && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+		    AST_TYPE_KIND(c->ast, t) != AST_TYPE_FUNCTION && !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext))
+			t = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) | AST_QUALIFIER_CONST);
+		ast_qualified_type auto_pattern = CXX_TY_UNKNOWN;
 		cxx_entity *auto_e = NULL;
 		uint32_t name_loc = c->tok[start].loc;
 
-		qty fn_ret_pattern = CXX_TY_UNKNOWN;	/* auto f(...): the declared return type, a pattern */
+		ast_qualified_type fn_ret_pattern = CXX_TY_UNKNOWN;	/* auto f(...): the declared return type, a pattern */
 		bool fn_variadic = false;
 
 		if (is_auto && t != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, t)) {
 			if (!f)
 				auto_pattern = t;	/* (a function's auto return type: its body tells, cxx_late_deduce) */
-			else if (AST_TYPE_KIND(c->ast, t) == TY_FUNC && cxx_type_has_placeholder(c, AST_TYPE(c->ast, t)->base) &&
+			else if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION && cxx_type_has_placeholder(c, AST_TYPE(c->ast, t)->base) &&
 				 !c->decl_has_trailing)
-				fn_ret_pattern = AST_TYPE(c->ast, t)->base, fn_variadic = (AST_TYPE(c->ast, t)->flags & TF_VARIADIC) != 0;
+				fn_ret_pattern = AST_TYPE(c->ast, t)->base, fn_variadic = (AST_TYPE(c->ast, t)->flags & AST_TYPE_FLAG_VARIADIC) != 0;
 			t = CXX_TY_UNKNOWN;	/* until the initializer is seen (it may not name the variable) */
 		}
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
@@ -145,9 +145,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		}
 		/* a variable's definition needs its type complete (an instance: its body now) */
 		if (!f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && t != CXX_TY_UNKNOWN && !c->tentative) {
-			qty et = t;
+			ast_qualified_type et = t;
 
-			while (AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+			while (AST_TYPE_KIND(c->ast, et) == AST_TYPE_ARRAY)
 				et = AST_TYPE(c->ast, et)->base;
 			cxx_type_require_complete(c, et);
 		}
@@ -158,7 +158,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			bool tmpl = c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE;
 			cxx_entity *e = cxx_declare(c, cxx_declaration_scope(c), dtor ? cxx_dtor_id() : cxx_ctor_id(),
 						    tmpl ? CXX_ENTITY_FUNCTION_TEMPLATE : CXX_ENTITY_VALUE);
-			qty ps[32];
+			ast_qualified_type ps[32];
 			bool known = c->ndecl_params <= 32;
 
 			for (uint32_t i = 0; known && i < c->ndecl_params; i++)
@@ -176,7 +176,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			if (e && !tmpl)
 				decl_fn = e;
 			if (e && !tmpl) {
-				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
+				e->ty = known ? cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
 				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);
 				c->last_fn = e;	/* (its body: parsed when used) */
 			} else if (e && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
@@ -195,7 +195,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			bool var = false;
 
 			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
-				var |= m->kind == CXX_ENTITY_VALUE && !m->field_of && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != TY_FUNC;
+				var |= m->kind == CXX_ENTITY_VALUE && !m->field_of && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != AST_TYPE_FUNCTION;
 			if (var) {
 				int depth = 0;
 
@@ -216,7 +216,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			/* a static member's definition: its initializer, on the member the class declares (and this
 			   declaration's entity), for cxx_gen_static_member_value */
 			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
-				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && !m->nsdmi_pos && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != TY_FUNC)
+				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && !m->nsdmi_pos && m->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, m->ty) != AST_TYPE_FUNCTION)
 					m->nsdmi_pos = c->pos, m->nsdmi_scope = c->scope;
 			c->pos = keep;
 		}
@@ -224,12 +224,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		    (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_LEFT_PAREN) || sm_init == 0)) {
 			/* T X::m = ...;: the definition of the static data member's variable (made where the class declares it) */
 			for (cxx_entity *m = cxx_lookup_local(qs, name); m; m = m->next)
-				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && m->sym && c->ast->syms[m->sym].kind == S_VAR &&
+				if (m->kind == CXX_ENTITY_VALUE && !m->field_of && m->sym && c->ast->syms[m->sym].kind == AST_SYMBOL_VARIABLE &&
 				    !(m->nsdmi_pos && m->nsdmi_pos < c->pos - 1 && !cxx_is(c, LEX_TOKEN_EQUAL) && !cxx_is(c, LEX_TOKEN_LEFT_BRACE) &&
 				      !cxx_is(c, LEX_TOKEN_LEFT_PAREN))) {
 					/* (T X::m; of a member initialized in its class: the definition has that initializer, not
 					   built here: left to the uses, which take the value) */
-					c->ast->syms[m->sym].sc = SC_NONE;
+					c->ast->syms[m->sym].sc = AST_STORAGE_NONE;
 					gen_var = m;
 					break;
 				}
@@ -283,12 +283,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (auto_e && !(flags & (DS_STATIC | DS_CONSTEXPR)))
 					auto_gen = true;	/* (auto: its symbol once the initializer gave its type) */
 				else if (!auto_e && (flags & (DS_STATIC | DS_CONSTEXPR)) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local) && t != CXX_TY_UNKNOWN &&
-					 !(AST_TYPE_KIND(c->ast, t) == TY_ARRAY && !AST_TYPE(c->ast, t)->n) &&
+					 !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, t)->n) &&
 					 (!cc_type_is_record(c->ast, t) || !cxx_gen_needs_construction_public(c, t)))
 					/* static int n = 3; constexpr char t[] = ...: in static storage, initialized by a constant (C's
 					   function-scope static); one with a dynamic initializer (a guard) is not built yet */
 					gen_local = e->sym = cxx_gen_local_static(c, name, t, name_loc);
-				else if (!auto_e && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY && !AST_TYPE(c->ast, t)->n &&
+				else if (!auto_e && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, t)->n &&
 					 cxx_is(c, LEX_TOKEN_EQUAL) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local))
 					unsized_e = e, unsized_static = (flags & (DS_STATIC | DS_CONSTEXPR)) != 0;	/* T a[] = {...}: its symbol once the initializer gave the bound */
 				else if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
@@ -341,19 +341,19 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
-				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
+				e->sym = cxx_symbol(c, f ? AST_SYMBOL_FUNCTION : AST_SYMBOL_VARIABLE, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
 				e->global_ns = cxx_declaration_scope(c) == c->global, e->home = cxx_declaration_scope(c);
 			if (e && global && kind == CXX_ENTITY_VALUE && !f && !(flags & DS_EXTERN_SEEN))
 				gen_var = e;
 			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
-				c->ast->syms[e->sym].sc = SC_STATIC;	/* (internal linkage) */
+				c->ast->syms[e->sym].sc = AST_STORAGE_STATIC;	/* (internal linkage) */
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !(flags & (DS_TYPEDEF | DS_FRIEND)) &&
 			    !e->sym && !c->tentative && !c->template_depth && !c->explicit_specialization && t != CXX_TY_UNKNOWN) {
 				/* a static data member: a variable of its own, named in its class (defined where the class's
 				   definition outside it is, or inline) */
-				e->sym = cxx_symbol(c, S_VAR, name, t, name_loc), e->home = cxx_declaration_scope(c);
+				e->sym = cxx_symbol(c, AST_SYMBOL_VARIABLE, name, t, name_loc), e->home = cxx_declaration_scope(c);
 				if (e->sym)
-					c->ast->syms[e->sym].sc = SC_EXTERN;
+					c->ast->syms[e->sym].sc = AST_STORAGE_EXTERN;
 				e->mangled_var = 1;
 				cxx_gen_variable_name(c, e, false);
 			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && e->home == c->global && (flags & DS_INLINE) &&
@@ -364,12 +364,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				memset(&at, 0, sizeof at);
 				at.weak = 1;
 				cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
-				c->ast->syms[e->sym].flags |= SF_LINKONCE;
+				c->ast->syms[e->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
 			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && e->home != c->global && !e->c_linkage &&
 				   c->ast->syms[e->sym].ty == t && !e->mangled_var) {
 				/* a namespace's variable: internal linkage written L (static, or const and not extern) */
 				bool internal = (flags & DS_STATIC) || cxx_scope_in_unnamed_namespace(c, e->home) ||
-						(t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
+						(t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
 
 				e->mangled_var = 1;
 				if (c->explicit_specialization) {
@@ -383,17 +383,17 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					memset(&at, 0, sizeof at);
 					at.weak = 1;
 					cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
-					c->ast->syms[e->sym].flags |= SF_LINKONCE;
+					c->ast->syms[e->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
 				}
 				if (internal && e->sym)
-					c->ast->syms[e->sym].sc = SC_STATIC, c->ast->syms[e->sym].flags &= ~SF_GLOBAL;
+					c->ast->syms[e->sym].sc = AST_STORAGE_STATIC, c->ast->syms[e->sym].flags &= ~AST_SYMBOL_FLAG_GLOBAL;
 				cxx_gen_variable_name(c, e, internal);
 			named:;
 			}
-			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
+			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL) && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !c->tentative && !c->template_depth)
 				e->nsdmi_pos = c->pos, e->nsdmi_scope = c->scope;	/* (a static constant member's initializer: cxx_gen_static_member_value) */
-			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
+			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL)) {
 				int64_t v;
 
@@ -403,7 +403,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (v >= 0 && !c->tentative)
 					e->value = v, e->has_value = 1;
 				else if (!c->tentative && !c->template_depth && t != CXX_TY_UNKNOWN &&
-					 ((AST_TYPE_KIND(c->ast, t) >= TY_BOOL && AST_TYPE_KIND(c->ast, t) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, t) == TY_ENUM))
+					 ((AST_TYPE_KIND(c->ast, t) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, t) <= AST_TYPE_UNSIGNED_LONG_LONG) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ENUM))
 					const_e = e;	/* (its initializer: a constant expression, evaluated below; an enumeration's
 							   too: constexpr memory_order memory_order_relaxed = memory_order::relaxed) */
 			}
@@ -638,12 +638,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
 				{
 					uint32_t in = c->enode;
-					qty it = c->etype;
+					ast_qualified_type it = c->etype;
 					uint8_t ilv = c->elval;
 
-					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == TY_ARRAY)	/* (an array, "text": a pointer to its first element) */
+					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_ARRAY)	/* (an array, "text": a pointer to its first element) */
 						it = cc_type_pointer(c->ast, AST_TYPE(c->ast, it)->base), ilv = 0;
-					else if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == TY_FUNC)	/* (a function: a pointer to it) */
+					else if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_FUNCTION)	/* (a function: a pointer to it) */
 						it = cc_type_pointer(c->ast, it), ilv = 0;
 					cxx_ctor_use(c, t, &it, &ilv, 1, false);
 					if (gen_local) {	/* code generation: the constructor's call, or a copy */
@@ -684,14 +684,14 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				/* (a constexpr one too when it is not an integer, whose uses are its value: a floating constant or an
 				   array has an object) */
 				bool cx_object = (flags & DS_CONSTEXPR) && t != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, t) &&
-						 !cc_type_is_integer(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ENUM;
+						 !cc_type_is_integer(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ENUM;
 				bool gen_global = global && gen_var && !f && (!(flags & DS_CONSTEXPR) || cx_object) && !auto_e && cxx_gen_global_begin(c, gen_var);
 
 				cxx_initializer_parse(c);
 				if (unsized_e && cxx_gen_on(c)) {
 					/* the bound: the list's elements, or the string literal's length */
 					uint64_t n = braced ? (c->brace_n != UINT32_MAX ? c->brace_n : 0) :
-						     c->enode && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, c->enode)->ty) == TY_ARRAY ?
+						     c->enode && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, c->enode)->ty) == AST_TYPE_ARRAY ?
 						     AST_TYPE(c->ast, AST_NODE_AT(c->ast, c->enode)->ty)->n : 0;
 
 					if (n) {
@@ -702,7 +702,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						cxx_gen_fail(c);
 				}
 				if (gen_global) {
-					cxx_gen_global_end(c, gen_var, !braced ? c->enode : AST_TYPE_KIND(c->ast, t) == TY_ARRAY ? cxx_gen_array_initializer(c, t, name_loc) :
+					cxx_gen_global_end(c, gen_var, !braced ? c->enode : AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY ? cxx_gen_array_initializer(c, t, name_loc) :
 							   cxx_gen_record_initializer(c, t, c->brace_nodes, c->brace_n, name_loc), true);
 					gen_declared = true;
 				}
@@ -715,31 +715,31 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					bool k = c->econst;
 					int64_t v = c->evalue;
 					uint32_t in = c->enode;
-					qty ity = c->etype;
+					ast_qualified_type ity = c->etype;
 					uint8_t ilv = c->elval;
 
 					auto_e->ty = cxx_auto_deduce(c, auto_pattern, c->etype, c->elval);
 					if (auto_gen && cxx_gen_on(c) && auto_e->ty != CXX_TY_UNKNOWN && in) {
 						/* code generation: the local, now that its type is known */
-						qty at = auto_e->ty;
+						ast_qualified_type at = auto_e->ty;
 						uint32_t ls = auto_e->sym = cxx_gen_local(c, name, at, name_loc);
 
-						if (ls && cc_type_is_record(c->ast, at) && AST_TYPE_KIND(c->ast, at) != TY_ARRAY) {
+						if (ls && cc_type_is_record(c->ast, at) && AST_TYPE_KIND(c->ast, at) != AST_TYPE_ARRAY) {
 							cxx_ctor_use(c, at, &ity, &ilv, 1, false);
 							cxx_gen_construct_local(c, ls, at, &in, 1, name_loc);
 						} else if (ls)
 							cxx_gen_local_declare(c, ls, in, true, name_loc);
 						gen_declared = true;
 					}
-					if (auto_e->ty != CXX_TY_UNKNOWN && !(QQ(auto_e->ty) & Q_CONST))
+					if (auto_e->ty != CXX_TY_UNKNOWN && !(AST_QUALIFIED_TYPE_QUALIFIERS(auto_e->ty) & AST_QUALIFIER_CONST))
 						k = false;
-					if (k && ((AST_TYPE_KIND(c->ast, auto_e->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= TY_ULLONG) ||
-						  AST_TYPE_KIND(c->ast, auto_e->ty) == TY_ENUM))
+					if (k && ((AST_TYPE_KIND(c->ast, auto_e->ty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= AST_TYPE_UNSIGNED_LONG_LONG) ||
+						  AST_TYPE_KIND(c->ast, auto_e->ty) == AST_TYPE_ENUM))
 						auto_e->value = v, auto_e->has_value = 1;	/* const auto n = 4; constexpr auto o = memory_order::seq_cst */
 				}
 				if (const_e && c->econst) {
 					const_e->value = c->evalue, const_e->has_value = 1;
-					if (AST_TYPE_KIND(c->ast, t) == TY_BOOL)
+					if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_BOOL)
 						const_e->value = c->evalue != 0;
 				}
 			}

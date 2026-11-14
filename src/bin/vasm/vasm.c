@@ -1,6 +1,7 @@
 /*
  * vasm: assembler driver.  vasm [-o out.o] in.s  (input: preprocessed text)
  *       vasm --target=x86_64-linux-gnu [-o out.o] in.s  (x86-64 AT&T syntax, an ELF object; default is arm64 ELF)
+ *       vasm --target=x86_64-w64-mingw32 [-o out.o] in.s  (x86-64 for Windows: a COFF object, .seh_* unwind tables)
  *       vasm --target=wasm64-unknown-emscripten [-o out.o] in.s  (LLVM's wasm syntax; only with make VCC_WASM=1)
  *       vasm --target=arm64-apple-macos [-o out.o] in.s  (Apple's syntax, a Mach-O object)
  *       vasm --bench N in.s...  (assemble each file N times, report MB/s)
@@ -36,6 +37,7 @@ static double vasm_clock_seconds(void) { struct timespec t; clock_gettime(CLOCK_
 int main(int argc, char **argv)
 {
 	const char *out = "a.out", *in = 0;
+	static char debug_directory[4096];
 	int bench = 0, first = 1;
 	if (argc > 2 && !strcmp(argv[1], "--bench")) { bench = atoi(argv[2]); first = 3; }
 	if (argc > 1 && !strcmp(argv[1], "--trace")) { as_trace_level = 1; argv++; argc--; }
@@ -88,13 +90,21 @@ int main(int argc, char **argv)
 	int wasm = 0, macho = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
+		else if (!strcmp(argv[i], "-g"))	/* (clang -g -c: the line table knows the compilation directory) */
+			as_debug_directory_set(a, getcwd(debug_directory, sizeof debug_directory));
+		else if (!strcmp(argv[i], "-dwarf-debug-producer") && i + 1 < argc) as_dwarf_producer_set(a, argv[++i]);	/* (cc1as's) */
+		else if (!strncmp(argv[i], "-gdwarf-", 8) && argv[i][8] >= '2' && argv[i][8] <= '5' && !argv[i][9]) as_dwarf_version_set(a, argv[i][8] - '0');	/* (clang -c's -dwarf-version) */
 		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
-		else if (!strncmp(argv[i], "--target=x86_64", 15)) elf_set_machine(o, EM_X86_64);
+		else if (!strncmp(argv[i], "--target=x86_64", 15)) {
+			elf_set_machine(o, EM_X86_64);
+			if (strstr(argv[i], "mingw") || strstr(argv[i], "windows"))	/* x86_64-w64-mingw32: a COFF object */
+				obj_set_format(o, OBJ_COFF);
+		}
 		else if (!strncmp(argv[i], "--target=", 9) && (strstr(argv[i], "darwin") || strstr(argv[i], "apple") ||
 							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu] [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu|x86_64-w64-mingw32] [-g [-dwarf-debug-producer S]] [-gdwarf-N] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = vasm_file_map(in, &n);
 	const char *msg;
 #ifndef VCC_WASM

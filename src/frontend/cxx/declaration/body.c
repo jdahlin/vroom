@@ -17,8 +17,8 @@ VPRIV void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
 	c->late[c->nlate].pack_n = UINT32_MAX, c->late[c->nlate].pack_types = NULL;
 	if (c->cpack_n != UINT32_MAX && c->cpack_name > 1 && c->cpack_at + c->cpack_n <= c->ndecl_params) {
 		c->late[c->nlate].pack_name = c->cpack_name, c->late[c->nlate].pack_at = c->cpack_at, c->late[c->nlate].pack_n = c->cpack_n;
-		c->late[c->nlate].pack_types = malloc((c->cpack_n ? c->cpack_n : 1) * sizeof(qty));
-		memcpy(c->late[c->nlate].pack_types, c->cpack_types, c->cpack_n * sizeof(qty));
+		c->late[c->nlate].pack_types = malloc((c->cpack_n ? c->cpack_n : 1) * sizeof(ast_qualified_type));
+		memcpy(c->late[c->nlate].pack_types, c->cpack_types, c->cpack_n * sizeof(ast_qualified_type));
 	}
 	c->late[c->nlate++].what = (uint8_t)what;
 }
@@ -70,18 +70,18 @@ VPRIV void cxx_function_body_parse(cxx *c)
    delegating constructor) by its type; then the arguments, and the constructor they pick */
 static void cxx_mem_initializer_gen(cxx *c)
 {
-	qty self_ty = c->gen_this ? AST_TYPE(c->ast, c->ast->syms[c->gen_this].ty)->base : CXX_TY_UNKNOWN;
-	cxx_scope *self = self_ty != CXX_TY_UNKNOWN ? cxx_tag_scope_get(c, QUNQ(self_ty)) : NULL;
+	ast_qualified_type self_ty = c->gen_this ? AST_TYPE(c->ast, c->ast->syms[c->gen_this].ty)->base : CXX_TY_UNKNOWN;
+	cxx_scope *self = self_ty != CXX_TY_UNKNOWN ? cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(self_ty)) : NULL;
 	cxx_entity *fe = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && self &&
 			 (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE) ?
 			 cxx_lookup_local(self, cxx_peek(c, 0)->id) : NULL;
 	uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[CXX_MAX_ARGS], n;
-	qty target = CXX_TY_UNKNOWN;
+	ast_qualified_type target = CXX_TY_UNKNOWN;
 	bool braced;
 
 	if (fe && fe->kind == CXX_ENTITY_VALUE && fe->field_of) {
 		mname = fe->name;
-		if (fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != TY_ARRAY)
+		if (fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != AST_TYPE_ARRAY)
 			target = fe->ty;
 		cxx_advance(c);
 	} else {
@@ -273,7 +273,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		c->pos = l.begin;
 		c->this_const = l.fn && (l.fn->fn_const & 1);
 		c->template_depth = l.template_depth;	/* a member template's body: names may be dependent */
-		qty this_save = c->this_type;
+		ast_qualified_type this_save = c->this_type;
 
 		/* this: a pointer to the class (its type once the class is complete) */
 		c->this_type = l.scope->kind == CXX_SCOPE_CLASS && l.scope->owner && l.scope->owner->ty ? l.scope->owner->ty : CXX_TY_UNKNOWN;

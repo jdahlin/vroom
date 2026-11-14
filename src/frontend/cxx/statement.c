@@ -104,15 +104,15 @@ static bool cxx_declaration_statement_try(cxx *c)
  * for (; __b != __e; ++__b) { decl = *__b; body } } -- each call resolved and built as the expression would
  * be (a pointer as the iterator: the built-in operators).  Sets gr's loop parts; false: not built.
  */
-static bool cxx_range_for_class(cxx *c, cxx_gen_range *gr, uint32_t range, qty rt, uint32_t loc)
+static bool cxx_range_for_class(cxx *c, cxx_gen_range *gr, uint32_t range, ast_qualified_type rt, uint32_t loc)
 {
 	cc *a = c->ast;
-	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(rt));
+	cxx_scope *cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(rt));
 	cxx_entity *bs, *es;
 	uint32_t rp, rnode, bnode, enode, bsym, esym;
-	qty it, it2;
+	ast_qualified_type it, it2;
 
-	if (!cls || !range || !(AST_NODE_AT(a, range)->flags & NF_LVALUE) || !c->gen_block)
+	if (!cls || !range || !(AST_NODE_AT(a, range)->flags & AST_NODE_FLAG_LVALUE) || !c->gen_block)
 		return false;
 	bs = cxx_lookup_in(c, cls, vintern_cstr("begin"), 0);
 	es = cxx_lookup_in(c, cls, vintern_cstr("end"), 0);
@@ -123,29 +123,29 @@ static bool cxx_range_for_class(cxx *c, cxx_gen_range *gr, uint32_t range, qty r
 	gr->outer = c->gen_block;
 	c->gen_block = &gr->pre;
 	/* the range, once: a pointer to it */
-	rp = cxx_gen_local(c, 0, cc_type_pointer(a, QUNQ(AST_NODE_AT(a, range)->ty)), loc);
+	rp = cxx_gen_local(c, 0, cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, range)->ty)), loc);
 	if (!rp)
 		goto fail;
 	cxx_gen_local_declare(c, rp, cc_address_of_build(a, range, loc), true, loc);
 	rnode = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, rp, loc)), loc);
 	/* begin(), end() */
-	c->call_obj = (QQ(rt) & Q_CONST) ? 2 : 1;
+	c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(rt) & AST_QUALIFIER_CONST) ? 2 : 1;
 	cxx_call_type(c, bs, CXX_TY_UNKNOWN, NULL, NULL, 0);
 	if (!c->call_resolved || !c->call_picked || (it = c->etype) == CXX_TY_UNKNOWN)
 		goto fail;
 	c->enode = 0;
 	cxx_gen_call(c, c->call_picked, rnode, false, NULL, 0, loc);
 	bnode = c->enode;
-	c->call_obj = (QQ(rt) & Q_CONST) ? 2 : 1;
+	c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(rt) & AST_QUALIFIER_CONST) ? 2 : 1;
 	cxx_call_type(c, es, CXX_TY_UNKNOWN, NULL, NULL, 0);
-	if (!c->call_resolved || !c->call_picked || (it2 = c->etype) == CXX_TY_UNKNOWN || QUNQ(it2) != QUNQ(it) || !bnode)
+	if (!c->call_resolved || !c->call_picked || (it2 = c->etype) == CXX_TY_UNKNOWN || AST_QUALIFIED_TYPE_UNQUALIFIED(it2) != AST_QUALIFIED_TYPE_UNQUALIFIED(it) || !bnode)
 		goto fail;
 	c->enode = 0;
 	cxx_gen_call(c, c->call_picked, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, rp, loc)), loc), false, NULL, 0, loc);
 	enode = c->enode;
 	if (!enode)
 		goto fail;
-	it = QUNQ(it);
+	it = AST_QUALIFIED_TYPE_UNQUALIFIED(it);
 	bsym = cxx_gen_local(c, 0, it, loc), esym = cxx_gen_local(c, 0, it, loc);
 	if (!bsym || !esym)
 		goto fail;
@@ -166,13 +166,13 @@ static bool cxx_range_for_class(cxx *c, cxx_gen_range *gr, uint32_t range, qty r
 		uint32_t bv = cxx_gen_var_node_public(c, bsym, loc), ev = cxx_gen_var_node_public(c, esym, loc);
 
 		if (!cc_type_is_record(a, it)) {
-			if (AST_TYPE_KIND(a, it) != TY_PTR)
+			if (AST_TYPE_KIND(a, it) != AST_TYPE_POINTER)
 				goto fail;
 			gr->cond = cc_binary_build(a, LEX_TOKEN_EXCLAMATION_EQUAL, cc_node_rvalue(a, bv), cc_node_rvalue(a, ev), loc);
-			gr->step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node_public(c, bsym, loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), loc), loc);
+			gr->step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node_public(c, bsym, loc), cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_LONG), loc), loc);
 			gr->elem = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, bsym, loc)), loc);
 		} else {
-			qty arg = it;
+			ast_qualified_type arg = it;
 
 			/* __b != __e (or !(__b == __e)) */
 			c->op_lv_set = 1, c->op_lv[0] = 1;
@@ -253,7 +253,7 @@ static void cxx_for_parse(cxx *c)
 			/* decl-specifiers declarator (or a structured binding [a, b]) : range */
 			uint32_t colon = i, last_id = 0;
 			cxx_entity *var = NULL;
-			qty var_type = CXX_TY_UNKNOWN;
+			ast_qualified_type var_type = CXX_TY_UNKNOWN;
 			bool var_auto = false;
 
 			/* the declaration, when it is a plain one outside templates: its name and type */
@@ -280,21 +280,21 @@ static void cxx_for_parse(cxx *c)
 					cxx_declare(c, fs, c->tok[k].id, CXX_ENTITY_VALUE);	/* structured bindings */
 			cxx_expect(c, LEX_TOKEN_COLON);
 			uint32_t rloc = cxx_peek(c, 0)->loc, rnode = 0, elems[64], nelems = 0;
-			qty brace_elem = CXX_TY_UNKNOWN, rrt = CXX_TY_UNKNOWN;
+			ast_qualified_type brace_elem = CXX_TY_UNKNOWN, rrt = CXX_TY_UNKNOWN;
 			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE), list_ok = braced;
 
 			if (braced) {
 				/* { e, ... }: a std::initializer_list of the elements' one type (decayed), here its elements */
 				cxx_advance(c);
 				while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
-					qty et;
+					ast_qualified_type et;
 
 					cxx_assignment_expression_parse(c);
 					et = c->etype;
-					if (et != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+					if (et != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, et) == AST_TYPE_ARRAY)
 						et = cc_type_pointer(c->ast, AST_TYPE(c->ast, et)->base);
 					else if (et != CXX_TY_UNKNOWN)
-						et = QUNQ(et);
+						et = AST_QUALIFIED_TYPE_UNQUALIFIED(et);
 					if (et == CXX_TY_UNKNOWN || (brace_elem != CXX_TY_UNKNOWN && brace_elem != et))
 						list_ok = false;
 					brace_elem = et;
@@ -313,12 +313,12 @@ static void cxx_for_parse(cxx *c)
 			}
 			if (var) {
 				/* auto: deduced from *begin(range), an lvalue; else as declared */
-				qty elem;
+				ast_qualified_type elem;
 
 				if (!var_auto)
 					var->ty = var_type;
 				else if (braced ? list_ok && (elem = brace_elem, true) : cxx_range_element_type(c, c->etype, &elem))
-					var->ty = cxx_auto_deduce(c, var_type, braced ? QT(QI(elem), Q_CONST) : elem, true);
+					var->ty = cxx_auto_deduce(c, var_type, braced ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(elem), AST_QUALIFIER_CONST) : elem, true);
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			{
@@ -328,7 +328,7 @@ static void cxx_for_parse(cxx *c)
 					   (!braced || list_ok);
 
 				bool cls_range = gen && !braced && rnode && c->etype != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, rrt) &&
-						 AST_TYPE_KIND(c->ast, rrt) != TY_ARRAY;
+						 AST_TYPE_KIND(c->ast, rrt) != AST_TYPE_ARRAY;
 
 				if (gen && (cls_range ? cxx_range_for_class(c, &gr, rnode, rrt, rloc) :
 						       cxx_gen_range_for_begin(c, &gr, rnode, braced ? elems : NULL, nelems, brace_elem, rloc))) {
@@ -371,7 +371,7 @@ static void cxx_for_parse(cxx *c)
 			cxx_expression_parse(c);
 			if (gen && cxx_gen_on(c)) {
 				if (c->enode)
-					cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, N_EXPR, floc, c->enode, 0, 0));
+					cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, AST_NODE_EXPRESSION, floc, c->enode, 0, 0));
 				else
 					cxx_gen_fail(c);
 			}
@@ -398,7 +398,7 @@ static void cxx_for_parse(cxx *c)
 	if (gen && cxx_gen_on(c)) {
 		cc_id_list sb;
 
-		gbody = c->snode ? c->snode : cxx_gen_new_statement(c, N_BLOCK, floc, 0, 0, 0);
+		gbody = c->snode ? c->snode : cxx_gen_new_statement(c, AST_NODE_BLOCK, floc, 0, 0, 0);
 		if (has_step && !gstep) {
 			cxx_gen_fail(c);
 			return;
@@ -406,8 +406,8 @@ static void cxx_for_parse(cxx *c)
 		cc_id_list_init(&sb);
 		cc_id_list_append(c->ast, &sb, gstep);
 		cc_id_list_append(c->ast, &sb, gbody);
-		cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, N_FOR, floc, 0, gcond, cc_id_list_freeze(c->ast, &sb)));
-		cxx_gen_statement(c, cxx_gen_new_statement(c, N_BLOCK, floc, 0, cc_id_list_freeze(c->ast, &pre), pre.n));
+		cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, AST_NODE_FOR, floc, 0, gcond, cc_id_list_freeze(c->ast, &sb)));
+		cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_BLOCK, floc, 0, cc_id_list_freeze(c->ast, &pre), pre.n));
 	}
 }
 
@@ -582,7 +582,7 @@ VPRIV void cxx_compound_statement_parse(cxx *c)
 	if (gen) {
 		c->gen_block = outer_block;
 		c->gen_block_temps = outer_temps;
-		cxx_gen_statement(c, cxx_gen_on(c) ? cxx_gen_new_statement(c, N_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n) : 0);
+		cxx_gen_statement(c, cxx_gen_on(c) ? cxx_gen_new_statement(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n) : 0);
 	}
 }
 
@@ -626,7 +626,7 @@ static void cxx_substatement_parse(cxx *c)
 		c->gen_block_temps = outer_temps;
 		if (list.n && c->snode && cxx_gen_on(c)) {
 			cc_id_list_append(c->ast, &list, c->snode);
-			c->snode = cxx_gen_new_statement(c, N_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n);
+			c->snode = cxx_gen_new_statement(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n);
 		} else if (list.n)
 			cxx_gen_fail(c);	/* (declarations with no statement to go with) */
 	}
@@ -637,7 +637,7 @@ static uint32_t cxx_gen_nested(cxx *c, uint32_t loc)
 {
 	if (!cxx_gen_on(c))
 		return 0;
-	return c->snode ? c->snode : cxx_gen_new_statement(c, N_BLOCK, loc, 0, 0, 0);
+	return c->snode ? c->snode : cxx_gen_new_statement(c, AST_NODE_BLOCK, loc, 0, 0, 0);
 }
 
 static void cxx_statement_parse1(cxx *c)
@@ -719,18 +719,18 @@ static void cxx_statement_parse1(cxx *c)
 		if (is_constexpr && cxx_gen_on(c)) {
 			/* if constexpr: the branch taken is the statement (the other one was not built); a condition
 			   not known here: not built */
-			uint32_t st = taken == 1 ? gen_then : taken == 0 ? (gen_else ? gen_else : cxx_gen_new_statement(c, N_BLOCK, sloc, 0, 0, 0)) : 0;
+			uint32_t st = taken == 1 ? gen_then : taken == 0 ? (gen_else ? gen_else : cxx_gen_new_statement(c, AST_NODE_BLOCK, sloc, 0, 0, 0)) : 0;
 
 			if (st && !(cond_gen && cpre.n))
 				cxx_gen_statement(c, st);
 			else
 				cxx_gen_fail(c);
 		} else if (gen_cond && gen_then && cxx_gen_on(c)) {
-			uint32_t st = cxx_gen_new_statement(c, N_IF, sloc, gen_cond, gen_then, gen_else);
+			uint32_t st = cxx_gen_new_statement(c, AST_NODE_IF, sloc, gen_cond, gen_then, gen_else);
 
 			if (cond_gen && cpre.n) {
 				cc_id_list_append(c->ast, &cpre, st);
-				st = cxx_gen_new_statement(c, N_BLOCK, sloc, 0, cc_id_list_freeze(c->ast, &cpre), cpre.n);
+				st = cxx_gen_new_statement(c, AST_NODE_BLOCK, sloc, 0, cc_id_list_freeze(c->ast, &cpre), cpre.n);
 			}
 			cxx_gen_statement(c, st);
 		} else if (cond_gen && cpre.n)
@@ -751,7 +751,7 @@ static void cxx_statement_parse1(cxx *c)
 		gen_body = cxx_gen_nested(c, sloc);
 		c->scope = outer;
 		if (gen_cond && gen_body && cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, is_while ? N_WHILE : N_SWITCH, sloc, gen_cond, gen_body, 0));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, is_while ? AST_NODE_WHILE : AST_NODE_SWITCH, sloc, gen_cond, gen_body, 0));
 		return;
 	}
 	case CXX_KW_do: {
@@ -769,7 +769,7 @@ static void cxx_statement_parse1(cxx *c)
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		if (gen_body && gen_cond && cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DO, sloc, gen_cond, gen_body, 0));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_DO, sloc, gen_cond, gen_body, 0));
 		return;
 	}
 	case CXX_KW_for:
@@ -782,10 +782,10 @@ static void cxx_statement_parse1(cxx *c)
 
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LEFT_BRACE) && is_return && cxx_gen_on(c) && !c->tentative && !c->template_depth &&
-		    c->gen_ret != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->gen_ret) && AST_TYPE_KIND(c->ast, c->gen_ret) != TY_ARRAY) {
+		    c->gen_ret != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->gen_ret) && AST_TYPE_KIND(c->ast, c->gen_ret) != AST_TYPE_ARRAY) {
 			/* return {args}: the result constructed from them (a temporary the return elides) */
 			uint32_t an[CXX_MAX_ARGS], n;
-			qty rt = QUNQ(c->gen_ret);
+			ast_qualified_type rt = AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret);
 
 			cxx_braced_arguments_parse(c);
 			n = c->ncargs;
@@ -809,7 +809,7 @@ static void cxx_statement_parse1(cxx *c)
 			if (c->ret_capture && c->ret_type == CXX_TY_UNKNOWN && !c->tentative)
 				c->ret_type = c->etype, c->ret_lval = c->elval;
 		} else if (c->ret_capture && c->ret_type == CXX_TY_UNKNOWN && !c->tentative)
-			c->ret_type = cc_type_basic(TY_VOID), c->ret_lval = 0;
+			c->ret_type = cc_type_basic(AST_TYPE_VOID), c->ret_lval = 0;
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		if (is_return && cxx_gen_on(c)) {
 			uint32_t r = cxx_gen_return(c, value, has_value, sloc);
@@ -821,7 +821,7 @@ static void cxx_statement_parse1(cxx *c)
 		return;
 	}
 	case CXX_KW_break: case CXX_KW_continue: {
-		int op = cxx_is_kw(c, CXX_KW_break) ? N_BREAK : N_CONTINUE;
+		int op = cxx_is_kw(c, CXX_KW_break) ? AST_NODE_BREAK : AST_NODE_CONTINUE;
 
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
@@ -867,7 +867,7 @@ static void cxx_statement_parse1(cxx *c)
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
 			cxx_substatement_parse(c);
 		if (cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DEFAULT, sloc, 0, 0, cxx_gen_nested(c, sloc)));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_DEFAULT, sloc, 0, 0, cxx_gen_nested(c, sloc)));
 		return;
 	case CXX_KW_try: {
 		/* code generation: the body as a function of its own, called through the function that has the
@@ -879,13 +879,13 @@ static void cxx_statement_parse1(cxx *c)
 
 		cxx_advance(c);
 		if (gen) {
-			exc = cxx_gen_scratch(c, cc_type_pointer(c->ast, cc_type_basic(TY_VOID)), sloc);
+			exc = cxx_gen_scratch(c, cc_type_pointer(c->ast, cc_type_basic(AST_TYPE_VOID)), sloc);
 			ok = cxx_try_block_parse(c, &closure, &call) && exc;
 		} else
 			cxx_compound_statement_parse(c);
 		while (cxx_is_kw(c, CXX_KW_catch)) {
 			cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
-			qty dt = CXX_TY_UNKNOWN;
+			ast_qualified_type dt = CXX_TY_UNKNOWN;
 			uint32_t name = 0, var = 0, hloc = cxx_peek(c, 0)->loc;
 			bool all = false;
 			cc_id_list hl;
@@ -922,9 +922,9 @@ static void cxx_statement_parse1(cxx *c)
 				e->ty = dt;
 			if (ok && cxx_gen_on(c) && nh < 8) {
 				/* its type info (the type caught: without a reference or qualifiers), and its start */
-				qty ct = dt;
+				ast_qualified_type ct = dt;
 
-				if (!all && ct != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ct) == TY_PTR && AST_TYPE(c->ast, ct)->ext)
+				if (!all && ct != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ct) == AST_TYPE_POINTER && AST_TYPE(c->ast, ct)->ext)
 					ct = AST_TYPE(c->ast, ct)->base;
 				ti[nh] = all ? 0 : ct == CXX_TY_UNKNOWN ? 0 : cxx_gen_typeinfo(c, ct);
 				ok = all || ti[nh];
@@ -937,7 +937,7 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_compound_statement_parse(c);
 			if (ok && c->snode && cxx_gen_on(c)) {
 				cc_id_list_append(c->ast, &hl, c->snode);
-				hnode[nh++] = cxx_gen_new_statement(c, N_BLOCK, hloc, 0, cc_id_list_freeze(c->ast, &hl), hl.n);
+				hnode[nh++] = cxx_gen_new_statement(c, AST_NODE_BLOCK, hloc, 0, cc_id_list_freeze(c->ast, &hl), hl.n);
 			} else
 				ok = false;
 			c->scope = outer;
@@ -973,10 +973,10 @@ static void cxx_statement_parse1(cxx *c)
 			{
 				uint32_t n = c->enode;
 
-				while (n && AST_NODE_AT(c->ast, n)->op != N_STR && AST_NODE_AT(c->ast, n)->a &&
-				       (AST_NODE_AT(c->ast, n)->op == N_CAST || AST_NODE_AT(c->ast, n)->op == N_ADDR))
+				while (n && AST_NODE_AT(c->ast, n)->op != AST_NODE_STRING && AST_NODE_AT(c->ast, n)->a &&
+				       (AST_NODE_AT(c->ast, n)->op == AST_NODE_CAST || AST_NODE_AT(c->ast, n)->op == AST_NODE_ADDRESS))
 					n = AST_NODE_AT(c->ast, n)->a;
-				tmpl = n && AST_NODE_AT(c->ast, n)->op == N_STR ? AST_NODE_AT(c->ast, n)->a + 1 : 0;
+				tmpl = n && AST_NODE_AT(c->ast, n)->op == AST_NODE_STRING ? AST_NODE_AT(c->ast, n)->a + 1 : 0;
 			}
 			while (cxx_is(c, LEX_TOKEN_COLON) || cxx_is(c, LEX_TOKEN_COLON_COLON))
 				cxx_advance(c);
@@ -993,14 +993,14 @@ static void cxx_statement_parse1(cxx *c)
 			}
 			cc *a = c->ast;
 			uint32_t ai = a->nasm++;
-			casm *r = &a->asms[ai];
+			ast_asm_statement *r = &a->asms[ai];
 
 			memset(r, 0, sizeof *r);
 			r->tmpl = tmpl, r->vol = vol, r->extended = 0;
-			r->ops = cc_heap_allocate(a, sizeof(asmop));
+			r->ops = cc_heap_allocate(a, sizeof(ast_asm_operand));
 			r->clob = cc_heap_allocate(a, sizeof(uint32_t));
 			r->labels = cc_heap_allocate(a, sizeof(uint32_t));
-			cxx_gen_statement(c, cxx_gen_new_statement(c, N_ASM, aloc, ai, 0, 0));
+			cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_ASM, aloc, ai, 0, 0));
 		}
 		return;
 	}
@@ -1018,7 +1018,7 @@ static void cxx_statement_parse1(cxx *c)
 
 	cxx_expression_parse(c);
 	if (cxx_gen_on(c) && c->enode)
-		cxx_gen_statement(c, cxx_gen_new_statement(c, N_EXPR, sloc, c->enode, 0, 0));
+		cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_EXPRESSION, sloc, c->enode, 0, 0));
 	if (!c->tentative && !c->template_depth && !c->instantiating) {
 		static int dump = -1;
 

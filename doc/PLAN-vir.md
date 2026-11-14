@@ -154,6 +154,9 @@ They follow the `LO()` interface, so that the builder is a thin translation:
 
 ### Passes at `-O2`
 
+(What each level runs today, with its options: `OPTIMIZATION.md`.  `-O3` adds
+the loop vectorizer and loop-constant hoisting.)
+
 1. **Build** (the walker through `vir_*`): SSA during the build, folding and
    local CSE on insertion.
 2. **Simplify:** trivial block parameters removed, constants forward, folded
@@ -197,13 +200,13 @@ fixpoints without a budget (the same rule as `codegen/flow/`).
 |---|-------------|-----------|
 | V0 | **Background and plan.** `RESEARCH-vir.md`, `PLAN-vir.md` | Reviewed by Johan |
 | V1 | **Format and tools.** `vir.h`, printer, parser, verifier, interpreter, `virtest`, `fuzz-vir` | Write-read-write identical on all tests; the verifier rejects a set of mutations; default build byte-identical (`vbench.py check`) |
-| V2 | **Builder and simplest lowering on x86-64.** The walker against `vir_*`; lowering where every value lives in a stack slot; `VCC_VIR=1`; fallback per function | With `VCC_VIR=1`: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture the same passes as without; coverage reported per corpus; without the flag byte-identical |
-| V3 | **Coverage.** Bit-fields, records in calls, varargs, atomics, floating point, switch (the walker's lowering), computed goto | Coverage ≥ 95 % of PostgreSQL's functions and of vcc's own; the x86 kernel boots with `VCC_VIR=1` (asm functions take the ordinary path); objtool without warnings |
+| V2 | **Builder and simplest lowering on x86-64.** The walker against `vir_*`; lowering where every value lives in a stack slot; behind a switch (then `VCC_VIR=1`); fallback per function | With VIR on: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture the same passes as without; coverage reported per corpus; without the flag byte-identical |
+| V3 | **Coverage.** Bit-fields, records in calls, varargs, atomics, floating point, switch (the walker's lowering), computed goto | Coverage ≥ 95 % of PostgreSQL's functions and of vcc's own; the x86 kernel boots with VIR on (asm functions take the ordinary path); objtool without warnings |
 | V4 | **Register allocation.** Next-use chains backward, greedy assignment forward, fixed registers, parallel moves per edge, `vir_alloc_check` | Instructions on a fixed set of TUs below today's `-O2`; allocator time and counters (spills, reloads, moves) reported separately; the check green on the tests and `fuzz-vir` |
 | V5 | **Passes.** Simplification, value numbering, store-to-load forwarding, dead code | Per pass: interpreter equivalence, instructions and `vbench.py` time before and after, in the plan |
 | V5b | **Inline asm.** `x64_asm` is split into planning and emission (SPEC X6); `asm` and `asmgoto` are built | Without the flag: the kernel objects and `vas-corpus.py` byte-identical; with it: coverage ≥ 99 % of the x86 kernel's functions |
-| V6 | **arm64.** Requires arm64 to have an `LO` lowering (TODO.md "arm64 and wasm on the shared walker"); VIR drives the move or waits for it | ctests 1729/1729, `vcc-abi.py`, the arm64 kernel boots with `VCC_VIR=1`; `vcc-obj.py` 840/840 |
-| V7 | **VIR is the default at `-O2`.** | Proposal: ≤ 1.25x clang -O2 in static instructions; phase 2 self-build ≤ 1.5x slower than the clang build (2.6x today); `-O2` compilation ≤ +15 % in total; `-O0`/`-O1` byte-identical all the way |
+| V6 | **arm64.** Requires arm64 to have an `LO` lowering (TODO.md "arm64 and wasm on the shared walker"); VIR drives the move or waits for it | ctests 1729/1729, `vcc-abi.py`, the arm64 kernel boots with VIR on; `vcc-obj.py` 840/840 |
+| V7 | **VIR is the default at `-O2`.** Switched 2026-11-13: `-O2` is VIR, `-O3` adds the vectorizer, `-O1` is the direct emitter (`OPTIMIZATION.md`); the numbers below are not measured yet | Proposal: ≤ 1.25x clang -O2 in static instructions; phase 2 self-build ≤ 1.5x slower than the clang build (2.6x today); `-O2` compilation ≤ +15 % in total; `-O0`/`-O1` byte-identical all the way |
 | later | `NSW` and type tags are used; SROA of non-escaped records; `returns_twice` with abnormal edges; VLA; `__int128`; wasm | — |
 
 "VIR 1.0" is the format and semantics as they look when V7 passes.
@@ -216,14 +219,17 @@ equivalence testing remain. Generated programs use no external calls.
 
 ## Validation
 
-- Until V7, VIR is behind `VCC_VIR=1`; every commit leaves the default output
-  byte-identical (`vcc-same.py`, `vbench.py check`).
+- Since 2026-11-13 VIR is `-O2`'s code generator; `-O0` and `-O1` keep the
+  direct emitter, whose output a VIR change leaves byte-identical
+  (`vcc-same.py`, `vbench.py check` at `-O1`).  Before that switch VIR was
+  behind `VCC_VIR=1`, an environment variable that no longer exists.
 - Two paths through the same walker are a test in themselves: the same
-  program built with and without `VCC_VIR=1` must behave alike in the C
-  suites, the ABI tests and the kernel boot.
+  program built at `-O1` and at `-O2`/`-O3` must behave alike in the C
+  suites (`vcc-ctests.py -O1`, `-O2`, `-O3`: CI runs all three), the ABI
+  tests and the kernel boot.
 - The interpreter compares before and after every pass; `fuzz-vir` with
   ASan/UBSan.
-- Speed gate: `bench/vbench.py gate` with the flag off (±0.1 %) and on
+- Speed gate: `bench/vbench.py gate` at `-O1` (±0.1 %) and at `-O2`
   (reported).
 
 ## Risks and open questions
@@ -249,6 +255,71 @@ equivalence testing remain. Generated programs use no external calls.
 - **Open:** benchmark suite and X for G5 (PLAN-release).
 
 ## Status
+
+### V7 switch: optimization levels instead of environment variables (2026-11-13)
+
+`-O2` is VIR, `-O3` adds the loop vectorizer and loop-constant hoisting,
+`-O1` (and `-Og`, `-O`) is the direct emitter, as `-O2` was before
+(`OPTIMIZATION.md`).  The levels and the options `-fvir`, `-frotate-loops`,
+`-fshrink-wrap`, `-fvectorize`, `-fhoist-loop-constants` are one table,
+`CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`), resolved in
+`driver/optimization.c`.  Every VIR environment variable is gone: what the
+harnesses used is a `-fvir-*` option (`-fvir-stats`, `-fvir-passes=`,
+`-fvir-check`, `-fvir-verify`, `-fvir-report`, `-fvir-dump`,
+`-fvir-functions=`, `-fno-vir-lower`, `-fvir-vectorize-report`,
+`-fvir-ccmp=`, `-fvir-probe=`), so they now work per job under vccd too.
+The pass switch is read per TU, not per process; a bad value fails the job.
+
+- Same output: each old mode against its new spelling, `-S` of the 2283
+  suite files on arm64, byte-identical in all 15 pairs (old `-O2` = `-O1`,
+  `VCC_VIR=bl VCC_VIR_VEC=0` = `-O2`, `VCC_VIR=bl` = `-O3`, and each knob).
+  `vcc-same.py --modes c0,c1` against the commit before: 4346/4346.
+- Suites: `vcc-ctests.py` 2129/2129 at `-O1`, `-O2` and `-O3`; the vcc suite
+  under ASan at `-O3 -fvir-verify -fvir-check` and at `-O1`; TSVC 151/151 at
+  each level; zlib's tests and same output at `-O1`, `-O2`, `-O3`;
+  `vcc-volatile.py` 48/48 at the three levels.  CI runs the suites at all
+  three (`ci/premerge.sh`: ctests, ctests-O1, ctests-O3).  The four
+  vectorizer tests in `test/vcc/` carry `vcc-flags: -O3`.
+- Kernel: the arm64 kernel (`-O2`, so through VIR now) builds with
+  `vccd-kbuild.sh` (17.1 s at `-j 6`, loaded machine) and boots Debian;
+  VIR lowers 53 % of a 60-TU sample's functions (inline asm is most of the
+  rest).
+- Compile cost against the commit before (`vbench.py gate`, kernel corpus,
+  `-O2`): emit +90 % instructions, the whole `-c` +9.5 % (+18 % cycles); the
+  front end unchanged.  V7's proposal allows +15 % in total.  V7's other
+  criteria (static instructions against clang, the self-build) are not
+  measured.
+- Compile cost after computing the inlining sizes on first use (2026-11-14,
+  against main 87f85d5b): cc +9.11 % instructions (+15.9 % cycles), emit
+  +84.7 %; that commit alone gave cc -0.61 %, emit -2.55 %, output
+  byte-identical.  Where emit's remaining ~600 M on the corpus goes:
+  VIR's build and lowering of the functions it lowers ~620 M (build
+  ~4500 instructions per final VIR instruction, lowering ~2800: the
+  allocator ~107 M, the record clean-ups ~64 M, simplify 67 M, to-vir 43 M,
+  canon 35 M, promote 30 M + 16 M for promote-again, which changes 37 of
+  1251 functions); walks that fail ~97 M (1040 of them, inline asm 746 of
+  896 fallbacks), after which the direct emitter still does ~400 M of
+  the 560 M it does at `-O1`.  No pass dominates and none is superlinear,
+  so the 1 % budget is out of reach by tuning: it needs VIR to take inline
+  asm (no failed walk, no second emission) and a cheaper builder.
+- Not run: `vcc-vir-x86.py` and the x86-64 CI job need an x86-64 host; its
+  compile side was checked here (the same functions lowered, packed
+  instructions only at `-O3`, `-O0`/`-O1` unchanged by VIR's options).
+- What CI found once `-O2` was VIR, fixed in the same branch:
+  - `vw_trivial` swept every block parameter to a fixed point, one nesting
+    level per sweep: `test/vcc/limits.c` (1000 nested loops) took 14 s
+    (20.7 G instructions in that pass) and timed out under ASan.  It is a
+    worklist now (Braun et al.'s tryRemoveTrivialPhi): 0.81 s, the same
+    assembly.
+  - `-g` made every function fall back (VIR wrote no line table), so `-g`
+    changed the code at `-O2`.  The lowering driver now calls `dbg_row` at
+    each block and wherever `f->loc` starts a run, and arm64's printer
+    shrink-wraps under `-g` too.  `vcc-dwarf.py` passes 1591/1591 at `-O0`
+    to `-O3` (`.text` unchanged by `-g`, dwarfdump verifies, `-g -c` equals
+    clang's assembly of `-g -S`), and `vcc-opt-debug.py` passes for x86-64.
+  - `vcc-x86-leaf-frame.py` required a frame in `fl_parameter`, `fl_stack`
+    and `fl_call`, the direct emitter's policy; VIR omits it there, as
+    clang -O2 does, and the harness now expects that at `-O2` and up.
 
 ### V4 x86-64 against clang -O2 (2026-11-12), goal at most 5 % slower
 
@@ -989,8 +1060,8 @@ units green.
 **2026-11-13: ARM comparison and reconsidered x86 attempts.** The current
 user goal is at most **1.05x clang -O2** for speedtest1; it is still open.
 The same SQLite 3.50.4 source, `-O2`, `SQLITE_THREADSAFE=0` and
-`SQLITE_OMIT_LOAD_EXTENSION` have been lowered with `VCC_VIR=bvls` and
-allocator check for both targets.  ARM uses its Linux cross sysroot.  Static
+`SQLITE_OMIT_LOAD_EXTENSION` have been lowered with `-O3 -fvir-verify -fvir-report` and
+the allocator check (`-fvir-check`) for both targets.  ARM uses its Linux cross sysroot.  Static
 instructions are not a comparison of cycles between different processors:
 
 | Function | ARM64 instructions | x86-64 instructions | ARM64/x86 spills |
@@ -1072,7 +1143,7 @@ chasing of empty branches (with preserved allocator edits/edge moves), loop
 order, rotation plan and decisions on copies of entry test/small joins.
 Both ARM and x86 call the same implementation.  The emitters still handle
 their registers, instructions, edge moves and frame limits.  No copy of
-ARM's planner in the x86 file.  `VCC_VIR_ROT=0` now turns off rotation on
+ARM's planner in the x86 file.  `-fno-rotate-loops` now turns off rotation on
 x86 too.
 
 ARM's SQLite assembly is byte-identical.  x86 actually uses rotation with
@@ -1374,11 +1445,742 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
-`VCC_VIR=bl` on x86-64 now goes through the same builder and loop vectorizer
+**SQLite codegen object swap (2026-11-14, 2c88c830).**
+Relinked vpp in both directions, replacing only obj/unity/codegen.o in
+the original ordered list of 29 objects. Both control relinks reproduced
+their original executable byte for byte. CPU 7, VCC_THREADS=1, SQLite
+3.50.4 -O2 -c, one warmup per binary followed by 32 measured compiles
+per binary with balanced run order. Medians from perf stat:
+
+| Other 28 objects | codegen.o | Retired user instructions | CPU ms |
+| --- | --- | ---: | ---: |
+| Self-hosted | Self-hosted | 1,678.60M | 156.550 |
+| Self-hosted | Clang | 1,460.70M | 146.820 |
+| Clang | Self-hosted | 1,318.97M | 142.170 |
+| Clang | Clang | 1,099.51M | 131.255 |
+
+Clang's codegen.o saved 217.90M instructions and 9.73 ms in the
+self-hosted binary. The reverse swap added 219.47M and 10.92 ms to
+the Clang-built binary. The object therefore accounts for 37.6–37.9%
+of the 579.09M instruction gap and 38–43% of the 25.30 ms CPU gap.
+The earlier emitter boundary count includes calls into separately
+compiled objects such as the assembler.
+
+The Clang host normally links as PIE and gains text relocations with
+the self-hosted object. A second balanced experiment linking all four
+as non-PIE (16 measured runs each) gave instruction shares of 37.6%
+and 37.9% and CPU shares of 41% and 37%. Every compile in both
+experiments produced the same SQLite object as the previous benchmark.
+
+**SQLite emitter instruction profile (2026-11-14).**
+On the #284 baseline the emitter accounted for 343.1M of the 588.9M
+extra retired user instructions on SQLite 3.50.4. The counts below
+come from reading a thread-local hardware counter at function entry and
+return with the compiler pinned to CPU 7 and VCC_THREADS=1. The walker
+and finish counts cover the same 1,924 functions in both builds.
+
+| Emitter region (exclusive, millions) | Self-hosted | Clang-built | Excess |
+| --- | ---: | ---: | ---: |
+| AST walker excluding x64_finish | 422.4 | 253.2 | 169.2 |
+| Committing chunks, including assembly | 406.4 | 285.2 | 121.3 |
+| x64_finish | 152.1 | 106.6 | 45.5 |
+| Other emitter work | 21.0 | 13.8 | 7.1 |
+
+In walk_lvalue_from_value, VCC reserved 120 stack bytes and copied a
+32-byte by-value operand from its incoming argument area. Clang read
+that area directly. VIR now uses the SysV incoming object for by-value
+memory parameters with sufficient alignment. The shared walker also
+skips register materialization for register values and drops the type
+width argument both materializers ignored. Clang had eliminated those
+width calculations in the inspected code. Compact lvalue and ABI records
+and guarded target-feature lookups reduce work in other walker paths.
+
+Instruction sampling also found x64_mov and as_x64_op under chunk commit.
+The compiler now encodes common numeric integer ModRM operands directly
+in the fragment. This benefits both builds. Chunk commit fell to 376.8M
+self-hosted and 254.8M Clang-built. Total emitter counts fell to 958.1M
+and 623.5M, reducing its excess from 343.1M to 334.7M.
+
+Medians of 24 rotated runs per binary after warmup, perf stat
+instructions:u and task-clock, on the same pinned SQLite -O2 -c compile:
+
+| Compiler | Instructions before | After | CPU ms before | After |
+| --- | ---: | ---: | ---: | ---: |
+| Self-hosted | 1,723.80M | 1,679.38M | 159.655 | 156.620 |
+| Clang-built | 1,134.88M | 1,099.57M | 133.465 | 131.935 |
+
+The absolute gap fell by 9.11M to 579.81M. The CPU ratio moved from
+1.196x to 1.187x. A second run measured 1.193x to 1.191x. All four
+binaries produced the same SQLite object, and its recursive query returned
+500500. Stage 2 and stage 3 matched. The x86 ABI suite passed all 35
+cases including cross-compiler calls. The VIR regression checks two
+independently mutated by-value arguments and inspects the lowered code.
+
+Integration review updates the existing CRC intrinsic to the materializer's
+new signature and initializes the new incoming-object slot field explicitly.
+Verified on the integrated stack: native x86 object parity 345/345, checked
+VIR own-object runtime tests 342/342, dedicated VIR assembly/object checks,
+x86 ABI cross-calls through VIR 35/35, feature macros 371/371, and sanitized
+machine-record effect contracts.
+
+**SQLite emitter and short literal comparisons (2026-11-14).**
+Five pinned SQLite 3.50.4 compiles per binary, sampling every 75,001 user
+cycles with call stacks. At the #283 baseline, a function from the codegen
+unity object appeared on 20,098/37,798 self-hosted samples (53.2%) and
+16,200/30,417 Clang-built samples (53.3%). The leaf itself belonged to
+codegen in 11,711 and 8,847 samples respectively. Inclusive counts include
+assembly and object writing called by the emitter.
+
+In the x86 two-address traversal VCC copied each 16-byte record to its
+stack and classified opcodes with a chain of range and equality branches.
+Clang inlined the traversal in x64_finish and used bit tests for membership.
+Both builds now index a byte table for operand constraints and copy ordinary
+records directly to the destination. Self-hosted samples whose leaf was
+x64_two_address_convert fell from 383 to 218.
+
+VIR now replaces a short literal memcmp whose sole result use tests equality
+with an unaligned word load at the original call and a literal comparison.
+Widths are 1, 2, 4 and 8 bytes. The directive macro passes the literal length
+explicitly. VCC emits the same memory/immediate compare as Clang for ".req"
+and "cfi_". Self-hosted libc memcmp samples called by as_snippet_assemble
+and as_directive_dispatch went from 117 and 114 to 0 and 24.
+
+CPU 7, one worker, same SQLite compile as #283. In 24 rotated repetitions the
+median task-clock was 167.335 → 164.415 ms self-hosted and 139.905 → 138.215 ms
+Clang-built (1.196× → 1.190×). Retired user instructions fell by 11.675 M
+and 4.647 M respectively. A repeat with no concurrent validation ran in
+159.360 → 158.905 ms and 133.510 → 133.635 ms (1.194× → 1.189×);
+retired instructions fell by 11.796 M and 4.364 M. The size of the timing
+gain is sensitive to host load. A 21-repetition alternating run was noisier
+(179.78 → 172.27 ms and 144.79 → 145.97 ms, final 1.180×). Every output had
+SHA-256 c4d3896fefc93dca709598910795c84ab65403ca45020b260292d57b777d3258.
+The linked object passed the recursive SQL sum check. Stage 2 and stage 3
+bootstrap objects matched.
+
+Integration review keeps the current `X64_OP_CRC32` opcode in the new
+constraint table and restricts the memcmp match explicitly to the ABI's
+flagless i64-to-i32 truncation. User byte narrowing and ordered comparisons
+retain the call. Expanded regression coverage exercises every width, high
+bits, embedded NUL, each changed byte, reversed operands and direct branches.
+Verified against the integrated stack: checked VIR x86 suite 342/342,
+`vcc-vir-x86.py` (assembly and own objects at -O2/-O3), and machine-record
+effect contracts with ASan/UBSan.
+
+**Forwarding padded ABI words and aggregate call results (2026-11-14).**
+In `as_snippet_assemble`, VIR zeroed a 16-byte stack token, stored a
+pointer and a 32-bit length, and immediately reloaded both as 64-bit
+words. Clang kept the fields in registers. VIR now forwards a full word
+from a zero fill and the most recent store to its low bytes when all
+other bytes in that word are known zero. It leaves overlapping field
+updates and volatile loads alone.
+
+The expression walker also copied a callee's 32-byte result out of a
+temporary after the call. Clang passed the enclosing function's result
+buffer on the direct-return path. VIR now passes the final buffer for a
+matching full-object copy if the temporary has just those two uses. A
+local destination must be private and suitably aligned. On the direct
+return from `walk_value_emit_inner` this removes two vector loads and
+two vector stores; Clang also makes this particular call a tail jump.
+
+Exclusive samples across five pinned SQLite 3.50.4 compiles (period
+75,001 user cycles), in `as_snippet_assemble`, `walk_value_emit` and
+`walk_value_emit_inner` respectively: self-hosted 458/354/771 →
+249/276/398; clang-built 219/160/612 → 223/174/644.
+
+| Median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 161.92 / 160.735 ms | 135.05 / 134.02 ms | 1.199× / 1.199× |
+| 21 runs alternating order | 164.88 / 163.13 ms | 136.92 / 137.17 ms | 1.204× / 1.189× |
+
+One worker, CPU 7, ordinary host builds, one warm-up per binary. The
+self-hosted binary retired 3.0–5.0M fewer instructions per compile.
+Its median time improved in both series; the ratio was flat in the
+rotated series. All four SQLite objects matched (SHA-256 prefix
+`c4d3896fefc9`); the recursive-query smoke test passed.
+
+**Packed byte OR reductions on SQLite (2026-11-14).**
+The inlined attribute emptiness scan dominated the excess samples in both
+`cc_attribute_merge` and `cc_attribute_apply_symbol`. Clang used SSE2
+unpacks and packed ORs; x86 VIR ran 148 byte loads, ORs and loop tests.
+The vectorizer now recognizes a zero-based fixed-trip OR of unsigned bytes
+into an i32 accumulator, with 16–256 iterations and no other live loop-body
+operations. OR complete unaligned 16-byte chunks before reducing to one byte,
+combine with the initial accumulator, and resume the original loop at the
+first unprocessed byte. The attribute scan uses nine wide loads and four
+scalar iterations. Volatile accesses and loops with writes keep their
+original order. Guard-page tests covered both exact and partial final chunks.
+
+Five single-worker SQLite 3.50.4 compiles on CPU 7, sampled every 75,001
+user cycles, gave 218 → 58 and 213 → 35 exclusive self-hosted samples in
+the two functions, respectively (clang-built 37 → 34 and 35 → 21).
+
+| Median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 162.14 / 160.36 ms | 134.14 / 134.115 ms | 1.209× / 1.196× |
+| 21 runs alternating order | 161.47 / 160.04 ms | 134.00 / 133.41 ms | 1.205× / 1.200× |
+
+Ordinary host builds, one warm-up per binary. Self-hosted vcc retired
+23.8–24.1M fewer instructions per compile. All four binaries produced the
+same SQLite object (SHA-256 prefix `c4d3896fefc9`); its recursive-query
+smoke test passed.
+
+**Frame operands and two-word records on SQLite (2026-11-14).**
+The x86 VIR path repeatedly computed a local address with LEA immediately
+before reading it or copying a record. The static counts of RSP-relative
+LEAs in `as_snippet_assemble`, `walk_value_emit` and `x64_record_effects`
+were 351, 36 and 21; Clang emitted 4, 2 and 0. Let the allocator leave an
+in-slot constant address in the memory operand of a load, test, comparison,
+short copy or zero fill. The counts fell to 117, 13 and 0.
+
+`cc_primary_parse` initialized two words on the stack and reloaded them with
+MOVUPS for a 16-byte copy into the parser arena. Exposing the two fields to
+promotion when either copy operand is a local lets VIR store both words
+directly into the arena. A trial forcing scalar moves for all small copies
+added 16M retired instructions with no time gain and was discarded.
+
+| SQLite 3.50.4 median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 163.95 / 162.30 ms | 134.25 / 134.04 ms | 1.221× / 1.211× |
+| 21 runs alternating order | 166.49 / 165.55 ms | 136.84 / 137.36 ms | 1.217× / 1.205× |
+
+One worker on CPU 7, ordinary builds, one warm-up per binary. Self-hosted
+vcc retired 16.0–16.4M fewer instructions. Five compiles sampled every
+75,001 user cycles gave 507 → 337 exclusive samples in `cc_primary_parse`
+and 390 → 339 in `walk_value_emit`; `as_snippet_assemble` was flat
+(456 → 457). All four binaries produced the same SQLite object
+(SHA-256 prefix `c4d3896fefc9`); the recursive-query smoke test passed.
+
+**Forwarding small record initializers to their destination (2026-11-14).**
+On the SQLite 3.50.4 compile, 78% of the self-hosted cycle samples in
+`walk_lvalue_load` landed on the copy out of a freshly initialized stack
+record: two byte stores immediately preceded a 16-byte reload. Clang wrote
+the result fields directly through the return pointer. VIR now forwards a
+zero fill and up to four scalar field stores at the original copy point,
+using the previously evaluated field values. An intervening memory write
+or call invalidates the candidate. The second promotion pass can then
+remove the private stack record. An inlined 32-byte return reproducer
+goes from two stack slots and two copies to writing the return buffer directly.
+
+Cycle profiles covering five pinned compiles per binary (sampling period 75,001) gave
+515 → 106 exclusive samples in `walk_lvalue_load` for self-hosted vcc
+and 51 → 44 for clang-built vcc. Median task-clock in milliseconds for
+one worker on CPU 7, one warm-up per binary, ordinary host builds:
+
+| SQLite compile | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 163.00 / 162.11 | 133.205 / 132.995 | 1.224× / 1.219× |
+| 21 runs alternating order | 162.69 / 162.17 | 133.05 / 132.87 | 1.223× / 1.221× |
+
+The self-hosted build retired 3.0–3.6M fewer instructions per compile.
+All four binaries produced the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`), which passed the recursive-query smoke test.
+
+**SQLite flag tests, directive scanning and host compiler profiles (2026-11-14).**
+VIR now branches directly on a masked unsigned load with a memory TEST. Clang
+used testb/jcc where vcc loaded the byte, masked it and tested the register.
+This applies to lex_tokenize_mode, pp_token_next and codegen_prepass_node_walk.
+VIR also eliminates repeated boolean normalization and lowers small constant
+scales to shifts or scaled LEA when an addressing-mode fold is unavailable.
+The memory-test fold alone retired about 16M fewer instructions per SQLite
+compile, with no reproducible time win in isolation.
+
+Both compilers spent cycles finding directive starts twice. Collect the
+positions in the first scan and build directive spans from those positions.
+Five pinned cycle profiles (period 75,001) gave 951 → 350 exclusive samples
+self-hosted and 755 → 307 clang-built for pp_file_enter and pp_skeleton_build
+combined, accounting for different inlining. pp_token_next measured 1206 → 1059
+self-hosted and 883 → 880 clang-built.
+
+| SQLite 3.50.4 median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 165.68 / 162.89 ms | 134.80 / 133.40 ms | 1.229× / 1.221× |
+| 21 runs alternating order | 168.14 / 165.36 ms | 137.06 / 135.30 ms | 1.227× / 1.222× |
+
+One thread, CPU 7, one warm-up per binary. On the same revision four host
+builds used the same clang, x86-64 tuning and unity settings. Training compiled
+the assembler, C parser, preprocessor and codegen unity units with one worker
+and the usual SQLite benchmark backend settings. SQLite was held out.
+
+| Clang-built vpp | Median task-clock (24 rotated runs) | Instructions |
+| --- | ---: | ---: |
+| Clang -O3 | 139.20 ms | 1139.9M |
+| ThinLTO | 139.03 ms | 1135.0M |
+| PGO | 132.81 ms | 1010.1M |
+| ThinLTO + PGO | 132.06 ms | 987.0M |
+
+Build the instrumented host vpp with VCC_PGO=-fprofile-instr-generate and
+collect profiles with LLVM_PROFILE_FILE containing %p. Merge with llvm-profdata
+merge and use VCC_PGO=-fprofile-instr-use=/absolute/path/to/merged.profdata in
+a fresh OUT. Add VCC_LTO=-flto=thin for the combined build. Bootstrap stages
+generate native objects; LLVM bitcode LTO and clang profile consumption apply
+to the clang host stage.
+
+Separately, train perf on the same compiler modules, compile the self-host
+with -ffunction-sections and link with lld, ordering input function symbols
+by descending user-cycle sample count. Median times were 163.18
+ms for the ordinary self-host, 162.94 ms for sections + lld
+and 163.81 ms for the profile-ordered link (24 rotated runs).
+This experiment changes function placement only. LLVM 23 perf2bolt crashed
+during conversion of the self-hosted branch trace. Every timed build emitted
+the identical SQLite object (SHA-256 prefix c4d3896fefc9).
+
+**SQLite with promotable two-word copies (2026-11-14).** In five pinned
+compiles, codegen_integer_truncate and cc_constant_truncate spent most of
+their exclusive cycle samples at the vector copy immediately after two
+scalar stores. Clang kept the words in general-purpose registers. VIR now
+represents a nonvolatile 16-byte copy between known frame addresses as
+two word loads followed by two word stores. Slot promotion can then forward
+the words across copies, including copies at nonzero offsets.
+
+| Function | Self-hosted exclusive cycle samples, before / after | Clang-built, before / after | Self-hosted movups instructions, before / after |
+| --- | ---: | ---: | ---: |
+| codegen_integer_truncate | 317 / 74 | 9 / 4 | 4 / 0 |
+| cc_constant_truncate | 76 / 22 | 3 / 9 | 4 / 0 |
+| em_bin_identity | 71 / 19 | 16 / 15 | 40 / 4 |
+
+The profile used perf cycles:u with period 75,001. Counts are per function
+symbol and exclude inlined work attributed to callers.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 171.34 / 168.11 ms | 137.27 / 137.65 ms | 1.248× / 1.221× |
+| 21 runs alternating order | 172.92 / 169.51 ms | 138.81 / 139.56 ms | 1.246× / 1.215× |
+
+One emitter thread on CPU 7, warm-up excluded. The rotating round retired
+4.47M fewer instructions self-hosted. All four binaries emitted the same
+object (SHA-256 prefix c4d3896fefc9), and the recursive-query test passed.
+Bootstrap stage 2 and stage 3 objects matched byte for byte.
+
+**SQLite with returns_twice in x86 VIR (2026-11-14).** Direct calls to
+setjmp and functions declared returns_twice now evict live registers at the call.
+Each spilled SSA value has a private slot in these functions, since longjmp can
+resume after an ordinary live range has ended. With allocation checking enabled,
+cc_statement_parse, cc_compound_statement_parse and cc_record_body_parse all lower.
+Their combined self-hosted machine code shrank from 63,937 to 31,738 bytes.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 172.78 / 170.51 ms | 137.72 / 137.55 ms | 1.254× / 1.240× |
+| 21 runs alternating order | 169.25 / 167.51 ms | 135.64 / 135.07 ms | 1.248× / 1.240× |
+
+One emitter thread on CPU 7, one warm-up excluded per binary. The rotating run
+retired 19.1M fewer instructions self-hosted. Every build produced the same
+SQLite object (SHA-256 prefix c4d3896fefc9), which passed the recursive-query
+smoke test. Self-host stages 2 and 3 matched. Repeated parser recovery in records,
+nested blocks and for headers produced the parent's diagnostics byte for byte.
+A nested two-checkpoint runtime test exercises private spills across both jumps.
+
+**SQLite after profiling whole-function VIR fallbacks (2026-11-14).** Matched the
+self-hosted cycle profile against bootstrap VIR diagnostics. One unsupported
+instruction in an infrequent branch or inlined callee sent the entire function to
+direct emission. Population counts blocked x64_function_print, x64_call and
+walk_arithmetic_emit; switch membership blocked codegen_expression_has_side_effects;
+wide division and floating conversions blocked walk_lvalue_emit and cc_constant_eval.
+
+Keep population counts in VIR (hardware POPCNT when enabled, scalar shifts and masks
+on baseline x86), lower guarded switch membership, and call the existing SysV runtime
+helpers for 128-bit division, remainder and float/double conversions. The six
+functions now lower. Their combined exclusive samples fell from 3,148 to 2,452 self-
+hosted and from 2,240 to 2,141 clang-built (five compiles each, period 75,001 user
+cycles). Independent of the fallbacks, x64_emit copied nearly every instruction header
+from a local buffer. Encode into the fragment when there is space; copies attributed
+to x64_emit fell from 1,323 to 61 self-hosted samples and from 1,471 to 126 clang-
+built.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 178.56 / 172.88 ms | 138.11 / 138.00 ms | 1.293× / 1.253× |
+| 21 runs alternating order | 181.61 / 176.79 ms | 141.68 / 140.96 ms | 1.282× / 1.254× |
+
+One emitter thread, CPU 7, warm-up excluded. The rotating round retired 76.8M fewer
+instructions self-hosted and 3.5M fewer clang-built. All four compilers emitted the
+identical object (SHA-256 prefix c4d3896fefc9). Bootstrap stages 2 and 3 matched. The
+wide-arithmetic, switch and popcount cases ran on native x86 and arm64 under QEMU. The
+width test caught an existing arm64 i32 popcount reading the high half of an incoming
+register; FMOV now uses the operand width.
+
+**SQLite after profiling primary expressions (2026-11-14).** In the baseline five-
+compile profile the grouped unary and primary-expression parsers had 1,288 self-hosted
+samples vs 424 clang-built. Clang inlines the span wrapper into unary. Self-hosted vcc
+built an eight-byte temporary using two four-byte stores, then immediately reloaded
+eight bytes and copied it to the span. The final store accounted for 93% of the
+wrapper samples. In the ordinary integer literal path, two widened arguments also went
+through stack temporaries.
+
+Write both span fields directly, record the primary range before consuming a postfix
+operator, and reuse the range on return through unary and cast parsing. One indexed
+byte test identifies postfix tokens. Classify ordinary integer literals using the
+64-bit magnitude already accumulated, then store their value in the integer pool. Wide
+and bit-precise literals retain their slow path.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 176.92 / 176.14 ms | 138.76 / 138.44 ms | 1.275× / 1.272× |
+| 21 runs alternating order | 174.30 / 173.13 ms | 136.01 / 135.72 ms | 1.282× / 1.276× |
+
+CPU 7, one emitter thread, warm-up excluded. The rotating round retired 13.4M fewer
+instructions self-hosted and 3.9M fewer clang-built. All four binaries emitted the
+same SQLite object (SHA-256 prefix c4d3896fefc9); the linked recursive query returned
+500500.
+
+Fresh profiles of five compiles per binary (period 75,001 user cycles), grouping
+unary, primary, postfix dispatch and integer type selection across inlining
+boundaries, gave 1,205 → 645 self-hosted exclusive samples and 432 → 408 clang-built.
+
+**SQLite after profiling the assembler statement parser (2026-11-14).**
+The assembler statement path was the next large cycle gap once clang's inlining was
+accounted for. In five baseline compiles, as_snippet_assemble and its callees took
+1,837 self-hosted vs 1,500 clang-built samples (period 75,001 user cycles), or about
+5.1M excess cycles per compile. An unsupported 128-bit multiply in the inlined .octa
+directive made the whole statement parser fall back to direct emission. The identifier
+loop repeatedly spilled the cursor. Clang used a six-instruction loop including a
+memory TESTB.
+
+Lower the low 128 bits of a product in SysV x86 VIR with UMULHI and the two cross
+products. Keep directive dispatch out of the statement loop and skip the macro hash
+when no macros are defined. With wide multiply alone, inlining produced a 119 KiB
+as_snippet_assemble. Keeping directive dispatch separate reduced it to 34 KiB. The
+self-hosted identifier loop now walks the cursor in a register in nine instructions.
+The five-compile inclusive counts after the change were 1,474 self-hosted and 1,478
+clang-built.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 175.64 / 173.35 ms | 135.16 / 135.22 ms | 1.299× / 1.282× |
+| 21 runs alternating order | 176.43 / 174.12 ms | 135.56 / 135.55 ms | 1.301× / 1.285× |
+
+Same -O2 -c workload, CPU 7, one emitter thread, warm-up excluded. Median retired
+instructions fell by 38.0M self-hosted and 2.0M clang-built in the rotating run. All
+four binaries emitted the same SQLite object, and the linked recursive SQL query
+returned 500500.
+
+**SQLite after profiling x86 record operands (2026-11-14).** Among the
+comparable exclusive functions, codegen_chunks_commit had the largest gap
+after the previously optimized walk_lvalue_load (911 vs 506 samples, five
+compiles per binary). Both builds inline x64_function_commit. For a MOVI
+with a signed 32-bit immediate, clang stored the fields in the final operand.
+Vcc zeroed a 40-byte stack temporary, filled it and copied it to the final
+operand with two MOVUPS pairs and a word copy. The first MOVUPS store had
+7.1% of the self-hosted commit function's samples.
+
+Pass the numeric MOVI fields directly to the assembler and write the chosen
+GPR encoding (signed imm32, zero-extending imm32 or full imm64) into the
+fragment. Construct the other records' operands in their final positions
+and advance a record pointer through the chunk. Fresh profiles (five
+compiles per binary, period 75,001 user cycles) put exclusive commit samples
+at 993 → 676 self-hosted and 561 → 477 clang-built.
+
+| SQLite 3.50.4 CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 21 runs, alternating order | 183.80 / 181.14 ms | 139.09 / 138.62 ms | 1.321× / 1.307× |
+| 24 runs, rotating positions | 184.15 / 181.94 ms | 140.47 / 140.71 ms | 1.311× / 1.293× |
+
+CPU 7, one emitter thread, `-O2 -c`, warm-up excluded. The 21-run retired
+instruction medians fell from 2.0007B to 1.9763B self-hosted and from
+1.1697B to 1.1564B clang-built. Both timing rounds favored the patch in
+paired ratios; the previous round measured this baseline at 1.298×. All
+four binaries produced the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`). The integer boundary fixture exercises all three MOVI
+forms and matches the baseline object.
+
+**SQLite after profiling x86 local branches (2026-11-14).** In the preceding
+five-compile cycle profile, as_x64_direct_branch and its callees accounted
+for 830 samples self-hosted and 179 clang-built (about 9.77M excess cycles
+per compile). The wrapper is present in both binaries. Larger raw differences
+for individual functions included inlining and tail calls; for example, clang
+tail-jumps from as_x64_op into x64_mov. At a direct branch, clang forwards
+as_symbol_value's two return registers to x64_branch. Vcc stores them,
+copies the 16-byte value with MOVUPS, then reloads the argument registers.
+For the local label name prefix, vcc also called strlen and memcpy where
+clang stored the four literal bytes with a single MOV.
+
+Ordinary generated jumps now register the symbol directly in a short-branch
+item for relaxation. Calls, absolute symbols and assembler variables retain
+expression handling. Cache recent local-label symbol IDs per TU, keyed by
+both function and label; a miss uses the same assembler name lookup so
+text snippets and structured records share symbols. Fresh five-compile
+profiles put inclusive branch samples at 831 → 360 self-hosted and 186 → 169
+clang-built (period 75,001 user cycles).
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 178.96 ms | 176.16 ms |
+| Clang-built vcc CPU time | 136.13 ms | 135.74 ms |
+| Self-hosted / clang-built | 1.315× | 1.298× |
+| Self-hosted retired instructions | 2.0152B | 2.0004B |
+| Clang-built retired instructions | 1.1801B | 1.1696B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order and warm-up
+excluded. The previous round measured this baseline at 1.309×. All four
+objects had SHA-256 prefix `c4d3896fefc9`. A separate 1,800-label test
+reused label numbers across functions and exceeded the cache size; its
+object matched the baseline and all targets executed correctly.
+
+**SQLite after profiling lvalue loads (2026-11-14).** Among comparable
+exclusive symbols from the previous profile, walk_lvalue_load had 569
+self-hosted samples versus 41 clang-built. The self-hosted scalar path
+zeroed a 32-byte codegen_value and copied it through a second frame slot
+to the hidden return pointer. 76% of its samples landed on the first
+intermediate MOVUPS store. Clang zeroed and populated the result in place.
+
+For an inlined return of an automatic, unqualified record compound literal,
+initialize the private inline result slot directly. The self-hosted scalar
+path now copies the result once to the ABI return pointer. The load also
+takes its lvalue descriptor by pointer. Classifying memory-valued types by
+a single switch replaces repeated type-kind loads and boolean tests across
+the walker. In profiles covering five fresh compiles per build (75,001-cycle period),
+exclusive walk_lvalue_load samples went from 549 to 426 self-hosted and
+41 to 35 clang-built. The separate self-hosted classification helper fell
+from 163 to 4 samples. Sampling counts are approximate.
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 180.88 ms | 179.27 ms |
+| Clang-built vcc CPU time | 137.14 ms | 137.00 ms |
+| Self-hosted / clang-built | 1.319× | 1.309× |
+| Self-hosted retired instructions | 2.0572B | 2.0153B |
+| Clang-built retired instructions | 1.1819B | 1.1804B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order and warm-up
+excluded. The previous round measured this baseline at 1.321×. All four
+produced the same SQLite object (SHA-256 prefix `c4d3896fefc9`), and
+a linked recursive SQL query returned 500500.
+
+**SQLite after profiling integer mnemonic dispatch (2026-11-14).** The
+leading comparable exclusive excess in the preceding call-chain profile was
+libc strcmp (591 extra samples). Its largest caller difference was x64_i_int
+(508 vs 345 samples across five SQLite compiles). In as_x64_insn the
+self-hosted code loads each instruction-family pointer and calls it
+indirectly. Clang unrolls the family list into direct calls. Both reached
+x64_i_int after twelve earlier families for common scalar operations, then
+tried both the full name and a suffix-stripped name. An instrumented compile
+counted 13,619 movq, 4,379 imulq and 5,198 pushq/popq dispatches.
+Exact size-suffixed scalar mov/add/sub/imul and register pushq/popq now
+dispatch to their encoders at entry. Other register classes retain the
+ordered family search.
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 185.91 ms | 179.84 ms |
+| Clang-built vcc CPU time | 140.33 ms | 136.15 ms |
+| Self-hosted / clang-built | 1.325× | 1.321× |
+| Self-hosted retired instructions | 2.1510B | 2.0576B |
+| Clang-built retired instructions | 1.2405B | 1.1821B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+Fresh cycle profiles (period 75,001, five compiles each) reduced strcmp
+samples directly under x64_i_int from 437 to 49 self-hosted and 322 to 38
+clang-built. All four SQLite objects had SHA-256 prefix `c4d3896fefc9`;
+the linked recursive query returned 500500.
+
+**SQLite after profiling x86 register parsing (2026-11-14).** The prior
+eight-compile profile showed 5.01M more exclusive cycles in libc strcmp
+per compile for self-hosted vcc. In fresh call-chain profiles covering five compiles per
+binary, its largest caller difference was x64_reg. Clang unrolled the
+legacy GPR name scan into immediate comparisons (`cmp $0x786172,%eax` for
+rax). Vcc called strcmp up to 36 times before considering numbered or SIMD
+registers. Decode the legacy aliases by width and register letters instead.
+At a period of 75,001 cycles, strcmp samples directly from x64_reg went
+from 248 to 1 self-hosted and stayed at zero clang-built. Samples with
+x64_reg anywhere on the stack went from 463 to 123 and 170 to 123,
+respectively (sampled estimates, five compiles total per binary).
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.35 ms | 189.40 ms |
+| Clang-built vcc CPU time | 143.20 ms | 142.90 ms |
+| Self-hosted / clang-built | 1.336× | 1.325× |
+| Self-hosted retired instructions | 2.1758B | 2.1517B |
+| Clang-built retired instructions | 1.2430B | 1.2414B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+All four compilers emitted the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`), and a linked recursive SQL query returned 500500.
+
+**SQLite after profiling x86 branch operands (2026-11-14).** On eight
+single-emitter SQLite 3.50.4 compiles per binary, the largest attributable
+exclusive cycle gap was in `codegen_chunks_commit`, which inlines
+`x64_function_commit` in both builds. The larger raw difference in
+`pp_file_enter` includes skeleton construction that clang keeps out of line.
+One MOVUPS in the self-hosted branch-operand copy accounted for 19% of
+samples in the commit function. Clang stored the returned symbol-expression
+registers straight into its operand. Passing the symbol ID and relocation
+modifier directly removes the operand construction from both builds.
+Ordinary symbols now resolve directly, and a substituted expression is
+folded once. Exclusive cycles per compile in the commit function fell from
+11.68M to 7.95M self-hosted and from 5.38M to 5.18M clang-built. Some cost
+moved into the assembler helpers.
+
+| SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.31 ms | 190.50 ms |
+| Clang-built vcc CPU time | 142.87 ms | 142.83 ms |
+| Self-hosted / clang-built | 1.339× | 1.334× |
+| Self-hosted retired instructions | 2.1810B | 2.1766B |
+| Clang-built retired instructions | 1.2438B | 1.2423B |
+
+CPU 7, `VCC_THREADS=1`, `-O2 -c`, alternating order and one warm-up excluded.
+All four builds produced the same object (SHA-256 prefix `c4d3896fefc9`).
+The previous round measured the same baseline at 1.336×.
+
+**SQLite after profiling x64_emit (2026-11-14).** Eight pinned SQLite
+3.50.4 compiles sampled with perf cycles:u put the self-hosted encoder at
+16.57M exclusive cycles per compile versus 9.93M clang-built. Vcc's byte
+loops repeatedly loaded and stored the scratch-buffer position; clang unrolled
+the ModRM copy and inlined symbol folding. The self build also copied numeric
+displacements to a stack temporary and called as_value_fold. Emitting ModRM
+and SIB directly, storing fields at their final width in the fragment and
+folding only symbolic displacements cut the samples to 10.65M and 8.63M
+cycles respectively.
+
+| Same single-emitter SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 189.66 ms | 187.38 ms |
+| Clang-built vcc CPU time | 140.34 ms | 140.29 ms |
+| Self-hosted / clang-built | 1.351× | 1.336× |
+| Self-hosted retired instructions | 2.207B | 2.180B |
+
+CPU 7, warm-up excluded, alternating run order. All four compilers produced
+the same SQLite object. The assembler parity suite includes two relocations
+in one instruction and literal RIP displacement followed by an immediate.
+
+**SQLite with both CRC32C word updates inlined (2026-11-14).** The VIR
+inliner admits the same register-only CRC32Q asm that the builder recognizes.
+The self-hosted two-word wrapper is 15 bytes: MOV, CRC32Q, CRC32Q, RET.
+Clang emits the same sequence with an extra MOV EAX,EAX between the CRCs
+(17 bytes). Previously the self-hosted wrapper called the word helper twice.
+
+| SQLite 3.50.4 compile, median CPU time | clang-built before / after | self-hosted before / after | ratio before / after |
+| --- | ---: | ---: | ---: |
+| 7 measured runs | 143.41 / 143.24 ms | 191.49 / 191.85 ms | 1.335× / 1.339× |
+| 21 measured runs | 141.93 / 141.75 ms | 189.02 / 191.22 ms | 1.332× / 1.349× |
+
+Same single-emitter, CPU-7 workload, warm-up excluded and order reversed each
+round. The 21-run self-hosted instruction median fell from 2.213B to 2.206B.
+Both timing rounds showed a small slowdown despite fewer instructions. All
+four builds produced identical objects, and the linked SQLite query passed.
+
+**SQLite with spill-free CRC32C word updates (2026-11-14).** The x86 VIR
+builder recognizes the nonvolatile register-only CRC32Q template used by the
+host identifier hash. The allocator sees the accumulator as a tied operand.
+The self-hosted word helper shrank from 17 instructions (57 bytes, including
+a 32-byte frame) to the same nine bytes as clang: MOV EAX,EDI; CRC32 RAX,RSI;
+RET. The two-word wrapper still calls the word helper twice in the self build.
+
+| Same SQLite 3.50.4 compile, median of 7 | Before | After |
+| --- | ---: | ---: |
+| clang-built vcc, CPU ms | 146.65 | 145.08 |
+| self-hosted vcc, CPU ms | 197.29 | 195.11 |
+| self-hosted / clang-built | 1.345× | 1.345× |
+| self-hosted retired instructions | 2.229B | 2.213B |
+
+Pinned to CPU 7 with one emitter thread and alternating order after warm-up.
+All four SQLite objects matched and the linked smoke query passed. The
+host-dispatch regression runs the vcc-built CRC object against a bitwise
+reference on Linux, including software fallback and hardware dispatch.
+
+**SQLite with structured x86 control-flow emission (2026-11-14).**
+The object emitter now passes direct calls, jumps, SETcc, CMOVcc and register
+TEST records to the assembler without formatting and matching mnemonics.
+Seven-run median CPU times on the same pinned SQLite 3.50.4 compile:
+
+| vcc build | Before | After | Retired instructions before / after |
+| --- | ---: | ---: | ---: |
+| clang-built | 145.02 ms | 140.64 ms | 1.313B / 1.256B |
+| self-hosted | 193.48 ms | 188.87 ms | 2.313B / 2.227B |
+
+All four objects matched. The time ratio was 1.334× before and 1.343× after.
+One remaining self-host-specific cost is the host CRC32C word helper:
+instruction sampling attributed roughly 28M instructions to it in the self
+build and 4M in the clang build. Disassembly showed stack traffic around the
+inline assembly in the self build; clang emitted a move, CRC32 and return.
+
+**SQLite with x86-64 SysV aggregate calls (2026-11-14).** VIR now lowers
+`codegen_prepass_node_walk` (4,075 VIR instructions, 14 spills) and
+`walk_value_emit_inner` (3,173 instructions, 34 spills). The separate VIR
+builder copy, `virbuild_walk_value_emit_inner`, still falls back at the
+use-before-definition check.
+
+SQLite 3.50.4, same single-emitter -O2 compile pinned to CPU 7, median CPU
+time of seven runs after warm-up with alternating run order:
+
+| vcc build | Before | With aggregate calls |
+| --- | ---: | ---: |
+| clang-built | 144.69 ms | 144.74 ms |
+| self-hosted | 220.70 ms | 193.16 ms |
+| self-hosted / clang-built | 1.525× | 1.335× |
+
+Self-hosted retired instructions fell from 2.781B to 2.314B across the
+whole compile. All four compilers produced byte-identical SQLite objects.
+Bootstrap stages 2 and 3 also matched byte for byte.
+
+**SQLite after rebasing onto 87f85d5b (2026-11-14).** The paired x86-64
+test used the same SQLite 3.50.4 amalgamation, flags and headers as below,
+with four executables, one warmup and seven alternating-order measurements
+per executable. Times are median perf task-clock on CPU 7 with one emitter
+thread. Both builds use the same compiler source within each row.
+
+| Revision | Clang-built CPU ms | Self-built CPU ms | Self / clang | Clang-built instructions | Self-built instructions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rebased computed goto | 154.19 | 244.19 | 1.58 | 1.478B | 3.123B |
+| Direct operand encoding, extension reuse and VIR atomics | 152.39 | 231.98 | 1.52 | 1.315B | 2.780B |
+
+The encoder now fills memory operands in place and sends LEA and extending
+moves directly to the shared numeric encoders. The self-built memory operand
+helper fell from 523 to 364 bytes. The direct emitter omits an immediately
+repeated extension of the same width and sign. Full-width 32/64-bit
+compare-exchange, fetch-add and exchange lower through VIR. This allows the
+preprocessor's skeleton builder to inline into pp_file_enter, which lowers
+with 134 spills. Both final executables emitted the same SQLite object
+(c4d3896fefc93dca709598910795c84ab65403ca45020b260292d57b777d3258),
+and the linked object ran a recursive SQL sum.
+
+In the final self-built cycle sample strcmp accounted for 4.1%, x64_emit
+3.3%, codegen_prepass_node_walk 2.5% and lex_tokenize_mode 2.2%.
+The prepass and walk_value_emit_inner both report an unsupported aggregate
+argument or result during VIR construction. The lexer still has 60 spills
+and occupies 27,945 bytes against clang's 10,925. The time ratios vary
+with shared-host load.
+
+**Computed goto (2026-11-14).** The x86-64 bootstrap lowers lex_tokenize_mode
+through VIR with 4,408 instructions, 908 blocks and 60 allocator spills.
+Computed goto sites merge their live values at a common indirect branch.
+Each address-taken C label gets an entry that performs the appropriate
+allocator edge moves, including for labels named in static initializers.
+Other architectures and indirect jumps inside inline expansions use the
+direct emitter. The x86 lexer scans masks low bit first using BSF.
+
+On the SQLite 3.50.4 compile described in PLAN-fas2, seven warm runs per
+configuration alternated forward/reverse order, pinned to CPU 7 with one
+emitter thread. The pre-change baseline includes the previous bootstrap
+optimizations ported onto 9d322868.
+
+| Compiler | Compile CPU ms | User instructions, billions | Lexer core ms |
+| --- | ---: | ---: | ---: |
+| Baseline self-built | 247.09 | 3.204 | 12.9 |
+| Updated self-built | 244.10 | 3.099 | 8.5 |
+| Baseline clang-built | 157.05 | 1.481 | 7.0 |
+| Updated clang-built | 156.45 | 1.470 | 6.7 |
+
+Core time is the median of lextest's best of three passes in a separate
+series. An additional same-source control changed only the lowering of
+lex_tokenize_mode. Direct, VIR and clang produced 32,403, 27,945 and
+10,925 bytes respectively. Disassembly showed four, one and three indirect
+jump sites respectively. The control measured 13.4, 11.0 and 9.6 ms for
+the lexer. Wall time on the shared host varied considerably. The updated
+compilers produced the original token hash and SQLite object SHA256.
+
+The 2026-11-13 bootstrap profile added x86-64 local-exec TLS addresses,
+frame-relative slot stores, and 32-bit moves for zero-extendable constants.
+The local-exec address uses %fs:0 and a TPOFF displacement, preserving flags
+during allocator edits. Other TLS models still use direct lowering.
+See the [paired SQLite compile measurements](PLAN-fas2.md).
+
+`-O3` on x86-64 now goes through the same builder and loop vectorizer
 as arm64; the function is marked `x86_64-linux`. `arch/x64/codegen/vir.c`
 lowers scalar leaf functions with SysV's integer/FP registers and stack
 parameters, fixed `cl`, callee-saved registers, spills and sequenced edge
-moves. Frame and spill tables are reused per `ecx`. `VCC_VIR_CHECK=1` checks
+moves. Frame and spill tables are reused per `ecx`. `-fvir-check` checks
 the real target allocation. The mode caches for VIR, vectorization and
 compare merging are thread-local; the six-thread test found and removed a
 race in the last of them.
@@ -1447,8 +2249,8 @@ own vector values, and a loop transformation).  Done, in this order:
   if-conversion): innermost loops with the test in the header and a straight
   body; inductions and `i32` sums; loads/stores `symbol ± 4·t`; the
   dependence rule in RESEARCH 6.3; the scalar loop stays as the remainder.
-  Off under `-mgeneral-regs-only` and with `VCC_VIR_VEC=0`; `VCC_VIR_VEC=r`
-  reports.
+  Off under `-mgeneral-regs-only` and below `-O3` (`-fno-vectorize`);
+  `-fvir-vectorize-report` reports.
 
 Measured (M1 Pro, `iterations` 256): direct emitter 7.2 s, VIR 4.3 s (5.1 s
 before the vectorizer), clang -O3 1.5 s; 151/151 checksums on all three.
@@ -1463,7 +2265,7 @@ become lanes (gather, `double`) 9, wrong order within the body 6.
 Validation: `test/vcc/vir_vec_loops.c` (47 loops x trip counts 0-9 and 37
 against clang: remainder 0-3, downward-running, distance -5..5 within one
 array, store before load, sums, select, invariant from memory);
-`vcc-ctests.py` with `VCC_VIR=bl` 2079/2082 (the three `.Lswitch.values`
+`vcc-ctests.py -O3` 2079/2082 (the three `.Lswitch.values`
 failures existed before), unchanged without VIR; ASan/UBSan clean on TSVC
 and the test; `vir-test.py` 124/124.
 
@@ -1500,7 +2302,7 @@ runtime in a multiplication.
 
 Tests: `test/vcc/vir_vec_loops.c` (now also overlapping pointers, 10 spilled
 vectors, steps 1 and 3, unknown distance, unsigned counters),
-`test/vcc/vir_fp_callee.c`.  `vcc-ctests.py` with `VCC_VIR=bl` 2080/2083
+`test/vcc/vir_fp_callee.c`.  `vcc-ctests.py -O3` 2080/2083
 (the same three), without VIR 2083/2083; ASan/UBSan clean.
 
 **Third round (same day): scalar loops.  VIR 6.3 G cycles, clang 4.75.**
@@ -1515,7 +2317,7 @@ vectors, steps 1 and 3, unknown distance, unsigned counters),
   immediate are made once in front of the straight inner loops the
   vectorizer looks at anyway (at most 6, no loops with calls).  **This is a
   departure from "No LICM in 1.0"** above, limited to constants;
-  `VCC_VIR_VEC=n` turns it off.  Effect on TSVC: -19 % instructions, -7 %
+  `-fno-hoist-loop-constants` turns it off.  Effect on TSVC: -19 % instructions, -7 %
   cycles.  **Decision (Johan, 2026-11-12): kept**, as an exception in the
   pass list above; broader LICM is still outside 1.0.
 - `bench/vcc-tsvc.py` writes cycles (`/usr/bin/time -l`): the machine is
@@ -1914,7 +2716,7 @@ Step 3 in the work order for sqlite.
 
 ### Lowering against LLVM's backend (2026-11-12): five points, sqlite speedtest1
 
-Branch `claude/vir-lowering-453a57`.  Measured with `VCC_VIR=bl`, speedtest1
+Branch `claude/vir-lowering-453a57`.  Measured at `-O3`, speedtest1
 `--size 100 --memdb`, pairwise runs (3 rounds) against the build before the
 point and against virpol; counters static on sqlite3.o.  From the start
 (5346e3e6) +14.5 % cycles against virpol, now +9.9 %.  Samplings per
@@ -2053,7 +2855,7 @@ only as a direction.
   once and in a row, becomes cmp + ccmp/ccmn (immediate 0..31, -1..-31,
   otherwise via x17) and no truth value in a register.
   **Measured, and therefore enabled sparingly:** merging every branch pair
-  (`VCC_CCMP=all`) gives on sqlite 380 ccmp (clang 552) but speedtest1 +0.4 %
+  (`-fvir-ccmp=all`) gives on sqlite 380 ccmp (clang 552) but speedtest1 +0.4 %
   instructions (the second compare also runs when the first decided) and
   unchanged cycles (median 9.10 vs 9.09 G, 8 paired runs).  Microtest (4096
   pairs, 60,000 iterations): unpredictable data 1.45 -> 1.18 G cycles (-19
@@ -2064,7 +2866,7 @@ only as a direction.
   therefore only the cases where the if-conversion can follow (the result is
   a value: `return a == 1 && b == 2`, `x = c1 || c2 ? p : q`): fewer
   instructions and no branches.  sqlite: 19 ccmp, -18 instructions
-  statically, speedtest1 -0.1 % instructions.  `VCC_CCMP=off|all` for
+  statically, speedtest1 -0.1 % instructions.  `-fvir-ccmp=none|all` for
   measurement.  Remaining to try: merge branch pairs only when they are
   badly predicted (requires a profile), chains of three in the value case.
   Test `vir_ccmp.c` (all condition codes x and/or x 32/64 bits, immediates,
@@ -2091,7 +2893,7 @@ each iteration did four `mov` and two extra jumps.
 - **Remaining** (after the next section): `slide_hash` (clang vectorizes),
   `crc32_z` (inline asm, does not go through VIR).
 - Verified: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
-  vcc-ctests with `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (the three
+  vcc-ctests `-O3 --vflags -fvir-check` 2077/2080 (the three
   failures, `.Lswitch.values`, exist before the change); inline 85/85;
   sqlite3.c through VIR with the check; the zlib tests give clang's bytes.
 
@@ -2123,7 +2925,7 @@ iteration of `longest_match` although it was read before the loop.
 - Test: `test/vcc/vir_load_far.c` (store after the load in the body, through
   another pointer, overlapping narrower and wider, call, inner loop, one arm,
   goto loop with entry in the middle, variable index, escaped local).
-- Verified: vcc-ctests with `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (the same
+- Verified: vcc-ctests `-O3 --vflags -fvir-check` 2077/2080 (the same
   three `.Lswitch.values` as before) and under ASan+UBSan (besides them two
   failures in the front end, `gcc/eeprof-1` and `gcc/pr105613`, not in VIR);
   inline 85/85; vir-test, vcc-volatile; sqlite3.c under ASan; zlib gives
@@ -2163,8 +2965,8 @@ shortcomings in the code fixed:
   2026-11-11 does not have without a flag.  Without a decision: store -> load
   across stores to the same base at another offset (`str w2, [x0, #8]; str
   w1, [x0, #12]; ldrsw x1, [x0, #8]`).
-- Test: `test/vcc/vir_field_access.c`.  Verified: vcc-ctests `VCC_VIR=bl
-  VCC_VIR_CHECK=1` 2079/2082 (the same three), with the verifier (`blv`) the
+- Test: `test/vcc/vir_field_access.c`.  Verified: vcc-ctests `-O3 --vflags
+  -fvir-check` 2079/2082 (the same three), with the verifier (`-fvir-verify`) the
   vcc suite, inline 85/85, direct emitter 2082/2082, ASan+UBSan as before,
   vir-test, vcc-volatile, sqlite3.c with the check and the same verification
   hash, zlib gives clang's bytes.
@@ -2201,8 +3003,8 @@ Branch `claude/vir-sqlite-optimization-acaf18`.  Measured on sqlite3.c `-O2`
   threads got Darwin's default stack (512 KB): `test/vcc/limits.c` gave no
   object on 8 threads; they now get the creating thread's size.
 - **Open, not VIR:** `test/vcc/deep_expr.c` and `deep_mixed.c` give different
-  objects between runs with `VCC_THREADS=8` also on the direct path (without
-  `VCC_VIR`).  Not investigated.
+  objects between runs with `VCC_THREADS=8` also on the direct path
+  (`-O1`).  Not investigated.
 - **Remaining in the profile (flat, no entry over 6 %):** `vw_hslot` 6 %
   (Braun's lookup per (block, variable); cache misses in VdbeExec),
   `vw_promote` 4.5 %, `vw_find` 4 %, `vir_oit_next`/`init` 5 %, `vw_simplify`
@@ -2227,7 +3029,7 @@ decision for SPEC-vir.md).
 
 The measurement that "Measured in V4" below promised.  sqlite3.c,
 speedtest1 `--size 100 --memdb`, Homebrew clang 23.1.4 `-O2` with `-mllvm
--regalloc=X`, vcc on 75bb9062 (`VCC_VIR=bl`), virpol is the binary from
+-regalloc=X`, vcc on 75bb9062 (`-O3`), virpol is the binary from
 12:36 the same day (older inlining).  Five alternating rounds, `/usr/bin/time
 -l`; the machine had load 10, so the cycles are the median of paired ratios
 with [min .. max], and only differences over about 2 % say anything.  The
@@ -2271,7 +3073,7 @@ they are stable to about 0.05 % even with load 10-20 on the machine, which
 cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
 8.5-8.6 G cycles (virpol 8.24 G, clang 7.86 G).
 
-- **What actually runs** (`VCC_VL_PROBE=MASK` in `codegen/vir/a64.c`: a `nop`
+- **What actually runs** (`-fvir-probe=MASK` in `codegen/vir/a64.c`: a `nop`
   after each edit of a kind; the difference in instructions is the number of
   executions, an upper bound since the `nop` also stops the post-folds):
 
@@ -2375,7 +3177,7 @@ cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
   when that block ends with `br` to the header: the latch falls into the test
   and the test's jump goes back to the body, one jump per iteration instead of
   two.  The edges into the loop get a copy of the test (`vl_goto`), as LLVM's
-  rotation with a guard.  `VCC_VIR_ROT=0` gives VIR's order.
+  rotation with a guard.  `-fno-rotate-loops` gives VIR's order.
 - **Two variants measured** (sqlite speedtest1, instructions):
   reordering only, with a jump to the test on the way in, **+0.07 %**
   (sqlite's loops are short: the jump in costs more than the iterations
@@ -2498,7 +3300,7 @@ cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
      slot and neither read nor write x19-x30; otherwise at the top as before
      and the marks are removed.  Not with unwind tables (Linux
      `-fasynchronous-unwind-tables`), `-g`, VLA/alloca or an over-aligned
-     frame.  `VCC_VIR_SHRINK=0` turns it off.
+     frame.  `-fno-shrink-wrap` turns it off.
 - **Measured, sqlite speedtest1 `--size 100`:** 25.645 G -> 25.514 G
   instructions (**-0.51 %**); cycles within the noise in three paired runs.
   Statically the same number of instructions (297 581 -> 297 580).
@@ -2554,7 +3356,7 @@ instructions; the noise between runs is about +-0.005 G.
   the if-conversion in the builder now makes up to eight `select`s per join
   instead of one, so both arms are counted more often.  The cycles are
   unchanged (six paired runs: -0.1 % [-0.5 .. +0.9]).  The vectorizer is not
-  it (`VCC_VIR_VEC=0`: 25.70 G).  Comparisons in instructions against clang
+  it (`-O2`, without it: 25.70 G).  Comparisons in instructions against clang
   thus start from 1.084x now, not 1.077x.
 - **Tried against `mov` (+0.38 G against clang), none of it kept:**
   1. A block parameter that is only returned takes the return register, and
@@ -2600,7 +3402,7 @@ instructions; the noise between runs is about +-0.005 G.
   299/299 direct, TSVC 151/151, sqlite same hash.
 - **TSVC on main is 7.37 G cycles, was 6.29 G before #125** (77 vectorized
   loops against 43).  The same number with and without this change, with
-  `VCC_VIR_SHRINK=0` and with `VCC_VIR_ROT=0`: it does not come from here and
+  `-fno-shrink-wrap` and with `-fno-rotate-loops`: it does not come from here and
   has not been investigated.
 
 ### TSVC after #125: search loops (2026-11-12)
@@ -2665,9 +3467,9 @@ from #125:
   irreducible graphs is derived here and must be covered by `vir_alloc_check`
   and `fuzz-vir`; the budget of 60 ns per VIR instruction for sweeps 5 and 6
   is a proposal.
-- **Measured in V4:** `vbench.py ab emit` with `VCC_VIR=1`, static
-  instructions against today's `-O2`, clang and gcc, the counters in
-  `VCC_VIR_STATS`, and the same set of TUs through clang with `-mllvm
+- **Measured in V4:** `vbench.py ab emit` with VIR (`-O2`), static
+  instructions against the direct emitter (`-O1`), clang and gcc, the
+  counters of `-fvir-stats`, and the same set of TUs through clang with `-mllvm
   -regalloc=basic` to see how much the allocator's quality is worth at all.
 
 ### V1 verifier: safe and linear slot exposure
@@ -2749,3 +3551,29 @@ clang (the same `config.h`); vcc compiles all 2019 C files, clang links.
   taken later): in total VIR 1.70× clang, the direct emitter 2.88×.  Worst
   through VIR: mpeg4/mpeg2 encoding 3.15×, convolution 3.4×, gblur 2.7×, aac
   encoding 2.3×, unsharp 2.3×, ffv1 1.8–1.9×; the decoders 1.1–1.3×.
+
+### SQLite register allocation (2026-11-13)
+
+A nonvolatile 64-bit load used exclusively as a pointer now yields a pointer
+directly. A late block parameter crossing a call can keep the last available
+callee-saved register. On the original x86 branch (7e166718), the mapped SQLite
+aMem reload count fell from 92.28M to 14.54M and three alternating native
+speedtest1 series improved by 1.27–2.00%. Those timings predate the tree
+reorganization. The current x86 lowering supports the same measurements,
+now options (-fvir-map, -fvir-map-function, -fvir-probe), through
+bench/sqlite/vir-edits.py.
+
+The bounded predecessor-choice experiment had inconsistent runtime results.
+Its patch and measurements in results/vir-entry-choice-20261113.* refer to
+7e166718. The compiler continues to use its existing predecessor policy.
+See [the optimizer policy inventory](RESEARCH-optimizer-limits.md) for the
+GCC and LLVM comparisons used in the investigation.
+
+### Review av -O2/-O3 och kostnadsstacken (2026-11-14)
+
+Merge med main behåller smala x86-atomics och POPCNT. Linux-räknarnas
+perf-deskriptorer stängs nu vid trådslut (även gruppmedlemmen), och öppnas
+med CLOEXEC. `bench/vperf-test.py` mockar perf-syscalls och kontrollerar
+40 trådar, inklusive fel vid andra öppningen. Verifierat: bygge `-j 6`,
+vir-test 133/133, VIR-regressioner 56/56 med verifierare och allokeringscheck,
+samt vcc-vir-x86 (assembly och egna objekt vid -O2/-O3).

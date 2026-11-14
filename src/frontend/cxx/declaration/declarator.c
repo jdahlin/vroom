@@ -88,7 +88,7 @@ VPRIV int64_t cxx_literal_value(cxx *c)
 VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, bool *is_function, cxx_scope **qscope)
 {
 	uint32_t name = 0, nested = 0, nested_end = 0;
-	qty t = c->type_in;
+	ast_qualified_type t = c->type_in;
 	cxx_suffix sfx[8];
 	uint32_t nsfx = 0;
 	bool too_many = false;
@@ -246,9 +246,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 			if (x) {
 				x->is_function = 1, x->variadic = c->fn_variadic;
 				x->nparams = c->fn_unknown ? UINT32_MAX : c->fn_nparams;
-				x->params = c->fn_nparams && !c->fn_unknown ? malloc(c->fn_nparams * sizeof(qty)) : NULL;
+				x->params = c->fn_nparams && !c->fn_unknown ? malloc(c->fn_nparams * sizeof(ast_qualified_type)) : NULL;
 				if (x->params)
-					memcpy(x->params, c->fn_params, c->fn_nparams * sizeof(qty));
+					memcpy(x->params, c->fn_params, c->fn_nparams * sizeof(ast_qualified_type));
 				/* the names, for the body (the parameters' own types, unknown ones too) */
 				x->nnamed = c->fn_nparams, x->ndefaults = c->fn_ndefaults, x->pack = c->fn_pack;
 				x->named = c->fn_nparams ? malloc(c->fn_nparams * sizeof *x->named) : NULL;
@@ -337,7 +337,7 @@ VPRIV void cxx_parameter_clause_parse(cxx *c)
 
 VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 {
-	qty *types = NULL, *decls = NULL;
+	ast_qualified_type *types = NULL, *decls = NULL;
 	uint32_t *names = NULL;
 	uint32_t n = 0, cap = 0, ndefaults = 0, pack = UINT32_MAX, def_tok[16];
 	uint8_t variadic = 0, unknown = 0;
@@ -347,7 +347,7 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 	if (!cxx_accept(c, LEX_TOKEN_RIGHT_PAREN)) {
 		for (;;) {
 			bool q, f;
-			qty t;
+			ast_qualified_type t;
 
 			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {
 				variadic = 1;
@@ -382,10 +382,10 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 						c->cpack_name = pname, c->cpack_at = n, c->cpack_n = pe->npack;
 						for (uint32_t k = 0; k < pe->npack; k++) {
 							bool q2, f2;
-							qty et = pe->pack[k].t;
+							ast_qualified_type et = pe->pack[k].t;
 
 							if (cq)
-								et = QT(QI(et), QQ(et) | Q_CONST);
+								et = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(et), AST_QUALIFIED_TYPE_QUALIFIERS(et) | AST_QUALIFIER_CONST);
 							c->pos = decl_pos, c->type_in = et, c->decl_pack = 0;
 							cxx_declarator_parse(c, true, &q2, &f2, NULL);
 							if (n == cap) {
@@ -410,8 +410,8 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 				pack = n;	/* a parameter pack: Ts&&... ts */
 			t = cxx_type_parameter_adjust(c, c->type_out);
 			/* in the body: the adjusted type with the declaration's own const (not part of the function's type) */
-			qty dt = t == CXX_TY_UNKNOWN || c->type_out == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, c->type_out) == TY_ARRAY ||
-				 AST_TYPE_KIND(c->ast, c->type_out) == TY_FUNC ? t : QT(QI(t), QQ(t) | (QQ(c->type_out) & (Q_CONST | Q_VOLATILE)));
+			ast_qualified_type dt = t == CXX_TY_UNKNOWN || c->type_out == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, c->type_out) == AST_TYPE_ARRAY ||
+				 AST_TYPE_KIND(c->ast, c->type_out) == AST_TYPE_FUNCTION ? t : AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) | (AST_QUALIFIED_TYPE_QUALIFIERS(c->type_out) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE)));
 
 			if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
 				uint32_t inner = ndefaults, db = c->pos;
@@ -467,7 +467,7 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 			if (t == CXX_TY_UNKNOWN)
 				unknown = 1;
 			/* (void): no parameters */
-			if (!(n == 0 && t == cc_type_basic(TY_VOID) && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
+			if (!(n == 0 && t == cc_type_basic(AST_TYPE_VOID) && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
 				if (n == cap) {
 					cap = cap ? cap * 2 : 8;
 					types = realloc(types, cap * sizeof *types);
@@ -485,14 +485,14 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 	}
 	if (n > c->fn_cparams) {
 		c->fn_cparams = n;
-		c->fn_params = realloc(c->fn_params, n * sizeof(qty));
+		c->fn_params = realloc(c->fn_params, n * sizeof(ast_qualified_type));
 		c->fn_pnames = realloc(c->fn_pnames, n * sizeof(uint32_t));
-		c->fn_pdecl = realloc(c->fn_pdecl, n * sizeof(qty));
+		c->fn_pdecl = realloc(c->fn_pdecl, n * sizeof(ast_qualified_type));
 	}
 	if (n) {
-		memcpy(c->fn_params, types, n * sizeof(qty));
+		memcpy(c->fn_params, types, n * sizeof(ast_qualified_type));
 		memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
-		memcpy(c->fn_pdecl, decls, n * sizeof(qty));
+		memcpy(c->fn_pdecl, decls, n * sizeof(ast_qualified_type));
 	}
 	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown, c->fn_ndefaults = ndefaults;
 	c->fn_ndefs = ndefaults <= 8 ? ndefaults : 0;
@@ -589,7 +589,7 @@ VPRIV void cxx_type_specifiers_parse(cxx *c)
    (new_array: there is one), CXX_TY_UNKNOWN when not known */
 VPRIV void cxx_new_type_id_parse(cxx *c)
 {
-	qty t;
+	ast_qualified_type t;
 	uint32_t dims = 0;
 
 	cxx_type_specifiers_parse(c);

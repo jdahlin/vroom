@@ -1,22 +1,22 @@
 /* C++ templates: function template signatures and bodies instantiated */
 #include "instantiate.h"
 
-VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body)
+VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body)
 {
 	cxx_partial *p = &f->p;
 	uint32_t np = p->params->ntparams;
 	cxx_saved s;
 	jmp_buf jb;
 	cxx_scope *binding;
-	volatile qty r = CXX_TY_UNKNOWN, sig = CXX_TY_UNKNOWN;
+	volatile ast_qualified_type r = CXX_TY_UNKNOWN, sig = CXX_TY_UNKNOWN;
 	volatile bool body = false;
 	volatile int8_t viable = 1;
 	cxx_targ *targs;
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
 	cxx_param *dp;
-	qty this_type = c->this_type, etype = c->etype;
+	ast_qualified_type this_type = c->this_type, etype = c->etype;
 	uint8_t this_const = c->this_const, ret_capture = c->ret_capture, ret_lval = c->ret_lval;
-	qty ret_type = c->ret_type;
+	ast_qualified_type ret_type = c->ret_type;
 	bool elval = c->elval;
 	cxx_entity *ecallee = c->ecallee;
 	uint32_t unevaluated = c->unevaluated, at = UINT32_MAX;
@@ -85,11 +85,11 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
 	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
-		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
+		ast_qualified_type t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
 
 		body = b;
 		viable = c->sig_requires;
-		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION)
 			r = AST_TYPE(c->ast, t)->base, sig = c->sig_fake ? CXX_TY_UNKNOWN : t;	/* (its parameters: only if they are the real ones) */
 		c->stats.bodies += body;
 		if (want_body && !b && inst && viable == 1)
@@ -133,7 +133,7 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
  * signature parsed with the parameters bound (not cached, no body).  c->sig_requires: 0 when the
  * substitution fails.
  */
-VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx, bool want_body, qty *ptypes,
+VPRIV ast_qualified_type cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx, bool want_body, ast_qualified_type *ptypes,
 				     uint32_t pn)
 {
 	cxx_partial *p = &f->p;
@@ -142,7 +142,7 @@ VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xa
 	cxx_targ acopy[32];
 	cxx_outer o;
 	jmp_buf jb;
-	volatile qty r = CXX_TY_UNKNOWN;
+	volatile ast_qualified_type r = CXX_TY_UNKNOWN;
 	volatile int8_t viable = -1;
 	volatile bool body = false;
 
@@ -212,16 +212,16 @@ VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xa
 	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
-		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
+		ast_qualified_type t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
 
 		body = b;
 		viable = c->sig_requires;
-		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION)
 			r = AST_TYPE(c->ast, t)->base;
 		c->bound_sig = c->sig_fake ? CXX_TY_UNKNOWN : t;
 		c->stats.bodies += body;
 		if (want_body && !b && inst && viable == 1) {
-			qty bs = c->bound_sig;
+			ast_qualified_type bs = c->bound_sig;
 
 			body = cxx_member_template_ooc_body(c, f, inst, acopy, nx, np - 1, ptypes, pn);	/* (defined outside its class) */
 			c->bound_sig = bs;
@@ -234,7 +234,7 @@ VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xa
 	c->gen_instance = outer_gen_instance;
 	c->instantiating--, c->body_depth--;
 	{
-		qty sig = c->bound_sig;
+		ast_qualified_type sig = c->bound_sig;
 
 		cxx_outer_restore(c, &o);
 		c->bound_sig = sig;

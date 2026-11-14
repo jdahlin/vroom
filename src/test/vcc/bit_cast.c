@@ -87,7 +87,7 @@ int main(void)
 	struct Fields { unsigned a:3,b:5; } fields = {5,11};
 	CHECK(__builtin_bit_cast(unsigned,(unsigned)fields.b)==11);
 	int x=5, *ptr=&x;
-	CHECK(__builtin_bit_cast(int *,__builtin_bit_cast(unsigned long,ptr))==ptr);
+	CHECK(__builtin_bit_cast(int *,__builtin_bit_cast(unsigned long long,ptr))==ptr);
 	union Pun u={.u=0x3f800000u}; CHECK(__builtin_bit_cast(float,u)==1.0f);
 	struct Large large={}; for(int i=0;i<32;i++) large.x[i]=(unsigned)i;
 	typedef unsigned Words[32];

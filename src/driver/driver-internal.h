@@ -71,20 +71,32 @@ struct driver_job {
 	driver_buffer predefines, command_line_defines, include_text, include_macros_text;
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
 	int darwin;
-	int target_x64;	/* x86_64-linux-gnu (PLAN-x86.md) */
+	int target_x64;	/* the x86-64 CPU: x86_64-linux-gnu (PLAN-x86.md), or Windows x64 (target_win64) */
+	int target_win64;	/* x86_64-w64-mingw32 (PLAN-win64.md): LLP64, MinGW-w64 headers; target_x64 is set too */
+	int ms_bitfields;	/* -mms-bitfields / -mno-ms-bitfields; -1: the target's default (on for Windows) */
+	const char *sysroot;	/* --sysroot= */
+	const char *resource_dir;	/* -resource-dir=: Windows takes DIR/include in place of vcc's own headers */
+	int no_builtin_includes;	/* -nobuiltininc: Windows leaves out vcc's own headers (or DIR/include) */
+	int verbose;	/* -v: with no input, the version banner configure scripts read (cmdline.c) */
+	const char *target_name;	/* --target=T as given */
+	char sysroot_directories[4][4200];	/* Windows: the system directories under it and -resource-dir's include (searchpath.c) */
+	int unicode;	/* -municode (Windows: UNICODE) */
 	int wasm_bits, target_linux;	/* 64 or 32: wasm64/wasm32-unknown-emscripten (PLAN-wasm.md); lnx: aarch64 Linux */
 	int hosted, no_standard_includes, asm_mode, undefine_predefined, raw_assembler, language_given;	/* raw_asm -1: by the suffix; xlang: -x given */
 	int march_has_lse, mcpu_has_lse, lse;
 	int sjlj;
-	int optimize, optimization_level, optimize_size, pie, pic, tls_model, function_data_sections, debug, freestanding, no_builtin, no_jump_tables, instrument_functions, cfi, strict_align, code_model_tiny, general_regs_only, wrapv;
+	int optimize, optimization_level, optimize_size, pie, pic, tls_model, function_data_sections, debug, dwarf_version, unwind_tables, no_seh, freestanding, no_builtin, no_jump_tables, instrument_functions, cfi, strict_align, code_model_tiny, general_regs_only, wrapv;
 	x86_features x64_features, x64_features_disabled, x64_features_raw, x64_features_forced_on, x64_features_forced_off;
 	const char *x64_cpu;
 	int no_sse, no_sse2, no_mmx;	/* x86-64: -mno-sse, -mno-sse2, -mno-mmx (last one wins) */
 	uint64_t disabled_builtins[CC_DISABLED_BUILTIN_WORDS];
+	/* optimization.c: per row of CC_OPTIMIZATIONS, 1 -fNAME, -1 -fno-NAME, 0 the level decides; the -fvir-* aids */
+	signed char optimization[CC_OPTIMIZATION_COUNT];
+	cc_vir_aids vir_aid;
 	int omit_frame_pointer;	/* unspecified: x86 enables omission above -O0 */
 	int sibling_calls;	/* explicit sibling-call flags are ordered independently of -O */
 	int x64_hardening_flags, patchable_entry_count, patchable_entry_before, stack_protector, stack_protector_guard_gs, auto_variables_zero;
-	const char *stack_protector_guard_symbol;	/* x86-64 hardening (cc_opts.xcf ...) */
+	const char *stack_protector_guard_symbol;	/* x86-64 hardening (cc_options.xcf ...) */
 	pp_opts pp_options;
 	char *prefix_map;
 	double start_time;
@@ -151,6 +163,10 @@ VPRIV int driver_explain_run(int argc, char **argv, const driver_environment *en
 /* cmdline.c: 0 to go on, 1 to end the job (status set), 2 to return 1 at once (the -ftls-model= error) */
 VPRIV int driver_cmdline_parse(struct driver_job *job, int argc, char **argv);
 VPRIV int driver_cmdline_check(struct driver_job *job);
+/* optimization.c */
+VPRIV int driver_optimization_level(const char *s);
+VPRIV bool driver_optimization_option(struct driver_job *job, const char *a);
+VPRIV cc_optimizations driver_optimization_resolve(const struct driver_job *job);
 /* warning-groups.c */
 VPRIV int driver_warning_groups_check(struct driver_job *job);
 /* job.c */

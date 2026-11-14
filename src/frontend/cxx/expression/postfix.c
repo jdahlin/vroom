@@ -32,7 +32,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			cxx_advance(c);
 			{
 				uint32_t targs = c->in_template_args;
-				qty base = c->etype;
+				ast_qualified_type base = c->etype;
 				uint32_t bn = c->enode, in, iloc = cxx_peek(c, 0)->loc;
 
 				c->in_template_args = 0;
@@ -46,7 +46,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 				if (!c->tentative && cxx_operator_call_type(c, vintern_cstr("operator[]"), base, &c->etype, 1))
 					cxx_gen_operator_call(c, bn, &in, 1, iloc);
 				else {
-					cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
+					cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == AST_TYPE_POINTER || AST_TYPE_KIND(c->ast, base) == AST_TYPE_ARRAY) &&
 					       !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
 					if (c->etype != CXX_TY_UNKNOWN)
 						cxx_gen_index(c, bn, in, iloc);
@@ -58,7 +58,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			{
 				uint32_t targs = c->in_template_args;
 				cxx_entity *set = c->ecallee;
-				qty callee = c->etype;
+				ast_qualified_type callee = c->etype;
 				uint8_t callee_lval = c->elval;
 				uint32_t obj_node = c->eobj_node, callee_node = c->enode;
 				bool obj_arrow = c->eobj_arrow;
@@ -92,14 +92,14 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 					if (!c->ncargs && !c->econst && !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
-					    AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_ULLONG) {
+					    AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UNSIGNED_LONG_LONG) {
 						/* f<args>() of a constexpr function template: its value, a constant */
 						cxx_entity *te = cxx_entity_kind_find(set, CXX_ENTITY_FUNCTION_TEMPLATE);
-						qty rt = QUNQ(c->etype);
+						ast_qualified_type rt = AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);
 						int64_t v;
 
 						if (te && cxx_ftemplate_const_call(c, te, xa, nx, &v)) {
-							cxx_ec(c, rt, rt == cc_type_basic(TY_BOOL) ? v != 0 : v);
+							cxx_ec(c, rt, rt == cc_type_basic(AST_TYPE_BOOL) ? v != 0 : v);
 							continue;
 						}
 					}
@@ -154,7 +154,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			continue;
 		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {
 			/* the object's class: its scope, for the member's lookup */
-			qty obj = c->etype;
+			ast_qualified_type obj = c->etype;
 			cxx_scope *cls = NULL;
 			uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
 			bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
@@ -162,7 +162,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			/* x->m on an object of class type: (x.operator->())->m, again while the result is a class
 			   ([over.ref]: p->m is interpreted as (p.operator->())->m) */
 			for (uint32_t hop = 0; arrow && hop < 8 && !c->tentative && obj != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, obj) &&
-			     AST_TYPE_KIND(c->ast, obj) != TY_ARRAY; hop++) {
+			     AST_TYPE_KIND(c->ast, obj) != AST_TYPE_ARRAY; hop++) {
 				if (!cxx_operator_call_type(c, vintern_cstr("operator->"), obj, NULL, 0) || c->etype == CXX_TY_UNKNOWN) {
 					obj = CXX_TY_UNKNOWN;
 					break;
@@ -172,10 +172,10 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 				obj = c->etype, obj_node = c->call_resolved && c->call_picked ? c->enode : 0;
 			}
 			if (cxx_is(c, LEX_TOKEN_ARROW))
-				obj = obj != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, obj) == TY_PTR && !AST_TYPE(c->ast, obj)->ext ?
+				obj = obj != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, obj) == AST_TYPE_POINTER && !AST_TYPE(c->ast, obj)->ext ?
 				      AST_TYPE(c->ast, obj)->base : CXX_TY_UNKNOWN;
 			if (obj != CXX_TY_UNKNOWN && !c->tentative)
-				cls = cxx_type_class_scope(c, QUNQ(obj));
+				cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(obj));
 			if (obj != CXX_TY_UNKNOWN && !c->tentative && !cc_type_is_record(c->ast, obj) && !cxx_is(c, LEX_TOKEN_TILDE))
 				CXX_INVALID(c);	/* x.m on what is not a class (a requirement fails) */
 			cxx_et(c, CXX_TY_UNKNOWN, false);
@@ -196,7 +196,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					uint32_t dloc = cxx_peek(c, 0)->loc;
 
 					c->pos += 4;
-					cxx_et(c, cc_type_basic(TY_VOID), false);
+					cxx_et(c, cc_type_basic(AST_TYPE_VOID), false);
 					if (!c->tentative && !c->template_depth && obj_node && obj != CXX_TY_UNKNOWN)
 						cxx_gen_destroy_object(c, obj_node, arrow, dloc);
 					continue;
@@ -227,7 +227,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 						if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 							cxx_name_type(c, m);
-							c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+							c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
 							c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 						} else if (!m && !cls->dependent && !cls->has_dependent_base)
 							CXX_INVALID(c);
@@ -250,7 +250,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 							c->xargs = realloc(c->xargs, (c->cxargs = c->ntargs + 8) * sizeof *c->xargs);
 						memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
 						c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = m;
-						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
 						c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 					} else if (cls && !q && !dep && !m && !cls->dependent && !cls->has_dependent_base && !c->tentative)
 						CXX_INVALID(c);	/* no such member template */
@@ -262,16 +262,16 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
-						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
 						/* a data member of a const object is const (not a mutable one, not a reference):
 						   x.layout.begin_ptr() on a const x calls the const overload */
-						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee && (QQ(obj) & Q_CONST)) {
+						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee && (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST)) {
 							cxx_entity *fe = m;
 
 							while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
 								fe = fe->next;
-							if (fe && !fe->is_mutable && !(AST_TYPE_KIND(c->ast, c->etype) == TY_PTR && AST_TYPE(c->ast, c->etype)->ext))
-								c->etype = QT(QI(c->etype), QQ(c->etype) | Q_CONST);
+							if (fe && !fe->is_mutable && !(AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_POINTER && AST_TYPE(c->ast, c->etype)->ext))
+								c->etype = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(c->etype), AST_QUALIFIED_TYPE_QUALIFIERS(c->etype) | AST_QUALIFIER_CONST);
 						}
 						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee)
 							cxx_gen_member(c, obj_node, arrow, id, mloc);	/* a data member */
@@ -286,10 +286,10 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 		case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS: {
 			int op = cxx_kind(c);
 			uint32_t xn = c->enode, oploc = cxx_peek(c, 0)->loc;
-			bool built_in = c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR);
+			bool built_in = c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_POINTER);
 
 			cxx_advance(c);
-			cxx_et(c, built_in ? QUNQ(c->etype) : CXX_TY_UNKNOWN, false);
+			cxx_et(c, built_in ? AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype) : CXX_TY_UNKNOWN, false);
 			if (built_in)
 				cxx_gen_postfix(c, op, xn, oploc);
 			continue;

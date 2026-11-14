@@ -100,7 +100,7 @@ enum {
 };
 enum {
 	PP_BUILTIN_NONE, PP_BUILTIN_FILE, PP_BUILTIN_LINE, PP_BUILTIN_COUNTER, PP_BUILTIN_DATE, PP_BUILTIN_TIME, PP_BUILTIN_TIMESTAMP,
-	PP_BUILTIN_BASE_FILE, PP_BUILTIN_FILE_NAME, PP_BUILTIN_INCLUDE_LEVEL, PP_BUILTIN_PRAGMA,
+	PP_BUILTIN_BASE_FILE, PP_BUILTIN_FILE_NAME, PP_BUILTIN_INCLUDE_LEVEL, PP_BUILTIN_FLT_EVAL_METHOD, PP_BUILTIN_PRAGMA,
 	PP_BUILTIN_HAS_ATTRIBUTE, PP_BUILTIN_HAS_BUILTIN, PP_BUILTIN_HAS_FEATURE, PP_BUILTIN_HAS_EXTENSION,
 	PP_BUILTIN_HAS_C_ATTRIBUTE, PP_BUILTIN_HAS_CPP_ATTRIBUTE, PP_BUILTIN_HAS_DECLSPEC_ATTRIBUTE, PP_BUILTIN_HAS_WARNING,
 	PP_BUILTIN_HAS_CONSTEXPR_BUILTIN, PP_BUILTIN_IS_TARGET_ARCHITECTURE, PP_BUILTIN_IS_TARGET_OS, PP_BUILTIN_IS_TARGET_VENDOR,
@@ -172,6 +172,8 @@ typedef struct pp_file_entry {
 	uint32_t name_length;
 	const char *spelled_path;	/* as spelled, for dependency files */
 	uint8_t is_system;		/* a system header (found in a system directory, or included by one) */
+	uint8_t guard_open;		/* its include guard's macro was undefined when it was entered: from then on
+					   clang knows the guard (MultipleIncludeOpt) and does not enter it again */
 	uint32_t included_from;		/* the #include's location (0: the main file, <built-in>, or a cached replay) */
 	uint32_t diagnostic_state;	/* the #pragma diagnostic state where it was entered (pdnode index) */
 	const char *comment_position;	/* -C: its comments before here are printed or dropped (NULL: none yet) */

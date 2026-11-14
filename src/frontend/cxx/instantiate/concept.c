@@ -313,20 +313,20 @@ VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs)
 	if (!f || !f->has_pt)
 		return -1;
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
-		qty P = f->pt[i];
+		ast_qualified_type P = f->pt[i];
 		void *owner;
 
 		if (P == CXX_TY_UNKNOWN)
 			return -1;
-		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+		if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext)
 			P = AST_TYPE(c->ast, P)->base;
 		/* (a bare T counts 2, const T 1: f(const T&) is more specialized than f(T&); so for T* and
 		   const T*, counted apart from bare T's: f(T) is less specialized than f(T*)) */
 		if (cxx_placeholder_of(c, P, &owner) >= 0)
-			n += (QQ(P) & Q_CONST) ? 100 : 200;
-		else if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext &&
+			n += (AST_QUALIFIED_TYPE_QUALIFIERS(P) & AST_QUALIFIER_CONST) ? 100 : 200;
+		else if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && !AST_TYPE(c->ast, P)->ext &&
 			 cxx_placeholder_of(c, AST_TYPE(c->ast, P)->base, &owner) >= 0)
-			n += (QQ(AST_TYPE(c->ast, P)->base) & Q_CONST) ? 1 : 2;
+			n += (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c->ast, P)->base) & AST_QUALIFIER_CONST) ? 1 : 2;
 	}
 	return n;
 }
@@ -341,14 +341,14 @@ VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs)
 	if (!f || !f->has_pt || nargs > 16)
 		return -1;
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
-		qty P = f->pt[i];
+		ast_qualified_type P = f->pt[i];
 		void *owner;
 		int k;
 		bool dup = false;
 
 		if (P == CXX_TY_UNKNOWN)
 			return -1;
-		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+		if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext)
 			P = AST_TYPE(c->ast, P)->base;
 		if ((k = cxx_placeholder_of(c, P, &owner)) < 0)
 			return -1;

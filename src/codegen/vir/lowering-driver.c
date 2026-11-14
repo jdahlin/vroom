@@ -2,17 +2,17 @@
 #include "lowering-driver.h"
 
 /* callee k (a symbol's address) returns twice: setjmp headers do not universally attach returns_twice to their declaration */
-VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee)
+VPRIV bool virbuild_call_returns_twice(codegen_context *e, const vir_insn *callee)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s;
 
-	if (callee->op != VIR_OP_SYMADDR || RKIND(callee->a) != RK_SYM)
+	if (callee->op != VIR_OP_SYMADDR || CODEGEN_REFERENCE_KIND(callee->a) != CODEGEN_REFERENCE_SYMBOL)
 		return false;
-	s = canon_sym(c, RIDX(callee->a));
-	return (sym_attrs(c, s)->flags & AF_TAIL_RETURNS_TWICE) ||
-	       EM_IDENT_IS(c->syms[s].name, "setjmp") || EM_IDENT_IS(c->syms[s].name, "_setjmp") ||
-	       EM_IDENT_IS(c->syms[s].name, "sigsetjmp") || EM_IDENT_IS(c->syms[s].name, "__sigsetjmp");
+	s = codegen_symbol_canonical(c, CODEGEN_REFERENCE_INDEX(callee->a));
+	return (codegen_symbol_attributes(c, s)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
+	       CODEGEN_IDENTIFIER_IS(c->syms[s].name, "setjmp") || CODEGEN_IDENTIFIER_IS(c->syms[s].name, "_setjmp") ||
+	       CODEGEN_IDENTIFIER_IS(c->syms[s].name, "sigsetjmp") || CODEGEN_IDENTIFIER_IS(c->syms[s].name, "__sigsetjmp");
 }
 
 /* the edits at position pos, from *ei on */
@@ -39,6 +39,21 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 	const vir_block *k = &f->blocks[b];
 	uint32_t pos = o->block_offsets[b], ei = o->block_offsets[f->block_count + 1 + b], eend = o->block_offsets[f->block_count + 2 + b];
 	uint32_t first = k->first + (t->params_in_loop ? 0 : k->parameter_count), last = k->first + k->insn_count;
+	uint32_t run = 0;	/* -g: the run of f->locations of instruction i (the last that starts at or before it) */
+
+	if (d->row && f->location_count) {
+		uint32_t lo = 0, hi = f->location_count;
+
+		while (hi - lo > 1) {
+			uint32_t m = lo + (hi - lo) / 2;
+
+			if (f->locations[m].first <= first)
+				lo = m;
+			else
+				hi = m;
+		}
+		run = lo;
+	}
 
 	t->block_begin(ctx, b);
 	if (!t->params_in_loop)
@@ -54,10 +69,18 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 		vir_operand_iterator it;
 		uint32_t *p, n = 0;
 		uint8_t res = VIR_REGISTER_NONE;
-		bool result = x.type != VIR_TYPE_VOID && !(t->skip_multi_operands && x.type == VIR_TYPE_MULTI);
+		bool result = x.type != VIR_TYPE_VOID && x.type != VIR_TYPE_MULTI;
 
 		if (d->skip_at && i == *d->skip_at)
 			break;
+		if (d->row && f->location_count) {	/* (before the edits: they are this instruction's) */
+			bool start = i == first;
+
+			while (run + 1 < f->location_count && f->locations[run + 1].first <= i)
+				run++, start = true;
+			if (start && f->locations[run].first <= i)
+				d->row(d->row_e, f->locations[run].source_location);
+		}
 		virbuild_edits(d, &ei, eend, i);
 		vir_operand_iterator_init(&it, f, &x, false);
 		if (t->skip_multi_operands) {
@@ -65,7 +88,7 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 				if (f->insns[*p].type == VIR_TYPE_MULTI)
 					continue;
 				if (n == d->max_operands)
-					t->fail(ctx, VIRFAIL(too_many_operands));
+					t->fail(ctx, VIRBUILD_FAILURE(too_many_operands));
 				d->operand_value[n] = *p;
 				d->operand_reg[n++] = o->operand_registers[pos++];
 			}
@@ -74,7 +97,7 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 			t->instruction(ctx, b, i, d->operand_reg, n, res);
 		} else {
 			while ((p = vir_operand_iterator_next(&it)))
-				n++;
+				n += f->insns[*p].type != VIR_TYPE_MULTI;
 			if (result)
 				res = o->operand_registers[pos + n];
 			t->instruction(ctx, b, i, &o->operand_registers[pos], n, res);
@@ -89,29 +112,13 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 		t->block_end(ctx, b);
 }
 
-/* VCC_VIR_ROT=0 keeps VIR's block order */
-static bool virbuild_rotation_wanted(bool cached)
-{
-	static int once = -1;
-
-	if (!cached || once < 0) {
-		const char *s = getenv("VCC_VIR_ROT");
-		int v = !(s && *s == '0');
-
-		if (!cached)
-			return v;
-		once = v;
-	}
-	return once;
-}
-
 VPRIV void virbuild_lower_body(const virbuild_lowering *d)
 {
 	const virbuild_lowering_target *t = d->target;
 	vir_function *f = d->f;
 
 	vir_layout_chases_compute(f, d->o, d->chase, d->path);
-	vir_layout_order(f, d->lp, d->chase, virbuild_rotation_wanted(t->rotation_cached) && d->optimize, d->order, d->position, d->rotation);
+	vir_layout_order(f, d->lp, d->chase, d->rotate && d->optimize, d->order, d->position, d->rotation);
 	if (t->order_adjust)
 		t->order_adjust(d->ctx);
 	if (t->body_begin)

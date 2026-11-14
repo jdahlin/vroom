@@ -75,9 +75,9 @@ VPRIV void cxx_paren_expression_parse(cxx *c)
 VPRIV void cxx_builtin_invoke_parse(cxx *c)
 {
 	uint32_t loc = cxx_peek(c, 0)->loc, n, nodes[CXX_MAX_ARGS];
-	qty at[CXX_MAX_ARGS];
+	ast_qualified_type at[CXX_MAX_ARGS];
 	uint8_t lv[CXX_MAX_ARGS];
-	qty f;
+	ast_qualified_type f;
 	bool known = true;
 
 	cxx_advance(c);
@@ -92,9 +92,9 @@ VPRIV void cxx_builtin_invoke_parse(cxx *c)
 	f = at[0];
 	if (f == CXX_TY_UNKNOWN)
 		return;
-	if (AST_TYPE_KIND(c->ast, f) == TY_PTR && AST_TYPE(c->ast, f)->ext)
+	if (AST_TYPE_KIND(c->ast, f) == AST_TYPE_POINTER && AST_TYPE(c->ast, f)->ext)
 		f = AST_TYPE(c->ast, f)->base;
-	if (cc_type_is_record(c->ast, f) && AST_TYPE_KIND(c->ast, f) != TY_ARRAY) {
+	if (cc_type_is_record(c->ast, f) && AST_TYPE_KIND(c->ast, f) != AST_TYPE_ARRAY) {
 		c->op_lv_set = 1, c->op_lv[0] = lv[0];
 		memcpy(c->op_lv + 1, lv + 1, n - 1);
 		if (cxx_operator_call_type(c, vintern_cstr("operator()"), f, at + 1, n - 1)) {
@@ -107,12 +107,12 @@ VPRIV void cxx_builtin_invoke_parse(cxx *c)
 			CXX_INVALID(c);	/* (no operator() takes these) */
 		return;
 	}
-	if (AST_TYPE_KIND(c->ast, f) == TY_FUNC || (AST_TYPE_KIND(c->ast, f) == TY_PTR && !AST_TYPE(c->ast, f)->ext &&
-						    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, f)->base) == TY_FUNC)) {
-		qty ft = AST_TYPE_KIND(c->ast, f) == TY_FUNC ? f : AST_TYPE(c->ast, f)->base;
+	if (AST_TYPE_KIND(c->ast, f) == AST_TYPE_FUNCTION || (AST_TYPE_KIND(c->ast, f) == AST_TYPE_POINTER && !AST_TYPE(c->ast, f)->ext &&
+						    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, f)->base) == AST_TYPE_FUNCTION)) {
+		ast_qualified_type ft = AST_TYPE_KIND(c->ast, f) == AST_TYPE_FUNCTION ? f : AST_TYPE(c->ast, f)->base;
 		const ctype *fx = AST_TYPE(c->ast, ft);
 
-		if ((fx->flags & TF_VARIADIC) ? n - 1 < fx->n : n - 1 != fx->n) {
+		if ((fx->flags & AST_TYPE_FLAG_VARIADIC) ? n - 1 < fx->n : n - 1 != fx->n) {
 			if (known && !c->template_depth)
 				CXX_INVALID(c);	/* (a function of another arity: a pointer to one has no default arguments) */
 			return;
@@ -121,12 +121,12 @@ VPRIV void cxx_builtin_invoke_parse(cxx *c)
 		if (c->etype != CXX_TY_UNKNOWN && nodes[0])
 			cxx_gen_indirect_call(c, nodes[0], nodes + 1, n - 1, loc);
 		else if (c->etype == CXX_TY_UNKNOWN && known && !c->template_depth && AST_TYPE(c->ast, ft)->n != n - 1 &&
-			 !(AST_TYPE(c->ast, ft)->flags & TF_VARIADIC))
+			 !(AST_TYPE(c->ast, ft)->flags & AST_TYPE_FLAG_VARIADIC))
 			CXX_INVALID(c);	/* (a function of another arity) */
 		return;
 	}
-	if (known && !c->template_depth && ((AST_TYPE_KIND(c->ast, f) >= TY_BOOL && AST_TYPE_KIND(c->ast, f) <= TY_FLOAT128) ||
-					     AST_TYPE_KIND(c->ast, f) == TY_ENUM))
+	if (known && !c->template_depth && ((AST_TYPE_KIND(c->ast, f) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, f) <= AST_TYPE_FLOAT128) ||
+					     AST_TYPE_KIND(c->ast, f) == AST_TYPE_ENUM))
 		CXX_INVALID(c);	/* (an arithmetic value: nothing to call; pointers to members: not decided) */
 }
 
@@ -150,7 +150,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		cxx_advance(c);
 		{
 			int64_t v;
-			qty nt = cxx_number_type(c, t);
+			ast_qualified_type nt = cxx_number_type(c, t);
 
 			if (cxx_number_value(t, &v))
 				cxx_ec(c, nt, v);
@@ -177,9 +177,9 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					cv = to[p - from];
 			}
 			if (cv != -1 || (t->len == 4 && t->s[2] == '0'))
-				cxx_ec(c, cc_type_basic(TY_CHAR), cv == -1 ? 0 : cv);
+				cxx_ec(c, cc_type_basic(AST_TYPE_CHAR), cv == -1 ? 0 : cv);
 			else
-				cxx_et(c, cc_type_basic(TY_CHAR), false);
+				cxx_et(c, cc_type_basic(AST_TYPE_CHAR), false);
 		}
 		return;
 	case LEX_TOKEN_STRING: case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_UTF8_STRING: case LEX_TOKEN_UTF16_STRING:
@@ -248,7 +248,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		}
 		/* "abc": an lvalue of const char[4] */
 		if (plain && !c->tentative) {
-			cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST), len + 1, 0), true);
+			cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(AST_TYPE_CHAR), AST_QUALIFIER_CONST), len + 1, 0), true);
 			cxx_gen_string(c, buf, len, first_piece->loc);
 		}
 		return;
@@ -283,16 +283,16 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && cxx_is(c, LEX_TOKEN_LEFT_PAREN))
 			cxx_skip_balanced(c);
 		if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
-			cxx_ec(c, cc_type_basic(TY_BOOL), t->kw == CXX_KW_true);
+			cxx_ec(c, cc_type_basic(AST_TYPE_BOOL), t->kw == CXX_KW_true);
 		else if (t->kw == CXX_KW___null)
-			cxx_et(c, cc_type_basic(TY_LONG), false);
+			cxx_et(c, cc_type_basic(AST_TYPE_LONG), false);
 		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative) {
 			cxx_et(c, cxx_nullptr_type(c), false);
 			cxx_gen_nullptr(c, t->loc);
 		}
 		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative) {
 			/* (a const member function's: a const T *) */
-			cxx_et(c, cc_type_pointer(c->ast, c->this_const ? QT(QI(c->this_type), QQ(c->this_type) | Q_CONST) : c->this_type), false);
+			cxx_et(c, cc_type_pointer(c->ast, c->this_const ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(c->this_type), AST_QUALIFIED_TYPE_QUALIFIERS(c->this_type) | AST_QUALIFIER_CONST) : c->this_type), false);
 			cxx_gen_this(c, t->loc);
 		}
 		else if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && !c->tentative) {
@@ -302,7 +302,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 
 			pp_location_describe(c->p, t->loc, &name, &nl, &line, &col);
 			if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
-				cxx_ec(c, cc_type_basic(TY_UINT), t->kw == CXX_KW___builtin_LINE ? line : col);
+				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_INT), t->kw == CXX_KW___builtin_LINE ? line : col);
 			else {
 				const char *s = name;
 				size_t n = nl;
@@ -313,13 +313,13 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 							s = name + i + 1, n = nl - i - 1;
 				if (t->kw == CXX_KW___builtin_FUNCTION)
 					s = "", n = 0;	/* (the enclosing function's name: not kept here) */
-				cxx_et(c, cc_type_pointer(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST)), false);
+				cxx_et(c, cc_type_pointer(c->ast, cc_type_qualify(c->ast, cc_type_basic(AST_TYPE_CHAR), AST_QUALIFIER_CONST)), false);
 				cxx_gen_string(c, s, n, t->loc);
 				if (c->enode)
 					c->enode = cc_conversion_decay(c->ast, c->enode);
 			}
 		} else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
-			cxx_et(c, cc_type_basic(TY_UINT), false);
+			cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_INT), false);
 		return;
 	case CXX_KW___builtin_source_location:
 		cxx_advance(c);
@@ -328,7 +328,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	case CXX_KW_static_cast: case CXX_KW_dynamic_cast: case CXX_KW_const_cast: case CXX_KW_reinterpret_cast:
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_LESS);
-		qty cast_to;
+		ast_qualified_type cast_to;
 		{
 			uint32_t targs = c->in_template_args;
 
@@ -346,12 +346,12 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 			cxx_paren_expression_parse(c);
 			/* static_cast<R (*)(P...)>(&f), (f): the overload of f whose type that is */
 			if (c->etype == CXX_TY_UNKNOWN && c->fn_set_seen && cast_to != CXX_TY_UNKNOWN && !c->tentative && !c->template_depth &&
-			    AST_TYPE_KIND(c->ast, cast_to) == TY_PTR && !AST_TYPE(c->ast, cast_to)->ext &&
-			    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, cast_to)->base) == TY_FUNC && c->pos - at <= 6) {
-				qty want = QUNQ(AST_TYPE(c->ast, cast_to)->base);
+			    AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_POINTER && !AST_TYPE(c->ast, cast_to)->ext &&
+			    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, cast_to)->base) == AST_TYPE_FUNCTION && c->pos - at <= 6) {
+				ast_qualified_type want = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, cast_to)->base);
 
 				for (cxx_entity *e = c->fn_set_seen; e; e = e->next)
-					if (e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && QUNQ(e->ty) == want && (!e->member_of || e->fn_static)) {
+					if (e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(e->ty) == want && (!e->member_of || e->fn_static)) {
 						uint32_t loc = c->tok[at].loc;
 
 						cxx_et(c, cast_to, false);
@@ -372,10 +372,10 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;
 			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
-			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128)
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= AST_TYPE_UINT128)
 				cxx_ec(c, cast_to, v);
 			else if (t->kw == CXX_KW_static_cast && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to) &&
-				 AST_TYPE_KIND(c->ast, cast_to) != TY_ARRAY)
+				 AST_TYPE_KIND(c->ast, cast_to) != AST_TYPE_ARRAY)
 				cxx_gen_static_cast_class(c, xn, cast_to, t->loc);
 			else if (t->kw == CXX_KW_static_cast || t->kw == CXX_KW_const_cast)	/* (const_cast: the same object or value, cv dropped) */
 				cxx_gen_cast(c, xn, cast_to, t->loc);
@@ -387,7 +387,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	{
 		/* typeid(T), typeid(e): a const std::type_info lvalue; its object for a type that is not a
 		   polymorphic class (a polymorphic object's dynamic type: not built) */
-		qty t = CXX_TY_UNKNOWN, ti = cxx_std_class(c, "type_info");
+		ast_qualified_type t = CXX_TY_UNKNOWN, ti = cxx_std_class(c, "type_info");
 		uint32_t tloc = cxx_peek(c, 0)->loc;
 
 		cxx_advance(c);
@@ -399,11 +399,11 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 			cxx_expression_parse(c);
 			c->unevaluated--;
 			t = c->etype;
-			if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && cxx_class_polymorphic(c, QUNQ(t)))
+			if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && cxx_class_polymorphic(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
 				t = CXX_TY_UNKNOWN;	/* (its dynamic type: from its vtable, not built) */
 		}
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-		cxx_et(c, ti != CXX_TY_UNKNOWN ? QT(QI(ti), Q_CONST) : CXX_TY_UNKNOWN, true);
+		cxx_et(c, ti != CXX_TY_UNKNOWN ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ti), AST_QUALIFIER_CONST) : CXX_TY_UNKNOWN, true);
 		if (!c->tentative && !c->template_depth && ti != CXX_TY_UNKNOWN)
 			cxx_gen_typeid(c, t, ti, tloc);
 		return;
@@ -413,12 +413,12 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		cxx_requires_expression_parse(c);
 		c->unevaluated--;
 		if (c->req_value >= 0)
-			cxx_ec(c, cc_type_basic(TY_BOOL), c->req_value);
+			cxx_ec(c, cc_type_basic(AST_TYPE_BOOL), c->req_value);
 		else
-			cxx_et(c, cc_type_basic(TY_BOOL), false);
+			cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 		return;
 	case CXX_KW___builtin_offsetof: {	/* (type, member): a constant when the class is laid out */
-		qty ot;
+		ast_qualified_type ot;
 		uint32_t member = 0;
 		uint64_t bits;
 		bool simple;
@@ -439,9 +439,9 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		}
 		cxx_advance(c);
 		if (simple && !c->template_depth && !c->tentative && cxx_class_field_offset(c, ot, member, &bits, 0) && !(bits & 7))
-			cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)(bits / 8));
+			cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)(bits / 8));
 		else
-			cxx_et(c, cc_type_basic(TY_ULONG), false);
+			cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
 		return;
 	}
 	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_bit_cast:
@@ -450,7 +450,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		cxx_builtin_call_parse(c);
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 		{
-			qty rt;
+			ast_qualified_type rt;
 			uint32_t bn[8], nb = c->nbnodes;
 
 			memcpy(bn, c->bnodes, sizeof bn);
@@ -475,7 +475,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	case CXX_KW_typename: case CXX_KW_decltype: case CXX_KW___decltype:
 		if (cxx_lookahead_fn(c, cxx_type_then_init)) {
 			cxx_type_specifiers_parse(c);
-			qty cast_to = c->ds_type;
+			ast_qualified_type cast_to = c->ds_type;
 
 			bool gen_class = false;
 			uint32_t gen_node = 0;
@@ -519,7 +519,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		/* a simple type keyword: int(x), unsigned{x} */
 		if (cxx_starts_type(c) && cxx_lookahead_fn(c, cxx_type_then_init)) {
 			cxx_type_specifiers_parse(c);
-			qty cast_to = c->ds_type;
+			ast_qualified_type cast_to = c->ds_type;
 
 			bool gen_class = false;
 			uint32_t gen_node = 0;
@@ -559,18 +559,18 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	    cxx_builtin_kind(t->id) == CXX_BUILTIN_TRAIT && !cxx_lookup(c, t->id)) {
 		cxx_builtin_call_parse(c);
 		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6) ||
-					 (t->len == 39 && !memcmp(t->s, "__builtin_lt_synthesizes_from_spaceship", 39))) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+					 (t->len == 39 && !memcmp(t->s, "__builtin_lt_synthesizes_from_spaceship", 39))) ? cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
 		{
 			/* a builtin that is a library function or a simple operation: its type, and its code */
-			qty rt;
+			ast_qualified_type rt;
 			uint32_t bn[8], nb = c->nbnodes;
 
 			memcpy(bn, c->bnodes, sizeof bn);
-			if (nb == 1 && c->bconst && c->bfirst != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bfirst) >= TY_BOOL &&
-			    AST_TYPE_KIND(c->ast, c->bfirst) <= TY_UINT128 && ((t->len == 19 && !memcmp(t->s, "__builtin_popcountg", 19)) ||
+			if (nb == 1 && c->bconst && c->bfirst != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bfirst) >= AST_TYPE_BOOL &&
+			    AST_TYPE_KIND(c->ast, c->bfirst) <= AST_TYPE_UINT128 && ((t->len == 19 && !memcmp(t->s, "__builtin_popcountg", 19)) ||
 			    (t->len == 14 && (!memcmp(t->s, "__builtin_clzg", 14) || !memcmp(t->s, "__builtin_ctzg", 14))))) {
 				/* the generic bit counts of a constant (the value is sign-extended to its type's width) */
-				uint32_t w = (uint32_t)AST_TYPE(c->ast, QUNQ(c->bfirst))->size * 8;
+				uint32_t w = (uint32_t)AST_TYPE(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(c->bfirst))->size * 8;
 				uint64_t lo = (uint64_t)c->bvalue, hi = c->bvalue < 0 ? ~0ull : 0;
 				int64_t r = -1;
 
@@ -585,7 +585,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 				else if (t->s[11] == 't' && (lo || hi))
 					r = lo ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
 				if (r >= 0) {
-					cxx_ec(c, cc_type_basic(TY_INT), r);
+					cxx_ec(c, cc_type_basic(AST_TYPE_INT), r);
 					return;
 				}
 			}
@@ -602,9 +602,9 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 			if (!c->template_depth && !c->tentative && c->nbtypes && c->nbtypes <= 2 &&
 			    !cxx_type_has_placeholder(c, c->btypes[0]) && !(c->nbtypes == 2 && cxx_type_has_placeholder(c, c->btypes[1])) &&
 			    cxx_trait_value(c, t->s, t->len, c->btypes, c->nbtypes, &v))
-				cxx_ec(c, t->len == 12 && !memcmp(t->s, "__datasizeof", 12) ? cc_type_basic(TY_ULONG) : cc_type_basic(TY_BOOL), v);
+				cxx_ec(c, t->len == 12 && !memcmp(t->s, "__datasizeof", 12) ? cc_type_basic(AST_TYPE_UNSIGNED_LONG) : cc_type_basic(AST_TYPE_BOOL), v);
 			else if (t->len == 12 && !memcmp(t->s, "__datasizeof", 12))
-				cxx_et(c, cc_type_basic(TY_ULONG), false);
+				cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
 		}
 		return;
 	}
@@ -642,7 +642,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		}
 		if (is_type) {
 			cxx_type_specifiers_parse(c);
-			qty cast_to = c->ds_type;
+			ast_qualified_type cast_to = c->ds_type;
 
 			bool gen_class = false;
 			uint32_t gen_node = 0;
@@ -658,7 +658,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					/* (deducing instantiates the class, whose members parse argument lists of their own: this
 					   list's, kept) */
 					uint32_t sn = c->ncargs, snodes[8], sbr[CXX_MAX_ARGS], szero = c->carg_zero;
-					qty st[8];
+					ast_qualified_type st[8];
 					uint8_t sl[8];
 
 					memcpy(snodes, c->carg_nodes, sn * sizeof *snodes), memcpy(st, c->cargs, sn * sizeof *st);

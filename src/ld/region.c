@@ -1,5 +1,7 @@
 /* Per-thread bump arenas that every allocation of a link comes from, and the release of big mappings. */
 
+#include "ld-internal.h"
+
 /* ---------------- arenas ---------------- */
 
 #define LD_REGION_BLOCK_SIZE (8u << 20)
@@ -12,14 +14,14 @@ static __thread unsigned ld_region_thread_generation;
 
 /* set by main for the last link of the process: exit tears the mappings down
  * in bulk, cheaper than ~900 munmap calls */
-static bool ld_keep_mappings;
-static void ld_region_unmap(const void *p, size_t n)
+VPRIV bool ld_keep_mappings;
+VPRIV void ld_region_unmap(const void *p, size_t n)
 {
 	if (!ld_keep_mappings)
 		munmap((void *)p, n);
 }
 
-static void *ld_region_large_alloc(size_t n)
+VPRIV void *ld_region_large_alloc(size_t n)
 {
 	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 	if (p == MAP_FAILED) {
@@ -30,7 +32,7 @@ static void *ld_region_large_alloc(size_t n)
 }
 
 /* zeroed memory from this thread's arena */
-static void *ld_region_alloc(size_t n)
+VPRIV void *ld_region_alloc(size_t n)
 {
 	n = (n + 15) & ~(size_t)15;
 	if (ld_region_thread_generation != atomic_load_explicit(&ld_region_generation, memory_order_relaxed)) {
@@ -53,7 +55,7 @@ static void *ld_region_alloc(size_t n)
 	ld_region_current += n;
 	return p;
 }
-static void ld_regions_free(void)
+VPRIV void ld_regions_free(void)
 {
 	/* Every thread's current block is in the list; drop all of them. */
 	for (ld_region_block *b = ld_region_blocks, *n; b; b = n) {
@@ -63,7 +65,7 @@ static void ld_regions_free(void)
 	ld_region_blocks = NULL;
 	atomic_fetch_add(&ld_region_generation, 1);
 }
-static char *ld_region_string_duplicate(const char *s)
+VPRIV char *ld_region_string_duplicate(const char *s)
 {
 	size_t n = strlen(s);
 	char *p = ld_region_alloc(n + 1);

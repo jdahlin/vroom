@@ -14,14 +14,14 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 }
 
 /* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class)
+VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class)
 {
 	bool q, f;
-	qty t;
+	ast_qualified_type t;
 
 	uint8_t missing = c->member_missing, invalid = c->einvalid;
 	/* (an instance with a parameter pack: its elements' types; taken here, the body's own parses reuse the fields) */
-	qty *pack_types = c->sig_pack_types;
+	ast_qualified_type *pack_types = c->sig_pack_types;
 	uint32_t pack_n = c->sig_pack_n;
 
 	c->sig_pack_n = UINT32_MAX;
@@ -33,15 +33,15 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 		c->member_missing = missing, c->einvalid = invalid;
 		return CXX_TY_UNKNOWN;
 	}
-	c->type_in = ctor_class ? cc_type_basic(TY_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
+	c->type_in = ctor_class ? cc_type_basic(AST_TYPE_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
 	/* auto f(): the declarator over auto's placeholder; the body's first return gives the type */
 	bool ret_auto = !ctor_class && c->ds_auto && c->ds_type == CXX_TY_UNKNOWN;
-	qty ret_pattern = CXX_TY_UNKNOWN;
+	ast_qualified_type ret_pattern = CXX_TY_UNKNOWN;
 
 	if (ret_auto)
-		c->type_in = QT(QI(cxx_auto_type(c)), c->ds_quals);
+		c->type_in = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(cxx_auto_type(c)), c->ds_quals);
 	if (any_return && c->type_in == CXX_TY_UNKNOWN)
-		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
+		c->type_in = cc_type_basic(AST_TYPE_VOID);	/* (deduction reads the parameters only) */
 	c->decl_return = CXX_TY_UNKNOWN;
 	c->cpack_n = UINT32_MAX;
 	uint8_t own_pack = c->sig_own_pack;
@@ -50,7 +50,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	cxx_declarator_parse(c, false, &q, &f, NULL);
 	c->sig_own_pack = own_pack;
 	uint32_t cpack_name = c->cpack_name, cpack_at = c->cpack_at, cpack_n = c->cpack_n;
-	qty cpack_types[32];
+	ast_qualified_type cpack_types[32];
 
 	if (cpack_n != UINT32_MAX)
 		memcpy(cpack_types, c->cpack_types, cpack_n * sizeof *cpack_types);
@@ -63,12 +63,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 		/* the placeholder stays here: a pattern for the deduction below, void or unknown to callers */
 		if (c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return)) {
 			ret_pattern = c->decl_return;
-			c->decl_return = any_return ? cc_type_basic(TY_VOID) : CXX_TY_UNKNOWN;
+			c->decl_return = any_return ? cc_type_basic(AST_TYPE_VOID) : CXX_TY_UNKNOWN;
 			if (t != CXX_TY_UNKNOWN) {
 				const ctype *ft = AST_TYPE(c->ast, t);
 
-				t = any_return ? cxx_type_function(c, cc_type_basic(TY_VOID), &c->ast->params[ft->aux], ft->n,
-								   (ft->flags & TF_VARIADIC) != 0) : CXX_TY_UNKNOWN;
+				t = any_return ? cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), &c->ast->params[ft->aux], ft->n,
+								   (ft->flags & AST_TYPE_FLAG_VARIADIC) != 0) : CXX_TY_UNKNOWN;
 			}
 		}
 	}
@@ -78,12 +78,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	   per element (so that it is ranked like any other candidate) */
 	if (f && !any_return && pack_n != UINT32_MAX && c->decl_pack_param != UINT32_MAX && c->decl_pack_param + 1 == c->ndecl_params &&
 	    c->decl_return != CXX_TY_UNKNOWN && c->ndecl_params - 1 + pack_n <= 32) {
-		qty ps[32];
+		ast_qualified_type ps[32];
 		uint32_t np = 0;
 		bool known = true;
 
 		for (uint32_t i = 0; i + 1 < c->ndecl_params; i++)
-			known &= (ps[np++] = QUNQ(c->decl_params[i].ty)) != CXX_TY_UNKNOWN && c->decl_params[i].ty != CXX_TY_UNKNOWN;
+			known &= (ps[np++] = AST_QUALIFIED_TYPE_UNQUALIFIED(c->decl_params[i].ty)) != CXX_TY_UNKNOWN && c->decl_params[i].ty != CXX_TY_UNKNOWN;
 		for (uint32_t i = 0; i < pack_n; i++)
 			ps[np++] = pack_types[i];
 		if (known)
@@ -159,7 +159,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 					memcpy(gi->defs, c->fn_defs, 2 * c->fn_ndefs * sizeof *gi->defs);
 					gi->def_scope = fs;
 				}
-				if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
+				if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
 				    pack_n == UINT32_MAX && !cxx_is_kw(c, CXX_KW_try)) {
 					cxx_entity *pe = NULL;
 
@@ -176,7 +176,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 					gi->ty = t;
 					gen = cxx_gen_function_begin(c, gi, fs, c->decl_params, c->ndecl_params);
 					c->gen_pack_entity = NULL;
-				} else if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
+				} else if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
 					   pack_n != UINT32_MAX && c->decl_pack_param < c->ndecl_params && !cxx_is_kw(c, CXX_KW_try) &&
 					   AST_TYPE(c->ast, t)->n == c->ndecl_params - 1 + pack_n && AST_TYPE(c->ast, t)->n <= 32) {
 					/* a function parameter pack: one parameter per element (T... v with v... expanded in the body) */
@@ -208,12 +208,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 			*body = true;
 			if (c->ret_capture) {
 				/* no return statement: void */
-				qty r;
+				ast_qualified_type r;
 
 				if (c->ret_type == CXX_TY_UNKNOWN && !c->ret_seen)
-					c->ret_type = cc_type_basic(TY_VOID);	/* no return statement */
+					c->ret_type = cc_type_basic(AST_TYPE_VOID);	/* no return statement */
 				r = c->ret_type == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN :
-				    AST_TYPE_KIND(c->ast, c->ret_type) == TY_VOID ? (ret_pattern == cxx_auto_type(c) ? c->ret_type : CXX_TY_UNKNOWN) :
+				    AST_TYPE_KIND(c->ast, c->ret_type) == AST_TYPE_VOID ? (ret_pattern == cxx_auto_type(c) ? c->ret_type : CXX_TY_UNKNOWN) :
 				    cxx_auto_deduce(c, ret_pattern, c->ret_type, c->ret_lval);
 
 				c->ret_capture = 0;
@@ -224,7 +224,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				if (r != CXX_TY_UNKNOWN && known) {
 					/* a deduced return type (auto f(T)): the function's type with it, and the body parsed a
 					   second time, now with its code (the first only deduced the type) */
-					qty ps[32];
+					ast_qualified_type ps[32];
 					uint32_t np = saved_nparams, end = c->pos;
 					cxx_scope *fs2 = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 					bool gen2;
@@ -247,7 +247,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				} else if (r != CXX_TY_UNKNOWN)
 					t = cxx_type_function(c, r, NULL, 0, true), c->sig_fake = 1;	/* (callers read the return type only) */
 			}
-		} else if (c->gen_instance && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake &&
+		} else if (c->gen_instance && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION && !c->sig_fake &&
 			   c->gen_instance->ty == CXX_TY_UNKNOWN && !c->tentative) {
 			/* declared only here (a member template defined outside its class): its type all the same, so that
 			   calls are built; its body: another declaration's, or another TU's */

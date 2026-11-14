@@ -6,7 +6,7 @@ VPRIV void cxx_new_expression_parse(cxx *c)
 	uint32_t place[4], nplace = 0, init[CXX_MAX_ARGS], loc = cxx_peek(c, 0)->loc, count = 0;
 	int ninit = -1;
 	bool array = false, braced = false;
-	qty t = CXX_TY_UNKNOWN, at[CXX_MAX_ARGS];
+	ast_qualified_type t = CXX_TY_UNKNOWN, at[CXX_MAX_ARGS];
 	uint8_t lv[CXX_MAX_ARGS];
 
 	cxx_accept(c, LEX_TOKEN_COLON_COLON);
@@ -52,8 +52,8 @@ init:
 		cxx_et(c, t != CXX_TY_UNKNOWN && !c->tentative ? cc_type_pointer(c->ast, t) : CXX_TY_UNKNOWN, false);
 		return;
 	}
-	if (!c->template_depth && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY && !array)
-		cxx_ctor_use(c, QUNQ(t), ninit > 0 ? at : NULL, ninit > 0 ? lv : NULL, ninit > 0 ? (uint32_t)ninit : 0, braced);
+	if (!c->template_depth && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY && !array)
+		cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), ninit > 0 ? at : NULL, ninit > 0 ? lv : NULL, ninit > 0 ? (uint32_t)ninit : 0, braced);
 	cxx_et(c, cc_type_pointer(c->ast, t), false);
 	if (!c->template_depth)
 		cxx_gen_new(c, t, place, nplace, count, array, init, ninit, loc);
@@ -129,7 +129,7 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			if (pk && pk->is_pack && !pk->pack_placeholder && !c->template_depth && !c->tentative) {
-				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)pk->npack);	/* (a bound pack: its length) */
+				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)pk->npack);	/* (a bound pack: its length) */
 				return;
 			}
 		} else if (cxx_paren_type_id_follows(c)) {
@@ -140,12 +140,12 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->type_out, &size, &align)) {
-				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
+				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)size);
 				return;
 			}
 			if (!c->template_depth && !c->tentative && cxx_type_definitely_incomplete(c, c->type_out)) {
 				/* sizeof of a type that stays incomplete: ill-formed, a substitution failure where one counts */
-				cxx_et(c, cc_type_basic(TY_ULONG), false);
+				cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
 				CXX_INVALID(c);
 				return;
 			}
@@ -158,11 +158,11 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 			c->unevaluated--;
 			/* sizeof expr: its type's size */
 			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->etype, &size, &align)) {
-				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
+				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)size);
 				return;
 			}
 		}
-		cxx_et(c, cc_type_basic(TY_ULONG), false);	/* size_t */
+		cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);	/* size_t */
 		return;
 	case CXX_KW_alignof: case CXX_KW__Alignof: case CXX_KW___alignof__: case CXX_KW___alignof:
 		cxx_advance(c);
@@ -174,19 +174,19 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->type_out, &size, &align)) {
-				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)align);
+				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)align);
 				return;
 			}
 		} else
 			cxx_unary_expression_parse(c);
-		cxx_et(c, cc_type_basic(TY_ULONG), false);
+		cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
 		return;
 	case CXX_KW_noexcept:
 		cxx_advance(c);
 		c->unevaluated++;
 		cxx_paren_expression_parse(c);
 		c->unevaluated--;
-		cxx_et(c, cc_type_basic(TY_BOOL), false);
+		cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 		return;
 	case CXX_KW_new:
 		cxx_new_expression_parse(c);
@@ -200,7 +200,7 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE), array = true;
 		cxx_cast_expression_parse(c);
 		x = c->enode;
-		cxx_et(c, cc_type_basic(TY_VOID), false);
+		cxx_et(c, cc_type_basic(AST_TYPE_VOID), false);
 		if (!c->tentative && !c->template_depth)
 			cxx_gen_delete(c, x, array, loc);
 		return;
@@ -252,7 +252,7 @@ VPRIV void cxx_cast_expression_parse(cxx *c)
 {
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_paren_type_id_follows(c) && cxx_cast_operand_follows(c)) {
 		/* (T)x, (T){...}; but (T)(...) is also a call of a parenthesized value: the type wins */
-		qty cast_to;
+		ast_qualified_type cast_to;
 
 		cxx_advance(c);
 		cxx_type_id_parse(c);
@@ -273,7 +273,7 @@ VPRIV void cxx_cast_expression_parse(cxx *c)
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;	/* ((void)x: a type whatever x is; a tentative parse types nothing) */
 			cxx_et(c, cast_to, false);
-			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128)
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= AST_TYPE_UINT128)
 				cxx_ec(c, cast_to, v);
 			else
 				cxx_gen_cast(c, xn, cast_to, cloc);

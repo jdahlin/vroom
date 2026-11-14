@@ -182,7 +182,7 @@ VPRIV cxx_entity *cxx_instance_named(cxx *c, cxx_entity *te, const cxx_targ *arg
 			return NULL;
 	x = cxx_instance_find(c, t, args, nargs, cxx_instance_hash(t, args, nargs));
 	if (!x || !x->inst || x->inst->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, x->inst->ty) ||
-	    (c->ast->tags[AST_TYPE(c->ast, x->inst->ty)->aux].flags & RF_COMPLETE))
+	    (c->ast->tags[AST_TYPE(c->ast, x->inst->ty)->aux].flags & AST_RECORD_FLAG_COMPLETE))
 		return NULL;
 	/* (defined by the specialization, not completed from the primary: its members are its own) */
 	x->late = 0, x->state = 2;
@@ -269,38 +269,38 @@ VPRIV bool cxx_spell_append(char *buf, size_t cap, size_t *len, const char *s)
 	return true;
 }
 
-VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len)
+VPRIV bool cxx_type_spell(cxx *c, ast_qualified_type t, char *buf, size_t cap, size_t *len)
 {
-	static const char *const basic[TY_NKINDS] = {
-		[TY_VOID] = "void", [TY_BOOL] = "bool", [TY_CHAR] = "char", [TY_SCHAR] = "signed char", [TY_UCHAR] = "unsigned char",
-		[TY_SHORT] = "short", [TY_USHORT] = "unsigned short", [TY_INT] = "int", [TY_UINT] = "unsigned int", [TY_LONG] = "long",
-		[TY_ULONG] = "unsigned long", [TY_LLONG] = "long long", [TY_ULLONG] = "unsigned long long", [TY_INT128] = "__int128",
-		[TY_UINT128] = "unsigned __int128", [TY_FLOAT] = "float", [TY_DOUBLE] = "double", [TY_LDOUBLE] = "long double",
+	static const char *const basic[AST_TYPE_KIND_COUNT] = {
+		[AST_TYPE_VOID] = "void", [AST_TYPE_BOOL] = "bool", [AST_TYPE_CHAR] = "char", [AST_TYPE_SIGNED_CHAR] = "signed char", [AST_TYPE_UNSIGNED_CHAR] = "unsigned char",
+		[AST_TYPE_SHORT] = "short", [AST_TYPE_UNSIGNED_SHORT] = "unsigned short", [AST_TYPE_INT] = "int", [AST_TYPE_UNSIGNED_INT] = "unsigned int", [AST_TYPE_LONG] = "long",
+		[AST_TYPE_UNSIGNED_LONG] = "unsigned long", [AST_TYPE_LONG_LONG] = "long long", [AST_TYPE_UNSIGNED_LONG_LONG] = "unsigned long long", [AST_TYPE_INT128] = "__int128",
+		[AST_TYPE_UINT128] = "unsigned __int128", [AST_TYPE_FLOAT] = "float", [AST_TYPE_DOUBLE] = "double", [AST_TYPE_LONG_DOUBLE] = "long double",
 	};
 	const ctype *x;
 
 	if (t == CXX_TY_UNKNOWN)
 		return false;
 	x = AST_TYPE(c->ast, t);
-	if (x->kind == TY_PTR) {
+	if (x->kind == AST_TYPE_POINTER) {
 		if (!cxx_type_spell(c, x->base, buf, cap, len))
 			return false;
 		if (!cxx_spell_append(buf, cap, len, x->ext == 1 ? "&" : x->ext == 2 ? "&&" : "*"))
 			return false;
-		if ((QQ(t) & Q_CONST) && !cxx_spell_append(buf, cap, len, " const"))
+		if ((AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) && !cxx_spell_append(buf, cap, len, " const"))
 			return false;
-		return !(QQ(t) & Q_VOLATILE) || cxx_spell_append(buf, cap, len, " volatile");
+		return !(AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) || cxx_spell_append(buf, cap, len, " volatile");
 	}
-	if ((QQ(t) & Q_CONST) && !cxx_spell_append(buf, cap, len, "const "))
+	if ((AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) && !cxx_spell_append(buf, cap, len, "const "))
 		return false;
-	if ((QQ(t) & Q_VOLATILE) && !cxx_spell_append(buf, cap, len, "volatile "))
+	if ((AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) && !cxx_spell_append(buf, cap, len, "volatile "))
 		return false;
-	if (x->ext == 1 && (x->kind == TY_UCHAR || x->kind == TY_USHORT || x->kind == TY_UINT || x->kind == TY_INT))
-		return cxx_spell_append(buf, cap, len, x->kind == TY_UCHAR ? "char8_t" : x->kind == TY_USHORT ? "char16_t" :
-						       x->kind == TY_UINT ? "char32_t" : "wchar_t");
-	if (x->kind < TY_NKINDS && basic[x->kind] && x->kind <= TY_LDOUBLE && !x->ext)
+	if (x->ext == 1 && (x->kind == AST_TYPE_UNSIGNED_CHAR || x->kind == AST_TYPE_UNSIGNED_SHORT || x->kind == AST_TYPE_UNSIGNED_INT || x->kind == AST_TYPE_INT))
+		return cxx_spell_append(buf, cap, len, x->kind == AST_TYPE_UNSIGNED_CHAR ? "char8_t" : x->kind == AST_TYPE_UNSIGNED_SHORT ? "char16_t" :
+						       x->kind == AST_TYPE_UNSIGNED_INT ? "char32_t" : "wchar_t");
+	if (x->kind < AST_TYPE_KIND_COUNT && basic[x->kind] && x->kind <= AST_TYPE_LONG_DOUBLE && !x->ext)
 		return cxx_spell_append(buf, cap, len, basic[x->kind]);
-	if (x->kind == TY_STRUCT || x->kind == TY_UNION || x->kind == TY_ENUM)
+	if (x->kind == AST_TYPE_STRUCT || x->kind == AST_TYPE_UNION || x->kind == AST_TYPE_ENUM)
 		return x->aux < c->ntag_spelling && c->tag_spelling[x->aux] && cxx_spell_append(buf, cap, len, c->tag_spelling[x->aux]);
 	return false;	/* (arrays, functions: not needed by the dump yet) */
 }

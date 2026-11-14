@@ -50,21 +50,21 @@ VPRIV void cxx_type_then_init(cxx *c)
 
 /* can a constant of type from (value v, held as int64_t) be one of type to: a 128-bit integer takes it
    sign-extended, which is wrong for an unsigned 64-bit value with its top bit set */
-VPRIV bool cxx_const_widens(cxx *c, qty from, qty to, int64_t v)
+VPRIV bool cxx_const_widens(cxx *c, ast_qualified_type from, ast_qualified_type to, int64_t v)
 {
 	int tk = to != CXX_TY_UNKNOWN ? AST_TYPE_KIND(c->ast, to) : -1;
 
-	if (tk != TY_INT128 && tk != TY_UINT128)
+	if (tk != AST_TYPE_INT128 && tk != AST_TYPE_UINT128)
 		return true;
 	if (v >= 0)
 		return true;
-	if (from != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, from) == TY_INT128 || AST_TYPE_KIND(c->ast, from) == TY_UINT128))
+	if (from != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, from) == AST_TYPE_INT128 || AST_TYPE_KIND(c->ast, from) == AST_TYPE_UINT128))
 		return true;	/* (from a 128-bit constant: held sign-extended already, ~(unsigned __int128)0) */
-	return from != CXX_TY_UNKNOWN && cc_type_is_signed(c->ast, from) && AST_TYPE_KIND(c->ast, from) != TY_ENUM;
+	return from != CXX_TY_UNKNOWN && cc_type_is_signed(c->ast, from) && AST_TYPE_KIND(c->ast, from) != AST_TYPE_ENUM;
 }
 
 /* T(x), T{x}, T(): a prvalue of type T; an integer constant when x is one (T(): zero) */
-VPRIV void cxx_functional_cast_type(cxx *c, qty cast_to)
+VPRIV void cxx_functional_cast_type(cxx *c, ast_qualified_type cast_to)
 {
 	bool k = c->carg_const && cxx_const_widens(c, c->ncargs == 1 ? c->cargs[0] : CXX_TY_UNKNOWN, cast_to, c->carg_value), zero = c->ncargs == 0;
 	int64_t v = zero ? 0 : c->carg_value;
@@ -72,11 +72,11 @@ VPRIV void cxx_functional_cast_type(cxx *c, qty cast_to)
 
 	cxx_et(c, cast_to, false);
 	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
-	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
+	    ((AST_TYPE_KIND(c->ast, cast_to) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= AST_TYPE_UINT128) || AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_ENUM))
 		cxx_ec(c, cast_to, v);
-	else if (zero && cast_to != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, cast_to) == TY_PTR || cc_type_is_arithmetic(c->ast, cast_to))) {
+	else if (zero && cast_to != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_POINTER || cc_type_is_arithmetic(c->ast, cast_to))) {
 		/* T() of a pointer or floating type: 0 converted (a null pointer, 0.0) */
-		cxx_ec(c, cc_type_basic(TY_INT), 0);
+		cxx_ec(c, cc_type_basic(AST_TYPE_INT), 0);
 		xn = c->enode;
 		cxx_et(c, cast_to, false);
 		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);

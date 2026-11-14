@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "common/intern.h"
@@ -156,7 +157,7 @@ static inline uint64_t lex_mask_pack(uint8x16_t a0, uint8x16_t a1, uint8x16_t a2
  *   NS    the next byte is + or - (maybe a sign inside a pp-number)
  * Blocks [from, to) of the file at s.
  */
-static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
+static void lex_bytes_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	const uint8x16_t mid = vdupq_n_u8(0x1f), mdg = vdupq_n_u8(0x04);
 	const uint8x16_t mws = vdupq_n_u8(0xe0);
@@ -271,7 +272,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 #else /* !__ARM_NEON */
 
 #ifdef LEX_X86_SIMD
-#define pp_paste_result_classify classify_scalar
+#define lex_bytes_classify classify_scalar
 #define lex_comment_end_find find_cend_scalar
 #define lex_line_end_find find_nl_scalar
 #define lex_quote_find find_quote_scalar
@@ -279,7 +280,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 
 /* Portable fallback; also independent searches for the scalar oracle. */
 
-static void pp_paste_result_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
+static void lex_bytes_classify(const uint8_t *s, size_t from, size_t to, uint64_t *m[LEX_MASK_COUNT])
 {
 	for (size_t b = from; b < to; b++) {
 		const uint8_t *q = s + 64 * b;
@@ -340,11 +341,11 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
 	}
 }
 #ifdef LEX_X86_SIMD
-#undef pp_paste_result_classify
+#undef lex_bytes_classify
 #undef lex_comment_end_find
 #undef lex_line_end_find
 #undef lex_quote_find
-static void (*pp_paste_result_classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
+static void (*lex_bytes_classify)(const uint8_t *, size_t, size_t, uint64_t **) = classify_scalar;
 static size_t (*lex_comment_end_find)(const char *, size_t) = find_cend_scalar;
 static size_t (*lex_line_end_find)(const char *, size_t) = find_nl_scalar;
 static size_t (*lex_quote_find)(const char *, size_t, uint8_t) = find_quote_scalar;
@@ -366,14 +367,14 @@ static void lex_simd_init_x86(void)
 	const char *cpu;
 	if (cap && !strcmp(cap, "scalar")) return;
 	if (!x86_native_features(&features, &disabled, &cpu) || !x86_feature_has(features, X86_FEATURE_AVX2)) return;
-	pp_paste_result_classify = lex_bytes_classify_avx2;
+	lex_bytes_classify = lex_bytes_classify_avx2;
 	lex_comment_end_find = lex_comment_end_find_avx2;
 	lex_line_end_find = lex_line_end_find_avx2;
 	lex_quote_find = lex_quote_find_avx2;
 	if (cap && !strcmp(cap, "avx2")) return;
 	if (x86_feature_has(features, X86_FEATURE_AVX512F) && x86_feature_has(features, X86_FEATURE_AVX512BW) &&
 	    x86_feature_has(features, X86_FEATURE_AVX512VBMI))
-		pp_paste_result_classify = lex_bytes_classify_avx512;
+		lex_bytes_classify = lex_bytes_classify_avx512;
 }
 #endif
 #endif /* host SIMD */
@@ -873,7 +874,7 @@ static size_t lex_blocks_classify(const char *s, size_t n, size_t nblk, size_t f
 {
 	if (to > nblk)
 		to = nblk;
-	pp_paste_result_classify((const uint8_t *)s, from, to, m);
+	lex_bytes_classify((const uint8_t *)s, from, to, m);
 	if (from <= (n >> 6) && (n >> 6) < to) {
 		for (int j = 0; j < LEX_MASK_COUNT; j++)
 			if (j != LEX_MASK_HANDLER)
@@ -1063,7 +1064,7 @@ fast:
 		const uint64_t NS = lex_mask_window(m[LEX_MASK_SIGN_NEXT], p);
 
 		/*
-		 * Left to the handlers (besides the X of pp_paste_result_classify(), which has
+		 * Left to the handlers (besides the X of lex_bytes_classify(), which has
 		 * every ".." with ellipses, "..5" and "..\<newline>."):
 		 * overlapping pairs (<<=, ->=) and a number before + or -: in
 		 * 1e+5 the sign belongs to it (numbers before a sign are rare).
@@ -1079,14 +1080,20 @@ fast:
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
 		const uint8_t *kt = lex_punctuator_kind_table;
 
+#if defined(__aarch64__)
 		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
+#endif
 		/*
 		 * The token starts S and the token ends: boundaries after a
-		 * non-blank byte.  Below lim they pair up.  Both bit-reversed,
-		 * so that clz finds the next one (M1 has no ctz).
+		 * non-blank byte.  Below lim they pair up. On x86 BSF
+		 * finds the lowest set bit directly. Reverse the masks for CLZ on M1.
 		 */
+#if defined(__x86_64__)
+		uint64_t rs = S, re = B & ~((W << 1) | 1);
+#else
 		uint64_t rs = __builtin_bitreverse64(S);
 		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
+#endif
 		unsigned pend = fl;
 		lex_token *const t0 = t;
 
@@ -1095,12 +1102,20 @@ fast:
 		 * or past lim (64 if there is none).
 		 */
 		for (;;) {
+#if defined(__x86_64__)
+			const unsigned e = re ? (unsigned)__builtin_ctzll(re) : 64;
+#else
 			const unsigned e = (unsigned)__builtin_clzg(re, 64);
+#endif
 
 			if (e >= lim)
 				break;	/* reaches X or past the window */
 
+#if defined(__x86_64__)
+			const unsigned o = (unsigned)__builtin_ctzll(rs);
+#else
 			const unsigned o = (unsigned)__builtin_clzll(rs);
+#endif
 			const size_t at = p + o;
 			const unsigned f = ((SP >> o) & 1) * LEX_TOKEN_FLAG_SPACE_BEFORE | ((SOL >> o) & 1) * LEX_TOKEN_FLAG_LINE_START;
 			uint16_t c01;
@@ -1114,13 +1129,21 @@ fast:
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			/* see lex_identifiers_intern(); the asm keeps the compiler from a second induction variable */
+#if defined(__aarch64__)
+			/* Keep clang from introducing a second induction variable. */
 			__asm__("" : "+r"(t));
+#endif
 			il[ni] = (uint32_t)(uintptr_t)t;
 			ni += kind == LEX_TOKEN_IDENTIFIER;
 			t++;
+
+#if defined(__x86_64__)
+			rs &= rs - 1;
+			re &= re - 1;
+#else
 			rs ^= (1ull << 63) >> o;
 			re ^= (1ull << 63) >> e;
+#endif
 		}
 		fl = pend;
 		if (likely(t != t0)) {
@@ -1602,6 +1625,7 @@ typedef struct lex_cache_entry {
 	_Atomic int state;
 	_Atomic uint32_t epoch;	/* the cache epoch this entry was last known to match the file system in */
 	_Atomic int dead;	/* found changed: later lookups skip it (the file is read again) */
+	_Atomic int racy;	/* modified just before it was read: checked at every lookup (below) */
 	uint64_t sm[2];		/* size and mtime (ns) of the file as read */
 	char path[];
 } lex_cache_entry;
@@ -1691,8 +1715,31 @@ static bool lex_cache_entry_claim(lex_cache_entry *e, int from, int to)
 			memory_order_acq_rel, memory_order_acquire);
 }
 
-static void pp_header_cache_entry_publish(lex_cache_entry *e, bool ok)
+/*
+ * Racy entries.  Within one build (one epoch) a cached file is trusted
+ * without a stat, which holds for sources and headers; but a configure script
+ * writes conftest.c, compiles it, rewrites it and compiles again, all in one
+ * process group (zlib's ./configure through the vcc shim: the second compile
+ * got the first file's bytes).  So, as git's racy-index rule: a file whose
+ * mtime was less than LEX_RACY_NANOSECONDS before it was read may still be
+ * being written, and every lookup checks it (a stat) until it is older; a
+ * changed one is read again.  Files that old trees and generated headers
+ * consist of are never racy, so a kernel build pays nothing.
+ */
+#define LEX_RACY_NANOSECONDS 3000000000ull
+
+static uint64_t lex_now_nanoseconds(void)
 {
+	struct timespec t;
+
+	clock_gettime(CLOCK_REALTIME, &t);
+	return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
+
+static void lex_cache_entry_publish(lex_cache_entry *e, bool ok)
+{
+	if (ok && e->sm[1] + LEX_RACY_NANOSECONDS > lex_now_nanoseconds())
+		atomic_store_explicit(&e->racy, 1, memory_order_relaxed);
 	atomic_store_explicit(&e->state, ok ? LEX_CACHE_OK : LEX_CACHE_MISSING, memory_order_release);
 }
 
@@ -1886,7 +1933,7 @@ const lex_file *lex_file_get(const char *path, size_t len)
 	if (ins) {
 		bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-		pp_header_cache_entry_publish(e, ok);
+		lex_cache_entry_publish(e, ok);
 		return ok ? &e->f : NULL;
 	}
 	for (int spin = 0;; spin++) {
@@ -1895,9 +1942,13 @@ const lex_file *lex_file_get(const char *path, size_t len)
 		if (st == LEX_CACHE_OK || st == LEX_CACHE_MISSING) {
 			uint32_t cur = vcache_epoch();
 
-			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur))
+			if (likely(atomic_load_explicit(&e->epoch, memory_order_relaxed) == cur) &&
+			    likely(!atomic_load_explicit(&e->racy, memory_order_relaxed)))
 				return st == LEX_CACHE_OK ? &e->f : NULL;
 			if (entry_fresh(e, st)) {	/* (no lock: threads that race each stat once) */
+				if (atomic_load_explicit(&e->racy, memory_order_relaxed) &&
+				    e->sm[1] + LEX_RACY_NANOSECONDS <= lex_now_nanoseconds())
+					atomic_store_explicit(&e->racy, 0, memory_order_relaxed);	/* old enough now */
 				atomic_store_explicit(&e->epoch, cur, memory_order_relaxed);
 				return st == LEX_CACHE_OK ? &e->f : NULL;
 			}
@@ -1908,12 +1959,12 @@ const lex_file *lex_file_get(const char *path, size_t len)
 			/* not reached by the I/O threads yet: do it here */
 			bool ok = lex_file_load(&e->f, e->path, e->sm);
 
-			pp_header_cache_entry_publish(e, ok);
+			lex_cache_entry_publish(e, ok);
 			return ok ? &e->f : NULL;
 		}
 		if (st == LEX_CACHE_READ && lex_cache_entry_claim(e, LEX_CACHE_READ, LEX_CACHE_LOADING)) {
 			lex_source_tokenize(&e->f, e->f.src, e->f.size);
-			pp_header_cache_entry_publish(e, true);
+			lex_cache_entry_publish(e, true);
 			return &e->f;
 		}
 #if defined(__aarch64__)
@@ -1970,7 +2021,7 @@ static void *lex_prefetch_thread_run(void *arg)
 				e->f.size = (uint32_t)size;
 				atomic_store_explicit(&e->state, LEX_CACHE_READ, memory_order_release);
 			} else {
-				pp_header_cache_entry_publish(e, false);
+				lex_cache_entry_publish(e, false);
 			}
 		}
 	}

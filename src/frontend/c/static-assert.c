@@ -5,7 +5,7 @@
 
 /* the layout of record t as a note at its definition (D5.3): its size, where the
    padding is, and the size in alignment order when that is smaller */
-static __attribute__((cold)) void cc_static_assert_layout_note(cc *c, qty t)
+static __attribute__((cold)) void cc_static_assert_layout_note(cc *c, ast_qualified_type t)
 {
 	const tag *g = &c->tags[AST_TYPE(c, t)->aux];
 	char b[96];
@@ -25,7 +25,7 @@ static __attribute__((cold)) void cc_static_assert_layout_note(cc *c, qty t)
 
 		bits |= f->bitfield;
 		flex |= !f->bitfield && cc_type_is_array(c, f->ty) && !cc_type_complete(c, f->ty);
-		if (!(g->flags & RF_UNION) && !f->bitfield && f->off / 8 > end && i) {
+		if (!(g->flags & AST_RECORD_FLAG_UNION) && !f->bitfield && f->off / 8 > end && i) {
 			const field *pf = &g->f[i - 1];
 
 			npad++;
@@ -40,13 +40,13 @@ static __attribute__((cold)) void cc_static_assert_layout_note(cc *c, qty t)
 		} else if (f->off / 8 + sz > end)
 			end = f->off / 8 + sz;
 	}
-	if (!(g->flags & RF_UNION) && g->size > end) {
+	if (!(g->flags & AST_RECORD_FLAG_UNION) && g->size > end) {
 		npad++;
 		snprintf(b, sizeof b, "%llu bytes of padding at the end", (unsigned long long)(g->size - end));
 		diag_record_label_add(c->p, d, g->f[g->nfield - 1].loc, pp_token_end_find(c->p, g->f[g->nfield - 1].loc), b);
 	}
 	/* the members in decreasing alignment (no bit-fields, no flexible array) */
-	if (npad && !bits && !flex && !(g->flags & RF_UNION) && !g->maxalign) {
+	if (npad && !bits && !flex && !(g->flags & AST_RECORD_FLAG_UNION) && !g->maxalign) {
 		uint32_t al[64], n = g->nfield < 64 ? g->nfield : 0;
 
 		for (uint32_t i = 0; i < n; i++)
@@ -77,7 +77,7 @@ static __attribute__((cold)) void cc_static_assert_sizeof_layouts(cc *c, diag_sp
 		const char *n;
 		bool tagged = false;
 		uint32_t id, s;
-		qty ty = 0;
+		ast_qualified_type ty = 0;
 
 		if (memcmp(q, "sizeof", 6) || (q > t && (isalnum((unsigned char)q[-1]) || q[-1] == '_')))
 			continue;
@@ -93,8 +93,8 @@ static __attribute__((cold)) void cc_static_assert_sizeof_layouts(cc *c, diag_sp
 		if (q == n || !(id = vintern_find(n, (size_t)(q - n), vintern_hash(n, (size_t)(q - n)))))
 			continue;
 		if (tagged && (s = cc_tag_lookup(c, id)))
-			ty = QT(c->tags[c->syms[s].val].ty, 0);
-		else if (!tagged && (s = cc_symbol_lookup(c, id)) && c->syms[s].kind == S_TYPEDEF)
+			ty = AST_QUALIFIED_TYPE(c->tags[c->syms[s].val].ty, 0);
+		else if (!tagged && (s = cc_symbol_lookup(c, id)) && c->syms[s].kind == AST_SYMBOL_TYPEDEF)
 			ty = c->syms[s].ty;
 		if (ty && cc_type_is_record(c, ty)) {
 			cc_static_assert_layout_note(c, ty);
@@ -110,7 +110,7 @@ static bool cc_static_assert_is_integer_literal(cc *c, uint32_t e)
 	size_t len = 0;
 	const char *t = pp_source_text(c->p, r.b, r.e, &len);
 
-	return AST_NODE(e)->op == N_NUM && t && len && *t >= '0' && *t <= '9';
+	return AST_NODE(e)->op == AST_NODE_NUMBER && t && len && *t >= '0' && *t <= '9';
 }
 
 /* clang's findFailedBooleanCondition: the failing operand of a chain of && */
@@ -119,9 +119,9 @@ static uint32_t cc_static_assert_failed_term(cc *c, uint32_t e)
 	for (;;) {
 		i128 a;
 
-		while (AST_NODE(e)->op == N_CAST && !c->span[e].e)
+		while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e)
 			e = AST_NODE(e)->a;
-		if (AST_NODE(e)->op != N_LOGAND)
+		if (AST_NODE(e)->op != AST_NODE_LOGICAL_AND)
 			return e;
 		e = cc_constant_integer(c, AST_NODE(e)->a, &a) && !a ? AST_NODE(e)->a : AST_NODE(e)->b;
 	}
@@ -157,9 +157,9 @@ static __attribute__((cold, noinline)) void cc_static_assert_failure_report(cc *
 			diag_record_help_set(c->p, d, "'long double' has 8 bytes on Apple (it is 'double') and 16 on Arm Linux (binary128)");
 		diag_record_emit(c->p, d);
 	}
-	while (AST_NODE(e)->op == N_CAST && !c->span[e].e)
+	while (AST_NODE(e)->op == AST_NODE_CAST && !c->span[e].e)
 		e = AST_NODE(e)->a;
-	if (AST_NODE(e)->op == N_BINARY && cc_operator_is_comparison(AST_NODE(e)->aux)) {
+	if (AST_NODE(e)->op == AST_NODE_BINARY && cc_operator_is_comparison(AST_NODE(e)->aux)) {
 		i128 a, b;
 
 		if (cc_constant_integer(c, AST_NODE(e)->a, &a) && cc_constant_integer(c, AST_NODE(e)->b, &b) &&

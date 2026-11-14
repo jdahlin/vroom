@@ -1,9 +1,8 @@
 # arm64 (aarch64-linux-gnu) target: vcc built natively on an arm64 Linux
 # runner, the C suites (gcc torture, tcc tests2, src/test/vcc) run under
-# qemu-system-aarch64 against clang's build, plus the fast harnesses.  ASan
-# and TSan builds are jobs of their own, alongside; TSan's runs on an x86-64
-# runner for now (the same arm64 target, vcc as an x86-64 program).  No
-# kernel, no PostgreSQL.
+# qemu-system-aarch64 against clang's build, plus the fast harnesses.  The
+# ASan and TSan builds run on x86-64 runners (x86.yml).  No kernel, no
+# PostgreSQL.
 # ci/premerge.sh holds the commands; run it locally in env/linux/run.sh.
 name: arm64
 on:
@@ -22,8 +21,6 @@ jobs:
       matrix:
         include:
           - { job: arm64, os: ubuntu-24.04-arm }
-          - { job: asan,  os: ubuntu-24.04-arm }
-          - { job: tsan,  os: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@v4
       - run: ci/setup-debian.sh

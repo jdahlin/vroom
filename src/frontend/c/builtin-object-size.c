@@ -4,22 +4,22 @@
 /* Object-size queries never evaluate their pointer operand. Track an address's
    enclosing allocation and nearest subobject independently, so modes 0/2 and
    1/3 retain their distinct bounds through casts and pointer arithmetic. */
-static uint64_t cc_builtin_object_size_initializer_extent(cc *c, qty ty, uint32_t init, unsigned depth)
+static uint64_t cc_builtin_object_size_initializer_extent(cc *c, ast_qualified_type ty, uint32_t init, unsigned depth)
 {
 	uint64_t size = cc_type_size(c, ty);
 	if (!init || depth > 64)
 		return size;
 	const node *x = AST_NODE(init);
-	if (cc_type_is_array(c, ty) && x->op == N_STR) {
+	if (cc_type_is_array(c, ty) && x->op == AST_NODE_STRING) {
 		const cstr *s = &c->strs[x->a];
 		uint64_t n = (uint64_t)s->n * s->esz;
-		return (AST_TYPE(c, ty)->flags & TF_INCOMPLETE) && n > size ? n : size;
+		return (AST_TYPE(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE) && n > size ? n : size;
 	}
-	if (x->op != N_INIT)
+	if (x->op != AST_NODE_INITIALIZER)
 		return size;
 	const uint32_t *v = &c->lists[x->b];
 	if (x->aux == 1) {
-		if (!(AST_TYPE(c, ty)->flags & TF_INCOMPLETE))
+		if (!(AST_TYPE(c, ty)->flags & AST_TYPE_FLAG_INCOMPLETE))
 			return size;
 		uint64_t es = cc_type_size(c, AST_TYPE(c, ty)->base);
 		for (uint32_t i = 0; i < x->c; i++) {
@@ -39,19 +39,19 @@ static uint64_t cc_builtin_object_size_initializer_extent(cc *c, qty ty, uint32_
 	return size;
 }
 
-static uint64_t cc_builtin_object_size_element_size(cc *c, qty pointer)
+static uint64_t cc_builtin_object_size_element_size(cc *c, ast_qualified_type pointer)
 {
-	qty base = AST_TYPE(c, pointer)->base;
-	return AST_TYPE_KIND(c, base) == TY_VOID || AST_TYPE_KIND(c, base) == TY_FUNC ? 1 : cc_type_size(c, base);
+	ast_qualified_type base = AST_TYPE(c, pointer)->base;
+	return AST_TYPE_KIND(c, base) == AST_TYPE_VOID || AST_TYPE_KIND(c, base) == AST_TYPE_FUNCTION ? 1 : cc_type_size(c, base);
 }
 
 /* Only the last array member can use the historical struct-hack bound. */
 static bool cc_builtin_object_size_is_flexible_member(cc *c, const node *x)
 {
-	qty t = cc_node_member_field(c, x)->ty;
+	ast_qualified_type t = cc_node_member_field(c, x)->ty;
 	if (!cc_type_is_array(c, t) || x->c + 1 != c->tags[x->b].nfield)
 		return false;
-	if (AST_TYPE(c, t)->flags & TF_INCOMPLETE)
+	if (AST_TYPE(c, t)->flags & AST_TYPE_FLAG_INCOMPLETE)
 		return true;
 	uint64_t n = cc_type_array_length(c, t);
 	return c->o->strict_flex_arrays == 0 ||
@@ -65,23 +65,23 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n, cc_object_bou
 	if (!n || depth > 64)
 		return false;
 	const node *x = AST_NODE(n);
-	cval index;
+	cc_value index;
 	switch (x->op) {
-	case N_VAR:
-	case N_COMPLIT: {
-		const sym *s = &c->syms[x->op == N_VAR ? x->a : x->b];
-		if (s->kind != S_VAR || (cc_type_is_array(c, s->ty) &&
-		    ((AST_TYPE(c, s->ty)->flags & TF_VLA) || ((AST_TYPE(c, s->ty)->flags & TF_INCOMPLETE) && !s->body))))
+	case AST_NODE_VARIABLE:
+	case AST_NODE_COMPOUND_LITERAL: {
+		const sym *s = &c->syms[x->op == AST_NODE_VARIABLE ? x->a : x->b];
+		if (s->kind != AST_SYMBOL_VARIABLE || (cc_type_is_array(c, s->ty) &&
+		    ((AST_TYPE(c, s->ty)->flags & AST_TYPE_FLAG_VLA) || ((AST_TYPE(c, s->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) && !s->body))))
 			return false;
 		*b = (cc_object_bound){ .whole = cc_builtin_object_size_initializer_extent(c, s->ty, s->body, 0), .storage = s->ty };
 		b->sub = b->whole;
 		return true;
 	}
-	case N_STR:
+	case AST_NODE_STRING:
 		*b = (cc_object_bound){ .whole = (uint64_t)c->strs[x->a].n * c->strs[x->a].esz };
 		b->sub = b->whole;
 		return true;
-	case N_MEMBER: {
+	case AST_NODE_MEMBER: {
 		const field *f = cc_node_member_field(c, x);
 		if (f->bitfield)
 			return false;
@@ -89,7 +89,7 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n, cc_object_bou
 		if (!cc_builtin_object_size_lvalue_bound(c, x->a, b, depth + 1, mode)) {
 			/* The array's declared subobject bound is independent of the
 			   unknown enclosing allocation. Do not invent a whole bound. */
-			if (!cc_type_is_array(c, f->ty) || (AST_TYPE(c, f->ty)->flags & TF_INCOMPLETE) || (flexible && mode != 3))
+			if (!cc_type_is_array(c, f->ty) || (AST_TYPE(c, f->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) || (flexible && mode != 3))
 				return false;
 			*b = (cc_object_bound){ .whole = -1, .sub = cc_type_size(c, f->ty), .storage = f->ty };
 			return true;
@@ -101,23 +101,23 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n, cc_object_bou
 		/* A declared record object (including an element of a declared
 		   array) does not give its trailing member the record's padding.
 		   Raw allocations/reinterpreted storage still permit the struct hack. */
-		if (mode == 3 || !flexible || (b->storage && !(AST_TYPE(c, f->ty)->flags & TF_INCOMPLETE)))
+		if (mode == 3 || !flexible || (b->storage && !(AST_TYPE(c, f->ty)->flags & AST_TYPE_FLAG_INCOMPLETE)))
 			b->sub = b->offset + cc_type_size(c, f->ty);
 		b->storage = f->ty;
 		return true;
 	}
-	case N_INDEX:
-		if (!cc_builtin_object_size_pointer_bound(c, x->a, b, depth + 1, mode) || !cc_constant_eval(c, x->b, &index) || index.kind != CV_INT)
+	case AST_NODE_INDEX:
+		if (!cc_builtin_object_size_pointer_bound(c, x->a, b, depth + 1, mode) || !cc_constant_eval(c, x->b, &index) || index.kind != CC_VALUE_INTEGER)
 			return false;
 		b->offset += index.i * cc_builtin_object_size_element_size(c, AST_NODE(x->a)->ty);
 		if (cc_type_is_record(c, x->ty) && b->storage &&
-		    (QUNQ(b->storage) == QUNQ(x->ty) ||
-		     (cc_type_is_array(c, b->storage) && QUNQ(AST_TYPE(c, b->storage)->base) == QUNQ(x->ty))))
+		    (AST_QUALIFIED_TYPE_UNQUALIFIED(b->storage) == AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) ||
+		     (cc_type_is_array(c, b->storage) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, b->storage)->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty))))
 			b->sub = b->offset + cc_type_size(c, x->ty);
 		if (b->storage && cc_type_is_array(c, b->storage))
 			b->storage = AST_TYPE(c, b->storage)->base;
 		return true;
-	case N_DEREF:
+	case AST_NODE_DEREFERENCE:
 		return cc_builtin_object_size_pointer_bound(c, x->a, b, depth + 1, mode);
 	default:
 		return false;
@@ -129,17 +129,17 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_objec
 	if (!n || depth > 64)
 		return false;
 	const node *x = AST_NODE(n);
-	cval index;
-	if (x->op == N_VAR && (c->syms[x->a].flags & SF_BOS_INIT))
+	cc_value index;
+	if (x->op == AST_NODE_VARIABLE && (c->syms[x->a].flags & AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER))
 		return cc_builtin_object_size_pointer_bound(c, c->syms[x->a].body, b, depth + 1, mode);
-	if (x->op == N_CALL && !c->o->no_builtin) {
+	if (x->op == AST_NODE_CALL && !c->o->no_builtin) {
 		uint32_t callee = x->a;
-		while (AST_NODE(callee)->op == N_CAST || AST_NODE(callee)->op == N_ADDR)
+		while (AST_NODE(callee)->op == AST_NODE_CAST || AST_NODE(callee)->op == AST_NODE_ADDRESS)
 			callee = AST_NODE(callee)->a;
-		if (AST_NODE(callee)->op != N_VAR)
+		if (AST_NODE(callee)->op != AST_NODE_VARIABLE)
 			return false;
 		const sym *s = &c->syms[AST_NODE(callee)->a];
-		if (s->kind != S_FUNC || !(s->flags & SF_GLOBAL) || s->sc == SC_STATIC || s->asmname ||
+		if (s->kind != AST_SYMBOL_FUNCTION || !(s->flags & AST_SYMBOL_FLAG_GLOBAL) || s->sc == AST_STORAGE_STATIC || s->asmname ||
 		    cc_library_builtin_is_disabled(c->o, cc_identifier_string(s->name), cc_identifier_length(s->name)))
 			return false;
 		const char *name = cc_identifier_string(s->name);
@@ -151,19 +151,19 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_objec
 		else return false;
 		const ctype *ft = AST_TYPE(c, s->ty);
 		uint32_t nargs = multiply || ai ? 2 : 1;
-		if (ft->kind != TY_FUNC || (ft->flags & (TF_NOPROTO | TF_VARIADIC)) ||
+		if (ft->kind != AST_TYPE_FUNCTION || (ft->flags & (AST_TYPE_FLAG_NO_PROTOTYPE | AST_TYPE_FLAG_VARIADIC)) ||
 		    ft->n != nargs || x->c != nargs || !cc_type_is_pointer(c, ft->base) || !cc_type_is_void(c, AST_TYPE(c, ft->base)->base))
 			return false;
 		for (uint32_t i = 0; i < nargs; i++) {
-			qty p = c->params[ft->aux + i];
-			if (ai && i == 0 ? (!cc_type_is_pointer(c, p) || !cc_type_is_void(c, AST_TYPE(c, p)->base)) : QUNQ(p) != QUNQ(c->t_size))
+			ast_qualified_type p = c->params[ft->aux + i];
+			if (ai && i == 0 ? (!cc_type_is_pointer(c, p) || !cc_type_is_void(c, AST_TYPE(c, p)->base)) : AST_QUALIFIED_TYPE_UNQUALIFIED(p) != AST_QUALIFIED_TYPE_UNQUALIFIED(c->t_size))
 				return false;
 		}
-		if (!cc_constant_eval(c, c->lists[x->b + ai], &index) || index.kind != CV_INT || index.i < 0)
+		if (!cc_constant_eval(c, c->lists[x->b + ai], &index) || index.kind != CC_VALUE_INTEGER || index.i < 0)
 			return false;
 		u128 size = (u128)index.i;
 		if (multiply) {
-			if (!cc_constant_eval(c, c->lists[x->b + 1], &index) || index.kind != CV_INT || index.i < 0)
+			if (!cc_constant_eval(c, c->lists[x->b + 1], &index) || index.kind != CC_VALUE_INTEGER || index.i < 0)
 				return false;
 			size *= (u128)index.i;
 		}
@@ -172,15 +172,15 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_objec
 		*b = (cc_object_bound){ .whole = (i128)size, .sub = (i128)size };
 		return true;
 	}
-	if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))
+	if (x->op == AST_NODE_ADDRESS || (x->op == AST_NODE_CAST && x->aux == AST_CAST_ARRAY_DECAY))
 		return cc_builtin_object_size_lvalue_bound(c, x->a, b, depth + 1, mode);
-	if (x->op == N_CAST && cc_type_is_pointer(c, AST_NODE(x->a)->ty)) {
+	if (x->op == AST_NODE_CAST && cc_type_is_pointer(c, AST_NODE(x->a)->ty)) {
 		if (!cc_builtin_object_size_pointer_bound(c, x->a, b, depth + 1, mode))
 			return false;
 		if (cc_type_is_pointer(c, x->ty) && cc_type_is_record(c, AST_TYPE(c, x->ty)->base)) {
-			qty base = AST_TYPE(c, x->ty)->base;
-			if (!b->storage || (QUNQ(b->storage) != QUNQ(base) &&
-			    !(cc_type_is_array(c, b->storage) && QUNQ(AST_TYPE(c, b->storage)->base) == QUNQ(base)))) {
+			ast_qualified_type base = AST_TYPE(c, x->ty)->base;
+			if (!b->storage || (AST_QUALIFIED_TYPE_UNQUALIFIED(b->storage) != AST_QUALIFIED_TYPE_UNQUALIFIED(base) &&
+			    !(cc_type_is_array(c, b->storage) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, b->storage)->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(base)))) {
 				b->sub = b->whole;
 				b->storage = 0;
 			}
@@ -189,11 +189,11 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_objec
 	}
 	if (cc_type_is_array(c, x->ty))
 		return cc_builtin_object_size_lvalue_bound(c, n, b, depth + 1, mode);
-	if (x->op == N_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS)) {
+	if (x->op == AST_NODE_BINARY && (x->aux == LEX_TOKEN_PLUS || x->aux == LEX_TOKEN_MINUS)) {
 		uint32_t p = x->a, i = x->b;
 		if (!cc_type_is_pointer(c, AST_NODE(p)->ty) && x->aux == LEX_TOKEN_PLUS) p = x->b, i = x->a;
 		if (!cc_type_is_pointer(c, AST_NODE(p)->ty) || !cc_builtin_object_size_pointer_bound(c, p, b, depth + 1, mode) ||
-		    !cc_constant_eval(c, i, &index) || index.kind != CV_INT)
+		    !cc_constant_eval(c, i, &index) || index.kind != CC_VALUE_INTEGER)
 			return false;
 		b->offset += (x->aux == LEX_TOKEN_MINUS ? -index.i : index.i) * cc_builtin_object_size_element_size(c, AST_NODE(p)->ty);
 		return true;
@@ -201,7 +201,7 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_objec
 	return false;
 }
 
-bool cc_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size)
+bool cc_builtin_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size)
 {
 	cc_object_bound b;
 	if (mode > 3 || !cc_builtin_object_size_pointer_bound(c, pointer, &b, 0, mode)) return false;

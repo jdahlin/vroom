@@ -4,11 +4,11 @@
 /* -Wdivision-by-zero, -Wshift-count-*: l op r with a constant r */
 CC_PRIVATE void cc_expression_runtime_warn(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	cval cv;
+	cc_value cv;
 	diag_span rr;
 
 	if (c->dead || (op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT && op != LEX_TOKEN_LESS_LESS && op != LEX_TOKEN_GREATER_GREATER) ||
-	    !cc_type_is_integer(c, AST_NODE(l)->ty) || !cc_type_is_integer(c, AST_NODE(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CV_INT)
+	    !cc_type_is_integer(c, AST_NODE(l)->ty) || !cc_type_is_integer(c, AST_NODE(r)->ty) || !cc_eval(c, r, &cv) || cv.kind != CC_VALUE_INTEGER)
 		return;
 	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT ? cv.i != 0 : cv.i >= 0 && cv.i < (i128)cc_type_size(c, cc_node_promoted_type(c, l)) * 8)
 		return;	/* no warning: no range (pp_token_end_find) either */
@@ -28,7 +28,7 @@ CC_PRIVATE void cc_expression_runtime_warn(cc *c, int op, uint32_t l, uint32_t r
 		return;
 	}
 	{
-		qty pt = cc_node_promoted_type(c, l);
+		ast_qualified_type pt = cc_node_promoted_type(c, l);
 		uint64_t w = cc_type_size(c, pt) * 8;
 		diag_record *d = cv.i < 0 ? cc_report_warning_begin(c, "shift-count-negative", true, NULL, loc, "shift count is negative")
 			   : cc_report_warning_begin(c, "shift-count-overflow", true, NULL, loc, "shift count >= width of type");
@@ -73,7 +73,7 @@ static __attribute__((cold, noinline)) void cc_expression_logical_constant_warn(
    parentheses and implicit conversions are gone (an explicit cast is another operand) */
 CC_PRIVATE uint32_t cc_node_without_implicit(cc *c, uint32_t n)
 {
-	while (AST_NODE(n)->op == N_CAST && !c->span[n].e)
+	while (AST_NODE(n)->op == AST_NODE_CAST && !c->span[n].e)
 		n = AST_NODE(n)->a;
 	return n;
 }
@@ -83,37 +83,37 @@ CC_PRIVATE uint32_t cc_node_without_implicit(cc *c, uint32_t n)
    aside; nothing from a macro) */
 CC_PRIVATE bool cc_expression_is_same_reference(cc *c, uint32_t a, uint32_t b, int depth)
 {
-	while (AST_NODE(a)->op == N_CAST && !c->span[a].e && AST_NODE(a)->a)
+	while (AST_NODE(a)->op == AST_NODE_CAST && !c->span[a].e && AST_NODE(a)->a)
 		a = AST_NODE(a)->a;
-	while (AST_NODE(b)->op == N_CAST && !c->span[b].e && AST_NODE(b)->a)
+	while (AST_NODE(b)->op == AST_NODE_CAST && !c->span[b].e && AST_NODE(b)->a)
 		b = AST_NODE(b)->a;
 	if (AST_NODE(a)->op != AST_NODE(b)->op || depth > 16)
 		return false;
 	switch (AST_NODE(a)->op) {
-	case N_VAR: {
+	case AST_NODE_VARIABLE: {
 		uint32_t nm = c->syms[AST_NODE(a)->a].name;
 
-		return AST_NODE(a)->a == AST_NODE(b)->a && c->syms[AST_NODE(a)->a].kind == S_VAR && nm &&
+		return AST_NODE(a)->a == AST_NODE(b)->a && c->syms[AST_NODE(a)->a].kind == AST_SYMBOL_VARIABLE && nm &&
 		       pp_location_spells(c->p, AST_NODE(a)->loc, cc_identifier_string(nm), (uint32_t)cc_identifier_length(nm)) &&
 		       pp_location_spells(c->p, AST_NODE(b)->loc, cc_identifier_string(nm), (uint32_t)cc_identifier_length(nm));
 	}
-	case N_MEMBER: {
+	case AST_NODE_MEMBER: {
 		uint32_t x = AST_NODE(a)->a, y = AST_NODE(b)->a;
 
 		if (AST_NODE(a)->b != AST_NODE(b)->b || AST_NODE(a)->c != AST_NODE(b)->c)
 			return false;
-		if (AST_NODE(x)->op == N_DEREF && AST_NODE(y)->op == N_DEREF)	/* p->m */
+		if (AST_NODE(x)->op == AST_NODE_DEREFERENCE && AST_NODE(y)->op == AST_NODE_DEREFERENCE)	/* p->m */
 			x = AST_NODE(x)->a, y = AST_NODE(y)->a;
 		return cc_expression_is_same_reference(c, x, y, depth + 1);
 	}
-	case N_INDEX: {
+	case AST_NODE_INDEX: {
 		uint32_t i = AST_NODE(a)->b, j = AST_NODE(b)->b;
 
-		while (AST_NODE(i)->op == N_CAST && !c->span[i].e && AST_NODE(i)->a)
+		while (AST_NODE(i)->op == AST_NODE_CAST && !c->span[i].e && AST_NODE(i)->a)
 			i = AST_NODE(i)->a;
-		while (AST_NODE(j)->op == N_CAST && !c->span[j].e && AST_NODE(j)->a)
+		while (AST_NODE(j)->op == AST_NODE_CAST && !c->span[j].e && AST_NODE(j)->a)
 			j = AST_NODE(j)->a;
-		return AST_NODE(i)->op == N_NUM && AST_NODE(j)->op == N_NUM && c->ipool[AST_NODE(i)->a] == c->ipool[AST_NODE(j)->a] &&
+		return AST_NODE(i)->op == AST_NODE_NUMBER && AST_NODE(j)->op == AST_NODE_NUMBER && c->ipool[AST_NODE(i)->a] == c->ipool[AST_NODE(j)->a] &&
 		       cc_expression_is_same_reference(c, AST_NODE(a)->a, AST_NODE(b)->a, depth + 1);
 	}
 	default:
@@ -134,7 +134,7 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_self_compare_warn(
 	if (!d)
 		return;
 	diag_record_help_set(c->p, d, "both sides are the same %s: was another one meant?",
-		     AST_NODE(cc_node_without_implicit(c, l))->op == N_VAR ? "variable" : "object");
+		     AST_NODE(cc_node_without_implicit(c, l))->op == AST_NODE_VARIABLE ? "variable" : "object");
 	diag_record_emit(c->p, d);
 }
 
@@ -146,14 +146,14 @@ static void cc_expression_operand_name(cc *c, uint32_t n, char *b, size_t sz, si
 	const char *nm;
 
 #define CC_EXPRESSION_OPERAND_NAME_APPEND(p, len) do { size_t q_ = (size_t)(len); if (*k + q_ < sz) memcpy(b + *k, (p), q_), *k += q_; } while (0)
-	if (x->op == N_VAR) {
+	if (x->op == AST_NODE_VARIABLE) {
 		nm = cc_identifier_name(c->syms[x->a].name, &l);
 		CC_EXPRESSION_OPERAND_NAME_APPEND(nm, l);
-	} else if (x->op == N_MEMBER) {
+	} else if (x->op == AST_NODE_MEMBER) {
 		const field *f = &c->tags[x->b].f[x->c];
 		uint32_t base = cc_node_without_implicit(c, x->a);
 
-		if (AST_NODE(base)->op == N_DEREF) {
+		if (AST_NODE(base)->op == AST_NODE_DEREFERENCE) {
 			cc_expression_operand_name(c, AST_NODE(base)->a, b, sz, k);
 			CC_EXPRESSION_OPERAND_NAME_APPEND("->", 2);
 		} else {
@@ -181,19 +181,19 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_null_compare_warn(
 	diag_span xr, nr = cc_node_range(c, nul);
 	diag_record *d;
 
-	if (y->op == N_ADDR) {
+	if (y->op == AST_NODE_ADDRESS) {
 		uint32_t in = cc_node_without_implicit(c, y->a);
 
-		if ((AST_NODE(in)->op != N_VAR && AST_NODE(in)->op != N_MEMBER) || cc_type_is_function(c, AST_NODE(in)->ty) ||
-		    (AST_NODE(in)->op == N_VAR && (c->syms[AST_NODE(in)->a].flags & SF_WEAK)))
+		if ((AST_NODE(in)->op != AST_NODE_VARIABLE && AST_NODE(in)->op != AST_NODE_MEMBER) || cc_type_is_function(c, AST_NODE(in)->ty) ||
+		    (AST_NODE(in)->op == AST_NODE_VARIABLE && (c->syms[AST_NODE(in)->a].flags & AST_SYMBOL_FLAG_WEAK)))
 			return;
 		what = "address of ", n = in;
-	} else if (y->op == N_VAR && cc_type_is_function(c, y->ty)) {
-		if (c->syms[y->a].flags & SF_WEAK)
+	} else if (y->op == AST_NODE_VARIABLE && cc_type_is_function(c, y->ty)) {
+		if (c->syms[y->a].flags & AST_SYMBOL_FLAG_WEAK)
 			return;
 		what = "function ", fn = true;
-	} else if ((y->op == N_VAR || y->op == N_MEMBER) && cc_type_is_array(c, y->ty)) {
-		if (y->op == N_VAR && (c->syms[y->a].flags & SF_WEAK))
+	} else if ((y->op == AST_NODE_VARIABLE || y->op == AST_NODE_MEMBER) && cc_type_is_array(c, y->ty)) {
+		if (y->op == AST_NODE_VARIABLE && (c->syms[y->a].flags & AST_SYMBOL_FLAG_WEAK))
 			return;
 		what = "array ";
 	} else {
@@ -203,8 +203,8 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_null_compare_warn(
 	if (!nl)
 		return;
 	xr = cc_node_range(c, n), at = AST_NODE(n)->loc;
-	if (AST_NODE(n)->op == N_MEMBER)	/* clang: at the member's name, after '.' or '->' */
-		at += AST_NODE(cc_node_without_implicit(c, AST_NODE(n)->a))->op == N_DEREF ? 2 : 1;
+	if (AST_NODE(n)->op == AST_NODE_MEMBER)	/* clang: at the member's name, after '.' or '->' */
+		at += AST_NODE(cc_node_without_implicit(c, AST_NODE(n)->a))->op == AST_NODE_DEREFERENCE ? 2 : 1;
 	d = cc_report_warning_begin(c, "tautological-pointer-compare", true, NULL, at,
 			  "comparison of %s'%s' %s to a null pointer is always %s", what, nm, eq ? "equal" : "not equal",
 			  eq ? "false" : "true");
@@ -217,7 +217,7 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_null_compare_warn(
 
 			if (k)
 				diag_record_fixit_add(c->p, k, xr.b, xr.b, "&", DIAG_APPLICABILITY_MAYBE);
-			if (!ft->n && !(ft->flags & TF_VARIADIC) && !cc_type_is_void(c, ft->base)) {
+			if (!ft->n && !(ft->flags & AST_TYPE_FLAG_VARIADIC) && !cc_type_is_void(c, ft->base)) {
 				k = diag_record_note_add(c->p, d, xr.b, "suffix with parentheses to turn this into a function call");
 				if (k)
 					diag_record_fixit_add(c->p, k, xr.e, xr.e, "()", DIAG_APPLICABILITY_MAYBE);
@@ -237,8 +237,8 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_range_compare_warn
 	const node *x = AST_NODE(n);
 	int op = x->aux;
 	uint32_t k = nk ? x->b : x->a, o = nk ? x->a : x->b, os = cc_node_without_implicit(c, o);
-	qty ot = AST_NODE(os)->ty;
-	cval v, ov;
+	ast_qualified_type ot = AST_NODE(os)->ty;
+	cc_value v, ov;
 	i128 lo, hi;
 	uint64_t w;
 	bool above, res;
@@ -246,12 +246,12 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_range_compare_warn
 	diag_span orr = cc_node_range(c, os), kr = cc_node_range(c, cc_node_without_implicit(c, k));
 	diag_record *d;
 
-	if (!cc_type_is_integer(c, ot) || (cc_eval(c, os, &ov) && ov.kind == CV_INT) || !cc_eval(c, k, &v) || v.kind != CV_INT)
+	if (!cc_type_is_integer(c, ot) || (cc_eval(c, os, &ov) && ov.kind == CC_VALUE_INTEGER) || !cc_eval(c, k, &v) || v.kind != CC_VALUE_INTEGER)
 		return;
 	w = cc_type_size(c, ot) * 8;
-	if (cc_type_is_signed(c, ot) && !cc_type_is_signed(c, AST_NODE(k)->ty) && AST_TYPE_KIND(c, ot) != TY_BOOL)
+	if (cc_type_is_signed(c, ot) && !cc_type_is_signed(c, AST_NODE(k)->ty) && AST_TYPE_KIND(c, ot) != AST_TYPE_BOOL)
 		return;	/* a signed operand in an unsigned comparison: not one interval (clang) */
-	if (AST_TYPE_KIND(c, ot) == TY_BOOL)
+	if (AST_TYPE_KIND(c, ot) == AST_TYPE_BOOL)
 		lo = 0, hi = 1;
 	else if (w >= 64 || w >= cc_type_size(c, AST_NODE(k)->ty) * 8)
 		return;	/* as wide as the comparison: every converted constant fits */
@@ -292,17 +292,17 @@ CC_PRIVATE __attribute__((cold, noinline)) void cc_expression_range_compare_warn
 
 CC_PRIVATE void cc_expression_logical_constant_check(cc *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
-	cval v;
+	cc_value v;
 
-	if (!cc_type_is_integer(c, AST_NODE(r)->ty) || !cc_type_is_integer(c, AST_NODE(l)->ty) || AST_TYPE_KIND(c, AST_NODE(l)->ty) == TY_BOOL ||
-	    !cc_eval(c, r, &v) || v.kind != CV_INT || v.i == 0 || v.i == 1)
+	if (!cc_type_is_integer(c, AST_NODE(r)->ty) || !cc_type_is_integer(c, AST_NODE(l)->ty) || AST_TYPE_KIND(c, AST_NODE(l)->ty) == AST_TYPE_BOOL ||
+	    !cc_eval(c, r, &v) || v.kind != CC_VALUE_INTEGER || v.i == 0 || v.i == 1)
 		return;
-	if (AST_NODE(r)->op == N_NUM && (AST_NODE(r)->aux & NUM_ENUM))
+	if (AST_NODE(r)->op == AST_NODE_NUMBER && (AST_NODE(r)->aux & AST_NUMBER_ENUMERATOR))
 		return;
-	if (AST_NODE(l)->op == N_NUM && (AST_NODE(l)->aux & NUM_ENUM)) {
-		cval lv;
+	if (AST_NODE(l)->op == AST_NODE_NUMBER && (AST_NODE(l)->aux & AST_NUMBER_ENUMERATOR)) {
+		cc_value lv;
 
-		if (cc_eval(c, l, &lv) && lv.kind == CV_INT && lv.i != 0 && lv.i != 1)
+		if (cc_eval(c, l, &lv) && lv.kind == CC_VALUE_INTEGER && lv.i != 0 && lv.i != 1)
 			return;
 	}
 	cc_expression_logical_constant_warn(c, op, l, r, loc, v.i);
@@ -310,20 +310,20 @@ CC_PRIVATE void cc_expression_logical_constant_check(cc *c, int op, uint32_t l, 
 
 
 /* -Winteger-overflow: n, a signed integer +, -, * or unary - of constants,
-   whose exact value does not fit its type.  Once per expression (NF_OVF). */
+   whose exact value does not fit its type.  Once per expression (AST_NODE_FLAG_OVERFLOW_REPORTED). */
 CC_PRIVATE void cc_expression_overflow_warn(cc *c, int op, uint32_t n, uint32_t loc, uint32_t sub0, uint32_t sub1)
 {
-	cval a, b;
+	cc_value a, b;
 	i128 v;
 	int bits;
-	qty t = AST_NODE(n)->ty;
+	ast_qualified_type t = AST_NODE(n)->ty;
 
-	if ((AST_NODE(sub0)->flags & NF_OVF) || (sub1 && (AST_NODE(sub1)->flags & NF_OVF))) {
-		AST_NODE(n)->flags |= NF_OVF;
+	if ((AST_NODE(sub0)->flags & AST_NODE_FLAG_OVERFLOW_REPORTED) || (sub1 && (AST_NODE(sub1)->flags & AST_NODE_FLAG_OVERFLOW_REPORTED))) {
+		AST_NODE(n)->flags |= AST_NODE_FLAG_OVERFLOW_REPORTED;
 		return;
 	}
 	if (c->dead || c->unevaluated || !cc_type_is_integer(c, t) || !cc_type_is_signed(c, t) || (bits = (int)cc_type_size(c, t) * 8) > 64 ||
-	    !cc_eval(c, sub0, &a) || a.kind != CV_INT || (sub1 && (!cc_eval(c, sub1, &b) || b.kind != CV_INT)))
+	    !cc_eval(c, sub0, &a) || a.kind != CC_VALUE_INTEGER || (sub1 && (!cc_eval(c, sub1, &b) || b.kind != CC_VALUE_INTEGER)))
 		return;
 	if (!sub1)
 		v = -a.i;
@@ -335,7 +335,7 @@ CC_PRIVATE void cc_expression_overflow_warn(cc *c, int op, uint32_t n, uint32_t 
 		v = a.i * b.i;
 	if (v >= -((i128)1 << (bits - 1)) && v < ((i128)1 << (bits - 1)))
 		return;
-	AST_NODE(n)->flags |= NF_OVF;
+	AST_NODE(n)->flags |= AST_NODE_FLAG_OVERFLOW_REPORTED;
 	{
 		char d[48], o[64];
 		int64_t w = bits == 64 ? (int64_t)(uint64_t)v : (int64_t)(int32_t)(uint32_t)v;
@@ -362,10 +362,10 @@ CC_PRIVATE void cc_expression_overflow_warn(cc *c, int op, uint32_t n, uint32_t 
 /* -Wself-assign: x = x (parentheses and implicit conversions aside), not volatile */
 CC_PRIVATE void cc_expression_self_assign_warn(cc *c, uint32_t l, uint32_t r, uint32_t loc)
 {
-	while (AST_NODE(r)->op == N_CAST && !c->span[r].e && AST_NODE(r)->a)
+	while (AST_NODE(r)->op == AST_NODE_CAST && !c->span[r].e && AST_NODE(r)->a)
 		r = AST_NODE(r)->a;
-	if (AST_NODE(l)->op != N_VAR || AST_NODE(r)->op != N_VAR || AST_NODE(l)->a != AST_NODE(r)->a || (QQ(AST_NODE(l)->ty) & Q_VOLATILE) ||
-	    c->syms[AST_NODE(l)->a].kind != S_VAR)
+	if (AST_NODE(l)->op != AST_NODE_VARIABLE || AST_NODE(r)->op != AST_NODE_VARIABLE || AST_NODE(l)->a != AST_NODE(r)->a || (AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE(l)->ty) & AST_QUALIFIER_VOLATILE) ||
+	    c->syms[AST_NODE(l)->a].kind != AST_SYMBOL_VARIABLE)
 		return;
 	{
 		uint32_t nm = c->syms[AST_NODE(l)->a].name;

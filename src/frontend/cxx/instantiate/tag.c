@@ -18,7 +18,7 @@ VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x)
 	c->tag_info[tag] = x;
 }
 
-VPRIV cxx_instance *cxx_tag_info(cxx *c, qty t)
+VPRIV cxx_instance *cxx_tag_info(cxx *c, ast_qualified_type t)
 {
 	uint32_t tag;
 
@@ -33,7 +33,7 @@ VPRIV cxx_instance *cxx_tag_info(cxx *c, qty t)
  * list, where the arguments of a trailing parameter pack start (UINT32_MAX: no pack) and the scope the
  * template is declared in: what the name mangler writes (mangle.c).
  */
-VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home)
+VPRIV bool cxx_instance_template(cxx *c, ast_qualified_type t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home)
 {
 	cxx_instance *x = cxx_tag_info(c, t);
 	cxx_scope *ps;
@@ -48,7 +48,7 @@ VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ 
 
 /* the integer type spelled by the tokens at pos (a value template parameter's: size_t, bool, unsigned long,
    std::size_t), CXX_TY_UNKNOWN for anything else */
-VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos)
+VPRIV ast_qualified_type cxx_simple_type_at(cxx *c, uint32_t pos)
 {
 	char w[4][16];
 	int n = 0, k = -1;
@@ -72,23 +72,23 @@ VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos)
 		memcpy(w[n], t->s, t->len), w[n][t->len] = 0, n++;
 	}
 #define W(i, s) (n > (i) && !strcmp(w[i], s))
-	if (n == 1 && W(0, "bool")) k = TY_BOOL;
-	else if (n == 1 && W(0, "char")) k = TY_CHAR;
-	else if (n == 1 && (W(0, "int") || W(0, "signed"))) k = TY_INT;
-	else if ((n == 1 && W(0, "unsigned")) || (n == 2 && W(0, "unsigned") && W(1, "int"))) k = TY_UINT;
-	else if ((n == 1 && W(0, "long")) || (n == 2 && W(0, "long") && W(1, "int"))) k = TY_LONG;
-	else if (n == 2 && W(0, "unsigned") && W(1, "long")) k = TY_ULONG;
-	else if (n == 2 && W(0, "long") && W(1, "long")) k = TY_LLONG;
-	else if (n == 3 && W(0, "unsigned") && W(1, "long") && W(2, "long")) k = TY_ULLONG;
-	else if (n == 1 && W(0, "short")) k = TY_SHORT;
-	else if (n == 2 && W(0, "unsigned") && W(1, "short")) k = TY_USHORT;
-	else if (n == 2 && W(0, "unsigned") && W(1, "char")) k = TY_UCHAR;
-	else if (n == 2 && W(0, "signed") && W(1, "char")) k = TY_SCHAR;
-	else if (n == 1 && (W(0, "size_t") || W(0, "__size_t") || W(0, "uint64_t") || W(0, "uintmax_t"))) k = TY_ULONG;
-	else if (n == 1 && (W(0, "ptrdiff_t") || W(0, "intmax_t") || W(0, "int64_t"))) k = TY_LONG;
-	else if (n == 1 && W(0, "uint8_t")) k = TY_UCHAR;
-	else if (n == 1 && W(0, "int32_t")) k = TY_INT;
-	else if (n == 1 && W(0, "uint32_t")) k = TY_UINT;
+	if (n == 1 && W(0, "bool")) k = AST_TYPE_BOOL;
+	else if (n == 1 && W(0, "char")) k = AST_TYPE_CHAR;
+	else if (n == 1 && (W(0, "int") || W(0, "signed"))) k = AST_TYPE_INT;
+	else if ((n == 1 && W(0, "unsigned")) || (n == 2 && W(0, "unsigned") && W(1, "int"))) k = AST_TYPE_UNSIGNED_INT;
+	else if ((n == 1 && W(0, "long")) || (n == 2 && W(0, "long") && W(1, "int"))) k = AST_TYPE_LONG;
+	else if (n == 2 && W(0, "unsigned") && W(1, "long")) k = AST_TYPE_UNSIGNED_LONG;
+	else if (n == 2 && W(0, "long") && W(1, "long")) k = AST_TYPE_LONG_LONG;
+	else if (n == 3 && W(0, "unsigned") && W(1, "long") && W(2, "long")) k = AST_TYPE_UNSIGNED_LONG_LONG;
+	else if (n == 1 && W(0, "short")) k = AST_TYPE_SHORT;
+	else if (n == 2 && W(0, "unsigned") && W(1, "short")) k = AST_TYPE_UNSIGNED_SHORT;
+	else if (n == 2 && W(0, "unsigned") && W(1, "char")) k = AST_TYPE_UNSIGNED_CHAR;
+	else if (n == 2 && W(0, "signed") && W(1, "char")) k = AST_TYPE_SIGNED_CHAR;
+	else if (n == 1 && (W(0, "size_t") || W(0, "__size_t") || W(0, "uint64_t") || W(0, "uintmax_t"))) k = AST_TYPE_UNSIGNED_LONG;
+	else if (n == 1 && (W(0, "ptrdiff_t") || W(0, "intmax_t") || W(0, "int64_t"))) k = AST_TYPE_LONG;
+	else if (n == 1 && W(0, "uint8_t")) k = AST_TYPE_UNSIGNED_CHAR;
+	else if (n == 1 && W(0, "int32_t")) k = AST_TYPE_INT;
+	else if (n == 1 && W(0, "uint32_t")) k = AST_TYPE_UNSIGNED_INT;
 #undef W
 	return k < 0 ? CXX_TY_UNKNOWN : cc_type_basic(k);
 }
@@ -100,7 +100,7 @@ VPRIV cxx_scope *cxx_template_home(const cxx_entity *te)
 }
 
 /* a class template's instance: its template's parameters (NULL: not one, or not known) */
-VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t)
+VPRIV cxx_scope *cxx_instance_tparams(cxx *c, ast_qualified_type t)
 {
 	cxx_instance *x = cxx_tag_info(c, t);
 

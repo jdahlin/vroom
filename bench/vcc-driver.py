@@ -9,6 +9,7 @@ the predefines that follow from -O and from -march/-mcpu (LSE); add rows as driv
 """
 import os, subprocess, sys, tempfile
 import importlib.util
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location('vd', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcc-diff.py'))
 vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
@@ -187,6 +188,16 @@ MARK_ROWS = [(t, f) for t in TARGETS for f in
 MARK_ROWS += [('--target=arm64-apple-macos' + v, f) for v, f in
               [('', '-mmacosx-version-min=13.0'), ('14', ''), ('15.2', ''), ('10.15', ''), ('10.9', ''),
                ('11', '-mmacosx-version-min=12.3.1')]]
+# Windows x64 (MinGW-w64, PLAN-win64.md WIN1): the same flags, the triple's spellings and its own switches
+WIN64 = '--target=x86_64-w64-mingw32'
+MARK_ROWS += [(WIN64, f) for f in
+              ['', '-undef', '-include a.h -DQ=2 -UQ', '-std=c23', '-std=c89', '-ansi', '-std=gnu99', '-ffreestanding -std=c89',
+               '-x assembler-with-cpp', '-mgeneral-regs-only -fshort-wchar -fPIC', '-fno-PIE -fno-asynchronous-unwind-tables',
+               '-fpie', '-fno-pic', '-fasynchronous-unwind-tables', '-imacros im.h', '-funsigned-char', '-fsigned-char',
+               '-ffast-math', '-ffast-math -fmath-errno -pthread', '-pthread', '-municode', '-municode -DUNICODE=2 -DX',
+               '-mms-bitfields', '-mno-ms-bitfields', '-march=haswell', '-march=znver4 -mno-avx512f', '-mavx2 -mno-sse4.2',
+               '-mno-sse2', '-O0', '-O2', '-Os', '-Og']]
+MARK_ROWS += [(t, f) for t in ('--target=x86_64-pc-windows-gnu', '--target=x86_64-w64-windows-gnu') for f in ['', '-std=c23', '-municode']]
 
 def mark_rows(verbose):
     bad = 0
@@ -210,6 +221,108 @@ def mark_rows(verbose):
                                                            'clang', 'vpp', n=0, lineterm=''))[:10]:
                             print('  ' + l)
     return bad
+
+# Windows x64 links (PLAN-win64.md WIN5/WIN6): vcc -v's vlink line against the ld.lld line of clang -###
+# for the same command line, with compiler-rt's builtins as libvccrt.a (clang's resource -L dropped)
+LINK_ROWS = ['', '-static', '-shared', '-municode', '-mwindows', '-mconsole', '-mthreads', '-pthread', '-s',
+             '-mwindows -municode', '-static -mthreads -pthread', '-nostdlib', '-nodefaultlibs', '-nostartfiles',
+             '-fstack-protector', '-fstack-protector-strong', '-fstack-protector-all -static',
+             '-fstack-protector-strong -fno-stack-protector', '-fstack-protector -mthreads', '-g', '-g -s',
+             '-ffunction-sections -fdata-sections -Wl,--gc-sections', '-fPIC', '-fno-asynchronous-unwind-tables',
+             '-L/x -lfoo -Wl,--major-os-version,6', '-Xlinker --strip-debug', '-shared -Wl,--out-implib,libt.dll.a']
+
+def link_rows(verbose):
+    import hostenv, re, shlex
+    S = hostenv.MINGW_SYSROOT
+    if hostenv.mingw_missing():
+        print('skip link rows (no MinGW sysroot)')
+        return 0, 0
+    res = hostenv.mingw_resource_dir()
+    bad = 0
+    def norm(toks):
+        out = []
+        for t in toks:
+            t = t.replace(S, 'S')
+            if t == f'-L{res.replace(S, "S")}/lib/windows':
+                continue
+            if t.endswith('/ld.lld') or t == 'vlink':
+                t = 'LD'
+            elif t.endswith('libclang_rt.builtins-x86_64.a') or t.endswith('/libvccrt.a'):
+                t = 'RT'
+            elif re.search(r'(/tmp/.*-[0-9a-zA-Z]+\.o|\.vcc-\d+\.o)$', t):
+                t = 'OBJ'
+            out.append(t)
+        return out
+    with tempfile.TemporaryDirectory() as d:
+        open(f'{d}/l.c', 'w').write('int main(void) { return 0; }\n')
+        for flags in LINK_ROWS:
+            fl = ['--target=x86_64-w64-mingw32', f'--sysroot={S}'] + flags.split() + ['l.c', '-o', 'l.exe']
+            c = subprocess.run([vd.CL, f'-resource-dir={res}', '-rtlib=compiler-rt', '--unwindlib=none', '-fuse-ld=lld', '-###'] + fl,
+                               cwd=d, capture_output=True, text=True)
+            ld = [l for l in c.stderr.splitlines() if 'ld.lld' in l]
+            v = subprocess.run([vd.VPP, '-v'] + fl, cwd=d, capture_output=True, text=True)
+            vl = [l for l in v.stderr.splitlines() if l.startswith('vlink ')]
+            a = norm(shlex.split(ld[-1])) if ld else ['(no ld.lld line)']
+            b = norm(vl[-1].split()) if vl else ['(no vlink line: ' + v.stderr.strip()[-120:] + ')']
+            ok = a == b
+            bad += not ok
+            if verbose or not ok:
+                print(f'{"ok  " if ok else "FAIL"} link {flags or "(none)"}' + ('' if ok else f'\n  clang: {" ".join(a)}\n  vcc:   {" ".join(b)}'))
+    return bad, len(LINK_ROWS)
+
+# Windows x64 code-generation flags (WIN6), each against clang -S of one probe: what the flag changes
+CG_SRC = ('#include <string.h>\nint d1 = 1;\nint b1;\nconst int r1 = 3;\nstatic int s1 = 4;\n__thread int t1 = 5;\n'
+          'void use(char *);\nint f(int x) { char b[32]; use(b); return x + d1 + b1 + r1 + s1 + t1; }\n'
+          'static int g(int x) { return x * 2; }\nint h(int x) { return g(x) + f(x); }\n')
+
+def cg_feature(text, what):
+    import re
+    if what == 'sections':	# the function and data sections, clang's ,unique,N aside
+        return sorted(re.sub(r',unique,\d+', '', l.strip()) for l in text.splitlines()
+                      if l.strip().startswith('.section') and not re.search(r'debug|drectve|refptr', l))
+    if what == 'seh':		# unwind tables: any .seh_ directive (.pdata/.xdata from them)
+        return any('.seh_' in l for l in text.splitlines())
+    if what == 'ssp':		# the guard and the failure call
+        return ('.refptr.__stack_chk_guard' in text, '__stack_chk_fail' in text)
+    return text
+
+CG_ROWS = [('-ffunction-sections', 'sections'), ('-fdata-sections', 'sections'), ('-ffunction-sections -fdata-sections', 'sections'),
+           ('', 'seh'), ('-fno-asynchronous-unwind-tables', 'seh'), ('-funwind-tables', 'seh'),
+           ('-fno-asynchronous-unwind-tables -funwind-tables', 'seh'), ('-funwind-tables -fno-asynchronous-unwind-tables', 'seh'),
+           ('-fno-unwind-tables', 'seh'), ('-fno-asynchronous-unwind-tables -fasynchronous-unwind-tables', 'seh'),
+           ('-fno-asynchronous-unwind-tables -fno-unwind-tables', 'seh'),
+           ('-fstack-protector', 'ssp'), ('-fstack-protector-strong', 'ssp'), ('-fstack-protector-all', 'ssp'), ('', 'ssp')]
+PIC_FLAGS = ['-fPIC', '-fpic', '-fPIE', '-fpie', '-fno-pic', '-fno-PIE', '-fno-pie', '-fPIC -fno-pic']
+
+def codegen_rows(verbose):
+    import hostenv
+    if hostenv.mingw_missing():
+        print('skip codegen rows (no MinGW sysroot)')
+        return 0, 0
+    bad = n = 0
+    with tempfile.TemporaryDirectory() as d:
+        open(f'{d}/g.c', 'w').write(CG_SRC)
+        def S(cc, flags):
+            # the sysroot for <stddef.h>: vcc's own Windows headers leave it to MinGW-w64 (WIN8)
+            r = subprocess.run([cc, '--target=x86_64-w64-mingw32', f'--sysroot={hostenv.MINGW_SYSROOT}', '-O0', '-S', '-o', '-',
+                                '-isystem', f'{vd.R}/src/test/rt/include']
+                               + flags.split() + ['g.c'], cwd=d, capture_output=True, text=True)
+            return r.stdout if not r.returncode else 'error: ' + r.stderr
+        for flags, what in CG_ROWS:
+            a, b = cg_feature(S(vd.CL, flags), what), cg_feature(S(vd.VPP, flags), what)
+            ok = a == b
+            n += 1; bad += not ok
+            if verbose or not ok:
+                print(f'{"ok  " if ok else "FAIL"} codegen {what} {flags or "(none)"}' + ('' if ok else f'\n  clang: {a}\n  vcc:   {b}'))
+        # -fPIC/-fPIE/-fno-pic: no effect on Windows' code (clang's -S is the same too)
+        for cc in (vd.CL, vd.VPP):
+            base = S(cc, '')
+            for flags in PIC_FLAGS:
+                ok = S(cc, flags) == base and not base.startswith('error')
+                n += 1; bad += not ok
+                if verbose or not ok:
+                    print(f'{"ok  " if ok else "FAIL"} codegen {os.path.basename(cc)} {flags}: -S unchanged')
+    return bad, n
 
 def main():
     verbose = '-v' in sys.argv
@@ -235,7 +348,10 @@ def main():
                 print(f'{"ok  " if ok else "FAIL"} {t} {flags or "(none)"}' +
                       ('' if ok else f'\n  clang: {" ".join(out.split())}\n  vpp:   {" ".join(vout.split())} {verr.strip()}'))
     bad += mark_rows(verbose)
-    n = len(ROWS) + len(ERR_ROWS) + len(drows) + 2 * len(MARK_ROWS)
+    lbad, nlink = link_rows(verbose)
+    cbad, ncg = codegen_rows(verbose)
+    bad += lbad + cbad
+    n = len(ROWS) + len(ERR_ROWS) + len(drows) + 2 * len(MARK_ROWS) + nlink + ncg
     print(f'vcc-driver: {n - bad}/{n} ok')
     sys.exit(1 if bad else 0)
 

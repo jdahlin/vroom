@@ -1,0 +1,25 @@
+/* Internal dynamic executable APIs. */
+VPRIV uint32_t xstr_add(struct ld_context *ctx, const char *str);
+VPRIV const elf_symbol *g_dsosym(struct ld_context *ctx, const ld_global_symbol *s);
+VPRIV void dyn_add_sections(struct ld_context *ctx);
+VPRIV void dyn_add_gotplt(struct ld_context *ctx);
+VPRIV void define_reserved(struct ld_context *ctx);
+VPRIV uint32_t osec_named(struct ld_context *ctx, const char *n);
+VPRIV void patch_reserved(struct ld_context *ctx);
+VPRIV ld_global_symbol *dyn_imported(struct ld_context *ctx, const ld_object *o, uint32_t symi);
+VPRIV void reloc_where(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, char *buf, size_t n);
+VPRIV uint32_t dyn_scan_reloc(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, const ld_relocation_target *t);
+VPRIV void dyn_reloc64(struct ld_context *ctx, const ld_object *o, const ld_input_section *is, const elf_rela *rl, const ld_relocation_target *t, uint64_t P, elf_rela *dyn, uint32_t *nd);
+VPRIV uint64_t dyn_plt_va(struct ld_context *ctx, const ld_global_symbol *s);
+VPRIV void drop_isec(struct ld_context *ctx, uint32_t si);
+VPRIV void dyn_localize(struct ld_context *ctx);
+VPRIV void dyn_after_scan(struct ld_context *ctx);
+VPRIV void dyn_shdrs(struct ld_context *ctx);
+VPRIV void dyn_write_gotplt(struct ld_context *ctx);
+VPRIV void dyn_write(struct ld_context *ctx);
+VPRIV uint64_t deflayout_dot(struct ld_context *ctx, uint32_t oi, uint64_t d);
+VPRIV uint32_t ld_symbol_name_elf_hash(const char *n);
+VPRIV uint32_t ld_symbol_name_gnu_hash(const char *n);
+VPRIV bool ld_dso_sym_def(const Dso *, uint32_t);
+VPRIV uint8_t *isec_out(struct ld_context *ctx, uint32_t si);
+VPRIV bool ld_output_section_is_relro(struct ld_context *ctx, uint32_t oi);

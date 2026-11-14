@@ -13,14 +13,14 @@
  */
 #include "cxx-internal.h"
 
-VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
+VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue)
 {
 	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0, c->econst = 0;
 	c->enode = 0;	/* (built by what follows the typing, where code is generated for it) */
 	c->eobj_node = 0;
 	c->edecl = t, c->edecl_name = 0;
 	c->ename = 0, c->ename_missing = 0;	/* (a name only until something is done with it) */
-	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
+	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext) {
 		/* a reference: its referent; an lvalue for T&, and for T&& only when it is a name (lvalue set by the
 		   caller): a call or cast to T&& is an xvalue, which binds as an rvalue */
 		c->etype = AST_TYPE(c->ast, t)->base, c->elval = AST_TYPE(c->ast, t)->ext == 1 || lvalue;
@@ -30,7 +30,7 @@ VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 }
 
 /* an integer or floating literal's type: C's rules (the suffix, the form) */
-VPRIV qty cxx_number_type(cxx *c, const cxx_token *t)
+VPRIV ast_qualified_type cxx_number_type(cxx *c, const cxx_token *t)
 {
 	bool fp = false, hex = t->len > 1 && t->s[0] == '0' && (t->s[1] == 'x' || t->s[1] == 'X');
 	int longs = 0, uns = 0, f = 0;
@@ -54,7 +54,7 @@ VPRIV qty cxx_number_type(cxx *c, const cxx_token *t)
 			break;
 	}
 	if (fp)
-		return cc_type_basic(f ? TY_FLOAT : longs ? TY_LDOUBLE : TY_DOUBLE);
+		return cc_type_basic(f ? AST_TYPE_FLOAT : longs ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE);
 	{
 		/* the first type of the list [lex.icon] its value fits: int, long, long long (decimal); octal, hex and
 		   binary also their unsigned ones; u: only the unsigned ones; l, ll: from long, long long (LP64) */
@@ -90,32 +90,32 @@ VPRIV qty cxx_number_type(cxx *c, const cxx_token *t)
 		bool dec = base == 10;
 
 		if (!uns && longs == 0 && v <= 0x7fffffff)
-			return cc_type_basic(TY_INT);
+			return cc_type_basic(AST_TYPE_INT);
 		if (longs == 0 && v <= 0xffffffffu && (uns || !dec))
-			return cc_type_basic(TY_UINT);
+			return cc_type_basic(AST_TYPE_UNSIGNED_INT);
 		if (!uns && longs <= 1 && v <= 0x7fffffffffffffffull && !big)
-			return cc_type_basic(longs == 2 ? TY_LLONG : TY_LONG);
+			return cc_type_basic(longs == 2 ? AST_TYPE_LONG_LONG : AST_TYPE_LONG);
 		if (longs <= 1 && (uns || !dec) && !big)
-			return cc_type_basic(TY_ULONG);
+			return cc_type_basic(AST_TYPE_UNSIGNED_LONG);
 		if (!uns && v <= 0x7fffffffffffffffull && !big)
-			return cc_type_basic(TY_LLONG);
-		return cc_type_basic(uns || !dec ? TY_ULLONG : TY_LLONG);	/* (too big for any: clang's extension, unsigned) */
+			return cc_type_basic(AST_TYPE_LONG_LONG);
+		return cc_type_basic(uns || !dec ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_LONG_LONG);	/* (too big for any: clang's extension, unsigned) */
 	}
 }
 
-static bool cxx_is_arith(cxx *c, qty t)
+static bool cxx_is_arith(cxx *c, ast_qualified_type t)
 {
 	return t != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t);
 }
 
-static bool cxx_is_ptr(cxx *c, qty t)
+static bool cxx_is_ptr(cxx *c, ast_qualified_type t)
 {
-	return t != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, t) == TY_PTR || AST_TYPE_KIND(c->ast, t) == TY_ARRAY);
+	return t != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY);
 }
 
-static qty cxx_decay(cxx *c, qty t)
+static ast_qualified_type cxx_decay(cxx *c, ast_qualified_type t)
 {
-	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return cc_type_pointer(c->ast, AST_TYPE(c->ast, t)->base);
 	return t;
 }
@@ -123,7 +123,7 @@ static qty cxx_decay(cxx *c, qty t)
 /* a binary operator's result (kind: the operator), from the operands' types */
 /* std::name (a class of <compare> and the like, in libc++'s inline namespace too): its type, complete;
    CXX_TY_UNKNOWN if not declared */
-VPRIV qty cxx_std_class(cxx *c, const char *name)
+VPRIV ast_qualified_type cxx_std_class(cxx *c, const char *name)
 {
 	cxx_entity *std = cxx_lookup_in(c, c->global, vintern_cstr("std"), 0), *e;
 
@@ -134,45 +134,45 @@ VPRIV qty cxx_std_class(cxx *c, const char *name)
 		e = e->next;
 	if (!e || e->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, e->ty))
 		return CXX_TY_UNKNOWN;
-	cxx_type_require_complete(c, QUNQ(e->ty));
-	return QUNQ(e->ty);
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e->ty));
+	return AST_QUALIFIED_TYPE_UNQUALIFIED(e->ty);
 }
 
-VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
+VPRIV void cxx_binary_type(cxx *c, int op, ast_qualified_type l, ast_qualified_type r)
 {
 	/* two values of one enumeration compared: bool (a scoped one has no other built-in operators) */
-	if (l != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_ENUM && QUNQ(l) == QUNQ(r) &&
+	if (l != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == AST_TYPE_ENUM && AST_QUALIFIED_TYPE_UNQUALIFIED(l) == AST_QUALIFIED_TYPE_UNQUALIFIED(r) &&
 	    (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL || op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ||
 	     op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL)) {
-		cxx_et(c, cc_type_basic(TY_BOOL), false);
+		cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 		return;
 	}
 	/* an unscoped enumeration in arithmetic: promoted (to int here; a scoped one has no such operators) */
-	if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_ENUM)
-		l = cc_type_basic(TY_INT);
-	if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == TY_ENUM)
-		r = cc_type_basic(TY_INT);
+	if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == AST_TYPE_ENUM)
+		l = cc_type_basic(AST_TYPE_INT);
+	if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == AST_TYPE_ENUM)
+		r = cc_type_basic(AST_TYPE_INT);
 	switch (op) {
 	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL:
 	case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL: case LEX_TOKEN_AMPERSAND_AMPERSAND: case LEX_TOKEN_PIPE_PIPE:
 		/* built in on arithmetic and pointers: bool (a class's operator: not resolved yet); std::nullptr_t (a
 		   struct here) compares as a null pointer, == and != ([expr.eq]/2), && and || as false */
 		{
-			bool ln = l != CXX_TY_UNKNOWN && c->nullptr_ty && QUNQ(l) == c->nullptr_ty;
-			bool rn = r != CXX_TY_UNKNOWN && c->nullptr_ty && QUNQ(r) == c->nullptr_ty;
+			bool ln = l != CXX_TY_UNKNOWN && c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(l) == c->nullptr_ty;
+			bool rn = r != CXX_TY_UNKNOWN && c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(r) == c->nullptr_ty;
 			bool np = op != LEX_TOKEN_LESS && op != LEX_TOKEN_LESS_EQUAL && op != LEX_TOKEN_GREATER && op != LEX_TOKEN_GREATER_EQUAL;
 
 			cxx_et(c, (cxx_is_arith(c, l) || cxx_is_ptr(c, l) || (ln && np)) && (cxx_is_arith(c, r) || cxx_is_ptr(c, r) || (rn && np)) ?
-				  cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+				  cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
 		}
 		return;
 	case LEX_TOKEN_LESS_LESS: case LEX_TOKEN_GREATER_GREATER:
-		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_promote(c->ast, QUNQ(l)) : CXX_TY_UNKNOWN, false);
+		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_promote(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(l)) : CXX_TY_UNKNOWN, false);
 		return;
 	case CXX_TOKEN_SPACESHIP:
 		/* built in: std::partial_ordering for floating point, std::strong_ordering for integers and pointers */
 		if ((cxx_is_arith(c, l) || cxx_is_ptr(c, l)) && (cxx_is_arith(c, r) || cxx_is_ptr(c, r))) {
-			bool fl = (cxx_is_arith(c, l) && !cc_type_is_integer(c->ast, QUNQ(l))) || (cxx_is_arith(c, r) && !cc_type_is_integer(c->ast, QUNQ(r)));
+			bool fl = (cxx_is_arith(c, l) && !cc_type_is_integer(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(l))) || (cxx_is_arith(c, r) && !cc_type_is_integer(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(r)));
 
 			cxx_et(c, cxx_std_class(c, fl ? "partial_ordering" : "strong_ordering"), false);
 		} else
@@ -180,21 +180,21 @@ VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 		return;
 	case LEX_TOKEN_PLUS: case LEX_TOKEN_MINUS:
 		if (cxx_is_ptr(c, l) && cxx_is_arith(c, r)) {
-			cxx_et(c, QUNQ(cxx_decay(c, l)), false);
+			cxx_et(c, AST_QUALIFIED_TYPE_UNQUALIFIED(cxx_decay(c, l)), false);
 			return;
 		}
 		if (op == LEX_TOKEN_PLUS && cxx_is_arith(c, l) && cxx_is_ptr(c, r)) {
-			cxx_et(c, QUNQ(cxx_decay(c, r)), false);
+			cxx_et(c, AST_QUALIFIED_TYPE_UNQUALIFIED(cxx_decay(c, r)), false);
 			return;
 		}
 		if (op == LEX_TOKEN_MINUS && cxx_is_ptr(c, l) && cxx_is_ptr(c, r)) {
-			cxx_et(c, cc_type_basic(TY_LONG), false);	/* ptrdiff_t */
+			cxx_et(c, cc_type_basic(AST_TYPE_LONG), false);	/* ptrdiff_t */
 			return;
 		}
 		__attribute__((fallthrough));
 	case LEX_TOKEN_STAR: case LEX_TOKEN_SLASH: case LEX_TOKEN_PERCENT: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_CARET:
 	case LEX_TOKEN_PIPE:
-		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_arithmetic_conversion(c->ast, QUNQ(l), QUNQ(r)) : CXX_TY_UNKNOWN,
+		cxx_et(c, cxx_is_arith(c, l) && cxx_is_arith(c, r) ? cc_type_arithmetic_conversion(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(l), AST_QUALIFIED_TYPE_UNQUALIFIED(r)) : CXX_TY_UNKNOWN,
 		       false);
 		return;
 	}
@@ -202,7 +202,7 @@ VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 }
 
 /* a unary operator's result */
-VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
+VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue)
 {
 	switch (op) {
 	case LEX_TOKEN_AMPERSAND:
@@ -212,10 +212,10 @@ VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
 		cxx_et(c, cxx_is_ptr(c, t) ? AST_TYPE(c->ast, t)->base : CXX_TY_UNKNOWN, true);
 		return;
 	case LEX_TOKEN_EXCLAMATION:
-		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_MINUS: case LEX_TOKEN_PLUS: case LEX_TOKEN_TILDE:
-		cxx_et(c, cxx_is_arith(c, t) ? cc_type_promote(c->ast, QUNQ(t)) : CXX_TY_UNKNOWN, false);
+		cxx_et(c, cxx_is_arith(c, t) ? cc_type_promote(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) : CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
 		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? t : CXX_TY_UNKNOWN, true);
@@ -229,9 +229,9 @@ VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
  * argument types args: the return type of the one function it selects, else unknown.
  */
 /* is the class d derived from the class b? */
-static bool cxx_derives(cxx *c, qty d, qty b, int depth)
+static bool cxx_derives(cxx *c, ast_qualified_type d, ast_qualified_type b, int depth)
 {
-	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(d)) : NULL;
+	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(d)) : NULL;
 
 	if (!cls)
 		return false;
@@ -240,7 +240,7 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
 
 		if (!s || s->kind != CXX_SCOPE_CLASS || !s->owner || s->owner->ty == CXX_TY_UNKNOWN)
 			continue;
-		if (QUNQ(s->owner->ty) == QUNQ(b) || cxx_derives(c, s->owner->ty, b, depth + 1))
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(s->owner->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(b) || cxx_derives(c, s->owner->ty, b, depth + 1))
 			return true;
 	}
 	return false;
@@ -252,11 +252,11 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
  */
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
-static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth);
-static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, qty to, int depth);
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
+static int cxx_class_converts_to(cxx *c, cxx_scope *cls, ast_qualified_type to, int depth);
+static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, ast_qualified_type to, int depth);
+static int cxx_class_constructs(cxx *c, ast_qualified_type to, const ast_qualified_type *args, const uint8_t *lval, uint32_t n, bool implicit);
 
-static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
+static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
 	bool binds_object = false;	/* T& (not const): binds an object, never a temporary made by a constructor */
@@ -264,60 +264,60 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 	if (p == CXX_TY_UNKNOWN || a == CXX_TY_UNKNOWN)
 		return 2;
 	pt = AST_TYPE(c->ast, p);
-	if (pt->kind == TY_PTR && pt->ext) {
-		binds_object = pt->ext == 1 && !(QQ(pt->base) & Q_CONST);
+	if (pt->kind == AST_TYPE_POINTER && pt->ext) {
+		binds_object = pt->ext == 1 && !(AST_QUALIFIED_TYPE_QUALIFIERS(pt->base) & AST_QUALIFIER_CONST);
 		/* T&& does not bind an lvalue of T (or of a class derived from it: a temporary a conversion makes from
 		   another type it binds, "text" to json&&); T& (not const) does not bind an rvalue */
-		bool same = a != CXX_TY_UNKNOWN && (QUNQ(a) == QUNQ(pt->base) ||
+		bool same = a != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_UNQUALIFIED(a) == AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) ||
 						    (cc_type_is_record(c->ast, a) && cc_type_is_record(c->ast, pt->base) &&
-						     cxx_type_class_scope(c, QUNQ(a)) && cxx_derives(c, a, pt->base, 0)));
+						     cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a)) && cxx_derives(c, a, pt->base, 0)));
 
-		if (have_lvalue && (pt->ext == 2 ? lvalue && (same || !cc_type_is_record(c->ast, pt->base)) : !lvalue && !(QQ(pt->base) & Q_CONST)))
+		if (have_lvalue && (pt->ext == 2 ? lvalue && (same || !cc_type_is_record(c->ast, pt->base)) : !lvalue && !(AST_QUALIFIED_TYPE_QUALIFIERS(pt->base) & AST_QUALIFIER_CONST)))
 			return 3;
 		p = pt->base;
 		pt = AST_TYPE(c->ast, p);
 	}
 	at = AST_TYPE(c->ast, a);
-	if (QUNQ(p) == QUNQ(a))
+	if (AST_QUALIFIED_TYPE_UNQUALIFIED(p) == AST_QUALIFIED_TYPE_UNQUALIFIED(a))
 		return 0;
 	/* nullptr converts to any pointer (and to bool), nothing else to nullptr_t */
-	if (c->nullptr_ty && QUNQ(a) == c->nullptr_ty)
-		return (pt->kind == TY_PTR && !pt->ext) || pt->kind == TY_BOOL ? 1 : cc_type_is_record(c->ast, p) ? 2 : 3;
-	if (c->nullptr_ty && QUNQ(p) == c->nullptr_ty)
+	if (c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(a) == c->nullptr_ty)
+		return (pt->kind == AST_TYPE_POINTER && !pt->ext) || pt->kind == AST_TYPE_BOOL ? 1 : cc_type_is_record(c->ast, p) ? 2 : 3;
+	if (c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(p) == c->nullptr_ty)
 		return 3;
 	/* an array bound to a reference to array: the same length and element (its cv may differ) */
-	if (pt->kind == TY_ARRAY && at->kind == TY_ARRAY)
-		return pt->n == at->n && QUNQ(pt->base) == QUNQ(at->base) ? 0 : 3;
-	if (((pt->kind >= TY_BOOL && pt->kind <= TY_FLOAT128) || pt->kind == TY_ENUM) &&
-	    ((at->kind >= TY_BOOL && at->kind <= TY_FLOAT128) || at->kind == TY_ENUM))
-		return pt->kind == TY_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
-	if (pt->kind == TY_PTR && !pt->ext) {
+	if (pt->kind == AST_TYPE_ARRAY && at->kind == AST_TYPE_ARRAY)
+		return pt->n == at->n && AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(at->base) ? 0 : 3;
+	if (((pt->kind >= AST_TYPE_BOOL && pt->kind <= AST_TYPE_FLOAT128) || pt->kind == AST_TYPE_ENUM) &&
+	    ((at->kind >= AST_TYPE_BOOL && at->kind <= AST_TYPE_FLOAT128) || at->kind == AST_TYPE_ENUM))
+		return pt->kind == AST_TYPE_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
+	if (pt->kind == AST_TYPE_POINTER && !pt->ext) {
 		const ctype *pb = AST_TYPE(c->ast, pt->base);
-		qty ab;
+		ast_qualified_type ab;
 
-		if (at->kind == TY_ARRAY)
+		if (at->kind == AST_TYPE_ARRAY)
 			ab = at->base;
-		else if (at->kind == TY_FUNC)
-			return QUNQ(pt->base) == QUNQ(a) ? 0 : 3;
-		else if (at->kind == TY_PTR && !at->ext)
+		else if (at->kind == AST_TYPE_FUNCTION)
+			return AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(a) ? 0 : 3;
+		else if (at->kind == AST_TYPE_POINTER && !at->ext)
 			ab = at->base;
-		else if (at->kind == TY_STRUCT || at->kind == TY_UNION) {
+		else if (at->kind == AST_TYPE_STRUCT || at->kind == AST_TYPE_UNION) {
 			/* a class to a pointer: only through a conversion function */
-			cxx_scope *as = cxx_type_class_scope(c, QUNQ(a));
+			cxx_scope *as = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a));
 
 			if (!as)
 				return 2;
-			cxx_type_require_complete(c, QUNQ(a));
+			cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a));
 			{
-				int k = cxx_class_converts_to(c, as, QUNQ(p), 0);
+				int k = cxx_class_converts_to(c, as, AST_QUALIFIED_TYPE_UNQUALIFIED(p), 0);
 
 				return k > 0 ? 5 : k < 0 ? 2 : 3;
 			}
 		} else	/* (an integer: the literal 0 only, which the type does not tell) */
-			return at->kind >= TY_BOOL && at->kind <= TY_ULLONG && !c->rank_no_literal && !(have_lvalue && lvalue) ? 2 : 3;
-		if (QUNQ(pt->base) == QUNQ(ab))
+			return at->kind >= AST_TYPE_BOOL && at->kind <= AST_TYPE_UNSIGNED_LONG_LONG && !c->rank_no_literal && !(have_lvalue && lvalue) ? 2 : 3;
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(ab))
 			return 0;
-		if (pb->kind == TY_VOID)
+		if (pb->kind == AST_TYPE_VOID)
 			return 1;
 		if (cc_type_is_record(c->ast, pt->base) && cc_type_is_record(c->ast, ab))
 			return cxx_derives(c, ab, pt->base, 0) ? 1 : 3;
@@ -328,30 +328,30 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 	if (cc_type_is_record(c->ast, p) || cc_type_is_record(c->ast, a)) {
 		/* through a class: a conversion function of the argument's class or a constructor of the
 		   parameter's.  Neither declared: no conversion. */
-		cxx_scope *as = cc_type_is_record(c->ast, a) ? cxx_type_class_scope(c, QUNQ(a)) : NULL;
-		cxx_scope *ps = cc_type_is_record(c->ast, p) && !binds_object ? cxx_type_class_scope(c, QUNQ(p)) : NULL;
+		cxx_scope *as = cc_type_is_record(c->ast, a) ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a)) : NULL;
+		cxx_scope *ps = cc_type_is_record(c->ast, p) && !binds_object ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(p)) : NULL;
 		bool by_ctor = false, by_conv = false;
 
 		if (cc_type_is_record(c->ast, a)) {
 			if (!as)
 				return 2;
-			cxx_type_require_complete(c, QUNQ(a));
+			cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a));
 			by_conv = cxx_class_converts(c, as, 0);
 			/* to something that is not a class: one of its conversion functions' types converts to it, or not */
 			if (by_conv && !cc_type_is_record(c->ast, p)) {
-				int k = cxx_class_converts_to(c, as, QUNQ(p), 0);
+				int k = cxx_class_converts_to(c, as, AST_QUALIFIED_TYPE_UNQUALIFIED(p), 0);
 
 				if (k >= 0)
 					return k ? 5 : 3;
 			}
 			/* to a class: only a conversion function to a class type can give one */
-			if (by_conv && cc_type_is_record(c->ast, p) && !cxx_class_converts_class(c, as, QUNQ(p), 0))
+			if (by_conv && cc_type_is_record(c->ast, p) && !cxx_class_converts_class(c, as, AST_QUALIFIED_TYPE_UNQUALIFIED(p), 0))
 				by_conv = false;
 		}
 		if (cc_type_is_record(c->ast, p) && !binds_object) {
 			if (!ps)
 				return 2;
-			cxx_type_require_complete(c, QUNQ(p));
+			cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(p));
 			if (ps->has_dependent_base)
 				return 2;
 			for (cxx_entity *e = cxx_lookup_in(c, ps, cxx_ctor_id(), 0); e; e = e->next)
@@ -360,7 +360,7 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 		if (!by_ctor && !by_conv)
 			return 3;
 		/* T(const T&) for an argument that is not a T: converting it to T first is this conversion again */
-		if (c->constructing && QUNQ(p) == c->constructing && !by_conv)
+		if (c->constructing && AST_QUALIFIED_TYPE_UNQUALIFIED(p) == c->constructing && !by_conv)
 			return 3;
 		/* a constructor of the parameter's class takes the argument (implicitly): a user-defined
 		   conversion (5: worse than any standard one) */
@@ -372,7 +372,7 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 
 			c->construct_depth++;
 			c->no_literal = nl;
-			r = cxx_class_constructs(c, QUNQ(p), &a, &lv, 1, true);
+			r = cxx_class_constructs(c, AST_QUALIFIED_TYPE_UNQUALIFIED(p), &a, &lv, 1, true);
 			c->construct_depth--;
 			c->rank_no_literal = nl;
 			if (r >= 0)
@@ -388,15 +388,15 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
  * is better than f(const C&) for an object that is not const, f(T&&) than f(const T&) for an rvalue),
  * 2 a standard conversion, 4 perhaps, 6 not at all.
  */
-static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
+static int cxx_arg_rank(cxx *c, ast_qualified_type p, ast_qualified_type a, bool lvalue, bool have_lvalue)
 {
 	int r = cxx_arg_rank0(c, p, a, lvalue, have_lvalue) * 2;
 
 	if (r == 10)
 		return 3;	/* a user-defined conversion */
 
-	if (!r && p != CXX_TY_UNKNOWN && a != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext &&
-	    (QQ(AST_TYPE(c->ast, p)->base) & ~QQ(a) & Q_CONST))
+	if (!r && p != CXX_TY_UNKNOWN && a != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && AST_TYPE(c->ast, p)->ext &&
+	    (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c->ast, p)->base) & ~AST_QUALIFIED_TYPE_QUALIFIERS(a) & AST_QUALIFIER_CONST))
 		r = 1;
 	return r;
 }
@@ -407,22 +407,22 @@ static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
  * arguments deduce; the call's type is known when one exact non-template matches, or when every
  * viable candidate returns the same type (a simplification of overload resolution).
  */
-static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+static void cxx_call_type_impl(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args,
 			       const uint8_t *lval, uint32_t nargs, bool operator_call);
 
-VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs)
+VPRIV void cxx_call_type(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs)
 {
 	cxx_call_type_impl(c, set, callee_type, NULL, UINT32_MAX, args, lval, nargs, false);
 }
 
 /* f<xargs>(args): only templates are candidates, their first parameters given */
-VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
+VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
 			   uint32_t nargs)
 {
 	cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, xargs, nxargs, args, lval, nargs, false);
 }
 
-static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args,
 				const uint8_t *lval, uint32_t nargs, bool operator_call, uint8_t *verdict);
 
 /*
@@ -430,7 +430,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
  * signatures instantiated on the way -- is not the expression's: only the call's own verdict is, no
  * function fits (set by the call itself) or its arguments are a pattern's placeholders.)
  */
-static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+static void cxx_call_type_impl(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args,
 			       const uint8_t *lval, uint32_t nargs, bool operator_call)
 {
 	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
@@ -442,7 +442,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	c->member_missing = missing, c->einvalid_unsure = adl;
 }
 
-static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
+static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type callee_type, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args,
 				const uint8_t *lval, uint32_t nargs, bool operator_call, uint8_t *verdict)
 {
 	static const uint8_t none[16];
@@ -469,16 +469,16 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		if (any_const)
 			obj = c->this_const ? 2 : 1;
 	}
-	qty result = CXX_TY_UNKNOWN;
+	ast_qualified_type result = CXX_TY_UNKNOWN;
 	bool same = true, unknown = false;
 
 	if (!set) {
 		/* a pointer to a function, a function's type */
-		qty f = callee_type;
+		ast_qualified_type f = callee_type;
 
-		if (f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_PTR && !AST_TYPE(c->ast, f)->ext)
+		if (f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == AST_TYPE_POINTER && !AST_TYPE(c->ast, f)->ext)
 			f = AST_TYPE(c->ast, f)->base;
-		cxx_et(c, f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_FUNC ? AST_TYPE(c->ast, f)->base : CXX_TY_UNKNOWN, false);
+		cxx_et(c, f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == AST_TYPE_FUNCTION ? AST_TYPE(c->ast, f)->base : CXX_TY_UNKNOWN, false);
 		if (!c->template_depth)
 			c->stats.calls++, c->stats.calls_typed += c->etype != CXX_TY_UNKNOWN, c->stats.why[CXX_WHY_NO_SET] += c->etype == CXX_TY_UNKNOWN;
 		if (!c->template_depth && c->etype == CXX_TY_UNKNOWN && getenv("VCC_CXX_WHY_NOSET")) {
@@ -501,7 +501,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	}
 	if (!lval)
 		lval = none;
-	qty acopy[16];
+	ast_qualified_type acopy[16];
 	uint8_t lcopy[16];
 
 	if (nargs <= 16) {	/* (instantiating a body reuses c->cargs) */
@@ -509,7 +509,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		args = acopy, lval = lcopy;
 	}
 	/* the viable candidates, each argument's conversion ranked */
-	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; qty pt[16]; } cand[24];
+	struct cand { cxx_entity *e; ast_qualified_type r; uint8_t rank[16]; uint8_t ranked, tmpl; ast_qualified_type pt[16]; } cand[24];
 	cxx_entity *unk[8];	/* the templates whose deduction is not known */
 	uint32_t nunk = 0;
 	const char *tn = getenv("VCC_CXX_CAND");	/* trace the candidates of calls to this name */
@@ -554,7 +554,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		fputc('\n', stderr);
 	}
 	for (cxx_entity *e = set; e; e = e->next) {
-		qty r;
+		ast_qualified_type r;
 		const ctype *sig = NULL;
 		struct cand *k;
 
@@ -587,10 +587,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			if (d <= 0)
 				continue;
 			/* its parameters with the arguments bound */
-			if (c->bound_sig != CXX_TY_UNKNOWN && ((AST_TYPE(c->ast, c->bound_sig)->flags & TF_VARIADIC) ||
+			if (c->bound_sig != CXX_TY_UNKNOWN && ((AST_TYPE(c->ast, c->bound_sig)->flags & AST_TYPE_FLAG_VARIADIC) ||
 								AST_TYPE(c->ast, c->bound_sig)->n >= nargs))
 				sig = AST_TYPE(c->ast, c->bound_sig);	/* (f(...) too: an argument for the ellipsis ranks last) */
-			else if (c->bound_sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bound_sig) == TY_FUNC &&
+			else if (c->bound_sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bound_sig) == AST_TYPE_FUNCTION &&
 				 AST_TYPE(c->ast, c->bound_sig)->n < nargs && !cxx_ftemplate_has_packs(e))
 				continue;	/* (fewer parameters than arguments, no pack, no ...: not viable; min(initializer_list<T>) for min(a, b)) */
 		} else {
@@ -600,10 +600,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				continue;	/* (f<...>: not a non-template) */
 			if (e->kind == CXX_ENTITY_VALUE && e->ty == CXX_TY_UNKNOWN && e->has_ret_pattern && e->late)
 				cxx_late_deduce(c, e->late);	/* (auto f() of an instance: its type from its body, now) */
-			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != AST_TYPE_FUNCTION)
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
-			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & TF_VARIADIC) && nargs >= ft->n)))
+			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & AST_TYPE_FLAG_VARIADIC) && nargs >= ft->n)))
 				continue;
 			if (obj == 2 && !e->fn_const && !e->fn_static)
 				continue;	/* (a const object: const members only) */
@@ -626,15 +626,15 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				if (own_args && a < 16 && own_brace[a] && a < sig->n) {
 					/* a braced list (its type here its last element's): initializer_list<E> takes it as it is,
 					   a class by a constructor, a scalar only from one element ([over.ics.list]) */
-					qty P = c->ast->params[sig->aux + a];
+					ast_qualified_type P = c->ast->params[sig->aux + a];
 
-					if (P != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+					if (P != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext)
 						P = AST_TYPE(c->ast, P)->base;
 					if (P == CXX_TY_UNKNOWN)
 						k->rank[a] = 4;
 					else if (cxx_is_initializer_list(c, P))
 						k->rank[a] = 0;
-					else if (cc_type_is_record(c->ast, P) && AST_TYPE_KIND(c->ast, P) != TY_ARRAY)
+					else if (cc_type_is_record(c->ast, P) && AST_TYPE_KIND(c->ast, P) != AST_TYPE_ARRAY)
 						k->rank[a] = 3;
 					else
 						k->rank[a] = 6;	/* (a scalar from {x}: rare, not told apart here) */
@@ -706,12 +706,12 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				/* the same conversion of an argument to T: binding T&& is better than const T& when the
 				   argument (or what a conversion makes of it, a temporary) is an rvalue [over.ics.rank] */
 				for (uint32_t n = 0; n < nargs && n < 16; n++) {
-					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+					ast_qualified_type pa = cand[a].pt[n], pb = cand[b].pt[n];
 
 					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || pa == pb || cand[a].rank[n] != cand[b].rank[n] ||
-					    AST_TYPE_KIND(c->ast, pa) != TY_PTR || AST_TYPE_KIND(c->ast, pb) != TY_PTR ||
+					    AST_TYPE_KIND(c->ast, pa) != AST_TYPE_POINTER || AST_TYPE_KIND(c->ast, pb) != AST_TYPE_POINTER ||
 					    !AST_TYPE(c->ast, pa)->ext || !AST_TYPE(c->ast, pb)->ext ||
-					    QUNQ(AST_TYPE(c->ast, pa)->base) != QUNQ(AST_TYPE(c->ast, pb)->base))
+					    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, pa)->base) != AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, pb)->base))
 						continue;
 					bool rv = cand[a].rank[n] == 3 || (lval && !lval[n]);	/* (3: through a conversion, a temporary) */
 
@@ -727,18 +727,18 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				/* T * against cv T *: the one adding fewer qualifiers is better ([over.ics.rank]/3.2.6:
 				   const base * over const volatile base *, libc++'s __cxx_atomic_load) */
 				for (uint32_t n = 0; n < nargs && n < 16; n++) {
-					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+					ast_qualified_type pa = cand[a].pt[n], pb = cand[b].pt[n];
 
 					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || cand[a].rank[n] != cand[b].rank[n] ||
-					    AST_TYPE_KIND(c->ast, pa) != TY_PTR || AST_TYPE_KIND(c->ast, pb) != TY_PTR ||
+					    AST_TYPE_KIND(c->ast, pa) != AST_TYPE_POINTER || AST_TYPE_KIND(c->ast, pb) != AST_TYPE_POINTER ||
 					    AST_TYPE(c->ast, pa)->ext != AST_TYPE(c->ast, pb)->ext)
 						continue;
 					pa = AST_TYPE(c->ast, pa)->base, pb = AST_TYPE(c->ast, pb)->base;
-					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || QUNQ(pa) != QUNQ(pb) || QQ(pa) == QQ(pb))
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || AST_QUALIFIED_TYPE_UNQUALIFIED(pa) != AST_QUALIFIED_TYPE_UNQUALIFIED(pb) || AST_QUALIFIED_TYPE_QUALIFIERS(pa) == AST_QUALIFIED_TYPE_QUALIFIERS(pb))
 						continue;
-					if ((QQ(pa) & QQ(pb)) == QQ(pa))
+					if ((AST_QUALIFIED_TYPE_QUALIFIERS(pa) & AST_QUALIFIED_TYPE_QUALIFIERS(pb)) == AST_QUALIFIED_TYPE_QUALIFIERS(pa))
 						better = true;
-					else if ((QQ(pa) & QQ(pb)) == QQ(pb))
+					else if ((AST_QUALIFIED_TYPE_QUALIFIERS(pa) & AST_QUALIFIED_TYPE_QUALIFIERS(pb)) == AST_QUALIFIED_TYPE_QUALIFIERS(pb))
 						worse = true;
 				}
 			}
@@ -746,15 +746,15 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				/* derived to base: to a nearer base is better (B over A for a C : B : A [over.ics.rank]; json's
 				   priority_tag<N>) */
 				for (uint32_t n = 0; n < nargs && n < 16; n++) {
-					qty pa = cand[a].pt[n], pb = cand[b].pt[n], at = QUNQ(args[n]);
+					ast_qualified_type pa = cand[a].pt[n], pb = cand[b].pt[n], at = AST_QUALIFIED_TYPE_UNQUALIFIED(args[n]);
 
 					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || at == CXX_TY_UNKNOWN || cand[a].rank[n] != cand[b].rank[n])
 						continue;
-					if (AST_TYPE_KIND(c->ast, pa) == TY_PTR && AST_TYPE(c->ast, pa)->ext)
+					if (AST_TYPE_KIND(c->ast, pa) == AST_TYPE_POINTER && AST_TYPE(c->ast, pa)->ext)
 						pa = AST_TYPE(c->ast, pa)->base;
-					if (AST_TYPE_KIND(c->ast, pb) == TY_PTR && AST_TYPE(c->ast, pb)->ext)
+					if (AST_TYPE_KIND(c->ast, pb) == AST_TYPE_POINTER && AST_TYPE(c->ast, pb)->ext)
 						pb = AST_TYPE(c->ast, pb)->base;
-					pa = QUNQ(pa), pb = QUNQ(pb);
+					pa = AST_QUALIFIED_TYPE_UNQUALIFIED(pa), pb = AST_QUALIFIED_TYPE_UNQUALIFIED(pb);
 					if (pa == pb || !cc_type_is_record(c->ast, pa) || !cc_type_is_record(c->ast, pb) || !cc_type_is_record(c->ast, at))
 						continue;
 					if (cxx_derives(c, pa, pb, 0) && (at == pa || cxx_derives(c, at, pa, 0)))
@@ -842,7 +842,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				uint32_t fnp = ft ? cxx_ftemplate_np(c, ft) : 0;
 
 				for (uint32_t n = 0; n < nargs && n < fnp && !w; n++) {
-					qty pt = cxx_ftemplate_pt(ft, n);
+					ast_qualified_type pt = cxx_ftemplate_pt(ft, n);
 
 					if (pt != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, pt) && args[n] != CXX_TY_UNKNOWN)
 						w = cxx_arg_rank(c, pt, args[n], lval[n], have_lval) > 0;
@@ -868,14 +868,14 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				bool differ = false, top = cand[a].ranked && cand[b].ranked && cand[a].tmpl == cand[b].tmpl;
 
 				for (uint32_t n = 0; n < nargs && top; n++) {
-					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+					ast_qualified_type pa = cand[a].pt[n], pb = cand[b].pt[n];
 
 					top = cand[a].rank[n] == cand[b].rank[n];
-					if (top && cand[a].rank[n] == 2 && pa != CXX_TY_UNKNOWN && pb != CXX_TY_UNKNOWN && QUNQ(pa) != QUNQ(pb)) {
+					if (top && cand[a].rank[n] == 2 && pa != CXX_TY_UNKNOWN && pb != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(pa) != AST_QUALIFIED_TYPE_UNQUALIFIED(pb)) {
 						int ka = AST_TYPE_KIND(c->ast, pa), kb = AST_TYPE_KIND(c->ast, pb);
-						bool promo = ka == TY_INT || ka == TY_UINT || ka == TY_DOUBLE || kb == TY_INT || kb == TY_UINT || kb == TY_DOUBLE;
+						bool promo = ka == AST_TYPE_INT || ka == AST_TYPE_UNSIGNED_INT || ka == AST_TYPE_DOUBLE || kb == AST_TYPE_INT || kb == AST_TYPE_UNSIGNED_INT || kb == AST_TYPE_DOUBLE;
 
-						differ |= ka >= TY_BOOL && ka <= TY_FLOAT128 && kb >= TY_BOOL && kb <= TY_FLOAT128 && !promo;
+						differ |= ka >= AST_TYPE_BOOL && ka <= AST_TYPE_FLOAT128 && kb >= AST_TYPE_BOOL && kb <= AST_TYPE_FLOAT128 && !promo;
 					}
 				}
 				/* (and no other candidate is better than them) */
@@ -956,7 +956,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		if (called->kind == CXX_ENTITY_VALUE)
 			cxx_member_body_use(c, called);
 		else if (called->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !c->unevaluated && !c->tentative && nargs <= 16) {
-			qty r, et = result;
+			ast_qualified_type r, et = result;
 
 			c->call_instance = NULL;
 			cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs, &r, true);
@@ -996,22 +996,22 @@ static cxx_entity *cxx_friend_lookup_in(cxx *c, cxx_scope *cls, uint32_t id, int
 	return NULL;
 }
 
-static cxx_entity *cxx_friend_lookup(cxx *c, qty t, uint32_t id, int depth)
+static cxx_entity *cxx_friend_lookup(cxx *c, ast_qualified_type t, uint32_t id, int depth)
 {
 	if (t == CXX_TY_UNKNOWN)
 		return NULL;
-	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 		t = AST_TYPE(c->ast, t)->base;
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return NULL;
-	return cxx_friend_lookup_in(c, cxx_type_class_scope(c, QUNQ(t)), id, depth);
+	return cxx_friend_lookup_in(c, cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), id, depth);
 }
 
-VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs)
+VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, const ast_qualified_type *args, uint32_t nargs)
 {
 	cxx_scope *cls;
 	cxx_entity *set;
-	qty all[4], acopy[16];
+	ast_qualified_type all[4], acopy[16];
 	bool have_lv = c->op_lv_set && nargs <= 16;
 	uint8_t lv[17];
 	bool any_class = false;
@@ -1022,7 +1022,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	   operator<<(ostream&, char) is exact) and stands, unsure, if none of them decides. */
 	uint8_t unsure0 = c->eunsure;
 	bool pending = false, pending_lval = false;
-	qty pending_type = CXX_TY_UNKNOWN;
+	ast_qualified_type pending_type = CXX_TY_UNKNOWN;
 #define OP_ATTEMPT_DONE() do { \
 		if (c->call_resolved) \
 			return true; \
@@ -1037,17 +1037,17 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		return false;
 	memcpy(acopy, args, nargs * sizeof *args);	/* (often &c->etype, which the first lookup's call resets) */
 	args = acopy;
-	cls = cc_type_is_record(c->ast, obj) && AST_TYPE_KIND(c->ast, obj) != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(obj)) : NULL;
+	cls = cc_type_is_record(c->ast, obj) && AST_TYPE_KIND(c->ast, obj) != AST_TYPE_ARRAY ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(obj)) : NULL;
 	/* (1 + x, "a" + s: the left operand is no class; the operator functions of the right one's) */
 	for (uint32_t i = 0; i < nargs && nargs <= 2; i++)
-		any_class |= args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]) && AST_TYPE_KIND(c->ast, args[i]) != TY_ARRAY &&
-			     cxx_type_class_scope(c, QUNQ(args[i]));
+		any_class |= args[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[i]) && AST_TYPE_KIND(c->ast, args[i]) != AST_TYPE_ARRAY &&
+			     cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[i]));
 	if (!cls && !any_class)
 		return false;
 	/* (no candidate fits: the next place, in the end the built-in operator: &x, a = b, a, b) */
 	set = cls ? cxx_lookup_in(c, cls, id, 0) : NULL;
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
-		c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
+		c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
 		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
 		OP_ATTEMPT_DONE();
 		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
@@ -1079,16 +1079,16 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
 		for (uint32_t i = 0; i <= nargs; i++) {
-			qty t = all[i];
+			ast_qualified_type t = all[i];
 			cxx_scope *ns;
 			bool dup = false;
 
 			if (t == CXX_TY_UNKNOWN)
 				continue;
-			if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+			if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 				t = AST_TYPE(c->ast, t)->base;
-			if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY ||
-			    !(ns = cxx_type_class_scope(c, QUNQ(t))))
+			if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY ||
+			    !(ns = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))))
 				continue;
 			while (ns && ns->kind != CXX_SCOPE_NAMESPACE)
 				ns = ns->parent;
@@ -1135,16 +1135,16 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 			all[i + 1] = args[i];
 		/* (one class operand that converts to nothing is enough: the built-in operator takes no class) */
 		for (uint32_t i = 0; known && i <= nargs; i++) {
-			qty t = all[i];
+			ast_qualified_type t = all[i];
 			cxx_scope *os;
 
 			if (t == CXX_TY_UNKNOWN || cxx_type_has_placeholder(c, t)) {
 				known = false;
 				break;
 			}
-			if (!cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+			if (!cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 				continue;
-			os = cxx_type_class_scope(c, QUNQ(t));
+			os = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 			stuck |= os && !cxx_class_converts(c, os, 0);
 		}
 		if (known && stuck)
@@ -1170,15 +1170,15 @@ VPRIV uint32_t cxx_dtor_id(void)
 }
 
 /* is t an instance of a template named initializer_list (std::initializer_list<E>)? */
-VPRIV bool cxx_is_initializer_list(cxx *c, qty t)
+VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t)
 {
 	cxx_scope *s;
 
 	if (t == CXX_TY_UNKNOWN)
 		return false;
-	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+	if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 		t = AST_TYPE(c->ast, t)->base;
-	if (!cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))) || !s->owner)
+	if (!cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))) || !s->owner)
 		return false;
 	return vintern_ents[s->owner->name].len == 16 && !memcmp(vintern_ents[s->owner->name].s, "initializer_list", 16);
 }
@@ -1188,14 +1188,14 @@ VPRIV bool cxx_is_initializer_list(cxx *c, qty t)
  * chosen (an initializer_list one first for braces), then the destructor; their bodies are
  * instantiated when t is an instance.  The expression's type is left as it was.
  */
-VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced)
+VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs, bool braced)
 {
-	qty et = c->etype;
+	ast_qualified_type et = c->etype;
 	bool el = c->elval;
 	cxx_entity *callee = c->ecallee, *set, *dtor;
 	cxx_scope *cls;
 
-	qty acopy[CXX_MAX_ARGS];
+	ast_qualified_type acopy[CXX_MAX_ARGS];
 	uint8_t lcopy[CXX_MAX_ARGS];
 	uint32_t bcopy[CXX_MAX_ARGS];
 
@@ -1211,11 +1211,11 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 			memcpy(lcopy, lval, nargs), lval = lcopy;
 	}
 	memcpy(bcopy, c->carg_brace, sizeof bcopy);
-	if (!(cls = cxx_type_class_scope(c, QUNQ(t)))) {
+	if (!(cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))) {
 		memcpy(c->carg_brace, bcopy, sizeof bcopy);
 		return;
 	}
-	cxx_type_require_complete(c, QUNQ(t));
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 	memcpy(c->carg_brace, bcopy, sizeof bcopy);
 	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
 	c->ctor_none = !set;
@@ -1238,7 +1238,7 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 			cxx_entity *il = c->ctor_ilist;
 			uint32_t br[CXX_MAX_ARGS];
 
-			qty ty[CXX_MAX_ARGS];
+			ast_qualified_type ty[CXX_MAX_ARGS];
 			uint8_t lv[CXX_MAX_ARGS];
 			uint32_t n = nargs < CXX_MAX_ARGS ? nargs : CXX_MAX_ARGS;
 
@@ -1257,7 +1257,7 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	c->call_obj = 0;	/* (a constructor has no object: what a member access in the arguments left) */
 	if (set) {
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, nargs,
-				   nargs == 1 && args[0] != CXX_TY_UNKNOWN && QUNQ(args[0]) == QUNQ(t));
+				   nargs == 1 && args[0] != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]) == AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		c->ctor_found = c->call_resolved && c->call_picked && c->call_picked->kind == CXX_ENTITY_VALUE;
 		c->ctor_picked = c->ctor_found ? c->call_picked : NULL;
 	}
@@ -1283,7 +1283,7 @@ static bool cxx_class_converts_scalar(cxx *c, cxx_scope *cls, int depth)
 		for (uint32_t i = 0; i < cls->nslots; i++)
 			for (cxx_entity *e = cls->slots[i]; e; e = e->next) {
 				const vident *v = &vintern_ents[e->name];
-				qty t;
+				ast_qualified_type t;
 
 				if (v->len < 10 || memcmp(v->s, "operator ", 9))
 					continue;
@@ -1291,14 +1291,14 @@ static bool cxx_class_converts_scalar(cxx *c, cxx_scope *cls, int depth)
 					return true;
 				if (v->s[9] != '#')
 					continue;
-				t = (qty)strtoul(v->s + 10, NULL, 10);
+				t = (ast_qualified_type)strtoul(v->s + 10, NULL, 10);
 				if (t == CXX_TY_UNKNOWN || t == 0)
 					return true;
-				if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+				if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 					t = AST_TYPE(c->ast, t)->base;
 				int k = AST_TYPE_KIND(c->ast, t);
 
-				if ((k >= TY_BOOL && k <= TY_FLOAT128) || k == TY_ENUM || k == TY_PTR)
+				if ((k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128) || k == AST_TYPE_ENUM || k == AST_TYPE_POINTER)
 					return true;
 			}
 	for (uint32_t i = 0; i < cls->nused; i++)
@@ -1309,14 +1309,14 @@ static bool cxx_class_converts_scalar(cxx *c, cxx_scope *cls, int depth)
 
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls)
 {
-	cxx_type_require_complete(c, QUNQ(cls->owner ? cls->owner->ty : CXX_TY_UNKNOWN));
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(cls->owner ? cls->owner->ty : CXX_TY_UNKNOWN));
 	return cxx_class_converts_scalar(c, cls, 0);
 }
 
 /* ---- integer constant expressions ---------------------------------------------------------- */
 
 /* an expression of type t with the constant value v */
-VPRIV void cxx_ec(cxx *c, qty t, int64_t v)
+VPRIV void cxx_ec(cxx *c, ast_qualified_type t, int64_t v)
 {
 	cxx_et(c, t, false);
 	if (t != CXX_TY_UNKNOWN) {
@@ -1324,9 +1324,9 @@ VPRIV void cxx_ec(cxx *c, qty t, int64_t v)
 		uint64_t size = AST_TYPE(c->ast, t)->size;
 
 		/* the value in t: bool is 0 or 1, a narrower integer wraps (sign- or zero-extended) */
-		if (k == TY_BOOL)
+		if (k == AST_TYPE_BOOL)
 			v = v != 0;
-		else if (k >= TY_CHAR && k <= TY_ULLONG && size && size < 8) {
+		else if (k >= AST_TYPE_CHAR && k <= AST_TYPE_UNSIGNED_LONG_LONG && size && size < 8) {
 			int sh = (int)(64 - size * 8);
 
 			v = cc_type_is_signed(c->ast, t) ? (int64_t)((uint64_t)v << sh) >> sh : (int64_t)(((uint64_t)v << sh) >> sh);
@@ -1419,7 +1419,7 @@ VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v)
 	return false;
 }
 
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
+static int cxx_class_constructs(cxx *c, ast_qualified_type to, const ast_qualified_type *args, const uint8_t *lval, uint32_t n, bool implicit);
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
 
 /*
@@ -1429,32 +1429,32 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
 /* does class t declare a user-provided (not defaulted, not deleted) member named id taking one t (by value or
    by reference: a copy or move constructor, assignment), which makes the operation not trivial
    ([class.copy.ctor]/11, [class.copy.assign]/9) */
-static bool cxx_class_user_special(cxx *c, qty t, uint32_t id)
+static bool cxx_class_user_special(cxx *c, ast_qualified_type t, uint32_t id)
 {
-	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(t));
+	cxx_scope *cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 
 	if (!cls)
 		return false;
 	for (cxx_entity *e = cxx_lookup_local(cls, id); e; e = e->next) {
 		const ctype *ft;
-		qty p0;
+		ast_qualified_type p0;
 
 		if (e->kind != CXX_ENTITY_VALUE || e->fn_defaulted || e->fn_deleted || e->ty == CXX_TY_UNKNOWN ||
-		    AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+		    AST_TYPE_KIND(c->ast, e->ty) != AST_TYPE_FUNCTION)
 			continue;
 		ft = AST_TYPE(c->ast, e->ty);
 		if (ft->n < 1 || ft->n > 1u + e->ndefaults)
 			continue;
 		p0 = c->ast->params[ft->aux];
-		if (p0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p0) == TY_PTR && AST_TYPE(c->ast, p0)->ext)
+		if (p0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p0) == AST_TYPE_POINTER && AST_TYPE(c->ast, p0)->ext)
 			p0 = AST_TYPE(c->ast, p0)->base;
-		if (p0 != CXX_TY_UNKNOWN && QUNQ(p0) == QUNQ(t))
+		if (p0 != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(p0) == AST_QUALIFIED_TYPE_UNQUALIFIED(t))
 			return true;
 	}
 	return false;
 }
 
-VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v)
+VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualified_type *t, uint32_t nt, int64_t *v)
 {
 	const ctype *x;
 	int k;
@@ -1469,28 +1469,28 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	   no operator< fits (clang's builtin; libc++'s __default_three_way_comparator): as the binary
 	   operator decides it (expression/binary.c) */
 	if (nt == 2 && IS("__builtin_lt_synthesizes_from_spaceship")) {
-		qty l = t[0], r = t[1];
-		qty et = c->etype;
+		ast_qualified_type l = t[0], r = t[1];
+		ast_qualified_type et = c->etype;
 		uint8_t elval = c->elval, econst = c->econst, resolved = c->call_resolved, nv = c->none_viable;
 		int64_t ev = c->evalue;
 		cxx_entity *picked = c->call_picked;
 		bool lt, ss = false;
 
-		if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_PTR && AST_TYPE(c->ast, l)->ext)
+		if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == AST_TYPE_POINTER && AST_TYPE(c->ast, l)->ext)
 			l = AST_TYPE(c->ast, l)->base;
-		if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == TY_PTR && AST_TYPE(c->ast, r)->ext)
+		if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == AST_TYPE_POINTER && AST_TYPE(c->ast, r)->ext)
 			r = AST_TYPE(c->ast, r)->base;
 		if (l == CXX_TY_UNKNOWN || r == CXX_TY_UNKNOWN || c->tentative)
 			return false;
-		if (!(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != TY_ARRAY) &&
-		    !(cc_type_is_record(c->ast, r) && AST_TYPE_KIND(c->ast, r) != TY_ARRAY)) {
+		if (!(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY) &&
+		    !(cc_type_is_record(c->ast, r) && AST_TYPE_KIND(c->ast, r) != AST_TYPE_ARRAY)) {
 			*v = 0;	/* (no class: the built-in <) */
 			return true;
 		}
 		c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = 1;
 		lt = cxx_operator_call_type(c, vintern_cstr("operator<"), l, &r, 1) && c->call_resolved;
 		if (!lt) {
-			qty ra = r, la = l;
+			ast_qualified_type ra = r, la = l;
 
 			c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = 1;
 			ss = cxx_operator_call_type(c, vintern_cstr("operator<=>"), l, &ra, 1) && c->call_resolved;
@@ -1508,26 +1508,26 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	if (nt == 2 && (IS("__is_trivially_assignable") || IS("__is_nothrow_assignable"))) {
 		/* T& = U trivially (or without throwing): scalars of compatible kinds yes; the same class: trivially
 		   copyable as vcc laid it out, or no if its copy, move or destructor is not trivial (else not known) */
-		qty l = t[0], r = t[1];
+		ast_qualified_type l = t[0], r = t[1];
 		bool nothrow = IS("__is_nothrow_assignable");
 
-		if (AST_TYPE_KIND(c->ast, l) != TY_PTR || !AST_TYPE(c->ast, l)->ext)
+		if (AST_TYPE_KIND(c->ast, l) != AST_TYPE_POINTER || !AST_TYPE(c->ast, l)->ext)
 			return false;	/* (to a prvalue: classes only, not decided here) */
-		l = QUNQ(AST_TYPE(c->ast, l)->base);
-		if (AST_TYPE_KIND(c->ast, r) == TY_PTR && AST_TYPE(c->ast, r)->ext)
+		l = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, l)->base);
+		if (AST_TYPE_KIND(c->ast, r) == AST_TYPE_POINTER && AST_TYPE(c->ast, r)->ext)
 			r = AST_TYPE(c->ast, r)->base;
-		r = QUNQ(r);
+		r = AST_QUALIFIED_TYPE_UNQUALIFIED(r);
 		int lk = AST_TYPE_KIND(c->ast, l), rk = AST_TYPE_KIND(c->ast, r);
-		bool larith = lk >= TY_BOOL && lk <= TY_FLOAT128, rarith = rk >= TY_BOOL && rk <= TY_FLOAT128;
+		bool larith = lk >= AST_TYPE_BOOL && lk <= AST_TYPE_FLOAT128, rarith = rk >= AST_TYPE_BOOL && rk <= AST_TYPE_FLOAT128;
 
-		if (larith || lk == TY_ENUM || (lk == TY_PTR && !AST_TYPE(c->ast, l)->ext)) {
-			if ((larith && (rarith || rk == TY_ENUM)) || l == r) {
-				*v = !(QQ(AST_TYPE(c->ast, t[0])->base) & Q_CONST) && (lk != TY_ENUM || l == r);
+		if (larith || lk == AST_TYPE_ENUM || (lk == AST_TYPE_POINTER && !AST_TYPE(c->ast, l)->ext)) {
+			if ((larith && (rarith || rk == AST_TYPE_ENUM)) || l == r) {
+				*v = !(AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c->ast, t[0])->base) & AST_QUALIFIER_CONST) && (lk != AST_TYPE_ENUM || l == r);
 				return true;
 			}
 			return false;
 		}
-		if (cc_type_is_record(c->ast, l) && lk != TY_ARRAY && l == r) {
+		if (cc_type_is_record(c->ast, l) && lk != AST_TYPE_ARRAY && l == r) {
 			bool pod, empty;
 
 			if (!nothrow && cxx_class_user_special(c, l, vintern_cstr("operator="))) {
@@ -1547,27 +1547,27 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	}
 	if (nt == 2 && (IS("__is_constructible") || IS("__is_assignable"))) {
 		bool assign = IS("__is_assignable");
-		qty to = t[0], from = t[1];
+		ast_qualified_type to = t[0], from = t[1];
 		const ctype *tt = AST_TYPE(c->ast, to), *ft = AST_TYPE(c->ast, from);
-		bool rvalue = !(ft->kind == TY_PTR && ft->ext == 1);
+		bool rvalue = !(ft->kind == AST_TYPE_POINTER && ft->ext == 1);
 
-		if (ft->kind == TY_PTR && ft->ext)
+		if (ft->kind == AST_TYPE_POINTER && ft->ext)
 			from = ft->base;
 		if (assign) {
-			if (!(tt->kind == TY_PTR && tt->ext) || (QQ(tt->base) & Q_CONST)) {
-				if (!(tt->kind == TY_PTR && tt->ext) && !cc_type_is_record(c->ast, to)) {
+			if (!(tt->kind == AST_TYPE_POINTER && tt->ext) || (AST_QUALIFIED_TYPE_QUALIFIERS(tt->base) & AST_QUALIFIER_CONST)) {
+				if (!(tt->kind == AST_TYPE_POINTER && tt->ext) && !cc_type_is_record(c->ast, to)) {
 					*v = 0;	/* (a scalar rvalue is not assignable) */
 					return true;
 				}
-				if (tt->kind == TY_PTR && tt->ext && !cc_type_is_record(c->ast, tt->base)) {
+				if (tt->kind == AST_TYPE_POINTER && tt->ext && !cc_type_is_record(c->ast, tt->base)) {
 					*v = 0;	/* (a const scalar) */
 					return true;
 				}
 			}
-			if (tt->kind == TY_PTR && tt->ext)
+			if (tt->kind == AST_TYPE_POINTER && tt->ext)
 				to = tt->base;
-			if (!cc_type_is_record(c->ast, to) && !(QQ(to) & Q_CONST)) {
-				int rank = cxx_arg_rank0(c, QUNQ(to), from, !rvalue, true);
+			if (!cc_type_is_record(c->ast, to) && !(AST_QUALIFIED_TYPE_QUALIFIERS(to) & AST_QUALIFIER_CONST)) {
+				int rank = cxx_arg_rank0(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), from, !rvalue, true);
 
 				if (rank == 2)
 					return false;
@@ -1575,9 +1575,9 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 				return true;
 			}
 		}
-		if (cc_type_is_record(c->ast, to) && !(AST_TYPE_KIND(c->ast, to) == TY_PTR) && QUNQ(to) == QUNQ(from) &&
-		    !(assign && (QQ(to) & Q_CONST))) {
-			int r = cxx_class_special(c, QUNQ(to), assign, rvalue && !(QQ(from) & Q_CONST), 0);
+		if (cc_type_is_record(c->ast, to) && !(AST_TYPE_KIND(c->ast, to) == AST_TYPE_POINTER) && AST_QUALIFIED_TYPE_UNQUALIFIED(to) == AST_QUALIFIED_TYPE_UNQUALIFIED(from) &&
+		    !(assign && (AST_QUALIFIED_TYPE_QUALIFIERS(to) & AST_QUALIFIER_CONST))) {
+			int r = cxx_class_special(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), assign, rvalue && !(AST_QUALIFIED_TYPE_QUALIFIERS(from) & AST_QUALIFIER_CONST), 0);
 
 			if (r < 0)
 				return false;
@@ -1586,16 +1586,16 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		}
 		/* a class object from something else: its operator= functions, then the implicit ones, which take
 		   an object of the class (what the right side converts to, or not) */
-		if (assign && cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR && AST_TYPE_KIND(c->ast, to) != TY_ARRAY &&
-		    !(QQ(to) & Q_CONST) && from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID) {
-			cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to));
+		if (assign && cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != AST_TYPE_POINTER && AST_TYPE_KIND(c->ast, to) != AST_TYPE_ARRAY &&
+		    !(AST_QUALIFIED_TYPE_QUALIFIERS(to) & AST_QUALIFIER_CONST) && from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != AST_TYPE_VOID) {
+			cxx_scope *cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 			cxx_entity *set, *own = NULL;
 			uint8_t lv = !rvalue;
 			int rank;
 
 			if (!cls)
 				return false;
-			cxx_type_require_complete(c, QUNQ(to));
+			cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 			if (cls->has_dependent_base)
 				return false;
 			set = cxx_lookup_in(c, cls, vintern_cstr("operator="), 0);
@@ -1605,7 +1605,7 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 					break;
 				}
 			if (own) {
-				qty et = c->etype;
+				ast_qualified_type et = c->etype;
 				bool el = c->elval;
 				cxx_entity *callee = c->ecallee;
 				uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
@@ -1624,7 +1624,7 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 					return false;
 			}
 			c->rank_no_literal = 1;
-			rank = cxx_arg_rank0(c, QUNQ(to), from, lv, true);
+			rank = cxx_arg_rank0(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), from, lv, true);
 			c->rank_no_literal = 0;
 			if (rank == 2)
 				return false;
@@ -1633,7 +1633,7 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 				return true;
 			}
 			{
-				int r = cxx_class_special(c, QUNQ(to), 1, true, 0);	/* (from the converted temporary) */
+				int r = cxx_class_special(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), 1, true, 0);	/* (from the converted temporary) */
 
 				if (r < 0)
 					return false;
@@ -1649,19 +1649,19 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	if (nt == 2 && c->nullptr_ty && (IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible") ||
 					 IS("__is_convertible") || IS("__is_convertible_to") || IS("__is_nothrow_convertible"))) {
 		bool ctor = IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible");
-		qty to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
+		ast_qualified_type to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
 
-		if (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext)
+		if (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) == AST_TYPE_POINTER && AST_TYPE(c->ast, from)->ext)
 			from = AST_TYPE(c->ast, from)->base;
-		if (from != CXX_TY_UNKNOWN && QUNQ(from) == c->nullptr_ty && to != CXX_TY_UNKNOWN) {
-			qty tb = AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext ? AST_TYPE(c->ast, to)->base : to;
+		if (from != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(from) == c->nullptr_ty && to != CXX_TY_UNKNOWN) {
+			ast_qualified_type tb = AST_TYPE_KIND(c->ast, to) == AST_TYPE_POINTER && AST_TYPE(c->ast, to)->ext ? AST_TYPE(c->ast, to)->base : to;
 			bool ref = tb != to;
 
-			if (!ref || (QQ(tb) & Q_CONST) || AST_TYPE(c->ast, to)->ext == 2) {
+			if (!ref || (AST_QUALIFIED_TYPE_QUALIFIERS(tb) & AST_QUALIFIER_CONST) || AST_TYPE(c->ast, to)->ext == 2) {
 				int k = AST_TYPE_KIND(c->ast, tb);
 
-				*v = (k == TY_PTR && !AST_TYPE(c->ast, tb)->ext) || QUNQ(tb) == c->nullptr_ty || (ctor && !ref && k == TY_BOOL);
-				if (k == TY_PTR || QUNQ(tb) == c->nullptr_ty || !cc_type_is_record(c->ast, tb))
+				*v = (k == AST_TYPE_POINTER && !AST_TYPE(c->ast, tb)->ext) || AST_QUALIFIED_TYPE_UNQUALIFIED(tb) == c->nullptr_ty || (ctor && !ref && k == AST_TYPE_BOOL);
+				if (k == AST_TYPE_POINTER || AST_QUALIFIED_TYPE_UNQUALIFIED(tb) == c->nullptr_ty || !cc_type_is_record(c->ast, tb))
 					return true;
 			} else if (!cc_type_is_record(c->ast, tb)) {
 				*v = 0;	/* (T& not const from a prvalue) */
@@ -1674,30 +1674,30 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	    IS("__is_convertible_to") || IS("__is_nothrow_convertible"))))) {
 		bool conv = !IS("__is_constructible") && !IS("__is_nothrow_constructible");
 		bool nothrow = IS("__is_nothrow_constructible") || IS("__is_nothrow_convertible");
-		qty to = conv ? t[1] : t[0], from = nt == 2 ? (conv ? t[0] : t[1]) : CXX_TY_UNKNOWN;
+		ast_qualified_type to = conv ? t[1] : t[0], from = nt == 2 ? (conv ? t[0] : t[1]) : CXX_TY_UNKNOWN;
 		uint8_t lv = 0;
 
-		if (nt == 2 && AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext) {
+		if (nt == 2 && AST_TYPE_KIND(c->ast, from) == AST_TYPE_POINTER && AST_TYPE(c->ast, from)->ext) {
 			lv = AST_TYPE(c->ast, from)->ext == 1;
 			from = AST_TYPE(c->ast, from)->base;
 		}
-		if (AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext && nt == 2 && !conv) {
+		if (AST_TYPE_KIND(c->ast, to) == AST_TYPE_POINTER && AST_TYPE(c->ast, to)->ext && nt == 2 && !conv) {
 			/* T&/const T&/T&& from a class object: a reference to it or to a base binds (or not) */
 			const ctype *tt = AST_TYPE(c->ast, to);
 
 			if (cc_type_is_record(c->ast, tt->base) && cc_type_is_record(c->ast, from) &&
-			    (QUNQ(tt->base) == QUNQ(from) || (cxx_type_class_scope(c, QUNQ(from)) && cxx_derives(c, from, tt->base, 0)))) {
-				bool cq = !(QQ(from) & Q_CONST) || (QQ(tt->base) & Q_CONST);
+			    (AST_QUALIFIED_TYPE_UNQUALIFIED(tt->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(from) || (cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from)) && cxx_derives(c, from, tt->base, 0)))) {
+				bool cq = !(AST_QUALIFIED_TYPE_QUALIFIERS(from) & AST_QUALIFIER_CONST) || (AST_QUALIFIED_TYPE_QUALIFIERS(tt->base) & AST_QUALIFIER_CONST);
 
-				*v = cq && (tt->ext == 1 ? lv || (QQ(tt->base) & Q_CONST) : !lv);
+				*v = cq && (tt->ext == 1 ? lv || (AST_QUALIFIED_TYPE_QUALIFIERS(tt->base) & AST_QUALIFIER_CONST) : !lv);
 				return true;
 			}
 			/* T& (not const) from an unrelated class with no conversion function: nothing binds */
-			if (cc_type_is_record(c->ast, tt->base) && cc_type_is_record(c->ast, from) && tt->ext == 1 && !(QQ(tt->base) & Q_CONST)) {
-				cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from));
+			if (cc_type_is_record(c->ast, tt->base) && cc_type_is_record(c->ast, from) && tt->ext == 1 && !(AST_QUALIFIED_TYPE_QUALIFIERS(tt->base) & AST_QUALIFIER_CONST)) {
+				cxx_scope *fs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from));
 
 				if (fs)
-					cxx_type_require_complete(c, QUNQ(from));
+					cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from));
 				if (fs && !cxx_class_converts(c, fs, 0)) {
 					*v = 0;
 					return true;
@@ -1705,15 +1705,15 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			}
 		}
 		if (conv && nt == 2 && from != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, from) && cc_type_is_record(c->ast, to) &&
-		    AST_TYPE_KIND(c->ast, from) != TY_ARRAY && AST_TYPE_KIND(c->ast, to) != TY_ARRAY && QUNQ(from) != QUNQ(to)) {
+		    AST_TYPE_KIND(c->ast, from) != AST_TYPE_ARRAY && AST_TYPE_KIND(c->ast, to) != AST_TYPE_ARRAY && AST_QUALIFIED_TYPE_UNQUALIFIED(from) != AST_QUALIFIED_TYPE_UNQUALIFIED(to)) {
 			/* one class to another: only derived to base, a constructor of To or a conversion function of From;
 			   none of them (iterator tags: random_access_iterator_tag to contiguous_iterator_tag): no */
-			cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from)), *ts = cxx_type_class_scope(c, QUNQ(to));
+			cxx_scope *fs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from)), *ts = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 
 			if (fs && ts && !fs->has_dependent_base && !ts->has_dependent_base) {
 				bool any_ctor = false;
 
-				cxx_type_require_complete(c, QUNQ(from)), cxx_type_require_complete(c, QUNQ(to));
+				cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from)), cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 				for (cxx_entity *e = cxx_lookup_in(c, ts, cxx_ctor_id(), 0); e; e = e->next)
 					if (e->member_of == ts && !e->fn_implicit && !e->fn_defaulted)
 						any_ctor = true;
@@ -1723,8 +1723,8 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 				}
 			}
 		}
-		if (cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR &&
-		    (nt == 1 || (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID))) {
+		if (cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != AST_TYPE_POINTER &&
+		    (nt == 1 || (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != AST_TYPE_VOID))) {
 			int r;
 
 			c->no_literal = 1;
@@ -1737,16 +1737,16 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			return true;
 		}
 		/* a class to something that is not one: its conversion functions (none: no) */
-		if (nt == 2 && cc_type_is_record(c->ast, from) && !cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_VOID &&
-		    !(AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext)) {
-			cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from));
+		if (nt == 2 && cc_type_is_record(c->ast, from) && !cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != AST_TYPE_VOID &&
+		    !(AST_TYPE_KIND(c->ast, to) == AST_TYPE_POINTER && AST_TYPE(c->ast, to)->ext)) {
+			cxx_scope *fs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from));
 
 			if (fs)
-				cxx_type_require_complete(c, QUNQ(from));
+				cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(from));
 			if (!fs || fs->has_dependent_base)
 				return false;
 			{
-				int k = cxx_class_converts_to(c, fs, QUNQ(to), 0);
+				int k = cxx_class_converts_to(c, fs, AST_QUALIFIED_TYPE_UNQUALIFIED(to), 0);
 
 				if (k < 0)
 					return false;
@@ -1761,25 +1761,25 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			*v = 0;
 			return true;
 		}
-		if (QUNQ(t[0]) == QUNQ(t[1])) {
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(t[0]) == AST_QUALIFIED_TYPE_UNQUALIFIED(t[1])) {
 			*v = 1;
 			return true;
 		}
-		if (!cxx_type_class_scope(c, QUNQ(t[1])))
+		if (!cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t[1])))
 			return false;	/* (the derived class's bases: not known) */
 		*v = cxx_derives(c, t[1], t[0], 0);
 		return true;
 	}
 	/* T from one T (a copy or a move): not trivial with a user-provided copy or move constructor */
 	if (nt == 2 && IS("__is_trivially_constructible") && t[0] != CXX_TY_UNKNOWN && t[1] != CXX_TY_UNKNOWN &&
-	    cc_type_is_record(c->ast, t[0]) && AST_TYPE_KIND(c->ast, t[0]) != TY_ARRAY) {
-		qty from = t[1];
+	    cc_type_is_record(c->ast, t[0]) && AST_TYPE_KIND(c->ast, t[0]) != AST_TYPE_ARRAY) {
+		ast_qualified_type from = t[1];
 
-		if (AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext)
+		if (AST_TYPE_KIND(c->ast, from) == AST_TYPE_POINTER && AST_TYPE(c->ast, from)->ext)
 			from = AST_TYPE(c->ast, from)->base;
 		/* (or a defaulted one that is not trivial: a member's or a base's is not, vcc's trivial-ABI test; it
 		   counts a destructor that is not trivial too) */
-		if (QUNQ(from) == QUNQ(t[0]) && (cxx_class_user_special(c, t[0], cxx_ctor_id()) || cxx_gen_trivial_abi(c, QUNQ(t[0]), 0) == 0)) {
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(from) == AST_QUALIFIED_TYPE_UNQUALIFIED(t[0]) && (cxx_class_user_special(c, t[0], cxx_ctor_id()) || cxx_gen_trivial_abi(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t[0]), 0) == 0)) {
 			*v = 0;
 			return true;
 		}
@@ -1788,23 +1788,23 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			IS("__is_nothrow_constructible") || IS("__is_trivially_constructible"))) {
 		/* constructible is (To, From); convertible is (From, To) */
 		bool ctor = IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible");
-		qty to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
+		ast_qualified_type to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
 		const ctype *ft = AST_TYPE(c->ast, from), *tt = AST_TYPE(c->ast, to);
-		bool lv = ft->kind == TY_PTR && ft->ext == 1;
+		bool lv = ft->kind == AST_TYPE_POINTER && ft->ext == 1;
 		int rank;
 
-		if (ft->kind == TY_PTR && ft->ext)
+		if (ft->kind == AST_TYPE_POINTER && ft->ext)
 			from = ft->base;
-		if (tt->kind == TY_VOID || AST_TYPE_KIND(c->ast, from) == TY_VOID) {
-			*v = !ctor && tt->kind == TY_VOID && AST_TYPE_KIND(c->ast, from) == TY_VOID;
+		if (tt->kind == AST_TYPE_VOID || AST_TYPE_KIND(c->ast, from) == AST_TYPE_VOID) {
+			*v = !ctor && tt->kind == AST_TYPE_VOID && AST_TYPE_KIND(c->ast, from) == AST_TYPE_VOID;
 			return true;
 		}
-		if (tt->kind == TY_ARRAY || tt->kind == TY_FUNC) {
+		if (tt->kind == AST_TYPE_ARRAY || tt->kind == AST_TYPE_FUNCTION) {
 			*v = 0;
 			return true;
 		}
 		/* (an integer type is not a null pointer constant: only the literal 0 is) */
-		if (tt->kind == TY_PTR && !tt->ext && AST_TYPE_KIND(c->ast, from) >= TY_BOOL && AST_TYPE_KIND(c->ast, from) <= TY_FLOAT128) {
+		if (tt->kind == AST_TYPE_POINTER && !tt->ext && AST_TYPE_KIND(c->ast, from) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, from) <= AST_TYPE_FLOAT128) {
 			*v = 0;
 			return true;
 		}
@@ -1820,15 +1820,15 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		return false;
 	x = AST_TYPE(c->ast, t[0]);
 	k = x->kind;
-	ref = k == TY_PTR && x->ext;
+	ref = k == AST_TYPE_POINTER && x->ext;
 	/* T(): scalars and pointers yes, references, void, functions and arrays of unknown bound no; a class's
 	   default constructor decides for a class */
 	if (IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_default_constructible")) {
-		if ((k >= TY_BOOL && k <= TY_FLOAT128) || (k == TY_PTR && !x->ext) || k == TY_ENUM) {
+		if ((k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128) || (k == AST_TYPE_POINTER && !x->ext) || k == AST_TYPE_ENUM) {
 			*v = 1;
 			return true;
 		}
-		if (ref || k == TY_VOID || k == TY_FUNC) {
+		if (ref || k == AST_TYPE_VOID || k == AST_TYPE_FUNCTION) {
 			*v = 0;
 			return true;
 		}
@@ -1846,30 +1846,30 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	   destructor is not deleted (its destructor's noexcept: implicitly so; libc++ declares none noexcept(false));
 	   not void, a function, an array of unknown bound */
 	if (IS("__is_destructible") || IS("__is_nothrow_destructible")) {
-		qty e = t[0];
+		ast_qualified_type e = t[0];
 
 		if (e == CXX_TY_UNKNOWN)
 			return false;
-		if (AST_TYPE_KIND(c->ast, e) == TY_PTR && AST_TYPE(c->ast, e)->ext) {
+		if (AST_TYPE_KIND(c->ast, e) == AST_TYPE_POINTER && AST_TYPE(c->ast, e)->ext) {
 			*v = 1;
 			return true;
 		}
-		if (AST_TYPE_KIND(c->ast, e) == TY_ARRAY && !AST_TYPE(c->ast, e)->n) {
+		if (AST_TYPE_KIND(c->ast, e) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, e)->n) {
 			*v = 0;
 			return true;
 		}
-		while (AST_TYPE_KIND(c->ast, e) == TY_ARRAY)
+		while (AST_TYPE_KIND(c->ast, e) == AST_TYPE_ARRAY)
 			e = AST_TYPE(c->ast, e)->base;
 		x = AST_TYPE(c->ast, e);
-		if (x->kind == TY_VOID || x->kind == TY_FUNC) {
+		if (x->kind == AST_TYPE_VOID || x->kind == AST_TYPE_FUNCTION) {
 			*v = 0;
 			return true;
 		}
 		if (cc_type_is_record(c->ast, e)) {
-			cxx_scope *ds = cxx_tag_scope_get(c, QUNQ(e));
+			cxx_scope *ds = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e));
 			cxx_entity *d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
 
-			if (!(c->ast->tags[x->aux].flags & RF_COMPLETE))
+			if (!(c->ast->tags[x->aux].flags & AST_RECORD_FLAG_COMPLETE))
 				return false;
 			*v = !(d && d->fn_deleted);
 			return true;
@@ -1886,19 +1886,19 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		bool never = IS("__is_empty") || IS("__is_polymorphic") || IS("__is_abstract");
 
 		if (trivially || never) {
-			qty e = t[0];
+			ast_qualified_type e = t[0];
 			bool pod, empty;
 
-			if (e != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e) == TY_PTR && AST_TYPE(c->ast, e)->ext) {
+			if (e != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e) == AST_TYPE_POINTER && AST_TYPE(c->ast, e)->ext) {
 				/* a reference: destroyed trivially (nothing to destroy), a literal type; not an object type,
 				   so none of the others (clang's answers; is_empty<int&> in tuple<int&>'s leaves) */
 				*v = IS("__is_trivially_destructible") || IS("__has_trivial_destructor") || IS("__is_literal_type");
 				return true;
 			}
-			while (AST_TYPE_KIND(c->ast, e) == TY_ARRAY)
+			while (AST_TYPE_KIND(c->ast, e) == AST_TYPE_ARRAY)
 				e = AST_TYPE(c->ast, e)->base;
 			x = AST_TYPE(c->ast, e);
-			if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || (x->kind == TY_PTR && !x->ext) || x->kind == TY_ENUM) {
+			if ((x->kind >= AST_TYPE_BOOL && x->kind <= AST_TYPE_FLOAT128) || (x->kind == AST_TYPE_POINTER && !x->ext) || x->kind == AST_TYPE_ENUM) {
 				*v = trivially;
 				return true;
 			}
@@ -1936,34 +1936,34 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		return true;
 	}
 	if (IS("__is_final")) {
-		cxx_scope *fs = cc_type_is_record(c->ast, t[0]) && k != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(t[0])) : NULL;
+		cxx_scope *fs = cc_type_is_record(c->ast, t[0]) && k != AST_TYPE_ARRAY ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t[0])) : NULL;
 
-		if (cc_type_is_record(c->ast, t[0]) && k != TY_ARRAY && !fs)
+		if (cc_type_is_record(c->ast, t[0]) && k != AST_TYPE_ARRAY && !fs)
 			return false;
 		*v = fs && fs->is_final;
 		return true;
 	}
-	if (IS("__is_void")) *v = k == TY_VOID;
-	else if (IS("__is_integral")) *v = (k >= TY_BOOL && k <= TY_UINT128);
-	else if (IS("__is_floating_point")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128);
-	else if (IS("__is_arithmetic")) *v = (k >= TY_BOOL && k <= TY_FLOAT128);
-	else if (IS("__is_pointer")) *v = k == TY_PTR && !x->ext;
+	if (IS("__is_void")) *v = k == AST_TYPE_VOID;
+	else if (IS("__is_integral")) *v = (k >= AST_TYPE_BOOL && k <= AST_TYPE_UINT128);
+	else if (IS("__is_floating_point")) *v = (k >= AST_TYPE_BFLOAT16 && k <= AST_TYPE_FLOAT128);
+	else if (IS("__is_arithmetic")) *v = (k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128);
+	else if (IS("__is_pointer")) *v = k == AST_TYPE_POINTER && !x->ext;
 	else if (IS("__is_reference")) *v = ref;
 	else if (IS("__is_lvalue_reference")) *v = ref && x->ext == 1;
 	else if (IS("__is_rvalue_reference")) *v = ref && x->ext == 2;
-	else if (IS("__is_const")) *v = !ref && (QQ(t[0]) & Q_CONST) != 0;
-	else if (IS("__is_volatile")) *v = !ref && (QQ(t[0]) & Q_VOLATILE) != 0;
-	else if (IS("__is_array")) *v = k == TY_ARRAY;
-	else if (IS("__is_function")) *v = k == TY_FUNC;
-	else if (IS("__is_enum")) *v = k == TY_ENUM;
-	else if (IS("__is_union")) *v = k == TY_UNION;
-	else if (IS("__is_class")) *v = k == TY_STRUCT;
-	else if (IS("__is_signed")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128) || (k >= TY_CHAR && k <= TY_UINT128 && cc_type_is_signed(c->ast, t[0]));
-	else if (IS("__is_unsigned")) *v = k == TY_BOOL || (k >= TY_CHAR && k <= TY_UINT128 && !cc_type_is_signed(c->ast, t[0]));
-	else if (IS("__is_fundamental")) *v = k <= TY_FLOAT128;
-	else if (IS("__is_scalar")) *v = (k >= TY_BOOL && k <= TY_FLOAT128) || (k == TY_PTR && !x->ext) || k == TY_ENUM;
-	else if (IS("__is_object")) *v = k != TY_FUNC && k != TY_VOID && !ref;
-	else if (IS("__is_compound")) *v = k > TY_FLOAT128;
+	else if (IS("__is_const")) *v = !ref && (AST_QUALIFIED_TYPE_QUALIFIERS(t[0]) & AST_QUALIFIER_CONST) != 0;
+	else if (IS("__is_volatile")) *v = !ref && (AST_QUALIFIED_TYPE_QUALIFIERS(t[0]) & AST_QUALIFIER_VOLATILE) != 0;
+	else if (IS("__is_array")) *v = k == AST_TYPE_ARRAY;
+	else if (IS("__is_function")) *v = k == AST_TYPE_FUNCTION;
+	else if (IS("__is_enum")) *v = k == AST_TYPE_ENUM;
+	else if (IS("__is_union")) *v = k == AST_TYPE_UNION;
+	else if (IS("__is_class")) *v = k == AST_TYPE_STRUCT;
+	else if (IS("__is_signed")) *v = (k >= AST_TYPE_BFLOAT16 && k <= AST_TYPE_FLOAT128) || (k >= AST_TYPE_CHAR && k <= AST_TYPE_UINT128 && cc_type_is_signed(c->ast, t[0]));
+	else if (IS("__is_unsigned")) *v = k == AST_TYPE_BOOL || (k >= AST_TYPE_CHAR && k <= AST_TYPE_UINT128 && !cc_type_is_signed(c->ast, t[0]));
+	else if (IS("__is_fundamental")) *v = k <= AST_TYPE_FLOAT128;
+	else if (IS("__is_scalar")) *v = (k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128) || (k == AST_TYPE_POINTER && !x->ext) || k == AST_TYPE_ENUM;
+	else if (IS("__is_object")) *v = k != AST_TYPE_FUNCTION && k != AST_TYPE_VOID && !ref;
+	else if (IS("__is_compound")) *v = k > AST_TYPE_FLOAT128;
 	else
 		return false;
 #undef IS
@@ -1971,32 +1971,32 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 }
 
 /* a range-for's element: *begin(r) for an array or a class with begin() (an lvalue's type; ADL begin: not yet) */
-VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem)
+VPRIV bool cxx_range_element_type(cxx *c, ast_qualified_type r, ast_qualified_type *elem)
 {
 	const ctype *x;
 	cxx_scope *cls;
 	cxx_entity *set;
-	qty it;
+	ast_qualified_type it;
 
 	if (r == CXX_TY_UNKNOWN)
 		return false;
 	x = AST_TYPE(c->ast, r);
-	if (x->kind == TY_ARRAY) {
+	if (x->kind == AST_TYPE_ARRAY) {
 		*elem = x->base;
 		return true;
 	}
-	if (!(cls = cxx_type_class_scope(c, QUNQ(r))))
+	if (!(cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(r))))
 		return false;
 	set = cxx_lookup_in(c, cls, vintern_cstr("begin"), 0);
 	if (!set || set->kind == CXX_ENTITY_DEPENDENT)
 		return false;
-	c->call_obj = (QQ(r) & Q_CONST) ? 2 : 1;
+	c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(r) & AST_QUALIFIER_CONST) ? 2 : 1;
 	cxx_call_type(c, set, CXX_TY_UNKNOWN, NULL, NULL, 0);
 	it = c->etype;
 	if (it == CXX_TY_UNKNOWN)
 		return false;
 	x = AST_TYPE(c->ast, it);
-	if (x->kind == TY_PTR && !x->ext) {
+	if (x->kind == AST_TYPE_POINTER && !x->ext) {
 		*elem = x->base;
 		return true;
 	}
@@ -2008,9 +2008,9 @@ VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem)
 }
 
 /* argument-dependent lookup: name in the namespace of each argument's class or enumeration (the first that has it) */
-VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs)
+VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs)
 {
-	qty acopy[16];
+	ast_qualified_type acopy[16];
 	uint8_t lcopy[16];
 
 	c->einvalid_unsure = 0;
@@ -2020,18 +2020,18 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 	}
 	memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
 	for (uint32_t i = 0; i < nargs; i++) {
-		qty t = acopy[i];
+		ast_qualified_type t = acopy[i];
 		cxx_scope *s;
 		cxx_entity *set;
 
 		if (t == CXX_TY_UNKNOWN)
 			continue;
-		if (AST_TYPE_KIND(c->ast, t) == TY_PTR)
+		if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER)
 			t = AST_TYPE(c->ast, t)->base;
-		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ENUM) {
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ENUM) {
 			/* an enumeration: the innermost namespace of its declaration ([basic.lookup.argdep]/3.3; a member
 			   enumeration's class too, not looked in here) */
-			s = cxx_tag_home(c, QUNQ(t));
+			s = cxx_tag_home(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 			while (s && s->kind != CXX_SCOPE_NAMESPACE)
 				s = s->parent;
 			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
@@ -2043,7 +2043,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 				c->einvalid_unsure = 1;
 			continue;
 		}
-		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))))
+		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))))
 			continue;
 		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */
 		if ((set = cxx_friend_lookup(c, t, name, 0))) {
@@ -2074,28 +2074,28 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 /* the one scalar type (arithmetic, an enumeration, a pointer) class t's conversion functions (or a base's)
    give, for a built-in operator its object is an operand of (atomic<int> == 4); CXX_TY_UNKNOWN: none, several
    or not known */
-static qty cxx_class_scalar_conversion_in(cxx *c, cxx_scope *cls, int depth, bool *several)
+static ast_qualified_type cxx_class_scalar_conversion_in(cxx *c, cxx_scope *cls, int depth, bool *several)
 {
-	qty found = CXX_TY_UNKNOWN;
+	ast_qualified_type found = CXX_TY_UNKNOWN;
 
 	if (!cls || cls->has_dependent_base || depth > 8 || cls->conv_unknown) {
 		*several = true;
 		return CXX_TY_UNKNOWN;
 	}
 	for (uint32_t i = 0; cls->has_conversion && i < cls->nconv; i++) {
-		qty t = cls->conv_types[i];
+		ast_qualified_type t = cls->conv_types[i];
 
 		if (t == CXX_TY_UNKNOWN) {
 			*several = true;
 			continue;
 		}
-		if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+		if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 			t = AST_TYPE(c->ast, t)->base;
-		if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
+		if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
 			continue;
-		if (found != CXX_TY_UNKNOWN && QUNQ(found) != QUNQ(t))
+		if (found != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(found) != AST_QUALIFIED_TYPE_UNQUALIFIED(t))
 			*several = true;
-		found = QUNQ(t);
+		found = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
 	}
 	for (uint32_t i = 0; found == CXX_TY_UNKNOWN && i < cls->nused; i++)
 		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS)
@@ -2103,18 +2103,18 @@ static qty cxx_class_scalar_conversion_in(cxx *c, cxx_scope *cls, int depth, boo
 	return found;
 }
 
-VPRIV qty cxx_class_scalar_conversion(cxx *c, qty t)
+VPRIV ast_qualified_type cxx_class_scalar_conversion(cxx *c, ast_qualified_type t)
 {
 	bool several = false;
-	qty r;
+	ast_qualified_type r;
 
-	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
 		return CXX_TY_UNKNOWN;
-	r = cxx_class_scalar_conversion_in(c, cxx_type_class_scope(c, QUNQ(t)), 0, &several);
+	r = cxx_class_scalar_conversion_in(c, cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), 0, &several);
 	return several ? CXX_TY_UNKNOWN : r;
 }
 
-static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
+static int cxx_class_converts_to(cxx *c, cxx_scope *cls, ast_qualified_type to, int depth)
 {
 	int r = 0;
 
@@ -2124,13 +2124,13 @@ static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
 		if (cls->conv_unknown || !cls->nconv)
 			r = -1;
 		for (uint32_t i = 0; i < cls->nconv; i++) {
-			qty t = cls->conv_types[i];
+			ast_qualified_type t = cls->conv_types[i];
 			const ctype *x = AST_TYPE(c->ast, t);
 			int k;
 
-			if (x->kind == TY_PTR && x->ext)
+			if (x->kind == AST_TYPE_POINTER && x->ext)
 				t = x->base;
-			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
+			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
 				continue;	/* (to a class: a second user-defined conversion would be needed) */
 			{
 				uint8_t nl = c->rank_no_literal;
@@ -2158,7 +2158,7 @@ static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
 }
 
 /* may one of the class's conversion functions (or a base's) convert to the class `to` (or one derived from it)? */
-static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, qty to, int depth)
+static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, ast_qualified_type to, int depth)
 {
 	if (!cls || cls->has_dependent_base || depth > 8)
 		return true;
@@ -2166,12 +2166,12 @@ static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, qty to, int depth)
 		if (cls->conv_unknown || !cls->nconv)
 			return true;
 		for (uint32_t i = 0; i < cls->nconv; i++) {
-			qty t = cls->conv_types[i];
+			ast_qualified_type t = cls->conv_types[i];
 
-			if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+			if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
 				t = AST_TYPE(c->ast, t)->base;
-			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY &&
-			    (QUNQ(t) == QUNQ(to) || cxx_derives(c, t, to, 0)))
+			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+			    (AST_QUALIFIED_TYPE_UNQUALIFIED(t) == AST_QUALIFIED_TYPE_UNQUALIFIED(to) || cxx_derives(c, t, to, 0)))
 				return true;
 		}
 	}
@@ -2196,7 +2196,7 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth)
  * Can an object of the class `to` be made from n arguments, T(args)?  1 yes, 0 no, -1 not known.
  * Its constructors by overload resolution; with none declared the implicit ones.
  */
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
+static int cxx_class_constructs(cxx *c, ast_qualified_type to, const ast_qualified_type *args, const uint8_t *lval, uint32_t n, bool implicit);
 
 /* does the implicit (or = default) constructor throw nothing: copying (copy: from a const lvalue of the class,
    moving: from an rvalue; 0 default) each base and member does not.  1 yes, 0 no, -1 not known */
@@ -2207,7 +2207,7 @@ static int cxx_class_parts_nothrow(cxx *c, cxx_scope *cls, int copy, int depth)
 	if (!cls || depth > 8)
 		return -1;
 	for (uint32_t i = 0, nb = cls->nused, nf = cls->nfield_types; i < nb + nf && r != 0; i++) {
-		qty ft;
+		ast_qualified_type ft;
 
 		if (i < nb) {
 			cxx_scope *b = cls->used[i];
@@ -2217,14 +2217,14 @@ static int cxx_class_parts_nothrow(cxx *c, cxx_scope *cls, int copy, int depth)
 			ft = b->owner ? b->owner->ty : CXX_TY_UNKNOWN;
 		} else
 			ft = cls->field_types[i - nb];
-		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == AST_TYPE_ARRAY)
 			ft = AST_TYPE(c->ast, ft)->base;
 		if (ft == CXX_TY_UNKNOWN)
 			return -1;
 		if (!cc_type_is_record(c->ast, ft))
 			continue;	/* (a scalar, a pointer, a reference: copied without throwing) */
 		{
-			qty a = copy == 1 ? QT(QI(ft), Q_CONST) : QUNQ(ft);
+			ast_qualified_type a = copy == 1 ? AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ft), AST_QUALIFIER_CONST) : AST_QUALIFIED_TYPE_UNQUALIFIED(ft);
 			uint8_t lv = copy == 1;
 			int k = cxx_class_constructs(c, ft, copy ? &a : NULL, copy ? &lv : NULL, copy ? 1 : 0, false);
 
@@ -2238,9 +2238,9 @@ static int cxx_class_parts_nothrow(cxx *c, cxx_scope *cls, int copy, int depth)
 }
 
 
-static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit)
+static int cxx_class_constructs(cxx *c, ast_qualified_type to, const ast_qualified_type *args, const uint8_t *lval, uint32_t n, bool implicit)
 {
-	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to)), *from_cls = NULL;
+	cxx_scope *cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to)), *from_cls = NULL;
 
 	c->constructs_nothrow = -1;
 	cxx_entity *set, *own = NULL;
@@ -2249,18 +2249,18 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 
 	if (!cls)
 		return -1;
-	cxx_type_require_complete(c, QUNQ(to));
+	cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 	if (cls->has_dependent_base)
 		return -1;
 	if (n == 1) {
 		if (args[0] == CXX_TY_UNKNOWN)
 			return -1;
-		if (cc_type_is_record(c->ast, args[0]) && AST_TYPE_KIND(c->ast, args[0]) != TY_PTR &&
-		    !(c->nullptr_ty && QUNQ(args[0]) == c->nullptr_ty)) {	/* (nullptr_t: a struct here, no class: as a scalar) */
-			from_cls = cxx_type_class_scope(c, QUNQ(args[0]));
-			same = QUNQ(args[0]) == QUNQ(to);
+		if (cc_type_is_record(c->ast, args[0]) && AST_TYPE_KIND(c->ast, args[0]) != AST_TYPE_POINTER &&
+		    !(c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]) == c->nullptr_ty)) {	/* (nullptr_t: a struct here, no class: as a scalar) */
+			from_cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]));
+			same = AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]) == AST_QUALIFIED_TYPE_UNQUALIFIED(to);
 			if (!same && from_cls) {
-				cxx_type_require_complete(c, QUNQ(args[0]));
+				cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]));
 				derived = cxx_derives(c, args[0], to, 0);
 			}
 			if (!same && !from_cls)
@@ -2274,20 +2274,20 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 			break;
 		}
 	if (own) {
-		qty et = c->etype;
+		ast_qualified_type et = c->etype;
 		bool el = c->elval;
 		cxx_entity *callee = c->ecallee, *picked;
 		uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
 		bool resolved, none;
 
-		qty outer = c->constructing;
+		ast_qualified_type outer = c->constructing;
 
 		uint8_t nl = c->no_literal;
 
 		c->skip_explicit = implicit;
 		c->call_obj = 0;
 		c->no_literal = nl;
-		c->constructing = n == 1 && !same && !derived ? QUNQ(to) : 0;
+		c->constructing = n == 1 && !same && !derived ? AST_QUALIFIED_TYPE_UNQUALIFIED(to) : 0;
 		cxx_call_type_impl(c, own, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, n, true);
 		c->constructing = outer;
 		resolved = c->call_resolved, none = c->none_viable, picked = c->call_picked;
@@ -2305,12 +2305,12 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 		r = 0;	/* (none of the declared ones; the implicit copy and move remain) */
 	}
 	if (same || derived) {
-		int s = cxx_class_special(c, to, 0, !lval[0] && !(QQ(args[0]) & Q_CONST), 0);
+		int s = cxx_class_special(c, to, 0, !lval[0] && !(AST_QUALIFIED_TYPE_QUALIFIERS(args[0]) & AST_QUALIFIER_CONST), 0);
 
-		c->constructs_nothrow = same && s == 1 ? cxx_class_parts_nothrow(c, cls, lval[0] || (QQ(args[0]) & Q_CONST) ? 1 : 2, 0) : -1;	/* (the implicit copy or move) */
+		c->constructs_nothrow = same && s == 1 ? cxx_class_parts_nothrow(c, cls, lval[0] || (AST_QUALIFIED_TYPE_QUALIFIERS(args[0]) & AST_QUALIFIER_CONST) ? 1 : 2, 0) : -1;	/* (the implicit copy or move) */
 		return s;
 	}
-	if (n == 1 && from_cls && cxx_class_converts_class(c, from_cls, QUNQ(to), 0))
+	if (n == 1 && from_cls && cxx_class_converts_class(c, from_cls, AST_QUALIFIED_TYPE_UNQUALIFIED(to), 0))
 		return -1;	/* (through the argument's conversion function, perhaps) */
 	if (own)
 		return r;
@@ -2320,9 +2320,9 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 		for (uint32_t i = 0; i < cls->nfield_types; i++)
 			if (cls->field_types[i] == CXX_TY_UNKNOWN)
 				return -1;
-			else if (AST_TYPE_KIND(c->ast, cls->field_types[i]) == TY_PTR && AST_TYPE(c->ast, cls->field_types[i])->ext)
+			else if (AST_TYPE_KIND(c->ast, cls->field_types[i]) == AST_TYPE_POINTER && AST_TYPE(c->ast, cls->field_types[i])->ext)
 				return 0;
-			else if (cc_type_is_record(c->ast, cls->field_types[i]) && AST_TYPE_KIND(c->ast, cls->field_types[i]) != TY_ARRAY) {
+			else if (cc_type_is_record(c->ast, cls->field_types[i]) && AST_TYPE_KIND(c->ast, cls->field_types[i]) != AST_TYPE_ARRAY) {
 				int f = cxx_class_constructs(c, cls->field_types[i], NULL, NULL, 0, false);
 
 				if (f <= 0)
@@ -2349,9 +2349,9 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
  * deleted (or the copy is implicitly deleted by a declared move); a defaulted or implicit one does what
  * its bases and members do.  -1: not known.
  */
-VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
+VPRIV int cxx_class_special(cxx *c, ast_qualified_type t, int what, bool rvalue, int depth)
 {
-	cxx_scope *cls = depth < 12 ? cxx_type_class_scope(c, QUNQ(t)) : NULL;
+	cxx_scope *cls = depth < 12 ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) : NULL;
 	cxx_entity *move = NULL, *copy = NULL, *pick;
 	bool templates = false;
 	int result = 1;
@@ -2362,7 +2362,7 @@ VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
 		return -1;
 	for (cxx_entity *e = cxx_lookup_in(c, cls, what ? vintern_cstr("operator=") : cxx_ctor_id(), 0); e; e = e->next) {
 		const ctype *ft;
-		qty p;
+		ast_qualified_type p;
 
 		if (e->member_of != cls)
 			continue;	/* (a base's: not this class's own) */
@@ -2370,24 +2370,24 @@ VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
 			templates = true;	/* (never a copy or move constructor; it may still be chosen) */
 			continue;
 		}
-		if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+		if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != AST_TYPE_FUNCTION)
 			continue;
 		ft = AST_TYPE(c->ast, e->ty);
 		if (!ft->n || ft->n > 1u + e->ndefaults)
 			continue;
 		p = c->ast->params[ft->aux];
-		if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext) {
+		if (AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && AST_TYPE(c->ast, p)->ext) {
 			const ctype *pt = AST_TYPE(c->ast, p);
 
-			if (QUNQ(pt->base) != QUNQ(t))
+			if (AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) != AST_QUALIFIED_TYPE_UNQUALIFIED(t))
 				continue;
 			if (pt->ext == 2)
 				move = e;
-			else if (QQ(pt->base) & Q_CONST)
+			else if (AST_QUALIFIED_TYPE_QUALIFIERS(pt->base) & AST_QUALIFIER_CONST)
 				copy = e;
 			else if (!copy)
 				copy = e;	/* X(X&): a copy constructor (from an lvalue that is not const) */
-		} else if (QUNQ(p) == QUNQ(t) && what)
+		} else if (AST_QUALIFIED_TYPE_UNQUALIFIED(p) == AST_QUALIFIED_TYPE_UNQUALIFIED(t) && what)
 			move = copy = e;	/* operator=(X): both */
 	}
 	(void)templates;
@@ -2414,7 +2414,7 @@ VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
 			result = -1;
 	}
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
-		qty m = cls->field_types[i];
+		ast_qualified_type m = cls->field_types[i];
 		const ctype *mt;
 		int r = 1;
 
@@ -2422,15 +2422,15 @@ VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
 			result = -1;
 			continue;
 		}
-		while (AST_TYPE_KIND(c->ast, m) == TY_ARRAY)
+		while (AST_TYPE_KIND(c->ast, m) == AST_TYPE_ARRAY)
 			m = AST_TYPE(c->ast, m)->base;
 		mt = AST_TYPE(c->ast, m);
-		if (mt->kind == TY_PTR && mt->ext)
+		if (mt->kind == AST_TYPE_POINTER && mt->ext)
 			r = !what;	/* a reference member: copied, not assigned */
-		else if (what && (QQ(m) & Q_CONST))
+		else if (what && (AST_QUALIFIED_TYPE_QUALIFIERS(m) & AST_QUALIFIER_CONST))
 			r = 0;		/* a const member: not assigned */
-		else if (mt->kind == TY_STRUCT || mt->kind == TY_UNION)
-			r = cxx_class_special(c, m, what, rvalue && !(QQ(m) & Q_CONST), depth + 1);
+		else if (mt->kind == AST_TYPE_STRUCT || mt->kind == AST_TYPE_UNION)
+			r = cxx_class_special(c, m, what, rvalue && !(AST_QUALIFIED_TYPE_QUALIFIERS(m) & AST_QUALIFIER_CONST), depth + 1);
 		if (!r)
 			return 0;
 		if (r < 0)

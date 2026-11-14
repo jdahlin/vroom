@@ -12,9 +12,9 @@
 
 typedef struct cxx_mangler {
 	cxx *c;
-	const qty *ph;		/* a function template instance's signature: its parameters' placeholders, mangled T_, T0_, ... */
+	const ast_qualified_type *ph;		/* a function template instance's signature: its parameters' placeholders, mangled T_, T0_, ... */
 	uint32_t nph;
-	const qty *tph;		/* ... the same for a value parameter's declared type (Tn <type>), while the template arguments are mangled */
+	const ast_qualified_type *tph;		/* ... the same for a value parameter's declared type (Tn <type>), while the template arguments are mangled */
 	uint32_t ntph;
 	const cxx_scope *tps;	/* ... and the template's parameters (their names) */
 	char b[2048];
@@ -22,7 +22,7 @@ typedef struct cxx_mangler {
 	bool bad;
 	/* substitution candidates, in the order they were completed: a scope (namespace or class), a
 	   template (its entity), or a type */
-	struct { uint8_t kind; const void *p; qty t; } subs[128];
+	struct { uint8_t kind; const void *p; ast_qualified_type t; } subs[128];
 	uint32_t nsubs;
 } cxx_mangler;
 
@@ -49,7 +49,7 @@ static void mg_source_name(cxx_mangler *m, uint32_t name)
 	mg_text(m, v->s, v->len);
 }
 
-static bool mg_substitution(cxx_mangler *m, int kind, const void *p, qty t)
+static bool mg_substitution(cxx_mangler *m, int kind, const void *p, ast_qualified_type t)
 {
 	for (uint32_t i = 0; i < m->nsubs; i++)
 		if (m->subs[i].kind == kind && m->subs[i].p == p && m->subs[i].t == t) {
@@ -82,7 +82,7 @@ static const void *mg_tkey(const cxx_entity *e)
 	return e && e->kind == CXX_ENTITY_TEMPLATE && e->tmpl ? (const void *)e->tmpl : (const void *)e;
 }
 
-static void mg_remember(cxx_mangler *m, int kind, const void *p, qty t)
+static void mg_remember(cxx_mangler *m, int kind, const void *p, ast_qualified_type t)
 {
 	if (m->nsubs == 128) {
 		m->bad = true;
@@ -107,7 +107,7 @@ static bool mg_scope_is_std(cxx_mangler *m, const cxx_scope *s)
 	       !memcmp(vintern_ents[s->owner->name].s, "std", 3);
 }
 
-static void mg_type(cxx_mangler *m, qty t);
+static void mg_type(cxx_mangler *m, ast_qualified_type t);
 static void mg_prefix(cxx_mangler *m, cxx_scope *s);
 static bool mg_nested(cxx_mangler *m, cxx_scope *s);
 
@@ -251,7 +251,7 @@ static bool mt_resolved_variable(mg_tok *k)
 		}
 		break;
 	}
-	if (!qualified || !e || e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) == TY_FUNC || e->next ||
+	if (!qualified || !e || e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION || e->next ||
 	    !e->home || (p < k->e && c->tok[p].kind == LEX_TOKEN_LESS))
 		return false;
 	mg_str(k->m, "L_Z");
@@ -378,7 +378,7 @@ static bool mt_type(mg_tok *k)
 	if (i >= 0 && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON && k->m->c->tok[k->p + 2].kind == LEX_TOKEN_IDENTIFIER &&
 	    k->m->tph && (uint32_t)i < k->m->ntph && k->m->tph[i]) {
 		/* T::name (a member type of a template parameter): N T_ <name> E */
-		const qty *ph = k->m->ph;
+		const ast_qualified_type *ph = k->m->ph;
 		uint32_t nph = k->m->nph;
 
 		k->own = true;
@@ -397,7 +397,7 @@ static bool mt_type(mg_tok *k)
 		k->own = true;
 		if (!k->m->tph || (uint32_t)i >= k->m->ntph || !k->m->tph[i])
 			return false;
-		const qty *ph = k->m->ph;
+		const ast_qualified_type *ph = k->m->ph;
 		uint32_t nph = k->m->nph;
 
 		k->p++;
@@ -432,12 +432,12 @@ static bool mt_type(mg_tok *k)
 			k->p++;
 			if (mt_targs(k) && !k->m->bad && mt_is(k, LEX_TOKEN_COLON_COLON) && k->p + 1 < k->e &&
 			    k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER) {
-				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (qty)3);	/* (X<args>) */
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (ast_qualified_type)3);	/* (X<args>) */
 				k->p++;
 				mt_src(k->m, mt_t(k));
 				k->p++;
 				mg_str(k->m, "E");
-				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (qty)4);	/* (X<args>::name) */
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (ast_qualified_type)4);	/* (X<args>::name) */
 				return true;
 			}
 		}
@@ -466,7 +466,7 @@ static bool mt_targs(mg_tok *k)
 		size_t mark = k->m->n;
 		uint32_t start = k->p;
 		int ti = mt_tparam(k);	/* (a template parameter: T* is that type, a candidate the parameters find) */
-		qty tt = ti >= 0 && k->m->tph && (uint32_t)ti < k->m->ntph ? k->m->tph[ti] : CXX_TY_UNKNOWN;
+		ast_qualified_type tt = ti >= 0 && k->m->tph && (uint32_t)ti < k->m->ntph ? k->m->tph[ti] : CXX_TY_UNKNOWN;
 
 		if (!mt_type(k))
 			return false;
@@ -484,7 +484,7 @@ static bool mt_targs(mg_tok *k)
 				mg_remember(k->m, CXX_SUB_TYPE, NULL, tt);
 			} else {
 				tt = CXX_TY_UNKNOWN;
-				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[start] + 0, (qty)(0x100 + level));
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[start] + 0, (ast_qualified_type)(0x100 + level));
 			}
 		}
 		if (mt_is(k, LEX_TOKEN_ELLIPSIS)) {
@@ -988,9 +988,9 @@ static bool mg_tok_param(cxx_mangler *m, uint32_t b, uint32_t e)
 		mg_str(m, "K");
 	mg_text(m, base, bl);
 	if (cst)
-		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (qty)1);
+		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (ast_qualified_type)1);
 	if (ref)
-		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (qty)2);
+		mg_remember(m, CXX_SUB_TEMPLATE, &c->tok[b] + 0, (ast_qualified_type)2);
 	return true;
 }
 
@@ -1201,7 +1201,7 @@ static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, boo
 		goto bad;
 	k.p++;
 	mg_str(m, "E");
-	mg_remember(m, CXX_SUB_TYPE, ei, (qty)0x7fff0001);	/* (enable_if<...>: a candidate of its own) */
+	mg_remember(m, CXX_SUB_TYPE, ei, (ast_qualified_type)0x7fff0001);	/* (enable_if<...>: a candidate of its own) */
 	if (!alias) {
 		if (!mt_is(&k, LEX_TOKEN_COLON_COLON))
 			goto bad;
@@ -1212,7 +1212,7 @@ static bool mg_tn_type(cxx_mangler *m, uint32_t p, char *lit, size_t litcap, boo
 	}
 	(void)member;
 	mg_str(m, "4typeE");
-	mg_remember(m, CXX_SUB_TYPE, ei, (qty)0x7fff0002);
+	mg_remember(m, CXX_SUB_TYPE, ei, (ast_qualified_type)0x7fff0002);
 	if (!m->bad) {
 		*own = k.own;
 		if (!k.own)	/* (not dependent on the function template's own parameters: no Tn, nothing remembered) */
@@ -1245,9 +1245,9 @@ static int mg_value_type_param(cxx_mangler *m, const cxx_scope *ps, uint32_t i)
 }
 
 /* a type without its references (T& and T&&: T) */
-static qty mg_strip_refs(cc *a, qty t)
+static ast_qualified_type mg_strip_refs(cc *a, ast_qualified_type t)
 {
-	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == TY_PTR && AST_TYPE(a, t)->ext)
+	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == AST_TYPE_POINTER && AST_TYPE(a, t)->ext)
 		t = AST_TYPE(a, t)->base;
 	return t;
 }
@@ -1288,20 +1288,20 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 				m->n = at;
 		}
 		int tk = !(*x).t && !vt && all ? mg_value_type_param(m, ps, i) : -1;
-		qty lt = tk >= 0 && all[tk].kind == 1 && all[tk].t != CXX_TY_UNKNOWN ? all[tk].t : 0;
+		ast_qualified_type lt = tk >= 0 && all[tk].kind == 1 && all[tk].t != CXX_TY_UNKNOWN ? all[tk].t : 0;
 
-		if (lt && !(AST_TYPE_KIND(m->c->ast, lt) >= TY_BOOL && AST_TYPE_KIND(m->c->ast, lt) <= TY_UINT128))
+		if (lt && !(AST_TYPE_KIND(m->c->ast, lt) >= AST_TYPE_BOOL && AST_TYPE_KIND(m->c->ast, lt) <= AST_TYPE_UINT128))
 			lt = 0;	/* (an integer or character type: written as such) */
 		mg_str(m, "L");
 		if ((*x).t)
 			mg_type(m, (*x).t);
 		else if (lt)
-			mg_type(m, QUNQ(lt));
+			mg_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(lt));
 		else
 			mg_str(m, vt ? vt : "i");
 		if (!(*x).t && !vt && !lt)
 			m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
-		if ((vt && vt[0] == 'b') || (lt && AST_TYPE_KIND(m->c->ast, lt) == TY_BOOL))
+		if ((vt && vt[0] == 'b') || (lt && AST_TYPE_KIND(m->c->ast, lt) == AST_TYPE_BOOL))
 			mg_str(m, (*x).v ? "1" : "0");
 		else
 		mg_text(m, num, (size_t)snprintf(num, sizeof num, (*x).v < 0 ? "n%llu" : "%llu",
@@ -1376,7 +1376,7 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 }
 
 /* a class as the last component of a prefix (or of a nested name): its name, its template arguments */
-static void mg_class_component(cxx_mangler *m, cxx_scope *s, qty t)
+static void mg_class_component(cxx_mangler *m, cxx_scope *s, ast_qualified_type t)
 {
 	cxx_entity *of;
 	const cxx_targ *args;
@@ -1421,7 +1421,7 @@ static void mg_prefix(cxx_mangler *m, cxx_scope *s)
 			m->bad = true;
 			return;
 		}
-		mg_class_component(m, s, QUNQ(s->owner->ty));
+		mg_class_component(m, s, AST_QUALIFIED_TYPE_UNQUALIFIED(s->owner->ty));
 		return;
 	}
 	if (mg_substitution(m, CXX_SUB_SCOPE, s, 0))
@@ -1444,7 +1444,7 @@ static bool mg_nested(cxx_mangler *m, cxx_scope *s)
 	return s && s != m->c->global && !mg_scope_is_std(m, s);
 }
 
-static void mg_class_type(cxx_mangler *m, qty t)
+static void mg_class_type(cxx_mangler *m, ast_qualified_type t)
 {
 	cxx_scope *s = cxx_tag_scope_get(m->c, t), *outer;
 	cxx_entity *of;
@@ -1503,7 +1503,7 @@ static void mg_class_type(cxx_mangler *m, qty t)
 	mg_class_component(m, s, t);
 }
 
-static void mg_type(cxx_mangler *m, qty t)
+static void mg_type(cxx_mangler *m, ast_qualified_type t)
 {
 	cc *a = m->c->ast;
 	const ctype *x;
@@ -1514,9 +1514,9 @@ static void mg_type(cxx_mangler *m, qty t)
 		return;
 	}
 	x = AST_TYPE(a, t);
-	q = QQ(t);
-	for (uint32_t i = 0; m->ph && i < m->nph && !(q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)); i++)
-		if (m->ph[i] && QUNQ(t) == m->ph[i]) {
+	q = AST_QUALIFIED_TYPE_QUALIFIERS(t);
+	for (uint32_t i = 0; m->ph && i < m->nph && !(q & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE | AST_QUALIFIER_RESTRICT)); i++)
+		if (m->ph[i] && AST_QUALIFIED_TYPE_UNQUALIFIED(t) == m->ph[i]) {
 			/* a template parameter: T_ for the first, T<n-1>_ after (a substitution candidate) */
 			char num[16];
 
@@ -1530,61 +1530,61 @@ static void mg_type(cxx_mangler *m, qty t)
 			return;
 		}
 	/* cv-qualified: the qualifiers before the type, each such type a substitution candidate */
-	if ((q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)) && x->kind != TY_FUNC && x->kind != TY_ARRAY) {
+	if ((q & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE | AST_QUALIFIER_RESTRICT)) && x->kind != AST_TYPE_FUNCTION && x->kind != AST_TYPE_ARRAY) {
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
-		if (q & Q_RESTRICT)
+		if (q & AST_QUALIFIER_RESTRICT)
 			mg_str(m, "r");
-		if (q & Q_VOLATILE)
+		if (q & AST_QUALIFIER_VOLATILE)
 			mg_str(m, "V");
-		if (q & Q_CONST)
+		if (q & AST_QUALIFIER_CONST)
 			mg_str(m, "K");
-		mg_type(m, QUNQ(t));
+		mg_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
 	}
 	switch (x->kind) {
-	case TY_VOID: mg_str(m, "v"); return;
-	case TY_BOOL: mg_str(m, "b"); return;
-	case TY_CHAR: mg_str(m, "c"); return;
-	case TY_SCHAR: mg_str(m, "a"); return;
-	case TY_UCHAR: mg_str(m, x->ext ? "Du" : "h"); return;	/* (ext: char8_t; below char16_t, wchar_t, char32_t) */
-	case TY_SHORT: mg_str(m, "s"); return;
-	case TY_USHORT: mg_str(m, x->ext ? "Ds" : "t"); return;
-	case TY_INT: mg_str(m, x->ext ? "w" : "i"); return;
-	case TY_UINT: mg_str(m, x->ext ? "Di" : "j"); return;
-	case TY_LONG: mg_str(m, "l"); return;
-	case TY_ULONG: mg_str(m, "m"); return;
-	case TY_LLONG: mg_str(m, "x"); return;
-	case TY_ULLONG: mg_str(m, "y"); return;
-	case TY_INT128: mg_str(m, "n"); return;
-	case TY_UINT128: mg_str(m, "o"); return;
-	case TY_FLOAT: mg_str(m, "f"); return;
-	case TY_DOUBLE: mg_str(m, "d"); return;
-	case TY_LDOUBLE: mg_str(m, "e"); return;
-	case TY_FLOAT128: mg_str(m, "g"); return;
-	case TY_PTR:
+	case AST_TYPE_VOID: mg_str(m, "v"); return;
+	case AST_TYPE_BOOL: mg_str(m, "b"); return;
+	case AST_TYPE_CHAR: mg_str(m, "c"); return;
+	case AST_TYPE_SIGNED_CHAR: mg_str(m, "a"); return;
+	case AST_TYPE_UNSIGNED_CHAR: mg_str(m, x->ext ? "Du" : "h"); return;	/* (ext: char8_t; below char16_t, wchar_t, char32_t) */
+	case AST_TYPE_SHORT: mg_str(m, "s"); return;
+	case AST_TYPE_UNSIGNED_SHORT: mg_str(m, x->ext ? "Ds" : "t"); return;
+	case AST_TYPE_INT: mg_str(m, x->ext ? "w" : "i"); return;
+	case AST_TYPE_UNSIGNED_INT: mg_str(m, x->ext ? "Di" : "j"); return;
+	case AST_TYPE_LONG: mg_str(m, "l"); return;
+	case AST_TYPE_UNSIGNED_LONG: mg_str(m, "m"); return;
+	case AST_TYPE_LONG_LONG: mg_str(m, "x"); return;
+	case AST_TYPE_UNSIGNED_LONG_LONG: mg_str(m, "y"); return;
+	case AST_TYPE_INT128: mg_str(m, "n"); return;
+	case AST_TYPE_UINT128: mg_str(m, "o"); return;
+	case AST_TYPE_FLOAT: mg_str(m, "f"); return;
+	case AST_TYPE_DOUBLE: mg_str(m, "d"); return;
+	case AST_TYPE_LONG_DOUBLE: mg_str(m, "e"); return;
+	case AST_TYPE_FLOAT128: mg_str(m, "g"); return;
+	case AST_TYPE_POINTER:
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
 		mg_str(m, x->ext == 1 ? "R" : x->ext == 2 ? "O" : "P");
 		mg_type(m, x->base);
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
-	case TY_FUNC:
+	case AST_TYPE_FUNCTION:
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
 		mg_str(m, "F");
 		mg_type(m, x->base);
-		if (!x->n && !(x->flags & TF_VARIADIC))
+		if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC))
 			mg_str(m, "v");
 		for (uint32_t i = 0; i < x->n; i++)
 			mg_type(m, a->params[x->aux + i]);
-		if (x->flags & TF_VARIADIC)
+		if (x->flags & AST_TYPE_FLAG_VARIADIC)
 			mg_str(m, "z");
 		mg_str(m, "E");
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
-	case TY_ARRAY: {
+	case AST_TYPE_ARRAY: {
 		char num[24];
 
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
@@ -1594,10 +1594,10 @@ static void mg_type(cxx_mangler *m, qty t)
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
 	}
-	case TY_STRUCT: case TY_UNION:
-		mg_class_type(m, QUNQ(t));
+	case AST_TYPE_STRUCT: case AST_TYPE_UNION:
+		mg_class_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		return;
-	case TY_ENUM: {
+	case AST_TYPE_ENUM: {
 		/* a named enumeration: its name where it is declared */
 		cxx_scope *home = cxx_tag_home(m->c, t);
 		uint32_t name = a->tags[x->aux].name;
@@ -1606,7 +1606,7 @@ static void mg_type(cxx_mangler *m, qty t)
 			m->bad = true;
 			return;
 		}
-		if (mg_substitution(m, CXX_SUB_TYPE, NULL, QUNQ(t)))
+		if (mg_substitution(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
 			return;
 		if (mg_nested(m, home)) {
 			mg_str(m, "N");
@@ -1618,7 +1618,7 @@ static void mg_type(cxx_mangler *m, qty t)
 				mg_str(m, "St");
 			mg_source_name(m, name);
 		}
-		mg_remember(m, CXX_SUB_TYPE, NULL, QUNQ(t));
+		mg_remember(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		return;
 	}
 	}
@@ -1626,16 +1626,16 @@ static void mg_type(cxx_mangler *m, qty t)
 }
 
 /* a parameter's type as the ABI mangles it: top-level cv dropped, arrays and functions as pointers */
-static void mg_parameter(cxx_mangler *m, qty t)
+static void mg_parameter(cxx_mangler *m, ast_qualified_type t)
 {
 	cc *a = m->c->ast;
 
-	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == TY_ARRAY)
+	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == AST_TYPE_ARRAY)
 		t = cc_type_pointer(a, AST_TYPE(a, t)->base);
-	else if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == TY_FUNC)
+	else if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == AST_TYPE_FUNCTION)
 		t = cc_type_pointer(a, t);
 	else if (t != CXX_TY_UNKNOWN)
-		t = QUNQ(t);
+		t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
 	mg_type(m, t);
 }
 
@@ -1670,7 +1670,7 @@ static const char *mg_operator(const vident *v, uint32_t nparams, bool member)
  * complete-object or base-object function.  Written to buf (NUL-terminated); false if some part of it is
  * not mangled yet.
  */
-VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, uint8_t is_const, int variant, char *buf, size_t cap)
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast_qualified_type ft, uint8_t is_const, int variant, char *buf, size_t cap)
 {
 	cc *a = c->ast;
 	cxx_mangler m;
@@ -1680,7 +1680,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	const char *op;
 	bool conv;
 
-	if (ft == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ft) != TY_FUNC)
+	if (ft == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ft) != AST_TYPE_FUNCTION)
 		return false;
 	x = AST_TYPE(a, ft);
 	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
@@ -1702,7 +1702,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	if (f->is_instance) {
 		/* (a value parameter's declared type in the template arguments refers to the template's parameters: T_, ...) */
 		uint32_t ntph = 0;
-		const qty *tph = cxx_instance_placeholders(c, f, &ntph);
+		const ast_qualified_type *tph = cxx_instance_placeholders(c, f, &ntph);
 
 		if (tph)
 			m.tph = tph, m.ntph = ntph, m.tps = f->inst_params;
@@ -1752,9 +1752,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	bool dt_guess = false, tok_params = false, tok_sig = false;
 
 	if (f->is_instance) {
-		const qty *ph;
+		const ast_qualified_type *ph;
 		uint32_t nph, pp = 0;
-		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph, &pp);
+		ast_qualified_type ds = cxx_instance_declared_sig(c, f, &ph, &nph, &pp);
 
 		dt_guess = cxx_instance_uses_decltype(c, f);
 		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
@@ -1762,10 +1762,10 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 
 		/* (a pack only inside a parameter's type, tuple<Ts...>&: a return type that did not form with the
 		   placeholders (typename tuple_element<I, tuple<Ts...>>::type&: void) is not written from them) */
-		bool known = ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC;
+		bool known = ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == AST_TYPE_FUNCTION;
 
 		if (known && f->inst_pack_at != UINT32_MAX && !pp && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN &&
-		    AST_TYPE_KIND(a, mg_strip_refs(a, AST_TYPE(a, ds)->base)) == TY_VOID && AST_TYPE_KIND(a, mg_strip_refs(a, x->base)) != TY_VOID)
+		    AST_TYPE_KIND(a, mg_strip_refs(a, AST_TYPE(a, ds)->base)) == AST_TYPE_VOID && AST_TYPE_KIND(a, mg_strip_refs(a, x->base)) != AST_TYPE_VOID)
 			known = false;
 		bool all_tok = known && !pp && mg_param_ranges(c, cxx_instance_decl_pos(f), tok_b, tok_e, &ntok) && ntok == AST_TYPE(a, ds)->n;
 
@@ -1773,11 +1773,11 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			if (a->params[AST_TYPE(a, ds)->aux + i] == CXX_TY_UNKNOWN)
 				known = all_tok, tok_params = true;	/* (a dependent member type: from its tokens) */
 		if (known && AST_TYPE(a, ds)->n == want && (!pp || pp <= want) &&
-		    (AST_TYPE(a, ds)->flags & TF_VARIADIC) == (x->flags & TF_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
+		    (AST_TYPE(a, ds)->flags & AST_TYPE_FLAG_VARIADIC) == (x->flags & AST_TYPE_FLAG_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
 			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph, pack_param = f->inst_pack_at != UINT32_MAX ? pp : 0;
 		else if (ds == CXX_TY_UNKNOWN && !pp && m.tph && f->inst_pack_at == UINT32_MAX &&
 			 mg_param_ranges(c, cxx_instance_decl_pos(f), tok_b, tok_e, &ntok) && ntok == x->n &&
-			 !(x->flags & TF_VARIADIC) && !cxx_instance_uses_decltype(c, f))
+			 !(x->flags & AST_TYPE_FLAG_VARIADIC) && !cxx_instance_uses_decltype(c, f))
 			tok_sig = true;	/* (the signature did not parse with placeholders: from its tokens) */
 		else
 			c->mangle_guess = 1;	/* (the instance's own types: a name of vcc's, not clang's) */
@@ -1788,7 +1788,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		mg_tok k = { &m, cxx_instance_decl_pos(f), c->ntok, false, { 0 }, 0 };
 		size_t save_n = m.n;
 		uint32_t save_subs = m.nsubs;
-		const qty *ph0 = m.ph;
+		const ast_qualified_type *ph0 = m.ph;
 		uint32_t nph0 = m.nph;
 		bool ok = true;
 
@@ -1810,7 +1810,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		c->mangle_guess = 1;
 	}
 	if (f->is_instance && !(v->len && v->s[0] == ' ')) {
-		const qty *ph0 = m.ph;
+		const ast_qualified_type *ph0 = m.ph;
 		uint32_t nph0 = m.nph;
 
 		if (dt_guess) {
@@ -1862,13 +1862,13 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (dt_guess)
 			c->mangle_guess = 1;	/* (decltype in its declaration: clang writes the expression, DT ... E) */
 	}
-	if (!x->n && !(x->flags & TF_VARIADIC))
+	if (!x->n && !(x->flags & AST_TYPE_FLAG_VARIADIC))
 		mg_str(&m, "v");
 	for (uint32_t i = 0; i < x->n; i++) {
 		if (pack_param && i + 1 == pack_param)
 			mg_str(&m, "Dp");	/* (a pack expansion; its pattern is a substitution candidate, then the expansion) */
 		if (tok_params && a->params[x->aux + i] == CXX_TY_UNKNOWN) {
-			const qty *tph0 = m.tph;
+			const ast_qualified_type *tph0 = m.tph;
 			uint32_t ntph0 = m.ntph;
 
 			m.tph = m.ph, m.ntph = m.nph;
@@ -1880,11 +1880,11 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (pack_param && i + 1 == pack_param)
 			mg_remember(&m, CXX_SUB_TEMPLATE, &m.ph[0] + 0x1000 + i, 0);	/* (Dp T itself: a candidate) */
 	}
-	if (x->flags & TF_VARIADIC)
+	if (x->flags & AST_TYPE_FLAG_VARIADIC)
 		mg_str(&m, "z");
 params_done:
 	if (f->is_instance) {
-		const qty *ph0 = m.ph;
+		const ast_qualified_type *ph0 = m.ph;
 		uint32_t nph0 = m.nph;
 
 		m.ph = m.tph ? m.tph : m.ph, m.nph = m.tph ? m.ntph : m.nph;
@@ -1933,14 +1933,14 @@ VPRIV bool cxx_mangle_variable(cxx *c, const cxx_entity *v, cxx_scope *home, boo
 }
 
 /* a class's data symbol: _ZTV (vtable), _ZTI (type info), _ZTS (type name) and the class's name */
-VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap)
+VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, ast_qualified_type cls, char *buf, size_t cap)
 {
 	cxx_mangler m;
 
 	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0, m.tph = NULL, m.ntph = 0, m.tps = NULL;
 	mg_str(&m, "_Z");
 	mg_str(&m, kind);
-	mg_type(&m, QUNQ(cls));
+	mg_type(&m, AST_QUALIFIED_TYPE_UNQUALIFIED(cls));
 	if (m.bad || m.n + 1 > cap)
 		return false;
 	memcpy(buf, m.b, m.n);
@@ -1949,7 +1949,7 @@ VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, s
 }
 
 /* a type's mangled spelling alone (what follows _ZTI and _ZTS; the type name string itself) */
-VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap)
+VPRIV bool cxx_mangle_type(cxx *c, ast_qualified_type t, char *buf, size_t cap)
 {
 	cxx_mangler m;
 

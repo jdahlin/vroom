@@ -69,17 +69,20 @@ VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
+# For an instrumented host build use VCC_PGO=-fprofile-instr-generate;
+# after training use -fprofile-instr-use=/absolute/path/to/merged.profdata.
+# Use a separate OUT for each set of flags.
+VCC_PGO   ?=
 VCC_LTO   ?=
 ifeq ($(HOST_OS),Darwin)
 LTO_LINK   = -Wl,-cache_path_lto,$(OBJ)/lto-cache
 else
 LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache -fuse-ld=lld
-LTO_LINK   = -Wl,--thinlto-cache-dir=$(OBJ)/lto-cache
 endif
-VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) -pthread
+VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) $(VCC_PGO) -pthread
 # -O3 also at link time: the driver passes it to ld, which then folds code
 # (and, with LTO, optimises and generates the code itself)
-VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
+VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
@@ -90,11 +93,11 @@ o = $(patsubst %.c,$(OBJ)/%.o,$(1))
 VCC_WASM ?=
 AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
 as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c as/macro.c as/conditional.c as/call-frame-information.c as/variable-items.c \
-           as/dwarf-line-table.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
+           as/dwarf-line-table.c as/coff-directives.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
-common_SRC = common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
+common_SRC = common/archive-reader.c common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
 port_SRC   = port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_ASM = $(if $(filter x86_64,$(HOST_ARCH)),frontend/lex/x86-simd.S)
@@ -112,10 +115,10 @@ server_SRC = $(filter-out server/diagnostics-store.c server/capabilities.c,$(wil
 SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
-# compiler for codegen/vir/ (VCC_VIR)
+# compiler for codegen/vir/ (VIR, -O2 and up)
 vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c vir/compact.c vir/pass-list.c $(wildcard vir/pass/*.c)
 VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
-obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c
+obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c platform/win/coff.c platform/win/unwind.c
 # with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
 cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c $(wildcard frontend/cxx/*.c) $(wildcard frontend/cxx/codegen/*.c) $(wildcard frontend/cxx/declaration/*.c) $(wildcard frontend/cxx/expression/*.c) $(wildcard frontend/cxx/instantiate/*.c)
 # the compile job (driver_job_run); declaration-cache.c stays a TU of its own
@@ -131,7 +134,12 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-LD_SRC  = ld/ld.c $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c
+# the ELF linker's parts, in the order ld/ld.c includes them (one TU, VCC_UNITY;
+# ld-internal.h is what they share); with `make VCC_UNITY=` each part is compiled
+# on its own, and vlink-main.c (main, under VLD_MAIN) only for vlink
+ld_SRC  = $(shell sed -n 's|^\#include "\.\./\(.*\.c\)"$$|\1|p; s|^\#include "\([a-z][^"/]*\.c\)"$$|ld/\1|p' ld/ld.c)
+LD_PARTS = $(filter-out ld/vlink-main.c,$(ld_SRC))
+LD_SRC  = $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c platform/win/pe-linker.c
 
 $(OBJ)/%.o: %.S Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
@@ -161,10 +169,12 @@ $(OBJ)/no/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(if $(filter-out x86_64,$(HOST_ARCH)),-mno-outline) -MMD -MP -c $< -o $@
 
-$(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
+$(OBJ)/ld/ld.o $(OBJ)/ld/vlink-main.o: XFLAGS = -DVLD_MAIN
 
-# the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
-VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,ld/objcopy.c platform/darwin/macho-linker.c)
+# the ELF linker with main() for vlink, and without it for vccd (links, nm and
+# objcopy run in its worker threads)
+VLINK_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ld.o,$(call o,$(LD_PARTS) ld/vlink-main.c))
+VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.c platform/darwin/macho-linker.c platform/win/pe-linker.c)
 $(OBJ)/ld/ldlib.o: ld/ld.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
 	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
@@ -183,7 +193,7 @@ else
 LEXTEST_OBJ = $(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC))
 endif
 $(OUT)/lextest: $(LEXTEST_OBJ) $(LEX_OBJECT)
-	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) -pthread $^ -o $@
+	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) -pthread $^ -o $@
 
 $(OUT)/vasm: $(call o,bin/vasm/vasm.c $(LIB_SRC)) $(AS_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
@@ -198,7 +208,7 @@ $(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC) $(LIB_SRC)) $(
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
-$(OUT)/vlink: $(call o,$(LD_SRC))
+$(OUT)/vlink: $(VLINK_LD_OBJ) $(call o,$(LD_SRC))
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
@@ -245,6 +255,14 @@ vcc-tsan:
 
 .PHONY: vcc-asan vcc-tsan
 
+# vcc's run-time support library for x86_64-w64-mingw32 (runtime/, libvccrt.a;
+# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters; by default it
+# compiles with our vpp and archives with our var (and vccd): no LLVM tool
+vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/var $(OUT)/vccd)
+	sh runtime/build.sh $(OUT)/vccrt
+
+.PHONY: vccrt
+
 # Reuse the normal target graph so each stage gets the same objects and make
 # can schedule independent compilation jobs across the recursive invocation.
 SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
@@ -254,10 +272,12 @@ SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
 SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
 endif
+# The stage compiles at VCC_OPT (-O3: VIR with the vectorizer, doc/OPTIMIZATION.md) on
+# every host; VCC_OPT=-O1 builds a comparison stage with the direct emitter.
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp

@@ -1,0 +1,94 @@
+# Windows x64 (x86_64-w64-mingw32) target, doc/PLAN-win64.md WIN9.  Two jobs:
+#
+#   wine    x86-64 Linux in the Debian container: Wine and the pinned
+#           llvm-mingw sysroot (ci/setup-debian.sh win64), then
+#           ci/premerge.sh win64: the suites under Wine (clang's reference,
+#           vlink's PE images, libvccrt), vlink-pe, vccrt-test, var COFF, and
+#           the guarded steps that switch on when vcc's Windows code generator
+#           is merged.  It uploads `win64-exes`: the programs that passed and
+#           a manifest of each one's expected stdout and exit code.
+#   native  windows-latest: runs those programs on real Windows with
+#           bench/win64-native.py (Python only, no compiler), against the same
+#           expected results; ci/win64-native-allow.txt lists, with a reason,
+#           a test that legitimately differs from Wine.
+#
+# Locally: ci/premerge.sh win64 (Wine and work/llvm-mingw on the host), then
+# python3 bench/win64-native.py build/linux/win64-exes --wrapper wine.
+name: win64
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wine:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # the llvm-mingw release tarball (~80 MB), keyed on its pinned name and
+      # SHA-256: fetch-testsuites.sh finds it and only unpacks
+      - name: llvm-mingw pin
+        id: pin
+        run: echo "mingw=$(grep -E '^MINGW_(REL|SHA256)=' bench/fetch-testsuites.sh | cut -d= -f2 | tr '\n' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: work/llvm-mingw/*.tar.xz
+          key: llvm-mingw-${{ steps.pin.outputs.mingw }}
+      - run: ci/setup-debian.sh win64
+        id: setup
+      # ccache, clang's reference results under Wine (win64tests/ref) and the
+      # pass caches of the vlink/libvccrt modes (keyed inside on the object,
+      # vlink and libvccrt); toolfp covers clang, Wine and the llvm-mingw pin
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ccache
+            build/linux/src/win64tests/ref
+            build/linux/src/win64tests/pass-vlink
+            build/linux/src/win64tests/pass-vccrt
+            build/linux/src/win64tests/pass
+          key: ci-win64-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-${{ github.sha }}
+          restore-keys: ci-win64-${{ runner.arch }}-${{ steps.setup.outputs.toolfp }}-
+      - run: ci/premerge.sh win64
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: win64-logs
+          path: build/linux/ci-logs/
+          if-no-files-found: ignore
+      # already xz-compressed: no second compression by the action.  Also
+      # when a step failed: the programs exported are the ones that passed,
+      # and the native job still says how they do on Windows.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: win64-exes
+          path: build/linux/win64-exes.tar.xz
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+  native:
+    needs: wine
+    if: ${{ !cancelled() }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      # the runner and the allow-list only
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            bench/win64-native.py
+            ci/win64-native-allow.txt
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: win64-exes
+          path: ${{ runner.temp }}/win64
+      - name: run on Windows
+        shell: pwsh
+        run: python bench/win64-native.py "${{ runner.temp }}/win64/win64-exes.tar.xz" --allow ci/win64-native-allow.txt

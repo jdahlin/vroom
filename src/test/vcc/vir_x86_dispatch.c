@@ -18,12 +18,12 @@ NI int byte_switch(const unsigned char *p,int a) {
  case 6:return a*5;case 7:return a|-7;default:return a+99;
  }
 }
-NI int signed_range(long x,int a) {
+NI int signed_range(long long x,int a) {
  switch(x) {case -9 ... -5:return a+2;case 7 ... 11:return a-3;
- case 0x100000000L:return a*5;case (-0x7fffffffffffffffL-1):return a*7;default:return a^91;}
+ case 0x100000000LL:return a*5;case (-0x7fffffffffffffffLL-1):return a*7;default:return a^91;}
 }
-NI unsigned long high(unsigned long x) {return x/37;}
-NI long shigh(long x) {return x/37;}
+NI unsigned long long high(unsigned long long x) {return x/37;}
+NI long long shigh(long long x) {return x/37;}
 NI unsigned atom(unsigned *p,unsigned value) {
  __atomic_store_n(p,value,__ATOMIC_SEQ_CST);
  __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -43,10 +43,10 @@ int main(void) {
   unsigned char x=i;
   if(byte_switch(&x,7)!=(i<8?expected[i]:106))return 8;
  }
- for(long i=-15;i<16;i++)if(signed_range(i,17)!=(i>=-9&&i<=-5?19:i>=7&&i<=11?14:(17^91)))return 3;
- if(signed_range(0x100000000L,17)!=85||signed_range(-0x7fffffffffffffffL-1,17)!=119)return 4;
- unsigned long u=~0UL; if(high(u)!=u/37)return 5;
- if(shigh(-123456789012345L)!=-123456789012345L/37)return 6;
+ for(long long i=-15;i<16;i++)if(signed_range(i,17)!=(i>=-9&&i<=-5?19:i>=7&&i<=11?14:(17^91)))return 3;
+ if(signed_range(0x100000000LL,17)!=85||signed_range(-0x7fffffffffffffffLL-1,17)!=119)return 4;
+ unsigned long long u=~0ULL; if(high(u)!=u/37)return 5;
+ if(shigh(-123456789012345LL)!=-123456789012345LL/37)return 6;
  unsigned v=0;if(atom(&v,0x98765432u)!=0x98765432u||v!=0x98765432u)return 7;
  return 0;
 }

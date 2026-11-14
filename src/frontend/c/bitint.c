@@ -3,13 +3,13 @@
 #include "cc-internal.h"
 #include "common/bigint.h"
 
-static bool cc_bitint_value_is_valid(cc*c,const cval*v) { return v->kind==CV_BIGINT && v->nbig && v->big<=c->nlist && v->nbig<=c->nlist-v->big; }
-CC_PRIVATE bool cc_bitint_value_is_nonzero(cc*c,const cval*v) { return cc_bitint_value_is_valid(c,v)&&vbi_nz(c->lists+v->big,v->nbig); }
+static bool cc_bitint_value_is_valid(cc*c,const cc_value*v) { return v->kind==CC_VALUE_BITINT && v->nbig && v->big<=c->nlist && v->nbig<=c->nlist-v->big; }
+CC_PRIVATE bool cc_bitint_value_is_nonzero(cc*c,const cc_value*v) { return cc_bitint_value_is_valid(c,v)&&vbi_nz(c->lists+v->big,v->nbig); }
 static uint32_t cc_bitint_words_store(cc*c,const uint32_t*a,size_t n) { uint32_t at=c->nlist;memcpy(c->lists+at,a,n*4);c->nlist+=(uint32_t)n;return at; }
-CC_PRIVATE uint32_t cc_bitint_node_new_words(cc*c,const uint32_t*a,qty t,uint32_t loc) {
- uint32_t n=cc_node_new(c,N_BIGNUM,t,loc);AST_NODE(n)->b=(uint32_t)(cc_type_size(c,t)/4);AST_NODE(n)->a=cc_bitint_words_store(c,a,AST_NODE(n)->b);return n;
+CC_PRIVATE uint32_t cc_bitint_node_new_words(cc*c,const uint32_t*a,ast_qualified_type t,uint32_t loc) {
+ uint32_t n=cc_node_new(c,AST_NODE_BITINT_NUMBER,t,loc);AST_NODE(n)->b=(uint32_t)(cc_type_size(c,t)/4);AST_NODE(n)->a=cc_bitint_words_store(c,a,AST_NODE(n)->b);return n;
 }
-CC_PRIVATE uint32_t cc_bitint_node_new_integer(cc*c,i128 value,qty t,uint32_t loc) {
+CC_PRIVATE uint32_t cc_bitint_node_new_integer(cc*c,i128 value,ast_qualified_type t,uint32_t loc) {
  size_t n=(size_t)(cc_type_size(c,t)/4);uint32_t*a=calloc(n,4);if(!a)cc_report_fatal(c,loc,"out of memory");
  for(size_t i=0;i<n;i++)a[i]=i<4?(uint32_t)((u128)value>>(i*32)):value<0?UINT32_MAX:0;
  vbi_norm(a,n,cc_type_integer_bits(c,t),cc_type_is_signed(c,t));uint32_t out=cc_bitint_node_new_words(c,a,t,loc);free(a);return out;
@@ -22,20 +22,20 @@ CC_PRIVATE uint32_t cc_bitint_literal_parse(cc*c,const char*s,size_t len,unsigne
  }
  while(used>1&&!a[used-1])used--;unsigned bits=a[used-1]?(unsigned)((used-1)*32+32-__builtin_clz(a[used-1])):1;bits+=!unsign;
  if(bits>8388608){free(a);cc_report_fatal(c,loc,"bit-precise integer literal exceeds maximum supported width");}
- qty t=cc_type_bitint(c,bits,unsign);size_t n=(size_t)(cc_type_size(c,t)/4);if(n>cap){uint32_t*p=realloc(a,n*4);if(!p){free(a);cc_report_fatal(c,loc,"out of memory");}a=p;memset(a+cap,0,(n-cap)*4);}
+ ast_qualified_type t=cc_type_bitint(c,bits,unsign);size_t n=(size_t)(cc_type_size(c,t)/4);if(n>cap){uint32_t*p=realloc(a,n*4);if(!p){free(a);cc_report_fatal(c,loc,"out of memory");}a=p;memset(a+cap,0,(n-cap)*4);}
  vbi_norm(a,n,bits,!unsign);uint32_t out=cc_bitint_node_new_words(c,a,t,loc);free(a);return out;
 }
-static void cc_bitint_operand_load(cc*c,uint32_t*out,size_t n,const cval*v,qty t) {
- if(v->kind==CV_BIGINT){bool neg=cc_type_is_signed(c,t)&&((c->lists[v->big+v->nbig-1]>>31)!=0);vbi_copy(out,n,c->lists+v->big,v->nbig,neg);}
+static void cc_bitint_operand_load(cc*c,uint32_t*out,size_t n,const cc_value*v,ast_qualified_type t) {
+ if(v->kind==CC_VALUE_BITINT){bool neg=cc_type_is_signed(c,t)&&((c->lists[v->big+v->nbig-1]>>31)!=0);vbi_copy(out,n,c->lists+v->big,v->nbig,neg);}
  else {bool neg=cc_type_is_signed(c,t)&&v->i<0;for(size_t i=0;i<n;i++)out[i]=i<4?(uint32_t)((u128)v->i>>(i*32)):neg?UINT32_MAX:0;}
 }
-static void cc_bitint_result_store(cc*c,cval*v,uint32_t*a,size_t n,qty t,bool ice) {
- vbi_norm(a,n,cc_type_integer_bits(c,t),cc_type_is_signed(c,t));memset(v,0,sizeof(*v));v->kind=CV_BIGINT;v->ice=ice;v->big=cc_bitint_words_store(c,a,n);v->nbig=(uint32_t)n;
+static void cc_bitint_result_store(cc*c,cc_value*v,uint32_t*a,size_t n,ast_qualified_type t,bool ice) {
+ vbi_norm(a,n,cc_type_integer_bits(c,t),cc_type_is_signed(c,t));memset(v,0,sizeof(*v));v->kind=CC_VALUE_BITINT;v->ice=ice;v->big=cc_bitint_words_store(c,a,n);v->nbig=(uint32_t)n;
  for(size_t i=0;i<n&&i<4;i++)v->i=(i128)((u128)v->i|((u128)a[i]<<(32*i)));
 }
 /* Integer magnitude to floating point, rounded once in the destination
  * format. The low retained bit represents every discarded bit. */
-static bool cc_bitint_to_float(cc *c, const cval *a, qty from, qty to, cval *v)
+static bool cc_bitint_to_float(cc *c, const cc_value *a, ast_qualified_type from, ast_qualified_type to, cc_value *v)
 {
  if (!cc_bitint_value_is_valid(c,a)) return false;
  size_t n=a->nbig; uint32_t *words=malloc(n*4);
@@ -50,14 +50,14 @@ static bool cc_bitint_to_float(cc *c, const cval *a, qty from, qty to, cval *v)
   for(unsigned j=0;j<116;j++){int bit=(int)j+shift;if(bit>=0&&(unsigned)bit<bits)m|=(u128)((words[bit/32]>>(bit%32))&1)<<j;}
   for(int bit=0;bit<shift;bit++)if((words[bit/32]>>(bit%32))&1){m|=1;break;}
  }
- free(words);memset(v,0,sizeof(*v));v->kind=CV_FLT;
+ free(words);memset(v,0,sizeof(*v));v->kind=CC_VALUE_FLOAT;
  if(cc_type_is_float128(c,to)){v->ld=true;v->q=vsoftfloat_round_with_precision(neg,16383+(int)bits-1,m,cc_float_precision_bits(c,to));v->f=vsoftfloat_to_double(v->q);return true;}
- int k=AST_TYPE_KIND(c,to),p=k==TY_FLOAT?23:k==TY_FLOAT16?10:k==TY_BFLOAT16?7:52;
- int bias=k==TY_FLOAT16?15:k==TY_FLOAT||k==TY_BFLOAT16?127:1023;
+ int k=AST_TYPE_KIND(c,to),p=k==AST_TYPE_FLOAT?23:k==AST_TYPE_FLOAT16?10:k==AST_TYPE_BFLOAT16?7:52;
+ int bias=k==AST_TYPE_FLOAT16?15:k==AST_TYPE_FLOAT||k==AST_TYPE_BFLOAT16?127:1023;
  uint64_t raw=(uint64_t)vsoftfloat_round_to_integral(neg,bias+(int)bits-1-(112-p),m,p,2*bias+1);
- if(k==TY_FLOAT){uint32_t u=(uint32_t)raw;float f;memcpy(&f,&u,4);v->f=f;}
- else if(k==TY_FLOAT16)v->f=h_to_d((uint16_t)raw);
- else if(k==TY_BFLOAT16)v->f=bf_to_d((uint16_t)raw);
+ if(k==AST_TYPE_FLOAT){uint32_t u=(uint32_t)raw;float f;memcpy(&f,&u,4);v->f=f;}
+ else if(k==AST_TYPE_FLOAT16)v->f=h_to_d((uint16_t)raw);
+ else if(k==AST_TYPE_BFLOAT16)v->f=bf_to_d((uint16_t)raw);
  else memcpy(&v->f,&raw,8);
  return true;
 }
@@ -86,7 +86,7 @@ static bool cc_bitint_from_float(uint32_t *out,size_t n,unsigned bits,bool sign,
 }
 
 /* Exactness constraints are checked before implicit constexpr conversion. */
-CC_PRIVATE bool cc_bitint_conversion_is_exact(cc *c,const cval *v,qty from,qty to)
+CC_PRIVATE bool cc_bitint_conversion_is_exact(cc *c,const cc_value *v,ast_qualified_type from,ast_qualified_type to)
 {
  if(!cc_bitint_value_is_valid(c,v))return false;
  size_t n=v->nbig;uint32_t *a=malloc(n*4);if(!a)return false;
@@ -97,20 +97,20 @@ CC_PRIVATE bool cc_bitint_conversion_is_exact(cc *c,const cval *v,qty from,qty t
  bool exact=true;
  if(cc_type_is_integer(c,to)){
   unsigned limit=cc_type_integer_bits(c,to);bool sign=cc_type_is_signed(c,to);
-  if(AST_TYPE_KIND(c,to)==TY_BOOL)exact=bits<=1;
+  if(AST_TYPE_KIND(c,to)==AST_TYPE_BOOL)exact=bits<=1;
   else if(neg&&!sign)exact=false;
   else if(sign){
    if(bits>limit-1){exact=neg&&bits==limit;for(unsigned i=0;exact&&i+1<bits;i++)if((a[i/32]>>(i%32))&1)exact=false;}
   }else exact=bits<=limit;
  }else if(cc_type_is_float(c,to)){
-  int k=AST_TYPE_KIND(c,to);unsigned precision=k==TY_FLOAT16?11:k==TY_BFLOAT16?8:k==TY_FLOAT?24:k==TY_DOUBLE?53:(unsigned)cc_float_precision_bits(c,to)+1;
-  unsigned maximum=k==TY_FLOAT16?16:k==TY_BFLOAT16||k==TY_FLOAT?128:k==TY_DOUBLE?1024:16384;
+  int k=AST_TYPE_KIND(c,to);unsigned precision=k==AST_TYPE_FLOAT16?11:k==AST_TYPE_BFLOAT16?8:k==AST_TYPE_FLOAT?24:k==AST_TYPE_DOUBLE?53:(unsigned)cc_float_precision_bits(c,to)+1;
+  unsigned maximum=k==AST_TYPE_FLOAT16?16:k==AST_TYPE_BFLOAT16||k==AST_TYPE_FLOAT?128:k==AST_TYPE_DOUBLE?1024:16384;
   exact=bits<=maximum;
   for(unsigned i=0;exact&&i+precision<bits;i++)if((a[i/32]>>(i%32))&1)exact=false;
  }
  free(a);return exact;
 }
-CC_PRIVATE char *cc_bitint_value_format(cc *c,const cval *v,qty from)
+CC_PRIVATE char *cc_bitint_value_format(cc *c,const cc_value *v,ast_qualified_type from)
 {
  if(!cc_bitint_value_is_valid(c,v))return NULL;
  size_t n=v->nbig;uint32_t *a=malloc(n*4);if(!a)return NULL;
@@ -125,36 +125,36 @@ CC_PRIVATE char *cc_bitint_value_format(cc *c,const cval *v,qty from)
 
 /* Read-only cases: these may run in parallel data emitters. Arithmetic that
  * needs new words is folded by cc_bitint_node_fold during parser construction. */
-CC_PRIVATE bool cc_bitint_read_eval(cc*c,uint32_t n,cval*v) {
- const node*x=AST_NODE(n);cval a,b;
- if(x->op==N_BIGNUM){if(!x->b||x->a>c->nlist||x->b>c->nlist-x->a)return false;memset(v,0,sizeof(*v));v->kind=CV_BIGINT;v->ice=!(x->aux&NUM_NO_ICE);v->big=x->a;v->nbig=x->b;for(uint32_t i=0;i<x->b&&i<4;i++)v->i=(i128)((u128)v->i|((u128)c->lists[x->a+i]<<(i*32)));return true;}
- if(x->op==N_CAST&&cc_constant_eval(c,x->a,&a)&&a.kind==CV_BIGINT){
-  if(x->aux==CK_NOP&&cc_type_is_bitint(c,x->ty)&&AST_NODE(x->a)->ty==x->ty){*v=a;return true;}
-  if(x->aux==CK_I2F&&cc_type_is_float(c,x->ty))return cc_bitint_to_float(c,&a,AST_NODE(x->a)->ty,x->ty,v);
-  if(x->aux==CK_BOOL){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=cc_bitint_value_is_nonzero(c,&a)};return true;}
-  if(cc_type_is_integer(c,x->ty)&&!cc_type_is_bitint(c,x->ty)){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=cc_constant_truncate(c,a.i,x->ty)};return true;}
+CC_PRIVATE bool cc_bitint_read_eval(cc*c,uint32_t n,cc_value*v) {
+ const node*x=AST_NODE(n);cc_value a,b;
+ if(x->op==AST_NODE_BITINT_NUMBER){if(!x->b||x->a>c->nlist||x->b>c->nlist-x->a)return false;memset(v,0,sizeof(*v));v->kind=CC_VALUE_BITINT;v->ice=!(x->aux&AST_NUMBER_NOT_ICE);v->big=x->a;v->nbig=x->b;for(uint32_t i=0;i<x->b&&i<4;i++)v->i=(i128)((u128)v->i|((u128)c->lists[x->a+i]<<(i*32)));return true;}
+ if(x->op==AST_NODE_CAST&&cc_constant_eval(c,x->a,&a)&&a.kind==CC_VALUE_BITINT){
+  if(x->aux==AST_CAST_NOP&&cc_type_is_bitint(c,x->ty)&&AST_NODE(x->a)->ty==x->ty){*v=a;return true;}
+  if(x->aux==AST_CAST_INTEGER_TO_FLOAT&&cc_type_is_float(c,x->ty))return cc_bitint_to_float(c,&a,AST_NODE(x->a)->ty,x->ty,v);
+  if(x->aux==AST_CAST_BOOL){*v=(cc_value){.kind=CC_VALUE_INTEGER,.ice=a.ice,.i=cc_bitint_value_is_nonzero(c,&a)};return true;}
+  if(cc_type_is_integer(c,x->ty)&&!cc_type_is_bitint(c,x->ty)){*v=(cc_value){.kind=CC_VALUE_INTEGER,.ice=a.ice,.i=cc_constant_truncate(c,a.i,x->ty)};return true;}
  }
- if(x->op==N_UNARY&&x->aux==LEX_TOKEN_EXCLAMATION&&cc_constant_eval(c,x->a,&a)&&a.kind==CV_BIGINT){*v=(cval){.kind=CV_INT,.ice=a.ice,.i=!cc_bitint_value_is_nonzero(c,&a)};return true;}
- if(x->op==N_BINARY&&!cc_type_is_bitint(c,x->ty)&&cc_constant_eval(c,x->a,&a)&&cc_constant_eval(c,x->b,&b)&&a.kind==CV_BIGINT&&b.kind==CV_BIGINT&&a.nbig==b.nbig){
+ if(x->op==AST_NODE_UNARY&&x->aux==LEX_TOKEN_EXCLAMATION&&cc_constant_eval(c,x->a,&a)&&a.kind==CC_VALUE_BITINT){*v=(cc_value){.kind=CC_VALUE_INTEGER,.ice=a.ice,.i=!cc_bitint_value_is_nonzero(c,&a)};return true;}
+ if(x->op==AST_NODE_BINARY&&!cc_type_is_bitint(c,x->ty)&&cc_constant_eval(c,x->a,&a)&&cc_constant_eval(c,x->b,&b)&&a.kind==CC_VALUE_BITINT&&b.kind==CC_VALUE_BITINT&&a.nbig==b.nbig){
   bool sa=cc_type_is_signed(c,AST_NODE(x->a)->ty),na=sa&&(c->lists[a.big+a.nbig-1]>>31),nb=sa&&(c->lists[b.big+b.nbig-1]>>31);int cmp=na!=nb?(na?-1:1):vbi_cmp(c->lists+a.big,c->lists+b.big,a.nbig);i128 out;
   switch(x->aux){case LEX_TOKEN_EQUAL_EQUAL:out=cmp==0;break;case LEX_TOKEN_EXCLAMATION_EQUAL:out=cmp!=0;break;case LEX_TOKEN_LESS:out=cmp<0;break;case LEX_TOKEN_LESS_EQUAL:out=cmp<=0;break;case LEX_TOKEN_GREATER:out=cmp>0;break;case LEX_TOKEN_GREATER_EQUAL:out=cmp>=0;break;default:return false;}
-  *v=(cval){.kind=CV_INT,.ice=a.ice&&b.ice,.i=out};return true;
+  *v=(cc_value){.kind=CC_VALUE_INTEGER,.ice=a.ice&&b.ice,.i=out};return true;
  }
  return false;
 }
 CC_PRIVATE uint32_t cc_bitint_node_fold(cc*c,uint32_t node_index) {
- const node*x=AST_NODE(node_index);qty to=x->ty;bool large=cc_type_is_bitint(c,to);cval a,b,v;
- if(x->op!=N_CAST&&x->op!=N_UNARY&&x->op!=N_BINARY)return node_index;
- if(!large&&!cc_type_is_bitint(c,AST_NODE(x->a)->ty)&&(x->op!=N_BINARY||!cc_type_is_bitint(c,AST_NODE(x->b)->ty)))return node_index;
- bool grammar=cc_constexpr_initializer_is_ok(c,x->a)&&(x->op!=N_BINARY||cc_constexpr_initializer_is_ok(c,x->b));
- if(cc_bitint_read_eval(c,node_index,&v)&&v.kind==CV_INT){uint32_t result=cc_node_integer_new(c,v.i,to,x->loc);AST_NODE(result)->aux|=(!v.ice?NUM_NO_ICE:0)|(!grammar?NUM_NO_CONSTEXPR:0);return result;}
- if(!large||!cc_constant_eval(c,x->a,&a)||(a.kind!=CV_INT&&a.kind!=CV_BIGINT&&!(x->op==N_CAST&&a.kind==CV_FLT)))return node_index;
+ const node*x=AST_NODE(node_index);ast_qualified_type to=x->ty;bool large=cc_type_is_bitint(c,to);cc_value a,b,v;
+ if(x->op!=AST_NODE_CAST&&x->op!=AST_NODE_UNARY&&x->op!=AST_NODE_BINARY)return node_index;
+ if(!large&&!cc_type_is_bitint(c,AST_NODE(x->a)->ty)&&(x->op!=AST_NODE_BINARY||!cc_type_is_bitint(c,AST_NODE(x->b)->ty)))return node_index;
+ bool grammar=cc_constexpr_initializer_is_ok(c,x->a)&&(x->op!=AST_NODE_BINARY||cc_constexpr_initializer_is_ok(c,x->b));
+ if(cc_bitint_read_eval(c,node_index,&v)&&v.kind==CC_VALUE_INTEGER){uint32_t result=cc_node_integer_new(c,v.i,to,x->loc);AST_NODE(result)->aux|=(!v.ice?AST_NUMBER_NOT_ICE:0)|(!grammar?AST_NUMBER_NOT_CONSTEXPR:0);return result;}
+ if(!large||!cc_constant_eval(c,x->a,&a)||(a.kind!=CC_VALUE_INTEGER&&a.kind!=CC_VALUE_BITINT&&!(x->op==AST_NODE_CAST&&a.kind==CC_VALUE_FLOAT)))return node_index;
  size_t n=(size_t)(cc_type_size(c,to)/4);uint32_t*buf=calloc(n*4+2,4);if(!buf)cc_report_fatal(c,x->loc,"out of memory");uint32_t*l=buf,*r=l+n,*out=r+n,*scratch=out+n;
- if(a.kind!=CV_FLT)cc_bitint_operand_load(c,l,n,&a,AST_NODE(x->a)->ty);bool ok=true,ice=a.ice;
- if(x->op==N_CAST&&a.kind==CV_FLT){bool valid=cc_bitint_from_float(out,n,cc_type_integer_bits(c,to),cc_type_is_signed(c,to),a.ld?a.q:vsoftfloat_of_double(a.f));ice=AST_NODE(x->a)->op==N_FNUM&&valid;grammar&=valid;}
- else if(x->op==N_CAST)memcpy(out,l,n*4);
- else if(x->op==N_UNARY){switch(x->aux){case LEX_TOKEN_PLUS:memcpy(out,l,n*4);break;case LEX_TOKEN_MINUS:vbi_neg(out,l,n);break;case LEX_TOKEN_TILDE:for(size_t i=0;i<n;i++)out[i]=~l[i];break;default:ok=false;}}
- else if(!cc_constant_eval(c,x->b,&b)||(b.kind!=CV_INT&&b.kind!=CV_BIGINT))ok=false;
+ if(a.kind!=CC_VALUE_FLOAT)cc_bitint_operand_load(c,l,n,&a,AST_NODE(x->a)->ty);bool ok=true,ice=a.ice;
+ if(x->op==AST_NODE_CAST&&a.kind==CC_VALUE_FLOAT){bool valid=cc_bitint_from_float(out,n,cc_type_integer_bits(c,to),cc_type_is_signed(c,to),a.ld?a.q:vsoftfloat_of_double(a.f));ice=AST_NODE(x->a)->op==AST_NODE_FLOAT_NUMBER&&valid;grammar&=valid;}
+ else if(x->op==AST_NODE_CAST)memcpy(out,l,n*4);
+ else if(x->op==AST_NODE_UNARY){switch(x->aux){case LEX_TOKEN_PLUS:memcpy(out,l,n*4);break;case LEX_TOKEN_MINUS:vbi_neg(out,l,n);break;case LEX_TOKEN_TILDE:for(size_t i=0;i<n;i++)out[i]=~l[i];break;default:ok=false;}}
+ else if(!cc_constant_eval(c,x->b,&b)||(b.kind!=CC_VALUE_INTEGER&&b.kind!=CC_VALUE_BITINT))ok=false;
  else {cc_bitint_operand_load(c,r,n,&b,AST_NODE(x->b)->ty);ice&=b.ice;switch(x->aux){
   case LEX_TOKEN_PLUS:vbi_add(out,l,r,n);break;case LEX_TOKEN_MINUS:vbi_sub(out,l,r,n);break;case LEX_TOKEN_STAR:vbi_mul(out,l,r,n);break;
   case LEX_TOKEN_AMPERSAND:case LEX_TOKEN_PIPE:case LEX_TOKEN_CARET:for(size_t i=0;i<n;i++)out[i]=x->aux==LEX_TOKEN_AMPERSAND?l[i]&r[i]:x->aux==LEX_TOKEN_PIPE?l[i]|r[i]:l[i]^r[i];break;
@@ -163,23 +163,23 @@ CC_PRIVATE uint32_t cc_bitint_node_fold(cc*c,uint32_t node_index) {
   default:ok=false;
  }}
  bool overflow=false;
- if(ok&&cc_type_is_signed(c,to)&&x->op!=N_CAST){
+ if(ok&&cc_type_is_signed(c,to)&&x->op!=AST_NODE_CAST){
   unsigned bits=cc_type_integer_bits(c,to),at=bits-1;bool sa=(l[at/32]>>(at%32))&1,sb=(r[at/32]>>(at%32))&1,so=(out[at/32]>>(at%32))&1;
-  if(x->op==N_UNARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa&&so;
-  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_PLUS)overflow=sa==sb&&so!=sa;
-  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa!=sb&&so!=sa;
-  else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_STAR){
+  if(x->op==AST_NODE_UNARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa&&so;
+  else if(x->op==AST_NODE_BINARY&&x->aux==LEX_TOKEN_PLUS)overflow=sa==sb&&so!=sa;
+  else if(x->op==AST_NODE_BINARY&&x->aux==LEX_TOKEN_MINUS)overflow=sa!=sb&&so!=sa;
+  else if(x->op==AST_NODE_BINARY&&x->aux==LEX_TOKEN_STAR){
    uint32_t *full=calloc(n*6,4);if(!full)cc_report_fatal(c,x->loc,"out of memory");
    vbi_copy(full,n*2,l,n,sa);vbi_copy(full+n*2,n*2,r,n,sb);vbi_mul(full+n*4,full,full+n*2,n*2);
    vbi_copy(full,n*2,out,n,so);vbi_norm(full,n*2,bits,true);overflow=memcmp(full,full+n*4,n*8)!=0;free(full);
-  }else if(x->op==N_BINARY&&x->aux==LEX_TOKEN_SLASH){
+  }else if(x->op==AST_NODE_BINARY&&x->aux==LEX_TOKEN_SLASH){
    /* Division above uses magnitudes; a positive result with the sign bit
       set is the signed-minimum / -1 overflow. */
-   overflow=cc_type_is_signed(c,AST_NODE(x->a)->ty)&&a.kind==CV_BIGINT&&(c->lists[a.big+a.nbig-1]>>31)&&b.kind==CV_BIGINT&&(c->lists[b.big+b.nbig-1]>>31)&&so;
+   overflow=cc_type_is_signed(c,AST_NODE(x->a)->ty)&&a.kind==CC_VALUE_BITINT&&(c->lists[a.big+a.nbig-1]>>31)&&b.kind==CC_VALUE_BITINT&&(c->lists[b.big+b.nbig-1]>>31)&&so;
   }
  }
  if(overflow){ice=false;grammar=false;}
- (void)scratch;uint32_t result=node_index;if(ok){cc_bitint_result_store(c,&v,out,n,to,ice);result=cc_node_new(c,N_BIGNUM,to,x->loc);AST_NODE(result)->a=v.big;AST_NODE(result)->b=v.nbig;AST_NODE(result)->aux=(!ice?NUM_NO_ICE:0)|(!grammar?NUM_NO_CONSTEXPR:0);
- if(overflow){AST_NODE(result)->flags|=NF_OVF;if(!c->dead&&!c->unevaluated&&!(AST_NODE(x->a)->flags&NF_OVF)&&(x->op!=N_BINARY||!(AST_NODE(x->b)->flags&NF_OVF))){char *value=cc_bitint_value_format(c,&v,to);cc_report_warning(c,"integer-overflow",true,NULL,x->loc,NULL,0,NULL,0,"overflow in expression; result is %s with type '%s'",value?value:"<wide integer>",tyname(c,to));free(value);}}
+ (void)scratch;uint32_t result=node_index;if(ok){cc_bitint_result_store(c,&v,out,n,to,ice);result=cc_node_new(c,AST_NODE_BITINT_NUMBER,to,x->loc);AST_NODE(result)->a=v.big;AST_NODE(result)->b=v.nbig;AST_NODE(result)->aux=(!ice?AST_NUMBER_NOT_ICE:0)|(!grammar?AST_NUMBER_NOT_CONSTEXPR:0);
+ if(overflow){AST_NODE(result)->flags|=AST_NODE_FLAG_OVERFLOW_REPORTED;if(!c->dead&&!c->unevaluated&&!(AST_NODE(x->a)->flags&AST_NODE_FLAG_OVERFLOW_REPORTED)&&(x->op!=AST_NODE_BINARY||!(AST_NODE(x->b)->flags&AST_NODE_FLAG_OVERFLOW_REPORTED))){char *value=cc_bitint_value_format(c,&v,to);cc_report_warning(c,"integer-overflow",true,NULL,x->loc,NULL,0,NULL,0,"overflow in expression; result is %s with type '%s'",value?value:"<wide integer>",tyname(c,to));free(value);}}
  }free(buf);return result;
 }

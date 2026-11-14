@@ -36,7 +36,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;
 		{
-			qty l = c->etype;
+			ast_qualified_type l = c->etype;
 			bool ll = c->elval;
 			uint32_t ln = c->enode, oploc = cxx_peek(c, 0)->loc;
 			bool built_in = false;
@@ -53,7 +53,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			cxx_binary_expression_parse(c, p + 1);
 			c->gen_notemp -= op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
 			rk = c->econst, rv = c->evalue;
-			qty rt = c->etype;
+			ast_qualified_type rt = c->etype;
 			uint32_t rn = c->enode;
 
 			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
@@ -65,7 +65,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			if (!c->tentative && (!found || !c->call_resolved) && op == LEX_TOKEN_EXCLAMATION_EQUAL && l != CXX_TY_UNKNOWN &&
 			    rt != CXX_TY_UNKNOWN && (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
 				/* no operator!= that fits: operator== (C++20 rewrites a != b as !(a == b)) */
-				qty ra = rt;
+				ast_qualified_type ra = rt;
 
 				c->op_lv_set = 1, c->op_lv[0] = ll;
 				if (cxx_operator_call_type(c, vintern_cstr("operator=="), l, &ra, 1) && c->call_resolved)
@@ -78,7 +78,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			if (!c->tentative && (!found || !c->call_resolved) && !rewritten && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
 			    (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL) &&
 			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
-				qty ra = rt, la = l;
+				ast_qualified_type ra = rt, la = l;
 				uint8_t lvl = ll, lvr = c->op_lv[1];
 
 				c->op_lv_set = 1, c->op_lv[0] = lvl, c->op_lv[1] = lvr;
@@ -93,12 +93,12 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			/* a <=> b with no operator<=>(a, b): the reversed candidate, 0 <=> (b <=> a) ([over.match.oper]/3.4,
 			   "text" <=> string) */
 			bool ss_reversed = false;
-			qty ss_type = CXX_TY_UNKNOWN;
+			ast_qualified_type ss_type = CXX_TY_UNKNOWN;
 
 			if (!c->tentative && (!found || !c->call_resolved) && op == CXX_TOKEN_SPACESHIP && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
-			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt)) && !(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != TY_ARRAY &&
-												 cc_type_is_record(c->ast, rt) && QUNQ(l) == QUNQ(rt))) {
-				qty la = l;
+			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt)) && !(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY &&
+												 cc_type_is_record(c->ast, rt) && AST_QUALIFIED_TYPE_UNQUALIFIED(l) == AST_QUALIFIED_TYPE_UNQUALIFIED(rt))) {
+				ast_qualified_type la = l;
 
 				c->op_lv_set = 1, c->op_lv[0] = r_lval, c->op_lv[1] = ll;
 				if (cxx_operator_call_type(c, vintern_cstr("operator<=>"), rt, &la, 1) && c->call_resolved && c->call_picked &&
@@ -110,11 +110,11 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				/* a class operand, no operator function that fits, and no conversion of the class to anything:
 				   ill-formed (std::string < int: a substitution failure in decltype(a < b)) */
 				for (int k = 0; k < 2; k++) {
-					qty o = k ? rt : l;
-					cxx_scope *os = cc_type_is_record(c->ast, o) && AST_TYPE_KIND(c->ast, o) != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(o)) : NULL;
+					ast_qualified_type o = k ? rt : l;
+					cxx_scope *os = cc_type_is_record(c->ast, o) && AST_TYPE_KIND(c->ast, o) != AST_TYPE_ARRAY ? cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(o)) : NULL;
 
 					if (os && !os->has_dependent_base && !os->dependent && !cxx_class_converts_public(c, os) &&
-					    !(c->nullptr_ty && QUNQ(o) == c->nullptr_ty))
+					    !(c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(o) == c->nullptr_ty))
 						CXX_INVALID(c);
 				}
 			}
@@ -122,7 +122,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			    !rewritten && !spaceship && !ss_reversed && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE) {
 				/* a class operand of a built-in operator: its conversion function to a scalar, then the
 				   operator ([over.match.oper]/7: atomic<int> == 4) */
-				qty cl = cxx_class_scalar_conversion(c, l), cr = cxx_class_scalar_conversion(c, rt);
+				ast_qualified_type cl = cxx_class_scalar_conversion(c, l), cr = cxx_class_scalar_conversion(c, rt);
 	
 				if (cl != CXX_TY_UNKNOWN) {
 					l = cl;
@@ -143,7 +143,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			if (rewritten) {
 				cxx_entity *eq = c->call_picked;
 
-				cxx_et(c, cc_type_basic(TY_BOOL), false);	/* (first: it clears the node) */
+				cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);	/* (first: it clears the node) */
 				c->call_resolved = 1, c->call_picked = eq;
 				if (eq) {
 					cxx_gen_operator_call(c, ln, &rn, 1, oploc);
@@ -151,7 +151,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 						cxx_gen_unary(c, LEX_TOKEN_EXCLAMATION, c->enode, oploc);
 				}
 			} else if (spaceship) {
-				cxx_et(c, cc_type_basic(TY_BOOL), false);
+				cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
 				c->call_resolved = 1, c->call_picked = ss_pick;
 				if (spaceship == 1)
 					cxx_gen_operator_call(c, ln, &rn, 1, oploc);
@@ -175,19 +175,19 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				cxx_gen_binary(c, op, ln, rn, oploc);	/* (no operator function: x && y through operator bool) */
 			/* constants: both operands, or the left alone when it decides && and || */
 			if (lk && rk) {
-				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&
-					   AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128 && !cc_type_is_signed(c->ast, c->etype);
+				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_CHAR &&
+					   AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UINT128 && !cc_type_is_signed(c->ast, c->etype);
 
 				/* a comparison's result is bool: unsigned when the operands' common type is (an
 				   unsigned operand of at least int's size, no narrower than the other) */
 				if (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL) {
-					qty o[2] = { l, rt };
+					ast_qualified_type o[2] = { l, rt };
 
 					uns = false;
 					for (int i = 0; i < 2 && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN; i++) {
 						const ctype *a = AST_TYPE(c->ast, o[i]), *b = AST_TYPE(c->ast, o[!i]);
 
-						uns |= a->kind >= TY_CHAR && a->kind <= TY_UINT128 && !cc_type_is_signed(c->ast, o[i]) &&
+						uns |= a->kind >= AST_TYPE_CHAR && a->kind <= AST_TYPE_UINT128 && !cc_type_is_signed(c->ast, o[i]) &&
 						       a->size >= 4 && a->size >= b->size;
 					}
 				}
@@ -206,7 +206,7 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 	if (cxx_accept(c, LEX_TOKEN_QUESTION)) {
 		uint32_t targs = c->in_template_args;
 
-		qty t2 = c->etype;	/* (GNU ?: : the condition's) */
+		ast_qualified_type t2 = c->etype;	/* (GNU ?: : the condition's) */
 		bool l2 = c->elval;
 		bool ck = c->econst, k2 = c->econst, k3;
 		int64_t cv = c->evalue, v2 = c->evalue, v3;
@@ -223,41 +223,41 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 		k3 = c->econst, v3 = c->evalue;
 		n3 = c->enode;
 		{
-			qty t3 = c->etype;
+			ast_qualified_type t3 = c->etype;
 
 			if (t2 != CXX_TY_UNKNOWN && t2 == t3)
 				cxx_et(c, t2, l2 && c->elval);
-			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t2) && QUNQ(t2) == QUNQ(t3) &&
-				 AST_TYPE_KIND(c->ast, t2) != TY_ARRAY)
-				cxx_et(c, QT(QI(t2), QQ(t2) | QQ(t3)), l2 && c->elval);	/* (one class, cv as the more qualified) */
+			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t2) && AST_QUALIFIED_TYPE_UNQUALIFIED(t2) == AST_QUALIFIED_TYPE_UNQUALIFIED(t3) &&
+				 AST_TYPE_KIND(c->ast, t2) != AST_TYPE_ARRAY)
+				cxx_et(c, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t2), AST_QUALIFIED_TYPE_QUALIFIERS(t2) | AST_QUALIFIED_TYPE_QUALIFIERS(t3)), l2 && c->elval);	/* (one class, cv as the more qualified) */
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t2) && cc_type_is_arithmetic(c->ast, t3))
-				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
+				cxx_et(c, cc_type_arithmetic_conversion(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t2), AST_QUALIFIED_TYPE_UNQUALIFIED(t3)), false);
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && c->nullptr_ty &&
-				 ((AST_TYPE_KIND(c->ast, t2) == TY_PTR && !AST_TYPE(c->ast, t2)->ext && QUNQ(t3) == c->nullptr_ty) ||
-				  (AST_TYPE_KIND(c->ast, t3) == TY_PTR && !AST_TYPE(c->ast, t3)->ext && QUNQ(t2) == c->nullptr_ty))) {
+				 ((AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t2)->ext && AST_QUALIFIED_TYPE_UNQUALIFIED(t3) == c->nullptr_ty) ||
+				  (AST_TYPE_KIND(c->ast, t3) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t3)->ext && AST_QUALIFIED_TYPE_UNQUALIFIED(t2) == c->nullptr_ty))) {
 				/* a pointer and nullptr: the pointer's type ([expr.cond]/7.3) */
-				qty pt = QUNQ(QUNQ(t3) == c->nullptr_ty ? t2 : t3);
+				ast_qualified_type pt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_QUALIFIED_TYPE_UNQUALIFIED(t3) == c->nullptr_ty ? t2 : t3);
 
 				cxx_et(c, pt, false);
 				if (cxx_gen_on(c) && n2 && n3) {
-					if (QUNQ(t2) == c->nullptr_ty)
+					if (AST_QUALIFIED_TYPE_UNQUALIFIED(t2) == c->nullptr_ty)
 						n2 = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, n2), pt);
 					else
 						n3 = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, n3), pt);
 				}
-			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t2) == TY_PTR && AST_TYPE_KIND(c->ast, t3) == TY_PTR &&
+			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER && AST_TYPE_KIND(c->ast, t3) == AST_TYPE_POINTER &&
 				   !AST_TYPE(c->ast, t2)->ext && !AST_TYPE(c->ast, t3)->ext &&
-				   QUNQ(AST_TYPE(c->ast, t2)->base) == QUNQ(AST_TYPE(c->ast, t3)->base)) {
+				   AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, t2)->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, t3)->base)) {
 				/* T * and const T *: the more qualified (the composite pointer type, [expr.type]/4) */
-				qty b2 = AST_TYPE(c->ast, t2)->base, b3 = AST_TYPE(c->ast, t3)->base;
+				ast_qualified_type b2 = AST_TYPE(c->ast, t2)->base, b3 = AST_TYPE(c->ast, t3)->base;
 
-				cxx_et(c, cc_type_pointer(c->ast, QT(QI(b2), QQ(b2) | QQ(b3))), false);
+				cxx_et(c, cc_type_pointer(c->ast, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(b2), AST_QUALIFIED_TYPE_QUALIFIERS(b2) | AST_QUALIFIED_TYPE_QUALIFIERS(b3))), false);
 			} else
 				cxx_et(c, CXX_TY_UNKNOWN, false);
 			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's
 			   builder finds no lvalue and the function gets no code) */
-			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR ||
-							   AST_TYPE_KIND(c->ast, c->etype) == TY_VOID ||	/* (c ? void(0) : f(): assert) */
+			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_POINTER ||
+							   AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_VOID ||	/* (c ? void(0) : f(): assert) */
 							   cc_type_is_record(c->ast, c->etype)))	/* (of one class: cxx_gen_conditional checks) */
 				cxx_gen_conditional(c, cn, n2, n3, qloc);
 			if (ck && (cv ? k2 : k3))
@@ -291,7 +291,7 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 			cxx_assignment_expression_parse(c);
 			operand = true, x = c->enode;
 		}
-		cxx_et(c, cc_type_basic(TY_VOID), false);
+		cxx_et(c, cc_type_basic(AST_TYPE_VOID), false);
 		cxx_gen_throw(c, x, operand, tloc);
 		return;
 	}
@@ -304,8 +304,8 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 	uint32_t n;
 
 	if (cxx_is_assignment_operator(c, &n)) {
-		qty l = c->etype;
-		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == TY_PTR);
+		ast_qualified_type l = c->etype;
+		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == AST_TYPE_POINTER);
 		uint32_t ln = c->enode, oploc = cxx_peek(c, 0)->loc, ntok = n;
 		int optok = cxx_operator_at(c, &ntok);
 
@@ -341,17 +341,17 @@ VPRIV void cxx_expression_parse(cxx *c)
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative && !c->template_depth)
 			c->eunsure = 1;
 		uint32_t ln = c->enode, cloc = cxx_peek(c, 0)->loc;
-		qty lt = c->etype;
+		ast_qualified_type lt = c->etype;
 		uint8_t ll = c->elval;
 
 		cxx_advance(c);
 		cxx_assignment_expression_parse(c);
-		if (!c->tentative && lt != CXX_TY_UNKNOWN && c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) != TY_VOID &&
-		    AST_TYPE_KIND(c->ast, lt) != TY_VOID && (cc_type_is_record(c->ast, lt) || cc_type_is_record(c->ast, c->etype) || AST_TYPE_KIND(c->ast, lt) == TY_ENUM ||
-		     AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)) {
+		if (!c->tentative && lt != CXX_TY_UNKNOWN && c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) != AST_TYPE_VOID &&
+		    AST_TYPE_KIND(c->ast, lt) != AST_TYPE_VOID && (cc_type_is_record(c->ast, lt) || cc_type_is_record(c->ast, c->etype) || AST_TYPE_KIND(c->ast, lt) == AST_TYPE_ENUM ||
+		     AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)) {
 			/* a, b with a class (or enumeration) operand: an operator, that fits is called (doctest's
 			   MessageBuilder) -- else the built-in comma */
-			qty rt = c->etype, ra = rt;
+			ast_qualified_type rt = c->etype, ra = rt;
 			uint8_t rl = c->elval;
 			uint32_t rn = c->enode;
 			bool found;

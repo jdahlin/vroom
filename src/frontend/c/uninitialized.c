@@ -75,21 +75,21 @@ static bool cc_uninitialized_condition_may_be_constant(cc *c, uint32_t n)
 		return true;
 	x = AST_NODE(n);
 	switch (x->op) {
-	case N_NUM: case N_FNUM: case N_STR: case N_LABELADDR:
+	case AST_NODE_NUMBER: case AST_NODE_FLOAT_NUMBER: case AST_NODE_STRING: case AST_NODE_LABEL_ADDRESS:
 		return true;
-	case N_VAR:
-		return (QQ(c->syms[x->a].ty) & Q_CONST) || AST_TYPE_KIND(c, x->ty) == TY_ARRAY || AST_TYPE_KIND(c, x->ty) == TY_FUNC;
-	case N_ADDR:
+	case AST_NODE_VARIABLE:
+		return (AST_QUALIFIED_TYPE_QUALIFIERS(c->syms[x->a].ty) & AST_QUALIFIER_CONST) || AST_TYPE_KIND(c, x->ty) == AST_TYPE_ARRAY || AST_TYPE_KIND(c, x->ty) == AST_TYPE_FUNCTION;
+	case AST_NODE_ADDRESS:
 		return true;	/* (&global, &x->f) */
-	case N_CAST: case N_UNARY:
+	case AST_NODE_CAST: case AST_NODE_UNARY:
 		return cc_uninitialized_condition_may_be_constant(c, x->a);
-	case N_BINARY: case N_COMMA:
+	case AST_NODE_BINARY: case AST_NODE_COMMA:
 		return cc_uninitialized_condition_may_be_constant(c, x->a) && cc_uninitialized_condition_may_be_constant(c, x->b);
-	case N_LOGAND: case N_LOGOR:
+	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR:
 		return cc_uninitialized_condition_may_be_constant(c, x->a) || cc_uninitialized_condition_may_be_constant(c, x->b);
-	case N_COND:
+	case AST_NODE_CONDITIONAL:
 		return cc_uninitialized_condition_may_be_constant(c, x->a) || (cc_uninitialized_condition_may_be_constant(c, x->b) && cc_uninitialized_condition_may_be_constant(c, x->c));
-	case N_BUILTIN:
+	case AST_NODE_BUILTIN:
 		return true;
 	default:
 		return false;
@@ -104,14 +104,14 @@ static int cc_uninitialized_condition_constant(cc_uninitialized_walk *w, uint32_
 /* && || ?: in a condition: clang names that operator's edge instead */
 static bool cc_uninitialized_condition_has_logic(cc *c, uint32_t n)
 {
-	while (n && (AST_NODE(n)->op == N_CAST || AST_NODE(n)->op == N_UNARY))
+	while (n && (AST_NODE(n)->op == AST_NODE_CAST || AST_NODE(n)->op == AST_NODE_UNARY))
 		n = AST_NODE(n)->a;
 	if (!n)
 		return false;
 	switch (AST_NODE(n)->op) {
-	case N_LOGAND: case N_LOGOR: case N_COND:
+	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: case AST_NODE_CONDITIONAL:
 		return true;
-	case N_BINARY: case N_COMMA: case N_ASSIGN:
+	case AST_NODE_BINARY: case AST_NODE_COMMA: case AST_NODE_ASSIGN:
 		return cc_uninitialized_condition_has_logic(c, AST_NODE(n)->a) || cc_uninitialized_condition_has_logic(c, AST_NODE(n)->b);
 	default:
 		return false;
@@ -166,7 +166,7 @@ static diag_span cc_uninitialized_case_range(cc *c, uint32_t n)
 	for (uint32_t n = 256; !t && n >= 8; n /= 2)	/* (near the end of the file) */
 		t = pp_source_text(c->p, b, b + n, &len);
 
-	if (AST_NODE(n)->op == N_DEFAULT || !t)
+	if (AST_NODE(n)->op == AST_NODE_DEFAULT || !t)
 		return (diag_span){ b, b + 7 };
 	if (len > 4 && !memcmp(t, "case", 4))
 		i = 4;
@@ -272,9 +272,9 @@ static void cc_uninitialized_lvalue(cc_uninitialized_walk *w, uint32_t e, cc_uni
 {
 	cc *c = w->c;
 
-	while (e && (AST_NODE(e)->op == N_MEMBER || AST_NODE(e)->op == N_UNARY))	/* (a member, __real/__imag) */
+	while (e && (AST_NODE(e)->op == AST_NODE_MEMBER || AST_NODE(e)->op == AST_NODE_UNARY))	/* (a member, __real/__imag) */
 		e = AST_NODE(e)->a;
-	if (e && AST_NODE(e)->op != N_VAR)
+	if (e && AST_NODE(e)->op != AST_NODE_VARIABLE)
 		cc_uninitialized_expression(w, e, st, false);
 }
 
@@ -289,12 +289,12 @@ static void cc_uninitialized_expression(cc_uninitialized_walk *w, uint32_t e, cc
 		return;
 	x = AST_NODE(e);
 	switch (x->op) {
-	case N_VAR:
+	case AST_NODE_VARIABLE:
 		if (!ignore)
 			cc_uninitialized_read(w, e, st);
 		return;
-	case N_ASSIGN:
-		if (AST_NODE(x->a)->op == N_VAR) {
+	case AST_NODE_ASSIGN:
+		if (AST_NODE(x->a)->op == AST_NODE_VARIABLE) {
 			if (x->aux)
 				cc_uninitialized_read(w, x->a, st);
 			cc_uninitialized_expression(w, x->b, st, false);
@@ -303,58 +303,58 @@ static void cc_uninitialized_expression(cc_uninitialized_walk *w, uint32_t e, cc
 			uint32_t v = x->a;
 
 			/* __real/__imag of a _Complex variable: initializes it (clang) */
-			while (AST_NODE(v)->op == N_MEMBER || AST_NODE(v)->op == N_UNARY)
+			while (AST_NODE(v)->op == AST_NODE_MEMBER || AST_NODE(v)->op == AST_NODE_UNARY)
 				v = AST_NODE(v)->a;
 			if (x->aux)
 				cc_uninitialized_expression(w, x->a, st, false);
 			cc_uninitialized_expression(w, x->b, st, false);
 			if (!x->aux)
 				cc_uninitialized_lvalue(w, x->a, st);
-			if (AST_NODE(v)->op == N_VAR)
+			if (AST_NODE(v)->op == AST_NODE_VARIABLE)
 				cc_uninitialized_write(w, v, st);
 		}
 		return;
-	case N_PREINC: case N_PREDEC: case N_POSTINC: case N_POSTDEC:
+	case AST_NODE_PRE_INCREMENT: case AST_NODE_PRE_DECREMENT: case AST_NODE_POST_INCREMENT: case AST_NODE_POST_DECREMENT:
 		cc_uninitialized_expression(w, x->a, st, false);
-		if (AST_NODE(x->a)->op == N_VAR)
+		if (AST_NODE(x->a)->op == AST_NODE_VARIABLE)
 			cc_uninitialized_write(w, x->a, st);
 		return;
-	case N_ADDR: {
+	case AST_NODE_ADDRESS: {
 		uint32_t v = x->a;
 
-		while (AST_NODE(v)->op == N_MEMBER || AST_NODE(v)->op == N_UNARY)
+		while (AST_NODE(v)->op == AST_NODE_MEMBER || AST_NODE(v)->op == AST_NODE_UNARY)
 			v = AST_NODE(v)->a;
-		if (AST_NODE(v)->op == N_VAR)
+		if (AST_NODE(v)->op == AST_NODE_VARIABLE)
 			cc_uninitialized_write(w, v, st);	/* (escapes: initialized from here on) */
 		else
 			cc_uninitialized_lvalue(w, x->a, st);
 		return;
 	}
-	case N_CAST:
-		cc_uninitialized_expression(w, x->a, st, x->aux == CK_VOID);
+	case AST_NODE_CAST:
+		cc_uninitialized_expression(w, x->a, st, x->aux == AST_CAST_VOID);
 		return;
-	case N_CALL:
+	case AST_NODE_CALL:
 		cc_uninitialized_expression(w, x->a, st, false);
 		for (uint32_t i = 0; i < x->c; i++) {
 			uint32_t a = c->lists[x->b + i];
 
 			/* &v for a pointer-to-const parameter: neither a use nor an initialization */
-			if (AST_NODE(a)->op == N_CAST && AST_NODE(AST_NODE(a)->a)->op == N_ADDR && AST_NODE(AST_NODE(AST_NODE(a)->a)->a)->op == N_VAR &&
-			    AST_TYPE_KIND(c, AST_NODE(a)->ty) == TY_PTR && (QQ(AST_TYPE(c, AST_NODE(a)->ty)->base) & Q_CONST))
+			if (AST_NODE(a)->op == AST_NODE_CAST && AST_NODE(AST_NODE(a)->a)->op == AST_NODE_ADDRESS && AST_NODE(AST_NODE(AST_NODE(a)->a)->a)->op == AST_NODE_VARIABLE &&
+			    AST_TYPE_KIND(c, AST_NODE(a)->ty) == AST_TYPE_POINTER && (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c, AST_NODE(a)->ty)->base) & AST_QUALIFIER_CONST))
 				continue;
 			cc_uninitialized_expression(w, a, st, false);
 		}
 		if (cc_reach_is_noreturn(&w->fl, e))
 			st->live = false;
 		return;
-	case N_BUILTIN:
+	case AST_NODE_BUILTIN:
 		for (uint32_t i = 0; i < x->c; i++) {
 			uint32_t a = c->lists[x->b + i];
 
-			if (i == 0 && (x->aux == BI_VA_START || x->aux == BI_VA_COPY)) {
-				while (AST_NODE(a)->op == N_CAST || AST_NODE(a)->op == N_ADDR)
+			if (i == 0 && (x->aux == CC_BUILTIN_VA_START || x->aux == CC_BUILTIN_VA_COPY)) {
+				while (AST_NODE(a)->op == AST_NODE_CAST || AST_NODE(a)->op == AST_NODE_ADDRESS)
 					a = AST_NODE(a)->a;
-				if (AST_NODE(a)->op == N_VAR) {
+				if (AST_NODE(a)->op == AST_NODE_VARIABLE) {
 					cc_uninitialized_write(w, a, st);	/* (va_start/va_copy initialize their va_list) */
 					continue;
 				}
@@ -364,7 +364,7 @@ static void cc_uninitialized_expression(cc_uninitialized_walk *w, uint32_t e, cc
 		if (cc_reach_is_noreturn(&w->fl, e))
 			st->live = false;
 		return;
-	case N_COND: {
+	case AST_NODE_CONDITIONAL: {
 		int k = cc_uninitialized_condition_constant(w, x->a);
 		cc_uninitialized_state t, f;
 
@@ -387,9 +387,9 @@ static void cc_uninitialized_expression(cc_uninitialized_walk *w, uint32_t e, cc
 		cc_uninitialized_join(st, &t), cc_uninitialized_join(st, &f);
 		return;
 	}
-	case N_LOGAND: case N_LOGOR: {
+	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: {
 		int k = cc_uninitialized_condition_constant(w, x->a);
-		bool and = x->op == N_LOGAND;
+		bool and = x->op == AST_NODE_LOGICAL_AND;
 		cc_uninitialized_state r, s;
 
 		cc_uninitialized_expression(w, x->a, st, false);
@@ -407,34 +407,34 @@ static void cc_uninitialized_expression(cc_uninitialized_walk *w, uint32_t e, cc
 		cc_uninitialized_join(st, &r);
 		return;
 	}
-	case N_COMMA:
+	case AST_NODE_COMMA:
 		cc_uninitialized_expression(w, x->a, st, true);
 		cc_uninitialized_expression(w, x->b, st, ignore);
 		return;
-	case N_BINARY: case N_CPLX:
+	case AST_NODE_BINARY: case AST_NODE_COMPLEX:
 		cc_uninitialized_expression(w, x->a, st, false);
 		cc_uninitialized_expression(w, x->b, st, false);
 		return;
-	case N_INDEX:
+	case AST_NODE_INDEX:
 		cc_uninitialized_expression(w, x->a, st, false);
 		cc_uninitialized_expression(w, x->b, st, false);
 		return;
-	case N_UNARY: case N_DEREF: case N_VAARG:
+	case AST_NODE_UNARY: case AST_NODE_DEREFERENCE: case AST_NODE_VA_ARG:
 		cc_uninitialized_expression(w, x->a, st, false);
 		return;
-	case N_MEMBER:
-		if (AST_NODE(x->a)->op == N_VAR && cc_type_is_record(c, AST_NODE(x->a)->ty) && !cc_type_is_complex(c, AST_NODE(x->a)->ty))
+	case AST_NODE_MEMBER:
+		if (AST_NODE(x->a)->op == AST_NODE_VARIABLE && cc_type_is_record(c, AST_NODE(x->a)->ty) && !cc_type_is_complex(c, AST_NODE(x->a)->ty))
 			cc_uninitialized_write(w, x->a, st);	/* s.m of a struct variable: no use, and initialized from here on (clang) */
 		else
 			cc_uninitialized_expression(w, x->a, st, false);	/* (a _Complex part is a use) */
 		return;
-	case N_STMTEXPR:
+	case AST_NODE_STATEMENT_EXPRESSION:
 		cc_uninitialized_statement(w, x->a, st);
 		return;
-	case N_COMPLIT:
+	case AST_NODE_COMPOUND_LITERAL:
 		cc_uninitialized_expression(w, x->a, st, false);
 		return;
-	case N_INIT:
+	case AST_NODE_INITIALIZER:
 		if (x->aux == 1)
 			for (uint32_t i = 0; i < x->c; i++)
 				cc_uninitialized_expression(w, c->lists[x->b + 3 * i + 2], st, false);
@@ -467,10 +467,10 @@ static void cc_uninitialized_loop(cc_uninitialized_walk *w, const node *x, cc_un
 	cc_uninitialized_state in = *st, head = in, out = { 0, 0, false };
 	bool rep = w->report;
 	cc_uninitialized_state *sb = w->brk, *sc = w->cont;
-	uint32_t cond = x->op == N_FOR ? x->b : x->a;
-	uint32_t body = x->op == N_FOR ? c->lists[x->c + 1] : x->b;
-	uint32_t step = x->op == N_FOR ? c->lists[x->c] : 0;
-	int k = cond || x->op != N_FOR ? cc_uninitialized_condition_constant(w, cond) : 1;
+	uint32_t cond = x->op == AST_NODE_FOR ? x->b : x->a;
+	uint32_t body = x->op == AST_NODE_FOR ? c->lists[x->c + 1] : x->b;
+	uint32_t step = x->op == AST_NODE_FOR ? c->lists[x->c] : 0;
+	int k = cond || x->op != AST_NODE_FOR ? cc_uninitialized_condition_constant(w, cond) : 1;
 
 	uint32_t nord0 = w->nord, nself0 = w->nself;
 	uint64_t done0 = w->done;
@@ -483,7 +483,7 @@ static void cc_uninitialized_loop(cc_uninitialized_walk *w, const node *x, cc_un
 
 		out = (cc_uninitialized_state){ 0, 0, false };
 		w->brk = &brk, w->cont = &cont;
-		if (x->op == N_DO) {
+		if (x->op == AST_NODE_DO) {
 			cc_uninitialized_statement(w, body, &s);
 			cc_uninitialized_join(&s, &cont);
 			cc_uninitialized_expression(w, cond, &s, false);
@@ -496,7 +496,7 @@ static void cc_uninitialized_loop(cc_uninitialized_walk *w, const node *x, cc_un
 			s.live &= k != 0;
 			cc_uninitialized_statement(w, body, &s);
 			cc_uninitialized_join(&s, &cont);
-			if (step && AST_NODE(step)->op == N_STMTEXPR)
+			if (step && AST_NODE(step)->op == AST_NODE_STATEMENT_EXPRESSION)
 				cc_uninitialized_statement(w, AST_NODE(step)->a, &s);
 			else if (step)
 				cc_uninitialized_expression(w, step, &s, true);
@@ -532,21 +532,21 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 	if (!n)
 		return;
 	x = AST_NODE(n);
-	if (x->op < N_BLOCK) {
+	if (x->op < AST_NODE_BLOCK) {
 		cc_uninitialized_expression(w, n, st, true);
 		return;
 	}
 	switch (x->op) {
-	case N_BLOCK:
+	case AST_NODE_BLOCK:
 		for (uint32_t i = 0; i < x->c; i++)
 			cc_uninitialized_statement(w, c->lists[x->b + i], st);
 		return;
-	case N_EXPR:
+	case AST_NODE_EXPRESSION:
 		cc_uninitialized_expression(w, x->a, st, false);	/* ("x;" is a use) */
 		if (cc_reach_is_noreturn(&w->fl, x->a))
 			st->live = false;
 		return;
-	case N_DECL: {
+	case AST_NODE_DECLARATION: {
 		int k = cc_uninitialized_variable_index(w, x->a);
 
 		if (!x->b) {
@@ -557,11 +557,11 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		{
 			uint32_t b0 = x->b;
 
-			while (AST_NODE(b0)->op == N_CAST && AST_NODE(b0)->aux == CK_NOP)
+			while (AST_NODE(b0)->op == AST_NODE_CAST && AST_NODE(b0)->aux == AST_CAST_NOP)
 				b0 = AST_NODE(b0)->a;
-			if (AST_NODE(b0)->op == N_VAR && AST_NODE(b0)->a == x->a && k < 0 && cc_uninitialized_is_tracked(c, c->syms[x->a].ty))
+			if (AST_NODE(b0)->op == AST_NODE_VARIABLE && AST_NODE(b0)->a == x->a && k < 0 && cc_uninitialized_is_tracked(c, c->syms[x->a].ty))
 				k = cc_uninitialized_variable_add(w, x->a);	/* (tracked from here: a later read is the report) */
-			if (k >= 0 && AST_NODE(b0)->op == N_VAR && AST_NODE(b0)->a == x->a) {
+			if (k >= 0 && AST_NODE(b0)->op == AST_NODE_VARIABLE && AST_NODE(b0)->a == x->a) {
 				if (st->live)
 					st->u |= 1ull << k, st->i &= ~(1ull << k);
 				w->selfv |= 1ull << k, w->xsym[k] = x->a, w->xloc[k] = AST_NODE(b0)->loc, w->xr[k] = cc_node_range_bare(c, b0);
@@ -584,11 +584,11 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		}
 		return;
 	}
-	case N_RETURN:
+	case AST_NODE_RETURN:
 		cc_uninitialized_expression(w, x->a, st, false);
 		st->live = false;
 		return;
-	case N_IF: {
+	case AST_NODE_IF: {
 		int k = cc_uninitialized_condition_constant(w, x->a);
 		cc_uninitialized_state t, e;
 
@@ -647,7 +647,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		cc_uninitialized_join(st, &e);
 		return;
 	}
-	case N_DO:
+	case AST_NODE_DO:
 		if (cc_uninitialized_condition_constant(w, x->a) == 0) {	/* do-while(0): no back edge, a block whose breaks go to its end */
 			cc_uninitialized_state brk = { 0, 0, false }, *sb = w->brk, *sc = w->cont, *sd = w->dobrk;
 			uint64_t sm = w->dcm;
@@ -686,23 +686,23 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 			return;
 		}
 		__attribute__((fallthrough));
-	case N_WHILE: case N_FOR:
-		if (x->op == N_FOR)
+	case AST_NODE_WHILE: case AST_NODE_FOR:
+		if (x->op == AST_NODE_FOR)
 			cc_uninitialized_statement(w, x->a, st);
 		w->blk++;
 		w->spend = 0, w->dep++;
 		cc_uninitialized_loop(w, x, st);
 		w->dep--, cc_uninitialized_pending_drop(w);
 		/* a loop that never loops back: its condition's false edge leaves it uninitialized (clang) */
-		if (x->op != N_DO && (x->op == N_WHILE ? x->a : x->b) && cc_uninitialized_condition_constant(w, x->op == N_WHILE ? x->a : x->b) < 0)
+		if (x->op != AST_NODE_DO && (x->op == AST_NODE_WHILE ? x->a : x->b) && cc_uninitialized_condition_constant(w, x->op == AST_NODE_WHILE ? x->a : x->b) < 0)
 			cc_uninitialized_pending_add(w, n, 6, &w->lp_head, &w->lp_brk, &w->lp_cx, false);
 		w->blk++;
 		return;
-	case N_SWITCH: {
+	case AST_NODE_SWITCH: {
 		cc_uninitialized_state *sb = w->brk, *si = w->swin, brk = { 0, 0, false }, in;
 		bool sk = w->sw_const, sh = w->sw_hit, def;
 		i128 sv = w->sw_val;
-		cval cv;
+		cc_value cv;
 
 		cc_uninitialized_state *ssb = w->swbrk;
 		uint32_t ssl[8], snl = w->nswlab, sarm = w->swarm;
@@ -715,7 +715,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		w->spend = 0;
 		w->brk = &brk, w->swin = &in;
 		w->swbrk = &brk, w->nswlab = 0, w->swarm = 0, w->swmask = 0, w->swcand = 0;
-		w->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CV_INT;
+		w->sw_const = cc_eval(c, x->a, &cv) && cv.kind == CC_VALUE_INTEGER;
 		w->sw_val = w->sw_const ? cv.i : 0;
 		w->sw_hit = w->sw_const && cc_reach_case_matches(&w->fl, x->b, w->sw_val);
 		def = cc_reach_has_default(&w->fl, x->b);
@@ -740,7 +740,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		w->brk = sb, w->swin = si, w->sw_const = sk, w->sw_hit = sh, w->sw_val = sv;
 		return;
 	}
-	case N_CASE: case N_DEFAULT:
+	case AST_NODE_CASE: case AST_NODE_DEFAULT:
 		if (w->swbrk == w->brk) {	/* (a label of the switch being walked, not inside a loop of it) */
 			/* a fallthrough into it continues the arm (case A: case CC_COMPLEX_BINARY: ...: A's edge is named) */
 			if (!st->live) {
@@ -753,7 +753,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		if (w->swin) {
 			bool here = true;
 
-			if (w->sw_const && x->op == N_CASE)
+			if (w->sw_const && x->op == AST_NODE_CASE)
 				here = w->sw_val >= c->ipool[x->a] && w->sw_val <= c->ipool[x->b];
 			else if (w->sw_const)
 				here = !w->sw_hit;
@@ -772,7 +772,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		w->blk++;
 		cc_uninitialized_statement(w, x->c, st);
 		return;
-	case N_LABEL:
+	case AST_NODE_LABEL:
 		if (x->a >= w->first && x->a - w->first < w->nlab) {
 			cc_uninitialized_join(st, &w->lab[x->a - w->first]);
 			w->seen[x->a - w->first] = 1;
@@ -781,31 +781,31 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 		w->blk++;
 		cc_uninitialized_statement(w, x->c, st);
 		return;
-	case N_GOTO:
+	case AST_NODE_GOTO:
 		cc_uninitialized_goto(w, x->a, st);
 		st->live = false;
 		return;
-	case N_GOTO_IND:
+	case AST_NODE_GOTO_INDIRECT:
 		cc_uninitialized_expression(w, x->a, st, false);
 		for (uint32_t l = w->first; l < w->first + w->nlab; l++)
 			if (c->labels[l].addr_taken)
 				cc_uninitialized_goto(w, l, st);
 		st->live = false;
 		return;
-	case N_BREAK:
+	case AST_NODE_BREAK:
 		if (w->brk && w->brk == w->swbrk)
 			cc_uninitialized_switch_arm(w, st);
 		if (w->brk)
 			cc_uninitialized_join(w->brk, st);
 		st->live = false;
 		return;
-	case N_CONTINUE:
+	case AST_NODE_CONTINUE:
 		if (w->cont)
 			cc_uninitialized_join(w->cont, st);
 		st->live = false;
 		return;
-	case N_ASM: {
-		const casm *a = &c->asms[x->a];
+	case AST_NODE_ASM: {
+		const ast_asm_statement *a = &c->asms[x->a];
 
 		for (uint32_t i = a->nout; i < a->nout + a->nin; i++)
 			cc_uninitialized_expression(w, a->ops[i].expr, st, false);
@@ -814,7 +814,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 			const char *cs = a->ops[i].constraint ? c->strs[a->ops[i].constraint - 1].s : "";
 
 			(void)cs;	/* (clang: a "+" operand is not a use, -Wuninitialized) */
-			if (AST_NODE(e)->op == N_VAR) {
+			if (AST_NODE(e)->op == AST_NODE_VARIABLE) {
 				cc_uninitialized_write(w, e, st);
 			} else
 				cc_uninitialized_lvalue(w, e, st);
@@ -831,7 +831,7 @@ static void cc_uninitialized_statement(cc_uninitialized_walk *w, uint32_t n, cc_
 /* the end of a then/else statement as clang's getEndLoc: an expression statement ends with its expression */
 static uint32_t cc_uninitialized_statement_end(cc *c, uint32_t n)
 {
-	if (AST_NODE(n)->op == N_EXPR && AST_NODE(n)->a)
+	if (AST_NODE(n)->op == AST_NODE_EXPRESSION && AST_NODE(n)->a)
 		return cc_node_range_bare(c, AST_NODE(n)->a).e;
 	return pp_token_end_find(c->p, c->span[n].e);
 }
@@ -878,16 +878,16 @@ static bool cc_uninitialized_sometimes_report(cc *c, cc_uninitialized_walk *w, u
 		return true;
 	}
 	if (kd == 6) {
-		cr = cc_node_range_bare(c, x->op == N_WHILE ? x->a : x->b);
+		cr = cc_node_range_bare(c, x->op == AST_NODE_WHILE ? x->a : x->b);
 		if (!cc_report_warning(c, "sometimes-uninitialized", true, g, cr.b, &cr, 1, NULL, 0,
 			      "variable '%.*s' is used uninitialized whenever '%s' loop exits because its condition is false",
-			      CC_IDENTIFIER(y->name), x->op == N_WHILE ? "while" : "for"))
+			      CC_IDENTIFIER(y->name), x->op == AST_NODE_WHILE ? "while" : "for"))
 			return false;
 		diag_report_extended(c->p, &d, "uninitialized use occurs here");
 		{
 			diag_fixit fx = { cr.b, cr.e, "1", 0 };	/* (while: the condition becomes 1; for: it is removed) */
 
-			d = (diag_info){ "note", cr.b, &cr, 1, &fx, x->op == N_WHILE, NULL, 0 };
+			d = (diag_info){ "note", cr.b, &cr, 1, &fx, x->op == AST_NODE_WHILE, NULL, 0 };
 			diag_report_extended(c->p, &d, "remove the condition if it is always true");
 		}
 		return true;
@@ -911,7 +911,7 @@ static bool cc_uninitialized_sometimes_report(cc *c, cc_uninitialized_walk *w, u
 
 			if (!cc_report_warning(c, "sometimes-uninitialized", true, g, kr.b, &kr, 1, NULL, 0,
 				      "variable '%.*s' is used uninitialized whenever switch %s is taken", CC_IDENTIFIER(y->name),
-				      AST_NODE(ln)->op == N_CASE ? "case" : "default"))
+				      AST_NODE(ln)->op == AST_NODE_CASE ? "case" : "default"))
 				continue;
 			d = (diag_info){ "note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0 };
 			diag_report_extended(c->p, &d, "uninitialized use occurs here");
@@ -926,27 +926,27 @@ static bool cc_uninitialized_sometimes_report(cc *c, cc_uninitialized_walk *w, u
 	if (f) {
 		r[0] = (diag_span){ c->span[w->sif[k]].b, c->span[x->b].b };
 		if (x->c)	/* (after an expression statement: its ';') */
-			r[1] = (diag_span){ AST_NODE(x->b)->op == N_EXPR ? c->span[x->b].e : cc_uninitialized_statement_end(c, x->b), cc_uninitialized_statement_end(c, x->c) }, nr = 2;
+			r[1] = (diag_span){ AST_NODE(x->b)->op == AST_NODE_EXPRESSION ? c->span[x->b].e : cc_uninitialized_statement_end(c, x->b), cc_uninitialized_statement_end(c, x->c) }, nr = 2;
 	} else
-		r[0] = (diag_span){ c->span[w->sif[k]].b, x->c ? c->span[x->c].b : AST_NODE(x->b)->op == N_BLOCK ? cc_uninitialized_statement_end(c, x->b) : c->span[x->b].e };	/* (no else: the whole if) */
+		r[0] = (diag_span){ c->span[w->sif[k]].b, x->c ? c->span[x->c].b : AST_NODE(x->b)->op == AST_NODE_BLOCK ? cc_uninitialized_statement_end(c, x->b) : c->span[x->b].e };	/* (no else: the whole if) */
 	d = (diag_info){ "note", r[0].b, r, nr, NULL, 0, NULL, 0 };
 	diag_report_extended(c->p, &d, "remove the 'if' if its condition is always %s", f ? "true" : "false");
 	return true;
 }
 
-static const char *cc_uninitialized_zero_initializer_text(cc *c, qty t)
+static const char *cc_uninitialized_zero_initializer_text(cc *c, ast_qualified_type t)
 {
 	int k = AST_TYPE_KIND(c, canon(c, t));
 
-	if (k == TY_ENUM || ((k == TY_STRUCT || k == TY_UNION) && !cc_type_is_complex(c, t)))
+	if (k == AST_TYPE_ENUM || ((k == AST_TYPE_STRUCT || k == AST_TYPE_UNION) && !cc_type_is_complex(c, t)))
 		return NULL;
-	if (k >= TY_BFLOAT16 && k <= TY_FLOAT128)
+	if (k >= AST_TYPE_BFLOAT16 && k <= AST_TYPE_FLOAT128)
 		return " = 0.0";
-	if (k == TY_BOOL && pp_macro_id_is_defined(c->p, vintern_cstr("false")))
+	if (k == AST_TYPE_BOOL && pp_macro_id_is_defined(c->p, vintern_cstr("false")))
 		return " = false";
-	if (k == TY_PTR && pp_macro_id_is_defined(c->p, vintern_cstr("NULL")))
+	if (k == AST_TYPE_POINTER && pp_macro_id_is_defined(c->p, vintern_cstr("NULL")))
 		return " = NULL";
-	if (k == TY_CHAR || k == TY_SCHAR || k == TY_UCHAR)
+	if (k == AST_TYPE_CHAR || k == AST_TYPE_SIGNED_CHAR || k == AST_TYPE_UNSIGNED_CHAR)
 		return " = '\\0'";
 	return " = 0";
 }
@@ -1021,7 +1021,7 @@ CC_PRIVATE void cc_uninitialized_check(cc *c, uint32_t body, uint32_t first_labe
 			continue;
 		if (z) {
 			/* the declarator's end: the name, or ')' of a function pointer (not an asm label or attributes) */
-			bool fp = AST_TYPE_KIND(c, canon(c, y->ty)) == TY_PTR && AST_TYPE_KIND(c, canon(c, AST_TYPE(c, canon(c, y->ty))->base)) == TY_FUNC;
+			bool fp = AST_TYPE_KIND(c, canon(c, y->ty)) == AST_TYPE_POINTER && AST_TYPE_KIND(c, canon(c, AST_TYPE(c, canon(c, y->ty))->base)) == AST_TYPE_FUNCTION;
 			uint32_t e = pp_token_end_find(c->p, fp && y->ple && !y->asmname && !y->attrs ? y->ple : y->loc);
 			diag_fixit fx = { e, e, z, 0 };
 			diag_info d = { "note", e, NULL, 0, &fx, 1, NULL, 0 };

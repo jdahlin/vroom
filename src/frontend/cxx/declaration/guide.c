@@ -83,11 +83,11 @@ VPRIV void cxx_guide_record(cxx *c, cxx_entity *te, uint32_t i)
  * deduction): the class its deduction guides of the simple form give (pair{a, b}: pair<A, B>); CXX_TY_UNKNOWN
  * if none applies (the implicit guides from its constructors: not built).
  */
-VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval, uint32_t nargs)
+VPRIV ast_qualified_type cxx_ctad(cxx *c, cxx_entity *te, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs)
 {
 	for (uint32_t gi = 0; te && gi < te->nguides; gi++) {
 		const cxx_guide *g = &te->guides[gi];
-		qty dt[8];
+		ast_qualified_type dt[8];
 		cxx_targ ta[8];
 		bool ok = g->np == nargs;
 		cxx_entity *inst;
@@ -95,7 +95,7 @@ VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval,
 		for (int k = 0; k < 8; k++)
 			dt[k] = CXX_TY_UNKNOWN;
 		for (uint32_t j = 0; ok && j < nargs; j++) {
-			qty at = args[j], d;
+			ast_qualified_type at = args[j], d;
 
 			if (at == CXX_TY_UNKNOWN) {
 				ok = false;
@@ -103,12 +103,12 @@ VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval,
 			}
 			if (g->mode[j] == 2 && lval && lval[j])
 				d = cxx_type_reference(c, at, false);	/* (T&& from an lvalue: T is a reference) */
-			else if (g->mode[j] == 0 && AST_TYPE_KIND(c->ast, at) == TY_ARRAY)
+			else if (g->mode[j] == 0 && AST_TYPE_KIND(c->ast, at) == AST_TYPE_ARRAY)
 				d = cc_type_pointer(c->ast, AST_TYPE(c->ast, at)->base);
-			else if (g->mode[j] == 0 && AST_TYPE_KIND(c->ast, at) == TY_FUNC)
+			else if (g->mode[j] == 0 && AST_TYPE_KIND(c->ast, at) == AST_TYPE_FUNCTION)
 				d = cc_type_pointer(c->ast, at);
 			else
-				d = QUNQ(at);
+				d = AST_QUALIFIED_TYPE_UNQUALIFIED(at);
 			if (dt[g->pidx[j]] != CXX_TY_UNKNOWN && dt[g->pidx[j]] != d)
 				ok = false;
 			dt[g->pidx[j]] = d;

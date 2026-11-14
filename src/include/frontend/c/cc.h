@@ -1,5 +1,5 @@
-#ifndef VCC_CC_H
-#define VCC_CC_H
+#ifndef VCC_FRONTEND_C_CC_H
+#define VCC_FRONTEND_C_CC_H
 /*
  * vcc front end: parser + semantic analysis for GNU C11 (what the kernel
  * and its host tools use), one TU at a time, pulling tokens from pp.h.
@@ -33,35 +33,35 @@
 /* ---------------- types ---------------- */
 
 enum {
-	TY_VOID, TY_BOOL,
-	TY_CHAR, TY_SCHAR, TY_UCHAR, TY_SHORT, TY_USHORT, TY_INT, TY_UINT,
-	TY_LONG, TY_ULONG, TY_LLONG, TY_ULLONG, TY_INT128, TY_UINT128,
-	TY_BFLOAT16, TY_FLOAT16, TY_FLOAT, TY_DOUBLE, TY_LDOUBLE,
-	TY_FLOAT128,	/* __float128 (x86-64): binary128 */
-	TY_PTR, TY_ARRAY, TY_FUNC, TY_STRUCT, TY_UNION, TY_ENUM,
-	TY_VECTOR,	/* GNU vector_size: base element, n lanes */
-	TY_SVE,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
-	TY_BITINT, TY_UBITINT, /* bit-precise integers wider than 128 bits */
-	TY_NKINDS
+	AST_TYPE_VOID, AST_TYPE_BOOL,
+	AST_TYPE_CHAR, AST_TYPE_SIGNED_CHAR, AST_TYPE_UNSIGNED_CHAR, AST_TYPE_SHORT, AST_TYPE_UNSIGNED_SHORT, AST_TYPE_INT, AST_TYPE_UNSIGNED_INT,
+	AST_TYPE_LONG, AST_TYPE_UNSIGNED_LONG, AST_TYPE_LONG_LONG, AST_TYPE_UNSIGNED_LONG_LONG, AST_TYPE_INT128, AST_TYPE_UINT128,
+	AST_TYPE_BFLOAT16, AST_TYPE_FLOAT16, AST_TYPE_FLOAT, AST_TYPE_DOUBLE, AST_TYPE_LONG_DOUBLE,
+	AST_TYPE_FLOAT128,	/* __float128 (x86-64): binary128 */
+	AST_TYPE_POINTER, AST_TYPE_ARRAY, AST_TYPE_FUNCTION, AST_TYPE_STRUCT, AST_TYPE_UNION, AST_TYPE_ENUM,
+	AST_TYPE_VECTOR,	/* GNU vector_size: base element, n lanes */
+	AST_TYPE_SVE_BUILTIN,		/* AArch64 builtin scalable type: sizeless; aux is its interned name */
+	AST_TYPE_BITINT, AST_TYPE_UNSIGNED_BITINT, /* bit-precise integers wider than 128 bits */
+	AST_TYPE_KIND_COUNT
 };
 
-enum { Q_CONST = 1, Q_VOLATILE = 2, Q_RESTRICT = 4, Q_MASK = 7 };
+enum { AST_QUALIFIER_CONST = 1, AST_QUALIFIER_VOLATILE = 2, AST_QUALIFIER_RESTRICT = 4, AST_QUALIFIER_MASK = 7 };
 
-typedef uint32_t qty;	/* (type index << 3) | Q_* */
-#define QT(i, q) (((qty)(i) << 3) | (q))
-#define QI(t) ((t) >> 3)
-#define QQ(t) ((t) & Q_MASK)
-#define QUNQ(t) ((t) & ~(qty)Q_MASK)
+typedef uint32_t ast_qualified_type;	/* (type index << 3) | Q_* */
+#define AST_QUALIFIED_TYPE(i, q) (((ast_qualified_type)(i) << 3) | (q))
+#define AST_QUALIFIED_TYPE_INDEX(t) ((t) >> 3)
+#define AST_QUALIFIED_TYPE_QUALIFIERS(t) ((t) & AST_QUALIFIER_MASK)
+#define AST_QUALIFIED_TYPE_UNQUALIFIED(t) ((t) & ~(ast_qualified_type)AST_QUALIFIER_MASK)
 
 enum {
-	TF_VARIADIC = 1,	/* function */
-	TF_NOPROTO = 2,		/* function: K&R "()" */
-	TF_INCOMPLETE = 4,	/* array of unknown size */
-	TF_VLA = 8,		/* variable length array (size in node n) */
-	TF_ALIGNED = 16,	/* aligned typedef variant */
-	TF_TRANSPARENT = 32,	/* transparent_union */
-	TF_BLOCK = 64,		/* pointer: a block pointer (^, Darwin SDK prototypes only) */
-	TF_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (ty_atomic) */
+	AST_TYPE_FLAG_VARIADIC = 1,	/* function */
+	AST_TYPE_FLAG_NO_PROTOTYPE = 2,		/* function: K&R "()" */
+	AST_TYPE_FLAG_INCOMPLETE = 4,	/* array of unknown size */
+	AST_TYPE_FLAG_VLA = 8,		/* variable length array (size in node n) */
+	AST_TYPE_FLAG_ALIGNED = 16,	/* aligned typedef variant */
+	AST_TYPE_FLAG_TRANSPARENT = 32,	/* transparent_union */
+	AST_TYPE_FLAG_BLOCK = 64,		/* pointer: a block pointer (^, Darwin SDK prototypes only) */
+	AST_TYPE_FLAG_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (cc_type_atomic) */
 };
 
 typedef struct ctype {
@@ -69,17 +69,28 @@ typedef struct ctype {
 	uint16_t ext;		/* vector: ext_vector_type's element count (a distinct type, as clang), 0: GNU */
 	uint32_t align;		/* bytes */
 	uint64_t size;		/* bytes; arrays: elem size * n */
-	qty base;		/* pointee / element / return / enum underlying */
+	ast_qualified_type base;		/* pointee / element / return / enum underlying */
 	uint32_t n;		/* integer: _BitInt precision (0: standard); array length; function: params; VLA: size node */
 	uint32_t aux;		/* function: index into params; record/enum: tag index */
 	uint32_t canon;		/* canonical type index (itself unless an aligned variant) */
 } ctype;
 
+/*
+ * x86-64 calling conventions.  A function type's `ext` is 0 for the target's own convention (System V
+ * on Linux, Microsoft x64 on Windows) or the other one, written as ms_abi or sysv_abi; it is part of
+ * the type (clang: incompatible function pointer types).  cc_func_abi (ccint.h) gives the effective
+ * one.  The va_list kinds: __builtin_va_list (System V: struct __va_list_tag[1]; Windows: char *) and
+ * __builtin_ms_va_list (char *, every x86-64 OS); cc_valist_is_ms tells them apart.
+ */
+enum { CC_FNABI_DEFAULT, CC_FNABI_MS, CC_FNABI_SYSV };
+/* dllimport / dllexport on a declaration (attrs.dll) */
+enum { CC_DLLIMPORT = 1, CC_DLLEXPORT = 2 };
+
 /* ---------------- records and enums ---------------- */
 
 typedef struct field {
 	uint32_t name;		/* identifier id, 0 for anonymous members and unnamed bit-fields */
-	qty ty;
+	ast_qualified_type ty;
 	uint64_t off;		/* bits */
 	uint32_t align;		/* effective field alignment, including packed/aligned/pragma pack */
 	uint16_t width;		/* bit-field width */
@@ -92,11 +103,12 @@ typedef struct field {
 } field;
 
 enum {
-	RF_COMPLETE = 1, RF_UNION = 2, RF_PACKED = 4, RF_FLEX = 8, RF_ENUM = 16,
-	RF_BEING_DEFINED = 32,
-	RF_ENUM_FIXED = 256, RF_ENUM_DEFINED = 512, RF_ENUM_DECLARED = 1024,
-	RF_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
-	RF_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
+	AST_RECORD_FLAG_COMPLETE = 1, AST_RECORD_FLAG_UNION = 2, AST_RECORD_FLAG_PACKED = 4, AST_RECORD_FLAG_FLEXIBLE = 8, AST_RECORD_FLAG_ENUM = 16,
+	AST_RECORD_FLAG_BEING_DEFINED = 32,
+	AST_RECORD_FLAG_ENUM_FIXED = 256, AST_RECORD_FLAG_ENUM_DEFINED = 512, AST_RECORD_FLAG_ENUM_DECLARED = 1024,
+	AST_RECORD_FLAG_MS_STRUCT = 128,	/* Microsoft allocation units for bit-fields */
+	AST_RECORD_FLAG_COMPLEX = 64,	/* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
+	AST_RECORD_FLAG_GCC_STRUCT = 2048,	/* gcc_struct: not the Microsoft layout, whatever -mms-bitfields and #pragma ms_struct say */
 };
 
 typedef struct tag {
@@ -118,39 +130,39 @@ typedef struct tag {
 
 /* ---------------- symbols ---------------- */
 
-enum { S_VAR, S_FUNC, S_TYPEDEF, S_ENUMCONST, S_BUILTIN };
-enum { SC_NONE, SC_EXTERN, SC_STATIC, SC_AUTO, SC_REGISTER, SC_TYPEDEF };
+enum { AST_SYMBOL_VARIABLE, AST_SYMBOL_FUNCTION, AST_SYMBOL_TYPEDEF, AST_SYMBOL_ENUMERATOR, AST_SYMBOL_BUILTIN };
+enum { AST_STORAGE_NONE, AST_STORAGE_EXTERN, AST_STORAGE_STATIC, AST_STORAGE_AUTO, AST_STORAGE_REGISTER, AST_STORAGE_TYPEDEF };
 
 enum {
-	SF_DEFINED = 1,		/* function body / object definition (initialized) */
-	SF_TENTATIVE = 2,
-	SF_INLINE = 4,
-	SF_USED = 8,		/* referenced */
-	SF_PARAM = 16,
-	SF_GLOBAL = 32,		/* file scope or extern */
-	SF_GNU_INLINE = 64,
-	SF_NORETURN = 128,
-	SF_WEAK = 256,
-	SF_ALWAYS_INLINE = 512,
-	SF_NOINLINE = 1024,
-	SF_THREAD = 2048,
-	SF_ATTR_USED = 4096,
-	SF_ADDR_TAKEN = 8192,
-	SF_INLINE_NOEXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
-	SF_NOINSTR = 65536,	/* no_instrument_function */
-	SF_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
-	SF_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
-	SF_REF = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
-	SF_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
-	SF_WUR = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
-	SF_NONNULL = 1u << 21,	/* a parameter declared nonnull */
-	SF_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
-	SF_BOS_QUERY = 1u << 24,	/* function contains an object-size query */
-	SF_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
-	SF_LINKONCE = 1u << 28,	/* C++: an inline function's or a template instance's definition (weak): emitted only if this TU refers to it */
-	SF_EXTDECL = 1u << 27,	/* function: a file-scope declaration without inline, or extern (C99 6.7.4p7: an inline definition is external) */
-	SF_BOS_INIT = 1u << 25,	/* local pointer has a certified immutable initializer */
-	SF_UVPEND = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
+	AST_SYMBOL_FLAG_DEFINED = 1,		/* function body / object definition (initialized) */
+	AST_SYMBOL_FLAG_TENTATIVE = 2,
+	AST_SYMBOL_FLAG_INLINE = 4,
+	AST_SYMBOL_FLAG_USED = 8,		/* referenced */
+	AST_SYMBOL_FLAG_PARAMETER = 16,
+	AST_SYMBOL_FLAG_GLOBAL = 32,		/* file scope or extern */
+	AST_SYMBOL_FLAG_GNU_INLINE = 64,
+	AST_SYMBOL_FLAG_NORETURN = 128,
+	AST_SYMBOL_FLAG_WEAK = 256,
+	AST_SYMBOL_FLAG_ALWAYS_INLINE = 512,
+	AST_SYMBOL_FLAG_NOINLINE = 1024,
+	AST_SYMBOL_FLAG_THREAD = 2048,
+	AST_SYMBOL_FLAG_ATTRIBUTE_USED = 4096,
+	AST_SYMBOL_FLAG_ADDRESS_TAKEN = 8192,
+	AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN = 16384,	/* some declaration is 'inline' without 'extern' */
+	AST_SYMBOL_FLAG_NO_INSTRUMENT = 65536,	/* no_instrument_function */
+	AST_SYMBOL_FLAG_OVERLOAD = 32768,	/* __attribute__((overloadable)): mangled name, member of an overload set */
+	AST_SYMBOL_FLAG_LAZY = 1u << 17,	/* a header function whose body is kept as tokens, parsed only if referenced */
+	AST_SYMBOL_FLAG_REFERENCED = 1u << 18,	/* named anywhere (also in sizeof/typeof): a lazy body must be parsed */
+	AST_SYMBOL_FLAG_DEPRECATED = 1u << 19,	/* deprecated: attrs record's depr/deprmsg */
+	AST_SYMBOL_FLAG_WARN_UNUSED_RESULT = 1u << 20,	/* warn_unused_result / nodiscard (attrs record's wur) */
+	AST_SYMBOL_FLAG_NONNULL = 1u << 21,	/* a parameter declared nonnull */
+	AST_SYMBOL_FLAG_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
+	AST_SYMBOL_FLAG_OBJECT_SIZE_QUERY = 1u << 24,	/* function contains an object-size query */
+	AST_SYMBOL_FLAG_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
+	AST_SYMBOL_FLAG_LINKONCE = 1u << 28,	/* C++: an inline function's or a template instance's definition (weak): emitted only if this TU refers to it */
+	AST_SYMBOL_FLAG_EXTERNAL_DECLARATION = 1u << 27,	/* function: a file-scope declaration without inline, or extern (C99 6.7.4p7: an inline definition is external) */
+	AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER = 1u << 25,	/* local pointer has a certified immutable initializer */
+	AST_SYMBOL_FLAG_UNINITIALIZED_PENDING = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */
 };
 
 typedef struct sym {
@@ -158,7 +170,7 @@ typedef struct sym {
 	uint8_t kind, sc;
 	uint16_t nref;		/* local variable: references minus discarded assignments (clang's RefsMinusAssignments) */
 	uint32_t flags;
-	qty ty;
+	ast_qualified_type ty;
 	uint32_t align;		/* aligned() on the declaration, bytes (0: none) */
 	int64_t val;		/* enumerator value */
 	uint32_t body;		/* function body / initializer node */
@@ -178,82 +190,82 @@ typedef struct sym {
 /* ---------------- nodes ---------------- */
 
 enum {
-	N_NONE,
+	AST_NODE_NONE,
 	/* expressions */
-	N_NUM,		/* a: constant pool index (integer); aux: NUM_RADIX (a literal not written in decimal), NUM_ENUM */
-	N_FNUM,		/* a: constant pool index (double) */
-	N_BIGNUM,	/* a: immutable LE32 words in lists, b: full storage word count */
-	N_STR,		/* a: string index */
-	N_VAR,		/* a: sym */
-	N_MEMBER,	/* a: base (lvalue struct), b: tag, c: field index */
-	N_INDEX,	/* a[b] (pointer + integer, already in that order) */
-	N_CALL,		/* a: callee, b: list, c: count */
-	N_BUILTIN,	/* aux: builtin id, b: list, c: count */
-	N_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0; c: folded FP emit value or 0 */
-	N_UNARY,	/* aux: op (T_* kind), a: operand */
-	N_ADDR, N_DEREF,
-	N_PREINC, N_PREDEC, N_POSTINC, N_POSTDEC,
-	N_BINARY,	/* aux: op (T_* kind), a, b */
-	N_LOGAND, N_LOGOR,
-	N_ASSIGN,	/* aux: 0 or the compound op (LEX_TOKEN_PLUS, ...), a, b */
-	N_COND,		/* a ? b : c (b == 0: GNU a ?: c) */
-	N_COMMA,
-	N_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
-	N_STMTEXPR,	/* a: compound statement */
-	N_COMPLIT,	/* a: init, b: sym of the object */
-	N_INIT,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
-	N_DESIG,	/* aux: 0 field (b: tag, c: field) / 1 index range (a..b) */
-	N_LABELADDR,	/* &&label: a: label */
-	N_VAARG,	/* a: va_list expr */
-	N_ZERO,		/* implicit zero initialization */
-	N_CPLX,		/* a + b i: a _Complex value from its parts (a, b of the element type) */
+	AST_NODE_NUMBER,		/* a: constant pool index (integer); aux: AST_NUMBER_RADIX (a literal not written in decimal), AST_NUMBER_ENUMERATOR */
+	AST_NODE_FLOAT_NUMBER,		/* a: constant pool index (double) */
+	AST_NODE_BITINT_NUMBER,	/* a: immutable LE32 words in lists, b: full storage word count */
+	AST_NODE_STRING,		/* a: string index */
+	AST_NODE_VARIABLE,		/* a: sym */
+	AST_NODE_MEMBER,	/* a: base (lvalue struct), b: tag, c: field index */
+	AST_NODE_INDEX,	/* a[b] (pointer + integer, already in that order) */
+	AST_NODE_CALL,		/* a: callee, b: list, c: count */
+	AST_NODE_BUILTIN,	/* aux: builtin id, b: list, c: count */
+	AST_NODE_CAST,		/* aux: cast kind, a: operand, b: an explicit cast's typedef (sym, in a body) or 0; c: folded FP emit value or 0 */
+	AST_NODE_UNARY,	/* aux: op (T_* kind), a: operand */
+	AST_NODE_ADDRESS, AST_NODE_DEREFERENCE,
+	AST_NODE_PRE_INCREMENT, AST_NODE_PRE_DECREMENT, AST_NODE_POST_INCREMENT, AST_NODE_POST_DECREMENT,
+	AST_NODE_BINARY,	/* aux: op (T_* kind), a, b */
+	AST_NODE_LOGICAL_AND, AST_NODE_LOGICAL_OR,
+	AST_NODE_ASSIGN,	/* aux: 0 or the compound op (LEX_TOKEN_PLUS, ...), a, b */
+	AST_NODE_CONDITIONAL,		/* a ? b : c (b == 0: GNU a ?: c) */
+	AST_NODE_COMMA,
+	AST_NODE_SIZEOF_VLA,	/* a: expression, b: VLA type; aux=1 captures a new type-name bound */
+	AST_NODE_STATEMENT_EXPRESSION,	/* a: compound statement */
+	AST_NODE_COMPOUND_LITERAL,	/* a: init, b: sym of the object */
+	AST_NODE_INITIALIZER,		/* initializer list: b: struct/union (aux 0/2): c values; array (aux 1): c (lo, hi, value) */
+	AST_NODE_DESIGNATOR,	/* aux: 0 field (b: tag, c: field) / 1 index range (a..b) */
+	AST_NODE_LABEL_ADDRESS,	/* &&label: a: label */
+	AST_NODE_VA_ARG,	/* a: va_list expr */
+	AST_NODE_ZERO,		/* implicit zero initialization */
+	AST_NODE_COMPLEX,		/* a + b i: a _Complex value from its parts (a, b of the element type) */
 	/* statements */
-	N_BLOCK,	/* b: list, c: count */
-	N_EXPR,		/* a */
-	N_DECL,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
-	N_IF, N_WHILE, N_DO,
-	N_FOR,		/* a: init, b: cond, c: list of [step, body] */
-	N_SWITCH,	/* a: cond, b: body */
-	N_CASE,		/* a: lo, b: hi (pool), c: stmt */
-	N_DEFAULT,	/* c: stmt */
-	N_LABEL,	/* a: label, c: stmt */
-	N_GOTO,		/* a: label */
-	N_GOTO_IND,	/* a: expr */
-	N_BREAK, N_CONTINUE,
-	N_RETURN,	/* a: expr or 0 */
-	N_ASM,		/* a: asm record */
-	N_NKINDS
+	AST_NODE_BLOCK,	/* b: list, c: count */
+	AST_NODE_EXPRESSION,		/* a */
+	AST_NODE_DECLARATION,		/* a: sym, b: init or 0; aux=1: initializer supplies inferred-type bounds */
+	AST_NODE_IF, AST_NODE_WHILE, AST_NODE_DO,
+	AST_NODE_FOR,		/* a: init, b: cond, c: list of [step, body] */
+	AST_NODE_SWITCH,	/* a: cond, b: body */
+	AST_NODE_CASE,		/* a: lo, b: hi (pool), c: stmt */
+	AST_NODE_DEFAULT,	/* c: stmt */
+	AST_NODE_LABEL,	/* a: label, c: stmt */
+	AST_NODE_GOTO,		/* a: label */
+	AST_NODE_GOTO_INDIRECT,	/* a: expr */
+	AST_NODE_BREAK, AST_NODE_CONTINUE,
+	AST_NODE_RETURN,	/* a: expr or 0 */
+	AST_NODE_ASM,		/* a: asm record */
+	AST_NODE_KIND_COUNT
 };
 
 enum {
-	CK_NOP,		/* same representation (qualifiers, typedef variants, signedness) */
-	CK_INT,		/* integer -> integer */
-	CK_BOOL,	/* scalar -> _Bool */
-	CK_I2F, CK_F2I, CK_F2F,
-	CK_P2I, CK_I2P, CK_P2P,
-	CK_DECAY,	/* array -> pointer to first element */
-	CK_FDECAY,	/* function -> pointer */
-	CK_VOID,	/* -> void */
-	CK_UNION,	/* -> transparent union / GNU cast to union */
-	CK_NULL,	/* null pointer constant -> pointer */
-	CK_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
-	CK_BITS,	/* __builtin_bit_cast: a is the source object, without array decay */
-	CK_VBITS,	/* GNU vector -> scalar of the same size (the bits) */
-	CK_VADDR,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
+	AST_CAST_NOP,		/* same representation (qualifiers, typedef variants, signedness) */
+	AST_CAST_INTEGER,		/* integer -> integer */
+	AST_CAST_BOOL,	/* scalar -> _Bool */
+	AST_CAST_INTEGER_TO_FLOAT, AST_CAST_FLOAT_TO_INTEGER, AST_CAST_FLOAT_TO_FLOAT,
+	AST_CAST_POINTER_TO_INTEGER, AST_CAST_INTEGER_TO_POINTER, AST_CAST_POINTER_TO_POINTER,
+	AST_CAST_ARRAY_DECAY,	/* array -> pointer to first element */
+	AST_CAST_FUNCTION_DECAY,	/* function -> pointer */
+	AST_CAST_VOID,	/* -> void */
+	AST_CAST_UNION,	/* -> transparent union / GNU cast to union */
+	AST_CAST_NULL_POINTER,	/* null pointer constant -> pointer */
+	AST_CAST_SPLAT,	/* scalar (already the element type) -> every lane of an ext_vector_type */
+	AST_CAST_BIT_CAST,	/* __builtin_bit_cast: a is the source object, without array decay */
+	AST_CAST_VECTOR_BITS,	/* GNU vector -> scalar of the same size (the bits) */
+	AST_CAST_VECTOR_ADDRESS,	/* GNU vector rvalue -> pointer to its first lane (v[i] on an rvalue) */
 };
 
-enum { NUM_RADIX = 1, NUM_ENUM = 2, NUM_NO_ICE = 4, NUM_NO_CONSTEXPR = 8 };	/* N_NUM aux: spelled not in decimal; an enumerator's value */
-enum { NF_LVALUE = 1, NF_BITFIELD = 2, NF_PAREN = 4, NF_NPC = 8,
-       NF_ERR = 16,
-       NF_MACRO = 32, NF_BOUNDS = 64, NF_OVF = 128 };	/* NF_OVF: a constant subexpression overflowed (-Winteger-overflow given once) */	/* NF_BOUNDS: a[CONST] already checked (-Warray-bounds) */	/* NF_MACRO: the operator came from a macro expansion (no style warnings) */	/* NF_ERR: stands in for an expression already diagnosed (no follow-on errors) */
+enum { AST_NUMBER_RADIX = 1, AST_NUMBER_ENUMERATOR = 2, AST_NUMBER_NOT_ICE = 4, AST_NUMBER_NOT_CONSTEXPR = 8 };	/* AST_NODE_NUMBER aux: spelled not in decimal; an enumerator's value */
+enum { AST_NODE_FLAG_LVALUE = 1, AST_NODE_FLAG_BITFIELD = 2, AST_NODE_FLAG_PARENTHESIZED = 4, AST_NODE_FLAG_NULL_POINTER_CONSTANT = 8,
+       AST_NODE_FLAG_ERROR = 16,
+       AST_NODE_FLAG_FROM_MACRO = 32, AST_NODE_FLAG_BOUNDS_CHECKED = 64, AST_NODE_FLAG_OVERFLOW_REPORTED = 128 };	/* AST_NODE_FLAG_OVERFLOW_REPORTED: a constant subexpression overflowed (-Winteger-overflow given once) */	/* AST_NODE_FLAG_BOUNDS_CHECKED: a[CONST] already checked (-Warray-bounds) */	/* AST_NODE_FLAG_FROM_MACRO: the operator came from a macro expansion (no style warnings) */	/* AST_NODE_FLAG_ERROR: stands in for an expression already diagnosed (no follow-on errors) */
 
-/* N_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
-enum { NC_FP_NONNEG = 1 };
+/* AST_NODE_COMMA result facts, attached by semantic lowering. NaNs are permitted. */
+enum { AST_NODE_COMMA_FP_NONNEGATIVE = 1 };
 
 typedef struct node {
 	uint8_t op, flags;
 	uint16_t aux;
-	qty ty;
+	ast_qualified_type ty;
 	uint32_t loc;
 	uint32_t a, b, c;
 } node;
@@ -261,21 +273,70 @@ typedef struct node {
 /* ---------------- the TU ---------------- */
 
 /* TLS models, in the order clang strengthens them (the larger wins) */
-enum { VCC_TLS_GD = 1, VCC_TLS_LD, VCC_TLS_IE, VCC_TLS_LE };
-static inline int vcc_tls_model(const char *m)
+enum { CC_TLS_GLOBAL_DYNAMIC = 1, CC_TLS_LOCAL_DYNAMIC, CC_TLS_INITIAL_EXEC, CC_TLS_LOCAL_EXEC };
+static inline int cc_tls_model_parse(const char *m)
 {
-	return !strcmp(m, "global-dynamic") ? VCC_TLS_GD : !strcmp(m, "local-dynamic") ? VCC_TLS_LD :
-	       !strcmp(m, "initial-exec") ? VCC_TLS_IE : !strcmp(m, "local-exec") ? VCC_TLS_LE : 0;
+	return !strcmp(m, "global-dynamic") ? CC_TLS_GLOBAL_DYNAMIC : !strcmp(m, "local-dynamic") ? CC_TLS_LOCAL_DYNAMIC :
+	       !strcmp(m, "initial-exec") ? CC_TLS_INITIAL_EXEC : !strcmp(m, "local-exec") ? CC_TLS_LOCAL_EXEC : 0;
 }
 
 enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
 
-typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl cache key */
-	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 */
+/*
+ * The optimizations an option turns on or off, one row each: X(field, "NAME", LEVEL) is
+ * -fNAME and -fno-NAME, on by default at -O<LEVEL> and above.  The driver resolves the level
+ * and the options into cc_options.optimize (driver/optimization.c); doc/OPTIMIZATION.md says
+ * what each row does and what else a level contains.  Every row runs on VIR, so none has an
+ * effect without `vir`, and VIR itself needs -O2: below it the rows are all off.
+ */
+#define CC_OPTIMIZATIONS(X) \
+	X(vir,                  "vir",                  2) /* functions go through VIR (codegen/vir/) */ \
+	X(rotate_loops,         "rotate-loops",         2) /* the lowering puts a loop's test at its end */ \
+	X(shrink_wrap,          "shrink-wrap",          2) /* arm64: the prologue moves to the paths that need a frame */ \
+	X(vectorize,            "vectorize",            3) /* the loop vectorizer (codegen/vir/vectorize.c) */ \
+	X(hoist_loop_constants, "hoist-loop-constants", 3) /* a loop's constants are made once in front of it */
+
+typedef struct cc_optimizations {
+#define X(field, name, level) bool field;
+	CC_OPTIMIZATIONS(X)
+#undef X
+} cc_optimizations;
+
+enum {
+#define X(field, name, level) +1
+	CC_OPTIMIZATION_COUNT = 0 CC_OPTIMIZATIONS(X)
+#undef X
+};
+
+/* -fvir-ccmp=: which pairs of compares the condition merge joins (codegen/vir/condition-merge.c) */
+enum { CC_CCMP_SELECT, CC_CCMP_ALL, CC_CCMP_NONE };
+
+/* The developer's aids for VIR (-fvir-*, doc/OPTIMIZATION.md): what the tests and the
+ * measuring harnesses ask for.  All zero by default; none changes the code of a function
+ * that goes through VIR, except build_only, functions, passes, ccmp, probe and map. */
+typedef struct cc_vir_aids {
+	bool build_only;	/* -fno-vir-lower: VIR is built (verified, printed), the direct emitter makes the code */
+	bool verify;		/* -fvir-verify: the verifier runs on every function built; a rejected one falls back */
+	bool dump;		/* -fvir-dump: each function's VIR on stderr */
+	bool report;		/* -fvir-report: a line per function on stderr: built, lowered, or why not */
+	bool check;		/* -fvir-check: the allocation checker runs on every function; a failure falls back */
+	bool stats;		/* -fvir-stats: per TU on stderr, functions through VIR and the reasons the others were not */
+	bool vectorize_report;	/* -fvir-vectorize-report: a line per innermost loop the vectorizer looked at */
+	uint8_t ccmp;		/* -fvir-ccmp=select|all|none: CC_CCMP_* */
+	int probe;		/* -fvir-probe=MASK: a nop after each allocator edit of the kinds in MASK */
+	bool map;		/* -fvir-map: x86-64, each allocator edit between # vl-site and # vl-end, its decisions on stderr */
+	const char *map_function;	/* -fvir-map-function=NAME: x86-64, the map and probes in NAME alone */
+	const char *passes;	/* -fvir-passes=ITEMS: time, leave out or check the builder's passes (codegen/vir/pass-table.c) */
+	const char *functions;	/* -fvir-functions=FILE: only the functions named in FILE, one per line, are lowered */
+} cc_vir_aids;
+
+typedef struct cc_options {	/* fields before outfd: parse options, all in the decl cache key */
+	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 / PP_WASM32 / PP_LINUX_X86_64 / PP_WIN64 */
 	int unsigned_char;
 	int ms_anon;		/* -fms-anonymous-structs / -fms-extensions: "struct S;" members */
 	int strict_flex_arrays; /* -fstrict-flex-arrays=0..3 */
-	int short_wchar;	/* -fshort-wchar */
+	int short_wchar;	/* -fshort-wchar (always on for Windows: wchar_t is unsigned short) */
+	int ms_bitfields;	/* -mms-bitfields (the default for Windows): records without gcc_struct get the MS layout */
 	int std;		/* -std=: 89, 99, 11, 17, 23 (0: gnu17) */
 	int implicit_int;	/* implicit int allowed (-std=gnu89, -Wno-error=implicit-int) */
 	int gnu89_inline;	/* -std=gnu89 or -fgnu89-inline: plain inline is gnu_inline */
@@ -304,11 +365,16 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	const char *field_uses;	/* VCC_FIELD_USES: the selection file (test aid; after outfd: not in the cache key) */
 	int lint;		/* vpp --lint: the style checks (frontend/c/naming-lint.c); not in the decl cache key */
 	int emit;		/* generate code (codegen/): 1 = assembly text to outfd, 2 = object into obj */
-	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og, -O), 2 (-O2, -Os, -Oz),
+				   3 (-O3 and above, -Ofast); doc/OPTIMIZATION.md */
+	cc_optimizations optimize;	/* what the level and the -f options turn on (CC_OPTIMIZATIONS) */
+	cc_vir_aids vir_aid;	/* -fvir-*: the developer's aids */
 	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
-	int debug;		/* -g: DWARF line tables (ELF) */
+	int debug;		/* -g: DWARF line tables (ELF, COFF) */
+	int dbg_version;	/* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
 	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
+	int no_seh;		/* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
@@ -323,19 +389,19 @@ typedef struct cc_opts {	/* fields before outfd: parse options, all in the decl 
 	struct ElfObj *obj;	/* emit == 2: the object (reset first; the caller finishes it) */
 	struct as_context *as;		/* emit == 2: the assembler bound to obj (one per thread) */
 	struct vbuffer *wasm_obj;	/* emit == 2 for wasm64: the object's bytes (arch/wasm/as) */
-} cc_opts;
+} cc_options;
 
-void cc_disable_builtin(uint64_t *bits, const char *name);
+void cc_builtin_disable(uint64_t *bits, const char *name);
 
 typedef struct cc cc;
 
 /* parse and analyse the whole TU; returns the number of errors */
-int cc_run(pp *p, const cc_opts *o);
+int cc_translation_unit_run(pp *p, const cc_options *o);
 /* lazy bodies kept and parsed so far (all TUs of the process) */
-void cc_lz_stats(char *buf, size_t n);
+void cc_lazy_body_statistics(char *buf, size_t n);
 /* VCC_DRCOV: header-cache hits that start and end at file-scope declaration boundaries */
-void cc_drcov_stats(char *buf, size_t n);
+void cc_replay_coverage_statistics(char *buf, size_t n);
 /* VCC_DR / VCC_DRREC: per-region declaration replay (frontend/c/replay.c) */
-void cc_dr_stats(char *buf, size_t n);
+void cc_replay_statistics(char *buf, size_t n);
 
 #endif
