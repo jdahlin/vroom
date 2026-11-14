@@ -228,6 +228,23 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 	if (cxx_gen_is_reference(c, to)) {
 		qty rt = AST_TYPE(a, to)->base;
 
+		if (AST_NODE_AT(a, x)->op == N_ASSIGN && !cc_type_is_record(a, rt) && AST_NODE_AT(a, x)->a &&
+		    (AST_NODE_AT(a, AST_NODE_AT(a, x)->a)->flags & NF_LVALUE) && QUNQ(AST_NODE_AT(a, AST_NODE_AT(a, x)->a)->ty) == QUNQ(rt)) {
+			/* l = r (or l op= r) bound to a reference: C++'s assignment is l itself, an lvalue (return l = l | r):
+			   (p = &l, *p op= r, p), l evaluated once */
+			const node *an = AST_NODE_AT(a, x);
+			qty pt = cc_type_pointer(a, AST_NODE_AT(a, an->a)->ty);
+			uint32_t p = cxx_gen_temporary(c, pt, loc), set, asg;
+
+			if (!p)
+				return 0;
+			set = cc_assignment_build(a, 0, cxx_gen_var_node(c, p, loc), cc_address_of_build(a, an->a, loc), loc);
+			asg = cc_assignment_build(a, an->aux, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, p, loc)), loc), an->b, loc);
+			x = cc_node_new_operands(a, N_COMMA, pt, loc, set,
+						 cc_node_new_operands(a, N_COMMA, pt, loc, asg, cc_node_rvalue(a, cxx_gen_var_node(c, p, loc))));
+			return cc_cast_insert(a, x, QUNQ(to), CK_NOP);
+		}
+
 		if (cc_type_is_record(a, rt) && AST_TYPE_KIND(a, rt) != TY_ARRAY &&
 		    (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_ARRAY)) {
 			/* a reference to a class bound to a value of another type ("text" for a const std::string &): a
@@ -304,7 +321,9 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 			/* another class's object: its conversion function to this class (strong_ordering to partial_ordering) */
 			uint32_t v = cxx_gen_convert_class(c, x, QUNQ(to), loc);
 
-			return v && QUNQ(AST_NODE_AT(a, v)->ty) == QUNQ(to) ? cc_node_rvalue(a, v) : 0;
+			if (v && QUNQ(AST_NODE_AT(a, v)->ty) == QUNQ(to))
+				return cc_node_rvalue(a, v);
+			/* (else: this class's converting constructor from it, below; __map_iterator(__tree_iterator)) */
 		}
 		{
 			/* a value of another type: the class's converting constructor (0 for _CmpUnspecifiedParam) */

@@ -13,7 +13,12 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_t
 	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
 	const tag *r;
 	qty bases[2];
-	uint32_t k = 0, zargs[3], saved = c->enode, zero;
+	uint32_t k = 0, zargs[3], saved = c->enode, zero, braces[CXX_MAX_ARGS];
+	bool have_braces = c->gen_agg_brace != NULL && nargs <= CXX_MAX_ARGS;
+
+	if (have_braces)
+		memcpy(braces, c->gen_agg_brace, nargs * sizeof *braces);
+	c->gen_agg_brace = NULL;	/* (this list's: not a nested one's) */
 
 	if (!cls || AST_TYPE_KIND(a, QUNQ(t)) != TY_STRUCT || cxx_class_polymorphic(c, t) || cxx_class_bases(c, t, bases, 2))
 		return false;
@@ -81,6 +86,44 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_t
 				return false;	/* (a default initializer after the elements: needs this, not built yet) */
 			if (cc_type_is_record(a, ft) && cxx_gen_needs_construction(c, ft, 0) && !cxx_gen_default_construct(c, m, ft, out, loc, 1))
 				return false;
+			continue;
+		}
+		if (!args[k] && have_braces && braces[k] && !cxx_gen_is_reference(c, ft)) {
+			/* the member's element is a braced list itself (M m{{nullptr}}): parsed again here for its
+			   code, the member initialized from its elements (an aggregate's own braced elements in turn) */
+			uint32_t pos = c->pos, an[CXX_MAX_ARGS], abr[CXX_MAX_ARGS], n;
+			qty at[CXX_MAX_ARGS];
+			uint8_t al[CXX_MAX_ARGS];
+
+			c->pos = braces[k];
+			cxx_braced_arguments_parse(c);
+			c->pos = pos;
+			n = c->ncargs;
+			if (n == UINT32_MAX || n > CXX_MAX_ARGS)
+				return false;
+			memcpy(an, c->carg_nodes, sizeof an), memcpy(abr, c->carg_brace, sizeof abr);
+			memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
+			if (cc_type_is_record(a, ft)) {
+				cxx_ctor_use(c, QUNQ(ft), at, al, n, true);
+				c->gen_agg_brace = abr;
+				if (!cxx_gen_construct_at(c, m, QUNQ(ft), an, n, out, loc))
+					return false;
+			} else if (n == 1 && an[0]) {
+				/* a scalar from {v} ({}: its zero, kept) */
+				uint32_t v = cxx_gen_bind(c, an[0], QUNQ(ft), loc);
+
+				if (!v)
+					return false;
+				if (ft != QUNQ(ft)) {
+					qty pt = cc_type_pointer(a, QUNQ(ft));
+					uint32_t addr = cc_address_of_build(a, m, loc);
+
+					m = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+				}
+				cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, m, v, loc), 0, 0));
+			} else if (n)
+				return false;
+			k++;
 			continue;
 		}
 		if (!args[k])

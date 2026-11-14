@@ -1742,3 +1742,12 @@ från Status 80).  `VCC_CXX_MISSING` anger nu det innersta uttrycket utan nod so
 0/70 kompletta, 850 saknade funktioner (förut 917); kvar överst: `__tree_.end()` (statement.c:362),
 basklassinitiering via alias (`json_base_class_t(std::move(other))`), CTAD (`pair{a, b}` i
 `__unwrap_range`), `__libcpp_is_trivially_relocatable<T>::value`, `decltype(auto)` otypat.
+
+## Status 84 (2026-11-14)
+En tilldelning bunden till en referens är vänstersidan (`return l = l | r;` till `E&`: `(p = &l, *p op= r,
+p)`, l beräknas en gång); ett klassvärde av annan klass konverteras med målets konverterande konstruktor
+när ingen konverteringsfunktion finns (`return __tree_.end();` till `__map_iterator`); ett aggregat vars
+element är en braced-lista (`M m{{nullptr, 3}, 4}`, nästlat, `{}`) initierar medlemmen från dess element.
+cxx-strict: 686 saknade funktioner (850).  Överst nu: basklass via alias i konstruktorinitierare (87),
+CTAD i `__unwrap_range` (79), `__libcpp_is_trivially_relocatable<T>::value` (79), kroppar vcc aldrig
+tolkade (67), `filldata<T>::fill` (38).

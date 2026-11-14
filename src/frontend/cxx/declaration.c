@@ -3821,14 +3821,17 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				}
 			} else if (object) {
 				/* T x = { ... }: copy-list-initialization, as T x{ ... } (its explicit constructors: not told apart) */
-				uint32_t an[CXX_MAX_ARGS], n;
+				uint32_t an[CXX_MAX_ARGS], n, abr[CXX_MAX_ARGS];
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
+				memcpy(abr, c->carg_brace, sizeof abr);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 				if (gen_local) {
+					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					c->gen_agg_brace = NULL;
 					gen_declared = true;
 				}
 			} else {
@@ -3896,15 +3899,18 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
-				uint32_t an[CXX_MAX_ARGS], n;
+				uint32_t an[CXX_MAX_ARGS], n, abr[CXX_MAX_ARGS];
 				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
+				memcpy(abr, c->carg_brace, sizeof abr);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 				if (gen_local) {
+					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					c->gen_agg_brace = NULL;
 					gen_declared = true;
 				}
 				if (gobj) {
