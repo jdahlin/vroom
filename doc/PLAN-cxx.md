@@ -52,6 +52,16 @@ suite supports), then exceptions in X7.
 - The C front end does not get slower: `bench/vbench.py gate` and
   `bench/vcc-same.py` on every step that touches shared code.
 
+## Order: hardest first
+
+The steps are numbered by dependency, but the work goes to the hard
+problems first: X0 (measured), then X1 and X2 only as far as templates need
+them, then X4 and X5 straight away.  X3 is not done as a step of its own:
+each of its features comes in when a libc++ test that X4 targets needs it.
+The questions that decide the plan are the instantiation key and order
+independence (X0's findings), and they get answered before broad language
+coverage, not after.
+
 ## Steps
 
 ### X0 Measure first, with clang only (no vcc code)
@@ -72,6 +82,80 @@ between TUs?  This decides whether the rest is worth doing.
 Gate: duplicated instantiation + its codegen is a large share of the
 build (expectation: most of it for json).  If it is small, stop here and
 write down why.
+
+**Results (2026-11-13, x86-64 Linux, clang 23.1.6, libc++, -O0 -g0).**
+Sources: nlohmann/json v3.12.0 with json_test_data v3.1.0; libc++ tests at
+llvm-project c47d7823685a (the Debian package's commit); amalgamations of
+DuckDB 1.4.2 (`duckdb.cpp`, 614k lines; libstdc++, see below), simdjson
+4.2.2, Catch2 3.11.0.  `bench/cxx-profile.py build|report|base TARGET`.
+
+| Target | TUs | clang CPU | Frontend | Instantiation | Backend | Instantiations repeated across TUs | COMDAT bytes that are repeats |
+|---|---|---|---|---|---|---|---|
+| json tests | 71 | 155 s (traced) | 86 % | 53 % (function 36 %, class 17 %) | 14 % | 85.1 % of 228k function, 84.8 % of 505k class | 11.5 of 16.8 MB |
+| libc++ tests (7 headers) | 635 of 646 | 191 s (traced) | 92 % | 40 % | 7 % | 39 % of 253k function, 57 % of 242k class | 2.3 of 9.0 MB |
+| DuckDB amalgamation | 1 | 81 s | 69 % | 60 % | 31 % | 8 % (inside the TU) | none |
+| Catch2 amalgamation | 1 | 3.1 s | 71 % | 47 % | 28 % | 7 % | none |
+| simdjson amalgamation | 1 | 0.8 s | 86 % | 13 % | 12 % | 9 % | none |
+
+(Instantiation is clang's `InstantiateFunction` + `InstantiateClass`
+totals; `Source`, the time spent reading included files, is 39 % for json
+and 2 % for DuckDB.)
+
+- **The gate passes for the multi-TU target.**  In json's tests 85 % of all
+  instantiations repeat one done in another TU; one instance of each
+  distinct function instantiation costs 72 s of the 303 s spent in them
+  (nested time counted in each parent).  69 % of the COMDAT code is a byte
+  copy of another object's.
+- **A PCH does not remove it.**  PCH of json.hpp + doctest: 1.5 s to build,
+  then 101.5 s CPU for the 56 TUs that can use it, against ~130 s without
+  (21 % saved).  The 15 others `#define private public` (or configure the
+  library) before including json, so they cannot share a PCH.  A unity build
+  of json's tests does not compile (`trait_test_arg` and friends defined in
+  several TUs): unity is not a free baseline either.
+- **libc++'s tests repeat less** (39 % of function instantiations): each
+  small TU instantiates its own test types.  46 % of their time is reading
+  headers, the part prefix snapshots already handle.  They also show the
+  name hazard plainly: `test()` has 84 different bodies in 93 objects (each
+  test its own program).  The 11 that do not compile are tests for other
+  standard modes or removed features; the harness compiles everything at
+  `-std=c++26` without reading lit's `REQUIRES`/`UNSUPPORTED`.
+- **Amalgamations measure the other problem.**  One TU has nothing to share
+  with another; what is left is instantiation throughput (60 % of DuckDB's
+  81 s) and the backend.  DuckDB is the single-TU benchmark, json the
+  cross-TU one.
+
+**What the cache key must handle (the hard part, measured).**  Among the
+48 json TUs that configure nothing, 120 of 19,569 distinct COMDAT groups
+(0.6 %) differ between TUs under the same mangled name, after names of
+strings, constant pools and `static` helpers are replaced by their contents.
+Every case inspected is one effect: a call emitted as `invoke` with a
+landing pad (and the extra block, `jmp` and frame slots that come with it)
+in some TUs and as a plain `call` in others, consistent with clang
+instantiating a template's `noexcept` lazily, so whether a callee is known
+not to throw depends on what the TU did before.  Semantically the same,
+bytes not.  Not yet confirmed with a minimal reproduction.  Counting all 71
+TUs, 390 groups differ, the rest for real reasons:
+- `unit-assert_macro` defines `JSON_ASSERT`, `unit-disabled_exceptions`
+  builds with `-fno-exceptions -DJSON_NOEXCEPTION`, `unit-comparison_legacy`
+  with a config macro: the same name, other source.  Legal (each test is its
+  own executable), and a cache keyed on the name alone would give wrong code.
+- Inline templates call `static` functions from the header
+  (`nlohmann::detail::little_endianness`): a COMDAT body refers to a
+  per-TU copy, so a cached body must keep that reference per TU.
+
+Consequences for the design, now requirements of X4 and X5:
+1. The key is the template's identity *as tokens*: the header-cache entry
+   its definition came from (vccd already has it; a different macro state
+   gives a different entry) plus the arguments, not the mangled name.
+2. vcc's own output must not depend on TU order: resolve a callee's
+   exception specification before emitting any caller, so the same key
+   always gives the same bytes.  We do not reproduce clang's TU-dependent
+   variants; the verify mode compares vcc with and without the cache.
+3. References from a cached body to internal-linkage entities stay
+   symbolic and resolve per TU.
+4. DuckDB with libc++ does not compile: glibc's `<langinfo.h>`, pulled in by
+   libc++'s `<locale>`, defines `GROUPING`, which DuckDB's parser uses as an
+   enumerator.  It builds with libstdc++.
 
 ### X1 The `ast.h` split, with C++'s requirements
 
@@ -194,4 +278,5 @@ own.
 
 ## Status
 
-- X0-X7: not started (2026-11-13).
+- X0: done (2026-11-13), gate passed for json; results above.
+- X1-X7: not started.
