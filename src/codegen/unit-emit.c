@@ -307,6 +307,13 @@ static void codegen_assembler_error_report(cc *c, const char *fmt, ...)
 	va_end(ap);
 }
 
+/* the object's machine and format: x86-64 COFF for Windows (PLAN-win64.md WIN5), else ELF */
+static void codegen_object_target_set(cc *c, ElfObj *obj)
+{
+	elf_set_machine(obj, CODEGEN_IS_X64(c) ? EM_X86_64 : EM_AARCH64);
+	obj_set_format(obj, CODEGEN_IS_WIN64(c) ? OBJ_COFF : OBJ_ELF);
+}
+
 /* the object backend: header text, chunks (items), tail text */
 static vjob_region_pool codegen_commit_pool = VJOB_REGION_POOL_INIT(3);
 
@@ -344,7 +351,7 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 	R.pending = pend;
 	R.serial = ser;
 	R.patches = pt;
-	elf_set_machine(R.object, CODEGEN_IS_X64(c) ? EM_X86_64 : EM_AARCH64);
+	codegen_object_target_set(c, R.object);
 	as_begin(R.assembler, R.object, "<vcc>");
 	if (as_snippet_assemble(R.assembler, hp, hn))
 		r = -1;
@@ -710,7 +717,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 					}
 				} else
 #endif
-				if (elf_set_machine(o->obj, CODEGEN_IS_X64(c) ? EM_X86_64 : EM_AARCH64),
+				if (codegen_object_target_set(c, o->obj),
 					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					codegen_assembler_error_report(c, "assembler: %s", msg);
 					E.errors++;

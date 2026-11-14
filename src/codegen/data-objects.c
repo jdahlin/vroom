@@ -483,9 +483,17 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 	}
 	if (CODEGEN_IS_WIN64(c)) {
 		/* COFF (clang's sections): .data, .bss, .rdata; thread-locals in .tls$, which the
-		   linker puts between the CRT's __tls_start and __tls_end; no .type or .size */
+		   linker puts between the CRT's __tls_start and __tls_end; no .type or .size.  -c: the
+		   same text, as items the TU's assembler reads in place (codegen_item_open) */
+		size_t h;
+
+		if (codegen_context_is_direct(e)) {
+			b->n = (b->n + 7) & ~(size_t)7;
+			start = b->n;
+		}
 		codegen_symbol_header_append(e, b, s, false, (y->flags & AST_SYMBOL_FLAG_THREAD) && !a->section ? "\t.section\t.tls$,\"dw\"\n" :
 			   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rdata,\"dr\"\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 		if (zero && !e->relocation_count) {
 			vtext_string_append(b, "\t.zero\t");
 			vtext_unsigned_append(b, size ? size : 1);
@@ -493,6 +501,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		} else {
 			codegen_data_directives_append(e, b, size);
 		}
+		codegen_item_close(e, h);
 		e->unit->object_total++;
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
@@ -662,7 +671,7 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 			break;
 		}
 	}
-	if (codegen_context_is_direct(e)) {
+	if (codegen_context_is_direct(e) && !CODEGEN_IS_WIN64(c)) {	/* (COFF: the text below, assembled in place) */
 		size_t h;
 		uint32_t ref = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, i);
 		bool asciz = s->esz == 1 && !nul;
@@ -690,6 +699,13 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 		codegen_item_close(e, h);
 		codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 		return;
+	}
+	size_t th = SIZE_MAX;
+
+	if (codegen_context_is_direct(e)) {	/* (COFF -c: the text as an item) */
+		b->n = (b->n + 7) & ~(size_t)7;
+		start = b->n;
+		th = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.section\t.rodata..L.str.%u,\"\",@\n", i);
@@ -734,5 +750,7 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
 	}
 	if (WASM(c))
 		vtext_format_append(b, "\t.size\t.L.str.%u, %llu\n", i, (unsigned long long)n);
+	if (th != SIZE_MAX)
+		codegen_item_close(e, th);
 	codegen_chunk_add(e, ((uint64_t)1 << 62) | i, start);
 }

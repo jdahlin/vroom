@@ -516,6 +516,8 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
 
+		if (CODEGEN_IS_WIN64(c) && (i->opcode == X_JTE || (i->opcode == X_LABEL && k + 1 < X->nin && X->in[k + 1].opcode == X_JTE)))
+			continue;	/* Windows: jump tables in .rdata after the function (x64w_tables), code only in .text */
 		if (codegen_context_is_direct(e)) {
 			record encoded;
 			bool code = x64_obj_record(e, i, &encoded);
@@ -534,8 +536,6 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 			}
 		}
 
-		if (CODEGEN_IS_WIN64(c) && (i->opcode == X_JTE || (i->opcode == X_LABEL && k + 1 < X->nin && X->in[k + 1].opcode == X_JTE)))
-			continue;	/* Windows: jump tables in .rdata after the function (x64w_tables), code only in .text */
 		switch (i->opcode) {
 		case X_LABEL:
 			x64_lbl(b, s, i->label);

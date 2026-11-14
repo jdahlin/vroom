@@ -72,6 +72,7 @@ static void driver_source_assemble(struct driver_job *job, const driver_environm
 		}
 		as_include_directory_set(driver_assembler, env->cwd);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);
+		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		size_t tn = (size_t)got;
 
 		if (job->darwin) {
@@ -288,6 +289,7 @@ static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_en
 
 		as_include_directory_set(driver_assembler, env->cwd);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
+		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		char *dt = NULL;
 		size_t dn = o.length;
 
