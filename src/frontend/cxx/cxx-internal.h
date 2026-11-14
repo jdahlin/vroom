@@ -128,6 +128,7 @@ typedef struct cxx_entity {
 	uint8_t late_done;
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
+	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
@@ -270,6 +271,7 @@ typedef struct cxx {
 	uint32_t ntag_spelling;
 	uint32_t instances_made, instances_failed;
 	uint8_t trace;			/* VCC_CXX_TRACE: each instantiation to stderr */
+	int mangle_fd;			/* VCC_CXX_MANGLE: the mangled names of the functions defined (-1: off) */
 	int layout_fd;			/* VCC_CXX_LAYOUT: static_asserts of the layouts, for clang (-1: off) */
 	char name_path[512];		/* the qualified name of the scope being parsed (for the layout dump) */
 	uint32_t name_path_len;
@@ -444,6 +446,8 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 		fprintf(stderr, "invalid at token %u (%s:%d)\n", c->pos, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 }
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
+VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
 #define cxx_gen_fail(c) cxx_gen_fail_at(c, __FILE__, __LINE__)
@@ -498,6 +502,7 @@ VPRIV uint32_t cxx_ctor_id(void), cxx_dtor_id(void);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
+VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t);
 VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);

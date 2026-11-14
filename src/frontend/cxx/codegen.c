@@ -46,20 +46,38 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 }
 
 /*
- * The function's symbol name: C++'s mangled name (through C's mangler for __attribute__((overloadable)),
- * which is the Itanium ABI's for these types), or the plain name for main and extern "C".  False: a name
- * not mangled yet (a function in a namespace).
+ * The function's symbol name: C++'s mangled name (mangle.c), or the plain name for main and extern "C".
+ * False: a name not mangled yet.
  */
 static bool cxx_gen_name(cxx *c, cxx_entity *f)
 {
+	cc *a = c->ast;
 	const vident *v = &vintern_ents[f->name];
+	char name[2048];
+	attrs at;
+	char *keep;
+	size_t n;
+	uint32_t si;
 
 	if (f->mangled || f->c_linkage)
 		return true;
-	if (!f->global_ns || f->member_of)
+	if (f->member_of || !f->home)
 		return false;
-	if (!(v->len == 4 && !memcmp(v->s, "main", 4)))
-		cc_mangle_overload_name_set(c->ast, f->sym);
+	if (f->home == c->global && v->len == 4 && !memcmp(v->s, "main", 4)) {
+		f->mangled = 1;
+		return true;
+	}
+	if (!cxx_mangle_function(c, f, f->home, f->ty, false, name, sizeof name))
+		return false;
+	/* the symbol's assembler name, as an asm label gives one in C */
+	n = strlen(name);
+	keep = cc_heap_allocate(a, n + 1);
+	memcpy(keep, name, n + 1);
+	si = a->nstr++;
+	a->strs[si] = (cstr){ keep, n + 1, 1, LEX_TOKEN_STRING };
+	memset(&at, 0, sizeof at);
+	at.asmname = si + 1;
+	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
 	f->mangled = 1;
 	return true;
 }

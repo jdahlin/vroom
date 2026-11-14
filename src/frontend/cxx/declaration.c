@@ -2985,7 +2985,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
-				e->global_ns = cxx_declaration_scope(c) == c->global;
+				e->global_ns = cxx_declaration_scope(c) == c->global, e->home = cxx_declaration_scope(c);
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL)) {
 				int64_t v;
@@ -3104,6 +3104,19 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					/* code generation: a function at namespace scope that is no template and no member */
 					bool gen = context == CXX_CONTEXT_NAMESPACE && !qs && decl_fn && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON) &&
 						   cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+
+					/* VCC_CXX_MANGLE=file: each function defined at namespace scope by its mangled name
+					   ("?name": not mangled yet), for bench/cxx-mangle.py to compare with clang's */
+					if (c->mangle_fd >= 0 && context == CXX_CONTEXT_NAMESPACE && !qs && decl_fn && !c->tentative && !c->template_depth &&
+					    !c->instantiating && !decl_fn->c_linkage && decl_fn->home) {
+						char mn[2048];
+						const vident *fv = &vintern_ents[decl_fn->name];
+
+						if (cxx_mangle_function(c, decl_fn, decl_fn->home, decl_fn->ty, false, mn, sizeof mn))
+							dprintf(c->mangle_fd, "%s\n", mn);
+						else
+							dprintf(c->mangle_fd, "?%.*s\n", (int)fv->len, fv->s);
+					}
 
 					cxx_function_body_parse(c);
 					if (gen)

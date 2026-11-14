@@ -35,6 +35,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	c.name_path_valid = 1;
 	c.trace = getenv("VCC_CXX_TRACE") != NULL;
 	c.layout_fd = -1;
+	c.mangle_fd = getenv("VCC_CXX_MANGLE") ? open(getenv("VCC_CXX_MANGLE"), O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
 	if (getenv("VCC_CXX_LAYOUT"))	/* static_asserts of the layouts built, for clang to check (bench/cxx-layout.py) */
 		c.layout_fd = open(getenv("VCC_CXX_LAYOUT"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	cxx_tokens_read(&c);
@@ -105,6 +106,8 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	}
 	if (c.layout_fd >= 0)
 		close(c.layout_fd);
+	if (c.mangle_fd >= 0)
+		close(c.mangle_fd);
 	cxx_free(&c);
 	return status;
 }

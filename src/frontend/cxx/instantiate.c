@@ -218,7 +218,7 @@ static cxx_instance *cxx_instance_add(cxx *c, cxx_template *t, const cxx_targ *a
 static bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding, cxx_targ *out);
 static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *a);
 
-static void cxx_instance_put(cxx *c, cxx_template *t, const cxx_targ *args, uint32_t nargs, cxx_entity *inst)
+static void cxx_instance_put(cxx *c, cxx_template *t, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst)
 {
 	uint32_t h = cxx_instance_hash(t, args, nargs);
 	cxx_instance *x = cxx_instance_find(c, t, args, nargs, h);
@@ -226,6 +226,8 @@ static void cxx_instance_put(cxx *c, cxx_template *t, const cxx_targ *args, uint
 	if (!x)
 		x = cxx_instance_add(c, t, args, nargs, h);
 	x->inst = inst;
+	if (!x->of)
+		x->of = te;	/* (its template, for the name mangler) */
 	if (inst && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty))
 		cxx_tag_info_set(c, AST_TYPE(c->ast, inst->ty)->aux, x);	/* (an explicit specialization: matchable) */
 }
@@ -241,7 +243,7 @@ VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, u
 		if (!args[i].kind)
 			return;
 	t = cxx_template_of(te);
-	cxx_instance_put(c, t, args, nargs, inst);	/* as written */
+	cxx_instance_put(c, t, te, args, nargs, inst);	/* as written */
 	/* and with the defaults completed: instantiate looks up the complete list */
 	ps = t->params ? t->params : t->declared;
 	if (ps && nargs < ps->ntparams) {
@@ -263,7 +265,7 @@ VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, u
 				cxx_bind(c, binding, d, &full[n]);
 			n++;
 		}
-		cxx_instance_put(c, t, full, n, inst);
+		cxx_instance_put(c, t, te, full, n, inst);
 	}
 }
 
@@ -572,6 +574,24 @@ static cxx_instance *cxx_tag_info(cxx *c, qty t)
 		return NULL;
 	tag = AST_TYPE(c->ast, t)->aux;
 	return tag < c->ntag_info ? c->tag_info[tag] : NULL;
+}
+
+/*
+ * Is the class t an instance of a class template?  Then its template's entity, the complete argument
+ * list, where the arguments of a trailing parameter pack start (UINT32_MAX: no pack) and the scope the
+ * template is declared in: what the name mangler writes (mangle.c).
+ */
+VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home)
+{
+	cxx_instance *x = cxx_tag_info(c, t);
+	cxx_scope *ps;
+
+	if (!x || !x->of || !x->t)
+		return false;
+	*of = x->of, *args = x->args, *nargs = x->nargs, *home = x->t->home;
+	ps = x->t->params ? x->t->params : x->t->declared;
+	*pack_at = ps && ps->ntparams && ps->tparams[ps->ntparams - 1].pack ? ps->ntparams - 1 : UINT32_MAX;
+	return true;
 }
 
 /* a placeholder type: its partial specialization and parameter index (-1: not one) */
@@ -1478,6 +1498,17 @@ VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t)
 	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t))
 		return NULL;
 	cxx_type_require_complete(c, t);
+	tag = AST_TYPE(c->ast, t)->aux;
+	return tag < c->ntag_scope ? c->tag_scope[tag] : NULL;
+}
+
+/* ... as it is: not completed for the asking (the name mangler: a type's name needs no body) */
+VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, qty t)
+{
+	uint32_t tag;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t))
+		return NULL;
 	tag = AST_TYPE(c->ast, t)->aux;
 	return tag < c->ntag_scope ? c->tag_scope[tag] : NULL;
 }
