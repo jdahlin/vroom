@@ -15,7 +15,7 @@
 
 VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
-	c->ecallee = NULL, c->xargs_set = 0;
+	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0;
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
 		/* a reference: its referent, an lvalue (T&& names are lvalues too) */
 		c->etype = AST_TYPE(c->ast, t)->base, c->elval = 1;
@@ -179,8 +179,20 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	static const uint8_t none[16];
 	cxx_entity *exact = NULL, *first = NULL;
 	uint32_t viable = 0, nexact = 0;
+	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
+	cxx_entity *nonconst = NULL;
+	uint32_t n_nonconst = 0;
 
-	c->none_viable = 0;
+	c->none_viable = 0, c->call_obj = 0;
+	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
+	if (!obj && set && c->this_type != CXX_TY_UNKNOWN && c->this_type) {
+		bool any_const = false;
+
+		for (cxx_entity *e = set; e; e = e->next)
+			any_const |= e->fn_const;
+		if (any_const)
+			obj = c->this_const ? 2 : 1;
+	}
 	qty result = CXX_TY_UNKNOWN;
 	bool same = true, unknown = false;
 
@@ -230,7 +242,11 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			ft = AST_TYPE(c->ast, e->ty);
 			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & TF_VARIADIC) && nargs >= ft->n)))
 				continue;
+			if (obj == 2 && !e->fn_const)
+				continue;	/* (a const object: const members only) */
 			r = ft->base;
+			if (obj == 1 && !e->fn_const)
+				n_nonconst++, nonconst = e;
 			if (cxx_exact(c, ft, args, nargs))
 				nexact++, exact = e;
 		}
@@ -239,6 +255,9 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		else if (r != result)
 			same = false;
 	}
+	/* f() and f() const on an object that is not const: the one that is not const */
+	if (nexact != 1 && !same && !unknown && n_nonconst == 1)
+		nexact = 1, exact = nonconst;
 	if (nexact == 1)
 		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
 	else if (!viable || !same || unknown) {

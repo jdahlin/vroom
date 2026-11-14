@@ -1062,7 +1062,7 @@ static int64_t cxx_literal_value(cxx *c)
 }
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
+typedef struct cxx_suffix { qty trailing; uint8_t is_const; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
 
 /*
  * A declarator (abstract if allowed); returns the declared name's id (0: none) and sets
@@ -1212,6 +1212,8 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			} else
 				too_many = true;
 			cxx_function_tail_parse(c);
+			if (x)
+				x->trailing = c->fn_trailing, x->is_const = c->fn_const;
 			*is_function = true;
 			continue;
 		}
@@ -1225,9 +1227,9 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		if (sfx[0].nnamed)
 			memcpy(c->decl_params, sfx[0].named, sfx[0].nnamed * sizeof *c->decl_params);
 		c->ndecl_params = sfx[0].nnamed;
-		c->decl_ndefaults = sfx[0].ndefaults;
+		c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const;
 	} else if (!nested && !c->tentative)
-		c->decl_ndefaults = 0;
+		c->decl_ndefaults = 0, c->decl_const = 0;
 	for (uint32_t i = 0; i < nsfx; i++)
 		if (sfx[i].is_function)
 			free(sfx[i].named);
@@ -1236,6 +1238,8 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		if (too_many)
 			t = CXX_TY_UNKNOWN;
 		else if (sfx[i].is_function) {
+			if (sfx[i].trailing != CXX_TY_UNKNOWN)
+				t = sfx[i].trailing;	/* (replaces auto) */
 			if (i == 0 && !nested)
 				c->decl_return = t;	/* (known even when a parameter's type is not) */
 			t = sfx[i].nparams == UINT32_MAX ? CXX_TY_UNKNOWN : cxx_type_function(c, t, sfx[i].params, sfx[i].nparams, sfx[i].variadic);
@@ -1363,8 +1367,11 @@ static void cxx_noexcept_parse(cxx *c)
 /* cv, ref-qualifier, noexcept, attributes, -> trailing return type */
 static void cxx_function_tail_parse(cxx *c)
 {
+	bool is_const = false;
+
 	for (;;) {
 		if (cxx_kw_is_cv(cxx_kw(c)) || cxx_is(c, LEX_TOKEN_AMPERSAND) || cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
+			is_const |= cxx_is_kw(c, CXX_KW_const);
 			cxx_advance(c);
 			continue;
 		}
@@ -1382,8 +1389,13 @@ static void cxx_function_tail_parse(cxx *c)
 		}
 		break;
 	}
-	if (cxx_accept(c, LEX_TOKEN_ARROW))
+	if (cxx_accept(c, LEX_TOKEN_ARROW)) {
 		cxx_type_id_parse(c);
+		c->fn_trailing = c->type_out;	/* auto f() -> T: the return type */
+		c->fn_const = is_const;
+		return;
+	}
+	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const;
 }
 
 /* the type of a functional cast T(x) / T{x}: type-specifiers only, no declarator */
@@ -1615,6 +1627,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		cxx_scope *fs;
 
 		c->pos = l.begin;
+		c->this_const = l.fn && l.fn->fn_const;
 		c->template_depth = l.template_depth;	/* a member template's body: names may be dependent */
 		qty this_save = c->this_type;
 
@@ -2546,6 +2559,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
 				c->last_fn = e;	/* (its body: parsed when used) */
+			} else if (e && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
+				e->ndefaults = (uint16_t)c->decl_ndefaults;
+				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, cs);
 			}
 		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
@@ -2559,8 +2575,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e = NULL;	/* (a friend template: found by ADL only) */
 			/* a function template (one level of parameters): its signature, for deduction at calls */
 			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
-			    !c->tentative && !c->instantiating)
-				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin);
+			    !c->tentative)
+				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, NULL);
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
 				e->ty = t;
@@ -2570,6 +2586,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
+			if (e && f)
+				e->fn_const = c->decl_const;
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
@@ -2880,15 +2898,15 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 }
 
 /* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body)
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class)
 {
 	bool q, f;
 	qty t;
 
 	cxx_attributes_skip(c);
-	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class)
 		return CXX_TY_UNKNOWN;
-	c->type_in = c->ds_type;
+	c->type_in = ctor_class ? cc_type_basic(TY_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
 	if (any_return && c->type_in == CXX_TY_UNKNOWN)
 		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
 	c->decl_return = CXX_TY_UNKNOWN;
@@ -2922,6 +2940,7 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	cxx_scope *fs;
 
 	c->pos = l->begin;
+	c->this_const = l->fn && l->fn->fn_const;
 	c->template_depth = l->template_depth;
 	c->this_type = l->scope->kind == CXX_SCOPE_CLASS && l->scope->owner && l->scope->owner->ty ? l->scope->owner->ty : CXX_TY_UNKNOWN;
 	c->scope = l->scope;

@@ -543,3 +543,15 @@ functions for unit-32bit (1,529 linkonce_odr), so vcc instantiates about a
 tenth of what code generation will need.  Missing: implicit special members,
 calls whose overload vcc cannot choose, operators on dependent operands
 inside instances, explicit template arguments, packs.
+
+### Status 2026-11-14 (4): calls
+Explicit template arguments, clang's type transform builtins, trailing
+return types, const/non-const member overloads (by the object's or this's
+constness), constructor templates and member templates of instances.
+unit-32bit: 1170 of 1432 calls typed; 160 function template bodies and 147
+member bodies instantiated, none failed (clang emits 1,692 functions); json
+71/71 parse, 38,352 layouts clang agrees with; 0.12 s.  The largest group of
+untyped calls (84) is SFINAE templates: an unnamed parameter whose type is
+enable_if_t<cond, int>, which needs the parameter's type parsed with the
+others bound and `X<T>::value` evaluated as a constant.  Then: implicit
+special members, packs, closure types, conversions in overload resolution.

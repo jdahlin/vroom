@@ -122,7 +122,8 @@ typedef struct cxx_entity {
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	struct cxx_ftemplate *ftmpl;
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
-	uint8_t late_done;	/* a function template: its signature, for deduction (instantiate.c) */
+	uint8_t late_done;
+	uint8_t fn_const;		/* a member function declared const */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
@@ -204,6 +205,10 @@ typedef struct cxx {
 	uint32_t fn_nparams, fn_cparams;
 	uint8_t fn_variadic, fn_unknown;
 	uint32_t fn_ndefaults;
+	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
+	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */
+	uint8_t this_const;		/* the member function being parsed is const */
+	uint8_t call_obj;		/* the callee is a member of an object: 1 not const, 2 const (0: not known) */
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
 	qty anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
 	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */
@@ -340,10 +345,10 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
 VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
-VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos);
+VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class);
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
 			      uint32_t nargs, qty *ret);
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body);
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);

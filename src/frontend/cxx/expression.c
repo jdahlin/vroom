@@ -789,6 +789,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 				qty callee = c->etype;
 				cxx_targ xa[8];
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
+				uint8_t call_obj = c->call_obj;
 
 				if (c->xargs_set && nx == UINT32_MAX)
 					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
@@ -801,11 +802,11 @@ static void cxx_postfix_expression_parse(cxx *c)
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
 				else if (nx != UINT32_MAX && set)
-					cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
+					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 				else if (!set && c->ncargs <= 2 && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
 				else
-					cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 			}
 			continue;
 		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {
@@ -849,8 +850,10 @@ static void cxx_postfix_expression_parse(cxx *c)
 				if (cls && !q && !dep) {
 					cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
 
-					if (m && m->kind != CXX_ENTITY_DEPENDENT)
+					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
+						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+					}
 				}
 			}
 			continue;

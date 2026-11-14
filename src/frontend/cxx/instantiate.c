@@ -1071,16 +1071,17 @@ typedef struct cxx_ftemplate {
 	cxx_fdone *done;	/* the argument lists instantiated: their return types (the body parsed once) */
 	uint32_t ndone, cdone;
 	uint32_t pos;		/* its decl-specifiers */
+	cxx_scope *ctor_class;	/* a constructor template: its class (no return type to parse) */
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
 } cxx_ftemplate;
 
-VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos)
+VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class)
 {
 	cxx_ftemplate *f = calloc(1, sizeof *f);
 
 	(void)c;
-	f->p.params = params, f->p.home = home, f->pos = pos, f->sig = CXX_TY_UNKNOWN;
+	f->p.params = params, f->p.home = home, f->pos = pos, f->sig = CXX_TY_UNKNOWN, f->ctor_class = ctor_class;
 	return f;
 }
 
@@ -1133,7 +1134,7 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 	if (!setjmp(jb))
-		f->sig = cxx_function_signature_parse(c, true, NULL);
+		f->sig = cxx_function_signature_parse(c, true, NULL, f->ctor_class);
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
@@ -1155,6 +1156,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
 	cxx_param *dp;
 	qty this_type = c->this_type, etype = c->etype;
+	uint8_t this_const = c->this_const;
 	bool elval = c->elval;
 	cxx_entity *ecallee = c->ecallee;
 
@@ -1185,13 +1187,14 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
-	c->this_type = CXX_TY_UNKNOWN;
+	/* a member template: this is its class */
+	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN;
 	c->body_depth++;
 	if (c->body_depth > c->stats.body_depth_max)
 		c->stats.body_depth_max = c->body_depth;
 	if (!setjmp(jb)) {
 		bool b;
-		qty t = cxx_function_signature_parse(c, false, &b);
+		qty t = cxx_function_signature_parse(c, false, &b, f->ctor_class);
 
 		body = b;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
@@ -1206,6 +1209,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	memcpy(c->decl_params, dp, ndp * sizeof *dp), c->ndecl_params = ndp, c->decl_ndefaults = ndd;
 	free(targs), free(dp);
 	c->this_type = this_type, c->etype = etype, c->elval = elval, c->ecallee = ecallee;
+	c->this_const = this_const;
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np))
 			f->done[i].ret = r;
@@ -1317,6 +1321,7 @@ typedef struct cxx_outer {
 	qty this_type, etype;
 	bool elval;
 	cxx_entity *ecallee, *last_fn;
+	uint8_t this_const;
 } cxx_outer;
 
 static void cxx_outer_save(cxx *c, cxx_outer *o)
@@ -1328,6 +1333,7 @@ static void cxx_outer_save(cxx *c, cxx_outer *o)
 	o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
 	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
 	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
+	o->this_const = c->this_const;
 }
 
 static void cxx_outer_restore(cxx *c, cxx_outer *o)
@@ -1337,6 +1343,7 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
 	free(o->targs), free(o->dp);
 	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
+	c->this_const = o->this_const;
 }
 
 /* a call uses e: an instance's member function, its body parsed now (once) */
