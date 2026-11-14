@@ -37,7 +37,7 @@ if [ "$*" = llvm-mingw ]; then
   mkdir -p "$d"
   t="$d/$MINGW_NAME.tar.xz"
   if ! echo "$MINGW_SHA256  $t" | sha256sum -c --status 2>/dev/null; then
-    curl -fL --retry 3 -o "$t.part" "$MINGW_URL"
+    curl -fsSL --retry 3 -o "$t.part" "$MINGW_URL"
     echo "$MINGW_SHA256  $t.part" | sha256sum -c --status || { echo "llvm-mingw: SHA-256 mismatch" >&2; rm -f "$t.part"; exit 1; }
     mv "$t.part" "$t"
   fi

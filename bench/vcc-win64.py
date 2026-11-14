@@ -2,7 +2,8 @@
 """vcc-win64.py: the C test suites through vcc's Windows x64 target (PLAN-win64.md).
 
   bench/vcc-win64.py [-j N] [--suite gcc|tcc|vcc|inline] [--ref-only] [--obj] [--objcmp]
-                     [--vlink-ref] [-v] [--show CAT] [--no-cache] [PAT]
+                     [--vlink-ref] [--vccrt-ref] [--export DIR] [-v] [--show CAT]
+                     [--no-cache] [PAT]
 
 Every test of the three suites of vcc-x86.py (gcc torture, tcc tests2, our
 own; --suite inline adds the inlining suite) is built for x86_64-w64-mingw32
@@ -22,6 +23,16 @@ vcc's run-time library (BUILD/vccrt/libvccrt.a, src/runtime/build.sh) where
 clang's has compiler-rt's builtins, once by lld and once by vlink, and runs
 both: each must give the reference result, and the link map must show no
 input from compiler-rt, libgcc or libunwind (`fail foreign` otherwise).
+
+--export DIR (WIN9; any mode) copies the program of every passing test to
+DIR/exe/SUITE/NAME.exe and writes DIR/vcc-win64.manifest.json: per test the
+executable, its argv and stdin (none), the reference's stdout ("\n" line
+ends) and exit code, and a timeout.  bench/win64-native.py runs such a
+directory on real Windows (CI's `native` job).  The program exported is the
+mode's own product: vcc's (default, --obj), vlink's with libvccrt.a
+(--vccrt-ref), vlink's with compiler-rt (--vlink-ref) or clang's own
+(--ref-only).  A test that passes from the pass cache is linked again (the
+link is deterministic, SOURCE_DATE_EPOCH) but not run.
 
 The chain (bench/hostenv.py: MINGW_SYSROOT, WINE): the host's clang compiles
 with the test runtime headers (src/test/rt/include-win64 before
@@ -106,7 +117,12 @@ TOOLFP = _toolfp()
 # tcc tests2 that vcc-ctests.py skips but that mean something here
 TCC_RUN = {'x86 asm', 'win32', 'msvc layout'}
 # tests that cannot work on Windows for a reason the reference run does not show
-WIN64_SKIP = {}
+WIN64_SKIP = {
+    # prints a field of fresh malloc memory when it happens to have a high bit
+    # set: UCRT's heap leaves it differently from run to run (seen 2026-11-14:
+    # the reference printed 17742, the same image later nothing)
+    'gcc/941014-2': 'reads uninitialized malloc memory: output depends on the heap',
+}
 # Why clang's own build does not run on Windows: each test whose reference is
 # excluded only for this target (it passes for x86_64-linux-gnu) has its
 # category and reason here, from the reference run of 2026-11-13.  The
@@ -176,6 +192,35 @@ def run(exe, timeout=20):
     """(rc, stdout, stderr) of EXE under Wine; rc 'timeout' when it did not finish"""
     rc, out, err = sh([WINE, exe], timeout=timeout, stdin=subprocess.DEVNULL, env=WENV, cwd=os.path.dirname(exe))
     return rc, out.decode('latin-1').replace('\r\n', '\n'), err.decode(errors='replace')
+
+
+def export(t, exe, ref):
+    """--export: EXE (a passing test's program) into EXPORT/exe and its
+    manifest entry into EXPORT/entries (main() gathers them)"""
+    suite, name, path = t
+    rel = f'exe/{suite}/{name}.exe'
+    os.makedirs(os.path.dirname(f'{EXPORT}/{rel}'), exist_ok=True)
+    shutil.copyfile(exe, f'{EXPORT}/{rel}')
+    entry = {'name': f'{suite}/{name}', 'exe': rel, 'argv': [], 'stdin': None,
+             'stdout': ref['out'], 'exit': ref['rc'], 'timeout': 20,
+             'source': os.path.relpath(path, ct.R)}
+    os.makedirs(f'{EXPORT}/entries/{suite}', exist_ok=True)
+    with open(f'{EXPORT}/entries/{suite}/{name}.json', 'w') as f:
+        json.dump(entry, f)
+
+
+def write_manifest(export_dir, mode):
+    """EXPORT_DIR/vcc-win64.manifest.json from the entries the workers wrote"""
+    tests = []
+    for directory, _, files in sorted(os.walk(f'{export_dir}/entries')):
+        for f in sorted(files):
+            with open(os.path.join(directory, f)) as e:
+                tests.append(json.load(e))
+    shutil.rmtree(f'{export_dir}/entries', ignore_errors=True)
+    with open(f'{export_dir}/vcc-win64.manifest.json', 'w') as f:
+        json.dump({'version': 1, 'producer': f'bench/vcc-win64.py {mode}', 'target': 'x86_64-w64-mingw32',
+                   'tests': tests}, f, indent=0)
+    return len(tests)
 
 
 def wine_failure(rc, err, timeout):
@@ -291,6 +336,14 @@ def one(t):
     if f'{suite}/{name}' in WIN64_WHY:
         return t, 'error', 'stale', 'the reference runs now: remove it from WIN64_WHY'
     if REF_ONLY:
+        if EXPORT:	# clang's object and link, as reference() built them
+            os.makedirs(wd, exist_ok=True)
+            rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd)
+            if not rc:
+                rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.exe')
+            if rc:
+                return t, 'error', 'export', ct.first_err(err if isinstance(err, str) else err.decode(errors='replace'))
+            export(t, f'{wd}/ref.exe', ref)
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
     os.makedirs(wd, exist_ok=True)
@@ -307,13 +360,10 @@ def one(t):
         return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
     pf = f'{OUT}/pass{"-obj" if OBJ else ""}/{suite}/{name}'
-    if not NOCACHE:
-        try:
-            if open(pf).read() == pk:
-                shutil.rmtree(wd, ignore_errors=True)
-                return t, 'pass', '', ''
-        except OSError:
-            pass
+    cached = cache_hit(pf, pk)
+    if cached and not EXPORT:
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'pass', '', ''
     rc, _, err = (0, b'', b'') if OBJ else sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
@@ -322,10 +372,14 @@ def one(t):
     if rc:
         m = re.search(r"undefined (?:symbol|reference to):? ['`]?(\w+)", err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
-    rc, out, err = run(f'{wd}/vcc.exe')
+    rc, out, err = (ref['rc'], ref['out'], '') if cached else run(f'{wd}/vcc.exe')
+    if rc == 'timeout':	# once more, as for the reference
+        rc, out, err = run(f'{wd}/vcc.exe')
     if rc == ref['rc'] and out == ref['out']:
         os.makedirs(os.path.dirname(pf), exist_ok=True)
         open(pf, 'w').write(pk)
+        if EXPORT:
+            export(t, f'{wd}/vcc.exe', ref)
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
     m = EXC.search(err) if rc == 255 else None
@@ -426,14 +480,15 @@ def vlinkref(t):
     obj = open(f'{wd}/ref.o', 'rb').read()
     pk = hashlib.sha1(obj + ref['key'].encode() + VLHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vlink/{suite}/{name}'
-    if not NOCACHE:
-        try:
-            if open(pf).read() == pk:
-                shutil.rmtree(wd, ignore_errors=True)
-                return t, 'pass', '', ''
-        except OSError:
-            pass
     objs = [f'{wd}/ref.o', RTO]
+    if cache_hit(pf, pk):
+        if EXPORT:	# the same link again (deterministic), not run
+            rc, _, err = sh(LINK + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
+            if rc:
+                return t, 'fail', 'vlink', ct.first_err(err.decode(errors='replace'))[:150]
+            export(t, f'{wd}/vlink.exe', ref)
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'pass', '', ''
     rc, _, err = sh(LINK + objs + ['-o', f'{wd}/lld.exe'], timeout=60, env=VLENV)
     if rc:
         return t, 'error', 'lld', ct.first_err(err.decode(errors='replace'))
@@ -443,6 +498,8 @@ def vlinkref(t):
         return t, 'fail', 'vlink', (ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vlink: signal/timeout {rc}: ' + ct.first_err(e))[:150]
     a, b = open(f'{wd}/lld.exe', 'rb').read(), open(f'{wd}/vlink.exe', 'rb').read()
     rc, out, err = run(f'{wd}/vlink.exe')
+    if rc == 'timeout':	# once more, as for the reference: Wine's first start in a worker
+        rc, out, err = run(f'{wd}/vlink.exe')
     if rc != ref['rc'] or out != ref['out']:
         m = EXC.search(err) if rc == 255 else None
         why = f'exception {m.group(1)}' if m else f'exit {rc} (clang {ref["rc"]})' if rc != ref['rc'] else 'output differs'
@@ -451,6 +508,8 @@ def vlinkref(t):
         return t, 'fail', 'differs', pe_differs(a, b)
     os.makedirs(os.path.dirname(pf), exist_ok=True)
     open(pf, 'w').write(pk)
+    if EXPORT:
+        export(t, f'{wd}/vlink.exe', ref)
     shutil.rmtree(wd, ignore_errors=True)
     return t, 'pass', '', ''
 
@@ -512,13 +571,14 @@ def vccrtref(t):
         return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
     pk = hashlib.sha1(open(f'{wd}/ref.o', 'rb').read() + ref['key'].encode() + VLHASH.encode() + VRHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vccrt/{suite}/{name}'
-    if not NOCACHE:
-        try:
-            if open(pf).read() == pk:
-                shutil.rmtree(wd, ignore_errors=True)
-                return t, 'pass', '', ''
-        except OSError:
-            pass
+    if cache_hit(pf, pk):
+        if EXPORT:	# vlink's link again (deterministic), not run
+            rc, err = vccrt_link([f'{wd}/ref.o', RTO], f'{wd}/vlink.exe', linker=VLINK)
+            if rc:
+                return t, 'fail', 'link-vlink', ct.first_err(err)[:150]
+            export(t, f'{wd}/vlink.exe', ref)
+        shutil.rmtree(wd, ignore_errors=True)
+        return t, 'pass', '', ''
     for which, linker in (('lld', None), ('vlink', VLINK)):
         exe, mp = f'{wd}/{which}.exe', f'{wd}/{which}.map'
         rc, err = vccrt_link([f'{wd}/ref.o', RTO], exe, linker=linker, map_file=mp)
@@ -537,6 +597,8 @@ def vccrtref(t):
             return t, 'fail', f'run-{which}', why
     os.makedirs(os.path.dirname(pf), exist_ok=True)
     open(pf, 'w').write(pk)
+    if EXPORT:
+        export(t, f'{wd}/vlink.exe', ref)
     shutil.rmtree(wd, ignore_errors=True)
     return t, 'pass', '', ''
 
@@ -544,11 +606,22 @@ def vccrtref(t):
 VLHASH = _vlink_hash()
 VRHASH = os.environ.get('VCC_VCCRT_HASH') or _vccrt_hash()
 NOCACHE = REF_ONLY = OBJ = False
+EXPORT = None
 
 
-def init(nocache, ref_only, obj):
-    global NOCACHE, REF_ONLY, OBJ
-    NOCACHE, REF_ONLY, OBJ = nocache, ref_only, obj
+def cache_hit(pf, pk):
+    """the pass cache PF holds PK (and --no-cache is off)"""
+    if NOCACHE:
+        return False
+    try:
+        return open(pf).read() == pk
+    except OSError:
+        return False
+
+
+def init(nocache, ref_only, obj, export_dir=None):
+    global NOCACHE, REF_ONLY, OBJ, EXPORT
+    NOCACHE, REF_ONLY, OBJ, EXPORT = nocache, ref_only, obj, export_dir
 
 
 if __name__ == '__main__':
@@ -560,12 +633,19 @@ if __name__ == '__main__':
     nocache, ref_only, obj, ocmode, verbose = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v'))
     vlmode = '--vlink-ref' in flags
     rtmode = '--vccrt-ref' in flags
-    for opt in ('-j', '--suite', '--show'):
+    export_dir = None
+    for opt in ('-j', '--suite', '--show', '--export'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
             if opt == '-j': j = int(v)
             elif opt == '--suite': suite = v
+            elif opt == '--export': export_dir = os.path.abspath(v)
             else: show = v
+    if export_dir:
+        if ocmode:
+            sys.exit('vcc-win64.py: --export with --objcmp: no program to export')
+        shutil.rmtree(f'{export_dir}/exe', ignore_errors=True)
+        shutil.rmtree(f'{export_dir}/entries', ignore_errors=True)
     pat = av[0] if av else None
     why = hostenv.mingw_missing()
     if why:
@@ -581,7 +661,7 @@ if __name__ == '__main__':
         os.environ['VCC_VCCRT_HASH'] = _vccrt_hash()
     rt_obj()
     hostenv.wine_start(PREFIX)
-    with Pool(j, initializer=init, initargs=(nocache, ref_only, obj)) as pool:
+    with Pool(j, initializer=init, initargs=(nocache, ref_only, obj, export_dir)) as pool:
         res = pool.map(vccrtref if rtmode else vlinkref if vlmode else objcmp if ocmode else one, ts, chunksize=1)
     by = defaultdict(Counter)
     whys = defaultdict(Counter)
@@ -616,5 +696,8 @@ if __name__ == '__main__':
     if vlmode:
         print(f'vlink: runs-ok {tot["pass"] + tot["fail:differs"]}/{tot["pass"] + tot["fail"]}, '
               f'image-identical {tot["pass"]}/{tot["pass"] + tot["fail"]}')
+    if export_dir:
+        mode = ' '.join(sorted(f for f in flags if f not in ('-v', '--no-cache'))) or '(vcc)'
+        print(f'export: {write_manifest(export_dir, mode)} programs in {export_dir}')
     print(f'{time.time() - t0:.1f} s')
     sys.exit(1 if tot['fail'] or tot['error'] else 0)

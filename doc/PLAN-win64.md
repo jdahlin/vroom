@@ -407,6 +407,92 @@ supported (C cannot read MXCSR without an intrinsic).
   `vcc-win64.py --vccrt-ref -j 4` 2014/2014 (lld and vlink), 0 foreign;
   `vccrt-test.py diff` 70/70.
 
+### WIN9 (2026-11-14): CI written, run locally; first GitHub run pending
+
+`.github/workflows/win64.yml` (reusable, called from `premerge.yml`, in
+`gate`'s `needs`):
+
+- **`wine`** (ubuntu-24.04, `container: debian:trixie`, 45 min limit):
+  `ci/setup-debian.sh win64` installs Debian 13's Wine (10.0; no i386
+  architecture, 64-bit loader only) and runs `bench/fetch-testsuites.sh
+  llvm-mingw` (SHA-256 checked; in a plain checkout it unpacks into
+  `work/llvm-mingw`, where `bench/hostenv.py` looks).  The release tarball
+  (80 MB) is cached by `actions/cache` keyed on `MINGW_REL`/`MINGW_SHA256`;
+  `toolfp` adds `wine --version` and the pin.  A second cache holds ccache,
+  `win64tests/ref` and the pass caches.  Then `ci/premerge.sh win64`:
+  `vcc-win64.py --ref-only`, `--vlink-ref`, `--vccrt-ref --export`,
+  `vlink-pe.py --run`, `vccrt-test.py diff --export` and `chkstk --export`,
+  `var-cmp.py coff` (moved here from the arm64 job), and `win64-pack`:
+  `build/linux/win64-exes.tar.xz`, uploaded as the `win64-exes` artifact.
+- **`native`** (windows-2025, 15 min limit, `needs: wine`): sparse checkout
+  of the runner and the allow-list, Python 3.12, `bench/win64-native.py
+  win64-exes.tar.xz --allow ci/win64-native-allow.txt`.  No compiler.
+
+`--export DIR` (`vcc-win64.py`, any mode; `vccrt-test.py diff|chkstk`)
+writes the passing programs and `DIR/*.manifest.json` (per test: exe, argv,
+stdin, expected stdout, exit code, timeout; expected = clang's reference
+under Wine).  A test passing from the pass cache is linked again (the link
+is deterministic) and exported without running.  The exported programs
+today: clang's objects linked by vlink with libvccrt.a (2013) plus the
+differential and stack-probe programs of `vccrt-test.py`.
+`bench/win64-native.py` runs each in an empty directory, in parallel, with
+the manifest's timeout; stdout compared with `\r\n` as `\n`, exit codes
+equal (a code above 255 that is not an NTSTATUS also modulo 256, as Wine
+reports them); failures to `$GITHUB_STEP_SUMMARY`; allowed failures need a
+reason and an allowed test that passes is an error.  `--wrapper wine` runs it
+on Linux.  `vlink-pe-bad.py` runs in the asan job (arm64), beside
+`vlink-bad.py`.
+
+**Guarded** in `ci/premerge.sh` (`has FILE TEXT`; a skipped step prints
+`skip NAME (why)` and a summary row), so each switches on when its feature
+is merged, with no CI change:
+
+| step | runs when | then |
+|---|---|---|
+| `win64-own` | `bench/vcc-win64.py` has `'--own'` | `vcc-win64.py --own --export`: the exported programs become vcc's (and `--vccrt-ref` runs without `--export`) |
+| `win64-own-vir` | ... and `'--vir'` | `vcc-win64.py --own --vir` |
+| `abi-win64` | `bench/vcc-abi.py` mentions `win64` | `vcc-abi.py --target win64` |
+| `vas-obj-coff` | `src/test/vas-obj/{win64,coff}-*.s` exist | `vas-obj.py` |
+| `zlib-win64`, `sqlite-win64` (WIN8 hook) | `bench/{zlib,sqlite}/run.py` mention `win64` | `run.py --target win64 all` |
+
+Found on the way: `gcc/941014-2` prints a field of fresh `malloc` memory
+when it happens to be set; under Wine the reference printed `17742` once and
+nothing later.  It is in `WIN64_SKIP` (the `native` job would be flaky on
+it); `--vlink-ref` retries a Wine timeout once, as the other modes do.
+
+Measured (this host, 16 threads, `CI_JOBS=4`):
+
+- `ci/premerge.sh win64` on the host (Wine 11.0), cold caches: 5 min
+  (`win64-ref` 77 s, `--vlink-ref` 70 s, `--vccrt-ref` 116 s, `var-coff`
+  24 s, the rest under 5 s each); warm: 2 min 53 s (`ref` 1 s, the two
+  link modes 81 s each: compile and vlink again, no Wine).
+- In `debian:trixie` under docker with the checkout copied (no `.git`, no
+  `work/`), as CI: `ci/setup-debian.sh win64` 74 s with the llvm-mingw
+  download, 65-68 s from the cached tarball; `ci/premerge.sh win64` 5 min
+  22 s cold (vcc built without ccache), 2 min 36 s warm, all steps green,
+  and `win64-native.py --wrapper wine` there on the packed artifact
+  2015/2015 in 4 s.  Debian's Wine 10.0
+  gives the same reference set as Wine 11.0: 2014 reference-ok of 2176,
+  the same 162 exclusions; WIN-specific lists unchanged.
+- Artifact: 2015 programs (353 MB unpacked, about 175 KB each: the static
+  CRT) in a 4.4-4.9 MB `tar.xz`.
+- `bench/win64-native.py --wrapper wine -j 4` on it: 2015/2015 in 3 s.
+  With a wrong expected stdout, a wrong exit code, an allowed difference,
+  a stale and an unknown allow entry: 2 fail, 1 allowed, 1 stale, 1
+  warning, exit 1, the step summary table written.
+- `vlink-pe-bad.py` (ASan build of this host): 530/530.
+- `actionlint` 1.7.7 (without shellcheck) and `yaml.safe_load`: clean.
+
+Not proven until the first GitHub Actions run: the workflow as a whole
+(the `workflow_call` wiring, `actions/cache` with a glob path in the
+container, the artifact hand-over, `compression-level: 0`); the runner
+times on GitHub's 4-core x86-64 machine (expected: `wine` 10-12 min cold,
+5-6 min warm; `native` 2-3 min with the download); **every program on real
+Windows** (Server 2025): the expected results come from Wine, so a Wine
+difference shows up as a `native` failure, to be fixed or added to
+`ci/win64-native-allow.txt` with its reason; `chkstk`'s strict page check
+on a real guard-page stack; `vlink-pe-bad.py` on the arm64 runner.
+
 ### WIN1-WIN6, WIN8-WIN10 (2026-11-13): planned
 
 Nothing implemented.  The reference chain was checked by hand (clang 23 ->

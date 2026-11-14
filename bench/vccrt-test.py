@@ -5,6 +5,7 @@
   bench/vccrt-test.py [diff] [-n N] [-v] [HELPER...]   libvccrt.a against compiler-rt under Wine
   bench/vccrt-test.py native [-n N]     the same C sources against the host's compiler-rt (x86-64 Linux)
   bench/vccrt-test.py chkstk            ___chkstk_ms: registers, pages touched, frames on a small-stack thread
+  ... diff|chkstk --export DIR          also export the libvccrt program for real Windows (WIN9)
 
 `needs` lists every symbol of compiler-rt's builtins archive that a link for
 x86_64-w64-mingw32 can take: (a) the undefined symbols of clang's object for
@@ -40,6 +41,11 @@ written (GetWriteWatch on a region the probe runs in: Wine commits thread
 stacks itself, so a probe that skips pages does not fault there), and
 frames of one page to 950000 bytes, fixed and alloca'd, on a thread with a
 1 MiB stack reservation.
+
+--export DIR (diff, chkstk; WIN9) copies the program linked with libvccrt.a
+to DIR/exe/vccrt/ and adds it to DIR/vccrt-MODE.manifest.json with the argv
+used here and the stdout and exit code it gave under Wine (after passing the
+check), for bench/win64-native.py to run on real Windows.
 
 libvccrt.a is built by src/runtime/build.sh (CC and AR as parameters; clang
 for the target until vcc's Windows code generator is in, see that script).
@@ -252,6 +258,21 @@ def wine(exe, *args, timeout=600):
     return r.returncode, r.stdout.decode('latin-1').replace('\r\n', '\n')
 
 
+def export(exe, argv, out, rc, mode, timeout=300):
+    """--export: EXE with ARGV and the stdout/exit code it gave under Wine"""
+    if not EXPORT:
+        return
+    import shutil
+    name = os.path.basename(exe)
+    os.makedirs(f'{EXPORT}/exe/vccrt', exist_ok=True)
+    shutil.copyfile(exe, f'{EXPORT}/exe/vccrt/{name}')
+    test = {'name': f'vccrt/{mode}', 'exe': f'exe/vccrt/{name}', 'argv': list(argv), 'stdin': None,
+            'stdout': out, 'exit': rc, 'timeout': timeout, 'source': f'src/test/vccrt ({mode})'}
+    with open(f'{EXPORT}/vccrt-{mode}.manifest.json', 'w') as f:
+        json.dump({'version': 1, 'producer': f'bench/vccrt-test.py {mode}', 'target': 'x86_64-w64-mingw32',
+                   'tests': [test]}, f, indent=0)
+
+
 def digests(out):
     return {f[0]: (f[1], f[2]) for f in (line.split() for line in out.splitlines()) if len(f) == 3}
 
@@ -389,6 +410,8 @@ def diff(n, names, verbose):
     tested = len([x for x in dv if not names or x in names])
     print(f'differential: {tested - failed}/{tested} helpers bit-identical to compiler-rt (or exact), {calls} calls, '
           f'{n} random inputs per helper')
+    if not failed:
+        export(vexe, [str(n)], out_v, rv, 'diff')
     return 1 if failed else 0
 
 
@@ -503,16 +526,21 @@ def chkstk():
     ok = rv == 0 and out_v.endswith('ok\n') and rc == 0 and same
     print(f'chkstk: {"ok" if ok else "FAILED"} (libvccrt exit {rv}, compiler-rt exit {rc}, '
           f'register and frame checks {"equal" if same else "differ"})')
+    if ok:
+        export(vexe, ['strict'], out_v, rv, 'chkstk')
     return 0 if ok else 1
 
 
 WENV = hostenv.wine_env(PREFIX)
 WENV['WINEDLLOVERRIDES'] += ';winedbg.exe=d'
+EXPORT = None
 
 if __name__ == '__main__':
     av = sys.argv[1:]
     j, n, verbose = 4, 20000, '-v' in av
     av = [a for a in av if a != '-v']
+    if '--export' in av:
+        k = av.index('--export'); EXPORT = os.path.abspath(av[k + 1]); del av[k:k + 2]
     for opt in ('-j', '-n'):
         if opt in av:
             k = av.index(opt); v = int(av[k + 1]); del av[k:k + 2]
