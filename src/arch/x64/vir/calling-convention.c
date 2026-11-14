@@ -88,9 +88,10 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 		x->operands[1] = RAX;
 		x->result = RAX;
 		x->clobbered[0] = 1u << RAX;
-	} else if (i->op == VIR_OP_STORE && f->insns[i->a].op == VIR_OP_SLOTADDR) {
-		/* The frame displacement is part of the store's addressing mode. */
-		x->operand_count = 2;
+	} else if ((i->op == VIR_OP_STORE || i->op == VIR_OP_LOAD || i->op == VIR_OP_ALOAD) &&
+		   x64_vir_is_frame_operand(f, i->a)) {
+		/* The displacement is part of the memory operand. */
+		x->operand_count = i->op == VIR_OP_STORE ? 2 : 1;
 		x->mem = 1;
 	} else if(i->op==VIR_OP_SWITCH && r10) {
 		/* A private dense selector can be produced directly in the dispatch
@@ -100,7 +101,12 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_re
 		} else x->edge_clobbered[0]=UINT64_C(1)<<R10;
 	} else if (i->op == VIR_OP_MEMCPY || i->op == VIR_OP_MEMSET) {
 		x->operand_count = 3;
-		if(x64_vir_memory_block_is_small(f,i)) {x->mem=i->op==VIR_OP_MEMSET?6:4;return;}
+		if (x64_vir_memory_block_is_small(f, i)) {
+			x->mem = 4; /* immediate count */
+			if (x64_vir_is_frame_operand(f, i->a)) x->mem |= 1;
+			if (i->op == VIR_OP_MEMSET || x64_vir_is_frame_operand(f, i->b)) x->mem |= 2;
+			return;
+		}
 		x->operands[0] = RDI;
 		x->operands[1] = i->op == VIR_OP_MEMSET ? RAX : RSI;
 		x->operands[2] = RCX;

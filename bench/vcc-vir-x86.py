@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
         ('vir_x86_cmpmem.c', {'left', 'right', 'full32', 'sign8', 'zero8', 'sign16', 'indexed', 'keep', 'vol', 'outside', 'narrow'}, {}),
         ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'branch8', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
-        ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
+        ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'frame_words', 'frame_test', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
         ('vir_x86_bytes.c', {'be16', 'be32', 'signed32', 'signedlow32', 'signedvol32', 'be64', 'be48', 'offset32', 'bev64', 'indexed16', 'indexed32', 'bev16', 'signed16', 'changed'}, {}),
@@ -177,6 +177,15 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'rep ' in body or 'movups' not in body:
                         raise SystemExit(f'{name}: missing direct SSE2 block accesses')
+                local = asm.read_text().split('zero_local:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if not re.search(r'movups\s+%xmm\d+,\s*[^\n]*\(%r(?:sp|bp)\)', local):
+                    raise SystemExit('zero_local: stack displacement missing from vector store')
+                local = asm.read_text().split('frame_test:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if not re.search(r'testb\s+\$8,\s*[^\n]*\(%r(?:sp|bp)\)', local):
+                    raise SystemExit('frame_test: stack displacement missing from masked test')
+                local = asm.read_text().split('frame_words:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if '%rsp' in local or '%rbp' in local:
+                    raise SystemExit('frame_words: two-word local still round-trips through the frame')
                 for name in ('copy129', 'zero257', 'dynamic', 'nonzero'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if 'rep ' not in body and not re.search(r'\bcall\w*\s+mem(?:cpy|set)', body):

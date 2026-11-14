@@ -41,6 +41,14 @@ VPRIV uint32_t x64_vir_param_word(const vir_function *f, const vir_insn *i);
 VPRIV uint32_t x64_vir_stack_object_size(const vir_function *f, uint32_t sig, uint32_t word);
 VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack, bool ms);
 VPRIV bool x64_vir_value_immediate(const vir_function *f, uint32_t v, int64_t *value);
+/* VIR bounds the whole frame below 1 GiB. Offsets inside the slot fit
+ * disp32 after layout; arbitrary pointer arithmetic can exceed that. */
+static inline bool x64_vir_is_frame_operand(const vir_function *f, uint32_t value)
+{
+	const vir_insn *addr = &f->insns[value];
+	return addr->op == VIR_OP_SLOTADDR && !addr->c && addr->b < f->slot[addr->a].size;
+}
+VPRIV codegen_lvalue x64_vir_memory_operand(x64_vir_context *L, uint32_t value, int reg);
 VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,const vir_insn *i);
 VPRIV bool x64_vir_switch_is_dense(const vir_function *f,const vir_insn *in,uint64_t *low,uint64_t *range);
 VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v, vir_register_constraint *x, void *ctx);
