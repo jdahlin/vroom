@@ -591,6 +591,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 
 			if (xargs)
 				continue;	/* (f<...>: not a non-template) */
+			if (e->kind == CXX_ENTITY_VALUE && e->ty == CXX_TY_UNKNOWN && e->has_ret_pattern && e->late)
+				cxx_late_deduce(c, e->late);	/* (auto f() of an instance: its type from its body, now) */
 			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
@@ -1390,6 +1392,45 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 
 	if (nt == 2 && IS("__is_same")) {
 		*v = t[0] == t[1];
+		return true;
+	}
+	/* is a < b (a: const L&, b: const R&) a rewritten candidate, (a <=> b) < 0, or 0 < (b <=> a), when
+	   no operator< fits (clang's builtin; libc++'s __default_three_way_comparator): as the binary
+	   operator decides it (expression/binary.c) */
+	if (nt == 2 && IS("__builtin_lt_synthesizes_from_spaceship")) {
+		qty l = t[0], r = t[1];
+		qty et = c->etype;
+		uint8_t elval = c->elval, econst = c->econst, resolved = c->call_resolved, nv = c->none_viable;
+		int64_t ev = c->evalue;
+		cxx_entity *picked = c->call_picked;
+		bool lt, ss = false;
+
+		if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_PTR && AST_TYPE(c->ast, l)->ext)
+			l = AST_TYPE(c->ast, l)->base;
+		if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == TY_PTR && AST_TYPE(c->ast, r)->ext)
+			r = AST_TYPE(c->ast, r)->base;
+		if (l == CXX_TY_UNKNOWN || r == CXX_TY_UNKNOWN || c->tentative)
+			return false;
+		if (!(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != TY_ARRAY) &&
+		    !(cc_type_is_record(c->ast, r) && AST_TYPE_KIND(c->ast, r) != TY_ARRAY)) {
+			*v = 0;	/* (no class: the built-in <) */
+			return true;
+		}
+		c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = 1;
+		lt = cxx_operator_call_type(c, vintern_cstr("operator<"), l, &r, 1) && c->call_resolved;
+		if (!lt) {
+			qty ra = r, la = l;
+
+			c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = 1;
+			ss = cxx_operator_call_type(c, vintern_cstr("operator<=>"), l, &ra, 1) && c->call_resolved;
+			if (!ss) {
+				c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = 1;
+				ss = cxx_operator_call_type(c, vintern_cstr("operator<=>"), r, &la, 1) && c->call_resolved;
+			}
+		}
+		c->etype = et, c->elval = elval, c->econst = econst, c->evalue = ev, c->call_resolved = resolved, c->none_viable = nv,
+		c->call_picked = picked;
+		*v = !lt && ss;
 		return true;
 	}
 	/* a class from or to an object of its own type: its copy or move constructor, or assignment operator */

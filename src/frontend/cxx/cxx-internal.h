@@ -145,6 +145,8 @@ typedef struct cxx_entity {
 	struct cxx_ftemplate *ftmpl;
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
+	uint8_t has_ret_pattern, ret_deducing, ret_variadic;	/* a function declared auto f(...): its return type from its body */
+	qty ret_pattern;		/* ... the declared return type, with auto's placeholder (auto, const auto &, auto *) */
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
 	uint8_t fn_noexcept;		/* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
@@ -616,6 +618,9 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			      uint32_t nargs, qty *ret, bool body);
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
+VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l);
+VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps, uint32_t n);	/* declaration/ */
+VPRIV void cxx_function_body_parse(cxx *c);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);

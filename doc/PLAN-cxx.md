@@ -1971,3 +1971,18 @@ kompileras nu, 10 nya saknas (strömmar och binärformat som inte nåddes förut
   ([temp.func.order]/6.2.2).  Kvar: clang manglar requires-klausulen (`IiQ5same2IT_EE`), vcc inte.
 Test: `run/adl-calls.cpp`.  cxx-strict 348 funktioner (338): 43 fler kompileras, inga nya fel; ökningen är
 anrop från nyss byggd kod till funktioner vcc aldrig instansierar ("no body seen", 44, nu störst).
+
+## Status 112 (2026-11-14)
+- Medlemsfunktioner med härledd returtyp (`auto f() { ... }` i klassen): förut fick de aldrig en typ (en
+  `is_auto` som uteslöt klassmedlemmar), så varje anrop föll.  `cxx_late_deduce` tolkar kroppen en gång
+  utan kod (`ret_capture`) och sätter funktionens typ, innan koden byggs: vid klassens slut, eller för en
+  instans när ett anrop eller namnet behöver typen.  Ännu inte: en användning i klassen före definitionen.
+- `static operator()` (C++23, libc++:s jämförare): objektet evalueras men skickas inte med.
+- `if (T x = e; cond) ... else ...`: x syns i else-grenen också ([stmt.if]/3).
+- Värdemallparametrar vars typ är klassens medlemstypedef (`template <size_type N>`): typen tolkas i
+  bindningens scope (`cxx_bind_value_type`), och instansens argument manglas med den (`ILm16E`).
+- `alias<T>::member` med en alias som ger en icke-klass: ett substitutionsfel, inte okänt
+  (`__remove_const_ref_t<unsigned char>::first_type`): `std::set<unsigned char>` fungerar.
+- `__builtin_lt_synthesizes_from_spaceship(const L&, const R&)` som clangs: binäroperatorns val.
+Test: `run/auto-members.cpp`.  cxx-strict 345 (348): 36 fler kompileras, 1 ny (`auto __res = __lhs <=> __rhs`).
+Sedda luckor: en instans av en C-variadisk funktionsmall (`f(Arg, ...)`) definieras aldrig.

@@ -558,7 +558,8 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 	if (t->kind == LEX_TOKEN_IDENTIFIER && !t->kw && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN &&
 	    cxx_builtin_kind(t->id) == CXX_BUILTIN_TRAIT && !cxx_lookup(c, t->id)) {
 		cxx_builtin_call_parse(c);
-		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6)) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
+		cxx_et(c, t->len > 5 && (!memcmp(t->s, "__is_", 5) || !memcmp(t->s, "__has_", 6) ||
+					 (t->len == 39 && !memcmp(t->s, "__builtin_lt_synthesizes_from_spaceship", 39))) ? cc_type_basic(TY_BOOL) : CXX_TY_UNKNOWN, false);
 		{
 			/* a builtin that is a library function or a simple operation: its type, and its code */
 			qty rt;

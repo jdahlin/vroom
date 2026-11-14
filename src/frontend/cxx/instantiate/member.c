@@ -167,6 +167,71 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 	cxx_outer_restore(c, &o);
 }
 
+/*
+ * auto f(...) { ... } defined in its class: the return type from the body's first return ([dcl.spec.auto.
+ * general]/3: a return statement's operand deduces it), in a pass of the body of its own that builds no
+ * code; the function's type has it after.  (Before its body is parsed a use has no type: a use in the class
+ * of a member defined later is not deduced.)
+ */
+VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l)
+{
+	cxx_entity *f = l ? l->fn : NULL;
+	cxx_outer o;
+	jmp_buf jb;
+	volatile qty rt = CXX_TY_UNKNOWN;
+	volatile uint8_t rl = 0, done = 0;
+	qty ps[32], r;
+
+	if (!f || !f->has_ret_pattern || f->ty != CXX_TY_UNKNOWN || f->ret_deducing || c->body_depth >= 64 || c->tentative ||
+	    l->nparams > 32 || l->template_depth)
+		return;
+	for (uint32_t i = 0; i < l->nparams; i++)
+		if ((ps[i] = l->params[i].ty) == CXX_TY_UNKNOWN)
+			return;
+	f->ret_deducing = 1;
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++, c->unevaluated++;
+	c->fail = &jb;
+	c->in_template_args = 0, c->explicit_specialization = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_scope *fs;
+
+		c->pos = l->begin;
+		c->this_const = f->fn_const;
+		c->template_depth = 0;
+		c->this_type = l->scope->kind == CXX_SCOPE_CLASS && l->scope->owner && l->scope->owner->ty ? l->scope->owner->ty : CXX_TY_UNKNOWN;
+		c->scope = l->scope;
+		c->class_depth = 0;
+		fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+		fs->fn = f;
+		cxx_scope_push(c, fs);
+		cxx_params_declare(c, fs, l->params, l->nparams);
+		c->ret_capture = 1, c->ret_type = CXX_TY_UNKNOWN, c->ret_lval = 0;
+		cxx_function_body_parse(c);
+		rt = c->ret_type, rl = c->ret_lval, done = 1;
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	f->ret_deducing = 0;
+	if (!done)
+		return;
+	if (rt == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, rt) == TY_VOID)
+		r = QUNQ(f->ret_pattern) == cxx_auto_type(c) ? cc_type_basic(TY_VOID) : CXX_TY_UNKNOWN;	/* (auto: void; auto&: none) */
+	else
+		r = cxx_auto_deduce(c, f->ret_pattern, rt, rl);
+	if (rt == CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN) {
+		/* (no return statement typed: void only if the body has none at all) */
+		bool any = false;
+
+		for (uint32_t p = l->begin; p < l->end && !any; p++)
+			any = c->tok[p].kw == CXX_KW_return;
+		if (any)
+			r = CXX_TY_UNKNOWN;
+	}
+	if (r != CXX_TY_UNKNOWN)
+		f->ty = cxx_type_function(c, r, ps, l->nparams, f->ret_variadic);
+}
+
 /* a call uses e: an instance's member function, its body parsed now (once) */
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 {

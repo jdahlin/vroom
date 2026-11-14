@@ -150,6 +150,7 @@ VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
 VPRIV void cxx_state_save(cxx *c, cxx_saved *s);
 VPRIV void cxx_state_restore(cxx *c, const cxx_saved *s);
 VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding, cxx_targ *out);
+VPRIV qty cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b);
 VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *a);
 VPRIV void cxx_bind_pack(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *list, uint32_t n);
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);
@@ -242,6 +243,7 @@ VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint3
 VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e);
 VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV void cxx_late_deduce(cxx *c, const cxx_late *l);
 
 /* auto.c */
 VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);

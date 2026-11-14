@@ -593,6 +593,13 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 		cxx_gen_call(c, f, obj, false, args, nargs, loc);
 		return;
 	}
+	if (f->fn_static && f->member_of && f->member_of->kind == CXX_SCOPE_CLASS) {
+		/* a static operator() or operator[] (C++23): the object is evaluated, not passed */
+		cxx_gen_call(c, f, 0, false, args, nargs, loc);
+		if (c->enode && AST_NODE_AT(c->ast, obj)->op != N_VAR)
+			c->enode = cc_node_new_operands(c->ast, N_COMMA, AST_NODE_AT(c->ast, c->enode)->ty, loc, cc_node_rvalue(c->ast, obj), c->enode);
+		return;
+	}
 	all[0] = obj;
 	memcpy(all + 1, args, nargs * sizeof *args);
 	cxx_gen_call(c, f, 0, false, all, nargs + 1, loc);

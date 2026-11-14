@@ -208,6 +208,11 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 				/* an alias template's instance: the class it names (completed), its members */
 				if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, inst->ty))
 					inst->members = cxx_type_class_scope(c, QUNQ(inst->ty));
+				/* ... one that is not a class (__remove_const_ref_t<unsigned char>::first_type): ill-formed, a
+				   substitution failure ([temp.deduct.general]/11.2) */
+				if (inst && !inst->members && inst->ty != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, inst->ty) &&
+				    AST_TYPE_KIND(c->ast, inst->ty) != TY_ENUM && !c->template_depth)
+					c->member_missing = 1;
 				if (inst && inst->members)
 					*qualifier = inst->members, te = inst;	/* the instance's own members */
 				else if (!te || te->kind != CXX_ENTITY_TEMPLATE || !te->members || args_dependent || te->dependent)

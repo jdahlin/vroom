@@ -676,14 +676,16 @@ static void cxx_statement_parse1(cxx *c)
 		bool cond_gen = cxx_gen_on(c) && c->gen_block;
 
 		cpre.n = 0;
+		cxx_scope *if_outer = NULL;
 
 		if (cxx_is(c, LEX_TOKEN_EXCLAMATION) || cxx_is_kw(c, CXX_KW_consteval)) {	/* if !consteval / if consteval */
 			cxx_accept(c, LEX_TOKEN_EXCLAMATION);
 			cxx_expect_kw(c, CXX_KW_consteval);
 			cxx_compound_statement_parse(c);
 		} else {
-			cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
+			cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 
+			if_outer = c->scope;
 			cxx_scope_push(c, s);
 			if (cond_gen) {
 				cc_id_list_init(&cpre);
@@ -705,7 +707,6 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_substatement_parse(c);
 			c->unevaluated -= taken == 0;
 			gen_then = cxx_gen_nested(c, sloc);
-			c->scope = outer;
 		}
 		if (cxx_accept_kw(c, CXX_KW_else)) {
 			c->unevaluated += taken == 1;
@@ -713,6 +714,8 @@ static void cxx_statement_parse1(cxx *c)
 			c->unevaluated -= taken == 1;
 			gen_else = cxx_gen_nested(c, sloc);
 		}
+		if (if_outer)
+			c->scope = if_outer;	/* (the condition's names are in scope in the else too, [stmt.if]/3) */
 		if (is_constexpr && cxx_gen_on(c)) {
 			/* if constexpr: the branch taken is the statement (the other one was not built); a condition
 			   not known here: not built */

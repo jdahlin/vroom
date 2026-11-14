@@ -75,6 +75,34 @@ VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding,
 	return ok;
 }
 
+/* a value template parameter's type, its tokens parsed in the binding's scope (the earlier parameters
+   bound, the template's own class for a member template: template <size_type A>); CXX_TY_UNKNOWN: not known */
+VPRIV qty cxx_bind_value_type(cxx *c, cxx_scope *binding, uint32_t type_b)
+{
+	cxx_outer o;
+	jmp_buf jb;
+	volatile qty got = CXX_TY_UNKNOWN;
+
+	if (c->body_depth >= 64)
+		return CXX_TY_UNKNOWN;
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++;
+	c->fail = &jb;
+	c->pos = type_b;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_type_specifiers_parse(c);
+		got = c->ds_type;
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	if (got != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, got) >= TY_BOOL && AST_TYPE_KIND(c->ast, got) <= TY_UINT128) &&
+	    AST_TYPE_KIND(c->ast, got) != TY_ENUM && AST_TYPE_KIND(c->ast, got) != TY_PTR)
+		return CXX_TY_UNKNOWN;	/* (a class type, auto: not here) */
+	return got != CXX_TY_UNKNOWN ? QUNQ(got) : got;
+}
+
 VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *a)
 {
 	cxx_entity *e;
@@ -99,8 +127,11 @@ VPRIV void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_t
 		e->value = a->v, e->has_value = 1;
 		if (a->kind == 2 && a->t && AST_TYPE_KIND(c->ast, a->t) == TY_ENUM)
 			e->ty = a->t;	/* (a value of an enumeration: the parameter's type is that) */
-		else if (p->type_b)
-			e->ty = cxx_simple_type_at(c, p->type_b);	/* (size_t N, bool B: the integer type spelled; else not known) */
+		else if (p->type_b) {
+			e->ty = cxx_simple_type_at(c, p->type_b);	/* (size_t N, bool B: the integer type spelled) */
+			if (e->ty == CXX_TY_UNKNOWN && !c->tentative && !c->template_depth)
+				e->ty = cxx_bind_value_type(c, binding, p->type_b);	/* (size_type N: a member typedef) */
+		}
 	}
 	if (p->kind == 1) {
 		e->ty = a->t;

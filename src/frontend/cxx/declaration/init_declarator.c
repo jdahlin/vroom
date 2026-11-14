@@ -66,9 +66,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 	uint8_t typedef_dependent = c->last_type_dependent;
 	qty base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
 	/* auto x = init: the declarator is parsed over auto's placeholder, deduced from the initializer */
-	bool is_auto = c->ds_auto && base == CXX_TY_UNKNOWN && !c->template_depth && !c->tentative &&
-		       (context != CXX_CONTEXT_CLASS || (flags & DS_STATIC)) &&	/* (static constexpr auto value = ...) */
-		       !(flags & (DS_TYPEDEF | DS_FRIEND));
+	/* (in a class: static constexpr auto value = ..., and member functions auto f(): a non-static data
+	   member cannot be auto) */
+	bool is_auto = c->ds_auto && base == CXX_TY_UNKNOWN && !c->template_depth && !c->tentative && !(flags & (DS_TYPEDEF | DS_FRIEND));
 	int auto_quals = c->ds_quals;
 	/* a data member of the class being built: a class body, not a template's or a function's */
 	bool member = context == CXX_CONTEXT_CLASS && c->build && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND));
@@ -104,9 +104,15 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		cxx_entity *auto_e = NULL;
 		uint32_t name_loc = c->tok[start].loc;
 
+		qty fn_ret_pattern = CXX_TY_UNKNOWN;	/* auto f(...): the declared return type, a pattern */
+		bool fn_variadic = false;
+
 		if (is_auto && t != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, t)) {
 			if (!f)
-				auto_pattern = t;	/* (a function's auto return type: its body would tell) */
+				auto_pattern = t;	/* (a function's auto return type: its body tells, cxx_late_deduce) */
+			else if (AST_TYPE_KIND(c->ast, t) == TY_FUNC && cxx_type_has_placeholder(c, AST_TYPE(c->ast, t)->base) &&
+				 !c->decl_has_trailing)
+				fn_ret_pattern = AST_TYPE(c->ast, t)->base, fn_variadic = (AST_TYPE(c->ast, t)->flags & TF_VARIADIC) != 0;
 			t = CXX_TY_UNKNOWN;	/* until the initializer is seen (it may not name the variable) */
 		}
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
@@ -266,6 +272,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */
+			if (e && kind == CXX_ENTITY_VALUE && f && fn_ret_pattern != CXX_TY_UNKNOWN && !c->tentative)
+				e->has_ret_pattern = 1, e->ret_pattern = fn_ret_pattern, e->ret_variadic = fn_variadic;
 			if (e && kind == CXX_ENTITY_VALUE && auto_pattern != CXX_TY_UNKNOWN)
 				auto_e = e;
 			/* code generation: a local variable of the function body being built */

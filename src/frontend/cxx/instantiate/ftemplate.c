@@ -57,6 +57,29 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ 
 	inst->fn_const = te->fn_const, inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
 	copy = malloc((nargs ? nargs : 1) * sizeof *copy);
 	memcpy(copy, args, nargs * sizeof *copy);
+	/* a value argument has its parameter's type (align<16> for template <size_type N>: unsigned long, what
+	   the mangled name writes), the parameters before it bound */
+	for (uint32_t i = 0; p->params && i < nargs && i < p->params->ntparams && !c->tentative; i++) {
+		const cxx_tparam *tp = &p->params->tparams[i];
+		cxx_scope *b;
+		qty pt;
+
+		if (tp->kind != 2 || tp->pack || copy[i].kind != 2 || !tp->type_b || (copy[i].t && AST_TYPE_KIND(c->ast, copy[i].t) == TY_ENUM))
+			continue;
+		/* (only a type named by one identifier, size_type N: one written with arguments or a qualifier,
+		   enable_if_t<...> = 0, is mangled as written, Tn <type>, by the mangler) */
+		if (c->tok[tp->type_b].kind != LEX_TOKEN_IDENTIFIER || c->tok[tp->type_b].kw || tp->type_b + 1 >= c->ntok ||
+		    c->tok[tp->type_b + 1].kind == LEX_TOKEN_LESS || c->tok[tp->type_b + 1].kind == LEX_TOKEN_COLON_COLON)
+			continue;
+		if ((pt = cxx_simple_type_at(c, tp->type_b)) == CXX_TY_UNKNOWN) {
+			b = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+			for (uint32_t j = 0; j < i; j++)
+				cxx_bind(c, b, &p->params->tparams[j], &copy[j]);
+			pt = cxx_bind_value_type(c, b, tp->type_b);
+		}
+		if (pt != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, pt) >= TY_BOOL && AST_TYPE_KIND(c->ast, pt) <= TY_UINT128)
+			copy[i].t = QUNQ(pt);
+	}
 	inst->targs = copy, inst->ntargs = nargs, inst->inst_pack_at = UINT32_MAX, inst->inst_params = p->params, inst->abi_tag = te->abi_tag, inst->inst_ftmpl = te->ftmpl;
 	return inst;
 }

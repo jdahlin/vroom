@@ -263,6 +263,8 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 {
 	cxx_scope *fs;
 
+	cxx_late_deduce(c, l);
+
 	c->pos = l->begin;
 	c->this_const = l->fn && l->fn->fn_const;
 	c->template_depth = l->template_depth;

@@ -112,8 +112,11 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 	cxx_entity *v = NULL;
 
 	for (cxx_entity *x = e; x; x = x->next) {
+		if (x->kind == CXX_ENTITY_VALUE && x->ty == CXX_TY_UNKNOWN && x->has_ret_pattern && x->late)
+			cxx_late_deduce(c, x->late);	/* (auto f(): its type from its body) */
 		if (x->kind == CXX_ENTITY_FUNCTION_TEMPLATE || (x->kind == CXX_ENTITY_VALUE && x->ty != CXX_TY_UNKNOWN &&
-								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC)) {
+								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC) ||
+		    (x->kind == CXX_ENTITY_VALUE && x->ty == CXX_TY_UNKNOWN && x->has_ret_pattern)) {	/* (one not deduced yet: a function still) */
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			c->ecallee = e;	/* functions: the call picks one */
 			c->fn_set_seen = e;	/* (or a cast's target type: static_cast<F *>(&f)) */
