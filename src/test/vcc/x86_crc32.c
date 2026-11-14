@@ -1,7 +1,6 @@
 /* SSE4.2 crc32 builtins (clang's crc32intrin.h) against a bitwise CRC-32C;
    the accumulator and data each evaluated once, the 64-bit form's high
    accumulator bits ignored as the instruction does. */
-/* vcc-flags: -msse4.2 */
 #if defined(__x86_64__)
 #include <nmmintrin.h>
 static int evaluations;
@@ -14,7 +13,8 @@ static unsigned ref(unsigned crc, unsigned long long v, int bytes)
 	}
 	return crc;
 }
-int main(void)
+__attribute__((target("sse4.2"),noinline))
+static int check(void)
 {
 	unsigned long long x = 0x9e3779b97f4a7c15ull;
 	for (int i = 0; i < 1000; i++) {
@@ -28,6 +28,12 @@ int main(void)
 		if (_mm_crc32_u64(c, x) != ref(c, x, 8)) return 6;
 	}
 	return evaluations == 8000 ? 0 : 7;
+}
+int main(void)
+{
+	unsigned ax, bx, cx, dx;
+	__asm__("cpuid" : "=a"(ax), "=b"(bx), "=c"(cx), "=d"(dx) : "0"(1), "2"(0));
+	return cx & (1u << 20) ? check() : 0;
 }
 #else
 int main(void) { return 0; }
