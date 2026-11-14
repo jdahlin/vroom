@@ -794,7 +794,41 @@ static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *b
 			return cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
 		}
 		return pt->flags == at->flags && pt->n == at->n && pt->aux == at->aux && cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
-	case TY_FUNC:
+	case TY_FUNC: {
+		/* R(A...): a trailing parameter that is a pack's placeholder takes the remaining parameters */
+		int pk = -1;
+		void *pown;
+
+		if (pt->n && !(pt->flags & TF_VARIADIC)) {
+			int li = cxx_placeholder_of(c, c->ast->params[pt->aux + pt->n - 1], &pown);
+
+			if (li >= 0 && pown == p && (uint32_t)li < p->params->ntparams && p->params->tparams[li].pack &&
+			    QQ(c->ast->params[pt->aux + pt->n - 1]) == 0)
+				pk = li;
+		}
+		if (pk >= 0) {
+			uint32_t fixed = pt->n - 1, rest;
+			cxx_targ *list;
+
+			if (at->n < fixed || pt->flags != at->flags || !cxx_match_type(c, p, pt->base, at->base, bind, depth + 1))
+				return false;
+			for (uint32_t k = 0; k < fixed; k++)
+				if (!cxx_match_type(c, p, c->ast->params[pt->aux + k], c->ast->params[at->aux + k], bind, depth + 1))
+					return false;
+			rest = at->n - fixed;
+			list = calloc(rest ? rest : 1, sizeof *list);	/* (the binding points into it: kept) */
+			for (uint32_t k = 0; k < rest; k++)
+				list[k].kind = 1, list[k].t = c->ast->params[at->aux + fixed + k];
+			if (bind[pk].kind == 6) {
+				bool same = bind[pk].v == rest && cxx_args_equal(bind[pk].list + bind[pk].t, list, rest);
+
+				free(list);
+				return same;
+			}
+			bind[pk].kind = 6, bind[pk].list = list, bind[pk].t = 0, bind[pk].v = rest;
+			return true;
+		}
+	}
 		if (pt->n != at->n || pt->flags != at->flags || !cxx_match_type(c, p, pt->base, at->base, bind, depth + 1))
 			return false;
 		for (uint32_t k = 0; k < pt->n; k++)
@@ -901,7 +935,8 @@ static void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 		e->dependent = 0;
 		if (tp->pack) {	/* a pack: its expansion in the pattern takes the remaining arguments */
 			e->is_pack = 1, e->pack_index = -1, e->pack_placeholder = (uint16_t)(i + 1), e->npack = 0;
-			continue;
+			if (tp->kind != 1)
+				continue;	/* (a type pack: a placeholder type too, for R(A...): cxx_match_type) */
 		}
 		if (tp->kind == 1) {
 			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
@@ -1157,6 +1192,7 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 			return -1;	/* a pattern vcc cannot evaluate might match: do not guess */
 		}
 		int m = cxx_partial_matches(c, p, args, n, tmp);
+
 
 		if (m < 0) {
 			if (getenv("VCC_CXX_WHY")) fprintf(stderr, "partial unknown (substitution) %s\n", t->path ? t->path : "?");

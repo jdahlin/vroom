@@ -466,7 +466,8 @@ typedef struct cxx {
 	uint32_t brace_nodes[CXX_BRACE_MAX], brace_n;	/* the last braced list's element nodes (flat lists) */
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
-	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */
+	uint8_t attr_nua, attr_packed;
+	uint32_t attr_align;		/* ... the alignment alignas/aligned asked for (0: none) */	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
@@ -705,6 +706,7 @@ VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem);
 VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);
 VPRIV void cxx_ec(cxx *c, qty t, int64_t v);
 VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align);
+VPRIV bool cxx_paren_type_id_follows(cxx *c);
 VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty);
 VPRIV uint32_t cxx_gen_empty_object(cxx *c, qty t, uint32_t loc);
 VPRIV bool cxx_number_value(const cxx_token *t, int64_t *v);

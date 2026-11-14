@@ -348,7 +348,7 @@ static void cxx_type_id_then_close(cxx *c)
 }
 
 /* ( type-id ) at the current (: a cast, sizeof(T), alignof(T) */
-static bool cxx_paren_type_id_follows(cxx *c)
+VPRIV bool cxx_paren_type_id_follows(cxx *c)
 {
 	cxx_mark m;
 	bool ok;

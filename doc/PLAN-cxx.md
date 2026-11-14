@@ -1624,3 +1624,17 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
 - cxx_gen_chain tar bara uttryckssatser (en deklaration flyttas till blocket): ett N_BLOCK i ett uttryck
   stoppade x86-64-lägret för unit-cbor.
 - Test: asm-simple, const-members; run 72/72.  Fork 69/70, 6,6 s CPU (36,6x), 21 603 funktioner, 20 testkroppar.
+
+### Status 73 (2026-11-14): alignas, R(A...)-specialiseringar, std::function
+
+- alignas/aligned på klasser och medlemmar läggs ut som clang (förut: ingen layout alls); en tom klass
+  med alignas eller med alignerade tomma baser får den storleken (libc++:s aligned_storage,
+  `std::function` 48 byte, linjering 16).
+- En partiell specialisering på en funktionstyp med paket, `X<R(A...)>`, matchar (typparet får en
+  platshållartyp), och `R(A...)` i en instans expanderar ett bundet typpaket (`__base<R(A...)>`).
+- `nullptr` (vcc:s nod: 0 som void *) till en klassparameter: ett std::nullptr_t-objekt
+  (`std::function cb = nullptr`, json::parse); `T{}` värdeinitierar i stället för initializer_list-
+  konstruktorn (lexerns `string_t token_buffer {}`).
+- Felkod undvikt: std::function lades ut med fel storlek när alignas räknades som 1 (kraschade i
+  unit-locale-cpp); nu byte för byte som clang.
+- Test: alignas-layout; run 73/73.  Fork 69/70, 6,8 s CPU (35,6x), 22 297 funktioner, 22 testkroppar.

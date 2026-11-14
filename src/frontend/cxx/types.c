@@ -125,6 +125,8 @@ typedef struct cxx_class_build {
 	uint32_t tag;			/* AST tag index (0: none: the class is not built) */
 	field *f;
 	uint8_t *nua;			/* per field: [[no_unique_address]] */
+	uint32_t *falign;		/* per field: alignas/aligned (0: none) */
+	uint32_t align;			/* the class's alignas (0: none) */
 	uint32_t nf, cf;
 	uint8_t packed;			/* __attribute__((packed)) on the class */
 	uint32_t skip_name;		/* the member whose type is not known (VCC_CXX_WHY_LAYOUT) */
@@ -183,6 +185,7 @@ VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, b
 	b->skip = skip;
 	b->pod = 1;
 	b->access_private = is_class;
+	b->align = c->attr_align, c->attr_align = 0;
 	c->build = b;
 	if (c->tentative)
 		return;
@@ -406,8 +409,10 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 	if (b->nf == b->cf) {
 		b->f = realloc(b->f, (b->cf = b->cf ? b->cf * 2 : 8) * sizeof *b->f);
 		b->nua = realloc(b->nua, b->cf);
+		b->falign = realloc(b->falign, b->cf * sizeof *b->falign);
 	}
 	b->nua[b->nf] = c->attr_nua && bitfield_width < 0;
+	b->falign[b->nf] = c->attr_align;
 	f = &b->f[b->nf++];
 	memset(f, 0, sizeof *f);
 	f->name = name, f->ty = t, f->loc = loc;
@@ -433,7 +438,7 @@ VPRIV void cxx_class_end(cxx *c)
 
 	c->build = b->outer;
 	if (c->tentative) {
-		free(b->f);
+		free(b->f), free(b->falign);
 		free(b);
 		return;
 	}
@@ -513,6 +518,8 @@ VPRIV void cxx_class_end(cxx *c)
 		}
 		if (!ok) {
 			c->stats.classes_skipped[CXX_SKIP_EMPTY_BASE]++;
+			if (getenv("VCC_CXX_WHY_LAYOUT"))
+				fprintf(stderr, "no layout: %.*s: empty base\n", c->name_path_valid ? (int)c->name_path_len : 1, c->name_path_valid ? c->name_path : "?");
 			goto done;
 		}
 		/* [[no_unique_address]] members of class type: an empty one takes no space (at offset 0; two of
@@ -545,14 +552,17 @@ VPRIV void cxx_class_end(cxx *c)
 			if (mi && mi->has_empty_base)
 				ok &= !nempty;	/* (its empty bases might share an address with ours) */
 			lay[nlay] = b->f[i], orig[nlay] = b->f[i].ty, at[nlay] = i;
+			fa[nlay] = b->falign[i];	/* alignas/aligned on the member */
 			if (mi && mi->valid && !mi->pod && mi->dsize && mi->dsize < AST_TYPE(c->ast, b->f[i].ty)->size) {
 				lay[nlay].ty = cc_type_array(c->ast, cc_type_basic(TY_CHAR), mi->dsize, 0);
-				fa[nlay] = AST_TYPE(c->ast, b->f[i].ty)->align;
+				fa[nlay] = AST_TYPE(c->ast, b->f[i].ty)->align > fa[nlay] ? AST_TYPE(c->ast, b->f[i].ty)->align : fa[nlay];
 			}
 			nlay++, nfields_nonempty++;
 		}
 		if (!ok) {
 			c->stats.classes_skipped[CXX_SKIP_EMPTY_BASE]++;
+			if (getenv("VCC_CXX_WHY_LAYOUT"))
+				fprintf(stderr, "no layout: %.*s: empty member\n", c->name_path_valid ? (int)c->name_path_len : 1, c->name_path_valid ? c->name_path : "?");
 			free(lay), free(fa), free(at), free(orig);
 			goto done;
 		}
@@ -564,6 +574,8 @@ VPRIV void cxx_class_end(cxx *c)
 			r->flags |= RF_PACKED;
 		if (balign > 1 && balign > r->maxalign)
 			r->maxalign = balign;	/* (the bases' alignment) */
+		if (b->align > r->maxalign)
+			r->maxalign = b->align;	/* struct alignas(N) S */
 		cc_layout_record(c->ast, r, fa, NULL);
 		for (uint32_t i = 0; i < nlay; i++) {
 			uint64_t end = lay[i].bitfield ? lay[i].off + lay[i].width : lay[i].off + AST_TYPE(c->ast, lay[i].ty)->size * 8;
@@ -601,8 +613,10 @@ VPRIV void cxx_class_end(cxx *c)
 		bi->pod = !polymorphic && b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&
 			  !(r->flags & RF_UNION ? 0 : 0);
 		if (bi->empty) {	/* C++: an empty class has size 1 */
-			r->size = 1, r->align = 1;
-			c->ast->ty[r->ty].size = 1, c->ast->ty[r->ty].align = 1;
+			uint32_t ea = r->maxalign > 1 ? r->maxalign : 1;	/* (struct alignas(N) E {}, or empty bases that are: N bytes, aligned N) */
+
+			r->size = ea, r->align = ea;
+			c->ast->ty[r->ty].size = ea, c->ast->ty[r->ty].align = ea;
 			bi->dsize = 0;
 		}
 		r->flags |= RF_COMPLETE;
@@ -619,7 +633,7 @@ VPRIV void cxx_class_end(cxx *c)
 		}
 	}
 done:
-	free(b->f);
+	free(b->f), free(b->falign);
 	free(b);
 }
 

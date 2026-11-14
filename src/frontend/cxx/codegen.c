@@ -115,6 +115,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
 static uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
+static uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc);
 static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
 static bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
 static bool cxx_gen_value_ok(cxx *c, qty t);
@@ -579,6 +580,17 @@ static uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, qty pt, uint32_t loc)
 	   pointer or array (not an explicit one: json from 3 or "text" for operator=(basic_json)) */
 	/* (a call's result is a prvalue though its node is an object here: CompatibleType&& must not deduce T&) */
 	at[0] = AST_NODE_AT(a, x)->ty, lv[0] = (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, x);
+	{
+		/* nullptr (vcc's node: 0 as a void *): a std::nullptr_t prvalue (std::function cb = nullptr) */
+		const struct node *nx = AST_NODE_AT(a, x);
+
+		if (c->nullptr_ty && nx->op == N_CAST && AST_TYPE_KIND(a, nx->ty) == TY_PTR && AST_TYPE(a, nx->ty)->base == cc_type_basic(TY_VOID) &&
+		    nx->a && AST_NODE_AT(a, nx->a)->op == N_NUM && a->ipool[AST_NODE_AT(a, nx->a)->a] == 0) {
+			at[0] = c->nullptr_ty, lv[0] = 0;
+			if (!(x = cxx_gen_nullptr_object(c, x, loc)))
+				return 0;
+		}
+	}
 	c->skip_explicit = QUNQ(at[0]) != t;
 	cxx_ctor_use(c, t, at, lv, 1, false);
 	c->skip_explicit = 0;
@@ -2205,7 +2217,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		/* (a constructor or destructor: the complete object's; a base subobject's: the base object's, C2/D2) */
 		bool base_obj = c->gen_base_type && cxx_gen_is_special(f) && f->member_of && f->member_of->owner &&
 				QUNQ(f->member_of->owner->ty) == c->gen_base_type;
-		uint32_t target = base_obj ? f->sym : !f->sym1 ? f->sym : cxx_gen_is_special(f) && vintern_ents[f->name].s[1] == 'd' ? cxx_gen_dtor_sym(f) : f->sym1;
+		uint32_t target = base_obj ? f->sym : !f->sym1 ? f->sym : cxx_gen_is_special(f) ? cxx_gen_dtor_sym(f) : f->sym1;	/* (C2 too: clang points an inline or instance constructor's C1 uses at C2) */
 
 		if (base_obj)
 			c->gen_base_type = 0;

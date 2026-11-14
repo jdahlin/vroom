@@ -32,6 +32,45 @@ static bool cxx_lookahead(cxx *c, void (*fn)(cxx *))
 /* ---- attributes -------------------------------------------------------------------------- */
 
 /* an attribute's tokens [b, e): one that changes a layout? (counted: a class with one is not laid out yet) */
+/* alignas(T), alignas(N), aligned(N) at '(': the alignment (0: not known here: a template's pattern, a
+   value not constant); the position after its ')' */
+static uint32_t cxx_alignment_argument(cxx *c)
+{
+	uint32_t v = 0, end;
+
+	{
+		uint32_t save = c->pos;
+
+		cxx_skip_balanced(c);
+		end = c->pos;
+		c->pos = save;
+	}
+	if (c->template_depth || c->tentative) {
+		c->pos = end;
+		return 0;
+	}
+	if (cxx_paren_type_id_follows(c)) {
+		uint64_t size;
+		uint32_t align;
+
+		cxx_advance(c);
+		cxx_type_id_parse(c);
+		if (cxx_is(c, LEX_TOKEN_RIGHT_PAREN) && cxx_type_size_known(c, c->type_out, &size, &align))
+			v = align;
+	} else {
+		uint8_t gen = c->gen;
+
+		cxx_advance(c);
+		c->unevaluated++, c->gen = 0;
+		cxx_conditional_expression_parse(c);
+		c->unevaluated--, c->gen = gen;
+		if (c->econst && c->evalue > 0 && c->evalue <= (1 << 20) && !(c->evalue & (c->evalue - 1)) && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))
+			v = (uint32_t)c->evalue;
+	}
+	c->pos = end;
+	return v;
+}
+
 static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 {
 	static const char *const names[] = { "no_unique_address", "__no_unique_address__", "packed", "__packed__",
@@ -50,7 +89,22 @@ static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 					c->attr_nua = 1;
 				else if (k < 4)
 					c->attr_packed = 1;
-				else
+				else if (k < 6) {
+					/* aligned(N) (aligned alone: the largest, 16): its value, else counted as below */
+					uint32_t v = 16;
+
+					if (i + 1 < e && c->tok[i + 1].kind == LEX_TOKEN_LEFT_PAREN) {
+						uint32_t save = c->pos;
+
+						c->pos = i + 1;
+						v = cxx_alignment_argument(c);
+						c->pos = save;
+					}
+					if (v)
+						c->attr_align = v > c->attr_align ? v : c->attr_align;
+					else
+						c->layout_attributes++;
+				} else
 					c->layout_attributes++;
 				break;
 			}
@@ -125,11 +179,17 @@ VPRIV void cxx_attributes_skip(cxx *c)
 			cxx_advance(c);
 			if (!cxx_is(c, LEX_TOKEN_LEFT_PAREN))
 				cxx_fail(c, "expected '(' after attribute");
-			cxx_skip_balanced(c);
-			if (align)
-				c->layout_attributes++;
-			else
+			if (align) {
+				uint32_t v = cxx_alignment_argument(c);	/* alignas(T), alignas(N) */
+
+				if (v)
+					c->attr_align = v > c->attr_align ? v : c->attr_align;
+				else
+					c->layout_attributes++;
+			} else {
+				cxx_skip_balanced(c);
 				cxx_attribute_scan(c, b, c->pos);
+			}
 			continue;
 		}
 		if (cxx_is_kw(c, CXX_KW___extension__) || cxx_is_kw(c, CXX_KW__Nullable) || cxx_is_kw(c, CXX_KW__Nonnull) ||
@@ -1574,6 +1634,35 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 					def_tok[2 * inner] = db, def_tok[2 * inner + 1] = c->pos;
 			}
 			if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->pos && c->tok[c->pos - 1].kind == LEX_TOKEN_IDENTIFIER && !c->tok[c->pos - 1].kw &&
+			    !c->template_depth) {
+				/* R(Args...) in an instance, Args a bound type pack: a parameter per element (__base<R(Args...)>) */
+				cxx_entity *pe = cxx_lookup(c, c->tok[c->pos - 1].id);
+
+				if (pe && pe->is_pack && !pe->pack_placeholder && pe->pack && pe->pack_index < 0 && pe->kind == CXX_ENTITY_TYPE) {
+					bool all = true;
+
+					for (uint32_t k = 0; k < pe->npack && all; k++)
+						all = pe->pack[k].kind == 1 && pe->pack[k].t != CXX_TY_UNKNOWN;
+					if (all) {
+						cxx_advance(c);
+						for (uint32_t k = 0; k < pe->npack; k++) {
+							if (n == cap) {
+								cap = cap ? cap * 2 : 8;
+								types = realloc(types, cap * sizeof *types);
+								names = realloc(names, cap * sizeof *names);
+								decls = realloc(decls, cap * sizeof *decls);
+							}
+							names[n] = 0;
+							decls[n] = types[n] = cxx_type_parameter_adjust(c, pe->pack[k].t);
+							n++;
+						}
+						if (!cxx_accept(c, LEX_TOKEN_COMMA))
+							break;
+						continue;
+					}
+				}
+			}
+			if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->pos && c->tok[c->pos - 1].kind == LEX_TOKEN_IDENTIFIER && !c->tok[c->pos - 1].kw &&
 			    t != CXX_TY_UNKNOWN) {
 				/* R(Args...) in a pattern, Args a pack's placeholder: a parameter pack (function<R(Args...)>) */
 				cxx_entity *pe = cxx_lookup(c, c->tok[c->pos - 1].id);
@@ -2752,6 +2841,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	cxx_entity *e = NULL;
 	bool is_union = cxx_is_kw(c, CXX_KW_union), is_class = cxx_is_kw(c, CXX_KW_class);
 	uint32_t key_loc = cxx_peek(c, 0)->loc, key_pos = c->pos, attrs = c->layout_attributes;
+
+	c->attr_align = 0;	/* (the class head's alignas: this class's alignment, cxx_class_begin) */
 	/* an instantiation re-parsing this class's tokens (instantiate.c): it defines that instance */
 	cxx_entity *instance = c->instantiation_target, *instance_of = c->instantiation_template;
 	cxx_targ spec_args[32];
@@ -3906,10 +3997,11 @@ static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs)
 {
 	/* (this member may be inside a class that is itself a [[no_unique_address]] member) */
 	uint8_t outer_nua = c->attr_nua;
+	uint32_t outer_align = c->attr_align;
 
-	c->attr_nua = 0;
+	c->attr_nua = 0, c->attr_align = 0;
 	cxx_member_declaration_parse1(c, cs);
-	c->attr_nua = outer_nua;
+	c->attr_nua = outer_nua, c->attr_align = outer_align;
 }
 
 static void cxx_member_declaration_parse1(cxx *c, cxx_scope *cs)

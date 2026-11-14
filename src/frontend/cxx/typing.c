@@ -1094,8 +1094,9 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	cxx_type_require_complete(c, QUNQ(t));
 	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
 	c->ctor_none = !set;
-	if (set && braced) {
-		/* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted) */
+	if (set && braced && nargs) {
+		/* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted); T{}:
+		   value-initialization, the default constructor ([dcl.init.list] 3.5) */
 		for (cxx_entity *e = set; e; e = e->next) {
 			const ctype *ft;
 
