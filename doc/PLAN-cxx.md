@@ -658,3 +658,18 @@ agrees with, 71/71 parse; parse tests 21/21 (ok-check-variable-templates,
 ok-check-traits).  Untyped calls now: __go(..., __priority_tag<N>()) (31),
 __to_address ambiguous or unknown (43), function objects' operator() (45),
 __promote_impl (14), iter_move (11); "callee unknown" 115.
+
+### Status 2026-11-14 (13): json itself is instantiated
+Until now `nlohmann::json` had no type: basic_json's template template
+parameters have defaults (ObjectType = std::map), which were not recorded,
+and `using json = basic_json<>;` names the instance while the template is
+only declared.  Now: defaults of template template parameters; an instance
+named before its template is defined is bound when completed; a declared
+template has a home scope for its defaults; an instance is completed in a
+tentative parse too (J::size_type n{}; was misread); class template members
+defined outside the class are instantiated on use (name, parameter count,
+const).  unit-32bit: 154 function template + 321 member + 23 out-of-class
+bodies (was 123 + 182 + 0), 2286 of 2703 calls typed, static_asserts 178
+true / 0 false / 22 not evaluated; 0.16 s (clang -fsyntax-only 0.80 s);
+unit-allocator 0.25 s (0.99 s).  json: 61,472 layouts clang agrees with,
+71/71 parse; parse tests 21/21.

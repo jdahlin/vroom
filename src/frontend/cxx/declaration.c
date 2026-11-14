@@ -204,8 +204,8 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 			cxx_advance(c);
 			cxx_advance(c);
 			e = e ? cxx_entity_prefer(cxx_entity_prefer(e, CXX_ENTITY_NAMESPACE), CXX_ENTITY_TYPE) : NULL;
-			if (e && e->kind == CXX_ENTITY_TYPE && !e->dependent && e->ty != CXX_TY_UNKNOWN && !c->tentative) {
-				cxx_scope *cls = cxx_type_class_scope(c, e->ty);	/* (an instance: completed now) */
+			if (e && e->kind == CXX_ENTITY_TYPE && !e->dependent && e->ty != CXX_TY_UNKNOWN) {
+				cxx_scope *cls = cxx_type_class_scope(c, e->ty);	/* (an instance: completed now, in a tentative parse too) */
 
 				if (cls && !e->members)
 					e->members = cls;
@@ -1999,14 +1999,18 @@ static void cxx_template_parameter_parse(cxx *c)
 				e->dependent = 1;
 			cxx_advance(c);
 		}
+		uint32_t db = 0, de = 0;
+
 		if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
 			cxx_scope *q;
 			bool dep;
 
+			db = c->pos;	/* (its default: a template's name, looked up when an instance needs it) */
 			cxx_nested_name_parse(c, &q, &dep);
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
+			de = c->pos;
 		}
-		cxx_tparam_add(c, 3, pname, pack, 0, 0);
+		cxx_tparam_add(c, 3, pname, pack, db, de);
 		return;
 	}
 	if ((cxx_is_kw(c, CXX_KW_class) || cxx_is_kw(c, CXX_KW_typename)) &&
@@ -3249,4 +3253,22 @@ VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c)
 	if (cxx_is(c, LEX_TOKEN_LESS))
 		cxx_template_arguments_parse(c);
 	return e;
+}
+
+/* a template template parameter's default argument, at its name: the template (out->kind 4), else unknown */
+VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out)
+{
+	cxx_scope *q;
+	bool dep;
+	cxx_entity *e;
+
+	out->kind = 0;
+	cxx_nested_name_parse(c, &q, &dep);
+	if (!cxx_is(c, LEX_TOKEN_IDENTIFIER) || dep)
+		cxx_fail(c, "expected a template name");
+	e = q ? cxx_lookup_in(c, q, cxx_peek(c, 0)->id, 0) : cxx_lookup(c, cxx_peek(c, 0)->id);
+	e = e ? cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE) : NULL;
+	cxx_advance(c);
+	if (e && e->kind == CXX_ENTITY_TEMPLATE && !e->is_pack && e->tmpl && !e->dependent)
+		out->kind = 4, out->v = (int64_t)(intptr_t)e;
 }

@@ -56,6 +56,7 @@ typedef struct cxx_instance {
 	cxx_scope *binding;	/* its parameters bound to the arguments */
 	uint32_t pos;		/* where its class is re-parsed: the template's, or a partial specialization's class-key */
 	uint8_t state;		/* 0 declared (an incomplete record), 1 being completed, 2 complete, 3 failed */
+	uint8_t late;		/* named while its template was only declared (using json = basic_json<>;): bound at completion */
 	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
 
@@ -104,6 +105,8 @@ VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params)
 	t = cxx_template_of(e);
 	if (!t->declared)
 		t->declared = params;
+	if (!t->home)
+		t->home = params->parent;	/* where its defaults' names are looked up, until it is defined */
 	if (!t->path && !t->params)	/* its name, for spelling instances of its partial specializations */
 		cxx_template_define_path(c, e, t);
 }
@@ -395,6 +398,8 @@ static bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding
 		if (p->kind == 1) {
 			cxx_type_id_parse(c);
 			out->kind = c->type_out != CXX_TY_UNKNOWN, out->t = c->type_out;
+		} else if (p->kind == 3) {
+			cxx_template_name_default_parse(c, out);	/* template<...> class C = std::vector */
 		} else {
 			/* a value: a constant expression */
 			out->kind = 0;
@@ -855,8 +860,10 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 	}
 	cxx_scope *ps = t->params ? t->params : t->declared;	/* (declared only: its partial specializations may still match) */
 
-	if (!ps || (!t->params && !t->npartials))
-		return NULL;	/* not defined */
+	bool late = false;	/* declared, not defined yet: the instance is named now, bound when it is completed */
+
+	if (!ps)
+		return NULL;
 	/* the arguments, defaults completed, bound in a scope of their own */
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, t->home, NULL);
 	for (uint32_t i = 0; i < ps->ntparams; i++) {
@@ -928,7 +935,7 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 			return NULL;
 		}
 		if (r == 0 && !t->params)
-			return NULL;	/* the primary template: declared, never defined */
+			late = true;	/* the primary template: declared, not defined yet */
 		if (r > 0) {
 			/* the partial specialization's parameters, deduced, bound for its re-parse */
 			c->partial_matches++;
@@ -940,10 +947,13 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 					cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
 		}
 	}
+	if (!t->params && !pick)
+		late = true;
 	inst = calloc(1, sizeof *inst);
 	inst->name = te->name, inst->kind = CXX_ENTITY_TYPE, inst->ty = CXX_TY_UNKNOWN;
 	x = cxx_instance_add(c, t, full, n, h);
 	x->inst = inst, x->of = te, x->binding = binding;
+	x->late = late && !pattern;
 	x->pos = pick ? pick->key_pos : 0;
 	if (pattern)
 		x->state = 3;	/* a pattern's record: matched by its arguments, never completed */
@@ -1034,10 +1044,52 @@ VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst)
 {
 	cxx_instance *x = inst ? inst->instance : NULL;
 
-	if (!x || x->state || c->tentative)
+	int tentative = c->tentative;
+
+	if (!x || x->state)
 		return;
+	/* (asked for in a tentative parse too: is J::type a type?  The instance's own parse is not tentative) */
+	c->tentative = 0;
+	if (x->late) {
+		/* the template is defined now (else the instance stays incomplete): its own parameter names, and
+		   the partial specializations declared since */
+		cxx_template *t = x->t;
+		cxx_partial *pick = NULL;
+		cxx_targ bind[64];
+		cxx_scope *binding;
+		int r = t->npartials ? cxx_partial_select(c, t, x->args, x->nargs, &pick, bind) : 0;
+
+		if (r < 0 || (r == 0 && !t->params)) {
+			c->tentative = tentative;
+			return;
+		}
+		x->late = 0;
+		if (r > 0) {
+			binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, pick->home, NULL);
+			for (uint32_t i = 0; i < pick->params->ntparams; i++)
+				if (bind[i].kind == 6)
+					cxx_bind_pack(c, binding, &pick->params->tparams[i], bind[i].list + bind[i].t, (uint32_t)bind[i].v);
+				else
+					cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
+			x->pos = pick->key_pos;
+		} else {
+			binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, t->home, NULL);
+			for (uint32_t i = 0; i < t->params->ntparams; i++) {
+				const cxx_tparam *tp = &t->params->tparams[i];
+
+				if (tp->pack) {
+					cxx_bind_pack(c, binding, tp, x->args + i, i <= x->nargs ? x->nargs - i : 0);
+					break;
+				}
+				if (i < x->nargs)
+					cxx_bind(c, binding, tp, &x->args[i]);
+			}
+		}
+		x->binding = binding;
+	}
 	x->state = 1;
 	x->state = cxx_instance_parse(c, x) ? 2 : 3;
+	c->tentative = tentative;
 }
 
 /* a type that must be complete (a member by value, a base, X::name): an instance's body is parsed now */
@@ -1658,6 +1710,9 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64 || c->unevaluated)
 		return;
 	e->late_done = 1;
+	if (getenv("VCC_CXX_BODIES") && e->late->scope && e->late->scope->owner)
+		fprintf(stderr, "body %.*s::%.*s\n", (int)vintern_ents[e->late->scope->owner->name].len, vintern_ents[e->late->scope->owner->name].s,
+			(int)vintern_ents[e->name].len, vintern_ents[e->name].s);
 	cxx_outer_save(c, &o);
 	c->instantiating++;
 	c->body_depth++;
