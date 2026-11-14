@@ -1374,6 +1374,34 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling primary expressions (2026-11-14).** In the baseline five-
+compile profile the grouped unary and primary-expression parsers had 1,288 self-hosted
+samples vs 424 clang-built. Clang inlines the span wrapper into unary. Self-hosted vcc
+built an eight-byte temporary using two four-byte stores, then immediately reloaded
+eight bytes and copied it to the span. The final store accounted for 93% of the
+wrapper samples. In the ordinary integer literal path, two widened arguments also went
+through stack temporaries.
+
+Write both span fields directly, record the primary range before consuming a postfix
+operator, and reuse the range on return through unary and cast parsing. One indexed
+byte test identifies postfix tokens. Classify ordinary integer literals using the
+64-bit magnitude already accumulated, then store their value in the integer pool. Wide
+and bit-precise literals retain their slow path.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 176.92 / 176.14 ms | 138.76 / 138.44 ms | 1.275× / 1.272× |
+| 21 runs alternating order | 174.30 / 173.13 ms | 136.01 / 135.72 ms | 1.282× / 1.276× |
+
+CPU 7, one emitter thread, warm-up excluded. The rotating round retired 13.4M fewer
+instructions self-hosted and 3.9M fewer clang-built. All four binaries emitted the
+same SQLite object (SHA-256 prefix c4d3896fefc9); the linked recursive query returned
+500500.
+
+Fresh profiles of five compiles per binary (period 75,001 user cycles), grouping
+unary, primary, postfix dispatch and integer type selection across inlining
+boundaries, gave 1,205 → 645 self-hosted exclusive samples and 432 → 408 clang-built.
+
 **SQLite after profiling the assembler statement parser (2026-11-14).**
 The assembler statement path was the next large cycle gap once clang's inlining was
 accounted for. In five baseline compiles, as_snippet_assemble and its callees took

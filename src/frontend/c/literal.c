@@ -4,10 +4,10 @@
 /* ---------------- literals ---------------- */
 
 /* the type of an integer literal (C11 6.4.4.1p5) */
-static inline ast_qualified_type cc_literal_integer_type(cc *c, u128 v, int l, bool u, bool dec)
+static inline ast_qualified_type cc_literal_integer_type(cc *c, uint64_t v, int l, bool u, bool dec)
 {
 	/* long: 64 bits, or 32 under ILP32 and LLP64 */
-	u128 lmax = CC_LONG32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_LONG32(c) ? UINT32_MAX : UINT64_MAX;
+	uint64_t lmax = CC_LONG32(c) ? INT32_MAX : INT64_MAX, ulmax = CC_LONG32(c) ? UINT32_MAX : UINT64_MAX;
 
 	if (l == 0 && !u && v <= INT32_MAX)
 		return cc_type_basic(AST_TYPE_INT);
@@ -210,7 +210,8 @@ static uint32_t cc_literal_number_parse_text(cc *c, const ptok *t, const char *s
 	if (over)
 		cc_report_error(c, t->loc, "integer literal is too large to be represented in any integer type");
 	{
-		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, base == 10), t->loc);
+		uint64_t magnitude = v > UINT64_MAX ? UINT64_MAX : (uint64_t)v;
+		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, magnitude, l, u, base == 10), t->loc);
 
 		AST_NODE(r)->aux = base != 10 ? AST_NUMBER_RADIX : 0;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
@@ -264,7 +265,10 @@ CC_PRIVATE uint32_t cc_literal_number_parse(cc *c, const ptok *t)
 			return cc_literal_number_parse_slow(c, t);	/* float, separators, odd suffixes */
 	}
 	{
-		uint32_t r = cc_node_integer_new(c, (i128)v, cc_literal_integer_type(c, v, l, u, dec), t->loc);
+		ast_qualified_type ty = !l && !u && v <= INT32_MAX ? cc_type_basic(AST_TYPE_INT) : cc_literal_integer_type(c, v, l, u, dec);
+		uint32_t r = cc_node_new(c, AST_NODE_NUMBER, ty, t->loc);
+		AST_NODE(r)->a = c->nipool;
+		c->ipool[c->nipool++] = v;
 
 		AST_NODE(r)->aux = dec ? 0 : AST_NUMBER_RADIX;	/* spelled with a leading 0 (-Wconstant-conversion) */
 		return r;
