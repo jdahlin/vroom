@@ -513,3 +513,725 @@ own.
   (libc++'s compressed pairs); vptr layouts.  Code: the shared builders move to a
   module of their own taking `struct ast *` (cxx/ is compiled in the cc
   module for now).  X5-X7: not started.
+
+### Status 2026-11-14: expression types (branch cxx/sema)
+Parameters and expressions carry types (`typing.c`); unit-32bit types 319 of
+612 expression statements outside templates.  CPU, -fsyntax-only, user+sys:
+unit-32bit vcc 0.12 s vs clang 0.80 s (6.6x), unit-allocator 0.12 s vs 0.99 s
+(7.9x).  vcc does not yet instantiate function bodies or resolve overloads
+fully, so the ratio will fall; the 4.5x threshold still has headroom.
+
+### Status 2026-11-14 (2): deduction
+Function templates keep their declaration; the first call parses the
+signature with placeholder parameters, each call deduces from the argument
+types (by value: decay and top-level cv; T&& with an lvalue: T = A&) and gets
+the return type by re-parsing the signature with the arguments bound.  Fixed
+on the way: `typename X::y` was always dependent, so instances lost such
+member types; `f(x);` with f a function template parsed as a declaration.
+unit-32bit: 337/378 expression statements typed, 539 classes laid out (was
+501), 228 instances (was 119); json: 34,617 layouts clang agrees with (was
+32,028), 71/71 parse.  Not yet: packs, explicit template arguments, default
+template arguments, deduction against base classes.
+
+### Status 2026-11-14 (3): bodies on use
+Function template bodies are instantiated when a call deduces them; class
+template member bodies when a call picks them; constructors and destructors
+are declared (under names no source spells) and used by variable definitions
+and T(args).  unit-32bit: 43 template bodies + 103 member bodies, none
+failed, 0.12 s.  The measure of what is left: clang -O0 emits 1,692
+functions for unit-32bit (1,529 linkonce_odr), so vcc instantiates about a
+tenth of what code generation will need.  Missing: implicit special members,
+calls whose overload vcc cannot choose, operators on dependent operands
+inside instances, explicit template arguments, packs.
+
+### Status 2026-11-14 (4): calls
+Explicit template arguments, clang's type transform builtins, trailing
+return types, const/non-const member overloads (by the object's or this's
+constness), constructor templates and member templates of instances.
+unit-32bit: 1170 of 1432 calls typed; 160 function template bodies and 147
+member bodies instantiated, none failed (clang emits 1,692 functions); json
+71/71 parse, 38,352 layouts clang agrees with; 0.12 s.  The largest group of
+untyped calls (84) is SFINAE templates: an unnamed parameter whose type is
+enable_if_t<cond, int>, which needs the parameter's type parsed with the
+others bound and `X<T>::value` evaluated as a constant.  Then: implicit
+special members, packs, closure types, conversions in overload resolution.
+
+### Status 2026-11-14 (5): constant expressions
+Expressions carry an integer constant value next to their type: literals,
+const/constexpr integers and value parameters, unary and binary operators
+(&& and || decided by a constant left operand), ?:, casts, sizeof/alignof of
+types vcc sizes, and the type-trait builtins that read only a type's form
+(__is_same, __is_integral, ...).  Template arguments and constant members
+(`static constexpr bool value = ...`) take it.  Fixed on the way: an alias
+template's instance had no members at `::` or as a base; a rewound tentative
+parse left dependent_seen set.  Negative template arguments stay unknown (a
+value parameter's type is not recorded).  json: 42,955 layouts clang agrees
+with (was 38,352), 71/71 parse; unit-32bit classes laid out 662 (was 540).
+
+### Status 2026-11-14 (6): default template arguments and SFINAE
+After deduction the remaining parameters take their default arguments, and
+an unnamed value parameter's type is formed with the earlier ones bound:
+`typename X::type` naming no member of a complete class X removes the
+candidate (enable_if).  Alias instances remember that failure for cache
+hits.  sizeof(expr) is a constant.  unit-32bit: 1428 of 1721 calls typed;
+267 function template bodies and 195 member bodies instantiated, none
+failed (clang emits 1,692 functions); 0.12 s.  json: 47,236 layouts clang
+agrees with, 71/71 parse.  Tests: ok-constant-expressions, ok-sfinae-deduction.
+
+### Status 2026-11-14 (7): auto
+`auto x = init` (with const, &, &&, *) is deduced from the initializer as a
+one-parameter template deduction; a range-for's variable from *begin(range)
+(arrays, classes with begin() returning a pointer or an iterator with
+operator*).  Before this no auto variable had a type.  unit-32bit: 1943 of
+2450 calls typed; 441 function template bodies and 196 member bodies, none
+failed (clang emits 1,692 functions); 0.12 s.  json: 47,512 layouts clang
+agrees with, 71/71 parse.  Not deduced yet: auto return types (the body's
+return statements), structured bindings, auto x{...}, generic lambdas.
+
+### Status 2026-11-14 (8): auto returns, lambdas, decltype
+auto return types (the instantiated body's first return), closure types for
+lambdas with known parameter types (operator(), return from the body),
+decltype of names, calls and other lvalues (with reference collapsing), and
+a deduced template whose bound parameters match the arguments exactly wins
+over the others.  Instances whose member typedefs do not resolve are not
+asserted against clang (libc++ names ill-formed ones where that is harmless).
+unit-32bit: 2111 of 2739 calls typed; 505 function template bodies and 210
+member bodies, none failed (clang emits 1,692 functions); 0.13 s.  json:
+46,091 layouts clang agrees with, 71/71 parse; parse tests 17/17.
+Largest untyped groups now: function objects' operator() with decltype
+return types over their parameters, begin(x) through ADL, libc++'s
+strong_order/weak_order customization objects, packs.
+
+### Status 2026-11-14 (9): only what C++ instantiates
+static_assert is evaluated (statistics; an error only with
+VCC_CXX_STATIC_ASSERT=1, which the ok-check-* tests set).  libc++'s own
+assertions found three over-instantiations, now fixed: a body is instantiated
+only for the function a call selects (not for every viable candidate), not
+from an unevaluated operand (decltype, sizeof, noexcept, requires) unless its
+return type is auto, and not from the discarded statement of an if constexpr
+whose condition is a known constant.  A T&& parameter does not bind an lvalue,
+a non-const T& not an rvalue (std::forward's two overloads).
+unit-32bit: static_asserts 69 true, 0 false (was 16), 116 not evaluated;
+168 function template bodies and 180 member bodies (the earlier 516 + 210
+included bodies C++ does not instantiate); 1911 of 2542 calls typed; clang
+emits 1,692 functions.  json: 44,885 layouts clang agrees with, 71/71 parse;
+parse tests 18/18.  Next: choosing among several viable candidates (partial
+ordering of function templates, conversion ranks), which is where bodies are
+now not instantiated; packs.
+
+### Status 2026-11-14 (10): overload ranking; what blocks next
+Candidates are ranked by each argument's conversion (exact, standard,
+perhaps through a class, none), then non-template over template and f() over
+f() const.  unit-32bit: 1902 of 2543 calls typed, 157 + 180 bodies, no false
+static_assert; json 44,418 layouts clang agrees with, 71/71 parse.
+The largest groups of untyped calls are libc++'s C++20 customization points
+(ranges::begin's `begin(__t)`, `__go(..., __priority_tag<N>())` in
+strong_order and friends): their overloads are chosen by requires-clauses and
+concepts, which vcc parses and does not evaluate.  Next: concept-ids and
+requires-clauses as constant expressions (a concept's definition with its
+arguments bound; a requires-expression is true when each requirement's
+expression has a type), then packs.  VCC_CXX_WHY_TOKENS=name prints the
+tokens around each untyped call of that name.
+
+### Status 2026-11-14 (11): concepts
+A concept-id is a constant: the concept's constraint-expression with its
+arguments bound (cached per argument list).  A requires-expression is true
+when every requirement holds, false when one is ill-formed for sure (no
+function fits, here or by ADL; no such member; a member of what is not a
+class; typename X::y missing; a nested requires that is false; a
+return-type-constraint that is not satisfied), else not known.  Function
+templates check constrained parameters (template<C T>), the header's
+requires-clause and a trailing one when deducing: false removes the
+candidate, not known leaves the call untyped.  Test ok-check-concepts.
+unit-32bit: 1644 of 2023 calls typed (81 %), 123 + 180 bodies, no false
+static_assert; json 48,962 layouts clang agrees with (was 44,418), 71/71
+parse; parse tests 19/19; 0.14 s.
+
+### Status 2026-11-14 (12): variable templates, trivial-type traits
+Variable templates evaluate (primary, partial and explicit specializations,
+through the class templates' matcher; T[N] with N deduced: not yet), and the
+traits that ask what a type does trivially answer for scalars, arrays of
+them and classes vcc laid out as POD.  libc++'s own static_asserts on
+unit-32bit: 160 true, 0 false, 16 not evaluated (was 62 / 0 / 116 two steps
+ago).  1708 of 2081 calls typed; 123 + 182 bodies; json 54,963 layouts clang
+agrees with, 71/71 parse; parse tests 21/21 (ok-check-variable-templates,
+ok-check-traits).  Untyped calls now: __go(..., __priority_tag<N>()) (31),
+__to_address ambiguous or unknown (43), function objects' operator() (45),
+__promote_impl (14), iter_move (11); "callee unknown" 115.
+
+### Status 2026-11-14 (13): json itself is instantiated
+Until now `nlohmann::json` had no type: basic_json's template template
+parameters have defaults (ObjectType = std::map), which were not recorded,
+and `using json = basic_json<>;` names the instance while the template is
+only declared.  Now: defaults of template template parameters; an instance
+named before its template is defined is bound when completed; a declared
+template has a home scope for its defaults; an instance is completed in a
+tentative parse too (J::size_type n{}; was misread); class template members
+defined outside the class are instantiated on use (name, parameter count,
+const).  unit-32bit: 154 function template + 321 member + 23 out-of-class
+bodies (was 123 + 182 + 0), 2286 of 2703 calls typed, static_asserts 178
+true / 0 false / 22 not evaluated; 0.16 s (clang -fsyntax-only 0.80 s);
+unit-allocator 0.25 s (0.99 s).  json: 61,472 layouts clang agrees with,
+71/71 parse; parse tests 21/21.
+
+### Status 2026-11-14 (14): enumerators, nullptr, per-parameter deduction
+Enumerators have their enumeration's type and values (template arguments
+carry the enumeration: X<(E)0>); nullptr has a type of its own; deduction
+works parameter by parameter (one of unknown type is skipped, not fatal);
+between templates that fit equally the one with fewer bare-T parameters wins,
+then the declaration that has a body; a member operator sees its object's
+constness.  The test's own statements (json j; j["a"] = 2; json::parse(..);
+json::from_bjdata(..)) now resolve.  unit-32bit: 158 + 330 + 23 bodies, 2314
+of 2727 calls typed, static_asserts 197 true / 0 false / 22 not evaluated,
+0.16 s; json 62,409 layouts clang agrees with, 71/71 parse; parse tests 21/21.
+VCC_CXX_CAND=name traces each candidate of calls to that name.
+Next: libc++'s _And/_Or/_Not over packs (std::__to_address's two overloads
+are both accepted: 64 calls), __go(..., __priority_tag<N>()), out-of-class
+members that share a parameter count, then the rest of packs.
+
+### Status 2026-11-14 (15): specializations matched by substitution
+A partial specialization whose pattern has an argument that cannot be deduced
+(decltype((void)expr), void_t<typename T::x>, a default that uses earlier
+parameters) is matched by deducing from the rest, substituting, and comparing:
+an ill-formed substitution is no match, one vcc cannot type is "not known".
+Patterns shorter than the parameter list take the primary's defaults; a
+pattern may name template template parameters (is_basic_json).  A function
+template constraint vcc cannot evaluate is "not known", no longer accepted.
+Instances are created in tentative parses too.  Fixed on the way: a default
+value argument left its type field unset (specializations on true/false
+stopped matching once enumeration types were compared).
+unit-32bit: partial specializations 154 matched, 10 unknown (was 137 / 104);
+static_asserts 177 true, 0 false, 22 not evaluated; 166 + 337 + 23 bodies;
+2483 of 2884 calls typed; 0.16 s.  json: 66,891 layouts clang agrees with,
+71/71 parse; parse tests 22/22 (ok-check-detection).
+
+### Status 2026-11-14 (16): relation traits, explicit packs
+__is_base_of, __is_convertible and __is_constructible answer where no
+class's constructors or conversion functions are needed (scalars, pointers,
+derived to base); a bound pack of types expands in a builtin call
+(__is_constructible(T, Args...)); a function template whose last parameter is
+a pack is called with explicit arguments (libc++'s _And = decltype(
+__and_helper<_Pred...>(0))), a substitution failure in its signature makes it
+not viable, and f(...) ranks after any real parameter.  Of 19 libc++ trait
+assertions surveyed (is_class, _And, _Not, is_convertible, decay_t, ...) 16
+evaluate true, 0 false; _Or, common_type_t and __underlying_type do not yet.
+unit-32bit: 179 + 337 + 23 bodies, 2503 of 2885 calls typed, static_asserts
+177 true / 0 false / 22 not evaluated, 0.16 s; json 72,738 layouts clang
+agrees with, 71/71 parse; parse tests 22/22.
+
+### Status 2026-11-14 (17): arrays, reference binding, the first break in from_bjdata
+T[N] with N deduced (function templates and specializations); f(C&) over
+f(const C&) for an object that is not const and f(const T&) as the more
+specialized template for one that is; deduction never converts a class (a
+pattern that matches neither the argument nor a base fails: std::begin's
+initializer_list overload no longer leaves begin(v) undecided);
+using-declarations carry a function template's data; a comma inside
+decltype( ) is the operator; an expression ill-formed for sure in a signature
+makes the candidate not viable.  Fixed: X<args>::m with no instance (a
+specialization vcc could not decide) looked in the primary template and
+returned its constants; a pack expansion's first, unexpanded parse marked the
+enclosing type dependent.
+unit-32bit: 189 + 343 + 23 bodies, 2615 of 3056 calls typed, no false
+static_assert; json 73,003 layouts clang agrees with, 71/71 parse; parse
+tests 22/22.
+What stops json's own code: from_bjdata -> input_adapter(container) ->
+input_adapter(first, last) -> iterator_input_adapter_factory<It>, whose
+specialization asks std::iterator_traits<It>::value_type; libc++ (C++20)
+defines __iterator_traits by partial specializations constrained with
+concepts, which vcc does not evaluate for class templates yet.  Next:
+constraints on class template partial specializations (constrained
+parameters and requires-clauses), then binary_reader's members.
+
+### Status 2026-11-14 (18): constrained class specializations
+A class template partial specialization's constraints (template<C T> struct
+X<T>, requires-clauses) are evaluated with the deduced parameters: not
+satisfied removes it, not known leaves the instance undecided; of two with
+the same pattern the constrained one is the more specialized.  Types are
+built in tentative parses too (sizeof(X<int *>::type) was misread as an
+expression).  std::iterator_traits<T*>, <vector::iterator>,
+<string::const_iterator> evaluate.
+unit-32bit: 188 + 343 + 23 bodies, 2657 of 3089 calls typed, no false
+static_assert, 0.19 s; json 71,556 layouts clang agrees with, 71/71 parse;
+parse tests 22/22.  Undecided now: constraints of std::__common_ref and
+__common_reference_sub_bullet1 (67), __iterator_traits for one iterator type
+(5), so from_bjdata still stops at iterator_input_adapter_factory.
+
+### Status 2026-11-14 (19): json's own code is instantiated
+json's tests are built as C++11 by its own CMake (the harness's -std=c++20
+was this plan's choice); in C++11 libc++ uses its __cxx03 headers, without
+concepts.  What stopped from_bjdata, and is fixed: decltype(expr):: as a
+qualifier (C++03 detection: decltype(test<T>(nullptr))::value); an auto
+f() -> decltype(invalid) lost its "not viable" in a second parse; the invalid
+flag of one call was cleared by the next call in the expression; a call
+returning T&& is an xvalue (binary_reader(std::move(ia), ...)); templates
+declared inside an instance are recorded (basic_json::binary_reader<T>); an
+instance's injected class name is a type argument (reader<J, I> inside
+J<long>); a template template parameter bound to a template keeps that
+template's identity (nlohmann's detector: is_detected_exact<bool, Op, SAX>
+was false).  Members of a partial specialization defined outside the class
+are not bound to the primary's instances (vector<bool, A>::push_back made
+vector<bool, bool>).
+unit-32bit, C++11: 254 function template + 409 member + 37 out-of-class
+bodies (lexer 41, binary_reader 31, json_sax_dom_parser 26, basic_json 18),
+3861 of 4427 calls typed, static_asserts 108 true / 0 false / 13 not
+evaluated, 6 instances failed, 0.13 s (clang -fsyntax-only 0.58 s).  C++20:
+223 + 486 + 38, 0.17 s (clang 0.80 s).  clang -O0 emits about 1,670
+functions for the file in either mode.  json: 96,270 layouts clang agrees
+with, 71/71 parse; parse tests 23/23 (ok-check-detector).
+
+### Status 2026-11-14 (20): to_json detection, klassers kopiering/flytt
+
+libc++:s `swap` och nlohmanns `has_to_json`-kedja (basic_json:s
+konverterande konstruktor) avgörs nu.  Det som saknades:
+- `__is_constructible(T, T&&/const T&)` och `__is_assignable(T&, ...)` för
+  klasser: deklarerade kopierings-/flyttkonstruktorer och `operator=`
+  (`= delete`, `= default`, implicita: baser och datamedlemmar).
+- Funktionsmallskandidater vars parameterform inte kan passa sorteras bort;
+  platshållare för paket och mallmallparametrar; `R(Args...)`-mönster.
+- Parametrarna är i scope redan i `noexcept(...)`, och deklareras innan den
+  tolkas (det `noexcept` instansierar skrev över `c->fn_*`, så parametrarna
+  i den efterföljande `-> decltype(...)` saknade typ).
+- Giltighetsflaggorna (`einvalid`, `eunsure`, `member_missing`) läcker inte
+  längre ut ur en klassinstans som kompletteras mitt i ett uttryck, och inte
+  från ett paketmönster som tolkats oexpanderat.
+- Ett anrop på platshållare i en partiell specialiserings mönster
+  (`X<T, decltype(f(std::declval<T>()))>`) substitueras vid matchning i
+  stället för att alltid passa; `a, b` med otypat `a` är "okänt"; `obj(args)`
+  utan passande `operator()` är ogiltigt.
+- `bench/cxx-layout.py` lägger den sist byggda klassen först (basic_json och
+  dess komparator behöver varandra; clang måste börja utifrån).
+unit-32bit, C++11: 273 funktionsmallar + 451 medlems- + 42 out-of-class-
+kroppar, 4646 av 5161 anrop typade, static_asserts 111 sanna / 0 falska / 13
+ej utvärderade, 0 misslyckade instanser.  json: 113 380 layouter som clang
+håller med om (0 fel), 71/71 parse; parse-tester 28/28 (ok-check-serializer,
+ok-check-detection-calls, ok-check-detection-comma, ok-check-pack-calls).
+Kvar före mätningen mot clang -O2: resterande otypade anrop (none viable 138,
+callee unknown 135, unbound 104), kodgenerering för C++ från det delade
+AST:t, länkning och körning av testerna.
+
+### Status 2026-11-14 (21): libc++-behållarna får layout, json(int) avgörs
+
+Mätt med sonder (`static_assert` mot json.hpp/libc++ som clang godkänner,
+`VCC_CXX_STATIC_ASSERT=2` rapporterar varje falsk/okänd och fortsätter):
+av 36 + 39 + 12 påståenden om json:s byggstenar var 11 rätt i början av
+steget; nu är alla utom fyra avgjorda och lika med clang.
+- Layout: `[[no_unique_address]]` (tom medlem tar ingen plats; en som inte
+  är POD för layout lämnar sin svansutfyllnad), packade klasser, namnlösa
+  klasser efter attribut, bitfältsbredder som konstantuttryck,
+  `__builtin_offsetof` som konstant, `__datasizeof`, `__is_final`.
+  `std::string` 24, `vector` 24, `map` 24, `unique_ptr` 8, `shared_ptr` 16,
+  `basic_json` 16: som clang.
+- Egenskaper: `__is_constructible`/`__is_convertible` för klasser genom
+  överlagringsupplösning av konstruktorerna (explicit, borttagna, implicita
+  default/kopia/flytt); användardefinierad konvertering som egen rang;
+  en klass utan konverteringsfunktion konverterar inte till skalär/pekare;
+  ett heltal av en typ (inte ett uttryck) är ingen nollpekarkonstant.
+- Konstanter: `T(x)`/`T()` av heltalskonstanter, jämförelser med osignerade
+  operander, `constexpr`-variabler är const, `static constexpr auto`.
+- Upplösning: giltighetsflaggorna hålls isär per anrop (kandidater som inte
+  deduceras, klasser och signaturer som instansieras på vägen); ett gammalt
+  "ingen passar" från ett inre anrop gjorde `obj(args)` ogiltigt.
+  `T&` (inte const) kompletterar inte parameterns klass
+  (`basic_string<unsigned char>` är ogiltig i libc++ och får inte röras).
+unit-32bit, C++11: 280 funktionsmallar + 422 medlems- + 38 out-of-class-
+kroppar, 4984 av 5497 anrop typade, 0.12 s.  json: 130 116 layouter som
+clang håller med om (0 fel), 71/71 parse; parse-tester 33/33.
+Kvar före mätningen mot clang -O2: `begin/end`-sonderna, strängoperatorer
+(`operator+`, `==` som fria mallar), vptr-layout (undantagshierarkin),
+kodgenerering för C++, länkning och körning.
+
+### Status 2026-11-14 (22): operatorer, dolda vänner, medlemsmallar med explicita argument
+
+Sonderna (nu även `std::string`/`vector`-operatorer, `ostream <<`,
+doctest och json på användningsnivå: `j[0]`, `j == 1`, `j.at("k")`,
+`json{1, 2, 3}`, `os << j`, `j = 1`) stämmer med clang utom
+`j.get<int>()` och doctests `has_insertion_operator`.
+- Operatorer: ADL i operandernas klassers namnrymder; dolda vänner
+  (funktioner deklarerade `friend` i klassen hålls per klass och hittas
+  genom ett argument); operandernas värdekategorier följer med (ett
+  lvalue-`ostream` är inte libc++:s rvalue-ström-överlagring); vänster
+  operand som inte är en klass; en operator som ingen funktion tar på en
+  klass utan konverteringsfunktion är ogiltig (`__is_ostreamable`).
+- Partiella specialiseringar väljs när instansen måste vara komplett, inte
+  när den namnges (`std::_And<A, X<args>>` rör aldrig `X<args>` när `A` är
+  falsk): tidigt val fick `__is_ostreamable` att fråga efter sig själv
+  utan slut (120 s och 12 GB på en TU; nu 0,16 s).
+- `x.f<args>(...)` med medlemsmallar (json:s `get<T>()` genom
+  `priority_tag`); en explicit specialiserings scope är dess egen klass
+  (`tag<4>` konverterar till `tag<0>`); en ogiltig aliasinstans är ogiltig
+  även ur cachen; paketsubstitution avbryts vid första ogiltiga element.
+- Konverteringsfunktioners måltyper sparas per klass:
+  `is_assignable<int&, const std::string>` är falsk i stället för okänd.
+unit-32bit, C++11: 0,16 s; json: 145 462 layouter som clang håller med om
+(0 fel), 71/71 parse; parse-tester 37/37.
+Kvar före mätningen mot clang -O2: `j.get<T>()`, vptr-layout,
+kodgenerering för C++ från det delade AST:t, länkning och körning.
+
+### Status 2026-11-14 (23): mätt gräns för 30x med dagens front end
+
+Hela sviten (71 TU:er, en i taget, `-fsyntax-only`, CPU-sekunder på den
+här maskinen), med dagens C++-front end (tolkning, instansiering av det
+som nås, typning; ingen AST för kroppar, ingen kod):
+
+| Mätning | Värde |
+|---|---|
+| clang -O2 (baslinjen) | 243 s; 30x är **8,1 s** |
+| vcc, C++20-flaggor (som baslinjen) | **13,7 s** |
+| vcc, C++11 (json:s egen CMake) | 10,2 s |
+| vcc, en TU med bara de delade huvudena (json, doctest, libc++) | 0,155 s; x 71 = **11,0 s** av de 13,7 |
+| vcc, det som är TU:ernas eget (13,7 - 11,0) | **2,7 s** |
+
+Slutsatser som mätningen bär:
+- Utan delning mellan TU:er går 30x inte: front end ensam tar 13,7 s, mer
+  än hela budgeten på 8,1 s, och den instansierar ännu bara ca 45 % av
+  funktionerna clang emitterar (747 av ca 1 670 i unit-32bit).
+- Med huvudena tolkade en gång (vccd, X5) är front end ca 0,16 + 2,7 =
+  **2,9 s**; då återstår ca 5,2 s av budgeten för resten av
+  instansieringen, AST, kodgenerering och objektfiler för 71 TU:er.  De 23
+  TU:er som konfigurerar om json delar bara libc++ och kostar mer än så.
+- Mätningen ände-till-ände (kompilera, länka, köra testerna) finns inte:
+  kodgenerering för C++ är inte påbörjad.
+
+Samma steg: operatorer skrivna som anrop (`operator<<(a, b)`), verklig
+tvetydighet (två kandidater som inget slår och som konverterar ett argument
+till olika typer i samma rang) är ogiltig, och en gemensam returtyp hos
+kandidater vcc inte kan ordna gör inte längre anropet giltigt (vcc sade att
+doctests `has_insertion_operator<int>` var sann; clang: falsk).
+`j.get<int>()` har sin typ.  Parse-tester 38/38; 148 440 layouter som
+clang håller med om.
+
+### Status 2026-11-14 (24): första C++-koden genom vcc:s emitter
+
+`vpp -x c++ -c` ger nu ett objekt.  Medan en funktionskropp tolkas bygger
+C++-parsern det delade AST:t med C-front-endens byggare (samma noder,
+konverteringar och satser som C ger emittern; `src/frontend/cxx/codegen.c`)
+och `cxx_run` lämnar TU:n till `emit_tu`.  Byggt hittills: funktioner i
+globala namnrymden över skalära typer (heltal, flyttal, pekare): literaler,
+variabler, de inbyggda operatorerna (binära, unära, tilldelning, `++`/`--`),
+anrop av sådana funktioner efter överlagringsupplösning, `if`/`while`/
+`return`/`break`/`continue`, lokala variabler.  Namnen manglas (C:s
+Itanium-manglare för `overloadable`; `main` och `extern "C"` som de är).
+En funktion vars kropp har något annat lämnas odefinierad (deklarerad, inte
+emitterad): `VCC_CXX_GEN=1` säger var vcc gav upp, och
+`VCC_CXX_PROGRESS=1` räknar "function definitions N, with code M".
+`bench/cxx-run-tests.py` (`src/test/cxx/run/`): vcc kompilerar, clang++
+länkar, programmet ska ge 0, alla funktioner ska ha fått kod och objektets
+definierade symboler ska vara de clang++ definierar: 2/2 (rekursion, tre
+överlagringar, `bool`, `double`, slingor).
+Saknas för json: klasser (medlemmar, `this`, konstruktorer/destruktorer),
+referenser, namnrymder och klassnamn i mangling, mallinstansers kroppar,
+undantag, vtabeller/RTTI, strängliteraler, `for`/`switch`/`do`.
+
+### Status 2026-11-14 (25): mangling, referenser, struct-värden och medlemsfunktioner i kod
+
+- `mangle.c`: Itanium-mangling för funktioner (namnrymder, klasser,
+  mallinstanser med typargument, pekare/referenser/cv, funktions- och
+  fälttyper, operatorer, substitutioner, `St`, namnlös namnrymd).
+  `bench/cxx-mangle.py` (`src/test/cxx/mangle/`): varje symbol clang++
+  definierar ska finnas bland vcc:s namn: 2/2 filer, 34 namn, bland dem
+  `std::string`, `vector`, `map`, `unique_ptr` och iteratorer.
+- Kod byggs nu också för: `?:`, `static_cast`/C-/funktionscast mellan
+  skalärer, `a[i]`, strängliteraler, komma, `for`/`do`, lokala fält med
+  platta initierarlistor, variabler i namnrymdsscope; referenser
+  (parametrar, lokala, returvärden; `const T&` bundet till ett värde får en
+  temporär); klasser som C skickar och kopierar som C++ gör (POD för
+  layout): medlemsåtkomst, värdeparametrar, returvärden, tilldelning;
+  medlemsfunktioner (i klassen och utanför, `const`, `static`, `this`,
+  implicit `this->`, `obj.f()`/`p->f()`), inline-funktioner som svaga
+  symboler.
+- Medlemsfunktioners kroppar tolkas efter att klassen lagts ut (inte bara
+  efter dess sista medlem): `sizeof` av klassen och medlemmar av `*this`
+  har sin layout där.
+`bench/cxx-run-tests.py`: 4/4 (omkring 70 funktioner, alla med kod).
+Saknas för json: konstruktorer/destruktorer och klasser som inte är POD,
+`switch`, uppräkningar, mallinstansers funktionskroppar, undantag,
+vtabeller/RTTI, lambdas, `new`/`delete`, range-for.
+
+### Status 2026-11-14 (26): konstruktorer/destruktorer, uppräkningar, switch, klassmallars medlemmar i kod
+
+- Uppräkningar (som sina underliggande heltal till emittern, med namn i
+  manglingen), `switch`/`case`/`default`, teckenliteraler.
+- Konstruktorer (i klassen och utanför) med medlemsinitierare för skalära
+  medlemmar; objekt med `T x(args)`, `T x{args}`, `T x = v`, `T x;` anropar
+  den konstruktor överlagringsupplösningen valde; destruktorer körs vid
+  scopets slut genom emitterns scope-cleanup (i ordning, även vid tidig
+  `return`).  C2/D2 har koden, C1/D1 är alias.
+- Medlemsfunktioner i klassmallsinstanser får kod där de först används.
+  Kodgenereringens tillstånd sparas undan medan en kropp byggs inuti en
+  annan; ett anrops val av funktion återställs efter att den anropades
+  kropp instansierats (annars anropades fel funktion).
+`bench/cxx-run-tests.py` 7/7; `cxx-mangle.py` 3/3 (36 namn).
+unit-32bit.cpp med `-c`: 342 av 760 betraktade funktionsdefinitioner har
+kod (clang emitterar ca 1 670), 0,17 s.
+Saknas för json: funktionsmallars instanser i kod, klasser med baser eller
+medlemmar som själva behöver konstruktor/destruktor, värdeöverföring av
+klasser med egna specialmedlemmar, temporärer av klasstyp, undantag,
+vtabeller/RTTI, lambdas, `new`/`delete`, range-for.
+
+### Status (27): basklasser, konstruktorkedjor, vptr-layout (2026-11-14)
+- Basklasser i kod: en konstruktors initierare för baser, delegerande
+  konstruktorer och medlemmar av klasstyp anropar den konstruktor som
+  överlagringsupplösningen valt; baser och medlemmar som inte nämns
+  standardkonstrueras först; en destruktor förstör medlemmar och baser efter
+  sin kropp.  Härledd→bas för referenser, pekare och objektet i ett
+  medlemsanrop.  `const`-medlemmar initieras; referensmedlemmar byggs inte än.
+  Avvikelse att rätta: medlemmar initieras i skriven ordning, inte
+  deklarationsordning.
+- Layout för klasser med virtuella funktioner (egen vptr i de första 8
+  byten, annars primär bas på offset 0): `cxx-layout` 155 339 layouter
+  godkända av clang (var 150 420), 0 fel.  Kod byggs ännu inte för sådana
+  klassers medlemsfunktioner (inga vtabeller).
+- `nullptr`, `reinterpret_cast`, matematik- och strängbuiltins; `static`
+  funktioner får intern länkning (`_ZL…`, lokal symbol).
+- `VCC_CXX_GEN=2`: innersta uttrycket per funktion som inte fick någon nod.
+`cxx-run-tests.py` 12/12.  Alla 71 json-TU:er går igenom `-c` utan fel:
+47 006 av 72 378 betraktade funktionsdefinitioner har kod (unit-32bit: 669
+av 1 026), 14,5 s väggtid seriellt.  Inget json-test länkar ännu, så det
+finns fortfarande ingen mätning mot clang -O2 (243 s CPU).
+Kvar för json: vtabeller/RTTI, undantag (emittern saknar C++ EH),
+lambdas, temporärer och värdeöverföring av icke-triviala klasser,
+implicita specialmedlemmar, standardargument, aggregatinitiering,
+`new`/`delete`, range-for, COMDAT, exakt manglade mallinstansnamn,
+headerdelning mellan TU:er (vccd).
+
+### Status (28): vtabeller och virtuella anrop (2026-11-14)
+- Varje klass håller sin vtabells platser (slutlig överskuggare per plats;
+  en virtuell destruktor tar två: D1 och D0).  `_ZTV…` definieras i den TU
+  som definierar nyckelfunktionen, annars svagt i varje TU som nämner den
+  (mallinstanser alltid svagt).  Konstruktorer och destruktorer sätter
+  vptr; anrop går genom vtabellen utom när namnet är kvalificerat
+  (`Base::f()`); D0 = D1 + `operator delete`; rent virtuella platser pekar
+  på `__cxa_pure_virtual`.
+- Implicit standardkonstruktor byggs på plats (baser, medlemmar, vptr);
+  en klass utan egen destruktor använder basens när bara den behövs.
+- Rättade tysta fel: `Base::f(x);` som sats tolkades som deklaration och
+  föll bort; en bas konstruktor kunde väljas för den härledda klassen;
+  klasser med medlemsinitierare (`int x = 0;`) får nu ingen konstruktorkod
+  alls tills de byggs (förut hoppades initierarna över).
+- Begränsningar: bara en bas med vtabell (inga thunks), typinfo-platsen
+  är null (ingen RTTI än), virtuella baser läggs inte ut.
+`cxx-run-tests.py` 13/13 (ny `virtual.cpp`), `cxx-layout` 158 106 layouter,
+0 fel.  Alla 71 json-TU:er går igenom `-c`: 54 507 av 81 500 betraktade
+funktionsdefinitioner har kod.  Inget json-test länkar ännu.
+
+### Status (29): klasser som värden (2026-11-14)
+- En klass som inte är trivial för anrop (Itanium: egen kopierings-/
+  flyttkonstruktor eller destruktor, vptr) returneras i ett objekt vars
+  adress kommer först och skickas som adressen till en temporär; skrivet
+  explicit för x86-64 (rdi/rax), andra mål får ingen kod för sådana
+  funktioner än.  Triviala klasser går som C, men bara om C:s bild av
+  posten klassas rätt (klasser med basbyte ≤ 16 byte byggs inte).
+- Prvalues av klasstyp är temporärer i blocket som byggs; den som tar
+  värdet (`T x = f();`, `return f();`, `T(f())`) riktar om konstruktionen
+  till sitt eget objekt (kopieringselision).  `T(args)`/`T{args}` bygger en
+  temporär; `return x;` flyttar från en lokal variabel.
+- Temporärer med destruktor förstörs vid blockets slut (senare än
+  standarden: slutet av fulluttrycket).  Ingen kod där en temporär skulle
+  skapas villkorligt eller flera gånger per blockinträde (loopvillkor och
+  -steg, `?:`, högerled av `&&`/`||`), eller före en `case`-etikett.
+- Inbyggda operatorer på klassoperander ger ingen nod (förut C-fel);
+  tilldelning av klass bara när den är en bytekopia.
+- Sparar konstruktorns initierarlista när en annan kropp byggs inuti.
+`cxx-run-tests.py` 14/14 (ny `class-values.cpp`: clangs antal kopior och
+flyttar).  69 json-testfiler går igenom `-c` utan fel: 63 608 av 92 500
+betraktade funktionsdefinitioner har kod.  Inget json-test länkar ännu.
+
+### Status (30): rätt mått och delade headers (2026-11-14)
+- Nytt mått, `bench/cxx-coverage.py`: de funktioner clang -O0 definierar
+  för ett json-test (allt testet använder, mallinstanser inräknade) mot dem
+  vcc definierar, efter avmangling utan libc++:s `[abi:…]`-taggar.
+  Hela sviten: **146 663 funktioner behövs, vcc har 9 023 (6,2 %)**; vcc:s
+  övriga 55 966 är inline-funktioner i headers som inget test använder.
+  "N av M funktionsdefinitioner har kod" i status 22-29 mätte alltså fel
+  mängd.  unit-32bit: 115 av 1 664.
+- Orsaker, i ordning: testkropparna (doctest) får ingen kod (lambdas,
+  undantag), så det mesta under dem byggs aldrig; 16 % av anropen saknar
+  typ (153 773 anrop, 129 368 typade i en sammanslagen TU), så deras
+  mallkroppar instansieras inte ens; manglingen saknar `abi_tag` och skiljer
+  inte wchar_t/char16_t/char32_t från heltalstyperna.
+  Framändens tider (13,7 s CPU för `-fsyntax-only`) är därmed en
+  underskattning: den gör ännu inte allt arbete clang gör.
+- Delade headers, övre gräns: alla 69 testfiler i en TU ger 1,47 s vägg
+  (1,30 s user) för `-fsyntax-only` och 1,54 s för `-c`, mot 13,7 s som
+  separata processer.  Siffran är optimistisk: några tester definierar om
+  makron före json.hpp (`#define private public`), så clang avvisar samma
+  sammanslagna fil, och vcc kontrollerar inte åtkomst.
+- Slutsats hittills: 30x (8,1 s) nås inte med en process per TU ens för
+  framänden ensam; med delade headers finns utrymmet, men ingen mätning
+  hela vägen finns förrän testerna länkar.
+
+### Status (31): överlagrade operatorer, konverteringsfunktioner (2026-11-14)
+- Överlagrade operatorer får kod: `a + b`, `a == b`, `a[i]`, `a(x)`,
+  unära, `a = b`/`a += b` (medlem eller på namnrymdsnivå, mallar också).
+- Konverteringsfunktioner har namn i klassen (`operator #<typ>`), manglas
+  `cv <typ>` och används för klass → skalär och för villkor, `!x`,
+  `x && y` (`operator bool`).
+- Rättade tysta fel (alla hittade av nya tester):
+  - en sats utan nod föll bort tyst om satsen före i samma block hade
+    lyckats (`sdone` nollställdes inte) — funktioner kunde alltså sakna
+    satser; nu får de ingen kod alls;
+  - `call_picked` från ett tidigare anrop kunde tas för operatorns funktion;
+  - referenser till inline-funktioner utan kod var svaga, så länkningen
+    gick igenom och programmet anropade adress noll — nu är bara
+    definitionen svag;
+  - en konstruktor hittad via konvertering av argumentet användes för
+    kopiering; C-fel vid bindning av klass till skalär eller tvärtom.
+- Instansers parametrar: parserns parameterposter kopieras innan typerna
+  prövas (att fullborda en klass skrev över dem).
+`cxx-run-tests.py` 15/15 (ny `operators.cpp`); `cxx-coverage.py`: 9 315 av
+146 663 behövda funktioner (6,4 %).  Doctest-kropparna får fortfarande
+ingen kod: `if (const Subcase& s = Subcase(...))`, `try`/`catch`/`throw`,
+lambdas, standardargument.
+
+### Status (32): standardargument, deklarationer som villkor (2026-11-14)
+- Standardargument: deras token sparas vid deklarationen och tolkas på
+  nytt där ett anrop utelämnar dem (funktioner, medlemmar, konstruktorer,
+  klassmallsinstansers medlemmar; inte funktionsmallars instanser än).
+- `if (T x = e)` / `if (const T& x = e)` och `switch` tolkas som riktiga
+  deklarationer; variabeln och villkorets temporärer lever i ett block runt
+  satsen (rätt livstid för doctests `Subcase`).
+- Delsatser (grenar, loopkroppar, etikettsatser) får ett eget block för
+  sina temporärer: förut hamnade `if (c) use(make());`:s temporär i det
+  omgivande blocket och förstördes även när den aldrig skapats.
+`cxx-run-tests.py` 17/17 (nya `default-args.cpp`, `conditions.cpp`);
+`cxx-coverage.py` 9 344 av 146 663 (6,4 %).  Kvar i doctest-kropparna:
+`try`/`catch`/`throw` (emittern saknar LSDA/landningsplattor), lambdas.
+
+### Status (33): lambdas, `auto`-lokaler (2026-11-14)
+- Ett lambdauttryck (inte generiskt, utanför mallar) får kod: kroppen
+  tolkas först för typerna och sedan en gång till som slutningstypens
+  `operator()` (en lokal symbol `__vcc_lambda_N`).  Variabler i omgivande
+  funktioner blir fångster när kroppen nämner dem (`[&]`, `[=]`, `[x]`,
+  `[&x]`, `[this]`); slutningstypen får en medlem per fångst, och
+  slutningsobjektet är en temporär där uttrycket står.  Nästlade lambdas
+  fångar genom varandra.  Inte än: init-fångster, `*this`, kopiering av
+  klasser med egen kopieringskonstruktor, konvertering till funktionspekare.
+- Slutningstyper heter `$_N_<hash av TU:n>` i manglade namn, så att mallar
+  instansierade med dem i två TU:er inte slås ihop.
+- `auto x = e;` som lokal variabel får sin symbol när typen är härledd.
+`cxx-run-tests.py` 18/18 (ny `lambdas.cpp`); `cxx-coverage.py` 9 430 av
+146 663 (6,4 %).  Kvar i doctest-kropparna: `try`/`catch`/`throw`.
+
+### Status (34): undantag och RTTI (2026-11-14)
+- Assemblern (`vas`): `.cfi_personality` och `.cfi_lsda` (zPLR i
+  `.eh_frame`), byte för byte som clang (`vas-obj` 65/65).
+- `throw x`: `__cxa_allocate_exception`, objektet konstrueras på plats,
+  `__cxa_throw` med typinfo och destruktor; `throw;` är `__cxa_rethrow`.
+- RTTI: `_ZTI`/`_ZTS` för klasser definieras svagt vid TU:ns slut
+  (`__class_type_info`, `__si_class_type_info`, `__vmi_class_type_info`;
+  nyckelfunktionsregeln som för vtabeller), och vtabellernas typinfo-plats
+  är nu ifylld.  Alla baser antas vara publika.
+- `try`/`catch` utan stöd i emittern: try-kroppen byggs som en egen
+  funktion (en slutning som fångar allt per referens) och anropas genom en
+  liten funktion skriven i assembler per try-block, som har
+  undantagstabellen (LSDA) och returnerar vilken hanterare som tog
+  undantaget.  Hanterarna ligger kvar i den omgivande funktionen;
+  `__cxa_end_catch` körs som blockets städning.  Bara x86-64.
+- Begränsningar: `return`/`break`/`continue` ut ur en try-kropp ger ingen
+  kod än; en hanterare som lämnas via ett undantag (`throw;`) avslutar inte
+  sin catch (objektet läcker och ligger kvar på runtimens stack — måste
+  rättas innan doctest fungerar); lokala objekt förstörs inte när ett
+  undantag passerar en funktion (inga städplattor).
+`cxx-run-tests.py` 19/19 (ny `exceptions.cpp`); `cxx-coverage.py` 9 430 av
+146 663 (6,4 %).
+
+### Status (35): referensmedlemmar, implicita destruktorer (2026-11-14)
+- Referensmedlemmar: en pekare i objektet, bunden av konstruktorns
+  initierare, avrefererad vid åtkomst.
+- Implicita destruktorer byggs som riktiga funktioner när en klass utan
+  egen destruktor har medlemmar eller flera baser som behöver förstöras;
+  `~T() = default` får sin kropp där den först används.
+- `= nullptr` som standardvärde för en mallparameter är nu ett känt värde
+  (`enable_if<...>::type* = nullptr`): doctests `operator<<` väljs, och
+  fler mallar instansieras.  `const T` med T en referenstyp tappar `const`.
+- `if (T x __attribute__((unused)) = e)` känns igen som deklaration.
+- `VCC_CXX_GEN=3`: var `cxx_gen_call` gav upp om ett anrop.
+- Layoutkontrollen hoppar över klasser nästlade i en icke-publik del
+  (clang kan inte namnge dem): 157 172 layouter, 0 fel.
+`cxx-run-tests.py` 20/20 (ny `members.cpp`); `cxx-coverage.py` 10 243 av
+146 663 (7,0 %).  Ett minimalt doctest-test kommer nu förbi alla
+doctest-makron men stannar i libc++: `std::string`s konstruktorer
+(`[[no_unique_address]]`-medlemmar i initierare, `__min_cap` utan typ),
+och testregistreringen kräver dynamisk initiering av globala variabler
+(`.init_array`), som inte finns än.
+
+### Status (36): dynamisk initiering av globala variabler (2026-11-14)
+- En variabel på namnrymdsnivå vars initierare inte är en konstant
+  initieras vid programstart: initieraren byggs i en egen funktion
+  (`__vcc_init_N`, emitterns `constructor`-attribut → `.init_array`), i
+  definitionernas ordning; konstanta initierare ligger kvar i objektfilen.
+- Globala objekt av klasstyp konstrueras där (`T x;`, `T x(a)`, `T x{a}`,
+  `T x = e`), och deras destruktor registreras med `__cxa_atexit`.
+  Förut nollades `T x;` tyst utan konstruktoranrop.
+- Bara variabler i den globala namnrymden än; statiska lokala variabler
+  (med vakter) saknas.
+`cxx-run-tests.py` 21/21 (ny `globals.cpp`: ordning, konstruktion och
+destruktion i omvänd ordning vid exit); `cxx-coverage.py` 10 247 av
+146 663 (7,0 %).
+
+### Status (37): mot en länkande `std::string` (2026-11-14)
+Mål för stunden: ett program med tre funktioner som bara konstruerar
+`std::string` ska länka och köra.  Odefinierade symboler: 27 → 9.
+- Onamngivna uppräkningar (`enum { cap = ... };`) ger sina uppräknare typ
+  och värde (förut otypade: `std::string::__min_cap`).
+- Tomma `[[no_unique_address]]`-medlemmar konstrueras i initierarlistor
+  (på objektets egen adress).
+- `T() = default` utförs på plats (baser, medlemmar, vptr; ingenting för en
+  union); tilldelning utan deklarerad `operator=` är en bytekopia när
+  klassen tillåter det.
+- Standardargument för funktionsmallars instanser (sparas när instansens
+  signatur tolkas); kopieringsinitiering från en array (`T x = "text"`)
+  ser en pekare.
+- `if constexpr`: bara den tagna grenen blir kod; fel i oevaluerad kod
+  fäller inte längre funktionen.
+Kvar för `std::string`-programmet: `basic_string()` och
+`basic_string(const char*, const allocator&)` (kroppar utan kod),
+konstanter på namnrymdsnivå (`__not_found`, `__ambiguous`: måste få en
+definition eller vikas), `__fill_n`, och de breda `__constexpr_w*`.
+`cxx-run-tests.py` 21/21; `cxx-coverage.py` 10 403 av 146 663 (7,1 %).
+
+### Status (38): ett `std::string`-program länkar och kör (2026-11-14)
+`std::string s("xy"); s.size()` och `std::string s; s.size()` kompileras
+av vcc, länkas mot libc++ och ger clangs värden (2 och 0).
+- Inline-funktioner (och vtabeller, typinfo) är `SF_LINKONCE`: de emitteras
+  bara när något med kod använder dem, som clang -O0.  Ett alias
+  `C1 = C2` till en konstruktor som namngavs innan den var känd som inline
+  pekar inte på en bortrensad funktion.
+- Symboler med samma assemblernamn delas (`cxx_gen_symbol_named`); medlemmar
+  i anonyma structar får sina standardinitierare; heltalskonstanter på
+  namnrymdsnivå viks.
+- `cxx_ctor_use` behåller sitt konstruktorval när destruktorns kropp
+  instansieras (den kroppen konstruerar egna objekt och skrev över valet:
+  `basic_string(const char*)` blev `__rep`s konstruktor).
+- `m()` och `T()` värdeinitierar: utan användarskriven standardkonstruktor
+  nollas objektet först (`__rep_()` med `__rep() = default`), sedan
+  konstrueras det om något behöver det.
+`cxx-run-tests.py` 22/22 (ny `value-init.cpp`).  `cxx-coverage.py`: 0 av
+71 TU:er fallerar, 2 138 av 146 663; talet sjönk från 10 403 eftersom
+oanvända inline-funktioner inte längre emitteras (en funktion utan kod drar
+inte in sina anrop), inte för att mindre kod genereras.  Kvar: strängliteral
+som variadiskt argument (`printf("%lu", ...)` blir otypad), rethrow ur en
+hanterare, statiska lokala variabler, implicita kopieringskonstruktorer.
+
+### Status (39): första mätningen hela vägen, med clang som utfyllnad (2026-11-14)
+`bench/cxx-weakfill.py`: varje json-test kompileras av vcc -O0; clangs -O0-objekt
+för samma TU görs svagt (`llvm-objcopy --globalize-symbol=_Z* --weaken`) och
+länkas med, så att det vcc inte gav kod kommer från clang.  Namn som ingen
+definierar (vcc manglar annorlunda) blir stubbar som fäller (`ud2`).
+- **66 av 70 test länkar och går igenom** (4 anropar en stubb:
+  32bit, bjdata, deserialization, regression2).
+- vcc -O0, TU för TU: **18,6 s CPU** (3,2 s vägg, -j 6), 13x mot clang -O2:s
+  243 s.  -fsyntax-only 18,1 s; kodgenereringen lägger till 1,2 s, men vcc
+  emitterar bara 2 038 av clangs 145 428 funktioner (199 kB av 22 MB .text).
+- Headrarna ensamma (doctest + json.hpp) tar 0,17 s per TU: 11,9 s av 18,1 s
+  är samma headrar 70 gånger.
+- Assemblern var kvadratisk i antal funktioner (`as_fragment_latest` gick hela
+  kedjan av fortsättningsfragment vid varje byte till `.text`): 145 000
+  C-funktioner tog 100 s, nu 2,2 s (clang -O0 10,7 s).  Utdata identisk.
+Prognos (uppskattning, inte mätning): med förkompilerade headrar 0,17 s +
+TU-eget arbete 7,4 s + resten av kodgenereringen (~143 000 funktioner à
+~15 µs, 2,1 s) ≈ 9,7 s, **25x**.  Delas även instansieringarna (som i
+unity-bygget, 1,5 s för alla -c) blir det ~3,7 s, ~65x.  Framändan hoppar ännu
+över arbete (otypade anrop, ej instansierade kroppar), så siffrorna är
+optimistiska.  30x kräver alltså delade headrar och troligen delade
+instansieringar (vccd), inte bara PCH.

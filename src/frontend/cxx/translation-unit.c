@@ -35,6 +35,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	c.name_path_valid = 1;
 	c.trace = getenv("VCC_CXX_TRACE") != NULL;
 	c.layout_fd = -1;
+	c.mangle_fd = getenv("VCC_CXX_MANGLE") ? open(getenv("VCC_CXX_MANGLE"), O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
 	if (getenv("VCC_CXX_LAYOUT"))	/* static_asserts of the layouts built, for clang to check (bench/cxx-layout.py) */
 		c.layout_fd = open(getenv("VCC_CXX_LAYOUT"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	cxx_tokens_read(&c);
@@ -85,11 +86,29 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			st->declarations, st->declarations_typed, st->classes, st->classes_laid_out, st->classes_skipped[CXX_SKIP_TEMPLATE],
 			st->classes_skipped[CXX_SKIP_BASES], st->classes_skipped[CXX_SKIP_VIRTUAL], st->classes_skipped[CXX_SKIP_UNKNOWN_MEMBER],
 			st->classes_skipped[CXX_SKIP_BITFIELD], st->classes_skipped[CXX_SKIP_SPECIALIZATION], st->symbols);
+		dprintf(o->errfd, "cxx: expression statements %u, typed %u\n", st->expressions, st->expressions_typed);
+		dprintf(o->errfd, "cxx: function template bodies %u, failed %u, cached %u, depth %u\n", st->bodies, st->bodies_failed,
+			st->bodies_cached, st->body_depth_max);
+		dprintf(o->errfd, "cxx: calls %u, typed %u; untyped: dependent %u, none viable %u, ambiguous %u, template not recorded %u, packs %u, "
+			"signature %u, argument %u, unbound %u, class match %u, return type %u, callee unknown %u\n", st->calls, st->calls_typed,
+			st->why[0], st->why[1], st->why[2], st->why[3], st->why[4], st->why[5], st->why[6], st->why[7], st->why[8], st->why[9], st->why[10]);
+		dprintf(o->errfd, "cxx: out-of-class member bodies %u, failed %u, ambiguous %u\n", st->ooc_bodies, st->ooc_failed, st->ooc_ambiguous);
+		dprintf(o->errfd, "cxx: static_asserts true %u, false %u, not evaluated %u\n", st->asserts_true, st->asserts_false, st->asserts_unknown);
+		dprintf(o->errfd, "cxx: instance member bodies %u, failed %u\n", st->member_bodies, st->member_bodies_failed);
 		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u; partial specializations: %u matched, %u unknown\n",
 			c.instances_made, c.instances_failed, c.ninstances, c.partial_matches, c.partial_unknown);
 	}
+	/* code generation: the functions whose bodies were built (codegen.c), through C's emitter */
+	if (!status && co->emit && !pp_error_count(p)) {
+		if (o->progress)
+			dprintf(o->errfd, "cxx: function definitions %u, with code %u\n", c.stats.functions, c.stats.functions_generated);
+		cxx_gen_vtables_emit(&c);
+		status = emit_tu(c.ast, co) != 0;
+	}
 	if (c.layout_fd >= 0)
 		close(c.layout_fd);
+	if (c.mangle_fd >= 0)
+		close(c.mangle_fd);
 	cxx_free(&c);
 	return status;
 }

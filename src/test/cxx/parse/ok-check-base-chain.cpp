@@ -1,0 +1,11 @@
+template <class A, class B> struct same { static constexpr bool value = false; };
+template <class A> struct same<A, A> { static constexpr bool value = true; };
+template <unsigned N> struct tag : tag<N - 1> { };
+template <> struct tag<0> { };
+int f(tag<0>); char f2(tag<1>); long f3(tag<2>);
+static_assert(same<decltype(f2(tag<2>{})), char>::value, "1");
+static_assert(same<decltype(f(tag<1>{})), int>::value, "2");
+static_assert(same<decltype(f(tag<4>{})), int>::value, "3");
+static_assert(same<decltype(f3(tag<4>{})), long>::value, "4");
+static_assert(__is_base_of(tag<0>, tag<3>), "5");
+static_assert(sizeof(tag<4>) == 1, "6");

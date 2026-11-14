@@ -15,7 +15,8 @@ for f in cases:
     with tempfile.TemporaryDirectory() as td:
         lay = os.path.join(td, "layout")
         r = subprocess.run([VPP, "-x", "c++", "-std=c++20", "-stdlib=libc++", "-fsyntax-only", "-w", f], capture_output=True, text=True,
-                           env={**os.environ, "VCC_CXX_LAYOUT": lay})
+                           env={**os.environ, "VCC_CXX_LAYOUT": lay,
+                                **({"VCC_CXX_STATIC_ASSERT": "1"} if os.path.basename(f).startswith("ok-check-") else {})})
         if (r.returncode == 0) != want_ok:
             fails += 1
             print(f"FAIL {os.path.basename(f)}: " + (r.stderr.strip().splitlines() or ["accepted"])[0])

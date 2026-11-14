@@ -279,7 +279,7 @@ static bool is_root(cc *c, uint32_t s)
 			return false;
 		if ((y->flags & SF_GNU_INLINE) && !(y->flags & SF_INLINE_NOEXTERN))
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
-		if (y->sc == SC_STATIC)
+		if (y->sc == SC_STATIC || (y->flags & SF_LINKONCE))
 			return a->used || a->constructor || a->destructor;
 		if ((y->flags & SF_INLINE) && !(y->flags & (SF_GNU_INLINE | SF_EXTDECL)) && y->sc != SC_EXTERN)
 			return false;	/* C99 inline definition */
@@ -290,7 +290,7 @@ static bool is_root(cc *c, uint32_t s)
 			return false;
 		if (!y->name || y->sc == SC_REGISTER)
 			return false;	/* global register variables have no storage */
-		if (y->sc == SC_STATIC)
+		if (y->sc == SC_STATIC || (y->flags & SF_LINKONCE))
 			return a->used;
 		return true;
 	}

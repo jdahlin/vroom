@@ -125,6 +125,22 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p, const char *
 	struct as_frame_description *f = &a->frame_descriptions[a->frame_description_count - 1];
 	if (AS_CFI_DIRECTIVE_IS("cfi_endproc")) { f->end = as_label_temporary_define(a); a->in_frame_description = 0; return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_signal_frame")) { f->is_signal = 1; return 0; }
+	if (AS_CFI_DIRECTIVE_IS("cfi_personality") || AS_CFI_DIRECTIVE_IS("cfi_lsda")) {
+		/* .cfi_personality ENCODING, SYMBOL and .cfi_lsda ENCODING, SYMBOL: pc-relative sdata4 (0x1b), the
+		   personality indirect too (0x9b) */
+		int is_lsda = AS_CFI_DIRECTIVE_IS("cfi_lsda");
+		int64_t enc;
+		as_value v;
+		if (as_expression_absolute_parse(a, &p, e, &enc)) return -1;
+		p = as_whitespace_skip(p, e);
+		if (p >= e || *p != ',') return as_error_report(a, "expected a comma");
+		p = as_whitespace_skip(p + 1, e);
+		if (as_expression_value_parse(a, &p, e, &v)) return -1;
+		if ((enc & 0x7f) != 0x1b) return as_error_report(a, "unsupported pointer encoding (only pc-relative sdata4)");
+		if (is_lsda) f->has_lsda = 1, f->lsda_encoding = (uint8_t)enc, f->lsda = v;
+		else f->has_personality = 1, f->personality_encoding = (uint8_t)enc, f->personality = v;
+		return 0;
+	}
 	if (AS_CFI_DIRECTIVE_IS("cfi_b_key_frame")) { f->uses_b_key = 1; return 0; }
 	if (AS_CFI_DIRECTIVE_IS("cfi_return_column")) return as_cfi_register_parse(a, &p, e, &f->return_register);
 	if (AS_CFI_DIRECTIVE_IS("cfi_remember_state")) { as_cfi_instruction_push(a, AS_CFI_REMEMBER); return 0; }
@@ -186,9 +202,10 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	if (elf_sec(o, sec)->align < 3) elf_sec(o, sec)->align = 3;
 	elf_data(o, fr);
 	as_fragment_offsets_cache(o);
-	struct { uint32_t key, off; } cies[8]; uint32_t ncie = 0;
+	struct { uint32_t key, off, personality; uint8_t has_personality, has_lsda; } cies[8]; uint32_t ncie = 0;
+	struct { size_t off; as_value v; } *ptrs = as_region_alloc(&a->definitions, sizeof *ptrs * (2 * (size_t)a->frame_description_count + 8)); uint32_t nptrs = 0;
 	size_t cap = 64;
-	for (uint32_t i = 0; i < a->frame_description_count; i++) cap += 64 + 16 * (size_t)a->frame_descriptions[i].instruction_count;
+	for (uint32_t i = 0; i < a->frame_description_count; i++) cap += 80 + 16 * (size_t)a->frame_descriptions[i].instruction_count;
 	for (uint32_t i = 0; i < a->cfi_instruction_count; i++) if (a->cfi_instructions[i].operation == AS_CFI_ESCAPE) cap += (size_t)a->cfi_instructions[i].offset;
 	as_byte_span b = { as_region_alloc(&a->definitions, cap), 0 };
 	size_t *pcbs = as_region_alloc(&a->definitions, sizeof(size_t) * a->frame_description_count);
@@ -211,21 +228,34 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 		struct as_frame_description *f = &a->frame_descriptions[i];
 		uint32_t key = (uint32_t)f->is_signal << 30 | (uint32_t)f->is_simple << 29 | f->return_register << 1 | f->uses_b_key;
 		uint32_t ci;
-		for (ci = 0; ci < ncie; ci++) if (cies[ci].key == key) break;
+		for (ci = 0; ci < ncie; ci++)
+			if (cies[ci].key == key && cies[ci].has_personality == f->has_personality && cies[ci].has_lsda == f->has_lsda &&
+			    (!f->has_personality || cies[ci].personality == f->personality.add)) break;
 		if (ci == ncie) {
 			if (ncie == 8) { as_error_report(a, "too many distinct CIEs"); return; }
-			cies[ncie].key = key; cies[ncie].off = (uint32_t)b.n; ncie++;
+			cies[ncie].key = key; cies[ncie].off = (uint32_t)b.n;
+			cies[ncie].has_personality = f->has_personality; cies[ncie].has_lsda = f->has_lsda; cies[ncie].personality = f->has_personality ? f->personality.add : 0; ncie++;
 			size_t st = b.n;
 			b.n += 4;
 			memset(b.p + b.n, 0, 4); b.n += 4;	/* CIE id */
 			b.p[b.n++] = 1;				/* version */
-			b.p[b.n++] = 'z'; b.p[b.n++] = 'R';
+			b.p[b.n++] = 'z';
+			if (f->has_personality) b.p[b.n++] = 'P';
+			if (f->has_lsda) b.p[b.n++] = 'L';
+			b.p[b.n++] = 'R';
 			if (f->is_signal) b.p[b.n++] = 'S';
 			if (f->uses_b_key) b.p[b.n++] = 'B';
 			b.p[b.n++] = 0;
 			as_leb128_unsigned_append(&b, 1); as_leb128_signed_append(&b, x86 ? -8 : -4);
 			b.p[b.n++] = (uint8_t)f->return_register;
-			as_leb128_unsigned_append(&b, 1); b.p[b.n++] = 0x1b;	/* augmentation: pcrel sdata4 */
+			as_leb128_unsigned_append(&b, 1u + (f->has_personality ? 5 : 0) + (f->has_lsda ? 1 : 0));
+			if (f->has_personality) {	/* P: its encoding, then the pointer */
+				b.p[b.n++] = f->personality_encoding;
+				ptrs[nptrs].off = b.n; ptrs[nptrs++].v = f->personality;
+				memset(b.p + b.n, 0, 4); b.n += 4;
+			}
+			if (f->has_lsda) b.p[b.n++] = f->lsda_encoding;	/* L */
+			b.p[b.n++] = 0x1b;	/* R: pcrel sdata4 */
 			if (!f->is_simple && x86) {	/* cfa = rsp + 8, the return address at cfa - 8 */
 				b.p[b.n++] = 0x0c; as_leb128_unsigned_append(&b, 7); as_leb128_unsigned_append(&b, 8);
 				b.p[b.n++] = 0x80 | 16; as_leb128_unsigned_append(&b, 1);
@@ -240,7 +270,11 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 		memcpy(b.p + b.n, &cptr, 4); b.n += 4;
 		size_t pcb = b.n;
 		memset(b.p + b.n, 0, 8); b.n += 8;	/* pc_begin, pc_range: fixups */
-		as_leb128_unsigned_append(&b, 0);
+		as_leb128_unsigned_append(&b, f->has_lsda ? 4 : 0);
+		if (f->has_lsda) {	/* the augmentation data: the LSDA's address */
+			ptrs[nptrs].off = b.n; ptrs[nptrs++].v = f->lsda;
+			memset(b.p + b.n, 0, 4); b.n += 4;
+		}
 		int64_t cfa = 0;
 		uint32_t base = f->start;
 		for (uint32_t k = f->first_instruction; k < f->first_instruction + f->instruction_count; k++) {
@@ -295,10 +329,25 @@ VPRIV void as_cfi_frame_emit(as_context *a)
 	uint64_t at = elf_frag(o, fr)->size;
 	uint8_t *q = elf_grow(o, fr, b.n);
 	memcpy(q, b.p, b.n);
-	for (uint32_t oi = 0; oi < a->frame_description_count; oi++) {
-		uint32_t i = ord[oi];
-		struct as_frame_description *f = &a->frame_descriptions[i];
-		elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, (as_value){ f->start, 0, 0 });
-		elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4, x86 ? R_X86_64_32 : R_AARCH64_ABS32, (as_value){ f->end, f->start, 0 });
+	/* the fixups in the order of their places (ld.bfd reads .rela.eh_frame that way) */
+	{
+		uint32_t nfix = 2 * a->frame_description_count + nptrs, n = 0;
+		struct { size_t off; uint32_t type; as_value v; } *fix = as_region_alloc(&a->definitions, sizeof *fix * (nfix + 1)), t;
+
+		for (uint32_t i = 0; i < a->frame_description_count; i++) {
+			struct as_frame_description *f = &a->frame_descriptions[i];
+			fix[n].off = pcbs[i], fix[n].type = x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, fix[n++].v = (as_value){ f->start, 0, 0 };
+			fix[n].off = pcbs[i] + 4, fix[n].type = x86 ? R_X86_64_32 : R_AARCH64_ABS32, fix[n++].v = (as_value){ f->end, f->start, 0 };
+		}
+		for (uint32_t k = 0; k < nptrs; k++)
+			fix[n].off = ptrs[k].off, fix[n].type = x86 ? R_X86_64_PC32 : R_AARCH64_PREL32, fix[n++].v = ptrs[k].v;
+		for (uint32_t i = 1; i < n; i++) {
+			uint32_t k = i;
+			t = fix[i];
+			while (k > 0 && fix[k - 1].off > t.off) { fix[k] = fix[k - 1]; k--; }
+			fix[k] = t;
+		}
+		for (uint32_t i = 0; i < n; i++)
+			elf_fixup(o, fr, at + fix[i].off, q + fix[i].off, fix[i].type, fix[i].v);
 	}
 }
