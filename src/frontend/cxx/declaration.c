@@ -2960,7 +2960,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		uint32_t gen_local = 0;		/* code generation: the local variable's symbol */
 		cxx_entity *gen_var = NULL;	/* ... a variable at namespace scope */
 		uint32_t gen_after_declarator = c->pos;
-		bool gen_declared = false;
+		bool gen_declared = false, auto_gen = false;
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
 			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
@@ -3054,7 +3054,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				auto_e = e;
 			/* code generation: a local variable of the function body being built */
 			if (e && kind == CXX_ENTITY_VALUE && !f && context == CXX_CONTEXT_BLOCK && cxx_gen_on(c)) {
-				if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
+				if (auto_e && !(flags & (DS_STATIC | DS_CONSTEXPR)))
+					auto_gen = true;	/* (auto: its symbol once the initializer gave its type) */
+				else if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
 					cxx_gen_fail(c);
 				else
 					gen_local = e->sym = cxx_gen_local(c, name, t, name_loc);
@@ -3301,8 +3303,23 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				if (auto_e && !braced && c->etype != CXX_TY_UNKNOWN) {
 					bool k = c->econst;
 					int64_t v = c->evalue;
+					uint32_t in = c->enode;
+					qty ity = c->etype;
+					uint8_t ilv = c->elval;
 
 					auto_e->ty = cxx_auto_deduce(c, auto_pattern, c->etype, c->elval);
+					if (auto_gen && cxx_gen_on(c) && auto_e->ty != CXX_TY_UNKNOWN && in) {
+						/* code generation: the local, now that its type is known */
+						qty at = auto_e->ty;
+						uint32_t ls = auto_e->sym = cxx_gen_local(c, name, at, name_loc);
+
+						if (ls && cc_type_is_record(c->ast, at) && AST_TYPE_KIND(c->ast, at) != TY_ARRAY) {
+							cxx_ctor_use(c, at, &ity, &ilv, 1, false);
+							cxx_gen_construct_local(c, ls, at, &in, 1, name_loc);
+						} else if (ls)
+							cxx_gen_local_declare(c, ls, in, true, name_loc);
+						gen_declared = true;
+					}
 					if (auto_e->ty != CXX_TY_UNKNOWN && !(QQ(auto_e->ty) & Q_CONST))
 						k = false;
 					if (k && AST_TYPE_KIND(c->ast, auto_e->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, auto_e->ty) <= TY_ULLONG)
@@ -3350,6 +3367,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 		}
 	next:
+		if (auto_gen && !gen_declared)
+			cxx_gen_fail(c);	/* (auto with a list, or no type: not built yet) */
 		/* code generation: a local with no initializer; one with a form of initializer not built yet */
 		if (gen_local && !gen_declared) {
 			if (c->pos == gen_after_declarator)

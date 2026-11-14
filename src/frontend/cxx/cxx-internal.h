@@ -177,6 +177,7 @@ struct cxx_scope {
 	uint8_t has_dependent_base;
 	struct cxx_scope *friends;	/* a class: the functions it declares friend (found through an argument of the class) */
 	uint8_t is_final;		/* a class declared final */
+	uint8_t is_lambda;		/* a closure type (its name is the TU's own: $_N) */
 	/* a class with virtual functions: its vtable's slots (each one's final overrider), the virtual functions it
 	   declares itself in order (the key function is the first that is neither pure nor inline) */
 	cxx_entity **vfuncs, **vown;
@@ -201,6 +202,23 @@ typedef struct cxx_param { uint32_t name; qty ty; } cxx_param;
 
 enum { CXX_WHY_DEPENDENT, CXX_WHY_NONE_VIABLE, CXX_WHY_AMBIGUOUS, CXX_WHY_NO_FTMPL, CXX_WHY_PACKS, CXX_WHY_SIG, CXX_WHY_ARG,
        CXX_WHY_UNBOUND, CXX_WHY_CLASS_MATCH, CXX_WHY_RETURN, CXX_WHY_NO_SET, CXX_WHY_N };
+
+/* code generation: a lambda's captures, found as its body names the enclosing functions' variables */
+typedef struct cxx_gen_lambda {
+	uint32_t floor;		/* symbols made before this one belong to the enclosing functions */
+	uint8_t def;		/* the capture-default: 0 none, 1 [&], 2 [=] */
+	uint8_t ex_this, bad;
+	uint32_t nex;
+	struct { uint32_t name; uint8_t by_ref; } ex[16];	/* the captures the list names */
+	uint32_t n;
+	struct {
+		uint32_t sym;			/* the captured variable's symbol (0: this) */
+		const struct cxx_entity *e;
+		uint8_t by_ref, is_this;
+		uint32_t local;			/* in operator(): a pointer to the captured object (this: its value) */
+		qty fty;			/* the closure's member */
+	} cap[32];
+} cxx_gen_lambda;
 
 typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn; } cxx_late;
 
@@ -324,6 +342,9 @@ typedef struct cxx {
 	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
 	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
 	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
+	uint32_t lambda_node;		/* ... code generation: the closure object's node (0: not built) */
+	uint32_t lambda_serial;		/* closure types so far (their names: $_N) */
+	struct cxx_gen_lambda *gen_lambda;	/* the lambda whose operator() is being built (NULL: an ordinary function) */
 	qty lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
 	uint8_t ret_seen;		/* ... and a return with a value was seen (its type perhaps not known) */
 	uint8_t ret_capture, ret_lval;	/* the body being parsed returns auto: its first return's type is wanted */
@@ -537,6 +558,9 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV bool cxx_gen_lambda_symbol(cxx *c, cxx_entity *call, uint32_t serial);
+VPRIV bool cxx_gen_lambda_finish(cxx *c, cxx_gen_lambda *l, cxx_entity *owner, uint32_t *body, uint32_t loc);
+VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, qty t, uint32_t loc);
 VPRIV void cxx_name_type(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);

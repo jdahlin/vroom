@@ -5,7 +5,8 @@
 
 Each src/test/cxx/run/*.cpp: `vpp -x c++ -c` (every function definition must get code:
 "function definitions N, with code N"), clang++ links the object, the program must exit 0, and
-the object's defined symbols must be the ones clang++ -c defines for the same file.
+the object's defined symbols must be the ones clang++ -c defines for the same file (lambdas'
+functions aside: their names are each compiler's own).
 """
 import argparse, os, re, subprocess, sys, tempfile
 
@@ -18,7 +19,9 @@ TESTS = os.path.join(ROOT, "src", "test", "cxx", "run")
 
 def symbols(obj):
     r = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True)
-    return sorted(l.split()[-1] for l in r.stdout.splitlines() if " T " in l or " t " in l)
+    # (a lambda's functions have names of each compiler's own: $_N in clang's, __vcc_lambda_N here)
+    return sorted(l.split()[-1] for l in r.stdout.splitlines()
+                  if (" T " in l or " t " in l) and "$_" not in l and "__vcc_lambda" not in l)
 
 
 def one(path, tmp, verbose):

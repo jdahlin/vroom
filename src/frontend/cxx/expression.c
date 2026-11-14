@@ -543,8 +543,15 @@ static void cxx_lambda_parse(cxx *c)
 	uint8_t o_capture = c->ret_capture, o_lval = c->ret_lval, o_seen = c->ret_seen;
 	qty o_type = c->ret_type;
 
+	/* code generation: the body is parsed for its types first, then again as the closure's operator() */
+	bool want_gen = cxx_gen_on(c) && c->gen_block != NULL;
+	uint8_t was_gen = c->gen;
+	uint32_t cap_b = c->pos, cap_e, body_b, gen_pnames[16], lloc = cxx_peek(c, 0)->loc;
+
 	c->lambda_type = CXX_TY_UNKNOWN;
+	c->lambda_node = 0;
 	cxx_skip_balanced(c);	/* [captures]: init-captures parse later with the body (names are values) */
+	cap_e = c->pos;
 	c->in_template_args = 0;
 	cxx_scope_push(c, ls);
 	cxx_attributes_skip(c);
@@ -581,6 +588,7 @@ static void cxx_lambda_parse(cxx *c)
 			nparams = c->fn_nparams;
 			for (uint32_t i = 0; i < nparams && i < 16; i++) {
 				params[i] = c->fn_params[i];
+				gen_pnames[i] = c->fn_pnames[i];
 				if (c->fn_pnames[i] > 1) {
 					cxx_entity *e = cxx_declare(c, ls, c->fn_pnames[i], CXX_ENTITY_VALUE);
 
@@ -657,7 +665,12 @@ static void cxx_lambda_parse(cxx *c)
 	c->class_depth = 0;
 	/* no trailing type: the body's first return (none: void); a lambda inside has its own */
 	c->ret_capture = typed && ret == CXX_TY_UNKNOWN, c->ret_type = CXX_TY_UNKNOWN, c->ret_seen = 0;
+	body_b = c->pos;
+	if (want_gen)
+		c->gen = 0;
 	cxx_compound_statement_parse(c);
+	if (want_gen)
+		c->gen = was_gen;
 	if (typed && ret == CXX_TY_UNKNOWN) {
 		if (c->ret_type == CXX_TY_UNKNOWN && !c->ret_seen)
 			ret = cc_type_basic(TY_VOID);
@@ -671,20 +684,96 @@ static void cxx_lambda_parse(cxx *c)
 	c->in_template_args = targs;
 	if (typed && ret != CXX_TY_UNKNOWN) {
 		/* the closure type: a class of its own with operator()(parameters) (its captures: not laid out) */
-		uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("lambda"), 0);
+		/* (its name: $_N and a number of the TU's own, so that templates instantiated with it in two TUs differ) */
+		char nm[64] = { 0 };
+		uint32_t serial = c->lambda_serial++, h = c->ntok * 2654435761u, lname, tag;
 		cxx_entity *owner = calloc(1, sizeof *owner), *call;
 		cxx_scope *cs;
 
-		owner->kind = CXX_ENTITY_TYPE, owner->name = vintern_cstr("lambda"), owner->pack_index = -1;
+		for (uint32_t i = 0; i < c->ntok; i += 1 + c->ntok / 512)
+			h = (h ^ c->tok[i].len ^ (c->tok[i].len ? (unsigned char)c->tok[i].s[0] : 0)) * 16777619u;
+		snprintf(nm, 48, "$_%u_%08x", serial, h);
+		lname = vintern_cstr(nm);
+		tag = cc_tag_new(c->ast, TY_STRUCT, lname, 0);
+		owner->kind = CXX_ENTITY_TYPE, owner->name = lname, owner->pack_index = -1;
 		owner->ty = QT(c->ast->tags[tag].ty, 0);
 		cs = cxx_scope_new(c, CXX_SCOPE_CLASS, outer, owner);
+		cs->is_lambda = 1;
 		owner->members = cs;
 		cxx_tag_scope_set(c, tag, cs);
 		call = cxx_declare(c, cs, vintern_cstr("operator()"), CXX_ENTITY_VALUE);
 		if (call) {
 			call->ty = cxx_type_function(c, ret, params, nparams, false);
 			call->fn_const = 1;
+			call->member_of = cs;
 			c->lambda_type = owner->ty;
+		}
+		if (call && want_gen && cxx_gen_on(c)) {
+			/* code generation: the capture list, then the body again as the closure's operator() */
+			cxx_gen_lambda l;
+			cxx_param ps[16];
+			cxx_scope *fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, outer, NULL);
+			uint32_t end = c->pos, bnode;
+			bool ok = true;
+
+			memset(&l, 0, sizeof l);
+			for (uint32_t i = cap_b + 1; i + 1 < cap_e && ok; i++) {
+				const cxx_token *x = &c->tok[i], *y = &c->tok[i + 1];
+				bool last = i + 2 >= cap_e || y->kind == LEX_TOKEN_COMMA;
+
+				if (x->kind == LEX_TOKEN_COMMA)
+					continue;
+				if (x->kind == LEX_TOKEN_AMPERSAND && last)
+					l.def = 1;
+				else if (x->kind == LEX_TOKEN_EQUAL && last)
+					l.def = 2;
+				else if (x->kind == LEX_TOKEN_IDENTIFIER && x->kw == CXX_KW_this && last)
+					l.ex_this = 1;
+				else if (x->kind == LEX_TOKEN_AMPERSAND && y->kind == LEX_TOKEN_IDENTIFIER && !y->kw && l.nex < 16 &&
+					 (i + 3 >= cap_e || c->tok[i + 2].kind == LEX_TOKEN_COMMA))
+					l.ex[l.nex].name = y->id, l.ex[l.nex++].by_ref = 1, i++;
+				else if (x->kind == LEX_TOKEN_IDENTIFIER && !x->kw && last && l.nex < 16)
+					l.ex[l.nex].name = x->id, l.ex[l.nex++].by_ref = 0;
+				else
+					ok = false;	/* (an init-capture, *this, a pack: not built yet) */
+			}
+			for (uint32_t i = 0; i < nparams && ok; i++) {
+				ps[i].name = gen_pnames[i], ps[i].ty = params[i];
+				if (gen_pnames[i] > 1) {
+					cxx_entity *e = cxx_declare(c, fs, gen_pnames[i], CXX_ENTITY_VALUE);
+
+					if (e)
+						e->ty = params[i];
+				}
+			}
+			if (ok && cxx_gen_lambda_symbol(c, call, serial)) {
+				l.floor = c->ast->nsym;
+				if (cxx_gen_function_begin(c, call, fs, ps, nparams)) {
+					uint8_t g_capture = c->ret_capture, g_seen = c->ret_seen, g_lval = c->ret_lval;
+					qty g_type = c->ret_type;
+
+					c->gen_lambda = &l;
+					c->pos = body_b;
+					c->scope = fs;
+					c->class_depth = 0, c->in_template_args = 0;
+					c->ret_capture = 0;
+					cxx_compound_statement_parse(c);
+					bnode = c->snode;
+					if (!cxx_gen_lambda_finish(c, &l, owner, &bnode, lloc))
+						cxx_gen_fail(c);
+					cxx_gen_function_end(c, call, bnode);
+					c->ret_capture = g_capture, c->ret_seen = g_seen, c->ret_lval = g_lval, c->ret_type = g_type;
+					c->class_depth = depth, c->in_template_args = targs;
+					c->scope = outer;
+					c->pos = end;
+					c->lambda_node = 0;
+					if (c->ast->syms[call->sym].flags & SF_DEFINED) {
+						cxx_gen_lambda_object(c, &l, owner->ty, lloc);
+						c->lambda_node = c->enode;
+					}
+					c->lambda_type = owner->ty;	/* (the body's lambdas, parsed again, left theirs) */
+				}
+			}
 		}
 	}
 }
@@ -934,7 +1023,12 @@ static void cxx_primary_expression_parse(cxx *c)
 		return;
 	case LEX_TOKEN_LEFT_SQUARE:
 		cxx_lambda_parse(c);	/* (its returns are its own: the enclosing function's capture is kept) */
-		cxx_et(c, c->lambda_type, false);	/* its closure type, when built (not its body's last expression's) */
+		{
+			uint32_t ln = c->lambda_node;
+
+			cxx_et(c, c->lambda_type, false);	/* its closure type, when built (not its body's last expression's) */
+			c->enode = ln;
+		}
 		return;
 	case LEX_TOKEN_LEFT_BRACE:
 		cxx_braced_init_list_parse(c);

@@ -1096,3 +1096,18 @@ lambdas, standardargument.
 `cxx-run-tests.py` 17/17 (nya `default-args.cpp`, `conditions.cpp`);
 `cxx-coverage.py` 9 344 av 146 663 (6,4 %).  Kvar i doctest-kropparna:
 `try`/`catch`/`throw` (emittern saknar LSDA/landningsplattor), lambdas.
+
+### Status (33): lambdas, `auto`-lokaler (2026-11-14)
+- Ett lambdauttryck (inte generiskt, utanför mallar) får kod: kroppen
+  tolkas först för typerna och sedan en gång till som slutningstypens
+  `operator()` (en lokal symbol `__vcc_lambda_N`).  Variabler i omgivande
+  funktioner blir fångster när kroppen nämner dem (`[&]`, `[=]`, `[x]`,
+  `[&x]`, `[this]`); slutningstypen får en medlem per fångst, och
+  slutningsobjektet är en temporär där uttrycket står.  Nästlade lambdas
+  fångar genom varandra.  Inte än: init-fångster, `*this`, kopiering av
+  klasser med egen kopieringskonstruktor, konvertering till funktionspekare.
+- Slutningstyper heter `$_N_<hash av TU:n>` i manglade namn, så att mallar
+  instansierade med dem i två TU:er inte slås ihop.
+- `auto x = e;` som lokal variabel får sin symbol när typen är härledd.
+`cxx-run-tests.py` 18/18 (ny `lambdas.cpp`); `cxx-coverage.py` 9 430 av
+146 663 (6,4 %).  Kvar i doctest-kropparna: `try`/`catch`/`throw`.

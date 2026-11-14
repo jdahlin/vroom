@@ -217,6 +217,10 @@ static void mg_class_type(cxx_mangler *m, qty t)
 	}
 	if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 		return;
+	if (s && s->is_lambda && s->owner) {
+		mg_source_name(m, s->owner->name);	/* a closure type: by its own name, wherever the lambda is */
+		return;
+	}
 	outer = instance ? home : mg_enclosing(m, s);
 	if (mg_nested(m, outer)) {
 		mg_str(m, "N");
