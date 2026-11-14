@@ -55,12 +55,52 @@ VPRIV qty cxx_number_type(cxx *c, const cxx_token *t)
 	}
 	if (fp)
 		return cc_type_basic(f ? TY_FLOAT : longs ? TY_LDOUBLE : TY_DOUBLE);
-	if (longs >= 2)
-		return cc_type_basic(uns ? TY_ULLONG : TY_LLONG);
-	if (longs)
-		return cc_type_basic(uns ? TY_ULONG : TY_LONG);
-	/* (an unsuffixed literal too big for int is long: not checked here) */
-	return cc_type_basic(uns ? TY_UINT : TY_INT);
+	{
+		/* the first type of the list [lex.icon] its value fits: int, long, long long (decimal); octal, hex and
+		   binary also their unsigned ones; u: only the unsigned ones; l, ll: from long, long long (LP64) */
+		unsigned __int128 v = 0;
+		unsigned base = 10;
+		uint32_t i = 0;
+		bool big = false;
+
+		if (hex)
+			base = 16, i = 2;
+		else if (t->len > 1 && t->s[0] == '0' && (t->s[1] == 'b' || t->s[1] == 'B'))
+			base = 2, i = 2;
+		else if (t->len > 1 && t->s[0] == '0')
+			base = 8, i = 1;
+		for (; i < t->len; i++) {
+			char ch = t->s[i];
+			unsigned d;
+
+			if (ch == '\'')
+				continue;
+			if (ch >= '0' && ch <= '9')
+				d = (unsigned)(ch - '0');
+			else if (base == 16 && ch >= 'a' && ch <= 'f')
+				d = (unsigned)(ch - 'a' + 10);
+			else if (base == 16 && ch >= 'A' && ch <= 'F')
+				d = (unsigned)(ch - 'A' + 10);
+			else
+				break;
+			v = v * base + d;
+			if (v >> 64)
+				big = true;
+		}
+		bool dec = base == 10;
+
+		if (!uns && longs == 0 && v <= 0x7fffffff)
+			return cc_type_basic(TY_INT);
+		if (longs == 0 && v <= 0xffffffffu && (uns || !dec))
+			return cc_type_basic(TY_UINT);
+		if (!uns && longs <= 1 && v <= 0x7fffffffffffffffull && !big)
+			return cc_type_basic(longs == 2 ? TY_LLONG : TY_LONG);
+		if (longs <= 1 && (uns || !dec) && !big)
+			return cc_type_basic(TY_ULONG);
+		if (!uns && v <= 0x7fffffffffffffffull && !big)
+			return cc_type_basic(TY_LLONG);
+		return cc_type_basic(uns || !dec ? TY_ULLONG : TY_LLONG);	/* (too big for any: clang's extension, unsigned) */
+	}
 }
 
 static bool cxx_is_arith(cxx *c, qty t)

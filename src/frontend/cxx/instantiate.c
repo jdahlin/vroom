@@ -742,9 +742,27 @@ static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *b
 		int q = QQ(pat);
 		qty a;
 
-		if ((QQ(arg) & q) != q)
+		if ((QQ(arg) & q) != q && q && AST_TYPE_KIND(c->ast, arg) == TY_ARRAY) {
+			/* const T against const char[N]: an array's qualifiers are its elements' -- T is char[N] */
+			const ctype *ar = AST_TYPE(c->ast, arg);
+			qty el = ar->base;
+
+			if (el == CXX_TY_UNKNOWN || (QQ(el) & q) != q || AST_TYPE_KIND(c->ast, el) == TY_ARRAY)
+				return false;
+			a = ar->flags & TF_INCOMPLETE ? CXX_TY_UNKNOWN : cc_type_array(c->ast, QT(QI(el), QQ(el) & ~q), ar->n, 0);
+			if (a == CXX_TY_UNKNOWN)
+				return false;
+		} else if ((QQ(arg) & q) != q)
 			return false;
-		a = QT(QI(arg), QQ(arg) & ~q);
+		else
+			a = QT(QI(arg), QQ(arg) & ~q);
+		if (q && AST_TYPE_KIND(c->ast, a) == TY_ARRAY && !(AST_TYPE(c->ast, a)->flags & TF_INCOMPLETE)) {
+			/* (an array's elements carry its qualifiers: const T is const char[N] with T char[N]) */
+			const ctype *ar = AST_TYPE(c->ast, a);
+
+			if (ar->base != CXX_TY_UNKNOWN && (QQ(ar->base) & q))
+				a = cc_type_array(c->ast, QT(QI(ar->base), QQ(ar->base) & ~q), ar->n, 0);
+		}
 		if (bind[i].kind)
 			return bind[i].kind == 1 && bind[i].t == a;
 		bind[i].kind = 1, bind[i].t = a, bind[i].v = 0;

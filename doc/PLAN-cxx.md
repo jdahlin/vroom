@@ -1523,3 +1523,13 @@ cxx-run 56/56; cxx-fork 69/70, 3 014 funktioner från vcc (från 2 728).
 `X::~X() = default;` utanför klassen (doctests `DOCTEST_DEFINE_INTERFACE`, en nyckelfunktion) får sin
 kropp där, inte inline: destruktorerna D0/D1/D2 och vtabellen definieras i TU:n som hos clang.
 cxx-run 57/57; cxx-fork 69/70, 3 061 funktioner.
+
+### Status (65): tre fel som gav fel kod, explicita operatoranrop (2026-11-14)
+Fel kod rättad: (1) en heltalslitteral utan suffix som inte ryms i int var int, trunkerad
+(`0x000FFFFFFFFFFFFF` blev -1, `4294967296` blev 0); nu [lex.icon]:s listor.  (2) ett överlagrat
+`operator,` anropades aldrig (den inbyggda kommaoperatorn användes tyst); nu som andra binära
+operatorer, den inbyggda om ingen kandidat passar.  (3) `const T&` från en `const char[N]` gav
+`T = const char[N]` (fel namn, `IA3_KcE`); en arrays kvalificerare är elementens, T är `char[N]`.
+`p->operator+(x)`, `this->operator,(in)`: objektet följer med till anropet.  Det här fick doctests
+CAPTURE (`mb * "x := ", x` i en lambda) att få kod, vilket visade litteralfelet i unit-to_chars.
+cxx-run 60/60; cxx-fork 69/70, 3 205 funktioner från vcc (från 3 061).

@@ -1777,6 +1777,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 						if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 							cxx_name_type(c, m);
 							c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+							c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 						} else if (!m && !cls->dependent && !cls->has_dependent_base)
 							CXX_INVALID(c);
 					}
@@ -2350,9 +2351,34 @@ VPRIV void cxx_expression_parse(cxx *c)
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative && !c->template_depth)
 			c->eunsure = 1;
 		uint32_t ln = c->enode, cloc = cxx_peek(c, 0)->loc;
+		qty lt = c->etype;
+		uint8_t ll = c->elval;
 
 		cxx_advance(c);
 		cxx_assignment_expression_parse(c);
+		if (!c->tentative && lt != CXX_TY_UNKNOWN && c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) != TY_VOID &&
+		    AST_TYPE_KIND(c->ast, lt) != TY_VOID && (cc_type_is_record(c->ast, lt) || cc_type_is_record(c->ast, c->etype) || AST_TYPE_KIND(c->ast, lt) == TY_ENUM ||
+		     AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)) {
+			/* a, b with a class (or enumeration) operand: an operator, that fits is called (doctest's
+			   MessageBuilder) -- else the built-in comma */
+			qty rt = c->etype, ra = rt;
+			uint8_t rl = c->elval;
+			uint32_t rn = c->enode;
+			bool found;
+
+			c->op_lv_set = 1, c->op_lv[0] = ll;
+			found = cxx_operator_call_type(c, vintern_cstr("operator,"), lt, &ra, 1);
+			c->op_lv_set = 0;
+			if (found && !(c->none_viable && !c->call_resolved)) {
+				if (c->call_resolved && c->call_picked)
+					cxx_gen_operator_call(c, ln, &rn, 1, cloc);
+				else
+					c->enode = 0;
+				continue;
+			}
+			cxx_et(c, rt, rl);
+			c->enode = rn;
+		}
 		if (c->etype != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, c->etype)) {
 			uint32_t rn = c->enode;
 
