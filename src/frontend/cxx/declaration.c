@@ -1103,12 +1103,16 @@ static uint32_t cxx_operator_name_parse(cxx *c)
 	int k = cxx_kind(c);
 
 	if (cxx_is_kw(c, CXX_KW_new) || cxx_is_kw(c, CXX_KW_delete)) {
+		/* operator new, operator delete[]: named so (with the space, like no other operator's name) */
+		bool is_new = cxx_is_kw(c, CXX_KW_new), arr = false;
+
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE)) {
 			cxx_advance(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
+			arr = true;
 		}
-		return 1;
+		return vintern_cstr(is_new ? (arr ? "operator new[]" : "operator new") : (arr ? "operator delete[]" : "operator delete"));
 	}
 	if (cxx_is_kw(c, CXX_KW_co_await)) {
 		cxx_advance(c);
@@ -1668,17 +1672,33 @@ VPRIV void cxx_type_specifiers_parse(cxx *c)
 }
 
 /* new-type-id: type-specifiers, ptr-operators and [n]... (no parentheses: T(args) is the initializer) */
+/* new-type-id: c->type_out the type allocated (an array's element), c->new_count its first bound's node
+   (new_array: there is one), CXX_TY_UNKNOWN when not known */
 VPRIV void cxx_new_type_id_parse(cxx *c)
 {
+	qty t;
+	uint32_t dims = 0;
+
 	cxx_type_specifiers_parse(c);
-	while (cxx_ptr_operator_parse(c, NULL))
+	t = c->ds_type;
+	while (cxx_ptr_operator_parse(c, t == CXX_TY_UNKNOWN ? NULL : &t))
 		;
+	c->new_array = 0, c->new_count = 0;
 	while (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_SQUARE) {
 		cxx_advance(c);
-		if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE))
+		if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE)) {
 			cxx_expression_parse(c);
+			if (!dims)
+				c->new_array = 1, c->new_count = c->enode;
+			else if (c->econst && t != CXX_TY_UNKNOWN)
+				t = cc_type_array(c->ast, t, (uint64_t)c->evalue, 0);	/* (new T[n][4]: of T[4]) */
+			else
+				t = CXX_TY_UNKNOWN;
+		}
+		dims++;
 		cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 	}
+	c->type_out = t;
 }
 
 /* type-id: type-specifiers and an abstract declarator */

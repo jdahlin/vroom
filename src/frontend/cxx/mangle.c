@@ -483,8 +483,13 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
 	op = mg_operator(v, x->n, member);
 	conv = v->len > 10 && !memcmp(v->s, "operator #", 10);
+	if (!op && v->len >= 12 && !memcmp(v->s, "operator ", 9) && !conv) {
+		/* operator new, new[], delete, delete[] */
+		op = !strcmp(v->s, "operator new") ? "nw" : !strcmp(v->s, "operator new[]") ? "na" :
+		     !strcmp(v->s, "operator delete") ? "dl" : !strcmp(v->s, "operator delete[]") ? "da" : NULL;
+	}
 	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
-		return false;	/* (new/delete, literal operators: later) */
+		return false;	/* (literal operators: later) */
 	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
 	if (v->len && v->s[0] == ' ') {
 		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))

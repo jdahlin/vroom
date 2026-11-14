@@ -56,6 +56,8 @@ static bool cxx_declaration_statement_try(cxx *c)
 		return false;
 	if (t->kw && t->kw != CXX_KW_typename && t->kw != CXX_KW_decltype)
 		return false;
+	if (t->kind == LEX_TOKEN_COLON_COLON && cxx_peek(c, 1)->kw == CXX_KW_operator)
+		return false;	/* ::operator delete(p);: a call (a block declares no operator function) */
 	/* x = 1; f(a); a.b(): not declarations, and quick to see */
 	if (t->kind == LEX_TOKEN_IDENTIFIER && !t->kw) {
 		int n = cxx_peek(c, 1)->kind;

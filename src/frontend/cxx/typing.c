@@ -542,6 +542,21 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 				fprintf(stderr, " %u", k->rank[a]);
 			fprintf(stderr, " obj=%u\n", obj);
 		}
+		{
+			/* a redeclaration of a candidate already here (the same function: its type, its scope, not a
+			   template's), the implicit operator new and <new>'s: one candidate */
+			bool dup = false;
+
+			for (uint32_t d = 0; d < ncand && !dup; d++)
+				if (!k->tmpl && !cand[d].tmpl && cand[d].e->ty == e->ty && e->ty != CXX_TY_UNKNOWN &&
+				    cand[d].e->member_of == e->member_of && cand[d].e->home == e->home && cand[d].e->name == e->name) {
+					dup = true;
+					if (!cand[d].e->sym && e->sym)
+						cand[d].e = e;
+				}
+			if (dup)
+				continue;
+		}
 		ncand++;
 		if (!viable++)
 			result = r, first = e;

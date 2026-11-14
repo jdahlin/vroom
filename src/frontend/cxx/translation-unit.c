@@ -104,6 +104,28 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 				e->ty = cc_type_basic(i == 1 ? TY_INT128 : TY_UINT128);
 		}
 	}
+	{
+		/* the global allocation functions every TU declares ([basic.stc.dynamic.general]); <new> redeclares them */
+		static const struct { const char *name; int ret; int nparams; } alloc[] = {
+			{ "operator new", 1, 1 }, { "operator new[]", 1, 1 }, { "operator delete", 0, 1 },
+			{ "operator delete[]", 0, 1 }, { "operator delete", 0, 2 }, { "operator delete[]", 0, 2 },
+		};
+		qty vp = cc_type_pointer(c.ast, cc_type_basic(TY_VOID)), sz = cc_type_basic(TY_ULONG);
+
+		for (size_t i = 0; i < sizeof alloc / sizeof *alloc; i++) {
+			cxx_entity *e = cxx_declare(&c, c.global, vintern_cstr(alloc[i].name), CXX_ENTITY_VALUE);
+			qty ps[2];
+
+			if (!e)
+				continue;
+			if (alloc[i].ret)
+				ps[0] = sz;
+			else
+				ps[0] = vp, ps[1] = sz;
+			e->ty = cxx_type_function(&c, alloc[i].ret ? vp : cc_type_basic(TY_VOID), ps, (uint32_t)alloc[i].nparams, false);
+			e->global_ns = 1, e->home = c.global;
+		}
+	}
 	c.fail = &top;
 	if (!setjmp(top)) {
 		cxx_translation_unit_parse(&c);

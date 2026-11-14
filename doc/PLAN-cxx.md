@@ -1258,3 +1258,19 @@ unity-byggen av de flesta grupperna fallerar sina test (testen påverkar
 varandra), så bara 55 giltiga grupper återstår.
 Mangling som nu stämmer med clang: abi_tag, bool/unsigned-värden i
 mallargument, funktionsmallars deklarerade signatur (T_), wchar_t/char8/16/32.
+
+### Status (41): new/delete, och ett fel som tidigare dolts (2026-11-14)
+- `new T(args)`, `new T{...}`, `new T`, `new T[n]` (skalärer), `new (p) T(...)`,
+  `delete`, `delete[]` (storleksangiven `_ZdlPvm` som clang 23), `p->~T()`;
+  `operator new/delete` som namngivna funktioner (deklareras implicit, manglas
+  `nw/na/dl/da`), `::operator delete(p);` tolkas som anrop, inte deklaration.
+  Två deklarationer av samma funktion (implicit och `<new>`s) är en kandidat.
+- Fel kod som nu syns när fler funktioner får kod: en `const std::string&`
+  bunden till en strängliteral fick literalens adress.  Nu en temporär via
+  den konverterande konstruktorn (`converting-bind.cpp`).  Hittades med
+  `VCC_CXX_NOGEN=fil` (vcc ger inte de namngivna funktionerna kod, clangs
+  används): bisektion över TU:ns funktioner.
+- Tilldelning av pekare konverteras som i C++ (Derived* till Base*).
+`cxx-fork.py`: 69 av 70, 3,8 s CPU (65x); vcc definierar 2 209 funktioner
+(från 2 038).  `cxx-run-tests.py` 26/26.  Kvar som känd skillnad:
+temporärer förstörs vid blockets slut, inte uttryckets.

@@ -77,7 +77,7 @@ def link_run(tu, outdir, main_obj, timeout):
     have, need = defined(obj), defined(os.path.join(outdir, name + ".clang.o"))
     share = len(have & need) / max(1, len(need))
     try:
-        r = subprocess.run([exe], capture_output=True, text=True, timeout=timeout, cwd=os.path.dirname(tu[1]))
+        r = subprocess.run([exe], capture_output=True, text=True, errors="replace", timeout=timeout, cwd=os.path.dirname(tu[1]))
     except subprocess.TimeoutExpired:
         return name, "timeout", [], share
     if r.returncode:

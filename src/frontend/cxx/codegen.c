@@ -600,6 +600,29 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 	if (cxx_gen_is_reference(c, to)) {
 		qty rt = AST_TYPE(a, to)->base;
 
+		if (cc_type_is_record(a, rt) && AST_TYPE_KIND(a, rt) != TY_ARRAY &&
+		    (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_ARRAY)) {
+			/* a reference to a class bound to a value of another type ("text" for a const std::string &): a
+			   temporary made by the class's converting constructor */
+			qty at[1] = { AST_NODE_AT(a, x)->ty };
+			uint8_t lv[1] = { (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 };
+			uint32_t saved = c->enode, tmp;
+
+			if (AST_TYPE(a, to)->ext == 1 && !(QQ(rt) & Q_CONST))
+				return 0;	/* (T& does not bind a temporary) */
+			if (AST_TYPE_KIND(a, at[0]) == TY_ARRAY)	/* ("text": a pointer, as for a call) */
+				at[0] = cc_type_pointer(a, AST_TYPE(a, at[0])->base), lv[0] = 0;
+			cxx_ctor_use(c, QUNQ(rt), at, lv, 1, false);
+			if (!c->ctor_found || !c->ctor_picked || c->ctor_picked->fn_explicit)
+				return 0;
+			c->enode = 0;
+			cxx_gen_construct_temp(c, QUNQ(rt), &x, 1, loc);
+			tmp = c->enode;
+			c->enode = saved;
+			if (!tmp || !(AST_NODE_AT(a, tmp)->flags & NF_LVALUE))
+				return 0;
+			return cc_cast_insert(a, cc_address_of_build(a, tmp, loc), QUNQ(to), CK_NOP);
+		}
 		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && cc_type_is_record(a, rt) && cc_type_is_record(a, AST_NODE_AT(a, x)->ty) &&
 		    QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(rt)) {
 			/* a reference to a base class bound to a derived object: its base subobject; to another class:
@@ -1467,6 +1490,12 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 		return;	/* (a class whose assignment is not a copy of its bytes: the implicit operator=, not built yet) */
 	if (cc_type_is_record(c->ast, AST_NODE_AT(c->ast, r)->ty) != cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty))
 		return;
+	if (!base && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) == TY_PTR && !cxx_gen_is_reference(c, AST_NODE_AT(c->ast, l)->ty)) {
+		/* a pointer: the value converted as C++ does (Derived * to Base *, moved to the base subobject) */
+		r = cxx_gen_bind(c, r, QUNQ(AST_NODE_AT(c->ast, l)->ty), loc);
+		if (!r)
+			return;
+	}
 	c->enode = cc_assignment_build(c->ast, base, l, r, loc);
 }
 
@@ -1759,6 +1788,10 @@ static const struct cxx_builtin_function {
 	{ "__builtin_strcmp", "strcmp", 'i', "ss" }, { "__builtin_unreachable", "abort", 'v', "" },
 	{ "__builtin_trap", "abort", 'v', "" }, { "__builtin_abort", "abort", 'v', "" },
 	{ "__builtin_operator_new", "_Znwm", 'p', "z" }, { "__builtin_operator_delete", "_ZdlPv", 'v', "p" },
+	{ "__builtin_operator_new", "_ZnwmSt11align_val_t", 'p', "zz" }, { "__builtin_operator_delete", "_ZdlPvm", 'v', "pz" },
+	{ "__builtin_operator_delete", "_ZdlPvmSt11align_val_t", 'v', "pzz" },
+	/* (new and delete expressions: cxx_gen_new, cxx_gen_delete) */
+	{ "__vcc_new_array", "_Znam", 'p', "z" }, { "__vcc_delete_array", "_ZdaPv", 'v', "p" },
 	{ "__builtin_sin", "sin", 'd', "d" }, { "__builtin_sinf", "sinf", 'f', "f" },
 	{ "__builtin_cos", "cos", 'd', "d" }, { "__builtin_cosf", "cosf", 'f', "f" },
 	{ "__builtin_tan", "tan", 'd', "d" }, { "__builtin_tanf", "tanf", 'f', "f" },
@@ -2660,6 +2693,169 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
+}
+
+/* ---- new and delete ------------------------------------------------------------------------- */
+
+/* a call of one of the builtin table's library functions (0: not built) */
+static uint32_t cxx_gen_library_call(cxx *c, const char *name, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	uint32_t saved = c->enode, n;
+
+	c->enode = 0;
+	cxx_gen_builtin(c, name, strlen(name), args, nargs, loc);
+	n = c->enode;
+	c->enode = saved;
+	return n;
+}
+
+/*
+ * new T(args), new T{args}, new T, new T[n], new (p) T(args): the storage (operator new, or the placement
+ * argument p), the object constructed in it (cxx_ctor_use was called for a class with the arguments), the
+ * pointer the result.  ninit: -1 no initializer, else the arguments' count.  Arrays: of scalars only.
+ */
+VPRIV void cxx_gen_new(cxx *c, qty t, const uint32_t *place, uint32_t nplace, uint32_t count, bool array, const uint32_t *init,
+		       int ninit, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty pt;
+	uint32_t mem, tmp, obj, size, last;
+	cc_id_list l;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) == TY_VOID || AST_TYPE_KIND(a, t) == TY_FUNC ||
+	    !(cxx_gen_object_type_ok(c, t) || cxx_gen_type_ok(c, t)) || cxx_gen_is_reference(c, t))
+		return;
+	if (array && (cc_type_is_record(a, t) || ninit > 0 || !count))
+		return;	/* (an array of a class, an array from a list: not built yet) */
+	pt = cc_type_pointer(a, t);
+	size = cc_node_integer_new(a, (i128)AST_TYPE(a, QUNQ(t))->size, cc_type_basic(TY_ULONG), loc);
+	if (nplace == 1 && place[0] && AST_TYPE_KIND(a, AST_NODE_AT(a, cc_conversion_decay(a, place[0]))->ty) == TY_PTR)
+		mem = cc_conversion_decay(a, place[0]);	/* new (p) T: operator new(size_t, void *) gives p back */
+	else if (nplace)
+		return;	/* (nothrow, alignment, user placement forms: not built yet) */
+	else if (array) {
+		uint32_t n = cc_conversion_apply(a, cc_conversion_decay(a, count), cc_type_basic(TY_ULONG));
+
+		size = cc_binary_build(a, LEX_TOKEN_STAR, n, size, loc);
+		mem = cxx_gen_library_call(c, "__vcc_new_array", &size, 1, loc);
+	} else
+		mem = cxx_gen_library_call(c, "__builtin_operator_new", &size, 1, loc);
+	if (!mem || !(tmp = cxx_gen_temporary(c, pt, loc)))
+		return;
+	cc_id_list_init(&l);
+	cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc),
+					cc_cast_insert(a, mem, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, mem)->ty, pt, mem)), loc), 0, 0));
+	obj = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), loc);
+	if (array) {
+		if (ninit == 0) {	/* new T[n](): zeroed */
+			uint32_t z[3] = { cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), cc_type_pointer(a, cc_type_basic(TY_VOID)), CK_NOP),
+					  cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), size };
+
+			if (!(last = cxx_gen_library_call(c, "__builtin_memset", z, 3, loc)))
+				return;
+			cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, last, 0, 0));
+		}
+	} else if (cc_type_is_record(a, t) && AST_TYPE_KIND(a, t) != TY_ARRAY) {
+		/* (no initializer: default-initialized, as T() is for a class with a constructor) */
+		if (!cxx_gen_construct_at(c, obj, QUNQ(t), init, ninit < 0 ? 0 : (uint32_t)ninit, &l, loc))
+			return;
+	} else if (ninit == 1 || ninit == 0) {
+		uint32_t v = ninit ? cxx_gen_bind(c, init[0], QUNQ(t), loc) : cc_conversion_apply(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), QUNQ(t));
+
+		if (!v)
+			return;
+		if (t != QUNQ(t)) {
+			qty upt = cc_type_pointer(a, QUNQ(t));
+
+			obj = cc_dereference_build(a, cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), upt, CK_NOP), loc);
+		}
+		cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, obj, v, loc), 0, 0));
+	} else if (ninit > 1)
+		return;
+	c->enode = cxx_gen_chain(c, &l, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), loc);
+}
+
+/* delete p, delete[] p: the object's destructor (a class's), then operator delete (sized, as clang does) */
+VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty pt, t;
+	uint32_t tmp, n, args[2];
+	cc_id_list l;
+	cxx_entity *d;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !p)
+		return;
+	p = cc_node_rvalue(a, p);
+	pt = QUNQ(AST_NODE_AT(a, p)->ty);
+	if (AST_TYPE_KIND(a, pt) != TY_PTR || AST_TYPE(a, pt)->ext)
+		return;
+	t = AST_TYPE(a, pt)->base;
+	if (AST_TYPE_KIND(a, t) == TY_VOID || (array && cc_type_is_record(a, t) && cxx_gen_needs_destruction(c, t, 0)))
+		return;	/* (an array of objects with destructors: its count cookie, not built yet) */
+	if (cc_type_is_record(a, t) && cxx_class_polymorphic(c, t))
+		return;	/* (a virtual destructor's deleting variant: through the vtable, not built yet) */
+	if (!(tmp = cxx_gen_temporary(c, pt, loc)))
+		return;
+	cc_id_list_init(&l);
+	cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), p, loc), 0, 0));
+	d = cc_type_is_record(a, t) ? cxx_gen_effective_destructor(c, t, 0) : NULL;
+	if (cc_type_is_record(a, t) && !d && cxx_gen_needs_destruction(c, t, 0))
+		return;
+	args[0] = cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), cc_type_pointer(a, cc_type_basic(TY_VOID)), CK_NOP);
+	args[1] = cc_node_integer_new(a, (i128)AST_TYPE(a, QUNQ(t))->size, cc_type_basic(TY_ULONG), loc);
+	n = array ? cxx_gen_library_call(c, "__vcc_delete_array", args, 1, loc) : cxx_gen_library_call(c, "__builtin_operator_delete", args, 2, loc);
+	if (!n)
+		return;
+	if (d) {
+		/* (the destructor runs on the object; both only when p is not null) */
+		uint32_t saved = c->enode;
+
+		c->enode = 0;
+		cxx_gen_call(c, d, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), loc), false, NULL, 0, loc);
+		if (!c->enode) {
+			c->enode = saved;
+			return;
+		}
+		n = cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, n)->ty, loc, c->enode, n);
+		c->enode = saved;
+	}
+	{
+		/* p ? (dtor, delete) : (void)0 */
+		uint32_t cond = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
+		uint32_t none = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), cc_type_basic(TY_VOID), CK_VOID);
+
+		n = cc_conditional_build(a, cond, cc_cast_insert(a, n, cc_type_basic(TY_VOID), CK_VOID), none, loc);
+	}
+	c->enode = cxx_gen_chain(c, &l, n, loc);
+}
+
+/* x.~T(), p->~T(): the destructor's call (a class with none to run, a scalar: nothing), as an expression */
+VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty t;
+	cxx_entity *d;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !x)
+		return;
+	if (arrow) {
+		x = cc_node_rvalue(a, x);
+		if (AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != TY_PTR)
+			return;
+		x = cc_dereference_build(a, x, loc);
+	}
+	t = QUNQ(AST_NODE_AT(a, x)->ty);
+	if (!cc_type_is_record(a, t) || !cxx_gen_needs_destruction(c, t, 0)) {
+		c->enode = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), cc_type_basic(TY_VOID), CK_VOID);
+		return;
+	}
+	if (!(d = cxx_gen_effective_destructor(c, t, 0)) || cxx_class_polymorphic(c, t))
+		return;	/* (a virtual destructor: through the vtable, not built yet) */
+	cxx_gen_call(c, d, x, false, NULL, 0, loc);
 }
 
 /* ---- virtual functions ----------------------------------------------------------------------- */
@@ -4114,6 +4310,34 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 
 	cxx_gen_pop(c);	/* (the body around this one, if any, goes on) */
 	c->stats.functions++;
+	if (ok && getenv("VCC_CXX_NOGEN") && f->sym) {
+		/* (a debugging aid: the functions named in the file, one mangled name a line, get no code here, so
+		   that another compiler's definition is used: bisecting which of vcc's is wrong) */
+		static __thread char *list;
+		static __thread size_t nlist;
+		const vident *v = &vintern_ents[a->syms[f->sym].name];
+
+		if (!list) {
+			FILE *lf = fopen(getenv("VCC_CXX_NOGEN"), "r");
+
+			list = calloc(1, 1 << 24);
+			if (lf) {
+				nlist = fread(list + 1, 1, (1 << 24) - 2, lf);
+				fclose(lf);
+			}
+			list[0] = '\n';
+			for (size_t i = 1; i <= nlist; i++)
+				if (list[i] == '\r')
+					list[i] = '\n';
+		}
+		for (const char *q = list; (q = strstr(q, "\n")) && q[1]; q++)
+			if (!strncmp(q + 1, v->s, v->len) && (q[1 + v->len] == '\n' || !q[1 + v->len])) {
+				ok = false;
+				break;
+			}
+		if (!ok)
+			return;
+	}
 	if (!ok)
 		return;
 	if (f->fn_inline) {

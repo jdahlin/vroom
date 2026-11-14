@@ -191,6 +191,11 @@ static void cxx_id_expression_parse(cxx *c)
 			    !cxx_is(c, LEX_TOKEN_LEFT_SQUARE)) {
 				cxx_operator_at(c, &on);
 				oid = cxx_operator_id_at(c, on);
+			} else if (cxx_is_kw(c, CXX_KW_new) || cxx_is_kw(c, CXX_KW_delete)) {
+				bool arr = cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE && cxx_peek(c, 2)->kind == LEX_TOKEN_RIGHT_SQUARE;
+
+				oid = vintern_cstr(cxx_is_kw(c, CXX_KW_new) ? (arr ? "operator new[]" : "operator new") :
+						   (arr ? "operator delete[]" : "operator delete"));
 			}
 			c->pos = at;
 		}
@@ -1648,6 +1653,17 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				template_kw = cxx_accept_kw(c, CXX_KW_template);
 				cxx_nested_name_parse(c, &q, &dep);
 				template_kw |= cxx_accept_kw(c, CXX_KW_template);
+				if (cxx_is(c, LEX_TOKEN_TILDE) && !q && !dep && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER &&
+				    cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN && cxx_peek(c, 3)->kind == LEX_TOKEN_RIGHT_PAREN) {
+					/* x.~T(), p->~T(): the destructor called (of a scalar: nothing) */
+					uint32_t dloc = cxx_peek(c, 0)->loc;
+
+					c->pos += 4;
+					cxx_et(c, cc_type_basic(TY_VOID), false);
+					if (!c->tentative && !c->template_depth && obj_node && obj != CXX_TY_UNKNOWN)
+						cxx_gen_destroy_object(c, obj_node, arrow, dloc);
+					continue;
+				}
 				if (cxx_is(c, LEX_TOKEN_TILDE) || cxx_is_kw(c, CXX_KW_operator)) {
 					/* x.operator->(), x.operator+=(y): the member operator by its name */
 					uint32_t oid = 0;
@@ -1738,6 +1754,12 @@ static void cxx_postfix_expression_parse1(cxx *c)
 
 static void cxx_new_expression_parse(cxx *c)
 {
+	uint32_t place[4], nplace = 0, init[16], loc = cxx_peek(c, 0)->loc, count = 0;
+	int ninit = -1;
+	bool array = false, braced = false;
+	qty t = CXX_TY_UNKNOWN, at[16];
+	uint8_t lv[16];
+
 	cxx_accept(c, LEX_TOKEN_COLON_COLON);
 	cxx_expect_kw(c, CXX_KW_new);
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
@@ -1745,22 +1767,47 @@ static void cxx_new_expression_parse(cxx *c)
 		if (cxx_paren_type_id_follows(c)) {
 			cxx_advance(c);
 			cxx_type_id_parse(c);
+			t = c->type_out;
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			goto init;
 		}
 		cxx_call_arguments_parse(c);
+		nplace = c->ncargs <= 4 ? c->ncargs : UINT32_MAX;
+		if (nplace != UINT32_MAX)
+			memcpy(place, c->carg_nodes, nplace * sizeof *place);
 	}
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 		cxx_advance(c);
 		cxx_type_id_parse(c);
+		t = c->type_out;
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-	} else
+	} else {
 		cxx_new_type_id_parse(c);
+		t = c->type_out, array = c->new_array, count = c->new_count;
+	}
 init:
-	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))
-		cxx_call_arguments_parse(c);
-	else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
-		cxx_braced_init_list_parse(c);
+	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) || cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
+		braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+		if (braced)
+			cxx_braced_arguments_parse(c);
+		else
+			cxx_call_arguments_parse(c);
+		ninit = c->ncargs <= 16 ? (int)c->ncargs : -2;
+		if (ninit >= 0) {
+			memcpy(init, c->carg_nodes, (size_t)ninit * sizeof *init);
+			memcpy(at, c->cargs, (size_t)ninit * sizeof *at);
+			memcpy(lv, c->cargs_lval, (size_t)ninit);
+		}
+	}
+	if (t == CXX_TY_UNKNOWN || c->tentative || ninit == -2 || nplace == UINT32_MAX) {
+		cxx_et(c, t != CXX_TY_UNKNOWN && !c->tentative ? cc_type_pointer(c->ast, t) : CXX_TY_UNKNOWN, false);
+		return;
+	}
+	if (!c->template_depth && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY && !array)
+		cxx_ctor_use(c, QUNQ(t), ninit > 0 ? at : NULL, ninit > 0 ? lv : NULL, ninit > 0 ? (uint32_t)ninit : 0, braced);
+	cxx_et(c, cc_type_pointer(c->ast, t), false);
+	if (!c->template_depth)
+		cxx_gen_new(c, t, place, nplace, count, array, init, ninit, loc);
 }
 
 static void cxx_unary_expression_parse(cxx *c)
@@ -1881,15 +1928,21 @@ static void cxx_unary_expression_parse(cxx *c)
 		return;
 	case CXX_KW_new:
 		cxx_new_expression_parse(c);
-		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (the new-type-id's pointer: not built yet) */
 		return;
-	case CXX_KW_delete:
+	case CXX_KW_delete: {
+		bool array = false;
+		uint32_t loc = cxx_peek(c, 0)->loc, x;
+
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_LEFT_SQUARE))
-			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
+			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE), array = true;
 		cxx_cast_expression_parse(c);
+		x = c->enode;
 		cxx_et(c, cc_type_basic(TY_VOID), false);
+		if (!c->tentative && !c->template_depth)
+			cxx_gen_delete(c, x, array, loc);
 		return;
+	}
 	case CXX_KW_co_await:
 		cxx_advance(c);
 		cxx_cast_expression_parse(c);

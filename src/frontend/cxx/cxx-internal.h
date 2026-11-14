@@ -433,6 +433,8 @@ typedef struct cxx {
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
+	uint8_t new_array;
 	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;
@@ -610,6 +612,9 @@ VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, s
 VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc);
 VPRIV void cxx_gen_indirect_call(cxx *c, uint32_t callee, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t loc);
+VPRIV void cxx_gen_new(cxx *c, qty t, const uint32_t *place, uint32_t nplace, uint32_t count, bool array, const uint32_t *init, int ninit, uint32_t loc);
+VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc);
+VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
