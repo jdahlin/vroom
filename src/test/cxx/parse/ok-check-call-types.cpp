@@ -26,3 +26,23 @@ void g(n::S s, const n::S cs, L less, short h)
 	static_assert(sizeof(p->tag) == 3, "");		// auto, a pointer
 	static_assert(sizeof(*begin(s)) == 4, "");	// ADL finds a template
 }
+
+// overload ranking: each argument's conversion, then a non-template over a template
+char  ov(int);
+short ov(double);
+long  ov(const char *);
+template<class T> long long ov(T *);
+struct Base { }; struct Derived : Base { };
+char  bd(Base &);
+short bd(...);
+template<class T> char  pk(T);
+short pk(int);
+void h(Derived d, float f, int *ip, char c)
+{
+	static_assert(sizeof(ov(1)) == 1, "");		// exact
+	static_assert(sizeof(ov(1.5)) == 2, "");	// exact
+	static_assert(sizeof(ov("s")) == 8, "");	// array to pointer, to const
+	static_assert(sizeof(pk(1)) == 2, "");		// a non-template over a template, both exact
+	static_assert(sizeof(pk(c)) == 1, "");		// the template is exact, the non-template converts
+	static_assert(sizeof(bd(d)) == 1, "");		// derived to base over ...
+}

@@ -139,33 +139,74 @@ VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
  * A call of the function set `set` (an entity chain: the functions among its entries) with the
  * argument types args: the return type of the one function it selects, else unknown.
  */
-/* does a non-template's parameter list take exactly these argument types (references seen through)? */
-static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
+/* is the class d derived from the class b? */
+static bool cxx_derives(cxx *c, qty d, qty b, int depth)
 {
-	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
-		qty p = c->ast->params[ft->aux + i];
+	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(d)) : NULL;
 
-		if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext)
-			p = AST_TYPE(c->ast, p)->base;
-		if (args[i] == CXX_TY_UNKNOWN || QUNQ(p) != QUNQ(args[i]))
-			return false;
+	if (!cls)
+		return false;
+	for (uint32_t i = 0; i < cls->nused; i++) {
+		cxx_scope *s = cls->used[i];
+
+		if (!s || s->kind != CXX_SCOPE_CLASS || !s->owner || s->owner->ty == CXX_TY_UNKNOWN)
+			continue;
+		if (QUNQ(s->owner->ty) == QUNQ(b) || cxx_derives(c, s->owner->ty, b, depth + 1))
+			return true;
 	}
-	return true;
+	return false;
 }
 
-/* can each reference parameter bind its argument?  T&& not an lvalue, T& (not const) not an rvalue */
-static bool cxx_refs_bind(cxx *c, const ctype *ft, const qty *args, const uint8_t *lval, uint32_t nargs)
+/*
+ * How an argument of type a converts to a parameter of type p: 0 exactly (identity, array or function
+ * to pointer, a qualification), 1 a standard conversion (arithmetic, derived to base, to void *),
+ * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
+ */
+static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 {
-	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
-		qty p = c->ast->params[ft->aux + i];
-		const ctype *pt = AST_TYPE(c->ast, p);
+	const ctype *pt, *at;
 
-		if (pt->kind != TY_PTR || !pt->ext || args[i] == CXX_TY_UNKNOWN)
-			continue;
-		if (pt->ext == 2 ? lval[i] != 0 : !lval[i] && !(QQ(pt->base) & Q_CONST))
-			return false;
+	if (p == CXX_TY_UNKNOWN || a == CXX_TY_UNKNOWN)
+		return 2;
+	pt = AST_TYPE(c->ast, p);
+	if (pt->kind == TY_PTR && pt->ext) {
+		/* T&& does not bind an lvalue; T& (not const) does not bind an rvalue */
+		if (have_lvalue && (pt->ext == 2 ? lvalue : !lvalue && !(QQ(pt->base) & Q_CONST)))
+			return 3;
+		p = pt->base;
+		pt = AST_TYPE(c->ast, p);
 	}
-	return true;
+	at = AST_TYPE(c->ast, a);
+	if (QUNQ(p) == QUNQ(a))
+		return 0;
+	if (((pt->kind >= TY_BOOL && pt->kind <= TY_FLOAT128) || pt->kind == TY_ENUM) &&
+	    ((at->kind >= TY_BOOL && at->kind <= TY_FLOAT128) || at->kind == TY_ENUM))
+		return pt->kind == TY_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
+	if (pt->kind == TY_PTR && !pt->ext) {
+		const ctype *pb = AST_TYPE(c->ast, pt->base);
+		qty ab;
+
+		if (at->kind == TY_ARRAY)
+			ab = at->base;
+		else if (at->kind == TY_FUNC)
+			return QUNQ(pt->base) == QUNQ(a) ? 0 : 3;
+		else if (at->kind == TY_PTR && !at->ext)
+			ab = at->base;
+		else
+			return at->kind == TY_STRUCT || at->kind == TY_UNION ? 2 : at->kind >= TY_BOOL && at->kind <= TY_ULLONG ? 2 : 3;
+		if (QUNQ(pt->base) == QUNQ(ab))
+			return 0;
+		if (pb->kind == TY_VOID)
+			return 1;
+		if (cc_type_is_record(c->ast, pt->base) && cc_type_is_record(c->ast, ab))
+			return cxx_derives(c, ab, pt->base, 0) ? 1 : 3;
+		return 3;
+	}
+	if (cc_type_is_record(c->ast, p) && cc_type_is_record(c->ast, a))
+		return cxx_derives(c, a, p, 0) ? 1 : 2;
+	if (cc_type_is_record(c->ast, p) || cc_type_is_record(c->ast, a))
+		return 2;
+	return 3;
 }
 
 /*
@@ -193,14 +234,10 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			       const uint8_t *lval, uint32_t nargs, bool operator_call)
 {
 	static const uint8_t none[16];
-	cxx_entity *exact = NULL, *first = NULL;
-	uint32_t viable = 0, nexact = 0;
+	cxx_entity *first = NULL;
+	uint32_t viable = 0;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
-	cxx_entity *nonconst = NULL;
-	uint32_t n_nonconst = 0, nexact_t = 0;
-	qty exact_t = CXX_TY_UNKNOWN;
-	cxx_entity *exact_te = NULL;
-	bool have_lval = lval != NULL, picked_t = false;
+	bool have_lval = lval != NULL;
 
 	c->none_viable = 0, c->call_obj = 0;
 	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
@@ -235,8 +272,15 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
 		args = acopy, lval = lcopy;
 	}
+	/* the viable candidates, each argument's conversion ranked */
+	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; } cand[24];
+	uint32_t ncand = 0;
+	int best = -1;
+
 	for (cxx_entity *e = set; e; e = e->next) {
 		qty r;
+		const ctype *sig = NULL;
+		struct cand *k;
 
 		if (e->kind == CXX_ENTITY_DEPENDENT) {
 			if (!c->template_depth)
@@ -251,15 +295,10 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
 			if (d <= 0)
 				continue;
-			/* its parameters with the arguments bound: can they bind, an exact match? */
-			if (c->bound_sig != CXX_TY_UNKNOWN) {
-				const ctype *bt = AST_TYPE(c->ast, c->bound_sig);
-
-				if (have_lval && !(bt->flags & TF_VARIADIC) && !cxx_refs_bind(c, bt, args, lval, nargs))
-					continue;	/* (T&& from an lvalue, T& from an rvalue: std::forward's other overload) */
-				if (r != CXX_TY_UNKNOWN && !(bt->flags & TF_VARIADIC) && bt->n == nargs && cxx_exact(c, bt, args, nargs))
-					nexact_t++, exact_t = r, exact_te = e;
-			}
+			/* its parameters with the arguments bound */
+			if (c->bound_sig != CXX_TY_UNKNOWN && !(AST_TYPE(c->ast, c->bound_sig)->flags & TF_VARIADIC) &&
+			    AST_TYPE(c->ast, c->bound_sig)->n >= nargs)
+				sig = AST_TYPE(c->ast, c->bound_sig);
 		} else {
 			const ctype *ft;
 
@@ -273,51 +312,106 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			if (obj == 2 && !e->fn_const)
 				continue;	/* (a const object: const members only) */
 			r = ft->base;
-			if (obj == 1 && !e->fn_const)
-				n_nonconst++, nonconst = e;
-			if (cxx_exact(c, ft, args, nargs))
-				nexact++, exact = e;
+			sig = ft;
 		}
+		if (ncand == 24) {
+			unknown = true;
+			continue;
+		}
+		k = &cand[ncand];
+		k->e = e, k->r = r, k->tmpl = e->kind == CXX_ENTITY_FUNCTION_TEMPLATE, k->ranked = sig != NULL && nargs <= 16;
+		if (k->ranked) {
+			bool fits = true;
+
+			for (uint32_t a = 0; a < nargs && fits; a++) {
+				/* (an argument for the ...: any) */
+				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 2;
+				fits = k->rank[a] < 3;
+			}
+			if (!fits)
+				continue;	/* (T&& from an lvalue, a pointer from a class: not viable) */
+		}
+		ncand++;
 		if (!viable++)
 			result = r, first = e;
 		else if (r != result)
 			same = false;
 	}
-	/* f() and f() const on an object that is not const: the one that is not const */
-	if (nexact != 1 && !same && !unknown && n_nonconst == 1)
-		nexact = 1, exact = nonconst;
-	if (nexact == 1)
-		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
-	else if (!nexact && nexact_t == 1 && !unknown && viable)
-		result = exact_t, picked_t = true;	/* f(int) and f(long) templates called with an int: the exact one */
+	/*
+	 * The best: at least as good as every other for each argument, and better for one; then a
+	 * non-template over a template, and on an object that is not const f() over f() const.  A
+	 * candidate whose parameters are not known cannot be compared.
+	 */
+	for (uint32_t a = 0; a < ncand && best < 0; a++) {
+		bool wins = cand[a].ranked;
+
+		for (uint32_t b = 0; b < ncand && wins; b++) {
+			bool better = false, worse = false;
+
+			if (a == b)
+				continue;
+			if (!cand[b].ranked) {
+				wins = false;
+				break;
+			}
+			for (uint32_t n = 0; n < nargs; n++) {
+				better |= cand[a].rank[n] < cand[b].rank[n];
+				worse |= cand[a].rank[n] > cand[b].rank[n];
+			}
+			if (!better && !worse) {
+				if (!cand[a].tmpl && cand[b].tmpl)
+					better = true;
+				else if (cand[a].tmpl == cand[b].tmpl && obj == 1 && !cand[a].e->fn_const && cand[b].e->fn_const)
+					better = true;
+			}
+			wins = better && !worse;
+		}
+		if (wins)
+			best = (int)a;
+	}
+	if (ncand == 1 && !unknown)
+		best = 0;
+	/* (a template vcc could not deduce might be better than anything but a non-template that matches exactly) */
+	if (best >= 0 && unknown) {
+		bool exact = !cand[best].tmpl && cand[best].ranked;
+
+		for (uint32_t n = 0; n < nargs && exact; n++)
+			exact = cand[best].rank[n] == 0;
+		if (!exact)
+			best = -1;
+	}
+	if (best >= 0)
+		result = cand[best].r;
 	else if (!viable || !same || unknown) {
 		c->none_viable = !viable && !unknown;
 		if (!c->template_depth && !(c->none_viable && operator_call))
 			c->stats.why[unknown ? c->why : !viable ? CXX_WHY_NONE_VIABLE : CXX_WHY_AMBIGUOUS]++;
 		result = CXX_TY_UNKNOWN;
-	} else if (result == CXX_TY_UNKNOWN && !c->template_depth)
+	}
+	if (result == CXX_TY_UNKNOWN && (best >= 0 || (viable && same && !unknown)) && !c->template_depth)
 		c->stats.why[CXX_WHY_RETURN]++;
 	if (!c->template_depth && !(c->none_viable && operator_call))
 		c->stats.calls++, c->stats.calls_typed += result != CXX_TY_UNKNOWN;
 	if (result == CXX_TY_UNKNOWN && !c->template_depth && !(c->none_viable && operator_call) && getenv("VCC_CXX_WHY"))
-		fprintf(stderr, "why@%u %s %.*s/%u\n", c->tok[c->pos ? c->pos - 1 : 0].loc, nexact == 1 || (viable && same && !unknown) ? "return" : unknown ? "unknown" :
-			!viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
-	/* the function called (when known): an instance's member body is instantiated */
-	{
-		cxx_entity *called = nexact == 1 ? exact : picked_t ? exact_te : viable == 1 && !unknown ? first : NULL;
+		fprintf(stderr, "why@%u %s %.*s/%u\n", c->tok[c->pos ? c->pos - 1 : 0].loc, best >= 0 || (viable && same && !unknown) ? "return" :
+			unknown ? "unknown" : !viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
+	/* the function called (when known): its body is instantiated, in evaluated code */
+	if (best >= 0) {
+		cxx_entity *called = cand[best].e;
 
-		if (called && called->kind == CXX_ENTITY_VALUE)
+		if (called->kind == CXX_ENTITY_VALUE)
 			cxx_member_body_use(c, called);
-		else if (called && called->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !c->unevaluated && !c->tentative && nargs <= 16) {
-			/* the template called, in evaluated code: its body (the result is as deduced above) */
+		else if (called->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !c->unevaluated && !c->tentative && nargs <= 16) {
 			qty r, et = result;
 
 			cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs, &r, true);
 			result = et != CXX_TY_UNKNOWN ? et : r;
 		}
 	}
+	(void)first;
 	cxx_et(c, result, false);
 }
+
 
 /*
  * An operator with a class operand: obj's member operator (args: the other operands), else
