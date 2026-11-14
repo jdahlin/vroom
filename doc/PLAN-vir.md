@@ -3054,3 +3054,12 @@ Its patch and measurements in results/vir-entry-choice-20261113.* refer to
 7e166718. The compiler continues to use its existing predecessor policy.
 See [the optimizer policy inventory](RESEARCH-optimizer-limits.md) for the
 GCC and LLVM comparisons used in the investigation.
+
+### Review av -O2/-O3 och kostnadsstacken (2026-11-14)
+
+Merge med main behåller smala x86-atomics och POPCNT. Linux-räknarnas
+perf-deskriptorer stängs nu vid trådslut (även gruppmedlemmen), och öppnas
+med CLOEXEC. `bench/vperf-test.py` mockar perf-syscalls och kontrollerar
+40 trådar, inklusive fel vid andra öppningen. Verifierat: bygge `-j 6`,
+vir-test 133/133, VIR-regressioner 56/56 med verifierare och allokeringscheck,
+samt vcc-vir-x86 (assembly och egna objekt vid -O2/-O3).

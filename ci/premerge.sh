@@ -90,6 +90,7 @@ arm64)
 
 	step flow-contracts python3 bench/vcc-flow.py --sanitize
 	step flow-values python3 bench/vcc-flow-values.py --sanitize
+	step vperf-lifecycle python3 bench/vperf-test.py
 	step vir-tests python3 bench/vir-test.py -j "$J" --bin-dir "$BUILD"
 	step vir-exposure python3 bench/vir-exposure.py --bin-dir "$BUILD"
 	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
