@@ -632,3 +632,17 @@ requires-clauses as constant expressions (a concept's definition with its
 arguments bound; a requires-expression is true when each requirement's
 expression has a type), then packs.  VCC_CXX_WHY_TOKENS=name prints the
 tokens around each untyped call of that name.
+
+### Status 2026-11-14 (11): concepts
+A concept-id is a constant: the concept's constraint-expression with its
+arguments bound (cached per argument list).  A requires-expression is true
+when every requirement holds, false when one is ill-formed for sure (no
+function fits, here or by ADL; no such member; a member of what is not a
+class; typename X::y missing; a nested requires that is false; a
+return-type-constraint that is not satisfied), else not known.  Function
+templates check constrained parameters (template<C T>), the header's
+requires-clause and a trailing one when deducing: false removes the
+candidate, not known leaves the call untyped.  Test ok-check-concepts.
+unit-32bit: 1644 of 2023 calls typed (81 %), 123 + 180 bodies, no false
+static_assert; json 48,962 layouts clang agrees with (was 44,418), 71/71
+parse; parse tests 19/19; 0.14 s.

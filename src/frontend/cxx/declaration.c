@@ -2032,6 +2032,7 @@ static void cxx_template_parameter_parse(cxx *c)
 		cxx_scope *q;
 		bool dep;
 		cxx_entity *e;
+		uint32_t cb = c->pos;
 
 		cxx_nested_name_parse(c, &q, &dep);
 		e = cxx_is(c, LEX_TOKEN_IDENTIFIER) ? cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id) : NULL;
@@ -2058,6 +2059,8 @@ static void cxx_template_parameter_parse(cxx *c)
 				de = c->pos;
 			}
 			cxx_tparam_add(c, 1, pname, pack, db, de);
+			if (c->scope->kind == CXX_SCOPE_TEMPLATE && !c->tentative && c->scope->ntparams && !pack)
+				c->scope->tparams[c->scope->ntparams - 1].constraint_b = cb;	/* (checked when deducing) */
 			return;
 		}
 		cxx_rewind(c, save, save_undo);
@@ -2140,6 +2143,9 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 			cxx_fail(c, "expected '>' after template parameters");
 	}
 	c->implicit_typename = implicit;
+	uint32_t freq = c->ftmpl_req;
+
+	c->ftmpl_req = cxx_is_kw(c, CXX_KW_requires) ? c->pos : 0;
 	cxx_requires_clause_parse(c);
 	uint32_t fbegin = c->ftmpl_begin;
 	cxx_scope *fscope = c->ftmpl_scope;
@@ -2153,11 +2159,19 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 		cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 		cxx_attributes_skip(c);
 		cxx_expect(c, LEX_TOKEN_EQUAL);
-		cxx_declare(c, cxx_declaration_scope(c)->parent ? cxx_declaration_scope(c) : c->global, name, CXX_ENTITY_CONCEPT);
+		{
+			cxx_entity *ce = cxx_declare(c, cxx_declaration_scope(c)->parent ? cxx_declaration_scope(c) : c->global, name,
+						     CXX_ENTITY_CONCEPT);
+
+			/* its constraint-expression, evaluated with arguments bound (cxx_concept_value) */
+			if (ce && !ce->ftmpl && c->template_depth == 1)
+				ce->ftmpl = cxx_ftemplate_new(c, ts, ts->parent, c->pos, NULL);
+		}
 		cxx_conditional_expression_parse(c);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 	} else
 		cxx_declaration_parse(c, context);
+	c->ftmpl_req = freq;
 	c->ftmpl_begin = fbegin, c->ftmpl_scope = fscope;
 	c->template_depth--;
 	cxx_scope_pop(c);
@@ -2669,6 +2683,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			} else if (e && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, cs);
+				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
 			}
 		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
@@ -2682,8 +2697,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e = NULL;	/* (a friend template: found by ADL only) */
 			/* a function template (one level of parameters): its signature, for deduction at calls */
 			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
-			    !c->tentative)
+			    !c->tentative) {
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, NULL);
+				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
+			}
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
 				e->ty = t;
@@ -3069,10 +3086,13 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	/* a parameter of unknown type: the return type alone (callers read only it then) */
 	if (f && t == CXX_TY_UNKNOWN && !any_return && c->decl_return != CXX_TY_UNKNOWN)
 		t = cxx_type_function(c, c->decl_return, NULL, 0, true);
+	/* a trailing requires-clause: its value with the arguments bound (false: the candidate is not viable) */
+	c->sig_requires = 1;
+	if (f && cxx_is_kw(c, CXX_KW_requires))
+		c->sig_requires = (int8_t)(any_return ? (cxx_requires_clause_parse(c), 1) : cxx_requires_clause_value(c));
 	/* body: the definition's body too (an instance's), its parameters declared */
 	if (body) {
 		*body = false;
-		cxx_requires_clause_parse(c);
 		cxx_attributes_skip(c);
 		if (f && cxx_is_function_body_start(c)) {
 			cxx_scope *fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
@@ -3143,4 +3163,36 @@ VPRIV void cxx_for_range_declaration_parse(cxx *c)
 VPRIV void cxx_lambda_parameters_parse(cxx *c)
 {
 	cxx_parameter_clause_parse(c);
+}
+
+/* requires constraint-expression, at 'requires': 1 true, 0 false, -1 not known */
+VPRIV int cxx_requires_clause_value(cxx *c)
+{
+	int v;
+
+	cxx_expect_kw(c, CXX_KW_requires);
+	c->unevaluated++;
+	cxx_conditional_expression_parse(c);
+	c->unevaluated--;
+	v = c->econst ? c->evalue != 0 : -1;
+	return v;
+}
+
+/* a type-constraint's concept, at its name: [nested::]Concept [<args>] (the arguments in c->targs, c->ntargs) */
+VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c)
+{
+	cxx_scope *q;
+	bool dep;
+	cxx_entity *e;
+
+	cxx_nested_name_parse(c, &q, &dep);
+	e = cxx_is(c, LEX_TOKEN_IDENTIFIER) ? cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id) : NULL;
+	e = e ? cxx_entity_template(e) : NULL;
+	if (!e || e->kind != CXX_ENTITY_CONCEPT)
+		return NULL;
+	cxx_advance(c);
+	c->ntargs = 0;
+	if (cxx_is(c, LEX_TOKEN_LESS))
+		cxx_template_arguments_parse(c);
+	return e;
 }

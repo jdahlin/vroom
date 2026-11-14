@@ -175,6 +175,17 @@ static void cxx_id_expression_parse(cxx *c)
 		if (is_template) {
 			cxx_template_arguments_parse(c);
 			cxx_et(c, CXX_TY_UNKNOWN, false);
+			/* Concept<args>: a bool, its value when the arguments are known */
+			if (!dep && e && cxx_entity_kind_find(e, CXX_ENTITY_CONCEPT)) {
+				int v = c->template_depth || c->tentative ? -1 :
+					cxx_concept_value(c, cxx_entity_kind_find(e, CXX_ENTITY_CONCEPT), c->targs, c->ntargs);
+
+				if (v >= 0)
+					cxx_ec(c, cc_type_basic(TY_BOOL), v);
+				else
+					cxx_et(c, cc_type_basic(TY_BOOL), false);
+				return;
+			}
 			/* f<args>: a call takes the explicit arguments (a function template's) */
 			if (!dep && e && cxx_entity_kind_find(e, CXX_ENTITY_FUNCTION_TEMPLATE) && !c->tentative) {
 				if (c->ntargs > c->cxargs)
@@ -198,6 +209,7 @@ static void cxx_id_expression_parse(cxx *c)
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 	(void)save;
 	c->ename = ename;	/* (after the cxx_et calls above, which clear it) */
+	c->ename_missing = ename && !e;
 }
 
 /* is this the start of a type (for casts, sizeof, functional casts)? */
@@ -487,10 +499,24 @@ static void cxx_requires_expression_parse(cxx *c)
 	cxx_scope *outer = c->scope;
 	uint32_t targs = c->in_template_args;
 
+	/* its value: every requirement holds (1), one fails for sure (0), or vcc cannot tell (-1) */
+	bool eval = !c->template_depth && !c->tentative;
+	int value = 1;
+
 	cxx_advance(c);	/* requires */
 	c->in_template_args = 0;
 	cxx_scope_push(c, rs);
-	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
+	if (eval && cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_lookahead_fn(c, cxx_lambda_parameters_parse)) {
+		/* parameters as a function's: names with their types (lvalues in the requirements) */
+		cxx_lambda_parameters_parse(c);
+		for (uint32_t i = 0; i < c->fn_nparams; i++)
+			if (c->fn_pnames[i] > 1) {
+				cxx_entity *e = cxx_declare(c, rs, c->fn_pnames[i], CXX_ENTITY_VALUE);
+
+				if (e)
+					e->ty = c->fn_pdecl[i];
+			}
+	} else if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 		/* parameters: type and name pairs */
 		cxx_advance(c);
 		while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
@@ -519,30 +545,55 @@ static void cxx_requires_expression_parse(cxx *c)
 	}
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
 	while (!cxx_accept(c, LEX_TOKEN_RIGHT_BRACE)) {
+		int r = -1;	/* this requirement */
+
+		c->einvalid = 0;
 		if (cxx_is_kw(c, CXX_KW_typename)) {	/* type requirement */
+			c->member_missing = 0;
 			cxx_type_id_parse(c);
+			r = c->member_missing ? 0 : c->type_out != CXX_TY_UNKNOWN ? 1 : -1;
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {	/* compound requirement */
+			qty et;
+			bool lv;
+
 			cxx_advance(c);
 			cxx_expression_parse(c);
+			et = c->etype, lv = c->elval;
+			r = c->einvalid ? 0 : et != CXX_TY_UNKNOWN ? 1 : -1;
 			cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
 			cxx_accept_kw(c, CXX_KW_noexcept);
 			if (cxx_accept(c, LEX_TOKEN_ARROW)) {
-				/* type-constraint: Concept<args> */
-				cxx_scope *q;
-				bool dep;
+				/* type-constraint: Concept<decltype((expr)), args> */
+				cxx_entity *ce = cxx_constraint_name_parse(c);
 
-				cxx_nested_name_parse(c, &q, &dep);
-				cxx_expect(c, LEX_TOKEN_IDENTIFIER);
-				if (cxx_is(c, LEX_TOKEN_LESS))
-					cxx_template_arguments_parse(c);
+				if (!ce)
+					cxx_fail(c, "expected a concept after '->'");
+				if (r == 1 && eval) {
+					cxx_targ a[32];
+
+					if (c->ntargs < 31) {
+						a[0] = (cxx_targ){ .kind = 1, .t = lv ? cxx_type_reference(c, et, false) : et };
+						memcpy(a + 1, c->targs, c->ntargs * sizeof *a);
+						r = cxx_concept_value(c, ce, a, c->ntargs + 1);
+					} else
+						r = -1;
+				}
 			}
 		} else if (cxx_is_kw(c, CXX_KW_requires)) {	/* nested requirement */
 			cxx_advance(c);
 			cxx_conditional_expression_parse(c);
-		} else
+			r = c->econst ? c->evalue != 0 : -1;
+		} else {
 			cxx_expression_parse(c);
+			r = c->einvalid ? 0 : c->etype != CXX_TY_UNKNOWN ? 1 : -1;
+		}
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
+		if (r == 0)
+			value = 0;
+		else if (r < 0 && value == 1)
+			value = -1;
 	}
+	c->req_value = (int8_t)(eval ? value : -1);
 	c->scope = outer;
 	c->in_template_args = targs;
 }
@@ -733,7 +784,10 @@ static void cxx_primary_expression_parse(cxx *c)
 		c->unevaluated++;
 		cxx_requires_expression_parse(c);
 		c->unevaluated--;
-		cxx_et(c, cc_type_basic(TY_BOOL), false);
+		if (c->req_value >= 0)
+			cxx_ec(c, cc_type_basic(TY_BOOL), c->req_value);
+		else
+			cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
 	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_offsetof: case CXX_KW___builtin_bit_cast:
 	case CXX_KW___builtin_convertvector: case CXX_KW___builtin_types_compatible_p: case CXX_KW___builtin_choose_expr:
@@ -896,6 +950,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
 				uint8_t call_obj = c->call_obj;
 				uint32_t ename = c->ename;
+				bool missing = c->ename_missing;
 
 				if (c->xargs_set && nx == UINT32_MAX)
 					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
@@ -915,8 +970,17 @@ static void cxx_postfix_expression_parse(cxx *c)
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
-					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable))
+					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {
+						bool none = c->none_viable || (!set && missing), known = true;
+
+						for (uint32_t i = 0; i < c->ncargs && i < 16; i++)
+							known &= c->cargs[i] != CXX_TY_UNKNOWN;
+						c->einvalid = 0;
 						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
+						/* nothing by that name fits, here or in the arguments' namespaces */
+						if (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure)
+							c->einvalid = 1;
+					}
 				}
 			}
 			continue;
@@ -930,6 +994,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 				      AST_TYPE(c->ast, obj)->base : CXX_TY_UNKNOWN;
 			if (obj != CXX_TY_UNKNOWN && !c->tentative)
 				cls = cxx_type_class_scope(c, QUNQ(obj));
+			if (obj != CXX_TY_UNKNOWN && !c->tentative && !cc_type_is_record(c->ast, obj) && !cxx_is(c, LEX_TOKEN_TILDE))
+				c->einvalid = 1;	/* x.m on what is not a class (a requirement fails) */
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			cxx_advance(c);
 			{
@@ -964,7 +1030,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
-					}
+					} else if (!m && !cls->dependent && !cls->has_dependent_base)
+						c->einvalid = 1;	/* no such member (a requirement fails) */
 				}
 			}
 			continue;

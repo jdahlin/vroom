@@ -1114,7 +1114,7 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; } cxx_fdone;
 
 typedef struct cxx_ftemplate {
 	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
@@ -1122,6 +1122,7 @@ typedef struct cxx_ftemplate {
 	uint32_t ndone, cdone;
 	uint32_t pos;		/* its decl-specifiers */
 	cxx_scope *ctor_class;	/* a constructor template: its class (no return type to parse) */
+	uint32_t req_pos;	/* its template header's requires-clause (0: none) */
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
 } cxx_ftemplate;
@@ -1133,6 +1134,12 @@ VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *hom
 	(void)c;
 	f->p.params = params, f->p.home = home, f->pos = pos, f->sig = CXX_TY_UNKNOWN, f->ctor_class = ctor_class;
 	return f;
+}
+
+VPRIV void cxx_ftemplate_requires(cxx_ftemplate *f, uint32_t pos)
+{
+	if (f)
+		f->req_pos = pos;
 }
 
 /* parse the signature once, the parameters bound to placeholders */
@@ -1207,6 +1214,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 	cxx_scope *binding;
 	volatile qty r = CXX_TY_UNKNOWN, sig = CXX_TY_UNKNOWN;
 	volatile bool body = false;
+	volatile int8_t viable = 1;
 	cxx_targ *targs;
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
 	cxx_param *dp;
@@ -1222,6 +1230,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 			if (!want_body || f->done[i].body) {
 				c->stats.bodies_cached++;
 				c->bound_sig = f->done[i].sig;
+				c->sig_requires = f->done[i].viable;
 				return f->done[i].ret;
 			}
 			at = i;	/* its signature was parsed; now its body */
@@ -1236,6 +1245,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
 		memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
 		f->done[f->ndone].ret = CXX_TY_UNKNOWN, f->done[f->ndone].sig = CXX_TY_UNKNOWN, f->done[f->ndone].body = 0;
+		f->done[f->ndone].viable = 1, f->done[f->ndone].n = np;
 		at = f->ndone++;
 	}
 	if (want_body)
@@ -1267,6 +1277,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
 
 		body = b;
+		viable = c->sig_requires;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
 			r = AST_TYPE(c->ast, t)->base, sig = t;
 		c->stats.bodies += body;
@@ -1288,10 +1299,13 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
 			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN)
 				f->done[i].ret = r, f->done[i].sig = sig;
-			r = f->done[i].ret, sig = f->done[i].sig;
+			if (!want_body)
+				f->done[i].viable = viable;
+			r = f->done[i].ret, sig = f->done[i].sig, viable = f->done[i].viable;
 			break;
 		}
 	c->bound_sig = sig;
+	c->sig_requires = viable;
 	return r;
 }
 
@@ -1373,6 +1387,63 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 	return 1;
 }
 
+/* a constraint parsed with the parameters bound: fn at pos gives 1, 0 or -1 */
+static int cxx_constraint_parse(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, uint32_t pos, const cxx_targ *first)
+{
+	cxx_partial *p = &f->p;
+	cxx_scope *binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	cxx_outer o;
+	jmp_buf jb;
+	volatile int v = -1;
+
+	if (c->body_depth >= 64)
+		return -1;
+	for (uint32_t j = 0; j < p->params->ntparams; j++)
+		if (bind[j].kind)
+			cxx_bind(c, binding, &p->params->tparams[j], &bind[j]);
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++;
+	c->fail = &jb;
+	c->pos = pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		if (first) {
+			/* template<Concept<args> T>: Concept<T, args> */
+			cxx_entity *ce = cxx_constraint_name_parse(c);
+			cxx_targ a[32];
+
+			if (ce && c->ntargs < 31) {
+				a[0] = *first;
+				memcpy(a + 1, c->targs, c->ntargs * sizeof *a);
+				v = cxx_concept_value(c, ce, a, c->ntargs + 1);
+			}
+		} else
+			v = cxx_requires_clause_value(c);
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	return v;
+}
+
+/* the template's constraints with its parameters bound: constrained parameters, the header's requires-clause */
+static int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
+{
+	cxx_partial *p = &f->p;
+
+	for (uint32_t i = 0; i < p->params->ntparams; i++) {
+		const cxx_tparam *tp = &p->params->tparams[i];
+
+		if (tp->constraint_b && bind[i].kind == 1) {
+			int v = cxx_constraint_parse(c, f, bind, tp->constraint_b, &bind[i]);
+
+			if (v <= 0)
+				return v;
+		}
+	}
+	return f->req_pos ? cxx_constraint_parse(c, f, bind, f->req_pos, NULL) : 1;
+}
+
 /*
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
@@ -1405,7 +1476,15 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 				return xargs[i].kind ? 0 : -1;
 			bind[i] = xargs[i];
 		}
+		{
+			int k = cxx_ftemplate_constraints(c, f, bind);
+
+			if (k <= 0)
+				return k;
+		}
 		*ret = cxx_ftemplate_return(c, f, bind, body);
+		if (c->sig_requires != 1)
+			return c->sig_requires;
 		return 1;	/* (its arity is not checked: the signature with the arguments bound would tell) */
 	}
 	if (f->sig == CXX_TY_UNKNOWN) {
@@ -1468,12 +1547,18 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	{
 		int k = cxx_ftemplate_complete(c, f, bind);
 
+		if (k > 0)
+			k = cxx_ftemplate_constraints(c, f, bind);
 		if (k <= 0) {
 			c->why = CXX_WHY_UNBOUND;
 			return k;
 		}
 	}
 	*ret = cxx_ftemplate_return(c, f, bind, body);
+	if (c->sig_requires != 1) {
+		c->why = CXX_WHY_UNBOUND;
+		return c->sig_requires;	/* its trailing requires-clause: false, or not known */
+	}
 	return 1;
 }
 
@@ -1602,4 +1687,66 @@ VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue)
 	if (!cxx_match_type(c, c->auto_owner, P, a, bind, 0) || bind[0].kind != 1)
 		return CXX_TY_UNKNOWN;
 	return cxx_auto_subst(c, pattern, bind[0].t, 0);
+}
+
+/* ---- concepts ------------------------------------------------------------------------------ */
+
+/*
+ * Concept<args>: its constraint-expression with the arguments bound, as a constant: 1 satisfied,
+ * 0 not, -1 not known (an argument or an atomic constraint vcc cannot evaluate).
+ */
+VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n)
+{
+	cxx_ftemplate *f = e ? e->ftmpl : NULL;
+	cxx_scope *ps, *binding;
+	cxx_outer o;
+	jmp_buf jb;
+	volatile int v = -1;
+	uint32_t at;
+
+	if (!f || n > 32 || c->body_depth >= 64 || c->tentative)
+		return -1;
+	ps = f->p.params;
+	for (uint32_t i = 0; i < n; i++)
+		if (!args[i].kind || args[i].kind == 3 || args[i].kind == 5 || (args[i].kind == 1 && cxx_mentions_placeholder(c, args[i].t, 0)))
+			return -1;
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (f->done[i].n == n && cxx_args_equal(f->done[i].args, args, n))
+			return f->done[i].viable;
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, f->p.home, NULL);
+	for (uint32_t i = 0; i < ps->ntparams; i++) {
+		const cxx_tparam *tp = &ps->tparams[i];
+
+		if (tp->pack) {
+			if (i + 1 != ps->ntparams || i > n)
+				return -1;
+			cxx_bind_pack(c, binding, tp, args + i, n - i);
+			break;
+		}
+		if (i >= n || (args[i].kind == 1) != (tp->kind == 1))
+			return -1;	/* (default arguments of a concept: not yet) */
+		cxx_bind(c, binding, tp, &args[i]);
+	}
+	if (f->ndone == f->cdone)
+		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
+	at = f->ndone++;
+	memset(&f->done[at], 0, sizeof f->done[at]);
+	f->done[at].args = malloc((n ? n : 1) * sizeof *args);
+	memcpy(f->done[at].args, args, n * sizeof *args);
+	f->done[at].n = n, f->done[at].viable = -1;	/* (a concept that names itself: not known) */
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++, c->unevaluated++;
+	c->fail = &jb;
+	c->pos = f->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_conditional_expression_parse(c);
+		if (c->econst)
+			v = c->evalue != 0;
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	f->done[at].viable = (int8_t)v;
+	return v;
 }

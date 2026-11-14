@@ -97,6 +97,7 @@ typedef struct cxx_tparam {
 	uint32_t name;
 	uint32_t def_b, def_e;	/* its default argument's tokens (0, 0: none) */
 	uint32_t type_b;	/* a value parameter: its type's tokens start (0: not recorded) */
+	uint32_t constraint_b;	/* a constrained type parameter (template<C T>): its concept's tokens start (0: none) */
 } cxx_tparam;
 
 /* a template argument, as far as it is known: a type or an integer value */
@@ -265,6 +266,12 @@ typedef struct cxx {
 	uint32_t ncargs, ccargs;
 	qty edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
 	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
+	uint8_t einvalid_unsure;	/* argument-dependent lookup found candidates it could not decide between */
+	uint8_t ename_missing;		/* ... and ordinary lookup found nothing by that name */
+	uint8_t einvalid;		/* the expression is ill-formed for sure (no function fits, no such member): a requirement fails */
+	int8_t req_value;		/* the last requires-expression: 1 true, 0 false, -1 not known */
+	int8_t sig_requires;		/* the last signature's trailing requires-clause: 1, 0, -1 not known (1: none) */
+	uint32_t ftmpl_req;		/* a template declaration's requires-clause (its token, 0: none) */
 	uint32_t unevaluated;		/* > 0: in an unevaluated operand or a discarded statement (calls instantiate no body) */
 	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
 	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
@@ -376,6 +383,10 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);
+VPRIV void cxx_ftemplate_requires(struct cxx_ftemplate *f, uint32_t pos);
+VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c);
+VPRIV int cxx_requires_clause_value(cxx *c);
 VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs);
 VPRIV void cxx_lambda_parameters_parse(cxx *c);
 VPRIV void cxx_class_unverifiable(cxx *c);
