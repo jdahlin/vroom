@@ -12,7 +12,7 @@ every reference-ok test of the three suites (bench/vcc-win64.py's reference
 cache; run `vcc-win64.py --ref-only` first) at -O0 and at -O2, (b) the
 undefined symbols of the mingw-w64 CRT (crt2.o, crtbegin.o, crtend.o and the
 libraries of the default link line) and of the test runtime, and (c) the
-helpers vcc's code generator calls (src/codegen/type.c's list, the complex
+helpers vcc's code generator calls (src/codegen/symbol-name.c's list, the complex
 division of src/frontend/c/complex.c, __builtin_powi*).  It then checks that
 libvccrt.a defines all of them and that the archive needs nothing but itself.
 
@@ -133,7 +133,7 @@ def _needs_one(job):
     return job[0], level, und
 
 
-# helpers vcc's code generator emits calls to (src/codegen/type.c's libcall
+# helpers vcc's code generator emits calls to (src/codegen/symbol-name.c's libcall
 # list, src/frontend/c/complex.c and library-function.c); written out so that
 # a helper added there shows up: `needs` fails on a name these files have and
 # this list lacks
@@ -152,7 +152,7 @@ __divsc3 __divdc3 __divxc3 __divtc3 __powisf2 __powidf2 __powixf2 __powitf2'''.s
 def vcc_codegen_helpers():
     """(c): the names in vcc's sources, to check VCC_CODEGEN against"""
     names = set()
-    for f in ('src/codegen/type.c', 'src/frontend/c/complex.c', 'src/frontend/c/library-function.c'):
+    for f in ('src/codegen/symbol-name.c', 'src/frontend/c/complex.c', 'src/frontend/c/library-function.c'):
         names |= set(re.findall(r'"(__[a-z0-9_]+[0-9])"', open(f'{R}/{f}').read()))
     return names
 

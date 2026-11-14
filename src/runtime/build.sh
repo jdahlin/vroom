@@ -5,11 +5,14 @@
 #   sh src/runtime/build.sh OUTDIR      (make -C src vccrt: OUTDIR = $(OUT)/vccrt)
 #
 # Parameters (environment):
-#   CC      the compiler for the target.  Default: the oracle clang, until
-#           vcc's Windows x64 code generator is in; then
-#           CC="build/linux/src/vcc --target=x86_64-w64-mingw32" is the only
-#           change (the sources are the C subset vcc compiles: GNU C11 with
-#           __int128, _Float16 and __float128, no intrinsics, no inline asm).
+#   CC      the compiler for the target.  Default: vcc itself, VCC_BIN's
+#           vpp --target=x86_64-w64-mingw32 (its -c writes the COFF object
+#           and assembles stack-probe.S with vcc's own assembler), so the
+#           library is built with no LLVM tool at all.  CC="clang
+#           --target=x86_64-w64-mingw32" builds the reference (vccrt-test.py
+#           compares helpers, not builds).  The sources are the C subset vcc
+#           compiles: GNU C11 with __int128, _Float16 and __float128, no
+#           intrinsics, no inline asm.
 #   AR      the archiver.  Default: vcc's own `var` in VCC_BIN (default
 #           OUTDIR's parent, the build directory under make), which writes
 #           COFF archives byte-identical to llvm-ar's (bench/var-cmp.py coff);
@@ -26,13 +29,18 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: build.sh OUTDIR}
-llvm=${VROOM_LLVM_BIN:-/usr/lib/llvm-23/bin}
-CC=${CC:-$llvm/clang --target=x86_64-w64-mingw32}
+mkdir -p "$out/obj"
+bin=${VCC_BIN:-$(cd "$out/.." && pwd)}
+if [ -z "${CC:-}" ]; then
+	if [ ! -x "$bin/vpp" ]; then
+		echo "build.sh: no $bin/vpp (make -C src vcc, set VCC_BIN, or CC=...)" >&2
+		exit 1
+	fi
+	CC="$bin/vpp --target=x86_64-w64-mingw32"
+fi
 CFLAGS=${CFLAGS:-}
 SRC=${SRC:-$(cd "$here" && ls *.c *.S 2>/dev/null || true)}
-mkdir -p "$out/obj"
 if [ -z "${AR:-}" ]; then
-	bin=${VCC_BIN:-$(cd "$out/.." && pwd)}
 	AR=$bin/var
 	if [ ! -x "$AR" ] || [ ! -x "$bin/vccd" ]; then
 		echo "build.sh: no $bin/var or $bin/vccd (make -C src vcc, set VCC_BIN, or AR=llvm-ar)" >&2

@@ -292,7 +292,7 @@ def corpus_build(W, jobs):
     # libvccrt.a's objects
     rt = f'{W}/vccrt'
     if not glob.glob(f'{rt}/obj/*.o'):
-        subprocess.run(['sh', f'{R}/src/runtime/build.sh', rt], check=True, env=dict(os.environ, AR=LLVM_AR))
+        subprocess.run(['sh', f'{R}/src/runtime/build.sh', rt], check=True, env=dict(os.environ, AR=LLVM_AR, CC=hostenv.llvm('clang') + ' --target=x86_64-w64-mingw32'))
     os.makedirs(f'{C}/rt', exist_ok=True)
     for o in glob.glob(f'{rt}/obj/*.o'):
         shutil.copy2(o, f'{C}/rt/')

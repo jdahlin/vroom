@@ -252,9 +252,9 @@ vcc-tsan:
 .PHONY: vcc-asan vcc-tsan
 
 # vcc's run-time support library for x86_64-w64-mingw32 (runtime/, libvccrt.a;
-# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters; without an
-# AR from the command line or the environment it archives with our var (and vccd)
-vccrt: $(if $(filter environment command line,$(origin AR)),,$(OUT)/var $(OUT)/vccd)
+# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters; by default it
+# compiles with our vpp and archives with our var (and vccd): no LLVM tool
+vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/var $(OUT)/vccd)
 	sh runtime/build.sh $(OUT)/vccrt
 
 .PHONY: vccrt
