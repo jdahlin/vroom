@@ -359,8 +359,17 @@ VPRIV void x64_ext(codegen_context *e, int r, int from, bool sgn)
 
 	if (from >= 8)
 		return;
-	if (from == 4 && !sgn && e->unit->options->opt >= 1 && !e->unit->cleanups_disabled && x64_last_u32(e, r))
-		return;
+	if (e->unit->options->opt >= 1 && !e->unit->cleanups_disabled) {
+		x64_lowering_context *x = e->x64_context;
+		if (from == 4 && !sgn && x64_last_u32(e, r))
+			return;
+		if (x->record_count && !X64_REGISTER_IS_XMM(r)) {
+			const record *last = &x->records[x->record_count - 1];
+			if ((last->opcode == X64_OP_LD || last->opcode == X64_OP_LDX || last->opcode == X64_OP_EXT) &&
+			    last->registers[0] == r && last->size == from && last->condition == sgn)
+				return;
+		}
+	}
 	i = x64_record_emit_three_registers(e, X64_OP_EXT, from, r, r, X64_REGISTER_NONE);
 	i->condition = sgn;
 }
