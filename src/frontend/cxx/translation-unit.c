@@ -7,8 +7,55 @@
  */
 #include <fcntl.h>
 #include <stdio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "cxx-internal.h"
+
+/* a TU forked after a shared prefix (#pragma vcc_fork): its object's path, for the driver (job.c) */
+const char *cxx_fork_output;
+
+/*
+ * The prefix (the headers every TU of VCC_FORK_LIST includes first) is parsed: one child per TU, in turn,
+ * each continuing from here as that TU.  The prefix file's next line is #include "__vcc_fork_tu.cpp"; the
+ * child writes that file next to the prefix as an #include of its TU, reads the rest of its tokens and
+ * parses them; the driver writes its object to the list's path.  The parent waits for each and returns
+ * 2 (nothing of its own to write).  The list: one "source object" per line, absolute paths.  A fork server
+ * in place of a precompiled header: the prefix's state is shared with no cost to load it (PLAN-cxx.md).
+ */
+static int cxx_fork_tus(cxx *c, int *child)
+{
+	FILE *f = fopen(getenv("VCC_FORK_LIST"), "r");
+	char src[4096], out[4096], stub[4096];
+	const char *dir = getenv("VCC_FORK_DIR");
+	int bad = 0;
+
+	*child = 0;
+	if (!f || !dir)
+		return 1;
+	snprintf(stub, sizeof stub, "%s/__vcc_fork_tu.cpp", dir);
+	while (fscanf(f, "%4095s %4095s", src, out) == 2) {
+		pid_t pid;
+		int st;
+		FILE *sf = fopen(stub, "w");
+
+		if (!sf)
+			return 1;
+		fprintf(sf, "#include \"%s\"\n", src);
+		fclose(sf);
+		fflush(NULL);
+		pid = fork();
+		if (pid == 0) {
+			fclose(f);
+			cxx_fork_output = strdup(out);
+			*child = 1;
+			return 0;
+		}
+		if (pid < 0 || waitpid(pid, &st, 0) < 0 || !WIFEXITED(st) || WEXITSTATUS(st))
+			bad++, dprintf(c->o->errfd, "vcc: fork: %s failed\n", src);
+	}
+	fclose(f);
+	return bad ? 1 : 2;
+}
 
 static void cxx_free(cxx *c)
 {
@@ -60,6 +107,16 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	c.fail = &top;
 	if (!setjmp(top)) {
 		cxx_translation_unit_parse(&c);
+		if (c.fork_pending) {
+			int child, r = cxx_fork_tus(&c, &child);
+
+			if (!child) {
+				cxx_free(&c);
+				return r == 2 ? 0 : 1;	/* (the parent: its children wrote the objects) */
+			}
+			cxx_tokens_read(&c);	/* the child: its TU's own tokens, then them parsed */
+			cxx_translation_unit_parse(&c);
+		}
 	} else {
 		const char *name = "?";
 		uint32_t nl = 1, line = 0, col = 0;

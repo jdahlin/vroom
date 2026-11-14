@@ -239,6 +239,8 @@ typedef struct cxx {
 	cc *ast;			/* the TU's AST tables (struct ast inside struct cc), what code generation reads */
 	cxx_token *tok;			/* the TU's tokens, then CXX_EOF */
 	uint32_t ntok, pos;
+	uint32_t tok_cap;		/* tok's capacity (a read resumed after #pragma vcc_fork appends) */
+	uint8_t fork_pending;		/* the read stopped at #pragma vcc_fork */
 	cxx_undo *undo;
 	uint32_t nundo, cundo;
 	cxx_scope *scope;		/* the innermost */

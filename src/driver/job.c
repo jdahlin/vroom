@@ -228,7 +228,11 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				cxx_options xo = { .standard = job->cxx, .errfd = job->errfd,
 						   .progress = driver_environment_get(env, "VCC_CXX_PROGRESS") != NULL };
 
+				extern const char *cxx_fork_output;
+
 				job->status = cxx_run(p, &co, &xo) || pp_error_count(p) ? 1 : 0;
+				if (cxx_fork_output)
+					job->output_file = cxx_fork_output;	/* (a TU forked after a shared prefix: its own object) */
 			} else
 				job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
 			driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;

@@ -1235,3 +1235,26 @@ unity-bygget, 1,5 s för alla -c) blir det ~3,7 s, ~65x.  Framändan hoppar änn
 över arbete (otypade anrop, ej instansierade kroppar), så siffrorna är
 optimistiska.  30x kräver alltså delade headrar och troligen delade
 instansieringar (vccd), inte bara PCH.
+
+### Status (40): headrarna en gång — 66x mätt, med clang som utfyllnad (2026-11-14)
+`bench/cxx-fork.py`: en forkserver i stället för förkompilerade headrar.  vpp -c
+av en prefixfil (testets `#define JSON_*/DOCTEST_*`, `doctest_compatibility.h`,
+`nlohmann/json.hpp`, `#pragma vcc_fork`) tolkar headrarna en gång och forkar
+sedan ett barn per TU som fortsätter med TU:ns egen text och skriver sitt eget
+objekt (`cxx_fork_tus` i translation-unit.c; job.c tar objektets sökväg).
+Varje TU kompileras fortfarande för sig.  70 TU:er, 3 prefix (68, 1, 1).
+- **vcc -O0: 3,7 s CPU för hela sviten, 66x mot clang -O2:s 243 s**
+  (TU för TU 17,9 s, 13,6x).  69 av 70 test går igenom på båda sätten
+  (unit-32bit fallerar i båda).
+- Objekten är desamma: alla 70 har samma funktioner och samma .text
+  (199 360 byte) som när TU:erna kompileras var för sig.
+- Förbehåll: vcc genererar fortfarande bara ~1 % av koden (clangs svaga
+  objekt fyller resten).  Kodgenereringen för resten skattas till ~2 s
+  (C-emittern: 145 000 funktioner på 2,2 s), framändan hoppar ännu över
+  arbete (otypade anrop, ej instansierade kroppar).  En full kodgenerering
+  hamnar därför troligen kring 6 s, ~40x: över 30x, men inte mätt.
+Unity-bygget (`bench/cxx-unity.py`) är ingen bra ersättare: clangs egna
+unity-byggen av de flesta grupperna fallerar sina test (testen påverkar
+varandra), så bara 55 giltiga grupper återstår.
+Mangling som nu stämmer med clang: abi_tag, bool/unsigned-värden i
+mallargument, funktionsmallars deklarerade signatur (T_), wchar_t/char8/16/32.

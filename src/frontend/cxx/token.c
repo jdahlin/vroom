@@ -50,18 +50,25 @@ VPRIV uint32_t cxx_keyword_of(uint32_t id)
 VPRIV void cxx_tokens_read(cxx *c)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
-	uint32_t cap = 1u << 16;
+	uint32_t cap = c->tok ? c->tok_cap : 1u << 16;
 	ptok t;
 
 	pthread_once(&once, cxx_keyword_table_init);
 	/* the parser keeps every token: pp's made spellings (#x, a##b) must not be reused */
 	pp_temporary_hold(c->p, 1);
-	c->tok = malloc(cap * sizeof(cxx_token));
-	c->ntok = 0;
+	if (!c->tok)	/* (else resumed after #pragma vcc_fork: the TU's own tokens follow the prefix's) */
+		c->tok = malloc(cap * sizeof(cxx_token)), c->ntok = 0;
+	c->fork_pending = 0;
 	for (;;) {
 		pp_token_next(c->p, &t);
-		if (t.kind == PP_TOKEN_KIND_DIRECTIVE_LINE)
+		if (t.kind == PP_TOKEN_KIND_DIRECTIVE_LINE) {
+			/* #pragma vcc_fork: the end of a prefix of headers shared by the TUs forked after it (cxx_run) */
+			if (t.len >= 15 && !memcmp(t.s, "pragma vcc_fork", 15) && getenv("VCC_FORK_LIST")) {
+				c->fork_pending = 1;
+				break;
+			}
 			continue;	/* #pragma lines: none matters to parsing json yet */
+		}
 		if (c->ntok + 2 >= cap)
 			c->tok = realloc(c->tok, (cap *= 2) * sizeof(cxx_token));
 		cxx_token *x = &c->tok[c->ntok];
@@ -118,8 +125,12 @@ VPRIV void cxx_tokens_read(cxx *c)
 		}
 		c->ntok++;
 	}
+	c->tok_cap = cap;
+	if (c->ntok + 2 >= cap)
+		c->tok = realloc(c->tok, (c->tok_cap = cap *= 2) * sizeof(cxx_token));
 	c->tok[c->ntok].kind = LEX_TOKEN_EOF;
 	c->tok[c->ntok].kw = 0;
+	c->tok[c->ntok].s = "", c->tok[c->ntok].len = 0, c->tok[c->ntok].id = 0;
 	c->tok[c->ntok + 1] = c->tok[c->ntok];
 }
 
