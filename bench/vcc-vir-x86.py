@@ -22,7 +22,7 @@ flags = ['--target=x86_64-linux-gnu', '-ffp-contract=off', '-fno-pie', '-isystem
 # Shared loop/join regressions use the native Linux C library headers.
 if Path('/usr/include/x86_64-linux-gnu').is_dir():
     flags += ['-isystem', '/usr/include/x86_64-linux-gnu', '-isystem', '/usr/include']
-required = {'vx_shift', 'vx_stack', 'vx_fp', 'vx_rotate', 'vx_f32', 'vx_f64', 'vx_i32', 'vx_sum', 'vx_series', 'vx_division', 'vx_srem', 'vx_udiv64', 'vx_udiv32'}
+required = {'vx_shift', 'vx_stack', 'vx_fp', 'vx_rotate', 'vx_f32', 'vx_f64', 'vx_i32', 'vx_sum', 'vx_series', 'vx_division', 'vx_srem', 'vx_udiv64', 'vx_udiv32', 'vx_index_reuse'}
 vector = {'vx_f32': 'mulps', 'vx_f64': 'mulpd', 'vx_i32': 'paddd', 'vx_sum': 'paddq', 'vx_series': 'paddq'}
 env = dict(os.environ, VCC_THREADS='1')
 # VIR's checks and reports (doc/OPTIMIZATION.md): -O3 has the vectorizer, -O2 not
@@ -54,6 +54,9 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         if threaded.read_bytes() != asm.read_bytes():
             raise SystemExit('assembly differs with six emitter threads')
         text = asm.read_text()
+        index_body = text.split('vx_index_reuse:\n', 1)[1].split('.Lfunc_end', 1)[0]
+        if len(re.findall(r'imulq\s+\$80,', index_body)) > 1:
+            raise SystemExit('repeated row index multiplication across dominated blocks')
         if lvl == '-O2':
             # The allocator's map and probes (-fvir-map, -fvir-probe) observe the
             # final allocation; -fvir-map-function must never change the code of

@@ -132,10 +132,21 @@ VPRIV void virbuild_block_values_number(codegen_context *e, virbuild_simplify_st
 		} else if ((eff & ~VIR_EFFECT_UF) == VIR_EFFECT_P && op != VIR_OP_BPARAM && op != VIR_OP_PARAM && op != VIR_OP_PROJ) {
 			vir_insn in = V->insns[q].insn;
 
+			/* Reuse index arithmetic from a dominating block on x86. Keeping
+			 * the same address also lets ordinary load numbering see it. */
+			uint32_t generation = S->block;
+			if (CODEGEN_IS_X64(e->compile_context) &&
+			    (in.type == VIR_TYPE_I32 || in.type == VIR_TYPE_I64 || in.type == VIR_TYPE_PTR)) {
+				switch (op) {
+				case VIR_OP_EXT: case VIR_OP_TRUNC: case VIR_OP_SHL: case VIR_OP_LSHR:
+				case VIR_OP_MUL: case VIR_OP_ADD: case VIR_OP_PTRADD: case VIR_OP_P2I: case VIR_OP_I2P:
+					generation = 0;
+				}
+			}
 			if (virbuild_opcode_is_commutative(op) && in.a > in.b)
-				key = (virbuild_value_entry){ op, in.type, in.flags, in.b, in.a, in.c, S->block, 0 };
+				key = (virbuild_value_entry){ op, in.type, in.flags, in.b, in.a, in.c, generation, 0 };
 			else
-				key = (virbuild_value_entry){ op, in.type, in.flags, in.a, in.b, in.c, S->block, 0 };
+				key = (virbuild_value_entry){ op, in.type, in.flags, in.a, in.b, in.c, generation, 0 };
 		} else
 			continue;
 		t = virbuild_value_table_lookup(S, &key);

@@ -22,6 +22,19 @@ NI long vx_division(long a,long b) { return a/b; }
 NI long vx_srem(long a,long b,long c) {return (a/b)*3+(a%b)*7+c;}
 NI unsigned long vx_udiv64(unsigned long a,unsigned long b,unsigned long c) {return a/b+(a%b)*7+c;}
 NI unsigned vx_udiv32(unsigned a,unsigned b,unsigned c) {return a/b+a%b+c;}
+struct row { int field[20]; };
+
+NI int vx_index_reuse(struct row *a, struct row *b, unsigned i, int update)
+{
+	int first = a[i].field[2];
+	if (first == 5)
+		return b[i].field[0] + 4;
+	if (first < 4)
+		return a[i].field[0];
+	b[i].field[0] = update;
+	return a[i].field[0] + b[i].field[1];
+}
+
 int main(void)
 {
 	float a[80],b[80],c[80]; double da[80],db[80],dc[80]; int ia[80],ib[80],ic[80]; long la[80];
@@ -54,5 +67,13 @@ int main(void)
 	if(vx_srem(-19,3,100)!=75)return 13;
 	if(vx_udiv64(~0UL,65537,91)!=(~0UL/65537+(~0UL%65537)*7+91))return 14;
 	if(vx_udiv32(0xf1234567u,7,19)!=(0xf1234567u/7+0xf1234567u%7+19))return 15;
+	struct row rows[2] = { 0 };
+	rows[1].field[0] = 11;
+	rows[1].field[1] = 3;
+	if (vx_index_reuse(rows, rows, 1, 20) != 11) return 16;
+	rows[1].field[2] = 5;
+	if (vx_index_reuse(rows, rows, 1, 20) != 15) return 17;
+	rows[1].field[2] = 9;
+	if (vx_index_reuse(rows, rows, 1, 20) != 23) return 18;
 	return 0;
 }
