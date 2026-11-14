@@ -2228,5 +2228,5 @@ TU; `unit-assert_macro` färre (487 mot 662), inte utrett.
   (värdeinitiering): `__test_implicit_default_constructible<const long&>({})` i decltype.
 - En funktionsmall med paket och fast antal funktionsparametrar är inte livskraftig för för många eller för få
   argument (förut "inte känd": `pair`:s piecewise-konstruktor gjorde `pair()` okänd).
-Kvar: kod för `f({})` utanför ett overvärderat sammanhang.  cxx-strict: 90 funktioner till, inga nya; 212
+Kvar: kod för `f({})` när anropet evalueras (utanför decltype).  cxx-strict: 90 funktioner till, inga nya; 212
 summerat per TU, 3 av 70 TU:er klarar sina tester med vcc ensamt.
