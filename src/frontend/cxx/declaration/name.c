@@ -366,9 +366,9 @@ VPRIV void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 		}
 	}
 	(void)t;
-	c->in_template_args++;
+	c->in_template_args++, c->want_constant++;	/* (a constant-expression: constexpr calls folded) */
 	cxx_conditional_expression_parse(c);
-	c->in_template_args--;
+	c->in_template_args--, c->want_constant--;
 	/* a constant expression: its value */
 	/* (negative: its value in the parameter's type is not known here, size_t(-1) for one) */
 	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0) {

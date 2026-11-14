@@ -2191,3 +2191,12 @@ per TU.
 - `p->~T()` av en virtuell destruktor anropar D1 genom vtabellen.
 Test: `run/ttp-patterns-vdtor.cpp`.  cxx-strict: 40 funktioner till, 2 nya (`ostream::put`/`write`: try/catch);
 214 summerat per TU.
+
+## Status 131 (2026-11-15)
+- `T x{}` och `T x{e}` för en skalär lokal variabel (`std::uint8_t number{}` i json:s binärläsare): noll
+  eller e; förut ingen kod.
+- constexpr-anrop viks också i mallargument (`want_constant` kring ett värdearguments uttryck), och
+  `cxx_const_call` tar en instans av en medlemsfunktionsmall (mallens tokens, klassens räckvidd).
+Kvar för `std::pair<A, B> p;`: en funktionsmall vars enda parameter är ett onamngivet paket
+(`template <int&...> static constexpr bool __enable_default()`) deduceras inte (paketet ska vara tomt).
+cxx-strict: inga nya; 213 summerat per TU.

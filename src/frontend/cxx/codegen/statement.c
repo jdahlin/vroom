@@ -226,6 +226,19 @@ fail:
 	return false;
 }
 
+VPRIV bool cxx_gen_is_reference_public(cxx *c, ast_qualified_type t)
+{
+	return cxx_gen_is_reference(c, t);
+}
+
+/* zero of the scalar type t, as a node (0: not built) */
+VPRIV uint32_t cxx_gen_zero_public(cxx *c, ast_qualified_type t, uint32_t loc)
+{
+	if (!cxx_gen_on(c) || !cxx_gen_type_ok(c, t) || cc_type_is_record(c->ast, t))
+		return 0;
+	return cc_conversion_apply(c->ast, cc_node_integer_new(c->ast, 0, cc_type_basic(AST_TYPE_INT), loc), AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+}
+
 VPRIV uint32_t cxx_gen_var_node_public(cxx *c, uint32_t s, uint32_t loc)
 {
 	return cxx_gen_var_node(c, s, loc);

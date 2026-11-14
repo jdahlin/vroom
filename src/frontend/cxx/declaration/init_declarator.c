@@ -825,6 +825,18 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						cxx_gen_global_end(c, gen_var, cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc), true);
 					gen_declared = true;
 				}
+			} else if (gen_local && !c->tentative && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+				   !cxx_gen_is_reference_public(c, t)) {
+				/* T x{} or T x{e} of a scalar: zero, or e (std::uint8_t number{} in json's binary reader) */
+				cxx_braced_arguments_parse(c);
+				if (c->ncargs == 0 || (c->ncargs == 1 && c->carg_nodes[0])) {
+					uint32_t v = c->ncargs ? c->carg_nodes[0] : cxx_gen_zero_public(c, t, name_loc);
+
+					if (v) {
+						cxx_gen_local_declare(c, gen_local, v, true, name_loc);
+						gen_declared = true;
+					}
+				}
 			} else
 				cxx_braced_init_list_parse(c);
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {

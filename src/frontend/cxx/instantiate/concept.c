@@ -229,7 +229,9 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
 	volatile int64_t v = 0;
 	uint32_t pos, depth = 0;
 
-	if (!f || !f->fn_constexpr || c->tentative || c->body_depth >= 64 || f->ty == CXX_TY_UNKNOWN ||
+	bool tmpl_member = f && !f->fn_constexpr && f->inst_ftmpl && f->member_of && !f->late && !f->body_end;
+
+	if (!f || !(f->fn_constexpr || tmpl_member) || c->tentative || c->body_depth >= 64 || f->ty == CXX_TY_UNKNOWN ||
 	    AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || AST_TYPE(c->ast, f->ty)->n)
 		return false;
 	if (f->cx_state == 1)
@@ -238,7 +240,37 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
 		begin = l->begin, end = l->end, bscope = l->scope;
 	else if (f->body_end)
 		begin = f->body_begin, end = f->body_end, bscope = f->body_scope;	/* (the class's late list is gone by now) */
-	else
+	else if (tmpl_member) {
+		/* an instance of a member function template (template <int&...> static constexpr bool
+		   __enable_default() in libc++'s pair): the template's tokens, constexpr, in its class's scope */
+		bool cx = false;
+		uint32_t d = 0, q;
+
+		for (q = f->inst_ftmpl->pos; q < c->ntok; q++) {
+			int k = c->tok[q].kind;
+
+			if (c->tok[q].kw == CXX_KW_constexpr)
+				cx = true;
+			if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
+				d++;
+			else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && d)
+				d--;
+			else if (!d && (k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_SEMICOLON))
+				break;
+		}
+		if (!cx || q >= c->ntok || c->tok[q].kind != LEX_TOKEN_LEFT_BRACE)
+			return false;
+		begin = q;
+		for (d = 0; q < c->ntok; q++) {
+			if (c->tok[q].kind == LEX_TOKEN_LEFT_BRACE)
+				d++;
+			else if (c->tok[q].kind == LEX_TOKEN_RIGHT_BRACE && !--d)
+				break;
+		}
+		if (q >= c->ntok)
+			return false;
+		end = q + 1, bscope = f->member_of;
+	} else
 		return false;
 	for (pos = begin; pos < end; pos++) {	/* (the body: the first { outside parentheses) */
 		int k = c->tok[pos].kind;
