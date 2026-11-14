@@ -19,7 +19,15 @@ static int as_text_has_prefix(as_text n, const char *pre)
 
 VPRIV uint32_t as_fragment_latest(as_context *a, uint32_t frag)	/* a frag split by .prefalign goes on in its continuation */
 {
+	/* (a section switched back to once per function: its chain grows by one frag each time, so the walk
+	   resumes where it last ended instead of starting over; 0 is never a chain's head) */
+	uint32_t head = frag, slot = head & 3;
+
+	if (frag && a->latest_head[slot] == head)
+		frag = a->latest_end[slot];
 	while (elf_frag(a->object, frag)->cont) frag = elf_frag(a->object, frag)->cont;
+	if (head)
+		a->latest_head[slot] = head, a->latest_end[slot] = frag;
 	return frag;
 }
 

@@ -94,6 +94,7 @@ struct as_context {
 	as_frame frames[AS_FRAMES_MAX]; int frame_count;
 	as_condition conditions[AS_CONDITIONS_MAX]; int condition_count;
 	uint32_t fragment_current, fragment_previous;	/* current/previous frag */
+	uint32_t latest_head[4], latest_end[4];	/* as_fragment_latest: where a few chains of continuations ended (a walk resumes there) */
 	struct { uint32_t cur, prev; } section_stack[AS_SECTION_STACK_MAX]; int section_stack_count;
 	vregion expansion_text;		/* expansion text stack */
 	vregion definitions;		/* macro definitions etc. (per run) */

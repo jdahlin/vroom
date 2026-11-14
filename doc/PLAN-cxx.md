@@ -1212,3 +1212,26 @@ oanvända inline-funktioner inte längre emitteras (en funktion utan kod drar
 inte in sina anrop), inte för att mindre kod genereras.  Kvar: strängliteral
 som variadiskt argument (`printf("%lu", ...)` blir otypad), rethrow ur en
 hanterare, statiska lokala variabler, implicita kopieringskonstruktorer.
+
+### Status (39): första mätningen hela vägen, med clang som utfyllnad (2026-11-14)
+`bench/cxx-weakfill.py`: varje json-test kompileras av vcc -O0; clangs -O0-objekt
+för samma TU görs svagt (`llvm-objcopy --globalize-symbol=_Z* --weaken`) och
+länkas med, så att det vcc inte gav kod kommer från clang.  Namn som ingen
+definierar (vcc manglar annorlunda) blir stubbar som fäller (`ud2`).
+- **66 av 70 test länkar och går igenom** (4 anropar en stubb:
+  32bit, bjdata, deserialization, regression2).
+- vcc -O0, TU för TU: **18,6 s CPU** (3,2 s vägg, -j 6), 13x mot clang -O2:s
+  243 s.  -fsyntax-only 18,1 s; kodgenereringen lägger till 1,2 s, men vcc
+  emitterar bara 2 038 av clangs 145 428 funktioner (199 kB av 22 MB .text).
+- Headrarna ensamma (doctest + json.hpp) tar 0,17 s per TU: 11,9 s av 18,1 s
+  är samma headrar 70 gånger.
+- Assemblern var kvadratisk i antal funktioner (`as_fragment_latest` gick hela
+  kedjan av fortsättningsfragment vid varje byte till `.text`): 145 000
+  C-funktioner tog 100 s, nu 2,2 s (clang -O0 10,7 s).  Utdata identisk.
+Prognos (uppskattning, inte mätning): med förkompilerade headrar 0,17 s +
+TU-eget arbete 7,4 s + resten av kodgenereringen (~143 000 funktioner à
+~15 µs, 2,1 s) ≈ 9,7 s, **25x**.  Delas även instansieringarna (som i
+unity-bygget, 1,5 s för alla -c) blir det ~3,7 s, ~65x.  Framändan hoppar ännu
+över arbete (otypade anrop, ej instansierade kroppar), så siffrorna är
+optimistiska.  30x kräver alltså delade headrar och troligen delade
+instansieringar (vccd), inte bara PCH.
