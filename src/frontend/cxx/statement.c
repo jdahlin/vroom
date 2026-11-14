@@ -38,6 +38,8 @@ static void cxx_block_declaration(cxx *c)
 }
 
 /* a declaration of a block scope (tried before an expression) */
+static void cxx_substatement_parse(cxx *c);
+
 static bool cxx_declaration_statement_try(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
@@ -204,7 +206,7 @@ static void cxx_for_parse(cxx *c)
 	}
 	c->gen_notemp--;
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-	cxx_statement_parse(c);
+	cxx_substatement_parse(c);
 	c->scope = outer;
 	if (gen && cxx_gen_on(c)) {
 		cc_id_list sb;
@@ -223,10 +225,73 @@ static void cxx_for_parse(cxx *c)
 }
 
 /* if/switch/while ( [init;] condition ) */
+/*
+ * An if's or a switch's condition that is a declaration (T x = e, T x{e}): parsed as a declaration like any
+ * other, up to the ) that ends the condition; its value is the variable's.  Code generation declares the
+ * variable in the block around the statement.  False: not a declaration.
+ */
+static bool cxx_condition_declaration_parse(cxx *c)
+{
+	uint32_t start = c->pos, close = c->pos, name = 0, at = 0;
+	int d = 0;
+
+	if (!c->cond_decl || c->tentative || c->template_depth)
+		return false;
+	for (; close < c->ntok; close++) {
+		int k = c->tok[close].kind;
+
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE || k == LEX_TOKEN_LEFT_BRACE)
+			d++;
+		else if (k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_RIGHT_BRACE) {
+			if (!d--)
+				break;
+		} else if (!d && k == LEX_TOKEN_SEMICOLON)
+			return false;	/* (an init-statement first) */
+		else if (!d && !name && k == LEX_TOKEN_IDENTIFIER && !c->tok[close].kw &&
+			 (c->tok[close + 1].kind == LEX_TOKEN_EQUAL || c->tok[close + 1].kind == LEX_TOKEN_LEFT_BRACE))
+			name = c->tok[close].id, at = close;
+	}
+	if (!name || at == start || close >= c->ntok || c->tok[close].kind != LEX_TOKEN_RIGHT_PAREN)
+		return false;
+	{
+		/* (what comes before the name ends a type: a name, >, *, &) */
+		int pk = c->tok[at - 1].kind;
+
+		if (pk != LEX_TOKEN_IDENTIFIER && pk != LEX_TOKEN_GREATER && pk != LEX_TOKEN_STAR && pk != LEX_TOKEN_AMPERSAND &&
+		    pk != LEX_TOKEN_AMPERSAND_AMPERSAND)
+			return false;
+	}
+	{
+		jmp_buf djb, *outer_fail = c->fail;
+		volatile bool parsed = false;
+		cxx_entity *e;
+
+		c->tok[close].kind = LEX_TOKEN_SEMICOLON;
+		c->fail = &djb;
+		if (!setjmp(djb)) {
+			cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
+			parsed = true;
+		}
+		c->fail = outer_fail;
+		c->tok[close].kind = LEX_TOKEN_RIGHT_PAREN;
+		if (!parsed)
+			longjmp(*outer_fail, 1);
+		c->pos = close;
+		e = cxx_lookup(c, name);
+		if (e && e->kind == CXX_ENTITY_VALUE)
+			cxx_name_type(c, e);
+		else
+			cxx_et(c, CXX_TY_UNKNOWN, false);
+	}
+	return true;
+}
+
 static void cxx_condition_parse(cxx *c)
 {
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	for (;;) {
+		if (cxx_condition_declaration_parse(c))
+			break;
 		if (cxx_declaration_statement_try(c)) {
 			/* a declaration: init-statement ending in ; or a condition declaration */
 			uint32_t save = c->pos;
@@ -335,6 +400,35 @@ VPRIV void cxx_statement_parse(cxx *c)
 	c->sdepth = depth - 1;
 }
 
+/*
+ * A statement that is a part of another (an if's branches, a loop's body, a label's statement).  Code
+ * generation: the temporaries it declares are its own, in a block around it (it may run many times or not
+ * at all for one entry of the enclosing block).
+ */
+static void cxx_substatement_parse(cxx *c)
+{
+	cc_id_list list;
+	void *outer_block = c->gen_block;
+	uint32_t outer_temps = c->gen_block_temps, loc = cxx_peek(c, 0)->loc;
+	bool gen = cxx_gen_on(c) && c->gen_block && !cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+
+	if (gen) {
+		cc_id_list_init(&list);
+		c->gen_block = &list;
+		c->gen_block_temps = 0;
+	}
+	cxx_statement_parse(c);
+	if (gen) {
+		c->gen_block = outer_block;
+		c->gen_block_temps = outer_temps;
+		if (list.n && c->snode && cxx_gen_on(c)) {
+			cc_id_list_append(c->ast, &list, c->snode);
+			c->snode = cxx_gen_new_statement(c, N_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n);
+		} else if (list.n)
+			cxx_gen_fail(c);	/* (declarations with no statement to go with) */
+	}
+}
+
 /* a nested statement's node, or an empty block for an empty statement */
 static uint32_t cxx_gen_nested(cxx *c, uint32_t loc)
 {
@@ -372,6 +466,13 @@ static void cxx_statement_parse1(cxx *c)
 		bool is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
 		int taken = -1;	/* if constexpr with a known condition: 1 the first statement, 0 the else */
 		uint32_t gen_cond = 0, gen_then = 0, gen_else = 0;
+		/* code generation: what the condition declares (a variable, temporaries) lives in a block around the if */
+		cc_id_list cpre;
+		void *cond_outer = c->gen_block;
+		uint32_t cond_temps = c->gen_block_temps;
+		bool cond_gen = cxx_gen_on(c) && c->gen_block;
+
+		cpre.n = 0;
 
 		if (cxx_is(c, LEX_TOKEN_EXCLAMATION) || cxx_is_kw(c, CXX_KW_consteval)) {	/* if !consteval / if consteval */
 			cxx_accept(c, LEX_TOKEN_EXCLAMATION);
@@ -381,25 +482,44 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
 
 			cxx_scope_push(c, s);
+			if (cond_gen) {
+				cc_id_list_init(&cpre);
+				c->gen_block = &cpre;
+				c->gen_block_temps = 0;
+			}
+			c->cond_decl = 1;
 			cxx_condition_parse(c);
+			c->cond_decl = 0;
 			gen_cond = is_constexpr ? 0 : cxx_gen_condition(c, c->enode);
+			if (cond_gen) {
+				c->gen_block = cond_outer;
+				c->gen_block_temps = cond_temps;
+			}
 			if (is_constexpr && c->econst && !c->tentative && !c->template_depth)
 				taken = c->evalue != 0;
 			/* the discarded statement is parsed, not instantiated: what it calls is not used */
 			c->unevaluated += taken == 0;
-			cxx_statement_parse(c);
+			cxx_substatement_parse(c);
 			c->unevaluated -= taken == 0;
 			gen_then = cxx_gen_nested(c, sloc);
 			c->scope = outer;
 		}
 		if (cxx_accept_kw(c, CXX_KW_else)) {
 			c->unevaluated += taken == 1;
-			cxx_statement_parse(c);
+			cxx_substatement_parse(c);
 			c->unevaluated -= taken == 1;
 			gen_else = cxx_gen_nested(c, sloc);
 		}
-		if (gen_cond && gen_then && cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, N_IF, sloc, gen_cond, gen_then, gen_else));
+		if (gen_cond && gen_then && cxx_gen_on(c)) {
+			uint32_t st = cxx_gen_new_statement(c, N_IF, sloc, gen_cond, gen_then, gen_else);
+
+			if (cond_gen && cpre.n) {
+				cc_id_list_append(c->ast, &cpre, st);
+				st = cxx_gen_new_statement(c, N_BLOCK, sloc, 0, cc_id_list_freeze(c->ast, &cpre), cpre.n);
+			}
+			cxx_gen_statement(c, st);
+		} else if (cond_gen && cpre.n)
+			cxx_gen_fail(c);
 		return;
 	case CXX_KW_switch: case CXX_KW_while: {
 		cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
@@ -412,7 +532,7 @@ static void cxx_statement_parse1(cxx *c)
 		cxx_condition_parse(c);
 		c->gen_notemp -= is_while;
 		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : cxx_gen_switch_value(c, c->enode);
-		cxx_statement_parse(c);
+		cxx_substatement_parse(c);
 		gen_body = cxx_gen_nested(c, sloc);
 		c->scope = outer;
 		if (gen_cond && gen_body && cxx_gen_on(c))
@@ -423,7 +543,7 @@ static void cxx_statement_parse1(cxx *c)
 		uint32_t gen_body, gen_cond;
 
 		cxx_advance(c);
-		cxx_statement_parse(c);
+		cxx_substatement_parse(c);
 		gen_body = cxx_gen_nested(c, sloc);
 		cxx_expect_kw(c, CXX_KW_while);
 		cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -501,7 +621,7 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_gen_fail(c);	/* (a jump past a temporary that is destroyed at the block's end) */
 		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
-			cxx_statement_parse(c);
+			cxx_substatement_parse(c);
 		if (known && cxx_gen_on(c))
 			cxx_gen_statement(c, cxx_gen_case(c, lo, hi, cxx_gen_nested(c, sloc), sloc));
 		return;
@@ -513,7 +633,7 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_gen_fail(c);	/* (a jump past a temporary that is destroyed at the block's end) */
 		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
-			cxx_statement_parse(c);
+			cxx_substatement_parse(c);
 		if (cxx_gen_on(c))
 			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DEFAULT, sloc, 0, 0, cxx_gen_nested(c, sloc)));
 		return;

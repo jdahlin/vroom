@@ -1052,6 +1052,16 @@ VPRIV uint32_t cxx_operator_id_at(cxx *c, uint32_t n)
 	return vintern_copy(buf, len);
 }
 
+/* the function just declared has default arguments: where their tokens are, for the calls that leave them out */
+static void cxx_defaults_record(cxx *c, cxx_entity *e)
+{
+	if (c->tentative || !e->ndefaults || c->fn_ndefs != e->ndefaults || c->template_depth)
+		return;
+	e->defs = malloc(2 * c->fn_ndefs * sizeof *e->defs);
+	memcpy(e->defs, c->fn_defs, 2 * c->fn_ndefs * sizeof *e->defs);
+	e->def_scope = c->scope;
+}
+
 /* operator-function-id or conversion-function-id, after 'operator': its name (1: not entered in a scope) */
 static uint32_t cxx_operator_name_parse(cxx *c)
 {
@@ -1460,7 +1470,7 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 {
 	qty *types = NULL, *decls = NULL;
 	uint32_t *names = NULL;
-	uint32_t n = 0, cap = 0, ndefaults = 0, pack = UINT32_MAX;
+	uint32_t n = 0, cap = 0, ndefaults = 0, pack = UINT32_MAX, def_tok[16];
 	uint8_t variadic = 0, unknown = 0;
 
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -1489,10 +1499,12 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 				 AST_TYPE_KIND(c->ast, c->type_out) == TY_FUNC ? t : QT(QI(t), QQ(t) | (QQ(c->type_out) & (Q_CONST | Q_VOLATILE)));
 
 			if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
-				uint32_t inner = ndefaults;
+				uint32_t inner = ndefaults, db = c->pos;
 
 				cxx_initializer_parse(c);	/* (a lambda's parameters inside: not ours) */
 				ndefaults = inner + 1;
+				if (inner < 8)
+					def_tok[2 * inner] = db, def_tok[2 * inner + 1] = c->pos;
 			}
 			if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->pos && c->tok[c->pos - 1].kind == LEX_TOKEN_IDENTIFIER && !c->tok[c->pos - 1].kw &&
 			    t != CXX_TY_UNKNOWN) {
@@ -1539,6 +1551,8 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 		memcpy(c->fn_pdecl, decls, n * sizeof(qty));
 	}
 	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown, c->fn_ndefaults = ndefaults;
+	c->fn_ndefs = ndefaults <= 8 ? ndefaults : 0;
+	memcpy(c->fn_defs, def_tok, 2 * c->fn_ndefs * sizeof *def_tok);
 	c->fn_pack = pack;
 	free(types);
 	free(names);
@@ -2993,7 +3007,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				decl_fn = e;
 			if (e && !tmpl) {
 				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
-				e->ndefaults = (uint16_t)c->decl_ndefaults;
+				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);
 				c->last_fn = e;	/* (its body: parsed when used) */
 			} else if (e && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
@@ -3081,7 +3095,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !(flags & (DS_STATIC | DS_TYPEDEF | DS_FRIEND)))
 				e->field_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)
-				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
+				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
 				e->global_ns = cxx_declaration_scope(c) == c->global, e->home = cxx_declaration_scope(c);

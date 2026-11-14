@@ -1082,3 +1082,17 @@ betraktade funktionsdefinitioner har kod.  Inget json-test länkar ännu.
 146 663 behövda funktioner (6,4 %).  Doctest-kropparna får fortfarande
 ingen kod: `if (const Subcase& s = Subcase(...))`, `try`/`catch`/`throw`,
 lambdas, standardargument.
+
+### Status (32): standardargument, deklarationer som villkor (2026-11-14)
+- Standardargument: deras token sparas vid deklarationen och tolkas på
+  nytt där ett anrop utelämnar dem (funktioner, medlemmar, konstruktorer,
+  klassmallsinstansers medlemmar; inte funktionsmallars instanser än).
+- `if (T x = e)` / `if (const T& x = e)` och `switch` tolkas som riktiga
+  deklarationer; variabeln och villkorets temporärer lever i ett block runt
+  satsen (rätt livstid för doctests `Subcase`).
+- Delsatser (grenar, loopkroppar, etikettsatser) får ett eget block för
+  sina temporärer: förut hamnade `if (c) use(make());`:s temporär i det
+  omgivande blocket och förstördes även när den aldrig skapats.
+`cxx-run-tests.py` 17/17 (nya `default-args.cpp`, `conditions.cpp`);
+`cxx-coverage.py` 9 344 av 146 663 (6,4 %).  Kvar i doctest-kropparna:
+`try`/`catch`/`throw` (emittern saknar LSDA/landningsplattor), lambdas.

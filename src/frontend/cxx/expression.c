@@ -103,7 +103,7 @@ static void cxx_unqualified_id_rest_parse(cxx *c)
 }
 
 /* what a name used as a value is: a variable's type (an lvalue), or a set of functions for a call */
-static void cxx_name_type(cxx *c, cxx_entity *e)
+VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 {
 	cxx_entity *v = NULL;
 

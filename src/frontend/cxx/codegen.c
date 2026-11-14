@@ -1136,19 +1136,58 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 	c->enode = cc_assignment_build(c->ast, base, l, r, loc);
 }
 
+/* the k-th default argument of f, parsed where the call is (in the scope of f's declaration): its node (0: not built) */
+static uint32_t cxx_gen_default_argument(cxx *c, const cxx_entity *f, uint32_t k)
+{
+	jmp_buf jb, *outer_fail = c->fail;
+	cxx_scope *scope = c->scope;
+	uint32_t pos = c->pos, enode = c->enode, eobj = c->eobj_node;
+	qty etype = c->etype;
+	uint8_t elval = c->elval, econst = c->econst, einvalid = c->einvalid, call_resolved = c->call_resolved, none_viable = c->none_viable;
+	uint8_t eobj_arrow = c->eobj_arrow, eunsure = c->eunsure;
+	int64_t evalue = c->evalue;
+	cxx_entity *call_picked = c->call_picked, *ecallee = c->ecallee;
+	volatile uint32_t node = 0;
+
+	if (!f->defs || k >= f->ndefaults || !f->def_scope)
+		return 0;
+	c->pos = f->defs[2 * k], c->scope = f->def_scope, c->fail = &jb;
+	if (!setjmp(jb)) {
+		cxx_assignment_expression_parse(c);
+		if (c->pos == f->defs[2 * k + 1])
+			node = c->enode;
+	}
+	c->fail = outer_fail, c->pos = pos, c->scope = scope;
+	c->enode = enode, c->eobj_node = eobj, c->eobj_arrow = eobj_arrow, c->etype = etype, c->elval = elval, c->econst = econst;
+	c->evalue = evalue, c->einvalid = einvalid, c->eunsure = eunsure, c->call_resolved = call_resolved, c->none_viable = none_viable;
+	c->call_picked = call_picked, c->ecallee = ecallee;
+	return node;
+}
+
 /* f(args): the function overload resolution picked, the arguments converted to its parameters' types */
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
-	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call;
+	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32];
 
 	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
 		return;
 	ft = AST_TYPE(a, f->ty);
+	if (nargs < ft->n && ft->n <= 32 && ft->n - nargs <= f->ndefaults && f->defs && !(ft->flags & TF_VARIADIC)) {
+		/* the arguments left out: the parameters' default arguments */
+		uint32_t n = ft->n, first = n - f->ndefaults;
+
+		memcpy(all, args, nargs * sizeof *args);
+		for (uint32_t i = nargs; i < n; i++)
+			if (!(all[i] = cxx_gen_default_argument(c, f, i - first)))
+				return;
+		args = all, nargs = n;
+		ft = AST_TYPE(a, f->ty);
+	}
 	if (ft->n != nargs || (ft->flags & TF_VARIADIC) || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
-		return;	/* (default arguments, ...: not built yet) */
+		return;	/* (variadic functions, default arguments not recorded: not built yet) */
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i] || !cxx_gen_value_ok(c, a->params[ft->aux + i]))
 			return;

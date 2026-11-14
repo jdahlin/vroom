@@ -144,6 +144,8 @@ typedef struct cxx_entity {
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
+	uint32_t *defs;			/* ... their tokens (begin, end pairs), parsed again where a call leaves them out; NULL: not recorded */
+	cxx_scope *def_scope;		/* ... and the scope they were declared in */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
 	   per element, pack_index then the element (ty, value) */
@@ -239,6 +241,7 @@ typedef struct cxx {
 	uint32_t fn_nparams, fn_cparams;
 	uint8_t fn_variadic, fn_unknown;
 	uint32_t fn_ndefaults;
+	uint32_t fn_defs[16], fn_ndefs;	/* the last parameter list's default arguments: begin, end token pairs (8 at most) */
 	uint8_t fn_has_trailing, decl_has_trailing;	/* the last function tail / declarator wrote -> type (known or not) */
 	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
 	uint8_t decl_pack;		/* the last declarator was a pack's (Ts&&... ts) */
@@ -359,6 +362,7 @@ typedef struct cxx {
 	qty gen_init_bases[16];
 	uint32_t ngen_init_bases;
 	uint8_t gen_delegates, gen_returns, gen_why;
+	uint8_t cond_decl;		/* parsing an if's or a switch's condition: a declaration there is a real one (code generation) */
 	qty conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
 	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
 	uint32_t gen_notemp;		/* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
@@ -533,6 +537,7 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_name_type(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
