@@ -32,6 +32,57 @@ clang -O2's run time.
 Progress is measured by `bench/cxx-json.py`: per TU, how far vcc gets (the
 first unsupported construct), then which tests pass, then time.
 
+## Can json reach 30x at vcc -O0 against clang -O2? (estimate, 2026-11-14)
+
+vcc does not generate C++ code yet, so this is an estimate from parts, each
+measured on this machine (x86-64 Linux, clang 23, CPU seconds, compile only).
+
+| Measurement | Value |
+|---|---|
+| clang -O2, the 71 TUs one by one (the baseline) | 243 s; 30x is **8.1 s** |
+| clang -O0, the 38 tests that do not reconfigure json, one by one / as one unity TU (`bench/cxx-unity.py`) | 45.0 s / 9.5 s: sharing gains **4.7x** |
+| clang -O2, the same | 76.3 s / 26.7 s (2.9x) |
+| clang -O0 unity TU's split | front end 6.8 s (77 %, mostly instantiation), back end 2.0 s |
+| clang -O0, a TU of the shared headers only (json, doctest, libc++) / libc++ only | 1.10 s / 0.45 s per TU |
+| vcc today, the 71 TUs one by one: preprocessing / preprocessing + C++ parse (no AST, no code) | 4.3 s / 8.4 s (60.4 M tokens) |
+| tokens: the shared headers / a TU's own (average) | 834 485 / 17 000: shared, 2.0 M instead of 60.4 M |
+| vcc against clang -O0 on C (SQLite amalgamation): -fsyntax-only / -c | 0.05 vs 0.22 s (**4.4x**) / 0.26 vs 0.66 s (back end **2.1x**) |
+| vcc -O0 against clang -O2 on C (SQLite) | 0.26 vs 9.8 s (38x) |
+
+The model.  With headers, instances and inline functions shared across TUs
+(vccd's caches, X5), a build costs what clang's unity TU costs, plus what
+cannot be shared.  The 48 TUs that leave json alone: about 1.1 + 8.4 x 48/38
+= 11.7 s at clang -O0 speed.  The 23 that reconfigure json (`#define private
+public`, `JSON_ASSERT`, `-fno-exceptions`) share only libc++: about 23 x
+(1.18 - 0.45) = 16.8 s.  Unique work: about **29 s at clang -O0 speed**.  vcc
+must do it in 8.1 s, 3.6x faster than clang -O0.  At vcc's measured C
+ratios (front end 4.4x, back end 2.1x, weighted 77/23): 29 x (0.77/4.4 +
+0.23/2.1) = **8.2 s, about 29.6x**.
+
+Verdict: **reachable, but only just**, and only if three things hold.
+1. vccd shares headers, instances and inline code across TUs (X5): without
+   it vcc's preprocessing and parsing alone already take 8.4 s.
+2. vcc's C++ front end keeps its C front end's advantage over clang (4.4x)
+   on semantics and instantiation.  Not measured yet: the C++ front end has
+   no semantic analysis.  This is the main risk.
+3. The back end stays at least 2.1x faster than clang -O0's.
+
+The levers, by size:
+- **The 23 reconfiguring TUs: 58 % of the unique work.**  Their changes
+  leave types and code alone (`private` -> `public` changes access only,
+  `JSON_ASSERT` one macro), but they change json.hpp's tokens, so a cache
+  keyed on tokens shares nothing of json with them.  Sharing them (a key
+  that ignores access specifiers, region-level header caching around the
+  changed macros) would bring the unique work to about 13 s at clang speed,
+  needing 1.6x: about 60x.
+- The back end: vcc -O0 emits 1.6x clang -O0's bytes on SQLite; a faster or
+  smaller -O0 path adds margin directly (23 % of the work).
+- A warm rebuild after editing one test is far beyond 30x: only that TU's
+  own work (a few percent of a TU) is left.
+
+Not counted: driver and process overhead per job (71 jobs), the cache's
+lookups and checks, writing the objects (the COMDAT bytes are copies).
+
 ## Targets
 
 Two targets, the first a stepping stone to the second.  Both have test
@@ -426,8 +477,17 @@ own.
   29 722 layouts, all agree with clang; json 71/71 under ASan; 13 parse
   cases (tail padding by each POD rule).  unit-32bit: 501 of 1 939 classes
   laid out, 118 instances.
-- Next: packs (most unknown partial specializations and bases need them),
-  no_unique_address (libc++'s compressed pairs), vptr layouts, enumerator
-  values.  Code: the shared builders move to a
+- Packs (2026-11-14): a pack parameter binds to the remaining arguments; an
+  expansion (template arguments, base clauses) is re-parsed once per element
+  with its packs bound to that element; sizeof..., template template
+  arguments, `__make_integer_seq`, `__type_pack_element`, trailing packs in
+  partial specialization patterns (also nested: `iseq<T, Is...>`).  wchar_t
+  and char8/16/32_t became distinct types.  `bench/cxx-layout.py`: 32 028
+  layouts, all agree with clang; 14 parse cases (a libc++-style tuple from
+  leaf bases and an integer sequence).
+- Next: the semantic analysis the 30x estimate depends on (expressions'
+  types, overload resolution, function template deduction, instantiating
+  function bodies), measured against clang as it grows; no_unique_address
+  (libc++'s compressed pairs); vptr layouts.  Code: the shared builders move to a
   module of their own taking `struct ast *` (cxx/ is compiled in the cc
   module for now).  X5-X7: not started.
