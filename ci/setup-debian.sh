@@ -7,6 +7,8 @@
 #
 #   ci/setup-debian.sh          clang, lld, llvm tools, qemu, python3, ccache
 #   ci/setup-debian.sh wasm     ... and emsdk (emcc + node) in $EMSDK
+#   ci/setup-debian.sh win64    ... and Wine (Debian's) and the pinned llvm-mingw
+#                               sysroot in work/llvm-mingw (x86-64 only)
 #
 # Under Actions it also sets the step output `toolfp`: a hash of the versions
 # of every tool whose output the harnesses' caches (clang references, passed
@@ -54,6 +56,16 @@ if [ "${1:-}" = wasm ]; then
 	fi
 fi
 
+if [ "${1:-}" = win64 ]; then
+	# Debian 13's Wine (10.0; WineHQ's 11.0 runs on the Mac and the dev
+	# hosts): its 64-bit loader is enough, the test programs are x86-64 only,
+	# so no i386 architecture.  The harnesses take it from PATH (/usr/bin/wine).
+	apt-get install -y -q --no-install-recommends wine wine64 xz-utils
+	# the MinGW-w64 sysroot, SHA-256 checked; CI restores the tarball from its
+	# cache (keyed on the pin) so that only the unpacking runs
+	sh "$(dirname "$0")/../bench/fetch-testsuites.sh" llvm-mingw
+fi
+
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
 	B=/usr/lib/llvm-$LLVM/bin
 	fp=$( {
@@ -61,6 +73,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
 		"$B/clang" --version; "$B/ld.lld" --version; qemu-system-aarch64 --version
 		qemu-x86_64 --version
 		if [ "${1:-}" = wasm ]; then emcc --version; node --version; fi
+		if [ "${1:-}" = win64 ]; then wine --version; grep '^MINGW_' "$(dirname "$0")/../bench/fetch-testsuites.sh"; fi
 	} 2>&1 | sha256sum | cut -c1-16)
 	echo "toolfp=$fp" >> "$GITHUB_OUTPUT"
 	echo "tool fingerprint $fp"

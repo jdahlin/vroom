@@ -405,6 +405,25 @@ fast-forwards main when everything is green).  A new harness belongs in
 `ci/premerge.sh` when it is fast and needs only the checkout.  The asan job also
 builds the fuzz targets and replays `test/fuzz/regress` (`make -C src fuzz-regress`).
 
+`win64.yml` (Windows x64, doc/PLAN-win64.md WIN9) has two jobs.  `wine`
+(ubuntu-24.04, Debian container; `ci/setup-debian.sh win64` adds Debian's
+Wine and unpacks the pinned llvm-mingw into `work/llvm-mingw`, its tarball
+cached on the pin) runs `ci/premerge.sh win64`: `vcc-win64.py --ref-only`,
+`--vlink-ref`, `--vccrt-ref`, `vlink-pe.py --run`, `vccrt-test.py diff` and
+`chkstk`, `var-cmp.py coff`, then packs `build/linux/win64-exes.tar.xz`: the
+programs that passed (`--export DIR` of those harnesses) with
+`*.manifest.json` (argv, stdin, expected stdout and exit code, timeout).
+`native` (windows-2025, Python only) runs them with `bench/win64-native.py`;
+`ci/win64-native-allow.txt` names, with a reason, a test that legitimately
+differs on Windows (an entry that passes is an error).  Steps whose feature is
+not merged yet are guarded in `ci/premerge.sh` (`has FILE TEXT`) and print
+`skip NAME (why)`: `--own`/`--vir`, `vcc-abi.py --target win64`, vasm's COFF
+cases, WIN8's zlib/SQLite hook; with `--own` present the export switches to
+vcc's programs.  Locally: `CI_JOBS=4 ci/premerge.sh win64` (Wine and
+work/llvm-mingw on the host, clang 23 on PATH), then
+`bench/win64-native.py build/linux/win64-exes --wrapper wine`.
+`vlink-pe-bad.py` runs in the asan job.
+
 ## Sanitizers
 ```
 make -C src -j 6 vcc-asan           # -fsanitize=address,undefined -> build/src-asan/
