@@ -1429,10 +1429,15 @@ static void cxx_primary_expression_parse(cxx *c)
 					uint32_t an[16], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
+					uint32_t abr_[16];
+
+					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
+					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}
 			}
@@ -1468,10 +1473,15 @@ static void cxx_primary_expression_parse(cxx *c)
 					uint32_t an[16], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
+					uint32_t abr_[16];
+
+					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
+					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}
 			}
@@ -1577,10 +1587,15 @@ static void cxx_primary_expression_parse(cxx *c)
 					uint32_t an[16], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
+					uint32_t abr_[16];
+
+					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
+					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}
 			}
@@ -1679,6 +1694,9 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
+					uint32_t abrace[16];
+
+					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 					if (!c->ncargs && !c->econst && !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
 					    AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_ULLONG) {
@@ -1693,7 +1711,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 						}
 					}
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
 				else if (!set && callee != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, callee) &&	/* (operator(): a member only) */
 					 (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
@@ -1711,9 +1729,12 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
+					uint32_t abrace[16];
+
+					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 					else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
 						cxx_gen_indirect_call(c, callee_node, anodes, an, cloc);	/* through a pointer to a function */
 					/* f(x) with no f that fits: the functions named f in the namespaces of the

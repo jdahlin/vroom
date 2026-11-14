@@ -259,8 +259,13 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 	pt = AST_TYPE(c->ast, p);
 	if (pt->kind == TY_PTR && pt->ext) {
 		binds_object = pt->ext == 1 && !(QQ(pt->base) & Q_CONST);
-		/* T&& does not bind an lvalue; T& (not const) does not bind an rvalue */
-		if (have_lvalue && (pt->ext == 2 ? lvalue : !lvalue && !(QQ(pt->base) & Q_CONST)))
+		/* T&& does not bind an lvalue of T (or of a class derived from it: a temporary a conversion makes from
+		   another type it binds, "text" to json&&); T& (not const) does not bind an rvalue */
+		bool same = a != CXX_TY_UNKNOWN && (QUNQ(a) == QUNQ(pt->base) ||
+						    (cc_type_is_record(c->ast, a) && cc_type_is_record(c->ast, pt->base) &&
+						     cxx_type_class_scope(c, QUNQ(a)) && cxx_derives(c, a, pt->base, 0)));
+
+		if (have_lvalue && (pt->ext == 2 ? lvalue && (same || !cc_type_is_record(c->ast, pt->base)) : !lvalue && !(QQ(pt->base) & Q_CONST)))
 			return 3;
 		p = pt->base;
 		pt = AST_TYPE(c->ast, p);
@@ -440,6 +445,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
 	/* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
 	bool own_args = args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs && (args == c->cargs || !memcmp(args, c->cargs, nargs * sizeof *args));
+	uint32_t own_zero = c->carg_zero, own_brace[16];	/* (taken now: deducing and instantiating parse argument lists of their own) */
+
+	memcpy(own_brace, c->carg_brace, sizeof own_brace);
 	bool have_lval = lval != NULL;
 
 	c->none_viable = 0, c->call_obj = 0;
@@ -598,7 +606,26 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			for (uint32_t a = 0; a < nargs && fits; a++) {
 				/* (an argument that is no integer constant 0 is no null pointer constant: the call's own
 				   arguments say which are; an argument for the ...: any) */
-				c->rank_no_literal = no_literal || (own_args && a < 16 && !((c->carg_zero >> a) & 1));
+				c->rank_no_literal = no_literal || (own_args && a < 16 && !((own_zero >> a) & 1));
+				if (own_args && a < 16 && own_brace[a] && a < sig->n) {
+					/* a braced list (its type here its last element's): initializer_list<E> takes it as it is,
+					   a class by a constructor, a scalar only from one element ([over.ics.list]) */
+					qty P = c->ast->params[sig->aux + a];
+
+					if (P != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+						P = AST_TYPE(c->ast, P)->base;
+					if (P == CXX_TY_UNKNOWN)
+						k->rank[a] = 4;
+					else if (cxx_is_initializer_list(c, P))
+						k->rank[a] = 0;
+					else if (cc_type_is_record(c->ast, P) && AST_TYPE_KIND(c->ast, P) != TY_ARRAY)
+						k->rank[a] = 3;
+					else
+						k->rank[a] = 6;	/* (a scalar from {x}: rare, not told apart here) */
+					k->pt[a] = c->ast->params[sig->aux + a];
+					fits = k->rank[a] < 6;
+					continue;
+				}
 				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 5;	/* (...: last) */
 				k->pt[a] = a < sig->n ? c->ast->params[sig->aux + a] : CXX_TY_UNKNOWN;
 				fits = k->rank[a] < 6;
@@ -656,6 +683,27 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			for (uint32_t n = 0; n < nargs; n++) {
 				better |= cand[a].rank[n] < cand[b].rank[n];
 				worse |= cand[a].rank[n] > cand[b].rank[n];
+			}
+			if (!better && !worse) {
+				/* the same conversion of an argument to T: binding T&& is better than const T& when the
+				   argument (or what a conversion makes of it, a temporary) is an rvalue [over.ics.rank] */
+				for (uint32_t n = 0; n < nargs && n < 16; n++) {
+					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || pa == pb || cand[a].rank[n] != cand[b].rank[n] ||
+					    AST_TYPE_KIND(c->ast, pa) != TY_PTR || AST_TYPE_KIND(c->ast, pb) != TY_PTR ||
+					    !AST_TYPE(c->ast, pa)->ext || !AST_TYPE(c->ast, pb)->ext ||
+					    QUNQ(AST_TYPE(c->ast, pa)->base) != QUNQ(AST_TYPE(c->ast, pb)->base))
+						continue;
+					bool rv = cand[a].rank[n] == 3 || (lval && !lval[n]);	/* (3: through a conversion, a temporary) */
+
+					if (!rv)
+						continue;
+					if (AST_TYPE(c->ast, pa)->ext == 2 && AST_TYPE(c->ast, pb)->ext == 1)
+						better = true;
+					else if (AST_TYPE(c->ast, pa)->ext == 1 && AST_TYPE(c->ast, pb)->ext == 2)
+						worse = true;
+				}
 			}
 			if (!better && !worse) {
 				if (!cand[a].tmpl && cand[b].tmpl)
@@ -1015,7 +1063,7 @@ VPRIV uint32_t cxx_dtor_id(void)
 }
 
 /* is t an instance of a template named initializer_list (std::initializer_list<E>)? */
-static bool cxx_is_initializer_list(cxx *c, qty t)
+VPRIV bool cxx_is_initializer_list(cxx *c, qty t)
 {
 	cxx_scope *s;
 

@@ -448,7 +448,8 @@ typedef struct cxx {
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
-	uint32_t carg_brace[16];	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
+	uint32_t carg_brace[16];
+	uint32_t gen_call_brace[16];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
 	uint8_t new_array;
 	uint32_t gen_pack_from, gen_pack_n;	/* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */
@@ -624,6 +625,7 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
+VPRIV bool cxx_is_initializer_list(cxx *c, qty t);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);

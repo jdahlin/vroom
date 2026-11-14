@@ -1598,3 +1598,18 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   kopierar byte (som clang, som inte definierar den).
 - Test: spaceship, empty-member-copy, nested-lists; run 69/69.  Fork 69/70, 6,3 s CPU (38,5x),
   20 916 funktioner.
+
+### Status 71 (2026-11-14): klammerlistor som argument, returtyper typename X<T>::type, två felkodsrisker
+
+- `f({...})`: en klammerlista som argument konstruerar sin parameter (initializer_list<E>, en klass
+  via sin konstruktor; `json({...})`, `v.insert(pos, {1, 2, 3})`, `v.assign({4, 5})`), och rangordnas
+  som en lista ([over.ics.list]) i stället för som sitt sista element.
+- En klass som skickas i register konverteras från en annan typ (const_iterator från iterator).
+- `T&&` binder ett temporärt objekt som en konvertering gör av ett lvalue av en annan typ
+  (`push_back("text")` väljer `push_back(json&&)` som clang); av två lika konverteringar är `T&&` bättre
+  än `const T&` för ett rvalue.
+- Returtypen `typename X<T>::type` manglas som skriven (`N...IT_E...E`, förut `v`): std::distance m.fl.
+- Felkod förhindrad: ett anrop som inte byggdes lämnade sitt sista arguments nod i c->enode, så
+  `f(x);` kunde bli `x;` (nu nollställs noden i cxx_gen_call); positioner för klammerargument som
+  inte konsumerades nollställs.
+- Test: braced-args; run 70/70.  Fork 69/70, 6,6 s CPU (37x), 21 069 funktioner, 17 testkroppar.

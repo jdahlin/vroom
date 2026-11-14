@@ -115,6 +115,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
 static uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
+static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
 static bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
 static bool cxx_gen_value_ok(cxx *c, qty t);
 static bool cxx_gen_by_address(cxx *c, qty t);
@@ -557,15 +558,16 @@ static uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, qty pt, uint32_t loc)
 	cc_id_list l;
 	uint32_t tmp;
 
-	if (!x || (QUNQ(AST_NODE_AT(a, x)->ty) != t && cc_type_is_record(a, AST_NODE_AT(a, x)->ty)))
-		return 0;	/* (from another class: whether it is an lvalue the node does not say, a temporary is one here) */
+	if (!x)
+		return 0;
 	if (QUNQ(AST_NODE_AT(a, x)->ty) == t && cxx_gen_prv_find(c, x))
 		return cc_address_of_build(a, x, loc);
 	if (QUNQ(AST_NODE_AT(a, x)->ty) == t && !(AST_NODE_AT(a, x)->flags & NF_LVALUE))
 		return 0;	/* (a prvalue of the class that is not a call's: not built yet) */
 	/* the parameter copy-initialized from the argument: a copy, or a converting constructor from a scalar,
 	   pointer or array (not an explicit one: json from 3 or "text" for operator=(basic_json)) */
-	at[0] = AST_NODE_AT(a, x)->ty, lv[0] = (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0;
+	/* (a call's result is a prvalue though its node is an object here: CompatibleType&& must not deduce T&) */
+	at[0] = AST_NODE_AT(a, x)->ty, lv[0] = (AST_NODE_AT(a, x)->flags & NF_LVALUE) != 0 && !cxx_gen_prv_find(c, x);
 	c->skip_explicit = QUNQ(at[0]) != t;
 	cxx_ctor_use(c, t, at, lv, 1, false);
 	c->skip_explicit = 0;
@@ -1713,8 +1715,8 @@ VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc
 	v = cc_conditional_build(a, lt, cc_node_integer_new(a, -1, cc_type_basic(TY_INT), loc), v, loc);
 	v = cc_assignment_build(a, 0, member(a, cxx_gen_var_node(c, tmp, loc), rec->f[0].name, loc),
 				cc_conversion_apply(a, v, QUNQ(rec->f[0].ty)), loc);
-	node = cc_node_new_operands(a, N_COMMA, cc_type_pointer(a, QUNQ(t)), loc, v, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc));
-	c->enode = cc_dereference_build(a, node, loc);
+	(void)node;
+	c->enode = cc_node_new_operands(a, N_COMMA, QUNQ(t), loc, v, cxx_gen_var_node(c, tmp, loc));	/* (the ordering object, a value) */
 }
 
 /* x, y */
@@ -1920,6 +1922,57 @@ static bool cxx_gen_std_cast_function(cxx *c, const cxx_entity *f)
 	return std_ns;
 }
 
+/* f({...}): a temporary of class type t constructed from the braced list at token `pos` (its arguments
+   parsed again here for their code: the list's first parse was unevaluated), as an lvalue (0: not built) */
+static uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t save = c->pos, an[16], n, tmp;
+	qty at[16];
+	uint8_t al[16];
+	cc_id_list l;
+
+	t = QUNQ(t);
+	if (!cc_type_is_record(a, t) || AST_TYPE_KIND(a, t) == TY_ARRAY || !cxx_gen_object_type_ok(c, t))
+		return 0;
+	c->pos = pos;
+	cxx_braced_arguments_parse(c);
+	c->pos = save;
+	n = c->ncargs;
+	if (n == UINT32_MAX || n > 16)
+		return 0;
+	memcpy(an, c->carg_nodes, sizeof an), memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
+	if (cxx_is_initializer_list(c, t)) {
+		/* f(initializer_list<E>) from {a, b}: the list itself (its array's class elements, whose destruction
+		   at the full-expression's end is not built: not done) */
+		uint32_t arr = 0, il;
+
+		c->ctor_ilist_n = n;
+		memcpy(c->ctor_ilist_types, at, n * sizeof *at), memcpy(c->ctor_ilist_lval, al, n);
+		memcpy(c->ctor_ilist_brace, c->carg_brace, sizeof c->ctor_ilist_brace);
+		if (!c->gen_block)
+			return 0;
+		il = cxx_gen_initializer_list(c, t, an, n, c->gen_block, loc, &arr);	/* (before the call, in its block) */
+		if (!il || (arr && cc_type_is_record(a, AST_TYPE(a, a->syms[arr].ty)->base) &&
+			    cxx_gen_needs_destruction(c, AST_TYPE(a, a->syms[arr].ty)->base, 0)))
+			return 0;
+		return il;
+	}
+	cxx_ctor_use(c, t, at, al, n, true);
+	{
+		cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
+		bool found = c->ctor_found, none = c->ctor_none;
+
+		if (!(tmp = cxx_gen_class_temp(c, t, loc)))
+			return 0;
+		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il;
+	}
+	(void)l;
+	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, an, n, c->gen_block, loc))
+		return 0;	/* (constructed before the call, in its block: the temporary is an lvalue) */
+	return cxx_gen_var_node(c, tmp, loc);
+}
+
 /* is a defaulted copy or move constructor of class t trivial: no vptr, its bases' and members' copies
    trivial (the class's other copy constructors aside: iter_impl's user-provided one does not make its
    defaulted move constructor non-trivial) */
@@ -1957,7 +2010,11 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
-	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32];
+	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32], br[16];
+
+	memcpy(br, c->gen_call_brace, sizeof br);	/* (this call's alone: taken at once) */
+	memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+	c->enode = 0;	/* (a call that is not built has no node: not its last argument's, which the parse left here) */
 
 	if (f && f->fn_defaulted && cxx_gen_on(c) && f->name == vintern_cstr("operator==")) {
 		/* a defaulted equality: no function to call, the comparison itself (a friend's two operands; a
@@ -1998,6 +2055,32 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		return;
 	}
 	ft = AST_TYPE(a, f->ty);
+	uint32_t bargs[16];
+	{
+		/* f({...}): a braced list argument (no node) made a temporary of its parameter's class */
+		bool any = false;
+
+		for (uint32_t i = 0; i < nargs; i++)
+			any |= !args[i] && br[i] && i < ft->n;
+		if (any) {
+			/* (what building them leaves of the statement's state is not the statement's: a call that fails
+			   after them must still fail its statement) */
+			uint32_t sdone = c->sdone, snode = c->snode;
+
+			memcpy(bargs, args, nargs * sizeof *args);
+			for (uint32_t i = 0; i < nargs; i++)
+				if (!args[i] && br[i] && i < ft->n) {
+					qty pt = a->params[ft->aux + i];
+
+					if (pt != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, pt) == TY_PTR && AST_TYPE(a, pt)->ext)
+						pt = AST_TYPE(a, pt)->base;
+					bargs[i] = cxx_gen_braced_temp(c, pt, br[i], loc);
+				}
+			c->sdone = sdone, c->snode = snode;
+			c->enode = 0;	/* (what building them left is no node of this call's: a call that fails has none) */
+			args = bargs;
+		}
+	}
 	if (nargs < ft->n && ft->n <= 32 && ft->n - nargs <= f->ndefaults && f->defs && !(ft->flags & TF_VARIADIC)) {
 		/* the arguments left out: the parameters' default arguments */
 		uint32_t n = ft->n, first = n - f->ndefaults;
@@ -2067,8 +2150,17 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 				arg = cc_cast_insert(a, arg, cc_type_basic(TY_DOUBLE), CK_F2F);
 			if (arg && !cxx_gen_type_ok(c, AST_NODE_AT(a, arg)->ty))
 				arg = 0;
+		} else if (cxx_gen_by_address(c, pt))
+			arg = cxx_gen_class_argument(c, args[i], pt, loc);
+		else if (args[i] && cc_type_is_record(a, pt) && AST_TYPE_KIND(a, pt) != TY_ARRAY && QUNQ(AST_NODE_AT(a, args[i])->ty) != QUNQ(pt) &&
+			 !(c->nullptr_ty && QUNQ(pt) == c->nullptr_ty)) {	/* (nullptr_t: a struct here, bound as before) */
+			/* a class passed as a value (registers) from another type: a temporary made by its converting
+			   constructor, its value passed (const_iterator from iterator) */
+			uint32_t p = cxx_gen_class_argument(c, args[i], pt, loc);
+
+			arg = p ? cc_node_rvalue(a, cc_dereference_build(a, p, loc)) : 0;
 		} else
-			arg = cxx_gen_by_address(c, pt) ? cxx_gen_class_argument(c, args[i], pt, loc) : cxx_gen_bind(c, args[i], pt, loc);
+			arg = cxx_gen_bind(c, args[i], pt, loc);
 
 		if (!arg) {
 			CXX_CALL_WHY(); goto fail;

@@ -211,6 +211,7 @@ static int mt_tparam(mg_tok *k)
 }
 
 static bool mt_type(mg_tok *k);
+static bool mt_targs(mg_tok *k);
 static bool mt_expr(mg_tok *k);
 
 /* [::]ns::...::v naming a namespace's variable (not a function, nothing dependent): L <its mangled name> E */
@@ -278,6 +279,41 @@ static const char *mt_builtin(mg_tok *k)
 	return NULL;
 }
 
+/* past a declaration's leading specifiers and attributes ([[...]], __attribute__((...)), static, inline, ...) */
+static void mt_skip_decl_specs(mg_tok *k)
+{
+	for (;;) {
+		const cxx_token *t = mt_t(k);
+
+		if (!t)
+			return;
+		if (mt_word(k, "static") || mt_word(k, "inline") || mt_word(k, "constexpr") || mt_word(k, "consteval") ||
+		    mt_word(k, "friend") || mt_word(k, "explicit") || mt_word(k, "virtual") || mt_word(k, "__inline__") ||
+		    mt_word(k, "__inline")) {
+			k->p++;
+			continue;
+		}
+		if ((t->kind == LEX_TOKEN_LEFT_SQUARE && k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_LEFT_SQUARE) ||
+		    (t->kind == LEX_TOKEN_IDENTIFIER && ((t->len == 13 && !memcmp(t->s, "__attribute__", 13)) ||
+							 (t->len == 10 && !memcmp(t->s, "__declspec", 10))))) {
+			int depth = 0;
+
+			if (t->kind == LEX_TOKEN_IDENTIFIER)
+				k->p++;
+			do {
+				t = mt_t(k);
+				if (!t)
+					return;
+				depth += t->kind == LEX_TOKEN_LEFT_SQUARE || t->kind == LEX_TOKEN_LEFT_PAREN;
+				depth -= t->kind == LEX_TOKEN_RIGHT_SQUARE || t->kind == LEX_TOKEN_RIGHT_PAREN;
+				k->p++;
+			} while (depth > 0);
+			continue;
+		}
+		return;
+	}
+}
+
 static bool mt_type(mg_tok *k)
 {
 	int i;
@@ -330,6 +366,43 @@ static bool mt_type(mg_tok *k)
 		mg_type(k->m, k->m->tph[i]);
 		k->m->ph = ph, k->m->nph = nph;
 		return true;
+	}
+	if (i < 0 && mt_t(k) && mt_t(k)->kind == LEX_TOKEN_IDENTIFIER && k->m->tps && k->p + 1 < k->e &&
+	    k->m->c->tok[k->p + 1].kind == LEX_TOKEN_LESS) {
+		/* X<args>::name (a member type of a class template's instance with dependent arguments):
+		   N <X's prefix> <X> I <args> E <name> E, X and X<args> substitution candidates */
+		const cxx_entity *e = NULL;
+		uint32_t save = k->p;
+		size_t save_n = k->m->n;
+		uint32_t save_subs = k->m->nsubs;
+
+		const cxx_scope *found = NULL;
+
+		for (const cxx_scope *sc = k->m->tps->parent; sc && !e; sc = sc->parent)
+			if ((e = cxx_lookup_in(k->m->c, (cxx_scope *)sc, mt_t(k)->id, 0)))
+				found = sc;
+		while (found && found->kind != CXX_SCOPE_NAMESPACE && found->kind != CXX_SCOPE_CLASS)
+			found = found->parent;	/* (a template's own parameter scope: the namespace it is in) */
+		if (e && e->kind == CXX_ENTITY_TEMPLATE && found) {
+			mg_str(k->m, "N");
+			if (!mg_substitution(k->m, CXX_SUB_TEMPLATE, e, 0)) {
+				mg_prefix(k->m, (cxx_scope *)found);
+				mg_source_name(k->m, e->name);
+				mg_remember(k->m, CXX_SUB_TEMPLATE, e, 0);
+			}
+			k->p++;
+			if (mt_targs(k) && !k->m->bad && mt_is(k, LEX_TOKEN_COLON_COLON) && k->p + 1 < k->e &&
+			    k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER) {
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (qty)3);	/* (X<args>) */
+				k->p++;
+				mt_src(k->m, mt_t(k));
+				k->p++;
+				mg_str(k->m, "E");
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[save] + 0, (qty)4);	/* (X<args>::name) */
+				return true;
+			}
+		}
+		k->p = save, k->m->n = save_n, k->m->nsubs = save_subs, k->m->bad = false;
 	}
 	if (mt_word(k, "std") && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON &&
 	    k->m->c->tok[k->p + 2].len == 6 && !memcmp(k->m->c->tok[k->p + 2].s, "size_t", 6))
@@ -1631,8 +1704,25 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			else
 				mg_type(&m, x->base);
 			m.ph = ph0, m.nph = nph0;
-		} else
-			mg_type(&m, x->base);
+		} else {
+			/* typename X<T>::type as written (its placeholder type here is no type of the mangling's) */
+			mg_tok k = { &m, cxx_instance_decl_pos(f), c->ntok, false, { 0 }, 0 };
+			size_t save_n = m.n;
+			uint32_t save_subs = m.nsubs;
+			bool done = false;
+
+			mt_skip_decl_specs(&k);
+			if (k.p && mt_word(&k, "typename")) {
+				k.p++;
+				m.ph = m.tph, m.nph = m.ntph;
+				done = mt_type(&k) && !m.bad;
+				m.ph = ph0, m.nph = nph0;
+				if (!done)
+					m.n = save_n, m.nsubs = save_subs, m.bad = false;
+			}
+			if (!done)
+				mg_type(&m, x->base);
+		}
 		if (dt_guess)
 			c->mangle_guess = 1;	/* (decltype in its declaration: clang writes the expression, DT ... E) */
 	}
