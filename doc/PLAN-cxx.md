@@ -704,3 +704,17 @@ unit-32bit: partial specializations 154 matched, 10 unknown (was 137 / 104);
 static_asserts 177 true, 0 false, 22 not evaluated; 166 + 337 + 23 bodies;
 2483 of 2884 calls typed; 0.16 s.  json: 66,891 layouts clang agrees with,
 71/71 parse; parse tests 22/22 (ok-check-detection).
+
+### Status 2026-11-14 (16): relation traits, explicit packs
+__is_base_of, __is_convertible and __is_constructible answer where no
+class's constructors or conversion functions are needed (scalars, pointers,
+derived to base); a bound pack of types expands in a builtin call
+(__is_constructible(T, Args...)); a function template whose last parameter is
+a pack is called with explicit arguments (libc++'s _And = decltype(
+__and_helper<_Pred...>(0))), a substitution failure in its signature makes it
+not viable, and f(...) ranks after any real parameter.  Of 19 libc++ trait
+assertions surveyed (is_class, _And, _Not, is_convertible, decay_t, ...) 16
+evaluate true, 0 false; _Or, common_type_t and __underlying_type do not yet.
+unit-32bit: 179 + 337 + 23 bodies, 2503 of 2885 calls typed, static_asserts
+177 true / 0 false / 22 not evaluated, 0.16 s; json 72,738 layouts clang
+agrees with, 71/71 parse; parse tests 22/22.

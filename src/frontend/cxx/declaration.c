@@ -3159,9 +3159,15 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	bool q, f;
 	qty t;
 
+	uint8_t missing = c->member_missing;
+
+	c->member_missing = 0;	/* (typename X::y with no y in the signature: the candidate is not viable) */
+	c->sig_requires = 1;
 	cxx_attributes_skip(c);
-	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class)
+	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class) {
+		c->member_missing = missing;
 		return CXX_TY_UNKNOWN;
+	}
 	c->type_in = ctor_class ? cc_type_basic(TY_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
 	/* auto f(): the declarator over auto's placeholder; the body's first return gives the type */
 	bool ret_auto = !ctor_class && c->ds_auto && c->ds_type == CXX_TY_UNKNOWN;
@@ -3191,12 +3197,16 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 		}
 	}
 	/* a parameter of unknown type: the return type alone (callers read only it then) */
+	c->sig_fake = 0;
 	if (f && t == CXX_TY_UNKNOWN && !any_return && c->decl_return != CXX_TY_UNKNOWN)
-		t = cxx_type_function(c, c->decl_return, NULL, 0, true);
+		t = cxx_type_function(c, c->decl_return, NULL, 0, true), c->sig_fake = 1;
 	/* a trailing requires-clause: its value with the arguments bound (false: the candidate is not viable) */
 	c->sig_requires = 1;
 	if (f && cxx_is_kw(c, CXX_KW_requires))
 		c->sig_requires = (int8_t)(any_return ? (cxx_requires_clause_parse(c), 1) : cxx_requires_clause_value(c));
+	if (c->member_missing && !any_return)
+		c->sig_requires = 0;	/* a substitution failure in the return or a parameter type */
+	c->member_missing = missing;
 	/* body: the definition's body too (an instance's), its parameters declared */
 	if (body) {
 		*body = false;
@@ -3223,7 +3233,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 
 				c->ret_capture = 0;
 				if (r != CXX_TY_UNKNOWN)
-					t = cxx_type_function(c, r, NULL, 0, true);	/* (callers read the return type only) */
+					t = cxx_type_function(c, r, NULL, 0, true), c->sig_fake = 1;	/* (callers read the return type only) */
 			}
 		}
 	}

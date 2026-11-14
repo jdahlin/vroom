@@ -278,6 +278,7 @@ typedef struct cxx {
 	uint32_t decl_less;		/* the last declarator-id's template arguments name<...> (its '<', 0: none) */
 	uint32_t ftmpl_req;		/* a template declaration's requires-clause (its token, 0: none) */
 	uint32_t unevaluated;		/* > 0: in an unevaluated operand or a discarded statement (calls instantiate no body) */
+	uint8_t sig_fake;		/* the last signature's function type stands for an unknown parameter list (only its return type is right) */
 	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
 	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
 	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */

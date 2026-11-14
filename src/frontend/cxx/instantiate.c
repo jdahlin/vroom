@@ -1555,7 +1555,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		body = b;
 		viable = c->sig_requires;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
-			r = AST_TYPE(c->ast, t)->base, sig = t;
+			r = AST_TYPE(c->ast, t)->base, sig = c->sig_fake ? CXX_TY_UNKNOWN : t;	/* (its parameters: only if they are the real ones) */
 		c->stats.bodies += body;
 	} else
 		c->stats.bodies_failed++;
@@ -1581,6 +1581,57 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 			break;
 		}
 	c->bound_sig = sig;
+	c->sig_requires = viable;
+	return r;
+}
+
+/*
+ * A template whose last parameter is a pack, every argument given explicitly: its return type, the
+ * signature parsed with the parameters bound (not cached, no body).  c->sig_requires: 0 when the
+ * substitution fails.
+ */
+static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx)
+{
+	cxx_partial *p = &f->p;
+	uint32_t np = p->params->ntparams;
+	cxx_scope *binding;
+	cxx_targ acopy[32];
+	cxx_outer o;
+	jmp_buf jb;
+	volatile qty r = CXX_TY_UNKNOWN;
+	volatile int8_t viable = -1;
+
+	if (c->body_depth >= 64 || nx > 32) {
+		c->sig_requires = -1;
+		return CXX_TY_UNKNOWN;
+	}
+	memcpy(acopy, xargs, nx * sizeof *xargs);
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	for (uint32_t i = 0; i + 1 < np; i++)
+		cxx_bind(c, binding, &p->params->tparams[i], &acopy[i]);
+	cxx_bind_pack(c, binding, &p->params->tparams[np - 1], acopy + (np - 1), nx - (np - 1));
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++;
+	c->fail = &jb;
+	c->pos = f->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		qty t = cxx_function_signature_parse(c, false, NULL, f->ctor_class);
+
+		viable = c->sig_requires;
+		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
+			r = AST_TYPE(c->ast, t)->base;
+		c->bound_sig = c->sig_fake ? CXX_TY_UNKNOWN : t;
+	} else
+		c->bound_sig = CXX_TY_UNKNOWN;
+	c->instantiating--, c->body_depth--;
+	{
+		qty sig = c->bound_sig;
+
+		cxx_outer_restore(c, &o);
+		c->bound_sig = sig;
+	}
 	c->sig_requires = viable;
 	return r;
 }
@@ -1742,6 +1793,22 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	}
 	cxx_ftemplate_evaluate(c, f);
 	p = &f->p;
+	if (f->packs && xargs && p->params->ntparams && p->params->ntparams <= 32) {
+		/* f<A, Ps...>(args) with the last parameter a pack and every argument explicit (libc++'s
+		   __and_helper<_Pred...>(0)): the signature with them bound */
+		uint32_t np = p->params->ntparams;
+		bool simple = p->params->tparams[np - 1].pack && p->params->tparams[np - 1].kind != 3 && nxargs + 1 >= np;
+
+		for (uint32_t i = 0; i + 1 < np && simple; i++)
+			simple = !p->params->tparams[i].pack && p->params->tparams[i].kind != 3 && xargs[i].kind &&
+				 (xargs[i].kind == 1) == (p->params->tparams[i].kind == 1);
+		for (uint32_t i = np - 1; i < nxargs && simple; i++)
+			simple = xargs[i].kind == 1 || xargs[i].kind == 2;
+		if (simple) {
+			*ret = cxx_ftemplate_return_pack(c, f, xargs, nxargs);
+			return c->sig_requires == 1 ? 1 : c->sig_requires;
+		}
+	}
 	if (f->packs || p->params->ntparams > 64) {
 		c->why = CXX_WHY_PACKS;
 		return -1;

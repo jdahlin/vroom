@@ -319,9 +319,9 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			if (d <= 0)
 				continue;
 			/* its parameters with the arguments bound */
-			if (c->bound_sig != CXX_TY_UNKNOWN && !(AST_TYPE(c->ast, c->bound_sig)->flags & TF_VARIADIC) &&
-			    AST_TYPE(c->ast, c->bound_sig)->n >= nargs)
-				sig = AST_TYPE(c->ast, c->bound_sig);
+			if (c->bound_sig != CXX_TY_UNKNOWN && ((AST_TYPE(c->ast, c->bound_sig)->flags & TF_VARIADIC) ||
+								AST_TYPE(c->ast, c->bound_sig)->n >= nargs))
+				sig = AST_TYPE(c->ast, c->bound_sig);	/* (f(...) too: an argument for the ellipsis ranks last) */
 		} else {
 			const ctype *ft;
 
@@ -708,11 +708,69 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		*v = t[0] == t[1];
 		return true;
 	}
+	/* how two types relate, where the answer does not need a class's constructors or conversion functions */
+	if (nt == 2 && IS("__is_base_of")) {
+		if (!cc_type_is_record(c->ast, t[0]) || !cc_type_is_record(c->ast, t[1])) {
+			*v = 0;
+			return true;
+		}
+		if (QUNQ(t[0]) == QUNQ(t[1])) {
+			*v = 1;
+			return true;
+		}
+		if (!cxx_type_class_scope(c, QUNQ(t[1])))
+			return false;	/* (the derived class's bases: not known) */
+		*v = cxx_derives(c, t[1], t[0], 0);
+		return true;
+	}
+	if (nt == 2 && (IS("__is_convertible") || IS("__is_convertible_to") || IS("__is_nothrow_convertible") || IS("__is_constructible") ||
+			IS("__is_nothrow_constructible") || IS("__is_trivially_constructible"))) {
+		/* constructible is (To, From); convertible is (From, To) */
+		bool ctor = IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible");
+		qty to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
+		const ctype *ft = AST_TYPE(c->ast, from), *tt = AST_TYPE(c->ast, to);
+		bool lv = ft->kind == TY_PTR && ft->ext == 1;
+		int rank;
+
+		if (ft->kind == TY_PTR && ft->ext)
+			from = ft->base;
+		if (tt->kind == TY_VOID || AST_TYPE_KIND(c->ast, from) == TY_VOID) {
+			*v = !ctor && tt->kind == TY_VOID && AST_TYPE_KIND(c->ast, from) == TY_VOID;
+			return true;
+		}
+		if (tt->kind == TY_ARRAY || tt->kind == TY_FUNC) {
+			*v = 0;
+			return true;
+		}
+		/* (an integer type is not a null pointer constant: only the literal 0 is) */
+		if (tt->kind == TY_PTR && !tt->ext && AST_TYPE_KIND(c->ast, from) >= TY_BOOL && AST_TYPE_KIND(c->ast, from) <= TY_FLOAT128) {
+			*v = 0;
+			return true;
+		}
+		rank = cxx_arg_rank(c, to, from, lv, true);
+		if (rank == 2)
+			return false;	/* (through a class: its constructors and conversion functions decide) */
+		*v = rank < 3;
+		return true;
+	}
 	if (nt != 1)
 		return false;
 	x = AST_TYPE(c->ast, t[0]);
 	k = x->kind;
 	ref = k == TY_PTR && x->ext;
+	/* T(): scalars and pointers yes, references, void, functions and arrays of unknown bound no; a class's
+	   default constructor decides for a class */
+	if (IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_default_constructible")) {
+		if ((k >= TY_BOOL && k <= TY_FLOAT128) || (k == TY_PTR && !x->ext) || k == TY_ENUM) {
+			*v = 1;
+			return true;
+		}
+		if (ref || k == TY_VOID || k == TY_FUNC) {
+			*v = 0;
+			return true;
+		}
+		return false;
+	}
 	/* what a type can do trivially: yes for scalars and arrays of them, and for a class vcc laid out as POD
 	   (one that is not POD for layout may still be trivially copyable: not known) */
 	{

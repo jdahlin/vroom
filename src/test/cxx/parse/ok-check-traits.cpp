@@ -24,3 +24,23 @@ static_assert(sizeof(A<u2>) == 5 && sizeof(A<static_cast<int>(V::array)>) == 7, 
 char pick(V);
 long pick(int);
 static_assert(sizeof(pick(V::object)) == 1 && sizeof(pick(u1)) == 8, "");
+
+// how two types relate; packs in builtin calls; an explicit pack of a function template
+struct Base { }; struct Derived : Base { }; struct Other { };
+static_assert(__is_base_of(Base, Derived) && __is_base_of(Base, Base) && !__is_base_of(Derived, Base) && !__is_base_of(Base, Other), "");
+static_assert(__is_convertible(int, long) && __is_convertible(Derived *, Base *) && !__is_convertible(Base *, Derived *), "");
+static_assert(!__is_convertible(int *, long *) && __is_convertible(int *, const int *) && __is_convertible(int *, void *), "");
+static_assert(__is_constructible(int, long) && __is_constructible(int) && !__is_constructible(int &) && !__is_constructible(int *, long *), "");
+template<class T, T v> struct ic { static constexpr T value = v; };
+template<class T, class... Args> struct constructible : ic<bool, __is_constructible(T, Args...)> { };
+template<class... P> struct count : ic<int, sizeof...(P)> { };
+static_assert(constructible<int, int>::value && constructible<int>::value && !constructible<int *, long>::value, "");
+static_assert(count<>::value == 0 && count<int, long, char>::value == 3, "");
+template<bool, class T = void> struct en { };
+template<class T> struct en<true, T> { typedef T type; };
+struct yes { static constexpr bool value = true; }; struct no { static constexpr bool value = false; };
+template<class...> using to_yes = yes;
+template<class... P> to_yes<typename en<P::value>::type...> all_helper(int);
+template<class...> no all_helper(...);
+template<class... P> using all = decltype(all_helper<P...>(0));
+static_assert(all<yes, yes>::value && !all<yes, no>::value && all<>::value, "");

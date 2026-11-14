@@ -332,8 +332,53 @@ static void cxx_builtin_call_parse(cxx *c)
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
+		/* Args...: a bound pack of types, each a type argument (__is_constructible(T, Args...)) */
+		if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS && !c->tentative &&
+		    !c->template_depth) {
+			cxx_entity *pk = cxx_lookup(c, cxx_peek(c, 0)->id);
+
+			if (pk && pk->kind == CXX_ENTITY_TYPE && pk->is_pack && !pk->pack_placeholder && pk->pack_index < 0) {
+				for (uint32_t i = 0; i < pk->npack; i++)
+					if (n < 2 && pk->pack[i].kind == 1 && pk->pack[i].t != CXX_TY_UNKNOWN)
+						types[n++] = pk->pack[i].t;
+					else
+						n = 3;
+				c->npacks_seen = 0;	/* (expanded here) */
+				cxx_advance(c);
+				cxx_advance(c);
+				if (!cxx_accept(c, LEX_TOKEN_COMMA))
+					break;
+				continue;
+			}
+		}
 		if (cxx_try_type_id(c)) {
+			uint32_t start = c->pos, seen = c->npacks_seen;
+
+			c->npacks_seen = 0;
 			cxx_type_id_parse(c);
+			if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->npacks_seen == 1 && !c->packs_seen[0]->pack_placeholder && c->instantiating &&
+			    !c->tentative && !c->template_depth) {
+				/* __is_constructible(T, Args...): the pack's elements, each a type argument */
+				cxx_entity *pk = c->packs_seen[0];
+				uint32_t end = c->pos;
+
+				for (uint32_t i = 0; i < pk->npack; i++) {
+					cxx_pack_element(c, pk, (int32_t)i);
+					c->pos = start;
+					cxx_type_id_parse(c);
+					if (n < 2 && c->type_out != CXX_TY_UNKNOWN && c->pos == end)
+						types[n++] = c->type_out;
+					else
+						n = 3;
+				}
+				cxx_pack_element(c, pk, -1);
+				c->pos = end + 1;
+				c->npacks_seen = seen;
+				if (!cxx_accept(c, LEX_TOKEN_COMMA))
+					break;
+				continue;
+			}
+			c->npacks_seen = seen;
 			if (n < 2 && c->type_out != CXX_TY_UNKNOWN)
 				types[n++] = c->type_out;
 			else
