@@ -122,6 +122,7 @@ typedef struct cxx_entity {
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
+	struct cxx_entity *bound_template;	/* a template template parameter bound to a template: that template (its identity) */
 	struct cxx_ftemplate *ftmpl;
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
@@ -209,6 +210,7 @@ typedef struct cxx {
 	uint32_t fn_nparams, fn_cparams;
 	uint8_t fn_variadic, fn_unknown;
 	uint32_t fn_ndefaults;
+	uint8_t fn_has_trailing, decl_has_trailing;	/* the last function tail / declarator wrote -> type (known or not) */
 	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
 	uint8_t decl_variadic, sig_is_function;	/* the last declarator's function is variadic; the last signature parsed was a function's */
 	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */

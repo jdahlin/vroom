@@ -19,8 +19,9 @@ VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 	c->edecl = t, c->edecl_name = 0;
 	c->ename = 0, c->ename_missing = 0;	/* (a name only until something is done with it) */
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
-		/* a reference: its referent, an lvalue (T&& names are lvalues too) */
-		c->etype = AST_TYPE(c->ast, t)->base, c->elval = 1;
+		/* a reference: its referent; an lvalue for T&, and for T&& only when it is a name (lvalue set by the
+		   caller): a call or cast to T&& is an xvalue, which binds as an rvalue */
+		c->etype = AST_TYPE(c->ast, t)->base, c->elval = AST_TYPE(c->ast, t)->ext == 1 || lvalue;
 		return;
 	}
 	c->etype = t, c->elval = lvalue;
@@ -913,14 +914,11 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
 			continue;
 		cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
-		if (c->etype != CXX_TY_UNKNOWN) {
-			c->einvalid = 0;
-			return;
-		}
+		if (c->etype != CXX_TY_UNKNOWN)
+			return;	/* (the caller decides what this means for the expression's validity) */
 		if (!c->none_viable)
 			c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */
 	}
-	c->einvalid = 0;
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 }
 

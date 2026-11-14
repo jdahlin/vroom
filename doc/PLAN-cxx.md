@@ -755,3 +755,26 @@ static_assert, 0.19 s; json 71,556 layouts clang agrees with, 71/71 parse;
 parse tests 22/22.  Undecided now: constraints of std::__common_ref and
 __common_reference_sub_bullet1 (67), __iterator_traits for one iterator type
 (5), so from_bjdata still stops at iterator_input_adapter_factory.
+
+### Status 2026-11-14 (19): json's own code is instantiated
+json's tests are built as C++11 by its own CMake (the harness's -std=c++20
+was this plan's choice); in C++11 libc++ uses its __cxx03 headers, without
+concepts.  What stopped from_bjdata, and is fixed: decltype(expr):: as a
+qualifier (C++03 detection: decltype(test<T>(nullptr))::value); an auto
+f() -> decltype(invalid) lost its "not viable" in a second parse; the invalid
+flag of one call was cleared by the next call in the expression; a call
+returning T&& is an xvalue (binary_reader(std::move(ia), ...)); templates
+declared inside an instance are recorded (basic_json::binary_reader<T>); an
+instance's injected class name is a type argument (reader<J, I> inside
+J<long>); a template template parameter bound to a template keeps that
+template's identity (nlohmann's detector: is_detected_exact<bool, Op, SAX>
+was false).  Members of a partial specialization defined outside the class
+are not bound to the primary's instances (vector<bool, A>::push_back made
+vector<bool, bool>).
+unit-32bit, C++11: 254 function template + 409 member + 37 out-of-class
+bodies (lexer 41, binary_reader 31, json_sax_dom_parser 26, basic_json 18),
+3861 of 4427 calls typed, static_asserts 108 true / 0 false / 13 not
+evaluated, 6 instances failed, 0.13 s (clang -fsyntax-only 0.58 s).  C++20:
+223 + 486 + 38, 0.17 s (clang 0.80 s).  clang -O0 emits about 1,670
+functions for the file in either mode.  json: 96,270 layouts clang agrees
+with, 71/71 parse; parse tests 23/23 (ok-check-detector).

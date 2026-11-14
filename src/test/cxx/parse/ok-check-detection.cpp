@@ -69,3 +69,19 @@ void arrays(int a[], B b)
 	static_assert(rank_v<int> == 0 && rank_v<int[3]> == 1 && rank_v<int[2][4]> == 2, "");
 	static_assert(extent<int[7]>::value == 7 && extent<int>::value == 0, "");
 }
+
+// the C++03 form: two member function templates, chosen by a substitution failure, read through decltype(...)::
+struct yes_t { static const bool value = true; }; struct no_t { static const bool value = false; };
+template<class T> struct has_vt {
+private:
+	template<class U> static no_t test(...);
+	template<class U> static yes_t test(void_t<typename U::value_type> * = nullptr);
+public:
+	static const bool value = decltype(test<T>(nullptr))::value;
+};
+template<class I, bool> struct tr { };
+template<class I> struct tr<I, true> { typedef typename I::value_type value_type; };
+template<class I> struct itr : tr<I, has_vt<I>::value> { };
+template<class T> struct itr<T *> { typedef T value_type; };
+static_assert(has_vt<A>::value && !has_vt<B>::value && !has_vt<int>::value, "");
+static_assert(sizeof(itr<A>::value_type) == 8 && sizeof(itr<short *>::value_type) == 2, "");

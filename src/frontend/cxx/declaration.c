@@ -278,6 +278,7 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 		}
 		if ((t->kw == CXX_KW_decltype || t->kw == CXX_KW___decltype) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
 			uint32_t save = c->pos, save_undo = c->nundo;
+			cxx_scope *cls = NULL;
 
 			cxx_advance(c);
 			cxx_skip_balanced(c);
@@ -285,8 +286,25 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 				cxx_rewind(c, save, save_undo);
 				break;
 			}
+			/* decltype(expr)::name outside templates: the class expr's type is (decltype(test<T>(0))::value) */
+			if (!c->template_depth) {
+				uint32_t after = c->pos, targs = c->in_template_args;
+
+				c->pos = save + 2;
+				c->in_template_args = 0;
+				c->unevaluated++;
+				cxx_expression_parse(c);
+				c->unevaluated--;
+				c->in_template_args = targs;
+				if (c->pos + 1 == after && c->etype != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->etype))
+					cls = cxx_type_class_scope(c, QUNQ(c->etype));
+				c->pos = after;
+			}
 			cxx_advance(c);
-			*dependent = true, *qualifier = NULL;
+			if (cls)
+				*qualifier = cls, c->qualifier_hint = cls;
+			else
+				*dependent = true, *qualifier = NULL;
 			continue;
 		}
 		break;
@@ -327,12 +345,18 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 		if (id->kind == LEX_TOKEN_IDENTIFIER && !id->kw && !dep &&
 		    (cxx_ends_argument(c, 1) || after->kind == LEX_TOKEN_ELLIPSIS)) {
 			cxx_entity *e = q ? cxx_lookup_in(c, q, id->id, 0) : cxx_lookup(c, id->id);
+			cxx_entity *inj = e ? cxx_entity_prefer(e, CXX_ENTITY_TYPE) : NULL;
 
 			e = e ? cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE) : NULL;
+			/* an instance's injected class name (J inside J<long>): the instance, a type; where a template
+			   template parameter takes it, cxx_instantiate turns it back into its template */
+			if (e && inj && inj->kind == CXX_ENTITY_TYPE && !inj->dependent && inj->ty != CXX_TY_UNKNOWN && !c->template_depth &&
+			    cc_type_is_record(c->ast, inj->ty))
+				e = NULL;
 			if (e && e->kind == CXX_ENTITY_TEMPLATE && !e->is_pack) {
 				cxx_advance(c);
 				if (e->tmpl && !e->dependent)
-					out->kind = 4, out->v = (int64_t)(intptr_t)e;
+					out->kind = 4, out->v = (int64_t)(intptr_t)(e->bound_template ? e->bound_template : e);
 				else if (e->placeholder)
 					out->kind = 7, out->v = e->placeholder - 1;	/* a pattern's template template parameter */
 				return;
@@ -1282,6 +1306,8 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			cxx_function_tail_parse(c);
 			if (x)
 				x->trailing = c->fn_trailing, x->is_const = c->fn_const;
+			if (!nested)
+				c->decl_has_trailing = c->fn_has_trailing;
 			*is_function = true;
 			continue;
 		}
@@ -1486,10 +1512,10 @@ static void cxx_function_tail_parse(cxx *c)
 		cxx_type_id_parse(c);
 		c->scope = outer;
 		c->fn_trailing = c->type_out;	/* auto f() -> T: the return type */
-		c->fn_const = is_const;
+		c->fn_const = is_const, c->fn_has_trailing = 1;
 		return;
 	}
-	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const;
+	c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const, c->fn_has_trailing = 0;
 }
 
 /* the type of a functional cast T(x) / T{x}: type-specifiers only, no declarator */
@@ -2895,8 +2921,33 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 							mname = cxx_dtor_id();
 					}
 				}
-				cxx_template_member_definition(c, qs->owner, mname, c->scope, c->scope->parent, c->ftmpl_begin, c->ndecl_params,
-							       c->decl_const);
+				/* only X<T, U>::f with the definition's own parameters in order: X<bool, A>::f is a member of a
+				   partial specialization, whose parameters are not the primary's */
+				{
+					bool primary = false;
+					uint32_t i = start;
+
+					while (i < c->pos && c->tok[i].kind != LEX_TOKEN_LESS)
+						i++;
+					if (i < c->pos) {
+						uint32_t k = 0;
+
+						primary = true;
+						for (i++; i < c->pos && primary; i++) {
+							if (c->tok[i].kind == LEX_TOKEN_GREATER)
+								break;
+							if (c->tok[i].kind == LEX_TOKEN_COMMA || c->tok[i].kind == LEX_TOKEN_ELLIPSIS)
+								continue;
+							primary = c->tok[i].kind == LEX_TOKEN_IDENTIFIER && k < c->scope->ntparams &&
+								  c->tok[i].id == c->scope->tparams[k].name;
+							k++;
+						}
+						primary &= k == c->scope->ntparams;
+					}
+					if (primary)
+						cxx_template_member_definition(c, qs->owner, mname, c->scope, c->scope->parent, c->ftmpl_begin,
+									       c->ndecl_params, c->decl_const);
+				}
 			}
 			if (context == CXX_CONTEXT_CLASS || c->class_depth)
 				cxx_function_body_defer(c);
@@ -3209,7 +3260,8 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	c->sig_is_function = f;
 	c->sig_auto = 0;
 	if (ret_auto && f) {
-		c->sig_auto = c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return);
+		/* (auto f() -> T with a T vcc could not form is not a deduced return type) */
+		c->sig_auto = c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return) && !c->decl_has_trailing;
 		/* the placeholder stays here: a pattern for the deduction below, void or unknown to callers */
 		if (c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return)) {
 			ret_pattern = c->decl_return;

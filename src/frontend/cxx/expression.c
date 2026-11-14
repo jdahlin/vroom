@@ -1037,6 +1037,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 				else if (!set && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
 				else {
+					uint8_t was = c->einvalid;	/* (an earlier part of the expression may be ill-formed already) */
+
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
@@ -1045,11 +1047,9 @@ static void cxx_postfix_expression_parse(cxx *c)
 
 						for (uint32_t i = 0; i < c->ncargs && i < 16; i++)
 							known &= c->cargs[i] != CXX_TY_UNKNOWN;
-						c->einvalid = 0;
 						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
 						/* nothing by that name fits, here or in the arguments' namespaces */
-						if (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure)
-							c->einvalid = 1;
+						c->einvalid = was || (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure);
 					}
 				}
 			}

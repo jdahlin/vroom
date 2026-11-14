@@ -93,11 +93,14 @@ VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sco
 {
 	cxx_template *t;
 
-	if (!e || c->tentative || c->instantiating)
+	if (!e || c->tentative)
 		return;
+	/* (inside an instance too: a member template of X<int>, its home X<int>'s scope, where the instance's
+	   own parameters are bound; it has no name of its own in the layout dump) */
 	t = cxx_template_of(e);
 	t->params = params, t->home = home, t->pos = pos, t->end = end, t->is_alias = alias;
-	cxx_template_define_path(c, e, t);
+	if (!c->instantiating)
+		cxx_template_define_path(c, e, t);
 }
 
 /* a declaration before the definition: its parameters' defaults count (template<class T = void> struct X;) */
@@ -436,8 +439,10 @@ static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_
 		cxx_entity *te = a->kind == 4 ? (cxx_entity *)(intptr_t)a->v : NULL;
 
 		e = cxx_declare(c, binding, p->name, CXX_ENTITY_TEMPLATE);
-		if (e && te)
+		if (e && te) {
 			e->dependent = 0, e->members = te->members, e->specs = te->specs, e->nspecs = te->nspecs, e->tmpl = te->tmpl;
+			e->bound_template = te->bound_template ? te->bound_template : te;	/* (Op<...> and Op are the template it is bound to) */
+		}
 		return;
 	}
 	e = cxx_declare(c, binding, p->name, p->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
@@ -882,10 +887,16 @@ static int cxx_partial_substitute(cxx *c, cxx_partial *p, const cxx_targ *bind, 
 	c->instantiating--, c->unevaluated--;
 	cxx_state_restore(c, &s);
 	invalid = c->einvalid || c->member_missing, unsure = c->eunsure;
-	if (getenv("VCC_CXX_SUBST"))
-		fprintf(stderr, "substitute: invalid %u missing %u unsure %u parsed %d args %u first kind %u last kind %u\n", c->einvalid, c->member_missing,
-			c->eunsure, ngot != UINT32_MAX, (unsigned)ngot, ngot && ngot != UINT32_MAX ? got[0].kind : 9,
-			ngot && ngot != UINT32_MAX ? got[ngot - 1].kind : 9);
+	if (getenv("VCC_CXX_SUBST")) {
+		char sp[256] = "?";
+		size_t sl = 0;
+
+		if (n && args[0].kind == 1)
+			cxx_type_spell(c, args[0].t, sp, sizeof sp, &sl);
+		fprintf(stderr, "substitute: invalid %u missing %u unsure %u parsed %d args %u first kind %u last kind %u; first argument %s\n",
+			c->einvalid, c->member_missing, c->eunsure, ngot != UINT32_MAX, (unsigned)ngot, ngot && ngot != UINT32_MAX ? got[0].kind : 9,
+			ngot && ngot != UINT32_MAX ? got[ngot - 1].kind : 9, sp);
+	}
 	c->einvalid = o_invalid, c->member_missing = o_missing, c->eunsure = o_unsure;
 	if (invalid)
 		return 0;
@@ -1170,6 +1181,13 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 				return NULL;
 		} else
 			return NULL;
+		/* an injected class name given where a template is wanted: the instance's template */
+		if (p->kind == 3 && full[n].kind == 1) {
+			cxx_instance *ix = cxx_tag_info(c, full[n].t);
+
+			if (ix && ix->of)
+				full[n].kind = 4, full[n].v = (int64_t)(intptr_t)ix->of, full[n].t = 0;
+		}
 		if ((p->kind == 1) != (full[n].kind == 1) || (p->kind == 3) != (full[n].kind == 4 || full[n].kind == 7))
 			return NULL;
 		cxx_bind(c, binding, p, &full[n]);
@@ -1189,12 +1207,17 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 			cxx_instance_complete(c, x->inst);
 		return x->inst;
 	}
-	if (0) {
+	if (getenv("VCC_CXX_TRACE_INSTANCE")) {
+		/* where an instance whose spelling contains the given text is first named */
 		char sp[512];
 		size_t sl;
 
-		dprintf(2, "cxx-trace: %*s%s\n", (int)c->instantiating * 2, "",
-			cxx_instance_spell(c, t, full, n, sp, sizeof sp, &sl) ? sp : t->path ? t->path : "?");
+		if (cxx_instance_spell(c, t, full, n, sp, sizeof sp, &sl) && strstr(sp, getenv("VCC_CXX_TRACE_INSTANCE"))) {
+			fprintf(stderr, "instance %s named at:", sp);
+			for (uint32_t i = c->pos > 12 ? c->pos - 12 : 0; i < c->pos + 6 && i < c->ntok; i++)
+				fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+			fputc('\n', stderr);
+		}
 	}
 	bool pattern = cxx_args_mention_placeholder(c, full, n);	/* X<T*> in a partial specialization's pattern */
 	cxx_partial *pick = NULL;
@@ -1638,14 +1661,14 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 	c->this_const = this_const, c->ret_capture = ret_capture, c->ret_lval = ret_lval, c->ret_type = ret_type;
 	c->unevaluated = unevaluated;
 	/* auto with no trailing type: only the body tells (an unevaluated call instantiates it too) */
-	if (!want_body && c->sig_auto && r == CXX_TY_UNKNOWN)
+	if (!want_body && c->sig_auto && r == CXX_TY_UNKNOWN && viable == 1)
 		return cxx_ftemplate_return(c, f, bind, true);
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
 			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN)
 				f->done[i].ret = r, f->done[i].sig = sig;
-			if (!want_body)
-				f->done[i].viable = viable;
+			if (!want_body || viable != 1)
+				f->done[i].viable = viable;	/* (not viable, however it was found out) */
 			r = f->done[i].ret, sig = f->done[i].sig, viable = f->done[i].viable;
 			break;
 		}
@@ -2009,6 +2032,8 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 
 	if (!t || !t->noocs || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
 		return;
+	if (x->pos)
+		return;	/* (an instance of a partial specialization: its members' definitions are not the primary's) */
 	nparams = AST_TYPE(c->ast, e->ty)->n;
 	for (uint32_t i = 0; i < t->noocs; i++)
 		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const)
