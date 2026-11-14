@@ -28,6 +28,7 @@
 #include "port/file.h"
 #include "common/checked-arithmetic.h"
 #include "elf-definitions.h"
+#include "platform/win/coff-format.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -1332,6 +1333,140 @@ static char nm_symbol_type_letter(const objcopy_elf *e, const elf_symbol *y)
 	return c;
 }
 
+/*
+ * COFF objects (Windows x64 through MinGW-w64, PLAN-win64.md WIN8: FFmpeg's
+ * configure reads `nm test.o` for the symbol prefix): the symbols llvm-nm 23
+ * lists and its letters (COFFObjectFile::getSymbolFlags, llvm-nm's
+ * getSymbolNMTypeChar), addresses 8 hex digits wide.  Not handled: bigobj and
+ * short import records (a clear error).  false: not a valid COFF object.
+ */
+static bool nm_coff_is_object(const uint8_t *p, size_t n)
+{
+	if (n < COFF_FILE_HEADER_SIZE)
+		return false;
+	uint16_t machine = pe_rd16(p);
+	return (machine == 0x8664 || machine == 0x14c || machine == 0xaa64 || machine == 0x1c4) && pe_rd16(p + 2) != 0xffff;
+}
+
+static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd, bool ext, nm_symbol **out, uint32_t *count)
+{
+	uint32_t nsec = pe_rd16(p + 2), symptr = pe_rd32(p + 8), nsym = pe_rd32(p + 12), opt = pe_rd16(p + 16);
+	uint64_t sec0 = COFF_FILE_HEADER_SIZE + (uint64_t)opt, strtab = (uint64_t)symptr + (uint64_t)nsym * COFF_SYMBOL_SIZE;
+
+	*out = NULL, *count = 0;
+	if (sec0 + (uint64_t)nsec * COFF_SECTION_HEADER_SIZE > n || (nsym && strtab + 4 > n))
+		return false;
+	uint32_t strsize = nsym ? pe_rd32(p + strtab) : 0;
+	if (nsym && strsize < 4)
+		strsize = 4;	/* (windres writes 0 for an empty table; llvm reads it as 4) */
+	if (nsym && strtab + strsize > n)
+		return false;
+	nm_symbol *v = objcopy_zeroed_alloc(nsym + 1, sizeof *v);
+	uint32_t m = 0;
+	for (uint32_t i = 0; i < nsym; i++) {
+		const uint8_t *y = p + symptr + (uint64_t)i * COFF_SYMBOL_SIZE;
+		int16_t secno = (int16_t)pe_rd16(y + 12);
+		uint8_t klass = y[16], naux = y[17];
+		uint32_t value = pe_rd32(y + 8);
+		char *name;
+
+		if (pe_rd32(y)) {
+			name = objcopy_zeroed_alloc(9, 1);
+			memcpy(name, y, 8);
+		} else {
+			uint32_t off = pe_rd32(y + 4);
+			if (off >= strsize) {
+				free(v);
+				return false;
+			}
+			const char *s = (const char *)p + strtab + off, *e = memchr(s, 0, strsize - off);
+			if (!e) {
+				free(v);
+				return false;
+			}
+			name = (char *)s;
+		}
+		bool external = klass == IMAGE_SYM_CLASS_EXTERNAL, weak_external = klass == IMAGE_SYM_CLASS_WEAK_EXTERNAL;
+		bool section_def = naux && (klass == IMAGE_SYM_CLASS_STATIC || (external && secno == IMAGE_SYM_ABSOLUTE));
+		bool global = external || weak_external, weak = false, undefined = external && secno == 0 && !value;
+		bool common = external && secno == 0 && value;
+		if (weak_external && naux && i + 1 < nsym) {
+			const uint8_t *aux = y + COFF_SYMBOL_SIZE;
+			weak = true;
+			undefined |= pe_rd32(aux + 4) != IMAGE_WEAK_EXTERN_SEARCH_ALIAS;
+		}
+		i += naux;
+		if (klass == IMAGE_SYM_CLASS_FILE || section_def)
+			continue;	/* format specific: llvm-nm shows them only with -a */
+		char c = '?';
+		if (weak)
+			c = undefined ? 'w' : 'W';
+		else if (undefined)
+			c = 'U';
+		else if (common)
+			c = 'C';
+		else if (secno == IMAGE_SYM_ABSOLUTE)
+			c = 'a';
+		else if (!strncmp(name, ".debug", 6) || !strncmp(name, ".sxdata", 7))
+			c = 'N';
+		else if (secno == IMAGE_SYM_DEBUG)
+			c = 'n';
+		else if (secno > 0 && (uint32_t)secno <= nsec) {
+			const uint8_t *h = p + sec0 + (uint64_t)(secno - 1) * COFF_SECTION_HEADER_SIZE;
+			uint32_t ch = pe_rd32(h + 36);
+
+			if (!memcmp(h, ".idata", 6))
+				c = 'i';
+			else if (ch & IMAGE_SCN_CNT_CODE)
+				c = 't';
+			else if (ch & IMAGE_SCN_CNT_INITIALIZED_DATA)
+				c = ch & IMAGE_SCN_MEM_WRITE ? 'd' : 'r';
+			else if (ch & IMAGE_SCN_CNT_UNINITIALIZED_DATA)
+				c = 'b';
+			else if (ch & IMAGE_SCN_LNK_INFO)
+				c = 'i';
+		}
+		if (global && !weak && c >= 'a' && c <= 'z')
+			c -= 32;
+		bool defined = !undefined;
+		if ((undef && defined) || (defd && !defined) || (ext && !global))
+			continue;
+		v[m++] = (nm_symbol){.name = name, .addr = value, .type = c, .defined = defined};
+	}
+	*out = v, *count = m;
+	return true;
+}
+
+/* a short import record (an import library's member): __imp_NAME, and NAME for
+   code, both global, the letter by the import type (llvm-nm's COFFImportFile) */
+static bool nm_coff_import_symbols(const uint8_t *p, size_t n, bool undef, bool ext, nm_symbol **out, uint32_t *count)
+{
+	uint32_t size = pe_rd32(p + 12);
+	uint16_t type = pe_rd16(p + 18) & 3;
+	const char *name = (const char *)p + COFF_IMPORT_HEADER_SIZE;
+
+	*out = NULL, *count = 0;
+	if ((uint64_t)COFF_IMPORT_HEADER_SIZE + size > n || !memchr(name, 0, size))
+		return false;
+	nm_symbol *v = objcopy_zeroed_alloc(2, sizeof *v);
+	char c = type == IMPORT_CODE ? 'T' : type == IMPORT_DATA ? 'D' : type == IMPORT_CONST ? 'R' : '?';
+	size_t l = strlen(name);
+	char *imp = objcopy_zeroed_alloc(l + 7, 1);
+
+	memcpy(imp, "__imp_", 6);
+	memcpy(imp + 6, name, l);
+	if (undef) {
+		*out = v;
+		return true;
+	}
+	(void)ext;	/* (both are global) */
+	v[(*count)++] = (nm_symbol){.name = imp, .type = c, .defined = true};
+	if (type == IMPORT_CODE)
+		v[(*count)++] = (nm_symbol){.name = name, .type = c, .defined = true};
+	*out = v;
+	return true;
+}
+
 /* nm's inputs: files, or the members of an archive (regular: copied out, 8-aligned; thin: by path) */
 typedef struct { char *label, *path; uint8_t *member_bytes; size_t size; bool is_member; const char *archive; } nm_input;
 
@@ -1447,6 +1582,46 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		nm_inputs_collect(dirfd, files[f], &in, &nin);
 	for (int f = 0; f < nin; f++) {
 		objcopy_elf e;
+		/* COFF: its own symbol reader, the same sort and output */
+		const uint8_t *cp = in[f].member_bytes;
+		size_t cn = in[f].size;
+		VAUTOUNMAP vfile_mapping cm = { 0 };
+		if (!cp) {
+			VAUTOCLOSE int cfd = openat(dirfd, in[f].path, O_RDONLY);
+			struct stat cst;
+			if (cfd >= 0 && vfile_map_fd(cfd, &cm, &cst))
+				cp = cm.p, cn = cm.n;
+		}
+		bool import = cp && cn >= COFF_IMPORT_HEADER_SIZE && pe_rd16(cp) == 0 && pe_rd16(cp + 2) == 0xffff;
+		if (cp && (nm_coff_is_object(cp, cn) || import)) {
+			nm_symbol *v;
+			uint32_t m;
+			if ((nf > 1 || in[f].is_member) && !fname)
+				fprintf(out, "\n%s:\n", in[f].label);
+			if (import ? !nm_coff_import_symbols(cp, cn, undef, ext, &v, &m) : !nm_coff_symbols(cp, cn, undef, defd, ext, &v, &m)) {
+				objcopy_error_report("'%s': invalid COFF object", in[f].label);
+				continue;
+			}
+			if (!nosort)
+				qsort(v, m, sizeof *v, numeric ? nm_symbol_address_cmp : nm_symbol_name_cmp);
+			char pfx[8192] = "";
+			if (fname && in[f].is_member)
+				snprintf(pfx, sizeof pfx, "%s:%s: ", in[f].archive, in[f].label);
+			else if (fname)
+				snprintf(pfx, sizeof pfx, "%s: ", in[f].label);
+			for (uint32_t i = 0; i < m; i++) {
+				fputs(pfx, out);
+				if (v[i].defined)
+					fprintf(out, "%08llx ", (unsigned long long)v[i].addr);
+				else
+					fprintf(out, "%8s ", "");
+				if (size)	/* (COFF symbols have no size) */
+					fputs(v[i].defined ? "00000000 " : "         ", out);
+				fprintf(out, "%c %s\n", v[i].type, v[i].name);
+			}
+			free(v);	/* (short names: 9-byte copies, left to the process's exit) */
+			continue;
+		}
 		if (in[f].member_bytes) {
 			memset(&e, 0, sizeof e);
 			e.file_bytes = in[f].member_bytes;

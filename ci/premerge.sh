@@ -227,6 +227,7 @@ win64)
 	step vccrt-diff    python3 bench/vccrt-test.py diff --export "$X"
 	step vccrt-chkstk  python3 bench/vccrt-test.py chkstk --export "$X"
 	step var-coff      python3 bench/var-cmp.py coff -j "$J" -n 300 --bin-dir "$BUILD"
+	step vnm-coff      python3 bench/vnm-coff.py -j "$J" --bin-dir "$BUILD"
 	# GUARD abi: cross-compiler calls clang/vcc x caller/callee under Wine (WIN2)
 	if has bench/vcc-abi.py win64; then
 		step abi-win64 python3 bench/vcc-abi.py --target win64
@@ -239,9 +240,9 @@ win64)
 	else
 		skip vas-obj-coff "no COFF cases in src/test/vas-obj (WIN4)"
 	fi
-	# HOOK WIN8 (not written yet): zlib and SQLite built by vcc for the
-	# target, their own tests under Wine against clang's cross build.  The
-	# harnesses gain `--target win64`; these lines then run them.
+	# WIN8: zlib and SQLite built by vcc for the target (and zlib's own
+	# configure through the vcc shim and vccd), their own tests under Wine
+	# against clang's cross build; each skips cleanly without its source.
 	if has bench/zlib/run.py win64; then
 		step zlib-win64 python3 bench/zlib/run.py --target win64 all
 	else
