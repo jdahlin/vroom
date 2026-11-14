@@ -1374,6 +1374,31 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Forwarding small record initializers to their destination (2026-11-14).**
+On the SQLite 3.50.4 compile, 78% of the self-hosted cycle samples in
+`walk_lvalue_load` landed on the copy out of a freshly initialized stack
+record: two byte stores immediately preceded a 16-byte reload. Clang wrote
+the result fields directly through the return pointer. VIR now forwards a
+zero fill and up to four scalar field stores at the original copy point,
+using the previously evaluated field values. An intervening memory write
+or call invalidates the candidate. The second promotion pass can then
+remove the private stack record. An inlined 32-byte return reproducer
+goes from two stack slots and two copies to writing the return buffer directly.
+
+Cycle profiles covering five pinned compiles per binary (sampling period 75,001) gave
+515 → 106 exclusive samples in `walk_lvalue_load` for self-hosted vcc
+and 51 → 44 for clang-built vcc. Median task-clock in milliseconds for
+one worker on CPU 7, one warm-up per binary, ordinary host builds:
+
+| SQLite compile | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 163.00 / 162.11 | 133.205 / 132.995 | 1.224× / 1.219× |
+| 21 runs alternating order | 162.69 / 162.17 | 133.05 / 132.87 | 1.223× / 1.221× |
+
+The self-hosted build retired 3.0–3.6M fewer instructions per compile.
+All four binaries produced the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`), which passed the recursive-query smoke test.
+
 **SQLite flag tests, directive scanning and host compiler profiles (2026-11-14).**
 VIR now branches directly on a masked unsigned load with a memory TEST. Clang
 used testb/jcc where vcc loaded the byte, masked it and tested the register.

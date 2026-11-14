@@ -236,6 +236,7 @@ VPRIV void virbuild_parameters_dead_remove(codegen_context *e);
 /* slot-promotion.c */
 VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V, uint32_t q);
 VPRIV bool virbuild_slots_promote(codegen_context *e);
+VPRIV bool virbuild_aggregate_copies_forward(codegen_context *e);
 
 /* if-conversion.c */
 VPRIV bool virbuild_arm_is_hoistable(virbuild_context *V, uint32_t a, uint32_t b, uint32_t cond, uint32_t *n);
