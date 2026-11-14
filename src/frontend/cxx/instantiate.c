@@ -1111,6 +1111,10 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 
 	if (nargs > 32)
 		return NULL;
+	/* a template template parameter bound to a template: that template's instance (named as it, not as the
+	   parameter: AllocatorType<T> is std::allocator<T>, whose constructors are called allocator) */
+	if (te && te->bound_template)
+		te = te->bound_template;
 	memcpy(acopy, args, nargs * sizeof *args);	/* (often c->targs, which a pattern's parse reuses) */
 	c->tentative = 0;
 	r = cxx_instantiate_now(c, te, acopy, nargs, complete);
@@ -1328,8 +1332,20 @@ static bool cxx_instance_parse(cxx *c, cxx_instance *x)
 			ok = true;
 		}
 		c->instances_made++;
-	} else
+	} else {
 		c->instances_failed++;
+		if (getenv("VCC_CXX_WHY")) {
+			/* the instance and the parse error that stopped it */
+			char sp[400] = "?";
+			size_t sl2 = 0;
+
+			cxx_instance_spell(c, t, x->args, x->nargs, sp, sizeof sp, &sl2);
+			fprintf(stderr, "instance failed: %s: %s; at:", sp, c->error);
+			for (uint32_t i = c->pos > 8 ? c->pos - 8 : 0; i < c->pos + 4 && i < c->ntok; i++)
+				fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+			fputc('\n', stderr);
+		}
+	}
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	return ok;
