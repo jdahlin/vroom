@@ -2208,3 +2208,16 @@ libc++:s `pair`); i ett konstantuttryck viks anropet genom mallen själv (`cxx_c
 sådant anrop utanför ett konstantuttryck får ingen kod (ingen instans görs på den vägen), och
 `std::pair<A, B> p;` väljer ännu ingen konstruktor: `__test_implicit_default_constructible<const long&>({})`
 (en tom klammerlista till `const long&`) är inte livskraftig hos vcc.  Test: `run/empty-pack-constexpr.cpp`.
+
+## Status 133 (2026-11-15): mätning mot 30x
+Kompilering av json:s 70 test-TU:er med vcc -O0 i dag (213 funktioner saknas ännu, summerat per TU; deras
+kod skulle tillkomma):
+| | CPU | vägg (`-j 6`) | mot clang -O2:s 243 s |
+|---|---|---|---|
+| TU för TU (som cxx-strict) | 31,5 s | 5,4 s | **7,7x** |
+| headrarna en gång per konfiguration (forkservern, 9 prefix: 48, 15, 7×1) | 12,4 s | 5,9 s | **19,6x** |
+En TU: hela -c 0,8 s, varav framänden 0,6 s; bara headrarna (json, doctest, libc++) 0,25 s.  Det som
+återstår per TU efter forken (≈0,15 s) är TU:ns egna instansieringar och kod.  30x (8,1 s) kräver alltså
+mer än forken: att instansieringar delas mellan TU:erna (json upprepar enligt X0 85 % av dem) eller en
+snabbare instansiering och kodgenerering.  Forkobjekten: 69 av 70 definierar samma funktioner som TU för
+TU; `unit-assert_macro` färre (487 mot 662), inte utrett.
