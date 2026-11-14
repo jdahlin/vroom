@@ -1406,3 +1406,16 @@ json: vcc definierar **4 192 funktioner (från 2 406)**, 69/70, 4,7 s CPU,
 11 av 118 testfunktioner.  Kvar: packar som inte står sist i mallens
 parameterlista (`template<class T, class... A, enable_if_t<...> = 0>`),
 manglingen av beroende typer, virtuella baser.
+
+### Status (52): packar som inte står sist (2026-11-14)
+`template <class T, class... A, enable_if_t<cond, int> = 0>`: en pack följd
+bara av parametrar med förval deduceras; förvalen räknas med packen bunden,
+och en värdeparameter vars typ inte bildas (`enable_if<false>::type`) gör
+kandidaten ogiltig.  Instansen binder parametrarna efter index.
+`allocator_traits::construct` och `std::min<T>`/`max<T>` fungerar nu med
+enbart vcc:s kod (program kompileras, länkas, körs).
+json: 69/70, 4,8 s CPU, men vcc definierar **2 472 funktioner (från 4 192)**:
+fler anrop väljer nu rätt mall, vars kropp ofta inte byggs (t.ex. `std::map`:s
+`__tree`-konstruktor) och vars namn är vcc:s eget (clang 23:s `Tn`), så
+anroparna får ingen kod.  Inget fel blir kod; täckningen sjunker tills
+kropparna och manglingen kommer ikapp.

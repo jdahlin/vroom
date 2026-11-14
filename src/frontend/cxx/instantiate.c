@@ -1786,7 +1786,11 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 			}
 			continue;
 		}
-		if (tp->pack && (tp->kind != 1 || i + 1 != p->params->ntparams))
+		bool rest_defaulted = true;	/* (a pack followed only by parameters with defaults: enable_if_t<...> = 0) */
+
+		for (uint32_t j = i + 1; j < p->params->ntparams; j++)
+			rest_defaulted &= !p->params->tparams[j].pack && p->params->tparams[j].def_b && p->params->tparams[j].kind != 3;
+		if (tp->pack && (tp->kind != 1 || (i + 1 != p->params->ntparams && !rest_defaulted)))
 			f->packs = 1;	/* (value packs, packs not last: not deduced; their placeholders still give the parameters'
 					   shapes, which rule the candidate out for arguments of another shape) */
 		if (tp->pack && !f->packs)
@@ -2106,9 +2110,15 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 		inst = f->done[at].inst;
 	}
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
-	for (uint32_t i = 0; i + 1 < np; i++)
-		cxx_bind(c, binding, &p->params->tparams[i], &acopy[i]);
-	cxx_bind_pack(c, binding, &p->params->tparams[np - 1], acopy + (np - 1), nx - (np - 1));
+	{
+		/* (the pack's parameter: pack_tp's, the others in order in acopy; its elements after them) */
+		uint32_t pk = f->pack_tp ? f->pack_tp - 1 : np - 1, k = 0;
+
+		for (uint32_t i = 0; i < np; i++)
+			if (i != pk)
+				cxx_bind(c, binding, &p->params->tparams[i], &acopy[k++]);
+		cxx_bind_pack(c, binding, &p->params->tparams[pk], acopy + (np - 1), nx - (np - 1));
+	}
 	cxx_outer_save(c, &o);
 	c->instantiating++, c->body_depth++;
 	c->fail = &jb;
@@ -2574,10 +2584,10 @@ static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, u
 			c->why = CXX_WHY_PACKS;
 			return -1;
 		}
-		for (uint32_t i = 0; i + 1 < ntp; i++)
-			if (!p->params->tparams[i].name || p->params->tparams[i].def_b || p->params->tparams[i].constraint_b) {
+		for (uint32_t i = 0; i < ntp; i++)
+			if (i < pk && (!p->params->tparams[i].name || p->params->tparams[i].def_b || p->params->tparams[i].constraint_b)) {
 				c->why = CXX_WHY_PACKS;
-				return -1;	/* (constraints and defaults beside a pack: not evaluated here) */
+				return -1;	/* (constraints and defaults before a pack: not evaluated here) */
 			}
 		for (uint32_t i = 0; i < fixed; i++) {
 			int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
@@ -2605,12 +2615,67 @@ static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, u
 			flat[ntp - 1 + ne++] = bind[pk];
 		}
 		bind[pk].kind = 0;
-		for (uint32_t i = 0; i + 1 < ntp; i++) {
-			if (!bind[i].kind) {
-				c->why = CXX_WHY_UNBOUND;
-				return -1;
+		{
+			/* the parameters other than the pack, in order (those after it: their defaults, with the pack bound),
+			   then the pack's elements */
+			cxx_scope *b = pk + 1 < ntp ? cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL) : NULL;
+			uint32_t k = 0;
+
+			for (uint32_t i = 0; i < pk; i++) {
+				if (!bind[i].kind) {
+					c->why = CXX_WHY_UNBOUND;
+					return -1;
+				}
+				flat[k++] = bind[i];
+				if (b)
+					cxx_bind(c, b, &p->params->tparams[i], &bind[i]);
 			}
-			flat[i] = bind[i];
+			if (b)
+				cxx_bind_pack(c, b, &p->params->tparams[pk], flat + (ntp - 1), ne);
+			for (uint32_t i = pk + 1; i < ntp; i++) {
+				const cxx_tparam *tp = &p->params->tparams[i];
+
+				if (tp->kind == 2 && tp->type_b && !tp->name) {
+					/* an unnamed value there for its type (enable_if_t<cond, int> = 0): the type must form */
+					cxx_outer o;
+					jmp_buf jb;
+					volatile bool failed = false;
+					volatile qty got = CXX_TY_UNKNOWN;
+
+					cxx_outer_save(c, &o);
+					c->instantiating++;
+					c->fail = &jb;
+					c->pos = tp->type_b;
+					c->scope = b;
+					c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0;
+					c->implicit_typename = 0, c->member_missing = 0;
+					if (!setjmp(jb)) {
+						cxx_type_specifiers_parse(c);
+						got = c->ds_type;
+					} else
+						failed = true;
+					c->instantiating--;
+					cxx_outer_restore(c, &o);
+					if (c->member_missing) {
+						c->why = CXX_WHY_UNBOUND;
+						return 0;	/* (no such type: a substitution failure, not viable) */
+					}
+					if (failed || got == CXX_TY_UNKNOWN) {
+						c->why = CXX_WHY_PACKS;
+						return -1;
+					}
+				}
+				if (!cxx_default_argument(c, &p->params->tparams[i], b, &flat[k])) {
+					c->why = CXX_WHY_PACKS;
+					return -1;
+				}
+				if (flat[k].kind == 0) {
+					c->why = CXX_WHY_UNBOUND;
+					return 0;	/* (enable_if_t<false, ...>: no type, a substitution failure) */
+				}
+				cxx_bind(c, b, &p->params->tparams[i], &flat[k]);
+				k++;
+			}
 		}
 		*ret = cxx_ftemplate_return_pack(c, f, flat, ntp - 1 + ne, body, etypes, ne);
 		return c->sig_requires == 1 ? 1 : c->sig_requires;
