@@ -24,6 +24,12 @@ test, assembled by vasm --target=x86_64-w64-mingw32, linked and run as the
 reference is; it passes when the output and exit code are the reference's,
 and the object is also compared with clang -c of the same .s (stage
 'objdiff' when it differs but runs).
+--own: vcc's own toolchain end to end, nothing from LLVM on vcc's side:
+`vpp -c` (the direct object path, WIN5) compiles the test and the test
+runtime, and vcc's driver links (`vpp --target=... -static ... -o x.exe`:
+vlink, libvccrt.a built by vcc, the MinGW-w64 CRT), with PATH emptied so
+that no tool can be found by name; the link map must name no input from
+compiler-rt, libgcc, libunwind or clang's lib/ directory (`fail foreign`).
 --vlink-ref (WIN7) links clang's object twice with the same command line,
 by lld and by vlink (clang --ld-path, SOURCE_DATE_EPOCH fixed): vlink's
 program must run as the reference does (runs-ok) and its file should be
@@ -71,7 +77,7 @@ as (clang rejects vcc's assembly), link, run.  A vcc assembly text
 byte-identical to one that passed before passes again without being
 assembled, linked or run (--no-cache runs all).
 """
-import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
+import glob, hashlib, importlib.util, json, os, re, shutil, subprocess, sys, time
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -327,6 +333,64 @@ def rt_obj():
     open(stamp, 'w').write(RTHASH + TOOLFP)
 
 
+RTO_OWN = f'{OUT}/rt-own.o'
+NOPATH = f'{OUT}/empty-path'	# --own: vcc's side runs with PATH=this (an empty directory)
+
+
+def own_env():
+    os.makedirs(NOPATH, exist_ok=True)
+    return dict(os.environ, PATH=NOPATH, VCC_VCCRT=VCCRT)
+
+
+def rt_obj_own():
+    """--own: rt/win64.c built by vpp -c (keyed on vpp and the source)"""
+    os.makedirs(OUT, exist_ok=True)
+    key = RTHASH + _file_hash(VPP)
+    try:
+        if open(RTO_OWN + '.key').read() == key and os.path.exists(RTO_OWN):
+            return
+    except OSError:
+        pass
+    subprocess.run([VPP, '-c'] + BASE + [RTSRC, '-o', RTO_OWN + '.tmp'], check=True, env=own_env())
+    os.replace(RTO_OWN + '.tmp', RTO_OWN)
+    open(RTO_OWN + '.key', 'w').write(key)
+
+
+def _file_hash(f):
+    try:
+        return hashlib.sha1(open(f, 'rb').read()).hexdigest()[:16]
+    except OSError:
+        return '?'
+
+
+def own_link(objs, exe):
+    """--own: vcc's driver links (vlink, libvccrt.a, the CRT); (rc, stderr, foreign inputs)"""
+    mp = exe + '.map'
+    rc, _, err = sh([VPP, TGT, f'--sysroot={MINGW_SYSROOT}', '-static'] + objs + [RTO_OWN, '-o', exe, f'-Wl,-Map={mp}'],
+                    timeout=60, env=dict(own_env(), SOURCE_DATE_EPOCH='1700000000', VCC_LINK_VERBOSE='1'))
+    err = err.decode(errors='replace')
+    bad = []
+    if not rc:
+        line = next((l for l in err.splitlines() if '/vlink ' in l), '').replace(MINGW_SYSROOT, 'SYSROOT')	# (llvm-mingw: only its sysroot)
+        bad = sorted({m.group(0) for m in re.finditer(r'\S*(?:clang_rt|libgcc|libunwind|compiler-rt|lib/clang/|llvm)\S*', line, re.I)})
+        if not line:
+            bad.append('(no link line)')
+        # every input of the map: our objects, the sysroot's CRT files and archive members, libvccrt.a's members
+        try:
+            text = open(mp, errors='replace').read()
+        except OSError:
+            text = None
+            bad.append('(no map)')
+        own = {os.path.basename(o) for o in glob.glob(f'{os.path.dirname(VCCRT)}/obj/*.o')}
+        for m in re.finditer(r'\s(\S+?):\(', text or ''):
+            f = m.group(1)
+            if f in own or f.startswith('lib64_') or f.startswith(MINGW_SYSROOT + '/x86_64-w64-mingw32/lib/') or \
+               (f.startswith('/') and not f.startswith(MINGW_SYSROOT) and not re.search(r'/lib/clang/|clang_rt|libgcc|libunwind', f)):
+                continue
+            bad.append(f)
+    return rc, err, sorted(set(bad))
+
+
 def link(objs, exe):
     rc, _, err = sh(LINK + objs + [RTO, '-o', exe], timeout=60)
     return rc, err.decode(errors='replace')
@@ -508,9 +572,9 @@ def one(t):
         return t, 'pass', '', ''
     os.makedirs(wd, exist_ok=True)
     vfl = BASE + ct.CLFL + flags
-    if OBJ:
+    if OBJ or OWN:
         # --obj: vpp -c (vcc's assembler and object writer), linked and run the same way
-        rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd)
+        rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd, **({'env': own_env()} if OWN else {}))
         if not rc:
             open(f'{wd}/vcc.s', 'wb').write(open(f'{wd}/vcc.o', 'rb').read())	# (the pass key: the object's bytes)
     else:
@@ -518,13 +582,13 @@ def one(t):
     if rc:
         e = err.decode(errors='replace')
         return t, 'fail', 'emit', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vpp: signal/timeout {rc}: ' + ct.first_err(e)
-    pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode()).hexdigest()
+    pk = hashlib.sha1(open(f'{wd}/vcc.s', 'rb').read() + ref['key'].encode() + (OWNKEY.encode() if OWN else b'')).hexdigest()
     pf = f'{OUT}/pass{"-own" if OWN else "-obj" if OBJ else ""}{"-seh" if SEH else ""}/{suite}/{name}'
     cached = cache_hit(pf, pk)
     if cached and not EXPORT:
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
-    rc, _, err = (0, b'', b'') if OBJ else sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
+    rc, _, err = (0, b'', b'') if OBJ or OWN else sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/vcc.o'])
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
@@ -533,7 +597,12 @@ def one(t):
         if bad:
             open(f'{wd}/seh.txt', 'w').write('\n'.join(bad) + '\n')
             return t, 'fail', 'seh', bad[0][:150]
-    rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
+    if OWN:
+        rc, err, bad = own_link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
+        if not rc and bad:
+            return t, 'fail', 'foreign', ' '.join(bad)[:150]
+    else:
+        rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
     if rc:
         m = re.search(r"undefined (?:symbol|reference to):? ['`]?(\w+)", err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
@@ -819,6 +888,7 @@ def vccrtref(t):
 
 
 VLHASH = _vlink_hash()
+OWNKEY = os.environ.get('VCC_OWN_KEY', '')
 VRHASH = os.environ.get('VCC_VCCRT_HASH') or _vccrt_hash()
 NOCACHE = REF_ONLY = OBJ = SEH = OWN = False
 EXPORT = None
@@ -843,7 +913,7 @@ if __name__ == '__main__':
     av = [part for arg in sys.argv[1:]
           for part in (('-j', arg[2:]) if re.fullmatch(r'-j[0-9]+', arg) else (arg,))]
     j, suite, show, verbose = 6, None, None, False
-    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh', '--vasm-ref', '--vlink-ref', '--vccrt-ref')}
+    flags = {a for a in av if a in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh', '--vasm-ref', '--vlink-ref', '--vccrt-ref', '--own')}
     av = [a for a in av if a not in flags]
     nocache, ref_only, obj, ocmode, verbose, vir, seh = (f in flags for f in ('--no-cache', '--ref-only', '--obj', '--objcmp', '-v', '--vir', '--seh'))
     vlmode = '--vlink-ref' in flags
@@ -851,7 +921,7 @@ if __name__ == '__main__':
     rtmode = '--vccrt-ref' in flags
     if vir:
         os.environ['VCC_VIR'] = 'l'	# (inherited by every vpp the workers run)
-    export_dir, own = None, False
+    export_dir, own = None, '--own' in flags
     for opt in ('-j', '--suite', '--show', '--export'):
         if opt in av:
             k = av.index(opt); v = av[k + 1]; del av[k:k + 2]
@@ -872,12 +942,15 @@ if __name__ == '__main__':
     if not ts:
         sys.exit('no tests matched the requested suite/pattern')
     t0 = time.time()
-    if rtmode:	# the library first: the workers key their pass cache on it
+    if rtmode or own:	# the library first: the workers key their pass cache on it (--own: built by vcc)
         r = subprocess.run(['sh', f'{ct.R}/src/runtime/build.sh', os.path.dirname(VCCRT)], capture_output=True, text=True)
         if r.returncode:
             sys.exit(f'vcc-win64.py: src/runtime/build.sh failed:\n{r.stdout}{r.stderr}')
         os.environ['VCC_VCCRT_HASH'] = _vccrt_hash()
     rt_obj()
+    if own:
+        rt_obj_own()
+        os.environ['VCC_OWN_KEY'] = _file_hash(VPP) + _file_hash(VLINK) + _vccrt_hash() + _file_hash(RTO_OWN)
     hostenv.wine_start(PREFIX)
     with Pool(j, initializer=init, initargs=(nocache, ref_only, obj, seh, export_dir, own)) as pool:
         res = pool.map(vasmref if vamode else vccrtref if rtmode else vlinkref if vlmode else objcmp if ocmode else one, ts, chunksize=1)
