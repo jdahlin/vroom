@@ -1381,3 +1381,11 @@ instansens för de egna, klassens medlemmar synliga vid namn.  Med och utan
 pack (`member-templates.cpp`).  `vector::emplace_back` stannar nu på en pack
 som används i en lambda (`[&] { f(std::forward<A>(a)...); }`).
 json oförändrad: 69/70, 2 406 funktioner, 11 av 118.
+
+### Status (50): packelement fångade av lambdor (2026-11-14)
+Ett packelement fångat med `[&]` byggs i closure-objektet från sin egen
+symbol (förut från packentiteten, som då inte längre pekade på elementet).
+En medlemsmall definierad utanför klassen vars omtolkning misslyckas behåller
+sin deklarerade typ.  `vector::emplace_back`: `__emplace_back_slow_path`
+saknar fortfarande typ i lambdans kropp (troligen instansen som lambdans
+första, typande pass sparade).  json oförändrad: 69/70, 2 406 funktioner.

@@ -1229,7 +1229,12 @@ VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, qty t, uint32_t loc)
 		c->enode = 0;
 		if (l->cap[k].is_this)
 			cxx_gen_this(c, loc);
-		else
+		else if (l->cap[k].sym && !c->gen_lambda) {
+			/* the variable captured, by its symbol (a pack's element: its entity names another by now) */
+			uint32_t n = cxx_gen_var_node(c, l->cap[k].sym, loc);
+
+			c->enode = cxx_gen_is_reference(c, c->ast->syms[l->cap[k].sym].ty) ? cxx_gen_referent(c, n, loc) : n;
+		} else
 			cxx_gen_variable(c, l->cap[k].e, loc);
 		v = c->enode;
 		c->enode = 0;

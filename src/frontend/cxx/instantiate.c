@@ -1898,6 +1898,8 @@ static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *i
 	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst->fn_const;
 	c->sig_pack_types = ptypes, c->sig_pack_n = pack_from != UINT32_MAX ? pn : UINT32_MAX;
 	c->gen_instance = inst;
+	qty was = inst->ty;
+
 	if (!setjmp(jb)) {
 		bool b = false;
 
@@ -1906,6 +1908,8 @@ static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *i
 		c->stats.ooc_bodies++;
 	} else
 		c->stats.ooc_failed++;
+	if (inst->ty == CXX_TY_UNKNOWN)
+		inst->ty = was;	/* (the definition's parse failed: the declaration's type, for its calls) */
 	c->gen_instance = NULL;
 	c->instantiating--, c->body_depth--;
 	cxx_outer_restore(c, &o);
