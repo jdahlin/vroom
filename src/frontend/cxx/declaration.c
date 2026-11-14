@@ -2438,7 +2438,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 				te->specs = realloc(te->specs, (te->nspecs + 1) * sizeof *te->specs);
 				te->specs[te->nspecs++] = cs;
 				if (c->template_depth)	/* a partial specialization: matched when te is instantiated */
-					cxx_template_partial(c, te, c->scope, target, spec_less, key_pos);
+					cxx_template_partial(c, te, c->scope, target, spec_less, key_pos, c->ftmpl_req);
 				else {
 					explicit_instance = calloc(1, sizeof *explicit_instance);
 					explicit_instance->name = name, explicit_instance->kind = CXX_ENTITY_TYPE;

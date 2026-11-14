@@ -30,3 +30,16 @@ void use(V v, n::X x, int i, double d)
 	static_assert(sizeof(g(v)) == 8 && sizeof(g(i)) == 1, "");
 	static_assert(sizeof(h(v)) == 4 && sizeof(h(x)) == 8, "");
 }
+
+// constrained partial specializations of class templates (libc++'s __iterator_traits)
+template<class T> concept has_vt = requires { typename T::value_type; };
+template<class T> concept is_ptr = __is_pointer(T);
+struct WithVT { typedef short value_type; };
+template<class T> struct traits { typedef char kind; };			// the primary: no member types
+template<has_vt T> struct traits<T> { typedef typename T::value_type kind; };
+template<class T> requires is_ptr<T> struct traits<T> { typedef long kind; };
+template<class T> struct traits2 { static constexpr int which = 0; };
+template<class T> requires (sizeof(T) == 1) struct traits2<T> { static constexpr int which = 1; };
+template<class T> requires (sizeof(T) > 1 && integral<T>) struct traits2<T> { static constexpr int which = 2; };
+static_assert(sizeof(traits<WithVT>::kind) == 2 && sizeof(traits<int *>::kind) == 8 && sizeof(traits<int>::kind) == 1, "");
+static_assert(traits2<char>::which == 1 && traits2<long>::which == 2 && traits2<double>::which == 0, "");

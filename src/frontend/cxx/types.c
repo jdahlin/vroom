@@ -31,8 +31,6 @@ VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
 		/* distinct types (X<wchar_t> is not X<int>): the C kind of their size and signedness, ext 1 */
 		ctype t = c->ast->ty[s->v_char8 ? TY_UCHAR : s->v_char16 ? TY_USHORT : s->v_char32 ? TY_UINT : TY_INT];
 
-		if (c->tentative)
-			return CXX_TY_UNKNOWN;
 		t.ext = 1;
 		return cc_type_qualify(c->ast, QT(cc_type_intern(c->ast, &t), 0), s->quals);
 	}
@@ -53,14 +51,14 @@ VPRIV qty cxx_spec_type(cxx *c, const cxx_spec *s)
 
 VPRIV qty cxx_type_pointer(cxx *c, qty base, int quals)
 {
-	if (base == CXX_TY_UNKNOWN || c->tentative)
+	if (base == CXX_TY_UNKNOWN)	/* (in a tentative parse too: a type is interned, nothing to undo) */
 		return CXX_TY_UNKNOWN;
 	return cc_type_qualify(c->ast, cc_type_pointer(c->ast, base), quals);
 }
 
 VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue)
 {
-	if (base == CXX_TY_UNKNOWN || c->tentative)
+	if (base == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	/* a reference to a reference (T& with T = U&&, through a typedef or a template argument) collapses:
 	   an rvalue reference only if both are */
@@ -79,7 +77,7 @@ VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue)
 
 VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n)
 {
-	if (elem == CXX_TY_UNKNOWN || c->tentative)
+	if (elem == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	if (n <= -3) {
 		/* a pattern's T[N]: an incomplete array that remembers which value parameter is its bound (ext: its
@@ -96,7 +94,7 @@ VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n)
 
 VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic)
 {
-	if (ret == CXX_TY_UNKNOWN || c->tentative)
+	if (ret == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	for (uint32_t i = 0; i < n; i++)
 		if (params[i] == CXX_TY_UNKNOWN)

@@ -741,3 +741,17 @@ defines __iterator_traits by partial specializations constrained with
 concepts, which vcc does not evaluate for class templates yet.  Next:
 constraints on class template partial specializations (constrained
 parameters and requires-clauses), then binary_reader's members.
+
+### Status 2026-11-14 (18): constrained class specializations
+A class template partial specialization's constraints (template<C T> struct
+X<T>, requires-clauses) are evaluated with the deduced parameters: not
+satisfied removes it, not known leaves the instance undecided; of two with
+the same pattern the constrained one is the more specialized.  Types are
+built in tentative parses too (sizeof(X<int *>::type) was misread as an
+expression).  std::iterator_traits<T*>, <vector::iterator>,
+<string::const_iterator> evaluate.
+unit-32bit: 188 + 343 + 23 bodies, 2657 of 3089 calls typed, no false
+static_assert, 0.19 s; json 71,556 layouts clang agrees with, 71/71 parse;
+parse tests 22/22.  Undecided now: constraints of std::__common_ref and
+__common_reference_sub_bullet1 (67), __iterator_traits for one iterator type
+(5), so from_bjdata still stops at iterator_input_adapter_factory.

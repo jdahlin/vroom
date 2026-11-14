@@ -26,6 +26,7 @@ static bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
 typedef struct cxx_partial {
 	cxx_scope *params, *home;
 	uint32_t less_pos, key_pos;	/* the '<' of the pattern X<...>; the class-key */
+	uint32_t req_pos;		/* its requires-clause (0: none); its parameters may be constrained too (template<C T>) */
 	uint8_t evaluated, ok;		/* the pattern was parsed (ok) */
 	uint8_t completed;		/* ... and completed with the primary's default arguments (X<T*> of template<class, class = void>) */
 	const cxx_scope *primary, *primary_d;	/* the primary's parameters (and an earlier declaration's): defaults that use them */
@@ -115,7 +116,7 @@ VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params)
 		cxx_template_define_path(c, e, t);
 }
 
-VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t key_pos)
+VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t key_pos, uint32_t req_pos)
 {
 	cxx_template *t;
 
@@ -127,6 +128,7 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 	memset(&t->partials[t->npartials], 0, sizeof *t->partials);
 	t->partials[t->npartials].params = params, t->partials[t->npartials].home = home;
 	t->partials[t->npartials].less_pos = less_pos, t->partials[t->npartials].key_pos = key_pos;
+	t->partials[t->npartials].req_pos = req_pos;
 	t->npartials++;
 }
 
@@ -989,6 +991,34 @@ static bool cxx_partial_at_least_as_specialized(cxx *c, cxx_partial *a, cxx_part
 	return cxx_partial_deduces(c, b, a->pattern, a->npattern, bind);
 }
 
+static int cxx_constraint_parse(cxx *c, cxx_partial *p, const cxx_targ *bind, uint32_t pos, const cxx_targ *first);
+
+static bool cxx_partial_constrained(const cxx_partial *p)
+{
+	if (p->req_pos)
+		return true;
+	for (uint32_t i = 0; i < p->params->ntparams; i++)
+		if (p->params->tparams[i].constraint_b)
+			return true;
+	return false;
+}
+
+/* p's constraints with its parameters bound: 1 satisfied (or none), 0 not, -1 not known */
+static int cxx_partial_constraints(cxx *c, cxx_partial *p, const cxx_targ *bind)
+{
+	for (uint32_t i = 0; i < p->params->ntparams; i++) {
+		const cxx_tparam *tp = &p->params->tparams[i];
+
+		if (tp->constraint_b && bind[i].kind == 1) {
+			int v = cxx_constraint_parse(c, p, bind, tp->constraint_b, &bind[i]);
+
+			if (v <= 0)
+				return v;
+		}
+	}
+	return p->req_pos ? cxx_constraint_parse(c, p, bind, p->req_pos, NULL) : 1;
+}
+
 /*
  * The partial specialization the arguments select: 0 none (the primary template), 1 one (*pick,
  * its parameters in bind), -1 not known (a pattern that cannot be evaluated, an ambiguity).
@@ -1014,6 +1044,15 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 			return -1;	/* (a pattern vcc cannot decide might match) */
 		}
 		if (m) {
+			/* its constraints with the deduced parameters: template<C T> struct X<T>, requires ... */
+			int ok = cxx_partial_constraints(c, p, tmp);
+
+			if (ok < 0) {
+				if (getenv("VCC_CXX_WHY")) fprintf(stderr, "partial unknown (constraint) %s\n", t->path ? t->path : "?");
+				return -1;
+			}
+			if (!ok)
+				continue;
 			if (ncand == 16)
 				return -1;
 			cand[ncand++] = p;
@@ -1021,14 +1060,23 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 	}
 	if (!ncand)
 		return 0;
-	/* the most specialized: at least as specialized as every other, and not the reverse */
+	/* the most specialized: at least as specialized as every other, and not the reverse; of two with the
+	   same pattern the constrained one (two constrained ones: their constraints' subsumption, not done) */
 	for (uint32_t i = 0; i < ncand; i++) {
 		bool best = true;
 
-		for (uint32_t k = 0; k < ncand && best; k++)
-			if (k != i && !(cxx_partial_at_least_as_specialized(c, cand[i], cand[k]) &&
-					!cxx_partial_at_least_as_specialized(c, cand[k], cand[i])))
-				best = false;
+		for (uint32_t k = 0; k < ncand && best; k++) {
+			bool ik, ki;
+
+			if (k == i)
+				continue;
+			ik = cxx_partial_at_least_as_specialized(c, cand[i], cand[k]);
+			ki = cxx_partial_at_least_as_specialized(c, cand[k], cand[i]);
+			if (ik && ki)
+				best = cxx_partial_constrained(cand[i]) && !cxx_partial_constrained(cand[k]);
+			else
+				best = ik && !ki;
+		}
 		if (best) {
 			*pick = cand[i];
 			cxx_partial_matches(c, cand[i], args, n, bind);
@@ -1739,9 +1787,8 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 }
 
 /* a constraint parsed with the parameters bound: fn at pos gives 1, 0 or -1 */
-static int cxx_constraint_parse(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, uint32_t pos, const cxx_targ *first)
+static int cxx_constraint_parse(cxx *c, cxx_partial *p, const cxx_targ *bind, uint32_t pos, const cxx_targ *first)
 {
-	cxx_partial *p = &f->p;
 	cxx_scope *binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 	cxx_outer o;
 	jmp_buf jb;
@@ -1750,7 +1797,9 @@ static int cxx_constraint_parse(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 	if (c->body_depth >= 64)
 		return -1;
 	for (uint32_t j = 0; j < p->params->ntparams; j++)
-		if (bind[j].kind)
+		if (bind[j].kind == 6)
+			cxx_bind_pack(c, binding, &p->params->tparams[j], bind[j].list + bind[j].t, (uint32_t)bind[j].v);
+		else if (bind[j].kind)
 			cxx_bind(c, binding, &p->params->tparams[j], &bind[j]);
 	cxx_outer_save(c, &o);
 	c->instantiating++, c->body_depth++;
@@ -1786,13 +1835,13 @@ static int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *b
 		const cxx_tparam *tp = &p->params->tparams[i];
 
 		if (tp->constraint_b && bind[i].kind == 1) {
-			int v = cxx_constraint_parse(c, f, bind, tp->constraint_b, &bind[i]);
+			int v = cxx_constraint_parse(c, p, bind, tp->constraint_b, &bind[i]);
 
 			if (v <= 0)
 				return v;
 		}
 	}
-	return f->req_pos ? cxx_constraint_parse(c, f, bind, f->req_pos, NULL) : 1;
+	return f->req_pos ? cxx_constraint_parse(c, p, bind, f->req_pos, NULL) : 1;
 }
 
 /*
