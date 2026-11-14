@@ -1001,6 +1001,20 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
 	const node *x = N(n);
 	const uint32_t *arg = &c->lists[x->b];
 	cc_value cv;
+	if (x->aux == CC_BUILTIN_X86_CRC32) {
+		/* crc32[bwlq] data, crc: the accumulator is tied to the result, as clang */
+		uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
+		if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_CRC32))
+			codegen_fatal_report(e, x->loc, "builtin requires target feature '%s'", "crc32");
+		int size = walk_type_size(c, N(arg[1])->ty);
+		codegen_value a = walk_value_emit(e, arg[0]);
+		int ra = walk_value_to_register(e, &a, N(arg[0])->ty);
+		codegen_value d = walk_value_emit(e, arg[1]);
+		int rd = walk_value_to_register(e, &d, N(arg[1])->ty);
+		x64_record_emit_three_registers(e, X64_OP_CRC32, size, ra, ra, rd);
+		x64_tfree(e, rd);
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)ra };
+	}
 	bool blend = x->aux == CC_BUILTIN_X86_BLENDVB;
 	uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
 	if (!x86_feature_has(cc_x86_features_get(c, fn), blend ? X86_FEATURE_SSE41 : X86_FEATURE_SSE42))
