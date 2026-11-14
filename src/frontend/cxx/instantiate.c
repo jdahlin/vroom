@@ -785,7 +785,16 @@ static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *b
 			/* T[N]: N is the argument array's length */
 			uint32_t vi = pt->ext - 1u;
 
-			if (at->ext || (at->flags & TF_INCOMPLETE) || !at->n || vi >= p->params->ntparams)
+			if (vi >= p->params->ntparams)
+				return false;
+			if (at->ext) {
+				/* (partial ordering: the other pattern's own bound placeholder, U[M] against T[N]: N is M) */
+				if (bind[vi].kind && !(bind[vi].kind == 3 && bind[vi].v == (int64_t)(at->ext - 1u)))
+					return false;
+				bind[vi].kind = 3, bind[vi].v = (int64_t)(at->ext - 1u), bind[vi].t = 0;
+				return cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);
+			}
+			if ((at->flags & TF_INCOMPLETE) || !at->n)
 				return false;
 			if (bind[vi].kind) {
 				if (bind[vi].kind != 2 || bind[vi].v != (int64_t)at->n)

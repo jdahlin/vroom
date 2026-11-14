@@ -1801,3 +1801,8 @@ får kod.  cxx-strict: 3 av 70 TU:s klarar testerna med bara vcc:s kod, inga lä
 En medlemsmall definierad utanför klassmallen hittas för primärmallens instanser även när en partiell
 specialisering definierar en med samma namn (`vector<bool, A>::__construct_at_end` bredvid
 `vector<T, A>::__construct_at_end`: två träffar gjorde att ingen kropp tolkades).  cxx-strict 465 (473).
+
+## Status 92 (2026-11-14)
+`::__builtin_x(...)` är inbyggnaden (ingen deklaration i globala namnrymden).  Partiell ordning med
+arrayer vars längd är en platshållare (`F<const char[N]>` mot `F<T[N]>`: den förra mer specialiserad;
+förut föll båda och primärmallen valdes, doctests `filldata<const char[N]>`).  cxx-strict 413 (465).

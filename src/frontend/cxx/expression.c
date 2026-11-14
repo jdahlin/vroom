@@ -1103,6 +1103,12 @@ static void cxx_primary_expression_parse(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
 
+	if (t->kind == LEX_TOKEN_COLON_COLON && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER && cxx_peek(c, 1)->len > 10 &&
+	    !memcmp(cxx_peek(c, 1)->s, "__builtin_", 10) && cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN &&
+	    !cxx_lookup_in(c, c->global, cxx_peek(c, 1)->id, 0)) {
+		cxx_advance(c);	/* ::__builtin_memmove(...): the builtin, as unqualified (no declaration in the global namespace) */
+		t = cxx_peek(c, 0);
+	}
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	switch (t->kind) {
 	case LEX_TOKEN_NUMBER:
