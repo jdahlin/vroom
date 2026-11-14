@@ -607,6 +607,9 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 	if (c->implicit_typename && dep && e && e->kind == CXX_ENTITY_DEPENDENT && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_PAREN)
 		typename_kw = true;	/* C++20: typename is implied here */
 	/* typename names a dependent type; a name that lookup resolves (an instance's) is that type */
+	/* typename X::y with X a complete class that has no y: an error (a deduction's substitution failure) */
+	if (typename_kw && !e && q && !dep && !c->template_depth && q->kind == CXX_SCOPE_CLASS && !q->dependent && !q->has_dependent_base)
+		c->member_missing = 1;
 	if (typename_kw && (dep || !e || e->kind == CXX_ENTITY_DEPENDENT || (!cxx_entity_is_type(cxx_entity_prefer(e, CXX_ENTITY_TYPE)) &&
 				 cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE)->kind != CXX_ENTITY_TEMPLATE))) {
 		cxx_advance(c);
@@ -1991,6 +1994,8 @@ static void cxx_template_parameter_parse(cxx *c)
 		bool q, f;
 		uint32_t name;
 
+		uint32_t tb = c->pos;
+
 		if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 			cxx_fail(c, "expected a template parameter");
 		uint32_t db = 0, de = 0;
@@ -2013,6 +2018,8 @@ static void cxx_template_parameter_parse(cxx *c)
 		}
 		pack |= c->pos > 0 && c->tok[c->pos - 1].kind == LEX_TOKEN_ELLIPSIS && !db;
 		cxx_tparam_add(c, 2, name > 1 ? name : 0, pack, db, de);
+		if (c->scope->kind == CXX_SCOPE_TEMPLATE && !c->tentative && c->scope->ntparams)
+			c->scope->tparams[c->scope->ntparams - 1].type_b = tb;	/* (enable_if_t<cond, int> = 0: checked when deducing) */
 	}
 }
 

@@ -53,6 +53,7 @@ typedef struct cxx_instance {
 	cxx_scope *binding;	/* its parameters bound to the arguments */
 	uint32_t pos;		/* where its class is re-parsed: the template's, or a partial specialization's class-key */
 	uint8_t state;		/* 0 declared (an incomplete record), 1 being completed, 2 complete, 3 failed */
+	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
 
 VPRIV cxx_template *cxx_template_of(cxx_entity *e)
@@ -392,14 +393,13 @@ static bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding
 			cxx_type_id_parse(c);
 			out->kind = c->type_out != CXX_TY_UNKNOWN, out->t = c->type_out;
 		} else {
-			cxx_token *t = cxx_peek(c, 0);
-
+			/* a value: a constant expression */
 			out->kind = 0;
-			if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
-				out->kind = 2, out->v = t->kw == CXX_KW_true;
-			else if (t->kind == LEX_TOKEN_NUMBER && t->len == 1 && t->s[0] >= '0' && t->s[0] <= '9')
-				out->kind = 2, out->v = t->s[0] - '0';
-			c->pos = p->def_e;
+			c->in_template_args++;
+			cxx_conditional_expression_parse(c);
+			c->in_template_args--;
+			if (c->econst && c->evalue >= 0)
+				out->kind = 2, out->v = c->evalue;
 		}
 		ok = c->pos == p->def_e && out->kind;
 	}
@@ -844,6 +844,8 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 	h = cxx_instance_hash(t, args, nargs);
 	x = cxx_instance_find(c, t, args, nargs, h);
 	if (x) {
+		if (x->missing)
+			c->member_missing = 1;
 		if (complete && x->inst)
 			cxx_instance_complete(c, x->inst);
 		return x->inst;
@@ -898,6 +900,8 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 	h = cxx_instance_hash(t, full, n);
 	x = cxx_instance_find(c, t, full, n, h);
 	if (x) {
+		if (x->missing)
+			c->member_missing = 1;
 		if (complete && x->inst)
 			cxx_instance_complete(c, x->inst);
 		return x->inst;
@@ -943,8 +947,13 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 	inst->instance = x;
 	if (t->is_alias) {
 		/* an alias is a type: computed now */
+		uint8_t mm = c->member_missing;
+
+		c->member_missing = 0;
 		if (!cxx_instance_parse(c, x))
 			x->inst = NULL;
+		x->missing = c->member_missing;
+		c->member_missing |= mm;
 		return x->inst;
 	}
 	/* a class: an incomplete record now; its body when it must be complete (C++ is lazy too: naming
@@ -1064,6 +1073,40 @@ VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x)
 	c->tag_instance[tag] = x;
 }
 
+/* what an enclosing parse still uses while a body is instantiated inside it */
+typedef struct cxx_outer {
+	cxx_saved s;
+	cxx_targ *targs;
+	uint32_t ntargs, ndp, ndd;
+	cxx_param *dp;
+	qty this_type, etype;
+	bool elval;
+	cxx_entity *ecallee, *last_fn;
+	uint8_t this_const;
+} cxx_outer;
+
+static void cxx_outer_save(cxx *c, cxx_outer *o)
+{
+	cxx_state_save(c, &o->s);
+	o->ntargs = c->ntargs, o->ndp = c->ndecl_params, o->ndd = c->decl_ndefaults;
+	o->targs = malloc((o->ntargs ? o->ntargs : 1) * sizeof *o->targs);
+	memcpy(o->targs, c->targs, o->ntargs * sizeof *o->targs);
+	o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
+	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
+	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
+	o->this_const = c->this_const;
+}
+
+static void cxx_outer_restore(cxx *c, cxx_outer *o)
+{
+	cxx_state_restore(c, &o->s);
+	memcpy(c->targs, o->targs, o->ntargs * sizeof *o->targs), c->ntargs = o->ntargs;
+	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
+	free(o->targs), free(o->dp);
+	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
+	c->this_const = o->this_const;
+}
+
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
 typedef struct cxx_fdone { cxx_targ *args; qty ret; } cxx_fdone;
@@ -1106,10 +1149,12 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_entity *e;
 
-		if (tp->kind == 3 || !tp->name || tp->pack) {
+		if (tp->kind == 3 || tp->pack) {
 			f->packs = 1;	/* (packs and template template parameters: not deduced yet) */
 			return;
 		}
+		if (!tp->name)
+			continue;	/* (unnamed: a default argument, a constraint in its type) */
 		e = cxx_declare(c, binding, tp->name, tp->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
 		if (!e)
 			return;
@@ -1219,6 +1264,61 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 }
 
 /*
+ * After deduction: the parameters left take their default arguments, and each value parameter's type
+ * is formed with the earlier parameters bound (template<class T, enable_if_t<cond<T>, int> = 0>).
+ * 1 all bound, 0 a substitution failure (typename X::type with no such member: not viable), -1 not
+ * known.
+ */
+static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
+{
+	cxx_partial *p = &f->p;
+
+	for (uint32_t i = 0; i < p->params->ntparams; i++) {
+		const cxx_tparam *tp = &p->params->tparams[i];
+		bool check = tp->kind == 2 && tp->type_b && !tp->name;	/* (an unnamed value: there for its type) */
+		cxx_scope *binding;
+		cxx_outer o;
+		jmp_buf jb;
+		volatile bool failed = false;
+
+		if (!bind[i].kind && !tp->def_b)
+			return -1;
+		if (bind[i].kind && !check)
+			continue;
+		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+		for (uint32_t j = 0; j < i; j++)
+			cxx_bind(c, binding, &p->params->tparams[j], &bind[j]);
+		if (check) {
+			cxx_outer_save(c, &o);
+			c->instantiating++;
+			c->fail = &jb;
+			c->pos = tp->type_b;
+			c->scope = binding;
+			c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+			c->member_missing = 0;
+			if (!setjmp(jb))
+				cxx_type_specifiers_parse(c);
+			else
+				failed = true;
+			c->instantiating--;
+			cxx_outer_restore(c, &o);
+			if (c->member_missing)
+				return 0;
+			if (failed)
+				return -1;
+		}
+		if (!bind[i].kind) {
+			c->member_missing = 0;
+			if (!cxx_default_argument(c, tp, binding, &bind[i]))
+				return c->member_missing ? 0 : -1;
+			if (c->member_missing)
+				return 0;
+		}
+	}
+	return 1;
+}
+
+/*
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
  */
@@ -1305,47 +1405,16 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			return AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT ? -1 : 0;
 		}
 	}
-	for (uint32_t i = 0; i < p->params->ntparams; i++)
-		if (!bind[i].kind) {
+	{
+		int k = cxx_ftemplate_complete(c, f, bind);
+
+		if (k <= 0) {
 			c->why = CXX_WHY_UNBOUND;
-			return -1;	/* (default template arguments: not yet) */
+			return k;
 		}
+	}
 	*ret = cxx_ftemplate_return(c, f, bind);
 	return 1;
-}
-
-/* what an enclosing parse still uses while a body is instantiated inside it */
-typedef struct cxx_outer {
-	cxx_saved s;
-	cxx_targ *targs;
-	uint32_t ntargs, ndp, ndd;
-	cxx_param *dp;
-	qty this_type, etype;
-	bool elval;
-	cxx_entity *ecallee, *last_fn;
-	uint8_t this_const;
-} cxx_outer;
-
-static void cxx_outer_save(cxx *c, cxx_outer *o)
-{
-	cxx_state_save(c, &o->s);
-	o->ntargs = c->ntargs, o->ndp = c->ndecl_params, o->ndd = c->decl_ndefaults;
-	o->targs = malloc((o->ntargs ? o->ntargs : 1) * sizeof *o->targs);
-	memcpy(o->targs, c->targs, o->ntargs * sizeof *o->targs);
-	o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
-	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
-	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
-	o->this_const = c->this_const;
-}
-
-static void cxx_outer_restore(cxx *c, cxx_outer *o)
-{
-	cxx_state_restore(c, &o->s);
-	memcpy(c->targs, o->targs, o->ntargs * sizeof *o->targs), c->ntargs = o->ntargs;
-	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
-	free(o->targs), free(o->dp);
-	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
-	c->this_const = o->this_const;
 }
 
 /* a call uses e: an instance's member function, its body parsed now (once) */

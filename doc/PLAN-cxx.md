@@ -567,3 +567,13 @@ template's instance had no members at `::` or as a base; a rewound tentative
 parse left dependent_seen set.  Negative template arguments stay unknown (a
 value parameter's type is not recorded).  json: 42,955 layouts clang agrees
 with (was 38,352), 71/71 parse; unit-32bit classes laid out 662 (was 540).
+
+### Status 2026-11-14 (6): default template arguments and SFINAE
+After deduction the remaining parameters take their default arguments, and
+an unnamed value parameter's type is formed with the earlier ones bound:
+`typename X::type` naming no member of a complete class X removes the
+candidate (enable_if).  Alias instances remember that failure for cache
+hits.  sizeof(expr) is a constant.  unit-32bit: 1428 of 1721 calls typed;
+267 function template bodies and 195 member bodies instantiated, none
+failed (clang emits 1,692 functions); 0.12 s.  json: 47,236 layouts clang
+agrees with, 71/71 parse.  Tests: ok-constant-expressions, ok-sfinae-deduction.

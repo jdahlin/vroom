@@ -1005,8 +1005,17 @@ static void cxx_unary_expression_parse(cxx *c)
 				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
 				return;
 			}
-		} else
+		} else {
+			uint64_t size;
+			uint32_t align;
+
 			cxx_unary_expression_parse(c);
+			/* sizeof expr: its type's size */
+			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->etype, &size, &align)) {
+				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
+				return;
+			}
+		}
 		cxx_et(c, cc_type_basic(TY_ULONG), false);	/* size_t */
 		return;
 	case CXX_KW_alignof: case CXX_KW__Alignof: case CXX_KW___alignof__: case CXX_KW___alignof:

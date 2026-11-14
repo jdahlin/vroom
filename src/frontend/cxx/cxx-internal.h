@@ -96,6 +96,7 @@ typedef struct cxx_tparam {
 	uint8_t pack;
 	uint32_t name;
 	uint32_t def_b, def_e;	/* its default argument's tokens (0, 0: none) */
+	uint32_t type_b;	/* a value parameter: its type's tokens start (0: not recorded) */
 } cxx_tparam;
 
 /* a template argument, as far as it is known: a type or an integer value */
@@ -260,6 +261,7 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint8_t member_missing;		/* typename X::y named no member of a complete class X (deduction: not viable) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
 	uint32_t body_depth;
