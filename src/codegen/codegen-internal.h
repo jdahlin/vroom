@@ -144,7 +144,7 @@ static inline bool codegen_symbol_is_inline_only(const sym *y)
 #include "vir/failure.h"
 
 /* references to things with a symbol: kind in the top 4 bits */
-enum { CODEGEN_REFERENCE_SYMBOL = 0, CODEGEN_REFERENCE_STRING = 1, CODEGEN_REFERENCE_LABEL = 2, CODEGEN_REFERENCE_NAME = 3, CODEGEN_REFERENCE_TABLE = 4, CODEGEN_REFERENCE_TLS_LE = 5 };
+enum { CODEGEN_REFERENCE_SYMBOL = 0, CODEGEN_REFERENCE_STRING = 1, CODEGEN_REFERENCE_LABEL = 2, CODEGEN_REFERENCE_NAME = 3, CODEGEN_REFERENCE_TABLE = 4, CODEGEN_REFERENCE_TLS_LE = 5, CODEGEN_REFERENCE_TLS_BASE = 6, CODEGEN_REFERENCE_TLS_OFFSET = 7 };
 #define CODEGEN_REFERENCE_MAKE(k, i) (((uint32_t)(k) << 28) | (uint32_t)(i))
 #define CODEGEN_REFERENCE_KIND(r) ((r) >> 28)
 #define CODEGEN_REFERENCE_INDEX(r) ((r) & 0x0fffffffu)
