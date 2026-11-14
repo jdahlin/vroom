@@ -956,8 +956,10 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_ec(c, cc_type_basic(TY_BOOL), t->kw == CXX_KW_true);
 		else if (t->kw == CXX_KW___null)
 			cxx_et(c, cc_type_basic(TY_LONG), false);
-		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative)
+		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative) {
 			cxx_et(c, cxx_nullptr_type(c), false);
+			cxx_gen_nullptr(c, t->loc);
+		}
 		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative) {
 			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
 			cxx_gen_this(c, t->loc);
@@ -997,6 +999,8 @@ static void cxx_primary_expression_parse(cxx *c)
 				cxx_ec(c, cast_to, v);
 			else if (t->kw == CXX_KW_static_cast)
 				cxx_gen_cast(c, xn, cast_to, t->loc);
+			else if (t->kw == CXX_KW_reinterpret_cast)
+				cxx_gen_reinterpret(c, xn, cast_to, t->loc);
 		}
 		return;
 	case CXX_KW_typeid:

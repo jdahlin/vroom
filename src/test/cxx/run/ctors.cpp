@@ -43,7 +43,23 @@ int early(int n) {
 	Tracked b(8);
 	return b.get();
 }
+// a const member is initialized by the constructor
+struct Fixed {
+	const int id;
+	int extra;
+	Fixed(int i) : id(i), extra(i + 1) {}
+	int sum() const { return id + extra; }
+};
+
+static int fixed_sum(int i)
+{
+	Fixed f(i);
+
+	return f.sum();
+}
+
 int main() {
+	if (fixed_sum(20) != 41) return 90;
 	Pair p; if (p.sum() != 3) return 1;
 	Pair q(4, 5); if (q.sum() != 9) return 2;
 	Pair r{6, 7}; if (r.sum() != 13) return 3;

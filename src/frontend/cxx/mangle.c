@@ -408,6 +408,8 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (member && is_const)
 			mg_str(&m, "K");
 		mg_prefix(&m, home);
+		if (f->fn_internal && !member)
+			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);
 		else
@@ -418,6 +420,8 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	} else {
 		if (mg_scope_is_std(&m, home))
 			mg_str(&m, "St");
+		if (f->fn_internal && !member)
+			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);
 		else

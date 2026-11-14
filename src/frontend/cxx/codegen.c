@@ -385,8 +385,8 @@ static qty cxx_gen_abi_type(cxx *c, const cxx_entity *f)
 	if (ft->n > 31)
 		return CXX_TY_UNKNOWN;
 	ps[np++] = cxx_gen_this_type(c, f);
-	if (ps[0] == CXX_TY_UNKNOWN)
-		return CXX_TY_UNKNOWN;
+	if (ps[0] == CXX_TY_UNKNOWN || cxx_class_polymorphic(c, AST_TYPE(a, ps[0])->base))
+		return CXX_TY_UNKNOWN;	/* (a class with virtual functions: vtables are not built yet) */
 	for (uint32_t i = 0; i < ft->n; i++)
 		ps[np++] = a->params[ft->aux + i];
 	ft = AST_TYPE(a, f->ty);
@@ -425,7 +425,8 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		if (st == CXX_TY_UNKNOWN)
 			return false;
 		f->sym = cc_symbol_new(a, S_FUNC, f->name, st, 0);
-		a->syms[f->sym].flags |= SF_GLOBAL;
+		if (!f->fn_internal || f->member_of)
+			a->syms[f->sym].flags |= SF_GLOBAL;
 		a->syms[f->sym].depth = 0;	/* (made while a body is being built: a file-scope symbol all the same) */
 	}
 	memset(&at, 0, sizeof at);
@@ -624,6 +625,35 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 	c->enode = cc_cast_insert(a, x, QUNQ(to), cc_conversion_cast_kind(a, AST_NODE_AT(a, x)->ty, QUNQ(to), x));
 }
 
+/* nullptr: a null void pointer (it converts to any pointer type) */
+VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+
+	if (!cxx_gen_on(c))
+		return;
+	c->enode = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), loc), vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, 0));
+}
+
+/* reinterpret_cast<T>(x) between pointers, or a pointer and an integer of its size */
+VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty from;
+	bool pf, pt;
+
+	(void)loc;
+	if (!cxx_gen_on(c) || !x || to == CXX_TY_UNKNOWN || cxx_gen_is_reference(c, to) || !cxx_gen_type_ok(c, to))
+		return;
+	x = cc_conversion_decay(a, x);
+	from = AST_NODE_AT(a, x)->ty;
+	pf = AST_TYPE_KIND(a, from) == TY_PTR, pt = AST_TYPE_KIND(a, to) == TY_PTR;
+	if (!cxx_gen_type_ok(c, from) || !(pf || pt) || (!pf && !cc_type_is_integer(a, from)) || (!pt && !cc_type_is_integer(a, to)))
+		return;
+	c->enode = cc_cast_insert(a, x, QUNQ(to), cc_conversion_cast_kind(a, from, QUNQ(to), x));
+}
+
 /* a[i] on a pointer or an array: *(a + i) */
 VPRIV void cxx_gen_index(cxx *c, uint32_t base, uint32_t index, uint32_t loc)
 {
@@ -759,7 +789,7 @@ static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
 /* the builtins that are a C library function (or operator new/delete) by another name */
 static const struct cxx_builtin_function {
 	const char *name, *symbol;
-	char ret, params[4];	/* v void, p void *, q const void *, s const char *, z size_t, i int */
+	char ret, params[4];	/* v void, p void *, q const void *, s const char *, z size_t, i int, f float, d double, c char */
 } cxx_builtin_functions[] = {
 	{ "__builtin_memcpy", "memcpy", 'p', "pqz" }, { "__builtin_memmove", "memmove", 'p', "pqz" },
 	{ "__builtin_memset", "memset", 'p', "piz" }, { "__builtin_memcmp", "memcmp", 'i', "qqz" },
@@ -767,6 +797,40 @@ static const struct cxx_builtin_function {
 	{ "__builtin_strcmp", "strcmp", 'i', "ss" }, { "__builtin_unreachable", "abort", 'v', "" },
 	{ "__builtin_trap", "abort", 'v', "" }, { "__builtin_abort", "abort", 'v', "" },
 	{ "__builtin_operator_new", "_Znwm", 'p', "z" }, { "__builtin_operator_delete", "_ZdlPv", 'v', "p" },
+	{ "__builtin_sin", "sin", 'd', "d" }, { "__builtin_sinf", "sinf", 'f', "f" },
+	{ "__builtin_cos", "cos", 'd', "d" }, { "__builtin_cosf", "cosf", 'f', "f" },
+	{ "__builtin_tan", "tan", 'd', "d" }, { "__builtin_tanf", "tanf", 'f', "f" },
+	{ "__builtin_asin", "asin", 'd', "d" }, { "__builtin_asinf", "asinf", 'f', "f" },
+	{ "__builtin_acos", "acos", 'd', "d" }, { "__builtin_acosf", "acosf", 'f', "f" },
+	{ "__builtin_atan", "atan", 'd', "d" }, { "__builtin_atanf", "atanf", 'f', "f" },
+	{ "__builtin_sinh", "sinh", 'd', "d" }, { "__builtin_sinhf", "sinhf", 'f', "f" },
+	{ "__builtin_cosh", "cosh", 'd', "d" }, { "__builtin_coshf", "coshf", 'f', "f" },
+	{ "__builtin_tanh", "tanh", 'd', "d" }, { "__builtin_tanhf", "tanhf", 'f', "f" },
+	{ "__builtin_exp", "exp", 'd', "d" }, { "__builtin_expf", "expf", 'f', "f" },
+	{ "__builtin_log", "log", 'd', "d" }, { "__builtin_logf", "logf", 'f', "f" },
+	{ "__builtin_log10", "log10", 'd', "d" }, { "__builtin_log10f", "log10f", 'f', "f" },
+	{ "__builtin_log2", "log2", 'd', "d" }, { "__builtin_log2f", "log2f", 'f', "f" },
+	{ "__builtin_sqrt", "sqrt", 'd', "d" }, { "__builtin_sqrtf", "sqrtf", 'f', "f" },
+	{ "__builtin_cbrt", "cbrt", 'd', "d" }, { "__builtin_cbrtf", "cbrtf", 'f', "f" },
+	{ "__builtin_fabs", "fabs", 'd', "d" }, { "__builtin_fabsf", "fabsf", 'f', "f" },
+	{ "__builtin_floor", "floor", 'd', "d" }, { "__builtin_floorf", "floorf", 'f', "f" },
+	{ "__builtin_ceil", "ceil", 'd', "d" }, { "__builtin_ceilf", "ceilf", 'f', "f" },
+	{ "__builtin_round", "round", 'd', "d" }, { "__builtin_roundf", "roundf", 'f', "f" },
+	{ "__builtin_trunc", "trunc", 'd', "d" }, { "__builtin_truncf", "truncf", 'f', "f" },
+	{ "__builtin_exp2", "exp2", 'd', "d" }, { "__builtin_exp2f", "exp2f", 'f', "f" },
+	{ "__builtin_expm1", "expm1", 'd', "d" }, { "__builtin_expm1f", "expm1f", 'f', "f" },
+	{ "__builtin_log1p", "log1p", 'd', "d" }, { "__builtin_log1pf", "log1pf", 'f', "f" },
+	{ "__builtin_pow", "pow", 'd', "dd" }, { "__builtin_powf", "powf", 'f', "ff" },
+	{ "__builtin_fmod", "fmod", 'd', "dd" }, { "__builtin_fmodf", "fmodf", 'f', "ff" },
+	{ "__builtin_atan2", "atan2", 'd', "dd" }, { "__builtin_atan2f", "atan2f", 'f', "ff" },
+	{ "__builtin_hypot", "hypot", 'd', "dd" }, { "__builtin_hypotf", "hypotf", 'f', "ff" },
+	{ "__builtin_copysign", "copysign", 'd', "dd" }, { "__builtin_copysignf", "copysignf", 'f', "ff" },
+	{ "__builtin_fmin", "fmin", 'd', "dd" }, { "__builtin_fminf", "fminf", 'f', "ff" },
+	{ "__builtin_fmax", "fmax", 'd', "dd" }, { "__builtin_fmaxf", "fmaxf", 'f', "ff" },
+	{ "__builtin_nan", "nan", 'd', "s" }, { "__builtin_nanf", "nanf", 'f', "s" },
+	{ "__builtin_char_memchr", "memchr", 'p', "qiz" }, { "__builtin_strchr", "strchr", 'p', "si" },
+	{ "__builtin_strncmp", "strncmp", 'i', "ssz" }, { "__builtin_bcmp", "memcmp", 'i', "qqz" },
+	{ "__builtin_free", "free", 'v', "p" }, { "__builtin_malloc", "malloc", 'p', "z" },
 };
 
 static qty cxx_builtin_code_type(cxx *c, char code)
@@ -779,6 +843,8 @@ static qty cxx_builtin_code_type(cxx *c, char code)
 	case 's': return cc_type_pointer(a, cc_type_qualify(a, cc_type_basic(TY_CHAR), Q_CONST));
 	case 'z': return cc_type_basic(TY_ULONG);
 	case 'i': return cc_type_basic(TY_INT);
+	case 'f': return cc_type_basic(TY_FLOAT);
+	case 'd': return cc_type_basic(TY_DOUBLE);
 	}
 	return cc_type_basic(TY_VOID);
 }
@@ -850,7 +916,7 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 			c->enode = cc_address_of_build(a, args[0], loc);
 		return;
 	}
-	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 16)
+	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 128)
 		return;
 	if (!c->gen_builtin_syms[i]) {
 		qty ps[4];
@@ -1046,6 +1112,24 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 			c->gen_init_bases[c->ngen_init_bases++] = QUNQ(class_type);
 		return;
 	}
+	{
+		/* (a reference member: bound, not assigned; not built yet) */
+		const tag *r = &a->tags[AST_TYPE(a, AST_NODE_AT(a, self)->ty)->aux];
+		bool found = false;
+
+		for (uint32_t i = 0; i < r->nfield; i++)
+			if (r->f[i].name == name) {
+				found = true;
+				if (cxx_gen_is_reference(c, r->f[i].ty)) {
+					cxx_gen_fail(c);
+					return;
+				}
+			}
+		if (!found) {
+			cxx_gen_fail(c);	/* (a member of an anonymous union) */
+			return;
+		}
+	}
 	target = cxx_gen_member_of(c, self, name, loc, 0);
 	if (!target || !(AST_NODE_AT(a, target)->flags & NF_LVALUE)) {
 		cxx_gen_fail(c);
@@ -1065,6 +1149,13 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 	}
 	value = nargs ? cc_conversion_apply(a, cc_conversion_decay(a, args[0]), QUNQ(mt)) :
 			cc_conversion_apply(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), QUNQ(mt));
+	if (mt != QUNQ(mt)) {
+		/* a const member: initialized all the same (through a pointer to its unqualified type) */
+		qty pt = cc_type_pointer(a, QUNQ(mt));
+		uint32_t addr = cc_address_of_build(a, target, loc);
+
+		target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+	}
 	cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, value, loc), 0, 0));
 }
 

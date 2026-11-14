@@ -3065,6 +3065,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->member_of = cxx_declaration_scope(c);
 			if (e && f && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC))
 				e->fn_static = 1;
+			if (e && f && kind == CXX_ENTITY_VALUE && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))
+				e->fn_internal = 1;
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !(flags & (DS_STATIC | DS_TYPEDEF | DS_FRIEND)))
 				e->field_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)

@@ -967,3 +967,29 @@ Saknas för json: funktionsmallars instanser i kod, klasser med baser eller
 medlemmar som själva behöver konstruktor/destruktor, värdeöverföring av
 klasser med egna specialmedlemmar, temporärer av klasstyp, undantag,
 vtabeller/RTTI, lambdas, `new`/`delete`, range-for.
+
+### Status (27): basklasser, konstruktorkedjor, vptr-layout (2026-11-14)
+- Basklasser i kod: en konstruktors initierare för baser, delegerande
+  konstruktorer och medlemmar av klasstyp anropar den konstruktor som
+  överlagringsupplösningen valt; baser och medlemmar som inte nämns
+  standardkonstrueras först; en destruktor förstör medlemmar och baser efter
+  sin kropp.  Härledd→bas för referenser, pekare och objektet i ett
+  medlemsanrop.  `const`-medlemmar initieras; referensmedlemmar byggs inte än.
+  Avvikelse att rätta: medlemmar initieras i skriven ordning, inte
+  deklarationsordning.
+- Layout för klasser med virtuella funktioner (egen vptr i de första 8
+  byten, annars primär bas på offset 0): `cxx-layout` 155 339 layouter
+  godkända av clang (var 150 420), 0 fel.  Kod byggs ännu inte för sådana
+  klassers medlemsfunktioner (inga vtabeller).
+- `nullptr`, `reinterpret_cast`, matematik- och strängbuiltins; `static`
+  funktioner får intern länkning (`_ZL…`, lokal symbol).
+- `VCC_CXX_GEN=2`: innersta uttrycket per funktion som inte fick någon nod.
+`cxx-run-tests.py` 12/12.  Alla 71 json-TU:er går igenom `-c` utan fel:
+47 006 av 72 378 betraktade funktionsdefinitioner har kod (unit-32bit: 669
+av 1 026), 14,5 s väggtid seriellt.  Inget json-test länkar ännu, så det
+finns fortfarande ingen mätning mot clang -O2 (243 s CPU).
+Kvar för json: vtabeller/RTTI, undantag (emittern saknar C++ EH),
+lambdas, temporärer och värdeöverföring av icke-triviala klasser,
+implicita specialmedlemmar, standardargument, aggregatinitiering,
+`new`/`delete`, range-for, COMDAT, exakt manglade mallinstansnamn,
+headerdelning mellan TU:er (vccd).
