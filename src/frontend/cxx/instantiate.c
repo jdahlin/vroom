@@ -2615,11 +2615,14 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = e->fn_const;
+	c->ooc_target = e;	/* (its code: this member's, cxx_init_declarators_parse) */
+	e->fn_inline = 1;	/* (an instance's member: defined in every TU that uses it, emitted weak) */
 	if (!setjmp(jb)) {
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
 		c->stats.ooc_bodies++;
 	} else
 		c->stats.ooc_failed++;
+	c->ooc_target = NULL;
 	c->instantiating--, c->body_depth--;
 	cxx_outer_restore(c, &o);
 }

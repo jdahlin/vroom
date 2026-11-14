@@ -774,6 +774,20 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 		base = cc_dereference_build(a, cc_conversion_decay(a, base), loc);
 	(void)bt;
 	c->enode = cxx_gen_member_of(c, base, name, loc, 0);	/* (0: a static member, or one of a class not laid out) */
+	if (c->enode && (QQ(AST_NODE_AT(a, c->enode)->ty) & Q_CONST) && cc_type_is_record(a, AST_NODE_AT(a, base)->ty)) {
+		/* a mutable member of a const object: not const */
+		cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(AST_NODE_AT(a, base)->ty));
+		cxx_entity *fe = cls ? cxx_lookup_in(c, cls, name, 0) : NULL;
+
+		while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
+			fe = fe->next;
+		if (fe && fe->is_mutable && fe->ty != CXX_TY_UNKNOWN && !(QQ(fe->ty) & Q_CONST)) {
+			qty pt = cc_type_pointer(a, QUNQ(AST_NODE_AT(a, c->enode)->ty));
+			uint32_t addr = cc_address_of_build(a, c->enode, loc);
+
+			c->enode = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		}
+	}
 	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))
 		c->enode = cxx_gen_referent(c, c->enode, loc);
 }
@@ -1771,6 +1785,20 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i])
 			return;
+	if (!cxx_gen_has_this(f) && !f->fn_static && f->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->ty) == TY_FUNC &&
+	    AST_TYPE(c->ast, f->ty)->n == nargs && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, obj)->ty)) {
+		/* (a member of the object's class whose entity lacks its class, an instance's late member: found there) */
+		cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(AST_NODE_AT(c->ast, obj)->ty));
+
+		for (cxx_entity *e = cls ? cxx_lookup_local(cls, f->name) : NULL; e; e = e->next)
+			if (e == f) {
+				f->member_of = cls;
+				break;
+			} else if (e->kind == CXX_ENTITY_VALUE && e->member_of == cls && e->ty == f->ty) {
+				f = e;	/* (the same member, as the object's class declares it) */
+				break;
+			}
+	}
 	if (cxx_gen_has_this(f)) {
 		cxx_gen_call(c, f, obj, false, args, nargs, loc);
 		return;

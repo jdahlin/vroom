@@ -154,7 +154,8 @@ typedef struct cxx_entity {
 	cxx_scope *def_scope;		/* ... and the scope they were declared in */
 	uint32_t nsdmi_pos;		/* a data member's default initializer: the position of its = or { (0: none recorded) */
 	cxx_scope *nsdmi_scope;		/* ... the class scope it is parsed in */
-	uint8_t has_nsdmi;		/* ... it has one (recorded or not: a template's pattern is not) */
+	uint8_t has_nsdmi;
+	uint8_t is_mutable;		/* a data member declared mutable (not const in a const object) */		/* ... it has one (recorded or not: a template's pattern is not) */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
 	   per element, pack_index then the element (ty, value) */
@@ -439,6 +440,7 @@ typedef struct cxx {
 	uint8_t new_array;
 	uint32_t gen_pack_from, gen_pack_n;	/* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */
 	struct cxx_entity *gen_pack_entity;
+	struct cxx_entity *ooc_target;	/* an instance's member whose out-of-class definition is being parsed */
 	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;

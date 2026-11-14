@@ -1591,6 +1591,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				uint8_t call_obj = c->call_obj;
 				uint32_t ename = c->ename;
 				bool missing = c->ename_missing;
+				uint32_t on_args = 0, on_nodes[16];
 
 				if (c->xargs_set && nx == UINT32_MAX)
 					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
@@ -1626,14 +1627,13 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
 						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
-				else if (!set && (c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
+				else if (!set && (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
+						  c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
 						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
 						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))) {
-					/* an object of class type: its operator() */
-					uint32_t anodes[16];
-
-					memcpy(anodes, c->carg_nodes, sizeof anodes);
-					cxx_gen_operator_call(c, callee_node, anodes, c->ncargs, c->tok[c->pos ? c->pos - 1 : 0].loc);
+					/* an object of class type: its operator() (the arguments as parsed: typing the call may
+					   instantiate its body, whose own calls reuse c->ncargs and c->carg_nodes) */
+					cxx_gen_operator_call(c, callee_node, on_nodes, on_args, c->tok[c->pos ? c->pos - 1 : 0].loc);
 				}
 				else {
 					uint8_t was = c->einvalid;	/* (an earlier part of the expression may be ill-formed already) */

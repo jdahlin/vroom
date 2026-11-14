@@ -1316,3 +1316,16 @@ packar fungerar.  Namnen är clangs (`_Z3fwdIJiRlEEiPFiilEDpOT_`,
 typ eller kod.  json-sviten oförändrad (69/70, 3,9 s, 2 215 funktioner,
 10 av 118 testfunktioner): libc++:s packanvändare stannar på andra luckor
 (virtuella baser, `operator()` på temporärer).
+
+### Status (45): klassmallars medlemmar definierade utanför klassen får kod (2026-11-14)
+- En instans medlem definierad utanför klassmallen (`template<class T> int
+  L<T>::f() {...}`) tolkades bara för typning; nu får den kod (svag, som
+  clangs).  libc++:s `vector`, `__vector_layout`, `basic_stringbuf` ...
+- `operator()` på en temporär: argumenten läses före typningen (som kan
+  instansiera kroppen och skriva över parserns argumentlista).
+- En klass som bara är framåtdeklarerad har sitt scope, så att namn med en
+  referens till den kan manglas.
+- `mutable`-medlemmar i const-objekt.
+`std::vector<int>`-programmet: allt utom `push_back` (en medlemsmall med pack
+definierad utanför klassen).  json: 69/70, 3,8 s, 2 230 funktioner,
+10 av 118 testfunktioner.

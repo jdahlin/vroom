@@ -622,7 +622,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template);
 static void cxx_enum_specifier_parse(cxx *c);
 
 enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32, DS_STATIC = 64,
-       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024, DS_INLINE = 2048 };
+       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024, DS_INLINE = 2048, DS_MUTABLE = 4096 };
 
 static bool cxx_kw_is_simple_type(int kw)
 {
@@ -873,6 +873,9 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			cxx_advance(c);
 		} else if (kw == CXX_KW_inline || kw == CXX_KW___inline || kw == CXX_KW___inline__) {
 			flags |= DS_INLINE;
+			cxx_advance(c);
+		} else if (kw == CXX_KW_mutable) {
+			flags |= DS_MUTABLE;
 			cxx_advance(c);
 		} else if (kw == CXX_KW_typedef) {
 			flags |= DS_TYPEDEF;
@@ -2689,8 +2692,13 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 					if (e && !e->members)
 						e->members = cxx_scope_new(c, CXX_SCOPE_CLASS, c->scope, e);
 					/* the AST record, incomplete until the definition (which reuses it): T* needs it */
-					if (e && !is_template && !c->template_depth && e->ty == CXX_TY_UNKNOWN && !c->tentative)
-						e->ty = QT(c->ast->tags[cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, key_loc)].ty, 0);
+					if (e && !is_template && !c->template_depth && e->ty == CXX_TY_UNKNOWN && !c->tentative) {
+						uint32_t tg = cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, key_loc);
+
+						e->ty = QT(c->ast->tags[tg].ty, 0);
+						if (e->members && !cxx_tag_scope_get(c, e->ty))
+							cxx_tag_scope_set(c, tg, e->members);	/* (its name and where it is: a mangled name may need them first) */
+					}
 					found = e;
 				}
 			}
@@ -3202,7 +3210,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && f && kind == CXX_ENTITY_VALUE && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))
 				e->fn_internal = 1;
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !(flags & (DS_STATIC | DS_TYPEDEF | DS_FRIEND)))
-				e->field_of = cxx_declaration_scope(c);
+				e->field_of = cxx_declaration_scope(c), e->is_mutable = (flags & DS_MUTABLE) != 0;
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
@@ -3359,6 +3367,11 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 						}
 						decl_fn = cxx_member_function_find(c, qs, mname, c->decl_params, c->ndecl_params, c->decl_const);
 					}
+					/* (an instance's member defined outside the class template: the member being instantiated) */
+					if (context == CXX_CONTEXT_NAMESPACE && qs && c->ooc_target && c->ooc_target->member_of == qs && !c->tentative &&
+					    !c->template_depth && (!decl_fn || decl_fn->member_of != qs))
+						decl_fn = c->ooc_target;
+					c->ooc_target = NULL;
 					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
 					      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
 
