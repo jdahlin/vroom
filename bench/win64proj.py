@@ -48,8 +48,18 @@ CLANG_LINK = [CL, TGT, f'--sysroot={SYSROOT}', f'-resource-dir={MRES}', '-rtlib=
               '--unwindlib=none', '-fuse-ld=lld', '-static']
 VCC_CC = [VPP, TGT, f'--sysroot={SYSROOT}']
 VCC_LINK = VCC_CC + ['-static']
-# the two vcc code generators, as bench/vcc-win64.py names them
-VIR = {'vcc': '0', 'vir': 'l'}
+# the two vcc code generators, as bench/vcc-win64.py names them: at the
+# projects' -O2 the direct emitter (-fno-vir) and VIR (doc/OPTIMIZATION.md)
+VIR = {'vcc': ['-fno-vir'], 'vir': []}
+
+
+def vcc_cc(name):
+    """vpp's command line for the code generator NAME (vcc, vir)"""
+    return VCC_CC + VIR.get(name, ['-fno-vir'])
+
+
+def vcc_link(name):
+    return vcc_cc(name) + ['-static']
 
 # no tool of these names may be on vcc's PATH
 _BLOCKED = re.compile(r'^(clang|llvm|lld|ld(\.|64|$)|wasm-ld|gcc|g\+\+|cc$|c\+\+$|c89|c99|cpp|tcc|as$|ar$|nm$|ranlib|strip|'
@@ -154,11 +164,10 @@ class Vccd:
 
 
 def vcc_env(name, vccd=None, **extra):
-    """the environment of vcc's side: PATH without foreign tools, VCC_VIR for
-    the code generator NAME (vcc, vir), the private vccd's socket"""
+    """the environment of vcc's side: PATH without foreign tools, the private
+    vccd's socket (the code generator is vcc_cc's flags)"""
     os.makedirs(f'{OUT}/tmp', exist_ok=True)
     e = dict(os.environ, PATH=clean_path(), VCC_VCCRT=VCCRT, TMPDIR=f'{OUT}/tmp', SOURCE_DATE_EPOCH='1700000000')
-    e['VCC_VIR'] = VIR.get(name, '0')
     if vccd:
         e['VCC_SOCK'] = vccd.sock
     e.update(extra)

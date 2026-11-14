@@ -4,6 +4,7 @@
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
+#include "lowering-driver.h"
 
 /* ---------------- calls ---------------- */
 

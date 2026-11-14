@@ -37,7 +37,7 @@ VPRIV void ld_headers_write(struct ld_context *ctx)
 {
 	elf_file_header *eh = (elf_file_header *)ctx->output.image;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
-	eh->e_type = ctx->options.relocatable ? 1 : ctx->options.shared ? 3 : 2;
+	eh->e_type = ctx->options.relocatable ? 1 : ctx->options.shared || ctx->options.pie ? 3 : 2;
 	eh->e_machine = ctx->inputs.x86 ? 62 : 183;
 	eh->e_version = 1;
 	/* lld: -e, else ENTRY(), else _start (silently absent) */

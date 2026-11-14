@@ -7,8 +7,8 @@ rerunnable (doc/quality/WORK-scheduler.md).
       (user + sys), busy = CPU / (wall x j), max RSS, involuntary switches.
       --emit T sets VCC_THREADS=T (nested emit inside the batch); --warm N
       adds N untimed passes first (B: max RSS must not grow with N).
-  bench/sched-measure.py emit [--bin-dir D ...] [-t 1,2,4,8] [--vir] [FILE]
-      C: one large TU (default work/sqlite/st/sqlite3.c) -O2 -c at
+  bench/sched-measure.py emit [--bin-dir D ...] [-t 1,2,4,8] [-O LEVEL] [FILE]
+      C: one large TU (default work/sqlite/st/sqlite3.c) -c at LEVEL (default -O2: VIR) at
       VCC_THREADS=T: wall, max RSS; the objects must be byte-identical.
   bench/sched-measure.py link [LABEL=DIR ...] [-r REPS]
       E: bench/vlink-pool.py (small, big and script links, default threads
@@ -105,8 +105,7 @@ def cmd_emit(a):
     if not os.path.exists(src):
         sys.exit(f'{src}: not found (bench/sqlite/run.py fetches it)')
     T = tempfile.mkdtemp(prefix='sched-emit-')
-    env0 = {'VCC_VIR': '1'} if a.vir else {}
-    print(f'{load()}; {src} -O2 -c{" VCC_VIR=1" if a.vir else ""}, {a.r} runs: min (median)')
+    print(f'{load()}; {src} {a.O} -c, {a.r} runs: min (median)')
     bad = 0
     for lab, b in bins(a.bin_dir, vd):
         ref = None
@@ -114,7 +113,7 @@ def cmd_emit(a):
             rows = []
             o = f'{T}/{lab.replace("/", "_")}-{t}.o'
             for _ in range(a.r):
-                st, wall, cpu, rss, sw, out = rusage_run([f'{b}/vpp', '-O2', '-c', src, '-o', o], dict(env0, VCC_THREADS=str(t)))
+                st, wall, cpu, rss, sw, out = rusage_run([f'{b}/vpp', a.O, '-c', src, '-o', o], dict(VCC_THREADS=str(t)))
                 if st:
                     sys.exit(f'{lab}: vpp failed:\n{out[-1500:]}')
                 rows.append((wall, cpu, rss))
@@ -218,7 +217,7 @@ def main():
     p.add_argument('--bin-dir', action='append'); p.add_argument('-j', default='1,2,4,6'); p.add_argument('--emit', type=int)
     p.add_argument('--warm', type=int, default=0); p.add_argument('--every', type=int, default=4); p.add_argument('-r', type=int, default=1)
     p = sub.add_parser('emit')
-    p.add_argument('--bin-dir', action='append'); p.add_argument('-t', default='1,2,4,8'); p.add_argument('--vir', action='store_true')
+    p.add_argument('--bin-dir', action='append'); p.add_argument('-t', default='1,2,4,8'); p.add_argument('-O', default='-O2', type=lambda v: v if v.startswith('-O') else '-O' + v)
     p.add_argument('-r', type=int, default=3); p.add_argument('file', nargs='?')
     p = sub.add_parser('link')
     p.add_argument('-r', type=int, default=3); p.add_argument('dirs', nargs='*')

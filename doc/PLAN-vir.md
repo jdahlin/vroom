@@ -154,6 +154,9 @@ They follow the `LO()` interface, so that the builder is a thin translation:
 
 ### Passes at `-O2`
 
+(What each level runs today, with its options: `OPTIMIZATION.md`.  `-O3` adds
+the loop vectorizer and loop-constant hoisting.)
+
 1. **Build** (the walker through `vir_*`): SSA during the build, folding and
    local CSE on insertion.
 2. **Simplify:** trivial block parameters removed, constants forward, folded
@@ -197,13 +200,13 @@ fixpoints without a budget (the same rule as `codegen/flow/`).
 |---|-------------|-----------|
 | V0 | **Background and plan.** `RESEARCH-vir.md`, `PLAN-vir.md` | Reviewed by Johan |
 | V1 | **Format and tools.** `vir.h`, printer, parser, verifier, interpreter, `virtest`, `fuzz-vir` | Write-read-write identical on all tests; the verifier rejects a set of mutations; default build byte-identical (`vbench.py check`) |
-| V2 | **Builder and simplest lowering on x86-64.** The walker against `vir_*`; lowering where every value lives in a stack slot; `VCC_VIR=1`; fallback per function | With `VCC_VIR=1`: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture the same passes as without; coverage reported per corpus; without the flag byte-identical |
-| V3 | **Coverage.** Bit-fields, records in calls, varargs, atomics, floating point, switch (the walker's lowering), computed goto | Coverage ≥ 95 % of PostgreSQL's functions and of vcc's own; the x86 kernel boots with `VCC_VIR=1` (asm functions take the ordinary path); objtool without warnings |
+| V2 | **Builder and simplest lowering on x86-64.** The walker against `vir_*`; lowering where every value lives in a stack slot; behind a switch (then `VCC_VIR=1`); fallback per function | With VIR on: `bench/vcc-x86.py`, `vcc-abi.py --target x86_64`, gcc-torture the same passes as without; coverage reported per corpus; without the flag byte-identical |
+| V3 | **Coverage.** Bit-fields, records in calls, varargs, atomics, floating point, switch (the walker's lowering), computed goto | Coverage ≥ 95 % of PostgreSQL's functions and of vcc's own; the x86 kernel boots with VIR on (asm functions take the ordinary path); objtool without warnings |
 | V4 | **Register allocation.** Next-use chains backward, greedy assignment forward, fixed registers, parallel moves per edge, `vir_alloc_check` | Instructions on a fixed set of TUs below today's `-O2`; allocator time and counters (spills, reloads, moves) reported separately; the check green on the tests and `fuzz-vir` |
 | V5 | **Passes.** Simplification, value numbering, store-to-load forwarding, dead code | Per pass: interpreter equivalence, instructions and `vbench.py` time before and after, in the plan |
 | V5b | **Inline asm.** `x64_asm` is split into planning and emission (SPEC X6); `asm` and `asmgoto` are built | Without the flag: the kernel objects and `vas-corpus.py` byte-identical; with it: coverage ≥ 99 % of the x86 kernel's functions |
-| V6 | **arm64.** Requires arm64 to have an `LO` lowering (TODO.md "arm64 and wasm on the shared walker"); VIR drives the move or waits for it | ctests 1729/1729, `vcc-abi.py`, the arm64 kernel boots with `VCC_VIR=1`; `vcc-obj.py` 840/840 |
-| V7 | **VIR is the default at `-O2`.** | Proposal: ≤ 1.25x clang -O2 in static instructions; phase 2 self-build ≤ 1.5x slower than the clang build (2.6x today); `-O2` compilation ≤ +15 % in total; `-O0`/`-O1` byte-identical all the way |
+| V6 | **arm64.** Requires arm64 to have an `LO` lowering (TODO.md "arm64 and wasm on the shared walker"); VIR drives the move or waits for it | ctests 1729/1729, `vcc-abi.py`, the arm64 kernel boots with VIR on; `vcc-obj.py` 840/840 |
+| V7 | **VIR is the default at `-O2`.** Switched 2026-11-13: `-O2` is VIR, `-O3` adds the vectorizer, `-O1` is the direct emitter (`OPTIMIZATION.md`); the numbers below are not measured yet | Proposal: ≤ 1.25x clang -O2 in static instructions; phase 2 self-build ≤ 1.5x slower than the clang build (2.6x today); `-O2` compilation ≤ +15 % in total; `-O0`/`-O1` byte-identical all the way |
 | later | `NSW` and type tags are used; SROA of non-escaped records; `returns_twice` with abnormal edges; VLA; `__int128`; wasm | — |
 
 "VIR 1.0" is the format and semantics as they look when V7 passes.
@@ -216,14 +219,17 @@ equivalence testing remain. Generated programs use no external calls.
 
 ## Validation
 
-- Until V7, VIR is behind `VCC_VIR=1`; every commit leaves the default output
-  byte-identical (`vcc-same.py`, `vbench.py check`).
+- Since 2026-11-13 VIR is `-O2`'s code generator; `-O0` and `-O1` keep the
+  direct emitter, whose output a VIR change leaves byte-identical
+  (`vcc-same.py`, `vbench.py check` at `-O1`).  Before that switch VIR was
+  behind `VCC_VIR=1`, an environment variable that no longer exists.
 - Two paths through the same walker are a test in themselves: the same
-  program built with and without `VCC_VIR=1` must behave alike in the C
-  suites, the ABI tests and the kernel boot.
+  program built at `-O1` and at `-O2`/`-O3` must behave alike in the C
+  suites (`vcc-ctests.py -O1`, `-O2`, `-O3`: CI runs all three), the ABI
+  tests and the kernel boot.
 - The interpreter compares before and after every pass; `fuzz-vir` with
   ASan/UBSan.
-- Speed gate: `bench/vbench.py gate` with the flag off (±0.1 %) and on
+- Speed gate: `bench/vbench.py gate` at `-O1` (±0.1 %) and at `-O2`
   (reported).
 
 ## Risks and open questions
@@ -249,6 +255,71 @@ equivalence testing remain. Generated programs use no external calls.
 - **Open:** benchmark suite and X for G5 (PLAN-release).
 
 ## Status
+
+### V7 switch: optimization levels instead of environment variables (2026-11-13)
+
+`-O2` is VIR, `-O3` adds the loop vectorizer and loop-constant hoisting,
+`-O1` (and `-Og`, `-O`) is the direct emitter, as `-O2` was before
+(`OPTIMIZATION.md`).  The levels and the options `-fvir`, `-frotate-loops`,
+`-fshrink-wrap`, `-fvectorize`, `-fhoist-loop-constants` are one table,
+`CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`), resolved in
+`driver/optimization.c`.  Every VIR environment variable is gone: what the
+harnesses used is a `-fvir-*` option (`-fvir-stats`, `-fvir-passes=`,
+`-fvir-check`, `-fvir-verify`, `-fvir-report`, `-fvir-dump`,
+`-fvir-functions=`, `-fno-vir-lower`, `-fvir-vectorize-report`,
+`-fvir-ccmp=`, `-fvir-probe=`), so they now work per job under vccd too.
+The pass switch is read per TU, not per process; a bad value fails the job.
+
+- Same output: each old mode against its new spelling, `-S` of the 2283
+  suite files on arm64, byte-identical in all 15 pairs (old `-O2` = `-O1`,
+  `VCC_VIR=bl VCC_VIR_VEC=0` = `-O2`, `VCC_VIR=bl` = `-O3`, and each knob).
+  `vcc-same.py --modes c0,c1` against the commit before: 4346/4346.
+- Suites: `vcc-ctests.py` 2129/2129 at `-O1`, `-O2` and `-O3`; the vcc suite
+  under ASan at `-O3 -fvir-verify -fvir-check` and at `-O1`; TSVC 151/151 at
+  each level; zlib's tests and same output at `-O1`, `-O2`, `-O3`;
+  `vcc-volatile.py` 48/48 at the three levels.  CI runs the suites at all
+  three (`ci/premerge.sh`: ctests, ctests-O1, ctests-O3).  The four
+  vectorizer tests in `test/vcc/` carry `vcc-flags: -O3`.
+- Kernel: the arm64 kernel (`-O2`, so through VIR now) builds with
+  `vccd-kbuild.sh` (17.1 s at `-j 6`, loaded machine) and boots Debian;
+  VIR lowers 53 % of a 60-TU sample's functions (inline asm is most of the
+  rest).
+- Compile cost against the commit before (`vbench.py gate`, kernel corpus,
+  `-O2`): emit +90 % instructions, the whole `-c` +9.5 % (+18 % cycles); the
+  front end unchanged.  V7's proposal allows +15 % in total.  V7's other
+  criteria (static instructions against clang, the self-build) are not
+  measured.
+- Compile cost after computing the inlining sizes on first use (2026-11-14,
+  against main 87f85d5b): cc +9.11 % instructions (+15.9 % cycles), emit
+  +84.7 %; that commit alone gave cc -0.61 %, emit -2.55 %, output
+  byte-identical.  Where emit's remaining ~600 M on the corpus goes:
+  VIR's build and lowering of the functions it lowers ~620 M (build
+  ~4500 instructions per final VIR instruction, lowering ~2800: the
+  allocator ~107 M, the record clean-ups ~64 M, simplify 67 M, to-vir 43 M,
+  canon 35 M, promote 30 M + 16 M for promote-again, which changes 37 of
+  1251 functions); walks that fail ~97 M (1040 of them, inline asm 746 of
+  896 fallbacks), after which the direct emitter still does ~400 M of
+  the 560 M it does at `-O1`.  No pass dominates and none is superlinear,
+  so the 1 % budget is out of reach by tuning: it needs VIR to take inline
+  asm (no failed walk, no second emission) and a cheaper builder.
+- Not run: `vcc-vir-x86.py` and the x86-64 CI job need an x86-64 host; its
+  compile side was checked here (the same functions lowered, packed
+  instructions only at `-O3`, `-O0`/`-O1` unchanged by VIR's options).
+- What CI found once `-O2` was VIR, fixed in the same branch:
+  - `vw_trivial` swept every block parameter to a fixed point, one nesting
+    level per sweep: `test/vcc/limits.c` (1000 nested loops) took 14 s
+    (20.7 G instructions in that pass) and timed out under ASan.  It is a
+    worklist now (Braun et al.'s tryRemoveTrivialPhi): 0.81 s, the same
+    assembly.
+  - `-g` made every function fall back (VIR wrote no line table), so `-g`
+    changed the code at `-O2`.  The lowering driver now calls `dbg_row` at
+    each block and wherever `f->loc` starts a run, and arm64's printer
+    shrink-wraps under `-g` too.  `vcc-dwarf.py` passes 1591/1591 at `-O0`
+    to `-O3` (`.text` unchanged by `-g`, dwarfdump verifies, `-g -c` equals
+    clang's assembly of `-g -S`), and `vcc-opt-debug.py` passes for x86-64.
+  - `vcc-x86-leaf-frame.py` required a frame in `fl_parameter`, `fl_stack`
+    and `fl_call`, the direct emitter's policy; VIR omits it there, as
+    clang -O2 does, and the harness now expects that at `-O2` and up.
 
 ### V4 x86-64 against clang -O2 (2026-11-12), goal at most 5 % slower
 
@@ -989,8 +1060,8 @@ units green.
 **2026-11-13: ARM comparison and reconsidered x86 attempts.** The current
 user goal is at most **1.05x clang -O2** for speedtest1; it is still open.
 The same SQLite 3.50.4 source, `-O2`, `SQLITE_THREADSAFE=0` and
-`SQLITE_OMIT_LOAD_EXTENSION` have been lowered with `VCC_VIR=bvls` and
-allocator check for both targets.  ARM uses its Linux cross sysroot.  Static
+`SQLITE_OMIT_LOAD_EXTENSION` have been lowered with `-O3 -fvir-verify -fvir-report` and
+the allocator check (`-fvir-check`) for both targets.  ARM uses its Linux cross sysroot.  Static
 instructions are not a comparison of cycles between different processors:
 
 | Function | ARM64 instructions | x86-64 instructions | ARM64/x86 spills |
@@ -1072,7 +1143,7 @@ chasing of empty branches (with preserved allocator edits/edge moves), loop
 order, rotation plan and decisions on copies of entry test/small joins.
 Both ARM and x86 call the same implementation.  The emitters still handle
 their registers, instructions, edge moves and frame limits.  No copy of
-ARM's planner in the x86 file.  `VCC_VIR_ROT=0` now turns off rotation on
+ARM's planner in the x86 file.  `-fno-rotate-loops` now turns off rotation on
 x86 too.
 
 ARM's SQLite assembly is byte-identical.  x86 actually uses rotation with
@@ -1984,11 +2055,11 @@ The local-exec address uses %fs:0 and a TPOFF displacement, preserving flags
 during allocator edits. Other TLS models still use direct lowering.
 See the [paired SQLite compile measurements](PLAN-fas2.md).
 
-`VCC_VIR=bl` on x86-64 now goes through the same builder and loop vectorizer
+`-O3` on x86-64 now goes through the same builder and loop vectorizer
 as arm64; the function is marked `x86_64-linux`. `arch/x64/codegen/vir.c`
 lowers scalar leaf functions with SysV's integer/FP registers and stack
 parameters, fixed `cl`, callee-saved registers, spills and sequenced edge
-moves. Frame and spill tables are reused per `ecx`. `VCC_VIR_CHECK=1` checks
+moves. Frame and spill tables are reused per `ecx`. `-fvir-check` checks
 the real target allocation. The mode caches for VIR, vectorization and
 compare merging are thread-local; the six-thread test found and removed a
 race in the last of them.
@@ -2057,8 +2128,8 @@ own vector values, and a loop transformation).  Done, in this order:
   if-conversion): innermost loops with the test in the header and a straight
   body; inductions and `i32` sums; loads/stores `symbol ± 4·t`; the
   dependence rule in RESEARCH 6.3; the scalar loop stays as the remainder.
-  Off under `-mgeneral-regs-only` and with `VCC_VIR_VEC=0`; `VCC_VIR_VEC=r`
-  reports.
+  Off under `-mgeneral-regs-only` and below `-O3` (`-fno-vectorize`);
+  `-fvir-vectorize-report` reports.
 
 Measured (M1 Pro, `iterations` 256): direct emitter 7.2 s, VIR 4.3 s (5.1 s
 before the vectorizer), clang -O3 1.5 s; 151/151 checksums on all three.
@@ -2073,7 +2144,7 @@ become lanes (gather, `double`) 9, wrong order within the body 6.
 Validation: `test/vcc/vir_vec_loops.c` (47 loops x trip counts 0-9 and 37
 against clang: remainder 0-3, downward-running, distance -5..5 within one
 array, store before load, sums, select, invariant from memory);
-`vcc-ctests.py` with `VCC_VIR=bl` 2079/2082 (the three `.Lswitch.values`
+`vcc-ctests.py -O3` 2079/2082 (the three `.Lswitch.values`
 failures existed before), unchanged without VIR; ASan/UBSan clean on TSVC
 and the test; `vir-test.py` 124/124.
 
@@ -2110,7 +2181,7 @@ runtime in a multiplication.
 
 Tests: `test/vcc/vir_vec_loops.c` (now also overlapping pointers, 10 spilled
 vectors, steps 1 and 3, unknown distance, unsigned counters),
-`test/vcc/vir_fp_callee.c`.  `vcc-ctests.py` with `VCC_VIR=bl` 2080/2083
+`test/vcc/vir_fp_callee.c`.  `vcc-ctests.py -O3` 2080/2083
 (the same three), without VIR 2083/2083; ASan/UBSan clean.
 
 **Third round (same day): scalar loops.  VIR 6.3 G cycles, clang 4.75.**
@@ -2125,7 +2196,7 @@ vectors, steps 1 and 3, unknown distance, unsigned counters),
   immediate are made once in front of the straight inner loops the
   vectorizer looks at anyway (at most 6, no loops with calls).  **This is a
   departure from "No LICM in 1.0"** above, limited to constants;
-  `VCC_VIR_VEC=n` turns it off.  Effect on TSVC: -19 % instructions, -7 %
+  `-fno-hoist-loop-constants` turns it off.  Effect on TSVC: -19 % instructions, -7 %
   cycles.  **Decision (Johan, 2026-11-12): kept**, as an exception in the
   pass list above; broader LICM is still outside 1.0.
 - `bench/vcc-tsvc.py` writes cycles (`/usr/bin/time -l`): the machine is
@@ -2524,7 +2595,7 @@ Step 3 in the work order for sqlite.
 
 ### Lowering against LLVM's backend (2026-11-12): five points, sqlite speedtest1
 
-Branch `claude/vir-lowering-453a57`.  Measured with `VCC_VIR=bl`, speedtest1
+Branch `claude/vir-lowering-453a57`.  Measured at `-O3`, speedtest1
 `--size 100 --memdb`, pairwise runs (3 rounds) against the build before the
 point and against virpol; counters static on sqlite3.o.  From the start
 (5346e3e6) +14.5 % cycles against virpol, now +9.9 %.  Samplings per
@@ -2663,7 +2734,7 @@ only as a direction.
   once and in a row, becomes cmp + ccmp/ccmn (immediate 0..31, -1..-31,
   otherwise via x17) and no truth value in a register.
   **Measured, and therefore enabled sparingly:** merging every branch pair
-  (`VCC_CCMP=all`) gives on sqlite 380 ccmp (clang 552) but speedtest1 +0.4 %
+  (`-fvir-ccmp=all`) gives on sqlite 380 ccmp (clang 552) but speedtest1 +0.4 %
   instructions (the second compare also runs when the first decided) and
   unchanged cycles (median 9.10 vs 9.09 G, 8 paired runs).  Microtest (4096
   pairs, 60,000 iterations): unpredictable data 1.45 -> 1.18 G cycles (-19
@@ -2674,7 +2745,7 @@ only as a direction.
   therefore only the cases where the if-conversion can follow (the result is
   a value: `return a == 1 && b == 2`, `x = c1 || c2 ? p : q`): fewer
   instructions and no branches.  sqlite: 19 ccmp, -18 instructions
-  statically, speedtest1 -0.1 % instructions.  `VCC_CCMP=off|all` for
+  statically, speedtest1 -0.1 % instructions.  `-fvir-ccmp=none|all` for
   measurement.  Remaining to try: merge branch pairs only when they are
   badly predicted (requires a profile), chains of three in the value case.
   Test `vir_ccmp.c` (all condition codes x and/or x 32/64 bits, immediates,
@@ -2701,7 +2772,7 @@ each iteration did four `mov` and two extra jumps.
 - **Remaining** (after the next section): `slide_hash` (clang vectorizes),
   `crc32_z` (inline asm, does not go through VIR).
 - Verified: vir-alloc 17/17, random 300, mutate, vir-test 119/119;
-  vcc-ctests with `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (the three
+  vcc-ctests `-O3 --vflags -fvir-check` 2077/2080 (the three
   failures, `.Lswitch.values`, exist before the change); inline 85/85;
   sqlite3.c through VIR with the check; the zlib tests give clang's bytes.
 
@@ -2733,7 +2804,7 @@ iteration of `longest_match` although it was read before the loop.
 - Test: `test/vcc/vir_load_far.c` (store after the load in the body, through
   another pointer, overlapping narrower and wider, call, inner loop, one arm,
   goto loop with entry in the middle, variable index, escaped local).
-- Verified: vcc-ctests with `VCC_VIR=bl VCC_VIR_CHECK=1` 2077/2080 (the same
+- Verified: vcc-ctests `-O3 --vflags -fvir-check` 2077/2080 (the same
   three `.Lswitch.values` as before) and under ASan+UBSan (besides them two
   failures in the front end, `gcc/eeprof-1` and `gcc/pr105613`, not in VIR);
   inline 85/85; vir-test, vcc-volatile; sqlite3.c under ASan; zlib gives
@@ -2773,8 +2844,8 @@ shortcomings in the code fixed:
   2026-11-11 does not have without a flag.  Without a decision: store -> load
   across stores to the same base at another offset (`str w2, [x0, #8]; str
   w1, [x0, #12]; ldrsw x1, [x0, #8]`).
-- Test: `test/vcc/vir_field_access.c`.  Verified: vcc-ctests `VCC_VIR=bl
-  VCC_VIR_CHECK=1` 2079/2082 (the same three), with the verifier (`blv`) the
+- Test: `test/vcc/vir_field_access.c`.  Verified: vcc-ctests `-O3 --vflags
+  -fvir-check` 2079/2082 (the same three), with the verifier (`-fvir-verify`) the
   vcc suite, inline 85/85, direct emitter 2082/2082, ASan+UBSan as before,
   vir-test, vcc-volatile, sqlite3.c with the check and the same verification
   hash, zlib gives clang's bytes.
@@ -2811,8 +2882,8 @@ Branch `claude/vir-sqlite-optimization-acaf18`.  Measured on sqlite3.c `-O2`
   threads got Darwin's default stack (512 KB): `test/vcc/limits.c` gave no
   object on 8 threads; they now get the creating thread's size.
 - **Open, not VIR:** `test/vcc/deep_expr.c` and `deep_mixed.c` give different
-  objects between runs with `VCC_THREADS=8` also on the direct path (without
-  `VCC_VIR`).  Not investigated.
+  objects between runs with `VCC_THREADS=8` also on the direct path
+  (`-O1`).  Not investigated.
 - **Remaining in the profile (flat, no entry over 6 %):** `vw_hslot` 6 %
   (Braun's lookup per (block, variable); cache misses in VdbeExec),
   `vw_promote` 4.5 %, `vw_find` 4 %, `vir_oit_next`/`init` 5 %, `vw_simplify`
@@ -2837,7 +2908,7 @@ decision for SPEC-vir.md).
 
 The measurement that "Measured in V4" below promised.  sqlite3.c,
 speedtest1 `--size 100 --memdb`, Homebrew clang 23.1.4 `-O2` with `-mllvm
--regalloc=X`, vcc on 75bb9062 (`VCC_VIR=bl`), virpol is the binary from
+-regalloc=X`, vcc on 75bb9062 (`-O3`), virpol is the binary from
 12:36 the same day (older inlining).  Five alternating rounds, `/usr/bin/time
 -l`; the machine had load 10, so the cycles are the median of paired ratios
 with [min .. max], and only differences over about 2 % say anything.  The
@@ -2881,7 +2952,7 @@ they are stable to about 0.05 % even with load 10-20 on the machine, which
 cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
 8.5-8.6 G cycles (virpol 8.24 G, clang 7.86 G).
 
-- **What actually runs** (`VCC_VL_PROBE=MASK` in `codegen/vir/a64.c`: a `nop`
+- **What actually runs** (`-fvir-probe=MASK` in `codegen/vir/a64.c`: a `nop`
   after each edit of a kind; the difference in instructions is the number of
   executions, an upper bound since the `nop` also stops the post-folds):
 
@@ -2985,7 +3056,7 @@ cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
   when that block ends with `br` to the header: the latch falls into the test
   and the test's jump goes back to the body, one jump per iteration instead of
   two.  The edges into the loop get a copy of the test (`vl_goto`), as LLVM's
-  rotation with a guard.  `VCC_VIR_ROT=0` gives VIR's order.
+  rotation with a guard.  `-fno-rotate-loops` gives VIR's order.
 - **Two variants measured** (sqlite speedtest1, instructions):
   reordering only, with a jump to the test on the way in, **+0.07 %**
   (sqlite's loops are short: the jump in costs more than the iterations
@@ -3108,7 +3179,7 @@ cycles are not.  Base after the merge: 26.18 G (virpol 24.49 G, clang 23.70 G),
      slot and neither read nor write x19-x30; otherwise at the top as before
      and the marks are removed.  Not with unwind tables (Linux
      `-fasynchronous-unwind-tables`), `-g`, VLA/alloca or an over-aligned
-     frame.  `VCC_VIR_SHRINK=0` turns it off.
+     frame.  `-fno-shrink-wrap` turns it off.
 - **Measured, sqlite speedtest1 `--size 100`:** 25.645 G -> 25.514 G
   instructions (**-0.51 %**); cycles within the noise in three paired runs.
   Statically the same number of instructions (297 581 -> 297 580).
@@ -3164,7 +3235,7 @@ instructions; the noise between runs is about +-0.005 G.
   the if-conversion in the builder now makes up to eight `select`s per join
   instead of one, so both arms are counted more often.  The cycles are
   unchanged (six paired runs: -0.1 % [-0.5 .. +0.9]).  The vectorizer is not
-  it (`VCC_VIR_VEC=0`: 25.70 G).  Comparisons in instructions against clang
+  it (`-O2`, without it: 25.70 G).  Comparisons in instructions against clang
   thus start from 1.084x now, not 1.077x.
 - **Tried against `mov` (+0.38 G against clang), none of it kept:**
   1. A block parameter that is only returned takes the return register, and
@@ -3210,7 +3281,7 @@ instructions; the noise between runs is about +-0.005 G.
   299/299 direct, TSVC 151/151, sqlite same hash.
 - **TSVC on main is 7.37 G cycles, was 6.29 G before #125** (77 vectorized
   loops against 43).  The same number with and without this change, with
-  `VCC_VIR_SHRINK=0` and with `VCC_VIR_ROT=0`: it does not come from here and
+  `-fno-shrink-wrap` and with `-fno-rotate-loops`: it does not come from here and
   has not been investigated.
 
 ### TSVC after #125: search loops (2026-11-12)
@@ -3275,9 +3346,9 @@ from #125:
   irreducible graphs is derived here and must be covered by `vir_alloc_check`
   and `fuzz-vir`; the budget of 60 ns per VIR instruction for sweeps 5 and 6
   is a proposal.
-- **Measured in V4:** `vbench.py ab emit` with `VCC_VIR=1`, static
-  instructions against today's `-O2`, clang and gcc, the counters in
-  `VCC_VIR_STATS`, and the same set of TUs through clang with `-mllvm
+- **Measured in V4:** `vbench.py ab emit` with VIR (`-O2`), static
+  instructions against the direct emitter (`-O1`), clang and gcc, the
+  counters of `-fvir-stats`, and the same set of TUs through clang with `-mllvm
   -regalloc=basic` to see how much the allocator's quality is worth at all.
 
 ### V1 verifier: safe and linear slot exposure
@@ -3367,11 +3438,21 @@ directly. A late block parameter crossing a call can keep the last available
 callee-saved register. On the original x86 branch (7e166718), the mapped SQLite
 aMem reload count fell from 92.28M to 14.54M and three alternating native
 speedtest1 series improved by 1.27–2.00%. Those timings predate the tree
-reorganization. The current x86 lowering supports the same VCC_VL_MAP,
-VCC_VL_FILTER and VCC_VL_PROBE measurements through bench/sqlite/vir-edits.py.
+reorganization. The current x86 lowering supports the same measurements,
+now options (-fvir-map, -fvir-map-function, -fvir-probe), through
+bench/sqlite/vir-edits.py.
 
 The bounded predecessor-choice experiment had inconsistent runtime results.
 Its patch and measurements in results/vir-entry-choice-20261113.* refer to
 7e166718. The compiler continues to use its existing predecessor policy.
 See [the optimizer policy inventory](RESEARCH-optimizer-limits.md) for the
 GCC and LLVM comparisons used in the investigation.
+
+### Review av -O2/-O3 och kostnadsstacken (2026-11-14)
+
+Merge med main behåller smala x86-atomics och POPCNT. Linux-räknarnas
+perf-deskriptorer stängs nu vid trådslut (även gruppmedlemmen), och öppnas
+med CLOEXEC. `bench/vperf-test.py` mockar perf-syscalls och kontrollerar
+40 trådar, inklusive fel vid andra öppningen. Verifierat: bygge `-j 6`,
+vir-test 133/133, VIR-regressioner 56/56 med verifierare och allokeringscheck,
+samt vcc-vir-x86 (assembly och egna objekt vid -O2/-O3).

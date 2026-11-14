@@ -5,6 +5,10 @@
 VPRIV void ld_inputs_load(struct ld_context *ctx)
 {
 	bool lazy = false;
+	ld_input_vector ex = {0};
+	for (uint32_t i = 0; i < ctx->options.inputs.n; i++)
+		ld_input_expand(ctx, &ex, ctx->options.inputs.v[i], 0);
+	ctx->options.inputs.v = ex.v; ctx->options.inputs.n = ex.n; ctx->options.inputs.cap = ex.cap;
 
 	for (uint32_t i = 0; i < ctx->options.inputs.n; i++)
 		if (!ctx->options.inputs.v[i].whole) {
@@ -15,10 +19,15 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
 		}
 	for (uint32_t i = 0; i < ctx->options.inputs.n; i++) {
 		const char *p = ctx->options.inputs.v[i].path;
-		size_t n;
-		uint8_t *b = ld_file_map(ctx, p, &n);
-		if (!b)
+		size_t n = ctx->options.inputs.v[i].size;
+		const uint8_t *b = ctx->options.inputs.v[i].buf;
+		if (n >= sizeof(elf_file_header) && !memcmp(b, "\177ELF\2\1", 6) && ((const elf_file_header *)b)->e_type == 3 && !ctx->options.relocatable) {
+			uint32_t before = ctx->dso.dsos.n;
+			ld_dso_add(ctx, p, b, n, ctx->options.inputs.v[i].as_needed);
+			if (lazy && ctx->dso.dsos.n > before)
+				VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.size = SIZE_MAX, .file_bytes = (const uint8_t *)(uintptr_t)before}), ld_region_alloc);
 			continue;
+		}
 		if (varchive_format_detect(b, n) != VARCHIVE_FORMAT_NONE) {
 			if (lazy && !ctx->options.inputs.v[i].whole) {
 				uint32_t before = ctx->inputs.pending.n, c0 = ctx->inputs.lazy_candidates.n;
@@ -42,6 +51,8 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
 		for (uint32_t i = 0; i < ctx->inputs.pending.n; i++)
 			if (ctx->inputs.pending.v[i].path)
 				ld_lazy_object_add(ctx, ctx->inputs.pending.v[i]);
+			else if (ctx->inputs.pending.v[i].size == SIZE_MAX)
+				ld_lazy_dso_add(ctx, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].file_bytes);
 			else
 				ld_lazy_archive_process(ctx, ctx->inputs.pending.v[i].size, (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].file_bytes);
 		ctx->inputs.pending = ctx->inputs.lazy_order;

@@ -1,5 +1,5 @@
 /*
- * The pre-IR's invariants, checked between passes (VCC_VIR_PASSES=verify, pass-table.c).
+ * The pre-IR's invariants, checked between passes (-fvir-passes=verify, pass-table.c).
  *
  * Only the invariants written down today (preir.h; quality-vir-build.md section 2, as
  * doc/quality/WORK-vir.md step 2b lists them), each as far as the facts the driver

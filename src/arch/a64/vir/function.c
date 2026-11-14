@@ -154,7 +154,6 @@ static const virbuild_lowering_target vl_lowering_target = {
 	.params_in_loop = false,
 	.edits_at_block_end = false,
 	.skip_multi_operands = true,
-	.rotation_cached = true,
 };
 
 /*
@@ -164,7 +163,7 @@ static const virbuild_lowering_target vl_lowering_target = {
  * the test's branch goes back to the body: one branch a round instead of two.  The edges
  * into the loop get a copy of the test (a64_vir_goto_emit), not a jump to it: with the jump,
  * speedtest1 ran more instructions than without the rotation (short loops).  a64_vir_thread_state_instance.hl[b] is
- * the loop of a header placed so, else VIR_BLOCK_NONE.  VCC_VIR_ROT=0: VIR's order.  The driver
+ * the loop of a header placed so, else VIR_BLOCK_NONE.  -fno-rotate-loops: VIR's order.  The driver
  * makes that layout; this puts the blocks in front of the save point first.
  */
 static void vl_target_order_adjust(void *ctx)
@@ -289,10 +288,6 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 	const ctype *ft = T(c, c->syms[s].ty);
 
 	*why = NULL;
-	if (e->unit->options->debug) {
-		*why = VIRBUILD_FAILURE(debug_info);
-		return false;
-	}
 	/* (unwind tables would have to describe the d registers' slots: not written) */
 	a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c), !e->unit->options->cfi && !a64_vir_vectors_cross_call(f));
 	if (!vir_loops_build(f, &V->loops)) {
@@ -313,22 +308,16 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 		}
 	/* shrink-wrapping (SPEC-vir.md 15.12): the allocator is told which calls will be sibling
 	 * calls, which need no frame.  Not with unwind tables (the rows would have to follow the
-	 * prologue into the body).  VCC_VIR_SHRINK=0: off */
+	 * prologue into the body).  -fno-shrink-wrap: off */
 	{
-		static int on = -1;
 		vir_alloc_options ao = { 0 };
 
-		if (on < 0) {
-			const char *x = getenv("VCC_VIR_SHRINK");
-
-			on = !(x && *x == '0');
-		}
 		L.context = e, L.function = f;
 		a64_vir_thread_state_instance.low32 = a64_vir_array_grow(a64_vir_thread_state_instance.low32, &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1, 1);
 		a64_vir_thread_state_instance.needs_fallthrough = a64_vir_array_grow(a64_vir_thread_state_instance.needs_fallthrough, &a64_vir_thread_state_instance.fallthrough_capacity, f->insn_count + 1, 1);
 		L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
 		L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);
-		if (on && !e->unit->cleanups_disabled && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c))) {
+		if (e->unit->options->optimize.shrink_wrap && !e->unit->cleanups_disabled && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c))) {
 			memset(a64_vir_thread_state_instance.needs_fallthrough, 0, f->insn_count);
 			for (uint32_t b = 0; L.tail && b < f->block_count; b++)
 				for (uint32_t i = f->blocks[b].first; i < f->blocks[b].first + f->blocks[b].insn_count; i++)
@@ -345,7 +334,7 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 		}
 		L.save_point = ao.shrink ? V->allocation.save_point : VIR_BLOCK_NONE;
 	}
-	if (getenv("VCC_VIR_CHECK")) {
+	if (e->unit->options->vir_aid.check) {
 		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->allocation, &msg);
 
@@ -376,8 +365,9 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s, const char **w
 	L.drv = (virbuild_lowering){
 		.target = &vl_lowering_target, .ctx = &L, .f = f, .o = L.allocation, .lp = L.loops,
 		.order = L.order, .position = L.order_positions, .rotation = a64_vir_thread_state_instance.head_labels, .chase = L.chases, .path = a64_vir_thread_state_instance.path,
-		.block_label = L.labels, .optimize = !e->unit->cleanups_disabled,
+		.block_label = L.labels, .optimize = !e->unit->cleanups_disabled, .rotate = e->unit->options->optimize.rotate_loops,
 		.operand_value = L.operand_values, .operand_reg = L.operand_registers, .max_operands = A64_VIR_OPERAND_MAX, .skip_at = &L.skip,
+		.row = e->unit->options->debug ? codegen_debug_row_add : NULL, .row_e = e,
 	};
 	L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID && codegen_type_is_integer(c, ft->base) && codegen_type_size(c, ft->base) == 4;
 	L.tail = !(ft->flags & AST_TYPE_FLAG_VARIADIC) && em_tail_caller_ok(e, s) && !a64_vir_tail_call_reason(&L, a64_vir_thread_state_instance.low32);	/* (lo32: scratch until it is filled) */

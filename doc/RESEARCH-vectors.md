@@ -286,8 +286,8 @@ clang `-O3`:
 |---|---|---|
 | clang 23.1.4 `-O3` | 0.46 s | reference |
 | clang `-O0` | 1.84 s | 151/151 |
-| vcc `-O2` | 2.48 s | 151/151 |
-| vcc `-O2`, `VCC_VIR=bl` | 2.46 s | 151/151 |
+| vcc `-O1` (direct emitter) | 2.48 s | 151/151 |
+| vcc `-O3` (VIR) | 2.46 s | 151/151 |
 
 - clang vectorizes 77 loops, in 66 of the 151 functions (44 %), 55 of them at
   width 4 interleaved 4; with `-ffast-math` 92 loops.

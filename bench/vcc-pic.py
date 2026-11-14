@@ -44,5 +44,47 @@ with tempfile.TemporaryDirectory() as t:
                 bad += 1
                 print('DIFF', os.path.basename(f), ' '.join(mode) or '(default)', 'clang only:', sorted(a - b), 'vcc only:', sorted(b - a))
             else: ok += 1
+# Check the section and its write permission as well as relocations: an absolute
+# pointer in .rodata prevents a PIE link even when the relocation kind is right.
+def object_sections(obj):
+    import struct
+    data = open(obj, 'rb').read()
+    shoff = struct.unpack_from('<Q', data, 40)[0]
+    shsize, count, strings = struct.unpack_from('<HHH', data, 58)
+    sh = [struct.unpack_from('<IIQQQQIIQQ', data, shoff + i * shsize) for i in range(count)]
+    names = sh[strings]
+    def name(off, table):
+        start = table[4] + off
+        return data[start:data.index(b'\0', start)].decode()
+    result = {}
+    for sec in sh:
+        if sec[1] != 2:
+            continue
+        for off in range(sec[4], sec[4] + sec[5], sec[9]):
+            stname, info, other, index, value, size = struct.unpack_from('<IBBHQQ', data, off)
+            if (info & 15) == 1 and index and index < count:
+                target = sh[index]
+                result[name(stname, sh[sec[6]])] = (name(target[0], names), target[2] & 1)
+    return result
+
+with tempfile.TemporaryDirectory() as t:
+    source = f'{R}/src/test/pic/const-reloc.c'
+    for target in ('aarch64-linux-gnu', 'x86_64-linux-gnu'):
+        for mode in ('-fno-pic', '-fPIE', '-fPIC'):
+            for sections in ([], ['-fdata-sections']):
+                for assembly in (False, True):
+                    tag = f'relro/{target}/{mode}/{bool(sections)}/{"asm" if assembly else "obj"}'
+                    flags = [f'--target={target}', '-O2', mode] + sections
+                    subprocess.run([CL] + flags + ['-c', source, '-o', f'{t}/c.o'], check=True)
+                    r = subprocess.run([VPP] + flags + (['-S', source, '-o', f'{t}/v.s'] if assembly else ['-c', source, '-o', f'{t}/v.o']), capture_output=True, text=True)
+                    if r.returncode == 0 and assembly:
+                        r = subprocess.run([CL, f'--target={target}', '-c', f'{t}/v.s', '-o', f'{t}/v.o'], capture_output=True, text=True)
+                    if r.returncode:
+                        print('FAIL', tag, r.stderr[:200]); bad += 1; continue
+                    a, b = object_sections(f'{t}/c.o'), object_sections(f'{t}/v.o')
+                    if a != b:
+                        print('FAIL', tag, 'clang:', a, 'vcc:', b); bad += 1
+                    else:
+                        ok += 1
 print(f'vcc-pic: {ok} pass, {bad} fail')
 sys.exit(1 if bad else 0)

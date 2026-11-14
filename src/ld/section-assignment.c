@@ -50,13 +50,13 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
 		/* stable: by rank, non-allocated last */
 		for (uint32_t i = 0; i < n; i++) {
 			const ld_input_section *is = &ctx->inputs.sections.v[ctx->layout.orphans.v[i]];
-			uint64_t q = ld_orphan_section_key(is);
+			uint64_t q = ld_orphan_section_key(ctx, is);
 			uint32_t at = k++;
 
 			while (at > 0) {
 				const ld_input_section *p = &ctx->inputs.sections.v[tmp[at - 1]];
 
-				if (ld_orphan_section_key(p) <= q)
+				if (ld_orphan_section_key(ctx, p) <= q)
 					break;
 				tmp[at] = tmp[at - 1];
 				at--;
@@ -69,17 +69,18 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
 		ld_input_section *is = &ctx->inputs.sections.v[ctx->layout.orphans.v[i]];
 		if (is->output_section == LD_OUTPUT_SECTION_DISCARD)
 			continue;
+		const char *oname = ctx->dyn.deflayout ? ld_default_output_section_name(is->name) : is->name;
 		uint32_t found = LD_NONE;
 		for (uint32_t k = 0; k < ctx->script.sections.n; k++)
-			if (!strcmp(ctx->script.sections.v[k].name, is->name))
+			if (!strcmp(ctx->script.sections.v[k].name, oname))
 				found = k;
 		if (found == LD_NONE) {
-			found = ld_output_section_find(ctx, is->name);
+			found = ld_output_section_find(ctx, oname);
 			VVEC_PUSH(ctx->script.commands, ((ld_command){.kind = LD_COMMAND_OUTPUT_SECTION, .index = found}), ld_region_alloc);
 			/* lld findOrphanPos, on the coarse ranks: the first output section of
 			 * the closest rank (sections without input sections do not count),
 			 * then past those as close whose rank is not above the orphan's */
-			int r = ld_orphan_section_rank(is->flags, is->type, is->name);
+			int r = ld_orphan_section_rank(ctx, is->flags, is->type, oname);
 			if (r >= 0) {
 				uint32_t at = LD_NONE;
 				int best = -1;

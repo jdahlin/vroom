@@ -281,6 +281,54 @@ static inline int cc_tls_model_parse(const char *m)
 
 enum { CC_DISABLED_BUILTIN_WORDS = 6 };	/* generated libbuiltins.inc indices */
 
+/*
+ * The optimizations an option turns on or off, one row each: X(field, "NAME", LEVEL) is
+ * -fNAME and -fno-NAME, on by default at -O<LEVEL> and above.  The driver resolves the level
+ * and the options into cc_options.optimize (driver/optimization.c); doc/OPTIMIZATION.md says
+ * what each row does and what else a level contains.  Every row runs on VIR, so none has an
+ * effect without `vir`, and VIR itself needs -O2: below it the rows are all off.
+ */
+#define CC_OPTIMIZATIONS(X) \
+	X(vir,                  "vir",                  2) /* functions go through VIR (codegen/vir/) */ \
+	X(rotate_loops,         "rotate-loops",         2) /* the lowering puts a loop's test at its end */ \
+	X(shrink_wrap,          "shrink-wrap",          2) /* arm64: the prologue moves to the paths that need a frame */ \
+	X(vectorize,            "vectorize",            3) /* the loop vectorizer (codegen/vir/vectorize.c) */ \
+	X(hoist_loop_constants, "hoist-loop-constants", 3) /* a loop's constants are made once in front of it */
+
+typedef struct cc_optimizations {
+#define X(field, name, level) bool field;
+	CC_OPTIMIZATIONS(X)
+#undef X
+} cc_optimizations;
+
+enum {
+#define X(field, name, level) +1
+	CC_OPTIMIZATION_COUNT = 0 CC_OPTIMIZATIONS(X)
+#undef X
+};
+
+/* -fvir-ccmp=: which pairs of compares the condition merge joins (codegen/vir/condition-merge.c) */
+enum { CC_CCMP_SELECT, CC_CCMP_ALL, CC_CCMP_NONE };
+
+/* The developer's aids for VIR (-fvir-*, doc/OPTIMIZATION.md): what the tests and the
+ * measuring harnesses ask for.  All zero by default; none changes the code of a function
+ * that goes through VIR, except build_only, functions, passes, ccmp, probe and map. */
+typedef struct cc_vir_aids {
+	bool build_only;	/* -fno-vir-lower: VIR is built (verified, printed), the direct emitter makes the code */
+	bool verify;		/* -fvir-verify: the verifier runs on every function built; a rejected one falls back */
+	bool dump;		/* -fvir-dump: each function's VIR on stderr */
+	bool report;		/* -fvir-report: a line per function on stderr: built, lowered, or why not */
+	bool check;		/* -fvir-check: the allocation checker runs on every function; a failure falls back */
+	bool stats;		/* -fvir-stats: per TU on stderr, functions through VIR and the reasons the others were not */
+	bool vectorize_report;	/* -fvir-vectorize-report: a line per innermost loop the vectorizer looked at */
+	uint8_t ccmp;		/* -fvir-ccmp=select|all|none: CC_CCMP_* */
+	int probe;		/* -fvir-probe=MASK: a nop after each allocator edit of the kinds in MASK */
+	bool map;		/* -fvir-map: x86-64, each allocator edit between # vl-site and # vl-end, its decisions on stderr */
+	const char *map_function;	/* -fvir-map-function=NAME: x86-64, the map and probes in NAME alone */
+	const char *passes;	/* -fvir-passes=ITEMS: time, leave out or check the builder's passes (codegen/vir/pass-table.c) */
+	const char *functions;	/* -fvir-functions=FILE: only the functions named in FILE, one per line, are lowered */
+} cc_vir_aids;
+
 typedef struct cc_options {	/* fields before outfd: parse options, all in the decl cache key */
 	int target;		/* PP_LINUX_AARCH64 / PP_DARWIN / PP_WASM64 / PP_WASM32 / PP_LINUX_X86_64 / PP_WIN64 */
 	int unsigned_char;
@@ -316,7 +364,10 @@ typedef struct cc_options {	/* fields before outfd: parse options, all in the de
 	const char *field_uses;	/* VCC_FIELD_USES: the selection file (test aid; after outfd: not in the cache key) */
 	int lint;		/* vpp --lint: the style checks (frontend/c/naming-lint.c); not in the decl cache key */
 	int emit;		/* generate code (codegen/): 1 = assembly text to outfd, 2 = object into obj */
-	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
+	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og, -O), 2 (-O2, -Os, -Oz),
+				   3 (-O3 and above, -Ofast); doc/OPTIMIZATION.md */
+	cc_optimizations optimize;	/* what the level and the -f options turn on (CC_OPTIMIZATIONS) */
+	cc_vir_aids vir_aid;	/* -fvir-*: the developer's aids */
 	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
 	int debug;		/* -g: DWARF line tables (ELF, COFF) */

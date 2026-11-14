@@ -36,7 +36,7 @@ def main():
             opt.run([args.vpp, '--target='+args.target, f'-O{level}', '-ffreestanding',
                      '-fno-stack-protector', '-S', source, '-o', assembly])
             text = assembly.read_text()
-            if level and re.search(r'\b(?:callq?|bl)\s+never_control\b', text):
+            if level and re.search(r'\b(?:callq?|bl|b|jmpq?)\s+never_control\b', text):
                 raise RuntimeError(f'O{level}: retained unreachable never_control')
             for name, symbol in [('control_volatile','observed'), ('control_atomic','atom')]:
                 function = opt.body(text, name, arch.startswith('wasm'))
@@ -61,7 +61,7 @@ def main():
                 if not memory_read:
                     raise RuntimeError(f'{name}: lost {symbol} memory read\n{function}')
             named = opt.body(text, 'control_named_call', arch.startswith('wasm'))
-            if not re.search(r'\b(?:callq?|bl)\s+strcmp\b', named):
+            if not re.search(r'\b(?:callq?|bl|b|jmpq?)\s+strcmp\b', named):	# (a call or a sibling call)
                 raise RuntimeError('folded an ordinary user-defined strcmp call')
             if arch.startswith('wasm'):
                 if re.search(r'\bcall\s+step\b', opt.body(text, 'control_not_evaluated', True)):

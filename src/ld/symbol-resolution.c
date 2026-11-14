@@ -146,6 +146,13 @@ VPRIV void ld_global_symbol_finish(void *arg, size_t i)
 		} else {
 			s->binding = STB_GLOBAL;
 		}
+		const DsoSym *ds = ctx->dso.dsos.n && !ctx->options.relocatable ? ld_dso_lookup(ctx, ld_global_name(ctx, g)) : NULL;
+		if (ds) {
+			const elf_symbol *y = &ctx->dso.dsos.v[ds->dso]->dsym[ds->idx];
+			s->dso1 = ds->dso + 1; s->dsym = ds->idx;
+			s->type = y->st_info & 15; s->size = y->st_size;
+			atomic_store_explicit(&ctx->dso.dsos.v[ds->dso]->used, true, memory_order_relaxed);
+		}
 		return;
 	}
 	uint32_t oi = (d >> 32) & 0x3fffffff, si = (uint32_t)d;

@@ -1045,7 +1045,7 @@ integration head remains.
 
 ### 2026-11-12: VIR's first x86-64 lowering
 
-`VCC_VIR=bl -O2`: allocated SysV leaf functions and the shared loop
+`-O3`: allocated SysV leaf functions and the shared loop
 vectorizer's SSE2 part now work on x86-64 too. Details, remaining
 retreats, targeted tests and measurements are in `PLAN-vir.md`,
 V2/V4 status 2026-11-12. No change to the default choice or -O0/-O1.
@@ -1350,3 +1350,14 @@ bygger NASM de fristående assemblerfilerna och vpp hanterar inline asm.
 Det andra använder `--disable-asm` för att köra DSP-kodens C-varianter.
 Make använder vpp för CC och HOSTCC, även för testverktygen. Clang kör
 konfigurationsproberna och anropar systemlänkaren.
+
+### X9: CRC32 regression portability (2026-11-14)
+
+The CRC32C builtin regression enables SSE4.2 on its check function and
+checks CPUID before calling it, as the string-intrinsic test does. It no
+longer enables SSE4.2 for other targets through a global test flag, and
+runs safely on x86-64 CPUs without SSE4.2.
+
+Verified: unity build; `vcc-x86.py -j 6 x86_crc32` with assembly and direct
+objects (O0/O2/O3), also `VCC_VIR=bl`; arm64 `vcc-ctests.py -j 6 --suite vcc
+x86_crc32`: each 1/1 pass. No compiler performance change.

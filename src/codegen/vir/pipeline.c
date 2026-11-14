@@ -97,11 +97,11 @@ VPRIV bool virbuild_function_to_vir(codegen_context *e)
 	return true;
 }
 
-/* the passes of the table (pass-table.c) in order; with VCC_VIR_PASSES set, through the instrumented
+/* the passes of the table (pass-table.c) in order; with -fvir-passes given, through the instrumented
    step (timing, leaving out, checking); false: the function cannot go through VIR (V->why) */
 VPRIV bool virbuild_function_emit(codegen_context *e)
 {
-	const virbuild_pass_switch *w = virbuild_pass_switch_get();
+	const virbuild_pass_switch *w = &e->unit->vir_pass_switch;
 	uint32_t n, valid = 0;
 	const virbuild_pass *t = virbuild_pass_list(&n);
 	bool last = false;	/* what the last row without VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED returned */

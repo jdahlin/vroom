@@ -63,7 +63,7 @@ def main():
             # Exercise the self-host code path in the arithmetic oracle below.
             clang = hostenv.llvm('clang')
             resource = subprocess.check_output([clang, '-print-resource-dir'], text=True).strip()
-            flags = ['--target=x86_64-linux-gnu', '-O2', '-D_GNU_SOURCE',
+            flags = ['--target=x86_64-linux-gnu', '-O2', '-fvir-report', '-fvir-check', '-D_GNU_SOURCE',
                      '-I'+str(ROOT/'src/include'), '-isystem', resource+'/include']
             multiarch = Path('/usr/include/x86_64-linux-gnu')
             if multiarch.is_dir():
@@ -72,7 +72,6 @@ def main():
             crc_input = d/'crc32c.o'
             link_flags = ['-no-pie']
             compiled = subprocess.run([bins/'vpp', *flags, '-c', crc_source, '-o', crc_input],
-                                      env=dict(os.environ, VCC_VIR='bls', VCC_VIR_CHECK='1'),
                                       capture_output=True, text=True)
             if compiled.returncode or 'crc_word_hw: lowered, 0 spills' not in compiled.stderr:
                 raise RuntimeError('CRC word helper did not lower spill-free:\n'+compiled.stderr)
@@ -97,7 +96,7 @@ def main():
         for label, prefix in prefixes:
             for crc in ('software', 'auto'):
                 for simd in ('scalar', 'avx2', 'auto'):
-                    env = dict(os.environ, VCC_CRC=crc, VCC_LEX_SIMD=simd, VCC_VIR='0')
+                    env = dict(os.environ, VCC_CRC=crc, VCC_LEX_SIMD=simd)
                     def run(command):
                         return subprocess.run(prefix+list(map(str, command)), env=env,
                                               capture_output=True, check=True, timeout=30).stdout

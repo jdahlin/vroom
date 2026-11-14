@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TSVC_2 (work/testsuites/TSVC_2, `bench/fetch-testsuites.sh TSVC_2`) built natively on
-macOS: tsvc.c by vpp -O2 through the direct emitter and through VIR (VCC_VIR=bl), the
-helpers and the reference by clang.  Every loop's checksum must equal clang -O3's.
+macOS: tsvc.c by vpp through the direct emitter (-O1) and through VIR (-O2, and -O3 with the
+loop vectorizer), the helpers and the reference by clang.  Every loop's checksum must equal clang -O3's.
 
     bench/vcc-tsvc.py [--iterations N] [--bin-dir DIR] [-v] [--why]
 
@@ -61,13 +61,11 @@ def build(name, cmd, env=None):
     cyc[name] = int(m.group(1)) / 1e9 if m else 0
     return rows
 
-vpp = [os.path.join(bind, 'vpp'), '-O2'] + (['-isysroot', sdk] if sdk else [])
-env0 = dict(os.environ, VCC_VIR='0')
+vpp = [os.path.join(bind, 'vpp')] + (['-isysroot', sdk] if sdk else [])
 ref = build('clang', [clang, '-O3'])
-runs = [('vcc', build('vcc', vpp, env0)), ('vir', build('vir', vpp, dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl'))))]
-# the vectorizer's own account (VCC_VIR_VEC=r): one line per innermost loop it looked at
-rep = run(vpp + ['-c', 'tsvc.c', '-o', os.devnull], cwd=out,
-          env=dict(env0, VCC_VIR=os.environ.get('VCC_VIR', 'bl') + 's', VCC_VIR_VEC='r', VCC_VIR_CORPUS_REPORT='1')).stderr
+runs = [(n, build(n, vpp + ['-' + n[4:]])) for n in ('vcc-O1', 'vcc-O2', 'vcc-O3')]
+# the vectorizer's own account (-fvir-vectorize-report): one line per innermost loop it looked at
+rep = run(vpp + ['-O3', '-fvir-report', '-fvir-vectorize-report', '-c', 'tsvc.c', '-o', os.devnull], cwd=out).stderr
 loops = [l for l in rep.split('\n') if l.startswith('vec: ')]
 vec = [l for l in loops if l.endswith(': vectorized')]
 bad = 0

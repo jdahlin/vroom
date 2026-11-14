@@ -20,7 +20,6 @@
 #define X_DESC(regs_, flags_) { .registers = (regs_), .flags = (flags_) }
 
 static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
-	[X64_OP_CRC32Q] = X_DESC(X_D | X_U | X_V, X_P),
 	[X64_OP_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
 	[X64_OP_CMPM] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
 	[X64_OP_TESTM] = X_DESC(X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
@@ -94,6 +93,7 @@ static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
 	[X64_OP_POPCNT] = X_DESC(X_D | X_U, X_P | X_W),
 	[X64_OP_BSR] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
 	[X64_OP_BSWAP] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P),
+	[X64_OP_CRC32] = X_DESC(X_D | X_U | X_V, X_P),
 	[X64_OP_EXT] = X_DESC(X_D | X_U, X_P),
 	/* Direction flag is an input even though REP leaves arithmetic flags alone. */
 	[X64_OP_REP] = { .flags = X_MEM | RECORD_EFFECT_BARRIER | X_R, .implicit_defined = X64_REGISTER_BIT(RCX) | X64_REGISTER_BIT(RDI), .implicit_used = X64_REGISTER_BIT(RCX) | X64_REGISTER_BIT(RDI) },
@@ -257,7 +257,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X64_OP_POPCNT] = RECORD_FLOW_NEXT,
 		[X64_OP_BSR] = RECORD_FLOW_NEXT,
 		[X64_OP_BSWAP] = RECORD_FLOW_NEXT,
-		[X64_OP_CRC32Q] = RECORD_FLOW_NEXT,
+		[X64_OP_CRC32] = RECORD_FLOW_NEXT,
 		[X64_OP_EXT] = RECORD_FLOW_NEXT,
 		[X64_OP_REP] = RECORD_FLOW_NEXT,
 		[X64_OP_FADD] = RECORD_FLOW_NEXT,

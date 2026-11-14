@@ -141,20 +141,11 @@ static void a64_vir_register_rematerialize(a64_vir_context *L, uint8_t dst, uint
 		a64_vir_constant_materialize(L, v, a64_vir_general_register(dst));
 }
 
-/* VCC_VL_PROBE=MASK (measuring): a nop after every allocator edit of the kinds in MASK, so
+/* -fvir-probe=MASK (measuring): a nop after every allocator edit of the kinds in MASK, so
  * that instructions retired minus an unprobed run's is how often that kind executes.
  * Bits: 0 reload, 1 remat, 2 move, 3 store (edits before an instruction); 4 remat, 5 store,
  * 6 reload, 7 move (on an edge).  An upper bound: the nop also stops the record folds. */
-static int a64_vir_probe_mask_get(void)
-{
-	static int m = -1;
-
-	if (m < 0)
-		m = getenv("VCC_VL_PROBE") ? atoi(getenv("VCC_VL_PROBE")) : 0;
-	return m;
-}
-
-#define A64_VIR_PROBE(bit) do { if (a64_vir_probe_mask_get() >> (bit) & 1) a64_record_emit_word(L->context, 0xd503201f); } while (0)
+#define A64_VIR_PROBE(bit) do { if (L->context->unit->options->vir_aid.probe >> (bit) & 1) a64_record_emit_word(L->context, 0xd503201f); } while (0)
 
 /* one allocator edit, before the instruction it is positioned at */
 VPRIV void vl_edit(a64_vir_context *L, const vir_edit *x)

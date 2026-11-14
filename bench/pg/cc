@@ -9,6 +9,9 @@
   compiled by vcc to a temporary object, then clang links.
 - everything else (--version, -E, -dM, links of objects, .S, .m): clang.
 
+$VCC_PG_FLAGS: more flags for vcc alone, after the build's (-O1: the direct emitter instead
+of VIR; doc/OPTIMIZATION.md).
+
 When vcc fails, the command is appended to $VCC_PG_LOG (one line: status, cwd,
 argv as JSON).  With VCC_PG_FALLBACK=1 clang then compiles the file instead,
 so the build finishes and the log lists every TU vcc could not do.
@@ -75,7 +78,7 @@ def vcc(argv):
             continue
         a.append(x)
         i += 1
-    p = subprocess.run([VPP] + a, stderr=subprocess.PIPE)
+    p = subprocess.run([VPP] + a + os.environ.get("VCC_PG_FLAGS", "").split(), stderr=subprocess.PIPE)
     err = p.stderr.decode(errors="replace")
     return p.returncode, err
 

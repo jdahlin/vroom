@@ -6,11 +6,11 @@
   bench/vir-passes.py --bisect --cmd 'SHELL COMMAND' [--bin-dir DIR]
 
 The builder's passes run from one table (src/codegen/vir/pass-table.c).  With
-VCC_VIR=bl VCC_VIR_STATS=1 VCC_VIR_PASSES=time, vpp prints per TU and pass
+-fvir-stats -fvir-passes=time, vpp prints per TU and pass
 "vcc vir-pass: pass=NAME runs=N changed=N instructions=N" (changed is `-` for
 a pass that does not say), plus two totals: @build (the walk and every pass,
 to-vir and canon included) and @lower (the target's lowering).  This runs
-`vpp -O2 -c` over the TU sets of bench/vir-failures.py (suites, kernel sample,
+`vpp -O3 -c` (every row runs) over the TU sets of bench/vir-failures.py (suites, kernel sample,
 SQLite; PostgreSQL with --sets postgres) and prints per pass: runs, runs that
 changed something, instructions (millions) and its share of @build; `walk` is
 @build less every pass (the AST walk through the builder's LO() interface).
@@ -19,9 +19,10 @@ something.  The timing's own cost (two counter reads per pass, measured once
 per process) is taken off each pass and off @build.
 
 --bisect: for a TU whose VIR build misbehaves, rerun it with each optional pass
-left out in turn (VCC_VIR_PASSES=-NAME) and say which leaving-out makes it
-pass.  PAT is a test of bench/vcc-ctests.py (run with VCC_VIR=bl); --cmd runs
-any command instead (exit status 0: it passes), with VCC_VIR_PASSES set.
+left out in turn (-fvir-passes=-NAME) and say which leaving-out makes it
+pass.  PAT is a test of bench/vcc-ctests.py (run at -O3, the option given to vcc
+alone with --vflags); --cmd runs any command instead (exit status 0: it passes),
+with `{vir}` in it replaced by the option (and by nothing for the first run).
 
 -n N   TUs per sample for kernel and postgres (default 200; 0: all)
 -j N   parallel vpp processes (default 3)
@@ -90,10 +91,9 @@ def vir_failures():
 def run(job):
     """one TU: {pass: [runs, changed or None, instructions]} of its final round, or None"""
     label, argv, cwd = job
-    env = dict(os.environ, VCC_VIR='bl', VCC_VIR_STATS='1', VCC_VIR_PASSES='time')
-    try:
-        p = subprocess.run([VPP, '-c', '-o', os.devnull] + argv, cwd=cwd, capture_output=True, text=True,
-                           errors='replace', env=env, timeout=TMO)
+    try:   # (the level after the TU's own -O)
+        p = subprocess.run([VPP, '-c', '-o', os.devnull] + argv + ['-O3', '-fvir-stats', '-fvir-passes=time'], cwd=cwd,
+                           capture_output=True, text=True, errors='replace', timeout=TMO)
         err = p.stderr
     except subprocess.TimeoutExpired:
         return label, None, []
@@ -173,8 +173,8 @@ def stats():
 
 def optional_passes():
     """the table's passes that may be left out, from vpp's own list (an unknown pass prints it)"""
-    p = subprocess.run([VPP, '-O2', '-x', 'c', '-c', '-o', os.devnull, '-'], input='int f(void) { return 0; }\n',
-                       capture_output=True, text=True, env=dict(os.environ, VCC_VIR='bl', VCC_VIR_PASSES='-?'))
+    p = subprocess.run([VPP, '-O3', '-fvir-passes=-?', '-x', 'c', '-c', '-o', os.devnull, '-'],
+                       input='int f(void) { return 0; }\n', capture_output=True, text=True)
     m = PASSLIST.search(p.stderr)
     if not m:
         sys.exit(f'vpp did not list its passes: {p.stderr.strip()[:300]}')
@@ -185,27 +185,26 @@ def bisect():
     if CMD:
         what = CMD
 
-        def passes(extra):
-            env = dict(os.environ, VCC_VIR=os.environ.get('VCC_VIR', 'bl'), **extra)
-            return subprocess.run(CMD, shell=True, env=env, capture_output=True).returncode == 0
+        def passes(option):
+            return subprocess.run(CMD.replace('{vir}', option), shell=True, capture_output=True).returncode == 0
     else:
         if len(ARGS) != 1:
             sys.exit(__doc__)
         what = f'vcc-ctests.py --suite {SUITE} {ARGS[0]}'
 
-        def passes(extra):
-            env = dict(os.environ, VCC_VIR='bl', VCC_BIN=BIN, **extra)
-            p = subprocess.run([sys.executable, f'{HERE}/vcc-ctests.py', '-j', '1', '--suite', SUITE, ARGS[0]],
-                               env=env, capture_output=True, text=True)
+        def passes(option):
+            env = dict(os.environ, VCC_BIN=BIN)
+            p = subprocess.run([sys.executable, f'{HERE}/vcc-ctests.py', '-j', '1', '-O3', '--no-cache', '--suite', SUITE]
+                               + (['--vflags', option] if option else []) + [ARGS[0]], env=env, capture_output=True, text=True)
             return p.returncode == 0
     print(f'bisect: {what}')
-    if passes({}):
+    if passes(''):
         print('bisect: it passes with every pass: nothing to bisect')
         return
     names = optional_passes()
     fixed = []
     for n in names:
-        ok = passes({'VCC_VIR_PASSES': f'-{n}'})
+        ok = passes(f'-fvir-passes=-{n}')
         print(f'  -{n:<18} {"passes" if ok else "fails"}', flush=True)
         if ok:
             fixed.append(n)

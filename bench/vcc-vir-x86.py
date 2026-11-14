@@ -24,8 +24,9 @@ if Path('/usr/include/x86_64-linux-gnu').is_dir():
     flags += ['-isystem', '/usr/include/x86_64-linux-gnu', '-isystem', '/usr/include']
 required = {'vx_shift', 'vx_stack', 'vx_fp', 'vx_rotate', 'vx_f32', 'vx_f64', 'vx_i32', 'vx_sum', 'vx_series', 'vx_division', 'vx_srem', 'vx_udiv64', 'vx_udiv32'}
 vector = {'vx_f32': 'mulps', 'vx_f64': 'mulpd', 'vx_i32': 'paddd', 'vx_sum': 'paddq', 'vx_series': 'paddq'}
-env = dict(os.environ, VCC_VIR='bvls', VCC_VIR_CHECK='1', VCC_VIR_VEC='r', VCC_THREADS='1')
-env.pop('VCC_VIR_LIST', None)
+env = dict(os.environ, VCC_THREADS='1')
+# VIR's checks and reports (doc/OPTIMIZATION.md): -O3 has the vectorizer, -O2 not
+aids = ['-fvir-verify', '-fvir-report', '-fvir-check', '-fvir-vectorize-report']
 
 def run(cmd, **kw):
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, **kw)
@@ -38,36 +39,37 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
     ref = d / 'ref'
     run([llvm('clang'), *flags, '-O2', str(source), '-no-pie', '-o', str(ref)])
     expected = run([str(ref)]).stdout
-    for vec in ('r', '0'):
-        testenv = dict(env, VCC_VIR_VEC=vec)
-        asm = d / f'vec-{vec}.s'
-        p = run([vpp, *flags, '-O2', '-S', str(source), '-o', str(asm)], env=testenv)
+    for lvl in ('-O3', '-O2'):
+        testenv = env
+        asm = d / f'vec{lvl}.s'
+        p = run([vpp, *flags, lvl, *aids, '-S', str(source), '-o', str(asm)], env=testenv)
         lowered = set(re.findall(r'vir: (\w+): lowered,', p.stderr))
         if not required <= lowered:
             raise SystemExit(f'not lowered: {sorted(required - lowered)}\n{p.stderr}')
         if 'verifier failures' in p.stderr or 'allocation check:' in p.stderr:
             raise SystemExit(f'incorrect fallback or invalid VIR:\n{p.stderr}')
         threaded = d / 'threaded.s'
-        run([vpp, *flags, '-O2', '-S', str(source), '-o', str(threaded)],
+        run([vpp, *flags, lvl, *aids, '-S', str(source), '-o', str(threaded)],
             env=dict(testenv, VCC_THREADS='6'))
         if threaded.read_bytes() != asm.read_bytes():
             raise SystemExit('assembly differs with six emitter threads')
         text = asm.read_text()
-        if vec == 'r':
-            # Diagnostics observe the final allocation; a name filter must
-            # never change policy. Exercise probes through both assemblers.
+        if lvl == '-O2':
+            # The allocator's map and probes (-fvir-map, -fvir-probe) observe the
+            # final allocation; -fvir-map-function must never change the code of
+            # another function.  Exercise probes through both assemblers.
             baseline = d / 'diagnostic-base.o'
-            run([vpp, *flags, '-O2', '-c', str(source), '-o', str(baseline)], env=testenv)
+            run([vpp, *flags, lvl, '-c', str(source), '-o', str(baseline)], env=testenv)
             for mode in ('filtered', 'map', 'probe'):
-                denv = dict(testenv, VCC_VL_MAP='1', VCC_VL_PROBE='255' if mode == 'probe' else '0',
-                            VCC_VL_FILTER='absent_function' if mode == 'filtered' else 'vx_stack')
+                dflags = ['-fvir-map', '-fvir-probe=' + ('255' if mode == 'probe' else '0'),
+                          '-fvir-map-function=' + ('absent_function' if mode == 'filtered' else 'vx_stack')]
                 mapped = d / (mode + '.s')
-                diagnostic = run([vpp, *flags, '-O2', '-S', str(source), '-o', str(mapped)], env=denv)
+                diagnostic = run([vpp, *flags, lvl, *dflags, '-S', str(source), '-o', str(mapped)], env=testenv)
                 objfile = d / (mode + '.o')
-                run([vpp, *flags, '-O2', '-c', str(source), '-o', str(objfile)], env=denv)
+                run([vpp, *flags, lvl, *dflags, '-c', str(source), '-o', str(objfile)], env=testenv)
                 if mode == 'filtered':
                     if mapped.read_bytes() != asm.read_bytes() or objfile.read_bytes() != baseline.read_bytes():
-                        raise SystemExit('a diagnostic filter changed unselected code')
+                        raise SystemExit('-fvir-map-function changed unselected code')
                 elif '# vl-site' not in mapped.read_text() or 'vl-function vx_stack ' not in diagnostic.stderr:
                     raise SystemExit('missing allocator site/decision mapping')
                 for inp in (mapped, objfile):
@@ -75,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
                     if run([str(exe)]).stdout != expected:
                         raise SystemExit('allocator diagnostics changed program results')
-        if vec != '0':
+        if lvl == '-O3':
             for name, opcode in vector.items():
                 body = text.split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                 if opcode not in body:
@@ -84,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             inp = asm
             if obj:
                 inp = d / 'own.o'
-                run([vpp, *flags, '-O2', '-c', str(source), '-o', str(inp)], env=testenv)
+                run([vpp, *flags, lvl, *aids, '-c', str(source), '-o', str(inp)], env=testenv)
             exe = d / 'run'
             run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
             if run([str(exe)]).stdout != expected:
@@ -124,15 +126,15 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         extra = source.with_name(filename)
         run([llvm('clang'), *flags, '-O2', str(extra), '-no-pie', '-o', str(ref)])
         extra_expected = run([str(ref)]).stdout
-        for vec in ('r', '0'):
-            testenv = dict(env, VCC_VIR_VEC=vec)
+        for lvl in ('-O3', '-O2'):
+            testenv = env
             asm = d / 'extra.s'
-            p = run([vpp, *flags, '-O2', '-S', str(extra), '-o', str(asm)], env=testenv)
+            p = run([vpp, *flags, lvl, *aids, '-S', str(extra), '-o', str(asm)], env=testenv)
             lowered = set(re.findall(r'vir: (\w+): lowered,', p.stderr))
             if not required_more <= lowered or 'verifier failures' in p.stderr or 'allocation check:' in p.stderr:
                 raise SystemExit(f'{filename}: missing {required_more-lowered} or invalid VIR\n{p.stderr}')
             threaded = d / 'extra-threaded.s'
-            run([vpp, *flags, '-O2', '-S', str(extra), '-o', str(threaded)],
+            run([vpp, *flags, lvl, *aids, '-S', str(extra), '-o', str(threaded)],
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
@@ -275,7 +277,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if not re.search(r'\(%\w+,%\w+,' + str(scale) + r'\)', body):
                         raise SystemExit(f'{name}: missing indexed memory operand with scale {scale}')
-            if vec != '0':
+            if lvl == '-O3':
                 if filename == 'vir_vector_stride.c':
                     loops = set(re.findall(r'vec: (\w+): loop b\d+: vectorized', p.stderr))
                     if not required_more <= loops:
@@ -288,7 +290,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 inp = asm
                 if obj:
                     inp = d / 'extra.o'
-                    run([vpp, *flags, '-O2', '-c', str(extra), '-o', str(inp)], env=testenv)
+                    run([vpp, *flags, lvl, *aids, '-c', str(extra), '-o', str(inp)], env=testenv)
                 exe = d / 'extra'
                 run([llvm('clang'), '-no-pie', str(inp), '-o', str(exe)])
                 if run([str(exe)]).stdout != extra_expected:
@@ -298,7 +300,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             run([llvm('clang'), *wrapflags, str(extra), '-no-pie', '-o', str(ref)])
             wrap_expected = run([str(ref)]).stdout
             asm = d / 'wrap.s'
-            run([vpp, *wrapflags, '-S', str(extra), '-o', str(asm)], env=env)
+            run([vpp, *wrapflags, '-O3', *aids, '-S', str(extra), '-o', str(asm)], env=env)
             body = asm.read_text().split('be16cast:\n', 1)[1].split('.Lfunc_end', 1)[0]
             if 'shll' not in body:
                 raise SystemExit('be16cast: -fwrapv product was moved past sign extension')
@@ -308,7 +310,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 raise SystemExit('wrapping index differs from clang')
         if filename == 'vir_x86_frame.c':
             asm = d / 'keep-frame.s'
-            run([vpp, *flags, '-O2', '-fno-omit-frame-pointer', '-S', str(extra), '-o', str(asm)], env=env)
+            run([vpp, *flags, '-O3', *aids, '-fno-omit-frame-pointer', '-S', str(extra), '-o', str(asm)], env=env)
             body = asm.read_text().split('pressure:\n', 1)[1].split('.Lfunc_end', 1)[0]
             if not re.search(r'pushq\s+%rbp', body):
                 raise SystemExit('pressure: -fno-omit-frame-pointer was ignored')
@@ -316,11 +318,11 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
             run([llvm('clang'), '-no-pie', str(asm), '-o', str(exe)])
             if run([str(exe)]).stdout != extra_expected:
                 raise SystemExit('pressure: frame-pointer mode failed')
-    # Enabling VIR must have no effect below -O2.
+    # VIR's options must have no effect below -O2.
     for opt in ('-O0', '-O1'):
         outputs = []
-        for mode in ('0', 'bvls'):
-            p = run([vpp, *flags, opt, '-S', str(source), '-o', '-'], env=dict(env, VCC_VIR=mode))
+        for more in ([], ['-fvir', '-fvectorize', *aids]):
+            p = run([vpp, *flags, opt, *more, '-S', str(source), '-o', '-'], env=env)
             outputs.append(p.stdout)
         if outputs[0] != outputs[1]:
             raise SystemExit(f'{opt}: VIR changed assembly')

@@ -71,8 +71,18 @@ VPRIV void ld_file_offsets_assign(struct ld_context *ctx)
 	for (uint32_t i = 0; i < ctx->layout.program_headers.n; i++) {
 		elf_program_header *p = &ctx->layout.program_headers.v[i];
 		ld_segment_sections *s = &ctx->layout.program_header_sections.v[i];
-		if (s->first_output_section < 0)
-			continue;
+		uint64_t hs = sizeof(elf_file_header) + (uint64_t)ctx->layout.program_headers.n * sizeof(elf_program_header);
+		if (p->p_type == PT_PHDR && ctx->layout.headers_loaded) {
+			p->p_offset = sizeof(elf_file_header);
+			p->p_vaddr = p->p_paddr = ctx->layout.file_header_address + sizeof(elf_file_header);
+			p->p_filesz = p->p_memsz = (uint64_t)ctx->layout.program_headers.n * sizeof(elf_program_header);
+			p->p_align = 8; continue;
+		}
+		if (s->first_output_section < 0 && s->includes_headers) {
+			p->p_offset = 0; p->p_vaddr = p->p_paddr = ctx->layout.file_header_address;
+			p->p_filesz = p->p_memsz = hs; continue;
+		}
+		if (s->first_output_section < 0) continue;
 		ld_output_section *f = &ctx->script.sections.v[s->first_output_section], *l = &ctx->script.sections.v[s->last_output_section];
 		uint64_t foff = s->includes_headers ? 0 : f->offset, fva = s->includes_headers ? ctx->layout.file_header_address : f->address;
 		p->p_filesz = l->offset - foff + (l->type != SHT_NOBITS ? l->size : 0);

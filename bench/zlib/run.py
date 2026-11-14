@@ -2,15 +2,15 @@
 """zlib as a test corpus and code-quality benchmark (TODO.md T13/T15).
 
   bench/zlib/run.py fetch                     # zlib tarball -> work/zlib (once, SHA-256 checked)
-  bench/zlib/run.py build [clang vcc vir gcc] # the library, example, minigzip, zbench
-  bench/zlib/run.py test  [clang vcc vir]     # self-tests, and the same bytes as clang's build
-  bench/zlib/run.py speed [-n 3] [--corpus FILE] [clang vcc vir gcc]
+  bench/zlib/run.py build [clang vcc vir vir3 gcc] # the library, example, minigzip, zbench
+  bench/zlib/run.py test  [clang vcc vir vir3]    # self-tests, and the same bytes as clang's build
+  bench/zlib/run.py speed [-n 3] [--corpus FILE] [clang vcc vir vir3 gcc]
   bench/zlib/run.py all                       # build, test, speed
 
 Each compiler builds zlib's 15 library files with -O2 into work/zlib/b-NAME
 (no configure: zconf.h works as shipped); clang compiles the test programs
-and links, so only the library differs.  `vcc` is vpp's direct emitter,
-`vir` is vpp with VCC_VIR=bl (the -O2 path through VIR).
+and links, so only the library differs.  `vcc` is vpp's direct emitter (-O1),
+`vir` is vpp at -O2 (through VIR), `vir3` at -O3 (VIR with the loop vectorizer).
 `test`: zlib's own example and infcover, a minigzip round trip checked by
 the system gzip, and zbench's sizes and CRCs equal to the clang build's
 (deflate is deterministic, so a miscompiled matcher shows as other bytes).
@@ -26,7 +26,7 @@ Windows x64 (doc/PLAN-win64.md WIN8): zlib cross-built for x86_64-w64-mingw32
 into build/linux/win64-projects/zlib/b-NAME, everything of a build by one
 toolchain: `clang` is the reference (clang, lld, compiler-rt, clang's
 headers), `vcc` and `vir` are vcc's own (vpp -c with vcc's headers, var,
-vcc's driver linking with vlink and libvccrt.a; VCC_VIR=0 or l), `vccd` is
+vcc's driver linking with vlink and libvccrt.a; -fno-vir or VIR), `vccd` is
 zlib's own ./configure and Makefile with CC="vcc --target=..." (the shim)
 and AR=var against a private vccd, which compiles and links in process.
 vcc's side runs with a PATH that has no compiler, linker or object tool
@@ -64,7 +64,7 @@ def find_gcc():
 
 
 GCC = find_gcc()
-CC = {'clang': (CLANG, {}), 'gcc': (GCC, {}), 'vcc': (VPP, {'VCC_VIR': '0'}), 'vir': (VPP, {'VCC_VIR': 'bl'})}
+CC = {'clang': (CLANG, []), 'gcc': (GCC, []), 'vcc': (VPP, ['-O1']), 'vir': (VPP, ['-O2']), 'vir3': (VPP, ['-O3'])}
 
 
 def sh(cmd, **kw):
@@ -88,16 +88,15 @@ def fetch():
 
 def build(name):
     fetch()
-    cc, env = CC[name]
+    cc, level = CC[name]
     if not cc:
         sys.exit(f'{name}: no compiler (set GCC)')
     b = os.path.join(W, 'b-' + name)
     shutil.rmtree(b, ignore_errors=True)
     os.makedirs(b)
-    env = dict(os.environ, **env)
     t = time.time()
     for f in LIB:
-        p = subprocess.run([cc] + FLAGS + ['-c', os.path.join(SRC, f + '.c'), '-o', f + '.o'], cwd=b, env=env)
+        p = subprocess.run([cc] + FLAGS + level + ['-c', os.path.join(SRC, f + '.c'), '-o', f + '.o'], cwd=b)
         if p.returncode:
             sys.exit(f'{name}: {f}.c does not compile')
     ct = time.time() - t
@@ -208,7 +207,7 @@ def wbuild(name, vccd):
     if name == 'clang':
         cc, env = wp.CLANG_CC, wp.clang_env()
     else:
-        cc, env = wp.VCC_CC, wp.vcc_env(name, vccd)
+        cc, env = wp.vcc_cc(name), wp.vcc_env(name, vccd)
         rc, n, clang_hdrs = wp.no_clang_headers(cc + WFLAGS + ['-I' + SRC, os.path.join(SRC, 'test', 'minigzip.c')], b, env)
         if rc or not n or clang_hdrs:
             bad.append(f'headers: {clang_hdrs or "-H failed"}')
@@ -225,7 +224,7 @@ def wbuild(name, vccd):
         if name == 'clang':
             cmd = wp.CLANG_LINK + WFLAGS + ['-w', '-I' + SRC, src] + lib + ['-o', prog + '.exe']
         else:
-            cmd = wp.VCC_LINK + WFLAGS + ['-v', '-w', '-I' + SRC, src] + lib + ['-o', prog + '.exe', f'-Wl,-Map={prog}.exe.map']
+            cmd = wp.vcc_link(name) + WFLAGS + ['-v', '-w', '-I' + SRC, src] + lib + ['-o', prog + '.exe', f'-Wl,-Map={prog}.exe.map']
         p = subprocess.run(cmd, cwd=b, env=env, capture_output=True, text=True)
         if p.returncode:
             sys.exit(f'{name}: {prog} does not build:\n{p.stderr}')
@@ -240,7 +239,7 @@ def wbuild_configure(b, vccd):
     """zlib's ./configure and make with the vcc shim and var against the private vccd"""
     t = time.time()
     cc = [wp.SHIM, wp.TGT, f'--sysroot={wp.SYSROOT}']
-    env = wp.vcc_env('vcc', vccd, CHOST='x86_64-w64-mingw32', CC=' '.join(cc), CFLAGS='-O2', AR=wp.VAR,
+    env = wp.vcc_env('vcc', vccd, CHOST='x86_64-w64-mingw32', CC=' '.join(cc), CFLAGS='-O2 -fno-vir', AR=wp.VAR,
                      RANLIB=f'{wp.VAR} s', NM=os.path.join(wp.BUILD, 'vnm'))
     with open(os.path.join(b, 'cfg.log'), 'w') as log:
         if subprocess.run([os.path.join(SRC, 'configure'), '--static'], cwd=b, env=env, stdout=log,
@@ -387,7 +386,7 @@ def main():
         i = a.index('-n'); n = int(a[i + 1]); del a[i:i + 2]
     if '--corpus' in a:
         i = a.index('--corpus'); corpus = os.path.abspath(a[i + 1]); del a[i:i + 2]
-    dflt = ['clang', 'vcc', 'vir']
+    dflt = ['clang', 'vcc', 'vir', 'vir3']
     if cmd == 'fetch':
         fetch()
     elif cmd == 'build':

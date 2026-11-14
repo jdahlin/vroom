@@ -925,7 +925,7 @@ sides (its test runtime uses `-nostdinc`).
   first captured program of a new server waited 60 s for them).
 
 **zlib 1.4** (`bench/zlib/run.py --target win64 all`, 27 s): clang, vcc,
-vir (VCC_VIR=l) and `vccd` (zlib's own `./configure --static` and Makefile,
+vir (VIR; `vcc` is -fno-vir) and `vccd` (zlib's own `./configure --static` and Makefile,
 CC = the vcc shim, AR = var, RANLIB = `var s`, against a private vccd that
 compiled 29 files and linked 6 programs itself).  All four: example,
 infcover, minigzip -1/-6/-9 round trips (decompressed by the program and by

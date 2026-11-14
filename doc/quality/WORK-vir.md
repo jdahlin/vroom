@@ -76,15 +76,15 @@ nice -n 10 make -C src -j 3 vcc OUT=$PWD/build/u                     # unity
 nice -n 10 make -C src -j 3 vcc VCC_UNITY= OUT=$PWD/build/p          # file by file
 bench/vbench.py mkbase REV                                           # base from the branch point
 bench/vcc-same.py --base DIR -j 3                   (VCC_BIN=$PWD/build/u)
-VCC_VIR=bl bench/vcc-same.py --base DIR -j 3        # the VIR path, identical too
-VCC_VIR=bl bench/vcc-ctests.py -j 3 --suite vcc --no-cache --bin-dir build/u
+                                                    # c1 is the direct path, c2/s2/d2 the VIR path (-O2): identical too
+bench/vcc-ctests.py -j 3 -O3 --suite vcc --no-cache --bin-dir build/u
 bench/vir-test.py -j 3 --bin-dir build/u ; bench/vir-alloc.py ; bench/vir-exposure.py
 python3 bench/vcc-vir-x86.py --bin-dir build/u      # x86-64's VIR lowering (CI's x86-64 job runs it too)
 ```
 
 `vcc-same.py`'s known 8 differences (mode `e` on files that include
 `src/headers/`, the base tree's path in line markers) are not differences.
-Timing (`bench/vbench.py gate`, with and without `VCC_VIR=bl`) is listed
+Timing (`bench/vbench.py gate`; the kernel's `-O2` is the VIR path) is listed
 under "Proof not run: needs a quiet machine" in the PR body; the integrator
 runs it.
 
@@ -93,11 +93,11 @@ runs it.
 | PR | What | State |
 |---|---|---|
 | #140 | `VCC_REC_STATS=1`, `bench/record-passes.py`: records each arm64 clean-up pass changes, direct path against VIR | merged |
-| #141 | `src/codegen/vir/failure.h` (one X-macro table of reasons), `VCC_VIR_STATS=1`, `bench/vir-failures.py` | merged |
+| #141 | `src/codegen/vir/failure.h` (one X-macro table of reasons), `-fvir-stats`, `bench/vir-failures.py` | merged |
 
 Starting numbers, from the PR bodies (arm64, `-O2`).
 
-**Failures by reason** (#141, `bench/vir-failures.py --top 12`, `VCC_VIR=bl`):
+**Failures by reason** (#141, `bench/vir-failures.py --top 12`, `-O3`):
 
 | Set | Functions | Through VIR | Fell back |
 |---|---|---|---|
@@ -165,7 +165,7 @@ Five sub-steps, one PR each.  Order and parallelism:
 | 2e one lowering driver | `arch/a64/vir/*`, `arch/x64/vir/*`, new `codegen/vir/lower-driver.c` | 2d | 2b, 2c |
 
 **Status (main at ddbb6413):** 2a merged (#167), 2b merged (#175), 2c
-merged (#154) without the debug check `VCC_VIR_CHECK_ANALYSES=1` (it now
+merged (#154) without the debug check `-fvir-passes=analyses` (it now
 comes with step 4.0), 2d merged (#172).  2e done in `src/codegen/vir/lowering-driver.[ch]`
 (branch `quality/vir-lowering-driver`): the table differs from the sketch below in
 these ways, all forced by what the two targets share: `block_enter` (the code after a
@@ -206,7 +206,7 @@ alone with `VCC_UNITY=`.
 | `if-conversion.c` | `vw_exprsame`, `vw_armreuse`, `vw_armempty`, `vw_hoist`, `vw_predix`, `vw_ifconv` | (n) | Q-VIRB-01 |
 | `condition-merge.c` | `vw_cbzlike`, `vw_cchain`, `vw_condmerge` | (o) | Q-VIRB-01 |
 | `vectorize.c` | all of `vec.inc` except `vv_pin` (analysis, construction, `vw_vectorize`) | vec.inc | Q-VIRB-01 |
-| `loop-constants.c` | `vv_pin` and what only it uses | vec.inc 1401-1476 | Q-VIRB-15 (the move only; its gate stays `VCC_VIR_VEC`) |
+| `loop-constants.c` | `vv_pin` and what only it uses | vec.inc 1401-1476 | Q-VIRB-15 (the move only; its gate stays the vectorizer's, now `-fhoist-loop-constants`) |
 | `to-vir.c` | `vw_m`, `vw_fin_blk`, `vw_emit_ins` | (q) | Q-VIRB-01 |
 | `pipeline.c` | `vw_emit` | (r) | Q-VIRB-01 |
 
@@ -218,7 +218,7 @@ be used by `vw_condmerge` too, it goes to `cfg.c` instead.  The trailing
 Proof adds: `bench/vcc-tsvc.py` (151 checksums and the vectorized-loop
 count unchanged); `src/tools/gen-walkprefix.py --check`.
 
-#### 2b. The pass table and `VCC_VIR_PASSES`
+#### 2b. The pass table and `-fvir-passes`
 
 Two commits: (1) the moves out of `vw_emit` into named functions
 (`vw_seal` from the sealing block, `vw_slot_uses` from the dead-slot scan,
@@ -229,7 +229,7 @@ The table (`src/codegen/vir/pass-table.c`, type in `pass-table.h`):
 
 ```c
 typedef struct virbuild_pass {
-	const char *name;          /* stable; VCC_VIR_PASSES and the statistics use it */
+	const char *name;          /* stable; -fvir-passes and the statistics use it */
 	bool (*run)(ecx *e);       /* returns whether it changed anything */
 	uint8_t needs;             /* PIR_ORDER, PIR_PREDS, PIR_DOMS: facts it reads */
 	uint8_t keeps;             /* the facts still valid after it; the others are cleared */
@@ -244,10 +244,10 @@ One row per step of `vw_emit` today, in its order (Q-VIRB 3.1):
 `condition-merge` and `if-conversion` (each `PASS_THEN_TRIVIAL`: the
 `while (vw_trivial(e))` after them), `vectorize` and `loop-constants` (both
 `PASS_VECTOR_GATE`: run only where `vw_vectorize` runs today, so
-`VCC_VIR_VEC=0` still turns both off), `split`, `slot-uses`, `to-vir`,
+`-fno-vectorize -fno-hoist-loop-constants` still turns both off), `split`, `slot-uses`, `to-vir`,
 `canon` (`vir_canon`).  `trivial`'s fixed point is the loop in the driver,
-not inside the pass.  A row is `PASS_REQUIRED` unless `VCC_VIR=blv` (the
-verifier) and `VCC_VIR=bl bench/vcc-ctests.py -j 3 --suite vcc` both pass
+not inside the pass.  A row is `PASS_REQUIRED` unless `-O3 -fvir-verify` (the
+verifier) and `bench/vcc-ctests.py -j 3 -O3 --suite vcc` both pass
 with it disabled; the PR lists which rows qualified.  `pipeline.c`'s
 `vw_emit` becomes a loop over the table that does exactly what it does
 today when the switch is unset.
@@ -256,7 +256,7 @@ The switch, read once per process (`pthread_once` in `pass-table.c`, not
 per function: Q-VIRB-10):
 
 ```
-VCC_VIR_PASSES=ITEM[,ITEM...]
+-fvir-passes=ITEM[,ITEM...]
   -NAME          skip pass NAME (a required one: error)
   only=A+B+...   run exactly these, in table order, plus the required ones (SPEC-vir 16: "overrides the pass list")
   verify         after every pass: the pre-IR checker (before to-vir) or vir_verify (to-vir, canon)
@@ -264,10 +264,9 @@ VCC_VIR_PASSES=ITEM[,ITEM...]
   time           per pass: runs, runs that changed something, instructions (vperf, read only when set)
 ```
 
-An unknown name prints `vcc: VCC_VIR_PASSES: unknown pass NAME (passes:
-...)` to stderr and exits 2 (a test aid, not an option).  `time` and
+An unknown name fails the job with the list of passes (a test aid).  `time` and
 `verify` output goes to stderr, one line per pass per TU, printed by
-`vw_stats_print` (`try.c`, from #141) when `VCC_VIR_STATS=1` is also set:
+`vw_stats_print` (`try.c`, from #141) when `-fvir-stats` is also given:
 
 ```
 vcc vir-pass: pass=NAME runs=N changed=N instructions=N
@@ -289,8 +288,8 @@ entry.  A failure under `verify` reports `vcc vir-verify: pass=NAME
 function=F: MESSAGE` and makes the function fall back (reason
 `verifier_rejected`).
 
-`bench/vir-passes.py` (like `bench/record-passes.py`): runs `vpp -O2 -c`
-with `VCC_VIR=bl VCC_VIR_STATS=1 VCC_VIR_PASSES=time` over the suites, the
+`bench/vir-passes.py` (like `bench/record-passes.py`): runs `vpp -c`
+with `-O3 -fvir-stats -fvir-passes=time` over the suites, the
 kernel sample (`-n`, default 200) and SQLite, and prints per pass: runs,
 changed, instructions (M), share of the VIR compile.  Its line goes into
 AGENTS.md.
@@ -301,9 +300,9 @@ predecessors; dominators), so `vw_doms` and the RPO index run once while
 nothing in between cleared them (today `simplify` and `simplify-again`
 compute both).  Identical output; instructions must go down (integrator).
 
-Proof adds: with `VCC_VIR=bl VCC_VIR_PASSES=verify`, `bench/vcc-ctests.py
--j 3 --suite vcc --no-cache` passes and reports no `vir-verify` line; for
-each optional row, `VCC_VIR=bl VCC_VIR_PASSES=-NAME bench/vcc-ctests.py -j 3
+Proof adds: `bench/vcc-ctests.py -j 3 -O3 --vflags -fvir-passes=verify
+--suite vcc --no-cache` passes and reports no `vir-verify` line; for
+each optional row, `bench/vcc-ctests.py -j 3 -O3 --vflags -fvir-passes=-NAME
 --suite vcc --no-cache` passes; `bench/vir-passes.py -j 3` prints its table
 into the PR body.
 
@@ -323,7 +322,7 @@ Only `src/vir/` and `src/include/vir/`.  A validity byte `valid` in
 `cfg_mark`/`cfg_end` move from the thread context into `vir_fn` (they are
 per function; a function loaded from a unit forgot them, Q-vir-ir 3).  The
 stale "vir_cfg first" notes (`vir.h`, `alloc.h`) go.  A debug check:
-`VCC_VIR_CHECK_ANALYSES=1` recomputes each analysis when it would return
+`-fvir-passes=analyses` recomputes each analysis when it would return
 early and aborts with `VBUG` (or `abort()` before WORK-common step 3) when
 the answer differs.  The verifier (`vir/verify.c`) asks for dominators
 through the same entry and stops rewriting the constant table and `f->tmp`
@@ -332,7 +331,7 @@ is left and noted.
 
 Proof adds: `bench/vir-test.py -j 3` (`dom/`, `canon/`), `bench/vir-alloc.py`
 (expected dumps), `python3 bench/virgen-test.py --bin-dir build/u`; the
-whole proof list again with `VCC_VIR_CHECK_ANALYSES=1 VCC_VIR=bl`;
+whole proof list again with `-O3 -fvir-passes=analyses`;
 instructions must fall (`vbench.py gate`, integrator; Q-passes-03 estimates
 1.3 % of a VIR compile).
 
@@ -415,7 +414,7 @@ typedef struct virbuild_lowering_target {
 	bool edits_at_block_end;	/* x86-64: the edits at pos = first + n run after the last instruction; arm64: none */
 	bool edge_blocks_at_end;	/* x86-64: all edge blocks after the last block (edgelab); arm64: after each block (L->tr) */
 	bool skip_multi_operands;	/* arm64: a VT_MULTI operand has no opr entry; x86-64 rejects such functions */
-	bool rotation_cached;		/* arm64 reads VCC_VIR_ROT once (static); x86-64 per function */
+	bool rotation_cached;		/* arm64 reads the rotation switch once (static); x86-64 per function */
 } virbuild_lowering_target;
 ```
 
@@ -429,10 +428,10 @@ reviews"), and fixing it is that bug's PR, not this step.  `vl_grow` and
 facilities" below (`VVECTOR_NEED`), and the driver keeps calling each
 target's own until then.
 
-Proof: as for 2d (`bench/vcc-same.py` with and without `VCC_VIR=bl`,
-`bench/vcc-vir-x86.py`, CI's x86-64 job), and `VCC_VIR_ROT=0` and
-`VCC_VIR_SHRINK=0` each once with `VCC_VIR=bl bench/vcc-same.py` against the
-base run with the same variable.
+Proof: as for 2d (`bench/vcc-same.py`, its direct and VIR modes,
+`bench/vcc-vir-x86.py`, CI's x86-64 job), and `-fno-rotate-loops` and
+`-fno-shrink-wrap` each once on the VIR path against the base run with the
+same option (`bench/vcc-same.py --modes c2,s3 --vflags F --base-vflags F`).
 
 ### 3. Close the failure reasons, most frequent first
 
@@ -442,22 +441,22 @@ One PR per sub-step.  These change generated code, so `vcc-same.py` cannot
 prove them.  **Proof for every sub-step** is VIR-MIGRATION's "Validation":
 
 ```
-VCC_VIR=bl bench/vcc-ctests.py -j 3 --no-cache                     # the C suites under qemu
-VCC_VIR=bl bench/vcc-ctests.py -j 3 --no-cache --cpu cortex-a53    # without LSE
-VCC_VIR=bl bench/vcc-abi.py ; VCC_VIR=bl bench/vcc-abi.py --host   # cross-compiler calls; natively (Apple)
+bench/vcc-ctests.py -j 3 --no-cache -O3                            # the C suites under qemu
+bench/vcc-ctests.py -j 3 --no-cache -O3 --cpu cortex-a53           # without LSE
+bench/vcc-abi.py ; bench/vcc-abi.py --host                         # cross-compiler calls; natively (Apple); -O2: VIR
 python3 bench/vcc-vir-x86.py --bin-dir build/u                     # x86-64's VIR lowering
-VCC_VIR=bl bench/vccd-kbuild.sh work/build-vir -j 3                # when work/ exists, then:
+bench/vccd-kbuild.sh work/build-vir -j 3                           # when work/ exists (the kernel's -O2: VIR), then:
 python3 bench/boot-test.py --kernel work/build-vir/arch/arm64/boot/Image --timeout 60
-VCC_VIR=bl bench/pg/build.sh vcc                                   # meson test: the same pass set as clang's
-VCC_VIR=bl bench/sqlite/run.py all                                 # testrunner: no vcc-only failures
-bench/zlib/run.py all                                              # its `vir` build: same bytes, self-tests
+bench/pg/build.sh vcc                                              # meson test: the same pass set as clang's
+bench/sqlite/run.py all                                            # testrunner: no vcc-only failures
+bench/zlib/run.py all                                              # its `vir` and `vir3` builds: same bytes, self-tests
 bench/vir-failures.py -j 3 [--keep-g]                              # the reason's count is 0, or what is left is listed
 ```
 
 Plus, needing a quiet machine (the integrator runs them; the PR lists
 them under "Proof not run"): instructions per TU on the kernel sample and
-SQLite before and after (`VCC_VIR=bl bench/vbench.py ab cc emit --base DIR
---per-tu`); the kernel image's size; `speedtest1` and `zbench` time, no
+SQLite before and after (`bench/vbench.py ab cc emit --base DIR
+--per-tu`, at their `-O2`: VIR); the kernel image's size; `speedtest1` and `zbench` time, no
 worse than the direct path.  **Budget:** the first sub-step adds a section
 "Budget used" to `doc/quality/VIR-MIGRATION.md`: a table (PR, kernel
 sample instructions per TU %, SQLite %, running sum %).  Every sub-step
@@ -527,7 +526,7 @@ one after another.
   with `-g` accepted, arm64 has no refusal left that needs no VIR.  It goes
   to the x86-64 twin (stack protector, no SIMD, `interrupt`), in
   `codegen/vir/try.c`.
-- Proof adds `VCC_VIR=bl bench/vcc-dwarf.py -j 3 -O 2` (dwarfdump
+- Proof adds `bench/vcc-dwarf.py -j 3 -O 3` (dwarfdump
   `--verify`, `.text` identical with and without `-g`, rows against clang)
   and `bench/vir-failures.py -j 3 --keep-g` (PostgreSQL with its own `-g`:
   `debug_info` 0 of 2 697).
@@ -566,9 +565,9 @@ one after another.
   calls in functions with asm.
 - The kernel's asm is mostly `ALTERNATIVE` and `.pushsection` templates;
   the 1 686 kernel functions are the measure.
-- Proof adds the `asm*` tests of `test/vcc` (`VCC_VIR=bl
-  bench/vcc-ctests.py -j 3 --suite vcc asm`), and, when `work/` exists, the
-  kernel with `VCC_VIR=bl bench/vccd-kbuild.sh` and a boot.
+- Proof adds the `asm*` tests of `test/vcc` (`bench/vcc-ctests.py -j 3 -O3
+  --suite vcc asm`), and, when `work/` exists, the
+  kernel with `bench/vccd-kbuild.sh` (its `-O2`: VIR) and a boot.
 
 Parallel: two sub-steps run at the same time when their file lists do not
 overlap.  First wave: 3.0, 3.2 (once its dependency is in), 3.4, 3.5, 3.9
@@ -619,13 +618,13 @@ One PR, `src/vir/`, `src/include/vir/`, `src/bin/virtest/`,
 1. rename `virbuild_pass*` in `codegen/vir/` to `virbuild_pass*` (STYLE);
 2. `src/include/vir/pass.h`, `src/vir/pass-list.c` (empty registry),
    `src/vir/compact.c` (`vir_function_compact`, tested from
-   `virtest --selftest`), the `VCC_VIR_CHECK_ANALYSES=1` check 2c left out;
+   `virtest --selftest`), the `-fvir-passes=analyses` check 2c left out;
 3. the builder table's `vir` field, the adapter, 64-bit row masks,
-   `PASS_OFF_BY_DEFAULT` and `+NAME` in `VCC_VIR_PASSES`;
+   `PASS_OFF_BY_DEFAULT` and `+NAME` in `-fvir-passes`;
 4. `virtest` runs registered passes (`; PASSES:`, `--passes`,
    `; CHANGES: yes`, `vir_verify` after each).
 
-Proof: step 2's list (identical output with and without `VCC_VIR=bl`), plus
+Proof: step 2's list (identical output on the direct path and VIR's), plus
 `bench/vir-test.py -j 3` and `--mutate 3000` under ASan.
 
 ### 4.1 The first pass: `redundant-extensions`
@@ -637,10 +636,10 @@ Proof: step 2's list (identical output with and without `VCC_VIR=bl`), plus
 builder's table.  Algorithm, tests, expected counters and the kill criterion
 are in the design's section 6.  It **changes output** at `-O2` with VIR on
 both targets: the proof is the design's section 5 (the C suites with
-`VCC_VIR=bl VCC_VIR_PASSES=verify`, `--cpu cortex-a53`, ABI, x86-64's VIR
+`-O3 --vflags -fvir-passes=verify`, `--cpu cortex-a53`, ABI, x86-64's VIR
 lowering, TSVC, zlib, SQLite, the counters of `bench/record-passes.py` and
-`bench/vir-passes.py`), plus byte identity in the default environment and
-with `VCC_VIR=bl VCC_VIR_PASSES=-redundant-extensions`.  It adds its row to
+`bench/vir-passes.py`), plus byte identity on the direct path and of VIR's
+output with `-fvir-passes=-redundant-extensions`.  It adds its row to
 VIR-MIGRATION.md's "Budget used".
 
 The second pass is `if-conversion` ported to VIR (design section 7); it
@@ -691,8 +690,8 @@ needs its own short design of the editing layer first.
 ## Adoption of common/ facilities
 
 Only after `WORK-common.md` step 5 has merged; one PR per facility, each
-proved like step 2 (identical output, both builds, `vcc-same.py` with and
-without `VCC_VIR=bl`) plus the ASan suite where an allocation changes.
+proved like step 2 (identical output, both builds, `vcc-same.py` on
+the direct path and VIR's) plus the ASan suite where an allocation changes.
 Counts are from main at d602dfa2 (grep), before step 2 moved the code: find
 the sites by the old names.
 

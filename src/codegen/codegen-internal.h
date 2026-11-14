@@ -193,7 +193,22 @@ enum { CODEGEN_NODE_HAS_LABEL = 1, CODEGEN_NODE_HAS_ALLOCA = 2 };				/* per node
 
 typedef struct codegen_call_edge {uint32_t callee,call;} codegen_call_edge;
 
+/* Tarjan's numbering, kept across the searches of VIR's inlining sizes (prepass.c) */
+typedef struct codegen_inline_search_state {
+	uint32_t *index, *low, *stack, *calls, *next, count;
+	uint8_t *on_stack;
+} codegen_inline_search_state;
+
 #define CODEGEN_RECORD_PASS_MAX 24
+
+/* -fvir-passes (codegen/vir/pass-table.c reads it, once per TU) */
+typedef struct virbuild_pass_switch {
+	uint64_t skip;		/* bit per row: left out */
+	uint64_t verify;	/* bit per row: the check runs after it */
+	bool time;		/* per pass: runs, changed, instructions (with -fvir-stats) */
+	bool analyses;		/* a VIR pass's `keeps` is checked against a fresh computation (vir_pass_run) */
+	bool active;		/* skip, verify or time: virbuild_function_emit takes the instrumented path */
+} virbuild_pass_switch;
 
 typedef struct codegen_unit {
 	cc *compile_context;
@@ -208,11 +223,14 @@ typedef struct codegen_unit {
 	uint8_t *inline_parameter_reads; /* parameter references outside a direct (void)param discard */
 	uint8_t *once;			/* VIR lowering on: per function, bit 0 when its one reference is a direct call (codegen_function_once_flags), bit 1 when it calls setjmp (prepass); else NULL */
 	/* VIR lowering on (with once): the direct call graph the prepass records, per
-	   function its size with the callees it inlines (codegen_function_inline_sizes) and its recursion group */
-	codegen_call_edge *call_edges;
-	uint32_t call_edge_count, call_edge_capacity, *call_edge_offsets, *call_edge_counts, *recursion_groups;
+	   function its size with the callees it inlines and its recursion group, computed
+	   on first use (codegen_inline_size, codegen_recursion_group) */
+	codegen_call_edge *call_edges;		/* a reservation: appended under call_edge_mutex, never moved */
+	uint32_t call_edge_count, *call_edge_offsets, *call_edge_counts, *recursion_groups;
 	uint16_t *inline_sizes;
-	bool call_graph_recording;			/* the prepass records calls (before the workers start) */
+	_Atomic uint8_t *inline_sized;		/* per function: inline_sizes and recursion_groups are final */
+	pthread_mutex_t call_edge_mutex, inline_size_mutex;
+	codegen_inline_search_state inline_search;	/* under inline_size_mutex */
 	uint16_t *local_use_weights;			/* per local: uses weighted by loop depth (prepass) */
 	uint8_t *local_needs_memory;		/* per local: needs memory (address taken, asm operand, {} init) */
 	uint32_t *function_local_span;		/* per function: [2s] lowest, [2s+1] highest local sym seen */
@@ -242,9 +260,15 @@ typedef struct codegen_unit {
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in a64_function_finish */
 	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
-	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
+	/* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
 	bool vir_statistics;
-	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vbuilt: built but not lowered (VCC_VIR without l) */
+	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vir_built: built but not lowered (-fno-vir-lower) */
+	/* -fvir-stats: instructions spent per outcome (port/performance-counters.h): the build and
+	   the lowering of lowered functions, the build of those that failed in it, and the build
+	   plus lowering of those the lowering refused */
+	_Atomic uint64_t vir_cost_build_ok, vir_cost_lower_ok, vir_cost_build_failed, vir_cost_lower_failed;
+	virbuild_pass_switch vir_pass_switch;	/* -fvir-passes */
+	char *vir_function_list;		/* -fvir-functions: "\nNAME\nNAME\n", or NULL: every function */
 	struct {
 		_Atomic uint32_t count;
 		uint32_t sym;		/* the first function that failed so (under emu) */
@@ -988,9 +1012,11 @@ VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT]
 #else
 extern const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
 #endif
-VPRIV void virbuild_statistics_print(codegen_unit *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
-VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
-VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void virbuild_statistics_print(codegen_unit *E);	/* -fvir-stats: one line of totals, one per reason (stderr) */
+VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s);	/* codegen/vir/: s through VIR (-O2: cc_options.optimize.vir); false: emit it as before */
+VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (-O2, and not -fno-vir or -fno-vir-lower) */
+VPRIV void virbuild_function_list_read(codegen_unit *E, const char *path);	/* -fvir-functions=FILE into E->vir_function_list */
+VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *items);	/* -fvir-passes=ITEMS (NULL: none) */
 VPRIV void virbuild_walk_context_free(codegen_context *e);
 VPRIV void wasm_data_ref(codegen_context *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr);
@@ -1006,12 +1032,15 @@ VPRIV uint8_t *codegen_function_once_flags(cc *c);
 #define WALK_INLINE_ONCE_MAX 4000 /* under VIR: a static function with one call */
 #endif
 #ifndef WALK_INLINE_VIR_MAX
-#define WALK_INLINE_VIR_MAX 150	/* under VIR: AST nodes of a callee with what it inlines (codegen_function_inline_sizes) */
+#define WALK_INLINE_VIR_MAX 150	/* under VIR: AST nodes of a callee with what it inlines (codegen_inline_size) */
 #endif
 #ifndef WALK_INLINE_CONSTANT_FACTOR
 #define WALK_INLINE_CONSTANT_FACTOR 4
 #endif
-VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
+VPRIV void codegen_inline_sizes_init(codegen_unit *E, cc *c, void *edge_space);	/* before the workers: VIR's inlining sizes, on first use */
+VPRIV void codegen_inline_sizes_free(codegen_unit *E);
+VPRIV uint32_t codegen_inline_size(codegen_unit *E, cc *c, uint32_t s);	/* s's AST nodes with the callees it inlines */
+VPRIV uint32_t codegen_recursion_group(codegen_unit *E, cc *c, uint32_t s);	/* equal for the functions of one recursion group */
 VPRIV bool codegen_inline_has_constant_argument(const codegen_unit *E, cc *c, uint32_t callee, uint32_t call);
 VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a);
 VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */

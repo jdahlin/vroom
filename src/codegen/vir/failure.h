@@ -3,8 +3,8 @@
  *
  * Every bail-out of the builder (codegen/vir/, not a64.c), of arm64's lowering (a64.c), of
  * x86-64's (arch/x64/codegen/vir.c) and of the driver (build-attempt.c) names one of
- * these.  The message is what VCC_VIR=s prints; the name is what the
- * statistic VCC_VIR_STATS=1 counts (build-attempt.c, tu.c).  Add a reason here and use
+ * these.  The message is what -fvir-report prints; the name is what the
+ * statistic -fvir-stats counts (build-attempt.c, tu.c).  Add a reason here and use
  * VIRBUILD_FAILURE(name) at the bail-out; never test the message text.
  */
 #ifndef VCC_CODEGEN_VIR_FAILURE_H
@@ -58,7 +58,6 @@
 	X(build_failed, "VIR: the function could not be built") \
 	X(emitter_error, "VIR: the walker reported an error") \
 	X(verifier_rejected, "VIR: the verifier rejected the function") \
-	X(debug_info, "VIR lowering: -g") \
 	X(loop_analysis, "VIR: loops") \
 	X(allocation_failed, "VIR: allocation failed") \
 	X(allocation_check_failed, "VIR: the allocation check failed") \
@@ -91,7 +90,7 @@
 	X(over_aligned_slot, "VIR lowering: an over-aligned slot") \
 	X(large_frame_scratch, "VIR lowering: x17 across a large frame") \
 	X(unsupported_instruction, "VIR lowering: an instruction it does not lower") \
-	X(x64_unsupported_target_option, "VIR x86-64: -g, stack protector or no SIMD") \
+	X(x64_unsupported_target_option, "VIR x86-64: stack protector or no SIMD") \
 	X(x64_interrupt_function, "VIR x86-64: an interrupt function") \
 	X(x64_constant_kind, "VIR x86-64: a constant of a kind it cannot place") \
 	X(x64_constant_range, "VIR x86-64: a symbol or slot address beyond the 32-bit range") \

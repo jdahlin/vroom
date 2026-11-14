@@ -115,7 +115,7 @@ server_SRC = $(filter-out server/diagnostics-store.c server/capabilities.c,$(wil
 SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
-# compiler for codegen/vir/ (VCC_VIR)
+# compiler for codegen/vir/ (VIR, -O2 and up)
 vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c vir/compact.c vir/pass-list.c $(wildcard vir/pass/*.c)
 VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c platform/win/coff.c platform/win/unwind.c
@@ -271,13 +271,12 @@ SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
 SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
 endif
-# Optimize the compiler executable during the native x86 bootstrap. An
-# explicit VCC_VIR setting still selects the backend for a comparison build.
-SELF_ENV = $(if $(and $(filter Linux-x86_64,$(HOST_OS)-$(HOST_ARCH)),$(filter undefined,$(origin VCC_VIR))),VCC_VIR=bl)
+# The stage compiles at VCC_OPT (-O3: VIR with the vectorizer, doc/OPTIMIZATION.md) on
+# every host; VCC_OPT=-O1 builds a comparison stage with the direct emitter.
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_ENV) $(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
