@@ -154,6 +154,19 @@ static bool cxx_entity_is_template(const cxx_entity *e)
 		     e->kind == CXX_ENTITY_VARIABLE_TEMPLATE || e->kind == CXX_ENTITY_CONCEPT);
 }
 
+/* t without the qualifiers in `drop`: an array's are its elements' ([basic.type.qualifier]: remove_cv<const char[2]>
+   is char[2]) */
+static qty cxx_type_drop_quals(cxx *c, qty t, unsigned drop)
+{
+	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY) {
+		const ctype *x = AST_TYPE(c->ast, t);
+		qty e = cxx_type_drop_quals(c, x->base, drop);
+
+		return e == x->base ? QT(QI(t), QQ(t) & ~drop) : QT(QI(cc_type_array(c->ast, e, x->n, x->flags & TF_INCOMPLETE)), QQ(t) & ~drop);
+	}
+	return QT(QI(t), QQ(t) & ~drop);
+}
+
 /* clang's type transform builtins (__remove_reference_t(T), ...): CXX_TY_UNKNOWN for those not done */
 static qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t)
 {
@@ -165,13 +178,13 @@ static qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t)
 	if (IS("__remove_reference_t"))
 		return base;
 	if (IS("__remove_cvref"))
-		return QUNQ(base);
+		return cxx_type_drop_quals(c, base, Q_CONST | Q_VOLATILE | Q_RESTRICT);
 	if (IS("__remove_cv"))
-		return ref ? t : QUNQ(t);
+		return ref ? t : cxx_type_drop_quals(c, t, Q_CONST | Q_VOLATILE | Q_RESTRICT);
 	if (IS("__remove_const"))
-		return ref ? t : QT(QI(t), QQ(t) & ~Q_CONST);
+		return ref ? t : cxx_type_drop_quals(c, t, Q_CONST);
 	if (IS("__remove_volatile"))
-		return ref ? t : QT(QI(t), QQ(t) & ~Q_VOLATILE);
+		return ref ? t : cxx_type_drop_quals(c, t, Q_VOLATILE);
 	if (IS("__add_lvalue_reference"))
 		return x->kind == TY_VOID ? t : cxx_type_reference(c, base, false);
 	if (IS("__add_rvalue_reference"))
@@ -1159,8 +1172,10 @@ static uint32_t cxx_operator_name_parse(cxx *c)
 		return id;
 	}
 	if (k == CXX_TOKEN_ARROW_STAR || k == CXX_TOKEN_SPACESHIP) {
+		uint32_t id = cxx_operator_id_at(c, 1);	/* operator<=>, operator->*: one token, their names */
+
 		cxx_advance(c);
-		return 1;
+		return id;
 	}
 	/* conversion: operator type-specifiers ptr-operators */
 	cxx_scope *conv_class = NULL;

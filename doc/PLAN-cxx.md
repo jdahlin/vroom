@@ -1579,3 +1579,22 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   D2 där), D1 annars.
 - Run 66/66, parse 38/38, mangle 36.  Fork: 69/70, 6,7 s CPU (36x mot clang -O2:s 243 s); vcc definierar
   20 918 funktioner (förut 3 528) av clang -O0:s 145 428, 16 av 118 testkroppar.
+
+### Status 70 (2026-11-14): <=>, nästlade listor, felkod i tomma medlemmar och listargument
+
+- `operator<=>` deklareras och anropas under sitt namn (förut namnlöst), och `a < b` (<=, >, >=)
+  skrivs om till `(a <=> b) @ 0` eller omvänt (C++20); `std::string() < "a"` m.fl. typas nu.
+- `operator()`/`operator[]` anropade med namn i en medlem (`return operator[](key_type(key))`).
+- `remove_cv`/`remove_cvref` tar bort kvalifikatorer från en arrays element (`const char[2]` → `char[2]`).
+- Ett heltal som inte är konstanten 0 är ingen nollpekarkonstant: `string::append(char)` matchar inte
+  längre `append(const char *)`; `__is_constructible(T, nullptr_t)` beräknas.
+- En parameter av klasstyp konstrueras från en skalär/array via en konverterande konstruktor
+  (`j["b"] = 3`).
+- initializer_list: element som själva är klammerlistor (`{{"a", 1}, {"b", {true, nullptr}}}`)
+  konstrueras från sina argument; elementtyperna kopieras innan konstruktorns kropp instansieras.
+- Felkod rättad: kopiering av en tom klass skrev en byte över en annan medlem ([[no_unique_address]]
+  `__value_comp_` över `std::__tree::__size_`: map-iteration kraschade); en klammerlista som argument
+  gav sitt sista uttrycks nod (`json({...})` blev 0).  En trivial defaulted kopierings-/flyttkonstruktor
+  kopierar byte (som clang, som inte definierar den).
+- Test: spaceship, empty-member-copy, nested-lists; run 69/69.  Fork 69/70, 6,3 s CPU (38,5x),
+  20 916 funktioner.

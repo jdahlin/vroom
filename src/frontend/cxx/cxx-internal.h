@@ -398,7 +398,7 @@ typedef struct cxx {
 	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
 	qty gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
-	char **gen_names;		/* the mangled names of the functions defined so far (a second definition by the same name gets no code) */
+	char **gen_names;		/* the mangled names of the functions defined so far, a hash set (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
 	/* a constructor's initializers so far: the members (names) and bases (types) they construct */
 	uint32_t gen_init_names[32], ngen_init_names;
@@ -432,6 +432,7 @@ typedef struct cxx {
 	struct cxx_entity *ctor_ilist;	/* ... for a braced list: its std::initializer_list constructor (NULL: none) */
 	qty ctor_ilist_types[16];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
 	uint8_t ctor_ilist_lval[16];
+	uint32_t ctor_ilist_brace[16];	/* ... an element that is a braced list: its '{' (carg_brace) */
 	uint32_t ctor_ilist_n;
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -446,6 +447,8 @@ typedef struct cxx {
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
+	uint32_t carg_brace[16];	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
 	uint8_t new_array;
 	uint32_t gen_pack_from, gen_pack_n;	/* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */
@@ -620,6 +623,7 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool has_init);
 VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
+VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);

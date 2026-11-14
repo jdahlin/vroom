@@ -438,6 +438,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	uint32_t viable = 0;
 	bool skip_explicit = c->skip_explicit, no_literal = c->no_literal;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
+	/* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
+	bool own_args = args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs && (args == c->cargs || !memcmp(args, c->cargs, nargs * sizeof *args));
 	bool have_lval = lval != NULL;
 
 	c->none_viable = 0, c->call_obj = 0;
@@ -593,9 +595,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		if (k->ranked) {
 			bool fits = true;
 
-			c->rank_no_literal = no_literal;
 			for (uint32_t a = 0; a < nargs && fits; a++) {
-				/* (an argument for the ...: any) */
+				/* (an argument that is no integer constant 0 is no null pointer constant: the call's own
+				   arguments say which are; an argument for the ...: any) */
+				c->rank_no_literal = no_literal || (own_args && a < 16 && !((c->carg_zero >> a) & 1));
 				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 5;	/* (...: last) */
 				k->pt[a] = a < sig->n ? c->ast->params[sig->aux + a] : CXX_TY_UNKNOWN;
 				fits = k->rank[a] < 6;
@@ -1059,11 +1062,20 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 		}
 		if (c->ctor_ilist) {
 			cxx_entity *il = c->ctor_ilist;
+			uint32_t br[16];
 
+			qty ty[16];
+			uint8_t lv[16];
+			uint32_t n = nargs < 16 ? nargs : 16;
+
+			/* (the list just parsed, before the body's instantiation reuses c->cargs, which args may be) */
+			memcpy(br, c->carg_brace, sizeof br);
+			for (uint32_t i = 0; i < n; i++)
+				ty[i] = args ? args[i] : CXX_TY_UNKNOWN, lv[i] = lval ? lval[i] : 0;
 			cxx_member_body_use(c, il);	/* (its body constructs things of its own) */
-			c->ctor_ilist = il, c->ctor_ilist_n = nargs < 16 ? nargs : 16;
-			for (uint32_t i = 0; i < c->ctor_ilist_n; i++)
-				c->ctor_ilist_types[i] = args ? args[i] : CXX_TY_UNKNOWN, c->ctor_ilist_lval[i] = lval ? lval[i] : 0;
+			memcpy(c->ctor_ilist_brace, br, sizeof br);
+			memcpy(c->ctor_ilist_types, ty, n * sizeof *ty), memcpy(c->ctor_ilist_lval, lv, n);
+			c->ctor_ilist = il, c->ctor_ilist_n = n;
 			set = NULL;
 		}
 	}
@@ -1750,7 +1762,8 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 	if (n == 1) {
 		if (args[0] == CXX_TY_UNKNOWN)
 			return -1;
-		if (cc_type_is_record(c->ast, args[0]) && AST_TYPE_KIND(c->ast, args[0]) != TY_PTR) {
+		if (cc_type_is_record(c->ast, args[0]) && AST_TYPE_KIND(c->ast, args[0]) != TY_PTR &&
+		    !(c->nullptr_ty && QUNQ(args[0]) == c->nullptr_ty)) {	/* (nullptr_t: a struct here, no class: as a scalar) */
 			from_cls = cxx_type_class_scope(c, QUNQ(args[0]));
 			same = QUNQ(args[0]) == QUNQ(to);
 			if (!same && from_cls) {

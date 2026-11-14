@@ -208,11 +208,15 @@ static void cxx_id_expression_parse(cxx *c)
 			uint32_t at = c->pos, on;
 
 			c->pos++;
-			if (cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH && !cxx_is(c, LEX_TOKEN_LEFT_PAREN) &&
-			    !cxx_is(c, LEX_TOKEN_LEFT_SQUARE)) {
+			if ((cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH && !cxx_is(c, LEX_TOKEN_LEFT_PAREN) &&
+			     !cxx_is(c, LEX_TOKEN_LEFT_SQUARE)) || cxx_is(c, CXX_TOKEN_SPACESHIP) || cxx_is(c, CXX_TOKEN_ARROW_STAR)) {
 				cxx_operator_at(c, &on);
 				oid = cxx_operator_id_at(c, on);
-			} else if (cxx_is_kw(c, CXX_KW_new) || cxx_is_kw(c, CXX_KW_delete)) {
+			} else if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN)
+				oid = vintern_cstr("operator()");	/* (in a member function: this->operator()(...)) */
+			else if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE)
+				oid = vintern_cstr("operator[]");
+			else if (cxx_is_kw(c, CXX_KW_new) || cxx_is_kw(c, CXX_KW_delete)) {
 				bool arr = cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE && cxx_peek(c, 2)->kind == LEX_TOKEN_RIGHT_SQUARE;
 
 				oid = vintern_cstr(cxx_is_kw(c, CXX_KW_new) ? (arr ? "operator new[]" : "operator new") :
@@ -421,7 +425,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	qty args[16];
 	uint8_t lval[16];
 	uint32_t n = 0;
-	uint32_t nodes[16] = { 0 };
+	uint32_t nodes[16] = { 0 }, braces[16] = { 0 }, zero = 0;
 	bool unknown = false, first_const = false;
 	int64_t first_value = 0;
 
@@ -434,7 +438,15 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 
 		memcpy(saved, c->packs_seen, sizeof saved);
 		c->npacks_seen = 0, c->packs_overflow = 0;
+		/* a braced list as an argument: typed here, no code (an initializer_list's element built from it
+		   re-parses it there: cxx_gen_initializer_list) */
+		bool brace = cxx_is(c, LEX_TOKEN_LEFT_BRACE);	/* (f({...}) too: its node is no expression's) */
+
+		c->unevaluated += brace;
 		cxx_initializer_parse(c);
+		c->unevaluated -= brace;
+		if (brace)
+			c->enode = 0;
 		/* f(std::forward<Args>(args)...) in an instance: the argument once per element of its packs */
 		if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->npacks_seen && !c->packs_overflow && c->instantiating && !c->tentative &&
 		    !c->template_depth) {
@@ -491,7 +503,9 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
 		if (n < 16)
-			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode;
+			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode, braces[n] = brace ? start : 0,
+			zero |= (uint32_t)(c->econst && !c->evalue && !brace && c->etype != CXX_TY_UNKNOWN &&
+					   AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128) << n;
 		if (!n)
 			first_const = c->econst, first_value = c->evalue;
 		n++;
@@ -505,6 +519,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 		unknown = true;
 	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
 	memcpy(c->carg_nodes, nodes, sizeof nodes);
+	memcpy(c->carg_brace, braces, sizeof braces);
+	c->carg_zero = zero;
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
 		c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
@@ -1765,7 +1781,8 @@ static void cxx_postfix_expression_parse1(cxx *c)
 							oid = vintern_cstr("operator()");
 						else if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE)
 							oid = vintern_cstr("operator[]");
-						else if (cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH) {
+						else if ((cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH) || cxx_is(c, CXX_TOKEN_SPACESHIP) ||
+							 cxx_is(c, CXX_TOKEN_ARROW_STAR)) {
 							cxx_operator_at(c, &on);
 							oid = cxx_operator_id_at(c, on);
 						}
@@ -2187,6 +2204,25 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 				if (cxx_operator_call_type(c, vintern_cstr("operator=="), l, &ra, 1) && c->call_resolved)
 					rewritten = true, found = true;
 			}
+			/* no operator< (<=, >, >=) that fits, a class operand: (a <=> b) @ 0, or 0 @ (b <=> a) (C++20) */
+			int spaceship = 0;	/* 1: a <=> b, 2: b <=> a */
+			cxx_entity *ss_pick = NULL;
+
+			if (!c->tentative && (!found || !c->call_resolved) && !rewritten && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
+			    (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL) &&
+			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {
+				qty ra = rt, la = l;
+				uint8_t lvl = ll, lvr = c->op_lv[1];
+
+				c->op_lv_set = 1, c->op_lv[0] = lvl, c->op_lv[1] = lvr;
+				if (cxx_operator_call_type(c, vintern_cstr("operator<=>"), l, &ra, 1) && c->call_resolved && c->call_picked)
+					spaceship = 1, ss_pick = c->call_picked, found = true;
+				else {
+					c->op_lv_set = 1, c->op_lv[0] = lvr, c->op_lv[1] = lvl;
+					if (cxx_operator_call_type(c, vintern_cstr("operator<=>"), rt, &la, 1) && c->call_resolved && c->call_picked)
+						spaceship = 2, ss_pick = c->call_picked, found = true;
+				}
+			}
 			if (!c->tentative && !found)
 				cxx_binary_type(c, op, l, rt), built_in = true;
 			c->op_lv_set = 0;
@@ -2200,6 +2236,16 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 					if (c->enode)
 						cxx_gen_unary(c, LEX_TOKEN_EXCLAMATION, c->enode, oploc);
 				}
+			} else if (spaceship) {
+				cxx_et(c, cc_type_basic(TY_BOOL), false);
+				c->call_resolved = 1, c->call_picked = ss_pick;
+				if (spaceship == 1)
+					cxx_gen_operator_call(c, ln, &rn, 1, oploc);
+				else
+					cxx_gen_operator_call(c, rn, &ln, 1, oploc);
+				cxx_gen_ordering_test(c, c->enode, spaceship == 1 ? op : op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER :
+						      op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER_EQUAL :
+						      LEX_TOKEN_LESS_EQUAL, oploc);	/* (the type set above: setting it clears the node) */
 			} else if (built_in && op == CXX_TOKEN_SPACESHIP)
 				cxx_gen_spaceship(c, ln, rn, c->etype, oploc);
 			else if (built_in)
