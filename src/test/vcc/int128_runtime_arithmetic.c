@@ -26,5 +26,13 @@ int main(void)
 	if (ufloat(high) != 0x1p127f || udouble(high) != 0x1p127) return 4;
 	if (floats(-0x1p98f) != negative || doubles(-0x1p98) != negative) return 5;
 	if (floatu(0x1p127f) != high || doubleu(0x1p127) != high) return 6;
+	/* Halfway cases must round once to the destination precision. */
+	if (ufloat(((U)1 << 24) + 1) != 0x1p24f ||
+	    ufloat(((U)1 << 24) + 3) != 0x1.000004p24f) return 7;
+	if (udouble(((U)1 << 53) + 1) != 0x1p53 ||
+	    udouble(((U)1 << 53) + 3) != 0x1.0000000000002p53) return 8;
+	/* Low limbs can break a tie even when the high limb is an exact tie. */
+	if (ufloat(((U)1 << 100) + ((U)1 << 76) + 1) != 0x1.000002p100f) return 9;
+	if (sfloat((S)((U)1 << 127)) != -0x1p127f) return 10;
 	return 0;
 }

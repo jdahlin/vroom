@@ -461,14 +461,78 @@ RT_COMPLEX_DIV(long double, __divxc3, rt_cdivl, 16384, 64,
                __builtin_fabsl, __builtin_copysignl, __builtin_infl())
 #endif
 #undef RT_COMPLEX_DIV
-__int128 __fixsfti(float f)
+/* Work on integer IEEE encodings: casts here would call these same helpers.
+ * Round to nearest, ties to even, directly from the full 128-bit integer. */
+static uint64_t rt_ti_ieee(unsigned __int128 m, int sign, int p, int bias)
 {
-	int neg = f < 0;
-	unsigned __int128 m = 0;
-	float a = neg ? -f : f, p = 0x1p127f;	/* no __floatuntisf here */
-	for (int i = 127; i >= 0; i--, p *= 0.5f)
-		if (a >= p) { a -= p; m |= (unsigned __int128)1 << i; }
-	return neg ? -(__int128)m : (__int128)m;
+	if (!m) return 0;
+	int e = 0;
+	for (unsigned __int128 n = m; n >>= 1;) e++;
+	int shift = e - p;
+	uint64_t q;
+	if (shift > 0) {
+		q = m >> shift;
+		unsigned __int128 rem = m & (((unsigned __int128)1 << shift) - 1);
+		unsigned __int128 half = (unsigned __int128)1 << (shift - 1);
+		q += rem > half || (rem == half && (q & 1));
+	} else q = (uint64_t)m << -shift;
+	return ((uint64_t)sign << (p + (bias == 127 ? 8 : 11))) +
+	       ((uint64_t)(e + bias - 1) << p) + q;
+}
+static unsigned __int128 rt_ieee_ti(uint64_t bits, int p, int bias)
+{
+	int e = (int)((bits >> p) & (bias * 2 + 1)) - bias;
+	if (e < 0) return 0;
+	if (e >= 128) return ~(unsigned __int128)0;
+	unsigned __int128 m = (bits & ((UINT64_C(1) << p) - 1)) | (UINT64_C(1) << p);
+	return e >= p ? m << (e - p) : m >> (p - e);
+}
+float __floattisf(__int128 a)
+{
+	union { float f; uint32_t u; } r = { .u = rt_ti_ieee(a < 0 ? -(unsigned __int128)a : (unsigned __int128)a, a < 0, 23, 127) };
+	return r.f;
+}
+__int128 __fixsfti(float a)
+{
+	union { float f; uint32_t u; } r = { .f = a };
+	unsigned __int128 m = rt_ieee_ti(r.u, 23, 127);
+	return (__int128)(a < 0 ? -m : m);
+}
+
+float __floatuntisf(unsigned __int128 a)
+{
+	union { float f; uint32_t u; } r = { .u = rt_ti_ieee(a, 0, 23, 127) };
+	return r.f;
+}
+unsigned __int128 __fixunssfti(float a)
+{
+	union { float f; uint32_t u; } r = { .f = a };
+	unsigned __int128 m = rt_ieee_ti(r.u, 23, 127);
+	return a < 0 ? 0 : m;
+}
+
+double __floattidf(__int128 a)
+{
+	union { double f; uint64_t u; } r = { .u = rt_ti_ieee(a < 0 ? -(unsigned __int128)a : (unsigned __int128)a, a < 0, 52, 1023) };
+	return r.f;
+}
+__int128 __fixdfti(double a)
+{
+	union { double f; uint64_t u; } r = { .f = a };
+	unsigned __int128 m = rt_ieee_ti(r.u, 52, 1023);
+	return (__int128)(a < 0 ? -m : m);
+}
+
+double __floatuntidf(unsigned __int128 a)
+{
+	union { double f; uint64_t u; } r = { .u = rt_ti_ieee(a, 0, 52, 1023) };
+	return r.f;
+}
+unsigned __int128 __fixunsdfti(double a)
+{
+	union { double f; uint64_t u; } r = { .f = a };
+	unsigned __int128 m = rt_ieee_ti(r.u, 52, 1023);
+	return a < 0 ? 0 : m;
 }
 
 /* calls clang leaves for GNU builtins it lacks */
