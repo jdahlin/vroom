@@ -200,6 +200,43 @@ def sh(cmd, timeout=60, **kw):
 
 OBJDUMP = hostenv.llvm('llvm-objdump')
 READOBJ = hostenv.llvm('llvm-readobj')
+DWARFDUMP = hostenv.llvm('llvm-dwarfdump')
+DEBUG = any(f.startswith('-g') and f != '-g0' for f in BASE)	# VCC_CFLAGS=-g...: the linked image's DWARF is verified
+
+
+NM = hostenv.llvm('llvm-nm')
+SYMBOLIZER = hostenv.llvm('llvm-symbolizer')
+
+
+def dwarf_bad(exe, obj=None, source=None):
+    """with -g: llvm-dwarfdump --verify of the linked image, and llvm-symbolizer at each function
+    the test's object defines gives that function and a line of the test's source; '' when good (WIN6)"""
+    if not DEBUG:
+        return ''
+    p = subprocess.run([DWARFDUMP, '--verify', exe], capture_output=True, text=True)
+    if p.returncode or 'No errors.' not in p.stdout:
+        return (p.stdout + p.stderr).strip().splitlines()[-1][:150] if (p.stdout + p.stderr).strip() else f'exit {p.returncode}'
+    if not subprocess.run([DWARFDUMP, '--debug-line', exe], capture_output=True, text=True).stdout.count('end_sequence'):
+        return 'no line table in the image'
+    if not obj:
+        return ''
+    fns = {l.split()[-1] for l in subprocess.run([NM, '--defined-only', obj], capture_output=True, text=True).stdout.splitlines()
+           if len(l.split()) == 3 and l.split()[1] in 'Tt'}
+    at = defaultdict(list)	# name -> addresses in the image (a static name can be in the runtime too)
+    for l in subprocess.run([NM, '--defined-only', exe], capture_output=True, text=True).stdout.splitlines():
+        if len(l.split()) == 3:
+            at[l.split()[2]].append(l.split()[0])
+    src = open(source, errors='replace').read()	# (a function defined by top-level asm has no rows)
+    names = sorted(n for n in fns if len(at.get(n, ())) == 1 and not re.search(rf'(^|[\s"]|\\n){re.escape(n)}:', src))
+    if not names:
+        return ''
+    out = subprocess.run([SYMBOLIZER, f'--obj={exe}'] + ['0x' + at[n][0] for n in names], capture_output=True, text=True).stdout
+    for n, res in zip(names, out.strip().split('\n\n')):
+        r = res.split('\n')
+        same = len(r) >= 1 and (r[0] == n or at[n][0] in at.get(r[0], ()))	# (an alias names the same address)
+        if len(r) < 2 or not same or r[1].startswith('??') or r[1].rsplit(':', 2)[1] == '0':
+            return f'llvm-symbolizer at {n}: {" ".join(r)[:120]}'
+    return ''
 _X86REG = {'RAX': 'rax', 'RCX': 'rcx', 'RDX': 'rdx', 'RBX': 'rbx', 'RSP': 'rsp', 'RBP': 'rbp', 'RSI': 'rsi', 'RDI': 'rdi',
            **{f'R{k}': f'r{k}' for k in range(8, 16)}, **{f'XMM{k}': f'xmm{k}' for k in range(16)}}
 
@@ -370,10 +407,10 @@ def _file_hash(f):
         return '?'
 
 
-def own_link(objs, exe):
+def own_link(objs, exe, flags=()):
     """--own: vcc's driver links (vlink, libvccrt.a, the CRT); (rc, stderr, foreign inputs)"""
     mp = exe + '.map'
-    rc, _, err = sh([VPP, TGT, f'--sysroot={MINGW_SYSROOT}', '-static', '-v'] + objs + [RTO_OWN, '-o', exe, f'-Wl,-Map={mp}'],
+    rc, _, err = sh([VPP, TGT, f'--sysroot={MINGW_SYSROOT}', '-static', '-v'] + link_flags(flags) + objs + [RTO_OWN, '-o', exe, f'-Wl,-Map={mp}'],
                     timeout=60, env=dict(own_env(), SOURCE_DATE_EPOCH='1700000000'))
     err = err.decode(errors='replace')
     bad = []
@@ -398,8 +435,17 @@ def own_link(objs, exe):
     return rc, err, sorted(set(bad))
 
 
-def link(objs, exe):
-    rc, _, err = sh(LINK + objs + [RTO, '-o', exe], timeout=60)
+# the test's vcc-flags that its link needs too (the driver's link line: clang's and vcc's)
+LINK_FLAGS = ('-municode', '-mwindows', '-mconsole', '-mthreads', '-fstack-protector', '-fstack-protector-strong',
+              '-fstack-protector-all')
+
+
+def link_flags(flags):
+    return [f for f in flags if f in LINK_FLAGS]
+
+
+def link(objs, exe, flags=()):
+    rc, _, err = sh(LINK + link_flags(flags) + objs + [RTO, '-o', exe], timeout=60)
     return rc, err.decode(errors='replace')
 
 
@@ -491,7 +537,7 @@ def reference(suite, name, path, flags, wd):
     if rc:
         r['skip'] = 'clang-rejects'; r['why'] = ct.first_err(err.decode(errors='replace'))
     else:
-        rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.exe')
+        rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.exe', flags)
         failure = ct.oracle_error(rc, err, 'link', 60)
         if failure:
             return dict(r, **failure)
@@ -572,7 +618,7 @@ def one(t):
             os.makedirs(wd, exist_ok=True)
             rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=cwd)
             if not rc:
-                rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.exe')
+                rc, err = link([f'{wd}/ref.o'], f'{wd}/ref.exe', flags)
             if rc:
                 return t, 'error', 'export', ct.first_err(err if isinstance(err, str) else err.decode(errors='replace'))
             export(t, f'{wd}/ref.exe', ref)
@@ -600,20 +646,24 @@ def one(t):
     if rc:
         m = re.search(r'error: (.*)', err.decode(errors='replace'))
         return t, 'fail', 'as', re.sub(r'\d+', 'N', m.group(1)) if m else ct.first_err(err.decode(errors='replace'))
-    if SEH:
+    asy = [f for f in flags if f in ('-fasynchronous-unwind-tables', '-fno-asynchronous-unwind-tables')]
+    if SEH and not (asy and asy[-1].startswith('-fno-') and '-funwind-tables' not in flags):	# (no unwind tables asked for)
         bad = seh_check(f'{wd}/vcc.o')
         if bad:
             open(f'{wd}/seh.txt', 'w').write('\n'.join(bad) + '\n')
             return t, 'fail', 'seh', bad[0][:150]
     if OWN:
-        rc, err, bad = own_link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
+        rc, err, bad = own_link([f'{wd}/vcc.o'], f'{wd}/vcc.exe', flags)
         if not rc and bad:
             return t, 'fail', 'foreign', ' '.join(bad)[:150]
     else:
-        rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.exe')
+        rc, err = link([f'{wd}/vcc.o'], f'{wd}/vcc.exe', flags)
     if rc:
         m = re.search(r"undefined (?:symbol|reference to):? ['`]?(\w+)", err)
         return t, 'fail', 'link', 'undefined ' + m.group(1) if m else ct.first_err(err)
+    bad = '' if cached else dwarf_bad(f'{wd}/vcc.exe', f'{wd}/vcc.o', path)
+    if bad:
+        return t, 'fail', 'dwarf', bad
     rc, out, err = (ref['rc'], ref['out'], '') if cached else run(f'{wd}/vcc.exe')
     if rc == 'timeout':	# once more, as for the reference
         rc, out, err = run(f'{wd}/vcc.exe')
@@ -701,7 +751,7 @@ def vasmref(t):
                 return t, 'pass', '', ''
         except OSError:
             pass
-    rc, err = link([f'{wd}/vas.o'], f'{wd}/vas.exe')
+    rc, err = link([f'{wd}/vas.o'], f'{wd}/vas.exe', flags)
     if rc:
         return t, 'fail', 'link', ct.first_err(err)
     rc, out, err = run(f'{wd}/vas.exe')
@@ -775,20 +825,23 @@ def vlinkref(t):
     objs = [f'{wd}/ref.o', RTO]
     if cache_hit(pf, pk):
         if EXPORT:	# the same link again (deterministic), not run
-            rc, _, err = sh(LINK + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
+            rc, _, err = sh(LINK + link_flags(flags) + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
             if rc:
                 return t, 'fail', 'vlink', ct.first_err(err.decode(errors='replace'))[:150]
             export(t, f'{wd}/vlink.exe', ref)
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
-    rc, _, err = sh(LINK + objs + ['-o', f'{wd}/lld.exe'], timeout=60, env=VLENV)
+    rc, _, err = sh(LINK + link_flags(flags) + objs + ['-o', f'{wd}/lld.exe'], timeout=60, env=VLENV)
     if rc:
         return t, 'error', 'lld', ct.first_err(err.decode(errors='replace'))
-    rc, _, err = sh(LINK + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
+    rc, _, err = sh(LINK + link_flags(flags) + [f'--ld-path={VLINK}'] + objs + ['-o', f'{wd}/vlink.exe'], timeout=60, env=VLENV)
     if rc:
         e = err.decode(errors='replace')
         return t, 'fail', 'vlink', (ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'vlink: signal/timeout {rc}: ' + ct.first_err(e))[:150]
     a, b = open(f'{wd}/lld.exe', 'rb').read(), open(f'{wd}/vlink.exe', 'rb').read()
+    bad = dwarf_bad(f'{wd}/vlink.exe')	# (clang's inlined frames: no symbolizer check)
+    if bad:
+        return t, 'fail', 'dwarf', bad
     rc, out, err = run(f'{wd}/vlink.exe')
     if rc == 'timeout':	# once more, as for the reference: Wine's first start in a worker
         rc, out, err = run(f'{wd}/vlink.exe')
@@ -851,6 +904,8 @@ def vccrtref(t):
     flags = flags_of(suite, name, src)
     wd = f'{OUT}/rt/{suite}/{name}'
     os.makedirs(wd, exist_ok=True)
+    if link_flags(flags):	# (the explicit link line has no driver flags)
+        return t, 'skip', 'link-flags', ' '.join(link_flags(flags))
     ref = reference(suite, name, path, flags, wd)
     if 'error' in ref:
         return t, 'error', ref['error'], ref['why']

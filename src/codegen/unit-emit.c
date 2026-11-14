@@ -352,6 +352,8 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp, siz
 	R.serial = ser;
 	R.patches = pt;
 	codegen_object_target_set(c, R.object);
+	as_dwarf_version_set(R.assembler, o->dbg_version);
+	as_debug_directory_set(R.assembler, NULL);	/* (the line table is the printer's .loc rows) */
 	as_begin(R.assembler, R.object, "<vcc>");
 	if (as_snippet_assemble(R.assembler, hp, hn))
 		r = -1;
@@ -435,7 +437,7 @@ static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(18);
  * in its own discard COMDAT as clang writes them (every TU that needs one has its copy; the linker
  * keeps one); the MinGW runtime's pseudo-relocations fix one up when NAME lives in a DLL.
  */
-static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr)
+static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr, bool stack_guard)
 {
 	for (uint32_t s = 0; refptr && s < c->nsym; s++)
 		if (atomic_load_explicit(&refptr[s], memory_order_relaxed)) {
@@ -451,6 +453,12 @@ static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr)
 			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		}
+	uint32_t g = stack_guard ? cc_symbol_global_find(c, "__stack_chk_guard") : 0;
+
+	if (stack_guard && !(g && refptr && atomic_load_explicit(&refptr[g], memory_order_relaxed)))	/* (-fstack-protector: libssp's variable, extern data as clang reaches it; once, if the TU names it too) */
+		vtext_string_append(b, "\t.section\t.rdata$.refptr.__stack_chk_guard,\"dr\",discard,.refptr.__stack_chk_guard\n"
+				    "\t.p2align\t3\n\t.globl\t.refptr.__stack_chk_guard\n.refptr.__stack_chk_guard:\n"
+				    "\t.quad\t__stack_chk_guard\n");
 }
 
 static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, uint8_t *mf, bool *again, bool last,
@@ -576,14 +584,30 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 		vtext_string_append(&hdr, "\t.text\n");
 	bool dbg = o->debug && !CODEGEN_IS_DARWIN(c) && !WASM(c);
 	if (dbg) {
-		vtext_string_append(&hdr, ".Ldbg_text0:\n\t.file\t0 ");
-		codegen_string_quote_append(&hdr, o->dbg_dir ? o->dbg_dir : ".");
+		/* DWARF 5: the main file is .file 0; below 5 it is .file 1 and the others follow, each named
+		   as clang does there: "compilation directory" "path relative to it" when it is under it */
+		const char *dir = o->dbg_dir ? o->dbg_dir : ".";
+		bool v5 = CODEGEN_DWARF_VERSION(c) >= 5;
+		size_t dl = strlen(dir);
+
+		vtext_string_append(&hdr, v5 ? ".Ldbg_text0:\n\t.file\t0 " : ".Ldbg_text0:\n\t.file\t1 ");
+		codegen_string_quote_append(&hdr, dir);
 		vtext_char_append(&hdr, ' ');
 		codegen_string_quote_append(&hdr, o->dbg_name ? o->dbg_name : "<stdin>");
 		vtext_char_append(&hdr, '\n');
 		for (uint32_t i = 0; i < E.debug_file_count; i++) {
-			vtext_format_append(&hdr, "\t.file\t%u ", i + 1);
-			codegen_string_quote_append(&hdr, E.debug_files[i]);
+			const char *f = E.debug_files[i];
+
+			vtext_format_append(&hdr, "\t.file\t%u ", i + 1 + !v5);
+			if (!v5 && f[0] != '/') {
+				codegen_string_quote_append(&hdr, dir);
+				vtext_char_append(&hdr, ' ');
+			} else if (!v5 && dl > 1 && !strncmp(f, dir, dl) && f[dl] == '/' && f[dl + 1]) {
+				codegen_string_quote_append(&hdr, dir);
+				vtext_char_append(&hdr, ' ');
+				f += dl + 1;
+			}
+			codegen_string_quote_append(&hdr, f);
 			vtext_char_append(&hdr, '\n');
 			free(E.debug_files[i]);
 		}
@@ -649,38 +673,67 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			}
 		}
 		if (dbg) {
-			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range */
-			/* (x86: .word is 2 bytes there, so .short/.long/.quad) */
-			bool x = CODEGEN_IS_X64(c), w = CODEGEN_IS_WIN64(c);	/* (COFF: "dr" sections, section-relative offsets) */
+			/* one compile unit over .text: producer, C11, name, its line table, dir, pc range;
+			   DWARF 5's unit header has the unit type and the address size before the abbreviations'
+			   offset, 4's (and 2's, 3's) after it; below 4 the line table's offset is data4 and the
+			   high pc an address */
+			/* (x86: .word is 2 bytes there, so .short/.long/.quad; COFF: "dr" sections, section-relative offsets) */
+			bool x = CODEGEN_IS_X64(c), w = CODEGEN_IS_WIN64(c);
+			int v = CODEGEN_DWARF_VERSION(c);
+			const char *half = x ? "short" : "hword", *word = x ? "long" : "word", *quad = x ? "quad" : "xword";
+			const char *offset = w ? "secrel32" : word;
+			/* COFF: a function outside .text (-ffunction-sections' .text$NAME COMDATs, a section
+			   attribute) makes the unit's pc range DW_AT_ranges, one range per function, as clang
+			   (a debugger finds the unit of an address by its ranges); not below DWARF 3 */
+			bool ranges = false;
 
-			vtext_string_append(&tail, w ? "\t.text\n.Ldbg_text1:\n"
-				    "\t.section\t.debug_abbrev,\"dr\"\n.Ldbg_abbrev:\n"
-				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
-				    "\t.section\t.debug_info,\"dr\"\n" : "\t.text\n.Ldbg_text1:\n"
-				    "\t.section\t.debug_abbrev,\"\",@progbits\n.Ldbg_abbrev:\n"
-				    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, 23, 27, 8, 17, 1, 18, 6, 0, 0, 0\n"
-				    "\t.section\t.debug_info,\"\",@progbits\n");
-			vtext_string_append(&tail, w ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				        "\t.short\t5\n\t.byte\t1, 8\n\t.secrel32\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				        "\t.short\t29\n\t.asciz\t" : x ? "\t.long\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				        "\t.short\t5\n\t.byte\t1, 8\n\t.long\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				        "\t.short\t29\n\t.asciz\t" :
-				        "\t.word\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n"
-				        "\t.hword\t5\n\t.byte\t1, 8\n\t.word\t.Ldbg_abbrev\n\t.byte\t1\n\t.asciz\t\"vcc\"\n"
-				        "\t.hword\t29\n\t.asciz\t");
+			for (uint32_t i = 0; w && v >= 3 && i < E.chunk_count && !ranges; i++) {
+				uint64_t key = E.chunks[i].key;
+
+				if (!(key & 1) && key < ((uint64_t)1 << 62) && c->syms[key >> 1].kind == AST_SYMBOL_FUNCTION)
+					ranges = (o->sections & 1) || codegen_symbol_attributes(c, (uint32_t)(key >> 1))->section;
+			}
+			vtext_format_append(&tail, "\t.text\n.Ldbg_text1:\n\t.section\t.debug_abbrev,%s\n.Ldbg_abbrev:\n"
+					    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, %s, 27, 8, 17, 1, %s, %s, 0, 0, 0\n"
+					    "\t.section\t.debug_info,%s\n",
+					    w ? "\"dr\"" : "\"\",@progbits", v >= 4 ? "23" : "6", ranges ? "85" : "18",
+					    ranges ? (v >= 4 ? "23" : "6") : v >= 4 ? "6" : "1", w ? "\"dr\"" : "\"\",@progbits");
+			vtext_format_append(&tail, "\t.%s\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n\t.%s\t%d\n", word, half, v);
+			if (v >= 5)
+				vtext_format_append(&tail, "\t.byte\t1, 8\n\t.%s\t.Ldbg_abbrev\n", offset);
+			else
+				vtext_format_append(&tail, "\t.%s\t.Ldbg_abbrev\n\t.byte\t8\n", offset);
+			vtext_format_append(&tail, "\t.byte\t1\n\t.asciz\t\"vcc\"\n\t.%s\t29\n\t.asciz\t", half);
 			codegen_string_quote_append(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
-			vtext_string_append(&tail, w ? "\n\t.secrel32\t.Lline_table_start0\n\t.asciz\t" :
-				    x ? "\n\t.long\t.Lline_table_start0\n\t.asciz\t" : "\n\t.word\t.Lline_table_start0\n\t.asciz\t");
+			vtext_format_append(&tail, "\n\t.%s\t.Lline_table_start0\n\t.asciz\t", offset);
 			codegen_string_quote_append(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			vtext_string_append(&tail, x ? "\n\t.quad\t.Ldbg_text0\n\t.long\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n" :
-				        "\n\t.xword\t.Ldbg_text0\n\t.word\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n");
+			if (ranges) {
+				vtext_format_append(&tail, "\n\t.%s\t0\n\t.%s\t.Ldbg_ranges\n.Ldbg_cu_end:\n", quad, offset);
+				vtext_string_append(&tail, v >= 5 ? "\t.section\t.debug_rnglists,\"dr\"\n\t.long\t.Ldbg_rnglists_end-.Ldbg_rnglists_start\n"
+					    ".Ldbg_rnglists_start:\n\t.short\t5\n\t.byte\t8, 0\n\t.long\t0\n.Ldbg_ranges:\n" :
+					    "\t.section\t.debug_ranges,\"dr\"\n.Ldbg_ranges:\n");
+				for (uint32_t i = 0; i < E.chunk_count; i++) {
+					uint64_t key = E.chunks[i].key;
+
+					if ((key & 1) || key >= ((uint64_t)1 << 62) || c->syms[key >> 1].kind != AST_SYMBOL_FUNCTION)
+						continue;
+					/* DWARF 5: DW_RLE_start_end (6); below: a begin, end pair (the base is the unit's 0) */
+					vtext_string_append(&tail, v >= 5 ? "\t.byte\t6\n\t.quad\t" : "\t.quad\t");
+					codegen_symbol_name_append(c, &tail, (uint32_t)(key >> 1));
+					vtext_format_append(&tail, "\n\t.quad\t.Lfunc_end%u\n", (uint32_t)(key >> 1));
+				}
+				vtext_string_append(&tail, v >= 5 ? "\t.byte\t0\n.Ldbg_rnglists_end:\n" : "\t.quad\t0\n\t.quad\t0\n");
+			} else if (v >= 4)
+				vtext_format_append(&tail, "\n\t.%s\t.Ldbg_text0\n\t.%s\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n", quad, word);
+			else
+				vtext_format_append(&tail, "\n\t.%s\t.Ldbg_text0\n\t.%s\t.Ldbg_text1\n.Ldbg_cu_end:\n", quad, quad);
 			vtext_string_append(&tail, w ? "\t.section\t.debug_line,\"dr\"\n.Lline_table_start0:\n" :
 				    "\t.section\t.debug_line,\"\",@progbits\n.Lline_table_start0:\n");
 		}
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
 		else if (CODEGEN_IS_WIN64(c))
-			win64_tail(c, &tail, E.refptr);
+			win64_tail(c, &tail, E.refptr, atomic_load_explicit(&E.stack_guard_refptr, memory_order_relaxed));
 		else
 			vtext_string_append(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };
@@ -717,7 +770,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 					}
 				} else
 #endif
-				if (codegen_object_target_set(c, o->obj),
+				if (codegen_object_target_set(c, o->obj), as_dwarf_version_set(o->as, o->dbg_version), as_debug_directory_set(o->as, NULL),
 					   as_run(o->as, o->obj, all.p, all.n, "<vcc>", &msg)) {
 					codegen_assembler_error_report(c, "assembler: %s", msg);
 					E.errors++;

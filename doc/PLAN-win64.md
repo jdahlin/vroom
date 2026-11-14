@@ -985,4 +985,106 @@ win64`: every step ok, zlib-win64 26 s and sqlite-win64 121 s now running
 headers, `tgmath.h`, `stdbit.h`; `-fcommon`/`__attribute__((common))` and
 `-coverage` are ignored (seen here, TODO.md); a `vcc-win64.py --vccd` mode.
 
-### WIN6, WIN10: planned
+### WIN6 (2026-11-14): debug information and the rest of the flags
+
+What clang does for the target, checked here first: `-g` is DWARF 4 (cc1as
+gets `-dwarf-version=4`, also for a `.s` without `-g`); `-gdwarf-2..5` are
+honoured, and a `.file 0` in the text makes MC write version 5; no
+`.debug_frame` and no `.cfi_*` (unwinding stays SEH); `.debug_*` are `"dr"`
+sections referenced with `IMAGE_REL_AMD64_SECREL`; clang also adds a
+CodeView `.debug$S` (S_OBJNAME, S_COMPILE3), which nothing reads for MinGW.
+
+- **Assembler.** The line table in the version clang -c writes:
+  `as_dwarf_version_set` (vasm `-gdwarf-N`, the driver's `-gdwarf-N`) else 4
+  for COFF and 5 otherwise, `.file 0` making it 5.  Version 4 (and 2/3,
+  which lack `max_ops_per_inst`): no file 0, MC's directory list without the
+  compilation directory, names in `.debug_line`.  COFF: `.debug_line` and
+  `.debug_line_str` are created after `.pdata` and `.llvm_addrsig` when the
+  text did not declare them (`coff_section_late`, as MC's streamer), version
+  5's string offsets are SECREL.  With `-g` (vasm `-g`, `vcc -g -c x.s`) the
+  table knows the compilation directory as cc1as's does, and a source
+  without `.file N` gets MC's debug information for assembler sources
+  (GenDwarfForAssembly): a row per instruction (the outermost macro/`.rept`
+  line, cpp markers, one-byte x86 prefixes as their own instruction), a
+  DW_TAG_label per label, `.debug_info`/`.debug_abbrev`/`.debug_aranges` and
+  `.debug_ranges`/`.debug_rnglists` over the sections with instructions,
+  MD5 of the source for version 5, the main file named without the
+  compilation directory; vasm `-dwarf-debug-producer` (vcc: "vcc").  COFF
+  writer fix found here: a relocation against a temporary that is a
+  section's COMDAT symbol names that symbol (MC; vcc's `-fdata-sections`
+  compound literals).
+- **Compiler `-g`.** The same content as for Linux (one compile unit, line
+  rows per statement) in DWARF 4 for Windows: `.file 1 "dir" "main"` and the
+  other files one more (clang's naming: relative to the compilation
+  directory), a version 4 unit header (below 4: the line table offset as
+  data4, the high pc an address); `-gdwarf-N` on every target
+  (`cc_options.dbg_version`; Linux's default output is unchanged).  COFF:
+  when a function is outside `.text` (`-ffunction-sections`, a section
+  attribute) the unit gets DW_AT_ranges, one range per function
+  (`.debug_ranges`, version 5 `.debug_rnglists`), so symbolizers find it.
+  `-g` does not change `.text`; `-g1/-g2/-g3/-gline-tables-only` give the
+  same tables, `-g0` none, as on Linux.
+- **Linker.** vlink-PE already carried `.debug_*` as lld does (long names
+  in the string table, discardable, SECREL/SECTION applied; `-s`,
+  `--strip-all`, `--strip-debug`): now tested with clang's and vcc's `-g`
+  objects.
+- **Flags.** `-fno-asynchronous-unwind-tables` without `-funwind-tables`
+  drops the `.seh_*` directives (no `.pdata`/`.xdata`) and the nop before an
+  epilogue after a call, as clang; the frame and `___chkstk_ms` stay.
+  `-fstack-protector*`: `__stack_chk_guard` through
+  `.refptr.__stack_chk_guard` (was direct) and the driver links
+  `-lssp_nonshared -lssp` from the sysroot when any such flag is given
+  (clang's MinGW toolchain; never compiler-rt).  `-ffunction-sections`/
+  `-fdata-sections` give clang's `.text$NAME` `one_only` sections (clang
+  adds `,unique,N`); `-fPIC/-fpic/-fPIE/-fpie/-fno-pic` change nothing in
+  either compiler's `-S`.  `-municode/-mwindows/-mconsole/-mthreads`: the
+  link line equals clang's.
+- **Tests.** `vas-obj.py` assembles every case with `-g` too, `win64-dwarf4.s`
+  and `win64-dwarf5.s`; `vas-corpus.py -g [--as-g]`; `vcc-dwarf.py --target
+  x86_64-w64-mingw32|x86_64-linux-gnu --gflag= --cflags=` (COFF `.text`
+  sections, and vasm of `-S` = `-c`); `VCC_CFLAGS=-g vcc-win64.py`
+  (`llvm-dwarfdump --verify` of every linked image, llvm-symbolizer at every
+  function vcc defined gives it and a line); `vlink-pe.py` 15 new cases;
+  `vcc-driver.py` 27 link rows and 31 code-generation rows; `src/test/win64`
+  `stack_protector`, `municode`, `subsystem` (`-mwindows`: the optional
+  header says GUI, gdi32 linked), `mthreads` (a thread key destructor runs),
+  `no_unwind_tables` (RtlLookupFunctionEntry finds none); `vcc-win64.py`
+  passes a test's driver link flags to both links and skips the SEH checker
+  where unwind tables are off.
+
+Debugger under Wine: winedbg 11 reads the DWARF of vcc's image (module
+"Dwarf-4") and shows file:line for the CRT's frames, but names vcc's frames
+only `crash+0x1491`: it names functions from DW_TAG_subprogram, which vcc
+writes on no target (TODO.md DWARF).  clang+lld's image gets names
+(`leaf+0x17(x=0x3)`) but no file:line for its own frames either.  So the
+check is llvm-symbolizer on the image: for the same program, vcc's and
+clang's builds give the same function and file:line (`crash.c:8` at the
+fault, the callers' lines).
+
+Measured (this host, `-j 3`/`-j 4`, Wine 11):
+
+| harness | before | after |
+|---|---|---|
+| `vcc-win64.py --vasm-ref` | 2017/2018 (`debug_asm`) | 2039/2039 |
+| `vcc-win64.py --objcmp` | 2105/2106 | 2120/2120 |
+| `vcc-win64.py --seh`, `--vir --seh` | 2032/2032 + 2 xfail | 2037/2037 + 2 xfail (5 new tests) |
+| `VCC_CFLAGS=-g vcc-win64.py --seh` | - | 2036/2037 + 2 xfail; the one is the oracle: clang -g -O2 of `tcc/101_cleanup` for MinGW runs over 60 s (deterministic, also alone) |
+| `VCC_CFLAGS=-g vcc-win64.py --vlink-ref` | - | runs-ok and image-identical 2038/2038 (the same oracle timeout) |
+| `vas-corpus.py --target x86_64-w64-mingw32 -g` | - | 4530/4530 (also `-gdwarf-5`); `--as-g` 4540/4540 |
+| `vas-obj.py` | 77/77 | 81/81, `-g` 70/70 + 1 xfail (`symver.s`) |
+| `vcc-dwarf.py --target x86_64-w64-mingw32` | - | -O0 1847/1847, -O2 1846/1846; `-gdwarf-2/3/5`, `-gline-tables-only`, `-ffunction-sections -fdata-sections` all pass |
+| `vcc-dwarf.py` (aarch64), `--target x86_64-linux-gnu` | | 1594/1594, 1596/1596 (also `-gdwarf-3/4`) |
+| `vlink-pe.py --run` | 57/57 | 72/72 |
+| `vcc-driver.py` | 229/304 | 287/362 (the 75 are the arm64 tables' version macros, as before) |
+| `vcc-same.py` vs the starting commit | | 23943/23958: the 15 `-E` markers naming the base tree's headers, as before |
+| `vcc-x86.py --suite vcc --objcmp` | 325/325 | 327/327 |
+| `quality.py --check` | 22/22 | 22/22 |
+
+Unity and file-by-file builds compile and link.  Not done (TODO.md):
+`-g` on `.S` through the driver (clang names the temporary file and follows
+the preprocessor's markers into included files), `.symver` with `-g`, the
+CodeView `.debug$S`, DW_TAG_subprogram and the rest of DWARF (as on Linux),
+Linux's unit ranges for functions outside `.text`, a stack-protector failure
+test.
+
+### WIN10: planned

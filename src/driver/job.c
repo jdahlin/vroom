@@ -19,6 +19,12 @@
  */
 #include "driver-internal.h"
 
+/* -g's compilation directory: the client's (vccd) or the process' (into buf) */
+static const char *driver_debug_directory(const driver_environment *env, char *buf, size_t size)
+{
+	return env->cwd ? env->cwd : getcwd(buf, size);
+}
+
 static double driver_clock_seconds(void)
 {
 	struct timespec ts;
@@ -71,6 +77,10 @@ static void driver_source_assemble(struct driver_job *job, const driver_environm
 			return;
 		}
 		as_include_directory_set(driver_assembler, env->cwd);
+		as_dwarf_version_set(driver_assembler, job->dwarf_version);
+		char cwd[4096];
+
+		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env, cwd, sizeof cwd) : NULL);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);
 		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		size_t tn = (size_t)got;
@@ -181,7 +191,7 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				.strict_std = job->strict_standard,
 				.fast_math = job->fast_math && (job->math_flags & 7) == 7, .no_fp_contract = job->no_fp_contract, .gnu89_inline = job->gnu89_inline, .no_builtin = job->freestanding || job->no_builtin, .no_jump_tables = job->no_jump_tables, .instrument = job->instrument_functions, .wasm_sjlj = job->sjlj,
 				.x86_features = job->x64_features, .x86_disabled = job->x64_features_disabled, .x86_features_set = job->target_x64, .x86_raw = job->x64_features_raw, .x86_override_on = job->x64_features_forced_on, .x86_override_off = job->x64_features_forced_off,
-				.general_regs_only = job->general_regs_only || (job->target_x64 && (job->no_sse || job->no_sse2)), .vcc_kernel = job->vcc_kernel, .lse = job->lse, .opt = job->optimization_level, .wrapv = job->wrapv, .pic = job->target_win64 ? 0 : job->pic ? 2 : job->pie ? 1 : 0,	/* (Windows: no GOT; PE images are relocated) */ .tlsmodel = job->tls_model, .sections = job->function_data_sections, .debug = job->debug, .cfi = job->cfi > 0, .dbg_name = job->main_file,
+				.general_regs_only = job->general_regs_only || (job->target_x64 && (job->no_sse || job->no_sse2)), .vcc_kernel = job->vcc_kernel, .lse = job->lse, .opt = job->optimization_level, .wrapv = job->wrapv, .pic = job->target_win64 ? 0 : job->pic ? 2 : job->pie ? 1 : 0,	/* (Windows: no GOT; PE images are relocated) */ .tlsmodel = job->tls_model, .sections = job->function_data_sections, .debug = job->debug, .dbg_version = job->dwarf_version, .cfi = job->cfi > 0, .no_seh = job->no_seh, .dbg_name = job->main_file,
 				.omit_frame_pointer = job->target_x64 && (job->omit_frame_pointer < 0 ? job->optimization_level > 0 : job->omit_frame_pointer),
 				.sibling_calls = job->sibling_calls,
 				.xcf = job->target_x64 ? job->x64_hardening_flags : 0, .pfe_n = job->target_x64 ? job->patchable_entry_count : 0, .pfe_m = job->patchable_entry_before, .sprot = job->target_x64 ? job->stack_protector : 0, .sp_gs = job->stack_protector_guard_gs, .sp_sym = job->stack_protector_guard_symbol, .autozero = job->target_x64 ? job->auto_variables_zero : 0,
@@ -288,6 +298,10 @@ static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_en
 		const char *msg;
 
 		as_include_directory_set(driver_assembler, env->cwd);
+		as_dwarf_version_set(driver_assembler, job->dwarf_version);
+		char cwd[4096];
+
+		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env, cwd, sizeof cwd) : NULL);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		char *dt = NULL;
@@ -328,7 +342,7 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 {
 	vjob_region *br = driver_buffer_region = vjob_region_pool_take(&driver_buffer_pool);
 	struct driver_job jobstore = {
-		.errfd = env->errfd, .hosted = 1, .ms_bitfields = -1, .raw_assembler = -1, .march_has_lse = -1, .mcpu_has_lse = -1, .pie = -1, .cfi = -1,
+		.errfd = env->errfd, .hosted = 1, .ms_bitfields = -1, .raw_assembler = -1, .march_has_lse = -1, .mcpu_has_lse = -1, .pie = -1, .cfi = -1, .unwind_tables = -1,
 		.x64_cpu = "x86-64", .omit_frame_pointer = -1, .unsigned_char = -1, .trigraphs = -1, .gnu89_inline = -1,
 		.predefines = { .region = &br[0] }, .command_line_defines = { .region = &br[1] }, .include_text = { .region = &br[2] }, .include_macros_text = { .region = &br[3] },
 	/* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
@@ -387,6 +401,8 @@ static __attribute__((noinline)) int driver_job_run_one(int argc, char **argv, c
 	{
 		int hl = !job->darwin && !job->target_win64;
 
+		/* Windows: SEH unless -fno-asynchronous-unwind-tables without -funwind-tables (clang) */
+		job->no_seh = job->target_win64 && job->cfi == 0 && job->unwind_tables != 1;
 		if (job->pie < 0)
 			job->pie = hl && !job->pic ? 2 : 0;
 		if (job->cfi < 0)

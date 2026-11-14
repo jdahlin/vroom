@@ -115,6 +115,8 @@
 /* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, SEH unwind directives, the
  * Microsoft calling convention, LLP64) */
 #define CODEGEN_IS_WIN64(c) ((c)->o->target == PP_WIN64)
+/* -g's DWARF version: -gdwarf-N, else clang's default (MinGW 4, else 5); below 5 the main file is .file 1 */
+#define CODEGEN_DWARF_VERSION(c) ((c)->o->dbg_version ? (c)->o->dbg_version : CODEGEN_IS_WIN64(c) ? 4 : 5)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU
@@ -200,6 +202,7 @@ typedef struct codegen_unit {
 	_Atomic uint8_t *strings_done;	/* per string: emitted */
 	_Atomic uint8_t *symbol_referenced;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *refptr;	/* WIN64, per sym: reached through .refptr.NAME (the stub in the tail) */
+	_Atomic uint8_t stack_guard_refptr;	/* WIN64: -fstack-protector read .refptr.__stack_chk_guard */
 	_Atomic uint8_t *walked;
 	uint16_t *function_node_counts;		/* per function: AST nodes (prepass) */
 	uint8_t *inline_parameter_reads; /* parameter references outside a direct (void)param discard */

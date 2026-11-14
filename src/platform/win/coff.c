@@ -53,6 +53,8 @@ typedef struct {
 	uint64_t symbol_offset, string_offset, size;
 	uint32_t *symidx; uint32_t symidx_count;	/* R_VCC_COFF_SYMIDX fixups */
 	uint32_t addrsig;		/* .llvm_addrsig section */
+	uint32_t *creation;		/* sections in MC's creation order (coff_section_late's last) */
+	uint8_t *is_comdat_key;		/* per ElfSym: a section's COMDAT symbol (in the table even when temporary) */
 } CoffOut;
 
 /* ---- the per-object state (objimpl.h) ---- */
@@ -114,6 +116,12 @@ uint32_t coff_section_unique(ElfObj *o, const char *name, uint32_t len, uint32_t
 	return s;
 }
 
+void coff_section_late(ElfObj *o, uint32_t sec)
+{
+	CoffState *c = coff_state(o);
+	if (c->late_count < 8) c->late_sections[c->late_count++] = sec;
+}
+
 void coff_file_name(ElfObj *o, const char *name, uint32_t len)
 {
 	CoffState *c = coff_state(o);
@@ -157,7 +165,7 @@ static void coff_relocation(ElfObj *o, CoffOut *w, ElfFix *x, uint64_t P, uint16
 	uint32_t target = aid;
 	if (a->flags & ESYM_SECTION)	/* the model's section symbol: the writer's */
 		target = COFF_RELOC_SECTION | symsec(o, a);
-	else if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC) {
+	else if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC && !w->is_comdat_key[aid]) {
 		/* MC: a temporary becomes its section's symbol and its offset */
 		if (!insec(a)) { elf_error(o, "undefined temporary symbol '%s'", a->name); return; }
 		c += (int64_t)symoff(o, a);
@@ -270,7 +278,8 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
 	w->entry_of = rpush(&o->arena, sizeof(uint32_t) * o->nsym, 8);
 	memset(w->entry_of, 0, sizeof(uint32_t) * o->nsym);
 	/* sections, each with its COMDAT symbol */
-	for (uint32_t s = 1; s < ns; s++) {
+	for (uint32_t i = 1; i < ns; i++) {
+		uint32_t s = w->creation[i];
 		ElfSec *se = elf_sec(o, s);
 		uint32_t e = coff_entry_add(o, w, COFF_ENTRY_SECTION, s);
 		w->section_entry[s] = e;
@@ -366,7 +375,8 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
 	/* the string table: long section names, then long symbol names */
 	vstring_ref *sv = rpush(&o->arena, sizeof(vstring_ref) * (ns + w->entry_count + 1), 8);
 	uint32_t n = 0;
-	for (uint32_t s = 1; s < ns; s++) {
+	for (uint32_t i = 1; i < ns; i++) {
+		uint32_t s = w->creation[i];
 		ElfSec *se = elf_sec(o, s);
 		w->section_string[s] = 0;
 		if (se->len > 8) sv[n++] = (vstring_ref){ se->name, se->len, &w->section_string[s] };
@@ -399,6 +409,14 @@ size_t coff_finish(ElfObj *o)
 	if (o->has_err) return 0;
 	if (o->has_addrsig) w->addrsig = coff_section(o, ".llvm_addrsig", 13, COFF_SCN_LNK_REMOVE, 0, 0);
 	uint32_t ns = o->nsec;
+	w->creation = rpush(&o->arena, sizeof(uint32_t) * ns, 8);
+	uint32_t late = o->coff ? o->coff->late_count : 0, k = 1;
+	for (uint32_t s = 1; s < ns; s++) {
+		int is_late = 0;
+		for (uint32_t i = 0; i < late; i++) is_late |= o->coff->late_sections[i] == s;
+		if (!is_late) w->creation[k++] = s;
+	}
+	for (uint32_t i = 0; i < late; i++) w->creation[k++] = o->coff->late_sections[i];
 	if (ns - 1 > COFF_SECTIONS_MAX) { elf_error(o, "too many sections for a COFF object (%u; /bigobj is not written)", ns - 1); return 0; }
 	elf_layout(o);
 	/* section numbers: associative COMDAT sections after the others (MC, for link.exe) */
@@ -408,8 +426,8 @@ size_t coff_finish(ElfObj *o)
 	w->section_string = w->section_number + 3 * ns;
 	uint32_t number = 1;
 	for (int assoc = 0; assoc < 2; assoc++)
-		for (uint32_t s = 1; s < ns; s++)
-			if ((elf_sec(o, s)->comdat == COFF_SELECT_ASSOCIATIVE) == assoc) { w->section_order[number] = s; w->section_number[s] = number++; }
+		for (uint32_t i = 1, s; i < ns; i++)
+			if (s = w->creation[i], (elf_sec(o, s)->comdat == COFF_SELECT_ASSOCIATIVE) == assoc) { w->section_order[number] = s; w->section_number[s] = number++; }
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
 		if (se->align > 13) { elf_error(o, "section '%s': alignment %llu is more than COFF's 8192", se->name, 1ull << se->align); return 0; }
@@ -419,6 +437,10 @@ size_t coff_finish(ElfObj *o)
 		}
 		se->nfix_reloc = 0;
 	}
+	w->is_comdat_key = rpush(&o->arena, o->nsym + 1, 8);
+	memset(w->is_comdat_key, 0, o->nsym + 1);
+	for (uint32_t s = 1; s < ns; s++)	/* (MC: a relocation names a temporary COMDAT symbol itself) */
+		if (elf_sec(o, s)->group && elf_sec(o, s)->comdat != COFF_SELECT_ASSOCIATIVE) w->is_comdat_key[elf_sec(o, s)->group] = 1;
 	/* fixups, in layout order */
 	w->relocations = rpush(&o->arena, sizeof(CoffRelocation) * (o->nfix + 1), 8);
 	w->symidx = rpush(&o->arena, sizeof(uint32_t) * (o->nfix + 1), 8);
@@ -456,7 +478,8 @@ size_t coff_finish(ElfObj *o)
 	w->raw_offset = rpush(&o->arena, sizeof(uint64_t) * ns * 2, 8);
 	w->relocation_offset = w->raw_offset + ns;
 	uint64_t off = 20 + 40 * (uint64_t)(ns - 1);
-	for (uint32_t s = 1; s < ns; s++) {
+	for (uint32_t i = 1; i < ns; i++) {
+		uint32_t s = w->creation[i];
 		ElfSec *se = elf_sec(o, s);
 		w->raw_offset[s] = 0; w->relocation_offset[s] = 0;
 		if (!(se->flags & COFF_SCN_UNINIT_DATA)) { w->raw_offset[s] = off; off += se->size; }

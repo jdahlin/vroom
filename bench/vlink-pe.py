@@ -10,6 +10,8 @@ must succeed or both fail; when both fail, vlink's first error must be lld's
 (the program name aside); when both succeed, every output (the image, an
 import library) must be byte-identical (SOURCE_DATE_EPOCH is fixed).  --run
 also runs each pair of programs under Wine and compares exit code and output.
+The v* objects are vcc's (vpp -c): -g, -gdwarf-5, -ffunction-sections and
+-fdata-sections with and without --gc-sections, -s and --strip-debug (WIN6).
 """
 import os, re, shutil, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -62,8 +64,16 @@ SRC = {
               'int main(void){ int x = bump(); printf("%d %d\\n", x, counter); return counter; }\n',
     'bigframe': '#include <stdio.h>\n#include <string.h>\nint main(void){ char b[100000]; memset(b, 1, sizeof b); '
                 'printf("%d\\n", b[99999]); return 0; }\n',
+    'dbg': '#include <stdio.h>\nstatic int sq(int x){ return x * x; }\nint unused_fn(int x){ return x * 3; }\n'
+           'int main(void){ printf("%d\\n", sq(6)); return 0; }\n',
 }
-FLAGS = {'gc': ['-ffunction-sections', '-fdata-sections'], 'common1': ['-fcommon'], 'common2': ['-fcommon']}
+SRC['dbg5'] = SRC['dbggc'] = SRC['dbg']
+# objects vcc compiles (vpp -c -O1), named v*: its -g, -ffunction-sections and -fdata-sections
+VPP = f'{BUILD}/vpp'
+VSRC = {'vdbg': (SRC['dbg'], ['-g']), 'vgc': (SRC['gc'], ['-ffunction-sections', '-fdata-sections']),
+        'vdbggc': (SRC['dbg'], ['-g', '-ffunction-sections', '-fdata-sections']), 'vdbg5': (SRC['dbg'], ['-gdwarf-5'])}
+FLAGS = {'gc': ['-ffunction-sections', '-fdata-sections'], 'common1': ['-fcommon'], 'common2': ['-fcommon'],
+         'dbg': ['-g'], 'dbg5': ['-gdwarf-5'], 'dbggc': ['-g', '-ffunction-sections', '-fdata-sections']}
 
 
 def link_line(objs, extra, shared=False):
@@ -81,6 +91,21 @@ CASES = [
     ('-S', ['main'], ['-S'], False, []),
     ('--strip-all', ['main'], ['--strip-all'], False, []),
     ('--gc-sections', ['gc'], ['--gc-sections'], False, []),
+    ('-g: .debug_* sections', ['dbg'], [], False, []),
+    ('-g -s', ['dbg'], ['-s'], False, []),
+    ('-g -S', ['dbg'], ['-S'], False, []),
+    ('-g --strip-debug', ['dbg'], ['--strip-debug'], False, []),
+    ('-g --strip-all', ['dbg'], ['--strip-all'], False, []),
+    ('-gdwarf-5', ['dbg5'], [], False, []),
+    ('-g -ffunction-sections --gc-sections', ['dbggc'], ['--gc-sections'], False, []),
+    ('-g -shared', ['dbg5', 'dllall'], [], True, []),
+    ('vcc -g', ['vdbg'], [], False, []),
+    ('vcc -g -s', ['vdbg'], ['-s'], False, []),
+    ('vcc -g --strip-debug', ['vdbg'], ['--strip-debug'], False, []),
+    ('vcc -gdwarf-5', ['vdbg5'], [], False, []),
+    ('vcc -ffunction-sections -fdata-sections', ['vgc'], [], False, []),
+    ('vcc -ffunction-sections --gc-sections', ['vgc'], ['--gc-sections'], False, []),
+    ('vcc -g -ffunction-sections --gc-sections', ['vdbggc'], ['--gc-sections'], False, []),
     ('--no-gc-sections', ['gc'], ['--gc-sections', '--no-gc-sections'], False, []),
     ('--subsystem windows', ['gui'], ['--subsystem', 'windows'], False, []),
     ('--subsystem=console:6.2', ['main'], ['--subsystem=console:6.2'], False, []),
@@ -221,6 +246,9 @@ def main():
     for n, src in SRC.items():
         open(f'{tmp}/{n}.c', 'w').write(src)
         subprocess.run([CL] + TGT + ['-O1', '-c', f'{tmp}/{n}.c', '-o', f'{tmp}/{n}.o'] + FLAGS.get(n, []), check=True)
+    for n, (src, fl) in VSRC.items():
+        open(f'{tmp}/{n}.c', 'w').write(src)
+        subprocess.run([VPP] + TGT + ['-O1', '-c', f'{tmp}/{n}.c', '-o', f'{tmp}/{n}.o'] + fl, check=True, cwd=tmp)
     subprocess.run([llvm('llvm-ar'), 'rcs', f'{tmp}/libx.a', f'{tmp}/lib1.o', f'{tmp}/lib2.o'], check=True)
     open(f'{tmp}/exports.def', 'w').write('LIBRARY out.dll\nEXPORTS\n  add\n  twice = add\n  counter DATA\n'
                                           '  bump @7\n  fwd = kernel32.Sleep\n  hidden_ord = bump @9 NONAME\n')

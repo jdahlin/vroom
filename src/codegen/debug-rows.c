@@ -6,7 +6,8 @@
  * record index to the source location; rows for nothing emitted are dropped.  A pass that deletes or
  * moves records must call codegen_debug_rows_remap so the rows follow (the printers and optimisers do).  File
  * numbers are unit-wide and handed out under E->dmu, so the threads agree on them; the main file is
- * number 0, as in clang (MC maps `.file N` of the main file to 0).  Users: arm64's and x86-64's
+ * number 0, as in clang (MC maps `.file N` of the main file to 0); below DWARF 5 every number is one more,
+ * the main file 1.  Users: arm64's and x86-64's
  * direct emitters; VIR does not call it.
  */
 #include "codegen-internal.h"
@@ -47,7 +48,7 @@ VPRIV bool codegen_debug_location_get(codegen_context *e, uint32_t loc, uint32_t
 
 	if (!pp_location_describe(e->compile_context->p, loc, &name, &len, line, col) || !*line)
 		return false;
-	*file = codegen_debug_file_find(e, name, len);
+	*file = codegen_debug_file_find(e, name, len) + (CODEGEN_DWARF_VERSION(e->compile_context) < 5);	/* (DWARF 4: no file 0) */
 	return true;
 }
 

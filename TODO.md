@@ -651,6 +651,29 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `elf_reg` + `coff_class`, `coff_seh_*` calls of obj.h could take them
   directly.  *Validate:* `vcc-win64.py --objcmp` stays 2105/2106; emit time
   per TU drops.
+- [ ] **`-g` on `.S` sources: clang's file names and rows** [C].  vasm/vcc
+  write MC's assembler debug information for a `.s` byte for byte (but the
+  producer), and follow cpp line markers in the text they are given; for a
+  `.S` clang assembles a temporary file named by `-main-file-name` and its
+  rows follow the preprocessor's markers into included files, vcc's `-c x.S`
+  path hands the assembler text whose rows are the `.S` file's own lines.
+  *Validate:* `clang -g -c x.S` = `vpp -g -c x.S` but DW_AT_producer for the
+  vas-corpus `.S` files (a new mode).
+- [ ] **vasm -g: `.symver` symbols after the debug sections' symbols** [C].
+  MC creates the `.symver` names in the ELF writer, after the
+  `-g`-generated sections; vasm registers them at the directive.
+  *Validate:* `bench/vas-obj.py` `symver.s` -g XPASSes (remove `G_XFAIL`).
+- [ ] **Windows x64: clang's `.debug$S` with `-g`** [C].  clang's `-g -S`
+  for MinGW also writes a CodeView `.debug$S` (S_OBJNAME, S_COMPILE3 with
+  its version); vcc writes only DWARF (assembled, it is clang's text either
+  way, so objects compare equal).  Nothing reads it for MinGW.
+  *Validate:* decide whether to write it; then a `vcc-dwarf.py` check.
+- [ ] **Windows x64: stack-protector failure path** [T].  The guard and
+  `-lssp` match clang (`src/test/win64/stack_protector.c`, vcc-driver.py
+  rows); a smashed canary reaching `__stack_chk_fail` is not tested (where
+  the canary sits relative to an overflowed buffer differs from clang's
+  layout).  *Validate:* a test that overwrites the canary slot itself and
+  exits through libssp's message, compared with clang's.
 - [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
   `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
   vccd); `bench/vccd-test.py win64-cross-build-through-the-shim` and
@@ -800,7 +823,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without a prologue, as clang), `.file 0` the main file, a v5 CU with
   low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
   `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
-  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.
+  Windows x64 (WIN6): DWARF 4 by default as clang, `-gdwarf-2..5` on every
+  target, COFF unit ranges for functions outside `.text`; Linux keeps the
+  `.text`-only pc range, so `-ffunction-sections -g` functions are outside
+  the unit there (llvm-symbolizer finds no unit for them).  No
+  `DW_TAG_subprogram`: winedbg names vcc's frames only by module+offset.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
   addresses to the right lines for `test/vcc`; later a scripted lldb
   session (break at file:line, print local).

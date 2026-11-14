@@ -148,8 +148,11 @@ static void x64_guard(codegen_context *e, tbuf *b)
 {
 	const cc_options *o = e->unit->options;
 
-	if (CODEGEN_IS_WIN64(e->compile_context) && !o->sp_sym && !o->sp_gs)
-		vtext_string_append(b, "\tmovq\t__stack_chk_guard(%rip), %r11\n");	/* MinGW: libssp's variable */
+	if (CODEGEN_IS_WIN64(e->compile_context) && !o->sp_sym && !o->sp_gs) {
+		/* MinGW: libssp's variable, extern data through its .refptr. pointer as clang */
+		vtext_string_append(b, "\tmovq\t.refptr.__stack_chk_guard(%rip), %r11\n\tmovq\t(%r11), %r11\n");
+		atomic_store_explicit(&e->unit->stack_guard_refptr, 1, memory_order_relaxed);
+	}
 	else if (o->sp_sym)
 		vtext_format_append(b, "\tmovq\t%%%s:%s(%%rip), %%r11\n", o->sp_gs ? "gs" : "fs", o->sp_sym);
 	else
@@ -268,7 +271,7 @@ static int64_t x64w_area(uint64_t saves)
 static void x64w_prologue(codegen_context *e, tbuf *b, uint32_t s, uint64_t saves, int64_t frame, uint32_t A)
 {
 	cc *c = e->compile_context;
-	bool seh = CODEGEN_IS_WIN64(c);
+	bool win = CODEGEN_IS_WIN64(c), seh = win && !c->o->no_seh;	/* (seh: the unwind directives) */
 	int64_t S = e->x64_context->wsave, off = 0;
 
 	(void)s;
@@ -297,7 +300,7 @@ static void x64w_prologue(codegen_context *e, tbuf *b, uint32_t s, uint64_t save
 	if (A > 16) {
 		vtext_format_append(b, "\tandq\t$%lld, %%rsp\n\tmovq\t%%rsp, %%r12\n", -(long long)A);
 	}
-	if (seh && frame >= 4096) {
+	if (win && frame >= 4096) {
 		/* a page or more: committed a page at a time (clang's sequence) */
 		if (frame > UINT32_MAX)
 			vtext_format_append(b, "\tmovabsq\t$%lld, %%rax\n", (long long)frame);
@@ -314,7 +317,7 @@ static void x64w_prologue(codegen_context *e, tbuf *b, uint32_t s, uint64_t save
 /* the saved registers back, then the epilogue the unwinder recognizes: lea rsp from rbp, pop */
 static void x64w_epilogue(codegen_context *e, tbuf *b, uint64_t saves, bool aftercall)
 {
-	bool seh = CODEGEN_IS_WIN64(e->compile_context);
+	bool seh = CODEGEN_IS_WIN64(e->compile_context) && !e->compile_context->o->no_seh;
 	int64_t S = e->x64_context->wsave, off = 0;
 
 	for (int r = XMM0; r <= XMM15; r++)
@@ -408,7 +411,7 @@ VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s)
 		if (wsaves)
 			X->framefree = false;
 		X->wsave = x64w_area(wsaves);
-		seh = CODEGEN_IS_WIN64(c) && !X->framefree;
+		seh = CODEGEN_IS_WIN64(c) && !X->framefree && !c->o->no_seh;
 	}
 	if (seh) {
 		vtext_string_append(b, ".seh_proc ");

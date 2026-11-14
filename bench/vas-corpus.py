@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """vas-corpus.py: vasm on compiler-generated assembly (TODO T7).
 
-  bench/vas-corpus.py [-j N] [-O LEVEL...] [--limit N] [--target T] [PAT]
+  bench/vas-corpus.py [-j N] [-O LEVEL...] [-g] [--limit N] [--target T] [PAT]
 
 --target x86_64-linux-gnu: the same for x86-64 (vasm --target=...).
+-g: clang -S -g at each level (DWARF line tables, .debug_* sections: version 4 for
+MinGW, 5 for Linux; -O '0 -gdwarf-5' picks a version).  --as-g: the assemblers
+get -g too (clang -g -c, vasm -g: the line table knows the compilation directory).
 --target x86_64-w64-mingw32: Windows x64, COFF objects (WIN4/WIN5): no sysroot,
 the test runtime's headers (src/test/rt/include-win64, rt/include) and clang's
 resource headers, as bench/vcc-win64.py compiles.
@@ -31,6 +34,11 @@ def cflags(tgt):
         return ['-nostdinc', '-I', f'{R}/src/test/rt/include-win64', '-I', f'{R}/src/test/rt/include', '-isystem', RES]
     return []
 
+ASG = []
+def _init(asg):
+    global ASG
+    ASG = asg
+
 def one(job):
     f, opt, TGT = job
     with tempfile.TemporaryDirectory() as t:
@@ -39,9 +47,9 @@ def one(job):
                           cwd=os.path.dirname(f)).returncode:
             return ('skip', f, opt, '')
         march = [o for o in opt.split() if o.startswith(('-march=', '-mcpu='))]	# the .s has no .arch
-        if subprocess.run([CL, f'--target={TGT}', *march, '-c', s, '-o', c], capture_output=True).returncode:
+        if subprocess.run([CL, f'--target={TGT}', *march, *ASG[:1], '-c', s, '-o', c], capture_output=True).returncode:
             return ('skip', f, opt, '')
-        q = subprocess.run([VAS] + ([f'--target={TGT}'] if TGT.startswith('x86_64') else []) + [s, '-o', v], capture_output=True, text=True)
+        q = subprocess.run([VAS] + ([f'--target={TGT}'] if TGT.startswith('x86_64') else []) + ASG + [s, '-o', v], capture_output=True, text=True)
         if q.returncode:
             m = re.search(r'error: (.*)', q.stderr)
             return ('fail', f, opt, m.group(1) if m else q.stderr[:200])
@@ -51,17 +59,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=6)
     ap.add_argument('-O', action='append', dest='opts')
+    ap.add_argument('-g', action='store_true', help='clang -S -g')
+    ap.add_argument('--as-g', action='store_true', help='clang -c -g, vasm -g')
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('-v', action='store_true', help='list every failing file')
     ap.add_argument('--target', default='aarch64-linux-gnu')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
-    opts = [o if o.startswith('-O') else '-O' + o for o in (a.opts or ['0', '2'])]
+    opts = [(o if o.startswith('-O') else '-O' + o) + (' -g' if a.g else '') for o in (a.opts or ['0', '2'])]
     files = sorted(glob.glob(f'{R}/src/test/**/*.c', recursive=True))
     if a.pat: files = [f for f in files if a.pat in f]
     if a.limit: files = files[:a.limit]
     jobs = [(f, o, a.target) for f in files for o in opts]
-    with Pool(a.j) as p: res = p.map(one, jobs, chunksize=4)
+    producer = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout.splitlines()[0]	# (cc1as's -dwarf-debug-producer)
+    with Pool(a.j, initializer=_init, initargs=(['-g', '-dwarf-debug-producer', producer] if a.as_g else [],)) as p: res = p.map(one, jobs, chunksize=4)
     cnt = collections.Counter(r[0] for r in res)
     why = collections.Counter()
     for k, f, o, m in res:

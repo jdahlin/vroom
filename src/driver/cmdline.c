@@ -329,8 +329,11 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fPIC")) job->pic = 2, job->pie = 0;
 		else if (!strcmp(a, "-g") || !strcmp(a, "-g1") || !strcmp(a, "-g2") || !strcmp(a, "-g3") ||
 			 !strncmp(a, "-ggdb", 5) || !strncmp(a, "-gdwarf", 7) || !strcmp(a, "-gline-tables-only") ||
-			 !strcmp(a, "-glldb") || !strcmp(a, "-gfull"))
+			 !strcmp(a, "-glldb") || !strcmp(a, "-gfull")) {
 			job->debug = 1;	/* line tables (the rest of DWARF: TODO.md) */
+			if (!strncmp(a, "-gdwarf-", 8) && a[8] >= '2' && a[8] <= '5' && !a[9])
+				job->dwarf_version = a[8] - '0';	/* (-gdwarf, -gdwarf32: the default) */
+		}
 		else if (!strcmp(a, "-g0")) job->debug = 0;
 		else if (!strcmp(a, "-ffunction-sections")) job->function_data_sections |= 1;
 		else if (!strcmp(a, "-fno-function-sections")) job->function_data_sections &= ~1;
@@ -361,6 +364,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fno-optimize-sibling-calls")) job->sibling_calls = -1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) job->cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) job->cfi = 0;
+		else if (!strcmp(a + (a[2] == 'n' ? 5 : 2), "unwind-tables") && a[1] == 'f') job->unwind_tables = a[2] != 'n';	/* -f[no-]unwind-tables (Windows: keeps SEH; elsewhere ignored) */
 		else if (!strcmp(a, "-mstrict-align")) job->strict_align = 1;
 		else if (!strcmp(a, "-fwrapv") || !strcmp(a, "-fno-strict-overflow")) job->wrapv = 1;
 		else if (!strcmp(a, "-fno-wrapv") || !strcmp(a, "-fstrict-overflow")) job->wrapv = 0;
