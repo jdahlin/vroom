@@ -62,14 +62,10 @@ VPRIV cxx_template *cxx_template_of(cxx_entity *e)
 	return e->tmpl;
 }
 
-VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t pos, uint32_t end, bool alias)
+static void cxx_template_define_path(cxx *c, cxx_entity *e, cxx_template *t)
 {
-	cxx_template *t;
-
-	if (!e || c->tentative || c->instantiating)
-		return;
-	t = cxx_template_of(e);
-	t->params = params, t->home = home, t->pos = pos, t->end = end, t->is_alias = alias;
+	free(t->path);
+	t->path = NULL;
 	if (c->name_path_valid && e->name > 1) {
 		const vident *v = &vintern_ents[e->name];
 		size_t n = c->name_path_len;
@@ -83,6 +79,17 @@ VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sco
 	}
 }
 
+VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t pos, uint32_t end, bool alias)
+{
+	cxx_template *t;
+
+	if (!e || c->tentative || c->instantiating)
+		return;
+	t = cxx_template_of(e);
+	t->params = params, t->home = home, t->pos = pos, t->end = end, t->is_alias = alias;
+	cxx_template_define_path(c, e, t);
+}
+
 /* a declaration before the definition: its parameters' defaults count (template<class T = void> struct X;) */
 VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params)
 {
@@ -93,6 +100,8 @@ VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params)
 	t = cxx_template_of(e);
 	if (!t->declared)
 		t->declared = params;
+	if (!t->path && !t->params)	/* its name, for spelling instances of its partial specializations */
+		cxx_template_define_path(c, e, t);
 }
 
 VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t key_pos)
@@ -308,7 +317,10 @@ VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len)
 		return false;
 	if ((QQ(t) & Q_VOLATILE) && !cxx_spell_append(buf, cap, len, "volatile "))
 		return false;
-	if (x->kind < TY_NKINDS && basic[x->kind] && x->kind <= TY_LDOUBLE)
+	if (x->ext == 1 && (x->kind == TY_UCHAR || x->kind == TY_USHORT || x->kind == TY_UINT || x->kind == TY_INT))
+		return cxx_spell_append(buf, cap, len, x->kind == TY_UCHAR ? "char8_t" : x->kind == TY_USHORT ? "char16_t" :
+						       x->kind == TY_UINT ? "char32_t" : "wchar_t");
+	if (x->kind < TY_NKINDS && basic[x->kind] && x->kind <= TY_LDOUBLE && !x->ext)
 		return cxx_spell_append(buf, cap, len, basic[x->kind]);
 	if (x->kind == TY_STRUCT || x->kind == TY_UNION || x->kind == TY_ENUM)
 		return x->aux < c->ntag_spelling && c->tag_spelling[x->aux] && cxx_spell_append(buf, cap, len, c->tag_spelling[x->aux]);
@@ -399,6 +411,14 @@ static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_
 
 	if (!p->name)
 		return;
+	if (p->kind == 3) {	/* a template template parameter: the template it names */
+		cxx_entity *te = a->kind == 4 ? (cxx_entity *)(intptr_t)a->v : NULL;
+
+		e = cxx_declare(c, binding, p->name, CXX_ENTITY_TEMPLATE);
+		if (e && te)
+			e->dependent = 0, e->members = te->members, e->specs = te->specs, e->nspecs = te->nspecs, e->tmpl = te->tmpl;
+		return;
+	}
 	e = cxx_declare(c, binding, p->name, p->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
 	if (!e)
 		return;
@@ -414,6 +434,42 @@ static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_
 			if (tag < c->ntag_scope)
 				e->members = c->tag_scope[tag];
 		}
+	}
+}
+
+/* a pack parameter bound to its arguments */
+static void cxx_bind_pack(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_targ *list, uint32_t n)
+{
+	cxx_entity *e;
+
+	if (!p->name)
+		return;
+	e = cxx_declare(c, binding, p->name, p->kind == 1 ? CXX_ENTITY_TYPE : p->kind == 2 ? CXX_ENTITY_VALUE : CXX_ENTITY_TEMPLATE);
+	if (!e)
+		return;
+	e->dependent = 0, e->is_pack = 1, e->pack_index = -1, e->ty = CXX_TY_UNKNOWN;
+	e->pack = malloc((n ? n : 1) * sizeof *e->pack);
+	memcpy(e->pack, list, n * sizeof *list);
+	e->npack = n;
+}
+
+/* an expansion's element: the pack entity stands for its i-th argument (i < 0: the whole pack) */
+VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i)
+{
+	e->pack_index = i;
+	if (i < 0) {
+		e->ty = CXX_TY_UNKNOWN, e->has_value = 0, e->members = NULL, e->tmpl = NULL;
+		return;
+	}
+	if (e->pack[i].kind == 1) {
+		e->ty = e->pack[i].t;
+		e->members = cxx_type_class_scope(c, e->ty);
+	} else if (e->pack[i].kind == 2)
+		e->value = e->pack[i].v, e->has_value = 1;
+	else if (e->pack[i].kind == 4) {
+		cxx_entity *te = (cxx_entity *)(intptr_t)e->pack[i].v;
+
+		e->members = te->members, e->specs = te->specs, e->nspecs = te->nspecs, e->tmpl = te->tmpl;
 	}
 }
 
@@ -438,7 +494,14 @@ static bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
 		if (a[i].kind == 1) {
 			if (!cxx_type_spell(c, a[i].t, buf, cap, len))
 				return false;
-		} else {
+		} else if (a[i].kind == 4) {
+			const cxx_entity *te = (const cxx_entity *)(intptr_t)a[i].v;
+
+			if (!te->tmpl || !te->tmpl->path || !cxx_spell_append(buf, cap, len, te->tmpl->path))
+				return false;
+		} else if (a[i].kind != 2)
+			return false;
+		else {
 			snprintf(num, sizeof num, "%lld", (long long)a[i].v);
 			if (!cxx_spell_append(buf, cap, len, num))
 				return false;
@@ -528,12 +591,14 @@ static bool cxx_mentions_placeholder(cxx *c, qty t, int depth)
 static bool cxx_args_mention_placeholder(cxx *c, const cxx_targ *a, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++)
-		if (a[i].kind == 3 || (a[i].kind == 1 && cxx_mentions_placeholder(c, a[i].t, 0)))
+		if (a[i].kind == 3 || a[i].kind == 5 || (a[i].kind == 1 && cxx_mentions_placeholder(c, a[i].t, 0)))
 			return true;
 	return false;
 }
 
 static bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx_targ *arg, cxx_targ *bind, int depth);
+static bool cxx_match_list(cxx *c, cxx_partial *p, const cxx_targ *pat, uint32_t np, const cxx_targ *args, uint32_t n, cxx_targ *bind,
+			   int depth);
 
 /* deduce: pat (a pattern of p) against the type arg, binding p's parameters in bind */
 static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *bind, int depth)
@@ -583,15 +648,34 @@ static bool cxx_match_type(cxx *c, cxx_partial *p, qty pat, qty arg, cxx_targ *b
 
 		if (!ip)
 			return QI(pat) == QI(arg);
-		if (!ia || ia->t != ip->t || ia->nargs != ip->nargs)
+		if (!ia || ia->t != ip->t)
 			return false;
-		for (uint32_t k = 0; k < ip->nargs; k++)
-			if (!cxx_match_arg(c, p, &ip->args[k], &ia->args[k], bind, depth + 1))
-				return false;
-		return true;
+		return cxx_match_list(c, p, ip->args, ip->nargs, ia->args, ia->nargs, bind, depth + 1);
 	}
 	}
 	return QI(pat) == QI(arg);
+}
+
+/* a pattern's argument list against an argument list; a trailing Pack... takes the rest */
+static bool cxx_match_list(cxx *c, cxx_partial *p, const cxx_targ *pat, uint32_t np, const cxx_targ *args, uint32_t n, cxx_targ *bind,
+			   int depth)
+{
+	bool trailing_pack = np && pat[np - 1].kind == 5;
+
+	if (trailing_pack ? n < np - 1 : np != n)
+		return false;
+	for (uint32_t i = 0; i < (trailing_pack ? np - 1 : n); i++)
+		if (!cxx_match_arg(c, p, &pat[i], &args[i], bind, depth))
+			return false;
+	if (trailing_pack) {
+		cxx_targ *b = &bind[pat[np - 1].v];
+		uint32_t start = np - 1, count = n - (np - 1);
+
+		if (b->kind == 6)	/* (bound before: the same elements) */
+			return b->v == count && cxx_args_equal(b->list + b->t, args + start, count);
+		b->kind = 6, b->list = args, b->t = start, b->v = count;
+	}
+	return true;
 }
 
 static bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx_targ *arg, cxx_targ *bind, int depth)
@@ -601,6 +685,8 @@ static bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx
 		return arg->kind == 1 && cxx_match_type(c, p, pat->t, arg->t, bind, depth);
 	case 2:
 		return arg->kind == 2 && pat->v == arg->v;
+	case 4:	/* a template */
+		return arg->kind == 4 && pat->v == arg->v;
 	case 3:	/* a value parameter */
 		if (arg->kind != 2 && arg->kind != 3)
 			return false;
@@ -629,12 +715,16 @@ static void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_entity *e;
 
-		if (tp->pack || tp->kind == 3 || !tp->name)
-			return;	/* packs and template template parameters: unknown */
+		if (tp->kind == 3 || !tp->name)
+			return;	/* template template parameters: unknown */
 		e = cxx_declare(c, binding, tp->name, tp->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
 		if (!e)
 			return;
 		e->dependent = 0;
+		if (tp->pack) {	/* a pack: its expansion in the pattern takes the remaining arguments */
+			e->is_pack = 1, e->pack_index = -1, e->pack_placeholder = (uint16_t)(i + 1), e->npack = 0;
+			continue;
+		}
 		if (tp->kind == 1) {
 			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
 
@@ -673,11 +763,8 @@ static void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 static bool cxx_partial_matches(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t n, cxx_targ *bind)
 {
 	memset(bind, 0, p->params->ntparams * sizeof *bind);
-	if (p->npattern != n)
+	if (!cxx_match_list(c, p, p->pattern, p->npattern, args, n, bind, 0))
 		return false;
-	for (uint32_t i = 0; i < n; i++)
-		if (!cxx_match_arg(c, p, &p->pattern[i], &args[i], bind, 0))
-			return false;
 	for (uint32_t i = 0; i < p->params->ntparams; i++)
 		if (!bind[i].kind)
 			return false;	/* (a parameter not deduced) */
@@ -759,18 +846,33 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 			cxx_instance_complete(c, x->inst);
 		return x->inst;
 	}
-	if (!t->params && !t->npartials)
+	cxx_scope *ps = t->params ? t->params : t->declared;	/* (declared only: its partial specializations may still match) */
+
+	if (!ps || (!t->params && !t->npartials))
 		return NULL;	/* not defined */
-	if (!t->params)
-		return NULL;	/* (only partial specializations: the primary's parameters are not known) */
 	/* the arguments, defaults completed, bound in a scope of their own */
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, t->home, NULL);
-	for (uint32_t i = 0; i < t->params->ntparams; i++) {
-		const cxx_tparam *p = &t->params->tparams[i];
+	for (uint32_t i = 0; i < ps->ntparams; i++) {
+		const cxx_tparam *p = &ps->tparams[i];
 		const cxx_tparam *d = t->declared && t->declared != t->params && i < t->declared->ntparams ? &t->declared->tparams[i] : NULL;
 
-		if (p->pack || p->kind == 3 || n >= 32)
-			return NULL;	/* packs and template template parameters: not yet */
+		if (n >= 32)
+			return NULL;
+		if (p->pack) {
+			/* a pack: the remaining arguments (the last parameter; a pack elsewhere is deduced only) */
+			uint32_t k = n;
+
+			if (i + 1 != ps->ntparams)
+				return NULL;
+			for (uint32_t j = i; j < nargs; j++) {
+				if (k >= 32 || (args[j].kind == 1) != (p->kind == 1))
+					return NULL;
+				full[k++] = args[j];
+			}
+			cxx_bind_pack(c, binding, p, full + n, k - n);
+			n = k;
+			break;
+		}
 		if (i < nargs)
 			full[n] = args[i];
 		else if (p->def_b) {
@@ -781,14 +883,14 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 				return NULL;
 		} else
 			return NULL;
-		if ((p->kind == 1) != (full[n].kind == 1))
+		if ((p->kind == 1) != (full[n].kind == 1) || (p->kind == 3) != (full[n].kind == 4))
 			return NULL;
 		cxx_bind(c, binding, p, &full[n]);
 		if (d && d->name != p->name)
 			cxx_bind(c, binding, d, &full[n]);	/* (the declaration's name for it, in its defaults) */
 		n++;
 	}
-	if (nargs > t->params->ntparams)
+	if (nargs > ps->ntparams && !(ps->ntparams && ps->tparams[ps->ntparams - 1].pack))
 		return NULL;
 	/* the complete argument list is the key (X<int> and X<int, allocator<int>> are one instance) */
 	h = cxx_instance_hash(t, full, n);
@@ -816,12 +918,17 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 			c->partial_unknown++;
 			return NULL;
 		}
+		if (r == 0 && !t->params)
+			return NULL;	/* the primary template: declared, never defined */
 		if (r > 0) {
 			/* the partial specialization's parameters, deduced, bound for its re-parse */
 			c->partial_matches++;
 			binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, pick->home, NULL);
 			for (uint32_t i = 0; i < pick->params->ntparams; i++)
-				cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
+				if (bind[i].kind == 6)	/* a deduced pack: its slice of the arguments */
+					cxx_bind_pack(c, binding, &pick->params->tparams[i], bind[i].list + bind[i].t, (uint32_t)bind[i].v);
+				else
+					cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
 		}
 	}
 	inst = calloc(1, sizeof *inst);
