@@ -655,10 +655,33 @@ static void cxx_statement_parse1(cxx *c)
 		return;
 	case LEX_TOKEN_IDENTIFIER:
 		if (!cxx_kw(c) && cxx_peek(c, 1)->kind == LEX_TOKEN_COLON) {	/* label */
+			uint32_t name = cxx_peek(c, 0)->id, loc = cxx_peek(c, 0)->loc, ln = 0, st = 0;
+			bool gen = cxx_gen_on(c) && !c->tentative && !c->template_depth;
+
 			cxx_advance(c);
 			cxx_advance(c);
-			if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
+			if (gen) {
+				/* name: statement, as a block of the label and the statement (C's AST_NODE_LABEL) */
+				uint32_t l = cxx_gen_label(c, name, loc);
+
+				if (c->ast->labels[l].defined)
+					cxx_gen_fail(c);
+				ln = cxx_gen_new_statement(c, AST_NODE_LABEL, loc, l, 0, 0);
+				c->ast->labels[l].defined = ln;
+			}
+			if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 				cxx_statement_parse(c);
+				st = c->snode;
+			}
+			if (gen && cxx_gen_on(c)) {
+				cc_id_list l2;
+
+				cc_id_list_init(&l2);
+				cc_id_list_append(c->ast, &l2, ln);
+				if (st)
+					cc_id_list_append(c->ast, &l2, st);
+				cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &l2), l2.n));
+			}
 			return;
 		}
 		break;
@@ -829,14 +852,22 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_gen_statement(c, cxx_gen_new_statement(c, op, sloc, 0, 0, 0));
 		return;
 	}
-	case CXX_KW_goto:
+	case CXX_KW_goto: {
+		uint32_t gloc = cxx_peek(c, 0)->loc;
+
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_STAR))
-			cxx_expression_parse(c);
-		else
+			cxx_expression_parse(c);	/* (goto *p: not built, the function gets no code) */
+		else {
+			uint32_t name = cxx_peek(c, 0)->id;
+
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
+			if (cxx_gen_on(c) && !c->tentative && !c->template_depth)
+				cxx_gen_statement(c, cxx_gen_new_statement(c, AST_NODE_GOTO, gloc, cxx_gen_label(c, name, gloc), 0, 0));
+		}
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		return;
+	}
 	case CXX_KW_case: {
 		bool known;
 		int64_t lo, hi;

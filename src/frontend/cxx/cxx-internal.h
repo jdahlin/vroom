@@ -479,7 +479,8 @@ typedef struct cxx {
 	uint32_t bnodes[8], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
 	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
-	uint32_t gen_vtt;		/* ... a base-object constructor or destructor of a class with virtual bases: its VTT parameter */
+	uint32_t gen_vtt;
+	struct cxx_gen_labels { uint32_t n, cap; uint32_t *name, *label; } *gen_labels;	/* ... its labels by name (goto, name:) */		/* ... a base-object constructor or destructor of a class with virtual bases: its VTT parameter */
 	uint32_t want_constant;		/* parsing a constant-expression (cxx_constant_expression_parse) */
 	uint8_t gen_wrapper;		/* cxx_gen_function_end: a C1/D1 built whole (no members, bases or vptrs added) */
 	uint8_t gen_abi_complete;	/* cxx_gen_abi_type: the complete-object function's type (no VTT parameter) */
@@ -738,6 +739,7 @@ VPRIV bool cxx_class_vbase_path(cxx *c, ast_qualified_type derived, ast_qualifie
    virtual base vbase, 0 for none, at offset off from it or from the class) */
 typedef struct cxx_vtt { uint32_t size, nsub, nvp; ast_qualified_type sub[16]; uint32_t sub_at[16]; ast_qualified_type vp_vbase[32]; uint64_t vp_off[32]; } cxx_vtt;
 VPRIV bool cxx_vtt_layout(cxx *c, ast_qualified_type t, cxx_vtt *v);
+VPRIV uint32_t cxx_gen_label(cxx *c, uint32_t name, uint32_t loc);
 VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls);
 VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);

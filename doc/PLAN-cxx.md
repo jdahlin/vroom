@@ -2170,3 +2170,10 @@ intervall-for över den).  Listan tolkas igen som anropsargument, `std::initiali
 och variabeln är den lokala lista `cxx_gen_initializer_list` bygger.  Kvar:
 `std::initializer_list<unsigned> f = {...}` med typen utskriven.  cxx-strict: 28 funktioner till, inga
 nya; 258 summerat per TU.
+
+## Status 129 (2026-11-15)
+`goto` och etiketter byggs (json:s lexer: `goto scan_number_minus;`): en etikettabell per funktion
+(sparad med kodgenereringens tillstånd, eftersom funktioner genereras inne i andra), C:s
+`AST_NODE_LABEL`/`AST_NODE_GOTO`; en etikett som en goto namnger men som inte definieras: ingen kod.
+`goto *p` inte än.  Test: `run/goto-labels.cpp`.  cxx-strict: 42 funktioner till, inga nya; 243 summerat
+per TU.

@@ -134,6 +134,29 @@ VPRIV void cxx_gen_statement(cxx *c, uint32_t node)
 	c->sdone = c->sdepth;
 }
 
+/* the body's label of this name (its index in the AST's labels): made at its first goto or definition */
+VPRIV uint32_t cxx_gen_label(cxx *c, uint32_t name, uint32_t loc)
+{
+	cc *a = c->ast;
+	struct cxx_gen_labels *g = c->gen_labels;
+	uint32_t l;
+
+	if (!g)
+		g = c->gen_labels = calloc(1, sizeof *g);
+	for (uint32_t i = 0; i < g->n; i++)
+		if (g->name[i] == name)
+			return g->label[i];
+	if (g->n == g->cap) {
+		g->cap = g->cap ? g->cap * 2 : 8;
+		g->name = realloc(g->name, g->cap * sizeof *g->name), g->label = realloc(g->label, g->cap * sizeof *g->label);
+	}
+	l = a->nlabel++;
+	memset(&a->labels[l], 0, sizeof a->labels[l]);
+	a->labels[l].name = name, a->labels[l].loc = loc;
+	g->name[g->n] = name, g->label[g->n++] = l;
+	return l;
+}
+
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z)
 {
 	return cc_statement_new(c->ast, op, loc, x, y, z);

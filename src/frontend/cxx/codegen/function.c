@@ -50,7 +50,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	ft = AST_TYPE(a, f->ty);
 	/* (from here the body is being built: what was, if anything, is set aside until cxx_gen_function_end) */
 	cxx_gen_push(c);
-	c->gen = 0, c->gen_failed = 0, c->gen_this = 0, c->gen_vtt = 0, c->gen_pre = NULL, c->gen_level = c->instantiating;
+	c->gen = 0, c->gen_failed = 0, c->gen_this = 0, c->gen_vtt = 0, c->gen_labels = NULL, c->gen_pre = NULL, c->gen_level = c->instantiating;
 	c->gen_sret = 0, c->gen_notemp = 0, c->gen_block_temps = 0;
 	c->gen_lambda = NULL;	/* (a lambda's operator(): set by its caller after this) */
 	cc_scope_open(a);
@@ -114,6 +114,15 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	cc *a = c->ast;
 	bool ok = c->gen && !c->gen_failed && body;
 	cc_id_list *pre = c->gen_pre;
+
+	if (c->gen_labels) {
+		/* every label a goto names is defined in the body */
+		for (uint32_t i = 0; i < c->gen_labels->n; i++)
+			if (!c->ast->labels[c->gen_labels->label[i]].defined)
+				ok = false;
+		free(c->gen_labels->name), free(c->gen_labels->label), free(c->gen_labels);
+		c->gen_labels = NULL;
+	}
 
 	if (!ok && c->gen && getenv("VCC_CXX_MISSING") && (f->sym || f->sym1)) {
 		/* VCC_CXX_MISSING: kept for cxx_gen_write_missing */

@@ -21,6 +21,7 @@ typedef struct cxx_gen_saved {
 	struct cxx_gen_saved *next;
 	uint8_t gen, gen_failed;
 	uint32_t gen_level, enode, snode, sdone, sdepth, gen_psyms, gen_npsyms, gen_fn, gen_this, gen_vtt, ast_fn, ast_depth;
+	struct cxx_gen_labels *gen_labels;
 	void *gen_block, *gen_pre;
 	ast_qualified_type gen_ret;
 	uint32_t gen_sret, gen_notemp, gen_block_temps;
@@ -38,7 +39,7 @@ VPRIV void cxx_gen_push(cxx *c)
 	s->next = c->gen_stack;
 	s->gen = c->gen, s->gen_failed = c->gen_failed, s->gen_level = c->gen_level;
 	s->enode = c->enode, s->snode = c->snode, s->sdone = c->sdone, s->sdepth = c->sdepth;
-	s->gen_psyms = c->gen_psyms, s->gen_npsyms = c->gen_npsyms, s->gen_fn = c->gen_fn, s->gen_this = c->gen_this, s->gen_vtt = c->gen_vtt;
+	s->gen_psyms = c->gen_psyms, s->gen_npsyms = c->gen_npsyms, s->gen_fn = c->gen_fn, s->gen_this = c->gen_this, s->gen_vtt = c->gen_vtt, s->gen_labels = c->gen_labels;
 	s->gen_block = c->gen_block, s->gen_pre = c->gen_pre, s->gen_ret = c->gen_ret;
 	s->ast_fn = c->ast->fn, s->ast_depth = c->ast->depth;
 	s->gen_sret = c->gen_sret, s->gen_notemp = c->gen_notemp, s->gen_block_temps = c->gen_block_temps;
@@ -60,7 +61,7 @@ VPRIV void cxx_gen_pop(cxx *c)
 	memcpy(cxx_gen_why, s->why_text, sizeof cxx_gen_why);
 	c->gen = s->gen, c->gen_failed = s->gen_failed, c->gen_level = s->gen_level;
 	c->enode = s->enode, c->snode = s->snode, c->sdone = s->sdone, c->sdepth = s->sdepth;
-	c->gen_psyms = s->gen_psyms, c->gen_npsyms = s->gen_npsyms, c->gen_fn = s->gen_fn, c->gen_this = s->gen_this, c->gen_vtt = s->gen_vtt;
+	c->gen_psyms = s->gen_psyms, c->gen_npsyms = s->gen_npsyms, c->gen_fn = s->gen_fn, c->gen_this = s->gen_this, c->gen_vtt = s->gen_vtt, c->gen_labels = s->gen_labels;
 	c->gen_block = s->gen_block, c->gen_ret = s->gen_ret;
 	c->gen_sret = s->gen_sret, c->gen_notemp = s->gen_notemp, c->gen_block_temps = s->gen_block_temps;
 	memcpy(c->gen_init_names, s->init_names, sizeof s->init_names), c->ngen_init_names = s->ninit_names;
