@@ -1857,8 +1857,20 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 		cxx_scope_push(c, fs);
 		cxx_params_declare(c, fs, l.params, l.nparams);
-		free(l.params);
-		cxx_function_body_parse(c);
+		{
+			/* code generation: a member function defined in its class (not a template's) */
+			bool gen = l.what == 0 && l.fn && !l.template_depth && l.scope->kind == CXX_SCOPE_CLASS && !l.scope->dependent &&
+				   l.scope->owner && !l.scope->owner->instance && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON);
+
+			if (gen) {
+				l.fn->fn_inline = 1;
+				gen = cxx_gen_function_begin(c, l.fn, fs, l.params, l.nparams);
+			}
+			free(l.params);
+			cxx_function_body_parse(c);
+			if (gen)
+				cxx_gen_function_end(c, l.fn, c->snode);
+		}
 		if (c->pos != l.end)
 			cxx_fail(c, "member function body ended early");
 		c->scope = ss;
@@ -2366,7 +2378,7 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 
 /* ---- classes and enums ------------------------------------------------------------------- */
 
-static void cxx_class_body_parse(cxx *c, cxx_scope *cs);
+static uint32_t cxx_class_body_parse(cxx *c, cxx_scope *cs);
 
 /* one base-specifier: its type (CXX_TY_UNKNOWN if not known), and whether it is virtual */
 static qty cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *virtual_out)
@@ -2679,8 +2691,15 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 				}
 			} else
 				cxx_name_path_push(c, q || dep ? 0 : name, &pl, &pv);	/* (X::Y {...}: not tracked) */
-			cxx_class_body_parse(c, cs);
-			cxx_class_end(c);
+			{
+				/* the member function bodies of the outermost class are parsed once it is complete:
+				   after its layout too (sizeof the class, members of this by value) */
+				uint32_t late_from = cxx_class_body_parse(c, cs);
+
+				cxx_class_end(c);
+				if (late_from != UINT32_MAX)
+					cxx_late_parse_all(c, late_from);
+			}
 			cxx_name_path_pop(c, pl, pv);
 		}
 		c->scope = outer;
@@ -2690,7 +2709,9 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 
 static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs);
 
-static void cxx_class_body_parse(cxx *c, cxx_scope *cs)
+/* (returns where the class's deferred bodies start, for the caller to parse after the class is laid out;
+   UINT32_MAX: not now -- a nested class, a tentative parse, an instance) */
+static uint32_t cxx_class_body_parse(cxx *c, cxx_scope *cs)
 {
 	uint32_t late_from = c->nlate, implicit = c->implicit_typename;
 
@@ -2703,7 +2724,7 @@ static void cxx_class_body_parse(cxx *c, cxx_scope *cs)
 	c->class_depth--;
 	c->implicit_typename = implicit;
 	if (!c->class_depth && !c->tentative && !c->instantiating)
-		cxx_late_parse_all(c, late_from);	/* the outermost class is complete */
+		return late_from;	/* the outermost class is complete */
 	else if (c->instantiating && !c->class_depth) {
 		/* an instance: its member functions' bodies wait for a call that uses them */
 		for (uint32_t i = late_from; i < c->nlate; i++)
@@ -2715,6 +2736,7 @@ static void cxx_class_body_parse(cxx *c, cxx_scope *cs)
 				free(c->late[i].params);
 		c->nlate = late_from;
 	}
+	return UINT32_MAX;
 }
 
 static void cxx_enum_specifier_parse(cxx *c)
@@ -2999,6 +3021,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				decl_fn = e;
 			if (e && f && context == CXX_CONTEXT_CLASS && !is_friend)
 				e->member_of = cxx_declaration_scope(c);
+			if (e && f && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC))
+				e->fn_static = 1;
+			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !(flags & (DS_STATIC | DS_TYPEDEF | DS_FRIEND)))
+				e->field_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
@@ -3124,17 +3150,24 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
 				{
 					/* code generation: a function at namespace scope that is no template and no member */
-					bool gen = context == CXX_CONTEXT_NAMESPACE && !qs && decl_fn && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON) &&
-						   cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+					bool gen;
+
+					/* (a member defined outside its class: the member its class declares) */
+					if (context == CXX_CONTEXT_NAMESPACE && qs && qs->kind == CXX_SCOPE_CLASS && !qs->dependent && !decl_fn && name > 1 &&
+					    !c->tentative && !c->template_depth && qs->owner && !qs->owner->instance)
+						decl_fn = cxx_member_function_find(c, qs, name, c->decl_params, c->ndecl_params, c->decl_const);
+					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
+					      !cxx_is(c, LEX_TOKEN_COLON) && cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
 
 					/* VCC_CXX_MANGLE=file: each function defined at namespace scope by its mangled name
 					   ("?name": not mangled yet), for bench/cxx-mangle.py to compare with clang's */
-					if (c->mangle_fd >= 0 && context == CXX_CONTEXT_NAMESPACE && !qs && decl_fn && !c->tentative && !c->template_depth &&
-					    !c->instantiating && !decl_fn->c_linkage && decl_fn->home) {
+					if (c->mangle_fd >= 0 && context == CXX_CONTEXT_NAMESPACE && decl_fn && !c->tentative && !c->template_depth &&
+					    !c->instantiating && !decl_fn->c_linkage && (decl_fn->home || decl_fn->member_of)) {
 						char mn[2048];
 						const vident *fv = &vintern_ents[decl_fn->name];
 
-						if (cxx_mangle_function(c, decl_fn, decl_fn->home, decl_fn->ty, false, mn, sizeof mn))
+						if (cxx_mangle_function(c, decl_fn, decl_fn->member_of ? decl_fn->member_of : decl_fn->home, decl_fn->ty,
+									decl_fn->member_of && decl_fn->fn_const, mn, sizeof mn))
 							dprintf(c->mangle_fd, "%s\n", mn);
 						else
 							dprintf(c->mangle_fd, "?%.*s\n", (int)fv->len, fv->s);
@@ -3158,6 +3191,12 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cxx_skip_balanced(c);
 			} else if (object && !cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
+				if (gen_local) {	/* (a class code is generated for: copied as C copies it) */
+					uint32_t in = c->enode;
+
+					cxx_gen_local_declare(c, gen_local, c->etype != CXX_TY_UNKNOWN && QUNQ(c->etype) == QUNQ(t) ? in : 0, true, name_loc);
+					gen_declared = true;
+				}
 				cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
 			} else if (object) {
 				cxx_braced_arguments_parse(c);
@@ -3586,7 +3625,19 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 	cxx_scope_push(c, fs);
 	cxx_params_declare(c, fs, l->params, l->nparams);
-	cxx_function_body_parse(c);
+	{
+		/* code generation: a member function defined in its class (not a template's, not an instance's yet) */
+		bool gen = l->what == 0 && l->fn && !l->template_depth && l->scope->kind == CXX_SCOPE_CLASS && !l->scope->dependent &&
+			   l->scope->owner && !l->scope->owner->instance && !cxx_is_kw(c, CXX_KW_try) && !cxx_is(c, LEX_TOKEN_COLON);
+
+		if (gen) {
+			l->fn->fn_inline = 1;
+			gen = cxx_gen_function_begin(c, l->fn, fs, l->params, l->nparams);
+		}
+		cxx_function_body_parse(c);
+		if (gen)
+			cxx_gen_function_end(c, l->fn, c->snode);
+	}
 	if (c->pos != l->end)
 		cxx_fail(c, "member function body ended early");
 }

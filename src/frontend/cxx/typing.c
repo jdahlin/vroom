@@ -17,6 +17,7 @@ VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
 	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0, c->econst = 0;
 	c->enode = 0;	/* (built by what follows the typing, where code is generated for it) */
+	c->eobj_node = 0;
 	c->edecl = t, c->edecl_name = 0;
 	c->ename = 0, c->ename_missing = 0;	/* (a name only until something is done with it) */
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {

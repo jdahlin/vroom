@@ -129,6 +129,9 @@ typedef struct cxx_entity {
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
 	uint8_t fn_const;		/* a member function declared const */
 	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
+	struct cxx_scope *field_of;	/* a non-static data member: its class */
+	uint8_t fn_static;		/* a static member function */
+	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
 	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
@@ -330,6 +333,9 @@ typedef struct cxx {
 	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
 	qty gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
+	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
+	uint32_t eobj_node;		/* a member function named through an object: the object's node */
+	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
 #define CXX_BRACE_MAX 256
 	uint32_t brace_nodes[CXX_BRACE_MAX], brace_n;	/* the last braced list's element nodes (flat lists) */
@@ -467,9 +473,12 @@ VPRIV void cxx_gen_comma(cxx *c, uint32_t x, uint32_t y, uint32_t loc);
 VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc);
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool has_init);
+VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
-VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
+VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const);
 VPRIV void cxx_gen_statement(cxx *c, uint32_t node);
 VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, uint32_t y, uint32_t z);
 VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e);

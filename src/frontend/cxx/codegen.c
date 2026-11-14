@@ -34,15 +34,26 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 	c->gen_failed = 1;
 }
 
-/* a type code is generated for so far: a scalar (not a reference) */
+static bool cxx_gen_object_type_ok(cxx *c, qty t);
+
+/*
+ * A type code is generated for so far, as a value (a parameter, a result, an operand): a scalar, a
+ * reference to an object type that is, or a class that C's rules pass and copy as C++'s do (laid out,
+ * POD for layout: no constructor, destructor or assignment of its own).
+ */
 VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 {
 	int k;
+	bool pod, empty;
 
 	if (t == CXX_TY_UNKNOWN)
 		return false;
 	k = AST_TYPE_KIND(c->ast, t);
-	return (k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE || (k == TY_PTR && !AST_TYPE(c->ast, t)->ext);
+	if (k == TY_PTR && AST_TYPE(c->ast, t)->ext)
+		return cxx_gen_object_type_ok(c, AST_TYPE(c->ast, t)->base);
+	if (k == TY_STRUCT || k == TY_UNION)
+		return (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE) && cxx_class_layout_info(c, t, &pod, &empty) && pod;
+	return (k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_PTR;
 }
 
 /* ... or an array of them (a variable's type; a parameter's has decayed) */
@@ -50,13 +61,124 @@ static bool cxx_gen_object_type_ok(cxx *c, qty t)
 {
 	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY && AST_TYPE(c->ast, t)->n)
 		t = AST_TYPE(c->ast, t)->base;
-	return cxx_gen_type_ok(c, t);
+	return t != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) && cxx_gen_type_ok(c, t);
+}
+
+static bool cxx_gen_is_reference(cxx *c, qty t)
+{
+	return t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext;
+}
+
+/* a temporary of the function body: a local of type t, declared in the block being built (0: no block) */
+static uint32_t cxx_gen_temporary(cxx *c, qty t, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t s, n;
+
+	if (!c->gen_block) {
+		cxx_gen_fail(c);
+		return 0;
+	}
+	s = cc_symbol_new(a, S_VAR, 0, QUNQ(t), loc);
+	a->syms[s].sc = SC_AUTO;
+	n = cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, 0);
+	cc_id_list_append(a, (cc_id_list *)c->gen_block, n);
+	return s;
+}
+
+/*
+ * The value x for an object, parameter or result of type to: converted for a scalar, as it is for a class,
+ * and for a reference the address of the lvalue it binds to (for a const T& or T&& bound to a value: of a
+ * temporary holding it).  0: not built.
+ */
+static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
+{
+	cc *a = c->ast;
+
+	if (!x)
+		return 0;
+	if (cxx_gen_is_reference(c, to)) {
+		qty rt = AST_TYPE(a, to)->base;
+
+		if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE) || (cxx_gen_type_ok(c, rt) && !cc_type_is_record(a, rt) &&
+								  QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(rt))) {
+			/* a value (or an lvalue of another type, converted): a temporary */
+			uint32_t tmp, tv, asg;
+
+			if (AST_TYPE(a, to)->ext == 1 && !(QQ(rt) & Q_CONST))
+				return 0;	/* (T& does not bind a value) */
+			if (!cxx_gen_object_type_ok(c, rt) || AST_TYPE_KIND(a, rt) == TY_ARRAY)
+				return 0;
+			tmp = cxx_gen_temporary(c, rt, loc);
+			if (!tmp)
+				return 0;
+			tv = cc_node_new(a, N_VAR, a->syms[tmp].ty, loc);
+			AST_NODE_AT(a, tv)->a = tmp;
+			AST_NODE_AT(a, tv)->flags = NF_LVALUE;
+			asg = cc_assignment_build(a, 0, tv, cc_type_is_record(a, rt) ? x : cc_conversion_apply(a, cc_conversion_decay(a, x), QUNQ(rt)), loc);
+			tv = cc_node_new(a, N_VAR, a->syms[tmp].ty, loc);
+			AST_NODE_AT(a, tv)->a = tmp;
+			AST_NODE_AT(a, tv)->flags = NF_LVALUE;
+			x = cc_node_new_operands(a, N_COMMA, cc_type_pointer(a, a->syms[tmp].ty), loc, asg, cc_address_of_build(a, tv, loc));
+		} else
+			x = cc_address_of_build(a, x, loc);
+		return cc_cast_insert(a, x, QUNQ(to), CK_NOP);
+	}
+	if (cc_type_is_record(a, to))
+		return QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(to) ? cc_node_rvalue(a, x) : 0;
+	return cc_conversion_apply(a, cc_conversion_decay(a, x), QUNQ(to));
+}
+
+/* a reference as an expression: the lvalue it refers to */
+static uint32_t cxx_gen_referent(cxx *c, uint32_t x, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty t = AST_NODE_AT(a, x)->ty;
+
+	x = cc_node_rvalue(a, x);
+	x = cc_cast_insert(a, x, cc_type_pointer(a, AST_TYPE(a, t)->base), CK_NOP);	/* (a plain pointer to the referent) */
+	return cc_dereference_build(a, x, loc);
+}
+
+/* base.name or base->name, a data member */
+VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty bt;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !base)
+		return;
+	if (arrow)
+		base = cc_dereference_build(a, cc_conversion_decay(a, base), loc);
+	bt = AST_NODE_AT(a, base)->ty;
+	if (!cc_type_is_record(a, bt) || !(a->tags[AST_TYPE(a, bt)->aux].flags & RF_COMPLETE))
+		return;
+	c->enode = member(a, base, name, loc);
+	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))
+		c->enode = cxx_gen_referent(c, c->enode, loc);
 }
 
 /*
  * The function's symbol name: C++'s mangled name (mangle.c), or the plain name for main and extern "C".
  * False: a name not mangled yet.
  */
+/* is f a member function called on an object (not static)? */
+static bool cxx_gen_has_this(const cxx_entity *f)
+{
+	return f->member_of && f->member_of->kind == CXX_SCOPE_CLASS && !f->fn_static;
+}
+
+/* the class a member function belongs to (its this is a pointer to it, const for a const member) */
+static qty cxx_gen_this_type(cxx *c, const cxx_entity *f)
+{
+	qty ct = f->member_of->owner ? f->member_of->owner->ty : CXX_TY_UNKNOWN;
+
+	if (ct == CXX_TY_UNKNOWN)
+		return CXX_TY_UNKNOWN;
+	return cc_type_pointer(c->ast, f->fn_const ? QT(QI(ct), QQ(ct) | Q_CONST) : ct);
+}
+
 static bool cxx_gen_name(cxx *c, cxx_entity *f)
 {
 	cc *a = c->ast;
@@ -66,18 +188,40 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 	char *keep;
 	size_t n;
 	uint32_t si;
+	cxx_scope *home = f->member_of ? f->member_of : f->home;
 
 	if (f->mangled || f->c_linkage)
 		return true;
-	if (f->member_of || !f->home)
+	if (!home || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC)
 		return false;
-	if (f->home == c->global && v->len == 4 && !memcmp(v->s, "main", 4)) {
+	if (home == c->global && v->len == 4 && !memcmp(v->s, "main", 4)) {
 		f->mangled = 1;
 		return true;
 	}
-	if (!cxx_mangle_function(c, f, f->home, f->ty, false, name, sizeof name))
+	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, name, sizeof name))
 		return false;
-	/* the symbol's assembler name, as an asm label gives one in C */
+	if (!f->sym) {
+		/* a member function: its symbol, of the function's type as the ABI calls it (this first) */
+		const ctype *ft = AST_TYPE(a, f->ty);
+		qty ps[33], st = f->ty;
+		uint32_t np = 0;
+
+		if (ft->n > 31)
+			return false;
+		if (cxx_gen_has_this(f)) {
+			ps[np++] = cxx_gen_this_type(c, f);
+			if (ps[0] == CXX_TY_UNKNOWN)
+				return false;
+			for (uint32_t i = 0; i < ft->n; i++)
+				ps[np++] = a->params[ft->aux + i];
+			ft = AST_TYPE(a, f->ty);
+			st = cxx_type_function(c, ft->base, ps, np, (ft->flags & TF_VARIADIC) != 0);
+		}
+		f->sym = cc_symbol_new(a, S_FUNC, f->name, st, 0);
+		a->syms[f->sym].flags |= SF_GLOBAL;
+	}
+	/* the symbol's assembler name, as an asm label gives one in C; weak for an inline function (every TU
+	   that uses it defines it: no COMDAT group yet) */
 	n = strlen(name);
 	keep = cc_heap_allocate(a, n + 1);
 	memcpy(keep, name, n + 1);
@@ -85,9 +229,45 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 	a->strs[si] = (cstr){ keep, n + 1, 1, LEX_TOKEN_STRING };
 	memset(&at, 0, sizeof at);
 	at.asmname = si + 1;
+	at.weak = f->fn_inline;
 	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
 	f->mangled = 1;
 	return true;
+}
+
+/* this, in a member function's body */
+VPRIV void cxx_gen_this(cxx *c, uint32_t loc)
+{
+	uint32_t n;
+
+	if (!cxx_gen_on(c) || !c->gen_this)
+		return;
+	n = cc_node_new(c->ast, N_VAR, c->ast->syms[c->gen_this].ty, loc);
+	AST_NODE_AT(c->ast, n)->a = c->gen_this;
+	AST_NODE_AT(c->ast, n)->flags = NF_LVALUE;
+	c->enode = cc_node_rvalue(c->ast, n);
+}
+
+/* the member function of class cls named name with these parameter types and constness (an out-of-class definition's) */
+VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const)
+{
+	cc *a = c->ast;
+
+	for (cxx_entity *e = cxx_lookup_in(c, cls, name, 0); e; e = e->next) {
+		const ctype *ft;
+		bool same = true;
+
+		if (e->kind != CXX_ENTITY_VALUE || e->member_of != cls || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, e->ty) != TY_FUNC)
+			continue;
+		ft = AST_TYPE(a, e->ty);
+		if (ft->n != nps || (bool)e->fn_const != is_const)
+			continue;
+		for (uint32_t i = 0; i < nps && same; i++)
+			same = ps[i].ty != CXX_TY_UNKNOWN && QUNQ(a->params[ft->aux + i]) == QUNQ(ps[i].ty);
+		if (same)
+			return e;
+	}
+	return NULL;
 }
 
 VPRIV void cxx_gen_integer(cxx *c, int64_t v, qty t, uint32_t loc)
@@ -117,11 +297,13 @@ VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc)
 {
 	uint32_t n;
 
-	if (!cxx_gen_on(c) || !v->sym || !cxx_gen_object_type_ok(c, v->ty))
+	if (!cxx_gen_on(c) || !v->sym || !(cxx_gen_object_type_ok(c, v->ty) || cxx_gen_type_ok(c, v->ty)))
 		return;
 	n = cc_node_new(c->ast, N_VAR, c->ast->syms[v->sym].ty, loc);
 	AST_NODE_AT(c->ast, n)->a = v->sym;
 	AST_NODE_AT(c->ast, n)->flags = NF_LVALUE;
+	if (cxx_gen_is_reference(c, c->ast->syms[v->sym].ty))
+		n = cxx_gen_referent(c, n, loc);	/* (a reference names what it refers to) */
 	c->enode = n;
 }
 
@@ -210,10 +392,10 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 	cc *a = c->ast;
 
 	(void)loc;
-	if (!cxx_gen_on(c) || !x || !cxx_gen_type_ok(c, to))
+	if (!cxx_gen_on(c) || !x || !cxx_gen_type_ok(c, to) || cxx_gen_is_reference(c, to) || cc_type_is_record(a, to))
 		return;
 	x = cc_conversion_decay(a, x);
-	if (!cxx_gen_type_ok(c, AST_NODE_AT(a, x)->ty))
+	if (!cxx_gen_type_ok(c, AST_NODE_AT(a, x)->ty) || cc_type_is_record(a, AST_NODE_AT(a, x)->ty))
 		return;
 	c->enode = cc_cast_insert(a, x, QUNQ(to), cc_conversion_cast_kind(a, AST_NODE_AT(a, x)->ty, QUNQ(to), x));
 }
@@ -285,15 +467,14 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 }
 
 /* f(args): the function overload resolution picked, the arguments converted to its parameters' types */
-VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t nargs, uint32_t loc)
+VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
-	uint32_t fn, n;
+	uint32_t fn, n, self = 0;
 
-	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || !f->sym || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC ||
-	    nargs > 16)
+	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
 		return;
 	ft = AST_TYPE(a, f->ty);
 	if (ft->n != nargs || (ft->flags & TF_VARIADIC) || (!cxx_gen_type_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
@@ -301,13 +482,31 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t na
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i] || !cxx_gen_type_ok(c, a->params[ft->aux + i]))
 			return;
-	if (!cxx_gen_name(c, f))
+	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
 		return;
+	ft = AST_TYPE(a, f->ty);
 	cc_id_list_init(&list);
-	for (uint32_t i = 0; i < nargs; i++) {
-		qty pt = a->params[ft->aux + i];
+	if (cxx_gen_has_this(f)) {
+		/* the object: its address (obj.f(), p->f()), or this for a member named alone */
+		qty tt = cxx_gen_this_type(c, f);
 
-		cc_id_list_append(a, &list, cc_conversion_apply(a, cc_conversion_decay(a, args[i]), QUNQ(pt)));
+		if (object)
+			self = arrow ? cc_conversion_decay(a, object) : (AST_NODE_AT(a, object)->flags & NF_LVALUE) ? cc_address_of_build(a, object, loc) : 0;
+		else if (c->gen_this) {
+			cxx_gen_this(c, loc);
+			self = c->enode;
+			c->enode = 0;
+		}
+		if (!self || tt == CXX_TY_UNKNOWN)
+			return;	/* (a member called on a value: a temporary, not built yet) */
+		cc_id_list_append(a, &list, cc_cast_insert(a, self, tt, CK_NOP));
+	}
+	for (uint32_t i = 0; i < nargs; i++) {
+		uint32_t arg = cxx_gen_bind(c, args[i], a->params[ft->aux + i], loc);
+
+		if (!arg)
+			return;
+		cc_id_list_append(a, &list, arg);
 	}
 	fn = cc_node_new(a, N_VAR, a->syms[f->sym].ty, loc);
 	AST_NODE_AT(a, fn)->a = f->sym;
@@ -316,7 +515,9 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t na
 	n = cc_node_new(a, N_CALL, QUNQ(ft->base), loc);
 	AST_NODE_AT(a, n)->a = fn;
 	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &list);
-	AST_NODE_AT(a, n)->c = nargs;
+	AST_NODE_AT(a, n)->c = list.n;
+	if (cxx_gen_is_reference(c, ft->base))
+		n = cxx_gen_referent(c, n, loc);
 	c->enode = n;
 }
 
@@ -357,8 +558,13 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 		cxx_gen_fail(c);
 		return 0;
 	}
-	if (has_value)
-		e = cc_conversion_apply(a, cc_conversion_decay(a, e), QUNQ(c->gen_ret));
+	if (has_value) {
+		e = cxx_gen_bind(c, e, c->gen_ret, loc);
+		if (!e) {
+			cxx_gen_fail(c);
+			return 0;
+		}
+	}
 	return cc_statement_new(a, N_RETURN, loc, e, 0, 0);
 }
 
@@ -370,7 +576,7 @@ VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, qty t, uint32_t loc)
 
 	if (!cxx_gen_on(c))
 		return 0;
-	if (!cxx_gen_object_type_ok(c, t)) {
+	if (!cxx_gen_object_type_ok(c, t) && !(cxx_gen_is_reference(c, t) && cxx_gen_type_ok(c, t))) {
 		cxx_gen_fail(c);
 		return 0;
 	}
@@ -399,9 +605,17 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_ini
 		cxx_gen_fail(c);	/* (an array from something that is not a list) */
 		return;
 	}
+	if (!has_init && cxx_gen_is_reference(c, a->syms[s].ty)) {
+		cxx_gen_fail(c);
+		return;
+	}
 	if (has_init) {
 		if (AST_NODE_AT(a, init)->op != N_INIT)
-			init = cc_conversion_apply(a, cc_conversion_decay(a, init), QUNQ(a->syms[s].ty));
+			init = cxx_gen_bind(c, init, a->syms[s].ty, loc);
+		if (!init) {
+			cxx_gen_fail(c);
+			return;
+		}
 		a->syms[s].body = init;
 		a->syms[s].flags |= SF_DEFINED;
 	}
@@ -496,9 +710,11 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	const ctype *ft;
 	cc_id_list psyms;
 
-	c->gen = 0, c->gen_failed = 0;
-	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || !f || !f->sym || f->ty == CXX_TY_UNKNOWN ||
-	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (a->syms[f->sym].flags & SF_DEFINED))
+	if (c->gen)
+		return false;	/* (a body parsed inside another: a local class's member, later) */
+	c->gen = 0, c->gen_failed = 0, c->gen_this = 0;
+	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || !f || f->ty == CXX_TY_UNKNOWN ||
+	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)))
 		return false;
 	ft = AST_TYPE(a, f->ty);
 	if ((ft->flags & TF_VARIADIC) || ft->n != nps || (!cxx_gen_type_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
@@ -506,10 +722,19 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	for (uint32_t i = 0; i < nps; i++)
 		if (!cxx_gen_type_ok(c, ps[i].ty))
 			return false;
-	if (!cxx_gen_name(c, f))
+	if (!cxx_gen_name(c, f) || !f->sym)
 		return false;
+	ft = AST_TYPE(a, f->ty);
 	cc_scope_open(a);
 	cc_id_list_init(&psyms);
+	if (cxx_gen_has_this(f)) {
+		uint32_t s = cc_symbol_new(a, S_VAR, vintern_cstr("this"), cxx_gen_this_type(c, f), a->syms[f->sym].loc);
+
+		a->syms[s].flags |= SF_PARAM;
+		a->syms[s].sc = SC_AUTO;
+		cc_id_list_append(a, &psyms, s);
+		c->gen_this = s;
+	}
 	for (uint32_t i = 0; i < nps; i++) {
 		uint32_t s = cc_symbol_new(a, S_VAR, ps[i].name > 1 ? ps[i].name : 0, QUNQ(ps[i].ty), a->syms[f->sym].loc);
 		cxx_entity *pe = ps[i].name > 1 ? cxx_lookup_in(c, fs, ps[i].name, 0) : NULL;
@@ -520,7 +745,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 		if (pe)
 			pe->sym = s;
 	}
-	c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = nps;
+	c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = psyms.n;
 	c->gen_ret = ft->base;
 	c->gen_fn = a->fn;
 	a->fn = f->sym;
@@ -535,7 +760,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	cc *a = c->ast;
 	bool ok = c->gen && !c->gen_failed && body;
 
-	c->gen = 0;
+	c->gen = 0, c->gen_this = 0;
 	a->fn = c->gen_fn;
 	cc_scope_close(a);
 	c->stats.functions++;

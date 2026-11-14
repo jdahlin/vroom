@@ -921,3 +921,28 @@ definierade symboler ska vara de clang++ definierar: 2/2 (rekursion, tre
 Saknas för json: klasser (medlemmar, `this`, konstruktorer/destruktorer),
 referenser, namnrymder och klassnamn i mangling, mallinstansers kroppar,
 undantag, vtabeller/RTTI, strängliteraler, `for`/`switch`/`do`.
+
+### Status 2026-11-14 (25): mangling, referenser, struct-värden och medlemsfunktioner i kod
+
+- `mangle.c`: Itanium-mangling för funktioner (namnrymder, klasser,
+  mallinstanser med typargument, pekare/referenser/cv, funktions- och
+  fälttyper, operatorer, substitutioner, `St`, namnlös namnrymd).
+  `bench/cxx-mangle.py` (`src/test/cxx/mangle/`): varje symbol clang++
+  definierar ska finnas bland vcc:s namn: 2/2 filer, 34 namn, bland dem
+  `std::string`, `vector`, `map`, `unique_ptr` och iteratorer.
+- Kod byggs nu också för: `?:`, `static_cast`/C-/funktionscast mellan
+  skalärer, `a[i]`, strängliteraler, komma, `for`/`do`, lokala fält med
+  platta initierarlistor, variabler i namnrymdsscope; referenser
+  (parametrar, lokala, returvärden; `const T&` bundet till ett värde får en
+  temporär); klasser som C skickar och kopierar som C++ gör (POD för
+  layout): medlemsåtkomst, värdeparametrar, returvärden, tilldelning;
+  medlemsfunktioner (i klassen och utanför, `const`, `static`, `this`,
+  implicit `this->`, `obj.f()`/`p->f()`), inline-funktioner som svaga
+  symboler.
+- Medlemsfunktioners kroppar tolkas efter att klassen lagts ut (inte bara
+  efter dess sista medlem): `sizeof` av klassen och medlemmar av `*this`
+  har sin layout där.
+`bench/cxx-run-tests.py`: 4/4 (omkring 70 funktioner, alla med kod).
+Saknas för json: konstruktorer/destruktorer och klasser som inte är POD,
+`switch`, uppräkningar, mallinstansers funktionskroppar, undantag,
+vtabeller/RTTI, lambdas, `new`/`delete`, range-for.

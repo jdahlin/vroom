@@ -123,6 +123,12 @@ static void cxx_name_type(cxx *c, cxx_entity *e)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	if (v)
 		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
+		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;
+
+		cxx_gen_this(c, loc);
+		cxx_gen_member(c, c->enode, true, v->name, loc);
+	}
 }
 
 /*
@@ -918,8 +924,10 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_et(c, cc_type_basic(TY_LONG), false);
 		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative)
 			cxx_et(c, cxx_nullptr_type(c), false);
-		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative)
+		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative) {
 			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
+			cxx_gen_this(c, t->loc);
+		}
 		else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)
 			cxx_et(c, cc_type_basic(TY_UINT), false);
 		return;
@@ -1169,6 +1177,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 				cxx_entity *set = c->ecallee;
 				qty callee = c->etype;
 				uint8_t callee_lval = c->elval;
+				uint32_t obj_node = c->eobj_node;
+				bool obj_arrow = c->eobj_arrow;
 				cxx_targ xa[8];
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
 				uint8_t call_obj = c->call_obj;
@@ -1197,8 +1207,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
-					if (set && c->call_resolved && c->call_picked && !call_obj && c->etype != CXX_TY_UNKNOWN)
-						cxx_gen_call(c, c->call_picked, anodes, an, cloc);
+					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
+						cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc);
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
 					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {
@@ -1219,6 +1229,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 			/* the object's class: its scope, for the member's lookup */
 			qty obj = c->etype;
 			cxx_scope *cls = NULL;
+			uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
+			bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
 
 			if (cxx_is(c, LEX_TOKEN_ARROW))
 				obj = obj != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, obj) == TY_PTR && !AST_TYPE(c->ast, obj)->ext ?
@@ -1298,6 +1310,10 @@ static void cxx_postfix_expression_parse(cxx *c)
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						if (c->etype != CXX_TY_UNKNOWN && m->kind == CXX_ENTITY_VALUE && !m->next)
+							cxx_gen_member(c, obj_node, arrow, id, mloc);	/* a data member */
+						else
+							c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* member functions: the call's object */
 					} else if (!m && !cls->dependent && !cls->has_dependent_base)
 						CXX_INVALID(c);	/* no such member (a requirement fails) */
 				}
