@@ -1903,3 +1903,10 @@ arraymedlem från `{}` nollställs (`__compressed_pair_padding`).  En mall vcc i
 i vägen för en kandidat som matchar alla argument exakt, när mallens icke-beroende parameter kräver en
 konvertering (`impl(__priority_tag<0>, ...)`).  `__atomic_add_fetch`/`__atomic_load_n` och liknande:
 typade, och byggda som C-frontendens noder (libc++:s referensräkning).  cxx-strict: 3/70, 330 (338).
+
+## Status 107 (2026-11-14)
+std::map::emplace/operator[] med bara vcc: två orsaker kvar.  (1) Beroende på ordning: när
+`pair<const int, int>`-konstruktorinstansen `pair(_U1&&, _U2&&)` skapas först inne i map:s väg
+(allocator_traits/construct_at) får den ingen typ (anropet byggs inte); skapas den först i vanlig kod går
+det.  (2) I `__tree::__emplace_unique`:s andra lambda (`[this](_Args&&... __args2)`) blir `__args2`
+otypat, trots att samma form fungerar i reducerade fall.  Båda nästa steg.
