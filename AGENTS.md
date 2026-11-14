@@ -253,6 +253,7 @@ bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
+bench/var-cmp.py coff -j 4 [-n N]   # ... no kernel tree: COFF (MinGW) and ELF members, generated, import records, N mutants (~15 s)
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
 bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
