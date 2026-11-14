@@ -599,7 +599,13 @@ static void cxx_primary_expression_parse(cxx *c)
 		cxx_paren_expression_parse(c);
 		return;
 	case LEX_TOKEN_LEFT_SQUARE:
-		cxx_lambda_parse(c);
+		{
+			uint8_t capture = c->ret_capture;	/* (the lambda's own returns are not the function's) */
+
+			c->ret_capture = 0;
+			cxx_lambda_parse(c);
+			c->ret_capture = capture;
+		}
 		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a closure type: not built; not its body's last expression's) */
 		return;
 	case LEX_TOKEN_LEFT_BRACE:

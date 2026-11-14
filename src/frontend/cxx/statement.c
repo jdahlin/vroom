@@ -307,8 +307,15 @@ VPRIV void cxx_statement_parse(cxx *c)
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 			cxx_braced_init_list_parse(c);
-		else if (!cxx_is(c, LEX_TOKEN_SEMICOLON))
+		else if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
 			cxx_expression_parse(c);
+			if (c->ret_capture)
+				c->ret_seen = 1;
+			/* an auto return type: the first return's (the others must agree) */
+			if (c->ret_capture && c->ret_type == CXX_TY_UNKNOWN && !c->tentative)
+				c->ret_type = c->etype, c->ret_lval = c->elval;
+		} else if (c->ret_capture && c->ret_type == CXX_TY_UNKNOWN && !c->tentative)
+			c->ret_type = cc_type_basic(TY_VOID), c->ret_lval = 0;
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		return;
 	case CXX_KW_break: case CXX_KW_continue:

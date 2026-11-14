@@ -116,7 +116,7 @@ VPRIV void cxx_unary_type(cxx *c, int op, qty t, bool lvalue)
 {
 	switch (op) {
 	case LEX_TOKEN_AMPERSAND:
-		cxx_et(c, lvalue && t != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, t) ? cxx_type_pointer(c, t, 0) : CXX_TY_UNKNOWN, false);
+		cxx_et(c, lvalue && t != CXX_TY_UNKNOWN ? cxx_type_pointer(c, t, 0) : CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_STAR:
 		cxx_et(c, cxx_is_ptr(c, t) ? AST_TYPE(c->ast, t)->base : CXX_TY_UNKNOWN, true);

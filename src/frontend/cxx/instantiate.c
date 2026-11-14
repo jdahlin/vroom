@@ -1082,7 +1082,8 @@ typedef struct cxx_outer {
 	qty this_type, etype;
 	bool elval;
 	cxx_entity *ecallee, *last_fn;
-	uint8_t this_const;
+	uint8_t this_const, ret_capture, ret_lval;
+	qty ret_type;
 } cxx_outer;
 
 static void cxx_outer_save(cxx *c, cxx_outer *o)
@@ -1094,7 +1095,8 @@ static void cxx_outer_save(cxx *c, cxx_outer *o)
 	o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
 	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
 	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
-	o->this_const = c->this_const;
+	o->this_const = c->this_const, o->ret_capture = c->ret_capture, o->ret_lval = c->ret_lval, o->ret_type = c->ret_type;
+	c->ret_capture = 0;
 }
 
 static void cxx_outer_restore(cxx *c, cxx_outer *o)
@@ -1104,7 +1106,7 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 	memcpy(c->decl_params, o->dp, o->ndp * sizeof *o->dp), c->ndecl_params = o->ndp, c->decl_ndefaults = o->ndd;
 	free(o->targs), free(o->dp);
 	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
-	c->this_const = o->this_const;
+	c->this_const = o->this_const, c->ret_capture = o->ret_capture, c->ret_lval = o->ret_lval, c->ret_type = o->ret_type;
 }
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
@@ -1203,7 +1205,8 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
 	cxx_param *dp;
 	qty this_type = c->this_type, etype = c->etype;
-	uint8_t this_const = c->this_const;
+	uint8_t this_const = c->this_const, ret_capture = c->ret_capture, ret_lval = c->ret_lval;
+	qty ret_type = c->ret_type;
 	bool elval = c->elval;
 	cxx_entity *ecallee = c->ecallee;
 
@@ -1256,7 +1259,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	memcpy(c->decl_params, dp, ndp * sizeof *dp), c->ndecl_params = ndp, c->decl_ndefaults = ndd;
 	free(targs), free(dp);
 	c->this_type = this_type, c->etype = etype, c->elval = elval, c->ecallee = ecallee;
-	c->this_const = this_const;
+	c->this_const = this_const, c->ret_capture = ret_capture, c->ret_lval = ret_lval, c->ret_type = ret_type;
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np))
 			f->done[i].ret = r;
@@ -1412,6 +1415,8 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			/* T&& with an lvalue: a forwarding reference deduces T as A& */
 			if (ext == 2 && !QQ(P) && lval[i] && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
 				A = cxx_type_reference(c, A, false);
+			else
+				A = QT(QI(A), QQ(A) | QQ(P));	/* (const T& binds what is not const too) */
 		} else {
 			/* by value: arrays and functions decay, top-level cv goes */
 			const ctype *at = AST_TYPE(c->ast, A);

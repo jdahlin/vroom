@@ -261,6 +261,9 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint8_t ret_seen;		/* ... and a return with a value was seen (its type perhaps not known) */
+	uint8_t ret_capture, ret_lval;	/* the body being parsed returns auto: its first return's type is wanted */
+	qty ret_type;
 	uint32_t range_name;		/* a range-for's declaration: its name, type (auto: a pattern over the placeholder) */
 	qty range_type;
 	uint8_t range_auto;
@@ -364,6 +367,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV void cxx_class_unverifiable(cxx *c);
 VPRIV void cxx_for_range_declaration_parse(cxx *c);
 VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem);
 VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);

@@ -1817,6 +1817,8 @@ static void cxx_using_parse(cxx *c)
 				e->kind = CXX_ENTITY_TYPE;
 				e->dependent = dep;
 				e->ty = c->type_out;
+				if (c->type_out == CXX_TY_UNKNOWN && !c->template_depth && c->class_depth)
+					cxx_class_unverifiable(c);
 				if (target && target->members)	/* (dependent: followed outside templates, json::lexer::) */
 					e->members = target->members, e->specs = target->specs, e->nspecs = target->nspecs;
 			}
@@ -2616,6 +2618,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
 				e->ty = t;
+				if (t == CXX_TY_UNKNOWN && !c->template_depth && context == CXX_CONTEXT_CLASS)
+					cxx_class_unverifiable(c);
 				if (type_of_typedef && type_of_typedef->members && !typedef_dependent)
 					e->members = type_of_typedef->members, e->specs = type_of_typedef->specs, e->nspecs = type_of_typedef->nspecs;
 			}
@@ -2967,11 +2971,30 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class)
 		return CXX_TY_UNKNOWN;
 	c->type_in = ctor_class ? cc_type_basic(TY_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
+	/* auto f(): the declarator over auto's placeholder; the body's first return gives the type */
+	bool ret_auto = !ctor_class && c->ds_auto && c->ds_type == CXX_TY_UNKNOWN;
+	qty ret_pattern = CXX_TY_UNKNOWN;
+
+	if (ret_auto)
+		c->type_in = QT(QI(cxx_auto_type(c)), c->ds_quals);
 	if (any_return && c->type_in == CXX_TY_UNKNOWN)
 		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
 	c->decl_return = CXX_TY_UNKNOWN;
 	cxx_declarator_parse(c, false, &q, &f, NULL);
 	t = f ? c->type_out : CXX_TY_UNKNOWN;
+	if (ret_auto && f) {
+		/* the placeholder stays here: a pattern for the deduction below, void or unknown to callers */
+		if (c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return)) {
+			ret_pattern = c->decl_return;
+			c->decl_return = any_return ? cc_type_basic(TY_VOID) : CXX_TY_UNKNOWN;
+			if (t != CXX_TY_UNKNOWN) {
+				const ctype *ft = AST_TYPE(c->ast, t);
+
+				t = any_return ? cxx_type_function(c, cc_type_basic(TY_VOID), &c->ast->params[ft->aux], ft->n,
+								   (ft->flags & TF_VARIADIC) != 0) : CXX_TY_UNKNOWN;
+			}
+		}
+	}
 	/* a parameter of unknown type: the return type alone (callers read only it then) */
 	if (f && t == CXX_TY_UNKNOWN && !any_return && c->decl_return != CXX_TY_UNKNOWN)
 		t = cxx_type_function(c, c->decl_return, NULL, 0, true);
@@ -2986,9 +3009,24 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 
 			cxx_scope_push(c, fs);
 			cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
+			c->ret_capture = ret_pattern != CXX_TY_UNKNOWN, c->ret_type = CXX_TY_UNKNOWN, c->ret_seen = 0;
 			cxx_function_body_parse(c);
 			c->scope = outer;
 			*body = true;
+			if (c->ret_capture) {
+				/* no return statement: void */
+				qty r;
+
+				if (c->ret_type == CXX_TY_UNKNOWN && !c->ret_seen)
+					c->ret_type = cc_type_basic(TY_VOID);	/* no return statement */
+				r = c->ret_type == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN :
+				    AST_TYPE_KIND(c->ast, c->ret_type) == TY_VOID ? (ret_pattern == cxx_auto_type(c) ? c->ret_type : CXX_TY_UNKNOWN) :
+				    cxx_auto_deduce(c, ret_pattern, c->ret_type, c->ret_lval);
+
+				c->ret_capture = 0;
+				if (r != CXX_TY_UNKNOWN)
+					t = cxx_type_function(c, r, NULL, 0, true);	/* (callers read the return type only) */
+			}
 		}
 	}
 	return t;

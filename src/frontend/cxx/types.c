@@ -109,6 +109,7 @@ typedef struct cxx_class_build {
 	field *f;
 	uint32_t nf, cf;
 	int skip;			/* -1: lay it out; else CXX_SKIP_* */
+	uint8_t unverifiable;		/* a member type of an instance did not resolve: clang may reject the instance */
 	uint32_t path_len;		/* the name path before this class (layout dump) */
 	uint8_t path_valid;
 	/* the Itanium ABI's inputs: base subobjects, and whether the class is POD for layout (a non-POD
@@ -367,7 +368,7 @@ VPRIV void cxx_class_end(cxx *c)
 		c->stats.classes_laid_out++;
 		if (!r->name)
 			c->anonymous_class = QT(r->ty, 0);
-		if (c->layout_fd >= 0 && c->name_path_valid && c->name_path_len) {
+		if (c->layout_fd >= 0 && c->name_path_valid && c->name_path_len && !b->unverifiable) {
 			/* elaborated: struct stat / struct timezone share their names with a function or variable */
 			const char *key = r->flags & RF_UNION ? "union" : "struct";
 
@@ -474,4 +475,12 @@ VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align)
 		return true;
 	}
 	return false;
+}
+
+/* an instance's member typedef has no type: its layout is not asserted (the instance may be ill-formed
+   and only named where that is harmless, std::__to_address_arrow_result<const char *>) */
+VPRIV void cxx_class_unverifiable(cxx *c)
+{
+	if (c->build && c->instantiating && !c->tentative)
+		c->build->unverifiable = 1;
 }
