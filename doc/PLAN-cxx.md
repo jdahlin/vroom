@@ -1721,3 +1721,14 @@ statement, global, function (150-680 rader), gemensamt i `codegen/codegen.h`.  R
 byte för byte lika på unit-algorithms, unit-hash, unit-diagnostics; varje fil kompilerar ensam
 (`VCC_UNITY=`; expression.c fick <ctype.h>, cxx_lookahead_fn delas, typing.c går via
 cxx_ftemplate_params).  cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36; cxx-fork 67/70 som förut.
+
+## Status 82 (2026-11-14)
+Weak-fill-mätningarna borttagna (bench/cxx-fork.py, cxx-weakfill.py, cxx-unity.py: clangs objekt fyllde
+det vcc inte kompilerade, vilket dolde luckorna).  I stället `bench/cxx-strict.py`: varje test-TU
+kompileras av vcc ensam, med `VCC_CXX_MISSING=FIL` (vcc skriver varje funktion vars kropp den inte
+byggde, med assemblernamn och var den gav upp); en funktion som TU:ns eget objekt ska definiera (clangs
+gör det) men vcc:s lämnar odefinierad är en saknad kompilering och TU:n fallerar med dem listade; utan
+sådana länkas den med doctests main och körs.  Summeringen räknar de saknade per ställe i codegen.
+(Kompilatorns fork-server, VCC_FORK_LIST, finns kvar.)  Första körningen: 0 av 70 TU:s kompletta, 67 med
+saknade kompileringar (917 funktioner summerat), 3 länkfel (namn vcc manglar annorlunda).  Orsakerna är
+ännu för grova: statement.c:600/362 (en sats utan nod) döljer det inre skälet; det är nästa steg.

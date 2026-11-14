@@ -22,7 +22,8 @@ typedef struct cxx_prv {
 #ifdef VCC_UNITY
 static __thread char cxx_gen_why[256];
 #else
-extern __thread char cxx_gen_why[256];
+extern __thread char cxx_gen_why[256];VPRIV uint32_t cxx_gen_check_missing(cxx *c);
+
 #endif
 
 /* the functions of codegen/, by file */

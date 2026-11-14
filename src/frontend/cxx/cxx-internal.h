@@ -425,6 +425,8 @@ typedef struct cxx {
 	uint32_t gen_delete_sym, gen_pure_sym;
 	/* function symbols by assembler name: two entities for one function (found through different declarations) share the symbol */
 	struct { const char *name; uint32_t sym; } *sym_names;
+	struct { uint32_t sym, sym1; char *why; } *missing;	/* VCC_CXX_MISSING: functions whose bodies were not built */
+	uint32_t nmissing, cmissing;
 	uint32_t nsym_names, csym_names;
 	cxx_scope **ti_list;		/* the classes whose type info this TU names (defined at its end where it belongs here) */
 	uint32_t nti_list, cti_list;
@@ -495,6 +497,7 @@ typedef struct cxx {
 
 /* tokens (token.c) */
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
+VPRIV void cxx_gen_write_missing(cxx *c);	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
 static inline cxx_token *cxx_peek(cxx *c, uint32_t ahead) { uint32_t i = c->pos + ahead; return &c->tok[i < c->ntok ? i : c->ntok]; }

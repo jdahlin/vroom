@@ -91,14 +91,14 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 	if (!c->gen || c->tentative || c->template_depth || c->unevaluated || c->instantiating != c->gen_level)
 		return;	/* (unevaluated: a discarded if constexpr branch, sizeof's operand) */
 	if (trace < 0)
-		trace = getenv("VCC_CXX_GEN") != NULL;
+		trace = getenv("VCC_CXX_GEN") != NULL || getenv("VCC_CXX_MISSING") != NULL;
 	if (trace && !c->gen_failed) {	/* VCC_CXX_GEN=4: kept for the function's name (cxx_gen_function_end) */
 		int k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "%s:%d:", strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 
 		for (uint32_t i = c->pos > 6 ? c->pos - 6 : 0; i < c->pos + 3 && i < c->ntok && k > 0 && k < (int)sizeof cxx_gen_why - 40; i++)
 			k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s", (int)(c->tok[i].len < 30 ? c->tok[i].len : 30), c->tok[i].s);
 	}
-	if (trace && !c->gen_failed && atoi(getenv("VCC_CXX_GEN")) < 4) {	/* VCC_CXX_GEN=1: the first thing in each function that is not built, and where vcc gave up */
+	if (trace && !c->gen_failed && getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) < 4) {	/* VCC_CXX_GEN=1: the first thing in each function that is not built, and where vcc gave up */
 		fprintf(stderr, "no code (%s:%d):", strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 		for (uint32_t i = c->pos > 10 ? c->pos - 10 : 0; i < c->pos + 3 && i < c->ntok; i++)
 			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);

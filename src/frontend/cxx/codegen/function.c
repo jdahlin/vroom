@@ -105,8 +105,17 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	bool ok = c->gen && !c->gen_failed && body;
 	cc_id_list *pre = c->gen_pre;
 
+	if (!ok && c->gen && getenv("VCC_CXX_MISSING") && (f->sym || f->sym1)) {
+		/* VCC_CXX_MISSING: kept for cxx_gen_write_missing */
+		if (c->nmissing == c->cmissing)
+			c->missing = realloc(c->missing, (c->cmissing = c->cmissing ? c->cmissing * 2 : 64) * sizeof *c->missing);
+		c->missing[c->nmissing].sym = f->sym, c->missing[c->nmissing].sym1 = f->sym1;
+		c->missing[c->nmissing++].why = strdup(cxx_gen_why[0] ? cxx_gen_why : "?");
+	}
 	if (!ok && c->gen && getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) == 4)	/* VCC_CXX_GEN=4: each function without code, why */
-		fprintf(stderr, "nofn %.*s: %s\n", (int)vintern_ents[f->name].len, vintern_ents[f->name].s, cxx_gen_why), cxx_gen_why[0] = 0;
+		fprintf(stderr, "nofn %.*s: %s\n", (int)vintern_ents[f->name].len, vintern_ents[f->name].s, cxx_gen_why);
+	if (!ok)
+		cxx_gen_why[0] = 0;
 
 	if (ok && cxx_gen_is_special(f) && c->gen_this) {
 		const vident *fv = &vintern_ents[f->name];
@@ -256,4 +265,28 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		cxx_vtable_symbol(c, f->member_of);	/* (the key function's TU defines the vtable) */
 	}
 	c->stats.functions_generated++;
+}
+
+/*
+ * VCC_CXX_MISSING=FILE: the functions whose bodies were not built and that nothing else defined (an
+ * instance's body built later counts), one line each: the symbol's assembler name, a tab, the first thing
+ * not built.  bench/cxx-strict.py reads it for the TU's undefined references that should have been its own.
+ */
+VPRIV void cxx_gen_write_missing(cxx *c)
+{
+	cc *a = c->ast;
+	const char *path = getenv("VCC_CXX_MISSING");
+	FILE *f = path && *path ? fopen(path, "w") : NULL;
+
+	if (!f)
+		return;
+	for (uint32_t i = 0; i < c->nmissing; i++)
+		for (int k = 0; k < 2; k++) {
+			uint32_t s = k ? c->missing[i].sym1 : c->missing[i].sym;
+
+			if (!s || (a->syms[s].flags & SF_DEFINED))
+				continue;
+			fprintf(f, "%s\t%s\n", cxx_gen_symbol_asm_name(c, s), c->missing[i].why);
+		}
+	fclose(f);
 }
