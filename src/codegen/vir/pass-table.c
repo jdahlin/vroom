@@ -80,6 +80,7 @@ static const virbuild_pass virbuild_passes[] = {
 	{ "simplify",           virbuild_pass_simplify,     O | P,  0,     O | P | D, U, NULL },				/* simplify.c */
 	/* simplifying can free a slot's address (an inlined call's pointer argument parked as an
 	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
+	{ "aggregate-copy",     virbuild_aggregate_copies_forward, O | P, 0, O | P | D, 0, NULL },
 	{ "promote-again",      virbuild_slots_promote,            O | P,  0,     O | P | D, 0, NULL },				/* slot-promotion.c */
 	{ "trivial-again",      virbuild_parameters_trivial_remove,            P,      0,     O | P | D, VIRBUILD_PASS_FLAG_FIXED_POINT | VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED, NULL },
 	{ "dead-params-again",  virbuild_pass_dead_params,  O,      0,     O | P | D, U | VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED, NULL },
