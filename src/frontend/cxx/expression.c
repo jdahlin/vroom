@@ -201,6 +201,21 @@ static void cxx_id_expression_parse(cxx *c)
 		}
 		cxx_fail(c, "expected an expression");
 	}
+	if (t->kw == CXX_KW_operator && q && !dep && q->kind == CXX_SCOPE_CLASS && q->owner && q->owner->ty &&
+	    cxx_peek(c, 1)->kind == LEX_TOKEN_EQUAL && cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN &&
+	    !cxx_lookup_in(c, q, vintern_cstr("operator="), 0)) {
+		/* B::operator=(x) of a class that declares none: its implicit assignment (json_base_class_t::operator=) */
+		qty bt = q->owner->ty;
+		uint32_t n;
+
+		cxx_advance(c), cxx_advance(c);
+		cxx_call_arguments_parse(c);
+		n = c->ncargs == 1 ? c->carg_nodes[0] : 0;
+		cxx_et(c, bt, true);
+		if (!c->tentative && !c->template_depth)
+			cxx_gen_base_assign(c, bt, n, t->loc);
+		return;
+	}
 	if (t->kw == CXX_KW_operator) {
 		/* operator<<(a, b), written as a call: the operator functions by that name (and, at the call,
 		   those in the arguments' namespaces); no member, no built-in */

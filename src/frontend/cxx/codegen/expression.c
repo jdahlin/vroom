@@ -501,3 +501,37 @@ VPRIV uint32_t cxx_gen_default_argument(cxx *c, const cxx_entity *f, uint32_t k)
 	c->call_picked = call_picked, c->ecallee = ecallee;
 	return node;
 }
+
+/* B::operator=(x) in a member function of a class derived from B, B's assignment the implicit one of a
+   trivially copyable class: its bytes from x (B or derived from it) into this's B subobject, an lvalue of B */
+VPRIV void cxx_gen_base_assign(cxx *c, qty base, uint32_t x, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t self, tb, src;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !x || !c->gen_this || !cxx_gen_defaulted_copy_trivial(c, QUNQ(base)))
+		return;
+	cxx_gen_this(c, loc);
+	self = c->enode ? cc_dereference_build(a, cc_node_rvalue(a, c->enode), loc) : 0;
+	c->enode = 0;
+	if (!self || !(tb = QUNQ(AST_NODE_AT(a, self)->ty) == QUNQ(base) ? self : cxx_gen_base_object(c, self, QUNQ(base), loc)))
+		return;
+	if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE) || !cc_type_is_record(a, AST_NODE_AT(a, x)->ty))
+		return;
+	src = QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(base) ? x : cxx_gen_base_object(c, x, QUNQ(base), loc);
+	if (!src)
+		return;
+	if (AST_NODE_AT(a, src)->ty != AST_NODE_AT(a, tb)->ty) {
+		qty pt = cc_type_pointer(a, AST_NODE_AT(a, tb)->ty);
+		uint32_t addr = cc_address_of_build(a, src, loc);
+
+		src = cc_dereference_build(a, cc_cast_insert(a, addr, pt, CK_NOP), loc);
+	}
+	{
+		uint32_t asg = cc_assignment_build(a, 0, tb, cc_node_rvalue(a, src), loc);
+
+		c->enode = cc_node_new_operands(a, N_COMMA, AST_NODE_AT(a, tb)->ty, loc, asg, tb);
+		AST_NODE_AT(a, c->enode)->flags |= NF_LVALUE;
+	}
+}

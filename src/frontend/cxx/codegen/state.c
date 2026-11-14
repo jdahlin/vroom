@@ -369,6 +369,35 @@ VPRIV bool cxx_gen_by_address(cxx *c, qty t)
 }
 
 /* a type as a parameter or a result: cxx_gen_type_ok's, and classes with constructors and destructors */
+/* does the class hold floating-point data (its members, bases', arrays'): a base's bytes would pass it in
+   integer registers where the ABI uses SSE ones */
+static bool cxx_gen_has_floating(cxx *c, qty t, int depth)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+
+	if (!cls || depth > 8)
+		return true;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (cxx_gen_has_floating(c, bases[i], depth + 1))
+			return true;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+			ft = AST_TYPE(a, ft)->base;
+		if (ft == CXX_TY_UNKNOWN)
+			return true;
+		if (cc_type_is_record(a, ft) ? cxx_gen_has_floating(c, ft, depth + 1) :
+		    (AST_TYPE_KIND(a, ft) >= TY_BFLOAT16 && AST_TYPE_KIND(a, ft) <= TY_FLOAT128) || AST_TYPE_KIND(a, ft) == TY_VECTOR)
+			return true;
+	}
+	return false;
+}
+
 VPRIV bool cxx_gen_value_ok(cxx *c, qty t)
 {
 	cc *a = c->ast;
@@ -380,7 +409,7 @@ VPRIV bool cxx_gen_value_ok(cxx *c, qty t)
 		return false;
 	tr = cxx_gen_trivial_abi(c, t, 0);
 	if (tr == 1)
-		return AST_TYPE(a, t)->size > 16 || !cxx_gen_has_base_bytes(c, t, 0);
+		return AST_TYPE(a, t)->size > 16 || !cxx_gen_has_base_bytes(c, t, 0) || !cxx_gen_has_floating(c, t, 0);
 	return tr == 0 && a->o->target == PP_LINUX_X86_64;	/* (the convention is written out for x86-64 only so far) */
 }
 

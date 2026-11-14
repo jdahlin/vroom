@@ -1828,3 +1828,9 @@ basic_string<char>) registreras: en medlem den täcker, och som inte har
 till biblioteket (basic_string:s kopieringskonstruktor anropade förut en dold hjälpfunktion som libc++.so
 inte exporterar).  Matchning: mallen, argumenten som prefix (namn jämförs manglade: vcc kan ha två
 instanser av char_traits<char>), medlemsnamn och antal parametrar.  cxx-strict 386.
+
+## Status 97 (2026-11-14)
+En trivialt kopierbar klass med basklass skickas och returneras som värde när ingen bas har
+flyttalsdata (basens bytes klassas då som heltal, som clang; anrop över kompilatorgränsen kontrollerade).
+`B::operator=(x)` för en klass utan egen tilldelning: den implicita, basdelobjektets bytes
+(json_base_class_t).  cxx-strict 377 (386).
