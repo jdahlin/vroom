@@ -821,9 +821,11 @@ def vlinkref(t):
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'skip', ref['skip'], ref['why']
     os.makedirs(wd, exist_ok=True)
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path),
+                    timeout=ct.reference_timeout(path))	# (the reference's time: branch_far takes minutes)
     if rc:
-        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+        e = err.decode(errors='replace')
+        return t, 'error', 'compile', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'clang: signal/timeout {rc}: ' + ct.first_err(e)
     obj = open(f'{wd}/ref.o', 'rb').read()
     pk = hashlib.sha1(obj + ref['key'].encode() + VLHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vlink/{suite}/{name}'
@@ -918,9 +920,11 @@ def vccrtref(t):
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'skip', ref['skip'], ref['why']
     os.makedirs(wd, exist_ok=True)
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path),
+                    timeout=ct.reference_timeout(path))	# (the reference's time: branch_far takes minutes)
     if rc:
-        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+        e = err.decode(errors='replace')
+        return t, 'error', 'compile', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'clang: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/ref.o', 'rb').read() + ref['key'].encode() + VLHASH.encode() + VRHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vccrt/{suite}/{name}'
     if cache_hit(pf, pk):
