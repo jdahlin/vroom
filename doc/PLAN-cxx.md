@@ -1638,3 +1638,14 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
 - Felkod undvikt: std::function lades ut med fel storlek när alignas räknades som 1 (kraschade i
   unit-locale-cpp); nu byte för byte som clang.
 - Test: alignas-layout; run 73/73.  Fork 69/70, 6,8 s CPU (35,6x), 22 297 funktioner, 22 testkroppar.
+
+### Status 74 (2026-11-14): inline namespaces i överlagringar, inbyggt kommatecken
+
+- En namnrymds funktioner och dess inline-namnrymds funktioner med samma namn är en överlagringsmängd
+  (libc++: `std::begin(initializer_list)` i std, `std::begin(C&)` i std::__1): `std::begin(s)` och
+  `using std::begin; begin(s)` hittade bara initializer_list-versionen.  Mängden byggs som kopior av
+  entiteterna och sparas per namnrymd och namn tills någon av listorna ändras.
+- `a, b` med en klassoperand och ingen operator, som vcc kan välja: det inbyggda kommatecknet (json:s
+  `decltype(begin(c), end(c))` i container_input_adapter_factory).
+- Test: inline-ns-overloads; run 74/74.  Fork 69/70, 7,8 s CPU (31x; mer kod genereras), 22 912 funktioner,
+  23 testkroppar.

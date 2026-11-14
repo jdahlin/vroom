@@ -102,6 +102,51 @@ VPRIV void cxx_scope_use(cxx *c, cxx_scope *s, cxx_scope *used)
 /* a name declared in s or what s uses (inline namespaces, using-directives, bases); qualified:
    a class with a dependent base answers 'dependent' for a name it does not declare (unqualified
    lookup skips dependent bases and goes on outward: two-phase lookup) */
+static bool cxx_entities_functions(const cxx_entity *e)
+{
+	for (; e; e = e->next)
+		if (e->kind != CXX_ENTITY_VALUE && e->kind != CXX_ENTITY_FUNCTION_TEMPLATE)
+			return false;
+		else if (e->kind == CXX_ENTITY_VALUE && (e->ty == CXX_TY_UNKNOWN || e->field_of))
+			return false;
+	return true;
+}
+
+/*
+ * A namespace's own functions by a name and those of its inline namespaces by the same name: one overload set
+ * ([namespace.def]: an inline namespace's members are found as the enclosing one's; libc++ declares
+ * begin(initializer_list<E>) in std, begin(C&) in std::__1).  The set is a list of copies of the entities,
+ * kept per scope and name while neither list changes.
+ */
+typedef struct cxx_merged { const cxx_scope *s; uint32_t name; const cxx_entity *own, *inl; cxx_entity *list; } cxx_merged;
+static __thread cxx_merged *merged;
+static __thread uint32_t nmerged, cmerged;
+
+static cxx_entity *cxx_lookup_merged(cxx_scope *s, uint32_t name, cxx_entity *own, cxx_entity *inl)
+{
+	cxx_entity *head = NULL, **tail = &head;
+
+	for (uint32_t i = 0; i < nmerged; i++)
+		if (merged[i].s == s && merged[i].name == name) {
+			if (merged[i].own == own && merged[i].inl == inl)
+				return merged[i].list;
+			merged[i] = merged[--nmerged];
+			break;
+		}
+	for (int k = 0; k < 2; k++)
+		for (const cxx_entity *t = k ? inl : own; t; t = t->next) {
+			cxx_entity *n = malloc(sizeof *n);
+
+			*n = *t;
+			n->next = NULL;
+			*tail = n, tail = &n->next;
+		}
+	if (nmerged == cmerged)
+		merged = realloc(merged, (cmerged = cmerged ? cmerged * 2 : 16) * sizeof *merged);
+	merged[nmerged++] = (cxx_merged){ s, name, own, inl, head };
+	return head;
+}
+
 static cxx_entity *cxx_lookup_scope(cxx *c, cxx_scope *s, uint32_t name, int depth, bool qualified)
 {
 	if (!s || depth > 16)
@@ -109,6 +154,14 @@ static cxx_entity *cxx_lookup_scope(cxx *c, cxx_scope *s, uint32_t name, int dep
 	if (s->nslots) {
 		cxx_entity *e = *cxx_scope_find_slot(s, name);
 
+		if (e && s->kind == CXX_SCOPE_NAMESPACE && cxx_entities_functions(e))
+			for (uint32_t i = 0; i < s->nused; i++)
+				if (s->used[i] && s->used[i]->inline_namespace && s->used[i]->nslots) {
+					cxx_entity *x = *cxx_scope_find_slot(s->used[i], name);
+
+					if (x && cxx_entities_functions(x))
+						return cxx_lookup_merged(s, name, e, x);
+				}
 		if (e)
 			return e;
 	}

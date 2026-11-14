@@ -2448,6 +2448,8 @@ VPRIV void cxx_expression_parse(cxx *c)
 			c->op_lv_set = 1, c->op_lv[0] = ll;
 			found = cxx_operator_call_type(c, vintern_cstr("operator,"), lt, &ra, 1);
 			c->op_lv_set = 0;
+			if (found && !c->call_resolved && c->etype == CXX_TY_UNKNOWN)
+				found = false;	/* (no operator, that vcc can pick: the built-in comma, b's type) */
 			if (found && !(c->none_viable && !c->call_resolved)) {
 				if (c->call_resolved && c->call_picked)
 					cxx_gen_operator_call(c, ln, &rn, 1, cloc);
