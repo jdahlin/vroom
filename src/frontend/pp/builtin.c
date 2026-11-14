@@ -273,6 +273,11 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
 			pp_token_number_make(p, t, p->counter_value++);
 		}
 		break;
+	case PP_BUILTIN_FLT_EVAL_METHOD:
+		/* clang: a builtin macro, 0 on every target vcc has (SSE on x86-64; -ffp-eval-method and
+		   #pragma clang fp eval_method are not supported).  float.h's FLT_EVAL_METHOD names it. */
+		pp_token_number_make(p, t, 0);
+		break;
 	case PP_BUILTIN_INCLUDE_LEVEL:
 		for (int i = 0; i < p->recording.level_count; i++)
 			p->recording.levels[i].uses_level = 1;

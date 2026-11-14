@@ -21,6 +21,7 @@ static const struct { const char *n; int b; } pp_builtin_macro_names[] = {
 	{ "__DATE__", PP_BUILTIN_DATE }, { "__TIME__", PP_BUILTIN_TIME }, { "__TIMESTAMP__", PP_BUILTIN_TIMESTAMP },
 	{ "__BASE_FILE__", PP_BUILTIN_BASE_FILE }, { "__FILE_NAME__", PP_BUILTIN_FILE_NAME },
 	{ "__INCLUDE_LEVEL__", PP_BUILTIN_INCLUDE_LEVEL }, { "_Pragma", PP_BUILTIN_PRAGMA },
+	{ "__FLT_EVAL_METHOD__", PP_BUILTIN_FLT_EVAL_METHOD },
 	{ "__has_attribute", PP_BUILTIN_HAS_ATTRIBUTE }, { "__has_builtin", PP_BUILTIN_HAS_BUILTIN },
 	{ "__has_feature", PP_BUILTIN_HAS_FEATURE }, { "__has_extension", PP_BUILTIN_HAS_EXTENSION },
 	{ "__has_c_attribute", PP_BUILTIN_HAS_C_ATTRIBUTE },	/* __has_cpp_attribute: not defined in C (clang) */
