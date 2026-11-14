@@ -71,11 +71,20 @@ VPRIV int virbuild_atomic(codegen_context *e, int op, int size, int rp, int rv, 
 
 VPRIV int virbuild_tlsaddr(codegen_context *e, uint32_t ref, int model)
 {
-	if (!CODEGEN_IS_X64(e->compile_context) || model != 0)
+	if (!CODEGEN_IS_X64(e->compile_context) || model > 1 || (model && CODEGEN_IS_WIN64(e->compile_context)))
 		virbuild_fail(e, VIRBUILD_FAILURE(thread_local));
 	int r = virbuild_treg(e);
-	uint32_t addr = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR,
-		CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TLS_LE, CODEGEN_REFERENCE_INDEX(ref)), 0, 0);
+	uint32_t addr;
+	if (model == 1) {
+		uint32_t base = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR,
+			CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TLS_BASE, 0), 0, 0);
+		uint32_t offset = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR,
+			CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TLS_OFFSET, CODEGEN_REFERENCE_INDEX(ref)), 0, 0);
+		addr = virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, base, virbuild_value_convert(e, offset, VIR_TYPE_I64), 0);
+	} else {
+		addr = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR,
+			CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TLS_LE, CODEGEN_REFERENCE_INDEX(ref)), 0, 0);
+	}
 	virbuild_register_write(e, r, addr);
 	return r;
 }
@@ -130,7 +139,31 @@ VPRIV int virbuild_va_arg(codegen_context *e, int rap, ast_qualified_type t)
 	}
 	return r;
 }
-VPRIV void virbuild_retrec(codegen_context *e, int raddr, const walk_argument *r, uint32_t lbl) { (void)raddr, (void)r, (void)lbl; virbuild_fail(e, VIRBUILD_FAILURE(record_result)); }
+VPRIV void virbuild_retrec(codegen_context *e, int raddr, const walk_argument *r, uint32_t lbl)
+{
+	codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = r->slot, .align = 8 };
+	int q;
+	if (r->is_in_memory) {
+		q = virbuild_treg(e);
+		virbuild_load(e, q, &at, 8, false);
+		virbuild_copy(e, q, raddr, r->size);
+	} else {
+		for (int j = 0; j < r->eightbyte_count; j++) {
+			uint32_t ty = r->classes[j] == WALK_ARGUMENT_INTEGER ? VIR_TYPE_I64 :
+				r->size == 4 ? VIR_TYPE_F32 : VIR_TYPE_F64;
+			q = ty == VIR_TYPE_I64 ? virbuild_treg(e) : virbuild_ftreg(e);
+			at = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = raddr, .offset = 8*j };
+			virbuild_load(e, q, &at, ty == VIR_TYPE_F32 ? 4 : 8, false);
+			uint32_t v = virbuild_register_read(e, q, ty);
+			virbuild_variable_write(e, VIRBUILD_RESULT_VARIABLE + j, e->vir_builder->current_block, v);
+			virbuild_tfree(e, q);
+		}
+		q = -1;
+	}
+	virbuild_tfree(e, q);
+	virbuild_tfree(e, raddr);
+	virbuild_branch_emit(e, virbuild_label_block(e, lbl));
+}
 VPRIV bool virbuild_tail_return(codegen_context *e, uint32_t expr) { (void)e, (void)expr; return false; }
 
 VPRIV void virbuild_trap(codegen_context *e)

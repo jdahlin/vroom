@@ -161,7 +161,7 @@ VPRIV record_effects x64_record_effects(const codegen_context *e, const record *
 			f.defines = X64_CALL_DEFINED_REGISTERS;
 			f.used = X64_CALL_USED_REGISTERS & ~X64_REGISTER_BIT(RDI); /* descriptor overwrites RDI */
 			f.flags = X_CALL_FLAGS;
-		} else if (i->condition) {
+		} else if (i->condition == 1) {
 			f.flags |= X_W; /* initial-exec uses addq, local-exec LEA does not */
 		}
 		if (e && CODEGEN_IS_WIN64(e->compile_context))

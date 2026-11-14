@@ -117,8 +117,8 @@ typedef struct virbuild_context {
 #define VIRBUILD_REGISTER_NONE 255
 #define VIRBUILD_FLOAT_REGISTER_FIRST 192	/* float names 192..254 */
 #define VIRBUILD_RESULT_VARIABLE 255	/* the result variable */
-#define VIRBUILD_JUMP_VARIABLE 256
-#define VIRBUILD_LOCAL_VARIABLE_FIRST 257	/* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
+#define VIRBUILD_JUMP_VARIABLE 257
+#define VIRBUILD_LOCAL_VARIABLE_FIRST 258	/* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
 #define VIRBUILD_BLOCK_NONE 0xffffffffu
 
 #define VIRBUILD_ARRAY_GROW(p, n, cap, k) do { \

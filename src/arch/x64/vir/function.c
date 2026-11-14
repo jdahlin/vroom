@@ -210,6 +210,11 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	e->walk_state->statement_depth = e->walk_state->temporary_slot_in_use_count = e->walk_state->temporary_slot_free_count = 0;
 	e->walk_state->frame_offset = 0; e->walk_state->frame_alignment = 16; e->walk_state->label_count = 0;
 	e->walk_state->stack_pointer_needed = false; e->walk_state->canary = 0;
+	if (VIR_GROUP_KIND(f->extra[f->signature + 1]) == VIR_GROUP_SRET) {
+		L.result_pointer_slot = walk_slot_temporary(e, 8, 8);
+		codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = L.result_pointer_slot };
+		x64_record_emit_memory(e, X64_OP_ST, 8, RDI, &at, false);
+	}
 	for (uint32_t k = 0; k < f->slot_count; k++) L.slot[k] = walk_slot_temporary(e, f->slot[k].size ?: 1, f->slot[k].align);
 	for (uint32_t k = 0; k < V->allocation.spill_count; k++) L.spill[k] = walk_slot_temporary(e, V->allocation.slot_sizes[k], V->allocation.slot_sizes[k]);
 	for (uint32_t b = 0; b < f->block_count; b++) L.label[b] = walk_label_new(e);
@@ -227,6 +232,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	}
 	virbuild_lower_body(&L.drv);
 	x64_label(e, L.ret);
+	if (L.result_pointer_slot) {
+		codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = L.result_pointer_slot };
+		x64_record_emit_memory(e, X64_OP_LD, 8, RAX, &at, false);
+	}
 	x64_finish(e, sym);
 	e->vir_try = false;
 	*why = NULL; return true;

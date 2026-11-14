@@ -15,6 +15,7 @@ typedef struct x64_vir_context {
 	vir_alloc_out *allocation;
 	int64_t *slot, *spill;
 	int general_temporary;
+	int64_t result_pointer_slot;
 	uint32_t *label, *edge_labels, ret, compare_condition, compare_block, setcc_record;
 	uint8_t *uses;
 	const vir_loops *loops;
@@ -35,6 +36,8 @@ VPRIV void *x64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t size);
 VPRIV int x64_vir_register_number(uint8_t r);
 VPRIV int x64_vir_type_size(uint32_t t);
 VPRIV int64_t x64_vir_constant_bits(const vir_insn *i);
+VPRIV uint32_t x64_vir_param_word(const vir_function *f, const vir_insn *i);
+VPRIV uint32_t x64_vir_stack_object_size(const vir_function *f, uint32_t sig, uint32_t word);
 VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig, uint32_t g, int *stack, bool ms);
 VPRIV bool x64_vir_value_immediate(const vir_function *f, uint32_t v, int64_t *value);
 VPRIV bool x64_vir_memory_block_is_small(const vir_function *f,const vir_insn *i);

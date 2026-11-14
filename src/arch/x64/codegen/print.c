@@ -866,6 +866,17 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 			x64_register_name_append(b, i->registers[0], 8);
 			break;
 		case X64_OP_TLS:
+			if (i->condition == 3 || i->condition == 4) {
+				vtext_string_append(b, "\tmovq\t");
+				if (i->condition == 3) vtext_string_append(b, "%fs:0");
+				else {
+					codegen_reference_offset_append(c, b, i->reference, 0);
+					vtext_string_append(b, "@GOTTPOFF(%rip)");
+				}
+				vtext_string_append(b, ", ");
+				x64_register_name_append(b, i->registers[0], 8);
+				break;
+			}
 			if (CODEGEN_IS_WIN64(c)) {
 				/* the module's block from the TEB's ThreadLocalStoragePointer, then the
 				   variable's offset in the .tls section (clang's sequence) */

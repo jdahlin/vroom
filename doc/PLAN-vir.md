@@ -1432,6 +1432,25 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with x86-64 SysV aggregate calls (2026-11-14).** VIR now lowers
+`codegen_prepass_node_walk` (4,075 VIR instructions, 14 spills) and
+`walk_value_emit_inner` (3,173 instructions, 34 spills). The separate VIR
+builder copy, `virbuild_walk_value_emit_inner`, still falls back at the
+use-before-definition check.
+
+SQLite 3.50.4, same single-emitter -O2 compile pinned to CPU 7, median CPU
+time of seven runs after warm-up with alternating run order:
+
+| vcc build | Before | With aggregate calls |
+| --- | ---: | ---: |
+| clang-built | 144.69 ms | 144.74 ms |
+| self-hosted | 220.70 ms | 193.16 ms |
+| self-hosted / clang-built | 1.525× | 1.335× |
+
+Self-hosted retired instructions fell from 2.781B to 2.314B across the
+whole compile. All four compilers produced byte-identical SQLite objects.
+Bootstrap stages 2 and 3 also matched byte for byte.
+
 **SQLite after rebasing onto 87f85d5b (2026-11-14).** The paired x86-64
 test used the same SQLite 3.50.4 amalgamation, flags and headers as below,
 with four executables, one warmup and seven alternating-order measurements

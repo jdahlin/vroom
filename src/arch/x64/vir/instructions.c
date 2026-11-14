@@ -166,7 +166,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		return;
 	}
 	switch (i->op) {
-	case VIR_OP_NOP: case VIR_OP_BPARAM: return;
+	case VIR_OP_PROJ: case VIR_OP_NOP: case VIR_OP_BPARAM: return;
 	case VIR_OP_BARRIER: x64_record_emit(e, X64_OP_BARRIER); return;
 	case VIR_OP_MEMCPY: case VIR_OP_MEMSET:
 		if(x64_vir_memory_block_is_small(L->function,i)){x64_vir_memory_block_lower(L,i,a,c);return;}
@@ -178,7 +178,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		for (uint32_t k = 0; k < ng; k++) {
 			int off;
 			uint8_t r = x64_vir_argument_register(L->function, i->b, k, &off, L->ms);
-			if (r == VIR_REGISTER_NONE) total = off - 8;
+			if (r == VIR_REGISTER_NONE) {
+				uint32_t bytes = x64_vir_stack_object_size(L->function, i->b, k);
+				total = off - 16 + (bytes ? (int)bytes : 8);
+			}
 			else if (VIR_REGISTER_CLASS(r)) nf++;
 		}
 		if (L->ms && total < 32) total = 32;	/* the shadow space */
@@ -189,6 +192,20 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 			if (x64_vir_argument_register(L->function, i->b, k, &off, L->ms) != VIR_REGISTER_NONE) continue;
 			uint32_t value = L->function->extra[i->c + 1 + k];
 			uint8_t r = p[k + 1];
+			uint32_t bytes = x64_vir_stack_object_size(L->function, i->b, k);
+			if (bytes) {
+				for (uint32_t pos = 0; pos < bytes;) {
+					uint32_t left = bytes - pos;
+					int width = left >= 16 ? 16 : left >= 8 ? 8 : left >= 4 ? 4 : left >= 2 ? 2 : 1;
+					int tmp = width == 16 ? XMM0 + 14 : L->general_temporary;
+					codegen_lvalue src = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = x64_vir_register_number(r), .offset = pos };
+					codegen_lvalue dst = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = RSP, .offset = off - 16 + pos };
+					x64_record_emit_memory(e, X64_OP_LD, width, tmp, &src, false);
+					x64_record_emit_memory(e, X64_OP_ST, width, tmp, &dst, false);
+					pos += width;
+				}
+				continue;
+			}
 			if (r == VIR_REGISTER_NONE) {
 				r = vir_register_class(L->function->insns[value].type) ? VIR_REGISTER_MAKE(1, 14) : L->general_temporary;
 				if (value < L->function->constant_count) x64_vir_constant_materialize(L, r, value);
@@ -221,9 +238,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 	}
 	case VIR_OP_PARAM: {
 		int stack;
-		if (x64_vir_argument_register(L->function, L->function->signature, i->a, &stack, L->ms) == VIR_REGISTER_NONE) {
+		uint32_t word = x64_vir_param_word(L->function, i);
+		if (x64_vir_argument_register(L->function, L->function->signature, word, &stack, L->ms) == VIR_REGISTER_NONE) {
 			codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = stack };
-			x64_record_emit_memory(e, X64_OP_LD, sz, d, &at, false);
+			bool mem = x64_vir_stack_object_size(L->function, L->function->signature, word) != 0;
+			x64_record_emit_memory(e, mem ? X64_OP_LEA : X64_OP_LD, sz, d, &at, false);
 		}
 		return;
 	}

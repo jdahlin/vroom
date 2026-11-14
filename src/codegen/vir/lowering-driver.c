@@ -69,7 +69,7 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 		vir_operand_iterator it;
 		uint32_t *p, n = 0;
 		uint8_t res = VIR_REGISTER_NONE;
-		bool result = x.type != VIR_TYPE_VOID && !(t->skip_multi_operands && x.type == VIR_TYPE_MULTI);
+		bool result = x.type != VIR_TYPE_VOID && x.type != VIR_TYPE_MULTI;
 
 		if (d->skip_at && i == *d->skip_at)
 			break;
@@ -97,7 +97,7 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 			t->instruction(ctx, b, i, d->operand_reg, n, res);
 		} else {
 			while ((p = vir_operand_iterator_next(&it)))
-				n++;
+				n += f->insns[*p].type != VIR_TYPE_MULTI;
 			if (result)
 				res = o->operand_registers[pos + n];
 			t->instruction(ctx, b, i, &o->operand_registers[pos], n, res);
