@@ -646,3 +646,15 @@ candidate, not known leaves the call untyped.  Test ok-check-concepts.
 unit-32bit: 1644 of 2023 calls typed (81 %), 123 + 180 bodies, no false
 static_assert; json 48,962 layouts clang agrees with (was 44,418), 71/71
 parse; parse tests 19/19; 0.14 s.
+
+### Status 2026-11-14 (12): variable templates, trivial-type traits
+Variable templates evaluate (primary, partial and explicit specializations,
+through the class templates' matcher; T[N] with N deduced: not yet), and the
+traits that ask what a type does trivially answer for scalars, arrays of
+them and classes vcc laid out as POD.  libc++'s own static_asserts on
+unit-32bit: 160 true, 0 false, 16 not evaluated (was 62 / 0 / 116 two steps
+ago).  1708 of 2081 calls typed; 123 + 182 bodies; json 54,963 layouts clang
+agrees with, 71/71 parse; parse tests 21/21 (ok-check-variable-templates,
+ok-check-traits).  Untyped calls now: __go(..., __priority_tag<N>()) (31),
+__to_address ambiguous or unknown (43), function objects' operator() (45),
+__promote_impl (14), iter_move (11); "callee unknown" 115.

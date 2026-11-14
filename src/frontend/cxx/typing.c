@@ -659,6 +659,38 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 	x = AST_TYPE(c->ast, t[0]);
 	k = x->kind;
 	ref = k == TY_PTR && x->ext;
+	/* what a type can do trivially: yes for scalars and arrays of them, and for a class vcc laid out as POD
+	   (one that is not POD for layout may still be trivially copyable: not known) */
+	{
+		bool trivially = IS("__is_trivially_copyable") || IS("__is_trivial") || IS("__is_standard_layout") || IS("__is_pod") ||
+				 IS("__is_trivially_destructible") || IS("__is_trivially_constructible") || IS("__has_trivial_destructor") ||
+				 IS("__is_literal_type") || IS("__is_trivially_relocatable");
+		bool never = IS("__is_empty") || IS("__is_polymorphic") || IS("__is_abstract");
+
+		if (trivially || never) {
+			qty e = t[0];
+			bool pod, empty;
+
+			while (AST_TYPE_KIND(c->ast, e) == TY_ARRAY)
+				e = AST_TYPE(c->ast, e)->base;
+			x = AST_TYPE(c->ast, e);
+			if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || (x->kind == TY_PTR && !x->ext) || x->kind == TY_ENUM) {
+				*v = trivially;
+				return true;
+			}
+			if (cxx_class_layout_info(c, e, &pod, &empty)) {
+				if (IS("__is_empty") && e == t[0]) {
+					*v = empty;
+					return true;
+				}
+				if (trivially && pod) {
+					*v = 1;
+					return true;
+				}
+			}
+			return false;
+		}
+	}
 	if (IS("__is_void")) *v = k == TY_VOID;
 	else if (IS("__is_integral")) *v = (k >= TY_BOOL && k <= TY_UINT128);
 	else if (IS("__is_floating_point")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128);

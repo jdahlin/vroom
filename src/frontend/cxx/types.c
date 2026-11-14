@@ -491,3 +491,18 @@ VPRIV void cxx_class_unverifiable(cxx *c)
 	if (c->build && c->instantiating && !c->tentative)
 		c->build->unverifiable = 1;
 }
+
+/* a class vcc laid out: is it POD for layout (trivial and standard-layout, as far as vcc sees), is it empty? */
+VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty)
+{
+	const cxx_class_info *i;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t))
+		return false;
+	cxx_type_require_complete(c, QUNQ(t));
+	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
+	if (!i->valid)
+		return false;
+	*pod = i->pod, *empty = i->empty;
+	return true;
+}

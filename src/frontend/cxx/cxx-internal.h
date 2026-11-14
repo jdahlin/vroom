@@ -398,6 +398,7 @@ VPRIV bool cxx_range_element_type(cxx *c, qty r, qty *elem);
 VPRIV qty cxx_auto_deduce(cxx *c, qty pattern, qty a, bool lvalue);
 VPRIV void cxx_ec(cxx *c, qty t, int64_t v);
 VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align);
+VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty);
 VPRIV bool cxx_number_value(const cxx_token *t, int64_t *v);
 VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v);
 VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint32_t nt, int64_t *v);
