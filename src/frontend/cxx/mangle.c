@@ -578,6 +578,26 @@ static bool mt_primary(mg_tok *k)
 		k->p++;
 		return true;
 	}
+	{
+		/* T::name of a template parameter (C::en() in a parameter's type): sr <T_> <name> */
+		int ti = t->kind == LEX_TOKEN_IDENTIFIER ? mt_tparam(k) : -1;
+
+		if (ti >= 0 && k->p + 2 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_COLON_COLON &&
+		    k->m->c->tok[k->p + 2].kind == LEX_TOKEN_IDENTIFIER && k->m->c->tok[k->p + 2].kw != CXX_KW_template &&
+		    !(k->p + 3 < k->e && k->m->c->tok[k->p + 3].kind == LEX_TOKEN_LESS)) {
+			char num[16];
+
+			mg_str(k->m, "sr");
+			if (ti)
+				mg_text(k->m, num, (size_t)snprintf(num, sizeof num, "T%d_", ti - 1));
+			else
+				mg_str(k->m, "T_");
+			k->own = true;	/* (one of the template's own parameters: the Tn type is written) */
+			mt_src(k->m, &k->m->c->tok[k->p + 2]);
+			k->p += 3;
+			return true;
+		}
+	}
 	if (t->kind != LEX_TOKEN_IDENTIFIER || mt_tparam(k) >= 0)
 		return false;
 	/* [ns::]... X<args>::value (sr <levels> E <name>), or [ns::] x<args> (sr <levels> E <name><args>) */
@@ -657,7 +677,8 @@ static bool mt_unary(mg_tok *k)
 
 		if (!mt_primary(k))
 			return false;
-		while (k->nfp && (mt_is(k, LEX_TOKEN_LEFT_PAREN) || ((mt_is(k, LEX_TOKEN_PERIOD) || mt_is(k, LEX_TOKEN_ARROW)) &&
+		while ((k->nfp || (mt_is(k, LEX_TOKEN_LEFT_PAREN) && k->m->n >= mark + 2 && !memcmp(k->m->b + mark, "sr", 2))) &&
+		       (mt_is(k, LEX_TOKEN_LEFT_PAREN) || ((mt_is(k, LEX_TOKEN_PERIOD) || mt_is(k, LEX_TOKEN_ARROW)) &&
 						    k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER))) {
 			if (!mt_is(k, LEX_TOKEN_LEFT_PAREN)) {
 				/* x.m, p->m: dt <x> <m>, pt <p> <m> */
