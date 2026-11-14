@@ -1303,9 +1303,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-mX` checked against lld's AArch64 emulations ("unknown emulation");
   `-zX` as `-z X` (`-znotext` was swallowed); `--version`/`-v` with "LLD
   23.1.4" for `scripts/ld-version.sh`; `-static`/`-Bstatic`/`-Bdynamic`,
-  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (archives only, "unable to find
-  library"); `-pie` and `--dynamic-linker` a clear error until dynamic
-  linking.  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
+  `-no-pie`; `-L DIR`/`-lNAME`/`-l:FILE` (`libNAME.so` before `.a` unless
+  `-Bstatic`); `-pie`, `--dynamic-linker`, `--no-dynamic-linker`,
+  `--as-needed`, `-E`, `--hash-style`, `-z now|lazy`, `-m elf_x86_64` (x86-64
+  dynamic executables, below); `--build-id` no longer takes the next argument.
+  `bench/vlink-opts.py`: 18/18 against ld.lld, image identical.)
   `--gc-sections` as lld's MarkLive (roots: entry, KEEP, SHF_GNU_RETAIN,
   non-alloc, init/fini arrays, notes outside groups, .ctors/.init/...,
   exported symbols under -shared; relocations, groups and SHF_LINK_ORDER
@@ -1323,14 +1325,38 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   getRankProximity, then back past sections without inputs (findOrphanPos).
   `--eh-frame-hdr` as lld's EhFrameHeader (sorted table, duplicate
   locations dropped) and PT_GNU_EH_FRAME: 4 cases.
-  Left: `--emit-relocs`, `-z now` (no effect without dynamic linking).
+  Left: `--emit-relocs`, `-rpath`/`DT_RUNPATH`, `--sysroot`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
+- [ ] **Dynamic executables (x86-64)** (done 2026-11-14: `ld/dso.c` reads
+  shared objects (.dynsym, default versions, DT_SONAME) and GNU ld input
+  scripts (glibc's libc.so, libgcc_s.so: GROUP/INPUT/AS_NEEDED, relative names
+  by the script's directory and -L); their definitions resolve globals no
+  object defines and stop lazy archive extraction.  `ld/dynamic-executable.c`: PLT (lazy,
+  lld's x86-64 PLT0/entries) and .got.plt, GLOB_DAT, symbolic R_X86_64_64 in
+  writable data, copy relocations with every alias exported (environ,
+  __environ), canonical PLT entries for addresses taken from code, RELATIVE
+  under -pie (read-only R_X86_64_64 and R_X86_64_32 in a PIE are errors as
+  lld), .dynsym/.gnu.hash/.hash/.gnu.version/.gnu.version_r/.dynamic (NEEDED,
+  INIT/FINI(_ARRAY), FLAGS_1 PIE/NOW), PT_INTERP, PT_DYNAMIC; without `-T`
+  lld's default layout (image base 0x200000 / 0 for PIE, headers in the first
+  PT_LOAD, segments at the next page at the same offset, .text.* -> .text as
+  getOutputSectionName); linker-defined __ehdr_start, _GLOBAL_OFFSET_TABLE_,
+  _DYNAMIC, __init_array_start..., _etext, _edata, __bss_start, _end.  The
+  .got, PLT and copies follow the symbol table order (ids depended on the
+  threads: a link was not reproducible).  `bench/vlink-dyn.py`: 24/24, clang's
+  and vpp's objects in PIE, no-PIE and -z now run as with lld; vcc built by
+  vpp and linked by vlink (no clang in the link) passes the vcc suite, and
+  rebuilds itself to byte-identical objects.)  Left: arm64; `-shared` on
+  x86-64; TLS relocations against shared-object symbols; IFUNC/IRELATIVE (a
+  static glibc link); versioned references (foo@V); lld byte identity of the
+  dynamic sections; `--gc-sections` with shared objects.
+  *Validate:* `bench/vlink-dyn.py`; vcc linked by vlink (`make VCC_CC=` a vpp + vlink wrapper).
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
   RELATIVE under -pie/-shared; `test/vcc/got_pic.c`, `pragma_weak.c`; locals
-  after the globals by file as lld's postScanRelocations (`vlink-opts.py`); not:
-  GLOB_DAT for preemptible symbols (dynamic linking)),
+  after the globals by file as lld's postScanRelocations (`vlink-opts.py`);
+  GLOB_DAT for x86-64 imported symbols (dynamic executables, above); not on arm64),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
   for `test/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,

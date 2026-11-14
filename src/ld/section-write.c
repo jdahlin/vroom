@@ -65,9 +65,13 @@ VPRIV void ld_input_section_write(void *arg, size_t j)
 			ld_u64_store(dst + 8 * k, v);
 			if (ctx->relocations.pic && !undef && !ld_global_symbol_is_absolute(ctx, g)) {
 				dyn[nd].r_offset = ld_input_section_address(ctx, si, 8 * k);
-				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_info = ctx->inputs.x86 ? 8 : R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;
+			} else if (ctx->dyn.dynexe && ctx->symbols.globals[g].dso1 && ctx->symbols.globals[g].state == LD_SYMBOL_STATE_UNDEFINED) {
+				dyn[nd].r_offset = ld_input_section_address(ctx, si, 8 * k);
+				dyn[nd].r_info = (uint64_t)ctx->symbols.globals[g].dynamic_index << 32 | 6;
+				dyn[nd++].r_addend = 0;
 			}
 		}
 		for (uint32_t k = 0; k < ctx->output.got_locals.n; k++) {
@@ -80,7 +84,7 @@ VPRIV void ld_input_section_write(void *arg, size_t j)
 			ld_u64_store(dst + at, v);
 			if (ctx->relocations.pic && !abs) {
 				dyn[nd].r_offset = ld_input_section_address(ctx, si, at);
-				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_info = ctx->inputs.x86 ? 8 : R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;
 			}

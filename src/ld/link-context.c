@@ -22,6 +22,8 @@ VPRIV struct ld_context *ld_context_create(FILE *error_stream, int directory_fd)
 	o->eh_frame_header_section = o->symtab_section = o->strtab_section = o->shstrtab_section = LD_NONE;
 	o->dynsym_section = o->dynstr_section = o->hash_section = o->gnu_hash_section = LD_NONE;
 	o->versym_section = o->verdef_section = o->dynamic_section = LD_NONE;
+	ctx->dyn.def_nph = 12;
+	ctx->dyn.interp_isec = ctx->dyn.plt_isec = ctx->dyn.gotplt_isec = ctx->dyn.relaplt_isec = ctx->dyn.verneed_isec = ctx->dyn.copy_isec = LD_NONE;
 	return ctx;
 }
 

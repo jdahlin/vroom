@@ -140,6 +140,8 @@ relative to it); `TODO.md` stays at the top.
     sharing `ld-internal.h`, as one TU, a split module like `as`; `ld_SRC`,
     main in `vlink-main.c`; also linked into vccd, which calls `ld_main` per
     link, each link with its own `struct ld_context`) and `vobjcopy`/`vnm`;
+    `dso.c` reads x86-64 shared objects and GNU input scripts;
+    `dynamic-executable.c` emits PLT/GOT, versions and default executable layout.
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: `link-mingw.c`: `vcc x.c -o x.exe` for Windows x64 (compile
     each source, then vlink with clang's MinGW link line, libvccrt.a in place
@@ -287,6 +289,7 @@ bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text 
 bench/vcc-dwarf.py -j 6 --target x86_64-w64-mingw32|x86_64-linux-gnu [--gflag=-gdwarf-5] [--cflags=-ffunction-sections]   # ... for x86-64 (COFF: DWARF 4 by default), also vasm of -S = -c
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-dyn.py                  # x86-64 dynamic executables against glibc: PIE, no-PIE, -z now (<5 s)
 bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
 bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, -g objects (clang's, vcc's) with -s/--strip-debug/--gc-sections, byte-identical (~15 s; --run: under Wine)
 bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)

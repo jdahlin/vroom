@@ -131,3 +131,13 @@ VPRIV void ld_lazy_archive_process(struct ld_context *ctx, uint32_t c0, uint32_t
 		}
 	}
 }
+
+VPRIV void ld_lazy_dso_add(struct ld_context *ctx, uint32_t d)
+{
+	const Dso *so = ctx->dso.dsos.v[d];
+	for (uint32_t k = 1; k < so->ndsym; k++)
+		if (ld_dso_sym_def(so, k)) {
+			ld_lazy_symbol *l = ld_lazy_symbol_find(ctx, so->dstr + so->dsym[k].st_name);
+			if (l->state != LD_LAZY_SYMBOL_LAZY) l->state = LD_LAZY_SYMBOL_DEFINED;
+		}
+}

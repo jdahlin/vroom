@@ -6,7 +6,7 @@
 
 
 
-static uint32_t ld_symbol_name_elf_hash(const char *n)
+VPRIV uint32_t ld_symbol_name_elf_hash(const char *n)
 {
 	uint32_t h = 0;
 	for (; *n; n++) {
@@ -18,7 +18,7 @@ static uint32_t ld_symbol_name_elf_hash(const char *n)
 	}
 	return h;
 }
-static uint32_t ld_symbol_name_gnu_hash(const char *n)
+VPRIV uint32_t ld_symbol_name_gnu_hash(const char *n)
 {
 	uint32_t h = 5381;
 	for (; *n; n++)

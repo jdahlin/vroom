@@ -149,6 +149,7 @@ x86)
 	# vcc as an x86-64 program on an x86-64 host: the steps that need one
 	build vcc
 	step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
+	step vlink-dyn python3 bench/vlink-dyn.py
 	step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
 	step interrupt python3 bench/vcc-interrupt.py
 	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"

@@ -11,7 +11,7 @@ static void ld_usage_error_report(struct ld_context *ctx, const char *a)
 
 /* -lNAME: libNAME.a in the -L directories in order (only static archives: no
  * dynamic linking yet, so as lld under -Bstatic); -l:FILE takes FILE as is */
-static const char *ld_library_find(struct ld_context *ctx, const char *name)
+VPRIV const char *ld_library_find(struct ld_context *ctx, const char *name)
 {
 	for (uint32_t k = 0; k < ctx->options.library_directories.n; k++) {
 		const char *d = ctx->options.library_directories.v[k];
@@ -20,7 +20,11 @@ static const char *ld_library_find(struct ld_context *ctx, const char *name)
 
 		if (name[0] == ':')
 			snprintf(p, n, "%s/%s", d, name + 1);
-		else
+		else if (!ctx->options.static_libraries_only) {
+			snprintf(p, n, "%s/lib%s.so", d, name);
+			if (!faccessat(ctx->options.directory_fd, p, R_OK, 0)) return p;
+			snprintf(p, n, "%s/lib%s.a", d, name);
+		} else
 			snprintf(p, n, "%s/lib%s.a", d, name);
 		if (!faccessat(ctx->options.directory_fd, p, R_OK, 0))
 			return p;
@@ -41,7 +45,7 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		   (!strcmp(a, name) && i + 1 < argc) ? argv[++i] : NULL)
 		const char *v;
 		if (a[0] != '-' || !a[1]) {
-			VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = a, .whole = whole}), ld_region_alloc);
+			VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = a, .whole = whole, .as_needed = ctx->options.as_needed}), ld_region_alloc);
 			continue;
 		}
 		if (LD_ARGUMENT_IS("-o") && i + 1 < argc) { ctx->options.output_path = argv[++i]; continue; }
@@ -72,7 +76,7 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		if (LD_ARGUMENT_IS("--emit-relocs") || LD_ARGUMENT_IS("-q")) { ld_error_report(ctx, "--emit-relocs is not supported"); continue; }
 		if ((v = LD_ARGUMENT_VALUE("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
 			/* lld's AArch64 little-endian emulations */
-			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec"))
+			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec") && strcmp(v, "elf_x86_64"))
 				ld_error_report(ctx, "unknown emulation: %s", v);
 			continue;
 		}
@@ -88,12 +92,22 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			continue;
 		}
 		if (LD_ARGUMENT_IS("-Bdynamic") || LD_ARGUMENT_IS("--Bdynamic") || LD_ARGUMENT_IS("-dy") || LD_ARGUMENT_IS("-call_shared")) { ctx->options.static_libraries_only = false; continue; }
-		if (LD_ARGUMENT_IS("-no-pie") || LD_ARGUMENT_IS("--no-pie")) continue;
-		if (LD_ARGUMENT_IS("-pie") || LD_ARGUMENT_IS("--pie")) { ld_error_report(ctx, "-pie is not supported (no dynamic linking yet)"); continue; }
+		if (LD_ARGUMENT_IS("-no-pie") || LD_ARGUMENT_IS("--no-pie")) { ctx->options.pie = false; continue; }
+		if (LD_ARGUMENT_IS("-pie") || LD_ARGUMENT_IS("--pie")) { ctx->options.pie = true; continue; }
 		if ((v = LD_ARGUMENT_VALUE("--dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-dynamic-linker")) || (v = LD_ARGUMENT_VALUE("-I"))) {
-			ld_error_report(ctx, "--dynamic-linker is not supported (no dynamic linking yet)");
+			ctx->options.dynlinker = v;
 			continue;
 		}
+		if (LD_ARGUMENT_IS("--no-dynamic-linker")) { ctx->options.no_dynlinker = true; continue; }
+		if (LD_ARGUMENT_IS("--as-needed") || LD_ARGUMENT_IS("-as-needed")) { ctx->options.as_needed = true; continue; }
+		if (LD_ARGUMENT_IS("--no-as-needed") || LD_ARGUMENT_IS("-no-as-needed")) { ctx->options.as_needed = false; continue; }
+		if (LD_ARGUMENT_IS("-E") || LD_ARGUMENT_IS("--export-dynamic") || LD_ARGUMENT_IS("-export-dynamic")) { ctx->options.export_dynamic = true; continue; }
+		if (LD_ARGUMENT_IS("--no-export-dynamic")) { ctx->options.export_dynamic = false; continue; }
+		if ((v = LD_ARGUMENT_VALUE("--hash-style"))) {
+			if (strcmp(v, "gnu") && strcmp(v, "sysv") && strcmp(v, "both")) ld_error_report(ctx, "unknown --hash-style: %s", v);
+			continue;
+		}
+
 		if ((v = LD_ARGUMENT_VALUE("--library-path")) || (v = LD_ARGUMENT_VALUE("-L")) || (!strncmp(a, "-L", 2) && a[2] && (v = a + 2))) {
 			VVEC_PUSH(ctx->options.library_directories, v, ld_region_alloc);
 			continue;
@@ -102,7 +116,7 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			const char *f = ld_library_find(ctx, v);
 
 			if (f)
-				VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = f, .whole = whole}), ld_region_alloc);
+				VVEC_PUSH(ctx->options.inputs, ((ld_input_argument){.path = f, .whole = whole, .as_needed = ctx->options.as_needed}), ld_region_alloc);
 			else
 				ld_error_report(ctx, "unable to find library -l%s", v);
 			continue;
@@ -112,7 +126,7 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 		if ((v = LD_ARGUMENT_VALUE("--entry")) || (v = LD_ARGUMENT_VALUE("-e"))) { ctx->options.entry = v; continue; }
 		if (!strncmp(a, "-e", 2) && a[2]) { ctx->options.entry = a + 2; continue; }
 		if ((v = LD_ARGUMENT_VALUE("-soname")) || (v = LD_ARGUMENT_VALUE("--soname")) || (v = LD_ARGUMENT_VALUE("-h"))) { ctx->options.soname = v; continue; }
-		if ((v = LD_ARGUMENT_VALUE("--build-id"))) { ctx->options.build_id = strcmp(v, "none") ? v : NULL; continue; }
+		if (!strncmp(a, "--build-id=", 11) && (v = a + 11)) { ctx->options.build_id = strcmp(v, "none") ? v : NULL; continue; }
 		if (LD_ARGUMENT_IS("--build-id")) { ctx->options.build_id = "fast"; continue; }
 		if ((v = LD_ARGUMENT_VALUE("--orphan-handling"))) {
 			if (!strcmp(v, "place")) ctx->options.orphan_handling = 0;
@@ -129,6 +143,8 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
 			if (!strcmp(v, "notext")) ctx->options.notext = true;
 			else if (!strcmp(v, "norelro")) ctx->options.no_relro = true;
 			else if (!strcmp(v, "relro")) ctx->options.no_relro = false;
+			else if (!strcmp(v, "now")) ctx->options.znow = true;
+			else if (!strcmp(v, "lazy")) ctx->options.znow = false;
 			else if (!strcmp(v, "max-page-size") || !strncmp(v, "max-page-size=", 14))
 				ctx->options.max_page_size = strtoull(v + 14, NULL, 0);
 			else if (strcmp(v, "norelro") && strcmp(v, "noexecstack") && strcmp(v, "relro") &&

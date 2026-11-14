@@ -76,6 +76,8 @@ VPRIV bool ld_output_section_offsets_assign(struct ld_context *ctx, uint32_t oi,
 	else if (os->address_expression)
 		ctx->layout.dot = ld_expression_value_resolve(ctx, ld_expression_eval(ctx, os->address_expression));
 	ctx->layout.current_output_section = oi;
+	if (ctx->dyn.deflayout && !os->address_expression && ld_output_section_is_in_load_segment(os))
+		ctx->layout.dot = deflayout_dot(ctx, oi, ctx->layout.dot);
 	if (!os->address_expression)
 		ctx->layout.dot = ld_value_align_up(ctx->layout.dot, os->address_alignment);
 	bool changed = os->address != ctx->layout.dot;
@@ -107,7 +109,8 @@ VPRIV bool ld_output_section_offsets_assign(struct ld_context *ctx, uint32_t oi,
 VPRIV bool ld_addresses_assign(struct ld_context *ctx)
 {
 	bool changed = false, symchg = false;
-	ctx->layout.dot = 0;
+	ctx->layout.dot = ctx->dyn.deflayout ? ctx->dyn.image_base + ld_headers_size(ctx) : 0;
+	ctx->dyn.dl_prev = LD_NONE;
 	ctx->layout.tbss_offset = 0;
 	ctx->layout.current_output_section = LD_OUTPUT_SECTION_AETHER;
 	ctx->script.address_errors.n = 0;

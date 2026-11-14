@@ -81,6 +81,18 @@ same files can run in parallel.
 
 ## Status
 
+### Status 2026-11-14: G3/G4, x86-64 dynamic executables
+
+The ELF linker now reads shared objects and GNU input scripts and links
+x86-64 glibc executables with PIE, copy relocations, PLT/GOT, symbol versions
+and constructors/destructors. Relocated ELF constants under PIC use
+`.data.rel.ro`, including per-object sections and both object/text output.
+`bench/vlink-dyn.py` passes 24/24 with clang and vcc objects; the same
+cases pass with a file-by-file linker build. `bench/vlink-opts.py` passes
+66/66 and `bench/vcc-pic.py` passes 76/76. G3/G4 remain open: arm64 dynamic
+executables, imported TLS, IFUNC and versioned symbol references remain in
+TODO.md.
+
 ### Status 2026-11-11: G2/G7, PostgreSQL on Linux
 
 The PostgreSQL harness can now isolate source and build trees on Linux,
