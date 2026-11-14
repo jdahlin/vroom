@@ -35,6 +35,12 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_t
 
 		target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
 	}
+	{
+		bool pod_, empty_;
+
+		if (cxx_class_layout_info(c, QUNQ(t), &pod_, &empty_) && empty_)
+			return nargs == 0;	/* (an empty class: no bytes of its own to zero, its one may be another member's) */
+	}
 	zargs[0] = cc_address_of_build(a, target, loc);
 	zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);
 	zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, QUNQ(t))->size, cc_type_basic(TY_ULONG), loc);

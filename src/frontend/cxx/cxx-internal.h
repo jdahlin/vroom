@@ -515,6 +515,8 @@ typedef struct cxx {
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);
+VPRIV uint32_t cxx_ftemplate_np(cxx *c, struct cxx_ftemplate *f);	/* instantiate/ftemplate.c */
+VPRIV qty cxx_ftemplate_pt(struct cxx_ftemplate *f, uint32_t i);
 VPRIV void cxx_gen_bind_name(cxx *c, cxx_entity *e, uint32_t object, uint32_t field, uint32_t loc);	/* codegen/statement.c: a structured binding's name */
 VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc);	/* codegen/vtable.c: typeid of a static type */
 VPRIV cxx_entity *cxx_entity_prefer(cxx_entity *e, int kind);	/* declaration/name.c: of a set, the entity of that kind */

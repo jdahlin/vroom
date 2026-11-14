@@ -92,6 +92,15 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 	if (cc_type_is_record(a, mt) && AST_TYPE_KIND(a, mt) != TY_ARRAY) {
 		bool own = c->ctor_found && c->ctor_picked && c->ctor_picked->member_of == cxx_tag_scope_get(c, QUNQ(mt));
 
+		bool pod_, empty_ = false;
+
+		if (!nargs && (!own || c->ctor_picked->fn_defaulted) && cxx_class_layout_info(c, QUNQ(mt), &pod_, &empty_) && empty_) {
+			/* member() of an empty class: nothing to zero (its byte may be another member's: [[no_unique_address]]
+			   __deleter_ at __ptr_'s offset in std::unique_ptr), constructed if anything needs it */
+			if (cxx_gen_needs_construction(c, QUNQ(mt), 0) && !cxx_gen_construct_at(c, target, QUNQ(mt), args, nargs, c->gen_pre, loc))
+				cxx_gen_fail(c);
+			return;
+		}
 		if (!nargs && (!own || c->ctor_picked->fn_defaulted)) {
 			/* member(): value-initialized; without a user-provided default constructor zeroed first (a union
 			   with T() = default), then default-constructed if anything needs it */
@@ -118,6 +127,33 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 		}
 		if (!cxx_gen_construct_at(c, target, QUNQ(mt), args, nargs, c->gen_pre, loc))
 			cxx_gen_fail(c);
+		return;
+	}
+	if (!nargs && AST_TYPE_KIND(a, mt) == TY_ARRAY) {
+		/* an array member from {} (char __padding_[N] = {}: libc++'s __compressed_pair_padding): its bytes zeroed */
+		qty et = mt;
+		uint32_t zargs[3], saved = c->enode, zero;
+
+		while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+			et = AST_TYPE(a, et)->base;
+		if (cc_type_is_record(a, et) || !cxx_gen_type_ok(c, et)) {
+			cxx_gen_fail(c);
+			return;
+		}
+		if (!AST_TYPE(a, QUNQ(mt))->size)
+			return;	/* (an array of no elements: nothing to zero) */
+		zargs[0] = cc_conversion_decay(a, target);
+		zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);
+		zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, QUNQ(mt))->size, cc_type_basic(TY_ULONG), loc);
+		c->enode = 0;
+		cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+		zero = c->enode;
+		c->enode = saved;
+		if (!zero) {
+			cxx_gen_fail(c);
+			return;
+		}
+		cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, zero, 0, 0));
 		return;
 	}
 	if (nargs > 1 || (nargs == 1 && !args[0]) || AST_TYPE_KIND(a, mt) == TY_ARRAY || !cxx_gen_type_ok(c, mt)) {

@@ -335,3 +335,16 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 	cxx_outer_restore(c, &o);
 	return true;
 }
+
+/* the template's parameter count and parameter i's type as its signature has them (placeholders for its own
+   parameters; 0: not known) */
+VPRIV uint32_t cxx_ftemplate_np(cxx *c, cxx_ftemplate *f)
+{
+	cxx_ftemplate_evaluate(c, f);
+	return f->has_pt ? f->np : 0;
+}
+
+VPRIV qty cxx_ftemplate_pt(cxx_ftemplate *f, uint32_t i)
+{
+	return f->has_pt && i < f->np ? f->pt[i] : CXX_TY_UNKNOWN;
+}

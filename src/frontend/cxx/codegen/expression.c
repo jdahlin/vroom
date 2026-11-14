@@ -446,6 +446,18 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 	}
 	if (!(AST_NODE_AT(c->ast, l)->flags & NF_LVALUE))
 		return;
+	if (!base && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) != TY_ARRAY &&
+	    QUNQ(AST_NODE_AT(c->ast, l)->ty) == QUNQ(AST_NODE_AT(c->ast, r)->ty)) {
+		/* x = y of an empty class: nothing copied (its byte may be another member's, [[no_unique_address]]
+		   __deleter_ at __ptr_'s offset in std::unique_ptr); y evaluated, x the result */
+		bool pod, empty;
+
+		if (cxx_class_layout_info(c, QUNQ(AST_NODE_AT(c->ast, l)->ty), &pod, &empty) && empty) {
+			c->enode = cc_node_new_operands(c->ast, N_COMMA, AST_NODE_AT(c->ast, l)->ty, loc, cc_cast_insert(c->ast, cc_address_of_build(c->ast, r, loc), cc_type_basic(TY_VOID), CK_VOID), l);
+			AST_NODE_AT(c->ast, c->enode)->flags |= NF_LVALUE;
+			return;
+		}
+	}
 	if (!base && c->nullptr_ty && QUNQ(AST_NODE_AT(c->ast, r)->ty) == c->nullptr_ty && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) == TY_PTR) {
 		/* p = v of a std::nullptr_t object (std::__exchange(p, nullptr)): the null pointer it holds */
 		r = cxx_gen_bind(c, r, QUNQ(AST_NODE_AT(c->ast, l)->ty), loc);

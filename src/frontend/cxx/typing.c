@@ -502,6 +502,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	}
 	/* the viable candidates, each argument's conversion ranked */
 	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; qty pt[16]; } cand[24];
+	cxx_entity *unk[8];	/* the templates whose deduction is not known */
+	uint32_t nunk = 0;
 	const char *tn = getenv("VCC_CXX_CAND");	/* trace the candidates of calls to this name */
 	bool trace = tn && !c->template_depth && strlen(tn) == vintern_ents[set->name].len && !memcmp(tn, vintern_ents[set->name].s, strlen(tn));
 	uint32_t ncand = 0;
@@ -572,6 +574,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			}
 			if (d < 0)
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
+			if (d < 0 && nunk < 8)
+				unk[nunk++] = e;
 			if (d <= 0)
 				continue;
 			/* its parameters with the arguments bound */
@@ -765,12 +769,35 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	}
 	if (ncand == 1 && !unknown)
 		best = 0;
-	/* (a template vcc could not deduce might be better than anything but a non-template that matches exactly) */
+	/* (a template vcc could not deduce might be better than anything but a non-template that matches exactly;
+	   or than one that matches every argument exactly, when each such template's parameter that depends on none
+	   of its own needs a conversion: impl(__priority_tag<0>, ...) against impl(__priority_tag<1>, ...)) */
 	if (best >= 0 && unknown) {
 		bool exact = !cand[best].tmpl && cand[best].ranked;
 
 		for (uint32_t n = 0; n < nargs && exact; n++)
 			exact = cand[best].rank[n] <= 1;
+		if (!exact && cand[best].ranked && nunk && nunk < 8 && args && nargs <= 16) {
+			bool all0 = true, worse = true;
+
+			for (uint32_t n = 0; n < nargs && all0; n++)
+				all0 = cand[best].rank[n] == 0;
+			for (uint32_t u = 0; u < nunk && all0 && worse; u++) {
+				struct cxx_ftemplate *ft = unk[u]->ftmpl;
+				bool w = false;
+
+				uint32_t fnp = ft ? cxx_ftemplate_np(c, ft) : 0;
+
+				for (uint32_t n = 0; n < nargs && n < fnp && !w; n++) {
+					qty pt = cxx_ftemplate_pt(ft, n);
+
+					if (pt != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, pt) && args[n] != CXX_TY_UNKNOWN)
+						w = cxx_arg_rank(c, pt, args[n], lval[n], have_lval) > 0;
+				}
+				worse = w;
+			}
+			exact = all0 && worse;
+		}
 		if (!exact)
 			best = -1;
 	}

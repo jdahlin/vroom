@@ -90,6 +90,24 @@ VPRIV int cxx_float_class_builtin(const char *name, size_t len)
 }
 
 /* a builtin call's type, for the builtins vcc knows as functions or simple operations (arg0: the first argument's type) */
+/* is name an __atomic builtin vcc builds from nodes, with that many arguments: 1 a value of *p, 2 none
+   (__atomic_store_n), 0 not one */
+VPRIV int cxx_atomic_builtin(const char *name, size_t len, uint32_t nargs)
+{
+	static const struct { const char *n; uint8_t args, kind; } t[] = {
+		{ "__atomic_add_fetch", 3, 1 }, { "__atomic_sub_fetch", 3, 1 }, { "__atomic_and_fetch", 3, 1 },
+		{ "__atomic_or_fetch", 3, 1 }, { "__atomic_xor_fetch", 3, 1 }, { "__atomic_fetch_add", 3, 1 },
+		{ "__atomic_fetch_sub", 3, 1 }, { "__atomic_fetch_and", 3, 1 }, { "__atomic_fetch_or", 3, 1 },
+		{ "__atomic_fetch_xor", 3, 1 }, { "__atomic_load_n", 2, 1 }, { "__atomic_exchange_n", 3, 1 },
+		{ "__atomic_store_n", 3, 2 },
+	};
+
+	for (size_t i = 0; i < sizeof t / sizeof *t; i++)
+		if (strlen(t[i].n) == len && !memcmp(name, t[i].n, len))
+			return nargs == t[i].args ? t[i].kind : 0;
+	return 0;
+}
+
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret)
 {
 	const struct cxx_builtin_function *b;
@@ -124,6 +142,15 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 		*ret = cc_type_pointer(c->ast, cc_type_basic(TY_VOID));
 		return true;
 	}
+	{
+		/* __atomic_add_fetch(p, v, order) and the like (libc++'s reference counts): the type p points to */
+		int k = cxx_atomic_builtin(name, len, nargs);
+
+		if (k && arg0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, arg0) == TY_PTR && !AST_TYPE(c->ast, arg0)->ext) {
+			*ret = k == 2 ? cc_type_basic(TY_VOID) : QUNQ(AST_TYPE(c->ast, arg0)->base);
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -131,6 +158,34 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
+	int ak = cxx_atomic_builtin(name, len, nargs);
+
+	if (ak && cxx_gen_on(c)) {
+		/* an __atomic builtin: C's node for it, from the arguments' nodes (the emitter's lowering) */
+		char nb[32];
+		const cc_builtin *b;
+		cc_id_list l;
+		qty pt;
+
+		if (len >= sizeof nb)
+			return;
+		memcpy(nb, name, len), nb[len] = 0;
+		cc_builtin_table_init();	/* (C's table: built once, a C++ TU may be the first to ask) */
+		b = cc_builtin_lookup(vintern_cstr(nb));
+
+		c->enode = 0;
+		for (uint32_t i = 0; i < nargs; i++)
+			if (!args[i])
+				return;
+		pt = AST_NODE_AT(a, args[0])->ty;
+		if (!b || AST_TYPE_KIND(a, pt) != TY_PTR || AST_TYPE(a, pt)->ext)
+			return;
+		cc_id_list_init(&l);
+		for (uint32_t i = 0; i < nargs; i++)
+			cc_id_list_append(a, &l, cc_node_rvalue(a, cc_conversion_decay(a, args[i])));
+		c->enode = cc_builtin_node_new(a, b->id, ak == 2 ? cc_type_basic(TY_VOID) : QUNQ(AST_TYPE(a, pt)->base), loc, &l);
+		return;
+	}
 	const struct cxx_builtin_function *b;
 	size_t i;
 

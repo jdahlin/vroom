@@ -1894,3 +1894,12 @@ värden för kroppen, och för koden ett pack av parametrarnas symboler.  Rätt 
 medlemsmall av en klassmall, skickad till en mall); libc++:s `__tree::__emplace_unique` via
 `__try_key_extraction` stannar ändå vid `__args2` (orsaken inte funnen än), så std::map::emplace och
 operator[] saknas fortfarande.  cxx-strict 338.
+
+## Status 106 (2026-11-14)
+Felkod rättad: en tom klass värdeinitieras eller tilldelas utan att skriva sin byte (med
+[[no_unique_address]] kan den ligga på en annan medlems plats: `std::unique_ptr`:s `__deleter_` på
+`__ptr_`:s adress; `unique_ptr<int> p(new int(7)); *p` kraschade), även i aggregatinitiering.  En
+arraymedlem från `{}` nollställs (`__compressed_pair_padding`).  En mall vcc inte kan deducera står inte
+i vägen för en kandidat som matchar alla argument exakt, när mallens icke-beroende parameter kräver en
+konvertering (`impl(__priority_tag<0>, ...)`).  `__atomic_add_fetch`/`__atomic_load_n` och liknande:
+typade, och byggda som C-frontendens noder (libc++:s referensräkning).  cxx-strict: 3/70, 330 (338).
