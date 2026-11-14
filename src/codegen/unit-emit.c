@@ -279,7 +279,7 @@ static bool codegen_symbol_is_root(cc *c, uint32_t s)
 			return false;
 		if ((y->flags & AST_SYMBOL_FLAG_GNU_INLINE) && !(y->flags & AST_SYMBOL_FLAG_INLINE_WITHOUT_EXTERN))
 			return false;	/* GNU 'extern inline': clang's isInlineDefinitionExternallyVisible */
-		if (y->sc == AST_STORAGE_STATIC)
+		if (y->sc == AST_STORAGE_STATIC || (y->flags & AST_SYMBOL_FLAG_LINKONCE))
 			return a->used || a->constructor || a->destructor;
 		if ((y->flags & AST_SYMBOL_FLAG_INLINE) && !(y->flags & (AST_SYMBOL_FLAG_GNU_INLINE | AST_SYMBOL_FLAG_EXTERNAL_DECLARATION)) && y->sc != AST_STORAGE_EXTERN)
 			return false;	/* C99 inline definition */
@@ -290,7 +290,7 @@ static bool codegen_symbol_is_root(cc *c, uint32_t s)
 			return false;
 		if (!y->name || y->sc == AST_STORAGE_REGISTER)
 			return false;	/* global register variables have no storage */
-		if (y->sc == AST_STORAGE_STATIC)
+		if (y->sc == AST_STORAGE_STATIC || (y->flags & AST_SYMBOL_FLAG_LINKONCE))
 			return a->used;
 		return true;
 	}

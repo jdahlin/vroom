@@ -1,0 +1,121 @@
+# The C++ front end's builtins: src/tools/gen-cxx-builtins.py writes builtins.inc from this list
+# (`--check`: builtins.inc is up to date and the list agrees with the C front end's tables).
+#
+#   name  kind  signature  [symbol]
+#
+# kind:
+#   lib      a call of `symbol`; for the C++-only ones (operator new and delete, vcc's own names).
+#            clang's library builtins (__builtin_memcpy, __builtin_sin, ...) are not listed: they come
+#            from src/frontend/c/libbuiltins.inc (gen-libbuiltins.py), and the generator rejects them here.
+#   node     the C front end's builtin node of the same name (frontend/c/builtin-table.c), lowered by
+#            the code generator; its operands as given.
+#   fclass   C's node of a floating-point classification: its operand of a floating type (any).
+#   atomic   C's node; the result is what the first argument points to (signature `*`), or void.
+#   special  built by name in codegen/builtin.c (no call, no node of C's).
+#   parsed   handled by the parser itself (expression/primary.c, typing.c): listed so that the list is
+#            the whole inventory (`--coverage`), not in builtins.inc.
+#
+# What the compiler (codegen's own calls) and the standard library need: `gen-cxx-builtins.py
+# --coverage DIR` lists the builtins libc++'s headers in DIR call that are neither here nor clang's
+# library builtins.
+#
+# signature: the result, then each parameter, in C's signature letters (cc_builtin_signature_type:
+# v b C h i u l L w W z d f c D p P s S); `.` an operand taken as it is (the C node's own typing);
+# `*` the type the first argument points to, `&` a pointer to the first argument's type, `=` its type.
+
+# ---- calls (C++ only)
+__builtin_operator_new          lib     pz      _Znwm
+__builtin_operator_new          lib     pzz     _ZnwmSt11align_val_t
+__builtin_operator_delete       lib     vp      _ZdlPv
+__builtin_operator_delete       lib     vpz     _ZdlPvm
+__builtin_operator_delete       lib     vpzz    _ZdlPvmSt11align_val_t
+__vcc_new_array                 lib     pz      _Znam
+__vcc_delete_array              lib     vp      _ZdaPv
+__builtin_unreachable           lib     v       abort
+__builtin_trap                  lib     v       abort
+__builtin_char_memchr           lib     sPiz    memchr
+
+# ---- floating-point classification (any floating type, long double too: the node's own lowering)
+__builtin_isnan                 fclass    i.
+__builtin_isinf                 fclass    i.
+__builtin_isfinite              fclass    i.
+__builtin_isnormal              fclass    i.
+__builtin_signbit               fclass    i.
+
+# ---- constants (folded by the C node: the payload string literal)
+__builtin_huge_val              node    d
+__builtin_huge_valf             node    f
+__builtin_huge_vall             node    D
+__builtin_nan                   node    dS
+__builtin_nanf                  node    fS
+__builtin_nanl                  node    DS
+
+# ---- atomics (libc++'s reference counts, std::atomic, std::atomic_ref)
+__atomic_load_n                 atomic  *.i
+__atomic_add_fetch              atomic  *..i
+__atomic_fetch_add              atomic  *..i
+__atomic_fetch_sub              atomic  *..i
+__atomic_fetch_and              atomic  *..i
+__atomic_fetch_or               atomic  *..i
+__atomic_fetch_xor              atomic  *..i
+__atomic_load                   node    v...
+__atomic_store                  node    v...
+__atomic_exchange               node    v....
+__atomic_compare_exchange       node    b......
+__atomic_thread_fence           node    vi
+__atomic_signal_fence           node    vi
+__c11_atomic_init               atomic  v..
+__c11_atomic_load               atomic  *.i
+__c11_atomic_store              atomic  v..i
+__c11_atomic_exchange           atomic  *..i
+__c11_atomic_fetch_add          atomic  *..i
+__c11_atomic_fetch_sub          atomic  *..i
+__c11_atomic_fetch_and          atomic  *..i
+__c11_atomic_fetch_or           atomic  *..i
+__c11_atomic_fetch_xor          atomic  *..i
+__c11_atomic_compare_exchange_strong atomic b....ii
+__c11_atomic_compare_exchange_weak   atomic b....ii
+__c11_atomic_thread_fence       node    vi
+__c11_atomic_signal_fence       node    vi
+__atomic_always_lock_free       special b..
+__atomic_is_lock_free           special b..
+__c11_atomic_is_lock_free       special b.
+
+# ---- integers (<bit>, <charconv>, overflow-checked arithmetic)
+__builtin_clz                   node    iu
+__builtin_clzl                  node    iL
+__builtin_clzll                 node    iW
+__builtin_ctz                   node    iu
+__builtin_ctzl                  node    iL
+__builtin_ctzll                 node    iW
+__builtin_clzg                  node    i.
+__builtin_clzg                  node    i..
+__builtin_ctzg                  node    i.
+__builtin_ctzg                  node    i..
+__builtin_popcountg             node    i.
+__builtin_bswap16               node    hh
+__builtin_bswap32               node    uu
+__builtin_bswap64               node    WW
+__builtin_add_overflow          node    b...
+__builtin_sub_overflow          node    b...
+__builtin_mul_overflow          node    b...
+
+# ---- built by name in codegen/builtin.c
+__builtin_launder               special =.
+__builtin_assume                special v.
+__builtin_assume_dereferenceable special v..
+__builtin_verbose_trap          special v..
+__builtin_expect                special l..
+__builtin_constant_p            special i.
+__builtin_is_constant_evaluated special b
+__builtin_addressof             special &.
+
+# ---- handled by the parser (not in builtins.inc)
+__builtin_bit_cast              parsed  v
+__builtin_invoke                parsed  v
+__builtin_offsetof              parsed  v
+__builtin_source_location       parsed  v
+__builtin_convertvector         parsed  v
+__builtin_lt_synthesizes_from_spaceship parsed v
+__builtin_assume_aligned        special p.z
+__builtin_assume_aligned        special p.zz

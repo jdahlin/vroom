@@ -1,0 +1,16 @@
+struct NP { NP(); long a; char b; };
+template <class T> struct FPB { [[no_unique_address]] T v; char first; };
+template <class T> inline const unsigned long dsv = __builtin_offsetof(FPB<T>, first);
+static_assert(__builtin_offsetof(FPB<int>, first) == 4, "1");
+static_assert(__builtin_offsetof(FPB<NP>, first) == 9, "2");
+static_assert(dsv<int> == 4, "3");
+static_assert(dsv<NP> == 9 && dsv<char> == 1, "4");
+struct E { };
+template <class T> inline const bool unp = (__is_empty(T) && !__is_final(T)) || sizeof(T) == dsv<T>;
+template <class T> inline const bool unp<T &> = true;
+template <class T, bool = unp<T>> class pad { char p[sizeof(T) - dsv<T>] = {}; };
+template <class T> class pad<T, true> { };
+static_assert(unp<int> && unp<E> && !unp<NP> && unp<int &>, "5");
+static_assert(sizeof(pad<NP>) == 7 && sizeof(pad<int>) == 1 && sizeof(pad<int &>) == 1, "6");
+template <class T, class A> struct V { T *b, *e; struct { [[no_unique_address]] T *cap; [[no_unique_address]] pad<T *> p1; [[no_unique_address]] A alloc; [[no_unique_address]] pad<A> p2; }; };
+static_assert(sizeof(V<int, E>) == 24 && sizeof(V<int, NP>) == 40, "7");

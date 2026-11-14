@@ -61,7 +61,7 @@ enum {
 	AST_TYPE_FLAG_ALIGNED = 16,	/* aligned typedef variant */
 	AST_TYPE_FLAG_TRANSPARENT = 32,	/* transparent_union */
 	AST_TYPE_FLAG_BLOCK = 64,		/* pointer: a block pointer (^, Darwin SDK prototypes only) */
-	AST_TYPE_FLAG_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (ty_atomic) */
+	AST_TYPE_FLAG_ATOMIC = 128,	/* _Atomic(T): n is T's index; clang's layout (cc_type_atomic) */
 };
 
 typedef struct ctype {
@@ -159,6 +159,7 @@ enum {
 	AST_SYMBOL_FLAG_INVALID = 1u << 23,	/* declared with an error (incomplete type): uses report nothing more (clang) */
 	AST_SYMBOL_FLAG_OBJECT_SIZE_QUERY = 1u << 24,	/* function contains an object-size query */
 	AST_SYMBOL_FLAG_CONSTEXPR = 1u << 26,	/* C23 constant object: initializer is a constant expression */
+	AST_SYMBOL_FLAG_LINKONCE = 1u << 28,	/* C++: an inline function's or a template instance's definition (weak): emitted only if this TU refers to it */
 	AST_SYMBOL_FLAG_EXTERNAL_DECLARATION = 1u << 27,	/* function: a file-scope declaration without inline, or extern (C99 6.7.4p7: an inline definition is external) */
 	AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER = 1u << 25,	/* local pointer has a certified immutable initializer */
 	AST_SYMBOL_FLAG_UNINITIALIZED_PENDING = 1u << 22,	/* -Wuninitialized: declared without an initializer, not yet assigned in the text */

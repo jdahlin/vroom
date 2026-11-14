@@ -144,7 +144,7 @@ CC_PRIVATE ast_qualified_type cc_type_pointer(cc *c, ast_qualified_type base)
 	if (likely(i >= c->ptr_lo && i < c->nty)) {	/* (ptr_lo: 1, or a recorded region's first type) */
 		const ctype *p = &c->ty[i];
 
-		if (p->kind == AST_TYPE_POINTER && !p->flags && p->base == base && p->align == CC_PTRSIZE(c))
+		if (p->kind == AST_TYPE_POINTER && !p->flags && !p->ext && p->base == base && p->align == CC_PTRSIZE(c))	/* (ext: a C++ reference) */
 			return AST_QUALIFIED_TYPE(i, 0);
 	}
 	{

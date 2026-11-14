@@ -94,6 +94,7 @@ struct as_context {
 	as_frame frames[AS_FRAMES_MAX]; int frame_count;
 	as_condition conditions[AS_CONDITIONS_MAX]; int condition_count;
 	uint32_t fragment_current, fragment_previous;	/* current/previous frag */
+	uint32_t latest_head[4], latest_end[4];	/* as_fragment_latest: where a few chains of continuations ended (a walk resumes there) */
 	struct { uint32_t cur, prev; } section_stack[AS_SECTION_STACK_MAX]; int section_stack_count;
 	vregion expansion_text;		/* expansion text stack */
 	vregion definitions;		/* macro definitions etc. (per run) */
@@ -114,7 +115,9 @@ struct as_context {
 	/* .cfi_*: instructions of all FDEs, the FDEs, the open one */
 	struct as_cfi_instruction { uint8_t operation; uint32_t register_first, register_second, label; int64_t offset; const uint8_t *escape_bytes; } *cfi_instructions;
 	uint32_t cfi_instruction_count, cfi_instruction_capacity;
-	struct as_frame_description { uint32_t start, end, first_instruction, instruction_count, return_register; uint8_t is_simple, is_signal, uses_b_key; } *frame_descriptions;
+	struct as_frame_description { uint32_t start, end, first_instruction, instruction_count, return_register; uint8_t is_simple, is_signal, uses_b_key;
+		/* .cfi_personality, .cfi_lsda: the personality routine and the language-specific data (C++ exceptions) */
+		uint8_t has_personality, has_lsda, personality_encoding, lsda_encoding; as_value personality, lsda; } *frame_descriptions;
 	uint32_t frame_description_count, frame_description_capacity;
 	int in_frame_description, cfi_eh_frame_selected;	/* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
 	struct { uint32_t orig, ver, rm; } *symvers; uint32_t symver_count, symver_capacity;	/* .symver */

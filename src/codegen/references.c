@@ -48,11 +48,11 @@ VPRIV void codegen_reference_claim(codegen_context *e, uint32_t ref)
 			if (unlikely(y->flags & AST_SYMBOL_FLAG_LAZY))
 				codegen_fatal_report(e, y->loc, "internal error: '%s' is referenced but its body was never parsed",
 				       vintern_ents[y->name].s);
-			if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body || (y->sc != AST_STORAGE_STATIC && !(WASM(c) && codegen_symbol_is_inline_only(y))))
+			if (!(y->flags & AST_SYMBOL_FLAG_DEFINED) || !y->body || (y->sc != AST_STORAGE_STATIC && !(y->flags & AST_SYMBOL_FLAG_LINKONCE) && !(WASM(c) && codegen_symbol_is_inline_only(y))))
 				return;
 		} else if (y->kind == AST_SYMBOL_VARIABLE) {
 			bool local_static = y->depth > 0 && y->sc == AST_STORAGE_STATIC;
-			bool file_static = y->depth == 0 && y->sc == AST_STORAGE_STATIC;
+			bool file_static = y->depth == 0 && (y->sc == AST_STORAGE_STATIC || (y->flags & AST_SYMBOL_FLAG_LINKONCE));
 
 			if (!(local_static || file_static || !y->name))
 				return;

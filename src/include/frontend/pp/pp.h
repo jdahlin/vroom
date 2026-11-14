@@ -58,6 +58,7 @@ typedef struct pp_opts {
 	const char *cwd;		/* relative paths are relative to this (NULL: process cwd) */
 	int errfd;			/* diagnostics (0: stderr) */
 	int asm_mode;			/* assembler-with-cpp: unknown directives pass, # need not stringify */
+	int cxx;			/* C++ (its standard's year): true/false in #if, __has_cpp_attribute */
 	int target;			/* PP_LINUX_AARCH64, PP_DARWIN, PP_WASM64, PP_WASM32, PP_LINUX_X86_64 or PP_WIN64 (column of the feature table; x86-64: has_tab_x86, Windows: has_tab_win64) */
 	int diag_color;			/* diagnostics: 1 colors, -1 none, 0 when errfd is a terminal */
 	int diag_nocaret;		/* -fno-caret-diagnostics: no source lines */
@@ -271,7 +272,7 @@ void diag_record_emit(pp *p, diag_record *d);
 const diag_record *diag_records_first(const pp *p);
 /*
  * VCC_TRACK_DIAG=1 prints with each diagnostic where in vcc it was reported
- * (rustc's -Z track-diagnostics): each reporting function (cc_error, report,
+ * (rustc's -Z track-diagnostics): each reporting function (cc_report_error, report,
  * diag_report_extended, ...) leaves its return address here, and the record keeps it;
  * it is symbolized (atos) only when printed.  Nothing at the call sites:
  * a __FILE_NAME__:__LINE__ argument or a thread-local store there changed

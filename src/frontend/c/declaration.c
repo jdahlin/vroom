@@ -158,7 +158,7 @@ CC_PRIVATE uint32_t cc_declaration_bind(cc *c, const cc_declaration_specifiers *
 				v.n = at.extvec;
 				if (CC_X86_64(c)) v.align = (uint32_t)p;
 			}
-			t = AST_QUALIFIED_TYPE(cc_type_intern(c, &v), AST_QUALIFIED_TYPE_QUALIFIERS(t));
+			t = AST_QUALIFIED_TYPE(cc_type_intern(c, &v), 0);	/* (the element's qualifiers are not the vector's, as clang) */
 		}
 	}
 	if (ds->sc == AST_STORAGE_TYPEDEF) {

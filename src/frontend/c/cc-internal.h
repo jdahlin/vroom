@@ -48,6 +48,10 @@
 
 #define CC_IDENTIFIER(id) cc_identifier_length(id), cc_identifier_string(id)
 
+/* a TU's tables: also the C++ front end's AST (frontend/cxx/, compiled in this module) */
+CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o);
+CC_PRIVATE void cc_translation_unit_free(cc *c);
+
 /* ---------------- types ---------------- */
 
 typedef struct { uint8_t size, align; } cc_basic_type_layout;
@@ -586,6 +590,7 @@ CC_PRIVATE void cc_attribute_apply_symbol(cc *c, sym *s, const attrs *a);
 CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc);
 CC_PRIVATE bool cc_library_builtin_is_known(const char *n);
 CC_PRIVATE const char *cc_library_builtin_signature(const char *n);
+CC_PRIVATE bool cc_library_builtin_info(cc *c, const char *name, size_t len, ast_qualified_type *fty, const char **lib);
 /* mangle.c */
 CC_PRIVATE void cc_mangle_overload_name_set(cc *c, uint32_t s);
 /* decl.c */
