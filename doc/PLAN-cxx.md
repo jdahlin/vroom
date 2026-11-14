@@ -2162,3 +2162,11 @@ Test: `run/literals-auto-arrays.cpp`.  cxx-strict: 87 funktioner till, inga nya;
 - Standardinitierare för arraymedlemmar med element eller en strängkonstant (`int a[3] = {1, 2, 3}`,
   `char s[4] = "abc"`): nollställd, sedan elementen.
 Test: `run/constexpr-case-array-nsdmi.cpp`.  cxx-strict: 84 funktioner till, inga nya.
+
+## Status 128 (2026-11-15)
+`auto x = { e, ... }` är en `std::initializer_list<T>` av elementens enda typ (avklingad)
+([dcl.type.auto.deduct]/4.1: `const auto factors = {12u, 8u, 4u, 0u}` i json:s `get_codepoint`, sedan en
+intervall-for över den).  Listan tolkas igen som anropsargument, `std::initializer_list<T>` instansieras,
+och variabeln är den lokala lista `cxx_gen_initializer_list` bygger.  Kvar:
+`std::initializer_list<unsigned> f = {...}` med typen utskriven.  cxx-strict: 28 funktioner till, inga
+nya; 258 summerat per TU.

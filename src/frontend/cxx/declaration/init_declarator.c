@@ -688,6 +688,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				bool cx_object = (flags & DS_CONSTEXPR) && t != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, t) &&
 						 !cc_type_is_integer(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ENUM;
 				bool gen_global = global && gen_var && !f && (!(flags & DS_CONSTEXPR) || cx_object) && !auto_e && cxx_gen_global_begin(c, gen_var);
+				uint32_t brace_at = braced ? c->pos : 0;	/* (auto x = {...}: the list, parsed again below) */
 
 				cxx_initializer_parse(c);
 				if (unsized_e && cxx_gen_on(c)) {
@@ -711,6 +712,62 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (gen_local) {
 					cxx_gen_local_declare(c, gen_local, braced ? cxx_gen_array_initializer(c, t, name_loc) : c->enode, true, name_loc);
 					gen_declared = true;
+				}
+				/* auto x = { e, ... }: a std::initializer_list of the elements' one type (decayed) ([dcl.type.auto.deduct]/4.1:
+				   const auto factors = {12u, 8u, 4u, 0u} in json's get_codepoint) */
+				if (auto_e && braced && brace_at && !c->tentative && !c->template_depth) {
+					uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;
+					ast_qualified_type at[CXX_MAX_ARGS], et = CXX_TY_UNKNOWN, ilt = CXX_TY_UNKNOWN;
+					uint8_t al[CXX_MAX_ARGS];
+					cxx_entity *std = cxx_lookup_in(c, c->global, vintern_cstr("std"), 0), *te;
+
+					c->pos = brace_at;
+					cxx_braced_arguments_parse(c);
+					c->pos = pos;
+					n = c->ncargs;
+					if (n != UINT32_MAX && n && n <= CXX_MAX_ARGS) {
+						memcpy(an, c->carg_nodes, n * sizeof *an), memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
+						for (uint32_t i = 0; i < n; i++) {
+							ast_qualified_type e1 = at[i];
+
+							if (e1 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e1) == AST_TYPE_ARRAY)
+								e1 = cc_type_pointer(c->ast, AST_TYPE(c->ast, e1)->base);
+							else if (e1 != CXX_TY_UNKNOWN)
+								e1 = AST_QUALIFIED_TYPE_UNQUALIFIED(e1);
+							if (e1 == CXX_TY_UNKNOWN || (i && e1 != et)) {
+								et = CXX_TY_UNKNOWN;
+								break;
+							}
+							et = e1;
+						}
+					}
+					while (std && !(std->kind == CXX_ENTITY_NAMESPACE && std->members))
+						std = std->next;
+					te = std && et != CXX_TY_UNKNOWN ? cxx_lookup_in(c, std->members, vintern_cstr("initializer_list"), 0) : NULL;
+					while (te && te->kind != CXX_ENTITY_TEMPLATE)
+						te = te->next;
+					if (te) {
+						cxx_targ ta = { .kind = 1, .t = et };
+						cxx_entity *inst = cxx_instantiate(c, te, &ta, 1, true);
+
+						if (inst && inst->ty != CXX_TY_UNKNOWN)
+							ilt = AST_QUALIFIED_TYPE_UNQUALIFIED(inst->ty);
+					}
+					if (ilt != CXX_TY_UNKNOWN) {
+						auto_e->ty = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ilt), AST_QUALIFIED_TYPE_QUALIFIERS(auto_pattern));
+						if (auto_gen && cxx_gen_on(c) && c->gen_block) {
+							uint32_t arr = 0, il, ls;
+
+							c->ctor_ilist_n = n;
+							memcpy(c->ctor_ilist_types, at, n * sizeof *at), memcpy(c->ctor_ilist_lval, al, n);
+							memcpy(c->ctor_ilist_brace, c->carg_brace, sizeof c->ctor_ilist_brace);
+							il = cxx_gen_initializer_list(c, ilt, an, n, c->gen_block, name_loc, &arr);
+							if (il && AST_NODE_AT(c->ast, il)->op == AST_NODE_VARIABLE && (ls = AST_NODE_AT(c->ast, il)->a)) {
+								auto_e->sym = ls;	/* (the list's own local, declared in this block: the variable) */
+								gen_declared = true;
+							}
+						}
+					}
 				}
 				/* auto x = expr: its type from the initializer's */
 				if (auto_e && !braced && c->etype != CXX_TY_UNKNOWN) {
