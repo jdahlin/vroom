@@ -1442,3 +1442,9 @@ inline-definitionerna utan användning försvinner), 11 av 118.
 `concat`, i alla felmeddelanden): en parameter före packen med förval tar
 förvalet när den varken deduceras eller ges.  json: 69/70, 5,1 s CPU,
 2 255 funktioner, 11 av 118.
+
+### Status (56): omskrivna kandidater för != (2026-11-14)
+`a != b` med bara `operator==` deklarerad blir `!(a == b)` (C++20), medlem eller vän.
+cxx-run får en rad `// std:` per test (rewritten-ne.cpp, c++20); 40/40.  cxx-fork: 4,9 s CPU,
+49x mot clang -O2, 69/70 test går igenom; vcc definierar 2 255 funktioner.  Målet (30x med bara
+vccs kod) är inte uppfyllt: det mesta av json-koden kommer fortfarande från clang.
