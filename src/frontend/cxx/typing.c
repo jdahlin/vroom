@@ -992,6 +992,27 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			return false;
 		}
 	}
+	if (IS("__datasizeof")) {
+		uint64_t ds, size;
+		uint32_t align;
+
+		if (cxx_class_data_size(c, t[0], &ds)) {
+			*v = (int64_t)ds;
+			return true;
+		}
+		if (cc_type_is_record(c->ast, t[0]) || !cxx_type_size_known(c, t[0], &size, &align))
+			return false;
+		*v = (int64_t)size;
+		return true;
+	}
+	if (IS("__is_final")) {
+		cxx_scope *fs = cc_type_is_record(c->ast, t[0]) && k != TY_ARRAY ? cxx_type_class_scope(c, QUNQ(t[0])) : NULL;
+
+		if (cc_type_is_record(c->ast, t[0]) && k != TY_ARRAY && !fs)
+			return false;
+		*v = fs && fs->is_final;
+		return true;
+	}
 	if (IS("__is_void")) *v = k == TY_VOID;
 	else if (IS("__is_integral")) *v = (k >= TY_BOOL && k <= TY_UINT128);
 	else if (IS("__is_floating_point")) *v = (k >= TY_BFLOAT16 && k <= TY_FLOAT128);

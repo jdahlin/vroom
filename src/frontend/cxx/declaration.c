@@ -34,8 +34,8 @@ static bool cxx_lookahead(cxx *c, void (*fn)(cxx *))
 /* an attribute's tokens [b, e): one that changes a layout? (counted: a class with one is not laid out yet) */
 static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 {
-	static const char *const names[] = { "no_unique_address", "__no_unique_address__", "aligned", "__aligned__", "packed",
-					     "__packed__", "ms_struct", "__ms_struct__" };
+	static const char *const names[] = { "no_unique_address", "__no_unique_address__", "packed", "__packed__",
+					     "aligned", "__aligned__", "ms_struct", "__ms_struct__" };
 
 	for (uint32_t i = b; i < e; i++) {
 		const cxx_token *t = &c->tok[i];
@@ -44,10 +44,45 @@ static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 			continue;
 		for (size_t k = 0; k < sizeof names / sizeof *names; k++)
 			if (t->len == strlen(names[k]) && !memcmp(t->s, names[k], t->len)) {
-				c->layout_attributes++;
-				return;
+				/* no_unique_address on a member and packed on a class are laid out (types.c); the
+				   others are counted: a class with one is not laid out yet */
+				if (k < 2)
+					c->attr_nua = 1;
+				else if (k < 4)
+					c->attr_packed = 1;
+				else
+					c->layout_attributes++;
+				break;
 			}
 	}
+}
+
+/* at a class key: is the class unnamed (struct {, struct __attribute__((packed)) {, struct [[a]] {)? */
+static bool cxx_class_key_unnamed(cxx *c)
+{
+	uint32_t i = c->pos + 1;
+
+	while (i < c->ntok) {
+		int depth = 0;
+
+		if (c->tok[i].kw == CXX_KW___attribute__ || c->tok[i].kw == CXX_KW___attribute || c->tok[i].kw == CXX_KW_alignas)
+			i++;
+		else if (!(c->tok[i].kind == LEX_TOKEN_LEFT_SQUARE && i + 1 < c->ntok && c->tok[i + 1].kind == LEX_TOKEN_LEFT_SQUARE))
+			break;
+		if (c->tok[i].kind != LEX_TOKEN_LEFT_PAREN && c->tok[i].kind != LEX_TOKEN_LEFT_SQUARE)
+			return false;
+		for (; i < c->ntok; i++) {
+			int k = c->tok[i].kind;
+
+			if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
+				depth++;
+			else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && !--depth) {
+				i++;
+				break;
+			}
+		}
+	}
+	return i < c->ntok && c->tok[i].kind == LEX_TOKEN_LEFT_BRACE;
 }
 
 VPRIV void cxx_attributes_skip(cxx *c)
@@ -883,7 +918,7 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			flags |= DS_TYPE;
 			sp.v_unknown = 1;
 		} else if (!(flags & DS_TYPE) && (kw == CXX_KW_class || kw == CXX_KW_struct || kw == CXX_KW_union)) {
-			bool unnamed = cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE;
+			bool unnamed = cxx_class_key_unnamed(c);
 
 			c->anonymous_class = CXX_TY_UNKNOWN;
 			cxx_class_specifier_parse(c, is_template);
@@ -2424,9 +2459,11 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	cxx_entity *instance = c->instantiation_target, *instance_of = c->instantiation_template;
 	cxx_targ spec_args[32];
 	uint32_t nspec_args = 0, spec_less = 0;
+	bool packed = false, is_final = false;
 
 	c->instantiation_target = c->instantiation_template = NULL;
 	cxx_advance(c);	/* class / struct / union */
+	c->attr_packed = 0;
 	cxx_attributes_skip(c);
 	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON)) {
 		cxx_nested_name_parse(c, &q, &dep);
@@ -2443,8 +2480,11 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		}
 	}
 	cxx_attributes_skip(c);
-	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && cxx_peek(c, 0)->len == 5 && !memcmp(cxx_peek(c, 0)->s, "final", 5))
+	packed = c->attr_packed, c->attr_packed = 0;
+	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && cxx_peek(c, 0)->len == 5 && !memcmp(cxx_peek(c, 0)->s, "final", 5)) {
+		is_final = true;
 		cxx_advance(c);
+	}
 	if (!cxx_is(c, LEX_TOKEN_LEFT_BRACE) && !cxx_is(c, LEX_TOKEN_COLON)) {
 		/* an elaborated type specifier: refers to (or declares) the class */
 		if (name) {
@@ -2527,6 +2567,10 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		cxx_class_begin(c, specialization ? explicit_instance : e, name, key_loc, is_union,
 				is_template || c->template_depth ? CXX_SKIP_TEMPLATE : specialization && !explicit_instance ? CXX_SKIP_SPECIALIZATION :
 				c->layout_attributes != attrs ? CXX_SKIP_ATTRIBUTE : -1, is_class);
+		if (packed)
+			cxx_class_packed(c);
+		if (is_final && !c->tentative)
+			cs->is_final = 1;
 		if (explicit_instance)
 			cxx_instance_register(c, e, spec_args, nspec_args, explicit_instance);
 		{
@@ -2758,8 +2802,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			int64_t w;
 
 			cxx_advance(c);
-			w = cxx_literal_value(c);
 			cxx_constant_expression_parse(c);
+			w = c->econst && c->evalue >= 0 && c->evalue <= 64 ? c->evalue : -1;
 			if (member)
 				cxx_class_field(c, 0, base, c->tok[start].loc, w < 0 ? -2 : (int)w);
 			goto next;
@@ -2916,14 +2960,13 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			cs->field_types[cs->nfield_types++] = t;
 		}
 		if (member && !f && name > 1) {
-			/* a data member: its bit-field width (a literal) comes after the declarator */
+			/* a data member: its bit-field width (a constant expression) comes after the declarator */
 			int w = -1;
 
 			if (cxx_is(c, LEX_TOKEN_COLON)) {
-				int64_t v = (cxx_advance(c), cxx_literal_value(c));
-
-				w = v < 0 ? -2 : (int)v;
+				cxx_advance(c);
 				cxx_constant_expression_parse(c);
+				w = c->econst && c->evalue >= 0 && c->evalue <= 64 ? (int)c->evalue : -2;
 			}
 			cxx_class_field(c, name, t, name_loc, w);
 			if (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE))
@@ -3153,10 +3196,23 @@ static void cxx_simple_declaration_parse(cxx *c, int context, cxx_scope *cs)
 	cxx_init_declarators_parse(c, flags, context, cs);
 }
 
+static void cxx_member_declaration_parse1(cxx *c, cxx_scope *cs);
+
 static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs)
 {
+	/* (this member may be inside a class that is itself a [[no_unique_address]] member) */
+	uint8_t outer_nua = c->attr_nua;
+
+	c->attr_nua = 0;
+	cxx_member_declaration_parse1(c, cs);
+	c->attr_nua = outer_nua;
+}
+
+static void cxx_member_declaration_parse1(cxx *c, cxx_scope *cs)
+{
 	int kw;
-	uint32_t member_attrs = c->layout_attributes;	/* (leading [[no_unique_address]] counts too) */
+	uint32_t member_attrs = c->layout_attributes;	/* (leading attributes count too) */
+
 
 	cxx_attributes_skip(c);
 	kw = cxx_kw(c);
@@ -3190,7 +3246,7 @@ static void cxx_member_declaration_parse(cxx *c, cxx_scope *cs)
 
 		cxx_simple_declaration_parse(c, CXX_CONTEXT_CLASS, cs);
 		if (c->layout_attributes != member_attrs && c->build == b)
-			cxx_class_skip(c, CXX_SKIP_ATTRIBUTE);	/* (aligned, packed, no_unique_address: not built yet) */
+			cxx_class_skip(c, CXX_SKIP_ATTRIBUTE);	/* (aligned, alignas, ms_struct: not built yet) */
 	}
 }
 

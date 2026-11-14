@@ -935,7 +935,34 @@ static void cxx_primary_expression_parse(cxx *c)
 		else
 			cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
-	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_offsetof: case CXX_KW___builtin_bit_cast:
+	case CXX_KW___builtin_offsetof: {	/* (type, member): a constant when the class is laid out */
+		qty ot;
+		uint32_t member = 0;
+		uint64_t bits;
+		bool simple;
+
+		cxx_advance(c);
+		cxx_advance(c);
+		cxx_type_id_parse(c);
+		ot = c->type_out;
+		cxx_expect(c, LEX_TOKEN_COMMA);
+		if (cxx_is(c, LEX_TOKEN_IDENTIFIER))
+			member = cxx_peek(c, 0)->id;
+		simple = member && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN;
+		while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {	/* (a.b[i]: not evaluated) */
+			if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE))
+				cxx_skip_balanced(c);
+			else
+				cxx_advance(c);
+		}
+		cxx_advance(c);
+		if (simple && !c->template_depth && !c->tentative && cxx_class_field_offset(c, ot, member, &bits, 0) && !(bits & 7))
+			cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)(bits / 8));
+		else
+			cxx_et(c, cc_type_basic(TY_ULONG), false);
+		return;
+	}
+	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_bit_cast:
 	case CXX_KW___builtin_convertvector: case CXX_KW___builtin_types_compatible_p: case CXX_KW___builtin_choose_expr:
 	case CXX_KW___builtin_shufflevector: case CXX_KW___builtin_addressof: case CXX_KW___is_identifier:
 		cxx_builtin_call_parse(c);
@@ -1011,7 +1038,9 @@ static void cxx_primary_expression_parse(cxx *c)
 			if (!c->template_depth && !c->tentative && c->nbtypes && c->nbtypes <= 2 &&
 			    !cxx_type_has_placeholder(c, c->btypes[0]) && !(c->nbtypes == 2 && cxx_type_has_placeholder(c, c->btypes[1])) &&
 			    cxx_trait_value(c, t->s, t->len, c->btypes, c->nbtypes, &v))
-				cxx_ec(c, cc_type_basic(TY_BOOL), v);
+				cxx_ec(c, t->len == 12 && !memcmp(t->s, "__datasizeof", 12) ? cc_type_basic(TY_ULONG) : cc_type_basic(TY_BOOL), v);
+			else if (t->len == 12 && !memcmp(t->s, "__datasizeof", 12))
+				cxx_et(c, cc_type_basic(TY_ULONG), false);
 		}
 		return;
 	}

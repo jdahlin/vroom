@@ -159,6 +159,7 @@ struct cxx_scope {
 	cxx_scope **used;
 	uint32_t nused, cused;
 	uint8_t has_dependent_base;
+	uint8_t is_final;		/* a class declared final */
 	uint8_t has_conversion;		/* a class: it declares a conversion function (operator T) */
 	qty *field_types;		/* a class: its non-static data members' types, for its implicit special members */
 	uint32_t nfield_types;
@@ -307,6 +308,7 @@ typedef struct cxx {
 	cxx_entity *call_picked;	/* ... and which */
 	uint8_t carg_const;		/* the argument list was one integer constant expression */
 	int64_t carg_value;		/* ... its value */
+	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */
 	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
@@ -378,6 +380,9 @@ VPRIV qty cxx_type_array(cxx *c, qty elem, int64_t n);	/* n < 0: unknown bound *
 VPRIV qty cxx_type_function(cxx *c, qty ret, const qty *params, uint32_t n, bool variadic);
 VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t);
 VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip, bool is_class);
+VPRIV void cxx_class_packed(cxx *c);
+VPRIV bool cxx_class_data_size(cxx *c, qty t, uint64_t *dsize);
+VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, int depth);
 VPRIV void cxx_class_skip(cxx *c, int reason);
 VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
 VPRIV void cxx_class_end(cxx *c);
