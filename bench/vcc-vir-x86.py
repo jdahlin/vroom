@@ -96,6 +96,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_low32.c', {'lowloop', 'wideloop', 'lowselect', 'wideselect', 'narrowarg', 'widearg'}, {}),
         ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
+        ('vir_record_words.c', {'token_copy', 'wrapper', 'produce', 'adjusted', 'rotate', 'read_old'}, {}),
         ('vir_byte_or.c', {'one_vector', 'with_tail', 'short_scan', 'volatile_scan', 'mutating_scan'}, {}),
         ('vir_x86_cmpmem.c', {'left', 'right', 'full32', 'sign8', 'zero8', 'sign16', 'indexed', 'keep', 'vol', 'outside', 'narrow'}, {}),
         ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'branch8', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
@@ -135,6 +136,14 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
+            if filename == 'vir_record_words.c':
+                text = asm.read_text()
+                body = text.split('token_copy:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if '%rsp' in body or '%rbp' in body:
+                    raise SystemExit('token_copy: ABI words still round-trip through a temporary')
+                body = text.split('wrapper:\n', 1)[1].split('.Lfunc_end', 1)[0]
+                if not re.search(r'\bcall\w*\s+produce\b', body) or 'movups' in body:
+                    raise SystemExit('wrapper: expected a forwarded result buffer')
             if filename == 'vir_byte_or.c':
                 for name in required_more:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
