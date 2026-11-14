@@ -1154,3 +1154,17 @@ doctest-makron men stannar i libc++: `std::string`s konstruktorer
 (`[[no_unique_address]]`-medlemmar i initierare, `__min_cap` utan typ),
 och testregistreringen kräver dynamisk initiering av globala variabler
 (`.init_array`), som inte finns än.
+
+### Status (36): dynamisk initiering av globala variabler (2026-11-14)
+- En variabel på namnrymdsnivå vars initierare inte är en konstant
+  initieras vid programstart: initieraren byggs i en egen funktion
+  (`__vcc_init_N`, emitterns `constructor`-attribut → `.init_array`), i
+  definitionernas ordning; konstanta initierare ligger kvar i objektfilen.
+- Globala objekt av klasstyp konstrueras där (`T x;`, `T x(a)`, `T x{a}`,
+  `T x = e`), och deras destruktor registreras med `__cxa_atexit`.
+  Förut nollades `T x;` tyst utan konstruktoranrop.
+- Bara variabler i den globala namnrymden än; statiska lokala variabler
+  (med vakter) saknas.
+`cxx-run-tests.py` 21/21 (ny `globals.cpp`: ordning, konstruktion och
+destruktion i omvänd ordning vid exit); `cxx-coverage.py` 10 247 av
+146 663 (7,0 %).

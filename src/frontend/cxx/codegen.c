@@ -122,6 +122,18 @@ static uint32_t cxx_gen_data_address(cxx *c, uint32_t s, uint32_t index);
 static uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
 static void cxx_gen_typeinfos_emit(cxx *c);
 
+/* is init a constant initializer for an object of type ty (cc_initializer_static_is_ok reports where not) */
+static bool cxx_gen_static_ok(cc *a, qty ty, uint32_t init)
+{
+	uint32_t bad = 0;
+
+	return cc_initializer_static_is_ok(a, ty, init, &bad);
+}
+static void cxx_gen_file_asm(cxx *c, const char *text);
+static uint32_t cxx_gen_data_symbol(cxx *c, const char *name, uint32_t n);
+static uint32_t cxx_gen_to_void_pointer(cxx *c, uint32_t n);
+static uint32_t cxx_gen_runtime_call(cxx *c, uint32_t fs, const uint32_t *args, uint32_t nargs, uint32_t loc);
+
 typedef struct cxx_prv {
 	uint32_t node;		/* the prvalue as an expression: an lvalue naming the temporary */
 	uint32_t expr;		/* the expression that constructs it (a call that takes the object's address first) */
@@ -2530,7 +2542,7 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 		AST_NODE_AT(a, n)->aux = 1;
 		AST_NODE_AT(a, n)->c = v.n / 3;
 		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
-		if (!cc_initializer_static_is_ok(a, y->ty, n, NULL))
+		if (!cxx_gen_static_ok(a, y->ty, n))
 			continue;
 		y = &a->syms[cls->vt_sym];
 		y->sc = 0;
@@ -2718,7 +2730,7 @@ static void cxx_gen_typeinfos_emit(cxx *c)
 		AST_NODE_AT(a, n)->aux = 1;
 		AST_NODE_AT(a, n)->c = words;
 		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
-		if (!cc_initializer_static_is_ok(a, y->ty, n, NULL))
+		if (!cxx_gen_static_ok(a, y->ty, n))
 			continue;
 		y = &a->syms[cls->ti_sym];
 		y->sc = 0;
@@ -3241,40 +3253,192 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
 {
 	cc *a = c->ast;
+	cxx_entity *f;
+	char nm[64];
+	attrs at;
 
 	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || c->gen || !v || !v->sym || !v->global_ns ||
 	    !cxx_gen_object_type_ok(c, v->ty))
 		return false;
-	c->gen = 1, c->gen_failed = 0, c->gen_block = NULL;
+	/* The initializer is built inside a function of its own: if it turns out not to be a constant, that
+	   function runs it when the program starts (.init_array), in the order of the definitions. */
+	f = calloc(1, sizeof *f);
+	f->kind = CXX_ENTITY_VALUE, f->name = vintern_cstr("__vcc_init"), f->pack_index = -1;
+	f->ty = cxx_type_function(c, cc_type_basic(TY_VOID), NULL, 0, false);
+	f->fn_internal = 1, f->mangled = 1;
+	f->sym = cc_symbol_new(a, S_FUNC, f->name, f->ty, 0);
+	a->syms[f->sym].depth = 0;
+	a->syms[f->sym].sc = SC_STATIC;
+	snprintf(nm, sizeof nm, "__vcc_init_%u", c->ginit_serial++);
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, nm) + 1;
+	at.constructor = 1, at.used = 1;	/* (run at start-up: the emitter's .init_array entry, when it is defined) */
+	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
+	if (!cxx_gen_function_begin(c, f, c->scope, NULL, 0)) {
+		free(f);
+		return false;
+	}
+	c->ginit_fn = f;
+	c->ginit_list = calloc(1, sizeof(cc_id_list));
+	cc_id_list_init(c->ginit_list);
+	c->gen_block = c->ginit_list;
 	return true;
+}
+
+/* the start-up function is done: kept (true) with its statements as its body and an .init_array entry, or dropped */
+static bool cxx_gen_global_finish(cxx *c, bool keep)
+{
+	cc *a = c->ast;
+	cxx_entity *f = c->ginit_fn;
+	cc_id_list *l = c->ginit_list;
+	uint32_t body = 0;
+	bool defined;
+
+	c->ginit_fn = NULL, c->ginit_list = NULL;
+	if (!f)
+		return false;
+	if (keep && cxx_gen_on(c) && l->n)
+		body = cc_statement_new(a, N_BLOCK, 0, 0, cc_id_list_freeze(a, l), l->n);
+	else
+		c->gen_failed = 1;
+	cxx_gen_function_end(c, f, body);
+	free(l);
+	defined = (a->syms[f->sym].flags & SF_DEFINED) != 0;
+	if (!defined && c->stats.functions)
+		c->stats.functions--;	/* (not a function of the program's: a constant initializer needs none) */
+	return defined;
+}
+
+/* the variable itself, zero until the start-up function has run (not const in the object: it is written then) */
+static void cxx_gen_global_zeroed(cxx *c, const cxx_entity *v)
+{
+	cc *a = c->ast;
+	sym *y = &a->syms[v->sym];
+
+	if (y->flags & (SF_DEFINED | SF_TENTATIVE))
+		return;
+	y->ty = QUNQ(y->ty);
+	y->flags |= SF_TENTATIVE;
+	a->toplevel[a->ntoplevel++] = v->sym;
+}
+
+/* x as an lvalue of its type without const (an initialization writes it) */
+static uint32_t cxx_gen_unqualified(cxx *c, uint32_t x, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty t = AST_NODE_AT(a, x)->ty, pt;
+	uint32_t addr;
+
+	if (t == QUNQ(t))
+		return x;
+	pt = cc_type_pointer(a, QUNQ(t));
+	addr = cc_address_of_build(a, x, loc);
+	return cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+}
+
+/*
+ * A namespace-scope object of class type t, initialized from args (cxx_ctor_use was called for it): built
+ * by the start-up function, and its destructor registered to run at exit (__cxa_atexit).
+ */
+VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	cxx_entity *picked = c->ctor_picked, *dtor = NULL;
+	bool found = c->ctor_found, none = c->ctor_none, ok = c->ginit_fn && cxx_gen_on(c);
+	bool needs = ok && cxx_gen_needs_destruction(c, t, 0);
+
+	if (ok && needs) {
+		dtor = cxx_gen_effective_destructor(c, t, 0);
+		ok = dtor && !dtor->fn_deleted && cxx_gen_name(c, dtor) && dtor->sym1;
+	}
+	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	ok = ok && cxx_gen_construct_at(c, cxx_gen_var_node(c, v->sym, loc), QUNQ(t), args, nargs, c->ginit_list, loc);
+	if (ok && dtor) {
+		/* __cxa_atexit(destructor, &object, &__dso_handle) */
+		qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), ps[3] = { vp, vp, vp };
+		uint32_t ar[3];
+
+		if (!c->gen_atexit_sym) {
+			c->gen_atexit_sym = cc_symbol_new(a, S_FUNC, vintern_cstr("__cxa_atexit"), cxx_type_function(c, cc_type_basic(TY_INT), ps, 3, false), 0);
+			a->syms[c->gen_atexit_sym].flags |= SF_GLOBAL;
+			a->syms[c->gen_atexit_sym].depth = 0;
+			c->gen_dso_sym = cxx_gen_data_symbol(c, "__dso_handle", 0);
+		}
+		ar[0] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, dtor->sym1, loc));
+		ar[1] = cxx_gen_to_void_pointer(c, cc_address_of_build(a, cxx_gen_var_node(c, v->sym, loc), loc));
+		ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
+		cc_id_list_append(a, c->ginit_list, cc_statement_new(a, N_EXPR, loc, cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
+	}
+	if (cxx_gen_global_finish(c, ok && ((cc_id_list *)c->ginit_list)->n))
+		cxx_gen_global_zeroed(c, v);
+	else if (ok)
+		cxx_gen_global_zeroed(c, v);	/* (nothing to run: a class with no construction, zeroed) */
 }
 
 VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool has_init)
 {
 	cc *a = c->ast;
 	sym *y = &a->syms[v->sym];
-	bool failed = c->gen_failed;
+	bool failed = c->gen_failed || !cxx_gen_on(c);
+	cc_id_list *l = c->ginit_list;
 
-	c->gen = 0;
-	if (y->flags & (SF_DEFINED | SF_TENTATIVE))
+	if (!c->ginit_fn) {
+		c->gen = 0;
 		return;
+	}
+	if (y->flags & (SF_DEFINED | SF_TENTATIVE)) {
+		cxx_gen_global_finish(c, false);
+		return;
+	}
 	if (!has_init) {
+		if (cc_type_is_record(a, y->ty) && AST_TYPE_KIND(a, y->ty) != TY_ARRAY && cxx_gen_needs_construction(c, y->ty, 0)) {
+			/* T x; of a class with a constructor: default-initialized at start-up */
+			cxx_ctor_use(c, y->ty, NULL, NULL, 0, false);
+			cxx_gen_global_object(c, v, y->ty, NULL, 0, 0);
+			return;
+		}
+		if (cc_type_is_record(a, y->ty) && cxx_gen_needs_destruction(c, y->ty, 0)) {
+			cxx_gen_global_object(c, v, y->ty, NULL, 0, 0);
+			return;
+		}
+		cxx_gen_global_finish(c, false);
+		y = &a->syms[v->sym];
 		y->flags |= SF_TENTATIVE;
 		a->toplevel[a->ntoplevel++] = v->sym;
 		return;
 	}
-	if (failed || !init)
-		return;	/* (an initializer not built yet: the variable stays a declaration) */
-	if (AST_NODE_AT(a, init)->op != N_INIT) {
-		if (!cxx_gen_type_ok(c, v->ty))
-			return;
-		init = cc_conversion_apply(a, cc_conversion_decay(a, init), QUNQ(y->ty));
-	}
-	if (!cc_initializer_static_is_ok(a, y->ty, init, NULL))
+	if (failed || !init) {
+		cxx_gen_global_finish(c, false);	/* (an initializer not built yet: the variable stays a declaration) */
 		return;
-	y->body = init;
-	y->flags |= SF_DEFINED;
-	a->toplevel[a->ntoplevel++] = v->sym;
+	}
+	if (!l->n) {
+		/* a constant initializer: in the object file */
+		uint32_t k = init;
+
+		if (AST_NODE_AT(a, k)->op != N_INIT)
+			k = cxx_gen_type_ok(c, v->ty) && !cc_type_is_record(a, AST_NODE_AT(a, k)->ty) ? cc_conversion_apply(a, cc_conversion_decay(a, k), QUNQ(y->ty)) : 0;
+		if (k && cxx_gen_static_ok(a, y->ty, k)) {
+			cxx_gen_global_finish(c, false);
+			y = &a->syms[v->sym];
+			y->body = k;
+			y->flags |= SF_DEFINED;
+			a->toplevel[a->ntoplevel++] = v->sym;
+			return;
+		}
+	}
+	/* not a constant: var = init when the program starts */
+	if (AST_NODE_AT(a, init)->op == N_INIT || cxx_gen_is_reference(c, v->ty) || !cxx_gen_type_ok(c, v->ty) || cc_type_is_record(a, v->ty)) {
+		cxx_gen_global_finish(c, false);	/* (a list, a reference, a class by value: not built yet) */
+		return;
+	}
+	init = cxx_gen_bind(c, init, QUNQ(v->ty), 0);
+	if (!init) {
+		cxx_gen_global_finish(c, false);
+		return;
+	}
+	cc_id_list_append(a, l, cc_statement_new(a, N_EXPR, 0, cc_assignment_build(a, 0, cxx_gen_unqualified(c, cxx_gen_var_node(c, v->sym, 0), 0), init, 0), 0, 0));
+	if (cxx_gen_global_finish(c, true))
+		cxx_gen_global_zeroed(c, v);
 }
 
 /* ---- functions ----------------------------------------------------------------------------- */

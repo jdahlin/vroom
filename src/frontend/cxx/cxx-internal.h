@@ -402,6 +402,10 @@ typedef struct cxx {
 	cxx_scope **ti_list;		/* the classes whose type info this TU names (defined at its end where it belongs here) */
 	uint32_t nti_list, cti_list;
 	uint32_t gen_eh_syms[8];	/* the exception runtime's functions, once declared */
+	cxx_entity *ginit_fn;		/* a namespace-scope variable's initializer is being built: the function that runs it at start-up */
+	void *ginit_list;		/* ... and that function's statements */
+	uint32_t ginit_serial;
+	uint32_t gen_atexit_sym, gen_dso_sym;
 	uint32_t gen_try_serial;	/* try blocks so far (their trampolines' names) */
 	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
@@ -568,6 +572,7 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc);
 VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t);
 VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc);

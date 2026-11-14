@@ -19,9 +19,11 @@ TESTS = os.path.join(ROOT, "src", "test", "cxx", "run")
 
 def symbols(obj):
     r = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True)
-    # (a lambda's functions have names of each compiler's own: $_N in clang's, __vcc_lambda_N here; __vcc_try_N: a try block's trampoline)
+    # (a lambda's functions have names of each compiler's own: $_N in clang's, __vcc_lambda_N here; __vcc_try_N: a try block's trampoline; the functions that
+    # initialize globals at start-up: __cxx_global_var_init* in clang's, __vcc_init_N here)
     return sorted(l.split()[-1] for l in r.stdout.splitlines()
-                  if (" T " in l or " t " in l) and "$_" not in l and "__vcc_" not in l)
+                  if (" T " in l or " t " in l) and "$_" not in l and "__vcc_" not in l
+                  and "__cxx_global_var_init" not in l and "_GLOBAL__sub_I_" not in l)
 
 
 def one(path, tmp, verbose):

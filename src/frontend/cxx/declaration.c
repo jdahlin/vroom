@@ -3287,6 +3287,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))	/* = delete("reason") */
 					cxx_skip_balanced(c);
 			} else if (object && !cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
+				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
+
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
 				{
 					uint32_t in = c->enode;
@@ -3294,6 +3296,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cxx_ctor_use(c, t, &c->etype, (uint8_t[]){ c->elval }, 1, false);
 					if (gen_local) {	/* code generation: the constructor's call, or a copy */
 						cxx_gen_construct_local(c, gen_local, t, &in, 1, name_loc);
+						gen_declared = true;
+					}
+					if (gobj) {	/* ... of an object at namespace scope: when the program starts */
+						cxx_gen_global_object(c, gen_var, t, &in, 1, name_loc);
 						gen_declared = true;
 					}
 				}
@@ -3349,6 +3355,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
 				uint32_t an[16], n;
+				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
@@ -3358,11 +3365,19 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
 					gen_declared = true;
 				}
+				if (gobj) {
+					if (c->ctor_found && c->ctor_picked)
+						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
+					else
+						cxx_gen_global_end(c, gen_var, 0, true);	/* (a list for an aggregate: not built yet) */
+					gen_declared = true;
+				}
 			} else
 				cxx_braced_init_list_parse(c);
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			if (object) {
 				uint32_t an[16], n;
+				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_call_arguments_parse(c);	/* direct-initialization */
 				n = c->ncargs;
@@ -3370,6 +3385,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, false);
 				if (gen_local) {
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					gen_declared = true;
+				}
+				if (gobj) {
+					cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
 					gen_declared = true;
 				}
 			} else
