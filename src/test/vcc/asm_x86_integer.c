@@ -74,7 +74,7 @@ int main(void)
     if (x != 0x9abcdef3U) return 6;
     __asm__ volatile("jmp .Ldone%=\n.Ldone%=:\n" : : : "memory");
     __asm__ volatile("nop");
-    register unsigned long forced __asm__("r12") = 37;
+    register unsigned long long forced __asm__("r12") = 37;
     __asm__("addq $2, %%r12" : "+r"(forced) : : "cc");
     if (forced != 39) return 7;
     float f = 1.0f;
@@ -86,9 +86,9 @@ int main(void)
     struct { unsigned a, b; } pair = { 0x12345678U, 0x9abcdef0U };
     __asm__("rolq $32, %0" : "+r"(pair) : : "cc");
     if (pair.a != 0x9abcdef0U || pair.b != 0x12345678U) return 10;
-    unsigned long packed;
+    unsigned long long packed;
     __asm__("movq %1, %0" : "=r"(packed) : "r"(pair));
-    if (packed != 0x123456789abcdef0UL) return 11;
+    if (packed != 0x123456789abcdef0ULL) return 11;
     return 0;
 }
 #else

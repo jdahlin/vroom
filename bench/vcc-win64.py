@@ -146,16 +146,14 @@ WIN64_SKIP = {
 # exclusion itself still comes from running clang's side; an entry whose
 # reference now runs is reported as stale.  Exclusions not listed here are
 # the same for x86-64 Linux (gcc-only flags and builtins, clang's own limits).
-_LP64 = 'assumes a 64-bit long (Windows is LLP64)'
 WIN64_WHY = {
     # LP64: the program tests 64-bit values held in long (our tests can move to long long)
     'gcc/comp-goto-1': ('lp64', 'label addresses in an unsigned long'),
     'gcc/pr36339': ('lp64', 'pointers in an unsigned long (my_uintptr_t)'),
-    **{f'vcc/{n}': ('lp64', _LP64) for n in (
-        'mem_builtin_inline', 'vir_low32', 'jump_table', 'asm_x86_integer', 'vir_ext_add_facts',
-        'vir_scratch_fold', 'vir_shrink_wrap', 'vir_x86_bytes', 'vir_x86_ext', 'vir_x86_index',
-        'vir_x86_nsw_index', 'vir_x86_testmem', 'asm_clobber_all', 'asm_goto_out', 'asm_imm_knownbits',
-        'atomic_ops', 'bit_cast', 'c23_keywords', 'vector_builtins', 'vir_x86_dispatch')},
+    # our tests moved to long long (2026-11-14); what is left is not the data model
+    'vcc/asm_clobber_all': ('asm', "clang's own program faults under Wine (an asm that clobbers every register)"),
+    'vcc/asm_imm_knownbits': ('asm', 'an asm operand expression clang does not accept for COFF'),
+    'vcc/bit_cast': ('ms-layout', 'a bit-field record bit-cast to an integer: the MS layout differs'),
     # MinGW lays records out with the MS rules (-mms-bitfields is its default)
     'vcc/ms_struct_layout': ('ms-layout', 'expects the GCC layout without ms_struct (MinGW defaults to MS)'),
     'vcc/pragma_pack_pop': ('ms-layout', 'bit-field sizes under #pragma pack follow the MS rules on MinGW'),

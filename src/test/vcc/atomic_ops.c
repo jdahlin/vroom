@@ -12,7 +12,7 @@ static int bad;
 #define CHECK(c) do { if (!(c)) { printf("line %d: %s\n", __LINE__, #c); bad++; } } while (0)
 
 enum color { RED, GREEN, BLUE };
-struct rec { char tag; _Atomic short s; _Atomic(long) l; };
+struct rec { char tag; _Atomic short s; _Atomic(long long) l; };
 
 _Atomic signed char gsc = -128;
 _Atomic unsigned char guc = 255;
@@ -20,7 +20,7 @@ _Atomic short gs = 32767;
 _Atomic unsigned short gus;
 _Atomic int gi;
 _Atomic unsigned gu;
-_Atomic long gl;
+_Atomic long long gl;
 _Atomic unsigned long long gull;
 _Atomic _Bool gb;
 _Atomic float gf = 1.5f;
@@ -37,7 +37,7 @@ _Static_assert(sizeof(_Atomic(char *)) == 8 && sizeof(_Atomic(struct rec)) == 16
 
 __attribute__((noinline)) static int three(void) { return 3; }
 
-__attribute__((noinline)) static void through(_Atomic int *p, _Atomic long *q)
+__attribute__((noinline)) static void through(_Atomic int *p, _Atomic long long *q)
 {
 	CHECK(++*p == 1);
 	CHECK((*p)++ == 1);
@@ -77,8 +77,8 @@ int main(void)
 	gu = 0;
 	CHECK(--gu == 0xffffffffu);
 	CHECK((gu >>= 28) == 15);
-	gl = 1L << 40;
-	CHECK((gl += gl) == 1L << 41);
+	gl = 1LL << 40;
+	CHECK((gl += gl) == 1LL << 41);
 	gull = ~0ull;
 	CHECK(++gull == 0);
 	CHECK((gull -= 1) == ~0ull);
@@ -119,7 +119,7 @@ int main(void)
 	/* through pointers, members, locals */
 	{
 		_Atomic int li = 0;
-		_Atomic long ll = 0;
+		_Atomic long long ll = 0;
 		struct rec lr = { 1, 2, 3 };
 		const _Atomic int ci = 9;
 
@@ -134,6 +134,6 @@ int main(void)
 		CHECK(sizeof(gi + 0) == 4 && sizeof(gsc + 0) == 4);
 		CHECK(_Generic(gi, int: 1, default: 0));
 	}
-	printf("%d %u %ld %g %d\n", gi, gu, gl, gd, bad);
+	printf("%d %u %lld %g %d\n", gi, gu, gl, gd, bad);
 	return bad;
 }
