@@ -601,3 +601,20 @@ member bodies, none failed (clang emits 1,692 functions); 0.13 s.  json:
 Largest untyped groups now: function objects' operator() with decltype
 return types over their parameters, begin(x) through ADL, libc++'s
 strong_order/weak_order customization objects, packs.
+
+### Status 2026-11-14 (9): only what C++ instantiates
+static_assert is evaluated (statistics; an error only with
+VCC_CXX_STATIC_ASSERT=1, which the ok-check-* tests set).  libc++'s own
+assertions found three over-instantiations, now fixed: a body is instantiated
+only for the function a call selects (not for every viable candidate), not
+from an unevaluated operand (decltype, sizeof, noexcept, requires) unless its
+return type is auto, and not from the discarded statement of an if constexpr
+whose condition is a known constant.  A T&& parameter does not bind an lvalue,
+a non-const T& not an rvalue (std::forward's two overloads).
+unit-32bit: static_asserts 69 true, 0 false (was 16), 116 not evaluated;
+168 function template bodies and 180 member bodies (the earlier 516 + 210
+included bodies C++ does not instantiate); 1911 of 2542 calls typed; clang
+emits 1,692 functions.  json: 44,885 layouts clang agrees with, 71/71 parse;
+parse tests 18/18.  Next: choosing among several viable candidates (partial
+ordering of function templates, conversion ranks), which is where bodies are
+now not instantiated; packs.

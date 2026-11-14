@@ -785,7 +785,9 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			else if (kw != CXX_KW_decltype && kw != CXX_KW___decltype && cxx_try_type_id(c))
 				cxx_type_id_parse(c);
 			else {
+				c->unevaluated++;
 				cxx_expression_parse(c);
+				c->unevaluated--;
 				/* decltype: a name's declared type; a call's or cast's type with its reference; T& for
 				   another lvalue; else the prvalue's type */
 				if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->template_depth && (kw == CXX_KW_decltype || kw == CXX_KW___decltype)) {
@@ -1392,7 +1394,9 @@ static void cxx_noexcept_parse(cxx *c)
 	if (cxx_accept_kw(c, CXX_KW_noexcept)) {
 		if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			cxx_advance(c);
+			c->unevaluated++;	/* (noexcept(noexcept(f(x))): what it calls is not used) */
 			cxx_constant_expression_parse(c);
+			c->unevaluated--;
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		}
 	} else if (cxx_accept_kw(c, CXX_KW_throw)) {
@@ -1915,11 +1919,27 @@ static void cxx_static_assert_parse(cxx *c)
 {
 	static int check = -1;
 	bool known, value;
+	uint32_t start = c->pos;
 
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 	cxx_assignment_expression_parse(c);
 	known = c->econst && !c->tentative && !c->template_depth, value = c->evalue != 0;
+	if (!c->tentative && !c->template_depth && !c->unevaluated) {
+		if (!known)
+			c->stats.asserts_unknown++;
+		else if (value)
+			c->stats.asserts_true++;
+		else {
+			c->stats.asserts_false++;
+			if (getenv("VCC_CXX_WHY")) {
+				fprintf(stderr, "static_assert false:");
+				for (uint32_t i = start; i < c->pos && i < start + 40; i++)
+					fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+				fputc('\n', stderr);
+			}
+		}
+	}
 	if (cxx_accept(c, LEX_TOKEN_COMMA))
 		cxx_assignment_expression_parse(c);	/* a string literal (or, in C++26, an expression) */
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
@@ -3031,7 +3051,9 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	c->decl_return = CXX_TY_UNKNOWN;
 	cxx_declarator_parse(c, false, &q, &f, NULL);
 	t = f ? c->type_out : CXX_TY_UNKNOWN;
+	c->sig_auto = 0;
 	if (ret_auto && f) {
+		c->sig_auto = c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return);
 		/* the placeholder stays here: a pattern for the deduction below, void or unknown to callers */
 		if (c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return)) {
 			ret_pattern = c->decl_return;

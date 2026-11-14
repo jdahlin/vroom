@@ -730,7 +730,9 @@ static void cxx_primary_expression_parse(cxx *c)
 		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (const std::type_info: not looked up) */
 		return;
 	case CXX_KW_requires:
+		c->unevaluated++;
 		cxx_requires_expression_parse(c);
+		c->unevaluated--;
 		cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
 	case CXX_KW___builtin_va_arg: case CXX_KW___builtin_offsetof: case CXX_KW___builtin_bit_cast:
@@ -1079,7 +1081,9 @@ static void cxx_unary_expression_parse(cxx *c)
 			uint64_t size;
 			uint32_t align;
 
+			c->unevaluated++;
 			cxx_unary_expression_parse(c);
+			c->unevaluated--;
 			/* sizeof expr: its type's size */
 			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->etype, &size, &align)) {
 				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
@@ -1107,7 +1111,9 @@ static void cxx_unary_expression_parse(cxx *c)
 		return;
 	case CXX_KW_noexcept:
 		cxx_advance(c);
+		c->unevaluated++;
 		cxx_paren_expression_parse(c);
+		c->unevaluated--;
 		cxx_et(c, cc_type_basic(TY_BOOL), false);
 		return;
 	case CXX_KW_new:

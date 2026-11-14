@@ -153,6 +153,21 @@ static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
 	return true;
 }
 
+/* can each reference parameter bind its argument?  T&& not an lvalue, T& (not const) not an rvalue */
+static bool cxx_refs_bind(cxx *c, const ctype *ft, const qty *args, const uint8_t *lval, uint32_t nargs)
+{
+	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
+		qty p = c->ast->params[ft->aux + i];
+		const ctype *pt = AST_TYPE(c->ast, p);
+
+		if (pt->kind != TY_PTR || !pt->ext || args[i] == CXX_TY_UNKNOWN)
+			continue;
+		if (pt->ext == 2 ? lval[i] != 0 : !lval[i] && !(QQ(pt->base) & Q_CONST))
+			return false;
+	}
+	return true;
+}
+
 /*
  * A call's type.  set: the functions the callee names (NULL: callee_type, a function or a pointer
  * to one).  The candidates are the non-templates whose arity fits and the templates whose
@@ -184,6 +199,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	cxx_entity *nonconst = NULL;
 	uint32_t n_nonconst = 0, nexact_t = 0;
 	qty exact_t = CXX_TY_UNKNOWN;
+	cxx_entity *exact_te = NULL;
+	bool have_lval = lval != NULL, picked_t = false;
 
 	c->none_viable = 0, c->call_obj = 0;
 	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
@@ -228,18 +245,20 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			return;
 		}
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
-			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r) : -1;
+			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
 
 			if (d < 0)
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
 			if (d <= 0)
 				continue;
-			/* its parameters with the arguments bound: an exact match? */
-			if (c->bound_sig != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN) {
+			/* its parameters with the arguments bound: can they bind, an exact match? */
+			if (c->bound_sig != CXX_TY_UNKNOWN) {
 				const ctype *bt = AST_TYPE(c->ast, c->bound_sig);
 
-				if (!(bt->flags & TF_VARIADIC) && bt->n == nargs && cxx_exact(c, bt, args, nargs))
-					nexact_t++, exact_t = r;
+				if (have_lval && !(bt->flags & TF_VARIADIC) && !cxx_refs_bind(c, bt, args, lval, nargs))
+					continue;	/* (T&& from an lvalue, T& from an rvalue: std::forward's other overload) */
+				if (r != CXX_TY_UNKNOWN && !(bt->flags & TF_VARIADIC) && bt->n == nargs && cxx_exact(c, bt, args, nargs))
+					nexact_t++, exact_t = r, exact_te = e;
 			}
 		} else {
 			const ctype *ft;
@@ -270,7 +289,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	if (nexact == 1)
 		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
 	else if (!nexact && nexact_t == 1 && !unknown && viable)
-		result = exact_t;	/* f(int) and f(long) templates called with an int: the exact one */
+		result = exact_t, picked_t = true;	/* f(int) and f(long) templates called with an int: the exact one */
 	else if (!viable || !same || unknown) {
 		c->none_viable = !viable && !unknown;
 		if (!c->template_depth && !(c->none_viable && operator_call))
@@ -285,10 +304,17 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			!viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
 	/* the function called (when known): an instance's member body is instantiated */
 	{
-		cxx_entity *called = nexact == 1 ? exact : viable == 1 && !unknown ? first : NULL;
+		cxx_entity *called = nexact == 1 ? exact : picked_t ? exact_te : viable == 1 && !unknown ? first : NULL;
 
 		if (called && called->kind == CXX_ENTITY_VALUE)
 			cxx_member_body_use(c, called);
+		else if (called && called->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !c->unevaluated && !c->tentative && nargs <= 16) {
+			/* the template called, in evaluated code: its body (the result is as deduced above) */
+			qty r, et = result;
+
+			cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs, &r, true);
+			result = et != CXX_TY_UNKNOWN ? et : r;
+		}
 	}
 	cxx_et(c, result, false);
 }

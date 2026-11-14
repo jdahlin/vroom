@@ -264,7 +264,9 @@ VPRIV void cxx_statement_parse(cxx *c)
 	switch (cxx_kw(c)) {
 	case CXX_KW_if:
 		cxx_advance(c);
-		cxx_accept_kw(c, CXX_KW_constexpr);
+		bool is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
+		int taken = -1;	/* if constexpr with a known condition: 1 the first statement, 0 the else */
+
 		if (cxx_is(c, LEX_TOKEN_EXCLAMATION) || cxx_is_kw(c, CXX_KW_consteval)) {	/* if !consteval / if consteval */
 			cxx_accept(c, LEX_TOKEN_EXCLAMATION);
 			cxx_expect_kw(c, CXX_KW_consteval);
@@ -274,11 +276,19 @@ VPRIV void cxx_statement_parse(cxx *c)
 
 			cxx_scope_push(c, s);
 			cxx_condition_parse(c);
+			if (is_constexpr && c->econst && !c->tentative && !c->template_depth)
+				taken = c->evalue != 0;
+			/* the discarded statement is parsed, not instantiated: what it calls is not used */
+			c->unevaluated += taken == 0;
 			cxx_statement_parse(c);
+			c->unevaluated -= taken == 0;
 			c->scope = outer;
 		}
-		if (cxx_accept_kw(c, CXX_KW_else))
+		if (cxx_accept_kw(c, CXX_KW_else)) {
+			c->unevaluated += taken == 1;
 			cxx_statement_parse(c);
+			c->unevaluated -= taken == 1;
+		}
 		return;
 	case CXX_KW_switch: case CXX_KW_while: {
 		cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;

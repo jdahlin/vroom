@@ -1082,6 +1082,7 @@ typedef struct cxx_outer {
 	qty this_type, etype;
 	bool elval;
 	cxx_entity *ecallee, *last_fn;
+	uint32_t unevaluated;
 	uint8_t this_const, ret_capture, ret_lval;
 	qty ret_type;
 } cxx_outer;
@@ -1097,6 +1098,7 @@ static void cxx_outer_save(cxx *c, cxx_outer *o)
 	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
 	o->this_const = c->this_const, o->ret_capture = c->ret_capture, o->ret_lval = c->ret_lval, o->ret_type = c->ret_type;
 	c->ret_capture = 0;
+	o->unevaluated = c->unevaluated;
 }
 
 static void cxx_outer_restore(cxx *c, cxx_outer *o)
@@ -1107,11 +1109,12 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 	free(o->targs), free(o->dp);
 	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
 	c->this_const = o->this_const, c->ret_capture = o->ret_capture, c->ret_lval = o->ret_lval, c->ret_type = o->ret_type;
+	c->unevaluated = o->unevaluated;
 }
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; } cxx_fdone;
 
 typedef struct cxx_ftemplate {
 	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
@@ -1190,9 +1193,12 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		f->sig = CXX_TY_UNKNOWN;
 }
 
-/* the return type with the deduced arguments: the signature re-parsed with them bound (member typedefs,
-   partial specializations: as for a real instance) */
-static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
+/*
+ * The return type with the deduced arguments: the signature re-parsed with them bound (member typedefs,
+ * partial specializations: as for a real instance).  want_body: the function is the one called, in
+ * evaluated code: its body is instantiated too (once).  An auto return type needs the body anyway.
+ */
+static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body)
 {
 	cxx_partial *p = &f->p;
 	uint32_t np = p->params->ntparams;
@@ -1209,22 +1215,31 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	qty ret_type = c->ret_type;
 	bool elval = c->elval;
 	cxx_entity *ecallee = c->ecallee;
+	uint32_t unevaluated = c->unevaluated, at = UINT32_MAX;
 
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
-			c->stats.bodies_cached++;
-			c->bound_sig = f->done[i].sig;
-			return f->done[i].ret;
+			if (!want_body || f->done[i].body) {
+				c->stats.bodies_cached++;
+				c->bound_sig = f->done[i].sig;
+				return f->done[i].ret;
+			}
+			at = i;	/* its signature was parsed; now its body */
+			break;
 		}
 	c->bound_sig = CXX_TY_UNKNOWN;
 	if (c->body_depth >= 64)
-		return CXX_TY_UNKNOWN;	/* (recursion: the return type alone would do; not yet) */
-	if (f->ndone == f->cdone)
-		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
-	f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
-	memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
-	f->done[f->ndone].ret = CXX_TY_UNKNOWN, f->done[f->ndone].sig = CXX_TY_UNKNOWN;
-	f->ndone++;	/* (before the body: a recursive call finds it) */
+		return at != UINT32_MAX ? f->done[at].ret : CXX_TY_UNKNOWN;
+	if (at == UINT32_MAX) {
+		if (f->ndone == f->cdone)
+			f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
+		f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
+		memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
+		f->done[f->ndone].ret = CXX_TY_UNKNOWN, f->done[f->ndone].sig = CXX_TY_UNKNOWN, f->done[f->ndone].body = 0;
+		at = f->ndone++;
+	}
+	if (want_body)
+		f->done[at].body = 1;	/* (before the body: a recursive call finds it) */
 	/* what the enclosing parse still uses */
 	targs = malloc((ntargs ? ntargs : 1) * sizeof *targs);
 	memcpy(targs, c->targs, ntargs * sizeof *targs);
@@ -1244,9 +1259,12 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	c->body_depth++;
 	if (c->body_depth > c->stats.body_depth_max)
 		c->stats.body_depth_max = c->body_depth;
+	c->sig_auto = 0;
+	if (want_body)
+		c->unevaluated = 0;	/* (the body is evaluated code, whatever the call was in) */
 	if (!setjmp(jb)) {
-		bool b;
-		qty t = cxx_function_signature_parse(c, false, &b, f->ctor_class);
+		bool b = false;
+		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
 
 		body = b;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
@@ -1262,9 +1280,17 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	free(targs), free(dp);
 	c->this_type = this_type, c->etype = etype, c->elval = elval, c->ecallee = ecallee;
 	c->this_const = this_const, c->ret_capture = ret_capture, c->ret_lval = ret_lval, c->ret_type = ret_type;
+	c->unevaluated = unevaluated;
+	/* auto with no trailing type: only the body tells (an unevaluated call instantiates it too) */
+	if (!want_body && c->sig_auto && r == CXX_TY_UNKNOWN)
+		return cxx_ftemplate_return(c, f, bind, true);
 	for (uint32_t i = 0; i < f->ndone; i++)
-		if (cxx_args_equal(f->done[i].args, bind, np))
-			f->done[i].ret = r, f->done[i].sig = sig;
+		if (cxx_args_equal(f->done[i].args, bind, np)) {
+			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN)
+				f->done[i].ret = r, f->done[i].sig = sig;
+			r = f->done[i].ret, sig = f->done[i].sig;
+			break;
+		}
 	c->bound_sig = sig;
 	return r;
 }
@@ -1352,7 +1378,7 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
  */
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-			      uint32_t nargs, qty *ret)
+			      uint32_t nargs, qty *ret, bool body)
 {
 	cxx_ftemplate *f = e->ftmpl;
 	cxx_partial *p;
@@ -1379,7 +1405,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 				return xargs[i].kind ? 0 : -1;
 			bind[i] = xargs[i];
 		}
-		*ret = cxx_ftemplate_return(c, f, bind);
+		*ret = cxx_ftemplate_return(c, f, bind, body);
 		return 1;	/* (its arity is not checked: the signature with the arguments bound would tell) */
 	}
 	if (f->sig == CXX_TY_UNKNOWN) {
@@ -1447,7 +1473,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			return k;
 		}
 	}
-	*ret = cxx_ftemplate_return(c, f, bind);
+	*ret = cxx_ftemplate_return(c, f, bind, body);
 	return 1;
 }
 
@@ -1457,7 +1483,7 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 	cxx_outer o;
 	jmp_buf jb;
 
-	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64)
+	if (!e || !e->late || e->late_done || c->tentative || c->body_depth >= 64 || c->unevaluated)
 		return;
 	e->late_done = 1;
 	cxx_outer_save(c, &o);

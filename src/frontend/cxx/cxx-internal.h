@@ -224,6 +224,7 @@ typedef struct cxx {
 	struct cxx_stats {
 		uint32_t classes, classes_laid_out, classes_skipped[16];	/* (by CXX_SKIP_*) */
 		uint32_t declarations, declarations_typed, symbols, expressions, expressions_typed;
+		uint32_t asserts_true, asserts_false, asserts_unknown;	/* static_asserts outside templates */
 		uint32_t calls, calls_typed, why[12];	/* calls outside templates; why a call has no type (CXX_WHY_*) */
 		uint32_t bodies, bodies_failed, bodies_cached, body_depth_max, member_bodies, member_bodies_failed;	/* function template bodies instantiated */
 	} stats;
@@ -264,6 +265,8 @@ typedef struct cxx {
 	uint32_t ncargs, ccargs;
 	qty edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
 	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
+	uint32_t unevaluated;		/* > 0: in an unevaluated operand or a discarded statement (calls instantiate no body) */
+	uint8_t sig_auto;		/* the last signature parsed returns auto with no trailing type */
 	uint32_t ename;			/* the expression is an unqualified name (its id): a call looks it up by its arguments too */
 	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
 	qty lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
@@ -368,7 +371,7 @@ VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t d
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
 VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class);
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
-			      uint32_t nargs, qty *ret);
+			      uint32_t nargs, qty *ret, bool body);
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
