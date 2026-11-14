@@ -381,8 +381,10 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 			}
 		}
 	}
+	/* (from an object of the same class with no constructor that fits: the implicit copy or move) */
 	if (set)
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, args, lval, nargs);
+		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, nargs,
+				   nargs == 1 && args[0] != CXX_TY_UNKNOWN && QUNQ(args[0]) == QUNQ(t));
 	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
 	if (dtor && dtor->kind == CXX_ENTITY_VALUE)
 		cxx_member_body_use(c, dtor);

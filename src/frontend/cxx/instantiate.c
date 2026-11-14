@@ -1263,6 +1263,29 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	return r;
 }
 
+/* P against the base classes of the class A (cv as A's): true if one matches (bind then holds it) */
+static bool cxx_match_bases(cxx *c, cxx_partial *p, qty P, qty A, cxx_targ *bind, int depth)
+{
+	cxx_scope *cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(A)) : NULL;
+	cxx_targ save[64];
+
+	if (!cls || p->params->ntparams > 64)
+		return false;
+	memcpy(save, bind, p->params->ntparams * sizeof *bind);
+	for (uint32_t i = 0; i < cls->nused; i++) {
+		cxx_scope *b = cls->used[i];
+		qty bt;
+
+		if (!b || b->kind != CXX_SCOPE_CLASS || !b->owner || b->owner->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, b->owner->ty))
+			continue;
+		bt = QT(QI(b->owner->ty), QQ(A));
+		if (cxx_match_type(c, p, P, bt, bind, 0) || cxx_match_bases(c, p, P, bt, bind, depth + 1))
+			return true;
+		memcpy(bind, save, p->params->ntparams * sizeof *bind);	/* (a partial match binds nothing) */
+	}
+	return false;
+}
+
 /*
  * After deduction: the parameters left take their default arguments, and each value parameter's type
  * is formed with the earlier parameters bound (template<class T, enable_if_t<cond<T>, int> = 0>).
@@ -1400,7 +1423,10 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			A = QUNQ(A);
 		}
 		if (!cxx_match_type(c, p, P, A, bind, 0)) {
-			/* (deduction against a base class, or a conversion: not tried; a failure here may be wrong) */
+			/* X<T> against a class derived from X<int>: its bases, nearest first */
+			if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
+				continue;
+			/* (a conversion: not tried; a failure here may be wrong for a class) */
 			c->why = CXX_WHY_CLASS_MATCH;
 			return AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT ? -1 : 0;
 		}
