@@ -329,6 +329,9 @@ typedef struct cxx {
 	uint8_t op_lv_set, op_lv[17];	/* the next operator call's operands: lvalues or not (the object first) */
 	/* code generation (codegen.c): the AST of the function body being parsed */
 	uint32_t c_linkage;		/* > 0: inside extern "C" */
+	uint32_t gen_level;		/* c->instantiating where the body being built started (deeper: another parse, no nodes) */
+	void *gen_stack;		/* the bodies being built around this one (one instantiated inside another) */
+	uint32_t gen_stack_depth;
 	uint8_t gen, gen_failed;	/* building it; something in it is not built yet (the function stays undefined) */
 	uint32_t enode;			/* the expression's AST node (0: not built) */
 	uint32_t snode, sdone, sdepth;	/* the statement's node; the statement depth that set it; the depth now */
@@ -466,6 +469,7 @@ VPRIV qty cxx_auto_type(cxx *c);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
 VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);
+VPRIV void cxx_gen_unwind(cxx *c, uint32_t depth);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
 #define cxx_gen_fail(c) cxx_gen_fail_at(c, __FILE__, __LINE__)
 VPRIV bool cxx_gen_type_ok(cxx *c, qty t);

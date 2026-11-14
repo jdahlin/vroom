@@ -1559,6 +1559,9 @@ typedef struct cxx_outer {
 	uint32_t unevaluated;
 	uint8_t this_const, ret_capture, ret_lval;
 	qty ret_type;
+	/* code generation: the expression and statement being built, and how many bodies are being built */
+	uint32_t enode, snode, sdone, sdepth, gen_stack_depth;
+	void *gen_block;
 } cxx_outer;
 
 static void cxx_outer_save(cxx *c, cxx_outer *o)
@@ -1573,6 +1576,8 @@ static void cxx_outer_save(cxx *c, cxx_outer *o)
 	o->this_const = c->this_const, o->ret_capture = c->ret_capture, o->ret_lval = c->ret_lval, o->ret_type = c->ret_type;
 	c->ret_capture = 0;
 	o->unevaluated = c->unevaluated;
+	o->enode = c->enode, o->snode = c->snode, o->sdone = c->sdone, o->sdepth = c->sdepth, o->gen_block = c->gen_block;
+	o->gen_stack_depth = c->gen_stack_depth;
 }
 
 static void cxx_outer_restore(cxx *c, cxx_outer *o)
@@ -1584,6 +1589,8 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
 	c->this_const = o->this_const, c->ret_capture = o->ret_capture, c->ret_lval = o->ret_lval, c->ret_type = o->ret_type;
 	c->unevaluated = o->unevaluated;
+	cxx_gen_unwind(c, o->gen_stack_depth);	/* (a body whose parse failed: the one around it goes on) */
+	c->enode = o->enode, c->snode = o->snode, c->sdone = o->sdone, c->sdepth = o->sdepth, c->gen_block = o->gen_block;
 }
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */

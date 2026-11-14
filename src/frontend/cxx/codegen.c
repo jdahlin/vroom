@@ -13,7 +13,60 @@
 /* building the AST of the function body being parsed? */
 VPRIV bool cxx_gen_on(cxx *c)
 {
-	return c->gen && !c->gen_failed && !c->tentative && !c->template_depth && !c->unevaluated && !c->instantiating;
+	return c->gen && !c->gen_failed && !c->tentative && !c->template_depth && !c->unevaluated && c->instantiating == c->gen_level;
+}
+
+/*
+ * The state of the body being built, set aside while another is built inside it: a function template's
+ * or a class template instance's member's body is instantiated where it is first used, in the middle of
+ * the body that uses it.
+ */
+typedef struct cxx_gen_saved {
+	struct cxx_gen_saved *next;
+	uint8_t gen, gen_failed;
+	uint32_t gen_level, enode, snode, sdone, sdepth, gen_psyms, gen_npsyms, gen_fn, gen_this, ast_fn, ast_depth;
+	void *gen_block, *gen_pre;
+	qty gen_ret;
+} cxx_gen_saved;
+
+static void cxx_gen_push(cxx *c)
+{
+	cxx_gen_saved *s = malloc(sizeof *s);
+
+	s->next = c->gen_stack;
+	s->gen = c->gen, s->gen_failed = c->gen_failed, s->gen_level = c->gen_level;
+	s->enode = c->enode, s->snode = c->snode, s->sdone = c->sdone, s->sdepth = c->sdepth;
+	s->gen_psyms = c->gen_psyms, s->gen_npsyms = c->gen_npsyms, s->gen_fn = c->gen_fn, s->gen_this = c->gen_this;
+	s->gen_block = c->gen_block, s->gen_pre = c->gen_pre, s->gen_ret = c->gen_ret;
+	s->ast_fn = c->ast->fn, s->ast_depth = c->ast->depth;
+	c->gen_stack = s;
+	c->gen_stack_depth++;
+}
+
+static void cxx_gen_pop(cxx *c)
+{
+	cxx_gen_saved *s = c->gen_stack;
+
+	c->gen_stack = s->next;
+	c->gen_stack_depth--;
+	c->gen = s->gen, c->gen_failed = s->gen_failed, c->gen_level = s->gen_level;
+	c->enode = s->enode, c->snode = s->snode, c->sdone = s->sdone, c->sdepth = s->sdepth;
+	c->gen_psyms = s->gen_psyms, c->gen_npsyms = s->gen_npsyms, c->gen_fn = s->gen_fn, c->gen_this = s->gen_this;
+	c->gen_block = s->gen_block, c->gen_ret = s->gen_ret;
+	if (c->gen_pre != s->gen_pre)
+		free(c->gen_pre);
+	c->gen_pre = s->gen_pre;
+	c->ast->fn = s->ast_fn;
+	while (c->ast->depth > s->ast_depth)
+		cc_scope_close(c->ast);
+	free(s);
+}
+
+/* the bodies begun since `depth` were abandoned (their parse failed): back to the one that was being built */
+VPRIV void cxx_gen_unwind(cxx *c, uint32_t depth)
+{
+	while (c->gen_stack_depth > depth)
+		cxx_gen_pop(c);
 }
 
 /* the body has something code generation does not build yet */
@@ -21,7 +74,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 {
 	static __thread int trace = -1;
 
-	if (!c->gen || c->tentative || c->template_depth || c->instantiating)
+	if (!c->gen || c->tentative || c->template_depth || c->instantiating != c->gen_level)
 		return;
 	if (trace < 0)
 		trace = getenv("VCC_CXX_GEN") != NULL;
@@ -290,6 +343,7 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 			return false;
 		f->sym = cc_symbol_new(a, S_FUNC, f->name, st, 0);
 		a->syms[f->sym].flags |= SF_GLOBAL;
+		a->syms[f->sym].depth = 0;	/* (made while a body is being built: a file-scope symbol all the same) */
 	}
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;
@@ -300,6 +354,7 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 			return false;
 		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
 		a->syms[f->sym1].flags |= SF_GLOBAL;
+		a->syms[f->sym1].depth = 0;
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
 		at.weak = f->fn_inline;
@@ -932,11 +987,8 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	const ctype *ft;
 	cc_id_list psyms;
 
-	if (c->gen)
-		return false;	/* (a body parsed inside another: a local class's member, later) */
-	c->gen = 0, c->gen_failed = 0, c->gen_this = 0;
-	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || !f || f->ty == CXX_TY_UNKNOWN ||
-	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)))
+	if (!a->o->emit || c->tentative || c->template_depth || c->unevaluated || !f || f->ty == CXX_TY_UNKNOWN ||
+	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)) || c->gen_stack_depth > 48)
 		return false;
 	ft = AST_TYPE(a, f->ty);
 	if ((ft->flags & TF_VARIADIC) || ft->n != nps || (!cxx_gen_type_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
@@ -962,6 +1014,9 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 		}
 	}
 	ft = AST_TYPE(a, f->ty);
+	/* (from here the body is being built: what was, if anything, is set aside until cxx_gen_function_end) */
+	cxx_gen_push(c);
+	c->gen = 0, c->gen_failed = 0, c->gen_this = 0, c->gen_pre = NULL, c->gen_level = c->instantiating;
 	cc_scope_open(a);
 	cc_id_list_init(&psyms);
 	if (cxx_gen_has_this(f)) {
@@ -986,7 +1041,6 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	c->gen_pre = calloc(1, sizeof(cc_id_list));
 	cc_id_list_init(c->gen_pre);
 	c->gen_ret = ft->base;
-	c->gen_fn = a->fn;
 	a->fn = f->sym;
 	c->gen = 1;
 	c->snode = 0, c->sdone = 0, c->sdepth = 0, c->gen_block = NULL;
@@ -1007,17 +1061,17 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		body = cc_statement_new(a, N_BLOCK, AST_NODE_AT(a, body)->loc, 0, cc_id_list_freeze(a, pre), pre->n);
 	}
 	free(pre);
-	c->gen = 0, c->gen_this = 0;
-	a->fn = c->gen_fn;
-	cc_scope_close(a);
+	uint32_t psyms = c->gen_psyms, npsyms = c->gen_npsyms;
+
+	cxx_gen_pop(c);	/* (the body around this one, if any, goes on) */
 	c->stats.functions++;
 	if (!ok)
 		return;
 	a->syms[f->sym].body = body;
 	a->syms[f->sym].flags |= SF_DEFINED;
 	a->syms[f->sym].defloc = a->syms[f->sym].loc;
-	AST_NODE_AT(a, body)->a = c->gen_psyms;
-	AST_NODE_AT(a, body)->aux = (uint16_t)c->gen_npsyms;
+	AST_NODE_AT(a, body)->a = psyms;
+	AST_NODE_AT(a, body)->aux = (uint16_t)npsyms;
 	a->toplevel[a->ntoplevel++] = f->sym;	/* (the TU's definitions, in order: what emit_tu walks) */
 	if (f->sym1) {
 		/* a constructor or destructor: the complete-object function is the same code (no virtual bases) */

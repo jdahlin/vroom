@@ -3680,9 +3680,9 @@ VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l)
 	cxx_scope_push(c, fs);
 	cxx_params_declare(c, fs, l->params, l->nparams);
 	{
-		/* code generation: a member function defined in its class (not a template's, not an instance's yet) */
+		/* code generation: a member function defined in its class (a class template instance's too) */
 		bool gen = l->what == 0 && l->fn && !l->template_depth && l->scope->kind == CXX_SCOPE_CLASS && !l->scope->dependent &&
-			   l->scope->owner && !l->scope->owner->instance && !cxx_is_kw(c, CXX_KW_try);
+			   l->scope->owner && !cxx_is_kw(c, CXX_KW_try);
 
 		if (gen) {
 			l->fn->fn_inline = 1;

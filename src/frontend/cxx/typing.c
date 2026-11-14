@@ -722,6 +722,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		}
 	}
 	(void)first;
+	/* (this call's verdict again: the bodies instantiated above made calls of their own) */
+	c->call_resolved = best >= 0;
+	c->call_picked = best >= 0 ? cand[best].e : NULL;
+	c->none_viable = best < 0 && !viable && !unknown;
 	cxx_et(c, result, false);
 }
 

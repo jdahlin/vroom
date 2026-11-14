@@ -946,3 +946,24 @@ undantag, vtabeller/RTTI, strängliteraler, `for`/`switch`/`do`.
 Saknas för json: konstruktorer/destruktorer och klasser som inte är POD,
 `switch`, uppräkningar, mallinstansers funktionskroppar, undantag,
 vtabeller/RTTI, lambdas, `new`/`delete`, range-for.
+
+### Status 2026-11-14 (26): konstruktorer/destruktorer, uppräkningar, switch, klassmallars medlemmar i kod
+
+- Uppräkningar (som sina underliggande heltal till emittern, med namn i
+  manglingen), `switch`/`case`/`default`, teckenliteraler.
+- Konstruktorer (i klassen och utanför) med medlemsinitierare för skalära
+  medlemmar; objekt med `T x(args)`, `T x{args}`, `T x = v`, `T x;` anropar
+  den konstruktor överlagringsupplösningen valde; destruktorer körs vid
+  scopets slut genom emitterns scope-cleanup (i ordning, även vid tidig
+  `return`).  C2/D2 har koden, C1/D1 är alias.
+- Medlemsfunktioner i klassmallsinstanser får kod där de först används.
+  Kodgenereringens tillstånd sparas undan medan en kropp byggs inuti en
+  annan; ett anrops val av funktion återställs efter att den anropades
+  kropp instansierats (annars anropades fel funktion).
+`bench/cxx-run-tests.py` 7/7; `cxx-mangle.py` 3/3 (36 namn).
+unit-32bit.cpp med `-c`: 342 av 760 betraktade funktionsdefinitioner har
+kod (clang emitterar ca 1 670), 0,17 s.
+Saknas för json: funktionsmallars instanser i kod, klasser med baser eller
+medlemmar som själva behöver konstruktor/destruktor, värdeöverföring av
+klasser med egna specialmedlemmar, temporärer av klasstyp, undantag,
+vtabeller/RTTI, lambdas, `new`/`delete`, range-for.
