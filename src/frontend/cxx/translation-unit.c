@@ -88,6 +88,9 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 		dprintf(o->errfd, "cxx: expression statements %u, typed %u\n", st->expressions, st->expressions_typed);
 		dprintf(o->errfd, "cxx: function template bodies %u, failed %u, cached %u, depth %u\n", st->bodies, st->bodies_failed,
 			st->bodies_cached, st->body_depth_max);
+		dprintf(o->errfd, "cxx: calls %u, typed %u; untyped: dependent %u, none viable %u, ambiguous %u, template not recorded %u, packs %u, "
+			"signature %u, argument %u, unbound %u, class match %u, return type %u, callee unknown %u\n", st->calls, st->calls_typed,
+			st->why[0], st->why[1], st->why[2], st->why[3], st->why[4], st->why[5], st->why[6], st->why[7], st->why[8], st->why[9], st->why[10]);
 		dprintf(o->errfd, "cxx: instance member bodies %u, failed %u\n", st->member_bodies, st->member_bodies_failed);
 		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u; partial specializations: %u matched, %u unknown\n",
 			c.instances_made, c.instances_failed, c.ninstances, c.partial_matches, c.partial_unknown);

@@ -97,6 +97,52 @@ static bool cxx_entity_is_template(const cxx_entity *e)
 		     e->kind == CXX_ENTITY_VARIABLE_TEMPLATE || e->kind == CXX_ENTITY_CONCEPT);
 }
 
+/* clang's type transform builtins (__remove_reference_t(T), ...): CXX_TY_UNKNOWN for those not done */
+static qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t)
+{
+	const ctype *x = AST_TYPE(c->ast, t);
+	bool ref = x->kind == TY_PTR && x->ext;
+	qty base = ref ? x->base : t;
+#define IS(s) (len == sizeof s - 1 && !memcmp(n, s, len))
+
+	if (IS("__remove_reference_t"))
+		return base;
+	if (IS("__remove_cvref"))
+		return QUNQ(base);
+	if (IS("__remove_cv"))
+		return ref ? t : QUNQ(t);
+	if (IS("__remove_const"))
+		return ref ? t : QT(QI(t), QQ(t) & ~Q_CONST);
+	if (IS("__remove_volatile"))
+		return ref ? t : QT(QI(t), QQ(t) & ~Q_VOLATILE);
+	if (IS("__add_lvalue_reference"))
+		return x->kind == TY_VOID ? t : cxx_type_reference(c, base, false);
+	if (IS("__add_rvalue_reference"))
+		return ref || x->kind == TY_VOID ? t : cxx_type_reference(c, t, true);
+	if (IS("__add_pointer"))
+		return x->kind == TY_FUNC ? cc_type_pointer(c->ast, t) : cc_type_pointer(c->ast, base);
+	if (IS("__remove_pointer"))
+		return x->kind == TY_PTR && !x->ext ? x->base : t;
+	if (IS("__decay")) {
+		const ctype *b = AST_TYPE(c->ast, base);
+
+		if (b->kind == TY_ARRAY)
+			return cc_type_pointer(c->ast, b->base);
+		if (b->kind == TY_FUNC)
+			return cc_type_pointer(c->ast, base);
+		return QUNQ(base);
+	}
+	if (IS("__remove_extent"))
+		return x->kind == TY_ARRAY ? x->base : t;
+	if (IS("__remove_all_extents")) {
+		while (AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+			t = AST_TYPE(c->ast, t)->base;
+		return t;
+	}
+#undef IS
+	return CXX_TY_UNKNOWN;	/* (__make_signed, __make_unsigned, __underlying_type, __remove_restrict) */
+}
+
 /* the entity a name denotes in qualifier (NULL: unqualified); NULL if none */
 static cxx_entity *cxx_name_lookup(cxx *c, cxx_scope *qualifier, bool dependent, uint32_t id)
 {
@@ -513,11 +559,19 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 		int b = cxx_builtin_kind(t->id);
 
 		if (b == CXX_BUILTIN_TYPE_TRANSFORM && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
+			const vident *v = &vintern_ents[t->id];
+			qty r;
+
 			cxx_advance(c);
 			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			c->last_type = NULL, c->last_type_dependent = 1;
+			/* the transform, when its operand is known (not in a template, not a placeholder pattern) */
+			r = c->template_depth || c->tentative || c->type_out == CXX_TY_UNKNOWN || cxx_type_has_placeholder(c, c->type_out) ?
+			    CXX_TY_UNKNOWN : cxx_type_transform(c, v->s, v->len, c->type_out);
+			if (r != CXX_TY_UNKNOWN)
+				c->last_type = cxx_type_entity(c, r), c->last_type_dependent = 0;
 			return true;
 		}
 		if (b == CXX_BUILTIN_TEMPLATE && cxx_peek(c, 1)->kind == LEX_TOKEN_LESS) {
@@ -1181,8 +1235,11 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 	for (uint32_t i = nsfx; i-- > 0;) {
 		if (too_many)
 			t = CXX_TY_UNKNOWN;
-		else if (sfx[i].is_function)
+		else if (sfx[i].is_function) {
+			if (i == 0 && !nested)
+				c->decl_return = t;	/* (known even when a parameter's type is not) */
 			t = sfx[i].nparams == UINT32_MAX ? CXX_TY_UNKNOWN : cxx_type_function(c, t, sfx[i].params, sfx[i].nparams, sfx[i].variadic);
+		}
 		else
 			t = sfx[i].n == -2 ? CXX_TY_UNKNOWN : cxx_type_array(c, t, sfx[i].n);
 		if (sfx[i].is_function)
@@ -2834,8 +2891,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body)
 	c->type_in = c->ds_type;
 	if (any_return && c->type_in == CXX_TY_UNKNOWN)
 		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
+	c->decl_return = CXX_TY_UNKNOWN;
 	cxx_declarator_parse(c, false, &q, &f, NULL);
 	t = f ? c->type_out : CXX_TY_UNKNOWN;
+	/* a parameter of unknown type: the return type alone (callers read only it then) */
+	if (f && t == CXX_TY_UNKNOWN && !any_return && c->decl_return != CXX_TY_UNKNOWN)
+		t = cxx_type_function(c, c->decl_return, NULL, 0, true);
 	/* body: the definition's body too (an instance's), its parameters declared */
 	if (body) {
 		*body = false;

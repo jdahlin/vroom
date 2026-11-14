@@ -1225,12 +1225,16 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	cxx_targ bind[64];
 
 	*ret = CXX_TY_UNKNOWN;
-	if (!f)
+	if (!f) {
+		c->why = CXX_WHY_NO_FTMPL;
 		return -1;
+	}
 	cxx_ftemplate_evaluate(c, f);
 	p = &f->p;
-	if (f->packs || p->params->ntparams > 64)
+	if (f->packs || p->params->ntparams > 64) {
+		c->why = CXX_WHY_PACKS;
 		return -1;
+	}
 	memset(bind, 0, p->params->ntparams * sizeof *bind);
 	/* every parameter given explicitly: the placeholder signature is not needed (its parameter types may
 	   not parse with placeholders: typename remove_reference<T>::type&) */
@@ -1243,8 +1247,10 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 		*ret = cxx_ftemplate_return(c, f, bind);
 		return 1;	/* (its arity is not checked: the signature with the arguments bound would tell) */
 	}
-	if (f->sig == CXX_TY_UNKNOWN)
+	if (f->sig == CXX_TY_UNKNOWN) {
+		c->why = CXX_WHY_SIG;
 		return -1;
+	}
 	ft = AST_TYPE(c->ast, f->sig);
 	if (nargs > ft->n && !(ft->flags & TF_VARIADIC))
 		return 0;
@@ -1265,8 +1271,10 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 
 		if (!cxx_mentions_placeholder(c, P, 0))
 			continue;	/* (non-deduced: its conversion is not checked here) */
-		if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID)
+		if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {
+			c->why = CXX_WHY_ARG;
 			return -1;	/* (void: a type vcc got wrong; no argument has it) */
+		}
 		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
 			int ext = AST_TYPE(c->ast, P)->ext;
 			void *owner;
@@ -1287,12 +1295,15 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 		}
 		if (!cxx_match_type(c, p, P, A, bind, 0)) {
 			/* (deduction against a base class, or a conversion: not tried; a failure here may be wrong) */
+			c->why = CXX_WHY_CLASS_MATCH;
 			return AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT ? -1 : 0;
 		}
 	}
 	for (uint32_t i = 0; i < p->params->ntparams; i++)
-		if (!bind[i].kind)
+		if (!bind[i].kind) {
+			c->why = CXX_WHY_UNBOUND;
 			return -1;	/* (default template arguments: not yet) */
+		}
 	*ret = cxx_ftemplate_return(c, f, bind);
 	return 1;
 }
@@ -1352,4 +1363,24 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e)
 	c->body_depth--;
 	c->instantiating--;
 	cxx_outer_restore(c, &o);
+}
+
+VPRIV bool cxx_type_has_placeholder(cxx *c, qty t)
+{
+	return cxx_mentions_placeholder(c, t, 0);
+}
+
+/* an entity for a computed type (a builtin transform's result): a type name, a class's members reachable */
+VPRIV cxx_entity *cxx_type_entity(cxx *c, qty t)
+{
+	cxx_entity *e = calloc(1, sizeof *e);
+
+	e->kind = CXX_ENTITY_TYPE, e->ty = t, e->pack_index = -1;
+	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t)) {
+		uint32_t tag = AST_TYPE(c->ast, t)->aux;
+
+		if (tag < c->ntag_scope)
+			e->members = c->tag_scope[tag];
+	}
+	return e;
 }

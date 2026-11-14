@@ -159,26 +159,28 @@ static bool cxx_exact(cxx *c, const ctype *ft, const qty *args, uint32_t nargs)
  * viable candidate returns the same type (a simplification of overload resolution).
  */
 static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
-			       const uint8_t *lval, uint32_t nargs);
+			       const uint8_t *lval, uint32_t nargs, bool operator_call);
 
 VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *args, const uint8_t *lval, uint32_t nargs)
 {
-	cxx_call_type_impl(c, set, callee_type, NULL, UINT32_MAX, args, lval, nargs);
+	cxx_call_type_impl(c, set, callee_type, NULL, UINT32_MAX, args, lval, nargs, false);
 }
 
 /* f<xargs>(args): only templates are candidates, their first parameters given */
 VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
 			   uint32_t nargs)
 {
-	cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, xargs, nxargs, args, lval, nargs);
+	cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, xargs, nxargs, args, lval, nargs, false);
 }
 
 static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const cxx_targ *xargs, uint32_t nxargs, const qty *args,
-			       const uint8_t *lval, uint32_t nargs)
+			       const uint8_t *lval, uint32_t nargs, bool operator_call)
 {
 	static const uint8_t none[16];
 	cxx_entity *exact = NULL, *first = NULL;
 	uint32_t viable = 0, nexact = 0;
+
+	c->none_viable = 0;
 	qty result = CXX_TY_UNKNOWN;
 	bool same = true, unknown = false;
 
@@ -189,6 +191,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_PTR && !AST_TYPE(c->ast, f)->ext)
 			f = AST_TYPE(c->ast, f)->base;
 		cxx_et(c, f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_FUNC ? AST_TYPE(c->ast, f)->base : CXX_TY_UNKNOWN, false);
+		if (!c->template_depth)
+			c->stats.calls++, c->stats.calls_typed += c->etype != CXX_TY_UNKNOWN, c->stats.why[CXX_WHY_NO_SET] += c->etype == CXX_TY_UNKNOWN;
 		return;
 	}
 	if (!lval)
@@ -204,6 +208,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		qty r;
 
 		if (e->kind == CXX_ENTITY_DEPENDENT) {
+			if (!c->template_depth)
+				c->stats.calls++, c->stats.why[CXX_WHY_DEPENDENT]++;
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			return;
 		}
@@ -235,8 +241,18 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	}
 	if (nexact == 1)
 		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
-	else if (!viable || !same || unknown)
+	else if (!viable || !same || unknown) {
+		c->none_viable = !viable && !unknown;
+		if (!c->template_depth && !(c->none_viable && operator_call))
+			c->stats.why[unknown ? c->why : !viable ? CXX_WHY_NONE_VIABLE : CXX_WHY_AMBIGUOUS]++;
 		result = CXX_TY_UNKNOWN;
+	} else if (result == CXX_TY_UNKNOWN && !c->template_depth)
+		c->stats.why[CXX_WHY_RETURN]++;
+	if (!c->template_depth && !(c->none_viable && operator_call))
+		c->stats.calls++, c->stats.calls_typed += result != CXX_TY_UNKNOWN;
+	if (result == CXX_TY_UNKNOWN && !c->template_depth && !(c->none_viable && operator_call) && getenv("VCC_CXX_WHY"))
+		fprintf(stderr, "why %s %.*s/%u\n", nexact == 1 || (viable && same && !unknown) ? "return" : unknown ? "unknown" :
+			!viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
 	/* the function called (when known): an instance's member body is instantiated */
 	{
 		cxx_entity *called = nexact == 1 ? exact : viable == 1 && !unknown ? first : NULL;
@@ -263,19 +279,26 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cls = cxx_type_class_scope(c, QUNQ(obj));
 	if (!cls)
 		return false;
+	/* (no candidate fits: the next place, in the end the built-in operator: &x, a = b, a, b) */
 	set = cxx_lookup_in(c, cls, id, 0);
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, args, NULL, nargs);
-		return true;
+		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, NULL, nargs, true);
+		if (!c->none_viable)
+			return true;
 	}
 	set = cxx_lookup(c, id);
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, all, NULL, nargs + 1);
-		return true;
+		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+		if (!c->none_viable)
+			return true;
 	}
+	/* built-in: the address of an object; anything else on a class is not known (an implicit operator=,
+	   a conversion to a built-in type) */
+	if (vintern_ents[id].len == 9 && !memcmp(vintern_ents[id].s, "operator&", 9) && nargs == 0)
+		return false;
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	return true;
 }

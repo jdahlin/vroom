@@ -163,6 +163,9 @@ typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
 /* a function parameter: its name (0: unnamed) and type, declared in the body's scope */
 typedef struct cxx_param { uint32_t name; qty ty; } cxx_param;
 
+enum { CXX_WHY_DEPENDENT, CXX_WHY_NONE_VIABLE, CXX_WHY_AMBIGUOUS, CXX_WHY_NO_FTMPL, CXX_WHY_PACKS, CXX_WHY_SIG, CXX_WHY_ARG,
+       CXX_WHY_UNBOUND, CXX_WHY_CLASS_MATCH, CXX_WHY_RETURN, CXX_WHY_NO_SET, CXX_WHY_N };
+
 typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn; } cxx_late;
 
 typedef struct cxx {
@@ -210,6 +213,7 @@ typedef struct cxx {
 	struct cxx_stats {
 		uint32_t classes, classes_laid_out, classes_skipped[16];	/* (by CXX_SKIP_*) */
 		uint32_t declarations, declarations_typed, symbols, expressions, expressions_typed;
+		uint32_t calls, calls_typed, why[12];	/* calls outside templates; why a call has no type (CXX_WHY_*) */
 		uint32_t bodies, bodies_failed, bodies_cached, body_depth_max, member_bodies, member_bodies_failed;	/* function template bodies instantiated */
 	} stats;
 	/* instantiation (instantiate.c) */
@@ -247,6 +251,8 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
+	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
 	uint32_t body_depth;
 	cxx_targ *xargs;		/* the callee's explicit template arguments f<A, B> (when xargs_set) */
 	uint32_t nxargs, cxargs;
@@ -340,6 +346,8 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body);
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
+VPRIV bool cxx_type_has_placeholder(cxx *c, qty t);
+VPRIV cxx_entity *cxx_type_entity(cxx *c, qty t);
 VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uint32_t nargs, bool braced);
 VPRIV uint32_t cxx_ctor_id(void), cxx_dtor_id(void);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
