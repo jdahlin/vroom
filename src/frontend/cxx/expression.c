@@ -1594,8 +1594,23 @@ static void cxx_primary_expression_parse(cxx *c)
 					cxx_braced_arguments_parse(c);
 				else
 					cxx_call_arguments_parse(c);
-				if (cast_to == CXX_TY_UNKNOWN && ctad_te && c->ncargs != UINT32_MAX && c->ncargs <= 8)
-					cast_to = cxx_ctad(c, ctad_te, c->cargs, c->cargs_lval, c->ncargs);
+				if (cast_to == CXX_TY_UNKNOWN && ctad_te && c->ncargs != UINT32_MAX && c->ncargs <= 8) {
+					/* (deducing instantiates the class, whose members parse argument lists of their own: this
+					   list's, kept) */
+					uint32_t sn = c->ncargs, snodes[8], sbr[CXX_MAX_ARGS], szero = c->carg_zero;
+					qty st[8];
+					uint8_t sl[8];
+
+					memcpy(snodes, c->carg_nodes, sn * sizeof *snodes), memcpy(st, c->cargs, sn * sizeof *st);
+					memcpy(sl, c->cargs_lval, sn), memcpy(sbr, c->carg_brace, sizeof sbr);
+					cast_to = cxx_ctad(c, ctad_te, st, sl, sn);
+					if (c->ccargs < sn)
+						c->cargs = realloc(c->cargs, (c->ccargs = sn + 16) * sizeof *c->cargs),
+						c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
+					c->ncargs = sn, c->carg_zero = szero;
+					memcpy(c->carg_nodes, snodes, sn * sizeof *snodes), memcpy(c->cargs, st, sn * sizeof *st);
+					memcpy(c->cargs_lval, sl, sn), memcpy(c->carg_brace, sbr, sizeof sbr);
+				}
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
 					uint32_t an[CXX_MAX_ARGS], n = c->ncargs;
 
@@ -2045,6 +2060,12 @@ static void cxx_unary_expression_parse(cxx *c)
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			if (!c->template_depth && !c->tentative && cxx_type_size_known(c, c->type_out, &size, &align)) {
 				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)size);
+				return;
+			}
+			if (!c->template_depth && !c->tentative && cxx_type_definitely_incomplete(c, c->type_out)) {
+				/* sizeof of a type that stays incomplete: ill-formed, a substitution failure where one counts */
+				cxx_et(c, cc_type_basic(TY_ULONG), false);
+				CXX_INVALID(c);
 				return;
 			}
 		} else {

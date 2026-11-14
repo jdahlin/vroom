@@ -62,6 +62,7 @@ typedef struct cxx_instance {
 	uint32_t pos;		/* where its class is re-parsed: the template's, or a partial specialization's class-key */
 	uint8_t state;		/* 0 declared (an incomplete record), 1 being completed, 2 complete, 3 failed */
 	uint8_t selecting;	/* its partial specialization is being chosen (asked for again meanwhile: not known) */
+	uint8_t no_definition;	/* completion found no partial specialization matching and no primary definition */
 	uint8_t late;		/* named while its template was only declared (using json = basic_json<>;): bound at completion */
 	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
@@ -1567,6 +1568,7 @@ static void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 		if (r < 0)
 			c->partial_unknown++;
 		if (r < 0 || (r == 0 && !t->params)) {
+			x->no_definition = r == 0;
 			c->tentative = tentative;
 			return;
 		}
@@ -1611,6 +1613,21 @@ VPRIV void cxx_type_require_complete(cxx *c, qty t)
 	tag = AST_TYPE(c->ast, t)->aux;
 	if (tag < c->ntag_instance && c->tag_instance[tag])
 		cxx_instance_complete(c, ((cxx_instance *)c->tag_instance[tag])->inst);
+}
+
+/* is the record type incomplete for good: an instance of a template that has no definition and no partial
+   specialization that matches it (sizeof of it: a substitution failure, __has_specialization_v in libc++) */
+VPRIV bool cxx_type_definitely_incomplete(cxx *c, qty t)
+{
+	uint32_t tag;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return false;
+	cxx_type_require_complete(c, t);
+	tag = AST_TYPE(c->ast, t)->aux;
+	if (c->ast->tags[tag].flags & RF_COMPLETE)
+		return false;
+	return tag < c->ntag_instance && c->tag_instance[tag] && ((cxx_instance *)c->tag_instance[tag])->no_definition;
 }
 
 /* the class scope of a record type (an instance: completed first), NULL if none */

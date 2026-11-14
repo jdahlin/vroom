@@ -1358,6 +1358,42 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		return true;
 	}
 	/* a class from or to an object of its own type: its copy or move constructor, or assignment operator */
+	if (nt == 2 && (IS("__is_trivially_assignable") || IS("__is_nothrow_assignable"))) {
+		/* T& = U trivially (or without throwing): scalars of compatible kinds yes; the same class: trivially
+		   copyable as vcc laid it out, or no if its copy, move or destructor is not trivial (else not known) */
+		qty l = t[0], r = t[1];
+		bool nothrow = IS("__is_nothrow_assignable");
+
+		if (AST_TYPE_KIND(c->ast, l) != TY_PTR || !AST_TYPE(c->ast, l)->ext)
+			return false;	/* (to a prvalue: classes only, not decided here) */
+		l = QUNQ(AST_TYPE(c->ast, l)->base);
+		if (AST_TYPE_KIND(c->ast, r) == TY_PTR && AST_TYPE(c->ast, r)->ext)
+			r = AST_TYPE(c->ast, r)->base;
+		r = QUNQ(r);
+		int lk = AST_TYPE_KIND(c->ast, l), rk = AST_TYPE_KIND(c->ast, r);
+		bool larith = lk >= TY_BOOL && lk <= TY_FLOAT128, rarith = rk >= TY_BOOL && rk <= TY_FLOAT128;
+
+		if (larith || lk == TY_ENUM || (lk == TY_PTR && !AST_TYPE(c->ast, l)->ext)) {
+			if ((larith && (rarith || rk == TY_ENUM)) || l == r) {
+				*v = !(QQ(AST_TYPE(c->ast, t[0])->base) & Q_CONST) && (lk != TY_ENUM || l == r);
+				return true;
+			}
+			return false;
+		}
+		if (cc_type_is_record(c->ast, l) && lk != TY_ARRAY && l == r) {
+			bool pod, empty;
+
+			if (cxx_class_layout_info(c, l, &pod, &empty) && pod) {
+				*v = 1;
+				return true;
+			}
+			if (!nothrow && cxx_gen_trivial_abi(c, l, 0) == 0) {
+				*v = 0;
+				return true;
+			}
+		}
+		return false;
+	}
 	if (nt == 2 && (IS("__is_constructible") || IS("__is_assignable"))) {
 		bool assign = IS("__is_assignable");
 		qty to = t[0], from = t[1];

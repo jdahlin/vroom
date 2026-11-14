@@ -1780,3 +1780,12 @@ vector-iteratorn blir känd).  En use-after-free i `cxx_gen_symbol_named`: en up
 som `cxx_gen_complete_object_aliases` gick igenom (unit-comparison kraschade, hittad med ASan); nu växer
 den bara vid insättning.  cxx-strict 550; överst: kroppar vcc aldrig tolkade (86), `_Algorithm()(...)`
 i `__copy_move_unwrap_iters` (79), `filldata<T>::fill` (38).
+
+## Status 89 (2026-11-14)
+`__is_trivially_assignable`/`__is_nothrow_assignable` för skalärer och för samma klass (POD ja; icke-trivial
+kopiering/flytt/destruktor nej).  `sizeof` av en typ som förblir ofullständig (instans av en mall utan
+definition och utan matchande partiell specialisering) är ett substitutionsfel: libc++:s
+`__has_specialization_v`/`__is_segmented_iterator_v` (vector 0, deque 1, som clang).  CTAD bevarar
+argumentlistan medan klassen instansieras (`std::pair{x, 2.5}` får kod, rätt värde).  cxx-strict
+oförändrat 550: för `json*` är valet av partiell specialisering av `__segmented_iterator_traits` okänt
+(begränsningar över `iterator_traits<json*>`), så `_Algorithm()(...)` (79) står kvar.
