@@ -436,7 +436,7 @@ static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(18);
  * in its own discard COMDAT as clang writes them (every TU that needs one has its copy; the linker
  * keeps one); the MinGW runtime's pseudo-relocations fix one up when NAME lives in a DLL.
  */
-static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr)
+static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr, bool stack_guard)
 {
 	for (uint32_t s = 0; refptr && s < c->nsym; s++)
 		if (atomic_load_explicit(&refptr[s], memory_order_relaxed)) {
@@ -452,6 +452,12 @@ static void win64_tail(cc *c, tbuf *b, _Atomic uint8_t *refptr)
 			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		}
+	uint32_t g = stack_guard ? cc_symbol_global_find(c, "__stack_chk_guard") : 0;
+
+	if (stack_guard && !(g && refptr && atomic_load_explicit(&refptr[g], memory_order_relaxed)))	/* (-fstack-protector: libssp's variable, extern data as clang reaches it; once, if the TU names it too) */
+		vtext_string_append(b, "\t.section\t.rdata$.refptr.__stack_chk_guard,\"dr\",discard,.refptr.__stack_chk_guard\n"
+				    "\t.p2align\t3\n\t.globl\t.refptr.__stack_chk_guard\n.refptr.__stack_chk_guard:\n"
+				    "\t.quad\t__stack_chk_guard\n");
 }
 
 static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, uint8_t *mf, bool *again, bool last,
@@ -726,7 +732,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 		if (WASM(c))
 			wasm_tail(c, &tail, E.claimed);
 		else if (CODEGEN_IS_WIN64(c))
-			win64_tail(c, &tail, E.refptr);
+			win64_tail(c, &tail, E.refptr, atomic_load_explicit(&E.stack_guard_refptr, memory_order_relaxed));
 		else
 			vtext_string_append(&tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
 		iov[k++] = (struct iovec){ hdr.p, hdr.n };

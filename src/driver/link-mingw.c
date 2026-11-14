@@ -9,8 +9,8 @@
  *         S/x86_64-w64-mingw32/lib/{crt2.o,crt2u.o,dllcrt2.o} S/.../crtbegin.o
  *         -L(user) -LS/x86_64-w64-mingw32/lib -LS/x86_64-w64-mingw32/mingw/lib -LS/lib
  *         OBJECTS, -l, -Wl, and -Xlinker in command-line order
- *         [-lmingwthrd] -lmingw32 libvccrt.a -lmoldname -lmingwex -lmsvcrt [-lpthread] [-lgdi32 -lcomdlg32]
- *         -ladvapi32 -lshell32 -luser32 -lkernel32 (static: in --start-group/--end-group; dynamic:
+ *         [-lssp_nonshared -lssp] [-lmingwthrd] -lmingw32 libvccrt.a -lmoldname -lmingwex -lmsvcrt [-lpthread]
+ *         [-lgdi32 -lcomdlg32] -ladvapi32 -lshell32 -luser32 -lkernel32 (static: in --start-group/--end-group; dynamic:
  *         then [-lmingwthrd] -lmingw32 libvccrt.a -lmoldname -lmingwex -lmsvcrt -lkernel32 again)
  *         S/x86_64-w64-mingw32/lib/crtend.o
  *
@@ -110,7 +110,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 {
 	const char *out = "a.exe", *sysroot = NULL;
 	bool shared = false, static_ = false, nostdlib = false, nodefaultlibs = false, nostartfiles = false;
-	bool unicode = false, threads = false, pthread = false, strip = false, verbose = false;
+	bool unicode = false, threads = false, pthread = false, strip = false, verbose = false, ssp = false;
 	const char *subsystem = NULL;
 	int nsrc = 0, errfd = env->errfd >= 0 ? env->errfd : 2;
 
@@ -139,6 +139,8 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 			threads = true;
 		else if (!strcmp(a, "-pthread"))
 			pthread = true;
+		else if (!strcmp(a, "-fstack-protector") || !strcmp(a, "-fstack-protector-strong") || !strcmp(a, "-fstack-protector-all"))
+			ssp = true;	/* (clang: any of them, even negated later) */
 		else if (!strcmp(a, "-s"))
 			strip = true;
 		else if (!strcmp(a, "-v"))
@@ -296,6 +298,8 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 
 		if (static_)
 			lav[nl++] = "--start-group";
+		if (ssp)	/* -fstack-protector*: the sysroot's libssp (__stack_chk_guard, __stack_chk_fail) */
+			lav[nl++] = "-lssp_nonshared", lav[nl++] = "-lssp";
 		for (int pass = 0; pass < (static_ ? 1 : 2); pass++) {
 			if (threads)
 				lav[nl++] = "-lmingwthrd";

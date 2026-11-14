@@ -202,6 +202,7 @@ typedef struct codegen_unit {
 	_Atomic uint8_t *strings_done;	/* per string: emitted */
 	_Atomic uint8_t *symbol_referenced;	/* per sym: referenced (for .weak of undefined syms) */
 	_Atomic uint8_t *refptr;	/* WIN64, per sym: reached through .refptr.NAME (the stub in the tail) */
+	_Atomic uint8_t stack_guard_refptr;	/* WIN64: -fstack-protector read .refptr.__stack_chk_guard */
 	_Atomic uint8_t *walked;
 	uint16_t *function_node_counts;		/* per function: AST nodes (prepass) */
 	uint8_t *inline_parameter_reads; /* parameter references outside a direct (void)param discard */

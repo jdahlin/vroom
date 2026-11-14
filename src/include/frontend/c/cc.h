@@ -322,6 +322,7 @@ typedef struct cc_options {	/* fields before outfd: parse options, all in the de
 	int debug;		/* -g: DWARF line tables (ELF, COFF) */
 	int dbg_version;	/* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
 	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
+	int no_seh;		/* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */
 	int pic;		/* ELF: 0 none (-fno-pic), 1 PIE (-fpie, the hosted default), 2 PIC (-fpic) */
