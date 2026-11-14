@@ -735,8 +735,24 @@ VPRIV bool cxx_class_layout_info(cxx *c, qty t, bool *pod, bool *empty)
 		return false;
 	cxx_type_require_complete(c, QUNQ(t));
 	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
-	if (!i->valid)
-		return false;
+	if (!i->valid) {
+		/* a closure type, laid out by code generation (its captures): a POD when they are all scalars, pointers or
+		   references (a class captured by value: its copy is that class's, not built here) */
+		uint32_t ti = AST_TYPE(c->ast, t)->aux;
+		const struct tag *r = &c->ast->tags[ti];
+		cxx_scope *cs = ti < c->ntag_scope ? c->tag_scope[ti] : NULL;
+
+		if (!cs || !cs->is_lambda || !(r->flags & RF_COMPLETE))
+			return false;
+		for (uint32_t k = 0; k < r->nfield; k++) {
+			int fk = AST_TYPE_KIND(c->ast, r->f[k].ty);
+
+			if (!((fk >= TY_BOOL && fk <= TY_LDOUBLE) || fk == TY_PTR || fk == TY_ENUM))
+				return false;
+		}
+		*pod = true, *empty = r->nfield == 0;
+		return true;
+	}
 	*pod = i->pod, *empty = i->empty;
 	return true;
 }

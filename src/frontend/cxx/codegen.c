@@ -2108,8 +2108,6 @@ static bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_
 	for (uint32_t i = 0; i < r->nfield; i++)
 		if (!r->f[i].name)
 			return false;
-	if (nargs > r->nfield)
-		return false;
 	if (AST_NODE_AT(a, target)->ty != QUNQ(AST_NODE_AT(a, target)->ty)) {
 		qty pt = cc_type_pointer(a, QUNQ(t));
 		uint32_t addr = cc_address_of_build(a, target, loc);
@@ -2133,6 +2131,33 @@ static bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_
 
 		while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
 			fe = fe->next;
+		if (m && AST_TYPE_KIND(a, ft) == TY_ARRAY && AST_TYPE(a, ft)->n && cxx_gen_type_ok(c, AST_TYPE(a, ft)->base) &&
+		    !cxx_gen_is_reference(c, AST_TYPE(a, ft)->base)) {
+			/* an array of scalars: the next elements, braces elided (std::array<int, 3> a{1, 2, 3}); the rest keep their
+			   zero */
+			qty et = AST_TYPE(a, ft)->base;
+
+			if (fe && fe->has_nsdmi && k >= nargs)
+				return false;
+			for (uint64_t j = 0; j < AST_TYPE(a, ft)->n && k < nargs; j++, k++) {
+				uint32_t el, v;
+
+				if (!args[k] || cc_type_is_record(a, AST_NODE_AT(a, args[k])->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, args[k])->ty) == TY_ARRAY)
+					return false;
+				el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, m),
+								cc_node_integer_new(a, (i128)j, cc_type_basic(TY_LONG), loc), loc), loc);
+				if (et != QUNQ(et)) {
+					qty pt = cc_type_pointer(a, QUNQ(et));
+					uint32_t addr = cc_address_of_build(a, el, loc);
+
+					el = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+				}
+				if (!(v = cxx_gen_bind(c, args[k], QUNQ(et), loc)))
+					return false;
+				cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, el, v, loc), 0, 0));
+			}
+			continue;
+		}
 		if (!m || AST_TYPE_KIND(a, ft) == TY_ARRAY)
 			return false;
 		if (k >= nargs) {
@@ -2168,6 +2193,8 @@ static bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_
 		}
 		k++;
 	}
+	if (k != nargs)
+		return false;	/* (more elements than the members take) */
 	return true;
 }
 

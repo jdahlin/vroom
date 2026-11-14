@@ -1274,3 +1274,20 @@ mallargument, funktionsmallars deklarerade signatur (T_), wchar_t/char8/16/32.
 `cxx-fork.py`: 69 av 70, 3,8 s CPU (65x); vcc definierar 2 209 funktioner
 (från 2 038).  `cxx-run-tests.py` 26/26.  Kvar som känd skillnad:
 temporärer förstörs vid blockets slut, inte uttryckets.
+
+### Status (42): fler byggstenar; flaskhalsen är iostreams (2026-11-14)
+Nytt: statiska lokala variabler med konstant initierare, lokala fält utan
+storlek (`T a[] = {...}`, `char s[] = "..."`), `__builtin_isnan/isinf/
+isfinite/isnormal`, `__builtin_LINE/FILE/FUNCTION/...`, `__func__`/
+`__PRETTY_FUNCTION__`, `c ? void(0) : f()` (assert), klammerelision för
+fältmedlemmar (`std::array<int, 3> a{1, 2, 3}`), typade värdemallparametrar
+(`size_t N`), lambdatyper med skalära fångster som POD.
+Mätt: bara 10 av json-testens 118 testfunktioner får kod av vcc, och det
+ändrades inte av detta: varje testkropp stannar längre ned.  Den vanligaste
+blockeringen i testkroppar är doctests `CAPTURE`/`INFO` och utskrifter, som
+går genom `std::ostream`: libc++:s `basic_ostream` har en virtuell bas
+(`ios_base`), som vcc varken lägger ut eller anropar genom.  Därefter
+`<=>`/`std::is_lt`, `operator,` på klasser, `pointer_traits::pointer_to`.
+Nästa steg för att vcc själv ska generera json-sviten: virtuella baser
+(layout, VTT, konstruktorer), sedan jämförelseoperatorerna.  `cxx-fork.py`
+oförändrat: 69/70, 3,8 s CPU, 2 215 funktioner.

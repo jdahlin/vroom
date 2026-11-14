@@ -281,7 +281,18 @@ static void cxx_id_expression_parse(cxx *c)
 		  (t->len == 17 && !memcmp(t->s + 10, "va_copy", 7)) || (t->len == 21 && !memcmp(t->s + 10, "unreachable", 11)) ||
 		  (t->len == 14 && !memcmp(t->s + 10, "trap", 4)) || (t->len == 18 && !memcmp(t->s + 10, "prefetch", 8))))
 		cxx_et(c, cxx_type_function(c, cc_type_basic(TY_VOID), NULL, 0, true), false);	/* builtins that return void */
-	else
+	else if (!e && !q && !c->tentative && ((t->len == 8 && !memcmp(t->s, "__func__", 8)) || (t->len == 12 && !memcmp(t->s, "__FUNCTION__", 12)) ||
+					       (t->len == 19 && !memcmp(t->s, "__PRETTY_FUNCTION__", 19)))) {
+		/* the function's name, a static const char[] (here its symbol's name: clang's spells the signature;
+		   only messages read it) */
+		const char *fn = "";
+		size_t fl = 0;
+
+		if (c->ast->fn && cxx_gen_on(c))
+			fn = vintern_ents[c->ast->syms[c->ast->fn].name].s, fl = vintern_ents[c->ast->syms[c->ast->fn].name].len;
+		cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST), fl + 1, 0), true);
+		cxx_gen_string(c, fn, fl, t->loc);
+	} else
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 	(void)save;
 	c->ename = ename;	/* (after the cxx_et calls above, which clear it) */
@@ -2169,7 +2180,8 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 				cxx_et(c, CXX_TY_UNKNOWN, false);
 			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's
 			   builder finds no lvalue and the function gets no code) */
-			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR))
+			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR ||
+							   AST_TYPE_KIND(c->ast, c->etype) == TY_VOID))	/* (c ? void(0) : f(): assert) */
 				cxx_gen_conditional(c, cn, n2, n3, qloc);
 			if (ck && (cv ? k2 : k3))
 				c->evalue = cv ? v2 : v3, c->econst = 1;	/* a constant condition: the branch taken */

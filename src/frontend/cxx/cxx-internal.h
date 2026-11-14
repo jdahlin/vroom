@@ -561,6 +561,7 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 }
 VPRIV qty cxx_auto_type(cxx *c);
 VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
+VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
 VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);

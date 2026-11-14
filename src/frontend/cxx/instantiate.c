@@ -457,6 +457,8 @@ static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_
 		e->value = a->v, e->has_value = 1;
 		if (a->kind == 2 && a->t && AST_TYPE_KIND(c->ast, a->t) == TY_ENUM)
 			e->ty = a->t;	/* (a value of an enumeration: the parameter's type is that) */
+		else if (p->type_b)
+			e->ty = cxx_simple_type_at(c, p->type_b);	/* (size_t N, bool B: the integer type spelled; else not known) */
 	}
 	if (p->kind == 1) {
 		e->ty = a->t;
@@ -593,6 +595,53 @@ VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ 
 	ps = x->t->params ? x->t->params : x->t->declared;
 	*pack_at = ps && ps->ntparams && ps->tparams[ps->ntparams - 1].pack ? ps->ntparams - 1 : UINT32_MAX;
 	return true;
+}
+
+/* the integer type spelled by the tokens at pos (a value template parameter's: size_t, bool, unsigned long,
+   std::size_t), CXX_TY_UNKNOWN for anything else */
+VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos)
+{
+	char w[4][16];
+	int n = 0, k = -1;
+
+	for (uint32_t p = pos; p < c->ntok && n < 4; p++) {
+		const cxx_token *t = &c->tok[p];
+
+		if (t->kind == LEX_TOKEN_COLON_COLON)
+			continue;
+		if (t->kind != LEX_TOKEN_IDENTIFIER || t->len >= 16)
+			break;
+		if (t->len == 3 && !memcmp(t->s, "std", 3) && p + 1 < c->ntok && c->tok[p + 1].kind == LEX_TOKEN_COLON_COLON)
+			continue;
+		if (t->len == 5 && !memcmp(t->s, "const", 5))
+			continue;
+		if (n && strcmp(w[n - 1], "unsigned") && strcmp(w[n - 1], "signed") && strcmp(w[n - 1], "long") && strcmp(w[n - 1], "short"))
+			break;
+		if (n && !(t->len == 3 && !memcmp(t->s, "int", 3)) && !(t->len == 4 && (!memcmp(t->s, "long", 4) || !memcmp(t->s, "char", 4))) &&
+		    !(t->len == 5 && !memcmp(t->s, "short", 5)))
+			break;
+		memcpy(w[n], t->s, t->len), w[n][t->len] = 0, n++;
+	}
+#define W(i, s) (n > (i) && !strcmp(w[i], s))
+	if (n == 1 && W(0, "bool")) k = TY_BOOL;
+	else if (n == 1 && W(0, "char")) k = TY_CHAR;
+	else if (n == 1 && (W(0, "int") || W(0, "signed"))) k = TY_INT;
+	else if ((n == 1 && W(0, "unsigned")) || (n == 2 && W(0, "unsigned") && W(1, "int"))) k = TY_UINT;
+	else if ((n == 1 && W(0, "long")) || (n == 2 && W(0, "long") && W(1, "int"))) k = TY_LONG;
+	else if (n == 2 && W(0, "unsigned") && W(1, "long")) k = TY_ULONG;
+	else if (n == 2 && W(0, "long") && W(1, "long")) k = TY_LLONG;
+	else if (n == 3 && W(0, "unsigned") && W(1, "long") && W(2, "long")) k = TY_ULLONG;
+	else if (n == 1 && W(0, "short")) k = TY_SHORT;
+	else if (n == 2 && W(0, "unsigned") && W(1, "short")) k = TY_USHORT;
+	else if (n == 2 && W(0, "unsigned") && W(1, "char")) k = TY_UCHAR;
+	else if (n == 2 && W(0, "signed") && W(1, "char")) k = TY_SCHAR;
+	else if (n == 1 && (W(0, "size_t") || W(0, "__size_t") || W(0, "uint64_t") || W(0, "uintmax_t"))) k = TY_ULONG;
+	else if (n == 1 && (W(0, "ptrdiff_t") || W(0, "intmax_t") || W(0, "int64_t"))) k = TY_LONG;
+	else if (n == 1 && W(0, "uint8_t")) k = TY_UCHAR;
+	else if (n == 1 && W(0, "int32_t")) k = TY_INT;
+	else if (n == 1 && W(0, "uint32_t")) k = TY_UINT;
+#undef W
+	return k < 0 ? CXX_TY_UNKNOWN : cc_type_basic(k);
 }
 
 /* a class template's instance: its template's parameters (NULL: not one, or not known) */
