@@ -394,8 +394,26 @@ own.
   TUs, all agree with clang (instances spelled `ns::X<int, ns::A<int>>`);
   `bench/cxx-parse-tests.py` also has clang check its cases' layouts; 71/71
   parse under ASan.  unit-32bit: 59 instances, 433 of 1 876 classes laid out.
-- Next: base classes (124 classes in unit-32bit skipped for them) and
-  partial specialization matching (most of libc++'s traits), then packs;
-  vptr layouts; enumerator values.  Code: the shared builders move to a
+- X4, partial specializations (2026-11-14): each records its parameters,
+  its argument pattern's tokens and its class-key.  To match, the pattern is
+  parsed once with its parameters bound to placeholders (a unique record
+  type per type parameter, a marked value per value parameter); a structural
+  matcher deduces them against the arguments through cv-qualifiers,
+  pointers, references, arrays, function types and other templates'
+  instances (their cache entries: template and arguments).  Several matches:
+  the most specialized by partial ordering (each pattern matched against the
+  other's); ambiguous, a pattern that cannot be evaluated (enable_if and
+  other unknown arguments), or a parameter not deduced: unknown.  The chosen
+  specialization's class is re-parsed with the deduced bindings, cached under
+  the primary's key; explicit specializations still come first.  Also: a
+  using-declaration now carries its entity's type (std::uint64_t was
+  unknown), and an array member of an incomplete class is never laid out.
+  `bench/cxx-layout.py`: 26 823 layouts, all agree with clang; json 71/71
+  under ASan; 12 parse cases (ordering, nested and value patterns,
+  std::array).  unit-32bit: 82 instances, 2 partial specializations
+  matched, 8 unknown.
+- Next: base classes (135 classes in unit-32bit skipped for them), then
+  packs (the unknown partial specializations are mostly enable_if patterns
+  and packs); vptr layouts; enumerator values.  Code: the shared builders move to a
   module of their own taking `struct ast *` (cxx/ is compiled in the cc
   module for now).  X5-X7: not started.

@@ -157,8 +157,19 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfi
 		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* (ill-formed: never laid out) */
 		return;
 	}
-	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE))
-		cxx_type_require_complete(c, t);	/* a member by value: an instance is completed now */
+	{
+		qty et = t;	/* (an array's element must be complete too) */
+
+		while (AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+			et = AST_TYPE(c->ast, et)->base;
+		if (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & RF_COMPLETE))
+			cxx_type_require_complete(c, et);	/* a member by value: an instance is completed now */
+		if (AST_TYPE_KIND(c->ast, et) == TY_VOID || AST_TYPE_KIND(c->ast, et) == TY_FUNC ||
+		    (cc_type_is_record(c->ast, et) && !(c->ast->tags[AST_TYPE(c->ast, et)->aux].flags & RF_COMPLETE))) {
+			b->skip = CXX_SKIP_UNKNOWN_MEMBER;
+			return;
+		}
+	}
 	if (cc_type_is_record(c->ast, t) && !(c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE)) {
 		b->skip = CXX_SKIP_UNKNOWN_MEMBER;	/* a member of a class that was not laid out */
 		return;
