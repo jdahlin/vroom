@@ -19,7 +19,7 @@
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
 # failure); the script runs every step and fails at the end if any failed.
 set -u
-JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|tsan-vccd|wasm|win64|win64}
+JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|tsan-vccd|wasm|win64}
 cd "$(dirname "$0")/.."
 J=${CI_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 BUILD=$(python3 -c 'import sys; sys.path.insert(0, "bench"); import hostenv; print(hostenv.BUILD)')
@@ -163,7 +163,8 @@ asan)
 	step ctests-vcc-O1 env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
-	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target aarch64-linux-gnu
+	# Hosted atomics use the runner's native libc/libatomic; arm64 is covered above.
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$B" --target x86_64-linux-gnu
 	step virgen       python3 bench/virgen-test.py --bin-dir "$B"
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
