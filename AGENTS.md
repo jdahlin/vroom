@@ -33,15 +33,20 @@ relative to it); `TODO.md` stays at the top.
 - `REVIEW-vir-lowering.md`: review of the VIR builder, format and arm64
   lowering (2026-11-12): bugs fixed and open, compile-time and runtime
   findings, spec drift, decisions needed.
+- `OPTIMIZATION.md`: the levels and what goes into each: `-O0`, `-O1` (the
+  direct emitter), `-O2` (VIR), `-O3` (VIR with the loop vectorizer); the
+  `-f` options of one optimization and the `-fvir-*` developer options.  No
+  environment variable selects an optimization; a new one gets a row in
+  `CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`) and a line in that document.
 - `PLAN-vir.md` (steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
-  `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
+  `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used at `-O2` and up,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa-construction.c`, `lower-*.c`, `slot-promotion.c`, the simplifier in `rules.c`, `value-numbering.c`, `load-forwarding.c` and `simplify.c`, `if-conversion.c`, `condition-merge.c`, `to-vir.c`, `pipeline.c`).  `vectorize.c` is the loop vectorizer, on
-  the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
-  innermost loop to stderr, `n` keeps loop constants unhoisted (`virbuild_loop_constants_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
-- `src/arch/a64/vir/` (internal header `lowering-internal.h`; files by topic: `calling-convention.c`, `moves.c`, `compares.c`, `memory.c`, `calls.c`, `switch.c`, `address-folds.c`, `returns-and-jumps.c`, `vectors.c`, `instructions.c`, `function.c`) and `src/arch/x64/vir/` (the same cut): VIR's arm64 and x86-64 lowerings.  arm64: `VCC_VIR_ROT=0` keeps VIR's block order (no loop
-  rotation), `VCC_VIR_SHRINK=0` the prologue at the function's entry (no shrink-wrapping); `VCC_VL_PROBE=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
+  the builder's pre-IR, at `-O3` (`-fvectorize`; `-fvir-vectorize-report` reports each
+  innermost loop to stderr, `-fno-hoist-loop-constants` keeps loop constants unhoisted, `virbuild_loop_constants_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
+- `src/arch/a64/vir/` (internal header `lowering-internal.h`; files by topic: `calling-convention.c`, `moves.c`, `compares.c`, `memory.c`, `calls.c`, `switch.c`, `address-folds.c`, `returns-and-jumps.c`, `vectors.c`, `instructions.c`, `function.c`) and `src/arch/x64/vir/` (the same cut): VIR's arm64 and x86-64 lowerings.  `-fno-rotate-loops` keeps VIR's block order (no loop
+  rotation); arm64: `-fno-shrink-wrap` the prologue at the function's entry (no shrink-wrapping); `-fvir-probe=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
   LLVM and GCC represent them; ABI and spill slots), loop vectorizers (LLVM,
@@ -288,13 +293,15 @@ bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import recor
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
-bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (test/volatile, <1 s)
+bench/vcc-volatile.py               # volatile loads/stores kept one for one at -O1, -O2 and -O3 (test/volatile, <1 s)
 bench/common-test.py                # src/common and src/port unit tests (src/test/common), host compiler, ASan+UBSan (~5 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (src/test/vir, ~1 s)
 bench/vir-exposure.py               # VIR: generated long, cyclic and multi-slot exposure checks (<1 s)
 bench/vir-test.py --mutate 3000 --bin-dir build/src-asan   # random mutants of those units: virtest never crashes (~1 min)
 bench/vcc-ctests.py -j 6 --suite vcc # our own regression tests (src/test/vcc), ~1 s
-bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (src/test/inline); VCC_VIR=bl for VIR's inliner
+bench/vcc-ctests.py -j 6 --suite inline   # gcc/llvm inlining and IPA run tests (src/test/inline); -O1 for the direct emitter's inliner
+bench/vcc-ctests.py -j 6 -O1        # vcc at another level (default -O2, VIR; -O1 the direct emitter, -O3 the vectorizer); clang stays -O2
+bench/vcc-ctests.py -j 6 -O3 --vflags '-fvir-verify -fvir-check'   # ... with flags for vcc alone (VIR's verifier and allocation check, as CI)
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)
@@ -331,9 +338,9 @@ src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's fu
 build/src/viralloc --sweep F.vir     # VIR register allocation (vir/register-allocation.c) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
-bench/vir-failures.py [-n N]        # why VIR gives up on functions (VCC_VIR_STATS=1; reasons: codegen/vir/failure.h): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
-bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, default path vs VCC_VIR=bl (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
-bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (VCC_VIR_PASSES=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
+bench/vir-failures.py [-n N]        # why VIR gives up on functions (-fvir-stats; reasons: codegen/vir/failure.h; --level -O3): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
+bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, -O1 (direct emitter) vs -O2 (VIR) (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
+bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (-fvir-passes=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple + x86-64 + Windows (MS layout, ms_struct/gcc_struct) (~2 s)
 bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, bits vs clang (~2 s; T x86_64-linux-gnu / x86_64-w64-mingw32: x87)
 bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)
@@ -355,7 +362,7 @@ bench/vcc-win64.py -j 6 --ref-only  # the C suites for x86_64-w64-mingw32: clang
 bench/vcc-win64.py -j 6 [--own] [--vir] [--seh]   # ... and vcc's side, by default vcc only: vpp -c, vcc's driver links (vlink + libvccrt.a built by vcc + the CRT), PATH empty on vcc's side, no foreign input in the map (doc/PLAN-win64.md; ~40 s, <2 s cached)
 bench/vcc-win64.py -j 6 --clang-as|--obj|--objcmp   # vpp -S + clang -c + lld; vpp -c + lld; --objcmp: vpp -c = vasm(-S) = clang -c(-S) byte for byte
 vpp --target=x86_64-w64-mingw32 --sysroot=S -v x.c -o x.exe   # compile and link with vlink + libvccrt.a; -v prints the link line (WIN5/WIN8)
-bench/vcc-win64.py -j 6 --vir --seh # ... through VIR (VCC_VIR=l); --seh: every object's .pdata/.xdata against its prologs, canonical epilogues
+bench/vcc-win64.py -j 6 --vir --seh # ... through VIR (without --vir: -fno-vir); --seh: every object's .pdata/.xdata against its prologs, canonical epilogues
 bench/vcc-win64.py -j 6 --suite win64   # src/test/win64: Windows' convention rules, TLS, dllimport, ctors; stack walk, unwinding longjmp, VEH unwinding out of vcc frames
 bench/vcc-abi.py --target win64 [--vir]  # src/test/abi clang/vcc x caller/callee for x86_64-w64-mingw32 under Wine (~3 min); msabi_calls also natively (--target x86_64)
 VROOM_WORK=DIR bench/vcc-abi-generated.py --target x86_64-w64-mingw32 --count 100   # generated GCC/LLVM ABI cases under Wine (DIR/testsuites: fetch-testsuites.sh gcc llvm)
@@ -382,14 +389,14 @@ bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEG
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)
 bench/pg/speed.py                  # PostgreSQL compile speed: clang, clang -O0, vpp, vpp --batch
 bench/sqlite/run.py all            # SQLite (macOS): vcc/clang/gcc builds, TCL testrunner (no vcc-only fails), speedtest1 (~4 min)
-bench/zlib/run.py all              # zlib 1.4 (macOS): clang/vcc/vir/gcc builds, self-tests, same bytes as clang's, zbench CPU time (~30 s)
-bench/ffmpeg/run.py all            # ffmpeg n8.1.3 without assembly (macOS): clang/vcc/vir builds, FATE (2740 tests, no samples), compile time, codec/filter CPU time (~15 min)
+bench/zlib/run.py all              # zlib 1.4 (macOS): clang, vcc (-O1), vir (-O2), vir3 (-O3), gcc builds, self-tests, same bytes as clang's, zbench CPU time (~30 s)
+bench/ffmpeg/run.py all            # ffmpeg n8.1.3 without assembly (macOS): clang, vcc (-O1), vir (ffmpeg's -O3) builds, FATE (2740 tests, no samples), compile time, codec/filter CPU time (~15 min)
 bench/zlib/run.py --target win64 all     # WIN8: zlib for x86_64-w64-mingw32 by clang, vcc, vir and zlib's ./configure through the vcc shim + vccd; self-tests under Wine, bytes = clang's (~30 s)
 bench/sqlite/run.py --target win64 all   # WIN8: amalgamation, shell, speedtest1, fuzzcheck, mptester, threadtest3 by clang/vcc/vir; SQL corpus output = clang's under Wine (~3 min; --full: all threadtests)
                                    # (bench/win64proj.py: their shared chains, the emptied PATH of vcc's side, link-map and -H checks; trees in build/linux/win64-projects)
 bench/ffmpeg/run.py --target win64 all   # WIN8: FFmpeg C fallbacks for mingw32 by clang/vcc/vir (vcc's tools only), sample-free FATE under Wine, no vcc-only failures
 bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import records vs llvm-nm (the sysroot's libraries; ~8 s)
-bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3, direct emitter and VIR, loops vectorized (~15 s)
+bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3 at vcc -O1, -O2, -O3, loops vectorized (~20 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
@@ -399,7 +406,10 @@ side; `VPP_CMP_NOCACHE=1` compares in full), `vcc-ctests.py -j 6` (5 s [32 s]: a
 that passed is not linked or run again; `--no-cache` runs all) and
 `vcc-sema.py layout` (clang only rechecks TUs whose claims changed;
 `NOCACHE=1` rechecks all).  The batch modes share caches across TUs as vccd
-does, so before a commit also run the per-process `cmp` and `run`.
+does, so before a commit also run the per-process `cmp` and `run`.  The C
+suites run at `-O2` (VIR); a change to code generation also runs them at
+`-O1` (the direct emitter, which is also VIR's fallback per function) and
+`-O3`, as CI does.
 PostgreSQL (`work/postgres`, `bench/pg/`) is the second test project: a
 native macOS build where vcc compiles every C file (`bench/pg/cc`) and clang
 links; the reference is Homebrew clang, and both builds must pass the same

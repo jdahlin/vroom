@@ -5,38 +5,120 @@
 #include "../walk/proto.h"
 #include "preir.h"
 
-/* a parameter all of whose operands are one value (or itself) is that value */
+/* p's one value other than itself, 0 none (its operands are all p), VIRBUILD_BLOCK_NONE two or more */
+static uint32_t virbuild_parameter_trivial_value(virbuild_context *V, uint32_t p)
+{
+	uint32_t same = 0, npred = V->blocks[V->insns[p].block].predecessor_count;
+
+	for (uint32_t j = 0; j < npred; j++) {
+		uint32_t o = virbuild_value_resolve(V, V->extra[V->insns[p].insn.b + j]);
+
+		if (o == p || o == same)
+			continue;
+		if (same)
+			return VIRBUILD_BLOCK_NONE;
+		same = o;
+	}
+	return same;
+}
+
+/* a parameter all of whose operands are one value (or itself) is that value.  A worklist
+ * (Braun et al.'s tryRemoveTrivialPhi): removing one parameter rechecks only the
+ * parameters that read it, so a nest of N loops costs O(N), not one sweep per level */
 VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e)
 {
 	virbuild_context *V = e->vir_builder;
+	uint32_t np = V->insn_count, nedge = 0, nw = 0;
 	bool any = false;
 
 	for (uint32_t i = 0; i < V->block_order_count; i++) {
 		virbuild_preir_block *k = &V->blocks[V->block_order[i]];
 
-		for (uint32_t p = k->first_parameter; p; p = V->insns[p].next) {
-			uint32_t same = 0;
-			bool triv = true;
+		for (uint32_t p = k->first_parameter; p; p = V->insns[p].next)
+			if (V->forward[p] == p)
+				nedge += k->predecessor_count;
+	}
+	if (!nedge)
+		return false;
+	/* per value: its first user edge (0 none) and its last; per edge: the parameter reading
+	 * the value, the next edge; the worklist and who is on it */
+	uint32_t *head = calloc((size_t)np * 3 + (size_t)nedge * 2 + 2, sizeof *head);
+	if (!head)
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+	uint32_t *tail = head + np, *work = tail + np, *user = work + np, *next = user + nedge + 1;
+	uint8_t *queued = calloc(np, 1);
+	if (!queued) {
+		free(head);
+		virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+	}
+	uint32_t ne = 0;
 
+	for (uint32_t i = 0; i < V->block_order_count; i++) {
+		virbuild_preir_block *k = &V->blocks[V->block_order[i]];
+
+		for (uint32_t p = k->first_parameter; p; p = V->insns[p].next) {
 			if (V->forward[p] != p)
 				continue;
 			for (uint32_t j = 0; j < k->predecessor_count; j++) {
 				uint32_t o = virbuild_value_resolve(V, V->extra[V->insns[p].insn.b + j]);
 
-				if (o == p || o == same)
+				if (o == p || V->insns[o].insn.op != VIR_OP_BPARAM)
 					continue;
-				if (same) {
-					triv = false;
-					break;
-				}
-				same = o;
+				user[++ne] = p;	/* edges count from 1: 0 ends a list */
+				if (tail[o])
+					next[tail[o]] = ne;
+				else
+					head[o] = ne;
+				tail[o] = ne;
 			}
-			if (!triv)
-				continue;
-			V->forward[p] = same ? same : virbuild_undefined_value(e, V->insns[p].insn.type);
-			any = true;
+			queued[p] = 1;
+			work[nw++] = p;
 		}
 	}
+	while (nw) {
+		uint32_t p = work[--nw], same;
+
+		queued[p] = 0;
+		if (V->forward[p] != p || (same = virbuild_parameter_trivial_value(V, p)) == VIRBUILD_BLOCK_NONE)
+			continue;
+		V->forward[p] = same ? same : virbuild_undefined_value(e, V->insns[p].insn.type);
+		any = true;
+		/* its readers may be trivial now, and they read same from now on: the live ones
+		 * other than same move to same's list (removed readers would make it grow along
+		 * a nest of loops, each level rescanning the levels inside it) */
+		bool keep = same && same < np && V->insns[same].insn.op == VIR_OP_BPARAM;
+		uint32_t kh = 0, kt = 0;
+
+		for (uint32_t d = head[p], dn; d; d = dn) {
+			uint32_t u = user[d];
+
+			dn = next[d];
+			if (V->forward[u] != u || u == same)
+				continue;
+			if (!queued[u]) {
+				queued[u] = 1;
+				work[nw++] = u;
+			}
+			if (!keep)
+				continue;
+			next[d] = 0;
+			if (kt)
+				next[kt] = d;
+			else
+				kh = d;
+			kt = d;
+		}
+		head[p] = tail[p] = 0;
+		if (kh) {
+			if (tail[same])
+				next[tail[same]] = kh;
+			else
+				head[same] = kh;
+			tail[same] = kt;
+		}
+	}
+	free(queued);
+	free(head);
 	return any;
 }
 

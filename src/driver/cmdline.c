@@ -320,9 +320,13 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 			job->raw_assembler = !strcmp(argv[i], "assembler") ? 1 : 0;
 			job->language_given = strcmp(argv[i], "none") != 0;
 		}
-		else if (!strcmp(a, "-O0")) job->optimize = 0, job->optimize_size = 0, job->optimization_level = 0;
-		else if (!strcmp(a, "-Os") || !strcmp(a, "-Oz")) { job->optimize = 2; job->optimize_size = 1; job->optimization_level = 2; }
-		else if (!strncmp(a, "-O", 2)) job->optimize = 2, job->optimize_size = 0, job->optimization_level = !strcmp(a, "-O1") || !strcmp(a, "-Og") ? 1 : 2;
+		/* optimize: __OPTIMIZE__ (predef.c); optimization_level: the code generator's level, 0-3 (optimization.c) */
+		else if (!strncmp(a, "-O", 2)) {
+			job->optimization_level = driver_optimization_level(a + 2);
+			job->optimize = job->optimization_level ? 2 : 0;
+			job->optimize_size = !strcmp(a, "-Os") || !strcmp(a, "-Oz");
+		}
+		else if (driver_optimization_option(job, a)) ;
 		else if (!strcmp(a, "-fpie")) job->pie = 1, job->pic = 0;
 		else if (!strcmp(a, "-fPIE")) job->pie = 2, job->pic = 0;
 		else if (!strcmp(a, "-fpic")) job->pic = 1, job->pie = 0;

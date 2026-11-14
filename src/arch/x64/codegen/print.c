@@ -914,8 +914,8 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		case X64_OP_UD2:
 			vtext_string_append(b, "\tud2");
 			break;
-		case X64_OP_BSF: case X64_OP_BSR:
-			x64_mnemonic_append(b, i->opcode == X64_OP_BSF ? "bsf" : "bsr", sz);
+		case X64_OP_BSF: case X64_OP_BSR: case X64_OP_POPCNT:
+			x64_mnemonic_append(b, i->opcode == X64_OP_BSF ? "bsf" : i->opcode == X64_OP_BSR ? "bsr" : "popcnt", sz);
 			x64_register_name_append(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
 			x64_register_name_append(b, i->registers[0], sz);

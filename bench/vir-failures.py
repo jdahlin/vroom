@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """vir-failures.py: why VIR gives up on a function (VIR-MIGRATION.md, gate G1).
 
-  bench/vir-failures.py [-j N] [-n N] [--sets LIST] [--bin-dir DIR] [--vir MODE] [--top K]
+  bench/vir-failures.py [-j N] [-n N] [--sets LIST] [--bin-dir DIR] [--level -O2|-O3] [--top K]
 
-Compiles TUs with `vpp -S` at -O2 and VCC_VIR=bl VCC_VIR_STATS=1: every
+Compiles TUs with `vpp -S -O2 -fvir-stats` (doc/OPTIMIZATION.md): every
 function the VIR builder or lowering cannot handle is compiled by the direct
 emitter, and vcc prints per TU how many and why (src/codegen/vir/failure.h,
 build-attempt.c).  This sums that over a set of TUs and prints the reasons, most
@@ -19,10 +19,10 @@ A set whose files are not on this machine is named as missing, not an error.
 
 -n N   TUs per sample for kernel and postgres (default 150; 0: all)
 -j N   parallel vpp processes (default 3)
---keep-g       keep -g in postgres' flags (it builds with -g, and VIR lowers nothing under
-               -g: every function would be one debug_info failure; default: -g removed)
+--keep-g       keep -g in postgres' flags (it builds with -g; VIR lowers the same functions
+               with or without it, so -g is removed by default: line tables cost time)
 --bin-dir DIR  tools from DIR (default build/src, or $VCC_BIN)
---vir MODE     the VCC_VIR value (default bl: build and lower; x86-64 lowers the same way)
+--level L      the level, -O2 (default) or -O3 (with the vectorizer); x86-64 lowers the same way
 Counts are functions, not TUs.  A TU vpp rejects (exit status != 0) is listed
 as failed and counted only as far as vpp reported.
 """
@@ -47,7 +47,7 @@ def option(name, default, cast=str):
 JOBS = option('-j', 3, int)
 SAMPLE = option('-n', 150, int)
 SETS = option('--sets', '', str)
-MODE = option('--vir', 'bl', str)
+LEVEL = option('--level', '-O2', str)
 TOP = option('--top', 0, int)
 KEEPG = '--keep-g' in sys.argv
 if KEEPG:
@@ -154,11 +154,10 @@ REASON = re.compile(r'^vcc vir-failure: reason=(\S+) count=(\d+) example=(\S*) d
 
 def run(job):
     label, argv, cwd = job
-    env = dict(os.environ, VCC_VIR=MODE, VCC_VIR_STATS='1')
     t = time.time()
-    try:
-        p = subprocess.run([VPP, '-S', '-o', '/dev/null'] + argv, cwd=cwd, capture_output=True, text=True,
-                           errors='replace', env=env, timeout=TMO)
+    try:   # (the level after the TU's own -O)
+        p = subprocess.run([VPP, '-S', '-o', '/dev/null'] + argv + [LEVEL, '-fvir-stats'], cwd=cwd, capture_output=True,
+                           text=True, errors='replace', timeout=TMO)
         rc, err = p.returncode, p.stderr
     except subprocess.TimeoutExpired:
         rc, err = -1, ''
@@ -221,7 +220,7 @@ def main():
         with ThreadPoolExecutor(JOBS) as pool:
             res = list(pool.map(run, jobs))
         cnt, ex, t4 = table(name, jobs, res)
-        print(f'   ({time.time() - t:.0f} s, -j {JOBS}, VCC_VIR={MODE})')
+        print(f'   ({time.time() - t:.0f} s, -j {JOBS}, {LEVEL})')
         grand.update(cnt)
         for k, v in ex.items():
             gex.setdefault(k, (f'{name}:{v[0]}', v[1]))

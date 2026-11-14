@@ -4,6 +4,7 @@
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
+#include "lowering-driver.h"
 
 /* ---------------- calls ---------------- */
 
@@ -129,6 +130,10 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref, codegen_valu
 	} else {
 		callee = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
 	}
+	/* x86-64's lowering refuses a returns_twice call (setjmp): fail here, not after the whole build */
+	if (!fn && CODEGEN_IS_X64(e->compile_context) &&
+	    virbuild_call_returns_twice(e, &(vir_insn){ .op = VIR_OP_SYMADDR, .type = VIR_TYPE_PTR, .a = ref }))
+		virbuild_fail(e, VIRBUILD_FAILURE(x64_returns_twice));
 	sig = virbuild_call_signature_make(e, a, n, variadic, rt, &rpc);
 	o = V->extra_count;
 	uint32_t count = sret, word = 0;

@@ -1,7 +1,7 @@
 /*
- * The VIR builder's pass table and VCC_VIR_PASSES (pass-table.h).
+ * The VIR builder's pass table and -fvir-passes (pass-table.h).
  *
- * VCC_VIR_PASSES=ITEM[,ITEM...], read once per process (a test aid, not an option):
+ * -fvir-passes=ITEM[,ITEM...], read once per TU (a test aid, not an optimization option):
  *   -NAME          leave pass NAME out (a required one: error)
  *   only=A+B+...   run exactly these, in table order, plus the required ones
  *   +NAME          run pass NAME, a row that is off unless asked for (PASS_OFF_BY_DEFAULT)
@@ -12,16 +12,17 @@
  *                  "vcc vir-verify: pass=NAME function=F: MESSAGE" and the function
  *                  falls back (reason verifier_rejected)
  *   verify=A+B     ... after the passes named
+ *   analyses       a VIR pass's `keeps` row is checked against a fresh computation
+ *                  (vir_pass_context.check_analyses); verify asks for it too
  *   time           per pass: runs, runs that changed something, instructions (vperf,
- *                  read only when set); printed with VCC_VIR_STATS=1 (virbuild_statistics_print):
+ *                  read only when set); printed with -fvir-stats (virbuild_statistics_print):
  *                    vcc vir-pass: pass=NAME runs=N changed=N instructions=N [changes=N] [checked=N]
  *                  changed is `-` for a pass that does not say; changes=N (rows of VIR
  *                  passes only) counts the instructions the pass rewrote or removed; the rows @build (the
  *                  walk and every pass, to-vir and canon included) and @lower (the
  *                  target's lowering) are the totals a pass's share is taken of
- * A row with a `vir` entry runs that pass of the registry (vir/pass.h) on V->f; with `verify`
- * the check of its `keeps` row runs too (VCC_VIR_CHECK_ANALYSES=1 asks for that alone).
- * An unknown pass or item prints the passes to stderr and exits 2.
+ * A row with a `vir` entry runs that pass of the registry (vir/pass.h) on V->f.
+ * An unknown pass or item fails the job with the list of passes.
  */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
@@ -89,7 +90,7 @@ static const virbuild_pass virbuild_passes[] = {
 	/* (loop-constants, virbuild_loop_constants_pin, runs inside vectorize, per loop: a row of its own needs vectorize.c) */
 	{ "vectorize",          virbuild_pass_vectorize,    O | P,  0,     O | P,     U | VIRBUILD_PASS_FLAG_VECTOR_GATE, NULL },	/* vectorize.c */
 	/* required: VIR's block parameters take no critical edges (left out, the verifier rejects 10 741
-	   functions of the suites and 31 vcc tests miscompile under VCC_VIR=bl, which does not verify) */
+	   functions of the suites and 31 vcc tests miscompile, as -O2 does not verify) */
 	{ "split",              virbuild_pass_split,        O | P,  0,     O | P,     U | VIRBUILD_PASS_FLAG_REQUIRED, NULL },		/* cfg.c */
 	{ "slot-uses",          virbuild_pass_slot_uses,    O,      0,     O | P | D, U | VIRBUILD_PASS_FLAG_REQUIRED, NULL },		/* pipeline.c */
 	{ "to-vir",             virbuild_pass_to_vir,       O,      0,     O | P | D, VIRBUILD_PASS_FLAG_REQUIRED | VIRBUILD_PASS_FLAG_ON_VIR, NULL },	/* pipeline.c, to-vir.c */
@@ -111,18 +112,22 @@ VPRIV const virbuild_pass *virbuild_pass_list(uint32_t *n)
 
 /* ---------------- the switch ---------------- */
 
-static virbuild_pass_switch virbuild_pass_switch_current;
 static uint64_t virbuild_pass_read_cost;	/* instructions of a vperformance_now pair (time) */
 static _Thread_local uint64_t virbuild_pass_overhead;	/* instructions this thread spent timing passes, not yet taken */
-static pthread_once_t virbuild_pass_switch_once = PTHREAD_ONCE_INIT;
+static pthread_once_t virbuild_pass_read_cost_once = PTHREAD_ONCE_INIT;
 
+/* the job ends: a message and, where it helps, the passes there are */
 static __attribute__((noreturn)) void virbuild_pass_switch_error(const char *what, const char *s, size_t n)
 {
-	fprintf(stderr, "vcc: VCC_VIR_PASSES: %s %.*s (passes:", what, (int)n, s);
-	for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT; i++)
-		fprintf(stderr, " %s%s", virbuild_passes[i].name, virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_REQUIRED ? "*" : "");
-	fprintf(stderr, "; * required)\n");
-	exit(2);
+	char msg[1024];
+	size_t k = (size_t)snprintf(msg, sizeof msg, "-fvir-passes: %s %.*s (passes:", what, (int)n, s);
+
+	for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT && k < sizeof msg; i++)
+		k += (size_t)snprintf(msg + k, sizeof msg - k, " %s%s", virbuild_passes[i].name,
+				      virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_REQUIRED ? "*" : "");
+	if (k < sizeof msg)
+		snprintf(msg + k, sizeof msg - k, "; * required)");
+	vjob_fail(msg);
 }
 
 static uint32_t virbuild_pass_switch_find(const char *s, size_t n)
@@ -154,12 +159,27 @@ static const char *virbuild_fact_name(uint32_t f)
 	return f & VIRBUILD_FACT_ORDER ? "the block order" : f & VIRBUILD_FACT_PREDS ? "the predecessor lists" : "the dominators";
 }
 
-static void virbuild_pass_switch_read(void)
+/* what two reads of the counters cost, taken off every pass's count */
+static void virbuild_pass_read_cost_measure(void)
 {
-	const char *s = getenv("VCC_VIR_PASSES");
-	virbuild_pass_switch *w = &virbuild_pass_switch_current;
+	uint64_t best = UINT64_MAX;
+
+	for (int r = 0; r < 8; r++) {
+		vperf a = vperformance_now(), b = vperformance_now();
+
+		if (vperformance_subtract(b, a).ins < best)
+			best = vperformance_subtract(b, a).ins;
+	}
+	virbuild_pass_read_cost = best;
+}
+
+VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *s)
+{
 	uint64_t req = 0, only = 0, plus = 0, off = 0;
 	uint32_t valid = 0;
+	char msg[200];
+
+	*w = (virbuild_pass_switch){ 0 };
 
 	for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT; i++)
 		if (virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_REQUIRED)
@@ -177,6 +197,8 @@ static void virbuild_pass_switch_read(void)
 			w->time = true;
 		else if (n == 6 && !memcmp(s, "verify", 6))
 			w->verify = ~0ull;
+		else if (n == 8 && !memcmp(s, "analyses", 8))
+			w->analyses = true;
 		else if (n > 7 && !memcmp(s, "verify=", 7))
 			w->verify |= virbuild_pass_switch_names_parse(s + 7, e);
 		else if (n > 1 && s[0] == '+')
@@ -199,9 +221,9 @@ static void virbuild_pass_switch_read(void)
 		w->skip |= off & ~plus;	/* the rows that are off unless asked for (+NAME) */
 	for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT; i++)	/* a VIR row carries its registry entry's name */
 		if (virbuild_passes[i].vir && strcmp(virbuild_passes[i].vir->name, virbuild_passes[i].name)) {
-			fprintf(stderr, "vcc: VCC_VIR_PASSES: row %s runs the VIR pass %s\n", virbuild_passes[i].name,
-				virbuild_passes[i].vir->name);
-			exit(2);
+			snprintf(msg, sizeof msg, "the VIR builder's row %s runs the VIR pass %s", virbuild_passes[i].name,
+				 virbuild_passes[i].vir->name);
+			VBUG(msg);
 		}
 	for (uint32_t i = 0; i + 1 < VIRBUILD_PASS_COUNT; i++)	/* (to-vir: checked after canon, the next row; a VIR pass's row checks itself) */
 		if ((w->verify >> i & 1) && (virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_ON_VIR) && !virbuild_passes[i + 1].vir)
@@ -209,17 +231,8 @@ static void virbuild_pass_switch_read(void)
 	w->skip &= (VIRBUILD_PASS_COUNT < 64 ? (1ull << VIRBUILD_PASS_COUNT) - 1 : ~0ull);
 	w->verify &= (VIRBUILD_PASS_COUNT < 64 ? (1ull << VIRBUILD_PASS_COUNT) - 1 : ~0ull);
 	w->active = w->skip || w->verify || w->time;
-	if (w->time) {	/* what two reads cost, taken off every pass's count */
-		uint64_t best = UINT64_MAX;
-
-		for (int r = 0; r < 8; r++) {
-			vperf a = vperformance_now(), b = vperformance_now();
-
-			if (vperformance_subtract(b, a).ins < best)
-				best = vperformance_subtract(b, a).ins;
-		}
-		virbuild_pass_read_cost = best;
-	}
+	if (w->time)
+		pthread_once(&virbuild_pass_read_cost_once, virbuild_pass_read_cost_measure);
 	/* every pass that runs finds the facts it needs, whichever conditional rows run */
 	for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT; i++) {
 		const virbuild_pass *p = &virbuild_passes[i];
@@ -228,19 +241,13 @@ static void virbuild_pass_switch_read(void)
 		if (w->skip >> i & 1)
 			continue;
 		if (p->needs & ~valid) {
-			fprintf(stderr, "vcc: VCC_VIR_PASSES: pass %s needs %s, which no pass before it leaves valid\n", p->name,
-				virbuild_fact_name(p->needs & ~valid));
-			exit(2);
+			snprintf(msg, sizeof msg, "-fvir-passes: pass %s needs %s, which no pass before it leaves valid", p->name,
+				 virbuild_fact_name(p->needs & ~valid));
+			vjob_fail(msg);
 		}
 		after = (valid & p->keeps) | p->makes;
 		valid = p->flags & VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED ? valid & after : after;
 	}
-}
-
-VPRIV const virbuild_pass_switch *virbuild_pass_switch_get(void)
-{
-	pthread_once(&virbuild_pass_switch_once, virbuild_pass_switch_read);
-	return &virbuild_pass_switch_current;
 }
 
 /* ---------------- running a row ---------------- */
@@ -253,10 +260,11 @@ static void vir_count_changes(codegen_unit *E, uint32_t row, uint64_t changes);
 
 /* The adapter: a VIR pass's row runs its registry entry on V->f.  A pass cannot fail the function, but
  * a limit reached while it appends is the build's failure (the function goes to the direct emitter), and so
- * is a stale analysis its `keeps` claims (checked with VCC_VIR_PASSES=verify or VCC_VIR_CHECK_ANALYSES=1). */
+ * is a stale analysis its `keeps` claims (checked with -fvir-passes=verify or =analyses). */
 static bool virbuild_pass_vir_run(codegen_context *e, const virbuild_pass *p)
 {
-	vir_pass_context ctx = { .budget = VIR_PASS_BUDGET, .checked = virbuild_pass_switch_get()->verify != 0 };
+	const virbuild_pass_switch *w = &e->unit->vir_pass_switch;
+	vir_pass_context ctx = { .budget = VIR_PASS_BUDGET, .checked = w->verify != 0, .check_analyses = w->analyses };
 	char err[160];
 	bool changed = vir_pass_run(&e->vir_builder->f, p->vir, &ctx, err, sizeof err);
 
@@ -366,7 +374,7 @@ static const char *virbuild_function_name(codegen_context *e, char *buf, size_t 
 VPRIV bool virbuild_pass_step_instrumented(codegen_context *e, uint32_t i, uint32_t *valid)
 {
 	const virbuild_pass *p = &virbuild_passes[i];
-	const virbuild_pass_switch *w = &virbuild_pass_switch_current;
+	const virbuild_pass_switch *w = &e->unit->vir_pass_switch;
 	bool count = w->time && e->unit->vir_statistics, check = w->verify >> i & 1, changed;
 	vperf t0 = { 0, 0 }, t1 = { 0, 0 };
 
@@ -409,10 +417,10 @@ VPRIV bool virbuild_pass_step_instrumented(codegen_context *e, uint32_t i, uint3
 	return changed;
 }
 
-/* VCC_VIR_PASSES=time or verify with VCC_VIR_STATS=1: the TU's lines (virbuild_statistics_print), then its counters go */
+/* -fvir-passes=time or verify with -fvir-stats: the TU's lines (virbuild_statistics_print), then its counters go */
 VPRIV void virbuild_pass_stats_print(codegen_unit *E)
 {
-	const virbuild_pass_switch *w = virbuild_pass_switch_get();
+	const virbuild_pass_switch *w = &E->vir_pass_switch;
 	virbuild_pass_tu *t;
 
 	if (!w->time && !w->verify)

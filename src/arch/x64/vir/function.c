@@ -89,7 +89,6 @@ static const virbuild_lowering_target vx_lowering_target = {
 	.params_in_loop = true,
 	.edits_at_block_end = true,
 	.skip_multi_operands = false,
-	.rotation_cached = false,
 };
 
 static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
@@ -97,16 +96,6 @@ static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
 {
 	vbuffer_format_append(ctx,"vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n",
 		b,pred,v,reg,stored,decision);
-}
-
-/* The diagnostics' environment variables, read once per process */
-static struct { const char *filter, *mapping, *probe; } vx_diag_env;
-static pthread_once_t vx_diag_once = PTHREAD_ONCE_INIT;
-static void vx_diag_init(void)
-{
-	vx_diag_env.filter = getenv("VCC_VL_FILTER");
-	vx_diag_env.mapping = getenv("VCC_VL_MAP");
-	vx_diag_env.probe = getenv("VCC_VL_PROBE");
 }
 
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char **why)
@@ -125,7 +114,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	vir_target_registers regs = { .alloc = { (X64_TEMPORARIES & ~(1u << R10)) | cs, (1u << 14) - 1 },
 		.callee = { cs, ms ? ((1u << 14) - 1) & ~((1u << 6) - 1) : 0 }, .fixed = x64_vir_fixed_registers_get, .context=&L };
 	*why = VIRBUILD_FAILURE(x64_unsupported_target_option);
-	if (e->unit->options->debug || e->unit->options->sprot || x64_target_has_no_simd(e)) return false;
+	if (e->unit->options->sprot || x64_target_has_no_simd(e)) return false;
 	const attrs *attrs = codegen_symbol_attributes(e->compile_context, sym);
 	if (attrs && attrs->interrupt) { *why = VIRBUILD_FAILURE(x64_interrupt_function); return false; }
 	for (uint32_t i = 1; i < f->constant_count; i++)
@@ -140,6 +129,11 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 			return false;
 		} else if (f->insns[i].op == VIR_OP_CALL && virbuild_call_returns_twice(e, &f->insns[f->insns[i].a])) {
 			*why = VIRBUILD_FAILURE(x64_returns_twice);
+			return false;
+		} else if (f->insns[i].op == VIR_OP_POPCNT &&
+			   !x86_feature_has(cc_x86_features_get(e->compile_context, sym), X86_FEATURE_POPCNT)) {
+			snprintf(V->failure_detail, sizeof V->failure_detail, "popcnt without POPCNT");
+			*why = VIRBUILD_FAILURE(x64_unsupported_instruction);
 			return false;
 		} else if (!x64_vir_value_is_supported(f, i)) {
 			snprintf(V->failure_detail, sizeof V->failure_detail, "%s.%s", vir_opcode_table[f->insns[i].op].name, vir_type_names[f->insns[i].type]);
@@ -156,11 +150,12 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	vir_uses_count(f,L.uses);L.scratch_register10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->loops)){*why=VIRBUILD_FAILURE(x64_loop_analysis);return false;}
-	pthread_once(&vx_diag_once,vx_diag_init);
+	/* -fvir-map, -fvir-probe, -fvir-map-function (doc/OPTIMIZATION.md) */
+	const cc_vir_aids *aid=&e->unit->options->vir_aid;
 	const vident *name=&vintern_ents[e->compile_context->syms[sym].name];
-	bool selected=!vx_diag_env.filter || (strlen(vx_diag_env.filter)==name->len && !memcmp(vx_diag_env.filter,name->s,name->len));
-	L.map=selected && vx_diag_env.mapping && *vx_diag_env.mapping && *vx_diag_env.mapping!='0';
-	L.probe=selected && vx_diag_env.probe?(unsigned)strtoul(vx_diag_env.probe,NULL,0):0;
+	bool selected=!aid->map_function || (strlen(aid->map_function)==name->len && !memcmp(aid->map_function,name->s,name->len));
+	L.map=selected && aid->map;
+	L.probe=selected?(unsigned)aid->probe:0;
 	vbuffer entries={0};
 	vir_alloc_options diagnostic={.entry=vx_entry,.entry_context=&entries};
 	const vir_alloc_options *dopt=L.map?&diagnostic:NULL;
@@ -189,7 +184,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	if (!allocated) {
 		*why = VIRBUILD_FAILURE(x64_allocation_failed); snprintf(V->failure_detail, sizeof V->failure_detail, "%s", V->allocation.error_message); return false;
 	}
-	if (getenv("VCC_VIR_CHECK")) {
+	if (e->unit->options->vir_aid.check) {
 		vbuffer msg = { 0 };
 		uint32_t n = vir_alloc_check(f, &regs, &V->allocation, &msg);
 		if (n) fprintf(stderr, "vir x86-64: allocation check: %.*s", (int)msg.n, msg.p ? (char *)msg.p : "");
@@ -228,7 +223,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym, const char *
 	L.order=layout;L.position=layout+f->block_count;L.rotations=layout+2*f->block_count;L.chase=layout+3*f->block_count;L.loops=&V->loops;
 	L.drv=(virbuild_lowering){ .target=&vx_lowering_target, .ctx=&L, .f=f, .o=&V->allocation, .lp=&V->loops,
 		.order=L.order, .position=L.position, .rotation=L.rotations, .chase=L.chase, .path=layout+4*f->block_count,
-		.block_label=L.label, .optimize=!e->unit->cleanups_disabled };
+		.block_label=L.label, .optimize=!e->unit->cleanups_disabled, .rotate=e->unit->options->optimize.rotate_loops,
+		.row=e->unit->options->debug?x64_dbgrow:NULL, .row_e=e };
 
 	for (int r = 0; r < 16; r++) {
 		if (V->allocation.callee[0] >> r & 1) x64_callee_save_use(e, r);

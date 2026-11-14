@@ -7,8 +7,8 @@
  * moves records must call codegen_debug_rows_remap so the rows follow (the printers and optimisers do).  File
  * numbers are unit-wide and handed out under E->dmu, so the threads agree on them; the main file is
  * number 0, as in clang (MC maps `.file N` of the main file to 0); below DWARF 5 every number is one more,
- * the main file 1.  Users: arm64's and x86-64's
- * direct emitters; VIR does not call it.
+ * the main file 1.  Users: arm64's and x86-64's direct emitters, and VIR's lowering driver
+ * (codegen/vir/lowering-driver.c) at each block and each run of f->loc (x86-64 through x64_dbgrow).
  */
 #include "codegen-internal.h"
 

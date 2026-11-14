@@ -1045,7 +1045,7 @@ integration head remains.
 
 ### 2026-11-12: VIR's first x86-64 lowering
 
-`VCC_VIR=bl -O2`: allocated SysV leaf functions and the shared loop
+`-O3`: allocated SysV leaf functions and the shared loop
 vectorizer's SSE2 part now work on x86-64 too. Details, remaining
 retreats, targeted tests and measurements are in `PLAN-vir.md`,
 V2/V4 status 2026-11-12. No change to the default choice or -O0/-O1.

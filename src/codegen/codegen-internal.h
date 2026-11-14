@@ -195,6 +195,15 @@ typedef struct codegen_call_edge {uint32_t callee,call;} codegen_call_edge;
 
 #define CODEGEN_RECORD_PASS_MAX 24
 
+/* -fvir-passes (codegen/vir/pass-table.c reads it, once per TU) */
+typedef struct virbuild_pass_switch {
+	uint64_t skip;		/* bit per row: left out */
+	uint64_t verify;	/* bit per row: the check runs after it */
+	bool time;		/* per pass: runs, changed, instructions (with -fvir-stats) */
+	bool analyses;		/* a VIR pass's `keeps` is checked against a fresh computation (vir_pass_run) */
+	bool active;		/* skip, verify or time: virbuild_function_emit takes the instrumented path */
+} virbuild_pass_switch;
+
 typedef struct codegen_unit {
 	cc *compile_context;
 	const cc_options *options;
@@ -242,9 +251,15 @@ typedef struct codegen_unit {
 	_Atomic uint32_t nerrcall;	/* error() calls dropped (not folded) */	/* VCC_EMIT_STATS: time in a64_function_finish */
 	const codegen_keep *previous_keep;			/* the previous round's functions, or NULL */
 	bool stats;
-	/* VCC_VIR_STATS: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
+	/* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
 	bool vir_statistics;
-	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vbuilt: built but not lowered (VCC_VIR without l) */
+	_Atomic uint64_t vir_attempted, vir_lowered, vir_built;	/* vir_built: built but not lowered (-fno-vir-lower) */
+	/* -fvir-stats: instructions spent per outcome (port/performance-counters.h): the build and
+	   the lowering of lowered functions, the build of those that failed in it, and the build
+	   plus lowering of those the lowering refused */
+	_Atomic uint64_t vir_cost_build_ok, vir_cost_lower_ok, vir_cost_build_failed, vir_cost_lower_failed;
+	virbuild_pass_switch vir_pass_switch;	/* -fvir-passes */
+	char *vir_function_list;		/* -fvir-functions: "\nNAME\nNAME\n", or NULL: every function */
 	struct {
 		_Atomic uint32_t count;
 		uint32_t sym;		/* the first function that failed so (under emu) */
@@ -987,9 +1002,11 @@ VPRIV const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT]
 #else
 extern const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
 #endif
-VPRIV void virbuild_statistics_print(codegen_unit *E);	/* VCC_VIR_STATS: one line of totals, one per reason (stderr) */
-VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s);	/* codegen/vir/: s through VIR (VCC_VIR); false: emit it as before */
-VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (VCC_VIR with l, -O2) */
+VPRIV void virbuild_statistics_print(codegen_unit *E);	/* -fvir-stats: one line of totals, one per reason (stderr) */
+VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s);	/* codegen/vir/: s through VIR (-O2: cc_options.optimize.vir); false: emit it as before */
+VPRIV bool virbuild_is_enabled(const cc_options *o);	/* VIR lowers functions (-O2, and not -fno-vir or -fno-vir-lower) */
+VPRIV void virbuild_function_list_read(codegen_unit *E, const char *path);	/* -fvir-functions=FILE into E->vir_function_list */
+VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *items);	/* -fvir-passes=ITEMS (NULL: none) */
 VPRIV void virbuild_walk_context_free(codegen_context *e);
 VPRIV void wasm_data_ref(codegen_context *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr);

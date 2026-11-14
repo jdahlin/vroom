@@ -136,7 +136,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
   zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
-  (`VCC_VIR=bl`) pass example, infcover and the minigzip round trips, and
+  (`-O3`) pass example, infcover and the minigzip round trips, and
   deflate at levels 1/6/9 gives clang's bytes.  All 131 functions VIR sees
   are lowered; only `crc32_z` (inline asm) falls back.  zbench on zlib's own
   source tar, CPU time against clang -O2: vcc 1.37x, VIR 1.10x, gcc-16 0.99x
@@ -1452,6 +1452,23 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   paths, ENOENT/EACCES/ENOTDIR messages).
 
 ## Tier 4: quality
+
+- [ ] **VIR's code shape against the direct emitter's rules** [P].  Since
+  -O2 is VIR (doc/OPTIMIZATION.md), `bench/vcc-opt-rules.py` checks code shape
+  at -O0/-O1 alone (`DIRECT_LEVELS`) and `bench/vcc-tail-controls.py` runs with
+  `-fno-vir`; -O2/-O3 are compiled and run, their shape unchecked.  Where VIR
+  falls short of the rules (2026-11-13; the code is correct in each case):
+  x86-64 makes no sibling calls (`tails`, tail-controls); arm64 leaves a dead
+  `ret` after a sibling call (`tails`: the return block keeps its label, and
+  `em_rec_unreachable` treats every label as an entry); x86-64 repeats a zero
+  extension (`extensions`, `ke_index`), loads a global through `leaq`+`movl`
+  instead of a RIP-relative `movl` (`bitrules`, `br_volatile`), misses
+  `mc_u32_3`'s LEA (`mulconst`), keeps `rl_bind`'s locals and `cp_stores`'
+  copies in memory (`locals`, `copies`); arm64 `ud_pressure` (`udivconst`).
+  Others differ from the rule and are no worse (`localvalues` reuses `a+b`,
+  `unusedinit` drops an unused non-volatile load): those rules need a VIR form.
+  *Validate:* the rule passes at -O2 and -O3 (add the level to
+  `DIRECT_LEVELS`'s check, or give the rule a VIR expectation).
 
 - [ ] **IPA constant propagation.** A static function's parameter that every
   call passes the same constant is that constant in the body (clang's IPSCCP,

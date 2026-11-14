@@ -73,6 +73,7 @@ enum {
 	X64_OP_BSF, X64_OP_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X64_OP_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X64_OP_CRC32,	/* SSE4.2: r0 = crc32c(r1, low sz bytes of r2) (sz 1, 2, 4, 8; r0 32-bit unless sz 8) */
+	X64_OP_POPCNT,	/* r0 = number of one bits of r1 (sz 4, 8; POPCNT) */
 	X64_OP_EXT,		/* r0 = r1's low sz bytes extended to 64 bits (cond 1: sign) */
 	X64_OP_REP,		/* cond 0: rep movsb (rdi rsi rcx), 1: rep stosb (rdi al rcx) */
 	/* SSE (X64_OP_LD/X64_OP_ST/X64_OP_MOV take xmm registers too) */

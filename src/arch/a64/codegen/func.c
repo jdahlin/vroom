@@ -437,7 +437,7 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 	A64_RECORD_PASS_BEGIN(e);
 	for (uint32_t k = 0; k < e->record_count; k++)
 		if (e->records[k].opcode == A64_OP_NOP && e->records[k].condition == A64_NOP_PROLOGUE) {
-			if (!leaf && !bp && !e->dynamic_frame && e->frame_alignment <= 16 && !e->unit->options->debug && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c)) &&
+			if (!leaf && !bp && !e->dynamic_frame && e->frame_alignment <= 16 && !(e->unit->options->cfi && !CODEGEN_IS_DARWIN(c)) &&
 			    a64_function_is_frameless(e, k))
 				kpro = k;
 			else
@@ -549,14 +549,14 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
 		}
 		if (k == e->record_count)
 			break;
-		if (k == kpro)
-			continue;	/* (the marker) */
 		const a64_record *i = &e->records[k];
 
-		for (; dj < e->debug_row_count && e->debug_rows[dj].record_index == k; dj++)
+		for (; dj < e->debug_row_count && e->debug_rows[dj].record_index == k; dj++)	/* (at the save point's marker too: after the prologue) */
 			if (dj + 1 == e->debug_row_count || e->debug_rows[dj + 1].record_index != k)	/* the last of several at one place */
 				vtext_format_append(b, dj ? "\t.loc\t%u %u %u\n" : "\t.loc\t%u %u %u prologue_end\n",
 				     e->debug_rows[dj].file, e->debug_rows[dj].line, e->debug_rows[dj].column);
+		if (k == kpro)
+			continue;	/* (the marker) */
 		if (far && ((i->opcode == A64_OP_BC && i->condition < 14) || i->opcode == A64_OP_CBZ || i->opcode == A64_OP_CBNZ)) {
 			a64_record n = *i;
 

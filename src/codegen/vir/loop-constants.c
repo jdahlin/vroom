@@ -11,7 +11,7 @@
  * that is no immediate.  Only in a loop without calls (they would need callee-saved registers),
  * at most 6, and only as the operands named here: a call's callee and a block copy's size stay
  * constants.  This is the one place VIR hoists anything (PLAN-vir.md: no LICM in 1.0);
- * VCC_VIR_VEC=n turns it off */
+ * -fhoist-loop-constants, on at -O3 */
 VPRIV void virbuild_loop_constants_pin(virbuild_vectorize_state *S, uint32_t pre)
 {
 	codegen_context *e = S->context;

@@ -507,7 +507,10 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			E.local_register_count = CODEGEN_LOCAL_REGISTER_MAX;
 	}
 	E.stats = getenv("VCC_EMIT_STATS") != NULL;
-	E.vir_statistics = getenv("VCC_VIR_STATS") != NULL;
+	E.vir_statistics = o->vir_aid.stats;
+	virbuild_pass_switch_read(&E.vir_pass_switch, o->optimize.vir ? o->vir_aid.passes : NULL);
+	if (o->optimize.vir && o->vir_aid.functions)
+		virbuild_function_list_read(&E, o->vir_aid.functions);
 	E.record_statistics = getenv("VCC_REC_STATS") != NULL;
 	E.cleanups_disabled = getenv("VCC_NOOPT") != NULL;
 	/* wasm64: objects from the text, through arch/wasm/as */

@@ -798,7 +798,7 @@ allocator's output and tracks symbolically which value each register and slot
 holds; every operand must read its own value, on every edge. This is
 regalloc2's checker, which its author credits for the allocator's correctness
 [RA2]. It runs after allocation in test and sanitizer builds and under
-`VCC_VIR_VERIFY=1`, and `fuzz-vir` drives it with random functions and with a
+`-fvir-check`, and `fuzz-vir` drives it with random functions and with a
 random register count (2 to all), so spill paths are exercised on small
 inputs.
 
@@ -807,13 +807,13 @@ together at most 60 ns per VIR instruction, twice the builder's budget
 (22.1); zero allocator calls to `malloc`.
 
 **What to measure, with which harness:**
-- *Compile time:* `bench/vbench.py ab emit` with `VCC_VIR=1`, and
-  `VCC_VIR_STATS=1` for time per sweep; `vbench.py gate` with the flag off
+- *Compile time:* `bench/vbench.py ab emit` at `-O2` (VIR), and
+  `-fvir-stats` for time per sweep; `vbench.py gate` without VIR (`-O1`)
   stays within 0.1 % (22.8).
 - *Static quality:* instructions on the fixed TU set of V4 against today's
   `-O2`, against `clang -O2` and against `gcc -O2`, the ratio `PLAN-vir.md`
   already tracks (1.51x today on arm64).
-- *Allocator counters* from `VCC_VIR_STATS=1`, per corpus, each also weighted
+- *Allocator counters* from `-fvir-stats`, per corpus, each also weighted
   by 10 to the power of loop depth: spill stores, reloads,
   rematerializations, register moves, edge moves, edge blocks created,
   callee-saved registers per function, functions that fell back to linear
@@ -825,7 +825,7 @@ together at most 60 ns per VIR instruction, twice the builder's budget
   in 7.10 is worth building.
 - *Run time:* the stage-2 self-build (`PLAN-vir.md` V7), PostgreSQL's
   `meson test` wall time (`bench/pg/build.sh vcc`), and the C suites as
-  correctness under `VCC_VIR=1`.
+  correctness at `-O2` (`bench/vcc-ctests.py`, VIR by default).
 - *Lower bound:* V2's lowering with every value in a slot is the A side of
   every A/B.
 

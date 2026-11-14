@@ -301,7 +301,7 @@ No runtime improvement is established by this review.
 
 `vir/alloc.h` already has `vir_astats`: intra-block reload/remat/move/store counts
 and separate edge counts. Reuse these. `emit/vir/a64.c` already implements
-`VCC_VL_PROBE`; x86 needs equivalent attribution at its edit-emission sites, plus
+`VCC_VL_PROBE` (now `-fvir-probe`); x86 needs equivalent attribution at its edit-emission sites, plus
 an optional mapping from an edit to its block, value and entry-state decision.
 Keep reports opt-in and function names as diagnostic filters only.
 

@@ -26,9 +26,10 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 	const vir_insn *i = &f->insns[v];
 	bool vec = vir_type_is_vector(i->type);
 	switch (i->op) {
-	case VIR_OP_CRC32C64: case VIR_OP_AXADD: case VIR_OP_AXCHG: return true;
-	case VIR_OP_ACAS:
-		return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) == x64_vir_type_size(i->type);
+	case VIR_OP_CRC32C64: return true;
+	case VIR_OP_ACAS: case VIR_OP_AXADD: case VIR_OP_AXCHG:	/* (narrower: the instruction at its width, then an extension) */
+		return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <= x64_vir_type_size(i->type);
+	case VIR_OP_POPCNT: return true;	/* (the target's POPCNT: x64_vir_function_lower checks it) */
 	case VIR_OP_CTZ: case VIR_OP_CLZ: return (i->flags & VIR_INSN_FLAG_NZ) != 0;
 	case VIR_OP_PROJ: case VIR_OP_NOP: case VIR_OP_BPARAM: case VIR_OP_PARAM: case VIR_OP_LOAD: case VIR_OP_STORE:
 	case VIR_OP_BR: case VIR_OP_BRIF: case VIR_OP_RET: case VIR_OP_TRAP: case VIR_OP_BARRIER: case VIR_OP_CALL:
@@ -39,7 +40,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 	case VIR_OP_FNEG: case VIR_OP_FABS: case VIR_OP_FSQRT: case VIR_OP_NEG: case VIR_OP_NOT:
 		return true;
 	case VIR_OP_SDIV: case VIR_OP_UDIV: case VIR_OP_SREM: case VIR_OP_UREM: case VIR_OP_SMULHI: case VIR_OP_UMULHI: return true;
-	case VIR_OP_U2F: return f->insns[i->a].type == VIR_TYPE_I32;
+	case VIR_OP_U2F: return f->insns[i->a].type == VIR_TYPE_I32 || i->type == VIR_TYPE_F64;
 	case VIR_OP_F2U: return i->type == VIR_TYPE_I32;
 	case VIR_OP_VICMP: return i->type == VIR_TYPE_I32X4 && (i->flags & 15) < 6;
 	case VIR_OP_MUL: return !vec || i->type == VIR_TYPE_I32X4;

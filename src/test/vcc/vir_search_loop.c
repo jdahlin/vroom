@@ -1,4 +1,5 @@
-/* VIR: search loops that update a carried value under a condition (a maximum, a minimum,
+/* vcc-flags: -O3 */
+/* VIR (-O3, the loop vectorizer): search loops that update a carried value under a condition (a maximum, a minimum,
  * a maximum with its index, in two dimensions, a last match) stay branches and are not
  * vectorized as an ordered reduction alone; the results with ties, negative zero and NaN. */
 #include <stdio.h>

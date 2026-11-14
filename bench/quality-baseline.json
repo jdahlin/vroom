@@ -1,5 +1,5 @@
 {
- "redundant_tokens": 46804,
+ "redundant_tokens": 46870,
  "duplicate_runs_across_files": 251,
  "fnv_hash_files": 18,
  "realloc_calls": 98,
@@ -8,8 +8,8 @@
  "static_name_extra_definitions": 14,
  "thread_creation_sites": 4,
  "cpu_count_probes": 5,
- "thread_locals": 112,
- "environment_knobs": 69,
+ "thread_locals": 109,
+ "environment_knobs": 56,
  "files_without_header_comment": 4,
  "functions_over_300_lines": 31,
  "files_over_2000_lines": 8,

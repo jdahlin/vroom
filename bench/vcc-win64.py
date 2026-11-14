@@ -16,8 +16,8 @@ same way.  By default vcc's side is vcc's own toolchain (--own, below);
 --clang-as uses `vpp -S`, assembled by clang and linked by lld; --obj
 uses the direct `vpp -c` path, and --objcmp compares both with clang's
 assembler.  --ref-only builds and runs clang's side only (WIN0).  --vir:
-vcc's side through VIR (VCC_VIR=l: -O2's SSA path, falling back per
-function to the direct emitter).  --seh: also check every vcc object's
+vcc's side through VIR (-O2's code generator, falling back per
+function to the direct emitter); without it vcc compiles with -fno-vir.  --seh: also check every vcc object's
 unwind data (seh_check below: each function's epilogue decoded as the
 Windows unwinder does, llvm-readobj --unwind against the bytes).
 --vasm-ref checks vcc's assembler and COFF writer alone (WIN4/WIN5): clang -S of each
@@ -201,6 +201,11 @@ def sh(cmd, timeout=60, **kw):
 OBJDUMP = hostenv.llvm('llvm-objdump')
 READOBJ = hostenv.llvm('llvm-readobj')
 DWARFDUMP = hostenv.llvm('llvm-dwarfdump')
+def vir_flags():
+    """vcc's code generator at -O2: the direct emitter (-fno-vir), VIR with --vir"""
+    return [] if os.environ.get('VCC_WIN64_VIR') == '1' else ['-fno-vir']
+
+
 DEBUG = any(f.startswith('-g') and f != '-g0' for f in BASE)	# VCC_CFLAGS=-g...: the linked image's DWARF is verified
 
 
@@ -625,7 +630,7 @@ def one(t):
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'pass', '', ''
     os.makedirs(wd, exist_ok=True)
-    vfl = BASE + ct.CLFL + flags
+    vfl = BASE + ct.CLFL + flags + vir_flags()
     if OBJ or OWN:
         # --obj: vpp -c (vcc's assembler and object writer), linked and run the same way
         rc, _, err = sh([VPP, '-c'] + vfl + [path, '-o', f'{wd}/vcc.o'], cwd=cwd, **({'env': own_env()} if OWN else {}))
@@ -691,7 +696,7 @@ def objcmp(t):
     os.makedirs(wd, exist_ok=True)
     src = open(path, 'rb').read().decode('latin-1')
     flags = flags_of(suite, name, src)
-    rc, _, err = sh([VPP, '-S'] + BASE + ct.CLFL + flags + [path, '-o', f'{wd}/vcc.s'], cwd=os.path.dirname(path))
+    rc, _, err = sh([VPP, '-S'] + BASE + ct.CLFL + flags + vir_flags() + [path, '-o', f'{wd}/vcc.s'], cwd=os.path.dirname(path))
     if rc:
         return t, 'skip', 'emit', ct.first_err(err.decode(errors='replace'))
     rc, _, err = sh([CL, TGT, '-c', f'{wd}/vcc.s', '-o', f'{wd}/ref.o'])
@@ -708,7 +713,7 @@ def objcmp(t):
     a, b = open(f'{wd}/ref.o', 'rb').read(), open(f'{wd}/vas.o', 'rb').read()
     if a != b:
         return t, 'fail', 'differs', f'{len(a)} vs {len(b)} bytes'
-    rc, _, err = sh([VPP, '-c'] + BASE + ct.CLFL + flags + [path, '-o', f'{wd}/direct.o'], cwd=os.path.dirname(path))
+    rc, _, err = sh([VPP, '-c'] + BASE + ct.CLFL + flags + vir_flags() + [path, '-o', f'{wd}/direct.o'], cwd=os.path.dirname(path))
     if rc:
         return t, 'fail', 'direct', ct.first_err(err.decode(errors='replace'))
     if open(f'{wd}/direct.o', 'rb').read() != b:
@@ -816,9 +821,11 @@ def vlinkref(t):
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'skip', ref['skip'], ref['why']
     os.makedirs(wd, exist_ok=True)
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path),
+                    timeout=ct.reference_timeout(path))	# (the reference's time: branch_far takes minutes)
     if rc:
-        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+        e = err.decode(errors='replace')
+        return t, 'error', 'compile', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'clang: signal/timeout {rc}: ' + ct.first_err(e)
     obj = open(f'{wd}/ref.o', 'rb').read()
     pk = hashlib.sha1(obj + ref['key'].encode() + VLHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vlink/{suite}/{name}'
@@ -913,9 +920,11 @@ def vccrtref(t):
         shutil.rmtree(wd, ignore_errors=True)
         return t, 'skip', ref['skip'], ref['why']
     os.makedirs(wd, exist_ok=True)
-    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path))
+    rc, _, err = sh([CL] + BASE + ct.CLFL + flags + ['-c', path, '-o', f'{wd}/ref.o'], cwd=os.path.dirname(path),
+                    timeout=ct.reference_timeout(path))	# (the reference's time: branch_far takes minutes)
     if rc:
-        return t, 'error', 'compile', ct.first_err(err.decode(errors='replace'))
+        e = err.decode(errors='replace')
+        return t, 'error', 'compile', ct.first_err(e) if isinstance(rc, int) and rc > 0 else f'clang: signal/timeout {rc}: ' + ct.first_err(e)
     pk = hashlib.sha1(open(f'{wd}/ref.o', 'rb').read() + ref['key'].encode() + VLHASH.encode() + VRHASH.encode()).hexdigest()
     pf = f'{OUT}/pass-vccrt/{suite}/{name}'
     if cache_hit(pf, pk):
@@ -983,7 +992,7 @@ if __name__ == '__main__':
     vamode = '--vasm-ref' in flags
     rtmode = '--vccrt-ref' in flags
     if vir:
-        os.environ['VCC_VIR'] = 'l'	# (inherited by every vpp the workers run)
+        os.environ['VCC_WIN64_VIR'] = '1'	# (read by vir_flags in every worker)
     # the default is --own (vcc's toolchain only); --clang-as: vpp -S assembled by clang, linked by lld
     export_dir, own = None, '--own' in flags or not flags & {'--obj', '--objcmp', '--ref-only', '--vasm-ref', '--vlink-ref', '--vccrt-ref', '--clang-as'}
     for opt in ('-j', '--suite', '--show', '--export'):

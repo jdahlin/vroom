@@ -89,8 +89,8 @@ def build(name):
     shutil.rmtree(b, ignore_errors=True)
     os.makedirs(b)
     vcc = name != 'clang'
-    cc, env = (wp.VCC_CC, wp.vcc_env(name)) if vcc else (wp.CLANG_CC, wp.clang_env())
-    link = wp.VCC_LINK if vcc else wp.CLANG_LINK
+    cc, env = (wp.vcc_cc(name), wp.vcc_env(name)) if vcc else (wp.CLANG_CC, wp.clang_env())
+    link = wp.vcc_link(name) if vcc else wp.CLANG_LINK
     bad = []
     t0 = time.time()
 

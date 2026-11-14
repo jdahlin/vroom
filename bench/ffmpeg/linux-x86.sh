@@ -7,7 +7,6 @@ clang=${CLANG:-clang}
 vpp=${VPP:-$root/build/linux/src/vpp}
 resource=$("$clang" -print-resource-dir)
 multiarch=$(gcc -print-multiarch)
-export VCC_VIR=0
 mkdir -p "$work"
 cd "$work"
 archive=ffmpeg-8.1.3.tar.xz
@@ -22,7 +21,8 @@ export GIT_CEILING_DIRECTORIES=$PWD
 src=$PWD/ffmpeg-8.1.3
 # Configure discovers the reference feature set. Make invokes vpp directly for
 # all target C and host C. The configured linker driver receives objects.
-cc="$vpp --target=x86_64-linux-gnu -isystem $resource/include -isystem /usr/include/$multiarch -isystem /usr/include"
+# -fno-vir: FFmpeg's -O3 with the direct emitter (doc/OPTIMIZATION.md)
+cc="$vpp --target=x86_64-linux-gnu -fno-vir -isystem $resource/include -isystem /usr/include/$multiarch -isystem /usr/include"
 for mode in nasm noasm; do
     mkdir -p "$mode"
     (

@@ -37,7 +37,7 @@ builds them (vcc's side by `vpp -S` and clang's assembler), linked by lld
 against the MinGW sysroot and run under Wine; `/* vcc-xfail-win64: ... */`
 marks a known bug there, `/* vcc-skip-win64: reason */` a test that does not
 apply (an LP64 or System V assumption).  --vir: vcc's side through VIR
-(VCC_VIR=l).  The tests under src/test/abi/msabi* also run natively on an
+(-O2's code generator; without it -fno-vir, the direct emitter, for x86_64 and win64).  The tests under src/test/abi/msabi* also run natively on an
 x86-64 Linux host (--target x86_64): ms_abi functions against clang.
 """
 import importlib.util, os, re, shutil, sys, tempfile
@@ -53,6 +53,7 @@ WASM = None	# the vcc-wasm.py module, with its target set, for --target wasm64/w
 X86 = None	# the vcc-x86.py module, for --target x86_64
 W64 = None	# the vcc-win64.py module, for --target win64
 VLINK = False
+VIRFL = []	# vcc's flags for its code generator: -fno-vir for --target x86_64/win64 without --vir
 HOSTFL = ['-O2', '-fno-stack-protector']
 
 
@@ -61,7 +62,7 @@ def compile_(cc, src, obj, inc):
     flags, _ = ct.exec_marks(open(src).read())
     base = [*base, *flags]
     if (X86 or W64) and cc != 'clang':
-        rc, _, err = ct.sh([ct.VPP, '-S'] + base + ['-I', inc, src, '-o', obj + '.s'])
+        rc, _, err = ct.sh([ct.VPP, '-S'] + base + VIRFL + ['-I', inc, src, '-o', obj + '.s'])
         if not rc:
             rc, _, err = ct.sh([ct.CL, (X86 or W64).TGT, '-c', obj + '.s', '-o', obj])
         return rc, err.decode(errors='replace')
@@ -166,9 +167,11 @@ def main():
         del av[i:i + 2]
         if t not in ('wasm64', 'wasm32', 'x86_64', 'win64'):
             sys.exit(f'vcc-abi: --target {t}: wasm64, wasm32, x86_64 or win64')
+        global VIRFL
         if '--vir' in av:
             av.remove('--vir')
-            os.environ['VCC_VIR'] = 'l'
+        elif t in ('x86_64', 'win64'):
+            VIRFL = ['-fno-vir']
         if t == 'win64':
             global W64
             spec = importlib.util.spec_from_file_location('vw64', f'{B}/vcc-win64.py')

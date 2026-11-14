@@ -39,6 +39,21 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 	const vir_block *k = &f->blocks[b];
 	uint32_t pos = o->block_offsets[b], ei = o->block_offsets[f->block_count + 1 + b], eend = o->block_offsets[f->block_count + 2 + b];
 	uint32_t first = k->first + (t->params_in_loop ? 0 : k->parameter_count), last = k->first + k->insn_count;
+	uint32_t run = 0;	/* -g: the run of f->locations of instruction i (the last that starts at or before it) */
+
+	if (d->row && f->location_count) {
+		uint32_t lo = 0, hi = f->location_count;
+
+		while (hi - lo > 1) {
+			uint32_t m = lo + (hi - lo) / 2;
+
+			if (f->locations[m].first <= first)
+				lo = m;
+			else
+				hi = m;
+		}
+		run = lo;
+	}
 
 	t->block_begin(ctx, b);
 	if (!t->params_in_loop)
@@ -58,6 +73,14 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 
 		if (d->skip_at && i == *d->skip_at)
 			break;
+		if (d->row && f->location_count) {	/* (before the edits: they are this instruction's) */
+			bool start = i == first;
+
+			while (run + 1 < f->location_count && f->locations[run + 1].first <= i)
+				run++, start = true;
+			if (start && f->locations[run].first <= i)
+				d->row(d->row_e, f->locations[run].source_location);
+		}
 		virbuild_edits(d, &ei, eend, i);
 		vir_operand_iterator_init(&it, f, &x, false);
 		if (t->skip_multi_operands) {
@@ -89,29 +112,13 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
 		t->block_end(ctx, b);
 }
 
-/* VCC_VIR_ROT=0 keeps VIR's block order */
-static bool virbuild_rotation_wanted(bool cached)
-{
-	static int once = -1;
-
-	if (!cached || once < 0) {
-		const char *s = getenv("VCC_VIR_ROT");
-		int v = !(s && *s == '0');
-
-		if (!cached)
-			return v;
-		once = v;
-	}
-	return once;
-}
-
 VPRIV void virbuild_lower_body(const virbuild_lowering *d)
 {
 	const virbuild_lowering_target *t = d->target;
 	vir_function *f = d->f;
 
 	vir_layout_chases_compute(f, d->o, d->chase, d->path);
-	vir_layout_order(f, d->lp, d->chase, virbuild_rotation_wanted(t->rotation_cached) && d->optimize, d->order, d->position, d->rotation);
+	vir_layout_order(f, d->lp, d->chase, d->rotate && d->optimize, d->order, d->position, d->rotation);
 	if (t->order_adjust)
 		t->order_adjust(d->ctx);
 	if (t->body_begin)

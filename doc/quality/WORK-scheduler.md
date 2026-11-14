@@ -378,7 +378,7 @@ more often (LIFO).
 `VCC_THREADS=8` (the two lld image cases of stage 1; the
 `vcc-threads-same` cases pass); `vcc-same.py --base` (stage 1's vpp, both at
 `VCC_THREADS=8`) 6519/6519 identical for c0, c2, s2 and 2173/2173 for c2
-with `VCC_VIR=1`; TSan: `vcc-ctests.py --suite vcc` 324/326 (same two),
+with `-O3 -fno-vir-lower` (VIR built, not lowered); TSan: `vcc-ctests.py --suite vcc` 324/326 (same two),
 `vcc-cbatch.py` with `VCC_THREADS=4` 840/840, 0 reports.  Measurements
 (load 4.1-4.8, stage 1 as base): C (sqlite3.c `-O2 -c`) unchanged within
 1 % at 1/4/8 threads, direct and VIR, objects identical; B (`batch -j 6
