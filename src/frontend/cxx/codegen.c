@@ -114,6 +114,7 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 }
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
+static uint32_t cxx_gen_dtor_sym(const cxx_entity *d);
 static bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
 static bool cxx_gen_value_ok(cxx *c, qty t);
 static bool cxx_gen_by_address(cxx *c, qty t);
@@ -206,16 +207,15 @@ static bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 	cxx_scope *cls;
 	bool pod, empty;
 
-	if (t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != TY_STRUCT && AST_TYPE_KIND(a, t) != TY_UNION) ||
-	    !cxx_class_layout_info(c, t, &pod, &empty) || !(a->tags[AST_TYPE(a, t)->aux].flags & RF_COMPLETE))
-		return false;
+#define CK(x, why) do { if (x) return false; } while (0)	/* (why: what VCC_CXX_GEN would say) */
+	CK(t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != TY_STRUCT && AST_TYPE_KIND(a, t) != TY_UNION), "kind");
+	CK(!cxx_class_layout_info(c, t, &pod, &empty), "layout");
+	CK(!(a->tags[AST_TYPE(a, t)->aux].flags & RF_COMPLETE), "incomplete");
 	if (pod)
 		return true;
 	cls = cxx_tag_scope_get(c, QUNQ(t));
-	if (!cls || cls->has_dependent_base)
-		return false;
-	if (cxx_class_polymorphic(c, t) && (!objects || !cxx_vtable_usable(c, cls)))
-		return false;
+	CK(!cls || cls->has_dependent_base, "dependent base");
+	CK(cxx_class_polymorphic(c, t) && (!objects || !cxx_vtable_usable(c, cls)), "vtable");
 	{
 		qty bases[16];
 		uint32_t nb = cxx_class_bases(c, t, bases, 16);
@@ -232,8 +232,8 @@ static bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft)) {
 			if (!cxx_gen_class_ok2(c, ft, objects))
 				return false;
-		} else if (!cxx_gen_type_ok(c, ft))
-			return false;	/* (a reference member is a pointer in the object: its referent's type must do) */
+		} else
+			CK(!cxx_gen_type_ok(c, ft), "field type");	/* (a reference member is a pointer in the object: its referent's type must do) */
 	}
 	return true;
 }
@@ -448,7 +448,7 @@ static uint32_t cxx_gen_class_temp(cxx *c, qty t, uint32_t loc)
 		attrs at;
 
 		memset(&at, 0, sizeof at);
-		at.cleanup = dtor->sym1;
+		at.cleanup = cxx_gen_dtor_sym(dtor);
 		cc_attribute_apply_symbol(a, &a->syms[s], &at);
 		c->gen_block_temps++;
 	}
@@ -866,6 +866,15 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 	}
 	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))
 		c->enode = cxx_gen_referent(c, c->enode, loc);
+}
+
+/* the symbol a complete object's destruction calls: D2 for an inline destructor (a class without virtual
+   bases: D1 does the same, and clang defines only D2 where it is inline, std::map's ~map), D1 otherwise */
+static uint32_t cxx_gen_dtor_sym(const cxx_entity *d)
+{
+	bool inl = d->fn_inline || (d->member_of && d->member_of->owner && d->member_of->owner->instance);
+
+	return inl && d->sym ? d->sym : d->sym1;
 }
 
 /* is the scope in an unnamed namespace (itself one, or inside one: its names have internal linkage) */
@@ -1969,7 +1978,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		/* (a constructor or destructor: the complete object's; a base subobject's: the base object's, C2/D2) */
 		bool base_obj = c->gen_base_type && cxx_gen_is_special(f) && f->member_of && f->member_of->owner &&
 				QUNQ(f->member_of->owner->ty) == c->gen_base_type;
-		uint32_t target = base_obj ? f->sym : f->sym1 ? f->sym1 : f->sym;
+		uint32_t target = base_obj ? f->sym : !f->sym1 ? f->sym : cxx_gen_is_special(f) && vintern_ents[f->name].s[1] == 'd' ? cxx_gen_dtor_sym(f) : f->sym1;
 
 		if (base_obj)
 			c->gen_base_type = 0;
@@ -3265,7 +3274,7 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 			return;
 		}
 		memset(&at, 0, sizeof at);
-		at.cleanup = dtor->sym1;
+		at.cleanup = cxx_gen_dtor_sym(dtor);
 		cc_attribute_apply_symbol(a, &a->syms[s], &at);
 	} else if (cxx_gen_needs_destruction(c, t, 0)) {
 		cxx_gen_fail(c);	/* (an implicit destructor that destroys members: not built yet) */
@@ -4203,7 +4212,7 @@ VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
 		if (cxx_gen_needs_destruction(c, t, 0)) {
 			if (!d || d->fn_deleted || !cxx_gen_name(c, d) || !d->sym1 || (cxx_member_body_use(c, d), 0))
 				return;
-			dtor = d->sym1;
+			dtor = cxx_gen_dtor_sym(d);
 		}
 	} else
 		init = cc_assignment_build(a, 0, target, cc_node_rvalue(a, x), loc);
@@ -4879,7 +4888,7 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, qty t, const uint3
 			a->syms[c->gen_atexit_sym].depth = 0;
 			c->gen_dso_sym = cxx_gen_data_symbol(c, "__dso_handle", 0);
 		}
-		ar[0] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, dtor->sym1, loc));
+		ar[0] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, cxx_gen_dtor_sym(dtor), loc));
 		ar[1] = cxx_gen_to_void_pointer(c, cc_address_of_build(a, cxx_gen_var_node(c, v->sym, loc), loc));
 		ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
 		cc_id_list_append(a, c->ginit_list, cc_statement_new(a, N_EXPR, loc, cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));

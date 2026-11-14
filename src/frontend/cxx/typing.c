@@ -618,7 +618,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 
 			for (uint32_t d = 0; d < ncand && !dup; d++)
 				if (!k->tmpl && !cand[d].tmpl && cand[d].e->ty == e->ty && e->ty != CXX_TY_UNKNOWN &&
-				    cand[d].e->member_of == e->member_of && cand[d].e->home == e->home && cand[d].e->name == e->name) {
+				    cand[d].e->member_of == e->member_of && cand[d].e->home == e->home && cand[d].e->name == e->name &&
+				    cand[d].e->fn_const == e->fn_const) {	/* (f() and f() const: two functions of one type here) */
 					dup = true;
 					if (!cand[d].e->sym && e->sym)
 						cand[d].e = e;

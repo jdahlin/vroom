@@ -1566,3 +1566,16 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   doctest:s `asm("int $3")` och try/catch.
 - Test: initializer-lists.cpp; run 64/64.  Fork: 69/70 (unit-32bit faller även med clang), 5,2 s CPU,
   46,5x; vcc definierar 3 368 funktioner (förut 3 205), 15 testkroppar.
+
+### Status 69 (2026-11-14): partiella specialiseringar, const-överlagring, D2 för inline-destruktorer
+
+- En partiell specialisering deklarerad efter att en annan använts gjorde att den första slutade matcha
+  (mallens lista av partialer realloc:ades, instanserna höll pekare in i den): `pointer_traits<T*>`
+  efter `<ostream>`, så `std::set`, `std::map` m.fl. fick ingen layout i testerna.  Varje partial
+  allokeras nu för sig.  Test: partial-later.cpp.
+- `f()` och `f() const` slogs ihop som en omdeklaration (samma funktionstyp i AST:n): ett icke-const
+  objekt anropade const-versionen.  Test: const-overloads.cpp.
+- En komplett objekts destruktion anropar D2 för en inline-destruktor (som clang, som bara definierar
+  D2 där), D1 annars.
+- Run 66/66, parse 38/38, mangle 36.  Fork: 69/70, 6,7 s CPU (36x mot clang -O2:s 243 s); vcc definierar
+  20 918 funktioner (förut 3 528) av clang -O0:s 145 428, 16 av 118 testkroppar.

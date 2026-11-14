@@ -38,7 +38,7 @@ typedef struct cxx_partial {
 } cxx_partial;
 
 struct cxx_template {
-	cxx_partial *partials;
+	cxx_partial **partials;	/* (each allocated on its own: instances keep pointers to the one they were made from) */
 	uint32_t npartials;
 	cxx_scope *params;	/* the template scope: its parameters (NULL until defined) */
 	cxx_scope *declared;	/* an earlier declaration's template scope: default arguments may be there */
@@ -128,11 +128,11 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 		return;
 	t = cxx_template_of(e);
 	t->has_partial = 1;
+	cxx_partial *np = calloc(1, sizeof *np);
+
 	t->partials = realloc(t->partials, (t->npartials + 1) * sizeof *t->partials);
-	memset(&t->partials[t->npartials], 0, sizeof *t->partials);
-	t->partials[t->npartials].params = params, t->partials[t->npartials].home = home;
-	t->partials[t->npartials].less_pos = less_pos, t->partials[t->npartials].key_pos = key_pos;
-	t->partials[t->npartials].req_pos = req_pos;
+	np->params = params, np->home = home, np->less_pos = less_pos, np->key_pos = key_pos, np->req_pos = req_pos;
+	t->partials[t->npartials] = np;
 	t->npartials++;
 }
 
@@ -351,6 +351,7 @@ VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len)
 
 typedef struct cxx_saved {
 	uint32_t pos, template_depth, in_template_args, implicit_typename, class_depth, nlate, name_path_len, explicit_specialization;
+	uint32_t layout_attributes;	/* (an instance's own attributes are not the enclosing class's: alignas in it) */
 	cxx_scope *scope;
 	jmp_buf *fail;
 	struct cxx_class_build *build;
@@ -366,6 +367,7 @@ static void cxx_state_save(cxx *c, cxx_saved *s)
 	s->pos = c->pos, s->template_depth = c->template_depth, s->in_template_args = c->in_template_args;
 	s->implicit_typename = c->implicit_typename, s->class_depth = c->class_depth, s->nlate = c->nlate;
 	s->scope = c->scope, s->fail = c->fail, s->build = c->build, s->explicit_specialization = c->explicit_specialization;
+	s->layout_attributes = c->layout_attributes;
 	s->name_path_len = c->name_path_len, s->name_path_valid = c->name_path_valid;
 	memcpy(s->name_path, c->name_path, c->name_path_len);
 	s->target2 = c->instantiation_template;
@@ -379,6 +381,7 @@ static void cxx_state_restore(cxx *c, const cxx_saved *s)
 	c->pos = s->pos, c->template_depth = s->template_depth, c->in_template_args = s->in_template_args;
 	c->implicit_typename = s->implicit_typename, c->class_depth = s->class_depth, c->nlate = s->nlate;
 	c->scope = s->scope, c->fail = s->fail, c->explicit_specialization = s->explicit_specialization;
+	c->layout_attributes = s->layout_attributes;
 	while (c->build != s->build) {	/* (classes an error left open) */
 		struct cxx_class_build *b = c->build;
 
@@ -1146,7 +1149,7 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 	cxx_targ tmp[64];
 
 	for (uint32_t i = 0; i < t->npartials; i++) {
-		cxx_partial *p = &t->partials[i];
+		cxx_partial *p = t->partials[i];
 
 		cxx_partial_evaluate(c, p);
 		if (!p->ok || p->params->ntparams > 64 || !cxx_partial_complete(c, p, t->params ? t->params : t->declared, t->declared, n)) {
