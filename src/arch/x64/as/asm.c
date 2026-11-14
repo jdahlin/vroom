@@ -370,7 +370,7 @@ VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx)
 
 VPRIV int x64_emit(as_context *a, XForm *f)
 {
-	uint8_t bytes[24], *out = bytes;
+	uint8_t bytes[24];
 	const XOp *rm = f->rm;
 	int rex = 0x40 | (f->w ? 8 : 0) | (f->reg & 8 ? 4 : 0) | (f->oreg && (f->oreg - 1) & 8 ? 1 : 0);
 	int seg = rm && rm->kind != XK_REG ? rm->seg : 0;
@@ -430,6 +430,16 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 			}
 		}
 	}
+	/* Most instructions fit in the current chunk. Encode there and commit
+	 * only the bytes used. At a chunk boundary grow by the exact length. */
+	uint32_t fr = a->fragment_current;
+	elf_code(a->object, fr);
+	ElfFrag *frag = elf_frag(a->object, fr);
+	ElfChunk *chunk = frag->tail;
+	uint64_t off = frag->size;
+	bool direct = chunk && chunk->cap - chunk->used >= sizeof bytes + 4 + 8;
+	uint8_t *p = direct ? chunk->data + chunk->used : bytes;
+	uint8_t *out = p;
 	if (seg)
 		*out++ = seg;
 	if (rm && rm->kind == XK_MEM && rm->addr32)
@@ -481,12 +491,15 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 
 	/* All lengths are now known. Write the displacement and immediate straight
 	 * into the fragment, at the same offsets used by the relocations. */
-	uint32_t fr = a->fragment_current;
-	size_t head = (size_t)(out - bytes);
-	elf_code(a->object, fr);
-	uint64_t off = elf_frag(a->object, fr)->size;
-	uint8_t *p = elf_grow(a->object, fr, head + dispsz + f->isz);
-	memcpy(p, bytes, head);
+	size_t head = (size_t)(out - p);
+	size_t length = head + dispsz + f->isz;
+	if (direct) {
+		chunk->used += (uint32_t)length;
+		frag->size += length;
+	} else {
+		p = elf_grow(a->object, fr, length);
+		memcpy(p, bytes, head);
+	}
 	if (dispsz) {
 		x64_field_store(p + head, dsym ? 0 : disp, dispsz);
 		if (dsym) {

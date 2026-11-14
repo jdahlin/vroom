@@ -28,7 +28,6 @@
 	X(register_variable_address, "VIR: the address of a register variable") \
 	X(unsupported_operator, "VIR: this operator") \
 	X(float_extension, "VIR: extension of a float") \
-	X(switch_bit_set, "VIR: switch bit set") \
 	X(wide_integer, "VIR: __int128") \
 	X(bit_precise_integer, "VIR: _BitInt") \
 	X(unsupported_floating_type, "VIR: this floating type") \

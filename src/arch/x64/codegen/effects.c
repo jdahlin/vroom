@@ -91,6 +91,7 @@ static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
 	[X64_OP_NAMED] = X_DESC(0, RECORD_EFFECT_LABEL | RECORD_EFFECT_BARRIER),
 	/* Undefined destination for zero input is conservatively an old value. */
 	[X64_OP_BSF] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
+	[X64_OP_POPCNT] = X_DESC(X_D | X_U, X_P | X_W),
 	[X64_OP_BSR] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P | X_W),
 	[X64_OP_BSWAP] = X_DESC(X_D | RECORD_OPERAND_USES_0 | X_U, X_P),
 	[X64_OP_EXT] = X_DESC(X_D | X_U, X_P),
@@ -253,6 +254,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X64_OP_JTE] = RECORD_FLOW_ENTRY,
 		[X64_OP_NAMED] = RECORD_FLOW_ENTRY,
 		[X64_OP_BSF] = RECORD_FLOW_NEXT,
+		[X64_OP_POPCNT] = RECORD_FLOW_NEXT,
 		[X64_OP_BSR] = RECORD_FLOW_NEXT,
 		[X64_OP_BSWAP] = RECORD_FLOW_NEXT,
 		[X64_OP_CRC32Q] = RECORD_FLOW_NEXT,

@@ -111,7 +111,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i, uint8_
 		a64_record_emit_three_registers(e, A64_OP_CLZ, x, rd, rd, 0);
 		return;
 	case VIR_OP_POPCNT:
-		a64_record_emit_word(e, a64_word_fmov_to_vector(1, 31, a64_vir_operand_general_register(L, 0, R_X16)));
+		a64_record_emit_word(e, a64_word_fmov_to_vector(x, 31, a64_vir_operand_general_register(L, 0, R_X16)));
 		a64_record_emit_word(e, 0x0e205800u | 31u << 5 | 31u);	/* cnt v31.8b, v31.8b */
 		a64_record_emit_word(e, 0x0e31b800u | 31u << 5 | 31u);	/* addv b31, v31.8b */
 		a64_record_emit_word(e, a64_word_fmov_from_vector(0, rd, 31));
