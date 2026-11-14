@@ -1374,6 +1374,33 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with promotable two-word copies (2026-11-14).** In five pinned
+compiles, codegen_integer_truncate and cc_constant_truncate spent most of
+their exclusive cycle samples at the vector copy immediately after two
+scalar stores. Clang kept the words in general-purpose registers. VIR now
+represents a nonvolatile 16-byte copy between known frame addresses as
+two word loads followed by two word stores. Slot promotion can then forward
+the words across copies, including copies at nonzero offsets.
+
+| Function | Self-hosted exclusive cycle samples, before / after | Clang-built, before / after | Self-hosted movups instructions, before / after |
+| --- | ---: | ---: | ---: |
+| codegen_integer_truncate | 317 / 74 | 9 / 4 | 4 / 0 |
+| cc_constant_truncate | 76 / 22 | 3 / 9 | 4 / 0 |
+| em_bin_identity | 71 / 19 | 16 / 15 | 40 / 4 |
+
+The profile used perf cycles:u with period 75,001. Counts are per function
+symbol and exclude inlined work attributed to callers.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 171.34 / 168.11 ms | 137.27 / 137.65 ms | 1.248× / 1.221× |
+| 21 runs alternating order | 172.92 / 169.51 ms | 138.81 / 139.56 ms | 1.246× / 1.215× |
+
+One emitter thread on CPU 7, warm-up excluded. The rotating round retired
+4.47M fewer instructions self-hosted. All four binaries emitted the same
+object (SHA-256 prefix c4d3896fefc9), and the recursive-query test passed.
+Bootstrap stage 2 and stage 3 objects matched byte for byte.
+
 **SQLite with returns_twice in x86 VIR (2026-11-14).** Direct calls to
 setjmp and functions declared returns_twice now evict live registers at the call.
 Each spilled SSA value has a private slot in these functions, since longjmp can
