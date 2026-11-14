@@ -3,17 +3,23 @@
 
 /* ---------------- two-address form ---------------- */
 
-/* ops whose result must be their first operand on x86 */
-static bool x64_record_is_tied(int op)
-{
-	return (op >= X64_OP_ADD && op <= X64_OP_SBB) || (op >= X64_OP_ADDI && op <= X64_OP_XORI) || (op >= X64_OP_SHLI && op <= X64_OP_SAR) ||
-	       op == X64_OP_NEG || op == X64_OP_NOT || op == X64_OP_BSWAP || op == X64_OP_CRC32Q || op == X64_OP_CMOV || (op >= X64_OP_FADD && op <= X64_OP_FXOR);
-}
-
-static bool x64_operation_is_commutative(int op)
-{
-	return op == X64_OP_ADD || op == X64_OP_AND || op == X64_OP_OR || op == X64_OP_XOR || op == X64_OP_IMUL || op == X64_OP_FADD || op == X64_OP_FMUL || op == X64_OP_FXOR;
-}
+/* Operand constraints indexed by the record's byte-sized opcode. */
+enum { X64_TIED = 1, X64_TIED_COMMUTATIVE };
+static const uint8_t x64_two_address_kind[256] = {
+	[X64_OP_ADD] = X64_TIED_COMMUTATIVE, [X64_OP_SUB] = X64_TIED,
+	[X64_OP_AND] = X64_TIED_COMMUTATIVE, [X64_OP_OR] = X64_TIED_COMMUTATIVE,
+	[X64_OP_XOR] = X64_TIED_COMMUTATIVE, [X64_OP_IMUL] = X64_TIED_COMMUTATIVE,
+	[X64_OP_ADC] = X64_TIED, [X64_OP_SBB] = X64_TIED,
+	[X64_OP_ADDI] = X64_TIED, [X64_OP_SUBI] = X64_TIED, [X64_OP_ANDI] = X64_TIED,
+	[X64_OP_ORI] = X64_TIED, [X64_OP_XORI] = X64_TIED,
+	[X64_OP_SHLI] = X64_TIED, [X64_OP_SHRI] = X64_TIED, [X64_OP_SARI] = X64_TIED,
+	[X64_OP_SHL] = X64_TIED, [X64_OP_SHR] = X64_TIED, [X64_OP_SAR] = X64_TIED,
+	[X64_OP_NEG] = X64_TIED, [X64_OP_NOT] = X64_TIED, [X64_OP_BSWAP] = X64_TIED,
+	[X64_OP_CRC32Q] = X64_TIED, [X64_OP_CMOV] = X64_TIED,
+	[X64_OP_FADD] = X64_TIED_COMMUTATIVE, [X64_OP_FSUB] = X64_TIED,
+	[X64_OP_FMUL] = X64_TIED_COMMUTATIVE, [X64_OP_FDIV] = X64_TIED,
+	[X64_OP_FXOR] = X64_TIED_COMMUTATIVE
+};
 
 /*
  * r0 = r1 op r2 as x86 has it, r0 = r0 op r2: a mov in front when r0 != r1;
@@ -31,31 +37,36 @@ VPRIV void x64_two_address_convert(codegen_context *e)
 
 	X->frame_free = x64_framefree_candidate(e);
 	for (uint32_t k = 0; k < X->record_count; k++) {
-		record i = X->records[k];
+		const record *i = &X->records[k];
 
 		if (e->debug_row_count)
 			codegen_debug_rows_remap(e, &j, k, n);	/* (-g rows: to the first record emitted for k) */
-		if (copies && i.opcode == X64_OP_MOV && x64_copy_forward_at(e, k))
+		if (copies && i->opcode == X64_OP_MOV && x64_copy_forward_at(e, k))
 			continue;
-		if (X->frame_free && !x64_framefree_record(e, &i))
+		if (X->frame_free && !x64_framefree_record(e, i))
 			X->frame_free = false;
-		if (x64_record_is_tied(i.opcode) && i.registers[0] != i.registers[1]) {
-			if (i.registers[2] != X64_REGISTER_NONE && i.registers[0] == i.registers[2]) {
-				if (x64_operation_is_commutative(i.opcode)) {
-					i.registers[2] = i.registers[1];
-				} else {
-					int t = X64_REGISTER_IS_XMM(i.registers[2]) ? XMM15 : R11;
-
-					o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { (uint8_t)t, i.registers[2], X64_REGISTER_NONE, X64_REGISTER_NONE } };
-					o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { i.registers[0], i.registers[1], X64_REGISTER_NONE, X64_REGISTER_NONE } };
-					i.registers[2] = (uint8_t)t;
-				}
-			} else {
-				o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { i.registers[0], i.registers[1], X64_REGISTER_NONE, X64_REGISTER_NONE } };
-			}
-			i.registers[1] = i.registers[0];
+		unsigned kind = x64_two_address_kind[i->opcode];
+		if (!kind || i->registers[0] == i->registers[1]) {
+			o[n++] = *i;
+			continue;
 		}
-		o[n++] = i;
+		uint8_t rhs = i->registers[2];
+		if (i->registers[2] != X64_REGISTER_NONE && i->registers[0] == i->registers[2]) {
+			if (kind == X64_TIED_COMMUTATIVE) {
+				rhs = i->registers[1];
+			} else {
+				int t = X64_REGISTER_IS_XMM(i->registers[2]) ? XMM15 : R11;
+
+				o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { (uint8_t)t, i->registers[2], X64_REGISTER_NONE, X64_REGISTER_NONE } };
+				o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { i->registers[0], i->registers[1], X64_REGISTER_NONE, X64_REGISTER_NONE } };
+				rhs = (uint8_t)t;
+			}
+		} else {
+			o[n++] = (record){ .opcode = X64_OP_MOV, .size = 8, .registers = { i->registers[0], i->registers[1], X64_REGISTER_NONE, X64_REGISTER_NONE } };
+		}
+		o[n] = *i;
+		o[n].registers[1] = i->registers[0];
+		o[n++].registers[2] = rhs;
 	}
 	if (e->debug_row_count)
 		codegen_debug_rows_remap(e, &j, UINT32_MAX, n);
