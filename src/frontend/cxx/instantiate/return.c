@@ -81,6 +81,7 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
 	c->sig_pack_types = NULL, c->sig_pack_n = UINT32_MAX;	/* (no pack of its own: not one a failed parse before left) */
 	if (want_body)
 		c->unevaluated = 0;	/* (the body is evaluated code, whatever the call was in) */
+	cxx_entity *outer_gen_instance = c->gen_instance;	/* (an enclosing signature's, being parsed: kept) */
 	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
@@ -95,7 +96,7 @@ VPRIV qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, b
 			body = cxx_member_template_ooc_body(c, f, inst, bind, np, UINT32_MAX, NULL, 0);	/* (defined outside its class) */
 	} else
 		c->stats.bodies_failed++;
-	c->gen_instance = NULL;
+	c->gen_instance = outer_gen_instance;
 	c->body_depth--;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
@@ -207,6 +208,7 @@ VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xa
 			c->stats.body_depth_max = c->body_depth;
 	}
 	c->sig_pack_types = ptypes, c->sig_pack_n = pn;	/* (the signature with the pack expanded; in a body, the pack of values) */
+	cxx_entity *outer_gen_instance = c->gen_instance;	/* (an enclosing signature's, being parsed: kept) */
 	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
@@ -229,7 +231,7 @@ VPRIV qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xa
 		if (want_body)
 			c->stats.bodies_failed++;
 	}
-	c->gen_instance = NULL;
+	c->gen_instance = outer_gen_instance;
 	c->instantiating--, c->body_depth--;
 	{
 		qty sig = c->bound_sig;

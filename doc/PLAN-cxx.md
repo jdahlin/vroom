@@ -1910,3 +1910,10 @@ std::map::emplace/operator[] med bara vcc: två orsaker kvar.  (1) Beroende på 
 (allocator_traits/construct_at) får den ingen typ (anropet byggs inte); skapas den först i vanlig kod går
 det.  (2) I `__tree::__emplace_unique`:s andra lambda (`[this](_Args&&... __args2)`) blir `__args2`
 otypat, trots att samma form fungerar i reducerade fall.  Båda nästa steg.
+
+## Status 108 (2026-11-14)
+Funktionsmallsinstansiering återställer `c->gen_instance` (förut nollställd): en instansiering mitt i en
+annan instans signatur (`explicit(!__is_implicit<...>())` i pair:s konstruktor) gjorde att den yttre
+instansen aldrig fick sin typ, beroende på vilken kod som först namngav den.  `construct_at<pair<const int,
+int>, int, int>` byggs nu i std::map:s väg.  Kvar för map: lambdan med `__args2`; fold-uttryck
+(`(a + ...)`) saknas.  cxx-strict 330.
