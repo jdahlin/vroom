@@ -104,7 +104,6 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 {
 	uint32_t fid = *(const uint32_t *)p;
 	const record *in = (const record *)(p + 8);
-	static const char *const ccname[] = { "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g" };
 	static const enum X64Op integer_op[] = {
 		[X64_OP_ADD]=X64O_ADD, [X64_OP_ADDI]=X64O_ADD, [X64_OP_SUB]=X64O_SUB, [X64_OP_SUBI]=X64O_SUB,
 		[X64_OP_AND]=X64O_AND, [X64_OP_ANDI]=X64O_AND, [X64_OP_OR]=X64O_OR, [X64_OP_ORI]=X64O_OR,
@@ -167,20 +166,29 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 		case X64_OP_NEG: case X64_OP_NOT: mn=i->opcode==X64_OP_NEG?"neg":"not"; o[0]=o[1]; count=1; break;
 		case X64_OP_CMP: op=X64O_CMP; mn="cmp"; o[1]=o[0]; x64_encode_register(&o[0], i->registers[2],sz); break;
 		case X64_OP_CMPI: op=X64O_CMP; mn="cmp"; o[1]=o[0]; o[0]=x64_encode_immediate(i->immediate); break;
-		case X64_OP_TEST: mn="test"; o[1]=o[0]; break;
-		case X64_OP_CMOV: snprintf(name,sizeof name,"cmov%s",ccname[i->condition]); mn=name; x64_encode_register(&o[0], i->registers[2],sz); break;
+		case X64_OP_TEST: op = X64O_TEST; o[1] = o[0]; break;
+		case X64_OP_CMOV:
+			x64_encode_register(&o[0], i->registers[2], sz);
+			if (as_x64_condition(R->assembler, X64O_CMOV, i->condition, sz, o)) return -1;
+			continue;
 		case X64_OP_SETCC:
-			snprintf(name,sizeof name,"set%s",ccname[i->condition]); x64_encode_register(&o[0], i->registers[0],1);
-			if (x64_encode_instruction(R,name,0,o,1)) return -1;
-			mn="movzbl"; sz=0; x64_encode_register(&o[1], i->registers[0],4); break;
+			x64_encode_register(&o[0], i->registers[0], 1);
+			if (as_x64_condition(R->assembler, X64O_SETCC, i->condition, 1, o)) return -1;
+			x64_encode_register(&o[1], i->registers[0], 4);
+			op = X64O_MOVZX; sz = 1; break;
 		case X64_OP_JMP: case X64_OP_JCC: case X64_OP_LEAL:
 			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,x64_encode_label(R,fid,i->label),0),.hasv=1 };
 			if (i->opcode==X64_OP_LEAL) { op=X64O_LEA;sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
-			else { snprintf(name,sizeof name,"j%s",i->opcode==X64_OP_JMP?"mp":ccname[i->condition]);mn=name;sz=0;count=1; } break;
-		case X64_OP_CALL:
-			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,codegen_commit_symbol_find(R,i->reference),0),.hasv=1 };
-			if(R->compile_context->o->pic&&(CODEGEN_REFERENCE_KIND(i->reference)==CODEGEN_REFERENCE_NAME||codegen_symbol_needs_got(R->compile_context,i->reference)))o[0].mod=XM_PLT;
+			else {
+				if (as_x64_direct_branch(R->assembler, i->opcode == X64_OP_JMP ? 16 : i->condition, o)) return -1;
+				continue;
+			}
 			break;
+		case X64_OP_CALL:
+			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,codegen_commit_symbol_find(R,i->reference),0),.hasv=1 };
+			if(R->compile_context->o->pic&&(CODEGEN_REFERENCE_KIND(i->reference)==CODEGEN_REFERENCE_NAME||codegen_symbol_needs_got(R->compile_context,i->reference)))o[0].mod=XM_PLT;
+			if (as_x64_direct_branch(R->assembler, -1, o)) return -1;
+			continue;
 		case X64_OP_CALLR: case X64_OP_JMPR: mn=i->opcode==X64_OP_CALLR?"callq":"jmpq";sz=0;count=1;x64_encode_register(&o[0], i->registers[1],8);o[0].star=1;break;
 		case X64_OP_PUSH: case X64_OP_POP: mn=i->opcode==X64_OP_PUSH?"pushq":"popq";sz=0;count=1;x64_encode_register(&o[0], i->opcode==X64_OP_PUSH?i->registers[1]:i->registers[0],8);break;
 		case X64_OP_CQO: mn=sz==8?"cqto":"cltd";sz=0;count=0;break;

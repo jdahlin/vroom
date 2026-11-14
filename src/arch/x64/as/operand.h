@@ -27,6 +27,12 @@ typedef struct {
 int as_x64_insn(as_context *a, char *mn, XOp *o, int nops);
 /* ALU values are the x86 encoding's group digits. */
 enum X64Op { X64O_ADD, X64O_OR, X64O_ADC, X64O_SBB, X64O_AND,
-	X64O_SUB, X64O_XOR, X64O_CMP, X64O_MOV, X64O_LEA, X64O_MOVSX, X64O_MOVZX };
+	X64O_SUB, X64O_XOR, X64O_CMP, X64O_MOV, X64O_LEA, X64O_MOVSX, X64O_MOVZX, X64O_TEST };
 int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o);
+/* Branch condition 0..15 is the opcode nibble, 16 is an unconditional jump,
+ * and -1 is a direct call. */
+int as_x64_direct_branch(as_context *a, int condition, XOp *target);
+/* Encode SETcc or CMOVcc with the condition nibble from the compiler record. */
+enum X64ConditionOp { X64O_SETCC, X64O_CMOV };
+int as_x64_condition(as_context *a, enum X64ConditionOp op, int condition, int size, XOp *operands);
 #endif

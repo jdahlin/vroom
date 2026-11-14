@@ -39,6 +39,14 @@ VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops)
 	return X64_NEXT;
 }
 
+static int x64_condition_encode(as_context *a, int cc, int size, XOp *o, enum X64ConditionOp op)
+{
+	if (op == X64O_SETCC)
+		return x64_emit(a, &F(.op = OPB(0x0f, 0x90 + cc), .nop = 2, .rm = &o[0], .rex8 = rex8(&o[0])));
+	return x64_emit(a, &F(.w = size == 8, .opsz16 = size == 2, .op = OPB(0x0f, 0x40 + cc), .nop = 2,
+			      .reg = o[1].reg, .rm = &o[0]));
+}
+
 VPRIV int x64_i_setcc(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
@@ -46,11 +54,8 @@ VPRIV int x64_i_setcc(as_context *a, char *mn, XOp *o, int nops)
 
 	(void)a, (void)mn, (void)o, (void)nops, (void)stem, (void)sz, (void)cc;
 	/* ---- setcc, cmovcc ---- */
-	if (!strncmp(mn, "set", 3) && nops == 1 && (cc = x64_cc(mn + 3)) >= 0) {
-		uint8_t op[2] = { 0x0f, (uint8_t)(0x90 + cc) };
-
-		return x64_emit(a, &F(.op = op, .nop = 2, .reg = 0, .rm = &o[0], .rex8 = rex8(&o[0])));
-	}
+	if (!strncmp(mn, "set", 3) && nops == 1 && (cc = x64_cc(mn + 3)) >= 0)
+		return x64_condition_encode(a, cc, 1, o, X64O_SETCC);
 	if (!strncmp(mn, "cmov", 4) && nops == 2) {
 		char t[16];
 		size_t n = strlen(mn + 4);
@@ -63,10 +68,8 @@ VPRIV int x64_i_setcc(as_context *a, char *mn, XOp *o, int nops)
 			cc = x64_cc(t);
 		}
 		if (cc >= 0) {
-			uint8_t op[2] = { 0x0f, (uint8_t)(0x40 + cc) };
 			int s = s2 ? s2 : opsize(&o[1]);
-
-			return x64_emit(a, &F(.w = s == 8, .opsz16 = s == 2, .op = op, .nop = 2, .reg = o[1].reg, .rm = &o[0]));
+			return x64_condition_encode(a, cc, s, o, X64O_CMOV);
 		}
 	}
 	return X64_NEXT;
@@ -206,6 +209,12 @@ static int x64_mov_extend(as_context *a, int from, int to, bool sx, XOp *o)
 	}
 }
 
+static int x64_test_register(as_context *a, int z, XOp *s, XOp *d)
+{
+	return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x84) : OPB(0x85), .nop = 1, .reg = s->reg,
+			      .rm = d, .rex8 = rex8(s) || rex8(d), .gotx = 2));
+}
+
 VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
@@ -296,8 +305,7 @@ VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 					f.op = z == 1 ? OPB(0xf6) : OPB(0xf7), f.nop = 1, f.reg = 0, f.rm = d;
 					return x64_emit(a, &f);
 				}
-				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = z == 1 ? OPB(0x84) : OPB(0x85), .nop = 1, .reg = s->reg,
-						      .rm = d, .rex8 = rex8(s) || rex8(d), .gotx = 2));
+				return x64_test_register(a, z, s, d);
 			}
 			{
 				static const struct { const char *n; uint8_t d; } un[] = {
@@ -437,9 +445,24 @@ int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
 	if (op <= X64O_CMP) return x64_alu(a, op, size, o, 2);
+	if (op == X64O_TEST) return x64_test_register(a, size, &o[0], &o[1]);
 	if (op == X64O_MOV) return x64_mov(a, size, o);
 	if (op == X64O_LEA) return x64_lea(a, size, o);
 	if (op == X64O_MOVSX || op == X64O_MOVZX)
 		return x64_mov_extend(a, size, o[1].size, op == X64O_MOVSX, o);
 	return as_error_report(a, "invalid structured integer operation");
+}
+
+int as_x64_direct_branch(as_context *a, int condition, XOp *target)
+{
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
+	return x64_branch(a, condition, target, condition < 0);
+}
+
+int as_x64_condition(as_context *a, enum X64ConditionOp op, int condition, int size, XOp *operands)
+{
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
+	return x64_condition_encode(a, condition, size, operands, op);
 }

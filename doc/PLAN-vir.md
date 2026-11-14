@@ -1374,6 +1374,22 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with structured x86 control-flow emission (2026-11-14).**
+The object emitter now passes direct calls, jumps, SETcc, CMOVcc and register
+TEST records to the assembler without formatting and matching mnemonics.
+Seven-run median CPU times on the same pinned SQLite 3.50.4 compile:
+
+| vcc build | Before | After | Retired instructions before / after |
+| --- | ---: | ---: | ---: |
+| clang-built | 145.02 ms | 140.64 ms | 1.313B / 1.256B |
+| self-hosted | 193.48 ms | 188.87 ms | 2.313B / 2.227B |
+
+All four objects matched. The time ratio was 1.334× before and 1.343× after.
+One remaining self-host-specific cost is the host CRC32C word helper:
+instruction sampling attributed roughly 28M instructions to it in the self
+build and 4M in the clang build. Disassembly showed stack traffic around the
+inline assembly in the self build; clang emitted a move, CRC32 and return.
+
 **SQLite with x86-64 SysV aggregate calls (2026-11-14).** VIR now lowers
 `codegen_prepass_node_walk` (4,075 VIR instructions, 14 spills) and
 `walk_value_emit_inner` (3,173 instructions, 34 spills). The separate VIR
