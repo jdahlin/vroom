@@ -89,7 +89,11 @@ int main(int argc, char **argv)
 	int wasm = 0, macho = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-o") && i + 1 < argc) out = argv[++i];
-		else if (!strcmp(argv[i], "-gdwarf-4") || !strcmp(argv[i], "-gdwarf-5")) as_dwarf_version_set(a, argv[i][8] - '0');	/* (clang -c's -dwarf-version) */
+		else if (!strcmp(argv[i], "-g")) {	/* (clang -g -c: the line table knows the compilation directory) */
+			static char cwd[4096];
+			as_debug_directory_set(a, getcwd(cwd, sizeof cwd));
+		}
+		else if (!strncmp(argv[i], "-gdwarf-", 8) && argv[i][8] >= '2' && argv[i][8] <= '5' && !argv[i][9]) as_dwarf_version_set(a, argv[i][8] - '0');	/* (clang -c's -dwarf-version) */
 		else if (!strncmp(argv[i], "--target=wasm", 13)) wasm = strncmp(argv[i] + 13, "32", 2) ? 64 : 32;
 		else if (!strncmp(argv[i], "--target=x86_64", 15)) {
 			elf_set_machine(o, EM_X86_64);
@@ -100,7 +104,7 @@ int main(int argc, char **argv)
 							       strstr(argv[i], "macos"))) macho = 1;
 		else in = argv[i];
 	}
-	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu|x86_64-w64-mingw32] [-gdwarf-4|-gdwarf-5] [-o out.o] in.s\n"); return 2; }
+	if (!in) { fprintf(stderr, "usage: vasm [--target=wasm64-...|arm64-apple-macos|x86_64-linux-gnu|x86_64-w64-mingw32] [-g] [-gdwarf-N] [-o out.o] in.s\n"); return 2; }
 	size_t n; const char *p = vasm_file_map(in, &n);
 	const char *msg;
 #ifndef VCC_WASM

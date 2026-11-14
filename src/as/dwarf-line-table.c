@@ -91,11 +91,15 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
 	if (n >= a->dwarf_file_count) a->dwarf_file_count = (uint32_t)n + 1;
 	struct as_dwarf_file *f = &a->dwarf_files[n];
 	int split = 0;
+	/* below version 5 with -g (cc1as -debug-info-kind): MC's line table knows the compilation
+	   directory, and a file in it is named without it, then split */
+	if (!v5 && n && two && a->debug_directory && dir.length == strlen(a->debug_directory) && !memcmp(dir.text, a->debug_directory, dir.length))
+		two = 0, dir = (as_text){ "", 0 };
 	if (!two && n) {	/* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
 		const char *sl = 0;
 		for (uint32_t i = 0; i < name.length; i++) if (name.text[i] == '/') sl = name.text + i;
-		if (sl && sl + 1 < name.text + name.length && sl > name.text) {
-			dir = (as_text){ name.text, (uint32_t)(sl - name.text) };
+		if (sl && sl + 1 < name.text + name.length && (sl > name.text || !v5)) {
+			dir = (as_text){ name.text, sl > name.text ? (uint32_t)(sl - name.text) : 1 };	/* ("/x.h": "/") */
 			name = (as_text){ sl + 1, (uint32_t)(name.text + name.length - sl - 1) };
 			split = 1;
 		}
@@ -262,6 +266,7 @@ VPRIV void as_dwarf_line_finish(as_context *a)
 	size_t hl = b.n; b.n += 4;
 	static const uint8_t std[] = { 1, 1, 1, 0xfb, 14, 13, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 };
 	memcpy(b.p + b.n, std, sizeof std); b.n += sizeof std;
+	if (a->dwarf_version < 4) { memmove(b.p + b.n - sizeof std + 1, b.p + b.n - sizeof std + 2, sizeof std - 2); b.n--; }	/* (no maximum_operations_per_instruction) */
 	if (!v5) {	/* MC's emitV2FileDirTables: the directories but the compilation one, the files from 1 */
 		for (uint32_t i = 1; i < a->dwarf_directory_count; i++) {
 			memcpy(b.p + b.n, a->dwarf_directories[i].text, a->dwarf_directories[i].length);

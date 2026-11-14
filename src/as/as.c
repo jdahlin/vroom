@@ -652,6 +652,7 @@ void as_free(as_context *a)
 
 void as_include_directory_set(as_context *a, const char *dir) { a->incbin_directory = dir; }
 void as_dwarf_version_set(as_context *a, int version) { a->dwarf_version_option = version; }
+void as_debug_directory_set(as_context *a, const char *dir) { a->debug_directory = dir; }
 
 /*
  * A persistent assembler bound to one ElfObj for a whole TU: as_begin()

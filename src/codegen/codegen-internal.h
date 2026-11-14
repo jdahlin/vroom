@@ -115,6 +115,8 @@
 /* Windows x64 (MinGW-w64, PLAN-win64.md): the OS branches (COFF, SEH unwind directives, the
  * Microsoft calling convention, LLP64) */
 #define CODEGEN_IS_WIN64(c) ((c)->o->target == PP_WIN64)
+/* -g's DWARF version: -gdwarf-N, else clang's default (MinGW 4, else 5); below 5 the main file is .file 1 */
+#define CODEGEN_DWARF_VERSION(c) ((c)->o->dbg_version ? (c)->o->dbg_version : CODEGEN_IS_WIN64(c) ? 4 : 5)
 
 /*
  * A C99 inline definition or GNU extern inline: not emitted (another TU

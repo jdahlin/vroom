@@ -319,7 +319,8 @@ typedef struct cc_options {	/* fields before outfd: parse options, all in the de
 	int opt;		/* -O level for code generation: 0 (default, -O0), 1 (-O1, -Og), 2 (-O2, -O3, -Os, -Oz, -O) */
 	int wrapv;		/* -fwrapv, -fno-strict-overflow: signed overflow wraps (VIR sets no nsw) */
 	int sections;		/* 1 -ffunction-sections, 2 -fdata-sections (ELF) */
-	int debug;		/* -g: DWARF line tables (ELF) */
+	int debug;		/* -g: DWARF line tables (ELF, COFF) */
+	int dbg_version;	/* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
 	int cfi;		/* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
 	const char *dbg_dir, *dbg_name;	/* the compilation directory and the main file, as named */
 	int tlsmodel;		/* -ftls-model=: VCC_TLS_*, 0: the default */

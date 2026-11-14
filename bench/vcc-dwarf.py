@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """vcc-dwarf.py: -g line tables (TODO.md DWARF).
 
-  bench/vcc-dwarf.py [-j N] [-O LEVEL] [PAT]
+  bench/vcc-dwarf.py [-j N] [-O LEVEL] [--target T] [--gflag=FLAG] [PAT]
 
 For every C file in src/test/vcc and tests/gcc-torture/execute
-(matching PAT), compiled for aarch64 Linux:
+(matching PAT), compiled for aarch64 Linux (--target x86_64-linux-gnu,
+x86_64-w64-mingw32: those; the MinGW one with the test runtime's headers and
+no sysroot, as vas-corpus.py, and DWARF 4 by default as clang):
   - vpp -g -c passes llvm-dwarfdump --verify;
-  - -g does not change the code: .text is byte-identical with and without -g;
-  - vpp -g -c equals clang -c of vpp -g -S (the line table from the text);
+  - -g does not change the code: .text is byte-identical with and without -g
+    (COFF: every .text section);
+  - vpp -g -c equals clang -c of vpp -g -S (the line table from the text), and
+    on x86-64 vasm of the same text;
+--gflag=FLAG: the flag instead of -g (-gdwarf-4, -gdwarf-5, -gline-tables-only, -g3).
   - rows at lines clang -g has no row for are counted (-v lists them): clang
     -O0 drops an if whose condition folds, vcc -O0 keeps its code.
 Clang's side (whether it compiles, its rows) is cached in build/src/dwarfref,
@@ -20,8 +25,16 @@ from hostenv import llvm, BUILD
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VPP = os.path.join(os.environ.get('VCC_BIN') or BUILD, 'vpp')
 CL, DD, OC = llvm('clang'), llvm('llvm-dwarfdump'), llvm('llvm-objcopy')
+VASM = os.path.join(os.path.dirname(VPP), 'vasm')
 RT = f'{R}/src/test/rt/include'
-FL = ['--target=aarch64-linux-gnu', '-w', '-ffreestanding', '-I', RT]
+TGT = 'aarch64-linux-gnu'
+GFLAG = '-g'
+RES = subprocess.run([CL, '-print-resource-dir'], capture_output=True, text=True).stdout.strip() + '/include'
+def flags(tgt):
+    if 'mingw' in tgt:
+        return [f'--target={tgt}', '-w', '-nostdinc', '-I', f'{RT}-win64', '-I', RT, '-isystem', RES]
+    return [f'--target={tgt}', '-w', '-ffreestanding', '-I', RT]
+FL = flags(TGT)
 REF = f'{BUILD}/dwarfref'
 CLV = subprocess.run([CL, '--version'], capture_output=True, text=True).stdout
 for _d, _, _fs in sorted(os.walk(RT)):	# the tests include the runtime headers
@@ -31,7 +44,25 @@ NOCACHE = False
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, **kw)
 
+def coff_text(o):
+    """the bytes of every .text section of a COFF object, in order"""
+    import struct
+    b = open(o, 'rb').read()
+    ns, sym, nsym = struct.unpack_from('<2xH4xII', b, 0)
+    strtab = sym + 18 * nsym
+    out = b''
+    for i in range(ns):
+        name, size, ptr = struct.unpack_from('<8s8xII', b, 20 + 40 * i)
+        name = name.rstrip(bytes(1))
+        if name.startswith(b'/'):
+            k = strtab + int(name[1:]); name = b[k:b.index(b'\0', k)]
+        if name == b'.text' or name.startswith(b'.text$'):
+            out += name + b[ptr:ptr + size]
+    return out
+
 def text(o, t):
+    if 'mingw' in TGT:
+        return coff_text(o)
     run([OC, '-O', 'binary', '--only-section=.text', o, t])
     return open(t, 'rb').read()
 
@@ -52,7 +83,7 @@ def lines(o, entry=True):
 
 def clang_rows(f, a, t):
     """clang -g's rows for f (None when clang rejects it), cached"""
-    key = hashlib.sha1(open(f, 'rb').read() + ' '.join(a + [CLV]).encode()).hexdigest()
+    key = hashlib.sha1(open(f, 'rb').read() + ' '.join(a + [GFLAG, CLV]).encode()).hexdigest()
     cf = f'{REF}/{key}.json'
     if not NOCACHE:
         try:
@@ -61,7 +92,7 @@ def clang_rows(f, a, t):
         except (OSError, ValueError):
             pass
     rows = None
-    if not run([CL] + a + ['-g', '-c', '-o', f'{t}/c.o'], cwd=os.path.dirname(f)).returncode:
+    if not run([CL] + a + [GFLAG, '-c', '-o', f'{t}/c.o'], cwd=os.path.dirname(f)).returncode:
         rows = lines(f'{t}/c.o')
     os.makedirs(REF, exist_ok=True)
     with open(f'{cf}.{os.getpid()}', 'w') as o:
@@ -79,7 +110,7 @@ def one(job):
             return ('skip', f, '')
         if run([VPP] + a + ['-c', '-o', f'{t}/n.o'], cwd=d).returncode:
             return ('skip', f, '')
-        p = run([VPP] + a + ['-g', '-c', '-o', f'{t}/g.o'], cwd=d, text=True)
+        p = run([VPP] + a + [GFLAG, '-c', '-o', f'{t}/g.o'], cwd=d, text=True)
         if p.returncode:
             return ('fail', f, 'vpp -g -c: ' + p.stderr[:200])
         v = run([DD, '--verify', f'{t}/g.o'], text=True)
@@ -87,19 +118,24 @@ def one(job):
             return ('fail', f, 'dwarfdump --verify: ' + v.stdout[-300:])
         if text(f'{t}/n.o', f'{t}/n.t') != text(f'{t}/g.o', f'{t}/g.t'):
             return ('fail', f, '-g changes .text')
-        if run([VPP] + a + ['-g', '-S', '-o', f'{t}/g.s'], cwd=d).returncode or \
-           run([CL, '--target=aarch64-linux-gnu', '-c', f'{t}/g.s', '-o', f'{t}/s.o']).returncode:
+        gv = [GFLAG] if GFLAG.startswith('-gdwarf-') else []	# (clang -c's -dwarf-version)
+        if run([VPP] + a + [GFLAG, '-S', '-o', f'{t}/g.s'], cwd=d).returncode or \
+           run([CL, f'--target={TGT}', *gv, '-c', f'{t}/g.s', '-o', f'{t}/s.o']).returncode:
             return ('fail', f, 'vpp -g -S does not assemble with clang')
         if open(f'{t}/s.o', 'rb').read() != open(f'{t}/g.o', 'rb').read():
             return ('fail', f, 'vpp -g -c differs from clang -c of vpp -g -S')
+        if TGT.startswith('x86_64'):
+            if run([VASM, f'--target={TGT}', *gv, f'{t}/g.s', '-o', f'{t}/a.o']).returncode or \
+               open(f'{t}/a.o', 'rb').read() != open(f'{t}/g.o', 'rb').read():
+                return ('fail', f, 'vasm of vpp -g -S differs from vpp -g -c')
         extra = lines(f'{t}/g.o', False) - crows
         if extra:	# clang -O0 drops an if whose condition folds, vcc keeps its code
             return ('ok', f, f'lines clang has no row for: {sorted(extra)[:5]}')
         return ('ok', f, '')
 
-def _init(nc):
-    global NOCACHE
-    NOCACHE = nc
+def _init(nc, tgt, gflag):
+    global NOCACHE, TGT, FL, GFLAG
+    NOCACHE, TGT, FL, GFLAG = nc, tgt, flags(tgt), gflag
 
 def main():
     ap = argparse.ArgumentParser()
@@ -107,13 +143,15 @@ def main():
     ap.add_argument('-O', dest='opt', default='0')
     ap.add_argument('-v', action='store_true')
     ap.add_argument('--no-cache', action='store_true')
+    ap.add_argument('--target', default='aarch64-linux-gnu')
+    ap.add_argument('--gflag', default='-g')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
     global NOCACHE
     NOCACHE = a.no_cache
     files = sorted(glob.glob(f'{R}/src/test/vcc/*.c') + glob.glob(f'{R}/src/test/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
-    with Pool(a.j, initializer=_init, initargs=(a.no_cache,)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
+    with Pool(a.j, initializer=_init, initargs=(a.no_cache, a.target, a.gflag)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}
     note = 0
     for k, f, m in res:
