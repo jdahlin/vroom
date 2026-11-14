@@ -513,3 +513,10 @@ own.
   (libc++'s compressed pairs); vptr layouts.  Code: the shared builders move to a
   module of their own taking `struct ast *` (cxx/ is compiled in the cc
   module for now).  X5-X7: not started.
+
+### Status 2026-11-14: expression types (branch cxx/sema)
+Parameters and expressions carry types (`typing.c`); unit-32bit types 319 of
+612 expression statements outside templates.  CPU, -fsyntax-only, user+sys:
+unit-32bit vcc 0.12 s vs clang 0.80 s (6.6x), unit-allocator 0.12 s vs 0.99 s
+(7.9x).  vcc does not yet instantiate function bodies or resolve overloads
+fully, so the ratio will fall; the 4.5x threshold still has headroom.
