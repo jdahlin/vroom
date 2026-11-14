@@ -753,6 +753,8 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_ec(c, cc_type_basic(TY_BOOL), t->kw == CXX_KW_true);
 		else if (t->kw == CXX_KW___null)
 			cxx_et(c, cc_type_basic(TY_LONG), false);
+		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative)
+			cxx_et(c, cxx_nullptr_type(c), false);
 		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative)
 			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
 		else if (t->kw == CXX_KW___builtin_LINE || t->kw == CXX_KW___builtin_COLUMN)

@@ -1189,6 +1189,10 @@ typedef struct cxx_ftemplate {
 	uint32_t pos;		/* its decl-specifiers */
 	cxx_scope *ctor_class;	/* a constructor template: its class (no return type to parse) */
 	uint32_t req_pos;	/* its template header's requires-clause (0: none) */
+	qty *pt;		/* its parameters' types, placeholders for the template's (one may be unknown: not deduced from) */
+	uint32_t np;
+	uint8_t has_pt, variadic;
+	uint8_t defined;	/* this declaration has a body (another of the same function may be a declaration only) */
 	cxx_vspec **vspecs;	/* a variable template: its specializations */
 	uint32_t nvspecs;
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
@@ -1260,8 +1264,16 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
-	if (!setjmp(jb))
+	if (!setjmp(jb)) {
 		f->sig = cxx_function_signature_parse(c, true, NULL, f->ctor_class);
+		if (c->sig_is_function) {
+			/* each parameter's type on its own: one that vcc cannot form does not stop the others */
+			f->np = c->ndecl_params, f->variadic = c->decl_variadic, f->has_pt = 1;
+			f->pt = malloc((f->np ? f->np : 1) * sizeof *f->pt);
+			for (uint32_t i = 0; i < f->np; i++)
+				f->pt[i] = c->decl_params[i].ty;
+		}
+	}
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
@@ -1555,14 +1567,14 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			return c->sig_requires;
 		return 1;	/* (its arity is not checked: the signature with the arguments bound would tell) */
 	}
-	if (f->sig == CXX_TY_UNKNOWN) {
+	if (!f->has_pt) {
 		c->why = CXX_WHY_SIG;
 		return -1;
 	}
-	ft = AST_TYPE(c->ast, f->sig);
-	if (nargs > ft->n && !(ft->flags & TF_VARIADIC))
+	(void)ft;
+	if (nargs > f->np && !f->variadic)
 		return 0;
-	if (nargs + e->ndefaults < ft->n)
+	if (nargs + e->ndefaults < f->np)
 		return 0;
 	/* explicit arguments: the first parameters (all of them: nothing left to deduce) */
 	if (xargs) {
@@ -1574,10 +1586,10 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			bind[i] = xargs[i];
 		}
 	}
-	for (uint32_t i = 0; i < nargs && i < ft->n; i++) {
-		qty P = c->ast->params[ft->aux + i], A = args[i];
+	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+		qty P = f->pt[i], A = args[i];
 
-		if (!cxx_mentions_placeholder(c, P, 0))
+		if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
 			continue;	/* (non-deduced: its conversion is not checked here) */
 		if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {
 			c->why = CXX_WHY_ARG;
@@ -1602,6 +1614,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			else if (at->kind == TY_FUNC)
 				A = cc_type_pointer(c->ast, A);
 			A = QUNQ(A);
+			P = QUNQ(P);	/* (a by-value parameter's own const is not part of the function's type) */
 		}
 		if (!cxx_match_type(c, p, P, A, bind, 0)) {
 			/* X<T> against a class derived from X<int>: its bases, nearest first */
@@ -2015,4 +2028,41 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint
 	f->done[at].viable = known ? 1 : -1, f->done[at].value = v;
 	*out = v;
 	return known;
+}
+
+/*
+ * How generic a function template is for a call of nargs arguments: the parameters that are a bare
+ * template parameter (T, const T&, T&&), which match anything.  Between two templates that fit equally,
+ * the one with fewer is the more specialized (f(T*) over f(T&&)): a stand-in for partial ordering.
+ * -1: not known.
+ */
+VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs)
+{
+	cxx_ftemplate *f = e->ftmpl;
+	int n = 0;
+
+	if (!f || !f->has_pt)
+		return -1;
+	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+		qty P = f->pt[i];
+		void *owner;
+
+		if (P == CXX_TY_UNKNOWN)
+			return -1;
+		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+			P = AST_TYPE(c->ast, P)->base;
+		n += cxx_placeholder_of(c, P, &owner) >= 0;
+	}
+	return n;
+}
+
+VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f)
+{
+	if (f)
+		f->defined = 1;
+}
+
+VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e)
+{
+	return e->ftmpl && e->ftmpl->defined;
 }

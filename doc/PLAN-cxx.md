@@ -673,3 +673,18 @@ bodies (was 123 + 182 + 0), 2286 of 2703 calls typed, static_asserts 178
 true / 0 false / 22 not evaluated; 0.16 s (clang -fsyntax-only 0.80 s);
 unit-allocator 0.25 s (0.99 s).  json: 61,472 layouts clang agrees with,
 71/71 parse; parse tests 21/21.
+
+### Status 2026-11-14 (14): enumerators, nullptr, per-parameter deduction
+Enumerators have their enumeration's type and values (template arguments
+carry the enumeration: X<(E)0>); nullptr has a type of its own; deduction
+works parameter by parameter (one of unknown type is skipped, not fatal);
+between templates that fit equally the one with fewer bare-T parameters wins,
+then the declaration that has a body; a member operator sees its object's
+constness.  The test's own statements (json j; j["a"] = 2; json::parse(..);
+json::from_bjdata(..)) now resolve.  unit-32bit: 158 + 330 + 23 bodies, 2314
+of 2727 calls typed, static_asserts 197 true / 0 false / 22 not evaluated,
+0.16 s; json 62,409 layouts clang agrees with, 71/71 parse; parse tests 21/21.
+VCC_CXX_CAND=name traces each candidate of calls to that name.
+Next: libc++'s _And/_Or/_Not over packs (std::__to_address's two overloads
+are both accepted: 64 calls), __go(..., __priority_tag<N>()), out-of-class
+members that share a parameter count, then the rest of packs.

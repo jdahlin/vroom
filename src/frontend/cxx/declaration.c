@@ -1269,7 +1269,7 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		if (sfx[0].nnamed)
 			memcpy(c->decl_params, sfx[0].named, sfx[0].nnamed * sizeof *c->decl_params);
 		c->ndecl_params = sfx[0].nnamed;
-		c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const;
+		c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const, c->decl_variadic = sfx[0].variadic;
 	} else if (!nested && !c->tentative)
 		c->decl_ndefaults = 0, c->decl_const = 0;
 	for (uint32_t i = 0; i < nsfx; i++)
@@ -2689,6 +2689,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		}
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
 		cxx_entity *const_e = NULL;	/* a const integer whose initializer is evaluated */
+		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
 			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
@@ -2737,6 +2738,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, cs);
 				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
+				fn_template = e;
 			}
 		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
@@ -2753,6 +2755,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			    !c->tentative) {
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, NULL);
 				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
+				fn_template = e;
 			}
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
@@ -2841,6 +2844,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			cxx_skip_balanced(c);
 			cxx_attributes_skip(c);
 		}
+		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK) && fn_template)
+			cxx_ftemplate_defined(fn_template->ftmpl);
 		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK)) {
 			/* template<...> R X<...>::f(...) { }: a class template's member defined outside it, instantiated
 			   for an instance when a call uses that member */
@@ -3163,6 +3168,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	c->decl_return = CXX_TY_UNKNOWN;
 	cxx_declarator_parse(c, false, &q, &f, NULL);
 	t = f ? c->type_out : CXX_TY_UNKNOWN;
+	c->sig_is_function = f;
 	c->sig_auto = 0;
 	if (ret_auto && f) {
 		c->sig_auto = c->decl_return != CXX_TY_UNKNOWN && cxx_type_has_placeholder(c, c->decl_return);

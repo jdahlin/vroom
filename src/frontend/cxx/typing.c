@@ -192,6 +192,11 @@ static int cxx_arg_rank(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 	at = AST_TYPE(c->ast, a);
 	if (QUNQ(p) == QUNQ(a))
 		return 0;
+	/* nullptr converts to any pointer (and to bool), nothing else to nullptr_t */
+	if (c->nullptr_ty && QUNQ(a) == c->nullptr_ty)
+		return (pt->kind == TY_PTR && !pt->ext) || pt->kind == TY_BOOL ? 1 : cc_type_is_record(c->ast, p) ? 2 : 3;
+	if (c->nullptr_ty && QUNQ(p) == c->nullptr_ty)
+		return 3;
 	if (((pt->kind >= TY_BOOL && pt->kind <= TY_FLOAT128) || pt->kind == TY_ENUM) &&
 	    ((at->kind >= TY_BOOL && at->kind <= TY_FLOAT128) || at->kind == TY_ENUM))
 		return pt->kind == TY_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
@@ -287,6 +292,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	}
 	/* the viable candidates, each argument's conversion ranked */
 	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; } cand[24];
+	const char *tn = getenv("VCC_CXX_CAND");	/* trace the candidates of calls to this name */
+	bool trace = tn && !c->template_depth && strlen(tn) == vintern_ents[set->name].len && !memcmp(tn, vintern_ents[set->name].s, strlen(tn));
 	uint32_t ncand = 0;
 	int best = -1;
 
@@ -304,6 +311,9 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
 
+			if (trace)
+				fprintf(stderr, "cand %.*s/%u template: deduce %d why %u ret %s\n", (int)vintern_ents[set->name].len, vintern_ents[set->name].s,
+					nargs, d, d <= 0 ? c->why : 0, d > 0 && r != CXX_TY_UNKNOWN ? "known" : "unknown");
 			if (d < 0)
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
 			if (d <= 0)
@@ -344,6 +354,13 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			if (!fits)
 				continue;	/* (T&& from an lvalue, a pointer from a class: not viable) */
 		}
+		if (trace) {
+			fprintf(stderr, "cand %.*s/%u %s const=%u ranked=%u ranks", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs,
+				k->tmpl ? "template" : "plain", e->fn_const, k->ranked);
+			for (uint32_t a = 0; a < nargs && k->ranked; a++)
+				fprintf(stderr, " %u", k->rank[a]);
+			fprintf(stderr, " obj=%u\n", obj);
+		}
 		ncand++;
 		if (!viable++)
 			result = r, first = e;
@@ -374,6 +391,19 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 			if (!better && !worse) {
 				if (!cand[a].tmpl && cand[b].tmpl)
 					better = true;
+				else if (cand[a].tmpl && cand[b].tmpl) {
+					/* two templates: the more specialized (fewer parameters that are a bare T) */
+					int ga = cxx_ftemplate_bare_params(c, cand[a].e, nargs), gb = cxx_ftemplate_bare_params(c, cand[b].e, nargs);
+
+					if (ga >= 0 && gb >= 0 && ga != gb)
+						better = ga < gb, worse = ga > gb;
+					/* as specialized as each other: a declaration and its definition are one function, the
+					   definition stands for it */
+					else if (cxx_ftemplate_has_body(cand[a].e) != cxx_ftemplate_has_body(cand[b].e) && cand[a].r == cand[b].r)
+						better = cxx_ftemplate_has_body(cand[a].e), worse = !better;
+				}
+				if (better || worse)
+					;
 				else if (cand[a].tmpl == cand[b].tmpl && obj == 1 && !cand[a].e->fn_const && cand[b].e->fn_const)
 					better = true;
 			}
@@ -468,6 +498,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	/* (no candidate fits: the next place, in the end the built-in operator: &x, a = b, a, b) */
 	set = cxx_lookup_in(c, cls, id, 0);
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
+		c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, NULL, nargs, true);
 		if (!c->none_viable)
 			return true;
@@ -815,4 +846,15 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 	}
 	c->einvalid = 0;
 	cxx_et(c, CXX_TY_UNKNOWN, false);
+}
+
+/* std::nullptr_t: a type of its own (a class no source declares; it converts to any pointer) */
+VPRIV qty cxx_nullptr_type(cxx *c)
+{
+	if (!c->nullptr_ty) {
+		uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("nullptr_t"), 0);
+
+		c->nullptr_ty = QT(c->ast->tags[tag].ty, 0);
+	}
+	return c->nullptr_ty;
 }

@@ -46,3 +46,17 @@ void h(Derived d, float f, int *ip, char c)
 	static_assert(sizeof(pk(c)) == 1, "");		// the template is exact, the non-template converts
 	static_assert(sizeof(bd(d)) == 1, "");		// derived to base over ...
 }
+
+// nullptr has a type of its own
+typedef decltype(nullptr) np_t;
+char  np(int *);
+short np(np_t);
+long  np(long);
+struct NJ { NJ(int v) {} NJ(np_t = nullptr) {} int n; };
+void hn(int *ip)
+{
+	NJ a;
+	NJ b = nullptr;
+	static_assert(sizeof(np(nullptr)) == 2 && sizeof(np(ip)) == 1 && sizeof(np(1L)) == 8, "");
+	static_assert(sizeof(a.n) == 4, "");
+}

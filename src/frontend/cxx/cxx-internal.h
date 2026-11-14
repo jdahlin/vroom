@@ -210,6 +210,7 @@ typedef struct cxx {
 	uint8_t fn_variadic, fn_unknown;
 	uint32_t fn_ndefaults;
 	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
+	uint8_t decl_variadic, sig_is_function;	/* the last declarator's function is variadic; the last signature parsed was a function's */
 	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */
 	int64_t evalue;			/* the expression's value, when econst (an integer constant expression) */
 	uint8_t econst;
@@ -287,6 +288,7 @@ typedef struct cxx {
 	qty range_type;
 	uint8_t range_auto;
 	uint8_t ds_auto, ds_quals;	/* the last decl-specifiers were auto (with these cv-qualifiers) */
+	qty nullptr_ty;			/* std::nullptr_t, the type of nullptr (0: not made yet) */
 	qty auto_ty;			/* auto's placeholder type (0: not made yet) */
 	struct cxx_partial *auto_owner;
 	uint8_t member_missing;		/* typename X::y named no member of a complete class X (deduction: not viable) */
@@ -386,6 +388,10 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
+VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
+VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
+VPRIV qty cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
 					    uint32_t nparams, bool is_const);
