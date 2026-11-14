@@ -2001,20 +2001,6 @@ static void cxx_template_declaration_parse(cxx *c, int context)
 	cxx_scope_pop(c);
 }
 
-/* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return)
-{
-	bool q, f;
-
-	cxx_attributes_skip(c);
-	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
-		return CXX_TY_UNKNOWN;
-	c->type_in = c->ds_type;
-	if (any_return && c->type_in == CXX_TY_UNKNOWN)
-		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
-	cxx_declarator_parse(c, false, &q, &f, NULL);
-	return f ? c->type_out : CXX_TY_UNKNOWN;
-}
 
 /* ---- classes and enums ------------------------------------------------------------------- */
 
@@ -2787,4 +2773,37 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 {
 	while (!cxx_is(c, LEX_TOKEN_EOF))
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
+}
+
+/* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body)
+{
+	bool q, f;
+	qty t;
+
+	cxx_attributes_skip(c);
+	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+		return CXX_TY_UNKNOWN;
+	c->type_in = c->ds_type;
+	if (any_return && c->type_in == CXX_TY_UNKNOWN)
+		c->type_in = cc_type_basic(TY_VOID);	/* (deduction reads the parameters only) */
+	cxx_declarator_parse(c, false, &q, &f, NULL);
+	t = f ? c->type_out : CXX_TY_UNKNOWN;
+	/* body: the definition's body too (an instance's), its parameters declared */
+	if (body) {
+		*body = false;
+		cxx_requires_clause_parse(c);
+		cxx_attributes_skip(c);
+		if (f && cxx_is_function_body_start(c)) {
+			cxx_scope *fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+			cxx_scope *outer = c->scope;
+
+			cxx_scope_push(c, fs);
+			cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
+			cxx_function_body_parse(c);
+			c->scope = outer;
+			*body = true;
+		}
+	}
+	return t;
 }

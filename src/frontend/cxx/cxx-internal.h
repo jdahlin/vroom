@@ -208,6 +208,7 @@ typedef struct cxx {
 	struct cxx_stats {
 		uint32_t classes, classes_laid_out, classes_skipped[16];	/* (by CXX_SKIP_*) */
 		uint32_t declarations, declarations_typed, symbols, expressions, expressions_typed;
+		uint32_t bodies, bodies_failed, bodies_cached, body_depth_max;	/* function template bodies instantiated */
 	} stats;
 	/* instantiation (instantiate.c) */
 	cxx_targ *targs;		/* the last template argument list's arguments */
@@ -244,6 +245,7 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	uint32_t body_depth;		/* function template bodies being instantiated (nested) */
 	uint32_t ftmpl_begin;		/* a template declaration: where the declaration after its parameters starts */
 	cxx_scope *ftmpl_scope;		/* ... and its template scope */
 	qty this_type;			/* in a member function's body: the class (this is a pointer to it) */
@@ -328,7 +330,7 @@ VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t d
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
 VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos);
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const qty *args, const uint8_t *lval, uint32_t nargs, qty *ret);
-VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return);
+VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);

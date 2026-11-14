@@ -1064,8 +1064,12 @@ VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x)
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
+typedef struct cxx_fdone { cxx_targ *args; qty ret; } cxx_fdone;
+
 typedef struct cxx_ftemplate {
 	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
+	cxx_fdone *done;	/* the argument lists instantiated: their return types (the body parsed once) */
+	uint32_t ndone, cdone;
 	uint32_t pos;		/* its decl-specifiers */
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
@@ -1129,7 +1133,7 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 	if (!setjmp(jb))
-		f->sig = cxx_function_signature_parse(c, true);
+		f->sig = cxx_function_signature_parse(c, true, NULL);
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
@@ -1141,11 +1145,37 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 {
 	cxx_partial *p = &f->p;
+	uint32_t np = p->params->ntparams;
 	cxx_saved s;
 	jmp_buf jb;
 	cxx_scope *binding;
 	volatile qty r = CXX_TY_UNKNOWN;
+	volatile bool body = false;
+	cxx_targ *targs;
+	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
+	cxx_param *dp;
+	qty this_type = c->this_type, etype = c->etype;
+	bool elval = c->elval;
+	cxx_entity *ecallee = c->ecallee;
 
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (cxx_args_equal(f->done[i].args, bind, np)) {
+			c->stats.bodies_cached++;
+			return f->done[i].ret;
+		}
+	if (c->body_depth >= 64)
+		return CXX_TY_UNKNOWN;	/* (recursion: the return type alone would do; not yet) */
+	if (f->ndone == f->cdone)
+		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
+	f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
+	memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
+	f->done[f->ndone].ret = CXX_TY_UNKNOWN;
+	f->ndone++;	/* (before the body: a recursive call finds it) */
+	/* what the enclosing parse still uses */
+	targs = malloc((ntargs ? ntargs : 1) * sizeof *targs);
+	memcpy(targs, c->targs, ntargs * sizeof *targs);
+	dp = malloc((ndp ? ndp : 1) * sizeof *dp);
+	memcpy(dp, c->decl_params, ndp * sizeof *dp);
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 	for (uint32_t i = 0; i < p->params->ntparams; i++)
 		cxx_bind(c, binding, &p->params->tparams[i], &bind[i]);
@@ -1155,14 +1185,30 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->this_type = CXX_TY_UNKNOWN;
+	c->body_depth++;
+	if (c->body_depth > c->stats.body_depth_max)
+		c->stats.body_depth_max = c->body_depth;
 	if (!setjmp(jb)) {
-		qty t = cxx_function_signature_parse(c, false);
+		bool b;
+		qty t = cxx_function_signature_parse(c, false, &b);
 
+		body = b;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
 			r = AST_TYPE(c->ast, t)->base;
-	}
+		c->stats.bodies += body;
+	} else
+		c->stats.bodies_failed++;
+	c->body_depth--;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
+	memcpy(c->targs, targs, ntargs * sizeof *targs), c->ntargs = ntargs;
+	memcpy(c->decl_params, dp, ndp * sizeof *dp), c->ndecl_params = ndp, c->decl_ndefaults = ndd;
+	free(targs), free(dp);
+	c->this_type = this_type, c->etype = etype, c->elval = elval, c->ecallee = ecallee;
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (cxx_args_equal(f->done[i].args, bind, np))
+			f->done[i].ret = r;
 	return r;
 }
 

@@ -86,6 +86,8 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 			st->classes_skipped[CXX_SKIP_BASES], st->classes_skipped[CXX_SKIP_VIRTUAL], st->classes_skipped[CXX_SKIP_UNKNOWN_MEMBER],
 			st->classes_skipped[CXX_SKIP_BITFIELD], st->classes_skipped[CXX_SKIP_SPECIALIZATION], st->symbols);
 		dprintf(o->errfd, "cxx: expression statements %u, typed %u\n", st->expressions, st->expressions_typed);
+		dprintf(o->errfd, "cxx: function template bodies %u, failed %u, cached %u, depth %u\n", st->bodies, st->bodies_failed,
+			st->bodies_cached, st->body_depth_max);
 		dprintf(o->errfd, "cxx: instances %u made, %u failed; cache %u; partial specializations: %u matched, %u unknown\n",
 			c.instances_made, c.instances_failed, c.ninstances, c.partial_matches, c.partial_unknown);
 	}

@@ -177,6 +177,13 @@ VPRIV void cxx_call_type(cxx *c, cxx_entity *set, qty callee_type, const qty *ar
 	}
 	if (!lval)
 		lval = none;
+	qty acopy[16];
+	uint8_t lcopy[16];
+
+	if (nargs <= 16) {	/* (instantiating a body reuses c->cargs) */
+		memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
+		args = acopy, lval = lcopy;
+	}
 	for (cxx_entity *e = set; e; e = e->next) {
 		qty r;
 
