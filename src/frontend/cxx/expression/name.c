@@ -136,7 +136,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		if (x->kind == CXX_ENTITY_VALUE && !v)
 			v = x;
 	}
-	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, true);
+	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, !(v && v->is_enumerator));	/* (an enumerator is a prvalue: E&& binds it) */
 	c->edecl_name = 1;
 	if (v && v->has_value && !v->placeholder)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */

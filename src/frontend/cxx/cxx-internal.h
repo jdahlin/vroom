@@ -160,6 +160,7 @@ typedef struct cxx_entity {
 	uint32_t sym0;			/* a virtual destructor: the deleting destructor's symbol (D0) */
 	uint8_t fn_internal;		/* a function declared static at namespace scope: internal linkage */
 	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
+	uint8_t is_enumerator;		/* an enumerator: a prvalue where it is named */
 	uint8_t has_vtt;		/* a constructor or destructor of a class with virtual bases: C2/D2 take a VTT, C1/D1 apart */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */

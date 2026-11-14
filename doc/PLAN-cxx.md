@@ -2131,3 +2131,14 @@ Kvar: `std::stringstream` och `std::ifstream` i samma TU.
   namnrymd).
 cxx-strict: alla 70 TU:er kompileras (en föll efter sammanslagningen), 3 passerar, 308 funktioner saknas
 (summerat per TU); vcc 30,6 s summerat per TU (43,2 s förut).
+
+## Status 125 (2026-11-15)
+- En uppräkningskonstant är ett prvalue (förut ett lvalue som alla namn): `E&&` och en vidarebefordrande
+  referens binder den, så `vector<json>::emplace_back(value_t::array)` och `handle_value(value_t::object)`
+  i json:s SAX-parser byggs.
+- `__is_trivially_copyable` och `__is_trivially_relocatable` för en klass som inte är POD för layout:
+  triviala kopierings- och flyttkonstruktorer och destruktor (`cxx_gen_trivial_abi`), ingen
+  användardeklarerad `operator=` i klassen, dess baser eller medlemmar; inte polymorf, inga virtuella baser
+  (`__uninitialized_allocator_relocate` när en vector växer).
+Test: `run/enumerator-prvalue.cpp`.  cxx-strict: 113 funktioner kompileras nu, 2 nya nås; 288 saknas
+summerat per TU.

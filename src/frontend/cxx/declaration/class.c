@@ -460,7 +460,7 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
 
 				if (!x)
 					continue;
-				x->ty = et;
+				x->ty = et, x->is_enumerator = 1;
 				if (known)
 					x->value = next, x->has_value = 1;
 			}

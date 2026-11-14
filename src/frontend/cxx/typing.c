@@ -12,6 +12,7 @@
  * an ambiguity is unknown, never a guess.
  */
 #include "cxx-internal.h"
+static bool cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth);
 
 VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue)
 {
@@ -1919,6 +1920,19 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualifie
 				*v = 0;
 				return true;
 			}
+			if (IS("__is_trivially_relocatable") && cc_type_is_record(c->ast, e) && !cxx_class_polymorphic(c, e) &&
+			    cxx_gen_trivial_abi(c, e, 0) == 1) {
+				/* trivial copy and move constructors and destructor: its bytes may be moved (libc++'s relocation
+				   by memcpy is right exactly then) */
+				*v = 1;
+				return true;
+			}
+			if (IS("__is_trivially_copyable") && cc_type_is_record(c->ast, e) && !cxx_class_polymorphic(c, e) &&
+			    !cxx_class_vbases(c, e, NULL, NULL, 0) && cxx_gen_trivial_abi(c, e, 0) == 1 && cxx_class_assign_trivial(c, e, 0)) {
+				/* trivial copy and move constructors, assignments and destructor ([class.prop]/1) */
+				*v = 1;
+				return true;
+			}
 			return false;
 		}
 	}
@@ -2071,6 +2085,34 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
  * Does one of the class's conversion functions (or a base's) convert to `to`, a type that is not a
  * class: 1 yes (its type converts to `to` by a standard conversion), 0 no, -1 not known.
  */
+/* are the class's copy and move assignments trivial: none user-declared in it, its bases or its members of
+   class type (arrays of them too) */
+static bool cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth)
+{
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+	ast_qualified_type bases[16];
+	uint32_t nb;
+
+	if (!cls || depth > 8 || cxx_class_user_special(c, t, vintern_cstr("operator=")))
+		return false;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (!cxx_class_assign_trivial(c, bases[i], depth + 1))
+			return false;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		ast_qualified_type ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == AST_TYPE_ARRAY)
+			ft = AST_TYPE(c->ast, ft)->base;
+		if (ft == CXX_TY_UNKNOWN || (AST_TYPE_KIND(c->ast, ft) == AST_TYPE_POINTER && AST_TYPE(c->ast, ft)->ext) ||
+		    (AST_QUALIFIED_TYPE_QUALIFIERS(ft) & AST_QUALIFIER_CONST))
+			return false;	/* (a reference or const member: assignment deleted, not decided here) */
+		if (cc_type_is_record(c->ast, ft) && !cxx_class_assign_trivial(c, ft, depth + 1))
+			return false;
+	}
+	return true;
+}
+
 /* the one scalar type (arithmetic, an enumeration, a pointer) class t's conversion functions (or a base's)
    give, for a built-in operator its object is an operand of (atomic<int> == 4); CXX_TY_UNKNOWN: none, several
    or not known */
