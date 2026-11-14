@@ -1445,6 +1445,33 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite codegen object swap (2026-11-14, 2c88c830).**
+Relinked vpp in both directions, replacing only obj/unity/codegen.o in
+the original ordered list of 29 objects. Both control relinks reproduced
+their original executable byte for byte. CPU 7, VCC_THREADS=1, SQLite
+3.50.4 -O2 -c, one warmup per binary followed by 32 measured compiles
+per binary with balanced run order. Medians from perf stat:
+
+| Other 28 objects | codegen.o | Retired user instructions | CPU ms |
+| --- | --- | ---: | ---: |
+| Self-hosted | Self-hosted | 1,678.60M | 156.550 |
+| Self-hosted | Clang | 1,460.70M | 146.820 |
+| Clang | Self-hosted | 1,318.97M | 142.170 |
+| Clang | Clang | 1,099.51M | 131.255 |
+
+Clang's codegen.o saved 217.90M instructions and 9.73 ms in the
+self-hosted binary. The reverse swap added 219.47M and 10.92 ms to
+the Clang-built binary. The object therefore accounts for 37.6–37.9%
+of the 579.09M instruction gap and 38–43% of the 25.30 ms CPU gap.
+The earlier emitter boundary count includes calls into separately
+compiled objects such as the assembler.
+
+The Clang host normally links as PIE and gains text relocations with
+the self-hosted object. A second balanced experiment linking all four
+as non-PIE (16 measured runs each) gave instruction shares of 37.6%
+and 37.9% and CPU shares of 41% and 37%. Every compile in both
+experiments produced the same SQLite object as the previous benchmark.
+
 **SQLite emitter instruction profile (2026-11-14).**
 On the #284 baseline the emitter accounted for 343.1M of the 588.9M
 extra retired user instructions on SQLite 3.50.4. The counts below
