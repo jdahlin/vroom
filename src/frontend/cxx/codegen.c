@@ -4378,10 +4378,30 @@ fail:
 	return false;
 }
 
+VPRIV uint32_t cxx_gen_var_node_public(cxx *c, uint32_t s, uint32_t loc)
+{
+	return cxx_gen_var_node(c, s, loc);
+}
+
+/* !x, as a node (0: not built) */
+VPRIV uint32_t cc_unary_build_public(cxx *c, int op, uint32_t x, uint32_t loc)
+{
+	uint32_t saved = c->enode, n;
+
+	c->enode = 0;
+	cxx_gen_unary(c, op, x, loc);
+	n = c->enode;
+	c->enode = saved;
+	return n;
+}
+
 /* the element the loop is at (an lvalue): p[i] */
 VPRIV uint32_t cxx_gen_range_for_element(cxx *c, cxx_gen_range *r)
 {
 	cc *a = c->ast;
+
+	if (r->cls)
+		return r->elem;
 
 	return cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, r->p, r->loc)),
 						       cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)), r->loc), r->loc);
@@ -4400,9 +4420,13 @@ VPRIV void cxx_gen_range_for_end(cxx *c, cxx_gen_range *r)
 	if (c->snode)
 		cc_id_list_append(a, &r->body, c->snode);
 	body = cc_statement_new(a, N_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->body), r->body.n);
-	cond = cc_binary_build(a, LEX_TOKEN_LESS, cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)),
-			       cc_node_integer_new(a, r->n, cc_type_basic(TY_LONG), r->loc), r->loc);
-	step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node(c, r->i, r->loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), r->loc), r->loc);
+	if (r->cls)
+		cond = r->cond, step = r->step;
+	else {
+		cond = cc_binary_build(a, LEX_TOKEN_LESS, cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)),
+				       cc_node_integer_new(a, r->n, cc_type_basic(TY_LONG), r->loc), r->loc);
+		step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node(c, r->i, r->loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), r->loc), r->loc);
+	}
 	cc_id_list_init(&sb);
 	cc_id_list_append(a, &sb, step);
 	cc_id_list_append(a, &sb, body);

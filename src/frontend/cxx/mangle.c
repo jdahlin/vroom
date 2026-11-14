@@ -516,7 +516,25 @@ static bool mt_unary(mg_tok *k)
 
 		if (!mt_primary(k))
 			return false;
-		while (k->nfp && mt_is(k, LEX_TOKEN_LEFT_PAREN)) {
+		while (k->nfp && (mt_is(k, LEX_TOKEN_LEFT_PAREN) || ((mt_is(k, LEX_TOKEN_PERIOD) || mt_is(k, LEX_TOKEN_ARROW)) &&
+						    k->p + 1 < k->e && k->m->c->tok[k->p + 1].kind == LEX_TOKEN_IDENTIFIER))) {
+			if (!mt_is(k, LEX_TOKEN_LEFT_PAREN)) {
+				/* x.m, p->m: dt <x> <m>, pt <p> <m> */
+				char obj[1024];
+				size_t ol = k->m->n - mark;
+				bool arrow = mt_is(k, LEX_TOKEN_ARROW);
+
+				if (ol >= sizeof obj)
+					return false;
+				memcpy(obj, k->m->b + mark, ol);
+				k->m->n = mark;
+				mg_str(k->m, arrow ? "pt" : "dt");
+				mg_text(k->m, obj, ol);
+				k->p++;
+				mt_src(k->m, mt_t(k));
+				k->p++;
+				continue;
+			}
 			/* a call: cl <callee> <args> E */
 			char callee[1024];
 			size_t cl = k->m->n - mark;
@@ -584,6 +602,129 @@ static bool mt_binary(mg_tok *k, int level)
 
 static bool mt_expr(mg_tok *k) { return mt_binary(k, 0); }
 
+/*
+ * A function template's trailing requires-clause, written after its parameters: Q <constraint> -- requires
+ * requires { e; ... } as rq X <e> E ... E, or a constraint expression.  0: none; 1: written; -1: one vcc does
+ * not mangle (the name is then a guess).
+ */
+static bool mg_param_ranges(cxx *c, uint32_t pos, uint32_t *b, uint32_t *e, uint32_t *n);
+static int mg_trailing_requires(cxx_mangler *m, uint32_t pos)
+{
+	cxx *c = m->c;
+	uint32_t b[16], e[16], n = 0, p, close = 0;
+	mg_tok k = { m, 0, c->ntok, false, { 0 }, 0 };
+	size_t save_n = m->n;
+	uint32_t save_subs = m->nsubs;
+	int d = 0;
+
+	if (!pos || !mg_param_ranges(c, pos, b, e, &n))
+		return 0;
+	/* the parameter list's ): after the last parameter's name (or the first ( for none) */
+	for (p = n ? e[n - 1] : pos; p < c->ntok; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS)
+			d++;
+		else if (kd == LEX_TOKEN_GREATER && d)
+			d--;
+		else if (kd == LEX_TOKEN_RIGHT_PAREN && !d--) {
+			close = p;
+			break;
+		}
+	}
+	if (!close)
+		return 0;
+	for (p = close + 1, d = 0; p < c->ntok && p < close + 4096; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN)
+			d++;
+		else if (kd == LEX_TOKEN_RIGHT_PAREN)
+			d--;
+		else if (!d && (kd == LEX_TOKEN_LEFT_BRACE || kd == LEX_TOKEN_SEMICOLON || kd == LEX_TOKEN_EQUAL || kd == LEX_TOKEN_COLON))
+			return 0;
+		else if (!d && c->tok[p].len == 8 && !memcmp(c->tok[p].s, "requires", 8))
+			break;
+	}
+	if (p >= c->ntok || c->tok[p].len != 8 || memcmp(c->tok[p].s, "requires", 8))
+		return 0;
+	for (uint32_t i = 0; i < n; i++)
+		k.fp[k.nfp++] = c->tok[e[i]].id;
+	if (!k.nfp)
+		k.fp[k.nfp++] = 1;	/* (none: still an expression context) */
+	k.p = p + 1;
+	mg_str(m, "Q");
+	if (mt_word(&k, "requires") && k.p + 1 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_LEFT_BRACE) {
+		k.p += 2;
+		mg_str(m, "rq");
+		while (!mt_is(&k, LEX_TOKEN_RIGHT_BRACE)) {
+			bool compound = mt_is(&k, LEX_TOKEN_LEFT_BRACE);
+
+			mg_str(m, "X");
+			if (compound)
+				k.p++;
+			if (!mt_binary(&k, 0))
+				goto bad;	/* (X <expression>: no E of its own) */
+			if (compound) {
+				/* { e } [noexcept] [-> Concept<args>]: X <e> [N] [R <type-constraint>] */
+				if (!mt_is(&k, LEX_TOKEN_RIGHT_BRACE))
+					goto bad;
+				k.p++;
+				if (mt_word(&k, "noexcept"))
+					k.p++, mg_str(m, "N");
+				if (mt_is(&k, LEX_TOKEN_ARROW)) {
+					cxx_entity *ce = NULL;
+					cxx_scope *sc = NULL;
+
+					k.p++;
+					mg_str(m, "R");
+					if (mt_word(&k, "std") && k.p + 1 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_COLON_COLON) {
+						cxx_entity *ns = cxx_lookup_local(c->global, vintern_cstr("std"));
+
+						while (ns && ns->kind != CXX_ENTITY_NAMESPACE)
+							ns = ns->next;
+						sc = ns ? ns->members : NULL;
+						k.p += 2;
+					}
+					if (!mt_is(&k, LEX_TOKEN_IDENTIFIER))
+						goto bad;
+					if (sc)
+						ce = cxx_lookup_in(c, sc, mt_t(&k)->id, 0);
+					else
+						for (const cxx_scope *s2 = m->tps; s2 && !ce; s2 = s2->parent)
+							ce = cxx_lookup_in(c, (cxx_scope *)s2, mt_t(&k)->id, 0);
+					while (ce && ce->kind != CXX_ENTITY_CONCEPT)
+						ce = ce->next;
+					if (!ce || !ce->home)
+						goto bad;
+					k.p++;
+					if (mg_nested(m, ce->home)) {
+						mg_str(m, "N");
+						mg_prefix(m, ce->home);
+					}
+					mg_source_name(m, ce->name);
+					mg_remember(m, CXX_SUB_TEMPLATE, ce, 0);
+					if (mt_is(&k, LEX_TOKEN_LESS) && !mt_targs(&k))
+						goto bad;
+					if (mg_nested(m, ce->home))
+						mg_str(m, "E");
+				}
+			}
+			if (!mt_is(&k, LEX_TOKEN_SEMICOLON))
+				goto bad;
+			k.p++;
+		}
+		mg_str(m, "E");
+	} else if (!mt_binary(&k, 0))
+		goto bad;
+	if (m->bad)
+		goto bad;
+	return 1;
+bad:
+	m->n = save_n, m->nsubs = save_subs, m->bad = false;
+	return -1;
+}
+
 /* the declarator's parameters from a declaration's first token: each one's type tokens [b, e) (its name
    excluded); false: not found, an unnamed parameter or more than 16 */
 static bool mg_param_ranges(cxx *c, uint32_t pos, uint32_t *b, uint32_t *e, uint32_t *n)
@@ -609,6 +750,14 @@ static bool mg_param_ranges(cxx *c, uint32_t pos, uint32_t *b, uint32_t *e, uint
 		} else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p >= pos + 3 && c->tok[p - 1].kind == LEX_TOKEN_RIGHT_PAREN &&
 			   c->tok[p - 2].kind == LEX_TOKEN_LEFT_PAREN && c->tok[p - 3].len == 8 && !memcmp(c->tok[p - 3].s, "operator", 8)) {
 			open = p;
+			break;
+		} else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p >= pos + 2 && c->tok[p - 1].kind != LEX_TOKEN_IDENTIFIER &&
+			   c->tok[p - 2].len == 8 && !memcmp(c->tok[p - 2].s, "operator", 8)) {
+			open = p;	/* operator!=( ... */
+			break;
+		} else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && p >= pos + 3 && c->tok[p - 1].kind == LEX_TOKEN_RIGHT_SQUARE &&
+			   c->tok[p - 3].len == 8 && !memcmp(c->tok[p - 3].s, "operator", 8)) {
+			open = p;	/* operator[]( */
 			break;
 		}
 	}
@@ -1508,6 +1657,15 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	if (x->flags & TF_VARIADIC)
 		mg_str(&m, "z");
 params_done:
+	if (f->is_instance) {
+		const qty *ph0 = m.ph;
+		uint32_t nph0 = m.nph;
+
+		m.ph = m.tph ? m.tph : m.ph, m.nph = m.tph ? m.ntph : m.nph;
+		if (mg_trailing_requires(&m, cxx_instance_decl_pos(f)) < 0)
+			c->mangle_guess = 1;	/* (a requires-clause not mangled: clang writes Q <constraint>) */
+		m.ph = ph0, m.nph = nph0;
+	}
 	if (m.bad && getenv("VCC_CXX_MANGLE_WHY"))
 		fprintf(stderr, "not mangled: %.*s (so far: %.*s)\n", (int)v->len, v->s, (int)m.n, m.b);
 	if (m.bad || m.n + 1 > cap)

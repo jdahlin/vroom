@@ -3746,6 +3746,13 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
 					gen_declared = true;
 				}
+			} else if (gen_local && !c->tentative) {
+				/* T x(e) of a scalar or a reference: as T x = e */
+				cxx_call_arguments_parse(c);
+				if (c->ncargs == 1 && c->carg_nodes[0]) {
+					cxx_gen_local_declare(c, gen_local, c->carg_nodes[0], true, name_loc);
+					gen_declared = true;
+				}
 			} else
 				cxx_expression_list_parse(c);
 		} else if (object) {
@@ -4082,8 +4089,17 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 		t = cxx_type_function(c, c->decl_return, NULL, 0, true), c->sig_fake = 1;
 	/* a trailing requires-clause: its value with the arguments bound (false: the candidate is not viable) */
 	c->sig_requires = 1;
-	if (f && cxx_is_kw(c, CXX_KW_requires))
-		c->sig_requires = (int8_t)(any_return ? (cxx_requires_clause_parse(c), 1) : cxx_requires_clause_value(c));
+	if (f && cxx_is_kw(c, CXX_KW_requires) && any_return)
+		cxx_requires_clause_parse(c);
+	else if (f && cxx_is_kw(c, CXX_KW_requires)) {
+		/* (the clause may name the parameters: requires requires { x.base() != y.base(); }) */
+		cxx_scope *ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *saved = c->scope;
+
+		cxx_params_declare(c, ps, c->decl_params, c->ndecl_params);
+		c->scope = ps;
+		c->sig_requires = (int8_t)cxx_requires_clause_value(c);
+		c->scope = saved;
+	}
 	if ((c->member_missing || c->einvalid) && !any_return && getenv("VCC_CXX_SIG")) {
 		fprintf(stderr, "signature fails: missing %u invalid %u (%u):", c->member_missing, c->einvalid, c->einvalid_at);
 		for (uint32_t i = c->einvalid_at > 12 ? c->einvalid_at - 12 : 0; i < c->einvalid_at + 3 && i < c->ntok; i++)

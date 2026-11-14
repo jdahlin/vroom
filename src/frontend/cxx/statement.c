@@ -99,6 +99,127 @@ static bool cxx_declaration_statement_try(cxx *c)
 	return cxx_try(c, cxx_block_declaration);
 }
 
+/*
+ * for (decl : r) over a class with begin() and end(): { auto &&__r = r; auto __b = __r.begin(), __e = __r.end();
+ * for (; __b != __e; ++__b) { decl = *__b; body } } -- each call resolved and built as the expression would
+ * be (a pointer as the iterator: the built-in operators).  Sets gr's loop parts; false: not built.
+ */
+static bool cxx_range_for_class(cxx *c, cxx_gen_range *gr, uint32_t range, qty rt, uint32_t loc)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(rt));
+	cxx_entity *bs, *es;
+	uint32_t rp, rnode, bnode, enode, bsym, esym;
+	qty it, it2;
+
+	if (!cls || !range || !(AST_NODE_AT(a, range)->flags & NF_LVALUE) || !c->gen_block)
+		return false;
+	bs = cxx_lookup_in(c, cls, vintern_cstr("begin"), 0);
+	es = cxx_lookup_in(c, cls, vintern_cstr("end"), 0);
+	if (!bs || !es || bs->kind == CXX_ENTITY_DEPENDENT || es->kind == CXX_ENTITY_DEPENDENT)
+		return false;
+	memset(gr, 0, sizeof *gr);
+	cc_id_list_init(&gr->pre);
+	gr->outer = c->gen_block;
+	c->gen_block = &gr->pre;
+	/* the range, once: a pointer to it */
+	rp = cxx_gen_local(c, 0, cc_type_pointer(a, QUNQ(AST_NODE_AT(a, range)->ty)), loc);
+	if (!rp)
+		goto fail;
+	cxx_gen_local_declare(c, rp, cc_address_of_build(a, range, loc), true, loc);
+	rnode = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, rp, loc)), loc);
+	/* begin(), end() */
+	c->call_obj = (QQ(rt) & Q_CONST) ? 2 : 1;
+	cxx_call_type(c, bs, CXX_TY_UNKNOWN, NULL, NULL, 0);
+	if (!c->call_resolved || !c->call_picked || (it = c->etype) == CXX_TY_UNKNOWN)
+		goto fail;
+	c->enode = 0;
+	cxx_gen_call(c, c->call_picked, rnode, false, NULL, 0, loc);
+	bnode = c->enode;
+	c->call_obj = (QQ(rt) & Q_CONST) ? 2 : 1;
+	cxx_call_type(c, es, CXX_TY_UNKNOWN, NULL, NULL, 0);
+	if (!c->call_resolved || !c->call_picked || (it2 = c->etype) == CXX_TY_UNKNOWN || QUNQ(it2) != QUNQ(it) || !bnode)
+		goto fail;
+	c->enode = 0;
+	cxx_gen_call(c, c->call_picked, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, rp, loc)), loc), false, NULL, 0, loc);
+	enode = c->enode;
+	if (!enode)
+		goto fail;
+	it = QUNQ(it);
+	bsym = cxx_gen_local(c, 0, it, loc), esym = cxx_gen_local(c, 0, it, loc);
+	if (!bsym || !esym)
+		goto fail;
+	if (cc_type_is_record(a, it)) {
+		uint8_t lv = 0;
+
+		cxx_ctor_use(c, it, &it, &lv, 1, false);
+		cxx_gen_construct_local(c, bsym, it, &bnode, 1, loc);
+		cxx_ctor_use(c, it, &it, &lv, 1, false);
+		cxx_gen_construct_local(c, esym, it, &enode, 1, loc);
+	} else {
+		cxx_gen_local_declare(c, bsym, bnode, true, loc);
+		cxx_gen_local_declare(c, esym, enode, true, loc);
+	}
+	if (!cxx_gen_on(c))
+		goto fail;
+	{
+		uint32_t bv = cxx_gen_var_node_public(c, bsym, loc), ev = cxx_gen_var_node_public(c, esym, loc);
+
+		if (!cc_type_is_record(a, it)) {
+			if (AST_TYPE_KIND(a, it) != TY_PTR)
+				goto fail;
+			gr->cond = cc_binary_build(a, LEX_TOKEN_EXCLAMATION_EQUAL, cc_node_rvalue(a, bv), cc_node_rvalue(a, ev), loc);
+			gr->step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node_public(c, bsym, loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), loc), loc);
+			gr->elem = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node_public(c, bsym, loc)), loc);
+		} else {
+			qty arg = it;
+
+			/* __b != __e (or !(__b == __e)) */
+			c->op_lv_set = 1, c->op_lv[0] = 1;
+			if (cxx_operator_call_type(c, vintern_cstr("operator!="), it, &arg, 1) && c->call_resolved && c->call_picked) {
+				c->enode = 0;
+				cxx_gen_operator_call(c, bv, &ev, 1, loc);
+				gr->cond = c->enode;
+			} else if ((arg = it, c->op_lv_set = 1, c->op_lv[0] = 1,
+				    cxx_operator_call_type(c, vintern_cstr("operator=="), it, &arg, 1)) && c->call_resolved && c->call_picked) {
+				c->enode = 0;
+				cxx_gen_operator_call(c, bv, &ev, 1, loc);
+				gr->cond = c->enode ? cc_unary_build_public(c, LEX_TOKEN_EXCLAMATION, c->enode, loc) : 0;
+			}
+			c->op_lv_set = 0;
+			/* ++__b */
+			c->op_lv_set = 1, c->op_lv[0] = 1;
+			if (cxx_operator_call_type(c, vintern_cstr("operator++"), it, NULL, 0) && c->call_resolved && c->call_picked) {
+				c->enode = 0;
+				cxx_gen_operator_call(c, cxx_gen_var_node_public(c, bsym, loc), NULL, 0, loc);
+				gr->step = c->enode;
+			}
+			c->op_lv_set = 0;
+			/* *__b */
+			c->op_lv_set = 1, c->op_lv[0] = 1;
+			if (cxx_operator_call_type(c, vintern_cstr("operator*"), it, NULL, 0) && c->call_resolved && c->call_picked) {
+				c->enode = 0;
+				cxx_gen_operator_call(c, cxx_gen_var_node_public(c, bsym, loc), NULL, 0, loc);
+				gr->elem = c->enode;
+			}
+			c->op_lv_set = 0;
+		}
+	}
+	if (!gr->cond || !gr->step || !gr->elem)
+		goto fail;
+	gr->cond = cxx_gen_condition(c, gr->cond);
+	if (!gr->cond)
+		goto fail;
+	gr->loc = loc, gr->ok = true, gr->cls = true;
+	cc_id_list_init(&gr->body);
+	c->gen_block = &gr->body;
+	return true;
+fail:
+	c->gen_block = gr->outer;
+	cxx_gen_fail(c);
+	return false;
+}
+
 /* for (init; cond; inc) or for (decl : range); after the ( */
 static void cxx_for_parse(cxx *c)
 {
@@ -159,7 +280,7 @@ static void cxx_for_parse(cxx *c)
 					cxx_declare(c, fs, c->tok[k].id, CXX_ENTITY_VALUE);	/* structured bindings */
 			cxx_expect(c, LEX_TOKEN_COLON);
 			uint32_t rloc = cxx_peek(c, 0)->loc, rnode = 0, elems[64], nelems = 0;
-			qty brace_elem = CXX_TY_UNKNOWN;
+			qty brace_elem = CXX_TY_UNKNOWN, rrt = CXX_TY_UNKNOWN;
 			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE), list_ok = braced;
 
 			if (braced) {
@@ -188,7 +309,7 @@ static void cxx_for_parse(cxx *c)
 					list_ok = false;
 			} else {
 				cxx_initializer_parse(c);
-				rnode = c->enode;
+				rnode = c->enode, rrt = c->etype;
 			}
 			if (var) {
 				/* auto: deduced from *begin(range), an lvalue; else as declared */
@@ -206,7 +327,11 @@ static void cxx_for_parse(cxx *c)
 				bool gen = cxx_gen_on(c) && var && var->ty != CXX_TY_UNKNOWN && !c->tentative && !c->template_depth &&
 					   (!braced || list_ok);
 
-				if (gen && cxx_gen_range_for_begin(c, &gr, rnode, braced ? elems : NULL, nelems, brace_elem, rloc)) {
+				bool cls_range = gen && !braced && rnode && c->etype != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, rrt) &&
+						 AST_TYPE_KIND(c->ast, rrt) != TY_ARRAY;
+
+				if (gen && (cls_range ? cxx_range_for_class(c, &gr, rnode, rrt, rloc) :
+						       cxx_gen_range_for_begin(c, &gr, rnode, braced ? elems : NULL, nelems, brace_elem, rloc))) {
 					uint32_t vs = cxx_gen_local(c, var->name, var->ty, rloc);
 
 					if (vs) {

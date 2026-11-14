@@ -1541,3 +1541,13 @@ lokal array av deras typ, `auto` härledd från den, const som initializer_list:
 `{ E *p = r; for (long i = 0; i < N; i++) { decl = p[i]; body } }`; variabeln som kopia, referens eller
 pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cxx-run 61/61; cxx-fork
 69/70, 3 205 funktioner (json:s range-for går över behållare eller strömmar).
+
+### Status 67 (2026-11-14): range-for över klasser, direktinitiering, requires-mangling
+
+- Range-for över klasser (begin()/end(), medlem eller fri funktion), `T x(e)` för skalärer,
+  ett avslutande requires-villkor utvärderas med parametrarna deklarerade, och Q-mangling
+  (`Q rq X … R concept`, `dt`/`pt`).  Test: range-for-classes.cpp, requires-params.cpp; 63/63.
+- Vad som saknas (VCC_CXX_GEN=2 över sviten, 41 818 misslyckade uttryck): vcc gör 29 av 4 066
+  testkroppar.  ~45 % är funktionsparameterpaket (`std::forward<Args>(args)...`), ~10 % medlemmar
+  i klassmallar som inte är utlagda, sedan beroende statiska anrop (`traits_type::length`),
+  inbyggda funktioner (`__builtin_memmove`, `clzg`) och initierarlistor (`json j = {1, 2}`).
