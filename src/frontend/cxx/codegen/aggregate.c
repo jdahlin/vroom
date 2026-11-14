@@ -146,8 +146,16 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_t
 
 			if (!v)
 				return false;
-			if (cxx_gen_is_reference(c, ft))
-				return false;	/* (a reference member: not built yet) */
+			if (cxx_gen_is_reference(c, ft)) {
+				/* a reference member: bound, its referent's address stored (the member as a plain pointer) */
+				qty rp = cc_type_pointer(a, AST_TYPE(a, ft)->base), pp = cc_type_pointer(a, rp);
+				uint32_t addr = cc_address_of_build(a, m, loc);
+
+				m = cc_dereference_build(a, cc_cast_insert(a, addr, pp, CK_NOP), loc);
+				cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, m, cc_cast_insert(a, v, rp, CK_NOP), loc), 0, 0));
+				k++;
+				continue;
+			}
 			if (ft != QUNQ(ft)) {
 				qty pt = cc_type_pointer(a, QUNQ(ft));
 				uint32_t addr = cc_address_of_build(a, m, loc);

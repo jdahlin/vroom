@@ -44,7 +44,9 @@ VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
 				i++;
 				continue;
 			}
-			if (c->tok[i - 1].kind == LEX_TOKEN_IDENTIFIER || c->tok[i - 1].kind == LEX_TOKEN_RIGHT_PAREN)
+			if (c->tok[i - 1].kind == LEX_TOKEN_IDENTIFIER || c->tok[i - 1].kind == LEX_TOKEN_RIGHT_PAREN ||
+			    (c->tok[i - 1].kind == LEX_TOKEN_RIGHT_SQUARE && i >= 3 && c->tok[i - 3].kw == CXX_KW_operator) ||	/* (operator[]) */
+			    (i >= 2 && c->tok[i - 2].kw == CXX_KW_operator))	/* (operator==, operator+ and the like) */
 				break;
 		}
 	}
@@ -160,8 +162,9 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 	if (!setjmp(jb)) {
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
 		c->stats.ooc_bodies++;
-	} else
+	} else {
 		c->stats.ooc_failed++;
+	}
 	c->ooc_target = NULL;
 	c->instantiating--, c->body_depth--;
 	cxx_outer_restore(c, &o);

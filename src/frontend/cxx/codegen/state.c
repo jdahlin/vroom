@@ -405,6 +405,8 @@ VPRIV bool cxx_gen_value_ok(cxx *c, qty t)
 
 	if (cxx_gen_type_ok(c, t))
 		return true;
+	if (t != CXX_TY_UNKNOWN && cc_type_is_record(a, t) && AST_TYPE_KIND(a, t) != TY_ARRAY)
+		cxx_type_require_complete(c, QUNQ(t));	/* (a result type an instance names, tuple<int&>: completed now) */
 	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(a, t) || AST_TYPE_KIND(a, t) == TY_ARRAY || !cxx_gen_class_ok2(c, t, true))
 		return false;
 	tr = cxx_gen_trivial_abi(c, t, 0);

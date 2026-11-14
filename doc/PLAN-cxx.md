@@ -2029,3 +2029,16 @@ cxx-strict 291 (322): 59 fler kompileras, inga nya fel.
   återställs efter det (förut gjorde `__primary_template<iterator_traits<T>>` signaturen med
   `iter_difference_t<T>` till ett substitutionsfel).
 Test: `run/friend-templates.cpp`.  cxx-strict 274 (291): 69 fler kompileras, 2 nya som nyss nåddes.
+
+## Status 118 (2026-11-14)
+Rättelse: "std::map fungerar" i Status 109-115 byggde på `wf.sh`, som fyller i clangs funktioner som svaga
+symboler; med vcc:s objekt ensamt saknades `__find_equal` och `map::operator[]`.  Leksakerna körs nu med
+vcc:s objekt ensamt (länkat mot libc++).
+- En medlemsmall i en klassmall med flera definitioner utanför klassen med samma namn (`__find_equal(k)` och
+  `__find_equal(hint, dummy, k)`): den med deklarationens antal parametrar och const.  `std::set` och
+  `map::emplace` länkar och kör nu med vcc ensamt.
+- `cxx_ooc_refs_agree` hittar parameterlistan efter `operator[]` och andra operatornamn.
+- Aggregat med referensmedlemmar (`R{x}` för `struct R { int &r; }`): referentens adress lagras.
+- En klasstyp som resultat kompletteras innan den bedöms (`cxx_gen_value_ok`).
+Kvar för `map::operator[]` och hela `std::tuple`: en partiell specialisering vars mönster använder en alias
+med en pack (`__tuple_impl<__index_sequence<I...>, T...>`) matchas aldrig, så `tuple<int>` får ingen layout.

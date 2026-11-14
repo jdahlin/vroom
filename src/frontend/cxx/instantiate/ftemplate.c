@@ -314,6 +314,18 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 		    t->oocs[i].inner->ntparams == f->p.params->ntparams &&
 		    (x->pos ? t->oocs[i].params->ntparams == nbargs : !t->params || t->oocs[i].params->ntparams == t->params->ntparams))
 			d = &t->oocs[i], matches++;	/* (the primary's: a partial specialization's definitions, vector<bool, A>'s, have its parameters) */
+	if (matches > 1) {
+		/* overloads of one name defined outside (__find_equal(k) and __find_equal(hint, dummy, k)): the one with
+		   this declaration's number of function parameters and const */
+		uint32_t np = cxx_ftemplate_np(c, f);
+
+		matches = 0;
+		for (uint32_t i = 0; i < t->noocs; i++)
+			if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams &&
+			    (x->pos ? t->oocs[i].params->ntparams == nbargs : !t->params || t->oocs[i].params->ntparams == t->params->ntparams) &&
+			    t->oocs[i].nparams == np && t->oocs[i].is_const == inst->fn_const)
+				d = &t->oocs[i], matches++;
+	}
 	if (matches != 1 || d->params->ntparams > nbargs + 1)
 		return false;
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
