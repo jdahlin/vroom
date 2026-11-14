@@ -429,6 +429,10 @@ typedef struct cxx {
 	uint32_t gen_try_serial;	/* try blocks so far (their trampolines' names) */
 	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
+	struct cxx_entity *ctor_ilist;	/* ... for a braced list: its std::initializer_list constructor (NULL: none) */
+	qty ctor_ilist_types[16];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
+	uint8_t ctor_ilist_lval[16];
+	uint32_t ctor_ilist_n;
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
 	uint8_t ctor_none;

@@ -3642,8 +3642,17 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					}
 				}
 			} else if (object) {
+				/* T x = { ... }: copy-list-initialization, as T x{ ... } (its explicit constructors: not told apart) */
+				uint32_t an[16], n;
+
 				cxx_braced_arguments_parse(c);
+				n = c->ncargs;
+				memcpy(an, c->carg_nodes, sizeof an);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
+				if (gen_local) {
+					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					gen_declared = true;
+				}
 			} else {
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 				/* code generation: a variable defined at namespace scope, its initializer's node */

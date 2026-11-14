@@ -21,6 +21,8 @@ VPRIV bool cxx_gen_on(cxx *c)
  * or a class template instance's member's body is instantiated where it is first used, in the middle of
  * the body that uses it.
  */
+static __thread char cxx_gen_why[256];	/* VCC_CXX_GEN=4: the first thing not built in the function being built */
+
 typedef struct cxx_gen_saved {
 	struct cxx_gen_saved *next;
 	uint8_t gen, gen_failed;
@@ -32,6 +34,7 @@ typedef struct cxx_gen_saved {
 	qty init_bases[16];
 	uint8_t delegates, returns, why;
 	struct cxx_gen_lambda *gen_lambda;
+	char why_text[256];
 } cxx_gen_saved;
 
 static void cxx_gen_push(cxx *c)
@@ -49,6 +52,7 @@ static void cxx_gen_push(cxx *c)
 	memcpy(s->init_bases, c->gen_init_bases, sizeof s->init_bases), s->ninit_bases = c->ngen_init_bases;
 	s->delegates = c->gen_delegates, s->returns = c->gen_returns, s->why = c->gen_why;
 	s->gen_lambda = c->gen_lambda;
+	memcpy(s->why_text, cxx_gen_why, sizeof cxx_gen_why), cxx_gen_why[0] = 0;
 	c->gen_stack = s;
 	c->gen_stack_depth++;
 }
@@ -59,6 +63,7 @@ static void cxx_gen_pop(cxx *c)
 
 	c->gen_stack = s->next;
 	c->gen_stack_depth--;
+	memcpy(cxx_gen_why, s->why_text, sizeof cxx_gen_why);
 	c->gen = s->gen, c->gen_failed = s->gen_failed, c->gen_level = s->gen_level;
 	c->enode = s->enode, c->snode = s->snode, c->sdone = s->sdone, c->sdepth = s->sdepth;
 	c->gen_psyms = s->gen_psyms, c->gen_npsyms = s->gen_npsyms, c->gen_fn = s->gen_fn, c->gen_this = s->gen_this;
@@ -93,7 +98,13 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 		return;	/* (unevaluated: a discarded if constexpr branch, sizeof's operand) */
 	if (trace < 0)
 		trace = getenv("VCC_CXX_GEN") != NULL;
-	if (trace && !c->gen_failed) {	/* VCC_CXX_GEN=1: the first thing in each function that is not built, and where vcc gave up */
+	if (trace && !c->gen_failed) {	/* VCC_CXX_GEN=4: kept for the function's name (cxx_gen_function_end) */
+		int k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "%s:%d:", strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
+
+		for (uint32_t i = c->pos > 6 ? c->pos - 6 : 0; i < c->pos + 3 && i < c->ntok && k > 0 && k < (int)sizeof cxx_gen_why - 40; i++)
+			k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s", (int)(c->tok[i].len < 30 ? c->tok[i].len : 30), c->tok[i].s);
+	}
+	if (trace && !c->gen_failed && atoi(getenv("VCC_CXX_GEN")) < 4) {	/* VCC_CXX_GEN=1: the first thing in each function that is not built, and where vcc gave up */
 		fprintf(stderr, "no code (%s:%d):", strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 		for (uint32_t i = c->pos > 10 ? c->pos - 10 : 0; i < c->pos + 3 && i < c->ntok; i++)
 			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
@@ -2575,6 +2586,77 @@ static bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_
 	return true;
 }
 
+/*
+ * A std::initializer_list<E> for a braced list's elements (the arguments of T{...}): a local array of them,
+ * converted to E (constructed, for a class E), and a local initializer_list pointing at it, as an lvalue
+ * (0: not built: libc++'s or libstdc++'s members not found; a class E's are destroyed by the caller).
+ */
+static bool cxx_gen_destroy(cxx *c, uint32_t x, qty t, cc_id_list *out, uint32_t loc);
+
+static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array)
+{
+	cc *a = c->ast;
+	qty lt = cc_type_basic(TY_LONG), et, pt;
+	uint32_t arr = 0, il, begin, size;
+	cc_id_list *saved = c->gen_block;
+	qty types[16];
+	uint8_t lvals[16];
+	uint32_t types_n = c->ctor_ilist_n == nargs ? nargs : 0;	/* (the element constructors' own uses overwrite them) */
+
+	memcpy(types, c->ctor_ilist_types, sizeof types), memcpy(lvals, c->ctor_ilist_lval, sizeof lvals);
+	if (!cxx_tag_scope_get(c, QUNQ(ilt)) || !(il = cxx_gen_local(c, 0, QUNQ(ilt), loc)))
+		return 0;
+	begin = cxx_gen_member_of(c, cxx_gen_var_node(c, il, loc), vintern_cstr("__begin_"), loc, 0);
+	size = cxx_gen_member_of(c, cxx_gen_var_node(c, il, loc), vintern_cstr("__size_"), loc, 0);
+	if (!begin || !size) {	/* (libstdc++'s) */
+		begin = cxx_gen_member_of(c, cxx_gen_var_node(c, il, loc), vintern_cstr("_M_array"), loc, 0);
+		size = cxx_gen_member_of(c, cxx_gen_var_node(c, il, loc), vintern_cstr("_M_len"), loc, 0);
+	}
+	if (!begin || !size || AST_TYPE_KIND(a, AST_NODE_AT(a, begin)->ty) != TY_PTR)
+		return 0;
+	pt = AST_NODE_AT(a, begin)->ty, et = QUNQ(AST_TYPE(a, pt)->base);
+	if (!cxx_gen_object_type_ok(c, et))
+		return 0;
+	c->gen_block = out;
+	if (nargs) {
+		if (!(arr = cxx_gen_local(c, 0, cc_type_array(a, et, nargs, 0), loc)))
+			goto fail;
+		cxx_gen_local_declare(c, arr, 0, false, loc);
+	}
+	for (uint32_t i = 0; i < nargs; i++) {
+		uint32_t slot = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)),
+								  cc_node_integer_new(a, i, lt, loc), loc), loc);
+
+		if (!args[i])
+			goto fail;
+		if (cc_type_is_record(a, et)) {
+			qty at = i < types_n && types[i] != CXX_TY_UNKNOWN ? types[i] : AST_NODE_AT(a, args[i])->ty;
+			uint8_t lv = i < types_n ? lvals[i] : (AST_NODE_AT(a, args[i])->flags & NF_LVALUE) != 0;
+
+			cxx_ctor_use(c, et, &at, &lv, 1, false);
+			if (!cxx_gen_construct_at(c, slot, et, &args[i], 1, out, loc))
+				goto fail;
+		} else {
+			uint32_t x = cxx_gen_bind(c, args[i], et, loc);
+
+			if (!x)
+				goto fail;
+			cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, slot, x, loc), 0, 0));
+		}
+	}
+	cxx_gen_local_declare(c, il, 0, false, loc);
+	cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, begin,
+		nargs ? cc_conversion_apply(a, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)), pt) : cc_conversion_apply(a, cc_node_integer_new(a, 0, lt, loc), pt), loc), 0, 0));
+	cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, size,
+		cc_conversion_apply(a, cc_node_integer_new(a, nargs, lt, loc), AST_NODE_AT(a, size)->ty), loc), 0, 0));
+	c->gen_block = saved;
+	*array = arr;
+	return cxx_gen_var_node(c, il, loc);
+fail:
+	c->gen_block = saved;
+	return 0;
+}
+
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -2584,6 +2666,34 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 
 	if (!target || !cls || nargs == UINT32_MAX || nargs > 16)
 		return false;
+	if (c->ctor_ilist && c->ctor_ilist->member_of == cls && c->ctor_ilist->ty != CXX_TY_UNKNOWN) {
+		/* T{a, b} with an initializer_list constructor: it, from the list (its other parameters defaulted) */
+		cxx_entity *ilc = c->ctor_ilist;
+		uint32_t il, arr = 0;
+		qty et;
+
+		c->ctor_ilist = NULL;
+		il = cxx_gen_initializer_list(c, a->params[AST_TYPE(a, ilc->ty)->aux], args, nargs, out, loc, &arr);
+		if (!il)
+			return false;
+		cxx_gen_call(c, ilc, target, false, &il, 1, loc);
+		if (!c->enode)
+			return false;
+		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, c->enode, 0, 0));
+		c->enode = 0;
+		/* the array's elements live to the end of the full-expression: here, the declaration's (not for an
+		   exception thrown by the constructor) */
+		et = arr ? AST_TYPE(a, a->syms[arr].ty)->base : CXX_TY_UNKNOWN;
+		if (arr && cc_type_is_record(a, et) && cxx_gen_needs_destruction(c, et, 0))
+			for (uint32_t i = nargs; i-- > 0;) {
+				uint32_t slot = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)),
+									  cc_node_integer_new(a, i, cc_type_basic(TY_LONG), loc), loc), loc);
+
+				if (!cxx_gen_destroy(c, slot, et, out, loc))
+					return false;
+			}
+		return true;
+	}
 	if (ctor && ctor->member_of != cls)
 		ctor = NULL, found = false;	/* (a base's constructor, found by name: not this class's) */
 	if (ctor && nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t)) {
@@ -3132,8 +3242,13 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 	cxx_entity *dtor;
 	cc_id_list *block = c->gen_block;
 	/* (what cxx_ctor_use chose: naming the destructor below resolves nothing, but keep it apart) */
-	cxx_entity *picked = c->ctor_picked;
+	cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
 	bool found = c->ctor_found, none = c->ctor_none;
+	qty il_types[16];
+	uint8_t il_lval[16];
+	uint32_t il_n = c->ctor_ilist_n;
+
+	memcpy(il_types, c->ctor_ilist_types, sizeof il_types), memcpy(il_lval, c->ctor_ilist_lval, sizeof il_lval);
 
 	if (!cxx_gen_on(c) || !s)
 		return;
@@ -3157,7 +3272,8 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 		return;
 	}
 	cc_id_list_append(a, block, cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, 0));
-	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il, c->ctor_ilist_n = il_n;
+	memcpy(c->ctor_ilist_types, il_types, sizeof il_types), memcpy(c->ctor_ilist_lval, il_lval, sizeof il_lval);
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
 }
@@ -4951,6 +5067,9 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	cc *a = c->ast;
 	bool ok = c->gen && !c->gen_failed && body;
 	cc_id_list *pre = c->gen_pre;
+
+	if (!ok && c->gen && getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) == 4)	/* VCC_CXX_GEN=4: each function without code, why */
+		fprintf(stderr, "nofn %.*s: %s\n", (int)vintern_ents[f->name].len, vintern_ents[f->name].s, cxx_gen_why), cxx_gen_why[0] = 0;
 
 	if (ok && cxx_gen_is_special(f) && c->gen_this) {
 		const vident *fv = &vintern_ents[f->name];

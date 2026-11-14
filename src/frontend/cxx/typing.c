@@ -1036,7 +1036,7 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	cxx_entity *callee = c->ecallee, *set, *dtor;
 	cxx_scope *cls;
 
-	c->ctor_picked = NULL, c->ctor_found = 0, c->ctor_none = 0;
+	c->ctor_picked = NULL, c->ctor_found = 0, c->ctor_none = 0, c->ctor_ilist = NULL;
 	if (c->tentative || nargs == UINT32_MAX || t == CXX_TY_UNKNOWN || !(cls = cxx_type_class_scope(c, QUNQ(t))))
 		return;
 	cxx_type_require_complete(c, QUNQ(t));
@@ -1051,10 +1051,19 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
 			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux])) {
-				cxx_member_body_use(c, e);
-				set = NULL;
-				break;
+				/* (the one with fewest parameters: vector(initializer_list) before (initializer_list, allocator)) */
+				if (!c->ctor_ilist || ft->n < AST_TYPE(c->ast, c->ctor_ilist->ty)->n)
+					c->ctor_ilist = e;
 			}
+		}
+		if (c->ctor_ilist) {
+			cxx_entity *il = c->ctor_ilist;
+
+			cxx_member_body_use(c, il);	/* (its body constructs things of its own) */
+			c->ctor_ilist = il, c->ctor_ilist_n = nargs < 16 ? nargs : 16;
+			for (uint32_t i = 0; i < c->ctor_ilist_n; i++)
+				c->ctor_ilist_types[i] = args ? args[i] : CXX_TY_UNKNOWN, c->ctor_ilist_lval[i] = lval ? lval[i] : 0;
+			set = NULL;
 		}
 	}
 	/* (from an object of the same class with no constructor that fits: the implicit copy or move) */
@@ -1068,11 +1077,11 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
 	if (dtor && dtor->kind == CXX_ENTITY_VALUE) {
 		/* (the destructor's body, instantiated here, constructs things of its own: keep this choice) */
-		cxx_entity *picked = c->ctor_picked;
+		cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
 		uint8_t found = c->ctor_found, none = c->ctor_none;
 
 		cxx_member_body_use(c, dtor);
-		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il;
 	}
 	c->etype = et, c->elval = el, c->ecallee = callee;
 }

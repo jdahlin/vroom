@@ -377,6 +377,8 @@ static bool cxx_const_widens(cxx *c, qty from, qty to, int64_t v)
 		return true;
 	if (v >= 0)
 		return true;
+	if (from != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, from) == TY_INT128 || AST_TYPE_KIND(c->ast, from) == TY_UINT128))
+		return true;	/* (from a 128-bit constant: held sign-extended already, ~(unsigned __int128)0) */
 	return from != CXX_TY_UNKNOWN && cc_type_is_signed(c->ast, from) && AST_TYPE_KIND(c->ast, from) != TY_ENUM;
 }
 

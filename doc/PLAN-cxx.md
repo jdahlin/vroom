@@ -1551,3 +1551,18 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   testkroppar.  ~45 % är funktionsparameterpaket (`std::forward<Args>(args)...`), ~10 % medlemmar
   i klassmallar som inte är utlagda, sedan beroende statiska anrop (`traits_type::length`),
   inbyggda funktioner (`__builtin_memmove`, `clzg`) och initierarlistor (`json j = {1, 2}`).
+
+### Status 68 (2026-11-14): std::initializer_list, 128-bitarskonstanter, VCC_CXX_GEN=4
+
+- `T x = {...}` och `T x{...}` med en initializer_list-konstruktor: en lokal array av elementen
+  (konverterade, eller konstruerade för en klass och förstörda efter konstruktorn) och en
+  initializer_list som pekar på den (libc++:s och libstdc++:s medlemmar).  `json j = {1, 2, 3}` och
+  `{{"a", 1}, {"b", {true, nullptr}}}` körs rätt; elementens typer tas från sema (nullptr: nullptr_t).
+- `~(unsigned __int128)0` förblir en konstant genom en cast: `numeric_limits<__int128>::min()`
+  (odefinierad i 69 av 70 TU:er) får kod.
+- `VCC_CXX_GEN=4`: varje funktion utan kod, med namn och första orsak (orsaken sparas över nästlade
+  instanser).  Testkroppar som saknas: 103 av 118; de vanligaste orsakerna är `auto x = ...` med ett
+  uttryck som inte byggs, lokala objekt av klasstyp som inte godtas (codegen.c, cxx_gen_local),
+  doctest:s `asm("int $3")` och try/catch.
+- Test: initializer-lists.cpp; run 64/64.  Fork: 69/70 (unit-32bit faller även med clang), 5,2 s CPU,
+  46,5x; vcc definierar 3 368 funktioner (förut 3 205), 15 testkroppar.
