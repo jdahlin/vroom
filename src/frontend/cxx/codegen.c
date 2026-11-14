@@ -686,6 +686,13 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 		x = cc_dereference_build(a, cc_cast_insert(a, cc_address_of_build(a, x, loc), cc_type_pointer(a, vp), CK_NOP), loc);
 		return cc_conversion_apply(a, cc_node_rvalue(a, x), QUNQ(to));
 	}
+	if (c->nullptr_ty && QUNQ(AST_NODE_AT(a, x)->ty) == c->nullptr_ty && AST_TYPE_KIND(a, to) == TY_PTR && !cxx_gen_is_reference(c, to)) {
+		/* ... one that is no lvalue (std::forward<nullptr_t>(v)): evaluated, and a null pointer (its only value) */
+		qty pt = QUNQ(to);
+		uint32_t z = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), loc), pt, CK_I2P);
+
+		return cc_node_new_operands(a, N_COMMA, pt, loc, x, z);
+	}
 	if (cxx_gen_is_reference(c, to)) {
 		qty rt = AST_TYPE(a, to)->base;
 
@@ -3180,6 +3187,19 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 	}
 	if (nargs > 1 || (nargs == 1 && !args[0]) || AST_TYPE_KIND(a, mt) == TY_ARRAY || !cxx_gen_type_ok(c, mt)) {
 		cxx_gen_fail(c);
+		return;
+	}
+	if (nargs && args[0] && cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != TY_ARRAY) {
+		/* a scalar member from a class: std::nullptr_t's null pointer, or the class's conversion function (C's
+		   conversion would be an error) */
+		uint32_t v = c->nullptr_ty && QUNQ(AST_NODE_AT(a, args[0])->ty) == c->nullptr_ty ? cxx_gen_bind(c, args[0], QUNQ(mt), loc) :
+			     cxx_gen_convert_class(c, args[0], QUNQ(mt), loc);
+
+		if (!v) {
+			cxx_gen_fail(c);
+			return;
+		}
+		cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, v, loc), 0, 0));
 		return;
 	}
 	value = nargs ? cc_conversion_apply(a, cc_conversion_decay(a, args[0]), QUNQ(mt)) :

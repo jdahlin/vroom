@@ -1372,6 +1372,31 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		if (assign)
 			return false;
 	}
+	/* from std::nullptr_t (a struct here, no class): a pointer or nullptr_t takes it, bool only by direct
+	   initialization, nothing else */
+	if (nt == 2 && c->nullptr_ty && (IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible") ||
+					 IS("__is_convertible") || IS("__is_convertible_to") || IS("__is_nothrow_convertible"))) {
+		bool ctor = IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_trivially_constructible");
+		qty to = ctor ? t[0] : t[1], from = ctor ? t[1] : t[0];
+
+		if (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext)
+			from = AST_TYPE(c->ast, from)->base;
+		if (from != CXX_TY_UNKNOWN && QUNQ(from) == c->nullptr_ty && to != CXX_TY_UNKNOWN) {
+			qty tb = AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext ? AST_TYPE(c->ast, to)->base : to;
+			bool ref = tb != to;
+
+			if (!ref || (QQ(tb) & Q_CONST) || AST_TYPE(c->ast, to)->ext == 2) {
+				int k = AST_TYPE_KIND(c->ast, tb);
+
+				*v = (k == TY_PTR && !AST_TYPE(c->ast, tb)->ext) || QUNQ(tb) == c->nullptr_ty || (ctor && !ref && k == TY_BOOL);
+				if (k == TY_PTR || QUNQ(tb) == c->nullptr_ty || !cc_type_is_record(c->ast, tb))
+					return true;
+			} else if (!cc_type_is_record(c->ast, tb)) {
+				*v = 0;	/* (T& not const from a prvalue) */
+				return true;
+			}
+		}
+	}
 	/* a class from arguments: its constructors decide */
 	if (nt >= 1 && nt <= 2 && (IS("__is_constructible") || IS("__is_nothrow_constructible") || (nt == 2 && (IS("__is_convertible") ||
 	    IS("__is_convertible_to") || IS("__is_nothrow_convertible"))))) {

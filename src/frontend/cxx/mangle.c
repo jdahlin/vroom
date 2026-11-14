@@ -424,8 +424,37 @@ static bool mt_targs(mg_tok *k)
 	k->p++;
 	mg_str(k->m, "I");
 	while (!mt_is(k, LEX_TOKEN_GREATER)) {
+		size_t mark = k->m->n;
+		uint32_t start = k->p;
+		int ti = mt_tparam(k);	/* (a template parameter: T* is that type, a candidate the parameters find) */
+		qty tt = ti >= 0 && k->m->tph && (uint32_t)ti < k->m->ntph ? k->m->tph[ti] : CXX_TY_UNKNOWN;
+
 		if (!mt_type(k))
 			return false;
+		/* T*, T&, T&& (each a substitution candidate), then Args... (Dp <pattern>) */
+		for (int level = 0; mt_is(k, LEX_TOKEN_STAR) || mt_is(k, LEX_TOKEN_AMPERSAND) || mt_is(k, LEX_TOKEN_AMPERSAND_AMPERSAND); level++) {
+			char op = mt_is(k, LEX_TOKEN_STAR) ? 'P' : mt_is(k, LEX_TOKEN_AMPERSAND) ? 'R' : 'O';
+
+			if (k->m->n + 1 >= sizeof k->m->b)
+				return false;
+			memmove(k->m->b + mark + 1, k->m->b + mark, k->m->n - mark);
+			k->m->b[mark] = op, k->m->n++;
+			k->p++;
+			if (tt != CXX_TY_UNKNOWN && start + 1 == k->p - 1 - level) {
+				tt = op == 'P' ? cc_type_pointer(k->m->c->ast, tt) : cxx_type_reference(k->m->c, tt, op == 'O');
+				mg_remember(k->m, CXX_SUB_TYPE, NULL, tt);
+			} else {
+				tt = CXX_TY_UNKNOWN;
+				mg_remember(k->m, CXX_SUB_TEMPLATE, &k->m->c->tok[start] + 0, (qty)(0x100 + level));
+			}
+		}
+		if (mt_is(k, LEX_TOKEN_ELLIPSIS)) {
+			if (k->m->n + 2 >= sizeof k->m->b)
+				return false;
+			memmove(k->m->b + mark + 2, k->m->b + mark, k->m->n - mark);
+			memcpy(k->m->b + mark, "Dp", 2), k->m->n += 2;
+			k->p++;
+		}
 		if (mt_is(k, LEX_TOKEN_COMMA))
 			k->p++;
 		else if (!mt_is(k, LEX_TOKEN_GREATER))

@@ -762,7 +762,7 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 	cxx_nested_name_parse(c, &q, &dep);
 	if (cxx_is_kw(c, CXX_KW_template)) {	/* typename X::template Y<...> */
 		cxx_advance(c);
-		typename_kw = true;
+		typename_kw |= dep;	/* (X known: what Y is decides; X::template f<int>() names a function) */
 	}
 	t = cxx_peek(c, 0);
 	if (t->kind != LEX_TOKEN_IDENTIFIER || t->kw)

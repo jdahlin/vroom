@@ -1649,3 +1649,18 @@ pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cx
   `decltype(begin(c), end(c))` i container_input_adapter_factory).
 - Test: inline-ns-overloads; run 74/74.  Fork 69/70, 7,8 s CPU (31x; mer kod genereras), 22 912 funktioner,
   23 testkroppar.
+
+### Status 75 (2026-11-14): std::pair-retur, `X::template f<T>()`, enable_if-överlagringar
+
+- `X::template f<T>()` med ett känt X är ett anrop, ingen typ (`__check_pair_construction<...>::template
+  __is_pair_constructible<U1, U2>()` i pair:s enable_if): `return {true, p};` till std::pair byggs.
+- `is_constructible`/`is_convertible` från std::nullptr_t; en skalär medlem från ett nullptr_t-objekt
+  (`second(std::forward<U2>(u2))`) och andra klassvärden går genom vcc:s konvertering i stället för C:s
+  (som gav ett hårt fel).
+- Mangling: `Tn enable_if<cond>` med `T*`, `T&`, `Args...` i villkoret (`PT_`, `DpT0_`, kandidater som
+  parametrarna hittar).  Förut fick allocator_traits::construct med och utan allokatorns construct samma
+  namn och den först definierade vann (fel kod).
+- unit-allocator faller i fork-mätningen: testets `static bool next_construct_fails` finns i både vcc:s och
+  clangs objekt och läses sektionsrelativt, så de två halvorna ser var sin kopia (en artefakt av det
+  blandade bygget, inte vcc:s kod).
+- Test: enable-if-overloads; run 75/75.  Fork 68/70, 7,7 s CPU (31,8x), 23 166 funktioner, 24 testkroppar.
