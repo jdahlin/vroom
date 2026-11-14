@@ -1,62 +1,58 @@
-# vroom
+<h1 align="center"><a href="doc/logos/hairpin-cartoon.png"><img src="doc/logos/hairpin-cartoon.png" alt="vroom" width="420"></a></h1>
 
-**vcc** is a fast C toolchain: preprocessor, compiler, assembler, linker
-and archiver, written from scratch.  It runs as a long-lived server (vccd),
-so work that translation units share is done once.  It is meant to be used
-as a drop-in compiler with `CC=vcc`.
+**vroom is a C toolchain built to get from a clean kernel tree to a bootable arm64 Linux image in under two seconds on an M1 Pro.** The goal is still ahead of us. A recorded cold build took 9.9 seconds, and the resulting kernel booted Debian.
 
-**vroom** is the project around it: a cold arm64 Linux kernel build on
-macOS, from an empty tree to a bootable `Image`, with a target of under
-2 seconds on an M1 Pro.
+The compiler is called `vcc`. Set `CC=vcc` and make sends jobs to `vccd`, a long-lived process that compiles C, assembles code, builds archives and links the kernel. Clang bootstraps the tools. The kernel build itself runs entirely on vroom.
 
-## Where it stands
+## ⏱️ Performance
 
-- **The kernel builds without clang, LLVM or binutils.**  Every `.c` and `.S`
-  file is compiled by vcc, linked by vcc's linker and archived by vcc's
-  `ar`.  The kernel boots Debian to `is-system-running = running`.
-- **A cold kernel build takes about 10 s** with vccd alone.  Most of the remaining time is make and Kbuild,
-  not the compiler.
-- **Preprocessor parity with clang:** `vcc -E` matches `clang -E`
-  token for token on the kernel's TUs, and `-dM`, `-M`, `-H`, `-dD` and
-  line markers match byte for byte.
-- **Real-world projects:** PostgreSQL (all `meson test` passing), SQLite
-  (TCL test runner), zlib and ffmpeg (FATE) build with vcc on macOS.
-  vcc also compiles itself.
-- **Targets:** arm64 Linux (ELF) and arm64 macOS (Mach-O) are the main
-  targets.  x86-64 Linux and WebAssembly (wasm64/wasm32) are in progress,
-  and there is an in-browser build for a compiler-explorer page.
-- **Optimisation:** `-O0`/`-O1` use a fast direct emitter with a peephole
-  and register pass.  `-O2` goes through **VIR**, an SSA IR with its own
-  register allocator and loop vectorizer ([SPEC-vir.md](doc/SPEC-vir.md)).
-- **Diagnostics:** clang-compatible locations and flags are the minimum.
-  On top of that, vcc has its own text styles, JSON, SARIF and HTML
-  output, `--fix`, and `vcc --explain ID`.
+| Workload | Recorded time | What was timed |
+| --- | ---: | --- |
+| Cold arm64 kernel build on M1 Pro | **9.9 s** | 884 compile jobs. Wall time was 11.1 s including harness startup and shutdown. [Build notes](doc/PLAN-fas2.md) · [Debian boot log](results/boot-20261110-133025.log) |
+| Compile SQLite to an x86-64 object | **292 ms** direct · **571 ms** via VIR | 262,899 lines in one C file on a Ryzen 7 9700X running Linux. Median CPU time over three fresh compiler processes with the file cache retained. [Measurements](results/sqlite-compile-20261113.json) |
+| Tokenize the same SQLite source | **4.9 ms** | 9.3 MB and 1.14 million tokens on the Ryzen. Best of seven warm lexer passes, or 1.91 GB/s. [Lexer results](results/lexer-simd-20261113.json) |
 
-vcc is not at 1.0 yet.  [TODO.md](TODO.md) lists what is left, ordered by
-risk, and [PLAN-release.md](doc/PLAN-release.md) defines the release gates G0-G9.
+About 840 kernel translation units each pull in 4–9 MB of source, but together they read just 44 MB of distinct text. Keeping tokens, macros and parsed declarations in one process lets the next compile reuse a header the previous one already read. Header functions stay as tokens until something uses them. Only about 2% need parsing.
 
-## How it is fast
+The emitter writes object files directly. Kbuild still schedules the work, and a small shell inside `vccd` handles its common recipes. Several [kernel patches](patches/) shorten the serial part before the first compile.
 
-```
-make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd (one process, thread pool)
-             │                                               ├── header cache: tokens, macros, declarations
-             └── vas / vld / var / vsh shims the same way    ├── TU job: lex → pp → parse → sema → emit
-                                                             ├── built-in assembler (.S and inline asm)
-                                                             └── built-in linker: objects in memory → vmlinux → Image
+## 🔧 Build and try it
+
+Build with clang on Apple Silicon or Linux (arm64 or x86-64). The tools land in `build/src/`. To try the standalone driver on one file:
+
+```sh
+make -C src -j 6 vcc
+echo 'int square(int x) { return x * x; }' > /tmp/vroom-square.c
+build/src/vpp --target=aarch64-linux-gnu -c /tmp/vroom-square.c -o /tmp/vroom-square.o
 ```
 
-- **One server, many TUs.**  The kernel's ~840 TUs each read about 880 headers,
-  4-9 MB of source per TU, but there are only 44 MB of unique text.  vccd
-  lexes, preprocesses and parses shared headers roughly once and replays them.
-- **Lazy function bodies.**  Header function bodies are saved as tokens and
-  parsed only when used.  About 2 % ever are.
-- **SIMD everywhere it pays:** NEON lexer, mmap'd input, arenas instead of
-  malloc, separate I/O and CPU threads.
-- **No text in the middle.**  The emitter writes objects directly.  Assembly
-  text is produced only for `-S`.
-- **Kbuild stays.**  make is not replaced.  A few small kernel patches
-  ([patches/](patches/)) remove serial steps before the first compile, and
-  `vsh` runs Kbuild's recipe subset of sh inside vccd.
+For the kernel benchmark, set up the kernel tree under `work/linux` using the [build environment](env/), then build and boot the image:
+
+```sh
+bench/vccd-kbuild.sh work/build-X -j 6
+python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60
+```
+
+## Compiler status
+
+The main targets are arm64 Linux (ELF) and macOS (Mach-O). The x86-64 Linux and WebAssembly backends are in development. There's also a [browser build of the compiler](contrib/wasm/).
+
+- **Code generation.** At `-O0` and `-O1`, vcc emits machine code directly. At `-O2` it can use VIR, an SSA intermediate representation with a register allocator and loop vectorizer. [VIR specification](doc/SPEC-vir.md)
+- **Compatibility.** The preprocessor matches clang token for token on kernel translation units. Macro dumps, dependency lists, include traces and line markers have byte-for-byte checks.
+- **Programs that build.** PostgreSQL, SQLite, zlib and FFmpeg build with vcc on macOS. vcc also compiles itself. To try the PostgreSQL build, run `bench/pg/build.sh vcc`.
+- **Diagnostics.** vcc supports clang-compatible locations and flags, JSON, SARIF and HTML output, plus `--fix` and `--explain ID`.
+
+## Tests
+
+```sh
+bench/vcc-ctests.py -j 6     # Compare program output with clang under QEMU
+bench/vcc-abi.py             # Mix callers and callees from both compilers
+bench/vcc-diag.py -j 6       # Check diagnostic text, locations and flags
+bench/vir-test.py -j 6       # Check the IR parser, printer and verifier
+bench/vbench.py gate         # Compare instructions against the merge base (1% budget)
+```
+
+Run the arm64 CI suite locally with `env/linux/run.sh ci/premerge.sh arm64`. For sanitizer builds, use `make -C src -j 6 vcc-asan` or `vcc-tsan`. The [contributor notes](AGENTS.md) cover file-by-file builds, fuzzing and the kernel parity tests.
 
 ## Repository layout
 
@@ -84,91 +80,6 @@ make ──► vcc (shim, ~100 µs) ──unix socket + SCM_RIGHTS──► vccd
 | [doc/](doc/) | plans, specs, research notes and reviews |
 
 [AGENTS.md](AGENTS.md) has the full per-file map.
-
-## Building
-
-You need macOS on arm64 or Linux (arm64 or x86-64) and a C compiler to
-bootstrap with (clang).  At run time vcc does not depend on clang.  Tables
-taken from clang once (capabilities, predefined macros, `__has_*` answers)
-are generated files in the tree.
-
-```bash
-make -C src -j 6 vcc
-```
-
-The tools are written to `build/src/`: `vpp` (one compile job, the test
-driver), `vccd` and its `vcc`/`vas`/`vld`/`var`/`vsh` shims, `vlink`,
-`vasm`, `vnm`, `vobjcopy`, `virtest`.
-
-Other variants:
-
-```bash
-make -C src -j 6 vcc-asan     # ASan + UBSan -> build/src-asan/
-```
-
-```bash
-make -C src -j 6 vcc-tsan     # TSan -> build/src-tsan/
-```
-
-```bash
-make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file instead of one TU per module
-```
-
-## Using it
-
-As a drop-in compiler for a project (macOS example, PostgreSQL):
-
-```bash
-bench/pg/build.sh vcc
-```
-
-A cold kernel build with vccd only (needs the kernel tree in `work/linux`,
-see `env/`):
-
-```bash
-bench/vccd-kbuild.sh work/build-X -j 6
-```
-
-```bash
-python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60
-```
-
-## Testing
-
-Clang is the reference.  Most harnesses compare vcc with clang directly,
-whether that is token streams, objects, layouts, diagnostics or program
-output.  A few that need only the checkout:
-
-```bash
-bench/vcc-ctests.py -j 6          # C suites: built by clang and vcc, run under qemu, output compared
-```
-
-```bash
-bench/vcc-abi.py                  # cross-compiler calls, clang/vcc x caller/callee
-```
-
-```bash
-bench/vcc-diag.py -j 6            # diagnostics snapshots and clang's locations/levels/flags
-```
-
-```bash
-bench/vir-test.py -j 6            # VIR parser, printer, verifier, dominators
-```
-
-```bash
-bench/vbench.py gate              # performance gate: instructions vs merge-base, 1 % budget
-```
-
-The kernel parity runs (`bench/vcc-diff.py`, `bench/vcc-sema.py`) need a
-kernel tree under `work/`.  CI runs `ci/premerge.sh` per target. To run it
-locally the same way:
-
-```bash
-env/linux/run.sh ci/premerge.sh arm64
-```
-
-[AGENTS.md](AGENTS.md) lists every harness, the sanitizer and fuzzing
-setup, and the working conventions.
 
 ## Documentation
 
