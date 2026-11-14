@@ -76,6 +76,7 @@ VPRIV cxx_entity *cxx_declare(cxx *c, cxx_scope *s, uint32_t name, int kind)
 			return e;
 	e = calloc(1, sizeof *e);
 	e->name = name, e->kind = (uint8_t)kind;
+	e->ty = CXX_TY_UNKNOWN;
 	if (!*slot)
 		s->nnames++;
 	/* types and templates first: a name that is both (struct stat and stat()) is a value

@@ -62,7 +62,9 @@ relative to it); `TODO.md` stays at the top.
   C++ predefines and `__has_*` answers from clang++.  The C++ front end is
   `src/frontend/cxx/` (module `cxx_SRC`; the driver calls `cxx_run` for a
   C++ job; `VCC_CXX_PROGRESS=1` prints how many tokens it parsed);
-  `bench/cxx-parse-tests.py` runs its cases in `src/test/cxx/parse`.
+  `bench/cxx-parse-tests.py` runs its cases in `src/test/cxx/parse`;
+  `bench/cxx-layout.py` has clang++ check every class layout it builds on json
+  (`VCC_CXX_LAYOUT=FILE` writes them as static_asserts).
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for

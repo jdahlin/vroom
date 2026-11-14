@@ -239,7 +239,8 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 static void cxx_class_specifier_parse(cxx *c, bool is_template);
 static void cxx_enum_specifier_parse(cxx *c);
 
-enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32 };
+enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32, DS_STATIC = 64,
+       DS_VIRTUAL = 128 };
 
 static bool cxx_kw_is_simple_type(int kw)
 {
@@ -381,17 +382,54 @@ no:
 }
 
 /* decl-specifier-seq; returns DS_* flags (0: nothing was consumed) */
+static void cxx_spec_keyword(cxx_spec *sp, int kw)
+{
+	switch (kw) {
+	case CXX_KW_void: sp->v_void = 1; break;
+	case CXX_KW_bool: case CXX_KW__Bool: sp->v_bool = 1; break;
+	case CXX_KW_char: sp->v_char = 1; break;
+	case CXX_KW_char8_t: sp->v_char8 = 1; break;
+	case CXX_KW_char16_t: sp->v_char16 = 1; break;
+	case CXX_KW_char32_t: sp->v_char32 = 1; break;
+	case CXX_KW_wchar_t: sp->v_wchar = 1; break;
+	case CXX_KW_int: sp->v_int = 1; break;
+	case CXX_KW_float: sp->v_float = 1; break;
+	case CXX_KW_double: sp->v_double = 1; break;
+	case CXX_KW___int128: sp->v_int128 = 1; break;
+	case CXX_KW___float128: sp->v_float128 = 1; break;
+	case CXX_KW__Float16: case CXX_KW___fp16: sp->v_float16 = 1; break;
+	case CXX_KW___bf16: sp->v_bf16 = 1; break;
+	case CXX_KW_short: sp->v_short = 1; break;
+	case CXX_KW_long: sp->v_long++; break;
+	case CXX_KW_signed: case CXX_KW___signed: case CXX_KW___signed__: sp->v_signed = 1; break;
+	case CXX_KW_unsigned: sp->v_unsigned = 1; break;
+	case CXX_KW_const: case CXX_KW___const: case CXX_KW___const__: sp->quals |= Q_CONST; break;
+	case CXX_KW_volatile: case CXX_KW___volatile: case CXX_KW___volatile__: sp->quals |= Q_VOLATILE; break;
+	case CXX_KW___restrict: case CXX_KW___restrict__: sp->quals |= Q_RESTRICT; break;
+	default: sp->v_unknown = 1;	/* auto, __auto_type, _Complex: not built yet */
+	}
+}
+
 static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_template)
 {
 	int flags = 0, any = 0;
+	cxx_spec sp;
 
+	memset(&sp, 0, sizeof sp);
 	c->last_type = NULL, c->last_type_dependent = 0;
+	c->defined_unnamed_class = 0;
 	for (;;) {
 		int kw = cxx_kw(c);
 
 		cxx_attributes_skip(c);
 		kw = cxx_kw(c);
-		if (kw == CXX_KW_typedef) {
+		if (kw == CXX_KW_static) {
+			flags |= DS_STATIC;
+			cxx_advance(c);
+		} else if (kw == CXX_KW_virtual) {
+			flags |= DS_VIRTUAL;
+			cxx_advance(c);
+		} else if (kw == CXX_KW_typedef) {
 			flags |= DS_TYPEDEF;
 			cxx_advance(c);
 		} else if (kw == CXX_KW_friend) {
@@ -408,12 +446,16 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 				cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			}
 		} else if (cxx_kw_is_decl_specifier(kw) || cxx_kw_is_cv(kw)) {
+			if (cxx_kw_is_cv(kw))
+				cxx_spec_keyword(&sp, kw);
 			cxx_advance(c);
 		} else if (cxx_kw_is_type_modifier(kw)) {
 			flags |= DS_MODIFIER;
+			cxx_spec_keyword(&sp, kw);
 			cxx_advance(c);
 		} else if (!(flags & DS_TYPE) && cxx_kw_is_simple_type(kw)) {
 			flags |= DS_TYPE;
+			cxx_spec_keyword(&sp, kw);
 			cxx_advance(c);
 		} else if (!(flags & DS_TYPE) && (kw == CXX_KW_decltype || kw == CXX_KW___decltype || kw == CXX_KW___typeof__ ||
 						  kw == CXX_KW___typeof || kw == CXX_KW_typeof) &&
@@ -436,6 +478,7 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 					cxx_fail(c, "expected a type");
 			}
 			flags |= DS_TYPE;
+			sp.v_unknown = 1;	/* decltype/typeof: not evaluated yet */
 			c->last_type = NULL, c->last_type_dependent = 1;
 		} else if (!(flags & DS_TYPE) && kw == CXX_KW__Atomic && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
 			cxx_advance(c);
@@ -443,23 +486,37 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			cxx_type_id_parse(c);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 			flags |= DS_TYPE;
+			sp.v_unknown = 1;
 		} else if (kw == CXX_KW__Atomic) {
+			sp.v_unknown = 1;
 			cxx_advance(c);
 		} else if (!(flags & DS_TYPE) && kw == CXX_KW__BitInt && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
 			cxx_advance(c);
 			cxx_skip_balanced(c);
 			flags |= DS_TYPE;
+			sp.v_unknown = 1;
 		} else if (!(flags & DS_TYPE) && (kw == CXX_KW_class || kw == CXX_KW_struct || kw == CXX_KW_union)) {
+			bool unnamed = cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE;
+
+			c->anonymous_class = CXX_TY_UNKNOWN;
 			cxx_class_specifier_parse(c, is_template);
+			c->defined_unnamed_class = unnamed;	/* (after: the body's declarations reset it) */
 			flags |= DS_TYPE;
+			sp.v_named = 1;
+			sp.named = unnamed ? c->anonymous_class : c->last_type && !c->last_type_dependent ? c->last_type->ty : CXX_TY_UNKNOWN;
 		} else if (!(flags & DS_TYPE) && kw == CXX_KW_enum) {
 			cxx_enum_specifier_parse(c);
 			flags |= DS_TYPE;
+			sp.v_named = 1;
+			sp.named = c->last_type ? c->last_type->ty : CXX_TY_UNKNOWN;
 		} else if (!(flags & (DS_TYPE | DS_MODIFIER)) &&
 			   (kw == CXX_KW_typename || ((cxx_is(c, LEX_TOKEN_IDENTIFIER) && !kw) || cxx_is(c, LEX_TOKEN_COLON_COLON) ||
 						      kw == CXX_KW_decltype)) &&
 			   cxx_type_name_try(c, ctor_class)) {
 			flags |= DS_TYPE;
+			sp.v_named = 1;
+			sp.named = c->last_type && !c->last_type_dependent && c->last_type->kind == CXX_ENTITY_TYPE ? c->last_type->ty
+															    : CXX_TY_UNKNOWN;
 			/* a constrained placeholder: Concept auto */
 		} else if (!(flags & DS_TYPE) && cxx_is(c, LEX_TOKEN_IDENTIFIER) && !kw && cxx_peek(c, 1)->kind == LEX_TOKEN_LESS) {
 			/* Concept<args> auto / Concept<args> decltype(auto) */
@@ -470,6 +527,7 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 				break;
 			cxx_advance(c);
 			cxx_template_arguments_parse(c);
+			sp.v_unknown = 1;
 			if (!cxx_is_kw(c, CXX_KW_auto) && !cxx_is_kw(c, CXX_KW_decltype))
 				cxx_fail(c, "expected 'auto' after a type constraint");
 		} else if (!(flags & DS_TYPE) && cxx_is(c, LEX_TOKEN_IDENTIFIER) && !kw &&
@@ -479,12 +537,15 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 
 			if (!te || te->kind != CXX_ENTITY_CONCEPT)
 				break;
+			sp.v_unknown = 1;
 			cxx_advance(c);	/* Concept auto */
 		} else
 			break;
 		any = 1;
 	}
-	return flags | (any ? 0 : 0);
+	(void)any;
+	c->ds_type = flags & (DS_TYPE | DS_MODIFIER) ? cxx_spec_type(c, &sp) : CXX_TY_UNKNOWN;
+	return flags;
 }
 
 /* ---- declarators ------------------------------------------------------------------------- */
@@ -493,17 +554,26 @@ static void cxx_parameter_clause_parse(cxx *c);
 static void cxx_parameter_clause_body_parse(cxx *c);
 static void cxx_function_tail_parse(cxx *c);
 
-/* ptr-operator: * cv, &, &&, X::* cv (with attributes); false if none */
-static bool cxx_ptr_operator_parse(cxx *c)
+/* ptr-operator: * cv, &, &&, X::* cv (with attributes); false if none.  t (may be NULL): the type it applies to */
+static bool cxx_ptr_operator_parse(cxx *c, qty *t)
 {
 	if (cxx_is(c, LEX_TOKEN_STAR) || cxx_is(c, LEX_TOKEN_AMPERSAND) || cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
+		int k = cxx_kind(c), quals = 0;
+
 		cxx_advance(c);
 		cxx_attributes_skip(c);
 		while (cxx_kw_is_cv(cxx_kw(c)) || cxx_is_kw(c, CXX_KW__Nullable) || cxx_is_kw(c, CXX_KW__Nonnull) ||
 		       cxx_is_kw(c, CXX_KW__Null_unspecified)) {
+			int kw = cxx_kw(c);
+
+			quals |= kw == CXX_KW_const || kw == CXX_KW___const || kw == CXX_KW___const__ ? Q_CONST :
+				 kw == CXX_KW_volatile || kw == CXX_KW___volatile || kw == CXX_KW___volatile__ ? Q_VOLATILE :
+				 kw == CXX_KW___restrict || kw == CXX_KW___restrict__ ? Q_RESTRICT : 0;
 			cxx_advance(c);
 			cxx_attributes_skip(c);
 		}
+		if (t)
+			*t = k == LEX_TOKEN_STAR ? cxx_type_pointer(c, *t, quals) : cxx_type_reference(c, *t, k == LEX_TOKEN_AMPERSAND_AMPERSAND);
 		return true;
 	}
 	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON)) {
@@ -512,10 +582,12 @@ static bool cxx_ptr_operator_parse(cxx *c)
 		bool dep;
 
 		cxx_nested_name_parse(c, &q, &dep);
-		if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {	/* pointer to member */
+		if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {	/* pointer to member (not built yet) */
 			cxx_advance(c);
 			while (cxx_kw_is_cv(cxx_kw(c)))
 				cxx_advance(c);
+			if (t)
+				*t = CXX_TY_UNKNOWN;
 			return true;
 		}
 		cxx_rewind(c, save, save_undo);
@@ -577,7 +649,7 @@ static void cxx_operator_name_parse(cxx *c)
 	/* conversion: operator type-specifiers ptr-operators */
 	if (!cxx_decl_specifiers_parse(c, NULL, false))
 		cxx_fail(c, "expected an operator or a type after 'operator'");
-	while (cxx_ptr_operator_parse(c))
+	while (cxx_ptr_operator_parse(c, NULL))
 		;
 }
 
@@ -617,15 +689,55 @@ static bool cxx_paren_is_nested_declarator(cxx *c)
  * *qualified if the name had a nested-name-specifier and *is_function if the outermost
  * suffix is a parameter list.
  */
+/* an integer literal's value (array bounds, bit-field widths; other constant expressions: -1, not evaluated yet) */
+static int64_t cxx_literal_value(cxx *c)
+{
+	cxx_token *t = cxx_peek(c, 0);
+	uint64_t v = 0;
+	uint32_t i = 0;
+
+	if (t->kind != LEX_TOKEN_NUMBER)
+		return -1;
+	for (; i < t->len && t->s[i] >= '0' && t->s[i] <= '9'; i++)
+		v = v * 10 + (uint64_t)(t->s[i] - '0');
+	for (uint32_t k = i; k < t->len; k++)	/* suffixes u l only */
+		if (t->s[k] != 'u' && t->s[k] != 'U' && t->s[k] != 'l' && t->s[k] != 'L')
+			return -1;
+	if (!i || (t->s[0] == '0' && t->len > 1 && i > 1))
+		return -1;	/* (octal and hexadecimal: not here) */
+	{
+		int k = cxx_peek(c, 1)->kind;
+
+		if (k != LEX_TOKEN_RIGHT_SQUARE && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_COMMA && k != LEX_TOKEN_EQUAL &&
+		    k != LEX_TOKEN_LEFT_BRACE)
+			return -1;	/* an expression that starts with a number */
+	}
+	return (int64_t)v;
+}
+
+/* a suffix of a declarator: [n] or (parameters), applied innermost last */
+typedef struct cxx_suffix { uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; } cxx_suffix;
+
+/*
+ * A declarator (abstract if allowed); returns the declared name's id (0: none) and sets
+ * *qualified if the name had a nested-name-specifier and *is_function if the outermost
+ * suffix is a parameter list.  Its type: c->type_in is the base (the decl-specifiers'),
+ * c->type_out the declared type.  C's inside-out rule: ptr-operators apply to the base,
+ * then the suffixes from the last to the first, then a parenthesized declarator to that.
+ */
 static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, bool *is_function, cxx_scope **qscope)
 {
-	uint32_t name = 0;
+	uint32_t name = 0, nested = 0, nested_end = 0;
+	qty t = c->type_in;
+	cxx_suffix sfx[8];
+	uint32_t nsfx = 0;
+	bool too_many = false;
 
 	*qualified = false;
 	*is_function = false;
 	if (qscope)
 		*qscope = NULL;
-	while (cxx_ptr_operator_parse(c))
+	while (cxx_ptr_operator_parse(c, &t))
 		;
 	cxx_attributes_skip(c);
 	cxx_accept(c, LEX_TOKEN_ELLIPSIS);	/* a pack */
@@ -642,15 +754,13 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		} while (cxx_accept(c, LEX_TOKEN_COMMA));
 		cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 		cxx_attributes_skip(c);
+		c->type_out = CXX_TY_UNKNOWN;
 		return 0;
 	}
 	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_paren_is_nested_declarator(c)) {
-		bool q2, f2;
-
-		cxx_advance(c);
-		name = cxx_declarator_parse(c, abstract_ok, &q2, &f2, qscope);
-		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-		*qualified = q2;
+		nested = c->pos;	/* parsed after the suffixes (their type is its base) */
+		cxx_skip_balanced(c);
+		nested_end = c->pos;
 	} else if (cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON) || cxx_is(c, LEX_TOKEN_TILDE)) {
 		cxx_scope *q;
 		bool dep;
@@ -714,12 +824,24 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 	}
 	/* suffixes */
 	for (;;) {
+		cxx_suffix *x = nsfx < 8 ? &sfx[nsfx] : NULL;
+
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_SQUARE) {
+			int64_t n = -1;
+
 			cxx_advance(c);
-			if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE))
+			if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE)) {
+				n = cxx_literal_value(c);
+				if (n < 0)
+					n = -2;	/* a bound not evaluated yet: the type is unknown */
 				cxx_expression_parse(c);
+			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 			cxx_attributes_skip(c);
+			if (x)
+				x->is_function = 0, x->n = n, nsfx++;
+			else
+				too_many = true;
 			continue;
 		}
 		if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
@@ -727,6 +849,15 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			if (cxx_peek(c, 1)->kind != LEX_TOKEN_RIGHT_PAREN && !cxx_lookahead(c, cxx_parameter_clause_parse))
 				break;
 			cxx_parameter_clause_parse(c);
+			if (x) {
+				x->is_function = 1, x->variadic = c->fn_variadic;
+				x->nparams = c->fn_unknown ? UINT32_MAX : c->fn_nparams;
+				x->params = c->fn_nparams && !c->fn_unknown ? malloc(c->fn_nparams * sizeof(qty)) : NULL;
+				if (x->params)
+					memcpy(x->params, c->fn_params, c->fn_nparams * sizeof(qty));
+				nsfx++;
+			} else
+				too_many = true;
 			cxx_function_tail_parse(c);
 			*is_function = true;
 			continue;
@@ -734,6 +865,40 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 		break;
 	}
 	c->scope = outer;
+	/* the type: suffixes from the last (innermost) to the first */
+	for (uint32_t i = nsfx; i-- > 0;) {
+		if (too_many)
+			t = CXX_TY_UNKNOWN;
+		else if (sfx[i].is_function)
+			t = sfx[i].nparams == UINT32_MAX ? CXX_TY_UNKNOWN : cxx_type_function(c, t, sfx[i].params, sfx[i].nparams, sfx[i].variadic);
+		else
+			t = sfx[i].n == -2 ? CXX_TY_UNKNOWN : cxx_type_array(c, t, sfx[i].n);
+		if (sfx[i].is_function)
+			free(sfx[i].params);
+	}
+	if (nested) {
+		/* ( declarator ): its own ptr-operators and suffixes apply to this type */
+		uint32_t end = c->pos;
+		bool q2, f2;
+
+		/* (*f)(int) declares a pointer, (f)(int) a function */
+		cxx_token *first = &c->tok[nested + 1];
+		bool pointer = first->kind == LEX_TOKEN_STAR || first->kind == LEX_TOKEN_AMPERSAND ||
+			       first->kind == LEX_TOKEN_AMPERSAND_AMPERSAND || first->kind == LEX_TOKEN_CARET ||
+			       (first->kind == LEX_TOKEN_IDENTIFIER && c->tok[nested + 2].kind == LEX_TOKEN_COLON_COLON);
+
+		c->pos = nested + 1;
+		c->type_in = t;
+		name = cxx_declarator_parse(c, abstract_ok, &q2, &f2, qscope);
+		*is_function = f2 || (*is_function && !pointer);
+		t = c->type_out;
+		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+		if (c->pos != nested_end)
+			cxx_fail(c, "a parenthesized declarator ended early");
+		c->pos = end;
+		*qualified = q2;
+	}
+	c->type_out = t;
 	return name;
 }
 
@@ -749,26 +914,51 @@ static void cxx_parameter_clause_parse(cxx *c)
 
 static void cxx_parameter_clause_body_parse(cxx *c)
 {
-	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
-	if (cxx_accept(c, LEX_TOKEN_RIGHT_PAREN))
-		return;
-	for (;;) {
-		bool q, f;
+	qty *types = NULL;
+	uint32_t n = 0, cap = 0;
+	uint8_t variadic = 0, unknown = 0;
 
-		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
-			break;
-		cxx_attributes_skip(c);
-		if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
-			cxx_fail(c, "expected a parameter type");
-		cxx_declarator_parse(c, true, &q, &f, NULL);
-		if (cxx_accept(c, LEX_TOKEN_EQUAL))
-			cxx_initializer_parse(c);
-		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))	/* (int...) */
-			break;
-		if (!cxx_accept(c, LEX_TOKEN_COMMA))
-			break;
+	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+	if (!cxx_accept(c, LEX_TOKEN_RIGHT_PAREN)) {
+		for (;;) {
+			bool q, f;
+			qty t;
+
+			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {
+				variadic = 1;
+				break;
+			}
+			cxx_attributes_skip(c);
+			if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+				cxx_fail(c, "expected a parameter type");
+			c->type_in = c->ds_type;
+			cxx_declarator_parse(c, true, &q, &f, NULL);
+			t = cxx_type_parameter_adjust(c, c->type_out);
+			if (cxx_accept(c, LEX_TOKEN_EQUAL))
+				cxx_initializer_parse(c);
+			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {	/* (int...): a pack or a C variadic */
+				variadic = 1;
+				unknown = 1;
+			}
+			if (t == CXX_TY_UNKNOWN)
+				unknown = 1;
+			/* (void): no parameters */
+			if (!(n == 0 && t == cc_type_basic(TY_VOID) && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
+				if (n == cap)
+					types = realloc(types, (cap = cap ? cap * 2 : 8) * sizeof *types);
+				types[n++] = t;
+			}
+			if (variadic || !cxx_accept(c, LEX_TOKEN_COMMA))
+				break;
+		}
+		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 	}
-	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+	if (n > c->fn_cparams)
+		c->fn_params = realloc(c->fn_params, (c->fn_cparams = n) * sizeof(qty));
+	if (n)
+		memcpy(c->fn_params, types, n * sizeof(qty));
+	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown;
+	free(types);
 }
 
 static void cxx_noexcept_parse(cxx *c)
@@ -821,7 +1011,7 @@ VPRIV void cxx_type_specifiers_parse(cxx *c)
 VPRIV void cxx_new_type_id_parse(cxx *c)
 {
 	cxx_type_specifiers_parse(c);
-	while (cxx_ptr_operator_parse(c))
+	while (cxx_ptr_operator_parse(c, NULL))
 		;
 	while (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_SQUARE) {
 		cxx_advance(c);
@@ -844,6 +1034,7 @@ VPRIV void cxx_type_id_parse(cxx *c)
 		cxx_entity *nlt = c->last_type;
 		uint8_t nld = c->last_type_dependent;
 
+		c->type_in = c->ds_type;
 		if (cxx_declarator_parse(c, true, &q, &f, NULL))
 			cxx_fail(c, "a type-id declares no name");	/* (T(f)) is an expression, not a cast */
 		c->last_type = nlt, c->last_type_dependent = nld;
@@ -932,10 +1123,13 @@ static void cxx_function_body_inner_parse(cxx *c);
 static void cxx_function_body_parse(cxx *c)
 {
 	uint32_t implicit = c->implicit_typename;
+	uint8_t valid = c->name_path_valid;
 
 	c->implicit_typename = 0;
+	c->name_path_valid = 0;	/* local classes: not nameable outside */
 	cxx_function_body_inner_parse(c);
 	c->implicit_typename = implicit;
+	c->name_path_valid = valid;
 }
 
 static void cxx_function_body_inner_parse(cxx *c)
@@ -1037,6 +1231,8 @@ static void cxx_namespace_parse(cxx *c)
 {
 	bool is_inline = cxx_accept_kw(c, CXX_KW_inline);
 	cxx_scope *outer = c->scope;
+	uint32_t path_len = c->name_path_len;
+	uint8_t path_valid = c->name_path_valid;
 
 	cxx_expect_kw(c, CXX_KW_namespace);
 	cxx_attributes_skip(c);
@@ -1100,6 +1296,13 @@ static void cxx_namespace_parse(cxx *c)
 		}
 		s->parent = c->scope;
 		c->scope = s;
+		{
+			uint32_t pl;
+			uint8_t pv;
+
+			cxx_name_path_push(c, name, &pl, &pv);	/* (anonymous: not nameable) */
+			(void)pl, (void)pv;
+		}
 		is_inline = false;
 	} while (cxx_accept(c, LEX_TOKEN_COLON_COLON));
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
@@ -1107,6 +1310,7 @@ static void cxx_namespace_parse(cxx *c)
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
 	cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
 	c->scope = outer;
+	cxx_name_path_pop(c, path_len, path_valid);
 }
 
 static void cxx_using_parse(cxx *c)
@@ -1166,6 +1370,7 @@ static void cxx_using_parse(cxx *c)
 			else if (e) {
 				e->kind = CXX_ENTITY_TYPE;
 				e->dependent = dep;
+				e->ty = c->type_out;
 				if (target && target->members)	/* (dependent: followed outside templates, json::lexer::) */
 					e->members = target->members, e->specs = target->specs, e->nspecs = target->nspecs;
 			}
@@ -1324,6 +1529,7 @@ static void cxx_template_parameter_parse(cxx *c)
 
 		if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 			cxx_fail(c, "expected a template parameter");
+		c->type_in = c->ds_type;
 		name = cxx_declarator_parse(c, true, &q, &f, NULL);
 		if (name > 1) {
 			cxx_entity *e = cxx_declare(c, c->scope, name, CXX_ENTITY_VALUE);
@@ -1459,6 +1665,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	bool dep = false, specialization = false;
 	uint32_t name = 0;
 	cxx_entity *e = NULL;
+	bool is_union = cxx_is_kw(c, CXX_KW_union);
+	uint32_t key_loc = cxx_peek(c, 0)->loc;
 
 	cxx_advance(c);	/* class / struct / union */
 	cxx_attributes_skip(c);
@@ -1490,6 +1698,9 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 					   even if the primary template is never defined (libc++'s char_traits) */
 					if (e && !e->members)
 						e->members = cxx_scope_new(c, CXX_SCOPE_CLASS, c->scope, e);
+					/* the AST record, incomplete until the definition (which reuses it): T* needs it */
+					if (e && !is_template && !c->template_depth && e->ty == CXX_TY_UNKNOWN && !c->tentative)
+						e->ty = QT(c->ast->tags[cc_tag_new(c->ast, is_union ? TY_UNION : TY_STRUCT, name, key_loc)].ty, 0);
 					found = e;
 				}
 			}
@@ -1532,6 +1743,10 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		}
 		if (is_template || c->template_depth)
 			cs->dependent = 1;
+		/* the AST record: built and laid out when C's rules are C++'s for it (types.c) */
+		cxx_class_begin(c, specialization ? NULL : e, name, key_loc, is_union,
+				is_template || c->template_depth ? CXX_SKIP_TEMPLATE : specialization ? CXX_SKIP_SPECIALIZATION :
+				cxx_is(c, LEX_TOKEN_COLON) ? CXX_SKIP_BASES : -1);
 		if (cxx_accept(c, LEX_TOKEN_COLON))
 			cxx_base_clause_parse(c, cs);
 		/* the injected-class-name */
@@ -1541,6 +1756,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 			if (inj) {
 				inj->members = cs;
 				inj->dependent = cs->dependent;
+				if (e && inj != e)
+					inj->ty = e->ty;
 				if (is_template && !specialization) {
 					cxx_entity *ty = cxx_declare(c, cs, name, CXX_ENTITY_TYPE);
 
@@ -1558,7 +1775,15 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		}
 		cs->parent = c->scope;
 		c->scope = cs;
-		cxx_class_body_parse(c, cs);
+		{
+			uint32_t pl;
+			uint8_t pv;
+
+			cxx_name_path_push(c, q || dep ? 0 : name, &pl, &pv);	/* (X::Y {...}: not tracked) */
+			cxx_class_body_parse(c, cs);
+			cxx_class_end(c);
+			cxx_name_path_pop(c, pl, pv);
+		}
 		c->scope = outer;
 		c->last_type = e, c->last_type_dependent = cs->dependent;
 	}
@@ -1599,12 +1824,19 @@ static void cxx_enum_specifier_parse(cxx *c)
 		cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 	}
 	cxx_attributes_skip(c);
+	qty underlying = CXX_TY_UNKNOWN;
+	uint32_t loc = cxx_peek(c, 0)->loc;
+
 	if (cxx_is(c, LEX_TOKEN_COLON) && (cxx_peek(c, 1)->kind != LEX_TOKEN_COLON)) {	/* underlying type */
 		cxx_advance(c);
 		cxx_type_id_parse(c);
+		underlying = c->type_out;
 	}
 	{
 		cxx_entity *e = name ? cxx_declare(c, cxx_declaration_scope(c), name, CXX_ENTITY_TYPE) : NULL;
+
+		if (!c->template_depth && (cxx_is(c, LEX_TOKEN_LEFT_BRACE) || underlying != CXX_TY_UNKNOWN || scoped))
+			cxx_enum_type(c, e, name, loc, underlying);
 		cxx_scope *es = NULL;
 
 		if (e && !e->members) {
@@ -1646,6 +1878,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 {
 	cxx_entity *type_of_typedef = c->last_type;
 	uint8_t typedef_dependent = c->last_type_dependent;
+	qty base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
+	/* a data member of the class being built: a class body, not a template's or a function's */
+	bool member = context == CXX_CONTEXT_CLASS && c->build && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND));
+	bool global = context == CXX_CONTEXT_NAMESPACE && !c->template_depth && !(flags & (DS_TYPEDEF | DS_FRIEND));
 
 	for (;;) {
 		bool q, f;
@@ -1654,12 +1890,25 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		uint32_t start = c->pos;
 
 		if (context == CXX_CONTEXT_CLASS && cxx_is(c, LEX_TOKEN_COLON)) {	/* an unnamed bit-field */
+			int64_t w;
+
 			cxx_advance(c);
+			w = cxx_literal_value(c);
 			cxx_constant_expression_parse(c);
+			if (member)
+				cxx_class_field(c, 0, base, c->tok[start].loc, w < 0 ? -2 : (int)w);
 			goto next;
 		}
+		c->type_in = base;
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
-		(void)start;
+		qty t = c->type_out;
+		uint32_t name_loc = c->tok[start].loc;
+		if (!c->tentative) {
+			c->stats.declarations++;
+			c->stats.declarations_typed += t != CXX_TY_UNKNOWN;
+		}
+		if (f && (flags & DS_VIRTUAL) && context == CXX_CONTEXT_CLASS)
+			cxx_class_skip(c, CXX_SKIP_VIRTUAL);	/* (a vptr: C++'s layout, not built yet) */
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
 		if (name > 1 && !q && !(cs && cs->owner && cs->owner->name == name)) {
 			int kind = (flags & DS_TYPEDEF) ? CXX_ENTITY_TYPE :
@@ -1671,9 +1920,24 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e = NULL;	/* (a friend template: found by ADL only) */
 			if (e && (flags & DS_TYPEDEF)) {
 				e->dependent = typedef_dependent;
+				e->ty = t;
 				if (type_of_typedef && type_of_typedef->members && !typedef_dependent)
 					e->members = type_of_typedef->members, e->specs = type_of_typedef->specs, e->nspecs = type_of_typedef->nspecs;
 			}
+			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
+				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc);
+		}
+		if (member && !f && name > 1) {
+			/* a data member: its bit-field width (a literal) comes after the declarator */
+			int w = -1;
+
+			if (cxx_is(c, LEX_TOKEN_COLON)) {
+				int64_t v = (cxx_advance(c), cxx_literal_value(c));
+
+				w = v < 0 ? -2 : (int)v;
+				cxx_constant_expression_parse(c);
+			}
+			cxx_class_field(c, name, t, name_loc, w);
 		}
 		if (context == CXX_CONTEXT_CLASS) {
 			/* pure, = default, = delete, bit-field width, override/final */
@@ -1798,8 +2062,17 @@ static void cxx_simple_declaration_parse(cxx *c, int context, cxx_scope *cs)
 		c->implicit_typename = implicit;
 	}
 
-	if (cxx_accept(c, LEX_TOKEN_SEMICOLON))	/* struct S {...}; enum E {...}; friend class X; */
+	if (cxx_is(c, LEX_TOKEN_SEMICOLON)) {	/* struct S {...}; enum E {...}; friend class X; */
+		/* an anonymous struct or union member: an unnamed field (C's layout has them) */
+		if (context == CXX_CONTEXT_CLASS && c->build && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND)) && c->defined_unnamed_class) {
+			if (c->ds_type != CXX_TY_UNKNOWN)
+				cxx_class_field(c, 0, c->ds_type, cxx_peek(c, 0)->loc, -1);
+			else
+				cxx_class_skip(c, CXX_SKIP_UNKNOWN_MEMBER);	/* (never lay out a class without a member) */
+		}
+		cxx_advance(c);
 		return;
+	}
 	if (!flags && !(cxx_is(c, LEX_TOKEN_TILDE) || cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON) ||
 			cxx_is_kw(c, CXX_KW_operator)))
 		cxx_fail(c, "expected a declaration");

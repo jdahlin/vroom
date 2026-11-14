@@ -354,6 +354,27 @@ own.
   not touch).  `vbench.py gate` cannot read instruction counters on this
   host (its x86-64 Linux setup); the arm64 measurement in
   MEASURE-ast-split.md showed the embedding removes instructions.
-- X1 next: the C++ parser builds into it: types from decl-specifiers and
-  declarators (`cc_type_*`), syms for declarations, then nodes.  X5-X7: not
-  started.
+- X1, second step (2026-11-13): the C++ parser fills the shared AST
+  (`src/frontend/cxx/types.c`).  Decl-specifiers and declarators give
+  types through C's code (`cc_type_*`; C's inside-out declarator rule, a
+  parenthesized declarator parsed after its suffixes); references are
+  `TY_PTR` with `ext` 1 or 2 (distinct when interned, passed as pointers);
+  wchar_t/char8_t/char16_t/char32_t have C kinds of their size for now.
+  Classes become records laid out by `cc_layout_record` when C's rules are
+  C++'s (no bases, no virtual functions, every member typed; an empty class
+  is 1 byte), forward declarations create the incomplete record, anonymous
+  members are unnamed fields, and a class with a member that cannot be
+  typed is never laid out.  Namespace-scope variables and functions get
+  symbols.  unit-32bit: 5 891 of 20 147 declarations typed, 305 of 1 789
+  classes laid out (skipped: 1 236 templates, 146 specializations, 47 with
+  bases, 10 virtual, 45 with an untyped member), 2 815 symbols.
+  `bench/cxx-layout.py`: every class laid out, with a name clang can
+  resolve, is a `static_assert` on sizeof and alignof compiled by clang++
+  with the TU: 20 242 over the 71 TUs, all agree.  C unchanged
+  (`vcc-same.py` as in the first step; vcc-x86 320/320; vcc-diag 229/229).
+- X1 next: constant expressions (array bounds such as `buf[len]`, enumerator
+  values), base classes and virtual functions in the layout, then
+  instantiation of class templates (X4), which is where most of json's
+  classes are.  Code: the shared builders move to a module of their own
+  taking `struct ast *` (cxx/ is compiled in the cc module for now).  X5-X7:
+  not started.
