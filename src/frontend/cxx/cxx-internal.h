@@ -359,6 +359,11 @@ typedef struct cxx {
 	qty gen_init_bases[16];
 	uint32_t ngen_init_bases;
 	uint8_t gen_delegates, gen_returns, gen_why;
+	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
+	uint32_t gen_notemp;		/* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
+	uint32_t gen_block_temps;	/* such temporaries declared in the block being built (a case label after one: not built) */
+	struct cxx_prv *prvs;		/* class prvalues: temporaries whose construction can still be aimed at another object */
+	uint32_t nprvs, cprvs;
 	uint8_t gen_vmode;		/* the next call of a virtual function: 0 through the vtable, 1 direct (a qualified name), 2 not known */
 	cxx_scope **vt_list;		/* the classes whose vtable this TU names */
 	uint32_t nvt_list, cvt_list;
@@ -527,6 +532,7 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
 VPRIV void cxx_gen_vtables_emit(cxx *c);
 VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap);

@@ -1082,6 +1082,9 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
+			bool gen_class = false;
+			uint32_t gen_node = 0;
+
 			{
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 
@@ -1089,10 +1092,20 @@ static void cxx_primary_expression_parse(cxx *c)
 					cxx_braced_arguments_parse(c);
 				else
 					cxx_call_arguments_parse(c);
-				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
+					uint32_t an[16], n = c->ncargs;
+
+					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					if (gen_class)
+						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					gen_node = c->enode;
+				}
 			}
 			cxx_functional_cast_type(c, cast_to);
+			if (gen_class)
+				c->enode = gen_node;
 			return;
 		}
 		if (t->kw == CXX_KW_decltype || t->kw == CXX_KW___decltype) {	/* decltype(x)::member */
@@ -1108,6 +1121,9 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
+			bool gen_class = false;
+			uint32_t gen_node = 0;
+
 			{
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 
@@ -1115,10 +1131,20 @@ static void cxx_primary_expression_parse(cxx *c)
 					cxx_braced_arguments_parse(c);
 				else
 					cxx_call_arguments_parse(c);
-				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
+					uint32_t an[16], n = c->ncargs;
+
+					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					if (gen_class)
+						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					gen_node = c->enode;
+				}
 			}
 			cxx_functional_cast_type(c, cast_to);
+			if (gen_class)
+				c->enode = gen_node;
 			return;
 		}
 		cxx_fail(c, "unexpected '%.*s' in an expression", (int)t->len, t->s);
@@ -1181,6 +1207,9 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_type_specifiers_parse(c);
 			qty cast_to = c->ds_type;
 
+			bool gen_class = false;
+			uint32_t gen_node = 0;
+
 			{
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 
@@ -1188,10 +1217,20 @@ static void cxx_primary_expression_parse(cxx *c)
 					cxx_braced_arguments_parse(c);
 				else
 					cxx_call_arguments_parse(c);
-				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
+				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
+					uint32_t an[16], n = c->ncargs;
+
+					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
+					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					if (gen_class)
+						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+					gen_node = c->enode;
+				}
 			}
 			cxx_functional_cast_type(c, cast_to);
+			if (gen_class)
+				c->enode = gen_node;
 			return;
 		}
 	}
@@ -1706,7 +1745,9 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			bool lk = c->econst, rk;
 			int64_t lv = c->evalue, rv, v;
 
+			c->gen_notemp += op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
 			cxx_binary_expression_parse(c, p + 1);
+			c->gen_notemp -= op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
 			rk = c->econst, rv = c->evalue;
 			qty rt = c->etype;
 			uint32_t rn = c->enode;
@@ -1757,11 +1798,13 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 		uint32_t cn = c->enode, n2 = 0, n3, qloc = c->tok[c->pos - 1].loc;
 
 		c->in_template_args = 0;
+		c->gen_notemp++;	/* (an operand that may not be evaluated: no temporaries with destructors) */
 		if (!cxx_is(c, LEX_TOKEN_COLON))	/* GNU ?: */
 			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval, k2 = c->econst, v2 = c->evalue, n2 = c->enode;
 		c->in_template_args = targs;
 		cxx_expect(c, LEX_TOKEN_COLON);
 		cxx_assignment_expression_parse(c);
+		c->gen_notemp--;
 		k3 = c->econst, v3 = c->evalue;
 		n3 = c->enode;
 		{

@@ -1013,3 +1013,25 @@ headerdelning mellan TU:er (vccd).
 `cxx-run-tests.py` 13/13 (ny `virtual.cpp`), `cxx-layout` 158 106 layouter,
 0 fel.  Alla 71 json-TU:er går igenom `-c`: 54 507 av 81 500 betraktade
 funktionsdefinitioner har kod.  Inget json-test länkar ännu.
+
+### Status (29): klasser som värden (2026-11-14)
+- En klass som inte är trivial för anrop (Itanium: egen kopierings-/
+  flyttkonstruktor eller destruktor, vptr) returneras i ett objekt vars
+  adress kommer först och skickas som adressen till en temporär; skrivet
+  explicit för x86-64 (rdi/rax), andra mål får ingen kod för sådana
+  funktioner än.  Triviala klasser går som C, men bara om C:s bild av
+  posten klassas rätt (klasser med basbyte ≤ 16 byte byggs inte).
+- Prvalues av klasstyp är temporärer i blocket som byggs; den som tar
+  värdet (`T x = f();`, `return f();`, `T(f())`) riktar om konstruktionen
+  till sitt eget objekt (kopieringselision).  `T(args)`/`T{args}` bygger en
+  temporär; `return x;` flyttar från en lokal variabel.
+- Temporärer med destruktor förstörs vid blockets slut (senare än
+  standarden: slutet av fulluttrycket).  Ingen kod där en temporär skulle
+  skapas villkorligt eller flera gånger per blockinträde (loopvillkor och
+  -steg, `?:`, högerled av `&&`/`||`), eller före en `case`-etikett.
+- Inbyggda operatorer på klassoperander ger ingen nod (förut C-fel);
+  tilldelning av klass bara när den är en bytekopia.
+- Sparar konstruktorns initierarlista när en annan kropp byggs inuti.
+`cxx-run-tests.py` 14/14 (ny `class-values.cpp`: clangs antal kopior och
+flyttar).  69 json-testfiler går igenom `-c` utan fel: 63 608 av 92 500
+betraktade funktionsdefinitioner har kod.  Inget json-test länkar ännu.

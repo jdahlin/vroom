@@ -191,6 +191,7 @@ static void cxx_for_parse(cxx *c)
 	}
 	if (gen)
 		c->gen_block = outer_block;
+	c->gen_notemp++;
 	if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
 		cxx_expression_parse(c);
 		if (gen)
@@ -201,6 +202,7 @@ static void cxx_for_parse(cxx *c)
 		cxx_expression_parse(c);
 		has_step = true, gstep = c->enode;
 	}
+	c->gen_notemp--;
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 	cxx_statement_parse(c);
 	c->scope = outer;
@@ -291,11 +293,12 @@ VPRIV void cxx_compound_statement_parse(cxx *c)
 	cc_id_list list;
 	void *outer_block = c->gen_block;
 	bool gen = cxx_gen_on(c);
-	uint32_t loc = cxx_peek(c, 0)->loc;
+	uint32_t loc = cxx_peek(c, 0)->loc, outer_temps = c->gen_block_temps;
 
 	if (gen) {
 		cc_id_list_init(&list);
 		c->gen_block = &list;
+		c->gen_block_temps = 0;
 	}
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
 	cxx_scope_push(c, bs);
@@ -310,6 +313,7 @@ VPRIV void cxx_compound_statement_parse(cxx *c)
 	c->scope = outer;
 	if (gen) {
 		c->gen_block = outer_block;
+		c->gen_block_temps = outer_temps;
 		cxx_gen_statement(c, cxx_gen_on(c) ? cxx_gen_new_statement(c, N_BLOCK, loc, 0, cc_id_list_freeze(c->ast, &list), list.n) : 0);
 	}
 }
@@ -403,7 +407,9 @@ static void cxx_statement_parse1(cxx *c)
 
 		cxx_advance(c);
 		cxx_scope_push(c, s);
+		c->gen_notemp += is_while;	/* (evaluated once per iteration: no temporaries with destructors) */
 		cxx_condition_parse(c);
+		c->gen_notemp -= is_while;
 		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : cxx_gen_switch_value(c, c->enode);
 		cxx_statement_parse(c);
 		gen_body = cxx_gen_nested(c, sloc);
@@ -420,7 +426,9 @@ static void cxx_statement_parse1(cxx *c)
 		gen_body = cxx_gen_nested(c, sloc);
 		cxx_expect_kw(c, CXX_KW_while);
 		cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+		c->gen_notemp++;
 		cxx_expression_parse(c);
+		c->gen_notemp--;
 		gen_cond = cxx_gen_condition(c, c->enode);
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
@@ -488,6 +496,8 @@ static void cxx_statement_parse1(cxx *c)
 			known &= c->econst, hi = c->evalue;
 		}
 		cxx_expect(c, LEX_TOKEN_COLON);
+		if (c->gen_block_temps)
+			cxx_gen_fail(c);	/* (a jump past a temporary that is destroyed at the block's end) */
 		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
 			cxx_statement_parse(c);
@@ -498,6 +508,8 @@ static void cxx_statement_parse1(cxx *c)
 	case CXX_KW_default:
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_COLON);
+		if (c->gen_block_temps)
+			cxx_gen_fail(c);	/* (a jump past a temporary that is destroyed at the block's end) */
 		c->snode = 0;
 		if (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
 			cxx_statement_parse(c);
