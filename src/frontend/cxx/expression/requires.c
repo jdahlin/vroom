@@ -69,6 +69,8 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
 			cxx_advance(c);
 			cxx_expression_parse(c);
 			et = c->etype, lv = c->elval;
+			qty xv = !lv && c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == TY_PTR && AST_TYPE(c->ast, c->edecl)->ext == 2 &&
+				 AST_TYPE(c->ast, c->edecl)->base == et ? c->edecl : CXX_TY_UNKNOWN;	/* (an xvalue: decltype((e)) is T&&) */
 			r = c->einvalid ? 0 : et != CXX_TY_UNKNOWN ? 1 : -1;
 			cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
 			cxx_accept_kw(c, CXX_KW_noexcept);
@@ -82,7 +84,7 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
 					cxx_targ a[32];
 
 					if (c->ntargs < 31) {
-						a[0] = (cxx_targ){ .kind = 1, .t = lv ? cxx_type_reference(c, et, false) : et };
+						a[0] = (cxx_targ){ .kind = 1, .t = xv != CXX_TY_UNKNOWN ? xv : lv ? cxx_type_reference(c, et, false) : et };
 						memcpy(a + 1, c->targs, c->ntargs * sizeof *a);
 						r = cxx_concept_value(c, ce, a, c->ntargs + 1);
 					} else

@@ -2110,3 +2110,13 @@ virtuella baser som inte är bibliotekets), null vid pekarkonvertering till en v
 `ostringstream` i `main`: `basic_string_view(It, End)` (begreppsbegränsad konstruktor) väljs inte.
 cxx-strict: 87 funktioner kompileras nu som inte gjorde det, 6 nya i `basic_filebuf` som nu nås (266 per
 TU räknat, 257 förut), ingen länkning misslyckas (1 förut).
+
+## Status 123 (2026-11-14)
+`std::ostringstream` kör med vcc:s objekt ensamt.  libc++:s iteratorbegrepp håller nu för pekare
+(`contiguous_iterator<const char *>`, `sized_sentinel_for`), så `basic_string_view(It, End)` väljs:
+- `__is_destructible` och `__is_nothrow_destructible` evalueras (referenser, skalärer, arrayer med känd
+  gräns, klasser utan borttagen destruktor; inte void, funktioner, arrayer utan gräns); förut okända, så
+  `destructible`, `movable`, `copyable` och allt ovanpå föll.
+- Ett sammansatt krav `{ E } -> C` ger C `decltype((E))` även för ett xvalue (T&& från ett anrop:
+  `ranges::iter_move`), som `decltype` själv redan gjorde.
+Kvar: `std::stringstream` och `std::ifstream` i samma TU.

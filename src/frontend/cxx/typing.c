@@ -1842,6 +1842,41 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		*v = 0;
 		return true;
 	}
+	/* destructible: a reference, a scalar, an array of known bound of such or of a class, a class whose
+	   destructor is not deleted (its destructor's noexcept: implicitly so; libc++ declares none noexcept(false));
+	   not void, a function, an array of unknown bound */
+	if (IS("__is_destructible") || IS("__is_nothrow_destructible")) {
+		qty e = t[0];
+
+		if (e == CXX_TY_UNKNOWN)
+			return false;
+		if (AST_TYPE_KIND(c->ast, e) == TY_PTR && AST_TYPE(c->ast, e)->ext) {
+			*v = 1;
+			return true;
+		}
+		if (AST_TYPE_KIND(c->ast, e) == TY_ARRAY && !AST_TYPE(c->ast, e)->n) {
+			*v = 0;
+			return true;
+		}
+		while (AST_TYPE_KIND(c->ast, e) == TY_ARRAY)
+			e = AST_TYPE(c->ast, e)->base;
+		x = AST_TYPE(c->ast, e);
+		if (x->kind == TY_VOID || x->kind == TY_FUNC) {
+			*v = 0;
+			return true;
+		}
+		if (cc_type_is_record(c->ast, e)) {
+			cxx_scope *ds = cxx_tag_scope_get(c, QUNQ(e));
+			cxx_entity *d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
+
+			if (!(c->ast->tags[x->aux].flags & RF_COMPLETE))
+				return false;
+			*v = !(d && d->fn_deleted);
+			return true;
+		}
+		*v = 1;
+		return true;
+	}
 	/* what a type can do trivially: yes for scalars and arrays of them, and for a class vcc laid out as POD
 	   (one that is not POD for layout may still be trivially copyable: not known) */
 	{
