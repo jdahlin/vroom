@@ -982,8 +982,14 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 		c->ctor_picked = c->ctor_found ? c->call_picked : NULL;
 	}
 	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
-	if (dtor && dtor->kind == CXX_ENTITY_VALUE)
+	if (dtor && dtor->kind == CXX_ENTITY_VALUE) {
+		/* (the destructor's body, instantiated here, constructs things of its own: keep this choice) */
+		cxx_entity *picked = c->ctor_picked;
+		uint8_t found = c->ctor_found, none = c->ctor_none;
+
 		cxx_member_body_use(c, dtor);
+		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	}
 	c->etype = et, c->elval = el, c->ecallee = callee;
 }
 

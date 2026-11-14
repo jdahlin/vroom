@@ -479,8 +479,9 @@ VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t 
 		return;
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 	cc_id_list_init(&l);
-	if (!nargs && !(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) && !cxx_gen_needs_construction(c, t, 0)) {
-		/* T() of a class with nothing to construct: zeroes */
+	if (!nargs && (!(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) || picked->fn_defaulted)) {
+		/* T() of a class without a user-provided default constructor: zeroes (then constructed, below, if
+		   anything needs it) */
 		uint32_t zargs[3], saved = c->enode;
 
 		zargs[0] = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
@@ -492,6 +493,15 @@ VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t 
 		c->enode = saved;
 		if (!zero)
 			return;
+		if (cxx_gen_needs_construction(c, t, 0)) {
+			c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+			cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, zero, 0, 0));
+			zero = 0;
+			if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, args, nargs, &l, loc)) {
+				cxx_gen_fail(c);
+				return;
+			}
+		}
 	} else if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, args, nargs, &l, loc)) {
 		cxx_gen_fail(c);	/* (the temporary is declared: nothing of this function is kept) */
 		return;
@@ -807,6 +817,39 @@ static qty cxx_gen_abi_type(cxx *c, const cxx_entity *f)
 	return cxx_type_function(c, ret, ps, np, (ft->flags & TF_VARIADIC) != 0);
 }
 
+/* the function symbol with this assembler name: the one made first (0: none yet; then `s` is entered, if not 0) */
+static uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s)
+{
+	uint32_t h = 2166136261u, mask, i;
+
+	for (const char *p = name; *p; p++)
+		h = (h ^ (unsigned char)*p) * 16777619u;
+	if (c->nsym_names * 2 >= c->csym_names) {
+		uint32_t ncap = c->csym_names ? c->csym_names * 2 : 1024;
+		void *old = c->sym_names;
+		uint32_t ocap = c->csym_names;
+
+		c->sym_names = calloc(ncap, sizeof *c->sym_names);
+		c->csym_names = ncap, c->nsym_names = 0;
+		for (uint32_t k = 0; k < ocap; k++) {
+			struct { const char *name; uint32_t sym; } *o = old;
+
+			if (o[k].name)
+				cxx_gen_symbol_named(c, o[k].name, o[k].sym);
+		}
+		free(old);
+	}
+	mask = c->csym_names - 1;
+	for (i = h & mask; c->sym_names[i].name; i = (i + 1) & mask)
+		if (!strcmp(c->sym_names[i].name, name))
+			return c->sym_names[i].sym;
+	if (s) {
+		c->sym_names[i].name = name, c->sym_names[i].sym = s;
+		c->nsym_names++;
+	}
+	return 0;
+}
+
 /*
  * The function's symbols and their names: C++'s mangled name (mangle.c), or the plain name for main and
  * extern "C".  A member function's symbol is made here (its type with this first); an inline function's is
@@ -833,6 +876,26 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 	}
 	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, special ? 2 : 0, name, sizeof name))
 		return false;
+	{
+		/* another entity for the same function (the same mangled name) has the symbol already */
+		uint32_t have = cxx_gen_symbol_named(c, name, 0);
+
+		if (have) {
+			f->sym = have;
+			f->sym1 = special ? have : 0;
+			if (special) {
+				/* (its other names: looked up the same way below, or the one symbol for an inline one) */
+				char n1[2048];
+
+				if (cxx_mangle_function(c, f, home, f->ty, false, 1, n1, sizeof n1) && cxx_gen_symbol_named(c, n1, 0))
+					f->sym1 = cxx_gen_symbol_named(c, n1, 0);
+				if (v->s[1] != 'c' && cxx_mangle_function(c, f, home, f->ty, false, 3, n1, sizeof n1))
+					f->sym0 = cxx_gen_symbol_named(c, n1, 0);
+			}
+			f->mangled = 1;
+			return true;
+		}
+	}
 	if (!f->sym || cxx_gen_abi_type(c, f) != f->ty) {
 		qty st = cxx_gen_abi_type(c, f);
 
@@ -846,7 +909,10 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;
 	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
-	if (special) {
+	cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, f->sym);
+	if (special && f->fn_inline)
+		f->sym1 = f->sym;	/* (an inline one: every TU that uses it has its own, so the one function, C2 or D2, does for both names) */
+	if (special && !f->fn_inline) {
 		if (!cxx_mangle_function(c, f, home, f->ty, false, 1, name, sizeof name))
 			return false;
 		f->sym1 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
@@ -855,17 +921,19 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		memset(&at, 0, sizeof at);
 		at.asmname = cxx_gen_text(c, name) + 1;
 		cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
-		if (f->fn_virtual && v->s[1] != 'c') {
-			/* a virtual destructor: the deleting destructor too */
-			if (!cxx_mangle_function(c, f, home, f->ty, false, 3, name, sizeof name))
-				return false;
-			f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
-			a->syms[f->sym0].flags |= SF_GLOBAL;
-			a->syms[f->sym0].depth = 0;
-			memset(&at, 0, sizeof at);
-			at.asmname = cxx_gen_text(c, name) + 1;
-				cc_attribute_apply_symbol(a, &a->syms[f->sym0], &at);
-		}
+		cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, f->sym1);
+	}
+	if (special && f->fn_virtual && v->s[1] != 'c') {
+		/* a virtual destructor: the deleting destructor too */
+		if (!cxx_mangle_function(c, f, home, f->ty, false, 3, name, sizeof name))
+			return false;
+		f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
+		a->syms[f->sym0].flags |= SF_GLOBAL;
+		a->syms[f->sym0].depth = 0;
+		memset(&at, 0, sizeof at);
+		at.asmname = cxx_gen_text(c, name) + 1;
+		cc_attribute_apply_symbol(a, &a->syms[f->sym0], &at);
+		cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, f->sym0);
 	}
 	f->mangled = 1;
 	return true;
@@ -1111,6 +1179,13 @@ VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc)
 
 	if (!cxx_gen_on(c) || !v->sym || !(cxx_gen_object_type_ok(c, v->ty) || cxx_gen_type_ok(c, v->ty)))
 		return;
+	if (v->has_value && v->ty != CXX_TY_UNKNOWN && (QQ(v->ty) & Q_CONST) && !c->ast->syms[v->sym].depth &&
+	    !(c->ast->syms[v->sym].flags & (SF_DEFINED | SF_TENTATIVE)) &&
+	    ((AST_TYPE_KIND(c->ast, v->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM)) {
+		/* a constant at namespace scope (constexpr, a const integer) with no object in this TU: its value */
+		c->enode = cc_node_integer_new(c->ast, (i128)v->value, QUNQ(v->ty), loc);
+		return;
+	}
 	if (c->gen_lambda && v->sym < c->gen_lambda->floor && c->ast->syms[v->sym].sc == SC_AUTO) {
 		/* in a lambda's body: a variable of an enclosing function is a capture */
 		int k = cxx_gen_capture(c, c->gen_lambda, v, loc);
@@ -1899,28 +1974,23 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 		return;
 	}
 	{
-		/* (a reference member: bound, not assigned; not built yet) */
-		const tag *r = &a->tags[AST_TYPE(a, AST_NODE_AT(a, self)->ty)->aux];
-		bool found = false;
+		/* the member as it is in the object (through anonymous structs and unions too) */
+		uint32_t raw = cxx_gen_member_of(c, self, name, loc, 0);
 
-		for (uint32_t i = 0; i < r->nfield; i++)
-			if (r->f[i].name == name) {
-				found = true;
-				if (cxx_gen_is_reference(c, r->f[i].ty)) {
-					/* a reference member: bound to its initializer (the member holds the address) */
-					uint32_t raw = member(a, self, name, loc), v = nargs == 1 && args[0] ? cxx_gen_bind(c, args[0], r->f[i].ty, loc) : 0;
+		if (raw && cxx_gen_is_reference(c, AST_NODE_AT(a, raw)->ty)) {
+			/* a reference member: bound to its initializer (the member holds the address) */
+			uint32_t v = nargs == 1 && args[0] ? cxx_gen_bind(c, args[0], AST_NODE_AT(a, raw)->ty, loc) : 0;
 
-					if (!v) {
-						cxx_gen_fail(c);
-						return;
-					}
-					if (c->ngen_init_names < 32)
-						c->gen_init_names[c->ngen_init_names++] = name;
-					cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, raw, v, loc), 0, 0));
-					return;
-				}
+			if (!v) {
+				cxx_gen_fail(c);
+				return;
 			}
-		if (!found) {
+			if (c->ngen_init_names < 32)
+				c->gen_init_names[c->ngen_init_names++] = name;
+			cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, raw, v, loc), 0, 0));
+			return;
+		}
+		if (!raw) {
 			/* not in the record: an empty [[no_unique_address]] member, which takes no space (an allocator, a
 			   comparator): constructed all the same, at the object's own address */
 			cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(AST_NODE_AT(a, self)->ty));
@@ -1939,7 +2009,7 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 					cxx_gen_fail(c);
 				return;
 			}
-			cxx_gen_fail(c);	/* (a member of an anonymous union) */
+			cxx_gen_fail(c);	/* (a static member, a member of a class not laid out) */
 			return;
 		}
 	}
@@ -1952,6 +2022,32 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
 		c->gen_init_names[c->ngen_init_names++] = name;
 	mt = AST_NODE_AT(a, target)->ty;
 	if (cc_type_is_record(a, mt) && AST_TYPE_KIND(a, mt) != TY_ARRAY) {
+		bool own = c->ctor_found && c->ctor_picked && c->ctor_picked->member_of == cxx_tag_scope_get(c, QUNQ(mt));
+
+		if (!nargs && (!own || c->ctor_picked->fn_defaulted)) {
+			/* member(): value-initialized; without a user-provided default constructor zeroed first (a union
+			   with T() = default), then default-constructed if anything needs it */
+			uint32_t zargs[3], saved = c->enode, zero;
+			cxx_entity *picked = c->ctor_picked;
+			uint8_t found = c->ctor_found, none = c->ctor_none;
+
+			zargs[0] = cc_address_of_build(a, target, loc);
+			zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);
+			zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, QUNQ(mt))->size, cc_type_basic(TY_ULONG), loc);
+			c->enode = 0;
+			cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+			zero = c->enode;
+			c->enode = saved;
+			if (!zero) {
+				cxx_gen_fail(c);
+				return;
+			}
+			cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, zero, 0, 0));
+			c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+			if (cxx_gen_needs_construction(c, QUNQ(mt), 0) && !cxx_gen_construct_at(c, target, QUNQ(mt), args, nargs, c->gen_pre, loc))
+				cxx_gen_fail(c);
+			return;
+		}
 		if (!cxx_gen_construct_at(c, target, QUNQ(mt), args, nargs, c->gen_pre, loc))
 			cxx_gen_fail(c);
 		return;
@@ -1976,13 +2072,50 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, con
  * A constructor's body is done: the bases and members of class type its initializers did not name are
  * default-constructed first (into `first`).  False: one of them is not built yet.
  */
+/* ... the members of the record r (the class's, or an anonymous struct's inside it) that the initializers
+   did not name and that need construction */
+static bool cxx_gen_constructor_member_defaults(cxx *c, const tag *r, cc_id_list *first, uint32_t loc, int depth)
+{
+	cc *a = c->ast;
+
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		qty ft = r->f[i].ty;
+		bool named = false;
+
+		if (!r->f[i].name && cc_type_is_record(a, ft) && AST_TYPE_KIND(a, ft) != TY_ARRAY && depth < 4) {
+			/* an anonymous struct: its members are the class's (a union: none is made active) */
+			if (AST_TYPE_KIND(a, ft) == TY_STRUCT &&
+			    !cxx_gen_constructor_member_defaults(c, &a->tags[AST_TYPE(a, ft)->aux], first, loc, depth + 1))
+				return false;
+			continue;
+		}
+		if (!r->f[i].name || !cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == TY_ARRAY) {
+			/* (an array of a class with a constructor: not built yet) */
+			qty et = ft;
+
+			while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+				et = AST_TYPE(a, et)->base;
+			if (cc_type_is_record(a, et) && cxx_gen_needs_construction(c, et, 0))
+				return false;
+			continue;
+		}
+		for (uint32_t k = 0; k < c->ngen_init_names; k++)
+			named |= c->gen_init_names[k] == r->f[i].name;
+		if (named || !cxx_gen_needs_construction(c, ft, 0))
+			continue;
+		cxx_ctor_use(c, ft, NULL, NULL, 0, false);
+		if (!cxx_gen_construct_at(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), QUNQ(ft), NULL, 0, first, loc))
+			return false;
+	}
+	return true;
+}
+
 static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc)
 {
 	cc *a = c->ast;
 	uint32_t self = cxx_gen_this_object(c, loc);
 	qty own, bases[16];
 	uint32_t nb;
-	const tag *r;
 
 	if (!self)
 		return false;
@@ -2001,30 +2134,7 @@ static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc
 		if (!cxx_gen_construct_at(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], NULL, 0, first, loc))
 			return false;
 	}
-	r = &a->tags[AST_TYPE(a, own)->aux];
-	for (uint32_t i = 0; i < r->nfield; i++) {
-		qty ft = r->f[i].ty;
-		bool named = false;
-
-		if (!r->f[i].name || !cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == TY_ARRAY) {
-			/* (an array of a class with a constructor, an anonymous member holding one: not built yet) */
-			qty et = ft;
-
-			while (AST_TYPE_KIND(a, et) == TY_ARRAY)
-				et = AST_TYPE(a, et)->base;
-			if (cc_type_is_record(a, et) && cxx_gen_needs_construction(c, et, 0))
-				return false;
-			continue;
-		}
-		for (uint32_t k = 0; k < c->ngen_init_names; k++)
-			named |= c->gen_init_names[k] == r->f[i].name;
-		if (named || !cxx_gen_needs_construction(c, ft, 0))
-			continue;
-		cxx_ctor_use(c, ft, NULL, NULL, 0, false);
-		if (!cxx_gen_construct_at(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), QUNQ(ft), NULL, 0, first, loc))
-			return false;
-	}
-	return true;
+	return cxx_gen_constructor_member_defaults(c, &a->tags[AST_TYPE(a, own)->aux], first, loc, 0);
 }
 
 /*
@@ -2587,6 +2697,7 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 			memset(&at, 0, sizeof at);
 			at.weak = 1;
 			cc_attribute_apply_symbol(a, y, &at);
+			y->flags |= SF_LINKONCE;	/* (emitted only if the TU's code refers to it) */
 		}
 		a->toplevel[a->ntoplevel++] = cls->vt_sym;
 	}
@@ -2719,6 +2830,7 @@ static void cxx_gen_typeinfos_emit(cxx *c)
 		at.asmname = cxx_gen_text(c, name) + 1;
 		at.weak = 1;
 		cc_attribute_apply_symbol(a, &a->syms[ts], &at);
+		a->syms[ts].flags |= SF_LINKONCE;
 		n = cc_node_new(a, N_STR, a->syms[ts].ty, 0);
 		AST_NODE_AT(a, n)->a = si;
 		AST_NODE_AT(a, n)->flags = NF_LVALUE;
@@ -2772,6 +2884,7 @@ static void cxx_gen_typeinfos_emit(cxx *c)
 		memset(&at, 0, sizeof at);
 		at.weak = 1;
 		cc_attribute_apply_symbol(a, y, &at);
+		y->flags |= SF_LINKONCE;
 		a->toplevel[a->ntoplevel++] = cls->ti_sym;
 	}
 }
@@ -2932,9 +3045,17 @@ VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uin
 	if (!cxx_gen_on(c) || a->o->target != PP_LINUX_X86_64 || !closure || !call->sym || !nhandlers || nhandlers > 60 ||
 	    !(AST_NODE_AT(a, closure)->flags & NF_LVALUE))
 		return 0;
-	for (uint32_t k = 0; k < nhandlers; k++)
+	for (uint32_t k = 0; k < nhandlers; k++) {
+		attrs used;
+
 		if (ti[k] && !cxx_gen_symbol_asm_name(c, ti[k]))
 			return 0;
+		if (ti[k]) {	/* (named by the exception table, in assembly: kept whatever the code refers to) */
+			memset(&used, 0, sizeof used);
+			used.used = 1;
+			cc_attribute_apply_symbol(a, &a->syms[ti[k]], &used);
+		}
+	}
 	if (!exc)
 		return 0;
 	text = malloc(cap);
@@ -3480,6 +3601,13 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
  * A function definition at namespace scope, before its body: its parameters' symbols, bound to the
  * parameter entities of the body's scope fs.  False: not a function code is generated for yet.
  */
+/* VCC_CXX_GEN=3: why a function definition was not even started (cxx_gen_function_begin) */
+#define CXX_BEGIN_WHY() do { \
+		if (getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 3 && f && !c->tentative && !c->template_depth && !c->unevaluated && \
+		    !(f->sym && (c->ast->syms[f->sym].flags & SF_DEFINED))) \
+			fprintf(stderr, "no begin (codegen.c:%d): %.*s\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s); \
+	} while (0)
+
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps)
 {
 	cc *a = c->ast;
@@ -3489,21 +3617,21 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 
 	/* (the parser's parameter records are its scratch: completing a class below parses declarations of its own) */
 	if (nps > 32)
-		return false;
+		{ CXX_BEGIN_WHY(); return false; }
 	memcpy(own, ps, nps * sizeof *ps);
 	ps = own;
 
 	if (!a->o->emit || c->tentative || c->template_depth || c->unevaluated || !f || f->ty == CXX_TY_UNKNOWN ||
 	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)) || c->gen_stack_depth > 48)
-		return false;
+		{ CXX_BEGIN_WHY(); return false; }
 	ft = AST_TYPE(a, f->ty);
 	if ((ft->flags & TF_VARIADIC) || ft->n != nps || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
-		return false;
+		{ CXX_BEGIN_WHY(); return false; }
 	for (uint32_t i = 0; i < nps; i++)	/* (the parser's record of a parameter may lack its type: the function type has it) */
 		if (!cxx_gen_value_ok(c, ps[i].ty != CXX_TY_UNKNOWN ? ps[i].ty : a->params[ft->aux + i]))
-			return false;
+			{ CXX_BEGIN_WHY(); return false; }
 	if (!cxx_gen_name(c, f) || !f->sym)
-		return false;
+		{ CXX_BEGIN_WHY(); return false; }
 	{
 		/* Two definitions with one symbol name: char16_t and unsigned short (and wchar_t, char32_t,
 		   char8_t) are one type here for now, so overloads on them mangle alike.  The first has the code. */
@@ -3512,7 +3640,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 
 		for (uint32_t i = 0; nm && i < c->ngen_names; i++)
 			if (!strcmp(c->gen_names[i], nm))
-				return false;
+				{ CXX_BEGIN_WHY(); return false; }
 		if (nm) {
 			if (c->ngen_names == c->cgen_names)
 				c->gen_names = realloc(c->gen_names, (c->cgen_names = c->cgen_names ? c->cgen_names * 2 : 256) * sizeof *c->gen_names);
@@ -3585,6 +3713,10 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			/* a constructor: the bases and members its initializers did not name, the initializers, its body
 			   (members' default initializers: not built yet) */
 			ok = !cxx_class_has_member_initializer(c, f->member_of->owner->ty) && cxx_gen_constructor_defaults(c, &all, bloc);
+			if (!ok && getenv("VCC_CXX_GEN"))
+				fprintf(stderr, "no code (constructor: %s): %.*s\n", cxx_class_has_member_initializer(c, f->member_of->owner->ty) ?
+					"members with default initializers" : "a base or member to default-construct",
+					(int)vintern_ents[f->member_of->owner->name].len, vintern_ents[f->member_of->owner->name].s);
 			for (uint32_t i = 0; ok && pre && i < pre->n; i++)
 				cc_id_list_append(a, &all, pre->v[i]);
 			if (ok && !c->gen_delegates && cxx_class_polymorphic(c, f->member_of->owner->ty)) {
@@ -3639,10 +3771,14 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		memset(&at, 0, sizeof at);
 		at.weak = 1;
 		cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
-		if (f->sym1)
-			cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
-		if (f->sym0)
+		if (f->sym1 && f->sym1 != f->sym)
+			cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);	/* (named before it was known to be inline: the alias below needs its target, which stays) */
+		else
+			a->syms[f->sym].flags |= SF_LINKONCE;	/* (emitted only if the TU refers to it) */
+		if (f->sym0) {
 			cc_attribute_apply_symbol(a, &a->syms[f->sym0], &at);
+			a->syms[f->sym0].flags |= SF_LINKONCE;
+		}
 	}
 	a->syms[f->sym].body = body;
 	a->syms[f->sym].flags |= SF_DEFINED;
@@ -3650,7 +3786,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	AST_NODE_AT(a, body)->a = psyms;
 	AST_NODE_AT(a, body)->aux = (uint16_t)npsyms;
 	a->toplevel[a->ntoplevel++] = f->sym;	/* (the TU's definitions, in order: what emit_tu walks) */
-	if (f->sym1) {
+	if (f->sym1 && f->sym1 != f->sym) {
 		/* a constructor or destructor: the complete-object function is the same code (no virtual bases) */
 		const sym *y = &a->syms[f->sym];
 		attrs at;

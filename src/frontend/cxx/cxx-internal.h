@@ -399,6 +399,9 @@ typedef struct cxx {
 	cxx_scope **vt_list;		/* the classes whose vtable this TU names */
 	uint32_t nvt_list, cvt_list;
 	uint32_t gen_delete_sym, gen_pure_sym;
+	/* function symbols by assembler name: two entities for one function (found through different declarations) share the symbol */
+	struct { const char *name; uint32_t sym; } *sym_names;
+	uint32_t nsym_names, csym_names;
 	cxx_scope **ti_list;		/* the classes whose type info this TU names (defined at its end where it belongs here) */
 	uint32_t nti_list, cti_list;
 	uint32_t gen_eh_syms[8];	/* the exception runtime's functions, once declared */

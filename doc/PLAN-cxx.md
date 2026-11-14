@@ -1189,3 +1189,26 @@ Kvar för `std::string`-programmet: `basic_string()` och
 konstanter på namnrymdsnivå (`__not_found`, `__ambiguous`: måste få en
 definition eller vikas), `__fill_n`, och de breda `__constexpr_w*`.
 `cxx-run-tests.py` 21/21; `cxx-coverage.py` 10 403 av 146 663 (7,1 %).
+
+### Status (38): ett `std::string`-program länkar och kör (2026-11-14)
+`std::string s("xy"); s.size()` och `std::string s; s.size()` kompileras
+av vcc, länkas mot libc++ och ger clangs värden (2 och 0).
+- Inline-funktioner (och vtabeller, typinfo) är `SF_LINKONCE`: de emitteras
+  bara när något med kod använder dem, som clang -O0.  Ett alias
+  `C1 = C2` till en konstruktor som namngavs innan den var känd som inline
+  pekar inte på en bortrensad funktion.
+- Symboler med samma assemblernamn delas (`cxx_gen_symbol_named`); medlemmar
+  i anonyma structar får sina standardinitierare; heltalskonstanter på
+  namnrymdsnivå viks.
+- `cxx_ctor_use` behåller sitt konstruktorval när destruktorns kropp
+  instansieras (den kroppen konstruerar egna objekt och skrev över valet:
+  `basic_string(const char*)` blev `__rep`s konstruktor).
+- `m()` och `T()` värdeinitierar: utan användarskriven standardkonstruktor
+  nollas objektet först (`__rep_()` med `__rep() = default`), sedan
+  konstrueras det om något behöver det.
+`cxx-run-tests.py` 22/22 (ny `value-init.cpp`).  `cxx-coverage.py`: 0 av
+71 TU:er fallerar, 2 138 av 146 663; talet sjönk från 10 403 eftersom
+oanvända inline-funktioner inte längre emitteras (en funktion utan kod drar
+inte in sina anrop), inte för att mindre kod genereras.  Kvar: strängliteral
+som variadiskt argument (`printf("%lu", ...)` blir otypad), rethrow ur en
+hanterare, statiska lokala variabler, implicita kopieringskonstruktorer.

@@ -3280,6 +3280,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 							dprintf(c->mangle_fd, "?%.*s\n", (int)fv->len, fv->s);
 					}
 
+					/* (a member function's body is parsed later, for this function: what came after the
+					   declarator, a noexcept(...) that completed a class, may have declared others since) */
+					if (context == CXX_CONTEXT_CLASS && decl_fn && !(flags & DS_FRIEND))
+						c->last_fn = decl_fn;
 					cxx_function_body_parse(c);
 					if (gen)
 						cxx_gen_function_end(c, decl_fn, c->snode);
