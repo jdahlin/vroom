@@ -2064,7 +2064,22 @@ static bool cxx_shape_mismatch(cxx *c, qty P, qty A)
 			return false;
 		if (at->kind != TY_STRUCT && at->kind != TY_UNION)
 			return true;
-		return !cxx_instance_of(c, A, ip->t, 0);
+		if (!cxx_instance_of(c, A, ip->t, 0))
+			return true;
+		/* X<P1, ...> against an X<A1, ...> itself: an argument whose own shape cannot match
+		   (identity_tag<tuple<Ts...>> against identity_tag<int>) */
+		{
+			cxx_instance *ia = cxx_tag_info(c, A);
+
+			if (ia && ia->t == ip->t)
+				for (uint32_t i = 0; i < ip->nargs && i < ia->nargs; i++) {
+					if (ip->args[i].kind != 1 || ia->args[i].kind != 1)
+						break;	/* (a pack's expansion, a value: not compared) */
+					if (cxx_shape_mismatch(c, ip->args[i].t, ia->args[i].t))
+						return true;
+				}
+		}
+		return false;
 	}
 	if (pt->kind == TY_PTR)
 		return !((at->kind == TY_PTR && !at->ext) || at->kind == TY_ARRAY || at->kind == TY_FUNC);

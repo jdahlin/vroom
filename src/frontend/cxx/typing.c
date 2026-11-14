@@ -178,6 +178,7 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  */
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
 static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth);
+static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, qty to, int depth);
 static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n, bool implicit);
 
 static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
@@ -263,6 +264,9 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 				if (k >= 0)
 					return k ? 5 : 3;
 			}
+			/* to a class: only a conversion function to a class type can give one */
+			if (by_conv && cc_type_is_record(c->ast, p) && !cxx_class_converts_class(c, as, QUNQ(p), 0))
+				by_conv = false;
 		}
 		if (cc_type_is_record(c->ast, p) && !binds_object) {
 			if (!ps)
@@ -1034,6 +1038,63 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			*v = r;
 			return true;
 		}
+		/* a class object from something else: its operator= functions, then the implicit ones, which take
+		   an object of the class (what the right side converts to, or not) */
+		if (assign && cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR && AST_TYPE_KIND(c->ast, to) != TY_ARRAY &&
+		    !(QQ(to) & Q_CONST) && from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID) {
+			cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to));
+			cxx_entity *set, *own = NULL;
+			uint8_t lv = !rvalue;
+			int rank;
+
+			if (!cls)
+				return false;
+			cxx_type_require_complete(c, QUNQ(to));
+			if (cls->has_dependent_base)
+				return false;
+			set = cxx_lookup_in(c, cls, vintern_cstr("operator="), 0);
+			for (cxx_entity *e = set; e; e = e->next)
+				if (e->member_of == cls || e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
+					own = set;
+					break;
+				}
+			if (own) {
+				qty et = c->etype;
+				bool el = c->elval;
+				cxx_entity *callee = c->ecallee;
+				uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
+				bool resolved, none;
+
+				c->call_obj = 1, c->no_literal = 1;
+				cxx_call_type_impl(c, own, CXX_TY_UNKNOWN, NULL, UINT32_MAX, &from, &lv, 1, true);
+				resolved = c->call_resolved || c->etype != CXX_TY_UNKNOWN, none = c->none_viable;
+				c->etype = et, c->elval = el, c->ecallee = callee;
+				c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
+				if (resolved) {
+					*v = !(c->call_picked && c->call_picked->kind == CXX_ENTITY_VALUE && c->call_picked->fn_deleted);
+					return true;
+				}
+				if (!none)
+					return false;
+			}
+			c->rank_no_literal = 1;
+			rank = cxx_arg_rank0(c, QUNQ(to), from, lv, true);
+			c->rank_no_literal = 0;
+			if (rank == 2)
+				return false;
+			if (rank == 3) {
+				*v = 0;
+				return true;
+			}
+			{
+				int r = cxx_class_special(c, QUNQ(to), 1, true, 0);	/* (from the converted temporary) */
+
+				if (r < 0)
+					return false;
+				*v = r;
+				return true;
+			}
+		}
 		if (assign)
 			return false;
 	}
@@ -1388,6 +1449,30 @@ static int cxx_class_converts_to(cxx *c, cxx_scope *cls, qty to, int depth)
 	return r;
 }
 
+/* may one of the class's conversion functions (or a base's) convert to the class `to` (or one derived from it)? */
+static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, qty to, int depth)
+{
+	if (!cls || cls->has_dependent_base || depth > 8)
+		return true;
+	if (cls->has_conversion) {
+		if (cls->conv_unknown || !cls->nconv)
+			return true;
+		for (uint32_t i = 0; i < cls->nconv; i++) {
+			qty t = cls->conv_types[i];
+
+			if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+				t = AST_TYPE(c->ast, t)->base;
+			if (cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY &&
+			    (QUNQ(t) == QUNQ(to) || cxx_derives(c, t, to, 0)))
+				return true;
+		}
+	}
+	for (uint32_t i = 0; i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS && cxx_class_converts_class(c, cls->used[i], to, depth + 1))
+			return true;
+	return false;
+}
+
 /* does the class, or a base of it, declare a conversion function? */
 static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth)
 {
@@ -1466,7 +1551,7 @@ static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *
 
 		return s;
 	}
-	if (n == 1 && from_cls && cxx_class_converts(c, from_cls, 0))
+	if (n == 1 && from_cls && cxx_class_converts_class(c, from_cls, QUNQ(to), 0))
 		return -1;	/* (through the argument's conversion function, perhaps) */
 	if (own)
 		return r;
