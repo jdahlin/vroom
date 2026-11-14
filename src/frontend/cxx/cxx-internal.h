@@ -467,9 +467,8 @@ typedef struct cxx {
 	struct cxx_entity *call_instance;	/* ... the one the last body instantiation was for */
 	struct cxx_entity *ftmpl_te;	/* the function template being deduced (its entity) */
 	qty bfirst;			/* ... its first expression argument's type */
-	uint32_t bnodes[4], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
-	uint32_t gen_builtin_syms[128];	/* the library functions the builtins call, once declared */
-	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* ... those C's builtin table names (__builtin_ceill: ceill) */
+	uint32_t bnodes[8], nbnodes;	/* the last builtin call's expression arguments' nodes (UINT32_MAX: a type among them, or too many) */
+	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */

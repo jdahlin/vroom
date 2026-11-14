@@ -33,9 +33,6 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, qty t, const uint32_t
 VPRIV uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc, uint32_t *array);
 
 /* builtin.c */
-VPRIV qty cxx_builtin_code_type(cxx *c, char code);
-VPRIV const struct cxx_builtin_function *cxx_builtin_function_find(const char *name, size_t len, uint32_t nargs, size_t *index);
-VPRIV int cxx_float_class_builtin(const char *name, size_t len);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);

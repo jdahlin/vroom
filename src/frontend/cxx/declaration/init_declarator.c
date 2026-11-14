@@ -403,8 +403,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (v >= 0 && !c->tentative)
 					e->value = v, e->has_value = 1;
 				else if (!c->tentative && !c->template_depth && t != CXX_TY_UNKNOWN &&
-					 AST_TYPE_KIND(c->ast, t) >= TY_BOOL && AST_TYPE_KIND(c->ast, t) <= TY_ULLONG)
-					const_e = e;	/* (its initializer: a constant expression, evaluated below) */
+					 ((AST_TYPE_KIND(c->ast, t) >= TY_BOOL && AST_TYPE_KIND(c->ast, t) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, t) == TY_ENUM))
+					const_e = e;	/* (its initializer: a constant expression, evaluated below; an enumeration's
+							   too: constexpr memory_order memory_order_relaxed = memory_order::relaxed) */
 			}
 		}
 		if (member && !f && name > 1 && cs && !c->tentative && !c->template_depth) {

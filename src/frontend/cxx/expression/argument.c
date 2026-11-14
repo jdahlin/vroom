@@ -126,7 +126,7 @@ VPRIV void cxx_builtin_call_parse(cxx *c)
 {
 	qty types[2];
 	uint32_t n = 0;
-	uint32_t bn[4], nb = 0;	/* (code generation: the expression arguments' nodes) */
+	uint32_t bn[8], nb = 0;	/* (code generation: the expression arguments' nodes) */
 	qty first = CXX_TY_UNKNOWN;
 
 	cxx_advance(c);
@@ -188,7 +188,7 @@ VPRIV void cxx_builtin_call_parse(cxx *c)
 			cxx_initializer_parse(c);
 			if (!nb && n == 0)
 				first = c->etype, c->bconst = c->econst, c->bvalue = c->evalue;
-			if (nb < 4 && nb != UINT32_MAX)
+			if (nb < 8 && nb != UINT32_MAX)
 				bn[nb++] = c->enode;
 			else
 				nb = UINT32_MAX;

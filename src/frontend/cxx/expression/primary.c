@@ -451,7 +451,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 		{
 			qty rt;
-			uint32_t bn[4], nb = c->nbnodes;
+			uint32_t bn[8], nb = c->nbnodes;
 
 			memcpy(bn, c->bnodes, sizeof bn);
 			if (nb != UINT32_MAX && !c->tentative && cxx_builtin_function_type(c, t->s, t->len, nb, c->bfirst, &rt)) {
@@ -563,7 +563,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		{
 			/* a builtin that is a library function or a simple operation: its type, and its code */
 			qty rt;
-			uint32_t bn[4], nb = c->nbnodes;
+			uint32_t bn[8], nb = c->nbnodes;
 
 			memcpy(bn, c->bnodes, sizeof bn);
 			if (nb == 1 && c->bconst && c->bfirst != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bfirst) >= TY_BOOL &&

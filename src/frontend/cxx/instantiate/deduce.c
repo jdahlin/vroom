@@ -265,6 +265,17 @@ VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue,
 		/* X<T> against a class derived from X<int>: its bases, nearest first */
 		if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
 			return 1;
+		/* ... X<T> * against a pointer to one ([temp.deduct.call]/4.3): the pointee's bases, as const and
+		   volatile as P's pointee (__cxx_atomic_load(const volatile __cxx_atomic_base_impl<T> *) for a
+		   __cxx_atomic_impl<bool> *) */
+		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && !AST_TYPE(c->ast, P)->ext && AST_TYPE_KIND(c->ast, A) == TY_PTR && !AST_TYPE(c->ast, A)->ext &&
+		    AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE(c->ast, A)->base != CXX_TY_UNKNOWN &&
+		    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, A)->base) == TY_STRUCT) {
+			qty pb = AST_TYPE(c->ast, P)->base, ab = AST_TYPE(c->ast, A)->base;
+
+			if ((QQ(pb) & QQ(ab)) == QQ(ab) && cxx_match_bases(c, p, pb, QT(QI(ab), QQ(pb)), bind, 0))
+				return 1;
+		}
 		/* (deduction does not convert: a pattern that matches neither the argument nor a base of it fails) */
 		c->why = CXX_WHY_CLASS_MATCH;
 		return 0;

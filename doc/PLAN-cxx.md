@@ -2042,3 +2042,22 @@ vcc:s objekt ensamt (länkat mot libc++).
 - En klasstyp som resultat kompletteras innan den bedöms (`cxx_gen_value_ok`).
 Kvar för `map::operator[]` och hela `std::tuple`: en partiell specialisering vars mönster använder en alias
 med en pack (`__tuple_impl<__index_sequence<I...>, T...>`) matchas aldrig, så `tuple<int>` får ingen layout.
+
+## Status 120 (2026-11-14)
+C++-frontens byggfunktioner ur en lista: `src/frontend/cxx/codegen/builtins.list` (namn, sort, signatur
+[, symbol]) -> `builtins.inc` med `src/tools/gen-cxx-builtins.py` (`--check` i premerge).  Sorterna: `lib`
+(anrop: operator new/delete, vcc:s egna), `node`/`fclass`/`atomic` (C-frontens nod, sänkt av kodgeneratorn),
+`special` (byggs vid namn), `parsed` (parsern; i listan för inventeringen).  Signaturerna i C:s bokstäver
+(`cc_builtin_signature_type`) i stället för en egen ofullständig uppsättning; clangs biblioteksbyggfunktioner
+kommer ur `libbuiltins.inc` och får inte stå i listan (generatorn kontrollerar), C-noderna måste finnas i
+C:s tabell.  Flyttalsklassningen är C:s noder: alla flyttalstyper, long double också (förut jämförelser,
+utan long double för isnormal).  `--coverage DIR`: av de 287 byggfunktioner libc++:s huvuden anropar täcks
+268; kvar 19 (korutiner, vektorreduktioner, mättad aritmetik, `bswapg`/`bswap128`, `clear_padding`,
+`complex`, typegenskaperna `is_virtual_base_of`/`is_implicit_lifetime`, `is_within_lifetime`, några
+plattforms- eller falska träffar).  Nya: `__c11_atomic_*` (namnen känns igen nu), generiska `__atomic_*`,
+staket, lock-free-frågorna, `clz`/`ctz`/`bswap`/`popcountg`, overflow, `launder`, `assume`, `verbose_trap`.
+Även: deduktion av `X<T> *` från en pekare till en härledd klass ([temp.deduct.call]/4.3), en
+funktionsmall funnen två gånger är en kandidat (`std::signbit`), constexpr-variabler av uppräkningstyp
+evalueras (förut fel kod), byggfunktionsargument upp till 8.  Test: `run/builtins-table.cpp`.
+Kvar för `std::atomic<T>`: en `_Atomic(T)`-medlem läggs inte ut.  cxx-strict 257 (274): 22 fler
+kompileras, 53 nya i `std::map`-kod som nu nås och stannar vid `std::tuple` (annan session).

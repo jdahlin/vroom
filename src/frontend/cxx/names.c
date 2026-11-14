@@ -284,7 +284,7 @@ VPRIV int cxx_builtin_kind(uint32_t id)
 	v = &vintern_ents[id];
 	if (v->len > 4 && (!memcmp(v->s, "__is_", 5) || !memcmp(v->s, "__has_", 6) || !memcmp(v->s, "__reference_", 12) ||
 			   !memcmp(v->s, "__array_", 8) || !memcmp(v->s, "__builtin_", 10) || !memcmp(v->s, "__can_pass", 10) ||
-			   (v->len > 9 && !memcmp(v->s, "__atomic_", 9)) ||
+			   (v->len > 9 && !memcmp(v->s, "__atomic_", 9)) || (v->len > 13 && !memcmp(v->s, "__c11_atomic_", 13)) ||
 			   (v->len == 12 && !memcmp(v->s, "__datasizeof", 12)) ||
 			   (v->len > 9 && !memcmp(v->s, "__atomic_", 9))))	/* (__atomic_add_fetch and the like: builtins too) */
 		return CXX_BUILTIN_TRAIT;

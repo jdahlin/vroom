@@ -66,6 +66,7 @@ arm64)
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
+	step cxx-builtins-generated python3 src/tools/gen-cxx-builtins.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
