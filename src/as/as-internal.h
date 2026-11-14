@@ -131,6 +131,7 @@ struct as_context {
 	int dwarf_row_is_pending, dwarf_table_is_due;
 	/* -g on an assembler source (MC's GenDwarfForAssembly): on from as_begin while debug_directory is
 	   set and no .file N was seen; a row per instruction and a DW_TAG_label per label in its sections */
+	int is_coff;			/* object->format == OBJ_COFF, set by as_begin: the per-statement tests read this one flag */
 	int gen_dwarf;			/* 0 off, 1 on, 2 on and the main file still to register (first snippet) */
 	uint32_t gen_file;		/* the file number of its rows and labels */
 	uint32_t *gen_sections, gen_section_count, gen_section_capacity;	/* in order: .text first */
@@ -253,7 +254,7 @@ static inline int as_at_is_specifier(const char *p, const char *e)
 		if (as_text_equals_ignore_case(s, n, names[i])) return 1;
 	return 0;
 }
-static inline int as_names_have_at(const as_context *a) { return a->object->format == OBJ_COFF; }
+static inline int as_names_have_at(const as_context *a) { return a->is_coff; }
 /* arch/<cpu>/as/parse.c */
 VPRIV void as_alias_rehash(as_context *a);
 VPRIV int a64_as_pools_flush(as_context *a);

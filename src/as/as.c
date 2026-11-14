@@ -194,14 +194,14 @@ static int as_label_define(as_context *a, const char *s, size_t n)
 		nl->forward = 0;
 		nl->current = y;
 		elf_define(a->object, y, a->fragment_current, elf_frag(a->object, a->fragment_current)->size);
-		if (a->gen_dwarf) as_gen_dwarf_label(a, s, n);	/* (no DW_TAG_label: a temporary) */
+		if (__builtin_expect(a->gen_dwarf, 0)) as_gen_dwarf_label(a, s, n);	/* (no DW_TAG_label: a temporary) */
 		return 0;
 	}
 	uint32_t y = as_symbol_intern(a, s, n);
 	ElfSym *ys = elf_symp(a->object, y);
 	if (ys->flags & ESYM_DEFINED) return as_error_report(a, "invalid symbol redefinition");
 	elf_define(a->object, y, a->fragment_current, elf_frag(a->object, a->fragment_current)->size);
-	if (a->gen_dwarf) as_gen_dwarf_label(a, s, n);
+	if (__builtin_expect(a->gen_dwarf, 0)) as_gen_dwarf_label(a, s, n);
 	return 0;
 }
 
@@ -281,7 +281,7 @@ static int as_directive_dispatch(as_context *a, as_text w, const char *p, const 
 	const char *d = w.text + 1;
 	size_t n = w.length - 1;
 #define AS_DIRECTIVE_IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
-	if (a->object->format == OBJ_COFF) {
+	if (__builtin_expect(a->is_coff, 0)) {
 		int rc;
 		if (as_directive_coff(a, w, p, e, &rc)) return rc;
 	}
@@ -569,7 +569,7 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 	p = as_whitespace_skip(p, e);
 	if (p >= e) return 0;
 	as_text w = as_text_first_word(p, e);
-	if (as_names_have_at(a))	/* @feat.00 = 0 */
+	if (__builtin_expect(a->is_coff, 0))	/* @feat.00 = 0 */
 		while (w.text + w.length < e && (w.text[w.length] == '@' || as_char_is_identifier((unsigned char)w.text[w.length]))) w.length++;
 	int rc, lab = 0;
 	if (w.text[0] == '.' && as_directive_conditional(a, w, w.text + w.length, e, &rc)) return rc;
@@ -627,7 +627,7 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 	as_macro *m = as_macro_find(a, w.text, w.length);
 	if (m) return as_macro_invoke(a, m, w.text + w.length, e);
 	if (w.text[0] == '.') return as_directive_dispatch(a, w, w.text + w.length, e);
-	int generated = a->gen_dwarf && as_gen_dwarf_instruction(a);
+	int generated = __builtin_expect(a->gen_dwarf, 0) && as_gen_dwarf_instruction(a);
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	if (a->object->machine == EM_X86_64) {
 		int r = x64_as_instruction_assemble(a, w.text, e, w.length);
@@ -679,6 +679,7 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
 	a->cfi_instruction_count = a->cfi_instruction_capacity = a->frame_description_count = a->frame_description_capacity = 0; a->in_frame_description = 0; a->cfi_eh_frame_selected = 0; a->symver_count = a->symver_capacity = 0; a->addrsig_symbol_count = a->addrsig_symbol_capacity = 0;
 	a->dwarf_file_count = a->dwarf_file_capacity = a->dwarf_directory_count = a->dwarf_directory_capacity = a->dwarf_row_count = a->dwarf_row_capacity = 0; a->variable_item_count = a->variable_item_capacity = 0; a->dwarf_row_is_pending = a->dwarf_table_is_due = 0;
 	a->variable_rank = NULL;
+	a->is_coff = o->format == OBJ_COFF;
 	a->dwarf_version = a->dwarf_version_option ? a->dwarf_version_option : o->format == OBJ_COFF ? 4 : 5;
 	a->gen_dwarf = a->debug_directory ? 2 : 0; a->gen_file = 0; a->cpp_file = NULL; a->cpp_line_delta = 0;
 	a->gen_section_count = a->gen_section_capacity = a->gen_label_count = a->gen_label_capacity = a->gen_name_count = a->gen_name_capacity = 0;

@@ -67,7 +67,7 @@ VPRIV int as_name_parse(as_context *a, const char **pp, const char *e, as_text *
 		return 0;
 	}
 	const char *s = p;
-	while (p < e && (as_char_is_identifier((unsigned char)*p) || *p == '-' || (*p == '@' && as_names_have_at(a)))) p++;
+	while (p < e && (as_char_is_identifier((unsigned char)*p) || *p == '-' || (__builtin_expect(*p == '@', 0) && as_names_have_at(a)))) p++;
 	if (p == s) return as_error_report(a, "expected identifier");
 	*out = (as_text){ s, (uint32_t)(p - s) };
 	*pp = p;
