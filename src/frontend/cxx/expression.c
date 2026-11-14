@@ -150,8 +150,31 @@ static void cxx_id_expression_parse(cxx *c)
 		cxx_fail(c, "expected an expression");
 	}
 	if (t->kw == CXX_KW_operator) {
+		/* operator<<(a, b), written as a call: the operator functions by that name (and, at the call,
+		   those in the arguments' namespaces); no member, no built-in */
+		uint32_t oid = 0;
+
+		if (!dep && !template_kw) {
+			uint32_t at = c->pos, on;
+
+			c->pos++;
+			if (cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH && !cxx_is(c, LEX_TOKEN_LEFT_PAREN) &&
+			    !cxx_is(c, LEX_TOKEN_LEFT_SQUARE)) {
+				cxx_operator_at(c, &on);
+				oid = cxx_operator_id_at(c, on);
+			}
+			c->pos = at;
+		}
 		cxx_unqualified_id_rest_parse(c);
 		cxx_et(c, CXX_TY_UNKNOWN, false);
+		if (oid > 1 && !c->tentative) {
+			cxx_entity *oe = q ? cxx_lookup_in(c, q, oid, 0) : cxx_lookup(c, oid);
+
+			if (oe && oe->kind != CXX_ENTITY_DEPENDENT)
+				cxx_name_type(c, oe);
+			if (!q)
+				c->ename = oid, c->ename_missing = !oe;
+		}
 		return;
 	}
 	if (dep)

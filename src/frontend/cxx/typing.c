@@ -395,6 +395,22 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		cxx_et(c, f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == TY_FUNC ? AST_TYPE(c->ast, f)->base : CXX_TY_UNKNOWN, false);
 		if (!c->template_depth)
 			c->stats.calls++, c->stats.calls_typed += c->etype != CXX_TY_UNKNOWN, c->stats.why[CXX_WHY_NO_SET] += c->etype == CXX_TY_UNKNOWN;
+		if (!c->template_depth && c->etype == CXX_TY_UNKNOWN && getenv("VCC_CXX_WHY_NOSET")) {
+			/* the callee names no function and has no function type: the call's tokens */
+			uint32_t b = c->pos, depth = 0;
+
+			while (b > 0 && c->pos - b < 40) {	/* (back to the call's opening parenthesis, then a few before) */
+				b--;
+				if (c->tok[b].kind == LEX_TOKEN_RIGHT_PAREN)
+					depth++;
+				else if (c->tok[b].kind == LEX_TOKEN_LEFT_PAREN && !--depth)
+					break;
+			}
+			fprintf(stderr, "no callee (%s):", c->unevaluated ? "unevaluated" : "evaluated");
+			for (uint32_t i = b > 8 ? b - 8 : 0; i < b + 3 && i < c->ntok; i++)
+				fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+			fputc('\n', stderr);
+		}
 		return;
 	}
 	if (!lval)
@@ -407,7 +423,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 		args = acopy, lval = lcopy;
 	}
 	/* the viable candidates, each argument's conversion ranked */
-	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; } cand[24];
+	struct cand { cxx_entity *e; qty r; uint8_t rank[16]; uint8_t ranked, tmpl; qty pt[16]; } cand[24];
 	const char *tn = getenv("VCC_CXX_CAND");	/* trace the candidates of calls to this name */
 	bool trace = tn && !c->template_depth && strlen(tn) == vintern_ents[set->name].len && !memcmp(tn, vintern_ents[set->name].s, strlen(tn));
 	uint32_t ncand = 0;
@@ -510,6 +526,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			for (uint32_t a = 0; a < nargs && fits; a++) {
 				/* (an argument for the ...: any) */
 				k->rank[a] = a < sig->n ? (uint8_t)cxx_arg_rank(c, c->ast->params[sig->aux + a], args[a], lval[a], have_lval) : 5;	/* (...: last) */
+				k->pt[a] = a < sig->n ? c->ast->params[sig->aux + a] : CXX_TY_UNKNOWN;
 				fits = k->rank[a] < 6;
 			}
 			c->rank_no_literal = 0;
@@ -563,6 +580,17 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 					   definition stands for it */
 					else if (cxx_ftemplate_has_body(cand[a].e) != cxx_ftemplate_has_body(cand[b].e) && cand[a].r == cand[b].r)
 						better = cxx_ftemplate_has_body(cand[a].e), worse = !better;
+					/* the same parameter types once bound, from fewer template parameters: the more
+					   specialized (operator<<(basic_ostream<char, T>&, char) against basic_ostream<C, T>&) */
+					else if (cand[a].e->ftmpl && cand[b].e->ftmpl && nargs <= 16 &&
+						 cand[a].e->ftmpl->p.params->ntparams != cand[b].e->ftmpl->p.params->ntparams) {
+						bool identical = true;
+
+						for (uint32_t n = 0; n < nargs && identical; n++)
+							identical = cand[a].pt[n] != CXX_TY_UNKNOWN && cand[a].pt[n] == cand[b].pt[n];
+						if (identical)
+							better = cand[a].e->ftmpl->p.params->ntparams < cand[b].e->ftmpl->p.params->ntparams, worse = !better;
+					}
 				}
 				if (better || worse)
 					;
@@ -584,6 +612,57 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			exact = cand[best].rank[n] <= 1;
 		if (!exact)
 			best = -1;
+	}
+	/*
+	 * No best one.  Two candidates nothing beats that convert an argument to different types by
+	 * conversions of the same rank are ambiguous for sure: os << 1 through operator<<(os, char) and
+	 * operator<<(os, signed char) (not where one of them may be a promotion, which vcc does not rank).
+	 * Otherwise the candidates' common return type stands, without saying the call is well-formed.
+	 */
+	bool ambiguous = false;
+
+	if (best < 0 && ncand >= 2 && !unknown && nargs <= 16) {
+		for (uint32_t a = 0; a < ncand && !ambiguous; a++)
+			for (uint32_t b = a + 1; b < ncand && !ambiguous; b++) {
+				bool differ = false, top = cand[a].ranked && cand[b].ranked && cand[a].tmpl == cand[b].tmpl;
+
+				for (uint32_t n = 0; n < nargs && top; n++) {
+					qty pa = cand[a].pt[n], pb = cand[b].pt[n];
+
+					top = cand[a].rank[n] == cand[b].rank[n];
+					if (top && cand[a].rank[n] == 2 && pa != CXX_TY_UNKNOWN && pb != CXX_TY_UNKNOWN && QUNQ(pa) != QUNQ(pb)) {
+						int ka = AST_TYPE_KIND(c->ast, pa), kb = AST_TYPE_KIND(c->ast, pb);
+						bool promo = ka == TY_INT || ka == TY_UINT || ka == TY_DOUBLE || kb == TY_INT || kb == TY_UINT || kb == TY_DOUBLE;
+
+						differ |= ka >= TY_BOOL && ka <= TY_FLOAT128 && kb >= TY_BOOL && kb <= TY_FLOAT128 && !promo;
+					}
+				}
+				/* (and no other candidate is better than them) */
+				for (uint32_t k = 0; k < ncand && top && differ; k++) {
+					bool better = false, worse = false;
+
+					if (k == a || k == b)
+						continue;
+					if (!cand[k].ranked) {
+						top = false;
+						break;
+					}
+					for (uint32_t n = 0; n < nargs; n++) {
+						better |= cand[k].rank[n] < cand[a].rank[n];
+						worse |= cand[k].rank[n] > cand[a].rank[n];
+					}
+					if (better && !worse)
+						top = false;
+					if (!better && !worse && !cand[k].tmpl && cand[a].tmpl)
+						top = false;	/* (a non-template that is as good wins) */
+				}
+				ambiguous = top && differ;
+			}
+		if (ambiguous) {
+			same = false;
+			*verdict |= 1, CXX_INVALID(c);
+		} else if (same && viable >= 2)
+			*verdict |= 2;
 	}
 	c->none_viable = 0;	/* (this call's verdict, not that of the calls made while deducing its candidates) */
 	c->call_resolved = best >= 0;
@@ -685,6 +764,20 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	uint8_t lv[17];
 	bool any_class = false;
 
+	/* The member, namespace-scope and friend operator functions are one candidate set in C++; here they
+	   are tried in turn.  An attempt that picks a function decides; one that is only not ruled out (several
+	   candidates vcc cannot order, os << 'c' among ostream's members) waits for the later ones (std's
+	   operator<<(ostream&, char) is exact) and stands, unsure, if none of them decides. */
+	uint8_t unsure0 = c->eunsure;
+	bool pending = false, pending_lval = false;
+	qty pending_type = CXX_TY_UNKNOWN;
+#define OP_ATTEMPT_DONE() do { \
+		if (c->call_resolved) \
+			return true; \
+		if (!c->none_viable && !pending) \
+			pending = true, pending_type = c->etype, pending_lval = c->elval; \
+	} while (0)
+
 	memcpy(lv, c->op_lv, sizeof lv);
 	c->op_lv_set = 0;
 	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
@@ -702,9 +795,8 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	set = cls ? cxx_lookup_in(c, cls, id, 0) : NULL;
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
-		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
-		if (!c->none_viable)
-			return true;
+		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
+		OP_ATTEMPT_DONE();
 		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
 		   to function aside) */
 		if (vintern_ents[id].len == 10 && !memcmp(vintern_ents[id].s, "operator()", 10) && !c->tentative) {
@@ -721,9 +813,8 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
-		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
-		if (!c->none_viable)
-			return true;
+		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+		OP_ATTEMPT_DONE();
 	}
 	/* the operator functions in the namespaces of the operands' classes (argument-dependent lookup):
 	   std's operator== for two std::string, operator+ for a string and a char */
@@ -756,20 +847,24 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 			set = cxx_lookup_in(c, ns, id, 0);
 			if (!set || set->kind == CXX_ENTITY_DEPENDENT)
 				continue;
-			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
-			if (!c->none_viable)
-				return true;
+			c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+			OP_ATTEMPT_DONE();
 		}
 		/* ... and the friends the operands' classes declare (hidden friends: found this way only) */
 		for (uint32_t i = 0; i <= nargs; i++) {
 			set = cxx_friend_lookup(c, all[i], id, 0);
 			if (!set)
 				continue;
-			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
-			if (!c->none_viable)
-				return true;
+			c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+			OP_ATTEMPT_DONE();
 		}
 	}
+	if (pending) {
+		cxx_et(c, pending_type, pending_lval);
+		c->eunsure = 1;
+		return true;
+	}
+	c->eunsure = unsure0;
 	/* built-in: the address of an object; anything else on a class is not known (an implicit operator=,
 	   a conversion to a built-in type) */
 	if (vintern_ents[id].len == 9 && !memcmp(vintern_ents[id].s, "operator&", 9) && nargs == 0)
@@ -805,6 +900,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cxx_et(c, CXX_TY_UNKNOWN, false);
 	return true;
 }
+#undef OP_ATTEMPT_DONE
 
 VPRIV uint32_t cxx_ctor_id(void)
 {
