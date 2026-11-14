@@ -68,6 +68,7 @@ typedef struct cxx_instance {
 	cxx_targ *pargs;	/* made from a partial specialization: its parameters' arguments (its members' definitions bind them) */
 	uint32_t npargs;
 	uint8_t late;		/* named while its template was only declared (using json = basic_json<>;): bound at completion */
+	uint16_t ttp;		/* A<args> in a partial specialization's pattern, A its template template parameter ttp - 1: a placeholder */
 	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
 

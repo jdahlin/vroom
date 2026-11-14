@@ -1973,6 +1973,8 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualifie
 	else if (IS("__is_const")) *v = !ref && (AST_QUALIFIED_TYPE_QUALIFIERS(t[0]) & AST_QUALIFIER_CONST) != 0;
 	else if (IS("__is_volatile")) *v = !ref && (AST_QUALIFIED_TYPE_QUALIFIERS(t[0]) & AST_QUALIFIER_VOLATILE) != 0;
 	else if (IS("__is_array")) *v = k == AST_TYPE_ARRAY;
+	else if (IS("__is_bounded_array")) *v = k == AST_TYPE_ARRAY && AST_TYPE(c->ast, t[0])->n && !(AST_TYPE(c->ast, t[0])->flags & AST_TYPE_FLAG_INCOMPLETE);
+	else if (IS("__is_unbounded_array")) *v = k == AST_TYPE_ARRAY && (!AST_TYPE(c->ast, t[0])->n || (AST_TYPE(c->ast, t[0])->flags & AST_TYPE_FLAG_INCOMPLETE));
 	else if (IS("__is_function")) *v = k == AST_TYPE_FUNCTION;
 	else if (IS("__is_enum")) *v = k == AST_TYPE_ENUM;
 	else if (IS("__is_union")) *v = k == AST_TYPE_UNION;

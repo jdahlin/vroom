@@ -2177,3 +2177,17 @@ nya; 258 summerat per TU.
 `AST_NODE_LABEL`/`AST_NODE_GOTO`; en etikett som en goto namnger men som inte definieras: ingen kod.
 `goto *p` inte än.  Test: `run/goto-labels.cpp`.  cxx-strict: 42 funktioner till, inga nya; 243 summerat
 per TU.
+
+## Status 130 (2026-11-15)
+`std::make_shared` (C++20) och `std::unique_ptr` med en lambda som raderare byggs med vcc ensamt:
+- `__is_bounded_array`/`__is_unbounded_array` evalueras (C++20:s array-överlagringar av `make_shared`).
+- En partiell specialisering vars mönster använder en mallmallparameter som typ (`A<T, X...>`: libc++:s
+  `__allocator_traits_rebind`): en platshållarpost (`ttp`) som matchar varje klassmalls instans och binder
+  A till dess mall; mönstret markeras osäkert så att argument som inte nämner en platshållare
+  (`__void_t<_Op<_Args...>>` i `__detector`) substitueras vid matchning.
+- `T::template rb<U>` för en klass utan medlemmen är ett substitutionsfel (`__has_rebind_other_v`).
+- En `~T() = default` i klassen, inte virtuell, är trivial när baserna och medlemmarna är det (json:s
+  `iter_impl` i en for-villkor, där temporärer med destruktorer inte byggs).
+- `p->~T()` av en virtuell destruktor anropar D1 genom vtabellen.
+Test: `run/ttp-patterns-vdtor.cpp`.  cxx-strict: 40 funktioner till, 2 nya (`ostream::put`/`write`: try/catch);
+214 summerat per TU.

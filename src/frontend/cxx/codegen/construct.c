@@ -94,8 +94,13 @@ VPRIV bool cxx_gen_needs_destruction(cxx *c, ast_qualified_type t, int depth)
 		return false;
 	if (!cls || depth > 8)
 		return true;
-	if (cxx_gen_declared_destructor(c, t))
-		return true;
+	{
+		cxx_entity *d = cxx_gen_declared_destructor(c, t);
+
+		/* ~T() = default; in the class, not virtual: trivial when its bases' and members' are (json's iter_impl) */
+		if (d && !(d->fn_defaulted && !d->fn_ooc_default && !d->fn_virtual && !d->fn_deleted))
+			return true;
+	}
 	nb = cxx_class_bases(c, t, bases, 16);
 	for (uint32_t i = 0; i < nb; i++)
 		if (cxx_gen_needs_destruction(c, bases[i], depth + 1))

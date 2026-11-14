@@ -182,6 +182,8 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 				break;
 			}
 			e = cxx_name_lookup(c, *qualifier, *dependent, t->id);
+			if (kw && !e && *qualifier && !*dependent && !c->template_depth && (*qualifier)->kind == CXX_SCOPE_CLASS)
+				c->member_missing = 1;	/* (T::template rebind<U> of a class without it: a substitution failure) */
 			if (!kw && !(e && (e->kind == CXX_ENTITY_DEPENDENT || cxx_entity_template(e))) &&
 			    cxx_builtin_kind(t->id) != CXX_BUILTIN_TEMPLATE) {
 				cxx_rewind(c, save, save_undo);

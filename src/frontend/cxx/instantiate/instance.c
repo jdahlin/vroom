@@ -31,6 +31,23 @@ VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *ar
 	cxx_instance *x;
 	cxx_entity *inst;
 
+	if (!t && te && te->kind == CXX_ENTITY_TEMPLATE && te->placeholder && !te->bound_template && !c->tentative && nargs <= 32) {
+		/* A<args> with A a partial specialization's template template parameter (__allocator_traits_rebind<
+		   _Alloc<_Tp, _Args...>, _Up, false>): a placeholder record, matched against any class template's instance
+		   (cxx_match_type binds A to its template) */
+		uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, te->name, 0);
+		cxx_instance *px = calloc(1, sizeof *px);
+		cxx_entity *pe = calloc(1, sizeof *pe);
+
+		px->args = malloc((nargs ? nargs : 1) * sizeof *args);
+		memcpy(px->args, args, nargs * sizeof *args);
+		px->nargs = nargs, px->ttp = te->placeholder, px->state = 3, px->inst = pe;
+		cxx_tag_info_set(c, tag, px);
+		pe->kind = CXX_ENTITY_TYPE, pe->name = te->name, pe->ty = AST_QUALIFIED_TYPE(c->ast->tags[tag].ty, 0), pe->dependent = 0;
+		c->eunsure = 1;	/* (inside an alias's arguments, __void_t<_Op<_Args...>>, what the alias gives does not show it: the
+				   pattern's arguments that do not mention a placeholder are substituted when matching) */
+		return pe;
+	}
 	if (!t || c->tentative || c->instantiating > 48 || nargs > 32)
 		return NULL;
 	for (uint32_t i = 0; i < nargs; i++)

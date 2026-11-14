@@ -162,8 +162,33 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
 		c->enode = cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc), cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
 		return;
 	}
-	if (!(d = cxx_gen_effective_destructor(c, t, 0)) || cxx_class_polymorphic(c, t))
-		return;	/* (a virtual destructor: through the vtable, not built yet) */
+	if (!(d = cxx_gen_effective_destructor(c, t, 0)))
+		return;
+	if (d->fn_virtual && d->vslot && !(d->member_of && d->member_of->is_final)) {
+		/* p->~T() of a virtual destructor: the complete-object one (D1) through the vtable, tmp = &x;
+		   ((void (**)(T *))*(void ***)tmp)[slot](tmp) */
+		uint32_t s1 = cxx_gen_name(c, d) ? d->sym1 : 0, tmp, pre, vptr, fn, call;
+		ast_qualified_type pt = cc_type_pointer(a, t), ft, pf, ppf, pppf;
+		cc_id_list args;
+
+		if (!s1 || !(tmp = cxx_gen_temporary(c, pt, loc)))
+			return;
+		ft = a->syms[s1].ty, pf = cc_type_pointer(a, ft), ppf = cc_type_pointer(a, pf), pppf = cc_type_pointer(a, ppf);
+		pre = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cc_address_of_build(a, x, loc), loc);
+		vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), pppf, AST_CAST_NOP), loc));
+		fn = cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, vptr,
+								  cc_node_integer_new(a, d->vslot - 1, cc_type_basic(AST_TYPE_LONG), loc), loc), loc));
+		cc_id_list_init(&args);
+		cc_id_list_append(a, &args, cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), a->params[AST_TYPE(a, ft)->aux], AST_CAST_NOP));
+		call = cc_node_new(a, AST_NODE_CALL, cc_type_basic(AST_TYPE_VOID), loc);
+		AST_NODE_AT(a, call)->a = fn;
+		AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
+		AST_NODE_AT(a, call)->c = 1;
+		c->enode = cc_node_new_operands(a, AST_NODE_COMMA, cc_type_basic(AST_TYPE_VOID), loc, pre, call);
+		return;
+	}
+	if (cxx_class_polymorphic(c, t) && !d->fn_virtual)
+		return;	/* (a non-virtual destructor of a class with virtual functions: the static type's, as written) */
 	cxx_gen_call(c, d, x, false, NULL, 0, loc);
 }
 

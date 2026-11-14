@@ -43,6 +43,8 @@ VPRIV bool cxx_mentions_placeholder(cxx *c, ast_qualified_type t, int depth)
 	case AST_TYPE_STRUCT: case AST_TYPE_UNION: {
 		cxx_instance *ix = cxx_tag_info(c, t);
 
+		if (ix && ix->ttp)
+			return true;	/* (A<...> of a template template parameter) */
 		if (ix)
 			for (uint32_t i = 0; i < ix->nargs; i++)
 				if ((ix->args[i].kind == 1 && cxx_mentions_placeholder(c, ix->args[i].t, depth + 1)) || ix->args[i].kind == 3 ||
@@ -186,6 +188,18 @@ VPRIV bool cxx_match_type(cxx *c, cxx_partial *p, ast_qualified_type pat, ast_qu
 		/* X<pattern...> against X<args...>: the same template, its arguments matched */
 		cxx_instance *ip = cxx_tag_info(c, pat), *ia = cxx_tag_info(c, arg);
 
+		if (ip && ip->ttp) {
+			/* A<pattern...> (A a template template parameter) against X<args...>: A is X, the arguments matched */
+			uint32_t ti = ip->ttp - 1u;
+			cxx_targ ta;
+
+			if (!ia || ia->ttp || !ia->of || ti >= p->params->ntparams)
+				return false;
+			ta.kind = 4, ta.v = (int64_t)(intptr_t)ia->of, ta.t = 0, ta.list = NULL;
+			if (bind[ti].kind ? !(bind[ti].kind == 4 && bind[ti].v == ta.v) : (bind[ti] = ta, false))
+				return false;
+			return cxx_match_list(c, p, ip->args, ip->nargs, ia->args, ia->nargs, bind, depth + 1);
+		}
 		if (!ip)
 			return AST_QUALIFIED_TYPE_INDEX(pat) == AST_QUALIFIED_TYPE_INDEX(arg);
 		if (!ia || ia->t != ip->t)
