@@ -30,11 +30,12 @@ PREFIX_HEADERS = ['#include "doctest_compatibility.h"\n', "#include <nlohmann/js
 
 
 def config_lines(src):
-    """the #define lines that configure json.hpp or doctest, before the TU's first #include"""
-    out = []
-    for line in open(src):
-        if re.match(r"\s*#\s*include", line):
-            break
+    """the #define lines that configure json.hpp or doctest, before the TU includes json.hpp (or, without
+    that, before its first #include)"""
+    out, lines = [], open(src).read().splitlines(True)
+    stop = next((i for i, l in enumerate(lines) if re.match(r"\s*#\s*include\s*<nlohmann/json(_fwd)?\.hpp>", l)),
+                next((i for i, l in enumerate(lines) if re.match(r"\s*#\s*include", l)), len(lines)))
+    for line in lines[:stop]:
         if re.match(r"\s*#\s*define\s+(JSON|DOCTEST)_", line):
             out.append(line.strip() + "\n")
     return tuple(out)

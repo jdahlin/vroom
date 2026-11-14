@@ -1699,3 +1699,17 @@ parametrar är sällsynta, en lista till en initializer_list-konstruktor är ett
 cxx-parse 38/38, cxx-mangle 36; cxx-fork 68/70 (unit-32bit går nu ut på tid i stället för att fallera,
 fallerar också med clang; unit-allocator: weak-fill-artefakten), 8,0 s CPU; 30 av 118 testkroppar,
 24 835 funktioner.  Nästa: ifstream/stringstream-lokaler (9 kroppar), `R"(...)"_json` (flera).
+
+## Status 80 (2026-11-14)
+Rättningar: `static_cast<E>(obj)` genom klassens konverteringsfunktion; överlagring väljer konvertering
+till närmare basklass ([over.ics.rank], json:s `priority_tag<N>`), och ett objekt av härledd klass till
+en basklassparameter kopierar basdelobjektet; ett const-objekt ser bara const-medlemsmallar; i en
+const-medlemsmalls kropp är `this` const (instansieringsvägarna satte inte `this_const`), och `this` typas
+`const T *` i en const-medlem.  cxx-fork.py: konfigurationsraderna läses fram till `#include
+<nlohmann/json.hpp>` (unit-diagnostics definierar JSON_DIAGNOSTICS efter doctest_compatibility.h och
+byggdes tidigare utan den; nu ett eget prefix, därav högre CPU-tid).  Mätt: cxx-run 77/77, cxx-parse 38/38,
+cxx-mangle 36; cxx-fork 67/70: unit-32bit (tidsgräns, fallerar också med clang), unit-allocator
+(weak-fill-artefakten), unit-ordered_json (nu genereras basic_json::erase, som anropar
+ordered_map::erase(const key_type&), vars kropp vcc ännu inte bygger: vector::erase via __wrap_iter,
+__unwrap_range, transparent jämförare i ett villkor; mallen erase(KeyType&&) som clang väljer faller på
+sitt villkor hos vcc).  10,2 s CPU med fyra prefix; 31 av 118 testkroppar.

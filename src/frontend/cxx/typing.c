@@ -558,6 +558,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			unknown |= e->fn_explicit == 2;
 			continue;	/* (copy-initialization: not through an explicit constructor) */
 		}
+		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 && !e->fn_const)
+			continue;	/* (a const object: const member templates only) */
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
 
@@ -702,6 +704,27 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 					if (AST_TYPE(c->ast, pa)->ext == 2 && AST_TYPE(c->ast, pb)->ext == 1)
 						better = true;
 					else if (AST_TYPE(c->ast, pa)->ext == 1 && AST_TYPE(c->ast, pb)->ext == 2)
+						worse = true;
+				}
+			}
+			if (!better && !worse && args) {
+				/* derived to base: to a nearer base is better (B over A for a C : B : A [over.ics.rank]; json's
+				   priority_tag<N>) */
+				for (uint32_t n = 0; n < nargs && n < 16; n++) {
+					qty pa = cand[a].pt[n], pb = cand[b].pt[n], at = QUNQ(args[n]);
+
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || at == CXX_TY_UNKNOWN || cand[a].rank[n] != cand[b].rank[n])
+						continue;
+					if (AST_TYPE_KIND(c->ast, pa) == TY_PTR && AST_TYPE(c->ast, pa)->ext)
+						pa = AST_TYPE(c->ast, pa)->base;
+					if (AST_TYPE_KIND(c->ast, pb) == TY_PTR && AST_TYPE(c->ast, pb)->ext)
+						pb = AST_TYPE(c->ast, pb)->base;
+					pa = QUNQ(pa), pb = QUNQ(pb);
+					if (pa == pb || !cc_type_is_record(c->ast, pa) || !cc_type_is_record(c->ast, pb) || !cc_type_is_record(c->ast, at))
+						continue;
+					if (cxx_derives(c, pa, pb, 0) && (at == pa || cxx_derives(c, at, pa, 0)))
+						better = true;
+					else if (cxx_derives(c, pb, pa, 0) && (at == pb || cxx_derives(c, at, pb, 0)))
 						worse = true;
 				}
 			}

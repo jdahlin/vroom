@@ -1248,7 +1248,8 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_gen_nullptr(c, t->loc);
 		}
 		else if (t->kw == CXX_KW_this && c->this_type != CXX_TY_UNKNOWN && c->this_type && !c->tentative) {
-			cxx_et(c, cc_type_pointer(c->ast, c->this_type), false);
+			/* (a const member function's: a const T *) */
+			cxx_et(c, cc_type_pointer(c->ast, c->this_const ? QT(QI(c->this_type), QQ(c->this_type) | Q_CONST) : c->this_type), false);
 			cxx_gen_this(c, t->loc);
 		}
 		else if (t->kw >= CXX_KW___builtin_LINE && t->kw <= CXX_KW___builtin_FILE_NAME && !c->tentative) {

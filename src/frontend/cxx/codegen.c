@@ -578,6 +578,16 @@ static uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, qty pt, uint32_t loc)
 		return cc_address_of_build(a, x, loc);
 	if (QUNQ(AST_NODE_AT(a, x)->ty) == t && !(AST_NODE_AT(a, x)->flags & NF_LVALUE))
 		return 0;	/* (a prvalue of the class that is not a call's: not built yet) */
+	{
+		/* an object of a class derived from the parameter's: its base subobject, copied (priority_tag<4>{} for
+		   priority_tag<1>) */
+		qty xt = QUNQ(AST_NODE_AT(a, x)->ty);
+		uint64_t off;
+
+		if (xt != t && cc_type_is_record(a, xt) && AST_TYPE_KIND(a, xt) != TY_ARRAY && (AST_NODE_AT(a, x)->flags & NF_LVALUE) &&
+		    cxx_class_base_offset(c, xt, t, &off, 0) && !(x = cxx_gen_base_object(c, x, t, loc)))
+			return 0;
+	}
 	/* the parameter copy-initialized from the argument: a copy, or a converting constructor from a scalar,
 	   pointer or array (not an explicit one: json from 3 or "text" for operator=(basic_json)) */
 	/* (a call's result is a prvalue though its node is an object here: CompatibleType&& must not deduce T&) */
@@ -1665,6 +1675,14 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 	}
 	if (!cxx_gen_type_ok(c, to) || cc_type_is_record(a, to))
 		return;
+	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != TY_ARRAY) {
+		/* static_cast<E>(obj): the class's conversion function to exactly that type */
+		uint32_t v = cxx_gen_convert_class(c, x, QUNQ(to), loc);
+
+		if (v)
+			c->enode = v;
+		return;
+	}
 	x = cc_conversion_decay(a, x);
 	if (!cxx_gen_type_ok(c, AST_NODE_AT(a, x)->ty) || cc_type_is_record(a, AST_NODE_AT(a, x)->ty))
 		return;

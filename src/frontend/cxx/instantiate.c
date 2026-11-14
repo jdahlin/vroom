@@ -2106,7 +2106,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 	/* a member template: this is its class */
-	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN;
+	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst ? inst->fn_const : c->this_const;	/* (a const member template: this is const) */
 	c->body_depth++;
 	if (c->body_depth > c->stats.body_depth_max)
 		c->stats.body_depth_max = c->body_depth;
@@ -2231,7 +2231,7 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
-	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN;
+	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst ? inst->fn_const : c->this_const;	/* (a const member template: this is const) */
 	if (want_body) {
 		c->unevaluated = 0;
 		if (c->body_depth > c->stats.body_depth_max)
