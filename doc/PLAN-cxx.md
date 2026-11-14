@@ -618,3 +618,17 @@ emits 1,692 functions.  json: 44,885 layouts clang agrees with, 71/71 parse;
 parse tests 18/18.  Next: choosing among several viable candidates (partial
 ordering of function templates, conversion ranks), which is where bodies are
 now not instantiated; packs.
+
+### Status 2026-11-14 (10): overload ranking; what blocks next
+Candidates are ranked by each argument's conversion (exact, standard,
+perhaps through a class, none), then non-template over template and f() over
+f() const.  unit-32bit: 1902 of 2543 calls typed, 157 + 180 bodies, no false
+static_assert; json 44,418 layouts clang agrees with, 71/71 parse.
+The largest groups of untyped calls are libc++'s C++20 customization points
+(ranges::begin's `begin(__t)`, `__go(..., __priority_tag<N>())` in
+strong_order and friends): their overloads are chosen by requires-clauses and
+concepts, which vcc parses and does not evaluate.  Next: concept-ids and
+requires-clauses as constant expressions (a concept's definition with its
+arguments bound; a requires-expression is true when each requirement's
+expression has a type), then packs.  VCC_CXX_WHY_TOKENS=name prints the
+tokens around each untyped call of that name.
