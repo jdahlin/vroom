@@ -214,6 +214,9 @@ static void cxx_id_expression_parse(cxx *c)
 	}
 	if (!q && !dep && !template_kw)
 		ename = t->id;
+	/* X::y with X a complete class that has no y: ill-formed (a substitution fails) */
+	if (q && !dep && !e && q->kind == CXX_SCOPE_CLASS && !q->dependent && !q->has_dependent_base && !c->template_depth)
+		c->einvalid = 1;
 	if (!dep && e)
 		cxx_name_type(c, e);
 	else if (!e && !q && t->len > 10 && !memcmp(t->s, "__builtin_", 10) && !c->tentative &&
@@ -298,6 +301,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	cxx_expect(c, open);
 	while (!cxx_is(c, close)) {
 		cxx_initializer_parse(c);
+		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
+			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
 		if (n < 16)
 			args[n] = c->etype, lval[n] = c->elval;
 		n++;
@@ -783,6 +788,8 @@ static void cxx_primary_expression_parse(cxx *c)
 			bool k = c->econst;
 			int64_t v = c->evalue;
 
+			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
+				c->eunsure = 1;
 			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
 			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
 				cxx_ec(c, cast_to, v);
@@ -1027,8 +1034,34 @@ static void cxx_postfix_expression_parse(cxx *c)
 				cxx_nested_name_parse(c, &q, &dep);
 				template_kw |= cxx_accept_kw(c, CXX_KW_template);
 				if (cxx_is(c, LEX_TOKEN_TILDE) || cxx_is_kw(c, CXX_KW_operator)) {
+					/* x.operator->(), x.operator+=(y): the member operator by its name */
+					uint32_t oid = 0;
+
+					if (cxx_is_kw(c, CXX_KW_operator) && cls && !q && !dep) {
+						uint32_t save = c->pos, on;
+
+						c->pos++;
+						if (cxx_is(c, LEX_TOKEN_LEFT_PAREN) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN)
+							oid = vintern_cstr("operator()");
+						else if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_SQUARE)
+							oid = vintern_cstr("operator[]");
+						else if (cxx_kind(c) >= LEX_TOKEN_LEFT_SQUARE && cxx_kind(c) < LEX_TOKEN_HASH) {
+							cxx_operator_at(c, &on);
+							oid = cxx_operator_id_at(c, on);
+						}
+						c->pos = save;
+					}
 					cxx_unqualified_id_rest_parse(c);
 					cxx_et(c, CXX_TY_UNKNOWN, false);
+					if (oid > 1) {
+						cxx_entity *m = cxx_lookup_in(c, cls, oid, 0);
+
+						if (m && m->kind != CXX_ENTITY_DEPENDENT) {
+							cxx_name_type(c, m);
+							c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						} else if (!m && !cls->dependent && !cls->has_dependent_base)
+							c->einvalid = 1;
+					}
 					continue;
 				}
 				if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
@@ -1275,6 +1308,8 @@ static void cxx_cast_expression_parse(cxx *c)
 			bool k = c->econst;
 			int64_t v = c->evalue;
 
+			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
+				c->eunsure = 1;	/* ((void)x: a type whatever x is; a tentative parse types nothing) */
 			cxx_et(c, cast_to, false);
 			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
 				cxx_ec(c, cast_to, v);

@@ -26,7 +26,11 @@ static bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
 typedef struct cxx_partial {
 	cxx_scope *params, *home;
 	uint32_t less_pos, key_pos;	/* the '<' of the pattern X<...>; the class-key */
-	uint8_t evaluated, ok;		/* the pattern was parsed; and every argument of it is known */
+	uint8_t evaluated, ok;		/* the pattern was parsed (ok) */
+	uint8_t completed;		/* ... and completed with the primary's default arguments (X<T*> of template<class, class = void>) */
+	const cxx_scope *primary, *primary_d;	/* the primary's parameters (and an earlier declaration's): defaults that use them */
+	uint8_t subst;			/* ... and an argument of it is not deducible (decltype((void)expr), typename T::x): matched by
+					   substituting the deduced parameters and comparing */
 	cxx_targ *pattern;		/* the pattern, placeholders for the parameters */
 	uint32_t npattern;
 	qty *ph;			/* per parameter: its placeholder type (a type parameter) */
@@ -398,17 +402,21 @@ static bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding
 	if (!setjmp(jb)) {
 		if (p->kind == 1) {
 			cxx_type_id_parse(c);
-			out->kind = c->type_out != CXX_TY_UNKNOWN, out->t = c->type_out;
+			out->kind = c->type_out != CXX_TY_UNKNOWN, out->t = c->type_out, out->v = 0;
 		} else if (p->kind == 3) {
+			out->t = 0, out->v = 0;
 			cxx_template_name_default_parse(c, out);	/* template<...> class C = std::vector */
 		} else {
-			/* a value: a constant expression */
-			out->kind = 0;
+			/* a value: a constant expression (its enumeration, if any, is part of the argument) */
+			out->kind = 0, out->t = 0, out->v = 0;
 			c->in_template_args++;
 			cxx_conditional_expression_parse(c);
 			c->in_template_args--;
-			if (c->econst && c->evalue >= 0)
+			if (c->econst && c->evalue >= 0) {
 				out->kind = 2, out->v = c->evalue;
+				if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)
+					out->t = QUNQ(c->etype);
+			}
 		}
 		ok = c->pos == p->def_e && out->kind;
 	}
@@ -598,7 +606,8 @@ static bool cxx_mentions_placeholder(cxx *c, qty t, int depth)
 
 		if (ix)
 			for (uint32_t i = 0; i < ix->nargs; i++)
-				if ((ix->args[i].kind == 1 && cxx_mentions_placeholder(c, ix->args[i].t, depth + 1)) || ix->args[i].kind == 3)
+				if ((ix->args[i].kind == 1 && cxx_mentions_placeholder(c, ix->args[i].t, depth + 1)) || ix->args[i].kind == 3 ||
+				    ix->args[i].kind == 7)
 					return true;
 		return false;
 	}
@@ -609,7 +618,7 @@ static bool cxx_mentions_placeholder(cxx *c, qty t, int depth)
 static bool cxx_args_mention_placeholder(cxx *c, const cxx_targ *a, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++)
-		if (a[i].kind == 3 || a[i].kind == 5 || (a[i].kind == 1 && cxx_mentions_placeholder(c, a[i].t, 0)))
+		if (a[i].kind == 3 || a[i].kind == 5 || a[i].kind == 7 || (a[i].kind == 1 && cxx_mentions_placeholder(c, a[i].t, 0)))
 			return true;
 	return false;
 }
@@ -699,12 +708,21 @@ static bool cxx_match_list(cxx *c, cxx_partial *p, const cxx_targ *pat, uint32_t
 static bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx_targ *arg, cxx_targ *bind, int depth)
 {
 	switch (pat->kind) {
+	case 0:
+		return true;	/* (not deducible: checked by substitution) */
 	case 1:
 		return arg->kind == 1 && cxx_match_type(c, p, pat->t, arg->t, bind, depth);
 	case 2:
 		return arg->kind == 2 && pat->v == arg->v && pat->t == arg->t;
 	case 4:	/* a template */
 		return arg->kind == 4 && pat->v == arg->v;
+	case 7:	/* a template template parameter: the template (or, pattern against pattern, another's parameter) */
+		if (arg->kind != 4 && arg->kind != 7)
+			return false;
+		if (bind[pat->v].kind)
+			return bind[pat->v].kind == arg->kind && bind[pat->v].v == arg->v;
+		bind[pat->v] = *arg;
+		return true;
 	case 3:	/* a value parameter */
 		if (arg->kind != 2 && arg->kind != 3)
 			return false;
@@ -733,8 +751,18 @@ static void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_entity *e;
 
-		if (tp->kind == 3 || !tp->name)
-			return;	/* template template parameters: unknown */
+		if (!tp->name)
+			return;
+		if (tp->kind == 3) {
+			/* a template template parameter: its name in the pattern is a template placeholder (kind 7) */
+			if (tp->pack)
+				return;
+			e = cxx_declare(c, binding, tp->name, CXX_ENTITY_TEMPLATE);
+			if (!e)
+				return;
+			e->dependent = 0, e->placeholder = (uint16_t)(i + 1);
+			continue;
+		}
 		e = cxx_declare(c, binding, tp->name, tp->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
 		if (!e)
 			return;
@@ -764,21 +792,29 @@ static void cxx_partial_evaluate(cxx *c, cxx_partial *p)
 	c->pos = p->less_pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	uint8_t o_unsure = c->eunsure;
+
+	c->eunsure = 0;
 	if (!setjmp(jb)) {
 		cxx_template_arguments_parse(c);
 		p->npattern = c->ntargs;
 		p->pattern = malloc((c->ntargs ? c->ntargs : 1) * sizeof *p->pattern);
 		memcpy(p->pattern, c->targs, c->ntargs * sizeof *p->pattern);
 		p->ok = 1;
-		for (uint32_t i = 0; i < p->npattern; i++)
-			p->ok &= p->pattern[i].kind != 0;
+		for (uint32_t i = 0; i < p->npattern; i++) {
+			/* decltype((void)expr-of-T): void here, whatever expr is: not deducible, substituted when matching */
+			if (c->eunsure && ((p->pattern[i].kind == 1 && !cxx_mentions_placeholder(c, p->pattern[i].t, 0)) || p->pattern[i].kind == 2))
+				p->pattern[i].kind = 0;
+			p->subst |= p->pattern[i].kind == 0;
+		}
 	}
+	c->eunsure = o_unsure;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 }
 
-/* does p's pattern match the arguments?  bind: its parameters, all deduced */
-static bool cxx_partial_matches(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t n, cxx_targ *bind)
+/* the deducible part: p's pattern against the arguments; bind: its parameters, all deduced */
+static bool cxx_partial_deduces(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t n, cxx_targ *bind)
 {
 	memset(bind, 0, p->params->ntparams * sizeof *bind);
 	if (!cxx_match_list(c, p, p->pattern, p->npattern, args, n, bind, 0))
@@ -789,6 +825,139 @@ static bool cxx_partial_matches(cxx *c, cxx_partial *p, const cxx_targ *args, ui
 	return true;
 }
 
+/*
+ * p's pattern with its deduced parameters substituted, against the arguments: 1 the same, 0 not (or
+ * the substitution is ill-formed: X<T, decltype((void)T().f())> for a T with no f), -1 not known.
+ */
+static int cxx_partial_substitute(cxx *c, cxx_partial *p, const cxx_targ *bind, const cxx_targ *args, uint32_t n)
+{
+	cxx_scope *binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	cxx_saved s;
+	jmp_buf jb;
+	cxx_targ got[32];
+	volatile uint32_t ngot = UINT32_MAX;
+	uint8_t o_invalid = c->einvalid, o_missing = c->member_missing, o_unsure = c->eunsure;
+	bool invalid, unsure;
+
+	if (n > 32 || c->instantiating > 48)
+		return -1;
+	for (uint32_t i = 0; i < p->params->ntparams; i++)
+		if (bind[i].kind == 6)
+			cxx_bind_pack(c, binding, &p->params->tparams[i], bind[i].list + bind[i].t, (uint32_t)bind[i].v);
+		else
+			cxx_bind(c, binding, &p->params->tparams[i], &bind[i]);
+	cxx_state_save(c, &s);
+	c->instantiating++, c->unevaluated++;
+	c->fail = &jb;
+	c->pos = p->less_pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->einvalid = 0, c->member_missing = 0, c->eunsure = 0;
+	if (!setjmp(jb)) {
+		cxx_template_arguments_parse(c);
+		if (c->ntargs <= 32) {
+			memcpy(got, c->targs, c->ntargs * sizeof *got);
+			ngot = c->ntargs;
+		}
+	}
+	c->instantiating--, c->unevaluated--;
+	cxx_state_restore(c, &s);
+	invalid = c->einvalid || c->member_missing, unsure = c->eunsure;
+	c->einvalid = o_invalid, c->member_missing = o_missing, c->eunsure = o_unsure;
+	if (invalid)
+		return 0;
+	if (ngot == UINT32_MAX || unsure)
+		return -1;
+	if (ngot > n)
+		return 0;
+	for (uint32_t i = 0; i < ngot; i++)
+		if (!got[i].kind)
+			return -1;
+	if (!cxx_args_equal(got, args, ngot))
+		return 0;
+	/* the arguments the pattern does not write are the primary's defaults: known ones are in p->pattern;
+	   one that uses the earlier parameters (class = enable_if_t<cond<T>>) is computed from the arguments */
+	if (ngot < n && p->npattern != n)
+		return 0;
+	for (uint32_t i = ngot; i < n; i++) {
+		cxx_targ d;
+
+		if (p->pattern[i].kind) {
+			if (!cxx_args_equal(&p->pattern[i], &args[i], 1))
+				return 0;
+			continue;
+		}
+		if (!p->primary || i >= p->primary->ntparams)
+			return -1;
+		{
+			const cxx_tparam *tp = &p->primary->tparams[i];
+			cxx_scope *b = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+
+			if (!tp->def_b && p->primary_d && p->primary_d != p->primary && i < p->primary_d->ntparams)
+				tp = &p->primary_d->tparams[i];
+			for (uint32_t j = 0; j < i; j++)
+				if (!p->primary->tparams[j].pack)
+					cxx_bind(c, b, &p->primary->tparams[j], &args[j]);
+			memset(&d, 0, sizeof d);
+			o_missing = c->member_missing, c->member_missing = 0;
+			if (!tp->def_b || !cxx_default_argument(c, tp, b, &d)) {
+				bool missing = c->member_missing;
+
+				c->member_missing = o_missing;
+				return missing ? 0 : -1;
+			}
+			c->member_missing = o_missing;
+			if (!cxx_args_equal(&d, &args[i], 1))
+				return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * A pattern shorter than the primary's parameter list takes the primary's default arguments for the
+ * rest (ps: the primary's parameters, d: an earlier declaration's, which may hold the defaults).  Only
+ * defaults that do not use the earlier parameters (class = void) are known here; false otherwise.
+ */
+static bool cxx_partial_complete(cxx *c, cxx_partial *p, const cxx_scope *ps, const cxx_scope *d, uint32_t n)
+{
+	cxx_scope *empty;
+
+	if (p->completed || p->npattern >= n || !ps || (p->npattern && p->pattern[p->npattern - 1].kind == 5))
+		return true;
+	if (ps->ntparams && ps->tparams[ps->ntparams - 1].pack && p->npattern + 1 >= ps->ntparams)
+		return true;	/* (the primary ends in a pack: the pattern's arguments are all of them) */
+	if (n > ps->ntparams)
+		return false;
+	empty = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
+	p->pattern = realloc(p->pattern, n * sizeof *p->pattern);
+	p->primary = ps, p->primary_d = d;
+	for (uint32_t i = p->npattern; i < n; i++) {
+		const cxx_tparam *tp = &ps->tparams[i];
+
+		if (!tp->def_b && d && d != ps && i < d->ntparams)
+			tp = &d->tparams[i];
+		memset(&p->pattern[i], 0, sizeof p->pattern[i]);
+		if (!tp->def_b)
+			return false;
+		/* a default that uses the earlier parameters: computed from the arguments when matching */
+		if (!cxx_default_argument(c, tp, empty, &p->pattern[i])) {
+			memset(&p->pattern[i], 0, sizeof p->pattern[i]);
+			p->subst = 1;
+		}
+	}
+	p->npattern = n, p->completed = 1;
+	return true;
+}
+
+/* does p match the arguments?  1 yes (bind: its parameters), 0 no, -1 not known */
+static int cxx_partial_matches(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t n, cxx_targ *bind)
+{
+	if (!cxx_partial_deduces(c, p, args, n, bind))
+		return 0;
+	return p->subst ? cxx_partial_substitute(c, p, bind, args, n) : 1;
+}
+
 /* a is at least as specialized as b: b's pattern matches a's (a's placeholders as types) */
 static bool cxx_partial_at_least_as_specialized(cxx *c, cxx_partial *a, cxx_partial *b)
 {
@@ -796,7 +965,7 @@ static bool cxx_partial_at_least_as_specialized(cxx *c, cxx_partial *a, cxx_part
 
 	if (b->params->ntparams > 64)
 		return false;
-	return cxx_partial_matches(c, b, a->pattern, a->npattern, bind);
+	return cxx_partial_deduces(c, b, a->pattern, a->npattern, bind);
 }
 
 /*
@@ -813,9 +982,17 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 		cxx_partial *p = &t->partials[i];
 
 		cxx_partial_evaluate(c, p);
-		if (!p->ok || p->params->ntparams > 64)
+		if (!p->ok || p->params->ntparams > 64 || !cxx_partial_complete(c, p, t->params ? t->params : t->declared, t->declared, n)) {
+			if (getenv("VCC_CXX_WHY")) fprintf(stderr, "partial unknown (%s) %s\n", !p->ok ? "pattern" : "defaults", t->path ? t->path : "?");
 			return -1;	/* a pattern vcc cannot evaluate might match: do not guess */
-		if (cxx_partial_matches(c, p, args, n, tmp)) {
+		}
+		int m = cxx_partial_matches(c, p, args, n, tmp);
+
+		if (m < 0) {
+			if (getenv("VCC_CXX_WHY")) fprintf(stderr, "partial unknown (substitution) %s\n", t->path ? t->path : "?");
+			return -1;	/* (a pattern vcc cannot decide might match) */
+		}
+		if (m) {
 			if (ncand == 16)
 				return -1;
 			cand[ncand++] = p;
@@ -842,7 +1019,26 @@ static int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uin
 
 static bool cxx_instance_parse(cxx *c, cxx_instance *x);
 
+static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
+
+/* X<args>: its instance (in a tentative parse too: is X<A>::type a type?  The instance is made and cached
+   as in any other parse; its own parses are not tentative) */
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete)
+{
+	int tentative = c->tentative;
+	cxx_targ acopy[32];
+	cxx_entity *r;
+
+	if (nargs > 32)
+		return NULL;
+	memcpy(acopy, args, nargs * sizeof *args);	/* (often c->targs, which a pattern's parse reuses) */
+	c->tentative = 0;
+	r = cxx_instantiate_now(c, te, acopy, nargs, complete);
+	c->tentative = tentative;
+	return r;
+}
+
+static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete)
 {
 	cxx_template *t = te ? te->tmpl : NULL;
 	cxx_targ full[32];
@@ -905,7 +1101,7 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 				return NULL;
 		} else
 			return NULL;
-		if ((p->kind == 1) != (full[n].kind == 1) || (p->kind == 3) != (full[n].kind == 4))
+		if ((p->kind == 1) != (full[n].kind == 1) || (p->kind == 3) != (full[n].kind == 4 || full[n].kind == 7))
 			return NULL;
 		cxx_bind(c, binding, p, &full[n]);
 		if (d && d->name != p->name)
@@ -1445,16 +1641,19 @@ static int cxx_ftemplate_complete(cxx *c, cxx_ftemplate *f, cxx_targ *bind)
 			c->scope = binding;
 			c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 			c->member_missing = 0;
-			if (!setjmp(jb))
+			volatile qty got = CXX_TY_UNKNOWN;
+
+			if (!setjmp(jb)) {
 				cxx_type_specifiers_parse(c);
-			else
+				got = c->ds_type;
+			} else
 				failed = true;
 			c->instantiating--;
 			cxx_outer_restore(c, &o);
 			if (c->member_missing)
 				return 0;
-			if (failed)
-				return -1;
+			if (failed || got == CXX_TY_UNKNOWN)
+				return -1;	/* (enable_if_t<cond, int> with a cond vcc cannot evaluate: not known, not fine) */
 		}
 		if (!bind[i].kind) {
 			c->member_missing = 0;
@@ -1963,15 +2162,42 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint
 			*out = f->done[i].value;
 			return f->done[i].viable == 1;
 		}
+	/* the complete argument list: default arguments for the rest (template<class T, class = void>) */
+	if (n < ps->ntparams && !(ps->ntparams && ps->tparams[ps->ntparams - 1].pack)) {
+		static __thread cxx_targ full[32];
+		cxx_scope *b = cxx_scope_new(c, CXX_SCOPE_BLOCK, f->p.home, NULL);
+
+		if (ps->ntparams > 32)
+			return false;
+		memcpy(full, args, n * sizeof *args);
+		for (uint32_t i = 0; i < ps->ntparams; i++) {
+			if (i >= n && (!ps->tparams[i].def_b || !cxx_default_argument(c, &ps->tparams[i], b, &full[i])))
+				return false;
+			cxx_bind(c, b, &ps->tparams[i], &full[i]);
+		}
+		memcpy(acopy, full, ps->ntparams * sizeof *full);
+		n = ps->ntparams;
+		for (uint32_t i = 0; i < f->ndone; i++)
+			if (f->done[i].n == n && cxx_args_equal(f->done[i].args, args, n)) {
+				*out = f->done[i].value;
+				return f->done[i].viable == 1;
+			}
+	}
 	/* the specialization: every pattern must be one vcc can match */
 	for (uint32_t i = 0; i < f->nvspecs; i++) {
 		cxx_vspec *sp = f->vspecs[i];
 
 		cxx_partial_evaluate(c, &sp->p);
-		if (!sp->p.ok || sp->p.params->ntparams > 64)
+		if (!sp->p.ok || sp->p.params->ntparams > 64 || !cxx_partial_complete(c, &sp->p, ps, NULL, n))
 			return false;
-		if (!cxx_partial_matches(c, &sp->p, args, n, tmp))
-			continue;
+		{
+			int m = cxx_partial_matches(c, &sp->p, args, n, tmp);
+
+			if (m < 0)
+				return false;
+			if (!m)
+				continue;
+		}
 		if (pick && !(cxx_partial_at_least_as_specialized(c, &sp->p, &pick->p) && !cxx_partial_at_least_as_specialized(c, &pick->p, &sp->p))) {
 			if (!(cxx_partial_at_least_as_specialized(c, &pick->p, &sp->p) && !cxx_partial_at_least_as_specialized(c, &sp->p, &pick->p)))
 				return false;	/* (neither is more specialized: not decided here) */

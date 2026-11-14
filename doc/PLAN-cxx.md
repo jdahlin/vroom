@@ -688,3 +688,19 @@ VCC_CXX_CAND=name traces each candidate of calls to that name.
 Next: libc++'s _And/_Or/_Not over packs (std::__to_address's two overloads
 are both accepted: 64 calls), __go(..., __priority_tag<N>()), out-of-class
 members that share a parameter count, then the rest of packs.
+
+### Status 2026-11-14 (15): specializations matched by substitution
+A partial specialization whose pattern has an argument that cannot be deduced
+(decltype((void)expr), void_t<typename T::x>, a default that uses earlier
+parameters) is matched by deducing from the rest, substituting, and comparing:
+an ill-formed substitution is no match, one vcc cannot type is "not known".
+Patterns shorter than the parameter list take the primary's defaults; a
+pattern may name template template parameters (is_basic_json).  A function
+template constraint vcc cannot evaluate is "not known", no longer accepted.
+Instances are created in tentative parses too.  Fixed on the way: a default
+value argument left its type field unset (specializations on true/false
+stopped matching once enumeration types were compared).
+unit-32bit: partial specializations 154 matched, 10 unknown (was 137 / 104);
+static_asserts 177 true, 0 false, 22 not evaluated; 166 + 337 + 23 bodies;
+2483 of 2884 calls typed; 0.16 s.  json: 66,891 layouts clang agrees with,
+71/71 parse; parse tests 22/22 (ok-check-detection).

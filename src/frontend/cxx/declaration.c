@@ -209,6 +209,9 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 
 				if (cls && !e->members)
 					e->members = cls;
+				/* int::x, T::x with T bound to a type that is not a class: ill-formed (a substitution fails) */
+				if (!cls && !e->members && !c->template_depth && !cc_type_is_record(c->ast, e->ty))
+					c->member_missing = 1;
 			}
 			if (!e || e->kind == CXX_ENTITY_DEPENDENT || !e->members || (e->dependent && c->template_depth))
 				*dependent = true, *qualifier = NULL;
@@ -326,6 +329,8 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 				cxx_advance(c);
 				if (e->tmpl && !e->dependent)
 					out->kind = 4, out->v = (int64_t)(intptr_t)e;
+				else if (e->placeholder)
+					out->kind = 7, out->v = e->placeholder - 1;	/* a pattern's template template parameter */
 				return;
 			}
 		}
@@ -2027,7 +2032,8 @@ static void cxx_template_parameter_parse(cxx *c)
 	    (cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER || cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS ||
 	     cxx_peek(c, 1)->kind == LEX_TOKEN_COMMA || cxx_peek(c, 1)->kind == LEX_TOKEN_GREATER ||
 	     cxx_peek(c, 1)->kind == LEX_TOKEN_EQUAL || cxx_peek(c, 1)->kind == LEX_TOKEN_GREATER_GREATER) &&
-	    !(cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER && cxx_peek(c, 2)->kind == LEX_TOKEN_COLON_COLON)) {
+	    !(cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER &&
+	      (cxx_peek(c, 2)->kind == LEX_TOKEN_COLON_COLON || cxx_peek(c, 2)->kind == LEX_TOKEN_LESS))) {	/* (typename X<..>::type v) */
 		/* type parameter */
 		bool pack;
 		uint32_t pname = 0, db = 0, de = 0;

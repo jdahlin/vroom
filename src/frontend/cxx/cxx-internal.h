@@ -271,6 +271,7 @@ typedef struct cxx {
 	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
 	uint8_t einvalid_unsure;	/* argument-dependent lookup found candidates it could not decide between */
 	uint8_t ename_missing;		/* ... and ordinary lookup found nothing by that name */
+	uint8_t eunsure;		/* a known type was given to something whose operand vcc could not type ((void)x, f(x)): validity not known */
 	uint8_t einvalid;		/* the expression is ill-formed for sure (no function fits, no such member): a requirement fails */
 	int8_t req_value;		/* the last requires-expression: 1 true, 0 false, -1 not known */
 	int8_t sig_requires;		/* the last signature's trailing requires-clause: 1, 0, -1 not known (1: none) */
