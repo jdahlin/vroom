@@ -3,7 +3,7 @@
 
 static codegen_value x64_mulhi(codegen_context *e, codegen_value a, codegen_value b, int op)
 {
-	int ra = x64_toreg(e, &a, 8), rb = x64_toreg(e, &b, 8), src = rb;
+	int ra = x64_toreg(e, &a), rb = x64_toreg(e, &b), src = rb;
 	static const uint8_t fixed[2] = { RAX, RDX };
 	/* Both operands are consumed; only unrelated live fixed registers survive. */
 	uint32_t saved = x64_save(e, fixed, 2, ra, rb);

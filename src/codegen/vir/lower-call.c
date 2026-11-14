@@ -75,7 +75,8 @@ static uint32_t virbuild_call_word_load(codegen_context *e, int64_t off, uint32_
 	{
 		uint32_t v = virbuild_insn_append(e, VIR_OP_LOAD, ty, virbuild_memory_flags_make(ty == VIR_TYPE_F32 ? 4 : 8, 8, false), virbuild_slot_address(e, slot, rel), 0, 0);
 
-		V->insns[v].slot_plus_one = slot + 1;
+		if (!V->slots[slot].incoming_object)
+			V->insns[v].slot_plus_one = slot + 1;
 		return v;
 	}
 }
@@ -254,6 +255,15 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n, const wa
 		codegen_lvalue home;
 		int q;
 
+		/* A SysV memory argument already occupies a private, writable
+		 * stack object. Use its address for this parameter's frame range. */
+		if (a[k].is_in_memory && CODEGEN_IS_X64(c) && !CODEGEN_IS_WIN64(c) &&
+		    codegen_symbol_alignment(c, sym) <= a[k].align) {
+			int64_t rel;
+			uint32_t slot = virbuild_slot_find(e, a[k].slot, a[k].size, &rel);
+			V->slots[slot].incoming_object = v;
+			continue;
+		}
 		if (walk_type_is_in_memory(e, ty)) {
 			codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = a[k].slot, .align = 8 };
 			q = !a[k].is_in_memory && pc != VIR_CLASS_INT ? virbuild_ftreg(e) : virbuild_treg(e);
@@ -332,7 +342,7 @@ VPRIV void virbuild_ret(codegen_context *e, codegen_value *v, ast_qualified_type
 						  (int64_t)((uint64_t)k & ((1ull << (8 * size)) - 1));
 				x = virbuild_constant_integer(e, codegen_type_is_pointer(c, t) ? VIR_TYPE_PTR : VIR_TYPE_I64, k);
 			} else {
-				int q = virbuild_toreg(e, v, size);
+				int q = virbuild_toreg(e, v);
 
 				if (size < 4)	/* (an int's upper half is unspecified in AAPCS64: a free zero extension) */
 					virbuild_ext(e, q, size, sgn);

@@ -11,7 +11,7 @@
 /* All operations consume their input register; retain a separate bias for %. */
 VPRIV codegen_value walk_division_signed_power_of_two_emit(codegen_context *e, ast_qualified_type t, codegen_value a, const em_sdivpow2_recipe *r)
 {
-	int size = r->bits / 8, ra = walk_value_to_register(e, &a, t), rb;
+	int size = r->bits / 8, ra = walk_value_to_register(e, &a), rb;
 	codegen_value bias;
 
 	if (!r->shift) {

@@ -20,12 +20,23 @@ __attribute__((noinline)) large change_large(long long k, large v)
 	return (large){v.z, v.y, v.x};
 }
 
+static __attribute__((noinline)) long long update(large *a, const large *b)
+{
+	a->y += b->x;
+	return a->y;
+}
+
+__attribute__((noinline)) long long separate(large a, large b)
+{
+	return update(&a, &b) + b.y;
+}
+
 int main(void)
 {
 	pair p = swap_pair((pair){17, 29});
 	mixed m = change_mixed((mixed){1.25, 20});
 	large v = {3, 5, 7}, result = change_large(10, v);
 	return p.x != 29 || p.y != 17 || m.x != 3.25 || m.y != 17 ||
-		result.x != 7 || result.y != 5 || result.z != 13 || v.x != 3 ||
+		separate(v, v) != 13 || v.y != 5 || result.x != 7 || result.y != 5 || result.z != 13 || v.x != 3 ||
 		crowded(1, 2, 3, 4, 5, (pair){6, 7}, 8) != 204;
 }

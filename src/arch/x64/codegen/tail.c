@@ -25,11 +25,10 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
 	   Literal values need no frame slot and are materialized after snapshots. */
 	for (uint32_t i = 0; i < call->c; i++) {
 		uint32_t a = c->lists[call->b + i];
-		ast_qualified_type ty = N(a)->ty;
 		values[i] = walk_value_emit(e, a);
 		slots[i] = 0;
 		if (values[i].kind != CODEGEN_VALUE_CONSTANT) {
-			int r = walk_value_to_register(e, &values[i], ty);
+			int r = walk_value_to_register(e, &values[i]);
 			codegen_lvalue to = { .kind = CODEGEN_LVALUE_FRAME, .offset = slots[i] = walk_slot_temporary(e, 8, 8), .align = 8 };
 
 			x64_store(e, r, &to, 8);

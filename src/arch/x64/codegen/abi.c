@@ -235,11 +235,11 @@ VPRIV void x64_classify(codegen_context *e, ast_qualified_type t, walk_argument 
 	a->is_unnamed = unnamed;
 	uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
 	/* Unnamed wide vectors/records use the overflow area, never YMM/ZMM. */
-	if (!unnamed)
+	if (!unnamed && ((a->is_vector && a->size > 16) || a->is_wide_record))
 		x64_abi_vector_check(e, a->size, a->is_vector, a->is_wide_record, cc_x86_features_get(e->compile_context, fn));
-	if (x64_target_has_no_simd(e) && a->is_in_memory && a->is_sse_up)
+	if (a->is_in_memory && a->is_sse_up && x64_target_has_no_simd(e))
 		a->is_sse_up = false;	/* a 32-byte vector: returned in memory, not xmm0:xmm1 */
-	if (x64_target_has_no_simd(e) && (a->is_x87 || (!a->is_in_memory && a->eightbyte_count && (a->classes[0] == WALK_ARGUMENT_SSE || (a->eightbyte_count > 1 && a->classes[1] == WALK_ARGUMENT_SSE)))))
+	if (a->is_x87 || (!a->is_in_memory && a->eightbyte_count && (a->classes[0] == WALK_ARGUMENT_SSE || (a->eightbyte_count > 1 && a->classes[1] == WALK_ARGUMENT_SSE))))
 		x64_nofp(e);
 }
 
@@ -900,7 +900,7 @@ VPRIV void x64_ret(codegen_context *e, codegen_value *v, ast_qualified_type t, u
 		v = NULL;
 	}
 	if (v) {
-		int r = x64_toreg(e, v, size);
+		int r = x64_toreg(e, v);
 
 		x64_ext(e, r, size, sgn);
 		x64_mov(e, RAX, r);

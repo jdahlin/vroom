@@ -66,6 +66,7 @@ typedef struct virbuild_preir_slot {
 	uint8_t used;		/* a reachable load reads it (emission) */
 	uint32_t final_slot;		/* VIR slot id, VIRBUILD_BLOCK_NONE none yet */
 	uint8_t is_promoted;		/* promoted to variables (virbuild_slots_promote): its stores go */
+	uint32_t incoming_object;	/* SysV memory parameter: address of the caller-provided argument copy */
 	uint8_t float32_written;		/* an 8-byte slot whose last float stored was an f32 (its low 4 bytes) */
 } virbuild_preir_slot;
 

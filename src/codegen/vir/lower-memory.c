@@ -54,6 +54,13 @@ VPRIV uint32_t virbuild_slot_find(codegen_context *e, int64_t off, uint64_t size
 
 VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s, int64_t rel)
 {
+	uint32_t incoming = e->vir_builder->slots[s].incoming_object;
+	if (incoming) {
+		if (!rel)
+			return incoming;
+		return virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, incoming,
+					    virbuild_constant_integer(e, VIR_TYPE_I64, rel), 0);
+	}
 	return virbuild_constant_make(e, VIR_OP_SLOTADDR, VIR_TYPE_PTR, s, (uint32_t)rel, (uint32_t)((uint64_t)rel >> 32));
 }
 
@@ -75,9 +82,12 @@ static uint32_t virbuild_address_make(codegen_context *e, const codegen_lvalue *
 {
 	*slot = VIRBUILD_BLOCK_NONE;
 	switch (l->kind) {
-	case CODEGEN_LVALUE_FRAME:
-		*slot = virbuild_slot_find(e, l->offset, size, rel);
-		return virbuild_slot_address(e, *slot, *rel);
+	case CODEGEN_LVALUE_FRAME: {
+		uint32_t s = virbuild_slot_find(e, l->offset, size, rel);
+		if (!e->vir_builder->slots[s].incoming_object)
+			*slot = s;
+		return virbuild_slot_address(e, s, *rel);
+	}
 	case CODEGEN_LVALUE_SYMBOL:
 		codegen_reference_note(e, l->reference);
 		return virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, l->reference, (uint32_t)l->offset, (uint32_t)((uint64_t)l->offset >> 32));

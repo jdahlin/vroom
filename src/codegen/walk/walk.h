@@ -32,7 +32,7 @@
  * slot (8-byte words; a scalar extended to 64 bits).
  */
 enum { WALK_ARGUMENT_INTEGER, WALK_ARGUMENT_SSE };
-typedef struct walk_argument { uint8_t eightbyte_count, classes[2]; bool is_in_memory, is_x87, is_sse_up, is_vector, is_wide_record, is_unnamed; uint32_t align, bool_lane_count; uint64_t size; int64_t slot; } walk_argument;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
+typedef struct walk_argument { uint8_t eightbyte_count, classes[2]; bool is_in_memory, is_x87, is_sse_up, is_vector, is_wide_record, is_unnamed; uint8_t bool_lane_count; uint32_t align; uint64_t size; int64_t slot; } walk_argument;	/* x87: returned in st(0); up: one 16-byte SSE word (x86-64 SSEUP) */
 /* ---------------- walker state (one per ecx) ---------------- */
 
 #define WALK_LOOP_MAX 1024

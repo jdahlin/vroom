@@ -43,7 +43,7 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_division_signed_power_of_two_emit(codegen_context *e, ast_qualified_type t, codegen_value a, const em_sdivpow2_recipe *r);
 VPRIV bool walk_division_unsigned_constant_check(codegen_context *e, codegen_value a, const em_udivconst_recipe *r);
 VPRIV codegen_value walk_division_unsigned_constant_emit(codegen_context *e, ast_qualified_type ty, codegen_value a, const em_udivconst_recipe *r);
-VPRIV int walk_value_to_register(codegen_context *e, codegen_value *v, ast_qualified_type t);
+VPRIV int walk_value_to_register(codegen_context *e, codegen_value *v);
 VPRIV void walk_value_free(codegen_context *e, const codegen_value *v);
 VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uint32_t lbl);
 VPRIV void walk_statement_emit(codegen_context *e, uint32_t n);
@@ -74,7 +74,7 @@ VPRIV void WALK_LOWER(mov)(codegen_context *e, int rd, int rs);			/* rd = rs (64
 VPRIV void WALK_LOWER(tkeep)(codegen_context *e, int r);			/* r in use again (an operation consumed it, the walker still holds it) */
 VPRIV int WALK_LOWER(nfree)(codegen_context *e);				/* free temporaries left */
 VPRIV int WALK_LOWER(nffree)(codegen_context *e);				/* free float temporaries left */
-VPRIV int WALK_LOWER(toreg)(codegen_context *e, codegen_value *v, int size);	/* a constant or address into a temporary: v becomes CODEGEN_VALUE_REGISTER */
+VPRIV int WALK_LOWER(toreg)(codegen_context *e, codegen_value *v);	/* a constant or address into a temporary: v becomes CODEGEN_VALUE_REGISTER */
 /* memory: size 1, 2, 4, 8; loads extend to 64 bits by sgn */
 VPRIV void WALK_LOWER(load)(codegen_context *e, int rd, const codegen_lvalue *l, int size, bool sgn);
 VPRIV void WALK_LOWER(store)(codegen_context *e, int rs, const codegen_lvalue *l, int size);

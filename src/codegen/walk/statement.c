@@ -278,7 +278,7 @@ static void walk_initializer_elements_store(codegen_context *e, const codegen_lv
 	if (walk_type_is_in_memory(e, ty)) {
 		/* another object's bytes (a struct variable, a call's result ...) */
 		codegen_value v = walk_value_emit(e, init);
-		int rs = walk_value_to_register(e, &v, e->compile_context->t_size), rd = walk_lvalue_address_get(e, d);
+		int rs = walk_value_to_register(e, &v), rd = walk_lvalue_address_get(e, d);
 
 		uint64_t bytes = codegen_type_size(c, ty);
 		if (codegen_type_is_record(c, ty) && (T(c, ty)->flags & AST_TYPE_FLAG_ATOMIC)) {
@@ -294,7 +294,7 @@ static void walk_initializer_elements_store(codegen_context *e, const codegen_lv
 	}
 	{
 		codegen_value v = walk_value_emit(e, init);
-		int r = walk_value_to_register(e, &v, ty);
+		int r = walk_value_to_register(e, &v);
 
 		WALK_LOWER(store)(e, r, d, walk_type_size(c, ty));
 		WALK_LOWER(tfree)(e, r);
@@ -328,7 +328,7 @@ VPRIV void walk_initializer_emit(codegen_context *e, const codegen_lvalue *d, as
 	{
 		/* a scalar: stored whatever its value (the object was not zeroed) */
 		codegen_value v = walk_value_emit(e, init);
-		int r = walk_value_to_register(e, &v, t);
+		int r = walk_value_to_register(e, &v);
 
 		e->volatile_untag_depth += vol;
 		WALK_LOWER(store)(e, r, d, walk_type_size(c, t));
@@ -477,7 +477,7 @@ static void walk_vla_scan(codegen_context *e, uint32_t n, uint32_t *top)
 		    (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
 			codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, x->a) + 8, .align = 8 };
 			codegen_value z = codegen_value_constant(0);
-			int r = WALK_LOWER(toreg)(e, &z, 8);
+			int r = WALK_LOWER(toreg)(e, &z);
 
 			WALK_LOWER(store)(e, r, &l, 8);
 			WALK_LOWER(tfree)(e, r);
@@ -712,7 +712,7 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
 		walk_value_free(e, &v);
 	}
 	v = walk_value_emit(e, x->a);
-	r = walk_value_to_register(e, &v, ct);
+	r = walk_value_to_register(e, &v);
 
 	walk_cases_collect(e, x->b);
 	uint32_t count = W->case_count - c0;
@@ -1185,7 +1185,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 						v = walk_lvalue_store_memory(e, &t, I->return_type, v);
 						walk_value_free(e, &v);
 					} else {
-						int r = walk_value_to_register(e, &v, I->return_type);
+						int r = walk_value_to_register(e, &v);
 
 						WALK_LOWER(store)(e, r, &t, walk_type_size(c, I->return_type));
 						WALK_LOWER(tfree)(e, r);
@@ -1205,7 +1205,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 		if (x->a && walk_type_is_in_memory(e, W->return_type)) {
 			/* the object's address; a size not a multiple of 8 through a slot of whole words */
 			codegen_value v = walk_value_emit(e, x->a);
-			int r = walk_value_to_register(e, &v, e->compile_context->t_size);
+			int r = walk_value_to_register(e, &v);
 
 			if (W->cleanup_count) {
 				/* the cleanups run after the value is taken: a copy, except of a local
@@ -1236,7 +1236,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 			if (W->cleanup_count) {
 				/* the value parked while the cleanups run */
 				codegen_lvalue t = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 8, 8), .align = 8 };
-				int r = walk_value_to_register(e, &v, W->return_type);
+				int r = walk_value_to_register(e, &v);
 
 				WALK_LOWER(store)(e, r, &t, 8);
 				WALK_LOWER(tfree)(e, r);
@@ -1278,7 +1278,7 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 	case AST_NODE_GOTO_INDIRECT: {
 		codegen_value v = walk_value_emit(e, x->a);
 
-		WALK_LOWER(jumpr)(e, walk_value_to_register(e, &v, e->compile_context->t_size));
+		WALK_LOWER(jumpr)(e, walk_value_to_register(e, &v));
 		return;
 	}
 	default:
@@ -1463,7 +1463,7 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
 					v = walk_lvalue_store_memory(e, &l, pt, v);
 					walk_value_free(e, &v);
 				} else {
-					int r = walk_value_to_register(e, &v, pt);
+					int r = walk_value_to_register(e, &v);
 
 					WALK_LOWER(store)(e, r, &l, walk_type_size(c, pt));
 					WALK_LOWER(tfree)(e, r);
@@ -1506,7 +1506,7 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
 				v = walk_lvalue_store_memory(e, &l, pt, v);
 				walk_value_free(e, &v);
 			} else {
-				int r = walk_value_to_register(e, &v, pt);
+				int r = walk_value_to_register(e, &v);
 
 				WALK_LOWER(store)(e, r, &l, walk_type_size(c, pt));
 				WALK_LOWER(tfree)(e, r);

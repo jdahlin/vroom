@@ -173,14 +173,14 @@ static codegen_value x64_asm_bits_transport(codegen_context *e, codegen_value v,
 	if (size != 1 && size != 2 && size != 4 && size != 8)
 		codegen_fatal_report(e, e->current_location, "x86-64: unsupported asm GPR operand size");
 	if (walk_type_is_in_memory(e, t)) {
-		int r = walk_value_to_register(e, &v, t), dst = x64_treg(e);
+		int r = walk_value_to_register(e, &v), dst = x64_treg(e);
 		codegen_lvalue l = { .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)r };
 		x64_load(e, dst, &l, size, false);
 		walk_value_free(e, &v);
 		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)dst };
 	}
 	if (codegen_type_is_float(e->compile_context, t)) {
-		int r = walk_value_to_register(e, &v, t);
+		int r = walk_value_to_register(e, &v);
 		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 8, 8) };
 		x64_store(e, r, &l, size);
 		walk_value_free(e, &v);
@@ -197,7 +197,7 @@ static codegen_value x64_asm_bits_transport(codegen_context *e, codegen_value v,
 static void x64_asm_operand_park(codegen_context *e, x64_asm_operand *o)
 {
 	if (!o->is_float) o->value = x64_asm_bits_transport(e, o->value, o->type, o->size);
-	int r = walk_value_to_register(e, &o->value, o->is_float ? o->type : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
+	int r = walk_value_to_register(e, &o->value);
 	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->parked_slot = walk_slot_temporary(e, 8, 8), .align = 8 };
 
 	x64_store(e, r, &l, o->is_float ? o->size : 8);
@@ -529,7 +529,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 				v = walk_lvalue_store_memory(e, &o->lvalue, o->type, v);
 				walk_value_free(e, &v);
 			} else {
-				int r = walk_value_to_register(e, &v, o->type);
+				int r = walk_value_to_register(e, &v);
 
 				x64_store(e, r, &o->lvalue, o->size);
 				x64_tfree(e, r);
@@ -545,12 +545,12 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 		if (o->fixed) {
 			/* parked until the fixed registers are loaded, last */
 			codegen_lvalue s = { .kind = CODEGEN_LVALUE_FRAME, .offset = o->parked_slot = walk_slot_temporary(e, 8, 8), .align = 8 };
-			int r = walk_value_to_register(e, &v, o->is_float ? o->type : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
+			int r = walk_value_to_register(e, &v);
 
 			x64_record_emit_memory(e, X64_OP_ST, o->is_float ? o->size : 8, r, &s, false);
 			x64_tfree(e, r);
 		} else {
-			walk_value_to_register(e, &v, o->is_float ? o->type : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
+			walk_value_to_register(e, &v);
 			o->register_number = v.register_number;
 			o->value = v;
 		}
@@ -563,7 +563,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
 			continue;
 		if (o->is_input_output && !o->is_float) o->value = x64_asm_bits_transport(e, o->value, o->type, o->size);
 		if (o->is_input_output) {
-			walk_value_to_register(e, &o->value, o->is_float ? o->type : codegen_type_primitive(AST_TYPE_UNSIGNED_LONG_LONG));
+			walk_value_to_register(e, &o->value);
 			o->register_number = o->value.register_number;
 		} else {
 			o->register_number = (uint8_t)(o->is_float ? x64_ftreg(e) : x64_treg(e));
