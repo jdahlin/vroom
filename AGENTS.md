@@ -268,14 +268,15 @@ bench/var-cmp.py coff -j 4 [-n N]   # ... no kernel tree: COFF (MinGW) and ELF m
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
 bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
-bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
+bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s; Windows: vcc -v's vlink line = clang -###'s ld.lld line, code-generation flags vs clang -S (WIN6)
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
+bench/vcc-dwarf.py -j 6 --target x86_64-w64-mingw32|x86_64-linux-gnu [--gflag=-gdwarf-5] [--cflags=-ffunction-sections]   # ... for x86-64 (COFF: DWARF 4 by default), also vasm of -S = -c
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
 bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
-bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, byte-identical (~15 s; --run: under Wine)
+bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, -g objects (clang's, vcc's) with -s/--strip-debug/--gc-sections, byte-identical (~15 s; --run: under Wine)
 bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
@@ -352,6 +353,7 @@ bench/vcc-win64.py -j 6 --suite win64   # src/test/win64: Windows' convention ru
 bench/vcc-abi.py --target win64 [--vir]  # src/test/abi clang/vcc x caller/callee for x86_64-w64-mingw32 under Wine (~3 min); msabi_calls also natively (--target x86_64)
 VROOM_WORK=DIR bench/vcc-abi-generated.py --target x86_64-w64-mingw32 --count 100   # generated GCC/LLVM ABI cases under Wine (DIR/testsuites: fetch-testsuites.sh gcc llvm)
 bench/vcc-win64.py -j 4 --vlink-ref # WIN7: clang's objects linked by lld and by vlink (same line): runs under Wine, file byte-identical (~2 min cold)
+VCC_CFLAGS=-g bench/vcc-win64.py -j 4 [--vlink-ref]   # WIN6: -g for both sides; every linked image passes llvm-dwarfdump --verify, llvm-symbolizer names each vcc function with a line
 bench/vcc-win64.py -j 4 --vccrt-ref # WIN7R: clang's objects linked with libvccrt.a instead of compiler-rt, by lld and by vlink, run under Wine; no compiler-rt/libgcc/libunwind input in the map
 bench/vccrt-test.py needs -j 4      # WIN7R: helpers the target needs (test objects -O0/-O2, the CRT, vcc's codegen) vs what libvccrt.a defines (<2 s cached)
 bench/vccrt-test.py [-n N] [HELPER] # every helper of libvccrt.a vs compiler-rt under Wine, bit for bit on generated inputs (~2 s; -n 300000: 17 M calls, ~20 s)
@@ -363,9 +365,10 @@ bench/vcc-wasm.py -j 6 --obj --vlink  # [VCC_WASM=1] ... vcc's side through vpp 
 bench/vcc-same.py --base DIR -j 6    # test-suite outputs byte-identical with DIR/vpp (vbench.py mkbase REV; arm64, Darwin and x86-64 Linux modes), ~80 s
 python3 bench/virgen-test.py --bin-dir build/linux/src  # generated VIR integer/control-flow units verify and round-trip
 bench/vas-enc.py $PWD/src/test/vas   # vas encodings vs llvm-mc
-bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s)
+bench/vas-obj.py                    # vasm objects vs clang -c byte for byte (src/test/vas-obj, <1 s); each also with -g (MC's debug info for assembler sources)
 bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs vasm (~6 min for -O0 -O2)
 bench/vas-corpus.py -j 6 --target x86_64-w64-mingw32   # ... COFF objects (test runtime headers, no sysroot; ~2 min)
+bench/vas-corpus.py -j 6 -g [--as-g] --target x86_64-w64-mingw32   # ... clang -S -g (DWARF 4 line tables; -O '0 -gdwarf-5'); --as-g: -g to both assemblers too
 bench/vas-mutate.py -n 20000 --bin-dir build/linux/src-asan   # mutated win64-*.s: vasm (ASan) never crashes (~1 min)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
