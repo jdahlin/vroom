@@ -1776,38 +1776,56 @@ static void cxx_function_body_inner_parse(cxx *c)
 			cxx_scope *q;
 			bool dep;
 
+			if (cxx_gen_on(c)) {
+				/* code generation: a member of this class by name, else a base class (or the class itself:
+				   a delegating constructor) by its type; then the arguments, and the constructor they pick */
+				qty self_ty = c->gen_this ? AST_TYPE(c->ast, c->ast->syms[c->gen_this].ty)->base : CXX_TY_UNKNOWN;
+				cxx_scope *self = self_ty != CXX_TY_UNKNOWN ? cxx_tag_scope_get(c, QUNQ(self_ty)) : NULL;
+				cxx_entity *fe = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && self &&
+						 (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE) ?
+						 cxx_lookup_local(self, cxx_peek(c, 0)->id) : NULL;
+				uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[16], n;
+				qty target = CXX_TY_UNKNOWN;
+				bool braced;
+
+				if (fe && fe->kind == CXX_ENTITY_VALUE && fe->field_of) {
+					mname = fe->name;
+					if (fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != TY_ARRAY)
+						target = fe->ty;
+					cxx_advance(c);
+				} else {
+					cxx_decl_specifiers_parse(c, NULL, false);
+					target = c->ds_type;
+					if (target == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, target))
+						cxx_gen_fail(c);
+				}
+				braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+				if (braced)
+					cxx_braced_arguments_parse(c);
+				else
+					cxx_call_arguments_parse(c);
+				n = c->ncargs;
+				memcpy(an, c->carg_nodes, sizeof an);
+				if (target != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, target))
+					cxx_ctor_use(c, target, c->cargs, c->cargs_lval, c->ncargs, braced);
+				cxx_gen_member_initializer(c, mname, target, an, n, mloc);
+			} else {
 			cxx_nested_name_parse(c, &q, &dep);
 			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_is_kw(c, CXX_KW_decltype))
 				cxx_fail(c, "expected a member or base name");
-			uint32_t mname = 0, mloc = cxx_peek(c, 0)->loc;
-			bool plain;
-
 			if (cxx_is_kw(c, CXX_KW_decltype)) {
 				cxx_advance(c);
 				cxx_skip_balanced(c);
 			} else {
-				mname = cxx_peek(c, 0)->id;
 				cxx_advance(c);
 				if (cxx_is(c, LEX_TOKEN_LESS))
-					cxx_template_arguments_parse(c), mname = 0;
+					cxx_template_arguments_parse(c);
 			}
-			plain = mname && !q && !dep;
-			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
+			if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 				cxx_braced_init_list_parse(c);
-				if (cxx_gen_on(c)) {	/* code generation: this->member = value */
-					if (plain)
-						cxx_gen_member_initializer(c, mname, c->brace_nodes, c->brace_n, mloc);
-					else
-						cxx_gen_fail(c);
-				}
-			} else if (cxx_gen_on(c)) {
-				cxx_call_arguments_parse(c);
-				if (plain)
-					cxx_gen_member_initializer(c, mname, c->carg_nodes, c->ncargs, mloc);
-				else
-					cxx_gen_fail(c);
-			} else
+			else
 				cxx_expression_list_parse(c);
+			}
 			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
 				cxx_gen_fail(c);
 		} while (cxx_accept(c, LEX_TOKEN_COMMA));

@@ -138,6 +138,9 @@ typedef struct cxx_class_build {
 typedef struct cxx_class_info {
 	uint64_t dsize;			/* data size: bytes up to the end of its last data, before tail padding */
 	uint8_t valid, pod, empty, has_empty_base;
+	/* its direct base classes: their tags and offsets (code generation: a derived object as its base) */
+	uint8_t nbases;
+	uint32_t base_tag[16], base_off[16];
 } cxx_class_info;
 
 static cxx_class_info *cxx_info_of(cxx *c, uint32_t tag)
@@ -240,6 +243,55 @@ VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, 
 		}
 	}
 	return false;
+}
+
+/*
+ * The offset of the base class subobject `base` in an object of class `derived` (a direct or indirect
+ * base, the first found); false: not a base of it, or a layout not known.
+ */
+VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, int depth)
+{
+	const cxx_class_info *i;
+	uint32_t dt, bt;
+
+	if (derived == CXX_TY_UNKNOWN || base == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, derived) || !cc_type_is_record(c->ast, base) ||
+	    AST_TYPE_KIND(c->ast, derived) == TY_ARRAY || AST_TYPE_KIND(c->ast, base) == TY_ARRAY || depth > 8)
+		return false;
+	if (!depth)
+		cxx_type_require_complete(c, QUNQ(derived));
+	dt = AST_TYPE(c->ast, derived)->aux, bt = AST_TYPE(c->ast, base)->aux;
+	i = cxx_info_of(c, dt);
+	if (!i->valid)
+		return false;
+	for (uint32_t k = 0; k < i->nbases; k++) {
+		uint64_t inner;
+
+		if (i->base_tag[k] == bt) {
+			*off = i->base_off[k];
+			return true;
+		}
+		if (cxx_class_base_offset(c, QT(c->ast->tags[i->base_tag[k]].ty, 0), base, &inner, depth + 1)) {
+			*off = i->base_off[k] + inner;
+			return true;
+		}
+	}
+	return false;
+}
+
+/* a class's direct bases: how many, and the k-th one's type */
+VPRIV uint32_t cxx_class_bases(cxx *c, qty t, qty *bases, uint32_t cap)
+{
+	const cxx_class_info *i;
+	uint32_t n = 0;
+
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return 0;
+	i = cxx_info_of(c, AST_TYPE(c->ast, t)->aux);
+	if (!i->valid)
+		return 0;
+	for (; n < i->nbases && n < cap; n++)
+		bases[n] = QT(c->ast->tags[i->base_tag[n]].ty, 0);
+	return n;
 }
 
 VPRIV void cxx_class_access(cxx *c, int non_public)
@@ -367,6 +419,7 @@ VPRIV void cxx_class_end(cxx *c)
 		uint64_t off = 0, data_end = 0;
 		uint32_t balign = 1, nonempty = 0, empty_tags[16], nempty = 0;
 		bool all_bases_pod = true, ok = true, any_empty_base = false;
+		uint32_t base_offs[16] = { 0 };
 		field *f;
 		uint32_t nf;
 
@@ -385,11 +438,13 @@ VPRIV void cxx_class_end(cxx *c)
 				if (nempty < 16)
 					empty_tags[nempty++] = b->bases[i];
 				any_empty_base = true;
+				base_offs[i] = 0;
 				continue;
 			}
 			if (any_empty_base && (nonempty == 0 && (ib->has_empty_base || ib->empty)))
 				ok = false;	/* (an empty base and a subobject at 0 that may hold the same type) */
 			off = (off + br->align - 1) / br->align * br->align;
+			base_offs[i] = (uint32_t)off;
 			off += ib->pod ? br->size : ib->dsize;
 			nonempty++;
 		}
@@ -485,6 +540,9 @@ VPRIV void cxx_class_end(cxx *c)
 		free(lay), free(fa), free(at), free(orig);
 		bi = cxx_info_of(c, b->tag);
 		bi->valid = 1;
+		bi->nbases = (uint8_t)b->nbases;
+		memcpy(bi->base_tag, b->bases, b->nbases * sizeof *b->bases);
+		memcpy(bi->base_off, base_offs, b->nbases * sizeof *base_offs);
 		bi->empty = !nfields_nonempty && !nonempty;
 		bi->has_empty_base = any_empty_base;
 		bi->dsize = (data_end + 7) / 8;

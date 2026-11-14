@@ -1050,6 +1050,16 @@ static void cxx_primary_expression_parse(cxx *c)
 	case CXX_KW___builtin_shufflevector: case CXX_KW___builtin_addressof: case CXX_KW___is_identifier:
 		cxx_builtin_call_parse(c);
 		cxx_et(c, CXX_TY_UNKNOWN, false);
+		{
+			qty rt;
+			uint32_t bn[4], nb = c->nbnodes;
+
+			memcpy(bn, c->bnodes, sizeof bn);
+			if (nb != UINT32_MAX && !c->tentative && cxx_builtin_function_type(c, t->s, t->len, nb, c->bfirst, &rt)) {
+				cxx_et(c, rt, false);
+				cxx_gen_builtin(c, t->s, t->len, bn, nb, t->loc);
+			}
+		}
 		return;
 	case CXX_KW_operator:
 		cxx_id_expression_parse(c);

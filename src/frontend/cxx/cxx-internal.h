@@ -344,6 +344,11 @@ typedef struct cxx {
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
 	char **gen_names;		/* the mangled names of the functions defined so far (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
+	/* a constructor's initializers so far: the members (names) and bases (types) they construct */
+	uint32_t gen_init_names[32], ngen_init_names;
+	qty gen_init_bases[16];
+	uint32_t ngen_init_bases;
+	uint8_t gen_delegates, gen_returns;	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -436,6 +441,8 @@ VPRIV qty cxx_type_parameter_adjust(cxx *c, qty t);
 VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, bool is_union, int skip, bool is_class);
 VPRIV void cxx_class_packed(cxx *c);
 VPRIV bool cxx_class_data_size(cxx *c, qty t, uint64_t *dsize);
+VPRIV bool cxx_class_base_offset(cxx *c, qty derived, qty base, uint64_t *off, int depth);
+VPRIV uint32_t cxx_class_bases(cxx *c, qty t, qty *bases, uint32_t cap);
 VPRIV bool cxx_class_field_offset(cxx *c, qty t, uint32_t name, uint64_t *bits, int depth);
 VPRIV void cxx_class_skip(cxx *c, int reason);
 VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
@@ -502,7 +509,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
-VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV cxx_entity *cxx_member_function_find(cxx *c, cxx_scope *cls, uint32_t name, const cxx_param *ps, uint32_t nps, bool is_const);

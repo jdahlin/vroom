@@ -434,6 +434,7 @@ static void cxx_statement_parse1(cxx *c)
 		if (is_return && cxx_gen_on(c)) {
 			uint32_t r = cxx_gen_return(c, value, has_value, sloc);
 
+			c->gen_returns = 1;
 			if (r)
 				cxx_gen_statement(c, r);
 		}

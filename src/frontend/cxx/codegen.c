@@ -89,6 +89,8 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
 static bool cxx_gen_is_reference(cxx *c, qty t);
+static uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, qty to, uint32_t loc);
+static uint32_t cxx_gen_base_object(cxx *c, uint32_t x, qty to, uint32_t loc);
 
 /*
  * A type code is generated for so far, as a value (a parameter, a result, an operand): a scalar, a
@@ -111,9 +113,9 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 }
 
 /*
- * A class whose objects code is generated for: laid out, with no base class, and members that need no
- * constructor or destructor call of their own (scalars, arrays of them, classes C copies as C++ does).
- * It may declare constructors and a destructor; passing it by value is then not built yet (cxx_gen_type_ok).
+ * A class whose objects code is generated for: laid out, its bases and its members of class type such
+ * classes too, its other members scalars or arrays of them.  It may declare constructors and a
+ * destructor; passing it by value is then not built yet (cxx_gen_type_ok).
  */
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
 {
@@ -127,14 +129,25 @@ VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
 	if (pod)
 		return true;
 	cls = cxx_tag_scope_get(c, QUNQ(t));
-	if (!cls || cls->nused || cls->has_dependent_base)
+	if (!cls || cls->has_dependent_base)
 		return false;
+	{
+		qty bases[16];
+		uint32_t nb = cxx_class_bases(c, t, bases, 16);
+
+		for (uint32_t i = 0; i < nb; i++)
+			if (!cxx_gen_class_ok(c, bases[i]))
+				return false;
+	}
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
 		qty ft = cls->field_types[i];
 
 		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
-		if (!cxx_gen_type_ok(c, ft) || cxx_gen_is_reference(c, ft))
+		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft)) {
+			if (!cxx_gen_class_ok(c, ft))
+				return false;
+		} else if (!cxx_gen_type_ok(c, ft) || cxx_gen_is_reference(c, ft))
 			return false;
 	}
 	return true;
@@ -186,6 +199,13 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 	if (cxx_gen_is_reference(c, to)) {
 		qty rt = AST_TYPE(a, to)->base;
 
+		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && cc_type_is_record(a, rt) && cc_type_is_record(a, AST_NODE_AT(a, x)->ty) &&
+		    QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(rt)) {
+			/* a reference to a base class bound to a derived object: its base subobject */
+			x = cxx_gen_base_object(c, x, QUNQ(rt), loc);
+			if (!x)
+				return 0;
+		}
 		if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE) || (cxx_gen_type_ok(c, rt) && !cc_type_is_record(a, rt) &&
 								  QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(rt))) {
 			/* a value (or an lvalue of another type, converted): a temporary */
@@ -212,7 +232,17 @@ static uint32_t cxx_gen_bind(cxx *c, uint32_t x, qty to, uint32_t loc)
 	}
 	if (cc_type_is_record(a, to))
 		return QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(to) ? cc_node_rvalue(a, x) : 0;
-	return cc_conversion_apply(a, cc_conversion_decay(a, x), QUNQ(to));
+	x = cc_conversion_decay(a, x);
+	if (AST_TYPE_KIND(a, to) == TY_PTR && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_PTR) {
+		/* Derived* to Base*: the pointer moved to the base subobject */
+		qty tb = AST_TYPE(a, to)->base, fb = AST_TYPE(a, AST_NODE_AT(a, x)->ty)->base;
+
+		if (cc_type_is_record(a, tb) && cc_type_is_record(a, fb) && QUNQ(tb) != QUNQ(fb)) {
+			x = cxx_gen_base_pointer(c, x, tb, loc);
+			return x ? cc_cast_insert(a, x, QUNQ(to), CK_NOP) : 0;
+		}
+	}
+	return cc_conversion_apply(a, x, QUNQ(to));
 }
 
 /* a reference as an expression: the lvalue it refers to */
@@ -226,6 +256,65 @@ static uint32_t cxx_gen_referent(cxx *c, uint32_t x, uint32_t loc)
 	return cc_dereference_build(a, x, loc);
 }
 
+/*
+ * A pointer to an object of class type as a pointer to its base class subobject (to: the base class, with
+ * the cv of the pointee): the pointer moved by the base's offset.  0: not a base of it.
+ */
+static uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, qty to, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty pt = AST_NODE_AT(a, p)->ty, from;
+	uint64_t off;
+
+	if (AST_TYPE_KIND(a, pt) != TY_PTR)
+		return 0;
+	from = AST_TYPE(a, pt)->base;
+	if (QUNQ(from) == QUNQ(to))
+		return cc_cast_insert(a, p, cc_type_pointer(a, to), CK_NOP);
+	if (!cxx_class_base_offset(c, QUNQ(from), QUNQ(to), &off, 0))
+		return 0;
+	if (off) {
+		p = cc_cast_insert(a, p, cc_type_pointer(a, cc_type_basic(TY_CHAR)), CK_NOP);
+		p = cc_binary_build(a, LEX_TOKEN_PLUS, p, cc_node_integer_new(a, (i128)off, cc_type_basic(TY_LONG), loc), loc);
+	}
+	return cc_cast_insert(a, p, cc_type_pointer(a, to), CK_NOP);
+}
+
+/* an lvalue of class type as its base class subobject (0: not a base of it) */
+static uint32_t cxx_gen_base_object(cxx *c, uint32_t x, qty to, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty xt = AST_NODE_AT(a, x)->ty;
+	uint32_t p;
+
+	if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE))
+		return 0;
+	p = cxx_gen_base_pointer(c, cc_address_of_build(a, x, loc), QT(QI(to), QQ(to) | QQ(xt)), loc);
+	return p ? cc_dereference_build(a, p, loc) : 0;
+}
+
+/* the member `name` of the object x: a field of its class, or of a base class (the subobject first) */
+static uint32_t cxx_gen_member_of(cxx *c, uint32_t x, uint32_t name, uint32_t loc, int depth)
+{
+	cc *a = c->ast;
+	qty bt = AST_NODE_AT(a, x)->ty, bases[16];
+	uint64_t bits;
+	uint32_t nb;
+
+	if (!cc_type_is_record(a, bt) || !(a->tags[AST_TYPE(a, bt)->aux].flags & RF_COMPLETE) || depth > 8)
+		return 0;
+	if (cxx_class_field_offset(c, bt, name, &bits, 0))
+		return member(a, x, name, loc);
+	nb = cxx_class_bases(c, bt, bases, 16);
+	for (uint32_t i = 0; i < nb; i++) {
+		uint32_t sub = cxx_gen_base_object(c, x, bases[i], loc), m;
+
+		if (sub && (m = cxx_gen_member_of(c, sub, name, loc, depth + 1)))
+			return m;
+	}
+	return 0;
+}
+
 /* base.name or base->name, a data member */
 VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint32_t loc)
 {
@@ -237,20 +326,8 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 		return;
 	if (arrow)
 		base = cc_dereference_build(a, cc_conversion_decay(a, base), loc);
-	bt = AST_NODE_AT(a, base)->ty;
-	if (!cc_type_is_record(a, bt) || !(a->tags[AST_TYPE(a, bt)->aux].flags & RF_COMPLETE))
-		return;
-	{
-		uint64_t bits;
-
-		if (!cxx_class_field_offset(c, bt, name, &bits, 0)) {
-			if (getenv("VCC_CXX_GEN_WHY"))
-				fprintf(stderr, "member %.*s: not a field of the record (%u fields)\n", (int)vintern_ents[name].len, vintern_ents[name].s,
-					a->tags[AST_TYPE(a, bt)->aux].nfield);
-			return;	/* (a base class's member, a static one: not a field of this record) */
-		}
-	}
-	c->enode = member(a, base, name, loc);
+	(void)bt;
+	c->enode = cxx_gen_member_of(c, base, name, loc, 0);	/* (0: a static member, or one of a class not laid out) */
 	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))
 		c->enode = cxx_gen_referent(c, c->enode, loc);
 }
@@ -644,7 +721,10 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		}
 		if (!self || tt == CXX_TY_UNKNOWN)
 			return;	/* (a member called on a value: a temporary, not built yet) */
-		cc_id_list_append(a, &list, cc_cast_insert(a, self, tt, CK_NOP));
+		self = cxx_gen_base_pointer(c, self, AST_TYPE(a, tt)->base, loc);	/* (a base class's member: on the base subobject) */
+		if (!self)
+			return;
+		cc_id_list_append(a, &list, self);
 	}
 	for (uint32_t i = 0; i < nargs; i++) {
 		uint32_t arg = cxx_gen_bind(c, args[i], a->params[ft->aux + i], loc);
@@ -730,6 +810,14 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 		*ret = cc_type_basic(TY_LONG);
 		return true;
 	}
+	if (len == 20 && !memcmp(name, "__builtin_constant_p", 20) && nargs == 1) {
+		*ret = cc_type_basic(TY_INT);
+		return true;
+	}
+	if (len == 19 && !memcmp(name, "__builtin_addressof", 19) && nargs == 1 && arg0 != CXX_TY_UNKNOWN) {
+		*ret = cc_type_pointer(c->ast, arg0);
+		return true;
+	}
 	return false;
 }
 
@@ -749,6 +837,15 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 	if (len == 16 && !memcmp(name, "__builtin_expect", 16)) {
 		if (args[0])
 			c->enode = cc_conversion_apply(a, cc_conversion_decay(a, args[0]), cc_type_basic(TY_LONG));
+		return;
+	}
+	if (len == 20 && !memcmp(name, "__builtin_constant_p", 20)) {
+		c->enode = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);	/* (not folded here: never a constant) */
+		return;
+	}
+	if (len == 19 && !memcmp(name, "__builtin_addressof", 19)) {
+		if (args[0] && (AST_NODE_AT(a, args[0])->flags & NF_LVALUE))
+			c->enode = cc_address_of_build(a, args[0], loc);
 		return;
 	}
 	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 16)
@@ -796,62 +893,311 @@ static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc)
 	return n;
 }
 
-/* a constructor's member initializer name(args): this->name = arg for a scalar member (zero for none) */
-VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, const uint32_t *args, uint32_t nargs, uint32_t loc)
+/* does the class declare a constructor, or do its bases or members of class type need one called? */
+static bool cxx_gen_needs_construction(cxx *c, qty t, int depth)
 {
 	cc *a = c->ast;
-	uint32_t target, value;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+	bool pod, empty;
+
+	if (cxx_class_layout_info(c, t, &pod, &empty) && pod)
+		return false;
+	if (!cls || depth > 8)
+		return true;
+	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
+		if (e->member_of == cls)
+			return true;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (cxx_gen_needs_construction(c, bases[i], depth + 1))
+			return true;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+			ft = AST_TYPE(a, ft)->base;
+		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft) && cxx_gen_needs_construction(c, ft, depth + 1))
+			return true;
+	}
+	return false;
+}
+
+/* the destructor the class declares (NULL: none) */
+static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t)
+{
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	cxx_entity *d = cls ? cxx_lookup_in(c, cls, cxx_dtor_id(), 0) : NULL;
+
+	return d && d->member_of == cls && d->kind == CXX_ENTITY_VALUE ? d : NULL;
+}
+
+/* does destroying an object of the class do anything: a declared destructor, here or in a base or member? */
+static bool cxx_gen_needs_destruction(cxx *c, qty t, int depth)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+	bool pod, empty;
+
+	if (cxx_class_layout_info(c, t, &pod, &empty) && pod)
+		return false;
+	if (!cls || depth > 8)
+		return true;
+	if (cxx_gen_declared_destructor(c, t))
+		return true;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (cxx_gen_needs_destruction(c, bases[i], depth + 1))
+			return true;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+			ft = AST_TYPE(a, ft)->base;
+		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft) && cxx_gen_needs_destruction(c, ft, depth + 1))
+			return true;
+	}
+	return false;
+}
+
+/*
+ * An object of class type t at the lvalue `target` is initialized from args: the call of the constructor
+ * cxx_ctor_use chose just before, or a copy from an object of the class where none is declared for that,
+ * or nothing for a class that needs no construction.  The statements go to `out`.  False: not built yet.
+ */
+static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc)
+{
+	cc *a = c->ast;
+	cxx_entity *ctor = c->ctor_picked;
+	bool found = c->ctor_found;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+
+	if (!target || !cls || nargs == UINT32_MAX || nargs > 16)
+		return false;
+	if (found && ctor) {
+		cxx_gen_call(c, ctor, target, false, args, nargs, loc);
+		if (!c->enode)
+			return false;
+		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, c->enode, 0, 0));
+		c->enode = 0;
+		return true;
+	}
+	if (nargs == 0)
+		return !cxx_gen_needs_construction(c, t, 0);	/* (an implicit default constructor that does something: not built yet) */
+	if (nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t) && cxx_gen_type_ok(c, t)) {
+		/* from an object of a class C copies as C++ does */
+		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, cc_node_rvalue(a, args[0]), loc), 0, 0));
+		return true;
+	}
+	return false;	/* (an aggregate from a list, an implicit copy of a class with constructors: not built yet) */
+}
+
+/* this->... : the object being constructed or destroyed, as an lvalue */
+static uint32_t cxx_gen_this_object(cxx *c, uint32_t loc)
+{
+	uint32_t p;
+
+	cxx_gen_this(c, loc);
+	p = c->enode;
+	c->enode = 0;
+	return p ? cc_dereference_build(c->ast, p, loc) : 0;
+}
+
+/*
+ * A constructor's initializer: name(args) for a member, or a base class (class_type; this class itself:
+ * a delegating constructor).  A scalar member is assigned (zero for no argument); a member or base of
+ * class type is constructed (cxx_ctor_use was called for it with these arguments).
+ */
+VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t self, target, value;
 	qty mt;
 
 	if (!cxx_gen_on(c) || !c->gen_this || !c->gen_pre)
 		return;
-	cxx_gen_this(c, loc);
-	cxx_gen_member(c, c->enode, true, name, loc);
-	target = c->enode;
-	c->enode = 0;
-	if (!target || nargs > 1 || nargs == UINT32_MAX || (nargs == 1 && !args[0])) {
-		cxx_gen_fail(c);	/* (a base class, a member of class type with arguments: not built yet) */
-		return;
-	}
-	mt = AST_NODE_AT(a, target)->ty;
-	if (cc_type_is_record(a, mt) || AST_TYPE_KIND(a, mt) == TY_ARRAY || !cxx_gen_type_ok(c, mt)) {
-		if (!(nargs == 1 && cc_type_is_record(a, mt) && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(mt) && cxx_gen_type_ok(c, mt))) {
-			cxx_gen_fail(c);
-			return;
-		}
-		value = cc_node_rvalue(a, args[0]);	/* (a member of a class C copies: from an object of it) */
-	} else
-		value = nargs ? cc_conversion_apply(a, cc_conversion_decay(a, args[0]), QUNQ(mt)) :
-				cc_conversion_apply(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), QUNQ(mt));
-	if (!(AST_NODE_AT(a, target)->flags & NF_LVALUE)) {
+	self = cxx_gen_this_object(c, loc);
+	if (!self || nargs == UINT32_MAX) {
 		cxx_gen_fail(c);
 		return;
 	}
+	if (!name) {
+		/* a base class, or the class itself */
+		qty own = AST_NODE_AT(a, self)->ty;
+
+		if (class_type == CXX_TY_UNKNOWN || !cc_type_is_record(a, class_type)) {
+			cxx_gen_fail(c);
+			return;
+		}
+		if (QUNQ(class_type) == QUNQ(own))
+			target = self, c->gen_delegates = 1;
+		else
+			target = cxx_gen_base_object(c, self, QUNQ(class_type), loc);
+		if (!target || !cxx_gen_construct_at(c, target, QUNQ(class_type), args, nargs, c->gen_pre, loc)) {
+			cxx_gen_fail(c);
+			return;
+		}
+		if (c->ngen_init_bases < 16)
+			c->gen_init_bases[c->ngen_init_bases++] = QUNQ(class_type);
+		return;
+	}
+	target = cxx_gen_member_of(c, self, name, loc, 0);
+	if (!target || !(AST_NODE_AT(a, target)->flags & NF_LVALUE)) {
+		cxx_gen_fail(c);
+		return;
+	}
+	if (c->ngen_init_names < 32)
+		c->gen_init_names[c->ngen_init_names++] = name;
+	mt = AST_NODE_AT(a, target)->ty;
+	if (cc_type_is_record(a, mt) && AST_TYPE_KIND(a, mt) != TY_ARRAY) {
+		if (!cxx_gen_construct_at(c, target, QUNQ(mt), args, nargs, c->gen_pre, loc))
+			cxx_gen_fail(c);
+		return;
+	}
+	if (nargs > 1 || (nargs == 1 && !args[0]) || AST_TYPE_KIND(a, mt) == TY_ARRAY || !cxx_gen_type_ok(c, mt)) {
+		cxx_gen_fail(c);
+		return;
+	}
+	value = nargs ? cc_conversion_apply(a, cc_conversion_decay(a, args[0]), QUNQ(mt)) :
+			cc_conversion_apply(a, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), QUNQ(mt));
 	cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, value, loc), 0, 0));
 }
 
 /*
- * A local object of class type: its declaration, the call of the constructor cxx_ctor_use chose (or a
- * copy from an object of the class where none is declared for that), and its destructor at the end of
- * its scope (the emitter's scope cleanup, as C's __attribute__((cleanup))).
+ * A constructor's body is done: the bases and members of class type its initializers did not name are
+ * default-constructed first (into `first`).  False: one of them is not built yet.
+ */
+static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t self = cxx_gen_this_object(c, loc);
+	qty own, bases[16];
+	uint32_t nb;
+	const tag *r;
+
+	if (!self)
+		return false;
+	if (c->gen_delegates)
+		return true;	/* (the constructor delegated to did it all) */
+	own = AST_NODE_AT(a, self)->ty;
+	nb = cxx_class_bases(c, own, bases, 16);
+	for (uint32_t i = 0; i < nb; i++) {
+		bool named = false;
+
+		for (uint32_t k = 0; k < c->ngen_init_bases; k++)
+			named |= c->gen_init_bases[k] == QUNQ(bases[i]);
+		if (named || !cxx_gen_needs_construction(c, bases[i], 0))
+			continue;
+		cxx_ctor_use(c, bases[i], NULL, NULL, 0, false);
+		if (!cxx_gen_construct_at(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], NULL, 0, first, loc))
+			return false;
+	}
+	r = &a->tags[AST_TYPE(a, own)->aux];
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		qty ft = r->f[i].ty;
+		bool named = false;
+
+		if (!r->f[i].name || !cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == TY_ARRAY) {
+			/* (an array of a class with a constructor, an anonymous member holding one: not built yet) */
+			qty et = ft;
+
+			while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+				et = AST_TYPE(a, et)->base;
+			if (cc_type_is_record(a, et) && cxx_gen_needs_construction(c, et, 0))
+				return false;
+			continue;
+		}
+		for (uint32_t k = 0; k < c->ngen_init_names; k++)
+			named |= c->gen_init_names[k] == r->f[i].name;
+		if (named || !cxx_gen_needs_construction(c, ft, 0))
+			continue;
+		cxx_ctor_use(c, ft, NULL, NULL, 0, false);
+		if (!cxx_gen_construct_at(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), QUNQ(ft), NULL, 0, first, loc))
+			return false;
+	}
+	return true;
+}
+
+/* ~T(): the destructor's call on the lvalue x (the class declares it); the statement goes to `out` */
+static bool cxx_gen_destroy(cxx *c, uint32_t x, qty t, cc_id_list *out, uint32_t loc)
+{
+	cc *a = c->ast;
+	cxx_entity *d = cxx_gen_declared_destructor(c, t);
+
+	if (!x)
+		return false;
+	if (!d)
+		return !cxx_gen_needs_destruction(c, t, 0);	/* (an implicit destructor that does something: not built yet) */
+	if (d->fn_deleted)
+		return false;
+	cxx_gen_call(c, d, x, false, NULL, 0, loc);
+	if (!c->enode)
+		return false;
+	cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, c->enode, 0, 0));
+	c->enode = 0;
+	return true;
+}
+
+/* a destructor's body is done: then its members of class type, last first, and its bases (into `after`) */
+static bool cxx_gen_destructor_rest(cxx *c, cc_id_list *after, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t self = cxx_gen_this_object(c, loc);
+	qty own, bases[16];
+	uint32_t nb;
+	const tag *r;
+
+	if (!self)
+		return false;
+	own = AST_NODE_AT(a, self)->ty;
+	r = &a->tags[AST_TYPE(a, own)->aux];
+	for (uint32_t i = r->nfield; i-- > 0;) {
+		qty ft = r->f[i].ty, et = ft;
+
+		while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+			et = AST_TYPE(a, et)->base;
+		if (!cc_type_is_record(a, et) || !cxx_gen_needs_destruction(c, et, 0))
+			continue;
+		if (!r->f[i].name || et != ft)
+			return false;	/* (arrays and anonymous members of classes with destructors: not built yet) */
+		if (!cxx_gen_destroy(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), QUNQ(ft), after, loc))
+			return false;
+	}
+	nb = cxx_class_bases(c, own, bases, 16);
+	for (uint32_t i = nb; i-- > 0;) {
+		if (!cxx_gen_needs_destruction(c, bases[i], 0))
+			continue;
+		if (!cxx_gen_destroy(c, cxx_gen_base_object(c, cxx_gen_this_object(c, loc), bases[i], loc), bases[i], after, loc))
+			return false;
+	}
+	return true;
+}
+
+/*
+ * A local object of class type: its declaration, its construction from args (cxx_ctor_use was called for
+ * it), and its destructor at the end of its scope (the emitter's scope cleanup, as C's
+ * __attribute__((cleanup))).
  */
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
-	cxx_entity *ctor = c->ctor_picked, *dtor;
-	bool found = c->ctor_found, none = c->ctor_none;
-	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	cxx_entity *dtor;
 	cc_id_list *block = c->gen_block;
+	/* (what cxx_ctor_use chose: naming the destructor below resolves nothing, but keep it apart) */
+	cxx_entity *picked = c->ctor_picked;
+	bool found = c->ctor_found, none = c->ctor_none;
 
 	if (!cxx_gen_on(c) || !s)
 		return;
-	if (!block || !cls || nargs == UINT32_MAX) {
+	if (!block || nargs == UINT32_MAX) {
 		cxx_gen_fail(c);
 		return;
 	}
-	/* the destructor, declared in the class (an implicit one does nothing for the classes built so far) */
-	dtor = cxx_lookup_in(c, cls, cxx_dtor_id(), 0);
-	if (dtor && dtor->member_of == cls && dtor->kind == CXX_ENTITY_VALUE) {
+	dtor = cxx_gen_declared_destructor(c, t);
+	if (dtor) {
 		attrs at;
 
 		if (dtor->fn_deleted || !cxx_gen_name(c, dtor) || !dtor->sym1) {
@@ -861,38 +1207,14 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 		memset(&at, 0, sizeof at);
 		at.cleanup = dtor->sym1;
 		cc_attribute_apply_symbol(a, &a->syms[s], &at);
-	}
-	cc_id_list_append(a, block, cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, 0));
-	if (found && ctor) {
-		cxx_gen_call(c, ctor, cxx_gen_var_node(c, s, loc), false, args, nargs, loc);
-		if (!c->enode) {
-			cxx_gen_fail(c);
-			return;
-		}
-		cc_id_list_append(a, block, cc_statement_new(a, N_EXPR, loc, c->enode, 0, 0));
-		c->enode = 0;
+	} else if (cxx_gen_needs_destruction(c, t, 0)) {
+		cxx_gen_fail(c);	/* (an implicit destructor that destroys members: not built yet) */
 		return;
 	}
-	if (nargs == 0 && none)
-		return;	/* (no constructor declared: default-initialization does nothing here) */
-	if (nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t) && cxx_class_special(c, QUNQ(t), 0, false, 0) == 1 && !found) {
-		/* from an object of the class, with no copy constructor declared: copied member by member, as C copies */
-		cxx_entity *copy = NULL;
-
-		for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
-			if (e->member_of == cls && e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && AST_TYPE(a, e->ty)->n == 1) {
-				qty p = a->params[AST_TYPE(a, e->ty)->aux];
-
-				if (cxx_gen_is_reference(c, p) && QUNQ(AST_TYPE(a, p)->base) == QUNQ(t))
-					copy = e;
-			}
-		if (!copy) {
-			cc_id_list_append(a, block, cc_statement_new(a, N_EXPR, loc,
-								     cc_assignment_build(a, 0, cxx_gen_var_node(c, s, loc), cc_node_rvalue(a, args[0]), loc), 0, 0));
-			return;
-		}
-	}
-	cxx_gen_fail(c);	/* (an aggregate from a list, a constructor not resolved: not built yet) */
+	cc_id_list_append(a, block, cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, 0));
+	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
+		cxx_gen_fail(c);
 }
 
 /* ---- statements ---------------------------------------------------------------------------- */
@@ -1171,6 +1493,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = psyms.n;
 	c->gen_pre = calloc(1, sizeof(cc_id_list));
 	cc_id_list_init(c->gen_pre);
+	c->ngen_init_names = 0, c->ngen_init_bases = 0, c->gen_delegates = 0, c->gen_returns = 0;
 	c->gen_ret = ft->base;
 	a->fn = f->sym;
 	c->gen = 1;
@@ -1185,12 +1508,32 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	bool ok = c->gen && !c->gen_failed && body;
 	cc_id_list *pre = c->gen_pre;
 
-	c->gen_pre = NULL;
-	if (ok && pre && pre->n) {
-		/* a constructor: its member initializers, then its body */
-		cc_id_list_append(a, pre, body);
-		body = cc_statement_new(a, N_BLOCK, AST_NODE_AT(a, body)->loc, 0, cc_id_list_freeze(a, pre), pre->n);
+	if (ok && cxx_gen_is_special(f) && c->gen_this) {
+		const vident *fv = &vintern_ents[f->name];
+		uint32_t bloc = AST_NODE_AT(a, body)->loc;
+		cc_id_list all;
+
+		cc_id_list_init(&all);
+		if (fv->s[1] == 'c') {
+			/* a constructor: the bases and members its initializers did not name, the initializers, its body */
+			ok = cxx_gen_constructor_defaults(c, &all, bloc);
+			for (uint32_t i = 0; ok && pre && i < pre->n; i++)
+				cc_id_list_append(a, &all, pre->v[i]);
+			if (ok && all.n) {
+				cc_id_list_append(a, &all, body);
+				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
+			}
+		} else {
+			/* a destructor: its body, then its members and bases (a return in the body would skip them) */
+			cc_id_list_append(a, &all, body);
+			ok = cxx_gen_destructor_rest(c, &all, bloc);
+			if (ok && all.n > 1) {
+				ok = !c->gen_returns;
+				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
+			}
+		}
 	}
+	c->gen_pre = NULL;
 	free(pre);
 	uint32_t psyms = c->gen_psyms, npsyms = c->gen_npsyms;
 
