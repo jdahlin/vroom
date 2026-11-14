@@ -1713,3 +1713,11 @@ cxx-mangle 36; cxx-fork 67/70: unit-32bit (tidsgräns, fallerar också med clang
 ordered_map::erase(const key_type&), vars kropp vcc ännu inte bygger: vector::erase via __wrap_iter,
 __unwrap_range, transparent jämförare i ett villkor; mallen erase(KeyType&&) som clang väljer faller på
 sitt villkor hos vcc).  10,2 s CPU med fyra prefix; 31 av 118 testkroppar.
+
+## Status 81 (2026-11-14)
+`frontend/cxx/codegen.c` (5 800 rader) delad i `frontend/cxx/codegen/`, en fil per ämne: state, convert,
+name, expression, lambda, call, builtin, construct, aggregate, constructor, destructor, new, vtable,
+statement, global, function (150-680 rader), gemensamt i `codegen/codegen.h`.  Ren flytt: -S-utdata
+byte för byte lika på unit-algorithms, unit-hash, unit-diagnostics; varje fil kompilerar ensam
+(`VCC_UNITY=`; expression.c fick <ctype.h>, cxx_lookahead_fn delas, typing.c går via
+cxx_ftemplate_params).  cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36; cxx-fork 67/70 som förut.

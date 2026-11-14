@@ -6,12 +6,14 @@
  * template arguments only if lookup says it is a template, or (C++20) if
  * lookup finds nothing and the arguments parse and are followed by (.
  */
+#include <ctype.h>
+
 #include "cxx-internal.h"
 
 static void cxx_cast_expression_parse(cxx *c);
 static void cxx_unary_expression_parse(cxx *c);
 
-static bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *))
+VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *))
 {
 	cxx_mark m;
 	jmp_buf jb;

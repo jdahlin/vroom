@@ -32,6 +32,8 @@
 #endif
 #endif
 
+#define AST_NODE_AT(a, i) (&(a)->nodes[i])	/* the AST node i */
+
 /* token kinds beyond the lexer's: C++'s joined punctuators */
 enum {
 	CXX_TOKEN_PERIOD_STAR = PP_TOKEN_KIND_DIRECTIVE_LINE + 1,	/* .* */
@@ -492,6 +494,7 @@ typedef struct cxx {
 } cxx;
 
 /* tokens (token.c) */
+VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
 static inline cxx_token *cxx_peek(cxx *c, uint32_t ahead) { uint32_t i = c->pos + ahead; return &c->tok[i < c->ntok ? i : c->ntok]; }

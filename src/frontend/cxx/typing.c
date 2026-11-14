@@ -744,13 +744,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 					/* the same parameter types once bound, from fewer template parameters: the more
 					   specialized (operator<<(basic_ostream<char, T>&, char) against basic_ostream<C, T>&) */
 					else if (cand[a].e->ftmpl && cand[b].e->ftmpl && nargs <= 16 &&
-						 cand[a].e->ftmpl->p.params->ntparams != cand[b].e->ftmpl->p.params->ntparams) {
+						 cxx_ftemplate_params(cand[a].e->ftmpl)->ntparams != cxx_ftemplate_params(cand[b].e->ftmpl)->ntparams) {
 						bool identical = true;
 
 						for (uint32_t n = 0; n < nargs && identical; n++)
 							identical = cand[a].pt[n] != CXX_TY_UNKNOWN && cand[a].pt[n] == cand[b].pt[n];
 						if (identical)
-							better = cand[a].e->ftmpl->p.params->ntparams < cand[b].e->ftmpl->p.params->ntparams, worse = !better;
+							better = cxx_ftemplate_params(cand[a].e->ftmpl)->ntparams < cxx_ftemplate_params(cand[b].e->ftmpl)->ntparams, worse = !better;
 					}
 				}
 				if (better || worse)
