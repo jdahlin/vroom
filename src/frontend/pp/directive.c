@@ -308,6 +308,12 @@ VPRIV int pp_pragma_run(pp *p, const char *s, size_t n, uint32_t loc, ptok *out,
 					    pp_pragma_word_match(&r, e, "dependency")))
 			return 0;
 		r = q;
+		/* clang's macro pragmas: run by its preprocessor (only diagnostics, not modelled) and not
+		   printed by -E; libc++'s <atomic> has #pragma clang deprecated(ATOMIC_VAR_INIT) */
+		if (pp_pragma_word_match(&r, e, "clang") && (pp_pragma_word_match(&r, e, "deprecated") ||
+		    pp_pragma_word_match(&r, e, "restrict_expansion") || pp_pragma_word_match(&r, e, "final")))
+			return 0;
+		r = q;
 		if ((pp_pragma_word_match(&r, e, "clang") || pp_pragma_word_match(&r, e, "GCC")) && pp_pragma_word_match(&r, e, "diagnostic")) {
 			PP_HEADER_CACHE_REGION_REJECT(p);	/* (a replay would not run it) */
 			diag_pragma_handle(p, r, e, loc);	/* (and kept in the output, as clang -E) */

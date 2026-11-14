@@ -13,10 +13,10 @@
  */
 #include "driver-internal.h"
 
-/* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts */
+/* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts, C++'s */
 static bool driver_input_is_source(const char *a)
 {
-	static const char *const sfx[] = { ".c", ".h", ".i", ".S", ".s", ".dts" };
+	static const char *const sfx[] = { ".c", ".h", ".i", ".S", ".s", ".dts", ".cpp", ".cc", ".cxx", ".c++", ".C", ".hpp", ".hh", ".hxx", ".ii" };
 	size_t l = strlen(a);
 
 	for (size_t i = 0; i < sizeof sfx / sizeof *sfx; i++) {
@@ -119,6 +119,34 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		if (!strcmp(a, "-fno-spell-checking")) { job->spell_checking_limit = -2; continue; }
 		if (!strncmp(a, "-ferror-limit=", 14)) { job->error_limit = atoi(a + 14); job->error_limit = job->error_limit ? job->error_limit : -1; continue; }
 		if (!strncmp(a, "-fmacro-backtrace-limit=", 24)) { job->macro_backtrace_limit = atoi(a + 24); job->macro_backtrace_limit = job->macro_backtrace_limit ? job->macro_backtrace_limit : -1; continue; }
+		if (!strncmp(a, "-std=", 5) && (!strncmp(a + 5, "c++", 3) || !strncmp(a + 5, "gnu++", 5))) {
+			/* clang's C++ spellings (LangStandards.def) */
+			static const struct { const char *s; int v; } stds[] = {
+				{ "98", 98 }, { "03", 98 }, { "11", 11 }, { "0x", 11 }, { "14", 14 }, { "1y", 14 }, { "17", 17 }, { "1z", 17 },
+				{ "20", 20 }, { "2a", 20 }, { "23", 23 }, { "2b", 23 }, { "26", 26 }, { "2c", 26 },
+			};
+			const char *v = a + 5 + (a[5] == 'g' ? 5 : 3);
+			size_t k;
+
+			for (k = 0; k < sizeof(stds) / sizeof(stds[0]) && strcmp(v, stds[k].s); k++)
+				;
+			if (k == sizeof(stds) / sizeof(stds[0])) {
+				dprintf(job->errfd, "error: invalid value '%s' in '%s'\n", a + 5, a);
+				job->status = 1;
+				return 1;
+			}
+			job->cxx = stds[k].v;
+			job->cxx_given = 1;
+			job->strict_standard = a[5] != 'g';
+			continue;
+		}
+		if (!strcmp(a, "-fno-exceptions") || !strcmp(a, "-fno-cxx-exceptions")) { job->no_exceptions = 1; continue; }
+		if (!strcmp(a, "-fexceptions") || !strcmp(a, "-fcxx-exceptions")) { job->no_exceptions = 0; continue; }
+		if (!strcmp(a, "-fno-rtti")) { job->no_rtti = 1; continue; }
+		if (!strcmp(a, "-frtti")) { job->no_rtti = 0; continue; }
+		if (!strcmp(a, "-stdlib=libc++")) { job->cxx_libcxx = 1; continue; }
+		if (!strcmp(a, "-nostdinc++")) { job->no_standard_cxx_includes = 1; continue; }
+		if (!strcmp(a, "-stdlib=libstdc++") || !strcmp(a, "-stdlib=platform")) { job->cxx_libcxx = 0; continue; }
 		if (!strncmp(a, "-std=", 5)) {
 			/* clang's C spellings (LangStandards.def); ver: a __STDC_VERSION__ of its own */
 			static const struct { const char *s; int v; const char *ver; } stds[] = {
@@ -286,6 +314,10 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-x") && i + 1 < argc) {
 			i++;
 			job->asm_mode = !strcmp(argv[i], "assembler-with-cpp");
+			if (!strcmp(argv[i], "c++") || !strcmp(argv[i], "c++-header") || !strcmp(argv[i], "c++-cpp-output"))
+				job->cxx = job->cxx ? job->cxx : -1;	/* the standard: -std= or clang++'s default (gnu++17), after the loop */
+			else if (strcmp(argv[i], "none"))
+				job->cxx = job->cxx_given ? job->cxx : 0;
 			job->raw_assembler = !strcmp(argv[i], "assembler") ? 1 : 0;
 			job->language_given = strcmp(argv[i], "none") != 0;
 		}
@@ -371,9 +403,30 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 				job->asm_mode = 1;
 			if (l > 2 && !strcmp(a + l - 2, ".s") && job->raw_assembler < 0)
 				job->raw_assembler = 1;	/* clang: .s is assembled without the preprocessor */
+			if (!job->language_given) {
+				static const char *const cxx_sfx[] = { ".cpp", ".cc", ".cxx", ".c++", ".C", ".hpp", ".hh", ".hxx", ".ii" };
+
+				for (size_t k = 0; k < sizeof cxx_sfx / sizeof *cxx_sfx; k++)
+					if (l > strlen(cxx_sfx[k]) && !strcmp(a + l - strlen(cxx_sfx[k]), cxx_sfx[k]))
+						job->cxx = job->cxx > 0 ? job->cxx : -1;
+			}
 		}
 	}
 #undef DRIVER_OPTION_VALUE
+	/* C++ without -std=: clang++'s default, gnu++17; -std=c++NN for a C input: C after all */
+	if (job->cxx < 0 || (job->cxx > 0 && !job->cxx_given))
+		job->cxx = 17, job->strict_standard = 0;
+	if (job->cxx_given && job->cxx > 0 && !job->language_given && job->main_file && job->main_file[0] != '-') {
+		size_t l = strlen(job->main_file);
+		static const char *const cxx_sfx[] = { ".cpp", ".cc", ".cxx", ".c++", ".C", ".hpp", ".hh", ".hxx", ".ii" };
+		int is_cxx = 0;
+
+		for (size_t k = 0; k < sizeof cxx_sfx / sizeof *cxx_sfx; k++)
+			is_cxx |= l > strlen(cxx_sfx[k]) && !strcmp(job->main_file + l - strlen(cxx_sfx[k]), cxx_sfx[k]);
+		if (!is_cxx)
+			job->cxx = 0;	/* clang: -std=c++20 on a .c file is an error; vcc lexes C */
+	}
+	job->pp_options.cxx = job->cxx;
 	return 0;
 }
 

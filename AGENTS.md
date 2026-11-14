@@ -56,7 +56,10 @@ relative to it); `TODO.md` stays at the top.
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
   build|report|base TARGET` (json, libcxx, duckdb, simdjson, catch2; sources
-  in `work/cxx`) is X0's clang-only measurement.
+  in `work/cxx`) is X0's clang-only measurement; `bench/cxx-json.py
+  [--stage pp|syntax|obj]` is the proof of concept's progress on json (the
+  only C++ test case for now); `src/tools/gen-cxxpredef.py` regenerates the
+  C++ predefines and `__has_*` answers from clang++.
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for

@@ -125,6 +125,14 @@ VPRIV void driver_searchpath_build(struct driver_job *job, const driver_environm
 #ifdef VCC_RESDIR
 	/* hosted Linux: clang's resource headers, then glibc's (multiarch first) */
 	if (job->hosted && !job->darwin && !job->no_standard_includes) {
+		if (job->cxx && job->cxx_libcxx && !job->no_standard_cxx_includes) {
+			/* clang++ -stdlib=libc++: <llvm>/bin/../include/c++/v1 first, spelled as clang does */
+			static __thread char cxxdir[512];
+			const char *r = VCC_RESDIR, *e = strstr(r, "/lib/clang/");
+
+			if (e && snprintf(cxxdir, sizeof cxxdir, "%.*s/bin/../include/c++/v1", (int)(e - r), r) < (int)sizeof cxxdir)
+				ADD(cxxdir);
+		}
 		ADD(VCC_RESDIR);
 		ADD("/usr/local/include");
 		job->pp_options.xc0 = job->search_count;	/* clang: extern "C" system directories (" 3 4" in line markers) */

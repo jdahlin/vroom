@@ -2,6 +2,7 @@
 #include "pp-internal.h"
 #include <sys/stat.h>
 #include "ppdata.inc"
+#include "ppdata-cxx-has.inc"
 #define PPDATA_X86_HAS
 #include "ppdata-x86.inc"
 
@@ -168,6 +169,28 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 
 	if (b == PP_BUILTIN_BUILDING_MODULE)
 		return 0;	/* no modules */
+	if (p->options->cxx && (p->options->target == PP_LINUX_X86_64 || p->options->target == PP_LINUX_AARCH64)) {
+		/* C++: clang++'s answers for what libc++, json and doctest ask (gen-cxxpredef.py) */
+		static const int col[27] = { [11] = 1, [14] = 2, [17] = 3, [20] = 4, [23] = 5, [26] = 6 };
+		int s = p->options->cxx == 98 ? 0 : col[p->options->cxx % 27], t = p->options->target == PP_LINUX_AARCH64;
+		size_t cl = 0, ch = sizeof(has_tab_cxx) / sizeof(has_tab_cxx[0]);
+
+		while (cl < ch) {
+			size_t mid = (cl + ch) / 2;
+			int c = strcmp(has_tab_cxx[mid].q, q[b]);
+
+			if (!c)
+				c = strcmp(has_tab_cxx[mid].name, name);
+			if (!c)
+				return (int)has_tab_cxx[mid].v[t][s];
+			if (c < 0)
+				cl = mid + 1;
+			else
+				ch = mid;
+		}
+		if (b == PP_BUILTIN_HAS_CPP_ATTRIBUTE || b == PP_BUILTIN_HAS_FEATURE || b == PP_BUILTIN_HAS_EXTENSION)
+			return 0;	/* these differ from C: the table has every nonzero answer */
+	}
 	if (p->options->target == PP_LINUX_X86_64) {	/* its own table (gen-x86data.sh) */
 		size_t xl = 0, xh = sizeof(has_tab_x86) / sizeof(has_tab_x86[0]);
 
