@@ -1819,3 +1819,12 @@ cxx-strict 392 (oförändrat: de funktionerna stannar vid nästa sak).
 ## Status 95 (2026-11-14)
 `T(const T&) = default` för en klass som inte är trivialt kopierbar (polymorf: `std::exception`) byggs på
 plats: baser, vptr, medlemmar (förut ett anrop till en funktion som aldrig definierades).  cxx-strict 388.
+
+## Status 96 (2026-11-14)
+`c ? a : b` av två lvärden av samma klass är ett lvärde (const om någon är det): `*(c ? &a : &b)`
+(json_ref::moved_or_copied).  `extern template R X<args>::f(params);` (libc++:s medlemslistor för
+basic_string<char>) registreras: en medlem den täcker, och som inte har
+`__exclude_from_explicit_instantiation__` (`_LIBCPP_HIDE_FROM_ABI`), får ingen kropp här; anropet går
+till biblioteket (basic_string:s kopieringskonstruktor anropade förut en dold hjälpfunktion som libc++.so
+inte exporterar).  Matchning: mallen, argumenten som prefix (namn jämförs manglade: vcc kan ha två
+instanser av char_traits<char>), medlemsnamn och antal parametrar.  cxx-strict 386.

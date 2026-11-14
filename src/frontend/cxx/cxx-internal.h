@@ -138,6 +138,7 @@ typedef struct cxx_entity {
 	struct cxx_ftemplate *inst_ftmpl;
 	uint32_t inst_pack_at;		/* ... a pack's arguments from here (UINT32_MAX: none; mangled J...E) */	/* ... its template (its declared signature mangles it) */
 	uint32_t abi_tag;		/* a function declared with __attribute__((abi_tag("x"))): x, interned (0: none) */
+	uint8_t no_explicit_inst;	/* __attribute__((exclude_from_explicit_instantiation)): an extern template does not cover it */
 	uint32_t sym1;			/* a constructor or destructor: the complete-object function's symbol (C1, D1; sym is C2, D2) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	struct cxx_entity *bound_template;	/* a template template parameter bound to a template: that template (its identity) */
@@ -435,6 +436,8 @@ typedef struct cxx {
 	uint32_t gen_delete_sym, gen_pure_sym;
 	/* function symbols by assembler name: two entities for one function (found through different declarations) share the symbol */
 	struct { const char *name; uint32_t sym; } *sym_names;
+	struct cxx_extern_member { struct cxx_entity *of; cxx_targ args[4]; uint32_t nargs, name, nparams; } *externs;	/* extern template R X<args>::f(...): defined elsewhere */
+	uint32_t nexterns;
 	struct { uint32_t sym, sym1; char *why; } *missing;	/* VCC_CXX_MISSING: functions whose bodies were not built */
 	uint32_t nmissing, cmissing;
 	uint32_t nsym_names, csym_names;
@@ -510,6 +513,7 @@ typedef struct cxx {
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);
+VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);	/* declaration.c: an extern template covers it */
 VPRIV bool cxx_type_definitely_incomplete(cxx *c, qty t);	/* instantiate.c: an instance with no definition to complete it */
 VPRIV qty cxx_ctad(cxx *c, cxx_entity *te, const qty *args, const uint8_t *lval, uint32_t nargs);	/* declaration.c: Name{args} of a class template */
 VPRIV int cxx_gen_trivial_abi(cxx *c, qty t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */

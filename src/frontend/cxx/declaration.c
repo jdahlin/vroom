@@ -120,6 +120,19 @@ static bool cxx_tokens_have_kw(cxx *c, uint32_t b, uint32_t e, int kw)
 	return false;
 }
 
+static void cxx_extern_member_record(cxx *c);
+
+/* does the identifier w appear in tokens [b, e) */
+static bool cxx_word_scan(cxx *c, uint32_t b, uint32_t e, const char *w)
+{
+	size_t n = strlen(w);
+
+	for (uint32_t i = b; i < e && i < c->ntok; i++)
+		if (c->tok[i].kind == LEX_TOKEN_IDENTIFIER && c->tok[i].len == n && !memcmp(c->tok[i].s, w, n))
+			return true;
+	return false;
+}
+
 /* __attribute__((__abi_tag__("x"))) or [[gnu::abi_tag("x")]] in tokens [b, e): the tag (interned; 0: none) */
 static uint32_t cxx_abi_tag_scan(cxx *c, uint32_t b, uint32_t e)
 {
@@ -2405,6 +2418,7 @@ static void cxx_using_parse(cxx *c)
 						/* (its name too: where it is declared, its linkage, as the original's) */
 						e->home = t->home, e->c_linkage = t->c_linkage, e->global_ns = t->global_ns, e->mangled = t->mangled;
 						e->fn_inline = t->fn_inline, e->fn_internal = t->fn_internal, e->abi_tag = t->abi_tag;
+						e->no_explicit_inst = t->no_explicit_inst;
 						e->fn_noexcept = t->fn_noexcept, e->fn_static = t->fn_static, e->defs = t->defs, e->def_scope = t->def_scope;
 						e->field_of = t->field_of, e->sym1 = t->sym1, e->fn_defaulted = t->fn_defaulted, e->fn_deleted = t->fn_deleted;
 					}
@@ -3374,6 +3388,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0, e->fn_noexcept = c->decl_noexcept;
 			if (e && !e->abi_tag && ds_from < c->pos)
 				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);
+			if (e && ds_from < c->pos && cxx_word_scan(c, ds_from, c->pos, "__exclude_from_explicit_instantiation__"))
+				e->no_explicit_inst = 1;	/* (_LIBCPP_HIDE_FROM_ABI on a constructor: this TU's own) */
 			if (e && !tmpl && dtor && !e->vslot)
 				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);	/* (virtual ~X(), or overriding a base's) */
 			if (e && !tmpl)
@@ -3526,6 +3542,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->fn_static = 1;
 			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && !e->abi_tag && ds_from < c->pos)
 				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);	/* (mangled after its name: B <len> <tag>) */
+			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && ds_from < c->pos &&
+			    cxx_word_scan(c, ds_from, c->pos, "__exclude_from_explicit_instantiation__"))
+				e->no_explicit_inst = 1;	/* (_LIBCPP_HIDE_FROM_ABI: always this TU's own) */
 			if (e && f && kind == CXX_ENTITY_VALUE && (flags & (DS_INLINE | DS_CONSTEXPR)))
 				e->fn_inline = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
 			if (e && f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !is_friend && !(flags & DS_STATIC))
@@ -4312,6 +4331,8 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 		}
 		if (cxx_peek(c, 1)->kw == CXX_KW_template) {	/* extern template class X<int>; */
 			cxx_advance(c);
+			if (cxx_peek(c, 1)->kw != CXX_KW_class && cxx_peek(c, 1)->kw != CXX_KW_struct)
+				cxx_extern_member_record(c);	/* extern template R X<args>::f(params); */
 			cxx_template_declaration_parse(c, context);
 			return;
 		}
@@ -4329,6 +4350,153 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 	if (cxx_accept(c, LEX_TOKEN_SEMICOLON))
 		return;
 	cxx_simple_declaration_parse(c, context, NULL);
+}
+
+/*
+ * extern template R X<args>::member(params); at 'template': the member of the class instance is defined
+ * elsewhere (libc++'s dylib: basic_string<char>'s copy constructor), kept on the instance's scope as its
+ * name and number of parameters.  Nothing is consumed.
+ */
+static void cxx_extern_member_record(cxx *c)
+{
+	uint32_t save = c->pos, save_undo = c->nundo, open = 0, depth = 0, end, np = 0, name;
+	cxx_scope *q;
+	bool dep;
+
+	/* the parameter list: the first ( at depth 0 that is no attribute's */
+	for (uint32_t i = c->pos + 1; i < c->ntok && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
+		int k = c->tok[i].kind;
+
+		if (c->tok[i].kind == LEX_TOKEN_IDENTIFIER && c->tok[i].len == 13 && !memcmp(c->tok[i].s, "__attribute__", 13)) {
+			int d = 0;
+
+			for (i++; i < c->ntok; i++) {
+				if (c->tok[i].kind == LEX_TOKEN_LEFT_PAREN)
+					d++;
+				else if (c->tok[i].kind == LEX_TOKEN_RIGHT_PAREN && !--d)
+					break;
+			}
+			continue;
+		}
+		if (k == LEX_TOKEN_LESS)
+			depth++;
+		else if (k == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (k == LEX_TOKEN_LEFT_PAREN && !depth) {
+			open = i;
+			break;
+		}
+	}
+	if (!open || open < 3 || (c->tok[open - 2].kind != LEX_TOKEN_COLON_COLON && !(c->tok[open - 3].kind == LEX_TOKEN_COLON_COLON &&
+	    c->tok[open - 2].kw == CXX_KW_operator)))
+		return;
+	{
+		/* the member's name: an identifier (the class's own: its constructor), or operator= and the like */
+		uint32_t at = c->tok[open - 2].kind == LEX_TOKEN_COLON_COLON ? open - 1 : open - 2, qend = at - 1, qb;
+		int d = 0;
+
+		if (c->tok[at].kw == CXX_KW_operator) {
+			char nm[64];
+
+			snprintf(nm, sizeof nm, "operator%.*s", (int)c->tok[at + 1].len, c->tok[at + 1].s);
+			name = vintern_cstr(nm);
+		} else if (c->tok[at].kind == LEX_TOKEN_IDENTIFIER)
+			name = c->tok[at].id;
+		else
+			return;
+		/* back over X<args> before the :: to its first name (and std:: before it) */
+		qb = qend;
+		if (qb && c->tok[qb - 1].kind == LEX_TOKEN_GREATER) {
+			for (qb--; qb > save; qb--) {
+				if (c->tok[qb].kind == LEX_TOKEN_GREATER)
+					d++;
+				else if (c->tok[qb].kind == LEX_TOKEN_LESS && !--d)
+					break;
+			}
+		}
+		if (!qb || c->tok[qb - 1].kind != LEX_TOKEN_IDENTIFIER)
+			return;
+		qb--;
+		while (qb >= 2 && c->tok[qb - 1].kind == LEX_TOKEN_COLON_COLON && c->tok[qb - 2].kind == LEX_TOKEN_IDENTIFIER)
+			qb -= 2;
+		c->pos = qb;
+		cxx_nested_name_parse(c, &q, &dep);
+		if (!q || dep || q->kind != CXX_SCOPE_CLASS || c->pos != at || !q->owner) {
+			cxx_rewind(c, save, save_undo);
+			return;
+		}
+		if (c->tok[at].kind == LEX_TOKEN_IDENTIFIER && c->tok[at].id == q->owner->name)
+			name = cxx_ctor_id();
+	}
+	/* the parameters: commas at depth 0 (none, or (void): 0) */
+	depth = 0, end = open + 1;
+	if (c->tok[open + 1].kind != LEX_TOKEN_RIGHT_PAREN && !(c->tok[open + 1].kw == CXX_KW_void && c->tok[open + 2].kind == LEX_TOKEN_RIGHT_PAREN))
+		np = 1;
+	for (; end < c->ntok; end++) {
+		int k = c->tok[end].kind;
+
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LESS || k == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_GREATER || k == LEX_TOKEN_RIGHT_SQUARE)) {
+			if (!depth)
+				break;
+			depth--;
+		} else if (k == LEX_TOKEN_COMMA && !depth)
+			np++;
+	}
+	{
+		cxx_entity *of;
+		const cxx_targ *ta;
+		uint32_t nta, pk;
+		cxx_scope *home;
+		struct cxx_extern_member *m;
+
+		if (!q->owner->ty || !cxx_instance_template(c, q->owner->ty, &of, &ta, &nta, &pk, &home) || nta > 4) {
+			cxx_rewind(c, save, save_undo);
+			return;
+		}
+		c->externs = realloc(c->externs, (c->nexterns + 1) * sizeof *c->externs);
+		m = &c->externs[c->nexterns++];
+		memset(m, 0, sizeof *m);
+		m->of = of, m->nargs = nta, m->name = name, m->nparams = np;
+		memcpy(m->args, ta, nta * sizeof *ta);
+	}
+	cxx_rewind(c, save, save_undo);
+}
+
+/* is the member function f of a class instance defined elsewhere (an extern template declaration names it, and
+   it is not excluded from explicit instantiation) */
+VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f)
+{
+	const cxx_scope *cls = f ? f->member_of : NULL;
+	cxx_entity *of;
+	const cxx_targ *ta;
+	uint32_t nta, pk;
+	cxx_scope *home;
+
+	if (!c->nexterns || !cls || !cls->owner || !cls->owner->ty || f->no_explicit_inst || f->inst_ftmpl || f->ty == CXX_TY_UNKNOWN ||
+	    AST_TYPE_KIND(c->ast, f->ty) != TY_FUNC || !cxx_instance_template(c, cls->owner->ty, &of, &ta, &nta, &pk, &home))
+		return false;	/* (a member template's instance: an extern template of the class names none) */
+	for (uint32_t i = 0; i < c->nexterns; i++) {
+		const struct cxx_extern_member *m = &c->externs[i];
+		bool same = m->of == of && m->name == f->name && m->nparams == AST_TYPE(c->ast, f->ty)->n && m->nargs <= nta;
+
+		/* (basic_string<char> as the extern template wrote it: its arguments a prefix of the instance's, the
+		   rest defaulted) */
+		for (uint32_t k = 0; same && k < m->nargs; k++) {
+			same = m->args[k].kind == ta[k].kind;
+			if (same && m->args[k].kind == 1 && m->args[k].t != ta[k].t) {
+				/* (one class may have two instances here: char_traits<char> as two types; their names agree) */
+				char x[512], y[512];
+
+				same = cxx_mangle_type(c, m->args[k].t, x, sizeof x) && cxx_mangle_type(c, ta[k].t, y, sizeof y) && !strcmp(x, y);
+			} else if (same && m->args[k].kind != 1)
+				same = m->args[k].v == ta[k].v;
+		}
+		if (same)
+			return true;
+	}
+	return false;
 }
 
 /* an instance's class (instantiate.c): the class-specifier at the template's class-key */

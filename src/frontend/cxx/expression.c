@@ -2394,6 +2394,9 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 
 			if (t2 != CXX_TY_UNKNOWN && t2 == t3)
 				cxx_et(c, t2, l2 && c->elval);
+			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t2) && QUNQ(t2) == QUNQ(t3) &&
+				 AST_TYPE_KIND(c->ast, t2) != TY_ARRAY)
+				cxx_et(c, QT(QI(t2), QQ(t2) | QQ(t3)), l2 && c->elval);	/* (one class, cv as the more qualified) */
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t2) && cc_type_is_arithmetic(c->ast, t3))
 				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
 			else

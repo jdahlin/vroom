@@ -25,6 +25,8 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	memcpy(own, ps, nps * sizeof *ps);
 	ps = own;
 
+	if (f && cxx_member_is_extern(c, f))
+		return false;	/* (an extern template's member: defined in the library, called there) */
 	if (!a->o->emit || c->tentative || c->template_depth || c->unevaluated || !f || f->ty == CXX_TY_UNKNOWN ||
 	    AST_TYPE_KIND(a, f->ty) != TY_FUNC || (f->sym && (a->syms[f->sym].flags & SF_DEFINED)) || c->gen_stack_depth > 48)
 		{ CXX_BEGIN_WHY(); return false; }

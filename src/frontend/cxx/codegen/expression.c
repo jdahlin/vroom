@@ -313,6 +313,18 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 
 	if (!cxx_gen_on(c) || !cond || !x || !y || cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
 		return;
+	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && cc_type_is_record(a, AST_NODE_AT(a, y)->ty) &&
+	    AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != TY_ARRAY && QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(AST_NODE_AT(a, y)->ty) &&
+	    (AST_NODE_AT(a, x)->flags & NF_LVALUE) && (AST_NODE_AT(a, y)->flags & NF_LVALUE)) {
+		/* c ? a : b of two lvalues of one class: an lvalue of it (const if either is), *(c ? &a : &b) */
+		qty t = AST_NODE_AT(a, x)->ty, u = AST_NODE_AT(a, y)->ty;
+		qty rt = QT(QI(t), QQ(t) | QQ(u)), pt = cc_type_pointer(a, rt);
+		uint32_t px = cc_cast_insert(a, cc_address_of_build(a, x, loc), pt, CK_NOP), py = cc_cast_insert(a, cc_address_of_build(a, y, loc), pt, CK_NOP);
+
+		cond = cc_condition_scalar(a, cc_conversion_decay(a, cond), "'?:'");
+		c->enode = cc_dereference_build(a, cc_conditional_build(a, cond, px, py, loc), loc);
+		return;
+	}
 	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) != cc_type_is_record(a, AST_NODE_AT(a, y)->ty) ||
 	    (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && (QUNQ(AST_NODE_AT(a, x)->ty) != QUNQ(AST_NODE_AT(a, y)->ty) ||
 							      cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) != 1)))
