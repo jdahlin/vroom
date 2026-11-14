@@ -1527,6 +1527,42 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
 	}
 }
 
+/* sort and print one input's symbols, BSD format, addresses (and -S sizes) WIDTH hex digits
+   (16 for ELF64, 8 for COFF, as llvm-nm); one buffered write */
+static void nm_symbols_print(FILE *out, nm_symbol *v, uint32_t m, const nm_input *in, bool fname, bool nosort, bool numeric,
+			     bool size, int width)
+{
+	if (!nosort)
+		qsort(v, m, sizeof *v, numeric ? nm_symbol_address_cmp : nm_symbol_name_cmp);
+	char pfx[8192] = "";
+	if (fname && in->is_member)
+		snprintf(pfx, sizeof pfx, "%s:%s: ", in->archive, in->label);
+	else if (fname)
+		snprintf(pfx, sizeof pfx, "%s: ", in->label);
+	size_t pl = strlen(pfx), cap = (size_t)m * (64 + pl) + 4096, len = 0;
+	for (uint32_t i = 0; i < m; i++)
+		cap += strlen(v[i].name);
+	char *buf = malloc(cap);
+	for (uint32_t i = 0; i < m; i++) {
+		nm_symbol *s = &v[i];
+		memcpy(buf + len, pfx, pl);
+		len += pl;
+		if (s->defined)
+			len += sprintf(buf + len, "%0*llx ", width, (unsigned long long)s->addr);
+		else
+			len += sprintf(buf + len, "%*s ", width, "");
+		if (size) {
+			if (s->defined)
+				len += sprintf(buf + len, "%0*llx ", width, (unsigned long long)s->size);
+			else
+				len += sprintf(buf + len, "%*s ", width, "");
+		}
+		len += sprintf(buf + len, "%c %s\n", s->type, s->name);
+	}
+	fwrite(buf, 1, len, out);
+	free(buf);
+}
+
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 {
 	objcopy_diagnostics = (struct ld_diagnostics){ .error_stream = err ? err : stderr, .program = "vnm" };
@@ -1602,23 +1638,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				objcopy_error_report("'%s': invalid COFF object", in[f].label);
 				continue;
 			}
-			if (!nosort)
-				qsort(v, m, sizeof *v, numeric ? nm_symbol_address_cmp : nm_symbol_name_cmp);
-			char pfx[8192] = "";
-			if (fname && in[f].is_member)
-				snprintf(pfx, sizeof pfx, "%s:%s: ", in[f].archive, in[f].label);
-			else if (fname)
-				snprintf(pfx, sizeof pfx, "%s: ", in[f].label);
-			for (uint32_t i = 0; i < m; i++) {
-				fputs(pfx, out);
-				if (v[i].defined)
-					fprintf(out, "%08llx ", (unsigned long long)v[i].addr);
-				else
-					fprintf(out, "%8s ", "");
-				if (size)	/* (COFF symbols have no size) */
-					fputs(v[i].defined ? "00000000 " : "         ", out);
-				fprintf(out, "%c %s\n", v[i].type, v[i].name);
-			}
+			nm_symbols_print(out, v, m, &in[f], fname, nosort, numeric, size, 8);
 			free(v);	/* (short names: 9-byte copies, left to the process's exit) */
 			continue;
 		}
@@ -1713,36 +1733,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 			v[m++] = (nm_symbol){.name = name, .addr = y->st_value, .size = y->st_size,
 					.type = nm_symbol_type_letter(&e, y), .defined = y->st_shndx != SHN_UNDEF};
 		}
-		if (!nosort)
-			qsort(v, m, sizeof *v, numeric ? nm_symbol_address_cmp : nm_symbol_name_cmp);
-		/* one buffered pass */
-		char pfx[8192] = "";
-		if (fname && in[f].is_member)
-			snprintf(pfx, sizeof pfx, "%s:%s: ", in[f].archive, in[f].label);
-		else if (fname)
-			snprintf(pfx, sizeof pfx, "%s: ", in[f].label);
-		size_t pl = strlen(pfx), cap = (size_t)m * (64 + pl) + 4096, len = 0;
-		for (uint32_t i = 0; i < m; i++)
-			cap += strlen(v[i].name);
-		char *buf = malloc(cap);
-		for (uint32_t i = 0; i < m; i++) {
-			nm_symbol *s = &v[i];
-			memcpy(buf + len, pfx, pl);
-			len += pl;
-			if (s->defined)
-				len += sprintf(buf + len, "%016llx ", (unsigned long long)s->addr);
-			else
-				len += sprintf(buf + len, "%16s ", "");
-			if (size) {
-				if (s->defined)
-					len += sprintf(buf + len, "%016llx ", (unsigned long long)s->size);
-				else
-					len += sprintf(buf + len, "%16s ", "");
-			}
-			len += sprintf(buf + len, "%c %s\n", s->type, s->name);
-		}
-		fwrite(buf, 1, len, out);
-		free(buf);
+		nm_symbols_print(out, v, m, &in[f], fname, nosort, numeric, size, 16);
 		for (uint32_t i = 0; owned && i < n; i++)
 			free(owned[i]);
 		free(owned);

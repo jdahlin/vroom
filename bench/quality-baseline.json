@@ -14,7 +14,7 @@
  "functions_over_300_lines": 31,
  "files_over_2000_lines": 8,
  "includes_of_another_modules_internal_header": 7,
- "module_pairs_including_each_other": 7,
+ "module_pairs_including_each_other": 8,
  "library_redundant_tokens": 967,
  "library_files_without_header_comment": 0,
  "library_files_with_label_only": 0,

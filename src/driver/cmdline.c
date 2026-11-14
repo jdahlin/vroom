@@ -30,6 +30,20 @@ static bool driver_input_is_source(const char *a)
 
 /* 0 to go on; 1: the job ends (status and message set); 2: return 1 at once, as the loop did on
    an invalid -ftls-model= (without the job's cleanup) */
+/* NAME=VALUE or NAME VALUE (the next argument): the value, else NULL */
+static const char *driver_cmdline_value_eq(const char *a, const char *name, int argc, char **argv, int *i)
+{
+	size_t n = strlen(name);
+
+	if (strncmp(a, name, n))
+		return NULL;
+	if (a[n] == '=')
+		return a + n + 1;
+	if (!a[n] && *i + 1 < argc)
+		return argv[++*i];
+	return NULL;
+}
+
 VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job, int argc, char **argv)
 {
 	for (int i = 1; i < argc; i++) {
@@ -294,10 +308,8 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-nostdinc")) job->no_standard_includes = 1;
 		else if (!strcmp(a, "-nobuiltininc")) job->no_builtin_includes = 1;
 		else if (!strcmp(a, "-v")) job->verbose = 1;
-		else if (!strncmp(a, "-resource-dir=", 14)) job->resource_dir = a + 14;
-		else if (!strcmp(a, "-resource-dir") && i + 1 < argc) job->resource_dir = argv[++i];
-		else if (!strncmp(a, "--sysroot=", 10)) job->sysroot = a + 10;
-		else if (!strcmp(a, "--sysroot") && i + 1 < argc) job->sysroot = argv[++i];
+		else if ((v = driver_cmdline_value_eq(a, "-resource-dir", argc, argv, &i))) job->resource_dir = v;
+		else if ((v = driver_cmdline_value_eq(a, "--sysroot", argc, argv, &i))) job->sysroot = v;
 		else if (!strcmp(a, "-mms-bitfields")) job->ms_bitfields = 1;
 		else if (!strcmp(a, "-mno-ms-bitfields")) job->ms_bitfields = 0;
 		else if (!strcmp(a, "-municode")) job->unicode = 1;
