@@ -1647,6 +1647,21 @@ VPRIV void cxx_new_type_id_parse(cxx *c)
 }
 
 /* type-id: type-specifiers and an abstract declarator */
+/* a handler's exception-declaration: a type and perhaps a name (the result; c->type_out the type) */
+VPRIV uint32_t cxx_handler_declaration_parse(cxx *c)
+{
+	bool q, f;
+	uint32_t name;
+
+	if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
+		cxx_fail(c, "expected a type");
+	c->type_in = c->ds_type;
+	name = cxx_declarator_parse(c, true, &q, &f, NULL);
+	if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN))
+		cxx_fail(c, "expected ')'");
+	return name;
+}
+
 VPRIV void cxx_type_id_parse(cxx *c)
 {
 	bool q, f;

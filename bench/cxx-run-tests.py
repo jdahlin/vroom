@@ -19,9 +19,9 @@ TESTS = os.path.join(ROOT, "src", "test", "cxx", "run")
 
 def symbols(obj):
     r = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True)
-    # (a lambda's functions have names of each compiler's own: $_N in clang's, __vcc_lambda_N here)
+    # (a lambda's functions have names of each compiler's own: $_N in clang's, __vcc_lambda_N here; __vcc_try_N: a try block's trampoline)
     return sorted(l.split()[-1] for l in r.stdout.splitlines()
-                  if (" T " in l or " t " in l) and "$_" not in l and "__vcc_lambda" not in l)
+                  if (" T " in l or " t " in l) and "$_" not in l and "__vcc_" not in l)
 
 
 def one(path, tmp, verbose):

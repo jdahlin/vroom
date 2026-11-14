@@ -473,3 +473,17 @@ VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, s
 	buf[m.n] = 0;
 	return true;
 }
+
+/* a type's mangled spelling alone (what follows _ZTI and _ZTS; the type name string itself) */
+VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap)
+{
+	cxx_mangler m;
+
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
+	mg_type(&m, t);
+	if (m.bad || m.n + 1 > cap)
+		return false;
+	memcpy(buf, m.b, m.n);
+	buf[m.n] = 0;
+	return true;
+}

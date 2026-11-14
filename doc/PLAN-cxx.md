@@ -1111,3 +1111,26 @@ lambdas, standardargument.
 - `auto x = e;` som lokal variabel får sin symbol när typen är härledd.
 `cxx-run-tests.py` 18/18 (ny `lambdas.cpp`); `cxx-coverage.py` 9 430 av
 146 663 (6,4 %).  Kvar i doctest-kropparna: `try`/`catch`/`throw`.
+
+### Status (34): undantag och RTTI (2026-11-14)
+- Assemblern (`vas`): `.cfi_personality` och `.cfi_lsda` (zPLR i
+  `.eh_frame`), byte för byte som clang (`vas-obj` 65/65).
+- `throw x`: `__cxa_allocate_exception`, objektet konstrueras på plats,
+  `__cxa_throw` med typinfo och destruktor; `throw;` är `__cxa_rethrow`.
+- RTTI: `_ZTI`/`_ZTS` för klasser definieras svagt vid TU:ns slut
+  (`__class_type_info`, `__si_class_type_info`, `__vmi_class_type_info`;
+  nyckelfunktionsregeln som för vtabeller), och vtabellernas typinfo-plats
+  är nu ifylld.  Alla baser antas vara publika.
+- `try`/`catch` utan stöd i emittern: try-kroppen byggs som en egen
+  funktion (en slutning som fångar allt per referens) och anropas genom en
+  liten funktion skriven i assembler per try-block, som har
+  undantagstabellen (LSDA) och returnerar vilken hanterare som tog
+  undantaget.  Hanterarna ligger kvar i den omgivande funktionen;
+  `__cxa_end_catch` körs som blockets städning.  Bara x86-64.
+- Begränsningar: `return`/`break`/`continue` ut ur en try-kropp ger ingen
+  kod än; en hanterare som lämnas via ett undantag (`throw;`) avslutar inte
+  sin catch (objektet läcker och ligger kvar på runtimens stack — måste
+  rättas innan doctest fungerar); lokala objekt förstörs inte när ett
+  undantag passerar en funktion (inga städplattor).
+`cxx-run-tests.py` 19/19 (ny `exceptions.cpp`); `cxx-coverage.py` 9 430 av
+146 663 (6,4 %).

@@ -40,6 +40,12 @@ static void cxx_block_declaration(cxx *c)
 /* a declaration of a block scope (tried before an expression) */
 static void cxx_substatement_parse(cxx *c);
 
+/* a handler's exception-declaration, up to its ): a type and perhaps a name */
+static void cxx_handler_declaration(cxx *c)
+{
+	cxx_handler_declaration_parse(c);
+}
+
 static bool cxx_declaration_statement_try(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
@@ -637,36 +643,87 @@ static void cxx_statement_parse1(cxx *c)
 		if (cxx_gen_on(c))
 			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DEFAULT, sloc, 0, 0, cxx_gen_nested(c, sloc)));
 		return;
-	case CXX_KW_try:
-		cxx_advance(c);
-		cxx_compound_statement_parse(c);
-		while (cxx_is_kw(c, CXX_KW_catch))
-			cxx_statement_parse(c);
-		return;
-	case CXX_KW_catch: {
-		cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
-		uint32_t last_id = 0;
-		int depth = 0;
+	case CXX_KW_try: {
+		/* code generation: the body as a function of its own, called through the function that has the
+		   exception table; then the handlers, each entered when that call says so */
+		bool gen = cxx_gen_on(c) && c->gen_block && !c->tentative && !c->template_depth;
+		uint32_t closure = 0, exc = 0, ti[8], hnode[8], nh = 0;
+		cxx_entity *call = NULL;
+		bool ok = gen;
 
 		cxx_advance(c);
-		cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
-		while (!(depth == 0 && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
-			if (cxx_is(c, LEX_TOKEN_EOF))
-				cxx_fail(c, "unterminated catch");
-			if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))
-				depth++;
-			else if (cxx_is(c, LEX_TOKEN_RIGHT_PAREN))
-				depth--;
-			if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c))
-				last_id = cxx_peek(c, 0)->id;
+		if (gen) {
+			exc = cxx_gen_scratch(c, cc_type_pointer(c->ast, cc_type_basic(TY_VOID)), sloc);
+			ok = cxx_try_block_parse(c, &closure, &call) && exc;
+		} else
+			cxx_compound_statement_parse(c);
+		while (cxx_is_kw(c, CXX_KW_catch)) {
+			cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL), *outer = c->scope;
+			qty dt = CXX_TY_UNKNOWN;
+			uint32_t name = 0, var = 0, hloc = cxx_peek(c, 0)->loc;
+			bool all = false;
+			cc_id_list hl;
+			cxx_entity *e;
+
 			cxx_advance(c);
+			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+				all = true;
+			else if (cxx_try(c, cxx_handler_declaration)) {
+				name = cxx_handler_declaration_parse(c);
+				dt = c->type_out;
+				if (name <= 1)
+					name = 0;
+			} else {
+				int depth = 0;
+
+				while (!(depth == 0 && cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
+					if (cxx_is(c, LEX_TOKEN_EOF))
+						cxx_fail(c, "unterminated catch");
+					if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))
+						depth++;
+					else if (cxx_is(c, LEX_TOKEN_RIGHT_PAREN))
+						depth--;
+					if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c))
+						name = cxx_peek(c, 0)->id;
+					cxx_advance(c);
+				}
+			}
+			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+			cxx_scope_push(c, s);
+			e = name ? cxx_declare(c, s, name, CXX_ENTITY_VALUE) : NULL;
+			if (e)
+				e->ty = dt;
+			if (ok && cxx_gen_on(c) && nh < 8) {
+				/* its type info (the type caught: without a reference or qualifiers), and its start */
+				qty ct = dt;
+
+				if (!all && ct != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ct) == TY_PTR && AST_TYPE(c->ast, ct)->ext)
+					ct = AST_TYPE(c->ast, ct)->base;
+				ti[nh] = all ? 0 : ct == CXX_TY_UNKNOWN ? 0 : cxx_gen_typeinfo(c, ct);
+				ok = all || ti[nh];
+				cc_id_list_init(&hl);
+				ok = ok && cxx_gen_catch_begin(c, exc, name && !all ? dt : CXX_TY_UNKNOWN, &var, &hl, hloc);
+				if (e && var)
+					e->sym = var;
+			} else
+				ok = false;
+			cxx_compound_statement_parse(c);
+			if (ok && c->snode && cxx_gen_on(c)) {
+				cc_id_list_append(c->ast, &hl, c->snode);
+				hnode[nh++] = cxx_gen_new_statement(c, N_BLOCK, hloc, 0, cc_id_list_freeze(c->ast, &hl), hl.n);
+			} else
+				ok = false;
+			c->scope = outer;
 		}
-		cxx_advance(c);
-		cxx_scope_push(c, s);
-		if (last_id)
-			cxx_declare(c, s, last_id, CXX_ENTITY_VALUE);
-		cxx_compound_statement_parse(c);
-		c->scope = outer;
+		if (gen) {
+			uint32_t st = ok && nh ? cxx_gen_try_statement(c, cxx_gen_try(c, closure, call, ti, nh, exc, sloc), hnode, nh, sloc) : 0;
+
+			if (st && cxx_gen_on(c))
+				cxx_gen_statement(c, st);
+			else
+				cxx_gen_fail(c);
+		}
 		return;
 	}
 	case CXX_KW_asm: case CXX_KW___asm__: case CXX_KW___asm:

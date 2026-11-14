@@ -177,6 +177,8 @@ struct cxx_scope {
 	uint8_t has_dependent_base;
 	struct cxx_scope *friends;	/* a class: the functions it declares friend (found through an argument of the class) */
 	uint8_t is_final;		/* a class declared final */
+	uint32_t ti_sym;		/* the class's type info object (_ZTI...), once named */
+	uint8_t ti_listed;
 	uint8_t is_lambda;		/* a closure type (its name is the TU's own: $_N) */
 	/* a class with virtual functions: its vtable's slots (each one's final overrider), the virtual functions it
 	   declares itself in order (the key function is the first that is neither pure nor inline) */
@@ -208,6 +210,7 @@ typedef struct cxx_gen_lambda {
 	uint32_t floor;		/* symbols made before this one belong to the enclosing functions */
 	uint8_t def;		/* the capture-default: 0 none, 1 [&], 2 [=] */
 	uint8_t ex_this, bad;
+	uint8_t is_try;		/* a try block's body, outlined: no return, break or continue out of it yet */
 	uint32_t nex;
 	struct { uint32_t name; uint8_t by_ref; } ex[16];	/* the captures the list names */
 	uint32_t n;
@@ -393,7 +396,12 @@ typedef struct cxx {
 	uint8_t gen_vmode;		/* the next call of a virtual function: 0 through the vtable, 1 direct (a qualified name), 2 not known */
 	cxx_scope **vt_list;		/* the classes whose vtable this TU names */
 	uint32_t nvt_list, cvt_list;
-	uint32_t gen_delete_sym, gen_pure_sym;	/* it delegates to another constructor; the body has a return statement */
+	uint32_t gen_delete_sym, gen_pure_sym;
+	cxx_scope **ti_list;		/* the classes whose type info this TU names (defined at its end where it belongs here) */
+	uint32_t nti_list, cti_list;
+	uint32_t gen_eh_syms[8];	/* the exception runtime's functions, once declared */
+	uint32_t gen_try_serial;	/* try blocks so far (their trampolines' names) */
+	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -558,6 +566,15 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc);
+VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t);
+VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc);
+VPRIV uint32_t cxx_gen_scratch(cxx *c, qty t, uint32_t loc);
+VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc);
+VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out);
+VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, qty decl_type, uint32_t *var, cc_id_list *list, uint32_t loc);
+VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap);
 VPRIV bool cxx_gen_lambda_symbol(cxx *c, cxx_entity *call, uint32_t serial);
 VPRIV bool cxx_gen_lambda_finish(cxx *c, cxx_gen_lambda *l, cxx_entity *owner, uint32_t *body, uint32_t loc);
 VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, qty t, uint32_t loc);
@@ -644,6 +661,7 @@ VPRIV void cxx_translation_unit_parse(cxx *c);
 VPRIV void cxx_declaration_parse(cxx *c, int context);
 VPRIV bool cxx_starts_declaration(cxx *c);
 VPRIV void cxx_type_id_parse(cxx *c);
+VPRIV uint32_t cxx_handler_declaration_parse(cxx *c);
 VPRIV void cxx_type_specifiers_parse(cxx *c);
 VPRIV void cxx_new_type_id_parse(cxx *c);
 VPRIV bool cxx_try_type_id(cxx *c);

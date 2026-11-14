@@ -116,6 +116,9 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f);
 static int cxx_gen_capture(cxx *c, cxx_gen_lambda *l, const cxx_entity *v, uint32_t loc);
 static qty cxx_gen_abi_type(cxx *c, const cxx_entity *f);
 static uint32_t cxx_gen_text(cxx *c, const char *text);
+static uint32_t cxx_gen_data_address(cxx *c, uint32_t s, uint32_t index);
+static uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
+static void cxx_gen_typeinfos_emit(cxx *c);
 
 typedef struct cxx_prv {
 	uint32_t node;		/* the prvalue as an expression: an lvalue naming the temporary */
@@ -442,7 +445,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t 
 	cxx_entity *picked = c->ctor_picked;
 	bool found = c->ctor_found, none = c->ctor_none;
 	cc_id_list l;
-	uint32_t tmp, node, expr, call = 0;
+	uint32_t tmp, node, expr, call = 0, zero = 0;
 
 	if (!cxx_gen_on(c))
 		return;
@@ -464,16 +467,23 @@ VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t 
 	cc_id_list_init(&l);
 	if (!nargs && !(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) && !cxx_gen_needs_construction(c, t, 0)) {
 		/* T() of a class with nothing to construct: zeroes */
-		uint32_t z = cc_node_new(a, N_INIT, t, loc);
+		uint32_t zargs[3], saved = c->enode;
 
-		AST_NODE_AT(a, z)->aux = 1;
-		a->syms[tmp].body = z;
+		zargs[0] = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
+		zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc);
+		zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, t)->size, cc_type_basic(TY_ULONG), loc);
+		c->enode = 0;
+		cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+		zero = c->enode;
+		c->enode = saved;
+		if (!zero)
+			return;
 	} else if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, args, nargs, &l, loc)) {
 		cxx_gen_fail(c);	/* (the temporary is declared: nothing of this function is kept) */
 		return;
 	}
-	expr = cxx_gen_chain(c, &l, 0, loc);
-	if (l.n == 1 && AST_NODE_AT(a, expr)->op == N_CALL && AST_NODE_AT(a, expr)->c)
+	expr = zero ? zero : cxx_gen_chain(c, &l, 0, loc);
+	if (!zero && l.n == 1 && AST_NODE_AT(a, expr)->op == N_CALL && AST_NODE_AT(a, expr)->c)
 		call = expr;
 	node = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
 	if (expr)
@@ -981,6 +991,7 @@ VPRIV bool cxx_gen_lambda_symbol(cxx *c, cxx_entity *call, uint32_t serial)
 		return false;
 	call->sym = cc_symbol_new(a, S_FUNC, call->name, st, 0);
 	a->syms[call->sym].depth = 0;
+	a->syms[call->sym].sc = SC_STATIC;	/* (internal linkage) */
 	snprintf(nm, sizeof nm, " __vcc_lambda_%u", serial);
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, nm + 1) + 1;
@@ -2424,7 +2435,9 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 			cxx_entity *e = k >= 2 ? cls->vfuncs[k - 2] : NULL;
 			uint32_t val, s = 0;
 
-			if (!e)
+			if (k == 1 && cls->owner && (s = cxx_gen_typeinfo(c, cls->owner->ty)) != 0)
+				val = cxx_gen_data_address(c, s, 0);	/* the class's type info */
+			else if (!e)
 				val = cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), 0);
 			else {
 				if (e->fn_pure) {
@@ -2468,6 +2481,494 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
 		}
 		a->toplevel[a->ntoplevel++] = cls->vt_sym;
 	}
+	cxx_gen_typeinfos_emit(c);
+}
+
+/* ---- run-time type information and exceptions ------------------------------------------------ */
+
+/* a data symbol by its assembler name, of type void *[n] (n 0: its size is not this TU's business) */
+static uint32_t cxx_gen_data_symbol(cxx *c, const char *name, uint32_t n)
+{
+	cc *a = c->ast;
+	attrs at;
+	uint32_t s = cc_symbol_new(a, S_VAR, vintern_cstr("__ti"), cc_type_array(a, cc_type_pointer(a, cc_type_basic(TY_VOID)), n ? n : 1, 0), 0);
+
+	a->syms[s].flags |= SF_GLOBAL;
+	a->syms[s].depth = 0;
+	a->syms[s].sc = SC_EXTERN;
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, name) + 1;
+	cc_attribute_apply_symbol(a, &a->syms[s], &at);
+	return s;
+}
+
+/*
+ * The type info object of type t (_ZTI...): a class's is declared here and defined at the TU's end where
+ * it belongs to this TU; a fundamental type's (and a pointer to one's) is the C++ runtime's.  0: not built
+ * (pointers to classes, functions, members).
+ */
+VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
+{
+	cc *a = c->ast;
+	char name[2048] = "_ZTI";
+	cxx_scope *cls;
+	int k;
+	bool pod, empty;
+
+	if (t == CXX_TY_UNKNOWN)
+		return 0;
+	t = QUNQ(t);
+	k = AST_TYPE_KIND(a, t);
+	if (k == TY_STRUCT || k == TY_UNION) {
+		cls = cxx_tag_scope_get(c, t);
+		if (!cls || !cxx_class_layout_info(c, t, &pod, &empty))
+			return 0;
+		if (cls->ti_sym)
+			return cls->ti_sym;
+		if (!cxx_mangle_type(c, t, name + 4, sizeof name - 4))
+			return 0;
+		cls->ti_sym = cxx_gen_data_symbol(c, name, 0);
+		if (c->nti_list == c->cti_list)
+			c->ti_list = realloc(c->ti_list, (c->cti_list = c->cti_list ? c->cti_list * 2 : 32) * sizeof *c->ti_list);
+		c->ti_list[c->nti_list++] = cls;
+		return cls->ti_sym;
+	}
+	if (k == TY_PTR && !AST_TYPE(a, t)->ext) {
+		/* the runtime has void *, char * and the like (and their const forms) */
+		qty b = AST_TYPE(a, t)->base;
+		int bk = b == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE_KIND(a, b);
+
+		if (!(bk == TY_VOID || (bk >= TY_BOOL && bk <= TY_ULLONG) || bk == TY_FLOAT || bk == TY_DOUBLE))
+			return 0;
+	} else if (!((k >= TY_BOOL && k <= TY_ULLONG) || k == TY_FLOAT || k == TY_DOUBLE))
+		return 0;
+	if (!cxx_mangle_type(c, t, name + 4, sizeof name - 4))
+		return 0;
+	return cxx_gen_data_symbol(c, name, 0);
+}
+
+/* &sym[index] as a void * constant (an initializer's element) */
+static uint32_t cxx_gen_data_address(cxx *c, uint32_t s, uint32_t index)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	uint32_t n = cc_conversion_decay(a, cxx_gen_var_node(c, s, 0));
+
+	if (index)
+		n = cc_binary_build(a, LEX_TOKEN_PLUS, n, cc_node_integer_new(a, index, cc_type_basic(TY_LONG), 0), 0);
+	return cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, n)->ty, vp, n));
+}
+
+/* the vtable's key function rule, for a class's type info too: does this TU define the class's vtable and RTTI? */
+static bool cxx_gen_class_data_here(cxx *c, cxx_scope *cls)
+{
+	cc *a = c->ast;
+	const cxx_entity *key = NULL;
+
+	for (uint32_t k = 0; k < cls->nvown && !key && !(cls->owner && cls->owner->instance); k++)
+		if (!cls->vown[k]->fn_pure && !cls->vown[k]->fn_inline && !cls->vown[k]->fn_defaulted && !cls->vown[k]->fn_deleted)
+			key = cls->vown[k];
+	return !key || (key->sym && (a->syms[key->sym].flags & SF_DEFINED));
+}
+
+/*
+ * The TU's end: the type info objects it defines (weak; a class with a key function has its own where that
+ * function is defined, as its vtable): _ZTS, the type's name, and _ZTI, an object of the runtime's
+ * __class_type_info (no bases), __si_class_type_info (one base at offset 0) or __vmi_class_type_info.
+ */
+static void cxx_gen_typeinfos_emit(cxx *c)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	uint32_t vt_class = 0, vt_si = 0, vt_vmi = 0;
+
+	for (uint32_t i = 0; i < c->nti_list; i++) {	/* (the list grows: a base's type info) */
+		cxx_scope *cls = c->ti_list[i];
+		qty t = cls->owner->ty, bases[16];
+		uint32_t nb = cxx_class_bases(c, t, bases, 16), bti[16], n, words = 0, ts, si, vals[40];
+		char name[2048] = "_ZTS";
+		uint64_t off[16];
+		cc_id_list v;
+		attrs at;
+		sym *y;
+		bool ok = true;
+
+		if ((cls->nvfuncs || cls->nvown) && !cxx_gen_class_data_here(c, cls))
+			continue;	/* (the key function's TU has it) */
+		if (!cxx_mangle_type(c, t, name + 4, sizeof name - 4))
+			continue;
+		for (uint32_t k = 0; k < nb && ok; k++)
+			ok = (bti[k] = cxx_gen_typeinfo(c, bases[k])) != 0 && cxx_class_base_offset(c, t, bases[k], &off[k], 0);
+		if (!ok)
+			continue;
+		/* the name: a weak array of char */
+		si = cxx_gen_text(c, name + 4);
+		ts = cc_symbol_new(a, S_VAR, vintern_cstr("__ts"), cc_type_array(a, QT(TY_CHAR, Q_CONST), strlen(name + 4) + 1, 0), 0);
+		a->syms[ts].flags |= SF_GLOBAL;
+		a->syms[ts].depth = 0;
+		memset(&at, 0, sizeof at);
+		at.asmname = cxx_gen_text(c, name) + 1;
+		at.weak = 1;
+		cc_attribute_apply_symbol(a, &a->syms[ts], &at);
+		n = cc_node_new(a, N_STR, a->syms[ts].ty, 0);
+		AST_NODE_AT(a, n)->a = si;
+		AST_NODE_AT(a, n)->flags = NF_LVALUE;
+		a->syms[ts].body = n;
+		a->syms[ts].flags |= SF_DEFINED;
+		a->toplevel[a->ntoplevel++] = ts;
+		/* the object's words */
+		if (!nb) {
+			if (!vt_class)
+				vt_class = cxx_gen_data_symbol(c, "_ZTVN10__cxxabiv117__class_type_infoE", 0);
+			vals[words++] = cxx_gen_data_address(c, vt_class, 2);
+			vals[words++] = cxx_gen_data_address(c, ts, 0);
+		} else if (nb == 1 && !off[0]) {
+			if (!vt_si)
+				vt_si = cxx_gen_data_symbol(c, "_ZTVN10__cxxabiv120__si_class_type_infoE", 0);
+			vals[words++] = cxx_gen_data_address(c, vt_si, 2);
+			vals[words++] = cxx_gen_data_address(c, ts, 0);
+			vals[words++] = cxx_gen_data_address(c, bti[0], 0);
+		} else {
+			if (!vt_vmi)
+				vt_vmi = cxx_gen_data_symbol(c, "_ZTVN10__cxxabiv121__vmi_class_type_infoE", 0);
+			vals[words++] = cxx_gen_data_address(c, vt_vmi, 2);
+			vals[words++] = cxx_gen_data_address(c, ts, 0);
+			/* flags (none) and the number of bases, two unsigned ints; then each base and its offset << 8 | public */
+			n = cc_node_integer_new(a, (i128)((uint64_t)nb << 32), cc_type_basic(TY_LONG), 0);
+			vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+			for (uint32_t k = 0; k < nb; k++) {
+				vals[words++] = cxx_gen_data_address(c, bti[k], 0);
+				n = cc_node_integer_new(a, (i128)((off[k] << 8) | 2), cc_type_basic(TY_LONG), 0);
+				vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+			}
+		}
+		cc_id_list_init(&v);
+		for (uint32_t k = 0; k < words; k++) {
+			cc_id_list_append(a, &v, k);
+			cc_id_list_append(a, &v, k);
+			cc_id_list_append(a, &v, vals[k]);
+		}
+		y = &a->syms[cls->ti_sym];
+		y->ty = cc_type_array(a, vp, words, 0);
+		n = cc_node_new(a, N_INIT, y->ty, 0);
+		AST_NODE_AT(a, n)->aux = 1;
+		AST_NODE_AT(a, n)->c = words;
+		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
+		if (!cc_initializer_static_is_ok(a, y->ty, n, NULL))
+			continue;
+		y = &a->syms[cls->ti_sym];
+		y->sc = 0;
+		y->body = n;
+		y->flags |= SF_DEFINED;
+		memset(&at, 0, sizeof at);
+		at.weak = 1;
+		cc_attribute_apply_symbol(a, y, &at);
+		a->toplevel[a->ntoplevel++] = cls->ti_sym;
+	}
+}
+
+/* the exception runtime's functions (libc++abi), by index */
+static uint32_t cxx_gen_eh_symbol(cxx *c, int which)
+{
+	static const struct { const char *name; char ret, np; } fns[] = {
+		{ "__cxa_allocate_exception", 'p', 1 }, { "__cxa_throw", 'v', 3 }, { "__cxa_rethrow", 'v', 0 },
+		{ "__cxa_begin_catch", 'p', 1 }, { "__cxa_end_catch", 'v', 1 },	/* (called as a scope's cleanup: with its address) */
+	};
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), ps[3] = { vp, vp, vp };
+
+	if (!c->gen_eh_syms[which]) {
+		uint32_t s;
+
+		if (which == 0)
+			ps[0] = cc_type_basic(TY_ULONG);
+		s = cc_symbol_new(a, S_FUNC, vintern_cstr(fns[which].name), cxx_type_function(c, fns[which].ret == 'p' ? vp : cc_type_basic(TY_VOID), ps, (uint32_t)fns[which].np, false), 0);
+		a->syms[s].flags |= SF_GLOBAL;
+		a->syms[s].depth = 0;
+		c->gen_eh_syms[which] = s;
+	}
+	return c->gen_eh_syms[which];
+}
+
+static uint32_t cxx_gen_runtime_call(cxx *c, uint32_t fs, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	cc_id_list l;
+	uint32_t n;
+
+	cc_id_list_init(&l);
+	for (uint32_t i = 0; i < nargs; i++)
+		cc_id_list_append(a, &l, args[i]);
+	n = cc_node_new(a, N_CALL, AST_TYPE(a, a->syms[fs].ty)->base, loc);
+	AST_NODE_AT(a, n)->a = cxx_gen_function_node(c, fs, loc);
+	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &l);
+	AST_NODE_AT(a, n)->c = nargs;
+	return n;
+}
+
+static uint32_t cxx_gen_to_void_pointer(cxx *c, uint32_t n)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+
+	return cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, n)->ty, vp, n));
+}
+
+/*
+ * throw x: the exception object is allocated by the runtime and initialized from x, then thrown with its
+ * type info and its destructor.  throw alone: the exception being handled, again.
+ */
+VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty t, vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), pt;
+	uint32_t ti, tmp, alloc, target, init, args[3], dtor = 0, n;
+	cxx_entity *d;
+
+	if (!cxx_gen_on(c))
+		return;
+	c->enode = 0;
+	if (!has_operand) {
+		c->enode = cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 2), NULL, 0, loc);
+		return;
+	}
+	if (!x)
+		return;
+	if (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == TY_ARRAY)
+		x = cc_conversion_decay(a, x);	/* (an array, a function: a pointer is thrown) */
+	t = QUNQ(AST_NODE_AT(a, x)->ty);
+	ti = cxx_gen_typeinfo(c, t);
+	if (!ti)
+		return;
+	tmp = cxx_gen_temporary(c, vp, loc);
+	if (!tmp)
+		return;
+	n = cc_node_integer_new(a, (i128)AST_TYPE(a, t)->size, cc_type_basic(TY_ULONG), loc);
+	alloc = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 0), &n, 1, loc), loc);
+	pt = cc_type_pointer(a, t);
+	n = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
+	target = cc_dereference_build(a, cc_cast_insert(a, n, pt, cc_conversion_cast_kind(a, vp, pt, n)), loc);
+	if (cc_type_is_record(a, t)) {
+		/* a class: copied or moved by its constructor (a prvalue: made there in the first place) */
+		qty at[1] = { AST_NODE_AT(a, x)->ty };
+		uint8_t lv[1] = { 1 };
+		cc_id_list l;
+
+		if (!(AST_NODE_AT(a, x)->flags & NF_LVALUE))
+			return;
+		if (!cxx_gen_prv_find(c, x))
+			cxx_ctor_use(c, t, at, lv, 1, false);
+		cc_id_list_init(&l);
+		if (!cxx_gen_construct_at(c, target, t, &x, 1, &l, loc))
+			return;
+		init = cxx_gen_chain(c, &l, 0, loc);
+		d = cxx_gen_effective_destructor(c, t, 0);
+		if (cxx_gen_needs_destruction(c, t, 0)) {
+			if (!d || d->fn_deleted || !cxx_gen_name(c, d) || !d->sym1)
+				return;
+			dtor = d->sym1;
+		}
+	} else
+		init = cc_assignment_build(a, 0, target, cc_node_rvalue(a, x), loc);
+	args[0] = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
+	args[1] = cxx_gen_data_address(c, ti, 0);
+	if (dtor)
+		args[2] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, dtor, loc));
+	else
+		args[2] = cxx_gen_to_void_pointer(c, cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), loc));
+	n = cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 1), args, 3, loc);
+	if (init)
+		n = cc_node_new_operands(a, N_COMMA, cc_type_basic(TY_VOID), loc, init, n);
+	c->enode = cc_node_new_operands(a, N_COMMA, cc_type_basic(TY_VOID), loc, alloc, n);
+}
+
+static const char *cxx_gen_symbol_asm_name(cxx *c, uint32_t s)
+{
+	cc *a = c->ast;
+	const sym *y = &a->syms[s];
+
+	return y->attrs && a->attr[y->attrs].asmname ? a->strs[a->attr[y->attrs].asmname - 1].s : NULL;
+}
+
+/* text at file scope, for the assembler as it is */
+static void cxx_gen_file_asm(cxx *c, const char *text)
+{
+	cc *a = c->ast;
+	uint32_t si = cxx_gen_text(c, text), ai = a->nasm++, n;
+
+	memset(&a->asms[ai], 0, sizeof a->asms[ai]);
+	a->asms[ai].tmpl = si + 1;
+	n = cc_node_new(a, N_ASM, cc_type_basic(TY_VOID), 0);
+	AST_NODE_AT(a, n)->a = ai;
+	a->tlasm[a->ntlasm++] = n;
+}
+
+/*
+ * A try block.  Its body was built as a function of its own (a closure's operator(), `call`, returning
+ * int; `closure` is the object holding its captures).  The body is called through a small function
+ * written out in assembly, which has the exception table: when an exception one of the handlers takes
+ * comes out of the body, that function returns minus the handler's number (1..) with the exception at
+ * *exc; else what the body returned (0).  Here: the call; its result's node (an int).  The handlers' type
+ * info symbols: ti[] (0: catch (...)).  x86-64 only.  0: not built.
+ */
+VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), ps[3] = { vp, vp, vp };
+	uint32_t serial = c->gen_try_serial++, fs, args[3];
+	char name[64], *text;
+	size_t cap = 4096 + 256 * (size_t)nhandlers, n = 0;
+	attrs at;
+
+	if (!cxx_gen_on(c) || a->o->target != PP_LINUX_X86_64 || !closure || !call->sym || !nhandlers || nhandlers > 60 ||
+	    !(AST_NODE_AT(a, closure)->flags & NF_LVALUE))
+		return 0;
+	for (uint32_t k = 0; k < nhandlers; k++)
+		if (ti[k] && !cxx_gen_symbol_asm_name(c, ti[k]))
+			return 0;
+	if (!exc)
+		return 0;
+	text = malloc(cap);
+#define ASM(...) (n += (size_t)snprintf(text + n, cap - n, __VA_ARGS__))
+	if (!c->gen_eh_pers) {
+		c->gen_eh_pers = 1;
+		ASM("\t.section\t.data.rel.ro,\"aw\",@progbits\n\t.p2align\t3\n.Lvcc_personality:\n\t.quad\t__gxx_personality_v0\n");
+	}
+	ASM("\t.text\n\t.type\t__vcc_try_%u,@function\n__vcc_try_%u:\n\t.cfi_startproc\n", serial, serial);
+	ASM("\t.cfi_personality 0x9b, .Lvcc_personality\n\t.cfi_lsda 0x1b, .Lvcc_lsda_%u\n", serial);
+	ASM("\tpushq\t%%rbx\n\t.cfi_def_cfa_offset 16\n\t.cfi_offset %%rbx, -16\n\tmovq\t%%rdx, %%rbx\n\tmovq\t%%rdi, %%rax\n\tmovq\t%%rsi, %%rdi\n");
+	ASM(".Lvcc_cs_%u:\n\tcallq\t*%%rax\n.Lvcc_ce_%u:\n\tpopq\t%%rbx\n\t.cfi_def_cfa_offset 8\n\tretq\n", serial, serial);
+	ASM(".Lvcc_lp_%u:\n\t.cfi_def_cfa_offset 16\n\tmovq\t%%rax, (%%rbx)\n\tmovl\t%%edx, %%eax\n\tnegl\t%%eax\n\tpopq\t%%rbx\n\t.cfi_def_cfa_offset 8\n\tretq\n", serial);
+	ASM("\t.cfi_endproc\n.Lvcc_end_%u:\n\t.size\t__vcc_try_%u, .Lvcc_end_%u-__vcc_try_%u\n", serial, serial, serial, serial);
+	/* the exception table: one call site, its actions (handler k: filter k, then the next), the types last first */
+	ASM("\t.section\t.gcc_except_table,\"a\",@progbits\n.Lvcc_lsda_%u:\n\t.byte\t0xff\n\t.byte\t0x9b\n", serial);
+	ASM("\t.uleb128 .Lvcc_tt_%u-.Lvcc_ttb_%u\n.Lvcc_ttb_%u:\n\t.byte\t0x01\n\t.uleb128 .Lvcc_cse_%u-.Lvcc_csb_%u\n.Lvcc_csb_%u:\n", serial, serial, serial, serial, serial, serial);
+	ASM("\t.uleb128 .Lvcc_cs_%u-__vcc_try_%u\n\t.uleb128 .Lvcc_ce_%u-.Lvcc_cs_%u\n\t.uleb128 .Lvcc_lp_%u-__vcc_try_%u\n\t.uleb128 1\n.Lvcc_cse_%u:\n",
+	    serial, serial, serial, serial, serial, serial, serial);
+	for (uint32_t k = 0; k < nhandlers; k++)
+		ASM("\t.byte\t%u\n\t.byte\t%u\n", k + 1, k + 1 < nhandlers ? 1u : 0u);
+	for (uint32_t k = nhandlers; k-- > 0;) {
+		if (ti[k])
+			ASM("\t.long\t.Lvcc_ti_%u_%u-.\n", serial, k);
+		else
+			ASM("\t.long\t0\n");
+	}
+	ASM(".Lvcc_tt_%u:\n\t.section\t.data.rel.ro,\"aw\",@progbits\n\t.p2align\t3\n", serial);
+	for (uint32_t k = 0; k < nhandlers; k++)
+		if (ti[k])
+			ASM(".Lvcc_ti_%u_%u:\n\t.quad\t%s\n", serial, k, cxx_gen_symbol_asm_name(c, ti[k]));
+	ASM("\t.text");
+#undef ASM
+	cxx_gen_file_asm(c, text);
+	free(text);
+	snprintf(name, sizeof name, " __vcc_try_%u", serial);
+	fs = cc_symbol_new(a, S_FUNC, vintern_cstr("__vcc_try"), cxx_type_function(c, cc_type_basic(TY_INT), ps, 3, false), loc);
+	a->syms[fs].flags |= SF_GLOBAL;
+	a->syms[fs].depth = 0;
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, name + 1) + 1;
+	cc_attribute_apply_symbol(a, &a->syms[fs], &at);
+	args[0] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, call->sym, loc));
+	args[1] = cxx_gen_to_void_pointer(c, cc_address_of_build(a, closure, loc));
+	args[2] = cxx_gen_to_void_pointer(c, cc_address_of_build(a, cxx_gen_var_node(c, exc, loc), loc));
+	return cxx_gen_runtime_call(c, fs, args, 3, loc);
+}
+
+/* a scratch variable of the block being built (0: no block) */
+VPRIV uint32_t cxx_gen_scratch(cxx *c, qty t, uint32_t loc)
+{
+	return cxx_gen_on(c) ? cxx_gen_temporary(c, t, loc) : 0;
+}
+
+/* a try block's outlined body, then "return 0" (it fell off its end) */
+VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc)
+{
+	cc *a = c->ast;
+	cc_id_list l;
+
+	if (!body)
+		return 0;
+	cc_id_list_init(&l);
+	cc_id_list_append(a, &l, body);
+	cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, cc_node_integer_new(a, 0, cc_type_basic(TY_INT), loc), 0, 0));
+	return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+}
+
+/* the try statement: code = the call of the body through its trampoline; then the handler it names, if any */
+VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t code = cxx_gen_temporary(c, cc_type_basic(TY_INT), loc), chain = 0;
+	cc_id_list l;
+
+	if (!code || !call)
+		return 0;
+	for (uint32_t k = nhandlers; k-- > 0;) {
+		uint32_t cond = cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, cxx_gen_var_node(c, code, loc)),
+						cc_node_integer_new(a, -(i128)(k + 1), cc_type_basic(TY_INT), loc), loc);
+
+		chain = cc_statement_new(a, N_IF, loc, cc_condition_scalar(a, cond, "statement"), handlers[k], chain);
+	}
+	cc_id_list_init(&l);
+	cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, code, loc), call, loc), 0, 0));
+	cc_id_list_append(a, &l, chain);
+	return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+}
+
+/*
+ * A handler's start, into `list` (the handler's block): the exception is caught (__cxa_begin_catch, ended
+ * by __cxa_end_catch when the block is left, any way but by an exception), and the handler's variable, of
+ * the declared type decl_type (CXX_TY_UNKNOWN: none), is made: *var its symbol.  False: not built.
+ */
+/* a local's declaration with its initializer, into `list` */
+static void cxx_gen_declare_with(cxx *c, cc_id_list *list, uint32_t s, uint32_t init, uint32_t loc)
+{
+	cc *a = c->ast;
+
+	a->syms[s].sc = SC_AUTO;
+	if (init) {
+		a->syms[s].body = init;
+		a->syms[s].flags |= SF_DEFINED;
+	}
+	cc_id_list_append(a, list, cc_node_new_operands(a, N_DECL, cc_type_basic(TY_VOID), loc, s, init));
+}
+
+VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, qty decl_type, uint32_t *var, cc_id_list *list, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	uint32_t obj = cc_symbol_new(a, S_VAR, 0, vp, loc), guard = cc_symbol_new(a, S_VAR, 0, cc_type_basic(TY_CHAR), loc), n, arg, s, init;
+	attrs at;
+
+	*var = 0;
+	arg = cc_node_rvalue(a, cxx_gen_var_node(c, exc, loc));
+	cxx_gen_declare_with(c, list, obj, cxx_gen_runtime_call(c, cxx_gen_eh_symbol(c, 3), &arg, 1, loc), loc);
+	memset(&at, 0, sizeof at);
+	at.cleanup = cxx_gen_eh_symbol(c, 4);
+	cc_attribute_apply_symbol(a, &a->syms[guard], &at);
+	cxx_gen_declare_with(c, list, guard, 0, loc);
+	if (decl_type == CXX_TY_UNKNOWN)
+		return 1;
+	n = cc_node_rvalue(a, cxx_gen_var_node(c, obj, loc));
+	if (cxx_gen_is_reference(c, decl_type)) {
+		/* T &e: the exception object itself */
+		s = cc_symbol_new(a, S_VAR, 0, decl_type, loc);
+		init = cc_cast_insert(a, n, decl_type, cc_conversion_cast_kind(a, vp, decl_type, n));
+	} else if (AST_TYPE_KIND(a, decl_type) == TY_PTR) {
+		/* a pointer: the runtime hands the pointer's value */
+		s = cc_symbol_new(a, S_VAR, 0, QUNQ(decl_type), loc);
+		init = cc_cast_insert(a, n, QUNQ(decl_type), cc_conversion_cast_kind(a, vp, QUNQ(decl_type), n));
+	} else if (cxx_gen_type_ok(c, QUNQ(decl_type)) || (cc_type_is_record(a, decl_type) && cxx_gen_trivial_abi(c, decl_type, 0) == 1)) {
+		/* a copy of a scalar, or of a class copied as its bytes */
+		qty pt = cc_type_pointer(a, QUNQ(decl_type));
+
+		s = cc_symbol_new(a, S_VAR, 0, QUNQ(decl_type), loc);
+		init = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, n, pt, cc_conversion_cast_kind(a, vp, pt, n)), loc));
+	} else
+		return 0;	/* (a class copied by its constructor: not built yet) */
+	cxx_gen_declare_with(c, list, s, init, loc);
+	*var = s;
+	return 1;
 }
 
 /* ---- statements ---------------------------------------------------------------------------- */
@@ -2539,6 +3040,10 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 
 	if (!cxx_gen_on(c))
 		return 0;
+	if (c->gen_lambda && c->gen_lambda->is_try) {
+		cxx_gen_fail(c);	/* (a return out of a try block: not built yet) */
+		return 0;
+	}
 	if (has_value && (!e || AST_TYPE_KIND(a, c->gen_ret) == TY_VOID)) {
 		cxx_gen_fail(c);
 		return 0;

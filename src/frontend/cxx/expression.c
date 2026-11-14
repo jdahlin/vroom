@@ -531,6 +531,67 @@ static void cxx_builtin_call_parse(cxx *c)
 
 /* ---- lambdas and requires-expressions ---------------------------------------------------- */
 
+/* a closure type's name: $_N and a number of the TU's own (templates instantiated with it in two TUs differ) */
+static uint32_t cxx_closure_name(cxx *c, uint32_t serial)
+{
+	char nm[64] = { 0 };
+	uint32_t h = c->ntok * 2654435761u;
+
+	for (uint32_t i = 0; i < c->ntok; i += 1 + c->ntok / 512)
+		h = (h ^ c->tok[i].len ^ (c->tok[i].len ? (unsigned char)c->tok[i].s[0] : 0)) * 16777619u;
+	snprintf(nm, 48, "$_%u_%08x", serial, h);
+	return vintern_cstr(nm);
+}
+
+/*
+ * A try block's body, at its {, where code is generated: built as a function of its own, a closure's
+ * operator() that captures everything by reference and returns 0, so that it can be called through the
+ * function that has the exception table (cxx_gen_try).  *closure_node: the closure object; false: not
+ * built (the body is parsed all the same).
+ */
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out)
+{
+	uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial), loc = cxx_peek(c, 0)->loc, bnode;
+	uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, lname, 0);
+	cxx_entity *owner = calloc(1, sizeof *owner), *call;
+	cxx_scope *outer = c->scope, *cs, *fs;
+	cxx_gen_lambda l;
+
+	*closure_node = 0, *call_out = NULL;
+	owner->kind = CXX_ENTITY_TYPE, owner->name = lname, owner->pack_index = -1;
+	owner->ty = QT(c->ast->tags[tag].ty, 0);
+	cs = cxx_scope_new(c, CXX_SCOPE_CLASS, outer, owner);
+	cs->is_lambda = 1;
+	owner->members = cs;
+	cxx_tag_scope_set(c, tag, cs);
+	call = cxx_declare(c, cs, vintern_cstr("operator()"), CXX_ENTITY_VALUE);
+	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, outer, NULL);
+	memset(&l, 0, sizeof l);
+	l.def = 1, l.is_try = 1;
+	if (call) {
+		call->ty = cxx_type_function(c, cc_type_basic(TY_INT), NULL, 0, false);
+		call->fn_const = 1, call->member_of = cs;
+	}
+	if (!call || !cxx_gen_lambda_symbol(c, call, serial) || (l.floor = c->ast->nsym, !cxx_gen_function_begin(c, call, fs, NULL, 0))) {
+		cxx_compound_statement_parse(c);
+		return false;
+	}
+	c->gen_lambda = &l;
+	c->scope = fs;
+	cxx_compound_statement_parse(c);
+	bnode = cxx_gen_return_zero(c, c->snode, loc);
+	if (!cxx_gen_lambda_finish(c, &l, owner, &bnode, loc))
+		cxx_gen_fail(c);
+	cxx_gen_function_end(c, call, bnode);
+	c->scope = outer;
+	if (!(c->ast->syms[call->sym].flags & SF_DEFINED))
+		return false;
+	cxx_gen_lambda_object(c, &l, owner->ty, loc);
+	*closure_node = c->enode, *call_out = call;
+	c->enode = 0;
+	return *closure_node != 0;
+}
+
 static void cxx_lambda_parse(cxx *c)
 {
 	cxx_scope *ls = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
@@ -685,15 +746,10 @@ static void cxx_lambda_parse(cxx *c)
 	if (typed && ret != CXX_TY_UNKNOWN) {
 		/* the closure type: a class of its own with operator()(parameters) (its captures: not laid out) */
 		/* (its name: $_N and a number of the TU's own, so that templates instantiated with it in two TUs differ) */
-		char nm[64] = { 0 };
-		uint32_t serial = c->lambda_serial++, h = c->ntok * 2654435761u, lname, tag;
+		uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial), tag;
 		cxx_entity *owner = calloc(1, sizeof *owner), *call;
 		cxx_scope *cs;
 
-		for (uint32_t i = 0; i < c->ntok; i += 1 + c->ntok / 512)
-			h = (h ^ c->tok[i].len ^ (c->tok[i].len ? (unsigned char)c->tok[i].s[0] : 0)) * 16777619u;
-		snprintf(nm, 48, "$_%u_%08x", serial, h);
-		lname = vintern_cstr(nm);
 		tag = cc_tag_new(c->ast, TY_STRUCT, lname, 0);
 		owner->kind = CXX_ENTITY_TYPE, owner->name = lname, owner->pack_index = -1;
 		owner->ty = QT(c->ast->tags[tag].ty, 0);
@@ -1948,10 +2004,17 @@ static bool cxx_is_assignment_operator(cxx *c, uint32_t *ntok)
 VPRIV void cxx_assignment_expression_parse(cxx *c)
 {
 	if (cxx_is_kw(c, CXX_KW_throw)) {
+		uint32_t tloc = cxx_peek(c, 0)->loc, x = 0;
+		bool operand = false;
+
 		cxx_advance(c);
 		if (!cxx_is(c, LEX_TOKEN_SEMICOLON) && !cxx_is(c, LEX_TOKEN_RIGHT_PAREN) && !cxx_is(c, LEX_TOKEN_COMMA) &&
-		    !cxx_is(c, LEX_TOKEN_COLON) && !cxx_is(c, LEX_TOKEN_RIGHT_BRACE))
+		    !cxx_is(c, LEX_TOKEN_COLON) && !cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 			cxx_assignment_expression_parse(c);
+			operand = true, x = c->enode;
+		}
+		cxx_et(c, cc_type_basic(TY_VOID), false);
+		cxx_gen_throw(c, x, operand, tloc);
 		return;
 	}
 	if (cxx_is_kw(c, CXX_KW_co_yield)) {
