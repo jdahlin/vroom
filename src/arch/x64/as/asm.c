@@ -801,6 +801,8 @@ int as_x64_insn(as_context *a, char *mn, XOp *o, int nops)
 {
 	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
 	a->x64_operand_size = 0;
+	int scalar = x64_scalar_sized(a, mn, o, nops);
+	if (scalar != X64_NEXT) return scalar;
 	for (int i = 0; i < nops; i++)
 		if (o[i].kind == XK_REG && (o[i].cls == XR_ZMM || o[i].cls == XR_MASK))
 			return x64_i_avx512(a, mn, o, nops);

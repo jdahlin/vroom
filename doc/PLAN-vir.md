@@ -1374,6 +1374,33 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling integer mnemonic dispatch (2026-11-14).** The
+leading comparable exclusive excess in the preceding call-chain profile was
+libc strcmp (591 extra samples). Its largest caller difference was x64_i_int
+(508 vs 345 samples across five SQLite compiles). In as_x64_insn the
+self-hosted code loads each instruction-family pointer and calls it
+indirectly. Clang unrolls the family list into direct calls. Both reached
+x64_i_int after twelve earlier families for common scalar operations, then
+tried both the full name and a suffix-stripped name. An instrumented compile
+counted 13,619 movq, 4,379 imulq and 5,198 pushq/popq dispatches.
+Exact size-suffixed scalar mov/add/sub/imul and register pushq/popq now
+dispatch to their encoders at entry. Other register classes retain the
+ordered family search.
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 185.91 ms | 179.84 ms |
+| Clang-built vcc CPU time | 140.33 ms | 136.15 ms |
+| Self-hosted / clang-built | 1.325× | 1.321× |
+| Self-hosted retired instructions | 2.1510B | 2.0576B |
+| Clang-built retired instructions | 1.2405B | 1.1821B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+Fresh cycle profiles (period 75,001, five compiles each) reduced strcmp
+samples directly under x64_i_int from 437 to 49 self-hosted and 322 to 38
+clang-built. All four SQLite objects had SHA-256 prefix `c4d3896fefc9`;
+the linked recursive query returned 500500.
+
 **SQLite after profiling x86 register parsing (2026-11-14).** The prior
 eight-compile profile showed 5.01M more exclusive cycles in libc strcmp
 per compile for self-hosted vcc. In fresh call-chain profiles covering five compiles per

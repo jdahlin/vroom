@@ -67,6 +67,7 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_bits(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_x87ar(as_context *a, char *mn, XOp *o, int nops);
+VPRIV int x64_scalar_sized(as_context *a, const char *mn, XOp *o, int nops);
 VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops);
 VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops);
 #endif
