@@ -124,6 +124,9 @@ typedef struct cxx_entity {
 	const struct cxx_targ *targs;	/* a function template's instance: its template arguments (the mangled name) */
 	uint32_t ntargs;
 	uint8_t is_instance;
+	struct cxx_scope *inst_params;	/* ... the template's parameters (their value types mangle the arguments) */
+	struct cxx_ftemplate *inst_ftmpl;	/* ... its template (its declared signature mangles it) */
+	uint32_t abi_tag;		/* a function declared with __attribute__((abi_tag("x"))): x, interned (0: none) */
 	uint32_t sym1;			/* a constructor or destructor: the complete-object function's symbol (C1, D1; sym is C2, D2) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	struct cxx_entity *bound_template;	/* a template template parameter bound to a template: that template (its identity) */
@@ -428,6 +431,7 @@ typedef struct cxx {
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;
 #define CXX_BRACE_MAX 256
@@ -552,6 +556,8 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 		fprintf(stderr, "invalid at token %u (%s:%d)\n", c->pos, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line);
 }
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
+VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
 VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);
 VPRIV bool cxx_gen_on(cxx *c);

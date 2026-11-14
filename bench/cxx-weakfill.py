@@ -66,8 +66,11 @@ def link_run(tu, outdir, main_obj, timeout):
         if not und:
             return name, "link", r.stderr.strip().splitlines()[-1:], 0
         with open(stubs, "w") as f:
-            for u in und:
-                f.write(f'.text\n.globl "{u}"\n.type "{u}",@function\n"{u}":\n\tud2\n')
+            for i, u in enumerate(und):
+                # (it says which name it is on stderr, then traps)
+                msg = f"vcc stub called: {u}\n"
+                f.write(f'.section .rodata\n.Lstub{i}: .ascii "{msg.encode("unicode_escape").decode()}"\n.text\n.globl "{u}"\n.type "{u}",@function\n"{u}":\n'
+                        f'\tmovl $1, %eax\n\tmovl $2, %edi\n\tleaq .Lstub{i}(%rip), %rsi\n\tmovl ${len(msg)}, %edx\n\tsyscall\n\tud2\n')
         r = subprocess.run(cmd + [stubs], capture_output=True, text=True)
         if r.returncode:
             return name, "link", r.stderr.strip().splitlines()[-3:], 0
@@ -78,7 +81,7 @@ def link_run(tu, outdir, main_obj, timeout):
     except subprocess.TimeoutExpired:
         return name, "timeout", [], share
     if r.returncode:
-        tail = [l for l in (r.stdout + r.stderr).splitlines() if l.strip()][-3:]
+        tail = [l for l in r.stderr.splitlines() if l.startswith("vcc stub called")][:1] + [l for l in (r.stdout + r.stderr).splitlines() if l.strip()][-2:]
         return name, "fail %d" % r.returncode, (["%d stubbed" % len(und)] if und else []) + tail, share
     return name, "ok" if not und else "ok-unres", ["%d stubbed: " % len(und) + und[0][:100]] if und else [], share
 

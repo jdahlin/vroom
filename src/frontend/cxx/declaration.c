@@ -57,6 +57,19 @@ static void cxx_attribute_scan(cxx *c, uint32_t b, uint32_t e)
 	}
 }
 
+/* __attribute__((__abi_tag__("x"))) or [[gnu::abi_tag("x")]] in tokens [b, e): the tag (interned; 0: none) */
+static uint32_t cxx_abi_tag_scan(cxx *c, uint32_t b, uint32_t e)
+{
+	for (uint32_t i = b; i + 2 < e && i + 2 < c->ntok; i++) {
+		const cxx_token *t = &c->tok[i];
+
+		if (t->kind == LEX_TOKEN_IDENTIFIER && ((t->len == 7 && !memcmp(t->s, "abi_tag", 7)) || (t->len == 11 && !memcmp(t->s, "__abi_tag__", 11))) &&
+		    c->tok[i + 1].kind == LEX_TOKEN_LEFT_PAREN && c->tok[i + 2].kind == LEX_TOKEN_STRING && c->tok[i + 2].len > 2)
+			return vintern_copy(c->tok[i + 2].s + 1, c->tok[i + 2].len - 2);
+	}
+	return 0;
+}
+
 /* at a class key: is the class unnamed (struct {, struct __attribute__((packed)) {, struct [[a]] {)? */
 static bool cxx_class_key_unnamed(cxx *c)
 {
@@ -2967,6 +2980,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 	/* a data member of the class being built: a class body, not a template's or a function's */
 	bool member = context == CXX_CONTEXT_CLASS && c->build && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND));
 	bool global = context == CXX_CONTEXT_NAMESPACE && !c->template_depth && !(flags & (DS_TYPEDEF | DS_FRIEND));
+	uint32_t ds_from = c->decl_start;	/* (its decl-specifiers: an abi_tag attribute among them) */
 
 	for (;;) {
 		bool q, f;
@@ -3050,6 +3064,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->member_of = cxx_declaration_scope(c);
 			if (e)
 				e->fn_explicit = (flags & DS_EXPLICIT) ? 1 : (flags & DS_EXPLICIT_MAYBE) ? 2 : 0;
+			if (e && !e->abi_tag && ds_from < c->pos)
+				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);
 			if (e && !tmpl)
 				decl_fn = e;
 			if (e && !tmpl) {
@@ -3137,6 +3153,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->member_of = cxx_declaration_scope(c);
 			if (e && f && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC))
 				e->fn_static = 1;
+			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && !e->abi_tag && ds_from < c->pos)
+				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);	/* (mangled after its name: B <len> <tag>) */
 			if (e && f && kind == CXX_ENTITY_VALUE && (flags & (DS_INLINE | DS_CONSTEXPR)))
 				e->fn_inline = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
 			if (e && f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !is_friend && !(flags & DS_STATIC))
@@ -3587,7 +3605,7 @@ static void cxx_member_declaration_parse1(cxx *c, cxx_scope *cs)
 	int kw;
 	uint32_t member_attrs = c->layout_attributes;	/* (leading attributes count too) */
 
-
+	c->decl_start = c->pos;	/* (its leading attributes too: an abi_tag) */
 	cxx_attributes_skip(c);
 	kw = cxx_kw(c);
 	if ((kw == CXX_KW_public || kw == CXX_KW_private || kw == CXX_KW_protected) && cxx_peek(c, 1)->kind == LEX_TOKEN_COLON) {
@@ -3641,6 +3659,7 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 {
 	int kw;
 
+	c->decl_start = c->pos;	/* (its leading attributes too: an abi_tag) */
 	cxx_attributes_skip(c);
 	kw = cxx_kw(c);
 	switch (kw) {

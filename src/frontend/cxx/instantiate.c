@@ -595,6 +595,14 @@ VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ 
 	return true;
 }
 
+/* a class template's instance: its template's parameters (NULL: not one, or not known) */
+VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t)
+{
+	cxx_instance *x = cxx_tag_info(c, t);
+
+	return x && x->t ? (x->t->params ? x->t->params : x->t->declared) : NULL;
+}
+
 /* a placeholder type: its partial specialization and parameter index (-1: not one) */
 static int cxx_placeholder_of(cxx *c, qty t, void **owner)
 {
@@ -1642,7 +1650,7 @@ static cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ
 	inst->fn_const = te->fn_const, inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
 	copy = malloc((nargs ? nargs : 1) * sizeof *copy);
 	memcpy(copy, args, nargs * sizeof *copy);
-	inst->targs = copy, inst->ntargs = nargs;
+	inst->targs = copy, inst->ntargs = nargs, inst->inst_params = p->params, inst->abi_tag = te->abi_tag, inst->inst_ftmpl = te->ftmpl;
 	return inst;
 }
 
@@ -1659,6 +1667,23 @@ VPRIV void cxx_ftemplate_requires(cxx_ftemplate *f, uint32_t pos)
 {
 	if (f)
 		f->req_pos = pos;
+}
+
+static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f);
+
+/* a function template's instance: the template's signature as declared, its type parameters' placeholder
+   types (ph[i] for parameter i); CXX_TY_UNKNOWN: not known */
+VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph)
+{
+	cxx_ftemplate *f = inst->inst_ftmpl;
+
+	if (!f)
+		return CXX_TY_UNKNOWN;
+	cxx_ftemplate_evaluate(c, f);
+	if (f->packs || !f->p.ph || f->sig == CXX_TY_UNKNOWN)
+		return CXX_TY_UNKNOWN;
+	*ph = f->p.ph, *nph = f->p.params->ntparams;
+	return f->sig;
 }
 
 /* parse the signature once, the parameters bound to placeholders */

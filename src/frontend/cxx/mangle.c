@@ -12,6 +12,8 @@
 
 typedef struct cxx_mangler {
 	cxx *c;
+	const qty *ph;		/* a function template instance's signature: its parameters' placeholders, mangled T_, T0_, ... */
+	uint32_t nph;
 	char b[2048];
 	size_t n;
 	bool bad;
@@ -99,7 +101,69 @@ static void mg_type(cxx_mangler *m, qty t);
 static void mg_prefix(cxx_mangler *m, cxx_scope *s);
 
 /* <template-args> of a class template instance */
-static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t nargs, uint32_t pack_at)
+/* <abi-tag>: B <source-name>, after the name it tags */
+static void mg_abi_tag(cxx_mangler *m, uint32_t tag)
+{
+	if (tag) {
+		mg_str(m, "B");
+		mg_source_name(m, tag);
+	}
+}
+
+/* a value parameter's type, when it is a plain integer type spelled by its tokens: its code (NULL: not known) */
+static const char *mg_value_type(cxx_mangler *m, const cxx_scope *ps, uint32_t i)
+{
+	const cxx *c = m->c;
+	uint32_t p;
+	char w[4][16];
+	int n = 0;
+
+	if (!ps || i >= ps->ntparams || ps->tparams[i].kind != 2 || ps->tparams[i].pack || !(p = ps->tparams[i].type_b))
+		return NULL;
+	for (; p < c->ntok && n < 4; p++) {
+		const cxx_token *t = &c->tok[p];
+
+		if (t->kind == LEX_TOKEN_COLON_COLON)
+			continue;
+		if (t->kind != LEX_TOKEN_IDENTIFIER || t->len >= 16)
+			break;
+		if (t->len == 3 && !memcmp(t->s, "std", 3) && p + 1 < c->ntok && c->tok[p + 1].kind == LEX_TOKEN_COLON_COLON)
+			continue;
+		if (t->len == 5 && !memcmp(t->s, "const", 5))
+			continue;
+		if (n && strcmp(w[n - 1], "unsigned") && strcmp(w[n - 1], "signed") && strcmp(w[n - 1], "long") && strcmp(w[n - 1], "short"))
+			break;
+		if (n && !(t->len == 3 && !memcmp(t->s, "int", 3)) && !(t->len == 4 && (!memcmp(t->s, "long", 4) || !memcmp(t->s, "char", 4))) &&
+		    !(t->len == 5 && !memcmp(t->s, "short", 5)))
+			break;	/* (the parameter's name after unsigned, long, ...) */
+		memcpy(w[n], t->s, t->len), w[n][t->len] = 0, n++;
+		if (strcmp(w[n - 1], "unsigned") && strcmp(w[n - 1], "signed") && strcmp(w[n - 1], "long") && strcmp(w[n - 1], "short"))
+			break;	/* (the last word of a type) */
+	}
+#define W(k, s) (n > (k) && !strcmp(w[k], s))
+	if (n == 1 && W(0, "bool")) return "b";
+	if (n == 1 && W(0, "char")) return "c";
+	if (n == 1 && (W(0, "int") || W(0, "signed"))) return "i";
+	if ((n == 1 && W(0, "unsigned")) || (n == 2 && W(0, "unsigned") && W(1, "int"))) return "j";
+	if ((n == 1 && W(0, "long")) || (n == 2 && W(0, "long") && W(1, "int"))) return "l";
+	if (n == 2 && W(0, "unsigned") && W(1, "long")) return "m";
+	if (n == 2 && W(0, "long") && W(1, "long")) return "x";
+	if (n == 3 && W(0, "unsigned") && W(1, "long") && W(2, "long")) return "y";
+	if (n == 1 && W(0, "short")) return "s";
+	if (n == 2 && W(0, "unsigned") && W(1, "short")) return "t";
+	if (n == 2 && W(0, "unsigned") && W(1, "char")) return "h";
+	if (n == 2 && W(0, "signed") && W(1, "char")) return "a";
+	if (n == 1 && (W(0, "size_t") || W(0, "__size_t"))) return "m";	/* (x86-64 and arm64 Linux) */
+	if (n == 1 && (W(0, "ptrdiff_t") || W(0, "intmax_t") || W(0, "int64_t"))) return "l";
+	if (n == 1 && (W(0, "uint64_t") || W(0, "uintmax_t"))) return "m";
+	if (n == 1 && W(0, "uint8_t")) return "h";
+	if (n == 1 && W(0, "int32_t")) return "i";
+	if (n == 1 && W(0, "uint32_t")) return "j";
+#undef W
+	return NULL;
+}
+
+static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t nargs, uint32_t pack_at, const cxx_scope *ps)
 {
 	mg_str(m, "I");
 	for (uint32_t i = 0; i < nargs; i++) {
@@ -112,11 +176,16 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 			   others as int (not clang's name for a size_t or bool argument yet) */
 			char num[32];
 
+			const char *vt = args[i].t ? NULL : mg_value_type(m, ps, i);
+
 			mg_str(m, "L");
 			if (args[i].t)
 				mg_type(m, args[i].t);
 			else
-				mg_str(m, "i");
+				mg_str(m, vt ? vt : "i");
+			if (vt && vt[0] == 'b')
+				mg_str(m, args[i].v ? "1" : "0");
+			else
 			mg_text(m, num, (size_t)snprintf(num, sizeof num, args[i].v < 0 ? "n%llu" : "%llu",
 							 (unsigned long long)(args[i].v < 0 ? 0 - (uint64_t)args[i].v : (uint64_t)args[i].v)));
 			mg_str(m, "E");
@@ -147,7 +216,7 @@ static void mg_class_component(cxx_mangler *m, cxx_scope *s, qty t)
 			mg_source_name(m, of->name);
 			mg_remember(m, CXX_SUB_TEMPLATE, of, 0);
 		}
-		mg_template_args(m, args, nargs, pack_at);
+		mg_template_args(m, args, nargs, pack_at, cxx_instance_tparams(m->c, t));
 	} else {
 		cxx_scope *outer = mg_enclosing(m, s);
 
@@ -243,6 +312,20 @@ static void mg_type(cxx_mangler *m, qty t)
 	}
 	x = AST_TYPE(a, t);
 	q = QQ(t);
+	for (uint32_t i = 0; m->ph && i < m->nph && !(q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)); i++)
+		if (m->ph[i] && QUNQ(t) == m->ph[i]) {
+			/* a template parameter: T_ for the first, T<n-1>_ after (a substitution candidate) */
+			char num[16];
+
+			if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
+				return;
+			if (i)
+				mg_text(m, num, (size_t)snprintf(num, sizeof num, "T%u_", i - 1));
+			else
+				mg_str(m, "T_");
+			mg_remember(m, CXX_SUB_TYPE, NULL, t);
+			return;
+		}
 	/* cv-qualified: the qualifiers before the type, each such type a substitution candidate */
 	if ((q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)) && x->kind != TY_FUNC && x->kind != TY_ARRAY) {
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
@@ -262,11 +345,11 @@ static void mg_type(cxx_mangler *m, qty t)
 	case TY_BOOL: mg_str(m, "b"); return;
 	case TY_CHAR: mg_str(m, "c"); return;
 	case TY_SCHAR: mg_str(m, "a"); return;
-	case TY_UCHAR: mg_str(m, "h"); return;
+	case TY_UCHAR: mg_str(m, x->ext ? "Du" : "h"); return;	/* (ext: char8_t; below char16_t, wchar_t, char32_t) */
 	case TY_SHORT: mg_str(m, "s"); return;
-	case TY_USHORT: mg_str(m, "t"); return;
-	case TY_INT: mg_str(m, "i"); return;
-	case TY_UINT: mg_str(m, "j"); return;
+	case TY_USHORT: mg_str(m, x->ext ? "Ds" : "t"); return;
+	case TY_INT: mg_str(m, x->ext ? "w" : "i"); return;
+	case TY_UINT: mg_str(m, x->ext ? "Di" : "j"); return;
 	case TY_LONG: mg_str(m, "l"); return;
 	case TY_ULONG: mg_str(m, "m"); return;
 	case TY_LLONG: mg_str(m, "x"); return;
@@ -397,7 +480,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	if (ft == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ft) != TY_FUNC)
 		return false;
 	x = AST_TYPE(a, ft);
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
 	op = mg_operator(v, x->n, member);
 	conv = v->len > 10 && !memcmp(v->s, "operator #", 10);
 	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
@@ -423,8 +506,11 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_type(&m, x->base);
 		} else
 			mg_source_name(&m, f->name);
+		mg_abi_tag(&m, f->abi_tag);
+		if (f->is_instance && !(v->len && v->s[0] == ' '))
+			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX);
+			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX, f->inst_params);
 		mg_str(&m, "E");
 	} else {
 		if (mg_scope_is_std(&m, home))
@@ -435,12 +521,24 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_str(&m, op);
 		else
 			mg_source_name(&m, f->name);
+		mg_abi_tag(&m, f->abi_tag);
 		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX);
+			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
+		if (f->is_instance)
+			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX, f->inst_params);
 	}
-	/* A function template's instance: the ABI writes its return type and its parameters as the template
-	   declares them (T_ for a parameter); here the instance's own types, so the name is unique and stable
-	   among vcc's objects but is not the one clang gives it. */
+	/* A function template's instance: its return type and its parameters as the template declares them
+	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
+	   among vcc's objects, not clang's name). */
+	if (f->is_instance) {
+		const qty *ph;
+		uint32_t nph;
+		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph);
+
+		if (ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC && AST_TYPE(a, ds)->n == x->n &&
+		    (AST_TYPE(a, ds)->flags & TF_VARIADIC) == (x->flags & TF_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
+			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph;
+	}
 	if (f->is_instance && !(v->len && v->s[0] == ' '))
 		mg_type(&m, x->base);
 	if (!x->n && !(x->flags & TF_VARIADIC))
@@ -463,7 +561,7 @@ VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, s
 {
 	cxx_mangler m;
 
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
 	mg_str(&m, "_Z");
 	mg_str(&m, kind);
 	mg_type(&m, QUNQ(cls));
@@ -479,7 +577,7 @@ VPRIV bool cxx_mangle_type(cxx *c, qty t, char *buf, size_t cap)
 {
 	cxx_mangler m;
 
-	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0, m.ph = NULL, m.nph = 0;
 	mg_type(&m, t);
 	if (m.bad || m.n + 1 > cap)
 		return false;
