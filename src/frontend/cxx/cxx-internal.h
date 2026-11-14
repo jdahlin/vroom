@@ -242,6 +242,9 @@ typedef struct cxx_gen_lambda {
 typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; struct cxx_entity *fn;
 	uint32_t pack_name, pack_at, pack_n; qty *pack_types; } cxx_late;	/* pack_*: a class pack expanded in the parameters (As... a; pack_n UINT32_MAX: none) */
 
+/* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
+#define CXX_MAX_ARGS 256
+
 typedef struct cxx {
 	pp *p;
 	const cxx_options *o;
@@ -432,9 +435,9 @@ typedef struct cxx {
 	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_ilist;	/* ... for a braced list: its std::initializer_list constructor (NULL: none) */
-	qty ctor_ilist_types[16];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
-	uint8_t ctor_ilist_lval[16];
-	uint32_t ctor_ilist_brace[16];	/* ... an element that is a braced list: its '{' (carg_brace) */
+	qty ctor_ilist_types[CXX_MAX_ARGS];	/* ... and the list's elements' types, as sema saw them (nullptr: nullptr_t, its node a void *) */
+	uint8_t ctor_ilist_lval[CXX_MAX_ARGS];
+	uint32_t ctor_ilist_brace[CXX_MAX_ARGS];	/* ... an element that is a braced list: its '{' (carg_brace) */
 	uint32_t ctor_ilist_n;
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -448,10 +451,10 @@ typedef struct cxx {
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
-	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+	uint32_t carg_nodes[CXX_MAX_ARGS];	/* the last argument list's nodes */
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
-	uint32_t carg_brace[16];
-	uint32_t gen_call_brace[16];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
+	uint32_t carg_brace[CXX_MAX_ARGS];
+	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
 	uint8_t new_array;
 	uint32_t gen_pack_from, gen_pack_n;	/* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */

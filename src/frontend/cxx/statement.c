@@ -781,13 +781,13 @@ static void cxx_statement_parse1(cxx *c)
 		if (cxx_is(c, LEX_TOKEN_LEFT_BRACE) && is_return && cxx_gen_on(c) && !c->tentative && !c->template_depth &&
 		    c->gen_ret != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->gen_ret) && AST_TYPE_KIND(c->ast, c->gen_ret) != TY_ARRAY) {
 			/* return {args}: the result constructed from them (a temporary the return elides) */
-			uint32_t an[16], n;
+			uint32_t an[CXX_MAX_ARGS], n;
 			qty rt = QUNQ(c->gen_ret);
 
 			cxx_braced_arguments_parse(c);
 			n = c->ncargs;
 			has_value = true;
-			if (n != UINT32_MAX && n <= 16) {
+			if (n != UINT32_MAX && n <= CXX_MAX_ARGS) {
 				memcpy(an, c->carg_nodes, n * sizeof *an);
 				cxx_ctor_use(c, rt, c->cargs, c->cargs_lval, n, true);
 				cxx_gen_construct_temp(c, rt, an, n, sloc);

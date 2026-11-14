@@ -501,7 +501,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t 
 		return;
 	c->enode = 0;
 	t = QUNQ(t);
-	if (nargs == UINT32_MAX || nargs > 16 || !cxx_gen_class_ok2(c, t, true))
+	if (nargs == UINT32_MAX || nargs > CXX_MAX_ARGS || !cxx_gen_class_ok2(c, t, true))
 		return;
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i])
@@ -1518,7 +1518,7 @@ VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t
 	if (!setjmp(jb)) {
 		if (record && (cxx_is(c, LEX_TOKEN_LEFT_PAREN) || cxx_is(c, LEX_TOKEN_LEFT_BRACE))) {
 			/* T X::m(args), T X::m{args}: a temporary made the same way (a value use: its copy is the object's) */
-			uint32_t an[16], n;
+			uint32_t an[CXX_MAX_ARGS], n;
 			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 
 			if (braced)
@@ -1526,7 +1526,7 @@ VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t
 			else
 				cxx_call_arguments_parse(c);
 			n = c->ncargs;
-			if (n <= 16) {
+			if (n <= CXX_MAX_ARGS) {
 				memcpy(an, c->carg_nodes, n * sizeof *an);
 				cxx_ctor_use(c, QUNQ(v->ty), c->cargs, c->cargs_lval, n, braced);
 				cxx_gen_construct_temp(c, QUNQ(v->ty), an, n, loc);
@@ -2042,9 +2042,9 @@ static uint32_t cxx_gen_array_cleanup(cxx *c, qty et, uint32_t n, uint32_t dsym,
 static uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc)
 {
 	cc *a = c->ast;
-	uint32_t save = c->pos, an[16], n, tmp;
-	qty at[16];
-	uint8_t al[16];
+	uint32_t save = c->pos, an[CXX_MAX_ARGS], n, tmp;
+	qty at[CXX_MAX_ARGS];
+	uint8_t al[CXX_MAX_ARGS];
 	cc_id_list l;
 
 	t = QUNQ(t);
@@ -2054,7 +2054,7 @@ static uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc)
 	cxx_braced_arguments_parse(c);
 	c->pos = save;
 	n = c->ncargs;
-	if (n == UINT32_MAX || n > 16)
+	if (n == UINT32_MAX || n > CXX_MAX_ARGS)
 		return 0;
 	memcpy(an, c->carg_nodes, sizeof an), memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
 	if (cxx_is_initializer_list(c, t)) {
@@ -2137,7 +2137,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
-	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32], br[16];
+	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[2 * CXX_MAX_ARGS], br[CXX_MAX_ARGS];
 
 	memcpy(br, c->gen_call_brace, sizeof br);	/* (this call's alone: taken at once) */
 	memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
@@ -2156,7 +2156,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		return;
 	}
 
-	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
+	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > CXX_MAX_ARGS)
 		{ CXX_CALL_WHY(); return; }
 	if (f->fn_defaulted && nargs == 1 && object && !arrow && args[0] && cxx_gen_is_special(f) && vintern_ents[f->name].s[1] == 'c' &&
 	    f->member_of && f->member_of->owner && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(f->member_of->owner->ty) &&
@@ -2182,7 +2182,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		return;
 	}
 	ft = AST_TYPE(a, f->ty);
-	uint32_t bargs[16];
+	uint32_t bargs[CXX_MAX_ARGS];
 	{
 		/* f({...}): a braced list argument (no node) made a temporary of its parameter's class */
 		bool any = false;
@@ -2445,7 +2445,7 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 	if (!cxx_gen_on(c))
 		return;
 	c->enode = 0;
-	if (!c->call_resolved || !f || f->kind != CXX_ENTITY_VALUE || !obj || nargs > 16)
+	if (!c->call_resolved || !f || f->kind != CXX_ENTITY_VALUE || !obj || nargs > CXX_MAX_ARGS)
 		return;
 	for (uint32_t i = 0; i < nargs; i++)
 		if (!args[i])
@@ -2963,11 +2963,11 @@ static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, 
 	qty lt = cc_type_basic(TY_LONG), et, pt;
 	uint32_t arr = 0, il, begin, size;
 	cc_id_list *saved = c->gen_block;
-	qty types[16];
-	uint8_t lvals[16];
+	qty types[CXX_MAX_ARGS];
+	uint8_t lvals[CXX_MAX_ARGS];
 	uint32_t types_n = c->ctor_ilist_n == nargs ? nargs : 0;	/* (the element constructors' own uses overwrite them) */
 
-	uint32_t braces[16];
+	uint32_t braces[CXX_MAX_ARGS];
 
 	memcpy(types, c->ctor_ilist_types, sizeof types), memcpy(lvals, c->ctor_ilist_lval, sizeof lvals);
 	memcpy(braces, c->ctor_ilist_brace, sizeof braces);
@@ -2999,15 +2999,15 @@ static uint32_t cxx_gen_initializer_list(cxx *c, qty ilt, const uint32_t *args, 
 		if (!args[i] && i < 16 && braces[i] && cc_type_is_record(a, et)) {
 			/* the element is a braced list itself, {"a", 1}: E{...} from its arguments, parsed again here for
 			   their code (its first parse was unevaluated) */
-			uint32_t pos = c->pos, an[16], n;
-			qty at[16];
-			uint8_t al[16];
+			uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;
+			qty at[CXX_MAX_ARGS];
+			uint8_t al[CXX_MAX_ARGS];
 
 			c->pos = braces[i];
 			cxx_braced_arguments_parse(c);
 			c->pos = pos;
 			n = c->ncargs;
-			if (n == UINT32_MAX || n > 16)
+			if (n == UINT32_MAX || n > CXX_MAX_ARGS)
 				goto fail;
 			memcpy(an, c->carg_nodes, sizeof an), memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
 			cxx_ctor_use(c, et, at, al, n, true);
@@ -3161,7 +3161,7 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 	bool found = c->ctor_found;
 	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
 
-	if (!target || !cls || nargs == UINT32_MAX || nargs > 16)
+	if (!target || !cls || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS)
 		return false;
 	if (c->ctor_ilist && c->ctor_ilist->member_of == cls && c->ctor_ilist->ty != CXX_TY_UNKNOWN) {
 		/* T{a, b} with an initializer_list constructor: it, from the list (its other parameters defaulted) */
@@ -3465,9 +3465,9 @@ static bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t lo
 	c->pos = fe->nsdmi_pos, c->scope = fe->nsdmi_scope, c->fail = &jb;
 	c->gen_pre = first;
 	if (!setjmp(jb)) {
-		uint32_t an[16], n = 0;
-		qty at[16];
-		uint8_t lv[16];
+		uint32_t an[CXX_MAX_ARGS], n = 0;
+		qty at[CXX_MAX_ARGS];
+		uint8_t lv[CXX_MAX_ARGS];
 		bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE) || (cxx_is(c, LEX_TOKEN_EQUAL) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE);
 		bool record = cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != TY_ARRAY;
 
@@ -3475,7 +3475,7 @@ static bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t lo
 		if (braced) {
 			cxx_braced_arguments_parse(c);
 			n = c->ncargs;
-			if (n != UINT32_MAX && n <= 16) {
+			if (n != UINT32_MAX && n <= CXX_MAX_ARGS) {
 				memcpy(an, c->carg_nodes, n * sizeof *an);
 				memcpy(at, c->cargs, n * sizeof *at);
 				memcpy(lv, c->cargs_lval, n * sizeof *lv);
@@ -3486,7 +3486,7 @@ static bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t lo
 			if (at[0] != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, at[0]) == TY_ARRAY)	/* ("text": a pointer) */
 				at[0] = cc_type_pointer(c->ast, AST_TYPE(c->ast, at[0])->base), lv[0] = 0;
 		}
-		if (n != UINT32_MAX && n <= 16) {
+		if (n != UINT32_MAX && n <= CXX_MAX_ARGS) {
 			if (record)
 				cxx_ctor_use(c, QUNQ(fe->ty), at, lv, n, braced);
 			cxx_gen_member_initializer(c, fe->name, CXX_TY_UNKNOWN, an, n, loc);
@@ -3790,9 +3790,9 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 	/* (what cxx_ctor_use chose: naming the destructor below resolves nothing, but keep it apart) */
 	cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
 	bool found = c->ctor_found, none = c->ctor_none;
-	qty il_types[16];
-	uint8_t il_lval[16];
-	uint32_t il_n = c->ctor_ilist_n, il_brace[16];
+	qty il_types[CXX_MAX_ARGS];
+	uint8_t il_lval[CXX_MAX_ARGS];
+	uint32_t il_n = c->ctor_ilist_n, il_brace[CXX_MAX_ARGS];
 
 	memcpy(il_types, c->ctor_ilist_types, sizeof il_types), memcpy(il_lval, c->ctor_ilist_lval, sizeof il_lval);
 	memcpy(il_brace, c->ctor_ilist_brace, sizeof il_brace);

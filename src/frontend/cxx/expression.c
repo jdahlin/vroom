@@ -422,10 +422,10 @@ VPRIV void cxx_braced_arguments_parse(cxx *c)
 
 static void cxx_arguments_parse(cxx *c, int open, int close)
 {
-	qty args[16];
-	uint8_t lval[16];
+	qty args[CXX_MAX_ARGS];
+	uint8_t lval[CXX_MAX_ARGS];
 	uint32_t n = 0;
-	uint32_t nodes[16] = { 0 }, braces[16] = { 0 }, zero = 0;
+	uint32_t nodes[CXX_MAX_ARGS] = { 0 }, braces[CXX_MAX_ARGS] = { 0 }, zero = 0;
 	bool unknown = false, first_const = false;
 	int64_t first_value = 0;
 
@@ -469,7 +469,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 						unknown = true;
 					if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 						c->eunsure = 1;
-					if (n < 16)
+					if (n < CXX_MAX_ARGS)
 						args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode;	/* (each element's node too) */
 					n++;
 				}
@@ -502,7 +502,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 		}
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
-		if (n < 16)
+		if (n < CXX_MAX_ARGS)
 			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode, braces[n] = brace ? start : 0,
 			zero |= (uint32_t)(c->econst && !c->evalue && !brace && c->etype != CXX_TY_UNKNOWN &&
 					   AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128) << n;
@@ -515,7 +515,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 			break;
 	}
 	cxx_expect(c, close);
-	if (n > 16)
+	if (n > CXX_MAX_ARGS)
 		unknown = true;
 	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
 	memcpy(c->carg_nodes, nodes, sizeof nodes);
@@ -524,9 +524,9 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
 		c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
-	memcpy(c->cargs, args, (n < 16 ? n : 16) * sizeof *args);
+	memcpy(c->cargs, args, (n < CXX_MAX_ARGS ? n : 16) * sizeof *args);
 	if (n)
-		memcpy(c->cargs_lval, lval, n < 16 ? n : 16);
+		memcpy(c->cargs_lval, lval, n < CXX_MAX_ARGS ? n : 16);
 	c->ncargs = unknown ? UINT32_MAX : n;
 }
 
@@ -1426,10 +1426,10 @@ static void cxx_primary_expression_parse(cxx *c)
 				else
 					cxx_call_arguments_parse(c);
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
-					uint32_t an[16], n = c->ncargs;
+					uint32_t an[CXX_MAX_ARGS], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
-					uint32_t abr_[16];
+					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
@@ -1470,10 +1470,10 @@ static void cxx_primary_expression_parse(cxx *c)
 				else
 					cxx_call_arguments_parse(c);
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
-					uint32_t an[16], n = c->ncargs;
+					uint32_t an[CXX_MAX_ARGS], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
-					uint32_t abr_[16];
+					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
@@ -1584,10 +1584,10 @@ static void cxx_primary_expression_parse(cxx *c)
 				else
 					cxx_call_arguments_parse(c);
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to)) {
-					uint32_t an[16], n = c->ncargs;
+					uint32_t an[CXX_MAX_ARGS], n = c->ncargs;
 
 					memcpy(an, c->carg_nodes, sizeof an);
-					uint32_t abr_[16];
+					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
@@ -1674,7 +1674,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				uint8_t call_obj = c->call_obj;
 				uint32_t ename = c->ename;
 				bool missing = c->ename_missing;
-				uint32_t on_args = 0, on_nodes[16];
+				uint32_t on_args = 0, on_nodes[CXX_MAX_ARGS];
 
 				if (c->xargs_set && nx == UINT32_MAX)
 					set = NULL, callee = CXX_TY_UNKNOWN;	/* (too many explicit arguments) */
@@ -1691,10 +1691,10 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
 				else if (nx != UINT32_MAX && set) {
-					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
+					uint32_t anodes[CXX_MAX_ARGS], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
-					uint32_t abrace[16];
+					uint32_t abrace[CXX_MAX_ARGS];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
@@ -1715,8 +1715,8 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				}
 				else if (!set && callee != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, callee) &&	/* (operator(): a member only) */
 					 (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
-						  c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
-						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
+						  c->op_lv_set = c->ncargs <= CXX_MAX_ARGS, c->op_lv[0] = callee_lval,
+						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= CXX_MAX_ARGS ? c->ncargs : 0),
 						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))) {
 					/* an object of class type: its operator() (the arguments as parsed: typing the call may
 					   instantiate its body, whose own calls reuse c->ncargs and c->carg_nodes) */
@@ -1726,10 +1726,10 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				}
 				else {
 					uint8_t was = c->einvalid;	/* (an earlier part of the expression may be ill-formed already) */
-					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
+					uint32_t anodes[CXX_MAX_ARGS], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
-					uint32_t abrace[16];
+					uint32_t abrace[CXX_MAX_ARGS];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
@@ -1892,11 +1892,11 @@ static void cxx_postfix_expression_parse1(cxx *c)
 
 static void cxx_new_expression_parse(cxx *c)
 {
-	uint32_t place[4], nplace = 0, init[16], loc = cxx_peek(c, 0)->loc, count = 0;
+	uint32_t place[4], nplace = 0, init[CXX_MAX_ARGS], loc = cxx_peek(c, 0)->loc, count = 0;
 	int ninit = -1;
 	bool array = false, braced = false;
-	qty t = CXX_TY_UNKNOWN, at[16];
-	uint8_t lv[16];
+	qty t = CXX_TY_UNKNOWN, at[CXX_MAX_ARGS];
+	uint8_t lv[CXX_MAX_ARGS];
 
 	cxx_accept(c, LEX_TOKEN_COLON_COLON);
 	cxx_expect_kw(c, CXX_KW_new);
@@ -1930,7 +1930,7 @@ init:
 			cxx_braced_arguments_parse(c);
 		else
 			cxx_call_arguments_parse(c);
-		ninit = c->ncargs <= 16 ? (int)c->ncargs : -2;
+		ninit = c->ncargs <= CXX_MAX_ARGS ? (int)c->ncargs : -2;
 		if (ninit >= 0) {
 			memcpy(init, c->carg_nodes, (size_t)ninit * sizeof *init);
 			memcpy(at, c->cargs, (size_t)ninit * sizeof *at);

@@ -445,7 +445,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
 	/* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
 	bool own_args = args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs && (args == c->cargs || !memcmp(args, c->cargs, nargs * sizeof *args));
-	uint32_t own_zero = c->carg_zero, own_brace[16];	/* (taken now: deducing and instantiating parse argument lists of their own) */
+	uint32_t own_zero = c->carg_zero, own_brace[CXX_MAX_ARGS];	/* (taken now: deducing and instantiating parse argument lists of their own) */
 
 	memcpy(own_brace, c->carg_brace, sizeof own_brace);
 	bool have_lval = lval != NULL;
@@ -1111,11 +1111,11 @@ VPRIV void cxx_ctor_use(cxx *c, qty t, const qty *args, const uint8_t *lval, uin
 		}
 		if (c->ctor_ilist) {
 			cxx_entity *il = c->ctor_ilist;
-			uint32_t br[16];
+			uint32_t br[CXX_MAX_ARGS];
 
-			qty ty[16];
-			uint8_t lv[16];
-			uint32_t n = nargs < 16 ? nargs : 16;
+			qty ty[CXX_MAX_ARGS];
+			uint8_t lv[CXX_MAX_ARGS];
+			uint32_t n = nargs < CXX_MAX_ARGS ? nargs : CXX_MAX_ARGS;
 
 			/* (the list just parsed, before the body's instantiation reuses c->cargs, which args may be) */
 			memcpy(br, c->carg_brace, sizeof br);

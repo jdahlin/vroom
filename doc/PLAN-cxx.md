@@ -1690,3 +1690,12 @@ med `void *` (unit-hash).  Mätt: cxx-run 77/77, cxx-parse 38/38, cxx-mangle 36;
 klarar testerna (kvar: unit-32bit, som också fallerar med clang, och unit-allocator, en statisk variabel
 dubblerad mellan vcc:s och clangs objekt: en artefakt av weak-fill), 8,2 s CPU, 29,7x mot clang -O2.
 vcc genererar 27 av 118 testkroppar och 24 545 funktioner; nästa steg är fler testkroppar.
+
+## Status 79 (2026-11-14)
+Argumentgränsen 16 (argumentlistor, braced-listor, initializer_list-element) är nu `CXX_MAX_ARGS` (256)
+i parser och kodgenerering; överlagringsrankningen i typing.c har kvar sina 16 (funktioner med fler
+parametrar är sällsynta, en lista till en initializer_list-konstruktor är ett argument).
+`std::vector<uint8_t> v = {...200 element...}` genereras och ger rätt värde.  Mätt: cxx-run 77/77,
+cxx-parse 38/38, cxx-mangle 36; cxx-fork 68/70 (unit-32bit går nu ut på tid i stället för att fallera,
+fallerar också med clang; unit-allocator: weak-fill-artefakten), 8,0 s CPU; 30 av 118 testkroppar,
+24 835 funktioner.  Nästa: ifstream/stringstream-lokaler (9 kroppar), `R"(...)"_json` (flera).

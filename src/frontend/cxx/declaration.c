@@ -2070,7 +2070,7 @@ static void cxx_function_body_inner_parse(cxx *c)
 				cxx_entity *fe = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && self &&
 						 (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE) ?
 						 cxx_lookup_local(self, cxx_peek(c, 0)->id) : NULL;
-				uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[16], n;
+				uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[CXX_MAX_ARGS], n;
 				qty target = CXX_TY_UNKNOWN;
 				bool braced;
 
@@ -3821,7 +3821,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				}
 			} else if (object) {
 				/* T x = { ... }: copy-list-initialization, as T x{ ... } (its explicit constructors: not told apart) */
-				uint32_t an[16], n;
+				uint32_t an[CXX_MAX_ARGS], n;
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
@@ -3896,7 +3896,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
-				uint32_t an[16], n;
+				uint32_t an[CXX_MAX_ARGS], n;
 				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
@@ -3918,7 +3918,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_braced_init_list_parse(c);
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			if (object) {
-				uint32_t an[16], n;
+				uint32_t an[CXX_MAX_ARGS], n;
 				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_call_arguments_parse(c);	/* direct-initialization */
