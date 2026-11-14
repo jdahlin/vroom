@@ -3661,6 +3661,18 @@ VPRIV void walk_condition_emit(codegen_context *e, uint32_t n, bool jump_if, uin
 	}
 
 	switch (x->op) {
+	case AST_NODE_BUILTIN:
+		if (x->aux == CC_BUILTIN_EXPECT || x->aux == CC_BUILTIN_EXPECT_PROB) {
+			/* Branch on the original condition. Materializing !!expr here
+			 * would turn a compare-and-branch into a chain of setccs. */
+			for (uint32_t i = 1; i < x->c; i++) {
+				codegen_value v = walk_value_emit(e, c->lists[x->b + i]);
+				walk_value_free(e, &v);
+			}
+			walk_condition_emit(e, c->lists[x->b], jump_if, lbl);
+			return;
+		}
+		break;
 	case AST_NODE_LOGICAL_AND: case AST_NODE_LOGICAL_OR: {
 		bool and = x->op == AST_NODE_LOGICAL_AND;
 

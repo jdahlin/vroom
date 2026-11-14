@@ -1374,6 +1374,68 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after rebasing onto 87f85d5b (2026-11-14).** The paired x86-64
+test used the same SQLite 3.50.4 amalgamation, flags and headers as below,
+with four executables, one warmup and seven alternating-order measurements
+per executable. Times are median perf task-clock on CPU 7 with one emitter
+thread. Both builds use the same compiler source within each row.
+
+| Revision | Clang-built CPU ms | Self-built CPU ms | Self / clang | Clang-built instructions | Self-built instructions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rebased computed goto | 154.19 | 244.19 | 1.58 | 1.478B | 3.123B |
+| Direct operand encoding, extension reuse and VIR atomics | 152.39 | 231.98 | 1.52 | 1.315B | 2.780B |
+
+The encoder now fills memory operands in place and sends LEA and extending
+moves directly to the shared numeric encoders. The self-built memory operand
+helper fell from 523 to 364 bytes. The direct emitter omits an immediately
+repeated extension of the same width and sign. Full-width 32/64-bit
+compare-exchange, fetch-add and exchange lower through VIR. This allows the
+preprocessor's skeleton builder to inline into pp_file_enter, which lowers
+with 134 spills. Both final executables emitted the same SQLite object
+(c4d3896fefc93dca709598910795c84ab65403ca45020b260292d57b777d3258),
+and the linked object ran a recursive SQL sum.
+
+In the final self-built cycle sample strcmp accounted for 4.1%, x64_emit
+3.3%, codegen_prepass_node_walk 2.5% and lex_tokenize_mode 2.2%.
+The prepass and walk_value_emit_inner both report an unsupported aggregate
+argument or result during VIR construction. The lexer still has 60 spills
+and occupies 27,945 bytes against clang's 10,925. The time ratios vary
+with shared-host load.
+
+**Computed goto (2026-11-14).** The x86-64 bootstrap lowers lex_tokenize_mode
+through VIR with 4,408 instructions, 908 blocks and 60 allocator spills.
+Computed goto sites merge their live values at a common indirect branch.
+Each address-taken C label gets an entry that performs the appropriate
+allocator edge moves, including for labels named in static initializers.
+Other architectures and indirect jumps inside inline expansions use the
+direct emitter. The x86 lexer scans masks low bit first using BSF.
+
+On the SQLite 3.50.4 compile described in PLAN-fas2, seven warm runs per
+configuration alternated forward/reverse order, pinned to CPU 7 with one
+emitter thread. The pre-change baseline includes the previous bootstrap
+optimizations ported onto 9d322868.
+
+| Compiler | Compile CPU ms | User instructions, billions | Lexer core ms |
+| --- | ---: | ---: | ---: |
+| Baseline self-built | 247.09 | 3.204 | 12.9 |
+| Updated self-built | 244.10 | 3.099 | 8.5 |
+| Baseline clang-built | 157.05 | 1.481 | 7.0 |
+| Updated clang-built | 156.45 | 1.470 | 6.7 |
+
+Core time is the median of lextest's best of three passes in a separate
+series. An additional same-source control changed only the lowering of
+lex_tokenize_mode. Direct, VIR and clang produced 32,403, 27,945 and
+10,925 bytes respectively. Disassembly showed four, one and three indirect
+jump sites respectively. The control measured 13.4, 11.0 and 9.6 ms for
+the lexer. Wall time on the shared host varied considerably. The updated
+compilers produced the original token hash and SQLite object SHA256.
+
+The 2026-11-13 bootstrap profile added x86-64 local-exec TLS addresses,
+frame-relative slot stores, and 32-bit moves for zero-extendable constants.
+The local-exec address uses %fs:0 and a TPOFF displacement, preserving flags
+during allocator edits. Other TLS models still use direct lowering.
+See the [paired SQLite compile measurements](PLAN-fas2.md).
+
 `VCC_VIR=bl` on x86-64 now goes through the same builder and loop vectorizer
 as arm64; the function is marked `x86_64-linux`. `arch/x64/codegen/vir.c`
 lowers scalar leaf functions with SysV's integer/FP registers and stack

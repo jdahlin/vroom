@@ -44,9 +44,18 @@ VPRIV bool x64_record_object_prepare(codegen_context *e, const record *i, record
 
 static void x64_encode_register(XOp *operand, int r, int size)
 {
-	*operand = (XOp){ .kind = XK_REG, .cls = X64_REGISTER_IS_XMM(r) ? XR_XMM : XR_GPR,
-		.reg = (uint8_t)(X64_REGISTER_IS_XMM(r) ? r - XMM0 : r), .size = (uint8_t)(X64_REGISTER_IS_XMM(r) ? 16 : size),
-		.needrex = !X64_REGISTER_IS_XMM(r) && size == 1 && r >= 4 };
+	memset(operand, 0, sizeof *operand);
+	operand->kind = XK_REG;
+	if (X64_REGISTER_IS_XMM(r)) {
+		operand->cls = XR_XMM;
+		operand->reg = r - XMM0;
+		operand->size = 16;
+	} else {
+		operand->cls = XR_GPR;
+		operand->reg = r;
+		operand->size = size;
+		operand->needrex = size == 1 && r >= 4;
+	}
 }
 
 static XOp x64_encode_immediate(int64_t v)
@@ -61,16 +70,24 @@ static uint32_t x64_encode_label(codegen_commit_context *R, uint32_t fid, uint32
 	return as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
 }
 
-static XOp x64_encode_memory(codegen_commit_context *R, const record *i)
+static void x64_encode_memory(XOp *operand, codegen_commit_context *R, const record *i)
 {
-	XOp m = { .kind = XK_MEM, .base = (int8_t)(i->registers[1] == RIP ? 16 : i->registers[1]), .index = -1, .scale = 1,
-		.v = { .c = i->offset }, .hasv = 1 };
-	if (i->registers[1] == RIP)
-		m.v = as_symbol_value(R->assembler, codegen_commit_symbol_find(R, i->reference), i->offset);
-	if (i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) {
-		m.index = (int8_t)i->registers[3]; m.scale = (uint8_t)(1u << i->shift);
+	memset(operand, 0, sizeof *operand);
+	operand->kind = XK_MEM;
+	operand->base = i->registers[1];
+	operand->index = -1;
+	operand->scale = 1;
+	operand->hasv = 1;
+	if (i->registers[1] == RIP) {
+		operand->base = 16;
+		operand->v = as_symbol_value(R->assembler, codegen_commit_symbol_find(R, i->reference), i->offset);
+	} else {
+		operand->v.c = i->offset;
 	}
-	return m;
+	if (i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) {
+		operand->index = i->registers[3];
+		operand->scale = 1u << i->shift;
+	}
 }
 
 static int x64_encode_instruction(codegen_commit_context *R, const char *name, int sz, XOp *o, int n)
@@ -123,22 +140,22 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 			else { op=-1; mn="movabs"; sz=8; o[0]=x64_encode_immediate(i->immediate); }
 			x64_encode_register(&o[1], i->registers[0],sz); break;
 		case X64_OP_LD: case X64_OP_LDX: case X64_OP_EXT:
-			if (i->opcode != X64_OP_EXT) o[0] = x64_encode_memory(R, i);
-			if (X64_REGISTER_IS_XMM(i->registers[0])) mn=sz==4?"movss":sz==8?"movsd":"movups";
-			else {
-				static const char *const sx[] = { [1]="movsbq",[2]="movswq",[4]="movslq",[8]="movq" };
-				static const char *const zx[] = { [1]="movzbl",[2]="movzwl",[4]="movl",[8]="movq" };
-				mn=i->condition?sx[sz]:zx[sz]; x64_encode_register(&o[1], i->registers[0],i->condition||sz==8?8:4);
-				if (sz==8 || (sz==4 && !i->condition)) op=X64O_MOV;
+			if (i->opcode != X64_OP_EXT) x64_encode_memory(&o[0], R, i);
+			if (X64_REGISTER_IS_XMM(i->registers[0])) {
+				mn = sz == 4 ? "movss" : sz == 8 ? "movsd" : "movups";
+				sz = 0;
+			} else {
+				x64_encode_register(&o[1], i->registers[0], i->condition || sz == 8 ? 8 : 4);
+				op = sz == o[1].size ? X64O_MOV : i->condition ? X64O_MOVSX : X64O_MOVZX;
 			}
-			sz=0; break;
+			break;
 		case X64_OP_ST: case X64_OP_STX:
-			mn="mov"; x64_encode_register(&o[0], i->registers[2],sz); o[1]=x64_encode_memory(R,i);
+			mn="mov"; x64_encode_register(&o[0], i->registers[2],sz); x64_encode_memory(&o[1], R, i);
 			if (!X64_REGISTER_IS_XMM(i->registers[2])) op=X64O_MOV;
 			if (X64_REGISTER_IS_XMM(i->registers[2])) { mn=sz==4?"movss":sz==8?"movsd":"movups"; sz=0; } break;
-		case X64_OP_LEA: mn="lea"; o[0]=x64_encode_memory(R,i); break;
+		case X64_OP_LEA: op=X64O_LEA; x64_encode_memory(&o[0], R, i); break;
 		case X64_OP_LEASCALE:
-			mn="lea"; o[0]=(XOp){ .kind=XK_MEM,.base=(int8_t)i->registers[1],.index=(int8_t)i->registers[2],.scale=(uint8_t)(1u<<i->shift) }; break;
+			op=X64O_LEA; o[0]=(XOp){ .kind=XK_MEM,.base=(int8_t)i->registers[1],.index=(int8_t)i->registers[2],.scale=(uint8_t)(1u<<i->shift) }; break;
 		case X64_OP_ADD: case X64_OP_SUB: case X64_OP_AND: case X64_OP_OR: case X64_OP_XOR: case X64_OP_ADC: case X64_OP_SBB:
 			op = integer_op[i->opcode]; x64_encode_register(&o[0], i->registers[2], sz); break;
 		case X64_OP_ADDI: case X64_OP_SUBI: case X64_OP_ANDI: case X64_OP_ORI: case X64_OP_XORI:
@@ -158,7 +175,7 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p, size_t n
 			mn="movzbl"; sz=0; x64_encode_register(&o[1], i->registers[0],4); break;
 		case X64_OP_JMP: case X64_OP_JCC: case X64_OP_LEAL:
 			o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,x64_encode_label(R,fid,i->label),0),.hasv=1 };
-			if (i->opcode==X64_OP_LEAL) { mn="lea";sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
+			if (i->opcode==X64_OP_LEAL) { op=X64O_LEA;sz=8;o[0].kind=XK_MEM;o[0].base=16;o[0].index=-1;o[0].scale=1; }
 			else { snprintf(name,sizeof name,"j%s",i->opcode==X64_OP_JMP?"mp":ccname[i->condition]);mn=name;sz=0;count=1; } break;
 		case X64_OP_CALL:
 			mn="callq";sz=0;count=1;o[0]=(XOp){ .kind=XK_EXPR,.v=as_symbol_value(R->assembler,codegen_commit_symbol_find(R,i->reference),0),.hasv=1 };

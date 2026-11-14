@@ -95,6 +95,9 @@ typedef struct virbuild_context {
 	uint32_t *block_map; uint32_t block_map_capacity;		/* scratch */
 	uint64_t live_names[3], live_float_names;		/* names in use */
 	uint32_t float_products[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
+	uint32_t indirect_dispatch; /* common predecessor for address-taken entries */
+	struct { uint32_t reference, block; } *indirect_targets;
+	uint32_t indirect_count, indirect_capacity;
 	uint32_t current_block;				/* the block being built */
 	bool sealing;
 	uint32_t result_type;				/* the result's type, VIR_TYPE_VOID none */
@@ -114,7 +117,8 @@ typedef struct virbuild_context {
 #define VIRBUILD_REGISTER_NONE 255
 #define VIRBUILD_FLOAT_REGISTER_FIRST 192	/* float names 192..254 */
 #define VIRBUILD_RESULT_VARIABLE 255	/* the result variable */
-#define VIRBUILD_LOCAL_VARIABLE_FIRST 256	/* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
+#define VIRBUILD_JUMP_VARIABLE 256
+#define VIRBUILD_LOCAL_VARIABLE_FIRST 257	/* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
 #define VIRBUILD_BLOCK_NONE 0xffffffffu
 
 #define VIRBUILD_ARRAY_GROW(p, n, cap, k) do { \
