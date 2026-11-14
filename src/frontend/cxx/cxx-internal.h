@@ -159,7 +159,7 @@ typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
 /* a function parameter: its name (0: unnamed) and type, declared in the body's scope */
 typedef struct cxx_param { uint32_t name; qty ty; } cxx_param;
 
-typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams; } cxx_late;
+typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; cxx_param *params; uint32_t nparams, template_depth; } cxx_late;
 
 typedef struct cxx {
 	pp *p;

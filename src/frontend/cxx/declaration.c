@@ -1408,6 +1408,7 @@ static void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
 		c->late = realloc(c->late, (c->clate = c->clate ? c->clate * 2 : 64) * sizeof *c->late);
 	c->late[c->nlate].begin = begin, c->late[c->nlate].end = end, c->late[c->nlate].scope = c->scope;
 	c->late[c->nlate].nparams = c->ndecl_params;
+	c->late[c->nlate].template_depth = c->template_depth;
 	c->late[c->nlate].params = c->ndecl_params ? malloc(c->ndecl_params * sizeof(cxx_param)) : NULL;
 	if (c->ndecl_params)
 		memcpy(c->late[c->nlate].params, c->decl_params, c->ndecl_params * sizeof(cxx_param));
@@ -1515,11 +1516,12 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 {
 	for (uint32_t i = from; i < c->nlate; i++) {
 		cxx_late l = c->late[i];
-		uint32_t save = c->pos, depth = c->class_depth;
+		uint32_t save = c->pos, depth = c->class_depth, tdepth = c->template_depth;
 		cxx_scope *ss = c->scope;
 		cxx_scope *fs;
 
 		c->pos = l.begin;
+		c->template_depth = l.template_depth;	/* a member template's body: names may be dependent */
 		c->scope = l.scope;
 		c->class_depth = 0;
 		fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
@@ -1532,6 +1534,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
 		c->scope = ss;
 		c->pos = save;
 		c->class_depth = depth;
+		c->template_depth = tdepth;
 	}
 	c->nlate = from;
 }

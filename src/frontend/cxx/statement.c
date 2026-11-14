@@ -358,10 +358,21 @@ VPRIV void cxx_statement_parse(cxx *c)
 		cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
 		return;
 	}
+	uint32_t start = c->pos;
+
 	cxx_expression_parse(c);
 	if (!c->tentative && !c->template_depth && !c->instantiating) {
+		static int dump = -1;
+
 		c->stats.expressions++;	/* (an expression statement outside templates: its type known?) */
 		c->stats.expressions_typed += c->etype != CXX_TY_UNKNOWN;
+		if (dump < 0)
+			dump = getenv("VCC_CXX_UNTYPED") != NULL;
+		if (dump && c->etype == CXX_TY_UNKNOWN) {	/* the untyped statements, for the next step */
+			for (uint32_t i = start; i < c->pos && i < start + 12; i++)
+				fprintf(stderr, "%.*s ", (int)c->tok[i].len, c->tok[i].s);
+			fputc('\n', stderr);
+		}
 	}
 	cxx_expect(c, LEX_TOKEN_SEMICOLON);
 }
