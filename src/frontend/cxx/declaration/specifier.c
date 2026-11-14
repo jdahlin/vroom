@@ -438,12 +438,17 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, qty *t)
 		bool dep;
 
 		cxx_nested_name_parse(c, &q, &dep);
-		if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {	/* pointer to member (not built yet) */
+		if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {
+			/* a pointer to member: an opaque type of its own (no such values are built yet), so that a template's
+			   parameter of that form is a deduction that fails for other arguments, not one not known */
 			cxx_advance(c);
 			while (cxx_kw_is_cv(cxx_kw(c)))
 				cxx_advance(c);
-			if (t)
-				*t = CXX_TY_UNKNOWN;
+			if (t) {
+				if (!c->memptr_ty)
+					c->memptr_ty = QT(c->ast->tags[cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("__vcc_member_pointer"), 0)].ty, 0);
+				*t = c->memptr_ty;
+			}
 			return true;
 		}
 		cxx_rewind(c, save, save_undo);

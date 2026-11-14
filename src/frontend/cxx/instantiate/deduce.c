@@ -223,6 +223,9 @@ VPRIV bool cxx_shape_mismatch(cxx *c, qty P, qty A)
    0 no match, -1 not known */
 VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue, cxx_targ *bind)
 {
+	if (c->memptr_ty && P != CXX_TY_UNKNOWN && QUNQ(P) == QUNQ(c->memptr_ty) && A != CXX_TY_UNKNOWN &&
+	    QUNQ(A) != QUNQ(c->memptr_ty) && !cc_type_is_record(c->ast, A))
+		return 0;	/* (R C::* from something that is no pointer to member: no deduction) */
 	if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
 		return 1;	/* (non-deduced: its conversion is not checked here) */
 	if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {

@@ -1874,3 +1874,9 @@ Hastighet: cxx-strict:s kompilering, bara vcc, en process per TU utan delade huv
 väggtid summerat (CPU ungefär lika) mot clang -O2:s 243 s, ~8x; med huvudfilerna en gång per
 konfiguration (fork-servern) var det 10 s, ~24x.  30x kräver både färdig täckning och den delningen
 (eller en snabbare vcc): ingen komplett mätning ännu.
+
+## Status 103 (2026-11-14)
+Pekare till medlem (`R C::*`) får en egen opak (ofullständig) typ i stället för okänd, och deduktion av ett
+sådant mönster mot ett argument som inte är en medlemspekare misslyckas (förut "inte känt", vilket
+blockerade libc++:s `__function::__is_null`).  `std::function<bool(int,int)> f = cb; g(f); g(1,3)` går
+nu igenom med bara vcc:s kod.  cxx-strict 342 (oförändrat i summa).

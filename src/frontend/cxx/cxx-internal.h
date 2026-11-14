@@ -359,6 +359,7 @@ typedef struct cxx {
 	uint32_t npacks_seen;
 	uint8_t packs_overflow;
 	/* expressions' types (typing.c) */
+	qty memptr_ty;		/* T C::*: one opaque (incomplete) type for every pointer to member, not built yet */
 	qty etype;			/* the last expression's type (CXX_TY_UNKNOWN: not known) */
 	uint8_t elval;			/* ... an lvalue */
 	cxx_entity *ecallee;		/* a name that is a set of functions: for the call that follows */
