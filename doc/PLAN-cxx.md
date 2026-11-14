@@ -1533,3 +1533,11 @@ operatorer, den inbyggda om ingen kandidat passar.  (3) `const T&` från en `con
 `p->operator+(x)`, `this->operator,(in)`: objektet följer med till anropet.  Det här fick doctests
 CAPTURE (`mb * "x := ", x` i en lambda) att få kod, vilket visade litteralfelet i unit-to_chars.
 cxx-run 60/60; cxx-fork 69/70, 3 205 funktioner från vcc (från 3 061).
+
+### Status (66): range-for över arrayer och klammerlistor (2026-11-14)
+Range-for hade ingen kodgenerering: kroppen tolkades med kodgenereringen på men utan någon slinga
+runt (troligen fel kod, kroppen en gång).  Nu: en array (lvärde) och en klammerlista (elementen i en
+lokal array av deras typ, `auto` härledd från den, const som initializer_list:s element) blir
+`{ E *p = r; for (long i = 0; i < N; i++) { decl = p[i]; body } }`; variabeln som kopia, referens eller
+pekare.  En klass med begin/end: ingen kod än (förut kroppen utan slinga).  cxx-run 61/61; cxx-fork
+69/70, 3 205 funktioner (json:s range-for går över behållare eller strömmar).

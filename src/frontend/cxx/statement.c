@@ -158,18 +158,72 @@ static void cxx_for_parse(cxx *c)
 				if (c->tok[k].kind == LEX_TOKEN_IDENTIFIER && !c->tok[k].kw && c->tok[k - 1].kind == LEX_TOKEN_COMMA)
 					cxx_declare(c, fs, c->tok[k].id, CXX_ENTITY_VALUE);	/* structured bindings */
 			cxx_expect(c, LEX_TOKEN_COLON);
-			cxx_initializer_parse(c);
+			uint32_t rloc = cxx_peek(c, 0)->loc, rnode = 0, elems[64], nelems = 0;
+			qty brace_elem = CXX_TY_UNKNOWN;
+			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE), list_ok = braced;
+
+			if (braced) {
+				/* { e, ... }: a std::initializer_list of the elements' one type (decayed), here its elements */
+				cxx_advance(c);
+				while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
+					qty et;
+
+					cxx_assignment_expression_parse(c);
+					et = c->etype;
+					if (et != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+						et = cc_type_pointer(c->ast, AST_TYPE(c->ast, et)->base);
+					else if (et != CXX_TY_UNKNOWN)
+						et = QUNQ(et);
+					if (et == CXX_TY_UNKNOWN || (brace_elem != CXX_TY_UNKNOWN && brace_elem != et))
+						list_ok = false;
+					brace_elem = et;
+					if (nelems < 64)
+						elems[nelems] = c->enode;
+					nelems++;
+					if (!cxx_accept(c, LEX_TOKEN_COMMA))
+						break;
+				}
+				cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
+				if (nelems > 64)
+					list_ok = false;
+			} else {
+				cxx_initializer_parse(c);
+				rnode = c->enode;
+			}
 			if (var) {
 				/* auto: deduced from *begin(range), an lvalue; else as declared */
 				qty elem;
 
 				if (!var_auto)
 					var->ty = var_type;
-				else if (cxx_range_element_type(c, c->etype, &elem))
-					var->ty = cxx_auto_deduce(c, var_type, elem, true);
+				else if (braced ? list_ok && (elem = brace_elem, true) : cxx_range_element_type(c, c->etype, &elem))
+					var->ty = cxx_auto_deduce(c, var_type, braced ? QT(QI(elem), Q_CONST) : elem, true);
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-			cxx_statement_parse(c);
+			{
+				/* code generation: arrays and braced lists (cxx_gen_range_for_begin) */
+				cxx_gen_range gr;
+				bool gen = cxx_gen_on(c) && var && var->ty != CXX_TY_UNKNOWN && !c->tentative && !c->template_depth &&
+					   (!braced || list_ok);
+
+				if (gen && cxx_gen_range_for_begin(c, &gr, rnode, braced ? elems : NULL, nelems, brace_elem, rloc)) {
+					uint32_t vs = cxx_gen_local(c, var->name, var->ty, rloc);
+
+					if (vs) {
+						var->sym = vs;
+						cxx_gen_local_declare(c, vs, cxx_gen_range_for_element(c, &gr), true, rloc);
+					}
+					c->snode = 0;
+					cxx_statement_parse(c);
+					if (!vs)
+						cxx_gen_fail(c);
+					cxx_gen_range_for_end(c, &gr);
+				} else {
+					if (cxx_gen_on(c) && !c->tentative && !c->template_depth)
+						cxx_gen_fail(c);	/* (begin/end of a class: not built yet) */
+					cxx_statement_parse(c);
+				}
+			}
 			c->scope = outer;
 			return;
 		}

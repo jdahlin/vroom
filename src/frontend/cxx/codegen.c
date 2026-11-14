@@ -4314,6 +4314,102 @@ VPRIV uint32_t cxx_gen_new_statement(cxx *c, int op, uint32_t loc, uint32_t x, u
 	return cc_statement_new(c->ast, op, loc, x, y, z);
 }
 
+/*
+ * for (decl : range) over an array (or a braced list, made an array first): { E *p = range; for (long i = 0;
+ * i < N; i++) { decl = p[i]; body } }.  begin/end of a class: not built yet.  The parts as the parser has
+ * them: elems/nelems for a braced list (else range, an lvalue array), the variable's symbol made here.
+ */
+VPRIV bool cxx_gen_range_for_begin(cxx *c, cxx_gen_range *r, uint32_t range, const uint32_t *elems, uint32_t nelems, qty elem, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty lt = cc_type_basic(TY_LONG), et, pt;
+	uint32_t arr, n;
+
+	memset(r, 0, sizeof *r);
+	if (!cxx_gen_on(c) || !c->gen_block)
+		return false;
+	cc_id_list_init(&r->pre);
+	r->outer = c->gen_block;
+	if (elems) {
+		/* a braced list: a local array of its elements, converted to their type */
+		if (!nelems || elem == CXX_TY_UNKNOWN || !cxx_gen_type_ok(c, elem))
+			return false;
+		et = QUNQ(elem);
+		arr = cxx_gen_local(c, 0, cc_type_array(a, et, nelems, 0), loc);
+		if (!arr)
+			return false;
+		c->gen_block = &r->pre;
+		cxx_gen_local_declare(c, arr, 0, false, loc);
+		for (uint32_t i = 0; i < nelems; i++) {
+			uint32_t x = elems[i] ? cc_conversion_apply(a, cc_conversion_decay(a, cc_node_rvalue(a, elems[i])), et) : 0, slot;
+
+			if (!x)
+				goto fail;
+			slot = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)),
+								   cc_node_integer_new(a, i, lt, loc), loc), loc);
+			cc_id_list_append(a, &r->pre, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, slot, x, loc), 0, 0));
+		}
+		range = cxx_gen_var_node(c, arr, loc);
+		n = nelems;
+	} else {
+		const ctype *x;
+
+		if (!range || !(AST_NODE_AT(a, range)->flags & NF_LVALUE) || AST_TYPE_KIND(a, AST_NODE_AT(a, range)->ty) != TY_ARRAY)
+			return false;
+		x = AST_TYPE(a, AST_NODE_AT(a, range)->ty);
+		if ((x->flags & TF_INCOMPLETE) || !x->n || !cxx_gen_object_type_ok(c, x->base))
+			return false;
+		et = x->base, n = (uint32_t)x->n;
+		c->gen_block = &r->pre;
+	}
+	pt = cc_type_pointer(a, et);
+	r->p = cxx_gen_local(c, 0, pt, loc);
+	r->i = cxx_gen_local(c, 0, lt, loc);
+	if (!r->p || !r->i)
+		goto fail;
+	cxx_gen_local_declare(c, r->p, cc_conversion_decay(a, range), true, loc);
+	cxx_gen_local_declare(c, r->i, cc_node_integer_new(a, 0, lt, loc), true, loc);
+	r->n = n, r->loc = loc, r->ok = true;
+	cc_id_list_init(&r->body);
+	c->gen_block = &r->body;
+	return true;
+fail:
+	c->gen_block = r->outer;
+	return false;
+}
+
+/* the element the loop is at (an lvalue): p[i] */
+VPRIV uint32_t cxx_gen_range_for_element(cxx *c, cxx_gen_range *r)
+{
+	cc *a = c->ast;
+
+	return cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_node_rvalue(a, cxx_gen_var_node(c, r->p, r->loc)),
+						       cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)), r->loc), r->loc);
+}
+
+/* the body parsed (c->snode): the loop, as the statement */
+VPRIV void cxx_gen_range_for_end(cxx *c, cxx_gen_range *r)
+{
+	cc *a = c->ast;
+	uint32_t cond, step, body;
+	cc_id_list sb;
+
+	c->gen_block = r->outer;
+	if (!r->ok || !cxx_gen_on(c))
+		return;
+	if (c->snode)
+		cc_id_list_append(a, &r->body, c->snode);
+	body = cc_statement_new(a, N_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->body), r->body.n);
+	cond = cc_binary_build(a, LEX_TOKEN_LESS, cc_node_rvalue(a, cxx_gen_var_node(c, r->i, r->loc)),
+			       cc_node_integer_new(a, r->n, cc_type_basic(TY_LONG), r->loc), r->loc);
+	step = cc_assignment_build(a, LEX_TOKEN_PLUS, cxx_gen_var_node(c, r->i, r->loc), cc_node_integer_new(a, 1, cc_type_basic(TY_LONG), r->loc), r->loc);
+	cc_id_list_init(&sb);
+	cc_id_list_append(a, &sb, step);
+	cc_id_list_append(a, &sb, body);
+	cc_id_list_append(a, &r->pre, cc_statement_new(a, N_FOR, r->loc, 0, cond, cc_id_list_freeze(a, &sb)));
+	cxx_gen_statement(c, cc_statement_new(a, N_BLOCK, r->loc, 0, cc_id_list_freeze(a, &r->pre), r->pre.n));
+}
+
 /* a condition: the expression's node as a scalar truth value (0: not built) */
 VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e)
 {
