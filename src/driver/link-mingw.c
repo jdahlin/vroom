@@ -139,7 +139,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env, 
 			threads = true;
 		else if (!strcmp(a, "-pthread"))
 			pthread = true;
-		else if (!strcmp(a, "-fstack-protector") || !strcmp(a, "-fstack-protector-strong") || !strcmp(a, "-fstack-protector-all"))
+		else if (!strncmp(a, "-fstack-protector", 17) && (!a[17] || !strcmp(a + 17, "-strong") || !strcmp(a + 17, "-all")))
 			ssp = true;	/* (clang: any of them, even negated later) */
 		else if (!strcmp(a, "-s"))
 			strip = true;

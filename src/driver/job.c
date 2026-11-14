@@ -19,12 +19,10 @@
  */
 #include "driver-internal.h"
 
-/* -g's compilation directory: the client's (vccd) or the process' */
-static const char *driver_debug_directory(const driver_environment *env)
+/* -g's compilation directory: the client's (vccd) or the process' (into buf) */
+static const char *driver_debug_directory(const driver_environment *env, char *buf, size_t size)
 {
-	static _Thread_local char cwd[4096];
-
-	return env->cwd ? env->cwd : getcwd(cwd, sizeof cwd);
+	return env->cwd ? env->cwd : getcwd(buf, size);
 }
 
 static double driver_clock_seconds(void)
@@ -80,7 +78,9 @@ static void driver_source_assemble(struct driver_job *job, const driver_environm
 		}
 		as_include_directory_set(driver_assembler, env->cwd);
 		as_dwarf_version_set(driver_assembler, job->dwarf_version);
-		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env) : NULL);
+		char cwd[4096];
+
+		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env, cwd, sizeof cwd) : NULL);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);
 		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		size_t tn = (size_t)got;
@@ -299,7 +299,9 @@ static void driver_job_preprocess(struct driver_job *job, pp *p, const driver_en
 
 		as_include_directory_set(driver_assembler, env->cwd);
 		as_dwarf_version_set(driver_assembler, job->dwarf_version);
-		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env) : NULL);
+		char cwd[4096];
+
+		as_debug_directory_set(driver_assembler, job->debug ? driver_debug_directory(env, cwd, sizeof cwd) : NULL);
 		elf_set_machine(driver_object, job->target_x64 ? EM_X86_64 : EM_AARCH64);	/* (a .S file: preprocessed, then assembled) */
 		obj_set_format(driver_object, job->target_win64 ? OBJ_COFF : OBJ_ELF);
 		char *dt = NULL;

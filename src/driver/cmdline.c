@@ -345,8 +345,7 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
 		else if (!strcmp(a, "-fno-optimize-sibling-calls")) job->sibling_calls = -1;
 		else if (!strcmp(a, "-fasynchronous-unwind-tables")) job->cfi = 1;
 		else if (!strcmp(a, "-fno-asynchronous-unwind-tables")) job->cfi = 0;
-		else if (!strcmp(a, "-funwind-tables")) job->unwind_tables = 1;	/* (Windows: keeps SEH; elsewhere ignored) */
-		else if (!strcmp(a, "-fno-unwind-tables")) job->unwind_tables = 0;
+		else if (!strcmp(a + (a[2] == 'n' ? 5 : 2), "unwind-tables") && a[1] == 'f') job->unwind_tables = a[2] != 'n';	/* -f[no-]unwind-tables (Windows: keeps SEH; elsewhere ignored) */
 		else if (!strcmp(a, "-mstrict-align")) job->strict_align = 1;
 		else if (!strcmp(a, "-fwrapv") || !strcmp(a, "-fno-strict-overflow")) job->wrapv = 1;
 		else if (!strcmp(a, "-fno-wrapv") || !strcmp(a, "-fstrict-overflow")) job->wrapv = 0;
