@@ -331,6 +331,8 @@ typedef struct cxx {
 	qty gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+#define CXX_BRACE_MAX 256
+	uint32_t brace_nodes[CXX_BRACE_MAX], brace_n;	/* the last braced list's element nodes (flat lists) */
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
 	uint8_t construct_depth;	/* conversions through constructors being tried (a constructor's parameter may need one) */
 	uint8_t attr_nua, attr_packed;	/* the declaration's attributes had no_unique_address, packed */
@@ -457,6 +459,14 @@ VPRIV void cxx_gen_floating(cxx *c, const char *text, size_t len, qty t, uint32_
 VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc);
 VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
+VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc);
+VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV void cxx_gen_index(cxx *c, uint32_t base, uint32_t index, uint32_t loc);
+VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, uint32_t loc);
+VPRIV void cxx_gen_comma(cxx *c, uint32_t x, uint32_t y, uint32_t loc);
+VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc);
+VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
+VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool has_init);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, const uint32_t *args, uint32_t nargs, uint32_t loc);

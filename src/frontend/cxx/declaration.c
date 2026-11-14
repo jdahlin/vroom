@@ -581,7 +581,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template);
 static void cxx_enum_specifier_parse(cxx *c);
 
 enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32, DS_STATIC = 64,
-       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512 };
+       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024 };
 
 static bool cxx_kw_is_simple_type(int kw)
 {
@@ -849,6 +849,8 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			} else
 				flags |= DS_EXPLICIT;
 		} else if (cxx_kw_is_decl_specifier(kw) || cxx_kw_is_cv(kw)) {
+			if (kw == CXX_KW_extern)
+				flags |= DS_EXTERN_SEEN;
 			if (cxx_kw_is_cv(kw))
 				cxx_spec_keyword(&sp, kw);
 			cxx_advance(c);
@@ -1668,6 +1670,11 @@ VPRIV bool cxx_try_type_id(cxx *c)
 
 VPRIV void cxx_braced_init_list_parse(cxx *c)
 {
+	/* code generation: the elements' nodes of a flat list { a, b, c } (c->brace_n; UINT32_MAX: not flat,
+	   or an element was not built) */
+	uint32_t nodes[CXX_BRACE_MAX], n = 0;
+	bool flat = true;
+
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 		if (cxx_is(c, LEX_TOKEN_PERIOD) && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER) {	/* .designator = */
@@ -1675,13 +1682,23 @@ VPRIV void cxx_braced_init_list_parse(cxx *c)
 			cxx_advance(c);
 			if (!cxx_accept(c, LEX_TOKEN_EQUAL) && !cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 				cxx_fail(c, "expected '=' after a designator");
+			flat = false;
 		}
+		flat &= !cxx_is(c, LEX_TOKEN_LEFT_BRACE);
 		cxx_initializer_parse(c);
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		if (flat && n < CXX_BRACE_MAX && c->enode)
+			nodes[n++] = c->enode;
+		else
+			flat = false;
+		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+			flat = false;
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}
 	cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
+	c->brace_n = flat ? n : UINT32_MAX;
+	if (flat)
+		memcpy(c->brace_nodes, nodes, n * sizeof *nodes);
 }
 
 /* initializer-clause: assignment-expression or braced-init-list */
@@ -2854,6 +2871,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
 		cxx_entity *decl_fn = NULL;	/* the function it declares (= delete, = default follow the declarator) */
 		uint32_t gen_local = 0;		/* code generation: the local variable's symbol */
+		cxx_entity *gen_var = NULL;	/* ... a variable at namespace scope */
 		uint32_t gen_after_declarator = c->pos;
 		bool gen_declared = false;
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
@@ -2986,6 +3004,10 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
 				e->global_ns = cxx_declaration_scope(c) == c->global, e->home = cxx_declaration_scope(c);
+			if (e && global && kind == CXX_ENTITY_VALUE && !f && !(flags & DS_EXTERN_SEEN))
+				gen_var = e;
+			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
+				c->ast->syms[e->sym].sc = SC_STATIC;	/* (internal linkage) */
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL)) {
 				int64_t v;
@@ -3142,10 +3164,16 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 			} else {
 				bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+				/* code generation: a variable defined at namespace scope, its initializer's node */
+				bool gen_global = global && gen_var && !f && !(flags & DS_CONSTEXPR) && !auto_e && cxx_gen_global_begin(c, gen_var);
 
 				cxx_initializer_parse(c);
+				if (gen_global) {
+					cxx_gen_global_end(c, gen_var, braced ? cxx_gen_array_initializer(c, t, name_loc) : c->enode, true);
+					gen_declared = true;
+				}
 				if (gen_local) {
-					cxx_gen_local_declare(c, gen_local, braced ? 0 : c->enode, true, name_loc);
+					cxx_gen_local_declare(c, gen_local, braced ? cxx_gen_array_initializer(c, t, name_loc) : c->enode, true, name_loc);
 					gen_declared = true;
 				}
 				/* auto x = expr: its type from the initializer's */
@@ -3187,6 +3215,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			else
 				cxx_gen_fail(c);
 		}
+		/* ... a variable at namespace scope with no initializer: zero-initialized */
+		if (gen_var && !gen_declared && c->pos == gen_after_declarator && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var))
+			cxx_gen_global_end(c, gen_var, 0, false);
 		if (!cxx_accept(c, LEX_TOKEN_COMMA))
 			break;
 	}

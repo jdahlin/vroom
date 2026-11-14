@@ -145,22 +145,60 @@ static void cxx_for_parse(cxx *c)
 			return;
 		}
 	}
+	/* code generation: { init; for (; cond; step) body } with the init's declarations in the block */
+	bool gen = cxx_gen_on(c);
+	cc_id_list pre;
+	void *outer_block = c->gen_block;
+	uint32_t floc = cxx_peek(c, 0)->loc, gcond = 0, gstep = 0, gbody;
+	bool has_step = false;
+
+	if (gen) {
+		cc_id_list_init(&pre);
+		c->gen_block = &pre;
+	}
 	if (!cxx_accept(c, LEX_TOKEN_SEMICOLON)) {
 		if (cxx_declaration_statement_try(c))
 			cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
 		else {
 			cxx_expression_parse(c);
+			if (gen && cxx_gen_on(c)) {
+				if (c->enode)
+					cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, N_EXPR, floc, c->enode, 0, 0));
+				else
+					cxx_gen_fail(c);
+			}
 			cxx_expect(c, LEX_TOKEN_SEMICOLON);
 		}
 	}
-	if (!cxx_is(c, LEX_TOKEN_SEMICOLON))
+	if (gen)
+		c->gen_block = outer_block;
+	if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
 		cxx_expression_parse(c);
+		if (gen)
+			gcond = cxx_gen_condition(c, c->enode);
+	}
 	cxx_expect(c, LEX_TOKEN_SEMICOLON);
-	if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN))
+	if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		cxx_expression_parse(c);
+		has_step = true, gstep = c->enode;
+	}
 	cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 	cxx_statement_parse(c);
 	c->scope = outer;
+	if (gen && cxx_gen_on(c)) {
+		cc_id_list sb;
+
+		gbody = c->snode ? c->snode : cxx_gen_new_statement(c, N_BLOCK, floc, 0, 0, 0);
+		if (has_step && !gstep) {
+			cxx_gen_fail(c);
+			return;
+		}
+		cc_id_list_init(&sb);
+		cc_id_list_append(c->ast, &sb, gstep);
+		cc_id_list_append(c->ast, &sb, gbody);
+		cc_id_list_append(c->ast, &pre, cxx_gen_new_statement(c, N_FOR, floc, 0, gcond, cc_id_list_freeze(c->ast, &sb)));
+		cxx_gen_statement(c, cxx_gen_new_statement(c, N_BLOCK, floc, 0, cc_id_list_freeze(c->ast, &pre), pre.n));
+	}
 }
 
 /* if/switch/while ( [init;] condition ) */
@@ -355,15 +393,22 @@ static void cxx_statement_parse1(cxx *c)
 			cxx_gen_statement(c, cxx_gen_new_statement(c, N_WHILE, sloc, gen_cond, gen_body, 0));
 		return;
 	}
-	case CXX_KW_do:
+	case CXX_KW_do: {
+		uint32_t gen_body, gen_cond;
+
 		cxx_advance(c);
 		cxx_statement_parse(c);
+		gen_body = cxx_gen_nested(c, sloc);
 		cxx_expect_kw(c, CXX_KW_while);
 		cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 		cxx_expression_parse(c);
+		gen_cond = cxx_gen_condition(c, c->enode);
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		cxx_expect(c, LEX_TOKEN_SEMICOLON);
+		if (gen_body && gen_cond && cxx_gen_on(c))
+			cxx_gen_statement(c, cxx_gen_new_statement(c, N_DO, sloc, gen_cond, gen_body, 0));
 		return;
+	}
 	case CXX_KW_for:
 		cxx_advance(c);
 		cxx_for_parse(c);

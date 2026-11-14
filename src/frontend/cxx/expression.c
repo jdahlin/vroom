@@ -308,11 +308,14 @@ static void cxx_functional_cast_type(cxx *c, qty cast_to)
 {
 	bool k = c->carg_const, zero = c->ncargs == 0;
 	int64_t v = zero ? 0 : c->carg_value;
+	uint32_t xn = c->ncargs == 1 ? c->carg_nodes[0] : 0;
 
 	cxx_et(c, cast_to, false);
 	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
 	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
 		cxx_ec(c, cast_to, v);
+	else
+		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
 }
 
 /* ( arguments ) or { arguments }: their types in c->cargs (unknown if any is a pack expansion) */
@@ -863,12 +866,14 @@ static void cxx_primary_expression_parse(cxx *c)
 		return;
 	case LEX_TOKEN_STRING: case LEX_TOKEN_WIDE_STRING: case LEX_TOKEN_UTF8_STRING: case LEX_TOKEN_UTF16_STRING:
 	case LEX_TOKEN_UTF32_STRING: {
-		uint32_t len = 0;
+		uint32_t len = 0, pieces = 0;
 		bool plain = true;
+		const cxx_token *first_piece = cxx_peek(c, 0);
 
 		while (cxx_kind(c) >= LEX_TOKEN_STRING && cxx_kind(c) <= LEX_TOKEN_UTF32_STRING) {
 			const cxx_token *x = cxx_peek(c, 0);
 
+			pieces++;
 			plain &= x->kind == LEX_TOKEN_STRING && x->s[0] == '"' && x->s[x->len - 1] == '"';
 			for (uint32_t i = 1; i + 1 < x->len; i++)
 				plain &= x->s[i] != '\\';	/* (escapes: the length is not counted here) */
@@ -876,8 +881,11 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_advance(c);
 		}
 		/* "abc": an lvalue of const char[4] */
-		if (plain && !c->tentative)
+		if (plain && !c->tentative) {
 			cxx_et(c, cc_type_array(c->ast, cc_type_qualify(c->ast, cc_type_basic(TY_CHAR), Q_CONST), len + 1, 0), true);
+			if (pieces == 1)	/* (concatenation and escapes: not built yet) */
+				cxx_gen_string(c, first_piece->s + 1, first_piece->len - 2, first_piece->loc);
+		}
 		return;
 	}
 	case LEX_TOKEN_LEFT_PAREN:
@@ -938,11 +946,15 @@ static void cxx_primary_expression_parse(cxx *c)
 			bool k = c->econst;
 			int64_t v = c->evalue;
 
+			uint32_t xn = c->enode;
+
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;
 			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
 			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
 				cxx_ec(c, cast_to, v);
+			else if (t->kw == CXX_KW_static_cast)
+				cxx_gen_cast(c, xn, cast_to, t->loc);
 		}
 		return;
 	case CXX_KW_typeid:
@@ -1130,6 +1142,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 			{
 				uint32_t targs = c->in_template_args;
 				qty base = c->etype;
+				uint32_t bn = c->enode, in, iloc = cxx_peek(c, 0)->loc;
 
 				c->in_template_args = 0;
 				if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
@@ -1137,11 +1150,16 @@ static void cxx_postfix_expression_parse(cxx *c)
 				else
 					cxx_expression_parse(c);
 				c->in_template_args = targs;
+				in = c->enode;
 				/* a[i]: an element of an array or pointer, or a class's operator[] */
 				if (!c->tentative && cxx_operator_call_type(c, vintern_cstr("operator[]"), base, &c->etype, 1))
 					;
-				else cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
-					  !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
+				else {
+					cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
+					       !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
+					if (c->etype != CXX_TY_UNKNOWN)
+						cxx_gen_index(c, bn, in, iloc);
+				}
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 			continue;
@@ -1518,11 +1536,15 @@ static void cxx_cast_expression_parse(cxx *c)
 			bool k = c->econst;
 			int64_t v = c->evalue;
 
+			uint32_t xn = c->enode, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
+
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;	/* ((void)x: a type whatever x is; a tentative parse types nothing) */
 			cxx_et(c, cast_to, false);
 			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
 				cxx_ec(c, cast_to, v);
+			else
+				cxx_gen_cast(c, xn, cast_to, cloc);
 		}
 		return;
 	}
@@ -1625,14 +1647,16 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 		bool l2 = c->elval;
 		bool ck = c->econst, k2 = c->econst, k3;
 		int64_t cv = c->evalue, v2 = c->evalue, v3;
+		uint32_t cn = c->enode, n2 = 0, n3, qloc = c->tok[c->pos - 1].loc;
 
 		c->in_template_args = 0;
 		if (!cxx_is(c, LEX_TOKEN_COLON))	/* GNU ?: */
-			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval, k2 = c->econst, v2 = c->evalue;
+			cxx_expression_parse(c), t2 = c->etype, l2 = c->elval, k2 = c->econst, v2 = c->evalue, n2 = c->enode;
 		c->in_template_args = targs;
 		cxx_expect(c, LEX_TOKEN_COLON);
 		cxx_assignment_expression_parse(c);
 		k3 = c->econst, v3 = c->evalue;
+		n3 = c->enode;
 		{
 			qty t3 = c->etype;
 
@@ -1642,6 +1666,10 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 				cxx_et(c, cc_type_arithmetic_conversion(c->ast, QUNQ(t2), QUNQ(t3)), false);
 			else
 				cxx_et(c, CXX_TY_UNKNOWN, false);
+			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's
+			   builder finds no lvalue and the function gets no code) */
+			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == TY_PTR))
+				cxx_gen_conditional(c, cn, n2, n3, qloc);
 			if (ck && (cv ? k2 : k3))
 				c->evalue = cv ? v2 : v3, c->econst = 1;	/* a constant condition: the branch taken */
 		}
@@ -1711,8 +1739,17 @@ VPRIV void cxx_expression_parse(cxx *c)
 		/* a, b: b's type whatever a is; whether a is valid is then not known (decltype(f(x), void())) */
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative && !c->template_depth)
 			c->eunsure = 1;
+		uint32_t ln = c->enode, cloc = cxx_peek(c, 0)->loc;
+
 		cxx_advance(c);
 		cxx_assignment_expression_parse(c);
+		if (c->etype != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, c->etype)) {
+			uint32_t rn = c->enode;
+
+			c->enode = 0;
+			cxx_gen_comma(c, ln, rn, cloc);
+		} else
+			c->enode = 0;
 	}
 }
 

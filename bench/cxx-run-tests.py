@@ -33,6 +33,9 @@ def one(path, tmp, verbose):
         return "not every function got code: " + (m.group(0) if m else "no count")
     if subprocess.run([CLANG, "-std=c++17", "-c", path, "-o", ref], capture_output=True).returncode:
         return "clang++ rejects the test"
+    # the test itself must be right: clang's build of it exits 0
+    if subprocess.run([CLANG, ref, "-o", exe + ".ref"], capture_output=True).returncode or subprocess.run([exe + ".ref"]).returncode:
+        return "the test fails when clang++ builds it"
     if symbols(obj) != symbols(ref):
         return "symbols differ: vcc %s, clang %s" % (symbols(obj), symbols(ref))
     r = subprocess.run([CLANG, obj, "-o", exe], capture_output=True, text=True)
