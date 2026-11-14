@@ -23,6 +23,7 @@
 #include "common/fail.h"
 #include "frontend/pp/pp.h"
 #include "frontend/c/cc.h"
+#include "frontend/cxx/cxx.h"
 #include "driver/driver.h"
 #include "as/as.h"
 #include "obj/obj.h"

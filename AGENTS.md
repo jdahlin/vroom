@@ -59,7 +59,10 @@ relative to it); `TODO.md` stays at the top.
   in `work/cxx`) is X0's clang-only measurement; `bench/cxx-json.py
   [--stage pp|syntax|obj]` is the proof of concept's progress on json (the
   only C++ test case for now); `src/tools/gen-cxxpredef.py` regenerates the
-  C++ predefines and `__has_*` answers from clang++.
+  C++ predefines and `__has_*` answers from clang++.  The C++ front end is
+  `src/frontend/cxx/` (module `cxx_SRC`; the driver calls `cxx_run` for a
+  C++ job; `VCC_CXX_PROGRESS=1` prints how many tokens it parsed);
+  `bench/cxx-parse-tests.py` runs its cases in `src/test/cxx/parse`.
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for

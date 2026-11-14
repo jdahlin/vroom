@@ -21,6 +21,7 @@ spec.loader.exec_module(cp)
 BIN = os.environ.get("VCC_BIN") or os.path.join(cp.ROOT, "build", "linux", "src")
 VPP = os.path.join(BIN, "vpp")
 STAGES = ["pp", "syntax", "obj"]
+PROGRESS = {}    # TU -> (tokens parsed, tokens) from the syntax stage
 
 
 def first_error(text):
@@ -51,9 +52,13 @@ def one(tu, last, outdir):
         else:
             a = [VPP, *base, "-O2", "-c", src, "-o", os.path.join(outdir, name + ".o")]
         try:
-            r = subprocess.run(a, capture_output=True, text=True, timeout=300)
+            r = subprocess.run(a, capture_output=True, text=True, timeout=300, env={**os.environ, "VCC_CXX_PROGRESS": "1"},
+                               errors="replace")
         except subprocess.TimeoutExpired:
             return name, st, "timeout"
+        m = re.search(r"cxx: parsed (\d+)/(\d+) tokens", r.stderr)
+        if m:
+            PROGRESS[name] = (int(m.group(1)), int(m.group(2)))
         if r.returncode:
             return name, st, first_error(r.stderr + r.stdout)
     return name, "ok", ""
@@ -72,6 +77,12 @@ def main():
     at = collections.Counter(st for _, st, _ in res)
     print(f"json: {len(res)} TUs; " + ", ".join(f"{s} failed {at[s]}" for s in ["ref"] + STAGES if at[s])
           + f"; passed through {a.stage}: {at['ok']}")
+    if PROGRESS:
+        done = sum(a for a, _ in PROGRESS.values())
+        tot = sum(b for _, b in PROGRESS.values())
+        least = min(PROGRESS.items(), key=lambda kv: kv[1][0] / max(kv[1][1], 1))
+        print(f"  parsed {done}/{tot} tokens ({100 * done / max(tot, 1):.1f} %); least: {least[0]} "
+              f"{least[1][0]}/{least[1][1]}")
     for st in ["ref"] + STAGES:
         errs = collections.Counter(bucket(m) for _, s, m in res if s == st)
         for m, n in errs.most_common(8):
