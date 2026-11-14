@@ -278,6 +278,18 @@ static void cxx_type_then_init(cxx *c)
 }
 
 
+/* T(x), T{x}, T(): a prvalue of type T; an integer constant when x is one (T(): zero) */
+static void cxx_functional_cast_type(cxx *c, qty cast_to)
+{
+	bool k = c->carg_const, zero = c->ncargs == 0;
+	int64_t v = zero ? 0 : c->carg_value;
+
+	cxx_et(c, cast_to, false);
+	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
+	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
+		cxx_ec(c, cast_to, v);
+}
+
 /* ( arguments ) or { arguments }: their types in c->cargs (unknown if any is a pack expansion) */
 static void cxx_arguments_parse(cxx *c, int open, int close);
 
@@ -296,7 +308,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	qty args[16];
 	uint8_t lval[16];
 	uint32_t n = 0;
-	bool unknown = false;
+	bool unknown = false, first_const = false;
+	int64_t first_value = 0;
 
 	cxx_expect(c, open);
 	while (!cxx_is(c, close)) {
@@ -365,6 +378,8 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
 		if (n < 16)
 			args[n] = c->etype, lval[n] = c->elval;
+		if (!n)
+			first_const = c->econst, first_value = c->evalue;
 		n++;
 		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
 			unknown = true;
@@ -374,6 +389,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 	cxx_expect(c, close);
 	if (n > 16)
 		unknown = true;
+	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
 		c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
@@ -952,7 +968,7 @@ static void cxx_primary_expression_parse(cxx *c)
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 			}
-			cxx_et(c, cast_to, false);
+			cxx_functional_cast_type(c, cast_to);
 			return;
 		}
 		if (t->kw == CXX_KW_decltype || t->kw == CXX_KW___decltype) {	/* decltype(x)::member */
@@ -978,7 +994,7 @@ static void cxx_primary_expression_parse(cxx *c)
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 			}
-			cxx_et(c, cast_to, false);
+			cxx_functional_cast_type(c, cast_to);
 			return;
 		}
 		cxx_fail(c, "unexpected '%.*s' in an expression", (int)t->len, t->s);
@@ -1037,7 +1053,7 @@ static void cxx_primary_expression_parse(cxx *c)
 				if (!c->tentative && !c->template_depth && cast_to != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, cast_to))
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 			}
-			cxx_et(c, cast_to, false);
+			cxx_functional_cast_type(c, cast_to);
 			return;
 		}
 	}
@@ -1471,6 +1487,7 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 
 			cxx_binary_expression_parse(c, p + 1);
 			rk = c->econst, rv = c->evalue;
+			qty rt = c->etype;
 			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1)) {
 				qty r = c->etype;
 
@@ -1481,6 +1498,20 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			if (lk && rk) {
 				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&
 					   AST_TYPE_KIND(c->ast, c->etype) <= TY_UINT128 && !cc_type_is_signed(c->ast, c->etype);
+
+				/* a comparison's result is bool: unsigned when the operands' common type is (an
+				   unsigned operand of at least int's size, no narrower than the other) */
+				if (op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER || op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL) {
+					qty o[2] = { l, rt };
+
+					uns = false;
+					for (int i = 0; i < 2 && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN; i++) {
+						const ctype *a = AST_TYPE(c->ast, o[i]), *b = AST_TYPE(c->ast, o[!i]);
+
+						uns |= a->kind >= TY_CHAR && a->kind <= TY_UINT128 && !cc_type_is_signed(c->ast, o[i]) &&
+						       a->size >= 4 && a->size >= b->size;
+					}
+				}
 
 				if (cxx_binary_value(op, lv, rv, uns, &v))
 					c->evalue = v, c->econst = 1;

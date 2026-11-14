@@ -176,6 +176,8 @@ static bool cxx_derives(cxx *c, qty d, qty b, int depth)
  * to pointer, a qualification), 1 a standard conversion (arithmetic, derived to base, to void *),
  * 2 perhaps (a class's constructor or conversion function, an unknown type), 3 not at all.
  */
+static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
+
 static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
@@ -214,8 +216,16 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 			return QUNQ(pt->base) == QUNQ(a) ? 0 : 3;
 		else if (at->kind == TY_PTR && !at->ext)
 			ab = at->base;
-		else
-			return at->kind == TY_STRUCT || at->kind == TY_UNION ? 2 : at->kind >= TY_BOOL && at->kind <= TY_ULLONG ? 2 : 3;
+		else if (at->kind == TY_STRUCT || at->kind == TY_UNION) {
+			/* a class to a pointer: only through a conversion function */
+			cxx_scope *as = cxx_type_class_scope(c, QUNQ(a));
+
+			if (!as)
+				return 2;
+			cxx_type_require_complete(c, QUNQ(a));
+			return cxx_class_converts(c, as, 0) ? 2 : 3;
+		} else
+			return at->kind >= TY_BOOL && at->kind <= TY_ULLONG ? 2 : 3;
 		if (QUNQ(pt->base) == QUNQ(ab))
 			return 0;
 		if (pb->kind == TY_VOID)
@@ -224,10 +234,32 @@ static int cxx_arg_rank0(cxx *c, qty p, qty a, bool lvalue, bool have_lvalue)
 			return cxx_derives(c, ab, pt->base, 0) ? 1 : 3;
 		return 3;
 	}
-	if (cc_type_is_record(c->ast, p) && cc_type_is_record(c->ast, a))
-		return cxx_derives(c, a, p, 0) ? 1 : 2;
-	if (cc_type_is_record(c->ast, p) || cc_type_is_record(c->ast, a))
-		return 2;
+	if (cc_type_is_record(c->ast, p) && cc_type_is_record(c->ast, a) && cxx_derives(c, a, p, 0))
+		return 1;
+	if (cc_type_is_record(c->ast, p) || cc_type_is_record(c->ast, a)) {
+		/* through a class: a conversion function of the argument's class or a constructor of the
+		   parameter's.  Neither declared: no conversion. */
+		cxx_scope *as = cc_type_is_record(c->ast, a) ? cxx_type_class_scope(c, QUNQ(a)) : NULL;
+		cxx_scope *ps = cc_type_is_record(c->ast, p) ? cxx_type_class_scope(c, QUNQ(p)) : NULL;
+		bool by_ctor = false, by_conv = false;
+
+		if (cc_type_is_record(c->ast, a)) {
+			if (!as)
+				return 2;
+			cxx_type_require_complete(c, QUNQ(a));
+			by_conv = cxx_class_converts(c, as, 0);
+		}
+		if (cc_type_is_record(c->ast, p)) {
+			if (!ps)
+				return 2;
+			cxx_type_require_complete(c, QUNQ(p));
+			if (ps->has_dependent_base)
+				return 2;
+			for (cxx_entity *e = cxx_lookup_in(c, ps, cxx_ctor_id(), 0); e; e = e->next)
+				by_ctor |= e->member_of == ps;
+		}
+		return by_ctor || by_conv ? 2 : 3;
+	}
 	return 3;
 }
 
@@ -465,6 +497,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (!exact)
 			best = -1;
 	}
+	c->call_resolved = best >= 0;
+	c->call_picked = best >= 0 ? cand[best].e : NULL;
 	if (best >= 0)
 		result = cand[best].r;
 	else if (!viable || !same || unknown) {
@@ -745,6 +779,9 @@ VPRIV bool cxx_binary_value(int op, int64_t l, int64_t r, bool uns, int64_t *v)
 	return false;
 }
 
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n);
+static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
+
 /*
  * clang's type trait builtins that depend on the type's form only (those that ask what a class can
  * do, __is_constructible and the like, are not known).  t: the type arguments.
@@ -802,6 +839,63 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		}
 		if (assign)
 			return false;
+	}
+	/* a class from arguments: its constructors decide */
+	if (nt >= 1 && nt <= 2 && (IS("__is_constructible") || IS("__is_nothrow_constructible") || (nt == 2 && (IS("__is_convertible") ||
+	    IS("__is_convertible_to") || IS("__is_nothrow_convertible"))))) {
+		bool conv = !IS("__is_constructible") && !IS("__is_nothrow_constructible");
+		bool nothrow = IS("__is_nothrow_constructible") || IS("__is_nothrow_convertible");
+		qty to = conv ? t[1] : t[0], from = nt == 2 ? (conv ? t[0] : t[1]) : CXX_TY_UNKNOWN;
+		uint8_t lv = 0;
+
+		if (nt == 2 && AST_TYPE_KIND(c->ast, from) == TY_PTR && AST_TYPE(c->ast, from)->ext) {
+			lv = AST_TYPE(c->ast, from)->ext == 1;
+			from = AST_TYPE(c->ast, from)->base;
+		}
+		if (AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext && nt == 2 && !conv) {
+			/* T&/const T&/T&& from a class object: a reference to it or to a base binds (or not) */
+			const ctype *tt = AST_TYPE(c->ast, to);
+
+			if (cc_type_is_record(c->ast, tt->base) && cc_type_is_record(c->ast, from) &&
+			    (QUNQ(tt->base) == QUNQ(from) || (cxx_type_class_scope(c, QUNQ(from)) && cxx_derives(c, from, tt->base, 0)))) {
+				bool cq = !(QQ(from) & Q_CONST) || (QQ(tt->base) & Q_CONST);
+
+				*v = cq && (tt->ext == 1 ? lv || (QQ(tt->base) & Q_CONST) : !lv);
+				return true;
+			}
+			/* T& (not const) from an unrelated class with no conversion function: nothing binds */
+			if (cc_type_is_record(c->ast, tt->base) && cc_type_is_record(c->ast, from) && tt->ext == 1 && !(QQ(tt->base) & Q_CONST)) {
+				cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from));
+
+				if (fs)
+					cxx_type_require_complete(c, QUNQ(from));
+				if (fs && !cxx_class_converts(c, fs, 0)) {
+					*v = 0;
+					return true;
+				}
+			}
+		}
+		if (cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_PTR &&
+		    (nt == 1 || (from != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, from) != TY_VOID))) {
+			int r = cxx_class_constructs(c, to, &from, &lv, nt - 1);
+
+			if (r < 0 || (r && nothrow))
+				return false;
+			*v = r;
+			return true;
+		}
+		/* a class to something that is not one: its conversion functions (none: no) */
+		if (nt == 2 && cc_type_is_record(c->ast, from) && !cc_type_is_record(c->ast, to) && AST_TYPE_KIND(c->ast, to) != TY_VOID &&
+		    !(AST_TYPE_KIND(c->ast, to) == TY_PTR && AST_TYPE(c->ast, to)->ext)) {
+			cxx_scope *fs = cxx_type_class_scope(c, QUNQ(from));
+
+			if (fs)
+				cxx_type_require_complete(c, QUNQ(from));
+			if (!fs || fs->has_dependent_base || cxx_class_converts(c, fs, 0))
+				return false;
+			*v = 0;
+			return true;
+		}
 	}
 	/* how two types relate, where the answer does not need a class's constructors or conversion functions */
 	if (nt == 2 && IS("__is_base_of")) {
@@ -1007,6 +1101,108 @@ VPRIV qty cxx_nullptr_type(cxx *c)
 		c->nullptr_ty = QT(c->ast->tags[tag].ty, 0);
 	}
 	return c->nullptr_ty;
+}
+
+/* does the class, or a base of it, declare a conversion function? */
+static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth)
+{
+	if (cls->has_conversion || cls->has_dependent_base || depth > 12)
+		return true;
+	for (uint32_t i = 0; i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS && cxx_class_converts(c, cls->used[i], depth + 1))
+			return true;
+	return false;
+}
+
+/*
+ * Can an object of the class `to` be made from n arguments, T(args)?  1 yes, 0 no, -1 not known.
+ * Its constructors by overload resolution; with none declared the implicit ones.
+ */
+static int cxx_class_constructs(cxx *c, qty to, const qty *args, const uint8_t *lval, uint32_t n)
+{
+	cxx_scope *cls = cxx_type_class_scope(c, QUNQ(to)), *from_cls = NULL;
+	cxx_entity *set, *own = NULL;
+	bool same = false, derived = false;
+	int r = -1;
+
+	if (!cls)
+		return -1;
+	cxx_type_require_complete(c, QUNQ(to));
+	if (cls->has_dependent_base)
+		return -1;
+	if (n == 1) {
+		if (args[0] == CXX_TY_UNKNOWN)
+			return -1;
+		if (cc_type_is_record(c->ast, args[0]) && AST_TYPE_KIND(c->ast, args[0]) != TY_PTR) {
+			from_cls = cxx_type_class_scope(c, QUNQ(args[0]));
+			same = QUNQ(args[0]) == QUNQ(to);
+			if (!same && from_cls) {
+				cxx_type_require_complete(c, QUNQ(args[0]));
+				derived = cxx_derives(c, args[0], to, 0);
+			}
+			if (!same && !from_cls)
+				return -1;
+		}
+	}
+	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
+	for (cxx_entity *e = set; e; e = e->next)
+		if (e->member_of == cls) {
+			own = set;
+			break;
+		}
+	if (own) {
+		qty et = c->etype;
+		bool el = c->elval;
+		cxx_entity *callee = c->ecallee, *picked;
+		uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
+		bool resolved, none;
+
+		cxx_call_type_impl(c, own, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval, n, true);
+		resolved = c->call_resolved, none = c->none_viable, picked = c->call_picked;
+		c->etype = et, c->elval = el, c->ecallee = callee;
+		c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
+		if (resolved)
+			return !(picked && picked->kind == CXX_ENTITY_VALUE && picked->fn_deleted);
+		if (!none && !same && !derived)
+			return -1;
+		r = 0;	/* (none of the declared ones; the implicit copy and move remain) */
+	}
+	if (same || derived) {
+		int s = cxx_class_special(c, to, 0, !lval[0] && !(QQ(args[0]) & Q_CONST), 0);
+
+		return s;
+	}
+	if (n == 1 && from_cls && cxx_class_converts(c, from_cls, 0))
+		return -1;	/* (through the argument's conversion function, perhaps) */
+	if (own)
+		return r;
+	/* no constructor declared: T() if its members allow it (taken to); T(a, ...) only for an aggregate
+	   (C++20: parenthesized aggregate initialization), which is not decided here */
+	if (!n) {
+		for (uint32_t i = 0; i < cls->nfield_types; i++)
+			if (cls->field_types[i] == CXX_TY_UNKNOWN)
+				return -1;
+			else if (AST_TYPE_KIND(c->ast, cls->field_types[i]) == TY_PTR && AST_TYPE(c->ast, cls->field_types[i])->ext)
+				return 0;
+			else if (cc_type_is_record(c->ast, cls->field_types[i]) && AST_TYPE_KIND(c->ast, cls->field_types[i]) != TY_ARRAY) {
+				int f = cxx_class_constructs(c, cls->field_types[i], NULL, NULL, 0);
+
+				if (f <= 0)
+					return f;
+			}
+		for (uint32_t i = 0; i < cls->nused; i++) {
+			cxx_scope *b = cls->used[i];
+
+			if (b && b->kind == CXX_SCOPE_CLASS && b->owner && b->owner->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b->owner->ty)) {
+				int f = cxx_class_constructs(c, b->owner->ty, NULL, NULL, 0);
+
+				if (f <= 0)
+					return f;
+			}
+		}
+		return 1;
+	}
+	return cls->nfield_types || cls->nused ? -1 : 0;
 }
 
 /*

@@ -159,6 +159,7 @@ struct cxx_scope {
 	cxx_scope **used;
 	uint32_t nused, cused;
 	uint8_t has_dependent_base;
+	uint8_t has_conversion;		/* a class: it declares a conversion function (operator T) */
 	qty *field_types;		/* a class: its non-static data members' types, for its implicit special members */
 	uint32_t nfield_types;
 	cxx_tparam *tparams;		/* a template scope: its parameters */
@@ -303,6 +304,10 @@ typedef struct cxx {
 	qty auto_ty;			/* auto's placeholder type (0: not made yet) */
 	struct cxx_partial *auto_owner;
 	uint8_t member_missing;		/* typename X::y named no member of a complete class X (deduction: not viable) */
+	cxx_entity *call_picked;	/* ... and which */
+	uint8_t carg_const;		/* the argument list was one integer constant expression */
+	int64_t carg_value;		/* ... its value */
+	uint8_t call_resolved;		/* the last call picked one function (whatever its return type) */
 	uint8_t why, none_viable;	/* the last failed deduction's reason; the last call had no viable candidate */
 	qty decl_return;		/* the last function declarator's return type (known when a parameter's is not) */			/* the last failed deduction's reason */
 	uint32_t body_depth;

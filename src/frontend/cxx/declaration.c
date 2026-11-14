@@ -1059,6 +1059,12 @@ static uint32_t cxx_operator_name_parse(cxx *c)
 		return 1;
 	}
 	/* conversion: operator type-specifiers ptr-operators */
+	for (cxx_scope *cs = c->scope; cs; cs = cs->parent)
+		if (cs->kind == CXX_SCOPE_CLASS) {
+			cs->has_conversion = 1;
+			break;
+		} else if (cs->kind == CXX_SCOPE_NAMESPACE)
+			break;
 	if (!cxx_decl_specifiers_parse(c, NULL, false))
 		cxx_fail(c, "expected an operator or a type after 'operator'");
 	while (cxx_ptr_operator_parse(c, NULL))
@@ -2041,8 +2047,14 @@ static void cxx_static_assert_parse(cxx *c)
 	/* evaluated; a false one is an error only on request for now (VCC_CXX_STATIC_ASSERT=1, the tests): a
 	   type or constant vcc gets wrong must not reject valid code while its semantics are incomplete */
 	if (check < 0)
-		check = getenv("VCC_CXX_STATIC_ASSERT") != NULL;
-	if (check && !c->tentative && !c->template_depth && !c->instantiating) {
+		check = getenv("VCC_CXX_STATIC_ASSERT") ? atoi(getenv("VCC_CXX_STATIC_ASSERT")) : 0;
+	if (check == 2 && !c->tentative && !c->template_depth && !c->instantiating && (!known || !value)) {
+		/* =2: every one of them reported, by its message, and the parse goes on (probing a library) */
+		fprintf(stderr, "static_assert %s:", known ? "FALSE" : "UNKNOWN");
+		for (uint32_t i = start; i < c->pos && i < start + 60; i++)
+			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+		fputc('\n', stderr);
+	} else if (check && !c->tentative && !c->template_depth && !c->instantiating) {
 		if (!known)
 			cxx_fail(c, "static assertion not evaluated");
 		if (!value)
@@ -2728,7 +2740,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 	uint8_t typedef_dependent = c->last_type_dependent;
 	qty base = c->ds_type;	/* (each declarator's parse may change c->ds_type) */
 	/* auto x = init: the declarator is parsed over auto's placeholder, deduced from the initializer */
-	bool is_auto = c->ds_auto && base == CXX_TY_UNKNOWN && !c->template_depth && !c->tentative && context != CXX_CONTEXT_CLASS &&
+	bool is_auto = c->ds_auto && base == CXX_TY_UNKNOWN && !c->template_depth && !c->tentative &&
+		       (context != CXX_CONTEXT_CLASS || (flags & DS_STATIC)) &&	/* (static constexpr auto value = ...) */
 		       !(flags & (DS_TYPEDEF | DS_FRIEND));
 	int auto_quals = c->ds_quals;
 	/* a data member of the class being built: a class body, not a template's or a function's */
@@ -2751,9 +2764,13 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				cxx_class_field(c, 0, base, c->tok[start].loc, w < 0 ? -2 : (int)w);
 			goto next;
 		}
-		c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), auto_quals) : base;
+		c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), auto_quals | ((flags & DS_CONSTEXPR) ? Q_CONST : 0)) : base;
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
 		qty t = c->type_out;
+		/* a constexpr variable is const (not a reference; an array's elements are) */
+		if ((flags & DS_CONSTEXPR) && !f && t != CXX_TY_UNKNOWN && !c->tentative && AST_TYPE_KIND(c->ast, t) != TY_ARRAY &&
+		    AST_TYPE_KIND(c->ast, t) != TY_FUNC && !(AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext))
+			t = QT(QI(t), QQ(t) | Q_CONST);
 		qty auto_pattern = CXX_TY_UNKNOWN;
 		cxx_entity *auto_e = NULL;
 		uint32_t name_loc = c->tok[start].loc;
