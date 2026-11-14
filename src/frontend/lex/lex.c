@@ -1080,14 +1080,20 @@ fast:
 		const unsigned lim = X ? (unsigned)__builtin_ctzll(X) : 64;	/* <= valid */
 		const uint8_t *kt = lex_punctuator_kind_table;
 
+#if defined(__aarch64__)
 		__asm__("" : "+r"(kt));	/* in a register, not rematerialized per token */
+#endif
 		/*
 		 * The token starts S and the token ends: boundaries after a
-		 * non-blank byte.  Below lim they pair up.  Both bit-reversed,
-		 * so that clz finds the next one (M1 has no ctz).
+		 * non-blank byte.  Below lim they pair up. On x86 BSF
+		 * finds the lowest set bit directly. Reverse the masks for CLZ on M1.
 		 */
+#if defined(__x86_64__)
+		uint64_t rs = S, re = B & ~((W << 1) | 1);
+#else
 		uint64_t rs = __builtin_bitreverse64(S);
 		uint64_t re = __builtin_bitreverse64(B & ~((W << 1) | 1));
+#endif
 		unsigned pend = fl;
 		lex_token *const t0 = t;
 
@@ -1096,12 +1102,20 @@ fast:
 		 * or past lim (64 if there is none).
 		 */
 		for (;;) {
+#if defined(__x86_64__)
+			const unsigned e = re ? (unsigned)__builtin_ctzll(re) : 64;
+#else
 			const unsigned e = (unsigned)__builtin_clzg(re, 64);
+#endif
 
 			if (e >= lim)
 				break;	/* reaches X or past the window */
 
+#if defined(__x86_64__)
+			const unsigned o = (unsigned)__builtin_ctzll(rs);
+#else
 			const unsigned o = (unsigned)__builtin_clzll(rs);
+#endif
 			const size_t at = p + o;
 			const unsigned f = ((SP >> o) & 1) * LEX_TOKEN_FLAG_SPACE_BEFORE | ((SOL >> o) & 1) * LEX_TOKEN_FLAG_LINE_START;
 			uint16_t c01;
@@ -1115,13 +1129,21 @@ fast:
 			t->kind = (uint8_t)kind;
 			t->flags = (uint8_t)(f | pend);
 			pend = 0;
-			/* see lex_identifiers_intern(); the asm keeps the compiler from a second induction variable */
+#if defined(__aarch64__)
+			/* Keep clang from introducing a second induction variable. */
 			__asm__("" : "+r"(t));
+#endif
 			il[ni] = (uint32_t)(uintptr_t)t;
 			ni += kind == LEX_TOKEN_IDENTIFIER;
 			t++;
+
+#if defined(__x86_64__)
+			rs &= rs - 1;
+			re &= re - 1;
+#else
 			rs ^= (1ull << 63) >> o;
 			re ^= (1ull << 63) >> e;
+#endif
 		}
 		fl = pend;
 		if (likely(t != t0)) {

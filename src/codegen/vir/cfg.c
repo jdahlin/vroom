@@ -19,6 +19,7 @@ VPRIV uint32_t virbuild_block_successor_count(virbuild_context *V, uint32_t b)
 	switch (V->insns[t].insn.op) {
 	case VIR_OP_BR: return 1;
 	case VIR_OP_BRIF: return 2;
+	case VIR_OP_IBR: return V->extra[V->insns[t].insn.c];
 	case VIR_OP_SWITCH: return 1 + V->extra[V->insns[t].insn.c];
 	default: return 0;
 	}
@@ -29,6 +30,7 @@ VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V, uint32_t b
 	vir_insn *in = &V->insns[V->blocks[b].terminator].insn;
 
 	switch (in->op) {
+	case VIR_OP_IBR: return &V->extra[in->c + 1 + k];
 	case VIR_OP_BR: return &in->a;
 	case VIR_OP_BRIF: return k ? &in->c : &in->b;
 	default: {
@@ -47,6 +49,7 @@ VPRIV void virbuild_empty_blocks_thread(codegen_context *e)
 	for (uint32_t b = 0; b < V->block_count; b++) {
 		uint32_t n = virbuild_block_successor_count(V, b);
 
+		if (b == V->indirect_dispatch) continue;
 		for (uint32_t k = 0; k < n; k++) {
 			uint32_t *t = virbuild_block_successor_pointer(V, b, k);
 

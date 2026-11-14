@@ -85,6 +85,13 @@ VPRIV bool virbuild_function_to_vir(codegen_context *e)
 		if (!virbuild_to_vir_insn_emit(e, V->blocks[b].terminator, b))
 			return false;
 	}
+	if (V->indirect_count) {
+		if (!V->blocks[V->indirect_dispatch].is_reachable)
+			virbuild_fail(e, VIRBUILD_FAILURE(label_address));
+		uint32_t list = V->insns[V->blocks[V->indirect_dispatch].terminator].insn.c;
+		for (uint32_t k = 0; k < V->indirect_count; k++)
+			f->blocks[V->blocks[V->extra[list + 1 + k]].final_block].flags |= VIR_BLOCK_FLAG_ADDR;
+	}
 	if (vir_is_failed())
 		return false;
 	return true;
