@@ -558,7 +558,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			unknown |= e->fn_explicit == 2;
 			continue;	/* (copy-initialization: not through an explicit constructor) */
 		}
-		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 && !e->fn_const)
+		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 && !e->fn_const && !e->fn_static)
 			continue;	/* (a const object: const member templates only) */
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
@@ -591,7 +591,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			ft = AST_TYPE(c->ast, e->ty);
 			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & TF_VARIADIC) && nargs >= ft->n)))
 				continue;
-			if (obj == 2 && !e->fn_const)
+			if (obj == 2 && !e->fn_const && !e->fn_static)
 				continue;	/* (a const object: const members only) */
 			r = ft->base;
 			sig = ft;

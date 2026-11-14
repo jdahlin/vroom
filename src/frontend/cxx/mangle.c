@@ -279,6 +279,38 @@ static const char *mt_builtin(mg_tok *k)
 	return NULL;
 }
 
+/* at auto: is there a trailing return type (auto f(...) -> T)?  The first ( ) at depth 0 after the name is the
+   parameter list; then -> before the body or ; */
+static uint32_t mt_trailing_at(const mg_tok *k);
+
+static bool mt_trailing_return(const mg_tok *k)
+{
+	return mt_trailing_at(k) != 0;
+}
+
+/* ... the token after its ->, 0: none */
+static uint32_t mt_trailing_at(const mg_tok *k)
+{
+	const cxx_token *tk = k->m->c->tok;
+	uint32_t p = k->p + 1, depth = 0;
+	bool params = false;
+
+	for (; p < k->e; p++) {
+		uint32_t kd = tk[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if (kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_RIGHT_SQUARE) {
+			if (depth && !--depth && kd == LEX_TOKEN_RIGHT_PAREN)
+				params = true;
+		} else if (!depth && (kd == LEX_TOKEN_LEFT_BRACE || kd == LEX_TOKEN_SEMICOLON || kd == LEX_TOKEN_EQUAL))
+			return false;
+		else if (!depth && params && kd == LEX_TOKEN_ARROW)
+			return p + 1;
+	}
+	return 0;
+}
+
 /* past a declaration's leading specifiers and attributes ([[...]], __attribute__((...)), static, inline, ...) */
 static void mt_skip_decl_specs(mg_tok *k)
 {
@@ -1766,7 +1798,26 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			bool done = false;
 
 			mt_skip_decl_specs(&k);
-			if (k.p && mt_word(&k, "typename")) {
+			if (k.p && !done && mt_word(&k, "auto") && mt_trailing_return(&k)) {
+				/* auto f(...) -> T: T, as written */
+				size_t n0 = m.n;
+				uint32_t s0 = m.nsubs;
+
+				k.p = mt_trailing_at(&k);
+				m.ph = m.tph, m.nph = m.ntph;
+				done = mt_type(&k) && !m.bad;
+				m.ph = ph0, m.nph = nph0;
+				if (!done)
+					m.n = n0, m.nsubs = s0, m.bad = false;
+			} else if (k.p && !done && mt_word(&k, "auto")) {
+				mg_str(&m, "Da");	/* (a deduced return type: auto as written, not what it deduced) */
+				done = true;
+			} else if (k.p && !done && mt_word(&k, "decltype") && k.p + 3 < k.e && c->tok[k.p + 1].kind == LEX_TOKEN_LEFT_PAREN &&
+				   c->tok[k.p + 2].len == 4 && !memcmp(c->tok[k.p + 2].s, "auto", 4) && c->tok[k.p + 3].kind == LEX_TOKEN_RIGHT_PAREN) {
+				mg_str(&m, "Dc");	/* decltype(auto) */
+				done = true;
+			}
+			if (k.p && !done && mt_word(&k, "typename")) {
 				k.p++;
 				m.ph = m.tph, m.nph = m.ntph;
 				done = mt_type(&k) && !m.bad;

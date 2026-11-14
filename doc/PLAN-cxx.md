@@ -1732,3 +1732,13 @@ sådana länkas den med doctests main och körs.  Summeringen räknar de saknade
 (Kompilatorns fork-server, VCC_FORK_LIST, finns kvar.)  Första körningen: 0 av 70 TU:s kompletta, 67 med
 saknade kompileringar (917 funktioner summerat), 3 länkfel (namn vcc manglar annorlunda).  Orsakerna är
 ännu för grova: statement.c:600/362 (en sats utan nod) döljer det inre skälet; det är nästa steg.
+
+## Status 83 (2026-11-14)
+Funktionsmallar med härledd returtyp (`auto f(T)`): kroppen tolkas en andra gång när typen är härledd,
+nu med kod (den första härledde bara typen; anrop till dem byggdes aldrig).  Mangling: `auto` som `Da`,
+`decltype(auto)` som `Dc`, en avslutande returtyp (`auto f(T) -> T`) som den skrivna typen (förut `v`).
+Statiska medlemmar anropas på const-objekt (`this->__throw_length_error()` i en const-medlem: regression
+från Status 80).  `VCC_CXX_MISSING` anger nu det innersta uttrycket utan nod som orsak.  cxx-strict:
+0/70 kompletta, 850 saknade funktioner (förut 917); kvar överst: `__tree_.end()` (statement.c:362),
+basklassinitiering via alias (`json_base_class_t(std::move(other))`), CTAD (`pair{a, b}` i
+`__unwrap_range`), `__libcpp_is_trivially_relocatable<T>::value`, `decltype(auto)` otypat.

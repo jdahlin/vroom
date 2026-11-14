@@ -4314,7 +4314,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 		if (f && cxx_is_function_body_start(c)) {
 			cxx_scope *fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 			cxx_scope *outer = c->scope;
+			cxx_entity *gen_auto = NULL;	/* an instance with a deduced return type: its body parsed again for code */
+			uint32_t body_pos = c->pos, saved_nparams = c->ndecl_params <= 32 ? c->ndecl_params : 0;
+			cxx_param saved_params[32];
+			bool saved_variadic = c->decl_variadic;
 
+			memcpy(saved_params, c->decl_params, saved_nparams * sizeof *saved_params);
 			fs->fn = c->gen_instance;
 			cxx_scope_push(c, fs);
 			cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
@@ -4337,6 +4342,9 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				bool gen = false;
 
 				c->gen_instance = NULL;	/* (this body's: not a body instantiated inside it) */
+				if (gi && ret_pattern != CXX_TY_UNKNOWN && pack_n == UINT32_MAX && cpack_n == UINT32_MAX && !c->tentative &&
+				    c->ndecl_params <= 32 && !cxx_is_kw(c, CXX_KW_try) && getenv("VCC_CXX_NOAUTO2") == NULL)
+					gen_auto = gi;
 				if (gi && c->decl_ndefaults && !gi->defs && c->fn_ndefs == c->decl_ndefaults && !c->tentative) {
 					/* its default arguments, for the calls that leave them out: parsed again in this scope
 					   (the template's parameters are bound in it) */
@@ -4403,7 +4411,34 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				    cxx_auto_deduce(c, ret_pattern, c->ret_type, c->ret_lval);
 
 				c->ret_capture = 0;
-				if (r != CXX_TY_UNKNOWN)
+				bool known = gen_auto && gen_auto->ty == CXX_TY_UNKNOWN && !saved_variadic;
+
+				for (uint32_t i = 0; known && i < saved_nparams; i++)
+					known = saved_params[i].ty != CXX_TY_UNKNOWN;
+				if (r != CXX_TY_UNKNOWN && known) {
+					/* a deduced return type (auto f(T)): the function's type with it, and the body parsed a
+					   second time, now with its code (the first only deduced the type) */
+					qty ps[32];
+					uint32_t np = saved_nparams, end = c->pos;
+					cxx_scope *fs2 = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+					bool gen2;
+
+					for (uint32_t i = 0; i < np; i++)
+						ps[i] = saved_params[i].ty;
+					t = cxx_type_function(c, r, ps, np, false);
+					gen_auto->ty = t;
+					fs2->fn = gen_auto;
+					c->pos = body_pos;
+					cxx_scope_push(c, fs2);
+					cxx_params_declare(c, fs2, saved_params, saved_nparams);
+					gen2 = cxx_gen_function_begin(c, gen_auto, fs2, saved_params, saved_nparams);
+					cxx_function_body_parse(c);
+					if (gen2)
+						cxx_gen_function_end(c, gen_auto, c->snode);
+					c->scope = outer;
+					if (c->pos != end)
+						c->pos = end;	/* (the same tokens: it ends where the first parse did) */
+				} else if (r != CXX_TY_UNKNOWN)
 					t = cxx_type_function(c, r, NULL, 0, true), c->sig_fake = 1;	/* (callers read the return type only) */
 			}
 		} else if (c->gen_instance && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake &&
