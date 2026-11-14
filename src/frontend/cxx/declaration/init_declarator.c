@@ -655,6 +655,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			} else if (object) {
 				/* T x = { ... }: copy-list-initialization, as T x{ ... } (its explicit constructors: not told apart) */
 				uint32_t an[CXX_MAX_ARGS], n, abr[CXX_MAX_ARGS];
+				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
@@ -665,6 +666,13 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
 					c->gen_agg_brace = NULL;
+					gen_declared = true;
+				}
+				if (gobj) {	/* ... at namespace scope: a constructor when the program starts, or the aggregate's values */
+					if (c->ctor_found && c->ctor_picked)
+						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
+					else
+						cxx_gen_global_end(c, gen_var, cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc), true);
 					gen_declared = true;
 				}
 			} else {
@@ -691,7 +699,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						cxx_gen_fail(c);
 				}
 				if (gen_global) {
-					cxx_gen_global_end(c, gen_var, braced ? cxx_gen_array_initializer(c, t, name_loc) : c->enode, true);
+					cxx_gen_global_end(c, gen_var, !braced ? c->enode : AST_TYPE_KIND(c->ast, t) == TY_ARRAY ? cxx_gen_array_initializer(c, t, name_loc) :
+							   cxx_gen_record_initializer(c, t, c->brace_nodes, c->brace_n, name_loc), true);
 					gen_declared = true;
 				}
 				if (gen_local) {
@@ -749,8 +758,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (gobj) {
 					if (c->ctor_found && c->ctor_picked)
 						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
-					else
-						cxx_gen_global_end(c, gen_var, 0, true);	/* (a list for an aggregate: not built yet) */
+					else	/* (a list for an aggregate of scalars: its values; else not built yet) */
+						cxx_gen_global_end(c, gen_var, cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc), true);
 					gen_declared = true;
 				}
 			} else

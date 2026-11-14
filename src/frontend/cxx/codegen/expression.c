@@ -442,6 +442,38 @@ VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc)
 #undef CMPV
 }
 
+/* 0 <=> ord, an ordering reversed (a reversed candidate's result): its less and greater swapped, equivalent and
+   unordered kept (libc++'s __value_: -1 and 1 swap) */
+VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, qty t, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t tmp, set, v, nv, flip, asg;
+	qty it = cc_type_basic(TY_INT);
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || !ord || t == CXX_TY_UNKNOWN || !(tmp = cxx_gen_temporary(c, QUNQ(t), loc)))
+		return;
+	set = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cc_node_rvalue(a, ord), loc);
+	if (!(v = cxx_gen_member_of(c, cxx_gen_var_node(c, tmp, loc), vintern_cstr("__value_"), loc, 0)))
+		return;
+	nv = cc_conversion_apply(a, cc_node_rvalue(a, v), it);
+	flip = cc_binary_build(a, LEX_TOKEN_PIPE_PIPE,
+			       cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, nv, cc_node_integer_new(a, -1, it, loc), loc),
+			       cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_conversion_apply(a, cc_node_rvalue(a, v), it),
+					       cc_node_integer_new(a, 1, it, loc), loc), loc);
+	nv = cc_node_new_operands(a, N_COND, it, loc, flip,
+				  cc_binary_build(a, LEX_TOKEN_MINUS, cc_node_integer_new(a, 0, it, loc), cc_conversion_apply(a, cc_node_rvalue(a, v), it), loc));
+	AST_NODE_AT(a, nv)->c = cc_conversion_apply(a, cc_node_rvalue(a, v), it);
+	asg = cc_assignment_build(a, 0, v, cc_conversion_apply(a, nv, QUNQ(AST_NODE_AT(a, v)->ty)), loc);
+	{
+		qty pt = cc_type_pointer(a, QUNQ(t));
+		uint32_t addr = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
+
+		c->enode = cc_dereference_build(a, cc_node_new_operands(a, N_COMMA, pt, loc, set,
+									cc_node_new_operands(a, N_COMMA, pt, loc, asg, addr)), loc);
+	}
+}
+
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc)
 {
 	if (!cxx_gen_on(c) || !l || !r)

@@ -2005,3 +2005,12 @@ cxx-strict 338 (345): 190 funktioner till kompileras (mest `<cmath>`/`<limits>`)
   defaultad som inte är trivial; förut sa POD-layout ja (`pair<const string, json>`, `std::string`, json),
   och `pair<int, int>`s tilldelning var okänd, så `__uninitialized_allocator_copy_impl` föll.  Nu som clang.
 cxx-strict 322 (338): 82 fler kompileras, 6 nya som nyss nåddes.
+
+## Status 115 (2026-11-14)
+- `a <=> b` utan `operator<=>(a, b)`: den omvända kandidaten, `0 <=> (b <=> a)` ([over.match.oper]/3.4;
+  `"text" <=> string`): ordningen vänds genom `__value_` (-1 och 1 byter plats).
+- En pack efter namnlösa mallparametrar som ges explicit (`__try_key_extraction_impl<K, true, R>(...)`)
+  deduceras; förut avvisades den.  `std::map<std::string, T, std::less<>>` med `"a"` som nyckel fungerar.
+- Aggregat på namnrymdsnivå från klammerlista (`const P p = {1, 2};`, `const O O::a{-1};`): initierarlistan
+  (`cxx_gen_record_initializer`, medlemmar som är skalärer); förut definierades variabeln aldrig.
+Test: `run/reversed-packs.cpp`.  cxx-strict 322.

@@ -57,6 +57,7 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			uint32_t rn = c->enode;
 
 			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
+			uint8_t r_lval = c->elval;
 			bool rewritten = false;	/* a != b as !(a == b) (C++20's rewritten candidates) */
 
 			bool found = !c->tentative && cxx_operator_call_type(c, opid, l, &c->etype, 1);
@@ -88,6 +89,21 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 					if (cxx_operator_call_type(c, vintern_cstr("operator<=>"), rt, &la, 1) && c->call_resolved && c->call_picked)
 						spaceship = 2, ss_pick = c->call_picked, found = true;
 				}
+			}
+			/* a <=> b with no operator<=>(a, b): the reversed candidate, 0 <=> (b <=> a) ([over.match.oper]/3.4,
+			   "text" <=> string) */
+			bool ss_reversed = false;
+			qty ss_type = CXX_TY_UNKNOWN;
+
+			if (!c->tentative && (!found || !c->call_resolved) && op == CXX_TOKEN_SPACESHIP && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
+			    (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt)) && !(cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != TY_ARRAY &&
+												 cc_type_is_record(c->ast, rt) && QUNQ(l) == QUNQ(rt))) {
+				qty la = l;
+
+				c->op_lv_set = 1, c->op_lv[0] = r_lval, c->op_lv[1] = ll;
+				if (cxx_operator_call_type(c, vintern_cstr("operator<=>"), rt, &la, 1) && c->call_resolved && c->call_picked &&
+				    c->etype != CXX_TY_UNKNOWN)
+					ss_reversed = true, ss_pick = c->call_picked, ss_type = c->etype, found = true;
 			}
 			if ((!found || (c->none_viable && !c->call_resolved)) && op != LEX_TOKEN_AMPERSAND_AMPERSAND && op != LEX_TOKEN_PIPE_PIPE && op != CXX_TOKEN_SPACESHIP &&
 			    !c->template_depth && l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN) {
@@ -125,6 +141,11 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 				cxx_gen_ordering_test(c, c->enode, spaceship == 1 ? op : op == LEX_TOKEN_LESS ? LEX_TOKEN_GREATER :
 						      op == LEX_TOKEN_GREATER ? LEX_TOKEN_LESS : op == LEX_TOKEN_LESS_EQUAL ? LEX_TOKEN_GREATER_EQUAL :
 						      LEX_TOKEN_LESS_EQUAL, oploc);	/* (the type set above: setting it clears the node) */
+			} else if (ss_reversed) {
+				cxx_et(c, ss_type, false);
+				c->call_resolved = 1, c->call_picked = ss_pick;
+				cxx_gen_operator_call(c, rn, &ln, 1, oploc);
+				cxx_gen_ordering_reverse(c, c->enode, ss_type, oploc);
 			} else if (built_in && op == CXX_TOKEN_SPACESHIP)
 				cxx_gen_spaceship(c, ln, rn, c->etype, oploc);
 			else if (built_in)

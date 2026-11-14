@@ -417,7 +417,8 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 			return -1;
 		}
 		for (uint32_t i = 0; i < ntp; i++)
-			if (i < pk && ((!p->params->tparams[i].name && !p->params->tparams[i].def_b) || p->params->tparams[i].constraint_b)) {
+			if (i < pk && ((!p->params->tparams[i].name && !p->params->tparams[i].def_b && !(xargs && i < nxargs)) ||
+				       p->params->tparams[i].constraint_b)) {	/* (an unnamed one given explicitly: bound) */
 				c->why = CXX_WHY_PACKS;
 				return -1;	/* (constraints before a pack: not evaluated here; a default is, when not deduced) */
 			}

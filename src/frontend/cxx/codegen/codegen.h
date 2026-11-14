@@ -109,6 +109,7 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 VPRIV void cxx_gen_spaceship(cxx *c, uint32_t l, uint32_t r, qty t, uint32_t loc);
 VPRIV void cxx_gen_comma(cxx *c, uint32_t x, uint32_t y, uint32_t loc);
 VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
+VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, qty t, uint32_t loc);
 VPRIV void cxx_gen_binary(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t loc);
 VPRIV uint32_t cxx_gen_default_argument(cxx *c, const cxx_entity *f, uint32_t k);
@@ -200,6 +201,7 @@ VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, qty t, uint32_t loc);
 VPRIV bool cxx_gen_needs_construction_public(cxx *c, qty t);
 VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init, bool has_init, uint32_t loc);
 VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc);
+VPRIV uint32_t cxx_gen_record_initializer(cxx *c, qty t, const uint32_t *nodes, uint32_t n, uint32_t loc);
 
 /* vtable.c */
 VPRIV bool cxx_vt_is_dtor(const cxx_entity *e);

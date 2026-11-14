@@ -494,6 +494,46 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, qty t, uint32_t loc)
 	return n;
 }
 
+/*
+ * T x = { a, b } (or T x{a, b}) for an aggregate class whose members are scalars (no base, no union, no
+ * bit-field, no constructor to run): its initializer list's node, a value per member, the ones not given
+ * zero ([dcl.init.aggr]/5: their default member initializer: none here) (0: not built)
+ */
+VPRIV uint32_t cxx_gen_record_initializer(cxx *c, qty t, const uint32_t *nodes, uint32_t n, uint32_t loc)
+{
+	cc *a = c->ast;
+	const tag *r;
+	cxx_scope *cls;
+	cc_id_list v;
+	uint32_t init;
+
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, t) != TY_STRUCT || n == UINT32_MAX || !cxx_gen_type_ok(c, QUNQ(t)) ||
+	    cxx_gen_needs_construction(c, QUNQ(t), 0) || !(cls = cxx_tag_scope_get(c, QUNQ(t))) || cls->nused)
+		return 0;
+	r = &a->tags[AST_TYPE(a, t)->aux];
+	if (n > r->nfield)
+		return 0;
+	cc_id_list_init(&v);
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		qty ft = r->f[i].ty;
+		cxx_entity *fe;
+
+		if (r->f[i].bitfield || !r->f[i].name || ft == CXX_TY_UNKNOWN || cc_type_is_record(a, ft) || AST_TYPE_KIND(a, ft) == TY_ARRAY)
+			return 0;
+		fe = cxx_lookup_local(cls, r->f[i].name);
+		if (fe && fe->nsdmi_pos && i >= n)
+			return 0;	/* (a default member initializer: not read here) */
+		if (i < n && !nodes[i])
+			return 0;
+		cc_id_list_append(a, &v, i < n ? cc_conversion_apply(a, cc_conversion_decay(a, nodes[i]), QUNQ(ft)) : 0);
+	}
+	init = cc_node_new(a, N_INIT, QUNQ(t), loc);
+	AST_NODE_AT(a, init)->aux = 0;
+	AST_NODE_AT(a, init)->c = v.n;
+	AST_NODE_AT(a, init)->b = cc_id_list_freeze(a, &v);
+	return init;
+}
+
 /* ---- variables at namespace scope ------------------------------------------------------------ */
 
 /* a structured binding's name e: a local reference to member field of the variable object (its symbol),
