@@ -1419,3 +1419,9 @@ fler anrop väljer nu rätt mall, vars kropp ofta inte byggs (t.ex. `std::map`:s
 `__tree`-konstruktor) och vars namn är vcc:s eget (clang 23:s `Tn`), så
 anroparna får ingen kod.  Inget fel blir kod; täckningen sjunker tills
 kropparna och manglingen kommer ikapp.
+
+### Status (53): std::map genom vcc enbart (2026-11-14)
+`const_cast` byggs (förut gav det ingen kod alls), referenscasts jämför
+klassen (samma post oavsett hur typen stavas), `return f();` i en
+void-funktion.  Ett program med `std::map<int, int>` kompileras, länkas och
+körs med enbart vcc:s kod.  json: 69/70, 2 484 funktioner, 11 av 118.

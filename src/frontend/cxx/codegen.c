@@ -1455,9 +1455,21 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 		return;
 	}
 	if (cxx_gen_is_reference(c, to)) {
-		/* static_cast<T&&>(x), static_cast<T&>(x) of an lvalue of that type: the same object */
-		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && QUNQ(AST_NODE_AT(a, x)->ty) == QUNQ(AST_TYPE(a, to)->base))
+		/* static_cast<T&&>(x), static_cast<T&>(x), const_cast<T&>(x) of an lvalue of that type: the same object
+		   (a class: the same record, however its type is spelled; const dropped through its address) */
+		qty xt = QUNQ(AST_NODE_AT(a, x)->ty), bt = QUNQ(AST_TYPE(a, to)->base);
+		bool same = xt == bt || (cc_type_is_record(a, xt) && cc_type_is_record(a, bt) && AST_TYPE_KIND(a, xt) == AST_TYPE_KIND(a, bt) &&
+					 AST_TYPE(a, xt)->aux == AST_TYPE(a, bt)->aux);
+
+		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && same) {
+			if (AST_NODE_AT(a, x)->ty != AST_TYPE(a, to)->base) {
+				qty pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
+				uint32_t addr = cc_address_of_build(a, x, loc);
+
+				x = cc_dereference_build(a, cc_cast_insert(a, addr, pt, CK_NOP), loc);
+			}
 			c->enode = x;
+		}
 		return;
 	}
 	if (!cxx_gen_type_ok(c, to) || cc_type_is_record(a, to))
@@ -4088,6 +4100,15 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 	if (c->gen_lambda && c->gen_lambda->is_try) {
 		cxx_gen_fail(c);	/* (a return out of a try block: not built yet) */
 		return 0;
+	}
+	if (has_value && e && AST_TYPE_KIND(a, c->gen_ret) == TY_VOID && AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == TY_VOID) {
+		/* return f(); in a void function (C++ allows it, C does not): f(), then return */
+		cc_id_list l;
+
+		cc_id_list_init(&l);
+		cc_id_list_append(a, &l, cc_statement_new(a, N_EXPR, loc, e, 0, 0));
+		cc_id_list_append(a, &l, cc_statement_new(a, N_RETURN, loc, 0, 0, 0));
+		return cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 	}
 	if (has_value && (!e || AST_TYPE_KIND(a, c->gen_ret) == TY_VOID)) {
 		cxx_gen_fail(c);

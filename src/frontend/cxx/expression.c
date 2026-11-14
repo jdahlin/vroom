@@ -1287,7 +1287,7 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
 			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128)
 				cxx_ec(c, cast_to, v);
-			else if (t->kw == CXX_KW_static_cast)
+			else if (t->kw == CXX_KW_static_cast || t->kw == CXX_KW_const_cast)	/* (const_cast: the same object or value, cv dropped) */
 				cxx_gen_cast(c, xn, cast_to, t->loc);
 			else if (t->kw == CXX_KW_reinterpret_cast)
 				cxx_gen_reinterpret(c, xn, cast_to, t->loc);
