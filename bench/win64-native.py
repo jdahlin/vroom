@@ -40,7 +40,7 @@ on Linux, to try this runner where there is no Windows).  The summary goes to
 stdout; with $GITHUB_STEP_SUMMARY set, the counts and a table of failures are
 appended there too.  The exit status is 1 on any unexpected result.
 """
-import argparse, concurrent.futures, glob, json, os, re, shlex, subprocess, sys, tarfile, tempfile, time
+import argparse, concurrent.futures, glob, json, os, re, shlex, shutil, subprocess, sys, tarfile, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ALLOW = os.path.join(ROOT, 'ci', 'win64-native-allow.txt')
@@ -126,6 +126,8 @@ def run_one(d, t, wrapper, scale):
 
 def unpack(archive):
     d = re.sub(r'\.(tar\.(xz|gz|bz2)|txz|tgz)$', '', archive) + '.d'
+    if os.path.isdir(d) and os.path.getmtime(d) < os.path.getmtime(archive):
+        shutil.rmtree(d)	# unpacked from an earlier archive (a local rerun): unpack this one
     if not os.path.isdir(d):
         with tarfile.open(archive) as tf:
             tf.extractall(d + '.tmp', filter='data') if hasattr(tarfile, 'data_filter') else tf.extractall(d + '.tmp')
