@@ -1367,3 +1367,8 @@ medlemmar av klasstyp definierade efter klassen (`partial_ordering::less`,
 sin initierare; `?:` av en klass.  Ett program med `std::is_lt(a <=> b)`,
 `std::is_gt`, `partial_ordering::unordered` kompileras, länkas och körs
 med enbart vcc:s kod.  json oförändrad: 69/70, 2 406 funktioner, 11 av 118.
+Rättelse till (48): commit 67d015e4 sade att `partial_ordering::unordered`-
+jämförelsen kördes med enbart vcc:s kod; den länkade inte då (`operator==
+= default` fick ingen kod).  Nu: en förvald `operator==` för en klass med
+skalära medlemmar byggs på plats (medlemmarna jämförs i ordning), och hela
+testet kompileras, länkas och körs med enbart vcc:s kod.

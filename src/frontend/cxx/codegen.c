@@ -1670,12 +1670,50 @@ VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc)
 			fprintf(stderr, "no call (codegen.c:%d): %.*s/%u\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s, nargs); \
 	} while (0)
 
+/* operator==(X, X) = default of a class whose members are scalars: the members compared in order, inline (0: not built) */
+static uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty t = QUNQ(AST_NODE_AT(a, x)->ty);
+	const tag *r;
+	uint32_t e = 0;
+
+	if (!cc_type_is_record(a, t) || QUNQ(AST_NODE_AT(a, y)->ty) != t || AST_TYPE_KIND(a, t) != TY_STRUCT ||
+	    !(AST_NODE_AT(a, x)->flags & NF_LVALUE) || !(AST_NODE_AT(a, y)->flags & NF_LVALUE))
+		return 0;
+	r = &a->tags[AST_TYPE(a, t)->aux];
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		int k = AST_TYPE_KIND(a, r->f[i].ty);
+		uint32_t q;
+
+		if (!r->f[i].name || !((k >= TY_BOOL && k <= TY_LDOUBLE) || k == TY_PTR || k == TY_ENUM))
+			return 0;
+		q = cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, member(a, x, r->f[i].name, loc)),
+				    cc_node_rvalue(a, member(a, y, r->f[i].name, loc)), loc);
+		e = e ? cc_binary_build(a, LEX_TOKEN_AMPERSAND_AMPERSAND, e, q, loc) : q;
+	}
+	return e ? cc_conversion_apply(a, e, cc_type_basic(TY_BOOL)) : cc_node_integer_new(a, 1, cc_type_basic(TY_BOOL), loc);
+}
+
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
 	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[32];
+
+	if (f && f->fn_defaulted && cxx_gen_on(c) && f->name == vintern_cstr("operator==")) {
+		/* a defaulted equality: no function to call, the comparison itself (a friend's two operands; a
+		   member's object and one) */
+		uint32_t x = f->member_of && !f->fn_static ? (object ? (arrow ? cc_dereference_build(a, cc_conversion_decay(a, object), loc) : object) : 0) :
+			     nargs == 2 ? args[0] : 0;
+		uint32_t y = f->member_of && !f->fn_static ? (nargs == 1 ? args[0] : 0) : nargs == 2 ? args[1] : 0;
+
+		c->enode = x && y ? cxx_gen_defaulted_eq(c, x, y, loc) : 0;
+		if (!c->enode)
+			CXX_CALL_WHY();
+		return;
+	}
 
 	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
 		{ CXX_CALL_WHY(); return; }
