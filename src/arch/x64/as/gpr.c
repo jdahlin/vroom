@@ -186,6 +186,26 @@ static int x64_mov(as_context *a, int sz, XOp *o)
 	return X64_NEXT;
 }
 
+static int x64_lea(as_context *a, int z, XOp *o)
+{
+	if (o[0].kind == XK_EXPR)
+		o[0].kind = XK_MEM;
+	return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = OPB(0x8d), .nop = 1, .reg = o[1].reg, .rm = &o[0]));
+}
+
+static int x64_mov_extend(as_context *a, int from, int to, bool sx, XOp *o)
+{
+	if (o[0].kind == XK_EXPR)
+		o[0].kind = XK_MEM;
+	if (from == 4 && sx)
+		return x64_emit(a, &F(.w = 1, .op = OPB(0x63), .nop = 1, .reg = o[1].reg, .rm = &o[0]));
+	{
+		uint8_t ops[2] = { 0x0f, (uint8_t)((sx ? 0xbe : 0xb6) + (from == 2)) };
+
+		return x64_emit(a, &F(.w = to == 8, .opsz16 = to == 2, .op = ops, .nop = 2, .reg = o[1].reg, .rm = &o[0], .rex8 = rex8(&o[0])));
+	}
+}
+
 VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 {
 	char stem[32];
@@ -254,9 +274,7 @@ VPRIV int x64_i_int(as_context *a, char *mn, XOp *o, int nops)
 			if (!strcmp(m, "lea") && nops == 2) {
 				int z = sz ? sz : opsize(&o[1]);
 
-				if (o[0].kind == XK_EXPR)
-					o[0].kind = XK_MEM;
-				return x64_emit(a, &F(.w = z == 8, .opsz16 = z == 2, .op = OPB(0x8d), .nop = 1, .reg = o[1].reg, .rm = &o[0]));
+				return x64_lea(a, z, o);
 			}
 			if (!strcmp(m, "test") && nops == 2) {
 				XOp *s = &o[0], *d = &o[1];
@@ -405,15 +423,7 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
 		int from = sfxsize(mn[4]), to = mn[5] ? sfxsize(mn[5]) : o[1].size, sx = mn[3] == 's';
 
 		if (from && from < to && to == o[1].size && (from < 4 || (from == 4 && sx))) {
-			if (o[0].kind == XK_EXPR)
-				o[0].kind = XK_MEM;
-			if (from == 4 && sx)
-				return x64_emit(a, &F(.w = 1, .op = OPB(0x63), .nop = 1, .reg = o[1].reg, .rm = &o[0]));
-			{
-				uint8_t ops[2] = { 0x0f, (uint8_t)((sx ? 0xbe : 0xb6) + (from == 2)) };
-
-				return x64_emit(a, &F(.w = to == 8, .opsz16 = to == 2, .op = ops, .nop = 2, .reg = o[1].reg, .rm = &o[0], .rex8 = rex8(&o[0])));
-			}
+			return x64_mov_extend(a, from, to, sx, o);
 		}
 	}
 	return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
@@ -428,5 +438,8 @@ int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
 	a->x64_operand_size = 0;
 	if (op <= X64O_CMP) return x64_alu(a, op, size, o, 2);
 	if (op == X64O_MOV) return x64_mov(a, size, o);
+	if (op == X64O_LEA) return x64_lea(a, size, o);
+	if (op == X64O_MOVSX || op == X64O_MOVZX)
+		return x64_mov_extend(a, size, o[1].size, op == X64O_MOVSX, o);
 	return as_error_report(a, "invalid structured integer operation");
 }
