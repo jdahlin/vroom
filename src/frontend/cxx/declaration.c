@@ -3906,6 +3906,29 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				    pack_n == UINT32_MAX && !cxx_is_kw(c, CXX_KW_try)) {
 					gi->ty = t;
 					gen = cxx_gen_function_begin(c, gi, fs, c->decl_params, c->ndecl_params);
+				} else if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
+					   pack_n != UINT32_MAX && c->decl_pack_param < c->ndecl_params && !cxx_is_kw(c, CXX_KW_try) &&
+					   AST_TYPE(c->ast, t)->n == c->ndecl_params - 1 + pack_n && AST_TYPE(c->ast, t)->n <= 32) {
+					/* a function parameter pack: one parameter per element (T... v with v... expanded in the body) */
+					cxx_param xp[32];
+					uint32_t k = 0, at = c->decl_pack_param;
+					cxx_entity *pe = c->decl_params[at].name > 1 ? cxx_lookup_in(c, fs, c->decl_params[at].name, 0) : NULL;
+
+					for (uint32_t i = 0; i < c->ndecl_params; i++)
+						if (i == at)
+							for (uint32_t j = 0; j < pack_n; j++)
+								xp[k].name = 0, xp[k].ty = c->ast->params[AST_TYPE(c->ast, t)->aux + k], k++;
+						else
+							xp[k++] = c->decl_params[i];
+					if (!pe || (pe->is_pack && pe->npack == pack_n)) {	/* (an unnamed pack: its elements unused) */
+						if (pe) {
+							pe->pack_syms = calloc(pack_n ? pack_n : 1, sizeof *pe->pack_syms);
+							c->gen_pack_entity = pe, c->gen_pack_from = at, c->gen_pack_n = pack_n;
+						}
+						gi->ty = t;
+						gen = cxx_gen_function_begin(c, gi, fs, xp, k);
+						c->gen_pack_entity = NULL;
+					}
 				}
 				cxx_function_body_parse(c);
 				if (gen)

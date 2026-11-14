@@ -1306,3 +1306,13 @@ stoppas av allmänna luckor, i ordning efter hur ofta de syns:
 - `<=>` med `std::is_lt`, `static_cast<const Bas &>(*this)`.
 Fel som hittades: medlemsfunktioner definierade utanför en explicit
 specialisering med `inline` (`__bitset<0, 0>`) blir starka symboler.
+
+### Status (44): funktionsmallar med parameterpackar får kod (2026-11-14)
+En instans av en mall med en funktionsparameterpack (`f(A&&... a)`) får nu
+en entitet och kod: en parameter per element, `a...` i argumentlistor
+expanderas till en nod per element, `sizeof...(T)` är en konstant, tomma
+packar fungerar.  Namnen är clangs (`_Z3fwdIJiRlEEiPFiilEDpOT_`,
+`_Z5countIJEEiDpRT_`).  Inte än: fold-uttryck (`(0 + ... + v)`) får varken
+typ eller kod.  json-sviten oförändrad (69/70, 3,9 s, 2 215 funktioner,
+10 av 118 testfunktioner): libc++:s packanvändare stannar på andra luckor
+(virtuella baser, `operator()` på temporärer).

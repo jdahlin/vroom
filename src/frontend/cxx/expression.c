@@ -429,7 +429,7 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 					if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 						c->eunsure = 1;
 					if (n < 16)
-						args[n] = c->etype, lval[n] = c->elval;
+						args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode;	/* (each element's node too) */
 					n++;
 				}
 				for (uint32_t k = 0; k < np; k++)
@@ -1907,9 +1907,16 @@ static void cxx_unary_expression_parse(cxx *c)
 	case CXX_KW_sizeof:
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {	/* sizeof...(pack) */
+			cxx_entity *pk;
+
 			cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+			pk = cxx_is(c, LEX_TOKEN_IDENTIFIER) ? cxx_lookup(c, cxx_peek(c, 0)->id) : NULL;
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+			if (pk && pk->is_pack && !pk->pack_placeholder && !c->template_depth && !c->tentative) {
+				cxx_ec(c, cc_type_basic(TY_ULONG), (int64_t)pk->npack);	/* (a bound pack: its length) */
+				return;
+			}
 		} else if (cxx_paren_type_id_follows(c)) {
 			uint64_t size;
 			uint32_t align;

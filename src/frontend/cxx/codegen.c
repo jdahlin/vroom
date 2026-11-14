@@ -4332,7 +4332,9 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 		a->syms[s].flags |= SF_PARAM;
 		a->syms[s].sc = SC_AUTO;
 		cc_id_list_append(a, &psyms, s);
-		if (pe)
+		if (c->gen_pack_entity && i >= c->gen_pack_from && i < c->gen_pack_from + c->gen_pack_n)
+			c->gen_pack_entity->pack_syms[i - c->gen_pack_from] = s;	/* (a pack's element: found through the pack) */
+		else if (pe)
 			pe->sym = s;
 	}
 	c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = psyms.n;

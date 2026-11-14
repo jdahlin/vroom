@@ -192,6 +192,8 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 		} else
 			m->bad = true;	/* (templates as arguments: not mangled yet) */
 	}
+	if (pack_at == nargs)
+		mg_str(m, "J");	/* (an empty pack: J E) */
 	if (pack_at <= nargs)
 		mg_str(m, "E");
 	mg_str(m, "E");
@@ -515,7 +517,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (f->is_instance && !(v->len && v->s[0] == ' '))
 			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX, f->inst_params);
+			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
 		mg_str(&m, "E");
 	} else {
 		if (mg_scope_is_std(&m, home))
@@ -530,26 +532,35 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (f->is_instance)
 			mg_remember(&m, CXX_SUB_TEMPLATE, f, 0);	/* (the template's name: a candidate before its arguments) */
 		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX, f->inst_params);
+			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
 	}
 	/* A function template's instance: its return type and its parameters as the template declares them
 	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
 	   among vcc's objects, not clang's name). */
+	uint32_t pack_param = 0;
+
 	if (f->is_instance) {
 		const qty *ph;
-		uint32_t nph;
-		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph);
+		uint32_t nph, pp = 0;
+		qty ds = cxx_instance_declared_sig(c, f, &ph, &nph, &pp);
+		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
+		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
-		if (ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC && AST_TYPE(a, ds)->n == x->n &&
+		if (ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC && AST_TYPE(a, ds)->n == want && (!pp || pp <= want) &&
 		    (AST_TYPE(a, ds)->flags & TF_VARIADIC) == (x->flags & TF_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
-			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph;
+			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph, pack_param = f->inst_pack_at != UINT32_MAX ? pp : 0;
 	}
 	if (f->is_instance && !(v->len && v->s[0] == ' '))
 		mg_type(&m, x->base);
 	if (!x->n && !(x->flags & TF_VARIADIC))
 		mg_str(&m, "v");
-	for (uint32_t i = 0; i < x->n; i++)
+	for (uint32_t i = 0; i < x->n; i++) {
+		if (pack_param && i + 1 == pack_param)
+			mg_str(&m, "Dp");	/* (a pack expansion; its pattern is a substitution candidate, then the expansion) */
 		mg_parameter(&m, a->params[x->aux + i]);
+		if (pack_param && i + 1 == pack_param)
+			mg_remember(&m, CXX_SUB_TEMPLATE, &m.ph[0] + 0x1000 + i, 0);	/* (Dp T itself: a candidate) */
+	}
 	if (x->flags & TF_VARIADIC)
 		mg_str(&m, "z");
 	if (m.bad && getenv("VCC_CXX_MANGLE_WHY"))

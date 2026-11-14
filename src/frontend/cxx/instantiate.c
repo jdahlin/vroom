@@ -492,6 +492,8 @@ static void cxx_bind_pack(cxx *c, cxx_scope *binding, const cxx_tparam *p, const
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i)
 {
 	e->pack_index = i;
+	if (e->pack_syms)
+		e->sym = i < 0 || (uint32_t)i >= e->npack ? 0 : e->pack_syms[i];	/* (a parameter pack: its element's parameter) */
 	if (i < 0) {
 		e->ty = CXX_TY_UNKNOWN, e->has_value = 0, e->members = NULL, e->tmpl = NULL;
 		return;
@@ -1699,7 +1701,7 @@ static cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ
 	inst->fn_const = te->fn_const, inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
 	copy = malloc((nargs ? nargs : 1) * sizeof *copy);
 	memcpy(copy, args, nargs * sizeof *copy);
-	inst->targs = copy, inst->ntargs = nargs, inst->inst_params = p->params, inst->abi_tag = te->abi_tag, inst->inst_ftmpl = te->ftmpl;
+	inst->targs = copy, inst->ntargs = nargs, inst->inst_pack_at = UINT32_MAX, inst->inst_params = p->params, inst->abi_tag = te->abi_tag, inst->inst_ftmpl = te->ftmpl;
 	return inst;
 }
 
@@ -1722,7 +1724,7 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f);
 
 /* a function template's instance: the template's signature as declared, its type parameters' placeholder
    types (ph[i] for parameter i); CXX_TY_UNKNOWN: not known */
-VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph)
+VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param)
 {
 	cxx_ftemplate *f = inst->inst_ftmpl;
 
@@ -1732,6 +1734,7 @@ VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **
 	if (f->packs || !f->p.ph || f->sig == CXX_TY_UNKNOWN)
 		return CXX_TY_UNKNOWN;
 	*ph = f->p.ph, *nph = f->p.params->ntparams;
+	*pack_param = f->pack_param;	/* (the function parameter pack Ts&&... ts: index + 1, 0: none) */
 	return f->sig;
 }
 
@@ -1997,6 +2000,16 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 	}
 	if (want_body)
 		f->done[at].body = 1;
+	/* code generation: this instantiation's function (its pack's arguments last, from np - 1) */
+	cxx_entity *inst = NULL;
+	uint32_t g_depth = c->gen_stack_depth, g_enode = c->enode, g_snode = c->snode, g_sdone = c->sdone, g_sdepth = c->sdepth;
+	void *g_block = c->gen_block;
+
+	if (want_body) {
+		if (!f->done[at].inst && (f->done[at].inst = cxx_ftemplate_instance(c, p, acopy, nx)))
+			f->done[at].inst->inst_pack_at = np - 1;
+		inst = f->done[at].inst;
+	}
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 	for (uint32_t i = 0; i + 1 < np; i++)
 		cxx_bind(c, binding, &p->params->tparams[i], &acopy[i]);
@@ -2014,6 +2027,7 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 			c->stats.body_depth_max = c->body_depth;
 	}
 	c->sig_pack_types = ptypes, c->sig_pack_n = pn;	/* (the signature with the pack expanded; in a body, the pack of values) */
+	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
 		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
@@ -2029,6 +2043,7 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 		if (want_body)
 			c->stats.bodies_failed++;
 	}
+	c->gen_instance = NULL;
 	c->instantiating--, c->body_depth--;
 	{
 		qty sig = c->bound_sig;
@@ -2036,6 +2051,10 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 		cxx_outer_restore(c, &o);
 		c->bound_sig = sig;
 	}
+	cxx_gen_unwind(c, g_depth);
+	c->enode = g_enode, c->snode = g_snode, c->sdone = g_sdone, c->sdepth = g_sdepth, c->gen_block = g_block;
+	if (want_body)
+		c->call_instance = inst;
 	/* (found again: the body may have added entries) */
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (f->done[i].n == nx + 1000 && cxx_args_equal(f->done[i].args, acopy, nx)) {
