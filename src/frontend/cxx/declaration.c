@@ -3067,3 +3067,9 @@ VPRIV void cxx_for_range_declaration_parse(cxx *c)
 	if (!cxx_is(c, LEX_TOKEN_COLON))
 		cxx_fail(c, "expected ':'");
 }
+
+/* a lambda's ( parameters ): as a function's (c->fn_params, c->fn_pnames, c->fn_nparams, c->fn_unknown) */
+VPRIV void cxx_lambda_parameters_parse(cxx *c)
+{
+	cxx_parameter_clause_parse(c);
+}

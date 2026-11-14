@@ -293,7 +293,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 	cxx_entity *set;
 	qty all[4];
 
-	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 2)
+	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
 		return false;
 	cls = cxx_type_class_scope(c, QUNQ(obj));
 	if (!cls)
@@ -305,7 +305,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		if (!c->none_viable)
 			return true;
 	}
-	set = cxx_lookup(c, id);
+	set = nargs <= 2 ? cxx_lookup(c, id) : NULL;	/* (operator() and operator[] are members) */
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)

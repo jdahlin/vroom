@@ -322,12 +322,20 @@ static void cxx_lambda_parse(cxx *c)
 	cxx_scope *ls = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 	cxx_scope *outer = c->scope;
 	uint32_t depth = c->class_depth, targs = c->in_template_args;
+	/* a closure type is built for a lambda outside templates whose parameter types are known */
+	bool typed = false, generic = false;
+	qty params[16], ret = CXX_TY_UNKNOWN;
+	uint32_t nparams = 0;
+	uint8_t o_capture = c->ret_capture, o_lval = c->ret_lval, o_seen = c->ret_seen;
+	qty o_type = c->ret_type;
 
+	c->lambda_type = CXX_TY_UNKNOWN;
 	cxx_skip_balanced(c);	/* [captures]: init-captures parse later with the body (names are values) */
 	c->in_template_args = 0;
 	cxx_scope_push(c, ls);
 	cxx_attributes_skip(c);
 	if (cxx_is(c, LEX_TOKEN_LESS)) {	/* []<typename T>(...) */
+		generic = true;
 		cxx_advance(c);
 		c->template_depth++;
 		while (!cxx_accept_greater(c)) {
@@ -350,7 +358,25 @@ static void cxx_lambda_parse(cxx *c)
 		c->template_depth--;
 		cxx_requires_clause_parse(c);
 	}
-	if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
+	if (!generic && !c->template_depth && !c->tentative &&
+	    (!cxx_is(c, LEX_TOKEN_LEFT_PAREN) || cxx_lookahead_fn(c, cxx_lambda_parameters_parse))) {
+		/* parameters as a function's: their names with their types */
+		if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
+			cxx_lambda_parameters_parse(c);
+			typed = !c->fn_unknown && c->fn_nparams <= 16 && !c->fn_variadic;
+			nparams = c->fn_nparams;
+			for (uint32_t i = 0; i < nparams && i < 16; i++) {
+				params[i] = c->fn_params[i];
+				if (c->fn_pnames[i] > 1) {
+					cxx_entity *e = cxx_declare(c, ls, c->fn_pnames[i], CXX_ENTITY_VALUE);
+
+					if (e)
+						e->ty = c->fn_params[i];
+				}
+			}
+		} else
+			typed = true;	/* [] { ... }: no parameters */
+	} else if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 		/* parameters: declare their names (for the body) */
 		cxx_advance(c);
 		while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
@@ -408,14 +434,45 @@ static void cxx_lambda_parse(cxx *c)
 		}
 		break;
 	}
-	if (cxx_accept(c, LEX_TOKEN_ARROW))
+	if (cxx_accept(c, LEX_TOKEN_ARROW)) {
 		cxx_type_id_parse(c);
+		ret = c->type_out;
+		typed &= ret != CXX_TY_UNKNOWN;
+	}
 	cxx_requires_clause_parse(c);
 	c->class_depth = 0;
+	/* no trailing type: the body's first return (none: void); a lambda inside has its own */
+	c->ret_capture = typed && ret == CXX_TY_UNKNOWN, c->ret_type = CXX_TY_UNKNOWN, c->ret_seen = 0;
 	cxx_compound_statement_parse(c);
+	if (typed && ret == CXX_TY_UNKNOWN) {
+		if (c->ret_type == CXX_TY_UNKNOWN && !c->ret_seen)
+			ret = cc_type_basic(TY_VOID);
+		else if (c->ret_type != CXX_TY_UNKNOWN)
+			ret = AST_TYPE_KIND(c->ast, c->ret_type) == TY_VOID ? c->ret_type :
+			      cxx_auto_deduce(c, cxx_auto_type(c), c->ret_type, c->ret_lval);
+	}
+	c->ret_capture = o_capture, c->ret_lval = o_lval, c->ret_seen = o_seen, c->ret_type = o_type;
 	c->class_depth = depth;
 	c->scope = outer;
 	c->in_template_args = targs;
+	if (typed && ret != CXX_TY_UNKNOWN) {
+		/* the closure type: a class of its own with operator()(parameters) (its captures: not laid out) */
+		uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, vintern_cstr("lambda"), 0);
+		cxx_entity *owner = calloc(1, sizeof *owner), *call;
+		cxx_scope *cs;
+
+		owner->kind = CXX_ENTITY_TYPE, owner->name = vintern_cstr("lambda"), owner->pack_index = -1;
+		owner->ty = QT(c->ast->tags[tag].ty, 0);
+		cs = cxx_scope_new(c, CXX_SCOPE_CLASS, outer, owner);
+		owner->members = cs;
+		cxx_tag_scope_set(c, tag, cs);
+		call = cxx_declare(c, cs, vintern_cstr("operator()"), CXX_ENTITY_VALUE);
+		if (call) {
+			call->ty = cxx_type_function(c, ret, params, nparams, false);
+			call->fn_const = 1;
+			c->lambda_type = owner->ty;
+		}
+	}
 }
 
 static void cxx_requires_expression_parse(cxx *c)
@@ -599,14 +656,8 @@ static void cxx_primary_expression_parse(cxx *c)
 		cxx_paren_expression_parse(c);
 		return;
 	case LEX_TOKEN_LEFT_SQUARE:
-		{
-			uint8_t capture = c->ret_capture;	/* (the lambda's own returns are not the function's) */
-
-			c->ret_capture = 0;
-			cxx_lambda_parse(c);
-			c->ret_capture = capture;
-		}
-		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (a closure type: not built; not its body's last expression's) */
+		cxx_lambda_parse(c);	/* (its returns are its own: the enclosing function's capture is kept) */
+		cxx_et(c, c->lambda_type, false);	/* its closure type, when built (not its body's last expression's) */
 		return;
 	case LEX_TOKEN_LEFT_BRACE:
 		cxx_braced_init_list_parse(c);
@@ -848,7 +899,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
 				else if (nx != UINT32_MAX && set)
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
-				else if (!set && c->ncargs <= 2 && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
+				else if (!set && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
 					;	/* an object of class type: its operator() */
 				else
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
