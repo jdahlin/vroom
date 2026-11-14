@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-dwarf.py: -g line tables (TODO.md DWARF).
 
-  bench/vcc-dwarf.py [-j N] [-O LEVEL] [--target T] [--gflag=FLAG] [PAT]
+  bench/vcc-dwarf.py [-j N] [-O LEVEL] [--target T] [--gflag=FLAG] [--cflags=FLAGS] [PAT]
 
 For every C file in src/test/vcc and tests/gcc-torture/execute
 (matching PAT), compiled for aarch64 Linux (--target x86_64-linux-gnu,
@@ -13,6 +13,8 @@ no sysroot, as vas-corpus.py, and DWARF 4 by default as clang):
   - vpp -g -c equals clang -c of vpp -g -S (the line table from the text), and
     on x86-64 vasm of the same text;
 --gflag=FLAG: the flag instead of -g (-gdwarf-4, -gdwarf-5, -gline-tables-only, -g3).
+--cflags=FLAGS: more flags for both compilers (-ffunction-sections: COFF's unit
+then has DW_AT_ranges).
   - rows at lines clang -g has no row for are counted (-v lists them): clang
     -O0 drops an if whose condition folds, vcc -O0 keeps its code.
 Clang's side (whether it compiles, its rows) is cached in build/src/dwarfref,
@@ -133,9 +135,9 @@ def one(job):
             return ('ok', f, f'lines clang has no row for: {sorted(extra)[:5]}')
         return ('ok', f, '')
 
-def _init(nc, tgt, gflag):
+def _init(nc, tgt, gflag, cflags):
     global NOCACHE, TGT, FL, GFLAG
-    NOCACHE, TGT, FL, GFLAG = nc, tgt, flags(tgt), gflag
+    NOCACHE, TGT, FL, GFLAG = nc, tgt, flags(tgt) + cflags.split(), gflag
 
 def main():
     ap = argparse.ArgumentParser()
@@ -145,13 +147,14 @@ def main():
     ap.add_argument('--no-cache', action='store_true')
     ap.add_argument('--target', default='aarch64-linux-gnu')
     ap.add_argument('--gflag', default='-g')
+    ap.add_argument('--cflags', default='')
     ap.add_argument('pat', nargs='?')
     a = ap.parse_args()
     global NOCACHE
     NOCACHE = a.no_cache
     files = sorted(glob.glob(f'{R}/src/test/vcc/*.c') + glob.glob(f'{R}/src/test/gcc-torture/execute/*.c'))
     if a.pat: files = [f for f in files if a.pat in f]
-    with Pool(a.j, initializer=_init, initargs=(a.no_cache, a.target, a.gflag)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
+    with Pool(a.j, initializer=_init, initargs=(a.no_cache, a.target, a.gflag, a.cflags)) as p: res = p.map(one, [(f, '-O' + a.opt) for f in files], chunksize=4)
     n = {'ok': 0, 'fail': 0, 'skip': 0}
     note = 0
     for k, f, m in res:

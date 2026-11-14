@@ -675,11 +675,22 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			int v = CODEGEN_DWARF_VERSION(c);
 			const char *half = x ? "short" : "hword", *word = x ? "long" : "word", *quad = x ? "quad" : "xword";
 			const char *offset = w ? "secrel32" : word;
+			/* COFF: a function outside .text (-ffunction-sections' .text$NAME COMDATs, a section
+			   attribute) makes the unit's pc range DW_AT_ranges, one range per function, as clang
+			   (a debugger finds the unit of an address by its ranges); not below DWARF 3 */
+			bool ranges = false;
 
+			for (uint32_t i = 0; w && v >= 3 && i < E.chunk_count && !ranges; i++) {
+				uint64_t key = E.chunks[i].key;
+
+				if (!(key & 1) && key < ((uint64_t)1 << 62) && c->syms[key >> 1].kind == AST_SYMBOL_FUNCTION)
+					ranges = (o->sections & 1) || codegen_symbol_attributes(c, (uint32_t)(key >> 1))->section;
+			}
 			vtext_format_append(&tail, "\t.text\n.Ldbg_text1:\n\t.section\t.debug_abbrev,%s\n.Ldbg_abbrev:\n"
-					    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, %s, 27, 8, 17, 1, 18, %s, 0, 0, 0\n"
+					    "\t.byte\t1, 17, 0, 37, 8, 19, 5, 3, 8, 16, %s, 27, 8, 17, 1, %s, %s, 0, 0, 0\n"
 					    "\t.section\t.debug_info,%s\n",
-					    w ? "\"dr\"" : "\"\",@progbits", v >= 4 ? "23" : "6", v >= 4 ? "6" : "1", w ? "\"dr\"" : "\"\",@progbits");
+					    w ? "\"dr\"" : "\"\",@progbits", v >= 4 ? "23" : "6", ranges ? "85" : "18",
+					    ranges ? (v >= 4 ? "23" : "6") : v >= 4 ? "6" : "1", w ? "\"dr\"" : "\"\",@progbits");
 			vtext_format_append(&tail, "\t.%s\t.Ldbg_cu_end-.Ldbg_cu_start\n.Ldbg_cu_start:\n\t.%s\t%d\n", word, half, v);
 			if (v >= 5)
 				vtext_format_append(&tail, "\t.byte\t1, 8\n\t.%s\t.Ldbg_abbrev\n", offset);
@@ -689,7 +700,23 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 			codegen_string_quote_append(&tail, o->dbg_name ? o->dbg_name : "<stdin>");
 			vtext_format_append(&tail, "\n\t.%s\t.Lline_table_start0\n\t.asciz\t", offset);
 			codegen_string_quote_append(&tail, o->dbg_dir ? o->dbg_dir : ".");
-			if (v >= 4)
+			if (ranges) {
+				vtext_format_append(&tail, "\n\t.%s\t0\n\t.%s\t.Ldbg_ranges\n.Ldbg_cu_end:\n", quad, offset);
+				vtext_string_append(&tail, v >= 5 ? "\t.section\t.debug_rnglists,\"dr\"\n\t.long\t.Ldbg_rnglists_end-.Ldbg_rnglists_start\n"
+					    ".Ldbg_rnglists_start:\n\t.short\t5\n\t.byte\t8, 0\n\t.long\t0\n.Ldbg_ranges:\n" :
+					    "\t.section\t.debug_ranges,\"dr\"\n.Ldbg_ranges:\n");
+				for (uint32_t i = 0; i < E.chunk_count; i++) {
+					uint64_t key = E.chunks[i].key;
+
+					if ((key & 1) || key >= ((uint64_t)1 << 62) || c->syms[key >> 1].kind != AST_SYMBOL_FUNCTION)
+						continue;
+					/* DWARF 5: DW_RLE_start_end (6); below: a begin, end pair (the base is the unit's 0) */
+					vtext_string_append(&tail, v >= 5 ? "\t.byte\t6\n\t.quad\t" : "\t.quad\t");
+					codegen_symbol_name_append(c, &tail, (uint32_t)(key >> 1));
+					vtext_format_append(&tail, "\n\t.quad\t.Lfunc_end%u\n", (uint32_t)(key >> 1));
+				}
+				vtext_string_append(&tail, v >= 5 ? "\t.byte\t0\n.Ldbg_rnglists_end:\n" : "\t.quad\t0\n\t.quad\t0\n");
+			} else if (v >= 4)
 				vtext_format_append(&tail, "\n\t.%s\t.Ldbg_text0\n\t.%s\t.Ldbg_text1-.Ldbg_text0\n.Ldbg_cu_end:\n", quad, word);
 			else
 				vtext_format_append(&tail, "\n\t.%s\t.Ldbg_text0\n\t.%s\t.Ldbg_text1\n.Ldbg_cu_end:\n", quad, quad);

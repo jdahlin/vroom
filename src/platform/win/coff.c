@@ -54,6 +54,7 @@ typedef struct {
 	uint32_t *symidx; uint32_t symidx_count;	/* R_VCC_COFF_SYMIDX fixups */
 	uint32_t addrsig;		/* .llvm_addrsig section */
 	uint32_t *creation;		/* sections in MC's creation order (coff_section_late's last) */
+	uint8_t *is_comdat_key;		/* per ElfSym: a section's COMDAT symbol (in the table even when temporary) */
 } CoffOut;
 
 /* ---- the per-object state (objimpl.h) ---- */
@@ -164,7 +165,7 @@ static void coff_relocation(ElfObj *o, CoffOut *w, ElfFix *x, uint64_t P, uint16
 	uint32_t target = aid;
 	if (a->flags & ESYM_SECTION)	/* the model's section symbol: the writer's */
 		target = COFF_RELOC_SECTION | symsec(o, a);
-	else if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC) {
+	else if (coff_is_temporary(a) && a->coff_class != COFF_CLASS_STATIC && !w->is_comdat_key[aid]) {
 		/* MC: a temporary becomes its section's symbol and its offset */
 		if (!insec(a)) { elf_error(o, "undefined temporary symbol '%s'", a->name); return; }
 		c += (int64_t)symoff(o, a);
@@ -436,6 +437,10 @@ size_t coff_finish(ElfObj *o)
 		}
 		se->nfix_reloc = 0;
 	}
+	w->is_comdat_key = rpush(&o->arena, o->nsym + 1, 8);
+	memset(w->is_comdat_key, 0, o->nsym + 1);
+	for (uint32_t s = 1; s < ns; s++)	/* (MC: a relocation names a temporary COMDAT symbol itself) */
+		if (elf_sec(o, s)->group && elf_sec(o, s)->comdat != COFF_SELECT_ASSOCIATIVE) w->is_comdat_key[elf_sec(o, s)->group] = 1;
 	/* fixups, in layout order */
 	w->relocations = rpush(&o->arena, sizeof(CoffRelocation) * (o->nfix + 1), 8);
 	w->symidx = rpush(&o->arena, sizeof(uint32_t) * (o->nfix + 1), 8);
