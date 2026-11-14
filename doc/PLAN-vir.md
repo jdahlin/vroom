@@ -289,6 +289,19 @@ The pass switch is read per TU, not per process; a bad value fails the job.
   front end unchanged.  V7's proposal allows +15 % in total.  V7's other
   criteria (static instructions against clang, the self-build) are not
   measured.
+- Compile cost after computing the inlining sizes on first use (2026-11-14,
+  against main 87f85d5b): cc +9.11 % instructions (+15.9 % cycles), emit
+  +84.7 %; that commit alone gave cc -0.61 %, emit -2.55 %, output
+  byte-identical.  Where emit's remaining ~600 M on the corpus goes:
+  VIR's build and lowering of the functions it lowers ~620 M (build
+  ~4500 instructions per final VIR instruction, lowering ~2800: the
+  allocator ~107 M, the record clean-ups ~64 M, simplify 67 M, to-vir 43 M,
+  canon 35 M, promote 30 M + 16 M for promote-again, which changes 37 of
+  1251 functions); walks that fail ~97 M (1040 of them, inline asm 746 of
+  896 fallbacks), after which the direct emitter still does ~400 M of
+  the 560 M it does at `-O1`.  No pass dominates and none is superlinear,
+  so the 1 % budget is out of reach by tuning: it needs VIR to take inline
+  asm (no failed walk, no second emission) and a cheaper builder.
 - Not run: `vcc-vir-x86.py` and the x86-64 CI job need an x86-64 host; its
   compile side was checked here (the same functions lowered, packed
   instructions only at `-O3`, `-O0`/`-O1` unchanged by VIR's options).

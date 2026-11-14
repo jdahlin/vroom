@@ -1360,7 +1360,7 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 			return false;
 #ifdef WALK_PREFIX
 		/* VIR: per call site by the callee's size with the callees it inlines itself
-		   (codegen_function_inline_sizes, bottom-up as LLVM), so nested copies cannot grow exponentially; a
+		   (codegen_inline_size, bottom-up as LLVM), so nested copies cannot grow exponentially; a
 		   static function called once is its only copy, so inlined up to a large body
 		   (clang's last-call-to-static bonus) */
 		if (e->vir_try && e->unit->inline_sizes) {
@@ -1368,17 +1368,21 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 			/* Keep the ordinary/context budget when the caller already
 			 * exceeds the large-copy budget: even one copy can grow its
 			 * allocation unit and register pressure substantially. */
-			bool once = (e->unit->once[s] & 1) && y->sc == AST_STORAGE_STATIC && !codegen_symbol_attributes(c, s)->used &&
-			            e->unit->function_node_counts[caller]<=WALK_INLINE_ONCE_MAX;
+			bool once;
+			uint32_t size;
 
+			codegen_function_walk_ensure(e->unit, c, caller);
+			once = (e->unit->once[s] & 1) && y->sc == AST_STORAGE_STATIC && !codegen_symbol_attributes(c, s)->used &&
+			       e->unit->function_node_counts[caller]<=WALK_INLINE_ONCE_MAX;
 			lim = once ? WALK_INLINE_ONCE_MAX : WALK_INLINE_VIR_MAX;
-			/* codegen_function_inline_sizes includes the same constant-argument sites bottom-up,
+			/* codegen_inline_size includes the same constant-argument sites bottom-up,
 			 * so selected nested copies are included in the caller's bound. */
-			if(!once && e->unit->inline_sizes[s]>WALK_INLINE_VIR_MAX &&
-			   e->unit->inline_sizes[s]<=WALK_INLINE_CONSTANT_FACTOR*WALK_INLINE_VIR_MAX && codegen_inline_has_constant_argument(e->unit,c,s,call))
+			size = once ? 0 : codegen_inline_size(e->unit, c, s);
+			if(!once && size>WALK_INLINE_VIR_MAX &&
+			   size<=WALK_INLINE_CONSTANT_FACTOR*WALK_INLINE_VIR_MAX && codegen_inline_has_constant_argument(e->unit,c,s,call))
 				lim=WALK_INLINE_CONSTANT_FACTOR*WALK_INLINE_VIR_MAX;
 			codegen_function_prepass_request(e, s);
-			if (!once && e->unit->inline_sizes[s] > lim)
+			if (!once && size > lim)
 				return false;
 		}
 #endif
@@ -1398,8 +1402,9 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
 	if (s == e->walk_state->function_symbol || e->walk_state->depth >= 16)
 		return false;
 #ifdef WALK_PREFIX
-	if (e->vir_try && e->unit->recursion_groups && e->unit->recursion_groups[s] == e->unit->recursion_groups[e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol])
-		return false;	/* (its own recursion group: codegen_function_inline_sizes) */
+	if (e->vir_try && e->unit->inline_sizes &&
+	    codegen_recursion_group(e->unit, c, s) == codegen_recursion_group(e->unit, c, e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol))
+		return false;	/* (its own recursion group: codegen_recursion_group) */
 #endif
 	for (walk_inline_call *I = e->walk_state->inline_call; I; I = I->outer)
 		if (I->function == s)

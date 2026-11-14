@@ -7,13 +7,14 @@
  * body once, the first time it is emitted or inlined, and publishes the result with a release store
  * (E->walked: 0 not started, 1 being walked, 2 done); a second thread spins until it is 2, so the
  * facts are immutable once visible.  Facts about non-local variables are installed before the
- * workers start and no lazy walk may update them.  codegen_function_once_flags and codegen_function_inline_sizes run before the workers: they
- * decide, for the whole unit, which static functions are inlined (clang's rule for one-use static
- * functions; VIR's size model, with a recursion group never inlined into itself, so the result does
- * not depend on thread order).  The facts must stay conservative: a variable wrongly called
+ * workers start and no lazy walk may update them.  codegen_function_once_flags runs before the workers and
+ * VIR's inlining sizes (codegen_inline_size) are computed on first use: they decide which static
+ * functions are inlined (clang's rule for one-use static functions; VIR's size model, with a recursion
+ * group never inlined into itself), and the result does not depend on thread order.  The facts must stay conservative: a variable wrongly called
  * unwritten becomes a constant in the generated code.
  */
 #include "codegen-internal.h"
+#include "common/scoped-cleanup.h"
 
 /* Object alignment can exceed the C type alignment. The x86-64 SysV ABI
  * gives arrays of at least 16 bytes 16-byte alignment, unless the declaration
@@ -107,7 +108,13 @@ typedef struct codegen_prepass_state {
 	int loopd;		/* loops around the node */
 	uint32_t llo, lhi;	/* local syms seen (lspan) */
 	bool discard_param;
+	bool record_calls;	/* VIR's inlining sizes: the direct calls go to codegen_prepass_calls */
+	uint32_t call_count;
 } codegen_prepass_state;
+
+/* the direct calls of the function being walked, until codegen_function_walk_ensure publishes them */
+static _Thread_local codegen_call_edge *codegen_prepass_calls;
+static _Thread_local uint32_t codegen_prepass_call_capacity;
 
 /* a local is read or written here: count it for register allocation (8x per loop level) */
 static void codegen_prepass_local_note(codegen_prepass_state *P, uint32_t s)
@@ -313,88 +320,154 @@ VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s)
 }
 
 /*
- * VIR's inlining sizes, bottom-up as LLVM's inliner: isz[s] is s's AST nodes plus
- * the isz of each callee it inlines (one whose isz is at most lim, or always_inline),
- * so a copy of s costs isz[s] however deep its callees inline.  A recursion group
- * (scc, Tarjan over the direct calls) does not inline into itself, which keeps the
- * sizes defined and the walker's choices independent of the order threads run in.
- * Runs before the workers: it walks every function (the prepass records calls).
+ * VIR's inlining sizes, bottom-up as LLVM's inliner: inline_sizes[s] is s's AST nodes
+ * plus the size of each callee it inlines (one whose size is at most
+ * WALK_INLINE_VIR_MAX, or always_inline), so a copy of s costs inline_sizes[s] however
+ * deep its callees inline.  A recursion group (Tarjan over the direct calls) does not
+ * inline into itself, which keeps the sizes defined.
+ *
+ * They are computed on first use, from the function asked about: the search
+ * walks (prepass) only the functions it reaches, not every function of the unit
+ * (most are header inlines nobody calls).  A function's size and group depend
+ * only on the functions it reaches, which a search from anywhere finds the same,
+ * so the walker's choices do not depend on which thread asks first.  Group ids
+ * (the root of the group) do depend on the order; they are only compared.  The
+ * searches share Tarjan's numbering (a finished group stays finished) under
+ * inline_size_mutex; inline_sized publishes a function's result.
  */
-VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim)
+static bool codegen_inline_search_walks(cc *c, uint32_t s)
 {
-	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
-	uint8_t *on;
+	return c->syms[s].kind == AST_SYMBOL_FUNCTION && c->syms[s].body && (c->syms[s].flags & AST_SYMBOL_FLAG_DEFINED) && codegen_symbol_canonical(c, s) == s;
+}
 
-	E->inline_parameter_reads = calloc((size_t)n + 64, 1);
-	E->call_edge_offsets = calloc((size_t)n + 64, 4);
-	E->call_edge_counts = calloc((size_t)n + 64, 4);
-	E->recursion_groups = calloc((size_t)n + 64, 4);
-	E->inline_sizes = calloc((size_t)n + 64, 2);
-	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
-	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
-	if (!E->inline_parameter_reads || !E->call_edge_offsets || !E->call_edge_counts || !E->recursion_groups || !E->inline_sizes || !idx || !low || !stk || !cs || !ci || !on)
-		abort();
-	E->call_graph_recording = true;
-	for (uint32_t s = 1; s < n; s++)
-		if (c->syms[s].kind == AST_SYMBOL_FUNCTION && c->syms[s].body && (c->syms[s].flags & AST_SYMBOL_FLAG_DEFINED) && codegen_symbol_canonical(c, s) == s) {
-			E->call_edge_offsets[s] = E->call_edge_count;
-			codegen_function_walk_ensure(E, c, s);
-			E->call_edge_counts[s] = E->call_edge_count - E->call_edge_offsets[s];
-		}
-	E->call_graph_recording = false;
-	/* Tarjan, iterative; a group is finished callees first, so its isz is computed there */
-	for (uint32_t r = 1; r < n; r++) {
-		if (idx[r] || c->syms[r].kind != AST_SYMBOL_FUNCTION)
-			continue;
-		cs[csp] = r, ci[csp++] = 0;
-		idx[r] = low[r] = ++nidx, stk[sp++] = r, on[r] = 1;
-		while (csp) {
-			uint32_t v = cs[csp - 1];
+VPRIV void codegen_inline_sizes_init(codegen_unit *E, cc *c, void *edge_space)
+{
+	size_t n = (size_t)c->nsym + 64;
 
-			if (ci[csp - 1] < E->call_edge_counts[v]) {
-				uint32_t w = E->call_edges[E->call_edge_offsets[v] + ci[csp - 1]++].callee;
+	E->inline_parameter_reads = calloc(n, 1);
+	E->call_edge_offsets = calloc(n, 4);
+	E->call_edge_counts = calloc(n, 4);
+	E->recursion_groups = calloc(n, 4);
+	E->inline_sizes = calloc(n, 2);
+	E->inline_sized = calloc(n, 1);
+	if (!E->inline_parameter_reads || !E->call_edge_offsets || !E->call_edge_counts || !E->recursion_groups || !E->inline_sizes || !E->inline_sized)
+		vout_of_memory();
+	E->call_edges = edge_space;
+	E->call_edge_count = 0;
+	pthread_mutex_init(&E->call_edge_mutex, NULL);
+	pthread_mutex_init(&E->inline_size_mutex, NULL);
+}
 
-				if (!idx[w]) {
-					cs[csp] = w, ci[csp++] = 0;
-					idx[w] = low[w] = ++nidx, stk[sp++] = w, on[w] = 1;
-				} else if (on[w] && idx[w] < low[v]) {
-					low[v] = idx[w];
-				}
-				continue;
-			}
-			csp--;
-			if (csp && low[v] < low[cs[csp - 1]])
-				low[cs[csp - 1]] = low[v];
-			if (low[v] != idx[v])
-				continue;
-			/* v roots a group: pop it, then sizes (the group's callees outside it are done) */
-			uint32_t top = sp;
+VPRIV void codegen_inline_sizes_free(codegen_unit *E)
+{
+	if (!E->inline_sizes)
+		return;
+	free(E->inline_parameter_reads), free(E->call_edge_offsets), free(E->call_edge_counts), free(E->recursion_groups);
+	free(E->inline_sizes), free((void *)E->inline_sized);
+	free(E->inline_search.index), free(E->inline_search.low), free(E->inline_search.stack), free(E->inline_search.calls);
+	free(E->inline_search.next), free(E->inline_search.on_stack);
+	pthread_mutex_destroy(&E->call_edge_mutex);
+	pthread_mutex_destroy(&E->inline_size_mutex);
+	E->inline_parameter_reads = NULL;
+	E->call_edge_offsets = E->call_edge_counts = E->recursion_groups = NULL;
+	E->inline_sizes = NULL;
+	E->inline_sized = NULL;
+	memset(&E->inline_search, 0, sizeof E->inline_search);
+}
 
-			do
-				E->recursion_groups[stk[--sp]] = v, on[stk[sp]] = 0;
-			while (stk[sp] != v);
-			for (uint32_t k = sp; k < top; k++) {
-				uint32_t s = stk[k], z = E->function_node_counts[s];
+/* a function the search reaches: walked (its calls recorded), numbered, on the stacks */
+static void codegen_inline_search_visit(codegen_unit *E, cc *c, uint32_t w, uint32_t *csp, uint32_t *sp)
+{
+	codegen_inline_search_state *G = &E->inline_search;
 
-				for (uint32_t j = 0; j < E->call_edge_counts[s]; j++) {
-					codegen_call_edge edge=E->call_edges[E->call_edge_offsets[s]+j];
-					uint32_t t=edge.callee;
+	if (codegen_inline_search_walks(c, w))
+		codegen_function_walk_ensure(E, c, w);
+	G->calls[*csp] = w, G->next[(*csp)++] = 0;
+	G->index[w] = G->low[w] = ++G->count, G->stack[(*sp)++] = w, G->on_stack[w] = 1;
+}
 
-					if(E->recursion_groups[t]==v || !codegen_inline_is_candidate(E,c,t))continue;
-					bool take=c->syms[t].flags&AST_SYMBOL_FLAG_ALWAYS_INLINE;
-					if(!take) {
-						bool once=(E->once[t]&1) && c->syms[t].sc==AST_STORAGE_STATIC && !codegen_symbol_attributes(c,t)->used &&
-						          E->function_node_counts[s]<=WALK_INLINE_ONCE_MAX;
-						take=once ? E->function_node_counts[t]<=WALK_INLINE_ONCE_MAX : E->inline_sizes[t]<=lim ||
-						 (E->inline_sizes[t]<=lim*WALK_INLINE_CONSTANT_FACTOR && codegen_inline_has_constant_argument(E,c,t,edge.call));
-					}
-					if(take)z=z>=65535u-E->inline_sizes[t]?65535u:z+E->inline_sizes[t];
-				}
-				E->inline_sizes[s] = z > 65535 ? 65535 : (uint16_t)z;
-			}
-		}
+/* Tarjan, iterative, from r; a group is finished callees first, so its sizes are computed there */
+static void codegen_inline_search(codegen_unit *E, cc *c, uint32_t r)
+{
+	codegen_inline_search_state *G = &E->inline_search;
+	uint32_t sp = 0, csp = 0, lim = WALK_INLINE_VIR_MAX;
+
+	if (!G->index) {
+		size_t n = (size_t)c->nsym + 64;
+
+		G->index = calloc(n, 4), G->low = calloc(n, 4), G->stack = malloc(n * 4);
+		G->calls = malloc(n * 4), G->next = malloc(n * 4), G->on_stack = calloc(n, 1);
+		if (!G->index || !G->low || !G->stack || !G->calls || !G->next || !G->on_stack)
+			vout_of_memory();
 	}
-	free(idx), free(low), free(stk), free(cs), free(ci), free(on);
+	if (G->index[r])
+		return;
+	codegen_inline_search_visit(E, c, r, &csp, &sp);
+	while (csp) {
+		uint32_t v = G->calls[csp - 1];
+
+		if (G->next[csp - 1] < E->call_edge_counts[v]) {
+			uint32_t w = E->call_edges[E->call_edge_offsets[v] + G->next[csp - 1]++].callee;
+
+			if (!G->index[w])
+				codegen_inline_search_visit(E, c, w, &csp, &sp);
+			else if (G->on_stack[w] && G->index[w] < G->low[v])
+				G->low[v] = G->index[w];
+			continue;
+		}
+		csp--;
+		if (csp && G->low[v] < G->low[G->calls[csp - 1]])
+			G->low[G->calls[csp - 1]] = G->low[v];
+		if (G->low[v] != G->index[v])
+			continue;
+		/* v roots a group: pop it, then sizes (the group's callees outside it are done) */
+		uint32_t top = sp;
+
+		do
+			E->recursion_groups[G->stack[--sp]] = v, G->on_stack[G->stack[sp]] = 0;
+		while (G->stack[sp] != v);
+		for (uint32_t k = sp; k < top; k++) {
+			uint32_t s = G->stack[k], z = codegen_inline_search_walks(c, s) ? E->function_node_counts[s] : 0;
+
+			for (uint32_t j = 0; j < E->call_edge_counts[s]; j++) {
+				codegen_call_edge edge=E->call_edges[E->call_edge_offsets[s]+j];
+				uint32_t t=edge.callee;
+
+				if(E->recursion_groups[t]==v || !codegen_inline_is_candidate(E,c,t))continue;
+				bool take=c->syms[t].flags&AST_SYMBOL_FLAG_ALWAYS_INLINE;
+				if(!take) {
+					bool once=(E->once[t]&1) && c->syms[t].sc==AST_STORAGE_STATIC && !codegen_symbol_attributes(c,t)->used &&
+					          E->function_node_counts[s]<=WALK_INLINE_ONCE_MAX;
+					take=once ? E->function_node_counts[t]<=WALK_INLINE_ONCE_MAX : E->inline_sizes[t]<=lim ||
+					 (E->inline_sizes[t]<=lim*WALK_INLINE_CONSTANT_FACTOR && codegen_inline_has_constant_argument(E,c,t,edge.call));
+				}
+				if(take)z=z>=65535u-E->inline_sizes[t]?65535u:z+E->inline_sizes[t];
+			}
+			E->inline_sizes[s] = z > 65535 ? 65535 : (uint16_t)z;
+		}
+		for (uint32_t k = sp; k < top; k++)
+			atomic_store_explicit(&E->inline_sized[G->stack[k]], 1, memory_order_release);
+	}
+}
+
+static void codegen_inline_sizes_ensure(codegen_unit *E, cc *c, uint32_t s)
+{
+	if (likely(atomic_load_explicit(&E->inline_sized[s], memory_order_acquire)))
+		return;
+	VLOCK(E->inline_size_mutex);
+	codegen_inline_search(E, c, s);
+}
+
+VPRIV uint32_t codegen_inline_size(codegen_unit *E, cc *c, uint32_t s)
+{
+	codegen_inline_sizes_ensure(E, c, s);
+	return E->inline_sizes[s];
+}
+
+VPRIV uint32_t codegen_recursion_group(codegen_unit *E, cc *c, uint32_t s)
+{
+	codegen_inline_sizes_ensure(E, c, s);
+	return E->recursion_groups[s];
 }
 
 /*
@@ -415,7 +488,7 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
 		return;
 	st = 0;
 	if (atomic_compare_exchange_strong(&E->walked[s], &st, 1)) {
-		codegen_prepass_state P = { .E=E, .c=c, .fn=s, .llo=UINT32_MAX };
+		codegen_prepass_state P = { .E=E, .c=c, .fn=s, .llo=UINT32_MAX, .record_calls = E->inline_sizes && codegen_inline_search_walks(c, s) };
 		double t = E->stats ? codegen_clock_seconds() : 0;
 		const node *b = &c->nodes[c->syms[s].body];
 
@@ -424,6 +497,17 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
 		codegen_prepass_node_walk(&P, c->syms[s].body);
 		E->function_local_span[2 * s] = P.llo, E->function_local_span[2 * s + 1] = P.lhi;
 		E->function_node_counts[s] = P.nodes > 65535 ? 65535 : (uint16_t)P.nodes;
+		if (P.call_count) {	/* (a search reads them once walked[s] is 2) */
+			uint32_t k;
+
+			{
+				VLOCK(E->call_edge_mutex);
+				k = E->call_edge_count;
+				E->call_edge_count += P.call_count;
+			}
+			memcpy(E->call_edges + k, codegen_prepass_calls, (size_t)P.call_count * sizeof *E->call_edges);
+			E->call_edge_offsets[s] = k, E->call_edge_counts[s] = P.call_count;
+		}
 		if (E->stats)
 			E->walk_nanoseconds += (uint64_t)((codegen_clock_seconds() - t) * 1e9), E->walk_total++;
 		atomic_store_explicit(&E->walked[s], 2, memory_order_release);
@@ -562,17 +646,15 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
 		    CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "setjmp") || CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "_setjmp") ||
 		    CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "sigsetjmp") || CODEGEN_IDENTIFIER_IS(c->syms[callee].name, "__sigsetjmp")))
 			P->E->once[P->fn] |= 2;
-		if (callee && P->E->call_graph_recording) {
-			codegen_unit *E = P->E;
-
-			if (E->call_edge_count == E->call_edge_capacity) {
-				codegen_call_edge *g = realloc(E->call_edges, (size_t)(E->call_edge_capacity = E->call_edge_capacity ? 2 * E->call_edge_capacity : 1024) * sizeof *g);
+		if (callee && P->record_calls) {
+			if (P->call_count == codegen_prepass_call_capacity) {
+				codegen_call_edge *g = realloc(codegen_prepass_calls, (size_t)(codegen_prepass_call_capacity = codegen_prepass_call_capacity ? 2 * codegen_prepass_call_capacity : 1024) * sizeof *g);
 
 				if (!g)
-					abort();
-				E->call_edges = g;
+					vout_of_memory();
+				codegen_prepass_calls = g;
 			}
-			E->call_edges[E->call_edge_count++] = (codegen_call_edge){codegen_symbol_canonical(c,callee),n};
+			codegen_prepass_calls[P->call_count++] = (codegen_call_edge){codegen_symbol_canonical(c,callee),n};
 		}
 		lab = codegen_prepass_node_walk(P, x->a);
 	}
