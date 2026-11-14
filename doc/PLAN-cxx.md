@@ -1796,3 +1796,8 @@ där `T::x` med T utan klass (member_missing) eller ett annat substitutionsfel (
 när den är en konjunktion (med `||` överst: inte avgjort).  Därmed väljs `__segmented_iterator_traits`
 för `json*` (join_views begränsade specialisering faller), och `std::copy`/`std::move` över json-vektorer
 får kod.  cxx-strict: 3 av 70 TU:s klarar testerna med bara vcc:s kod, inga länkfel, 473 saknade (550).
+
+## Status 91 (2026-11-14)
+En medlemsmall definierad utanför klassmallen hittas för primärmallens instanser även när en partiell
+specialisering definierar en med samma namn (`vector<bool, A>::__construct_at_end` bredvid
+`vector<T, A>::__construct_at_end`: två träffar gjorde att ingen kropp tolkades).  cxx-strict 465 (473).

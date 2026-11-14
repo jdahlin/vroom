@@ -1995,8 +1995,9 @@ static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *i
 	if (!t || !inst || x->pos)
 		return false;
 	for (uint32_t i = 0; i < t->noocs; i++)
-		if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams)
-			d = &t->oocs[i], matches++;
+		if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams &&
+		    (!t->params || t->oocs[i].params->ntparams == t->params->ntparams))
+			d = &t->oocs[i], matches++;	/* (the primary's: a partial specialization's definitions, vector<bool, A>'s, have its parameters) */
 	if (matches != 1 || d->params->ntparams > x->nargs + 1)
 		return false;
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
