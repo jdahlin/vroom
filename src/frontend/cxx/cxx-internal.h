@@ -513,6 +513,7 @@ typedef struct cxx {
 VPRIV bool cxx_lookahead_fn(cxx *c, void (*fn)(cxx *));	/* expression.c: does fn parse at the current token (tentatively) */
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start);	/* codegen/state.c: an expression without a node, the reason */
 VPRIV void cxx_gen_write_missing(cxx *c);
+VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc);	/* codegen/vtable.c: typeid of a static type */
 VPRIV cxx_entity *cxx_entity_prefer(cxx_entity *e, int kind);	/* declaration/name.c: of a set, the entity of that kind */
 VPRIV void cxx_gen_base_assign(cxx *c, qty base, uint32_t x, uint32_t loc);	/* codegen/expression.c: B::operator=(x), the implicit one */
 VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);	/* declaration.c: an extern template covers it */

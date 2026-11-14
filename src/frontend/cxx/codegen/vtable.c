@@ -466,6 +466,92 @@ VPRIV uint32_t cxx_gen_data_symbol(cxx *c, const char *name, uint32_t n)
 }
 
 /*
+ * The type info object of a function type or a pointer to one (_ZTIFbiiE, _ZTIPFbiiE: no TU owns them, each
+ * user defines them weak, as clang): its name _ZTS..., then the object of the runtime's class vtname
+ * (__function_type_info: vptr, name; __pointer_type_info: also flags 0 and the pointee's type info).
+ */
+static uint32_t cxx_gen_typeinfo_define(cxx *c, qty t, const char *vtname, uint32_t pointee)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	char name[2048] = "_ZTI", tsname[2048] = "_ZTS";
+	uint32_t ti, ts, si, n, vals[4], words = 0;
+	cc_id_list v;
+	attrs at;
+
+	if (!cxx_mangle_type(c, t, name + 4, sizeof name - 4))
+		return 0;
+	memcpy(tsname + 4, name + 4, strlen(name + 4) + 1);
+	if ((ti = cxx_gen_symbol_named(c, name, 0)) != 0)
+		return ti;
+	/* the name: a weak array of char */
+	si = cxx_gen_text(c, name + 4);
+	ts = cc_symbol_new(a, S_VAR, vintern_cstr("__ts"), cc_type_array(a, QT(TY_CHAR, Q_CONST), strlen(name + 4) + 1, 0), 0);
+	a->syms[ts].flags |= SF_GLOBAL;
+	a->syms[ts].depth = 0;
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, tsname) + 1;
+	at.weak = 1;
+	cc_attribute_apply_symbol(a, &a->syms[ts], &at);
+	a->syms[ts].flags |= SF_LINKONCE;
+	n = cc_node_new(a, N_STR, a->syms[ts].ty, 0);
+	AST_NODE_AT(a, n)->a = si;
+	AST_NODE_AT(a, n)->flags = NF_LVALUE;
+	a->syms[ts].body = n;
+	a->syms[ts].flags |= SF_DEFINED;
+	a->toplevel[a->ntoplevel++] = ts;
+	/* the object */
+	vals[words++] = cxx_gen_data_address(c, cxx_gen_data_symbol(c, vtname, 0), 2);
+	vals[words++] = cxx_gen_data_address(c, ts, 0);
+	if (pointee) {
+		n = cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), 0);	/* (flags: none, then padding) */
+		vals[words++] = cc_cast_insert(a, n, vp, cc_conversion_cast_kind(a, cc_type_basic(TY_LONG), vp, n));
+		vals[words++] = cxx_gen_data_address(c, pointee, 0);
+	}
+	cc_id_list_init(&v);
+	for (uint32_t k = 0; k < words; k++) {
+		cc_id_list_append(a, &v, k);
+		cc_id_list_append(a, &v, k);
+		cc_id_list_append(a, &v, vals[k]);
+	}
+	ti = cc_symbol_new(a, S_VAR, vintern_cstr("__ti"), cc_type_array(a, vp, words, 0), 0);
+	a->syms[ti].flags |= SF_GLOBAL;
+	a->syms[ti].depth = 0;
+	n = cc_node_new(a, N_INIT, a->syms[ti].ty, 0);
+	AST_NODE_AT(a, n)->aux = 1;
+	AST_NODE_AT(a, n)->c = words;
+	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, name) + 1;
+	at.weak = 1;
+	cc_attribute_apply_symbol(a, &a->syms[ti], &at);
+	a->syms[ti].flags |= SF_LINKONCE | SF_DEFINED;
+	a->syms[ti].body = n;
+	a->toplevel[a->ntoplevel++] = ti;
+	cxx_gen_symbol_named(c, cxx_gen_symbol_asm_name(c, ti), ti);
+	return ti;
+}
+
+/* typeid(T), typeid(e) of a type that is not a polymorphic class: its type info object, a const std::type_info
+   lvalue (ti_type: that class) */
+VPRIV void cxx_gen_typeid(cxx *c, qty t, qty ti_type, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t s;
+	qty pt;
+
+	c->enode = 0;
+	if (!cxx_gen_on(c) || t == CXX_TY_UNKNOWN || ti_type == CXX_TY_UNKNOWN)
+		return;
+	if (AST_TYPE_KIND(a, t) == TY_PTR && AST_TYPE(a, t)->ext)
+		t = AST_TYPE(a, t)->base;	/* (typeid of a reference type: the referred type's) */
+	if (!(s = cxx_gen_typeinfo(c, QUNQ(t))))
+		return;
+	pt = cc_type_pointer(a, QT(QI(ti_type), Q_CONST));
+	c->enode = cc_dereference_build(a, cc_cast_insert(a, cxx_gen_data_address(c, s, 0), pt, CK_NOP), loc);
+}
+
+/*
  * The type info object of type t (_ZTI...): a class's is declared here and defined at the TU's end where
  * it belongs to this TU; a fundamental type's (and a pointer to one's) is the C++ runtime's.  0: not built
  * (pointers to classes, functions, members).
@@ -495,6 +581,13 @@ VPRIV uint32_t cxx_gen_typeinfo(cxx *c, qty t)
 			c->ti_list = realloc(c->ti_list, (c->cti_list = c->cti_list ? c->cti_list * 2 : 32) * sizeof *c->ti_list);
 		c->ti_list[c->nti_list++] = cls;
 		return cls->ti_sym;
+	}
+	if (k == TY_FUNC)
+		return cxx_gen_typeinfo_define(c, t, "_ZTVN10__cxxabiv120__function_type_infoE", 0);
+	if (k == TY_PTR && !AST_TYPE(a, t)->ext && AST_TYPE(a, t)->base != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, AST_TYPE(a, t)->base) == TY_FUNC) {
+		uint32_t f = cxx_gen_typeinfo(c, AST_TYPE(a, t)->base);
+
+		return f ? cxx_gen_typeinfo_define(c, t, "_ZTVN10__cxxabiv119__pointer_type_infoE", f) : 0;
 	}
 	if (k == TY_PTR && !AST_TYPE(a, t)->ext) {
 		/* the runtime has void *, char * and the like (and their const forms) */

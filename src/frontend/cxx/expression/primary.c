@@ -381,15 +381,30 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		}
 		return;
 	case CXX_KW_typeid:
+	{
+		/* typeid(T), typeid(e): a const std::type_info lvalue; its object for a type that is not a
+		   polymorphic class (a polymorphic object's dynamic type: not built) */
+		qty t = CXX_TY_UNKNOWN, ti = cxx_std_class(c, "type_info");
+		uint32_t tloc = cxx_peek(c, 0)->loc;
+
 		cxx_advance(c);
 		cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
 		if (cxx_try_type_id(c))
-			cxx_type_id_parse(c);
-		else
+			cxx_type_id_parse(c), t = c->type_out;
+		else {
+			c->unevaluated++;
 			cxx_expression_parse(c);
+			c->unevaluated--;
+			t = c->etype;
+			if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && cxx_class_polymorphic(c, QUNQ(t)))
+				t = CXX_TY_UNKNOWN;	/* (its dynamic type: from its vtable, not built) */
+		}
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
-		cxx_et(c, CXX_TY_UNKNOWN, false);	/* (const std::type_info: not looked up) */
+		cxx_et(c, ti != CXX_TY_UNKNOWN ? QT(QI(ti), Q_CONST) : CXX_TY_UNKNOWN, true);
+		if (!c->tentative && !c->template_depth && ti != CXX_TY_UNKNOWN)
+			cxx_gen_typeid(c, t, ti, tloc);
 		return;
+	}
 	case CXX_KW_requires:
 		c->unevaluated++;
 		cxx_requires_expression_parse(c);

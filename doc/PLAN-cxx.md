@@ -1864,3 +1864,13 @@ Konstruktormallar definierade utanför en partiell specialisering (`function<_Rp
 hittas (registrerade under klassens namn), även när primärmallen bara är deklarerad, och tolkas som
 konstruktorer (ingen returtyp).  Kroppar vcc aldrig tolkade: 53 → 24; summan oförändrad 342 (de tolkas nu och
 stannar vid nästa sak: std::function når `typeid(_Fp)` i `__func::target_type`, typeid saknas).
+
+## Status 102 (2026-11-14)
+`typeid(T)` och `typeid(e)` av en typ som inte är en polymorf klass: ett const std::type_info-lvärde, typens
+_ZTI-objekt; för funktionstyper och pekare till funktioner definieras _ZTS/_ZTI svaga
+(__function_type_info, __pointer_type_info), som clang.  Namn och likhet som clangs (`i 1S PFbiiE`).
+cxx-strict 342 (std::function stannar nu vid pack `_ArgTypes&&... __arg` i klassmedlemmar).
+Hastighet: cxx-strict:s kompilering, bara vcc, en process per TU utan delade huvudfiler: 29,5 s
+väggtid summerat (CPU ungefär lika) mot clang -O2:s 243 s, ~8x; med huvudfilerna en gång per
+konfiguration (fork-servern) var det 10 s, ~24x.  30x kräver både färdig täckning och den delningen
+(eller en snabbare vcc): ingen komplett mätning ännu.
