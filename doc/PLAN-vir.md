@@ -1374,6 +1374,36 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling lvalue loads (2026-11-14).** Among comparable
+exclusive symbols from the previous profile, walk_lvalue_load had 569
+self-hosted samples versus 41 clang-built. The self-hosted scalar path
+zeroed a 32-byte codegen_value and copied it through a second frame slot
+to the hidden return pointer. 76% of its samples landed on the first
+intermediate MOVUPS store. Clang zeroed and populated the result in place.
+
+For an inlined return of an automatic, unqualified record compound literal,
+initialize the private inline result slot directly. The self-hosted scalar
+path now copies the result once to the ABI return pointer. The load also
+takes its lvalue descriptor by pointer. Classifying memory-valued types by
+a single switch replaces repeated type-kind loads and boolean tests across
+the walker. In profiles covering five fresh compiles per build (75,001-cycle period),
+exclusive walk_lvalue_load samples went from 549 to 426 self-hosted and
+41 to 35 clang-built. The separate self-hosted classification helper fell
+from 163 to 4 samples. Sampling counts are approximate.
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 180.88 ms | 179.27 ms |
+| Clang-built vcc CPU time | 137.14 ms | 137.00 ms |
+| Self-hosted / clang-built | 1.319× | 1.309× |
+| Self-hosted retired instructions | 2.0572B | 2.0153B |
+| Clang-built retired instructions | 1.1819B | 1.1804B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order and warm-up
+excluded. The previous round measured this baseline at 1.321×. All four
+produced the same SQLite object (SHA-256 prefix `c4d3896fefc9`), and
+a linked recursive SQL query returned 500500.
+
 **SQLite after profiling integer mnemonic dispatch (2026-11-14).** The
 leading comparable exclusive excess in the preceding call-chain profile was
 libc strcmp (591 extra samples). Its largest caller difference was x64_i_int

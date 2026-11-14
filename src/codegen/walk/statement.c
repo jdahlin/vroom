@@ -1162,24 +1162,36 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
 			walk_inline_call *I = W->inline_call;
 
 			if (x->a && KIND(c, I->return_type) != AST_TYPE_VOID) {
-				codegen_value v = walk_value_emit(e, x->a);
+				const node *result = N(x->a);
 				codegen_lvalue t = { .kind = CODEGEN_LVALUE_FRAME, .offset = I->return_slot, .align = 16 };
 
-				if (v.kind == CODEGEN_VALUE_CONSTANT && (!I->any_return || (I->constant_is_ok && I->constant.integer == v.integer)) && !walk_type_is_in_memory(e, I->return_type) && !codegen_type_is_float(c, I->return_type)) {
-					I->constant = v;
-				} else {
+				/* The inline result slot is private until the call finishes. */
+				if (result->op == AST_NODE_COMPOUND_LITERAL && result->ty == I->return_type &&
+				    codegen_type_is_record(c, result->ty) && !AST_QUALIFIED_TYPE_QUALIFIERS(result->ty) &&
+				    !(T(c, result->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+				    codegen_symbol_is_local_variable(c, result->b)) {
+					t.align = codegen_type_alignment(c, result->ty);
+					walk_initializer_emit(e, &t, result->ty, result->a);
 					I->constant_is_ok = false;
+				} else {
+					codegen_value v = walk_value_emit(e, x->a);
+
+					if (v.kind == CODEGEN_VALUE_CONSTANT && (!I->any_return || (I->constant_is_ok && I->constant.integer == v.integer)) && !walk_type_is_in_memory(e, I->return_type) && !codegen_type_is_float(c, I->return_type)) {
+						I->constant = v;
+					} else {
+						I->constant_is_ok = false;
+					}
+					if (walk_type_is_in_memory(e, I->return_type)) {
+						v = walk_lvalue_store_memory(e, &t, I->return_type, v);
+						walk_value_free(e, &v);
+					} else {
+						int r = walk_value_to_register(e, &v, I->return_type);
+
+						WALK_LOWER(store)(e, r, &t, walk_type_size(c, I->return_type));
+						WALK_LOWER(tfree)(e, r);
+					}
 				}
 				I->any_return = true;
-				if (walk_type_is_in_memory(e, I->return_type)) {
-					v = walk_lvalue_store_memory(e, &t, I->return_type, v);
-					walk_value_free(e, &v);
-				} else {
-					int r = walk_value_to_register(e, &v, I->return_type);
-
-					WALK_LOWER(store)(e, r, &t, walk_type_size(c, I->return_type));
-					WALK_LOWER(tfree)(e, r);
-				}
 			} else if (x->a) {
 				codegen_value v = walk_value_emit(e, x->a);
 

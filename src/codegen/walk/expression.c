@@ -53,7 +53,18 @@ VPRIV bool walk_type_is_in_memory(codegen_context *e, ast_qualified_type t)
 {
 	cc *c = e->compile_context;
 
-	return codegen_type_is_bitint_big(c, t) || codegen_type_is_record(c, t) || codegen_type_is_array(c, t) || codegen_type_is_vector(c, t) || codegen_type_is_sve(c, t) || KIND(c, t) == AST_TYPE_FLOAT128 || (KIND(c, t) == AST_TYPE_LONG_DOUBLE && WALK_LOWER(ldmem)()) || (walk_type_is_wide(c, t) && WALK_LOWER(i128mem)());
+	switch (KIND(c, t)) {
+	case AST_TYPE_BITINT: case AST_TYPE_UNSIGNED_BITINT:
+	case AST_TYPE_STRUCT: case AST_TYPE_UNION: case AST_TYPE_ARRAY:
+	case AST_TYPE_VECTOR: case AST_TYPE_SVE_BUILTIN: case AST_TYPE_FLOAT128:
+		return true;
+	case AST_TYPE_LONG_DOUBLE:
+		return WALK_LOWER(ldmem)();
+	case AST_TYPE_INT128: case AST_TYPE_UINT128:
+		return WALK_LOWER(i128mem)();
+	default:
+		return false;
+	}
 }
 
 /* t is IEEE binary128: __float128, or long double off x86-64 (arm64 Linux; x86-64's is x87) */
@@ -741,7 +752,7 @@ static int walk_atomic_record_size(codegen_context *e, ast_qualified_type t)
 }
 
 /* (a volatile access: e->novtag, so the lowering keeps it as it is) */
-static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_qualified_type t)
+static codegen_value walk_lvalue_load(codegen_context *e, const codegen_lvalue *l, ast_qualified_type t)
 {
 	cc *c = e->compile_context;
 	int r, vol = (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_VOLATILE) != 0;
@@ -749,13 +760,13 @@ static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_
 	/* GNU void lvalues evaluate their address, but have no value to load,
 	   including when qualified volatile. */
 	if (KIND(c, t) == AST_TYPE_VOID) {
-		walk_lvalue_free(e, &l);
+		walk_lvalue_free(e, l);
 		return codegen_value_constant(0);
 	}
 	if (codegen_type_is_record(c, t) && (T(c, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
 		int size = walk_atomic_record_size(e, t);
 		codegen_lvalue tmp = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, size, size), .align = (uint32_t)size };
-		int rp = WALK_LOWER(laddr)(e, &l);
+		int rp = WALK_LOWER(laddr)(e, l);
 		int value = WALK_LOWER(atomic)(e, WALK_ATOMIC_LOAD, size, rp, -1, -1);
 
 		WALK_LOWER(tfree)(e, rp);
@@ -763,31 +774,31 @@ static codegen_value walk_lvalue_load(codegen_context *e, codegen_lvalue l, ast_
 		WALK_LOWER(tfree)(e, value);
 		return walk_value_from_register(WALK_LOWER(laddr)(e, &tmp));
 	}
-	if (l.is_bitfield) {
+	if (l->is_bitfield) {
 		e->volatile_untag_depth += vol;
-		codegen_value v = walk_bitfield_load(e, &l, t);
+		codegen_value v = walk_bitfield_load(e, l, t);
 
 		e->volatile_untag_depth -= vol;
-		walk_lvalue_free(e, &l);
+		walk_lvalue_free(e, l);
 		return v;
 	}
 	if (codegen_type_is_function(c, t) || walk_type_is_in_memory(e, t)) {
 		/* the object itself: its address (arrays and functions decay; records, x87 long double) */
-		if (l.kind == CODEGEN_LVALUE_SYMBOL)
-			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = l.reference, .integer = l.offset };
-		return walk_value_from_register(WALK_LOWER(laddr)(e, &l));
+		if (l->kind == CODEGEN_LVALUE_SYMBOL)
+			return (codegen_value){ .kind = CODEGEN_VALUE_ADDRESS, .reference = l->reference, .integer = l->offset };
+		return walk_value_from_register(WALK_LOWER(laddr)(e, l));
 	}
-	if (walk_type_is_in_float_register(e, t)) {
+	if (codegen_type_is_float(c, t)) {
 		r = WALK_LOWER(ftreg)(e);
 		e->volatile_untag_depth += vol;
-		WALK_LOWER(load)(e, r, &l, walk_type_size(c, t), false);
+		WALK_LOWER(load)(e, r, l, walk_type_size(c, t), false);
 		e->volatile_untag_depth -= vol;
-		walk_lvalue_free(e, &l);
+		walk_lvalue_free(e, l);
 		return walk_value_from_register(r);
 	}
-	r = l.kind == CODEGEN_LVALUE_REGISTER ? l.register_number : WALK_LOWER(treg)(e);
+	r = l->kind == CODEGEN_LVALUE_REGISTER ? l->register_number : WALK_LOWER(treg)(e);
 	e->volatile_untag_depth += vol;
-	WALK_LOWER(load)(e, r, &l, walk_type_size(c, t), walk_type_is_signed(c, t) || KIND(c, t) == AST_TYPE_BOOL ? walk_type_is_signed(c, t) : false);
+	WALK_LOWER(load)(e, r, l, walk_type_size(c, t), walk_type_is_signed(c, t));
 	e->volatile_untag_depth -= vol;
 	return walk_value_from_register(r);
 }
@@ -925,13 +936,14 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
 			else { int r = walk_value_to_register(e, &v, from); WALK_LOWER(store)(e, r, &d, walk_type_size(c, from)); WALK_LOWER(tfree)(e, r); }
 		}
 		if (walk_type_is_in_memory(e, x->ty)) return walk_value_from_register(WALK_LOWER(laddr)(e, &d));
-		return walk_lvalue_load(e, d, x->ty);
+		return walk_lvalue_load(e, &d, x->ty);
 	}
 	case AST_CAST_VECTOR_BITS: {
 		/* a vector's bits as a scalar of its size */
 		codegen_value v = walk_value_emit(e, x->a);
 
-		return walk_lvalue_load(e, walk_lvalue_from_value(e, v, x->ty), x->ty);
+		codegen_lvalue l = walk_lvalue_from_value(e, v, x->ty);
+		return walk_lvalue_load(e, &l, x->ty);
 	}
 	case AST_CAST_SPLAT: {
 		/* the scalar into every lane of a new vector */
@@ -3385,12 +3397,13 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 			walk_unsupported_fail(e, n, "a global register variable other than the stack pointer");
 		}
 		walk_scalar_check(e, n, x->ty);
-		return walk_lvalue_load(e, walk_lvalue_emit(e, n), x->ty);
+		codegen_lvalue l = walk_lvalue_emit(e, n);
+		return walk_lvalue_load(e, &l, x->ty);
 	}
 	case AST_NODE_COMPOUND_LITERAL: {
 		codegen_lvalue l = walk_lvalue_emit(e, n);
 
-		return walk_lvalue_load(e, l, x->ty);
+		return walk_lvalue_load(e, &l, x->ty);
 	}
 	case AST_NODE_INDEX: {
 		int k = e->unit->options->opt && codegen_type_size(c, x->ty) <= 8 ? codegen_array_element_slot(e, n, false) : -1;
@@ -3404,12 +3417,15 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 			return codegen_value_constant(e->walk_state->array_elements[i].value);
 		if (!codegen_type_is_array(c, x->ty) && !codegen_type_is_function(c, x->ty))
 			walk_scalar_check(e, n, x->ty);
-		return walk_lvalue_load(e, walk_lvalue_emit(e, n), x->ty);
+		codegen_lvalue l = walk_lvalue_emit(e, n);
+		return walk_lvalue_load(e, &l, x->ty);
 	}
-	case AST_NODE_STRING: case AST_NODE_MEMBER: case AST_NODE_DEREFERENCE:
+	case AST_NODE_STRING: case AST_NODE_MEMBER: case AST_NODE_DEREFERENCE: {
 		if (!codegen_type_is_array(c, x->ty) && !codegen_type_is_function(c, x->ty))
 			walk_scalar_check(e, n, x->ty);
-		return walk_lvalue_load(e, walk_lvalue_emit(e, n), x->ty);
+		codegen_lvalue l = walk_lvalue_emit(e, n);
+		return walk_lvalue_load(e, &l, x->ty);
+	}
 	case AST_NODE_ADDRESS: {
 		codegen_lvalue l;
 
@@ -3477,7 +3493,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
 		rp = WALK_LOWER(va_arg)(e, ra, x->ty);
 		WALK_LOWER(tfree)(e, ra);
 		l = (codegen_lvalue){ .kind = CODEGEN_LVALUE_REGISTER, .register_number = (uint8_t)rp, .align = 8 };
-		return walk_lvalue_load(e, l, x->ty);
+		return walk_lvalue_load(e, &l, x->ty);
 	}
 	case AST_NODE_FLOAT_NUMBER: {
 		u128 q = 0;
