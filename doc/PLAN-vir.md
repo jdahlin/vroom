@@ -1374,6 +1374,22 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite with both CRC32C word updates inlined (2026-11-14).** The VIR
+inliner admits the same register-only CRC32Q asm that the builder recognizes.
+The self-hosted two-word wrapper is 15 bytes: MOV, CRC32Q, CRC32Q, RET.
+Clang emits the same sequence with an extra MOV EAX,EAX between the CRCs
+(17 bytes). Previously the self-hosted wrapper called the word helper twice.
+
+| SQLite 3.50.4 compile, median CPU time | clang-built before / after | self-hosted before / after | ratio before / after |
+| --- | ---: | ---: | ---: |
+| 7 measured runs | 143.41 / 143.24 ms | 191.49 / 191.85 ms | 1.335× / 1.339× |
+| 21 measured runs | 141.93 / 141.75 ms | 189.02 / 191.22 ms | 1.332× / 1.349× |
+
+Same single-emitter, CPU-7 workload, warm-up excluded and order reversed each
+round. The 21-run self-hosted instruction median fell from 2.213B to 2.206B.
+Both timing rounds showed a small slowdown despite fewer instructions. All
+four builds produced identical objects, and the linked SQLite query passed.
+
 **SQLite with spill-free CRC32C word updates (2026-11-14).** The x86 VIR
 builder recognizes the nonvolatile register-only CRC32Q template used by the
 host identifier hash. The allocator sees the accumulator as a tied operand.

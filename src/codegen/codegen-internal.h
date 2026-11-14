@@ -1012,6 +1012,7 @@ VPRIV uint8_t *codegen_function_once_flags(cc *c);
 #endif
 VPRIV void codegen_function_inline_sizes(codegen_unit *E, cc *c, uint32_t lim);	/* E->isz, E->scc: VIR's inlining sizes */
 VPRIV bool codegen_inline_has_constant_argument(const codegen_unit *E, cc *c, uint32_t callee, uint32_t call);
+VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a);
 VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s);	/* VIR could inline a call to s (size aside) */	/* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int codegen_u32_compare(const void *a, const void *b);
 /* tu.c */

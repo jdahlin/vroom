@@ -87,14 +87,12 @@ VPRIV codegen_value virbuild_setjmp(codegen_context *e, int rbuf) { (void)rbuf; 
 VPRIV void virbuild_longjmp(codegen_context *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(longjmp)); }
 /* A nonvolatile register-only CRC32Q has one tied accumulator and one
  * input. Keep both as SSA values so the x86 allocator sees the tie. */
-VPRIV void virbuild_asm(codegen_context *e, uint32_t n)
+VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a)
 {
-	cc *c = e->compile_context;
-	const ast_asm_statement *a = &c->asms[N(n)->a];
 	if (!CODEGEN_IS_X64(c) || !a->extended || a->go || a->vol || a->nout != 1 || a->nin != 1 ||
 	    a->nclob || a->nlabel || strcmp(c->strs[a->tmpl - 1].s, "crc32q %1, %0") ||
 	    strcmp(c->strs[a->ops[0].constraint - 1].s, "+r") || strcmp(c->strs[a->ops[1].constraint - 1].s, "r"))
-		virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly));
+		return false;
 
 	for (unsigned k = 0; k < 2; k++) {
 		const node *operand = N(a->ops[k].expr);
@@ -102,8 +100,17 @@ VPRIV void virbuild_asm(codegen_context *e, uint32_t n)
 		    c->syms[operand->a].sc == AST_STORAGE_REGISTER || AST_QUALIFIED_TYPE_QUALIFIERS(operand->ty) ||
 		    !codegen_type_is_integer(c, operand->ty) || codegen_type_is_bitint(c, operand->ty) ||
 		    walk_type_size(c, operand->ty) != 8)
-			virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly));
+			return false;
 	}
+	return true;
+}
+
+VPRIV void virbuild_asm(codegen_context *e, uint32_t n)
+{
+	cc *c = e->compile_context;
+	const ast_asm_statement *a = &c->asms[N(n)->a];
+	if (!virbuild_asm_is_crc32q(c, a))
+		virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly));
 	uint32_t out = a->ops[0].expr;
 	codegen_lvalue dest = walk_lvalue_emit(e, out);
 	codegen_value acc = walk_lvalue_reload(e, &dest, N(out)->ty);

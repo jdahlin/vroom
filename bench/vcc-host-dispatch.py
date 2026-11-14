@@ -8,6 +8,7 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import tempfile
 import hostenv
@@ -75,6 +76,11 @@ def main():
                                       capture_output=True, text=True)
             if compiled.returncode or 'crc_word_hw: lowered, 0 spills' not in compiled.stderr:
                 raise RuntimeError('CRC word helper did not lower spill-free:\n'+compiled.stderr)
+            pair = subprocess.check_output([hostenv.llvm('llvm-objdump'), '--no-show-raw-insn',
+                                            '--disassemble-symbols=crc_pair_hw', crc_input], text=True)
+            ops = re.findall(r'^\s*[0-9a-f]+:\s+(\w+)', pair, re.MULTILINE)
+            if ops.count('crc32q') != 2 or any(op.startswith(('call', 'jmp')) for op in ops):
+                raise RuntimeError('expected both CRC updates inline in crc_pair_hw:\n'+pair)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
                         '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
                         str(ROOT/'src/common/intern.c'), str(ROOT/'src/common/fail.c'),
