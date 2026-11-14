@@ -300,7 +300,63 @@ static void cxx_arguments_parse(cxx *c, int open, int close)
 
 	cxx_expect(c, open);
 	while (!cxx_is(c, close)) {
+		uint32_t start = c->pos, seen = c->npacks_seen;
+		cxx_entity *saved[8];
+
+		memcpy(saved, c->packs_seen, sizeof saved);
+		c->npacks_seen = 0, c->packs_overflow = 0;
 		cxx_initializer_parse(c);
+		/* f(std::forward<Args>(args)...) in an instance: the argument once per element of its packs */
+		if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->npacks_seen && !c->packs_overflow && c->instantiating && !c->tentative &&
+		    !c->template_depth) {
+			cxx_entity *packs[8];
+			uint32_t np = c->npacks_seen, len = c->packs_seen[0]->npack, end = c->pos;
+			bool ok = true;
+
+			memcpy(packs, c->packs_seen, sizeof packs);
+			for (uint32_t k = 0; k < np; k++)
+				ok &= packs[k]->npack == len && !packs[k]->pack_placeholder;
+			if (ok) {
+				for (uint32_t i = 0; i < len; i++) {
+					for (uint32_t k = 0; k < np; k++)
+						cxx_pack_element(c, packs[k], (int32_t)i);
+					c->pos = start;
+					cxx_initializer_parse(c);
+					if (c->pos != end)
+						unknown = true;
+					if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
+						c->eunsure = 1;
+					if (n < 16)
+						args[n] = c->etype, lval[n] = c->elval;
+					n++;
+				}
+				for (uint32_t k = 0; k < np; k++)
+					cxx_pack_element(c, packs[k], -1);
+				c->pos = end + 1;
+				c->npacks_seen = seen;
+				memcpy(c->packs_seen, saved, sizeof saved);
+				if (!cxx_accept(c, LEX_TOKEN_COMMA))
+					break;
+				continue;
+			}
+		}
+		/* not expanded here: its packs belong to an enclosing expansion, with the ones seen before */
+		{
+			cxx_entity *mine[8];
+			uint32_t nmine = c->npacks_seen;
+
+			memcpy(mine, c->packs_seen, sizeof mine);
+			c->npacks_seen = seen;
+			memcpy(c->packs_seen, saved, sizeof saved);
+			for (uint32_t k = 0; k < nmine && k < 8; k++) {
+				uint32_t j = 0;
+
+				while (j < c->npacks_seen && c->packs_seen[j] != mine[k])
+					j++;
+				if (j == c->npacks_seen && j < 8)
+					c->packs_seen[c->npacks_seen++] = mine[k];
+			}
+		}
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
 		if (n < 16)

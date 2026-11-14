@@ -1496,6 +1496,7 @@ typedef struct cxx_ftemplate {
 	qty *pt;		/* its parameters' types, placeholders for the template's (one may be unknown: not deduced from) */
 	uint32_t np;
 	uint8_t has_pt, variadic;
+	uint32_t pack_tp, pack_param;	/* a trailing type pack Ts... and the parameter Ts&&... ts that expands it (index + 1; 0: none) */
 	uint8_t defined;	/* this declaration has a body (another of the same function may be a declaration only) */
 	cxx_vspec **vspecs;	/* a variable template: its specializations */
 	uint32_t nvspecs;
@@ -1537,10 +1538,12 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_entity *e;
 
-		if (tp->kind == 3 || tp->pack) {
-			f->packs = 1;	/* (packs and template template parameters: not deduced yet) */
+		if (tp->kind == 3 || (tp->pack && (tp->kind != 1 || i + 1 != p->params->ntparams || !tp->name))) {
+			f->packs = 1;	/* (value packs, packs not last, template template parameters: not deduced yet) */
 			return;
 		}
+		if (tp->pack)
+			f->pack_tp = i + 1;	/* Ts...: a placeholder as a type's; the parameter Ts&&... ts gives its pattern */
 		if (!tp->name)
 			continue;	/* (unnamed: a default argument, a constraint in its type) */
 		e = cxx_declare(c, binding, tp->name, tp->kind == 1 ? CXX_ENTITY_TYPE : CXX_ENTITY_VALUE);
@@ -1576,8 +1579,14 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 			f->pt = malloc((f->np ? f->np : 1) * sizeof *f->pt);
 			for (uint32_t i = 0; i < f->np; i++)
 				f->pt[i] = c->decl_params[i].ty;
+			/* the pack's parameter: the last one, its type a pattern over the pack's placeholder */
+			if (f->pack_tp && c->decl_pack_param != UINT32_MAX && c->decl_pack_param + 1 == f->np &&
+			    f->pt[f->np - 1] != CXX_TY_UNKNOWN)
+				f->pack_param = f->np;
 		}
 	}
+	if (f->pack_tp && !f->pack_param)
+		f->packs = 1;	/* (the pack is not expanded by a plain last parameter: tuple<Ts...>, only explicit) */
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)
@@ -1698,22 +1707,46 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
  * signature parsed with the parameters bound (not cached, no body).  c->sig_requires: 0 when the
  * substitution fails.
  */
-static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx)
+static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *xargs, uint32_t nx, bool want_body, qty *ptypes,
+				     uint32_t pn)
 {
 	cxx_partial *p = &f->p;
-	uint32_t np = p->params->ntparams;
+	uint32_t np = p->params->ntparams, at = UINT32_MAX;
 	cxx_scope *binding;
 	cxx_targ acopy[32];
 	cxx_outer o;
 	jmp_buf jb;
 	volatile qty r = CXX_TY_UNKNOWN;
 	volatile int8_t viable = -1;
+	volatile bool body = false;
 
 	if (c->body_depth >= 64 || nx > 32) {
 		c->sig_requires = -1;
 		return CXX_TY_UNKNOWN;
 	}
 	memcpy(acopy, xargs, nx * sizeof *xargs);
+	/* done before with these arguments (the pack's elements are part of the key) */
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (f->done[i].n == nx + 1000 && cxx_args_equal(f->done[i].args, acopy, nx)) {
+			if (!want_body || f->done[i].body) {
+				c->bound_sig = f->done[i].sig, c->sig_requires = f->done[i].viable;
+				return f->done[i].ret;
+			}
+			at = i;
+			break;
+		}
+	if (at == UINT32_MAX) {
+		if (f->ndone == f->cdone)
+			f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
+		at = f->ndone++;
+		memset(&f->done[at], 0, sizeof f->done[at]);
+		f->done[at].args = malloc((nx ? nx : 1) * sizeof *acopy);
+		memcpy(f->done[at].args, acopy, nx * sizeof *acopy);
+		f->done[at].n = nx + 1000;	/* (apart from the fixed-length entries) */
+		f->done[at].ret = CXX_TY_UNKNOWN, f->done[at].sig = CXX_TY_UNKNOWN, f->done[at].viable = 1;
+	}
+	if (want_body)
+		f->done[at].body = 1;
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 	for (uint32_t i = 0; i + 1 < np; i++)
 		cxx_bind(c, binding, &p->params->tparams[i], &acopy[i]);
@@ -1724,15 +1757,28 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->this_type = p->home->kind == CXX_SCOPE_CLASS && p->home->owner && p->home->owner->ty ? p->home->owner->ty : CXX_TY_UNKNOWN;
+	if (want_body) {
+		c->unevaluated = 0;
+		if (c->body_depth > c->stats.body_depth_max)
+			c->stats.body_depth_max = c->body_depth;
+	}
+	c->sig_pack_types = ptypes, c->sig_pack_n = pn;	/* (the signature with the pack expanded; in a body, the pack of values) */
 	if (!setjmp(jb)) {
-		qty t = cxx_function_signature_parse(c, false, NULL, f->ctor_class);
+		bool b = false;
+		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
 
+		body = b;
 		viable = c->sig_requires;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
 			r = AST_TYPE(c->ast, t)->base;
 		c->bound_sig = c->sig_fake ? CXX_TY_UNKNOWN : t;
-	} else
+		c->stats.bodies += body;
+	} else {
 		c->bound_sig = CXX_TY_UNKNOWN;
+		if (want_body)
+			c->stats.bodies_failed++;
+	}
 	c->instantiating--, c->body_depth--;
 	{
 		qty sig = c->bound_sig;
@@ -1740,6 +1786,16 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 		cxx_outer_restore(c, &o);
 		c->bound_sig = sig;
 	}
+	/* (found again: the body may have added entries) */
+	for (uint32_t i = 0; i < f->ndone; i++)
+		if (f->done[i].n == nx + 1000 && cxx_args_equal(f->done[i].args, acopy, nx)) {
+			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN)
+				f->done[i].ret = r, f->done[i].sig = c->bound_sig;
+			if (!want_body || viable != 1)
+				f->done[i].viable = viable;
+			r = f->done[i].ret, viable = f->done[i].viable, c->bound_sig = f->done[i].sig;
+			break;
+		}
 	c->sig_requires = viable;
 	return r;
 }
@@ -1883,6 +1939,72 @@ static int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *b
 	return f->req_pos ? cxx_constraint_parse(c, p, bind, f->req_pos, NULL) : 1;
 }
 
+/* one argument (type A, an lvalue or not) against a parameter's pattern P: 1 deduced or nothing to deduce,
+   0 no match, -1 not known */
+static int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue, cxx_targ *bind)
+{
+	if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
+		return 1;	/* (non-deduced: its conversion is not checked here) */
+	if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {
+		c->why = CXX_WHY_ARG;
+		return -1;	/* (void: a type vcc got wrong; no argument has it) */
+	}
+	if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
+		int ext = AST_TYPE(c->ast, P)->ext;
+		void *owner;
+
+		P = AST_TYPE(c->ast, P)->base;
+		/* T&& with an lvalue: a forwarding reference deduces T as A& */
+		if (ext == 2 && !QQ(P) && lvalue && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
+			A = cxx_type_reference(c, A, false);
+		else
+			A = QT(QI(A), QQ(A) | QQ(P));	/* (const T& binds what is not const too) */
+	} else {
+		/* by value: arrays and functions decay, top-level cv goes */
+		const ctype *at = AST_TYPE(c->ast, A);
+
+		if (at->kind == TY_ARRAY)
+			A = cc_type_pointer(c->ast, at->base);
+		else if (at->kind == TY_FUNC)
+			A = cc_type_pointer(c->ast, A);
+		A = QUNQ(A);
+		P = QUNQ(P);	/* (a by-value parameter's own const is not part of the function's type) */
+	}
+	if (!cxx_match_type(c, p, P, A, bind, 0)) {
+		/* X<T> against a class derived from X<int>: its bases, nearest first */
+		if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
+			return 1;
+		/* (deduction does not convert: a pattern that matches neither the argument nor a base of it fails) */
+		c->why = CXX_WHY_CLASS_MATCH;
+		return 0;
+	}
+	return 1;
+}
+
+/* pat with p's placeholder (the pack's) replaced by t: T, const T, T&, T&&, T* */
+static qty cxx_placeholder_subst(cxx *c, cxx_partial *p, qty pat, qty t, int depth)
+{
+	const ctype *x;
+	void *owner;
+
+	if (pat == CXX_TY_UNKNOWN || depth > 16)
+		return CXX_TY_UNKNOWN;
+	if (cxx_placeholder_of(c, pat, &owner) >= 0)
+		return owner == p ? (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext ? t : cc_type_qualify(c->ast, t, QQ(pat))) :
+				    CXX_TY_UNKNOWN;
+	x = AST_TYPE(c->ast, pat);
+	if (x->kind == TY_PTR) {
+		qty b = cxx_placeholder_subst(c, p, x->base, t, depth + 1);
+
+		if (b == CXX_TY_UNKNOWN)
+			return b;
+		if (x->ext)
+			return cxx_type_reference(c, b, x->ext == 2);	/* (collapses) */
+		return cc_type_qualify(c->ast, cc_type_pointer(c->ast, b), QQ(pat));
+	}
+	return cxx_mentions_placeholder(c, pat, 0) ? CXX_TY_UNKNOWN : pat;
+}
+
 /*
  * Deduce e's template arguments from a call: 0 not viable (deduction failed), 1 viable, *ret its
  * return type (CXX_TY_UNKNOWN if it cannot be formed), -1 not known (vcc cannot deduce it).
@@ -1902,6 +2024,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	}
 	cxx_ftemplate_evaluate(c, f);
 	p = &f->p;
+	/* (make<T>(args...) with a deducible pack goes below: T explicit, the pack from the arguments) */
 	if (f->packs && xargs && p->params->ntparams && p->params->ntparams <= 32) {
 		/* f<A, Ps...>(args) with the last parameter a pack and every argument explicit (libc++'s
 		   __and_helper<_Pred...>(0)): the signature with them bound */
@@ -1914,7 +2037,7 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 		for (uint32_t i = np - 1; i < nxargs && simple; i++)
 			simple = xargs[i].kind == 1 || xargs[i].kind == 2;
 		if (simple) {
-			*ret = cxx_ftemplate_return_pack(c, f, xargs, nxargs);
+			*ret = cxx_ftemplate_return_pack(c, f, xargs, nxargs, false, NULL, UINT32_MAX);
 			return c->sig_requires == 1 ? 1 : c->sig_requires;
 		}
 	}
@@ -1947,10 +2070,12 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 		return -1;
 	}
 	(void)ft;
-	if (nargs > f->np && !f->variadic)
-		return 0;
-	if (nargs + e->ndefaults < f->np)
-		return 0;
+	if (!f->pack_tp) {	/* (a pack takes any number of arguments) */
+		if (nargs > f->np && !f->variadic)
+			return 0;
+		if (nargs + e->ndefaults < f->np)
+			return 0;
+	}
 	/* explicit arguments: the first parameters (all of them: nothing left to deduce) */
 	if (xargs) {
 		if (nxargs > p->params->ntparams)
@@ -1961,44 +2086,64 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			bind[i] = xargs[i];
 		}
 	}
-	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
-		qty P = f->pt[i], A = args[i];
+	if (f->pack_tp) {
+		/* f(A a, Ts&&... ts): the fixed parameters, then each further argument against the pack's pattern */
+		uint32_t ntp = p->params->ntparams, fixed = f->np - 1, pk = f->pack_tp - 1, ne = 0;
+		cxx_targ flat[32];
+		qty etypes[16];
 
-		if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
-			continue;	/* (non-deduced: its conversion is not checked here) */
-		if (A == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, A) == TY_VOID) {
-			c->why = CXX_WHY_ARG;
-			return -1;	/* (void: a type vcc got wrong; no argument has it) */
-		}
-		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext) {
-			int ext = AST_TYPE(c->ast, P)->ext;
-			void *owner;
-
-			P = AST_TYPE(c->ast, P)->base;
-			/* T&& with an lvalue: a forwarding reference deduces T as A& */
-			if (ext == 2 && !QQ(P) && lval[i] && cxx_placeholder_of(c, P, &owner) >= 0 && owner == p)
-				A = cxx_type_reference(c, A, false);
-			else
-				A = QT(QI(A), QQ(A) | QQ(P));	/* (const T& binds what is not const too) */
-		} else {
-			/* by value: arrays and functions decay, top-level cv goes */
-			const ctype *at = AST_TYPE(c->ast, A);
-
-			if (at->kind == TY_ARRAY)
-				A = cc_type_pointer(c->ast, at->base);
-			else if (at->kind == TY_FUNC)
-				A = cc_type_pointer(c->ast, A);
-			A = QUNQ(A);
-			P = QUNQ(P);	/* (a by-value parameter's own const is not part of the function's type) */
-		}
-		if (!cxx_match_type(c, p, P, A, bind, 0)) {
-			/* X<T> against a class derived from X<int>: its bases, nearest first */
-			if (AST_TYPE_KIND(c->ast, QUNQ(A)) == TY_STRUCT && cxx_match_bases(c, p, P, A, bind, 0))
-				continue;
-			/* (deduction does not convert: a pattern that matches neither the argument nor a base of it fails) */
-			c->why = CXX_WHY_CLASS_MATCH;
+		if (nargs < fixed)
 			return 0;
+		if (nargs - fixed > 16 || ntp > 16 || f->req_pos || (xargs && nxargs > pk)) {	/* (explicit elements of the pack: not mixed) */
+			c->why = CXX_WHY_PACKS;
+			return -1;
 		}
+		for (uint32_t i = 0; i + 1 < ntp; i++)
+			if (!p->params->tparams[i].name || p->params->tparams[i].def_b || p->params->tparams[i].constraint_b) {
+				c->why = CXX_WHY_PACKS;
+				return -1;	/* (constraints and defaults beside a pack: not evaluated here) */
+			}
+		for (uint32_t i = 0; i < fixed; i++) {
+			int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
+
+			if (r <= 0)
+				return r;
+		}
+		for (uint32_t i = fixed; i < nargs; i++) {
+			int r;
+
+			bind[pk].kind = 0;
+			r = cxx_deduce_argument(c, p, f->pt[fixed], args[i], lval[i], bind);
+			if (r <= 0)
+				return r;
+			if (bind[pk].kind != 1) {
+				c->why = CXX_WHY_PACKS;
+				return -1;
+			}
+			/* the element's parameter type: the pattern with this element (Ts&& with T = A&: A&) */
+			etypes[ne] = cxx_placeholder_subst(c, p, f->pt[fixed], bind[pk].t, 0);
+			if (etypes[ne] == CXX_TY_UNKNOWN) {
+				c->why = CXX_WHY_PACKS;
+				return -1;
+			}
+			flat[ntp - 1 + ne++] = bind[pk];
+		}
+		bind[pk].kind = 0;
+		for (uint32_t i = 0; i + 1 < ntp; i++) {
+			if (!bind[i].kind) {
+				c->why = CXX_WHY_UNBOUND;
+				return -1;
+			}
+			flat[i] = bind[i];
+		}
+		*ret = cxx_ftemplate_return_pack(c, f, flat, ntp - 1 + ne, body, etypes, ne);
+		return c->sig_requires == 1 ? 1 : c->sig_requires;
+	}
+	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+		int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
+
+		if (r <= 0)
+			return r;
 	}
 	{
 		int k = cxx_ftemplate_complete(c, f, bind);

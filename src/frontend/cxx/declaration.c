@@ -1143,7 +1143,7 @@ static int64_t cxx_literal_value(cxx *c)
 }
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { qty trailing; uint8_t is_const; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
+typedef struct cxx_suffix { qty trailing; uint32_t pack; uint8_t is_const; uint8_t is_function, variadic; int64_t n; qty *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
 
 /*
  * A declarator (abstract if allowed); returns the declared name's id (0: none) and sets
@@ -1169,8 +1169,10 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 	cxx_attributes_skip(c);
 	/* a pack declarator (Ts... ts, Ts&&...): not T... in a template argument list, that is an expansion */
 	if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && (cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN ||
-					      cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE || !c->in_template_argument))
+					      cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE || !c->in_template_argument)) {
 		cxx_advance(c);
+		c->decl_pack = 1;
+	}
 	if (!abstract_ok && cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER) {
 		/* a structured binding: auto [a, b, ...c] */
 		cxx_advance(c);
@@ -1296,7 +1298,7 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 				if (x->params)
 					memcpy(x->params, c->fn_params, c->fn_nparams * sizeof(qty));
 				/* the names, for the body (the parameters' own types, unknown ones too) */
-				x->nnamed = c->fn_nparams, x->ndefaults = c->fn_ndefaults;
+				x->nnamed = c->fn_nparams, x->ndefaults = c->fn_ndefaults, x->pack = c->fn_pack;
 				x->named = c->fn_nparams ? malloc(c->fn_nparams * sizeof *x->named) : NULL;
 				for (uint32_t k = 0; k < c->fn_nparams; k++)
 					x->named[k].name = c->fn_pnames[k], x->named[k].ty = c->fn_pdecl[k];
@@ -1322,6 +1324,7 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 			memcpy(c->decl_params, sfx[0].named, sfx[0].nnamed * sizeof *c->decl_params);
 		c->ndecl_params = sfx[0].nnamed;
 		c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const, c->decl_variadic = sfx[0].variadic;
+		c->decl_pack_param = sfx[0].pack;
 	} else if (!nested && !c->tentative)
 		c->decl_ndefaults = 0, c->decl_const = 0;
 	for (uint32_t i = 0; i < nsfx; i++)
@@ -1383,7 +1386,7 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 {
 	qty *types = NULL, *decls = NULL;
 	uint32_t *names = NULL;
-	uint32_t n = 0, cap = 0, ndefaults = 0;
+	uint32_t n = 0, cap = 0, ndefaults = 0, pack = UINT32_MAX;
 	uint8_t variadic = 0, unknown = 0;
 
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -1402,7 +1405,10 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 			uint32_t pname;
 
 			c->type_in = c->ds_type;
+			c->decl_pack = 0;
 			pname = cxx_declarator_parse(c, true, &q, &f, NULL);
+			if (c->decl_pack)
+				pack = n;	/* a parameter pack: Ts&&... ts */
 			t = cxx_type_parameter_adjust(c, c->type_out);
 			/* in the body: the adjusted type with the declaration's own const (not part of the function's type) */
 			qty dt = t == CXX_TY_UNKNOWN || c->type_out == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, c->type_out) == TY_ARRAY ||
@@ -1449,6 +1455,7 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 		memcpy(c->fn_pdecl, decls, n * sizeof(qty));
 	}
 	c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown, c->fn_ndefaults = ndefaults;
+	c->fn_pack = pack;
 	free(types);
 	free(names);
 	free(decls);
@@ -3236,7 +3243,11 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	qty t;
 
 	uint8_t missing = c->member_missing, invalid = c->einvalid;
+	/* (an instance with a parameter pack: its elements' types; taken here, the body's own parses reuse the fields) */
+	qty *pack_types = c->sig_pack_types;
+	uint32_t pack_n = c->sig_pack_n;
 
+	c->sig_pack_n = UINT32_MAX;
 	c->member_missing = 0;	/* (typename X::y with no y in the signature: the candidate is not viable) */
 	c->einvalid = 0;	/* (and an expression that is ill-formed for sure: -> decltype(c.begin()) for an int) */
 	c->sig_requires = 1;
@@ -3276,6 +3287,21 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 	}
 	/* a parameter of unknown type: the return type alone (callers read only it then) */
 	c->sig_fake = 0;
+	/* an instance with its pack bound: f(int, Ts&&... ts) is f(int, A&, B&&): the fixed parameters, then one
+	   per element (so that it is ranked like any other candidate) */
+	if (f && !any_return && pack_n != UINT32_MAX && c->decl_pack_param != UINT32_MAX && c->decl_pack_param + 1 == c->ndecl_params &&
+	    c->decl_return != CXX_TY_UNKNOWN && c->ndecl_params - 1 + pack_n <= 32) {
+		qty ps[32];
+		uint32_t np = 0;
+		bool known = true;
+
+		for (uint32_t i = 0; i + 1 < c->ndecl_params; i++)
+			known &= (ps[np++] = QUNQ(c->decl_params[i].ty)) != CXX_TY_UNKNOWN && c->decl_params[i].ty != CXX_TY_UNKNOWN;
+		for (uint32_t i = 0; i < pack_n; i++)
+			ps[np++] = pack_types[i];
+		if (known)
+			t = cxx_type_function(c, c->decl_return, ps, np, false);
+	}
 	if (f && t == CXX_TY_UNKNOWN && !any_return && c->decl_return != CXX_TY_UNKNOWN)
 		t = cxx_type_function(c, c->decl_return, NULL, 0, true), c->sig_fake = 1;
 	/* a trailing requires-clause: its value with the arguments bound (false: the candidate is not viable) */
@@ -3295,6 +3321,17 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 
 			cxx_scope_push(c, fs);
 			cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
+			/* the parameter pack: a pack of values, one type per element (args... expands with Args...) */
+			if (pack_n != UINT32_MAX && c->decl_pack_param < c->ndecl_params && c->decl_params[c->decl_pack_param].name > 1) {
+				cxx_entity *pe = cxx_lookup_in(c, fs, c->decl_params[c->decl_pack_param].name, 0);
+
+				if (pe && pe->kind == CXX_ENTITY_VALUE) {
+					pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN, pe->npack = pack_n;
+					pe->pack = calloc(pack_n ? pack_n : 1, sizeof *pe->pack);
+					for (uint32_t i = 0; i < pack_n; i++)
+						pe->pack[i].kind = 1, pe->pack[i].t = pack_types[i];
+				}
+			}
 			c->ret_capture = ret_pattern != CXX_TY_UNKNOWN, c->ret_type = CXX_TY_UNKNOWN, c->ret_seen = 0;
 			cxx_function_body_parse(c);
 			c->scope = outer;

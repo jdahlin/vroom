@@ -212,6 +212,10 @@ typedef struct cxx {
 	uint32_t fn_ndefaults;
 	uint8_t fn_has_trailing, decl_has_trailing;	/* the last function tail / declarator wrote -> type (known or not) */
 	qty fn_trailing;		/* the last function tail's trailing return type (CXX_TY_UNKNOWN: none) */
+	uint8_t decl_pack;		/* the last declarator was a pack's (Ts&&... ts) */
+	uint32_t fn_pack, decl_pack_param;	/* the last parameter clause's / declarator's pack parameter (its index, UINT32_MAX: none) */
+	qty *sig_pack_types;		/* a signature parsed with a body: its parameter pack's element types (sig_pack_n of them; UINT32_MAX: none) */
+	uint32_t sig_pack_n;
 	uint8_t decl_variadic, sig_is_function;	/* the last declarator's function is variadic; the last signature parsed was a function's */
 	uint8_t fn_const, decl_const;	/* the last function tail had const; the last declarator's function did */
 	int64_t evalue;			/* the expression's value, when econst (an integer constant expression) */
