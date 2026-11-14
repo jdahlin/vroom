@@ -281,7 +281,7 @@ static __attribute__((noinline)) int as_directive_dispatch(as_context *a, as_tex
 {
 	const char *d = w.text + 1;
 	size_t n = w.length - 1;
-#define AS_DIRECTIVE_IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
+#define AS_DIRECTIVE_IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, sizeof(x) - 1))
 	if (__builtin_expect(a->is_coff, 0)) {
 		int rc;
 		if (as_directive_coff(a, w, p, e, &rc)) return rc;
