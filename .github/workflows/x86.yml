@@ -2,7 +2,8 @@
 # the expensive sanitizer jobs and the steps that need an x86-64 host.
 #   x86   vcc built for x86-64: host dispatch, x86 objects, VIR x86, ...
 #   asan  ASan+UBSan build (arm64 target suites under qemu, as before)
-#   tsan  TSan build
+#   tsan  TSan build: vcc suite, VIR x86
+#   tsan-vccd  TSan build: vccd and its stress run (split for wall time)
 # Cache keys carry runner.arch, so they never mix with arm64.yml's.
 # ci/premerge.sh holds the commands.
 name: x86
@@ -24,6 +25,7 @@ jobs:
           - { job: x86,  os: ubuntu-24.04 }
           - { job: asan, os: ubuntu-24.04 }
           - { job: tsan, os: ubuntu-24.04 }
+          - { job: tsan-vccd, os: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@v4
       - run: ci/setup-debian.sh

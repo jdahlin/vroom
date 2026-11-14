@@ -9,7 +9,8 @@
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
 #   ci/premerge.sh x86      x86-64 host: the steps needing one (x86 runner)
 #   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
-#   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
+#   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), VIR x86
+#   ci/premerge.sh tsan-vccd  TSan build: vccd service and stress
 #   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
 #   ci/premerge.sh win64    Windows x64 (MinGW-w64) under Wine: suites, vlink PE, libvccrt, var COFF;
 #                           exports the programs for the native Windows job (doc/PLAN-win64.md WIN9)
@@ -18,7 +19,7 @@
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
 # failure); the script runs every step and fails at the end if any failed.
 set -u
-JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|wasm|win64|win64}
+JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|tsan-vccd|wasm|win64|win64}
 cd "$(dirname "$0")/.."
 J=${CI_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 BUILD=$(python3 -c 'import sys; sys.path.insert(0, "bench"); import hostenv; print(hostenv.BUILD)')
@@ -180,6 +181,11 @@ tsan)
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step task-test    "$B/task-test"
+	;;
+tsan-vccd)
+	# split from tsan for wall time: these two are ~325 s of TSan's ~490 s
+	build vcc-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
