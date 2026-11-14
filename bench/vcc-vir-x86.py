@@ -96,6 +96,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_low32.c', {'lowloop', 'wideloop', 'lowselect', 'wideselect', 'narrowarg', 'widearg'}, {}),
         ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
+        ('vir_byte_or.c', {'one_vector', 'with_tail', 'short_scan', 'volatile_scan', 'mutating_scan'}, {}),
         ('vir_x86_cmpmem.c', {'left', 'right', 'full32', 'sign8', 'zero8', 'sign16', 'indexed', 'keep', 'vol', 'outside', 'narrow'}, {}),
         ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'branch8', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'frame_words', 'frame_test', 'dynamic', 'nonzero', 'lowzero'}, {}),
@@ -134,6 +135,12 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                 env=dict(testenv, VCC_THREADS='6'))
             if threaded.read_bytes() != asm.read_bytes():
                 raise SystemExit(f'{filename}: assembly differs with six emitter threads')
+            if filename == 'vir_byte_or.c':
+                for name in required_more:
+                    body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
+                    wide = re.search(r'movups\s+[^\n]*\([^)]*\),', body)
+                    if bool(wide) != (vec != '0' and name in ('one_vector', 'with_tail')):
+                        raise SystemExit(f'{name}: unexpected byte reduction load width')
             if filename == 'vir_slot_width.c':
                 for name in ('mix32', 'signed32', 'mix16', 'mix8'):
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]

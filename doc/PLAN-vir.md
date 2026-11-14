@@ -1374,6 +1374,32 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**Packed byte OR reductions on SQLite (2026-11-14).**
+The inlined attribute emptiness scan dominated the excess samples in both
+`cc_attribute_merge` and `cc_attribute_apply_symbol`. Clang used SSE2
+unpacks and packed ORs; x86 VIR ran 148 byte loads, ORs and loop tests.
+The vectorizer now recognizes a zero-based fixed-trip OR of unsigned bytes
+into an i32 accumulator, with 16–256 iterations and no other live loop-body
+operations. OR complete unaligned 16-byte chunks before reducing to one byte,
+combine with the initial accumulator, and resume the original loop at the
+first unprocessed byte. The attribute scan uses nine wide loads and four
+scalar iterations. Volatile accesses and loops with writes keep their
+original order. Guard-page tests covered both exact and partial final chunks.
+
+Five single-worker SQLite 3.50.4 compiles on CPU 7, sampled every 75,001
+user cycles, gave 218 → 58 and 213 → 35 exclusive self-hosted samples in
+the two functions, respectively (clang-built 37 → 34 and 35 → 21).
+
+| Median task-clock | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 162.14 / 160.36 ms | 134.14 / 134.115 ms | 1.209× / 1.196× |
+| 21 runs alternating order | 161.47 / 160.04 ms | 134.00 / 133.41 ms | 1.205× / 1.200× |
+
+Ordinary host builds, one warm-up per binary. Self-hosted vcc retired
+23.8–24.1M fewer instructions per compile. All four binaries produced the
+same SQLite object (SHA-256 prefix `c4d3896fefc9`); its recursive-query
+smoke test passed.
+
 **Frame operands and two-word records on SQLite (2026-11-14).**
 The x86 VIR path repeatedly computed a local address with LEA immediately
 before reading it or copying a record. The static counts of RSP-relative
