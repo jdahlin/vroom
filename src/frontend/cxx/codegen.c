@@ -1487,11 +1487,14 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		args = all, nargs = n;
 		ft = AST_TYPE(a, f->ty);
 	}
-	if (ft->n != nargs || (ft->flags & TF_VARIADIC) || (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID))
-		{ CXX_CALL_WHY(); return; }	/* (variadic functions, default arguments not recorded: not built yet) */
+	if ((ft->flags & TF_VARIADIC) ? nargs < ft->n || nargs > 32 : ft->n != nargs)
+		{ CXX_CALL_WHY(); return; }	/* (default arguments not recorded: not built yet) */
+	if (!cxx_gen_value_ok(c, ft->base) && AST_TYPE_KIND(a, ft->base) != TY_VOID)
+		{ CXX_CALL_WHY(); return; }
 	for (uint32_t i = 0; i < nargs; i++)
-		if (!args[i] || !cxx_gen_value_ok(c, a->params[ft->aux + i]))
-			{ CXX_CALL_WHY(); return; }
+		if (!args[i] || (i < ft->n ? !cxx_gen_value_ok(c, a->params[ft->aux + i]) :
+				 cc_type_is_record(a, AST_NODE_AT(a, args[i])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[i])->ty) != TY_ARRAY))
+			{ CXX_CALL_WHY(); return; }	/* (a class through ...: not built yet) */
 	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
 		{ CXX_CALL_WHY(); return; }
 	ft = AST_TYPE(a, f->ty);
@@ -1523,8 +1526,18 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 		cc_id_list_append(a, &list, self);
 	}
 	for (uint32_t i = 0; i < nargs; i++) {
-		qty pt = a->params[ft->aux + i];
-		uint32_t arg = cxx_gen_by_address(c, pt) ? cxx_gen_class_argument(c, args[i], pt, loc) : cxx_gen_bind(c, args[i], pt, loc);
+		qty pt = i < ft->n ? a->params[ft->aux + i] : CXX_TY_UNKNOWN;
+		uint32_t arg;
+
+		if (i >= ft->n) {
+			/* through ...: the default argument promotions (an array decays, a float is a double) */
+			arg = cc_node_rvalue(a, args[i]);
+			if (arg && AST_TYPE_KIND(a, AST_NODE_AT(a, arg)->ty) == TY_FLOAT)
+				arg = cc_cast_insert(a, arg, cc_type_basic(TY_DOUBLE), CK_F2F);
+			if (arg && !cxx_gen_type_ok(c, AST_NODE_AT(a, arg)->ty))
+				arg = 0;
+		} else
+			arg = cxx_gen_by_address(c, pt) ? cxx_gen_class_argument(c, args[i], pt, loc) : cxx_gen_bind(c, args[i], pt, loc);
 
 		if (!arg)
 			{ CXX_CALL_WHY(); goto fail; }
