@@ -526,6 +526,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			if (c->bound_sig != CXX_TY_UNKNOWN && ((AST_TYPE(c->ast, c->bound_sig)->flags & TF_VARIADIC) ||
 								AST_TYPE(c->ast, c->bound_sig)->n >= nargs))
 				sig = AST_TYPE(c->ast, c->bound_sig);	/* (f(...) too: an argument for the ellipsis ranks last) */
+			else if (c->bound_sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bound_sig) == TY_FUNC &&
+				 AST_TYPE(c->ast, c->bound_sig)->n < nargs && !cxx_ftemplate_has_packs(e))
+				continue;	/* (fewer parameters than arguments, no pack, no ...: not viable; min(initializer_list<T>) for min(a, b)) */
 		} else {
 			const ctype *ft;
 

@@ -1389,3 +1389,20 @@ En medlemsmall definierad utanför klassen vars omtolkning misslyckas behåller
 sin deklarerade typ.  `vector::emplace_back`: `__emplace_back_slow_path`
 saknar fortfarande typ i lambdans kropp (troligen instansen som lambdans
 första, typande pass sparade).  json oförändrad: 69/70, 2 406 funktioner.
+
+### Status (51): ett tyst tappat anrop, fler kandidater rätt, egna namn spärrade (2026-11-14)
+- `X<T>::f(a, b);` i ett block tolkades (tentativt) som en deklaration och
+  försvann tyst: funktionen fick kod utan anropet (fel kod).  Ett block
+  deklarerar inget kvalificerat namn; nu är det ett uttryck.
+- En mall med färre parametrar än anropets argument (och utan pack) är ingen
+  kandidat (`min(initializer_list<T>)` bredvid `min(a, b)`).
+- `__builtin_assume_aligned`; en packinstans tagen ur cachen anger sin
+  funktion för anropet (förut en inre instans som låg kvar).
+- När vcc inte kan skriva clangs namn (en deklarerad signatur med beroende
+  typer som `__type_identity_t<T>`, värdeparametrar som `enable_if_t<...>`,
+  där clang 23 skriver `Tn <typ>`) är namnet vcc:s eget; ett anrop till en
+  sådan funktion utan vcc:s kod byggs inte (inget skulle definiera namnet).
+json: vcc definierar **4 192 funktioner (från 2 406)**, 69/70, 4,7 s CPU,
+11 av 118 testfunktioner.  Kvar: packar som inte står sist i mallens
+parameterlista (`template<class T, class... A, enable_if_t<...> = 0>`),
+manglingen av beroende typer, virtuella baser.

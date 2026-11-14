@@ -1730,6 +1730,14 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f);
 
 /* a function template's instance: the template's signature as declared, its type parameters' placeholder
    types (ph[i] for parameter i); CXX_TY_UNKNOWN: not known */
+/* does the function template have packs (its parameter lists may take any number of arguments) */
+VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e)
+{
+	const cxx_ftemplate *f = e ? e->ftmpl : NULL;
+
+	return !f || f->packs || f->pack_tp || f->pack_param || f->variadic;
+}
+
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param)
 {
 	cxx_ftemplate *f = inst->inst_ftmpl;
@@ -2068,6 +2076,8 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 		if (f->done[i].n == nx + 1000 && cxx_args_equal(f->done[i].args, acopy, nx)) {
 			if (!want_body || f->done[i].body) {
 				c->bound_sig = f->done[i].sig, c->sig_requires = f->done[i].viable;
+				if (want_body)
+					c->call_instance = f->done[i].inst;	/* (the call's function: this one's, not one an inner call left) */
 				return f->done[i].ret;
 			}
 			at = i;

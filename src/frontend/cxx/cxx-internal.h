@@ -156,7 +156,8 @@ typedef struct cxx_entity {
 	uint32_t nsdmi_pos;		/* a data member's default initializer: the position of its = or { (0: none recorded) */
 	cxx_scope *nsdmi_scope;		/* ... the class scope it is parsed in */
 	uint8_t has_nsdmi;
-	uint8_t is_mutable;		/* a data member declared mutable (not const in a const object) */		/* ... it has one (recorded or not: a template's pattern is not) */
+	uint8_t is_mutable;
+	uint8_t name_guess;		/* a function whose symbol name is vcc's own (not clang's): called only when vcc defines it */		/* a data member declared mutable (not const in a const object) */		/* ... it has one (recorded or not: a template's pattern is not) */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
 	   per element, pack_index then the element (ty, value) */
@@ -445,6 +446,7 @@ typedef struct cxx {
 	struct cxx_entity *fn_set_seen;	/* the last name of functions parsed (an overload set a cast picks from) */
 	uint8_t fn_noexcept, decl_noexcept;	/* the function declarator's noexcept (cxx_noexcept_parse) */
 	int8_t constructs_nothrow;	/* cxx_class_constructs: the constructor it found is noexcept (1, 0; -1 not known) */
+	uint8_t mangle_guess;		/* cxx_mangle_function: the name is vcc's own (a template's declared signature not known) */
 	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;
@@ -573,6 +575,7 @@ VPRIV qty cxx_auto_type(cxx *c);
 VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
 VPRIV cxx_scope *cxx_template_home(const cxx_entity *te);
 VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
+VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);
 VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty ft, bool is_const, int variant, char *buf, size_t cap);

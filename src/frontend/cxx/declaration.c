@@ -3046,6 +3046,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		}
 		c->type_in = is_auto ? QT(QI(cxx_auto_type(c)), auto_quals | ((flags & DS_CONSTEXPR) ? Q_CONST : 0)) : base;
 		name = cxx_declarator_parse(c, false, &q, &f, &qs);
+		if (q && context == CXX_CONTEXT_BLOCK && c->tentative)
+			cxx_fail(c, "a block declares no qualified name");	/* (X<T>::f(a, b); is a call, not a declaration) */
 		qty t = c->type_out;
 		/* a constexpr variable is const (not a reference; an array's elements are) */
 		if ((flags & DS_CONSTEXPR) && !f && t != CXX_TY_UNKNOWN && !c->tentative && AST_TYPE_KIND(c->ast, t) != TY_ARRAY &&

@@ -184,6 +184,8 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 				mg_type(m, args[i].t);
 			else
 				mg_str(m, vt ? vt : "i");
+			if (!args[i].t && !vt)
+				m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
 			if (vt && vt[0] == 'b')
 				mg_str(m, args[i].v ? "1" : "0");
 			else
@@ -573,9 +575,15 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
 		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
-		if (ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC && AST_TYPE(a, ds)->n == want && (!pp || pp <= want) &&
+		bool known = ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC;
+
+		for (uint32_t i = 0; known && i < AST_TYPE(a, ds)->n; i++)
+			known = a->params[AST_TYPE(a, ds)->aux + i] != CXX_TY_UNKNOWN;
+		if (known && AST_TYPE(a, ds)->n == want && (!pp || pp <= want) &&
 		    (AST_TYPE(a, ds)->flags & TF_VARIADIC) == (x->flags & TF_VARIADIC) && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN)
 			x = AST_TYPE(a, ds), m.ph = ph, m.nph = nph, pack_param = f->inst_pack_at != UINT32_MAX ? pp : 0;
+		else
+			c->mangle_guess = 1;	/* (the instance's own types: a name of vcc's, not clang's) */
 	}
 	if (f->is_instance && !(v->len && v->s[0] == ' '))
 		mg_type(&m, x->base);

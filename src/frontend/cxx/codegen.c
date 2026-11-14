@@ -960,8 +960,10 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		f->mangled = 1;
 		return true;
 	}
+	c->mangle_guess = 0;
 	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of && f->fn_const, special ? 2 : 0, name, sizeof name))
 		return false;
+	f->name_guess = c->mangle_guess;
 	{
 		/* another entity for the same function (the same mangled name) has the symbol already */
 		uint32_t have = cxx_gen_symbol_named(c, name, 0);
@@ -1744,6 +1746,8 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 			{ CXX_CALL_WHY(); return; }	/* (a class through ...: not built yet) */
 	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
 		{ CXX_CALL_WHY(); return; }
+	if (f->name_guess && !(a->syms[f->sym].flags & SF_DEFINED))
+		{ CXX_CALL_WHY(); return; }	/* (a name only vcc gives, and no code of vcc's for it: nothing would define it) */
 	ft = AST_TYPE(a, f->ty);
 	cc_id_list_init(&list);
 	if (cxx_gen_by_address(c, ft->base)) {
@@ -2069,6 +2073,10 @@ VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint3
 		*ret = cc_type_pointer(c->ast, arg0);
 		return true;
 	}
+	if (len == 24 && !memcmp(name, "__builtin_assume_aligned", 24) && (nargs == 2 || nargs == 3)) {
+		*ret = cc_type_pointer(c->ast, cc_type_basic(TY_VOID));
+		return true;
+	}
 	return false;
 }
 
@@ -2134,6 +2142,14 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 	if (len == 19 && !memcmp(name, "__builtin_addressof", 19)) {
 		if (args[0] && (AST_NODE_AT(a, args[0])->flags & NF_LVALUE))
 			c->enode = cc_address_of_build(a, args[0], loc);
+		return;
+	}
+	if (len == 24 && !memcmp(name, "__builtin_assume_aligned", 24)) {
+		/* the pointer itself, as void * (the alignment it promises: not used at -O0) */
+		uint32_t p = args[0] ? cc_conversion_decay(a, args[0]) : 0;
+
+		if (p && AST_TYPE_KIND(a, AST_NODE_AT(a, p)->ty) == TY_PTR)
+			c->enode = cc_cast_insert(a, p, cc_type_pointer(a, cc_type_basic(TY_VOID)), CK_NOP);
 		return;
 	}
 	if (!(b = cxx_builtin_function_find(name, len, nargs, &i)) || i >= 128)
