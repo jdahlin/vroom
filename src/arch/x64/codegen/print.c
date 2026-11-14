@@ -7,7 +7,7 @@
 static bool x64_record_is_tied(int op)
 {
 	return (op >= X64_OP_ADD && op <= X64_OP_SBB) || (op >= X64_OP_ADDI && op <= X64_OP_XORI) || (op >= X64_OP_SHLI && op <= X64_OP_SAR) ||
-	       op == X64_OP_NEG || op == X64_OP_NOT || op == X64_OP_BSWAP || op == X64_OP_CRC32Q || op == X64_OP_CMOV || (op >= X64_OP_FADD && op <= X64_OP_FXOR);
+	       op == X64_OP_NEG || op == X64_OP_NOT || op == X64_OP_BSWAP || op == X64_OP_CRC32 || op == X64_OP_CMOV || (op >= X64_OP_FADD && op <= X64_OP_FXOR);
 }
 
 static bool x64_operation_is_commutative(int op)
@@ -914,17 +914,17 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 		case X64_OP_UD2:
 			vtext_string_append(b, "\tud2");
 			break;
-		case X64_OP_BSF: case X64_OP_BSR:
-			x64_mnemonic_append(b, i->opcode == X64_OP_BSF ? "bsf" : "bsr", sz);
+		case X64_OP_BSF: case X64_OP_BSR: case X64_OP_POPCNT:
+			x64_mnemonic_append(b, i->opcode == X64_OP_BSF ? "bsf" : i->opcode == X64_OP_BSR ? "bsr" : "popcnt", sz);
 			x64_register_name_append(b, i->registers[1], sz);
 			vtext_string_append(b, ", ");
 			x64_register_name_append(b, i->registers[0], sz);
 			break;
-		case X64_OP_CRC32Q:
+		case X64_OP_CRC32:
 			x64_mnemonic_append(b, "crc32", sz);
 			x64_register_name_append(b, i->registers[2], sz);
 			vtext_string_append(b, ", ");
-			x64_register_name_append(b, i->registers[0], sz);
+			x64_register_name_append(b, i->registers[0], sz == 8 ? 8 : 4);
 			break;
 		case X64_OP_BSWAP:
 			if(sz==2) {

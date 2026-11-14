@@ -612,13 +612,19 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
 		return;
 	}
+	/* Relocated ELF constants must be writable until the dynamic loader has
+	   applied their relocations; RELRO protects them afterwards. */
+	const char *constant_section = e->relocation_count && c->o->pic && !CODEGEN_IS_DARWIN(c)
+		? "\t.section\t.data.rel.ro,\"aw\",@progbits\n"
+		: "\t.section\t.rodata,\"a\",@progbits\n";
+
 	if (codegen_context_is_direct(e)) {
 		size_t h;
 
 		b->n = (b->n + 7) & ~(size_t)7;
 		start = b->n;
 		codegen_symbol_header_append(e, b, s, false,
-			   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+			   codegen_type_is_all_const(c, y->ty) ? constant_section : zero ? "\t.bss\n" : "\t.data\n", align);
 		codegen_data_item_append(e, zero && !e->relocation_count ? (size ? size : 1) : size, zero && !e->relocation_count);
 		h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
 		*(codegen_object_size *)codegen_item_room_need(e, sizeof(codegen_object_size)) = (codegen_object_size){ .symbol = s, .size = size };
@@ -628,7 +634,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
 		return;
 	}
 	codegen_symbol_header_append(e, b, s, false,
-		   codegen_type_is_all_const(c, y->ty) ? "\t.section\t.rodata,\"a\",@progbits\n" : zero ? "\t.bss\n" : "\t.data\n", align);
+		   codegen_type_is_all_const(c, y->ty) ? constant_section : zero ? "\t.bss\n" : "\t.data\n", align);
 	if (zero && !e->relocation_count) {
 		if (a->section && !strncmp(c->strs[a->section - 1].s, ".bss", 4)) {
 			vtext_string_append(b, "\t.zero\t");

@@ -147,7 +147,7 @@ VPRIV void ld_undefined_symbols_report(struct ld_context *ctx)
 	uint32_t n = 0;
 	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
 		ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
-		if (s->state != LD_SYMBOL_STATE_UNDEFINED || s->binding == STB_WEAK)
+		if (s->state != LD_SYMBOL_STATE_UNDEFINED || s->binding == STB_WEAK || s->dso1)
 			continue;
 		if ((ld_key_load(&s->first_occurrence) >> 32) >= ctx->inputs.objects.n)	/* referenced only by the script */
 			continue;

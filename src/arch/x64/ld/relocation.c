@@ -24,7 +24,8 @@ static int x64_ld_got_relaxation_kind(struct ld_context *ctx, const ld_object *o
 		return 0;
 	if (t->is_undefined || t->is_absolute || t->discarded || rl->r_offset < 2)
 		return 0;
-	(void)o;
+	if (dyn_imported(ctx, o, (uint32_t)(rl->r_info >> 32)))
+		return 0;	/* a copy or canonical PLT keeps the GOT slot assigned by the scan */
 	{
 		const uint8_t *p = is->data + rl->r_offset;
 		uint8_t op = p[-2], modrm = p[-1];
@@ -78,6 +79,7 @@ VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
 		return;
 	ld_object *o = ctx->inputs.objects.v[is->object];
 	ld_relocation_target t;
+	uint32_t nd = 0;
 
 	for (uint32_t r = 0; r < is->rela_count; r++) {
 		const elf_rela *rl = &is->rela[r];
@@ -91,6 +93,8 @@ VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
 		if (t.discarded && (is->flags & SHF_ALLOC))
 			ld_error_report(ctx, "%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
+		if (ctx->dyn.dynexe || ctx->relocations.pic)
+			nd += dyn_scan_reloc(ctx, o, is, rl, &t);
 		switch (type) {
 		case R_X86_64_NONE: case R_X86_64_64: case R_X86_64_PC32: case R_X86_64_PLT32: case R_X86_64_32:
 		case R_X86_64_32S: case R_X86_64_16: case R_X86_64_PC16: case R_X86_64_8: case R_X86_64_PC8:
@@ -113,7 +117,7 @@ VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
 			      (unsigned long long)rl->r_offset, type);
 		}
 	}
-	is->dynamic_relocation_count = 0;
+	is->dynamic_relocation_count = nd;
 }
 
 VPRIV void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, uint8_t *buf)
@@ -122,6 +126,9 @@ VPRIV void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, ui
 	ld_object *o = ctx->inputs.objects.v[is->object];
 	uint64_t secva = ld_input_section_address(ctx, si, 0);
 	ld_relocation_target t;
+	elf_rela *dyn = ctx->relocations.rela_dyn_buffer && is->dynamic_relocation_count ?
+		ctx->relocations.rela_dyn_buffer + is->first_dynamic_relocation : NULL;
+	uint32_t nd = 0;
 
 	for (uint32_t r = 0; r < is->rela_count; r++) {
 		const elf_rela *rl = &is->rela[r];
@@ -135,11 +142,22 @@ VPRIV void x64_ld_input_section_relocate(struct ld_context *ctx, uint32_t si, ui
 			continue;
 		}
 		ld_relocation_target_final_find(ctx, o, symi, rl->r_addend, &t);
+		{
+			ld_global_symbol *im = dyn_imported(ctx, o, symi);
+
+			if (im && im->state == LD_SYMBOL_STATE_UNDEFINED && im->needplt) {
+				t.is_undefined = t.is_absolute = false;
+				t.symbol_address = dyn_plt_va(ctx, im);
+				t.address = t.symbol_address + (uint64_t)rl->r_addend;
+			}
+		}
 		switch (type) {
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
 			ld_u64_store(loc, t.address);
+			if (dyn)
+				dyn_reloc64(ctx, o, is, rl, &t, P, dyn, &nd);
 			break;
 		case R_X86_64_PC64:
 			ld_u64_store(loc, t.address - P);

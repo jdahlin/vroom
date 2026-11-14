@@ -1,4 +1,5 @@
-/* The loop vectorizer on 8-byte lanes (f64x2, i64x2; VIR at -O2): as vir_vec_loops.c, every loop
+/* vcc-flags: -O3 */
+/* The loop vectorizer on 8-byte lanes (f64x2, i64x2; VIR at -O3): as vir_vec_loops.c, every loop
    at the trip counts 0-9 and 37, the arrays and the result printed, clang's scalar result the
    reference.  Two lanes change every constant of the transformation (a remainder of 0-1, a
    dependence of 1 iteration is the only short one, 8-byte strides, no 64-bit multiply), and a

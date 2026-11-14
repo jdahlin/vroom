@@ -17,12 +17,18 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	ctx->timing.start_time = t0;
 	ctx->timing.start_counters = vperformance_now();
 	ctx->timing.start_faults = ctx->timing.enabled ? ld_minor_fault_count() : 0;
-	ctx->relocations.pic = ctx->options.shared;
+	ctx->relocations.pic = ctx->options.shared || ctx->options.pie;
 
 	ld_inputs_load(ctx);
 	ld_phase_time_report(ctx, "map+parse inputs");
 	if (atomic_load(&ctx->diagnostics.error_count))
 		return 1;
+	if (!ctx->inputs.x86 && ctx->inputs.objects.n && (ctx->options.pie || ctx->dso.dsos.n)) {
+		ld_error_report(ctx, "-pie and shared objects are supported for x86-64 only"); return 1;
+	}
+	ctx->dyn.dynexe = ctx->inputs.x86 && !ctx->options.shared && !ctx->options.relocatable && (ctx->dso.dsos.n || (ctx->options.pie && !ctx->options.static_libraries_only));
+	ctx->dyn.deflayout = ctx->inputs.x86 && !ctx->options.script && !ctx->options.relocatable && !ctx->options.shared;
+	ctx->dyn.image_base = ctx->options.pie ? 0 : 0x200000;
 	ld_global_table_init(ctx);
 	if (ctx->options.script) {
 		size_t n;
@@ -82,6 +88,7 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 			}
 	}
 	ld_dynamic_symbol_define(ctx);
+	define_reserved(ctx);
 	ld_start_stop_symbols_define(ctx);
 	ld_parallel_for(ctx->symbols.order.n, ld_symbols_demote, ctx);
 	ld_undefined_symbols_report(ctx);
@@ -98,15 +105,20 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 			if (ctx->inputs.objects.v[i]->file_bytes && ctx->inputs.objects.v[i]->first_global_index)
 				ctx->inputs.objects.v[i]->local_needs_got = calloc(ctx->inputs.objects.v[i]->first_global_index, 1);
 	ld_parallel_for(ctx->inputs.sections.n, ctx->inputs.x86 ? x64_ld_relocation_scan : a64_ld_relocation_scan, ctx);
+	dyn_localize(ctx);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
-	for (uint32_t g = 0, ng = atomic_load(&ctx->symbols.count); g < ng; g++)
+	for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
+		uint32_t g = ctx->symbols.order.v[i];
 		if (atomic_load(&ctx->symbols.globals[g].needs_got)) {
 			ctx->symbols.globals[g].got_index = ctx->output.got_symbols.n;
 			VVEC_PUSH(ctx->output.got_symbols, g, ld_region_alloc);
 			if (ctx->relocations.pic && ctx->output.got_section != LD_NONE && !ld_global_symbol_is_absolute(ctx, g) && ctx->symbols.globals[g].state != LD_SYMBOL_STATE_UNDEFINED && !ctx->symbols.globals[g].demoted)
 				ctx->inputs.sections.v[ctx->output.got_section].dynamic_relocation_count++;
+			else if (ctx->dyn.dynexe && ctx->symbols.globals[g].dso1 && ctx->symbols.globals[g].state == LD_SYMBOL_STATE_UNDEFINED)
+				ctx->inputs.sections.v[ctx->output.got_section].dynamic_relocation_count++;
 		}
+	}
 	for (uint32_t i = 0; ctx->output.got_section != LD_NONE && i < ctx->inputs.objects.n; i++) {
 		ld_object *o = ctx->inputs.objects.v[i];
 
@@ -122,6 +134,9 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	}
 	if (ctx->output.got_section != LD_NONE)
 		ctx->inputs.sections.v[ctx->output.got_section].size = (uint64_t)(ctx->output.got_symbols.n + ctx->output.got_locals.n) * 8;
+	if (ctx->dyn.gotplt_isec != LD_NONE && !ctx->dyn.dynexe) ctx->inputs.sections.v[ctx->dyn.gotplt_isec].size = 24;
+	dyn_after_scan(ctx);
+	if (ctx->dyn.dynexe) ld_output_sections_adjust(ctx);
 	ctx->output.relative_count = 0;
 	for (uint32_t i = 0; i < ctx->inputs.sections.n; i++)
 		ctx->output.relative_count += ctx->inputs.sections.v[i].dynamic_relocation_count;
@@ -190,11 +205,18 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	} else {
 		ld_program_headers_create(ctx);
 		ld_program_headers_finish(ctx);
+		for (int it = 0; ctx->dyn.deflayout && ctx->layout.program_headers.n != ctx->dyn.def_nph && it < 4; it++) {
+			ctx->dyn.def_nph = ctx->layout.program_headers.n;
+			ctx->layout.in_layout = true; ld_addresses_assign(ctx); ctx->layout.in_layout = false;
+			ld_program_headers_create(ctx); ld_program_headers_finish(ctx);
+		}
 	}
+	patch_reserved(ctx);
 	/* symtab and shstrtab sizes are needed before file offsets */
 	ld_section_name_table_build(ctx);
 	ld_symbol_table_build(ctx);
 	ld_dynamic_section_links_set(ctx);
+	dyn_shdrs(ctx);
 	{
 		ld_output_section *os = &ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.symtab_section)];
 		os->link = ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.strtab_section)].section_header_index;
@@ -248,6 +270,7 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	ld_gap_fills_write(ctx);
 	ld_parallel_for(ctx->output.write_jobs.n, ld_input_section_write, ctx);
 	ld_dynamic_sections_write(ctx);
+	dyn_write(ctx);
 	ld_eh_frame_header_write(ctx);
 	ld_phase_time_report(ctx, "copy + relocate");
 	ld_symbol_table_fill(ctx);
@@ -268,6 +291,10 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 	for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
 		if (ctx->inputs.objects.v[i]->mapped && ctx->inputs.objects.v[i]->file_bytes)
 			ld_region_unmap(ctx->inputs.objects.v[i]->file_bytes, ctx->inputs.objects.v[i]->size);
+	for (uint32_t i = 0; i < ctx->dso.dsos.n; i++)
+		for (uint32_t k = 0; k < ctx->options.inputs.n; k++)
+			if (ctx->options.inputs.v[k].buf == ctx->dso.dsos.v[i]->buf)
+				ld_region_unmap(ctx->dso.dsos.v[i]->buf, ctx->dso.dsos.v[i]->size);
 	ld_global_table_free(ctx);
 	return rc || atomic_load(&ctx->diagnostics.error_count) ? 1 : 0;
 }

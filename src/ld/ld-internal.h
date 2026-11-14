@@ -71,6 +71,9 @@
 typedef struct {
 	const char *path;
 	bool whole;
+	bool as_needed;
+	const uint8_t *buf;
+	size_t size;
 } ld_input_argument;
 
 struct ld_options {
@@ -92,6 +95,8 @@ struct ld_options {
 	bool static_libraries_only;
 	bool garbage_collect_sections, print_garbage_collected_sections;		/* --gc-sections, --print-gc-sections */
 	bool no_relro;			/* -z norelro: no PT_GNU_RELRO */
+	bool pie, no_dynlinker, as_needed, export_dynamic, znow;
+	const char *dynlinker;
 	bool eh_frame_header;		/* --eh-frame-hdr: .eh_frame_hdr and PT_GNU_EH_FRAME */
 	int directory_fd;		/* relative paths are relative to it (ld_main's dirfd) */
 };
@@ -123,7 +128,8 @@ typedef struct ld_object {
 
 enum { LD_SECTION_KIND_NONE, LD_SECTION_KIND_NORMAL, LD_SECTION_KIND_MERGE_INPUT, LD_SECTION_KIND_MERGE, LD_SECTION_KIND_THUNK, LD_SECTION_KIND_DYNAMIC_RELOCATIONS, LD_SECTION_KIND_BUILD_ID,
        LD_SECTION_KIND_SYMBOL_TABLE, LD_SECTION_KIND_STRING_TABLE, LD_SECTION_KIND_SECTION_NAME_TABLE, LD_SECTION_KIND_COMMENT, LD_SECTION_KIND_GOT, LD_SECTION_KIND_EH_FRAME_HEADER,
-       LD_SECTION_KIND_DYNAMIC_SYMBOLS, LD_SECTION_KIND_DYNAMIC_STRINGS, LD_SECTION_KIND_HASH_TABLE, LD_SECTION_KIND_GNU_HASH_TABLE, LD_SECTION_KIND_SYMBOL_VERSIONS, LD_SECTION_KIND_VERSION_DEFINITIONS, LD_SECTION_KIND_DYNAMIC };
+       LD_SECTION_KIND_DYNAMIC_SYMBOLS, LD_SECTION_KIND_DYNAMIC_STRINGS, LD_SECTION_KIND_HASH_TABLE, LD_SECTION_KIND_GNU_HASH_TABLE, LD_SECTION_KIND_SYMBOL_VERSIONS, LD_SECTION_KIND_VERSION_DEFINITIONS, LD_SECTION_KIND_DYNAMIC,
+       LD_SECTION_KIND_INTERPRETER, LD_SECTION_KIND_PLT, LD_SECTION_KIND_GOT_PLT, LD_SECTION_KIND_PLT_RELOCATIONS, LD_SECTION_KIND_VERSION_REQUIREMENTS };
 
 typedef struct ld_input_section {
 	const uint8_t *data;
@@ -210,6 +216,8 @@ typedef struct ld_global_symbol {
 	uint32_t got_index;		/* its .got slot */
 	uint16_t version;			/* VERSION index: 0 local, 1 global, 2.. named */
 	uint32_t dynamic_index;		/* index in .dynsym, 0 if not exported */
+	uint32_t dso1, dsym, pltidx;
+	_Atomic uint8_t needplt, needcopy, canon;
 } ld_global_symbol;
 
 /* ---- the parsed linker script: expressions, input section descriptions, output sections, PHDRS, VERSION nodes and symbol assignments ---- */
@@ -501,8 +509,14 @@ struct ld_script {
 	const char *cursor, *end, *file;	/* the lexer */
 };
 
+#include "dso.h"
+
+#include "dyn.h"
+
 struct ld_context {
+	struct ld_dso_state dso;
 	struct ld_options options;
+	struct ld_dynamic_executable dyn;
 	struct ld_inputs inputs;
 	struct ld_symbols symbols;
 	struct ld_script script;
@@ -589,6 +603,7 @@ VPRIV uint32_t ld_visibility_rank(uint8_t v);
 VPRIV uint8_t ld_visibility_from_rank(uint32_t r);
 VPRIV void ld_atomic_u64_min(_Atomic uint64_t *p, uint64_t v);
 VPRIV void ld_atomic_u8_min(_Atomic uint8_t *p, uint8_t v);
+#include "dyn-api.h"
 VPRIV uint32_t ld_global_name_intern(struct ld_context *ctx, const char *name);
 VPRIV uint32_t ld_global_name_find(struct ld_context *ctx, const char *name);
 /* address-values.c */
@@ -667,8 +682,10 @@ VPRIV uint64_t ld_headers_size(struct ld_context *ctx);
 VPRIV uint32_t ld_input_section_description_match(struct ld_context *ctx, const char *name);
 VPRIV void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids, uint32_t n, int order);
 VPRIV void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_input_section *is);
-VPRIV int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name);
-VPRIV uint64_t ld_orphan_section_key(const ld_input_section *is);
+VPRIV const char *ld_default_output_section_name(const char *n);
+VPRIV bool ld_dynamic_synthetic(struct ld_context *ctx, const ld_input_section *is);
+VPRIV int ld_orphan_section_rank(struct ld_context *ctx, uint64_t flags, uint32_t type, const char *name);
+VPRIV uint64_t ld_orphan_section_key(struct ld_context *ctx, const ld_input_section *is);
 VPRIV int ld_rank_proximity(int a, int b);
 VPRIV int ld_output_section_rank(struct ld_context *ctx, uint32_t oi);
 VPRIV void ld_name_cache_init(struct ld_context *ctx);
@@ -710,11 +727,13 @@ VPRIV void ld_eh_frame_header_write(struct ld_context *ctx);
 VPRIV int ld_string_cmp(const void *a, const void *b);
 VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx, const char **names, uint32_t n);
 /* option-parse.c */
+VPRIV const char *ld_library_find(struct ld_context *ctx, const char *name);
 VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv);
 /* lazy-archive.c */
 VPRIV void ld_lazy_object_add(struct ld_context *ctx, ld_pending_member p);
 VPRIV void ld_lazy_archive_process(struct ld_context *ctx, uint32_t c0, uint32_t c1);
 /* input-load.c */
+VPRIV void ld_lazy_dso_add(struct ld_context *ctx, uint32_t d);
 VPRIV void ld_inputs_load(struct ld_context *ctx);
 VPRIV void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from);
 VPRIV void ld_global_table_init(struct ld_context *ctx);

@@ -12,6 +12,15 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen
 	uint32_t ty = virbuild_integer_type(size), x = virbuild_walker_value_get(e, &a, ty), op;
 	int r = virbuild_result_register_pick(e, &a, NULL);
 
+	/* x86-64 lowers popcnt only with POPCNT: fail here, not after the whole build */
+	if (CODEGEN_IS_X64(e->compile_context) &&
+	    (bi == CC_BUILTIN_POPCOUNT || bi == CC_BUILTIN_POPCOUNTL || bi == CC_BUILTIN_POPCOUNTLL ||
+	     bi == CC_BUILTIN_PARITY || bi == CC_BUILTIN_PARITYL || bi == CC_BUILTIN_PARITYLL)) {
+		uint32_t fn = e->walk_state->inline_call ? e->walk_state->inline_call->function : e->walk_state->function_symbol;
+
+		if (!x86_feature_has(cc_x86_features_get(e->compile_context, fn), X86_FEATURE_POPCNT))
+			virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));
+	}
 	switch (bi) {
 	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL: op = VIR_OP_CLZ; break;
 	case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL: op = VIR_OP_CTZ; break;

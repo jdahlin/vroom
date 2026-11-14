@@ -11,8 +11,9 @@
 Every tree is configured by clang with --disable-asm --disable-autodetect
 (config.h is the same file in all of them), so the C fallbacks of the DSP
 code are what runs; make then gets CC=bench/pg/cc, which hands every C file
-to vpp and lets clang link.  `vcc` is the direct emitter (VCC_VIR=0), `vir`
-is VCC_VIR=bl.  A file vcc fails on is logged in b-NAME/fail.jsonl and
+to vpp and lets clang link.  `vcc` is the direct emitter (-O1 after ffmpeg's
+flags), `vir` vpp at ffmpeg's own level (-O3: VIR with the loop vectorizer).  A
+file vcc fails on is logged in b-NAME/fail.jsonl and
 compiled by clang (the build reports the count; it must be 0).
 
 `compile` takes clang's command lines from `gmake -n -B` and runs them
@@ -52,7 +53,7 @@ CLANG = os.environ.get('CLANG') or ('/opt/homebrew/opt/llvm/bin/clang' if os.pat
 VPP = os.environ.get('VPP') or os.path.join(ROOT, 'build', 'src', 'vpp')
 WRAP = os.path.join(ROOT, 'bench', 'pg', 'cc')
 JOBS = os.environ.get('JOBS', '6')
-VIR = {'clang': None, 'vcc': '0', 'vir': 'bl'}
+VIR = {'clang': None, 'vcc': ['-O1'], 'vir': []}	# vpp's flags after the build's (None: clang)
 CONFIGURE = ['--disable-asm', '--disable-autodetect', '--disable-doc', '--disable-debug']
 
 
@@ -63,7 +64,7 @@ def bdir(name):
 def benv(name):
     env = dict(os.environ, VCC_PG_CLANG=CLANG, VPP=VPP)
     if VIR[name] is not None:
-        env.update(VCC_VIR=VIR[name], VCC_PG_LOG=os.path.join(bdir(name), 'fail.jsonl'), VCC_PG_FALLBACK='1')
+        env.update(VCC_PG_FLAGS=' '.join(VIR[name]), VCC_PG_LOG=os.path.join(bdir(name), 'fail.jsonl'), VCC_PG_FALLBACK='1')
     return env
 
 
@@ -152,20 +153,19 @@ def compile_mode(mode, jobs, out):
     cwd = bdir('clang')
     name = mode.split('-')[0]
     env = dict(os.environ, VPP_BATCH_ERR='1')       # batch mode prints its diagnostics, as a process does
-    if VIR[name] is not None:
-        env['VCC_VIR'] = VIR[name]
+    more = VIR[name] or []	# vpp's flags after the job's
     t, c = time.perf_counter(), cpu()
     if mode.endswith('-batch'):
         jf = os.path.join(out, 'jobs')
         with open(jf, 'w') as f:
             for k, a in enumerate(jobs):
-                f.write('\x1f'.join(['-'] + a + outs(out, k)) + '\n')
+                f.write('\x1f'.join(['-'] + a + more + outs(out, k)) + '\n')
         subprocess.run([VPP, '--batch', jf, '-j', JOBS, '-C', cwd], cwd=cwd, env=env, capture_output=True)
     else:
         cc = CLANG if name == 'clang' else VPP
 
         def one(k):
-            return subprocess.run([cc] + jobs[k] + outs(out, k), cwd=cwd, env=env, capture_output=True).returncode
+            return subprocess.run([cc] + jobs[k] + more + outs(out, k), cwd=cwd, env=env, capture_output=True).returncode
         with concurrent.futures.ThreadPoolExecutor(int(JOBS)) as pool:
             list(pool.map(one, range(len(jobs))))
     wall, used = time.perf_counter() - t, cpu() - c

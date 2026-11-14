@@ -5,7 +5,7 @@
 /* ---------------- phdrs (lld createPhdrs) ---------------- */
 
 /* lld isRelroSection */
-static bool ld_output_section_is_relro(struct ld_context *ctx, uint32_t oi)
+VPRIV bool ld_output_section_is_relro(struct ld_context *ctx, uint32_t oi)
 {
 	const ld_output_section *os = &ctx->script.sections.v[oi];
 	const char *n = os->name;
@@ -28,7 +28,10 @@ VPRIV void ld_program_headers_create(struct ld_context *ctx)
 {
 	ctx->layout.program_headers.n = ctx->layout.program_header_sections.n = 0;
 	ld_segment_create(ctx, PT_PHDR, PF_R);
+	if (ctx->dyn.interp_isec != LD_NONE && ld_input_section_is_live(ctx, ctx->dyn.interp_isec))
+		ld_segment_section_add(ctx, ld_segment_create(ctx, 3, PF_R), ld_input_section_output_section(ctx, ctx->dyn.interp_isec));
 	int hdrload = ld_segment_create(ctx, PT_LOAD, PF_R);
+	if (ctx->dyn.deflayout) ctx->layout.program_header_sections.v[hdrload].includes_headers = true;
 	int load = hdrload;
 	uint32_t flags = PF_R;
 	/* lld relroEnd: the first section after the relro run starts a PT_LOAD */
@@ -73,7 +76,7 @@ VPRIV void ld_program_headers_create(struct ld_context *ctx)
 		}
 	}
 	/* lld: PT_DYNAMIC over .dynamic */
-	if (ctx->output.dynamic_live)
+	if (ctx->output.dynamic_live || (ctx->dyn.dynexe && ld_input_section_is_live(ctx, ctx->output.dynamic_section)))
 		ld_segment_section_add(ctx, ld_segment_create(ctx, PT_DYNAMIC, ld_output_section_segment_flags(&ctx->script.sections.v[ld_input_section_output_section(ctx, ctx->output.dynamic_section)])), ld_input_section_output_section(ctx, ctx->output.dynamic_section));
 	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
 	if (!ctx->options.no_relro && !ctx->options.relocatable) {
@@ -131,7 +134,9 @@ VPRIV void ld_program_headers_finish(struct ld_context *ctx)
 	uint64_t hsize = sizeof(elf_file_header) + (uint64_t)ctx->layout.program_headers.n * sizeof(elf_program_header);
 	uint64_t base = min & ~(ctx->options.max_page_size - 1);
 	ctx->layout.headers_loaded = !ctx->options.nmagic && hsize <= min - base;
-	if (ctx->layout.headers_loaded)
+	if (ctx->dyn.deflayout) {
+		ctx->layout.headers_loaded = true; ctx->layout.file_header_address = ctx->dyn.image_base;
+	} else if (ctx->layout.headers_loaded)
 		ld_error_report(ctx, "ELF headers in the first PT_LOAD are not supported (no SECTIONS gap below the first section)");
 	int *map = ld_region_alloc(ctx->layout.program_headers.n * sizeof(int));
 	uint32_t w = 0;
@@ -142,7 +147,8 @@ VPRIV void ld_program_headers_finish(struct ld_context *ctx)
 		if (p->p_type == PT_PHDR)
 			keep = ctx->layout.headers_loaded;
 		else if (p->p_type == PT_LOAD) {
-			if (s->first_output_section < 0)
+			if (s->includes_headers && ctx->dyn.deflayout) keep = true;
+			else if (s->first_output_section < 0)
 				keep = false;
 			else {
 				ld_output_section *f = &ctx->script.sections.v[s->first_output_section], *l = &ctx->script.sections.v[s->last_output_section];

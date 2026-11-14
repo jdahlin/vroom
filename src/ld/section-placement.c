@@ -6,7 +6,7 @@
 
 VPRIV uint64_t ld_headers_size(struct ld_context *ctx)
 {
-	return sizeof(elf_file_header) + (uint64_t)(ctx->script.has_phdrs ? ctx->script.segments.n : ctx->layout.program_headers.n) * sizeof(elf_program_header);
+	return sizeof(elf_file_header) + (uint64_t)(ctx->script.has_phdrs ? ctx->script.segments.n : ctx->dyn.deflayout ? ctx->dyn.def_nph : ctx->layout.program_headers.n) * sizeof(elf_program_header);
 }
 
 /* ---------------- section assignment ---------------- */
@@ -130,7 +130,7 @@ VPRIV void ld_section_commit(struct ld_context *ctx, ld_output_section *os, ld_i
  * non-allocated.  Orphans go next to the section whose rank shares the most
  * leading bits (lld getRankProximity) */
 enum { LD_ORPHAN_RANK_WRITE = 1 << 14, LD_ORPHAN_RANK_EXECUTE = 1 << 12, LD_ORPHAN_RANK_READ_ONLY_DATA = 1 << 11, LD_ORPHAN_RANK_NOT_RELRO = 1 << 9, LD_ORPHAN_RANK_NOT_TLS = 1 << 8, LD_ORPHAN_RANK_BSS = 1 << 7 };
-VPRIV int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name)
+VPRIV int ld_orphan_section_rank(struct ld_context *ctx, uint64_t flags, uint32_t type, const char *name)
 {
 	int r;
 
@@ -140,7 +140,7 @@ VPRIV int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name
 	bool relro = (flags & SHF_WRITE) &&
 		     ((flags & SHF_TLS) || type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY ||
 		      !strcmp(name, ".got") || !strcmp(name, ".data.rel.ro") || !strcmp(name, ".bss.rel.ro") ||
-		      !strcmp(name, ".ctors") || !strcmp(name, ".dtors") || !strcmp(name, ".jcr") || !strcmp(name, ".eh_frame"));
+		      !strcmp(name, ".ctors") || !strcmp(name, ".dtors") || !strcmp(name, ".jcr") || !strcmp(name, ".eh_frame") || (ctx->dyn.dynexe && !strcmp(name, ".dynamic")));
 	if (!relro)
 		r |= LD_ORPHAN_RANK_NOT_RELRO;
 	if (!(flags & SHF_TLS))
@@ -152,10 +152,10 @@ VPRIV int ld_orphan_section_rank(uint64_t flags, uint32_t type, const char *name
 
 /* orphans sort by rank; .eh_frame_hdr and .eh_frame are lld synthetics, after
  * the input orphans of their rank, the header first */
-VPRIV uint64_t ld_orphan_section_key(const ld_input_section *is)
+VPRIV uint64_t ld_orphan_section_key(struct ld_context *ctx, const ld_input_section *is)
 {
-	unsigned r = (unsigned)ld_orphan_section_rank(is->flags, is->type, is->name);
-	unsigned syn = !strcmp(is->name, ".eh_frame_hdr") ? 1 : !strcmp(is->name, ".eh_frame") ? 2 : 0;
+	unsigned r = (unsigned)ld_orphan_section_rank(ctx, is->flags, is->type, ctx->dyn.deflayout ? ld_default_output_section_name(is->name) : is->name);
+	unsigned syn = ld_dynamic_synthetic(ctx, is) ? 0 : !strcmp(is->name, ".eh_frame_hdr") ? 2 : !strcmp(is->name, ".eh_frame") ? 3 : 1;
 
 	return (uint64_t)r << 2 | syn;
 }
@@ -169,7 +169,7 @@ VPRIV int ld_output_section_rank(struct ld_context *ctx, uint32_t oi)
 	for (uint32_t k = 0; k < os->commands.n; k++)
 		if (os->commands.v[k].kind == LD_COMMAND_INPUT_SECTION_DESCRIPTION && ctx->script.input_descriptions.v[os->commands.v[k].index].sections.n) {
 			ld_input_section *is = &ctx->inputs.sections.v[ctx->script.input_descriptions.v[os->commands.v[k].index].sections.v[0]];
-			return ld_orphan_section_rank(is->flags, is->type, is->name);
+			return ld_orphan_section_rank(ctx, is->flags, is->type, ctx->dyn.deflayout ? ld_default_output_section_name(is->name) : is->name);
 		}
 	return -1;
 }
@@ -198,4 +198,22 @@ VPRIV const char *ld_start_stop_section_name(const char *n)
 		if (!isalnum((unsigned char)*p) && *p != '_')
 			return NULL;
 	return s;
+}
+
+VPRIV const char *ld_default_output_section_name(const char *n)
+{
+	static const char *const pfx[] = {".data.rel.ro", ".data", ".rodata", ".bss.rel.ro", ".bss", ".ldata", ".lrodata", ".lbss", ".gcc_except_table", ".init_array", ".fini_array", ".tbss", ".tdata", ".ctors", ".dtors", ".sdata", ".sbss", ".text"};
+	for (uint32_t i = 0; i < sizeof pfx / sizeof *pfx; i++) {
+		size_t l = strlen(pfx[i]);
+		if (!strncmp(n, pfx[i], l) && (n[l] == 0 || n[l] == '.')) return pfx[i];
+	}
+	return n;
+}
+VPRIV bool ld_dynamic_synthetic(struct ld_context *ctx, const ld_input_section *is)
+{
+	if (!ctx->dyn.dynexe) return false;
+	switch (is->kind) {
+	case LD_SECTION_KIND_INTERPRETER: case LD_SECTION_KIND_DYNAMIC_SYMBOLS: case LD_SECTION_KIND_DYNAMIC_STRINGS: case LD_SECTION_KIND_HASH_TABLE: case LD_SECTION_KIND_GNU_HASH_TABLE: case LD_SECTION_KIND_SYMBOL_VERSIONS: case LD_SECTION_KIND_VERSION_REQUIREMENTS: case LD_SECTION_KIND_DYNAMIC_RELOCATIONS: case LD_SECTION_KIND_PLT_RELOCATIONS: return true;
+	}
+	return false;
 }

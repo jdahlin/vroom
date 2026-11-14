@@ -103,13 +103,13 @@ typedef struct virbuild_context {
 	uint32_t result_type;				/* the result's type, VIR_TYPE_VOID none */
 	uint32_t parameter_count, function_signature;			/* the function's signature (pre extra offset) */
 	const char *failure_reason;
-	char failure_detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): VCC_VIR_STATS */
+	char failure_detail[96];			/* what a failure reason leaves out (an opcode, the allocator's message): -fvir-stats */
 	vir_function f;				/* the function built (valid until the thread's next vir_function_begin) */
 	int64_t *lowering_slots, *lowering_spills;
 	uint8_t *lowering_uses; uint32_t lowering_uses_capacity;
 	uint32_t *lowering_edge_labels, lowering_edge_label_capacity;
 	uint32_t *lowering_layout, lowering_layout_capacity;
-	uint32_t *lowering_labels, lowering_slot_capacity, lowering_spill_capacity, lowering_label_capacity; /* x86 lowering buffers, reused per ecx */
+	uint32_t *lowering_labels, lowering_slot_capacity, lowering_spill_capacity, lowering_label_capacity; /* x86 lowering buffers, reused per codegen_context */
 	vir_loops loops;
 	vir_alloc_out allocation;
 } virbuild_context;

@@ -2,6 +2,8 @@
 """Sibling-call flags and attributes survive mixed shared-header batch jobs.
 
 Cross-compiles x86 and arm64 by default; no target runner or SDK is needed.
+Every job has -fno-vir: the levels' flags are checked on the direct emitter's
+sibling calls (VIR on x86-64 makes none yet: TODO.md).
 """
 import argparse
 import os
@@ -87,7 +89,7 @@ def main():
                 rows = []
                 for i, (flags, _) in enumerate(VARIANTS):
                     rows.append('\x1f'.join(['-', '--target=' + target, '-std=c23',
-                                             '-ffreestanding', '-fno-stack-protector', *flags,
+                                             '-ffreestanding', '-fno-stack-protector', *flags, '-fno-vir',
                                              '-S', str(source), '-o', str(directory / f'job-{i}.s')]))
                 jobs = directory / 'jobs'
                 jobs.write_text('\n'.join(rows) + '\n')

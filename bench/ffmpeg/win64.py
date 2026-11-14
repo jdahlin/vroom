@@ -18,7 +18,7 @@ fallbacks of the DSP code run, as bench/ffmpeg/linux-x86.sh's noasm tree);
 --disable-autodetect: no external library; Win32 threads on, so the frame and
 slice threads of the codecs run; no Windows resources (vlink has no .rsrc).
 The tools: clang's tree has clang + lld + compiler-rt and llvm-ar/llvm-nm;
-vcc's (`vcc` direct emitter, `vir` VCC_VIR=l) has vpp as --cc and --ld (vcc's
+vcc's (`vcc` direct emitter by -fno-vir, `vir` VIR) has vpp as --cc and --ld (vcc's
 driver links with vlink and libvccrt.a), var as --ar against a private vccd,
 vnm as --nm, `true` as ranlib and strip, PATH emptied of foreign tools
 (bench/win64proj.py), and ffmpeg.exe's link map checked.
@@ -89,7 +89,7 @@ def toolchain(name):
         ld = ' '.join(wp.CLANG_LINK)
         return common + [f'--cc={cc}', f'--ld={ld}', f'--ar={hostenv.llvm("llvm-ar")}', f'--nm={hostenv.llvm("llvm-nm")}',
                          '--ranlib=true', '--strip=true'], wp.clang_env()
-    cc = ' '.join(wp.VCC_CC)
+    cc = ' '.join(wp.vcc_cc(name))
     return common + [f'--cc={cc}', f'--ld={cc} -static', f'--ar={wp.VAR}', f'--nm={wp.BUILD}/vnm', '--ranlib=true',
                      '--strip=true'], wp.vcc_env(name)
 
@@ -125,7 +125,7 @@ def build(name):
             f = wp.map_foreign(os.path.join(b, exe + '.map'))
             if f:
                 bad.append(f'{exe}: foreign input {" ".join(f)}')
-        rc, n, ch = wp.no_clang_headers(wp.VCC_CC + ['-I.', '-I' + SRC, os.path.join(SRC, 'libavutil', 'cpu.c')], b, env)
+        rc, n, ch = wp.no_clang_headers(wp.vcc_cc(name) + ['-I.', '-I' + SRC, os.path.join(SRC, 'libavutil', 'cpu.c')], b, env)
         if rc or not n or ch:
             bad.append(f'headers: {ch or "-H failed"}')
     cfiles = sum(1 for l in open(os.path.join(b, 'build.log'), errors='replace') if l.startswith('CC\t'))

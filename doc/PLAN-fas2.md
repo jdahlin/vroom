@@ -490,8 +490,9 @@ fragment walk and the two scalar scans of the amalgamation for newlines.
 
 Cache the last continuation in each fragment, encode common integer records
 by opcode, populate register operands in place and find newlines using bounded
-memchr. Linux x86-64 bootstrap builds now use VIR for the compiler executable.
-An explicit VCC_VIR setting overrides the bootstrap default. Compiling SQLite
+memchr. Linux x86-64 bootstrap builds now use VIR for the compiler executable
+(its -O3; since VIR became -O2's code generator, on every host: VCC_OPT=-O1
+builds a direct-emitter stage for comparison). Compiling SQLite
 with the resulting executable uses the same options as before.
 
 | Compiler | Wall ms | CPU ms | User instructions, billions |

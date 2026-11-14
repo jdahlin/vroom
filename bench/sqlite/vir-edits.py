@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Count x86 VIR allocator sites with alignment-controlled assembly NOP probes.
 
-Input: sqlite3 assembly built with VCC_VL_MAP=1 VCC_VL_FILTER=sqlite3VdbeExec,
+Input: sqlite3 assembly built with -fvir-map -fvir-map-function=sqlite3VdbeExec,
 its speedtest1 object, and the compiler's stderr (--decisions). No timing claims
 are made for these binaries. Runtime comparisons belong in vir-x86.py using
 unmodified executables. Counters exclude out-of-line callees.
@@ -35,7 +35,7 @@ def sites(text):
     if stack or not rows:
         raise ValueError('missing or unbalanced allocator mapping')
     if len({r['id'] for r in rows}) != len(rows):
-        raise ValueError('map exactly one function with VCC_VL_FILTER')
+        raise ValueError('map exactly one function with -fvir-map-function')
     return rows, owners
 
 

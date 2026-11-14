@@ -192,8 +192,14 @@ def main():
             for function in ['fl_literal', 'fl_empty', 'fl_callee', 'fl_other_literal']:
                 if framed(body(text, function)) == omit:
                     raise RuntimeError(f'{name}: wrong frame policy for {function}')
-            for function in ['fl_frame', 'fl_return', 'fl_raw', 'fl_parameter',
-                             'fl_stack', 'fl_aligned', 'fl_call', 'fl_setjmp', 'fl_alloca', 'fl_clobber', 'fl_interrupt']:
+            # VIR (-O2 and up) omits the frame of these too, as clang -O2 does: it reads stack
+            # arguments from %rsp and aligns a call with subq; the direct emitter keeps a frame
+            vir = omit and flags[0] in ('-O2', '-O3')
+            for function in ['fl_parameter', 'fl_stack', 'fl_call']:
+                if vir and framed(body(text, function)):
+                    raise RuntimeError(f'{name}: VIR kept a frame in {function}')
+            for function in ['fl_frame', 'fl_return', 'fl_raw', 'fl_aligned', 'fl_setjmp', 'fl_alloca',
+                             'fl_clobber', 'fl_interrupt'] + ([] if vir else ['fl_parameter', 'fl_stack', 'fl_call']):
                 if not framed(body(text, function)):
                     raise RuntimeError(f'{name}: required frame omitted in {function}')
             if not args.no_run:

@@ -167,7 +167,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 	}
 	switch (i->op) {
 	case VIR_OP_CRC32C64:
-		x64_record_emit_three_registers(e, X64_OP_CRC32Q, 8, d, a, c);
+		x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
 		return;
 	case VIR_OP_PROJ: case VIR_OP_NOP: case VIR_OP_BPARAM: return;
 	case VIR_OP_BARRIER: x64_record_emit(e, X64_OP_BARRIER); return;
@@ -339,7 +339,24 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, tmp, X64_REGISTER_NONE); return;
 	}
 	case VIR_OP_FEXT: case VIR_OP_FTRUNC: x64_record_emit_three_registers(e, X64_OP_CVTF2F, sz, d, a, X64_REGISTER_NONE); return;
-	case VIR_OP_S2F: case VIR_OP_U2F: {
+	case VIR_OP_U2F:
+		if (L->function->insns[i->a].type == VIR_TYPE_I64) {
+			/* f64 of an unsigned 64-bit value: hi * 2^32 + lo, both halves exact, one rounding (in the add) */
+			int t = L->general_temporary, x = XMM0 + 14;
+
+			x64_record_emit_three_registers(e, X64_OP_MOV, 8, t, a, X64_REGISTER_NONE);
+			x64_record_emit_three_registers(e, X64_OP_SHRI, 8, t, t, X64_REGISTER_NONE)->immediate = 32;
+			x64_record_emit_three_registers(e, X64_OP_CVTI2F, 8, d, t, X64_REGISTER_NONE)->shift = 8;
+			x64_record_emit_move_immediate(e, t, (int64_t)1 << 32);
+			x64_record_emit_three_registers(e, X64_OP_CVTI2F, 8, x, t, X64_REGISTER_NONE)->shift = 8;
+			x64_record_emit_three_registers(e, X64_OP_FMUL, 8, d, d, x);
+			x64_record_emit_three_registers(e, X64_OP_MOV, 4, t, a, X64_REGISTER_NONE);
+			x64_record_emit_three_registers(e, X64_OP_CVTI2F, 8, x, t, X64_REGISTER_NONE)->shift = 8;
+			x64_record_emit_three_registers(e, X64_OP_FADD, 8, d, d, x);
+			return;
+		}
+		__attribute__((fallthrough));
+	case VIR_OP_S2F: {
 		int from = x64_vir_type_size(L->function->insns[i->a].type);
 		if (i->op == VIR_OP_U2F) { x64_record_emit_three_registers(e, X64_OP_MOV, 4, L->general_temporary, a, X64_REGISTER_NONE); a = L->general_temporary; from = 8; }
 		x64_record_emit_three_registers(e, X64_OP_CVTI2F, sz, d, a, X64_REGISTER_NONE)->shift = from; return;
@@ -473,15 +490,27 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v, const 
 		x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, (XMM0 + 14), X64_REGISTER_NONE); return;
 	}
 	case VIR_OP_AXADD: case VIR_OP_AXCHG: {
-		int width = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+		int w = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+
 		x64_record_emit_three_registers(e, X64_OP_MOV, sz, L->general_temporary, c, X64_REGISTER_NONE);
 		x64_record_emit_three_registers(e, i->op == VIR_OP_AXADD ? X64_OP_XADD : X64_OP_XCHG,
-			width, L->general_temporary, a, X64_REGISTER_NONE);
-		x64_record_emit_three_registers(e, width < sz ? X64_OP_EXT : X64_OP_MOV, width, d, L->general_temporary, X64_REGISTER_NONE)->condition = !!(i->flags & VIR_INSN_FLAG_MS);
+			w, L->general_temporary, a, X64_REGISTER_NONE);
+		if (w < sz)	/* a narrower access: the old value extended as a load's (flag S) */
+			x64_record_emit_three_registers(e, X64_OP_EXT, w, d, L->general_temporary, X64_REGISTER_NONE)->condition = (i->flags & VIR_INSN_FLAG_MS) != 0;
+		else
+			x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, L->general_temporary, X64_REGISTER_NONE);
 		return;
 	}
-	case VIR_OP_ACAS:
-		x64_record_emit_three_registers(e, X64_OP_CMPXCHG, sz, X64_REGISTER_NONE, a, x64_vir_register_number(p[2]));
+	case VIR_OP_ACAS: {
+		int w = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+
+		x64_record_emit_three_registers(e, X64_OP_CMPXCHG, w, X64_REGISTER_NONE, a, x64_vir_register_number(p[2]));
+		if (w < sz)	/* the old value in rax, extended as a load's (flag S) */
+			x64_record_emit_three_registers(e, X64_OP_EXT, w, RAX, RAX, X64_REGISTER_NONE)->condition = (i->flags & VIR_INSN_FLAG_MS) != 0;
+		return;
+	}
+	case VIR_OP_POPCNT:
+		x64_record_emit_three_registers(e, X64_OP_POPCNT, sz, d, a, X64_REGISTER_NONE);
 		return;
 	case VIR_OP_AFENCE: x64_record_emit(e,X64_OP_MFENCE); return;
 	case VIR_OP_ASTORE:

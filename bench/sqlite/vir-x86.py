@@ -43,10 +43,9 @@ def build(a):
                 if variant == 'clang':
                     checked([clang, *flags, '-c', a.source / (source + '.c'), '-o', obj], stderr=log)
                 else:
-                    env = dict(os.environ, VCC_VIR='bvls', VCC_VIR_CHECK='1')
                     asm = stem.with_suffix('.s')
-                    checked([a.bin_dir / 'vpp', *flags, '-S', a.source / (source + '.c'), '-o', asm],
-                            env=env, stderr=log)
+                    checked([a.bin_dir / 'vpp', *flags, '-fvir-verify', '-fvir-report', '-fvir-check',
+                             '-S', a.source / (source + '.c'), '-o', asm], stderr=log)
                     checked([clang, '-c', asm, '-o', obj], stderr=log)
             objects.append(obj)
             print(f'{variant} {source}: {time.monotonic() - start:.3f} s', flush=True)

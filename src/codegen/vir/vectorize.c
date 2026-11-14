@@ -1363,18 +1363,6 @@ static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
 	V->block_order_count += 5;
 }
 
-static int virbuild_vectorize_environment_get(void)
-{
-	static _Thread_local int m = -1;
-
-	if (m < 0) {
-		const char *s = getenv("VCC_VIR_VEC");	/* 0: off; r: report each loop to stderr; n: no constants hoisted */
-
-		m = s && !strcmp(s, "0") ? 0 : 1 | (s && strchr(s, 'r') ? 2 : 0) | (s && strchr(s, 'n') ? 4 : 0);
-	}
-	return m;
-}
-
 VPRIV void virbuild_function_vectorize(codegen_context *e)
 {
 	virbuild_context *V = e->vir_builder;
@@ -1382,7 +1370,11 @@ VPRIV void virbuild_function_vectorize(codegen_context *e)
 	uint32_t n0 = V->block_order_count, *hs, nh = 0, loc = e->current_location;
 	char nm[100];
 
-	if (!virbuild_vectorize_environment_get() || e->unit->options->general_regs_only || !virbuild_is_enabled(e->unit->options))
+	const cc_optimizations *on = &e->unit->options->optimize;
+
+	/* the innermost loops: -fvectorize makes them vector loops, -fhoist-loop-constants makes
+	   their constants in front of them; neither with -mgeneral-regs-only (VIRBUILD_PASS_FLAG_VECTOR_GATE) */
+	if ((!on->vectorize && !on->hoist_loop_constants) || e->unit->options->general_regs_only || !virbuild_is_enabled(e->unit->options))
 		return;
 	hs = malloc(((size_t)n0 + 1) * sizeof *hs);
 	if (!hs)
@@ -1431,16 +1423,16 @@ VPRIV void virbuild_function_vectorize(codegen_context *e)
 		}
 		for (uint32_t k = 0; k < S.loop_block_count; k++)
 			S.in_loop[S.loop_blocks[k]] = 1;
-		done = virbuild_vectorize_loop(&S);
+		done = on->vectorize && virbuild_vectorize_loop(&S);
 		if (done)
 			virbuild_vectorize_blocks_place(&S);
-		if (!(virbuild_vectorize_environment_get() & 4)) {
+		if (on->hoist_loop_constants) {
 			if (done)
 				virbuild_loop_constants_pin(&S, S.join_block);
 			else if (V->insns[V->blocks[S.predecessor].terminator].insn.op == VIR_OP_BR && V->insns[V->blocks[S.predecessor].terminator].insn.a == H)
 				virbuild_loop_constants_pin(&S, S.predecessor);
 		}
-		if (virbuild_vectorize_environment_get() & 2) {
+		if (on->vectorize && e->unit->options->vir_aid.vectorize_report) {
 			const vident *id = &vintern_ents[e->compile_context->syms[e->walk_state->function_symbol].name];
 
 			snprintf(nm, sizeof nm, "%.*s", (int)id->len, id->s);

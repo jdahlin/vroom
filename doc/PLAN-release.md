@@ -81,6 +81,18 @@ same files can run in parallel.
 
 ## Status
 
+### Status 2026-11-14: G3/G4, x86-64 dynamic executables
+
+The ELF linker now reads shared objects and GNU input scripts and links
+x86-64 glibc executables with PIE, copy relocations, PLT/GOT, symbol versions
+and constructors/destructors. Relocated ELF constants under PIC use
+`.data.rel.ro`, including per-object sections and both object/text output.
+`bench/vlink-dyn.py` passes 24/24 with clang and vcc objects; the same
+cases pass with a file-by-file linker build. `bench/vlink-opts.py` passes
+66/66 and `bench/vcc-pic.py` passes 76/76. G3/G4 remain open: arm64 dynamic
+executables, imported TLS, IFUNC and versioned symbol references remain in
+TODO.md.
+
 ### Status 2026-11-11: G2/G7, PostgreSQL on Linux
 
 The PostgreSQL harness can now isolate source and build trees on Linux,
@@ -782,3 +794,14 @@ runs clang/vcc x caller/callee under Wine (28 pass, 3 xfail); the C suites
 (`win64.yml`) runs them under Wine and the same programs on windows-2025,
 which has not run on GitHub yet.  G4 stays open: G1-G3 are not run per
 target.
+
+### Status 2026-11-14: G0/G4, native x86 CI and sanitizer runners
+
+`x86.yml` now gates native x86 object/dispatch/VIR checks and the ASan,
+TSan and TSan-vccd jobs alongside arm64 and win64.  Hosted ASan atomic
+regressions target native x86-64, where the runner provides libc and
+libatomic; the arm64 job retains arm64 coverage.  Verified locally with
+an isolated ASan+UBSan build and all three hosted atomic regressions;
+`sh -n ci/premerge.sh` and `git diff --check` pass.  The PR's arm64, x86,
+TSan and TSan-vccd checks passed; the integrated CI run remains required.
+G0 and G4 remain open.

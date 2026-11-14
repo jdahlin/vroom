@@ -25,7 +25,7 @@ static unsigned x64_copy_fields(const record *i)
 	case X64_OP_SHLI: case X64_OP_SHRI: case X64_OP_SARI:
 	case X64_OP_NEG: case X64_OP_NOT:
 	case X64_OP_CMPI: case X64_OP_TEST:
-	case X64_OP_BSF: case X64_OP_BSR: case X64_OP_BSWAP: case X64_OP_EXT:
+	case X64_OP_BSF: case X64_OP_BSR: case X64_OP_POPCNT: case X64_OP_BSWAP: case X64_OP_EXT:
 		return 1u << 1;
 	case X64_OP_ST:
 	case X64_OP_ADD: case X64_OP_SUB: case X64_OP_AND: case X64_OP_OR: case X64_OP_XOR: case X64_OP_IMUL: case X64_OP_ADC: case X64_OP_SBB:

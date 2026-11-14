@@ -17,7 +17,8 @@ VPRIV void ld_synthetic_sections_add(struct ld_context *ctx)
 	}
 	/* (lld always has .rela.dyn: dropped when empty, but a script that names it
 	   keeps an empty RELA output section) */
-	if (ctx->relocations.pic || (ctx->inputs.x86 && ctx->options.script && !ctx->options.relocatable))
+	dyn_add_sections(ctx);
+	if (!ctx->dyn.dynexe && (ctx->relocations.pic || (ctx->inputs.x86 && ctx->options.script && !ctx->options.relocatable)))
 	{
 		ctx->output.rela_dyn_section = ld_input_section_create(ctx, ".rela.dyn", LD_SECTION_KIND_DYNAMIC_RELOCATIONS, SHT_RELA, SHF_ALLOC, 8);
 		ctx->inputs.sections.v[ctx->output.rela_dyn_section].entry_size = sizeof(elf_rela);
@@ -51,6 +52,7 @@ VPRIV void ld_synthetic_sections_add(struct ld_context *ctx)
 	/* only when some GOT relocation needs it (lld drops an empty .got); sized after the scan */
 	if (ld_got_is_needed(ctx))
 		ctx->output.got_section = ld_input_section_create(ctx, ".got", LD_SECTION_KIND_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
+	dyn_add_gotplt(ctx);
 	ctx->output.symtab_section = ld_input_section_create(ctx, ".symtab", LD_SECTION_KIND_SYMBOL_TABLE, SHT_SYMTAB, 0, 8);
 	ctx->inputs.sections.v[ctx->output.symtab_section].entry_size = sizeof(elf_symbol);
 	ctx->output.shstrtab_section = ld_input_section_create(ctx, ".shstrtab", LD_SECTION_KIND_SECTION_NAME_TABLE, SHT_STRTAB, 0, 1);
