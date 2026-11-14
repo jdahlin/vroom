@@ -1815,3 +1815,7 @@ i anroparens objekt med en konverterande konstruktor.  cxx-strict 392 (413).
 `T x({}, v)`: en braced-lista som argument i direktinitiering blir en temporär av parameterns klass
 (listornas positioner skickas till konstruktoranropet; ett anrop utan sådana argument tar dem inte).
 cxx-strict 392 (oförändrat: de funktionerna stannar vid nästa sak).
+
+## Status 95 (2026-11-14)
+`T(const T&) = default` för en klass som inte är trivialt kopierbar (polymorf: `std::exception`) byggs på
+plats: baser, vptr, medlemmar (förut ett anrop till en funktion som aldrig definierades).  cxx-strict 388.

@@ -290,6 +290,27 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *
 		ctor = NULL, found = false;
 		goto bitwise;
 	}
+	if (found && ctor && ctor->fn_defaulted && !ctor->fn_deleted && nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t) &&
+	    (AST_NODE_AT(a, args[0])->flags & NF_LVALUE) && ctor->ty != CXX_TY_UNKNOWN && AST_TYPE(a, ctor->ty)->n == 1 &&
+	    cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) && AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->ext == 1) {
+		/* T(const T&) = default of a class that is not trivially copyable (a polymorphic one: std::exception):
+		   what it does, in place (bases, the vptr, members), no function called */
+		uint32_t src = args[0];
+
+		if (AST_NODE_AT(a, target)->ty != QUNQ(t)) {
+			qty pt = cc_type_pointer(a, QUNQ(t));
+			uint32_t addr = cc_address_of_build(a, target, loc);
+
+			target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		}
+		if (AST_NODE_AT(a, src)->ty != QUNQ(t)) {
+			qty pt = cc_type_pointer(a, QUNQ(t));
+			uint32_t addr = cc_address_of_build(a, src, loc);
+
+			src = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		}
+		return cxx_gen_copy_construct_parts(c, target, t, src, out, loc, 0);
+	}
 	if (found && ctor && ctor->fn_defaulted && !nargs) {	/* T() = default: what the implicit one does, in place */
 		if (cxx_class_has_member_initializer(c, t))
 			return cxx_gen_construct_by_body(c, target, t, ctor, out, loc);
