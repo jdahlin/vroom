@@ -757,6 +757,19 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 
 					if (ga >= 0 && gb >= 0 && ga != gb)
 						better = ga < gb, worse = ga > gb;
+					/* both all bare and binding to the same types: f(T, T) is more specialized than f(T, U)
+					   ([temp.func.order]: U deduces from T, not T from U) */
+					else if (ga >= 0 && ga == gb && cxx_ftemplate_distinct_bare(c, cand[a].e, nargs) > 0 &&
+						 cxx_ftemplate_distinct_bare(c, cand[b].e, nargs) > 0 &&
+						 cxx_ftemplate_distinct_bare(c, cand[a].e, nargs) != cxx_ftemplate_distinct_bare(c, cand[b].e, nargs)) {
+						bool same = true;
+
+						for (uint32_t n = 0; n < nargs && n < 16 && same; n++)
+							same = cand[a].pt[n] != CXX_TY_UNKNOWN && cand[a].pt[n] == cand[b].pt[n];
+						if (same)
+							better = cxx_ftemplate_distinct_bare(c, cand[a].e, nargs) < cxx_ftemplate_distinct_bare(c, cand[b].e, nargs),
+							worse = !better;
+					}
 					/* as specialized as each other, one with a requires-clause (satisfied: it is a
 					   candidate) and the other without: the constrained one ([temp.func.order]/6.2.2) */
 					else if (cxx_ftemplate_constrained(cand[a].e) != cxx_ftemplate_constrained(cand[b].e) &&

@@ -50,9 +50,15 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ 
 		return NULL;
 	inst = calloc(1, sizeof *inst);
 	inst->name = te->name, inst->kind = CXX_ENTITY_VALUE, inst->ty = CXX_TY_UNKNOWN, inst->pack_index = -1;
-	if (p->home->kind == CXX_SCOPE_CLASS)
+	if (p->home->kind == CXX_SCOPE_CLASS && !(te->ftmpl && te->ftmpl->is_friend))
 		inst->member_of = p->home;
-	else
+	else if (p->home->kind == CXX_SCOPE_CLASS) {
+		cxx_scope *ns = p->home;	/* (a friend: the namespace around its class) */
+
+		while (ns && ns->kind != CXX_SCOPE_NAMESPACE)
+			ns = ns->parent;
+		inst->home = ns ? ns : c->global;
+	} else
 		inst->home = p->home;
 	inst->fn_const = te->fn_const, inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
 	copy = malloc((nargs ? nargs : 1) * sizeof *copy);
@@ -91,6 +97,12 @@ VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *hom
 	(void)c;
 	f->p.params = params, f->p.home = home, f->pos = pos, f->sig = CXX_TY_UNKNOWN, f->ctor_class = ctor_class;
 	return f;
+}
+
+VPRIV void cxx_ftemplate_friend(cxx_ftemplate *f)
+{
+	if (f)
+		f->is_friend = 1;
 }
 
 VPRIV void cxx_ftemplate_requires(cxx_ftemplate *f, uint32_t pos)

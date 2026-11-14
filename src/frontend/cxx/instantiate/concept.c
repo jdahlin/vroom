@@ -331,6 +331,35 @@ VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs)
 	return n;
 }
 
+/* how many distinct template parameters the first nargs function parameters are (bare: T, const T&, T&&);
+   -1: one is not bare, or not known (f(T, T) uses one, f(T, U) two) */
+VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs)
+{
+	cxx_ftemplate *f = e->ftmpl;
+	int seen[16], ns = 0;
+
+	if (!f || !f->has_pt || nargs > 16)
+		return -1;
+	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+		qty P = f->pt[i];
+		void *owner;
+		int k;
+		bool dup = false;
+
+		if (P == CXX_TY_UNKNOWN)
+			return -1;
+		if (AST_TYPE_KIND(c->ast, P) == TY_PTR && AST_TYPE(c->ast, P)->ext)
+			P = AST_TYPE(c->ast, P)->base;
+		if ((k = cxx_placeholder_of(c, P, &owner)) < 0)
+			return -1;
+		for (int j = 0; j < ns && !dup; j++)
+			dup = seen[j] == k;
+		if (!dup)
+			seen[ns++] = k;
+	}
+	return ns;
+}
+
 VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f)
 {
 	if (f)

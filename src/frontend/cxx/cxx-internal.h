@@ -736,6 +736,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
+VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
 VPRIV void cxx_ftemplate_join_declarations(cxx *c, struct cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
@@ -751,6 +752,7 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);
 VPRIV void cxx_ftemplate_requires(struct cxx_ftemplate *f, uint32_t pos);
+VPRIV void cxx_ftemplate_friend(struct cxx_ftemplate *f);
 VPRIV cxx_entity *cxx_constraint_name_parse(cxx *c);
 VPRIV int cxx_requires_clause_value(cxx *c);
 VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8_t *lval, uint32_t nargs);

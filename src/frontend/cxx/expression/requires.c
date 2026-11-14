@@ -52,6 +52,8 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 	}
 	cxx_expect(c, LEX_TOKEN_LEFT_BRACE);
+	uint8_t mm0 = c->member_missing, iv0 = c->einvalid;
+
 	while (!cxx_accept(c, LEX_TOKEN_RIGHT_BRACE)) {
 		int r = -1;	/* this requirement */
 
@@ -104,6 +106,9 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
 	c->req_value = (int8_t)(eval ? value : -1);
 	c->scope = outer;
 	c->in_template_args = targs;
+	/* (a requirement that fails makes the expression false, nothing around it ill-formed:
+	   [expr.prim.req.general]/5) */
+	c->member_missing = mm0, c->einvalid = iv0;
 }
 
 /* ---- primary and postfix ----------------------------------------------------------------- */

@@ -2019,3 +2019,13 @@ Test: `run/reversed-packs.cpp`.  cxx-strict 322.
 - `c ? &x : nullptr` har pekarens typ ([expr.cond]/7.3), `c ? p : q` med `T *` och `const T *` den mer
   kvalificerade: json:s `get_impl_ptr` (statement.c:331, förut den vanligaste orsaken).
 cxx-strict 291 (322): 59 fler kompileras, inga nya fel.
+
+## Status 117 (2026-11-14)
+- En vänfunktionsmall definierad i sin klass (`__wrap_iter`s `operator-`) gav instanser som medlemmar, så
+  anropet byggdes med objekt plus ett argument och föll; nu en instans i klassens namnrymd (`is_friend`).
+- `f(T, T)` är mer specialiserad än `f(T, U)` när parametrarna binds lika (`__distance(_RandIter, _RandIter)`
+  före `(_InputIter, _Sent)`).
+- Ett requires-uttryck vars krav fallerar är falskt, inget runt det felformat: `member_missing`/`einvalid`
+  återställs efter det (förut gjorde `__primary_template<iterator_traits<T>>` signaturen med
+  `iter_difference_t<T>` till ett substitutionsfel).
+Test: `run/friend-templates.cpp`.  cxx-strict 274 (291): 69 fler kompileras, 2 nya som nyss nåddes.

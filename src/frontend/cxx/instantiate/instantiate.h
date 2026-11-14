@@ -118,6 +118,7 @@ typedef struct cxx_ftemplate {
 	uint8_t has_pt, variadic;
 	uint32_t pack_tp, pack_param;	/* a trailing type pack Ts... and the parameter Ts&&... ts that expands it (index + 1; 0: none) */
 	uint8_t defined;	/* this declaration has a body (another of the same function may be a declaration only) */
+	uint8_t is_friend;	/* a friend declared in a class: its instances are not members (their scope: the class's namespace) */
 	cxx_vspec **vspecs;	/* a variable template: its specializations */
 	uint32_t nvspecs;
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
@@ -206,6 +207,7 @@ VPRIV void cxx_outer_restore(cxx *c, cxx_outer *o);
 VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t nargs);
 VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class);
 VPRIV void cxx_ftemplate_requires(cxx_ftemplate *f, uint32_t pos);
+VPRIV void cxx_ftemplate_friend(cxx_ftemplate *f);
 VPRIV bool cxx_ftemplate_has_packs(const cxx_entity *e);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
 VPRIV const qty *cxx_instance_placeholders(cxx *c, const cxx_entity *inst, uint32_t *n);
@@ -258,6 +260,7 @@ VPRIV void cxx_vtemplate_special(cxx *c, cxx_ftemplate *f, cxx_scope *params, cx
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
+VPRIV int cxx_ftemplate_distinct_bare(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f);
 VPRIV void cxx_ftemplate_join_declarations(cxx *c, cxx_ftemplate *f, cxx_entity *set, uint32_t nparams, bool is_const);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);

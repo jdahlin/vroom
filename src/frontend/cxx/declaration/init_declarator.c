@@ -260,6 +260,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cxx_tparams_inherit_defaults(c, c->scope, cxx_declaration_scope(c), name);
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, NULL);
 				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
+				if (is_friend)
+					cxx_ftemplate_friend(e->ftmpl);
 				fn_template = e;
 			}
 			if (e && (flags & DS_TYPEDEF)) {
