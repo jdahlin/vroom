@@ -12,3 +12,15 @@ static_assert(__is_pointer(int *) && !__is_pointer(int &) && __is_lvalue_referen
 static_assert(__is_const(const int) && !__is_const(const int *) && __is_enum(C) && __is_class(P) && !__is_class(C), "");
 static_assert(__is_signed(int) && !__is_signed(unsigned) && __is_unsigned(unsigned long) && __is_floating_point(double), "");
 static_assert(__is_array(int[2]) && !__is_array(int *) && __is_function(void(int)) && __is_void(void), "");
+
+// enumerators: the enumeration's type, their values
+enum class V : unsigned char { null, object, array = 7, string, last = string + 2 };
+enum U { u0, u1 = u0 + 4, u2 };
+template<int N> struct A { char c[N]; };
+static_assert(sizeof(V::object) == 1 && sizeof(u1) == 4, "");
+static_assert(V::null == V::null && V::object != V::array && V::array < V::string, "");
+static_assert(static_cast<int>(V::string) == 8 && static_cast<int>(V::last) == 10 && u2 == 5 && u1 + 1 == 5, "");
+static_assert(sizeof(A<u2>) == 5 && sizeof(A<static_cast<int>(V::array)>) == 7, "");
+char pick(V);
+long pick(int);
+static_assert(sizeof(pick(V::object)) == 1 && sizeof(pick(u1)) == 8, "");

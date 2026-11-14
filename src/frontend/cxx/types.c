@@ -461,7 +461,7 @@ VPRIV bool cxx_type_size_known(cxx *c, qty t, uint64_t *size, uint32_t *align)
 	x = AST_TYPE(c->ast, t);
 	if (x->kind == TY_PTR && x->ext)	/* a reference: its referent's */
 		return cxx_type_size_known(c, x->base, size, align);
-	if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || x->kind == TY_PTR) {
+	if ((x->kind >= TY_BOOL && x->kind <= TY_FLOAT128) || x->kind == TY_PTR || x->kind == TY_ENUM) {
 		*size = x->size, *align = x->align;
 		return x->size != 0;
 	}

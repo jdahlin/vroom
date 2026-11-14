@@ -80,6 +80,18 @@ static qty cxx_decay(cxx *c, qty t)
 /* a binary operator's result (kind: the operator), from the operands' types */
 VPRIV void cxx_binary_type(cxx *c, int op, qty l, qty r)
 {
+	/* two values of one enumeration compared: bool (a scoped one has no other built-in operators) */
+	if (l != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_ENUM && QUNQ(l) == QUNQ(r) &&
+	    (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL || op == LEX_TOKEN_LESS || op == LEX_TOKEN_GREATER ||
+	     op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL)) {
+		cxx_et(c, cc_type_basic(TY_BOOL), false);
+		return;
+	}
+	/* an unscoped enumeration in arithmetic: promoted (to int here; a scoped one has no such operators) */
+	if (l != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, l) == TY_ENUM)
+		l = cc_type_basic(TY_INT);
+	if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == TY_ENUM)
+		r = cc_type_basic(TY_INT);
 	switch (op) {
 	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL:
 	case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL: case LEX_TOKEN_AMPERSAND_AMPERSAND: case LEX_TOKEN_PIPE_PIPE:

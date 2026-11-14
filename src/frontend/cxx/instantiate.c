@@ -143,15 +143,16 @@ static uint32_t cxx_instance_hash(const cxx_template *t, const cxx_targ *a, uint
 	uint64_t h = (uintptr_t)t * 0x9E3779B97F4A7C15ull;
 
 	for (uint32_t i = 0; i < n; i++)
-		h = (h ^ ((uint64_t)a[i].kind << 56 ^ (a[i].kind == 1 ? a[i].t : (uint64_t)a[i].v))) * 0x100000001B3ull;
+		h = (h ^ ((uint64_t)a[i].kind << 56 ^ (a[i].kind == 1 ? a[i].t : (uint64_t)a[i].v ^ (a[i].kind == 2 ? (uint64_t)a[i].t << 20 : 0)))) *
+		    0x100000001B3ull;
 	return (uint32_t)(h ^ (h >> 32));
 }
 
 static bool cxx_args_equal(const cxx_targ *a, const cxx_targ *b, uint32_t n)
 {
 	for (uint32_t i = 0; i < n; i++)
-		if (a[i].kind != b[i].kind || (a[i].kind == 1 ? a[i].t != b[i].t : a[i].v != b[i].v))
-			return false;
+		if (a[i].kind != b[i].kind || (a[i].kind == 1 ? a[i].t != b[i].t : a[i].v != b[i].v) || (a[i].kind == 2 && a[i].t != b[i].t))
+			return false;	/* (a value's enumeration type is part of it) */
 	return true;
 }
 
@@ -433,8 +434,11 @@ static void cxx_bind(cxx *c, cxx_scope *binding, const cxx_tparam *p, const cxx_
 	if (!e)
 		return;
 	e->dependent = 0;
-	if (p->kind == 2)
+	if (p->kind == 2) {
 		e->value = a->v, e->has_value = 1;
+		if (a->kind == 2 && a->t && AST_TYPE_KIND(c->ast, a->t) == TY_ENUM)
+			e->ty = a->t;	/* (a value of an enumeration: the parameter's type is that) */
+	}
 	if (p->kind == 1) {
 		e->ty = a->t;
 		/* a class argument: its members are reachable through the parameter's name (T::value_type) */
@@ -512,6 +516,10 @@ static bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
 		} else if (a[i].kind != 2)
 			return false;
 		else {
+			/* an enumeration's value: (E)4 */
+			if (a[i].t && a[i].t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, a[i].t) == TY_ENUM &&
+			    !(cxx_spell_append(buf, cap, len, "(") && cxx_type_spell(c, a[i].t, buf, cap, len) && cxx_spell_append(buf, cap, len, ")")))
+				return false;
 			snprintf(num, sizeof num, "%lld", (long long)a[i].v);
 			if (!cxx_spell_append(buf, cap, len, num))
 				return false;
@@ -694,7 +702,7 @@ static bool cxx_match_arg(cxx *c, cxx_partial *p, const cxx_targ *pat, const cxx
 	case 1:
 		return arg->kind == 1 && cxx_match_type(c, p, pat->t, arg->t, bind, depth);
 	case 2:
-		return arg->kind == 2 && pat->v == arg->v;
+		return arg->kind == 2 && pat->v == arg->v && pat->t == arg->t;
 	case 4:	/* a template */
 		return arg->kind == 4 && pat->v == arg->v;
 	case 3:	/* a value parameter */

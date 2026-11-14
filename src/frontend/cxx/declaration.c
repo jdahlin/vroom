@@ -368,8 +368,15 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 
 		if (e && e->kind == CXX_ENTITY_VALUE && e->placeholder)
 			out->kind = 3, out->v = e->placeholder - 1;	/* a partial specialization's value parameter */
-		else if (v >= 0)
+		else if (v >= 0) {
 			out->kind = 2, out->v = v;
+			/* an enumerator, a constant of enumeration type: X<e> is not X<its value> */
+			for (cxx_entity *x = e; x; x = x->next)
+				if (x->kind == CXX_ENTITY_VALUE && x->has_value && x->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, x->ty) == TY_ENUM) {
+					out->t = QUNQ(x->ty);
+					break;
+				}
+		}
 	}
 	(void)t;
 	c->in_template_args++;
@@ -377,8 +384,11 @@ static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 	c->in_template_args--;
 	/* a constant expression: its value */
 	/* (negative: its value in the parameter's type is not known here, size_t(-1) for one) */
-	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0)
+	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0) {
 		out->kind = 2, out->v = c->evalue;
+		if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == TY_ENUM)
+			out->t = QUNQ(c->etype);	/* (its enumeration: part of the argument) */
+	}
 }
 
 /* after the <: arguments, then > */
@@ -2573,17 +2583,44 @@ static void cxx_enum_specifier_parse(cxx *c)
 		c->last_type = e, c->last_type_dependent = 0;
 		if (!cxx_accept(c, LEX_TOKEN_LEFT_BRACE))
 			return;
+		/* enumerators: the enumeration's type, and their values (the previous one's + 1, or = a constant) */
+		int64_t next = 0;
+		bool known = !c->template_depth;
+		qty et = e && !c->template_depth ? e->ty : CXX_TY_UNKNOWN;
+
 		while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
 			uint32_t en = cxx_peek(c, 0)->id;
+			cxx_entity *e1, *e2;
 
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 			cxx_attributes_skip(c);
-			if (es)
-				cxx_declare(c, es, en, CXX_ENTITY_VALUE);
-			if (!scoped)
-				cxx_declare(c, cxx_declaration_scope(c), en, CXX_ENTITY_VALUE);
-			if (cxx_accept(c, LEX_TOKEN_EQUAL))
+			e1 = es ? cxx_declare(c, es, en, CXX_ENTITY_VALUE) : NULL;
+			e2 = !scoped ? cxx_declare(c, cxx_declaration_scope(c), en, CXX_ENTITY_VALUE) : NULL;
+			if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
+				cxx_scope *outer = c->scope;
+
+				/* (the earlier enumerators are in scope: last = first + 2, in a scoped enumeration too) */
+				if (es && scoped && !c->tentative) {
+					cxx_scope *in = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
+
+					cxx_scope_use(c, in, es);
+					cxx_scope_push(c, in);
+				}
 				cxx_constant_expression_parse(c);
+				c->scope = outer;
+				known = c->econst && !c->tentative && !c->template_depth;
+				next = c->evalue;
+			}
+			for (int k = 0; k < 2; k++) {
+				cxx_entity *x = k ? e2 : e1;
+
+				if (!x)
+					continue;
+				x->ty = et;
+				if (known)
+					x->value = next, x->has_value = 1;
+			}
+			next++;
 			if (!cxx_accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
