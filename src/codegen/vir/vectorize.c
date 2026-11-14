@@ -1431,6 +1431,15 @@ VPRIV void virbuild_function_vectorize(codegen_context *e)
 		}
 		for (uint32_t k = 0; k < S.loop_block_count; k++)
 			S.in_loop[S.loop_blocks[k]] = 1;
+		if (virbuild_byte_or_reduce(&S)) {
+			if (virbuild_vectorize_environment_get() & 2) {
+				const vident *id = &vintern_ents[e->compile_context->syms[e->walk_state->function_symbol].name];
+				fprintf(stderr, "vec: %.*s: loop b%u: vectorized byte OR\n", (int)id->len, id->s, H);
+			}
+			for (uint32_t k = 0; k < S.loop_block_count; k++)
+				S.in_loop[S.loop_blocks[k]] = 0;
+			continue;
+		}
 		done = virbuild_vectorize_loop(&S);
 		if (done)
 			virbuild_vectorize_blocks_place(&S);

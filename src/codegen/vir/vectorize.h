@@ -49,6 +49,7 @@ enum { VIRBUILD_VECTORIZE_MODE_ENTRY, VIRBUILD_VECTORIZE_MODE_BODY, VIRBUILD_VEC
 
 /* vectorize.c */
 VPRIV bool virbuild_vectorize_insn_is_skipped(virbuild_context *V, uint32_t q);
+VPRIV bool virbuild_byte_or_reduce(virbuild_vectorize_state *S);
 VPRIV void virbuild_function_vectorize(codegen_context *e);
 
 /* loop-constants.c */
