@@ -141,6 +141,14 @@ static int vccd_request_dispatch(const struct vccd_request *r, const char **kind
 		atomic_fetch_add(&vccd_probe_count, 1);
 		return vccd_diagnostics_query(r->argv[1][18] ? r->argv[1] + 19 : NULL, r->fds[1], r->fds[2]);
 	}
+	if (vccd_request_is_version_banner(r)) {
+		/* `cc [--target=T ...] -v` with no input: the driver's banner (configure scripts read it) */
+		driver_environment e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = r->fds[2], .envp = r->envp, .infd = r->fds[0] };
+
+		*kind = "cc-version";
+		atomic_fetch_add(&vccd_probe_count, 1);
+		return driver_job_run(r->argc, r->argv, &e);
+	}
 	probe = vccd_probe_kind_classify(r);
 	if (probe) {
 		static const char *const names[] = { "", "cc-probe", "as-probe", "src-probe", "link-probe" };

@@ -45,6 +45,24 @@ static bool vccd_option_takes_value(const char *a)
 	return false;
 }
 
+/* `-v` and nothing to do (no input, no -c/-S/-E/-###): the version banner */
+VPRIV bool vccd_request_is_version_banner(const struct vccd_request *r)
+{
+	bool v = false;
+
+	for (int i = 1; i < r->argc; i++) {
+		const char *a = r->argv[i];
+
+		if (!strcmp(a, "-v"))
+			v = true;
+		else if (a[0] != '-' || !a[1] || !strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E") || !strcmp(a, "-###"))
+			return false;
+		else if (vccd_option_takes_value(a))
+			i++;
+	}
+	return v;
+}
+
 /* the one input of a compile: a .c or .S file anywhere on the line or "-", NULL if none or several */
 VPRIV const char *vccd_request_input_find(const struct vccd_request *r)
 {

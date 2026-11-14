@@ -429,6 +429,61 @@ def edited_main_file_rebuilds():
     finally: v.stop()
 
 @test()
+def file_rewritten_within_one_build():
+    """a configure script writes conftest.c, compiles, rewrites it and compiles again, all
+    in one process group: each compile sees the bytes written last (lex.c's racy entries;
+    zlib's ./configure got the first file's #error in its second probe)"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(d)
+        cc = ' '.join([SHIM] + TARGET)
+        script = (f"echo '#error error' > t.c; {cc} -c t.c -o 0.o 2>/dev/null; "
+                  f"echo 'int v = 1;' > t.c; {cc} -c t.c -o 1.o && "
+                  f"echo 'int v = 22222;' > t.c; {cc} -c t.c -o 2.o && "
+                  f"echo 'int v = 3;' > t.c; {cc} -c t.c -o 3.o")	# (the last: same size as 1)
+        p = subprocess.run(['sh', '-c', script], cwd=d, capture_output=True, text=True, timeout=60,
+                           env=dict(os.environ, VCC_SOCK=v.sock), process_group=0)
+        check(p.returncode == 0, f'rc {p.returncode}: {p.stderr[-300:]}')
+        a, b, c = obj(d, '1.o'), obj(d, '2.o'), obj(d, '3.o')
+        check(a != b and b != c and a != c, 'a rewritten file was compiled with its earlier bytes')
+        check(c == fresh(d, 't.c', '4.o'), 'the last object differs from a fresh server')
+    finally: v.stop()
+
+@test()
+def win64_cross_build_through_the_shim():
+    """the vcc shim for x86_64-w64-mingw32 (PLAN-win64.md WIN8): vccd compiles (COFF) and
+    links in process (vlink-PE, libvccrt.a, the sysroot's CRT); the program runs under Wine"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hostenv
+    why = hostenv.mingw_missing()
+    vccrt = os.environ.get('VCC_VCCRT') or f'{vd.BIN}/vccrt/libvccrt.a'
+    if why: raise Skip(why)
+    if not os.path.exists(vccrt): raise Skip(f'no {vccrt} (make -C src vccrt)')
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        tu(d, 'a.c', '#include <stdio.h>\n#include <windows.h>\nint twice(int);\n'
+                     'int main(void) { printf("%d %d\\n", twice(21), (int)sizeof(long)); return GetCurrentProcessId() ? 7 : 1; }\n')
+        tu(d, 'b.c', 'int twice(int x) { return 2 * x; }\n')
+        win = [SHIM, '--target=x86_64-w64-mingw32', f'--sysroot={hostenv.MINGW_SYSROOT}']
+        sh = (f"{' '.join(win)} -O2 -c b.c -o b.o && {' '.join(win)} -O2 -v a.c b.o -o a.exe -Wl,-Map=a.map")
+        p = subprocess.run(['sh', '-c', sh], cwd=d, capture_output=True, text=True, timeout=120, process_group=0,
+                           env=dict(os.environ, VCC_SOCK=v.sock, VCC_VCCRT=vccrt, PATH='/usr/bin:/bin'))
+        check(p.returncode == 0, f'rc {p.returncode}: {p.stderr[-500:]}')
+        b = subprocess.run(win + ['-v'], capture_output=True, text=True, timeout=30, env=dict(os.environ, VCC_SOCK=v.sock))
+        check(b.returncode == 0 and 'clang' in b.stderr and 'x86_64-w64-mingw32' in b.stderr,
+              f'`vcc -v` without input (configure scripts read it): {b.returncode} {b.stderr[-200:]}')
+        check(open(f'{d}/b.o', 'rb').read(2) == b'\x64\x86', 'b.o is not a COFF x86-64 object')
+        check(open(f'{d}/a.exe', 'rb').read(2) == b'MZ', 'a.exe is not a PE image')
+        check(any(l.startswith('vlink ') and 'libvccrt.a' in l for l in p.stderr.splitlines()), f'no vlink line: {p.stderr[-300:]}')
+        check(not re.search(r'clang_rt|libgcc|compiler-rt', open(f'{d}/a.map', errors='replace').read()), 'foreign input in the map')
+        if os.path.exists(hostenv.WINE):
+            env = hostenv.wine_start(os.environ.get('VCC_WINEPREFIX', f'{vd.BIN}/wine'))	# (vcc-win64.py's prefix)
+            r = subprocess.run([hostenv.WINE, f'{d}/a.exe'], cwd=d, capture_output=True, timeout=120, env=env, stdin=subprocess.DEVNULL)
+            check(r.returncode == 7 and r.stdout.replace(b'\r\n', b'\n') == b'42 4\n', f'under Wine: {r.returncode} {r.stdout!r}')
+    finally: v.stop()
+
+@test()
 def header_created_after_miss():
     v = Vccd()
     try:
