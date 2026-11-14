@@ -295,11 +295,17 @@ CG_ROWS = [('-ffunction-sections', 'sections'), ('-fdata-sections', 'sections'),
 PIC_FLAGS = ['-fPIC', '-fpic', '-fPIE', '-fpie', '-fno-pic', '-fno-PIE', '-fno-pie', '-fPIC -fno-pic']
 
 def codegen_rows(verbose):
+    import hostenv
+    if hostenv.mingw_missing():
+        print('skip codegen rows (no MinGW sysroot)')
+        return 0, 0
     bad = n = 0
     with tempfile.TemporaryDirectory() as d:
         open(f'{d}/g.c', 'w').write(CG_SRC)
         def S(cc, flags):
-            r = subprocess.run([cc, '--target=x86_64-w64-mingw32', '-O0', '-S', '-o', '-', '-isystem', f'{vd.R}/src/test/rt/include']
+            # the sysroot for <stddef.h>: vcc's own Windows headers leave it to MinGW-w64 (WIN8)
+            r = subprocess.run([cc, '--target=x86_64-w64-mingw32', f'--sysroot={hostenv.MINGW_SYSROOT}', '-O0', '-S', '-o', '-',
+                                '-isystem', f'{vd.R}/src/test/rt/include']
                                + flags.split() + ['g.c'], cwd=d, capture_output=True, text=True)
             return r.stdout if not r.returncode else 'error: ' + r.stderr
         for flags, what in CG_ROWS:
