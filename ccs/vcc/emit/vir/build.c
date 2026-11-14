@@ -1797,6 +1797,7 @@ VPRIV void vw_ecx_free(ecx *e)
 		return;
 	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
+	vscratch_destroy(&V->simpbuf);
 	free(V->xslot), free(V->xspill), free(V->xlabel), free(V->xuses), free(V->xedgelab);
 	free(V);
 	e->vw = NULL;
@@ -2402,7 +2403,7 @@ typedef struct vwsimp {
 	uint32_t *cnt, n0;	/* uses per value; values from n0 on are the pass's constants */
 	vwhe *ht; uint32_t hmask;	/* pure instructions and loads of the dominators, by content */
 	uint32_t *log, nlog;	/* ... the entries added, in order (undone leaving a block) */
-	uint32_t *kt, kmask, ncst, nk;	/* constants: value + 1 */
+	uint32_t *kt, kmask, nk;	/* constants: value + 1 */
 	uint32_t memgen, gens, *egen;	/* the memory state loads are keyed by; per block at its end */
 	uint32_t blk;		/* the block pure instructions are keyed by: one kept live into other
 				 * blocks costs a register more often than it saves an instruction */
@@ -2414,8 +2415,49 @@ typedef struct vwsimp {
 	uint32_t *ri, *bend;	/* per block: its reverse-postorder index; the position of its end */
 	uint32_t *linner;	/* per index: its innermost loop, VW_NOBLK none */
 	uint32_t *lstart, *lend, *lpar;	/* per loop: first and last index, the loop round it */
+	uint32_t *stack;	/* shared by loop discovery, dominator traversal and dead-code removal */
 	uint8_t *lmerged;	/* ... made of retreating edges to different blocks */
 } vwsimp;
+
+/* Size the workspace before assigning pointers: growth may move the backing allocation.
+ * Every table except the trailing byte flags has four-byte alignment. */
+static size_t vw_simp_layout(ecx *e, vwsimp *S, char *base, size_t kc, size_t hc)
+{
+	vwst *V = e->vw;
+	size_t nv = (size_t)V->np + 1, nb = (size_t)V->nb + 1, nr = (size_t)V->norder + 1;
+	size_t used = 0;
+
+#define VW_TABLE(field, count) do { \
+	size_t bytes; \
+	if (base) S->field = (void *)(base + used); \
+	if (__builtin_mul_overflow((size_t)(count), sizeof *S->field, &bytes) || \
+	    __builtin_add_overflow(used, bytes, &used)) vw_fail(e, "out of memory"); \
+} while (0)
+	VW_TABLE(stack, nv > 2 * nb ? nv : 2 * nb);
+	VW_TABLE(log, 2 * nv);
+	VW_TABLE(egen, nb);
+	VW_TABLE(idom, nb);
+	VW_TABLE(dkid, nb);
+	VW_TABLE(dnext, nb);
+	VW_TABLE(ri, nb);
+	VW_TABLE(wr, nv);
+	VW_TABLE(linner, nr);
+	VW_TABLE(lstart, nr);
+	VW_TABLE(lend, nr);
+	VW_TABLE(lpar, nr);
+	/* Only this suffix needs zeroing on reuse. */
+	size_t clear = used;
+	VW_TABLE(ht, hc);
+	VW_TABLE(kt, kc);
+	VW_TABLE(cnt, 2 * nv);
+	VW_TABLE(seq, nv);
+	VW_TABLE(bend, nb);
+	VW_TABLE(lmerged, nr);
+#undef VW_TABLE
+	if (base)
+		memset(base + clear, 0, used - clear);
+	return used;
+}
 
 static void vw_inc(vwst *V, vwsimp *S, uint32_t v)
 {
@@ -2837,24 +2879,8 @@ static void vw_far_init(ecx *e, vwsimp *S)
 	vwst *V = e->vw;
 	uint32_t n = V->norder, pos = 0, sp = 0, nl = 0, *stk, *iend;
 
-	S->seq = calloc((size_t)S->n0 + 1, sizeof *S->seq);
-	S->wr = malloc(((size_t)S->n0 + 1) * sizeof *S->wr);
-	S->ri = malloc(((size_t)V->nb + 1) * sizeof *S->ri);
-	S->bend = calloc((size_t)V->nb + 1, sizeof *S->bend);
-	S->linner = malloc(((size_t)n + 1) * sizeof *S->linner);
-	S->lstart = malloc(((size_t)n + 1) * sizeof *S->lstart);
-	S->lend = malloc(((size_t)n + 1) * sizeof *S->lend);
-	S->lpar = malloc(((size_t)n + 1) * sizeof *S->lpar);
-	S->lmerged = calloc((size_t)n + 1, 1);
-	stk = malloc(((size_t)n + 1) * sizeof *stk);
-	iend = malloc(((size_t)n + 1) * sizeof *iend);
-	if (!S->seq || !S->wr || !S->ri || !S->bend || !S->linner || !S->lstart || !S->lend || !S->lpar ||
-	    !S->lmerged || !stk || !iend)
-		vw_fail(e, "out of memory");
-	for (uint32_t b = 0; b < V->nb; b++)
-		S->ri[b] = VW_NOBLK;
-	for (uint32_t i = 0; i < n; i++)
-		S->ri[V->order[i]] = i;
+	stk = S->stack;
+	iend = stk + n;
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t b = V->order[i];
 
@@ -2899,7 +2925,6 @@ static void vw_far_init(ecx *e, vwsimp *S)
 		}
 		S->linner[i] = sp ? stk[sp - 1] : VW_NOBLK;
 	}
-	free(stk), free(iend);
 }
 
 /* load q of the bytes at A: the table's entry for them, and whether its load (an earlier
@@ -3079,14 +3104,9 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 static void vw_doms(ecx *e, vwsimp *S)
 {
 	vwst *V = e->vw;
-	uint32_t n = V->norder, *ri = malloc(((size_t)V->nb + 1) * sizeof *ri);
+	uint32_t n = V->norder, *ri = S->ri;
 	bool changed = true;
 
-	S->idom = malloc(((size_t)V->nb + 1) * sizeof *S->idom);
-	S->dkid = malloc(((size_t)V->nb + 1) * sizeof *S->dkid);
-	S->dnext = malloc(((size_t)V->nb + 1) * sizeof *S->dnext);
-	if (!ri || !S->idom || !S->dkid || !S->dnext)
-		vw_fail(e, "out of memory");
 	for (uint32_t b = 0; b < V->nb; b++)
 		ri[b] = VW_NOBLK, S->idom[b] = VW_NOBLK, S->dkid[b] = VW_NOBLK, S->dnext[b] = VW_NOBLK;
 	for (uint32_t i = 0; i < n; i++)
@@ -3125,7 +3145,6 @@ static void vw_doms(ecx *e, vwsimp *S)
 		S->dnext[b] = S->dkid[d];
 		S->dkid[d] = b;
 	}
-	free(ri);
 }
 
 /*
@@ -3176,22 +3195,25 @@ static void vw_simplify(ecx *e)
 	vwst *V = e->vw;
 	vwsimp S = { 0 };
 	uint32_t *stk, ns = 0;
+	uint64_t hc = 16, kc = 16, nonconst = 0;
 
 	S.n0 = V->np;
-	S.cnt = calloc(2 * ((size_t)S.n0 + 1), sizeof *S.cnt);
-	stk = malloc(((size_t)S.n0 + 1) * sizeof *stk);
-	{
-		uint32_t kc = 16;
-
-		for (uint32_t i = 0; i < V->np; i++)
-			S.ncst += V->p[i].blk == VW_NOBLK;
-		while (kc < 2 * (V->np + 64))	/* (and the constants the pass makes) */
-			kc *= 2;
-		S.kt = calloc(kc, sizeof *S.kt);
-		S.kmask = kc - 1;
-	}
-	if (!S.cnt || !stk || !S.kt)
+	for (uint32_t i = 0; i < V->np; i++)
+		nonconst += V->p[i].blk != VW_NOBLK;
+	while (kc < 2 * ((uint64_t)V->np + 64))
+		kc *= 2;
+	while (hc < 2 * nonconst + 2)
+		hc *= 2;
+	if (kc > UINT32_MAX || hc > UINT32_MAX)
+		vw_fail(e, "simplify table too large");
+	S.kmask = kc - 1;
+	S.hmask = hc - 1;
+	size_t need = vw_simp_layout(e, &S, NULL, kc, hc);
+	void *buf = vscratch_get(&V->simpbuf, need);
+	if (!buf)
 		vw_fail(e, "out of memory");
+	vw_simp_layout(e, &S, buf, kc, hc);
+	stk = S.stack;
 	uint32_t *pcopy = S.cnt + S.n0 + 1;
 	/* uses */
 	for (uint32_t i = 0; i < V->norder; i++) {
@@ -3223,16 +3245,8 @@ static void vw_simplify(ecx *e)
 	vw_doms(e, &S);
 	vw_far_init(e, &S);
 	{
-		uint32_t cap = 16, top = 0, *bst = malloc((size_t)(V->nb + 1) * 2 * sizeof *bst);
+		uint32_t top = 0, *bst = S.stack;
 
-		while (cap < 2 * (V->np - S.ncst) + 2)
-			cap *= 2;
-		S.ht = calloc(cap, sizeof *S.ht);
-		S.hmask = cap - 1;
-		S.log = malloc((2 * (size_t)V->np + 2) * sizeof *S.log);	/* (a store or a load adds two) */
-		S.egen = malloc(((size_t)V->nb + 1) * sizeof *S.egen);
-		if (!S.ht || !S.log || !bst || !S.egen)
-			vw_fail(e, "out of memory");
 		bst[top++] = V->order[0], bst[top++] = 0;
 		while (top) {
 			uint32_t ph = bst[--top], b = bst[--top];
@@ -3252,7 +3266,6 @@ static void vw_simplify(ecx *e)
 			for (uint32_t c = S.dkid[b]; c != VW_NOBLK; c = S.dnext[c])
 				bst[top++] = c, bst[top++] = 0;
 		}
-		free(bst);
 	}
 	vw_ownaddr(e, &S);
 	/* what nothing reads */
@@ -3277,11 +3290,6 @@ static void vw_simplify(ecx *e)
 		});
 		V->fwd[q] = vw_undefk(e, &S, V->p[q].in.ty);
 	}
-	free(S.ht), free(S.log), free(S.egen), free(S.kt);
-	free(S.idom), free(S.dkid), free(S.dnext);
-	free(S.seq), free(S.wr), free(S.ri), free(S.bend), free(S.linner), free(S.lstart), free(S.lend), free(S.lpar), free(S.lmerged);
-	free(S.cnt);
-	free(stk);
 }
 
 /*

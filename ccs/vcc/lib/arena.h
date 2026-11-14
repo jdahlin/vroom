@@ -231,6 +231,30 @@ static inline VUSE VRETNONNULL void *vreserve(size_t n, int flags, const char *m
 	return p;
 }
 
+/* Reusable heap-backed workspace for passes that can size all tables up front.
+ * Zero-initialize the owner. Each get starts a new lifetime for every view,
+ * returns uninitialized storage, and leaves the owner intact on failure. */
+typedef struct vscratch { void *p; size_t cap; } vscratch;
+
+static inline void *vscratch_get(vscratch *s, size_t bytes)
+{
+	if (bytes > s->cap) {
+		void *p = realloc(s->p, bytes);
+
+		if (!p)
+			return NULL;
+		s->p = p;
+		s->cap = bytes;
+	}
+	return s->p;
+}
+
+static inline void vscratch_destroy(vscratch *s)
+{
+	free(s->p);
+	*s = (vscratch){ 0 };
+}
+
 /* a bump region over a reservation, by offset (the assembler, the object writer) */
 typedef struct vregion { uint8_t *base; size_t used, cap; } vregion;
 

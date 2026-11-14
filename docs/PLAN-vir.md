@@ -2315,6 +2315,34 @@ kända rest mot clang: adresstagna lokaler i slingor utan anrop (`balance`:
 `b.nCell` laddas och lagras varje varv; kräver aliasanalys på typ eller
 ursprung, ett beslut för SPEC-vir.md).
 
+### V2: arbetsminne i vw_simplify (2026-11-15)
+
+Förenklingspasset storleksberäknar sina tabeller före körning. Varje emit-tråd
+återanvänder ett sammanhängande arbetsminne mellan funktionerna i TU:n och
+nollställer bara de tabeller som kräver det. Ägaren finns i byggaren också om
+passet lämnas med `longjmp`; minnet frigörs när emit-kontexten stängs.
+
+SQLite 3.50.4, `sqlite3.c`, 1 422 funktioner sänkta genom VIR. Före är
+`ee8154be`. Linux x86-64, Ryzen 7 9700X, clang 23, en kärna,
+`VCC_THREADS=1 VCC_VIR=bl vpp --target=x86_64-linux-gnu -O2 -S` med
+`-DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION` och systemhuvuden
+som i `bench/sqlite/vir-x86.py`. Tolv omgångar med slumpad ordning,
+ny process per kompilering, varm filcache, utdata till /dev/null. Tid och
+max-RSS är medianer. Separata körningar räknade anrop från vcc:s objekt med
+länkarens `--wrap` och skrev assembler som var byte-identisk i alla fyra fall.
+
+| Pass | Heap | malloc + calloc + realloc | free | Tid (ms) | Max-RSS (MiB) |
+|---|---|---:|---:|---:|---:|
+| Före | glibc 2.43 | 53 942 | 104 254 | 359,3 | 171,1 |
+| Arbetsminne | glibc 2.43 | 20 471 | 70 771 | 353,8 | 172,8 |
+| Före | mimalloc 3.2.8 | 53 942 | 104 254 | 360,6 | 186,5 |
+| Arbetsminne | mimalloc 3.2.8 | 20 471 | 70 771 | 356,9 | 184,8 |
+
+Arbetsminnet tog bort 62 % av allokeringsanropen. Med glibc steg max-RSS
+med 1,7 MiB. Tidsskillnaden var liten jämfört med spridningen (351–367 ms
+före, 350–384 ms efter). Att byta heap med `LD_PRELOAD=libmimalloc.so.3`
+gav högre max-RSS i båda fallen. Mätningen gäller en TU och en tråd.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
