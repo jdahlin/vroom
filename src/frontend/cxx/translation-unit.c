@@ -102,6 +102,7 @@ int cxx_run(pp *p, const cc_opts *co, const cxx_options *o)
 	if (!status && co->emit && !pp_error_count(p)) {
 		if (o->progress)
 			dprintf(o->errfd, "cxx: function definitions %u, with code %u\n", c.stats.functions, c.stats.functions_generated);
+		cxx_gen_vtables_emit(&c);
 		status = emit_tu(c.ast, co) != 0;
 	}
 	if (c.layout_fd >= 0)

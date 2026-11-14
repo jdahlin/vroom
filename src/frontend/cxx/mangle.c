@@ -398,9 +398,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		return false;	/* (conversion functions, new/delete, literal operators: later) */
 	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
 	if (v->len && v->s[0] == ' ') {
-		if (!member || (variant != 1 && variant != 2))
+		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))
 			return false;
-		op = v->s[1] == 'c' ? (variant == 1 ? "C1" : "C2") : (variant == 1 ? "D1" : "D2");
+		op = v->s[1] == 'c' ? (variant == 1 ? "C1" : "C2") : (variant == 1 ? "D1" : variant == 3 ? "D0" : "D2");
 	}
 	mg_str(&m, "_Z");
 	if (mg_nested(&m, home)) {
@@ -442,6 +442,22 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		mg_str(&m, "z");
 	if (m.bad && getenv("VCC_CXX_MANGLE_WHY"))
 		fprintf(stderr, "not mangled: %.*s (so far: %.*s)\n", (int)v->len, v->s, (int)m.n, m.b);
+	if (m.bad || m.n + 1 > cap)
+		return false;
+	memcpy(buf, m.b, m.n);
+	buf[m.n] = 0;
+	return true;
+}
+
+/* a class's data symbol: _ZTV (vtable), _ZTI (type info), _ZTS (type name) and the class's name */
+VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap)
+{
+	cxx_mangler m;
+
+	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
+	mg_str(&m, "_Z");
+	mg_str(&m, kind);
+	mg_type(&m, QUNQ(cls));
 	if (m.bad || m.n + 1 > cap)
 		return false;
 	memcpy(buf, m.b, m.n);

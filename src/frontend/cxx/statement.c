@@ -66,6 +66,25 @@ static bool cxx_declaration_statement_try(cxx *c)
 		}
 		if (!e && n != LEX_TOKEN_COLON_COLON && n != LEX_TOKEN_LESS)
 			return false;
+		/* A::B::f(...): a qualified name of functions or variables is an expression (Base::f(x); calls) */
+		if (e && n == LEX_TOKEN_COLON_COLON) {
+			cxx_entity *x = e;
+			uint32_t i = 0;
+
+			while (x && cxx_peek(c, i + 1)->kind == LEX_TOKEN_COLON_COLON && cxx_peek(c, i + 2)->kind == LEX_TOKEN_IDENTIFIER &&
+			       !cxx_peek(c, i + 2)->kw && x->members && !x->members->dependent && !x->next) {
+				x = cxx_lookup_in(c, x->members, cxx_peek(c, i + 2)->id, 0);
+				i += 2;
+			}
+			if (x && i && cxx_peek(c, i + 1)->kind != LEX_TOKEN_COLON_COLON && cxx_peek(c, i + 1)->kind != LEX_TOKEN_LESS) {
+				bool values = true;
+
+				for (cxx_entity *y = x; y && values; y = y->next)
+					values = y->kind == CXX_ENTITY_VALUE || y->kind == CXX_ENTITY_FUNCTION_TEMPLATE;
+				if (values)
+					return false;
+			}
+		}
 	}
 	return cxx_try(c, cxx_block_declaration);
 }

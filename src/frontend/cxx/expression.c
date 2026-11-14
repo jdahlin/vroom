@@ -1270,6 +1270,10 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				if (nx != UINT32_MAX)
 					memcpy(xa, c->xargs, nx * sizeof *xa);
 
+				/* (a virtual function named with a qualifier is called directly; a callee that is not a plain name: not known) */
+				uint8_t vmode = c->pos >= 2 && c->tok[c->pos - 1].kind == LEX_TOKEN_IDENTIFIER ?
+						(c->tok[c->pos - 2].kind == LEX_TOKEN_COLON_COLON ? 1 : 0) : 2;
+
 				c->in_template_args = 0;
 				cxx_call_arguments_parse(c);
 				c->in_template_args = targs;
@@ -1281,7 +1285,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc);
+						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
 				else if (!set && (c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
 						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
@@ -1294,7 +1298,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc);
+						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
 					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {

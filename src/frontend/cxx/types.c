@@ -133,6 +133,7 @@ typedef struct cxx_class_build {
 	uint32_t bases[16], nbases;
 	uint8_t pod, access_private, public_data, private_data;
 	uint8_t virt;			/* it declares a virtual function */
+	uint8_t nsdmi;			/* a member has a default initializer */
 } cxx_class_build;
 
 /* per AST tag: what a derived class's layout needs of this class */
@@ -140,6 +141,7 @@ typedef struct cxx_class_info {
 	uint64_t dsize;			/* data size: bytes up to the end of its last data, before tail padding */
 	uint8_t valid, pod, empty, has_empty_base;
 	uint8_t polymorphic;		/* it has a vptr: its own (at offset 0) or its primary base's */
+	uint8_t nsdmi;			/* a member has a default initializer (its constructors apply it) */
 	/* its direct base classes: their tags and offsets (code generation: a derived object as its base) */
 	uint8_t nbases;
 	uint32_t base_tag[16], base_off[16];
@@ -306,6 +308,8 @@ VPRIV void cxx_class_member_traits(cxx *c, int what)
 {
 	if (c->build && (what == CXX_MEMBER_USER_SPECIAL || what == CXX_MEMBER_INITIALIZER))
 		c->build->pod = 0;
+	if (c->build && what == CXX_MEMBER_INITIALIZER)
+		c->build->nsdmi = 1;
 }
 
 /* a base class: complete, non-virtual (a virtual base: a vtable layout, not built yet) */
@@ -336,6 +340,14 @@ VPRIV void cxx_class_virtual(cxx *c)
 {
 	if (c->build && !c->tentative)
 		c->build->virt = 1, c->build->pod = 0;
+}
+
+/* does a member of the class have a default initializer? */
+VPRIV bool cxx_class_has_member_initializer(cxx *c, qty t)
+{
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return false;
+	return cxx_info_of(c, AST_TYPE(c->ast, t)->aux)->nsdmi;
 }
 
 /* does the class have a vptr (a virtual function of its own or of a base)? */
@@ -577,6 +589,7 @@ VPRIV void cxx_class_end(cxx *c)
 		bi->empty = !nfields_nonempty && !nonempty;
 		bi->has_empty_base = any_empty_base;
 		bi->polymorphic = polymorphic;
+		bi->nsdmi = b->nsdmi;
 		bi->dsize = (data_end + 7) / 8;
 		/* POD for layout: trivial and standard-layout, as far as the parser sees it */
 		bi->pod = !polymorphic && b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&

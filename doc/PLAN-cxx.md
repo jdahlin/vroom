@@ -993,3 +993,23 @@ lambdas, temporärer och värdeöverföring av icke-triviala klasser,
 implicita specialmedlemmar, standardargument, aggregatinitiering,
 `new`/`delete`, range-for, COMDAT, exakt manglade mallinstansnamn,
 headerdelning mellan TU:er (vccd).
+
+### Status (28): vtabeller och virtuella anrop (2026-11-14)
+- Varje klass håller sin vtabells platser (slutlig överskuggare per plats;
+  en virtuell destruktor tar två: D1 och D0).  `_ZTV…` definieras i den TU
+  som definierar nyckelfunktionen, annars svagt i varje TU som nämner den
+  (mallinstanser alltid svagt).  Konstruktorer och destruktorer sätter
+  vptr; anrop går genom vtabellen utom när namnet är kvalificerat
+  (`Base::f()`); D0 = D1 + `operator delete`; rent virtuella platser pekar
+  på `__cxa_pure_virtual`.
+- Implicit standardkonstruktor byggs på plats (baser, medlemmar, vptr);
+  en klass utan egen destruktor använder basens när bara den behövs.
+- Rättade tysta fel: `Base::f(x);` som sats tolkades som deklaration och
+  föll bort; en bas konstruktor kunde väljas för den härledda klassen;
+  klasser med medlemsinitierare (`int x = 0;`) får nu ingen konstruktorkod
+  alls tills de byggs (förut hoppades initierarna över).
+- Begränsningar: bara en bas med vtabell (inga thunks), typinfo-platsen
+  är null (ingen RTTI än), virtuella baser läggs inte ut.
+`cxx-run-tests.py` 13/13 (ny `virtual.cpp`), `cxx-layout` 158 106 layouter,
+0 fel.  Alla 71 json-TU:er går igenom `-c`: 54 507 av 81 500 betraktade
+funktionsdefinitioner har kod.  Inget json-test länkar ännu.

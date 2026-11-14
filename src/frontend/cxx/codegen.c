@@ -88,6 +88,8 @@ VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line)
 }
 
 static bool cxx_gen_object_type_ok(cxx *c, qty t);
+static bool cxx_vtable_usable(cxx *c, cxx_scope *cls);
+static uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
 static bool cxx_gen_is_reference(cxx *c, qty t);
 static uint32_t cxx_gen_base_pointer(cxx *c, uint32_t p, qty to, uint32_t loc);
 static uint32_t cxx_gen_base_object(cxx *c, uint32_t x, qty to, uint32_t loc);
@@ -117,7 +119,15 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
  * classes too, its other members scalars or arrays of them.  It may declare constructors and a
  * destructor; passing it by value is then not built yet (cxx_gen_type_ok).
  */
-VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
+static bool cxx_gen_class_ok2(cxx *c, qty t, bool objects);
+
+__attribute__((unused)) VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
+{
+	return cxx_gen_class_ok2(c, t, false);
+}
+
+/* objects: as an object in memory (a class with virtual functions too: never copied as a value here) */
+static bool cxx_gen_class_ok2(cxx *c, qty t, bool objects)
 {
 	cc *a = c->ast;
 	cxx_scope *cls;
@@ -128,17 +138,17 @@ VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
 		return false;
 	if (pod)
 		return true;
-	if (cxx_class_polymorphic(c, t))
-		return false;	/* (vtables: not built yet) */
 	cls = cxx_tag_scope_get(c, QUNQ(t));
 	if (!cls || cls->has_dependent_base)
+		return false;
+	if (cxx_class_polymorphic(c, t) && (!objects || !cxx_vtable_usable(c, cls)))
 		return false;
 	{
 		qty bases[16];
 		uint32_t nb = cxx_class_bases(c, t, bases, 16);
 
 		for (uint32_t i = 0; i < nb; i++)
-			if (!cxx_gen_class_ok(c, bases[i]))
+			if (!cxx_gen_class_ok2(c, bases[i], objects))
 				return false;
 	}
 	for (uint32_t i = 0; i < cls->nfield_types; i++) {
@@ -147,7 +157,7 @@ VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
 		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
 			ft = AST_TYPE(a, ft)->base;
 		if (ft != CXX_TY_UNKNOWN && cc_type_is_record(a, ft)) {
-			if (!cxx_gen_class_ok(c, ft))
+			if (!cxx_gen_class_ok2(c, ft, objects))
 				return false;
 		} else if (!cxx_gen_type_ok(c, ft) || cxx_gen_is_reference(c, ft))
 			return false;
@@ -161,7 +171,7 @@ static bool cxx_gen_object_type_ok(cxx *c, qty t)
 	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_ARRAY && AST_TYPE(c->ast, t)->n)
 		t = AST_TYPE(c->ast, t)->base;
 	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != TY_ARRAY)
-		return cxx_gen_class_ok(c, t);
+		return cxx_gen_class_ok2(c, t, true);
 	return t != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) && cxx_gen_type_ok(c, t);
 }
 
@@ -385,8 +395,8 @@ static qty cxx_gen_abi_type(cxx *c, const cxx_entity *f)
 	if (ft->n > 31)
 		return CXX_TY_UNKNOWN;
 	ps[np++] = cxx_gen_this_type(c, f);
-	if (ps[0] == CXX_TY_UNKNOWN || cxx_class_polymorphic(c, AST_TYPE(a, ps[0])->base))
-		return CXX_TY_UNKNOWN;	/* (a class with virtual functions: vtables are not built yet) */
+	if (ps[0] == CXX_TY_UNKNOWN || (cxx_class_polymorphic(c, AST_TYPE(a, ps[0])->base) && !cxx_vtable_usable(c, f->member_of)))
+		return CXX_TY_UNKNOWN;	/* (a class with virtual functions whose vtable is not built yet) */
 	for (uint32_t i = 0; i < ft->n; i++)
 		ps[np++] = a->params[ft->aux + i];
 	ft = AST_TYPE(a, f->ty);
@@ -443,6 +453,18 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		at.asmname = cxx_gen_text(c, name) + 1;
 		at.weak = f->fn_inline;
 		cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
+		if (f->fn_virtual && v->s[1] != 'c') {
+			/* a virtual destructor: the deleting destructor too */
+			if (!cxx_mangle_function(c, f, home, f->ty, false, 3, name, sizeof name))
+				return false;
+			f->sym0 = cc_symbol_new(a, S_FUNC, f->name, a->syms[f->sym].ty, 0);
+			a->syms[f->sym0].flags |= SF_GLOBAL;
+			a->syms[f->sym0].depth = 0;
+			memset(&at, 0, sizeof at);
+			at.asmname = cxx_gen_text(c, name) + 1;
+			at.weak = f->fn_inline;
+			cc_attribute_apply_symbol(a, &a->syms[f->sym0], &at);
+		}
 	}
 	f->mangled = 1;
 	return true;
@@ -726,7 +748,7 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
-	uint32_t fn, n, self = 0;
+	uint32_t fn, n, self = 0, pre = 0;
 
 	if (!cxx_gen_on(c) || !f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, f->ty) != TY_FUNC || nargs > 16)
 		return;
@@ -765,7 +787,24 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 			return;
 		cc_id_list_append(a, &list, arg);
 	}
-	{
+	if (f->fn_virtual && !cxx_gen_is_special(f) && c->gen_vmode != 1) {
+		/* through the vtable: tmp = object's address; (*(F ***)tmp)[slot](tmp, args) */
+		qty pf = cc_type_pointer(a, a->syms[f->sym].ty), ppf = cc_type_pointer(a, pf), pppf = cc_type_pointer(a, ppf);
+		qty st = QUNQ(AST_NODE_AT(a, self)->ty);
+		uint32_t tmp, tn, vptr;
+
+		if (c->gen_vmode == 2 || !f->vslot || !self)
+			return;
+		tmp = cxx_gen_temporary(c, st, loc);
+		if (!tmp)
+			return;
+		pre = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), self, loc);
+		list.v[0] = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
+		tn = cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc));
+		vptr = cc_node_rvalue(a, cc_dereference_build(a, cc_cast_insert(a, tn, pppf, cc_conversion_cast_kind(a, st, pppf, tn)), loc));
+		fn = cc_node_rvalue(a, cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, vptr,
+				cc_node_integer_new(a, f->vslot - 1, cc_type_basic(TY_LONG), loc), loc), loc));
+	} else {
 		uint32_t target = f->sym1 ? f->sym1 : f->sym;	/* (a constructor or destructor: the complete object's) */
 
 		fn = cc_node_new(a, N_VAR, a->syms[target].ty, loc);
@@ -777,6 +816,8 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 	AST_NODE_AT(a, n)->a = fn;
 	AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &list);
 	AST_NODE_AT(a, n)->c = list.n;
+	if (pre)
+		n = cc_node_new_operands(a, N_COMMA, QUNQ(ft->base), loc, pre, n);
 	if (cxx_gen_is_reference(c, ft->base))
 		n = cxx_gen_referent(c, n, loc);
 	c->enode = n;
@@ -972,8 +1013,8 @@ static bool cxx_gen_needs_construction(cxx *c, qty t, int depth)
 
 	if (cxx_class_layout_info(c, t, &pod, &empty) && pod)
 		return false;
-	if (!cls || depth > 8)
-		return true;
+	if (!cls || depth > 8 || cxx_class_polymorphic(c, t) || cxx_class_has_member_initializer(c, t))
+		return true;	/* (a vptr to set, members' default initializers) */
 	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
 		if (e->member_of == cls)
 			return true;
@@ -1036,6 +1077,7 @@ static bool cxx_gen_needs_destruction(cxx *c, qty t, int depth)
  * cxx_ctor_use chose just before, or a copy from an object of the class where none is declared for that,
  * or nothing for a class that needs no construction.  The statements go to `out`.  False: not built yet.
  */
+static bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth);
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -1045,6 +1087,8 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 
 	if (!target || !cls || nargs == UINT32_MAX || nargs > 16)
 		return false;
+	if (ctor && ctor->member_of != cls)
+		ctor = NULL, found = false;	/* (a base's constructor, found by name: not this class's) */
 	if (found && ctor) {
 		cxx_gen_call(c, ctor, target, false, args, nargs, loc);
 		if (!c->enode)
@@ -1054,7 +1098,7 @@ static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t 
 		return true;
 	}
 	if (nargs == 0)
-		return !cxx_gen_needs_construction(c, t, 0);	/* (an implicit default constructor that does something: not built yet) */
+		return cxx_gen_default_construct(c, target, t, out, loc, 0);	/* (the implicit default constructor, in place) */
 	if (nargs == 1 && args[0] && QUNQ(AST_NODE_AT(a, args[0])->ty) == QUNQ(t) && cxx_gen_type_ok(c, t)) {
 		/* from an object of a class C copies as C++ does */
 		cc_id_list_append(a, out, cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, cc_node_rvalue(a, args[0]), loc), 0, 0));
@@ -1214,11 +1258,47 @@ static bool cxx_gen_constructor_defaults(cxx *c, cc_id_list *first, uint32_t loc
 	return true;
 }
 
+/*
+ * The destructor that destroying an object of the class runs: the one it declares; with none declared,
+ * the one of its only base that needs destruction, when that base is at offset 0 and no member needs
+ * destruction (the implicit destructor does just that).  NULL: none, or an implicit one not built yet.
+ */
+static cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth)
+{
+	cc *a = c->ast;
+	cxx_entity *d = cxx_gen_declared_destructor(c, t);
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16], only = CXX_TY_UNKNOWN;
+	uint32_t nb;
+	uint64_t off;
+
+	if (d || !cls || depth > 8)
+		return d;
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty ft = cls->field_types[i];
+
+		while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ft) == TY_ARRAY)
+			ft = AST_TYPE(a, ft)->base;
+		if (ft == CXX_TY_UNKNOWN || (cc_type_is_record(a, ft) && cxx_gen_needs_destruction(c, ft, 0)))
+			return NULL;
+	}
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (cxx_gen_needs_destruction(c, bases[i], 0)) {
+			if (only != CXX_TY_UNKNOWN)
+				return NULL;
+			only = bases[i];
+		}
+	if (only == CXX_TY_UNKNOWN || !cxx_class_base_offset(c, t, only, &off, 0) || off)
+		return NULL;
+	return cxx_gen_effective_destructor(c, only, depth + 1);
+}
+
 /* ~T(): the destructor's call on the lvalue x (the class declares it); the statement goes to `out` */
 static bool cxx_gen_destroy(cxx *c, uint32_t x, qty t, cc_id_list *out, uint32_t loc)
 {
 	cc *a = c->ast;
-	cxx_entity *d = cxx_gen_declared_destructor(c, t);
+	cxx_entity *d = cxx_gen_effective_destructor(c, t, 0);
 
 	if (!x)
 		return false;
@@ -1289,7 +1369,7 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 		cxx_gen_fail(c);
 		return;
 	}
-	dtor = cxx_gen_declared_destructor(c, t);
+	dtor = cxx_gen_effective_destructor(c, t, 0);
 	if (dtor) {
 		attrs at;
 
@@ -1308,6 +1388,381 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *ar
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
+}
+
+/* ---- virtual functions ----------------------------------------------------------------------- */
+
+static bool cxx_vt_is_dtor(const cxx_entity *e)
+{
+	return cxx_gen_is_special(e) && vintern_ents[e->name].s[1] != 'c';
+}
+
+/* does y override x: the same name, parameter types and constness (a destructor overrides a destructor) */
+static bool cxx_vt_same(cxx *c, const cxx_entity *x, const cxx_entity *y)
+{
+	cc *a = c->ast;
+	const ctype *fx, *fy;
+
+	if (cxx_vt_is_dtor(x) || cxx_vt_is_dtor(y))
+		return cxx_vt_is_dtor(x) && cxx_vt_is_dtor(y);
+	if (x->name != y->name || x->ty == CXX_TY_UNKNOWN || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, x->ty) != TY_FUNC ||
+	    AST_TYPE_KIND(a, y->ty) != TY_FUNC || x->fn_const != y->fn_const)
+		return false;
+	fx = AST_TYPE(a, x->ty), fy = AST_TYPE(a, y->ty);
+	if (fx->n != fy->n)
+		return false;
+	for (uint32_t i = 0; i < fx->n; i++)
+		if (QUNQ(a->params[fx->aux + i]) != QUNQ(a->params[fy->aux + i]))
+			return false;
+	return true;
+}
+
+static void cxx_vt_push(cxx_scope *cls, cxx_entity *e)
+{
+	if (cls->nvfuncs == cls->cvfuncs)
+		cls->vfuncs = realloc(cls->vfuncs, (cls->cvfuncs = cls->cvfuncs ? cls->cvfuncs * 2 : 8) * sizeof *cls->vfuncs);
+	cls->vfuncs[cls->nvfuncs++] = e;
+}
+
+/* the class's vtable starts as its primary base's (the one base with a vtable) */
+static void cxx_vtable_init(cxx *c, cxx_scope *cls)
+{
+	if (cls->vt_init)
+		return;
+	cls->vt_init = 1;
+	for (uint32_t i = 0; i < cls->nused; i++) {
+		cxx_scope *b = cls->used[i];
+
+		if (!b || b->kind != CXX_SCOPE_CLASS)
+			continue;
+		cxx_vtable_init(c, b);
+		if (b->vt_bad)
+			cls->vt_bad = 1;
+		if (!b->nvfuncs)
+			continue;
+		if (cls->nvfuncs) {
+			cls->vt_bad = 1;	/* (a second vtable, with thunks: not built yet) */
+			continue;
+		}
+		for (uint32_t k = 0; k < b->nvfuncs; k++)
+			cxx_vt_push(cls, b->vfuncs[k]);
+	}
+}
+
+/* a non-static member function is declared in a class: its vtable slot, if it is virtual or overrides one */
+VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw)
+{
+	bool found = false;
+
+	if (!cls || cls->kind != CXX_SCOPE_CLASS || c->tentative || e->fn_virtual || (cxx_gen_is_special(e) && !cxx_vt_is_dtor(e)))
+		return;
+	cxx_vtable_init(c, cls);
+	for (uint32_t i = 0; i < cls->nvfuncs; i++)
+		if (cls->vfuncs[i] != e && cxx_vt_same(c, cls->vfuncs[i], e)) {
+			if (!found)
+				e->vslot = i + 1;
+			cls->vfuncs[i] = e;
+			found = true;
+		}
+	if (!found && !virt_kw)
+		return;
+	if (!found) {
+		e->vslot = cls->nvfuncs + 1;
+		cxx_vt_push(cls, e);
+		if (cxx_vt_is_dtor(e))
+			cxx_vt_push(cls, e);
+	}
+	e->fn_virtual = 1;
+	{
+		/* = 0 after the declarator (and override, final) */
+		uint32_t k = 0;
+
+		while (cxx_peek(c, k)->kind == LEX_TOKEN_IDENTIFIER && !cxx_peek(c, k)->kw && k < 4)
+			k++;
+		if (cxx_peek(c, k)->kind == LEX_TOKEN_EQUAL && cxx_peek(c, k + 1)->len == 1 && cxx_peek(c, k + 1)->s[0] == '0')
+			e->fn_pure = 1;
+	}
+	if (cls->nvown == cls->cvown)
+		cls->vown = realloc(cls->vown, (cls->cvown = cls->cvown ? cls->cvown * 2 : 8) * sizeof *cls->vown);
+	cls->vown[cls->nvown++] = e;
+}
+
+/* can the class's vtable be built here? */
+static bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
+{
+	if (!cls || cls->kind != CXX_SCOPE_CLASS || !cls->owner || cls->owner->ty == CXX_TY_UNKNOWN || cls->dependent)
+		return false;
+	cxx_vtable_init(c, cls);
+	if (cls->vt_bad || !cls->nvfuncs)
+		return false;
+	for (uint32_t i = 0; i < cls->nvfuncs; i++) {
+		const cxx_entity *e = cls->vfuncs[i];
+
+		if (!cxx_vt_is_dtor(e) || e->member_of == cls)
+			continue;
+		/* a base's virtual destructor and none declared here: the implicit one is the base's if this class's
+		   own members need no destruction (else: an implicit destructor, not built yet) */
+		for (uint32_t k = 0; k < cls->nfield_types; k++) {
+			qty ft = cls->field_types[k];
+
+			while (ft != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, ft) == TY_ARRAY)
+				ft = AST_TYPE(c->ast, ft)->base;
+			if (ft == CXX_TY_UNKNOWN || (cc_type_is_record(c->ast, ft) && cxx_gen_needs_destruction(c, ft, 0)))
+				return false;
+		}
+	}
+	return true;
+}
+
+/* the vtable's symbol (_ZTV...), declared; the TU's end defines it where it belongs here (0: not built) */
+static uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
+{
+	cc *a = c->ast;
+	char name[2048];
+	attrs at;
+	uint32_t s;
+
+	if (cls->vt_sym)
+		return cls->vt_sym;
+	if (!cxx_vtable_usable(c, cls) || !cxx_mangle_class_data(c, "TV", cls->owner->ty, name, sizeof name))
+		return 0;
+	s = cc_symbol_new(a, S_VAR, cls->owner->name, cc_type_array(a, cc_type_pointer(a, cc_type_basic(TY_VOID)), cls->nvfuncs + 2, 0), 0);
+	a->syms[s].flags |= SF_GLOBAL;
+	a->syms[s].depth = 0;
+	a->syms[s].sc = SC_EXTERN;
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, name) + 1;
+	cc_attribute_apply_symbol(a, &a->syms[s], &at);
+	cls->vt_sym = s;
+	if (c->nvt_list == c->cvt_list)
+		c->vt_list = realloc(c->vt_list, (c->cvt_list = c->cvt_list ? c->cvt_list * 2 : 32) * sizeof *c->vt_list);
+	c->vt_list[c->nvt_list++] = cls;
+	/* a class template's instance: its virtual functions' bodies are wanted now (the vtable names them) */
+	for (uint32_t i = 0; i < cls->nvfuncs; i++)
+		if (cls->vfuncs[i]->late && !cls->vfuncs[i]->late_done)
+			cxx_member_body_use(c, cls->vfuncs[i]);
+	return s;
+}
+
+/* this's vptr = the class's vtable (past its two header words): the statement (0: not built) */
+static uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self, uint32_t loc)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID)), vppp = cc_type_pointer(a, cc_type_pointer(a, vp));
+	uint32_t vs = cxx_vtable_symbol(c, cls), addr, target;
+
+	if (!vs || !self)
+		return 0;
+	addr = cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, vs, loc)),
+			       cc_node_integer_new(a, 2, cc_type_basic(TY_LONG), loc), loc);
+	target = cc_dereference_build(a, cc_cast_insert(a, self, vppp, cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, vppp, self)), loc);
+	return cc_statement_new(a, N_EXPR, loc, cc_assignment_build(a, 0, target, addr, loc), 0, 0);
+}
+
+static uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc)
+{
+	uint32_t fn = cc_node_new(c->ast, N_VAR, c->ast->syms[s].ty, loc);
+
+	AST_NODE_AT(c->ast, fn)->a = s;
+	AST_NODE_AT(c->ast, fn)->flags = NF_LVALUE;
+	return cc_node_rvalue(c->ast, fn);
+}
+
+static uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc)
+{
+	uint32_t self;
+
+	cxx_gen_this(c, loc);
+	self = c->enode;
+	c->enode = 0;
+	return cxx_gen_vptr_store_at(c, cls, self, loc);
+}
+
+/*
+ * An object of a class with no constructor declared is default-initialized where it stands (target: an
+ * lvalue naming it, without side effects): its bases and members of class type, then its vptr.  False: not
+ * built (members with default initializers, arrays of classes with constructors).
+ */
+static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
+
+static bool cxx_gen_default_construct(cxx *c, uint32_t target, qty t, cc_id_list *out, uint32_t loc, int depth)
+{
+	cc *a = c->ast;
+	cxx_scope *cls = cxx_tag_scope_get(c, QUNQ(t));
+	qty bases[16];
+	uint32_t nb;
+	const tag *r;
+
+	if (!target)
+		return false;
+	if (!cxx_gen_needs_construction(c, t, 0))
+		return true;
+	if (!cls || depth > 8 || cxx_class_has_member_initializer(c, t))
+		return false;
+	cxx_ctor_use(c, QUNQ(t), NULL, NULL, 0, false);
+	if (c->ctor_found && c->ctor_picked && c->ctor_picked->member_of == cls)
+		return cxx_gen_construct_at(c, target, QUNQ(t), NULL, 0, out, loc);
+	for (cxx_entity *e = cxx_lookup_in(c, cls, cxx_ctor_id(), 0); e; e = e->next)
+		if (e->member_of == cls)
+			return false;	/* (constructors, none of them for no arguments) */
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++)
+		if (!cxx_gen_default_construct(c, cxx_gen_base_object(c, target, bases[i], loc), bases[i], out, loc, depth + 1))
+			return false;
+	r = &a->tags[AST_TYPE(a, QUNQ(t))->aux];
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		qty ft = r->f[i].ty, et = ft;
+
+		while (AST_TYPE_KIND(a, et) == TY_ARRAY)
+			et = AST_TYPE(a, et)->base;
+		if (!cc_type_is_record(a, et) || !cxx_gen_needs_construction(c, et, 0))
+			continue;
+		if (et != ft || !r->f[i].name)
+			return false;
+		if (!cxx_gen_default_construct(c, member(a, target, r->f[i].name, loc), ft, out, loc, depth + 1))
+			return false;
+	}
+	if (cxx_class_polymorphic(c, t)) {
+		uint32_t st = cxx_gen_vptr_store_at(c, cls, cc_address_of_build(a, target, loc), loc);
+
+		if (!st)
+			return false;
+		cc_id_list_append(a, out, st);
+	}
+	return true;
+}
+
+/* a library function by its symbol name, void f(void *) or void f(void) */
+static uint32_t cxx_gen_runtime_symbol(cxx *c, const char *name, bool pointer_param)
+{
+	cc *a = c->ast;
+	qty ps[1] = { cc_type_pointer(a, cc_type_basic(TY_VOID)) };
+	uint32_t s = cc_symbol_new(a, S_FUNC, vintern_cstr(name), cxx_type_function(c, cc_type_basic(TY_VOID), ps, pointer_param ? 1 : 0, false), 0);
+
+	a->syms[s].flags |= SF_GLOBAL;
+	a->syms[s].depth = 0;
+	return s;
+}
+
+/* a virtual destructor is defined: the deleting destructor D0 = { D1(this); operator delete(this); } */
+static void cxx_gen_deleting_destructor(cxx *c, cxx_entity *f)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+	uint32_t loc = a->syms[f->sym].loc, ps, self, call, body, saved_fn = a->fn;
+	cc_id_list psyms, stmts, args;
+
+	if (!f->sym0 || !f->sym1 || (a->syms[f->sym0].flags & SF_DEFINED))
+		return;
+	if (!c->gen_delete_sym)
+		c->gen_delete_sym = cxx_gen_runtime_symbol(c, "_ZdlPv", true);
+	cc_scope_open(a);
+	a->fn = f->sym0;
+	ps = cc_symbol_new(a, S_VAR, vintern_cstr("this"), cxx_gen_this_type(c, f), loc);
+	a->syms[ps].flags |= SF_PARAM;
+	a->syms[ps].sc = SC_AUTO;
+	cc_id_list_init(&psyms);
+	cc_id_list_append(a, &psyms, ps);
+	cc_id_list_init(&stmts);
+	cc_id_list_init(&args);
+	cc_id_list_append(a, &args, cc_node_rvalue(a, cxx_gen_var_node(c, ps, loc)));
+	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, f->sym1, loc);
+	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
+	AST_NODE_AT(a, call)->c = 1;
+	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	cc_id_list_init(&args);
+	self = cc_node_rvalue(a, cxx_gen_var_node(c, ps, loc));
+	cc_id_list_append(a, &args, cc_cast_insert(a, self, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, vp, self)));
+	call = cc_node_new(a, N_CALL, cc_type_basic(TY_VOID), loc);
+	AST_NODE_AT(a, call)->a = cxx_gen_function_node(c, c->gen_delete_sym, loc);
+	AST_NODE_AT(a, call)->b = cc_id_list_freeze(a, &args);
+	AST_NODE_AT(a, call)->c = 1;
+	cc_id_list_append(a, &stmts, cc_statement_new(a, N_EXPR, loc, call, 0, 0));
+	body = cc_statement_new(a, N_BLOCK, loc, 0, cc_id_list_freeze(a, &stmts), stmts.n);
+	cc_scope_close(a);
+	a->fn = saved_fn;
+	a->syms[f->sym0].body = body;
+	a->syms[f->sym0].flags |= SF_DEFINED;
+	a->syms[f->sym0].defloc = loc;
+	AST_NODE_AT(a, body)->a = cc_id_list_freeze(a, &psyms);
+	AST_NODE_AT(a, body)->aux = 1;
+	a->toplevel[a->ntoplevel++] = f->sym0;
+}
+
+/*
+ * The TU's end: the vtables it defines.  A class with a key function (its first virtual function that is
+ * neither pure nor inline) has its vtable where that function is defined; any other class (a class
+ * template's instance too) in every TU that names it, weak.  The type info slot is null for now (RTTI:
+ * not built yet).
+ */
+VPRIV void cxx_gen_vtables_emit(cxx *c)
+{
+	cc *a = c->ast;
+	qty vp = cc_type_pointer(a, cc_type_basic(TY_VOID));
+
+	for (uint32_t i = 0; i < c->nvt_list; i++) {
+		cxx_scope *cls = c->vt_list[i];
+		sym *y = &a->syms[cls->vt_sym];
+		const cxx_entity *key = NULL;
+		cc_id_list v;
+		uint32_t n, seen_dtor = 0;
+		bool ok = true;
+
+		for (uint32_t k = 0; k < cls->nvown && !key && !(cls->owner && cls->owner->instance); k++)
+			if (!cls->vown[k]->fn_pure && !cls->vown[k]->fn_inline && !cls->vown[k]->fn_defaulted && !cls->vown[k]->fn_deleted)
+				key = cls->vown[k];
+		if (key && !(key->sym && (a->syms[key->sym].flags & SF_DEFINED)))
+			continue;	/* (the TU that defines the key function has it) */
+		cc_id_list_init(&v);
+		for (uint32_t k = 0; k < cls->nvfuncs + 2 && ok; k++) {
+			cxx_entity *e = k >= 2 ? cls->vfuncs[k - 2] : NULL;
+			uint32_t val, s = 0;
+
+			if (!e)
+				val = cc_node_integer_new(a, 0, cc_type_basic(TY_LONG), 0);
+			else {
+				if (e->fn_pure) {
+					if (!c->gen_pure_sym)
+						c->gen_pure_sym = cxx_gen_runtime_symbol(c, "__cxa_pure_virtual", false);
+					s = c->gen_pure_sym;
+				} else if (e->fn_deleted || !cxx_gen_name(c, e))
+					ok = false;
+				else if (cxx_vt_is_dtor(e))
+					s = seen_dtor++ ? e->sym0 : e->sym1;
+				else
+					s = e->sym;
+				if (!s) {
+					ok = false;
+					break;
+				}
+				val = cxx_gen_function_node(c, s, 0);
+			}
+			cc_id_list_append(a, &v, k);
+			cc_id_list_append(a, &v, k);
+			cc_id_list_append(a, &v, cc_cast_insert(a, val, vp, cc_conversion_cast_kind(a, AST_NODE_AT(a, val)->ty, vp, val)));
+		}
+		if (!ok)
+			continue;
+		n = cc_node_new(a, N_INIT, y->ty, 0);
+		AST_NODE_AT(a, n)->aux = 1;
+		AST_NODE_AT(a, n)->c = v.n / 3;
+		AST_NODE_AT(a, n)->b = cc_id_list_freeze(a, &v);
+		if (!cc_initializer_static_is_ok(a, y->ty, n, NULL))
+			continue;
+		y = &a->syms[cls->vt_sym];
+		y->sc = 0;
+		y->body = n;
+		y->flags |= SF_DEFINED;
+		if (!key) {
+			attrs at;
+
+			memset(&at, 0, sizeof at);
+			at.weak = 1;
+			cc_attribute_apply_symbol(a, y, &at);
+		}
+		a->toplevel[a->ntoplevel++] = cls->vt_sym;
+	}
 }
 
 /* ---- statements ---------------------------------------------------------------------------- */
@@ -1608,20 +2063,43 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 
 		cc_id_list_init(&all);
 		if (fv->s[1] == 'c') {
-			/* a constructor: the bases and members its initializers did not name, the initializers, its body */
-			ok = cxx_gen_constructor_defaults(c, &all, bloc);
+			/* a constructor: the bases and members its initializers did not name, the initializers, its body
+			   (members' default initializers: not built yet) */
+			ok = !cxx_class_has_member_initializer(c, f->member_of->owner->ty) && cxx_gen_constructor_defaults(c, &all, bloc);
 			for (uint32_t i = 0; ok && pre && i < pre->n; i++)
 				cc_id_list_append(a, &all, pre->v[i]);
+			if (ok && !c->gen_delegates && cxx_class_polymorphic(c, f->member_of->owner->ty)) {
+				/* the object is of this class from here: its vptr (members initialized by calls of virtual
+				   functions would want it before them) */
+				uint32_t st = cxx_gen_vptr_store(c, f->member_of, bloc);
+
+				if (st)
+					cc_id_list_append(a, &all, st);
+				else
+					ok = false;
+			}
 			if (ok && all.n) {
 				cc_id_list_append(a, &all, body);
 				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
 			}
 		} else {
 			/* a destructor: its body, then its members and bases (a return in the body would skip them) */
+			uint32_t before;
+
+			if (cxx_class_polymorphic(c, f->member_of->owner->ty)) {
+				uint32_t st = cxx_gen_vptr_store(c, f->member_of, bloc);	/* (the body sees an object of this class) */
+
+				if (st)
+					cc_id_list_append(a, &all, st);
+				else
+					ok = false;
+			}
 			cc_id_list_append(a, &all, body);
-			ok = cxx_gen_destructor_rest(c, &all, bloc);
-			if (ok && all.n > 1) {
+			before = all.n;
+			ok = ok && cxx_gen_destructor_rest(c, &all, bloc);
+			if (ok && all.n > before)
 				ok = !c->gen_returns;
+			if (ok && all.n > 1) {
 				body = cc_statement_new(a, N_BLOCK, bloc, 0, cc_id_list_freeze(a, &all), all.n);
 			}
 		}
@@ -1650,6 +2128,11 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		cc_attribute_apply_symbol(a, &a->syms[f->sym1], &at);
 		a->syms[f->sym1].flags |= SF_DEFINED;
 		a->toplevel[a->ntoplevel++] = f->sym1;
+	}
+	if (f->fn_virtual && f->member_of) {
+		if (f->sym0)
+			cxx_gen_deleting_destructor(c, f);
+		cxx_vtable_symbol(c, f->member_of);	/* (the key function's TU defines the vtable) */
 	}
 	c->stats.functions_generated++;
 }

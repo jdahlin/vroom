@@ -135,6 +135,9 @@ typedef struct cxx_entity {
 	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
 	struct cxx_scope *field_of;	/* a non-static data member: its class */
 	uint8_t fn_static;		/* a static member function */
+	uint8_t fn_virtual, fn_pure;	/* a virtual member function (declared so, or it overrides one); = 0 */
+	uint32_t vslot;			/* ... its index in the class's vtable + 1 (a destructor: the complete one's, the deleting one's follows) */
+	uint32_t sym0;			/* a virtual destructor: the deleting destructor's symbol (D0) */
 	uint8_t fn_internal;		/* a function declared static at namespace scope: internal linkage */
 	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
@@ -172,6 +175,12 @@ struct cxx_scope {
 	uint8_t has_dependent_base;
 	struct cxx_scope *friends;	/* a class: the functions it declares friend (found through an argument of the class) */
 	uint8_t is_final;		/* a class declared final */
+	/* a class with virtual functions: its vtable's slots (each one's final overrider), the virtual functions it
+	   declares itself in order (the key function is the first that is neither pure nor inline) */
+	cxx_entity **vfuncs, **vown;
+	uint32_t nvfuncs, cvfuncs, nvown, cvown;
+	uint8_t vt_init, vt_bad, vt_listed;	/* vt_bad: more than one base with a vtable (thunks: not built yet) */
+	uint32_t vt_sym;		/* the vtable's AST symbol (_ZTV...) */
 	qty *conv_types;		/* ... the types its conversion functions convert to */
 	uint32_t nconv;
 	uint8_t conv_unknown;		/* ... one of them to a type not recorded (a template's, a pointer) */
@@ -349,7 +358,11 @@ typedef struct cxx {
 	uint32_t gen_init_names[32], ngen_init_names;
 	qty gen_init_bases[16];
 	uint32_t ngen_init_bases;
-	uint8_t gen_delegates, gen_returns, gen_why;	/* it delegates to another constructor; the body has a return statement */
+	uint8_t gen_delegates, gen_returns, gen_why;
+	uint8_t gen_vmode;		/* the next call of a virtual function: 0 through the vtable, 1 direct (a qualified name), 2 not known */
+	cxx_scope **vt_list;		/* the classes whose vtable this TU names */
+	uint32_t nvt_list, cvt_list;
+	uint32_t gen_delete_sym, gen_pure_sym;	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -451,6 +464,7 @@ VPRIV void cxx_class_end(cxx *c);
 VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual);
 VPRIV void cxx_class_virtual(cxx *c);
 VPRIV bool cxx_class_polymorphic(cxx *c, qty t);
+VPRIV bool cxx_class_has_member_initializer(cxx *c, qty t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
@@ -513,6 +527,9 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
+VPRIV void cxx_gen_vtables_emit(cxx *c);
+VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap);
 VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
