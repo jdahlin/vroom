@@ -620,14 +620,42 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
  * a namespace-scope one found by ordinary lookup (args: all operands; ADL not yet).  false if
  * neither is found: the built-in operator applies.
  */
+/* the friend functions named id that the class of t (or a base of it) declares */
+static cxx_entity *cxx_friend_lookup_in(cxx *c, cxx_scope *cls, uint32_t id, int depth)
+{
+	cxx_entity *e;
+
+	if (!cls || depth > 6)
+		return NULL;
+	if (cls->friends && (e = cxx_lookup_in(c, cls->friends, id, 0)) && e->kind != CXX_ENTITY_DEPENDENT)
+		return e;
+	for (uint32_t i = 0; i < cls->nused; i++)
+		if (cls->used[i] && cls->used[i]->kind == CXX_SCOPE_CLASS && (e = cxx_friend_lookup_in(c, cls->used[i], id, depth + 1)))
+			return e;
+	return NULL;
+}
+
+static cxx_entity *cxx_friend_lookup(cxx *c, qty t, uint32_t id, int depth)
+{
+	if (t == CXX_TY_UNKNOWN)
+		return NULL;
+	if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+		t = AST_TYPE(c->ast, t)->base;
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return NULL;
+	return cxx_friend_lookup_in(c, cxx_type_class_scope(c, QUNQ(t)), id, depth);
+}
+
 VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs)
 {
 	cxx_scope *cls;
 	cxx_entity *set;
-	qty all[4];
+	qty all[4], acopy[16];
 
 	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
 		return false;
+	memcpy(acopy, args, nargs * sizeof *args);	/* (often &c->etype, which the first lookup's call resets) */
+	args = acopy;
 	cls = cxx_type_class_scope(c, QUNQ(obj));
 	if (!cls)
 		return false;
@@ -657,6 +685,51 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 		cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
 		if (!c->none_viable)
 			return true;
+	}
+	/* the operator functions in the namespaces of the operands' classes (argument-dependent lookup):
+	   std's operator== for two std::string, operator+ for a string and a char */
+	if (nargs <= 2 && !c->tentative) {
+		cxx_scope *seen[4];
+		uint32_t nseen = 0;
+
+		all[0] = obj;
+		for (uint32_t i = 0; i < nargs; i++)
+			all[i + 1] = args[i];
+		for (uint32_t i = 0; i <= nargs; i++) {
+			qty t = all[i];
+			cxx_scope *ns;
+			bool dup = false;
+
+			if (t == CXX_TY_UNKNOWN)
+				continue;
+			if (AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext)
+				t = AST_TYPE(c->ast, t)->base;
+			if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY ||
+			    !(ns = cxx_type_class_scope(c, QUNQ(t))))
+				continue;
+			while (ns && ns->kind != CXX_SCOPE_NAMESPACE)
+				ns = ns->parent;
+			for (uint32_t k = 0; k < nseen; k++)
+				dup |= seen[k] == ns;
+			if (!ns || dup)
+				continue;
+			seen[nseen++] = ns;
+			set = cxx_lookup_in(c, ns, id, 0);
+			if (!set || set->kind == CXX_ENTITY_DEPENDENT)
+				continue;
+			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+			if (!c->none_viable)
+				return true;
+		}
+		/* ... and the friends the operands' classes declare (hidden friends: found this way only) */
+		for (uint32_t i = 0; i <= nargs; i++) {
+			set = cxx_friend_lookup(c, all[i], id, 0);
+			if (!set)
+				continue;
+			cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, NULL, nargs + 1, true);
+			if (!c->none_viable)
+				return true;
+		}
 	}
 	/* built-in: the address of an object; anything else on a class is not known (an implicit operator=,
 	   a conversion to a built-in type) */
@@ -1166,6 +1239,14 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const qty *args, const uint8
 			t = AST_TYPE(c->ast, t)->base;
 		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, QUNQ(t))))
 			continue;
+		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */
+		if ((set = cxx_friend_lookup(c, t, name, 0))) {
+			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			if (c->etype != CXX_TY_UNKNOWN)
+				return;
+			if (!c->none_viable)
+				c->einvalid_unsure = 1;
+		}
 		while (s && s->kind != CXX_SCOPE_NAMESPACE)
 			s = s->parent;
 		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)

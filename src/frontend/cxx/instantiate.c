@@ -61,6 +61,7 @@ typedef struct cxx_instance {
 	cxx_scope *binding;	/* its parameters bound to the arguments */
 	uint32_t pos;		/* where its class is re-parsed: the template's, or a partial specialization's class-key */
 	uint8_t state;		/* 0 declared (an incomplete record), 1 being completed, 2 complete, 3 failed */
+	uint8_t selecting;	/* its partial specialization is being chosen (asked for again meanwhile: not known) */
 	uint8_t late;		/* named while its template was only declared (using json = basic_json<>;): bound at completion */
 	uint8_t missing;	/* an alias whose type named a member that is not there (typename X::type): said again on a cache hit */
 } cxx_instance;
@@ -1232,7 +1233,12 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 	cxx_partial *pick = NULL;
 	cxx_targ bind[64];
 
-	if (!pattern && t->npartials) {
+	/* A class template's partial specialization is chosen when the instance must be complete, as its body
+	   is: naming X<args> decides nothing (std::_And<A, X<args>> never looks at X<args> when A is false;
+	   choosing it here made __is_ostreamable ask for itself without end).  An alias is a type now. */
+	if (!pattern && t->npartials && !t->is_alias)
+		late = true;
+	else if (!pattern && t->npartials) {
 		int r = cxx_partial_select(c, t, full, n, &pick, bind);
 
 		if (r < 0) {
@@ -1402,12 +1408,23 @@ static void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
 		cxx_partial *pick = NULL;
 		cxx_targ bind[64];
 		cxx_scope *binding;
-		int r = t->npartials ? cxx_partial_select(c, t, x->args, x->nargs, &pick, bind) : 0;
+		int r;
 
+		if (x->selecting) {
+			c->tentative = tentative;
+			return;
+		}
+		x->selecting = 1;
+		r = t->npartials ? cxx_partial_select(c, t, x->args, x->nargs, &pick, bind) : 0;
+		x->selecting = 0;
+		if (r < 0)
+			c->partial_unknown++;
 		if (r < 0 || (r == 0 && !t->params)) {
 			c->tentative = tentative;
 			return;
 		}
+		if (r > 0)
+			c->partial_matches++;
 		x->late = 0;
 		if (r > 0) {
 			binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, pick->home, NULL);

@@ -160,6 +160,7 @@ struct cxx_scope {
 	cxx_scope **used;
 	uint32_t nused, cused;
 	uint8_t has_dependent_base;
+	struct cxx_scope *friends;	/* a class: the functions it declares friend (found through an argument of the class) */
 	uint8_t is_final;		/* a class declared final */
 	uint8_t has_conversion;		/* a class: it declares a conversion function (operator T) */
 	qty *field_types;		/* a class: its non-static data members' types, for its implicit special members */

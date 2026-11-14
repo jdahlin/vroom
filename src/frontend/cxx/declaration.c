@@ -2891,9 +2891,17 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				   c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE ? (f ? CXX_ENTITY_FUNCTION_TEMPLATE : CXX_ENTITY_VARIABLE_TEMPLATE)
 											   : CXX_ENTITY_VALUE;
 			cxx_entity *e = (flags & DS_FRIEND) ? NULL : cxx_declare(c, cxx_declaration_scope(c), name, kind);
+			bool is_friend = false;
 
-			if ((flags & DS_FRIEND) && f && kind == CXX_ENTITY_FUNCTION_TEMPLATE)
-				e = NULL;	/* (a friend template: found by ADL only) */
+			/* a friend function declared in a class: not a member, not found by ordinary lookup; a call
+			   with an argument of the class finds it (kept in the class's friends) */
+			if ((flags & DS_FRIEND) && f && context == CXX_CONTEXT_CLASS && cs && !c->tentative &&
+			    (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE)) {
+				if (!cs->friends)
+					cs->friends = cxx_scope_new(c, CXX_SCOPE_BLOCK, cs, NULL);
+				e = cxx_declare(c, cs->friends, name, kind);
+				is_friend = e != NULL;
+			}
 			/* a function template (one level of parameters): its signature, for deduction at calls */
 			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
 			    !c->tentative) {
@@ -2933,12 +2941,12 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 						}
 				}
 			}
-			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
+			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS && !is_friend ? e : NULL;
 			if (e && f)
 				e->fn_const = c->decl_const;
 			if (e && f && kind == CXX_ENTITY_VALUE)
 				decl_fn = e;
-			if (e && f && context == CXX_CONTEXT_CLASS)
+			if (e && f && context == CXX_CONTEXT_CLASS && !is_friend)
 				e->member_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)
 				e->ndefaults = (uint16_t)c->decl_ndefaults;	/* (redeclarations may add defaults) */
