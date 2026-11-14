@@ -271,6 +271,7 @@ VPRIV void as_gen_dwarf_finish(as_context *a);
 /* arch/x64/as/asm.c (EM_X86_64 objects) */
 VPRIV int x64_as_instruction_assemble(as_context *a, const char *p, const char *e, size_t wn);
 /* variable-items.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */
+VPRIV int as_variable_item_label_branch_add(as_context *a, int cc, uint32_t symbol);
 VPRIV int as_variable_item_branch_add(as_context *a, int cc, as_value v, int mod);
 
 /* what the files of as/ define for each other, by the file that defines it */

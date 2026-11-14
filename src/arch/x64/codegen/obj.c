@@ -65,9 +65,16 @@ static XOp x64_encode_immediate(int64_t v)
 
 static uint32_t x64_encode_label(codegen_commit_context *R, uint32_t fid, uint32_t label)
 {
+	size_t index = label % (sizeof R->x64_labels / sizeof R->x64_labels[0]);
+	if (R->x64_labels[index].symbol && R->x64_labels[index].function == fid && R->x64_labels[index].label == label)
+		return R->x64_labels[index].symbol;
 	R->name_buffer.n = 0;
 	x64_label_name_append(&R->name_buffer, fid, label);
-	return as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
+	uint32_t symbol = as_symbol_by_name(R->assembler, R->name_buffer.p, R->name_buffer.n);
+	R->x64_labels[index].function = fid;
+	R->x64_labels[index].label = label;
+	R->x64_labels[index].symbol = symbol;
+	return symbol;
 }
 
 static void x64_encode_memory(XOp *operand, codegen_commit_context *R, const record *i)
