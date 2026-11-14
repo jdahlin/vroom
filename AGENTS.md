@@ -80,7 +80,10 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
     The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
     written yet.  Tests: `tests/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
   - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
-    calls `ld_main` per link) and `vobjcopy`/`vnm`;
+    calls `ld_main` per link) and `vobjcopy`/`vnm`; x86-64 dynamic executables
+    in `dso.inc` (shared objects and GNU ld input scripts as inputs) and
+    `dyn.inc` (PLT/GOT, copy relocations, .dynamic, versions; without `-T`
+    lld's default layout), both #included by `ld.c`;
     `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
   - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
     declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
@@ -179,6 +182,7 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-dyn.py                  # x86-64 dynamic executables (glibc; PIE, no-PIE, -z now): vlink's run as lld's (ccs/vcc/tests/vlink-dyn, <5 s)
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one, direct emitter and VIR (tests/volatile, <1 s)
 bench/vir-test.py -j 6              # VIR: parser/printer round trip, verifier rules, canon, dominators (ccs/vcc/tests/vir, ~1 s)

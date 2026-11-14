@@ -317,6 +317,9 @@ static void pfor(size_t n, pfn fn, void *arg)
 typedef struct {
 	const char *path;
 	bool whole;
+	bool as_needed;			/* --as-needed / AS_NEEDED(): DT_NEEDED only when used */
+	const uint8_t *buf;		/* mapped by expand_input */
+	size_t size;
 } InputArg;
 
 static struct {
@@ -339,6 +342,12 @@ static struct {
 	bool gc, print_gc;		/* --gc-sections, --print-gc-sections */
 	bool norelro;			/* -z norelro: no PT_GNU_RELRO */
 	bool eh_frame_hdr;		/* --eh-frame-hdr: .eh_frame_hdr and PT_GNU_EH_FRAME */
+	bool pie;			/* -pie: ET_DYN executable, R_X86_64_RELATIVE for absolute addresses */
+	bool no_dynlinker;		/* --no-dynamic-linker: no .interp */
+	const char *dynlinker;		/* --dynamic-linker: .interp */
+	bool as_needed;			/* the current --as-needed state */
+	bool export_dynamic;		/* -E: every defined global in .dynsym */
+	bool znow;			/* -z now: DF_BIND_NOW */
 } opt;
 
 static int dirfd_base = AT_FDCWD;
@@ -372,7 +381,8 @@ static VVEC(Obj *) objs;
 
 enum { K_NONE, K_NORMAL, K_MERGE_IN, K_MERGE, K_THUNK, K_RELADYN, K_BUILDID,
        K_SYMTAB, K_STRTAB, K_SHSTRTAB, K_COMMENT, K_GOT, K_EHHDR,
-       K_DYNSYM, K_DYNSTR, K_HASH, K_GNUHASH, K_VERSYM, K_VERDEF, K_DYNAMIC };
+       K_DYNSYM, K_DYNSTR, K_HASH, K_GNUHASH, K_VERSYM, K_VERDEF, K_DYNAMIC,
+       K_INTERP, K_PLT, K_GOTPLT, K_RELAPLT, K_VERNEED };	/* (dynamic executables: dyn.inc) */
 
 typedef struct ISec {
 	const uint8_t *data;
@@ -397,6 +407,29 @@ typedef struct ISec {
 
 #define OS_DISCARD 0xfffffffeu
 static VVEC(ISec) isecs;
+
+/* dynamic executables (dyn.inc) */
+#define R_X86_64_COPY_ 5u
+#define R_X86_64_GLOB_DAT_ 6u
+#define R_X86_64_JUMP_SLOT_ 7u
+#define R_X86_64_RELATIVE_ 8u
+static bool dynexe;		/* x86-64 executable with shared objects or -pie (not -static) */
+static bool deflayout;		/* x86-64 without a script: lld's default layout */
+static uint64_t image_base;
+static uint32_t def_nph = 12;	/* program headers assumed by header_size() (deflayout) */
+
+/* dyn.inc's read-only synthetic sections: placed before the input sections of their rank */
+static bool dyn_synthetic(const ISec *is)
+{
+	if (!dynexe)
+		return false;
+	switch (is->kind) {
+	case K_INTERP: case K_DYNSYM: case K_DYNSTR: case K_HASH: case K_GNUHASH: case K_VERSYM:
+	case K_VERNEED: case K_RELADYN: case K_RELAPLT:
+		return true;
+	}
+	return false;
+}
 
 /* SHF_MERGE input split into pieces */
 typedef struct {
@@ -454,6 +487,12 @@ typedef struct G {
 	uint32_t gotidx;		/* its .got slot */
 	uint16_t ver;			/* VERSION index: 0 local, 1 global, 2.. named */
 	uint32_t dynidx;		/* index in .dynsym, 0 if not exported */
+	/* dynamic executables (dso.inc, dyn.inc) */
+	uint32_t dso1, dsym;		/* GS_UNDEF resolved by a shared object: its index + 1, .dynsym entry */
+	_Atomic uint8_t needplt;	/* a call: a PLT entry */
+	_Atomic uint8_t needcopy;	/* data referenced directly: a copy relocation */
+	_Atomic uint8_t canon;		/* a function's address taken directly: the PLT entry is its address */
+	uint32_t pltidx;
 } G;
 
 static _Atomic(const char *) *hnames;	/* per slot */
@@ -2101,6 +2140,8 @@ static void drop_gnu_property(void)
 	}
 }
 
+#include "dso.inc"
+
 /* ---------------- symbol resolution ---------------- */
 
 static inline uint64_t symkey(uint32_t obj, uint32_t idx) { return (uint64_t)obj << 32 | idx; }
@@ -2245,6 +2286,15 @@ static void finish_sym(void *arg, size_t i)
 			s->type = y->st_info & 15;
 		} else {
 			s->bind = STB_GLOBAL;
+		}
+		const DsoSym *ds = dsos.n && !opt.relocatable ? dso_lookup(gname(g)) : NULL;
+		if (ds) {
+			const Sym *y = &dsos.v[ds->dso]->dsym[ds->idx];
+			s->dso1 = ds->dso + 1;
+			s->dsym = ds->idx;
+			s->type = y->st_info & 15;
+			s->size = y->st_size;
+			atomic_store_explicit(&dsos.v[ds->dso]->used, true, memory_order_relaxed);
 		}
 		return;
 	}
@@ -2686,7 +2736,7 @@ static void eh_frames(void)
 
 static uint64_t header_size(void)
 {
-	return sizeof(Ehdr) + (uint64_t)(have_phdrs ? sphdrs.n : phdrs.n) * sizeof(Phdr);
+	return sizeof(Ehdr) + (uint64_t)(have_phdrs ? sphdrs.n : deflayout ? def_nph : phdrs.n) * sizeof(Phdr);
 }
 
 /* ---------------- section assignment ---------------- */
@@ -2794,6 +2844,8 @@ static void commit_section(OSec *os, ISec *is)
  * non-allocated.  Orphans go next to the section whose rank shares the most
  * leading bits (lld getRankProximity) */
 enum { RF_WRITE = 1 << 14, RF_EXEC = 1 << 12, RF_RODATA = 1 << 11, RF_NOT_RELRO = 1 << 9, RF_NOT_TLS = 1 << 8, RF_BSS = 1 << 7 };
+static const char *default_osec_name(const char *n);
+
 static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
 {
 	int r;
@@ -2804,7 +2856,8 @@ static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
 	bool relro = (flags & SHF_WRITE) &&
 		     ((flags & SHF_TLS) || type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY ||
 		      !strcmp(name, ".got") || !strcmp(name, ".data.rel.ro") || !strcmp(name, ".bss.rel.ro") ||
-		      !strcmp(name, ".ctors") || !strcmp(name, ".dtors") || !strcmp(name, ".jcr") || !strcmp(name, ".eh_frame"));
+		      !strcmp(name, ".ctors") || !strcmp(name, ".dtors") || !strcmp(name, ".jcr") || !strcmp(name, ".eh_frame") ||
+		      (dynexe && !strcmp(name, ".dynamic")));
 	if (!relro)
 		r |= RF_NOT_RELRO;
 	if (!(flags & SHF_TLS))
@@ -2818,8 +2871,8 @@ static int orphan_rank(uint64_t flags, uint32_t type, const char *name)
  * the input orphans of their rank, the header first */
 static uint64_t orphan_key(const ISec *is)
 {
-	unsigned r = (unsigned)orphan_rank(is->flags, is->type, is->name);
-	unsigned syn = !strcmp(is->name, ".eh_frame_hdr") ? 1 : !strcmp(is->name, ".eh_frame") ? 2 : 0;
+	unsigned r = (unsigned)orphan_rank(is->flags, is->type, deflayout ? default_osec_name(is->name) : is->name);
+	unsigned syn = dyn_synthetic(is) ? 0 : !strcmp(is->name, ".eh_frame_hdr") ? 2 : !strcmp(is->name, ".eh_frame") ? 3 : 1;
 
 	return (uint64_t)r << 2 | syn;
 }
@@ -2833,7 +2886,7 @@ static int osec_rank(uint32_t oi)
 	for (uint32_t k = 0; k < os->cmds.n; k++)
 		if (os->cmds.v[k].kind == C_ISD && isds.v[os->cmds.v[k].idx].secs.n) {
 			ISec *is = &isecs.v[isds.v[os->cmds.v[k].idx].secs.v[0]];
-			return orphan_rank(is->flags, is->type, is->name);
+			return orphan_rank(is->flags, is->type, deflayout ? default_osec_name(is->name) : is->name);
 		}
 	return -1;
 }
@@ -2972,6 +3025,23 @@ static void gc_sections(const char *entry)
 	free(work);
 }
 
+/* lld getOutputSectionName without a script: .text.foo -> .text, ... */
+static const char *default_osec_name(const char *n)
+{
+	static const char *const pfx[] = {
+		".data.rel.ro", ".data", ".rodata", ".bss.rel.ro", ".bss", ".ldata", ".lrodata", ".lbss",
+		".gcc_except_table", ".init_array", ".fini_array", ".tbss", ".tdata", ".ctors", ".dtors",
+		".sdata", ".sbss", ".text",
+	};
+	for (uint32_t i = 0; i < sizeof pfx / sizeof *pfx; i++) {
+		size_t l = strlen(pfx[i]);
+
+		if (!strncmp(n, pfx[i], l) && (n[l] == 0 || n[l] == '.'))
+			return pfx[i];
+	}
+	return n;
+}
+
 static void assign_sections(void)
 {
 	ncache_init();
@@ -3039,17 +3109,18 @@ static void assign_sections(void)
 		ISec *is = &isecs.v[orphans.v[i]];
 		if (is->osec == OS_DISCARD)
 			continue;
+		const char *oname = deflayout ? default_osec_name(is->name) : is->name;
 		uint32_t found = NONE;
 		for (uint32_t k = 0; k < osecs.n; k++)
-			if (!strcmp(osecs.v[k].name, is->name))
+			if (!strcmp(osecs.v[k].name, oname))
 				found = k;
 		if (found == NONE) {
-			found = get_osec(is->name);
+			found = get_osec(oname);
 			VVEC_PUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}), alloc);
 			/* lld findOrphanPos, on the coarse ranks: the first output section of
 			 * the closest rank (sections without input sections do not count),
 			 * then past those as close whose rank is not above the orphan's */
-			int r = orphan_rank(is->flags, is->type, is->name);
+			int r = orphan_rank(is->flags, is->type, deflayout ? default_osec_name(is->name) : is->name);
 			if (r >= 0) {
 				uint32_t at = NONE;
 				int best = -1;
@@ -3389,6 +3460,7 @@ static int phnew(uint32_t type, uint32_t flags)
 static uint64_t tls_tp;
 static bool has_tls;
 static uint64_t hdr_va;		/* PHDRS FILEHDR: address of the ELF header */
+static bool headers_loaded;	/* the ELF and program headers are in the first PT_LOAD */
 
 static void assign_file_offsets(void)
 {
@@ -3425,6 +3497,20 @@ static void assign_file_offsets(void)
 	for (uint32_t i = 0; i < phdrs.n; i++) {
 		Phdr *p = &phdrs.v[i];
 		PhdrSecs *s = &phsecs.v[i];
+		uint64_t hs = sizeof(Ehdr) + (uint64_t)phdrs.n * sizeof(Phdr);
+		if (p->p_type == PT_PHDR && headers_loaded) {
+			p->p_offset = sizeof(Ehdr);
+			p->p_vaddr = p->p_paddr = hdr_va + sizeof(Ehdr);
+			p->p_filesz = p->p_memsz = (uint64_t)phdrs.n * sizeof(Phdr);
+			p->p_align = 8;
+			continue;
+		}
+		if (s->first < 0 && s->hdr) {	/* headers only */
+			p->p_offset = 0;
+			p->p_vaddr = p->p_paddr = hdr_va;
+			p->p_filesz = p->p_memsz = hs;
+			continue;
+		}
 		if (s->first < 0)
 			continue;
 		OSec *f = &osecs.v[s->first], *l = &osecs.v[s->last];
@@ -3527,6 +3613,7 @@ static void put_sym(Sym *d, uint8_t *strbuf, uint64_t *stroff, const char *name,
 
 #include "../arch/a64/ld/relocate.inc"
 static _Atomic bool got_seen;
+#include "dyn.inc"
 #include "../arch/x64/ld/x64.inc"
 
 static VVEC(uint32_t) wjobs;		/* ISecs to write */
@@ -3593,8 +3680,13 @@ static void write_isec(void *arg, size_t j)
 			wr64(dst + 8 * k, v);
 			if (pic && !undef && !gsym_isabs(g)) {
 				dyn[nd].r_offset = isec_va(si, 8 * k);
-				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_info = x86_ld ? R_X86_64_RELATIVE_ : R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
+				nd++;
+			} else if (dynexe && gsyms[g].dso1 && gsyms[g].state == GS_UNDEF) {
+				dyn[nd].r_offset = isec_va(si, 8 * k);
+				dyn[nd].r_info = (uint64_t)gsyms[g].dynidx << 32 | R_X86_64_GLOB_DAT_;
+				dyn[nd].r_addend = 0;
 				nd++;
 			}
 		}
@@ -3608,7 +3700,7 @@ static void write_isec(void *arg, size_t j)
 			wr64(dst + at, v);
 			if (pic && !abs) {
 				dyn[nd].r_offset = isec_va(si, at);
-				dyn[nd].r_info = R_AARCH64_RELATIVE;
+				dyn[nd].r_info = x86_ld ? R_X86_64_RELATIVE_ : R_AARCH64_RELATIVE;
 				dyn[nd].r_addend = (int64_t)v;
 				nd++;
 			}
@@ -3769,7 +3861,12 @@ static const char *find_lib(const char *name)
 
 		if (name[0] == ':')
 			snprintf(p, n, "%s/%s", d, name + 1);
-		else
+		else if (!opt.bstatic) {
+			snprintf(p, n, "%s/lib%s.so", d, name);
+			if (!faccessat(dirfd_base, p, R_OK, 0))
+				return p;
+			snprintf(p, n, "%s/lib%s.a", d, name);
+		} else
 			snprintf(p, n, "%s/lib%s.a", d, name);
 		if (!faccessat(dirfd_base, p, R_OK, 0))
 			return p;
@@ -3790,7 +3887,7 @@ static bool parse_args(int argc, char **argv)
 		   (!strcmp(a, name) && i + 1 < argc) ? argv[++i] : NULL)
 		const char *v;
 		if (a[0] != '-' || !a[1]) {
-			VVEC_PUSH(opt.inputs, ((InputArg){.path = a, .whole = whole}), alloc);
+			VVEC_PUSH(opt.inputs, ((InputArg){.path = a, .whole = whole, .as_needed = opt.as_needed}), alloc);
 			continue;
 		}
 		if (ARG("-o") && i + 1 < argc) { opt.out = argv[++i]; continue; }
@@ -3821,7 +3918,8 @@ static bool parse_args(int argc, char **argv)
 		if (ARG("--emit-relocs") || ARG("-q")) { error("--emit-relocs is not supported"); continue; }
 		if ((v = VAL("-m")) || (!strncmp(a, "-m", 2) && a[2] && (v = a + 2))) {
 			/* lld's AArch64 little-endian emulations */
-			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec"))
+			if (strcmp(v, "aarch64elf") && strcmp(v, "aarch64linux") && strcmp(v, "aarch64_elf64_le_vec") &&
+			    strcmp(v, "elf_x86_64"))
 				error("unknown emulation: %s", v);
 			continue;
 		}
@@ -3837,10 +3935,20 @@ static bool parse_args(int argc, char **argv)
 			continue;
 		}
 		if (ARG("-Bdynamic") || ARG("--Bdynamic") || ARG("-dy") || ARG("-call_shared")) { opt.bstatic = false; continue; }
-		if (ARG("-no-pie") || ARG("--no-pie")) continue;
-		if (ARG("-pie") || ARG("--pie")) { error("-pie is not supported (no dynamic linking yet)"); continue; }
+		if (ARG("-no-pie") || ARG("--no-pie")) { opt.pie = false; continue; }
+		if (ARG("-pie") || ARG("--pie")) { opt.pie = true; continue; }
+		if (ARG("--no-dynamic-linker")) { opt.no_dynlinker = true; continue; }
 		if ((v = VAL("--dynamic-linker")) || (v = VAL("-dynamic-linker")) || (v = VAL("-I"))) {
-			error("--dynamic-linker is not supported (no dynamic linking yet)");
+			opt.dynlinker = v;
+			continue;
+		}
+		if (ARG("--as-needed") || ARG("-as-needed")) { opt.as_needed = true; continue; }
+		if (ARG("--no-as-needed") || ARG("-no-as-needed")) { opt.as_needed = false; continue; }
+		if (ARG("-E") || ARG("--export-dynamic") || ARG("-export-dynamic")) { opt.export_dynamic = true; continue; }
+		if (ARG("--no-export-dynamic")) { opt.export_dynamic = false; continue; }
+		if ((v = VAL("--hash-style"))) {
+			if (strcmp(v, "gnu") && strcmp(v, "sysv") && strcmp(v, "both"))
+				error("unknown --hash-style: %s", v);
 			continue;
 		}
 		if ((v = VAL("--library-path")) || (v = VAL("-L")) || (!strncmp(a, "-L", 2) && a[2] && (v = a + 2))) {
@@ -3851,7 +3959,7 @@ static bool parse_args(int argc, char **argv)
 			const char *f = find_lib(v);
 
 			if (f)
-				VVEC_PUSH(opt.inputs, ((InputArg){.path = f, .whole = whole}), alloc);
+				VVEC_PUSH(opt.inputs, ((InputArg){.path = f, .whole = whole, .as_needed = opt.as_needed}), alloc);
 			else
 				error("unable to find library -l%s", v);
 			continue;
@@ -3861,7 +3969,7 @@ static bool parse_args(int argc, char **argv)
 		if ((v = VAL("--entry")) || (v = VAL("-e"))) { opt.entry = v; continue; }
 		if (!strncmp(a, "-e", 2) && a[2]) { opt.entry = a + 2; continue; }
 		if ((v = VAL("-soname")) || (v = VAL("--soname")) || (v = VAL("-h"))) { opt.soname = v; continue; }
-		if ((v = VAL("--build-id"))) { opt.build_id = strcmp(v, "none") ? v : NULL; continue; }
+		if (!strncmp(a, "--build-id=", 11)) { v = a + 11; opt.build_id = strcmp(v, "none") ? v : NULL; continue; }
 		if (ARG("--build-id")) { opt.build_id = "fast"; continue; }
 		if ((v = VAL("--orphan-handling"))) {
 			if (!strcmp(v, "place")) opt.orphan = 0;
@@ -3878,6 +3986,8 @@ static bool parse_args(int argc, char **argv)
 			if (!strcmp(v, "notext")) opt.notext = true;
 			else if (!strcmp(v, "norelro")) opt.norelro = true;
 			else if (!strcmp(v, "relro")) opt.norelro = false;
+			else if (!strcmp(v, "now")) opt.znow = true;
+			else if (!strcmp(v, "lazy")) opt.znow = false;
 			else if (!strcmp(v, "max-page-size") || !strncmp(v, "max-page-size=", 14))
 				opt.max_page = strtoull(v + 14, NULL, 0);
 			else if (strcmp(v, "norelro") && strcmp(v, "noexecstack") && strcmp(v, "relro") &&
@@ -4007,6 +4117,20 @@ static void lextract(uint32_t c)
 	lobject(lcand.v[c]);
 }
 
+/* a shared object's definitions: a later archive member is not extracted for them */
+static void ldso(uint32_t d)
+{
+	const Dso *so = dsos.v[d];
+
+	for (uint32_t k = 1; k < so->ndsym; k++)
+		if (dso_sym_def(so, k)) {
+			LSym *l = lsym(so->dstr + so->dsym[k].st_name);
+
+			if (l->st != LS_LAZY)
+				l->st = LS_DEF;
+		}
+}
+
 static void larchive(uint32_t c0, uint32_t c1)
 {
 	for (uint32_t c = c0; c < c1; c++) {
@@ -4033,6 +4157,16 @@ static void load_inputs(void)
 {
 	bool lazy = false;
 
+	/* input linker scripts (libc.so) are replaced by the files they name */
+	{
+		InputVec ex = {0};
+
+		for (uint32_t i = 0; i < opt.inputs.n; i++)
+			expand_input(&ex, opt.inputs.v[i], 0);
+		opt.inputs.v = ex.v;
+		opt.inputs.n = ex.n;
+		opt.inputs.cap = ex.cap;
+	}
 	for (uint32_t i = 0; i < opt.inputs.n && !opt.relocatable; i++)
 		if (!opt.inputs.v[i].whole) {
 			const char *p = opt.inputs.v[i].path;
@@ -4042,10 +4176,16 @@ static void load_inputs(void)
 		}
 	for (uint32_t i = 0; i < opt.inputs.n; i++) {
 		const char *p = opt.inputs.v[i].path;
-		size_t n;
-		uint8_t *b = map_file(p, &n);
-		if (!b)
+		size_t n = opt.inputs.v[i].size;
+		const uint8_t *b = opt.inputs.v[i].buf;
+		if (n >= sizeof(Ehdr) && !memcmp(b, "\177ELF\2\1", 6) && ((const Ehdr *)b)->e_type == 3 && !opt.relocatable) {
+			uint32_t before = dsos.n;
+
+			dso_add(p, b, n, opt.inputs.v[i].as_needed);
+			if (lazy && dsos.n > before)	/* its definitions take part in the lazy pass here */
+				VVEC_PUSH(pending, ((Pending){.path = NULL, .size = SIZE_MAX, .buf = (const uint8_t *)(uintptr_t)before}), alloc);
 			continue;
+		}
 		if (n >= 8 && (!memcmp(b, "!<arch>\n", 8) || !memcmp(b, "!<thin>\n", 8))) {
 			if (lazy && !opt.inputs.v[i].whole && !opt.relocatable) {
 				uint32_t before = pending.n, c0 = lcand.n;
@@ -4069,6 +4209,8 @@ static void load_inputs(void)
 		for (uint32_t i = 0; i < pending.n; i++)
 			if (pending.v[i].path)
 				lobject(pending.v[i]);
+			else if (pending.v[i].size == SIZE_MAX)
+				ldso((uint32_t)(uintptr_t)pending.v[i].buf);
 			else
 				larchive(pending.v[i].size, (uint32_t)(uintptr_t)pending.v[i].buf);
 		pending = lout;
@@ -4242,6 +4384,8 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 	else if (os->addr)
 		dot = ev_value(eval(os->addr));
 	cur_osec = oi;
+	if (deflayout && !os->addr && sec_in_load(os))
+		dot = deflayout_dot(oi, dot);
 	if (!os->addr)
 		dot = alignup(dot, os->addralign);
 	bool changed = os->va != dot;
@@ -4273,7 +4417,8 @@ static bool assign_offsets(uint32_t oi, bool *symchg)
 static bool assign_addresses(void)
 {
 	bool changed = false, symchg = false;
-	dot = 0;
+	dot = deflayout ? image_base + header_size() : 0;
+	dl_prev = NONE;
 	tbss_off = 0;
 	cur_osec = AETHER;
 	recorded.n = 0;
@@ -4375,7 +4520,6 @@ static void adjust_output_sections(void)
 
 /* ---------------- phdrs (lld createPhdrs) ---------------- */
 
-static bool headers_loaded;
 
 /* lld isRelroSection */
 static bool is_relro(uint32_t oi)
@@ -4401,7 +4545,11 @@ static void create_phdrs(void)
 {
 	phdrs.n = phsecs.n = 0;
 	phnew(PT_PHDR, PF_R);
+	if (interp_isec != NONE && sec_live(interp_isec))
+		phadd(phnew(3 /* PT_INTERP */, PF_R), isec_osec(interp_isec));
 	int hdrload = phnew(PT_LOAD, PF_R);
+	if (deflayout)
+		phsecs.v[hdrload].hdr = true;	/* the ELF and program headers start it */
 	int load = hdrload;
 	uint32_t flags = PF_R;
 	/* lld relroEnd: the first section after the relro run starts a PT_LOAD */
@@ -4446,7 +4594,7 @@ static void create_phdrs(void)
 		}
 	}
 	/* lld: PT_DYNAMIC over .dynamic */
-	if (dyn_live)
+	if (dyn_live || (dynexe && sec_live(dynamic_isec)))
 		phadd(phnew(PT_DYNAMIC, phflags(&osecs.v[isec_osec(dynamic_isec)])), isec_osec(dynamic_isec));
 	/* lld: one PT_GNU_RELRO over the contiguous relro sections */
 	if (!opt.norelro && !opt.relocatable) {
@@ -4504,7 +4652,10 @@ static void finish_phdrs(void)
 	uint64_t hsize = sizeof(Ehdr) + (uint64_t)phdrs.n * sizeof(Phdr);
 	uint64_t base = min & ~(opt.max_page - 1);
 	headers_loaded = !opt.nmagic && hsize <= min - base;
-	if (headers_loaded)
+	if (deflayout) {
+		headers_loaded = true;
+		hdr_va = image_base;
+	} else if (headers_loaded)
 		error("ELF headers in the first PT_LOAD are not supported (no SECTIONS gap below the first section)");
 	int *map = alloc(phdrs.n * sizeof(int));
 	uint32_t w = 0;
@@ -4515,7 +4666,9 @@ static void finish_phdrs(void)
 		if (p->p_type == PT_PHDR)
 			keep = headers_loaded;
 		else if (p->p_type == PT_LOAD) {
-			if (s->first < 0)
+			if (s->hdr && deflayout)
+				keep = true;
+			else if (s->first < 0)
 				keep = false;
 			else {
 				OSec *f = &osecs.v[s->first], *l = &osecs.v[s->last];
@@ -4775,7 +4928,7 @@ static void write_headers(void)
 {
 	Ehdr *eh = (Ehdr *)out;
 	memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
-	eh->e_type = opt.relocatable ? 1 : opt.shared ? 3 : 2;
+	eh->e_type = opt.relocatable ? 1 : opt.shared || opt.pie ? 3 : 2;
 	eh->e_machine = x86_ld ? 62 : 183;
 	eh->e_version = 1;
 	/* lld: -e, else ENTRY(), else _start (silently absent) */
@@ -5345,7 +5498,8 @@ static void add_synthetic_sections(void)
 	}
 	/* (lld always has .rela.dyn: dropped when empty, but a script that names it
 	   keeps an empty RELA output section) */
-	if (pic || (x86_ld && opt.script && !opt.relocatable))
+	dyn_add_sections();
+	if (!dynexe && (pic || (x86_ld && opt.script && !opt.relocatable)))
 	{
 		reladyn_isec = new_isec(".rela.dyn", K_RELADYN, SHT_RELA, SHF_ALLOC, 8);
 		isecs.v[reladyn_isec].entsize = sizeof(Rela);
@@ -5379,6 +5533,7 @@ static void add_synthetic_sections(void)
 	/* only when some GOT relocation needs it (lld drops an empty .got); sized after the scan */
 	if (any_got())
 		got_isec = new_isec(".got", K_GOT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8);
+	dyn_add_gotplt();
 	symtab_isec = new_isec(".symtab", K_SYMTAB, SHT_SYMTAB, 0, 8);
 	isecs.v[symtab_isec].entsize = sizeof(Sym);
 	shstrtab_isec = new_isec(".shstrtab", K_SHSTRTAB, SHT_STRTAB, 0, 1);
@@ -5686,7 +5841,7 @@ static void report_undefined(void)
 	uint32_t n = 0;
 	for (uint32_t i = 0; i < gorder.n; i++) {
 		G *s = &gsyms[gorder.v[i]];
-		if (s->state != GS_UNDEF || s->bind == STB_WEAK)
+		if (s->state != GS_UNDEF || s->bind == STB_WEAK || s->dso1)
 			continue;
 		if ((kget(&s->first) >> 32) >= objs.n)	/* referenced only by the script */
 			continue;
@@ -5777,12 +5932,19 @@ static int run(int argc, char **argv)
 	t_last = t0;
 	p_last = vperf_now();
 	flt_last = timing ? minflt() : 0;
-	pic = opt.shared;
+	pic = opt.shared || opt.pie;
 
 	load_inputs();
 	phase("map+parse inputs");
 	if (atomic_load(&nerrors))
 		return 1;
+	if (!x86_ld && objs.n && (opt.pie || dsos.n)) {
+		error("-pie and shared objects are supported for x86-64 only");
+		return 1;
+	}
+	dynexe = x86_ld && !opt.shared && !opt.relocatable && (dsos.n || (opt.pie && !opt.bstatic));
+	deflayout = x86_ld && !opt.script && !opt.relocatable && !opt.shared;
+	image_base = opt.pie ? 0 : 0x200000;
 	gtable_init();
 	if (opt.script) {
 		size_t n;
@@ -5842,6 +6004,7 @@ static int run(int argc, char **argv)
 			}
 	}
 	define_dynamic_sym();
+	define_reserved();
 	start_stop_symbols();
 	pfor(gorder.n, demote_symbols, NULL);
 	report_undefined();
@@ -5858,15 +6021,20 @@ static int run(int argc, char **argv)
 			if (objs.v[i]->buf && objs.v[i]->firstg)
 				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
 	pfor(isecs.n, x86_ld ? x64_scan_relocs : scan_relocs, NULL);
+	dyn_localize();	/* (copies and canonical PLTs are definitions before the .got is counted) */
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
-	for (uint32_t g = 0, ng = atomic_load(&ngsyms); g < ng; g++)
+	for (uint32_t i = 0; i < gorder.n; i++) {
+		uint32_t g = gorder.v[i];	/* (symbol table order, as lld: ids depend on the threads) */
 		if (atomic_load(&gsyms[g].needgot)) {
 			gsyms[g].gotidx = gotsyms.n;
 			VVEC_PUSH(gotsyms, g, alloc);
 			if (pic && got_isec != NONE && !gsym_isabs(g) && gsyms[g].state != GS_UNDEF && !gsyms[g].demoted)
 				isecs.v[got_isec].ndyn++;
+			else if (dynexe && gsyms[g].dso1 && gsyms[g].state == GS_UNDEF)
+				isecs.v[got_isec].ndyn++;	/* R_X86_64_GLOB_DAT */
 		}
+	}
 	for (uint32_t i = 0; got_isec != NONE && i < objs.n; i++) {
 		Obj *o = objs.v[i];
 
@@ -5882,6 +6050,11 @@ static int run(int argc, char **argv)
 	}
 	if (got_isec != NONE)
 		isecs.v[got_isec].size = (uint64_t)(gotsyms.n + gotlocs.n) * 8;
+	if (gotplt_isec != NONE && !dynexe)
+		isecs.v[gotplt_isec].size = 24;	/* (the reserved entries: _GLOBAL_OFFSET_TABLE_ of a static link) */
+	dyn_after_scan();
+	if (dynexe)
+		adjust_output_sections();
 	ndyn = 0;
 	for (uint32_t i = 0; i < isecs.n; i++)
 		ndyn += isecs.v[i].ndyn;
@@ -5950,11 +6123,22 @@ static int run(int argc, char **argv)
 	} else {
 		create_phdrs();
 		finish_phdrs();
+		/* the default layout put the first section past def_nph headers: until it is their number */
+		for (int it = 0; deflayout && phdrs.n != def_nph && it < 4; it++) {
+			def_nph = phdrs.n;
+			in_layout = true;
+			assign_addresses();
+			in_layout = false;
+			create_phdrs();
+			finish_phdrs();
+		}
 	}
+	patch_reserved();
 	/* symtab and shstrtab sizes are needed before file offsets */
 	build_shstrtab();
 	build_symtab();
 	dynamic_shdrs();
+	dyn_shdrs();
 	{
 		OSec *os = &osecs.v[isec_osec(symtab_isec)];
 		os->link = osecs.v[isec_osec(strtab_isec)].shidx;
@@ -6008,6 +6192,7 @@ static int run(int argc, char **argv)
 	write_fills();
 	pfor(wjobs.n, write_isec, NULL);
 	write_dynamic();
+	dyn_write();
 	write_ehhdr();
 	phase("copy + relocate");
 	fill_symtab();
@@ -6028,6 +6213,10 @@ static int run(int argc, char **argv)
 	for (uint32_t i = 0; i < objs.n; i++)
 		if (objs.v[i]->mapped && objs.v[i]->buf)
 			unmap(objs.v[i]->buf, objs.v[i]->size);
+	for (uint32_t i = 0; i < dsos.n; i++)	/* (vccd links many times in one process) */
+		for (uint32_t k = 0; k < opt.inputs.n; k++)
+			if (opt.inputs.v[k].buf == dsos.v[i]->buf)
+				unmap(dsos.v[i]->buf, dsos.v[i]->size);
 	gtable_free();
 	return rc || atomic_load(&nerrors) ? 1 : 0;
 }
@@ -6523,6 +6712,19 @@ static void reset_state(void)
 	memset(&dynstr, 0, sizeof dynstr);
 	memset(&dynstr_offs, 0, sizeof dynstr_offs);
 	have_phdrs = dyn_live = false;
+	/* dynamic executables */
+	memset(&dsos, 0, sizeof dsos);
+	free(dsyms_tab.v);
+	memset(&dsyms_tab, 0, sizeof dsyms_tab);
+	memset(&plts, 0, sizeof plts);
+	memset(&xdsyms, 0, sizeof xdsyms);
+	memset(&xstr, 0, sizeof xstr);
+	memset(&needvers, 0, sizeof needvers);
+	memset(&needed, 0, sizeof needed);
+	dynexe = deflayout = false;
+	def_nph = 12;
+	interp_isec = plt_isec = gotplt_isec = relaplt_isec = verneed_isec = copy_isec = NONE;
+	xexport = NULL;
 	nverdefs = 0;
 	hdr_va = 0;
 	memset(&gotsyms, 0, sizeof gotsyms);	/* (all of it: its buffer was in the last link's arena) */

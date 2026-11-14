@@ -22,7 +22,8 @@ static int x64_relax_kind(const Obj *o, const ISec *is, const Rela *rl, const Ta
 		return 0;
 	if (t->undef || t->abs || t->discarded || rl->r_offset < 2)
 		return 0;
-	(void)o;
+	if (dyn_imported(o, (uint32_t)(rl->r_info >> 32)))
+		return 0;	/* (a copy or canonical PLT keeps the GOT slot the scan gave it) */
 	{
 		const uint8_t *p = is->data + rl->r_offset;
 		uint8_t op = p[-2], modrm = p[-1];
@@ -76,6 +77,7 @@ static void x64_scan_relocs(void *arg, size_t i)
 		return;
 	Obj *o = objs.v[is->obj];
 	Target t;
+	uint32_t nd = 0;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		const Rela *rl = &is->rela[r];
@@ -89,6 +91,8 @@ static void x64_scan_relocs(void *arg, size_t i)
 		if (t.discarded && (is->flags & SHF_ALLOC))
 			error("%s:(%s+0x%llx): relocation refers to a discarded section", o->path, is->name,
 			      (unsigned long long)rl->r_offset);
+		if (dynexe || pic)
+			nd += dyn_scan_reloc(o, is, rl, &t);
 		switch (type) {
 		case R_X86_64_NONE: case R_X86_64_64: case R_X86_64_PC32: case R_X86_64_PLT32: case R_X86_64_32:
 		case R_X86_64_32S: case R_X86_64_16: case R_X86_64_PC16: case R_X86_64_8: case R_X86_64_PC8:
@@ -111,7 +115,7 @@ static void x64_scan_relocs(void *arg, size_t i)
 			      (unsigned long long)rl->r_offset, type);
 		}
 	}
-	is->ndyn = 0;
+	is->ndyn = nd;
 }
 
 static void x64_relocate_isec(uint32_t si, uint8_t *buf)
@@ -120,6 +124,8 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 	Obj *o = objs.v[is->obj];
 	uint64_t secva = isec_va(si, 0);
 	Target t;
+	Rela *dyn = reladyn_buf && is->ndyn ? reladyn_buf + is->dyn0 : NULL;
+	uint32_t nd = 0;
 
 	for (uint32_t r = 0; r < is->nrela; r++) {
 		const Rela *rl = &is->rela[r];
@@ -133,11 +139,22 @@ static void x64_relocate_isec(uint32_t si, uint8_t *buf)
 			continue;
 		}
 		reloc_target_final(o, symi, rl->r_addend, &t);
+		{
+			G *im = dyn_imported(o, symi);
+
+			if (im && im->state == GS_UNDEF && im->needplt) {	/* a call: its PLT entry */
+				t.undef = t.abs = false;
+				t.s = dyn_plt_va(im);
+				t.va = t.s + (uint64_t)rl->r_addend;
+			}
+		}
 		switch (type) {
 		case R_X86_64_NONE:
 			break;
 		case R_X86_64_64:
 			wr64(loc, t.va);
+			if (dyn)
+				dyn_reloc64(o, is, rl, &t, P, dyn, &nd);
 			break;
 		case R_X86_64_PC64:
 			wr64(loc, t.va - P);
