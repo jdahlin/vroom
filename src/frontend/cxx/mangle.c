@@ -129,7 +129,7 @@ static const char *mg_value_type(cxx_mangler *m, const cxx_scope *ps, uint32_t i
 	char w[4][16];
 	int n = 0;
 
-	if (!ps || i >= ps->ntparams || ps->tparams[i].kind != 2 || ps->tparams[i].pack || !(p = ps->tparams[i].type_b))
+	if (!ps || i >= ps->ntparams || ps->tparams[i].kind != 2 || !(p = ps->tparams[i].type_b))	/* (a pack's too: its elements' type) */
 		return NULL;
 	for (; p < c->ntok && n < 4; p++) {
 		const cxx_token *t = &c->tok[p];
@@ -1244,11 +1244,27 @@ static int mg_value_type_param(cxx_mangler *m, const cxx_scope *ps, uint32_t i)
 	return -1;
 }
 
+/* a type without its references (T& and T&&: T) */
+static qty mg_strip_refs(cc *a, qty t)
+{
+	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, t) == TY_PTR && AST_TYPE(a, t)->ext)
+		t = AST_TYPE(a, t)->base;
+	return t;
+}
+
 static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps, const cxx_targ *all)
 {
 	if ((*x).kind == 1 && (*x).t != CXX_TY_UNKNOWN)
 		mg_type(m, (*x).t);
-	else if ((*x).kind == 2) {
+	else if ((*x).kind == 5) {
+		/* a pattern's pack expansion (tuple<Ts...> in a declared signature): Dp <the pack's parameter> */
+		if (!m->ph || (*x).v < 0 || (uint64_t)(*x).v >= m->nph || !m->ph[(*x).v]) {
+			m->bad = true;
+			return;
+		}
+		mg_str(m, "Dp");
+		mg_type(m, m->ph[(*x).v]);
+	} else if ((*x).kind == 2) {
 		/* a value: L <type> <value> E; the type is the parameter's, known here for enumerations only:
 		   others as int (not clang's name for a size_t or bool argument yet) */
 		char num[32];
@@ -1350,7 +1366,7 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 	for (uint32_t i = 0; i < nargs; i++) {
 		if (i == pack_at)
 			mg_str(m, "J");
-		mg_template_arg(m, &args[i], i, ps, pack_at > nargs || i < pack_at ? args : NULL);
+		mg_template_arg(m, &args[i], i >= pack_at && pidx != UINT32_MAX ? pidx : i, ps, pack_at > nargs || i < pack_at ? args : NULL);	/* (a pack's element: the pack's parameter) */
 	}
 	if (pack_at == nargs)
 		mg_str(m, "J");	/* (an empty pack: J E) */
@@ -1744,7 +1760,13 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		/* (with a function parameter pack: the declared parameters, the pack one of them, written Dp <its type>) */
 		uint32_t want = pp && f->inst_pack_at != UINT32_MAX ? x->n - (f->ntargs - f->inst_pack_at) + 1 : x->n;
 
+		/* (a pack only inside a parameter's type, tuple<Ts...>&: a return type that did not form with the
+		   placeholders (typename tuple_element<I, tuple<Ts...>>::type&: void) is not written from them) */
 		bool known = ds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ds) == TY_FUNC;
+
+		if (known && f->inst_pack_at != UINT32_MAX && !pp && AST_TYPE(a, ds)->base != CXX_TY_UNKNOWN &&
+		    AST_TYPE_KIND(a, mg_strip_refs(a, AST_TYPE(a, ds)->base)) == TY_VOID && AST_TYPE_KIND(a, mg_strip_refs(a, x->base)) != TY_VOID)
+			known = false;
 		bool all_tok = known && !pp && mg_param_ranges(c, cxx_instance_decl_pos(f), tok_b, tok_e, &ntok) && ntok == AST_TYPE(a, ds)->n;
 
 		for (uint32_t i = 0; known && i < AST_TYPE(a, ds)->n; i++)

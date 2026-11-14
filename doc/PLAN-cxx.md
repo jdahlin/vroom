@@ -2043,6 +2043,22 @@ vcc:s objekt ensamt (länkat mot libc++).
 Kvar för `map::operator[]` och hela `std::tuple`: en partiell specialisering vars mönster använder en alias
 med en pack (`__tuple_impl<__index_sequence<I...>, T...>`) matchas aldrig, så `tuple<int>` får ingen layout.
 
+## Status 119 (2026-11-14)
+- Partiella specialiseringar vars mönster är en alias över en pack (`al<Ts...>` för `tl<Ts...>`,
+  `__tuple_impl<__index_sequence<I...>, T...>`) matchas: elementet som självt är mönstrets packexpansion
+  (kind 5) förs vidare oförändrat, och återställningen av packens element rör inte platshållarpackar.
+  `sizeof(std::tuple<int>)`, `std::tuple` och `std::get<0>(std::forward_as_tuple(v))` fungerar med vcc ensamt.
+- En pack som bara står inne i en parameters typ (`get<I>(tuple<Ts...>&)`) deduceras där, som lista; ett
+  explicit argument av fel sort (värde för typparameter) gör kandidaten icke-viabel.
+- Mem-initierare med packexpansion (`leaf<I, T>(fwd(a))...`) byggs en gång per element; `explicit(expr)`
+  sparar packstatus runt uttrycket; `static_cast<B&>(d)` till basklass går via basobjektet; referenstyper i
+  `__is_trivially_destructible` m.fl. som clang.
+- Mangling: en värdepacks element får packparameterns typ (`seq<0, 1>` för `size_t...`: `Lm0ELm1E`), en
+  mönsterpack i en deklarerad signatur skrivs `DpT0_`.
+Kvar för `map::operator[]` (mp.cpp): pairs styckvisa konstruktor har två packar inne i typer
+(`tuple<A1...>, tuple<A2...>`), vilket deduktionen inte gör ännu; `construct_at(p, 3, 0)` för en pair ger
+fel värde.  Test: `run/alias-pack-partial.cpp`.  cxx-strict 201 (274).
+
 ## Status 120 (2026-11-14)
 C++-frontens byggfunktioner ur en lista: `src/frontend/cxx/codegen/builtins.list` (namn, sort, signatur
 [, symbol]) -> `builtins.inc` med `src/tools/gen-cxx-builtins.py` (`--check` i premerge).  Sorterna: `lib`

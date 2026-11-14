@@ -66,6 +66,124 @@ VPRIV void cxx_function_body_parse(cxx *c)
 	c->name_path_valid = valid;
 }
 
+/* one mem-initializer, with its code: a member of this class by name, else a base class (or the class itself: a
+   delegating constructor) by its type; then the arguments, and the constructor they pick */
+static void cxx_mem_initializer_gen(cxx *c)
+{
+	qty self_ty = c->gen_this ? AST_TYPE(c->ast, c->ast->syms[c->gen_this].ty)->base : CXX_TY_UNKNOWN;
+	cxx_scope *self = self_ty != CXX_TY_UNKNOWN ? cxx_tag_scope_get(c, QUNQ(self_ty)) : NULL;
+	cxx_entity *fe = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && self &&
+			 (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE) ?
+			 cxx_lookup_local(self, cxx_peek(c, 0)->id) : NULL;
+	uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[CXX_MAX_ARGS], n;
+	qty target = CXX_TY_UNKNOWN;
+	bool braced;
+
+	if (fe && fe->kind == CXX_ENTITY_VALUE && fe->field_of) {
+		mname = fe->name;
+		if (fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != TY_ARRAY)
+			target = fe->ty;
+		cxx_advance(c);
+	} else {
+		cxx_decl_specifiers_parse(c, NULL, false);
+		target = c->ds_type;
+		if (target == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, target))
+			cxx_gen_fail(c);
+	}
+	braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+	if (braced)
+		cxx_braced_arguments_parse(c);
+	else
+		cxx_call_arguments_parse(c);
+	n = c->ncargs;
+	memcpy(an, c->carg_nodes, sizeof an);
+	if (target != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, target))
+		cxx_ctor_use(c, target, c->cargs, c->cargs_lval, c->ncargs, braced);
+	cxx_gen_member_initializer(c, mname, target, an, n, mloc);
+}
+
+/* where the mem-initializer at pos ends (after its ( ) or { }), and whether a pack expansion ... follows:
+   X<args>(...)..., the end then at the ... */
+static uint32_t cxx_mem_initializer_end(cxx *c, uint32_t pos)
+{
+	uint32_t i = pos;
+	int angle = 0, paren = 0;
+
+	for (; i < c->ntok; i++) {
+		int k = c->tok[i].kind;
+
+		if (k == LEX_TOKEN_LESS)
+			angle++;
+		else if (k == LEX_TOKEN_GREATER && angle)
+			angle--;
+		else if (k == LEX_TOKEN_GREATER_GREATER && angle)
+			angle = angle >= 2 ? angle - 2 : 0;
+		else if (k == LEX_TOKEN_LEFT_PAREN && (angle || paren))
+			paren++;
+		else if (k == LEX_TOKEN_RIGHT_PAREN && paren)
+			paren--;
+		else if ((k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_BRACE) && !angle && !paren)
+			break;
+		else if (k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_EOF)
+			return 0;
+	}
+	for (int depth = 0; i < c->ntok; i++) {
+		int k = c->tok[i].kind;
+
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_BRACE || k == LEX_TOKEN_RIGHT_SQUARE) && !--depth)
+			return i + 1 < c->ntok && c->tok[i + 1].kind == LEX_TOKEN_ELLIPSIS ? i + 1 : 0;
+	}
+	return 0;
+}
+
+/*
+ * base<Ts>(args)... in a mem-initializer list ([class.base.init]/17, tuple's leaves): one initializer per
+ * element of the bound packs it names, each built as the others are.  False: not one (or its packs not
+ * known: built as before, which fails).
+ */
+static bool cxx_mem_initializer_expansion_gen(cxx *c)
+{
+	uint32_t start = c->pos, dots = cxx_mem_initializer_end(c, start), np = 0, len = 0;
+	cxx_entity *packs[8];
+
+	if (!dots)
+		return false;
+	for (uint32_t i = start; i < dots; i++) {
+		cxx_entity *e;
+		bool dup = false;
+
+		if (c->tok[i].kind != LEX_TOKEN_IDENTIFIER || c->tok[i].kw || (i > start && (c->tok[i - 1].kind == LEX_TOKEN_PERIOD ||
+		    c->tok[i - 1].kind == LEX_TOKEN_ARROW || c->tok[i - 1].kind == LEX_TOKEN_COLON_COLON)))
+			continue;
+		e = cxx_lookup(c, c->tok[i].id);
+		if (!e || !e->is_pack || e->pack_placeholder || e->pack_index >= 0)
+			continue;
+		for (uint32_t k = 0; k < np && !dup; k++)
+			dup = packs[k] == e;
+		if (dup)
+			continue;
+		if (np == 8 || (np && e->npack != len))
+			return false;
+		len = e->npack, packs[np++] = e;
+	}
+	if (!np)
+		return false;
+	for (uint32_t i = 0; i < len; i++) {
+		for (uint32_t k = 0; k < np; k++)
+			cxx_pack_element(c, packs[k], (int32_t)i);
+		c->pos = start;
+		cxx_mem_initializer_gen(c);
+		if (c->pos != dots)
+			cxx_gen_fail(c);
+	}
+	for (uint32_t k = 0; k < np; k++)
+		cxx_pack_element(c, packs[k], -1);
+	c->pos = dots + 1;
+	return true;
+}
+
 VPRIV void cxx_function_body_inner_parse(cxx *c)
 {
 	bool is_try = cxx_accept_kw(c, CXX_KW_try);
@@ -76,38 +194,8 @@ VPRIV void cxx_function_body_inner_parse(cxx *c)
 			bool dep;
 
 			if (cxx_gen_on(c)) {
-				/* code generation: a member of this class by name, else a base class (or the class itself:
-				   a delegating constructor) by its type; then the arguments, and the constructor they pick */
-				qty self_ty = c->gen_this ? AST_TYPE(c->ast, c->ast->syms[c->gen_this].ty)->base : CXX_TY_UNKNOWN;
-				cxx_scope *self = self_ty != CXX_TY_UNKNOWN ? cxx_tag_scope_get(c, QUNQ(self_ty)) : NULL;
-				cxx_entity *fe = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && self &&
-						 (cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE) ?
-						 cxx_lookup_local(self, cxx_peek(c, 0)->id) : NULL;
-				uint32_t mloc = cxx_peek(c, 0)->loc, mname = 0, an[CXX_MAX_ARGS], n;
-				qty target = CXX_TY_UNKNOWN;
-				bool braced;
-
-				if (fe && fe->kind == CXX_ENTITY_VALUE && fe->field_of) {
-					mname = fe->name;
-					if (fe->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != TY_ARRAY)
-						target = fe->ty;
-					cxx_advance(c);
-				} else {
-					cxx_decl_specifiers_parse(c, NULL, false);
-					target = c->ds_type;
-					if (target == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, target))
-						cxx_gen_fail(c);
-				}
-				braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE);
-				if (braced)
-					cxx_braced_arguments_parse(c);
-				else
-					cxx_call_arguments_parse(c);
-				n = c->ncargs;
-				memcpy(an, c->carg_nodes, sizeof an);
-				if (target != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, target))
-					cxx_ctor_use(c, target, c->cargs, c->cargs_lval, c->ncargs, braced);
-				cxx_gen_member_initializer(c, mname, target, an, n, mloc);
+				if (!cxx_mem_initializer_expansion_gen(c))
+					cxx_mem_initializer_gen(c);
 			} else {
 			cxx_nested_name_parse(c, &q, &dep);
 			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_is_kw(c, CXX_KW_decltype))

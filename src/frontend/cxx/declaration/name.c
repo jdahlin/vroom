@@ -423,6 +423,15 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 					for (uint32_t i = 0; ok && i < len; i++) {
 						cxx_targ e;
 
+						if (np == 1 && end == start + 1 && packs[0]->pack[i].kind == 5) {
+							/* the element is a pattern's pack expansion itself (an alias in a partial
+							   specialization's pattern, al<Ts...> for tl<Ts...>): it stays one */
+							if (n < 32)
+								args[n++] = packs[0]->pack[i];
+							else
+								args[31].kind = 0;
+							continue;
+						}
 						for (uint32_t k = 0; k < np; k++)
 							cxx_pack_element(c, packs[k], (int32_t)i);
 						c->pos = start;
@@ -438,7 +447,9 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 							break;
 					}
 					for (uint32_t k = 0; k < np; k++)
-						cxx_pack_element(c, packs[k], -1);
+						if (!packs[k]->pack_placeholder)	/* (a pattern's pack keeps its placeholder type: its
+											   elements were not taken, cv<U, T>... with U one) */
+							cxx_pack_element(c, packs[k], -1);
 					c->pos = after;
 					if (!ok && n)
 						args[n - 1].kind = 0;

@@ -211,8 +211,10 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		}
 		if (tp->kind == 3) {
 			/* a template template parameter: not deduced; its name in a parameter's type is a template
-			   placeholder, so that the type has a shape (X<T, Layout>&) */
-			f->packs = 1;
+			   placeholder, so that the type has a shape (X<T, Layout>&).  One with a default takes it
+			   (template <class...> class _And = _And: tuple's constructors) */
+			if (!tp->def_b || tp->pack)
+				f->packs = 1;
 			if (tp->name && !tp->pack) {
 				e = cxx_declare(c, binding, tp->name, CXX_ENTITY_TEMPLATE);
 				if (e)
@@ -258,6 +260,8 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 	c->pos = f->pos;
 	c->scope = binding;
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->sig_pack_types = NULL, c->sig_pack_n = UINT32_MAX;	/* (the template's own signature: no instance's pack, not one left
+								   by the instantiation this evaluation is inside of) */
 	if (!setjmp(jb)) {
 		f->sig = cxx_function_signature_parse(c, true, NULL, f->ctor_class);
 		if (c->sig_is_function) {
@@ -272,8 +276,9 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 				f->pack_param = f->np;
 		}
 	}
-	if (f->pack_tp && !f->pack_param)
-		f->packs = 1;	/* (the pack is not expanded by a plain last parameter: tuple<Ts...>, only explicit) */
+	if (f->pack_tp && !f->pack_param && !f->has_pt)
+		f->packs = 1;	/* (the pack is not expanded by a plain last parameter, and the parameters are not known:
+				   only explicit; with them known, tuple<Ts...>& deduces it, cxx_ftemplate_deduce) */
 	c->instantiating--;
 	cxx_state_restore(c, &s);
 	if (f->sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->sig) != TY_FUNC)

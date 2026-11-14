@@ -348,7 +348,14 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 	cxx_ftemplate_evaluate(c, f);
 	p = &f->p;
 	/* (make<T>(args...) with a deducible pack goes below: T explicit, the pack from the arguments) */
-	if (f->packs && xargs && p->params->ntparams && p->params->ntparams <= 32) {
+	bool nothing_deduced = f->packs;	/* (__and_helper<_Pred...>(0): its parameters name no template parameter) */
+
+	if (!nothing_deduced && f->pack_tp && !f->pack_param && f->has_pt) {
+		nothing_deduced = true;
+		for (uint32_t i = 0; i < f->np && nothing_deduced; i++)
+			nothing_deduced = f->pt[i] != CXX_TY_UNKNOWN && !cxx_mentions_placeholder(c, f->pt[i], 0);
+	}
+	if (nothing_deduced && xargs && p->params->ntparams && p->params->ntparams <= 32) {
 		/* f<A, Ps...>(args) with the last parameter a pack and every argument explicit (libc++'s
 		   __and_helper<_Pred...>(0)): the signature with them bound */
 		uint32_t np = p->params->ntparams;
@@ -364,6 +371,12 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 			return c->sig_requires == 1 ? 1 : c->sig_requires;
 		}
 	}
+	/* an explicit argument of the other kind (a value for a type parameter: get<1> against get<T>(tuple&)): not
+	   viable, whatever is left to deduce */
+	for (uint32_t i = 0; xargs && i < nxargs && i < p->params->ntparams && !p->params->tparams[i].pack; i++)
+		if ((xargs[i].kind == 1 || xargs[i].kind == 2) && p->params->tparams[i].kind != 3 &&
+		    (xargs[i].kind == 1) != (p->params->tparams[i].kind == 1))
+			return 0;
 	if (f->packs || p->params->ntparams > 64) {
 		/* not deduced, but a parameter whose shape the argument cannot have rules it out: swap(tuple<Ts...>&,
 		   tuple<Ts...>&) for two ints */
@@ -416,12 +429,16 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		}
 	}
 	if (f->pack_tp) {
-		/* f(A a, Ts&&... ts): the fixed parameters, then each further argument against the pack's pattern */
-		uint32_t ntp = p->params->ntparams, fixed = f->np - 1, pk = f->pack_tp - 1, ne = 0;
+		/* f(A a, Ts&&... ts): the fixed parameters, then each further argument against the pack's pattern; or
+		   the pack only inside the parameters' types (get(tuple<Ts...>&)): deduced there, as a list */
+		bool inside = !f->pack_param;
+		uint32_t ntp = p->params->ntparams, fixed = inside ? f->np : f->np - 1, pk = f->pack_tp - 1, ne = 0;
 		cxx_targ flat[32];
 		qty etypes[16];
 
-		if (nargs < fixed)
+		if (nargs < fixed && !(inside && nargs + e->ndefaults >= fixed))
+			return 0;
+		if (inside && nargs > fixed && !f->variadic)
 			return 0;
 		if (nargs - fixed > 16 || ntp > 16 || f->req_pos || (xargs && nxargs > pk)) {	/* (explicit elements of the pack: not mixed) */
 			c->why = CXX_WHY_PACKS;
@@ -433,13 +450,22 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 				c->why = CXX_WHY_PACKS;
 				return -1;	/* (constraints before a pack: not evaluated here; a default is, when not deduced) */
 			}
-		for (uint32_t i = 0; i < fixed; i++) {
+		for (uint32_t i = 0; i < fixed && i < nargs; i++) {
 			int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
 
 			if (r <= 0)
 				return r;
 		}
-		for (uint32_t i = fixed; i < nargs; i++) {
+		if (inside) {
+			/* the pack's elements, as the pattern deduced them (tuple<int, long>: int, long) */
+			if (bind[pk].kind != 6 || bind[pk].v < 0 || ntp - 1 + (uint32_t)bind[pk].v > 32 || bind[pk].v > 16) {
+				c->why = CXX_WHY_PACKS;
+				return -1;
+			}
+			for (uint32_t i = 0; i < (uint32_t)bind[pk].v; i++)
+				flat[ntp - 1 + ne++] = bind[pk].list[bind[pk].t + i];
+		}
+		for (uint32_t i = inside ? nargs : fixed; i < nargs; i++) {
 			int r;
 
 			bind[pk].kind = 0;
@@ -524,7 +550,7 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 				k++;
 			}
 		}
-		*ret = cxx_ftemplate_return_pack(c, f, flat, ntp - 1 + ne, body, etypes, ne);
+		*ret = cxx_ftemplate_return_pack(c, f, flat, ntp - 1 + ne, body, inside ? NULL : etypes, inside ? UINT32_MAX : ne);
 		return c->sig_requires == 1 ? 1 : c->sig_requires;
 	}
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {

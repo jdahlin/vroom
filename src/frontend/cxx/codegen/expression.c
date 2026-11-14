@@ -262,7 +262,22 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, qty to, uint32_t loc)
 		qty xt = QUNQ(AST_NODE_AT(a, x)->ty), bt = QUNQ(AST_TYPE(a, to)->base);
 		bool same = xt == bt || (cc_type_is_record(a, xt) && cc_type_is_record(a, bt) && AST_TYPE_KIND(a, xt) == AST_TYPE_KIND(a, bt) &&
 					 AST_TYPE(a, xt)->aux == AST_TYPE(a, bt)->aux);
+		uint64_t off;
 
+		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && !same && cc_type_is_record(a, xt) && cc_type_is_record(a, bt) &&
+		    AST_TYPE_KIND(a, xt) != TY_ARRAY && AST_TYPE_KIND(a, bt) != TY_ARRAY && cxx_class_base_offset(c, xt, bt, &off, 0)) {
+			/* static_cast<B&>(d) of an object of a class derived from B: its B subobject ([expr.static.cast]/2;
+			   std::get on a tuple's leaf), as the reference's cv */
+			uint32_t b = cxx_gen_base_object(c, x, bt, loc);
+
+			if (b && AST_NODE_AT(a, b)->ty != AST_TYPE(a, to)->base) {
+				qty pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
+
+				b = cc_dereference_build(a, cc_cast_insert(a, cc_address_of_build(a, b, loc), pt, CK_NOP), loc);
+			}
+			c->enode = b;
+			return;
+		}
 		if ((AST_NODE_AT(a, x)->flags & NF_LVALUE) && same) {
 			if (AST_NODE_AT(a, x)->ty != AST_TYPE(a, to)->base) {
 				qty pt = cc_type_pointer(a, AST_TYPE(a, to)->base);

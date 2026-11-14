@@ -1854,6 +1854,12 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 			qty e = t[0];
 			bool pod, empty;
 
+			if (e != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e) == TY_PTR && AST_TYPE(c->ast, e)->ext) {
+				/* a reference: destroyed trivially (nothing to destroy), a literal type; not an object type,
+				   so none of the others (clang's answers; is_empty<int&> in tuple<int&>'s leaves) */
+				*v = IS("__is_trivially_destructible") || IS("__has_trivial_destructor") || IS("__is_literal_type");
+				return true;
+			}
 			while (AST_TYPE_KIND(c->ast, e) == TY_ARRAY)
 				e = AST_TYPE(c->ast, e)->base;
 			x = AST_TYPE(c->ast, e);

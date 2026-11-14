@@ -266,10 +266,20 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 		} else if (kw == CXX_KW_explicit) {
 			cxx_advance(c);
 			if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
+				/* explicit(expr): its value is the specifier's alone; what its parse leaves (the packs it
+				   saw, a member it did not find) is not the declaration's: tuple's
+				   explicit(!_And<is_convertible<_Up, _Tp>...>::value) before (_Up&&... __u) */
+				uint32_t nseen = c->npacks_seen;
+				cxx_entity *seen[8];
+				uint8_t mm = c->member_missing, iv = c->einvalid, dseen = c->dependent_seen;
+
+				memcpy(seen, c->packs_seen, sizeof seen);
 				cxx_advance(c);
 				cxx_constant_expression_parse(c);
 				flags |= !c->econst || c->template_depth ? DS_EXPLICIT_MAYBE : c->evalue ? DS_EXPLICIT : 0;
 				cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
+				c->npacks_seen = nseen, memcpy(c->packs_seen, seen, sizeof seen);
+				c->member_missing = mm, c->einvalid = iv, c->dependent_seen = dseen;
 			} else
 				flags |= DS_EXPLICIT;
 		} else if (cxx_kw_is_decl_specifier(kw) || cxx_kw_is_cv(kw)) {
