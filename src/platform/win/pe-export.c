@@ -157,16 +157,7 @@ typedef struct { uint8_t *p; size_t n, cap; } pe_bytes;
 
 static void pe_bytes_put(pe_bytes *b, const void *d, size_t n)
 {
-	if (b->n + n > b->cap) {
-		size_t nc = b->cap ? b->cap * 2 : 4096;
-		while (nc < b->n + n)
-			nc *= 2;
-		uint8_t *np = realloc(b->p, nc);
-		if (!np)
-			pe_oom();
-		b->p = np;
-		b->cap = nc;
-	}
+	VVECTOR_NEED(b->p, b->n, b->cap, n);
 	memcpy(b->p + b->n, d, n);
 	b->n += n;
 }

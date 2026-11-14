@@ -19,6 +19,7 @@
  * descending; a string that ends the previous one shares its bytes).
  */
 #include "../../obj/objimpl.h"
+#include "common/string-table.h"
 
 /* Relocation records, kept per section in layout order. */
 typedef struct { uint64_t off; uint32_t sym, type; int64_t addend; uint32_t sec, pad; } Rel;
@@ -67,40 +68,14 @@ VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type, El
 
 /* ---- string table ---- */
 
-typedef struct { const char *s; uint32_t n; uint32_t *out; } Str;
-
-static int strcmp_rev(const void *pa, const void *pb)
+/* .strtab: tail-merged as StringTableBuilder (common/string-table.h), offsets from 1 */
+static void build_strtab(ElfObj *o, Out *w, vstring_ref *v, uint32_t n)
 {
-	const Str *a = pa, *b = pb;
-	uint32_t i = 0;
-	for (;; i++) {
-		int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;
-		int cb = i < b->n ? (unsigned char)b->s[b->n - 1 - i] : -1;
-		if (ca != cb) return ca > cb ? -1 : 1;	/* descending */
-		if (ca < 0) return 0;
-	}
-}
-
-static void build_strtab(ElfObj *o, Out *w, Str *v, uint32_t n)
-{
-	qsort(v, n, sizeof *v, strcmp_rev);
-	uint32_t size = 1;
-	const char *prev = 0; uint32_t prevn = 0, prevoff = 0;
-	for (uint32_t i = 0; i < n; i++) {
-		if (prev && prevn >= v[i].n && !memcmp(prev + prevn - v[i].n, v[i].s, v[i].n)) {
-			*v[i].out = prevoff + prevn - v[i].n;
-			continue;
-		}
-		*v[i].out = size; prevoff = size; prev = v[i].s; prevn = v[i].n;
-		size += v[i].n + 1;
-	}
+	uint32_t size = vstring_table_layout(v, n, 1);
 	uint8_t *t = rpush(&o->arena, size, 8);
+
 	t[0] = 0;
-	prev = 0;
-	for (uint32_t i = 0; i < n; i++) {
-		memcpy(t + *v[i].out, v[i].s, v[i].n);
-		t[*v[i].out + v[i].n] = 0;
-	}
+	vstring_table_fill(t, v, n, 0);
 	w->strtab = t; w->strsize = size;
 }
 
@@ -117,15 +92,12 @@ size_t elf_finish(ElfObj *o)
 	Out *w = rpush(&o->arena, sizeof *w, 8);
 	*w = out_of(o);
 	o->fin = w;
-	uint32_t ns = o->nsec;
 	elf_layout(o);
 	/* fixups, in layout order */
 	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
 	ElfFix *fx = (ElfFix *)o->fixes.base;
-	for (uint32_t s = 1; s < ns; s++)
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
-			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
-				elf_resolve(o, w, &fx[i]);
+	ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i)
+		elf_resolve(o, w, &fx[i]);
 	return elf_finish_tail(o, w);
 }
 
@@ -212,28 +184,28 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	}
 	/* strings */
 	uint32_t nstr = 0, cap = w->nsymtab + 2 * ns + 4;
-	Str *sv = rpush(&o->arena, sizeof(Str) * cap, 8);
+	vstring_ref *sv = rpush(&o->arena, sizeof(vstring_ref) * cap, 8);
 	w->secname = rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8);
 	w->relaname = w->secname + ns;
 	uint32_t *symname = rpush(&o->arena, sizeof(uint32_t) * (w->nsymtab + 1), 8);
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
-		sv[nstr++] = (Str){ se->name, se->len, &w->secname[s] };
+		sv[nstr++] = (vstring_ref){ se->name, se->len, &w->secname[s] };
 		if (se->rela_idx) {
 			char *rn = rpush(&o->arena, se->len + 6, 1);
 			memcpy(rn, ".rela", 5); memcpy(rn + 5, se->name, se->len); rn[se->len + 5] = 0;
-			sv[nstr++] = (Str){ rn, se->len + 5, &w->relaname[s] };
+			sv[nstr++] = (vstring_ref){ rn, se->len + 5, &w->relaname[s] };
 		}
 	}
-	sv[nstr++] = (Str){ ".symtab", 7, &w->symtab_name };
-	if (w->as_idx) sv[nstr++] = (Str){ ".llvm_addrsig", 13, &w->as_name };
-	if (ngroup) sv[nstr++] = (Str){ ".group", 6, &w->group_name };
-	sv[nstr++] = (Str){ ".strtab", 7, &w->strtab_name };
+	sv[nstr++] = (vstring_ref){ ".symtab", 7, &w->symtab_name };
+	if (w->as_idx) sv[nstr++] = (vstring_ref){ ".llvm_addrsig", 13, &w->as_name };
+	if (ngroup) sv[nstr++] = (vstring_ref){ ".group", 6, &w->group_name };
+	sv[nstr++] = (vstring_ref){ ".strtab", 7, &w->strtab_name };
 	for (uint32_t k = 0; k < w->nsymtab; k++) {
 		ElfSym *y = elf_symp(o, w->symtab[k]);
 		if (y->flags & ESYM_SECTION) { symname[k] = 0; continue; }
 		if (!y->len) { symname[k] = 0; continue; }
-		sv[nstr++] = (Str){ y->name, y->len, &symname[k] };
+		sv[nstr++] = (vstring_ref){ y->name, y->len, &symname[k] };
 	}
 	build_strtab(o, w, sv, nstr);
 	for (uint32_t k = 0; k < w->nsymtab; k++) elf_symp(o, w->symtab[k])->size_sub = symname[k];	/* reuse: name offset */
@@ -298,12 +270,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
 		if (se->type == SHT_NOBITS) continue;
-		uint8_t *d = b + w->secoff[s];
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
-			ElfFrag *fr = elf_frag(o, f);
-			uint8_t *q = d + fr->base;
-			for (ElfChunk *c = fr->head; c; c = c->next) { memcpy(q, c->data, c->used); q += c->used; }
-		}
+		elf_section_bytes_copy(o, s, b + w->secoff[s]);
 	}
 	/* symtab */
 	uint8_t *y = b + w->symoff_ + 24;

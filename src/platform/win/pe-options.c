@@ -359,9 +359,52 @@ static bool pe_subsystem_parse(const char *s)
 	return false;
 }
 
-#define PE_PUSH_STR(v, n, x) do { uint32_t pe_cap_ = (n) ? ((n) < 16 ? 16 : (n) * 2) : 0; (void)pe_cap_; \
-	const char **pe_nv_ = realloc((void *)(v), ((size_t)(n) + 1) * sizeof(*(v))); if (!pe_nv_) pe_oom(); \
-	(v) = pe_nv_; (v)[(n)++] = (x); } while (0)
+/* (no capacity kept: these lists are short, each append reallocates) */
+#define PE_PUSH_STR(v, n, x) do { uint32_t pe_cap_ = (n); VVECTOR_APPEND(v, n, pe_cap_, x); } while (0)
+
+/* the options that set one bool of cfg */
+static const struct { const char *name; bool *field; bool value; } pe_bool_options[] = {
+	{ "gc-sections", &cfg.gc, true },
+	{ "no-gc-sections", &cfg.gc, false },
+	{ "verbose", &cfg.verbose, true },
+	{ "dynamicbase", &cfg.dynamic_base, true },
+	{ "disable-dynamicbase", &cfg.dynamic_base, false },
+	{ "no-dynamicbase", &cfg.dynamic_base, false },
+	{ "high-entropy-va", &cfg.high_entropy_va, true },
+	{ "disable-high-entropy-va", &cfg.high_entropy_va, false },
+	{ "disable-nxcompat", &cfg.nx_compat, false },
+	{ "tsaware", &cfg.ts_aware, true },
+	{ "disable-tsaware", &cfg.ts_aware, false },
+	{ "large-address-aware", &cfg.large_address_aware, true },
+	{ "appcontainer", &cfg.appcontainer, true },
+	{ "disable-appcontainer", &cfg.appcontainer, false },
+	{ "disable-reloc-section", &cfg.relocatable, false },
+	{ "enable-reloc-section", &cfg.relocatable, true },
+	{ "insert-timestamp", &cfg.insert_timestamp, true },
+	{ "no-insert-timestamp", &cfg.insert_timestamp, false },
+	{ "enable-auto-import", &cfg.auto_import, true },
+	{ "disable-auto-import", &cfg.auto_import, false },
+	{ "enable-runtime-pseudo-reloc", &cfg.pseudo_relocs, true },
+	{ "disable-runtime-pseudo-reloc", &cfg.pseudo_relocs, false },
+	{ "exclude-all-symbols", &cfg.exclude_all, true },
+	{ "allow-multiple-definition", &cfg.allow_multiple, true },
+	{ "no-allow-multiple-definition", &cfg.allow_multiple, false },
+	{ "kill-at", &cfg.kill_at, true },
+	{ "demangle", &cfg.demangle, true },
+	{ "no-demangle", &cfg.demangle, false },
+	{ "fatal-warnings", &cfg.fatal_warnings, true },
+	{ "no-fatal-warnings", &cfg.fatal_warnings, false },
+};
+
+static bool pe_bool_option(const char *a)
+{
+	for (size_t k = 0; k < sizeof pe_bool_options / sizeof *pe_bool_options; k++)
+		if (pe_flag(a, pe_bool_options[k].name)) {
+			*pe_bool_options[k].field = pe_bool_options[k].value;
+			return true;
+		}
+	return false;
+}
 
 /* false: stop without linking (--version) */
 static bool pe_options_parse(int argc, char **argv)
@@ -403,42 +446,14 @@ static bool pe_options_parse(int argc, char **argv)
 		if (pe_flag(a, "whole-archive")) { whole = true; continue; }
 		if (pe_flag(a, "no-whole-archive")) { whole = false; continue; }
 		if (pe_flag(a, "shared") || pe_flag(a, "dll")) { cfg.dll = true; continue; }
-		if (pe_flag(a, "gc-sections")) { cfg.gc = true; continue; }
-		if (pe_flag(a, "no-gc-sections")) { cfg.gc = false; continue; }
+		if (pe_bool_option(a)) continue;
 		if (pe_flag(a, "strip-all")) { cfg.debug = 0; continue; }
 		if (pe_flag(a, "strip-debug")) { if (cfg.debug) cfg.debug = 1; continue; }
-		if (pe_flag(a, "verbose")) { cfg.verbose = true; continue; }
 		if (pe_flag(a, "version")) {
 			fprintf(stdout, "vlink (compatible with GNU linkers)\n");
 			return false;
 		}
-		if (pe_flag(a, "dynamicbase")) { cfg.dynamic_base = true; continue; }
-		if (pe_flag(a, "disable-dynamicbase") || pe_flag(a, "no-dynamicbase")) { cfg.dynamic_base = false; continue; }
-		if (pe_flag(a, "high-entropy-va")) { cfg.high_entropy_va = true; continue; }
-		if (pe_flag(a, "disable-high-entropy-va")) { cfg.high_entropy_va = false; continue; }
-		if (pe_flag(a, "disable-nxcompat")) { cfg.nx_compat = false; continue; }
-		if (pe_flag(a, "tsaware")) { cfg.ts_aware = true; continue; }
-		if (pe_flag(a, "disable-tsaware")) { cfg.ts_aware = false; continue; }
-		if (pe_flag(a, "large-address-aware")) { cfg.large_address_aware = true; continue; }
-		if (pe_flag(a, "appcontainer")) { cfg.appcontainer = true; continue; }
-		if (pe_flag(a, "disable-appcontainer")) { cfg.appcontainer = false; continue; }
-		if (pe_flag(a, "disable-reloc-section")) { cfg.relocatable = false; continue; }
-		if (pe_flag(a, "enable-reloc-section")) { cfg.relocatable = true; continue; }
-		if (pe_flag(a, "insert-timestamp")) { cfg.insert_timestamp = true; continue; }
-		if (pe_flag(a, "no-insert-timestamp")) { cfg.insert_timestamp = false; continue; }
-		if (pe_flag(a, "enable-auto-import")) { cfg.auto_import = true; continue; }
-		if (pe_flag(a, "disable-auto-import")) { cfg.auto_import = false; continue; }
-		if (pe_flag(a, "enable-runtime-pseudo-reloc")) { cfg.pseudo_relocs = true; continue; }
-		if (pe_flag(a, "disable-runtime-pseudo-reloc")) { cfg.pseudo_relocs = false; continue; }
 		if (pe_flag(a, "export-all-symbols")) { cfg.export_all = cfg.export_all_set = true; continue; }
-		if (pe_flag(a, "exclude-all-symbols")) { cfg.exclude_all = true; continue; }
-		if (pe_flag(a, "allow-multiple-definition")) { cfg.allow_multiple = true; continue; }
-		if (pe_flag(a, "no-allow-multiple-definition")) { cfg.allow_multiple = false; continue; }
-		if (pe_flag(a, "kill-at")) { cfg.kill_at = true; continue; }
-		if (pe_flag(a, "demangle")) { cfg.demangle = true; continue; }
-		if (pe_flag(a, "no-demangle")) { cfg.demangle = false; continue; }
-		if (pe_flag(a, "fatal-warnings")) { cfg.fatal_warnings = true; continue; }
-		if (pe_flag(a, "no-fatal-warnings")) { cfg.fatal_warnings = false; continue; }
 		if (pe_flag(a, "build-id")) { build_id = 1; continue; }
 		if ((v = pe_value(argc, argv, &i, "build-id"))) {
 			if (!strcmp(v, "none"))

@@ -1,14 +1,12 @@
 /*
  * COFF and PE constants and on-disk layouts (the Microsoft PE/COFF
- * specification), shared by vlink's PE writer (pe-*.c).  Only fixed-width
- * fields; files are read with the pe_rd* helpers, never by casting, because
- * input objects need not be aligned.
- *
- * The COFF object writer for the assembler (coff.c) is a separate piece of
- * work; the two should share this header once both exist.
+ * specification), shared by the COFF object writer (platform/win/coff.c, in
+ * the obj module) and vlink's PE linker (platform/win/pe-*.c).  Only
+ * fixed-width fields; files are read with the pe_rd* helpers, never by
+ * casting, because input objects need not be aligned.
  */
-#ifndef VCC_PE_DEFINITIONS_H
-#define VCC_PE_DEFINITIONS_H
+#ifndef VCC_PLATFORM_WIN_COFF_FORMAT_H
+#define VCC_PLATFORM_WIN_COFF_FORMAT_H
 #include <stdint.h>
 #include <string.h>
 

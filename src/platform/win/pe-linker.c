@@ -28,6 +28,10 @@
  */
 #include "ld/ld.h"
 #include "common/digest.h"
+#include "common/hash.h"
+#include "common/leb128.h"
+#include "common/string-table.h"
+#include "common/vector.h"
 #include "port/task.h"
 
 #include "pe-linker-internal.h"
@@ -129,9 +133,7 @@ static char *pe_format(const char *fmt, ...)
 }
 
 /* a growable array of pointers in malloc memory (freed with the link) */
-#define PE_PUSH(v, n, cap, x) do { if ((n) >= (cap)) { (cap) = (cap) ? 2 * (cap) : 16; \
-	void *pe_np_ = realloc((v), (size_t)(cap) * sizeof(*(v))); if (!pe_np_) pe_oom(); (v) = pe_np_; } \
-	(v)[(n)++] = (x); } while (0)
+#define PE_PUSH(v, n, cap, x) VVECTOR_APPEND(v, n, cap, x)
 
 /* ---------------- diagnostics ---------------- */
 

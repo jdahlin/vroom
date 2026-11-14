@@ -76,13 +76,7 @@ static void pe_symbols_init(void)
 		pe_oom();
 }
 
-static uint32_t pe_name_hash(const char *s, size_t n)
-{
-	uint32_t h = 2166136261u;
-	for (size_t i = 0; i < n; i++)
-		h = (h ^ (uint8_t)s[i]) * 16777619u;
-	return h;
-}
+static uint32_t pe_name_hash(const char *s, size_t n) { return vhash_string(s, (uint32_t)n); }
 
 static pe_symbol *pe_sym_find_n(const char *name, size_t n)
 {

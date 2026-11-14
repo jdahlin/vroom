@@ -21,12 +21,10 @@
  * time stamp is 0.  Names longer than 8 are in the string table, tail-merged as StringTableBuilder does.
  */
 #include "../../obj/objimpl.h"
+#include "platform/win/coff-format.h"
+#include "common/leb128.h"
+#include "common/string-table.h"
 
-enum {
-	IMAGE_REL_AMD64_ADDR64 = 1, IMAGE_REL_AMD64_ADDR32 = 2, IMAGE_REL_AMD64_ADDR32NB = 3, IMAGE_REL_AMD64_REL32 = 4,
-	IMAGE_REL_AMD64_SECTION = 10, IMAGE_REL_AMD64_SECREL = 11,
-};
-enum { COFF_CLASS_FILE = 103, COFF_CLASS_WEAK_EXTERNAL = 105 };
 enum { COFF_ENTRY_SECTION, COFF_ENTRY_SYMBOL, COFF_ENTRY_WEAK_DEFAULT, COFF_ENTRY_FILE };
 #define COFF_RELOC_SECTION 0x80000000u	/* CoffRelocation.target: a section's symbol */
 #define COFF_SECTIONS_MAX 65279		/* beyond: /bigobj, not written */
@@ -254,36 +252,14 @@ static int coff_is_external(const ElfSym *y)
 	return !(y->flags & ESYM_DEFINED) && !y->alias;	/* undefined and not a variable */
 }
 
-typedef struct { const char *s; uint32_t n; uint32_t *out; } CoffString;
-
-static int coff_string_compare(const void *pa, const void *pb)
-{
-	const CoffString *a = pa, *b = pb;
-	for (uint32_t i = 0;; i++) {
-		int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;
-		int cb = i < b->n ? (unsigned char)b->s[b->n - 1 - i] : -1;
-		if (ca != cb) return ca > cb ? -1 : 1;
-		if (ca < 0) return 0;
-	}
-}
-
 /* the string table (StringTableBuilder, WinCOFF: offsets from 4, a suffix of the previous shares it) */
-static void coff_strings(ElfObj *o, CoffOut *w, CoffString *v, uint32_t n)
+static void coff_strings(ElfObj *o, CoffOut *w, vstring_ref *v, uint32_t n)
 {
-	qsort(v, n, sizeof *v, coff_string_compare);
-	uint32_t size = 4, prevoff = 0, prevn = 0;
-	const char *prev = NULL;
-	for (uint32_t i = 0; i < n; i++) {
-		if (prev && prevn >= v[i].n && !memcmp(prev + prevn - v[i].n, v[i].s, v[i].n)) {
-			*v[i].out = prevoff + prevn - v[i].n;
-			continue;
-		}
-		*v[i].out = size; prevoff = size; prev = v[i].s; prevn = v[i].n;
-		size += v[i].n + 1;
-	}
+	uint32_t size = vstring_table_layout(v, n, 4);
 	uint8_t *t = rpush(&o->arena, size, 8);
+
 	put(t, size, 4);
-	for (uint32_t i = 0; i < n; i++) { memcpy(t + *v[i].out, v[i].s, v[i].n); t[*v[i].out + v[i].n] = 0; }
+	vstring_table_fill(t, v, n, 0);
 	w->strings = t; w->string_size = size;
 }
 
@@ -349,7 +325,7 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
 		}
 		e->name = y->name; e->length = y->len;
 		if (y->coff_weak) {
-			e->storage_class = COFF_CLASS_WEAK_EXTERNAL; e->aux_count = 1;
+			e->storage_class = IMAGE_SYM_CLASS_WEAK_EXTERNAL; e->aux_count = 1;
 			continue;
 		}
 		if (!e->has_definition) {	/* a COMDAT symbol never registered: its name and section (MC) */
@@ -381,23 +357,23 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
 	for (uint32_t i = 0; cs && i < cs->file_count; i++) {
 		uint32_t k = coff_entry_add(o, w, COFF_ENTRY_FILE, i);
 		CoffEntry *e = &w->entries[k];
-		e->name = ".file"; e->length = 5; e->section_number = -2; e->storage_class = COFF_CLASS_FILE;
+		e->name = ".file"; e->length = 5; e->section_number = -2; e->storage_class = IMAGE_SYM_CLASS_FILE;
 		e->aux_count = (uint8_t)((cs->files[i].length + 17) / 18);
 	}
 	uint32_t index = 0;
 	for (uint32_t i = 0; i < w->entry_count; i++) { w->entries[i].index = index; index += 1 + w->entries[i].aux_count; }
 	w->symbol_count = index;
 	/* the string table: long section names, then long symbol names */
-	CoffString *sv = rpush(&o->arena, sizeof(CoffString) * (ns + w->entry_count + 1), 8);
+	vstring_ref *sv = rpush(&o->arena, sizeof(vstring_ref) * (ns + w->entry_count + 1), 8);
 	uint32_t n = 0;
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
 		w->section_string[s] = 0;
-		if (se->len > 8) sv[n++] = (CoffString){ se->name, se->len, &w->section_string[s] };
+		if (se->len > 8) sv[n++] = (vstring_ref){ se->name, se->len, &w->section_string[s] };
 	}
 	for (uint32_t i = 0; i < w->entry_count; i++) {
 		CoffEntry *e = &w->entries[i];
-		if (e->length > 8) sv[n++] = (CoffString){ e->name, e->length, &e->string_offset };
+		if (e->length > 8) sv[n++] = (vstring_ref){ e->name, e->length, &e->string_offset };
 	}
 	coff_strings(o, w, sv, n);
 }
@@ -411,10 +387,7 @@ static uint32_t coff_symbol_index(ElfObj *o, CoffOut *w, uint32_t target)
 	return w->entries[w->entry_of[target] - 1].index;
 }
 
-static void coff_uleb(uint8_t *p, uint32_t *n, uint32_t v)
-{
-	do { uint8_t c = v & 0x7f; v >>= 7; p[(*n)++] = (uint8_t)(c | (v ? 0x80 : 0)); } while (v);
-}
+static void coff_uleb(uint8_t *p, uint32_t *n, uint32_t v) { *n += (uint32_t)vleb128_unsigned_store(p + *n, v); }
 
 size_t coff_finish(ElfObj *o)
 {
@@ -450,10 +423,8 @@ size_t coff_finish(ElfObj *o)
 	w->relocations = rpush(&o->arena, sizeof(CoffRelocation) * (o->nfix + 1), 8);
 	w->symidx = rpush(&o->arena, sizeof(uint32_t) * (o->nfix + 1), 8);
 	ElfFix *fx = (ElfFix *)o->fixes.base;
-	for (uint32_t s = 1; s < ns; s++)
-		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
-			for (uint32_t i = elf_frag(o, f)->fix_head; i; i = fx[i].next)
-				coff_resolve(o, w, &fx[i]);
+	ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i)
+		coff_resolve(o, w, &fx[i]);
 	if (o->has_err) return 0;
 	w->relocation_first = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);
 	for (uint32_t s = 1, k = 0; s <= ns; s++) { w->relocation_first[s] = k; if (s < ns) k += elf_sec(o, s)->nfix_reloc; }
@@ -528,11 +499,7 @@ void coff_emit(ElfObj *o, uint8_t *b)
 		crc[s] = 0;
 		if (w->raw_offset[s]) {
 			uint8_t *d = b + w->raw_offset[s];
-			for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
-				ElfFrag *fr = elf_frag(o, f);
-				uint8_t *q = d + fr->base;
-				for (ElfChunk *ch = fr->head; ch; ch = ch->next) { memcpy(q, ch->data, ch->used); q += ch->used; }
-			}
+			elf_section_bytes_copy(o, s, d);
 			for (uint64_t i = 0; i < se->size; i++) c = crc_table[(c ^ d[i]) & 0xff] ^ (c >> 8);	/* JamCRC from 0 (MC) */
 			crc[s] = c;
 		}
@@ -549,7 +516,7 @@ void coff_emit(ElfObj *o, uint8_t *b)
 		coff_section_name(h, se, w->section_string[s]);
 		put(h + 16, se->size, 4); put(h + 20, w->raw_offset[s], 4); put(h + 24, w->relocation_offset[s], 4);
 		put(h + 32, n >= 0xffff ? 0xffff : n, 2);
-		put(h + 36, (uint32_t)se->flags | (uint32_t)(se->align + 1) << 20 | (n >= 0xffff ? 0x01000000u : 0), 4);
+		put(h + 36, (uint32_t)se->flags | (uint32_t)(se->align + 1) << 20 | (n >= 0xffff ? IMAGE_SCN_LNK_NRELOC_OVFL : 0), 4);
 	}
 	uint8_t *y = b + w->symbol_offset;
 	for (uint32_t i = 0; i < w->entry_count; i++) {

@@ -43,45 +43,18 @@ static int32_t pe_strtab_add(const char *s, size_t n)
 	return (int32_t)pe_string_count - 1;
 }
 
-/* multikeySort's order: by characters from the end, greater first; a suffix after the longer string */
-static int pe_tail_cmp(const void *a, const void *b)
-{
-	const pe_string *x = *(pe_string *const *)a, *y = *(pe_string *const *)b;
-	for (uint32_t pos = 0;; pos++) {
-		int cx = pos < x->n ? (unsigned char)x->s[x->n - 1 - pos] : -1;
-		int cy = pos < y->n ? (unsigned char)y->s[y->n - 1 - pos] : -1;
-		if (cx != cy)
-			return cx > cy ? -1 : 1;
-		if (cx < 0)
-			return 0;
-	}
-}
-
-/* two groups, each sorted and tail-merged on its own: section names first, then symbol names */
-
+/* two groups, each sorted and tail-merged on its own (common/string-table.h): section names first, then symbol names */
 static size_t pe_strtab_group(uint32_t from, uint32_t to, size_t size)
 {
 	if (from >= to)
 		return size;
-	pe_string **v = malloc((to - from) * sizeof *v);
+	vstring_ref *v = malloc((to - from) * sizeof *v);
 	if (!v)
 		pe_oom();
 	for (uint32_t i = from; i < to; i++)
-		v[i - from] = &pe_strings[i];
-	qsort(v, to - from, sizeof *v, pe_tail_cmp);
-	const pe_string *prev = NULL;
-	for (uint32_t i = 0; i < to - from; i++) {
-		pe_string *p = v[i];
-		if (prev && prev->n >= p->n && !memcmp(prev->s + prev->n - p->n, p->s, p->n)) {
-			p->offset = (uint32_t)(size - p->n - 1);
-			continue;
-		}
-		p->offset = (uint32_t)size;
-		memcpy(pe_strtab + size - 4, p->s, p->n);
-		pe_strtab[size - 4 + p->n] = 0;
-		size += p->n + 1;
-		prev = p;
-	}
+		v[i - from] = (vstring_ref){ pe_strings[i].s, pe_strings[i].n, &pe_strings[i].offset };
+	size = vstring_table_layout(v, to - from, (uint32_t)size);
+	vstring_table_fill((uint8_t *)pe_strtab, v, to - from, 4);
 	free(v);
 	return size;
 }

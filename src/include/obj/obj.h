@@ -32,6 +32,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "port/job-regions.h"
 #include "common/region.h"
@@ -176,6 +177,27 @@ uint32_t elf_split(ElfObj *o, uint32_t frag);
 static inline ElfSec *elf_sec(ElfObj *o, uint32_t s) { return (ElfSec *)o->secs.base + s; }
 static inline ElfFrag *elf_frag(ElfObj *o, uint32_t f) { return (ElfFrag *)o->frags.base + f; }
 static inline ElfSym *elf_symp(ElfObj *o, uint32_t s) { return (ElfSym *)o->syms.base + s; }
+
+/* the object writers (ELF, Mach-O, COFF): section s's laid-out bytes (its frags at their bases) to d */
+static inline void elf_section_bytes_copy(ElfObj *o, uint32_t s, uint8_t *d)
+{
+	for (uint32_t f = s; f; f = elf_frag(o, f)->next) {
+		ElfFrag *fr = elf_frag(o, f);
+		uint8_t *q = d + fr->base;
+
+		for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
+			memcpy(q, ch->data, ch->used);
+			q += ch->used;
+		}
+	}
+}
+
+/* ... and every fixup in layout order (section, frag, fixup): `for` heads, the body follows;
+   I names the fixup's index in FX, the fixup array (ElfFix *)o->fixes.base */
+#define ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i) \
+	for (uint32_t elf_s_ = 1; elf_s_ < (o)->nsec; elf_s_++) \
+		for (uint32_t elf_f_ = elf_s_; elf_f_; elf_f_ = elf_frag(o, elf_f_)->next) \
+			for (uint32_t i = elf_frag(o, elf_f_)->fix_head; i; i = (fx)[i].next)
 
 /* Emission.  elf_grow() returns room for n contiguous bytes at the end of
  * the frag (frag offset elf_frag(o,f)->size before the call). */

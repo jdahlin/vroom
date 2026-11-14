@@ -161,9 +161,7 @@ static void pe_aligncomm_parse(const char *v)
 				cfg.align_comm[i].align = (uint32_t)a;
 			return;
 		}
-	cfg.align_comm = realloc(cfg.align_comm, (cfg.nalign_comm + 1) * sizeof *cfg.align_comm);
-	if (!cfg.align_comm)
-		pe_oom();
+	VVECTOR_NEED(cfg.align_comm, cfg.nalign_comm, cfg.align_comm_capacity, 1);
 	cfg.align_comm[cfg.nalign_comm].name = name;
 	cfg.align_comm[cfg.nalign_comm].align = (uint32_t)a;
 	cfg.nalign_comm++;
@@ -177,9 +175,7 @@ static void pe_alternate_name_add(const char *from, const char *to)
 				pe_error("/alternatename: conflicts: %s", from);
 			return;
 		}
-	cfg.alternate_names = realloc(cfg.alternate_names, (cfg.nalternate_names + 1) * sizeof *cfg.alternate_names);
-	if (!cfg.alternate_names)
-		pe_oom();
+	VVECTOR_NEED(cfg.alternate_names, cfg.nalternate_names, cfg.alternate_names_capacity, 1);
 	cfg.alternate_names[cfg.nalternate_names].from = from;
 	cfg.alternate_names[cfg.nalternate_names].to = to;
 	cfg.nalternate_names++;

@@ -198,7 +198,7 @@ relative to it); `TODO.md` stays at the top.
   - `platform/win/`: vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
     one TU like `ld/ld.c` that #includes `pe-options.c`, `pe-input.c`,
     `pe-resolve.c`, `pe-export.c`, `pe-layout.c`, `pe-write.c`; model in
-    `pe-linker-internal.h`, COFF/PE constants in `pe-definitions.h`): chosen
+    `pe-linker-internal.h`, COFF/PE constants in `include/platform/win/coff-format.h`, shared with `coff.c`): chosen
     when the first input is COFF x86-64 or by `-m i386pep`; ld.lld's MinGW
     command line, output byte-identical to lld's (doc/PLAN-win64.md WIN7).
   - `runtime/`: vcc's run-time support library for x86_64-w64-mingw32

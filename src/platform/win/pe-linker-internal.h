@@ -12,7 +12,7 @@
  */
 #ifndef VCC_PE_LINKER_INTERNAL_H
 #define VCC_PE_LINKER_INTERNAL_H
-#include "pe-definitions.h"
+#include "platform/win/coff-format.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -251,9 +251,9 @@ typedef struct {
 	pe_export *exports;
 	uint32_t nexports, export_capacity;
 	struct { const char *name; uint32_t align; } *align_comm;
-	uint32_t nalign_comm;
+	uint32_t nalign_comm, align_comm_capacity;
 	struct { const char *from, *to; } *alternate_names;
-	uint32_t nalternate_names;
+	uint32_t nalternate_names, alternate_names_capacity;
 	struct { const char *from, *to; } *merges;
 	uint32_t nmerges;
 } pe_config;
