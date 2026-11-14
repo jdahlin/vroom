@@ -8,6 +8,7 @@
  * the encoded bytes (x64_emit); operand-size suffixes are split by split_sfx.  Encodings are those
  * LLVM MC picks, so objects stay byte-identical with clang's; bench/vas-enc.py checks them. */
 #include "x64as.h"
+#include "common/bytes.h"
 
 VPRIV int x64_i_jump(as_context *a, char *mn, XOp *o, int nops)
 {
@@ -503,6 +504,31 @@ int as_x64_op(as_context *a, enum X64Op op, int size, XOp *o)
 	if (op == X64O_MOVSX || op == X64O_MOVZX)
 		return x64_mov_extend(a, size, o[1].size, op == X64O_MOVSX, o);
 	return as_error_report(a, "invalid structured integer operation");
+}
+
+/* A numeric MOVI record has a GPR destination and no relocation. A
+ * signed imm32 uses C7 /0 at 64 bits; B8+r carries the other immediates. */
+int as_x64_mov_immediate(as_context *a, int reg, int size, int64_t value)
+{
+	if (a->dwarf_row_is_pending) as_dwarf_row_emit(a);
+	a->x64_operand_size = 0;
+	bool sign_extend = size != 4 && fits32(value);
+	bool imm64 = size != 4 && !sign_extend && (uint64_t)value > UINT32_MAX;
+	uint8_t rex = 0x40 | ((sign_extend || imm64) ? 8 : 0) | (reg >> 3);
+	uint32_t frag = a->fragment_current;
+	elf_code(a->object, frag);
+	size_t length = (rex != 0x40) + 1 + sign_extend + (imm64 ? 8 : 4);
+	uint8_t *p = elf_grow(a->object, frag, length);
+	if (rex != 0x40) *p++ = rex;
+	if (sign_extend) {
+		*p++ = 0xc7;
+		*p++ = 0xc0 | (reg & 7);
+	} else {
+		*p++ = 0xb8 | (reg & 7);
+	}
+	if (imm64) vbytes_store_u64(p, value);
+	else vbytes_store_u32(p, (uint32_t)value);
+	return 0;
 }
 
 int as_x64_direct_branch(as_context *a, int condition, uint32_t symbol, int mod)

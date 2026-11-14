@@ -1374,6 +1374,35 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling x86 record operands (2026-11-14).** Among the
+comparable exclusive functions, codegen_chunks_commit had the largest gap
+after the previously optimized walk_lvalue_load (911 vs 506 samples, five
+compiles per binary). Both builds inline x64_function_commit. For a MOVI
+with a signed 32-bit immediate, clang stored the fields in the final operand.
+Vcc zeroed a 40-byte stack temporary, filled it and copied it to the final
+operand with two MOVUPS pairs and a word copy. The first MOVUPS store had
+7.1% of the self-hosted commit function's samples.
+
+Pass the numeric MOVI fields directly to the assembler and write the chosen
+GPR encoding (signed imm32, zero-extending imm32 or full imm64) into the
+fragment. Construct the other records' operands in their final positions
+and advance a record pointer through the chunk. Fresh profiles (five
+compiles per binary, period 75,001 user cycles) put exclusive commit samples
+at 993 → 676 self-hosted and 561 → 477 clang-built.
+
+| SQLite 3.50.4 CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 21 runs, alternating order | 183.80 / 181.14 ms | 139.09 / 138.62 ms | 1.321× / 1.307× |
+| 24 runs, rotating positions | 184.15 / 181.94 ms | 140.47 / 140.71 ms | 1.311× / 1.293× |
+
+CPU 7, one emitter thread, `-O2 -c`, warm-up excluded. The 21-run retired
+instruction medians fell from 2.0007B to 1.9763B self-hosted and from
+1.1697B to 1.1564B clang-built. Both timing rounds favored the patch in
+paired ratios; the previous round measured this baseline at 1.298×. All
+four binaries produced the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`). The integer boundary fixture exercises all three MOVI
+forms and matches the baseline object.
+
 **SQLite after profiling x86 local branches (2026-11-14).** In the preceding
 five-compile cycle profile, as_x64_direct_branch and its callees accounted
 for 830 samples self-hosted and 179 clang-built (about 9.77M excess cycles
