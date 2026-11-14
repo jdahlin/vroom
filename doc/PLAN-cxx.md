@@ -1840,3 +1840,14 @@ Medlemmar av en partiell specialisering definierade utanför klassen (`template<
 V<bool, A>::push(...)`, libc++:s vector<bool>) registreras åtskilda från primärmallens; en instans av den
 partiella specialiseringen binder definitionens parametrar till det matchningen deducerade (sparat på
 instansen).  cxx-strict 373 (377).
+
+## Status 99 (2026-11-14)
+`__builtin_invoke(f, args...)` (libc++:s `__invoke`, `__invoke_result`, `is_invocable`): anropet f(args...)
+för en funktion, funktionspekare eller ett objekt med operator(); fel antal argument eller ett aritmetiskt
+värde är ogiltigt (substitutionsfel).  En funktion i kopieringsinitiering av en klass förfaller till en
+pekare (`std::function<...> f = cb;`).  Utanför-klass-definitioner: en med parameterpack matchar alla
+antal ≥ n−1, flera med samma antal skiljs på referenssorten per parameter (`function(const function&)`
+mot `function(function&&)`), ett klasspack i parametrarna (`_ArgTypes... __arg`) blir ett pack av
+parametrarna, och en partiell specialiserings medlemsmallar hittas och binds (deducerade pack expanderas).
+cxx-strict: 3/70, 342 saknade (373).  (Ett försök att bygga `std::addressof(x)` som `&x` direkt bröt
+libc++:s `__static_fancy_pointer_cast` i json-testerna och togs bort.)

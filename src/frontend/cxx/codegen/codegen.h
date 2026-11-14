@@ -44,6 +44,7 @@ VPRIV uint32_t cxx_gen_var_node(cxx *c, uint32_t s, uint32_t loc);
 VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t loc);
 VPRIV bool cxx_gen_std_cast_function(cxx *c, const cxx_entity *f);
+VPRIV bool cxx_gen_std_namespace_function(cxx *c, const cxx_entity *f);
 VPRIV uint32_t cxx_gen_array_cleanup(cxx *c, qty et, uint32_t n, uint32_t dsym, uint32_t loc);
 VPRIV uint32_t cxx_gen_braced_temp(cxx *c, qty t, uint32_t pos, uint32_t loc);
 VPRIV bool cxx_gen_defaulted_copy_trivial(cxx *c, qty t);

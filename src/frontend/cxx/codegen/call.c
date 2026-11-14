@@ -56,15 +56,24 @@ VPRIV uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t loc
 }
 
 /* is f std::forward, std::move, std::move_if_noexcept or std::as_const (in std or libc++'s std::__1)? */
+VPRIV bool cxx_gen_std_namespace_function(cxx *c, const cxx_entity *f);
+
 VPRIV bool cxx_gen_std_cast_function(cxx *c, const cxx_entity *f)
 {
 	const vident *v = &vintern_ents[f->name];
-	const cxx_scope *s = f->home;
-	bool std_ns = false;
 
 	if (!((v->len == 7 && !memcmp(v->s, "forward", 7)) || (v->len == 4 && !memcmp(v->s, "move", 4)) ||
 	      (v->len == 16 && !memcmp(v->s, "move_if_noexcept", 16)) || (v->len == 8 && !memcmp(v->s, "as_const", 8))))
 		return false;
+	return cxx_gen_std_namespace_function(c, f);
+}
+
+/* is f a function of namespace std (or libc++'s std::__1), not a member */
+VPRIV bool cxx_gen_std_namespace_function(cxx *c, const cxx_entity *f)
+{
+	const cxx_scope *s = f->home;
+	bool std_ns = false;
+
 	if (!s || f->member_of || s->kind != CXX_SCOPE_NAMESPACE || !s->owner)
 		return false;
 	if (s->parent == c->global)

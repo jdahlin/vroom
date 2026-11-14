@@ -1114,10 +1114,77 @@ static void cxx_paren_expression_parse(cxx *c)
 	c->implicit_typename = implicit;
 }
 
+/*
+ * __builtin_invoke(f, args...) (libc++'s std::__invoke, __invoke_result, is_invocable): the call f(args...)
+ * for a function, a pointer to one or an object with operator() (pointers to members: not known); not
+ * callable with these arguments: invalid, a substitution failure where one counts.
+ */
+static void cxx_builtin_invoke_parse(cxx *c)
+{
+	uint32_t loc = cxx_peek(c, 0)->loc, n, nodes[CXX_MAX_ARGS];
+	qty at[CXX_MAX_ARGS];
+	uint8_t lv[CXX_MAX_ARGS];
+	qty f;
+	bool known = true;
+
+	cxx_advance(c);
+	cxx_call_arguments_parse(c);
+	n = c->ncargs;
+	cxx_et(c, CXX_TY_UNKNOWN, false);
+	if (n == UINT32_MAX || n == 0 || n > CXX_MAX_ARGS || c->tentative)
+		return;
+	memcpy(nodes, c->carg_nodes, n * sizeof *nodes), memcpy(at, c->cargs, n * sizeof *at), memcpy(lv, c->cargs_lval, n);
+	for (uint32_t i = 0; i < n; i++)
+		known &= at[i] != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, at[i]);
+	f = at[0];
+	if (f == CXX_TY_UNKNOWN)
+		return;
+	if (AST_TYPE_KIND(c->ast, f) == TY_PTR && AST_TYPE(c->ast, f)->ext)
+		f = AST_TYPE(c->ast, f)->base;
+	if (cc_type_is_record(c->ast, f) && AST_TYPE_KIND(c->ast, f) != TY_ARRAY) {
+		c->op_lv_set = 1, c->op_lv[0] = lv[0];
+		memcpy(c->op_lv + 1, lv + 1, n - 1);
+		if (cxx_operator_call_type(c, vintern_cstr("operator()"), f, at + 1, n - 1)) {
+			uint32_t obj = nodes[0];
+
+			if (!obj && c->gen)
+				obj = cxx_gen_empty_object(c, f, loc);
+			cxx_gen_operator_call(c, obj, nodes + 1, n - 1, loc);
+		} else if (known && !c->template_depth)
+			CXX_INVALID(c);	/* (no operator() takes these) */
+		return;
+	}
+	if (AST_TYPE_KIND(c->ast, f) == TY_FUNC || (AST_TYPE_KIND(c->ast, f) == TY_PTR && !AST_TYPE(c->ast, f)->ext &&
+						    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, f)->base) == TY_FUNC)) {
+		qty ft = AST_TYPE_KIND(c->ast, f) == TY_FUNC ? f : AST_TYPE(c->ast, f)->base;
+		const ctype *fx = AST_TYPE(c->ast, ft);
+
+		if ((fx->flags & TF_VARIADIC) ? n - 1 < fx->n : n - 1 != fx->n) {
+			if (known && !c->template_depth)
+				CXX_INVALID(c);	/* (a function of another arity: a pointer to one has no default arguments) */
+			return;
+		}
+		cxx_call_type(c, NULL, ft, at + 1, lv + 1, n - 1);
+		if (c->etype != CXX_TY_UNKNOWN && nodes[0])
+			cxx_gen_indirect_call(c, nodes[0], nodes + 1, n - 1, loc);
+		else if (c->etype == CXX_TY_UNKNOWN && known && !c->template_depth && AST_TYPE(c->ast, ft)->n != n - 1 &&
+			 !(AST_TYPE(c->ast, ft)->flags & TF_VARIADIC))
+			CXX_INVALID(c);	/* (a function of another arity) */
+		return;
+	}
+	if (known && !c->template_depth && ((AST_TYPE_KIND(c->ast, f) >= TY_BOOL && AST_TYPE_KIND(c->ast, f) <= TY_FLOAT128) ||
+					     AST_TYPE_KIND(c->ast, f) == TY_ENUM))
+		CXX_INVALID(c);	/* (an arithmetic value: nothing to call; pointers to members: not decided) */
+}
+
 static void cxx_primary_expression_parse(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
 
+	if (t->kind == LEX_TOKEN_IDENTIFIER && t->len == 16 && !memcmp(t->s, "__builtin_invoke", 16) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN) {
+		cxx_builtin_invoke_parse(c);
+		return;
+	}
 	if (t->kind == LEX_TOKEN_COLON_COLON && cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER && cxx_peek(c, 1)->len > 10 &&
 	    !memcmp(cxx_peek(c, 1)->s, "__builtin_", 10) && cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN &&
 	    !cxx_lookup_in(c, c->global, cxx_peek(c, 1)->id, 0)) {

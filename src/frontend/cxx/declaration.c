@@ -3766,8 +3766,26 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					if (decl_fn && (flags & (DS_INLINE | DS_CONSTEXPR)))
 						decl_fn->fn_inline = 1;	/* (inline X::f() {...} outside its class: weak, as clang's) */
 					fs->fn = decl_fn;
-					gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
-					      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+					{
+						/* R X<A...>::f(As... a) of a class pack, its parameters expanded: a, a pack of those
+						   parameters (a... in the body: std::function's operator()) */
+						cxx_entity *pe = NULL;
+
+						if (context == CXX_CONTEXT_NAMESPACE && decl_fn && c->cpack_n != UINT32_MAX && c->cpack_name > 1 &&
+						    c->cpack_at + c->cpack_n <= c->ndecl_params && (pe = cxx_declare(c, fs, c->cpack_name, CXX_ENTITY_VALUE))) {
+							uint32_t pn = c->cpack_n;
+
+							pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN, pe->npack = pn;
+							pe->pack = calloc(pn ? pn : 1, sizeof *pe->pack);
+							for (uint32_t j = 0; j < pn; j++)
+								pe->pack[j].kind = 1, pe->pack[j].t = c->decl_params[c->cpack_at + j].ty;
+							pe->pack_syms = calloc(pn ? pn : 1, sizeof *pe->pack_syms);
+							c->gen_pack_entity = pe, c->gen_pack_from = c->cpack_at, c->gen_pack_n = pn;
+						}
+						gen = context == CXX_CONTEXT_NAMESPACE && decl_fn && (!qs || decl_fn->member_of == qs) && !cxx_is_kw(c, CXX_KW_try) &&
+						      cxx_gen_function_begin(c, decl_fn, fs, c->decl_params, c->ndecl_params);
+						c->gen_pack_entity = NULL;
+					}
 
 					/* VCC_CXX_MANGLE=file: each function defined at namespace scope by its mangled name
 					   ("?name": not mangled yet), for bench/cxx-mangle.py to compare with clang's */
@@ -3828,6 +3846,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 
 					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == TY_ARRAY)	/* (an array, "text": a pointer to its first element) */
 						it = cc_type_pointer(c->ast, AST_TYPE(c->ast, it)->base), ilv = 0;
+					else if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == TY_FUNC)	/* (a function: a pointer to it) */
+						it = cc_type_pointer(c->ast, it), ilv = 0;
 					cxx_ctor_use(c, t, &it, &ilv, 1, false);
 					if (gen_local) {	/* code generation: the constructor's call, or a copy */
 						cxx_gen_construct_local(c, gen_local, t, &in, 1, name_loc);

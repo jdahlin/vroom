@@ -47,7 +47,7 @@ struct cxx_template {
 	uint8_t is_alias, has_partial;
 	char *path;		/* its qualified name (the layout dump), NULL: not nameable */
 	/* its members defined outside the class: template<...> R X<...>::f(...) { } */
-	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const, partial; } *oocs;	/* (inner: a member template's own parameters) */
+	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const, partial, pack; } *oocs;	/* (inner: a member template's own parameters) */
 	uint32_t noocs;
 };
 
@@ -2006,13 +2006,16 @@ static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *i
 	jmp_buf jb;
 	uint32_t matches = 0;
 
-	if (!t || !inst || x->pos)
-		return false;
+	if (!t || !inst || (x->pos && (!x->pargs || !t->params || x->npargs == t->params->ntparams)))
+		return false;	/* (a partial specialization's instance: its definitions told apart by their parameter count) */
+	const cxx_targ *bargs = x->pos ? x->pargs : x->args;
+	uint32_t nbargs = x->pos ? x->npargs : x->nargs;
+
 	for (uint32_t i = 0; i < t->noocs; i++)
 		if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams &&
-		    (!t->params || t->oocs[i].params->ntparams == t->params->ntparams))
+		    (!t->params || (x->pos ? t->oocs[i].params->ntparams == nbargs : t->oocs[i].params->ntparams == t->params->ntparams)))
 			d = &t->oocs[i], matches++;	/* (the primary's: a partial specialization's definitions, vector<bool, A>'s, have its parameters) */
-	if (matches != 1 || d->params->ntparams > x->nargs + 1)
+	if (matches != 1 || d->params->ntparams > nbargs + 1)
 		return false;
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
 	for (uint32_t i = 0; i < d->params->ntparams; i++) {
@@ -2021,12 +2024,15 @@ static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *i
 		if (tp->pack) {
 			if (i + 1 != d->params->ntparams)
 				return false;
-			cxx_bind_pack(c, binding, tp, x->args + i, x->nargs - i);
+			if (x->pos && i < nbargs && bargs[i].kind == 6)	/* (a partial's deduced pack: its elements) */
+				cxx_bind_pack(c, binding, tp, bargs[i].list + bargs[i].t, (uint32_t)bargs[i].v);
+			else
+				cxx_bind_pack(c, binding, tp, bargs + i, nbargs - i);
 			break;
 		}
-		if (i >= x->nargs)
+		if (i >= nbargs)
 			return false;
-		cxx_bind(c, binding, tp, &x->args[i]);
+		cxx_bind(c, binding, tp, &bargs[i]);
 	}
 	for (uint32_t i = 0; i < d->inner->ntparams; i++) {
 		if (pack_from != UINT32_MAX && i == pack_from) {
@@ -2859,10 +2865,9 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 {
 	cxx_template *t = cxx_template_of(te);
 
-	(void)c;
 	t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
 	t->oocs[t->noocs++] = (struct cxx_ooc){ .name = name, .pos = pos, .nparams = nparams, .params = params, .home = home,
-						.is_const = is_const, .partial = partial };
+						.is_const = is_const, .partial = partial, .pack = c->decl_pack_param < nparams };
 }
 
 /* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
@@ -2875,6 +2880,60 @@ VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint3
 	t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
 	t->oocs[t->noocs++] = (struct cxx_ooc){ .name = name, .pos = pos, .nparams = nparams, .params = outer, .home = home,
 						.inner = inner, .is_const = is_const };
+}
+
+/* do the reference kinds of the parameters of the out-of-class definition at pos (& 1, && 2, none 0, as
+   written) agree with e's declared parameters */
+static bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
+{
+	const ctype *ft = AST_TYPE(c->ast, e->ty);
+	uint32_t i = pos, depth = 0, k = 0;
+	int ref = 0;
+
+	/* to the parameter list: the ( after X<...>::name at depth 0 (operator(): its own () skipped) */
+	for (; i < c->ntok && c->tok[i].kind != LEX_TOKEN_LEFT_BRACE && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
+		int kd = c->tok[i].kind;
+
+		if (kd == LEX_TOKEN_LESS)
+			depth++;
+		else if (kd == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && i > pos + 1) {
+			if (c->tok[i - 1].kw == CXX_KW_operator && c->tok[i + 1].kind == LEX_TOKEN_RIGHT_PAREN) {
+				i++;
+				continue;
+			}
+			if (c->tok[i - 1].kind == LEX_TOKEN_IDENTIFIER || c->tok[i - 1].kind == LEX_TOKEN_RIGHT_PAREN)
+				break;
+		}
+	}
+	if (i >= c->ntok || c->tok[i].kind != LEX_TOKEN_LEFT_PAREN)
+		return false;
+	depth = 0;
+	for (i++; i < c->ntok; i++) {
+		int kd = c->tok[i].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS || kd == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_GREATER || kd == LEX_TOKEN_RIGHT_SQUARE) && depth)
+			depth--;
+		else if (!depth && (kd == LEX_TOKEN_COMMA || kd == LEX_TOKEN_RIGHT_PAREN)) {
+			if (k < ft->n) {
+				qty pt = c->ast->params[ft->aux + k];
+				int want = AST_TYPE_KIND(c->ast, pt) == TY_PTR ? AST_TYPE(c->ast, pt)->ext : 0;
+
+				if (want != ref)
+					return false;
+			}
+			k++, ref = 0;
+			if (kd == LEX_TOKEN_RIGHT_PAREN)
+				break;
+		} else if (!depth && kd == LEX_TOKEN_AMPERSAND)
+			ref = 1;
+		else if (!depth && kd == LEX_TOKEN_AMPERSAND_AMPERSAND)
+			ref = 2;
+	}
+	return true;
 }
 
 /*
@@ -2907,10 +2966,19 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		bargs = x->pargs, nbargs = x->npargs;
 	}
 	nparams = AST_TYPE(c->ast, e->ty)->n;
-	for (uint32_t i = 0; i < t->noocs; i++)
-		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner &&
-		    (x->pos ? t->oocs[i].partial && t->oocs[i].params->ntparams == nbargs : !t->oocs[i].partial))
-			d = &t->oocs[i], matches++;
+	for (int pass = 0; pass < 2 && matches != 1; pass++) {
+		/* (pass 1, several with that many parameters: each parameter's reference kind as written must agree,
+		   function(const function&) against function(function&&)) */
+		matches = 0, d = NULL;
+		for (uint32_t i = 0; i < t->noocs; i++)
+			if (t->oocs[i].name == e->name && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner &&
+			    (t->oocs[i].pack ? nparams + 1 >= t->oocs[i].nparams : t->oocs[i].nparams == nparams) &&
+			    (x->pos ? t->oocs[i].partial && t->oocs[i].params->ntparams == nbargs : !t->oocs[i].partial) &&
+			    (!pass || cxx_ooc_refs_agree(c, t->oocs[i].pos, e)))
+				d = &t->oocs[i], matches++;
+		if (!matches)
+			break;
+	}
 	if (!matches)
 		return;	/* (declared only: defined in another TU, or = default) */
 	e->late_done = 1;
@@ -2926,7 +2994,10 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		if (tp->pack) {
 			if (i + 1 != d->params->ntparams || i > nbargs)
 				return;
-			cxx_bind_pack(c, binding, tp, bargs + i, nbargs - i);
+			if (x->pos && i < nbargs && bargs[i].kind == 6)	/* (a partial's deduced pack: its elements) */
+				cxx_bind_pack(c, binding, tp, bargs[i].list + bargs[i].t, (uint32_t)bargs[i].v);
+			else
+				cxx_bind_pack(c, binding, tp, bargs + i, nbargs - i);
 			break;
 		}
 		if (i >= nbargs)
