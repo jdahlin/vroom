@@ -1420,6 +1420,16 @@ static void cxx_parameter_clause_body_parse(cxx *c)
 				cxx_initializer_parse(c);	/* (a lambda's parameters inside: not ours) */
 				ndefaults = inner + 1;
 			}
+			if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && c->pos && c->tok[c->pos - 1].kind == LEX_TOKEN_IDENTIFIER && !c->tok[c->pos - 1].kw &&
+			    t != CXX_TY_UNKNOWN) {
+				/* R(Args...) in a pattern, Args a pack's placeholder: a parameter pack (function<R(Args...)>) */
+				cxx_entity *pe = cxx_lookup(c, c->tok[c->pos - 1].id);
+
+				if (pe && pe->is_pack && pe->pack_placeholder) {
+					cxx_advance(c);
+					pack = n;
+				}
+			}
 			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {	/* (int...): a pack or a C variadic */
 				variadic = 1;
 				unknown = 1;
@@ -2754,6 +2764,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		/* an object of class type defined here (not in a template): its constructor and destructor are used */
 		cxx_entity *const_e = NULL;	/* a const integer whose initializer is evaluated */
 		cxx_entity *fn_template = NULL;	/* the function template this declarator declares (is it a definition?) */
+		cxx_entity *decl_fn = NULL;	/* the function it declares (= delete, = default follow the declarator) */
 		bool object = !f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && !c->tentative &&
 			      !c->template_depth && t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t);
 		if (!c->tentative) {
@@ -2794,6 +2805,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				known = (ps[i] = c->decl_params[i].ty) != CXX_TY_UNKNOWN;
 			if (e)
 				e->member_of = cxx_declaration_scope(c);
+			if (e && !tmpl)
+				decl_fn = e;
 			if (e && !tmpl) {
 				e->ty = known ? cxx_type_function(c, cc_type_basic(TY_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
@@ -2856,6 +2869,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			c->last_fn = e && kind == CXX_ENTITY_VALUE && f && context == CXX_CONTEXT_CLASS ? e : NULL;
 			if (e && f)
 				e->fn_const = c->decl_const;
+			if (e && f && kind == CXX_ENTITY_VALUE)
+				decl_fn = e;
 			if (e && f && context == CXX_CONTEXT_CLASS)
 				e->member_of = cxx_declaration_scope(c);
 			if (e && f && c->decl_ndefaults > e->ndefaults)
@@ -2875,6 +2890,11 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 					 AST_TYPE_KIND(c->ast, t) >= TY_BOOL && AST_TYPE_KIND(c->ast, t) <= TY_ULLONG)
 					const_e = e;	/* (its initializer: a constant expression, evaluated below) */
 			}
+		}
+		if (member && !f && name > 1 && cs && !c->tentative && !c->template_depth) {
+			/* (its type, for the class's implicit copy, move and assignment) */
+			cs->field_types = realloc(cs->field_types, (cs->nfield_types + 1) * sizeof *cs->field_types);
+			cs->field_types[cs->nfield_types++] = t;
 		}
 		if (member && !f && name > 1) {
 			/* a data member: its bit-field width (a literal) comes after the declarator */
@@ -2980,6 +3000,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
 			if (f && (cxx_is_kw(c, CXX_KW_default) || cxx_is_kw(c, CXX_KW_delete) ||
 				  (cxx_is(c, LEX_TOKEN_NUMBER) && cxx_peek(c, 0)->len == 1))) {
+				if (decl_fn && !c->tentative)
+					decl_fn->fn_deleted = cxx_is_kw(c, CXX_KW_delete), decl_fn->fn_defaulted = cxx_is_kw(c, CXX_KW_default);
 				cxx_advance(c);
 				if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))	/* = delete("reason") */
 					cxx_skip_balanced(c);

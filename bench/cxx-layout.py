@@ -26,7 +26,12 @@ def one(tu, outdir):
                        capture_output=True, text=True, errors="replace", env={**os.environ, "VCC_CXX_LAYOUT": asserts})
     if r.returncode or not os.path.exists(asserts):
         return name, 0, ["vcc failed: " + cj.first_error(r.stderr)]
-    n = sum(1 for _ in open(asserts))
+    # A class completes after the classes it instantiates on the way, and clang must start from the outer
+    # one where the two need each other (basic_json and its comparator): the last one built goes first.
+    lines = open(asserts).readlines()
+    n = len(lines)
+    with open(asserts, "w") as f:
+        f.writelines(reversed(lines))
     wrap = os.path.join(outdir, name + ".layout.cpp")
     with open(wrap, "w") as f:
         f.write(f'#include "{src}"\n#include "{asserts}"\n')

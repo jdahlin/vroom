@@ -330,9 +330,13 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
 
-			if (trace)
-				fprintf(stderr, "cand %.*s/%u template: deduce %d why %u ret %s\n", (int)vintern_ents[set->name].len, vintern_ents[set->name].s,
+			if (trace) {
+				fprintf(stderr, "cand %.*s/%u template: deduce %d why %u ret %s:", (int)vintern_ents[set->name].len, vintern_ents[set->name].s,
 					nargs, d, d <= 0 ? c->why : 0, d > 0 && r != CXX_TY_UNKNOWN ? "known" : "unknown");
+				for (uint32_t i = cxx_ftemplate_pos(e), k = 0; i && k < 60 && i < c->ntok; i++, k++)
+					fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+				fputc('\n', stderr);
+			}
 			if (d < 0)
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
 			if (d <= 0)
@@ -727,6 +731,49 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const qty *t, uint
 		*v = t[0] == t[1];
 		return true;
 	}
+	/* a class from or to an object of its own type: its copy or move constructor, or assignment operator */
+	if (nt == 2 && (IS("__is_constructible") || IS("__is_assignable"))) {
+		bool assign = IS("__is_assignable");
+		qty to = t[0], from = t[1];
+		const ctype *tt = AST_TYPE(c->ast, to), *ft = AST_TYPE(c->ast, from);
+		bool rvalue = !(ft->kind == TY_PTR && ft->ext == 1);
+
+		if (ft->kind == TY_PTR && ft->ext)
+			from = ft->base;
+		if (assign) {
+			if (!(tt->kind == TY_PTR && tt->ext) || (QQ(tt->base) & Q_CONST)) {
+				if (!(tt->kind == TY_PTR && tt->ext) && !cc_type_is_record(c->ast, to)) {
+					*v = 0;	/* (a scalar rvalue is not assignable) */
+					return true;
+				}
+				if (tt->kind == TY_PTR && tt->ext && !cc_type_is_record(c->ast, tt->base)) {
+					*v = 0;	/* (a const scalar) */
+					return true;
+				}
+			}
+			if (tt->kind == TY_PTR && tt->ext)
+				to = tt->base;
+			if (!cc_type_is_record(c->ast, to) && !(QQ(to) & Q_CONST)) {
+				int rank = cxx_arg_rank0(c, QUNQ(to), from, !rvalue, true);
+
+				if (rank == 2)
+					return false;
+				*v = rank < 3;
+				return true;
+			}
+		}
+		if (cc_type_is_record(c->ast, to) && !(AST_TYPE_KIND(c->ast, to) == TY_PTR) && QUNQ(to) == QUNQ(from) &&
+		    !(assign && (QQ(to) & Q_CONST))) {
+			int r = cxx_class_special(c, QUNQ(to), assign, rvalue && !(QQ(from) & Q_CONST), 0);
+
+			if (r < 0)
+				return false;
+			*v = r;
+			return true;
+		}
+		if (assign)
+			return false;
+	}
 	/* how two types relate, where the answer does not need a class's constructors or conversion functions */
 	if (nt == 2 && IS("__is_base_of")) {
 		if (!cc_type_is_record(c->ast, t[0]) || !cc_type_is_record(c->ast, t[1])) {
@@ -931,4 +978,100 @@ VPRIV qty cxx_nullptr_type(cxx *c)
 		c->nullptr_ty = QT(c->ast->tags[tag].ty, 0);
 	}
 	return c->nullptr_ty;
+}
+
+/*
+ * Can an object of the class t be made from (what 0), or assigned (what 1), an object of its own type,
+ * an rvalue or an lvalue?  The constructor or operator= that takes it: 1 if it is user-provided, 0 if
+ * deleted (or the copy is implicitly deleted by a declared move); a defaulted or implicit one does what
+ * its bases and members do.  -1: not known.
+ */
+VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth)
+{
+	cxx_scope *cls = depth < 12 ? cxx_type_class_scope(c, QUNQ(t)) : NULL;
+	cxx_entity *move = NULL, *copy = NULL, *pick;
+	bool templates = false;
+	int result = 1;
+
+	if (getenv("VCC_CXX_NOSPECIAL"))
+		return -1;
+	if (!cls || cls->has_dependent_base)
+		return -1;
+	for (cxx_entity *e = cxx_lookup_in(c, cls, what ? vintern_cstr("operator=") : cxx_ctor_id(), 0); e; e = e->next) {
+		const ctype *ft;
+		qty p;
+
+		if (e->member_of != cls)
+			continue;	/* (a base's: not this class's own) */
+		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
+			templates = true;	/* (never a copy or move constructor; it may still be chosen) */
+			continue;
+		}
+		if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, e->ty) != TY_FUNC)
+			continue;
+		ft = AST_TYPE(c->ast, e->ty);
+		if (!ft->n || ft->n > 1u + e->ndefaults)
+			continue;
+		p = c->ast->params[ft->aux];
+		if (AST_TYPE_KIND(c->ast, p) == TY_PTR && AST_TYPE(c->ast, p)->ext) {
+			const ctype *pt = AST_TYPE(c->ast, p);
+
+			if (QUNQ(pt->base) != QUNQ(t))
+				continue;
+			if (pt->ext == 2)
+				move = e;
+			else if (QQ(pt->base) & Q_CONST)
+				copy = e;
+			else if (!copy)
+				copy = e;	/* X(X&): a copy constructor (from an lvalue that is not const) */
+		} else if (QUNQ(p) == QUNQ(t) && what)
+			move = copy = e;	/* operator=(X): both */
+	}
+	(void)templates;
+	pick = rvalue ? (move ? move : copy) : copy;
+	if (!rvalue && !copy && move)
+		return 0;	/* a declared move operation: the copy is implicitly deleted */
+	if (pick) {
+		if (pick->fn_deleted)
+			return 0;
+		if (!pick->fn_defaulted)
+			return 1;	/* user-provided */
+	}
+	/* defaulted or implicit: member-wise */
+	for (uint32_t i = 0; i < cls->nused; i++) {
+		cxx_scope *b = cls->used[i];
+		int r;
+
+		if (!b || b->kind != CXX_SCOPE_CLASS || !b->owner || b->owner->ty == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, b->owner->ty))
+			continue;
+		r = cxx_class_special(c, b->owner->ty, what, rvalue, depth + 1);
+		if (!r)
+			return 0;
+		if (r < 0)
+			result = -1;
+	}
+	for (uint32_t i = 0; i < cls->nfield_types; i++) {
+		qty m = cls->field_types[i];
+		const ctype *mt;
+		int r = 1;
+
+		if (m == CXX_TY_UNKNOWN) {
+			result = -1;
+			continue;
+		}
+		while (AST_TYPE_KIND(c->ast, m) == TY_ARRAY)
+			m = AST_TYPE(c->ast, m)->base;
+		mt = AST_TYPE(c->ast, m);
+		if (mt->kind == TY_PTR && mt->ext)
+			r = !what;	/* a reference member: copied, not assigned */
+		else if (what && (QQ(m) & Q_CONST))
+			r = 0;		/* a const member: not assigned */
+		else if (mt->kind == TY_STRUCT || mt->kind == TY_UNION)
+			r = cxx_class_special(c, m, what, rvalue && !(QQ(m) & Q_CONST), depth + 1);
+		if (!r)
+			return 0;
+		if (r < 0)
+			result = -1;
+	}
+	return result;
 }

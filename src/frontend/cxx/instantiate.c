@@ -618,7 +618,7 @@ static bool cxx_mentions_placeholder(cxx *c, qty t, int depth)
 		if (ix)
 			for (uint32_t i = 0; i < ix->nargs; i++)
 				if ((ix->args[i].kind == 1 && cxx_mentions_placeholder(c, ix->args[i].t, depth + 1)) || ix->args[i].kind == 3 ||
-				    ix->args[i].kind == 7)
+				    ix->args[i].kind == 7 || ix->args[i].kind == 5 || ix->args[i].kind == 0)
 					return true;
 		return false;
 	}
@@ -1167,7 +1167,8 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 			if (i + 1 != ps->ntparams)
 				return NULL;
 			for (uint32_t j = i; j < nargs; j++) {
-				if (k >= 32 || (args[j].kind == 1) != (p->kind == 1))
+				/* (a pattern's pack expansion, tuple<Ts...>: it stands for the pack's elements) */
+				if (k >= 32 || (args[j].kind != 5 && (args[j].kind == 1) != (p->kind == 1)))
 					return NULL;
 				full[k++] = args[j];
 			}
@@ -1177,12 +1178,16 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 		}
 		if (i < nargs)
 			full[n] = args[i];
-		else if (p->def_b) {
-			if (!cxx_default_argument(c, p, binding, &full[n]))
-				return NULL;
-		} else if (d && d->def_b && d->kind == p->kind) {
-			if (!cxx_default_argument(c, d, binding, &full[n]))	/* (an earlier declaration's default) */
-				return NULL;
+		else if (p->def_b || (d && d->def_b && d->kind == p->kind)) {
+			memset(&full[n], 0, sizeof full[n]);
+			if (!cxx_default_argument(c, p->def_b ? p : d, binding, &full[n])) {	/* (or an earlier declaration's default) */
+				/* in a pattern (X<T> with T a placeholder and a default that uses it): any argument there */
+				if (!cxx_args_mention_placeholder(c, full, n))
+					return NULL;
+				memset(&full[n], 0, sizeof full[n]);
+				n++;
+				continue;
+			}
 		} else
 			return NULL;
 		/* an injected class name given where a template is wanted: the instance's template */
@@ -1538,11 +1543,25 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		const cxx_tparam *tp = &p->params->tparams[i];
 		cxx_entity *e;
 
-		if (tp->kind == 3 || (tp->pack && (tp->kind != 1 || i + 1 != p->params->ntparams || !tp->name))) {
-			f->packs = 1;	/* (value packs, packs not last, template template parameters: not deduced yet) */
+		if (tp->pack && !tp->name) {
+			f->packs = 1;	/* (unnamed packs: not deduced yet) */
 			return;
 		}
-		if (tp->pack)
+		if (tp->kind == 3) {
+			/* a template template parameter: not deduced; its name in a parameter's type is a template
+			   placeholder, so that the type has a shape (X<T, Layout>&) */
+			f->packs = 1;
+			if (tp->name && !tp->pack) {
+				e = cxx_declare(c, binding, tp->name, CXX_ENTITY_TEMPLATE);
+				if (e)
+					e->dependent = 0, e->placeholder = (uint16_t)(i + 1);
+			}
+			continue;
+		}
+		if (tp->pack && (tp->kind != 1 || i + 1 != p->params->ntparams))
+			f->packs = 1;	/* (value packs, packs not last: not deduced; their placeholders still give the parameters'
+					   shapes, which rule the candidate out for arguments of another shape) */
+		if (tp->pack && !f->packs)
 			f->pack_tp = i + 1;	/* Ts...: a placeholder as a type's; the parameter Ts&&... ts gives its pattern */
 		if (!tp->name)
 			continue;	/* (unnamed: a default argument, a constraint in its type) */
@@ -1550,6 +1569,8 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		if (!e)
 			return;
 		e->dependent = 0;
+		if (tp->pack)	/* tuple<Ts...> in a parameter's type: a pattern whose arguments end in the pack */
+			e->is_pack = 1, e->pack_index = -1, e->pack_placeholder = (uint16_t)(i + 1), e->npack = 0;
 		if (tp->kind == 1) {
 			uint32_t tag = cc_tag_new(c->ast, TY_STRUCT, tp->name, 0);
 
@@ -1939,6 +1960,58 @@ static int cxx_ftemplate_constraints(cxx *c, cxx_ftemplate *f, const cxx_targ *b
 	return f->req_pos ? cxx_constraint_parse(c, p, bind, f->req_pos, NULL) : 1;
 }
 
+/* is the class a an instance of the template t, or derived from one? */
+static bool cxx_instance_of(cxx *c, qty a, const cxx_template *t, int depth)
+{
+	cxx_instance *ia = cxx_tag_info(c, a);
+	cxx_scope *cls;
+
+	if (ia && ia->t == t)
+		return true;
+	cls = depth < 8 ? cxx_type_class_scope(c, QUNQ(a)) : NULL;
+	if (!cls || cls->has_dependent_base)
+		return cls != NULL;	/* (bases not known: it may be) */
+	for (uint32_t i = 0; i < cls->nused; i++) {
+		cxx_scope *b = cls->used[i];
+
+		if (b && b->kind == CXX_SCOPE_CLASS && b->owner && b->owner->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b->owner->ty) &&
+		    cxx_instance_of(c, b->owner->ty, t, depth + 1))
+			return true;
+	}
+	return false;
+}
+
+/* can no argument of type A match the pattern P, whatever its parameters are?  X<...> against what is not
+   an X (or derived from one), a pointer or array pattern against what is not one */
+static bool cxx_shape_mismatch(cxx *c, qty P, qty A)
+{
+	const ctype *pt, *at;
+	void *owner;
+
+	if (P == CXX_TY_UNKNOWN || A == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
+		return false;
+	pt = AST_TYPE(c->ast, P);
+	if (pt->kind == TY_PTR && pt->ext)
+		P = pt->base, pt = AST_TYPE(c->ast, P);
+	if (cxx_placeholder_of(c, P, &owner) >= 0)
+		return false;	/* a bare T: anything */
+	at = AST_TYPE(c->ast, A);
+	if (pt->kind == TY_STRUCT || pt->kind == TY_UNION) {
+		cxx_instance *ip = cxx_tag_info(c, P);
+
+		if (!ip)
+			return false;
+		if (at->kind != TY_STRUCT && at->kind != TY_UNION)
+			return true;
+		return !cxx_instance_of(c, A, ip->t, 0);
+	}
+	if (pt->kind == TY_PTR)
+		return !((at->kind == TY_PTR && !at->ext) || at->kind == TY_ARRAY || at->kind == TY_FUNC);
+	if (pt->kind == TY_ARRAY)
+		return at->kind != TY_ARRAY;
+	return false;
+}
+
 /* one argument (type A, an lvalue or not) against a parameter's pattern P: 1 deduced or nothing to deduce,
    0 no match, -1 not known */
 static int cxx_deduce_argument(cxx *c, cxx_partial *p, qty P, qty A, bool lvalue, cxx_targ *bind)
@@ -2042,6 +2115,12 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 		}
 	}
 	if (f->packs || p->params->ntparams > 64) {
+		/* not deduced, but a parameter whose shape the argument cannot have rules it out: swap(tuple<Ts...>&,
+		   tuple<Ts...>&) for two ints */
+		if (f->has_pt && f->packs && !f->variadic)
+			for (uint32_t i = 0; i < nargs && i < f->np; i++)
+				if (cxx_shape_mismatch(c, f->pt[i], args[i]))
+					return 0;
 		c->why = CXX_WHY_PACKS;
 		return -1;
 	}
@@ -2616,4 +2695,9 @@ VPRIV void cxx_ftemplate_defined(cxx_ftemplate *f)
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e)
 {
 	return e->ftmpl && e->ftmpl->defined;
+}
+
+VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e)
+{
+	return e->ftmpl ? e->ftmpl->pos : 0;
 }

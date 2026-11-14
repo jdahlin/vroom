@@ -127,7 +127,8 @@ typedef struct cxx_entity {
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
-	uint8_t fn_const;		/* a member function declared const */	/* a function template: its signature, for deduction (instantiate.c) */
+	uint8_t fn_const;		/* a member function declared const */
+	uint8_t fn_deleted, fn_defaulted;	/* ... = delete, = default */	/* a function template: its signature, for deduction (instantiate.c) */
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
@@ -158,6 +159,8 @@ struct cxx_scope {
 	cxx_scope **used;
 	uint32_t nused, cused;
 	uint8_t has_dependent_base;
+	qty *field_types;		/* a class: its non-static data members' types, for its implicit special members */
+	uint32_t nfield_types;
 	cxx_tparam *tparams;		/* a template scope: its parameters */
 	uint32_t ntparams;
 };
@@ -396,9 +399,11 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV qty cxx_auto_type(cxx *c);
+VPRIV int cxx_class_special(cxx *c, qty t, int what, bool rvalue, int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
 VPRIV void cxx_ftemplate_defined(struct cxx_ftemplate *f);
 VPRIV bool cxx_ftemplate_has_body(const cxx_entity *e);
+VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV qty cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
