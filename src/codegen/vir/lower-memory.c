@@ -255,6 +255,23 @@ VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 		uint32_t fl = virbuild_memory_flags_make((int)n, 1, false);
 
 		virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d, virbuild_insn_append(e, VIR_OP_LOAD, n == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32, fl, s, 0, 0), 0);
+	} else if (n == 16 && !e->volatile_untag_depth &&
+		   e->vir_builder->insns[s].insn.op == VIR_OP_SLOTADDR &&
+		   e->vir_builder->insns[d].insn.op == VIR_OP_SLOTADDR) {
+		/* The walker represents wide integers as two machine words.
+		 * Expose both fields to slot promotion instead of copying
+		 * through memory between their producers and consumers. */
+		uint32_t fl = virbuild_memory_flags_make(8, 1, false);
+		vir_insn src = e->vir_builder->insns[s].insn, dst = e->vir_builder->insns[d].insn;
+		uint64_t src_offset = (uint64_t)src.b | (uint64_t)src.c << 32;
+		uint64_t dst_offset = (uint64_t)dst.b | (uint64_t)dst.c << 32;
+		uint32_t sh = virbuild_slot_address(e, src.a, (int64_t)(src_offset + 8));
+		uint32_t dh = virbuild_slot_address(e, dst.a, (int64_t)(dst_offset + 8));
+		uint32_t lo = virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I64, fl, s, 0, 0);
+		uint32_t hi = virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I64, fl, sh, 0, 0);
+
+		virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d, lo, 0);
+		virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, fl, dh, hi, 0);
 	} else {
 		virbuild_insn_append(e, VIR_OP_MEMCPY, VIR_TYPE_VOID, 0, d, s, virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)n));
 	}
