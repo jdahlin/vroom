@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""vlink-dyn.py: vlink's x86-64 dynamic executables against glibc (dyn.inc, dso.inc).
+"""vlink-dyn.py: vlink's x86-64 dynamic executables against glibc (dynamic-executable.c, dso.c).
 
   bench/vlink-dyn.py [-v] [PAT]
 
-Every C file in ccs/vcc/tests/vlink-dyn is compiled by clang and by vpp, in
+Every C file in src/test/vlink-dyn is compiled by clang and by vpp, in
 three modes: -fPIE linked -pie, -fno-pic linked -no-pie (copy relocations,
 canonical PLT entries), -fPIE linked -pie -z now.  Each object is linked by
 ld.lld and by vlink with the link line clang's driver gives (crt files, libc.so
@@ -47,7 +47,7 @@ def main():
         return 0
     ok = bad = 0
     with tempfile.TemporaryDirectory() as t:
-        for f in sorted(glob.glob(f'{R}/ccs/vcc/tests/vlink-dyn/*.c')):
+        for f in sorted(glob.glob(f'{R}/src/test/vlink-dyn/*.c')):
             name = os.path.basename(f)[:-2]
             if pat and pat not in name:
                 continue
@@ -76,13 +76,15 @@ def main():
                     if res['lld'] and res['lld'][0] == 'link':
                         print(f'FAIL {tag}: lld: {res["lld"][1]}')
                         bad += 1
-                    elif res['vlink'] != res['lld']:
+                    elif res['lld'][0] != 0 or res['vlink'] != res['lld']:
                         print(f'FAIL {tag}: vlink {res["vlink"]!r}\n     lld   {res["lld"]!r}')
                         bad += 1
                     else:
                         ok += 1
                         if verbose:
                             print(f'ok   {tag}: {res["vlink"][1].decode(errors="replace").strip()!r}')
+    if not ok and not bad:
+        print('FAIL vlink-dyn: no cases selected'); bad += 1
     print(f'vlink-dyn: {ok}/{ok + bad} ok')
     return 1 if bad else 0
 

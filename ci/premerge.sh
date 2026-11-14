@@ -7,15 +7,17 @@
 # vcc-builtins.py (Homebrew's clang).
 #
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
-#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad
+#   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
-#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node)
+#   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
+#   ci/premerge.sh win64    Windows x64 (MinGW-w64) under Wine: suites, vlink PE, libvccrt, var COFF;
+#                           exports the programs for the native Windows job (doc/PLAN-win64.md WIN9)
 #
 # Locally (Debian arm64 container, as CI):  env/linux/run.sh ci/premerge.sh arm64
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
 # failure); the script runs every step and fails at the end if any failed.
 set -u
-JOB=${1:?usage: ci/premerge.sh arm64|asan|tsan|wasm}
+JOB=${1:?usage: ci/premerge.sh arm64|asan|tsan|wasm|win64}
 cd "$(dirname "$0")/.."
 J=${CI_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 BUILD=$(python3 -c 'import sys; sys.path.insert(0, "bench"); import hostenv; print(hostenv.BUILD)')
@@ -43,9 +45,19 @@ step() {	# step NAME CMD...: run, log, report; keep going on failure
 	return 0
 }
 
-build() {	# build MAKE-TARGET: a build failure ends the job
+skip() {	# skip NAME WHY: a guarded step whose feature is not in this tree
+	echo "skip $1 ($2)"
+	[ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "| $1 | skipped: $2 |" >> "$GITHUB_STEP_SUMMARY"
+	return 0
+}
+
+has() {	# has FILE TEXT: FILE exists and contains TEXT (a feature guard)
+	[ -f "$1" ] && grep -qF -- "$2" "$1"
+}
+
+build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 	echo "::group::make $1"
-	if ! make -C ccs -j "$J" "$1" > "$LOGS/make-$1.log" 2>&1; then
+	if ! make -C src -j "$J" "$@" > "$LOGS/make-$1.log" 2>&1; then
 		tail -n 60 "$LOGS/make-$1.log"; echo "::endgroup::"
 		echo "FAIL make $1"; exit 1
 	fi
@@ -57,6 +69,8 @@ case $JOB in
 arm64)
 	build vcc
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+		step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
+		step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
 		step interrupt python3 bench/vcc-interrupt.py
 		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
 		step vlink-dyn python3 bench/vlink-dyn.py
@@ -64,7 +78,7 @@ arm64)
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
-	step memory-cells-generated python3 bench/gen-memory-cells.py --check
+	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
@@ -98,10 +112,13 @@ arm64)
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step embed-search python3 bench/vcc-embed-search.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
+	step field-uses   python3 bench/vcc-field-uses.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step stress       python3 bench/vcc-stress.py
 	step stress-vccd  python3 bench/vcc-stress.py --vccd
+	step task-test    "$BUILD/task-test"
+	step common-test  env CC="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/common-test.py -j "$J"
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
@@ -133,7 +150,7 @@ arm64)
 	;;
 asan)
 	build vcc-asan
-	B=$(dirname "$BUILD")/ccs-asan
+	B=$(dirname "$BUILD")/src-asan
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
@@ -144,24 +161,31 @@ asan)
 	step virgen       python3 bench/virgen-test.py --bin-dir "$B"
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
+	step field-uses   python3 bench/vcc-field-uses.py -j "$J" --bin-dir "$B"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"
+	step vlink-pe-bad python3 bench/vlink-pe-bad.py --bin-dir "$B"
+	# the fuzz targets (ASan+UBSan, libFuzzer from libclang-rt-N-dev when present, else test/fuzz/driver.c)
+	# build and replay test/fuzz/regress: replay only, no fuzzing; a build break or a failing input fails the job
+	step fuzz-regress make -C src -j "$J" fuzz-regress
 	;;
 tsan)
 	build vcc-tsan
-	B=$(dirname "$BUILD")/ccs-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
 		step vir-x86-tsan python3 bench/vcc-vir-x86.py --bin-dir "$B"
 	fi
 	# a test's vcc-timeout bounds the normal build; TSan's is 15-20x slower
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step task-test    "$B/task-test"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
 wasm)
-	build vcc
+	# disabled (2026-11-13): needs the wasm sources compiled in
+	build vcc VCC_WASM=1
 	step switch-bitsets-wasm32 python3 bench/vcc-switch-bitsets.py --target wasm32-unknown-emscripten --run
 	step switch-bitsets-wasm64 python3 bench/vcc-switch-bitsets.py --target wasm64-unknown-emscripten --run
 	step opt-rules-wasm32 python3 bench/vcc-opt-rules.py --target wasm32-unknown-emscripten --run
@@ -171,6 +195,71 @@ wasm)
 	step const-control-wasm32 python3 bench/vcc-constant-control.py --target wasm32-unknown-emscripten
 	step const-control-wasm64 python3 bench/vcc-constant-control.py --target wasm64-unknown-emscripten
 	step wasm64       python3 bench/vcc-wasm.py -j "$J"
+	;;
+win64)
+	# Windows x64 (doc/PLAN-win64.md WIN9): x86-64 Linux with Wine and the
+	# llvm-mingw sysroot (ci/setup-debian.sh win64).  Clang and lld are the
+	# oracle only.  The programs that pass are exported with a manifest for
+	# the `native` job (bench/win64-native.py on windows-latest).
+	build vcc
+	X=${CI_WIN64_EXPORT:-$(dirname "$BUILD")/win64-exes}
+	rm -rf "$X" "$X.tar.xz"
+	step win64-ref     python3 bench/vcc-win64.py --ref-only -j "$J"
+	step win64-vlink   python3 bench/vcc-win64.py --vlink-ref -j "$J"
+	# GUARD own: vcc's code generator, COFF assembler and own-toolchain mode
+	# (vcc compiles, vlink links with libvccrt.a, Wine runs), from the
+	# WIN1-WIN5 branch.  Until it is here, the exported programs are clang's
+	# objects linked by vlink with libvccrt.a (--vccrt-ref); after, vcc's.
+	if has bench/vcc-win64.py "'--own'"; then
+		step win64-vccrt python3 bench/vcc-win64.py --vccrt-ref -j "$J"
+		step win64-own   python3 bench/vcc-win64.py --own -j "$J" --export "$X"
+		# GUARD own+vir: the same through VIR (-O2's SSA path)
+		if has bench/vcc-win64.py "'--vir'"; then
+			step win64-own-vir python3 bench/vcc-win64.py --own --vir -j "$J"
+		else
+			skip win64-own-vir "no --vir in bench/vcc-win64.py"
+		fi
+	else
+		step win64-vccrt python3 bench/vcc-win64.py --vccrt-ref -j "$J" --export "$X"
+		skip win64-own "no --own in bench/vcc-win64.py (WIN1-WIN5 not merged)"
+		skip win64-own-vir "no --own in bench/vcc-win64.py"
+	fi
+	step vlink-pe      python3 bench/vlink-pe.py --run
+	step vccrt-diff    python3 bench/vccrt-test.py diff --export "$X"
+	step vccrt-chkstk  python3 bench/vccrt-test.py chkstk --export "$X"
+	step var-coff      python3 bench/var-cmp.py coff -j "$J" -n 300 --bin-dir "$BUILD"
+	step vnm-coff      python3 bench/vnm-coff.py -j "$J" --bin-dir "$BUILD"
+	# GUARD abi: cross-compiler calls clang/vcc x caller/callee under Wine (WIN2)
+	if has bench/vcc-abi.py win64; then
+		step abi-win64 python3 bench/vcc-abi.py --target win64
+	else
+		skip abi-win64 "no --target win64 in bench/vcc-abi.py (WIN2)"
+	fi
+	# GUARD vas-obj: vasm's COFF cases (WIN4), src/test/vas-obj/{win64,coff}-*.s
+	if ls src/test/vas-obj | grep -qE '^(win64|coff)-.*[.]s$'; then
+		step vas-obj-coff python3 bench/vas-obj.py
+	else
+		skip vas-obj-coff "no COFF cases in src/test/vas-obj (WIN4)"
+	fi
+	# WIN8: zlib and SQLite built by vcc for the target (and zlib's own
+	# configure through the vcc shim and vccd), their own tests under Wine
+	# against clang's cross build; each skips cleanly without its source.
+	if has bench/zlib/run.py win64; then
+		step zlib-win64 python3 bench/zlib/run.py --target win64 all
+	else
+		skip zlib-win64 "WIN8: no win64 in bench/zlib/run.py"
+	fi
+	if has bench/sqlite/run.py win64; then
+		step sqlite-win64 python3 bench/sqlite/run.py --target win64 all
+	else
+		skip sqlite-win64 "WIN8: no win64 in bench/sqlite/run.py"
+	fi
+	# the artifact for the native job: one tar.xz (the programs share the
+	# CRT, so a solid archive is a fraction of a zip of each)
+	step win64-pack    sh -c 'for m in vcc-win64 vccrt-diff vccrt-chkstk; do
+		[ -f "$1/$m.manifest.json" ] || { echo "no $m.manifest.json: its step failed"; exit 1; }; done
+		tar -C "$(dirname "$1")" -cJf "$1.tar.xz" "$(basename "$1")"' pack "$X"
+	[ -f "$X.tar.xz" ] && echo "win64-exes: $(ls "$X"/*.manifest.json | wc -l) manifests, $(find "$X/exe" -name '*.exe' | wc -l) programs, $(du -k "$X.tar.xz" | cut -f1) KiB packed"
 	;;
 *)
 	echo "unknown job $JOB"; exit 2;;

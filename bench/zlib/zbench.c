@@ -3,7 +3,7 @@
  * (LEVEL: only deflate and inflate at that level, for profiling).
  *
  * One line per measurement: NAME SECONDS BYTES CHECK, where SECONDS is the
- * best CPU time of REPS runs, BYTES the output size and CHECK a CRC of the
+ * best CPU time (Windows: wall time) of REPS runs, BYTES the output size and CHECK a CRC of the
  * output, so two builds of zlib can be compared for both speed and result
  * (deflate is deterministic: the same zlib gives the same bytes).
  * Exit status 1 when a round trip does not give the input back.
@@ -12,14 +12,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "zlib.h"
 
 static double now(void)
 {
+#ifdef _WIN32
+	/* wall time from the performance counter (run.py --target win64): under Wine the
+	   process times tick in 10 ms steps, too coarse for one inflate */
+	LARGE_INTEGER c, f;
+
+	QueryPerformanceCounter(&c);
+	QueryPerformanceFrequency(&f);
+	return (double)c.QuadPart / (double)f.QuadPart;
+#else
 	struct timespec t;
 
 	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
 	return t.tv_sec + t.tv_nsec * 1e-9;
+#endif
 }
 
 static void line(const char *name, int level, double s, unsigned long n, unsigned long check)

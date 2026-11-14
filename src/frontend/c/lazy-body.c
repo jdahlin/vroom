@@ -1,0 +1,216 @@
+/* vcc front end: lazy bodies (see lztok in ccint.h) */
+#include <stdatomic.h>
+
+#include "cc-internal.h"
+
+/* ---------------- lazy bodies ---------------- */
+
+static _Atomic uint64_t cc_lazy_body_kept_functions, cc_lazy_body_kept_tokens, cc_lazy_body_parsed_functions, cc_lazy_body_parsed_tokens, cc_lazy_body_header_cache_functions;
+static int cc_lazy_body_disabled = -1;
+
+void cc_lazy_body_statistics(char *buf, size_t n)
+{
+	snprintf(buf, n, "lazy bodies: %llu kept (%.1f M tokens; %llu in the header cache), %llu parsed (%.1f M tokens)",
+		 (unsigned long long)cc_lazy_body_kept_functions, cc_lazy_body_kept_tokens / 1e6, (unsigned long long)cc_lazy_body_header_cache_functions,
+		 (unsigned long long)cc_lazy_body_parsed_functions, cc_lazy_body_parsed_tokens / 1e6);
+}
+
+/* n lazy bodies appended by a declaration replay (frontend/c/replay.c): counted as kept */
+CC_PRIVATE void cc_lazy_body_replayed(const cc_lazy_function *L, uint32_t n)
+{
+	for (uint32_t i = 0; i < n; i++) {
+		atomic_fetch_add_explicit(&cc_lazy_body_kept_functions, 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&cc_lazy_body_kept_tokens, L[i].z.close - L[i].z.open + 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&cc_lazy_body_header_cache_functions, 1, memory_order_relaxed);
+	}
+}
+
+/* a definition whose code only exists if something references it, from a header */
+CC_PRIVATE bool cc_lazy_body_eligible(cc *c, uint32_t s, const cc_declarator *d)
+{
+	const sym *y = &c->syms[s];
+	const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
+
+	int off = __atomic_load_n(&cc_lazy_body_disabled, __ATOMIC_RELAXED);
+
+	if (unlikely(off < 0))	/* (threads race to set it: same value) */
+		__atomic_store_n(&cc_lazy_body_disabled, off = getenv("VCC_EAGER") != NULL, __ATOMIC_RELAXED);
+	if (c->nptag)	/* (its parameter list declared tags the body sees: cc_function_definition_parse binds them) */
+		return false;
+	if (off || y->kind != AST_SYMBOL_FUNCTION || y->sc != AST_STORAGE_STATIC || (y->flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_ATTRIBUTE_USED | AST_SYMBOL_FLAG_OVERLOAD)))
+		return false;
+	if (a && (a->used || a->constructor || a->destructor || a->alias))
+		return false;
+	if (c->lz_on || c->ntk != 1)
+		return false;	/* (lookahead past the '{': never at a definition) */
+	/* (#pragma pack: cc_lazy_body_parse gives the body the value in force here, cc_lazy_function.pack) */
+	return !pp_location_is_in_main_file(c->p, d->loc);
+}
+
+static void cc_lazy_body_token_append(cc *c, const ptok *t)
+{
+	cc_lazy_token *z = &c->lzt[c->nlzt++];
+
+	z->loc = t->loc;
+	z->kind = t->kind;
+	z->len = t->len;
+	if (t->kind == LEX_TOKEN_IDENTIFIER) {
+		z->v = t->id;
+		z->flags = t->flags & ~LEX_TOKEN_FLAG_SPLICED;	/* (the interned spelling has no splices) */
+		z->len = vintern_ents[t->id].len;
+	} else {
+		z->v = c->nlzs;
+		z->flags = t->flags;
+		char *d = c->lzs + c->nlzs;
+		const char *q = t->s;
+		uint32_t n = t->len;
+
+		if (likely(n <= 3)) {	/* punctuators, most numbers: no memcpy call (a stub on Darwin) */
+			if (n)
+				d[0] = q[0];
+			if (n > 1)
+				d[1] = q[1];
+			if (n > 2)
+				d[2] = q[2];
+		} else {
+			memcpy(d, q, n);
+		}
+		d[n] = 0;
+		c->nlzs += t->len + 1;
+	}
+}
+
+static void cc_lazy_body_parse(cc *c, uint32_t i);
+
+/* tk[0] is the body's '{': keep the tokens through its '}' */
+CC_PRIVATE void cc_lazy_body_capture(cc *c, uint32_t s, const cc_declarator *d)
+{
+	uint32_t i = c->nlzf++, depth = 0;
+	cc_lazy_function *L = &c->lzf[i];
+	ptok t;
+	bool eof = false;
+
+	*L = (cc_lazy_function){ s, c->nlzt, 0, c->nsym, d->name, d->loc, d->psyms, d->npsyms, d->plb, d->ple, 0, 0, { 0 }, c->npack ? c->pack[c->npack - 1] : 0 };
+	if (pp_lazy_body_skip(c->p, &c->tk[0], &L->z)) {
+		/* replayed from the header cache: the entry has the tokens, nothing passes through */
+		L->hc = 1;
+		c->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY;
+		atomic_fetch_add_explicit(&cc_lazy_body_kept_functions, 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&cc_lazy_body_kept_tokens, L->z.close - L->z.open + 1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&cc_lazy_body_header_cache_functions, 1, memory_order_relaxed);
+		c->prevloc = L->z.rloc;
+		c->prevflags = L->z.rflags;
+		cc_token_fetch(c, &c->tk[0]);
+		c->ntk = 1;
+		return;
+	}
+	cc_lazy_body_token_append(c, &c->tk[0]);	/* '{' */
+	depth = 1;
+	for (;;) {
+		pp_token_next(c->p, &t);	/* raw: #pragma comes along as PP_TOKEN_KIND_DIRECTIVE_LINE, applied when parsed */
+		if (t.kind == LEX_TOKEN_EOF) {
+			eof = true;
+			break;
+		}
+		cc_lazy_body_token_append(c, &t);
+		depth += t.kind == LEX_TOKEN_LEFT_BRACE;
+		depth -= t.kind == LEX_TOKEN_RIGHT_BRACE;
+		if (!depth)
+			break;
+	}
+	L->ntk = c->nlzt - L->tk;
+	c->syms[s].flags |= AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY;
+	atomic_fetch_add_explicit(&cc_lazy_body_kept_functions, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&cc_lazy_body_kept_tokens, L->ntk, memory_order_relaxed);
+	if (eof) {
+		/* an unterminated body: parse it now, for clang's diagnostics */
+		cc_lazy_body_parse(c, i);
+		c->tk[0] = t;
+		c->ntk = 1;
+		return;
+	}
+	c->prevloc = c->lzt[c->nlzt - 1].loc;
+	c->prevflags = c->lzt[c->nlzt - 1].flags;
+	cc_token_fetch(c, &c->tk[0]);
+	c->ntk = 1;
+}
+
+static void cc_lazy_body_parse(cc *c, uint32_t i)
+{
+	cc_lazy_function *L = &c->lzf[i];
+	ptok tk[4];
+	int ntk = c->ntk, npack = c->npack;
+	uint32_t pack0 = c->pack[0];
+	uint64_t packid0 = c->packid[0];
+	uint32_t prevloc = c->prevloc, s = L->sym;
+	uint8_t prevflags = c->prevflags;
+	cc_declarator d;
+
+	L->done = 1;
+	memcpy(tk, c->tk, sizeof(tk));
+	memset(&d, 0, sizeof(d));
+	d.name = L->name, d.loc = L->loc, d.psyms = L->psyms, d.npsyms = L->npsyms;
+	d.plb = L->plb, d.ple = L->ple, d.has_func = true;
+	c->lz_on = true;
+	c->lz_hc = L->hc;
+	c->lzz = L->z;
+	c->lzc = L->tk, c->lze = L->hc ? L->z.base : L->tk + L->ntk;
+	c->lz_wm = L->wm;
+	c->npack = L->pack ? 1 : 0;	/* the #pragma pack of the definition (MinGW-w64's headers are inside one) */
+	c->pack[0] = L->pack, c->packid[0] = 0;
+	cc_token_fetch(c, &c->tk[0]);
+	c->ntk = 1;
+	c->syms[s].flags &= ~(AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY);
+	struct cc_recovery_point *rec = c->rec;
+
+	c->rec = NULL;	/* another token stream: no recovery outside the body */
+	cc_function_definition_parse(c, s, &d);
+	c->rec = rec;
+	if (!cc_token_is(c, LEX_TOKEN_EOF))
+		cc_report_error(c, tok(c)->loc, "expected end of function body");
+	atomic_fetch_add_explicit(&cc_lazy_body_parsed_functions, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&cc_lazy_body_parsed_tokens, L->hc ? L->z.close - L->z.open + 1 : L->ntk, memory_order_relaxed);
+	c->lz_on = false;
+	c->lz_hc = false;
+	c->lz_wm = 0;
+	c->npack = npack;
+	c->pack[0] = pack0, c->packid[0] = packid0;
+	memcpy(c->tk, tk, sizeof(tk));
+	c->ntk = ntk;
+	c->prevloc = prevloc;
+	c->prevflags = prevflags;
+}
+
+/* after the TU: the lazy bodies something names, until nothing new is named */
+CC_PRIVATE void cc_lazy_body_closure(cc *c)
+{
+	bool more = true;
+
+	if (!c->nlzf)
+		return;
+	for (uint32_t i = 0; i < c->ntoplevel; i++) {
+		const sym *y = &c->syms[c->toplevel[i]];
+
+		if (y->attrs && c->attr[y->attrs].alias) {
+			uint32_t t = cc_symbol_global_find(c, c->strs[c->attr[y->attrs].alias - 1].s);
+
+			if (t)
+				c->syms[t].flags |= AST_SYMBOL_FLAG_REFERENCED;
+		}
+	}
+	while (more) {
+		more = false;
+		for (uint32_t i = 0; i < c->nlzf; i++) {
+			const cc_lazy_function *L = &c->lzf[i];
+			const sym *y = &c->syms[L->sym];
+			const attrs *a = y->attrs ? &c->attr[y->attrs] : NULL;
+
+			if (L->done || !((y->flags & (AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED | AST_SYMBOL_FLAG_ADDRESS_TAKEN | AST_SYMBOL_FLAG_ATTRIBUTE_USED)) ||
+					 (a && (a->used || a->constructor || a->destructor))))
+				continue;
+			cc_lazy_body_parse(c, i);
+			more = true;
+		}
+	}
+}
+

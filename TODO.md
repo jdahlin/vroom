@@ -10,11 +10,11 @@ and the existing gates (AGENTS.md "Build and test") stay green.
 Notation: **[P]** confirmed by a probe during the review, **[R]** from reading.
 
 File references: `emit.c:N`, `cc.c:N` and `pp.c:N` predate the split into
-`emit/` (+ `arch/a64/emit/`), `cc/` and `pp/` (2026-11-08), and line numbers
+`codegen/` (+ `arch/a64/codegen/`), `frontend/c/` and `frontend/pp/` (2026-11-08), and line numbers
 in `as/as.c`, `obj/obj.c` and `ld/ld.c` predate the restructure of
 2026-11-09 (AGENTS.md "Layout"), which moved parts of them to `arch/a64/`
 and `platform/linux/` and shortened the files whose buffers moved to `lib/`
-(`vccd/ar.c`, `vccd/rsh.c`, `vccd/fixdep.c`, `cc/layout.c`, `pp/diag.c`);
+(`utils/ar.c`, `utils/shell.c`, `utils/fixdep.c`, `frontend/c/layout.c`, `frontend/diag/diag.c`);
 search for the function named in the item.
 The test kinds referenced below are defined in the "Test infrastructure" section
 first; most items only add a file to one of them.
@@ -24,7 +24,7 @@ first; most items only add a file to one of them.
 Existing gates that every change must keep green: `vcc-diff.py cmp`
 (pp parity), `vcc-sema.py run` + `layout` (878/879), `vcc-ctests.py`
 (1708/1708), `vcc-diag.py` (63/63), `vcc-sema.py warn` (879/879),
-`make -C ccs self-check`, `make -C ccs fuzz-regress`, kernel boot.
+`make -C src self-check`, `make -C src fuzz-regress`, kernel boot.
 
 - [x] **T0 performance gate.** (done: `bench/vbench.py gate`.)  Every item below must leave the hot path
   alone: `bench/vbench.py` (kernel front end + emit, fixed corpus) before
@@ -32,23 +32,23 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   message.  Features that cost time when used (`-g`, warnings that need
   dataflow, an optimizer) are measured with the flag on and off separately.
 - [x] **T1 `vcc` suite: self-checking regressions under qemu.** (done: `bench/vcc-ctests.py --suite vcc` with xfail markers, 9 tests added, all xfail today.)
-  `ccs/vcc/tests/vcc/*.c`, gcc-torture style (exit 0 or `abort()`), the
+  `src/test/vcc/*.c`, gcc-torture style (exit 0 or `abort()`), the
   suite in `bench/vcc-ctests.py` (`tests()`: `--suite vcc`).  Clang
   is still the oracle, so a test also documents clang's behaviour.  Supports
   `/* vcc-flags: ... */` and `/* vcc-threads */` (link the runtime's tiny
   thread shim, or run on the Darwin host, see T3).  One file per fixed bug.
-- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu, `--host` Darwin and `--target wasm64|wasm32` halves, xfail markers; no generator yet.)  `ccs/vcc/tests/abi/NAME/{caller.c,callee.c}`;
+- [ ] **T2 `abi` suite: cross-compiler calls.** (partial: `bench/vcc-abi.py`, Linux/qemu, `--host` Darwin and `--target wasm64|wasm32` halves, xfail markers; no generator yet.)  `src/test/abi/NAME/{caller.c,callee.c}`;
   the runner builds the 4 combinations (clang/vcc × caller/callee) and runs
-  each, on Linux (qemu, `tests/rt`) and on the Darwin host (native, system
+  each, on Linux (qemu, `test/rt`) and on the Darwin host (native, system
   libc).  Covers argument passing, returns, varargs, layout of shared structs.
   A generator (`bench/abi-gen.py`, random signatures with a fixed seed, like
   gcc's `struct-layout-1`) gives breadth; hand-written cases pin known bugs.
 - [ ] **T3 `host` suite: native Darwin runs.**  Same `vcc` suite files built with
   `vpp -c --target=arm64-apple-darwin`, linked with ld64 against libSystem,
   run natively.  Needed for threads, TLV, real libm, and Darwin ABI items.
-  `make -C ccs host-tests`.
-- [ ] **T4 `reject` suite: must-diagnose tests.**  `tests/diag/` already
-  diffs stderr exactly with clang; add `tests/reject/*.c` where only "vcc
+  `make -C src host-tests`.
+- [ ] **T4 `reject` suite: must-diagnose tests.**  `test/diag/` already
+  diffs stderr exactly with clang; add `test/reject/*.c` where only "vcc
   exits non-zero with an error mentioning X" is required (for cases where an
   exact clang message match is not yet the goal).  `// expect-error: REGEX`
   lines; runner `bench/vcc-reject.py`.  Promote to `diag/` once messages match.
@@ -59,30 +59,30 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   requires, for each: no signal, exit status 1, a diagnostic on stderr,
   within a time bound.  A `--vccd` mode sends them all to one private vccd
   (as `vccd-cc.py` does) and then a normal TU, which must still compile.
-  Run also with `--bin-dir build/ccs-asan`.
+  Run also with `--bin-dir build/src-asan`.
 - [ ] **T6 `obj` checks: object-level assertions.**  `bench/vcc-objcheck.py`
-  with `tests/obj/*.c` carrying `// CHECK-RELOC: R_AARCH64_ADR_GOT_PAGE sym`,
+  with `test/obj/*.c` carrying `// CHECK-RELOC: R_AARCH64_ADR_GOT_PAGE sym`,
   `// CHECK-SECTION: .eh_frame`, `// CHECK-NOT-SYM: x`, checked with
   `llvm-readelf -r -S -s` / `llvm-objdump -d`.  For PIC, TLS, CFI, DWARF,
   section groups, branch ranges — things that are about the object, not
   runtime output.
-- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g`, `-O2 -fPIC`, `-O3`, `-O3 -march=armv8.6-a+...` and `-O3 -march=armv9-a+sve2`, `-O3 -mcpu=neoverse-v1` (`.prefalign`) too.)  `tests/as/*.c` →
+- [ ] **T7 `as` corpus: compiler-generated assembly.** (started: `bench/vas-corpus.py`: clang -S -O0/-O2 of every test C file, clang -c vs vasm byte for byte: 3035/3035 identical on 2026-11-09, `-g`, `-O2 -fPIC`, `-O3`, `-O3 -march=armv8.6-a+...` and `-O3 -march=armv9-a+sve2`, `-O3 -mcpu=neoverse-v1` (`.prefalign`) too.)  `test/as/*.c` →
   `clang --target=aarch64-linux-gnu -O2 -S` (and `-g`, `-fPIC`, `-march=armv8.5-a+sve2`)
   → assemble with `vasm` and with clang, compare objects with
   `bench/vas-diff.py` (sections, symbols, relocations, bytes).  Plus
   per-instruction encoding tables generated from llvm-mc
   (`bench/vas-enc.py` extended: every mnemonic × operand form in a list,
   diff `llvm-objdump -d` text).
-- [ ] **T8 `ld` suite: links against lld.**  `tests/ld/NAME/` with sources,
+- [ ] **T8 `ld` suite: links against lld.**  `test/ld/NAME/` with sources,
   a command line and an optional script; `bench/vld-cmp.py` links with
   `vlink` and `ld.lld`, compares `llvm-readelf -a` (normalised), and where
   runnable, runs both under qemu-user or qemu-system and compares output.
-- [ ] **T9 more fuzz targets** (`ccs/fuzz/`): `fuzz-cc` (front end on pp
+- [ ] **T9 more fuzz targets** (`src/test/fuzz/`): `fuzz-cc` (front end on pp
   output, `-fsyntax-only`), `fuzz-emit` (front end + emit to a buffer; with
   csmith/yarpgen programs as a differential oracle under qemu), `fuzz-as`
   (assembler text), `fuzz-elf` (ld `parse_obj`/`add_archive`, objcopy
   `elf_open`, nm on raw bytes), `fuzz-ar`.  Each with `regress/<target>/`
-  replayed by `make -C ccs fuzz-regress`.
+  replayed by `make -C src fuzz-regress`.
 - [ ] **T10 random-program differential testing.**  `bench/vcc-csmith.py`:
   csmith / yarpgen programs (checksum output) built by clang -O0 and vcc,
   run under qemu, compare.  Minutes per run, reduce failures with creduce
@@ -132,7 +132,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   SQLite 3.50.4 on Darwin (2026-11-11): vcc builds testfixture + shell via
   `bench/pg/cc`; `testrunner.tcl --jobs 6` gives the same result as clang
   -O2 (329068 tests, only interrupt2.test fails, timing, both compilers)
-  after the Apple variadic-slot fix (tests/abi/va_int_slot).  speedtest1
+  after the Apple variadic-slot fix (test/abi/va_int_slot).  speedtest1
   --size 100 --memdb: clang -O2 2.49 s, gcc-16 -O2 2.44 s, vcc -O2 3.92 s;
   sqlite3.c compiles in 0.13 s (clang -O2 7.9 s, gcc 22 s).  `bench/sqlite/run.py all`.
   zlib 1.4 on Darwin (2026-11-12, `bench/zlib/run.py all`): vcc and VIR
@@ -168,7 +168,7 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   independent of machine load).  Feeds the Tier 4 optimizer item.
 - [ ] **T16 coverage of vcc itself.**  Build vcc with
   `-fprofile-instr-generate -fcoverage-mapping`, run all suites, and list
-  `cc/` and `emit/` branches no suite reaches; each gets a targeted T1 test.
+  `frontend/c/` and `codegen/` branches no suite reaches; each gets a targeted T1 test.
   This, not the number of packages built, says when testing is enough.
 - [ ] **T17 Debian, sampled, last.**  A full archive rebuild mostly tests
   the front end ("it built" says little about wrong code; most packages
@@ -183,11 +183,11 @@ Existing gates that every change must keep green: `vcc-diff.py cmp`
   rate that justifies it.
 - [x] **rt `%Lg` with clang's caller**: `%g` read its exponent with
   `strtol` from an unterminated buffer, so stack bytes after it decided
-  between `19` and `1.9e+01`.  Done: `tests/vcc/printf_Lg.c`,
+  between `19` and `1.9e+01`.  Done: `test/vcc/printf_Lg.c`,
   `deep_mixed.c` prints `%Lg` again.
 - [ ] **T18 runtime gaps hide torture tests.**  34 gcc/tcc tests are
   `ref-fail` (`vcc-ctests.py --show ref-fail`): ~15 only because
-  `tests/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
+  `test/rt` lacks `pow`, `tanh`, `__divsc3`, `__fixsfti`, `tmpnam`,
   `atomic_signal_fence`, or clang leaves `__builtin_exit`/`__builtin_puts`/
   `__builtin_mul_overflow_p` as calls.  Add them to the runtime (or a
   per-test shim) so the tests run.  *Validate:* `ref-fail` count drops,
@@ -222,20 +222,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-a` for `a` a `vector_size(32)` of `__int128` gives `4294967293` for a
   lane of 3 (`gen_vlanes` negates through `arith` at the element's width as
   if 32 bits).  x86-64's walker does it right.
-  *Validate:* `ccs/vcc/tests/vcc/vec_wide_lanes.c` (xfail on arm64).
+  *Validate:* `src/test/vcc/vec_wide_lanes.c` (xfail on arm64).
 
 - [ ] **arm64: the hardening options are accepted and ignored.**
   `-ftrivial-auto-var-init=zero`, `-fstack-protector*`, `-fpatchable-function-entry`
   (and on x86 only `-fcf-protection`, `-mfunction-return=`, `-mretpoline-external-thunk`)
-  are implemented for x86-64 (cc_opts.xcf ...); arm64 accepts them silently,
+  are implemented for x86-64 (cc_options.xcf ...); arm64 accepts them silently,
   so a kernel built with them lacks the protection.
-  *Validate:* `ccs/vcc/tests/vcc/autoinit_zero.c` (xfail on arm64).
+  *Validate:* `src/test/vcc/autoinit_zero.c` (xfail on arm64).
 
 - [ ] **arm64: asm flag outputs (`"=@cc<cond>"`) are not implemented.**
   The output gets an unset register (`cmp w9, #0` then `str w10`): any
   `"=@cceq"` reads garbage.  x86-64 has them (`set<cond>` + `movzbl`; the
   kernel's CC_SET in test_bit/boot_cpu_has).
-  *Validate:* `ccs/vcc/tests/vcc/asm_flag_out.c` with an arm64 branch.
+  *Validate:* `src/test/vcc/asm_flag_out.c` with an arm64 branch.
 
 - [x] **Branch range: no relaxation for b.cond/cbz/tbz/adr** [P].  Done for
   functions without inline asm (`r_relax` in emit.c: b.!cond .+8; b label,
@@ -243,7 +243,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   and for `adr` to a label beyond 1 MB, an error instead of wrapped code
   (relaxation there is still to do).  The emitter has no tbz.  Left: the
   assembler's integer targets (`b.eq 0x100000000`), see the assembler section.
-  `arch/a64/a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
+  `include/arch/a64/a64.h:129-140` mask the offset; `enc()` in `emit.c:1484`.  Out-of-range
   conditional branches must become an inverted branch over a `b`; `adr`
   beyond ±1 MB must become `adrp+add`; `tbz` (±32 KB) likewise.  Also assert
   in the encoders (debug builds) that the offset fits.  Assembler too:
@@ -256,7 +256,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   realigns sp (42ecfb3, from PostgreSQL); in a function with a VLA or
   alloca x28 holds that realigned sp and addresses the frame slots
   (finish_function); VLAs of over-aligned types round their address up
-  (emit/stmt.c).  `slot()` `emit.c:2224`.
+  (codegen/stmt.c).  `slot()` `emit.c:2224`.
   Realign: when a function has a local with alignment > 16, align sp
   (`and sp, x?, #-A`) after the frame setup and address such locals off a
   base register (x19 or sp), keeping x29 for the frame.
@@ -266,19 +266,19 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **Atomic complex increment/decrement** [P]. Non-atomic complex
   `++`/`--` update only the real component and preserve the imaginary bits.
   Atomic complex values up to eight bytes use a whole-object compare-exchange
-  loop (`tests/vcc/atomic_complex_incdec.c`, `tests/atomic/complex_concurrent.c`).
+  loop (`test/vcc/atomic_complex_incdec.c`, `test/atomic/complex_concurrent.c`).
   Linux wider complex values use the generic libatomic whole-object ABI and
   CAS retries. Validated concurrent double/long-double increments, imaginary
   signed-zero retention, 64-byte aggregate snapshots and 128-bit integer RMW
-  on both Linux targets (`tests/atomic/wide.c`, link with `-latomic -pthread`).
+  on both Linux targets (`test/atomic/wide.c`, link with `-latomic -pthread`).
   Wider atomic operations on other targets remain unsupported.
 
 - [x] **`_Atomic` dropped** [P].  Done: `_Atomic(T)` and the qualifier
-  (also `T *_Atomic`) make a type of its own (`TF_ATOMIC`, `ty_atomic()` in
-  cc/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
+  (also `T *_Atomic`) make a type of its own (`AST_TYPE_FLAG_ATOMIC`, `ty_atomic()` in
+  frontend/c/type.c) with clang's layout; lvalue conversion (`decay_slow`) yields
   T; emit loads with `ldar`, stores with `stlr`, and every compound
   assignment and `++`/`--` is a `casal` loop around the operator's usual
-  code (`atomic_rmw`, emit/expr.c).  Tests: `atomic_layout.c`,
+  code (`atomic_rmw`, codegen/expr.c).  Tests: `atomic_layout.c`,
   `atomic_ops.c`. Linux whole-object records and wider integer, FP and complex
   accesses use the libatomic pointer ABI when a native 1/2/4/8-byte access is
   unavailable; native 16-byte instructions remain an optimization. Atomic
@@ -288,7 +288,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   pointer unevaluated. Unknown Linux sizes/alignment query libatomic instead
   of claiming every access is lock-free. Library-backed 16-byte operations
   are conservatively not always lock-free. Tests: `atomic_lock_free.c`,
-  hosted `tests/atomic/lock_free_runtime.c` (both Linux targets).
+  hosted `test/atomic/lock_free_runtime.c` (both Linux targets).
   Differs from clang on
   purpose: clang 21/23 zero-extend a signed old value when the compound
   operation leaves int arithmetic (`x /= -2` on `_Atomic signed char` -2
@@ -325,11 +325,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* unity/file builds, own x86 then ARM/QEMU suites, O0 regression,
   and kernel sema run/batch; evidence `work/results/pr113596/validation.json`.
 - [x] **VLA pointer `++`/`--`/`+=`/`-=`/difference ignore runtime size** [P].
-  Done (emit/expr.c: assign_op, incdec_op, pointer difference).  Found
+  Done (codegen/expr.c: assign_op, incdec_op, pointer difference).  Found
   with it: `int a[6][n]` (constant outer bound) was laid out as a 0-byte
   fixed array that overwrote other locals; an array of VLAs is now a VLA
-  (cc/declarator.c).  VLA sizes are evaluated once where the declaration
-  is reached (parameters: on entry) and kept in a slot (emit/stmt.c
+  (frontend/c/declarator.c).  VLA sizes are evaluated once where the declaration
+  is reached (parameters: on entry) and kept in a slot (codegen/stmt.c
   vla_fix), so a later `n = ...` no longer changes `sizeof` or the step.
   Was: `ptr_add_vla` `emit.c:6051` only covers binary `+`/`-` and subscripting.
   *Validate:* T1 `vla_ptr.c` (`int (*q)[n]`: `q++`, `q--`, `q += 2`,
@@ -348,21 +348,21 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `vla_bound_effects.c`; unchanged Kefir `vla1`, all four
   Clang/vcc combinations on Linux x86-64 and ARM/QEMU.
 - [x] **VLA with initializer accepted; garbage at run time** [P].  Done:
-  rejected as clang does, same location and range (cc/decl.c); `= {}`
+  rejected as clang does, same location and range (frontend/c/decl.c); `= {}`
   (accepted by clang in every mode) zeroes the array at run time
-  (emit/stmt.c gen_vla_decl).  Tests: `tests/diag/vla_init.c`,
-  `tests/vcc/vla_zero.c`.
+  (codegen/stmt.c gen_vla_decl).  Tests: `test/diag/vla_init.c`,
+  `test/vcc/vla_zero.c`.
   Was: reject
   as clang does ("variable-sized object may not be initialized"), except
   `= {}` in C23 which zeroes.
-  *Validate:* T4 (`int a[n] = {1};` errors); `tests/diag/vla_init.c` once
+  *Validate:* T4 (`int a[n] = {1};` errors); `test/diag/vla_init.c` once
   the message matches; T1 for the C23 `= {}` zeroing when C23 lands.
-- [x] **Vector types passed in GPRs** [P].  Done: `hfa()` (emit/abi.c)
+- [x] **Vector types passed in GPRs** [P].  Done: `hfa()` (codegen/abi.c)
   takes short vectors (8/16 bytes) alone and as HVA members (1-4 of one
   size, never mixed with floats), so arguments, returns and va_arg use v
   registers; vectors under 8 bytes are returned in v0 as clang/LLVM does
-  (lanes widened to 8 bytes; `vec_small`).  Tests: `tests/abi/vec_args`,
-  `tests/abi/vec_small_ret` (bench/vcc-abi.py, Linux).  Left: the Darwin
+  (lanes widened to 8 bytes; `vec_small`).  Tests: `test/abi/vec_args`,
+  `test/abi/vec_small_ret` (bench/vcc-abi.py, Linux).  Left: the Darwin
   host half (T2/T3), variadic vectors on Darwin.
   Was: `is_recabi` `emit.c:98`.
   Short vectors (8/16 bytes) go in v registers per AAPCS64 (and HVA
@@ -370,14 +370,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T2 `vec-args` (int32x4, uint8x8, `vector_size(16)` float/int,
   as arguments, returns, varargs, mixed with HFA) both targets.
 - [x] **Darwin: narrow integer returns not extended** [P].  (done:
-  `tests/abi/narrow_int`, `bench/vcc-abi.py --host`; arguments too.)  Apple's ABI
+  `test/abi/narrow_int`, `bench/vcc-abi.py --host`; arguments too.)  Apple's ABI
   requires the callee to sign/zero-extend `char`/`short`/`bool` returns to
   32 bits (and the caller for arguments).  Extend at return in emit.c when
   the target is Darwin.
   *Validate:* T2 `narrow-ret` on Darwin (`retc(0x1ff)` → -1, `bool`,
   `unsigned short`, through function pointers and tail position).
 - [x] **Darwin: unnamed bitfields add alignment** [P].  (done:
-  `bench/vcc-bflayout.py`, both targets, and `tests/abi/bitfield_layout`;
+  `bench/vcc-bflayout.py`, both targets, and `test/abi/bitfield_layout`;
   it also found two Linux bugs, fixed with it: `aligned()` on a bit-field
   did not move its offset, and packed bit-fields were byte- not bit-aligned.)  On Darwin `int :0`
   and `int :3` do not affect the struct's alignment.  `struct{char a; int :0;
@@ -389,7 +389,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `f128.h`, `bench/vcc-ldconst.py`; also float literals rounded once, and
   out-of-range float→int folds saturate as clang.)
   `number_s` `cc.c:1296`.  Parse to binary128 (a correctly rounded
-  decimal→binary128 converter; the tf soft-float in `tests/rt` can be the
+  decimal→binary128 converter; the tf soft-float in `test/rt` can be the
   check), fold in binary128.
   *Validate:* T1 `ldouble_const.c` (`0.1L != 0.1`, `1e4000L` finite,
   `LDBL_MAX`, `LDBL_MIN`, denormals, hex float `0x1.0000000000000000000000000001p0L`,
@@ -398,18 +398,18 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Implement `#pragma weak sym` and `#pragma weak alias = target`.
   *Validate:* T6 `pragma_weak.c` (symbol binding WEAK, alias defined);
   T1 `pragma_weak_undef.c` (`&ext == 0` at run time, not folded to 1).
-  (done: clang's rules in `cc/decl.c`, pending pragmas included, and its
+  (done: clang's rules in `frontend/c/decl.c`, pending pragmas included, and its
   diagnostics; on Darwin the aliases are local, as clang's.  Also fixed: a
   weak symbol's address, by attribute too, was folded as nonzero in the
   front end and the emitter, and Darwin aliases lacked the `_` on their
-  target.  Bindings by the linker in `tests/abi/pragma_weak` (T6 does not
+  target.  Bindings by the linker in `test/abi/pragma_weak` (T6 does not
   exist), run-time zero in T1 `pragma_weak.c`, warnings in
-  `tests/diag/pragma_weak.c`.)
+  `test/diag/pragma_weak.c`.)
 - [x] **`#pragma pack(push, ident, N)` ignores N; `pop, ident` pops one** [P].
-  (done: `pragma_pack` in cc/token.c with clang's rules: labels, `pop, id`
+  (done: `pragma_pack` in frontend/c/token.c with clang's rules: labels, `pop, id`
   to the label (a missing one pops nothing), `pop, N`, `pack(0)` = default,
   invalid values and malformed pragmas ignored whole; tests
-  `tests/vcc/pragma_pack.c`, `pragma_pack_pop.c`.  clang's
+  `test/vcc/pragma_pack.c`, `pragma_pack_pop.c`.  clang's
   -Wignored-pragmas warnings are not given.)
   `cc.c:919-927`.
   *Validate:* layout `_Static_assert` cases against clang (all forms:
@@ -419,7 +419,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Nested GNU range lists now detach on later writes, preserving independent
   element values and positional continuation (`range_designator_overwrite.c`,
   unchanged GCC `gnu99-init-1.c`).
-  (done, cc/init.c: an array element or range a later designator covers is
+  (done, frontend/c/init.c: an array element or range a later designator covers is
   dropped, not evaluated; a designator into a sub-object initialized by one
   value keeps the rest of it: a string becomes one element per character,
   a struct/array value one member access / element per part, a union value
@@ -427,16 +427,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   error: the overridden value has side effects (clang evaluates it once).
   Only a run that starts below an earlier one's end scans for covered runs,
   so in-order lists stay linear (`init_large.c`, `vcc-timeout: 10`).
-  Tests `tests/vcc/desig_override.c`, `desig_override2.c`.)
+  Tests `test/vcc/desig_override.c`, `desig_override2.c`.)
   `.s = "ab", .s[3] = 'z'` loses "ab"; `.i = iv, .i.y = 99` zeroes `i.x`;
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
 - [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
-  `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
+  `cc_options` field before `outfd` (cc.h says parse options go there) plus emit;
   `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl
   cache rows need bigger headers to reach a restore).  Was:  `opt_sig`
-  `driver/ccsnap.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
+  `driver/declaration-cache.c:356` misses `-std`, `-fgnu89-inline`, `-finstrument-functions`,
   implicit-int/function flags; `sig_of` `pp.c:1518` misses `-W`/`-Werror`.
   Derive both keys from one struct of all parse-affecting options so a new
   option cannot be forgotten.
@@ -454,7 +454,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   until then T11 with `#ifdef __OPTIMIZE__` probes.
 - [x] **Inline asm `%=` depends on thread scheduling** [R].  (done: the
   function's symbol × 1024 + its n-th emitted asm that uses `%=`
-  (emit/asm.c); `tests/vcc/asm_uniq.c` with the new `vcc-threads-same`
+  (codegen/asm.c); `test/vcc/asm_uniq.c` with the new `vcc-threads-same`
   marker (`-S` equal with 1 and 8 threads; failed before) and `vcc-noref`
   (clang rejects `%=` on AArch64).)
   `atomic_fetch_add(&E->asmno)` `emit.c:8010`.  Number per function
@@ -463,7 +463,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   functions with `VCC_THREADS=1` and `=8` ten times; objects byte-identical.
 - [x] **LSE-only atomics** [R].  (done: without LSE (Linux default, armv8-a,
   -mcpu=cortex-a53 ..., `+nolse`) every casal/swpal/ld<op>al is an
-  ldaxr/stlxr loop (emit/builtin.c at_cas/at_swp/at_ldop, also the
+  ldaxr/stlxr loop (codegen/builtin.c at_cas/at_swp/at_ldop, also the
   `_Atomic` operators); LSE as before for armv8.1-a+, `+lse`, newer -mcpu
   and Darwin; `__ARM_FEATURE_ATOMICS` as clang (`bench/vcc-driver.py`,
   16 rows).  `vcc-ctests.py --cpu cortex-a53` runs vcc's binaries on a CPU
@@ -477,9 +477,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   with a `--cpu` option.
 - [x] **`error()` calls dropped silently when not folded** [P].  (done: every
   surviving call is clang's error "call to 'f' declared with 'error'
-  attribute: msg", once per call site (emit/call.c); the old drop-and-go-on
+  attribute: msg", once per call site (codegen/call.c); the old drop-and-go-on
   rule only with `-fvcc-kernel`, which `-D__KERNEL__` implies.  Test
-  `tests/diag/attr_error.c` with the new `diag-mode: -c` marker.  Differs:
+  `test/diag/attr_error.c` with the new `diag-mode: -c` marker.  Differs:
   clang reports errors inside `static inline` functions after their caller's
   (it emits them later), vcc where they are inlined.  The `warning`
   attribute is still ignored.)
@@ -493,8 +493,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **Socket has no peer check, lives in /tmp** [R].  *Done:* default socket
   `$XDG_RUNTIME_DIR/vccd/` or `$TMPDIR/vccd-UID/` (0700, owner and mode checked
   by shim and server, `protocol.h`), socket bound 0600, peer uid checked on
-  accept (getpeereid / SO_PEERCRED).  The other-uid test needs sudo.  Was:  `vccd/vccd.c:924-927`,
-  `vccd/shim.c:85-135`.  Socket in a per-user 0700 directory
+  accept (getpeereid / SO_PEERCRED).  The other-uid test needs sudo.  Was:  `server/vccd.c:924-927`,
+  `bin/vcc/shim.c:85-135`.  Socket in a per-user 0700 directory
   (`$XDG_RUNTIME_DIR` or `$TMPDIR/vccd-$UID/`), check the directory's owner
   and mode before connecting (shim) and before binding (server), and check
   the peer uid with `getpeereid`/`SO_PEERCRED` on every connection.
@@ -502,48 +502,48 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   refused; pre-created squatting socket/dir detected by the shim and refused).
 - [x] **ld.lld spawned with the request's environment** [R].  *Done:* spawn drops
   `DYLD_*`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT` (blacklist, so tools keep
-  the variables they read); vccd-test spawned-tool-env-clean.  Was: `vccd/vccd.c:543`.
+  the variables they read); vccd-test spawned-tool-env-clean.  Was: `server/vccd.c:543`.
   Whitelist (PATH and the few the tools read); drop `LD_*`/`DYLD_*`.
   *Validate:* T12 (`DYLD_INSERT_LIBRARIES=/nonexistent` in the request does
   not change the child; a test helper dumps its env).
 - [x] **No protocol/build versioning** [R].  *Done:* magic "roo2", the header
   carries a build id (size+mtime of the vccd next to the shim); vccd answers
-  VROOM_STATUS_MISMATCH and the shim says to restart it (vccd-test
+  VCCD_STATUS_MISMATCH and the shim says to restart it (vccd-test
   other-build-refused).  No automatic restart.  Was:  `protocol.h:12`.  Add a build
   id (hash of the binary or a build-time constant) to the handshake; on
   mismatch the shim restarts the server or falls back.
   *Validate:* T12 (shim from build A against vccd from build B → clear
   error or restart, never silent service).
 - [ ] **Input-driven `abort()` / stack overflow kill the whole server** [P].  (recursion
-  done: `lib/vstack.h` checks the stack pointer in cast_expr, the #if evaluator
+  done: `include/port/stack-guard.h` checks the stack pointer in cast_expr, the #if evaluator
   and argument pre-expansion; 128 KB left ends the TU (clang itself crashes
   on these inputs).  Overflow is a per-TU error now too: pp's
-  token stack via fatal(), as/elf regions via `vjob_fail` (obj/obj.h, a longjmp
+  token stack via fatal(), as/elf regions via `vjob_fail` (include/obj/obj.h, a longjmp
   the driver sets); vcc-stress 19/19, --vccd 20/20.  Audited the rest: input-driven
   ones are errors now (front-end heap: fatal; labels: efatal; pp shared region,
-  identifier table: `vjob_escape` in lib/intern.c; ELF sections: vjob_fail); the
+  identifier table: `vjob_escape` in common/intern.c; ELF sections: vjob_fail); the
   remaining aborts are mmap failures and internal invariants.  No stress case
   yet for the front-end heap, labels or sections.)
   Aborts: `emit.c:1934,2036,2778`; `cc.c:44,1518,6219`; `as/as.c:107`;
-  `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `lib/intern.c:96,195`;
-  `lex/lex.c:1318,1394`; `driver/ppdriver.c:65`.  Recursion without depth limit: cc.c
+  `obj/obj.c:33,40,234`; `pp.c:89,301,1721,2145,2531,2594`; `common/intern.c:96,195`;
+  `frontend/lex/lex.c:1318,1394`; `driver/ppdriver.c:65`.  Recursion without depth limit: cc.c
   expression/declarator parser, pp `#if` evaluator and argument
   pre-expansion.  Turn arena/limit failures into per-TU fatal errors
   (longjmp to the job, as `fatal_jb` already does in pp), add depth limits
   matching clang's (bracket depth 256 by default, `-fbracket-depth`), and
-  check `vmreg` reservations in `mk`/`sym`/`tag`.
+  check `vjob_region` reservations in `mk`/`sym`/`tag`.
   *Validate:* T5 (every generated case: exit 1 with a diagnostic, and in
   `--vccd` mode the server keeps serving).
 - [x] **Unbounded argv arrays** [P].  *Done:* the directory lists are sized by
   argc (one per-thread allocation), the depfile table grows until every file
   fits; 5000 `-I`, 5000 `-include` and a 70000-header depfile work.  Was:  `driver/ppdriver.c:410,489-498,561`
-  (`dirs_i[1024]`, `all[2048]` …), `write_deps` 65536 files
+  (`dirs_i[1024]`, `all[2048]` …), `driver_depfile_write` 65536 files
   (`driver/ppdriver.c:288`).  Allocate from the job arena.
   *Validate:* T5 (5000 `-I`, 5000 `-include`, a TU with 100k headers in the
   depfile).
 - [x] **fd handling: uninitialised cmsg, three fds assumed** [R].  *Done:* cbuf
   zeroed, room for 16, count from cmsg_len; not exactly three closes them all.  Was:
-  `vccd/vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
+  `server/vccd.c:172,186,875-877`.  Zero `cbuf`, take the count from `cmsg_len`,
   reject requests without exactly three fds.
   *Validate:* T12 (send 0, 1, 2, 4 fds; server rejects, does not close
   unrelated fds — check that the listening socket and other open connections
@@ -553,12 +553,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   in fixdep/elf/ppdriver.  No child-fd test yet.  Was:  Use `MSG_CMSG_CLOEXEC` (Linux; on
   macOS set `FD_CLOEXEC` immediately under a lock or spawn with
   `POSIX_SPAWN_CLOEXEC_DEFAULT`), `O_CLOEXEC` in `driver/ppdriver.c:743`,
-  `vccd/fixdep.c:407`.
+  `utils/fixdep.c:407`.
   *Validate:* T12 (a spawned child lists its open fds: only 0-2).
 - [x] **No timeouts; idle connections stall all workers** [R].  *Done:* a worker
   waits 2 s (poll) for the request, SO_RCVTIMEO bounds the payload; a failed
   recvmsg no longer spins in CMSG_NXTHDR on a zero cmsg_len.  Was:
-  `vccd/vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
+  `server/vccd.c:182,190,305`.  Read the request with a deadline; don't tie a
   worker to a connection until the request is complete.
   *Validate:* T12 (open 2×ncpu idle connections, then a real job completes
   within 1 s).
@@ -568,20 +568,20 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   vccd-test killed-client-no-output.  (SIGTERM
   done: the listening socket closes and is unlinked, queued and running jobs
   finish, then exit; vccd-test sigterm-drains.  Cancel on client exit open.)
-  `vccd/vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and
+  `server/vccd.c:979,1017`.  Detect peer close (kqueue EV_EOF / poll POLLHUP) and
   abandon the job; on SIGTERM stop accepting and drain.
   *Validate:* T12 (kill the shim during a long TU: the output file is not
   written; SIGTERM during a job: the job completes or its output is absent).
 - [x] **Outputs written in place** [R].  *Done:* every output (`-o`, `-S`, deps)
   goes to `NAME.vccPID.N.tmp` and is renamed when complete; a failed job
   unlinks it and leaves the old file.  Was:  `driver/ppdriver.c:266`.  Write to a
-  temporary next to the target and `rename()` (vccd/ar.c already does).
+  temporary next to the target and `rename()` (utils/ar.c already does).
   *Validate:* T12 (interrupt during write: either the old file or none,
   never a truncated one with a new mtime).
 - [x] **Request environment and umask ignored by in-process jobs** [R].  *Done:*
   jobs read `CPATH` (after -I), `C_INCLUDE_PATH` (after -isystem) and
   `SOURCE_DATE_EPOCH` (UTC __DATE__/__TIME__/__TIMESTAMP__) as clang, from the
-  request's env under vccd (`ppd_env.envp`); outputs follow the client's umask.
+  request's env under vccd (`driver_environment.envp`); outputs follow the client's umask.
   vccd-test request-env-reaches-job.  The VCC_*/VPP_* debug knobs stay
   server-wide.
 - [x] **Caches never invalidated** [R].  *Done:* a build is a client process
@@ -590,7 +590,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   include caches are emptied (header/decl caches key on the file entries, so
   they follow).  Within one build nothing is revalidated: a header regenerated
   mid-build after it was read is still stale.  vccd-test: 4 tests XPASS.  Was:  Token cache keyed by path, caches
-  misses (`lex/lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
+  misses (`frontend/lex/lex.c:1484-1505`, comment at `pp.c:4025`); dircache; header
   cache replays on top.  Either scope all caches to a build (make's
   jobserver lifetime / an explicit generation the shim sends) or validate
   with (dev, ino, size, mtime_ns) on each first use per build and drop
@@ -599,7 +599,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   previously missing header → found; `__has_include` flips; regenerate a
   header during a build).
 - [ ] **Memory only grows** [R].  (server side done: at a new build, idle, a vccd
-  above `VCC_RESTART_MB` resident (6144) answers what it holds VROOM_STATUS_RETRY
+  above `VCC_RESTART_MB` resident (6144) answers what it holds VCCD_STATUS_RETRY
   and execs itself on the same listening socket; the shim resends.  vccd-test
   memory-restart-between-builds.  Within one build memory still only grows.
   A full identifier table (6.3M) is an error for the TU, and vccd restarts at
@@ -613,7 +613,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **No server → exit 127** [R].  *Done:* on the default socket the shim
   starts vccd itself (flock in the socket directory, setsid, log there;
   `VCC_NO_AUTOSTART` turns it off); vccd-test autostart-default-socket (4
-  concurrent shims, one server).  An explicit VCC_SOCK is never started.  Was:  `vccd/shim.c:96-99`.  Autostart the server
+  concurrent shims, one server).  An explicit VCC_SOCK is never started.  Was:  `bin/vcc/shim.c:96-99`.  Autostart the server
   (with a lock) or run the job in-process in the shim.
   *Validate:* T11 (no server running: `vcc -c a.c` succeeds).
 - [x] **Request size capped at 1 MB** [R].  *Done:* 8 MB (above Linux's ARG_MAX
@@ -625,8 +625,95 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ## Tier 3: features general C needs
 
 ### Codegen (`emit.c`)
+- [ ] **Windows x64: packed boolean vectors at calls** [C].  clang passes an
+  `ext_vector_type` `_Bool` vector of N lanes on the Microsoft convention one
+  lane per argument position (results through a hidden pointer, the bits
+  packed), as it does for System V; `arch/x64/codegen/abi-win64.c` passes it
+  as one by-reference vector.  `src/test/abi/packed_bool`, `packed_bool_4096`
+  and `packed_bool_variadic_fixed` are `vcc-xfail-win64`.
+  *Validate:* `bench/vcc-abi.py --target win64 packed_bool` XPASSes; remove the markers.
+- [ ] **Windows x64: MS bit-field layout of a packed record with `:0`** [C].
+  `tcc/95_bitfields_ms` TEST 6 (`__attribute__((packed))`, `int x:12, y:4, :0,
+  :4, z:3`): clang starts the unit after `:0` at the byte where the previous
+  unit ends, vcc aligns it to the type (`frontend/c/record-layout.c`); found
+  by `bench/vcc-win64.py`.
+  *Validate:* `bench/vcc-win64.py tcc 95_bitfields_ms` passes (XPASS: remove
+  its `XFAIL` entry in `bench/vcc-win64.py`).
+- [ ] **x86-64: `naked` functions** [C].  `__attribute__((naked))` is not
+  implemented for x86-64: the body gets a frame, so the asm's `retq` sits
+  inside it; on Windows the epilogue checker of `vcc-win64.py --seh` flags
+  `vcc/dead_results` (`XFAIL`, stage seh; the function is never called).
+  *Validate:* `bench/vcc-win64.py --seh vcc dead_results` XPASSes.
+- [ ] **Windows x64: `-c` without text for the frame and sections** [P].
+  `vpp -c` for the target encodes records directly but hands the `.def`
+  records, sections/COMDAT, `.seh_*`, data and strings to the TU's assembler
+  as text items (as x86-64 ELF does for its directives); the `coff_section`,
+  `elf_reg` + `coff_class`, `coff_seh_*` calls of obj.h could take them
+  directly.  *Validate:* `vcc-win64.py --objcmp` stays 2105/2106; emit time
+  per TU drops.
+- [ ] **`-g` on `.S` sources: clang's file names and rows** [C].  vasm/vcc
+  write MC's assembler debug information for a `.s` byte for byte (but the
+  producer), and follow cpp line markers in the text they are given; for a
+  `.S` clang assembles a temporary file named by `-main-file-name` and its
+  rows follow the preprocessor's markers into included files, vcc's `-c x.S`
+  path hands the assembler text whose rows are the `.S` file's own lines.
+  *Validate:* `clang -g -c x.S` = `vpp -g -c x.S` but DW_AT_producer for the
+  vas-corpus `.S` files (a new mode).
+- [ ] **vasm -g: `.symver` symbols after the debug sections' symbols** [C].
+  MC creates the `.symver` names in the ELF writer, after the
+  `-g`-generated sections; vasm registers them at the directive.
+  *Validate:* `bench/vas-obj.py` `symver.s` -g XPASSes (remove `G_XFAIL`).
+- [ ] **Windows x64: clang's `.debug$S` with `-g`** [C].  clang's `-g -S`
+  for MinGW also writes a CodeView `.debug$S` (S_OBJNAME, S_COMPILE3 with
+  its version); vcc writes only DWARF (assembled, it is clang's text either
+  way, so objects compare equal).  Nothing reads it for MinGW.
+  *Validate:* decide whether to write it; then a `vcc-dwarf.py` check.
+- [ ] **Windows x64: stack-protector failure path** [T].  The guard and
+  `-lssp` match clang (`src/test/win64/stack_protector.c`, vcc-driver.py
+  rows); a smashed canary reaching `__stack_chk_fail` is not tested (where
+  the canary sits relative to an overflowed buffer differs from clang's
+  layout).  *Validate:* a test that overwrites the canary slot itself and
+  exits through libssp's message, compared with clang's.
+- [ ] **Windows x64: `--own` under vccd in a harness** [T].  The shim with
+  `--target=x86_64-w64-mingw32` compiles and links (driver/link-mingw.c in
+  vccd); `bench/vccd-test.py win64-cross-build-through-the-shim` and
+  `bench/zlib/run.py --target win64` (zlib's ./configure and Makefile through
+  the shim) cover it since WIN8, but `vcc-win64.py` drives vpp only.
+  *Validate:* a `vcc-win64.py --vccd` mode (private vccd, the shim as CC)
+  gives the same pass set as `--own`.
+- [ ] **Windows x64: the x86 SIMD intrinsic headers** [C].  vcc's own
+  `src/headers/x86/` has only what MinGW-w64's `windows.h`/`malloc.h` reach
+  (`x86intrin.h`, `emmintrin.h`, `xmmintrin.h`, `mm_malloc.h`: the vector
+  types, fences, pause, clflush, MXCSR, rdtsc); no `immintrin.h`, no SSE/AVX
+  arithmetic intrinsics, no `cpuid.h`, so `<intrin.h>` (which includes
+  `pmmintrin.h` and the rest) does not compile without `-resource-dir`.  The
+  WIN8 projects are configured without them (FFmpeg `--disable-asm`).
+  *Validate:* `vcc-diff.py --win64` with vcc's headers on the intrinsic TUs
+  (`intrin.h`, `-march=haswell`) and a test calling SSE2/AVX2 intrinsics
+  under Wine against clang's build.
+- [ ] **Windows x64: `<tgmath.h>` and `<stdbit.h>`** [C].  Neither MinGW-w64
+  nor `src/headers/freestanding/` has them (clang's resource directory has
+  `tgmath.h`; C23's `stdbit.h` neither).  *Validate:* a `src/test/vcc` case per
+  header compiled for x86_64-w64-mingw32 without `-resource-dir`.
+- [ ] **`-fcommon` and `__attribute__((common))` are ignored** [C].  vcc
+  emits a tentative definition as `.bss` (`B`) on every target where clang's
+  `-fcommon` or the attribute gives a common symbol (`C`), found in WIN8's
+  vnm comparison; a program that defines the same tentative variable in two
+  TUs and relies on `-fcommon` fails to link.  *Validate:* `vnm` of a TU with
+  both shows `C`, as clang's, for ELF and COFF; a two-TU test links with
+  `-fcommon`.
+- [ ] **`-coverage` is accepted and ignored** [C].  zlib's Makefile builds
+  `infcover` with `-coverage`; clang instruments and links the profile
+  runtime, vcc compiles normally (the program runs, no `.gcda`).
+  *Validate:* either an error ("unsupported option") or gcov-compatible
+  counters; decide which.
+- [ ] **Windows x64: FFmpeg with NASM, SQLite's TCL suite** [T].  WIN8 ran
+  FFmpeg's C fallbacks only (`--disable-asm`) and SQLite without its TCL
+  testrunner (no tclsh for Windows on the host; testfixture.exe needs one).
+  *Validate:* `bench/ffmpeg/run.py --target win64` with x86asm (NASM objects
+  linked by vlink) and a Windows Tcl to build testfixture.exe.
 - [ ] **wasm: the optimizations the gcc torture tests assume** [P].  The
-  wasm generator (`arch/wasm/emit/`) has no inliner or dead-code removal:
+  wasm generator (`arch/wasm/codegen/`) has no inliner or dead-code removal:
   `20020720-1`, `20030216-1`, `20041114-1`, `compare-3`, `pure-1`,
   `shiftopt-1` call a `link_error` that the optimizer must remove, and
   `bcp-1` needs `__builtin_constant_p` of an inlined argument.  They are
@@ -693,8 +780,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* `bench/vcc-wasm.py -j 6 --suite vcc --no-cache -v` using emcc 7
   and Node 24; every named probe must become XPASS when repaired, then remove
   its corresponding entry and rerun. Also retain the unmarked GCC/TCC gates.
-- [ ] **PIC/PIE** [P]: done: `cc_opts.pic` from the driver (PIE the hosted
-  default, `-fno-pic`), `sym_needs_got` (arch/a64/emit/value.c) as clang:
+- [ ] **PIC/PIE** [P]: done: `cc_options.pic` from the driver (PIE the hosted
+  default, `-fno-pic`), `sym_needs_got` (arch/a64/codegen/value.c) as clang:
   `-fPIC` every default-visibility non-static symbol, `-fPIE` those not
   defined in the TU, hidden/protected direct, calls direct; checked by
   `bench/vcc-pic.py` (GOT relocations vs clang per mode).  Left: T8 (a
@@ -705,17 +792,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **ELF TLS** [P]: done as clang's defaults: local-exec for a symbol
   defined in the TU, initial-exec for the others, TLSDESC under `-fPIC`
   (`I_TLV` with `cond` = model, x0 = the address), `.tdata`/`.tbss`
-  "awT"; relocations checked by `bench/vcc-pic.py` (`tests/pic/tls.c`),
-  run by `tests/vcc/tls_static.c` (`tests/rt` sets `tpidr_el0`).  `-ftls-model=` and
+  "awT"; relocations checked by `bench/vcc-pic.py` (`test/pic/tls.c`),
+  run by `test/vcc/tls_static.c` (`test/rt` sets `tpidr_el0`).  `-ftls-model=` and
   `tls_model()` as clang (the attribute over the option, the default if
-  stronger; `tests/pic/tls_model.c`).  Left: local-dynamic proper (now
+  stronger; `test/pic/tls_model.c`).  Left: local-dynamic proper (now
   TLSDESC per symbol, clang uses `_TLS_MODULE_BASE_` for local symbols), the
   register choice (always x0/x1, clang allocates).  `-ffunction-sections`/
   `-fdata-sections` done (ELF, `.text.f`/`.data.d`/`.tbss.t`...; static
   locals are named after vcc's symbol, `.bss.x.N`, clang `.bss.f.x`;
-  `tests/vcc/data_sections.c`).
+  `test/vcc/data_sections.c`).
   *Validate:* T6 (relocs per model); T1 run under qemu with the runtime's
-  TLS setup (`tests/rt` start.S sets `tpidr_el0`); T3 already has TLV.
+  TLS setup (`test/rt` start.S sets `tpidr_el0`); T3 already has TLV.
 - [~] **CFI / `.eh_frame`** (and Darwin compact unwind) [P].
   `-fasynchronous-unwind-tables` default on hosted Linux.  ELF done: the
   printer writes `.cfi_*` (CFA = x29 + 16 after the frame record, the frame
@@ -736,25 +823,30 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   without a prologue, as clang), `.file 0` the main file, a v5 CU with
   low/high pc.  `bench/vcc-dwarf.py`: 1377/1377 verify, `.text` unchanged by
   `-g`, `-c` = clang -c of `-S`; rows clang lacks (136 files) are ifs clang
-  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.)
+  -O0 folds.  Left: variables, types, frame base; Mach-O; direct objects.
+  Windows x64 (WIN6): DWARF 4 by default as clang, `-gdwarf-2..5` on every
+  target, COFF unit ranges for functions outside `.text`; Linux keeps the
+  `.text`-only pc range, so `-ffunction-sections -g` functions are outside
+  the unit there (llvm-symbolizer finds no unit for them).  No
+  `DW_TAG_subprogram`: winedbg names vcc's frames only by module+offset.)
   *Validate:* T6 (`llvm-dwarfdump --verify`); `llvm-symbolizer` maps
-  addresses to the right lines for `tests/vcc`; later a scripted lldb
+  addresses to the right lines for `test/vcc`; later a scripted lldb
   session (break at file:line, print local).
 - [x] **Register spilling** [P] (done: a third try of the function spills each binary
-  operator's left value to a frame slot; tests/vcc/deep_expr.c, deep_mixed.c (depth 10..200,
+  operator's left value to a frame slot; test/vcc/deep_expr.c, deep_mixed.c (depth 10..200,
   long/calls/__int128/double/long double), stress expr-right-nest-250/10k): ~18-deep right-nested expression was a
   fatal "out of registers" (`emit.c:2176-2195`).
   *Validate:* T1 `deep_expr.c` (generated: right-nested depth 10..200,
   mixed int/FP/calls); T5 for depth 10k (no crash).
 - [x] **`_Float16` on Linux x86-64 and arm64.** Storage, literals,
   rounding, arithmetic/conversions, classification, and half-float HFA calls.
-  *Validated:* `tests/vcc/float16.c` exhausts all 65,536 encodings;
-  `tests/abi/float16` checks all clang/vcc caller/callee combinations on
+  *Validated:* `test/vcc/float16.c` exhausts all 65,536 encodings;
+  `test/abi/float16` checks all clang/vcc caller/callee combinations on
   both Linux targets. Kernel sema 887/887 and preprocessing parity 920/920.
 - [x] **`__bf16` on Linux x86-64 and arm64.** Distinct type, two-byte
   bfloat exponent/significand layout, literals/conversions/arithmetic and ABI.
-  *Validated:* all 65,536 encodings in `tests/vcc/bfloat16.c`, cross-compiler
-  `tests/abi/bfloat16` calls on both Linux targets, invalid-complex diagnostic,
+  *Validated:* all 65,536 encodings in `test/vcc/bfloat16.c`, cross-compiler
+  `test/abi/bfloat16` calls on both Linux targets, invalid-complex diagnostic,
   unity/nonunity builds and kernel sema 887/887 (run and batch).
 - [ ] **FP vectors** (`float32x4_t`,
   `emit.c:5886`), **`"w"` asm operands** (`emit.c:7831`), **16-byte atomics**
@@ -770,10 +862,10 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   detection under qemu.
 - [x] **Fixed limits** (done: call arguments (42ecfb3), nested loops/switches
   and cleanups: reserved stacks (4M), no fixed array; the loop pushes had no
-  bound check: tests/vcc `limits.c`, 300 arguments, 1000 nested loops, 300
+  bound check: test/vcc `limits.c`, 300 arguments, 1000 nested loops, 300
   nested switches, 1000 cleanups, also under ASan.)  Kept by design, with a
   clean error: 16M instructions / 4M labels per function.
-- [x] **`-S` on Darwin writes ELF directives** (`.type @function`).  (Done: emit/darwin.c
+- [x] **`-S` on Darwin writes ELF directives** (`.type @function`).  (Done: codegen/darwin.c
   rewrites the text into Apple's dialect; far b.cond/cbz in text are long form on both
   targets.  `bench/vcc-darwin-s.py`: 1428 vcc + gcc-torture tests, -S assembled by `as`,
   same result as the direct object.)
@@ -786,13 +878,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   warnings and drops those in code its CFG finds unreachable.  vcc approximates with
   `c->dead` (constant `if`/`?:`), so it still warns after `return`/`break`, in `while (0)`
   bodies and under `v && 0`.  Queue them per function and filter by the flow walk of
-  `-Wreturn-type` (cc/func.c), which would mark reached statements.
-  *Validate:* tests/diag case with each form; `vcc-sema.py warn` stays 879/879.
+  `-Wreturn-type` (frontend/c/func.c), which would mark reached statements.
+  *Validate:* test/diag case with each form; `vcc-sema.py warn` stays 879/879.
 - [ ] **C23 / per-TU `-std`** [P] (partly done: per-TU keyword map `kwmap` (C23 spellings ->
   GNU keywords; true/false/nullptr/constexpr), `#if true`, digit separators through a
-  translated copy (vlex_digitsep: `-E` and `#x` print them without the `'`, clang keeps them),
-  tests/vcc/c23_keywords.c, c99_ids.c; C23 `auto` type inference and strict `-std=c11` without
-  `typeof`/`asm` keywords (D5.5, tests/diag/c23_auto.c).  Left: `u8'a'` (one token only in C23: the lexer
+  translated copy (lex_file_digit_separators_remove: `-E` and `#x` print them without the `'`, clang keeps them),
+  test/vcc/c23_keywords.c, c99_ids.c; C23 `auto` type inference and strict `-std=c11` without
+  `typeof`/`asm` keywords (D5.5, test/diag/c23_auto.c).  Left: `u8'a'` (one token only in C23: the lexer
   cache needs a per-mode entry, which would also give exact separators), nullptr_t,
   constexpr checks, `_BitInt`, `#embed`): one global keyword table (`kwclass`
   `cc.c:740-768`), `o->std` never read.  Per-TU keyword set; then `bool`,
@@ -821,8 +913,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Wasm overflow builtins above 64 bits remain explicitly diagnosed.
   *Validate:* `bench/vcc-bitint.py`, `vcc-bitint-constants.py`,
   `vcc-bitint-abi.py`, `vcc-bitint-replay.py`, `vcc-bitint-float.py`, existing
-  `tests/vcc/bitint_constants.c`, `bitint_runtime.c`,
-  `bitint_compound_padding.c` and `tests/abi/bitint/`.
+  `test/vcc/bitint_constants.c`, `bitint_runtime.c`,
+  `bitint_compound_padding.c` and `test/abi/bitint/`.
 - [ ] **Strict floating environment for wide integer casts**: Linux wide
   integer-to-float lowering currently constructs nearest-even bits and does
   not raise inexact/overflow flags. Accepting `-frounding-math` or
@@ -837,9 +929,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   ignores the environment; its `-frounding-math` wide cast fails in the
   backend, so use exact IEEE expectations rather than that failed oracle.
 - [ ] **Builtins**: ~~`__builtin_shufflevector`, `__builtin_convertvector`~~ (done:
-  tests/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
+  test/vcc/vector_builtins.c; vector diagnostics spell clang's unnamed form, without the
   `(vector of N 'T' values)` note and typedef names) [P].  Library builtins (clang's `F`
-  ones, 479) are declared from cc/libbuiltins.inc (gen-libbuiltins.py) as calls to the
+  ones, 479) are declared from frontend/c/libbuiltins.inc (gen-libbuiltins.py) as calls to the
   function: `bench/vcc-builtins.py` 473 -> 302 -> 190 -> 160 unknown of 924 for aarch64 Linux;
   `__has_builtin` is also 1 for what the front end implements (pp_builtin_known, set by
   cc): 337 -> 237 -> 153 -> 126 answer 0, none 1 where clang says 0 (the harness fails on that).  Audit the full list against clang's `Builtins.td` for the target
@@ -848,27 +940,49 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   generated use of each clang builtin and reports unknowns.
   (Partly: `__builtin_clzg`/`ctzg`/`popcountg`, `__builtin_ldexp*`,
   `scalbn`, `trunc*`, `round*`, `floorf`/`ceilf`, `fmaxf`/`fminf` added for
-  `make -C ccs self-check`; the generic forms reject a fallback whose
-  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: tests/vcc/builtin_rotate_arm.c.  Atomic nand/max/min (`__atomic_*`, `__c11_atomic_*`, `__sync_*` with clang's -Wsync-fetch-and-nand-semantics-changed: diag `sync_nand.c`; LSE ld{s,u}{max,min}al, LL/SC without LSE, nand as a loop), `__atomic_test_and_set`/`clear`, `__c11_atomic_compare_exchange_{strong,weak}`, `__c11_atomic_is_lock_free`: tests/vcc/atomic_nand_minmax.c (also `--cpu cortex-a53`, wasm).  Left in that group: floating `__atomic_fetch_{max,min}` and `fmaximum`/`fminimum`, `uinc`/`udec`.)
+  `make -C src self-check`; the generic forms reject a fallback whose
+  argument has side effects.  Sized `__sync_*_N`, `__sync_swap`, `__c11_atomic_*`, `__builtin_rotate{left,right}N` and the ACLE `__builtin_arm_{nop,yield,wfe,wfi,sev,sevl,clrex,isb,dmb,dsb,trap,clz,clz64,rbit,rbit64,cls,cls64}`: test/vcc/builtin_rotate_arm.c.  Atomic nand/max/min (`__atomic_*`, `__c11_atomic_*`, `__sync_*` with clang's -Wsync-fetch-and-nand-semantics-changed: diag `sync_nand.c`; LSE ld{s,u}{max,min}al, LL/SC without LSE, nand as a loop), `__atomic_test_and_set`/`clear`, `__c11_atomic_compare_exchange_{strong,weak}`, `__c11_atomic_is_lock_free`: test/vcc/atomic_nand_minmax.c (also `--cpu cortex-a53`, wasm).  Left in that group: floating `__atomic_fetch_{max,min}` and `fmaximum`/`fminimum`, `uinc`/`udec`.)
   ~~`__has_builtin` answers 0 for names absent from the kernel/SDK~~ (done for what vcc
   implements, see above; the rest are builtins vcc lacks).
 - [ ] **SVE in the front end**: baseline AArch64 builtin sizeless types and
   libc declarations work; invalid size, array, field, storage and pointer
   arithmetic uses are diagnosed. Four diagnostics and declaration runtime
-  checks pass on Linux x86/ARM; ARM c-testsuite 220/220. Full `arm_sve.h`
-  tuple/intrinsic APIs, `target("+sve")` validation and scalable lowering
-  remain unsupported and are diagnosed explicitly.
-  *Validate:* T1 under `qemu -cpu max`, layout checks for the types.
+  checks pass on Linux x86/ARM; ARM c-testsuite 220/220.
+  Done (2026-11-12): sizeless values in the arm64 direct emitter and a
+  vcc-owned `include/arm_sve.h` for what PostgreSQL's
+  `pg_popcount_aarch64.c` uses (`svptrue_b*`, `svcnt[bhwd]`, `svdup_u8/u64`,
+  `svld1_u8/u64`, `svadd/svand[_n]_u8/u64_x`, `svcnt_u8/u64_x`,
+  `svaddv_u8/u64`, `svwhilelt_b8_s32/s64`), each a macro around inline asm.
+  A sizeless object is a frame slot of the architectural maximum (256 bytes,
+  a predicate 32); a copy moves the bytes of this vector length through
+  z31/p15 (`ldr`/`str`); an asm operand "w" is loaded into z16+ and "Upa"/
+  "Upl" into p0+ around the template (`arch/a64/codegen/asm.c`).  `?:` on two
+  values of one sizeless type is accepted.  VIR leaves such functions to the
+  direct emitter (inline asm).  `bench/pg/speed.py` on a clang-configured
+  build: 1574/1574.
+  Left: the rest of `arm_sve.h` (tuples, the other element types, `_m`/`_z`
+  forms, operators on sizeless vectors, which sema rejects), sizeless
+  arguments and results (the vector PCS: diagnosed "code generation for an
+  SVE argument or result is not supported yet", so no intrinsic can be a
+  function), `target("+sve")` validation (a call to an intrinsic outside
+  such a function is not diagnosed), values in registers across statements
+  (every intrinsic loads and stores its operands), the `__mfp8` builtin type
+  (not needed once the header is vcc's own), and the unbraced
+  `ld1d z0.d, p0/z, [x0]` spelling in vas (GNU as takes it; the header
+  writes `{z0.d}`).
+  *Validate:* test/vcc/sve_popcount.c under `qemu -cpu max` against clang
+  (the runtime's start.S sets CPACR_EL1.ZEN); test/diag/sve_*.c; layout
+  checks for the types.
 - [x] **`ext_vector_type` silently dropped; unknown attributes no warning** [P].
-  Done: `ext_vector_type` (tests/vcc/ext_vector.c);
+  Done: `ext_vector_type` (test/vcc/ext_vector.c);
   `-Wunknown-attributes` for GNU syntax from clang's attribute names per
-  target (`cc/gen-attrnames.sh` -> `attrnames.inc`) with its typo
+  target (`tools/gen-attrnames.sh` -> `attrnames.inc`) with its typo
   correction (SimpleTypoCorrection), 625 generated typos identical to clang
   on all three targets, diag `unknown_attribute.c`; `[[x]]`, `[[gnu::x]]`,
   `[[clang::x]]` (`_Clang`, `__gnu__`) and other vendors from
   `__has_c_attribute` (`unknown_std_attribute.c`, the 625 again per scope).
 - [x] **`[[__clang__::x]]`**: (done: clang's -Wignored-attributes warning with
-  the `_Clang` fix-it, taken as `clang::`; tests/vcc `attr_clang_macro.c`;
+  the `_Clang` fix-it, taken as `clang::`; test/vcc `attr_clang_macro.c`;
   the predefine tables in clang's -dD order, so the "expanded from macro"
   note says `<built-in>:2` as clang: diag `attr_clang_builtin_line.c`.)
   Only `__clang__` written in the source, after a `[[` written there, as
@@ -895,21 +1009,21 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   raw allocation probes; kernel `vcc-sema.py run` and `batch` (887 TUs).
 - [x] **Attributes without effect**: none left.  Accepted
   and needing nothing today: `returns_twice` (locals live in memory:
-  `tests/vcc/returns_twice.c`; the optimizer item must honour it when
+  `test/vcc/returns_twice.c`; the optimizer item must honour it when
   locals go to registers), `alloc_size` (only `__builtin_object_size`,
   where vcc's -1 is the conservative answer), `target` (vas gates no
   instructions yet: the `.arch` item).  (Done: `format(printf, i, j)`
   (`-Wformat`, `-Wformat-extra-args`, `-Wformat-insufficient-args`,
-  `-Wformat-invalid-specifier`, `-Wformat-security`; `cc/fmt.c` after
+  `-Wformat-invalid-specifier`, `-Wformat-security`; `frontend/c/fmt.c` after
   clang's CheckFormatHandler, the type answers per target from clang in
-  `cc/fmttab.inc` by `gen-fmttab.py`; Linux and Darwin, not wasm or
+  `frontend/c/fmttab.inc` by `gen-fmttab.py`; Linux and Darwin, not wasm or
   `-fshort-wchar`; diag `format*.c`, 16 random 300-call files identical to
   clang on both targets except typedef names, kernel warn 879/879,
   PostgreSQL 0 differences); `nonnull` (`-Wnonnull`
   for null constants, plain/indexed/on a parameter: diag `nonnull.c`);
   `ifunc`
   (STT_GNU_IFUNC, global as clang, direct under PIE like an alias:
-  `tests/pic/ifunc.c`, `alias.c` in vcc-pic.py, which now also compares
+  `test/pic/ifunc.c`, `alias.c` in vcc-pic.py, which now also compares
   symbol types and bindings); `deprecated`
   (functions, variables, typedefs, tags, enumerators; not inside a
   deprecated function) and `warn_unused_result`/`[[nodiscard]]`, also in
@@ -931,7 +1045,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "variable has incomplete type 'T'" with the forward-declaration note, also
   with an initializer, the variable then invalid (no follow-on member error);
   "array has incomplete element type"; "previous definition is here" for a
-  defined function: tests/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
+  defined function: test/vcc `label_decl.c`, diag `label_decl_kr_vis.c`,
   `incomplete_var.c`, `conflict_prev_def.c`.)
   Labeled declaration groups remain in their enclosing lexical scope;
   stack lifetime and cleanup are covered by `label_declaration_lifetime.c`
@@ -947,22 +1061,22 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `case-labels-*`; GCC `limits-pointer.c` and `limits-caselabels.c`;
   excessive pointer storage and genuine expression nesting fail cleanly.
 
-### Preprocessor and lexer (`pp.c`, `lex/lex.c`)
+### Preprocessor and lexer (`pp.c`, `frontend/lex/lex.c`)
 - [x] **`#pragma once` by path string, capped at 4096** [P].  (Done: by (dev, ino) from
   read_src, list grows; symlink/hard link/`a/../a` checked against clang -E -P;
-  tests/vcc/once.c, once_tri.c.)
+  test/vcc/once.c, once_tri.c.)
   `pp.c:4189,5191,4479`.  Key on (dev, ino); unbounded set.
-  *Validate:* `ccs/fuzz/regress/pp/` style files + `make -C ccs fuzz-diff`
+  *Validate:* `src/test/fuzz/regress/pp/` style files + `make -C src fuzz-diff`
   extended with a directory fixture (symlink, hardlink, `a/../a/x.h`),
   compared with `clang -E -P`.
 - [x] **UTF-8 BOM not skipped** [P].  *Done:* read_file blanks a leading BOM
-  (columns kept); tests/vcc/bom.c with bom_inc.h.  (vlex_get_hook inputs,
+  (columns kept); test/vcc/bom.c with bom_inc.h.  (lex_file_get_hook inputs,
   fuzz-pp, are not filtered.)
 - [x] **Trigraphs** under strict `-std=c89/c99/c11/c17` or `-trigraphs` [P].  (Done:
-  `vlex_trigraphs` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; tests/vcc/trigraphs.c.
+  `lex_file_trigraphs_replace` lexes a translated copy; `-ftrigraphs`/`-fno-trigraphs` too; test/vcc/trigraphs.c.
   No `-Wtrigraphs` warnings yet.)
 - [x] **No `//` comments in C89** (`-ansi`, `-std=c89`): clang lexes `//` as two `/` there [P].
-  (Done: `vlex_c89` copy, strict c89 only as clang; tests/vcc/c89_comments.c.)
+  (Done: `lex_file_c89_convert` copy, strict c89 only as clang; test/vcc/c89_comments.c.)
   *Validate:* pp-diff fixtures with each `-std`.
 - [x] **`SOURCE_DATE_EPOCH`; `__TIMESTAMP__` from file mtime** [P].  (Both done:
   __TIMESTAMP__ is the current file's mtime, `??? ...` when stat fails, as clang.)
@@ -979,7 +1093,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   clang::offset, prefix, suffix, if_empty, `__has_embed` 0/1/2, -Wc23-extensions,
   -M lists the file, clang's search (absolute, or for quoted names the
   includer's directory followed by the working directory);
-  tests/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
+  test/vcc `embed.c` checksums the file embedding itself; `--embed-dir` (`<x>`
   only there, `"x"` after the includer and working directories); `-E`/`-E -P` placement of
   the token after the data, byte for byte as clang; limit() takes a constant
   expression; a header with #embed is not cached (replay would not see a
@@ -1006,7 +1120,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (Linux PIE/CFI defaults, C23 char8_t/%B, Darwin -fshort-wchar and
   -mgeneral-regs-only).
   `bench/vcc-diff.py text` and `textc` (-C) 912/912,
-  `ccs/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
+  `src/test/fuzz/pp-diff.py --text` on regress/pp and the seed corpus.)  (`-M`/`-MM` done: see Depfiles;
   `-H` done: `bench/vcc-diff.py hdr` 912/912, header cache off under `-H`;
   `-dD` done: `bench/vcc-diff.py dd` 910/912, predefined macros in clang's
   order from `predef_order_*` (gen-ppdata-order.py); the two left are the
@@ -1056,15 +1170,17 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T11 on a machine/CI image with only Xcode, and after moving
   the install prefix.
 - [x] **Files ≥ 2 GB reported as missing** (*Done:* the main file says "file too
-  large (2 GB or more)"; an #include of one still says not found) (`lex/lex.c:1373`, `uint32` offsets
-  `lex/lex.h:50,61`).  Clear error.
+  large (2 GB or more)"; an #include of one still says not found) (`frontend/lex/lex.c:1373`, `uint32` offsets
+  `include/frontend/lex/lex.h:50,61`).  Clear error.
   *Validate:* T5 (sparse 3 GB file → "file too large").
 - [ ] **x86-64 host build** (builds and runs since 2026-11-10, PLAN-x86.md X0):
-  `classify` and the three searches in `lex/lex.c` have a scalar version
-  for hosts without NEON, CRC32C is SSE4.2 (`lib/hostcrc.h`), `pause` for
-  `yield`, `-march=native -msse4.2`, the fuzz targets use the host's clang
-  and libFuzzer.  Left: an SSE2/AVX2 `classify` (the scalar one is a byte
-  at a time), and the kernel parity runs on this host (no `work/` here).
+  `classify` and the three searches in `frontend/lex/lex.c` have a scalar version
+  for hosts without NEON, CRC32C selects SSE4.2 or software at runtime
+  (`include/port/crc32c.h`), `pause` for `yield`, baseline `-march=x86-64`,
+  the fuzz targets use the host's clang
+  and libFuzzer. AVX2/AVX-512 classification and AVX2 searches added
+  2026-11-13 (PLAN-x86.md X0), selected at runtime with scalar fallback. Left: full kernel
+  parity runs on this host.
   *Validate:* `fuzz-regress`; `fuzz-lex` (window path vs reference) ~1M
   runs clean; `-S`/`-c`/`-E` of the C suites byte-identical between the
   x86-64 build and an arm64 cross build under qemu-aarch64 (1903 files x 4).
@@ -1086,7 +1202,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [x] **Scalar FP** [P]: 2/1/3-source arithmetic, frint*, fcmp(e) (also #0.0),
   fccmp(e), fcsel, fcvt between S/D/H, fcvt[nampz][su] and [su]cvtf (also
   fixed point), `fmov #imm` and the H moves.  *Validated:*
-  `ccs/vcc/tests/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
+  `src/test/vas/fp-scalar.s` vs llvm-mc (`bench/vas-enc.py` 293/293);
   `bench/vas-corpus.py -O2` 1441/1519, the rest AdvSIMD.
 - [ ] **AdvSIMD** [P]: done: integer 3-same (mul/mla/mls also by element,
   sshl/ushl, smax/smin, sabd/uabd), compare with #0, neg/abs, FP 3-same and
@@ -1095,7 +1211,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   (s/u mull/mlal/mlsl/abdl/abal/addl/subl/addw/subw and the 2 forms),
   shll/sxtl/uxtl, xtn/sqxtn/uqxtn/sqxtun, shrn/rshrn, usra/ssra/urshr/srshr/
   ursra/srsra, uaddlv/saddlv, mvni, `movi d`, ld2-ld4/st2-st4 and lanes,
-  ldpsw (`ccs/vcc/tests/vas/simd-ops.s` vs llvm-mc).  Left: FP16 vectors,
+  ldpsw (`src/test/vas/simd-ops.s` vs llvm-mc).  Left: FP16 vectors,
   saturating arithmetic (sqadd, sqdmull, ...), pairwise FP, crypto beyond
   AES/SHA, by-element forms of the long ops, ld1r variants.  *Validate:*
   `bench/vas-enc.py`, `bench/vas-corpus.py`.
@@ -1103,14 +1219,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   CSSC [P].  *Validate:* T7 tables.  (Done: sxtb/sxth/sxtw, uxtb/uxth/uxtw
   (X forms as llvm-mc), cls, rev64 X, ngc(s), mneg, smnegl/umnegl,
   smsubl/umsubl, bfc, CSSC abs/cnt/ctz and smax/smin/umax/umin (register and
-  immediate; the vector cnt/umax/umin unchanged); `ccs/vcc/tests/vas/int-alias.s`,
+  immediate; the vector cnt/umax/umin unchanged); `src/test/vas/int-alias.s`,
   `bench/vas-enc.py` 128/128 vs llvm-mc.)
 - [x] **Pointer auth, barriers/hints** (paciasp … xpaclri, csdb, esb, ssbb,
   pssbb, dgh, `psb csync`, wfet, chkfeat, sysl, prfum, ldapur, stlur), **MTE
   irg/addg** [P].  *Validate:* T7 tables.  (Done: PAC hints and register forms,
   blraa…brabz, retaa/eretaa, ldraa/ldrab, csdb/esb/ssbb/pssbb/dgh, psb/tsb
   csync, wfet/wfit, chkfeat, sysl, prfum, ldapur*/stlur*, irg/gmi/addg/subg/
-  subp(s)/cmpp/stgp; `ccs/vcc/tests/vas/pac-hint.s`, `bench/vas-enc.py`
+  subp(s)/cmpp/stgp; `src/test/vas/pac-hint.s`, `bench/vas-enc.py`
   vs llvm-mc.)
 - [ ] **SVE/SVE2/SME** [P].  Done (`arch/a64/as/sve.inc`): `p/z`, `p/m`,
   Z lists, patterns, `mul #n`; the forms clang generates: predicated and
@@ -1124,11 +1240,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   uxtw/sxtw/lsl), ldff1/ldnf1/ldnt1/stnt1/ld1rq, prf[bhwd]; by-element
   fmla/fmls/fmul/mla/mls/mul, sdot/udot.  Left: SVE2 non-temporal gathers,
   the rest of SVE2 (widening/narrowing, histogram, crypto), SME.  *Validated:*
-  `ccs/vcc/tests/vas/sve.s` vs llvm-mc; T7 `-O "3 -march=armv9-a+sve2"`
+  `src/test/vas/sve.s` vs llvm-mc; T7 `-O "3 -march=armv9-a+sve2"`
   1519/1519.
 - [ ] **Directives**: left: `.arch`/`.cpu` gating instructions (T4).
   (`.eqv`, `.nops`, `.inst.n` are GNU-only: clang rejects them.)
-  *Validate:* `bench/vas-obj.py` (`ccs/vcc/tests/vas-obj/`: clang -c and
+  *Validate:* `bench/vas-obj.py` (`src/test/vas-obj/`: clang -c and
   vasm byte for byte).  (Done: COMDAT/`"G"` groups (SHT_GROUP, signature
   in the group section when undefined), `.addrsig`/`.addrsig_sym`,
   `.altmacro` (`%expr`, `<text>`, bare parameter names), `.type`
@@ -1141,9 +1257,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `:tprel_*:`, `:dtprel_*:` (add, movz/movk, ldst of every size), `:prel_g*:`,
   `ldr x0, :got:v` / `:gottprel:`, `:pg_hi21_nc:`; TLS relocations make the
   symbol STT_TLS and labels in TLS sections are STT_TLS, as MC.  *Validated:*
-  `ccs/vcc/tests/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
+  `src/test/vas-obj/tlsops.s`, `tlslocal.s` byte-identical with clang -c.
 - [~] **Mach-O syntax** `@PAGE`/`@PAGEOFF`/`@GOTPAGE…`/`@TLVPPAGE…`: `vpp -c x.s`
-  for a Darwin target reads Apple's dialect (`as_darwin_text`, the inverse of
+  for a Darwin target reads Apple's dialect (`macho_dialect_translate`, the inverse of
   emit's `darwin_text`: sections, `L` labels, `.zerofill`/`.tbss`/`.comm` log2
   alignment, NEON `op.T vA, vB` and `mov d0, v1[1]`) into the Mach-O writer
   (commons now as Mach-O commons).  *Validated:* `vcc-darwin-s.py`: vpp -c of
@@ -1178,7 +1294,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Crashes on ordinary inputs** [P]: no script.  (Fixed: a script
   without `.symtab`/`.strtab`/`.shstrtab` places them as orphans, as lld;
   `/DISCARD/` of a merge section (`.comment`): `isec_osec`.  Both found by
-  `VCC_LD=build/ccs/vlink bench/vcc-ctests.py --no-cache`, which links every
+  `VCC_LD=build/src/vlink bench/vcc-ctests.py --no-cache`, which links every
   test with vlink: 1750/1750; with `VCC_LDCMP=1` each test is linked by both
   and vlink's loaded image (objcopy -O binary) must equal lld's: 1750/1750.)
   *Validate:* T8 cases `no-script`, `discard-comment`.
@@ -1211,11 +1327,11 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   locations dropped) and PT_GNU_EH_FRAME: 4 cases.
   Left: `--emit-relocs`, `-rpath`/`DT_RUNPATH`, `--sysroot`.
   *Validate:* `bench/vlink-opts.py` per option; unknown options are errors.
-- [ ] **Dynamic executables (x86-64)** (done 2026-11-14: `ld/dso.inc` reads
+- [ ] **Dynamic executables (x86-64)** (done 2026-11-14: `ld/dso.c` reads
   shared objects (.dynsym, default versions, DT_SONAME) and GNU ld input
   scripts (glibc's libc.so, libgcc_s.so: GROUP/INPUT/AS_NEEDED, relative names
   by the script's directory and -L); their definitions resolve globals no
-  object defines and stop lazy archive extraction.  `ld/dyn.inc`: PLT (lazy,
+  object defines and stop lazy archive extraction.  `ld/dynamic-executable.c`: PLT (lazy,
   lld's x86-64 PLT0/entries) and .got.plt, GLOB_DAT, symbolic R_X86_64_64 in
   writable data, copy relocations with every alias exported (environ,
   __environ), canonical PLT entries for addresses taken from code, RELATIVE
@@ -1238,12 +1354,12 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Relocations**: (done: GOT relaxation adrp+ldr -> adrp+add / nop+adr
   as lld; orphans placed by lld's coarse rank (sections without inputs do not count; nothing with inputs after: at the very end, as lld); `.got` for
   `ADR_GOT_PAGE`/`LD64_GOT_LO12_NC` against globals, 0 for undefined weak,
-  RELATIVE under -pie/-shared; `tests/vcc/got_pic.c`, `pragma_weak.c`; locals
+  RELATIVE under -pie/-shared; `test/vcc/got_pic.c`, `pragma_weak.c`; locals
   after the globals by file as lld's postScanRelocations (`vlink-opts.py`);
-  GLOB_DAT for x86-64 imported symbols (dynamic executables, below); not on arm64),
+  GLOB_DAT for x86-64 imported symbols (dynamic executables, above); not on arm64),
   TLS in shared objects (executables done: LE, IE and TLSDESC relaxed to LE as
   lld, `PT_TLS`, `.tbss` without address space; text byte-identical to lld
-  for `tests/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,
+  for `test/vcc/tls_{static,ie,desc}.c`; `PT_GNU_RELRO` as lld: isRelroSection,
   one contiguous run, p_align 1, a new PT_LOAD at relroEnd, `-z norelro`;
   `VCC_LDCMP=1` also compares program headers: 1756/1756), MOVW_*, CONDBR19, TSTBR14,
   PREL32 to undefined (`ld/ld.c:2560-2570`).
@@ -1317,7 +1433,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `dwarfdump` / lldb line lookup; `-mmacosx-version-min=14.0` in
   `otool -l`); `bench/vcc-abi.py --host pragma_weak` (its xfail goes).
 
-### Driver (`driver/ppdriver.c`, `vccd/vccd.c`, `vccd/caps.c`)
+### Driver (`driver/ppdriver.c`, `server/vccd.c`, `server/capabilities.c`)
 - [ ] **vccd compiles only `-c` of one `.c`/`.S` for aarch64 Linux; the rest
   goes to clang** (done: the input anywhere on the line, `-o` before `-c`,
   `-fPIC`, `-S` (without `-o`: the basename with `.s`, as clang); vccd-test
@@ -1326,25 +1442,25 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   *Validate:* T11 (`-c a.c -o a.o`, flags after the input, `-o` before
   `-c`) all handled by vcc (a counter in vccd's stats, or `VCC_NO_FORWARD=1`
   that turns forwarding into an error).
-- [ ] **No linking, no crt/sysroot discovery** (`vccd/caps.c:174`).
+- [ ] **No linking, no crt/sysroot discovery** (`server/capabilities.c:174`).
   *Validate:* T11 `vcc hello.c -o hello` on aarch64 Linux (qemu-user) and
   macOS; then an autoconf project (e.g. GNU hello) and a CMake project
   configure and build with `CC=vcc`, tests pass.
 - [ ] **Unknown flags silently ignored** [P] (`driver/ppdriver.c:435-533`): `-g`,
   `-fsanitize=*`, `-m32`, `-march=znver4`, `-x c++`, `.cpp` inputs, `@rsp`,
-  several inputs.  (Done: input detection by suffix, `src_suffix`.)
+  several inputs.  (Done: input detection by suffix, `driver_input_is_source`.)
   Every option is either implemented, explicitly ignored with a documented
   reason, or an error (`-Wunused-command-line-argument` like clang).
   *Validate:* T11 table generated from clang's option list
   (`clang --help-hidden`): each must be in an explicit table in
   driver/ppdriver.c; a test fails when an option has no entry.
 - [ ] **Missing**: (done: `--target=T -dumpmachine` in vccd, vccd-test.)
-  `-print-*` (`-print-file-name` echoes, `vccd/vccd.c:665`), `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
+  `-print-*` (`-print-file-name` echoes, `server/vccd.c:665`), `-v`, `-###`, `-save-temps`, `-shared`, `-l`/`-L`, `-Wl,`.
   *Validate:* T11 rows.
-- [ ] **caps.c probe answers can contradict real compiles** (`vccd/vccd.c:291`,
-  `vccd/caps.c:199-208`), unmatched sources forwarded to clang (`vccd/vccd.c:395`),
-  every stdin link probe false (`vccd/vccd.c:353-356`), `.tmp_` heuristic
-  (`vccd/vccd.c:252`), `--version` claims clang (`vccd/caps.c:163`).
+- [ ] **capabilities.c probe answers can contradict real compiles** (`server/vccd.c:291`,
+  `server/capabilities.c:199-208`), unmatched sources forwarded to clang (`server/vccd.c:395`),
+  every stdin link probe false (`server/vccd.c:353-356`), `.tmp_` heuristic
+  (`server/vccd.c:252`), `--version` claims clang (`server/capabilities.c:163`).
   Make the table a cache of vcc's own answers (generated by running vcc,
   not clang), key it on target+flags, drop the filename heuristic, report
   an honest version string that CMake/Meson can identify (and a
@@ -1356,8 +1472,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 ### rsh
 - [ ] (Done: `trap` with EXIT/0 or no handler goes to the real shell,
   signal traps stay a no-op; rm/mkdir messages from strerror; fixdep only as
-  a whole path component and an existing executable.)  **fixdep path match by suffix** (`vccd/rsh.c:414`): require the
-  configured kernel tree.  **Wrong errno text** (`vccd/rsh.c:552,568,577`).
+  a whole path component and an existing executable.)  **fixdep path match by suffix** (`utils/shell.c:414`): require the
+  configured kernel tree.  **Wrong errno text** (`utils/shell.c:552,568,577`).
   *Validate:* `bench/vsh-test.py` rows against dash (trap, other fixdep
   paths, ENOENT/EACCES/ENOTDIR messages).
 
@@ -1372,26 +1488,26 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   turns from xfail to XPASS (drop it from `INLINE_XFAIL`).
 
 - [ ] **Optimizer shared across x86, arm64 and wasm**. Implementation
-  owner: `PLAN-fas2.md`, **Gemensam optimerare utan SSA**, OPT0–OPT8.
+  owner: `PLAN-fas2.md`, **Shared optimizer without SSA**, OPT0–OPT8.
   arm64 already has register locals, copy/dead-result cleanup, stack-cell
   forwarding and extension facts; wasm already has scalar locals. Extract
   and reuse those algorithms rather than treating x86's gaps as missing
   from every backend. Share typed arithmetic, effect/reachability facts,
-  local-candidate selection, inlining and switch policy in `emit/opt/`;
-  record algorithms in `emit/rec/` for register targets. Target instructions,
+  local-candidate selection, inlining and switch policy in `codegen/opt/`;
+  record algorithms in `codegen/rec/` for register targets. Target instructions,
   register assignment, ABI and structured wasm lowering stay with targets.
   The first rule must be consumed by all three backends, including wasm32
   and wasm64 for supported types. For `-O0`/`-O1`: no new IR/SSA or unbounded pass loops (`-O2` is owned by
   `PLAN-vir.md`).
   First delivered slice (2026-11-11): unsigned power-of-two div/rem in
-  `emit/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
-  Integer identities now live in separate `emit/opt/identity.c`, shared by
+  `codegen/opt/divpow2.c`, all three consumers, codegen/runtime checks at O0–O3.
+  Integer identities now live in separate `codegen/opt/identity.c`, shared by
   all targets; keep future algorithms in named files, with small walker
   adapters. Both build modes pass 32 target/level/rule checks.
-  Next slice: shared `emit/rec/fallthrough.c` on arm64/x86; wasm
+  Next slice: shared `codegen/rec/fallthrough.c` on arm64/x86; wasm
   terminal while-backedge cleanup in separate reachability unit. OPT2
   now also removes unreachable suffixes and has x86 effect metadata.
-  Shared bounded block/liveness contracts now live in `emit/flow/`.
+  Shared bounded block/liveness contracts now live in `codegen/flow/`.
   Wasm's separate typed-flow consumer removes overwritten private exact
   4/8-byte frame stores through structured joins; unique opening tokens
   preserve branch identity and epoch-scoped real fences preserve calls
@@ -1416,8 +1532,8 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   Shared locals.c eligibility/selection now feeds all targets and x86
   promotes profitable scalar locals in four callee-save homes. Direct
   ABI-to-home binding is now direct for selected register/stack parameters;
-  `emit/rec/copies.c` now shares arm64's forward-copy search with the x86
-  adapter in `arch/x64/emit/copies.c`: bounded transactional rewrites of
+  `codegen/rec/copies.c` now shares arm64's forward-copy search with the x86
+  adapter in `arch/x64/codegen/copies.c`: bounded transactional rewrites of
   full-width GPR temporaries within a block, with target effect/operand
   contracts. Native 32-bit/XMM copy cleanup, shared extension facts and
   improved profitability remain pending. Unity/nonunity builds, 32 focused
@@ -1441,16 +1557,16 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   not a function"), "extraneous ')' before ';'" after a builtin's name, the
   remaining `fatal()` sites one by one; mutants with more follow-on errors
   than clang 4.8 % (goal 5 % reached).
-  *Validate:* `tests/diag/` cases with several independent errors, exact
+  *Validate:* `test/diag/` cases with several independent errors, exact
   clang output (`vcc-diag.py`).
 - [x] **Warnings as errors not controllable**: `-Wno-error=`/`-Wno-` of
   `int-conversion`, `incompatible-pointer-types` (its subgroup
   `incompatible-function-pointer-types` follows) and the function pointer
   flag; `-Werror=` of one again is clang's plain error (no `-Werror,`:
-  `pp_werror_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
+  `diag_warning_error_named`).  Done: diag `conv_flags*.c` (`diag-flags:` in
   vcc-diag.py), 12 flag combinations identical to clang.
 - [x] **-Winteger-overflow**: signed `+ - *` and unary `-` of constants
-  whose exact value does not fit (innermost only, `NF_OVF`), value with
+  whose exact value does not fit (innermost only, `AST_NODE_FLAG_OVERFLOW_REPORTED`), value with
   clang's digit separators.  Done: diag `int_overflow.c`; not modelled:
   overflow inside casts/conditionals reached through other operators.
 - [x] **-Wunused-variable**, `-Wunused-const-variable`: block-scope
@@ -1464,7 +1580,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   the taken one when the condition is constant; a comma's right operand).
   Narrowing waits for the end of the function as clang's
   DiagRuntimeBehavior; same-width sign changes skip literals spelled with a
-  leading 0 (`N_NUM` aux) and chars in braces.  Done: diag `const_conv.c`,
+  leading 0 (`AST_NODE_NUMBER` aux) and chars in braces.  Done: diag `const_conv.c`,
   kernel/PostgreSQL/test suites 0 differences.  Not modelled: clang drops
   the deferred ones in unreachable code (vcc: only under a constant-false
   condition, `c->dead`); a member
@@ -1492,7 +1608,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   name, #else, #endif, #undef's name, #include's header name and #line's
   file name, with clang's "//" fix-it; conditionals at the active level
   also when a skip lands on them.  With it: a #line file name now reaches
-  the diagnostics (`diag_where` replaced it by the file's path).  Done:
+  the diagnostics (`diag_location_presumed` replaced it by the file's path).  Done:
   diag `extra_tokens.c`; parity cmp/lines green.  Not modelled: a
   macro-expanded #include name.
 - [x] **pp `#pragma GCC warning`/`error`** ("msg" or ("msg"), else
@@ -1541,7 +1657,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   diagnostic printer leaves out the snippet for a repeated location as clang.)
   (Done: `-Wreturn-type` (fall off the end, "in all control paths") and
   `-Winvalid-noreturn` (also a return in a noreturn function), "no case
-  matching constant switch condition": `cc/flow.c`, reachability as clang's
+  matching constant switch condition": `frontend/c/flow.c`, reachability as clang's
   CFG with constant conditions (also && / || / const variables, the kernel's
   scoped_guard), noreturn calls and goto; diag `return_type*.c`, kernel warn
   879/879, PostgreSQL no differences.)
@@ -1567,7 +1683,7 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   under sizeof/typeof.  Done: diag `mod_zero_const.c`, `mod_zero_const2.c`.
 - [x] **`"abc"[1]` as a static initializer**: an element of a string
   literal folds (`eval`); `{ "q"[0] }` in an int array parsed as a string
-  initializer.  Done: `tests/vcc/static_strelem.c`.
+  initializer.  Done: `test/vcc/static_strelem.c`.
 - [x] **Typedef names in -Wformat**: variables, parameters and members keep
   the typedef they were declared with (`sym.tdef`, `field.tdef`): messages
   print `'size_t' (aka 'unsigned long')`, fix-its use z/j/t and `%hhu` for a
@@ -1591,9 +1707,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   "; dereference with *" hint and fix-it (simple operands), `int *const`
   spelled as clang, a decayed array named `int[2]`, and "not a compile-time
   constant" after a conversion error: diag `ptr_discards_quals.c`,
-  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (CK_SPLAT),
+  `deref_hint.c`, `ptr_const_spelling.c`; `ext_vector_type` splat (AST_CAST_SPLAT),
   the scalar-to-vector truncation error, `.xyzw`/`.rgba`/`.sN`/`.hi`/`.lo`/
-  `.even`/`.odd` swizzles: `tests/vcc/ext_swizzle.c`, diag
+  `.even`/`.odd` swizzles: `test/vcc/ext_swizzle.c`, diag
   `ext_vector_splat.c`, `vector_scalar_trunc.c`, `ext_swizzle_range.c`.)
   Not done: assignment to a multi-component swizzle; a `long` constant out
   of an unsigned lane's range is an error in vcc, a -Wconstant-conversion
@@ -1630,9 +1746,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `vector_size(3)` on `int` says "invalid vector size" (clang: not an
   integral multiple of component size); vector element type errors point at
   the declarator, clang at the attribute.
-  *Validate:* diag tests (`tests/diag/excess_init.c` style).
+  *Validate:* diag tests (`test/diag/excess_init.c` style).
 - [ ] **Warnings in lazy bodies**: an unused `static` function outside the main
-  file is never parsed (`cc/lazy.c` `lazy_ok`), so its warnings are missing:
+  file is never parsed (`frontend/c/lazy.c` `lazy_ok`), so its warnings are missing:
   clang warns `-Wreturn-type` for `static inline int f(void) { }` in a
   non-system header, vcc only with `VCC_EAGER=1`.  A cheap scan of the kept
   tokens, or parsing the body when a warning group it could hit is on and the
@@ -1652,14 +1768,13 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `-pedantic`: 1 031 of 1 536 chains identical to clang's).
   *Validate:* diag tests, the kernel chain comparison.
 - [ ] **Merged diagnostics: cases from the D8 branch**: the merge with main kept main's
-  implementation where both had one (`cc/flow.c`, `cc/fmt.c`, return-stack-address,
-  unused-value/-comparison); the branch's dropped files (`git show ce5d47b:ccs/vcc/cc/`
+  implementation where both had one (`frontend/c/flow.c`, `frontend/c/fmt.c`, return-stack-address,
+  unused-value/-comparison); the branch's dropped files (`git show ce5d47b:src/frontend/c/`
   `uninit.c`, `format.c`, `unused.c`, `attrcheck.c`) handled these, now marked
-  `diag-differs` in `tests/diag/*_v2.c`, `portability.c`:
+  `diag-differs` in `test/diag/*_v2.c`, `portability.c`:
   - -Wsometimes-uninitialized: `if (c && (x = g())) return x; return x;`, an `if` whose
     then-branch only breaks or returns, `if (c) x = 1; else if (d) x = 2;`
     (`uninit_v2.c`), and the edge and the use drawn as numbered path steps;
-  - -Wreturn-type after a switch on an enum that returns in every case (clang: none);
   - -Wreturn-stack-address: two shapes missed, one extra (`return_stack_v2.c`);
   - -Wunused-value/-Wunused-comparison: four cases (`unused_value_v2.c`);
   - -Wformat for scanf and its family (fmt.c checks printf only).
@@ -1672,22 +1787,24 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   same pass set as clang.
 - [ ] **One set of data structures in `lib/`** (restructure 2026-11-09).
   Merged so far: `vreserve` (4 copies), `vregion` (as + object writer),
-  `vbuf` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
-  buffers `vbuf`/`vsbuf`/`vzbuf`/`vfixbuf`/`vfdbuf` (they differ in OOM
+  `vbuffer` (pp diagnostics + fixdep).  Still side by side in `lib/`: the
+  buffers `vbuffer`/`vbuffer`/`vbuffer`/`vbuffer`/`vbuffer` (they differ in OOM
   behaviour: abort, sticky flag, bool) and `tbuf.h`; the arenas `vregion`
-  (offsets) and `varena` (pointers); the hashes `vhash_obj`/`vhash_strtab`.
+  (offsets) and `varena` (pointers); the hashes `vhash_string`/`vhash_string`.
   Still in their component, tied to its state: ppdriver's `buf` (first
-  16 MB from a per-job vmreg), cc's `vec` (inline storage, frozen into
+  16 MB from a per-job vjob_region), cc's `vec` (inline storage, frozen into
   `c->lists`), ld's block arena (process-wide list, generations), as's
   `.req` hash, objcopy's StrTab and the object writer's symbol table.  One
   OOM policy for code inside vccd (fail the request, never abort) decides
   the buffer.  *Validate:* outputs byte-identical (objects, `-S`, `-E`),
   `bench/vbench.py gate`.
-- [ ] **The linker as a split module** (restructure 2026-11-09).  `ld/ld.c`
+- [x] **The linker as a split module** (restructure 2026-11-09; done 2026-11-13:
+  `ld-internal.h`, the link context, the fragments as `arch/*/ld/*.c`, each part
+  compiles alone with `make VCC_UNITY=`; doc/quality/WORK-linker.md step 2).  `ld/ld.c`
   is one TU of ~4400 lines over process-wide globals (`objs`, `isecs`,
   `gsyms`, ... of anonymous `VVEC` types); its arm64 parts are fragments
   (`arch/a64/ld/*.inc`) it #includes.  Make it files by topic with an
-  `ldimpl.h` (named vector types, VPRIV globals), as cc/pp/emit, and the
+  `ldimpl.h` (named vector types, VPRIV globals), as frontend/c/pp/emit, and the
   fragments real files.  *Validate:* `bench/vbench.py check --base` (the
   vmlinux link byte-identical), `bench/vobjcopy-cmp.sh`, gate.
 - [ ] **Shared emitter semantics and incremental walker convergence**
@@ -1705,9 +1822,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 - [ ] **Target-OS code out of the generic files** (restructure 2026-11-09).
   `platform/` has whole files only (Mach-O writer, ELF writer); the
   target-Darwin branches (`DARWIN(c)` and `PP_DARWIN` tests, ~25) are still
-  inline in `emit/tu.c`, `emit/type.c`, `emit/data.c`, `arch/a64/emit/`
-  (call, value, func, builtin, lval, abi), `cc/tu.c`, `cc/layout.c`,
-  `driver/ppdriver.c` and `vccd/vccd.c`.  Give them hooks in `platform/<os>/`
+  inline in `codegen/tu.c`, `codegen/type.c`, `codegen/data.c`, `arch/a64/codegen/`
+  (call, value, func, builtin, lval, abi), `frontend/c/tu.c`, `frontend/c/layout.c`,
+  `driver/ppdriver.c` and `server/vccd.c`.  Give them hooks in `platform/<os>/`
   once the x86-64 backend shows which differences are per OS and which per
   CPU (Apple arm64's ABI is both).  *Validate:* outputs byte-identical,
   `bench/vcc-abi.py --host`.

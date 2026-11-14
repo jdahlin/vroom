@@ -7,7 +7,7 @@ Each test starts its own private vccd (socket in a fresh temporary
 directory, no backend) and checks one property of the service: access to the
 socket, malformed requests, idle connections, cache invalidation between
 builds, the client's umask.  Requests are sent either through the real shim
-(build/ccs/vcc) or by a raw client in this file that speaks protocol.h
+(build/src/vcc) or by a raw client in this file that speaks protocol.h
 directly, to send what the shim never would.
 
 Known failures are marked xfail with their TODO.md item: a failure is
@@ -15,7 +15,7 @@ counted as xfail, a pass is XPASS (an error: remove the marker in the commit
 that fixes it).  Tests that cannot run here (a second user is needed) are
 skipped.  Exit status 1 on any FAIL or XPASS.
 
---bin-dir build/ccs-asan or build/ccs-tsan runs the sanitizer builds of
+--bin-dir build/src-asan or build/src-tsan runs the sanitizer builds of
 vccd; then also check the vccd log each test prints with -v.
 """
 import array, os, re, shutil, signal, socket, stat, struct, subprocess, sys, tempfile, time, importlib.util
@@ -53,8 +53,8 @@ class Vccd:
             time.sleep(0.02)
         else: raise SystemExit('vccd-test: vccd did not start')
     def alive(self): return self.p.poll() is None
-    def stop(self):
-        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(5)
+    def stop(self, timeout=5):
+        if self.alive(): self.p.send_signal(signal.SIGTERM); self.p.wait(timeout)
     def cc(self, cwd, src, out='a.o', extra=(), umask=None, timeout=30):
         """compile through the shim: (status, stderr)"""
         pre = (lambda: os.umask(umask)) if umask is not None else None
@@ -112,8 +112,8 @@ def socket_mode_ignores_umask(v=None):
 @test()
 def default_socket_not_in_tmp():
     """the default socket path (shim and server) is in a per-user directory, not /tmp"""
-    for f in ('shim.c', 'vccd.c'):
-        src = open(f'{vd.R}/ccs/vcc/vccd/{f}').read()
+    for f in ('bin/vcc/shim.c', 'server/vccd.c'):
+        src = open(f'{vd.R}/src/{f}').read()
         check('"/tmp/vccd.sock"' not in src, f'{f}: default socket /tmp/vccd.sock')
 
 @test()
@@ -305,7 +305,7 @@ def killed_client_no_output():
         check(not os.path.exists(f'{d}/big.o'), 'object written for a client that had gone')
         check(not [f for f in os.listdir(d) if f.endswith('.tmp')], 'temporary left behind')
         st, err = v.cc(d, tu(d)); check(st == 0, f'server after: {st} {err[-300:]}')
-    finally: v.stop()
+    finally: v.stop(300)	# SIGTERM waits for the abandoned job: the next request's new build no longer drains it (Q-SCHED-01)
 
 @test()
 def memory_restart_between_builds():
@@ -332,7 +332,7 @@ def other_build_refused():
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
-        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VROOM_STATUS_MISMATCH)')
+        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VCCD_STATUS_MISMATCH)')
         st, err = v.cc(d, src)
         check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
     finally: v.stop()
@@ -354,6 +354,13 @@ def garbage_requests():
             dict(header=hdr(MAGIC, len(argv), 0, len(good) + 100), payload=good, close_early=True),
             dict(header=hdr(MAGIC, len(argv), 0, len(good)), payload=good.replace(b'\0', b'x')),
             dict(header=b'\x72\x6f', payload=b'', close_early=True),
+            # 1 + argc + envc wraps to 1 in 32 bits: only the cwd
+            dict(header=hdr(MAGIC, 0xffffffff, 1, len(d) + 1), payload=d.encode() + b'\0'),
+            dict(header=hdr(MAGIC, 0xffffffff, 2, len(good)), payload=good),
+            # the payload's last string without its NUL
+            dict(header=hdr(MAGIC, len(argv), 0, len(good) - 1), payload=good[:-1]),
+            # pad not zero
+            dict(header=struct.pack('<IIIIQII', MAGIC, len(argv), 0, len(good), 0, 0, 1), payload=good),
         ]
         for i, b in enumerate(bad):
             try:
@@ -422,6 +429,61 @@ def edited_main_file_rebuilds():
     finally: v.stop()
 
 @test()
+def file_rewritten_within_one_build():
+    """a configure script writes conftest.c, compiles, rewrites it and compiles again, all
+    in one process group: each compile sees the bytes written last (lex.c's racy entries;
+    zlib's ./configure got the first file's #error in its second probe)"""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'; os.makedirs(d)
+        cc = ' '.join([SHIM] + TARGET)
+        script = (f"echo '#error error' > t.c; {cc} -c t.c -o 0.o 2>/dev/null; "
+                  f"echo 'int v = 1;' > t.c; {cc} -c t.c -o 1.o && "
+                  f"echo 'int v = 22222;' > t.c; {cc} -c t.c -o 2.o && "
+                  f"echo 'int v = 3;' > t.c; {cc} -c t.c -o 3.o")	# (the last: same size as 1)
+        p = subprocess.run(['sh', '-c', script], cwd=d, capture_output=True, text=True, timeout=60,
+                           env=dict(os.environ, VCC_SOCK=v.sock), process_group=0)
+        check(p.returncode == 0, f'rc {p.returncode}: {p.stderr[-300:]}')
+        a, b, c = obj(d, '1.o'), obj(d, '2.o'), obj(d, '3.o')
+        check(a != b and b != c and a != c, 'a rewritten file was compiled with its earlier bytes')
+        check(c == fresh(d, 't.c', '4.o'), 'the last object differs from a fresh server')
+    finally: v.stop()
+
+@test()
+def win64_cross_build_through_the_shim():
+    """the vcc shim for x86_64-w64-mingw32 (PLAN-win64.md WIN8): vccd compiles (COFF) and
+    links in process (vlink-PE, libvccrt.a, the sysroot's CRT); the program runs under Wine"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hostenv
+    why = hostenv.mingw_missing()
+    vccrt = os.environ.get('VCC_VCCRT') or f'{vd.BIN}/vccrt/libvccrt.a'
+    if why: raise Skip(why)
+    if not os.path.exists(vccrt): raise Skip(f'no {vccrt} (make -C src vccrt)')
+    v = Vccd()
+    try:
+        d = f'{v.dir}/w'
+        tu(d, 'a.c', '#include <stdio.h>\n#include <windows.h>\nint twice(int);\n'
+                     'int main(void) { printf("%d %d\\n", twice(21), (int)sizeof(long)); return GetCurrentProcessId() ? 7 : 1; }\n')
+        tu(d, 'b.c', 'int twice(int x) { return 2 * x; }\n')
+        win = [SHIM, '--target=x86_64-w64-mingw32', f'--sysroot={hostenv.MINGW_SYSROOT}']
+        sh = (f"{' '.join(win)} -O2 -c b.c -o b.o && {' '.join(win)} -O2 -v a.c b.o -o a.exe -Wl,-Map=a.map")
+        p = subprocess.run(['sh', '-c', sh], cwd=d, capture_output=True, text=True, timeout=120, process_group=0,
+                           env=dict(os.environ, VCC_SOCK=v.sock, VCC_VCCRT=vccrt, PATH='/usr/bin:/bin'))
+        check(p.returncode == 0, f'rc {p.returncode}: {p.stderr[-500:]}')
+        b = subprocess.run(win + ['-v'], capture_output=True, text=True, timeout=30, env=dict(os.environ, VCC_SOCK=v.sock))
+        check(b.returncode == 0 and 'clang' in b.stderr and 'x86_64-w64-mingw32' in b.stderr,
+              f'`vcc -v` without input (configure scripts read it): {b.returncode} {b.stderr[-200:]}')
+        check(open(f'{d}/b.o', 'rb').read(2) == b'\x64\x86', 'b.o is not a COFF x86-64 object')
+        check(open(f'{d}/a.exe', 'rb').read(2) == b'MZ', 'a.exe is not a PE image')
+        check(any(l.startswith('vlink ') and 'libvccrt.a' in l for l in p.stderr.splitlines()), f'no vlink line: {p.stderr[-300:]}')
+        check(not re.search(r'clang_rt|libgcc|compiler-rt', open(f'{d}/a.map', errors='replace').read()), 'foreign input in the map')
+        if os.path.exists(hostenv.WINE):
+            env = hostenv.wine_start(os.environ.get('VCC_WINEPREFIX', f'{vd.BIN}/wine'))	# (vcc-win64.py's prefix)
+            r = subprocess.run([hostenv.WINE, f'{d}/a.exe'], cwd=d, capture_output=True, timeout=120, env=env, stdin=subprocess.DEVNULL)
+            check(r.returncode == 7 and r.stdout.replace(b'\r\n', b'\n') == b'42 4\n', f'under Wine: {r.returncode} {r.stdout!r}')
+    finally: v.stop()
+
+@test()
 def header_created_after_miss():
     v = Vccd()
     try:
@@ -444,6 +506,87 @@ def header_shadowed_by_new_file():
         st, err = v.cc(d, src, out='2.o', extra=['-Ii1', '-Ii2']); check(st == 0, err[-300:])
         check(obj(d, '1.o') != obj(d, '2.o'), 'i1/h.h was not picked up')
     finally: v.stop()
+
+@test()
+def two_groups_share_caches():
+    """two builds at once through one server (Q-SCHED-01): they do not flush each
+    other's caches (at most the first switch, when nothing is running), every
+    object is right, and a build after an edit still sees the edit"""
+    from concurrent.futures import ThreadPoolExecutor
+    v = Vccd(workers=4, env={'VCC_LOG': '1'})
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n')
+        leaders = [subprocess.Popen(['sleep', '60'], process_group=0) for _ in range(2)]
+        def one(i, pgid=None, out=None):
+            src = tu(d, f'a{i}.c', f'#include "h.h"\nint v{i} = N + {i};\nint f{i}(void) {{ return v{i} * 3; }}\n')
+            p = subprocess.run([SHIM] + TARGET + ['-c', '-o', out or f'a{i}.o', src], cwd=d, capture_output=True, timeout=30,
+                               env=dict(os.environ, VCC_SOCK=v.sock), process_group=pgid)
+            return i, p.returncode, p.stderr.decode(errors='replace')
+        try:
+            with ThreadPoolExecutor(6) as ex:	# jobs alternate between the two groups
+                res = list(ex.map(lambda i: one(i, leaders[i % 2].pid), range(48)))
+        finally:
+            for l in leaders: l.kill(); l.wait()
+        for i, st, err in res:
+            check(st == 0, f'job {i}: {st} {err[-200:]}')
+            check(f'v{i}'.encode() in obj(d, f'a{i}.o'), f'job {i}: object does not define v{i}')
+        o1 = obj(d, 'a0.o')
+        time.sleep(0.01)
+        open(f'{d}/h.h', 'w').write('#define N 22222\n')
+        _, st, err = one(0, None, 'b0.o'); check(st == 0, err[-300:])	# a new group
+        check(obj(d, 'b0.o') != o1, 'a build after the header edit used the stale header')
+    finally: v.stop()
+    m = re.search(r'(\d+) builds \(cache flushes\)', open(v.logf).read())
+    check(m is not None, 'no flush count in the vccd log')
+    n = int(m.group(1))
+    check(n <= 2, f'{n} cache flushes: at most one for the first switch and one for the build after the edit')
+
+def long_job(v, d):
+    """a compile in its own process group that is still running while the caller goes on (a build in progress)"""
+    big = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+    p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', big], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
+                         stderr=subprocess.DEVNULL, process_group=0)
+    time.sleep(0.5)
+    check(p.poll() is None, 'the long job ended too early for this test')
+    return p
+
+@test()
+def edit_seen_by_build_started_while_another_runs():
+    """Q-SCHED-01: build A is running, build B compiles a file that includes h.h, h.h is edited, build C starts (a new
+    make, while A still runs: no flush): C compiles the NEW h.h, not the one B's compile left in the caches"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            time.sleep(0.01)
+            open(f'{d}/h.h', 'w').write('#define N 22222\n')
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(a.poll() is None, 'the long job ended before the second build: the test did not test the case')
+            check(obj(d, '1.o') != obj(d, '2.o'), 'the build started while another ran used the header from before the edit')
+            check(obj(d, '2.o') == fresh(d, src, '3.o'), 'second build differs from a fresh server')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
+
+@test()
+def unedited_files_hit_the_cache_for_a_new_build():
+    """the other half: a file that did not change is not read again by a build that starts while another runs.  The
+    check is a stat (size, mtime, identity), so a rewrite of the same size with the same mtime goes unseen: that is how
+    this shows that the cached copy was used"""
+    v = Vccd(workers=4)
+    try:
+        d = f'{v.dir}/w'; tu(d, 'h.h', '#define N 1111\n'); src = tu(d, 'a.c', '#include "h.h"\nint v = N;\n')
+        a = long_job(v, d)
+        try:
+            st, err = v.cc(d, src, out='1.o'); check(st == 0, err[-300:])
+            ns = os.stat(f'{d}/h.h').st_mtime_ns
+            with open(f'{d}/h.h', 'r+') as f: f.write('#define N 2222\n')	# same size, same inode
+            os.utime(f'{d}/h.h', ns=(ns, ns))
+            st, err = v.cc(d, src, out='2.o'); check(st == 0, err[-300:])
+            check(obj(d, '1.o') == obj(d, '2.o'), 'an unchanged file (size, mtime) was read again')
+        finally: a.kill(); a.wait()
+    finally: v.stop(120)
 
 # ---------------- the client's view ----------------
 
@@ -571,7 +714,7 @@ def links_in_process_independent():
             open(f'{d}/{name}', 'w').write(text)
         links = [['--eh-frame-hdr', '-T', 'a.lds'], ['-T', 'b.lds'], ['-T', 'a.lds', '-e', 'f7'],
                  ['-T', 'b.lds', '-e', 'f3']]
-        ref = {}	# vccd's vld adds --vroom-stubs (ld_run)
+        ref = {}	# vccd's vld adds --vroom-stubs (vccd_linker_run)
         for i, a in enumerate(links):
             r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref{i}', 'm.o'] + a, cwd=d, capture_output=True,
                                text=True, timeout=30)
@@ -584,6 +727,58 @@ def links_in_process_independent():
                 check(v.alive(), f'vccd died in link {a} (round {rnd})')
                 check(r.returncode == 0, f'link {a} (round {rnd}): {r.stderr[-300:]}')
                 check(open(f'{d}/out{i}', 'rb').read() == ref[i], f'link {a} (round {rnd}) differs from vlink\'s')
+    finally: v.stop()
+
+@test()
+def link_machine_reset():
+    """an x86-64 link leaves nothing behind: the next arm64 link in the same vccd is vlink's"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        tu(d, 'm.c', 'int f(void) { return 1; }\nint _start(void) { return f(); }\n')
+        for o, t in (('a.o', 'aarch64'), ('x.o', 'x86_64')):
+            r = subprocess.run([vd.VPP, f'--target={t}-linux-gnu', '-nostdinc', '-ffreestanding', '-c', '-o', o, 'm.c'],
+                               cwd=d, capture_output=True, text=True, timeout=30)
+            check(r.returncode == 0, f'compile {t}: {r.stderr[-300:]}')
+        for o in ('a.o', 'x.o'):
+            r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', f'ref-{o}', o], cwd=d, capture_output=True,
+                               text=True, timeout=30)
+            check(r.returncode == 0, f'vlink {o}: {r.stderr[-300:]}')
+        for o in ('a.o', 'x.o', 'a.o'):
+            r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out-{o}', o], cwd=d, capture_output=True, text=True,
+                               env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+            check(r.returncode == 0, f'link {o}: {r.stderr[-300:]}')
+            check(obj(d, f'out-{o}') == obj(d, f'ref-{o}'), f'link {o} differs from vlink\'s')
+        r = subprocess.run([f'{vd.BIN}/vld', '-o', 'mix', 'a.o', 'x.o'], cwd=d, capture_output=True, text=True,
+                           env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+        check(r.returncode != 0 and 'incompatible' in r.stderr, f'mixed machines: rc {r.returncode} {r.stderr[-300:]}')
+    finally: v.stop()
+
+@test()
+def link_tls_reset():
+    """a link with a PT_TLS leaves no thread-local base behind: the next link, which has none but a DTPOFF
+    relocation, is what a fresh vlink makes"""
+    v = Vccd(workers=1)
+    try:
+        d = f'{v.dir}/w'
+        os.makedirs(d, exist_ok=True)
+        srcs = {'tls.s': '\t.globl _start\n_start:\tret\n\t.section .tdata,"awT",@progbits\n\t.long 5\n'
+                         '\t.section .tbss,"awT",@nobits\n\t.zero 8\n',
+                'dtp.s': '\t.globl _start\n_start:\tleaq dv@DTPOFF(%rax), %rcx\n\tret\n\t.data\n\t.globl dv\ndv:\t.long 1\n'}
+        for name, text in srcs.items():
+            open(f'{d}/{name}', 'w').write(text)
+            r = subprocess.run([vd.VPP, '--target=x86_64-linux-gnu', '-c', '-o', name[:-2] + '.o', name], cwd=d,
+                               capture_output=True, text=True, timeout=30)
+            check(r.returncode == 0, f'assemble {name}: {r.stderr[-300:]}')
+        r = subprocess.run([f'{vd.BIN}/vlink', '--vroom-stubs', '-o', 'ref', 'dtp.o'], cwd=d, capture_output=True, text=True,
+                           timeout=30)
+        check(r.returncode == 0, f'vlink: {r.stderr[-300:]}')
+        for o in ('tls.o', 'dtp.o'):
+            r = subprocess.run([f'{vd.BIN}/vld', '-o', f'out-{o}', o], cwd=d, capture_output=True, text=True,
+                               env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+            check(r.returncode == 0, f'link {o}: {r.stderr[-300:]}')
+        check(open(f'{d}/out-dtp.o', 'rb').read() == open(f'{d}/ref', 'rb').read(),
+              'the link after a TLS link differs from a fresh vlink\'s')
     finally: v.stop()
 
 def main():

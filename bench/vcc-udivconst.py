@@ -10,14 +10,14 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "vcc/emit/opt/udivconst.c"
-#include "vcc/arch/x64/emit/x64impl.h"
-#include "vcc/emit/walk/udivconst.c"
-#include "vcc/arch/a64/emit/udivconst.c"
-VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
+#include "codegen/opt/udivconst.c"
+#include "arch/x64/codegen/x64-internal.h"
+#include "codegen/walk/division-unsigned-constant.c"
+#include "arch/a64/codegen/udivconst.c"
+VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
-VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }
-VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
+VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
+VPRIV void slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 
 static uint32_t apply(uint32_t n, const em_udivconst_recipe *r)
@@ -91,30 +91,30 @@ static void divisor64(uint64_t d)
 }
 static void pressure(void)
 {
-    emitter emit={0};
-    xst x={0};
-    ecx e={.E=&emit,.x64=&x};
+    codegen_unit emit={0};
+    x64_lowering_context x={0};
+    codegen_context e={.unit=&emit,.x64_context=&x};
     const int regs[]={RAX,RCX,RDX,RSI,RDI,R8,R9,R10};
     for (unsigned count=0;count<=8;count++) {
-        x.live=0;
-        for (unsigned j=0;j<8-count;j++) x.live |= 1u<<regs[j];
-        e.live=(1u<<(NTEMP-count))-1;
+        x.temporaries_in_use=0;
+        for (unsigned j=0;j<8-count;j++) x.temporaries_in_use |= 1u<<regs[j];
+        e.temporaries_in_use=(1u<<(CODEGEN_TEMPORARY_COUNT-count))-1;
         for (unsigned materialize=0;materialize<2;materialize++) {
-            val a={.k=materialize ? V_ADDR : V_REG};
+            codegen_value a={.kind=materialize ? CODEGEN_VALUE_ADDRESS : CODEGEN_VALUE_REGISTER};
             for (unsigned add=0;add<2;add++) for (unsigned rem=0;rem<2;rem++) {
                 em_udivconst_recipe r={.add=add,.remainder=rem};
                 /* Independently model the peak: optional input materialization,
                  * a saved numerator when needed, and the large multiplier. */
                 unsigned peak=materialize + (add || rem) + 1;
-                assert(wk_udivconst_ok(&e,a,&r) == (count>=peak));
+                assert(walk_division_unsigned_constant_check(&e,a,&r) == (count>=peak));
                 assert(a64_udivconst_ok(&e,a,&r) == (count>=peak));
             }
         }
     }
-    e.live=0; e.resv=((1u<<NTEMP)-1) ^ 3u;
+    e.temporaries_in_use=0; e.temporaries_reserved=((1u<<CODEGEN_TEMPORARY_COUNT)-1) ^ 3u;
     em_udivconst_recipe corrected={.add=true};
-    assert(a64_udivconst_ok(&e,(val){.k=V_REG},&corrected));
-    assert(!a64_udivconst_ok(&e,(val){.k=V_ADDR},&corrected));
+    assert(a64_udivconst_ok(&e,(codegen_value){.kind=CODEGEN_VALUE_REGISTER},&corrected));
+    assert(!a64_udivconst_ok(&e,(codegen_value){.kind=CODEGEN_VALUE_ADDRESS},&corrected));
 }
 int main(void)
 {
@@ -165,7 +165,7 @@ def main():
         binary = Path(tmp) / 'effects'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('unsigned32/64 reciprocal arithmetic contracts: PASS')

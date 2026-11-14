@@ -1,0 +1,325 @@
+/*
+ * lextest: lexer driver.
+ *
+ *   lextest dump FILE...          tokens in the normalized form lexdiff.py
+ *                                 compares with clang -dump-raw-tokens
+ *   lextest bench [-j N] [-r R] LIST
+ *                                 lex every file in LIST (one path per line)
+ *                                 through the token cache with N threads;
+ *                                 -r: R times, uncached (for profiling)
+ *                                 -p: lex_file_prefetch() every file first
+ *   lextest lextest_identifier_check LIST          every identifier's id matches its spelling
+ *   lextest core LIST             single thread, files pre-mapped and
+ *                                 touched: pure lexing speed of one core
+ */
+#include <pthread.h>
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#else
+#define pthread_set_qos_class_self_np(c, p) ((void)0)
+#endif
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "common/intern.h"
+#include "frontend/lex/lex.h"
+#include "port/darwin/pmc.h"
+#include "port/performance-counters.h"
+
+static double lextest_clock_seconds(clockid_t c)
+{
+	struct timespec ts;
+
+	clock_gettime(c, &ts);
+	return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+/* llvm::write_escaped, as used by clang's token dump */
+static void lextest_stringify(const char *s, size_t n)
+{
+	for (size_t i = 0; i < n; i++) {
+		unsigned char c = (unsigned char)s[i];
+
+		if (c == '\\' || c == '"')
+			putchar('\\'), putchar(c);
+		else if (c == '\t')
+			fputs("\\t", stdout);
+		else if (c == '\n')
+			fputs("\\n", stdout);
+		else if (c >= 0x20 && c < 0x7f)
+			putchar(c);
+		else
+			printf("\\%03o", c);
+	}
+}
+
+static int lextest_dump(const char *arg)
+{
+	char path[4096] = { 0 };	/* padded: lex_file_get reads path[len + 7] */
+	const lex_file *f = strlen(arg) < sizeof(path) - 8 ? lex_file_get(strcpy(path, arg), strlen(arg)) : NULL;
+	size_t line = 1, bol = 0, pos = 0;
+	char *buf;
+
+	if (!f) {
+		fprintf(stderr, "lextest: cannot read %s\n", path);
+		return 1;
+	}
+	buf = malloc(f->size + 1);
+	for (uint32_t i = 0; i < f->ntok; i++) {
+		const lex_token *t = &f->tok[i];
+		size_t l;
+
+		for (; pos < t->off; pos++) {
+			char c = f->src[pos];
+
+			if (c == '\n' || (c == '\r' && f->src[pos + 1] != '\n')) {
+				line++;
+				bol = pos + 1;
+			}
+		}
+		l = lex_token_spell(f->src, t, buf);
+		printf("%s\t", lex_token_name(t->kind));
+		lextest_stringify(buf, l);
+		printf("\t%zu:%zu\t%d\n", line, t->off - bol + 1, !!(t->flags & LEX_TOKEN_FLAG_LINE_START));
+	}
+	free(buf);
+	return 0;
+}
+
+static char **lextest_paths;
+static size_t *lextest_path_lengths;
+static size_t lextest_path_count;
+static _Atomic size_t lextest_next_file;
+static size_t lextest_repetitions = 1;	/* bench -r: uncached, every file reps times */
+static int lextest_prefetch;	/* bench -p: lex_file_prefetch() all files first */
+static _Atomic uint64_t lextest_total_bytes, lextest_total_tokens;
+static double lextest_cpu_time[256];
+
+static void lextest_list_read(const char *list)
+{
+	FILE *fp = fopen(list, "r");
+	char line[4096];
+	size_t cap = 0;
+
+	if (!fp) {
+		perror(list);
+		exit(1);
+	}
+	while (fgets(line, sizeof(line), fp)) {
+		size_t n = strcspn(line, "\n");
+
+		if (!n)
+			continue;
+		line[n] = 0;
+		if (lextest_path_count == cap) {
+			cap = cap ? cap * 2 : 4096;
+			lextest_paths = realloc(lextest_paths, cap * sizeof(*lextest_paths));
+			lextest_path_lengths = realloc(lextest_path_lengths, cap * sizeof(*lextest_path_lengths));
+		}
+		lextest_path_lengths[lextest_path_count] = n;
+		lextest_paths[lextest_path_count] = calloc(1, n + 8);	/* lex_file_get hashes by words: path[n + 7] */
+		memcpy(lextest_paths[lextest_path_count++], line, n);
+	}
+	fclose(fp);
+}
+
+static void *lextest_worker(void *arg)
+{
+	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+	int id = (int)(intptr_t)arg;
+	double c0 = lextest_clock_seconds(CLOCK_THREAD_CPUTIME_ID);
+	uint64_t b = 0, t = 0;
+	size_t i;
+
+	while ((i = atomic_fetch_add(&lextest_next_file, 1)) < lextest_path_count * lextest_repetitions) {
+		lex_file u;
+		const lex_file *f = lextest_repetitions > 1 ? (lex_file_load_uncached(lextest_paths[i % lextest_path_count], &u) ? &u : NULL)
+					      : lex_file_get(lextest_paths[i], lextest_path_lengths[i]);
+
+		if (f) {
+			b += f->size;
+			t += f->ntok;
+		}
+	}
+	lextest_cpu_time[id] = lextest_clock_seconds(CLOCK_THREAD_CPUTIME_ID) - c0;
+	atomic_fetch_add(&lextest_total_bytes, b);
+	atomic_fetch_add(&lextest_total_tokens, t);
+	return NULL;
+}
+
+static int lextest_bench(int nthr, const char *list)
+{
+	pthread_t th[256];
+	double t0, wall, cpu = 0;
+
+	lextest_list_read(list);
+	t0 = lextest_clock_seconds(CLOCK_MONOTONIC);
+	if (lextest_prefetch)
+		for (size_t i = 0; i < lextest_path_count; i++)
+			lex_file_prefetch(lextest_paths[i], lextest_path_lengths[i]);
+	for (int i = 0; i < nthr; i++)
+		pthread_create(&th[i], NULL, lextest_worker, (void *)(intptr_t)i);
+	for (int i = 0; i < nthr; i++)
+		pthread_join(th[i], NULL);
+	wall = lextest_clock_seconds(CLOCK_MONOTONIC) - t0;
+	for (int i = 0; i < nthr; i++)
+		cpu += lextest_cpu_time[i];
+	printf("%zu files, %.1f MB, %.2f M tokens, %u identifiers\n", lextest_path_count,
+	       lextest_total_bytes / 1e6, lextest_total_tokens / 1e6, vintern_count());
+	printf("wall %.1f ms with %d threads (%.2f GB/s), cpu %.1f ms (%.2f GB/s per core)\n",
+	       wall * 1e3, nthr, lextest_total_bytes / wall / 1e9, cpu * 1e3, lextest_total_bytes / cpu / 1e9);
+	return 0;
+}
+
+/* lexing only: files mapped and faulted in first, scratch and output reused */
+static int lextest_core(const char *list, int repetitions)
+{
+	const char **src;
+	size_t *sz, max = 0, bytes = 0, toks = 0;
+	void *scratch;
+	lex_token *out;
+	double t0, best = 1e9;
+
+	lextest_list_read(list);
+	src = calloc(lextest_path_count, sizeof(*src));
+	sz = calloc(lextest_path_count, sizeof(*sz));
+	for (size_t i = 0; i < lextest_path_count; i++) {
+		const lex_file *f = lex_file_get(lextest_paths[i], lextest_path_lengths[i]);	/* maps + warms */
+
+		if (!f)
+			continue;
+		src[i] = f->src;
+		sz[i] = f->size;
+		max = sz[i] > max ? sz[i] : max;
+		bytes += sz[i];
+	}
+	scratch = malloc(lex_scratch_size(max));
+	out = malloc((max + 2) * sizeof(lex_token));
+	lex_identifiers_not_interned = getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
+	int pmc = getenv("PMC") && !pmc_init(getenv("PMC"));
+	uint64_t c0[PMC_N], c1[PMC_N], cb[PMC_N] = { 0 };
+	vperf vbest = { ~0ull, ~0ull }, v0;
+	uint64_t h = 1469598103934665603ull;
+
+	for (int r = 0; r < repetitions; r++) {
+		toks = 0;
+		if (pmc)
+			pmc_read(c0);
+		v0 = vperformance_now();
+		t0 = lextest_clock_seconds(CLOCK_THREAD_CPUTIME_ID);
+		for (size_t i = 0; i < lextest_path_count; i++)
+			if (src[i])
+				toks += lex_tokenize(src[i], sz[i], out, scratch);
+		t0 = lextest_clock_seconds(CLOCK_THREAD_CPUTIME_ID) - t0;
+		v0 = vperformance_subtract(vperformance_now(), v0);
+		vbest.ins = v0.ins < vbest.ins ? v0.ins : vbest.ins;
+		vbest.cyc = v0.cyc < vbest.cyc ? v0.cyc : vbest.cyc;
+		if (pmc)
+			pmc_read(c1);
+		if (t0 < best) {
+			best = t0;
+			for (int j = 0; j < PMC_N; j++)
+				cb[j] = c1[j] - c0[j];
+		}
+	}
+	/* untimed: a hash of every token record (bench/vbench.py's correctness check) */
+	for (size_t i = 0; i < lextest_path_count; i++)
+		if (src[i]) {
+			size_t n = lex_tokenize(src[i], sz[i], out, scratch);
+			const unsigned char *q = (const unsigned char *)out;
+
+			for (size_t k = 0; k < n * sizeof(lex_token); k++)
+				h = (h ^ q[k]) * 1099511628211ull;
+		}
+	printf("%.1f MB, %.2f M tokens: best of %d %.1f ms = %.2f GB/s, %.1f ns/token\n",
+	       bytes / 1e6, toks / 1e6, repetitions, best * 1e3, bytes / best / 1e9, best * 1e9 / toks);
+	printf("perf: %llu instructions, %llu cycles (min of %d passes)\nhash: %016llx\n", (unsigned long long)vbest.ins,
+	       (unsigned long long)vbest.cyc, repetitions, (unsigned long long)h);
+	if (pmc)
+		for (int j = 0; j < pmc_n; j++)
+			printf("  %-28s %14llu  %8.3f /token  %8.4f /byte\n", pmc_names[j],
+			       (unsigned long long)cb[j], (double)cb[j] / toks, (double)cb[j] / bytes);
+	return 0;
+}
+
+/* every identifier's id spells the identifier: same spelling <=> same id */
+static int lextest_identifier_check(const char *list)
+{
+	char *buf = NULL;
+	size_t cap = 0, bad = 0, n = 0;
+
+	lextest_list_read(list);
+	if (getenv("PREFETCH"))	/* through the I/O threads */
+		for (size_t i = 0; i < lextest_path_count; i++)
+			lex_file_prefetch(lextest_paths[i], lextest_path_lengths[i]);
+	for (size_t i = 0; i < lextest_path_count; i++) {
+		const lex_file *f = lex_file_get(lextest_paths[i], lextest_path_lengths[i]);
+
+		if (!f)
+			continue;
+		if (cap < f->size + 1)
+			buf = realloc(buf, cap = f->size + 1);
+		for (uint32_t j = 0; j < f->ntok; j++) {
+			const lex_token *t = &f->tok[j];
+			size_t l;
+
+			if (t->kind != LEX_TOKEN_IDENTIFIER)
+				continue;
+			n++;
+			l = lex_token_spell(f->src, t, buf);
+			if (!t->id || t->id > vintern_count() || vintern_ents[t->id].len != l ||
+			    memcmp(vintern_ents[t->id].s, buf, l)) {
+				if (bad++ < 10)
+					fprintf(stderr, "%s: token %u '%.*s' has id %u\n", lextest_paths[i], j,
+						(int)l, buf, t->id);
+			}
+		}
+	}
+	printf("%zu identifiers, %zu bad ids, %u distinct\n", n, bad, vintern_count());
+	return bad != 0;
+}
+
+int main(int argc, char **argv)
+{
+	/* P cores: E-core timings are meaningless here */
+	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+	vintern_init();
+	if (argc >= 3 && !strcmp(argv[1], "dump")) {
+		int rc = 0;
+
+		for (int i = 2; i < argc; i++)
+			rc |= lextest_dump(argv[i]);
+		return rc;
+	}
+	if (argc >= 3 && !strcmp(argv[1], "bench")) {
+		int nthr = 8, a = 2;
+
+		for (;;) {
+			if (a + 2 < argc && !strcmp(argv[a], "-j"))
+				nthr = atoi(argv[a + 1]);
+			else if (a + 2 < argc && !strcmp(argv[a], "-r"))
+				lextest_repetitions = (size_t)atoi(argv[a + 1]);
+			else if (a + 1 < argc && !strcmp(argv[a], "-p")) {
+				lextest_prefetch = 1;
+				a--;	/* no argument */
+			}
+			else
+				break;
+			a += 2;
+		}
+		if (nthr < 1 || nthr > 256 || a >= argc)
+			return 2;
+		return lextest_bench(nthr, argv[a]);
+	}
+	if (argc >= 3 && !strcmp(argv[1], "idcheck"))
+		return lextest_identifier_check(argv[2]);
+	if (argc >= 3 && !strcmp(argv[1], "core"))
+		return lextest_core(argv[2], argc > 3 ? atoi(argv[3]) : 5);
+	fprintf(stderr, "usage: lextest dump FILE... | bench [-j N] LIST | core LIST [REPS]\n");
+	return 2;
+}

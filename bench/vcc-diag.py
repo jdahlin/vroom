@@ -3,13 +3,13 @@
 Diagnostics: vcc's own expected output, with clang as the reference point
 (PLAN-diag.md test layers 1 and 4).
 
-Every ccs/vcc/tests/diag/*.c is a small piece of broken C.  vcc runs
+Every src/test/diag/*.c is a small piece of broken C.  vcc runs
 -fsyntax-only on it (no colours, same target) from that directory; a test
 passes when
   - layer 4: vcc's stderr is exactly X.c.stderr (vcc's own snapshot: the text
     may be better than clang's), and
   - layer 2: with -fdiagnostics-show-id every diagnostic has an id
-    (bench/gen-diagids.py), and
+    (src/tools/gen-diagids.py), and
   - layer 5a: the -fdiagnostics-format=json records rebuild that text
     exactly (bench/diag-render.py), and the SARIF log passes
     bench/sarif-check.py, and
@@ -17,6 +17,7 @@ passes when
     level, -W flag) as clang's, in order, and the exit status agrees.
 A deliberate difference from clang in layer 1 (a better place, fewer
 follow-on errors) is declared in the case: /* diag-differs: why */.
+/* diag-vpp-flags: F */ adds flags for vcc alone (clang has no --lint).
 A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
 The summary also counts the cases whose text in -fdiagnostics-style=clang is
@@ -31,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hostenv import llvm, BUILD
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-D = f'{R}/ccs/vcc/tests/diag'
+D = f'{R}/src/test/diag'
 CL = llvm('clang')
 # --bin-dir DIR or VCC_BIN=DIR: the tools of a sanitizer build (PLAN-diag layer 9)
 _BIN = os.environ.get('VCC_BIN', BUILD)
@@ -60,6 +61,9 @@ def run(cmd, name, extra=()):
         fl = [f for f in FL if f != '-fsyntax-only'] + ['-c', '-o', '/dev/null']
     m = re.search(r'/\*\s*diag-flags:\s*(.*?)\s*\*/', src)	# flags for both compilers
     if m:
+        fl = fl + m.group(1).split()
+    m = re.search(r'/\*\s*diag-vpp-flags:\s*(.*?)\s*\*/', src)	# flags for vpp only (--lint)
+    if m and cmd[0] != CL:
         fl = fl + m.group(1).split()
     fl = fl + list(extra)
     p = subprocess.run(cmd + fl + [name], cwd=D, capture_output=True, timeout=30)
@@ -120,7 +124,7 @@ def one(name, bless=False):
         why.append('locations/levels/flags differ from clang')
     if (rc_c == 0) != (rc_v == 0):
         why.append(f'exit {rc_v}, clang {rc_c}')
-    # layer 2: every diagnostic carries an id from pp/diagids.inc (clang's name or vcc_*)
+    # layer 2: every diagnostic carries an id from diag/diagnostic-ids.inc (clang's name or vcc_*)
     _, out_i = run([VPP], name, ['-fdiagnostics-show-id'])
     noid = [l for l in out_i.splitlines() if HEAD.match(l) and (not re.search(r' \[(\w+)\]$', l) or l.endswith('[vcc_unknown]'))]
     if noid:

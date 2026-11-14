@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vcc-ldconst.py: long double (binary128) constants, bit for bit against clang.
 
-  bench/vcc-ldconst.py [-n N] [--seed S] [--keep DIR]
+  bench/vcc-ldconst.py [-n N] [--seed S] [--keep DIR] [--target TRIPLE]
 
 Generates N long double literals (random decimals over the whole exponent
 range, exact halfway cases and their neighbours, hex floats, the extremes,
@@ -10,6 +10,11 @@ conversions to and from double, float and integers) as initializers of
 global arrays for aarch64 Linux, compiles the file with clang and vcc and
 compares the arrays' bytes in .data.  Exit 1 on any difference; the first
 ones are printed with their source.  The same seed gives the same file.
+
+--target x86_64-linux-gnu or x86_64-w64-mingw32 (PLAN-win64.md WIN1): long
+double is x87's 80 bits there; for Windows the bytes come from both
+compilers' -S text (the .quad/.short/... after each array's label), since
+vcc does not write COFF objects yet.
 """
 import os, random, subprocess, sys, tempfile
 
@@ -128,8 +133,41 @@ def data(obj):
     return out
 
 
+def asm_data(path):
+    """symbol -> bytes, from GNU as text: the data directives after each label"""
+    import re
+    size = {'.byte': 1, '.short': 2, '.value': 2, '.2byte': 2, '.word': 2, '.long': 4, '.int': 4, '.4byte': 4,
+            '.quad': 8, '.8byte': 8}
+    out, cur = {}, None
+    for l in open(path):
+        l = l.split('#')[0].strip()
+        m = re.match(r'^([A-Za-z_.$][\w.$]*):$', l)
+        if m:
+            cur = m.group(1)
+            out[cur] = bytearray()
+            continue
+        w = l.split(None, 1)
+        if not w or cur is None:
+            continue
+        if w[0] in size:
+            try:
+                for v in w[1].split(','):
+                    out[cur] += (int(v.strip(), 0) & ((1 << 8 * size[w[0]]) - 1)).to_bytes(size[w[0]], 'little')
+            except ValueError:	# (an expression: not one of the arrays)
+                cur = None
+        elif w[0] == '.zero':
+            out[cur] += bytes(int(w[1].split(',')[0], 0))
+        elif w[0].startswith('.') and w[0] not in ('.p2align', '.size', '.type', '.globl'):
+            cur = None
+    return {k: bytes(v) for k, v in out.items()}
+
+
 def main():
+    global TGT
     av = sys.argv[1:]
+    if '--target' in av:
+        TGT = '--target=' + av[av.index('--target') + 1]
+    text = 'mingw' in TGT	# no COFF objects from vcc yet: compare the -S text
     n = int(av[av.index('-n') + 1]) if '-n' in av else 3000
     seed = int(av[av.index('--seed') + 1]) if '--seed' in av else 1
     keep = av[av.index('--keep') + 1] if '--keep' in av else None
@@ -139,17 +177,19 @@ def main():
     open(f'{d}/ld.c', 'w').write(src)
     res = {}
     for cc, cmd in (('clang', [CL, TGT, '-ffreestanding', '-w']), ('vcc', [VPP, TGT])):
-        p = subprocess.run(cmd + ['-c', f'{d}/ld.c', '-o', f'{d}/ld.{cc}.o'], capture_output=True, text=True)
+        p = subprocess.run(cmd + ['-S' if text else '-c', f'{d}/ld.c', '-o', f'{d}/ld.{cc}.o'], capture_output=True, text=True)
         if p.returncode:
             print(f'{cc}: {p.stderr[-1500:]}')
             sys.exit(1)
-        res[cc] = data(f'{d}/ld.{cc}.o')
+        res[cc] = asm_data(f'{d}/ld.{cc}.o') if text else data(f'{d}/ld.{cc}.o')
     bad = tot = 0
+    x87 = 'x86_64' in TGT	# 80 bits in 16 bytes: the 6 of padding are not the value
     for name, sz, xs in rows:
         a, b = res['clang'].get(name, b''), res['vcc'].get(name, b'')
         for i, x in enumerate(xs):
             tot += 1
-            if a[i * sz:(i + 1) * sz] != b[i * sz:(i + 1) * sz]:
+            vb = 10 if x87 and sz == 16 and name in ('lit', 'ex_ld') else sz
+            if a[i * sz:i * sz + vb] != b[i * sz:i * sz + vb]:
                 if bad < 12:
                     print(f'{name}[{i}] {x}: clang {a[i*sz:(i+1)*sz][::-1].hex()} vcc {b[i*sz:(i+1)*sz][::-1].hex()}')
                 bad += 1

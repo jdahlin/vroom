@@ -10,13 +10,13 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "vcc/emit/opt/sdivconst.c"
-#include "vcc/arch/x64/emit/x64impl.h"
-#include "vcc/emit/walk/sdivconst.c"
-#include "vcc/arch/a64/emit/sdivconst.c"
-VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
-VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }
-VPRIV void slot_tag(ecx *e, ins *i, int64_t off, int64_t len)
+#include "codegen/opt/sdivconst.c"
+#include "arch/x64/codegen/x64-internal.h"
+#include "codegen/walk/division-signed-constant.c"
+#include "arch/a64/codegen/sdivconst.c"
+VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
+VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
+VPRIV void slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)
 { (void)e; (void)i; (void)off; (void)len; }
 
 static uint64_t seed=UINT64_C(0x987654321abcdeff);
@@ -69,18 +69,18 @@ static void divisor(int64_t d, unsigned bits)
 }
 static void pressure(void)
 {
-    emitter emit={0}; xst x={0}; ecx e={.E=&emit,.x64=&x};
+    codegen_unit emit={0}; x64_lowering_context x={0}; codegen_context e={.unit=&emit,.x64_context=&x};
     const int regs[]={RAX,RCX,RDX,RSI,RDI,R8,R9,R10};
     for (unsigned count=0;count<=8;count++) {
-        x.live=0;
-        for (unsigned j=0;j<8-count;j++) x.live|=1u<<regs[j];
-        e.live=(1u<<(NTEMP-count))-1;
+        x.temporaries_in_use=0;
+        for (unsigned j=0;j<8-count;j++) x.temporaries_in_use|=1u<<regs[j];
+        e.temporaries_in_use=(1u<<(CODEGEN_TEMPORARY_COUNT-count))-1;
         for (unsigned materialize=0;materialize<2;materialize++)
         for (unsigned add=0;add<2;add++) for (unsigned rem=0;rem<2;rem++) {
             em_sdivconst_recipe r={.add=add,.remainder=rem};
-            val a={.k=materialize ? V_ADDR : V_REG};
+            codegen_value a={.kind=materialize ? CODEGEN_VALUE_ADDRESS : CODEGEN_VALUE_REGISTER};
             unsigned needed=materialize+1+(add||rem);
-            assert(wk_sdivconst_ok(&e,a,&r)==(count>=needed));
+            assert(walk_division_signed_constant_check(&e,a,&r)==(count>=needed));
             assert(a64_sdivconst_ok(&e,a,&r)==(count>=needed));
         }
     }
@@ -126,7 +126,7 @@ def main():
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
         subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-Wno-undefined-internal',
-                        '-I', str(Path(R) / 'ccs'), *flags, str(source), '-o', str(binary)],
+                        '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'), *flags, str(source), '-o', str(binary)],
                        check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('signed32/64 reciprocal arithmetic and pressure contracts: PASS')

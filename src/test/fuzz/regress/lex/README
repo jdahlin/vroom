@@ -1,0 +1,4 @@
+Minimized inputs from fuzz findings, one file per fixed bug, named after it.
+make -C src fuzz-regress replays frontend/lex/ through fuzz-lex and frontend/pp/ through fuzz-pp
+(every input must pass); make -C src fuzz-diff also runs frontend/pp/ and ../seeds/pp/
+through pp-diff.py (vpp against clang -E -P).  This file is an input too.

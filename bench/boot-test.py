@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Bootar en arm64-kärna med Debian 13 nocloud i QEMU (hvf) och väntar på login-prompten.
+"""Boots an arm64 kernel with Debian 13 nocloud in QEMU (hvf) and waits for the login prompt.
 
     python3 bench/boot-test.py [--kernel work/build-min/arch/arm64/boot/Image] [--timeout 120]
     python3 bench/boot-test.py --arch x86_64 --kernel work/build-x86/arch/x86/boot/bzImage   # KVM (PLAN-x86.md X8)
 
-Exit 0 om "login:" syns på seriekonsolen (= userspace nådd), annars 1.
-Hela konsolloggen sparas i results/boot-<tid>.log.
+Exit 0 if "login:" appears on the serial console (= userspace reached), otherwise 1.
+The whole console log is saved in results/boot-<time>.log.
 """
 import argparse
 import base64
@@ -16,7 +16,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WORK = os.environ.get("VROOM_WORK", os.path.join(ROOT, "work"))  # t.ex. huvudcheckoutens work/
+WORK = os.environ.get("VROOM_WORK", os.path.join(ROOT, "work"))  # e.g. the main checkout's work/
 BASE = os.path.join(WORK, "debian/debian-13-nocloud-arm64.qcow2")
 
 
@@ -38,8 +38,8 @@ done
 } > /dev/console 2>&1
 """
 CHECK_B64 = base64.b64encode(CHECK_SCRIPT.encode()).decode()
-# Körs av systemd.run=; startar kontrollen som en egen tjänst efter multi-user.target
-# så att den inte själv håller boot-transaktionen öppen.
+# Run by systemd.run=; starts the check as its own service after multi-user.target
+# so that it does not itself hold the boot transaction open.
 CHECK = (f"echo {CHECK_B64} | base64 -d > /run/vroom-check.sh; "
          "systemd-run --no-block --unit=vroom-check -p After=multi-user.target "
          "-p Wants=multi-user.target /bin/sh /run/vroom-check.sh")
@@ -56,10 +56,10 @@ def main():
     ap.add_argument("--timeout", type=float, default=120)
     ap.add_argument("--append", default="")
     ap.add_argument("--allow-degraded", action="store_true")
-    ap.add_argument("--no-login", action="store_true", help="nöj dig med login-prompten")
+    ap.add_argument("--no-login", action="store_true", help="stop at the login prompt")
     ap.add_argument("--arch", default="arm64", choices=["arm64", "x86_64"])
     ap.add_argument("--overlay", default=os.path.join(WORK, "debian/overlay.qcow2"),
-                    help="egen overlay om flera sessioner bootar samtidigt")
+                    help="own overlay if several sessions boot at the same time")
     a = ap.parse_args()
 
     base = BASE if a.arch == "arm64" else os.path.join(WORK, "debian/debian-13-nocloud-amd64.qcow2")
@@ -91,8 +91,8 @@ def main():
     buf = b""
     ok = False
     t_login = None
-    # Userspace-kontroll utan inloggning: systemd.run= kör ett kommando som en
-    # transient systemd-tjänst; utdata skrivs till seriekonsolen.
+    # Userspace check without login: systemd.run= runs a command as a
+    # transient systemd service; output is written to the serial console.
     state = "boot"
     with open(logpath, "wb") as log:
         while time.monotonic() - t0 < a.timeout:
@@ -120,7 +120,7 @@ def main():
     tail = open(logpath, "rb").read().decode(errors="replace").splitlines()[-12:]
     print("\n".join(tail))
     login = f"login-prompt {t_login:.1f} s, " if t_login else ""
-    print(f"\n{'BOOT OK' if ok else 'BOOT FAILED'}: {login}klar {dt:.1f} s, logg: {logpath}")
+    print(f"\n{'BOOT OK' if ok else 'BOOT FAILED'}: {login}done {dt:.1f} s, log: {logpath}")
     sys.exit(0 if ok else 1)
 
 

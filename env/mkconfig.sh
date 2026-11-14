@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Genererar env/vroom.config från allnoconfig + vroom-min.config + vroom-trim.config.
+# Generates env/vroom.config from allnoconfig + vroom-min.config + vroom-trim.config.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/env/macos-env.sh"

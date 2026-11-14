@@ -1,0 +1,3 @@
+# expect: ok-dry
+# mutate: src/a.c|int len_of|int  len_of
+len	length	field	Box

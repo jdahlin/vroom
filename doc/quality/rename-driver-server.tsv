@@ -1,0 +1,697 @@
+# Rename table for WORK-driver-server step 5 (doc/quality/WORK-driver-server.md): src/driver/, src/server/, src/utils/,
+# src/bin/*/ and their headers under src/include/ (protocol.h, driver/, utils/).  Document only: nothing is applied by this file.
+# Columns: old, new, kind, where and why.  Whole-word identifiers and path rows, for src/tools/rename-table.py.
+# Kinds:
+#   path      a file: rows with `.c`/`.h` ending, applied to #include lines, Makefile lists and prose; --move does the git mv.
+#             --move cannot find a header that is included by its bare name (`caps.h`, `dstore.h`): move src/server/caps.h and
+#             src/server/dstore.h by hand (git mv) after the run; their bare rows already rewrite the #include lines.
+#   function  file-scope function, static or VPRIV, public or not
+#   type      struct, typedef or enum tag
+#   constant  enumerator or constant macro
+#   macro     macro that is not a constant
+#   state     file-scope variable, table or thread-local
+#   unsafe    commented out, never applied: a name a whole-word script cannot rename safely, because the same word names other
+#             things elsewhere in src/ or bench/ (locals, other types, Python names), is an English word that also occurs in
+#             comments and prose, or is defined in several files of this scope under one name (each of those rows has its own
+#             new name here).  Rename by hand with the compiler's help; the new names are unique in the tree.
+#   field     in the last section only, commented out: struct fields that are not words.  Applied by the front-end-based tool, not
+#             by whole-word replace; each row has its struct tag in the last column (several structs share old names such as n, s).
+# Names follow doc/STYLE.md: `driver_` in driver/ (the declaration cache's internals `driver_snapshot_`), `vccd_` in server/ and for
+# the wire protocol (include/protocol.h), the tool's name in utils/ (`ar_`, `fixdep_`, `shell_`) and in bin/ (`shim_`, `vpp_`,
+# `lextest_`, `vasm_`, `viralloc_`, `virtest_`).  `fd`, `argc`, `argv`, `envp`, `cwd` and the other standard names of the domain
+# stay as written.
+# Not renamed (user-visible or protocol): every string literal (the --version texts, vccd's counters line, the region name
+# "ppdriver.buf", messages), environment variables (VCC_*, VCCD_SHARED_POOL, VPP_*), command-line options and the tool names
+# vcc/vas/vld/var/vsh/vccd/vpp, the wire format itself (VROOM_MAGIC's value, the field order and widths of the request header and the
+# status values 0x7fff0000-2), `main`, names already in the form (driver_cmdline_*, driver_depfile_names, driver_input_read,
+# driver_predef_build, driver_searchpath_*, driver_target_features_check, driver_warning_groups_check, ar_run).  Left alone because
+# another module owns them: x86_feature_macros, x86_cpu_macros (generated into driver/x86macros-data.inc by tools/gen-x86features.py,
+# arch/x64's x86_ prefix), predef_order_* (generated pp tables), `cc_fetch` and the other cc_ names, `ElfObj`, `as_context`.
+# Not changed by the script and decided by hand: strings that name a renamed function (the dry run lists them).
+# Checked by the dry run (src/tools/rename-table.py doc/quality/rename-driver-server.tsv): every old name occurs, no new name occurs
+# in src/ bench/ ci/ contrib/ already and no two rows share a new name.
+#
+# --- paths
+driver/ccsnap.c	driver/declaration-cache.c	path	the declaration cache (WORK-cc-cache keeps its possible move to frontend/c open)
+driver/ccsnap.h	driver/declaration-cache.h	path	include/driver/ccsnap.h; users: frontend/c, server
+ccsnap.c	declaration-cache.c	path	prose
+driver/ppdriver.h	driver/driver.h	path	include/driver/ppdriver.h: the module's public header (overview comment), like as/as.h and ld/ld.h
+driver/x86predefines.h	driver/x86-predefines.h	path	beside driver/predef.c; hyphenated words
+x86predefines.h	x86-predefines.h	path	
+server/caps.c	server/capabilities.c	path	the capability tables (what vcc accepts); `caps` is not a full word
+caps.c	capabilities.c	path	prose
+caps.h	capabilities.h	path	#include "caps.h" in vccd-internal.h
+server/dstore.c	server/diagnostics-store.c	path	
+dstore.c	diagnostics-store.c	path	prose
+dstore.h	diagnostics-store.h	path	#include "dstore.h"
+utils/rsh.c	utils/shell.c	path	prefix `shell_` (STYLE.md: utils take their tool's name); `rsh` stays the name of the subset in comments
+utils/rsh.h	utils/shell.h	path	include/utils/rsh.h
+rsh.c	shell.c	path	prose
+rsh.h	shell.h	path	prose
+# --- driver: public API (include/driver/ppdriver.h)
+ppd_env	driver_environment	type	include/driver/ppdriver.h: one job's cwd, fds, environment (users: server, bin/vpp, frontend)
+ppd_run	driver_job_run	function	driver/job.c, include/driver/ppdriver.h (users: server, bin/vpp)
+ppd_run1	driver_job_run_one	function	driver/job.c: the body of ppd_run
+ppd_compare	driver_tokens_compare	function	driver/tokcmp.c, include/driver/ppdriver.h (--cmp)
+ppd_getenv	driver_environment_get	function	driver/job.c
+ppd_umask	driver_client_umask	state	driver/output.c, include/driver/ppdriver.h (set by vccd)
+ppd_conn	driver_client_connection	state	driver/output.c, include/driver/ppdriver.h (set by vccd)
+ppd_ns_cc	driver_compile_nanoseconds	state	include/driver/ppdriver.h: -c phase total; read by bin/vpp
+ppd_ns_emit	driver_emit_nanoseconds	state	include/driver/ppdriver.h
+ppd_ns_obj	driver_object_nanoseconds	state	include/driver/ppdriver.h
+ppd_bytes_obj	driver_object_bytes	state	include/driver/ppdriver.h
+ppd_tok_out	driver_tokens_taken	state	include/driver/ppdriver.h: tokens the parser took from pp_token_next
+ppd_tok_skip	driver_tokens_skipped	state	include/driver/ppdriver.h: tokens skipped by the declaration cache
+ppd_ph	driver_phase_counters	state	include/driver/ppdriver.h
+PPD_PH_CC	DRIVER_PHASE_COMPILE	constant	include/driver/ppdriver.h
+PPD_PH_EMIT	DRIVER_PHASE_EMIT	constant	
+PPD_PH_OBJ	DRIVER_PHASE_OBJECT	constant	
+PPD_NPH	DRIVER_PHASE_COUNT	constant	
+ppd_ph_add	driver_phase_add	function	include/driver/ppdriver.h
+# --- driver: job buffer (driver/job-buffer.c, driver-internal.h)
+# buf	driver_buffer	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind type. driver-internal.h: struct buf (the job's text buffer); users of the typedef: all driver files and bin/vpp
+bufpool	driver_buffer_pool	state	driver/job-buffer.c
+bufr	driver_buffer_region	state	driver/job-buffer.c: this job's region
+BUF_REG	DRIVER_BUFFER_REGION_SIZE	constant	driver/job-buffer.c
+# bput	driver_buffer_append	unsafe	the same word names other things outside this scope (platform/darwin/ldmacho.c); rename by hand. Kind function. driver/job-buffer.c
+# bstr	driver_buffer_append_string	unsafe	the same word names other things outside this scope (bench/vcc-opt-rules.py, bench/vcc-x86features.py); rename by hand. Kind function. driver/job-buffer.c
+bfree	driver_buffer_free	function	driver/job-buffer.c
+define_arg	driver_buffer_append_define	function	driver/job-buffer.c: appends "#define NAME VALUE" for a -D argument
+# --- driver: output (driver/output.c)
+# at	driver_path_resolve	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. driver/output.c: path relative to the job's cwd
+# write_all	driver_output_write_all	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. driver/output.c (also a private write_all in utils/rsh.c, see the other rows)
+client_gone	driver_client_is_gone	function	driver/output.c
+out_mode	driver_output_mode_set	function	driver/output.c: applies the client's umask to an fd
+tmp_name	driver_output_temporary_name	function	driver/output.c
+# write_file	driver_output_file_write	unsafe	the same word names other things outside this scope (bench/vccd-sample.py, diag/report.c, ld/objcopy.c); rename by hand. Kind function. driver/output.c: atomic file through a temporary
+# write_out	driver_output_write	unsafe	the same word names other things outside this scope (codegen/tu.c); rename by hand. Kind function. driver/output.c: to -o or to the job's output fd
+nsnow	driver_clock_nanoseconds	function	driver/output.c
+# obj_state	driver_object_state_acquire	unsafe	the same word names other things outside this scope (test/abi/tlv_regs/callee.c); rename by hand. Kind function. driver/output.c: pops a pooled assembler/ELF writer/buffer set
+obj_release	driver_object_state_release	function	driver/output.c
+write_obj	driver_object_write	function	driver/output.c: lays out and writes the object
+obj_name	driver_object_name	function	driver/output.c: the default object name for a main file
+objst	driver_object_state	type	driver/output.c: struct objst
+obj_free	driver_object_state_free_list	state	driver/output.c
+tl_os	driver_object_state_current	state	driver/output.c: thread-local
+obj_mu	driver_object_state_lock	state	driver/output.c
+tl_as	driver_assembler	state	driver-internal.h, driver/output.c: thread-local assembler
+tl_obj	driver_object	state	thread-local ELF writer
+tl_objbuf	driver_object_buffer	state	thread-local serialised object
+tl_wasm_obj	driver_wasm_object	state	thread-local; wasm is off by default
+OBJBUF_CAP	DRIVER_OBJECT_BUFFER_CAPACITY	constant	driver/output.c
+# --- driver: other files
+src_suffix	driver_input_is_source	function	driver/cmdline.c: an input file by its suffix
+write_deps	driver_depfile_write	function	driver/depfile.c
+# explain	driver_explain_run	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. driver/explain.c: vcc --explain
+explain_tab	driver_explain_pages	state	driver/explain.c: the compiled-in pages (explain.inc, generated by tools/gen-explain.py)
+read_stdin_all	driver_input_stdin_read	function	driver/input.c
+# now	driver_clock_seconds	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. driver/job.c (private `now` in bin/vpp, bin/vasm, bin/viralloc and bin/lextest: one row each, in the order of their files)
+job_pp_opts_first	driver_job_pp_options_prepare	function	driver/job.c
+job_pp_opts_second	driver_job_pp_options_finish	function	driver/job.c
+job_compile	driver_job_compile	function	driver/job.c
+job_preprocess	driver_job_preprocess	function	driver/job.c
+predef_flags	driver_predef_flags_append	function	driver/predef.c
+predef_c23	driver_predef_c23_append	function	driver/predef.c
+env_ndirs	driver_searchpath_environment_count	function	driver/searchpath.c
+env_dirs	driver_searchpath_environment_split	function	driver/searchpath.c
+arch_lse	driver_target_lse_detect	function	driver/target-a64.c
+x86_driver_features	driver_target_features_parse	function	driver/target-x64.c: static
+lexbuf	driver_tokens_lex_string	function	driver/tokcmp.c
+lexfree	driver_tokens_lex_free	function	driver/tokcmp.c
+# clean	driver_tokens_spelling_get	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. driver/tokcmp.c
+# line_of	driver_tokens_line_number	unsafe	the same word names other things outside this scope (diag/fixit-apply.c); rename by hand. Kind function. driver/tokcmp.c (also a diag name `line_of` in other tables)
+# show	driver_tokens_context_print	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. driver/tokcmp.c
+tokstream_hash	driver_tokens_hash	function	driver/tokcmp.c
+refhash_read	driver_tokens_hash_cache_read	function	driver/tokcmp.c
+refhash_write	driver_tokens_hash_cache_write	function	driver/tokcmp.c
+cmp_toks	driver_tokens_compare_buffers	function	driver/tokcmp.c
+# HB	DRIVER_TOKENS_HASH_BYTES	unsafe	the same word names other things outside this scope (test/diag/const_conv.c); rename by hand. Kind macro. driver/tokcmp.c: local macro in driver_tokhash_run
+x86_macro_line	driver_x86_macro_line_append	function	driver/x86predefines.h
+x86_feature_predefines	driver_x86_feature_predefines_append	function	driver/x86predefines.h
+# --- driver: declaration cache (driver/ccsnap.c, include/driver/ccsnap.h; used by frontend/c and server)
+dc_begin	driver_declaration_cache_begin	function	include/driver/ccsnap.h; users frontend/c, driver/job.c
+dc_end	driver_declaration_cache_end	function	
+dc_materialize	driver_declaration_cache_materialize	function	
+dc_kill	driver_declaration_cache_kill	function	
+dc_boundary_slow	driver_declaration_cache_boundary_slow	function	
+dc_boundary	driver_declaration_cache_boundary	function	static inline in the header; hook in frontend/c
+dc_stale	driver_declaration_cache_is_stale	function	static inline in the header
+dc_stats	driver_declaration_cache_statistics_format	function	prints into a buffer; users server/counters via ppdriver
+dcst	driver_declaration_cache_state	type	include/driver/ccsnap.h: struct dcst, `cc.dc` points to it
+dcnode	driver_snapshot_node	type	driver/ccsnap.c, include/driver/ccsnap.h (forward declaration)
+dcsnap	driver_snapshot	type	driver/ccsnap.c
+dcarr	driver_snapshot_array	type	driver/ccsnap.c
+dcroot	driver_snapshot_root	type	driver/ccsnap.c
+coder	driver_snapshot_coder	type	driver/ccsnap.c: pointer and location encoder/decoder
+# roots	driver_snapshot_roots	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. driver/ccsnap.c: the chain roots by options signature
+dc_mem	driver_snapshot_memory_used	state	driver/ccsnap.c
+dc_max	driver_snapshot_memory_limit	state	driver/ccsnap.c: VCC_DC_MAX_MB
+dc_off	driver_snapshot_disabled	state	driver/ccsnap.c: VCC_NODC
+st_snap	driver_snapshot_take_count	state	driver/ccsnap.c
+st_restore	driver_snapshot_restore_count	state	driver/ccsnap.c
+st_regions	driver_snapshot_region_count	state	driver/ccsnap.c
+tok_skip	driver_snapshot_tokens_skipped	state	driver/ccsnap.c
+img_buf	driver_snapshot_image_buffer	state	driver/ccsnap.c: thread-local
+img_cap	driver_snapshot_image_capacity	state	driver/ccsnap.c: thread-local
+DC_PAGE	DRIVER_SNAPSHOT_PAGE_SIZE	constant	driver/ccsnap.c
+LOC_REL	DRIVER_SNAPSHOT_LOCATION_RELATIVE	constant	driver/ccsnap.c
+LOCS	DRIVER_SNAPSHOT_LOCATIONS	macro	driver/ccsnap.c: the list of cc locations
+A_TY	DRIVER_SNAPSHOT_ARRAY_TYPES	constant	driver/ccsnap.c: the A_* enumerators name the arrays of a cc
+A_PARAMS	DRIVER_SNAPSHOT_ARRAY_PARAMETERS	constant	
+A_TAGS	DRIVER_SNAPSHOT_ARRAY_TAGS	constant	
+A_SYMS	DRIVER_SNAPSHOT_ARRAY_SYMBOLS	constant	
+A_NODES	DRIVER_SNAPSHOT_ARRAY_NODES	constant	
+A_LISTS	DRIVER_SNAPSHOT_ARRAY_LISTS	constant	
+A_IPOOL	DRIVER_SNAPSHOT_ARRAY_INTEGER_POOL	constant	
+A_FPOOL	DRIVER_SNAPSHOT_ARRAY_FLOAT_POOL	constant	
+A_STRS	DRIVER_SNAPSHOT_ARRAY_STRINGS	constant	
+A_LABELS	DRIVER_SNAPSHOT_ARRAY_LABELS	constant	
+A_ATTR	DRIVER_SNAPSHOT_ARRAY_ATTRIBUTES	constant	
+A_ASMS	DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS	constant	
+A_SSTACK	DRIVER_SNAPSHOT_ARRAY_SCOPE_STACK	constant	
+A_TOPLEVEL	DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL	constant	
+A_TLASM	DRIVER_SNAPSHOT_ARRAY_TOP_LEVEL_ASM	constant	
+A_SPAN	DRIVER_SNAPSHOT_ARRAY_SPANS	constant	
+A_LZT	DRIVER_SNAPSHOT_ARRAY_LAZY_TYPES	constant	
+A_LZF	DRIVER_SNAPSHOT_ARRAY_LAZY_FUNCTIONS	constant	
+A_LZS	DRIVER_SNAPSHOT_ARRAY_LAZY_SYMBOLS	constant	
+A_PAREN	DRIVER_SNAPSHOT_ARRAY_PARENTHESES	constant	
+A_HEAP	DRIVER_SNAPSHOT_ARRAY_HEAP	constant	
+A_N	DRIVER_SNAPSHOT_ARRAY_COUNT	constant	
+abase	driver_snapshot_array_base	function	driver/ccsnap.c
+enc_ptr	driver_snapshot_pointer_encode	function	
+dec_ptr	driver_snapshot_pointer_decode	function	
+enc_loc	driver_snapshot_location_encode	function	
+dec_loc	driver_snapshot_location_decode	function	
+code_ptrs	driver_snapshot_pointers_translate	function	
+code_cc	driver_snapshot_state_translate	function	
+mem_take	driver_snapshot_memory_reserve	function	
+# dalloc	driver_snapshot_allocate	unsafe	the same word names other things outside this scope (frontend/pp/dircache.c); rename by hand. Kind function. 
+ancestor_snap	driver_snapshot_ancestor_find	function	
+snap_take	driver_snapshot_take	function	
+snap_restore	driver_snapshot_restore	function	
+# opt_sig	driver_snapshot_options_signature	unsafe	the same word names other things outside this scope (TODO.md, frontend/c/replay.c); rename by hand. Kind function. 
+root_get	driver_snapshot_root_get	function	
+# child	driver_snapshot_node_child	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+dc_env	driver_snapshot_environment_read	function	
+# die	driver_snapshot_mark_dead	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. driver/ccsnap.c (also a `die` in bin/vcc/shim.c)
+# --- driver: names of the first split that need words
+driver_predef_darwin_sysdirs	driver_predef_darwin_system_directories	function	driver/predef.c, driver-internal.h
+driver_predef_darwin_fwdirs	driver_predef_darwin_framework_directories	function	driver/predef.c, driver-internal.h
+driver_tokhash_run	driver_tokens_hash_run	function	driver/tokcmp.c: --vcc-tokhash
+driver_assemble_source	driver_source_assemble	function	driver/job.c: noun before verb
+# ARG	DRIVER_OPTION_VALUE	unsafe	the same word names other things outside this scope (bench/clangdiag.py, frontend/c/builtin-os-log.c, frontend/pp/expand.c); rename by hand. Kind macro. driver/cmdline.c: local to driver_cmdline_parse
+# --- server: shared types and state (vccd-internal.h, vccd.c)
+# req	vccd_request	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. vccd-internal.h: struct req
+# worker	vccd_worker	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind type. vccd-internal.h: struct worker (the word `worker` is also a function in bin/lextest)
+MAX_STRS	VCCD_STRINGS_MAX	constant	vccd-internal.h
+QSIZE	VCCD_QUEUE_SIZE	constant	vccd-internal.h, server/work-queue.c
+WORKER_STACK	VCCD_WORKER_STACK_SIZE	constant	vccd-internal.h
+PROBE_NONE	VCCD_PROBE_NONE	constant	vccd-internal.h: the PROBE_* enumerators
+PROBE_CC	VCCD_PROBE_CC	constant	
+PROBE_AS	VCCD_PROBE_AS	constant	
+PROBE_SRC	VCCD_PROBE_SOURCE	constant	
+PROBE_LINK	VCCD_PROBE_LINK	constant	
+backend_sock	vccd_backend_socket	state	vccd.c, vccd-internal.h: --backend-sock
+ld_backend	vccd_linker_backend	state	vccd.c: --ld PROG
+log_requests	vccd_log_requests	state	vccd.c
+own_pp	vccd_own_preprocessor	state	vccd.c: -E handled by vcc itself
+own_cc	vccd_own_compiler	state	vccd.c: -c/-S handled by vcc itself
+self_exe	vccd_self_executable	state	vccd.c
+self_build	vccd_self_build_id	state	vccd.c
+# tool_dir	vccd_tool_directory	unsafe	the same word names other things outside this scope (bench/vcc-kefir.py); rename by hand. Kind state. vccd.c
+g_argc	vccd_restart_argc	state	server/build-generation.c, vccd.c: kept for the restart exec
+# g_argv	vccd_restart_argv	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind state. same (a different `g_argv` in bin/vcc/shim.c: renamed there to shim_argv)
+g_ls	vccd_listen_fd	state	vccd.c
+g_sock	vccd_socket_path	state	vccd.c
+peer_is_us	vccd_peer_is_us	function	vccd.c
+# --- server: work queue and workers
+# queue	vccd_queue_fds	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. server/work-queue.c
+qhead	vccd_queue_head	state	
+qtail	vccd_queue_tail	state	
+qlock	vccd_queue_lock	state	
+qcond	vccd_queue_condition	state	
+n_active	vccd_active_count	state	
+queue_push	vccd_queue_push	function	server/work-queue.c
+queue_pop	vccd_queue_pop	function	
+queue_try_pop	vccd_queue_pop_try	function	
+worker_buffers	vccd_worker_buffers_get	function	server/worker.c
+# serve	vccd_worker_connection_serve	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. server/worker.c
+worker_main	vccd_worker_main	function	server/worker.c
+pool_job	vccd_worker_pool_job	function	server/worker.c
+drain_exit	vccd_server_drain_exit	function	server/worker.c
+# --- server: build generations
+GEN_KEEP_MS	VCCD_GENERATION_KEEP_MILLISECONDS	constant	server/build-generation.c
+GEN_GROUPS	VCCD_GENERATION_GROUPS_MAX	constant	
+gen_mu	vccd_generation_lock	state	
+gen_grp	vccd_generation_groups	state	
+gen_ngrp	vccd_generation_group_count	state	
+gen_running	vccd_generation_running_count	state	
+n_flush	vccd_flush_count	state	build generations seen (cache flushes)
+gen_restart	vccd_generation_restart_pending	state	
+accept_parked	vccd_accept_parked	state	
+rss_mb	vccd_generation_resident_megabytes	function	
+restart_due	vccd_generation_restart_is_due	function	
+park_accept	vccd_accept_park	function	
+do_restart	vccd_generation_restart	function	
+gen_enter	vccd_generation_enter	function	
+gen_leave	vccd_generation_leave	function	
+# --- server: counters
+n_probe	vccd_probe_count	state	server/counters.c (printed by vccd_counters_print: output text unchanged)
+n_probe_cc	vccd_probe_compile_count	state	
+n_fwd	vccd_forward_count	state	
+n_spawn	vccd_spawn_count	state	
+n_pp	vccd_preprocess_count	state	
+# n_cc	vccd_compile_count	unsafe	the same word names other things outside this scope (bench/kbuild.py); rename by hand. Kind state. 
+n_fail	vccd_failure_count	state	
+n_fallback	vccd_fallback_count	state	
+n_ar	vccd_archive_count	state	
+n_ld	vccd_link_count	state	
+n_host	vccd_host_count	state	
+n_objcopy	vccd_objcopy_count	state	
+n_sh	vccd_recipe_count	state	recipes run in process
+n_sh_decl	vccd_recipe_declined_count	state	recipes passed to the real shell
+print_counts	vccd_counters_print	function	server/counters.c
+# --- server: requests
+read_full	vccd_fd_read_full	function	server/request.c
+write_full	vccd_fd_write_full	function	server/request.c
+recv_req	vccd_request_receive	function	
+split_req	vccd_request_split	function	
+# say	vccd_request_message_write	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. writes a message with the tool's name to the request's stderr
+# now_ms	vccd_clock_milliseconds	unsafe	the same word names other things outside this scope (bench/tsh.c); rename by hand. Kind function. 
+req_env	vccd_request_environment_get	function	
+log_req	vccd_request_log	function	
+read_all	vccd_fd_read_all	function	server/probe.c
+# spawn	vccd_program_spawn	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. server/spawn.c
+# --- server: classify and dispatch
+cc_is_pp	vccd_request_is_preprocess	function	server/classify.c
+takes_value	vccd_option_takes_value	function	server/classify.c
+cc_input	vccd_request_input_find	function	
+cc_is_compile	vccd_request_is_compile	function	
+host_cc_link	vccd_request_is_host_link	function	
+dg_is_compile	vccd_request_is_delegated_compile	function	VCC_DELEGATE
+# handle	vccd_request_handle	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. server/dispatch.c
+handle1	vccd_request_dispatch	function	server/dispatch.c
+# --- server: compile, probe, forward, tools, host programs, recipes
+cap_fd	vccd_compile_capture_fd	state	server/compile.c: thread-local
+cc_own	vccd_compile_in_process	function	server/compile.c
+# delegate	vccd_compile_delegate	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+fixdep_after	vccd_compile_fixdep_after	function	
+probe_output	vccd_probe_output_is_discard	function	server/probe.c
+cc_probe_kind	vccd_probe_kind_classify	function	
+read_stdin	vccd_probe_stdin_read	function	
+compile_stdin	vccd_probe_stdin_compile	function	
+cc_probe	vccd_probe_cc_answer	function	
+ld_is_probe	vccd_probe_ld_is_query	function	
+ld_probe	vccd_probe_ld_answer	function	
+# forward	vccd_backend_forward	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. server/forward.c
+forward_relay	vccd_backend_relay	function	
+forward_argv	vccd_backend_forward_argv	function	
+argv_with	vccd_argv_with_extra	function	server/tools.c
+ld_in_process	vccd_linker_run_in_process	function	
+ld_run	vccd_linker_run	function	
+objcopy_run_req	vccd_objcopy_run	function	
+host_with_arg	vccd_host_option_takes_value	function	server/host-programs.c
+is_src	vccd_host_is_source	function	
+host_cc	vccd_host_program_compile	function	
+sh_is_tool	vccd_recipe_is_tool	function	server/recipe.c: rsh callback
+sh_run_tool	vccd_recipe_tool_run	function	rsh callback
+sh_fixdep	vccd_recipe_fixdep_run	function	rsh callback
+run_sh	vccd_recipe_run	function	
+sh_ctx	vccd_recipe_context	type	
+sh_raw	vccd_recipe_request_buffer	state	thread-local
+sh_strs	vccd_recipe_request_strings	state	thread-local
+# --- server: capability tables (server/caps.c, caps.h)
+cc_option	vccd_capabilities_cc_option_arity	function	server/caps.c: argv entries consumed (users: server, driver probes)
+ld_option	vccd_capabilities_ld_option_is_accepted	function	
+ld_rejects	vccd_capabilities_ld_option_is_rejected	function	
+as_source_probe	vccd_capabilities_as_source_probe	function	
+c_source_probe	vccd_capabilities_c_source_probe	function	
+cc_predefined	vccd_capabilities_macro_is_predefined	function	
+cc_version_text	vccd_capabilities_cc_version_text	state	text unchanged (clang-compatible identity)
+ld_version_text	vccd_capabilities_ld_version_text	state	text unchanged
+cc_resource_include	vccd_capabilities_resource_include	state	
+cc_can_link	vccd_capabilities_can_link	state	
+# in	vccd_capabilities_list_contains	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. server/caps.c: static
+# prefix	vccd_capabilities_has_prefix	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+as_option_ok	vccd_capabilities_as_option_is_ok	function	static
+# cmp_str	vccd_capabilities_string_compare	unsafe	the same word names other things outside this scope (ld/stub-collection.c, ld/stub-object.c); rename by hand. Kind function. static
+warning_ok	vccd_capabilities_warning_is_ok	function	static
+# lookup	vccd_capabilities_probe_lookup	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+probe_src	vccd_capabilities_probe_source	type	
+cc_with_arg	vccd_capabilities_cc_with_argument	state	
+cc_exact	vccd_capabilities_cc_exact	state	
+cc_prefix	vccd_capabilities_cc_prefix	state	
+warning_groups	vccd_capabilities_warning_groups	state	
+ld_exact	vccd_capabilities_ld_exact	state	
+as_sources	vccd_capabilities_as_sources	state	
+c_sources	vccd_capabilities_c_sources	state	
+# --- server: diagnostics store (server/dstore.c, dstore.h)
+dstore_job	vccd_diagnostics_job	type	server/dstore.h
+dstore_begin	vccd_diagnostics_job_begin	function	
+dstore_end	vccd_diagnostics_job_end	function	
+dstore_new_build	vccd_diagnostics_build_new	function	
+dstore_query	vccd_diagnostics_query	function	
+drec_s	vccd_diagnostics_record	type	struct drec_s: used by dstore.h too
+# tent	vccd_diagnostics_unit	unsafe	the same word names other things outside this scope (test/pic/syms.c); rename by hand. Kind type. one translation unit's records
+istr	vccd_diagnostics_interned_string	type	
+kcount	vccd_diagnostics_key_count	type	
+TU_JSON_MAX	VCCD_DIAGNOSTICS_UNIT_JSON_MAX	constant	
+JSON_BUDGET	VCCD_DIAGNOSTICS_JSON_BUDGET	constant	
+NBUCKET	VCCD_DIAGNOSTICS_BUCKETS	constant	
+# dmu	vccd_diagnostics_lock	unsafe	the same word names other things outside this scope (codegen/debug-rows.c, codegen/emitimpl.h, codegen/tu.c); rename by hand. Kind state. 
+# buckets	vccd_diagnostics_unit_buckets	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+dset	vccd_diagnostics_dedup_keys	state	
+dcap	vccd_diagnostics_dedup_capacity	state	
+# dn	vccd_diagnostics_dedup_count	unsafe	the same word names other things outside this scope (arch/a64/ld/thunkpass.inc, arch/a64/vir/moves.c, arch/wasm/as/as.c); rename by hand. Kind state. 
+ndup_build	vccd_diagnostics_duplicate_count	state	
+json_bytes	vccd_diagnostics_json_bytes	state	
+ibuckets	vccd_diagnostics_string_buckets	state	
+xrealloc	vccd_diagnostics_realloc	function	static
+xstrdup	vccd_diagnostics_strdup	function	static
+shash	vccd_diagnostics_string_hash	function	static
+# intern	vccd_diagnostics_string_intern	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+# seen	vccd_diagnostics_key_is_seen	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+# put	vccd_diagnostics_json_append	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. static
+put_jstr	vccd_diagnostics_json_string_append	function	static
+# record	vccd_diagnostics_record_add	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+tent_free	vccd_diagnostics_unit_free	function	static
+# count	vccd_diagnostics_key_count_add	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+kcmp	vccd_diagnostics_key_compare	function	static
+tcmp	vccd_diagnostics_unit_compare	function	static
+# wr	vccd_diagnostics_write	unsafe	the same word names other things outside this scope (arch/x64/as/sse.c, codegen/vir/load-forwarding.c, codegen/vir/simplify.c); rename by hand. Kind function. static
+# table	vccd_diagnostics_table_print	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. static
+# --- protocol (include/protocol.h): the wire format and the names around it
+vroom_build_id	vccd_build_id	function	include/protocol.h
+vroom_default_sock	vccd_socket_default	function	include/protocol.h
+vroom_req_hdr	vccd_request_header	type	include/protocol.h: struct vroom_req_hdr
+VROOM_MAGIC	VCCD_PROTOCOL_MAGIC	constant	the value 0x326f6f72 is the wire's, unchanged
+VROOM_MAX_PAYLOAD	VCCD_PROTOCOL_PAYLOAD_MAX	constant	
+VROOM_STATUS_DECLINE	VCCD_STATUS_DECLINE	constant	
+VROOM_STATUS_MISMATCH	VCCD_STATUS_MISMATCH	constant	
+VROOM_STATUS_RETRY	VCCD_STATUS_RETRY	constant	
+# HOST_CC	VCCD_HOST_PROGRAMS_ENABLED	unsafe	the same word names other things outside this scope (Makefile); rename by hand. Kind macro. server/classify.c: 1 on macOS (host programs are compiled by vccd), 0 elsewhere
+# --- utils/ar.c (prefix ar_; ar_run is right already)
+# err	ar_error_report	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. utils/ar.c (and private `err` in utils/rsh.c: see shell_error_report)
+ml_push	ar_member_list_push	function	utils/ar.c
+ml_free	ar_member_list_free	function	
+sbuf_done	ar_buffer_finish	function	
+# norm	ar_path_normalize	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+dirof	ar_path_directory	function	
+relto	ar_path_relative	function	
+base_of	ar_path_base	function	
+# num	ar_field_number_parse	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+read_thin	ar_thin_archive_read	function	
+add_file	ar_member_file_add	function	
+elf_syms	ar_elf_symbols_read	function	
+# mget	ar_member_map	unsafe	the same word names other things outside this scope (frontend/pp/expand.c, frontend/pp/header-cache-publish.c, frontend/pp/header-cache-serve.c); rename by hand. Kind function. 
+mput	ar_member_unmap	function	
+# header	ar_header_append	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# be32	ar_buffer_append_u32_be	unsafe	the same word names other things outside this scope (bench/vcc-vir-x86.py, ld/wasmld.c, platform/darwin/ldmacho.c); rename by hand. Kind function. 
+le32	ar_buffer_append_u32_le	function	
+# r16	ar_load_u16_le	unsafe	the same word names other things outside this scope (arch/x64/as/asm.c, bench/vcc-emit-names.py, test/abi/int_records/callee.c); rename by hand. Kind function. 
+# r32	ar_load_u32_le	unsafe	the same word names other things outside this scope (arch/x64/as/asm.c, arch/x64/as/sse.c); rename by hand. Kind function. 
+# r64	ar_load_u64_le	unsafe	the same word names other things outside this scope (arch/x64/as/asm.c, arch/x64/as/sse.c, arch/x64/as/sys.c); rename by hand. Kind function. 
+build_bsd	ar_bsd_symbol_table_build	function	
+arq_done	ar_request_finish	function	
+write_archive	ar_archive_write	function	
+write_all_fd	ar_fd_write_all	function	
+read_regular	ar_regular_archive_read	function	the members of a regular archive
+regular_read	ar_regular_archive_operate	function	t, p, x on a regular archive
+zeros8	ar_zero_padding	state	
+# member	ar_member	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+mlist	ar_member_list	type	
+arq	ar_request	type	
+# --- utils/fixdep.c (prefix fixdep_; vfixdep is the public entry)
+vfixdep	fixdep_run	function	utils/fixdep.c, include/utils/fixdep.h (users: server)
+# strhash	fixdep_string_hash	unsafe	the same word names other things outside this scope (ld/global-symbols.c, ld/lazy-archive.c, ld/relocatable-link.c); rename by hand. Kind function. 
+in_hashtable	fixdep_table_contains	function	
+free_tab	fixdep_table_free	function	
+str_ends_with	fixdep_string_ends_with	function	
+scan_configs	fixdep_configs_scan	function	
+file_configs	fixdep_file_configs	function	
+is_ignored_file	fixdep_file_is_ignored	function	
+is_no_parse_file	fixdep_file_is_unparsed	function	
+use_file	fixdep_file_use	function	
+parse_dep_file	fixdep_depfile_parse	function	
+read_at	fixdep_file_read	function	
+# item	fixdep_item	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+HASHSZ	FIXDEP_HASH_SIZE	constant	
+# job	fixdep_job	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind type. utils/fixdep.c: struct job (bin/vpp has another `job`; renamed vpp_job)
+# --- utils/rsh.c (prefix shell_: kbuild's recipe subset of sh)
+rsh_run	shell_run	function	utils/rsh.c, include/utils/rsh.h (users: server)
+RSH_DECLINE	SHELL_DECLINE	constant	include/utils/rsh.h
+rsh_ops	shell_callbacks	type	include/utils/rsh.h: the hooks the caller supplies
+tk_push	shell_token_push	function	
+name_char	shell_char_is_name	function	
+bail_char	shell_char_is_unsupported	function	
+tokenize	shell_tokenize	function	
+sc_add	shell_script_command_add	function	
+wordv	shell_words_to_argv	function	
+do_printf	shell_printf_format	function	
+parse_simple	shell_command_parse	function	
+# parse	shell_script_parse	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# write_all	shell_fd_write_all	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. utils/rsh.c: duplicate of the driver's write_all, different new name until common/ has one (WORK-common)
+# err	shell_error_report	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. utils/rsh.c (the other `err` is ar_error_report)
+rm_err	shell_rm_error_report	function	
+# is_dir	shell_path_is_directory	unsafe	the same word names other things outside this scope (bench/vcc-kefir.py, bench/vcc-small.py, bench/vcc-torture-compile.py); rename by hand. Kind function. 
+mkdir_p	shell_directories_create	function	
+# run	shell_script_run	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# tok	shell_token	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+# toks	shell_token_list	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+# cmd	shell_command	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+# script	shell_script	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind type. 
+T_WORD	SHELL_TOKEN_WORD	constant	
+# T_SEMI	SHELL_TOKEN_SEMICOLON	unsafe	the same word names other things outside this scope (frontend/c/attribute.c, frontend/c/declaration-specifiers.c, frontend/c/declaration.c); rename by hand. Kind constant. 
+# T_PIPE	SHELL_TOKEN_PIPE	unsafe	the same word names other things outside this scope (arch/a64/codegen/arith.c, arch/a64/codegen/expr.c, arch/a64/codegen/lval.c); rename by hand. Kind constant. 
+T_GT	SHELL_TOKEN_REDIRECT	constant	
+C_NOP	SHELL_COMMAND_NOP	constant	
+C_SET_E	SHELL_COMMAND_SET_E	constant	
+C_TEXT	SHELL_COMMAND_TEXT	constant	
+C_RM	SHELL_COMMAND_RM	constant	
+C_MKDIR	SHELL_COMMAND_MKDIR	constant	
+C_TOOL	SHELL_COMMAND_TOOL	constant	
+C_FIXDEP	SHELL_COMMAND_FIXDEP	constant	
+# --- bin/vcc/shim.c (the vcc/vas/vld/var/vsh shim, prefix shim_)
+real_shell	shim_real_shell_exec	function	bin/vcc/shim.c
+# die	shim_die	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/vcc/shim.c
+# put	shim_string_append	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. 
+vccd_path	shim_vccd_path_find	function	
+# autostart	shim_vccd_start	unsafe	the same word names other things outside this scope (TODO.md); rename by hand. Kind function. 
+# buf	shim_request_buffer	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind state. bin/vcc/shim.c: static char buf[]
+# g_argv	shim_argv	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind state. bin/vcc/shim.c
+SHIM_NOSIG	SHIM_SEND_NOSIGNAL	macro	
+# --- bin/vpp
+# now	vpp_clock_seconds	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/vpp/vpp.c
+run_job	vpp_job_run	function	
+run_pass	vpp_pass_run	function	
+# batch	vpp_batch_run	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# job	vpp_job	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind type. bin/vpp/vpp.c: struct job
+# jobs	vpp_jobs	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+# njobs	vpp_job_count	unsafe	the same word names other things outside this scope (port/task.c); rename by hand. Kind state. 
+cmpmode	vpp_compare_mode	state	
+warmup	vpp_warmup	state	
+# bdir	vpp_batch_directory	unsafe	the same word names other things outside this scope (bench/ffmpeg/run.py, bench/vbench.py); rename by hand. Kind state. 
+# nul	vpp_null_fd	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+# --- bin/lextest
+# now	lextest_clock_seconds	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/lextest/lextest.c
+# stringify	lextest_stringify	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# dump	lextest_dump	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+read_list	lextest_list_read	function	
+# worker	lextest_worker	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. 
+# bench	lextest_bench	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# core	lextest_core	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+idcheck	lextest_identifier_check	function	
+# paths	lextest_paths	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+# plen	lextest_path_lengths	unsafe	the same word names other things outside this scope (bench/vccd-test.py, frontend/pp/dircache.c); rename by hand. Kind state. 
+npaths	lextest_path_count	state	
+next_file	lextest_next_file	state	
+# reps	lextest_repetitions	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+# prefetch	lextest_prefetch	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind state. 
+tot_bytes	lextest_total_bytes	state	
+tot_toks	lextest_total_tokens	state	
+cpu_time	lextest_cpu_time	state	
+# --- bin/vasm, bin/viralloc, bin/virtest
+# map	vasm_file_map	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. bin/vasm/vasm.c
+# now	vasm_clock_seconds	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/vasm/vasm.c
+# slurp	viralloc_file_read	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/viralloc/viralloc.c
+# find_sep	viralloc_separator_find	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. 
+parse_regs	viralloc_registers_parse	function	
+# now	viralloc_clock_seconds	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. 
+# one	viralloc_function_allocate	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# slurp	virtest_file_read	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. bin/virtest/virtest.c
+# find_sep	virtest_separator_find	unsafe	the same old name is defined in several files (rows below give each its own new name); rename by hand. Kind function. 
+# selftest	virtest_selftest	unsafe	an English word: comments and prose would change; rename by hand with the compiler. Kind function. 
+# ================================ FIELDS: applied by the front-end-based tool, not by this script ================================
+# Every row below is commented out (whole-word replacement would hit locals and other structs).  Columns: old, new, kind, struct tag and meaning.
+# --- struct buf (driver-internal.h)
+# p	data	field	struct buf
+# n	length	field	struct buf
+# cap	capacity	field	struct buf
+# r	region	field	struct buf: the per-thread region the first 16 MB come from
+# --- struct driver_job (driver-internal.h; its option fields are replaced wholesale by the option table of WORK-driver-server step 2, so these names may live only until then)
+# dirs_q	quote_directories	field	struct driver_job: -iquote
+# dirs_i	include_directories	field	struct driver_job: -I
+# dirs_s	system_directories	field	struct driver_job: -isystem
+# dirs_a	after_directories	field	struct driver_job: -idirafter
+# all	search_directories	field	struct driver_job: the merged list
+# nq	quote_count	field	struct driver_job
+# ni	include_count	field	struct driver_job
+# ns	system_count	field	struct driver_job
+# na	after_count	field	struct driver_job
+# n	search_count	field	struct driver_job: entries of search_directories
+# ne	embed_count	field	struct driver_job
+# dirs_e	embed_directories	field	struct driver_job: --embed-dir
+# cpath	cpath_value	field	struct driver_job: $CPATH of the job's environment
+# cipath	c_include_path_value	field	struct driver_job: $C_INCLUDE_PATH
+# cmp	compare_file	field	struct driver_job: --cmp
+# out	output_file	field	struct driver_job: -o
+# deptarget	dependency_target	field	struct driver_job: -MT/-MQ
+# md	dependency_file_mode	field	struct driver_job: 1 -MD, 2 -MMD
+# mdeps	dependency_print_mode	field	struct driver_job: 1 -M, 2 -MM
+# mphony	dependency_phony	field	struct driver_job: -MP
+# dcolor	diagnostic_color	field	struct driver_job
+# nocaret	no_caret	field	struct driver_job
+# elimit	error_limit	field	struct driver_job
+# mblimit	macro_backtrace_limit	field	struct driver_job
+# slimit	spell_checking_limit	field	struct driver_job
+# showid	show_diagnostic_id	field	struct driver_job
+# dformat	diagnostic_format	field	struct driver_job
+# nwargs	warning_argument_count	field	struct driver_job
+# dstyle	diagnostic_style	field	struct driver_job
+# dunicode	diagnostic_unicode	field	struct driver_job
+# badval	bad_value_option	field	struct driver_job
+# wargs	warning_arguments	field	struct driver_job
+# pmapbuf	prefix_map_buffer	field	struct driver_job
+# pmap	prefix_map	field	struct driver_job: -fmacro-prefix-map
+# pre	predefines	field	struct driver_job
+# cmdl	command_line_defines	field	struct driver_job: -D and -U as text
+# incl	include_text	field	struct driver_job: -include
+# imac	include_macros_text	field	struct driver_job: -imacros
+# x86	target_x64	field	struct driver_job
+# wasm	wasm_bits	field	struct driver_job: 64, 32 or 0
+# lnx	target_linux	field	struct driver_job
+# raw_asm	raw_assembler	field	struct driver_job
+# xlang	language_given	field	struct driver_job: -x given
+# nostdinc	no_standard_includes	field	struct driver_job
+# undef	undefine_predefined	field	struct driver_job: -undef
+# march_lse	march_has_lse	field	struct driver_job
+# mcpu_lse	mcpu_has_lse	field	struct driver_job
+# opt	optimize	field	struct driver_job: 0 or 2
+# olevel	optimization_level	field	struct driver_job
+# os	optimize_size	field	struct driver_job
+# tlsmodel	tls_model	field	struct driver_job
+# sections	function_data_sections	field	struct driver_job: bit 0 functions, bit 1 data
+# nobuiltin	no_builtin	field	struct driver_job
+# nojt	no_jump_tables	field	struct driver_job
+# instr	instrument_functions	field	struct driver_job
+# tiny	code_model_tiny	field	struct driver_job
+# gregs	general_regs_only	field	struct driver_job
+# x86_features_	x64_features	field	struct driver_job
+# x86_disabled	x64_features_disabled	field	struct driver_job
+# x86_raw	x64_features_raw	field	struct driver_job
+# x86_on	x64_features_forced_on	field	struct driver_job
+# x86_off	x64_features_forced_off	field	struct driver_job
+# x86_cpu	x64_cpu	field	struct driver_job
+# nosse	no_sse	field	struct driver_job
+# nosse2	no_sse2	field	struct driver_job
+# nommx	no_mmx	field	struct driver_job
+# xcf	x64_hardening_flags	field	struct driver_job
+# pfe_n	patchable_entry_count	field	struct driver_job
+# pfe_m	patchable_entry_before	field	struct driver_job
+# sprot	stack_protector	field	struct driver_job
+# sp_gs	stack_protector_guard_gs	field	struct driver_job
+# sp_sym	stack_protector_guard_symbol	field	struct driver_job
+# autozero	auto_variables_zero	field	struct driver_job
+# po	pp_options	field	struct driver_job
+# t0	start_time	field	struct driver_job
+# nomarkers	no_line_markers	field	struct driver_job: -P
+# dmacros	dump_macros	field	struct driver_job: -dM
+# showinc	show_includes	field	struct driver_job: -H
+# ddefs	dump_defines	field	struct driver_job: -dD
+# syntax	syntax_only	field	struct driver_job
+# layout	layout_checks	field	struct driver_job
+# ms_anon	ms_anonymous_structs	field	struct driver_job
+# tokhash	token_hash	field	struct driver_job
+# emit	emit_assembly	field	struct driver_job
+# objmode	object_mode	field	struct driver_job
+# stdver	standard_version	field	struct driver_job
+# macos_min	macos_minimum_version	field	struct driver_job
+# fast_root4	fast_math	field	struct driver_job
+# nocontract	no_fp_contract	field	struct driver_job
+# macos_min_flag	macos_minimum_source	field	struct driver_job
+# uchar	unsigned_char	field	struct driver_job
+# fmath	math_flags	field	struct driver_job
+# tri	trigraphs	field	struct driver_job
+# std	standard	field	struct driver_job
+# strict	strict_standard	field	struct driver_job
+# wimpl_int	allow_implicit_int	field	struct driver_job
+# wimpl_fn	allow_implicit_function	field	struct driver_job
+# conv_warn	conversion_warning_flags	field	struct driver_job
+# objbuf	object_name_buffer	field	struct driver_job
+# dtbuf	dependency_target_buffer	field	struct driver_job
+# dfbuf	depfile_name_buffer	field	struct driver_job
+# dtarget	depfile_target	field	struct driver_job
+# dnosys	depfile_omit_system	field	struct driver_job
+# dfirst	depfile_first_input	field	struct driver_job
+# --- struct ppd_env (include/driver/ppdriver.h)
+# dsink	diagnostic_sink	field	struct ppd_env
+# errtty	error_is_terminal	field	struct ppd_env
+# in_src	input_text	field	struct ppd_env
+# in_len	input_length	field	struct ppd_env
+# --- declaration cache (driver/ccsnap.c, include/driver/ccsnap.h)
+# e	element	field	struct dcnode
+# ctr	counter	field	struct dcnode
+# kids	children	field	struct dcnode
+# sib	sibling	field	struct dcnode
+# snap	snapshot	field	struct dcnode
+# c	state	field	struct dcsnap: the scalar cc
+# a	arrays	field	struct dcsnap
+# n	bytes	field	struct dcarr
+# pg	pages	field	struct dcarr
+# pos	position	field	struct dcst
+# ev	events	field	struct dcst: events consumed
+# base	location_base	field	struct dcst and struct coder
+# open	open_event	field	struct dcst
+# hn	heap_size	field	struct coder
+# to	target_heap	field	struct coder
+# bad	failed	field	struct coder
+# sig	signature	field	struct dcroot
+# --- driver object state (driver/output.c)
+# as	assembler	field	struct objst
+# obj	object	field	struct objst
+# buf	buffer	field	struct objst
+# --- server (vccd-internal.h, dstore.h, dstore.c)
+# rawlen	raw_length	field	struct req
+# strs	strings	field	struct worker
+# tu	unit_path	field	dstore_job and tent: the source file, absolute
+# njson	json_length	field	dstore_job and tent
+# cjson	json_capacity	field	dstore_job
+# recs	records	field	dstore_job and tent
+# nrec	record_count	field	dstore_job and tent
+# crec	record_capacity	field	dstore_job
+# s	text	field	struct istr
+# k	key	field	kcount
+# n	counts	field	kcount: warnings, errors
+# r	request	field	struct sh_ctx
+# pgrp	process_group	field	struct vroom_req_hdr and the anonymous struct of gen_grp
+# pad	padding	field	struct vroom_req_hdr: must be zero
+# build	build_id	field	struct vroom_req_hdr
+# ms	milliseconds	field	anonymous struct of gen_grp (and struct job of bin/vpp)
+# --- utils
+# abs	absolute_name	field	struct member (ar.c)
+# m	members	field	struct mlist
+# n	count	field	struct mlist, struct toks, struct script
+# cap	capacity	field	struct mlist, struct toks, struct script
+# dir	directory	field	struct arq
+# o	output	field	struct job (fixdep.c)
+# err	error_message	field	struct job (fixdep.c)
+# s	text	field	struct tok (rsh.c)
+# t	tokens	field	struct toks
+# textlen	text_length	field	struct cmd
+# c	commands	field	struct script
+# --- bin/vpp
+# av	argv	field	struct job (vpp.c)
+# ac	argc	field	struct job (vpp.c)
+# all	total_counters	field	struct job (vpp.c)
+# ph	phase_counters	field	struct job (vpp.c)

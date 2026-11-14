@@ -1,0 +1,231 @@
+{
+  "host": "AMD Ryzen 7 9700X, x86-64 Linux, clang 23, -O3 -march=native",
+  "source": "work/vir-x86-corpus/sqlite/st/sqlite3.c",
+  "measurement": "Best of 7 warm lexer passes; best of 5 fresh-process CPU times per compilation. Compiler pair differs only in lex.o; other objects identical. No GCC/Clang speed comparison.",
+  "lexer": {
+    "before": "9.3 MB, 1.14 M tokens: best of 7 30.5 ms = 0.30 GB/s, 26.8 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n",
+    "after": "9.3 MB, 1.14 M tokens: best of 7 4.9 ms = 1.91 GB/s, 4.3 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n",
+    "avx2": "9.3 MB, 1.14 M tokens: best of 7 5.9 ms = 1.58 GB/s, 5.2 ns/token\nperf: 0 instructions, 0 cycles (min of 7 passes)\nhash: fc9fb9fabfbd44b5\n"
+  },
+  "compilation": [
+    {
+      "target": "x86_64",
+      "mode": "pp",
+      "scalar": {
+        "cpu_seconds": [
+          0.082644,
+          0.08399599999999999,
+          0.08175800000000003,
+          0.08228700000000001,
+          0.08263600000000001
+        ],
+        "min_cpu_seconds": 0.08175800000000003,
+        "sha256": "196d76723b52bb5b1fef07418e09a0fedc940ff9fff6886df2236bbf3330ad3a"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.053556000000000006,
+          0.05335499999999996,
+          0.05201700000000006,
+          0.05157800000000004,
+          0.05366699999999994
+        ],
+        "min_cpu_seconds": 0.05157800000000004,
+        "sha256": "196d76723b52bb5b1fef07418e09a0fedc940ff9fff6886df2236bbf3330ad3a"
+      }
+    },
+    {
+      "target": "x86_64",
+      "mode": "sema",
+      "scalar": {
+        "cpu_seconds": [
+          0.09551699999999994,
+          0.09618300000000007,
+          0.095447,
+          0.095001,
+          0.09438400000000008
+        ],
+        "min_cpu_seconds": 0.09438400000000008,
+        "sha256": null
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.06612600000000002,
+          0.065023,
+          0.06766300000000003,
+          0.0675869999999999,
+          0.06815100000000018
+        ],
+        "min_cpu_seconds": 0.065023,
+        "sha256": null
+      }
+    },
+    {
+      "target": "x86_64",
+      "mode": "direct",
+      "scalar": {
+        "cpu_seconds": [
+          0.30377599999999993,
+          0.2974600000000003,
+          0.302443,
+          0.30467900000000026,
+          0.30492399999999986
+        ],
+        "min_cpu_seconds": 0.2974600000000003,
+        "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.2700239999999997,
+          0.27145799999999987,
+          0.2711269999999998,
+          0.2723530000000005,
+          0.2720479999999992
+        ],
+        "min_cpu_seconds": 0.2700239999999997,
+        "sha256": "4ec1301ac350ffa29fa1b3b5a0bb2859397784ea09b9a9e04b5ee9d681a348d4"
+      }
+    },
+    {
+      "target": "x86_64",
+      "mode": "vir",
+      "scalar": {
+        "cpu_seconds": [
+          0.6050810000000006,
+          0.6031499999999996,
+          0.5990000000000013,
+          0.5972940000000002,
+          0.599345
+        ],
+        "min_cpu_seconds": 0.5972940000000002,
+        "sha256": "96746284231e85f57b14ee69676291157687def1ccbdd4a92202569704a15efa"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.5661380000000005,
+          0.5666049999999996,
+          0.5594610000000007,
+          0.5593739999999987,
+          0.5552170000000016
+        ],
+        "min_cpu_seconds": 0.5552170000000016,
+        "sha256": "96746284231e85f57b14ee69676291157687def1ccbdd4a92202569704a15efa"
+      }
+    },
+    {
+      "target": "aarch64",
+      "mode": "pp",
+      "scalar": {
+        "cpu_seconds": [
+          0.08210699999999749,
+          0.08087700000000009,
+          0.08117600000000058,
+          0.0815999999999999,
+          0.08156800000000164
+        ],
+        "min_cpu_seconds": 0.08087700000000009,
+        "sha256": "332476bb3dd145adb2ef4d062cc8374933866dcb8351fe8186c2000de855e6cb"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.05250799999999822,
+          0.0524340000000012,
+          0.05246499999999976,
+          0.0526250000000017,
+          0.05031699999999839
+        ],
+        "min_cpu_seconds": 0.05031699999999839,
+        "sha256": "332476bb3dd145adb2ef4d062cc8374933866dcb8351fe8186c2000de855e6cb"
+      }
+    },
+    {
+      "target": "aarch64",
+      "mode": "sema",
+      "scalar": {
+        "cpu_seconds": [
+          0.09156399999999909,
+          0.0938960000000022,
+          0.09273299999999818,
+          0.0956100000000002,
+          0.09509100000000226
+        ],
+        "min_cpu_seconds": 0.09156399999999909,
+        "sha256": null
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.06613599999999886,
+          0.06330100000000094,
+          0.06621200000000105,
+          0.06406099999999881,
+          0.06205300000000058
+        ],
+        "min_cpu_seconds": 0.06205300000000058,
+        "sha256": null
+      }
+    },
+    {
+      "target": "aarch64",
+      "mode": "direct",
+      "scalar": {
+        "cpu_seconds": [
+          0.1653520000000004,
+          0.1690750000000003,
+          0.16686699999999988,
+          0.1712510000000007,
+          0.17190799999999928
+        ],
+        "min_cpu_seconds": 0.1653520000000004,
+        "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.14198399999999944,
+          0.14200100000000182,
+          0.14092000000000038,
+          0.13886800000000044,
+          0.14331000000000005
+        ],
+        "min_cpu_seconds": 0.13886800000000044,
+        "sha256": "aa3ad3d7fd2dbe55b8aa8424aa5729b69724c7865cc2f7ee857ce9f4bc77a04a"
+      }
+    },
+    {
+      "target": "aarch64",
+      "mode": "vir",
+      "scalar": {
+        "cpu_seconds": [
+          0.47886799999999896,
+          0.47725200000000134,
+          0.47745599999999877,
+          0.4818940000000005,
+          0.47100399999999976
+        ],
+        "min_cpu_seconds": 0.47100399999999976,
+        "sha256": "af763fa5594179fd92e11da88285e84d270475e2abd93863ec05c1710f10f67c"
+      },
+      "simd": {
+        "cpu_seconds": [
+          0.4466340000000004,
+          0.44677499999999837,
+          0.44522400000000273,
+          0.4455399999999994,
+          0.4499729999999995
+        ],
+        "min_cpu_seconds": 0.44522400000000273,
+        "sha256": "af763fa5594179fd92e11da88285e84d270475e2abd93863ec05c1710f10f67c"
+      }
+    }
+  ],
+  "validation": {
+    "raw_clang_parity": "329 files / 1,379,848 tokens on scalar, AVX2 and AVX-512; new boundary seed adds 120 tokens",
+    "fuzz_asan_ubsan": {
+      "avx512": 1597537,
+      "avx2": 1518970,
+      "seconds_each": 46
+    },
+    "classifier": "All 65,536 byte pairs at every lane, and all byte values at search offsets 0..127, against scalar predicates under ASan/UBSan, both SIMD paths. Temporary harness work/lexer-simd/masks.c.",
+    "preprocessor": "9 accepted fuzz regressions match Clang before/after, 2 rejected inputs skipped. SQLite x86: 679196 tokens; arm64: 680657 tokens, normalized __clang_patchlevel__ (bundled 23.1.4 vs installed 23.1.6). Full kernel parity not run.",
+    "outputs": "SQLite -E and direct/VIR objects byte-identical scalar/SIMD for both target architectures."
+  }
+}

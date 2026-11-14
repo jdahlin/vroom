@@ -54,7 +54,7 @@ def main():
         summary(sys.argv[2]); return 0
     directory = Path(os.environ['VCC_VIR_CORPUS_LOG']).resolve()
     directory.mkdir(parents=True, exist_ok=True)
-    vpp = os.environ.get('VCC_VIR_CORPUS_VPP', str(ROOT / 'build/linux/ccs/vpp'))
+    vpp = os.environ.get('VCC_VIR_CORPUS_VPP', str(ROOT / 'build/linux/src/vpp'))
     mode = os.environ.get('VCC_VIR_CORPUS_MODE', os.environ.get('VCC_VIR', 'bvls'))
     if mode != '0':
         mode += 'vs'

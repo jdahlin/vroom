@@ -2,10 +2,11 @@
 """vccd-cc.py: kernel TUs compiled (-c) through the vcc shim by a private vccd.
 
   bench/vccd-cc.py [--bin-dir DIR] [PAT]    N=150 TUs (.c and .S), 6 clients
+  VCCD_J=N: vccd's -j (default 6); VCCD_SHARED_POOL=1: vccd's shared pool
 
 Exercises vccd's own request path (socket, worker threads, cc-own jobs) without
 a kernel build; meant for the sanitizer variants (AGENTS.md, "Sanitizers").
-vccd comes from --bin-dir (or VCC_BIN), the shim from build/ccs.  There is no
+vccd comes from --bin-dir (or VCC_BIN), the shim from build/src.  There is no
 backend: vcc does every job.  vccd's
 stderr, with any sanitizer report, goes to $LOG (default $TMPDIR/vccd-cc.log).
 """
@@ -17,7 +18,7 @@ T = tempfile.mkdtemp(prefix='vccd-cc-')
 sock = f'{T}/vccd.sock'
 logf = os.environ.get('LOG', os.path.join(tempfile.gettempdir(), 'vccd-cc.log'))
 log = open(logf, 'w')
-d = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', sock, '-j', '6'],
+d = subprocess.Popen([f'{vd.BIN}/vccd', '--sock', sock, '-j', os.environ.get('VCCD_J', '6')],
                      stderr=log, stdout=log, env=dict(os.environ, VCC_LOG='1'))
 for _ in range(100):
     if os.path.exists(sock): break

@@ -1,0 +1,136 @@
+# Rename table for WORK-common step 2.  Columns: old, new, optional note.
+# Whole-word identifiers, and include paths (rows whose old ends in .h or .c, applied
+# to #include lines and Makefile lists; --move also does the git mv).
+# Lines starting with # are comments.  Reviewed against doc/STYLE.md before applying.
+# files (include/common, include/port)
+common/buf.h	common/buffer.h
+common/tbuf.h	common/text-buffer.h
+common/vec.h	common/vector.h
+common/ckd.h	common/checked-arithmetic.h
+common/defer.h	common/scoped-cleanup.h
+common/attr.h	common/attributes.h
+port/mapfile.h	port/file.h
+port/vperf.h	port/performance-counters.h
+port/vstack.h	port/stack-guard.h
+port/hostcrc.h	port/crc32c.h
+common/f128.h	common/softfloat.h
+# include guards: VCC_<MODULE>_<NAME>_H, every header under include/common and include/port
+VCC_ATTR_H	VCC_COMMON_ATTRIBUTES_H
+VCC_LIB_BIGINT_H	VCC_COMMON_BIGINT_H
+VCC_BUF_H	VCC_COMMON_BUFFER_H
+VCC_CKD_H	VCC_COMMON_CHECKED_ARITHMETIC_H
+VCC_DEFER_H	VCC_COMMON_SCOPED_CLEANUP_H
+VCC_DIGEST_H	VCC_COMMON_DIGEST_H
+VCC_F128_H	VCC_COMMON_SOFTFLOAT_H
+VCC_FAIL_H	VCC_COMMON_FAIL_H
+VCC_HASH_H	VCC_COMMON_HASH_H
+VCC_INTERN_H	VCC_COMMON_INTERN_H
+VCC_REGION_H	VCC_COMMON_REGION_H
+VCC_TBUF_H	VCC_COMMON_TEXT_BUFFER_H
+VCC_VEC_H	VCC_COMMON_VECTOR_H
+VCC_LIB_HOSTCRC_H	VCC_PORT_CRC32C_H
+VCC_JOB_REGIONS_H	VCC_PORT_JOB_REGIONS_H
+VCC_MAPFILE_H	VCC_PORT_FILE_H
+VPERF_H	VCC_PORT_PERFORMANCE_COUNTERS_H
+VCC_VSTACK_H	VCC_PORT_STACK_GUARD_H
+VCC_X86NATIVE_H	VCC_PORT_X86NATIVE_H
+VCC_PMC_H	VCC_PORT_DARWIN_PMC_H
+# text buffer (the emitter's fixed reservation): tb_* -> vtext_*
+tb_c	vtext_char_append
+tb_f	vtext_format_append
+tb_hex	vtext_hex_prefixed_append
+tb_i	vtext_signed_append
+tb_init	vtext_init
+tb_n8	vtext_name_append
+tb_need	vtext_need
+tb_put	vtext_append
+tb_reg	vtext_region_init
+tb_u	vtext_unsigned_append
+tb_u_slow	vtext_unsigned_append_slow
+tb_x	vtext_hex_digits_append
+tb_s	vtext_string_append
+# soft float (f128.h): q_*, qb_* -> vsoftfloat_*; p suffix = precision parameter
+q_add	vsoftfloat_add
+q_addp	vsoftfloat_add_with_precision
+q_cmp	vsoftfloat_compare
+q_div	vsoftfloat_divide
+q_divp	vsoftfloat_divide_with_precision
+q_isinf	vsoftfloat_is_infinity
+q_isnan	vsoftfloat_is_nan
+q_mul	vsoftfloat_multiply
+q_mulp	vsoftfloat_multiply_with_precision
+q_nan_storage	vsoftfloat_nan_storage
+q_norm	vsoftfloat_normalize
+q_nz	vsoftfloat_is_nonzero
+q_of_d	vsoftfloat_of_double
+q_of_i	vsoftfloat_of_integer
+q_of_ip	vsoftfloat_of_integer_with_precision
+q_parse	vsoftfloat_parse
+q_parsep	vsoftfloat_parse_with_precision
+q_qnan	vsoftfloat_quiet_nan
+q_rndp	vsoftfloat_round_with_precision
+q_round	vsoftfloat_round_to_integral
+q_sub	vsoftfloat_subtract
+q_subp	vsoftfloat_subtract_with_precision
+q_to_bf	vsoftfloat_to_bfloat16
+q_to_d	vsoftfloat_to_double
+q_to_f	vsoftfloat_to_float
+q_to_h	vsoftfloat_to_half
+q_to_i	vsoftfloat_to_integer_wrapping
+q_to_int	vsoftfloat_to_integer_saturating
+q_to_p	vsoftfloat_to_precision
+q_to_x87	vsoftfloat_to_x87
+q_trunc	vsoftfloat_truncate
+q_un	vsoftfloat_unpack
+qb_bit	vsoftfloat_big_bit
+qb_bits	vsoftfloat_big_bit_count
+qb_mulsmall	vsoftfloat_big_multiply_small
+qb_shl	vsoftfloat_big_shift_left
+qb_subshl	vsoftfloat_big_subtract_shifted
+qb_top	vsoftfloat_big_top_bit
+Q_P80	VSOFTFLOAT_X87_80
+# digests
+ld_xxh3	vdigest_xxh3
+ld_blake3	vdigest_blake3
+ld_sha256	vdigest_sha256
+# hashes and checked arithmetic
+vckd_range	vchecked_range
+vckd_add	vchecked_add
+vckd_mul	vchecked_multiply
+# interner
+VIC_BITS	VINTERN_CACHE_BITS
+# job regions, performance counters, stack guard, file mapping
+vmpool_give	vjob_region_pool_give
+vmpool_take	vjob_region_pool_take
+vmreg_dbg	vjob_region_debug
+vmreg_dbg_init	vjob_region_debug_init
+vmreg_dbg_mode	vjob_region_debug_mode
+vmreg_dbg_mu	vjob_region_debug_mutex
+vmreg_dbg_put	vjob_region_debug_release
+vmreg_dbg_report	vjob_region_debug_report
+vmreg_dbg_tab	vjob_region_debug_table
+vmreg_get	vjob_region_acquire
+vmreg_map	vjob_region_map
+vmreg_put	vjob_region_release
+vmreg	vjob_region
+vmpool	vjob_region_pool
+VMREG_KEEP	VJOB_REGION_KEEP
+VMREG_MIN	VJOB_REGION_MIN
+VMREG_PAGE	VJOB_REGION_PAGE
+VMREG_SCRATCH	VJOB_REGION_SCRATCH
+VMPOOL_INIT	VJOB_REGION_POOL_INIT
+vperf_now	vperformance_now
+vperf_sub	vperformance_subtract
+vstack_init	vstack_guard_init
+vstack_lim	vstack_guard_limit
+vstack_low	vstack_guard_low
+VSTACK_RESERVE	VSTACK_GUARD_RESERVE
+vmap_file	vfile_map
+vunmap_file	vfile_unmap
+vmapped	vfile_mapping
+# step 6: the two "vmreg ..." output strings in port/job-regions.c keep their text in this step.
+# step 4: vhash_obj and vhash_strtab (different bodies), vbuf_s, vsbuf_str, vfixbuf_puts (types merge).
+# unlikely_vi stays: the existing `unlikely` is defined per includer, not visible where intern.h is used.
+# NOT in this table (need code, not a rename): __crc32cd/__crc32cb -> vcrc32c_u64/u8 on both hosts
+# (arm64 uses the ACLE intrinsics of the same name; hostcrc.h must define the new names there first),
+# struct fields with clipped names (by hand, with their module), x86features.h / x86native.h (x86_*).

@@ -1,0 +1,20 @@
+# Rename table for WORK-common step 4 (merge the variants).  Same format as rename-common.tsv
+# (step 2, applied: its rows have no old names left, so it is not run again).
+# The five byte buffers are one vbuffer (common/buffer.h); several old names become one new name:
+# run with --allow-merge.
+vbuf	vbuffer	type
+vsbuf	vbuffer	type, VBUFFER_STICKY
+vzbuf	vbuffer	type, VBUFFER_STICKY
+vfixbuf	vbuffer	type, vbuffer_fixed
+vfdbuf	vbuffer	type, vbuffer_fd
+vbuf_put	vbuffer_append
+vsbuf_put	vbuffer_append
+vzbuf_put	vbuffer_append
+vfixbuf_put	vbuffer_append
+vbuf_s	vbuffer_string_append
+vsbuf_str	vbuffer_string_append
+vfixbuf_puts	vbuffer_string_append
+vbuf_f	vbuffer_format_append
+vfdbuf_printf	vbuffer_format_append
+vfdbuf_flush	vbuffer_flush
+vbuf_reserve	vbuffer_reserve

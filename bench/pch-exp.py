@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Experiment: bygg en PCH av vanliga kärnheaders och mät per-fil-tid med/utan."""
+"""Experiment: build a PCH of common kernel headers and measure per-file time with/without."""
 import os, shlex, subprocess, sys, time
 B = '/Users/johandahlin/dev/vroom/work/build-vroomd'
 C = '/opt/homebrew/opt/llvm/bin/clang'
-PREFIX = '/Users/johandahlin/dev/vroom/ccs/phase1/pch/vroom-prefix.h'
+PREFIX = '/Users/johandahlin/dev/vroom/contrib/phase1/pch/vroom-prefix.h'
 PCH = '/tmp/claude-vroom.pch'
 os.chdir(B)
 
@@ -44,6 +44,6 @@ for obj in sys.argv[1:]:
         for _ in range(3):
             dt, r = run(a + extra)
             ts.append(dt)
-            if r.returncode: print(obj, name, 'FEL:', r.stderr[-1500:]); break
+            if r.returncode: print(obj, name, 'ERROR:', r.stderr[-1500:]); break
         best[name] = min(ts)
     print(obj.ljust(32), '  '.join(f'{k}={v:.3f}s' for k, v in best.items()))

@@ -8,7 +8,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/flow/values.c"
+#include "codegen/flow/values.c"
 int main(void)
 {
  em_value_table t = {0};
@@ -59,7 +59,7 @@ def main():
         source, binary = Path(temp) / 'test.c', Path(temp) / 'test'
         source.write_text(SOURCE)
         flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
-        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'ccs'),
+        subprocess.run([args.cc, '-std=gnu11', '-O1', '-g', '-I', str(Path(R) / 'src'), '-I', str(Path(R) / 'src' / 'include'),
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
     print('bounded local value table contracts: PASS')

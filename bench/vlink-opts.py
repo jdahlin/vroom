@@ -17,7 +17,7 @@ VLINK, VPP = f'{BUILD}/vlink', f'{BUILD}/vpp'
 LLD = shutil.which('ld.lld') or llvm('ld.lld')
 OC = llvm('llvm-objcopy')
 # as the C suites: vlink's layout without a script is another TODO.md item
-LDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'ccs/vcc/tests/rt/link.ld')
+LDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src/test/rt/link.ld')
 
 # (name, args); {o}: the objects, {m}: the main object alone, {a}: the archive directory
 CASES = [
@@ -86,6 +86,10 @@ CASES = [
     ('--eh-frame-hdr gc', '--eh-frame-hdr --gc-sections {t}/e1.o {t}/e2.o {t}/e3.o {t}/ep.o {t}/pers.o'),
     ('--eh-frame-hdr without .eh_frame', '--eh-frame-hdr {t}/cm.o'),
     ('--no-eh-frame-hdr', '--eh-frame-hdr --no-eh-frame-hdr {t}/e1.o {t}/e2.o {t}/ep.o {t}/pers.o'),
+    # response files (kbuild: ld -r -o m.o @m.mod): quotes, a nested @file, one that does not exist
+    ('@file', '@{t}/objs.rsp'),
+    ('@file nested quoted', '@{t}/outer.rsp {t}/x.o'),
+    ('@missing', '@{t}/nosuch.rsp {t}/a.o {t}/x.o'),
 ]
 MSG = {'-mbad': 'unknown emulation: foo',
        '-l missing': 'unable to find library -lnosuch', '-l no -L': 'unable to find library -lx'}
@@ -186,6 +190,10 @@ def main():
         for lib, ms, fl in (('x', 'x', 'rcs'), ('ch', 'b1 b2 b3 unused', 'rcs'), ('chr', 'unused b3 b2 b1', 'rcs'),
                             ('p', 'p1 p2', 'rcs'), ('cm', 'cm2', 'rcs'), ('g', 'g2', 'rcs'), ('cmd', 'cmd', 'rcs'), ('q', 'q1', 'rcs'), ('thin', 'b1 b2 b3', 'rcsT')):
             subprocess.run([llvm('llvm-ar'), fl, f'{t}/lib/lib{lib}.a'] + [f'{t}/{m}.o' for m in ms.split()], check=True)
+        shutil.copy(f'{t}/a.o', f'{t}/a b.o')
+        open(f'{t}/objs.rsp', 'w').write(f'{t}/a.o\n{t}/x.o\n')
+        open(f'{t}/outer.rsp', 'w').write(f'"{t}/a b.o" @{t}/inner.rsp\n')
+        open(f'{t}/inner.rsp', 'w').write('-e _start\n')
         for name, args in CASES:
             a = args.format(o=f'{t}/a.o {t}/x.o', m=f'{t}/a.o', a=f'{t}/lib', t=t).split()
             r = {}
@@ -228,6 +236,21 @@ def main():
             print(f'FAIL --print-gc-sections:\n  vlink {pr[0]}\n  lld   {pr[1]}')
         elif v:
             print(f'ok   --print-gc-sections: {len(pr[0])} removed')
+        # -r stays lazy: of two members defining the same symbol only the needed one is
+        # read (the kernel's vmlinux.o and libstub's zboot.o vs efi-stub-entry.o)
+        shutil.copy(f'{t}/b1.o', f'{t}/b1dup.o')
+        subprocess.run([llvm('llvm-ar'), 'rcs', f'{t}/lib/libdup.a', f'{t}/b1.o', f'{t}/b1dup.o'], check=True)
+        syms = []
+        for exe in (VLINK, LLD):
+            p = subprocess.run([exe, '-r', f'{t}/c.o', '--start-group', f'{t}/lib/libdup.a', '--end-group',
+                                '-o', f'{t}/r.o'], capture_output=True, text=True)
+            nm = subprocess.run([llvm('llvm-nm'), f'{t}/r.o'], capture_output=True, text=True).stdout if p.returncode == 0 else ''
+            syms.append((p.returncode, first_err(p.stderr), sorted(nm.split('\n'))))
+        if syms[0] != syms[1] or syms[0][0]:
+            bad += 1
+            print(f'FAIL -r lazy archive:\n  vlink {syms[0][:2]}\n  lld   {syms[1][:2]}')
+        elif v:
+            print('ok   -r lazy archive')
         # undefined symbols: lld's whole stderr (every reference with its source file and function,
         # 3 then "referenced N more times", "did you mean" for the first two, archive members,
         # blank lines after multi-line errors), the program name aside
@@ -239,14 +262,16 @@ def main():
                'st': 'int h(void); int _start(void){return h();}\n',
                'sp': 'static int foq(void){return 1;}\nint fooo(void){return 0;} int foo(void); int x_(void);'
                      ' int _start(void){return x_()+foo()+foq();}\nint ffo(void);int g(void){return ffo();}\n'
-                     'int foqq(void); int k(void){return foqq();}\n'}
+                     'int foqq(void); int k(void){return foqq();}\n',
+               # a name past 1023 bytes: the report was cut there (vbuffer_format_append)
+               'long': 'extern int ' + 'L' * 3000 + '(void); int f(void){return ' + 'L' * 3000 + '();}\n'}
         for name, src in UND.items():
             open(f'{t}/{name}.c', 'w').write(src)
             subprocess.run([llvm('clang'), '--target=aarch64-linux-gnu', '-w', '-c', f'{name}.c', '-o', f'{name}.o'],
                            cwd=t, check=True)
         subprocess.run([llvm('llvm-ar'), 'rc', f'{t}/lu.a', f'{t}/un2.o'], check=True)
         for args in ('un1.o un2.o -e f', 'st.o lu.a', 'un3.o un1.o -e a1', 'sp.o', 'sp.o un3.o', 'un3.o sp.o',
-                     'nope1.o nope2.o'):
+                     'nope1.o nope2.o', 'long.o -e f'):
             errs = []
             # lld scans relocations in parallel: with threads the order of its errors (and so
             # which two get "did you mean") varies run to run; vlink's is lld's sequential one
