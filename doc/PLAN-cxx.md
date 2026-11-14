@@ -412,8 +412,22 @@ own.
   under ASan; 12 parse cases (ordering, nested and value patterns,
   std::array).  unit-32bit: 82 instances, 2 partial specializations
   matched, 8 unknown.
-- Next: base classes (135 classes in unit-32bit skipped for them), then
-  packs (the unknown partial specializations are mostly enable_if patterns
-  and packs); vptr layouts; enumerator values.  Code: the shared builders move to a
+- Base classes (2026-11-14), Itanium ABI without virtual functions: bases
+  in order, each at its alignment; an empty base at offset 0 (empty base
+  optimization; two subobjects of one type at one address are refused, not
+  laid out); a POD base takes its size, a non-POD base its data size, so the
+  derived class's members reuse its tail padding.  POD for layout is
+  approximated as trivial and standard-layout: no user-provided special
+  member, no default member initializer, one access for all data members,
+  POD bases and members, data in at most one class of the hierarchy.  A
+  template-id base outside a template is an instance, completed.  Classes
+  with attributes that change layouts (aligned, alignas, packed,
+  no_unique_address, ms_struct) are not laid out yet.  `bench/cxx-layout.py`:
+  29 722 layouts, all agree with clang; json 71/71 under ASan; 13 parse
+  cases (tail padding by each POD rule).  unit-32bit: 501 of 1 939 classes
+  laid out, 118 instances.
+- Next: packs (most unknown partial specializations and bases need them),
+  no_unique_address (libc++'s compressed pairs), vptr layouts, enumerator
+  values.  Code: the shared builders move to a
   module of their own taking `struct ast *` (cxx/ is compiled in the cc
   module for now).  X5-X7: not started.
