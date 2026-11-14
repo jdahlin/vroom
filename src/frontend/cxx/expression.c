@@ -1280,7 +1280,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				in = c->enode;
 				/* a[i]: an element of an array or pointer, or a class's operator[] */
 				if (!c->tentative && cxx_operator_call_type(c, vintern_cstr("operator[]"), base, &c->etype, 1))
-					;
+					cxx_gen_operator_call(c, bn, &in, 1, iloc);
 				else {
 					cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
 					       !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
@@ -1296,7 +1296,7 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				cxx_entity *set = c->ecallee;
 				qty callee = c->etype;
 				uint8_t callee_lval = c->elval;
-				uint32_t obj_node = c->eobj_node;
+				uint32_t obj_node = c->eobj_node, callee_node = c->enode;
 				bool obj_arrow = c->eobj_arrow;
 				cxx_targ xa[8];
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
@@ -1328,8 +1328,13 @@ static void cxx_postfix_expression_parse1(cxx *c)
 				}
 				else if (!set && (c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
 						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
-						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs)))
-					;	/* an object of class type: its operator() */
+						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))) {
+					/* an object of class type: its operator() */
+					uint32_t anodes[16];
+
+					memcpy(anodes, c->carg_nodes, sizeof anodes);
+					cxx_gen_operator_call(c, callee_node, anodes, c->ncargs, c->tok[c->pos ? c->pos - 1 : 0].loc);
+				}
 				else {
 					uint8_t was = c->einvalid;	/* (an earlier part of the expression may be ill-formed already) */
 					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
@@ -1526,7 +1531,10 @@ static void cxx_unary_expression_parse(cxx *c)
 				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0)) {
 					cxx_unary_type(c, op, c->etype, c->elval);
 					cxx_gen_unary(c, op, xn, oploc);
-				}
+				} else if (!c->tentative && c->call_resolved && c->call_picked)
+					cxx_gen_operator_call(c, xn, NULL, 0, oploc);
+				else if (!c->tentative)
+					cxx_gen_unary(c, op, xn, oploc);	/* (no operator function: a conversion of the operand, !x) */
 				if (k && (op == LEX_TOKEN_EXCLAMATION || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_PLUS || op == LEX_TOKEN_TILDE)) {
 					c->evalue = op == LEX_TOKEN_EXCLAMATION ? !v : op == LEX_TOKEN_MINUS ? (int64_t)(0 - (uint64_t)v) :
 						    op == LEX_TOKEN_TILDE ? ~v : v;
@@ -1758,6 +1766,10 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			c->op_lv_set = 0;
 			if (built_in)
 				cxx_gen_binary(c, op, ln, rn, oploc);
+			else if (!c->tentative && c->call_resolved && c->call_picked)
+				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
+			else if (!c->tentative)
+				cxx_gen_binary(c, op, ln, rn, oploc);	/* (no operator function: x && y through operator bool) */
 			/* constants: both operands, or the left alone when it decides && and || */
 			if (lk && rk) {
 				bool uns = c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) >= TY_CHAR &&
@@ -1876,6 +1888,8 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
 			if (built_in)
 				cxx_gen_assignment(c, optok, ln, rn, oploc);
+			else if (!c->tentative)
+				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
 		}
 	}
 }

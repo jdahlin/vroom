@@ -1059,3 +1059,26 @@ betraktade funktionsdefinitioner har kod.  Inget json-test länkar ännu.
 - Slutsats hittills: 30x (8,1 s) nås inte med en process per TU ens för
   framänden ensam; med delade headers finns utrymmet, men ingen mätning
   hela vägen finns förrän testerna länkar.
+
+### Status (31): överlagrade operatorer, konverteringsfunktioner (2026-11-14)
+- Överlagrade operatorer får kod: `a + b`, `a == b`, `a[i]`, `a(x)`,
+  unära, `a = b`/`a += b` (medlem eller på namnrymdsnivå, mallar också).
+- Konverteringsfunktioner har namn i klassen (`operator #<typ>`), manglas
+  `cv <typ>` och används för klass → skalär och för villkor, `!x`,
+  `x && y` (`operator bool`).
+- Rättade tysta fel (alla hittade av nya tester):
+  - en sats utan nod föll bort tyst om satsen före i samma block hade
+    lyckats (`sdone` nollställdes inte) — funktioner kunde alltså sakna
+    satser; nu får de ingen kod alls;
+  - `call_picked` från ett tidigare anrop kunde tas för operatorns funktion;
+  - referenser till inline-funktioner utan kod var svaga, så länkningen
+    gick igenom och programmet anropade adress noll — nu är bara
+    definitionen svag;
+  - en konstruktor hittad via konvertering av argumentet användes för
+    kopiering; C-fel vid bindning av klass till skalär eller tvärtom.
+- Instansers parametrar: parserns parameterposter kopieras innan typerna
+  prövas (att fullborda en klass skrev över dem).
+`cxx-run-tests.py` 15/15 (ny `operators.cpp`); `cxx-coverage.py`: 9 315 av
+146 663 behövda funktioner (6,4 %).  Doctest-kropparna får fortfarande
+ingen kod: `if (const Subcase& s = Subcase(...))`, `try`/`catch`/`throw`,
+lambdas, standardargument.

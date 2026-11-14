@@ -388,14 +388,16 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	const vident *v = &vintern_ents[f->name];
 	bool member = home && home->kind == CXX_SCOPE_CLASS;
 	const char *op;
+	bool conv;
 
 	if (ft == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ft) != TY_FUNC)
 		return false;
 	x = AST_TYPE(a, ft);
 	m.c = c, m.n = 0, m.bad = false, m.nsubs = 0;
 	op = mg_operator(v, x->n, member);
-	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op)
-		return false;	/* (conversion functions, new/delete, literal operators: later) */
+	conv = v->len > 10 && !memcmp(v->s, "operator #", 10);
+	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
+		return false;	/* (new/delete, literal operators: later) */
 	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
 	if (v->len && v->s[0] == ' ') {
 		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))
@@ -408,11 +410,14 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 		if (member && is_const)
 			mg_str(&m, "K");
 		mg_prefix(&m, home);
-		if (f->fn_internal && !member)
+		if (f->fn_internal && !member && !op)
 			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);
-		else
+		else if (conv) {
+			mg_str(&m, "cv");
+			mg_type(&m, x->base);
+		} else
 			mg_source_name(&m, f->name);
 		if (f->is_instance)
 			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX);
@@ -420,7 +425,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 	} else {
 		if (mg_scope_is_std(&m, home))
 			mg_str(&m, "St");
-		if (f->fn_internal && !member)
+		if (f->fn_internal && !member && !op)
 			mg_str(&m, "L");
 		if (op)
 			mg_str(&m, op);

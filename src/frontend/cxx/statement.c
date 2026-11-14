@@ -326,6 +326,7 @@ VPRIV void cxx_statement_parse(cxx *c)
 	uint32_t depth = ++c->sdepth;
 
 	c->snode = 0;
+	c->sdone = 0;	/* (the statement before this one, done at the same depth, does not vouch for this one) */
 	cxx_statement_parse1(c);
 	if (c->gen && c->sdone != depth) {
 		cxx_gen_fail(c);

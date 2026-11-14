@@ -1124,8 +1124,14 @@ static uint32_t cxx_operator_name_parse(cxx *c)
 		if (conv_to == CXX_TY_UNKNOWN || c->template_depth || cxx_type_has_placeholder(c, conv_to))
 			conv_class->conv_unknown = 1;
 		else {
+			/* (its name in the class: "operator #" and the type's number; mangle.c writes cv <type>) */
+			char nm[64] = { 0 };
+
 			conv_class->conv_types = realloc(conv_class->conv_types, (conv_class->nconv + 1) * sizeof(qty));
 			conv_class->conv_types[conv_class->nconv++] = conv_to;
+			snprintf(nm, 32, "operator #%u", (unsigned)QUNQ(conv_to));
+			c->conv_last = conv_to;
+			return vintern_cstr(nm);
 		}
 	}
 	return 1;
@@ -1277,7 +1283,10 @@ static uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, 
 				cxx_template_arguments_parse(c);
 		} else if (cxx_is_kw(c, CXX_KW_operator)) {
 			cxx_advance(c);
-			name = cxx_operator_name_parse(c);	/* (1: a conversion, new/delete: not entered in a scope) */
+			c->conv_last = CXX_TY_UNKNOWN;
+			name = cxx_operator_name_parse(c);	/* (1: new/delete, a conversion of a template: not entered in a scope) */
+			if (c->conv_last != CXX_TY_UNKNOWN)
+				t = c->conv_last;	/* a conversion function returns the type it names */
 			if (cxx_is(c, LEX_TOKEN_LESS) && cxx_lookahead(c, cxx_template_arguments_then_paren))
 				cxx_template_arguments_parse(c);	/* operator+<char, ...>( : a specialization */
 		} else if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c)) {

@@ -789,6 +789,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args,
 
 	memcpy(lv, c->op_lv, sizeof lv);
 	c->op_lv_set = 0;
+	c->call_resolved = 0, c->call_picked = NULL;	/* (what an earlier call picked is not this operator's function) */
 	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
 		return false;
 	memcpy(acopy, args, nargs * sizeof *args);	/* (often &c->etype, which the first lookup's call resets) */

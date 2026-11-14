@@ -359,6 +359,7 @@ typedef struct cxx {
 	qty gen_init_bases[16];
 	uint32_t ngen_init_bases;
 	uint8_t gen_delegates, gen_returns, gen_why;
+	qty conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
 	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
 	uint32_t gen_notemp;		/* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
 	uint32_t gen_block_temps;	/* such temporaries declared in the block being built (a case label after one: not built) */
@@ -532,6 +533,7 @@ VPRIV void cxx_gen_this(cxx *c, uint32_t loc);
 VPRIV bool cxx_builtin_function_type(cxx *c, const char *name, size_t len, uint32_t nargs, qty arg0, qty *ret);
 VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_nullptr(cxx *c, uint32_t loc);
+VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_gen_construct_temp(cxx *c, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
 VPRIV void cxx_gen_vtables_emit(cxx *c);
