@@ -243,8 +243,12 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 	{
 		uint64_t bits;
 
-		if (!cxx_class_field_offset(c, bt, name, &bits, 0))
+		if (!cxx_class_field_offset(c, bt, name, &bits, 0)) {
+			if (getenv("VCC_CXX_GEN_WHY"))
+				fprintf(stderr, "member %.*s: not a field of the record (%u fields)\n", (int)vintern_ents[name].len, vintern_ents[name].s,
+					a->tags[AST_TYPE(a, bt)->aux].nfield);
 			return;	/* (a base class's member, a static one: not a field of this record) */
+		}
 	}
 	c->enode = member(a, base, name, loc);
 	if (c->enode && cxx_gen_is_reference(c, AST_NODE_AT(a, c->enode)->ty))

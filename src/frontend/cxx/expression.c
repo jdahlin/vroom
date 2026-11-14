@@ -1363,7 +1363,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
-						if (c->etype != CXX_TY_UNKNOWN && m->kind == CXX_ENTITY_VALUE && !m->next)
+						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee)
 							cxx_gen_member(c, obj_node, arrow, id, mloc);	/* a data member */
 						else
 							c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* member functions: the call's object */

@@ -2715,6 +2715,10 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 				uint32_t late_from = cxx_class_body_parse(c, cs);
 
 				cxx_class_end(c);
+				/* (an unnamed class has no entity: its scope by its type, for the members of an
+				   anonymous struct or union) */
+				if (!name && !c->tentative && c->anonymous_class != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->anonymous_class))
+					cxx_tag_scope_set(c, AST_TYPE(c->ast, c->anonymous_class)->aux, cs);
 				if (late_from != UINT32_MAX)
 					cxx_late_parse_all(c, late_from);
 			}
@@ -3388,6 +3392,20 @@ static void cxx_simple_declaration_parse(cxx *c, int context, cxx_scope *cs)
 				cxx_class_field(c, 0, c->ds_type, cxx_peek(c, 0)->loc, -1);
 			else
 				cxx_class_skip(c, CXX_SKIP_UNKNOWN_MEMBER);	/* (never lay out a class without a member) */
+		}
+		/* ... whose data members are members of the enclosing class by name (s.x for struct { int x; }) */
+		if (context == CXX_CONTEXT_CLASS && cs && !(flags & (DS_TYPEDEF | DS_STATIC | DS_FRIEND)) && c->defined_unnamed_class &&
+		    c->ds_type != CXX_TY_UNKNOWN && !c->tentative) {
+			cxx_scope *as = cxx_tag_scope_get(c, c->ds_type);
+
+			for (uint32_t i = 0; as && as != cs && i < as->nslots; i++)
+				for (cxx_entity *m = as->slots[i]; m; m = m->next)
+					if (m->kind == CXX_ENTITY_VALUE && m->field_of && !cxx_lookup_local(cs, m->name)) {
+						cxx_entity *ne = cxx_declare(c, cs, m->name, CXX_ENTITY_VALUE);
+
+						if (ne)
+							ne->ty = m->ty, ne->field_of = cs, ne->dependent = m->dependent;
+					}
 		}
 		cxx_advance(c);
 		return;
