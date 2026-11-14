@@ -161,8 +161,10 @@ asan)
 	# LeakSanitizer is on by default on Linux (not on macOS): vcc exits with
 	# its arenas and caches mapped, by design, so every compile would "leak"
 	export ASAN_OPTIONS=${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0
-	step ctests-vcc   env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc
-	step ctests-vcc-O1 env VCC_BIN="$B" python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
+	# Explicit vcc-timeout limits measure the normal compiler. ASan/UBSan
+	# makes init_large about 7x slower; allow sanitizer overhead as for TSan.
+	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
+	step ctests-vcc-O1 env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	# Hosted atomics use the runner's native libc/libatomic; arm64 is covered above.
