@@ -3603,6 +3603,20 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				  (cxx_is(c, LEX_TOKEN_NUMBER) && cxx_peek(c, 0)->len == 1))) {
 				if (decl_fn && !c->tentative)
 					decl_fn->fn_deleted = cxx_is_kw(c, CXX_KW_delete), decl_fn->fn_defaulted = cxx_is_kw(c, CXX_KW_default);
+				if (!c->tentative && !c->template_depth && !c->instantiating && q && qs && qs->kind == CXX_SCOPE_CLASS &&
+				    cxx_is_kw(c, CXX_KW_default) && !decl_fn) {
+					/* X::~X() = default; (a key function: the vtable here) */
+					cxx_entity *d = cxx_lookup_local(qs, cxx_dtor_id());
+
+					while (d && (d->kind != CXX_ENTITY_VALUE || d->member_of != qs))
+						d = d->next;
+					for (uint32_t i = start; d && i < c->pos; i++)
+						if (c->tok[i].kind == LEX_TOKEN_TILDE) {	/* (a destructor's definition, not another member's) */
+							d->fn_defaulted = 1;
+							cxx_gen_defaulted_destructor(c, d);
+							break;
+						}
+				}
 				cxx_advance(c);
 				if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))	/* = delete("reason") */
 					cxx_skip_balanced(c);

@@ -1520,3 +1520,6 @@ doctests `INFO` (`mb.m_stream = s` i en lambda) fick ingen kod.  Nu inte efter `
 Ett basobjekt konstrueras och förstörs med basobjektets variant (C2, D2), inte hela objektets
 (C1, D1), som Itanium vill (doctests `ContextScopeBase` definierar bara C2).
 cxx-run 56/56; cxx-fork 69/70, 3 014 funktioner från vcc (från 2 728).
+`X::~X() = default;` utanför klassen (doctests `DOCTEST_DEFINE_INTERFACE`, en nyckelfunktion) får sin
+kropp där, inte inline: destruktorerna D0/D1/D2 och vtabellen definieras i TU:n som hos clang.
+cxx-run 57/57; cxx-fork 69/70, 3 061 funktioner.

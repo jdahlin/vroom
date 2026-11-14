@@ -112,6 +112,7 @@ static bool cxx_gen_needs_construction(cxx *c, qty t, int depth);
 static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
 static cxx_entity *cxx_gen_effective_destructor(cxx *c, qty t, int depth);
 static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t);
+static cxx_entity *cxx_gen_destructor_body(cxx *c, qty t, cxx_entity *d);
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps);
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
 static bool cxx_gen_construct_at(cxx *c, uint32_t target, qty t, const uint32_t *args, uint32_t nargs, cc_id_list *out, uint32_t loc);
@@ -2406,6 +2407,15 @@ VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d)
 	}
 }
 
+/* X::~X() = default; outside its class: its body made now, from the class's members and bases */
+VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d)
+{
+	if (d && d->member_of && d->member_of->owner && d->member_of->owner->ty != CXX_TY_UNKNOWN) {
+		d->fn_ooc_default = 1, d->fn_inline = 0;
+		cxx_gen_destructor_body(c, d->member_of->owner->ty, d);
+	}
+}
+
 /* the destructor the class declares (NULL: none) */
 static cxx_entity *cxx_gen_declared_destructor(cxx *c, qty t)
 {
@@ -2945,7 +2955,8 @@ static cxx_entity *cxx_gen_destructor_body(cxx *c, qty t, cxx_entity *d)
 	if (d->gen_tried || d->fn_deleted)
 		return d->sym && (a->syms[d->sym].flags & SF_DEFINED) ? d : d->gen_tried == 2 ? d : NULL;
 	d->gen_tried = 2;	/* (being built: a member of its own type further in asks again) */
-	d->fn_inline = 1;
+	if (!d->fn_ooc_default)
+		d->fn_inline = 1;	/* (X::~X() = default; outside the class: not inline, the TU's own definition) */
 	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, cls, NULL);
 	if (!cxx_gen_function_begin(c, d, fs, NULL, 0)) {
 		d->gen_tried = 1;

@@ -140,7 +140,8 @@ typedef struct cxx_entity {
 	struct cxx_scope *home;		/* a function with a symbol: the namespace it is declared in */
 	struct cxx_scope *field_of;	/* a non-static data member: its class */
 	uint8_t fn_static;		/* a static member function */
-	uint8_t mangled_var;		/* a variable: its symbol named (cxx_gen_variable_name) */
+	uint8_t mangled_var;
+	uint8_t fn_ooc_default;		/* X::~X() = default; outside its class (not inline) */		/* a variable: its symbol named (cxx_gen_variable_name) */
 	uint8_t fn_virtual, fn_pure;	/* a virtual member function (declared so, or it overrides one); = 0 */
 	uint32_t vslot;			/* ... its index in the class's vtable + 1 (a destructor: the complete one's, the deleting one's follows) */
 	uint32_t sym0;			/* a virtual destructor: the deleting destructor's symbol (D0) */
@@ -565,6 +566,7 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 VPRIV void cxx_late_parse_one(cxx *c, const cxx_late *l);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
+VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
 /* the expression is ill-formed for sure (VCC_CXX_SIG=2: where vcc decided so) */
 #define CXX_INVALID(c) cxx_invalid_note(c, __FILE__, __LINE__)
 static inline void cxx_invalid_note(cxx *c, const char *file, int line)
