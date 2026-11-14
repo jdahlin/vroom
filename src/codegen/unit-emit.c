@@ -430,7 +430,7 @@ static void codegen_keep_make(codegen_keep *K, cc *c, const codegen_unit *E)
 }
 
 /* codegen_unit_round_emit's per-TU tables (E.*) and text buffers */
-static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(18);
+static vjob_region_pool codegen_round_pool = VJOB_REGION_POOL_INIT(19);
 
 /*
  * Windows x64: the .refptr.NAME pointers the code read (sym_win64_indirect), in symbol order, each
@@ -534,7 +534,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	if (!WASM(c) && virbuild_is_enabled(o))
 		E.once = codegen_function_once_flags(c);
 	if (E.once)
-		codegen_function_inline_sizes(&E, c, WALK_INLINE_VIR_MAX);
+		codegen_inline_sizes_init(&E, c, vjob_region_acquire(&er[18], ((size_t)c->nnode + 64) * sizeof(codegen_call_edge), "emit.calls"));
 	/* roots */
 	for (uint32_t i = 0; i < c->ntoplevel; i++) {
 		uint32_t s = c->toplevel[i];
@@ -570,10 +570,11 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out, u
 	 * being leaked by a thread per round. */
 	vtask_parallel_for((size_t)nthr, nthr, codegen_drain_slot_run, ctx, 0);
 	t2 = codegen_clock_seconds();
-	free(E.once);free(E.inline_parameter_reads);
-	E.once = E.inline_parameter_reads = NULL;
-	free(E.call_edges), free(E.call_edge_offsets), free(E.call_edge_counts), free(E.recursion_groups), free(E.inline_sizes);
-	E.call_edges = NULL; E.call_edge_offsets = E.call_edge_counts = E.recursion_groups = NULL, E.inline_sizes = NULL;
+	if (E.inline_sizes)
+		vjob_region_release(&er[18], VJOB_REGION_SCRATCH);	/* (the calls are written before they are read) */
+	codegen_inline_sizes_free(&E);
+	free(E.once);
+	E.once = NULL;
 	/* stitch */
 	qsort(E.chunks, E.chunk_count, sizeof(codegen_chunk), codegen_chunk_compare);
 	vtext_region_init(&hdr, &er[12], (size_t)1 << 26, "emit.hdr");
