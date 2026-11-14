@@ -281,7 +281,7 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	if (!c->template_depth && !(c->none_viable && operator_call))
 		c->stats.calls++, c->stats.calls_typed += result != CXX_TY_UNKNOWN;
 	if (result == CXX_TY_UNKNOWN && !c->template_depth && !(c->none_viable && operator_call) && getenv("VCC_CXX_WHY"))
-		fprintf(stderr, "why %s %.*s/%u\n", nexact == 1 || (viable && same && !unknown) ? "return" : unknown ? "unknown" :
+		fprintf(stderr, "why@%u %s %.*s/%u\n", c->tok[c->pos ? c->pos - 1 : 0].loc, nexact == 1 || (viable && same && !unknown) ? "return" : unknown ? "unknown" :
 			!viable ? "none" : "ambiguous", (int)vintern_ents[set->name].len, vintern_ents[set->name].s, nargs);
 	/* the function called (when known): an instance's member body is instantiated */
 	{
