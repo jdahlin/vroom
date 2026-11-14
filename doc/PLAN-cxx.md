@@ -1484,5 +1484,5 @@ syns som en stubbe, i ett bygge med bara vcc ett länkfel).  Kvar att utreda.
 ### Status (60): destruktorer som körs implicit får sina kroppar
 När en destruktors kropp begärs begärs först kropparna för de destruktorer dess slut kör (medlemmars
 och basers klasser): de tolkas före, inte inifrån dess kodgenerering (som bröt den yttre).
-`basic_json<..., long double>::data::~data` byggs nu.  cxx-run 50/50; cxx-fork 69/70, 5,2 s CPU
+`basic_json<..., long double>::data::~data` byggs nu; long double (x87, binary128) i genererad kod.  cxx-run 51/51; cxx-fork 69/70, 5,2 s CPU
 (46,7x), 2 666 funktioner från vcc (från 2 551).

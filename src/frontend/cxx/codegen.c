@@ -172,7 +172,7 @@ VPRIV bool cxx_gen_type_ok(cxx *c, qty t)
 	if (k == TY_STRUCT || k == TY_UNION)
 		return cxx_class_layout_info(c, t, &pod, &empty) && pod &&	/* (an instance is completed here if it was not yet) */
 		       (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & RF_COMPLETE);
-	return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_PTR || k == TY_ENUM;
+	return (k >= TY_BOOL && k <= TY_UINT128) || k == TY_FLOAT || k == TY_DOUBLE || k == TY_LDOUBLE || k == TY_PTR || k == TY_ENUM;
 }
 
 /*
@@ -1162,13 +1162,22 @@ VPRIV void cxx_gen_floating(cxx *c, const char *text, size_t len, qty t, uint32_
 	size_t n = 0;
 	int k = t != CXX_TY_UNKNOWN ? AST_TYPE_KIND(c->ast, t) : -1;
 
-	if (!cxx_gen_on(c) || (k != TY_FLOAT && k != TY_DOUBLE) || len >= sizeof buf)
+	if (!cxx_gen_on(c) || (k != TY_FLOAT && k != TY_DOUBLE && k != TY_LDOUBLE) || len >= sizeof buf)
 		return;
 	for (size_t i = 0; i < len; i++)
 		if (text[i] != '\'')
 			buf[n++] = text[i];
 	buf[n] = 0;
-	c->enode = cc_node_float_new(c->ast, strtod(buf, NULL), t, loc);	/* (strtod stops at the suffix) */
+	if (cc_type_is_float128(c->ast, t)) {
+		/* a binary128 long double (Arm Linux): parsed to its own precision, as C does */
+		size_t m = n;
+
+		while (m && (buf[m - 1] == 'l' || buf[m - 1] == 'L'))
+			m--;
+		c->enode = cc_node_float128_new(c->ast, vsoftfloat_parse_with_precision(buf, m, cc_float_precision_bits(c->ast, t)), t, loc);
+		return;
+	}
+	c->enode = cc_node_float_new(c->ast, k == TY_FLOAT ? (double)strtof(buf, NULL) : strtod(buf, NULL), t, loc);	/* (strto* stop at the suffix) */
 }
 
 /* ---- lambdas ------------------------------------------------------------------------------- */
