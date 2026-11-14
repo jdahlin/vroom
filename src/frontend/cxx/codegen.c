@@ -128,6 +128,8 @@ VPRIV bool cxx_gen_class_ok(cxx *c, qty t)
 		return false;
 	if (pod)
 		return true;
+	if (cxx_class_polymorphic(c, t))
+		return false;	/* (vtables: not built yet) */
 	cls = cxx_tag_scope_get(c, QUNQ(t));
 	if (!cls || cls->has_dependent_base)
 		return false;
@@ -1493,7 +1495,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cx
 	c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = psyms.n;
 	c->gen_pre = calloc(1, sizeof(cc_id_list));
 	cc_id_list_init(c->gen_pre);
-	c->ngen_init_names = 0, c->ngen_init_bases = 0, c->gen_delegates = 0, c->gen_returns = 0;
+	c->ngen_init_names = 0, c->ngen_init_bases = 0, c->gen_delegates = 0, c->gen_returns = 0, c->gen_why = 0;
 	c->gen_ret = ft->base;
 	a->fn = f->sym;
 	c->gen = 1;

@@ -348,7 +348,7 @@ typedef struct cxx {
 	uint32_t gen_init_names[32], ngen_init_names;
 	qty gen_init_bases[16];
 	uint32_t ngen_init_bases;
-	uint8_t gen_delegates, gen_returns;	/* it delegates to another constructor; the body has a return statement */
+	uint8_t gen_delegates, gen_returns, gen_why;	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
@@ -448,6 +448,8 @@ VPRIV void cxx_class_skip(cxx *c, int reason);
 VPRIV void cxx_class_field(cxx *c, uint32_t name, qty t, uint32_t loc, int bitfield_width);
 VPRIV void cxx_class_end(cxx *c);
 VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual);
+VPRIV void cxx_class_virtual(cxx *c);
+VPRIV bool cxx_class_polymorphic(cxx *c, qty t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };

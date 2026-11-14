@@ -2945,7 +2945,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			c->stats.declarations_typed += t != CXX_TY_UNKNOWN;
 		}
 		if (f && (flags & DS_VIRTUAL) && context == CXX_CONTEXT_CLASS)
-			cxx_class_skip(c, CXX_SKIP_VIRTUAL);	/* (a vptr: C++'s layout, not built yet) */
+			cxx_class_virtual(c);
 		/* a user-provided constructor, destructor or assignment (not = default): the class is not POD */
 		if (f && context == CXX_CONTEXT_CLASS && c->build && !(flags & DS_FRIEND)) {
 			bool special = (cs && cs->owner && name == cs->owner->name) ||	/* constructor, destructor */

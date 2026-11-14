@@ -132,12 +132,14 @@ typedef struct cxx_class_build {
 	   base's tail padding is reused by the derived class's members) */
 	uint32_t bases[16], nbases;
 	uint8_t pod, access_private, public_data, private_data;
+	uint8_t virt;			/* it declares a virtual function */
 } cxx_class_build;
 
 /* per AST tag: what a derived class's layout needs of this class */
 typedef struct cxx_class_info {
 	uint64_t dsize;			/* data size: bytes up to the end of its last data, before tail padding */
 	uint8_t valid, pod, empty, has_empty_base;
+	uint8_t polymorphic;		/* it has a vptr: its own (at offset 0) or its primary base's */
 	/* its direct base classes: their tags and offsets (code generation: a derived object as its base) */
 	uint8_t nbases;
 	uint32_t base_tag[16], base_off[16];
@@ -329,6 +331,21 @@ VPRIV void cxx_class_base(cxx *c, qty t, bool is_virtual)
 	b->bases[b->nbases++] = tag;
 }
 
+/* the class declares a virtual function */
+VPRIV void cxx_class_virtual(cxx *c)
+{
+	if (c->build && !c->tentative)
+		c->build->virt = 1, c->build->pod = 0;
+}
+
+/* does the class have a vptr (a virtual function of its own or of a base)? */
+VPRIV bool cxx_class_polymorphic(cxx *c, qty t)
+{
+	if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == TY_ARRAY)
+		return false;
+	return cxx_info_of(c, AST_TYPE(c->ast, t)->aux)->polymorphic;
+}
+
 VPRIV void cxx_class_skip(cxx *c, int reason)
 {
 	if (c->build && c->build->skip < 0)
@@ -425,7 +442,21 @@ VPRIV void cxx_class_end(cxx *c)
 
 		/* base subobjects (Itanium ABI, no virtual functions): in order; an empty one takes no
 		   space at offset 0; a non-POD one's tail padding goes to what follows (its data size) */
-		for (uint32_t i = 0; i < b->nbases; i++) {
+		/* a class with virtual functions: its primary base (the first base with a vptr) comes first, at
+		   offset 0, and shares its vptr; with no such base the class's own vptr is its first 8 bytes */
+		int primary = -1;
+		bool polymorphic = b->virt;
+
+		for (uint32_t i = 0; i < b->nbases; i++)
+			if (cxx_info_of(c, b->bases[i])->polymorphic) {
+				if (primary < 0)
+					primary = (int)i;
+				polymorphic = true;
+			}
+		if (polymorphic && primary < 0)
+			off = 8, balign = 8, nonempty++;
+		for (uint32_t k = 0; k < b->nbases; k++) {
+			uint32_t i = primary < 0 ? k : k == 0 ? (uint32_t)primary : k <= (uint32_t)primary ? k - 1 : k;
 			const tag *br = &c->ast->tags[b->bases[i]];
 			cxx_class_info *ib = cxx_info_of(c, b->bases[i]);
 
@@ -545,9 +576,10 @@ VPRIV void cxx_class_end(cxx *c)
 		memcpy(bi->base_off, base_offs, b->nbases * sizeof *base_offs);
 		bi->empty = !nfields_nonempty && !nonempty;
 		bi->has_empty_base = any_empty_base;
+		bi->polymorphic = polymorphic;
 		bi->dsize = (data_end + 7) / 8;
 		/* POD for layout: trivial and standard-layout, as far as the parser sees it */
-		bi->pod = b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&
+		bi->pod = !polymorphic && b->pod && all_bases_pod && !(b->public_data && b->private_data) && nonempty <= 1 && !(nfields_nonempty && nonempty) &&
 			  !(r->flags & RF_UNION ? 0 : 0);
 		if (bi->empty) {	/* C++: an empty class has size 1 */
 			r->size = 1, r->align = 1;

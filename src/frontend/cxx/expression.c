@@ -1194,7 +1194,27 @@ static void cxx_primary_expression_parse(cxx *c)
 	cxx_id_expression_parse(c);
 }
 
+static void cxx_postfix_expression_parse1(cxx *c);
+
+/* VCC_CXX_GEN=2: the innermost postfix expression of each function that code generation did not build */
 static void cxx_postfix_expression_parse(cxx *c)
+{
+	static __thread int trace = -1;
+	uint32_t start = c->pos;
+
+	cxx_postfix_expression_parse1(c);
+	if (trace < 0)
+		trace = getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 2;
+	if (trace && !c->enode && cxx_gen_on(c) && !c->gen_why) {
+		c->gen_why = 1;
+		fprintf(stderr, "no node:");
+		for (uint32_t i = start; i < c->pos && i < start + 12; i++)
+			fprintf(stderr, " %.*s", (int)c->tok[i].len, c->tok[i].s);
+		fprintf(stderr, " -> %s\n", c->etype == CXX_TY_UNKNOWN ? "untyped" : cc_type_is_record(c->ast, c->etype) ? "class" : "typed");
+	}
+}
+
+static void cxx_postfix_expression_parse1(cxx *c)
 {
 	cxx_primary_expression_parse(c);
 	for (;;) {
