@@ -1776,6 +1776,11 @@ VPRIV bool cxx_instance_uses_decltype(cxx *c, const cxx_entity *inst)
 	return false;
 }
 
+VPRIV const cxx_scope *cxx_ftemplate_params(const cxx_ftemplate *f)
+{
+	return f ? f->p.params : NULL;
+}
+
 /* parse the signature once, the parameters bound to placeholders */
 static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 {

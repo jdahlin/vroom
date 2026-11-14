@@ -516,7 +516,26 @@ bad:
 }
 
 /* one template argument; i: its parameter's index in ps */
-static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps)
+/* a value parameter declared with another parameter's type (template <class T, T v>): that parameter's index (-1: not) */
+static int mg_value_type_param(cxx_mangler *m, const cxx_scope *ps, uint32_t i)
+{
+	const cxx *c = m->c;
+	uint32_t p;
+
+	if (!ps || i >= ps->ntparams || ps->tparams[i].kind != 2 || !(p = ps->tparams[i].type_b) || p + 1 >= c->ntok)
+		return -1;
+	if (c->tok[p].kind != LEX_TOKEN_IDENTIFIER)
+		return -1;
+	if (c->tok[p + 1].kind != LEX_TOKEN_IDENTIFIER && c->tok[p + 1].kind != LEX_TOKEN_COMMA && c->tok[p + 1].kind != LEX_TOKEN_GREATER &&
+	    c->tok[p + 1].kind != LEX_TOKEN_EQUAL && c->tok[p + 1].kind != LEX_TOKEN_GREATER_GREATER)
+		return -1;	/* (only the parameter's name, or nothing, after the type) */
+	for (uint32_t k = 0; k < i; k++)
+		if (ps->tparams[k].kind == 1 && !ps->tparams[k].pack && ps->tparams[k].name == c->tok[p].id)
+			return (int)k;
+	return -1;
+}
+
+static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps, const cxx_targ *all)
 {
 	if ((*x).kind == 1 && (*x).t != CXX_TY_UNKNOWN)
 		mg_type(m, (*x).t);
@@ -539,14 +558,21 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 			else
 				m->n = at;
 		}
+		int tk = !(*x).t && !vt && all ? mg_value_type_param(m, ps, i) : -1;
+		qty lt = tk >= 0 && all[tk].kind == 1 && all[tk].t != CXX_TY_UNKNOWN ? all[tk].t : 0;
+
+		if (lt && !(AST_TYPE_KIND(m->c->ast, lt) >= TY_BOOL && AST_TYPE_KIND(m->c->ast, lt) <= TY_UINT128))
+			lt = 0;	/* (an integer or character type: written as such) */
 		mg_str(m, "L");
 		if ((*x).t)
 			mg_type(m, (*x).t);
+		else if (lt)
+			mg_type(m, QUNQ(lt));
 		else
 			mg_str(m, vt ? vt : "i");
-		if (!(*x).t && !vt)
+		if (!(*x).t && !vt && !lt)
 			m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
-		if (vt && vt[0] == 'b')
+		if ((vt && vt[0] == 'b') || (lt && AST_TYPE_KIND(m->c->ast, lt) == TY_BOOL))
 			mg_str(m, (*x).v ? "1" : "0");
 		else
 		mg_text(m, num, (size_t)snprintf(num, sizeof num, (*x).v < 0 ? "n%llu" : "%llu",
@@ -598,20 +624,20 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 	mg_str(m, "I");
 	if (npost) {
 		for (uint32_t j = 0; j < pidx; j++)
-			mg_template_arg(m, &args[j], j, ps);
+			mg_template_arg(m, &args[j], j, ps, args);
 		mg_str(m, "J");
 		for (uint32_t j = pack_at; j < nargs; j++)
-			mg_template_arg(m, &args[j], pidx, ps);
+			mg_template_arg(m, &args[j], pidx, ps, NULL);
 		mg_str(m, "E");
 		for (uint32_t j = 0; j < npost; j++)
-			mg_template_arg(m, &args[pidx + j], pidx + 1 + j, ps);
+			mg_template_arg(m, &args[pidx + j], pidx + 1 + j, ps, NULL);
 		mg_str(m, "E");
 		return;
 	}
 	for (uint32_t i = 0; i < nargs; i++) {
 		if (i == pack_at)
 			mg_str(m, "J");
-		mg_template_arg(m, &args[i], i, ps);
+		mg_template_arg(m, &args[i], i, ps, pack_at > nargs || i < pack_at ? args : NULL);
 	}
 	if (pack_at == nargs)
 		mg_str(m, "J");	/* (an empty pack: J E) */

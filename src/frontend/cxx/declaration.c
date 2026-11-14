@@ -2304,6 +2304,82 @@ static void cxx_static_assert_parse(cxx *c)
 	cxx_expect(c, LEX_TOKEN_SEMICOLON);
 }
 
+/* the end of a template parameter's type, from p: the ',' '>' or '=' after it at depth 0 */
+static uint32_t cxx_tparam_type_end(cxx *c, uint32_t p)
+{
+	int depth = 0;
+
+	for (; p < c->ntok; p++) {
+		int k = c->tok[p].kind;
+
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE || k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_LESS)
+			depth++;
+		else if (k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE || k == LEX_TOKEN_RIGHT_BRACE)
+			depth--;
+		else if (k == LEX_TOKEN_GREATER || k == LEX_TOKEN_GREATER_GREATER) {
+			if (depth <= 0)
+				return p;
+			depth -= k == LEX_TOKEN_GREATER ? 1 : 2;
+			if (depth < 0)
+				return p;	/* (>> closing this list too) */
+		} else if (!depth && (k == LEX_TOKEN_COMMA || k == LEX_TOKEN_EQUAL || k == LEX_TOKEN_SEMICOLON))
+			return p;
+	}
+	return p;
+}
+
+static bool cxx_tokens_same(cxx *c, uint32_t a, uint32_t ae, uint32_t b, uint32_t be)
+{
+	if (ae - a != be - b)
+		return false;
+	for (uint32_t i = 0; i < ae - a; i++)
+		if (c->tok[a + i].kind != c->tok[b + i].kind || c->tok[a + i].len != c->tok[b + i].len ||
+		    memcmp(c->tok[a + i].s, c->tok[b + i].s, c->tok[a + i].len))
+			return false;
+	return true;
+}
+
+/*
+ * A function template's redeclaration (its definition after a declaration): the default template arguments
+ * the earlier declaration gave, which this one may not repeat (json's concat_into: enable_if_t<...> = 0 on
+ * the declaration only).  An earlier one matches when it has as many parameters of the same kinds and each
+ * value parameter's type is written the same.
+ */
+VPRIV void cxx_tparams_inherit_defaults(cxx *c, cxx_scope *ps, cxx_scope *in, uint32_t name)
+{
+	bool missing = false;
+
+	if (!ps || !in || name <= 1)
+		return;
+	for (uint32_t i = 0; i < ps->ntparams; i++)
+		missing |= !ps->tparams[i].def_b && !ps->tparams[i].pack;
+	if (!missing)
+		return;
+	for (cxx_entity *o = cxx_lookup_local(in, name); o; o = o->next) {
+		const cxx_scope *os;
+		bool same = true, gives = false;
+
+		if (o->kind != CXX_ENTITY_FUNCTION_TEMPLATE || !o->ftmpl || !(os = cxx_ftemplate_params(o->ftmpl)) || os == ps ||
+		    os->ntparams != ps->ntparams)
+			continue;
+		for (uint32_t i = 0; i < ps->ntparams && same; i++) {
+			const cxx_tparam *a = &ps->tparams[i], *b = &os->tparams[i];
+
+			same = a->kind == b->kind && a->pack == b->pack;
+			if (same && a->kind == 2)
+				same = a->type_b && b->type_b &&
+				       cxx_tokens_same(c, a->type_b, cxx_tparam_type_end(c, a->type_b), b->type_b, cxx_tparam_type_end(c, b->type_b));
+			gives |= !a->def_b && b->def_b;
+		}
+		if (!same || !gives)
+			continue;
+		for (uint32_t i = 0; i < ps->ntparams; i++)
+			if (!ps->tparams[i].def_b && os->tparams[i].def_b)
+				ps->tparams[i].def_b = os->tparams[i].def_b, ps->tparams[i].def_e = os->tparams[i].def_e;
+		return;
+	}
+}
+
 /* ---- templates --------------------------------------------------------------------------- */
 
 static void cxx_template_parameter_parse(cxx *c)
@@ -3207,6 +3283,7 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			/* a function template (one level of parameters): its signature, for deduction at calls */
 			if (e && kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->ftmpl && c->template_depth == 1 && c->scope == c->ftmpl_scope &&
 			    !c->tentative) {
+				cxx_tparams_inherit_defaults(c, c->scope, cxx_declaration_scope(c), name);
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, NULL);
 				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);
 				fn_template = e;

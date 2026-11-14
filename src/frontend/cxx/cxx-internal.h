@@ -554,6 +554,8 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params, cxx_sc
 VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
 VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
+VPRIV void cxx_tparams_inherit_defaults(cxx *c, cxx_scope *ps, cxx_scope *in, uint32_t name);
+VPRIV const cxx_scope *cxx_ftemplate_params(const struct cxx_ftemplate *f);
 VPRIV struct cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class);
 VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const qty *args, const uint8_t *lval,
 			      uint32_t nargs, qty *ret, bool body);
