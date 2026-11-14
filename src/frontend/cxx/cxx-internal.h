@@ -120,6 +120,7 @@ typedef struct cxx_entity {
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
+	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
 	   per element, pack_index then the element (ty, value) */
@@ -193,8 +194,10 @@ typedef struct cxx {
 	uint32_t *fn_pnames;		/* ... and names */
 	cxx_param *decl_params;		/* the last declarator's function parameters (its body's names) */
 	uint32_t ndecl_params, cdecl_params;
+	uint32_t decl_ndefaults;	/* ... and how many of them have default arguments */
 	uint32_t fn_nparams, fn_cparams;
 	uint8_t fn_variadic, fn_unknown;
+	uint32_t fn_ndefaults;
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
 	qty anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
 	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */
@@ -266,6 +269,7 @@ VPRIV uint32_t cxx_keyword_of(uint32_t id);
 typedef struct cxx_mark { uint32_t pos, nundo; jmp_buf *fail; cxx_scope *scope; uint32_t template_depth, in_template_args; } cxx_mark;
 VPRIV void cxx_mark_set(cxx *c, cxx_mark *m);
 VPRIV void cxx_mark_rewind(cxx *c, const cxx_mark *m);
+VPRIV uint32_t cxx_operator_id_at(cxx *c, uint32_t n);
 VPRIV void cxx_rewind(cxx *c, uint32_t pos, uint32_t nundo);
 
 /* names (names.c) */
@@ -321,6 +325,7 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, qty t);
 VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
+VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, qty obj, const qty *args, uint32_t nargs);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_pack_element(cxx *c, cxx_entity *e, int32_t i);	/* i < 0: back to the whole pack */

@@ -175,6 +175,11 @@ static void cxx_id_expression_parse(cxx *c)
 	}
 	if (!dep && e)
 		cxx_name_type(c, e);
+	else if (!e && !q && t->len > 10 && !memcmp(t->s, "__builtin_", 10) && !c->tentative &&
+		 ((t->len == 18 && !memcmp(t->s + 10, "va_start", 8)) || (t->len == 16 && !memcmp(t->s + 10, "va_end", 6)) ||
+		  (t->len == 17 && !memcmp(t->s + 10, "va_copy", 7)) || (t->len == 21 && !memcmp(t->s + 10, "unreachable", 11)) ||
+		  (t->len == 14 && !memcmp(t->s + 10, "trap", 4)) || (t->len == 18 && !memcmp(t->s + 10, "prefetch", 8))))
+		cxx_et(c, cxx_type_function(c, cc_type_basic(TY_VOID), NULL, 0, true), false);	/* builtins that return void */
 	else
 		cxx_et(c, CXX_TY_UNKNOWN, false);
 	(void)save;
@@ -718,8 +723,10 @@ static void cxx_postfix_expression_parse(cxx *c)
 				else
 					cxx_expression_parse(c);
 				c->in_template_args = targs;
-				/* a[i]: an element of an array or pointer (a class's operator[]: not resolved yet) */
-				cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
+				/* a[i]: an element of an array or pointer, or a class's operator[] */
+				if (!c->tentative && cxx_operator_call_type(c, vintern_cstr("operator[]"), base, &c->etype, 1))
+					;
+				else cxx_et(c, base != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, base) == TY_PTR || AST_TYPE_KIND(c->ast, base) == TY_ARRAY) &&
 					  !AST_TYPE(c->ast, base)->ext ? AST_TYPE(c->ast, base)->base : CXX_TY_UNKNOWN, true);
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
@@ -735,6 +742,8 @@ static void cxx_postfix_expression_parse(cxx *c)
 				c->in_template_args = targs;
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
+				else if (!set && c->ncargs <= 2 && cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))
+					;	/* an object of class type: its operator() */
 				else
 					cxx_call_type(c, set, callee, c->cargs, c->ncargs);
 			}
@@ -842,9 +851,11 @@ static void cxx_unary_expression_parse(cxx *c)
 		{
 			int op = cxx_kind(c);
 
+			uint32_t opid = cxx_operator_id_at(c, 1);
+
 			cxx_advance(c);
 			cxx_cast_expression_parse(c);
-			if (!c->tentative)
+			if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0))
 				cxx_unary_type(c, op, c->etype, c->elval);
 		}
 		return;
@@ -1008,12 +1019,17 @@ static void cxx_binary_expression_parse(cxx *c, int min)
 			qty l = c->etype;
 			uint32_t k;
 			int op = cxx_operator_at(c, &k);
+			uint32_t opid = cxx_operator_id_at(c, k);
 
 			while (n--)
 				cxx_advance(c);
 			cxx_binary_expression_parse(c, p + 1);
-			if (!c->tentative)
-				cxx_binary_type(c, op, l, c->etype);
+			if (!c->tentative && !cxx_operator_call_type(c, opid, l, &c->etype, 1)) {
+				qty r = c->etype;
+
+				if (!cxx_operator_call_type(c, opid, r, (qty[]){ l }, 1) || c->etype == CXX_TY_UNKNOWN)
+					cxx_binary_type(c, op, l, r);
+			}
 		}
 	}
 }
@@ -1080,12 +1096,15 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 		qty l = c->etype;
 		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == TY_PTR);
 
+		uint32_t opid = cxx_operator_id_at(c, n);
+
 		if (cxx_peek(c, n)->kind == LEX_TOKEN_ELLIPSIS)
 			return;	/* a fold over = */
 		while (n--)
 			cxx_advance(c);
 		cxx_initializer_parse(c);
-		cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);	/* (a class's operator=: not resolved yet) */
+		if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, &c->etype, 1))
+			cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
 	}
 }
 
