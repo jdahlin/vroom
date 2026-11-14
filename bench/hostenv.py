@@ -139,4 +139,10 @@ def wine_start(prefix, persist=60):
     # a no-op when a server already runs for this prefix
     subprocess.run([WINESERVER, f'-p{persist}'], env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    # the first program of a new server starts Wine's services (services.exe,
+    # winedevice, explorer), which inherit its stdout and stderr and live as long
+    # as the server: a caller capturing them would wait for that (60 s).  Start
+    # them here with no pipes to hold.
+    subprocess.run([WINE, 'cmd', '/c', 'exit'], env=env, stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
     return env
