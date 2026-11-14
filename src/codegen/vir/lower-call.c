@@ -103,6 +103,33 @@ static uint32_t virbuild_call_signature_make(codegen_context *e, const walk_argu
 	return o;
 }
 
+/* SysV wide arithmetic helpers use at most two arguments: each is either
+ * one floating value or two integer words. The operands are already in SSA. */
+VPRIV codegen_value virbuild_wide_helper_call(codegen_context *e, int helper, ast_qualified_type result_type,
+	ast_qualified_type operand_type, unsigned nargs, const uint32_t *values)
+{
+	walk_argument args[2], result;
+	virbuild_classify(e, operand_type, &args[0], false);
+	args[1] = args[0];
+	virbuild_classify(e, result_type, &result, false);
+	uint32_t rpc, sig = virbuild_call_signature_make(e, args, nargs, false, result_type, &rpc);
+	uint32_t count = nargs * args[0].eightbyte_count;
+	uint32_t operands = virbuild_extra_append(e, &count, 1);
+	virbuild_extra_append(e, values, count);
+	uint32_t fn = virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, CODEGEN_FIXED_REFERENCE(helper), 0, 0);
+	bool wide = result.eightbyte_count == 2;
+	uint32_t call = virbuild_insn_append(e, VIR_OP_CALL, wide ? VIR_TYPE_MULTI : virbuild_pass_class_type(rpc), 0, fn, sig, operands);
+	virbuild_store_table_clear(e, true);
+	if (wide) {
+		uint32_t lo = virbuild_insn_append(e, VIR_OP_PROJ, VIR_TYPE_I64, 0, call, 0, 0);
+		uint32_t hi = virbuild_insn_append(e, VIR_OP_PROJ, VIR_TYPE_I64, 0, call, 1, 0);
+		return virbuild_wide_pack(e, lo, hi);
+	}
+	int r = virbuild_ftreg(e);
+	virbuild_register_write(e, r, call);
+	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
+}
+
 /* Pass a pointer to the walker's private, padded argument or result object. */
 static uint32_t virbuild_call_slot_pointer(codegen_context *e, int64_t offset)
 {

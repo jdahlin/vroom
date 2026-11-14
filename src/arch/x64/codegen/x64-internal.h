@@ -93,6 +93,7 @@ enum {
 	X64_OP_PROBE,	/* Windows: the stack pages rax bytes below rsp touched (callq ___chkstk_ms; it keeps every register) */
 	X64_OP_FRAMEADDR,	/* the Windows frame: r0 = rbp less its save area (print.c), the unwinder's establisher frame */
 	X64_OP_CRC32Q, /* r0 = CRC32C(r1, eight bytes of r2) */
+	X64_OP_POPCNT,
 	X64_OP_COUNT
 };
 

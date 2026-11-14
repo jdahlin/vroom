@@ -184,6 +184,9 @@ VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b, uint32
 VPRIV uint32_t virbuild_insn_append(codegen_context *e, uint32_t op, uint32_t ty, uint32_t fl, uint32_t a, uint32_t b, uint32_t c);
 VPRIV uint32_t virbuild_constant_make(codegen_context *e, uint32_t op, uint32_t ty, uint32_t a, uint32_t b, uint32_t c);
 VPRIV uint32_t virbuild_constant_integer(codegen_context *e, uint32_t ty, int64_t v);
+VPRIV codegen_value virbuild_wide_pack(codegen_context *e, uint32_t lo, uint32_t hi);
+VPRIV codegen_value virbuild_wide_helper_call(codegen_context *e, int helper, ast_qualified_type result_type,
+	ast_qualified_type operand_type, unsigned nargs, const uint32_t *values);
 VPRIV uint32_t virbuild_extra_append(codegen_context *e, const uint32_t *w, uint32_t n);
 VPRIV uint32_t virbuild_block_new(codegen_context *e);
 VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l);

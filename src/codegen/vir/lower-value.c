@@ -378,8 +378,19 @@ VPRIV void virbuild_brz(codegen_context *e, codegen_value a, int size, bool nz, 
 
 VPRIV void virbuild_switch_bitset(codegen_context *e, int r, int size, const em_switch_bitset_recipe *recipe, uint32_t target, uint32_t dflt)
 {
-	(void)r, (void)size, (void)recipe, (void)target, (void)dflt;
-	virbuild_fail(e, VIRBUILD_FAILURE(switch_bit_set));
+	uint32_t ty = virbuild_integer_type(size), index = virbuild_register_read(e, r, ty);
+	uint32_t mask_ty = virbuild_integer_type(recipe->bits / 8);
+	if (recipe->lo)
+		index = virbuild_insn_append(e, VIR_OP_SUB, ty, 0, index, virbuild_constant_integer(e, ty, recipe->lo), 0);
+	/* Compare at the selector width before narrowing the shift count. */
+	uint32_t inside = virbuild_insn_append(e, VIR_OP_ICMP, VIR_TYPE_I32,
+		virbuild_integer_condition_code(LEX_TOKEN_LESS_EQUAL, false), index, virbuild_constant_integer(e, ty, recipe->span), 0);
+	virbuild_branch_if(e, inside, dflt, false);
+	uint32_t count = virbuild_value_convert(e, index, mask_ty);
+	uint32_t member = virbuild_insn_append(e, VIR_OP_LSHR, mask_ty, 0, virbuild_constant_integer(e, mask_ty, recipe->mask), count, 0);
+	member = virbuild_insn_append(e, VIR_OP_AND, mask_ty, 0, member, virbuild_constant_integer(e, mask_ty, 1), 0);
+	virbuild_branch_if(e, member, target, true);
+	virbuild_jump(e, dflt);
 }
 
 static int virbuild_switch_case_compare(const void *a, const void *b)
@@ -440,7 +451,7 @@ static void virbuild_wide_target_check(codegen_context *e)
 		virbuild_fail(e, VIRBUILD_FAILURE(wide_integer));
 }
 
-static codegen_value virbuild_wide_pack(codegen_context *e, uint32_t lo, uint32_t hi)
+VPRIV codegen_value virbuild_wide_pack(codegen_context *e, uint32_t lo, uint32_t hi)
 {
 	codegen_lvalue at = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_slot_temporary(e, 16, 16), .align = 8 };
 	int q = virbuild_treg(e);
@@ -479,6 +490,16 @@ VPRIV codegen_value virbuild_bigconst(codegen_context *e, ast_qualified_type t, 
 VPRIV codegen_value virbuild_bigbin(codegen_context *e, int op, ast_qualified_type t, codegen_value a, codegen_value b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
 VPRIV codegen_value virbuild_bigcmp(codegen_context *e, int op, ast_qualified_type t, codegen_value a, codegen_value b) { (void)op, (void)t, (void)a, (void)b; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
 VPRIV codegen_value virbuild_bigcvt(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to) { (void)v, (void)from, (void)to; virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer)); }
+/* SysV compiler-rt takes two integer pairs and returns the result in RDX:RAX. */
+static codegen_value virbuild_wide_divrem(codegen_context *e, int op, bool sgn, const uint32_t x[2], const uint32_t y[2])
+{
+	int helper = op == LEX_TOKEN_SLASH ? (sgn ? CODEGEN_LIBRARY_DIVTI3 : CODEGEN_LIBRARY_UDIVTI3) :
+	                                     (sgn ? CODEGEN_LIBRARY_MODTI3 : CODEGEN_LIBRARY_UMODTI3);
+	uint32_t words[] = { x[0], x[1], y[0], y[1] };
+	ast_qualified_type ty = codegen_type_primitive(sgn ? AST_TYPE_INT128 : AST_TYPE_UINT128);
+	return virbuild_wide_helper_call(e, helper, ty, ty, 2, words);
+}
+
 VPRIV codegen_value virbuild_wbin(codegen_context *e, int op, bool sgn, codegen_value a, codegen_value b)
 {
 	uint32_t x[2], y[2], lo, hi;
@@ -508,6 +529,8 @@ VPRIV codegen_value virbuild_wbin(codegen_context *e, int op, bool sgn, codegen_
 		return virbuild_wide_pack(e, left ? outer : inner, left ? inner : outer);
 	}
 	virbuild_wide_unpack(e, b, y);
+	if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT)
+		return virbuild_wide_divrem(e, op, sgn, x, y);
 	if (op == LEX_TOKEN_STAR) {
 		/* Modulo 2^128, only the low product and the two cross terms survive. */
 		lo = virbuild_insn_append(e, VIR_OP_MUL, VIR_TYPE_I64, 0, x[0], y[0], 0);
@@ -558,6 +581,29 @@ VPRIV codegen_value virbuild_wcmp(codegen_context *e, int op, bool sgn, codegen_
 	return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = q };
 }
 
+static codegen_value virbuild_wide_float_convert(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to, bool to_wide)
+{
+	cc *c = e->compile_context;
+	bool single = KIND(c, to_wide ? from : to) == AST_TYPE_FLOAT;
+	bool sign = KIND(c, to_wide ? to : from) == AST_TYPE_INT128;
+	int helper;
+	if (to_wide)
+		helper = sign ? (single ? CODEGEN_LIBRARY_FIXSFTI : CODEGEN_LIBRARY_FIXDFTI) :
+		                (single ? CODEGEN_LIBRARY_FIXUNSSFTI : CODEGEN_LIBRARY_FIXUNSDFTI);
+	else
+		helper = sign ? (single ? CODEGEN_LIBRARY_FLOATTISF : CODEGEN_LIBRARY_FLOATTIDF) :
+		                (single ? CODEGEN_LIBRARY_FLOATUNTISF : CODEGEN_LIBRARY_FLOATUNTIDF);
+
+	uint32_t words[2];
+	if (to_wide) {
+		words[0] = virbuild_walker_value_get(e, &v, single ? VIR_TYPE_F32 : VIR_TYPE_F64);
+		if (v.kind == CODEGEN_VALUE_REGISTER) virbuild_tfree(e, v.register_number);
+	} else {
+		virbuild_wide_unpack(e, v, words);
+	}
+	return virbuild_wide_helper_call(e, helper, to, from, 1, words);
+}
+
 VPRIV codegen_value virbuild_wcvt(codegen_context *e, codegen_value v, ast_qualified_type from, ast_qualified_type to)
 {
 	cc *c = e->compile_context;
@@ -565,6 +611,9 @@ VPRIV codegen_value virbuild_wcvt(codegen_context *e, codegen_value v, ast_quali
 	bool fw = KIND(c, from) == AST_TYPE_INT128 || KIND(c, from) == AST_TYPE_UINT128;
 	bool tw = KIND(c, to) == AST_TYPE_INT128 || KIND(c, to) == AST_TYPE_UINT128;
 	if (fw && tw) return v;
+	if ((fw && (KIND(c, to) == AST_TYPE_FLOAT || KIND(c, to) == AST_TYPE_DOUBLE)) ||
+	    (tw && (KIND(c, from) == AST_TYPE_FLOAT || KIND(c, from) == AST_TYPE_DOUBLE)))
+		return virbuild_wide_float_convert(e, v, from, to, tw);
 	if (codegen_type_is_float(c, from) || codegen_type_is_float(c, to) || (!fw && !tw))
 		virbuild_fail(e, VIRBUILD_FAILURE(wide_integer));
 	if (tw) {

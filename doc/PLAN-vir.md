@@ -1374,6 +1374,35 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling whole-function VIR fallbacks (2026-11-14).** Matched the
+self-hosted cycle profile against bootstrap VIR diagnostics. One unsupported
+instruction in an infrequent branch or inlined callee sent the entire function to
+direct emission. Population counts blocked x64_function_print, x64_call and
+walk_arithmetic_emit; switch membership blocked codegen_expression_has_side_effects;
+wide division and floating conversions blocked walk_lvalue_emit and cc_constant_eval.
+
+Keep population counts in VIR (hardware POPCNT when enabled, scalar shifts and masks
+on baseline x86), lower guarded switch membership, and call the existing SysV runtime
+helpers for 128-bit division, remainder and float/double conversions. The six
+functions now lower. Their combined exclusive samples fell from 3,148 to 2,452 self-
+hosted and from 2,240 to 2,141 clang-built (five compiles each, period 75,001 user
+cycles). Independent of the fallbacks, x64_emit copied nearly every instruction header
+from a local buffer. Encode into the fragment when there is space; copies attributed
+to x64_emit fell from 1,323 to 61 self-hosted samples and from 1,471 to 126 clang-
+built.
+
+| SQLite 3.50.4 median CPU time | Self-hosted before / after | Clang-built before / after | Ratio before / after |
+| --- | ---: | ---: | ---: |
+| 24 runs rotating positions | 178.56 / 172.88 ms | 138.11 / 138.00 ms | 1.293× / 1.253× |
+| 21 runs alternating order | 181.61 / 176.79 ms | 141.68 / 140.96 ms | 1.282× / 1.254× |
+
+One emitter thread, CPU 7, warm-up excluded. The rotating round retired 76.8M fewer
+instructions self-hosted and 3.5M fewer clang-built. All four compilers emitted the
+identical object (SHA-256 prefix c4d3896fefc9). Bootstrap stages 2 and 3 matched. The
+wide-arithmetic, switch and popcount cases ran on native x86 and arm64 under QEMU. The
+width test caught an existing arm64 i32 popcount reading the high half of an incoming
+register; FMOV now uses the operand width.
+
 **SQLite after profiling primary expressions (2026-11-14).** In the baseline five-
 compile profile the grouped unary and primary-expression parsers had 1,288 self-hosted
 samples vs 424 clang-built. Clang inlines the span wrapper into unary. Self-hosted vcc

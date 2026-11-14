@@ -7,6 +7,32 @@
 
 /* ---------------- builtins and the rest ---------------- */
 
+/* Keep baseline x86 population counts in SSA so the allocator can place the
+ * intermediates and the optimizer can simplify constant and masked inputs. */
+static uint32_t virbuild_population_count(codegen_context *e, uint32_t ty, uint32_t x)
+{
+	if (!CODEGEN_IS_X64(e->compile_context) ||
+	    x86_feature_has(cc_x86_features_get(e->compile_context, e->walk_state->function_symbol), X86_FEATURE_POPCNT))
+		return virbuild_insn_append(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
+
+	uint32_t m1 = virbuild_constant_integer(e, ty, INT64_C(0x5555555555555555));
+	uint32_t m2 = virbuild_constant_integer(e, ty, INT64_C(0x3333333333333333));
+	uint32_t m4 = virbuild_constant_integer(e, ty, INT64_C(0x0f0f0f0f0f0f0f0f));
+	uint32_t ones = virbuild_constant_integer(e, ty, INT64_C(0x0101010101010101));
+	uint32_t t = virbuild_insn_append(e, VIR_OP_LSHR, ty, 0, x, virbuild_constant_integer(e, ty, 1), 0);
+	t = virbuild_insn_append(e, VIR_OP_AND, ty, 0, t, m1, 0);
+	x = virbuild_insn_append(e, VIR_OP_SUB, ty, 0, x, t, 0);
+	t = virbuild_insn_append(e, VIR_OP_LSHR, ty, 0, x, virbuild_constant_integer(e, ty, 2), 0);
+	t = virbuild_insn_append(e, VIR_OP_AND, ty, 0, t, m2, 0);
+	x = virbuild_insn_append(e, VIR_OP_AND, ty, 0, x, m2, 0);
+	x = virbuild_insn_append(e, VIR_OP_ADD, ty, 0, x, t, 0);
+	t = virbuild_insn_append(e, VIR_OP_LSHR, ty, 0, x, virbuild_constant_integer(e, ty, 4), 0);
+	x = virbuild_insn_append(e, VIR_OP_ADD, ty, 0, x, t, 0);
+	x = virbuild_insn_append(e, VIR_OP_AND, ty, 0, x, m4, 0);
+	x = virbuild_insn_append(e, VIR_OP_MUL, ty, 0, x, ones, 0);
+	return virbuild_insn_append(e, VIR_OP_LSHR, ty, 0, x, virbuild_constant_integer(e, ty, ty == VIR_TYPE_I32 ? 24 : 56), 0);
+}
+
 VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen_value a)
 {
 	uint32_t ty = virbuild_integer_type(size), x = virbuild_walker_value_get(e, &a, ty), op;
@@ -15,14 +41,16 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size, codegen
 	switch (bi) {
 	case CC_BUILTIN_CLZ: case CC_BUILTIN_CLZL: case CC_BUILTIN_CLZLL: op = VIR_OP_CLZ; break;
 	case CC_BUILTIN_CTZ: case CC_BUILTIN_CTZL: case CC_BUILTIN_CTZLL: op = VIR_OP_CTZ; break;
-	case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL: op = VIR_OP_POPCNT; break;
+	case CC_BUILTIN_POPCOUNT: case CC_BUILTIN_POPCOUNTL: case CC_BUILTIN_POPCOUNTLL:
+		virbuild_register_write(e, r, virbuild_population_count(e, ty, x));
+		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	case CC_BUILTIN_BSWAP32: case CC_BUILTIN_BSWAP64: op = VIR_OP_BSWAP; break;
 	case CC_BUILTIN_BSWAP16:
 		x = virbuild_insn_append(e, VIR_OP_BSWAP, VIR_TYPE_I32, 0, virbuild_value_convert(e, x, VIR_TYPE_I32), 0, 0);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x, virbuild_constant_integer(e, VIR_TYPE_I32, 16), 0));
 		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	case CC_BUILTIN_PARITY: case CC_BUILTIN_PARITYL: case CC_BUILTIN_PARITYLL:
-		x = virbuild_insn_append(e, VIR_OP_POPCNT, ty, 0, x, 0, 0);
+		x = virbuild_population_count(e, ty, x);
 		virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_AND, ty, 0, x, virbuild_constant_integer(e, ty, 1), 0));
 		return (codegen_value){ .kind = CODEGEN_VALUE_REGISTER, .register_number = (uint8_t)r };
 	default: virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));

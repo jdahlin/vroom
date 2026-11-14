@@ -26,7 +26,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
 	const vir_insn *i = &f->insns[v];
 	bool vec = vir_type_is_vector(i->type);
 	switch (i->op) {
-	case VIR_OP_CRC32C64: case VIR_OP_AXADD: case VIR_OP_AXCHG: return true;
+	case VIR_OP_POPCNT: case VIR_OP_BSWAP: case VIR_OP_CRC32C64: case VIR_OP_AXADD: case VIR_OP_AXCHG: return true;
 	case VIR_OP_ACAS:
 		return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) == x64_vir_type_size(i->type);
 	case VIR_OP_CTZ: case VIR_OP_CLZ: return (i->flags & VIR_INSN_FLAG_NZ) != 0;
