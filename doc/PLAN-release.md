@@ -782,3 +782,14 @@ runs clang/vcc x caller/callee under Wine (28 pass, 3 xfail); the C suites
 (`win64.yml`) runs them under Wine and the same programs on windows-2025,
 which has not run on GitHub yet.  G4 stays open: G1-G3 are not run per
 target.
+
+### Status 2026-11-14: G0/G4, native x86 CI and sanitizer runners
+
+`x86.yml` now gates native x86 object/dispatch/VIR checks and the ASan,
+TSan and TSan-vccd jobs alongside arm64 and win64.  Hosted ASan atomic
+regressions target native x86-64, where the runner provides libc and
+libatomic; the arm64 job retains arm64 coverage.  Verified locally with
+an isolated ASan+UBSan build and all three hosted atomic regressions;
+`sh -n ci/premerge.sh` and `git diff --check` pass.  The PR's arm64, x86,
+TSan and TSan-vccd checks passed; the integrated CI run remains required.
+G0 and G4 remain open.

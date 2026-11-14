@@ -11,7 +11,7 @@
 # them too (a merged PR; gate's own fast-forward triggers nothing), which is
 # what fills the caches (arm64.yml) every new PR starts from.
 #
-# One reusable workflow per target (arm64.yml, win64.yml, x86 later; wasm.yml is manual-only): a new
+# One reusable workflow per target (arm64.yml, win64.yml, x86.yml; wasm.yml is manual-only): a new
 # target is its own file plus a line under jobs and gate's needs.
 name: premerge
 on:
