@@ -1111,7 +1111,7 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; } cxx_fdone;
 
 typedef struct cxx_ftemplate {
 	cxx_partial p;		/* its parameters as placeholders (the partial specializations' machinery) */
@@ -1199,7 +1199,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	cxx_saved s;
 	jmp_buf jb;
 	cxx_scope *binding;
-	volatile qty r = CXX_TY_UNKNOWN;
+	volatile qty r = CXX_TY_UNKNOWN, sig = CXX_TY_UNKNOWN;
 	volatile bool body = false;
 	cxx_targ *targs;
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
@@ -1213,15 +1213,17 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
 			c->stats.bodies_cached++;
+			c->bound_sig = f->done[i].sig;
 			return f->done[i].ret;
 		}
+	c->bound_sig = CXX_TY_UNKNOWN;
 	if (c->body_depth >= 64)
 		return CXX_TY_UNKNOWN;	/* (recursion: the return type alone would do; not yet) */
 	if (f->ndone == f->cdone)
 		f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done);
 	f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
 	memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
-	f->done[f->ndone].ret = CXX_TY_UNKNOWN;
+	f->done[f->ndone].ret = CXX_TY_UNKNOWN, f->done[f->ndone].sig = CXX_TY_UNKNOWN;
 	f->ndone++;	/* (before the body: a recursive call finds it) */
 	/* what the enclosing parse still uses */
 	targs = malloc((ntargs ? ntargs : 1) * sizeof *targs);
@@ -1248,7 +1250,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 
 		body = b;
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
-			r = AST_TYPE(c->ast, t)->base;
+			r = AST_TYPE(c->ast, t)->base, sig = t;
 		c->stats.bodies += body;
 	} else
 		c->stats.bodies_failed++;
@@ -1262,7 +1264,8 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind)
 	c->this_const = this_const, c->ret_capture = ret_capture, c->ret_lval = ret_lval, c->ret_type = ret_type;
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np))
-			f->done[i].ret = r;
+			f->done[i].ret = r, f->done[i].sig = sig;
+	c->bound_sig = sig;
 	return r;
 }
 

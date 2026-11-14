@@ -118,6 +118,7 @@ static void cxx_name_type(cxx *c, cxx_entity *e)
 			v = x;
 	}
 	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, true);
+	c->edecl_name = 1;
 	if (v && v->has_value && !v->placeholder)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 }
@@ -654,6 +655,7 @@ static void cxx_primary_expression_parse(cxx *c)
 	}
 	case LEX_TOKEN_LEFT_PAREN:
 		cxx_paren_expression_parse(c);
+		c->edecl_name = 0;	/* decltype((x)) is a reference */
 		return;
 	case LEX_TOKEN_LEFT_SQUARE:
 		cxx_lambda_parse(c);	/* (its returns are its own: the enclosing function's capture is kept) */

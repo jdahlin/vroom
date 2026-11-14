@@ -62,6 +62,13 @@ VPRIV qty cxx_type_reference(cxx *c, qty base, bool rvalue)
 {
 	if (base == CXX_TY_UNKNOWN || c->tentative)
 		return CXX_TY_UNKNOWN;
+	/* a reference to a reference (T& with T = U&&, through a typedef or a template argument) collapses:
+	   an rvalue reference only if both are */
+	if (AST_TYPE_KIND(c->ast, base) == TY_PTR && AST_TYPE(c->ast, base)->ext) {
+		if (rvalue || AST_TYPE(c->ast, base)->ext == 1)
+			return QUNQ(base);
+		base = AST_TYPE(c->ast, base)->base;
+	}
 	{
 		ctype t = { .kind = TY_PTR, .size = CC_PTRSIZE(c->ast), .align = CC_PTRSIZE(c->ast), .base = base,
 			    .ext = (uint16_t)(rvalue ? 2 : 1) };

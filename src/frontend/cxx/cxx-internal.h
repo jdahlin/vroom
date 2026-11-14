@@ -261,6 +261,9 @@ typedef struct cxx {
 	qty *cargs;			/* the last call's argument types */
 	uint8_t *cargs_lval;		/* ... and which are lvalues */
 	uint32_t ncargs, ccargs;
+	qty edecl;			/* the expression's type as cxx_et got it (a call's reference type), for decltype */
+	uint8_t edecl_name;		/* ... of an unparenthesized name or member: decltype is its declared type */
+	qty bound_sig;			/* the last deduced template's function type with its arguments bound (or unknown) */
 	qty lambda_type;		/* the last lambda's closure type (CXX_TY_UNKNOWN: not built) */
 	uint8_t ret_seen;		/* ... and a return with a value was seen (its type perhaps not known) */
 	uint8_t ret_capture, ret_lval;	/* the body being parsed returns auto: its first return's type is wanted */

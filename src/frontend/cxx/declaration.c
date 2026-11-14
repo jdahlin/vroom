@@ -786,8 +786,18 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 				cxx_type_id_parse(c);
 			else {
 				cxx_expression_parse(c);
-				/* decltype of a prvalue: its type (an lvalue's T& / a name's declared type: not yet) */
-				if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->elval)
+				/* decltype: a name's declared type; a call's or cast's type with its reference; T& for
+				   another lvalue; else the prvalue's type */
+				if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->template_depth && (kw == CXX_KW_decltype || kw == CXX_KW___decltype)) {
+					bool ref = c->edecl != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->edecl) == TY_PTR && AST_TYPE(c->ast, c->edecl)->ext;
+
+					if (ref && AST_TYPE(c->ast, c->edecl)->base == c->etype)
+						known = c->edecl;	/* (as declared: T& or T&&) */
+					else if (c->edecl_name || !c->elval)
+						known = c->etype;
+					else
+						known = cxx_type_reference(c, c->etype, false);
+				} else if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->elval)
 					known = c->etype;
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);

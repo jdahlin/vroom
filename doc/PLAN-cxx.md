@@ -587,3 +587,17 @@ operator*).  Before this no auto variable had a type.  unit-32bit: 1943 of
 failed (clang emits 1,692 functions); 0.12 s.  json: 47,512 layouts clang
 agrees with, 71/71 parse.  Not deduced yet: auto return types (the body's
 return statements), structured bindings, auto x{...}, generic lambdas.
+
+### Status 2026-11-14 (8): auto returns, lambdas, decltype
+auto return types (the instantiated body's first return), closure types for
+lambdas with known parameter types (operator(), return from the body),
+decltype of names, calls and other lvalues (with reference collapsing), and
+a deduced template whose bound parameters match the arguments exactly wins
+over the others.  Instances whose member typedefs do not resolve are not
+asserted against clang (libc++ names ill-formed ones where that is harmless).
+unit-32bit: 2111 of 2739 calls typed; 505 function template bodies and 210
+member bodies, none failed (clang emits 1,692 functions); 0.13 s.  json:
+46,091 layouts clang agrees with, 71/71 parse; parse tests 17/17.
+Largest untyped groups now: function objects' operator() with decltype
+return types over their parameters, begin(x) through ADL, libc++'s
+strong_order/weak_order customization objects, packs.

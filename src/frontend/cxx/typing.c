@@ -16,6 +16,7 @@
 VPRIV void cxx_et(cxx *c, qty t, bool lvalue)
 {
 	c->ecallee = NULL, c->xargs_set = 0, c->call_obj = 0, c->econst = 0;
+	c->edecl = t, c->edecl_name = 0;
 	if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_PTR && AST_TYPE(c->ast, t)->ext) {
 		/* a reference: its referent, an lvalue (T&& names are lvalues too) */
 		c->etype = AST_TYPE(c->ast, t)->base, c->elval = 1;
@@ -181,7 +182,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 	uint32_t viable = 0, nexact = 0;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
 	cxx_entity *nonconst = NULL;
-	uint32_t n_nonconst = 0;
+	uint32_t n_nonconst = 0, nexact_t = 0;
+	qty exact_t = CXX_TY_UNKNOWN;
 
 	c->none_viable = 0, c->call_obj = 0;
 	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
@@ -232,6 +234,13 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 				unknown = true;	/* (a template vcc cannot deduce might be the best) */
 			if (d <= 0)
 				continue;
+			/* its parameters with the arguments bound: an exact match? */
+			if (c->bound_sig != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN) {
+				const ctype *bt = AST_TYPE(c->ast, c->bound_sig);
+
+				if (!(bt->flags & TF_VARIADIC) && bt->n == nargs && cxx_exact(c, bt, args, nargs))
+					nexact_t++, exact_t = r;
+			}
 		} else {
 			const ctype *ft;
 
@@ -260,6 +269,8 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, qty callee_type, const c
 		nexact = 1, exact = nonconst;
 	if (nexact == 1)
 		result = AST_TYPE(c->ast, exact->ty)->base;	/* (an exact non-template wins over a template's equal match) */
+	else if (!nexact && nexact_t == 1 && !unknown && viable)
+		result = exact_t;	/* f(int) and f(long) templates called with an int: the exact one */
 	else if (!viable || !same || unknown) {
 		c->none_viable = !viable && !unknown;
 		if (!c->template_depth && !(c->none_viable && operator_call))
