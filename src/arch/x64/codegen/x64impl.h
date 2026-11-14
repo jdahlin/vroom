@@ -1,6 +1,6 @@
 /*
  * vcc code generator, x86-64 (PLAN-x86.md): the lowering of the walker's
- * operations (layer 2) to records (codegen/rec/rec.h), the two-address pass
+ * operations (layer 2) to records (codegen/rec/record.h), the two-address pass
  * and the printer of clang's AT&T syntax.  System V ABI, Linux ELF; Windows x64.
  *
  * Registers are physical, numbered as the encoding does (rax 0 .. r15 15).
@@ -101,9 +101,9 @@ enum { XF_LDT, XF_STPT, XF_LD, XF_STP, XF_ILD, XF_ISTP, XF_ADD, XF_SUB, XF_MUL, 
 enum { CC_O, CC_NO, CC_B, CC_AE, CC_E, CC_NE, CC_BE, CC_A, CC_S, CC_NS, CC_P, CC_NP, CC_L, CC_GE, CC_LE, CC_G };
 
 typedef struct xst {
-	rec *in;		/* the function's records */
+	record *in;		/* the function's records */
 	uint32_t nin, capin;
-	rec *tw;		/* twoaddr.c's output */
+	record *tw;		/* twoaddr.c's output */
 	uint32_t ntw;
 	uint32_t live;		/* temporaries in use (bit = register) */
 	bool asmcs;		/* inside an asm: out of temporaries, take a callee-saved register (saved by the prologue) */
@@ -137,59 +137,59 @@ typedef struct xst {
 
 /* the integer argument registers, in order */
 static inline int x64_argreg(int i) { static const uint8_t r[6] = { RDI, RSI, RDX, RCX, R8, R9 }; return r[i]; }
-VPRIV xst *x64_state(ecx *e);
-VPRIV rec *x64_op3(ecx *e, int op, int sz, int r0, int r1, int r2);
-VPRIV void x64_mem(ecx *e, int op, int sz, int r, const lval *l, bool sgn);
-VPRIV void x64_mov(ecx *e, int rd, int rs);
-VPRIV void x64_movi(ecx *e, int r, int64_t v);
-VPRIV uint32_t x64_save(ecx *e, const uint8_t *regs, int n, int k0, int k1);
-VPRIV void x64_restore(ecx *e, uint32_t sv);
-VPRIV int x64_ftreg(ecx *e);
-VPRIV void x64_csused(ecx *e, int r);	/* a callee-saved register used: the prologue saves it */
+VPRIV xst *x64_state(codegen_context *e);
+VPRIV record *x64_op3(codegen_context *e, int op, int sz, int r0, int r1, int r2);
+VPRIV void x64_mem(codegen_context *e, int op, int sz, int r, const codegen_lvalue *l, bool sgn);
+VPRIV void x64_mov(codegen_context *e, int rd, int rs);
+VPRIV void x64_movi(codegen_context *e, int r, int64_t v);
+VPRIV uint32_t x64_save(codegen_context *e, const uint8_t *regs, int n, int k0, int k1);
+VPRIV void x64_restore(codegen_context *e, uint32_t sv);
+VPRIV int x64_ftreg(codegen_context *e);
+VPRIV void x64_csused(codegen_context *e, int r);	/* a callee-saved register used: the prologue saves it */
 VPRIV int x64_rname(const char *s);	/* asm.c: a register name (with or without %), -1 for none */
-VPRIV rec *x64_put(ecx *e, int op);
-VPRIV void x64_twoaddr(ecx *e);
-VPRIV bool x64_mulconst(ecx *e, int size, int r, i128 rhs);
+VPRIV record *x64_put(codegen_context *e, int op);
+VPRIV void x64_twoaddr(codegen_context *e);
+VPRIV bool x64_mulconst(codegen_context *e, int size, int r, i128 rhs);
 
-VPRIV bool x64_tail_return(ecx *e, uint32_t expr);
-VPRIV uint32_t x64_tail_ref(const ecx *e);
-VPRIV bool x64_framefree_candidate(ecx *e);
-VPRIV bool x64_framefree_record(ecx *e, const rec *i);
-VPRIV bool x64_copy_forward_at(ecx *e, uint32_t k);
-VPRIV bool x64_last_u32(const ecx *e, int r);
-VPRIV void x64_dead(ecx *e);
-VPRIV void x64_dead_budget(ecx *e, uint32_t budget);	/* internal bounded-fallback contracts */
-VPRIV void x64_locals_begin(ecx *e, uint32_t s);
-VPRIV bool x64_local(ecx *e, uint32_t s, lval *l);
-VPRIV bool x64_byref(ecx *e, uint32_t s);
+VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr);
+VPRIV uint32_t x64_tail_ref(const codegen_context *e);
+VPRIV bool x64_framefree_candidate(codegen_context *e);
+VPRIV bool x64_framefree_record(codegen_context *e, const record *i);
+VPRIV bool x64_copy_forward_at(codegen_context *e, uint32_t k);
+VPRIV bool x64_last_u32(const codegen_context *e, int r);
+VPRIV void x64_dead(codegen_context *e);
+VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget);	/* internal bounded-fallback contracts */
+VPRIV void x64_locals_begin(codegen_context *e, uint32_t s);
+VPRIV bool x64_local(codegen_context *e, uint32_t s, codegen_lvalue *l);
+VPRIV bool x64_byref(codegen_context *e, uint32_t s);
 /* effects.c: logical records before or after two-address expansion. */
 VPRIV const uint8_t *x64_flow_table(void);
 /* Prepared for shared copy/liveness passes; also exercised by contract tests. */
-VPRIV __attribute__((unused)) receffects x64_effects(const ecx *e, const rec *i);
-VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s);
-VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);
+VPRIV __attribute__((unused)) record_effects x64_effects(const codegen_context *e, const record *i);
+VPRIV void x64_print(codegen_context *e, tbuf *b, uint32_t s);
+VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz);
 
 VPRIV void x64_lbl(tbuf *b, uint32_t s, uint32_t l);
 VPRIV void x64_reg(tbuf *b, int r, int sz);
-VPRIV int x64_tlsaddr(ecx *e, uint32_t ref, int model);
-VPRIV bool sym_needs_got(cc *c, uint32_t ref);	/* arch/a64/codegen/value.c (shared) */
-VPRIV int x64_base(ecx *e, const lval *l, uint32_t *ref);
-VPRIV bool x64_nosimd(ecx *e);
-VPRIV void x64_nofp(ecx *e);
-VPRIV void x64_x87(ecx *e, int xf, const lval *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
-VPRIV void x64_call_xmms(ecx *e, const wkarg *r);	/* abi.c, both conventions: a result in xmm0, xmm1, ... */
-VPRIV void x64_call_park(ecx *e, ast_qualified_type rt);	/* abi.c, both conventions: a call's integer result to r11 */
-VPRIV val x64_call_value(ecx *e, val *fn, ast_qualified_type rt, const wkarg *r);	/* ... and its value as the walker takes it */
+VPRIV int x64_tlsaddr(codegen_context *e, uint32_t ref, int model);
+VPRIV bool codegen_symbol_needs_got(cc *c, uint32_t ref);	/* arch/a64/codegen/value.c (shared) */
+VPRIV int x64_base(codegen_context *e, const codegen_lvalue *l, uint32_t *ref);
+VPRIV bool x64_nosimd(codegen_context *e);
+VPRIV void x64_nofp(codegen_context *e);
+VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz);	/* an x87 record (fp.c) */	/* fatal under -mgeneral-regs-only / -mno-sse */
+VPRIV void x64_call_xmms(codegen_context *e, const walk_argument *r);	/* abi.c, both conventions: a result in xmm0, xmm1, ... */
+VPRIV void x64_call_park(codegen_context *e, ast_qualified_type rt);	/* abi.c, both conventions: a call's integer result to r11 */
+VPRIV codegen_value x64_call_value(codegen_context *e, codegen_value *fn, ast_qualified_type rt, const walk_argument *r);	/* ... and its value as the walker takes it */
 /* abi-win64.c: the Microsoft x64 convention */
 VPRIV int x64w_argreg(int i);
-VPRIV void x64w_classify(ecx *e, ast_qualified_type t, wkarg *a, bool unnamed);
-VPRIV val x64w_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool variadic, const wkarg *r, ast_qualified_type rt);
-VPRIV void x64w_params(ecx *e, wkarg *a, int n, const wkarg *r, bool variadic);
-VPRIV void x64w_va_start(ecx *e, int rap);
-VPRIV int x64w_va_arg(ecx *e, int rap, ast_qualified_type t);
-VPRIV void x64w_helper(ecx *e, int fn, const int64_t *in, const ast_qualified_type *types, int n, int64_t res, ast_qualified_type rt);
-VPRIV void x64w_xmm_part(ecx *e, int op, int64_t off, int size);
+VPRIV void x64w_classify(codegen_context *e, ast_qualified_type t, walk_argument *a, bool unnamed);
+VPRIV codegen_value x64w_call(codegen_context *e, uint32_t ref, codegen_value *fn, const walk_argument *a, int n, bool variadic, const walk_argument *r, ast_qualified_type rt);
+VPRIV void x64w_params(codegen_context *e, walk_argument *a, int n, const walk_argument *r, bool variadic);
+VPRIV void x64w_va_start(codegen_context *e, int rap);
+VPRIV int x64w_va_arg(codegen_context *e, int rap, ast_qualified_type t);
+VPRIV void x64w_helper(codegen_context *e, int fn, const int64_t *in, const ast_qualified_type *types, int n, int64_t res, ast_qualified_type rt);
+VPRIV void x64w_xmm_part(codegen_context *e, int op, int64_t off, int size);
 /* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
-static inline bool x64w_helpers(const ecx *e) { return WIN64(e->c); }
+static inline bool x64w_helpers(const codegen_context *e) { return CODEGEN_IS_WIN64(e->compile_context); }
 
 #endif

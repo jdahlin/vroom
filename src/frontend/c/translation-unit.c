@@ -265,7 +265,7 @@ int cc_translation_unit_run(pp *p, const cc_options *o)
 	if (o->dump_layouts && !c->errors)
 		cc_layout_check(c);
 	if (o->emit && !c->errors && !pp_error_count(p))
-		c->errors += emit_tu(c, o);
+		c->errors += codegen_unit_emit(c, o);
 	if (unlikely(c->field_uses))
 		cc_field_uses_finish(c);
 	errors = c->errors;

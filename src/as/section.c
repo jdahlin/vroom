@@ -19,7 +19,14 @@ static int as_text_has_prefix(as_text n, const char *pre)
 
 VPRIV uint32_t as_fragment_latest(as_context *a, uint32_t frag)	/* a frag split by .prefalign goes on in its continuation */
 {
-	while (elf_frag(a->object, frag)->cont) frag = elf_frag(a->object, frag)->cont;
+	ElfFrag *first = elf_frag(a->object, frag);
+	if (!first->cont) return frag;
+	/* Splits append to the active continuation. Resume at the previous
+	 * endpoint when a section or saved fragment is entered again. */
+	frag = first->last_cont ? first->last_cont : first->cont;
+	while (elf_frag(a->object, frag)->cont)
+		frag = elf_frag(a->object, frag)->cont;
+	first->last_cont = frag;
 	return frag;
 }
 

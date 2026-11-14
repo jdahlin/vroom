@@ -2,17 +2,17 @@
 #include "lowering-driver.h"
 
 /* callee k (a symbol's address) returns twice: setjmp headers do not universally attach returns_twice to their declaration */
-VPRIV bool virbuild_call_returns_twice(ecx *e, const vir_insn *callee)
+VPRIV bool virbuild_call_returns_twice(codegen_context *e, const vir_insn *callee)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	uint32_t s;
 
-	if (callee->op != VIR_OP_SYMADDR || RKIND(callee->a) != RK_SYM)
+	if (callee->op != VIR_OP_SYMADDR || CODEGEN_REFERENCE_KIND(callee->a) != CODEGEN_REFERENCE_SYMBOL)
 		return false;
-	s = canon_sym(c, RIDX(callee->a));
-	return (sym_attrs(c, s)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
-	       EM_IDENT_IS(c->syms[s].name, "setjmp") || EM_IDENT_IS(c->syms[s].name, "_setjmp") ||
-	       EM_IDENT_IS(c->syms[s].name, "sigsetjmp") || EM_IDENT_IS(c->syms[s].name, "__sigsetjmp");
+	s = codegen_symbol_canonical(c, CODEGEN_REFERENCE_INDEX(callee->a));
+	return (codegen_symbol_attributes(c, s)->flags & CC_ATTRIBUTE_FLAG_TAIL_RETURNS_TWICE) ||
+	       CODEGEN_IDENTIFIER_IS(c->syms[s].name, "setjmp") || CODEGEN_IDENTIFIER_IS(c->syms[s].name, "_setjmp") ||
+	       CODEGEN_IDENTIFIER_IS(c->syms[s].name, "sigsetjmp") || CODEGEN_IDENTIFIER_IS(c->syms[s].name, "__sigsetjmp");
 }
 
 /* the edits at position pos, from *ei on */

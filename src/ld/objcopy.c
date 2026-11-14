@@ -22,6 +22,7 @@
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
 #include "ld/ld.h"
+#include "common/archive-reader.h"
 #include "common/hash.h"
 #include "common/scoped-cleanup.h"
 #include "port/file.h"
@@ -43,9 +44,8 @@
 
 #define OBJCOPY_NONE 0xffffffffu
 
-static FILE *objcopy_error_stream;
-static int objcopy_error_count;
-static const char *objcopy_program_name = "vobjcopy";
+/* the run's diagnostics: one run at a time per process (vccd_objcopy_run takes a lock) */
+static struct ld_diagnostics objcopy_diagnostics = { .program = "vobjcopy" };
 
 static void objcopy_error_report(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #include <stdarg.h>
@@ -53,18 +53,15 @@ static void objcopy_error_report(const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	fprintf(objcopy_error_stream, "%s: error: ", objcopy_program_name);
-	vfprintf(objcopy_error_stream, fmt, ap);
-	fputc('\n', objcopy_error_stream);
+	ld_diagnostic_report(&objcopy_diagnostics, "error", fmt, ap);
 	va_end(ap);
-	objcopy_error_count++;
 }
 
 static void *objcopy_zeroed_alloc(size_t n, size_t s)
 {
 	void *p = calloc(n ? n : 1, s ? s : 1);
 	if (!p) {
-		fprintf(stderr, "%s: out of memory\n", objcopy_program_name);
+		fprintf(stderr, "%s: out of memory\n", objcopy_diagnostics.program);
 		abort();
 	}
 	return p;
@@ -583,7 +580,7 @@ static int objcopy_binary_input(int dirfd)
 		       .sh_size = 4 * sizeof(elf_symbol), .sh_link = 1, .sh_info = 1, .sh_addralign = 8, .sh_entsize = sizeof(elf_symbol)};
 	sh[3] = (elf_section_header){.sh_name = (uint32_t)objcopy_string_table_find(&t, ".data"), .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
 		       .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1};
-	return objcopy_error_count ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, 0666);
+	return atomic_load(&objcopy_diagnostics.error_count) ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, 0666);
 }
 
 /* what objcopy_run owns besides plain allocations: the generated contents of
@@ -973,7 +970,7 @@ static int objcopy_run(int dirfd)
 				continue;
 			memcpy(b + lma[k] - min, s->data, s->size);
 		}
-		int rc = objcopy_error_count ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, 0777);
+		int rc = atomic_load(&objcopy_diagnostics.error_count) ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, 0777);
 		if (b)
 			munmap(b, total);
 		return rc;
@@ -1154,7 +1151,7 @@ static int objcopy_run(int dirfd)
 				    .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link, .sh_info = s->info, .sh_addralign = s->alignment,
 				    .sh_entsize = s->entry_size};
 	}
-	int rc = objcopy_error_count ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, rel ? 0666 : 0777);
+	int rc = atomic_load(&objcopy_diagnostics.error_count) ? 1 : objcopy_file_write(dirfd, objcopy_options.output_path, b, total, rel ? 0666 : 0777);
 	munmap(b, total);
 	return rc;
 }
@@ -1167,9 +1164,7 @@ static void objcopy_name_list_append(const char ***v, uint32_t *n, const char *s
 
 int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 {
-	objcopy_error_stream = err ? err : stderr;
-	objcopy_error_count = 0;
-	objcopy_program_name = "vobjcopy";
+	objcopy_diagnostics = (struct ld_diagnostics){ .error_stream = err ? err : stderr, .program = "vobjcopy" };
 	memset(&objcopy_options, 0, sizeof objcopy_options);
 	const char *files[2];
 	int nf = 0;
@@ -1249,7 +1244,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	if (nf < 1)
 		objcopy_error_report("no input file");
 	int rc = 1;
-	if (!objcopy_error_count) {
+	if (!atomic_load(&objcopy_diagnostics.error_count)) {
 		objcopy_options.input_path = files[0];
 		objcopy_options.output_path = nf > 1 ? files[1] : files[0];
 		rc = objcopy_options.binary_input ? objcopy_binary_input(dirfd) : objcopy_run(dirfd);
@@ -1262,7 +1257,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 	free(objcopy_options.add_sections);
 	free(objcopy_options.set_section_flags);
 	free(objcopy_options.rename_sections);
-	return rc || objcopy_error_count;
+	return rc || atomic_load(&objcopy_diagnostics.error_count);
 }
 
 /* ================= nm ================= */
@@ -1353,87 +1348,53 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
 	char magic[8];
 
 	if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 || pread(fd, magic, 8, 0) != 8 ||
-	    (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
+	    varchive_format_detect(magic, 8) == VARCHIVE_FORMAT_NONE) {
 		nm_input_append(v, n, (nm_input){.label = strdup(path), .path = strdup(path)});
 		return;
 	}
-	bool thin = magic[2] == 't';
 	VAUTOUNMAP vfile_mapping m;
 	if (!vfile_map_fd(fd, &m, &st)) {
 		objcopy_error_report("'%s': %s", path, strerror(errno));
 		return;
 	}
-	size_t sz = m.n;
-	const uint8_t *b = m.p;
-	const char *longn = NULL;
-	size_t longsz = 0;
 	const char *slash = strrchr(path, '/');
+	varchive_cursor cursor;
+	varchive_member member;
 
 	VCLOSE(fd);	/* (the mapping outlives the descriptor) */
-	for (size_t o = 8; o + 60 <= sz;) {
-		const char *h = (const char *)b + o;
-		char num[11] = { 0 }, name[4096];
-		size_t msz, nl;
+	varchive_cursor_init(&cursor, m.p, m.n);
+	for (; varchive_member_next(&cursor, &member); varchive_cursor_advance(&cursor, &member)) {
+		char name[4096];
 
-		if (h[58] != '`' || h[59] != '\n') {
+		if (!member.header_valid || (member.has_data && !member.data_fits)) {
 			objcopy_error_report("'%s': truncated or malformed archive", path);
 			break;
 		}
-		memcpy(num, h + 48, 10);
-		msz = strtoull(num, NULL, 10);
-		bool special = h[0] == '/' && (h[1] == ' ' || (h[1] == '/' && h[2] == ' ') || !memcmp(h, "/SYM64/", 7));
-		bool data = !thin || special;	/* thin: only the special members have data */
-		if (data && msz > sz - o - 60) {
-			objcopy_error_report("'%s': truncated or malformed archive", path);
-			break;
-		}
-		if (h[0] == '/' && h[1] == '/' && h[2] == ' ') {
-			longn = h + 60, longsz = msz;
-		} else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7))) {
-			/* symbol table */
+		if (member.kind != VARCHIVE_MEMBER_FILE)
+			continue;
+		/* a long name not in "//" is empty */
+		snprintf(name, sizeof name, "%.*s", member.name ? (int)member.name_length : 0, member.name ? member.name : "");
+		nm_input x = {.label = strdup(name), .is_member = true, .archive = path};
+		if (cursor.thin) {
+			char full[8192];
+
+			if (name[0] == '/' || !slash)
+				snprintf(full, sizeof full, "%s", name);
+			else
+				snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
+			x.path = strdup(full);
 		} else {
-			if (h[0] == '/' && longn) {
-				size_t off = strtoull(h + 1, NULL, 10), e = off;
-
-				while (e < longsz && longn[e] != '\n')
-					e++;
-				nl = e - off;
-				if (off > longsz)
-					nl = 0, off = 0;
-				if (nl && longn[off + nl - 1] == '/')
-					nl--;
-				snprintf(name, sizeof name, "%.*s", (int)nl, longn + off);
-			} else {
-				nl = 0;
-				while (nl < 16 && h[nl] != '/')
-					nl++;
-				snprintf(name, sizeof name, "%.*s", (int)nl, h);
-			}
-			nm_input x = {.label = strdup(name), .is_member = true, .archive = path};
-			if (thin) {
-				char full[8192];
-
-				if (name[0] == '/' || !slash)
-					snprintf(full, sizeof full, "%s", name);
-				else
-					snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
-				x.path = strdup(full);
-			} else {
-				x.member_bytes = objcopy_zeroed_alloc(msz + 8, 1);
-				memcpy(x.member_bytes, h + 60, msz);
-				x.size = msz;
-			}
-			nm_input_append(v, n, x);
+			x.member_bytes = objcopy_zeroed_alloc(member.size + 8, 1);
+			memcpy(x.member_bytes, member.data, member.size);
+			x.size = member.size;
 		}
-		o += 60 + (data ? msz + (msz & 1) : 0);
+		nm_input_append(v, n, x);
 	}
 }
 
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 {
-	objcopy_error_stream = err ? err : stderr;
-	objcopy_error_count = 0;
-	objcopy_program_name = "vnm";
+	objcopy_diagnostics = (struct ld_diagnostics){ .error_stream = err ? err : stderr, .program = "vnm" };
 	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false, dyn = false;
 	bool fname = false;	/* -A/-o: each line starts with the file (archive:member) */
 	const char **files = objcopy_zeroed_alloc((size_t)argc + 1, sizeof *files);
@@ -1476,7 +1437,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	}
 	if (!nf)
 		files[nf++] = "a.out";
-	if (objcopy_error_count) {
+	if (atomic_load(&objcopy_diagnostics.error_count)) {
 		free(files);
 		return 1;
 	}
@@ -1504,7 +1465,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		if ((nf > 1 || in[f].is_member) && !fname)
 			fprintf(out, "\n%s:\n", in[f].label);
 		if (!st) {
-			fprintf(objcopy_error_stream, "%s: %s: no symbols\n", objcopy_program_name, in[f].label);
+			fprintf(objcopy_diagnostics.error_stream, "%s: %s: no symbols\n", objcopy_diagnostics.program, in[f].label);
 			if (!in[f].member_bytes)
 				objcopy_elf_close(&e);
 			continue;
@@ -1621,5 +1582,5 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	}
 	free(in);
 	free(files);
-	return objcopy_error_count ? 1 : 0;
+	return atomic_load(&objcopy_diagnostics.error_count) ? 1 : 0;
 }

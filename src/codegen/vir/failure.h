@@ -116,7 +116,7 @@ typedef enum {
 
 typedef struct { const char *name, *message; } virbuild_failure_info;
 
-/* the table is defined in build-attempt.c; the message of a reason, which is what vfail holds */
+/* the table is defined in build-attempt.c; the message of a reason, which is what vir_failure_reason holds */
 #define VIRBUILD_FAILURE(name) (virbuild_failure_table[VIRBUILD_FAILURE_##name].message)
 
 #endif

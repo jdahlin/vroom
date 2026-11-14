@@ -45,6 +45,10 @@ static int x64_regname(const char *s, size_t n, XOp *o)
 		o->size = !*t ? 8 : !strcmp(t, "d") ? 4 : !strcmp(t, "w") ? 2 : !strcmp(t, "b") ? 1 : 0;
 		return o->size ? 0 : -1;
 	}
+	if (n == 3 && b[0] == 'm' && b[1] == 'm' && b[2] >= '0' && b[2] <= '7') {
+		o->cls = XR_MM, o->reg = b[2] - '0', o->size = 8;
+		return 0;
+	}
 	if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) && as_char_is_digit((unsigned char)b[3])) {
 		int r = atoi(b + 3);
 
@@ -243,7 +247,8 @@ mem:
 				return 0;
 			}
 			o->base = (int8_t)(r.cls == XR_RIP ? 16 : r.reg);
-			if (r.cls != XR_RIP && (r.cls != XR_GPR || r.size != 8))
+			o->addr32 = r.cls == XR_GPR && r.size == 4;
+			if (r.cls != XR_RIP && (r.cls != XR_GPR || (r.size != 8 && r.size != 4)))
 				return as_error_report(a, "invalid base register");
 			p = as_whitespace_skip(q, e);
 		}
@@ -254,8 +259,10 @@ mem:
 
 				if (!q)
 					return -1;
-				if (r.cls != XR_GPR || r.size != 8 || r.reg == 4)
+				if (r.cls != XR_GPR || (r.size != 8 && r.size != 4) || r.reg == 4 ||
+				    (o->base >= 0 && (r.size == 4) != o->addr32))
 					return as_error_report(a, "invalid index register");
+				o->addr32 = r.size == 4;
 				o->index = (int8_t)r.reg;
 				p = as_whitespace_skip(q, e);
 			}
@@ -390,6 +397,8 @@ VPRIV int x64_emit(as_context *a, XForm *f)
 		rex |= 0x40;
 	if (seg)
 		eb(&x, seg);
+	if (rm && rm->kind == XK_MEM && rm->addr32)
+		eb(&x, 0x67);
 	if (f->opsz16 && !f->vex)
 		eb(&x, 0x66);
 	if (a->x64_lock_prefix) {

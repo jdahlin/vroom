@@ -94,7 +94,7 @@ as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c
            arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
-common_SRC = common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
+common_SRC = common/archive-reader.c common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
 port_SRC   = port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_ASM = $(if $(filter x86_64,$(HOST_ARCH)),frontend/lex/x86-simd.S)
@@ -252,8 +252,9 @@ vcc-tsan:
 .PHONY: vcc-asan vcc-tsan
 
 # vcc's run-time support library for x86_64-w64-mingw32 (runtime/, libvccrt.a;
-# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters
-vccrt:
+# PLAN-win64.md WIN7R): CC and AR are runtime/build.sh's parameters; without an
+# AR from the command line or the environment it archives with our var (and vccd)
+vccrt: $(if $(filter environment command line,$(origin AR)),,$(OUT)/var $(OUT)/vccd)
 	sh runtime/build.sh $(OUT)/vccrt
 
 .PHONY: vccrt
@@ -267,10 +268,13 @@ SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
 SELF_FLAGS += -isystem $(HOST_RESOURCE) -isystem /usr/include/$(SELF_TARGET) -isystem /usr/include
 endif
+# Optimize the compiler executable during the native x86 bootstrap. An
+# explicit VCC_VIR setting still selects the backend for a comparison build.
+SELF_ENV = $(if $(and $(filter Linux-x86_64,$(HOST_OS)-$(HOST_ARCH)),$(filter undefined,$(origin VCC_VIR))),VCC_VIR=bl)
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_CC="$(SELF_ENV) $(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp

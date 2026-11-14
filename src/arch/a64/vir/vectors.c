@@ -10,7 +10,7 @@
  * scratch of the two compares that need one */
 VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in, uint8_t res)
 {
-	ecx *e = L->context;
+	codegen_context *e = L->context;
 	vir_function *f = L->function;
 	int vd = res == VIR_REGISTER_NONE ? 31 : a64_vir_vector_register(res);
 	/* two 64-bit lanes: the size bit of every lane-wise instruction used here */

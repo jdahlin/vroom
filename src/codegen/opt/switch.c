@@ -5,9 +5,9 @@
  * A jump table needs at least 4 cases, no ranges, a target that has tables, and a span under
  * 4 * cases + 8 and under 65536 entries; 8 or more cases otherwise get a tree.  Comparisons are in
  * 128 bits so that extreme 64-bit case values cannot overflow.  No allocation and no AST walk.
- * Called by the shared walker (walk/stmt.c) and by arm64's and wasm's statement lowering.
+ * Called by the shared walker (walk/statement.c) and by arm64's and wasm's statement lowering.
  */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV int em_switch_strategy(uint32_t n, i128 lo, i128 hi, bool ranges, bool tables)
 {

@@ -2,23 +2,23 @@
  * function-output.c: hand a finished function's text to the unit, write an ELF symbol header
  * (section, visibility, alignment, .type, the label), and the constructor/destructor table entries.
  *
- * out_chunk appends one finished chunk, keyed by the function's order key, under E->cmu: chunks
+ * codegen_chunk_add appends one finished chunk, keyed by the function's order key, under E->cmu: chunks
  * come from any worker thread and are stitched in key order at the end, which is what makes the
- * output independent of thread timing.  sym_header writes what clang writes before a function or
+ * output independent of thread timing.  codegen_symbol_header_append writes what clang writes before a function or
  * object (an explicit section, -ffunction-sections/-fdata-sections, hidden/protected, .p2align,
  * -fpatchable-function-entry nops on x86), as text or, in the direct object path, as an item
  * (obj.c).  Called by the backends' function finishers and by data.c.
  */
-#include "emitimpl.h"
+#include "codegen-internal.h"
 
-VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
+VPRIV void codegen_chunk_add(codegen_context *e, uint64_t key, size_t start)
 {
-	emitter *E = e->E;
+	codegen_unit *E = e->unit;
 
-	pthread_mutex_lock(&E->cmu);
-	E->chunks[E->nchunk++] = (chunk){ key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
-					  (uint32_t)((e->nrlog - e->rlog0) / 2) };
-	pthread_mutex_unlock(&E->cmu);
+	pthread_mutex_lock(&E->chunk_mutex);
+	E->chunks[E->chunk_count++] = (codegen_chunk){ key, e->out.p + start, e->out.n - start, e->round_log + e->round_log_item_start,
+					  (uint32_t)((e->round_log_count - e->round_log_item_start) / 2) };
+	pthread_mutex_unlock(&E->chunk_mutex);
 }
 
 /*
@@ -27,16 +27,16 @@ VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
  * .tls$ ("dw"); a named section "xr", "dr" or "dw"; -ffunction-sections / -fdata-sections put each
  * in .text$NAME (.data$, .rdata$, .bss$) as a one_only COMDAT keyed by it; no .type or .size.
  */
-static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec)
+static void sym_header_coff(codegen_context *e, tbuf *b, uint32_t s, bool fn, const char *defsec)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
-	const attrs *a = sym_attrs(c, s);
+	const attrs *a = codegen_symbol_attributes(c, s);
 	bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
 
 	if (fn) {
 		vtext_string_append(b, "\t.def\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, global ? ";\n\t.scl\t2;\n\t.type\t32;\n\t.endef\n" : ";\n\t.scl\t3;\n\t.type\t32;\n\t.endef\n");
 	}
 	if (a->section) {
@@ -58,9 +58,9 @@ static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *de
 		if (k < sizeof m / sizeof *m) {
 			vtext_string_append(b, "\t.section\t");
 			vtext_string_append(b, m[k].base);
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_format_append(b, ",\"%s\",one_only,", m[k].flags);
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_char_append(b, '\n');
 		} else {
 			vtext_string_append(b, defsec);
@@ -70,15 +70,15 @@ static void sym_header_coff(ecx *e, tbuf *b, uint32_t s, bool fn, const char *de
 	}
 }
 
-VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
+VPRIV void codegen_symbol_header_append(codegen_context *e, tbuf *b, uint32_t s, bool fn, const char *defsec, uint32_t align)
 {
-	cc *c = e->c;
+	cc *c = e->compile_context;
 	const sym *y = &c->syms[s];
-	const attrs *a = sym_attrs(c, s);
+	const attrs *a = codegen_symbol_attributes(c, s);
 	bool global = y->sc != AST_STORAGE_STATIC && y->depth == 0 && y->name;
-	size_t h = it_open(e, IT_TEXT);
+	size_t h = codegen_item_open(e, CODEGEN_ITEM_TEXT);
 
-	if (WIN64(c)) {
+	if (CODEGEN_IS_WIN64(c)) {
 		sym_header_coff(e, b, s, fn, defsec);
 	} else if (a->section) {
 		const char *sn = c->strs[a->section - 1].s;
@@ -88,7 +88,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		vtext_string_append(b, sn);
 		vtext_string_append(b, fn ? "\",\"ax\",@progbits\n" : bss ? "\",\"aw\",@nobits\n" :
 			 (AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_CONST) && !strncmp(sn, ".rodata", 7) ? "\",\"a\",@progbits\n" : "\",\"aw\",@progbits\n");
-	} else if (!DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
+	} else if (!CODEGEN_IS_DARWIN(c) && (c->o->sections & (fn ? 1 : 2))) {
 		/* -ffunction-sections / -fdata-sections: .text.NAME etc., as clang */
 		static const struct { const char *def, *base, *rest; } m[] = {
 			{ "\t.text\n", ".text.", ",\"ax\",@progbits\n" },
@@ -115,7 +115,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		if (base) {
 			vtext_string_append(b, "\t.section\t");
 			vtext_string_append(b, base);
-			sym_name(c, b, s);
+			codegen_symbol_name_append(c, b, s);
 			vtext_string_append(b, rest);
 		} else {
 			vtext_string_append(b, defsec);
@@ -123,48 +123,48 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 	} else {
 		vtext_string_append(b, defsec);
 	}
-	if (h != SIZE_MAX && !(fn && X86(c) && c->o->pfe_m) && !WIN64(c)) {	/* (COFF: text for now, WIN5) */
-		symhdr *sh;
+	if (h != SIZE_MAX && !(fn && CODEGEN_IS_X64(c) && c->o->pfe_m) && !CODEGEN_IS_WIN64(c)) {	/* (COFF: text for codegen_clock_seconds, WIN5) */
+		codegen_symbol_header *sh;
 
-		it_close(e, h);
-		h = it_open(e, IT_SYMHDR);
-		sh = it_room(e, sizeof *sh);
-		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
+		codegen_item_close(e, h);
+		h = codegen_item_open(e, CODEGEN_ITEM_SYMBOL_HEADER);
+		sh = codegen_item_room_need(e, sizeof *sh);
+		*sh = (codegen_symbol_header){ .symbol = s, .alignment_log2 = (uint8_t)__builtin_ctz(align ? align : 1), .is_function = fn };
 		if (global) {
 			sh->bind = (y->flags & AST_SYMBOL_FLAG_WEAK) ? STB_WEAK : STB_GLOBAL;
 			if (a->visibility) {
 				const char *v = c->strs[a->visibility - 1].s;
 
-				sh->vis = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
+				sh->visibility = !strcmp(v, "hidden") ? STV_HIDDEN : !strcmp(v, "protected") ? STV_PROTECTED : 0;
 			}
 		}
-		it_close(e, h);
+		codegen_item_close(e, h);
 		return;
 	}
 	if (global) {
 		vtext_string_append(b, (y->flags & AST_SYMBOL_FLAG_WEAK) ? "\t.weak\t" : "\t.globl\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_char_append(b, '\n');
-		if (a->visibility && !WIN64(c)) {	/* (COFF has no symbol visibility) */
+		if (a->visibility && !CODEGEN_IS_WIN64(c)) {	/* (COFF has no symbol visibility) */
 			const char *v = c->strs[a->visibility - 1].s;
 
 			if (!strcmp(v, "hidden") || !strcmp(v, "protected")) {
 				vtext_string_append(b, !strcmp(v, "hidden") ? "\t.hidden\t" : "\t.protected\t");
-				sym_name(c, b, s);
+				codegen_symbol_name_append(c, b, s);
 				vtext_char_append(b, '\n');
 			}
 		}
 	}
 	vtext_string_append(b, "\t.p2align\t");
 	vtext_unsigned_append(b, (uint64_t)__builtin_ctz(align ? align : 1));
-	if (WIN64(c)) {
+	if (CODEGEN_IS_WIN64(c)) {
 		vtext_char_append(b, '\n');	/* (COFF: the .def record, no .type) */
 	} else {
 		vtext_string_append(b, fn ? "\n\t.type\t" : "\n\t.type\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_string_append(b, fn ? ",@function\n" : ",@object\n");
 	}
-	if (fn && X86(c) && c->o->pfe_m) {
+	if (fn && CODEGEN_IS_X64(c) && c->o->pfe_m) {
 		/* -fpatchable-function-entry=N,M: M nops before the entry, recorded for ftrace */
 		vtext_string_append(b, ".Lpfe");
 		vtext_unsigned_append(b, s);
@@ -172,23 +172,23 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 		for (int k = 0; k < c->o->pfe_m; k++)
 			vtext_string_append(b, "\tnop\n");
 	}
-	sym_name(c, b, s);
+	codegen_symbol_name_append(c, b, s);
 	vtext_string_append(b, ":\n");
-	it_close(e, h);
+	codegen_item_close(e, h);
 }
 
 /* a constructor's or destructor's pointer: .init_array[.prio] / .fini_array[.prio], as clang */
-VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
+VPRIV void codegen_constructor_entry_append(cc *c, tbuf *b, uint32_t s, bool fini)
 {
-	const attrs *a = sym_attrs(c, s);
+	const attrs *a = codegen_symbol_attributes(c, s);
 
-	if (WIN64(c)) {
+	if (CODEGEN_IS_WIN64(c)) {
 		/* MinGW: .ctors/.dtors, a priority as .ctors.NNNNN (65535 - priority), as clang */
 		vtext_string_append(b, fini ? "\t.section\t.dtors" : "\t.section\t.ctors");
 		if (a && a->prio)
 			vtext_format_append(b, ".%05u", 65535 - a->prio);
 		vtext_string_append(b, ",\"dw\"\n\t.p2align\t3\n\t.quad\t");
-		sym_name(c, b, s);
+		codegen_symbol_name_append(c, b, s);
 		vtext_char_append(b, '\n');
 		return;
 	}
@@ -199,7 +199,7 @@ VPRIV void ctor_entry(cc *c, tbuf *b, uint32_t s, bool fini)
 		vtext_unsigned_append(b, a->prio);
 	}
 	vtext_string_append(b, fini ? ",\"aw\",@fini_array\n\t.p2align\t3\n" : ",\"aw\",@init_array\n\t.p2align\t3\n");
-	vtext_string_append(b, X86(c) ? "\t.quad\t" : "\t.xword\t");
-	sym_name(c, b, s);
+	vtext_string_append(b, CODEGEN_IS_X64(c) ? "\t.quad\t" : "\t.xword\t");
+	codegen_symbol_name_append(c, b, s);
 	vtext_char_append(b, '\n');
 }

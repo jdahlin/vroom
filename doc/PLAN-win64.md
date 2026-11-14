@@ -562,7 +562,8 @@ Merged with main after the linker split (#230) and the renames (#224,
 `platform/win/pe-linker.c` to `LD_SRC` and `VCCD_LD_OBJ`; `pe-*.c` and
 `ld/link-entry.c` needed no change.  The file-by-file build's duplicate
 `virbuild_failure_table` (present on main without WIN7) is fixed: the
-declaration in `codegen/emitimpl.h` is `extern` outside `VCC_UNITY`.
+declaration in `codegen/emitimpl.h` (`codegen-internal.h` since main's
+rename) is `extern` outside `VCC_UNITY`.
 Measured after the merge: unity and file-by-file builds clean;
 `vlink-pe.py --run` 57/57; `vcc-win64.py --vlink-ref -j 4` runs-ok and
 image-identical 2012/2012 (134 s cold); `vlink-pe-bad.py` (ASan) 530/530;
@@ -574,7 +575,7 @@ image-identical 2012/2012 (134 s cold); `vlink-pe-bad.py` (ASan) 530/530;
 `src/runtime/` (internal header `runtime-internal.h`, 12 C files and
 `stack-probe.S`, about 1900 lines) builds `libvccrt.a` with
 `src/runtime/build.sh` (`make -C src vccrt`; CC and AR are parameters,
-today clang for the target and llvm-ar).  Written from the helpers'
+today clang for the target and vcc's `var`).  Written from the helpers'
 specifications, no compiler-rt or libgcc source; compiler-rt is only the
 oracle in `bench/vccrt-test.py`.
 
@@ -635,13 +636,39 @@ Measured:
   linked with libvccrt.a instead of compiler-rt, by lld and by vlink; no
   link map names compiler-rt, libgcc or libunwind (80 s).
 
-Not done: `var` cannot archive the library yet (it writes a symbol table
-only for ELF members; lld and vlink need one for COFF), so AR defaults to
-llvm-ar.  Building with vcc for the target needs WIN1-WIN5 (the target,
+Not done: building with vcc for the target needs WIN1-WIN5 (the target,
 the Windows ABI, COFF objects and `.seh_*` in `vas` for `stack-probe.S`);
-then CC="vcc --target=x86_64-w64-mingw32" and AR=var are the only change.
+then CC="vcc --target=x86_64-w64-mingw32" is the only change.
 The driver does not link it yet (WIN8: `-nodefaultlibs` + libvccrt.a).
 Rounding modes other than to nearest and exception flags are not
 supported (C cannot read MXCSR without an intrinsic).
+
+- 2026-11-14: `var` archives COFF, so the library no longer needs llvm-ar:
+  `build.sh`'s AR defaults to `var` (VCC_BIN, default the build directory,
+  run against a private vccd), `AR=` still overrides.  `src/utils/ar.c`
+  writes llvm-ar's COFF format when the first member is a COFF object or
+  import record: GNU's first linker member with each name once, the second
+  linker member (member offsets, 16-bit member indices, names sorted),
+  long names as `NAME\0`; the symbols as llvm's object library reads
+  them (external but undefined, weak externals of the alias search kind,
+  common, absolute; bigobj; short import records `__imp_X` and `X`, data
+  imports `__imp_X` only; identify_magic's machine list; the 32-bit string
+  table position and recovery from a broken symbol or string table).
+  Also `U` (real dates, uids, gids, modes), one `//` entry per long name,
+  a regular archive as a plain member, and on Linux GNU (not BSD) for an
+  archive whose first member is not an object, all as llvm-ar.
+  ARM64EC/ARM64X members and archives mixing ARM64 with other COFF
+  machines (llvm-ar adds `/<ECSYMBOLS>/`) are refused.  Verified:
+  `bench/var-cmp.py coff` (new mode, no kernel tree) 230/230 cases
+  byte-identical to llvm-ar 23 (115 command sequences, again with
+  SYM64_THRESHOLD=0: rcs/rc/qc/crsD/D/U/S/T, r/q/d/s/m/t/p/x, libvccrt's 13
+  objects, 356 COFF and 51 ELF objects from the suites, 60 generated files,
+  llvm-dlltool's import library), 1500/1500 mutants (same bytes or both
+  rejected), ASan/UBSan clean on all cases and 1000 mutants; the old ar.c
+  against the new on the 38 ELF-only cases: the 27 Kbuild-style ones
+  unchanged, the 11 others the intended fixes; `make vccrt` with var
+  gives the byte-identical libvccrt.a llvm-ar gives for the same objects;
+  `vcc-win64.py --vccrt-ref -j 4` 2014/2014 (lld and vlink), 0 foreign;
+  `vccrt-test.py diff` 70/70.
 
 ### WIN4-WIN10: planned

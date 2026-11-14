@@ -182,8 +182,11 @@ Wave 2's tracks:
   later in the wave.  The link context is done in four PRs (#183 design and
   step 1, #220 output side, #222 input side, then the context as a parameter):
   no per-link state is left at file scope, `ld_main` creates one context per
-  link.  Next: the field renames of `rename-ld.tsv`, the part files compiling
-  alone, then WORK-linker steps 3 and 4 (`doc/quality/WORK-linker.md`).
+  link.  Then the field renames of `rename-ld.tsv` (#225) and the part files
+  compiling alone (#230); WORK-linker step 3, the shared layer, is under way
+  (#231: file mappings through `port/file.h`; one archive reader in
+  `common/archive-reader.c` for vlink, vnm and ar), then step 4, one linker
+  core (`doc/quality/WORK-linker.md`).
 - Track I (diagnostics as their own module; one option table per tool) is held
   by owner, wave 2, and not started.
 - The field-use mode (track D) stays a plain rename helper; its output is not

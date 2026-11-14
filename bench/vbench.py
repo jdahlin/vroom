@@ -24,7 +24,7 @@ Modes (default: all; one thread each):
   pphc  corpus, tokens only, header cache on, cold (record + replay)
   fe    corpus, -fsyntax-only (pp + parse + sema), warm, no header/decl cache
   cc    corpus, -c, warm, no caches; also reports the emit and obj phases
-  emit  as cc, but the metric is emit_tu alone (codegen + encoding)
+  emit  as cc, but the metric is codegen_unit_emit alone (codegen + encoding)
   real  corpus, -c, all caches on, cold (closest to vccd)
   as    vasm --bench over the 30 preprocessed kernel .S files
   ld    vlink --threads=1: the final vmlinux link of work/build-o0

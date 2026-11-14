@@ -71,7 +71,7 @@ relative to it); `TODO.md` stays at the top.
     buffer `vbuffer` (`buffer.h`) and the emitter's text buffer
     (`text-buffer.h`), growable arrays (`vector.h`), `string-index.h` and the
     string hash (`hash.h`), the identifier table (`intern.c`), `bytes.h`,
-    `leb128.h`, `format.h`, digests (`digest-xxh3.c`, `digest-blake3.c`,
+    `leb128.h`, `format.h`, the ar archive reader (`archive-reader.c`), digests (`digest-xxh3.c`, `digest-blake3.c`,
     `digest-sha256.c`), binary128 and x87 soft float (`softfloat.h`),
     `bigint.h`, scoped resources through `cleanup` (`scoped-cleanup.h`:
     VAUTOFREE, VAUTOCLOSE, VLOCK; not across a longjmp), attributes
@@ -102,7 +102,7 @@ relative to it); `TODO.md` stays at the top.
     - `c/`: parser + sema (GNU C11, clang's layout and constant rules).  C++
       and Objective-C go next to it.
   - `codegen/`: code generator (straight from the AST): the shared part, state
-    and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
+    and types (`codegen-internal.h`), the work queue and threads (`unit-emit.c`), data
     objects, the prepass; the arm64 part is `arch/a64/codegen/`.
   - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
     conditionals, expressions; internal header `as-internal.h`; one module with
@@ -158,7 +158,7 @@ relative to it); `TODO.md` stays at the top.
     application and range-extension thunks (`ld/*.c`, parts of the
     linker's module);
     `codegen/`: instruction records and register names (`ins.h`, `a64impl.h`,
-    included by `codegen/emitimpl.h`), expressions, statements, calls (AAPCS64
+    included by `codegen/codegen-internal.h`), expressions, statements, calls (AAPCS64
     and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
     printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
     in the `codegen` unity TU (`codegen_SRC`), so VPRIV stays static.
@@ -212,7 +212,7 @@ relative to it); `TODO.md` stays at the top.
     every format, internal names `__vccrt_*`, no libc or libm.  Rules that
     keep it buildable by vcc are in `runtime-internal.h`.
   - `frontend/pp/`, `frontend/c/` and `codegen/` (with `arch/<cpu>/codegen/`) are directories of
-    files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `emitimpl.h`) with the types, macros
+    files by topic, one internal header each (`pp-internal.h`, `cc-internal.h`, `codegen-internal.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
     (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
@@ -258,6 +258,7 @@ bench/vcc-sema.py run -j 6          # vpp -fsyntax-only on every C TU
 bench/vcc-sema.py batch -j 6        # the same in one vpp --batch process: ~3 s instead of ~35 s
 bench/vcc-sema.py layout -j 6       # layouts/constants/decl types checked by clang (~70 s)
 bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built tree
+bench/var-cmp.py coff -j 4 [-n N]   # ... no kernel tree: COFF (MinGW) and ELF members, generated, import records, N mutants (~15 s)
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
 bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
@@ -267,6 +268,7 @@ bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame pe
 bench/vcc-dwarf.py -j 6             # -g line tables: dwarfdump --verify, .text unchanged, rows vs clang (~2 min)
 bench/vlink-bad.py                  # corrupt objects/archives: vlink (ASan) fails cleanly (<1 s)
 bench/vlink-opts.py                 # vlink options vs ld.lld: errors and loaded image (<1 s)
+bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
 bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, byte-identical (~15 s; --run: under Wine)
 bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)
 build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)

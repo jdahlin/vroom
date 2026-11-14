@@ -20,7 +20,7 @@
  *       --warm N   N untimed passes over all jobs first (warm token cache,
  *                  header cache and declaration cache; outputs discarded)
  *       --stats F  one line per job to F: status, ms, instructions, cycles,
- *                  and instructions in cc_translation_unit_run / emit_tu / object write
+ *                  and instructions in cc_translation_unit_run / codegen_unit_emit / object write
  *                  (tab separated, last column the main file); vbench.py
  *   VPP_WARM=N   N untimed passes first (fills the token cache; profiling)
  */

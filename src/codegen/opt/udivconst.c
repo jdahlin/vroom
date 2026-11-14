@@ -2,7 +2,7 @@
  * round-up/add-correction algorithm described in Hacker's Delight ch.10 and
  * libdivide's unsigned32 generator (https://github.com/ridiculousfish/libdivide).
  * No division by a runtime value or machine-register assumptions live here. */
-#include "../emitimpl.h"
+#include "../codegen-internal.h"
 
 VPRIV bool em_udivconst32(uint32_t d, bool remainder, em_udivconst_recipe *r)
 {
@@ -55,13 +55,13 @@ VPRIV bool em_udivconst64(uint64_t d, bool remainder, em_udivconst_recipe *r)
 
 VPRIV bool em_udivconst(cc *c, ast_qualified_type ty, int op, i128 rhs, em_udivconst_recipe *r)
 {
-	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !is_integer(c, ty) ||
-	    is_signed(c, ty) || em_bitint(c, ty))
+	if ((op != LEX_TOKEN_SLASH && op != LEX_TOKEN_PERCENT) || !codegen_type_is_integer(c, ty) ||
+	    codegen_type_is_signed(c, ty) || codegen_type_is_bitint(c, ty))
 		return false;
-	unsigned size = (unsigned)tsize(c, ty);
+	unsigned size = (unsigned)codegen_type_size(c, ty);
 	if (size == 4)
-		return em_udivconst32((uint32_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
+		return em_udivconst32((uint32_t)codegen_integer_truncate(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	if (size == 8)
-		return em_udivconst64((uint64_t)em_trunc_to(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
+		return em_udivconst64((uint64_t)codegen_integer_truncate(c, rhs, ty), op == LEX_TOKEN_PERCENT, r);
 	return false;
 }

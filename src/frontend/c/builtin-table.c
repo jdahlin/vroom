@@ -62,6 +62,8 @@ static const cc_builtin cc_builtin_table[] = {
 	{ "__builtin_popcount", CC_BUILTIN_POPCOUNT, 1, "iu" }, { "__builtin_popcountl", CC_BUILTIN_POPCOUNTL, 1, "iL" },
 	{ "__builtin_popcountll", CC_BUILTIN_POPCOUNTLL, 1, "iW" },
 	{ "__builtin_clzg", CC_BUILTIN_CLZG, 1, "i." }, { "__builtin_ctzg", CC_BUILTIN_CTZG, 1, "i." },
+	{ "__builtin_stdc_count_ones", CC_BUILTIN_STDC_COUNT_ONES, 1, "u." },
+	{ "__builtin_stdc_trailing_zeros", CC_BUILTIN_STDC_TRAILING_ZEROS, 1, "u." },
 	{ "__builtin_popcountg", CC_BUILTIN_POPCOUNTG, 1, "i." },
 	{ "__builtin_parity", CC_BUILTIN_PARITY, 1, "iu" }, { "__builtin_parityl", CC_BUILTIN_PARITYL, 1, "iL" },
 	{ "__builtin_parityll", CC_BUILTIN_PARITYLL, 1, "iW" },
