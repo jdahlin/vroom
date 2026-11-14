@@ -165,6 +165,69 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, ast_qualified_type 
 		cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, AST_NODE_EXPRESSION, loc, zero, 0, 0));
 		return;
 	}
+	if (nargs && AST_TYPE_KIND(a, mt) == AST_TYPE_ARRAY && AST_TYPE(a, mt)->n && !cc_type_is_record(a, AST_TYPE(a, mt)->base) &&
+	    AST_TYPE_KIND(a, AST_TYPE(a, mt)->base) != AST_TYPE_ARRAY && cxx_gen_type_ok(c, AST_TYPE(a, mt)->base)) {
+		/* an array of scalars from its elements (int a[3] = {1, 2, 3}), or a char array from a string literal
+		   (char s[4] = "abc"): zeroed, then the elements (the literal's bytes, at most the array's) */
+		ast_qualified_type et = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, mt)->base);
+		uint64_t len = AST_TYPE(a, mt)->n, esz = AST_TYPE(a, et)->size;
+		uint32_t zargs[3], saved = c->enode, zero, base = target;
+		bool str = nargs == 1 && args[0] && AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) == AST_TYPE_ARRAY &&
+			   AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, AST_NODE_AT(a, args[0])->ty)->base))->size == esz;
+
+		if (mt != AST_QUALIFIED_TYPE_UNQUALIFIED(mt) || AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(a, mt)->base)) {
+			ast_qualified_type pt = cc_type_pointer(a, cc_type_array(a, et, len, 0));
+			uint32_t addr = cc_address_of_build(a, target, loc);
+
+			base = cc_dereference_build(a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);	/* (a const member: initialized all the same) */
+		}
+		if (nargs > len || (!str && nargs == 1 && !args[0])) {
+			cxx_gen_fail(c);
+			return;
+		}
+		zargs[0] = cc_conversion_decay(a, base);
+		zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc);
+		zargs[2] = cc_node_integer_new(a, (i128)(len * esz), cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+		c->enode = 0;
+		cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+		zero = c->enode;
+		c->enode = saved;
+		if (!zero) {
+			cxx_gen_fail(c);
+			return;
+		}
+		cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, AST_NODE_EXPRESSION, loc, zero, 0, 0));
+		if (str) {
+			uint64_t n = AST_TYPE(a, AST_NODE_AT(a, args[0])->ty)->n;
+			uint32_t margs[3], cp;
+
+			margs[0] = cc_conversion_decay(a, base);
+			margs[1] = cc_conversion_decay(a, args[0]);
+			margs[2] = cc_node_integer_new(a, (i128)((n < len ? n : len) * esz), cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+			c->enode = 0;
+			cxx_gen_builtin(c, "__builtin_memcpy", 16, margs, 3, loc);
+			cp = c->enode;
+			c->enode = saved;
+			if (!cp) {
+				cxx_gen_fail(c);
+				return;
+			}
+			cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cp, 0, 0));
+			return;
+		}
+		for (uint32_t j = 0; j < nargs; j++) {
+			uint32_t el, v;
+
+			if (!args[j] || cc_type_is_record(a, AST_NODE_AT(a, args[j])->ty) || !(v = cxx_gen_bind(c, args[j], et, loc))) {
+				cxx_gen_fail(c);
+				return;
+			}
+			el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, base),
+							cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+			cc_id_list_append(a, (cc_id_list *)c->gen_pre, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, el, v, loc), 0, 0));
+		}
+		return;
+	}
 	if (nargs > 1 || (nargs == 1 && !args[0]) || AST_TYPE_KIND(a, mt) == AST_TYPE_ARRAY || !cxx_gen_type_ok(c, mt)) {
 		cxx_gen_fail(c);
 		return;

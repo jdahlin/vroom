@@ -214,6 +214,69 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint
 }
 
 /*
+ * f() of a constexpr function with no parameter defined in its class (char_traits<char>::eof() as a case
+ * label): its value, when its body is return expr; with expr a constant.  Its tokens are parsed again, as
+ * cxx_ftemplate_const_call does a template's.  False: not known.
+ */
+VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
+{
+	const cxx_late *l = f ? f->late : NULL;
+	uint32_t begin, end;
+	cxx_scope *bscope;
+	cxx_outer o;
+	jmp_buf jb;
+	volatile bool known = false;
+	volatile int64_t v = 0;
+	uint32_t pos, depth = 0;
+
+	if (!f || !f->fn_constexpr || c->tentative || c->body_depth >= 64 || f->ty == CXX_TY_UNKNOWN ||
+	    AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || AST_TYPE(c->ast, f->ty)->n)
+		return false;
+	if (f->cx_state == 1)
+		return *out = f->cx_value, true;	/* (a failure is not kept: tried too early, a later use may succeed) */
+	if (l)
+		begin = l->begin, end = l->end, bscope = l->scope;
+	else if (f->body_end)
+		begin = f->body_begin, end = f->body_end, bscope = f->body_scope;	/* (the class's late list is gone by now) */
+	else
+		return false;
+	for (pos = begin; pos < end; pos++) {	/* (the body: the first { outside parentheses) */
+		int k = c->tok[pos].kind;
+
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && depth)
+			depth--;
+		else if (!depth && k == LEX_TOKEN_LEFT_BRACE)
+			break;
+	}
+	if (pos + 1 >= end || c->tok[pos + 1].kw != CXX_KW_return)
+		return false;
+	uint8_t gen = c->gen, gen_failed = c->gen_failed;
+	uint32_t enode = c->enode;
+
+	cxx_outer_save(c, &o);
+	c->body_depth++, c->unevaluated++;
+	c->gen = 0;	/* (typed only: nothing of it is built into the function around the call) */
+	c->fail = &jb;
+	c->pos = pos + 2;
+	c->scope = cxx_scope_new(c, CXX_SCOPE_BLOCK, bscope, NULL);
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_expression_parse(c);
+		if (c->econst && cxx_is(c, LEX_TOKEN_SEMICOLON) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE && c->pos + 2 == end)
+			known = true, v = c->evalue;
+	}
+	c->body_depth--;
+	cxx_outer_restore(c, &o);
+	c->gen = gen, c->gen_failed = gen_failed, c->enode = enode;
+	if (known)
+		f->cx_state = 1, f->cx_value = v;
+	*out = v;
+	return known;
+}
+
+/*
  * f<args>() of a constexpr function template, every template argument given and no function parameter:
  * its value, when its body is declarations of aliases (using X = ...; typedef ...; static_assert) and
  * then return expr; with expr a constant.  The template's own tokens are parsed again with the arguments

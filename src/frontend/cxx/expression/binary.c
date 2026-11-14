@@ -383,5 +383,7 @@ VPRIV void cxx_expression_parse(cxx *c)
 
 VPRIV void cxx_constant_expression_parse(cxx *c)
 {
+	c->want_constant++;	/* (a constexpr function's call is folded here: case char_traits<char>::eof():) */
 	cxx_conditional_expression_parse(c);
+	c->want_constant--;
 }

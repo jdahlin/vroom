@@ -126,8 +126,23 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
+					ast_qualified_type cty = c->etype;
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
 						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+					if (c->want_constant && cpick && !an && !obj_node && !c->econst && !c->template_depth && cty != CXX_TY_UNKNOWN && c->etype == cty &&
+					    ((AST_TYPE_KIND(c->ast, cty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cty) <= AST_TYPE_UNSIGNED_LONG_LONG) ||
+					     AST_TYPE_KIND(c->ast, cty) == AST_TYPE_ENUM)) {
+						/* f() of a constexpr function: a constant too (case char_traits<char>::eof():), the call kept */
+						int64_t cv;
+						uint32_t keep = c->enode;
+
+						if (cxx_const_call(c, cpick, &cv)) {
+							c->econst = 1, c->evalue = cty == cc_type_basic(AST_TYPE_BOOL) ? cv != 0 : cv, c->enode = keep;
+							if (!keep && c->gen)	/* (no call built: its value, a constant) */
+								cxx_gen_integer(c, c->evalue, AST_QUALIFIED_TYPE_UNQUALIFIED(cty), cloc);
+						}
+					}
 					else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
 						cxx_gen_indirect_call(c, callee_node, anodes, an, cloc);	/* through a pointer to a function */
 					/* f(x) with no f that fits: the functions named f in the namespaces of the

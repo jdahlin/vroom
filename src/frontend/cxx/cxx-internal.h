@@ -161,6 +161,11 @@ typedef struct cxx_entity {
 	uint8_t fn_internal;		/* a function declared static at namespace scope: internal linkage */
 	uint8_t fn_inline;		/* a function defined in its class or declared inline: emitted weak */
 	uint8_t is_enumerator;		/* an enumerator: a prvalue where it is named */
+	uint8_t fn_constexpr;		/* a function declared constexpr */
+	uint8_t cx_state;		/* ... its value without arguments: 0 not tried, 1 known (cx_value), 2 not a constant */
+	int64_t cx_value;
+	uint32_t body_begin, body_end;	/* a member function defined in its class: its tokens (cxx_late_add), kept */
+	cxx_scope *body_scope;		/* an enumerator: a prvalue where it is named */
 	uint8_t has_vtt;		/* a constructor or destructor of a class with virtual bases: C2/D2 take a VTT, C1/D1 apart */
 	uint8_t c_linkage, global_ns, mangled;	/* a function: declared extern "C"; in the global namespace; its symbol has its mangled name */
 	uint8_t fn_explicit;		/* a constructor declared explicit (2: explicit(expr), not evaluated) */
@@ -475,6 +480,7 @@ typedef struct cxx {
 	uint32_t gen_lib_name[64], gen_lib_sym[64], ngen_lib;	/* the library functions the builtins call, once declared */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t gen_vtt;		/* ... a base-object constructor or destructor of a class with virtual bases: its VTT parameter */
+	uint32_t want_constant;		/* parsing a constant-expression (cxx_constant_expression_parse) */
 	uint8_t gen_wrapper;		/* cxx_gen_function_end: a C1/D1 built whole (no members, bases or vptrs added) */
 	uint8_t gen_abi_complete;	/* cxx_gen_abi_type: the complete-object function's type (no VTT parameter) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
@@ -763,6 +769,7 @@ VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint3
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
 					    uint32_t nparams, uint8_t is_const, bool partial);
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);
+VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out);
 VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);

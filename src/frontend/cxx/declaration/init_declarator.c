@@ -331,7 +331,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			    cxx_word_scan(c, ds_from, c->pos, "__exclude_from_explicit_instantiation__"))
 				e->no_explicit_inst = 1;	/* (_LIBCPP_HIDE_FROM_ABI: always this TU's own) */
 			if (e && f && kind == CXX_ENTITY_VALUE && (flags & (DS_INLINE | DS_CONSTEXPR)))
-				e->fn_inline = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
+				e->fn_inline = 1;
+			if (e && f && kind == CXX_ENTITY_VALUE && (flags & DS_CONSTEXPR))
+				e->fn_constexpr = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
 			if (e && f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !is_friend && !(flags & DS_STATIC))
 				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);
 			if (e && f && kind == CXX_ENTITY_VALUE && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))

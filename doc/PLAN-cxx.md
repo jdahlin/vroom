@@ -2151,3 +2151,14 @@ summerat per TU.
 - En aggregats array-medlem från sin egen klammerlista (`std::array<char, 4> t = {{'t', 'r', 'u', 'e'}}` i
   lexerns `scan_literal`, `B b = {5, {1, 2}}`); på namnrymdsnivå inte än.
 Test: `run/literals-auto-arrays.cpp`.  cxx-strict: 87 funktioner till, inga nya; 258 saknas summerat per TU.
+
+## Status 127 (2026-11-15)
+- Ett anrop utan argument av en constexpr-funktion definierad i sin klass, vars kropp är `return E;` med E
+  en konstant, är en konstant i ett konstantuttryck (`case char_traits<char>::eof():` i json:s lexer:
+  `scan`, `scan_comment`, `scan_string`, `scan_number`).  Kroppens tokens sparas på entiteten
+  (`body_begin`/`body_end`: klassens lista över sena kroppar är borta när fallet tolkas); de tolkas igen
+  utan kodgenerering; bara inom `cxx_constant_expression_parse` (överallt annars ändrades kodvägen för
+  `(numeric_limits<T>::max)()`).  Ett misslyckande sparas inte (för tidigt försökt).
+- Standardinitierare för arraymedlemmar med element eller en strängkonstant (`int a[3] = {1, 2, 3}`,
+  `char s[4] = "abc"`): nollställd, sedan elementen.
+Test: `run/constexpr-case-array-nsdmi.cpp`.  cxx-strict: 84 funktioner till, inga nya.
