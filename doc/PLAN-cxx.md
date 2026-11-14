@@ -1436,3 +1436,9 @@ körs med enbart vcc:s kod.  json: 69/70, 2 484 funktioner, 11 av 118.
   den används; förut stark (två TU:er hade krockat).
 json: 69/70, 4,9 s CPU, 2 204 funktioner (färre: de felaktigt starka
 inline-definitionerna utan användning försvinner), 11 av 118.
+
+### Status (55): förval före en pack (2026-11-14)
+`template <class O = std::string, class... A> O concat(A&&...)` (json:s
+`concat`, i alla felmeddelanden): en parameter före packen med förval tar
+förvalet när den varken deduceras eller ges.  json: 69/70, 5,1 s CPU,
+2 255 funktioner, 11 av 118.

@@ -2585,9 +2585,9 @@ static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, u
 			return -1;
 		}
 		for (uint32_t i = 0; i < ntp; i++)
-			if (i < pk && (!p->params->tparams[i].name || p->params->tparams[i].def_b || p->params->tparams[i].constraint_b)) {
+			if (i < pk && ((!p->params->tparams[i].name && !p->params->tparams[i].def_b) || p->params->tparams[i].constraint_b)) {
 				c->why = CXX_WHY_PACKS;
-				return -1;	/* (constraints and defaults before a pack: not evaluated here) */
+				return -1;	/* (constraints before a pack: not evaluated here; a default is, when not deduced) */
 			}
 		for (uint32_t i = 0; i < fixed; i++) {
 			int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
@@ -2618,20 +2618,23 @@ static int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, u
 		{
 			/* the parameters other than the pack, in order (those after it: their defaults, with the pack bound),
 			   then the pack's elements */
-			cxx_scope *b = pk + 1 < ntp ? cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL) : NULL;
+			cxx_scope *b = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 			uint32_t k = 0;
 
 			for (uint32_t i = 0; i < pk; i++) {
+				if (!bind[i].kind && p->params->tparams[i].def_b &&
+				    (!cxx_default_argument(c, &p->params->tparams[i], b, &bind[i]) || !bind[i].kind)) {
+					c->why = CXX_WHY_UNBOUND;
+					return -1;	/* (not deduced, and its default not known) */
+				}
 				if (!bind[i].kind) {
 					c->why = CXX_WHY_UNBOUND;
 					return -1;
 				}
 				flat[k++] = bind[i];
-				if (b)
-					cxx_bind(c, b, &p->params->tparams[i], &bind[i]);
+				cxx_bind(c, b, &p->params->tparams[i], &bind[i]);
 			}
-			if (b)
-				cxx_bind_pack(c, b, &p->params->tparams[pk], flat + (ntp - 1), ne);
+			cxx_bind_pack(c, b, &p->params->tparams[pk], flat + (ntp - 1), ne);
 			for (uint32_t i = pk + 1; i < ntp; i++) {
 				const cxx_tparam *tp = &p->params->tparams[i];
 
