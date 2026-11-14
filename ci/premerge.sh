@@ -7,6 +7,7 @@
 # vcc-builtins.py (Homebrew's clang).
 #
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
+#   ci/premerge.sh x86      x86-64 host: the steps needing one (x86 runner)
 #   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
 #   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
 #   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
@@ -17,7 +18,7 @@
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
 # failure); the script runs every step and fails at the end if any failed.
 set -u
-JOB=${1:?usage: ci/premerge.sh arm64|asan|tsan|wasm|win64}
+JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|wasm|win64|win64}
 cd "$(dirname "$0")/.."
 J=${CI_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 BUILD=$(python3 -c 'import sys; sys.path.insert(0, "bench"); import hostenv; print(hostenv.BUILD)')
@@ -68,12 +69,6 @@ build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
-	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
-		step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
-		step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
-		step interrupt python3 bench/vcc-interrupt.py
-		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
-	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
@@ -127,9 +122,6 @@ arm64)
 	step extint-alias python3 bench/vcc-extint.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/extint-alias"
 	step bitint-constants python3 bench/vcc-bitint-constants.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-constants"
 	step bitint-float python3 bench/vcc-bitint-float.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-float" --cflag=-O3
-	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
-		step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3
-	fi
 	step pic          python3 bench/vcc-pic.py
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
@@ -146,6 +138,15 @@ arm64)
 	step ldconst      python3 bench/vcc-ldconst.py
 	step cfi          python3 bench/vcc-cfi.py -j "$J"
 	step dwarf        python3 bench/vcc-dwarf.py -j "$J"
+	;;
+x86)
+	# vcc as an x86-64 program on an x86-64 host: the steps that need one
+	build vcc
+	step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
+	step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
+	step interrupt python3 bench/vcc-interrupt.py
+	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
+	step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3
 	;;
 asan)
 	build vcc-asan
