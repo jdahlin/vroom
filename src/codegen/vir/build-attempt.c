@@ -87,6 +87,9 @@ VPRIV void virbuild_statistics_print(codegen_unit *E)
 		}
 	fprintf(stderr, "vcc vir: attempted=%llu lowered=%llu built=%llu fallback=%llu\n", (unsigned long long)E->vir_attempted,
 		(unsigned long long)E->vir_lowered, (unsigned long long)E->vir_built, (unsigned long long)fell);
+	fprintf(stderr, "vcc vir-cost: build_ok=%llu lower_ok=%llu build_failed=%llu lower_failed=%llu\n",
+		(unsigned long long)E->vir_cost_build_ok, (unsigned long long)E->vir_cost_lower_ok,
+		(unsigned long long)E->vir_cost_build_failed, (unsigned long long)E->vir_cost_lower_failed);
 	for (int i = 0; i < n; i++) {
 		int k = ord[i];
 		const vident *id = &vintern_ents[E->compile_context->syms[E->vir_failures[k].sym].name];
@@ -182,6 +185,7 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 		e->unit->vir_attempted++;
 	timed = e->unit->vir_statistics && e->unit->vir_pass_switch.time;
 	virbuild_pass_list(&npass);
+	vperf c0 = e->unit->vir_statistics ? vperformance_now() : (vperf){ 0, 0 }, c1;
 	if (timed)
 		t0 = vperformance_now();
 	{
@@ -195,10 +199,14 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 	e->vir_try = false;
 	if (m & VIRBUILD_MODE_REPORT)
 		virbuild_function_name_get(e, s, nm, sizeof nm);
+	c1 = e->unit->vir_statistics ? vperformance_now() : (vperf){ 0, 0 };
 	if (e->vir_failure_reason) {
+		if (e->unit->vir_statistics)
+			e->unit->vir_cost_build_failed += c1.ins - c0.ins;
 		virbuild_failure_note(e, s, e->vir_failure_reason, VIRBUILD_FAILURE_emitter_error, NULL);
 		if (m & VIRBUILD_MODE_REPORT)
-			fprintf(stderr, "vir: %s: no: %s\n", nm, e->vir_failure_reason);
+			fprintf(stderr, "vir: %s: no: %s (%llu instructions)\n", nm, e->vir_failure_reason,
+				(unsigned long long)(e->unit->vir_statistics ? c1.ins - c0.ins : 0));
 		return false;
 	}
 	{
@@ -238,6 +246,14 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
 			ok = CODEGEN_IS_X64(e->compile_context) ? x64_vir_function_lower(e, s, &why) : a64_vir_function_lower(e, s, &why);
 			if (timed)
 				virbuild_pass_note(e->unit, VIRBUILD_PASS_ROW_LOWER(npass), vperformance_subtract(vperformance_now(), t0).ins);
+			if (e->unit->vir_statistics) {
+				vperf c2 = vperformance_now();
+
+				if (ok)
+					e->unit->vir_cost_build_ok += c1.ins - c0.ins, e->unit->vir_cost_lower_ok += c2.ins - c1.ins;
+				else
+					e->unit->vir_cost_lower_failed += c2.ins - c0.ins;
+			}
 			if (ok) {
 				if (e->unit->vir_statistics)
 					e->unit->vir_lowered++;
