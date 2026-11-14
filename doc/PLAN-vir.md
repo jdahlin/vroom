@@ -1374,6 +1374,155 @@ project builds.
 
 ### V2/V4 x86-64 (2026-11-12): first allocated leaf functions and SSE2
 
+**SQLite after profiling integer mnemonic dispatch (2026-11-14).** The
+leading comparable exclusive excess in the preceding call-chain profile was
+libc strcmp (591 extra samples). Its largest caller difference was x64_i_int
+(508 vs 345 samples across five SQLite compiles). In as_x64_insn the
+self-hosted code loads each instruction-family pointer and calls it
+indirectly. Clang unrolls the family list into direct calls. Both reached
+x64_i_int after twelve earlier families for common scalar operations, then
+tried both the full name and a suffix-stripped name. An instrumented compile
+counted 13,619 movq, 4,379 imulq and 5,198 pushq/popq dispatches.
+Exact size-suffixed scalar mov/add/sub/imul and register pushq/popq now
+dispatch to their encoders at entry. Other register classes retain the
+ordered family search.
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 185.91 ms | 179.84 ms |
+| Clang-built vcc CPU time | 140.33 ms | 136.15 ms |
+| Self-hosted / clang-built | 1.325× | 1.321× |
+| Self-hosted retired instructions | 2.1510B | 2.0576B |
+| Clang-built retired instructions | 1.2405B | 1.1821B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+Fresh cycle profiles (period 75,001, five compiles each) reduced strcmp
+samples directly under x64_i_int from 437 to 49 self-hosted and 322 to 38
+clang-built. All four SQLite objects had SHA-256 prefix `c4d3896fefc9`;
+the linked recursive query returned 500500.
+
+**SQLite after profiling x86 register parsing (2026-11-14).** The prior
+eight-compile profile showed 5.01M more exclusive cycles in libc strcmp
+per compile for self-hosted vcc. In fresh call-chain profiles covering five compiles per
+binary, its largest caller difference was x64_reg. Clang unrolled the
+legacy GPR name scan into immediate comparisons (`cmp $0x786172,%eax` for
+rax). Vcc called strcmp up to 36 times before considering numbered or SIMD
+registers. Decode the legacy aliases by width and register letters instead.
+At a period of 75,001 cycles, strcmp samples directly from x64_reg went
+from 248 to 1 self-hosted and stayed at zero clang-built. Samples with
+x64_reg anywhere on the stack went from 463 to 123 and 170 to 123,
+respectively (sampled estimates, five compiles total per binary).
+
+| SQLite 3.50.4, median of 21 compiles | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.35 ms | 189.40 ms |
+| Clang-built vcc CPU time | 143.20 ms | 142.90 ms |
+| Self-hosted / clang-built | 1.336× | 1.325× |
+| Self-hosted retired instructions | 2.1758B | 2.1517B |
+| Clang-built retired instructions | 1.2430B | 1.2414B |
+
+CPU 7, one emitter thread, `-O2 -c`, alternating order, warm-up excluded.
+All four compilers emitted the same SQLite object (SHA-256 prefix
+`c4d3896fefc9`), and a linked recursive SQL query returned 500500.
+
+**SQLite after profiling x86 branch operands (2026-11-14).** On eight
+single-emitter SQLite 3.50.4 compiles per binary, the largest attributable
+exclusive cycle gap was in `codegen_chunks_commit`, which inlines
+`x64_function_commit` in both builds. The larger raw difference in
+`pp_file_enter` includes skeleton construction that clang keeps out of line.
+One MOVUPS in the self-hosted branch-operand copy accounted for 19% of
+samples in the commit function. Clang stored the returned symbol-expression
+registers straight into its operand. Passing the symbol ID and relocation
+modifier directly removes the operand construction from both builds.
+Ordinary symbols now resolve directly, and a substituted expression is
+folded once. Exclusive cycles per compile in the commit function fell from
+11.68M to 7.95M self-hosted and from 5.38M to 5.18M clang-built. Some cost
+moved into the assembler helpers.
+
+| SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 191.31 ms | 190.50 ms |
+| Clang-built vcc CPU time | 142.87 ms | 142.83 ms |
+| Self-hosted / clang-built | 1.339× | 1.334× |
+| Self-hosted retired instructions | 2.1810B | 2.1766B |
+| Clang-built retired instructions | 1.2438B | 1.2423B |
+
+CPU 7, `VCC_THREADS=1`, `-O2 -c`, alternating order and one warm-up excluded.
+All four builds produced the same object (SHA-256 prefix `c4d3896fefc9`).
+The previous round measured the same baseline at 1.336×.
+
+**SQLite after profiling x64_emit (2026-11-14).** Eight pinned SQLite
+3.50.4 compiles sampled with perf cycles:u put the self-hosted encoder at
+16.57M exclusive cycles per compile versus 9.93M clang-built. Vcc's byte
+loops repeatedly loaded and stored the scratch-buffer position; clang unrolled
+the ModRM copy and inlined symbol folding. The self build also copied numeric
+displacements to a stack temporary and called as_value_fold. Emitting ModRM
+and SIB directly, storing fields at their final width in the fragment and
+folding only symbolic displacements cut the samples to 10.65M and 8.63M
+cycles respectively.
+
+| Same single-emitter SQLite compile, median of 21 | Before | After |
+| --- | ---: | ---: |
+| Self-hosted vcc CPU time | 189.66 ms | 187.38 ms |
+| Clang-built vcc CPU time | 140.34 ms | 140.29 ms |
+| Self-hosted / clang-built | 1.351× | 1.336× |
+| Self-hosted retired instructions | 2.207B | 2.180B |
+
+CPU 7, warm-up excluded, alternating run order. All four compilers produced
+the same SQLite object. The assembler parity suite includes two relocations
+in one instruction and literal RIP displacement followed by an immediate.
+
+**SQLite with both CRC32C word updates inlined (2026-11-14).** The VIR
+inliner admits the same register-only CRC32Q asm that the builder recognizes.
+The self-hosted two-word wrapper is 15 bytes: MOV, CRC32Q, CRC32Q, RET.
+Clang emits the same sequence with an extra MOV EAX,EAX between the CRCs
+(17 bytes). Previously the self-hosted wrapper called the word helper twice.
+
+| SQLite 3.50.4 compile, median CPU time | clang-built before / after | self-hosted before / after | ratio before / after |
+| --- | ---: | ---: | ---: |
+| 7 measured runs | 143.41 / 143.24 ms | 191.49 / 191.85 ms | 1.335× / 1.339× |
+| 21 measured runs | 141.93 / 141.75 ms | 189.02 / 191.22 ms | 1.332× / 1.349× |
+
+Same single-emitter, CPU-7 workload, warm-up excluded and order reversed each
+round. The 21-run self-hosted instruction median fell from 2.213B to 2.206B.
+Both timing rounds showed a small slowdown despite fewer instructions. All
+four builds produced identical objects, and the linked SQLite query passed.
+
+**SQLite with spill-free CRC32C word updates (2026-11-14).** The x86 VIR
+builder recognizes the nonvolatile register-only CRC32Q template used by the
+host identifier hash. The allocator sees the accumulator as a tied operand.
+The self-hosted word helper shrank from 17 instructions (57 bytes, including
+a 32-byte frame) to the same nine bytes as clang: MOV EAX,EDI; CRC32 RAX,RSI;
+RET. The two-word wrapper still calls the word helper twice in the self build.
+
+| Same SQLite 3.50.4 compile, median of 7 | Before | After |
+| --- | ---: | ---: |
+| clang-built vcc, CPU ms | 146.65 | 145.08 |
+| self-hosted vcc, CPU ms | 197.29 | 195.11 |
+| self-hosted / clang-built | 1.345× | 1.345× |
+| self-hosted retired instructions | 2.229B | 2.213B |
+
+Pinned to CPU 7 with one emitter thread and alternating order after warm-up.
+All four SQLite objects matched and the linked smoke query passed. The
+host-dispatch regression runs the vcc-built CRC object against a bitwise
+reference on Linux, including software fallback and hardware dispatch.
+
+**SQLite with structured x86 control-flow emission (2026-11-14).**
+The object emitter now passes direct calls, jumps, SETcc, CMOVcc and register
+TEST records to the assembler without formatting and matching mnemonics.
+Seven-run median CPU times on the same pinned SQLite 3.50.4 compile:
+
+| vcc build | Before | After | Retired instructions before / after |
+| --- | ---: | ---: | ---: |
+| clang-built | 145.02 ms | 140.64 ms | 1.313B / 1.256B |
+| self-hosted | 193.48 ms | 188.87 ms | 2.313B / 2.227B |
+
+All four objects matched. The time ratio was 1.334× before and 1.343× after.
+One remaining self-host-specific cost is the host CRC32C word helper:
+instruction sampling attributed roughly 28M instructions to it in the self
+build and 4M in the clang build. Disassembly showed stack traffic around the
+inline assembly in the self build; clang emitted a move, CRC32 and return.
+
 **SQLite with x86-64 SysV aggregate calls (2026-11-14).** VIR now lowers
 `codegen_prepass_node_walk` (4,075 VIR instructions, 14 spills) and
 `walk_value_emit_inner` (3,173 instructions, 34 spills). The separate VIR

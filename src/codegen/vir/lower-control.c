@@ -85,7 +85,44 @@ VPRIV int virbuild_spget(codegen_context *e) { virbuild_fail(e, VIRBUILD_FAILURE
 VPRIV void virbuild_spset(codegen_context *e, int r) { (void)r; virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer)); }
 VPRIV codegen_value virbuild_setjmp(codegen_context *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(setjmp)); }
 VPRIV void virbuild_longjmp(codegen_context *e, int rbuf) { (void)rbuf; virbuild_fail(e, VIRBUILD_FAILURE(longjmp)); }
-VPRIV void virbuild_asm(codegen_context *e, uint32_t n) { (void)n; virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly)); }
+/* A nonvolatile register-only CRC32Q has one tied accumulator and one
+ * input. Keep both as SSA values so the x86 allocator sees the tie. */
+VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a)
+{
+	if (!CODEGEN_IS_X64(c) || !a->extended || a->go || a->vol || a->nout != 1 || a->nin != 1 ||
+	    a->nclob || a->nlabel || strcmp(c->strs[a->tmpl - 1].s, "crc32q %1, %0") ||
+	    strcmp(c->strs[a->ops[0].constraint - 1].s, "+r") || strcmp(c->strs[a->ops[1].constraint - 1].s, "r"))
+		return false;
+
+	for (unsigned k = 0; k < 2; k++) {
+		const node *operand = N(a->ops[k].expr);
+		if (operand->op != AST_NODE_VARIABLE || !codegen_symbol_is_local_variable(c, operand->a) ||
+		    c->syms[operand->a].sc == AST_STORAGE_REGISTER || AST_QUALIFIED_TYPE_QUALIFIERS(operand->ty) ||
+		    !codegen_type_is_integer(c, operand->ty) || codegen_type_is_bitint(c, operand->ty) ||
+		    walk_type_size(c, operand->ty) != 8)
+			return false;
+	}
+	return true;
+}
+
+VPRIV void virbuild_asm(codegen_context *e, uint32_t n)
+{
+	cc *c = e->compile_context;
+	const ast_asm_statement *a = &c->asms[N(n)->a];
+	if (!virbuild_asm_is_crc32q(c, a))
+		virbuild_fail(e, VIRBUILD_FAILURE(inline_assembly));
+	uint32_t out = a->ops[0].expr;
+	codegen_lvalue dest = walk_lvalue_emit(e, out);
+	codegen_value acc = walk_lvalue_reload(e, &dest, N(out)->ty);
+	codegen_value word = walk_value_emit(e, a->ops[1].expr);
+	uint32_t seed = virbuild_walker_value_get(e, &acc, VIR_TYPE_I64);
+	uint32_t data = virbuild_walker_value_get(e, &word, VIR_TYPE_I64);
+	int r = virbuild_result_register_pick(e, &acc, &word);
+	virbuild_register_write(e, r, virbuild_insn_append(e, VIR_OP_CRC32C64, VIR_TYPE_I64, 0, seed, data, 0));
+	walk_lvalue_store_register(e, &dest, N(out)->ty, r);
+	virbuild_tfree(e, r);
+	if (dest.kind == CODEGEN_LVALUE_REGISTER) virbuild_tfree(e, dest.register_number);
+}
 /* the va_list at rap points at the first unnamed argument (Apple's: on the stack) */
 VPRIV void virbuild_va_start(codegen_context *e, int rap)
 {

@@ -20,6 +20,7 @@
 #define X_DESC(regs_, flags_) { .registers = (regs_), .flags = (flags_) }
 
 static const record_op_descriptor x64_op_descriptors[X64_OP_COUNT] = {
+	[X64_OP_CRC32Q] = X_DESC(X_D | X_U | X_V, X_P),
 	[X64_OP_CMOV] = X_DESC(X_D | X_U | X_V, X_P | X_R),
 	[X64_OP_CMPM] = X_DESC(X_U | X_V | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
 	[X64_OP_TESTM] = X_DESC(X_U | RECORD_OPERAND_USES_3, RECORD_EFFECT_LOAD | RECORD_EFFECT_TRAP | X_W),
@@ -254,6 +255,7 @@ VPRIV const uint8_t *x64_flow_table(void)
 		[X64_OP_BSF] = RECORD_FLOW_NEXT,
 		[X64_OP_BSR] = RECORD_FLOW_NEXT,
 		[X64_OP_BSWAP] = RECORD_FLOW_NEXT,
+		[X64_OP_CRC32Q] = RECORD_FLOW_NEXT,
 		[X64_OP_EXT] = RECORD_FLOW_NEXT,
 		[X64_OP_REP] = RECORD_FLOW_NEXT,
 		[X64_OP_FADD] = RECORD_FLOW_NEXT,

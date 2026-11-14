@@ -1294,7 +1294,7 @@ VPRIV bool walk_symbol_constant_get(codegen_context *e, uint32_t s, codegen_valu
  * inlining).  Not: variadic or unprototyped, recursive, a label address
  * taken (one copy only), deeper than 16.
  */
-/* a tiny static function clang would inline: no inline asm, no locals aligned above 16
+/* a tiny static function clang would inline: no opaque inline asm, no locals aligned above 16
    (either could need registers the caller's frame holds) */
 static bool walk_function_is_tiny(cc *c, uint32_t n)
 {
@@ -1305,7 +1305,12 @@ static bool walk_function_is_tiny(cc *c, uint32_t n)
 	x = N(n);
 	switch (x->op) {
 	case AST_NODE_ASM:
+#ifdef WALK_PREFIX
+		/* This template becomes an ordinary register operation in VIR. */
+		return virbuild_asm_is_crc32q(c, &c->asms[x->a]);
+#else
 		return false;
+#endif
 	case AST_NODE_DECLARATION:
 		return c->syms[x->a].kind != AST_SYMBOL_VARIABLE || codegen_symbol_alignment(c, x->a) <= 16;
 	case AST_NODE_BLOCK:
