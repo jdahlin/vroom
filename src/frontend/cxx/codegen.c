@@ -792,6 +792,15 @@ VPRIV void cxx_gen_member(cxx *c, uint32_t base, bool arrow, uint32_t name, uint
 		c->enode = cxx_gen_referent(c, c->enode, loc);
 }
 
+/* is the scope in an unnamed namespace (itself one, or inside one: its names have internal linkage) */
+static bool cxx_scope_in_unnamed_namespace(cxx *c, const cxx_scope *s)
+{
+	for (; s; s = s->parent)
+		if (s->kind == CXX_SCOPE_NAMESPACE && !s->owner && s != c->global)
+			return true;
+	return false;
+}
+
 /*
  * The function's symbol name: C++'s mangled name (mangle.c), or the plain name for main and extern "C".
  * False: a name not mangled yet.
@@ -954,9 +963,13 @@ static bool cxx_gen_name(cxx *c, cxx_entity *f)
 		if (st == CXX_TY_UNKNOWN)
 			return false;
 		f->sym = cc_symbol_new(a, S_FUNC, f->name, st, 0);
-		if (!f->fn_internal || f->member_of)
-			a->syms[f->sym].flags |= SF_GLOBAL;
+		if ((!f->fn_internal || f->member_of) && !cxx_scope_in_unnamed_namespace(c, home))
+			a->syms[f->sym].flags |= SF_GLOBAL;	/* (in an unnamed namespace, a class's member too: internal) */
 		a->syms[f->sym].depth = 0;	/* (made while a body is being built: a file-scope symbol all the same) */
+	}
+	if (cxx_scope_in_unnamed_namespace(c, home)) {
+		a->syms[f->sym].flags &= ~SF_GLOBAL;	/* (internal linkage, however the symbol was made) */
+		a->syms[f->sym].sc = SC_STATIC;
 	}
 	memset(&at, 0, sizeof at);
 	at.asmname = cxx_gen_text(c, name) + 1;

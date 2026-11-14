@@ -441,6 +441,7 @@ typedef struct cxx {
 	uint32_t gen_pack_from, gen_pack_n;	/* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */
 	struct cxx_entity *gen_pack_entity;
 	struct cxx_entity *ooc_target;	/* an instance's member whose out-of-class definition is being parsed */
+	struct cxx_entity *fn_set_seen;	/* the last name of functions parsed (an overload set a cast picks from) */
 	uint32_t decl_start;		/* the declaration being parsed: its decl-specifiers' first token */
 	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
 	int64_t bvalue;
@@ -567,6 +568,7 @@ static inline void cxx_invalid_note(cxx *c, const char *file, int line)
 }
 VPRIV qty cxx_auto_type(cxx *c);
 VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t);
+VPRIV cxx_scope *cxx_template_home(const cxx_entity *te);
 VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos);
 VPRIV qty cxx_instance_declared_sig(cxx *c, const cxx_entity *inst, const qty **ph, uint32_t *nph, uint32_t *pack_param);
 VPRIV bool cxx_instance_template(cxx *c, qty t, cxx_entity **of, const cxx_targ **args, uint32_t *nargs, uint32_t *pack_at, cxx_scope **home);

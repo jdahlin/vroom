@@ -99,6 +99,7 @@ static bool mg_scope_is_std(cxx_mangler *m, const cxx_scope *s)
 
 static void mg_type(cxx_mangler *m, qty t);
 static void mg_prefix(cxx_mangler *m, cxx_scope *s);
+static bool mg_nested(cxx_mangler *m, cxx_scope *s);
 
 /* <template-args> of a class template instance */
 /* <abi-tag>: B <source-name>, after the name it tags */
@@ -189,8 +190,34 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 			mg_text(m, num, (size_t)snprintf(num, sizeof num, args[i].v < 0 ? "n%llu" : "%llu",
 							 (unsigned long long)(args[i].v < 0 ? 0 - (uint64_t)args[i].v : (uint64_t)args[i].v)));
 			mg_str(m, "E");
+		} else if (args[i].kind == 4 && args[i].v) {
+			/* a template as the argument (std::map for basic_json's ObjectType): its name, a substitution
+			   candidate (S0_ the next time) */
+			const cxx_entity *te = (const cxx_entity *)(intptr_t)args[i].v;
+			cxx_scope *home;
+
+			if (te->bound_template)
+				te = te->bound_template;
+			home = cxx_template_home(te);
+			if (!home) {
+				m->bad = true;
+				continue;
+			}
+			if (mg_substitution(m, CXX_SUB_TEMPLATE, te, 0))
+				continue;
+			if (mg_nested(m, home)) {
+				mg_str(m, "N");
+				mg_prefix(m, home);
+				mg_source_name(m, te->name);
+				mg_str(m, "E");
+			} else {
+				if (mg_scope_is_std(m, home))
+					mg_str(m, "St");
+				mg_source_name(m, te->name);
+			}
+			mg_remember(m, CXX_SUB_TEMPLATE, te, 0);
 		} else
-			m->bad = true;	/* (templates as arguments: not mangled yet) */
+			m->bad = true;	/* (an argument not known) */
 	}
 	if (pack_at == nargs)
 		mg_str(m, "J");	/* (an empty pack: J E) */

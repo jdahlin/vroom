@@ -3963,6 +3963,12 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				if (r != CXX_TY_UNKNOWN)
 					t = cxx_type_function(c, r, NULL, 0, true), c->sig_fake = 1;	/* (callers read the return type only) */
 			}
+		} else if (c->gen_instance && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake &&
+			   c->gen_instance->ty == CXX_TY_UNKNOWN && !c->tentative) {
+			/* declared only here (a member template defined outside its class): its type all the same, so that
+			   calls are built; its body: another declaration's, or another TU's */
+			c->gen_instance->ty = t;
+			c->gen_instance = NULL;
 		}
 	}
 	return t;

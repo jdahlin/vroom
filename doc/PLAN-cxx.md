@@ -1329,3 +1329,18 @@ typ eller kod.  json-sviten oförändrad (69/70, 3,9 s, 2 215 funktioner,
 `std::vector<int>`-programmet: allt utom `push_back` (en medlemsmall med pack
 definierad utanför klassen).  json: 69/70, 3,8 s, 2 230 funktioner,
 10 av 118 testfunktioner.
+
+### Status (46): json-funktioner kan namnges (2026-11-14)
+- Mallar som mallargument manglas (`basic_json<std::map, std::vector, ...>`):
+  varje funktion med `json` i signaturen saknade namn och fick ingen kod.
+  Nu samma namn som clang.
+- Funktioner i en namnlös namnrymd har intern länkning (som clangs `t`).
+- `static_cast<F *>(&f)` väljer överlagringen av f med typen F.
+- En instans som bara deklareras här (en medlemsmall definierad utanför
+  klassen) har sin typ, så att anrop till den byggs (kroppen: inte än).
+- Anrop genom en funktionspekare med en klass som argument: `operator()`
+  söks bara för klassobjekt (förut blev anropet otypat).
+json: 69/70, 4,1 s CPU (59x), 2 395 funktioner (från 2 230), 10 av 118
+testfunktioner.  Nästa stopp i testkroppar: typdrag som
+`__is_nothrow_constructible` på klasser (noexcept på konstruktorer följs
+inte), `<=>`, virtuella baser.

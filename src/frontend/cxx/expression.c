@@ -112,6 +112,7 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC)) {
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			c->ecallee = e;	/* functions: the call picks one */
+			c->fn_set_seen = e;	/* (or a cast's target type: static_cast<F *>(&f)) */
 			bool one = x == e && x->kind == CXX_ENTITY_VALUE;
 
 
@@ -1250,7 +1251,30 @@ static void cxx_primary_expression_parse(cxx *c)
 		}
 		if (!cxx_accept_greater(c))
 			cxx_fail(c, "expected '>'");
-		cxx_paren_expression_parse(c);
+		c->fn_set_seen = NULL;
+		{
+			uint32_t at = c->pos;
+
+			cxx_paren_expression_parse(c);
+			/* static_cast<R (*)(P...)>(&f), (f): the overload of f whose type that is */
+			if (c->etype == CXX_TY_UNKNOWN && c->fn_set_seen && cast_to != CXX_TY_UNKNOWN && !c->tentative && !c->template_depth &&
+			    AST_TYPE_KIND(c->ast, cast_to) == TY_PTR && !AST_TYPE(c->ast, cast_to)->ext &&
+			    AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, cast_to)->base) == TY_FUNC && c->pos - at <= 6) {
+				qty want = QUNQ(AST_TYPE(c->ast, cast_to)->base);
+
+				for (cxx_entity *e = c->fn_set_seen; e; e = e->next)
+					if (e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && QUNQ(e->ty) == want && (!e->member_of || e->fn_static)) {
+						uint32_t loc = c->tok[at].loc;
+
+						cxx_et(c, cast_to, false);
+						cxx_gen_function_value(c, e, loc);
+						if (c->enode)
+							c->enode = cc_conversion_decay(c->ast, c->enode);	/* (the function's address) */
+						break;
+					}
+			}
+			c->fn_set_seen = NULL;
+		}
 		{
 			bool k = c->econst && cxx_const_widens(c, c->etype, cast_to, c->evalue);
 			int64_t v = c->evalue;
@@ -1627,7 +1651,8 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
 						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
-				else if (!set && (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
+				else if (!set && callee != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, callee) &&	/* (operator(): a member only) */
+					 (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
 						  c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
 						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
 						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs))) {

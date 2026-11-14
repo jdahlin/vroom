@@ -646,6 +646,12 @@ VPRIV qty cxx_simple_type_at(cxx *c, uint32_t pos)
 	return k < 0 ? CXX_TY_UNKNOWN : cc_type_basic(k);
 }
 
+/* a class or alias template: the scope it is declared in (NULL: not known) */
+VPRIV cxx_scope *cxx_template_home(const cxx_entity *te)
+{
+	return te && te->tmpl ? te->tmpl->home : NULL;
+}
+
 /* a class template's instance: its template's parameters (NULL: not one, or not known) */
 VPRIV cxx_scope *cxx_instance_tparams(cxx *c, qty t)
 {
