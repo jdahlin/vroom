@@ -1222,8 +1222,19 @@ static void cxx_postfix_expression_parse(cxx *c)
 				cxx_advance(c);
 				/* the object's type is not known here: name<...>( is a member template call if it parses */
 				if (cxx_is(c, LEX_TOKEN_LESS) && (template_kw || cxx_lookahead_fn(c, cxx_template_arguments_then_call))) {
+					cxx_entity *m = cls && !q && !dep ? cxx_lookup_in(c, cls, id, 0) : NULL;
+
 					cxx_template_arguments_parse(c);
 					cxx_et(c, CXX_TY_UNKNOWN, false);
+					/* x.f<args>(...): the member function templates named f, with the explicit arguments */
+					if (m && m->kind != CXX_ENTITY_DEPENDENT && cxx_entity_kind_find(m, CXX_ENTITY_FUNCTION_TEMPLATE) && !c->tentative) {
+						if (c->ntargs > c->cxargs)
+							c->xargs = realloc(c->xargs, (c->cxargs = c->ntargs + 8) * sizeof *c->xargs);
+						memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
+						c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = m;
+						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+					} else if (cls && !q && !dep && !m && !cls->dependent && !cls->has_dependent_base && !c->tentative)
+						CXX_INVALID(c);	/* no such member template */
 					continue;
 				}
 				/* the member: a data member's type, or the member functions for the call */

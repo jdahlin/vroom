@@ -2546,6 +2546,9 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 					explicit_instance = calloc(1, sizeof *explicit_instance);
 					explicit_instance->name = name, explicit_instance->kind = CXX_ENTITY_TYPE;
 					explicit_instance->ty = CXX_TY_UNKNOWN, explicit_instance->members = cs;
+					/* (its scope is this class's, not the template's: a class derived from it finds
+					   the base's type there) */
+					cs->owner = explicit_instance;
 				}
 			}
 			e = te;

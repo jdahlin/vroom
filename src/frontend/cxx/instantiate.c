@@ -1270,14 +1270,18 @@ static cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *a
 		x->state = 3;	/* a pattern's record: matched by its arguments, never completed */
 	inst->instance = x;
 	if (t->is_alias) {
-		/* an alias is a type: computed now */
-		uint8_t mm = c->member_missing;
+		/* an alias is a type: computed now; what made it ill-formed is remembered with it (the next
+		   use of the same alias is ill-formed too) */
+		uint8_t mm = c->member_missing, iv = c->einvalid;
 
-		c->member_missing = 0;
+		c->member_missing = 0, c->einvalid = 0;
 		if (!cxx_instance_parse(c, x))
 			x->inst = NULL;
-		x->missing = c->member_missing;
+		x->missing = c->member_missing || c->einvalid;
 		c->member_missing |= mm;
+		c->einvalid = iv;
+		if (x->missing)
+			c->member_missing = 1;
 		return x->inst;
 	}
 	/* a class: an incomplete record now; its body when it must be complete (C++ is lazy too: naming
