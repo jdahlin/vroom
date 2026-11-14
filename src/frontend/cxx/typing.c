@@ -709,6 +709,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 			c->unevaluated ? "unevaluated" : "evaluated", best >= 0 && cand[best].e->late && cand[best].e->late_done ? "done" : "-",
 			(int)vintern_ents[set->name].len, vintern_ents[set->name].s);
 	/* the function called (when known): its body is instantiated, in evaluated code */
+	cxx_entity *called_instance = NULL;
+
 	if (best >= 0) {
 		cxx_entity *called = cand[best].e;
 
@@ -719,12 +721,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, qty callee_type, const 
 
 			cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs, &r, true);
 			result = et != CXX_TY_UNKNOWN ? et : r;
+			called_instance = c->call_instance;	/* (code generation: the function this call calls) */
 		}
 	}
 	(void)first;
 	/* (this call's verdict again: the bodies instantiated above made calls of their own) */
 	c->call_resolved = best >= 0;
-	c->call_picked = best >= 0 ? cand[best].e : NULL;
+	c->call_picked = best >= 0 ? (called_instance ? called_instance : cand[best].e) : NULL;
 	c->none_viable = best < 0 && !viable && !unknown;
 	cxx_et(c, result, false);
 }

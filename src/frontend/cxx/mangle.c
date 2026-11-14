@@ -107,8 +107,21 @@ static void mg_template_args(cxx_mangler *m, const cxx_targ *args, uint32_t narg
 			mg_str(m, "J");
 		if (args[i].kind == 1 && args[i].t != CXX_TY_UNKNOWN)
 			mg_type(m, args[i].t);
-		else
-			m->bad = true;	/* (values, templates: not mangled yet) */
+		else if (args[i].kind == 2) {
+			/* a value: L <type> <value> E; the type is the parameter's, known here for enumerations only:
+			   others as int (not clang's name for a size_t or bool argument yet) */
+			char num[32];
+
+			mg_str(m, "L");
+			if (args[i].t)
+				mg_type(m, args[i].t);
+			else
+				mg_str(m, "i");
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, args[i].v < 0 ? "n%llu" : "%llu",
+							 (unsigned long long)(args[i].v < 0 ? 0 - (uint64_t)args[i].v : (uint64_t)args[i].v)));
+			mg_str(m, "E");
+		} else
+			m->bad = true;	/* (templates as arguments: not mangled yet) */
 	}
 	if (pack_at <= nargs)
 		mg_str(m, "E");
@@ -399,6 +412,8 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_str(&m, op);
 		else
 			mg_source_name(&m, f->name);
+		if (f->is_instance)
+			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX);
 		mg_str(&m, "E");
 	} else {
 		if (mg_scope_is_std(&m, home))
@@ -407,7 +422,14 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, qty
 			mg_str(&m, op);
 		else
 			mg_source_name(&m, f->name);
+		if (f->is_instance)
+			mg_template_args(&m, f->targs, f->ntargs, UINT32_MAX);
 	}
+	/* A function template's instance: the ABI writes its return type and its parameters as the template
+	   declares them (T_ for a parameter); here the instance's own types, so the name is unique and stable
+	   among vcc's objects but is not the one clang gives it. */
+	if (f->is_instance && !(v->len && v->s[0] == ' '))
+		mg_type(&m, x->base);
 	if (!x->n && !(x->flags & TF_VARIADIC))
 		mg_str(&m, "v");
 	for (uint32_t i = 0; i < x->n; i++)

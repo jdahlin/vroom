@@ -1595,7 +1595,7 @@ static void cxx_outer_restore(cxx *c, cxx_outer *o)
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */
 
-typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; } cxx_fdone;
+typedef struct cxx_fdone { cxx_targ *args; qty ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; cxx_entity *inst; } cxx_fdone;
 
 /* a variable template's partial or explicit specialization: its pattern and its initializer */
 typedef struct cxx_vspec { cxx_partial p; uint32_t init_pos; } cxx_vspec;
@@ -1617,6 +1617,31 @@ typedef struct cxx_ftemplate {
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
 } cxx_ftemplate;
+
+/*
+ * The entity of one instantiation of a function template (code generation: what is defined and called):
+ * the template's name and scope, the arguments it was instantiated with; its type when its signature is
+ * parsed with them bound.
+ */
+static cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p, const cxx_targ *args, uint32_t nargs)
+{
+	cxx_entity *te = c->ftmpl_te, *inst;
+	cxx_targ *copy;
+
+	if (!te || !p->home)
+		return NULL;
+	inst = calloc(1, sizeof *inst);
+	inst->name = te->name, inst->kind = CXX_ENTITY_VALUE, inst->ty = CXX_TY_UNKNOWN, inst->pack_index = -1;
+	if (p->home->kind == CXX_SCOPE_CLASS)
+		inst->member_of = p->home;
+	else
+		inst->home = p->home;
+	inst->fn_const = te->fn_const, inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
+	copy = malloc((nargs ? nargs : 1) * sizeof *copy);
+	memcpy(copy, args, nargs * sizeof *copy);
+	inst->targs = copy, inst->ntargs = nargs;
+	return inst;
+}
 
 VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params, cxx_scope *home, uint32_t pos, cxx_scope *ctor_class)
 {
@@ -1754,6 +1779,8 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 				c->stats.bodies_cached++;
 				c->bound_sig = f->done[i].sig;
 				c->sig_requires = f->done[i].viable;
+				if (want_body)
+					c->call_instance = f->done[i].inst;
 				return f->done[i].ret;
 			}
 			at = i;	/* its signature was parsed; now its body */
@@ -1768,11 +1795,21 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
 		memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
 		f->done[f->ndone].ret = CXX_TY_UNKNOWN, f->done[f->ndone].sig = CXX_TY_UNKNOWN, f->done[f->ndone].body = 0;
-		f->done[f->ndone].viable = 1, f->done[f->ndone].n = np;
+		f->done[f->ndone].viable = 1, f->done[f->ndone].n = np, f->done[f->ndone].inst = NULL, f->done[f->ndone].value = 0;
 		at = f->ndone++;
 	}
 	if (want_body)
 		f->done[at].body = 1;	/* (before the body: a recursive call finds it) */
+	/* code generation: this instantiation's function */
+	cxx_entity *inst = NULL;
+	uint32_t g_depth = c->gen_stack_depth, g_enode = c->enode, g_snode = c->snode, g_sdone = c->sdone, g_sdepth = c->sdepth;
+	void *g_block = c->gen_block;
+
+	if (want_body) {
+		if (!f->done[at].inst)
+			f->done[at].inst = cxx_ftemplate_instance(c, p, bind, np);
+		inst = f->done[at].inst;
+	}
 	/* what the enclosing parse still uses */
 	targs = malloc((ntargs ? ntargs : 1) * sizeof *targs);
 	memcpy(targs, c->targs, ntargs * sizeof *targs);
@@ -1795,6 +1832,7 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 	c->sig_auto = 0;
 	if (want_body)
 		c->unevaluated = 0;	/* (the body is evaluated code, whatever the call was in) */
+	c->gen_instance = inst;
 	if (!setjmp(jb)) {
 		bool b = false;
 		qty t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
@@ -1806,9 +1844,14 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		c->stats.bodies += body;
 	} else
 		c->stats.bodies_failed++;
+	c->gen_instance = NULL;
 	c->body_depth--;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
+	cxx_gen_unwind(c, g_depth);
+	c->enode = g_enode, c->snode = g_snode, c->sdone = g_sdone, c->sdepth = g_sdepth, c->gen_block = g_block;
+	if (want_body)
+		c->call_instance = inst;
 	memcpy(c->targs, targs, ntargs * sizeof *targs), c->ntargs = ntargs;
 	memcpy(c->decl_params, dp, ndp * sizeof *dp), c->ndecl_params = ndp, c->decl_ndefaults = ndd;
 	free(targs), free(dp);
@@ -2227,8 +2270,14 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 			      uint32_t nargs, qty *ret, bool body)
 {
 	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
-	int r = cxx_ftemplate_deduce1(c, e, xargs, nxargs, args, lval, nargs, ret, body);
+	cxx_entity *outer_te = c->ftmpl_te;
+	int r;
 
+	c->ftmpl_te = e;
+	if (body)
+		c->call_instance = NULL;
+	r = cxx_ftemplate_deduce1(c, e, xargs, nxargs, args, lval, nargs, ret, body);
+	c->ftmpl_te = outer_te;
 	c->einvalid = invalid, c->eunsure = unsure, c->member_missing = missing, c->einvalid_unsure = adl;
 	return r;
 }

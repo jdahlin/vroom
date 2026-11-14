@@ -1217,8 +1217,14 @@ static void cxx_postfix_expression_parse(cxx *c)
 				c->in_template_args = targs;
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
-				else if (nx != UINT32_MAX && set)
+				else if (nx != UINT32_MAX && set) {
+					uint32_t anodes[16], an = c->ncargs, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
+
+					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
+					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
+						cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc);
+				}
 				else if (!set && (c->op_lv_set = c->ncargs <= 16, c->op_lv[0] = callee_lval,
 						  memcpy(c->op_lv + 1, c->cargs_lval, c->ncargs <= 16 ? c->ncargs : 0),
 						  cxx_operator_call_type(c, vintern_cstr("operator()"), callee, c->cargs, c->ncargs)))
@@ -1321,6 +1327,7 @@ static void cxx_postfix_expression_parse(cxx *c)
 						memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
 						c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = m;
 						c->call_obj = (QQ(obj) & Q_CONST) ? 2 : 1;
+						c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 					} else if (cls && !q && !dep && !m && !cls->dependent && !cls->has_dependent_base && !c->tentative)
 						CXX_INVALID(c);	/* no such member template */
 					continue;

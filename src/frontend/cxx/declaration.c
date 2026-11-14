@@ -3643,7 +3643,22 @@ VPRIV qty cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_
 				}
 			}
 			c->ret_capture = ret_pattern != CXX_TY_UNKNOWN, c->ret_type = CXX_TY_UNKNOWN, c->ret_seen = 0;
-			cxx_function_body_parse(c);
+			{
+				/* code generation: this instantiation of the function template (its signature as parsed
+				   with the arguments bound; not one with a deduced return type or a pack, yet) */
+				cxx_entity *gi = c->gen_instance;
+				bool gen = false;
+
+				c->gen_instance = NULL;	/* (this body's: not a body instantiated inside it) */
+				if (gi && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC && !c->sig_fake && ret_pattern == CXX_TY_UNKNOWN &&
+				    pack_n == UINT32_MAX && !cxx_is_kw(c, CXX_KW_try)) {
+					gi->ty = t;
+					gen = cxx_gen_function_begin(c, gi, fs, c->decl_params, c->ndecl_params);
+				}
+				cxx_function_body_parse(c);
+				if (gen)
+					cxx_gen_function_end(c, gi, c->snode);
+			}
 			c->scope = outer;
 			*body = true;
 			if (c->ret_capture) {

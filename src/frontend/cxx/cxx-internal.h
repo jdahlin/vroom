@@ -121,6 +121,9 @@ typedef struct cxx_entity {
 	cxx_template *tmpl;		/* a class or alias template: what instantiating it needs (instantiate.c) */
 	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
+	const struct cxx_targ *targs;	/* a function template's instance: its template arguments (the mangled name) */
+	uint32_t ntargs;
+	uint8_t is_instance;
 	uint32_t sym1;			/* a constructor or destructor: the complete-object function's symbol (C1, D1; sym is C2, D2) */
 	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
 	struct cxx_entity *bound_template;	/* a template template parameter bound to a template: that template (its identity) */
@@ -345,6 +348,9 @@ typedef struct cxx {
 	struct cxx_entity *ctor_picked;	/* the constructor the last cxx_ctor_use chose (NULL: none declared fits, or none is needed) */
 	uint8_t ctor_found;		/* ... it chose one; ctor_none: the class declares no constructor */
 	uint8_t ctor_none;
+	struct cxx_entity *gen_instance;	/* the function template instance whose signature and body are parsed next (NULL: none) */
+	struct cxx_entity *call_instance;	/* ... the one the last body instantiation was for */
+	struct cxx_entity *ftmpl_te;	/* the function template being deduced (its entity) */
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
