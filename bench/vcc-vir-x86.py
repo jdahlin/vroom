@@ -97,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
         ('vir_x86_scratch.c', {'rotate', 'negd', 'absd', 'negf', 'absf'}, {}),
         ('vir_x86_frame.c', {'frames', 'pressure', 'callee'}, {}),
         ('vir_x86_cmpmem.c', {'left', 'right', 'full32', 'sign8', 'zero8', 'sign16', 'indexed', 'keep', 'vol', 'outside', 'narrow'}, {}),
-        ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
+        ('vir_x86_testmem.c', {'flag8', 'flag16', 'flag32', 'flag64', 'indexed', 'branch8', 'vol', 'sign', 'shared', 'sharedmask', 'member', 'keep'}, {}),
         ('vir_x86_blocks.c', {'copy1', 'copy24', 'copy127', 'copy128', 'copy129', 'zero24', 'zero256', 'zero257', 'zero_local', 'readbyte', 'dynamic', 'nonzero', 'lowzero'}, {}),
         ('vir_x86_ext.c', {'clean', 'trim', 'mask', 'signedload', 'fromcall'}, {}),
         ('vir_x86_select.c', {'choose', 'uchoose', 'keep', 'boolean', 'pointer'}, {}),
@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory(prefix='vcc-vir-x86-') as tmp:
                     if re.search(r'cmp[bwlq]\s+[^\n]*\(%', body):
                         raise SystemExit(f'{name}: unsafe memory comparison fold')
             if filename == 'vir_x86_testmem.c':
-                for name, op in [('flag8', 'testb'), ('flag16', 'testw'), ('flag32', 'testl'), ('flag64', 'testq')]:
+                for name, op in [('flag8', 'testb'), ('flag16', 'testw'), ('flag32', 'testl'), ('flag64', 'testq'), ('branch8', 'testb')]:
                     body = asm.read_text().split(name + ':\n', 1)[1].split('.Lfunc_end', 1)[0]
                     if not re.search(op + r'\s+\$[^,]+,.*\(%', body):
                         raise SystemExit(f'{name}: missing direct memory test')
