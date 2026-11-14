@@ -168,6 +168,10 @@ VPRIV bool cxx_class_key_unnamed(cxx *c)
 VPRIV void cxx_attributes_skip(cxx *c)
 {
 	for (;;) {
+		const cxx_token *t = cxx_peek(c, 0);
+
+		if (t->kind != LEX_TOKEN_LEFT_SQUARE && !t->kw)
+			return;	/* (the common case: no attribute here) */
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE) {
 			uint32_t b = c->pos;
 
