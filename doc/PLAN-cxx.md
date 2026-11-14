@@ -1372,3 +1372,12 @@ jämförelsen kördes med enbart vcc:s kod; den länkade inte då (`operator==
 = default` fick ingen kod).  Nu: en förvald `operator==` för en klass med
 skalära medlemmar byggs på plats (medlemmarna jämförs i ordning), och hela
 testet kompileras, länkas och körs med enbart vcc:s kod.
+
+### Status (49): medlemsmallar definierade utanför klassmallen får kod (2026-11-14)
+`template<class T> template<class... A> R X<T>::f(A&&...)`: definitionen
+registreras (båda parameterlistorna) och tolkas för en instans vars klass bara
+deklarerar medlemsmallen: klassinstansens argument för de yttre parametrarna,
+instansens för de egna, klassens medlemmar synliga vid namn.  Med och utan
+pack (`member-templates.cpp`).  `vector::emplace_back` stannar nu på en pack
+som används i en lambda (`[&] { f(std::forward<A>(a)...); }`).
+json oförändrad: 69/70, 2 406 funktioner, 11 av 118.

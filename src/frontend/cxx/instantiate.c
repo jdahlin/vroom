@@ -47,7 +47,7 @@ struct cxx_template {
 	uint8_t is_alias, has_partial;
 	char *path;		/* its qualified name (the layout dump), NULL: not nameable */
 	/* its members defined outside the class: template<...> R X<...>::f(...) { } */
-	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home; uint8_t is_const; } *oocs;
+	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const; } *oocs;	/* (inner: a member template's own parameters) */
 	uint32_t noocs;
 };
 
@@ -1839,6 +1839,79 @@ static void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
  * partial specializations: as for a real instance).  want_body: the function is the one called, in
  * evaluated code: its body is instantiated too (once).  An auto return type needs the body anyway.
  */
+/*
+ * A member template's instance whose class declares it without a body: its definition outside the class
+ * template (template<class T> template<class... A> R X<T>::f(...) {...}), parsed with the class instance's
+ * arguments for the outer parameters and bind for its own (the last from pack_from a pack; ptypes its
+ * elements' parameter types), its code generated for inst.  False: no such definition.
+ */
+static bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *inst, const cxx_targ *bind, uint32_t nbind,
+					 uint32_t pack_from, qty *ptypes, uint32_t pn)
+{
+	cxx_scope *cs = f->p.home;
+	cxx_instance *x = cs && cs->kind == CXX_SCOPE_CLASS && cs->owner ? cs->owner->instance : NULL;
+	cxx_template *t = x ? x->t : NULL;
+	const struct cxx_ooc *d = NULL;
+	cxx_scope *binding;
+	cxx_outer o;
+	jmp_buf jb;
+	uint32_t matches = 0;
+
+	if (!t || !inst || x->pos)
+		return false;
+	for (uint32_t i = 0; i < t->noocs; i++)
+		if (t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams)
+			d = &t->oocs[i], matches++;
+	if (matches != 1 || d->params->ntparams > x->nargs + 1)
+		return false;
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
+	for (uint32_t i = 0; i < d->params->ntparams; i++) {
+		const cxx_tparam *tp = &d->params->tparams[i];
+
+		if (tp->pack) {
+			if (i + 1 != d->params->ntparams)
+				return false;
+			cxx_bind_pack(c, binding, tp, x->args + i, x->nargs - i);
+			break;
+		}
+		if (i >= x->nargs)
+			return false;
+		cxx_bind(c, binding, tp, &x->args[i]);
+	}
+	for (uint32_t i = 0; i < d->inner->ntparams; i++) {
+		if (pack_from != UINT32_MAX && i == pack_from) {
+			cxx_bind_pack(c, binding, &d->inner->tparams[i], bind + i, nbind - i);
+			break;
+		}
+		if (i >= nbind)
+			return false;
+		cxx_bind(c, binding, &d->inner->tparams[i], &bind[i]);
+	}
+	cxx_scope_use(c, binding, cs);	/* (the class's members, by name in the body, as X<T>:: makes them) */
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++;
+	c->unevaluated = 0;
+	c->fail = &jb;
+	c->pos = d->pos;
+	c->scope = binding;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	c->this_type = cs->owner->ty ? cs->owner->ty : CXX_TY_UNKNOWN, c->this_const = inst->fn_const;
+	c->sig_pack_types = ptypes, c->sig_pack_n = pack_from != UINT32_MAX ? pn : UINT32_MAX;
+	c->gen_instance = inst;
+	if (!setjmp(jb)) {
+		bool b = false;
+
+		inst->ty = CXX_TY_UNKNOWN;	/* (its type again, from the definition: the body's code takes it) */
+		(void)cxx_function_signature_parse(c, false, &b, NULL);
+		c->stats.ooc_bodies++;
+	} else
+		c->stats.ooc_failed++;
+	c->gen_instance = NULL;
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	return true;
+}
+
 static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, bool want_body)
 {
 	cxx_partial *p = &f->p;
@@ -1928,6 +2001,8 @@ static qty cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cxx_targ *bind, 
 		if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == TY_FUNC)
 			r = AST_TYPE(c->ast, t)->base, sig = c->sig_fake ? CXX_TY_UNKNOWN : t;	/* (its parameters: only if they are the real ones) */
 		c->stats.bodies += body;
+		if (want_body && !b && inst && viable == 1)
+			body = cxx_member_template_ooc_body(c, f, inst, bind, np, UINT32_MAX, NULL, 0);	/* (defined outside its class) */
 	} else
 		c->stats.bodies_failed++;
 	c->gen_instance = NULL;
@@ -2044,6 +2119,12 @@ static qty cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, const cxx_targ *x
 			r = AST_TYPE(c->ast, t)->base;
 		c->bound_sig = c->sig_fake ? CXX_TY_UNKNOWN : t;
 		c->stats.bodies += body;
+		if (want_body && !b && inst && viable == 1) {
+			qty bs = c->bound_sig;
+
+			body = cxx_member_template_ooc_body(c, f, inst, acopy, nx, np - 1, ptypes, pn);	/* (defined outside its class) */
+			c->bound_sig = bs;
+		}
 	} else {
 		c->bound_sig = CXX_TY_UNKNOWN;
 		if (want_body)
@@ -2564,6 +2645,18 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 						.is_const = is_const };
 }
 
+/* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
+VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner,
+						     cxx_scope *home, uint32_t pos, uint32_t nparams, bool is_const)
+{
+	cxx_template *t = cxx_template_of(te);
+
+	(void)c;
+	t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
+	t->oocs[t->noocs++] = (struct cxx_ooc){ .name = name, .pos = pos, .nparams = nparams, .params = outer, .home = home,
+						.inner = inner, .is_const = is_const };
+}
+
 /*
  * A call uses e, a member function of a class template's instance declared without a body: its
  * definition outside the class (matched by name, parameter count and const), parsed as an ordinary
@@ -2587,7 +2680,7 @@ static void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		return;	/* (an instance of a partial specialization: its members' definitions are not the primary's) */
 	nparams = AST_TYPE(c->ast, e->ty)->n;
 	for (uint32_t i = 0; i < t->noocs; i++)
-		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const)
+		if (t->oocs[i].name == e->name && t->oocs[i].nparams == nparams && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner)
 			d = &t->oocs[i], matches++;
 	if (!matches)
 		return;	/* (declared only: defined in another TU, or = default) */

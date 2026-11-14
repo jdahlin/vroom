@@ -3332,6 +3332,12 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		}
 		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK) && fn_template)
 			cxx_ftemplate_defined(fn_template->ftmpl);
+		if (f && cxx_is_function_body_start(c) && context == CXX_CONTEXT_NAMESPACE && q && qs && qs->owner && qs->owner->tmpl &&
+		    c->template_depth == 2 && c->scope == c->ftmpl_scope && c->scope->parent && c->scope->parent->kind == CXX_SCOPE_TEMPLATE &&
+		    !c->tentative && !c->instantiating && !c->class_depth)
+			/* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
+			cxx_template_member_template_definition(c, qs->owner, name, c->scope->parent, c->scope, c->scope->parent->parent,
+								c->ftmpl_begin, c->ndecl_params, c->decl_const);
 		if (f && cxx_is_function_body_start(c) && !(context == CXX_CONTEXT_BLOCK)) {
 			/* template<...> R X<...>::f(...) { }: a class template's member defined outside it, instantiated
 			   for an instance when a call uses that member */
