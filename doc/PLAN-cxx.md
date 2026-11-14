@@ -335,5 +335,25 @@ own.
   clang).  Not a speed number yet: parsing unit-32bit takes 0.13 s against
   clang -fsyntax-only's 1.17 s, but clang also checks and instantiates.
   Development started at 0.1 % of the tokens; libc++ was 80 % of the work.
-- X1, X5-X7: not started.  Next: the AST (what X1's split and X4's recorded
-  instantiations need), then instantiation.
+- X1, first step (2026-11-13): one AST for C and C++.
+  `src/include/frontend/ast.h` holds the side-table records codegen reads
+  (`cstr label attrs asmop casm`, `i128`) and `struct ast`: the tables and
+  TU-wide values code generation reads, in the order
+  `doc/quality/MEASURE-ast-split.md` measured (per-node tables first, `o`
+  next to `ty`).  `struct cc` holds it as its first member through a union
+  with an identical anonymous struct, so `c->syms` and `c->ast.syms` are one
+  field and no code generation line changed; `_Static_assert`s keep it at
+  offset 0 and under 504 bytes.  The C++ front end is compiled in the `cc`
+  module and `cxx_run` gets a `struct cc` as its AST: the same type
+  interning, record layout and constant code, and later `emit_tu`.
+  Verified: `bench/vcc-same.py --base` (the previous commit) 15 210/15 218
+  outputs identical, the 8 others `-E` line markers naming the base's
+  `src/headers/arm_neon.h` path; `vcc-x86.py --suite vcc` 320/320; vcc-diag
+  229/229; every file compiles alone (`VCC_UNITY=`; that build's link
+  stops at `vir_failure_table`, defined in a codegen header this change does
+  not touch).  `vbench.py gate` cannot read instruction counters on this
+  host (its x86-64 Linux setup); the arm64 measurement in
+  MEASURE-ast-split.md showed the embedding removes instructions.
+- X1 next: the C++ parser builds into it: types from decl-specifiers and
+  declarators (`cc_type_*`), syms for declarations, then nodes.  X5-X7: not
+  started.

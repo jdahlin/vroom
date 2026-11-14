@@ -158,16 +158,6 @@ static void driver_job_pp_options_finish(struct driver_job *job, const driver_en
 /* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
 static void driver_job_compile(struct driver_job *job, pp *p, const driver_environment *env)
 {
-		if (job->cxx) {	/* C++ (PLAN-cxx.md): parsing only, so far */
-			cxx_options xo = { .standard = job->cxx, .errfd = job->errfd, .progress = driver_environment_get(env, "VCC_CXX_PROGRESS") != NULL };
-
-			job->status = cxx_run(p, &xo) || pp_error_count(p) ? 1 : 0;
-			if (!job->status && !job->syntax_only) {
-				dprintf(job->errfd, "vcc: error: C++ code generation is not implemented yet\n");
-				job->status = 1;
-			}
-			return;
-		}
 		const char *field_uses = driver_environment_get(env, "VCC_FIELD_USES");	/* test aid: frontend/c/field-uses.c */
 
 		if (__builtin_expect(field_uses != NULL, 0)) {
@@ -181,6 +171,11 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 				job->status = 1;
 				return;
 			}
+		}
+		if (job->cxx && !job->syntax_only) {
+			dprintf(job->errfd, "vcc: error: C++ code generation is not implemented yet\n");
+			job->status = 1;
+			return;
 		}
 		cc_opts co = { .target = job->pp_options.target, .unsigned_char = job->pp_options.unsigned_char, .dump_layouts = job->layout_checks, .lint = job->lint, .ms_anon = job->ms_anonymous_structs, .short_wchar = job->short_wchar, .strict_flex_arrays = job->strict_flex_arrays,
 				.std = job->standard, .c2y = job->standard == 23 && job->standard_version && !strcmp(job->standard_version, "202400L"), .implicit_int = job->standard == 89 || job->allow_implicit_int, .implicit_fn = job->standard == 89 || job->allow_implicit_function, .conv_warn = job->conversion_warning_flags,
@@ -229,7 +224,13 @@ static void driver_job_compile(struct driver_job *job, pp *p, const driver_envir
 			unsigned long long t1 = driver_clock_nanoseconds();
 			vperf v1 = vperformance_now();
 
-			job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
+			if (job->cxx) {	/* C++ (PLAN-cxx.md): the same options and AST; parsing only, so far */
+				cxx_options xo = { .standard = job->cxx, .errfd = job->errfd,
+						   .progress = driver_environment_get(env, "VCC_CXX_PROGRESS") != NULL };
+
+				job->status = cxx_run(p, &co, &xo) || pp_error_count(p) ? 1 : 0;
+			} else
+				job->status = cc_run(p, &co) || pp_error_count(p) ? 1 : 0;
 			driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
 			driver_phase_add(DRIVER_PHASE_COMPILE, v1);
 			driver_tokens_taken += pp_token_count(p);
