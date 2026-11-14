@@ -129,6 +129,12 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 			cxx_advance(c);
 			cxx_advance(c);
 			e = e ? cxx_entity_prefer(cxx_entity_prefer(e, CXX_ENTITY_NAMESPACE), CXX_ENTITY_TYPE) : NULL;
+			if (e && e->kind == CXX_ENTITY_TYPE && !e->dependent && e->ty != CXX_TY_UNKNOWN && !c->tentative) {
+				cxx_scope *cls = cxx_type_class_scope(c, e->ty);	/* (an instance: completed now) */
+
+				if (cls && !e->members)
+					e->members = cls;
+			}
 			if (!e || e->kind == CXX_ENTITY_DEPENDENT || !e->members || (e->dependent && c->template_depth))
 				*dependent = true, *qualifier = NULL;
 			else
@@ -171,7 +177,12 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 					break;
 				}
 				cxx_advance(c);
-				if (!te || te->kind != CXX_ENTITY_TEMPLATE || !te->members || args_dependent || te->dependent)
+				cxx_entity *inst = te && te->kind == CXX_ENTITY_TEMPLATE && !args_dependent && !c->template_depth && !*dependent ?
+						   cxx_instantiate(c, te, c->targs, c->ntargs, true) : NULL;
+
+				if (inst && inst->members)
+					*qualifier = inst->members, te = inst;	/* the instance's own members */
+				else if (!te || te->kind != CXX_ENTITY_TEMPLATE || !te->members || args_dependent || te->dependent)
 					*dependent = true, *qualifier = NULL;
 				else
 					*qualifier = te->members;	/* X<args>:: looks in the primary and its specializations */
@@ -200,13 +211,28 @@ VPRIV cxx_entity *cxx_nested_name_parse(cxx *c, cxx_scope **qualifier, bool *dep
 
 /* ---- template arguments ------------------------------------------------------------------ */
 
-static void cxx_template_argument_parse(cxx *c)
+static int64_t cxx_literal_value(cxx *c);
+
+/* one template argument; *out: what it is, as far as known (a type, an integer literal) */
+static void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 {
+	cxx_token *t = cxx_peek(c, 0), *n = cxx_peek(c, 1);
+
+	out->kind = 0, out->t = 0, out->v = 0;	/* (all of it hashed by the instance cache) */
 	/* a type-id if it parses as one and ends the argument, else an expression */
 	if (cxx_try_type_id(c)) {
 		cxx_type_id_parse(c);
+		if (c->type_out != CXX_TY_UNKNOWN)
+			out->kind = 1, out->t = c->type_out;
 		return;
 	}
+	if (n->kind == LEX_TOKEN_COMMA || n->kind == LEX_TOKEN_GREATER) {
+		int64_t v = cxx_literal_value(c);
+
+		if (v >= 0)
+			out->kind = 2, out->v = v;
+	}
+	(void)t;
 	c->in_template_args++;
 	cxx_conditional_expression_parse(c);
 	c->in_template_args--;
@@ -217,13 +243,23 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 {
 	uint32_t saved = c->in_template_args, implicit = c->implicit_typename;
 
+	cxx_targ args[32];
+	uint32_t n = 0;
+
 	cxx_expect(c, LEX_TOKEN_LESS);
 	c->in_template_args = 0;
 	c->implicit_typename = 0;	/* (only the declaration's own decl-specifiers) */
 	if (!cxx_accept_greater(c)) {
 		for (;;) {
-			cxx_template_argument_parse(c);
-			cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+			cxx_targ a;
+
+			cxx_template_argument_parse(c, &a);
+			if (cxx_accept(c, LEX_TOKEN_ELLIPSIS))
+				a.kind = 0;	/* a pack expansion: not yet */
+			if (n < 32)
+				args[n++] = a;
+			else
+				args[31].kind = 0;
 			if (!cxx_accept(c, LEX_TOKEN_COMMA))
 				break;
 		}
@@ -232,6 +268,12 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 	}
 	c->in_template_args = saved;
 	c->implicit_typename = implicit;
+	/* the arguments, for the caller to read at once (a nested list overwrites them) */
+	if (n > c->ctargs)
+		c->targs = realloc(c->targs, (c->ctargs = n + 8) * sizeof *c->targs);
+	if (n)
+		memcpy(c->targs, args, n * sizeof *args);
+	c->ntargs = n;
 }
 
 /* ---- decl-specifiers --------------------------------------------------------------------- */
@@ -353,9 +395,20 @@ static bool cxx_type_name_try(cxx *c, cxx_scope *ctor_class)
 		cxx_entity *te = cxx_entity_prefer(e, CXX_ENTITY_TEMPLATE), *ty = cxx_entity_prefer(e, CXX_ENTITY_TYPE);
 
 		if (te && te->kind == CXX_ENTITY_TEMPLATE && cxx_peek(c, 1)->kind == LEX_TOKEN_LESS) {
+			uint8_t seen = c->dependent_seen;
+
+			c->dependent_seen = 0;
 			cxx_advance(c);
 			cxx_template_arguments_parse(c);
 			c->last_type = te, c->last_type_dependent = (uint8_t)(c->template_depth > 0);
+			if (!c->template_depth && !c->dependent_seen && !dep) {
+				/* X<args> outside templates: an instance (instantiate.c), or unknown */
+				cxx_entity *inst = cxx_instantiate(c, te, c->targs, c->ntargs, false);	/* (named: not completed) */
+
+				if (inst)
+					c->last_type = inst, c->last_type_dependent = 0;
+			}
+			c->dependent_seen |= seen;
 			return true;
 		}
 		if (cxx_entity_is_type(ty)) {
@@ -638,8 +691,12 @@ static void cxx_operator_name_parse(cxx *c)
 	if (k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_HASH && k != LEX_TOKEN_LEFT_BRACE && k != LEX_TOKEN_RIGHT_BRACE &&
 	    k != LEX_TOKEN_RIGHT_PAREN && k != LEX_TOKEN_RIGHT_SQUARE && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_PERIOD &&
 	    k != LEX_TOKEN_ELLIPSIS && k != LEX_TOKEN_QUESTION && k != LEX_TOKEN_COLON && k != LEX_TOKEN_COLON_COLON) {
-		/* (operator> and >>: as written; a template's closing > never follows 'operator' here) */
-		cxx_advance(c);
+		/* operator>>, operator>=, operator>>=: joined pieces */
+		uint32_t n;
+
+		cxx_operator_at(c, &n);
+		while (n--)
+			cxx_advance(c);
 		return;
 	}
 	if (k == CXX_TOKEN_ARROW_STAR || k == CXX_TOKEN_SPACESHIP) {
@@ -690,12 +747,32 @@ static bool cxx_paren_is_nested_declarator(cxx *c)
  * suffix is a parameter list.
  */
 /* an integer literal's value (array bounds, bit-field widths; other constant expressions: -1, not evaluated yet) */
+/*
+ * The value of the constant expression here when it is one token: an integer literal, true or
+ * false, or a name bound to a known integer (a value template argument, a const or constexpr
+ * variable initialized with one).  -1 when it is not that (not evaluated yet).
+ */
 static int64_t cxx_literal_value(cxx *c)
 {
 	cxx_token *t = cxx_peek(c, 0);
 	uint64_t v = 0;
 	uint32_t i = 0;
+	int next = cxx_peek(c, 1)->kind;
+	bool ends = next == LEX_TOKEN_RIGHT_SQUARE || next == LEX_TOKEN_SEMICOLON || next == LEX_TOKEN_COMMA || next == LEX_TOKEN_EQUAL ||
+		    next == LEX_TOKEN_LEFT_BRACE || next == LEX_TOKEN_GREATER || next == LEX_TOKEN_RIGHT_PAREN || next == LEX_TOKEN_RIGHT_BRACE;
 
+	if (!ends)
+		return -1;	/* an expression that starts here */
+	if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
+		return t->kw == CXX_KW_true;
+	if (t->kind == LEX_TOKEN_IDENTIFIER && !t->kw) {
+		cxx_entity *e = cxx_lookup(c, t->id);
+
+		for (; e; e = e->next)
+			if (e->kind == CXX_ENTITY_VALUE && e->has_value && e->value >= 0)
+				return e->value;
+		return -1;
+	}
 	if (t->kind != LEX_TOKEN_NUMBER)
 		return -1;
 	for (; i < t->len && t->s[i] >= '0' && t->s[i] <= '9'; i++)
@@ -705,13 +782,6 @@ static int64_t cxx_literal_value(cxx *c)
 			return -1;
 	if (!i || (t->s[0] == '0' && t->len > 1 && i > 1))
 		return -1;	/* (octal and hexadecimal: not here) */
-	{
-		int k = cxx_peek(c, 1)->kind;
-
-		if (k != LEX_TOKEN_RIGHT_SQUARE && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_COMMA && k != LEX_TOKEN_EQUAL &&
-		    k != LEX_TOKEN_LEFT_BRACE)
-			return -1;	/* an expression that starts with a number */
-	}
 	return (int64_t)v;
 }
 
@@ -1352,6 +1422,7 @@ static void cxx_using_parse(cxx *c)
 		cxx_advance(c);
 		cxx_attributes_skip(c);
 		cxx_expect(c, LEX_TOKEN_EQUAL);
+		uint32_t alias_b = c->pos;
 		{
 			uint32_t implicit = c->implicit_typename;
 
@@ -1359,14 +1430,17 @@ static void cxx_using_parse(cxx *c)
 			cxx_type_id_parse(c);
 			c->implicit_typename = implicit;
 		}
+		uint32_t alias_e = c->pos;
 		{
 			cxx_entity *target = c->last_type;
 			uint8_t dep = c->last_type_dependent;
 
 			cxx_expect(c, LEX_TOKEN_SEMICOLON);
 			e = cxx_declare(c, cxx_declaration_scope(c), name, c->template_depth ? CXX_ENTITY_TEMPLATE : CXX_ENTITY_TYPE);
-			if (e && c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE)
+			if (e && c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE) {
 				e->kind = CXX_ENTITY_TEMPLATE;
+				cxx_template_define(c, e, c->scope, cxx_declaration_scope(c), alias_b, alias_e, true);
+			}
 			else if (e) {
 				e->kind = CXX_ENTITY_TYPE;
 				e->dependent = dep;
@@ -1458,10 +1532,13 @@ static void cxx_template_parameter_parse(cxx *c)
 		cxx_scope_pop(c);
 		if (!cxx_accept_kw(c, CXX_KW_class) && !cxx_accept_kw(c, CXX_KW_typename))
 			cxx_fail(c, "expected 'class' in a template template parameter");
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		bool pack = cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		uint32_t pname = 0;
+
 		if (cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
 			cxx_entity *e = cxx_declare(c, c->scope, cxx_peek(c, 0)->id, CXX_ENTITY_TEMPLATE);
 
+			pname = cxx_peek(c, 0)->id;
 			if (e)
 				e->dependent = 1;
 			cxx_advance(c);
@@ -1473,6 +1550,7 @@ static void cxx_template_parameter_parse(cxx *c)
 			cxx_nested_name_parse(c, &q, &dep);
 			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
 		}
+		cxx_tparam_add(c, 3, pname, pack, 0, 0);
 		return;
 	}
 	if ((cxx_is_kw(c, CXX_KW_class) || cxx_is_kw(c, CXX_KW_typename)) &&
@@ -1481,17 +1559,25 @@ static void cxx_template_parameter_parse(cxx *c)
 	     cxx_peek(c, 1)->kind == LEX_TOKEN_EQUAL || cxx_peek(c, 1)->kind == LEX_TOKEN_GREATER_GREATER) &&
 	    !(cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER && cxx_peek(c, 2)->kind == LEX_TOKEN_COLON_COLON)) {
 		/* type parameter */
+		bool pack;
+		uint32_t pname = 0, db = 0, de = 0;
+
 		cxx_advance(c);
-		cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+		pack = cxx_accept(c, LEX_TOKEN_ELLIPSIS);
 		if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c)) {
 			cxx_entity *e = cxx_declare(c, c->scope, cxx_peek(c, 0)->id, CXX_ENTITY_TYPE);
 
+			pname = cxx_peek(c, 0)->id;
 			if (e)
 				e->dependent = 1;
 			cxx_advance(c);
 		}
-		if (cxx_accept(c, LEX_TOKEN_EQUAL))
+		if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
+			db = c->pos;
 			cxx_type_id_parse(c);
+			de = c->pos;
+		}
+		cxx_tparam_add(c, 1, pname, pack, db, de);
 		return;
 	}
 	/* a constrained type parameter: Concept<args> name, Concept name */
@@ -1505,19 +1591,27 @@ static void cxx_template_parameter_parse(cxx *c)
 		e = cxx_is(c, LEX_TOKEN_IDENTIFIER) ? cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id) : NULL;
 		e = e ? cxx_entity_template(e) : NULL;
 		if (e && e->kind == CXX_ENTITY_CONCEPT) {
+			bool pack;
+			uint32_t pname = 0, db = 0, de = 0;
+
 			cxx_advance(c);
 			if (cxx_is(c, LEX_TOKEN_LESS))
 				cxx_template_arguments_parse(c);
-			cxx_accept(c, LEX_TOKEN_ELLIPSIS);
+			pack = cxx_accept(c, LEX_TOKEN_ELLIPSIS);
 			if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c)) {
 				cxx_entity *p = cxx_declare(c, c->scope, cxx_peek(c, 0)->id, CXX_ENTITY_TYPE);
 
+				pname = cxx_peek(c, 0)->id;
 				if (p)
 					p->dependent = 1;
 				cxx_advance(c);
 			}
-			if (cxx_accept(c, LEX_TOKEN_EQUAL))
+			if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
+				db = c->pos;
 				cxx_type_id_parse(c);
+				de = c->pos;
+			}
+			cxx_tparam_add(c, 1, pname, pack, db, de);
 			return;
 		}
 		cxx_rewind(c, save, save_undo);
@@ -1529,6 +1623,9 @@ static void cxx_template_parameter_parse(cxx *c)
 
 		if (!(cxx_decl_specifiers_parse(c, NULL, false) & (DS_TYPE | DS_MODIFIER)))
 			cxx_fail(c, "expected a template parameter");
+		uint32_t db = 0, de = 0;
+		bool pack = cxx_is(c, LEX_TOKEN_ELLIPSIS);
+
 		c->type_in = c->ds_type;
 		name = cxx_declarator_parse(c, true, &q, &f, NULL);
 		if (name > 1) {
@@ -1538,10 +1635,14 @@ static void cxx_template_parameter_parse(cxx *c)
 				e->dependent = 1;
 		}
 		if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
+			db = c->pos;
 			c->in_template_args++;
 			cxx_conditional_expression_parse(c);
 			c->in_template_args--;
+			de = c->pos;
 		}
+		pack |= c->pos > 0 && c->tok[c->pos - 1].kind == LEX_TOKEN_ELLIPSIS && !db;
+		cxx_tparam_add(c, 2, name > 1 ? name : 0, pack, db, de);
 	}
 }
 
@@ -1666,8 +1767,13 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 	uint32_t name = 0;
 	cxx_entity *e = NULL;
 	bool is_union = cxx_is_kw(c, CXX_KW_union);
-	uint32_t key_loc = cxx_peek(c, 0)->loc;
+	uint32_t key_loc = cxx_peek(c, 0)->loc, key_pos = c->pos;
+	/* an instantiation re-parsing this class's tokens (instantiate.c): it defines that instance */
+	cxx_entity *instance = c->instantiation_target, *instance_of = c->instantiation_template;
+	cxx_targ spec_args[32];
+	uint32_t nspec_args = 0;
 
+	c->instantiation_target = c->instantiation_template = NULL;
 	cxx_advance(c);	/* class / struct / union */
 	cxx_attributes_skip(c);
 	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON)) {
@@ -1679,6 +1785,8 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		if (cxx_is(c, LEX_TOKEN_LESS)) {	/* a specialization */
 			cxx_template_arguments_parse(c);
 			specialization = true;
+			nspec_args = c->ntargs < 32 ? c->ntargs : 32;
+			memcpy(spec_args, c->targs, nspec_args * sizeof *spec_args);
 		}
 	}
 	cxx_attributes_skip(c);
@@ -1704,6 +1812,9 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 					found = e;
 				}
 			}
+			/* template<class T = void> struct X;: defaults the definition may not repeat */
+			if (is_template && found && found->kind == CXX_ENTITY_TEMPLATE && cxx_is(c, LEX_TOKEN_SEMICOLON))
+				cxx_template_declared(c, found, c->scope);
 			c->last_type = found, c->last_type_dependent = found ? found->dependent : 1;
 		}
 		return;
@@ -1713,8 +1824,14 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		cxx_scope *target = q ? q : cxx_declaration_scope(c), *cs;
 		cxx_entity *found = name ? cxx_lookup_local(target, name) : NULL;
 		cxx_scope *outer = c->scope;
+		cxx_entity *explicit_instance = NULL;	/* an explicit specialization: its class */
 
-		if (specialization) {
+		if (instance) {
+			e = instance;
+			cs = cxx_scope_new(c, CXX_SCOPE_CLASS, c->scope, e);
+			e->members = cs;
+			specialization = false, is_template = false;
+		} else if (specialization) {
 			/* a partial or explicit specialization: its own scope, recorded with the template */
 			cxx_entity *te = found ? cxx_entity_template(found) : NULL;
 
@@ -1724,6 +1841,13 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 			if (te && !c->tentative) {
 				te->specs = realloc(te->specs, (te->nspecs + 1) * sizeof *te->specs);
 				te->specs[te->nspecs++] = cs;
+				if (c->template_depth)
+					cxx_template_partial(te);	/* (instances of te: unknown until matching is written) */
+				else {
+					explicit_instance = calloc(1, sizeof *explicit_instance);
+					explicit_instance->name = name, explicit_instance->kind = CXX_ENTITY_TYPE;
+					explicit_instance->ty = CXX_TY_UNKNOWN, explicit_instance->members = cs;
+				}
 			}
 			e = te;
 		} else {
@@ -1743,10 +1867,21 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 		}
 		if (is_template || c->template_depth)
 			cs->dependent = 1;
+		/* a class template's definition: what instantiating it re-parses */
+		if (is_template && !specialization && c->scope->kind == CXX_SCOPE_TEMPLATE)
+			cxx_template_define(c, e, c->scope, target, key_pos, 0, false);
 		/* the AST record: built and laid out when C's rules are C++'s for it (types.c) */
-		cxx_class_begin(c, specialization ? NULL : e, name, key_loc, is_union,
-				is_template || c->template_depth ? CXX_SKIP_TEMPLATE : specialization ? CXX_SKIP_SPECIALIZATION :
+		cxx_class_begin(c, specialization ? explicit_instance : e, name, key_loc, is_union,
+				is_template || c->template_depth ? CXX_SKIP_TEMPLATE : specialization && !explicit_instance ? CXX_SKIP_SPECIALIZATION :
 				cxx_is(c, LEX_TOKEN_COLON) ? CXX_SKIP_BASES : -1);
+		if (explicit_instance)
+			cxx_instance_register(c, e, spec_args, nspec_args, explicit_instance);
+		{
+			cxx_entity *built = specialization ? explicit_instance : e;
+
+			if (built && built->ty != CXX_TY_UNKNOWN && !c->tentative)
+				cxx_tag_scope_set(c, AST_TYPE(c->ast, built->ty)->aux, cs);
+		}
 		if (cxx_accept(c, LEX_TOKEN_COLON))
 			cxx_base_clause_parse(c, cs);
 		/* the injected-class-name */
@@ -1757,7 +1892,17 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 				inj->members = cs;
 				inj->dependent = cs->dependent;
 				if (e && inj != e)
-					inj->ty = e->ty;
+					inj->ty = specialization && explicit_instance ? explicit_instance->ty : e->ty;
+				if (is_template && !specialization && e)
+					inj->tmpl = e->tmpl;	/* X<U> inside X: instances of the same template */
+				if (instance && instance_of) {
+					/* in an instance, X<...> names the template it instantiates */
+					cxx_entity *tn = cxx_declare(c, cs, name, CXX_ENTITY_TEMPLATE);
+
+					if (tn)
+						tn->members = instance_of->members, tn->specs = instance_of->specs, tn->nspecs = instance_of->nspecs,
+						tn->tmpl = instance_of->tmpl;
+				}
 				if (is_template && !specialization) {
 					cxx_entity *ty = cxx_declare(c, cs, name, CXX_ENTITY_TYPE);
 
@@ -1769,7 +1914,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 					cxx_entity *tn = cxx_declare(c, cs, name, CXX_ENTITY_TEMPLATE);
 
 					if (tn && tn != e)
-						tn->members = e->members, tn->specs = e->specs, tn->nspecs = e->nspecs;
+						tn->members = e->members, tn->specs = e->specs, tn->nspecs = e->nspecs, tn->tmpl = e->tmpl;
 				}
 			}
 		}
@@ -1779,7 +1924,22 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template)
 			uint32_t pl;
 			uint8_t pv;
 
-			cxx_name_path_push(c, q || dep ? 0 : name, &pl, &pv);	/* (X::Y {...}: not tracked) */
+			if (instance || explicit_instance) {
+				/* an instance is named by its spelling (instantiate.c set it); an explicit
+				   specialization by its template's name and arguments */
+				pl = c->name_path_len, pv = c->name_path_valid;
+				if (explicit_instance) {
+					char sp[512];
+					size_t sl;
+
+					if (cxx_template_id_spell(c, e, spec_args, nspec_args, sp, sizeof sp, &sl) && sl < sizeof c->name_path) {
+						memcpy(c->name_path, sp, sl);
+						c->name_path_len = (uint32_t)sl;
+					} else
+						c->name_path_valid = 0;
+				}
+			} else
+				cxx_name_path_push(c, q || dep ? 0 : name, &pl, &pv);	/* (X::Y {...}: not tracked) */
 			cxx_class_body_parse(c, cs);
 			cxx_class_end(c);
 			cxx_name_path_pop(c, pl, pv);
@@ -1803,8 +1963,10 @@ static void cxx_class_body_parse(cxx *c, cxx_scope *cs)
 	cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
 	c->class_depth--;
 	c->implicit_typename = implicit;
-	if (!c->class_depth && !c->tentative)
+	if (!c->class_depth && !c->tentative && !c->instantiating)
 		cxx_late_parse_all(c, late_from);	/* the outermost class is complete */
+	else if (c->instantiating && !c->class_depth)
+		c->nlate = late_from;	/* an instance: types and layout only, its function bodies are not parsed */
 }
 
 static void cxx_enum_specifier_parse(cxx *c)
@@ -1909,6 +2071,14 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 		}
 		if (f && (flags & DS_VIRTUAL) && context == CXX_CONTEXT_CLASS)
 			cxx_class_skip(c, CXX_SKIP_VIRTUAL);	/* (a vptr: C++'s layout, not built yet) */
+		/* a variable's definition needs its type complete (an instance: its body now) */
+		if (!f && !(flags & (DS_TYPEDEF | DS_FRIEND)) && context != CXX_CONTEXT_CLASS && t != CXX_TY_UNKNOWN && !c->tentative) {
+			qty et = t;
+
+			while (AST_TYPE_KIND(c->ast, et) == TY_ARRAY)
+				et = AST_TYPE(c->ast, et)->base;
+			cxx_type_require_complete(c, et);
+		}
 		/* what it declares (not a constructor or destructor: they have no name to look up) */
 		if (name > 1 && !q && !(cs && cs->owner && cs->owner->name == name)) {
 			int kind = (flags & DS_TYPEDEF) ? CXX_ENTITY_TYPE :
@@ -1926,6 +2096,16 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 			}
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? S_FUNC : S_VAR, name, t, name_loc);
+			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
+			    cxx_is(c, LEX_TOKEN_EQUAL)) {
+				int64_t v;
+
+				cxx_advance(c);
+				v = cxx_literal_value(c);
+				c->pos--;
+				if (v >= 0 && !c->tentative)
+					e->value = v, e->has_value = 1;
+			}
 		}
 		if (member && !f && name > 1) {
 			/* a data member: its bit-field width (a literal) comes after the declarator */
@@ -2181,6 +2361,12 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 	if (cxx_accept(c, LEX_TOKEN_SEMICOLON))
 		return;
 	cxx_simple_declaration_parse(c, context, NULL);
+}
+
+/* an instance's class (instantiate.c): the class-specifier at the template's class-key */
+VPRIV void cxx_class_specifier_for_instance(cxx *c)
+{
+	cxx_class_specifier_parse(c, false);
 }
 
 VPRIV void cxx_translation_unit_parse(cxx *c)

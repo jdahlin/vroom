@@ -66,6 +66,23 @@ VPRIV void cxx_tokens_read(cxx *c)
 			c->tok = realloc(c->tok, (cap *= 2) * sizeof(cxx_token));
 		cxx_token *x = &c->tok[c->ntok];
 		x->s = t.s, x->len = t.len, x->id = t.id, x->loc = t.loc, x->kind = t.kind, x->kw = 0;
+		/* >> >= >>= as one-character pieces: a > may close template arguments, and the token array
+		   stays as read (an instantiation re-parses a template's tokens); the expression parser
+		   joins adjacent pieces where they are operators (cxx_operator_at) */
+		if (t.kind == LEX_TOKEN_GREATER_GREATER || t.kind == LEX_TOKEN_GREATER_EQUAL || t.kind == LEX_TOKEN_GREATER_GREATER_EQUAL) {
+			static const char *const pieces = ">>=";
+			const char *sp = t.kind == LEX_TOKEN_GREATER_EQUAL ? ">=" : t.kind == LEX_TOKEN_GREATER_GREATER ? ">>" : pieces;
+
+			if (c->ntok + 4 >= cap)
+				c->tok = realloc(c->tok, (cap *= 2) * sizeof(cxx_token));
+			for (uint32_t k = 0; k < t.len; k++) {
+				cxx_token *y = &c->tok[c->ntok++];
+
+				y->s = t.s + k, y->len = 1, y->id = 0, y->loc = t.loc + k, y->kw = 0;
+				y->kind = sp[k] == '>' ? LEX_TOKEN_GREATER : LEX_TOKEN_EQUAL;
+			}
+			continue;
+		}
 		if (t.kind == LEX_TOKEN_EOF)
 			break;
 		if (t.kind == LEX_TOKEN_IDENTIFIER)
@@ -139,8 +156,8 @@ VPRIV void cxx_expect_kw(cxx *c, int kw)
 		cxx_fail(c, "expected '%s'", cxx_keyword_names[kw]);
 }
 
-/* the in-place edits a tentative parse may have to undo */
-static void cxx_token_edit(cxx *c, uint32_t i, int kind, uint32_t skip)
+/* the in-place edits a tentative parse may have to undo (none since >> is split at read; kept for the log) */
+static __attribute__((unused)) void cxx_token_edit(cxx *c, uint32_t i, int kind, uint32_t skip)
 {
 	if (c->nundo == c->cundo)
 		c->undo = realloc(c->undo, (c->cundo = c->cundo ? c->cundo * 2 : 64) * sizeof(cxx_undo));
@@ -154,21 +171,30 @@ static void cxx_token_edit(cxx *c, uint32_t i, int kind, uint32_t skip)
 
 VPRIV bool cxx_accept_greater(cxx *c)
 {
-	switch (cxx_kind(c)) {
-	case LEX_TOKEN_GREATER:
-		cxx_advance(c);
-		return true;
-	case LEX_TOKEN_GREATER_GREATER:
-		cxx_token_edit(c, c->pos, LEX_TOKEN_GREATER, 1);
-		return true;
-	case LEX_TOKEN_GREATER_EQUAL:
-		cxx_token_edit(c, c->pos, LEX_TOKEN_EQUAL, 1);
-		return true;
-	case LEX_TOKEN_GREATER_GREATER_EQUAL:
-		cxx_token_edit(c, c->pos, LEX_TOKEN_GREATER_EQUAL, 1);
-		return true;
+	return cxx_accept(c, LEX_TOKEN_GREATER);	/* (>> and >= arrive as pieces: tokens_read) */
+}
+
+/* the operator here, joining > pieces that are adjacent in the source: its kind and token count */
+VPRIV int cxx_operator_at(cxx *c, uint32_t *ntok)
+{
+	cxx_token *t = cxx_peek(c, 0), *n = cxx_peek(c, 1), *n2 = cxx_peek(c, 2);
+
+	*ntok = 1;
+	if (t->kind != LEX_TOKEN_GREATER || n->s != t->s + 1)
+		return t->kind;
+	if (n->kind == LEX_TOKEN_GREATER) {
+		if (n2->kind == LEX_TOKEN_EQUAL && n2->s == n->s + 1) {
+			*ntok = 3;
+			return LEX_TOKEN_GREATER_GREATER_EQUAL;
+		}
+		*ntok = 2;
+		return LEX_TOKEN_GREATER_GREATER;
 	}
-	return false;
+	if (n->kind == LEX_TOKEN_EQUAL) {
+		*ntok = 2;
+		return LEX_TOKEN_GREATER_EQUAL;
+	}
+	return t->kind;
 }
 
 VPRIV void cxx_skip_balanced(cxx *c)

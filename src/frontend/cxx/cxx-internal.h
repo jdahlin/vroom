@@ -88,6 +88,22 @@ enum {
 };
 
 typedef struct cxx_scope cxx_scope;
+typedef struct cxx_template cxx_template;
+
+/* a template parameter (in its template scope, in order) */
+typedef struct cxx_tparam {
+	uint8_t kind;		/* 1 type, 2 value, 3 template */
+	uint8_t pack;
+	uint32_t name;
+	uint32_t def_b, def_e;	/* its default argument's tokens (0, 0: none) */
+} cxx_tparam;
+
+/* a template argument, as far as it is known: a type or an integer value */
+typedef struct cxx_targ {
+	uint8_t kind;		/* 0 unknown, 1 type, 2 value */
+	qty t;
+	int64_t v;
+} cxx_targ;
 
 /* a type the parser cannot give yet (dependent, a template-id, auto, decltype): qty 0 is void */
 #define CXX_TY_UNKNOWN ((qty)0xFFFFFFFFu)
@@ -98,7 +114,11 @@ typedef struct cxx_entity {
 	uint8_t dependent;		/* a type that depends on template parameters (its members are unknown) */
 	cxx_scope *members;		/* namespace or class: its scope; a typedef to a class: that class's scope */
 	qty ty;				/* a type: its AST type (CXX_TY_UNKNOWN: not known yet) */
+	cxx_template *tmpl;		/* a class or alias template: what instantiating it needs (instantiate.c) */
+	struct cxx_instance *instance;	/* an instance: its cache entry (completed on demand) */
 	uint32_t sym;			/* a variable or function: its AST symbol (0: none yet) */
+	int64_t value;			/* a constant (value template argument, constexpr/const integer): its value */
+	uint8_t has_value;
 	cxx_scope **specs;		/* class template: its partial and explicit specializations' scopes */
 	uint32_t nspecs;
 	struct cxx_entity *next;	/* the next entity with the same name in the same scope */
@@ -119,6 +139,8 @@ struct cxx_scope {
 	cxx_scope **used;
 	uint32_t nused, cused;
 	uint8_t has_dependent_base;
+	cxx_tparam *tparams;		/* a template scope: its parameters */
+	uint32_t ntparams;
 };
 
 typedef struct cxx_undo { uint32_t index; cxx_token token; } cxx_undo;
@@ -164,6 +186,22 @@ typedef struct cxx {
 		uint32_t classes, classes_laid_out, classes_skipped[8];
 		uint32_t declarations, declarations_typed, symbols;
 	} stats;
+	/* instantiation (instantiate.c) */
+	cxx_targ *targs;		/* the last template argument list's arguments */
+	uint32_t ntargs, ctargs;
+	void *instances;		/* the cache: (template, arguments) -> instance, a table of pointers (instantiate.c) */
+	uint32_t ninstances, cinstances;
+	uint32_t instantiating;		/* > 0: re-parsing a template's tokens (function bodies are skipped) */
+	cxx_entity *instantiation_target;	/* the class an instantiation's class-specifier defines */
+	cxx_entity *instantiation_template;	/* ... and the template it instantiates */
+	cxx_scope **tag_scope;		/* per AST tag: the class's scope (a type parameter bound to it: T::member) */
+	uint32_t ntag_scope;
+	void **tag_instance;		/* per AST tag: an instance not completed yet (instantiate.c) */
+	uint32_t ntag_instance;
+	char **tag_spelling;		/* per AST tag: its name as C++ source (the layout dump), NULL: none */
+	uint32_t ntag_spelling;
+	uint32_t instances_made, instances_failed;
+	uint8_t trace;			/* VCC_CXX_TRACE: each instantiation to stderr */
 	int layout_fd;			/* VCC_CXX_LAYOUT: static_asserts of the layouts, for clang (-1: off) */
 	char name_path[512];		/* the qualified name of the scope being parsed (for the layout dump) */
 	uint32_t name_path_len;
@@ -185,7 +223,8 @@ static inline bool cxx_accept_kw(cxx *c, int kw) { if (cxx_is_kw(c, kw)) { cxx_a
 VPRIV __attribute__((noreturn, format(printf, 2, 3))) void cxx_fail(cxx *c, const char *fmt, ...);
 VPRIV void cxx_expect(cxx *c, int kind);
 VPRIV void cxx_expect_kw(cxx *c, int kw);
-VPRIV bool cxx_accept_greater(cxx *c);	/* a > ending template arguments: also the first half of >>, >=, >>= */
+VPRIV bool cxx_accept_greater(cxx *c);	/* a > ending template arguments */
+VPRIV int cxx_operator_at(cxx *c, uint32_t *ntok);	/* the operator here, > pieces joined: kind, tokens */
 VPRIV void cxx_skip_balanced(cxx *c);	/* from an opening ( [ { to after its closing one */
 VPRIV uint32_t cxx_keyword_of(uint32_t id);
 
@@ -233,6 +272,24 @@ VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, qty
 VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, qty t, uint32_t loc);
 VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);
 VPRIV void cxx_name_path_pop(cxx *c, uint32_t saved_len, uint8_t saved_valid);
+
+/* instantiation (instantiate.c) */
+VPRIV cxx_template *cxx_template_of(cxx_entity *e);	/* (allocates) */
+VPRIV void cxx_template_define(cxx *c, cxx_entity *e, cxx_scope *params, cxx_scope *home, uint32_t pos, uint32_t end, bool alias);
+VPRIV void cxx_template_partial(cxx_entity *e);
+VPRIV void cxx_template_declared(cxx *c, cxx_entity *e, cxx_scope *params);
+VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack, uint32_t def_b, uint32_t def_e);
+VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
+VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
+VPRIV void cxx_type_require_complete(cxx *c, qty t);
+VPRIV cxx_scope *cxx_type_class_scope(cxx *c, qty t);
+VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
+VPRIV void cxx_instance_register(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, cxx_entity *inst);
+VPRIV bool cxx_type_spell(cxx *c, qty t, char *buf, size_t cap, size_t *len);
+VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n);
+VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s);
+VPRIV void cxx_class_specifier_for_instance(cxx *c);
+VPRIV bool cxx_template_id_spell(cxx *c, cxx_entity *te, const cxx_targ *a, uint32_t n, char *buf, size_t cap, size_t *len);
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);
