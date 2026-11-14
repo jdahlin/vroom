@@ -7,8 +7,10 @@
 # vcc-builtins.py (Homebrew's clang).
 #
 #   ci/premerge.sh arm64    vcc build, the C suites under qemu, fast harnesses
+#   ci/premerge.sh x86      x86-64 host: the steps needing one (x86 runner)
 #   ci/premerge.sh asan     ASan+UBSan build: vcc suite, diag, stress, vccd, vlink-bad, fuzz-regress
-#   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), vccd
+#   ci/premerge.sh tsan     TSan build: vcc suite (threaded emitter), VIR x86
+#   ci/premerge.sh tsan-vccd  TSan build: vccd service and stress
 #   ci/premerge.sh wasm     the C suites for wasm64 (emcc + node); DISABLED, manual (doc/PLAN-wasm.md)
 #   ci/premerge.sh win64    Windows x64 (MinGW-w64) under Wine: suites, vlink PE, libvccrt, var COFF;
 #                           exports the programs for the native Windows job (doc/PLAN-win64.md WIN9)
@@ -17,7 +19,7 @@
 # Each step's output goes to build/linux/ci-logs/STEP.log (CI uploads it on
 # failure); the script runs every step and fails at the end if any failed.
 set -u
-JOB=${1:?usage: ci/premerge.sh arm64|asan|tsan|wasm|win64}
+JOB=${1:?usage: ci/premerge.sh arm64|x86|asan|tsan|tsan-vccd|wasm|win64|win64}
 cd "$(dirname "$0")/.."
 J=${CI_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 BUILD=$(python3 -c 'import sys; sys.path.insert(0, "bench"); import hostenv; print(hostenv.BUILD)')
@@ -68,12 +70,6 @@ build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
-	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
-		step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
-		step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
-		step interrupt python3 bench/vcc-interrupt.py
-		step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
-	fi
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
@@ -127,9 +123,6 @@ arm64)
 	step extint-alias python3 bench/vcc-extint.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/extint-alias"
 	step bitint-constants python3 bench/vcc-bitint-constants.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-constants"
 	step bitint-float python3 bench/vcc-bitint-float.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-float" --cflag=-O3
-	if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
-		step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3
-	fi
 	step pic          python3 bench/vcc-pic.py
 	step vas-obj      python3 bench/vas-obj.py
 	step vlink-opts   python3 bench/vlink-opts.py
@@ -146,6 +139,15 @@ arm64)
 	step ldconst      python3 bench/vcc-ldconst.py
 	step cfi          python3 bench/vcc-cfi.py -j "$J"
 	step dwarf        python3 bench/vcc-dwarf.py -j "$J"
+	;;
+x86)
+	# vcc as an x86-64 program on an x86-64 host: the steps that need one
+	build vcc
+	step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
+	step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
+	step interrupt python3 bench/vcc-interrupt.py
+	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
+	step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3
 	;;
 asan)
 	build vcc-asan
@@ -179,6 +181,11 @@ tsan)
 	# (init_large: 10 s was not enough on the x86-64 runner)
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
 	step task-test    "$B/task-test"
+	;;
+tsan-vccd)
+	# split from tsan for wall time: these two are ~325 s of TSan's ~490 s
+	build vcc-tsan
+	B=$(dirname "$BUILD")/src-tsan
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step stress-vccd  python3 bench/vcc-stress.py --vccd --bin-dir "$B"
 	;;
