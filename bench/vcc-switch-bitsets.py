@@ -17,6 +17,30 @@ POSITIVE = ['bs32', 'bs64', 'bs_negative', 'bs_min', 'bs_umax', 'bs_u32',
 NEGATIVE = ['bs_few', 'bs_nonstacked', 'bs_dense', 'bs_wide', 'bs_shared_default']
 
 
+
+def inverse_guard(body, arch, shift):
+    """Loop rotation can branch into the in-range arm instead of past it.
+
+    Require that target before the shift and an out-of-range fallthrough
+    ending in a return or a jump past the shift, so merely finding an
+    unsigned branch cannot hide an unguarded membership test.
+    """
+    branch = r'\bb\.ls\s+(\S+)' if arch == 'aarch64' else r'\bjbe\s+(\S+)'
+    for match in re.finditer(branch, body[:shift]):
+        target = re.search(r'^' + re.escape(match[1]) + r':', body, re.M)
+        if not target or not match.end() < target.start() < shift:
+            continue
+        fallthrough = body[match.end():target.start()]
+        if re.search(r'\bretq?\s*(?:\n|$)', fallthrough):
+            return True
+        jump = r'\bb\s+(\S+)' if arch == 'aarch64' else r'\bjmpq?\s+(\S+)'
+        for exit in re.finditer(jump, fallthrough):
+            destination = re.search(r'^' + re.escape(exit[1]) + r':', body, re.M)
+            if destination and destination.start() > shift:
+                return True
+    return False
+
+
 def check(text, arch, enabled):
     wasm = arch.startswith('wasm')
     shift = r'\bi(?:32|64)\.shr_u\b' if wasm else r'\b(?:lsr|shrq?|shrl)\s'
@@ -28,7 +52,10 @@ def check(text, arch, enabled):
         if bool(shifts) != expected:
             raise RuntimeError(f'{name}: expected bitset={expected}\n{body}')
         if expected:
-            if len(shifts) != 1 or not re.search(guard, body[:shifts[0].start()]):
+            guarded = bool(re.search(guard, body[:shifts[0].start()]))
+            if not wasm and not guarded:
+                guarded = inverse_guard(body, arch, shifts[0].start())
+            if len(shifts) != 1 or not guarded:
                 raise RuntimeError(f'{name}: missing unsigned guard before single shift\n{body}')
             if wasm and 'br_table' in body:
                 raise RuntimeError(f'{name}: table retained beside membership test\n{body}')
