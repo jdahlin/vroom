@@ -112,6 +112,17 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 								  AST_TYPE_KIND(c->ast, x->ty) == TY_FUNC)) {
 			cxx_et(c, CXX_TY_UNKNOWN, false);
 			c->ecallee = e;	/* functions: the call picks one */
+			bool one = x == e && x->kind == CXX_ENTITY_VALUE;
+
+
+			for (cxx_entity *y = x->next; y && one; y = y->next)	/* (redeclarations: the same function) */
+				one = y->kind != CXX_ENTITY_VALUE || y->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, y->ty) != TY_FUNC ? y->kind != CXX_ENTITY_FUNCTION_TEMPLATE && y->kind != CXX_ENTITY_VALUE : y->ty == x->ty;
+			if (!cxx_is(c, LEX_TOKEN_LEFT_PAREN) && !cxx_is(c, LEX_TOKEN_LESS) && one &&
+			    (!x->member_of || x->fn_static) && !c->template_depth) {
+				/* one function, not called: the function, an lvalue (it decays to a pointer to it) */
+				cxx_et(c, x->ty, true);
+				cxx_gen_function_value(c, x, c->tok[c->pos ? c->pos - 1 : 0].loc);
+			}
 			return;
 		}
 		if (x->kind == CXX_ENTITY_VALUE && !v)
@@ -123,12 +134,16 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	if (v)
 		cxx_gen_variable(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);
-	if (v && v->has_value && !v->placeholder && !v->sym && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN) {
-		/* an enumerator (or a constant with no object): its value, of the enumeration's underlying type */
+	if (v && v->has_value && !v->placeholder && !c->enode && c->gen && v->ty != CXX_TY_UNKNOWN &&
+	    (AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM || (AST_TYPE_KIND(c->ast, v->ty) >= TY_BOOL && AST_TYPE_KIND(c->ast, v->ty) <= TY_ULLONG))) {
+		/* an enumerator (or a constant with no object, or one whose object was not made: a static constexpr
+		   member): its value, of the enumeration's underlying type */
 		qty vt = AST_TYPE_KIND(c->ast, v->ty) == TY_ENUM ? AST_TYPE(c->ast, v->ty)->base : QUNQ(v->ty);
 
 		cxx_gen_integer(c, v->value, vt, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	}
+	if (v && !v->field_of && !v->sym && v->nsdmi_pos && !c->enode && cxx_gen_on(c))
+		c->enode = cxx_gen_static_member_value(c, v, c->tok[c->pos ? c->pos - 1 : 0].loc);	/* (a static constant member: its initializer) */
 	if (v && v->field_of && c->gen_this && !c->enode && cxx_gen_on(c)) {	/* a data member of this */
 		uint32_t loc = c->tok[c->pos ? c->pos - 1 : 0].loc;
 
@@ -315,16 +330,29 @@ static void cxx_type_then_init(cxx *c)
 }
 
 
+/* can a constant of type from (value v, held as int64_t) be one of type to: a 128-bit integer takes it
+   sign-extended, which is wrong for an unsigned 64-bit value with its top bit set */
+static bool cxx_const_widens(cxx *c, qty from, qty to, int64_t v)
+{
+	int tk = to != CXX_TY_UNKNOWN ? AST_TYPE_KIND(c->ast, to) : -1;
+
+	if (tk != TY_INT128 && tk != TY_UINT128)
+		return true;
+	if (v >= 0)
+		return true;
+	return from != CXX_TY_UNKNOWN && cc_type_is_signed(c->ast, from) && AST_TYPE_KIND(c->ast, from) != TY_ENUM;
+}
+
 /* T(x), T{x}, T(): a prvalue of type T; an integer constant when x is one (T(): zero) */
 static void cxx_functional_cast_type(cxx *c, qty cast_to)
 {
-	bool k = c->carg_const, zero = c->ncargs == 0;
+	bool k = c->carg_const && cxx_const_widens(c, c->ncargs == 1 ? c->cargs[0] : CXX_TY_UNKNOWN, cast_to, c->carg_value), zero = c->ncargs == 0;
 	int64_t v = zero ? 0 : c->carg_value;
 	uint32_t xn = c->ncargs == 1 ? c->carg_nodes[0] : 0;
 
 	cxx_et(c, cast_to, false);
 	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
-	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
+	    ((AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128) || AST_TYPE_KIND(c->ast, cast_to) == TY_ENUM))
 		cxx_ec(c, cast_to, v);
 	else
 		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
@@ -451,6 +479,7 @@ static void cxx_builtin_call_parse(cxx *c)
 
 	cxx_advance(c);
 	cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+	c->bconst = 0;
 	while (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
 		/* Args...: a bound pack of types, each a type argument (__is_constructible(T, Args...)) */
 		if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) && cxx_peek(c, 1)->kind == LEX_TOKEN_ELLIPSIS && !c->tentative &&
@@ -506,7 +535,7 @@ static void cxx_builtin_call_parse(cxx *c)
 		} else {
 			cxx_initializer_parse(c);
 			if (!nb && n == 0)
-				first = c->etype;
+				first = c->etype, c->bconst = c->econst, c->bvalue = c->evalue;
 			if (nb < 4 && nb != UINT32_MAX)
 				bn[nb++] = c->enode;
 			else
@@ -1184,7 +1213,7 @@ static void cxx_primary_expression_parse(cxx *c)
 			cxx_fail(c, "expected '>'");
 		cxx_paren_expression_parse(c);
 		{
-			bool k = c->econst;
+			bool k = c->econst && cxx_const_widens(c, c->etype, cast_to, c->evalue);
 			int64_t v = c->evalue;
 
 			uint32_t xn = c->enode;
@@ -1192,7 +1221,7 @@ static void cxx_primary_expression_parse(cxx *c)
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;
 			cxx_et(c, cast_to, false);	/* (a reference type: an lvalue of its referent) */
-			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128)
 				cxx_ec(c, cast_to, v);
 			else if (t->kw == CXX_KW_static_cast)
 				cxx_gen_cast(c, xn, cast_to, t->loc);
@@ -1294,7 +1323,7 @@ static void cxx_primary_expression_parse(cxx *c)
 
 					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
-					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 					gen_node = c->enode;
@@ -1333,7 +1362,7 @@ static void cxx_primary_expression_parse(cxx *c)
 
 					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
-					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 					gen_node = c->enode;
@@ -1357,6 +1386,29 @@ static void cxx_primary_expression_parse(cxx *c)
 			uint32_t bn[4], nb = c->nbnodes;
 
 			memcpy(bn, c->bnodes, sizeof bn);
+			if (nb == 1 && c->bconst && c->bfirst != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bfirst) >= TY_BOOL &&
+			    AST_TYPE_KIND(c->ast, c->bfirst) <= TY_UINT128 && ((t->len == 19 && !memcmp(t->s, "__builtin_popcountg", 19)) ||
+			    (t->len == 14 && (!memcmp(t->s, "__builtin_clzg", 14) || !memcmp(t->s, "__builtin_ctzg", 14))))) {
+				/* the generic bit counts of a constant (the value is sign-extended to its type's width) */
+				uint32_t w = (uint32_t)AST_TYPE(c->ast, QUNQ(c->bfirst))->size * 8;
+				uint64_t lo = (uint64_t)c->bvalue, hi = c->bvalue < 0 ? ~0ull : 0;
+				int64_t r = -1;
+
+				if (w < 64)
+					lo &= (1ull << w) - 1, hi = 0;
+				if (w <= 64)
+					hi = 0;
+				if (t->s[11] == 'o')
+					r = __builtin_popcountll(lo) + (w > 64 ? __builtin_popcountll(hi) : 0);
+				else if (t->s[10] == 'c' && t->s[11] == 'l' && (lo || hi))
+					r = w > 64 ? (hi ? __builtin_clzll(hi) : 64 + __builtin_clzll(lo)) - (int)(128 - w) : __builtin_clzll(lo) - (int)(64 - w);
+				else if (t->s[11] == 't' && (lo || hi))
+					r = lo ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
+				if (r >= 0) {
+					cxx_ec(c, cc_type_basic(TY_INT), r);
+					return;
+				}
+			}
 			if (nb != UINT32_MAX && !c->tentative && cxx_builtin_function_type(c, t->s, t->len, nb, c->bfirst, &rt)) {
 				cxx_et(c, rt, false);
 				cxx_gen_builtin(c, t->s, t->len, bn, nb, t->loc);
@@ -1419,7 +1471,7 @@ static void cxx_primary_expression_parse(cxx *c)
 
 					memcpy(an, c->carg_nodes, sizeof an);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
-					gen_class = !braced || (c->ctor_found && c->ctor_picked);	/* (a list for an aggregate: not built yet) */
+					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					if (gen_class)
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 					gen_node = c->enode;
@@ -1520,6 +1572,18 @@ static void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
+					if (!c->ncargs && !c->econst && !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
+					    AST_TYPE_KIND(c->ast, c->etype) >= TY_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= TY_ULLONG) {
+						/* f<args>() of a constexpr function template: its value, a constant */
+						cxx_entity *te = cxx_entity_kind_find(set, CXX_ENTITY_FUNCTION_TEMPLATE);
+						qty rt = QUNQ(c->etype);
+						int64_t v;
+
+						if (te && cxx_ftemplate_const_call(c, te, xa, nx, &v)) {
+							cxx_ec(c, rt, rt == cc_type_basic(TY_BOOL) ? v != 0 : v);
+							continue;
+						}
+					}
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
 						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
@@ -1540,6 +1604,8 @@ static void cxx_postfix_expression_parse1(cxx *c)
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
 						c->gen_vmode = vmode, cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+					else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
+						cxx_gen_indirect_call(c, callee_node, anodes, an, cloc);	/* through a pointer to a function */
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
 					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {
@@ -1884,7 +1950,7 @@ static void cxx_cast_expression_parse(cxx *c)
 		}
 		cxx_cast_expression_parse(c);
 		{
-			bool k = c->econst;
+			bool k = c->econst && cxx_const_widens(c, c->etype, cast_to, c->evalue);
 			int64_t v = c->evalue;
 
 			uint32_t xn = c->enode, cloc = c->tok[c->pos ? c->pos - 1 : 0].loc;
@@ -1892,7 +1958,7 @@ static void cxx_cast_expression_parse(cxx *c)
 			if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 				c->eunsure = 1;	/* ((void)x: a type whatever x is; a tentative parse types nothing) */
 			cxx_et(c, cast_to, false);
-			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_ULLONG)
+			if (k && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) >= TY_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= TY_UINT128)
 				cxx_ec(c, cast_to, v);
 			else
 				cxx_gen_cast(c, xn, cast_to, cloc);

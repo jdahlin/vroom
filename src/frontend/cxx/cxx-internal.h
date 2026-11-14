@@ -148,6 +148,9 @@ typedef struct cxx_entity {
 	uint16_t ndefaults;		/* a function: how many trailing parameters have default arguments */
 	uint32_t *defs;			/* ... their tokens (begin, end pairs), parsed again where a call leaves them out; NULL: not recorded */
 	cxx_scope *def_scope;		/* ... and the scope they were declared in */
+	uint32_t nsdmi_pos;		/* a data member's default initializer: the position of its = or { (0: none recorded) */
+	cxx_scope *nsdmi_scope;		/* ... the class scope it is parsed in */
+	uint8_t has_nsdmi;		/* ... it has one (recorded or not: a template's pattern is not) */
 	uint16_t placeholder;		/* a value parameter of a partial specialization being matched: its index + 1 */
 	/* a parameter pack bound to its arguments (instantiate.c): an expansion re-parses its pattern once
 	   per element, pack_index then the element (ty, value) */
@@ -425,6 +428,8 @@ typedef struct cxx {
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
 	uint8_t eobj_arrow;		/* ... through a pointer (p->f) */
 	uint32_t carg_nodes[16];	/* the last argument list's nodes */
+	uint8_t bconst;			/* a builtin call's first argument: a constant (bvalue) */
+	int64_t bvalue;
 #define CXX_BRACE_MAX 256
 	uint32_t brace_nodes[CXX_BRACE_MAX], brace_n;	/* the last braced list's element nodes (flat lists) */
 	uint8_t skip_explicit;		/* the call is an implicit conversion: explicit constructors are not candidates */
@@ -595,6 +600,9 @@ VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_k
 VPRIV void cxx_gen_vtables_emit(cxx *c);
 VPRIV bool cxx_mangle_class_data(cxx *c, const char *kind, qty cls, char *buf, size_t cap);
 VPRIV void cxx_gen_reinterpret(cxx *c, uint32_t x, qty to, uint32_t loc);
+VPRIV void cxx_gen_indirect_call(cxx *c, uint32_t callee, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV uint32_t cxx_gen_static_member_value(cxx *c, const cxx_entity *v, uint32_t loc);
+VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc);
 VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name, qty class_type, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV bool cxx_gen_class_ok(cxx *c, qty t);
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, qty t, const uint32_t *args, uint32_t nargs, uint32_t loc);
@@ -619,6 +627,7 @@ VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
 					    uint32_t nparams, bool is_const);
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);
+VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out);
 VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *v);
 VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n);
 VPRIV void cxx_ftemplate_requires(struct cxx_ftemplate *f, uint32_t pos);

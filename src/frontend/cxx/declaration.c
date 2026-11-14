@@ -174,8 +174,27 @@ static qty cxx_type_transform(cxx *c, const char *n, size_t len, qty t)
 			t = AST_TYPE(c->ast, t)->base;
 		return t;
 	}
+	if (IS("__underlying_type"))
+		return x->kind == TY_ENUM ? x->base : CXX_TY_UNKNOWN;
+	if (IS("__make_signed") || IS("__make_unsigned")) {
+		/* the integer type of the same size and the other signedness (cv kept); an enumeration's by its size */
+		bool to_unsigned = n[7] == 'u';
+		int k = x->kind == TY_ENUM ? AST_TYPE_KIND(c->ast, x->base) : x->kind, r;
+
+		if (ref || k < TY_CHAR || k > TY_UINT128)
+			return CXX_TY_UNKNOWN;
+		switch (k) {
+		case TY_CHAR: case TY_SCHAR: case TY_UCHAR: r = to_unsigned ? TY_UCHAR : TY_SCHAR; break;
+		case TY_SHORT: case TY_USHORT: r = to_unsigned ? TY_USHORT : TY_SHORT; break;
+		case TY_INT: case TY_UINT: r = to_unsigned ? TY_UINT : TY_INT; break;
+		case TY_LONG: case TY_ULONG: r = to_unsigned ? TY_ULONG : TY_LONG; break;
+		case TY_LLONG: case TY_ULLONG: r = to_unsigned ? TY_ULLONG : TY_LLONG; break;
+		default: r = to_unsigned ? TY_UINT128 : TY_INT128; break;
+		}
+		return QT(QI(cc_type_basic(r)), QQ(t));
+	}
 #undef IS
-	return CXX_TY_UNKNOWN;	/* (__make_signed, __make_unsigned, __underlying_type, __remove_restrict) */
+	return CXX_TY_UNKNOWN;	/* (__remove_restrict) */
 }
 
 /* the entity a name denotes in qualifier (NULL: unqualified); NULL if none */
@@ -581,7 +600,7 @@ static void cxx_class_specifier_parse(cxx *c, bool is_template);
 static void cxx_enum_specifier_parse(cxx *c);
 
 enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR = 16, DS_DEFINED_CLASS = 32, DS_STATIC = 64,
-       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024 };
+       DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024, DS_INLINE = 2048 };
 
 static bool cxx_kw_is_simple_type(int kw)
 {
@@ -829,6 +848,9 @@ static int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_temp
 			cxx_advance(c);
 		} else if (kw == CXX_KW_virtual) {
 			flags |= DS_VIRTUAL;
+			cxx_advance(c);
+		} else if (kw == CXX_KW_inline || kw == CXX_KW___inline || kw == CXX_KW___inline__) {
+			flags |= DS_INLINE;
 			cxx_advance(c);
 		} else if (kw == CXX_KW_typedef) {
 			flags |= DS_TYPEDEF;
@@ -3115,6 +3137,8 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				e->member_of = cxx_declaration_scope(c);
 			if (e && f && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC))
 				e->fn_static = 1;
+			if (e && f && kind == CXX_ENTITY_VALUE && (flags & (DS_INLINE | DS_CONSTEXPR)))
+				e->fn_inline = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
 			if (e && f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !is_friend && !(flags & DS_STATIC))
 				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);
 			if (e && f && kind == CXX_ENTITY_VALUE && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))
@@ -3130,6 +3154,9 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				gen_var = e;
 			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
 				c->ast->syms[e->sym].sc = SC_STATIC;	/* (internal linkage) */
+			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
+			    cxx_is(c, LEX_TOKEN_EQUAL) && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !c->tentative && !c->template_depth)
+				e->nsdmi_pos = c->pos, e->nsdmi_scope = c->scope;	/* (a static constant member's initializer: cxx_gen_static_member_value) */
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (QQ(t) & Q_CONST))) &&
 			    cxx_is(c, LEX_TOKEN_EQUAL)) {
 				int64_t v;
@@ -3159,8 +3186,19 @@ static void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope
 				w = c->econst && c->evalue >= 0 && c->evalue <= 64 ? (int)c->evalue : -2;
 			}
 			cxx_class_field(c, name, t, name_loc, w);
-			if (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE))
+			if (cxx_is(c, LEX_TOKEN_EQUAL) || cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 				cxx_class_member_traits(c, CXX_MEMBER_INITIALIZER);	/* (a default member initializer) */
+				cxx_entity *fe = c->tentative ? NULL : cxx_lookup_local(cxx_declaration_scope(c), name);
+
+				while (fe && !(fe->kind == CXX_ENTITY_VALUE && fe->field_of))
+					fe = fe->next;
+				if (fe) {
+					/* (parsed again where a constructor applies it: cxx_gen_nsdmi) */
+					fe->has_nsdmi = 1;
+					if (!c->template_depth)
+						fe->nsdmi_pos = c->pos, fe->nsdmi_scope = c->scope;
+				}
+			}
 		}
 		if (context == CXX_CONTEXT_CLASS) {
 			/* pure, = default, = delete, bit-field width, override/final */

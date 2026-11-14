@@ -1617,6 +1617,8 @@ typedef struct cxx_ftemplate {
 	uint32_t nvspecs;
 	qty sig;		/* its function type, placeholders for the parameters (CXX_TY_UNKNOWN: not known) */
 	uint8_t evaluated, packs;
+	cxx_fdone *consts;	/* constexpr calls f<args>() evaluated (cxx_ftemplate_const_call): value, viable 1 known, -1 not */
+	uint32_t nconsts, cconsts;
 } cxx_ftemplate;
 
 /*
@@ -2864,6 +2866,92 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args, uint
 	c->instantiating--, c->body_depth--;
 	cxx_outer_restore(c, &o);
 	f->done[at].viable = known ? 1 : -1, f->done[at].value = v;
+	*out = v;
+	return known;
+}
+
+/*
+ * f<args>() of a constexpr function template, every template argument given and no function parameter:
+ * its value, when its body is declarations of aliases (using X = ...; typedef ...; static_assert) and
+ * then return expr; with expr a constant.  The template's own tokens are parsed again with the arguments
+ * bound, as a variable template's initializer is.  False: not known.
+ */
+VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args, uint32_t n, int64_t *out)
+{
+	cxx_ftemplate *f = e ? e->ftmpl : NULL;
+	cxx_scope *ps, *binding;
+	cxx_targ acopy[32];
+	cxx_outer o;
+	jmp_buf jb;
+	volatile bool known = false;
+	volatile int64_t v = 0;
+	uint32_t at, pos, depth = 0;
+	bool is_constexpr = false;
+
+	if (!f || !f->defined || n > 32 || c->body_depth >= 64 || c->tentative || f->ctor_class)
+		return false;
+	ps = f->p.params;
+	if (n != ps->ntparams)
+		return false;	/* (deduced or defaulted arguments: not yet) */
+	memcpy(acopy, args, n * sizeof *args);
+	args = acopy;
+	for (uint32_t i = 0; i < n; i++)
+		if (!args[i].kind || args[i].kind == 3 || args[i].kind == 5 || ps->tparams[i].pack ||
+		    (args[i].kind == 1) != (ps->tparams[i].kind == 1) || (args[i].kind == 1 && cxx_mentions_placeholder(c, args[i].t, 0)))
+			return false;
+	for (uint32_t i = 0; i < f->nconsts; i++)
+		if (f->consts[i].n == n && cxx_args_equal(f->consts[i].args, args, n)) {
+			*out = f->consts[i].value;
+			return f->consts[i].viable == 1;
+		}
+	/* its body: after the declarator's (), the first { outside parentheses */
+	for (pos = f->pos; pos < c->ntok; pos++) {
+		int k = c->tok[pos].kind;
+
+		if (c->tok[pos].kind == LEX_TOKEN_IDENTIFIER && c->tok[pos].len == 9 && !memcmp(c->tok[pos].s, "constexpr", 9))
+			is_constexpr = true;
+		if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && depth)
+			depth--;
+		else if (!depth && (k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_EQUAL))
+			break;
+	}
+	if (!is_constexpr || pos >= c->ntok || c->tok[pos].kind != LEX_TOKEN_LEFT_BRACE)
+		return false;
+	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, f->p.home, NULL);
+	for (uint32_t i = 0; i < n; i++)
+		cxx_bind(c, binding, &ps->tparams[i], &args[i]);
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->body_depth++, c->unevaluated++;
+	c->fail = &jb;
+	c->pos = pos + 1;
+	c->scope = cxx_scope_new(c, CXX_SCOPE_BLOCK, binding, NULL);
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		for (int guard = 0; guard < 64; guard++) {
+			if (cxx_is_kw(c, CXX_KW_using) || cxx_is_kw(c, CXX_KW_typedef) || cxx_is_kw(c, CXX_KW_static_assert)) {
+				cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
+				continue;
+			}
+			if (cxx_is_kw(c, CXX_KW_return)) {
+				cxx_advance(c);
+				cxx_expression_parse(c);
+				if (c->econst && cxx_is(c, LEX_TOKEN_SEMICOLON) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE)
+					known = true, v = c->evalue;
+			}
+			break;
+		}
+	}
+	c->instantiating--, c->body_depth--;
+	cxx_outer_restore(c, &o);
+	if (f->nconsts == f->cconsts)
+		f->consts = realloc(f->consts, (f->cconsts = f->cconsts ? f->cconsts * 2 : 4) * sizeof *f->consts);
+	at = f->nconsts++;
+	memset(&f->consts[at], 0, sizeof f->consts[at]);
+	f->consts[at].args = malloc((n ? n : 1) * sizeof *args);
+	memcpy(f->consts[at].args, args, n * sizeof *args);
+	f->consts[at].n = n, f->consts[at].viable = known ? 1 : -1, f->consts[at].value = v;
 	*out = v;
 	return known;
 }
