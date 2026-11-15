@@ -332,6 +332,51 @@ VPRIV int cxx_ftemplate_deduce(cxx *c, cxx_entity *e, const cxx_targ *xargs, uin
 	return r;
 }
 
+/* is f's i-th function parameter a pointer to member as written (T C::* p): vcc has no type for one, so no
+   argument deduces its parameters (its tokens, from the declaration's parameter list) */
+static bool cxx_ftemplate_param_is_member_pointer(cxx *c, const cxx_ftemplate *f, uint32_t i)
+{
+	uint32_t p = f->pos, depth = 0, k = 0;
+
+	for (; p < c->ntok && c->tok[p].kind != LEX_TOKEN_LEFT_BRACE && c->tok[p].kind != LEX_TOKEN_SEMICOLON; p++) {
+		if (c->tok[p].kind == LEX_TOKEN_IDENTIFIER && (c->tok[p].kw == CXX_KW___attribute__ || c->tok[p].kw == CXX_KW___attribute) &&
+		    p + 1 < c->ntok && c->tok[p + 1].kind == LEX_TOKEN_LEFT_PAREN) {
+			int d = 0;
+
+			for (p++; p < c->ntok; p++)
+				if (c->tok[p].kind == LEX_TOKEN_LEFT_PAREN)
+					d++;
+				else if (c->tok[p].kind == LEX_TOKEN_RIGHT_PAREN && !--d)
+					break;
+			continue;
+		}
+		if (c->tok[p].kind == LEX_TOKEN_LESS)
+			depth++;
+		else if (c->tok[p].kind == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (c->tok[p].kind == LEX_TOKEN_LEFT_PAREN && !depth)
+			break;
+	}
+	if (p >= c->ntok || c->tok[p].kind != LEX_TOKEN_LEFT_PAREN)
+		return false;
+	depth = 0;
+	for (p++; p < c->ntok; p++) {
+		int kd = c->tok[p].kind;
+
+		if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS || kd == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_GREATER || kd == LEX_TOKEN_RIGHT_SQUARE) && depth)
+			depth--;
+		else if (!depth && kd == LEX_TOKEN_RIGHT_PAREN)
+			return false;
+		else if (!depth && kd == LEX_TOKEN_COMMA)
+			k++;
+		else if (k == i && !depth && kd == LEX_TOKEN_COLON_COLON && p + 1 < c->ntok && c->tok[p + 1].kind == LEX_TOKEN_STAR)
+			return true;
+	}
+	return false;
+}
+
 VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, uint32_t nxargs, const ast_qualified_type *args, const uint8_t *lval,
 				 uint32_t nargs, ast_qualified_type *ret, bool body)
 {
@@ -576,6 +621,11 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
 		int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
 
+		if (r > 0 && args[i] != CXX_TY_UNKNOWN &&
+		    (cc_type_is_record(c->ast, args[i]) || cc_type_is_arithmetic(c->ast, args[i])) && cxx_ftemplate_param_is_member_pointer(c, f, i)) {
+			c->why = CXX_WHY_ARG;
+			return 0;	/* (_Ret _Class::* from a class or a number: not deduced, not viable -- libc++'s __is_null) */
+		}
 		if (r <= 0 && getenv("VCC_CXX_SIG"))
 			fprintf(stderr, "deduce: argument %u: %d\n", i, r);
 		if (r <= 0)

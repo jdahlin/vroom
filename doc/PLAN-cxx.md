@@ -2693,3 +2693,11 @@ Sviter gröna (141/141, 38/38, mangle).  Strikt bänk: pass 27, 112 saknas.
   ([dcl.init.list]/3.10): `std::vector<std::uint8_t> v = {{0xCA, 0xFE}}`
   blir kopian av den vektor den inre listan gör.  Test: `run/ilist-nested-braces.cpp`.
 Sviter gröna (143/143, 38/38, mangle).  Strikt bänk: pass 28, 111 saknas.
+
+## Status 173 (2026-11-16)
+En funktionsmall vars parameter är en pekare till medlem (`R C::* p`, som
+vcc saknar typ för) är inte valbar för ett argument av klass- eller
+aritmetisk typ; förut blev den "okänd" och gjorde hela anropet otypat
+(libc++:s `__function::__is_null(__f)`): `std::function` från en lambda
+kompileras.  Test: `run/member-pointer-overload-not-viable.cpp`.  Sviter
+gröna (144/144, 38/38, mangle).  Strikt bänk: pass 28, 111 saknas.
