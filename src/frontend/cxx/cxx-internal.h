@@ -268,7 +268,7 @@ typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; c
 	uint32_t pack_name, pack_at, pack_n; ast_qualified_type *pack_types; } cxx_late;	/* pack_*: a class pack expanded in the parameters (As... a; pack_n UINT32_MAX: none) */
 
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
-#define CXX_MAX_ARGS 256
+#define CXX_MAX_ARGS 1024
 
 typedef struct cxx {
 	pp *p;

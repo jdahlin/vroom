@@ -2360,3 +2360,10 @@ Aggregat med arraymedlemmar på namnrymdsnivå och som statiska lokaler:
   körning (segfault, fanns förut); nu skrivbar.
 Test: `run/aggregate-array-members.cpp`.  Strikt bänk: pass 7, 167 saknas
 (från 210).  Sviter gröna (102/102, 38/38, mangle, 350/350).
+
+## Status 147 (2026-11-15)
+`CXX_MAX_ARGS` 256 -> 1024: en klammerlista med fler element (jsons `utf8d`,
+`std::array<std::uint8_t, 400>`) byggdes inte.  Tid och minne per TU
+oförändrade (unit-hash 0,42 s, 343 MB).  Test: `run/long-brace-list.cpp`.
+Strikt bänk: pass 8, 155 saknas (från 167).  Sviter gröna (103/103, 38/38,
+mangle, 350/350).
