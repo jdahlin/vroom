@@ -1,0 +1,9 @@
+# Format implementation sources and headers. Other files include generated
+# tables and inputs whose spelling or line numbers are part of a test.
+**
+!**/*.c
+!**/*.h
+test/**
+codegen/walk/prefix.h
+codegen/walk/unprefix.h
+server/capabilities.c
