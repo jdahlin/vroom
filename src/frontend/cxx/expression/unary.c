@@ -59,8 +59,27 @@ init:
 		cxx_gen_new(c, t, place, nplace, count, array, init, ninit, loc);
 }
 
+/* sizeof of a variable length array (or of its type): C's node, its size computed when it runs */
+static bool cxx_sizeof_vla(cxx *c, ast_qualified_type t, uint32_t loc)
+{
+	if (c->template_depth || c->tentative || t == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY ||
+	    !(AST_TYPE(c->ast, t)->flags & AST_TYPE_FLAG_VLA))
+		return false;
+	cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
+	if (cxx_gen_on(c)) {
+		uint32_t n = cc_node_new(c->ast, AST_NODE_SIZEOF_VLA, cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+
+		AST_NODE_AT(c->ast, n)->a = 0;
+		AST_NODE_AT(c->ast, n)->b = t;
+		c->enode = n;
+	}
+	return true;
+}
+
 VPRIV void cxx_unary_expression_parse(cxx *c)
 {
+	uint32_t sloc;
+
 	switch (cxx_kind(c)) {
 	case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS: case LEX_TOKEN_STAR: case LEX_TOKEN_AMPERSAND: case LEX_TOKEN_PLUS:
 	case LEX_TOKEN_MINUS: case LEX_TOKEN_EXCLAMATION: case LEX_TOKEN_TILDE:
@@ -120,6 +139,7 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 	}
 	switch (cxx_kw(c)) {
 	case CXX_KW_sizeof:
+		sloc = cxx_peek(c, 0)->loc;
 		cxx_advance(c);
 		if (cxx_accept(c, LEX_TOKEN_ELLIPSIS)) {	/* sizeof...(pack) */
 			cxx_entity *pk;
@@ -143,6 +163,8 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)size);
 				return;
 			}
+			if (cxx_sizeof_vla(c, c->type_out, sloc))
+				return;
 			if (!c->template_depth && !c->tentative && cxx_type_definitely_incomplete(c, c->type_out)) {
 				/* sizeof of a type that stays incomplete: ill-formed, a substitution failure where one counts */
 				cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);
@@ -161,6 +183,8 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 				cxx_ec(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), (int64_t)size);
 				return;
 			}
+			if (cxx_sizeof_vla(c, c->etype, sloc))
+				return;
 		}
 		cxx_et(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG), false);	/* size_t */
 		return;

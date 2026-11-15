@@ -214,6 +214,7 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 
 		if (cxx_is(c, LEX_TOKEN_LEFT_SQUARE) && cxx_peek(c, 1)->kind != LEX_TOKEN_LEFT_SQUARE) {
 			int64_t n = -1;
+			uint32_t vla = 0;
 
 			cxx_advance(c);
 			if (!cxx_is(c, LEX_TOKEN_RIGHT_SQUARE)) {
@@ -229,11 +230,14 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 				cxx_expression_parse(c);
 				if (n == -2 && c->econst && !c->tentative && !c->template_depth && c->evalue > 0)
 					n = c->evalue;	/* (a constant expression: int a[N * 2]) */
+				else if (n == -2 && !c->econst && !c->tentative && !c->template_depth && cxx_gen_on(c) && c->gen_block && c->enode &&
+					 c->etype != CXX_TY_UNKNOWN && cc_type_is_integer(c->ast, c->etype))
+					vla = c->enode;	/* (int a[n] in a body: a variable length array, GNU's, C's type) */
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 			cxx_attributes_skip(c);
 			if (x)
-				x->is_function = 0, x->n = n, nsfx++;
+				x->is_function = 0, x->n = n, x->vla = vla, nsfx++;
 			else
 				too_many = true;
 			continue;
@@ -295,7 +299,8 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 			t = sfx[i].nparams == UINT32_MAX ? CXX_TY_UNKNOWN : cxx_type_function(c, t, sfx[i].params, sfx[i].nparams, sfx[i].variadic);
 		}
 		else
-			t = sfx[i].n == -2 ? CXX_TY_UNKNOWN : cxx_type_array(c, t, sfx[i].n);
+			t = sfx[i].n == -2 && sfx[i].vla && t != CXX_TY_UNKNOWN ? cc_type_vla(c->ast, t, cc_conversion_apply(c->ast, cc_node_rvalue(c->ast, sfx[i].vla), cc_type_basic(AST_TYPE_UNSIGNED_LONG))) :
+			    sfx[i].n == -2 ? CXX_TY_UNKNOWN : cxx_type_array(c, t, sfx[i].n);
 		if (sfx[i].is_function)
 			free(sfx[i].params);
 	}

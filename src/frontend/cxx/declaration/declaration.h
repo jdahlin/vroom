@@ -16,7 +16,7 @@ enum { DS_TYPE = 1, DS_TYPEDEF = 2, DS_FRIEND = 4, DS_MODIFIER = 8, DS_CONSTEXPR
        DS_VIRTUAL = 128, DS_EXPLICIT = 256, DS_EXPLICIT_MAYBE = 512, DS_EXTERN_SEEN = 1024, DS_INLINE = 2048, DS_MUTABLE = 4096 };
 
 /* a suffix of a declarator: [n] or (parameters), applied innermost last */
-typedef struct cxx_suffix { ast_qualified_type trailing; uint32_t pack; uint8_t is_const, is_noexcept; uint8_t is_function, variadic; int64_t n; ast_qualified_type *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
+typedef struct cxx_suffix { ast_qualified_type trailing; uint32_t pack; uint8_t is_const, is_noexcept; uint8_t is_function, variadic; int64_t n; uint32_t vla; ast_qualified_type *params; uint32_t nparams; cxx_param *named; uint32_t nnamed, ndefaults; } cxx_suffix;
 
 /* the functions of declaration/, by file */
 
