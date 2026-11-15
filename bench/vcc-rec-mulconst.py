@@ -2,6 +2,7 @@
 """Shared single-operation multiplication recipes against a modular oracle."""
 import argparse
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -60,8 +61,9 @@ def main():
             implementation = (Path(R) / 'ccs/vcc/emit/opt/mulconst.cpp').read_text()
             implementation = implementation.replace('#include "../emitimpl.h"',
                 '#include "' + str(Path(R) / 'ccs/vcc/emit/emitimpl.h') + '"')
-            changed = implementation.replace('case 3: return 1;', 'case 3: return 2;')
-            assert changed != implementation
+            changed, matches = re.subn(r'\bcase\s+3\s*:\s*return\s+1\s*;', 'case 3: return 2;', implementation)
+            if matches != 1:
+                raise RuntimeError(f'expected one multiply-by-three recipe, found {matches}')
             compile_run(SOURCE.replace('#include "vcc/emit/opt/mulconst.cpp"', changed), True)
     print('shared constant-multiply recipe contracts: PASS')
 
