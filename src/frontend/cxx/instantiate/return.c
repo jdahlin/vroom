@@ -97,6 +97,16 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 		c->stats.bodies += body;
 		if (want_body && !b && inst && viable == 1)
 			body = cxx_member_template_ooc_body(c, f, inst, bind, np, UINT32_MAX, NULL, 0);	/* (defined outside its class) */
+		if (want_body && !body && inst && viable == 1 && c->ftmpl_te && c->ftmpl_te->ftmpl == f && !f->defined) {
+			/* a declaration only, its definition later in the TU (doctest's TEST_CASE_TEMPLATE func<T>):
+			   instantiated from that at the TU's end, its point of instantiation ([temp.point]/8) */
+			if (c->nlate_tbodies == c->clate_tbodies)
+				c->late_tbodies = realloc(c->late_tbodies, (c->clate_tbodies = c->clate_tbodies ? c->clate_tbodies * 2 : 8) * sizeof *c->late_tbodies);
+			c->late_tbodies[c->nlate_tbodies].te = c->ftmpl_te;
+			c->late_tbodies[c->nlate_tbodies].args = malloc((np ? np : 1) * sizeof *bind);
+			memcpy(c->late_tbodies[c->nlate_tbodies].args, bind, np * sizeof *bind);
+			c->late_tbodies[c->nlate_tbodies++].n = np;
+		}
 	} else
 		c->stats.bodies_failed++;
 	c->gen_instance = outer_gen_instance;
@@ -259,4 +269,42 @@ VPRIV ast_qualified_type cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, con
 		}
 	c->sig_requires = viable;
 	return r;
+}
+
+/*
+ * At the TU's end: the function template instances whose template was a declaration only when they were
+ * used, their bodies from the template's definition that came later (the same name in the same scope, as
+ * many template parameters of the same kinds), instantiated with the same arguments.  Their names are the
+ * same; the definition's instance is the one with code.
+ */
+VPRIV void cxx_late_template_bodies(cxx *c)
+{
+	for (uint32_t i = 0; i < c->nlate_tbodies; i++) {	/* (one may add more) */
+		cxx_entity *te = c->late_tbodies[i].te, *def = NULL, *outer = c->ftmpl_te;
+		const cxx_scope *ps = cxx_ftemplate_params(te->ftmpl), *home = te->ftmpl->p.home;
+		ast_qualified_type ret;
+
+		if (!home || !ps)
+			continue;
+		for (cxx_entity *o = cxx_lookup_local((cxx_scope *)home, te->name); o && !def; o = o->next) {
+			const cxx_scope *os;
+			bool same;
+
+			if (o == te || o->kind != CXX_ENTITY_FUNCTION_TEMPLATE || !o->ftmpl || !o->ftmpl->defined || !(os = cxx_ftemplate_params(o->ftmpl)) ||
+			    os->ntparams != ps->ntparams || o->fn_static != te->fn_static)
+				continue;
+			same = true;
+			for (uint32_t k = 0; k < ps->ntparams && same; k++)
+				same = os->tparams[k].kind == ps->tparams[k].kind && os->tparams[k].pack == ps->tparams[k].pack;
+			if (same)
+				def = o;
+		}
+		if (!def)
+			continue;
+		c->ftmpl_te = def;
+		c->tentative = 0, c->unevaluated = 0;
+		ret = cxx_ftemplate_return(c, def->ftmpl, c->late_tbodies[i].args, true);
+		(void)ret;
+		c->ftmpl_te = outer;
+	}
 }

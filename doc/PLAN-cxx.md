@@ -2602,3 +2602,21 @@ Sviter gröna (128/128, 38/38, mangle).  Strikt bänk: pass 22 (från 18),
   antalsöverlagringen.  Test: `run/requires-deref-scalar.cpp`.  Kvar: en
   efterställd requires-klausul ingår inte i vcc:s mangling (clangs `Q...E`).
 Sviter gröna (130/130, 38/38, mangle).  Strikt bänk: pass 22, 105 saknas.
+
+## Status 166 (2026-11-15)
+- `using N::operator""_x;` importerar litteraloperatorn (jsons globala
+  `_json`/`_json_pointer`); i en klass lämnas `using Base::operator...`
+  som förut.  Test: `run/udl-string.cpp`.
+- En konstruktors argument som är ett namn på funktioner (doctests
+  `TestCase(func<Type>, ...)`) byggs i `cxx_gen_call` som anropens
+  (`gen_call_sets`, som `gen_call_brace`).  Test: `run/ctor-function-template-arg.cpp`.
+- En funktionsmall som används före sin definition instansieras från
+  definitionen i TU:ns slut ([temp.point]/8; doctests TEST_CASE_TEMPLATE);
+  en static funktionsmalls instanser har intern länkning (`_ZL...`, lokal).
+  Test: `run/template-defined-after-use.cpp`.
+- `c ? "ab" : "xyz"`: fält- och funktionsoperander avklädda till pekare.
+  Test: `run/conditional-string-literals.cpp`.
+- unit-32bit kan inte gå igenom på en 64-bitarsvärd (clangs bygge fallerar
+  också, `SIZE_MAX == 0xffffffff`); med vcc hänger den dessutom i BJData-fallen.
+Sviter gröna (133/133, 38/38, mangle).  Strikt bänk: pass 24; 133 saknas
+(fler mallkroppar räknas nu).

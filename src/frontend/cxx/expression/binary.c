@@ -239,6 +239,22 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 		{
 			ast_qualified_type t3 = c->etype;
 
+			/* an array or function operand (two string literals, "x" and a const char *): the pointer it decays
+			   to, the operands then pointers ([expr.cond]/7; two lvalues of one array type too, here) */
+			for (int k = 0; k < 2; k++) {
+				ast_qualified_type *tk = k ? &t3 : &t2;
+				uint32_t *nk = k ? &n3 : &n2;
+
+				if (*tk == CXX_TY_UNKNOWN || (AST_TYPE_KIND(c->ast, *tk) != AST_TYPE_ARRAY && AST_TYPE_KIND(c->ast, *tk) != AST_TYPE_FUNCTION))
+					continue;
+				*tk = AST_TYPE_KIND(c->ast, *tk) == AST_TYPE_ARRAY ? cc_type_pointer(c->ast, AST_TYPE(c->ast, *tk)->base) : cc_type_pointer(c->ast, *tk);
+				if (k)
+					c->elval = 0;
+				else
+					l2 = 0;
+				if (*nk && cxx_gen_on(c))
+					*nk = cc_conversion_decay(c->ast, *nk);
+			}
 			if (t2 != CXX_TY_UNKNOWN && t2 == t3)
 				cxx_et(c, t2, l2 && c->elval);
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t2) && AST_QUALIFIED_TYPE_UNQUALIFIED(t2) == AST_QUALIFIED_TYPE_UNQUALIFIED(t3) &&

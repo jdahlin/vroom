@@ -296,7 +296,14 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 
 	for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS && !holes; i++)
 		holes = !args[i];
+	cxx_argset sets[16];
+
+	for (uint32_t i = 0; i < 16; i++)
+		sets[i].set = NULL;
 	if (holes) {
+		memcpy(sets, c->gen_call_sets, sizeof sets);	/* (a constructor's: TestCase(func<Type>, ...); taken with the holes) */
+		for (uint32_t i = 0; i < 16; i++)
+			c->gen_call_sets[i].set = NULL;
 		memcpy(br, c->gen_call_brace, sizeof br);	/* (this call's alone: taken at once) */
 		memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
 	} else
@@ -379,7 +386,7 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 		bool any = false;
 
 		for (uint32_t i = 0; i < nargs; i++)
-			any |= !args[i] && br[i] && i < ft->n;
+			any |= !args[i] && (br[i] || (i < 16 && sets[i].set)) && i < ft->n;
 		if (any) {
 			/* (what building them leaves of the statement's state is not the statement's: a call that fails
 			   after them must still fail its statement) */
@@ -393,7 +400,8 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 					if (pt != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, pt) == AST_TYPE_POINTER && AST_TYPE(a, pt)->ext)
 						pt = AST_TYPE(a, pt)->base;
 					bargs[i] = cxx_gen_braced_temp(c, pt, br[i], loc);
-				}
+				} else if (!args[i] && i < 16 && sets[i].set && i < ft->n)
+					bargs[i] = cxx_gen_argset_value(c, &sets[i], a->params[ft->aux + i], loc);	/* (a name of functions) */
 			c->sdone = sdone, c->snode = snode;
 			c->enode = 0;	/* (what building them left is no node of this call's: a call that fails has none) */
 			args = bargs;

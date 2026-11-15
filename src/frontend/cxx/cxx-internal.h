@@ -513,7 +513,10 @@ typedef struct cxx {
 	uint32_t carg_brace[CXX_MAX_ARGS];
 	const uint32_t *gen_agg_brace;	/* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
 	cxx_argset carg_sets[16];	/* the last argument list's arguments that are untyped names of functions */
-	cxx_argset op_rset, op_rset_cur;	/* a binary operator's right operand that is one (pending; the resolution's) */
+	cxx_argset op_rset, op_rset_cur;
+	cxx_argset gen_call_sets[16];
+	struct cxx_late_tbody { struct cxx_entity *te; cxx_targ *args; uint32_t n; } *late_tbodies;	/* instances used before their template's definition */
+	uint32_t nlate_tbodies, clate_tbodies;	/* the next cxx_gen_call's arguments that are names of functions (as gen_call_brace) */	/* a binary operator's right operand that is one (pending; the resolution's) */
 	uint8_t gen_value_init;		/* the next cxx_gen_construct_at with no arguments is value-initialization (T{}, x = {}): zeroed first */
 	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
@@ -860,6 +863,7 @@ VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs, uint3
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);
+VPRIV void cxx_late_template_bodies(cxx *c);
 VPRIV void cxx_declaration_parse(cxx *c, int context);
 VPRIV bool cxx_starts_declaration(cxx *c);
 VPRIV void cxx_type_id_parse(cxx *c);

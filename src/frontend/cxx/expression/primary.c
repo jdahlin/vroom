@@ -730,15 +730,21 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
+					cxx_argset asets_[16];
+
+					memcpy(asets_, c->carg_sets, sizeof asets_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
+					memcpy(c->gen_call_sets, asets_, sizeof asets_);	/* (T(f<X>): the function) */
 					if (gen_class) {
 						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 						c->gen_agg_brace = NULL;
 					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
+					for (uint32_t z_ = 0; z_ < 16; z_++)
+						c->gen_call_sets[z_].set = NULL;
 					gen_node = c->enode;
 				}
 			}
@@ -777,15 +783,21 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
+					cxx_argset asets_[16];
+
+					memcpy(asets_, c->carg_sets, sizeof asets_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
+					memcpy(c->gen_call_sets, asets_, sizeof asets_);	/* (T(f<X>): the function) */
 					if (gen_class) {
 						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 						c->gen_agg_brace = NULL;
 					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
+					for (uint32_t z_ = 0; z_ < 16; z_++)
+						c->gen_call_sets[z_].set = NULL;
 					gen_node = c->enode;
 				}
 			}
@@ -920,15 +932,21 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					uint32_t abr_[CXX_MAX_ARGS];
 
 					memcpy(abr_, c->carg_brace, sizeof abr_);
+					cxx_argset asets_[16];
+
+					memcpy(asets_, c->carg_sets, sizeof asets_);
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
+					memcpy(c->gen_call_sets, asets_, sizeof asets_);	/* (T(f<X>): the function) */
 					if (gen_class) {
 						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
 						c->gen_agg_brace = NULL;
 					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
+					for (uint32_t z_ = 0; z_ < 16; z_++)
+						c->gen_call_sets[z_].set = NULL;
 					gen_node = c->enode;
 				}
 			}

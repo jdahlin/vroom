@@ -349,8 +349,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				e->fn_constexpr = 1;	/* (an inline or constexpr function: its definition is weak, emitted where used) */
 			if (e && f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !is_friend && !(flags & DS_STATIC))
 				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);
-			if (e && f && kind == CXX_ENTITY_VALUE && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))
-				e->fn_internal = 1;
+			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && context != CXX_CONTEXT_CLASS && !is_friend && (flags & DS_STATIC))
+				e->fn_internal = 1;	/* (a static function template too: its instances are internal) */
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && !(flags & (DS_STATIC | DS_TYPEDEF | DS_FRIEND)))
 				e->field_of = cxx_declaration_scope(c), e->is_mutable = (flags & DS_MUTABLE) != 0;
 			if (e && f && c->decl_ndefaults > e->ndefaults)
@@ -889,11 +889,17 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				n = c->ncargs;
 				memcpy(an, c->carg_nodes, sizeof an);
 				memcpy(pbr, c->carg_brace, sizeof pbr);
+				cxx_argset psets[16];
+
+				memcpy(psets, c->carg_sets, sizeof psets);
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, false);
 				if (gen_local) {
 					memcpy(c->gen_call_brace, pbr, sizeof pbr);	/* (T x({...}, v): the list a temporary of its parameter's class) */
+					memcpy(c->gen_call_sets, psets, sizeof psets);	/* (T x(f<X>): the function) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+					for (uint32_t z_ = 0; z_ < 16; z_++)
+						c->gen_call_sets[z_].set = NULL;
 					gen_declared = true;
 				}
 				if (gobj) {

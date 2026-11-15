@@ -17,12 +17,14 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 	if (nargs == UINT32_MAX || nargs > CXX_MAX_ARGS || !cxx_gen_class_ok2(c, t, true))
 		return;
 	for (uint32_t i = 0; i < nargs; i++)
-		if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]) && !c->gen_call_brace[i])
+		if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]) && !c->gen_call_brace[i] && !(i < 16 && c->gen_call_sets[i].set))
 			return;	/* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it; a
 				   constructor's braced argument, T({1, 2}): a temporary of its parameter's class, cxx_gen_call) */
 	uint32_t call_brace[CXX_MAX_ARGS];
+	cxx_argset call_sets[16];
 
 	memcpy(call_brace, c->gen_call_brace, sizeof call_brace);
+	memcpy(call_sets, c->gen_call_sets, sizeof call_sets);
 	if (nargs == 1 && args[0] && cxx_gen_prv_find(c, args[0]) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == t) {
 		c->enode = args[0];	/* T(a prvalue of T): that object */
 		return;
@@ -45,6 +47,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 	c->gen_agg_brace = agg_brace;
 	memcpy(c->gen_call_brace, call_brace, sizeof call_brace);
+	memcpy(c->gen_call_sets, call_sets, sizeof call_sets);
 	cc_id_list_init(&l);
 	if (!nargs && (!(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) || picked->fn_defaulted)) {
 		/* T() of a class without a user-provided default constructor: zeroes (then constructed, below, if

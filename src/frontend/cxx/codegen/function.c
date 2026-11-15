@@ -240,7 +240,12 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 	}
 	if (!ok)
 		return;
-	if (f->fn_inline) {
+	if (f->fn_inline && f->fn_internal && !f->member_of && f->is_instance) {
+		/* an instance of a static function template: internal, emitted if the TU refers to it (clang's _ZL..., local) */
+		a->syms[f->sym].flags &= ~AST_SYMBOL_FLAG_GLOBAL;
+		a->syms[f->sym].sc = AST_STORAGE_STATIC;
+		a->syms[f->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
+	} else if (f->fn_inline) {
 		/* an inline function's definition is weak (a reference to one that got no code stays a plain
 		   undefined symbol: the link fails instead of calling nothing) */
 		attrs at;

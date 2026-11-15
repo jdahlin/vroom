@@ -165,13 +165,20 @@ VPRIV void cxx_using_parse(cxx *c)
 		bool is_typename = cxx_accept_kw(c, CXX_KW_typename);
 
 		cxx_nested_name_parse(c, &q, &dep);
-		if (cxx_accept_kw(c, CXX_KW_operator)) {
-			cxx_operator_name_parse(c);
-		} else if (cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
-			uint32_t name = cxx_peek(c, 0)->id;
+		uint32_t opname = 0;
+
+		if (cxx_accept_kw(c, CXX_KW_operator))
+			opname = cxx_operator_name_parse(c);	/* (using N::operator""_x;: imported as names are, at namespace scope) */
+		if (opname > 1 && !q && !dep)
+			opname = 0;
+		if (opname == 1 || (opname && cxx_declaration_scope(c)->kind == CXX_SCOPE_CLASS)) {
+			/* (a class's using Base::operator=;: not imported here) */
+		} else if (opname || cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
+			uint32_t name = opname ? opname : cxx_peek(c, 0)->id;
 
 			target = cxx_name_lookup(c, q, dep, name);
-			cxx_advance(c);
+			if (!opname)
+				cxx_advance(c);
 			if (target && !c->tentative) {
 				/* the names it brings in: each entity, by kind */
 				for (cxx_entity *t = target; t; t = t->next) {

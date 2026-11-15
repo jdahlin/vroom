@@ -11,7 +11,9 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 {
 	while (!cxx_is(c, LEX_TOKEN_EOF))
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
+	cxx_late_template_bodies(c);
 }
+
 
 /* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */
 VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, bool *body, cxx_scope *ctor_class)
