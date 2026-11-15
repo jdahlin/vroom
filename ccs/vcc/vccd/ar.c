@@ -91,7 +91,7 @@ static bool ml_push(mlist *l, member m)
 {
 	if (l->n == l->cap) {
 		size_t cap = l->cap ? l->cap * 2 : 256;
-		member *p = realloc(l->m, cap * sizeof(*p));
+		member *p = (member *)realloc(l->m, cap * sizeof(*p));
 
 		if (!p)
 			return false;
@@ -128,7 +128,7 @@ static void sbuf_done(vsbuf *b)
 static char *norm(const char *base, const char *path)
 {
 	size_t bl = path[0] == '/' ? 0 : strlen(base), pl = strlen(path), n = 0;
-	char *in = malloc(bl + pl + 2), *out = malloc(bl + pl + 2), *s;
+	char *in = (char *)malloc(bl + pl + 2), *out = (char *)malloc(bl + pl + 2), *s;
 
 	if (!in || !out) {
 		free(in);
@@ -199,7 +199,7 @@ static char *relto(const char *dir, const char *abs)
 		if (dir[i] == '/')
 			up++;
 	rest = abs + last + (abs[last] == '/');
-	if (!(r = malloc(up * 3 + strlen(rest) + 1)))
+	if (!(r = (char *)malloc(up * 3 + strlen(rest) + 1)))
 		return NULL;
 	for (p = r; up--; p += 3)
 		memcpy(p, "../", 3);
@@ -444,8 +444,8 @@ static const char zeros8[8];
 static bool build_bsd(arq *q, vsbuf *out, const mlist *l, bool symtab)
 {
 	SBUF vsbuf syms = { 0 };
-	VAUTOFREE uint32_t *nsym = calloc(l->n + 1, sizeof *nsym);
-	VAUTOFREE uint64_t *mpos = calloc(l->n + 1, sizeof *mpos);
+	VAUTOFREE uint32_t *nsym = (uint32_t *)calloc(l->n + 1, sizeof *nsym);
+	VAUTOFREE uint64_t *mpos = (uint64_t *)calloc(l->n + 1, sizeof *mpos);
 	uint32_t total = 0;
 	uint64_t pos, symsize = 0;
 	bool any = false;
@@ -564,7 +564,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 	if (names.n & 1)
 		vsbuf_put(&names, "\n", 1);	/* (a regular archive's names never pad: each entry is even) */
 	if (symtab && l->n) {
-		if (!(nsym = calloc(l->n, sizeof(*nsym))))
+		if (!(nsym = (uint32_t *)calloc(l->n, sizeof(*nsym))))
 			return false;
 		for (i = 0; i < l->n; i++) {
 			vmapped d;
@@ -590,7 +590,7 @@ static bool write_archive(arq *q, const char *archive_abs, const char *shown, co
 
 	vsbuf_put(&out, thin ? "!<thin>\n" : "!<arch>\n", 8);
 	if (l->n) {
-		VAUTOFREE uint64_t *mpos = calloc(l->n, sizeof *mpos);
+		VAUTOFREE uint64_t *mpos = (uint64_t *)calloc(l->n, sizeof *mpos);
 
 		if (!mpos)
 			return false;
@@ -666,7 +666,7 @@ write:
 		return false;
 	}
 
-	if (!(tmp = malloc(strlen(archive_abs) + 20)))
+	if (!(tmp = (char *)malloc(strlen(archive_abs) + 20)))
 		return false;
 	sprintf(tmp, "%s.tmp-ar-XXXXXX", archive_abs);
 	if ((fd = mkstemp(tmp)) < 0) {
@@ -788,7 +788,7 @@ bad:
 static int regular_read(arq *q, const vmapped *d, const char *shown, char op, char **files, int nfiles)
 {
 	MLIST mlist l = { 0 };
-	VAUTOFREE bool *found = calloc((size_t)nfiles + 1, 1);
+	VAUTOFREE bool *found = (bool *)calloc((size_t)nfiles + 1, 1);
 	SBUF vsbuf out = { 0 };
 	int rc = 0;
 
@@ -853,7 +853,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 	VAUTOUNMAP vmapped d = { 0 };
 	bool have_old = false, regular_old = false, bsd = false;
 
-	if (!(files = calloc(argc, sizeof(*files))))
+	if (!(files = (char **)calloc(argc, sizeof(*files))))
 		return 1;
 	for (i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -973,7 +973,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
 	{
 		/* llvm-ar's computeNewArchiveMembers for r and m */
-		VAUTOFREE bool *used = calloc(nfiles + 1, sizeof(bool));
+		VAUTOFREE bool *used = (bool *)calloc(nfiles + 1, sizeof(bool));
 		long insert = -1;
 
 		if (!used)

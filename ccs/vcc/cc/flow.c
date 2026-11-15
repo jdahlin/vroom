@@ -349,7 +349,7 @@ VPRIV int body_falls_off(cc *c, uint32_t body, uint32_t first_label)
 	uint32_t nl = c->nlabel - first_label;
 
 	f.first = first_label, f.nlab = nl;
-	f.lab = nl <= sizeof(small) ? small : calloc(nl, 1);
+	f.lab = nl <= sizeof(small) ? small : (uint8_t *)calloc(nl, 1);
 	if (!f.lab)
 		return 0;
 	if (nl <= sizeof(small))
@@ -1334,7 +1334,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
 	/* (only the head is cleared: the report arrays are written before they are read) */
 	memset(w, 0, offsetof(uwk, uloc));
 	w->c = c, w->fl.c = c;
-	w->lab = nl <= 16 ? small : calloc(nl, sizeof(ust) + 1), w->first = first_label, w->nlab = nl;
+	w->lab = nl <= 16 ? small : (ust *)calloc(nl, sizeof(ust) + 1), w->first = first_label, w->nlab = nl;
 	if (!w->lab)
 		return;
 	w->seen = nl <= 16 ? seen : (uint8_t *)(w->lab + nl);

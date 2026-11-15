@@ -50,7 +50,7 @@ VPRIV void init_attrs(void)
 			uint32_t id = vintern_copy(b[k], k ? l + 4 : l);
 
 			if (!attr_dir[id >> DIR_BITS])
-				attr_dir[id >> DIR_BITS] = calloc(DIR_PAGE, sizeof(uint32_t));
+				attr_dir[id >> DIR_BITS] = (uint32_t *)calloc(DIR_PAGE, sizeof(uint32_t));
 			attr_dir[id >> DIR_BITS][id & (DIR_PAGE - 1)] = (uint32_t)i;
 		}
 	}

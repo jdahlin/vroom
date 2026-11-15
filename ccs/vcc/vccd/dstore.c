@@ -61,7 +61,7 @@ static void *xrealloc(void *p, size_t n)
 	return p;
 }
 
-static char *xstrdup(const char *s) { return s ? strcpy(xrealloc(NULL, strlen(s) + 1), s) : NULL; }
+static char *xstrdup(const char *s) { return s ? strcpy((char *)xrealloc(NULL, strlen(s) + 1), s) : NULL; }
 
 static uint32_t shash(const char *s)
 {
@@ -96,7 +96,7 @@ static const char *intern(const char *s, bool path)
 	for (e = ibuckets[h]; e; e = e->next)
 		if (!strcmp(e->s, s))
 			return e->s;
-	e = xrealloc(NULL, sizeof(*e) + strlen(s) + 1);
+	e = (istr *)xrealloc(NULL, sizeof(*e) + strlen(s) + 1);
 	strcpy(e->s, s);
 	e->next = ibuckets[h], ibuckets[h] = e;
 	return e->s;
@@ -111,7 +111,7 @@ static bool seen(pp_dsink *s, uint64_t key)
 	VLOCK(dmu);
 	if (2 * (dn + 1) > dcap) {
 		size_t nc = dcap ? 2 * dcap : 1024;
-		uint64_t *n = calloc(nc, sizeof(*n));
+		uint64_t *n = (uint64_t *)calloc(nc, sizeof(*n));
 
 		if (!n)
 			abort();
@@ -144,7 +144,7 @@ static void put(dstore_job *j, const char *s, size_t n)
 {
 	if (j->njson + n > j->cjson) {
 		j->cjson = (j->njson + n) * 2 + 256;
-		j->json = xrealloc(j->json, j->cjson);
+		j->json = (char *)xrealloc(j->json, j->cjson);
 	}
 	memcpy(j->json + j->njson, s, n);
 	j->njson += n;
@@ -182,7 +182,7 @@ static void record(pp_dsink *s, const pp_drec *r)
 	}
 	if (j->nrec == j->crec) {
 		j->crec = j->crec ? 2 * j->crec : 8;
-		j->recs = xrealloc(j->recs, j->crec * sizeof(*j->recs));
+		j->recs = (struct drec_s *)xrealloc(j->recs, j->crec * sizeof(*j->recs));
 	}
 	j->recs[j->nrec++] = d;
 	if (!r->json || s->nojson || r->jlen < 2 || r->json[0] != '{') {
@@ -205,7 +205,7 @@ void dstore_begin(dstore_job *j, const char *cwd, const char *src, int dedup)
 	j->sink.seen = seen;
 	j->sink.record = record;
 	n = (src[0] == '/' || !cwd ? 0 : strlen(cwd) + 1) + strlen(src) + 1;
-	j->tu = xrealloc(NULL, n);
+	j->tu = (char *)xrealloc(NULL, n);
 	if (src[0] == '/' || !cwd)
 		strcpy(j->tu, src);
 	else
@@ -233,7 +233,7 @@ void dstore_end(dstore_job *j, int ok)
 		put(j, n, (size_t)snprintf(n, sizeof n, ",\"omitted\":%u}\n", j->omitted));
 	}
 	if (ok && j->nrec) {
-		nt = xrealloc(NULL, sizeof(*nt));
+		nt = (tent *)xrealloc(NULL, sizeof(*nt));
 		*nt = (tent){ NULL, j->tu, j->json, j->njson, j->recs, j->nrec };
 		j->tu = NULL, j->json = NULL, j->recs = NULL, j->nrec = 0;
 	}
@@ -280,14 +280,14 @@ static void count(kcount **v, unsigned *n, unsigned *c, const char *k, int err)
 		}
 	if (*n == *c) {
 		*c = *c ? 2 * *c : 16;
-		*v = xrealloc(*v, *c * sizeof(**v));
+		*v = (kcount *)xrealloc(*v, *c * sizeof(**v));
 	}
 	(*v)[(*n)++] = (kcount){ k, { !err, err } };
 }
 
 static int kcmp(const void *a, const void *b)
 {
-	const kcount *x = a, *y = b;
+	const kcount *x = (const kcount *)a, *y = (const kcount *)b;
 	unsigned tx = x->n[0] + x->n[1], ty = y->n[0] + y->n[1];
 
 	return tx != ty ? (tx < ty) - (tx > ty) : strcmp(x->k, y->k);
@@ -337,7 +337,7 @@ int dstore_query(const char *what, int fd, int errfd)
 	for (unsigned b = 0; b < NBUCKET; b++)
 		for (tent *t = buckets[b]; t; t = t->next) {
 			if (n == c)
-				all = xrealloc(all, (c = c ? 2 * c : 64) * sizeof(*all));
+				all = (tent **)xrealloc(all, (c = c ? 2 * c : 64) * sizeof(*all));
 			all[n++] = t;
 		}
 	if (n)
@@ -364,7 +364,7 @@ int dstore_query(const char *what, int fd, int errfd)
 			w == 1 ? "" : "s", e, e == 1 ? "" : "s", n, n == 1 ? "" : "s", ndup_build, ndup_build == 1 ? "" : "s");
 		for (unsigned i = 0; i < nfl; i++)
 			if (strcmp(fl[i].k, "(no flag)")) {
-				char *f = xrealloc(NULL, strlen(fl[i].k) + 3);
+				char *f = (char *)xrealloc(NULL, strlen(fl[i].k) + 3);
 
 				strcpy(f, "-W"), strcat(f, fl[i].k);
 				fl[i].k = f;

@@ -396,7 +396,7 @@ VPRIV uint32_t string_lit(cc *c)
 		ptok *t = tok(c);
 		if (count == cap) {
 			cap *= 2;
-			ptok *more = malloc(cap * sizeof(*more));
+			ptok *more = (ptok *)malloc(cap * sizeof(*more));
 			if (!more)
 				fatal(c, loc, "out of memory");
 			memcpy(more, tokens, count * sizeof(*more));
@@ -422,7 +422,7 @@ VPRIV uint32_t string_lit(cc *c)
 		const char *s = t->s, *e;
 
 		if (unlikely(t->flags & TF_DIRTY))
-			s = pp_spell(t, tmp = malloc(t->len + 1), &sl);
+			s = pp_spell(t, tmp = (char *)malloc(t->len + 1), &sl);
 		e = s + sl - 1;
 		/* each source byte gives at most 4 bytes */
 		if (unlikely(buf + n + sl * 4 + 16 > c->hend)) {
@@ -437,7 +437,7 @@ VPRIV uint32_t string_lit(cc *c)
 			uint32_t v;
 
 			if (esz == 1) {
-				const char *q = memchr(s, '\\', (size_t)(e - s));
+				const char *q = (const char *)memchr(s, '\\', (size_t)(e - s));
 
 				if (!q)
 					q = e;
@@ -489,7 +489,7 @@ VPRIV uint32_t string_lit(cc *c)
 	memset(buf + n, 0, (size_t)esz);
 	n += (size_t)esz;
 	{
-		char *keep = halloc(c, n);
+		char *keep = (char *)halloc(c, n);
 		uint32_t si = c->nstr++;
 		qty et;
 

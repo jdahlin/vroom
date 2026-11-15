@@ -171,7 +171,7 @@ uint32_t pp_include_point(const pp *p, uint32_t loc)
 			while (j < end && (s[j] == ' ' || s[j] == '\t'))
 				j++;
 			if (end - j > 7 && !memcmp(s + j, "include", 7)) {
-				const char *nl = memchr(s + j, '\n', end - j);
+				const char *nl = (const char *)memchr(s + j, '\n', end - j);
 
 				if (!nl)
 					break;
@@ -179,7 +179,7 @@ uint32_t pp_include_point(const pp *p, uint32_t loc)
 			}
 		}
 		{
-			const char *nl = memchr(s + i, '\n', end - i);
+			const char *nl = (const char *)memchr(s + i, '\n', end - i);
 
 			if (!nl)
 				break;
@@ -197,7 +197,7 @@ enum { PD_IGNORED = 1, PD_WARNING, PD_ERROR };
 static void dtrans(pp *p, uint32_t st, uint32_t loc)
 {
 	if (!p->dtr)
-		p->dtr = varena_alloc(&p->perm, 4096 * sizeof(*p->dtr));
+		p->dtr = (__typeof__(p->dtr))varena_alloc(&p->perm, 4096 * sizeof(*p->dtr));
 	if (p->ndtr < 4096)
 		p->dtr[p->ndtr].loc = loc, p->dtr[p->ndtr++].st = st;
 	p->dcur = st;
@@ -240,7 +240,7 @@ VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc)
 	if (n >= sizeof(p->dn->name) || (n > 3 && !memcmp(q, "no-", 3)))
 		return;
 	if (!p->dn) {
-		p->dn = varena_alloc(&p->perm, 4096 * sizeof(*p->dn));
+		p->dn = (__typeof__(p->dn))varena_alloc(&p->perm, 4096 * sizeof(*p->dn));
 		memset(&p->dn[0], 0, sizeof(*p->dn));
 		p->ndn = 1;
 	}
@@ -674,7 +674,7 @@ static void sn_line(pp *p, vbuf *b, const fent *e, const vdiag *d, uint32_t ls, 
 	vbuf_s(b, "\n");
 	{
 		uint32_t lw = dcols(s, ls, le, 0) + 1, ccol = caret ? dcols(s, ls, off, 0) : UINT32_MAX;
-		char *m = calloc(lw + 1, 1);
+		char *m = (char *)calloc(lw + 1, 1);
 
 		memset(m, ' ', lw);
 		for (uint32_t i = 0; i < d->nspan; i++) {
@@ -981,7 +981,7 @@ struct mdef { uint32_t name, loc, fe, k; };
 
 static int mdef_cmp(const void *a, const void *b)
 {
-	const struct mdef *x = a, *y = b;
+	const struct mdef *x = (const struct mdef *)a, *y = (const struct mdef *)b;
 
 	return x->name != y->name ? (x->name < y->name ? -1 : 1) : x->loc < y->loc ? -1 : x->loc > y->loc;
 }
@@ -1004,7 +1004,7 @@ static void mdx_update(pp *p)
 				continue;
 			if (p->nmdx == p->cmdx) {
 				uint32_t c = p->cmdx ? p->cmdx * 2 : 1024;
-				struct mdef *n = varena_alloc(&p->perm, c * sizeof(*n));
+				struct mdef *n = (struct mdef *)varena_alloc(&p->perm, c * sizeof(*n));
 
 				if (p->nmdx)
 					memcpy(n, p->mdx, p->nmdx * sizeof(*n));
@@ -1370,7 +1370,7 @@ static int level_of(const char *what)
 
 static char *dstr(pp *p, const char *s, size_t n)
 {
-	char *r = varena_alloc(&p->perm, n + 1);
+	char *r = (char *)varena_alloc(&p->perm, n + 1);
 
 	memcpy(r, s, n);
 	r[n] = 0;
@@ -1404,7 +1404,7 @@ static void vec_suffix(char *m, size_t cap)
 
 vdiag *pp_diag_vbegin(pp *p, int level, uint32_t loc, const char *fmt, va_list ap)
 {
-	vdiag *d = varena_alloc(&p->perm, sizeof(*d));
+	vdiag *d = (vdiag *)varena_alloc(&p->perm, sizeof(*d));
 	char msg[2048];
 	int n = vsnprintf(msg, sizeof(msg), fmt, ap);
 
@@ -1438,7 +1438,7 @@ void pp_diag_label(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *label)
 {
 	if (d->nspan == d->cspan) {
 		uint32_t c = d->cspan ? d->cspan * 2 : 4;
-		vdspan *n = varena_alloc(&p->perm, c * sizeof(*n));
+		vdspan *n = (vdspan *)varena_alloc(&p->perm, c * sizeof(*n));
 
 		if (d->nspan)
 			memcpy(n, d->span, d->nspan * sizeof(*n));
@@ -1512,7 +1512,7 @@ void pp_diag_fix(pp *p, vdiag *d, uint32_t b, uint32_t e, const char *s, int app
 	app &= ~VDA_NAME;
 	if (d->nfix == d->cfix) {
 		uint32_t c = d->cfix ? d->cfix * 2 : 4;
-		vdfix *n = varena_alloc(&p->perm, c * sizeof(*n));
+		vdfix *n = (vdfix *)varena_alloc(&p->perm, c * sizeof(*n));
 
 		if (d->nfix)
 			memcpy(n, d->fix, d->nfix * sizeof(*n));

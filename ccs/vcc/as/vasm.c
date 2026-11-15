@@ -23,7 +23,7 @@ static const char *map(const char *path, size_t *n)
 	if (fd < 0) { perror(path); exit(1); }
 	struct stat st; fstat(fd, &st);
 	*n = (size_t)st.st_size;
-	const char *p = *n ? mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : "";
+	const char *p = *n ? (const char *)mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : "";
 	close(fd);
 	return p;
 }
@@ -42,8 +42,8 @@ int main(int argc, char **argv)
 	if (bench) {
 		/* inputs mapped once and touched, so this measures the assembler */
 		int nf = argc - first;
-		const char **ps = calloc((size_t)nf, sizeof *ps);
-		size_t *ns = calloc((size_t)nf, sizeof *ns), tin = 0, tout = 0;
+		const char **ps = (const char **)calloc((size_t)nf, sizeof *ps);
+		size_t *ns = (size_t *)calloc((size_t)nf, sizeof *ns), tin = 0, tout = 0;
 		static uint8_t *buf; static size_t cap;
 		volatile unsigned sink = 0;
 		for (int i = 0; i < nf; i++) { ps[i] = map(argv[first + i], &ns[i]); for (size_t j = 0; j < ns[i]; j += 4096) sink += (unsigned char)ps[i][j]; }
@@ -57,7 +57,7 @@ int main(int argc, char **argv)
 				const char *msg;
 				if (as_run(a, o, ps[i], ns[i], argv[first + i], &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
 				size_t k = elf_finish(o);
-				if (k > cap) { cap = k * 2; buf = realloc(buf, cap); }
+				if (k > cap) { cap = k * 2; buf = (uint8_t *)realloc(buf, cap); }
 				elf_emit(o, buf);
 				if (!r) {
 					tin += ns[i]; tout += k;
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
 		if (as_run(a, o, d, dn, in, &msg)) { fprintf(stderr, "%s\n", msg); return 1; }
 		size_t on = macho_finish(o);
 		if (!on || o->has_err) { fprintf(stderr, "%s: %s\n", in, o->err[0] ? o->err : "cannot lay out the object"); return 1; }
-		uint8_t *ob = malloc(on);
+		uint8_t *ob = (uint8_t *)malloc(on);
 		FILE *f = fopen(out, "wb");
 		if (!ob) return 1;
 		macho_emit(o, ob);

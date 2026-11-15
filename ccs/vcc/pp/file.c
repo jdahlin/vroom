@@ -13,7 +13,7 @@ VPRIV void *salloc(size_t n)
 	size_t off;
 
 	if (unlikely(!b0)) {
-		char *b = vm(SHARED_MAX), *z = NULL;
+		char *b = (char *)vm(SHARED_MAX), *z = NULL;
 
 		if (__atomic_compare_exchange_n(&shared_base, &z, b, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
 			b0 = b;
@@ -81,13 +81,13 @@ static pfile *pfile_build(const vlex_file *f)
 {
 	const vtok *t = f->tok;
 	uint32_t n = f->ntok, nd = 0, sp = 0, *stk;
-	pfile *fi = salloc(sizeof(*fi));
+	pfile *fi = (pfile *)salloc(sizeof(*fi));
 	pdir *d;
 
 	for (uint32_t i = 0; i < n; i++)
 		nd += (t[i].flags & TF_SOL) && t[i].kind == T_HASH;
-	d = salloc((nd + 1) * sizeof(*d));
-	stk = malloc((nd + 1) * sizeof(*stk));
+	d = (pdir *)salloc((nd + 1) * sizeof(*d));
+	stk = (uint32_t *)malloc((nd + 1) * sizeof(*stk));
 	nd = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t e, k;
@@ -119,8 +119,8 @@ static pfile *pfile_build(const vlex_file *f)
 		fi->bad = 2, fi->badtok = d[stk[sp - 1]].tok + 1;
 	free(stk);
 	fi->dir = d;
-	fi->mac = salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
-	fi->inc = salloc((nd + 1) * sizeof(*fi->inc));
+	fi->mac = (_Atomic(const pmacro *) *)salloc((nd + 1) * sizeof(*fi->mac));	/* fresh: zero */
+	fi->inc = (_Atomic(const incent *) *)salloc((nd + 1) * sizeof(*fi->inc));
 	fi->ndir = nd;
 	/*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
@@ -153,14 +153,15 @@ static pfile *pfile_build(const vlex_file *f)
 VPRIV const pfile *pfile_get(const vlex_file *f, bool *fresh)
 {
 	vlex_file *w = (vlex_file *)f;
-	void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
+	pfile *fi = (pfile *)__atomic_load_n(&w->pp, __ATOMIC_ACQUIRE);
+	void *z = NULL;
 
 	*fresh = false;
 	if (likely(fi != NULL))
 		return fi;
 	fi = pfile_build(f);
 	if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-		return z;	/* lost the race; ours is wasted */
+		return (const pfile *)z;	/* lost the race; ours is wasted */
 	*fresh = true;
 	return fi;
 }
@@ -176,7 +177,7 @@ VPRIV uint32_t file_line(const vlex_file *f, const pfile *cfi, uint32_t off)
 
 		for (uint32_t i = 0; i < f->size; i++)
 			c += f->src[i] == '\n';
-		l = salloc((c + 1) * sizeof(*l));
+		l = (uint32_t *)salloc((c + 1) * sizeof(*l));
 		c = 0;
 		for (uint32_t i = 0; i < f->size; i++)
 			if (f->src[i] == '\n')

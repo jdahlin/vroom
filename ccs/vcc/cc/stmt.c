@@ -415,7 +415,7 @@ typedef struct case_order {
 
 static int case_compare(const void *ap, const void *bp)
 {
-	const case_order *a = ap, *b = bp;
+	const case_order *a = (const case_order *)ap, *b = (const case_order *)bp;
 
 	if (a->v.lo != b->v.lo)
 		return a->v.lo < b->v.lo ? -1 : 1;
@@ -429,7 +429,7 @@ static void switch_duplicates(cc *c)
 
 	if (n <= 64)
 		return;
-	a = halloc(c, n * sizeof(*a));
+	a = (case_order *)halloc(c, n * sizeof(*a));
 	for (uint32_t i = 0; i < n; i++) {
 		struct swcase v = c->cases[c->case_base + i];
 
@@ -626,16 +626,16 @@ VPRIV uint32_t asm_stmt(cc *c, bool toplevel)
 	a = &c->asms[ai];
 	a->nout = outs.n / 3;
 	a->nin = ins.n / 3;
-	a->ops = halloc(c, (a->nout + a->nin + 1) * sizeof(asmop));
+	a->ops = (asmop *)halloc(c, (a->nout + a->nin + 1) * sizeof(asmop));
 	for (uint32_t i = 0; i < a->nout; i++)
 		a->ops[i] = (asmop){ outs.v[3 * i], outs.v[3 * i + 1], outs.v[3 * i + 2] };
 	for (uint32_t i = 0; i < a->nin; i++)
 		a->ops[a->nout + i] = (asmop){ ins.v[3 * i], ins.v[3 * i + 1], ins.v[3 * i + 2] };
 	a->nclob = clob.n;
-	a->clob = halloc(c, (clob.n + 1) * sizeof(uint32_t));
+	a->clob = (uint32_t *)halloc(c, (clob.n + 1) * sizeof(uint32_t));
 	memcpy(a->clob, clob.v, clob.n * sizeof(uint32_t));
 	a->nlabel = labs.n;
-	a->labels = halloc(c, (labs.n + 1) * sizeof(uint32_t));
+	a->labels = (uint32_t *)halloc(c, (labs.n + 1) * sizeof(uint32_t));
 	memcpy(a->labels, labs.v, labs.n * sizeof(uint32_t));
 	expect_semi(c, "after asm statement");
 	n = mkstmt(c, N_ASM, loc, ai, 0, 0);
@@ -957,7 +957,7 @@ static uint32_t label_head(cc *c)
 				}
 			if (c->ncase == c->capcase) {
 				c->capcase = c->capcase ? c->capcase * 2 : 64;
-				c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
+				c->cases = (__typeof__(c->cases))realloc(c->cases, c->capcase * sizeof(*c->cases));
 			}
 			c->cases[c->ncase++] = (struct swcase){ lo, hi, vloc };
 		}

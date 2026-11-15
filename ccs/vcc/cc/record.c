@@ -9,9 +9,9 @@ static void fscr_grow(fscratch *x, uint32_t need)
 
 	while (cap < need)
 		cap *= 2;
-	x->fs = realloc(x->fs, cap * sizeof(field));
-	x->fa = realloc(x->fa, cap * sizeof(uint32_t));
-	x->fp = realloc(x->fp, cap);
+	x->fs = (field *)realloc(x->fs, cap * sizeof(field));
+	x->fa = (uint32_t *)realloc(x->fa, cap * sizeof(uint32_t));
+	x->fp = (uint8_t *)realloc(x->fp, cap);
 	if (!x->fs || !x->fa || !x->fp) {
 		fputs("vcc: out of memory\n", stderr);
 		abort();
@@ -204,7 +204,7 @@ __attribute__((noinline)) VPRIV void struct_body(cc *c, uint32_t ti)
 	c->in_struct--;
 	attribute_list(c, &post);
 	r = &c->tags[ti];
-	r->f = halloc(c, (nf + 1) * sizeof(field));
+	r->f = (field *)halloc(c, (nf + 1) * sizeof(field));
 	memcpy(r->f, &x->fs[base], nf * sizeof(field));
 	fs = r->f;
 	r->nfield = nf;

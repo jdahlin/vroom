@@ -50,8 +50,8 @@ static const pmacro *canon_macro(const pmacro *m)
 				/* a copy in shared memory: body tokens rebased on a copy of their text */
 				uint32_t lo = m->nbody ? m->body[0].off : 0;
 				uint32_t hi = m->nbody ? m->body[m->nbody - 1].off + m->body[m->nbody - 1].len : 0;
-				char *t = salloc(hi - lo + 64);
-				vtok *v = m->nbody ? salloc(m->nbody * sizeof(vtok)) : (vtok *)no_body;
+				char *t = (char *)salloc(hi - lo + 64);
+				vtok *v = m->nbody ? (vtok *)salloc(m->nbody * sizeof(vtok)) : (vtok *)no_body;
 
 				memcpy(t, m->src + lo, hi - lo);
 				memset(t + (hi - lo), 0, 64);
@@ -59,13 +59,13 @@ static const pmacro *canon_macro(const pmacro *m)
 					v[j] = m->body[j];
 					v[j].off -= lo;
 				}
-				c = salloc(sizeof(*c));
+				c = (pmacro *)salloc(sizeof(*c));
 				*c = *m;
 				c->body = v;
 				c->src = t;
 				c->hash = h;
 				if (m->pidx) {
-					uint8_t *x = salloc(m->nbody + 1);
+					uint8_t *x = (uint8_t *)salloc(m->nbody + 1);
 
 					memcpy(x, m->pidx, m->nbody);
 					c->pidx = x;
@@ -118,7 +118,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
 			if (unlikely(vt[i].kind == T_UNKNOWN))
 				pp_invalid_tok(p, c->src + vt[i].off, vt[i].len, c->loc + vt[i].off);
 	if (!m) {
-		pmacro *n = site ? salloc(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n));
+		pmacro *n = (pmacro *)(site ? salloc(sizeof(*n)) : varena_alloc(&p->perm, sizeof(*n)));
 
 		err = parse_define(vt, b, e, n, site ? mem_shared : mem_perm, &p->perm, &eoff);
 		if (err) {
@@ -196,7 +196,7 @@ static void dm_put(char **b, size_t *n, size_t *cap, const char *s, size_t l)
 {
 	if (*n + l + 1 > *cap) {
 		*cap = (*n + l + 1) * 2;
-		*b = realloc(*b, *cap);
+		*b = (char *)realloc(*b, *cap);
 	}
 	memcpy(*b + *n, s, l);
 	*n += l;
@@ -267,7 +267,7 @@ static void dd_text(pp *p, uint32_t id, const pmacro *m)
  * <built-in>'s directives (the command line's -D/-U) one by one */
 VPRIV void dd_flush(pp *p)
 {
-	uint8_t *done = calloc(p->ndd + 1, 1);
+	uint8_t *done = (uint8_t *)calloc(p->ndd + 1, 1);
 
 	p->dd_done = 1;
 	for (int k = 0; k < p->o->ndd_order; k++) {
@@ -294,7 +294,7 @@ VPRIV void dd_out(pp *p, uint32_t id, const pmacro *m, bool builtin)
 {
 	if (builtin && !p->dd_done) {
 		if (p->ndd == p->capdd)
-			p->dd_ev = realloc(p->dd_ev, (p->capdd = p->capdd ? 2 * p->capdd : 1024) * sizeof(*p->dd_ev));
+			p->dd_ev = (__typeof__(p->dd_ev))realloc(p->dd_ev, (p->capdd = p->capdd ? 2 * p->capdd : 1024) * sizeof(*p->dd_ev));
 		p->dd_ev[p->ndd].id = id;
 		p->dd_ev[p->ndd++].m = m;
 		return;
@@ -321,7 +321,7 @@ int pp_macros(pp *p, char **out, size_t *len)
 			if (!m || m->kind == MK_BUILTIN)
 				continue;
 			if (nid == capid)
-				ids = realloc(ids, (capid = capid ? capid * 2 : 1024) * sizeof(*ids));
+				ids = (uint32_t *)realloc(ids, (capid = capid ? capid * 2 : 1024) * sizeof(*ids));
 			ids[nid++] = d << MPAGE_BITS | k;
 		}
 	}
@@ -331,7 +331,7 @@ int pp_macros(pp *p, char **out, size_t *len)
 		dm_one(&b, &n, &cap, ids[i], m);
 	}
 	free(ids);
-	*out = b ? b : calloc(1, 1);
+	*out = b ? b : (char *)calloc(1, 1);
 	*len = n;
 	return 0;
 }

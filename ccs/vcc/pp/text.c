@@ -22,7 +22,7 @@ VPRIV void out_reserve(pp *p, size_t n)
 	nc = p->capout ? p->capout * 2 : 1u << 24;
 	while (nc < p->nout + n)
 		nc *= 2;
-	np = vm(nc);
+	np = (char *)vm(nc);
 	if (p->out) {
 		memcpy(np, p->out, p->nout);
 		munmap(p->out, p->capout);

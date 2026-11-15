@@ -69,7 +69,7 @@ static int dump(const char *arg)
 		fprintf(stderr, "lextest: cannot read %s\n", path);
 		return 1;
 	}
-	buf = malloc(f->size + 1);
+	buf = (char *)malloc(f->size + 1);
 	for (uint32_t i = 0; i < f->ntok; i++) {
 		const vtok *t = &f->tok[i];
 		size_t l;
@@ -118,11 +118,11 @@ static void read_list(const char *list)
 		line[n] = 0;
 		if (npaths == cap) {
 			cap = cap ? cap * 2 : 4096;
-			paths = realloc(paths, cap * sizeof(*paths));
-			plen = realloc(plen, cap * sizeof(*plen));
+			paths = (char **)realloc(paths, cap * sizeof(*paths));
+			plen = (size_t *)realloc(plen, cap * sizeof(*plen));
 		}
 		plen[npaths] = n;
-		paths[npaths] = calloc(1, n + 8);	/* vlex_get hashes by words: path[n + 7] */
+		paths[npaths] = (char *)calloc(1, n + 8);	/* vlex_get hashes by words: path[n + 7] */
 		memcpy(paths[npaths++], line, n);
 	}
 	fclose(fp);
@@ -186,8 +186,8 @@ static int core(const char *list, int reps)
 	double t0, best = 1e9;
 
 	read_list(list);
-	src = calloc(npaths, sizeof(*src));
-	sz = calloc(npaths, sizeof(*sz));
+	src = (const char **)calloc(npaths, sizeof(*src));
+	sz = (size_t *)calloc(npaths, sizeof(*sz));
 	for (size_t i = 0; i < npaths; i++) {
 		const vlex_file *f = vlex_get(paths[i], plen[i]);	/* maps + warms */
 
@@ -199,7 +199,7 @@ static int core(const char *list, int reps)
 		bytes += sz[i];
 	}
 	scratch = malloc(vlex_scratch_size(max));
-	out = malloc((max + 2) * sizeof(vtok));
+	out = (vtok *)malloc((max + 2) * sizeof(vtok));
 	vlex_no_intern = getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
 	int pmc = getenv("PMC") && !pmc_init(getenv("PMC"));
 	uint64_t c0[PMC_N], c1[PMC_N], cb[PMC_N] = { 0 };
@@ -263,7 +263,7 @@ static int idcheck(const char *list)
 		if (!f)
 			continue;
 		if (cap < f->size + 1)
-			buf = realloc(buf, cap = f->size + 1);
+			buf = (char *)realloc(buf, cap = f->size + 1);
 		for (uint32_t j = 0; j < f->ntok; j++) {
 			const vtok *t = &f->tok[j];
 			size_t l;

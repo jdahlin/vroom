@@ -375,7 +375,7 @@ VPRIV void rt_emit(cc *c, vdiag *d)
 	}
 	if (c->nrtq == c->rtqcap) {
 		c->rtqcap = c->rtqcap ? c->rtqcap * 2 : 8;
-		c->rtq = realloc(c->rtq, c->rtqcap * sizeof(vdiag *));
+		c->rtq = (vdiag **)realloc(c->rtq, c->rtqcap * sizeof(vdiag *));
 	}
 	c->rtq[c->nrtq++] = d;
 }
@@ -559,7 +559,7 @@ VPRIV void rt_defer(cc *c, const char *flag, const char *const *groups, uint32_t
 	pp_diag_flag(d, flag);
 	d->werror = lv == VDL_ERROR;
 	if (ms) {	/* (a copy: the record waits for the body's end) */
-		char *m = halloc(c, mlen + 1);
+		char *m = (char *)halloc(c, mlen + 1);
 
 		memcpy(m, ms, mlen), m[mlen] = 0;
 		pp_diag_macro(d, m, mlen);

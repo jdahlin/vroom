@@ -34,7 +34,7 @@ static uint32_t sig_intern(char *b, size_t n)
 			break;
 		}
 	if (r == HNONE && nsig < (1 << 16)) {
-		char *c = malloc(n ? n : 1);
+		char *c = (char *)malloc(n ? n : 1);
 
 		memcpy(c, b, n);
 		sig_str[nsig] = c;
@@ -48,7 +48,7 @@ static uint32_t sig_intern(char *b, size_t n)
 /* base signature into *sig, prefix ids into psig[0..ndirs]; false if too long */
 VPRIV bool sig_of(const pp_opts *o, uint32_t *sig, uint32_t *psig)
 {
-	char *b = malloc(1 << 17);
+	char *b = (char *)malloc(1 << 17);
 	size_t n = 0;
 	bool ok = true;
 
@@ -95,10 +95,10 @@ VPRIV hkey *hkey_get(uint32_t sig, const vlex_file *f, int32_t sdir, uint32_t nf
 			if (!make)
 				return NULL;
 			if (!mine) {
-				char *sp = salloc(sl + 1);
+				char *sp = (char *)salloc(sl + 1);
 
 				memcpy(sp, spath, sl + 1);
-				mine = salloc(sizeof(*mine));
+				mine = (hkey *)salloc(sizeof(*mine));
 				mine->hash = h;
 				mine->f = f;
 				mine->spath = sp;
@@ -130,7 +130,7 @@ VPRIV int once_index(const pp *p, const vlex_file *f)
 VPRIV void once_add(pp *p, const vlex_file *f)
 {
 	if (p->nonce == p->oncecap) {
-		const vlex_file **n = varena_alloc(&p->perm, 2 * p->oncecap * sizeof(*n));
+		const vlex_file **n = (const vlex_file **)varena_alloc(&p->perm, 2 * p->oncecap * sizeof(*n));
 
 		memcpy(n, p->once, p->nonce * sizeof(*n));
 		p->once = n;
@@ -153,12 +153,12 @@ static pthread_once_t hck_once = PTHREAD_ONCE_INIT;
 
 static void hck_init(void)
 {
-	atomic_store_explicit(&hck_tab, vm(sizeof(_Atomic(const hck *)) << HCK_BITS), memory_order_release);
+	atomic_store_explicit(&hck_tab, (_Atomic(const hck *) *)vm(sizeof(_Atomic(const hck *)) << HCK_BITS), memory_order_release);
 }
 
 static uint64_t hck_hash(const void *s, size_t n, uint32_t esz)
 {
-	const unsigned char *b = s;
+	const unsigned char *b = (const unsigned char *)s;
 	uint32_t h0 = (uint32_t)n, h1 = esz;
 	size_t i = 0;
 
@@ -196,7 +196,7 @@ static const hck *hck_get(pp *p, const void *a, uint32_t n, uint32_t esz)
 
 		if (!e) {
 			if (!mine) {
-				mine = hsalloc(p, sizeof(hck) + bytes + 16);
+				mine = (hck *)hsalloc(p, sizeof(hck) + bytes + 16);
 				mine->h = h;
 				mine->n = n;
 				mine->esz = esz;
@@ -211,7 +211,7 @@ static const hck *hck_get(pp *p, const void *a, uint32_t n, uint32_t esz)
 			return *cc = e;	/* (a chunk of ours that lost a race stays unused) */
 	}
 	if (!mine) {
-		mine = hsalloc(p, sizeof(hck) + bytes + 16);
+		mine = (hck *)hsalloc(p, sizeof(hck) + bytes + 16);
 		mine->h = h;
 		mine->n = n;
 		mine->esz = esz;
@@ -225,7 +225,7 @@ static const hck *hck_get(pp *p, const void *a, uint32_t n, uint32_t esz)
 VPRIV const void *hc_blob(pp *p, const void *s, size_t n)
 {
 	if (n >= 0xffffffffu) {
-		char *d = hsalloc(p, n + 16);
+		char *d = (char *)hsalloc(p, n + 16);
 
 		memcpy(d, s, n);
 		memset(d + n, 0, 16);
@@ -240,14 +240,14 @@ VPRIV const void *hc_blob(pp *p, const void *s, size_t n)
  */
 VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz)
 {
-	const char *b = a;
+	const char *b = (const char *)a;
 	const hck **c, **tmp;
 	uint32_t nc = 0, st = 0;
 	hvec v = { NULL, 0, n };
 
 	if (!n)
 		return v;
-	tmp = varena_alloc(&p->tmp, (size_t)n * sizeof(*tmp));
+	tmp = (const hck **)varena_alloc(&p->tmp, (size_t)n * sizeof(*tmp));
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t id;
 
@@ -267,7 +267,7 @@ VPRIV hvec hc_vec(pp *p, const void *a, uint32_t n, uint32_t esz)
 			st = i + 1;
 		}
 	}
-	c = hsalloc(p, nc * sizeof(*c));
+	c = (const hck **)hsalloc(p, nc * sizeof(*c));
 	memcpy(c, tmp, nc * sizeof(*c));
 	v.c = c;
 	v.nc = nc;

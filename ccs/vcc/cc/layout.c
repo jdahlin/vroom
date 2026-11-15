@@ -424,7 +424,7 @@ static void type_str(cc *c, qty t, const char *inner, vfixbuf *out, bool *ok)
 /* the next of the TU's 8 type-name buffers (per TU: vccd compiles on many threads) */
 static vfixbuf *tybuf(cc *c)
 {
-	if (unlikely(!c->tyb) && !(c->tyb = malloc(8 * sizeof(vfixbuf))))
+	if (unlikely(!c->tyb) && !(c->tyb = (struct vfixbuf *)malloc(8 * sizeof(vfixbuf))))
 		abort();
 	return &c->tyb[c->tyk++ & 7];
 }
@@ -442,7 +442,7 @@ VPRIV const char *tyname(cc *c, qty t)
 
 VPRIV void layout_checks(cc *c)
 {
-	vfdbuf o = { malloc(1 << 20), 0, 1 << 20, c->o->outfd };
+	vfdbuf o = { (char *)malloc(1 << 20), 0, 1 << 20, c->o->outfd };
 	char rn[512];
 
 	vfdbuf_printf(&o, "\n/* vcc layout checks */\n");

@@ -159,7 +159,7 @@ VPRIV __attribute__((noinline, cold, noreturn)) void expect_fail(cc *c, const ch
 
 	if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' && c->prevloc && !(c->prevflags & PF_MACRO)) {
 		uint32_t e = pp_tok_end(c->p, c->prevloc);
-		char *s = halloc(c, n - 1);
+		char *s = (char *)halloc(c, n - 1);
 		pp_fixit fx = { e, e, s, VDA_MAYBE };
 
 		memcpy(s, what + 1, n - 2), s[n - 2] = 0;
@@ -414,7 +414,7 @@ static void pragma(cc *c, const ptok *t)
 			if (c->nvis)
 				c->nvis--;
 		} else if (e - q >= 4 && !memcmp(q, "push", 4)) {
-			const char *a = memchr(q, '(', (size_t)(e - q)), *b = a ? memchr(a, ')', (size_t)(e - a)) : NULL;
+			const char *a = (const char *)memchr(q, '(', (size_t)(e - q)), *b = a ? (const char *)memchr(a, ')', (size_t)(e - a)) : NULL;
 
 			if (a && b && c->nvis < 16) {
 				size_t n;
@@ -425,7 +425,7 @@ static void pragma(cc *c, const ptok *t)
 				while (b > a && (b[-1] == ' ' || b[-1] == '\t'))
 					b--;
 				n = (size_t)(b - a);
-				keep = halloc(c, n + 1);
+				keep = (char *)halloc(c, n + 1);
 				memcpy(keep, a, n);
 				keep[n] = 0;
 				c->strs[c->nstr] = (cstr){ keep, (uint32_t)(n + 1), 1, T_STRING };

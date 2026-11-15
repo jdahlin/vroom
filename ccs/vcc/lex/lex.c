@@ -1550,7 +1550,7 @@ static void *arena(size_t n)
 	if ((size_t)(ar_end - ar_cur) < n) {
 		size_t sz = n > (64u << 20) ? n : (64u << 20);
 
-		p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+		p = (char *)mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (p == MAP_FAILED) {
 			perror("vcc: mmap");
 			abort();
@@ -1580,7 +1580,7 @@ static _Thread_local size_t scratch_size;
  */
 static char *read_file(int fd, size_t size, size_t *got)
 {
-	char *b = arena(size + 128);	/* not always fresh: arena_trim gives tails back */
+	char *b = (char *)arena(size + 128);	/* not always fresh: arena_trim gives tails back */
 	size_t n = 0;
 
 	while (n < size) {
@@ -1636,7 +1636,7 @@ static void lex_src_mode(vlex_file *f, const char *src, size_t size, bool digrap
 		if (scratch == MAP_FAILED)
 			abort();
 	}
-	tok = arena((size + 2) * sizeof(vtok));
+	tok = (vtok *)arena((size + 2) * sizeof(vtok));
 	f->src = src;
 	f->size = (uint32_t)size;
 	f->ntok = lex_mode(src, size, tok, scratch, digraphs);
@@ -1654,7 +1654,7 @@ static void lex_src(vlex_file *f, const char *src, size_t size)
  * and comments and the spacing of adjacent tokens used by stringization. */
 const vlex_file *vlex_nodigraphs(const vlex_file *f)
 {
-	vlex_file *nf = arena(sizeof(*nf));
+	vlex_file *nf = (vlex_file *)arena(sizeof(*nf));
 
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
@@ -1720,7 +1720,7 @@ static centry *centry_get(const char *path, size_t len, int st0, bool *ins)
 			if (e->hash == h && e->len == len && !memcmp(e->path, path, len))
 				return e;	/* mine, if allocated, is wasted arena space: rare */
 		if (!mine) {
-			mine = arena(sizeof(*mine) + len + 1);
+			mine = (centry *)arena(sizeof(*mine) + len + 1);
 			memset(mine, 0, sizeof(*mine));
 			mine->hash = h;
 			mine->len = (uint32_t)len;
@@ -1753,16 +1753,16 @@ static void publish(centry *e, bool ok)
 const vlex_file *vlex_trigraphs(const vlex_file *f)
 {
 	static const char from[] = "=/'()!<>-", to[] = "#\\^[]|{}~";
-	const char *s = f->src, *q = memmem(s, f->size, "??", 2);
+	const char *s = f->src, *q = (const char *)memmem(s, f->size, "??", 2);
 	size_t n = f->size, o = 0;
 	char *b;
 	vlex_file *nf;
 
 	while (q && (q + 2 >= s + n || !strchr(from, q[2]) || !q[2]))
-		q = q + 1 < s + n ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2) : NULL;
+		q = q + 1 < s + n ? (const char *)memmem(q + 1, (size_t)(s + n - q - 1), "??", 2) : NULL;
 	if (!q)
 		return f;
-	b = arena(n + 128);
+	b = (char *)arena(n + 128);
 	for (size_t i = 0; i < n; i++) {
 		const char *t;
 
@@ -1774,7 +1774,7 @@ const vlex_file *vlex_trigraphs(const vlex_file *f)
 		}
 	}
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = (vlex_file *)arena(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
@@ -1797,7 +1797,7 @@ static size_t lx_skip(const char *s, size_t n, size_t i)
 		return i;
 	}
 	if (s[i] == '/' && i + 1 < n && s[i + 1] == '*') {
-		const char *e = memmem(s + i + 2, n - i - 2, "*/", 2);
+		const char *e = (const char *)memmem(s + i + 2, n - i - 2, "*/", 2);
 
 		return e ? (size_t)(e - s) + 2 : n;
 	}
@@ -1820,14 +1820,14 @@ const vlex_file *vlex_digitsep(const vlex_file *f)
 	vlex_file *nf;
 
 	/* quick: a ' between two alphanumerics somewhere at all */
-	for (const char *q = memchr(s, '\'', n); q; q = memchr(q + 1, '\'', (size_t)(s + n - q - 1)))
+	for (const char *q = (const char *)memchr(s, '\'', n); q; q = (const char *)memchr(q + 1, '\'', (size_t)(s + n - q - 1)))
 		if (q > s && q + 1 < s + n && lx_alnum(q[-1]) && lx_alnum(q[1])) {
 			any = true;
 			break;
 		}
 	if (!any)
 		return f;
-	b = arena(n + 128);
+	b = (char *)arena(n + 128);
 	any = false;
 	while (i < n) {
 		char ch = s[i];
@@ -1865,7 +1865,7 @@ const vlex_file *vlex_digitsep(const vlex_file *f)
 	if (!any)
 		return f;
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = (vlex_file *)arena(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
@@ -1886,9 +1886,9 @@ const vlex_file *vlex_c89(const vlex_file *f)
 
 	if (!memmem(s, n, "//", 2))
 		return f;
-	for (const char *q = s; (q = memmem(q, (size_t)(s + n - q), "//", 2)); q++)
+	for (const char *q = s; (q = (const char *)memmem(q, (size_t)(s + n - q), "//", 2)); q++)
 		cnt++;
-	b = arena(n + cnt + 128);
+	b = (char *)arena(n + cnt + 128);
 	cnt = 0;
 	while (i < n) {
 		char ch = s[i];
@@ -1909,7 +1909,7 @@ const vlex_file *vlex_c89(const vlex_file *f)
 	if (!cnt)
 		return f;
 	memset(b + o, 0, 128);
-	nf = arena(sizeof(*nf));
+	nf = (vlex_file *)arena(sizeof(*nf));
 	memset(nf, 0, sizeof(*nf));
 	nf->path = f->path;
 	nf->dev = f->dev;
@@ -2047,7 +2047,7 @@ void vlex_prefetch(const char *path, size_t len)
 	pthread_mutex_lock(&ioq_mu);
 	if (ioq_tail - ioq_head == ioq_cap) {	/* grow, keeping FIFO order */
 		size_t cap = ioq_cap ? 2 * ioq_cap : 4096;
-		centry **q = malloc(cap * sizeof(*q));
+		centry **q = (centry **)malloc(cap * sizeof(*q));
 
 		for (size_t i = 0; i < ioq_tail - ioq_head; i++)
 			q[i] = ioq[(ioq_head + i) % ioq_cap];

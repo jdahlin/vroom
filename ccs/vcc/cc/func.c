@@ -505,7 +505,7 @@ static bool self_entry(cc *c, uint32_t n, const flow *f)
 static bool rp_seq(cc *c, const node *x, uint32_t i, bool reach, bool brk, rpath *P)
 {
 	uint32_t j = i;
-	uint8_t small[64], *end = i <= sizeof small ? small : malloc(i);
+	uint8_t small[64], *end = i <= sizeof small ? small : (uint8_t *)malloc(i);
 	bool r = reach;
 
 	if (!end) {
@@ -719,7 +719,7 @@ static __attribute__((noinline)) void return_type_warn(cc *c, uint32_t s, uint32
 	if (!d)
 		return;
 	f.lab0 = lab0, f.nlab = c->nlabel - lab0;
-	f.lab = f.nlab <= sizeof small ? small : calloc(f.nlab, 1);
+	f.lab = f.nlab <= sizeof small ? small : (uint8_t *)calloc(f.nlab, 1);
 	memset(f.lab, 0, f.nlab <= sizeof small ? f.nlab : 0);
 	if (k == 1) {
 		do {	/* again while a goto reaches a new label (each pass reaches more) */
@@ -837,7 +837,7 @@ static void fold_local_builtins(cc *c, uint32_t sym0, uint32_t node0)
 		if ((x->op == N_BUILTIN && x->aux == BI_CONSTANT_P) || (c->o->fast_math && x->op == N_CALL)) query = true;
 	}
 	if (!query) return;
-	uint8_t *stable = calloc(nsym, 1);
+	uint8_t *stable = (uint8_t *)calloc(nsym, 1);
 	if (!stable) return;
 	for (uint32_t i = sym0; i < nsym; i++) {
 		const sym *s = &c->syms[i];

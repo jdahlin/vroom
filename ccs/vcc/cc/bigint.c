@@ -10,19 +10,19 @@ VPRIV uint32_t mk_big_words(cc*c,const uint32_t*a,qty t,uint32_t loc) {
  uint32_t n=mk(c,N_BIGNUM,t,loc);N(n)->b=(uint32_t)(ty_size(c,t)/4);N(n)->a=big_words(c,a,N(n)->b);return n;
 }
 VPRIV uint32_t big_int_node(cc*c,i128 value,qty t,uint32_t loc) {
- size_t n=(size_t)(ty_size(c,t)/4);uint32_t*a=calloc(n,4);if(!a)fatal(c,loc,"out of memory");
+ size_t n=(size_t)(ty_size(c,t)/4);uint32_t*a=(uint32_t *)calloc(n,4);if(!a)fatal(c,loc,"out of memory");
  for(size_t i=0;i<n;i++)a[i]=i<4?(uint32_t)((u128)value>>(i*32)):value<0?UINT32_MAX:0;
  vbi_norm(a,n,int_bits(c,t),is_signed(c,t));uint32_t out=mk_big_words(c,a,t,loc);free(a);return out;
 }
 VPRIV uint32_t big_literal(cc*c,const char*s,size_t len,unsigned base,bool unsign,uint32_t loc) {
- size_t cap=len/8+4;uint32_t*a=calloc(cap,4);if(!a)fatal(c,loc,"out of memory");size_t used=1;
+ size_t cap=len/8+4;uint32_t*a=(uint32_t *)calloc(cap,4);if(!a)fatal(c,loc,"out of memory");size_t used=1;
  size_t start=base==16||base==2?2:0;
  for(size_t i=start;i<len;i++){unsigned d;unsigned char ch=(unsigned char)s[i];if(ch=='\'')continue;if(ch>='0'&&ch<='9')d=ch-'0';else if((ch|32)>='a'&&(ch|32)<='f')d=(ch|32)-'a'+10;else break;
   uint64_t carry=d;for(size_t j=0;j<used;j++){carry+=(uint64_t)a[j]*base;a[j]=(uint32_t)carry;carry>>=32;}if(carry)a[used++]=(uint32_t)carry;
  }
  while(used>1&&!a[used-1])used--;unsigned bits=a[used-1]?(unsigned)((used-1)*32+32-__builtin_clz(a[used-1])):1;bits+=!unsign;
  if(bits>8388608){free(a);fatal(c,loc,"bit-precise integer literal exceeds maximum supported width");}
- qty t=ty_bitint(c,bits,unsign);size_t n=(size_t)(ty_size(c,t)/4);if(n>cap){uint32_t*p=realloc(a,n*4);if(!p){free(a);fatal(c,loc,"out of memory");}a=p;memset(a+cap,0,(n-cap)*4);}
+ qty t=ty_bitint(c,bits,unsign);size_t n=(size_t)(ty_size(c,t)/4);if(n>cap){uint32_t*p=(uint32_t *)realloc(a,n*4);if(!p){free(a);fatal(c,loc,"out of memory");}a=p;memset(a+cap,0,(n-cap)*4);}
  vbi_norm(a,n,bits,!unsign);uint32_t out=mk_big_words(c,a,t,loc);free(a);return out;
 }
 static void big_operand(cc*c,uint32_t*out,size_t n,const cval*v,qty t) {
@@ -38,7 +38,7 @@ static void big_result(cc*c,cval*v,uint32_t*a,size_t n,qty t,bool ice) {
 static bool big_to_float(cc *c, const cval *a, qty from, qty to, cval *v)
 {
  if (!big_valid(c,a)) return false;
- size_t n=a->nbig; uint32_t *words=malloc(n*4);
+ size_t n=a->nbig; uint32_t *words=(uint32_t *)malloc(n*4);
  if (!words) return false;
  bool neg=is_signed(c,from)&&(c->lists[a->big+n-1]>>31);
  if(neg)vbi_neg(words,c->lists+a->big,n);else memcpy(words,c->lists+a->big,n*4);
@@ -89,7 +89,7 @@ static bool big_from_float(uint32_t *out,size_t n,unsigned bits,bool sign,u128 q
 VPRIV bool big_conversion_exact(cc *c,const cval *v,qty from,qty to)
 {
  if(!big_valid(c,v))return false;
- size_t n=v->nbig;uint32_t *a=malloc(n*4);if(!a)return false;
+ size_t n=v->nbig;uint32_t *a=(uint32_t *)malloc(n*4);if(!a)return false;
  bool neg=is_signed(c,from)&&(c->lists[v->big+n-1]>>31);
  if(neg)vbi_neg(a,c->lists+v->big,n);else memcpy(a,c->lists+v->big,n*4);
  size_t used=n;while(used&&!a[used-1])used--;
@@ -113,11 +113,11 @@ VPRIV bool big_conversion_exact(cc *c,const cval *v,qty from,qty to)
 VPRIV char *big_value_string(cc *c,const cval *v,qty from)
 {
  if(!big_valid(c,v))return NULL;
- size_t n=v->nbig;uint32_t *a=malloc(n*4);if(!a)return NULL;
+ size_t n=v->nbig;uint32_t *a=(uint32_t *)malloc(n*4);if(!a)return NULL;
  bool neg=is_signed(c,from)&&(c->lists[v->big+n-1]>>31);
  if(neg)vbi_neg(a,c->lists+v->big,n);else memcpy(a,c->lists+v->big,n*4);
  while(n>1&&!a[n-1])n--;
- char *text=malloc(n*8+4);if(!text){free(a);return NULL;}
+ char *text=(char *)malloc(n*8+4);if(!text){free(a);return NULL;}
  char *p=text;if(neg)*p++='-';*p++='0';*p++='x';
  bool started=false;for(size_t i=n*8;i--;){unsigned digit=(a[i/8]>>(4*(i%8)))&15;if(digit||started||!i){*p++="0123456789abcdef"[digit];started=true;}}
  *p=0;free(a);return text;
@@ -149,7 +149,7 @@ VPRIV uint32_t big_fold_node(cc*c,uint32_t node_index) {
  bool grammar=constexpr_init_ok(c,x->a)&&(x->op!=N_BINARY||constexpr_init_ok(c,x->b));
  if(big_read_eval(c,node_index,&v)&&v.kind==CV_INT){uint32_t result=mk_int(c,v.i,to,x->loc);N(result)->aux|=(!v.ice?NUM_NO_ICE:0)|(!grammar?NUM_NO_CONSTEXPR:0);return result;}
  if(!large||!eval(c,x->a,&a)||(a.kind!=CV_INT&&a.kind!=CV_BIGINT&&!(x->op==N_CAST&&a.kind==CV_FLT)))return node_index;
- size_t n=(size_t)(ty_size(c,to)/4);uint32_t*buf=calloc(n*4+2,4);if(!buf)fatal(c,x->loc,"out of memory");uint32_t*l=buf,*r=l+n,*out=r+n,*scratch=out+n;
+ size_t n=(size_t)(ty_size(c,to)/4);uint32_t*buf=(uint32_t *)calloc(n*4+2,4);if(!buf)fatal(c,x->loc,"out of memory");uint32_t*l=buf,*r=l+n,*out=r+n,*scratch=out+n;
  if(a.kind!=CV_FLT)big_operand(c,l,n,&a,N(x->a)->ty);bool ok=true,ice=a.ice;
  if(x->op==N_CAST&&a.kind==CV_FLT){bool valid=big_from_float(out,n,int_bits(c,to),is_signed(c,to),a.ld?a.q:q_of_d(a.f));ice=N(x->a)->op==N_FNUM&&valid;grammar&=valid;}
  else if(x->op==N_CAST)memcpy(out,l,n*4);
@@ -159,7 +159,7 @@ VPRIV uint32_t big_fold_node(cc*c,uint32_t node_index) {
   case T_PLUS:vbi_add(out,l,r,n);break;case T_MINUS:vbi_sub(out,l,r,n);break;case T_STAR:vbi_mul(out,l,r,n);break;
   case T_AMP:case T_PIPE:case T_CARET:for(size_t i=0;i<n;i++)out[i]=x->aux==T_AMP?l[i]&r[i]:x->aux==T_PIPE?l[i]|r[i]:l[i]^r[i];break;
   case T_LESSLESS:case T_GREATERGREATER:{bool high=false;for(size_t i=2;i<n;i++)high|=r[i]!=0;uint64_t shift=r[0]|(n>1?(uint64_t)r[1]<<32:0);if(high||shift>=int_bits(c,to)){ok=false;break;}vbi_shift(out,l,n,shift,x->aux==T_GREATERGREATER,is_signed(c,to)&&(l[n-1]>>31));break;}
-  case T_SLASH:case T_PERCENT:{bool neg=is_signed(c,to)&&(l[n-1]>>31),neg2=is_signed(c,to)&&(r[n-1]>>31);if(!vbi_nz(r,n)){ok=false;break;}if(neg)vbi_neg(l,l,n);if(neg2)vbi_neg(r,r,n);uint32_t*division=calloc(n*2+2,4);if(!division)fatal(c,x->loc,"out of memory");vbi_div(out,division,l,r,n,division+n+1);if(x->aux==T_PERCENT)memcpy(out,division,n*4);if(x->aux==T_SLASH?neg!=neg2:neg)vbi_neg(out,out,n);free(division);break;}
+  case T_SLASH:case T_PERCENT:{bool neg=is_signed(c,to)&&(l[n-1]>>31),neg2=is_signed(c,to)&&(r[n-1]>>31);if(!vbi_nz(r,n)){ok=false;break;}if(neg)vbi_neg(l,l,n);if(neg2)vbi_neg(r,r,n);uint32_t*division=(uint32_t *)calloc(n*2+2,4);if(!division)fatal(c,x->loc,"out of memory");vbi_div(out,division,l,r,n,division+n+1);if(x->aux==T_PERCENT)memcpy(out,division,n*4);if(x->aux==T_SLASH?neg!=neg2:neg)vbi_neg(out,out,n);free(division);break;}
   default:ok=false;
  }}
  bool overflow=false;
@@ -169,7 +169,7 @@ VPRIV uint32_t big_fold_node(cc*c,uint32_t node_index) {
   else if(x->op==N_BINARY&&x->aux==T_PLUS)overflow=sa==sb&&so!=sa;
   else if(x->op==N_BINARY&&x->aux==T_MINUS)overflow=sa!=sb&&so!=sa;
   else if(x->op==N_BINARY&&x->aux==T_STAR){
-   uint32_t *full=calloc(n*6,4);if(!full)fatal(c,x->loc,"out of memory");
+   uint32_t *full=(uint32_t *)calloc(n*6,4);if(!full)fatal(c,x->loc,"out of memory");
    vbi_copy(full,n*2,l,n,sa);vbi_copy(full+n*2,n*2,r,n,sb);vbi_mul(full+n*4,full,full+n*2,n*2);
    vbi_copy(full,n*2,out,n,so);vbi_norm(full,n*2,bits,true);overflow=memcmp(full,full+n*4,n*8)!=0;free(full);
   }else if(x->op==N_BINARY&&x->aux==T_SLASH){

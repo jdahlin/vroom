@@ -56,7 +56,7 @@ static bool in_hashtable(const char *name, unsigned int len, item *tab[])
 	for (a = tab[hash % HASHSZ]; a; a = a->next)
 		if (a->hash == hash && a->len == len && !memcmp(a->name, name, len))
 			return true;
-	a = malloc(sizeof(*a) + len);
+	a = (item *)malloc(sizeof(*a) + len);
 	if (!a)
 		abort();
 	memcpy(a->name, name, len);
@@ -295,7 +295,7 @@ static char *read_at(const char *cwd, const char *path, char *abs, size_t cap)
 	fd = open(abs, O_RDONLY);
 	if (fd < 0)
 		return NULL;
-	if (fstat(fd, &st) || !(buf = malloc((size_t)st.st_size + 1))) {
+	if (fstat(fd, &st) || !(buf = (char *)malloc((size_t)st.st_size + 1))) {
 		close(fd);
 		return NULL;
 	}

@@ -8,7 +8,7 @@ VPRIV uint32_t *dslot(cc *c, uint32_t **dir, uint32_t id)
 	uint32_t **pg = &dir[id >> DIR_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = halloc(c, DIR_PAGE * sizeof(uint32_t));
+		*pg = (uint32_t *)halloc(c, DIR_PAGE * sizeof(uint32_t));
 		memset(*pg, 0, DIR_PAGE * sizeof(uint32_t));
 	}
 	return &(*pg)[id & (DIR_PAGE - 1)];
@@ -181,7 +181,7 @@ VPRIV void proto_binding(cc *c, uint32_t s)
 		return;
 	if (c->nptag == c->cptag) {
 		uint32_t cap = c->cptag ? c->cptag * 2 : 16;
-		uint32_t *p = halloc(c, (size_t)cap * sizeof(*p));
+		uint32_t *p = (uint32_t *)halloc(c, (size_t)cap * sizeof(*p));
 
 		if (c->nptag)
 			memcpy(p, c->ptag, (size_t)c->nptag * sizeof(*p));
@@ -437,7 +437,7 @@ VPRIV uint32_t undeclared(cc *c, const char *msg, uint32_t id, uint32_t loc, boo
 	if (s || k) {
 		int m;
 		const char *t = idname(s ? c->syms[s].name : k, &m);
-		char *fs = halloc(c, (size_t)m + 1);
+		char *fs = (char *)halloc(c, (size_t)m + 1);
 		pp_fixit fx;
 
 		memcpy(fs, t, m), fs[m] = 0;
@@ -535,7 +535,7 @@ VPRIV void vinit(vec *v) { v->v = v->inl, v->n = 0, v->cap = 16; }
 VPRIV void vpush(cc *c, vec *v, uint32_t x)
 {
 	if (unlikely(v->n == v->cap)) {
-		uint32_t *nv = halloc(c, v->cap * 2 * sizeof(uint32_t));
+		uint32_t *nv = (uint32_t *)halloc(c, v->cap * 2 * sizeof(uint32_t));
 
 		memcpy(nv, v->v, v->n * sizeof(uint32_t));
 		v->v = nv;

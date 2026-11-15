@@ -14,7 +14,7 @@
 
 VPRIV Sv svdup(As *a, const char *s, size_t n)
 {
-	char *p = rget(&a->defs, n + 1);
+	char *p = (char *)rget(&a->defs, n + 1);
 	memcpy(p, s, n); p[n] = 0;
 	return (Sv){ p, (uint32_t)n };
 }
@@ -69,7 +69,7 @@ static NumLab *numlab(As *a, uint32_t num)
 {
 	if (a->nlcount * 2 >= a->nlmask) {
 		uint32_t nm = a->nlmask * 2 + 1;
-		NumLab *t = rget(&a->defs, sizeof *t * (nm + 1));
+		NumLab *t = (NumLab *)rget(&a->defs, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->nlmask; i++) {
 			if (!a->nl[i].cur && !a->nl[i].fwd) continue;
@@ -92,7 +92,7 @@ static Var *var_slot(As *a, uint32_t y, int create)
 {
 	if (create && a->vcount * 2 >= a->vmask) {
 		uint32_t nm = a->vmask * 2 + 1;
-		Var *t = rget(&a->defs, sizeof *t * (nm + 1));
+		Var *t = (Var *)rget(&a->defs, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->vmask; i++) {
 			if (!a->vars[i].sym) continue;
@@ -993,7 +993,7 @@ static int d_ascii(As *a, const char *p, const char *e, int z)
 	for (;;) {
 		char sbuf[4096], *buf = sbuf;	/* the decoded string is no longer than its source */
 		size_t n;
-		if ((size_t)(e - p) > sizeof sbuf && !(buf = malloc((size_t)(e - p)))) return err(a, "out of memory");
+		if ((size_t)(e - p) > sizeof sbuf && !(buf = (char *)malloc((size_t)(e - p)))) return err(a, "out of memory");
 		if (parse_string(a, &p, e, buf, &n)) { if (buf != sbuf) free(buf); return -1; }
 		elf_data(a->o, a->cur);
 		elf_bytes(a->o, a->cur, buf, n);
@@ -1456,7 +1456,7 @@ static int assign(As *a, Sv n, const char *p, const char *e)
 					uint32_t nc = a->raliascap ? a->raliascap * 2 : 32;
 					void *nb = rget(&a->defs, sizeof *a->ralias * nc);
 					if (a->nralias) memcpy(nb, a->ralias, sizeof *a->ralias * a->nralias);
-					a->ralias = nb, a->raliascap = nc;
+					a->ralias = (__typeof__(a->ralias))nb, a->raliascap = nc;
 				}
 				a->ralias[a->nralias].sym = y;
 				memset(a->ralias[a->nralias].reg, 0, 8);
@@ -1689,11 +1689,11 @@ static Tmpl tmpl_compile(As *a, vregion *r, Sv body, const Param *ps, uint32_t n
 {
 	const char *b = body.s;
 	size_t n = body.n, nbs = 0;
-	for (const char *q = b; (q = memchr(q, '\\', (size_t)(b + n - q))); q++) nbs++;
-	Tmpl t = { rget(r, sizeof(Piece) * (nbs + 1)), 0 };
+	for (const char *q = b; (q = (const char *)memchr(q, '\\', (size_t)(b + n - q))); q++) nbs++;
+	Tmpl t = { (Piece *)rget(r, sizeof(Piece) * (nbs + 1)), 0 };
 	size_t lit = 0, i = 0;
 	while (i < n) {
-		const char *q = memchr(b + i, '\\', n - i);
+		const char *q = (const char *)memchr(b + i, '\\', n - i);
 		if (!q) break;
 		i = (size_t)(q - b);
 		if (i + 1 == n) break;
@@ -1725,7 +1725,7 @@ static Tmpl tmpl_compile_alt(vregion *r, Sv body, const Param *ps, uint32_t np)
 {
 	const char *b = body.s;
 	size_t n = body.n;
-	Tmpl t = { rget(r, sizeof(Piece) * (n / 2 + 2)), 0 };
+	Tmpl t = { (Piece *)rget(r, sizeof(Piece) * (n / 2 + 2)), 0 };
 	size_t lit = 0, i = 0;
 	while (i < n) {
 		size_t st = i;
@@ -1762,7 +1762,7 @@ static int alt_arg(As *a, const char **pp, const char *e, Sv *out)
 		int k = snprintf(buf, sizeof buf, "%lld", (long long)v);
 		*out = svdup(a, buf, (size_t)k);
 	} else {
-		char *o = rget(&a->defs, (size_t)(e - p) + 1);
+		char *o = (char *)rget(&a->defs, (size_t)(e - p) + 1);
 		size_t n = 0;
 		for (p++; p < e && *p != '>'; p++) {
 			if (*p == '!' && p + 1 < e) p++;
@@ -1860,9 +1860,9 @@ static int d_macro(As *a, const char *p, const char *e)
 	}
 	Sv body;
 	if (collect_body(a, 1, &body)) return -1;
-	Macro *m = rget(&a->defs, sizeof *m);
+	Macro *m = (Macro *)rget(&a->defs, sizeof *m);
 	m->name = name;
-	m->params = rget(&a->defs, sizeof(Param) * (np ? np : 1));
+	m->params = (Param *)rget(&a->defs, sizeof(Param) * (np ? np : 1));
 	memcpy(m->params, ps, sizeof(Param) * np);
 	m->np = np;
 	/* file text outlives the macro (as_snippet's contract); expansions do not */
@@ -1871,7 +1871,7 @@ static int d_macro(As *a, const char *p, const char *e)
 	m->t = (Tmpl){ 0, 0 };
 	if (a->mcount * 2 >= a->mmask) {
 		uint32_t nm = a->mmask * 2 + 1;
-		Macro **t = rget(&a->defs, sizeof *t * (nm + 1));
+		Macro **t = (Macro **)rget(&a->defs, sizeof *t * (nm + 1));
 		memset(t, 0, sizeof *t * (nm + 1));
 		for (uint32_t i = 0; i <= a->mmask; i++)
 			for (Macro *x = a->mtab[i], *nx; x; x = nx) { nx = x->next; uint32_t h = hsv(x->name.s, x->name.n) & nm; x->next = t[h]; t[h] = x; }
@@ -2190,7 +2190,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 			if (parse_name(a, &p, e, &nm)) return -1;
 			if (a->nasg == a->asgcap) {
 				uint32_t nc = a->asgcap ? a->asgcap * 2 : 64;
-				uint32_t *t = rget(&a->defs, sizeof *t * nc);
+				uint32_t *t = (uint32_t *)rget(&a->defs, sizeof *t * nc);
 				if (a->nasg) memcpy(t, a->asg, sizeof *t * a->nasg);
 				a->asg = t; a->asgcap = nc;
 			}
@@ -2408,7 +2408,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
 				uint32_t nc = a->svcap ? a->svcap * 2 : 16;
 				void *t = rget(&a->defs, sizeof *a->sv * nc);
 				if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
-				a->sv = t; a->svcap = nc;
+				a->sv = (__typeof__(a->sv))t; a->svcap = nc;
 			}
 			a->sv[a->nsv].orig = ya; a->sv[a->nsv].ver = yt; a->sv[a->nsv].rm = 2;
 			a->nsv++;
@@ -2501,7 +2501,7 @@ static int statement(As *a, const char *p, const char *e)
 		Sv reg = trim(q + 4, e);
 		if (a->nal == a->alcap) {
 			uint32_t nc = a->alcap ? a->alcap * 2 : 64;
-			Alias *t = rget(&a->defs, sizeof *t * nc);
+			Alias *t = (Alias *)rget(&a->defs, sizeof *t * nc);
 			if (a->nal) memcpy(t, a->al, sizeof *t * a->nal);
 			a->al = t; a->alcap = nc;
 		}
@@ -2525,10 +2525,10 @@ static int statement(As *a, const char *p, const char *e)
 
 As *as_new(void)
 {
-	As *a = reserve(sizeof *a);
-	a->xs.base = reserve((size_t)1 << 32); a->xs.cap = (size_t)1 << 32;
-	a->defs.base = reserve((size_t)1 << 30); a->defs.cap = (size_t)1 << 30;
-	a->sb.base = reserve((size_t)1 << 24); a->sb.cap = (size_t)1 << 24;
+	As *a = (As *)reserve(sizeof *a);
+	a->xs.base = (uint8_t *)reserve((size_t)1 << 32); a->xs.cap = (size_t)1 << 32;
+	a->defs.base = (uint8_t *)reserve((size_t)1 << 30); a->defs.cap = (size_t)1 << 30;
+	a->sb.base = (uint8_t *)reserve((size_t)1 << 24); a->sb.cap = (size_t)1 << 24;
 	return a;
 }
 
@@ -2562,14 +2562,14 @@ void as_begin(As *a, ElfObj *o, const char *name)
 	a->var_rank = NULL;
 	memset(&a->dwcur, 0, sizeof a->dwcur); a->dwcur.flags = 1;
 	a->mmask = 255; a->mcount = 0;
-	a->mtab = rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
+	a->mtab = (Macro **)rget(&a->defs, sizeof(Macro *) * (a->mmask + 1));
 	memset(a->mtab, 0, sizeof(Macro *) * (a->mmask + 1));
 	a->npool = 0; a->poolcap = 0; a->pool = 0;
 	a->vmask = 63; a->vcount = 0;
-	a->vars = rget(&a->defs, sizeof(Var) * (a->vmask + 1));
+	a->vars = (Var *)rget(&a->defs, sizeof(Var) * (a->vmask + 1));
 	memset(a->vars, 0, sizeof(Var) * (a->vmask + 1));
 	a->nlmask = 255; a->nlcount = 0;
-	a->nl = rget(&a->defs, sizeof(NumLab) * (a->nlmask + 1));
+	a->nl = (NumLab *)rget(&a->defs, sizeof(NumLab) * (a->nlmask + 1));
 	memset(a->nl, 0, sizeof(NumLab) * (a->nlmask + 1));
 	elf_reset(o);
 	uint32_t text_sec = std_section(a, ".text");
@@ -2674,7 +2674,7 @@ static struct Cfi *cfi_push(As *a, uint8_t op)
 {
 	if (a->ncfi == a->cficap) {
 		uint32_t nc = a->cficap ? a->cficap * 2 : 256;
-		struct Cfi *t = rget(&a->defs, sizeof *t * nc);
+		struct Cfi *t = (struct Cfi *)rget(&a->defs, sizeof *t * nc);
 		if (a->ncfi) memcpy(t, a->cfi, sizeof *t * a->ncfi);
 		a->cfi = t; a->cficap = nc;
 	}
@@ -2709,7 +2709,7 @@ static int d_cfi(As *a, Sv w, const char *p, const char *e)
 		if (a->infde) return err(a, "starting new .cfi frame before finishing the previous one");
 		if (a->nfde == a->fdecap) {
 			uint32_t nc = a->fdecap ? a->fdecap * 2 : 64;
-			struct Fde *t = rget(&a->defs, sizeof *t * nc);
+			struct Fde *t = (struct Fde *)rget(&a->defs, sizeof *t * nc);
 			if (a->nfde) memcpy(t, a->fde, sizeof *t * a->nfde);
 			a->fde = t; a->fdecap = nc;
 		}
@@ -2731,7 +2731,7 @@ static int d_cfi(As *a, Sv w, const char *p, const char *e)
 	if (CIS("cfi_restore_state")) { cfi_push(a, CF_RESTORE_STATE); return 0; }
 	if (CIS("cfi_negate_ra_state") || CIS("cfi_window_save")) { cfi_push(a, CF_NEGATE_RA); return 0; }
 	if (CIS("cfi_escape")) {
-		uint8_t *b = rget(&a->defs, (size_t)(e - p) + 1);
+		uint8_t *b = (uint8_t *)rget(&a->defs, (size_t)(e - p) + 1);
 		uint32_t n = 0;
 		while (p < e) {
 			int64_t v;
@@ -2813,10 +2813,10 @@ static void cfi_finish(As *a)
 	size_t cap = 64;
 	for (uint32_t i = 0; i < a->nfde; i++) cap += 64 + 16 * (size_t)a->fde[i].n;
 	for (uint32_t i = 0; i < a->ncfi; i++) if (a->cfi[i].op == CF_ESCAPE) cap += (size_t)a->cfi[i].off;
-	Buf8 b = { rget(&a->defs, cap), 0 };
-	size_t *pcbs = rget(&a->defs, sizeof(size_t) * a->nfde);
+	Buf8 b = { (uint8_t *)rget(&a->defs, cap), 0 };
+	size_t *pcbs = (size_t *)rget(&a->defs, sizeof(size_t) * a->nfde);
 	/* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
-	uint32_t *ord = rget(&a->defs, sizeof(uint32_t) * a->nfde);
+	uint32_t *ord = (uint32_t *)rget(&a->defs, sizeof(uint32_t) * a->nfde);
 	for (uint32_t i = 0; i < a->nfde; i++) {
 		struct Fde *f = &a->fde[i];
 		uint32_t key = (uint32_t)f->sig << 30 | (uint32_t)f->simple << 29 | f->ra << 1 | f->bkey;
@@ -2936,7 +2936,7 @@ static struct VarItem *var_item(As *a, int kind)
 		uint32_t nc = a->pfacap ? a->pfacap * 2 : 64;
 		void *t = rget(&a->defs, sizeof *a->pfa * nc);
 		if (a->npfa) memcpy(t, a->pfa, sizeof *a->pfa * a->npfa);
-		a->pfa = t; a->pfacap = nc;
+		a->pfa = (struct VarItem *)t; a->pfacap = nc;
 	}
 	struct VarItem *v = &a->pfa[a->npfa++];
 	memset(v, 0, sizeof *v);
@@ -3090,9 +3090,9 @@ static void var_finish(As *a)
 	ElfObj *o = a->o;
 	for (uint32_t i = 0; i < a->npfa; i++) elf_frag(o, a->pfa[i].frag)->aux = i + 1;
 	uint32_t count = o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - o->nfrag;
-	a->var_rank = rget(&a->defs, sizeof(uint32_t) * count);
-	a->var_tree = rget(&a->defs, sizeof(uint64_t) * count);
-	a->var_oldoff = rget(&a->defs, sizeof(uint64_t) * count);
+	a->var_rank = (uint32_t *)rget(&a->defs, sizeof(uint32_t) * count);
+	a->var_tree = (uint64_t *)rget(&a->defs, sizeof(uint64_t) * count);
+	a->var_oldoff = (uint64_t *)rget(&a->defs, sizeof(uint64_t) * count);
 	memset(a->var_tree, 0, sizeof(uint64_t) * count);
 	a->var_n = count - 1;
 	uint32_t rank = 0;
@@ -3102,7 +3102,7 @@ static void var_finish(As *a)
 			a->var_rank[var_index(o, f)] = ++rank;
 			var_add(a, rank, p->size + (p->cont && p->aux ? a->pfa[p->aux - 1].size : 0));
 		}
-	uint64_t *prev = rget(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
+	uint64_t *prev = (uint64_t *)rget(&a->defs, sizeof(uint64_t) * (a->npfa + 1));
 	/* pass -1 lays out the items with every jump short (MC's first layout); then each pass
 	   relaxes the jumps against the previous pass's layout and lays the rest out again */
 	for (int it = -1;; it++) {
@@ -3253,7 +3253,7 @@ static uint32_t dw_dir_from(As *a, Sv d, uint32_t from)
 	for (uint32_t i = from; i < a->ndwd; i++) if (a->dwd[i].n == d.n && !memcmp(a->dwd[i].s, d.s, d.n)) return i;
 	if (a->ndwd == a->dwdcap) {
 		uint32_t nc = a->dwdcap ? a->dwdcap * 2 : 16;
-		Sv *t = rget(&a->defs, sizeof *t * nc);
+		Sv *t = (Sv *)rget(&a->defs, sizeof *t * nc);
 		if (a->ndwd) memcpy(t, a->dwd, sizeof *t * a->ndwd);
 		a->dwd = t; a->dwdcap = nc;
 	}
@@ -3269,7 +3269,7 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	uint64_t n;
 	if (dw_num(a, &p, e, &n)) return -1;
 	if (n > 100000) return err(a, "file number too large");
-	char *b1 = rget(&a->defs, (size_t)(e - p) + 1), *b2 = rget(&a->defs, (size_t)(e - p) + 1);
+	char *b1 = (char *)rget(&a->defs, (size_t)(e - p) + 1), *b2 = (char *)rget(&a->defs, (size_t)(e - p) + 1);
 	size_t l1, l2 = 0;
 	if (parse_string(a, &p, e, b1, &l1)) return -1;
 	b1[l1] = 0;
@@ -3304,7 +3304,7 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	if (n >= a->dwfcap) {
 		uint32_t nc = a->dwfcap ? a->dwfcap : 16;
 		while (nc <= n) nc *= 2;
-		struct DwFile *t = rget(&a->defs, sizeof *t * nc);
+		struct DwFile *t = (struct DwFile *)rget(&a->defs, sizeof *t * nc);
 		memset(t, 0, sizeof *t * nc);
 		if (a->ndwf) memcpy(t, a->dwf, sizeof *t * a->ndwf);
 		a->dwf = t; a->dwfcap = nc;
@@ -3324,7 +3324,7 @@ static int d_dwfile(As *a, const char *p, const char *e)
 	if (!a->ndwd) {	/* directory 0: the root file's, else the compilation directory */
 		Sv d = dir;
 		if (n) {
-			char *cwd = rget(&a->defs, 4096);
+			char *cwd = (char *)rget(&a->defs, 4096);
 			if (!getcwd(cwd, 4096)) cwd[0] = 0;
 			d = (Sv){ cwd, (uint32_t)strlen(cwd) };
 		}
@@ -3380,7 +3380,7 @@ VPRIV void loc_row(As *a)
 	a->dwlocp = 0;
 	if (a->ndwl == a->dwlcap) {
 		uint32_t nc = a->dwlcap ? a->dwlcap * 2 : 256;
-		struct DwLoc *t = rget(&a->defs, sizeof *t * nc);
+		struct DwLoc *t = (struct DwLoc *)rget(&a->defs, sizeof *t * nc);
 		if (a->ndwl) memcpy(t, a->dwl, sizeof *t * a->ndwl);
 		a->dwl = t; a->dwlcap = nc;
 	}
@@ -3459,8 +3459,8 @@ static void dwline_finish(As *a)
 	int md5 = 1;
 	for (uint32_t i = 0; i < a->ndwf; i++) if (a->dwf[i].set && !a->dwf[i].hasmd5) md5 = 0;
 	size_t cap = 256 + 32 * (size_t)(a->ndwf + a->ndwd) + 48 * (size_t)a->ndwl;
-	Buf8 b = { rget(&a->defs, cap), 0 };
-	uint32_t *sfix = rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwf + a->ndwd + 1));
+	Buf8 b = { (uint8_t *)rget(&a->defs, cap), 0 };
+	uint32_t *sfix = (uint32_t *)rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwf + a->ndwd + 1));
 	uint32_t nsfix = 0;
 	b.n = 4;
 	b.p[b.n++] = 5; b.p[b.n++] = 0; b.p[b.n++] = 8; b.p[b.n++] = 0;
@@ -3488,9 +3488,9 @@ static void dwline_finish(As *a)
 	memcpy(b.p + hl, &hlen, 4);
 	/* sequences: one per section, in order of first row */
 	frag_bases(o);
-	uint32_t *afix = rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwl + 1));
+	uint32_t *afix = (uint32_t *)rget(&a->defs, sizeof(uint32_t) * 2 * (a->ndwl + 1));
 	uint32_t nafix = 0;
-	uint8_t *done = rget(&a->defs, a->ndwl + 1);
+	uint8_t *done = (uint8_t *)rget(&a->defs, a->ndwl + 1);
 	memset(done, 0, a->ndwl + 1);
 	for (uint32_t s = 0; s < a->ndwl; s++) {
 		if (done[s]) continue;
@@ -3561,7 +3561,7 @@ static int d_symver(As *a, const char *p, const char *e)
 	const char *q = p;
 	while (q < e && *q != ',' && *q != ' ' && *q != '\t') q++;
 	v = (Sv){ p, (size_t)(q - p) };
-	const char *at = memchr(v.s, '@', v.n);
+	const char *at = (const char *)memchr(v.s, '@', v.n);
 	if (!at) return err(a, "expected a '@' in the name");
 	int rm = 0;
 	p = ws(q, e);
@@ -3579,7 +3579,7 @@ static int d_symver(As *a, const char *p, const char *e)
 		uint32_t nc = a->svcap ? a->svcap * 2 : 16;
 		void *t = rget(&a->defs, sizeof *a->sv * nc);
 		if (a->nsv) memcpy(t, a->sv, sizeof *a->sv * a->nsv);
-		a->sv = t; a->svcap = nc;
+		a->sv = (__typeof__(a->sv))t; a->svcap = nc;
 	}
 	a->sv[a->nsv].orig = yo; a->sv[a->nsv].ver = yv; a->sv[a->nsv].rm = rm;
 	a->nsv++;
@@ -3611,11 +3611,11 @@ static void symver_finish(As *a)
 			continue;
 		}
 		int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->sv[i].rm;
-		const char *at = memchr(t->name, '@', t->len);
+		const char *at = (const char *)memchr(t->name, '@', t->len);
 		if (at && t->len - (size_t)(at - t->name) >= 3 && !memcmp(at, "@@@", 3)) {
 			/* name@@@v: @@ when defined here, @ otherwise */
 			size_t k = (size_t)(at - t->name);
-			char *n = rget(&a->defs, t->len);
+			char *n = (char *)rget(&a->defs, t->len);
 			memcpy(n, t->name, k + 1);
 			if (def) { memcpy(n + k + 1, at + 2, t->len - k - 2); }
 			else { memcpy(n + k + 1, at + 3, t->len - k - 3); }
@@ -3727,7 +3727,7 @@ static void db_put(DBuf *b, const char *s, size_t n)
 {
 	if (b->n + n + 64 > b->cap) {
 		b->cap = (b->n + n + 64) * 2;
-		b->p = realloc(b->p, b->cap);
+		b->p = (char *)realloc(b->p, b->cap);
 	}
 	memcpy(b->p + b->n, s, n);
 	b->n += n;
@@ -3894,7 +3894,7 @@ static bool dt_neon(DBuf *b, const char *s, const char *c)
 		m++;
 	if (!isalpha((unsigned char)*s) || memchr(s, ':', (size_t)(m - s)))
 		return false;	/* a label */
-	d = memchr(s, '.', (size_t)(m - s));
+	d = (const char *)memchr(s, '.', (size_t)(m - s));
 	if (!d) {
 		/* "mov d0, v1[1]": the lane size from the scalar register */
 		static const char *const lane[] = { ".b", ".h", ".s", ".d" };
@@ -3902,7 +3902,7 @@ static bool dt_neon(DBuf *b, const char *s, const char *c)
 
 		while (r < c && (*r == ' ' || *r == '\t'))
 			r++;
-		lb = memchr(r, '[', (size_t)(c - r));
+		lb = (const char *)memchr(r, '[', (size_t)(c - r));
 		if (!lb || r + 1 >= c || !strchr("bhsd", *r) || !isdigit((unsigned char)r[1]) || memchr(r, '.', (size_t)(c - r)))
 			return false;
 		const char *v = lb;
@@ -3985,7 +3985,7 @@ char *as_darwin_text(const char *t, size_t n, size_t *outn)
 	};
 
 	for (const char *p = t, *e = t + n; p < e;) {
-		const char *nl = memchr(p, '\n', (size_t)(e - p));
+		const char *nl = (const char *)memchr(p, '\n', (size_t)(e - p));
 		const char *le = nl ? nl : e;
 		const char *c = p;
 		bool quote = false;

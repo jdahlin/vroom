@@ -29,38 +29,38 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 	c->ext_off = -1;	/* (ext_on: computed at its first use) */
 	c->o = o;
 	ccr = vmpool_take(&ccpool);
-	c->ty = vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
-	c->params = vmreg_get(&ccr[1], (size_t)1 << 28, "cc.params");
-	c->tags = vmreg_get(&ccr[2], (size_t)1 << 28, "cc.tags");
-	c->syms = vmreg_get(&ccr[3], (size_t)1 << 30, "cc.syms");
-	c->nodes = vmreg_get(&ccr[4], (size_t)1 << 32, "cc.nodes");
-	c->lists = vmreg_get(&ccr[5], (size_t)1 << 30, "cc.lists");
-	c->ipool = vmreg_get(&ccr[6], (size_t)1 << 30, "cc.ipool");
-	c->fpool = vmreg_get(&ccr[7], (size_t)1 << 26, "cc.fpool");
-	c->strs = vmreg_get(&ccr[8], (size_t)1 << 28, "cc.strs");
-	c->labels = vmreg_get(&ccr[9], (size_t)1 << 26, "cc.labels");
-	c->attr = vmreg_get(&ccr[10], (size_t)1 << 28, "cc.attr");
-	c->asms = vmreg_get(&ccr[11], (size_t)1 << 28, "cc.asms");
-	c->sstack = vmreg_get(&ccr[12], (size_t)1 << 28, "cc.sstack");
-	c->toplevel = vmreg_get(&ccr[13], (size_t)1 << 26, "cc.toplevel");
-	c->tlasm = vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
-	c->heap = c->hp = vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
-	c->ptrc = vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
-	c->span = vmreg_get(&ccr[17], (size_t)1 << 31, "cc.span");
-	c->lzt = vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
-	c->lzf = vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
-	c->lzs = vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
-	c->paren = vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
+	c->ty = (ctype *)vmreg_get(&ccr[0], (size_t)1 << 30, "cc.ty");
+	c->params = (qty *)vmreg_get(&ccr[1], (size_t)1 << 28, "cc.params");
+	c->tags = (tag *)vmreg_get(&ccr[2], (size_t)1 << 28, "cc.tags");
+	c->syms = (sym *)vmreg_get(&ccr[3], (size_t)1 << 30, "cc.syms");
+	c->nodes = (node *)vmreg_get(&ccr[4], (size_t)1 << 32, "cc.nodes");
+	c->lists = (uint32_t *)vmreg_get(&ccr[5], (size_t)1 << 30, "cc.lists");
+	c->ipool = (i128 *)vmreg_get(&ccr[6], (size_t)1 << 30, "cc.ipool");
+	c->fpool = (double *)vmreg_get(&ccr[7], (size_t)1 << 26, "cc.fpool");
+	c->strs = (cstr *)vmreg_get(&ccr[8], (size_t)1 << 28, "cc.strs");
+	c->labels = (label *)vmreg_get(&ccr[9], (size_t)1 << 26, "cc.labels");
+	c->attr = (attrs *)vmreg_get(&ccr[10], (size_t)1 << 28, "cc.attr");
+	c->asms = (casm *)vmreg_get(&ccr[11], (size_t)1 << 28, "cc.asms");
+	c->sstack = (uint32_t *)vmreg_get(&ccr[12], (size_t)1 << 28, "cc.sstack");
+	c->toplevel = (uint32_t *)vmreg_get(&ccr[13], (size_t)1 << 26, "cc.toplevel");
+	c->tlasm = (uint32_t *)vmreg_get(&ccr[14], (size_t)1 << 24, "cc.tlasm");
+	c->heap = c->hp = (char *)vmreg_get(&ccr[15], (size_t)1 << 32, "cc.heap");
+	c->ptrc = (uint32_t *)vmreg_get(&ccr[16], (size_t)1 << 30, "cc.ptrc");
+	c->span = (pp_span *)vmreg_get(&ccr[17], (size_t)1 << 31, "cc.span");
+	c->lzt = (lztok *)vmreg_get(&ccr[18], (size_t)1 << 32, "cc.lzt");
+	c->lzf = (lzfn *)vmreg_get(&ccr[19], (size_t)1 << 28, "cc.lzf");
+	c->lzs = (char *)vmreg_get(&ccr[20], (size_t)1 << 31, "cc.lzs");
+	c->paren = (__typeof__(c->paren))vmreg_get(&ccr[21], (size_t)1 << 30, "cc.paren");
 	c->hend = c->heap + ((size_t)1 << 32);
 	c->capdops = 4096;
-	c->dops = halloc(c, c->capdops * sizeof(dop));
+	c->dops = (struct dop *)halloc(c, c->capdops * sizeof(dop));
 	c->ndops = 0;
 	tl_fscr.n = 0;
 	c->tyhcap = 1 << 16;
-	c->tyhash = halloc(c, c->tyhcap * sizeof(uint32_t));
+	c->tyhash = (uint32_t *)halloc(c, c->tyhcap * sizeof(uint32_t));
 	memset(c->tyhash, 0, c->tyhcap * sizeof(uint32_t));
 	c->fnhcap = 1 << 14;
-	c->fnhash = halloc(c, c->fnhcap * sizeof(uint32_t));
+	c->fnhash = (uint32_t *)halloc(c, c->fnhcap * sizeof(uint32_t));
 	memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
 	/* index 0 of every table is "none" */
 	c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
@@ -117,7 +117,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			tag *r = &c->tags[ti];
 			qty vp = ty_ptr(c, prim(TY_VOID));
 
-			r->f = halloc(c, 4 * sizeof(field));
+			r->f = (field *)halloc(c, 4 * sizeof(field));
 			memset(r->f, 0, 4 * sizeof(field));
 			r->nfield = 4;
 			r->f[0].ty = r->f[1].ty = prim(TY_UINT);
@@ -132,7 +132,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 			tag *r = &c->tags[ti];
 			qty vp = ty_ptr(c, prim(TY_VOID));
 
-			r->f = halloc(c, 5 * sizeof(field));
+			r->f = (field *)halloc(c, 5 * sizeof(field));
 			memset(r->f, 0, 5 * sizeof(field));
 			r->nfield = 5;
 			r->f[0].ty = r->f[1].ty = r->f[2].ty = vp;
@@ -227,7 +227,7 @@ VPRIV void drcov_boundary(cc *c)
 {
 	if (c->ndrb == c->cdrb) {
 		c->cdrb = c->cdrb ? c->cdrb * 2 : 4096;
-		c->drb = realloc(c->drb, c->cdrb * sizeof(uint64_t));
+		c->drb = (uint64_t *)realloc(c->drb, c->cdrb * sizeof(uint64_t));
 	}
 	if (c->ntk == 1)
 		c->drb[c->ndrb++] = pp_ntok(c->p) - 1;
@@ -294,7 +294,7 @@ void cc_drcov_stats(char *buf, size_t n)
 int cc_run(pp *p, const cc_opts *o)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
-	cc *c = malloc(sizeof(cc));
+	cc *c = (cc *)malloc(sizeof(cc));
 	int errors;
 
 	pthread_once(&once, init_tables);	/* vccd runs TUs on many threads */

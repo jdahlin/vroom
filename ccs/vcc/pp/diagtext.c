@@ -175,9 +175,9 @@ static void one_line(pp *p, vbuf *b, const fent *e, const vdiag *d, const mark *
 	}
 	vbuf_s(b, "\n");
 	/* the marks: each column to the mark that wins it */
-	row = calloc(lw + 2, 1);
+	row = (char *)calloc(lw + 2, 1);
 	{
-		uint8_t *pri = calloc(lw + 2, 1);
+		uint8_t *pri = (uint8_t *)calloc(lw + 2, 1);
 
 		memset(row, ' ', lw + 1);
 		for (int i = 0; i < nm; i++) {

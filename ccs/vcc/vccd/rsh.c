@@ -39,7 +39,7 @@ static bool tk_push(struct toks *v, int kind, bool assign, char *s)
 {
 	if (v->n == v->cap) {
 		int cap = v->cap ? 2 * v->cap : 64;
-		struct tok *t = realloc(v->t, cap * sizeof(*t));
+		struct tok *t = (struct tok *)realloc(v->t, cap * sizeof(*t));
 
 		if (!t)
 			return false;
@@ -179,7 +179,7 @@ static struct cmd *sc_add(struct script *sc)
 {
 	if (sc->n == sc->cap) {
 		int cap = sc->cap ? 2 * sc->cap : 16;
-		struct cmd *c = realloc(sc->c, cap * sizeof(*c));
+		struct cmd *c = (struct cmd *)realloc(sc->c, cap * sizeof(*c));
 
 		if (!c)
 			return NULL;
@@ -206,7 +206,7 @@ static char **wordv(struct tok *t, int n, vzbuf *extra)
 			while (*p && *p != ' ' && *p != '\t' && *p != '\n')
 				p++;
 		}
-	v = malloc((n + nx + 1) * sizeof(*v));
+	v = (char **)malloc((n + nx + 1) * sizeof(*v));
 	if (!v)
 		return NULL;
 	for (i = 0; i < n; i++)

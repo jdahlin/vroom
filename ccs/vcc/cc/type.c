@@ -77,7 +77,7 @@ VPRIV uint32_t ty_intern(cc *c, const ctype *t)
 				c->ty[idx].canon = idx;
 			c->tyhash[i] = idx;
 			if (c->nty * 2 > c->tyhcap) {	/* grow */
-				uint32_t ncap = c->tyhcap * 2, *nh = halloc(c, ncap * sizeof(uint32_t));
+				uint32_t ncap = c->tyhcap * 2, *nh = (uint32_t *)halloc(c, ncap * sizeof(uint32_t));
 
 				memset(nh, 0, ncap * sizeof(uint32_t));
 				for (uint32_t j = 0; j < c->tyhcap; j++) {
@@ -232,7 +232,7 @@ VPRIV qty ty_func(cc *c, qty ret, const qty *par, uint32_t n, int flags)
 			c->nparams += n;
 			c->fnhash[i] = idx;
 			if (++c->nfn * 2 > c->fnhcap) {
-				uint32_t ncap = c->fnhcap * 2, *nh = halloc(c, ncap * sizeof(uint32_t));
+				uint32_t ncap = c->fnhcap * 2, *nh = (uint32_t *)halloc(c, ncap * sizeof(uint32_t));
 
 				memset(nh, 0, ncap * sizeof(uint32_t));
 				for (uint32_t j = 0; j < c->fnhcap; j++) {

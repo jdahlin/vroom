@@ -156,7 +156,7 @@ static uint32_t mangle_overload(cc *c, uint32_t s)
 		mg_s(&m, "z");
 	if (m.full)
 		return 0;
-	keep = halloc(c, m.n + 1);
+	keep = (char *)halloc(c, m.n + 1);
 	memcpy(keep, m.b, m.n);
 	keep[m.n] = 0;
 	si = c->nstr++;

@@ -219,7 +219,7 @@ static void do_restart(void)
 		usleep(1000);
 	}
 	{
-		char fd[16], **av = calloc((size_t)g_argc + 3, sizeof(char *));
+		char fd[16], **av = (char **)calloc((size_t)g_argc + 3, sizeof(char *));
 		int k = 0;
 
 		for (int i = 0; i < g_argc; i++) {
@@ -559,7 +559,7 @@ static int read_all(int fd, char **buf, size_t *len)
 		ssize_t k;
 
 		if (cap - n < 65536) {
-			char *nb = realloc(b, cap = cap ? cap * 2 : 1 << 16);
+			char *nb = (char *)realloc(b, cap = cap ? cap * 2 : 1 << 16);
 
 			if (!nb)
 				break;
@@ -995,7 +995,7 @@ static int forward_argv(const struct req *r, int argc, char **argv)
 		len += strlen(argv[i]) + 1;
 	for (char **e = r->envp; *e; e++, envc++)
 		len += strlen(*e) + 1;
-	if (len > VROOM_MAX_PAYLOAD || !(raw = malloc(sizeof(*nh) + len)))
+	if (len > VROOM_MAX_PAYLOAD || !(raw = (char *)malloc(sizeof(*nh) + len)))
 		return 127;
 	nh = (struct vroom_req_hdr *)raw;
 	*nh = *h;
@@ -1030,7 +1030,7 @@ static int spawn(const struct req *r, const char *prog)
 
 	while (r->envp[nall])
 		nall++;
-	env = malloc((nall + 1) * sizeof(char *));
+	env = (char **)malloc((nall + 1) * sizeof(char *));
 	for (char **e = r->envp; *e; e++)
 		if (strncmp(*e, "DYLD_", 5) && strncmp(*e, "LD_PRELOAD=", 11) && strncmp(*e, "LD_LIBRARY_PATH=", 16) &&
 		    strncmp(*e, "LD_AUDIT=", 9) && strncmp(*e, "VCC_UMASK=", 10))
@@ -1113,7 +1113,7 @@ static int handle1(const struct req *r, const char **kind);
 /* argv[0] plus extra, then argv[1..]: a NULL-terminated copy (free it) */
 static char **argv_with(const struct req *r, const char *extra)
 {
-	char **av = malloc(((size_t)r->argc + 2) * sizeof(char *));
+	char **av = (char **)malloc(((size_t)r->argc + 2) * sizeof(char *));
 	int n = 0;
 
 	if (!av)
@@ -1268,9 +1268,9 @@ static int host_cc(const struct req *r)
 	}
 
 	/* compile + link: the compile options, then per source "-c SRC -o TMP" */
-	char **cav = malloc(((size_t)r->argc + 8) * sizeof(char *));
-	char **lav = malloc(((size_t)r->argc + 8) * sizeof(char *));
-	char (*tmp)[4096] = nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL;
+	char **cav = (char **)malloc(((size_t)r->argc + 8) * sizeof(char *));
+	char **lav = (char **)malloc(((size_t)r->argc + 8) * sizeof(char *));
+	char (*tmp)[4096] = nsrc ? (char (*)[4096])malloc((size_t)nsrc * sizeof(*tmp)) : NULL;
 	int status = 0, nc = 1, nl = 3, ntmp = 0;
 
 	if (!cav || !lav || (nsrc && !tmp)) {
@@ -1485,7 +1485,7 @@ static int handle1(const struct req *r, const char **kind)
 	if (backend_sock && host_cc_link(r)) {
 		/* vcc compiles, the backend links the object with the command's options */
 		const char *in = cc_input(r), *out = NULL, *td = getenv("TMPDIR");
-		char tmp[4096], **av = malloc((size_t)(r->argc + 4) * sizeof(char *)), **lv;
+		char tmp[4096], **av = (char **)malloc((size_t)(r->argc + 4) * sizeof(char *)), **lv;
 		bool deps = false, mt = false;
 		int n = 0, ln = 0, fd, st;
 		ppd_env e = { .cwd = r->cwd, .outfd = r->fds[1], .errfd = log_requests ? 2 : -1, .envp = r->envp, .infd = r->fds[0] };
@@ -1496,7 +1496,7 @@ static int handle1(const struct req *r, const char **kind)
 			goto plain;
 		}
 		close(fd);
-		lv = malloc((size_t)(r->argc + 1) * sizeof(char *));
+		lv = (char **)malloc((size_t)(r->argc + 1) * sizeof(char *));
 		for (int i = 0; i < r->argc; i++) {
 			const char *a = r->argv[i];
 
@@ -1673,9 +1673,9 @@ static int sh_run_tool(void *ctx, char **argv, char **assign, const int fds[3])
 	int st, argc = 0, envc = 0;
 
 	if (!sh_raw) {
-		sh_raw = mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
+		sh_raw = (char *)mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
 			      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-		sh_strs = mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
+		sh_strs = (char **)mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
 			       MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (sh_raw == MAP_FAILED || sh_strs == MAP_FAILED) {
 			sh_raw = NULL;
@@ -1786,9 +1786,9 @@ static void *worker_main(void *arg)
 	struct worker w;
 
 	(void)arg;
-	w.raw = mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
+	w.raw = (char *)mmap(NULL, sizeof(struct vroom_req_hdr) + VROOM_MAX_PAYLOAD,
 		     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	w.strs = mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
+	w.strs = (char **)mmap(NULL, MAX_STRS * sizeof(char *), PROT_READ | PROT_WRITE,
 		      MAP_PRIVATE | MAP_ANON, -1, 0);
 	if (w.raw == MAP_FAILED || w.strs == MAP_FAILED) {
 		perror("vccd: mmap");

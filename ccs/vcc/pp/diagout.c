@@ -634,7 +634,7 @@ static void fix_add(const pp *p, fedits *x, const vdiag *d, bool machine)
 		    k->e - f->base > f->f->size || !f->f->path)
 			continue;
 		if (x->n == x->cap)
-			x->v = realloc(x->v, (x->cap = x->cap ? x->cap * 2 : 64) * sizeof(*x->v));
+			x->v = (fedit *)realloc(x->v, (x->cap = x->cap ? x->cap * 2 : 64) * sizeof(*x->v));
 		x->v[x->n] = (fedit){ f->f, k->b - f->base, k->e - f->base, x->n, k->s };
 		x->n++;
 	}
@@ -642,7 +642,7 @@ static void fix_add(const pp *p, fedits *x, const vdiag *d, bool machine)
 
 static int fedit_cmp(const void *a, const void *b)
 {
-	const fedit *x = a, *y = b;
+	const fedit *x = (const fedit *)a, *y = (const fedit *)b;
 
 	if (x->f != y->f)
 		return x->f < y->f ? -1 : 1;

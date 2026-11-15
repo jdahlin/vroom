@@ -40,7 +40,7 @@
 	do {                                                                                        \
 		if ((x).n + (k) > (x).cap) {                                                        \
 			(x).cap = ((x).n + (k)) * 2 + 32;                                           \
-			(x).v = realloc((x).v, (size_t)(x).cap * sizeof(*(x).v));                   \
+			(x).v = (__typeof__((x).v))realloc((x).v, (size_t)(x).cap * sizeof(*(x).v));                   \
 		}                                                                                   \
 	} while (0)
 #define VPUSH(x, val)                     \
@@ -593,7 +593,7 @@ static const void *tc_intern(const char *b, uint32_t n)
 		if (x->h == h && x->n == n && !memcmp(x->b, b, n))
 			break;
 	if (!x) {
-		x = malloc(sizeof(*x) + n);
+		x = (tcont *)malloc(sizeof(*x) + n);
 		x->h = h, x->n = n;
 		memcpy(x->b, b, n);
 		x->next = atomic_load_explicit(&tc_tab[j], memory_order_relaxed);
@@ -613,7 +613,7 @@ static void tk_set(struct drrec *r, uint32_t t, const void *k)
 		if (!k)
 			return;
 		nc = t + t / 2 + 1024;
-		r->tk = realloc(r->tk, nc * sizeof(*r->tk));
+		r->tk = (const void **)realloc(r->tk, nc * sizeof(*r->tk));
 		memset(r->tk + r->ctk, 0, (nc - r->ctk) * sizeof(*r->tk));
 		r->ctk = nc;
 	}
@@ -630,7 +630,7 @@ static bool rs_add(struct drrec *r, uint64_t k)
 
 	if (r->hn * 2 >= r->hcap) {
 		uint32_t ncap = r->hcap ? r->hcap * 2 : 1024;
-		uint64_t *nh = calloc(ncap, sizeof(uint64_t));
+		uint64_t *nh = (uint64_t *)calloc(ncap, sizeof(uint64_t));
 
 		for (uint32_t i = 0; i < r->hcap; i++)
 			if (r->hs[i]) {
@@ -663,8 +663,8 @@ static uint32_t wm_get(wmap *w, uint64_t k, uint32_t v)
 	k++;
 	if (w->n * 2 >= w->cap) {
 		uint32_t ncap = w->cap ? w->cap * 2 : 1024;
-		uint64_t *nk = calloc(ncap, sizeof(uint64_t));
-		uint32_t *nv = malloc(ncap * sizeof(uint32_t));
+		uint64_t *nk = (uint64_t *)calloc(ncap, sizeof(uint64_t));
+		uint32_t *nv = (uint32_t *)malloc(ncap * sizeof(uint32_t));
 
 		for (uint32_t i = 0; i < w->cap; i++)
 			if (w->k[i]) {
@@ -957,7 +957,7 @@ static void rt_insert(struct drrec *r, cc *c, uint32_t idx)
 	uint32_t m;
 
 	if ((r->rn + 1) * 2 > r->rcap) {
-		uint32_t ncap = r->rcap * 2, *nh = calloc(ncap, sizeof(uint32_t));
+		uint32_t ncap = r->rcap * 2, *nh = (uint32_t *)calloc(ncap, sizeof(uint32_t));
 
 		for (uint32_t j = 0; j < r->rcap; j++) {
 			uint32_t x = r->rt[j], k;
@@ -1007,7 +1007,7 @@ static void rf_insert(struct drrec *r, cc *c, uint32_t idx)
 	uint32_t m;
 
 	if ((r->rfn + 1) * 2 > r->rfcap) {
-		uint32_t ncap = r->rfcap * 2, *nh = calloc(ncap, sizeof(uint32_t));
+		uint32_t ncap = r->rfcap * 2, *nh = (uint32_t *)calloc(ncap, sizeof(uint32_t));
 
 		for (uint32_t j = 0; j < r->rfcap; j++) {
 			uint32_t x = r->rf[j], k;
@@ -1135,22 +1135,22 @@ static void rec_open(cc *c, uint64_t b, const void *he, uint32_t base, unsigned 
 	r->wf.n = r->wp.n = r->wb.n = r->wv.n = r->work.n = 0;
 	r->ops.n = r->opar.n = 0;
 	if (dr_check) {
-		r->ssym = grow(r->ssym, &r->csym, c->nsym, sizeof(sym));
+		r->ssym = (sym *)grow(r->ssym, &r->csym, c->nsym, sizeof(sym));
 		memcpy(r->ssym, c->syms, c->nsym * sizeof(sym));
-		r->stag = grow(r->stag, &r->ctag, c->ntag, sizeof(tag));
+		r->stag = (tag *)grow(r->stag, &r->ctag, c->ntag, sizeof(tag));
 		memcpy(r->stag, c->tags, c->ntag * sizeof(tag));
-		r->sty = grow(r->sty, &r->cty, c->nty, sizeof(ctype));
+		r->sty = (ctype *)grow(r->sty, &r->cty, c->nty, sizeof(ctype));
 		memcpy(r->sty, c->ty, c->nty * sizeof(ctype));
-		r->sattr = grow(r->sattr, &r->cattr, c->nattr, sizeof(attrs));
+		r->sattr = (attrs *)grow(r->sattr, &r->cattr, c->nattr, sizeof(attrs));
 		memcpy(r->sattr, c->attr, c->nattr * sizeof(attrs));
 	}
 	if (!r->rt)
-		r->rt = calloc(r->rcap = 1024, sizeof(uint32_t));
+		r->rt = (uint32_t *)calloc(r->rcap = 1024, sizeof(uint32_t));
 	else if (r->rn)
 		memset(r->rt, 0, r->rcap * sizeof(uint32_t));
 	r->rn = 0;
 	if (!r->rf)
-		r->rf = calloc(r->rfcap = 256, sizeof(uint32_t));
+		r->rf = (uint32_t *)calloc(r->rfcap = 256, sizeof(uint32_t));
 	else if (r->rfn)
 		memset(r->rf, 0, r->rfcap * sizeof(uint32_t));
 	r->rfn = 0;
@@ -1585,7 +1585,7 @@ static bool rel_build(drent *e)
 		for (int k = 0; k <= RO_DA; k++)
 			e->dn[a][k] = t, t += rl[a].d[k].n;
 		e->dn[a][RO_DA + 1] = t;
-		e->dof[a] = malloc((t + 1) * sizeof(uint32_t));
+		e->dof[a] = (uint32_t *)malloc((t + 1) * sizeof(uint32_t));
 		for (int k = 0; k <= RO_DA; k++) {
 			if (rl[a].d[k].n)
 				memcpy(e->dof[a] + e->dn[a][k], rl[a].d[k].v, rl[a].d[k].n * sizeof(uint32_t));
@@ -1882,7 +1882,7 @@ static void rec_close(cc *c, uint64_t endpos)
 		goto nopub;
 
 	/* the entry */
-	e = calloc(1, sizeof(drent));
+	e = (drent *)calloc(1, sizeof(drent));
 	e->he = r->he, e->ctr = r->ctr, e->pack = r->pack, e->sig = opt_sig(c->o);
 	e->nsym_bi = r->nsym_bi, e->nty_bi = r->nty_bi, e->ntag_bi = r->ntag_bi;
 	e->base = r->base, e->span = r->span;
@@ -1891,7 +1891,7 @@ static void rec_close(cc *c, uint64_t endpos)
 	e->f0 = r->f0, e->f1 = c->nfpool, e->r0 = r->st0, e->r1 = c->nstr, e->a0 = r->a0, e->a1 = c->nattr;
 	e->ntok = tok;
 	e->prevloc = c->prevloc, e->prevflags = c->prevflags;
-	e->rd = xdup(r->rds.v, r->rds.n * sizeof(drread)), e->nrd = r->rds.n;
+	e->rd = (drread *)xdup(r->rds.v, r->rds.n * sizeof(drread)), e->nrd = r->rds.n;
 	{
 		uint32_t nw[W_N] = { r->ws.n, r->wt.n, r->wy.n, r->wa.n, r->wst.n, r->wl.n };
 
@@ -1902,7 +1902,7 @@ static void rec_close(cc *c, uint64_t endpos)
 				cap *= 2;
 			e->nw[k] = nw[k];
 			e->wmask[k] = cap - 1;
-			e->wk[k] = calloc(cap, sizeof(uint64_t));
+			e->wk[k] = (uint64_t *)calloc(cap, sizeof(uint64_t));
 			for (uint32_t i = 0; i < nw[k]; i++) {
 				uint32_t a = k == W_SYM ? r->ws.v[i].a : k == W_TAG ? r->wt.v[i].a : k == W_TY ? r->wy.v[i].a
 					   : k == W_ATTR ? r->wa.v[i].a : k == W_STR ? r->wst.v[i].a : r->wl.v[i].a, j;
@@ -2021,22 +2021,22 @@ static void rec_close(cc *c, uint64_t endpos)
 		}
 		free(cb.v);
 	}
-	e->ws = xdup(r->ws.v, r->ws.n * sizeof(wsym));
-	e->wt = xdup(r->wt.v, r->wt.n * sizeof(wtag));
-	e->wy = xdup(r->wy.v, r->wy.n * sizeof(wty));
-	e->wa = xdup(r->wa.v, r->wa.n * sizeof(wattr));
-	e->wst = xdup(r->wst.v, r->wst.n * sizeof(wstr));
-	e->wl = xdup(r->wl.v, r->wl.n * sizeof(wlist));
-	e->wf = xdup(r->wf.v, r->wf.n * sizeof(field));
-	e->wp = xdup(r->wp.v, r->wp.n * sizeof(qty));
-	e->wb = xdup(r->wb.v, r->wb.n);
-	e->wv = xdup(r->wv.v, r->wv.n * sizeof(uint32_t));
-	e->wvp = malloc((r->wv.n + 1) * sizeof(uint32_t));
+	e->ws = (wsym *)xdup(r->ws.v, r->ws.n * sizeof(wsym));
+	e->wt = (wtag *)xdup(r->wt.v, r->wt.n * sizeof(wtag));
+	e->wy = (wty *)xdup(r->wy.v, r->wy.n * sizeof(wty));
+	e->wa = (wattr *)xdup(r->wa.v, r->wa.n * sizeof(wattr));
+	e->wst = (wstr *)xdup(r->wst.v, r->wst.n * sizeof(wstr));
+	e->wl = (wlist *)xdup(r->wl.v, r->wl.n * sizeof(wlist));
+	e->wf = (field *)xdup(r->wf.v, r->wf.n * sizeof(field));
+	e->wp = (qty *)xdup(r->wp.v, r->wp.n * sizeof(qty));
+	e->wb = (char *)xdup(r->wb.v, r->wb.n);
+	e->wv = (uint32_t *)xdup(r->wv.v, r->wv.n * sizeof(uint32_t));
+	e->wvp = (uint32_t *)malloc((r->wv.n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < r->wv.n; i++)
 		e->wvp[i] = r->wv.v[i] ? wm_find(&r->wm, (uint64_t)W_SYM << 32 | r->wv.v[i]) : UINT32_MAX;
-	e->ops = xdup(r->ops.v, r->ops.n * sizeof(drop)), e->nops = r->ops.n;
-	e->opar = xdup(r->opar.v, r->opar.n * sizeof(qty));
-	e->fin = malloc((r->ops.n + 1) * sizeof(ctype));
+	e->ops = (drop *)xdup(r->ops.v, r->ops.n * sizeof(drop)), e->nops = r->ops.n;
+	e->opar = (qty *)xdup(r->opar.v, r->opar.n * sizeof(qty));
+	e->fin = (ctype *)malloc((r->ops.n + 1) * sizeof(ctype));
 	x = (trx){ c, e, r, true, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL };
 
 	/* the type log: every own type made by one op, content mappable */
@@ -2081,8 +2081,8 @@ static void rec_close(cc *c, uint64_t endpos)
 
 	/* own records */
 	/* (rel_build checks that their references map) */
-	e->syms = xdup(&c->syms[e->s0], (e->s1 - e->s0) * sizeof(sym));
-	e->tags = xdup(&c->tags[e->t0], (e->t1 - e->t0) * sizeof(tag));
+	e->syms = (sym *)xdup(&c->syms[e->s0], (e->s1 - e->s0) * sizeof(sym));
+	e->tags = (tag *)xdup(&c->tags[e->t0], (e->t1 - e->t0) * sizeof(tag));
 	for (uint32_t i = 0; i < e->t1 - e->t0; i++) {
 		tag *t = &e->tags[i];
 
@@ -2094,11 +2094,11 @@ static void rec_close(cc *c, uint64_t endpos)
 			t->f = (field *)(uintptr_t)at;
 		}
 	}
-	e->nodes = xdup(&c->nodes[e->n0], (e->n1 - e->n0) * sizeof(node));
-	e->spans = xdup(&c->span[e->n0], (e->n1 - e->n0) * sizeof(pp_span));
-	e->parens = xdup(&c->paren[e->n0], (e->n1 - e->n0) * sizeof(*c->paren));
-	e->lists = xdup(&c->lists[e->l0], (e->l1 - e->l0) * sizeof(uint32_t));
-	e->lk = calloc(e->l1 - e->l0 + 1, 1);
+	e->nodes = (node *)xdup(&c->nodes[e->n0], (e->n1 - e->n0) * sizeof(node));
+	e->spans = (pp_span *)xdup(&c->span[e->n0], (e->n1 - e->n0) * sizeof(pp_span));
+	e->parens = (struct cparen *)xdup(&c->paren[e->n0], (e->n1 - e->n0) * sizeof(*c->paren));
+	e->lists = (uint32_t *)xdup(&c->lists[e->l0], (e->l1 - e->l0) * sizeof(uint32_t));
+	e->lk = (uint8_t *)calloc(e->l1 - e->l0 + 1, 1);
 #define MARK(l, cnt, kk, ext_ok)                                                               \
 	do {                                                                                   \
 		uint32_t l_ = (l), n_ = (cnt);                                                 \
@@ -2179,15 +2179,15 @@ static void rec_close(cc *c, uint64_t endpos)
 		else if (!e->lk[i])
 			e->lk[i] = LK_DEAD;
 	}
-	e->ip = xdup(&c->ipool[e->i0], (e->i1 - e->i0) * sizeof(i128));
-	e->fp = xdup(&c->fpool[e->f0], (e->f1 - e->f0) * sizeof(double));
-	e->strs = xdup(&c->strs[e->r0], (e->r1 - e->r0) * sizeof(cstr));
+	e->ip = (i128 *)xdup(&c->ipool[e->i0], (e->i1 - e->i0) * sizeof(i128));
+	e->fp = (double *)xdup(&c->fpool[e->f0], (e->f1 - e->f0) * sizeof(double));
+	e->strs = (cstr *)xdup(&c->strs[e->r0], (e->r1 - e->r0) * sizeof(cstr));
 	for (uint32_t i = 0; i < e->r1 - e->r0; i++) {
 		cstr *s = &e->strs[i];
 
 		s->s = (const char *)(uintptr_t)heap_piece(&hp, c, heap0, s->s, (size_t)s->n * s->esz, &x.bad);
 	}
-	e->attr = xdup(&c->attr[e->a0], (e->a1 - e->a0) * sizeof(attrs));
+	e->attr = (attrs *)xdup(&c->attr[e->a0], (e->a1 - e->a0) * sizeof(attrs));
 
 	/* writes: the changed fields must map */
 	for (uint32_t i = 0; i < xs.n; i++) {
@@ -2240,15 +2240,15 @@ static void rec_close(cc *c, uint64_t endpos)
 			VPUSH(bind, c->sstack[i]);
 		/* (the sstack's tail of own syms: everything bound at file scope by the region) */
 		e->nbind = bind.n;
-		e->bind = malloc((bind.n + 1) * sizeof(uint32_t));
+		e->bind = (uint32_t *)malloc((bind.n + 1) * sizeof(uint32_t));
 		for (uint32_t i = 0; i < bind.n; i++)
 			e->bind[i] = bind.v[bind.n - 1 - i];
 		free(bind.v);
 	}
 	e->ntl = c->ntoplevel - r->tl0;
-	e->tl = xdup(&c->toplevel[r->tl0], e->ntl * sizeof(uint32_t));
+	e->tl = (uint32_t *)xdup(&c->toplevel[r->tl0], e->ntl * sizeof(uint32_t));
 	e->nlz = c->nlzf - r->lzf0;
-	e->lz = xdup(&c->lzf[r->lzf0], e->nlz * sizeof(lzfn));
+	e->lz = (lzfn *)xdup(&c->lzf[r->lzf0], e->nlz * sizeof(lzfn));
 	for (uint32_t i = 0; i < e->nlz; i++)
 		if (!lz_ok(e, &e->lz[i]))
 			x.bad = true;
@@ -2335,7 +2335,7 @@ static uint32_t *ensure(uint32_t **a, uint32_t *cap, uint32_t n, bool zero)
 	if (n > *cap) {
 		uint32_t nc = n + n / 2 + 1024;
 
-		*a = realloc(*a, (size_t)nc * sizeof(uint32_t));
+		*a = (uint32_t *)realloc(*a, (size_t)nc * sizeof(uint32_t));
 		memset(*a + *cap, 0, (size_t)(nc - *cap) * sizeof(uint32_t));
 		*cap = nc;
 	}
@@ -2827,7 +2827,7 @@ static void apply(cc *c, const drent *e, uint32_t baseB)
 		tag *to = &c->tags[c->ntag];
 
 		if (e->nheap) {
-			x.heapB = halloc(c, e->nheap + 16);
+			x.heapB = (char *)halloc(c, e->nheap + 16);
 			x.heapB = (char *)(((uintptr_t)x.heapB + 15) & ~(uintptr_t)15);
 			memcpy(x.heapB, e->heap, e->nheap);
 			rel_apply(&x, x.heapB, RA_HEAP);
@@ -3398,7 +3398,7 @@ VPRIV void dr_begin(cc *c)
 	c->dr_on = 0;
 	if (!dr_mode || c->o->dump_layouts)
 		return;
-	c->dr = calloc(1, sizeof(struct drrec));
+	c->dr = (struct drrec *)calloc(1, sizeof(struct drrec));
 	c->dr->nsym_bi = c->nsym, c->dr->nty_bi = c->nty, c->dr->ntag_bi = c->ntag;
 }
 

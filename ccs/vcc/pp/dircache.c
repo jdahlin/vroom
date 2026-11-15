@@ -56,7 +56,7 @@ static void *dalloc(size_t n)
 	size_t off;
 
 	if (!b0) {
-		char *b = mmap(NULL, DC_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), *z = NULL;
+		char *b = (char *)mmap(NULL, DC_MAX, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), *z = NULL;
 
 		if (b == MAP_FAILED)
 			abort();
@@ -82,7 +82,7 @@ static dnode *node_get(const char *path, size_t plen)
 			if (e->hash == h && e->plen == plen && !memcmp(e->path, path, plen))
 				return e;
 		if (!mine) {
-			mine = dalloc(sizeof(*mine) + plen + 17);
+			mine = (dnode *)dalloc(sizeof(*mine) + plen + 17);
 			mine->hash = h;
 			mine->plen = (uint32_t)plen;
 			memcpy(mine->path, path, plen);

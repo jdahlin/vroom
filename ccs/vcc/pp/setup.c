@@ -43,7 +43,7 @@ static const pmacro *bi_macro[sizeof(bi) / sizeof(bi[0])];
 static void bi_init(void)
 {
 	for (size_t i = 0; i < sizeof(bi) / sizeof(bi[0]); i++) {
-		pmacro *m = salloc(sizeof(*m));
+		pmacro *m = (pmacro *)salloc(sizeof(*m));
 
 		memset(m, 0, sizeof(*m));
 		m->kind = MK_BUILTIN;
@@ -62,9 +62,9 @@ static _Thread_local vmreg *ppr;
 static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const pp_opts *o)
 {
 	size_t ml = o->main_len;
-	char *ms = salloc(ml + 129);
-	vlex_file *f = varena_alloc(&p->perm, sizeof(*f));
-	vtok *mt = varena_alloc(&p->perm, (ml + 2) * sizeof(vtok));
+	char *ms = (char *)salloc(ml + 129);
+	vlex_file *f = (vlex_file *)varena_alloc(&p->perm, sizeof(*f));
+	vtok *mt = (vtok *)varena_alloc(&p->perm, (ml + 2) * sizeof(vtok));
 	void *scratch = vmreg_get(&ppr[7], vlex_scratch_size(ml) + 4096, "pp.lexscratch");
 
 	memcpy(ms, o->main_src, ml);
@@ -81,7 +81,7 @@ static __attribute__((noinline, cold)) const vlex_file *stdin_file(pp *p, const 
 
 pp *pp_open(const pp_opts *o)
 {
-	pp *p = vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
+	pp *p = (pp *)vmreg_get(&(ppr = vmpool_take(&pppool))[0], sizeof(pp), "pp");
 	const vlex_file *mf;
 	size_t n = strlen(o->predef);
 	char *src;
@@ -97,20 +97,20 @@ pp *pp_open(const pp_opts *o)
 		p->dtrack = t && *t && *t != '0';
 	}
 	p->color = o->diag_color > 0 || (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
-	p->cx = vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
-	p->perm.base = p->perm.p = vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
+	p->cx = (ctx *)vmreg_get(&ppr[1], MAXCTX * sizeof(ctx), "pp.cx");
+	p->perm.base = p->perm.p = (char *)vmreg_get(&ppr[2], 1ull << 30, "pp.perm");
 	p->perm.end = p->perm.base + (1ull << 30);
-	p->tmp.base = p->tmp.p = vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
+	p->tmp.base = p->tmp.p = (char *)vmreg_get(&ppr[3], 1ull << 32, "pp.tmp");
 	p->tmp.end = p->tmp.base + (1ull << 32);
-	p->psig = varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
+	p->psig = (uint32_t *)varena_alloc(&p->perm, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
 	if (!sig_of(o, &p->sig, p->psig))
 		p->sig = HNONE;
-	p->sv = vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
-	p->fe = vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
-	p->once = varena_alloc(&p->perm, 256 * sizeof(*p->once));
+	p->sv = (ptok *)vmreg_get(&ppr[4], SVMAX * sizeof(ptok), "pp.sv");
+	p->fe = (fent *)vmreg_get(&ppr[5], (1u << 20) * sizeof(fent), "pp.fe");
+	p->once = (const vlex_file **)varena_alloc(&p->perm, 256 * sizeof(*p->once));
 	p->oncecap = 256;
-	p->pushed = varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
-	p->lm = vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
+	p->pushed = (__typeof__(p->pushed))varena_alloc(&p->perm, 4096 * sizeof(*p->pushed));
+	p->lm = (__typeof__(p->lm))vmreg_get(&ppr[6], 65536 * sizeof(*p->lm), "pp.lm");
 	{
 		static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -128,7 +128,7 @@ pp *pp_open(const pp_opts *o)
 	} else {
 		/* the caller's string is unpadded; vlex_get hashes by words (ASan) */
 		size_t ml = strlen(o->main);
-		char *mp = varena_alloc(&p->perm, ml + 16);
+		char *mp = (char *)varena_alloc(&p->perm, ml + 16);
 
 		memcpy(mp, o->main, ml);
 		memset(mp + ml, 0, 16);
@@ -167,10 +167,10 @@ pp *pp_open(const pp_opts *o)
 	p->base_namelen = p->fe[0].namelen;
 
 	/* "<built-in>": the predefines, -D/-U and -include, on top of the main file */
-	src = salloc(n + 129);	/* interned identifiers point into it: immortal */
+	src = (char *)salloc(n + 129);	/* interned identifiers point into it: immortal */
 	memcpy(src, o->predef, n);
 	memset(src + n, 0, 129);
-	tok = varena_alloc(&p->perm, (n + 2) * sizeof(vtok));
+	tok = (vtok *)varena_alloc(&p->perm, (n + 2) * sizeof(vtok));
 	scratch = vmreg_get(&ppr[7], vlex_scratch_size(n) + 4096, "pp.lexscratch");
 	p->builtin.path = "<built-in>";
 	p->builtin.src = src;
@@ -325,7 +325,7 @@ const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 VPRIV void drcov_hit(pp *p, int d0)
 {
 	if (!p->drh)
-		p->drh = varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
+		p->drh = (pp_hitreg *)varena_alloc(&p->perm, DRCOV_MAX * sizeof(pp_hitreg));
 	if (p->depth > d0 && p->cx[d0].type == C_REPLAY && p->cx[d0].he == p->hc_last) {
 		if (p->ndrs < 64) {
 			p->drs[p->ndrs].pos = p->ntok_out, p->drs[p->ndrs].depth = p->depth;
@@ -1016,7 +1016,7 @@ size_t pp_files(const pp *p, const char **names, size_t max, int nosys)
 
 	while (cap < 2 * p->nfe)
 		cap *= 2;
-	tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
+	tab = cap <= 1024 ? stk : (uint32_t *)malloc(cap * sizeof(*tab));
 	if (!tab)
 		abort();
 	memset(tab, 0, cap * sizeof(*tab));

@@ -71,11 +71,11 @@ static void bput(buf *b, const char *s, size_t n)
 		while (nc < b->n + n + 256)
 			nc *= 2;
 		if (!b->cap && b->r && nc == BUF_REG) {
-			b->p = vmreg_get(b->r, BUF_REG, "ppdriver.buf");
+			b->p = (char *)vmreg_get(b->r, BUF_REG, "ppdriver.buf");
 			b->cap = BUF_REG;
 			goto put;
 		}
-		np = mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+		np = (char *)mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (np == MAP_FAILED)
 			abort();
 		if (b->p) {
@@ -126,8 +126,8 @@ static double now(void)
 static vlex_file lexbuf(const char *s, size_t n)
 {
 	vlex_file f = { 0 };
-	char *src = mmap(NULL, n + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-	vtok *tok = mmap(NULL, (n + 2) * sizeof(vtok), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	char *src = (char *)mmap(NULL, n + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	vtok *tok = (vtok *)mmap(NULL, (n + 2) * sizeof(vtok), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 	size_t sn = vlex_scratch_size(n) + 4096;
 	void *scr = mmap(NULL, sn, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
@@ -184,7 +184,7 @@ static int cmp_toks(const vlex_file *pa, const vlex_file *pb, char *ba, char *bb
 static uint64_t tokstream_hash(const vlex_file *f)
 {
 	size_t cap = (size_t)f->size + (size_t)f->ntok * 5 + 64, n = 0;
-	unsigned char *b = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	unsigned char *b = (unsigned char *)mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 	uint64_t h;
 
 	for (uint32_t i = 0; i < f->ntok; i++) {
@@ -260,8 +260,8 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		return 2;
 	}
 	if (!ba) {
-		ba = malloc(1 << 20);
-		bb = malloc(1 << 20);
+		ba = (char *)malloc(1 << 20);
+		bb = (char *)malloc(1 << 20);
 	}
 	vlex_no_intern = 1;	/* the copies are freed: nothing may point into them */
 	A = lexbuf(ours, on);
@@ -274,7 +274,7 @@ int ppd_compare(const char *ours, size_t on, const char *refpath)
 		return 0;
 	}
 	{
-		char *m = mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
+		char *m = (char *)mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
 
 		VCLOSE(fd);
 		B = lexbuf(m, (size_t)st.st_size);
@@ -453,7 +453,7 @@ static int write_deps(const pp *p, const char *cwd, const char *depfile, const c
 	while (!names || (n = pp_files(p, names, cap, nosys)) == cap) {
 		free(names);
 		cap = cap ? 2 * cap : 4096;
-		names = malloc(cap * sizeof(*names));
+		names = (const char **)malloc(cap * sizeof(*names));
 	}
 	buf d = { .r = &bufr[3] };
 	int r;
@@ -530,10 +530,10 @@ static void obj_state(void)
 		obj_free = s->next;
 	pthread_mutex_unlock(&obj_mu);
 	if (!s) {
-		s = calloc(1, sizeof(*s));
+		s = (struct objst *)calloc(1, sizeof(*s));
 		s->as = as_new();
 		s->obj = elf_new();
-		s->buf = mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+		s->buf = (uint8_t *)mmap(NULL, OBJBUF_CAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
 		if (s->buf == MAP_FAILED)
 			abort();
 	}
@@ -825,7 +825,7 @@ static __attribute__((noinline, cold)) int read_stdin_all(int fd, int errfd, con
 		ssize_t k;
 
 		if (icap - n < 65536) {
-			char *nb = realloc(ib, icap = icap ? icap * 2 : 1 << 20);
+			char *nb = (char *)realloc(ib, icap = icap ? icap * 2 : 1 << 20);
 
 			if (!nb) {
 				dprintf(errfd, "vcc: error: out of memory reading stdin\n");
@@ -913,7 +913,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 	if (5 * per > dircap) {
 		free(dirv);
 		dircap = 5 * per;
-		dirv = malloc(dircap * sizeof(*dirv));
+		dirv = (const char **)malloc(dircap * sizeof(*dirv));
 	}
 	const char **dirs_q = dirv, **dirs_i = dirv + per, **dirs_s = dirv + 2 * per, **dirs_a = dirv + 3 * per,
 		   **all = dirv + 4 * per;
@@ -1109,7 +1109,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			/* warning options, in order, for pp_wstate (some are also handled below);
 			   -pedantic is -Wpedantic, -pedantic-errors also -Werror=pedantic (two entries) */
 			if (!wargs)
-				wargs = calloc((size_t)argc * 2 + 1, sizeof(*wargs));
+				wargs = (const char **)calloc((size_t)argc * 2 + 1, sizeof(*wargs));
 			if (!strcmp(a, "-pedantic") || !strcmp(a, "--pedantic"))
 				wargs[nwargs++] = "-Wpedantic";
 			else if (!strcmp(a, "-pedantic-errors") || !strcmp(a, "--pedantic-errors"))
@@ -1445,7 +1445,7 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv, const ppd_e
 			goto out;
 		}
 		/* padded: the lexer reads 16 bytes past the end */
-		VAUTOFREE char *t = calloc(1, (size_t)st.st_size + 64);
+		VAUTOFREE char *t = (char *)calloc(1, (size_t)st.st_size + 64);
 		ssize_t got = t ? read(fd, t, (size_t)st.st_size) : -1;
 
 		VCLOSE(fd);

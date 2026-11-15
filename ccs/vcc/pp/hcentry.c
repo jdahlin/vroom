@@ -36,7 +36,7 @@ VPRIV bool replay_seg(pp *p, ctx *c)
 /* __COUNTER__ digits in the spelling of own token k: this TU's values */
 static __attribute__((noinline)) void ctr_spell(pp *p, const hent *e, uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
 {
-	char *b = varena_alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
+	char *b = (char *)varena_alloc(&p->perm, t->len + 24 * 4 + 32), *w = b;
 	uint32_t at = 0;
 
 	while (*ci < e->nctr && e->ctr[*ci].off == k) {
@@ -108,7 +108,7 @@ int pp_lazy_skip(pp *p, const ptok *lb, pp_lazy *z)
 
 void pp_lazy_tok(pp *p, pp_lazy *z, ptok *t)
 {
-	const hent *e = z->e;
+	const hent *e = (const hent *)z->e;
 	uint32_t k = z->k++;
 
 	htok_get(t, &e->tk[k], e->xtk, shared_base0(), z->base);
@@ -436,23 +436,23 @@ VPRIV void hc_begin(pp *p, hkey *k)
 		rec_spare.t = NULL;
 	}
 	if (!r->t) {
-		r->t = vm(HC_MAXT * sizeof(htouch));
-		r->ord = vm(HC_MAXORD * sizeof(honce));
-		r->ctr = vm(HC_MAXCP * sizeof(hcpos));
-		r->crd = vm(HC_MAXCRD * sizeof(hcrd));
-		r->seg = vm(HC_MAXSEG * sizeof(hsegr));
-		r->cp = vm((HC_MAXCP + 1) * sizeof(cprov));
-		r->kid = vm(HC_MAXKID * sizeof(hkidr));
-		r->kex = vm(HC_MAXKEX * sizeof(uint32_t));
-		r->lk = vm(HC_MAXLK * sizeof(hlook));
+		r->t = (htouch *)vm(HC_MAXT * sizeof(htouch));
+		r->ord = (honce *)vm(HC_MAXORD * sizeof(honce));
+		r->ctr = (hcpos *)vm(HC_MAXCP * sizeof(hcpos));
+		r->crd = (hcrd *)vm(HC_MAXCRD * sizeof(hcrd));
+		r->seg = (hsegr *)vm(HC_MAXSEG * sizeof(hsegr));
+		r->cp = (cprov *)vm((HC_MAXCP + 1) * sizeof(cprov));
+		r->kid = (hkidr *)vm(HC_MAXKID * sizeof(hkidr));
+		r->kex = (uint32_t *)vm(HC_MAXKEX * sizeof(uint32_t));
+		r->lk = (hlook *)vm(HC_MAXLK * sizeof(hlook));
 	}
 	if (p->tokmode == 2 && !r->tk) {
 		if (tk_spare) {
 			r->tk = tk_spare, r->sb = sb_spare;
 			tk_spare = NULL;
 		} else {
-			r->tk = vm(HC_MAXTK * sizeof(ptok));
-			r->sb = vm(HC_MAXSB);
+			r->tk = (ptok *)vm(HC_MAXTK * sizeof(ptok));
+			r->sb = (char *)vm(HC_MAXSB);
 		}
 	}
 	if (!r->n) {
@@ -507,7 +507,7 @@ static const char *hstrdup(pp *p, const char *s, size_t n)
 
 	if (s >= sb && s < sb + (1ull << 34) && !s[n])
 		return s;	/* already shared (a replayed entry's): immortal */
-	return hc_blob(p, s, n);	/* NUL-terminated, shared */
+	return (const char *)hc_blob(p, s, n);	/* NUL-terminated, shared */
 }
 
 /* hc_blob of a token's spelling, through a small cache of recent ones */
@@ -528,16 +528,16 @@ static const char *spell_blob(pp *p, const char *s, uint32_t len, uint8_t kind)
 			if (((const hck *)(const void *)(d - offsetof(hck, d)))->n == len && !((x ^ y) & mk))
 				return d;
 		}
-		return p->kspell[kind] = hc_blob(p, s, len);
+		return p->kspell[kind] = (const char *)hc_blob(p, s, len);
 	}
 	memcpy(&w, s, 8);	/* (spellings are readable 16 bytes past their end) */
 	if (len < 8)
 		w &= ~(~0ull << (8 * len));
 	h = (uint32_t)(((w ^ len) * 0x9E3779B97F4A7C15ull) >> 52);
-	d = p->bcache[h];
+	d = (const char *)p->bcache[h];
 	if (d && ((const hck *)(const void *)(d - offsetof(hck, d)))->n == len && !memcmp(d, s, len))
 		return d;
-	d = hc_blob(p, s, len);
+	d = (const char *)hc_blob(p, s, len);
 	p->bcache[h] = d;
 	return d;
 }
@@ -548,8 +548,8 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 	struct hrec *r = &p->rec;
 	uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 	size_t own = end - L->text0, w = 0, at = L->text0, skipped = 0;
-	hseg *sg = hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
-	hctr *ct = hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
+	hseg *sg = (hseg *)hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
+	hctr *ct = (hctr *)hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
 	uint32_t ci = L->c0;
 	htok *tk;
 	ptok *xt = NULL;
@@ -558,7 +558,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 
 	for (uint32_t i = L->s0; i < r->nseg; i++)
 		own -= r->seg[i].end - r->seg[i].start;
-	tk = varena_alloc(&p->tmp, (own ? own : 1) * sizeof(htok));
+	tk = (htok *)varena_alloc(&p->tmp, (own ? own : 1) * sizeof(htok));
 	for (uint32_t i = L->s0; i <= r->nseg; i++) {
 		size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -587,13 +587,13 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 			}
 			/* escape: the full token, its spelling stored */
 			if (nx == xcap) {
-				ptok *n2 = varena_alloc(&p->tmp, (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
+				ptok *n2 = (ptok *)varena_alloc(&p->tmp, (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
 
 				if (nx)
 					memcpy(n2, xt, nx * sizeof(ptok));
 				xt = n2;
 			}
-			t.s = hc_blob(p, t.s, t.len);
+			t.s = (const char *)hc_blob(p, t.s, t.len);
 			xt[nx] = t;
 			*h = (htok){ nx++, t.loc, t.kind, HF_X, 0 };
 		}
@@ -610,7 +610,7 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 
 		for (size_t k = 0; k < w; k++)
 			nb += tk[k].kind == T_LBRACE;
-		br = hsalloc(p, (nb ? nb : 1) * 2 * sizeof(uint32_t));
+		br = (uint32_t *)hsalloc(p, (nb ? nb : 1) * 2 * sizeof(uint32_t));
 		nb = 0;
 		for (size_t k = 0; k < w; k++) {
 			if (tk[k].kind == T_LBRACE) {
@@ -626,8 +626,8 @@ static void publish_tok(pp *p, const hlev *L, size_t end, hent *e)
 		e->br = br;
 		e->nbr = nb;
 	}
-	e->tk = hc_blob(p, tk, own * sizeof(htok));	/* (16-aligned) */
-	e->xtk = nx ? hcopy(p, xt, nx * sizeof(ptok)) : NULL;
+	e->tk = (const htok *)hc_blob(p, tk, own * sizeof(htok));	/* (16-aligned) */
+	e->xtk = nx ? (const ptok *)hcopy(p, xt, nx * sizeof(ptok)) : NULL;
 	e->ntext = own;
 	e->total = end - L->text0;
 	e->seg = sg;
@@ -672,7 +672,7 @@ static void hc_account(const hent *e, const hkey *k)
 static hent *publish(pp *p, const hlev *L, size_t end)
 {
 	struct hrec *r = &p->rec;
-	hent *e = hsalloc(p, sizeof(*e));
+	hent *e = (hent *)hsalloc(p, sizeof(*e));
 	uint32_t nrg = 0, nru = 0, nrv = 0, ndl = 0, *ru;
 	hread *rg, *rv, *dl;
 	hfent *fe;
@@ -692,10 +692,10 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		ndl += (t->flags & HT_O) != 0;
 	}
 	/* scratch in tmp: the stored form is the shared chunks */
-	rg = varena_alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
-	ru = varena_alloc(&p->tmp, (nru ? nru : 1) * sizeof(*ru));
-	rv = varena_alloc(&p->tmp, (nrv ? nrv : 1) * sizeof(*rv));
-	dl = varena_alloc(&p->tmp, (ndl ? ndl : 1) * sizeof(*dl));
+	rg = (hread *)varena_alloc(&p->tmp, (nrg ? nrg : 1) * sizeof(*rg));
+	ru = (uint32_t *)varena_alloc(&p->tmp, (nru ? nru : 1) * sizeof(*ru));
+	rv = (hread *)varena_alloc(&p->tmp, (nrv ? nrv : 1) * sizeof(*rv));
+	dl = (hread *)varena_alloc(&p->tmp, (ndl ? ndl : 1) * sizeof(*dl));
 	nrg = nru = nrv = ndl = 0;
 	for (uint32_t i = L->t0; i < r->nt; i++) {
 		const htouch *t = &r->t[i];
@@ -721,19 +721,19 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	e->dl = hc_vec(p, dl, ndl, sizeof(*dl));
 	{
 		uint32_t nk = r->nkid - L->k0;
-		hkid *kd = hsalloc(p, (nk ? nk : 1) * sizeof(hkid));
+		hkid *kd = (hkid *)hsalloc(p, (nk ? nk : 1) * sizeof(hkid));
 
 		for (uint32_t i = 0; i < nk; i++) {
 			const hkidr *k = &r->kid[L->k0 + i];
 
-			kd[i] = (hkid){ k->e, k->nex ? hcopy(p, r->kex + k->ex0, k->nex * sizeof(uint32_t)) : NULL, k->nex };
+			kd[i] = (hkid){ k->e, k->nex ? (const uint32_t *)hcopy(p, r->kex + k->ex0, k->nex * sizeof(uint32_t)) : NULL, k->nex };
 		}
 		e->kid = kd;
 		e->nkid = nk;
 	}
 	e->nlk = r->nlk - L->l0;
 	if (e->nlk) {
-		hlook *lk = hsalloc(p, e->nlk * sizeof(hlook));
+		hlook *lk = (hlook *)hsalloc(p, e->nlk * sizeof(hlook));
 
 		for (uint32_t i = 0; i < e->nlk; i++) {
 			const hlook *l = &r->lk[L->l0 + i];
@@ -745,12 +745,12 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		}
 		e->lk = lk;
 	}
-	e->ord = hcopy(p, r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
+	e->ord = (const honce *)hcopy(p, r->ord + L->o0, (r->nord - L->o0) * sizeof(honce));
 	e->nord = r->nord - L->o0;
-	e->oadd = hcopy(p, p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
+	e->oadd = (const vlex_file *const *)hcopy(p, p->once + L->nonce0, (p->nonce - L->nonce0) * sizeof(*p->once));
 	e->noadd = p->nonce - L->nonce0;
 	e->nfe = p->nfe - L->fe0;
-	fe = hsalloc(p, (e->nfe ? e->nfe : 1) * sizeof(hfent));
+	fe = (hfent *)hsalloc(p, (e->nfe ? e->nfe : 1) * sizeof(hfent));
 	for (uint32_t i = 0; i < e->nfe; i++) {
 		const fent *f = &p->fe[L->fe0 + i];
 
@@ -765,7 +765,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 	e->ndirs = L->ndirs;
 	e->psig = p->psig[L->ndirs];
 	{
-		hcread *cr = hsalloc(p, (r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
+		hcread *cr = (hcread *)hsalloc(p, (r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
 
 		for (uint32_t i = L->r0; i < r->ncrd; i++) {
 			const hcrd *c = &r->crd[i];
@@ -783,14 +783,14 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 		uint32_t ns = r->nseg - L->s0, nc = r->nctr - L->c0;
 		size_t own = end - L->text0;
 		char *t;
-		hseg *sg = hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
-		hctr *ct = hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
+		hseg *sg = (hseg *)hsalloc(p, (ns ? ns : 1) * sizeof(hseg));
+		hctr *ct = (hctr *)hsalloc(p, (nc ? nc : 1) * sizeof(hctr));
 		size_t w = 0, at = L->text0, skipped = 0;
 		uint32_t ci = L->c0;
 
 		for (uint32_t i = L->s0; i < r->nseg; i++)
 			own -= r->seg[i].end - r->seg[i].start;
-		t = varena_alloc(&p->tmp, own + 1);
+		t = (char *)varena_alloc(&p->tmp, own + 1);
 		for (uint32_t i = L->s0; i <= r->nseg; i++) {
 			size_t to = i < r->nseg ? r->seg[i].start : end;
 
@@ -805,7 +805,7 @@ static hent *publish(pp *p, const hlev *L, size_t end)
 				at = r->seg[i].end;
 			}
 		}
-		e->text = hc_blob(p, t, own);	/* variants often print the same */
+		e->text = (const char *)hc_blob(p, t, own);	/* variants often print the same */
 		e->ntext = own;
 		e->total = end - L->text0;
 		e->seg = sg;

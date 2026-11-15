@@ -64,7 +64,7 @@ typedef struct { const char *s; uint32_t n; uint32_t *out; } Str;
 
 static int strcmp_rev(const void *pa, const void *pb)
 {
-	const Str *a = pa, *b = pb;
+	const Str *a = (const Str *)pa, *b = (const Str *)pb;
 	uint32_t i = 0;
 	for (;; i++) {
 		int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;
@@ -87,7 +87,7 @@ static void build_strtab(ElfObj *o, Out *w, Str *v, uint32_t n)
 		*v[i].out = size; prevoff = size; prev = v[i].s; prevn = v[i].n;
 		size += v[i].n + 1;
 	}
-	uint8_t *t = rpush(&o->arena, size, 8);
+	uint8_t *t = (uint8_t *)rpush(&o->arena, size, 8);
 	t[0] = 0;
 	prev = 0;
 	for (uint32_t i = 0; i < n; i++) {
@@ -105,13 +105,13 @@ static size_t elf_finish_tail(ElfObj *o, Out *w);
 
 size_t elf_finish(ElfObj *o)
 {
-	Out *w = rpush(&o->arena, sizeof *w, 8);
+	Out *w = (Out *)rpush(&o->arena, sizeof *w, 8);
 	*w = out_of(o);
 	o->fin = w;
 	uint32_t ns = o->nsec;
 	elf_layout(o);
 	/* fixups, in layout order */
-	w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
+	w->rel = (Rel *)rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
 	ElfFix *fx = (ElfFix *)o->fixes.base;
 	for (uint32_t s = 1; s < ns; s++)
 		for (uint32_t f = s; f; f = elf_frag(o, f)->next)
@@ -125,7 +125,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	uint32_t ns = o->nsec;
 	if (o->has_err) return 0;
 	/* relocations are already grouped by section (sections processed in order) */
-	w->relbeg = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);
+	w->relbeg = (uint32_t *)rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);
 	{
 		uint32_t k = 0;
 		for (uint32_t s = 1; s < ns; s++) { w->relbeg[s] = k; k += elf_sec(o, s)->nfix_reloc; }
@@ -145,7 +145,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 		if (!(g->flags & ESYM_DEFINED) && !g->common) { g->common = 2; g->value = s; }
 	}
 	/* symbol table: locals then globals, creation order */
-	w->symtab = rpush(&o->arena, sizeof(uint32_t) * o->nsym * 2, 8);
+	w->symtab = (uint32_t *)rpush(&o->arena, sizeof(uint32_t) * o->nsym * 2, 8);
 	uint32_t *glob = w->symtab + o->nsym;
 	uint32_t nl = 0, ng = 0;
 	uint32_t *rl = (uint32_t *)o->regs.base;
@@ -184,7 +184,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	w->symtab_idx = idx++;
 	w->nshdr = idx;
 	if (w->as_idx) {	/* ULEB128 symbol indices of the listed symbols in the symbol table */
-		w->as_data = rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
+		w->as_data = (uint8_t *)rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
 		uint32_t n = 0;
 		for (uint32_t i = 0; i < o->naddrsig; i++) {
 			uint32_t id = o->addrsig[i];
@@ -203,15 +203,15 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	}
 	/* strings */
 	uint32_t nstr = 0, cap = w->nsymtab + 2 * ns + 4;
-	Str *sv = rpush(&o->arena, sizeof(Str) * cap, 8);
-	w->secname = rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8);
+	Str *sv = (Str *)rpush(&o->arena, sizeof(Str) * cap, 8);
+	w->secname = (uint32_t *)rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8);
 	w->relaname = w->secname + ns;
-	uint32_t *symname = rpush(&o->arena, sizeof(uint32_t) * (w->nsymtab + 1), 8);
+	uint32_t *symname = (uint32_t *)rpush(&o->arena, sizeof(uint32_t) * (w->nsymtab + 1), 8);
 	for (uint32_t s = 1; s < ns; s++) {
 		ElfSec *se = elf_sec(o, s);
 		sv[nstr++] = (Str){ se->name, se->len, &w->secname[s] };
 		if (se->rela_idx) {
-			char *rn = rpush(&o->arena, se->len + 6, 1);
+			char *rn = (char *)rpush(&o->arena, se->len + 6, 1);
 			memcpy(rn, ".rela", 5); memcpy(rn + 5, se->name, se->len); rn[se->len + 5] = 0;
 			sv[nstr++] = (Str){ rn, se->len + 5, &w->relaname[s] };
 		}
@@ -229,7 +229,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
 	build_strtab(o, w, sv, nstr);
 	for (uint32_t k = 0; k < w->nsymtab; k++) elf_symp(o, w->symtab[k])->size_sub = symname[k];	/* reuse: name offset */
 	/* file offsets */
-	w->secoff = rpush(&o->arena, sizeof(uint64_t) * ns * 3, 8);
+	w->secoff = (uint64_t *)rpush(&o->arena, sizeof(uint64_t) * ns * 3, 8);
 	w->relaoff = w->secoff + ns;
 	w->goff = w->secoff + 2 * ns;
 	uint64_t off = 64;
@@ -274,7 +274,7 @@ static void shdr(uint8_t *p, uint32_t name, uint32_t type, uint64_t flags, uint6
 
 void elf_emit(ElfObj *o, uint8_t *b)
 {
-	Out *w = o->fin;
+	Out *w = (Out *)o->fin;
 	uint32_t ns = o->nsec;
 	memset(b, 0, w->size);
 	static const uint8_t ident[16] = { 0x7f, 'E', 'L', 'F', 2, 1, 1, 0 };
@@ -373,7 +373,7 @@ int elf_write_file(ElfObj *o, const char *path)
 {
 	size_t n = elf_finish(o);
 	if (!n) return -1;
-	uint8_t *b = rpush(&o->arena, n, 16);
+	uint8_t *b = (uint8_t *)rpush(&o->arena, n, 16);
 	elf_emit(o, b);
 	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
 	if (fd < 0) { elf_error(o, "%s: %s", path, strerror(errno)); return -1; }

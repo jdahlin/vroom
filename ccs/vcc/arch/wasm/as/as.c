@@ -36,7 +36,7 @@ int was_error(wmod *m, const char *fmt, ...)
 	do { \
 		if ((n) >= (c)) { \
 			(c) = (c) ? (c) * 2 : 16; \
-			(p) = realloc((p), (size_t)(c) * sizeof(*(p))); \
+			(p) = (__typeof__(p))realloc((p), (size_t)(c) * sizeof(*(p))); \
 			if (!(p)) \
 				abort(); \
 		} \
@@ -92,7 +92,7 @@ static void rehash(wmod *m)
 	uint32_t cap = m->htcap ? m->htcap * 2 : 1024;
 
 	free(m->ht);
-	m->ht = calloc(cap, sizeof(uint32_t));
+	m->ht = (uint32_t *)calloc(cap, sizeof(uint32_t));
 	if (!m->ht)
 		abort();
 	m->htcap = cap;
@@ -120,7 +120,7 @@ uint32_t was_sym(wmod *m, const char *s, size_t n)
 	GROW(m->sym, m->nsym, m->csym);
 	y = &m->sym[m->nsym];
 	memset(y, 0, sizeof *y);
-	y->name = malloc(n + 1);
+	y->name = (char *)malloc(n + 1);
 	memcpy(y->name, s, n);
 	y->name[n] = 0;
 	y->nlen = (uint32_t)n;
@@ -399,7 +399,7 @@ static const winsn *insn_find(const char *s, size_t n)
 	uint32_t j;
 
 	if (!__atomic_load_n(&built, __ATOMIC_ACQUIRE)) {
-		uint16_t *t = calloc(cap, sizeof *t);
+		uint16_t *t = (uint16_t *)calloc(cap, sizeof *t);
 
 		if (!t)
 			abort();
@@ -558,8 +558,8 @@ static int instruction(was *a, const winsn *w, lx *l)
 
 			if (m->nci >= m->cci) {
 				m->cci = m->cci ? 2 * m->cci : 16;
-				m->ci_at = realloc(m->ci_at, m->cci * sizeof(uint32_t));
-				m->ci_sig = realloc(m->ci_sig, m->cci * sizeof(uint32_t));
+				m->ci_at = (uint32_t *)realloc(m->ci_at, m->cci * sizeof(uint32_t));
+				m->ci_sig = (uint32_t *)realloc(m->ci_sig, m->cci * sizeof(uint32_t));
 				if (!m->ci_at || !m->ci_sig)
 					abort();
 			}
@@ -785,7 +785,7 @@ static int section(was *a, const char *s, size_t n)
 		if (i == m->ncust) {
 			GROW(m->cust, m->ncust, m->ccust);
 			memset(&m->cust[i], 0, sizeof(wseg));
-			m->cust[i].name = malloc(n + 1);
+			m->cust[i].name = (char *)malloc(n + 1);
 			memcpy(m->cust[i].name, s, n);
 			m->cust[i].name[n] = 0;
 			m->ncust++;
@@ -805,7 +805,7 @@ static int section(was *a, const char *s, size_t n)
 		}
 	GROW(m->seg, m->nseg, m->cseg);
 	memset(&m->seg[m->nseg], 0, sizeof(wseg));
-	m->seg[m->nseg].name = malloc(n + 1);
+	m->seg[m->nseg].name = (char *)malloc(n + 1);
 	memcpy(m->seg[m->nseg].name, s, n);
 	m->seg[m->nseg].name[n] = 0;
 	a->cur = 2;
@@ -1204,7 +1204,7 @@ int wasm_assemble(const char *text, size_t len, int w32, uint8_t **out, size_t *
 
 	err[0] = 0;
 	while (p < e && !r) {
-		const char *q = memchr(p, '\n', (size_t)(e - p));
+		const char *q = (const char *)memchr(p, '\n', (size_t)(e - p));
 		const char *le = q ? q : e;
 
 		m.line++;

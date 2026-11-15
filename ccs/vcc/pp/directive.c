@@ -162,7 +162,7 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 	if (m->nbody && (m->body[0].kind == T_HASHHASH || m->body[m->nbody - 1].kind == T_HASHHASH))
 		return "'##' cannot appear at either end of a macro expansion";
 	if (np) {
-		pidx = mem(mc, m->nbody + 1);
+		pidx = (uint8_t *)mem(mc, m->nbody + 1);
 		for (uint32_t j = 0; j < m->nbody; j++) {
 			pidx[j] = 0;
 			if (m->body[j].kind != T_IDENT)
@@ -186,7 +186,7 @@ VPRIV const char *parse_define(const vtok *vt, uint32_t b, uint32_t e, pmacro *m
 	return NULL;
 }
 
-VPRIV void *mem_perm(void *a, size_t n) { return varena_alloc(a, n); }
+VPRIV void *mem_perm(void *a, size_t n) { return varena_alloc((varena *)a, n); }
 VPRIV void *mem_shared(void *a, size_t n) { (void)a; return salloc(n); }
 
 /* the macro name in ("NAME") of push_macro/pop_macro, or 0 */
@@ -199,7 +199,7 @@ static uint32_t pragma_macro_name(const char *s, size_t n)
 	if (s == e)
 		return 0;
 	s++;
-	q = memchr(s, '"', (size_t)(e - s));
+	q = (const char *)memchr(s, '"', (size_t)(e - s));
 	if (!q || q == s)
 		return 0;
 	{
@@ -372,7 +372,7 @@ static void line_directive(pp *p, ctx *c, uint32_t b, uint32_t e, bool expand_li
 		size_t l;
 		const char *s = pp_spell(&f, tmp, &l);
 
-		w = varena_alloc(&p->perm, l + 1);
+		w = (char *)varena_alloc(&p->perm, l + 1);
 		m->name = w;
 		for (size_t i = 1; i + 1 < l; i++) {
 			if (s[i] == '\\' && i + 2 < l)
@@ -562,7 +562,7 @@ pass: {
 		/* clang -E re-lexes the line as tokens: one space where there was
 		 * any, and one before the end of the line if a blank or comment is */
 		size_t n = 0, cap = (size_t)(l->off + l->len - f->off) + 2;
-		char *s = varena_alloc(&p->tmp, cap + 16);
+		char *s = (char *)varena_alloc(&p->tmp, cap + 16);
 		const char *q = c->src + l->off + l->len;
 
 		for (uint32_t i = b; i < e; i++) {

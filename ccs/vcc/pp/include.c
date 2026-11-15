@@ -3,7 +3,7 @@
 
 static char *pstrdup(pp *p, const char *s, size_t n)
 {
-	char *d = varena_alloc(&p->perm, n + 1);
+	char *d = (char *)varena_alloc(&p->perm, n + 1);
 
 	memcpy(d, s, n);
 	d[n] = 0;
@@ -129,7 +129,7 @@ static const vlex_file *find_include_(pp *p, const ctx *from, const char *name, 
 	*used = (uint32_t)p->o->ndirs;	/* not in any of them */
 	/* frameworks: <Fw/h.h> -> DIR/Fw.framework/Headers/h.h */
 	if (angled && !next) {
-		const char *sl = memchr(name, '/', nlen);
+		const char *sl = (const char *)memchr(name, '/', nlen);
 
 		for (int k = 0; sl && k < p->o->nfwdirs; k++) {
 			int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s", p->o->fwdirs[k],
@@ -302,7 +302,7 @@ static const vlex_file *find_include_at(pp *p, const ctx *from, const char *name
 		goto done;
 	{
 		size_t pl = f ? strlen(*path) : 0;
-		incent *m = salloc(sizeof(*m) + kp + pl + 1);
+		incent *m = (incent *)salloc(sizeof(*m) + kp + pl + 1);
 
 		m->hash = h, m->sig = sig, m->fsig = fsig, m->klen = (uint32_t)kl, m->mode = mode;
 		m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
@@ -345,7 +345,7 @@ static void add_fent(pp *p, ctx *c, const vlex_file *f, const char *name)
 	if (from && !strncmp(name, from, strlen(from))) {
 		const char *to = p->o->prefix_to ? p->o->prefix_to : "";
 		size_t fl = strlen(from), tl = strlen(to);
-		char *d = varena_alloc(&p->perm, tl + nl - fl + 1);
+		char *d = (char *)varena_alloc(&p->perm, tl + nl - fl + 1);
 
 		memcpy(d, to, tl);
 		memcpy(d + tl, name + fl, nl - fl + 1);
@@ -731,7 +731,7 @@ static bool emb_list(pp *p, const ptok **out, uint32_t *n, bool exp)
 			buf[k++] = t;
 	}
 	{
-		ptok *c = varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
+		ptok *c = (ptok *)varena_alloc(&p->tmp, (k ? k : 1) * sizeof(ptok));
 
 		memcpy(c, buf, k * sizeof(ptok));
 		*out = c, *n = k;
@@ -967,7 +967,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc, uint32_t n
 
 		if (!nt)
 			return;
-		o = w = varena_alloc(&p->tmp, nt * sizeof(ptok));
+		o = w = (ptok *)varena_alloc(&p->tmp, nt * sizeof(ptok));
 		if (on) {
 			if (m.npre)	/* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
 				memcpy(w, m.pre, m.npre * sizeof(ptok)), w += m.npre;

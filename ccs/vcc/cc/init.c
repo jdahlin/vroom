@@ -34,7 +34,7 @@ typedef struct ilist {
 
 static ilist *il_new(cc *c, qty ty)
 {
-	ilist *l = halloc(c, sizeof(ilist));
+	ilist *l = (ilist *)halloc(c, sizeof(ilist));
 
 	memset(l, 0, sizeof(*l));
 	l->ty = ty;
@@ -50,8 +50,8 @@ static ilist *il_new(cc *c, qty ty)
 
 		l->isunion = (r->flags & RF_UNION) != 0;
 		l->n = r->nfield;
-		l->slot = halloc(c, (r->nfield + 1) * sizeof(uint32_t));
-		l->sub = halloc(c, (r->nfield + 1) * sizeof(ilist *));
+		l->slot = (uint32_t *)halloc(c, (r->nfield + 1) * sizeof(uint32_t));
+		l->sub = (struct ilist **)halloc(c, (r->nfield + 1) * sizeof(ilist *));
 		memset(l->slot, 0, (r->nfield + 1) * sizeof(uint32_t));
 		memset(l->sub, 0, (r->nfield + 1) * sizeof(ilist *));
 	}
@@ -62,17 +62,17 @@ static ilist *il_new(cc *c, qty ty)
    a designator reaches them, so a large range does not duplicate its tree. */
 static ilist *il_copy(cc *c, const ilist *from)
 {
-	ilist *s = halloc(c, sizeof(*s));
+	ilist *s = (ilist *)halloc(c, sizeof(*s));
 	*s = *from;
 	s->shared = false;
 	if (s->array) {
-		s->runs = halloc(c, s->caprun * sizeof(irun));
+		s->runs = (irun *)halloc(c, s->caprun * sizeof(irun));
 		if (s->nrun) memcpy(s->runs, from->runs, s->nrun * sizeof(irun));
 		for (uint32_t i = 0; i < s->nrun; i++)
 			if (s->runs[i].sub) s->runs[i].sub->shared = true;
 	} else {
-		s->slot = halloc(c, (s->n + 1) * sizeof(uint32_t));
-		s->sub = halloc(c, (s->n + 1) * sizeof(ilist *));
+		s->slot = (uint32_t *)halloc(c, (s->n + 1) * sizeof(uint32_t));
+		s->sub = (struct ilist **)halloc(c, (s->n + 1) * sizeof(ilist *));
 		memcpy(s->slot, from->slot, (s->n + 1) * sizeof(uint32_t));
 		memcpy(s->sub, from->sub, (s->n + 1) * sizeof(ilist *));
 		for (uint64_t i = 0; i < s->n; i++)
@@ -92,7 +92,7 @@ static void il_run(cc *c, ilist *l, uint64_t lo, uint64_t hi, uint32_t node, ili
 {
 	if (l->nrun == l->caprun) {
 		uint32_t ncap = l->caprun ? l->caprun * 2 : 8;
-		irun *nr = halloc(c, ncap * sizeof(irun));
+		irun *nr = (irun *)halloc(c, ncap * sizeof(irun));
 
 		if (l->nrun)
 			memcpy(nr, l->runs, l->nrun * sizeof(irun));
@@ -603,7 +603,7 @@ static uint64_t il_designation(cc *c, ilist *l, bool st)
 	vinit(&cursor);
 	uint64_t pos = il_designation_path(c, l, st, &cursor);
 	if (cursor.n > 1) {
-		ilist *small[16], **parents = cursor.n <= 16 ? small : halloc(c, cursor.n * sizeof(*parents));
+		ilist *small[16], **parents = cursor.n <= 16 ? small : (ilist **)halloc(c, cursor.n * sizeof(*parents));
 		parents[0] = l;
 		for (uint32_t i = 1; i < cursor.n; i++)
 			parents[i] = il_child(c, parents[i - 1], cursor.v[i - 1]);

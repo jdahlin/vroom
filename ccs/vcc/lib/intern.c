@@ -303,9 +303,9 @@ static void init_once(void)
 	};
 
 	/* lazily backed: only touched pages cost anything */
-	slots = reserve(NSLOT * sizeof(*slots));
-	vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
-	copy_buf = reserve(COPY_MAX);
+	slots = (_Atomic(uint64_t) *)reserve(NSLOT * sizeof(*slots));
+	vintern_ents = (vident *)reserve(MAX_ENT * sizeof(*vintern_ents));
+	copy_buf = (char *)reserve(COPY_MAX);
 	for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
 		uint32_t id = vintern_cstr(kw[i]);
 
@@ -328,7 +328,7 @@ vintern_cache *vintern_local(void)
 	static _Thread_local vintern_cache *c;
 
 	if (!c)
-		c = reserve(sizeof(*c));
+		c = (vintern_cache *)reserve(sizeof(*c));
 	return c;
 }
 

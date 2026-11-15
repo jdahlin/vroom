@@ -35,13 +35,13 @@ void elf_error(ElfObj *o, const char *fmt, ...)
 
 ElfObj *elf_new(void)
 {
-	ElfObj *o = reserve(sizeof *o);
-	o->arena.base = reserve(ARENA_CAP); o->arena.cap = ARENA_CAP;
-	o->secs.base = reserve(SEC_CAP); o->secs.cap = SEC_CAP;
-	o->frags.base = reserve(FRAG_CAP * sizeof(ElfFrag)); o->frags.cap = FRAG_CAP * sizeof(ElfFrag);
-	o->syms.base = reserve(SYMS_CAP); o->syms.cap = SYMS_CAP;
-	o->fixes.base = reserve(FIX_CAP); o->fixes.cap = FIX_CAP;
-	o->regs.base = reserve(SYMS_CAP); o->regs.cap = SYMS_CAP;
+	ElfObj *o = (ElfObj *)reserve(sizeof *o);
+	o->arena.base = (uint8_t *)reserve(ARENA_CAP); o->arena.cap = ARENA_CAP;
+	o->secs.base = (uint8_t *)reserve(SEC_CAP); o->secs.cap = SEC_CAP;
+	o->frags.base = (uint8_t *)reserve(FRAG_CAP * sizeof(ElfFrag)); o->frags.cap = FRAG_CAP * sizeof(ElfFrag);
+	o->syms.base = (uint8_t *)reserve(SYMS_CAP); o->syms.cap = SYMS_CAP;
+	o->fixes.base = (uint8_t *)reserve(FIX_CAP); o->fixes.cap = FIX_CAP;
+	o->regs.base = (uint8_t *)reserve(SYMS_CAP); o->regs.cap = SYMS_CAP;
 	o->machine = EM_AARCH64;
 	elf_reset(o);
 	return o;
@@ -64,7 +64,7 @@ void elf_reset(ElfObj *o)
 	memset(o->syms.base, 0, sizeof(ElfSym));
 	memset(o->fixes.base, 0, sizeof(ElfFix));
 	o->hmask = 1023; o->hcount = 0;
-	o->htab = rpush(&o->arena, (o->hmask + 1) * 4, 64);
+	o->htab = (uint32_t *)rpush(&o->arena, (o->hmask + 1) * 4, 64);
 	memset(o->htab, 0, (o->hmask + 1) * 4);
 	o->has_err = 0; o->err[0] = 0;
 	o->addrsig = 0; o->naddrsig = 0; o->has_addrsig = 0;
@@ -72,7 +72,7 @@ void elf_reset(ElfObj *o)
 
 static const char *copyname(ElfObj *o, const char *s, uint32_t n)
 {
-	char *p = rpush(&o->arena, n + 1, 1);
+	char *p = (char *)rpush(&o->arena, n + 1, 1);
 	memcpy(p, s, n); p[n] = 0;
 	return p;
 }
@@ -81,7 +81,7 @@ static const char *copyname(ElfObj *o, const char *s, uint32_t n)
 
 static uint32_t newsym(ElfObj *o, const char *name, uint32_t len, uint32_t h)
 {
-	ElfSym *y = rpush(&o->syms, sizeof *y, 8);
+	ElfSym *y = (ElfSym *)rpush(&o->syms, sizeof *y, 8);
 	memset(y, 0, sizeof *y);
 	y->name = copyname(o, name, len); y->len = len; y->hash = h;
 	return o->nsym++;
@@ -90,7 +90,7 @@ static uint32_t newsym(ElfObj *o, const char *name, uint32_t len, uint32_t h)
 static void hgrow(ElfObj *o)
 {
 	uint32_t nm = o->hmask * 2 + 1;
-	uint32_t *t = rpush(&o->arena, (nm + 1) * 4, 64);
+	uint32_t *t = (uint32_t *)rpush(&o->arena, (nm + 1) * 4, 64);
 	memset(t, 0, (nm + 1) * 4);
 	for (uint32_t i = 0; i <= o->hmask; i++) {
 		uint32_t s = o->htab[i];
@@ -155,7 +155,7 @@ typedef struct ElfExpr { uint32_t sym; int op; ElfVal x, y; struct ElfExpr *next
 
 void elf_expr_sym(ElfObj *o, uint32_t s, int op, ElfVal x, ElfVal y)
 {
-	ElfExpr *e = rpush(&o->arena, sizeof *e, 8);
+	ElfExpr *e = (ElfExpr *)rpush(&o->arena, sizeof *e, 8);
 
 	*e = (ElfExpr){ s, op, x, y, 0 };
 	if (!o->expr_tail) o->expr_tail = &o->expr;
@@ -262,7 +262,7 @@ uint32_t elf_section(ElfObj *o, const char *name, uint32_t len, uint32_t type,
 	uint32_t i = elf_find_section(o, name, len, group);
 	if (i) return i;
 	i = o->nsec++;
-	ElfSec *s = rpush(&o->secs, sizeof *s, 8);
+	ElfSec *s = (ElfSec *)rpush(&o->secs, sizeof *s, 8);
 	(void)s; s = elf_sec(o, i);
 	memset(s, 0, sizeof *s);
 	s->name = copyname(o, name, len); s->len = len;
@@ -320,7 +320,7 @@ uint8_t *elf_grow_slow(ElfObj *o, uint32_t frag, size_t n)
 	size_t cap = f->tail ? (size_t)f->tail->cap * 2 : 4096 - sizeof(ElfChunk);
 	if (cap > (1u << 20)) cap = 1u << 20;
 	if (cap < n) cap = n;
-	ElfChunk *c = rpush(&o->arena, sizeof *c + cap, 16);
+	ElfChunk *c = (ElfChunk *)rpush(&o->arena, sizeof *c + cap, 16);
 	c->next = 0; c->used = (uint32_t)n; c->cap = (uint32_t)cap;
 	if (f->tail) f->tail->next = c; else f->head = c;
 	f->tail = c;
@@ -413,7 +413,7 @@ void elf_data_slow(ElfObj *o, uint32_t frag)
 
 void elf_fixup(ElfObj *o, uint32_t frag, uint64_t off, uint8_t *p, uint32_t type, ElfVal v)
 {
-	ElfFix *x = rpush(&o->fixes, sizeof *x, 8);
+	ElfFix *x = (ElfFix *)rpush(&o->fixes, sizeof *x, 8);
 	uint32_t id = o->nfix++;
 	x->frag = frag; x->next = 0; x->type = type; x->pad = 0; x->off = off; x->p = p; x->v = v;
 	ElfFrag *f = elf_frag(o, frag);

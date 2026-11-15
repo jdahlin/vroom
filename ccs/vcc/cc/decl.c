@@ -123,7 +123,7 @@ static void weak_push(cc *c, uint32_t key, uint32_t alias, uint32_t loc, uint32_
 {
 	if (c->npweak == c->cpweak) {
 		c->cpweak = c->cpweak ? 2 * c->cpweak : 8;
-		c->pweak = realloc(c->pweak, c->cpweak * sizeof(*c->pweak));
+		c->pweak = (__typeof__(c->pweak))realloc(c->pweak, c->cpweak * sizeof(*c->pweak));
 	}
 	c->pweak[c->npweak++] = (struct pweak){ key, alias, loc, s };
 }
@@ -132,7 +132,7 @@ static uint32_t id_string(cc *c, uint32_t id)
 {
 	int l;
 	const char *s = idname(id, &l);
-	char *k = halloc(c, (size_t)l + 1);
+	char *k = (char *)halloc(c, (size_t)l + 1);
 
 	memcpy(k, s, (size_t)l);
 	k[l] = 0;
@@ -681,7 +681,7 @@ VPRIV uint32_t lib_builtin(cc *c, uint32_t id, uint32_t loc)
 				lib = c->o->target == PP_LINUX_X86_64 ? "__powixf2" :
 				      ty_size(c, ret) == 8 ? "__powidf2" : "__powitf2";
 			size_t ll = strlen(lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
-			char *keep = halloc(c, ll + pre + 1);
+			char *keep = (char *)halloc(c, ll + pre + 1);
 			attrs a;
 
 			keep[0] = '_';

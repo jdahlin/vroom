@@ -16,7 +16,7 @@ VPRIV qty ty_complex(cc *c, qty et)
 		tag *r = &c->tags[ti];
 
 		r->nfield = 2;
-		r->f = halloc(c, 2 * sizeof(field));
+		r->f = (field *)halloc(c, 2 * sizeof(field));
 		memset(r->f, 0, 2 * sizeof(field));
 		r->f[0].ty = r->f[1].ty = prim(k);
 		r->f[1].off = 8 * ty_size(c, prim(k));

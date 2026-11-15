@@ -94,7 +94,7 @@ static const char *const warning_groups[] = {
 
 static int cmp_str(const void *k, const void *e)
 {
-	return strcmp(k, *(const char *const *)e);
+	return strcmp((const char *)k, *(const char *const *)e);
 }
 
 /*

@@ -855,7 +855,7 @@ static inline uintptr_t *mslot(pp *p, uint32_t id)
 	uintptr_t **pg = &p->mdir[id >> MPAGE_BITS];
 
 	if (unlikely(!*pg)) {
-		*pg = varena_alloc(&p->perm, MPAGE * sizeof(uintptr_t));
+		*pg = (uintptr_t *)varena_alloc(&p->perm, MPAGE * sizeof(uintptr_t));
 		memset(*pg, 0, MPAGE * sizeof(uintptr_t));
 	}
 	return &(*pg)[id & (MPAGE - 1)];
@@ -1081,7 +1081,7 @@ static __attribute__((noinline, cold)) void dollar_split(pp *p, ptok *t)
 	if (!id || !mget(p, id))
 		return;
 	{
-		ptok *n = varena_alloc(&p->tmp, sizeof(*n));
+		ptok *n = (ptok *)varena_alloc(&p->tmp, sizeof(*n));
 
 		*n = *t;
 		n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;

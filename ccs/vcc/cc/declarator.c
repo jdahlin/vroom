@@ -288,7 +288,7 @@ static dop *dop_grow(cc *c, dop *old, uint32_t used, uint32_t *cap, uint32_t nee
 		fatal(c, tok(c)->loc, "declarator too complex");
 	while (nc < need)
 		nc *= 2;
-	p = halloc(c, nc * sizeof(*p));
+	p = (dop *)halloc(c, nc * sizeof(*p));
 	memcpy(p, old, used * sizeof(*p));
 	*cap = nc;
 	return p;

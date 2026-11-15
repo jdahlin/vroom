@@ -115,7 +115,7 @@ static int user_sec(ElfObj *o, Mo *m, const ElfSec *se)
 	int nf = 0;
 	if (!memchr(p, ',', se->len)) return 0;
 	while (nf < 4) {
-		const char *q = memchr(p, ',', (size_t)(e - p));
+		const char *q = (const char *)memchr(p, ',', (size_t)(e - p));
 		const char *z = q ? q : e;
 		while (p < z && *p == ' ') p++;
 		const char *t = z;
@@ -139,7 +139,7 @@ static int user_sec(ElfObj *o, Mo *m, const ElfSec *se)
 		flags = types[k].v;
 	}
 	for (const char *a = nf > 3 ? f[3] : NULL, *ae = a ? f[3] + fl[3] : NULL; a && a < ae;) {
-		const char *z = memchr(a, '+', (size_t)(ae - a));
+		const char *z = (const char *)memchr(a, '+', (size_t)(ae - a));
 		if (!z) z = ae;
 		size_t k = 0;
 		while (k < sizeof attrs / sizeof *attrs && (strlen(attrs[k].n) != (size_t)(z - a) || memcmp(attrs[k].n, a, (size_t)(z - a)))) k++;
@@ -322,16 +322,16 @@ static uint64_t al(uint64_t v, uint64_t a) { return (v + a - 1) & ~(a - 1); }
 size_t macho_finish(ElfObj *o)
 {
 	uint32_t ns = o->nsec;
-	Mo *m = zalloc(o, sizeof *m);
+	Mo *m = (Mo *)zalloc(o, sizeof *m);
 	if (!m) return 0;
 	o->fin = m;
 	elf_layout(o);
 	if (o->has_err) return 0;
-	m->map = zalloc(o, ns + 1);
-	m->vaddr = zalloc(o, sizeof(uint64_t) * (ns + 1));
-	m->needsym = zalloc(o, o->nsym + 1);
-	m->nlidx = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
-	m->strx = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
+	m->map = (int8_t *)zalloc(o, ns + 1);
+	m->vaddr = (uint64_t *)zalloc(o, sizeof(uint64_t) * (ns + 1));
+	m->needsym = (uint8_t *)zalloc(o, o->nsym + 1);
+	m->nlidx = (uint32_t *)zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
+	m->strx = (uint32_t *)zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
 	if (o->has_err) return 0;
 	/* sections */
 	uint64_t moffs[M_N] = { 0 };
@@ -400,7 +400,7 @@ size_t macho_finish(ElfObj *o)
 			if (k >= 0) cnt[k] += 2;
 		}
 		for (int k = 0; k < M_N; k++)
-			if (cnt[k]) m->rel[k] = zalloc(o, sizeof(MRel) * cnt[k]);
+			if (cnt[k]) m->rel[k] = (MRel *)zalloc(o, sizeof(MRel) * cnt[k]);
 		if (o->has_err) return 0;
 	}
 	{
@@ -412,7 +412,7 @@ size_t macho_finish(ElfObj *o)
 	}
 	if (o->has_err) return 0;
 	/* symbols: locals, external definitions, undefined */
-	m->nl = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
+	m->nl = (uint32_t *)zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
 	if (!m->nl) return 0;
 	uint32_t n = 0;
 	for (int pass = 0; pass < 3; pass++) {
@@ -450,7 +450,7 @@ size_t macho_finish(ElfObj *o)
 	{
 		uint32_t size = 1;
 		for (uint32_t k = 0; k < n; k++) size += elf_symp(o, m->nl[k])->len + 1;
-		m->str = zalloc(o, size + 8);
+		m->str = (char *)zalloc(o, size + 8);
 		if (!m->str) return 0;
 		uint32_t at = 1;
 		for (uint32_t k = 0; k < n; k++) {
@@ -499,7 +499,7 @@ static void pname(uint8_t *p, const char *s) { memset(p, 0, 16); memcpy(p, s, st
 
 void macho_emit(ElfObj *o, uint8_t *b)
 {
-	Mo *m = o->fin;
+	Mo *m = (Mo *)o->fin;
 	uint32_t ns = o->nsec;
 	uint64_t vmsize = 0, fileend = m->dataoff;
 

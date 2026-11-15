@@ -188,7 +188,7 @@ static void code_ptrs(coder *k, char **img, const cc *c, bool enc)
 	cstr *st = (cstr *)img[A_STRS];
 	casm *as = (casm *)img[A_ASMS];
 
-#define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
+#define P(x) ((x) = (__typeof__(x))(enc ? enc_ptr(k, (x)) : dec_ptr(k, (x))))
 	for (uint32_t i = 0; i < c->ntag; i++)
 		P(tg[i].f);
 	for (uint32_t i = 0; i < c->nstr; i++)
@@ -204,7 +204,7 @@ static void code_ptrs(coder *k, char **img, const cc *c, bool enc)
 /* the scalar state's heap pointers (in place) */
 static void code_cc(coder *k, cc *s, bool enc)
 {
-#define P(x) ((x) = enc ? enc_ptr(k, (x)) : dec_ptr(k, (x)))
+#define P(x) ((x) = (__typeof__(x))(enc ? enc_ptr(k, (x)) : dec_ptr(k, (x))))
 	P(s->ptag);
 	P(s->tyhash);
 	P(s->fnhash);	/* (dops: the TU keeps its own, see snap_restore) */
@@ -268,7 +268,7 @@ static dcsnap *snap_take(const cc *c, const dcnode *n, uint32_t base)
 		if (img_buf)
 			munmap(img_buf, img_cap);
 		img_cap = (tot + ((size_t)1 << 24)) & ~(((size_t)1 << 24) - 1);
-		img_buf = mmap(NULL, img_cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+		img_buf = (char *)mmap(NULL, img_cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 		if (img_buf == MAP_FAILED) {
 			img_buf = NULL, img_cap = 0;
 			return NULL;
@@ -286,7 +286,7 @@ static dcsnap *snap_take(const cc *c, const dcnode *n, uint32_t base)
 #undef ENC
 	if (k.bad)
 		return NULL;
-	s = dalloc(sizeof(*s));
+	s = (dcsnap *)dalloc(sizeof(*s));
 	s->c = *c;
 	code_cc(&k, &s->c, true);
 	s->c.prevloc = enc_loc(&k, c->prevloc);
@@ -301,7 +301,7 @@ static dcsnap *snap_take(const cc *c, const dcnode *n, uint32_t base)
 			size_t np = (sz[a] + DC_PAGE - 1) / DC_PAGE;
 
 			s->a[a].n = sz[a];
-			s->a[a].pg = dalloc((np ? np : 1) * sizeof(char *));
+			s->a[a].pg = (const char **)dalloc((np ? np : 1) * sizeof(char *));
 			own += np * sizeof(char *);
 			for (size_t i = 0; i < np; i++) {
 				size_t len = sz[a] - i * DC_PAGE < DC_PAGE ? sz[a] - i * DC_PAGE : DC_PAGE;
@@ -312,7 +312,7 @@ static dcsnap *snap_take(const cc *c, const dcnode *n, uint32_t base)
 					s->a[a].pg[i] = par->a[a].pg[i];
 					continue;
 				}
-				pg = dalloc(DC_PAGE);
+				pg = (char *)dalloc(DC_PAGE);
 				memcpy(pg, src, len);
 				s->a[a].pg[i] = pg;
 				own += DC_PAGE;
@@ -395,7 +395,7 @@ static dcnode *root_get(uint64_t sig)
 		for (r = h; r; r = r->next)
 			if (r->sig == sig)
 				return &r->node;
-		r = calloc(1, sizeof(*r));
+		r = (struct dcroot *)calloc(1, sizeof(*r));
 		r->sig = sig;
 		r->next = h;
 		if (atomic_compare_exchange_strong_explicit(&roots, &h, r, memory_order_acq_rel, memory_order_acquire))
@@ -415,7 +415,7 @@ static dcnode *child(dcnode *n, const void *e, unsigned ctr, bool make)
 				return x;
 		if (!make)
 			return NULL;
-		x = calloc(1, sizeof(*x));
+		x = (dcnode *)calloc(1, sizeof(*x));
 		x->e = e;
 		x->ctr = ctr;
 		x->parent = n;
@@ -444,7 +444,7 @@ void dc_begin(cc *c)
 	c->dc = NULL;
 	if (dc_off)
 		return;
-	c->dc = calloc(1, sizeof(struct dcst));
+	c->dc = (struct dcst *)calloc(1, sizeof(struct dcst));
 	c->dc->node = root_get(opt_sig(c->o));
 }
 

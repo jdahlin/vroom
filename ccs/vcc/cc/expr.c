@@ -615,7 +615,7 @@ static uint32_t func_name(cc *c, uint32_t loc)
 	const sym *f = c->fn ? &c->syms[c->fn] : NULL;
 	int len = 0;
 	const char *s = f ? idname(f->name, &len) : "";
-	char *buf = halloc(c, (size_t)len + 1);
+	char *buf = (char *)halloc(c, (size_t)len + 1);
 	uint32_t si = c->nstr++, n;
 
 	memcpy(buf, s, (size_t)len);

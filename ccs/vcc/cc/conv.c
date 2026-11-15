@@ -766,7 +766,7 @@ static const char *arr_tyname(cc *c, qty t)
 
 	if (!sp)
 		return s;
-	o = halloc(c, strlen(s) + 1);
+	o = (char *)halloc(c, strlen(s) + 1);
 	memcpy(o, s, (size_t)(sp - s));
 	strcpy(o + (sp - s), sp + 1);
 	return o;

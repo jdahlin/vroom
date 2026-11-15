@@ -406,14 +406,14 @@ VPRIV void init_builtins(void)
 	/* the table is shared by all TUs; building it twice is harmless */
 	for (uint32_t i = 0; builtins[i].name; i++) {
 		size_t l = strlen(builtins[i].name);
-		char *s = malloc(l + 17);
+		char *s = (char *)malloc(l + 17);
 		uint32_t id;
 
 		memcpy(s, builtins[i].name, l);
 		memset(s + l, 0, 17);
 		id = vintern_copy(s, l);
 		if (!bi_dir[id >> DIR_BITS]) {
-			uint32_t *pg = calloc(DIR_PAGE, sizeof(uint32_t));
+			uint32_t *pg = (uint32_t *)calloc(DIR_PAGE, sizeof(uint32_t));
 
 			bi_dir[id >> DIR_BITS] = pg;
 		}

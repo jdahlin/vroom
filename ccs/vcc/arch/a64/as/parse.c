@@ -330,7 +330,7 @@ static uint32_t pool_entry(As *a, Val v, uint32_t size)
 		}
 	if (a->npool == a->poolcap) {
 		uint32_t nc = a->poolcap ? a->poolcap * 2 : 64;
-		Pool *t = rget(&a->defs, sizeof *t * nc);
+		Pool *t = (Pool *)rget(&a->defs, sizeof *t * nc);
 		if (a->npool) memcpy(t, a->pool, sizeof *t * a->npool);
 		a->pool = t; a->poolcap = nc;
 	}
