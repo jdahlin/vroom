@@ -229,7 +229,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 			const vvi *x = o[1 - kc];
 			uint64_t K = in.op == VO_MUL ? (uint64_t)o[kc]->k : 1ull << o[1]->k;
 
-			r = (vvi){ .kind = allinv ? VK_INV : VK_LIN, .c = (int64_t)((uint64_t)x->c * K), .bv = x->bv,
+			r = (vvi){ .kind = (uint8_t)(allinv ? VK_INV : VK_LIN), .c = (int64_t)((uint64_t)x->c * K), .bv = x->bv,
 				   .bs = (int64_t)((uint64_t)x->bs * K), .k = (int64_t)((uint64_t)x->k * K) };
 			r.exact = x->exact && (in.ty != VT_I32 || ((in.fl & VIF_NSW) && !x->uns));
 			if (!r.bs)

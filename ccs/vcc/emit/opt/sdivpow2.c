@@ -6,18 +6,21 @@
 
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r)
 {
-	i128 d;
-	uint64_t mag;
+    i128 d;
+    uint64_t mag;
 
-	if ((op != T_SLASH && op != T_PERCENT) || !is_integer(c, ty) ||
-	    !is_signed(c, ty) || em_bitint(c, ty) || !tsize(c, ty) || tsize(c, ty) > 8)
-		return false;
-	d = em_trunc_to(c, rhs, ty);
-	/* i128 contains every supported dividend/divisor, including INT64_MIN. */
-	mag = (uint64_t)(d < 0 ? -d : d);
-	if (!mag || (mag & (mag - 1)))
-		return false;
-	*r = (em_sdivpow2_recipe){ .bits = tsize(c, ty) <= 4 ? 32 : 64,
-		.shift = __builtin_ctzll(mag), .negative = d < 0, .remainder = op == T_PERCENT };
-	return true;
+    if ((op != T_SLASH && op != T_PERCENT) || !is_integer(c, ty) ||
+        !is_signed(c, ty) || em_bitint(c, ty) || !tsize(c, ty) ||
+        tsize(c, ty) > 8)
+        return false;
+    d = em_trunc_to(c, rhs, ty);
+    /* i128 contains every supported dividend/divisor, including INT64_MIN. */
+    mag = (uint64_t)(d < 0 ? -d : d);
+    if (!mag || (mag & (mag - 1)))
+        return false;
+    *r = (em_sdivpow2_recipe){.bits = (uint8_t)(tsize(c, ty) <= 4 ? 32 : 64),
+                              .shift = (uint8_t)__builtin_ctzll(mag),
+                              .negative = d < 0,
+                              .remainder = op == T_PERCENT};
+    return true;
 }
