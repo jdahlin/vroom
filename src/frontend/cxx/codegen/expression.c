@@ -413,8 +413,31 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 {
 	cc *a = c->ast;
 
-	if (!cxx_gen_on(c) || !cond || !x || !y)
+	if (!cxx_gen_on(c) || !cond || !y)
 		return;
+	if (!x) {
+		/* GNU's a ?: b, a evaluated once: of two lvalues of one scalar type an lvalue, *(t = &a, *t ? t : &b);
+		   else C's node, which keeps a's value */
+		ast_qualified_type ct = AST_NODE_AT(a, cond)->ty, yt = AST_NODE_AT(a, y)->ty;
+
+		if (cc_type_is_record(a, ct) || cc_type_is_record(a, yt))
+			return;
+		if ((AST_NODE_AT(a, cond)->flags & AST_NODE_FLAG_LVALUE) && (AST_NODE_AT(a, y)->flags & AST_NODE_FLAG_LVALUE) &&
+		    AST_QUALIFIED_TYPE_UNQUALIFIED(ct) == AST_QUALIFIED_TYPE_UNQUALIFIED(yt) && AST_TYPE_KIND(a, ct) != AST_TYPE_ARRAY) {
+			ast_qualified_type pt = cc_type_pointer(a, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ct), AST_QUALIFIED_TYPE_QUALIFIERS(ct) | AST_QUALIFIED_TYPE_QUALIFIERS(yt)));
+			uint32_t tmp = cxx_gen_temporary(c, pt, loc), set, test, pick;
+
+			if (!tmp)
+				return;
+			set = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cc_cast_insert(a, cc_address_of_build(a, cond, loc), pt, AST_CAST_NOP), loc);
+			test = cc_condition_scalar(a, cc_conversion_decay(a, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), loc)), "'?:'");
+			pick = cc_conditional_build(a, test, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), cc_cast_insert(a, cc_address_of_build(a, y, loc), pt, AST_CAST_NOP), loc);
+			c->enode = cc_dereference_build(a, cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, set, pick), loc);
+			return;
+		}
+		c->enode = cc_conditional_build(a, cc_conversion_decay(a, cond), 0, cc_conversion_decay(a, y), loc);
+		return;
+	}
 	if (cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
 		cond = cxx_gen_convert_class(c, cond, cc_type_basic(AST_TYPE_BOOL), loc);	/* (a class: its operator bool, explicit or not) */
 	if (!cond || cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
