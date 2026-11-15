@@ -230,10 +230,59 @@ no:
     return false;
 }
 
+/* decay_t<T>: no reference, no cv, an array's or a function's pointer */
+static ast_qualified_type cxx_common_decay(cxx *c, ast_qualified_type t)
+{
+    if (t == CXX_TY_UNKNOWN)
+        return t;
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER &&
+        AST_TYPE(c->ast, t)->ext)
+        t = AST_TYPE(c->ast, t)->base;
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
+        return cc_type_pointer(c->ast, AST_TYPE(c->ast, t)->base);
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION)
+        return cc_type_pointer(c->ast, t);
+    return AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+}
+
+/* common_type<A, B>'s type as __builtin_common_type gives it, for what vcc decides: one type after decay,
+   arithmetic types (the usual conversions), a pointer and nullptr_t; 0 none, -1 not known (two classes: a
+   specialization of common_type, std::chrono's, may give one) */
+static int cxx_common_pair(cxx *c, ast_qualified_type a, ast_qualified_type b,
+                           ast_qualified_type *out)
+{
+    cc *x = c->ast;
+
+    a = cxx_common_decay(c, a), b = cxx_common_decay(c, b);
+    if (a == CXX_TY_UNKNOWN || b == CXX_TY_UNKNOWN)
+        return -1;
+    if (a == b && AST_TYPE_KIND(x, a) != AST_TYPE_VOID) {
+        *out = a;
+        return 1;
+    }
+    if (cc_type_is_arithmetic(x, a) && cc_type_is_arithmetic(x, b)) {
+        *out = cc_type_arithmetic_conversion(x, a, b);
+        return 1;
+    }
+    if (c->nullptr_ty &&
+        ((AST_TYPE_KIND(x, a) == AST_TYPE_POINTER && b == c->nullptr_ty) ||
+         (AST_TYPE_KIND(x, b) == AST_TYPE_POINTER && a == c->nullptr_ty))) {
+        *out = a == c->nullptr_ty ? b : a;
+        return 1;
+    }
+    if (cc_type_is_record(x, a) || cc_type_is_record(x, b))
+        return -1;
+    return AST_TYPE_KIND(x, a) == AST_TYPE_POINTER ||
+                   AST_TYPE_KIND(x, b) == AST_TYPE_POINTER
+               ? -1
+               : 0; /* (pointers to different types: their composite, not done) */
+}
+
 /*
  * clang's builtin templates, as far as libc++ uses them:
  *   __make_integer_seq<Seq, T, N>     Seq<T, 0, 1, ..., N-1>
  *   __type_pack_element<I, Ts...>     the I-th of Ts
+ *   __builtin_common_type<Tmpl, TypeIdentity, Empty, Ts...>   TypeIdentity<common type of Ts>, or Empty
  * The result goes to c->last_type (unknown otherwise).
  */
 VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
@@ -263,6 +312,34 @@ VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
         r->kind = CXX_ENTITY_TYPE, r->ty = a[a[0].v + 1].t, r->pack_index = -1;
         r->members = cxx_type_class_scope(c, r->ty);
         c->last_type = r, c->last_type_dependent = 0;
+    } else if (v->len == 21 && !memcmp(v->s, "__builtin_common_type", 21) &&
+               n >= 3 && a[1].kind == 4 && a[2].kind == 1) {
+        /* libc++'s common_type<Ts...>: the types folded pairwise ([meta.trans.other]/3); one: with itself */
+        ast_qualified_type t = CXX_TY_UNKNOWN;
+        int r = n > 3;
+
+        for (uint32_t i = 3; i < n && r > 0; i++) {
+            if (a[i].kind != 1) {
+                r = -1;
+                break;
+            }
+            r = cxx_common_pair(c, i == 3 ? a[i].t : t, a[i].t, &t);
+        }
+        if (r > 0) {
+            cxx_targ ta = VCC_LITERAL(cxx_targ, .kind = 1, .t = t);
+            cxx_entity *inst = cxx_instantiate(
+                c, (cxx_entity *)(intptr_t)a[1].v, &ta, 1, false);
+
+            if (inst)
+                c->last_type = inst, c->last_type_dependent = 0;
+        } else if (r == 0) {
+            cxx_entity *e =
+                (cxx_entity *)calloc(1, sizeof *e); /* Empty: no type member */
+
+            e->kind = CXX_ENTITY_TYPE, e->ty = a[2].t, e->pack_index = -1;
+            e->members = cxx_type_class_scope(c, e->ty);
+            c->last_type = e, c->last_type_dependent = 0;
+        }
     }
 }
 
