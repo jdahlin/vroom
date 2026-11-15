@@ -59,17 +59,20 @@ else
 HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
+VCC_CXX_DIALECT = -x c++ -std=gnu++20 -fno-exceptions
 VCC_LANG ?= c++
 ifeq ($(VCC_LANG),c++)
 VCC_CC = $(CCACHE) $(HOST_CXX)
-VCC_DIALECT = -x c++ -std=gnu++20
+VCC_DIALECT = $(VCC_CXX_DIALECT)
+# The host tools use the C runtime. Let the C driver select the link libraries.
+VCC_LINK = $(CCACHE) $(HOST_CC)
 else ifeq ($(VCC_LANG),c)
 VCC_CC = $(CCACHE) $(HOST_CC)
 VCC_DIALECT = -x c -std=c11
+VCC_LINK = $(VCC_CC)
 else
 $(error VCC_LANG must be c or c++)
 endif
-VCC_LINK   = $(VCC_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
 VCC_SANLD ?=
@@ -320,7 +323,7 @@ vcc-cxx-check: $(C_COMPAT_CHECK) $(CXX_CHECK)
 $(C_COMPAT_CHECK): check-c-compat/%: %
 	$(HOST_CC) -x c -std=c11 $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
 $(CXX_CHECK): check-cxx/%: %
-	$(HOST_CXX) $(VCC_FAST) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
+	$(HOST_CXX) $(VCC_FAST) $(VCC_CXX_DIALECT) $(CXX_CHECK_FLAGS) $<
 
 # ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
