@@ -1,5 +1,5 @@
 /*
- * memptr.c: pointers to members, as the Itanium C++ ABI lays them out.
+ * memptr.cpp: pointers to members, as the Itanium C++ ABI lays them out.
  *
  * T C::* of a data member is a struct of one ptrdiff_t, the member's offset in a C (-1: the null one); of a
  * member function R (C::*)(P...) [cv] a struct of two, ptr and adj: ptr the function's address, or for a

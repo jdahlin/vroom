@@ -1,5 +1,5 @@
 /*
- * eh.c: C++ exceptions in the direct emitter (frontend/c/cc.h's eh).  A function with cleanup variables
+ * eh.cpp: C++ exceptions in the direct emitter (frontend/c/cc.h's eh).  A function with cleanup variables
  * gets an exception table: x64_call brackets every call with marks (.Lvcceh<fn>_<n>) and notes the
  * innermost cleanup node live there; here, before the return label (jumped over), one landing pad per
  * node reached: it keeps the exception (in %rax at the pad) in a slot, then runs the node's cleanup and

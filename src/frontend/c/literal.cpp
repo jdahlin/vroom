@@ -587,7 +587,7 @@ CC_PRIVATE uint32_t cc_literal_string_build(cc *c, const ptok *tokens,
         if (s > t->s && s[-1] == 'R') {
             /* a raw string: R"delim( chars )delim", no escapes; each byte as it is (narrow) or as
                UTF-8's code point (wide) */
-            const char *open = memchr(s, '(', (size_t)(e - s));
+            const char *open = (const char *)memchr(s, '(', (size_t)(e - s));
             size_t dl = open ? (size_t)(open - s - 1) : 0;
             const char *b = open ? open + 1 : e, *end = e - dl - 1;
 

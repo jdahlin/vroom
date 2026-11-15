@@ -2522,3 +2522,12 @@ instructions by +0.0011% compiling the nlohmann/json object workload and
 +0.0004% compiling 160 namespaces of 96 declarations each. Baseline
 `2df8ed5a`, normal x86-64 Linux vpp, 11 alternating pairs pinned to one CPU
 after warmup. Both object files matched their respective baselines byte for byte.
+
+### Parameter-list storage (2026-11-15)
+
+Normal x86-64 Linux vpp, baseline `2df8ed5a`, Clang 23 host build. Median
+user instructions over 11 alternating pairs on one pinned CPU after warmup.
+Compiling a TU that calls nlohmann/json's `is_null()` and `is_array()` to an
+object went from 4,431,528,953 to 4,418,098,670 instructions (−0.30%), with
+identical object bytes. Parsing 6,000 declarations with 0–16 parameters went
+from 208,216,939 to 194,229,447 instructions (−6.72%).

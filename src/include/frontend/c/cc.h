@@ -155,7 +155,7 @@ enum {
     AST_RECORD_FLAG_GCC_STRUCT =
         2048, /* gcc_struct: not the Microsoft layout, whatever -mms-bitfields and #pragma ms_struct say */
     AST_RECORD_FLAG_MEMBER_POINTER =
-        4096, /* C++'s T C::*: a struct of one or two longs (frontend/cxx/memptr.c) */
+        4096, /* C++'s T C::*: a struct of one or two longs (frontend/cxx/memptr.cpp) */
     AST_RECORD_FLAG_ENUM_SCOPED =
         8192, /* C++'s enum class: no implicit conversion to an integer */
 };

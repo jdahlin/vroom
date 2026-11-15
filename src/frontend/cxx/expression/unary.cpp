@@ -86,7 +86,7 @@ static bool cxx_sizeof_vla(cxx *c, ast_qualified_type t, uint32_t loc)
     return true;
 }
 
-/* &C::m of a non-static data member or member function m of class C: a pointer to member (memptr.c), of the
+/* &C::m of a non-static data member or member function m of class C: a pointer to member (memptr.cpp), of the
    class that declares m (&D::i of B's i is an int B::*); false (nothing consumed): no such name here */
 static bool cxx_address_of_member_parse(cxx *c)
 {

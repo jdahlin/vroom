@@ -59,7 +59,7 @@ static void walk_scalar_check(codegen_context *e, uint32_t n,
         walk_unsupported_fail(e, n, "__int128");
 }
 
-static bool walk_type_is_wide(cc *c, ast_qualified_type t)
+VPRIV bool walk_type_is_wide(cc *c, ast_qualified_type t)
 {
     return KIND(c, t) == AST_TYPE_INT128 || KIND(c, t) == AST_TYPE_UINT128;
 }

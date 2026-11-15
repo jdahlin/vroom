@@ -319,7 +319,7 @@ static inline bool x64w_helpers(const codegen_context *e)
     return CODEGEN_IS_WIN64(e->compile_context);
 }
 
-/* eh.c: C++ exceptions' landing pads and table */
+/* eh.cpp: C++ exceptions' landing pads and table */
 VPRIV bool x64_eh_wanted(codegen_context *e);
 VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 

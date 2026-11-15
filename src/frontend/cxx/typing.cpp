@@ -2220,7 +2220,7 @@ static bool cxx_class_converts(cxx *c, cxx_scope *cls, int depth);
 /* does class t declare a user-provided (not defaulted, not deleted) member named id taking one t (by value or
    by reference: a copy or move constructor, assignment), which makes the operation not trivial
    ([class.copy.ctor]/11, [class.copy.assign]/9) */
-static bool cxx_class_user_special(cxx *c, ast_qualified_type t, uint32_t id)
+VPRIV bool cxx_class_user_special(cxx *c, ast_qualified_type t, uint32_t id)
 {
     cxx_scope *cls = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 

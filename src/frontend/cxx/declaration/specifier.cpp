@@ -730,7 +730,7 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, ast_qualified_type *t)
 
         cxx_nested_name_parse(c, &q, &dep);
         if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {
-            /* a pointer to member (memptr.c); of a class not known (dependent): an opaque type of its own, so
+            /* a pointer to member (memptr.cpp); of a class not known (dependent): an opaque type of its own, so
 			   that a template's parameter of that form is a deduction that fails for other arguments */
             int mq = 0;
             void *po;

@@ -1,4 +1,4 @@
-/* C++ code generation: pointers to members (frontend/cxx/memptr.c has their types and layout) */
+/* C++ code generation: pointers to members (frontend/cxx/memptr.cpp has their types and layout) */
 #include "codegen.h"
 
 /* a value of pointer to member type t from its parts' nodes (a long each; v1 only for a member function's):

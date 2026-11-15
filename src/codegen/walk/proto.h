@@ -69,7 +69,7 @@ VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
 VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s);
 VPRIV void x64_eh_pads(
     codegen_context *
-        e); /* arch/x64/codegen/eh.c: the landing pads of the function's exception table */
+        e); /* arch/x64/codegen/eh.cpp: the landing pads of the function's exception table */
 VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_division_signed_power_of_two_emit(
@@ -91,6 +91,7 @@ VPRIV void walk_initializer_emit(codegen_context *e, const codegen_lvalue *dst,
 VPRIV void walk_bitfield_initialize(codegen_context *e, const codegen_lvalue *l,
                                     ast_qualified_type t, uint32_t init);
 /* a bit-field initialized */ /* an object initialized by init (0: none) */
+VPRIV bool walk_type_is_wide(cc *c, ast_qualified_type t);
 VPRIV int walk_type_size(cc *c, ast_qualified_type t);
 VPRIV bool walk_type_is_in_memory(
     codegen_context *e,

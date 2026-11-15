@@ -400,7 +400,7 @@ typedef struct cxx_late {
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
 #define CXX_MAX_ARGS 1024
 
-/* a pointer to member type T C::* (memptr.c): its struct's tag, the class, the member's type, a member
+/* a pointer to member type T C::* (memptr.cpp): its struct's tag, the class, the member's type, a member
    function's cv (1 const, 2 volatile) */
 typedef struct cxx_memptr {
     uint32_t tag;
@@ -587,7 +587,7 @@ typedef struct cxx {
     ast_qualified_type
         memptr_ty; /* T C::* of a class not known (dependent): one opaque (incomplete) type */
     struct cxx_memptr
-        *memptrs; /* the pointer to member types made (memptr.c) */
+        *memptrs; /* the pointer to member types made (memptr.cpp) */
     uint32_t bmf_callee, bmf_this,
         bmf_pre; /* x.*pmf: the function it names (a node) and the this to pass it */
     uint32_t nmemptr, cmemptr;
@@ -1358,6 +1358,7 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init,
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs,
                                   const cxx_param *ps, uint32_t nps);
 VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
+VPRIV bool cxx_class_user_special(cxx *c, ast_qualified_type t, uint32_t id);
 VPRIV int cxx_class_special(cxx *c, ast_qualified_type t, int what, bool rvalue,
                             int depth);
 VPRIV int cxx_ftemplate_bare_params(cxx *c, cxx_entity *e, uint32_t nargs);
