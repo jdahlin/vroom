@@ -218,7 +218,7 @@ static bool exposure_build(vir_fn *f, uint8_t *mark, vex_graph *g)
 	    __builtin_add_overflow(total, (size_t)f->nslot, &total)) return false;
 	g->mem = malloc(total);
 	if (!g->mem) return false;
-	g->head = g->mem;
+	g->head = (uint32_t *)g->mem;
 	g->queue = g->head + f->nins;
 	g->edge = (vex_edge *)(g->queue + f->nins);
 	g->slot = (uint8_t *)(g->edge + nedges);

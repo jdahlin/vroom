@@ -20,7 +20,7 @@
 #define PV_PUSH(a, x) do { \
 	if ((a).n == (a).cap) { \
 		(a).cap = (a).cap ? (a).cap * 2 : 64; \
-		(a).v = realloc((a).v, (size_t)(a).cap * sizeof(*(a).v)); \
+		(a).v = (__typeof__((a).v))realloc((a).v, (size_t)(a).cap * sizeof(*(a).v)); \
 		if (!(a).v) abort(); \
 	} \
 	(a).v[(a).n++] = (x); \
@@ -57,7 +57,7 @@ static uint32_t nm_get(nm *m, const char *s, uint32_t n, bool *isnew)
 		uint32_t nc = m->cap ? m->cap * 2 : 64;
 
 		free(m->tab);
-		m->tab = calloc(nc, 4);
+		m->tab = (uint32_t *)calloc(nc, 4);
 		if (!m->tab)
 			abort();
 		m->cap = nc;
@@ -200,7 +200,7 @@ static void sput(ps *p, int c)
 {
 	if (p->snb == p->scap) {
 		p->scap = p->scap ? p->scap * 2 : 256;
-		p->sbuf = realloc(p->sbuf, p->scap);
+		p->sbuf = (char *)realloc(p->sbuf, p->scap);
 		if (!p->sbuf)
 			abort();
 	}
@@ -616,7 +616,7 @@ static void parse_sigdecl(ps *p)
 	res0 = parse_group(p, &res1);
 	expect_nl(p);
 	{
-		uint32_t *all = malloc((size_t)(3 + w.n) * 4);
+		uint32_t *all = (uint32_t *)malloc((size_t)(3 + w.n) * 4);
 
 		if (!all)
 			abort();
@@ -684,7 +684,7 @@ static void parse_asmdecl(ps *p)
 			}
 		expect_p(p, ')');
 		*cnt[k] = l.n;
-		*lst[k] = vir_unit_alloc(p->u, (size_t)l.n * sizeof(char *));
+		*lst[k] = (const char **)vir_unit_alloc(p->u, (size_t)l.n * sizeof(char *));
 		if (l.n)
 			memcpy((void *)*lst[k], l.v, (size_t)l.n * sizeof(char *));
 		PV_FREE(l);
@@ -696,7 +696,7 @@ static void parse_asmdecl(ps *p)
 	expect_nl(p);
 	if (p->u->nas == p->u->cas) {
 		p->u->cas = p->u->cas ? p->u->cas * 2 : 8;
-		p->u->as = realloc(p->u->as, (size_t)p->u->cas * sizeof(vir_uasm));
+		p->u->as = (vir_uasm *)realloc(p->u->as, (size_t)p->u->cas * sizeof(vir_uasm));
 		if (!p->u->as)
 			abort();
 	}
@@ -814,7 +814,7 @@ static void parse_datadecl(ps *p)
 			}
 			if (u->nitem == u->citem) {
 				u->citem = u->citem ? u->citem * 2 : 64;
-				u->item = realloc(u->item, (size_t)u->citem * sizeof(vir_item));
+				u->item = (vir_item *)realloc(u->item, (size_t)u->citem * sizeof(vir_item));
 				if (!u->item)
 					abort();
 			}
@@ -1083,7 +1083,7 @@ static void parse_flags(ps *p, vir_ins *in)
 /* the suffix of an op token: "slt" of `icmp.slt` (NULL when there is none) */
 static void split_op(const tok *t, const char **nm_, size_t *nl, const char **sfx, size_t *sl)
 {
-	const char *d = memchr(t->s, '.', t->len);
+	const char *d = (const char *)memchr(t->s, '.', t->len);
 
 	*nm_ = t->s;
 	if (d) {
@@ -1286,7 +1286,7 @@ static void parse_instr(ps *p, uint32_t rty)
 		parse_oplist(p, 1, WM_LIST, 0, &n);
 		expect_p(p, ')');
 		{
-			uint32_t *w = calloc((size_t)n + 1, 4);
+			uint32_t *w = (uint32_t *)calloc((size_t)n + 1, 4);
 
 			if (!w)
 				abort();
@@ -1333,7 +1333,7 @@ static void parse_instr(ps *p, uint32_t rty)
 			}
 		expect_p(p, ')');
 		{
-			uint32_t *all = malloc(((size_t)w.n + 2) * 4);
+			uint32_t *all = (uint32_t *)malloc(((size_t)w.n + 2) * 4);
 
 			if (!all)
 				abort();
@@ -1372,7 +1372,7 @@ static void parse_instr(ps *p, uint32_t rty)
 				}
 			expect_p(p, ']');
 			{
-				uint32_t *all = calloc((size_t)nl2 + 2, 4);
+				uint32_t *all = (uint32_t *)calloc((size_t)nl2 + 2, 4);
 
 				if (!all)
 					abort();
@@ -1471,7 +1471,7 @@ static void parse_instr(ps *p, uint32_t rty)
 			}
 		expect_p(p, ']');
 		{
-			uint32_t *all = calloc((size_t)n + 1, 4);
+			uint32_t *all = (uint32_t *)calloc((size_t)n + 1, 4);
 
 			if (!all)
 				abort();
@@ -1491,7 +1491,7 @@ static void parse_instr(ps *p, uint32_t rty)
 
 		parse_oplist(p, 2, WM_LIST, 0, &n);
 		{
-			uint32_t *all = calloc((size_t)n + 1, 4);
+			uint32_t *all = (uint32_t *)calloc((size_t)n + 1, 4);
 
 			if (!all)
 				abort();
@@ -1712,7 +1712,7 @@ static void finish_function(ps *p, const tok *close)
 		if (!p->blks.e.v[i].st)
 			perr_at(p, p->blks.e.v[i].line, p->blks.e.v[i].col, "undefined block %.*s", (int)p->blks.e.v[i].n,
 				p->blks.e.v[i].s);
-	cid = calloc((size_t)p->cdefs.n + 1, 4);
+	cid = (uint32_t *)calloc((size_t)p->cdefs.n + 1, 4);
 	if (!cid)
 		abort();
 	/* constants written as instructions: in text order, not unified */
@@ -1809,7 +1809,7 @@ static void finish_function(ps *p, const tok *close)
 
 			if (ty != VT_I32 && ty != VT_I64)
 				perr_at(p, ps_->line, ps_->col, "a switch operand is i32 or i64");
-			w = malloc(((size_t)n * st + 1) * 4);
+			w = (uint32_t *)malloc(((size_t)n * st + 1) * 4);
 			if (!w)
 				abort();
 			w[0] = n;

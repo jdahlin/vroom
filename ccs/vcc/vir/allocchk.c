@@ -364,13 +364,13 @@ uint32_t vir_alloc_check(vir_fn *f, const vir_regs *rg, const vir_alloc_out *o, 
 
 	if (!nb)
 		return 0;
-	c.nm = calloc(f->nins, 4);
-	ent = calloc(nb, sizeof(*ent));
-	seen = calloc(nb, 1);
-	inwl = calloc(nb, 1);
-	wl = calloc(nb, 4);
-	st = calloc(c.nloc, 4);
-	tmp = calloc(c.nloc, 4);
+	c.nm = (uint32_t *)calloc(f->nins, 4);
+	ent = (uint32_t **)calloc(nb, sizeof(*ent));
+	seen = (bool *)calloc(nb, 1);
+	inwl = (bool *)calloc(nb, 1);
+	wl = (uint32_t *)calloc(nb, 4);
+	st = (uint32_t *)calloc(c.nloc, 4);
+	tmp = (uint32_t *)calloc(c.nloc, 4);
 	if (!c.nm || !ent || !seen || !inwl || !wl || !st || !tmp)
 		abort();
 	for (uint32_t i = 0; i < f->nins; i++)
@@ -379,7 +379,7 @@ uint32_t vir_alloc_check(vir_fn *f, const vir_regs *rg, const vir_alloc_out *o, 
 		for (uint32_t i = f->blk[b].first; i < f->blk[b].first + f->blk[b].n; i++)
 			if (f->ins[i].ty != VT_VOID)
 				c.nm[i] = n++;
-		ent[b] = calloc(c.nloc, 4);
+		ent[b] = (uint32_t *)calloc(c.nloc, 4);
 		if (!ent[b])
 			abort();
 	}

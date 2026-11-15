@@ -23,15 +23,15 @@ static void lx_init(void)
 {
 	if (lx.l)
 		return;
-	lx.l = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_loop), MAP_NORESERVE, "vir: loops");
-	lx.inner = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-	lx.stk = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-	lx.rng = vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops");
+	lx.l = (vir_loop *)vreserve((size_t)VIR_MAX_BLK * sizeof(vir_loop), MAP_NORESERVE, "vir: loops");
+	lx.inner = (uint32_t *)vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
+	lx.stk = (uint32_t *)vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
+	lx.rng = (uint32_t (*)[2])vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops");
 }
 
 static int by_head(const void *a, const void *b)
 {
-	const vir_loop *x = a, *y = b;
+	const vir_loop *x = (const vir_loop *)a, *y = (const vir_loop *)b;
 
 	return x->head < y->head ? -1 : x->head > y->head;
 }

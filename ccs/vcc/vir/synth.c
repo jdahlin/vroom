@@ -86,7 +86,7 @@ static uint8_t retreg(const vir_fn *f, uint32_t sig, uint32_t p)
 
 static void fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
-	const vir_synth *t = ctx;
+	const vir_synth *t = (const vir_synth *)ctx;
 	const vir_ins *in = &f->ins[v];
 	uint8_t reg[VIR_FIX_N];
 

@@ -237,6 +237,17 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### V1/V4 (2026-11-15): explicita pekarkonverteringar
+
+De 14 C-filerna i `vcc/vir/` klarar syntaxkontroll som GNU++20 med Clang 23
+på x86-64 Linux. Explicita konverteringar i allokeringar, vektormakron och
+återanrop tog bort 161 felpositioner för `void *`. C-bygget gav byte-identiska
+`vpp`, `vccd`, `viralloc` och `virtest` jämfört med 810c3124.
+SQLite 3.50.4 vid -O2 tog 614,01 respektive 618,06 ms CPU att kompilera
+(median av fem körningar på samma kärna). speedtest1 var byte-identisk och
+tog 86,91 respektive 87,04 ms CPU med `--size 10 --memdb --testset main`.
+VIR-sviten klarade 130/130 fall och allokeraren 21/21.
+
 ### Referenskompilatorernas optimeringsgränser (2026-11-13)
 
 Inventering och familjegranskning klar: 305 GCC-parametrar vid O0/O1/O2/O3/Os

@@ -15,22 +15,22 @@ vir_ctx *vir_ctx_get(void)
 
 	if (c)
 		return c;
-	c = calloc(1, sizeof(*c));
+	c = (vir_ctx *)calloc(1, sizeof(*c));
 	if (!c)
 		abort();
 	for (int i = 0; i < 2; i++) {
-		c->ins[i] = vreserve((size_t)VIR_MAX_INS * sizeof(vir_ins), MAP_NORESERVE, "vir: ins");
-		c->blk[i] = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_blk), MAP_NORESERVE, "vir: blk");
-		c->loc[i] = vreserve((size_t)VIR_MAX_LOC * sizeof(vir_loc), MAP_NORESERVE, "vir: loc");
+		c->ins[i] = (vir_ins *)vreserve((size_t)VIR_MAX_INS * sizeof(vir_ins), MAP_NORESERVE, "vir: ins");
+		c->blk[i] = (vir_blk *)vreserve((size_t)VIR_MAX_BLK * sizeof(vir_blk), MAP_NORESERVE, "vir: blk");
+		c->loc[i] = (vir_loc *)vreserve((size_t)VIR_MAX_LOC * sizeof(vir_loc), MAP_NORESERVE, "vir: loc");
 	}
-	c->slot = vreserve((size_t)VIR_MAX_SLOT * sizeof(vir_slot), MAP_NORESERVE, "vir: slot");
-	c->extra = vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: extra");
-	c->tmp = vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: tmp");
-	c->aux = vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: aux");
-	c->ctab = vreserve(((size_t)1 << VIR_CTAB_BITS) * sizeof(*c->ctab), MAP_NORESERVE, "vir: constants");
+	c->slot = (vir_slot *)vreserve((size_t)VIR_MAX_SLOT * sizeof(vir_slot), MAP_NORESERVE, "vir: slot");
+	c->extra = (uint32_t *)vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: extra");
+	c->tmp = (uint32_t *)vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: tmp");
+	c->aux = (uint32_t *)vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: aux");
+	c->ctab = (__typeof__(c->ctab))vreserve(((size_t)1 << VIR_CTAB_BITS) * sizeof(*c->ctab), MAP_NORESERVE, "vir: constants");
 	for (int i = 0; i < 6; i++)
-		c->bs[i] = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: block scratch");
-	c->sc = vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: successors");
+		c->bs[i] = (uint32_t *)vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: block scratch");
+	c->sc = (uint32_t *)vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: successors");
 	tl_ctx = c;
 	return c;
 }
@@ -750,7 +750,7 @@ VPRIV void *vir_unit_alloc(vir_unit *u, size_t n)
 		abort();
 	if (u->nheap == u->cheap) {
 		u->cheap = u->cheap ? u->cheap * 2 : 64;
-		u->heap = realloc(u->heap, u->cheap * sizeof(void *));
+		u->heap = (void **)realloc(u->heap, u->cheap * sizeof(void *));
 		if (!u->heap)
 			abort();
 	}
@@ -760,7 +760,7 @@ VPRIV void *vir_unit_alloc(vir_unit *u, size_t n)
 
 VPRIV const char *vir_unit_str(vir_unit *u, const char *s, size_t n)
 {
-	char *p = vir_unit_alloc(u, n + 1);
+	char *p = (char *)vir_unit_alloc(u, n + 1);
 
 	memcpy(p, s, n);
 	p[n] = 0;
@@ -770,7 +770,7 @@ VPRIV const char *vir_unit_str(vir_unit *u, const char *s, size_t n)
 #define UGROW(arr, n, cap) do { \
 	if ((n) == (cap)) { \
 		(cap) = (cap) ? (cap) * 2 : 16; \
-		(arr) = realloc((arr), (size_t)(cap) * sizeof(*(arr))); \
+		(arr) = (__typeof__(arr))realloc((arr), (size_t)(cap) * sizeof(*(arr))); \
 		if (!(arr)) abort(); \
 	} \
 } while (0)
@@ -816,7 +816,7 @@ uint32_t vir_unit_sigw(vir_unit *u, const uint32_t *w, uint32_t n)
 			return i;
 	while (u->nsigw + n > u->csigw) {
 		u->csigw = u->csigw ? u->csigw * 2 : 64;
-		u->sigw = realloc(u->sigw, (size_t)u->csigw * 4);
+		u->sigw = (uint32_t *)realloc(u->sigw, (size_t)u->csigw * 4);
 		if (!u->sigw)
 			abort();
 	}
@@ -842,18 +842,18 @@ static void *dup_arr(const void *p, size_t n)
 static void fn_copy(vir_fn *d, const vir_fn *f)
 {
 	*d = *f;
-	d->ins = dup_arr(f->ins, (size_t)f->nins * sizeof(vir_ins));
-	d->blk = dup_arr(f->blk, (size_t)f->nblk * sizeof(vir_blk));
-	d->slot = dup_arr(f->slot, (size_t)f->nslot * sizeof(vir_slot));
-	d->extra = dup_arr(f->extra, (size_t)f->nextra * 4);
-	d->loc = dup_arr(f->loc, (size_t)f->nloc * sizeof(vir_loc));
+	d->ins = (vir_ins *)dup_arr(f->ins, (size_t)f->nins * sizeof(vir_ins));
+	d->blk = (vir_blk *)dup_arr(f->blk, (size_t)f->nblk * sizeof(vir_blk));
+	d->slot = (vir_slot *)dup_arr(f->slot, (size_t)f->nslot * sizeof(vir_slot));
+	d->extra = (uint32_t *)dup_arr(f->extra, (size_t)f->nextra * 4);
+	d->loc = (vir_loc *)dup_arr(f->loc, (size_t)f->nloc * sizeof(vir_loc));
 	d->tmp = NULL;
 }
 
 void vir_fn_save(vir_unit *u, const vir_fn *f, uint32_t sym)
 {
 	UGROW(u->fn, u->nfn, u->cfn);
-	u->fsym = realloc(u->fsym, (size_t)u->cfn * sizeof(uint32_t));
+	u->fsym = (uint32_t *)realloc(u->fsym, (size_t)u->cfn * sizeof(uint32_t));
 	if (!u->fsym)
 		abort();
 	fn_copy(&u->fn[u->nfn], f);

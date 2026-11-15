@@ -86,7 +86,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 	uint32_t blk = VIR_NOBLK, ins = 0, pos = 0, e = 0, nv = 0;
 	char s1[48], s2[48], s3[48];
 
-	d.nm = malloc((size_t)f->nins * 4 + 4);
+	d.nm = (uint32_t *)malloc((size_t)f->nins * 4 + 4);
 	if (!d.nm)
 		abort();
 	for (uint32_t k = 0; k < f->nblk; k++)
@@ -168,7 +168,7 @@ void vir_alloc_print(vbuf *b, const vir_unit *u, vir_fn *f, const vir_loops *lp,
 				}
 				if (ed.n) {
 					size_t ln = mark - back;
-					char *line = malloc(ln + 1);
+					char *line = (char *)malloc(ln + 1);
 
 					memcpy(line, b->p + back, ln);
 					b->n = back;

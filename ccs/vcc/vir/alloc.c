@@ -69,7 +69,7 @@ static _Thread_local struct actx {
 	uint8_t vfm[VO_TARGET0];	/* per opcode: bits 0-2 the value fields a, b, c; 8: a list (vir_oit) */
 } ax_tls;
 
-#define R(p, n, sz) p = vreserve((size_t)(n) * (sz), MAP_NORESERVE, "vir: alloc")
+#define R(p, n, sz) p = (__typeof__(p))vreserve((size_t)(n) * (sz), MAP_NORESERVE, "vir: alloc")
 static void ax_init(void)
 {
 	size_t nv = VIR_MAX_INS;
