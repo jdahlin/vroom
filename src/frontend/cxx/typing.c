@@ -153,6 +153,21 @@ VPRIV void cxx_binary_type(cxx *c, int op, ast_qualified_type l, ast_qualified_t
 		l = cc_type_basic(AST_TYPE_INT);
 	if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == AST_TYPE_ENUM)
 		r = cc_type_basic(AST_TYPE_INT);
+	/* _Complex T with an arithmetic or complex operand: the complex type of the elements' common type
+	   (+ - * /), bool (== != && ||) */
+	if (l != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN && (cxx_type_is_complex(c, l) || cxx_type_is_complex(c, r)) &&
+	    (cxx_is_arith(c, l) || cxx_type_is_complex(c, l)) && (cxx_is_arith(c, r) || cxx_type_is_complex(c, r))) {
+		ast_qualified_type le = cxx_type_is_complex(c, l) ? c->ast->tags[AST_TYPE(c->ast, l)->aux].f[0].ty : l;
+		ast_qualified_type re = cxx_type_is_complex(c, r) ? c->ast->tags[AST_TYPE(c->ast, r)->aux].f[0].ty : r;
+
+		if (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_STAR || op == LEX_TOKEN_SLASH)
+			cxx_et(c, cc_type_complex(c->ast, cc_type_arithmetic_conversion(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(le), AST_QUALIFIED_TYPE_UNQUALIFIED(re))), false);
+		else if (op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL || op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE)
+			cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
+		else
+			cxx_et(c, CXX_TY_UNKNOWN, false);
+		return;
+	}
 	switch (op) {
 	case LEX_TOKEN_EQUAL_EQUAL: case LEX_TOKEN_EXCLAMATION_EQUAL: case LEX_TOKEN_LESS: case LEX_TOKEN_LESS_EQUAL:
 	case LEX_TOKEN_GREATER: case LEX_TOKEN_GREATER_EQUAL: case LEX_TOKEN_AMPERSAND_AMPERSAND: case LEX_TOKEN_PIPE_PIPE:

@@ -1674,6 +1674,15 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 		return;
 	}
 	case AST_TYPE_STRUCT: case AST_TYPE_UNION:
+		if (x->kind == AST_TYPE_STRUCT && (a->tags[x->aux].flags & AST_RECORD_FLAG_COMPLEX) && a->tags[x->aux].nfield) {
+			/* _Complex T: C <T>, a substitution candidate */
+			if (mg_substitution(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
+				return;
+			mg_str(m, "C");
+			mg_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(a->tags[x->aux].f[0].ty));
+			mg_remember(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+			return;
+		}
 		mg_class_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 		return;
 	case AST_TYPE_ENUM: {

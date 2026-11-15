@@ -181,6 +181,32 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 		cxx_advance(c);
 		{
 			int64_t v;
+			/* GNU's imaginary suffix (2i, 1.5if): the number without it, then 0 + v i, C's complex node */
+			char ib[128];
+			cxx_token it = *t;
+			bool imag = false;
+
+			for (uint32_t k = t->len; k > 0 && t->len < sizeof ib && strchr("fFlLuUiIjJ", t->s[k - 1]); k--)
+				if (strchr("iIjJ", t->s[k - 1]) && !(t->len > 1 && (t->s[1] | 32) == 'x' && strchr("fF", t->s[k - 1]))) {
+					memcpy(ib, t->s, k - 1), memcpy(ib + k - 1, t->s + k, t->len - k);
+					memset(ib + t->len - 1, 0, 16);
+					it.s = ib, it.len = t->len - 1, imag = true;
+					break;
+				}
+			if (imag) {
+				ast_qualified_type et = cxx_number_type(c, &it), ct = cc_type_complex(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(et));
+
+				if (cxx_number_value(&it, &v))
+					cxx_ec(c, et, v);
+				else if (!c->tentative)
+					cxx_et(c, et, false), cxx_gen_floating(c, it.s, it.len, et, t->loc);
+				uint32_t vn = c->enode;
+
+				cxx_et(c, ct, false);
+				if (vn && cxx_gen_on(c))
+					c->enode = cc_complex_node_new(c->ast, ct, cc_lowering_zero(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(et), t->loc), vn, t->loc);
+				return;
+			}
 			ast_qualified_type nt = cxx_number_type(c, t);
 
 			if (cxx_number_value(t, &v))
@@ -519,8 +545,31 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 
 		cxx_advance(c);
 		cxx_cast_expression_parse(c);
-		if (!ext)
-			cxx_et(c, CXX_TY_UNKNOWN, false);
+		if (ext)
+			return;
+		{
+			/* __real__ x, __imag__ x: a complex's part (an lvalue of an lvalue's), of a real number itself or 0 */
+			ast_qualified_type ot = c->etype;
+			bool im = t->kw == CXX_KW___imag__, lv = c->elval;
+			uint32_t n = c->enode;
+
+			if (ot == CXX_TY_UNKNOWN || (!cxx_type_is_complex(c, ot) && !cc_type_is_arithmetic(c->ast, ot))) {
+				cxx_et(c, CXX_TY_UNKNOWN, false);
+				return;
+			}
+			ast_qualified_type pt = cxx_type_is_complex(c, ot) ? AST_QUALIFIED_TYPE_UNQUALIFIED(c->ast->tags[AST_TYPE(c->ast, ot)->aux].f[0].ty) :
+					      AST_QUALIFIED_TYPE_UNQUALIFIED(ot);
+
+			cxx_et(c, pt, cxx_type_is_complex(c, ot) && lv);
+			if (!n || !cxx_gen_on(c))
+				return;
+			if (cxx_type_is_complex(c, ot))
+				c->enode = cc_complex_part(c->ast, n, im);
+			else {
+				n = cc_node_rvalue(c->ast, n);
+				c->enode = im ? cc_node_new_operands(c->ast, AST_NODE_COMMA, pt, t->loc, n, cc_lowering_zero(c->ast, pt, t->loc)) : n;
+			}
+		}
 		return;
 	}
 	case CXX_KW_typename: case CXX_KW_decltype: case CXX_KW___decltype:

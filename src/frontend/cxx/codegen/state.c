@@ -177,6 +177,8 @@ VPRIV bool cxx_gen_type_ok(cxx *c, ast_qualified_type t)
 			return true;	/* (a reference to a function: its address too) */
 		return cxx_gen_object_type_ok(c, b);
 	}
+	if (cxx_type_is_complex(c, t))
+		return true;	/* (_Complex T: C's struct of two, the code generator's) */
 	if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION)
 		return cxx_class_layout_info(c, t, &pod, &empty) && pod &&	/* (an instance is completed here if it was not yet) */
 		       (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & AST_RECORD_FLAG_COMPLETE);
@@ -238,6 +240,8 @@ VPRIV bool cxx_gen_object_type_ok(cxx *c, ast_qualified_type t)
 {
 	while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && AST_TYPE(c->ast, t)->n)
 		t = AST_TYPE(c->ast, t)->base;
+	if (cxx_type_is_complex(c, t))
+		return true;
 	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
 		return cxx_gen_class_ok2(c, t, true);
 	return t != CXX_TY_UNKNOWN && !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext) && cxx_gen_type_ok(c, t);

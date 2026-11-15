@@ -16,7 +16,23 @@
 #include <stdio.h>
 #include "cxx-internal.h"
 
+static ast_qualified_type cxx_spec_type1(cxx *c, const cxx_spec *s);
+
+/* the decl-specifiers' type; _Complex T: C's complex type of T (_Complex alone: of double, as GCC's) */
 VPRIV ast_qualified_type cxx_spec_type(cxx *c, const cxx_spec *s)
+{
+	ast_qualified_type t = cxx_spec_type1(c, s);
+
+	if (!s->v_complex || s->v_unknown)
+		return t;
+	if (t == CXX_TY_UNKNOWN)
+		t = cc_type_qualify(c->ast, cc_type_basic(AST_TYPE_DOUBLE), s->quals);
+	if (!cc_type_is_arithmetic(c->ast, t))
+		return CXX_TY_UNKNOWN;
+	return cc_type_qualify(c->ast, cc_type_complex(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), AST_QUALIFIED_TYPE_QUALIFIERS(t));
+}
+
+static ast_qualified_type cxx_spec_type1(cxx *c, const cxx_spec *s)
 {
 	int k;
 

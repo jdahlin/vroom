@@ -225,7 +225,8 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
 	case CXX_KW_volatile: case CXX_KW___volatile: case CXX_KW___volatile__: sp->quals |= AST_QUALIFIER_VOLATILE; break;
 	case CXX_KW___restrict: case CXX_KW___restrict__: sp->quals |= AST_QUALIFIER_RESTRICT; break;
 	case CXX_KW_auto: case CXX_KW___auto_type: sp->v_auto = 1, sp->v_unknown = 1; break;	/* (deduced by the declaration) */
-	default: sp->v_unknown = 1;	/* _Complex: not built yet */
+	case CXX_KW__Complex: case CXX_KW___complex__: sp->v_complex = 1; break;	/* (of the type the others give: C's) */
+	default: sp->v_unknown = 1;
 	}
 }
 

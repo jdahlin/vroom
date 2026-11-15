@@ -24,6 +24,14 @@
 #include "../c/cc-internal.h"	/* the shared AST (frontend/ast.h) and the code that builds it */
 #include "frontend/cxx/cxx.h"
 
+/* _Complex T is C's struct of two; to C++ it is an arithmetic type, no class: the front end's records leave it
+   out (C's own code, compiled before this in the unity TU, keeps cc_type_is_record as it is) */
+static inline bool cxx_record_not_complex(cc *a, ast_qualified_type t)
+{
+	return cc_type_is_record(a, t) && !(AST_TYPE_KIND(a, t) == AST_TYPE_STRUCT && (a->tags[AST_TYPE(a, t)->aux].flags & AST_RECORD_FLAG_COMPLEX));
+}
+#define cc_type_is_record(a, t) cxx_record_not_complex((a), (t))
+
 #ifndef VPRIV
 #ifdef VCC_UNITY
 #define VPRIV static
@@ -603,7 +611,7 @@ enum { CXX_SKIP_TEMPLATE, CXX_SKIP_BASES, CXX_SKIP_VIRTUAL, CXX_SKIP_UNKNOWN_MEM
        CXX_SKIP_ATTRIBUTE, CXX_SKIP_EMPTY_BASE, CXX_SKIP_COUNT };
 typedef struct cxx_spec {
 	uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int, v_float, v_double;
-	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals, v_auto;
+	uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128, v_float16, v_bf16, v_unknown, quals, v_auto, v_complex;
 	ast_qualified_type named;			/* a type name's type (0 with v_named unset) */
 	uint8_t v_named;
 } cxx_spec;
@@ -629,6 +637,12 @@ VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
+/* _Complex T: C's struct of two (cc_type_is_complex), an arithmetic type here, not a class */
+static inline bool cxx_type_is_complex(const cxx *c, ast_qualified_type t)
+{
+	return t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_STRUCT && (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags & AST_RECORD_FLAG_COMPLEX);
+}
+
 /* an object of type t is const: t is, or for an array its elements are (const int a[] at namespace scope:
    internal, as const int x) */
 static inline bool cxx_type_const_object(const cxx *c, ast_qualified_type t)

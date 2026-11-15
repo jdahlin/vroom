@@ -260,7 +260,8 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t2) && AST_QUALIFIED_TYPE_UNQUALIFIED(t2) == AST_QUALIFIED_TYPE_UNQUALIFIED(t3) &&
 				 AST_TYPE_KIND(c->ast, t2) != AST_TYPE_ARRAY)
 				cxx_et(c, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t2), AST_QUALIFIED_TYPE_QUALIFIERS(t2) | AST_QUALIFIED_TYPE_QUALIFIERS(t3)), l2 && c->elval);	/* (one class, cv as the more qualified) */
-			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, t2) && cc_type_is_arithmetic(c->ast, t3))
+			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, t2) || cxx_type_is_complex(c, t2)) &&
+				 (cc_type_is_arithmetic(c->ast, t3) || cxx_type_is_complex(c, t3)))	/* (_Complex too: C's conversions) */
 				cxx_et(c, cc_type_arithmetic_conversion(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t2), AST_QUALIFIED_TYPE_UNQUALIFIED(t3)), false);
 			else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && c->nullptr_ty &&
 				 ((AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t2)->ext && AST_QUALIFIED_TYPE_UNQUALIFIED(t3) == c->nullptr_ty) ||
@@ -319,6 +320,7 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 			   builder finds no lvalue and the function gets no code) */
 			if (c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_POINTER ||
 							   AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_VOID ||	/* (c ? void(0) : f(): assert) */
+							   cxx_type_is_complex(c, c->etype) ||
 							   cc_type_is_record(c->ast, c->etype)))	/* (of one class: cxx_gen_conditional checks) */
 				cxx_gen_conditional(c, cn, n2, n3, qloc);
 			if (ck && (cv ? k2 : k3))
