@@ -173,7 +173,11 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, ast_qualified_type pt,
 	picked = c->ctor_picked, found = c->ctor_found, none = c->ctor_none;
 	c->call_picked = call_picked, c->call_resolved = call_resolved, c->none_viable = none_viable;
 	c->etype = etype, c->elval = elval, c->econst = econst, c->evalue = evalue, c->einvalid = einvalid;
+	c->gen_cond_ok = 1;	/* (in an operand that may not run, ?:'s: a flagged temporary, live set once built) */
 	tmp = cxx_gen_class_temp(c, t, loc);
+	uint32_t live = c->gen_cond_live;
+
+	c->gen_cond_live = 0;
 	if (!tmp)
 		return 0;
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
@@ -182,6 +186,9 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, ast_qualified_type pt,
 		cxx_gen_fail(c);
 		return 0;
 	}
+	if (live)	/* (built: its cleanup destroys it now) */
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, live, loc),
+								cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc), loc), 0, 0));
 	return cxx_gen_chain(c, &l, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc), loc);
 }
 

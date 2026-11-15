@@ -2652,3 +2652,11 @@ Sviter gröna (133/133, 38/38, mangle).  Strikt bänk: pass 24, 125 saknas.
   libc++:s `move_backward`).  Test: `run/preincrement-lvalue.cpp`.
 Sviter gröna (137/137, 38/38, mangle).  Strikt bänk: pass 25, alla TU:er
 kompileras, 127 funktioner saknas.
+
+## Status 169 (2026-11-15)
+Ett klassargument som skickas by value (en temporär med destruktor) i en
+operand som kanske inte körs (`?:`: jsons `strict ? parser(..., nullptr,
+...).sax_parse(...) : ...`) byggs som en flaggad temporär, som
+`cxx_gen_construct_temp` gör, och förstörs bara om grenen kördes.  Test:
+`run/conditional-class-argument.cpp`.  Sviter gröna (138/138, 38/38,
+mangle).  Strikt bänk: pass 26, 115 saknas.
