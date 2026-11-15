@@ -3653,3 +3653,35 @@ med CLOEXEC. `bench/vperf-test.py` mockar perf-syscalls och kontrollerar
 40 trådar, inklusive fel vid andra öppningen. Verifierat: bygge `-j 6`,
 vir-test 133/133, VIR-regressioner 56/56 med verifierare och allokeringscheck,
 samt vcc-vir-x86 (assembly och egna objekt vid -O2/-O3).
+
+### Delad arbetsyta för VIR-passen (2026-11-15)
+
+Varje byggartråd återanvänder nu en växande arbetsyta mellan funktioner för
+förenkling, slot promotion, döda blockparametrar, villkorssammanslagning och
+kantdelning. Vektoriseraren skapar sin värdetabell först när en loop behöver
+klassificera ett värde.
+
+SQLite 3.50.4, hela sqlite3.c till x86-64 Linux-assembly, en tråd, glibc,
+SQLITE_THREADSAFE=0 och SQLITE_OMIT_LOAD_EXTENSION. Bas är f8662d04.
+Anrop är summan av malloc, calloc och realloc, räknade vid länkning av vpp.
+Tid och högsta RSS är medianer från åtta körningar per kombination med varm
+indata, samma CPU och blandad körordning, utan räknare.
+
+| Opt | Ändring | Anrop | Tid (ms) | RSS (MiB) |
+|-----|---------|------:|---------:|----------:|
+| -O2 | Bas | 57 497 | 410 | 172,5 |
+| -O2 | Förenkling | 24 620 | 406 | 173,4 |
+| -O2 | Alla arbetsytor | 13 433 | 405 | 173,4 |
+| -O2 | Även lat värdetabell | 13 433 | 380 | 173,5 |
+| -O3 | Bas | 59 614 | 416 | 172,5 |
+| -O3 | Förenkling | 26 737 | 388 | 175,3 |
+| -O3 | Alla arbetsytor | 15 550 | 414 | 175,5 |
+| -O3 | Även lat värdetabell | 15 449 | 415 | 174,3 |
+
+Vid -O3 minskade värdetabellens calloc från 273 till 172 och begärda byte
+från 40 351 976 till 31 266 312. Vid -O2 är vektorisering avstängd.
+Tiderna varierade även mellan versioner som gör samma arbete vid -O2.
+Antalet anrop sjönk tydligt utan någon tydlig tidsvinst vid -O3.
+Assembly var byteidentisk med basen efter varje steg vid både -O2 och -O3
+på x86-64, samt efter sista steget vid -O3 på arm64 med VIR-kontroller.
+TSVC gav samma 151 kontrollsummor som clang vid -O1, -O2 och -O3.
