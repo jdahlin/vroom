@@ -384,6 +384,30 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, boo
 	return 3;
 }
 
+/* an integral or floating-point promotion of a to p ([conv.prom], [conv.fpprom]): what is narrower than
+   int to int (unsigned int for what int does not hold), an unscoped enumeration to int, float to double;
+   p may be a reference to const */
+static bool cxx_is_promotion(cxx *c, ast_qualified_type p, ast_qualified_type a)
+{
+	if (p == CXX_TY_UNKNOWN || a == CXX_TY_UNKNOWN)
+		return false;
+	if (AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && AST_TYPE(c->ast, p)->ext) {
+		p = AST_TYPE(c->ast, p)->base;
+		if (p == CXX_TY_UNKNOWN)
+			return false;
+	}
+	int pk = (int)AST_TYPE_KIND(c->ast, p), ak = (int)AST_TYPE_KIND(c->ast, a);
+
+	if (ak == AST_TYPE_FLOAT)
+		return pk == AST_TYPE_DOUBLE;
+	if (ak == AST_TYPE_ENUM)
+		return pk == AST_TYPE_INT;	/* (its underlying type's promotion: int for those vcc gives) */
+	if (ak == AST_TYPE_BOOL || ak == AST_TYPE_CHAR || ak == AST_TYPE_SIGNED_CHAR || ak == AST_TYPE_UNSIGNED_CHAR || ak == AST_TYPE_SHORT ||
+	    ak == AST_TYPE_UNSIGNED_SHORT)
+		return pk == AST_TYPE_INT;
+	return false;
+}
+
 /*
  * The rank used to compare candidates: 0 exact, 1 exact but bound to a reference that adds const (f(C&)
  * is better than f(const C&) for an object that is not const, f(T&&) than f(const T&) for an rvalue),
@@ -703,8 +727,12 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 				break;
 			}
 			for (uint32_t n = 0; n < nargs; n++) {
-				better |= cand[a].rank[n] < cand[b].rank[n];
-				worse |= cand[a].rank[n] > cand[b].rank[n];
+				/* (of standard conversions, a promotion ranks better: abs(short) is abs(int), not abs(long)) */
+				int ka = cand[a].rank[n] * 2 + (cand[a].rank[n] == 2 && !(args && n < 16 && cxx_is_promotion(c, cand[a].pt[n], args[n])));
+				int kb = cand[b].rank[n] * 2 + (cand[b].rank[n] == 2 && !(args && n < 16 && cxx_is_promotion(c, cand[b].pt[n], args[n])));
+
+				better |= ka < kb;
+				worse |= ka > kb;
 			}
 			if (!better && !worse) {
 				/* the same conversion of an argument to T: binding T&& is better than const T& when the
