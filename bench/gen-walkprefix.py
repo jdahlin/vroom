@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ccs/vcc/emit/walk/prefix.h: the walker's function names, for compiling emit/walk/*.c
+ccs/vcc/emit/walk/prefix.h: the walker's function names, for compiling emit/walk/*.cpp
 a second time under other names (PLAN-vir.md V2, SPEC-vir.md X1).
 
 The walker is one source for every CPU: its own functions are wk_*, the target
@@ -11,10 +11,10 @@ WK_PREFIX is defined, prefix.h renames every function the walker defines;
 when it is not, the header is empty and nothing changes.
 
 The list is taken from the walker's own function definitions (a function at
-file scope in walk/*.c, VPRIV or static, named wk_*), so it cannot go stale
+file scope in walk/*.cpp, VPRIV or static, named wk_*), so it cannot go stale
 silently: --check fails if the checked-in header differs, if a wk_* function
-declared in walk.h is not defined in walk/*.c (it would be renamed but not
-found), or if walk/*.c calls a name that LO() should have made (x64_*).
+declared in walk.h is not defined in walk/*.cpp (it would be renamed but not
+found), or if walk/*.cpp calls a name that LO() should have made (x64_*).
 
   bench/gen-walkprefix.py           regenerate ccs/vcc/emit/walk/prefix.h
   bench/gen-walkprefix.py --check   exit 1 if it is out of date or inconsistent
@@ -31,7 +31,7 @@ DEF = re.compile(r'^(?:VPRIV|static)\b(?:__attribute__\(\(.*?\)\)|[^();=])*?\b(w
 
 def defined():
     names = {}
-    for f in sorted(glob.glob(f'{D}/*.c')):
+    for f in sorted(glob.glob(f'{D}/*.cpp')):
         src = open(f).read()
         for m in DEF.finditer(src):
             # a definition has its body after the closing parenthesis; a
@@ -78,8 +78,8 @@ def main():
     hdr = open(f'{D}/walk.h').read() + open(f'{D}/proto.h').read()
     for n in sorted(set(re.findall(r'\b(wk_\w+)\s*\(', hdr))):
         if n not in names:
-            bad.append(f'{n}: declared in walk.h/proto.h, not defined in walk/*.c')
-    for f in sorted(glob.glob(f'{D}/*.c')):
+            bad.append(f'{n}: declared in walk.h/proto.h, not defined in walk/*.cpp')
+    for f in sorted(glob.glob(f'{D}/*.cpp')):
         for i, line in enumerate(open(f), 1):
             if re.search(r'\bx64_\w+', line) and 'LO(' not in line:
                 bad.append(f'{os.path.basename(f)}:{i}: a target name outside LO(): {line.strip()}')

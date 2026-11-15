@@ -9,9 +9,9 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/emit/rec/copies.c"
-#include "vcc/arch/x64/emit/copies.c"
+#include "vcc/arch/x64/emit/effects.cpp"
+#include "vcc/emit/rec/copies.cpp"
+#include "vcc/arch/x64/emit/copies.cpp"
 #define OP(op_,sz_,d_,a_,b_) ((rec){ .op=op_, .sz=sz_, .r={d_,a_,b_,XNOREG} })
 #define CP(d,s) OP(X_MOV,8,d,s,XNOREG)
 #define IMM(d) OP(X_MOVI,8,d,XNOREG,XNOREG)

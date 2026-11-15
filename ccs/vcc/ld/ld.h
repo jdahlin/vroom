@@ -17,7 +17,7 @@
 
 int ld_main(int argc, char **argv, int dirfd, FILE *err);
 
-/* arm64 Mach-O executables from MH_OBJECTs (platform/darwin/ldmacho.c);
+/* arm64 Mach-O executables from MH_OBJECTs (platform/darwin/ldmacho.cpp);
    ld_main dispatches here when the first input is Mach-O */
 int ld_macho(int argc, char **argv, int dirfd, FILE *err);
 

@@ -1,9 +1,10 @@
 # Format implementation sources and headers. Other files include generated
 # tables and inputs whose spelling or line numbers are part of a test.
 **
+!**/*.cpp
 !**/*.c
 !**/*.h
 tests/**
 emit/walk/prefix.h
 emit/walk/unprefix.h
-vccd/caps.c
+vccd/caps.cpp

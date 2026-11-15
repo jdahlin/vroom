@@ -251,7 +251,7 @@ struct cc {
     uint32_t nasm;
 
     char *heap, *hp, *hend; /* bump allocator for everything else */
-    struct dop *dops;       /* declarator op stack (cc/declarator.c) */
+    struct dop *dops;       /* declarator op stack (cc/declarator.cpp) */
     uint32_t ndops, capdops;
 
     /* scopes: identifier id -> innermost binding (sym index) */
@@ -344,7 +344,7 @@ struct cc {
     /* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
     uint64_t *drb;
     uint32_t ndrb, cdrb;
-    /* VCC_DR / VCC_DRREC: per-region declaration replay (cc/replay.c) */
+    /* VCC_DR / VCC_DRREC: per-region declaration replay (cc/replay.cpp) */
     struct drrec *dr;
     uint8_t dr_on; /* a region is being recorded: the hooks log */
 };

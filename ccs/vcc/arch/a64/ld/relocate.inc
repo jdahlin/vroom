@@ -1,4 +1,4 @@
-/* arm64 relocation application: values into instruction fields, range checks, .rela.dyn; part of ld/ld.c (#included there) */
+/* arm64 relocation application: values into instruction fields, range checks, .rela.dyn; part of ld/ld.cpp (#included there) */
 
 
 static void write_le_imm(uint8_t *loc, uint32_t mask, uint32_t v)

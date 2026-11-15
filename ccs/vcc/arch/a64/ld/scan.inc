@@ -1,4 +1,4 @@
-/* arm64 relocation scan: which relocations are supported, which need a dynamic relocation; part of ld/ld.c (#included there) */
+/* arm64 relocation scan: which relocations are supported, which need a dynamic relocation; part of ld/ld.cpp (#included there) */
 
 /* ---------------- relocation scan ---------------- */
 

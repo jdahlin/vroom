@@ -1,7 +1,7 @@
 /*
  * x86-64 relocations for vlink (static executables, as ld.lld -static): the
  * scan (GOT slots, what is supported), relaxations and the application.
- * Part of ld/ld.c (#included there, after arm64's).  lld's decisions:
+ * Part of ld/ld.cpp (#included there, after arm64's).  lld's decisions:
  *   - PLT32 and PC32 resolve directly (no PLT in a static link);
  *   - [REX_]GOTPCRELX with addend -4 against a defined, non-absolute
  *     symbol relaxes: mov -> lea, call/jmp * -> addr32 call / jmp + nop,

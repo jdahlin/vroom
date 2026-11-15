@@ -89,7 +89,7 @@ def vcc_messages():
     for d in DIRS:
         for root, _, files in os.walk(f'{V}/{d}'):
             for f in sorted(files):
-                if not f.endswith('.c'):
+                if not f.endswith('.cpp'):
                     continue
                 path = os.path.join(root, f)
                 src = open(path, errors='replace').read()

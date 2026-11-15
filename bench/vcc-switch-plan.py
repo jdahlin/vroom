@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/opt/switch.c"
+#include "vcc/emit/opt/switch.cpp"
 
 /* Independently walk the public sorted intervals for representative values.
  * Targets retain source identity even when the normalization changes order. */

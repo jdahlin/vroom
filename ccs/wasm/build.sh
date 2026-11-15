@@ -11,15 +11,15 @@ cd "$(dirname "$0")/.."
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iwasm/compat -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="vcc/driver/vpp.c vcc/lex/lex.c vcc/lib/intern.c vcc/arch/a64/as/enc.c vcc/platform/darwin/macho.c vcc/arch/wasm/as/as.c vcc/platform/wasm/wasm.c
- vcc/pp/dircache.c vcc/driver/ppdriver.c vcc/driver/ccsnap.c vcc/lib/ldhash.c"
+SRC="vcc/driver/vpp.cpp vcc/lex/lex.cpp vcc/lib/intern.cpp vcc/arch/a64/as/enc.cpp vcc/platform/darwin/macho.cpp vcc/arch/wasm/as/as.cpp vcc/platform/wasm/wasm.cpp
+ vcc/pp/dircache.cpp vcc/driver/ppdriver.cpp vcc/driver/ccsnap.cpp vcc/lib/ldhash.cpp"
 for m in as obj cc pp emit; do
 	case $m in
-	as) f="vcc/as/as.c vcc/arch/a64/as/parse.c";;
-	obj) f="vcc/obj/obj.c vcc/arch/a64/obj/fixup.c vcc/platform/linux/elf.c";;
-	cc) f=$(ls vcc/cc/*.c);;
-	pp) f=$(ls vcc/pp/*.c | grep -v dircache);;
-	emit) f=$(ls vcc/emit/*.c vcc/emit/opt/*.c vcc/emit/rec/*.c vcc/emit/flow/*.c vcc/arch/a64/emit/*.c vcc/arch/wasm/emit/*.c);;
+	as) f="vcc/as/as.cpp vcc/arch/a64/as/parse.cpp";;
+	obj) f="vcc/obj/obj.cpp vcc/arch/a64/obj/fixup.cpp vcc/platform/linux/elf.cpp";;
+	cc) f=$(ls vcc/cc/*.cpp);;
+	pp) f=$(ls vcc/pp/*.cpp | grep -v dircache);;
+	emit) f=$(ls vcc/emit/*.cpp vcc/emit/opt/*.cpp vcc/emit/rec/*.cpp vcc/emit/flow/*.cpp vcc/arch/a64/emit/*.cpp vcc/arch/wasm/emit/*.cpp);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"
@@ -27,16 +27,17 @@ done
 if [ -n "$VCC" ]; then
 	SR=$(em-config CACHE)/sysroot
 	RES=$(${LLVM:-/opt/homebrew/opt/llvm}/bin/clang -print-resource-dir)/include
-	COMPILE="$VCC --target=wasm64-unknown-emscripten -nostdinc -isystem $RES -isystem $SR/include/wasm64-emscripten
+	COMPILE="$VCC -x c --target=wasm64-unknown-emscripten -nostdinc -isystem $RES -isystem $SR/include/wasm64-emscripten
 	 -isystem $SR/include -std=c11 -O2 -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter -mllvm -wasm-enable-sjlj ${WFLAGS}"
 	LFLAGS=-sSUPPORT_LONGJMP=wasm	# setjmp through wasm exception handling, as vcc compiles it
 else
-	COMPILE="emcc $CFLAGS"
+	COMPILE="emcc -x c $CFLAGS"
 fi
 OBJS=
 pids=
 for s in $SRC wasm/mman.c; do
-	o=$OUT/obj/$(echo $s | sed 's,.*/,,; s,\.c$,.o,')
+	name=${s##*/}
+	o=$OUT/obj/${name%.*}.o
 	OBJS="$OBJS $o"
 	$COMPILE -c $s -o $o &
 	pids="$pids $!"

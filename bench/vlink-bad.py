@@ -90,7 +90,7 @@ def ar_cases(o):
     yield 'ar-longname-offset', ar([('//', b'xx/\n'), ('/9999', o)])
     yield 'ar-longname-truncated', ar([('//', b'xx/\n')])[:-2]
 
-# ---- wasm64: vlink -mwasm64 (ld/wasmld.c) ----
+# ---- wasm64: vlink -mwasm64 (ld/wasmld.cpp) ----
 def uleb(b, j):
     v = s = 0
     while True:

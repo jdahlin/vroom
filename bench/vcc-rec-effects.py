@@ -13,8 +13,8 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/arch/x64/emit/extensions.c"
+#include "vcc/arch/x64/emit/effects.cpp"
+#include "vcc/arch/x64/emit/extensions.cpp"
 
 static rec instruction(int op, int size)
 {

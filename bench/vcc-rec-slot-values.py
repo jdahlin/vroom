@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/rec/slot-values.c"
+#include "vcc/emit/rec/slot-values.cpp"
 
 static void block_boundaries(em_slot_values *s)
 {
