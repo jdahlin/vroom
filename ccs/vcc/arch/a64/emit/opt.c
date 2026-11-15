@@ -1651,8 +1651,8 @@ static bool fold1(ecx *e, uint32_t k)
             !fkept(e, (uint32_t)d, k, RB(f.src)))
             return false;
         *i = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz, .rd = i->rd,
-                         .rn = (uint8_t)f.src, .imm = f.sh,
-                         .sh = (uint8_t)(f.sh + n - 1));
+                         .rn = (uint8_t)f.src, .sh = (uint8_t)(f.sh + n - 1),
+                         .imm = f.sh);
         fdone(e, (uint32_t)d, k);
         return true;
     }
@@ -1852,12 +1852,12 @@ static void fmulk(ecx *e, uint32_t k)
                                 .rn = (uint8_t)a, .rm = (uint8_t)a,
                                 .sh = (uint8_t)n);
             *i = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz, .rd = i->rd,
-                             .rn = (uint8_t)r, .imm = (w - sh) % w,
-                             .sh = (uint8_t)(w - 1 - sh));
+                             .rn = (uint8_t)r, .sh = (uint8_t)(w - 1 - sh),
+                             .imm = (w - sh) % w);
         } else { /* lsl r, a, n; sub d, r, a */
             in[d] = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz,
                                 .rd = (uint8_t)r, .rn = (uint8_t)a,
-                                .imm = (w - n) % w, .sh = (uint8_t)(w - 1 - n));
+                                .sh = (uint8_t)(w - 1 - n), .imm = (w - n) % w);
             *i = VCC_LITERAL(ins, .op = I_SUB, .sz = i->sz, .rd = i->rd,
                              .rn = (uint8_t)r, .rm = (uint8_t)a);
         }
@@ -2031,8 +2031,8 @@ static void fbswap(ecx *e, uint32_t k)
                                 .rd = (uint8_t)rd, .rn = (uint8_t)rd);
     if (sgn)
         in[k] = VCC_LITERAL(ins, .op = I_SBFM, .sz = (uint8_t)sz,
-                            .rd = (uint8_t)rd, .rn = (uint8_t)rd, .imm = 0,
-                            .sh = (uint8_t)(8 * n - 1));
+                            .rd = (uint8_t)rd, .rn = (uint8_t)rd,
+                            .sh = (uint8_t)(8 * n - 1), .imm = 0);
     for (uint32_t q = 0; q < 2; q++) {
         uint32_t j = q ? k : at[0];
 
@@ -2200,8 +2200,8 @@ static void copies(ecx *e)
         .flags_stride = sizeof(*W.ro),
         .opaque_mask = OP_ALL,
         .read = W.rr,
-        .write = W.ww,
         .live = W.la,
+        .write = W.ww,
         .rewrite = a64_copy_rewrite,
         .ctx = e,
     };

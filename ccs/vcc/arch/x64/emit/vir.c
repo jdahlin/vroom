@@ -325,9 +325,9 @@ static void vx_mat(vx *L, uint8_t dst, uint32_t v)
             x64_op3(L->e, X_ADDI, 8, d, d, XNOREG)->imm = vx_bits(i);
     } else {
         lval a = {.k = (uint8_t)(i->op == VO_SLOTADDR ? L_FRAME : L_SYM),
+                  .ref = i->a,
                   .off =
-                      vx_bits(i) + (i->op == VO_SLOTADDR ? L->slot[i->a] : 0),
-                  .ref = i->a};
+                      vx_bits(i) + (i->op == VO_SLOTADDR ? L->slot[i->a] : 0)};
         x64_mem(L->e, X_LEA, 8, d, &a, false);
     }
 }

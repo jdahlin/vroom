@@ -92,8 +92,8 @@ static wmem *wm_event(ecx *e, uint8_t kind)
     }
     W->mem = (wmem *)wm_grow(W->mem, &W->capmem, W->nmem + 1, sizeof(*W->mem));
     wmem *m = &W->mem[W->nmem++];
-    *m = VCC_LITERAL(wmem, .kind = kind, .source = UINT32_MAX,
-                     .cache = UINT32_MAX);
+    *m = VCC_LITERAL(wmem, .source = UINT32_MAX, .cache = UINT32_MAX,
+                     .kind = kind);
     return m;
 }
 

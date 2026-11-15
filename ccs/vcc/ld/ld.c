@@ -841,7 +841,7 @@ static EV evabs(uint64_t x)
 }
 static EV evsec(EV a, bool fabs, uint64_t off)
 {
-    return VCC_LITERAL(EV, .kind = a.kind, .idx = a.idx, .fabs = fabs,
+    return VCC_LITERAL(EV, .kind = a.kind, .fabs = fabs, .idx = a.idx,
                        .val = off, .align = 1);
 }
 
@@ -849,7 +849,7 @@ static EV evsec(EV a, bool fabs, uint64_t off)
 static EV gsym_ev(uint32_t g)
 {
     G *s = &gsyms[g];
-    EV v = {.align = 1, .type = s->type};
+    EV v = {.type = s->type, .align = 1};
     if (s->state == GS_SCRIPT) {
         v.kind = s->ev.kind;
         v.idx = s->ev.idx;
@@ -2851,15 +2851,15 @@ static uint32_t new_isec(const char *name, uint8_t kind, uint32_t type,
                          uint64_t flags, uint32_t align)
 {
     ISec is = {.name = name,
-               .kind = kind,
-               .type = type,
                .flags = flags,
+               .type = type,
                .align = align,
                .obj = NONE,
+               .shndx = NONE,
                .osec = NONE,
                .isd = NONE,
                .aux = NONE,
-               .shndx = NONE};
+               .kind = kind};
     VVEC_PUSH(isecs, is, alloc);
     return isecs.n - 1;
 }
@@ -3633,10 +3633,10 @@ static void assign_sections(void)
                         break;
                 }
                 if (m == merges.n) {
-                    Merge mg = {.flags = is->flags,
+                    Merge mg = {.osec = oi,
+                                .flags = is->flags,
                                 .entsize = is->entsize,
-                                .align = is->align,
-                                .osec = oi};
+                                .align = is->align};
                     uint32_t syn =
                         new_isec(isecs.v[si].name, K_MERGE, isecs.v[si].type,
                                  isecs.v[si].flags, isecs.v[si].align);
@@ -4255,14 +4255,14 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
         VCC_LITERAL(Shdr, .sh_name = 1, .sh_type = SHT_PROGBITS,
                     .sh_flags = SHF_ALLOC | SHF_EXECINSTR, .sh_addralign = 4);
     sh[3] = VCC_LITERAL(Shdr, .sh_name = 7, .sh_type = SHT_PROGBITS,
-                        .sh_flags = SHF_ALLOC | SHF_WRITE, .sh_size = datasz,
+                        .sh_flags = SHF_ALLOC | SHF_WRITE,
                         .sh_offset = (uint64_t)(shstr + 32 - (char *)b),
-                        .sh_addralign = 16);
+                        .sh_size = datasz, .sh_addralign = 16);
     sh[4] =
         VCC_LITERAL(Shdr, .sh_name = 13, .sh_type = SHT_SYMTAB,
                     .sh_offset = (uint64_t)((uint8_t *)sy - b),
                     .sh_size = (n + 2) * sizeof(Sym), .sh_link = 1,
-                    .sh_info = 2, .sh_entsize = sizeof(Sym), .sh_addralign = 8);
+                    .sh_info = 2, .sh_addralign = 8, .sh_entsize = sizeof(Sym));
     /* the symbol strtab shares section 1 in the real object; here it's separate memory */
     str[0] = 0;
     memcpy(str + 1, "$d", 3);
@@ -4748,8 +4748,9 @@ static void load_inputs(void)
                 /* an input marker: the archive's members are read here */
                 VVEC_PUSH(
                     pending,
-                    (VCC_LITERAL(Pending, .path = NULL, .size = c0,
-                                 .buf = (const uint8_t *)(uintptr_t)lcand.n)),
+                    (VCC_LITERAL(Pending, .path = NULL,
+                                 .buf = (const uint8_t *)(uintptr_t)lcand.n,
+                                 .size = c0)),
                     alloc);
                 continue;
             }

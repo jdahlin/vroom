@@ -224,7 +224,7 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
                             a, F(.w = s == 8, .opsz16 = s == 2,
                                  .op = s == 1 ? OPB("\xc0") : OPB("\xc1"),
                                  .nop = 1, .reg = digit, .rm = d,
-                                 .rex8 = rex8(d), .isz = 1, .imm = c));
+                                 .rex8 = rex8(d), .imm = c, .isz = 1));
                     }
                 }
             if (!strcmp(m, "mov") && nops == 2) {
@@ -272,8 +272,8 @@ VPRIV int x64_i_int(As *a, char *mn, XOp *o, int nops)
             if (!strcmp(m, "movabs") && nops == 2) {
                 int64_t c = 0;
                 XOp *d = &o[1];
-                XForm f = F(.w = 1, .op = OPB("\xb8"), .nop = 1,
-                            .oreg = d->reg + 1, .isz = 8);
+                XForm f = F(.w = 1, .op = OPB("\xb8"), .nop = 1, .isz = 8,
+                            .oreg = d->reg + 1);
 
                 x64_imm(a, &o[0], &f, &c);
                 f.imm = c;

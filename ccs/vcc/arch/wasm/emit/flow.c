@@ -42,9 +42,9 @@ static wflow_event *wf_event(ecx *e, int kind)
         W->capflow = cap;
     }
     wflow_event *f = &W->flow[W->nflow++];
-    *f = VCC_LITERAL(wflow_event, .at = W->nmem, .kind = (uint8_t)kind,
-                     .token = UINT32_MAX, .end = UINT32_MAX,
-                     .alternate = UINT32_MAX);
+    *f = VCC_LITERAL(wflow_event, .at = W->nmem, .token = UINT32_MAX,
+                     .end = UINT32_MAX, .alternate = UINT32_MAX,
+                     .kind = (uint8_t)kind);
     return f;
 }
 

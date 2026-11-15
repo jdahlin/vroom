@@ -686,12 +686,12 @@ VPRIV int x64_alu(As *a, int n, int sz, XOp *o, int nops)
 
             XForm g = F(.w = w, .opsz16 = p16,
 
-                        .op = &op, .nop = 1,
+                        .op = &op, .nop = 1, .imm = k,
                         .isz = b         ? 1
                                : sz == 2 ? 2
                                          : 4,
-                        .imm = k, .immsym = f.immsym, .immv = f.immv,
-                        .immmod = f.immmod, .immsgn = 1);
+                        .immv = f.immv, .immsym = f.immsym, .immsgn = 1,
+                        .immmod = f.immmod);
             return x64_emit(a, &g);
         } else {
             f.op = b ? OPB("\x80") : OPB("\x81"), f.nop = 1,
@@ -751,9 +751,9 @@ VPRIV int x64_sse(As *a, int pfx, int op, int w, int reg, const XOp *rm)
 {
     uint8_t ops[2] = {0x0f, (uint8_t)op};
 
-    return x64_emit_form(a,
-                         F(.rep = pfx == 0x66 ? 0 : pfx, .opsz16 = pfx == 0x66,
-                           .w = w, .op = ops, .nop = 2, .reg = reg, .rm = rm));
+    return x64_emit_form(a, F(.w = w, .opsz16 = pfx == 0x66,
+                              .rep = pfx == 0x66 ? 0 : pfx, .op = ops, .nop = 2,
+                              .reg = reg, .rm = rm));
 }
 
 /* x87 with a memory operand: op /digit */

@@ -200,7 +200,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
         ;
     else if (FK.sleaf)
         PUT(.op = I_SUBI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz);
-    else if (PUT(.op = I_STP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP,
+    else if (PUT(.op = I_STP, .sz = 1, .rd = R_FP, .rn = SP, .ra = R_LR,
                  .cond = 1, .imm = -16),
              PUT(.op = I_MOV, .sz = 1, .rd = R_FP, .rn = SP),
              e->falign > 16) { /* sp = (sp - frame) & -falign */
@@ -212,7 +212,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
     }
     for (int k = 0; k + 1 < ncs; k += 2)
         PUT(.op = I_STP, .sz = 1, .rd = (uint8_t)cs[k],
-            .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)cs_base(),
+            .rn = (uint8_t)cs_base(), .ra = (uint8_t)cs[k + 1],
             .imm = cs_off(csave, k));
     if (ncs & 1)
         PUT(.op = I_ST, .sz = 3, .rd = (uint8_t)cs[ncs - 1],
@@ -223,7 +223,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
     n += e->nin - rest;
     for (int k = 0; k + 1 < ncs; k += 2)
         PUT(.op = I_LDP, .sz = 1, .rd = (uint8_t)cs[k],
-            .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)cs_base(),
+            .rn = (uint8_t)cs_base(), .ra = (uint8_t)cs[k + 1],
             .imm = cs_off(csave, k));
     if (ncs & 1)
         PUT(.op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1],
@@ -235,7 +235,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
     } else {
         if (!FK.nomov)
             PUT(.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP);
-        PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .ra = R_LR, .rn = SP, .cond = 2,
+        PUT(.op = I_LDP, .sz = 1, .rd = R_FP, .rn = SP, .ra = R_LR, .cond = 2,
             .imm = 16);
     }
     if (tail)
@@ -342,10 +342,10 @@ static void expand_tables(ecx *e, uint32_t fid)
         ins *o = &e->in[d];
         o[0] = VCC_LITERAL(ins, .op = I_ADR, .rd = R_X16, .label = x.label);
         o[1] = VCC_LITERAL(ins, .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16,
-                           .rm = x.rd, .sh = 2,
-                           .cond = (uint8_t)(x.cond ? 8 + 2 : 0));
-        o[2] = VCC_LITERAL(ins, .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17,
-                           .rn = R_X17);
+                           .rm = x.rd, .cond = (uint8_t)(x.cond ? 8 + 2 : 0),
+                           .sh = 2);
+        o[2] = VCC_LITERAL(ins, .op = I_LD, .sz = 2, .rd = R_X17, .rn = R_X17,
+                           .cond = 1);
         o[3] = VCC_LITERAL(ins, .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16,
                            .rm = R_X17);
         o[4] = VCC_LITERAL(ins, .op = I_BR, .rn = R_X16);
@@ -504,7 +504,7 @@ static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave,
         for (int j = 0; j + 1 < ncs; j += 2)
             seq[q++] =
                 VCC_LITERAL(ins, .op = I_LDP, .sz = 1, .rd = (uint8_t)cs[j],
-                            .ra = (uint8_t)cs[j + 1], .rn = (uint8_t)cs_base(),
+                            .rn = (uint8_t)cs_base(), .ra = (uint8_t)cs[j + 1],
                             .imm = cs_off(csave, j));
         if (ncs & 1)
             seq[q++] = VCC_LITERAL(
@@ -520,7 +520,7 @@ static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave,
                 seq[q++] = VCC_LITERAL(ins, .op = I_MOV, .sz = 1, .rd = SP,
                                        .rn = R_FP);
             seq[q++] = VCC_LITERAL(ins, .op = I_LDP, .sz = 1, .rd = R_FP,
-                                   .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
+                                   .rn = SP, .ra = R_LR, .cond = 2, .imm = 16);
         }
         if (cfi)
             seq[q++] = VCC_LITERAL(ins, .op = I_NOP, .cond = NOP_CFI_EPILOGUE);

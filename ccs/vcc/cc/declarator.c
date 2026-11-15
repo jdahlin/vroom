@@ -495,8 +495,8 @@ VPRIV qty apply_declarator(cc *c, qty t, uint32_t first, uint32_t nops)
             if (o->fl & TF_BLOCK) {
                 ctype b = {.kind = TY_PTR,
                            .flags = TF_BLOCK,
-                           .size = CC_PTRSIZE(c),
                            .align = CC_PTRSIZE(c),
+                           .size = CC_PTRSIZE(c),
                            .base = t};
 
                 t = QT(ty_intern(c, &b), o->q & Q_MASK);

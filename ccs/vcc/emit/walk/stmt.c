@@ -1570,12 +1570,12 @@ VPRIV val wk_inline(ecx *e, uint32_t n, uint32_t s)
     const node *x = N(n), *body = N(c->syms[s].body);
     wkinl I = {.up = W->inl,
                .fn = s,
-               .call = n,
                .endlbl = wk_newlabel(e),
+               .call = n,
                .rty = T(c, c->syms[s].ty)->base,
                .cbase = W->nclean,
-               .cst_ok = true,
-               .vbase = W->nvla};
+               .vbase = W->nvla,
+               .cst_ok = true};
     uint32_t inst0 = W->inst;
     int64_t saved_sp = 0;
     val res;

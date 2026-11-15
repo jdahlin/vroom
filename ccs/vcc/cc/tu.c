@@ -72,7 +72,7 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
     /* basic types: index == kind */
     for (int k = 0; k < TY_PTR; k++) {
         ctype t = {
-            .kind = (uint8_t)k, .size = basic[k].size, .align = basic[k].align};
+            .kind = (uint8_t)k, .align = basic[k].align, .size = basic[k].size};
 
         if (k == TY_LDOUBLE && o->target == PP_DARWIN)
             t.size = 8, t.align = 8;
@@ -194,8 +194,8 @@ static void cc_init(cc *c, pp *p, const cc_opts *o)
 				   register or its 256-bit predicate. */
                 bool pred = i >= 13;
                 ctype t = {.kind = TY_SVE,
-                           .size = pred ? 32u : 256u,
                            .align = pred ? 2u : 16u,
+                           .size = pred ? 32u : 256u,
                            .aux = name};
 
                 s = sym_new(c, S_TYPEDEF, name, QT(ty_intern(c, &t), 0), 0);

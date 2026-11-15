@@ -830,9 +830,10 @@ static int objcopy_run(int dirfd)
     uint32_t ehs = e.nph, phs = e.nph + 1;
     seg[ehs] = VCC_LITERAL(OSeg, .origoff = 0, .filesz = sizeof(Ehdr),
                            .index = ehs, .parent = -1);
-    seg[phs] = VCC_LITERAL(OSeg, .origoff = eh->e_phoff, .vaddr = eh->e_phoff,
+    seg[phs] = VCC_LITERAL(OSeg, .origoff = eh->e_phoff,
                            .filesz = (uint64_t)eh->e_phentsize * eh->e_phnum,
-                           .align = 8, .index = phs, .parent = -1);
+                           .vaddr = eh->e_phoff, .align = 8, .index = phs,
+                           .parent = -1);
     for (uint32_t c = 0; c < ng; c++) {
         OSeg *ch = &seg[c];
         for (uint32_t p = 0; p < e.nph; p++) {

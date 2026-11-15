@@ -173,8 +173,8 @@ VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
 {
     if (bits > 128) {
         ctype t = {.kind = (uint8_t)(unsign ? TY_UBITINT : TY_BITINT),
-                   .size = 8 * (((uint64_t)bits + 63) / 64),
                    .align = 8,
+                   .size = 8 * (((uint64_t)bits + 63) / 64),
                    .n = bits};
         return QT(ty_intern(c, &t), 0);
     }
@@ -189,11 +189,11 @@ VPRIV qty ty_bitint(cc *c, unsigned bits, bool unsign)
                : size == 8 ? TY_LLONG
                            : TY_INT128;
     ctype t = {.kind = (uint8_t)(kind + unsign),
-               .size = size,
                .align = size > 8 && (c->o->target == PP_LINUX_X86_64 ||
                                      PP_IS_WASM(c->o->target))
                             ? 8
                             : size,
+               .size = size,
                .n = bits};
 
     return QT(ty_intern(c, &t), 0);
@@ -224,8 +224,8 @@ VPRIV qty ty_ptr(cc *c, qty base)
     }
     {
         ctype t = {.kind = TY_PTR,
-                   .size = CC_PTRSIZE(c),
                    .align = CC_PTRSIZE(c),
+                   .size = CC_PTRSIZE(c),
                    .base = base};
 
         i = ty_intern(c, &t);
@@ -239,8 +239,8 @@ VPRIV qty ty_array(cc *c, qty elem, uint64_t n, int flags)
     const ctype *e = T(c, elem);
     ctype t = {.kind = TY_ARRAY,
                .flags = (uint8_t)flags,
-               .base = elem,
-               .align = e->align};
+               .align = e->align,
+               .base = elem};
 
     if (!(flags & (TF_INCOMPLETE | TF_VLA))) {
         t.n = (uint32_t)n;
@@ -261,8 +261,8 @@ VPRIV qty ty_vla(cc *c, qty elem, uint32_t sizenode)
 {
     ctype t = {.kind = TY_ARRAY,
                .flags = TF_VLA,
-               .base = elem,
                .align = T(c, elem)->align,
+               .base = elem,
                .n = sizenode};
 
     return QT(ty_intern(c, &t), 0);
@@ -367,12 +367,12 @@ VPRIV qty ty_vector(cc *c, qty elem, uint32_t size)
     const ctype *e = T(c, elem);
     /* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
     ctype t = {.kind = TY_VECTOR,
-               .base = QUNQ(elem),
-               .size = size,
                .align = size > 16 && !PP_IS_WASM(c->o->target) &&
                                 c->o->target != PP_LINUX_X86_64
                             ? 16
-                            : size};
+                            : size,
+               .size = size,
+               .base = QUNQ(elem)};
 
     t.n = e->size ? (uint32_t)(size / e->size) : 0;
     return QT(ty_intern(c, &t), 0);

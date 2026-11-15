@@ -38,8 +38,8 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
                     if (is_bvec(c, ty)) {
                         wlv l = {.k = WL_MEM,
                                  .bf = 1,
-                                 .width = 1,
                                  .bitoff = (uint16_t)(k % 8),
+                                 .width = 1,
                                  .off = k / 8};
                         wmem_lval(e, &l, off + k / 8);
                         wslot_addr(e, off);
@@ -61,9 +61,9 @@ static void welems(ecx *e, uint64_t off, qty ty, uint32_t init)
                 if (f->bitfield) {
                     wlv l = {.k = WL_MEM,
                              .bf = 1,
+                             .sgn = is_signed(c, f->ty),
                              .bitoff = (uint16_t)(f->off % 8),
                              .width = f->width,
-                             .sgn = is_signed(c, f->ty),
                              .off = off + f->off / 8};
 
                     wmem_lval(e, &l, off + f->off / 8);

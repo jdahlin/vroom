@@ -246,7 +246,7 @@ VPRIV int x64_i_avx(As *a, char *mn, XOp *o, int nops)
         if (nops == 4 && !strcmp(mn, "vpblendvb")) {
             uint8_t ops[3] = {0x0f, 0x3a, 0x4c};
             XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[3].reg,
-                        .rm = &o[1], .vvvv = o[2].reg, .isz = 1, .vex = 1,
+                        .rm = &o[1], .isz = 1, .vex = 1, .vvvv = o[2].reg,
                         .vl = o[3].size == 32);
 
             if (o[1].kind == XK_EXPR)
