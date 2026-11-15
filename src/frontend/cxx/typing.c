@@ -2188,6 +2188,17 @@ VPRIV bool cxx_range_element_type(cxx *c, ast_qualified_type r, ast_qualified_ty
 }
 
 /* argument-dependent lookup: name in the namespace of each argument's class or enumeration (the first that has it) */
+/* does a set found by name have a function or function template in it (all that argument-dependent lookup
+   finds, [basic.lookup.argdep]/4: not a variable, a function object) */
+static bool cxx_adl_has_functions(cxx *c, const cxx_entity *set)
+{
+	for (const cxx_entity *e = set; e; e = e->next)
+		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE ||
+		    (e->kind == CXX_ENTITY_VALUE && (e->ty == CXX_TY_UNKNOWN ? e->has_ret_pattern : AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION)))
+			return true;
+	return false;
+}
+
 VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs)
 {
 	ast_qualified_type acopy[16];
@@ -2247,7 +2258,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 			s = cxx_tag_home(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 			while (s && s->kind != CXX_SCOPE_NAMESPACE)
 				s = s->parent;
-			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
+			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT || !cxx_adl_has_functions(c, set))
 				continue;
 			c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
 			ADL_DONE();
@@ -2270,8 +2281,8 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 		}
 		while (s && s->kind != CXX_SCOPE_NAMESPACE)
 			s = s->parent;
-		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
-			continue;
+		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT || !cxx_adl_has_functions(c, set))
+			continue;	/* (what ADL finds is functions only: json's nlohmann::from_json, an object, is not one) */
 		c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
 		ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
 		if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)

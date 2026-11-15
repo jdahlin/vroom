@@ -511,11 +511,18 @@ VPRIV int cxx_noexcept_parse(cxx *c)
 	if (cxx_accept_kw(c, CXX_KW_noexcept)) {
 		r = 1;
 		if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
+			uint8_t invalid = c->einvalid, missing = c->member_missing;
+
 			cxx_advance(c);
 			c->unevaluated++;	/* (noexcept(noexcept(f(x))): what it calls is not used) */
 			cxx_constant_expression_parse(c);
 			c->unevaluated--;
 			r = c->econst ? c->evalue != 0 : 2;
+			/* (its operand is no part of a substitution: instantiated only when the exception specification is
+			   needed, [temp.inst]/14 -- an ill-formed one does not make a candidate not viable) */
+			if (!c->econst)
+				r = 2;
+			c->einvalid = invalid, c->member_missing = missing;
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		}
 	} else if (cxx_accept_kw(c, CXX_KW_throw)) {

@@ -2620,3 +2620,18 @@ Sviter gröna (130/130, 38/38, mangle).  Strikt bänk: pass 22, 105 saknas.
   också, `SIZE_MAX == 0xffffffff`); med vcc hänger den dessutom i BJData-fallen.
 Sviter gröna (133/133, 38/38, mangle).  Strikt bänk: pass 24; 133 saknas
 (fler mallkroppar räknas nu).
+
+## Status 167 (2026-11-15)
+Dolda vänner i jsons serialiseringskedja (`NLOHMANN_DEFINE_TYPE_INTRUSIVE`,
+`json j(p)`, `j.get<T>()`):
+- ADL görs också när den vanliga uppsättningen lämnar anropet olöst (ingen
+  kandidat valbar, eller alla returnerar void och ingen väljs) och väljer då
+  vännen; typen behålls om ADL inte hittar något.
+- ADL tar bara med funktioner och funktionsmallar ([basic.lookup.argdep]/4):
+  `nlohmann::from_json`, ett funktionsobjekt i argumentets namnrymd, stoppade
+  sökningen innan argumentklassens vänner prövades.
+- En noexcept-specifikations operand gör inte en kandidat ogiltig ([temp.inst]/14).
+- En mallkropp som instansieras under ett försök att omvandla till en klass
+  (`constructing`, `construct_depth`) gör det utan den omvandlingens
+  begränsningar: `j = 5` i en `to_json` som `json(T&&)`:s noexcept instansierar.
+Sviter gröna (133/133, 38/38, mangle).  Strikt bänk: pass 24, 125 saknas.

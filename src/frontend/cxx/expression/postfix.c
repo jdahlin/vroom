@@ -162,14 +162,25 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					}
 					else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
 						cxx_gen_indirect_call(c, callee_node, anodes, an, cloc);	/* through a pointer to a function */
-					/* f(x) with no f that fits: the functions named f in the namespaces of the
-					   arguments' classes (argument-dependent lookup) */
-					if (c->etype == CXX_TY_UNKNOWN && ename && (!set || c->none_viable)) {
+					/* f(x) with no f that fits, or none that could be chosen (candidates whose viability is not
+					   known: json's detail::to_json overloads for a class with a hidden friend to_json): the
+					   functions named f in the namespaces of the arguments' classes (argument-dependent lookup) */
+					/* (typed but not resolved -- every candidate returns void -- only for code generation, the
+					   type kept when it finds nothing) */
+					bool shared = c->etype != CXX_TY_UNKNOWN && set && !(c->call_resolved && c->call_picked) && ename && cxx_gen_on(c) && !c->tentative;
+					ast_qualified_type shared_t = c->etype;
+					uint8_t shared_l = c->elval;
+
+					if ((c->etype == CXX_TY_UNKNOWN || shared) && ename && (!set || c->none_viable || !c->tentative)) {
 						bool none = c->none_viable || (!set && missing), known = true;
 
 						for (uint32_t i = 0; i < c->ncargs && i < 16; i++)
 							known &= c->cargs[i] != CXX_TY_UNKNOWN;
 						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
+						if (shared && !(c->etype != CXX_TY_UNKNOWN && c->call_resolved && c->call_picked)) {
+							cxx_et(c, shared_t, shared_l);
+							continue;
+						}
 						/* code generation: the function found there, called (no object: a namespace's
 						   function, or a friend the class declares) */
 						if (c->etype != CXX_TY_UNKNOWN && c->call_resolved && c->call_picked && an != UINT32_MAX &&

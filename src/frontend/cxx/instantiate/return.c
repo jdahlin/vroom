@@ -86,6 +86,13 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 		c->unevaluated = 0;	/* (the body is evaluated code, whatever the call was in) */
 	cxx_entity *outer_gen_instance = c->gen_instance;	/* (an enclosing signature's, being parsed: kept) */
 	c->gen_instance = inst;
+	/* (a body is evaluated code of its own: not part of the conversion an enclosing resolution is trying,
+	   whose class's constructors it may use -- j = 5 in a to_json a json(T&&)'s noexcept instantiates) */
+	ast_qualified_type outer_constructing = c->constructing;
+	uint8_t outer_construct_depth = c->construct_depth;
+
+	if (want_body)
+		c->constructing = 0, c->construct_depth = 0;
 	if (!setjmp(jb)) {
 		bool b = false;
 		ast_qualified_type t = cxx_function_signature_parse(c, false, want_body ? &b : NULL, f->ctor_class);
@@ -110,6 +117,7 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 	} else
 		c->stats.bodies_failed++;
 	c->gen_instance = outer_gen_instance;
+	c->constructing = outer_constructing, c->construct_depth = outer_construct_depth;
 	c->body_depth--;
 	c->instantiating--;
 	cxx_state_restore(c, &s);
