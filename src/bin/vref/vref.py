@@ -523,7 +523,10 @@ def outline_if(unit, spec, within, scope_info):
     import textwrap
 
     require(
-        isinstance(spec, dict) and set(spec) == {"match", "name", "parameters"},
+        isinstance(spec, dict)
+        and {"match", "name", "parameters"}
+        <= set(spec)
+        <= {"match", "name", "parameters", "return_status"},
         "outline_if requires match, name and parameters",
     )
     require(
@@ -545,10 +548,30 @@ def outline_if(unit, spec, within, scope_info):
     closing = closing_brace(unit.words, opening, scope_info[1])
     block_end = unit.end(closing)
     unit.check_range(begin, block_end)
+    status = spec.get("return_status", False)
+    require(type(status) is bool, "return_status must be boolean")
     words = unit.words[opening + 1 : closing]
     forbidden = set(
         b"return co_return co_await co_yield goto break continue case default this __func__ __FUNCTION__ __PRETTY_FUNCTION__ __builtin_alloca alloca asm __asm__ setjmp _setjmp sigsetjmp static #".split()
     )
+    if status:
+        require(
+            unit.language == b"c" and within.split()[0:1] == ["int"],
+            "status extraction requires an int-returning C function",
+        )
+        require(
+            len(words) >= 3
+            and words[-3] == b"return"
+            and words[-2].isdigit()
+            and words[-1] == b";"
+            and (len(words) == 3 or words[-4] in (b";", b"}")),
+            "expected a final unconditional return of a status",
+        )
+        require(
+            len(pattern) == 5 and pattern[2].startswith("@"),
+            "expected a single bound guard variable",
+        )
+        forbidden -= {b"return", b"static"}
     require(
         not forbidden.intersection(words),
         "block contains unsupported control flow or function context",
@@ -586,23 +609,56 @@ def outline_if(unit, spec, within, scope_info):
         require(len(target) == 1 and word not in args, "ambiguous helper parameter")
         (pos,) = target
         i = unit.index[pos]
-        require(
-            unit.decls[pos] == b"P"
-            and header_start < i < scope_info[0]
-            and i >= 3
-            and unit.words[i - 3] in (b"(", b",")
-            and IDENT.fullmatch(unit.words[i - 2])
-            and unit.words[i - 1] == b"*"
-            and unit.words[i + 1] in (b")", b","),
-            "expected a named pointer parameter of the enclosing function",
-        )
-        declarations.append(unit.data[unit.starts[i - 2] : unit.end(i)])
+        if status:
+            start = i
+            while start and unit.words[start - 1] == b"*":
+                start -= 1
+            start -= 1
+            require(
+                start > 0
+                and IDENT.fullmatch(unit.words[start])
+                and unit.words[start - 1] in (b";", b"{", b"(", b",")
+                and unit.decls[pos] == b"V"
+                and unit.words[i + 1] == b"="
+                and pos < begin
+                and (start != i - 1 or unit.words[start] == b"int"),
+                "expected a simple scalar or pointer declaration",
+            )
+        else:
+            start = i - 2
+            require(
+                unit.decls[pos] == b"P"
+                and header_start < i < scope_info[0]
+                and i >= 3
+                and unit.words[i - 3] in (b"(", b",")
+                and IDENT.fullmatch(unit.words[start])
+                and unit.words[i - 1] == b"*"
+                and unit.words[i + 1] in (b")", b","),
+                "expected a named pointer parameter of the enclosing function",
+            )
+        declarations.append(unit.data[unit.starts[start] : unit.end(i)])
+        if status:
+            # An earlier alias could change the original local during the call.
+            require(
+                not any(
+                    pos in unit.bindings.get(at, ())
+                    for at in unit.starts[i + 1 : unit.index[begin]]
+                ),
+                "status capture used before the selected guard",
+            )
         captures[pos] = word
         args.append(word)
     for i in range(opening + 1, closing):
         bindings = unit.bindings.get(unit.starts[i], ())
         for pos in bindings:
-            if pos in captures:
+            if pos in captures and status:
+                require(
+                    unit.words[i - 1] not in (b"&", b"++", b"--")
+                    and (unit.words[i - 1] != b"(" or IDENT.fullmatch(unit.words[i - 2]))
+                    and unit.words[i + 1] not in b"= += -= *= /= %= &= |= ^= <<= >>= ++ --".split(),
+                    "expected read-only use of status capture",
+                )
+            elif pos in captures:
                 # Only C guarantees that an ordinary argument cannot bind to a reference.
                 arg = (
                     unit.language == b"c"
@@ -626,7 +682,7 @@ def outline_if(unit, spec, within, scope_info):
     body = textwrap.dedent(body.decode("utf-8")).strip("\n")
     body = textwrap.indent(body, "    ").encode()
     helper = (
-        b"static void "
+        (b"static int " if status else b"static void ")
         + name
         + b"("
         + (b", ".join(declarations) or b"void")
@@ -641,7 +697,17 @@ def outline_if(unit, spec, within, scope_info):
     at = unit.starts[header_start]
     return [
         (at, at, helper),
-        (guard_end, block_end, b"\n" + indent + b"    " + name + b"(" + b", ".join(args) + b");"),
+        (
+            guard_end,
+            block_end,
+            b"\n"
+            + indent
+            + (b"    return " if status else b"    ")
+            + name
+            + b"("
+            + b", ".join(args)
+            + b");",
+        ),
     ]
 
 

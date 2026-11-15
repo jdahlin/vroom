@@ -117,3 +117,10 @@ macro expansions and uses of additional enclosing locals are declined. The
 [scope-growth recipe](../src/test/vref/scope-growth.toml) extracts the rehash
 loop from `cxx_declare`. Run it with the same bootstrap flags as the storage
 migration, selecting `src/frontend/cxx/names.cpp`.
+
+For an `int` C function, `return_status = true` replaces the selected branch
+with `return helper(...);`. The guard must test a single variable and the
+block must end in an unconditional return of a decimal status. Parameters
+may be freshly initialized local integers or pointers read by the branch.
+The [vasm recipe](../src/test/vref/vasm-benchmark.toml) operates on the
+prepared benchmark block in the first commit of the migration.

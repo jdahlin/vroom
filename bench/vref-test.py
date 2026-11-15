@@ -167,6 +167,38 @@ int main(void) { Box b = {2}; return fill(&b) != 6; }
             "+= prior", "+= extra"
         )
         run(directory, file, bad, "recipe", outline, fail=True)
+    outline.write_text(
+        'within = "int f ( int n ) {"\n[outline_if]\n'
+        'match = "if ( @count ) {"\nname = "status"\nparameters = ["count", "p"]\n'
+        "return_status = true\n"
+    )
+    source = """int f(int n) {
+    int count = n;
+    int *p = &n;
+    if (count) {
+        if (*p < 0)
+            return 1;
+        return 0;
+    }
+    return 2;
+}
+int main(void) { return f(-1) != 1 || f(1) != 0 || f(0) != 2; }
+"""
+    changed = run(directory, "status.c", source, "recipe", outline)
+    assert "return status(count, p);" in changed
+    subprocess.run(
+        [os.environ.get("CLANG", "clang"), "status.c", "-o", "check"], cwd=directory, check=True
+    )
+    subprocess.run([directory / "check"], cwd=directory, check=True)
+    for replacement in ("if (*p) return 0;", "count++; return 0;"):
+        run(
+            directory,
+            "status.c",
+            source.replace("return 0;", replacement, 1),
+            "recipe",
+            outline,
+            fail=True,
+        )
     cpp = "namespace ns { int f(int p) { int n(p); n++; return n; } }\n"
     assert len(run(directory, "ns.cpp", cpp, "refs", "1:35")) == 3
 print(f"vref: {count} cases passed")
