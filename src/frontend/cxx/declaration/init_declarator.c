@@ -244,7 +244,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			int kind = (flags & DS_TYPEDEF) ? CXX_ENTITY_TYPE :
 				   c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE ? (f ? CXX_ENTITY_FUNCTION_TEMPLATE : CXX_ENTITY_VARIABLE_TEMPLATE)
 											   : CXX_ENTITY_VALUE;
-			cxx_entity *e = (flags & DS_FRIEND) ? NULL : cxx_declare(c, cxx_declaration_scope(c), name, kind);
+			/* (a function template of _BitInt(N): vcc has no _BitInt type, no argument deduces it, and its
+			   unknown parameter type would leave every call of the name unresolved: libc++'s abs) */
+			bool bitint = kind == CXX_ENTITY_FUNCTION_TEMPLATE && cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW__BitInt);
+			cxx_entity *e = (flags & DS_FRIEND) || bitint ? NULL : cxx_declare(c, cxx_declaration_scope(c), name, kind);
 			bool is_friend = false;
 
 			/* a friend function declared in a class: not a member, not found by ordinary lookup; a call

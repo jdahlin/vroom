@@ -426,6 +426,126 @@ static int cxx_arg_rank(cxx *c, ast_qualified_type p, ast_qualified_type a, bool
 	return r;
 }
 
+/* ---- a set of functions where a function's type is wanted ([over.over]: os << endl, call(f), &f) ---- */
+
+/* the expression just parsed from start is a name of functions alone (f, &f, N::f, ::f), its type not known:
+   that set (NULL: not one) */
+VPRIV cxx_entity *cxx_fnset_of_expression(cxx *c, uint32_t start)
+{
+	uint32_t i = start;
+
+	if (c->tentative || c->template_depth || c->etype != CXX_TY_UNKNOWN || !c->fn_set_seen)
+		return NULL;
+	if (i < c->pos && c->tok[i].kind == LEX_TOKEN_AMPERSAND)
+		i++;
+	if (i < c->pos && c->tok[i].kind == LEX_TOKEN_COLON_COLON)
+		i++;
+	for (;;) {
+		if (i >= c->pos || c->tok[i].kind != LEX_TOKEN_IDENTIFIER || c->tok[i].kw)
+			return NULL;
+		i++;
+		if (i == c->pos)
+			return c->fn_set_seen;
+		if (c->tok[i].kind != LEX_TOKEN_COLON_COLON)
+			return NULL;
+		i++;
+	}
+}
+
+/* the function type a parameter of type target takes a function as: R (*)(P...), R (&)(P...) */
+static ast_qualified_type cxx_fnset_target(cxx *c, ast_qualified_type target)
+{
+	if (target == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, target) != AST_TYPE_POINTER)
+		return CXX_TY_UNKNOWN;
+	ast_qualified_type f = AST_TYPE(c->ast, target)->base;
+
+	return f != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f) == AST_TYPE_FUNCTION ? AST_QUALIFIED_TYPE_UNQUALIFIED(f) : CXX_TY_UNKNOWN;
+}
+
+/* the function of set whose type a parameter of type target takes (a template's specialization deduced from
+   it; make: instantiated, the instance) or NULL */
+VPRIV cxx_entity *cxx_fnset_pick(cxx *c, cxx_entity *set, ast_qualified_type target, bool make)
+{
+	ast_qualified_type want = cxx_fnset_target(c, target);
+
+	if (want == CXX_TY_UNKNOWN)
+		return NULL;
+	for (cxx_entity *e = set; e; e = e->next)
+		if (e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(e->ty) == want && (!e->member_of || e->fn_static))
+			return e;
+
+	const ctype *w = AST_TYPE(c->ast, want);
+	ast_qualified_type args[16];
+	uint8_t lval[16];
+
+	if (w->n > 16 || (w->flags & AST_TYPE_FLAG_VARIADIC))
+		return NULL;
+	/* a template: deduced as from a call with arguments of the target's parameter types (P& an lvalue of P) */
+	for (uint32_t i = 0; i < w->n; i++) {
+		ast_qualified_type p = c->ast->params[w->aux + i];
+		bool ref = p != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && AST_TYPE(c->ast, p)->ext;
+
+		args[i] = ref ? AST_TYPE(c->ast, p)->base : p, lval[i] = ref && AST_TYPE(c->ast, p)->ext == 1;
+	}
+	for (cxx_entity *e = set; e; e = e->next) {
+		if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || (e->member_of && !e->fn_static))
+			continue;
+		ast_qualified_type et = c->etype, bs = c->bound_sig, r;
+		uint8_t el = c->elval, ek = c->econst;
+		int64_t ev = c->evalue;
+		uint32_t en = c->enode;
+		cxx_entity *ci = c->call_instance, *got = NULL, *cp = c->call_picked, *cc = c->ecallee, *fs = c->fn_set_seen;
+		uint8_t cr = c->call_resolved, nv = c->none_viable, cn = c->call_nranks, crk[16];
+
+		memcpy(crk, c->call_ranks, sizeof crk);
+
+		c->call_instance = NULL;
+		if (cxx_ftemplate_deduce(c, e, NULL, UINT32_MAX, args, lval, w->n, &r, false) == 1 && c->bound_sig != CXX_TY_UNKNOWN &&
+		    AST_QUALIFIED_TYPE_UNQUALIFIED(c->bound_sig) == want) {
+			got = e;
+			if (make) {
+				cxx_ftemplate_deduce(c, e, NULL, UINT32_MAX, args, lval, w->n, &r, true);
+				got = c->call_instance && c->call_instance->inst_ftmpl == e->ftmpl ? c->call_instance : NULL;
+			}
+		}
+		c->etype = et, c->bound_sig = bs, c->elval = el, c->econst = ek, c->evalue = ev, c->enode = en, c->call_instance = ci;
+		c->call_picked = cp, c->ecallee = cc, c->fn_set_seen = fs, c->call_resolved = cr, c->none_viable = nv, c->call_nranks = cn;
+		memcpy(c->call_ranks, crk, sizeof crk);
+		if (got)
+			return got;
+	}
+	return NULL;
+}
+
+/* code generation: the function of set a parameter of type target takes, as its argument (its address for
+   a pointer, the function for a reference; 0: not built) */
+VPRIV uint32_t cxx_fnset_node(cxx *c, cxx_entity *set, ast_qualified_type target, uint32_t loc)
+{
+	cxx_entity *f = cxx_gen_on(c) ? cxx_fnset_pick(c, set, target, true) : NULL;
+	uint32_t en = c->enode, n;
+
+	if (!f || f->kind != CXX_ENTITY_VALUE)
+		return 0;
+	cxx_gen_function_value(c, f, loc);
+	n = c->enode, c->enode = en;
+	if (n && !AST_TYPE(c->ast, target)->ext)
+		n = cc_conversion_decay(c->ast, n);	/* (R (*)(P...): its address) */
+	return n;
+}
+
+/* code generation: the arguments of a call of f that name a set of functions (their nodes 0), each the
+   function of its parameter's type */
+VPRIV void cxx_fnset_fill(cxx *c, cxx_entity *f, cxx_entity *const *sets, uint32_t *nodes, uint32_t n, uint32_t loc)
+{
+	if (!f || f->kind != CXX_ENTITY_VALUE || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION)
+		return;
+	const ctype *ft = AST_TYPE(c->ast, f->ty);
+
+	for (uint32_t i = 0; i < n && i < 16 && i < ft->n; i++)
+		if (!nodes[i] && sets[i])
+			nodes[i] = cxx_fnset_node(c, sets[i], c->ast->params[ft->aux + i], loc);
+}
+
 /*
  * A call's type.  set: the functions the callee names (NULL: callee_type, a function or a pointer
  * to one).  The candidates are the non-templates whose arity fits and the templates whose
@@ -461,8 +581,10 @@ static void cxx_call_type_impl(cxx *c, cxx_entity *set, ast_qualified_type calle
 	uint8_t invalid = c->einvalid, unsure = c->eunsure, missing = c->member_missing, adl = c->einvalid_unsure;
 
 	uint8_t verdict = 0;	/* 1: no function fits; 2: validity not known (placeholder arguments) */
+	cxx_entity *op_fnset = c->op_fnset;	/* (an operator's: for its candidates, member and not, not calls inside) */
 
 	cxx_call_type_impl1(c, set, callee_type, xargs, nxargs, args, lval, nargs, operator_call, &verdict);
+	c->op_fnset = op_fnset;
 	c->einvalid = invalid | (verdict & 1), c->eunsure = unsure | ((verdict & 2) != 0);
 	c->member_missing = missing, c->einvalid_unsure = adl;
 }
@@ -481,6 +603,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 	uint32_t own_zero = c->carg_zero, own_brace[CXX_MAX_ARGS];	/* (taken now: deducing and instantiating parse argument lists of their own) */
 
 	memcpy(own_brace, c->carg_brace, sizeof own_brace);
+	cxx_entity *own_fn[16] = { 0 };	/* the arguments that name a set of functions */
+
+	if (c->op_fnset && args && nargs && nargs <= 16 && args[nargs - 1] == CXX_TY_UNKNOWN)
+		own_fn[nargs - 1] = c->op_fnset;	/* (an operator's right operand) */
+	else if (own_args && !c->op_fnset)
+		memcpy(own_fn, c->carg_fnset, sizeof own_fn);
+	c->op_fnset = NULL;
 	bool have_lval = lval != NULL;
 
 	c->none_viable = 0, c->call_obj = 0;
@@ -618,6 +747,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 			else if (c->bound_sig != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->bound_sig) == AST_TYPE_FUNCTION &&
 				 AST_TYPE(c->ast, c->bound_sig)->n < nargs && !cxx_ftemplate_has_packs(e))
 				continue;	/* (fewer parameters than arguments, no pack, no ...: not viable; min(initializer_list<T>) for min(a, b)) */
+			if (sig && !(sig->flags & AST_TYPE_FLAG_VARIADIC) && sig->n > nargs + e->ndefaults && !cxx_ftemplate_has_packs(e))
+				continue;	/* (more parameters than arguments and defaults: f<T, S>(r, v) is not f(T, T, T)) */
 		} else {
 			const ctype *ft;
 
@@ -667,6 +798,15 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 					else
 						k->rank[a] = 6;	/* (a scalar from {x}: rare, not told apart here) */
 					k->pt[a] = c->ast->params[sig->aux + a];
+					fits = k->rank[a] < 6;
+					continue;
+				}
+				if (a < 16 && own_fn[a] && args[a] == CXX_TY_UNKNOWN) {
+					/* a set of functions: exactly the one of the parameter's function type, or not viable */
+					ast_qualified_type P = a < sig->n ? c->ast->params[sig->aux + a] : CXX_TY_UNKNOWN;
+
+					k->rank[a] = P != CXX_TY_UNKNOWN && cxx_fnset_pick(c, own_fn[a], P, false) ? 0 : 6;
+					k->pt[a] = P;
 					fits = k->rank[a] < 6;
 					continue;
 				}
