@@ -122,8 +122,19 @@ VPRIV bool cxx_gen_destructor_rest(cxx *c, cc_id_list *after, uint32_t loc)
 			et = AST_TYPE(a, et)->base;
 		if (!cc_type_is_record(a, et) || !cxx_gen_needs_destruction(c, et, 0))
 			continue;
+		if (r->f[i].name && et != ft && AST_TYPE(a, ft)->base == et && AST_TYPE(a, ft)->n && AST_TYPE(a, ft)->n <= 256) {
+			/* an array of them (std::array<pair<char, string>, 12>): each element, the last first */
+			for (uint64_t j = AST_TYPE(a, ft)->n; j-- > 0;) {
+				uint32_t el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc)),
+									      cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+
+				if (!cxx_gen_destroy(c, el, AST_QUALIFIED_TYPE_UNQUALIFIED(et), after, loc))
+					return false;
+			}
+			continue;
+		}
 		if (!r->f[i].name || et != ft)
-			return false;	/* (arrays and anonymous members of classes with destructors: not built yet) */
+			return false;	/* (anonymous members, arrays of arrays of classes with destructors: not built yet) */
 		if (!cxx_gen_destroy(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), AST_QUALIFIED_TYPE_UNQUALIFIED(ft), after, loc))
 			return false;
 	}

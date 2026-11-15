@@ -513,8 +513,11 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
-					if (gen_class)
+					if (gen_class) {
+						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+						c->gen_agg_brace = NULL;
+					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}
@@ -557,8 +560,11 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
-					if (gen_class)
+					if (gen_class) {
+						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+						c->gen_agg_brace = NULL;
+					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}
@@ -697,8 +703,11 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 					cxx_ctor_use(c, cast_to, c->cargs, c->cargs_lval, c->ncargs, braced);	/* T(args): a temporary */
 					gen_class = true;	/* (a list for an aggregate: its members, cxx_gen_aggregate_init) */
 					memcpy(c->gen_call_brace, abr_, sizeof abr_);	/* T({...}): the list a temporary of the parameter's class */
-					if (gen_class)
+					if (gen_class) {
+						c->gen_agg_brace = braced && n <= CXX_MAX_ARGS ? abr_ : NULL;	/* (an aggregate's elements that are braced lists: H{{S(1), S(2)}}) */
 						cxx_gen_construct_temp(c, cast_to, an, n, t->loc);
+						c->gen_agg_brace = NULL;
+					}
 					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);	/* (not taken: an aggregate's) */
 					gen_node = c->enode;
 				}

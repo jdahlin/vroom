@@ -425,6 +425,42 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 		c->enode = cc_dereference_build(a, cc_conditional_build(a, cond, px, py, loc), loc);
 		return;
 	}
+	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && cc_type_is_record(a, AST_NODE_AT(a, y)->ty) &&
+	    AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_ARRAY && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) &&
+	    cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) != 1) {
+		/* c ? a : b of one class, not both lvalues: a prvalue, a temporary each branch constructs from its
+		   operand (json's res ? result : basic_json(value_t::discarded)) */
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty), pt = cc_type_pointer(a, t);
+		cxx_prv *px = cxx_gen_prv_find(c, x), *py = cxx_gen_prv_find(c, y);
+		/* (an operand that is a temporary just built, T(7): the result, built there; the other branch
+		   constructs into it, so neither is copied twice) */
+		int own = py && py->tmp && !py->call ? 1 : px && px->tmp && !px->call ? 0 : -1;
+		uint32_t tmp = own >= 0 ? (own ? py->tmp : px->tmp) : cxx_gen_class_temp(c, t, loc), side[2] = { x, y }, br[2];
+
+		if (!tmp)
+			return;
+		for (int k = 0; k < 2; k++) {
+			if (k == own) {
+				br[k] = cc_address_of_build(a, side[k], loc);	/* (its node constructs it, then names it) */
+				continue;
+			}
+			ast_qualified_type at[1] = { AST_NODE_AT(a, side[k])->ty };
+			uint8_t lv[1] = { (AST_NODE_AT(a, side[k])->flags & AST_NODE_FLAG_LVALUE) != 0 && !cxx_gen_prv_find(c, side[k]) };
+			cc_id_list l;
+
+			cc_id_list_init(&l);
+			cxx_ctor_use(c, t, at, lv, 1, false);
+			if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, &side[k], 1, &l, loc))
+				return;
+			br[k] = cxx_gen_chain(c, &l, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc), loc);
+			if (!br[k] || AST_NODE_AT(a, br[k])->ty != pt)
+				br[k] = cc_cast_insert(a, br[k], pt, AST_CAST_NOP);
+		}
+		cond = cc_condition_scalar(a, cc_conversion_decay(a, cond), "'?:'");
+		c->enode = cc_dereference_build(a, cc_conditional_build(a, cond, br[0], br[1], loc), loc);
+		cxx_gen_prv_add(c, c->enode, 0, 0, tmp);
+		return;
+	}
 	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) != cc_type_is_record(a, AST_NODE_AT(a, y)->ty) ||
 	    (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && (AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) ||
 							      cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) != 1)))

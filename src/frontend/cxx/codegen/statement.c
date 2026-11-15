@@ -367,6 +367,16 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 		cxx_gen_fail(c);
 		return 0;
 	}
+	if (has_value && c->gen_sret && e && e == c->gen_ret_done) {
+		/* T built in the caller's object already (return T{...};): it, then its address */
+		cc_id_list l;
+
+		c->gen_ret_done = 0;
+		cc_id_list_init(&l);
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, e, 0, 0));
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0));
+		return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
+	}
 	if (has_value && c->gen_sret) {
 		/* a class returned by address: constructed in the object the caller gave, whose address is returned */
 		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret), at[1];

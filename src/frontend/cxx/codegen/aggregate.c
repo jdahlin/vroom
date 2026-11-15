@@ -136,6 +136,68 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
 			}
 			continue;
 		}
+		if (m && AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY && AST_TYPE(a, ft)->n && AST_TYPE(a, ft)->n <= CXX_MAX_ARGS &&
+		    cc_type_is_record(a, AST_TYPE(a, ft)->base) && AST_TYPE_KIND(a, AST_TYPE(a, ft)->base) != AST_TYPE_ARRAY && !(fe && fe->has_nsdmi)) {
+			/* an array of class objects: from the array's own braced list, or (braces elided) the next elements;
+			   each constructed in place from its element (S(1), or its own braced list: std::array<pair<char,
+			   string>, 12>{{...}}); those not given default-constructed */
+			ast_qualified_type et = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, ft)->base);
+			uint64_t ne = AST_TYPE(a, ft)->n;
+			uint32_t pos = c->pos, *an = NULL, *abr = NULL, n = 0;
+			uint32_t own_an[CXX_MAX_ARGS], own_br[CXX_MAX_ARGS];
+
+			if (k < nargs && !args[k] && have_braces && braces[k]) {
+				c->pos = braces[k];
+				cxx_braced_arguments_parse(c);
+				c->pos = pos;
+				n = c->ncargs;
+				if (n == UINT32_MAX || n > CXX_MAX_ARGS || n > ne)
+					return false;
+				memcpy(own_an, c->carg_nodes, n * sizeof *own_an);
+				memcpy(own_br, c->carg_brace, n * sizeof *own_br);
+				an = own_an, abr = own_br;
+				k++;
+			} else {
+				n = nargs - k < ne ? nargs - k : (uint32_t)ne;
+				an = (uint32_t *)args + k, abr = have_braces ? braces + k : NULL;
+				k += n;
+			}
+			for (uint64_t j = 0; j < ne; j++) {
+				uint32_t el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, target, r->f[i].name, loc)),
+								      cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+
+				if (j >= n) {
+					if (!cxx_gen_default_construct(c, el, et, out, loc, 1))
+						return false;
+				} else if (!an[j] && abr && abr[j]) {
+					uint32_t ean[CXX_MAX_ARGS], ebr[CXX_MAX_ARGS], en;
+
+					c->pos = abr[j];
+					cxx_braced_arguments_parse(c);
+					c->pos = pos;
+					en = c->ncargs;
+					if (en == UINT32_MAX || en > CXX_MAX_ARGS)
+						return false;
+					memcpy(ean, c->carg_nodes, en * sizeof *ean);
+					memcpy(ebr, c->carg_brace, en * sizeof *ebr);
+					cxx_ctor_use(c, et, c->cargs, c->cargs_lval, en, true);
+					c->gen_agg_brace = ebr;
+					if (!cxx_gen_construct_at(c, el, et, ean, en, out, loc))
+						return false;
+				} else {
+					ast_qualified_type at[1];
+					uint8_t lv[1];
+
+					if (!an[j])
+						return false;
+					at[0] = AST_NODE_AT(a, an[j])->ty, lv[0] = (AST_NODE_AT(a, an[j])->flags & AST_NODE_FLAG_LVALUE) != 0 && !cxx_gen_prv_find(c, an[j]);
+					cxx_ctor_use(c, et, at, lv, 1, false);
+					if (!cxx_gen_construct_at(c, el, et, &an[j], 1, out, loc))
+						return false;
+				}
+			}
+			continue;
+		}
 		if (!m || AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
 			return false;
 		if (k >= nargs) {

@@ -17,23 +17,34 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 	if (nargs == UINT32_MAX || nargs > CXX_MAX_ARGS || !cxx_gen_class_ok2(c, t, true))
 		return;
 	for (uint32_t i = 0; i < nargs; i++)
-		if (!args[i])
-			return;
-	if (nargs == 1 && cxx_gen_prv_find(c, args[0]) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == t) {
+		if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]))
+			return;	/* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it) */
+	if (nargs == 1 && args[0] && cxx_gen_prv_find(c, args[0]) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == t) {
 		c->enode = args[0];	/* T(a prvalue of T): that object */
 		return;
 	}
-	tmp = cxx_gen_class_temp(c, t, loc);
-	if (!tmp)
-		return;
+	const uint32_t *agg_brace = c->gen_agg_brace;	/* (the temporary's destructor, made now, may build lists of its own) */
+	uint32_t into = 0;
+
+	if (c->gen_ret_into && c->gen_sret && AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret_into) == t) {
+		/* return T{...};: T built in the caller's object, no temporary ([stmt.return], [class.temporary]/2) */
+		into = 1;
+		c->gen_ret_into = 0;
+		tmp = 0;
+	} else {
+		tmp = cxx_gen_class_temp(c, t, loc);
+		if (!tmp)
+			return;
+	}
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	c->gen_agg_brace = agg_brace;
 	cc_id_list_init(&l);
 	if (!nargs && (!(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) || picked->fn_defaulted)) {
 		/* T() of a class without a user-provided default constructor: zeroes (then constructed, below, if
 		   anything needs it) */
 		uint32_t zargs[3], saved = c->enode;
 
-		zargs[0] = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
+		zargs[0] = cc_address_of_build(a, (into ? cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc) : cxx_gen_var_node(c, tmp, loc)), loc);
 		zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc);
 		zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, t)->size, cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
 		c->enode = 0;
@@ -46,22 +57,27 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 			c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
 			cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, zero, 0, 0));
 			zero = 0;
-			if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, args, nargs, &l, loc)) {
+			if (!cxx_gen_construct_at(c, (into ? cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc) : cxx_gen_var_node(c, tmp, loc)), t, args, nargs, &l, loc)) {
 				cxx_gen_fail(c);
 				return;
 			}
 		}
-	} else if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, args, nargs, &l, loc)) {
+	} else if (!cxx_gen_construct_at(c, (into ? cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc) : cxx_gen_var_node(c, tmp, loc)), t, args, nargs, &l, loc)) {
 		cxx_gen_fail(c);	/* (the temporary is declared: nothing of this function is kept) */
 		return;
 	}
 	expr = zero ? zero : cxx_gen_chain(c, &l, 0, loc);
 	if (!zero && l.n == 1 && AST_NODE_AT(a, expr)->op == AST_NODE_CALL && AST_NODE_AT(a, expr)->c)
 		call = expr;
-	node = cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc);
+	node = cc_address_of_build(a, (into ? cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc) : cxx_gen_var_node(c, tmp, loc)), loc);
 	if (expr)
 		node = cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, node)->ty, loc, expr, node);
 	node = cc_dereference_build(a, node, loc);
+	if (into) {
+		c->gen_ret_done = node;	/* (not a temporary: the return has nothing to copy) */
+		c->enode = node;
+		return;
+	}
 	if (call)
 		cxx_gen_prv_add(c, node, expr, call, tmp);
 	else

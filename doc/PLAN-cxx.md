@@ -2367,3 +2367,20 @@ Test: `run/aggregate-array-members.cpp`.  Strikt bänk: pass 7, 167 saknas
 oförändrade (unit-hash 0,42 s, 343 MB).  Test: `run/long-brace-list.cpp`.
 Strikt bänk: pass 8, 155 saknas (från 167).  Sviter gröna (103/103, 38/38,
 mangle, 350/350).
+
+## Status 148 (2026-11-15)
+Arrayer av klassobjekt i aggregat (`std::array<pair<char, string>, 12>`,
+jsons `make_array` för `bjd_types_map`):
+- byggs från egna listor (i deklarationer och som `T{...}`-uttryck: listornas
+  `{` följer med, och överlever att temporärens destruktor byggs),
+  förstörs och kopieras element för element;
+- `return T{...};` / `return T(...);` (hela uttrycket) byggs i anroparens
+  objekt: ingen temporär, ingen kopia (antalen som clangs);
+- `T(T&&) = default` byggs på plats (medlemmarna kopieras: källan förblir
+  giltig);
+- `c ? lvärde : prvärde` av en klass: en temporär, prvärdet byggt i den.
+Kvar: en temporär med destruktor i en operand som kanske inte körs (`&&`,
+`?:`) byggs inte (stoppar `from_msgpack`), och `return` av en sådan
+icke-anrops-temporär kopierar en gång för mycket.  Test:
+`run/aggregate-class-arrays.cpp`.  Strikt bänk: pass 8, 153 saknas (från
+155).  Sviter gröna (104/104, 38/38, mangle, 350/350).

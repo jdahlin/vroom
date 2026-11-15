@@ -440,6 +440,8 @@ typedef struct cxx {
 	uint8_t cond_decl;		/* parsing an if's or a switch's condition: a declaration there is a real one (code generation) */
 	ast_qualified_type conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
 	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
+	ast_qualified_type gen_ret_into;	/* return T{...}; / T(...): T, built in the result object (the next temporary of T) */
+	uint32_t gen_ret_done;			/* ... the node of the one built there */
 	uint32_t gen_notemp;		/* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
 	uint32_t gen_block_temps;	/* such temporaries declared in the block being built (a case label after one: not built) */
 	struct cxx_prv *prvs;		/* class prvalues: temporaries whose construction can still be aimed at another object */

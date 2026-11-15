@@ -177,8 +177,25 @@ VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target, ast_qualified_t
 			ast_qualified_type at[1] = { AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_QUALIFIED_TYPE_UNQUALIFIED(ft)), AST_QUALIFIER_CONST) };
 			uint8_t lv[1] = { 1 };
 
+			if (et != ft && AST_TYPE(a, ft)->base == et && AST_TYPE(a, ft)->n && AST_TYPE(a, ft)->n <= 256) {
+				/* an array of such a class (std::array<pair<char, string>, 12>): each element copied */
+				ast_qualified_type eat[1] = { AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_QUALIFIED_TYPE_UNQUALIFIED(et)), AST_QUALIFIER_CONST) };
+
+				for (uint64_t j = 0; j < AST_TYPE(a, ft)->n; j++) {
+					uint32_t te = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, target, r->f[i].name, loc)),
+										     cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+					uint32_t se = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, src, r->f[i].name, loc)),
+										     cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+					uint8_t elv[1] = { 1 };
+
+					cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(et), eat, elv, 1, false);
+					if (!cxx_gen_construct_at(c, te, AST_QUALIFIED_TYPE_UNQUALIFIED(et), &se, 1, out, loc))
+						return false;
+				}
+				continue;
+			}
 			if (et != ft)
-				return false;	/* (an array of such a class: not built yet) */
+				return false;	/* (an array of arrays of such a class: not built yet) */
 			cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft), at, lv, 1, false);
 			if (c->ctor_picked && c->ctor_picked->fn_deleted) {
 				lv[0] = 0, at[0] = AST_QUALIFIED_TYPE_UNQUALIFIED(ft);	/* (a move-only member: moved) */
@@ -310,9 +327,11 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t, c
 	}
 	if (found && ctor && ctor->fn_defaulted && !ctor->fn_deleted && nargs == 1 && args[0] && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(t) &&
 	    (AST_NODE_AT(a, args[0])->flags & AST_NODE_FLAG_LVALUE) && ctor->ty != CXX_TY_UNKNOWN && AST_TYPE(a, ctor->ty)->n == 1 &&
-	    cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) && AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->ext == 1) {
-		/* T(const T&) = default of a class that is not trivially copyable (a polymorphic one: std::exception):
-		   what it does, in place (bases, the vptr, members), no function called */
+	    cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) && AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->ext >= 1) {
+		/* T(const T&) = default (or T(T&&) = default: pair(pair&&) with a string in it) of a class that is not
+		   trivially copyable (a polymorphic one: std::exception): what it does, in place (bases, the vptr,
+		   members), no function called; a move's members copied (the source stays valid, as a moved-from
+		   object must) */
 		uint32_t src = args[0];
 
 		if (AST_NODE_AT(a, target)->ty != AST_QUALIFIED_TYPE_UNQUALIFIED(t)) {

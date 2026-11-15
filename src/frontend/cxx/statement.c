@@ -816,7 +816,9 @@ static void cxx_statement_parse1(cxx *c)
 			if (n != UINT32_MAX && n <= CXX_MAX_ARGS) {
 				memcpy(an, c->carg_nodes, n * sizeof *an);
 				cxx_ctor_use(c, rt, c->cargs, c->cargs_lval, n, true);
+				c->gen_ret_into = c->gen_sret ? rt : CXX_TY_UNKNOWN, c->gen_ret_done = 0;	/* (built in the result object) */
 				cxx_gen_construct_temp(c, rt, an, n, sloc);
+				c->gen_ret_into = CXX_TY_UNKNOWN;
 				value = c->enode;
 			}
 			if (!value)
@@ -824,7 +826,57 @@ static void cxx_statement_parse1(cxx *c)
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
 			cxx_braced_init_list_parse(c), has_value = true;
 		else if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
+			/* return T{...}; or return T(...);, the whole expression one class prvalue of the result's class:
+			   built in the result object ([stmt.return]: no temporary to copy) */
+			bool into = false;
+
+			if (is_return && cxx_gen_on(c) && c->gen_sret && !c->tentative && !c->template_depth && c->gen_ret != CXX_TY_UNKNOWN) {
+				uint32_t i = c->pos, d = 0;
+
+				if (c->tok[i].kind == LEX_TOKEN_COLON_COLON)
+					i++;
+				while (i < c->ntok && c->tok[i].kind == LEX_TOKEN_IDENTIFIER) {
+					i++;
+					if (c->tok[i].kind == LEX_TOKEN_LESS) {	/* (template arguments: to the matching >) */
+						for (d = 0; i < c->ntok; i++) {
+							int k = c->tok[i].kind;
+
+							if (k == LEX_TOKEN_LESS || k == LEX_TOKEN_LEFT_PAREN)
+								d++;
+							else if (k == LEX_TOKEN_GREATER || k == LEX_TOKEN_RIGHT_PAREN)
+								d--;
+							else if (k == LEX_TOKEN_GREATER_GREATER)
+								d -= 2;
+							else if (k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_LEFT_BRACE)
+								break;
+							if ((int)d <= 0) {
+								i++;
+								break;
+							}
+						}
+						if ((int)d < 0)
+							break;
+					}
+					if (c->tok[i].kind != LEX_TOKEN_COLON_COLON)
+						break;
+					i++;
+				}
+				if (i > c->pos && i < c->ntok && (c->tok[i].kind == LEX_TOKEN_LEFT_BRACE || c->tok[i].kind == LEX_TOKEN_LEFT_PAREN)) {
+					int open = c->tok[i].kind, close = open == LEX_TOKEN_LEFT_BRACE ? LEX_TOKEN_RIGHT_BRACE : LEX_TOKEN_RIGHT_PAREN;
+
+					for (d = 0; i < c->ntok; i++) {
+						if (c->tok[i].kind == open)
+							d++;
+						else if (c->tok[i].kind == close && !--d)
+							break;
+					}
+					into = i + 1 < c->ntok && c->tok[i + 1].kind == LEX_TOKEN_SEMICOLON;
+				}
+			}
+			if (into)
+				c->gen_ret_into = AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret), c->gen_ret_done = 0;
 			cxx_expression_parse(c);
+			c->gen_ret_into = CXX_TY_UNKNOWN;
 			has_value = true, value = c->enode;
 			if (c->ret_capture)
 				c->ret_seen = 1;
