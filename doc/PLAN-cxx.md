@@ -2384,3 +2384,14 @@ Kvar: en temporär med destruktor i en operand som kanske inte körs (`&&`,
 icke-anrops-temporär kopierar en gång för mycket.  Test:
 `run/aggregate-class-arrays.cpp`.  Strikt bänk: pass 8, 153 saknas (från
 155).  Sviter gröna (104/104, 38/38, mangle, 350/350).
+
+## Status 149 (2026-11-15)
+Temporärer med destruktor i operander som kanske inte körs (`a && f(T(x))`,
+`c ? n : f(T(x))`, `c && g().v`) byggs nu: `T tmp; T *live = 0;`, `live =
+&tmp` när den är byggd, och `live` har som cleanup en hjälpfunktion per typ
+(`__vcc_cdtor_N(T **p) { if (*p) (*p)->~T(); }`).  Gäller `T(...)`/`T{...}`
+och anropsresultat (dessa riktas då inte om till ett annat objekt).
+Värden och antal konstruktioner som clangs; temporärerna lever till blockets
+slut (som förut).  Test: `run/conditional-temporaries.cpp`.  Strikt bänk:
+pass 8, 159 saknas (från 153: mer kod nås).  Sviter gröna (105/105, 38/38,
+mangle, 350/350).

@@ -24,7 +24,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 		return;
 	}
 	const uint32_t *agg_brace = c->gen_agg_brace;	/* (the temporary's destructor, made now, may build lists of its own) */
-	uint32_t into = 0;
+	uint32_t into = 0, live = 0;
 
 	if (c->gen_ret_into && c->gen_sret && AST_QUALIFIED_TYPE_UNQUALIFIED(c->gen_ret_into) == t) {
 		/* return T{...};: T built in the caller's object, no temporary ([stmt.return], [class.temporary]/2) */
@@ -32,7 +32,9 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 		c->gen_ret_into = 0;
 		tmp = 0;
 	} else {
+		c->gen_cond_ok = 1;	/* (in an operand that may not run: a flagged temporary, live set below) */
 		tmp = cxx_gen_class_temp(c, t, loc);
+		live = c->gen_cond_live, c->gen_cond_live = 0;
 		if (!tmp)
 			return;
 	}
@@ -66,7 +68,14 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 		cxx_gen_fail(c);	/* (the temporary is declared: nothing of this function is kept) */
 		return;
 	}
-	expr = zero ? zero : cxx_gen_chain(c, &l, 0, loc);
+	if (live && zero) {	/* (the zeroing is all the construction: before live is set) */
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, zero, 0, 0));
+		zero = 0;
+	}
+	if (live)	/* (built: its cleanup destroys it now) */
+		cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, live, loc),
+								cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc), loc), 0, 0));
+	expr = zero && !live ? zero : cxx_gen_chain(c, &l, 0, loc);
 	if (!zero && l.n == 1 && AST_NODE_AT(a, expr)->op == AST_NODE_CALL && AST_NODE_AT(a, expr)->c)
 		call = expr;
 	node = cc_address_of_build(a, (into ? cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, c->gen_sret, loc)), loc) : cxx_gen_var_node(c, tmp, loc)), loc);

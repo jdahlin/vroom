@@ -255,6 +255,7 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 	cc *a = c->ast;
 	const ctype *ft;
 	cc_id_list list;
+	uint32_t ret_live = 0;
 	uint32_t fn, n, self = 0, pre = 0, ret_tmp = 0, self_at = 0, call, all[2 * CXX_MAX_ARGS], br[CXX_MAX_ARGS];
 
 	bool holes = false;
@@ -385,7 +386,9 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 	cc_id_list_init(&list);
 	if (cxx_gen_by_address(c, ft->base)) {
 		/* a class returned by address: in a temporary (whoever takes the value may aim it elsewhere) */
+		c->gen_cond_ok = 1;	/* (in an operand that may not run: flagged, live set after the call) */
 		ret_tmp = cxx_gen_class_temp(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft->base), loc);
+		ret_live = c->gen_cond_live, c->gen_cond_live = 0;
 		if (!ret_tmp)
 			{ CXX_CALL_WHY(); return; }
 		cc_id_list_append(a, &list, cc_address_of_build(a, cxx_gen_var_node(c, ret_tmp, loc), loc));
@@ -491,8 +494,18 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 		/* the call gives the result object's address back */
 		uint32_t expr = n;
 
-		n = cc_dereference_build(a, n, loc);
-		cxx_gen_prv_add(c, n, expr, call, ret_tmp);
+		if (ret_live) {
+			/* (a flagged temporary: built once the call is back; not aimed elsewhere, its cleanup is this one's) */
+			ast_qualified_type pt = AST_NODE_AT(a, n)->ty;
+			uint32_t set = cc_assignment_build(a, 0, cxx_gen_var_node(c, ret_live, loc), cc_address_of_build(a, cxx_gen_var_node(c, ret_tmp, loc), loc), loc);
+
+			n = cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, n, cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, set, cc_address_of_build(a, cxx_gen_var_node(c, ret_tmp, loc), loc)));
+			n = cc_dereference_build(a, n, loc);
+			cxx_gen_prv_add(c, n, 0, 0, ret_tmp);
+		} else {
+			n = cc_dereference_build(a, n, loc);
+			cxx_gen_prv_add(c, n, expr, call, ret_tmp);
+		}
 	} else if (cc_type_is_record(a, ft->base) && c->gen_block) {
 		/* a class returned as C does: held in a temporary, so that it is an object (x().f(), a const T&) */
 		uint32_t tmp = cxx_gen_temporary(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft->base), loc);

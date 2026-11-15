@@ -456,15 +456,106 @@ VPRIV uint32_t cxx_gen_prv_aim(cxx *c, cxx_prv *p, uint32_t address)
  * than C++ says, the end of the full-expression).  0: not built: no destructor to call, or a place that
  * runs more than once or not at all for one entry of the block (a loop's condition, x && y's y).
  */
+VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body);
+VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV uint32_t cxx_gen_text(cxx *c, const char *text);
+
+/*
+ * static void __vcc_cdtor_N(T **live) { if (*live) (*live)->~T(); }: the cleanup of a temporary that an
+ * operand which may not run builds (a ? b : T(x), a && f(T(x))): *live is its address once it is built,
+ * null until then.  0: not built.
+ */
+static uint32_t cxx_gen_cond_dtor(cxx *c, ast_qualified_type t, cxx_entity *dtor)
+{
+	cc *a = c->ast;
+	uint32_t tag = AST_TYPE(a, t)->aux, body, p, inner, call, s;
+	ast_qualified_type pp = cc_type_pointer(a, cc_type_pointer(a, t));
+	cxx_entity *f, *pe;
+	cxx_scope *fs;
+	cxx_param ps[1];
+	char nm[64];
+	attrs at;
+	cc_id_list l;
+
+	for (uint32_t i = 0; i < c->gen_ncdtor; i++)
+		if (c->gen_cdtor_tag[i] == tag)
+			return c->gen_cdtor_sym[i];
+	f = calloc(1, sizeof *f);
+	f->kind = CXX_ENTITY_VALUE, f->name = vintern_cstr("__vcc_cdtor"), f->pack_index = -1;
+	f->ty = cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), &pp, 1, false);
+	f->fn_internal = 1, f->mangled = 1;
+	f->sym = cc_symbol_new(a, AST_SYMBOL_FUNCTION, f->name, f->ty, 0);
+	a->syms[f->sym].depth = 0;
+	a->syms[f->sym].sc = AST_STORAGE_STATIC;
+	snprintf(nm, sizeof nm, "__vcc_cdtor_%u", c->gen_ncdtor);
+	memset(&at, 0, sizeof at);
+	at.asmname = cxx_gen_text(c, nm) + 1;
+	cc_attribute_apply_symbol(a, &a->syms[f->sym], &at);
+	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->global, NULL);
+	ps[0].name = vintern_cstr("live"), ps[0].ty = pp;
+	pe = cxx_declare(c, fs, ps[0].name, CXX_ENTITY_VALUE);
+	if (!pe)
+		return 0;
+	pe->ty = pp;
+	if (!cxx_gen_function_begin(c, f, fs, ps, 1))
+		return 0;
+	p = cxx_gen_var_node(c, pe->sym, 0);
+	inner = cc_node_rvalue(a, cc_dereference_build(a, cc_node_rvalue(a, p), 0));
+	cxx_gen_call(c, dtor, cc_dereference_build(a, inner, 0), false, NULL, 0, 0);
+	call = c->enode, c->enode = 0;
+	if (!call) {
+		c->gen_failed = 1;
+		cxx_gen_function_end(c, f, 0);
+		return 0;
+	}
+	cc_id_list_init(&l);
+	cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_IF, 0, cc_condition_scalar(a, cc_node_rvalue(a, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, pe->sym, 0)), 0)), "statement"),
+						  cc_statement_new(a, AST_NODE_EXPRESSION, 0, call, 0, 0), 0));
+	body = cc_statement_new(a, AST_NODE_BLOCK, 0, 0, cc_id_list_freeze(a, &l), l.n);
+	cxx_gen_function_end(c, f, body);
+	if (!(a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))
+		return 0;
+	s = f->sym;
+	c->gen_cdtor_tag = realloc(c->gen_cdtor_tag, (c->gen_ncdtor + 1) * sizeof *c->gen_cdtor_tag);
+	c->gen_cdtor_sym = realloc(c->gen_cdtor_sym, (c->gen_ncdtor + 1) * sizeof *c->gen_cdtor_sym);
+	c->gen_cdtor_tag[c->gen_ncdtor] = tag, c->gen_cdtor_sym[c->gen_ncdtor++] = s;
+	return s;
+}
+
 VPRIV uint32_t cxx_gen_class_temp(cxx *c, ast_qualified_type t, uint32_t loc)
 {
 	cc *a = c->ast;
 	bool needs = cxx_gen_needs_destruction(c, t, 0);
 	cxx_entity *dtor = needs ? cxx_gen_effective_destructor(c, t, 0) : NULL;
 	uint32_t s;
+	bool cond = c->gen_cond_ok;
 
-	if (needs && (!dtor || dtor->fn_deleted || c->gen_notemp || !cxx_gen_name(c, dtor) || !dtor->sym1 || (cxx_member_body_use(c, dtor), 0)))
+	c->gen_cond_ok = 0, c->gen_cond_live = 0;
+	if (needs && (!dtor || dtor->fn_deleted || !cxx_gen_name(c, dtor) || !dtor->sym1 || (cxx_member_body_use(c, dtor), 0)))
 		return 0;
+	if (needs && c->gen_notemp) {
+		/* in an operand that may not run: T tmp; T *live = 0; (live = &tmp once built), destroyed through
+		   live (the caller sets it: cxx_gen_construct_temp) */
+		uint32_t helper, live, n;
+		attrs at;
+
+		if (!cond || !c->gen_block || !(helper = cxx_gen_cond_dtor(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), dtor)))
+			return 0;
+		s = cxx_gen_temporary(c, t, loc);
+		if (!s)
+			return 0;
+		live = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)), loc);
+		a->syms[live].sc = AST_STORAGE_AUTO;
+		n = cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, live,
+					 cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_LONG), loc), a->syms[live].ty, AST_CAST_INTEGER_TO_POINTER));
+		cc_id_list_append(a, (cc_id_list *)c->gen_block, n);
+		memset(&at, 0, sizeof at);
+		at.cleanup = helper;
+		cc_attribute_apply_symbol(a, &a->syms[live], &at);
+		c->gen_block_temps++;
+		c->gen_cond_live = live;
+		return s;
+	}
 	if (!c->gen_block)
 		return 0;
 	s = cxx_gen_temporary(c, t, loc);
