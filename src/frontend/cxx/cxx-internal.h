@@ -721,7 +721,8 @@ typedef struct cxx {
         ginit_fn; /* a namespace-scope variable's initializer is being built: the function that runs it at start-up */
     void *ginit_list; /* ... and that function's statements */
     uint32_t ginit_serial;
-    uint32_t gen_atexit_sym, gen_dso_sym;
+    uint32_t gen_atexit_sym, gen_dso_sym, gen_guard_acquire_sym,
+        gen_guard_release_sym;
     uint32_t gen_try_serial; /* try blocks so far (their trampolines' names) */
     uint8_t gen_eh_pers;
     /* the personality routine's cell was emitted */ /* it delegates to another constructor; the body has a return statement */

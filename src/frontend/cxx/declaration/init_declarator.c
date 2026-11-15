@@ -458,9 +458,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                          !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY &&
                            !AST_TYPE(c->ast, t)->n) &&
                          (!cc_type_is_record(c->ast, t) ||
-                          !cxx_gen_needs_construction_public(c, t)))
+                          !cxx_gen_needs_construction_public(c, t) ||
+                          (AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+                           !(flags & DS_CONSTEXPR))))
                     /* static int n = 3; constexpr char t[] = ...: in static storage, initialized by a constant (C's
-					   function-scope static); one with a dynamic initializer (a guard) is not built yet */
+					   function-scope static); static std::string s; a class's, constructed under a guard
+					   (cxx_gen_construct_local); a scalar's dynamic initializer is not built yet */
                     gen_local = e->sym =
                         cxx_gen_local_static(c, name, t, name_loc);
                 else if (!auto_e && t != CXX_TY_UNKNOWN &&
