@@ -2496,6 +2496,24 @@ SPEC corrected to draft 0.4 in its own commit (list in the PR).
   `--equiv` and the microbenchmarks in SPEC 22.8.  No passes exist, so
   `PASSES:` accepts only `canon`.
 
+### V4: skip reconciliation of an inherited forward edge (2026-11-15)
+
+Block entry inherits live-in register locations from its chosen predecessor.
+When the block has no parameters and is not a loop header, that predecessor's
+edge already satisfies the saved entry state. Sweep 6 skips reconciliation
+for this edge. Other predecessors still reconcile against the same snapshot.
+
+Against `db855043`, single-threaded x86-64 Linux compilation of SQLite
+3.50.4 at `-O2` used 1.37% fewer retired user instructions and 1.51% fewer
+user cycles (paired medians of eight shuffled rounds on a Ryzen 7 9700X).
+SQLite assembly matched byte for byte for arm64 and x86-64 with VIR
+verification and allocation checking. All 22 allocator fixtures and 48
+generated CFG units (384 functions) passed the sweeps. Allocation dumps
+matched the baseline with both the default and one-word live-in pools;
+350 functions actually entered the linear fallback. Under arm64 QEMU,
+the vcc suite passed 350 cases with one expected failure at `-O3` with both
+checkers enabled.
+
 ### V4, first part (2026-11-11): the allocator and the check on a synthetic target
 
 Branch `claude/vir-regalloc-impl-f22a1d` on `main` (V1's first half); no code

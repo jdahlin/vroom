@@ -1700,6 +1700,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
     vir_function *f = a->function;
     const vir_block *k = &f->blocks[b];
     uint32_t best = VIR_BLOCK_NONE, bs = 0, l = a->loops->inner[b];
+    bool loop_header = l != VIR_BLOCK_NONE && a->loops->loops[l].head == b;
     bool relocate;
 
     if (!++ax.bgen) { /* a new path state: nothing stored (the stamps wrapped: clear) */
@@ -1770,7 +1771,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
         a->options->entry(a->options->entry_context, b, best, 0,
                           VIR_REGISTER_NONE, false, "predecessor");
     /* the loop-header rule: drop values live through the loop without a use in it */
-    if (l != VIR_BLOCK_NONE && a->loops->loops[l].head == b)
+    if (loop_header)
         for (int c = 0; c < 2; c++) {
             uint32_t nr =
                          (uint32_t)__builtin_popcountll(a->registers->alloc[c]),
@@ -1883,8 +1884,7 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
                               r >= 0 ? (uint8_t)r : VIR_REGISTER_NONE,
                               ax.sst[q] == ax.bgen, decision);
     }
-    if (l != VIR_BLOCK_NONE && a->loops->loops[l].head == b &&
-        best != VIR_BLOCK_NONE && !a->linear)
+    if (loop_header && best != VIR_BLOCK_NONE && !a->linear)
         vir_alloc_loop_values_preload(a, b, l, best);
     vir_alloc_state_save(a, ax.ent_off, ax.ent_n, b);
     if (a->options && a->options->entry)
@@ -1906,6 +1906,10 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
                     g) /* bmark doubles as the "done" stamp after sweep 5 */
                 continue;
             ax.bmark[p] = g;
+            /* Live-ins keep best's locations. Only parameters and loop headers
+             * can change their placement before the entry snapshot above. */
+            if (p == best && !k->parameter_count && !loop_header)
+                continue;
             for (uint32_t s = ax.soff[p]; s < ax.soff[p + 1]; s++)
                 if (ax.succ[s] == b)
                     conform(a, p, s - ax.soff[p], b);
