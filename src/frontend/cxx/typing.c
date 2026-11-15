@@ -436,9 +436,11 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a,
          pt->kind == AST_TYPE_ENUM) &&
         ((at->kind >= AST_TYPE_BOOL && at->kind <= AST_TYPE_FLOAT128) ||
          at->kind == AST_TYPE_ENUM))
-        return pt->kind == AST_TYPE_ENUM
+        return pt->kind == AST_TYPE_ENUM || (at->kind == AST_TYPE_ENUM &&
+                                             (c->ast->tags[at->aux].flags &
+                                              AST_RECORD_FLAG_ENUM_SCOPED))
                    ? 3
-                   : 1; /* (nothing converts to an enumeration) */
+                   : 1; /* (nothing converts to an enumeration; an enum class to nothing) */
     if (pt->kind == AST_TYPE_POINTER && !pt->ext) {
         const ctype *pb = AST_TYPE(c->ast, pt->base);
         ast_qualified_type ab;

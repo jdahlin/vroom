@@ -548,6 +548,10 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
         if (!c->template_depth && (cxx_is(c, LEX_TOKEN_LEFT_BRACE) ||
                                    underlying != CXX_TY_UNKNOWN || scoped))
             cxx_enum_type(c, e, name, loc, underlying);
+        if (scoped && e && e->ty != CXX_TY_UNKNOWN &&
+            AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_ENUM)
+            c->ast->tags[AST_TYPE(c->ast, e->ty)->aux].flags |=
+                AST_RECORD_FLAG_ENUM_SCOPED;
         if (e && e->ty != CXX_TY_UNKNOWN && !c->tentative)
             cxx_tag_home_set(c, e->ty, cxx_declaration_scope(c));
         cxx_scope *es = NULL;
