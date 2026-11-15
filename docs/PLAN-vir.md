@@ -2382,6 +2382,53 @@ assemblerfilerna var byte-identiska.
 Det ger 55,5 % färre anrop. Skillnaderna i tid och max-RSS ligger inom
 spridningen mellan körningarna för båda heaparna.
 
+#### CPU-profil efter delat arbetsminne (2026-11-15)
+
+Mätt på en ren kopia av `0d72765e`, med samma SQLite 3.50.4-TU, flaggor och
+glibc som ovan. Ryzen 7 9700X, en kärna, varm filcache, ny process varje gång,
+clang 23 med produktionsflaggor och radtabeller. Tio körningar med `perf stat`
+gav i medeltal 351,1 ms väggtid, 1,739 miljarder användarcykler och 3,536
+miljarder instruktioner. I tio separata körningar var medianen för användartid
+313 ms och för systemtid 37 ms.
+
+Tio kompileringar med `perf record -e cycles:u -c 700001 --call-graph dwarf,4096`
+gav 25 104 stickprov och inga tappade prov. Andelar av hela inspelningen,
+avrundade. Egen andel inkluderar inlinad kod. Anropskedjorna överlappar och
+kan vara avkortade vid stackgränsen.
+
+| Funktion | Egen andel | Med anrop |
+|---|---:|---:|
+| vw_emit | 5,1 % | 42,4 % |
+| vir_alloc | 7,2 % | 16,7 % |
+| vw_simplify | 9,8 % | 10,2 % |
+| vw_promote | 6,3 % | 7,6 % |
+| vw_readv | 3,5 % | 6,6 % |
+| vir_canon | 3,9 % | 5,0 % |
+| vw_hslot | 4,0 % | 4,1 % |
+
+Radtabellerna förklarar var de inlinade cyklerna hamnar. Av 1 801 egna prov
+i vir_alloc låg 795 i instr med inlinade hjälpare och 723 i enter. Av 2 468
+egna prov i vw_simplify låg 968 i vw_cse_blk med inlinade hjälpare.
+
+Vektoriseraren mättes i två separata instrumenterade byggen. Båda gav samma
+assembler som det oinstrumenterade bygget, byte för byte. För tid användes
+CLOCK_MONOTONIC_RAW kring varje operation, tolv körningar, median per TU.
+Hela passet tog cirka 1,54 ms över 1 427 anrop. S.I:s 271 calloc tog cirka
+0,56 ms, inklusive eventuell nollning i libc. De 634 explicita
+rensningsslingorna tog cirka 5 µs sammanlagt, och free av S.I cirka 20 µs.
+Råmedianerna för de tre regionerna var 568, 15 och 25 µs. Två angränsande
+klockavläsningar kostade cirka 16 ns. Den justerade siffran för rensningen
+är därför ungefärlig. Senare sidfel tillskrivs inte calloc.
+
+För täckning markerades varje index som lästes eller skrevs av vektoriseraren,
+med en separat markeringstabell per funktion. Av 663 786 reserverade poster
+à 56 byte användes 3 448 distinkta poster (0,52 %). I 100 av 271 tabeller
+användes ingen post. I den största användes 58 av 46 591. Efter slingorna
+skrevs 3 667 poster med nollor, inklusive återbesök. De 35,45 MiB som
+begärdes sammanlagt säger därmed litet om kostnaden för rensningen.
+Registerallokeringens instr/enter och förenklingens vw_cse_blk är större
+mål för arbetet med kompileringstid.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
