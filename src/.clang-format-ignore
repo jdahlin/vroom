@@ -2,6 +2,7 @@
 # tables and inputs whose spelling or line numbers are part of a test.
 **
 !**/*.c
+!**/*.cpp
 !**/*.h
 test/**
 codegen/walk/prefix.h

@@ -3,7 +3,7 @@
 
 #include "ld-internal.h"
 
-int ld_thread_count = 1;	/* this link's width: --threads, else the P cores */
+int ld_thread_count = 1; /* this link's width: --threads, else the P cores */
 /* the process is one link at a time (vlink, not vccd): --threads is its task budget */
 bool ld_standalone;
 
@@ -11,13 +11,13 @@ bool ld_standalone;
    all tiny (a link of four small objects) stays on the caller */
 VPRIV void ld_parallel_for(size_t n, ld_parallel_function fn, void *arg)
 {
-	vtask_parallel_for(n, ld_thread_count, fn, arg, VTASK_SMALL_ITEMS);
+    vtask_parallel_for(n, ld_thread_count, fn, arg, VTASK_SMALL_ITEMS);
 }
 
 /* the width of a link without --threads */
 VPRIV int ld_parallel_default_width(void)
 {
-	int n = vtask_cpus_probe().performance;
+    int n = vtask_cpus_probe().performance;
 
-	return n > 64 ? 64 : n;
+    return n > 64 ? 64 : n;
 }

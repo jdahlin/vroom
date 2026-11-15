@@ -9,8 +9,10 @@
 
 VPRIV bool em_xor_not(cc *c, ast_qualified_type ty, int op, i128 rhs)
 {
-	if (op != LEX_TOKEN_CARET || !codegen_type_is_integer(c, ty) || codegen_type_is_bitint(c, ty))
-		return false;
-	uint64_t size = codegen_type_size(c, ty);
-	return (size == 4 || size == 8) && codegen_integer_truncate(c, rhs, ty) == codegen_integer_truncate(c, -1, ty);
+    if (op != LEX_TOKEN_CARET || !codegen_type_is_integer(c, ty) ||
+        codegen_type_is_bitint(c, ty))
+        return false;
+    uint64_t size = codegen_type_size(c, ty);
+    return (size == 4 || size == 8) && codegen_integer_truncate(c, rhs, ty) ==
+                                           codegen_integer_truncate(c, -1, ty);
 }

@@ -9,15 +9,19 @@
  */
 #include "codegen-internal.h"
 
-VPRIV codegen_binding *codegen_symbol_binding_get(codegen_context *e, uint32_t s)
+VPRIV codegen_binding *codegen_symbol_binding_get(codegen_context *e,
+                                                  uint32_t s)
 {
-	return &e->bindings[s];
+    return &e->bindings[s];
 }
 
 VPRIV bool codegen_symbol_is_local_variable(cc *c, uint32_t s)
 {
-	const sym *y = &c->syms[s];
+    const sym *y = &c->syms[s];
 
-	return y->kind == AST_SYMBOL_VARIABLE && y->depth > 0 && (y->sc == AST_STORAGE_AUTO || y->sc == AST_STORAGE_REGISTER || (y->flags & AST_SYMBOL_FLAG_PARAMETER) ||
-						   (y->sc == AST_STORAGE_NONE && !(y->flags & AST_SYMBOL_FLAG_GLOBAL)));
+    return y->kind == AST_SYMBOL_VARIABLE && y->depth > 0 &&
+           (y->sc == AST_STORAGE_AUTO || y->sc == AST_STORAGE_REGISTER ||
+            (y->flags & AST_SYMBOL_FLAG_PARAMETER) ||
+            (y->sc == AST_STORAGE_NONE &&
+             !(y->flags & AST_SYMBOL_FLAG_GLOBAL)));
 }

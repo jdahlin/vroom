@@ -18,37 +18,39 @@ static pthread_cond_t vccd_queue_condition = PTHREAD_COND_INITIALIZER;
 /* false: the queue is full and fd was closed (the shim reports an error) */
 VPRIV bool vccd_queue_push(int fd)
 {
-	{
-		VLOCK(vccd_queue_lock);
-		if (vccd_queue_tail - vccd_queue_head < VCCD_QUEUE_SIZE) {
-			vccd_queue_fds[vccd_queue_tail++ % VCCD_QUEUE_SIZE] = fd;
-			pthread_cond_signal(&vccd_queue_condition);
-			return true;
-		}
-	}
-	close(fd);
-	return false;
+    {
+        VLOCK(vccd_queue_lock);
+        if (vccd_queue_tail - vccd_queue_head < VCCD_QUEUE_SIZE) {
+            vccd_queue_fds[vccd_queue_tail++ % VCCD_QUEUE_SIZE] = fd;
+            pthread_cond_signal(&vccd_queue_condition);
+            return true;
+        }
+    }
+    close(fd);
+    return false;
 }
 _Atomic int vccd_active_count;
 VPRIV int vccd_queue_pop(void)
 {
-	int fd;
+    int fd;
 
-	VLOCK(vccd_queue_lock);
-	while (vccd_queue_head == vccd_queue_tail)
-		pthread_cond_wait(&vccd_queue_condition, &vccd_queue_lock);
-	fd = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
-	atomic_fetch_add(&vccd_active_count, 1);	/* under the lock: vccd_server_drain_exit never sees it in neither place */
-	return fd;
+    VLOCK(vccd_queue_lock);
+    while (vccd_queue_head == vccd_queue_tail)
+        pthread_cond_wait(&vccd_queue_condition, &vccd_queue_lock);
+    fd = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+    atomic_fetch_add(
+        &vccd_active_count,
+        1); /* under the lock: vccd_server_drain_exit never sees it in neither place */
+    return fd;
 }
 
 /* the shared pool's jobs: one socket each, or -1 when a restart already
    answered the queued ones */
 VPRIV int vccd_queue_pop_try(void)
 {
-	VLOCK(vccd_queue_lock);
-	if (vccd_queue_head == vccd_queue_tail)
-		return -1;
-	atomic_fetch_add(&vccd_active_count, 1);
-	return vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+    VLOCK(vccd_queue_lock);
+    if (vccd_queue_head == vccd_queue_tail)
+        return -1;
+    atomic_fetch_add(&vccd_active_count, 1);
+    return vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
 }

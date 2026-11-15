@@ -10,15 +10,16 @@
 
 VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs)
 {
-	if (*op != LEX_TOKEN_STAR || !codegen_type_is_integer(c, ty) || codegen_type_is_bitint(c, ty))
-		return false;
-	uint64_t size = codegen_type_size(c, ty);
-	if (size != 4 && size != 8)
-		return false;
-	uint64_t factor = size == 4 ? (uint32_t)*rhs : (uint64_t)*rhs;
-	if (factor < 2 || (factor & (factor - 1)))
-		return false;
-	*op = LEX_TOKEN_LESS_LESS;
-	*rhs = __builtin_ctzll(factor);
-	return true;
+    if (*op != LEX_TOKEN_STAR || !codegen_type_is_integer(c, ty) ||
+        codegen_type_is_bitint(c, ty))
+        return false;
+    uint64_t size = codegen_type_size(c, ty);
+    if (size != 4 && size != 8)
+        return false;
+    uint64_t factor = size == 4 ? (uint32_t)*rhs : (uint64_t)*rhs;
+    if (factor < 2 || (factor & (factor - 1)))
+        return false;
+    *op = LEX_TOKEN_LESS_LESS;
+    *rhs = __builtin_ctzll(factor);
+    return true;
 }

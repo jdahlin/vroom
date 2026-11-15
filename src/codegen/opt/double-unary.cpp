@@ -8,20 +8,24 @@
 
 VPRIV uint32_t em_double_unary(codegen_context *e, uint32_t n)
 {
-	cc *c = e->compile_context;
-	const node *x = N(n), *inner, *operand;
-	uint64_t size;
+    cc *c = e->compile_context;
+    const node *x = N(n), *inner, *operand;
+    uint64_t size;
 
-	if (!e->unit->options->opt || e->unit->cleanups_disabled || x->op != AST_NODE_UNARY ||
-	    (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
-		return 0;
-	inner = N(x->a);
-	if (inner->op != AST_NODE_UNARY || inner->aux != x->aux)
-		return 0;
-	operand = N(inner->a);
-	if (AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(inner->ty) || AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(operand->ty) ||
-	    !codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty))
-		return 0;
-	size = codegen_type_size(c, x->ty);
-	return size == 4 || size == 8 ? inner->a : 0;
+    if (!e->unit->options->opt || e->unit->cleanups_disabled ||
+        x->op != AST_NODE_UNARY ||
+        (x->aux != LEX_TOKEN_MINUS && x->aux != LEX_TOKEN_TILDE))
+        return 0;
+    inner = N(x->a);
+    if (inner->op != AST_NODE_UNARY || inner->aux != x->aux)
+        return 0;
+    operand = N(inner->a);
+    if (AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) !=
+            AST_QUALIFIED_TYPE_UNQUALIFIED(inner->ty) ||
+        AST_QUALIFIED_TYPE_UNQUALIFIED(x->ty) !=
+            AST_QUALIFIED_TYPE_UNQUALIFIED(operand->ty) ||
+        !codegen_type_is_integer(c, x->ty) || codegen_type_is_bitint(c, x->ty))
+        return 0;
+    size = codegen_type_size(c, x->ty);
+    return size == 4 || size == 8 ? inner->a : 0;
 }

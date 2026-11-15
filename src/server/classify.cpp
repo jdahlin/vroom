@@ -14,13 +14,15 @@
 /* -E on a named file or stdin: vcc's preprocessor handles it */
 VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r)
 {
-	bool e = false;
-	const char *last = r->argv[r->argc - 1];
+    bool e = false;
+    const char *last = r->argv[r->argc - 1];
 
-	for (int i = 1; i < r->argc; i++)
-		e |= !strcmp(r->argv[i], "-E");
-	return e && vccd_own_preprocessor && (!strcmp(last, "-") || (last[0] != '-' && (strstr(last, ".c") || strstr(last, ".S") ||
-						  strstr(last, ".dts") || strstr(last, ".lds"))));
+    for (int i = 1; i < r->argc; i++)
+        e |= !strcmp(r->argv[i], "-E");
+    return e && vccd_own_preprocessor &&
+           (!strcmp(last, "-") ||
+            (last[0] != '-' && (strstr(last, ".c") || strstr(last, ".S") ||
+                                strstr(last, ".dts") || strstr(last, ".lds"))));
 }
 /*
  * -c or -S of a named .c or .S file or of stdin (`-`) for aarch64 Linux: vcc
@@ -33,61 +35,87 @@ VPRIV bool vccd_request_is_preprocess(const struct vccd_request *r)
 /* options whose value is the next argument (so it is not an input) */
 static bool vccd_option_takes_value(const char *a)
 {
-	static const char *const v[] = {
-		"-o", "-I", "-D", "-U", "-include", "-imacros", "-isystem", "-idirafter", "-iquote", "-iprefix",
-		"-iwithprefix", "-isysroot", "-MF", "-MT", "-MQ", "-x", "-Xclang", "-Xassembler", "-Xpreprocessor",
-		"-mllvm", "--param", "-arch", "-target", "-include-pch", "--sysroot",
-	};
+    static const char *const v[] = {
+        "-o",
+        "-I",
+        "-D",
+        "-U",
+        "-include",
+        "-imacros",
+        "-isystem",
+        "-idirafter",
+        "-iquote",
+        "-iprefix",
+        "-iwithprefix",
+        "-isysroot",
+        "-MF",
+        "-MT",
+        "-MQ",
+        "-x",
+        "-Xclang",
+        "-Xassembler",
+        "-Xpreprocessor",
+        "-mllvm",
+        "--param",
+        "-arch",
+        "-target",
+        "-include-pch",
+        "--sysroot",
+    };
 
-	for (size_t k = 0; k < sizeof v / sizeof *v; k++)
-		if (!strcmp(a, v[k]))
-			return true;
-	return false;
+    for (size_t k = 0; k < sizeof v / sizeof *v; k++)
+        if (!strcmp(a, v[k]))
+            return true;
+    return false;
 }
 
 /* `-v` and nothing to do (no input, no -c/-S/-E/-###): the version banner */
 VPRIV bool vccd_request_is_version_banner(const struct vccd_request *r)
 {
-	bool v = false;
+    bool v = false;
 
-	for (int i = 1; i < r->argc; i++) {
-		const char *a = r->argv[i];
+    for (int i = 1; i < r->argc; i++) {
+        const char *a = r->argv[i];
 
-		if (!strcmp(a, "-v"))
-			v = true;
-		else if (a[0] != '-' || !a[1] || !strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E") || !strcmp(a, "-###"))
-			return false;
-		else if (vccd_option_takes_value(a))
-			i++;
-	}
-	return v;
+        if (!strcmp(a, "-v"))
+            v = true;
+        else if (a[0] != '-' || !a[1] || !strcmp(a, "-c") || !strcmp(a, "-S") ||
+                 !strcmp(a, "-E") || !strcmp(a, "-###"))
+            return false;
+        else if (vccd_option_takes_value(a))
+            i++;
+    }
+    return v;
 }
 
 /* the one input of a compile: a .c or .S file anywhere on the line or "-", NULL if none or several */
 VPRIV const char *vccd_request_input_find(const struct vccd_request *r)
 {
-	const char *in = NULL;
+    const char *in = NULL;
 
-	for (int i = 1; i < r->argc; i++) {
-		const char *a = r->argv[i];
-		size_t n = strlen(a);
+    for (int i = 1; i < r->argc; i++) {
+        const char *a = r->argv[i];
+        size_t n = strlen(a);
 
-		if (!strcmp(a, "-")) {	/* stdin (Kconfig's cc-version.sh, tools-support-relr.sh) */
-			if (in)
-				return NULL;
-			in = a;
-			continue;
-		}
-		if (a[0] == '-') {
-			if (vccd_option_takes_value(a))
-				i++;
-			continue;
-		}
-		if (n < 3 || a[n - 2] != '.' || (a[n - 1] != 'c' && a[n - 1] != 'S') || in)
-			return NULL;	/* another kind of input (.o, .s, ...) or a second one */
-		in = a;
-	}
-	return in;
+        if (!strcmp(
+                a,
+                "-")) { /* stdin (Kconfig's cc-version.sh, tools-support-relr.sh) */
+            if (in)
+                return NULL;
+            in = a;
+            continue;
+        }
+        if (a[0] == '-') {
+            if (vccd_option_takes_value(a))
+                i++;
+            continue;
+        }
+        if (n < 3 || a[n - 2] != '.' || (a[n - 1] != 'c' && a[n - 1] != 'S') ||
+            in)
+            return NULL; /* another kind of input (.o, .s, ...) or a second one */
+        in = a;
+    }
+    return in;
 }
 
 /* a host program's compile (no --target) is vcc's on an arm64 Mac, the target it defaults to */
@@ -99,35 +127,39 @@ VPRIV const char *vccd_request_input_find(const struct vccd_request *r)
 
 VPRIV bool vccd_request_is_compile(const struct vccd_request *r)
 {
-	bool c = false, linux_target = false, target = false;
+    bool c = false, linux_target = false, target = false;
 
-	if (!vccd_own_compiler || !vccd_request_input_find(r))
-		return false;
-	for (int i = 1; i < r->argc; i++) {
-		const char *a = r->argv[i];
+    if (!vccd_own_compiler || !vccd_request_input_find(r))
+        return false;
+    for (int i = 1; i < r->argc; i++) {
+        const char *a = r->argv[i];
 
-		if (a[0] != '-')
-			continue;
-		if (!strcmp(a, "-c"))
-			c = true;
-		else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
-			linux_target = target = true;
-		else if (!strncmp(a, "--target=x86_64-", 16) && (strstr(a, "-mingw32") || strstr(a, "-windows-gnu")))
-			linux_target = target = true;	/* (Windows x64, PLAN-win64.md: vcc's own too) */
-		else if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target") || !strcmp(a, "-arch"))
-			target = true;
-		else if (!strcmp(a, "-S"))
-			c = true;	/* assembly text: the same job */
-		else if (!strcmp(a, "-E") ||
-			 !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm"))
-			return false;
-		else if (!strcmp(a, "-x") && i + 1 < r->argc && strcmp(r->argv[i + 1], "c") &&
-			 strcmp(r->argv[i + 1], "assembler-with-cpp"))
-			return false;
-		else if (vccd_option_takes_value(a))
-			i++;
-	}
-	return c && (linux_target || (VCCD_HOST_PROGRAMS_ENABLED && !target));
+        if (a[0] != '-')
+            continue;
+        if (!strcmp(a, "-c"))
+            c = true;
+        else if (!strncmp(a, "--target=aarch64-", 17) && strstr(a, "-linux"))
+            linux_target = target = true;
+        else if (!strncmp(a, "--target=x86_64-", 16) &&
+                 (strstr(a, "-mingw32") || strstr(a, "-windows-gnu")))
+            linux_target = target =
+                true; /* (Windows x64, PLAN-win64.md: vcc's own too) */
+        else if (!strncmp(a, "--target=", 9) || !strcmp(a, "-target") ||
+                 !strcmp(a, "-arch"))
+            target = true;
+        else if (!strcmp(a, "-S"))
+            c = true; /* assembly text: the same job */
+        else if (!strcmp(a, "-E") || !strcmp(a, "-shared") ||
+                 !strcmp(a, "-emit-llvm"))
+            return false;
+        else if (!strcmp(a, "-x") && i + 1 < r->argc &&
+                 strcmp(r->argv[i + 1], "c") &&
+                 strcmp(r->argv[i + 1], "assembler-with-cpp"))
+            return false;
+        else if (vccd_option_takes_value(a))
+            i++;
+    }
+    return c && (linux_target || (VCCD_HOST_PROGRAMS_ENABLED && !target));
 }
 
 /*
@@ -137,45 +169,52 @@ VPRIV bool vccd_request_is_compile(const struct vccd_request *r)
  */
 VPRIV bool vccd_request_is_host_link(const struct vccd_request *r)
 {
-	const char *in = vccd_request_input_find(r);
-	size_t n;
-	bool out = false;
+    const char *in = vccd_request_input_find(r);
+    size_t n;
+    bool out = false;
 
-	if (!VCCD_HOST_PROGRAMS_ENABLED || !vccd_own_compiler || !in || !strcmp(in, "-") || (n = strlen(in)) < 3 || strcmp(in + n - 2, ".c"))
-		return false;
-	for (int i = 1; i < r->argc; i++) {
-		const char *a = r->argv[i];
+    if (!VCCD_HOST_PROGRAMS_ENABLED || !vccd_own_compiler || !in ||
+        !strcmp(in, "-") || (n = strlen(in)) < 3 || strcmp(in + n - 2, ".c"))
+        return false;
+    for (int i = 1; i < r->argc; i++) {
+        const char *a = r->argv[i];
 
-		if (!strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E") || !strcmp(a, "-M") || !strcmp(a, "-MM") ||
-		    !strcmp(a, "-x") || !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm") || !strcmp(a, "-###") ||
-		    !strcmp(a, "-v") || !strncmp(a, "-print-", 7) || !strncmp(a, "--target=", 9) ||
-		    !strcmp(a, "-target") || !strcmp(a, "-arch"))
-			return false;
-		if (!strcmp(a, "-o") && i + 1 < r->argc)
-			out = true;
-		if (vccd_option_takes_value(a))
-			i++;
-	}
-	return out;
+        if (!strcmp(a, "-c") || !strcmp(a, "-S") || !strcmp(a, "-E") ||
+            !strcmp(a, "-M") || !strcmp(a, "-MM") || !strcmp(a, "-x") ||
+            !strcmp(a, "-shared") || !strcmp(a, "-emit-llvm") ||
+            !strcmp(a, "-###") || !strcmp(a, "-v") ||
+            !strncmp(a, "-print-", 7) || !strncmp(a, "--target=", 9) ||
+            !strcmp(a, "-target") || !strcmp(a, "-arch"))
+            return false;
+        if (!strcmp(a, "-o") && i + 1 < r->argc)
+            out = true;
+        if (vccd_option_takes_value(a))
+            i++;
+    }
+    return out;
 }
 
 /* VCC_DELEGATE: -c of a named .c file (the last argument), nothing vcc's driver would not do */
-VPRIV bool vccd_request_is_delegated_compile(const struct vccd_request *r, const char *skip)
+VPRIV bool vccd_request_is_delegated_compile(const struct vccd_request *r,
+                                             const char *skip)
 {
-	const char *last = r->argv[r->argc - 1];
-	size_t n = strlen(last);
-	bool c = false;
+    const char *last = r->argv[r->argc - 1];
+    size_t n = strlen(last);
+    bool c = false;
 
-	if (!vccd_own_compiler || last[0] == '-' || n < 3 || strcmp(last + n - 2, ".c") || (skip && *skip && strstr(last, skip)))
-		return false;
-	for (int i = 1; i < r->argc - 1; i++) {
-		const char *a = r->argv[i];
+    if (!vccd_own_compiler || last[0] == '-' || n < 3 ||
+        strcmp(last + n - 2, ".c") || (skip && *skip && strstr(last, skip)))
+        return false;
+    for (int i = 1; i < r->argc - 1; i++) {
+        const char *a = r->argv[i];
 
-		if (!strcmp(a, "-c"))
-			c = true;
-		else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-M") || !strcmp(a, "-MM") || !strcmp(a, "-x") ||
-			 !strcmp(a, "-") || !strcmp(a, "-emit-llvm") || !strncmp(a, "-print-", 7) || !strcmp(a, "-###"))
-			return false;
-	}
-	return c;
+        if (!strcmp(a, "-c"))
+            c = true;
+        else if (!strcmp(a, "-E") || !strcmp(a, "-S") || !strcmp(a, "-M") ||
+                 !strcmp(a, "-MM") || !strcmp(a, "-x") || !strcmp(a, "-") ||
+                 !strcmp(a, "-emit-llvm") || !strncmp(a, "-print-", 7) ||
+                 !strcmp(a, "-###"))
+            return false;
+    }
+    return c;
 }

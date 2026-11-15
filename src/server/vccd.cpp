@@ -56,238 +56,250 @@
 
 #include "vccd-internal.h"
 
-const char *vccd_backend_socket;	/* vroomd (clang), only if given */
-const char *vccd_linker_backend;		/* links run this (vroom-ld), only if given */
+const char *vccd_backend_socket; /* vroomd (clang), only if given */
+const char *vccd_linker_backend; /* links run this (vroom-ld), only if given */
 bool vccd_log_requests, vccd_own_preprocessor = true, vccd_own_compiler = true;
-char vccd_self_executable[4096];	/* our own binary (realpath), for a restart */
-uint64_t vccd_self_build_id;	/* vccd_build_id of our own binary */
-char vccd_tool_directory[4096];	/* where vccd and its shims live (realpath) */
+char vccd_self_executable[4096]; /* our own binary (realpath), for a restart */
+uint64_t vccd_self_build_id;     /* vccd_build_id of our own binary */
+char vccd_tool_directory[4096];  /* where vccd and its shims live (realpath) */
 static bool vccd_peer_is_us(int c)
 {
 #ifdef __APPLE__
-	uid_t u;
-	gid_t g;
+    uid_t u;
+    gid_t g;
 
-	return !getpeereid(c, &u, &g) && u == geteuid();
+    return !getpeereid(c, &u, &g) && u == geteuid();
 #else
-	struct ucred cr;
-	socklen_t l = sizeof(cr);
+    struct ucred cr;
+    socklen_t l = sizeof(cr);
 
-	return !getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cr, &l) && cr.uid == geteuid();
+    return !getsockopt(c, SOL_SOCKET, SO_PEERCRED, &cr, &l) &&
+           cr.uid == geteuid();
 #endif
 }
 
 int main(int argc, char **argv)
 {
-	const char *sock = NULL;
-	char ddir[1024], dsock[1100];
-	struct sockaddr_un sa = { .sun_family = AF_UNIX };
+    const char *sock = NULL;
+    char ddir[1024], dsock[1100];
+    struct sockaddr_un sa = {.sun_family = AF_UNIX};
 #ifdef __APPLE__
-	struct kevent ev;
+    struct kevent ev;
 #endif
-	/* make never has more than -j requests in flight, and compiles are CPU bound:
+    /* make never has more than -j requests in flight, and compiles are CPU bound:
 	 * two per core leaves room for the ones that block (recipes waiting on
 	 * their tools, spawned tools) without a thread per possible connection */
-	int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i, listen_fd = -1, jobs = 0;
-	bool shared_pool = getenv("VCCD_SHARED_POOL") && !strcmp(getenv("VCCD_SHARED_POOL"), "1");
+    int nworkers = 2 * (int)sysconf(_SC_NPROCESSORS_ONLN), ls, kq, i,
+        listen_fd = -1, jobs = 0;
+    bool shared_pool =
+        getenv("VCCD_SHARED_POOL") && !strcmp(getenv("VCCD_SHARED_POOL"), "1");
 
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "--sock") && i + 1 < argc)
-			sock = argv[++i];
-		else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
-			listen_fd = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
-			vccd_backend_socket = argv[++i];
-		else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
-			vccd_linker_backend = argv[++i];
-		else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
-			vccd_linker_backend = argv[++i];	/* (old name of --ld) */
-		else if (!strcmp(argv[i], "-j") && i + 1 < argc)
-			nworkers = jobs = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "--shared-pool"))
-			shared_pool = true;
-		else {
-			fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld P] [-j N] [--shared-pool]\n");
-			return 2;
-		}
-	}
-	/* the shared pool's threads (emit helpers, link phases) run compiler code
+    for (i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--sock") && i + 1 < argc)
+            sock = argv[++i];
+        else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
+            listen_fd = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
+            vccd_backend_socket = argv[++i];
+        else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
+            vccd_linker_backend = argv[++i];
+        else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
+            vccd_linker_backend = argv[++i]; /* (old name of --ld) */
+        else if (!strcmp(argv[i], "-j") && i + 1 < argc)
+            nworkers = jobs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--shared-pool"))
+            shared_pool = true;
+        else {
+            fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld "
+                            "P] [-j N] [--shared-pool]\n");
+            return 2;
+        }
+    }
+    /* the shared pool's threads (emit helpers, link phases) run compiler code
 	   as the workers do: the same stack, so input nests as deep on either */
-	vtask_stack_size_set(VCCD_WORKER_STACK_SIZE);
-	vccd_log_requests = getenv("VCC_LOG");
-	{	/* the shims next to vccd: recipes may run them here (rsh) */
-		char self[4096], *sl;
+    vtask_stack_size_set(VCCD_WORKER_STACK_SIZE);
+    vccd_log_requests = getenv("VCC_LOG");
+    { /* the shims next to vccd: recipes may run them here (rsh) */
+        char self[4096], *sl;
 
-		if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
-			vccd_self_build_id = vccd_build_id(self);
-			snprintf(vccd_self_executable, sizeof(vccd_self_executable), "%s", self);
-			*sl = 0;
-			snprintf(vccd_tool_directory, sizeof(vccd_tool_directory), "%s", self);
-		}
-	}
-	/* without a backend vcc does all of it */
-	vccd_own_preprocessor = !vccd_backend_socket || !getenv("VCC_PP") || strcmp(getenv("VCC_PP"), "0");
-	vccd_own_compiler = !vccd_backend_socket || !getenv("VCC_CC") || strcmp(getenv("VCC_CC"), "0");
-	signal(SIGPIPE, SIG_IGN);
+        if (realpath(argv[0], self) && (sl = strrchr(self, '/'))) {
+            vccd_self_build_id = vccd_build_id(self);
+            snprintf(vccd_self_executable, sizeof(vccd_self_executable), "%s",
+                     self);
+            *sl = 0;
+            snprintf(vccd_tool_directory, sizeof(vccd_tool_directory), "%s",
+                     self);
+        }
+    }
+    /* without a backend vcc does all of it */
+    vccd_own_preprocessor = !vccd_backend_socket || !getenv("VCC_PP") ||
+                            strcmp(getenv("VCC_PP"), "0");
+    vccd_own_compiler = !vccd_backend_socket || !getenv("VCC_CC") ||
+                        strcmp(getenv("VCC_CC"), "0");
+    signal(SIGPIPE, SIG_IGN);
 
-	if (!sock) {
-		if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
-			fprintf(stderr, "vccd: %s is not a private directory of ours\n", ddir);
-			return 1;
-		}
-		sock = dsock;
-	}
-	vccd_restart_argc = argc, vccd_restart_argv = argv, vccd_socket_path = sock;
-	if (listen_fd >= 0) {	/* re-exec'ed after a memory restart: the same socket */
-		ls = vccd_listen_fd = listen_fd;
-		fcntl(ls, F_SETFD, FD_CLOEXEC);
-		goto listening;
-	}
-	unlink(sock);
-	strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
-	ls = socket(AF_UNIX, SOCK_STREAM, 0);
-	vccd_listen_fd = ls;
-	{	/* the socket is 0600 whatever the umask: the peer check below is the real gate */
-		mode_t um = umask(077);
-		int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
+    if (!sock) {
+        if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), 1)) {
+            fprintf(stderr, "vccd: %s is not a private directory of ours\n",
+                    ddir);
+            return 1;
+        }
+        sock = dsock;
+    }
+    vccd_restart_argc = argc, vccd_restart_argv = argv, vccd_socket_path = sock;
+    if (listen_fd >=
+        0) { /* re-exec'ed after a memory restart: the same socket */
+        ls = vccd_listen_fd = listen_fd;
+        fcntl(ls, F_SETFD, FD_CLOEXEC);
+        goto listening;
+    }
+    unlink(sock);
+    strncpy(sa.sun_path, sock, sizeof(sa.sun_path) - 1);
+    ls = socket(AF_UNIX, SOCK_STREAM, 0);
+    vccd_listen_fd = ls;
+    { /* the socket is 0600 whatever the umask: the peer check below is the real gate */
+        mode_t um = umask(077);
+        int bad = ls < 0 || bind(ls, (struct sockaddr *)&sa, sizeof(sa));
 
-		umask(um);
-		if (bad || listen(ls, 1024)) {
-			perror("vccd: socket");
-			return 1;
-		}
-	}
+        umask(um);
+        if (bad || listen(ls, 1024)) {
+            perror("vccd: socket");
+            return 1;
+        }
+    }
 listening:
-	fcntl(ls, F_SETFL, O_NONBLOCK);
+    fcntl(ls, F_SETFL, O_NONBLOCK);
 #ifndef __APPLE__
-	{	/* USR1/TERM go to the signalfd below: block them before the workers inherit the mask */
-		sigset_t ss;
+    { /* USR1/TERM go to the signalfd below: block them before the workers inherit the mask */
+        sigset_t ss;
 
-		sigemptyset(&ss);
-		sigaddset(&ss, SIGUSR1);
-		sigaddset(&ss, SIGTERM);
-		pthread_sigmask(SIG_BLOCK, &ss, NULL);
-	}
+        sigemptyset(&ss);
+        sigaddset(&ss, SIGUSR1);
+        sigaddset(&ss, SIGTERM);
+        pthread_sigmask(SIG_BLOCK, &ss, NULL);
+    }
 #endif
 
-	if (shared_pool) {
-		vtask_budget_set(jobs > 0 ? jobs : vtask_jobs_from_environment(0));
-		if (vccd_log_requests)
-			fprintf(stderr, "vccd: shared pool, budget %d\n", vtask_budget());
-	}
-	for (i = 0; i < (shared_pool ? 0 : nworkers); i++) {
-		pthread_t t;
-		pthread_attr_t at;
+    if (shared_pool) {
+        vtask_budget_set(jobs > 0 ? jobs : vtask_jobs_from_environment(0));
+        if (vccd_log_requests)
+            fprintf(stderr, "vccd: shared pool, budget %d\n", vtask_budget());
+    }
+    for (i = 0; i < (shared_pool ? 0 : nworkers); i++) {
+        pthread_t t;
+        pthread_attr_t at;
 
-		pthread_attr_init(&at);
-		pthread_attr_setstacksize(&at, VCCD_WORKER_STACK_SIZE);
-		pthread_create(&t, &at, vccd_worker_main, NULL);
-		pthread_attr_destroy(&at);
-	}
+        pthread_attr_init(&at);
+        pthread_attr_setstacksize(&at, VCCD_WORKER_STACK_SIZE);
+        pthread_create(&t, &at, vccd_worker_main, NULL);
+        pthread_attr_destroy(&at);
+    }
 
-	/* accept thread: kqueue (epoll on Linux), drain the backlog on every wakeup */
+    /* accept thread: kqueue (epoll on Linux), drain the backlog on every wakeup */
 #ifdef __APPLE__
-	kq = kqueue();
-	EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
-	if (kq < 0 || kevent(kq, &ev, 1, NULL, 0, NULL) < 0) {
-		perror("vccd: kqueue");
-		return 1;
-	}
-	signal(SIGUSR1, SIG_IGN);
-	signal(SIGTERM, SIG_IGN);
-	EV_SET(&ev, SIGUSR1, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
-	EV_SET(&ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent(kq, &ev, 1, NULL, 0, NULL);
-	for (;;) {
-		struct kevent out;
-		struct timespec tick = { 0, 50000000 };	/* (a restart waits for vccd_accept_park) */
-		int nev;
+    kq = kqueue();
+    EV_SET(&ev, ls, EVFILT_READ, EV_ADD, 0, 0, NULL);
+    if (kq < 0 || kevent(kq, &ev, 1, NULL, 0, NULL) < 0) {
+        perror("vccd: kqueue");
+        return 1;
+    }
+    signal(SIGUSR1, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+    EV_SET(&ev, SIGUSR1, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+    kevent(kq, &ev, 1, NULL, 0, NULL);
+    EV_SET(&ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
+    kevent(kq, &ev, 1, NULL, 0, NULL);
+    for (;;) {
+        struct kevent out;
+        struct timespec tick = {
+            0, 50000000}; /* (a restart waits for vccd_accept_park) */
+        int nev;
 
-		vccd_accept_park();
-		if ((nev = kevent(kq, NULL, 0, &out, 1, &tick)) == 0)
-			continue;
-		if (nev < 0) {
-			if (errno == EINTR)
-				continue;
-			perror("vccd: kevent");
-			return 1;
-		}
-		if (out.filter == EVFILT_SIGNAL) {
-			vccd_counters_print();
-			if (out.ident == SIGTERM)
-				vccd_server_drain_exit(ls, sock);
-			continue;
-		}
+        vccd_accept_park();
+        if ((nev = kevent(kq, NULL, 0, &out, 1, &tick)) == 0)
+            continue;
+        if (nev < 0) {
+            if (errno == EINTR)
+                continue;
+            perror("vccd: kevent");
+            return 1;
+        }
+        if (out.filter == EVFILT_SIGNAL) {
+            vccd_counters_print();
+            if (out.ident == SIGTERM)
+                vccd_server_drain_exit(ls, sock);
+            continue;
+        }
 #else
-	/* Linux: epoll on the listening socket and a signalfd for USR1/TERM */
-	{
-		sigset_t ss;
-		struct epoll_event e = { .events = EPOLLIN };
-		int sfd;
+    /* Linux: epoll on the listening socket and a signalfd for USR1/TERM */
+    {
+        sigset_t ss;
+        struct epoll_event e = {.events = EPOLLIN};
+        int sfd;
 
-		sigemptyset(&ss);
-		sigaddset(&ss, SIGUSR1);
-		sigaddset(&ss, SIGTERM);
-		sfd = signalfd(-1, &ss, SFD_CLOEXEC);
-		kq = epoll_create1(EPOLL_CLOEXEC);
-		e.data.fd = ls;
-		if (kq < 0 || sfd < 0 || epoll_ctl(kq, EPOLL_CTL_ADD, ls, &e) < 0) {
-			perror("vccd: epoll");
-			return 1;
-		}
-		e.data.fd = sfd;
-		epoll_ctl(kq, EPOLL_CTL_ADD, sfd, &e);
-		for (;;) {
-			struct epoll_event out;
-			int nev;
+        sigemptyset(&ss);
+        sigaddset(&ss, SIGUSR1);
+        sigaddset(&ss, SIGTERM);
+        sfd = signalfd(-1, &ss, SFD_CLOEXEC);
+        kq = epoll_create1(EPOLL_CLOEXEC);
+        e.data.fd = ls;
+        if (kq < 0 || sfd < 0 || epoll_ctl(kq, EPOLL_CTL_ADD, ls, &e) < 0) {
+            perror("vccd: epoll");
+            return 1;
+        }
+        e.data.fd = sfd;
+        epoll_ctl(kq, EPOLL_CTL_ADD, sfd, &e);
+        for (;;) {
+            struct epoll_event out;
+            int nev;
 
-			vccd_accept_park();
-			if ((nev = epoll_wait(kq, &out, 1, 50)) == 0)
-				continue;
-			if (nev < 0) {
-				if (errno == EINTR)
-					continue;
-				perror("vccd: epoll_wait");
-				return 1;
-			}
-			if (out.data.fd == sfd) {
-				struct signalfd_siginfo si;
+            vccd_accept_park();
+            if ((nev = epoll_wait(kq, &out, 1, 50)) == 0)
+                continue;
+            if (nev < 0) {
+                if (errno == EINTR)
+                    continue;
+                perror("vccd: epoll_wait");
+                return 1;
+            }
+            if (out.data.fd == sfd) {
+                struct signalfd_siginfo si;
 
-				if (read(sfd, &si, sizeof si) != sizeof si)
-					continue;
-				vccd_counters_print();
-				if (si.ssi_signo == SIGTERM)
-					vccd_server_drain_exit(ls, sock);
-				continue;
-			}
+                if (read(sfd, &si, sizeof si) != sizeof si)
+                    continue;
+                vccd_counters_print();
+                if (si.ssi_signo == SIGTERM)
+                    vccd_server_drain_exit(ls, sock);
+                continue;
+            }
 #endif
-		for (;;) {
-			int c;
+        for (;;) {
+            int c;
 
-			if (atomic_load(&vccd_generation_restart_pending))
-				break;	/* (parks at the loop's top) */
-			c = accept(ls, NULL, NULL);
+            if (atomic_load(&vccd_generation_restart_pending))
+                break; /* (parks at the loop's top) */
+            c = accept(ls, NULL, NULL);
 
-			if (c < 0)
-				break;
-			if (!vccd_peer_is_us(c)) {	/* another user: refused before reading anything */
-				close(c);
-				continue;
-			}
-			fcntl(c, F_SETFL, 0);	/* BSD: accept() inherits O_NONBLOCK */
-			fcntl(c, F_SETFD, FD_CLOEXEC);
-			{	/* the shim sends its request right after connecting: a client that
+            if (c < 0)
+                break;
+            if (!vccd_peer_is_us(
+                    c)) { /* another user: refused before reading anything */
+                close(c);
+                continue;
+            }
+            fcntl(c, F_SETFL, 0); /* BSD: accept() inherits O_NONBLOCK */
+            fcntl(c, F_SETFD, FD_CLOEXEC);
+            { /* the shim sends its request right after connecting: a client that
 				   stays silent frees its worker instead of holding it */
-				struct timeval tv = { 2, 0 };
+                struct timeval tv = {2, 0};
 
-				setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-			}
-			if (vccd_queue_push(c) && shared_pool)
-				vtask_spawn(vccd_worker_pool_job, NULL);
-		}
-	}
+                setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            }
+            if (vccd_queue_push(c) && shared_pool)
+                vtask_spawn(vccd_worker_pool_job, NULL);
+        }
+    }
 #ifndef __APPLE__
-	}
+}
 #endif
 }

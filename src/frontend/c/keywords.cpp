@@ -10,12 +10,14 @@
 
 static const char *const vkeyword_names[] = {
 #define X(k) #k,
-	KEYWORDS(X)
+    KEYWORDS(X)
 #undef X
-	"__VA_ARGS__", "__VA_OPT__",
+        "__VA_ARGS__",
+    "__VA_OPT__",
 };
 
 __attribute__((constructor)) static void vkeyword_register(void)
 {
-	vintern_preset(vkeyword_names, sizeof(vkeyword_names) / sizeof(vkeyword_names[0]));
+    vintern_preset(vkeyword_names,
+                   sizeof(vkeyword_names) / sizeof(vkeyword_names[0]));
 }

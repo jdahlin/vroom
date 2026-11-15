@@ -3,4 +3,4 @@ repos:
     rev: v23.1.5
     hooks:
       - id: clang-format
-        files: ^src/.*\.[ch]$
+        files: ^src/.*\.(c|cpp|h)$

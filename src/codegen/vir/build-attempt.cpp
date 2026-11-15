@@ -27,10 +27,9 @@
 #include "port/performance-counters.h"
 
 /* every reason VIR gives up on a function (failure.h); vfail points at a message of this table */
-const virbuild_failure_info
-    virbuild_failure_table[VIRBUILD_FAILURE_COUNT] = {
+const virbuild_failure_info virbuild_failure_table[VIRBUILD_FAILURE_COUNT] = {
 #define X(name, message) {#name, message},
-        VIRBUILD_FAILURES(X)
+    VIRBUILD_FAILURES(X)
 #undef X
 };
 
