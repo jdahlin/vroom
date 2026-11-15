@@ -1452,6 +1452,15 @@ static bool virbuild_vectorize_update_depends_on_parameter(virbuild_context *V,
     return false;
 }
 
+static bool virbuild_vectorize_require_infos(virbuild_vectorize_state *S)
+{
+    if (!S->infos) {
+        S->infos = calloc((size_t)S->value_count + 1, sizeof *S->infos);
+        S->out_of_memory = !S->infos;
+    }
+    return S->infos != NULL;
+}
+
 static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 {
     codegen_context *e = S->context;
@@ -1517,26 +1526,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
                 S, "an initial value from inside the loop");
         N = V->insns[nx].insn;
         if (virbuild_vectorize_step_chain_find(S, p, nx, &K, &kb)) {
-            virbuild_vectorize_info *ii = virbuild_vectorize_info_get(S, init),
-                                    kk = {.kind = VIRBUILD_VECTORIZE_KIND_INV,
-                                          .is_exact = 1,
-                                          .step = K};
-            bool rep = virbuild_vectorize_info_combine(&r, ii, &kk, 1);
-
-            if (S->nind == 32)
-                return virbuild_vectorize_reject(S, "too many inductions");
-            r.kind = VIRBUILD_VECTORIZE_KIND_LIN,
-            r.is_exact = rep && ii->is_exact && (ty != VIR_TYPE_I32 || kb);
-            if (!r.is_exact && rep && ii->is_exact && K == 1 &&
-                virbuild_vectorize_loop_test_is_unsigned_less(S, p) &&
-                (!virbuild_vectorize_info_is_constant(ii) || ii->constant >= 0))
-                r.is_exact = r.is_unsigned =
-                    1; /* (below an unsigned bound, stepping 1: it cannot wrap) */
-            if (!r.is_exact && ty != VIR_TYPE_I32)
-                return virbuild_vectorize_reject(
-                    S, "an induction without a linear form");
-            S->indk[S->nind] = K;
-            S->ind[S->nind++] = p;
+            r.kind = VIRBUILD_VECTORIZE_KIND_LIN;
         } else if ((ty == S->fty &&
                     ((N.op == VIR_OP_FADD || N.op == VIR_OP_FMUL) &&
                          (virbuild_value_resolve(V, N.a) == p ||
@@ -1581,9 +1571,35 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
                        : "a value carried around the loop that is neither an "
                          "induction nor a sum");
         }
+        if (!virbuild_vectorize_require_infos(S))
+            return false;
+        if (r.kind == VIRBUILD_VECTORIZE_KIND_LIN) {
+            virbuild_vectorize_info *ii = virbuild_vectorize_info_get(S, init),
+                                    kk = {.kind = VIRBUILD_VECTORIZE_KIND_INV,
+                                          .is_exact = 1,
+                                          .step = K};
+            bool rep = virbuild_vectorize_info_combine(&r, ii, &kk, 1);
+
+            if (S->nind == 32)
+                return virbuild_vectorize_reject(S, "too many inductions");
+            r.is_exact = rep && ii->is_exact && (ty != VIR_TYPE_I32 || kb);
+            if (!r.is_exact && rep && ii->is_exact && K == 1 &&
+                virbuild_vectorize_loop_test_is_unsigned_less(S, p) &&
+                (!virbuild_vectorize_info_is_constant(ii) || ii->constant >= 0))
+                r.is_exact = r.is_unsigned =
+                    1; /* (below an unsigned bound, stepping 1: it cannot wrap) */
+            if (!r.is_exact && ty != VIR_TYPE_I32)
+                return virbuild_vectorize_reject(
+                    S, "an induction without a linear form");
+            S->indk[S->nind] = K;
+            S->ind[S->nind++] = p;
+        }
         x = virbuild_vectorize_info_touch(S, p);
         *x = r;
     }
+    /* Loops without live header parameters first need records here. */
+    if (!virbuild_vectorize_require_infos(S))
+        return false;
     /* the instructions, in the order they run */
     for (uint32_t i = 0; i < S->loop_block_count; i++) {
         uint32_t b = S->loop_blocks[i], tt = V->blocks[b].terminator;
@@ -2253,10 +2269,9 @@ VPRIV void virbuild_function_vectorize(codegen_context *e)
                                         S.predecessor_index];
         if (S.predecessor == S.latch)
             continue;
-        if (!S.infos) {
-            S.infos = calloc((size_t)S.value_count + 1, sizeof *S.infos);
+        if (!S.in_loop) {
             S.in_loop = calloc((size_t)V->block_count + 1, 1);
-            if (!S.infos || !S.in_loop)
+            if (!S.in_loop)
                 break;
         }
         for (uint32_t k = 0; k < S.loop_block_count; k++)
@@ -2275,6 +2290,8 @@ VPRIV void virbuild_function_vectorize(codegen_context *e)
             continue;
         }
         done = on->vectorize && virbuild_vectorize_loop(&S);
+        if (S.out_of_memory)
+            break;
         if (done)
             virbuild_vectorize_blocks_place(&S);
         if (on->hoist_loop_constants) {

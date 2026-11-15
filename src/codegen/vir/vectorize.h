@@ -50,6 +50,7 @@ typedef struct virbuild_vectorize_state {
     uint32_t value_count; /* per value below n0 */
     uint32_t *touched;
     uint32_t touched_count, touched_capacity;
+    bool out_of_memory;
     uint8_t *in_loop;                           /* per block: in the loop */
     uint32_t loop_blocks[64], loop_block_count; /* the loop's blocks, H first */
     uint32_t header, predecessor, latch, exit, predecessor_index,
