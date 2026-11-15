@@ -261,6 +261,16 @@ static int cxx_class_converts_to(cxx *c, cxx_scope *cls, ast_qualified_type to, 
 static bool cxx_class_converts_class(cxx *c, cxx_scope *cls, ast_qualified_type to, int depth);
 static int cxx_class_constructs(cxx *c, ast_qualified_type to, const ast_qualified_type *args, const uint8_t *lval, uint32_t n, bool implicit);
 
+/* is t a scoped enumeration's type (enum class) */
+VPRIV bool cxx_enum_is_scoped(cxx *c, ast_qualified_type t)
+{
+	t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+	for (uint32_t i = 0; i < c->nscoped_enums; i++)
+		if (c->scoped_enums[i] == t)
+			return true;
+	return false;
+}
+
 static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
@@ -295,7 +305,7 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, boo
 		return pt->n == at->n && AST_QUALIFIED_TYPE_UNQUALIFIED(pt->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(at->base) ? 0 : 3;
 	if (((pt->kind >= AST_TYPE_BOOL && pt->kind <= AST_TYPE_FLOAT128) || pt->kind == AST_TYPE_ENUM) &&
 	    ((at->kind >= AST_TYPE_BOOL && at->kind <= AST_TYPE_FLOAT128) || at->kind == AST_TYPE_ENUM))
-		return pt->kind == AST_TYPE_ENUM ? 3 : 1;	/* (nothing converts to an enumeration) */
+		return pt->kind == AST_TYPE_ENUM || (at->kind == AST_TYPE_ENUM && cxx_enum_is_scoped(c, a)) ? 3 : 1;	/* (nothing converts to an enumeration; a scoped one converts to nothing) */
 	if (pt->kind == AST_TYPE_POINTER && !pt->ext) {
 		const ctype *pb = AST_TYPE(c->ast, pt->base);
 		ast_qualified_type ab;

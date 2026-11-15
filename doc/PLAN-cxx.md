@@ -2716,3 +2716,17 @@ gröna (144/144, 38/38, mangle).  Strikt bänk: pass 28, 111 saknas.
   i jsons egen `operator=` blir fel (`is_nothrow_move_assignable<json>`, unit-concepts).
 Test: `run/single-user-conversion.cpp`.  Sviter gröna (145/145, 38/38,
 mangle).  Strikt bänk: pass 28, 112 saknas.
+
+## Status 175 (2026-11-16)
+- En scoped enum (`enum class`) omvandlas inte implicit till ett heltal: en
+  aritmetisk parameter är inte valbar för den (förut rang 2, en standard-
+  omvandling).  Test: `run/scoped-enum-no-conversion.cpp`.
+- Valet av partiell specialisering för en mall med samma argument som redan
+  väljs längre upp (en egenskap som beror på sig själv: libc++:s
+  `__is_ostreamable` genom `operator<<(_Stream&&, const _Tp&)`) ger
+  primärmallen i stället för okänt.
+- Kvar: libc++:s `_And<...>` beräknar alla element där clang slutar vid
+  första misslyckade substitution ([temp.deduct]/7); doctests
+  `has_insertion_operator<value_t>` blir därför okänd (unit-inspection,
+  unit-modifiers).  En funktion med bara `...` som parametrar får ingen kod.
+Sviter gröna (146/146, 38/38, mangle).  Strikt bänk: pass 29, 108 saknas.

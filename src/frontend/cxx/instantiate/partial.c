@@ -278,7 +278,34 @@ VPRIV int cxx_partial_constraints(cxx *c, cxx_partial *p, const cxx_targ *bind)
  * The partial specialization the arguments select: 0 none (the primary template), 1 one (*pick,
  * its parameters in bind), -1 not known (a pattern that cannot be evaluated, an ambiguity).
  */
+static int cxx_partial_select1(cxx *c, cxx_template *t, const cxx_targ *args, uint32_t n, cxx_partial **pick, cxx_targ *bind);
+
+/*
+ * (A selection that needs itself -- __is_ostreamable<ostream&, const E&>'s decltype(os << e), whose candidates
+ * include libc++'s operator<<(_Stream&&, const _Tp&) constrained by that same __is_ostreamable: clang never
+ * gets there, substitution stops at is_base_of<ios_base, ostream&>, [temp.deduct]/7, where vcc evaluates every
+ * element of _And): the primary template, the trait false.)
+ */
+static __thread struct { cxx_template *t; const cxx_targ *args; uint32_t n; } cxx_partial_active[32];
+static __thread uint32_t cxx_partial_nactive;
+
 VPRIV int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uint32_t n, cxx_partial **pick, cxx_targ *bind)
+{
+	int r;
+
+	for (uint32_t i = 0; i < cxx_partial_nactive; i++)
+		if (cxx_partial_active[i].t == t && cxx_partial_active[i].n == n && cxx_args_equal(cxx_partial_active[i].args, args, n))
+			return 0;
+	if (cxx_partial_nactive == 32)
+		return -1;
+	cxx_partial_active[cxx_partial_nactive].t = t, cxx_partial_active[cxx_partial_nactive].args = args, cxx_partial_active[cxx_partial_nactive].n = n;
+	cxx_partial_nactive++;
+	r = cxx_partial_select1(c, t, args, n, pick, bind);
+	cxx_partial_nactive--;
+	return r;
+}
+
+static int cxx_partial_select1(cxx *c, cxx_template *t, const cxx_targ *args, uint32_t n, cxx_partial **pick, cxx_targ *bind)
 {
 	cxx_partial *cand[16];
 	uint32_t ncand = 0;

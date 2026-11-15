@@ -515,6 +515,8 @@ typedef struct cxx {
 	cxx_argset carg_sets[16];	/* the last argument list's arguments that are untyped names of functions */
 	cxx_argset op_rset, op_rset_cur;
 	cxx_argset gen_call_sets[16];
+	ast_qualified_type *scoped_enums;	/* the scoped enumerations' types (enum class: no implicit conversion to an integer) */
+	uint32_t nscoped_enums, cscoped_enums;
 	struct cxx_late_tbody { struct cxx_entity *te; cxx_targ *args; uint32_t n; } *late_tbodies;	/* instances used before their template's definition */
 	uint32_t nlate_tbodies, clate_tbodies;	/* the next cxx_gen_call's arguments that are names of functions (as gen_call_brace) */	/* a binary operator's right operand that is one (pending; the resolution's) */
 	uint8_t gen_value_init;		/* the next cxx_gen_construct_at with no arguments is value-initialization (T{}, x = {}): zeroed first */
@@ -853,6 +855,7 @@ VPRIV bool cxx_template_id_spell(cxx *c, cxx_entity *te, const cxx_targ *a, uint
 
 /* expressions' types (typing.c) */
 VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue);
+VPRIV bool cxx_enum_is_scoped(cxx *c, ast_qualified_type t);
 VPRIV struct cxx_entity *cxx_function_for_target(cxx *c, const cxx_argset *as, ast_qualified_type p);
 VPRIV void cxx_argset_take(cxx *c, cxx_argset *as);
 VPRIV uint32_t cxx_gen_argset_value(cxx *c, const cxx_argset *as, ast_qualified_type p, uint32_t loc);

@@ -467,6 +467,11 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
 
 		if (!c->template_depth && (cxx_is(c, LEX_TOKEN_LEFT_BRACE) || underlying != CXX_TY_UNKNOWN || scoped))
 			cxx_enum_type(c, e, name, loc, underlying);
+		if (scoped && e && e->ty != CXX_TY_UNKNOWN && !c->tentative && !cxx_enum_is_scoped(c, e->ty)) {
+			if (c->nscoped_enums == c->cscoped_enums)
+				c->scoped_enums = realloc(c->scoped_enums, (c->cscoped_enums = c->cscoped_enums ? c->cscoped_enums * 2 : 16) * sizeof *c->scoped_enums);
+			c->scoped_enums[c->nscoped_enums++] = AST_QUALIFIED_TYPE_UNQUALIFIED(e->ty);
+		}
 		if (e && e->ty != CXX_TY_UNKNOWN && !c->tentative)
 			cxx_tag_home_set(c, e->ty, cxx_declaration_scope(c));
 		cxx_scope *es = NULL;
