@@ -2497,3 +2497,17 @@ char16_t, char32_t; `u8` är char som i C++11).  Litteraloperatorer
 manglas `li<n>_x`; `"..."_x` anropar dem med strängen och dess längd.
 Tester: `run/string-literal-kinds.cpp`, `run/udl-string.cpp`.  Sviter gröna
 (115/115, 38/38, mangle); strikt bänk pass 10, 152 saknas (fler kroppar nås).
+
+## Status 158 (2026-11-15)
+- `x = v` och `x += v` med en skalär `x` och ett klassobjekt `v`: `v`:s
+  konverteringsfunktion (jsons `position_t` till `size_t` i SAX-parsrarna).
+  Test: `run/assign-class-to-scalar.cpp`.
+- Ett klassargument för en parameter av en annan klass (by value, inte en
+  bas): argumentets konverteringsfunktion till parameterns klass (jsons
+  `binary_writer<uint8_t>(o)`, `output_adapter` till `output_adapter_t`).
+  Test: `run/class-arg-conversion-function.cpp`.
+- En inline-variabel av en tom klass som initieras med `= T()`
+  (`std::piecewise_construct`) definieras svag och nollad, i stället för en
+  deklaration vars adress blev noll.  Test: `run/inline-var-empty-class.cpp`.
+Sviter gröna (118/118, 38/38, mangle).  Strikt bänk: pass 13, 117 saknas
+(från 152), ett testfel och tre länkfel att se på.

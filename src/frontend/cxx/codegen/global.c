@@ -353,6 +353,28 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, ast_qualified_type
 		ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
 		cc_id_list_append(a, c->ginit_list, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
 	}
+	if (ok && !dtor && ((cc_id_list *)c->ginit_list)->n && (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE) &&
+	    (!picked || picked->fn_constexpr || picked->fn_defaulted)) {
+		/* an inline variable of an empty class whose construction does nothing to see (inline constexpr
+		   piecewise_construct_t piecewise_construct = piecewise_construct_t()): its byte, zero, defined weak as
+		   every TU's copy is */
+		bool pod, empty;
+
+		if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &pod, &empty) && empty) {
+			sym *y;
+			attrs at;
+
+			cxx_gen_global_finish(c, false);
+			y = &a->syms[v->sym];
+			if (!(y->attrs && a->attr[y->attrs].weak)) {
+				memset(&at, 0, sizeof at);
+				at.weak = 1;
+				cc_attribute_apply_symbol(a, y, &at);
+			}
+			cxx_gen_global_zeroed(c, v);
+			return;
+		}
+	}
 	if (ok && ((cc_id_list *)c->ginit_list)->n && (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE)) {
 		/* an inline variable built at start-up: not here (another TU's copy may be the one linked, constant
 		   and read-only: written to, it faults; strong_ordering::less, whose constexpr constructor is not

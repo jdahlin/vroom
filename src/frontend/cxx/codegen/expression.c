@@ -634,6 +634,14 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 			return;
 		}
 	}
+	if (!cc_type_is_record(c->ast, AST_NODE_AT(c->ast, l)->ty) && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, r)->ty) &&
+	    AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, r)->ty) != AST_TYPE_ARRAY) {
+		/* x = v, x += v of a scalar from a class object: its conversion function to x's type (json's
+		   position_t to size_t) */
+		r = cxx_gen_bind(c, r, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty), loc);
+		if (!r)
+			return;
+	}
 	if (!base && c->nullptr_ty && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, r)->ty) == c->nullptr_ty && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, l)->ty) == AST_TYPE_POINTER) {
 		/* p = v of a std::nullptr_t object (std::__exchange(p, nullptr)): the null pointer it holds */
 		r = cxx_gen_bind(c, r, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(c->ast, l)->ty), loc);

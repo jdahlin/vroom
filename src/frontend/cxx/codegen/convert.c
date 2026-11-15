@@ -123,6 +123,21 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, ast_qualified_type pt,
 	if (AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) == t && !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE))
 		return 0;	/* (a prvalue of the class that is not a call's: not built yet) */
 	{
+		/* an object of another class, not derived from the parameter's: the prvalue its conversion function to
+		   the parameter's class gives (json's output_adapter to output_adapter_t, a shared_ptr) */
+		ast_qualified_type xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
+		uint64_t off;
+		uint32_t vk, y;
+
+		if (xt != t && cc_type_is_record(a, xt) && AST_TYPE_KIND(a, xt) != AST_TYPE_ARRAY && (AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) &&
+		    !cxx_class_base_offset(c, xt, t, &off, 0) && !cxx_class_vbase_path(c, xt, t, &vk, &off) &&
+		    (y = cxx_gen_convert_class(c, x, t, loc)) && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) == t && cxx_gen_prv_find(c, y)) {
+			c->call_picked = call_picked, c->call_resolved = call_resolved, c->none_viable = none_viable;
+			c->etype = etype, c->elval = elval, c->econst = econst, c->evalue = evalue, c->einvalid = einvalid;
+			return cc_address_of_build(a, y, loc);
+		}
+	}
+	{
 		/* an object of a class derived from the parameter's: its base subobject, copied (priority_tag<4>{} for
 		   priority_tag<1>) */
 		ast_qualified_type xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
