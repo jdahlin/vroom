@@ -31,6 +31,18 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 
         memcpy(saved, c->packs_seen, sizeof saved);
         c->npacks_seen = 0, c->packs_overflow = 0;
+        /* T x{.a = 1, .b{2}}: a designated aggregate initializer (C++20), not a constructor's
+           arguments; as in cxx_braced_init_list_parse, the list is no flat one */
+        if (open == LEX_TOKEN_LEFT_BRACE && cxx_is(c, LEX_TOKEN_PERIOD) &&
+            cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER) {
+            cxx_advance(c);
+            cxx_advance(c);
+            if (!cxx_accept(c, LEX_TOKEN_EQUAL) &&
+                !cxx_is(c, LEX_TOKEN_LEFT_BRACE))
+                cxx_fail(c, "expected '=' after a designator");
+            unknown = true;
+            start = c->pos;
+        }
         /* a braced list as an argument: typed here, no code (an initializer_list's element built from it
 		   re-parses it there: cxx_gen_initializer_list) */
         bool brace = cxx_is(
