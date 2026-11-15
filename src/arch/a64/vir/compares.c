@@ -104,7 +104,7 @@ VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in,
         2, 0, 0, 8, 0, 4, 0, 0}; /* nzcv satisfying a condition */
     codegen_context *e = L->context;
     int x = a64_vir_value_is_64_bit(L->function, in->a), code = in->flags & 15,
-        cc, rn, rm = -1;
+        condition, rn, rm = -1;
     int64_t k = 0;
     bool imm = false;
     uint32_t w;
@@ -130,16 +130,16 @@ VPRIV void a64_vir_compare_chained_lower(a64_vir_context *L, const vir_insn *in,
         a64_record_emit_move_immediate(e, 1, rm, k);
         imm = false;
     }
-    cc = a64_vir_integer_condition_codes[code];
+    condition = a64_vir_integer_condition_codes[code];
     w = (imm && k < 0 ? 0x3a400000u : 0x7a400000u) | (unsigned)x << 31 |
         (unsigned)(isor ? L->chain_condition ^ 1 : L->chain_condition) << 12 |
-        (unsigned)(rn & 31) << 5 | sat[isor ? cc : cc ^ 1];
+        (unsigned)(rn & 31) << 5 | sat[isor ? condition : condition ^ 1];
     if (imm)
         w |= 0x800u | (unsigned)(k < 0 ? -k : k) << 16;
     else
         w |= (unsigned)(rm & 31) << 16;
     a64_record_emit_word(e, w);
-    L->chain_condition = cc;
+    L->chain_condition = condition;
 }
 
 /* the flags of a condition value (operand 0): the fused compare's, else `cmp w, #0` and NE */

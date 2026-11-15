@@ -140,7 +140,7 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
     bool is_union = cxx_is_kw(c, CXX_KW_union),
          is_class = cxx_is_kw(c, CXX_KW_class);
     uint32_t key_loc = cxx_peek(c, 0)->loc, key_pos = c->pos,
-             attrs = c->layout_attributes;
+             initial_attributes = c->layout_attributes;
 
     c->attr_align =
         0; /* (the class head's alignas: this class's alignment, cxx_class_begin) */
@@ -302,8 +302,8 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
             c, specialization ? explicit_instance : e, name, key_loc, is_union,
             is_template || c->template_depth       ? CXX_SKIP_TEMPLATE
             : specialization && !explicit_instance ? CXX_SKIP_SPECIALIZATION
-            : c->layout_attributes != attrs        ? CXX_SKIP_ATTRIBUTE
-                                                   : -1,
+            : c->layout_attributes != initial_attributes ? CXX_SKIP_ATTRIBUTE
+                                                         : -1,
             is_class);
         if (packed)
             cxx_class_packed(c);

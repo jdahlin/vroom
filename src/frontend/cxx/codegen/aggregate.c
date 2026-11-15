@@ -214,11 +214,14 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
                 /* a reference member: bound, its referent's address stored (the member as a plain pointer) */
                 ast_qualified_type rp = cc_type_pointer(a,
                                                         AST_TYPE(a, ft)->base),
-                                   pp = cc_type_pointer(a, rp);
+                                   pointer_to_reference =
+                                       cc_type_pointer(a, rp);
                 uint32_t addr = cc_address_of_build(a, m, loc);
 
                 m = cc_dereference_build(
-                    a, cc_cast_insert(a, addr, pp, AST_CAST_NOP), loc);
+                    a,
+                    cc_cast_insert(a, addr, pointer_to_reference, AST_CAST_NOP),
+                    loc);
                 cc_id_list_append(
                     a, out,
                     cc_statement_new(a, AST_NODE_EXPRESSION, loc,
