@@ -49,7 +49,7 @@ VPRIV uint32_t cxx_keyword_of(uint32_t id)
 
 /* a keyword of the TU's standard, as clang: C++11's and C++20's are identifiers before them
    (libc++'s C++03 mode defines nullptr, decltype, static_assert and typedefs char16_t), and
-   __char16_t/__char32_t spell char16_t/char32_t in every mode */
+   __char16_t/__char32_t/__decltype spell char16_t/char32_t/decltype in every mode */
 static uint16_t cxx_keyword_in(cxx *c, uint32_t id)
 {
 	uint16_t kw = (uint16_t)cxx_keyword_of(id);
@@ -58,6 +58,7 @@ static uint16_t cxx_keyword_in(cxx *c, uint32_t id)
 	switch (kw) {
 	case CXX_KW___char16_t: return CXX_KW_char16_t;
 	case CXX_KW___char32_t: return CXX_KW_char32_t;
+	case CXX_KW___decltype: return CXX_KW_decltype;	/* (libc++'s decltype before C++11) */
 	case CXX_KW_alignas: case CXX_KW_alignof: case CXX_KW_char16_t: case CXX_KW_char32_t: case CXX_KW_constexpr:
 	case CXX_KW_decltype: case CXX_KW_noexcept: case CXX_KW_nullptr: case CXX_KW_static_assert: case CXX_KW_thread_local:
 		return std >= 11 ? kw : 0;

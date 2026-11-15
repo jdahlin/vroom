@@ -1360,9 +1360,17 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 			m->c->mangle_guess = 1;	/* (the parameter's type not read: clang may write Tn <its type> here) */
 		if ((vt && vt[0] == 'b') || (lt && AST_TYPE_KIND(m->c->ast, lt) == AST_TYPE_BOOL))
 			mg_str(m, (*x).v ? "1" : "0");
-		else
-		mg_text(m, num, (size_t)snprintf(num, sizeof num, (*x).v < 0 ? "n%llu" : "%llu",
-						 (unsigned long long)((*x).v < 0 ? 0 - (uint64_t)(*x).v : (uint64_t)(*x).v)));
+		else {
+			/* (of an unsigned type: its bits, 1ULL << 63 is 9223372036854775808, not n...) */
+			int uk = lt ? (int)AST_TYPE_KIND(m->c->ast, lt) : -1;
+			bool uns = (vt && vt[0] && !vt[1] && strchr("htjmy", vt[0])) || uk == AST_TYPE_UNSIGNED_CHAR ||
+				   uk == AST_TYPE_UNSIGNED_SHORT || uk == AST_TYPE_UNSIGNED_INT || uk == AST_TYPE_UNSIGNED_LONG ||
+				   uk == AST_TYPE_UNSIGNED_LONG_LONG;
+			bool neg = (*x).v < 0 && !uns;
+
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, neg ? "n%llu" : "%llu",
+							 (unsigned long long)(neg ? 0 - (uint64_t)(*x).v : (uint64_t)(*x).v)));
+		}
 		mg_str(m, "E");
 	} else if ((*x).kind == 4 && (*x).v) {
 		/* a template as the argument (std::map for basic_json's ObjectType): its name, a substitution
@@ -1455,7 +1463,11 @@ static void mg_class_component(cxx_mangler *m, cxx_scope *s, ast_qualified_type 
 	} else {
 		cxx_scope *outer = mg_enclosing(m, s);
 
-		if (!s->owner || s->owner->name <= 1) {
+		uint32_t name = s->owner ? s->owner->name : 0;
+
+		if (name <= 1)
+			name = m->c->ast->tags[AST_TYPE(m->c->ast, t)->aux].name;	/* (its typedef name for linkage) */
+		if (name <= 1) {
 			m->bad = true;	/* (an unnamed class: its own numbering, later) */
 			return;
 		}
@@ -1463,7 +1475,7 @@ static void mg_class_component(cxx_mangler *m, cxx_scope *s, ast_qualified_type 
 			mg_str(m, "St");
 		else
 			mg_prefix(m, outer);
-		mg_source_name(m, s->owner->name);
+		mg_source_name(m, name);
 	}
 	mg_remember(m, CXX_SUB_TYPE, NULL, t);
 }
@@ -1526,8 +1538,9 @@ static void mg_class_type(cxx_mangler *m, ast_qualified_type t)
 		return;
 	}
 	outer = instance ? home : mg_enclosing(m, s);
-	if (!instance && s && s->owner && s->owner->name > 1) {
-		/* a local class: Z <its function's encoding> E <name> ([class.local]; the first of its name only) */
+	if (!instance && s) {
+		/* a local class: Z <its function's encoding> E <name> ([class.local]; the first of its name only);
+		   an unnamed one $_<its tag> as clang's $_<n> (internal: any name unique in the TU) */
 		const cxx_scope *b;
 		cxx_entity *fn = NULL;
 
@@ -1546,7 +1559,16 @@ static void mg_class_type(cxx_mangler *m, ast_qualified_type t)
 			mg_str(m, "Z");
 			mg_str(m, enc + 2);
 			mg_str(m, "E");
-			mg_source_name(m, s->owner->name);
+			uint32_t lname = s->owner && s->owner->name > 1 ? s->owner->name : m->c->ast->tags[AST_TYPE(m->c->ast, t)->aux].name;
+
+			if (lname > 1)
+				mg_source_name(m, lname);
+			else {
+				char num[32];
+				int n = snprintf(num, sizeof num, "$_%u", (unsigned)AST_TYPE(m->c->ast, t)->aux);
+
+				mg_text(m, num, (size_t)snprintf(num, sizeof num, "%d$_%u", n, (unsigned)AST_TYPE(m->c->ast, t)->aux));
+			}
 			mg_remember(m, CXX_SUB_TYPE, NULL, t);
 			return;
 		}

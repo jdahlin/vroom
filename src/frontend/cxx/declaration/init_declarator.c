@@ -276,6 +276,18 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					cxx_class_unverifiable(c);
 				if (type_of_typedef && type_of_typedef->members && !typedef_dependent)
 					e->members = type_of_typedef->members, e->specs = type_of_typedef->specs, e->nspecs = type_of_typedef->nspecs;
+				/* typedef struct { } E;: the unnamed class or enumeration takes E as its name for linkage
+				   (a function of E is _Z3foo1E, as clang's) */
+				if (t != CXX_TY_UNKNOWN && !AST_QUALIFIED_TYPE_QUALIFIERS(t) && !typedef_dependent) {
+					const ctype *tx = AST_TYPE(c->ast, t);
+
+					if ((tx->kind == AST_TYPE_STRUCT || tx->kind == AST_TYPE_UNION || tx->kind == AST_TYPE_ENUM) &&
+					    c->ast->tags[tx->aux].name <= 1) {
+						c->ast->tags[tx->aux].name = name;
+						if (tx->kind == AST_TYPE_ENUM && !cxx_tag_home(c, t) && !c->tentative)
+							cxx_tag_home_set(c, t, cxx_declaration_scope(c));	/* (an unnamed one has none yet) */
+					}
+				}
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */

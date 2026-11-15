@@ -626,6 +626,13 @@ VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
+/* the expression's type is a 64-bit unsigned one: a negative evalue is its value 2^63 and up (1ULL << 63) */
+static inline bool cxx_etype_unsigned64(const cxx *c)
+{
+	int k = c->etype != CXX_TY_UNKNOWN ? (int)AST_TYPE_KIND(c->ast, c->etype) : -1;
+
+	return k == AST_TYPE_UNSIGNED_LONG || k == AST_TYPE_UNSIGNED_LONG_LONG;
+}
 VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, ast_qualified_type underlying);
 VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);
