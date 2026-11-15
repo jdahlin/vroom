@@ -2564,3 +2564,11 @@ eller länkfel; 117 funktioner saknas.
   verkliga orsaken.
 Sviter gröna (125/125, 38/38, mangle).  Strikt bänk: pass 18, inga test-
 eller länkfel.
+
+## Status 163 (2026-11-15)
+`__builtin_common_type<Tmpl, TypeIdentity, Empty, Ts...>` (libc++:s
+`std::common_type`, som bas): de avklädda typerna, lika eller aritmetiska
+(vanliga aritmetiska omvandlingar), vikta från vänster; annars Empty.
+Inbyggda mallar tolkas nu även som basspecificerare.  jsons
+`value_in_range_of` kompileras.  Test: `run/builtin-common-type.cpp`.
+Sviter gröna (126/126, 38/38, mangle).  Strikt bänk: pass 18, 115 saknas.

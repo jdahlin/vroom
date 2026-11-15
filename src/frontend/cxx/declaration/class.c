@@ -26,6 +26,28 @@ VPRIV ast_qualified_type cxx_base_specifier_parse(cxx *c, cxx_scope *cs, bool *v
 		cxx_accept_kw(c, CXX_KW_template);
 		if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
 			cxx_fail(c, "expected a base class name");
+		if (!q && !dep && cxx_builtin_kind(cxx_peek(c, 0)->id) == CXX_BUILTIN_TEMPLATE && cxx_peek(c, 1)->kind == LEX_TOKEN_LESS) {
+			/* a builtin template as the base (libc++'s common_type : __builtin_common_type<...>): its result */
+			uint32_t id = cxx_peek(c, 0)->id;
+
+			cxx_advance(c);
+			cxx_template_arguments_parse(c);
+			c->last_type = NULL;
+			if (!c->template_depth && !c->tentative)
+				cxx_builtin_template(c, id, c->targs, c->ntargs);
+			if (c->last_type && c->last_type->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, c->last_type->ty)) {
+				cxx_scope *bs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(c->last_type->ty));
+
+				base_ty = c->last_type->ty;
+				if (bs)
+					cxx_scope_use(c, cs, bs);
+				else
+					cs->has_dependent_base = 1;
+			} else
+				cs->has_dependent_base = 1;
+			*virtual_out = is_virtual;
+			return base_ty;
+		}
 		base = cxx_name_lookup(c, q, dep, cxx_peek(c, 0)->id);
 		cxx_advance(c);
 		if (cxx_is(c, LEX_TOKEN_LESS)) {

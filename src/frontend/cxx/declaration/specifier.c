@@ -172,6 +172,7 @@ no:
  * clang's builtin templates, as far as libc++ uses them:
  *   __make_integer_seq<Seq, T, N>     Seq<T, 0, 1, ..., N-1>
  *   __type_pack_element<I, Ts...>     the I-th of Ts
+ *   __builtin_common_type<Tmpl, TypeIdentity, Empty, Ts...>   TypeIdentity<common type> or Empty
  * The result goes to c->last_type (unknown otherwise).
  */
 VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a, uint32_t n)
@@ -196,6 +197,55 @@ VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a, uint32_t
 		r->kind = CXX_ENTITY_TYPE, r->ty = a[a[0].v + 1].t, r->pack_index = -1;
 		r->members = cxx_type_class_scope(c, r->ty);
 		c->last_type = r, c->last_type_dependent = 0;
+	} else if (v->len == 21 && !memcmp(v->s, "__builtin_common_type", 21) && n >= 4 && a[1].kind == 4 && a[1].v && a[2].kind == 1) {
+		/* __builtin_common_type<Tmpl, TypeIdentity, Empty, Ts...>: TypeIdentity<the common type of Ts>, else Empty
+		   ([meta.trans.other]: libc++'s std::common_type).  Here: each type decayed; equal ones, and arithmetic
+		   ones by the usual arithmetic conversions, folded left to right (anything else: none, Empty) */
+		ast_qualified_type ct = CXX_TY_UNKNOWN;
+
+		for (uint32_t i = 3; i < n; i++) {
+			ast_qualified_type d;
+			const ctype *x;
+
+			if (a[i].kind != 1 || a[i].t == CXX_TY_UNKNOWN) {
+				ct = CXX_TY_UNKNOWN;
+				break;
+			}
+			d = a[i].t;
+			x = AST_TYPE(c->ast, d);
+			if (x->kind == AST_TYPE_POINTER && x->ext)	/* (a reference: its referent) */
+				d = x->base, x = AST_TYPE(c->ast, d);
+			if (x->kind == AST_TYPE_ARRAY)
+				d = cc_type_pointer(c->ast, x->base);
+			else if (x->kind == AST_TYPE_FUNCTION)
+				d = cc_type_pointer(c->ast, d);
+			else
+				d = AST_QUALIFIED_TYPE_UNQUALIFIED(d);
+			if (i == 3)
+				ct = d;
+			else if (ct == d)
+				;
+			else if (cc_type_is_arithmetic(c->ast, ct) && cc_type_is_arithmetic(c->ast, d) && AST_TYPE_KIND(c->ast, ct) != AST_TYPE_ENUM &&
+				 AST_TYPE_KIND(c->ast, d) != AST_TYPE_ENUM)
+				ct = AST_QUALIFIED_TYPE_UNQUALIFIED(cc_type_arithmetic_conversion(c->ast, ct, d));
+			else {
+				ct = CXX_TY_UNKNOWN;
+				break;
+			}
+		}
+		if (ct != CXX_TY_UNKNOWN) {
+			cxx_targ one = { .kind = 1, .t = ct };
+			cxx_entity *inst = cxx_instantiate(c, (cxx_entity *)(intptr_t)a[1].v, &one, 1, true);
+
+			if (inst)
+				c->last_type = inst, c->last_type_dependent = 0;
+		} else {
+			cxx_entity *r = calloc(1, sizeof *r);	/* (Empty: no member type) */
+
+			r->kind = CXX_ENTITY_TYPE, r->ty = a[2].t, r->pack_index = -1;
+			r->members = cxx_type_class_scope(c, r->ty);
+			c->last_type = r, c->last_type_dependent = 0;
+		}
 	}
 }
 
