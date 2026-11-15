@@ -517,7 +517,9 @@ driver_job_run_one(int argc, char **argv, const driver_environment *env)
                               .command_line_defines = {.region = &br[1]},
                               .include_text = {.region = &br[2]},
                               .include_macros_text = {.region = &br[3]},
+#if defined(__x86_64__) && !defined(__APPLE__)
                               .target_x64 = 1,
+#endif
                               .ms_bitfields = -1,
                               .hosted = 1,
                               .raw_assembler = -1,
