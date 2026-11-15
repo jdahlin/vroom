@@ -6013,7 +6013,6 @@ static void write_fills(void)
 
 static void reset_state(void);
 
-static _Atomic bool got_seen;
 static void find_got(void *arg, size_t i)
 {
     (void)arg;

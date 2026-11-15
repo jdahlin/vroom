@@ -858,7 +858,7 @@ static int objcopy_run(int dirfd)
 
     /* --dump-section */
     for (uint32_t i = 0; i < oc.ndump; i++) {
-        char *eq = strchr(oc.dump[i], '=');
+        const char *eq = strchr(oc.dump[i], '=');
         if (!eq) {
             oerror("bad --dump-section %s", oc.dump[i]);
             continue;
