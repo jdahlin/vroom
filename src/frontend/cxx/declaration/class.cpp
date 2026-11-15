@@ -230,13 +230,16 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
             /* class X; (not friend) declares X in this scope whatever an enclosing one has:
                only this scope is looked in ([basic.lookup.elab]; Skia's SkSL::Program and
                SkSL::RP::Program) */
+            bool is_friend = key_pos && c->tok[key_pos - 1].kw == CXX_KW_friend;
             bool own_scope =
-                !q && !dep && cxx_is(c, LEX_TOKEN_SEMICOLON) &&
-                !(key_pos && c->tok[key_pos - 1].kw == CXX_KW_friend);
-            cxx_scope *ds =
-                cxx_declaration_scope(c)->kind == CXX_SCOPE_FUNCTION_PARAMETERS
-                    ? cxx_enclosing_namespace(c)
-                    : cxx_declaration_scope(c);
+                !q && !dep && cxx_is(c, LEX_TOKEN_SEMICOLON) && !is_friend;
+            /* (friend class X; with no X found: X belongs to the enclosing namespace, not the
+               class: P::H in a member of the class that befriends P) */
+            cxx_scope *ds = cxx_declaration_scope(c)->kind ==
+                                        CXX_SCOPE_FUNCTION_PARAMETERS ||
+                                    is_friend
+                                ? cxx_enclosing_namespace(c)
+                                : cxx_declaration_scope(c);
             cxx_entity *found = own_scope ? cxx_lookup_local(ds, name)
                                           : cxx_name_lookup(c, q, dep, name);
 
