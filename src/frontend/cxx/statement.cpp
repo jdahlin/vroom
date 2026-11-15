@@ -479,12 +479,20 @@ static void cxx_for_parse(cxx *c)
     if (gen)
         c->gen_block = outer_block;
     c->gen_notemp++;
-    if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
-        cxx_expression_parse(c);
-        if (gen)
-            gcond = cxx_gen_condition(c, c->enode);
+    if (!cxx_is(c, LEX_TOKEN_SEMICOLON) && cxx_declaration_statement_try(c)) {
+        /* for (init; auto r = it.next(); ): a condition declaration, made anew each iteration
+           (its ; ends it as a declaration's; no code for it yet) */
+        cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
+        if (gen && cxx_gen_on(c) && !c->tentative && !c->template_depth)
+            cxx_gen_fail(c);
+    } else {
+        if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
+            cxx_expression_parse(c);
+            if (gen)
+                gcond = cxx_gen_condition(c, c->enode);
+        }
+        cxx_expect(c, LEX_TOKEN_SEMICOLON);
     }
-    cxx_expect(c, LEX_TOKEN_SEMICOLON);
     if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
         cxx_expression_parse(c);
         has_step = true, gstep = c->enode;
