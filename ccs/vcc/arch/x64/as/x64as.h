@@ -12,13 +12,15 @@
 #include "operand.h"
 
 typedef struct {
-	uint8_t b[24];
-	int n;
-	int fixat, fixtype, fixsize;	/* one fixup (the displacement or the immediate) */
-	Val fixv;
-	int fix2at, fix2type;	/* a second one: an immediate symbol after a displacement */
-	Val fix2v;
-	int x87;		/* (unused) */
+    uint8_t b[24];
+    int n;
+    int fixat, fixtype,
+        fixsize; /* one fixup (the displacement or the immediate) */
+    Val fixv;
+    int fix2at,
+        fix2type; /* a second one: an immediate symbol after a displacement */
+    Val fix2v;
+    int x87; /* (unused) */
 } XEnc;
 
 /*
@@ -28,20 +30,25 @@ typedef struct {
  * instructions whose GOTPCREL relaxes (REX_)GOTPCRELX, 1 for others that do.
  */
 typedef struct {
-	int w, opsz16, rep;		/* rep: a mandatory F2/F3 prefix */
-	const uint8_t *op; int nop;
-	int reg;			/* ModRM.reg (0..15) */
-	const XOp *rm;			/* register or memory */
-	int rex8;			/* an 8-bit register operand that needs REX (spl ...) */
-	int64_t imm; int isz; Val immv; int immsym, immsgn, immmod;
-	int gotx;
-	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
-	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
+    int w, opsz16, rep; /* rep: a mandatory F2/F3 prefix */
+    const uint8_t *op;
+    int nop;
+    int reg;       /* ModRM.reg (0..15) */
+    const XOp *rm; /* register or memory */
+    int rex8;      /* an 8-bit register operand that needs REX (spl ...) */
+    int64_t imm;
+    int isz;
+    Val immv;
+    int immsym, immsgn, immmod;
+    int gotx;
+    int oreg; /* a register in the last opcode byte, + 1 (0: none) */
+    int vex, vvvv,
+        vl; /* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
 } XForm;
-#define F(...) ((XForm){ __VA_ARGS__ })
+#define F(...) ((XForm){__VA_ARGS__})
 
-#define OPB(...) ((const uint8_t[]){ __VA_ARGS__ })
-enum { X64_NEXT = -2 };	/* a family's answer: not one of mine */
+#define OPB(...) ((const uint8_t[]){__VA_ARGS__})
+enum { X64_NEXT = -2 }; /* a family's answer: not one of mine */
 
 VPRIV void eb(XEnc *x, int v);
 VPRIV void ew(XEnc *x, int64_t v, int n);
@@ -50,6 +57,10 @@ VPRIV int fits32(int64_t v);
 VPRIV int isconst(As *a, Val *v, int64_t *c);
 VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx);
 VPRIV int x64_emit(As *a, XForm *f);
+static inline int x64_emit_form(As *a, XForm form)
+{
+    return x64_emit(a, &form);
+}
 VPRIV int x64_raw(As *a, const uint8_t *b, int n);
 VPRIV int x64_cc(const char *s);
 VPRIV int sfxsize(char c);

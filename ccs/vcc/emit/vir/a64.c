@@ -441,11 +441,10 @@ static void vl_mat(vl *L, uint32_t v, int rd)
         movi(e, 1, rd, vl_k64(k));
         return;
     case VO_SYMADDR:
-        addr_of_ref(e, rd, k->a, vl_k64(&(vir_ins){.b = k->b, .c = k->c}));
+        addr_of_ref(e, rd, k->a, vl_k64(k));
         return;
     case VO_SLOTADDR:
-        opi(e, I_ADDI, 1, rd, FRAME,
-            L->soff[k->a] + vl_k64(&(vir_ins){.b = k->b, .c = k->c}));
+        opi(e, I_ADDI, 1, rd, FRAME, L->soff[k->a] + vl_k64(k));
         return;
     default:
         vl_fail(L, "VIR lowering: a constant it cannot materialize");
@@ -994,15 +993,14 @@ static lval vl_addr(vl *L, uint32_t w, int t)
     if (L->opr[0] == VR_NONE && vl_isconst(L->f, v) &&
         L->f->ins[v].op == VO_SLOTADDR) {
         l.k = L_FRAME;
-        l.off = L->soff[L->f->ins[v].a] +
-                vl_k64(&(vir_ins){.b = L->f->ins[v].b, .c = L->f->ins[v].c});
+        l.off = L->soff[L->f->ins[v].a] + vl_k64(&L->f->ins[v]);
         return l;
     }
     if (L->opr[0] == VR_NONE && vl_isconst(L->f, v) &&
         L->f->ins[v].op == VO_SYMADDR) {
         l.k = L_SYM;
         l.ref = L->f->ins[v].a;
-        l.off = vl_k64(&(vir_ins){.b = L->f->ins[v].b, .c = L->f->ins[v].c});
+        l.off = vl_k64(&L->f->ins[v]);
         l.align = 1u << VIF_AL(w);
         return l;
     }
@@ -1167,8 +1165,7 @@ static int vl_maddr(vl *L, uint32_t k, int t, int64_t *off)
     *off = 0;
     if (L->opr[k] == VR_NONE && vl_isconst(L->f, v) &&
         L->f->ins[v].op == VO_SLOTADDR) {
-        *off = L->soff[L->f->ins[v].a] +
-               vl_k64(&(vir_ins){.b = L->f->ins[v].b, .c = L->f->ins[v].c});
+        *off = L->soff[L->f->ins[v].a] + vl_k64(&L->f->ins[v]);
         return FRAME;
     }
     return vl_ix(L, k, t);

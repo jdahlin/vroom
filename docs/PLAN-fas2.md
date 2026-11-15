@@ -409,6 +409,14 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   600,43 → 603,48 ms CPU att kompilera (median av fem körningar, +0,51 %).
   Båda SQLite-objekten och den länkade speedtest1 var byte-identiska,
   så körtidsmätningen utgick.
+- 2026-11-15: C++20-kontrollen av 197 filer gav 0 fel för adresser till
+  temporära objekt (tidigare 60). Även adressen till ett temporärt heltal i
+  drivrutinens tokenhash är borta. C-bygget jämfördes med 0f8db22e på
+  x86-64 Linux. SQLite vid -O2 tog 601,48 → 598,79 ms CPU att kompilera
+  (median av fem körningar). Objekten och speedtest1 var byte-identiska,
+  så körtidsmätningen utgick. Separat assemblerade vasm samma SQLite-källas
+  assemblerutskrift på 176,09 → 176,76 ms CPU (median av 16 körningar)
+  och gav ett byte-identiskt objekt.
 - `ccs/vcc/as.c` (GNU as-syntax), `a64.c`/`a64.h` (tabelldriven A64-kodare, delas med emittern), `elf.c`/`elf.h` (ELF-skrivare i minnet, mmap-reserverade regioner, ingen malloc; ett objekt per tråd). Drivrutin `vasm` (`make -C ccs vcc`).
 - Täckning efter inventering av de 30 `.S`-TU:erna: `.macro`/`.irp`/`.irpc`/`.rept`/`.exitm`/`.purgem`, `.if*` enligt MC:s AsmCond, `.pushsection`/`.popsection`/`.previous`/`.subsection`, data/`.inst`/`.incbin`/`.org`/`.fill`/`.align`-familjen, `.set`/`.equ` med lata variabler (framåtreferenser, alias ärver typ/storlek), `.type`/`.size`-uttryck, numeriska labels, `.req`, `ldr =` med litteralpooler, `:lo12:`/`:pg_hi21:`/`:abs_gN(_nc|_s):`. ~200 mnemonics (heltal, ldst, system, SIMD, SHA, CRC, MOPS); 1 625 sysreg-namn tagna en gång ur llvm-mc (`gen-sysreg.sh` → `a64sysreg.inc`). Ingen CFI behövs (kärnan bygger utan `.cfi_*` i dessa TU:er).
 - MC-beteenden som krävdes för byte-identitet: sektionsordning (`.strtab` först, `.rela` direkt efter sin sektion), StringTableBuilders svansdelning, symbolordning = registreringsordning (mappningssymbol före operandsymbol), sektionssymboler bara om en reloc använder dem, pc-relativa fixups mot lokala symboler i samma sektion löses, `$x`/`$d` per sektion men inte för utfyllnad, nop-utfyllnad med inledande nollor i kod.
