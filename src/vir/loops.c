@@ -17,88 +17,99 @@
 #include "vir/register-allocation.h"
 
 static _Thread_local struct lctx {
-	vir_loop *l;
-	uint32_t *inner, *stk;
-	uint32_t (*rng)[2];
+    vir_loop *l;
+    uint32_t *inner, *stk;
+    uint32_t (*rng)[2];
 } vir_loops_thread_arrays;
 
 static void vir_loops_thread_init(void)
 {
-	if (vir_loops_thread_arrays.l)
-		return;
-	vir_loops_thread_arrays.l = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_loop), MAP_NORESERVE, "vir: loops");
-	vir_loops_thread_arrays.inner = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-	vir_loops_thread_arrays.stk = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-	vir_loops_thread_arrays.rng = vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops");
+    if (vir_loops_thread_arrays.l)
+        return;
+    vir_loops_thread_arrays.l = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_loop),
+                                         MAP_NORESERVE, "vir: loops");
+    vir_loops_thread_arrays.inner =
+        vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
+    vir_loops_thread_arrays.stk =
+        vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
+    vir_loops_thread_arrays.rng =
+        vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops");
 }
 
 static int by_head(const void *a, const void *b)
 {
-	const vir_loop *x = a, *y = b;
+    const vir_loop *x = a, *y = b;
 
-	return x->head < y->head ? -1 : x->head > y->head;
+    return x->head < y->head ? -1 : x->head > y->head;
 }
 
 bool vir_loops_build(vir_function *f, vir_loops *lp)
 {
-	uint32_t n = f->block_count, sp = 0, nl = 0;
-	uint32_t (*st)[2] = vir_loops_thread_arrays.rng;
+    uint32_t n = f->block_count, sp = 0, nl = 0;
+    uint32_t (*st)[2] = vir_loops_thread_arrays.rng;
 
-	vir_loops_thread_init();
-	st = vir_loops_thread_arrays.rng;
-	lp->loops = vir_loops_thread_arrays.l;
-	lp->inner = vir_loops_thread_arrays.inner;
-	lp->count = 0;
-	if (!vir_cfg_build(f))
-		return false;
-	/* phase 1: per head (in block order, so ranges arrive sorted by start) the largest
+    vir_loops_thread_init();
+    st = vir_loops_thread_arrays.rng;
+    lp->loops = vir_loops_thread_arrays.l;
+    lp->inner = vir_loops_thread_arrays.inner;
+    lp->count = 0;
+    if (!vir_cfg_build(f))
+        return false;
+    /* phase 1: per head (in block order, so ranges arrive sorted by start) the largest
 	 * back-edge source; a range that ends inside the open one on top and continues past
 	 * it overlaps partially and is merged, which can make the top overlap its parent */
-	for (uint32_t b = 0; b < n; b++) {
-		const vir_block *k = &f->blocks[b];
-		uint32_t e = VIR_BLOCK_NONE;
+    for (uint32_t b = 0; b < n; b++) {
+        const vir_block *k = &f->blocks[b];
+        uint32_t e = VIR_BLOCK_NONE;
 
-		for (uint32_t j = 0; j < k->predecessor_count; j++) {
-			uint32_t p = f->extra[k->predecessor_first + j];
+        for (uint32_t j = 0; j < k->predecessor_count; j++) {
+            uint32_t p = f->extra[k->predecessor_first + j];
 
-			if (p >= b && (e == VIR_BLOCK_NONE || p > e))
-				e = p;
-		}
-		if (e == VIR_BLOCK_NONE)
-			continue;
-		while (sp && st[sp - 1][1] < b) {
-			sp--;
-			vir_loops_thread_arrays.l[nl++] = (vir_loop){ st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0 };
-		}
-		if (sp && st[sp - 1][1] < e) {
-			st[sp - 1][1] = e;
-			while (sp >= 2 && st[sp - 2][1] < st[sp - 1][1]) {
-				st[sp - 2][1] = st[sp - 1][1];
-				sp--;
-			}
-			continue;
-		}
-		st[sp][0] = b;
-		st[sp][1] = e;
-		sp++;
-	}
-	while (sp) {
-		sp--;
-		vir_loops_thread_arrays.l[nl++] = (vir_loop){ st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0 };
-	}
-	qsort(vir_loops_thread_arrays.l, nl, sizeof(vir_loop), by_head);
-	/* phase 2: parents, depths and each block's innermost loop */
-	sp = 0;
-	for (uint32_t b = 0, i = 0; b < n; b++) {
-		while (sp && vir_loops_thread_arrays.l[vir_loops_thread_arrays.stk[sp - 1]].end < b)
-			sp--;
-		while (i < nl && vir_loops_thread_arrays.l[i].head == b) {
-			vir_loops_thread_arrays.l[i].parent = sp ? vir_loops_thread_arrays.stk[sp - 1] : VIR_BLOCK_NONE;
-			vir_loops_thread_arrays.l[i].depth = sp + 1;
-			vir_loops_thread_arrays.stk[sp++] = i++;
-		}
-		vir_loops_thread_arrays.inner[b] = sp ? vir_loops_thread_arrays.stk[sp - 1] : VIR_BLOCK_NONE;
-	}
-	lp->count = nl;
-	return true;
+            if (p >= b && (e == VIR_BLOCK_NONE || p > e))
+                e = p;
+        }
+        if (e == VIR_BLOCK_NONE)
+            continue;
+        while (sp && st[sp - 1][1] < b) {
+            sp--;
+            vir_loops_thread_arrays.l[nl++] =
+                (vir_loop){st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0};
+        }
+        if (sp && st[sp - 1][1] < e) {
+            st[sp - 1][1] = e;
+            while (sp >= 2 && st[sp - 2][1] < st[sp - 1][1]) {
+                st[sp - 2][1] = st[sp - 1][1];
+                sp--;
+            }
+            continue;
+        }
+        st[sp][0] = b;
+        st[sp][1] = e;
+        sp++;
+    }
+    while (sp) {
+        sp--;
+        vir_loops_thread_arrays.l[nl++] =
+            (vir_loop){st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0};
+    }
+    qsort(vir_loops_thread_arrays.l, nl, sizeof(vir_loop), by_head);
+    /* phase 2: parents, depths and each block's innermost loop */
+    sp = 0;
+    for (uint32_t b = 0, i = 0; b < n; b++) {
+        while (
+            sp &&
+            vir_loops_thread_arrays.l[vir_loops_thread_arrays.stk[sp - 1]].end <
+                b)
+            sp--;
+        while (i < nl && vir_loops_thread_arrays.l[i].head == b) {
+            vir_loops_thread_arrays.l[i].parent =
+                sp ? vir_loops_thread_arrays.stk[sp - 1] : VIR_BLOCK_NONE;
+            vir_loops_thread_arrays.l[i].depth = sp + 1;
+            vir_loops_thread_arrays.stk[sp++] = i++;
+        }
+        vir_loops_thread_arrays.inner[b] =
+            sp ? vir_loops_thread_arrays.stk[sp - 1] : VIR_BLOCK_NONE;
+    }
+    lp->count = nl;
+    return true;
 }

@@ -21,50 +21,55 @@
 #include <string.h>
 
 typedef struct vstring_ref {
-	const char *s;
-	uint32_t n;
-	uint32_t *out;		/* where its offset goes */
+    const char *s;
+    uint32_t n;
+    uint32_t *out; /* where its offset goes */
 } vstring_ref;
 
 static inline int vstring_ref_tail_compare(const void *pa, const void *pb)
 {
-	const vstring_ref *a = pa, *b = pb;
+    const vstring_ref *a = pa, *b = pb;
 
-	for (uint32_t i = 0;; i++) {
-		int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;
-		int cb = i < b->n ? (unsigned char)b->s[b->n - 1 - i] : -1;
+    for (uint32_t i = 0;; i++) {
+        int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;
+        int cb = i < b->n ? (unsigned char)b->s[b->n - 1 - i] : -1;
 
-		if (ca != cb)
-			return ca > cb ? -1 : 1;	/* descending; a suffix after the longer string */
-		if (ca < 0)
-			return 0;
-	}
+        if (ca != cb)
+            return ca > cb
+                       ? -1
+                       : 1; /* descending; a suffix after the longer string */
+        if (ca < 0)
+            return 0;
+    }
 }
 
-static inline uint32_t vstring_table_layout(vstring_ref *v, uint32_t n, uint32_t start)
+static inline uint32_t vstring_table_layout(vstring_ref *v, uint32_t n,
+                                            uint32_t start)
 {
-	uint32_t size = start, prevoff = 0, prevn = 0;
-	const char *prev = NULL;
+    uint32_t size = start, prevoff = 0, prevn = 0;
+    const char *prev = NULL;
 
-	qsort(v, n, sizeof *v, vstring_ref_tail_compare);
-	for (uint32_t i = 0; i < n; i++) {
-		if (prev && prevn >= v[i].n && !memcmp(prev + prevn - v[i].n, v[i].s, v[i].n)) {
-			*v[i].out = prevoff + prevn - v[i].n;
-			continue;
-		}
-		*v[i].out = size;
-		prevoff = size, prev = v[i].s, prevn = v[i].n;
-		size += v[i].n + 1;
-	}
-	return size;
+    qsort(v, n, sizeof *v, vstring_ref_tail_compare);
+    for (uint32_t i = 0; i < n; i++) {
+        if (prev && prevn >= v[i].n &&
+            !memcmp(prev + prevn - v[i].n, v[i].s, v[i].n)) {
+            *v[i].out = prevoff + prevn - v[i].n;
+            continue;
+        }
+        *v[i].out = size;
+        prevoff = size, prev = v[i].s, prevn = v[i].n;
+        size += v[i].n + 1;
+    }
+    return size;
 }
 
-static inline void vstring_table_fill(uint8_t *t, const vstring_ref *v, uint32_t n, uint32_t bias)
+static inline void vstring_table_fill(uint8_t *t, const vstring_ref *v,
+                                      uint32_t n, uint32_t bias)
 {
-	for (uint32_t i = 0; i < n; i++) {
-		memcpy(t + *v[i].out - bias, v[i].s, v[i].n);
-		t[*v[i].out - bias + v[i].n] = 0;
-	}
+    for (uint32_t i = 0; i < n; i++) {
+        memcpy(t + *v[i].out - bias, v[i].s, v[i].n);
+        t[*v[i].out - bias + v[i].n] = 0;
+    }
 }
 
 #endif

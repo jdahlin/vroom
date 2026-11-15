@@ -59,11 +59,11 @@ static const char *pe_prog = "vlink";
 static int pe_error_count, pe_warning_count;
 static int pe_dirfd = AT_FDCWD;
 
-static pe_file **pe_objects;		/* lld's objFileInstances */
+static pe_file **pe_objects; /* lld's objFileInstances */
 static uint32_t pe_object_count, pe_object_capacity;
-static pe_file **pe_imports;		/* lld's importFileInstances */
+static pe_file **pe_imports; /* lld's importFileInstances */
 static uint32_t pe_import_count, pe_import_capacity;
-static pe_symbol **pe_globals;		/* every global, in insertion order */
+static pe_symbol **pe_globals; /* every global, in insertion order */
 static uint32_t pe_global_count, pe_global_capacity;
 static pe_symbol **pe_hash;
 static uint32_t pe_hash_mask;
@@ -71,65 +71,72 @@ static uint32_t pe_chunk_order;
 
 /* ---------------- memory: one arena per link ---------------- */
 
-typedef struct pe_arena_block { struct pe_arena_block *next; size_t used, cap; } pe_arena_block;
+typedef struct pe_arena_block {
+    struct pe_arena_block *next;
+    size_t used, cap;
+} pe_arena_block;
 static pe_arena_block *pe_arena;
 
 static void pe_oom(void)
 {
-	fputs("vlink: out of memory\n", stderr);
-	exit(1);
+    fputs("vlink: out of memory\n", stderr);
+    exit(1);
 }
 
 static void *pe_alloc(size_t n)
 {
-	n = (n + 15) & ~(size_t)15;
-	if (!pe_arena || pe_arena->used + n > pe_arena->cap) {
-		size_t cap = n > (1u << 20) ? n : (1u << 20);
-		pe_arena_block *b = malloc(sizeof *b + 16 + cap);
-		if (!b)
-			pe_oom();
-		b->next = pe_arena;
-		b->used = 0;
-		b->cap = cap;
-		pe_arena = b;
-	}
-	void *p = (char *)(pe_arena + 1) + 16 + pe_arena->used;
-	pe_arena->used += n;
-	memset(p, 0, n);
-	return p;
+    n = (n + 15) & ~(size_t)15;
+    if (!pe_arena || pe_arena->used + n > pe_arena->cap) {
+        size_t cap = n > (1u << 20) ? n : (1u << 20);
+        pe_arena_block *b = malloc(sizeof *b + 16 + cap);
+        if (!b)
+            pe_oom();
+        b->next = pe_arena;
+        b->used = 0;
+        b->cap = cap;
+        pe_arena = b;
+    }
+    void *p = (char *)(pe_arena + 1) + 16 + pe_arena->used;
+    pe_arena->used += n;
+    memset(p, 0, n);
+    return p;
 }
 
 static void pe_arena_free(void)
 {
-	while (pe_arena) {
-		pe_arena_block *n = pe_arena->next;
-		free(pe_arena);
-		pe_arena = n;
-	}
+    while (pe_arena) {
+        pe_arena_block *n = pe_arena->next;
+        free(pe_arena);
+        pe_arena = n;
+    }
 }
 
 static char *pe_strndup(const char *s, size_t n)
 {
-	char *p = pe_alloc(n + 1);
-	memcpy(p, s, n);
-	p[n] = 0;
-	return p;
+    char *p = pe_alloc(n + 1);
+    memcpy(p, s, n);
+    p[n] = 0;
+    return p;
 }
 
-static char *pe_strdup(const char *s) { return pe_strndup(s, strlen(s)); }
+static char *pe_strdup(const char *s)
+{
+    return pe_strndup(s, strlen(s));
+}
 
-static char *pe_format(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static char *pe_format(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
 static char *pe_format(const char *fmt, ...)
 {
-	va_list ap, aq;
-	va_start(ap, fmt);
-	va_copy(aq, ap);
-	int n = vsnprintf(NULL, 0, fmt, ap);
-	va_end(ap);
-	char *p = pe_alloc((size_t)n + 1);
-	vsnprintf(p, (size_t)n + 1, fmt, aq);
-	va_end(aq);
-	return p;
+    va_list ap, aq;
+    va_start(ap, fmt);
+    va_copy(aq, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    char *p = pe_alloc((size_t)n + 1);
+    vsnprintf(p, (size_t)n + 1, fmt, aq);
+    va_end(aq);
+    return p;
 }
 
 /* a growable array of pointers in malloc memory (freed with the link) */
@@ -137,66 +144,71 @@ static char *pe_format(const char *fmt, ...)
 
 /* ---------------- diagnostics ---------------- */
 
-static void pe_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void pe_error(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2)));
 static void pe_error(const char *fmt, ...)
 {
-	va_list ap;
-	va_start(ap, fmt);
-	if (pe_error_count++ < 20) {
-		fprintf(pe_err_stream, "%s: error: ", pe_prog);
-		vfprintf(pe_err_stream, fmt, ap);
-		fputc('\n', pe_err_stream);
-	} else if (pe_error_count == 21)
-		fprintf(pe_err_stream, "%s: error: too many errors emitted, stopping now\n", pe_prog);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, fmt);
+    if (pe_error_count++ < 20) {
+        fprintf(pe_err_stream, "%s: error: ", pe_prog);
+        vfprintf(pe_err_stream, fmt, ap);
+        fputc('\n', pe_err_stream);
+    } else if (pe_error_count == 21)
+        fprintf(pe_err_stream,
+                "%s: error: too many errors emitted, stopping now\n", pe_prog);
+    va_end(ap);
 }
 
 static void pe_warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void pe_warn(const char *fmt, ...)
 {
-	va_list ap;
-	va_start(ap, fmt);
-	if (cfg.fatal_warnings) {
-		fprintf(pe_err_stream, "%s: error: ", pe_prog);
-		pe_error_count++;
-	} else
-		fprintf(pe_err_stream, "%s: warning: ", pe_prog);
-	vfprintf(pe_err_stream, fmt, ap);
-	fputc('\n', pe_err_stream);
-	pe_warning_count++;
-	va_end(ap);
+    va_list ap;
+    va_start(ap, fmt);
+    if (cfg.fatal_warnings) {
+        fprintf(pe_err_stream, "%s: error: ", pe_prog);
+        pe_error_count++;
+    } else
+        fprintf(pe_err_stream, "%s: warning: ", pe_prog);
+    vfprintf(pe_err_stream, fmt, ap);
+    fputc('\n', pe_err_stream);
+    pe_warning_count++;
+    va_end(ap);
 }
 
 static void pe_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void pe_log(const char *fmt, ...)
 {
-	if (!cfg.verbose)
-		return;
-	va_list ap;
-	va_start(ap, fmt);
-	fprintf(pe_err_stream, "%s: ", pe_prog);
-	vfprintf(pe_err_stream, fmt, ap);
-	fputc('\n', pe_err_stream);
-	va_end(ap);
+    if (!cfg.verbose)
+        return;
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(pe_err_stream, "%s: ", pe_prog);
+    vfprintf(pe_err_stream, fmt, ap);
+    fputc('\n', pe_err_stream);
+    va_end(ap);
 }
 
 static const char *pe_basename(const char *p)
 {
-	const char *s = strrchr(p, '/');
-	return s ? s + 1 : p;
+    const char *s = strrchr(p, '/');
+    return s ? s + 1 : p;
 }
 
 /* lld's toString(InputFile): "archive.a(member.o)" or the path */
 static const char *pe_file_name(const pe_file *f)
 {
-	if (!f)
-		return "<internal>";
-	if (!f->parent)
-		return f->path;
-	return pe_format("%s(%s)", pe_basename(f->parent), pe_basename(f->path));
+    if (!f)
+        return "<internal>";
+    if (!f->parent)
+        return f->path;
+    return pe_format("%s(%s)", pe_basename(f->parent), pe_basename(f->path));
 }
 
-static inline uint64_t pe_align_up(uint64_t v, uint64_t a) { return a ? (v + a - 1) / a * a : v; }
+static inline uint64_t pe_align_up(uint64_t v, uint64_t a)
+{
+    return a ? (v + a - 1) / a * a : v;
+}
 
 #include "pe-options.c"
 #include "pe-input.c"
@@ -209,90 +221,93 @@ static inline uint64_t pe_align_up(uint64_t v, uint64_t a) { return a ? (v + a -
 
 static void pe_state_reset(void)
 {
-	for (uint32_t i = 0; i < pe_object_count; i++)
-		free(pe_objects[i]->chunks);
-	free(cfg.exports);
-	free(cfg.align_comm);
-	free(cfg.alternate_names);
-	free((void *)cfg.includes);
-	free((void *)cfg.optional_includes);
-	free((void *)cfg.exclude_libs);
-	free((void *)cfg.exclude_symbols);
-	free(pe_objects);
-	free(pe_imports);
-	free(pe_globals);
-	free(pe_hash);
-	pe_objects = NULL;
-	pe_imports = NULL;
-	pe_globals = NULL;
-	pe_hash = NULL;
-	pe_object_count = pe_object_capacity = pe_import_count = pe_import_capacity = 0;
-	pe_global_count = pe_global_capacity = pe_hash_mask = 0;
-	pe_chunk_order = 0;
-	pe_error_count = pe_warning_count = 0;
-	pe_input_reset();
-	pe_resolve_reset();
-	pe_layout_reset();
-	pe_write_reset();
-	pe_arena_free();
-	memset(&cfg, 0, sizeof cfg);
+    for (uint32_t i = 0; i < pe_object_count; i++)
+        free(pe_objects[i]->chunks);
+    free(cfg.exports);
+    free(cfg.align_comm);
+    free(cfg.alternate_names);
+    free((void *)cfg.includes);
+    free((void *)cfg.optional_includes);
+    free((void *)cfg.exclude_libs);
+    free((void *)cfg.exclude_symbols);
+    free(pe_objects);
+    free(pe_imports);
+    free(pe_globals);
+    free(pe_hash);
+    pe_objects = NULL;
+    pe_imports = NULL;
+    pe_globals = NULL;
+    pe_hash = NULL;
+    pe_object_count = pe_object_capacity = pe_import_count =
+        pe_import_capacity = 0;
+    pe_global_count = pe_global_capacity = pe_hash_mask = 0;
+    pe_chunk_order = 0;
+    pe_error_count = pe_warning_count = 0;
+    pe_input_reset();
+    pe_resolve_reset();
+    pe_layout_reset();
+    pe_write_reset();
+    pe_arena_free();
+    memset(&cfg, 0, sizeof cfg);
 }
 
 static int pe_link_locked(int argc, char **argv, int dirfd, FILE *err)
 {
-	pe_err_stream = err ? err : stderr;
-	pe_dirfd = dirfd;
-	pe_prog = argc > 0 ? pe_basename(argv[0]) : "vlink";
-	if (!pe_options_parse(argc, argv))
-		return pe_error_count ? 1 : 0;	/* (--version, --help) */
-	if (pe_error_count)
-		return 1;
-	pe_symbols_init();
-	if (!pe_resolve_run() || pe_error_count)
-		return 1;
-	if (!pe_layout_run() || pe_error_count)
-		return 1;
-	if (!pe_write_run() || pe_error_count)
-		return 1;
-	return 0;
+    pe_err_stream = err ? err : stderr;
+    pe_dirfd = dirfd;
+    pe_prog = argc > 0 ? pe_basename(argv[0]) : "vlink";
+    if (!pe_options_parse(argc, argv))
+        return pe_error_count ? 1 : 0; /* (--version, --help) */
+    if (pe_error_count)
+        return 1;
+    pe_symbols_init();
+    if (!pe_resolve_run() || pe_error_count)
+        return 1;
+    if (!pe_layout_run() || pe_error_count)
+        return 1;
+    if (!pe_write_run() || pe_error_count)
+        return 1;
+    return 0;
 }
 
 int pe_link(int argc, char **argv, int dirfd, FILE *err)
 {
-	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-	vtask_mutex_lock(&lock);
-	int rc = pe_link_locked(argc, argv, dirfd, err);
-	pe_state_reset();
-	pthread_mutex_unlock(&lock);
-	return rc;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    vtask_mutex_lock(&lock);
+    int rc = pe_link_locked(argc, argv, dirfd, err);
+    pe_state_reset();
+    pthread_mutex_unlock(&lock);
+    return rc;
 }
 
 /* the first input is a COFF x86-64 object (or an archive of them), or -m i386pep is given */
 bool pe_link_wanted(int argc, char **argv, int dirfd)
 {
-	for (int i = 1; i < argc; i++) {
-		const char *a = argv[i];
-		if (!strcmp(a, "-m") && i + 1 < argc)
-			return !strcmp(argv[i + 1], "i386pep");
-		if (!strcmp(a, "-mi386pep"))
-			return true;
-	}
-	for (int i = 1; i < argc; i++) {
-		const char *a = argv[i];
-		if (a[0] == '-') {
-			if (!strcmp(a, "-o") || !strcmp(a, "-T") || !strcmp(a, "-L") || !strcmp(a, "-l") ||
-			    !strcmp(a, "-e") || !strcmp(a, "-u") || !strcmp(a, "-m") || !strcmp(a, "-Map") ||
-			    !strcmp(a, "-z") || !strcmp(a, "--sysroot") || !strcmp(a, "-arch") || !strcmp(a, "-syslibroot"))
-				i++;
-			continue;
-		}
-		int fd = openat(dirfd, a, O_RDONLY | O_CLOEXEC);
-		if (fd < 0)
-			return false;
-		uint8_t m[4] = {0};
-		bool r = read(fd, m, 4) == 4 && m[0] == 0x64 && m[1] == 0x86;
-		close(fd);
-		return r;
-	}
-	return false;
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (!strcmp(a, "-m") && i + 1 < argc)
+            return !strcmp(argv[i + 1], "i386pep");
+        if (!strcmp(a, "-mi386pep"))
+            return true;
+    }
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (a[0] == '-') {
+            if (!strcmp(a, "-o") || !strcmp(a, "-T") || !strcmp(a, "-L") ||
+                !strcmp(a, "-l") || !strcmp(a, "-e") || !strcmp(a, "-u") ||
+                !strcmp(a, "-m") || !strcmp(a, "-Map") || !strcmp(a, "-z") ||
+                !strcmp(a, "--sysroot") || !strcmp(a, "-arch") ||
+                !strcmp(a, "-syslibroot"))
+                i++;
+            continue;
+        }
+        int fd = openat(dirfd, a, O_RDONLY | O_CLOEXEC);
+        if (fd < 0)
+            return false;
+        uint8_t m[4] = {0};
+        bool r = read(fd, m, 4) == 4 && m[0] == 0x64 && m[1] == 0x86;
+        close(fd);
+        return r;
+    }
+    return false;
 }

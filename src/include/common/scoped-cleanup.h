@@ -41,44 +41,56 @@
 
 static inline void vdefer_free(void *pp)
 {
-	void **p = pp;
+    void **p = pp;
 
-	free(*p);
-	*p = NULL;
+    free(*p);
+    *p = NULL;
 }
 #define VAUTOFREE VCLEANUP(vdefer_free)
 
 static inline void vdefer_close(int *fd)
 {
-	if (*fd >= 0)
-		close(*fd);
-	*fd = -1;
+    if (*fd >= 0)
+        close(*fd);
+    *fd = -1;
 }
 #define VAUTOCLOSE VCLEANUP(vdefer_close)
-#define VCLOSE(fd) vdefer_close(&(fd))	/* close now, early: the cleanup then finds -1 */
+#define VCLOSE(fd)                                                             \
+    vdefer_close(&(fd)) /* close now, early: the cleanup then finds -1 */
 
 static inline void vdefer_unlock(pthread_mutex_t **m)
 {
-	if (*m) {
-		pthread_mutex_unlock(*m);
-		*m = NULL;
-	}
+    if (*m) {
+        pthread_mutex_unlock(*m);
+        *m = NULL;
+    }
 }
 
 static inline pthread_mutex_t *vdefer_lock(pthread_mutex_t *m)
 {
-	pthread_mutex_lock(m);
-	return m;
+    pthread_mutex_lock(m);
+    return m;
 }
 
 #define VDEFER_CAT2(a, b) a##b
 #define VDEFER_CAT(a, b) VDEFER_CAT2(a, b)
-#define VLOCK_AS(g, mu) pthread_mutex_t *g VCLEANUP(vdefer_unlock) = vdefer_lock(&(mu))
+#define VLOCK_AS(g, mu)                                                        \
+    pthread_mutex_t *g VCLEANUP(vdefer_unlock) = vdefer_lock(&(mu))
 #define VLOCK(mu) VLOCK_AS(VDEFER_CAT(vlock_, __LINE__), mu)
 #define VUNLOCK(g) vdefer_unlock(&(g))
 
 /* take the resource out of its variable (so the cleanup finds nothing) */
-#define VTAKE(p) ({ __typeof__(p) vtake_ = (p); (p) = NULL; vtake_; })
-#define VTAKE_FD(fd) ({ int vtake_ = (fd); (fd) = -1; vtake_; })
+#define VTAKE(p)                                                               \
+    ({                                                                         \
+        __typeof__(p) vtake_ = (p);                                            \
+        (p) = NULL;                                                            \
+        vtake_;                                                                \
+    })
+#define VTAKE_FD(fd)                                                           \
+    ({                                                                         \
+        int vtake_ = (fd);                                                     \
+        (fd) = -1;                                                             \
+        vtake_;                                                                \
+    })
 
 #endif
