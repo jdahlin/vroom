@@ -3453,6 +3453,29 @@ alternating rounds with 28 preprocessed arm64 kernel files gave median user CPU
 host show no general speed change. Provenance is in
 `work/opt-profile/local-values-integration-{cost,cputime}/`.
 
+### GNU++20 som värdspråk (2026-11-15)
+
+Portat till d8037619: de 483 implementationsfilerna under `src/` har
+suffixet `.cpp`. Standardbygget använder GNU++20; `VCC_LANG=c` väljer
+C11. `make -C src -j6 self-check` bygger steg 2 och 3 som C11 med vcc
+vid standardens -O3. På x86-64 Linux blev samtliga 49 objekt samt `vpp`
+byteidentiska mellan stegen. Både unity och separat kompilering fungerade.
+
+SQLite 3.50.4 på Ryzen 7 9700X, Clang 23 som värdkompilator. Jämförelsen
+gäller C-bygget från d8037619 och det portade C++-bygget. Per rad kördes
+16 uppvärmda par på CPU 4, med slumpad, balanserad körordning. Talen är
+medianen av den procentuella skillnaden i processorns tid per par; positivt
+betyder att C++-bygget tog längre tid.
+
+| SQLite-kompilering | -O2 | -O3 |
+|---|---:|---:|
+| Ordinarie flaggor | +0,18 % | +0,23 % |
+| Med `-fvir-check -fvir-verify` | +0,47 % | +0,34 % |
+
+Vid båda optimeringsnivåerna och i båda konfigurationerna var objekten
+för sqlite3 och speedtest1 samt den länkade speedtest1 byteidentiska.
+Körtidsmätningen utgick.
+
 ### C++-kompatibilitet i kompilatorns C-källkod (2026-11-15)
 
 `make -C src -k -j6 vcc-cxx-check` granskar varje aktiv produktionsfil
