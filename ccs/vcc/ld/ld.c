@@ -2430,11 +2430,11 @@ static void drop_gnu_property(void)
 {
     const uint32_t want =
         x86_ld ? 0xc0000002u : 0xc0000000u; /* X86 / AARCH64 FEATURE_1_AND */
-    uint32_t and = ~0u;
+    uint32_t common_features = ~0u;
 
     if (opt.relocatable)
         return;
-    for (uint32_t i = 0; i < objs.n && and; i++) {
+    for (uint32_t i = 0; i < objs.n && common_features; i++) {
         Obj *o = objs.v[i];
         uint32_t f = 0;
 
@@ -2464,9 +2464,9 @@ static void drop_gnu_property(void)
                 p = d + ((dn + 7) & ~7u);
             }
         }
-        and &= f;
+        common_features &= f;
     }
-    if (and)
+    if (common_features)
         return;
     for (uint32_t i = 0; i < objs.n; i++) {
         Obj *o = objs.v[i];

@@ -424,6 +424,12 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   byte-identiska, så körtidsmätningen utgick. Separat tog vasm
   185,34 → 186,39 ms CPU (median av sex körningar) för samma assemblerkälla
   och gav ett byte-identiskt objekt.
+- 2026-11-15: Fem lokala variabler med C++-nyckelorden `and` och `explicit`
+  som namn har bytt namn. Det tog bort 26 unika C++-fel i syntaxkontrollen
+  av 197 filer, utan nya diagnostikmeddelanden. Alla 40 objekt och nio verktyg
+  i C-bygget var byte-identiska mot 774e3bdf på x86-64 Linux. Även båda
+  SQLite-objekten vid -O2 och den länkade speedtest1 var byte-identiska,
+  så både kompilerings- och körtidsmätningen utgick.
 - `ccs/vcc/as.c` (GNU as-syntax), `a64.c`/`a64.h` (tabelldriven A64-kodare, delas med emittern), `elf.c`/`elf.h` (ELF-skrivare i minnet, mmap-reserverade regioner, ingen malloc; ett objekt per tråd). Drivrutin `vasm` (`make -C ccs vcc`).
 - Täckning efter inventering av de 30 `.S`-TU:erna: `.macro`/`.irp`/`.irpc`/`.rept`/`.exitm`/`.purgem`, `.if*` enligt MC:s AsmCond, `.pushsection`/`.popsection`/`.previous`/`.subsection`, data/`.inst`/`.incbin`/`.org`/`.fill`/`.align`-familjen, `.set`/`.equ` med lata variabler (framåtreferenser, alias ärver typ/storlek), `.type`/`.size`-uttryck, numeriska labels, `.req`, `ldr =` med litteralpooler, `:lo12:`/`:pg_hi21:`/`:abs_gN(_nc|_s):`. ~200 mnemonics (heltal, ldst, system, SIMD, SHA, CRC, MOPS); 1 625 sysreg-namn tagna en gång ur llvm-mc (`gen-sysreg.sh` → `a64sysreg.inc`). Ingen CFI behövs (kärnan bygger utan `.cfi_*` i dessa TU:er).
 - MC-beteenden som krävdes för byte-identitet: sektionsordning (`.strtab` först, `.rela` direkt efter sin sektion), StringTableBuilders svansdelning, symbolordning = registreringsordning (mappningssymbol före operandsymbol), sektionssymboler bara om en reloc använder dem, pc-relativa fixups mot lokala symboler i samma sektion löses, `$x`/`$d` per sektion men inte för utfyllnad, nop-utfyllnad med inledande nollor i kod.
