@@ -140,7 +140,35 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
 	c->attr_packed = 0;
 	cxx_attributes_skip(c);
 	if (cxx_is(c, LEX_TOKEN_IDENTIFIER) || cxx_is(c, LEX_TOKEN_COLON_COLON)) {
+		uint32_t nn = c->pos;
+
 		cxx_nested_name_parse(c, &q, &dep);
+		if (!q && dep && c->template_depth && c->tok[nn].kind == LEX_TOKEN_IDENTIFIER && c->tok[nn + 1].kind == LEX_TOKEN_LESS &&
+		    c->pos >= 2 && c->tok[c->pos - 1].kind == LEX_TOKEN_COLON_COLON && c->tok[c->pos - 2].kind == LEX_TOKEN_GREATER) {
+			/* template<class T> class X<T>::Y: X's own class scope (its template's), where Y was declared */
+			cxx_entity *xt = cxx_lookup(c, c->tok[nn].id);
+
+			xt = xt ? cxx_entity_template(xt) : NULL;
+			if (xt && xt->members && xt->members->kind == CXX_SCOPE_CLASS) {
+				uint32_t i = nn + 2, d = 1;
+				bool own = true;	/* (X<T, U> with the header's own parameters, in order: the primary's) */
+
+				for (uint32_t k = 0; i < c->pos && d; i++) {
+					int kd = c->tok[i].kind;
+
+					if (kd == LEX_TOKEN_LESS)
+						d++, own = false;
+					else if (kd == LEX_TOKEN_GREATER)
+						d--;
+					else if (kd == LEX_TOKEN_IDENTIFIER)
+						own &= k < c->scope->ntparams && c->tok[i].id == c->scope->tparams[k++].name;
+					else if (kd != LEX_TOKEN_COMMA && kd != LEX_TOKEN_ELLIPSIS)
+						own = false;
+				}
+				if (own && c->scope->kind == CXX_SCOPE_TEMPLATE)
+					q = xt->members;
+			}
+		}
 		if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
 			cxx_fail(c, "expected a class name");
 		name = cxx_peek(c, 0)->id;
@@ -246,6 +274,17 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
 		}
 		if (is_template || c->template_depth)
 			cs->dependent = 1;
+		/* template<...> class X<...>::Y { }: kept with X's template, for each instance that declares Y */
+		bool member_class = q && !instance && !specialization && is_template && c->template_depth && name && q->kind == CXX_SCOPE_CLASS &&
+				    q->owner && c->scope->kind == CXX_SCOPE_TEMPLATE && found && found->kind == CXX_ENTITY_TYPE;
+
+		if (member_class) {
+			cxx_entity *qt = cxx_entity_template(q->owner);
+
+			if (qt && qt->members == q && !c->tentative)
+				cxx_template_member_class_definition(c, qt, name, c->scope, key_pos);
+			is_template = false;	/* (a class, not a class template: X's parameters are the header's) */
+		}
 		/* a class template's definition: what instantiating it re-parses */
 		if (is_template && !specialization && c->scope->kind == CXX_SCOPE_TEMPLATE)
 			cxx_template_define(c, e, c->scope, target, key_pos, 0, false);
@@ -301,7 +340,8 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
 				}
 			}
 		}
-		cs->parent = c->scope;
+		/* (X::Y { }: Y's enclosing scope is X's, whose members its body names) */
+		cs->parent = q && q->kind == CXX_SCOPE_CLASS && !instance && !specialization ? q : c->scope;
 		c->scope = cs;
 		{
 			uint32_t pl;

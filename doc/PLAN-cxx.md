@@ -2300,3 +2300,15 @@ Två felkompileringar som gjorde unit-large_json fel vid körning:
 Strikt bänk: pass 6, inga test- eller länkfel; 202 funktioner saknas
 (summerat), needed 214 rader (122 distinkta).  Sviter gröna (96/96, 38/38,
 mangle, 350/350).
+
+## Status 141 (2026-11-15)
+Medlemsklasser i klassmallar som deklareras i mallen och definieras utanför
+(`class sentry;` ... `template <class C, class T> class basic_ostream<C,
+T>::sentry { }`): `X<T>::` med mallens egna parametrar ger nu mallens
+klassscope, definitionen sparas med mallen och varje instans som deklarerar
+klassen får den definierad därifrån; en kvalificerad klassdefinition har sin
+kvalificerande klass som omgivande scope.  `?:` med ett klassvillkor använder
+dess `operator bool` (även explicit).  Test: `run/ooc-member-class.cpp`
+(symbolerna som clangs).  `ostream << string` (`__put_character_sequence`)
+kompileras; statement.c:982 borta ur bänken.  Strikt bänk: pass 6, 199 saknas
+(från 202).  Sviter gröna (97/97, 38/38, mangle, 350/350).

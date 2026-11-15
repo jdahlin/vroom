@@ -11,6 +11,65 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 						.is_const = is_const, .partial = partial, .pack = c->decl_pack_param < nparams };
 }
 
+/* template<...> class X<...>::Y { }: a member class of a class template defined outside it (basic_ostream's
+   sentry); pos is its class-key, params the definition's template parameters */
+VPRIV void cxx_template_member_class_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, uint32_t pos)
+{
+	cxx_template *t = cxx_template_of(te);
+
+	(void)c;
+	if (!t || !params)
+		return;
+	t->ooc_classes = realloc(t->ooc_classes, (t->nooc_classes + 1) * sizeof *t->ooc_classes);
+	t->ooc_classes[t->nooc_classes++] = (struct cxx_ooc_class){ .name = name, .pos = pos, .params = params, .home = params->parent };
+}
+
+/* an instance of the primary template just parsed: its member classes declared in it and defined outside
+   (class sentry; ... class basic_ostream<C, T>::sentry { }), defined from those definitions with the
+   instance's arguments bound to the definition's parameter names */
+VPRIV void cxx_instance_ooc_classes(cxx *c, cxx_instance *x)
+{
+	cxx_template *t = x->t;
+	cxx_scope *cs = x->inst ? x->inst->members : NULL;
+
+	if (!t || !t->nooc_classes || x->pos || !cs || c->instantiating > 48)
+		return;
+	for (uint32_t k = 0; k < t->nooc_classes; k++) {
+		const struct cxx_ooc_class *d = &t->ooc_classes[k];
+		cxx_entity *e = cxx_lookup_local(cs, d->name);
+		cxx_scope *binding;
+		cxx_saved s;
+		jmp_buf jb;
+
+		e = e ? cxx_entity_prefer(e, CXX_ENTITY_TYPE) : NULL;
+		if (!e || e->kind != CXX_ENTITY_TYPE || !e->members || e->members->nnames || e->ooc_class_done)
+			continue;	/* (not declared in the instance, or defined already) */
+		e->ooc_class_done = 1;
+		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
+		for (uint32_t i = 0; i < d->params->ntparams; i++) {
+			const cxx_tparam *tp = &d->params->tparams[i];
+
+			if (tp->pack) {
+				cxx_bind_pack(c, binding, tp, x->args + i, i <= x->nargs ? x->nargs - i : 0);
+				break;
+			}
+			if (i < x->nargs)
+				cxx_bind(c, binding, tp, &x->args[i]);
+		}
+		cxx_state_save(c, &s);
+		c->instantiating++;
+		c->fail = &jb;
+		c->pos = d->pos;
+		c->scope = binding;
+		c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+		c->name_path_valid = 0;
+		if (!setjmp(jb))
+			cxx_class_specifier_parse(c, false);
+		c->instantiating--;
+		cxx_state_restore(c, &s);
+	}
+}
+
 /* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner,
 						     cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const)

@@ -51,6 +51,9 @@ struct cxx_template {
 	/* its members defined outside the class: template<...> R X<...>::f(...) { } */
 	struct cxx_ooc { uint32_t name, pos, nparams; cxx_scope *params, *home, *inner; uint8_t is_const, partial, pack; } *oocs;	/* (inner: a member template's own parameters) */
 	uint32_t noocs;
+	/* its member classes defined outside it: template<...> class X<...>::Y { } */
+	struct cxx_ooc_class { uint32_t name, pos; cxx_scope *params, *home; } *ooc_classes;
+	uint32_t nooc_classes;
 };
 
 typedef struct cxx_instance {
@@ -192,6 +195,7 @@ VPRIV int cxx_partial_select(cxx *c, cxx_template *t, const cxx_targ *args, uint
 VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
 VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete);
 VPRIV bool cxx_instance_parse(cxx *c, cxx_instance *x);
+VPRIV void cxx_instance_ooc_classes(cxx *c, cxx_instance *x);
 VPRIV void cxx_instance_complete(cxx *c, cxx_entity *inst);
 VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst);
 VPRIV void cxx_type_require_complete(cxx *c, ast_qualified_type t);

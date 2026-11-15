@@ -145,6 +145,7 @@ typedef struct cxx_entity {
 	struct cxx_ftemplate *ftmpl;
 	struct cxx_late *late;		/* a member function of an instance: its body, parsed when a call uses it */
 	uint8_t late_done;
+	uint8_t ooc_class_done;	/* (a member class of an instance: defined from its out-of-class definition, cxx_instance_ooc_classes) */
 	uint8_t has_ret_pattern, ret_deducing, ret_variadic;	/* a function declared auto f(...): its return type from its body */
 	ast_qualified_type ret_pattern;		/* ... the declared return type, with auto's placeholder (auto, const auto &, auto *) */
 	cxx_scope *member_of;		/* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
@@ -776,6 +777,7 @@ VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV ast_qualified_type cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner, cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const);
+VPRIV void cxx_template_member_class_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, uint32_t pos);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
 					    uint32_t nparams, uint8_t is_const, bool partial);
 VPRIV void cxx_vtemplate_special(cxx *c, struct cxx_ftemplate *f, cxx_scope *params, cxx_scope *home, uint32_t less_pos, uint32_t init_pos);

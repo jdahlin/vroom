@@ -279,6 +279,8 @@ VPRIV bool cxx_instance_parse(cxx *c, cxx_instance *x)
 	}
 	c->instantiating--;
 	cxx_state_restore(c, &s);
+	if (ok && !t->is_alias)
+		cxx_instance_ooc_classes(c, x);
 	return ok;
 }
 

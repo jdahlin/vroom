@@ -363,7 +363,11 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 {
 	cc *a = c->ast;
 
-	if (!cxx_gen_on(c) || !cond || !x || !y || cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
+	if (!cxx_gen_on(c) || !cond || !x || !y)
+		return;
+	if (cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
+		cond = cxx_gen_convert_class(c, cond, cc_type_basic(AST_TYPE_BOOL), loc);	/* (a class: its operator bool, explicit or not) */
+	if (!cond || cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
 		return;
 	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && cc_type_is_record(a, AST_NODE_AT(a, y)->ty) &&
 	    AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_ARRAY && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) &&
