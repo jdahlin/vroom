@@ -12,6 +12,7 @@
  *   lextest core LIST             single thread, files pre-mapped and
  *                                 touched: pure lexing speed of one core
  */
+#include "common/cmdlib.h"
 #include <pthread.h>
 #ifdef __APPLE__
 #include <pthread/qos.h>
@@ -310,40 +311,60 @@ static int lextest_identifier_check(const char *list)
     return bad != 0;
 }
 
+enum { OPT_DUMP = 1, OPT_BENCH, OPT_IDCHECK, OPT_CORE, OPT_J, OPT_R, OPT_P };
+static const cmdlib_option lextest_options[] = {
+    {OPT_DUMP, "dump", "FILE...", "Dump tokens.", false},
+    {OPT_BENCH, "bench", "LIST", "Benchmark the files in LIST.", false},
+    {OPT_IDCHECK, "idcheck", "LIST", "Check identifier spellings.", false},
+    {OPT_CORE, "core", "LIST",
+     "Measure single-core lexing (optional trailing REPS).", false},
+    {OPT_J, "-j", "N", "Benchmark with N threads.", false},
+    {OPT_R, "-r", "N", "Repeat uncached lexing N times.", false},
+    {OPT_P, "-p", NULL, "Prefetch benchmark inputs.", false},
+    {0, NULL, NULL, NULL, false}};
+
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        cmdlib_print_help("Usage: lextest COMMAND [OPTIONS] INPUT...",
+                          lextest_options);
+        return 0;
+    }
+
     /* P cores: E-core timings are meaningless here */
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
     vintern_init();
-    if (argc >= 3 && !strcmp(argv[1], "dump")) {
+    int command = cmdlib_match(lextest_options, argc - 1, argv + 1, NULL);
+    if (argc >= 3 && command == OPT_DUMP) {
         int rc = 0;
 
         for (int i = 2; i < argc; i++)
             rc |= lextest_dump(argv[i]);
         return rc;
     }
-    if (argc >= 3 && !strcmp(argv[1], "bench")) {
+    if (argc >= 3 && command == OPT_BENCH) {
         int nthr = 8, a = 2;
 
         for (;;) {
-            if (a + 2 < argc && !strcmp(argv[a], "-j"))
-                nthr = atoi(argv[a + 1]);
-            else if (a + 2 < argc && !strcmp(argv[a], "-r"))
-                lextest_repetitions = (size_t)atoi(argv[a + 1]);
-            else if (a + 1 < argc && !strcmp(argv[a], "-p")) {
+            int option =
+                cmdlib_match(lextest_options, argc - a - 1, argv + a, NULL);
+            if (option == OPT_J)
+                nthr = atoi(argv[++a]);
+            else if (option == OPT_R)
+                lextest_repetitions = (size_t)atoi(argv[++a]);
+            else if (option == OPT_P)
                 lextest_prefetch = 1;
-                a--; /* no argument */
-            } else
+            else
                 break;
-            a += 2;
+            a++;
         }
         if (nthr < 1 || nthr > 256 || a >= argc)
             return 2;
         return lextest_bench(nthr, argv[a]);
     }
-    if (argc >= 3 && !strcmp(argv[1], "idcheck"))
+    if (argc >= 3 && command == OPT_IDCHECK)
         return lextest_identifier_check(argv[2]);
-    if (argc >= 3 && !strcmp(argv[1], "core"))
+    if (argc >= 3 && command == OPT_CORE)
         return lextest_core(argv[2], argc > 3 ? atoi(argv[3]) : 5);
     fprintf(
         stderr,

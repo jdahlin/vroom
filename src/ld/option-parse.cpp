@@ -1,5 +1,6 @@
 /* Command-line parsing (ld_arguments_parse) and library search. */
 
+#include "common/cmdlib.h"
 #include "common/literal.h"
 #include "ld-internal.h"
 
@@ -44,10 +45,7 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
 #define LD_ARGUMENT_IS(name) (!strcmp(a, name))
-#define LD_ARGUMENT_VALUE(name)                                                \
-    (!strncmp(a, name "=", strlen(name) + 1) ? (a + strlen(name) + 1)          \
-     : (!strcmp(a, name) && i + 1 < argc)    ? argv[++i]                       \
-                                             : NULL)
+#define LD_ARGUMENT_VALUE(name) cmdlib_value(name, argc, argv, &i)
         const char *v;
         if (a[0] != '-' || !a[1]) {
             VVEC_PUSH(ctx->options.inputs,

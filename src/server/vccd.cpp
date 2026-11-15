@@ -54,6 +54,7 @@
  * On SIGUSR1 (and at exit) the counts are printed: own compiles, failures.
  */
 
+#include "common/cmdlib.h"
 #include "vccd-internal.h"
 
 const char *vccd_backend_socket; /* vroomd (clang), only if given */
@@ -78,8 +79,34 @@ static bool vccd_peer_is_us(int c)
 #endif
 }
 
+enum {
+    OPT_SOCK = 1,
+    OPT_LISTEN_FD,
+    OPT_BACKEND_SOCK,
+    OPT_LD,
+    OPT_LLD,
+    OPT_J,
+    OPT_SHARED_POOL
+};
+static const cmdlib_option vccd_options[] = {
+    {OPT_SOCK, "--sock", "PATH", "Listen on a Unix socket.", false},
+    {OPT_LISTEN_FD, "--listen-fd", "FD", "Use an inherited listener.", false},
+    {OPT_BACKEND_SOCK, "--backend-sock", "PATH",
+     "Forward jobs to a backend socket.", false},
+    {OPT_LD, "--ld", "PROG", "Run an external linker.", false},
+    {OPT_LLD, "--lld", "PROG", "Alias for --ld.", false},
+    {OPT_J, "-j", "N", "Set the worker count.", false},
+    {OPT_SHARED_POOL, "--shared-pool", NULL, "Share workers across jobs.",
+     false},
+    {0, NULL, NULL, NULL, false}};
+
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        cmdlib_print_help("Usage: vccd [OPTIONS]", vccd_options);
+        return 0;
+    }
+
     const char *sock = NULL;
     char ddir[1024], dsock[1100];
     struct sockaddr_un sa = {.sun_family = AF_UNIX};
@@ -95,19 +122,20 @@ int main(int argc, char **argv)
         getenv("VCCD_SHARED_POOL") && !strcmp(getenv("VCCD_SHARED_POOL"), "1");
 
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--sock") && i + 1 < argc)
+        int option = cmdlib_match(vccd_options, argc - i, argv + i, NULL);
+        if (option == OPT_SOCK)
             sock = argv[++i];
-        else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
+        else if (option == OPT_LISTEN_FD)
             listen_fd = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--backend-sock") && i + 1 < argc)
+        else if (option == OPT_BACKEND_SOCK)
             vccd_backend_socket = argv[++i];
-        else if (!strcmp(argv[i], "--ld") && i + 1 < argc)
+        else if (option == OPT_LD)
             vccd_linker_backend = argv[++i];
-        else if (!strcmp(argv[i], "--lld") && i + 1 < argc)
+        else if (option == OPT_LLD)
             vccd_linker_backend = argv[++i]; /* (old name of --ld) */
-        else if (!strcmp(argv[i], "-j") && i + 1 < argc)
+        else if (option == OPT_J)
             nworkers = jobs = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--shared-pool"))
+        else if (option == OPT_SHARED_POOL)
             shared_pool = true;
         else {
             fprintf(stderr, "usage: vccd [--sock P] [--backend-sock P] [--ld "

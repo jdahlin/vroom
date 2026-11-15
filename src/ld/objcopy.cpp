@@ -21,6 +21,7 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
+#include "common/cmdlib.h"
 #include "common/literal.h"
 #include "ld/ld.h"
 #include "common/archive-reader.h"
@@ -1391,10 +1392,7 @@ int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
 #define OBJCOPY_ARGUMENT_IS(s) (!strcmp(a, s))
-#define OBJCOPY_ARGUMENT_VALUE(s)                                              \
-    (!strncmp(a, s "=", sizeof(s))              ? a + sizeof(s)                \
-     : (OBJCOPY_ARGUMENT_IS(s) && i + 1 < argc) ? argv[++i]                    \
-                                                : NULL)
+#define OBJCOPY_ARGUMENT_VALUE(name) cmdlib_value(name, argc, argv, &i)
         const char *v;
         if ((v = OBJCOPY_ARGUMENT_VALUE("-O")) ||
             (v = OBJCOPY_ARGUMENT_VALUE("--output-target"))) {

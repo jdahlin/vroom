@@ -98,6 +98,33 @@ def obj(d, name='a.o'):
 def check(cond, msg):
     if not cond: raise AssertionError(msg)
 
+@test()
+def native_compile_and_link():
+    """An ordinary vcc command produces a runnable program in the client's cwd."""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/native'
+        tu(d, 'foo.c', '#include <stdio.h>\nint main(void) { puts("native"); return 7; }\n')
+        r = subprocess.run([SHIM, '-o', 'main', 'foo.c'], cwd=d, capture_output=True,
+                           env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+        check(r.returncode == 0, r.stderr)
+        r = subprocess.run(['./main'], cwd=d, capture_output=True, timeout=10)
+        check((r.returncode, r.stdout) == (7, b'native\n'), (r.returncode, r.stdout, r.stderr))
+    finally: v.stop()
+
+@test()
+def command_help():
+    """Standalone programs and forwarding shims expose their own options without a server."""
+    for tool, option in [('vcc', '-fsyntax-only'), ('vas', '-c'), ('vld', '--entry'),
+                         ('var', '--thin'), ('vsh/sh', '-ec'), ('vcc-nm', '--numeric-sort'),
+                         ('vcc-objcopy', '--rename-section'), ('vlink', '--entry'),
+                         ('vnm', '--defined-only'), ('vobjcopy', '--add-section'),
+                         ('vasm', '-gdwarf-N'), ('vccd', '--listen-fd'), ('vpp', '--batch'),
+                         ('lextest', 'idcheck'), ('virtest', '--no-verify'), ('viralloc', '--sweep')]:
+        r = subprocess.run([f'{vd.BIN}/{tool}', '--help'], capture_output=True, text=True,
+                           env=dict(os.environ, VCC_SOCK='/no-such-vccd.sock'), timeout=5)
+        check(r.returncode == 0 and not r.stderr and option in r.stdout, (tool, r.stderr, r.stdout))
+
 # ---------------- access ----------------
 
 @test()
