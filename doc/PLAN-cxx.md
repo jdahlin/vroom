@@ -2525,3 +2525,13 @@ Sviter gröna (118/118, 38/38, mangle).  Strikt bänk: pass 13, 117 saknas
   `run/extern-template-function.cpp`.
 Sviter gröna (120/120, 38/38, mangle).  Strikt bänk: pass 15, inga länkfel,
 två testfel (unit-class_iterator, unit-wstring).
+
+## Status 160 (2026-11-15)
+En uppräknare (i en namnlös enum i en klass: `N::value`) som argument för
+en int- eller bool-mallparameter behöll sin enum-typ i argumentet, så
+`X<N::value>` blev en annan instans än `X<1>` och kunde inte manglas
+(funktionen saknade kod).  Nu får argumentet parameterns heltalstyp när
+parameterns typ stavas som en heltalstyp (bool görs 0/1).  jsons
+`is_iterator_of_multibyte<T>::value` väljer nu den breda strängadaptern:
+unit-wstring går igenom.  Test: `run/enum-value-template-arg.cpp`.
+Sviter gröna (121/121, 38/38, mangle).  Strikt bänk: pass 16.

@@ -22,6 +22,33 @@ VPRIV cxx_entity *cxx_instantiate(cxx *c, cxx_entity *te, const cxx_targ *args, 
 	return r;
 }
 
+/* a value parameter whose type is spelled as an integer type (a fundamental one, or std's size_t and the
+   like): true, and a bool parameter's argument made 0 or 1 */
+static bool cxx_tparam_integer_type(cxx *c, const cxx_tparam *p, cxx_targ *a)
+{
+	static const char *const words[] = { "bool", "char", "short", "int", "long", "signed", "unsigned", "wchar_t", "char8_t",
+					     "char16_t", "char32_t", "size_t", "ptrdiff_t", "int8_t", "int16_t", "int32_t", "int64_t",
+					     "uint8_t", "uint16_t", "uint32_t", "uint64_t", "intmax_t", "uintmax_t", "intptr_t", "uintptr_t" };
+	uint32_t i = p->type_b;
+
+	if (!i || i >= c->ntok)
+		return false;
+	while (i < c->ntok && (c->tok[i].kw == CXX_KW_const || c->tok[i].kw == CXX_KW_volatile))
+		i++;
+	if (i + 2 < c->ntok && c->tok[i].kind == LEX_TOKEN_IDENTIFIER && c->tok[i].len == 3 && !memcmp(c->tok[i].s, "std", 3) &&
+	    c->tok[i + 1].kind == LEX_TOKEN_COLON_COLON)
+		i += 2;
+	if (i >= c->ntok || c->tok[i].kind != LEX_TOKEN_IDENTIFIER)
+		return false;
+	for (size_t w = 0; w < sizeof words / sizeof *words; w++)
+		if (strlen(words[w]) == c->tok[i].len && !memcmp(words[w], c->tok[i].s, c->tok[i].len)) {
+			if (w == 0)
+				a->v = a->v != 0;
+			return true;
+		}
+	return false;
+}
+
 VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *args, uint32_t nargs, bool complete)
 {
 	cxx_template *t = te ? te->tmpl : NULL;
@@ -93,9 +120,11 @@ VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te, const cxx_targ *ar
 			n = k;
 			break;
 		}
-		if (i < nargs)
+		if (i < nargs) {
 			full[n] = args[i];
-		else if (p->def_b || (d && d->def_b && d->kind == p->kind)) {
+			if (p->kind == 2 && full[n].kind == 2 && full[n].t && cxx_tparam_integer_type(c, p, &full[n]))
+				full[n].t = 0;	/* (an enumerator for an int or bool parameter: its value, X<N::value> is X<1>) */
+		} else if (p->def_b || (d && d->def_b && d->kind == p->kind)) {
 			memset(&full[n], 0, sizeof full[n]);
 			if (!cxx_default_argument(c, p->def_b ? p : d, binding, &full[n])) {	/* (or an earlier declaration's default) */
 				/* in a pattern (X<T> with T a placeholder and a default that uses it): any argument there */
