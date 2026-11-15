@@ -1324,6 +1324,53 @@ VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t)
  * chosen (an initializer_list one first for braces), then the destructor; their bodies are
  * instantiated when t is an instance.  The expression's type is left as it was.
  */
+/* the elements of the braced list at '{' (pos): how many at its top level */
+static uint32_t cxx_brace_count(cxx *c, uint32_t pos)
+{
+	uint32_t n = 0, depth = 0;
+	bool any = false;
+
+	for (uint32_t i = pos + 1; i < c->ntok; i++) {
+		int k = c->tok[i].kind;
+
+		if (k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE)
+			depth++;
+		else if ((k == LEX_TOKEN_RIGHT_BRACE || k == LEX_TOKEN_RIGHT_PAREN || k == LEX_TOKEN_RIGHT_SQUARE) && depth)
+			depth--;
+		else if (k == LEX_TOKEN_RIGHT_BRACE)
+			return any ? n + 1 : 0;
+		else if (k == LEX_TOKEN_COMMA && !depth)
+			n++;
+		any = true;
+	}
+	return UINT32_MAX;
+}
+
+/* can std::initializer_list<E> (il) take the braced list's elements: an element that is a braced list of more
+   than one element is no scalar E's ([dcl.init.list]/3.10: vector<uint8_t>{{1, 2, 3}} is a copy of the vector
+   the inner list makes, not a list of one byte) */
+static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, uint32_t nargs)
+{
+	cxx_scope *s;
+	cxx_entity *vt;
+	ast_qualified_type e;
+
+	if (AST_TYPE_KIND(c->ast, il) == AST_TYPE_POINTER && AST_TYPE(c->ast, il)->ext)
+		il = AST_TYPE(c->ast, il)->base;
+	/* (E: its value_type) */
+	if (!(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(il))) || !(vt = cxx_lookup_local(s, vintern_cstr("value_type"))) ||
+	    vt->kind != CXX_ENTITY_TYPE || (e = vt->ty) == CXX_TY_UNKNOWN || cc_type_is_record(c->ast, e))
+		return true;
+	for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS; i++)
+		if (c->carg_brace[i] && c->carg_brace[i] < c->ntok && c->tok[c->carg_brace[i]].kind == LEX_TOKEN_LEFT_BRACE) {
+			uint32_t k = cxx_brace_count(c, c->carg_brace[i]);
+
+			if (k != UINT32_MAX && k > 1)
+				return false;
+		}
+	return true;
+}
+
 VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs, bool braced)
 {
 	ast_qualified_type et = c->etype;
@@ -1364,7 +1411,8 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *
 			if (e->kind != CXX_ENTITY_VALUE || e->ty == CXX_TY_UNKNOWN)
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
-			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux])) {
+			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux]) &&
+			    cxx_ilist_elements_fit(c, c->ast->params[ft->aux], nargs)) {
 				/* (the one with fewest parameters: vector(initializer_list) before (initializer_list, allocator)) */
 				if (!c->ctor_ilist || ft->n < AST_TYPE(c->ast, c->ctor_ilist->ty)->n)
 					c->ctor_ilist = e;

@@ -2683,3 +2683,13 @@ mangle).  Strikt bänk: pass 26, 116 saknas.
 - Kvar (sett i testerna): en fältmedlem eller lokal fältvariabel av en klass
   med initierare (`E e[3] = { E(1), ... }`) byggs inte.
 Sviter gröna (141/141, 38/38, mangle).  Strikt bänk: pass 27, 112 saknas.
+
+## Status 172 (2026-11-16)
+- `T x{{...}}`, `T x = {{...}}` med en konstruktor vars parameter är en
+  klass: den inre listan blir en temporär av parameterns klass.  Test:
+  `run/braced-ctor-inner-list.cpp`.
+- En initializer_list-konstruktor med en skalär elementtyp är inte valbar
+  när ett element är en klammerlista med fler än ett element
+  ([dcl.init.list]/3.10): `std::vector<std::uint8_t> v = {{0xCA, 0xFE}}`
+  blir kopian av den vektor den inre listan gör.  Test: `run/ilist-nested-braces.cpp`.
+Sviter gröna (143/143, 38/38, mangle).  Strikt bänk: pass 28, 111 saknas.

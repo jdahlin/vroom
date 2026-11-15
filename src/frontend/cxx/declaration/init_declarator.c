@@ -689,7 +689,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
+					if (c->ctor_found && c->ctor_picked && n <= CXX_MAX_ARGS)
+						memcpy(c->gen_call_brace, abr, sizeof abr);	/* (T x{{...}} by a constructor: its parameter's temporary from the inner list) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
 					c->gen_agg_brace = NULL;
 					gen_declared = true;
 				}
@@ -844,7 +847,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
 					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
+					if (c->ctor_found && c->ctor_picked && n <= CXX_MAX_ARGS)
+						memcpy(c->gen_call_brace, abr, sizeof abr);	/* (T x{{...}} by a constructor: its parameter's temporary from the inner list) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+					memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
 					c->gen_agg_brace = NULL;
 					gen_declared = true;
 				}
