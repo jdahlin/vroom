@@ -11,6 +11,7 @@
  * matters.  driver_cmdline_check runs after the target check and refuses a missing input and a bad
  * option value (job->bad_value_option).
  */
+#include "common/cmdlib.h"
 #include "driver-internal.h"
 
 /* an input file by its suffix, as clang's driver: .c .h .i (C), .S .s (assembly), .dts, C++'s */
@@ -32,21 +33,6 @@ static bool driver_input_is_source(const char *a)
 
 /* 0 to go on; 1: the job ends (status and message set); 2: return 1 at once, as the loop did on
    an invalid -ftls-model= (without the job's cleanup) */
-/* NAME=VALUE or NAME VALUE (the next argument): the value, else NULL */
-static const char *driver_cmdline_value_eq(const char *a, const char *name,
-                                           int argc, char **argv, int *i)
-{
-    size_t n = strlen(name);
-
-    if (strncmp(a, name, n))
-        return NULL;
-    if (a[n] == '=')
-        return a + n + 1;
-    if (!a[n] && *i + 1 < argc)
-        return argv[++*i];
-    return NULL;
-}
-
 VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
                                                          int argc, char **argv)
 {
@@ -646,10 +632,9 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
             job->no_builtin_includes = 1;
         else if (!strcmp(a, "-v"))
             job->verbose = 1;
-        else if ((v = driver_cmdline_value_eq(a, "-resource-dir", argc, argv,
-                                              &i)))
+        else if ((v = cmdlib_value("-resource-dir", argc, argv, &i)))
             job->resource_dir = v;
-        else if ((v = driver_cmdline_value_eq(a, "--sysroot", argc, argv, &i)))
+        else if ((v = cmdlib_value("--sysroot", argc, argv, &i)))
             job->sysroot = v;
         else if (!strcmp(a, "-mms-bitfields"))
             job->ms_bitfields = 1;

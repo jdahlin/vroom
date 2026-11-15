@@ -12,6 +12,7 @@
  *
  * vlink runs this when called as wasm-ld or with -mwasm64.
  */
+#include "common/cmdlib.h"
 #include "common/literal.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -2444,10 +2445,7 @@ int wasm_ld_main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
 
-#define VAL(flag)                                                              \
-    (!strcmp(a, flag) && i + 1 < argc          ? argv[++i]                     \
-     : !strncmp(a, flag "=", strlen(flag) + 1) ? a + strlen(flag) + 1          \
-                                               : NULL)
+#define VAL(name) cmdlib_value(name, argc, argv, &i)
         const char *v;
 
         if (!strcmp(a, "-o") && i + 1 < argc)
