@@ -2487,3 +2487,11 @@ och ett senare försök som valde (jsons dolda `operator<<`) ärvde det: doctest
 `has_insertion_operator<json>` blev okänd i instanser och `toString(json)`
 saknade kod.  Varje ADL-försök börjar nu med ingångens värde.  Sviter gröna
 (113/113, 38/38, mangle, 350/350).
+
+### Scope table growth (2026-11-15)
+
+Extracting `cxx_scope_grow` from `cxx_declare` changed median retired user
+instructions by +0.0011% compiling the nlohmann/json object workload and
++0.0004% compiling 160 namespaces of 96 declarations each. Baseline
+`2df8ed5a`, normal x86-64 Linux vpp, 11 alternating pairs pinned to one CPU
+after warmup. Both object files matched their respective baselines byte for byte.
