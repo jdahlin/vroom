@@ -60,6 +60,9 @@ static int cxx_fork_tus(cxx *c, int *child)
 
 static void cxx_free(cxx *c)
 {
+#ifdef VCC_REFACTOR
+    free(c->fn_ref_tokens);
+#endif
     free(c->tok);
     free(c->undo);
     free(c->late);

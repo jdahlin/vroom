@@ -97,6 +97,21 @@ CC_PRIVATE void cc_symbol_bind(cc *c, uint32_t s)
 
     if (!y->name)
         return;
+#ifdef VCC_REFACTOR
+    if (unlikely(c->o->refactor) && y->kind == AST_SYMBOL_VARIABLE &&
+        c->depth && !(y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
+        y->sc != AST_STORAGE_EXTERN)
+        pp_refactor_binding(c->p, c->o->outfd,
+                            y->flags & AST_SYMBOL_FLAG_PARAMETER ? 'P' : 'V',
+                            y->loc, y->loc, y->name, false);
+    if (unlikely(c->o->refactor) && !c->depth && y->kind == AST_SYMBOL_VARIABLE)
+        pp_refactor_binding(c->p, c->o->outfd, 'D', y->loc, y->loc, y->name,
+                            false);
+    if (unlikely(c->o->refactor) && !c->depth &&
+        y->kind == AST_SYMBOL_FUNCTION && y->sc == AST_STORAGE_STATIC)
+        pp_refactor_binding(c->p, c->o->outfd, 'F', y->loc, y->loc, y->name,
+                            false);
+#endif
     slot = cc_scope_slot(
         c, y->kind == CC_SYMBOL_NAMESPACE_TAG ? c->tdir : c->odir, y->name);
     y->shadow = *slot;

@@ -69,6 +69,14 @@ VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps,
         if (ps[i].name > 1) {
             cxx_entity *e = cxx_declare(c, fs, ps[i].name, CXX_ENTITY_VALUE);
 
+#ifdef VCC_REFACTOR
+            if (e && c->ast->o->refactor && ps[i].ref_token) {
+                cxx_token *t = &c->tok[ps[i].ref_token - 1];
+                e->ref_loc = t->loc;
+                pp_refactor_binding(c->p, c->ast->o->outfd, 'P', t->loc, t->loc,
+                                    t->id, t->macro);
+            }
+#endif
             if (e)
                 e->ty = ps[i].ty;
         }

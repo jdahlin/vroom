@@ -45,6 +45,9 @@ enum {
 typedef struct cxx_token {
     const char *s;
     uint32_t len, id, loc;
+#ifdef VCC_REFACTOR
+    uint8_t macro;
+#endif
     uint16_t kind;
     uint16_t kw; /* CXX_KW_* for identifiers that are keywords, else 0 */
 } cxx_token;
@@ -129,6 +132,9 @@ typedef struct cxx_targ {
 #define CXX_TY_UNKNOWN ((ast_qualified_type)0xFFFFFFFFu)
 
 typedef struct cxx_entity {
+#ifdef VCC_REFACTOR
+    uint32_t ref_loc; /* local declaration for source queries */
+#endif
     uint32_t name; /* interned id */
     uint8_t kind;
     uint8_t
@@ -312,6 +318,9 @@ typedef struct cxx_undo {
 /* a member function body, default argument or initializer parsed once its class is complete */
 /* a function parameter: its name (0: unnamed) and type, declared in the body's scope */
 typedef struct cxx_param {
+#ifdef VCC_REFACTOR
+    uint32_t ref_token;
+#endif
     uint32_t name;
     ast_qualified_type ty;
 } cxx_param;
@@ -439,7 +448,11 @@ typedef struct cxx {
     /* types (types.c): the decl-specifiers' type, a declarator's base and result */
     ast_qualified_type ds_type, type_in, type_out;
     ast_qualified_type
-        *fn_params;      /* the last parameter clause's types (types.c) */
+        *fn_params; /* the last parameter clause's types (types.c) */
+#ifdef VCC_REFACTOR
+    uint32_t ref_declarator; /* index + 1 of the declarator identifier */
+    uint32_t *fn_ref_tokens;
+#endif
     uint32_t *fn_pnames; /* ... and names */
     ast_qualified_type *
         fn_pdecl; /* ... and the parameters' own types in the body (a by-value const stays const) */

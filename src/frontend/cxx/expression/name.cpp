@@ -311,6 +311,11 @@ VPRIV void cxx_id_expression_parse(cxx *c)
                 e = cxx_lookup_in(c, q->owner->specs[i], t->id, 0);
     } else
         e = cxx_lookup(c, t->id);
+#ifdef VCC_REFACTOR
+    if (c->ast->o->refactor && !c->tentative)
+        pp_refactor_binding(c->p, c->ast->o->outfd, 'R', t->loc,
+                            e ? e->ref_loc : 0, t->id, t->macro);
+#endif
     cxx_advance(c);
     if (cxx_is(c, LEX_TOKEN_LESS)) {
         bool is_template =

@@ -96,6 +96,16 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) $(VCC_PGO) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
+# Build the query frontend from the compiler sources with occurrence recording.
+# A separate object directory keeps production layouts and hot paths identical.
+.PHONY: vref
+vref: $(OUT)/vref
+	$(MAKE) OUT=$(OUT)/vref-lib VCC_OPT='$(VCC_OPT) -DVCC_REFACTOR' $(OUT)/vref-lib/vpp
+
+$(OUT)/vref: bin/vref/vref.py | $(OUT)
+	cp $< $@
+	chmod +x $@
+
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
 
 o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))

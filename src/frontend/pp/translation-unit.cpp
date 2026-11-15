@@ -118,6 +118,9 @@ pp *pp_open(const pp_opts *o)
 
     vintern_init();
     p->options = o;
+#ifdef VCC_REFACTOR
+    p->refactor_fd = -1;
+#endif
     p->warning_cache_options = NULL; /* (the region may be a previous TU's) */
     p->keep_macro_text = false;
     {

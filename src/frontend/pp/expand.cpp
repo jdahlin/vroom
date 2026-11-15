@@ -1191,6 +1191,18 @@ static __attribute__((noinline, cold)) void pp_macro_text_position_note(pp *p,
     }
 }
 
+#ifdef VCC_REFACTOR
+static void pp_refactor_macro(pp *p, const ptok *first, const ptok *last)
+{
+    if (p->refactor_fd >= 0 && pp_location_is_in_main_file(p, first->loc) &&
+        pp_location_is_in_main_file(p, last->loc)) {
+        uint32_t base = p->files[0].location_base;
+        dprintf(p->refactor_fd, "M %u %u 0\n", first->loc - base,
+                last->loc - base + last->len);
+    }
+}
+#endif
+
 /* expand macro m named by t; 1 if t now holds the result token, 2 if the next raw one */
 VPRIV int pp_macro_expand(pp *p, const pp_macro *m, ptok *t)
 {
@@ -1209,6 +1221,10 @@ VPRIV int pp_macro_expand(pp *p, const pp_macro *m, ptok *t)
         p->line_start_location = t->loc, p->line_start_name_active = 1,
         p->line_start_context_depth = p->context_depth;
 
+#ifdef VCC_REFACTOR
+    if (m->kind != PP_MACRO_FUNCTION_LIKE)
+        pp_refactor_macro(p, t, t);
+#endif
     if (m->kind == PP_MACRO_BUILTIN)
         return pp_builtin_macro_expand(p, m, t);
     if (m->kind == PP_MACRO_OBJECT_LIKE) {
@@ -1247,6 +1263,9 @@ VPRIV int pp_macro_expand(pp *p, const pp_macro *m, ptok *t)
     }
     if (!pp_macro_arguments_collect(p, m, t, &a, &rp))
         return pp_macro_arguments_collect_fail(t, &rp);
+#ifdef VCC_REFACTOR
+    pp_refactor_macro(p, t, &rp);
+#endif
     if (unlikely(p->output_text_mode > 1))
         pp_comments_skip_to(
             p, &rp); /* -C: comments in macro arguments are dropped */

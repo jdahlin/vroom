@@ -303,6 +303,12 @@ static void driver_job_compile(struct driver_job *job, pp *p,
            sizeof job->disabled_builtins);
     co.emit = job->emit_assembly;
     co.field_uses = field_uses;
+#ifdef VCC_REFACTOR
+    co.refactor =
+        job->syntax_only && driver_environment_get(env, "VCC_REF_QUERY");
+    if (co.refactor)
+        pp_refactor_tokens(p, co.outfd);
+#endif
     char dbgdir[4096];
     if (job->debug)
         co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);

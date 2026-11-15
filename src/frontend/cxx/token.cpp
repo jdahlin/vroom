@@ -176,6 +176,9 @@ VPRIV void cxx_tokens_read(cxx *c)
             c->tok =
                 (cxx_token *)(realloc(c->tok, (cap *= 2) * sizeof(cxx_token)));
         cxx_token *x = &c->tok[c->ntok];
+#ifdef VCC_REFACTOR
+        x->macro = !!(t.flags & PP_TOKEN_FLAG_FROM_MACRO);
+#endif
         x->s = t.s, x->len = t.len, x->id = t.id, x->loc = t.loc,
         x->kind = t.kind, x->kw = 0;
         /* >> >= >>= as one-character pieces: a > may close template arguments, and the token array

@@ -1802,6 +1802,13 @@ static bool lex_source_read(const char *path, const char **src, size_t *size,
     struct stat st;
     int fd;
 
+#ifdef VCC_REFACTOR
+    /* Validate the proposed bytes under the original main file's include path. */
+    const char *original = getenv("VREF_MAIN"),
+               *overlay = getenv("VREF_OVERLAY");
+    if (original && overlay && !strcmp(path, original))
+        path = overlay;
+#endif
     do
         fd = open(path, O_RDONLY | O_CLOEXEC);
     while (fd < 0 && errno == EINTR);

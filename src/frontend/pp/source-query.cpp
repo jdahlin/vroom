@@ -26,6 +26,47 @@ uint32_t pp_main_file_end(const pp *p)
            (n && e->lex_file->src[n - 1] == '\n' ? n - 1 : n);
 }
 
+#ifdef VCC_REFACTOR
+/* Byte offsets always refer to the physical main file, including after #line.
+   Opaque bindings outside this file have no editable declaration here. */
+void pp_refactor_tokens(pp *p, int fd)
+{
+    const lex_file *f = p->files[0].lex_file;
+    char storage[16384];
+    vbuffer out;
+    p->refactor_fd = fd;
+    vbuffer_fd(&out, storage, sizeof storage, fd);
+    vbuffer_format_append(&out, "S %u\n", f->size);
+    for (size_t i = 0; i < f->size; i += 8192)
+        vbuffer_append(&out, f->src + i,
+                       f->size - i < 8192 ? f->size - i : 8192);
+    for (uint32_t i = 0; i < f->ntok; i++) {
+        const lex_token *t = &f->tok[i];
+        vbuffer_format_append(&out, "T %u %u %u\n", t->off, t->len,
+                              t->flags & LEX_TOKEN_FLAG_SPLICED);
+    }
+    vbuffer_flush(&out);
+}
+
+void pp_refactor_binding(const pp *p, int fd, char role, uint32_t loc,
+                         uint32_t declaration, uint32_t id, bool macro)
+{
+    const pp_file_entry *main = &p->files[0];
+    int64_t target = declaration && pp_location_is_in_main_file(p, declaration)
+                         ? (int64_t)(declaration - main->location_base)
+                         : -1;
+    if (!id || (!pp_location_is_in_main_file(p, loc) && target < 0))
+        return;
+    const vident *v = &vintern_ents[id];
+    bool direct = pp_location_is_in_main_file(p, loc) && !macro &&
+                  pp_location_spells(p, loc, v->s, v->len) &&
+                  !pp_location_is_in_macro(p, loc);
+    dprintf(fd, "%c %lld %lld %.*s\n", role,
+            direct ? (long long)(loc - main->location_base) : -1LL,
+            (long long)target, (int)v->len, v->s);
+}
+#endif
+
 void pp_macro_text_keep(pp *p)
 {
     p->keep_macro_text = true;
