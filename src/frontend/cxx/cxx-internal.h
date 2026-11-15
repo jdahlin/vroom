@@ -234,7 +234,9 @@ struct cxx_scope {
 	   declares itself in order (the key function is the first that is neither pure nor inline) */
 	cxx_entity **vfuncs, **vown;
 	uint32_t nvfuncs, cvfuncs, nvown, cvown;
-	uint8_t vt_init, vt_bad, vt_listed;	/* vt_bad: more than one base with a vtable (thunks: not built yet) */
+	uint8_t vt_init, vt_bad, vt_listed;	/* vt_bad: a vtable group not built here (virtual bases, nested secondary vtables) */
+	struct cxx_scope **vt_sec;	/* the secondary vtables: the bases with vtables after the primary one, in order */
+	uint32_t nvt_sec;
 	uint32_t vt_sym;		/* the vtable's AST symbol (_ZTV...) */
 	ast_qualified_type *conv_types;		/* ... the types its conversion functions convert to */
 	uint32_t nconv;

@@ -215,6 +215,7 @@ VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls, ast_qualified_type b
 VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f);
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
 VPRIV uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc);
+VPRIV uint32_t cxx_vtable_words(const cxx_scope *cls);
 VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth);
 VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth);
 VPRIV uint32_t cxx_gen_runtime_symbol(cxx *c, const char *name, bool pointer_param);
