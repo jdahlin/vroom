@@ -218,6 +218,7 @@ VPRIV uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc);
 VPRIV uint32_t cxx_vtable_words(const cxx_scope *cls);
 VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth);
 VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, ast_qualified_type t, cc_id_list *out, uint32_t loc, int depth);
+VPRIV void cxx_gen_eh_ready(cxx *c);
 VPRIV uint32_t cxx_gen_runtime_symbol(cxx *c, const char *name, bool pointer_param);
 VPRIV void cxx_gen_deleting_destructor(cxx *c, cxx_entity *f);
 VPRIV void cxx_gen_complete_object_aliases(cxx *c);

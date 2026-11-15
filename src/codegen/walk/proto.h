@@ -38,6 +38,9 @@ VPRIV int64_t walk_slot_permanent(codegen_context *e, uint64_t size, uint32_t al
 VPRIV int64_t walk_slot_permanent_kind(codegen_context *e, uint64_t size, uint32_t align, int kind);	/* walk_slot_permanent, told to WALK_LOWER(slot) as kind (WK_SLOT_*) */
 VPRIV int64_t walk_local_slot(codegen_context *e, uint32_t s);	/* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t walk_label_new(codegen_context *e);
+VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn, int64_t slot);
+VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s);
+VPRIV void x64_eh_pads(codegen_context *e);	/* arch/x64/codegen/eh.c: the landing pads of the function's exception table */
 VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_division_signed_power_of_two_emit(codegen_context *e, ast_qualified_type t, codegen_value a, const em_sdivpow2_recipe *r);

@@ -339,34 +339,45 @@ VPRIV void walk_initializer_emit(codegen_context *e, const codegen_lvalue *d, as
 
 /* ---------------- declarations ---------------- */
 
+/* fn(v) of a function taking one pointer, v the 8 bytes in frame slot `slot` (a cleanup, _Unwind_Resume) */
+VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn, int64_t slot)
+{
+	cc *c = e->compile_context;
+	walk_argument a;
+	codegen_value r;
+
+	em_abi(e, c->syms[fn].ty);
+	WALK_LOWER(classify)(e, e->compile_context->t_size, &a, false);
+	a.slot = slot;
+	codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn));
+	e->has_calls = true;
+	em_abi(e, c->syms[fn].ty);
+	r = WALK_LOWER(call)(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a, 1, false, NULL, codegen_type_primitive(AST_TYPE_VOID));
+	walk_value_free(e, &r);
+}
+
+/* cleanup(f) variable s: f(&s) */
+VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s)
+{
+	cc *c = e->compile_context;
+	uint32_t fn = codegen_symbol_canonical(c, codegen_symbol_attributes(c, s)->cleanup);
+	codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, s), .align = 8 };
+	int64_t slot = walk_slot_temporary(e, 8, 8);
+	int ra = WALK_LOWER(laddr)(e, &l);
+	codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = slot, .align = 8 };
+
+	WALK_LOWER(store)(e, ra, &d, 8);
+	WALK_LOWER(tfree)(e, ra);
+	walk_call_slot_argument(e, fn, slot);
+}
+
 /* cleanup(f) variables: f(&var), innermost first, down to depth `to` (the stack stays) */
 VPRIV void walk_cleanups_run(codegen_context *e, int to)
 {
-	cc *c = e->compile_context;
 	walk_state *W = e->walk_state;
 
-	for (int i = W->cleanup_count; i-- > to;) {
-		uint32_t s = W->cleanups[i], fn = codegen_symbol_canonical(c, codegen_symbol_attributes(c, s)->cleanup);
-		codegen_lvalue l = { .kind = CODEGEN_LVALUE_FRAME, .offset = walk_local_slot(e, s), .align = 8 };
-		walk_argument a;
-		codegen_value r;
-
-		em_abi(e, c->syms[fn].ty);
-		WALK_LOWER(classify)(e, e->compile_context->t_size, &a, false);
-		a.slot = walk_slot_temporary(e, 8, 8);
-		{
-			int ra = WALK_LOWER(laddr)(e, &l);
-			codegen_lvalue d = { .kind = CODEGEN_LVALUE_FRAME, .offset = a.slot, .align = 8 };
-
-			WALK_LOWER(store)(e, ra, &d, 8);
-			WALK_LOWER(tfree)(e, ra);
-		}
-		codegen_reference_note(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn));
-		e->has_calls = true;
-		em_abi(e, c->syms[fn].ty);
-		r = WALK_LOWER(call)(e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a, 1, false, NULL, codegen_type_primitive(AST_TYPE_VOID));
-		walk_value_free(e, &r);
-	}
+	for (int i = W->cleanup_count; i-- > to;)
+		walk_cleanup_call(e, W->cleanups[i]);
 }
 
 static void walk_declaration_emit(codegen_context *e, const node *x)
@@ -1687,12 +1698,24 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 
 		walk_vla_scan(e, y->body, &top);
 	}
+	/* C++ exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
+	   landing pads that run the cleanups live there); x86-64's direct emitter only */
+	W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
+#ifndef WALK_LOWER_PREFIX
+	W->eh_fn = e->unit->options->eh && e->unit->options->cfi && W->cleanup_node_count > 0 && c->eh_resume_sym;
+#else
+	W->eh_fn = 0;
+#endif
 	walk_statement_emit(e, y->body);
 	if (walk_function_is_main(c, s) && KIND(c, W->return_type) == AST_TYPE_INT) {
 		codegen_value z = codegen_value_constant(0);
 
 		WALK_LOWER(ret)(e, &z, codegen_type_primitive(AST_TYPE_INT), W->return_label);	/* falling off the end of main returns 0 */
 	}
+#ifndef WALK_LOWER_PREFIX
+	if (W->eh_fn)
+		WALK_LOWER(eh_pads)(e);	/* (before the return label, jumped over) */
+#endif
 	walk_label_place(e, W->return_label);
 	WALK_LOWER(finish)(e, s);
 	if (pa != pabuf) free(pa);

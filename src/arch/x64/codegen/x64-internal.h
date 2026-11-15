@@ -70,6 +70,7 @@ enum {
 	X64_OP_PCMPSTR,	/* SSE4.2: xmm0/xmm1, eax/edx lengths; cond selects opcode, imm control */
 	X64_OP_RAW,		/* inline asm: e->raw's text at off, ref bytes */
 	X64_OP_NAMED,	/* ref's name as a label here */
+	X64_OP_EHMARK,	/* .Lvcceh<label>: a call site's bounds or a landing pad, for the exception table (no effect) */
 	X64_OP_BSF, X64_OP_BSR,	/* r0 = index of the lowest / highest set bit of r1 */
 	X64_OP_BSWAP,	/* r0 = r0 byte-reversed (sz 4, 8) */
 	X64_OP_CRC32,	/* SSE4.2: r0 = crc32c(r1, low sz bytes of r2) (sz 1, 2, 4, 8; r0 32-bit unless sz 8) */
@@ -194,5 +195,9 @@ VPRIV void x64w_helper(codegen_context *e, int fn, const int64_t *in, const ast_
 VPRIV void x64w_xmm_part(codegen_context *e, int op, int64_t off, int size);
 /* the current function's helper calls (__divti3, __addtf3, ...) follow Microsoft's convention */
 static inline bool x64w_helpers(const codegen_context *e) { return CODEGEN_IS_WIN64(e->compile_context); }
+
+/* eh.c: C++ exceptions' landing pads and table */
+VPRIV bool x64_eh_wanted(codegen_context *e);
+VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 
 #endif

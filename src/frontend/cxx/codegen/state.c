@@ -570,6 +570,7 @@ VPRIV uint32_t cxx_gen_class_temp(cxx *c, ast_qualified_type t, uint32_t loc)
 
 		memset(&at, 0, sizeof at);
 		at.cleanup = cxx_gen_dtor_sym(dtor);
+		cxx_gen_eh_ready(c);	/* (with exceptions: run when one unwinds the scope too) */
 		cc_attribute_apply_symbol(a, &a->syms[s], &at);
 		c->gen_block_temps++;
 	}

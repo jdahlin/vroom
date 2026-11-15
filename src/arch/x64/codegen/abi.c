@@ -500,12 +500,31 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref, codegen_value *fn
 	free(bregs);
 	if (variadic)
 		x64_record_emit_three_registers(e, X64_OP_MOVI, 4, RAX, X64_REGISTER_NONE, X64_REGISTER_NONE)->immediate = fp;	/* al: vector registers used */
+	/* C++ exceptions: the call's bounds for the exception table, with the cleanup it unwinds into */
+	walk_state *EW = e->walk_state;
+	bool eh = EW && EW->eh_fn;	/* (a landing pad's calls too, no pad of their own: an address the table lacks terminates) */
+
+	if (eh && EW->eh_nsites == WALK_EH_SITES)
+		EW->eh_overflow = 1, eh = false;
+	if (eh) {
+		uint32_t k = EW->eh_nsites++;
+
+		EW->eh_sites[k].begin = ++EW->eh_marks;
+		/* (in a landing pad: a cleanup's call terminates if it throws, eh_in_pads 2; _Unwind_Resume has none) */
+		EW->eh_sites[k].node = EW->eh_in_pads == 2 ? UINT32_MAX : EW->eh_in_pads ? 0 :
+				       EW->cleanup_count ? EW->cleanup_symbol_nodes[EW->cleanups[EW->cleanup_count - 1]] : 0;
+		x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_sites[k].begin;
+	}
 	if (fn) {
 		x64_record_emit_three_registers(e, X64_OP_CALLR, 8, X64_REGISTER_NONE, R11, X64_REGISTER_NONE);
 	} else {
 		i = x64_record_emit(e, X64_OP_CALL);
 		i->reference = ref;
 		i->condition = variadic;
+	}
+	if (eh) {
+		EW->eh_sites[EW->eh_nsites - 1].end = ++EW->eh_marks;
+		x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_marks;
 	}
 	if (savedsp) {
 		codegen_lvalue slot = x64_fr(savedsp);

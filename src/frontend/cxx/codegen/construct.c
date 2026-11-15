@@ -455,17 +455,26 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, con
 		}
 		memset(&at, 0, sizeof at);
 		at.cleanup = cxx_gen_dtor_sym(dtor);
+		cxx_gen_eh_ready(c);	/* (with exceptions: run when one unwinds the scope too) */
 		cc_attribute_apply_symbol(a, &a->syms[s], &at);
 	} else if (cxx_gen_needs_destruction(c, t, 0)) {
 		cxx_gen_fail(c);	/* (an implicit destructor that destroys members: not built yet) */
 		return;
 	}
-	cc_id_list_append(a, block, cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, 0));
+	/* (with a destructor the declaration follows the construction: its cleanup is live from there on, so an
+	   exception the constructor throws does not destroy the object it did not make; the emitter gives the
+	   variable its slot at its first use) */
+	uint32_t decl = cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, 0);
+
+	if (!dtor)
+		cc_id_list_append(a, block, decl);
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il, c->ctor_ilist_n = il_n;
 	memcpy(c->ctor_ilist_types, il_types, sizeof il_types), memcpy(c->ctor_ilist_lval, il_lval, sizeof il_lval);
 	memcpy(c->ctor_ilist_brace, il_brace, sizeof il_brace);
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
+	if (dtor)
+		cc_id_list_append(a, block, decl);
 }
 
 /* ---- new and delete ------------------------------------------------------------------------- */

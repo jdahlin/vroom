@@ -40,6 +40,7 @@ typedef struct walk_argument { uint8_t eightbyte_count, classes[2]; bool is_in_m
 
 typedef struct walk_loop { uint32_t break_label, continue_label; int cleanup_depth; } walk_loop;	/* cdepth: the cleanups live at its entry */
 #define WALK_CLEANUP_MAX 1024
+#define WALK_EH_SITES 4096
 typedef struct walk_case { i128 low, high; uint32_t node; } walk_case;
 
 /* an inlined call: where its returns go */
@@ -99,6 +100,12 @@ typedef struct walk_state {
 	   enclosing it; per sym its node, per user label the innermost node in scope there */
 	struct { uint32_t symbol, parent; } cleanup_nodes[WALK_CLEANUP_MAX];
 	uint32_t cleanup_node_count;
+	/* C++ exceptions (options->eh, x86-64): each call's bounds and the innermost cleanup node live there (0: none),
+	   marks .Lvcceh<fn>_<n> (X64_OP_EHMARK); the landing pads' marks per node; eh_fn: this function has a table */
+	struct { uint32_t begin, end, node; } eh_sites[WALK_EH_SITES];
+	uint32_t eh_nsites, eh_marks, eh_term, eh_pad[WALK_CLEANUP_MAX];
+	uint8_t eh_fn, eh_in_pads, eh_overflow;
+	uint8_t *eh_seen;	/* the printer: per mark, written (passes after the walker may delete a call; calloc'ed) */
 	uint32_t *cleanup_symbol_nodes, *cleanup_symbol_generations, *label_cleanup_nodes, *label_cleanup_generations;
 	/* Constants for locals or parameters never written, bound per sym when kgen == gen. */
 	uint32_t *constant_generations;

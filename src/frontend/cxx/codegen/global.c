@@ -22,6 +22,24 @@ VPRIV void cxx_gen_file_asm(cxx *c, const char *text)
 	a->tlasm[a->ntlasm++] = n;
 }
 
+/* C++ with exceptions: what the code generator's landing pads need (frontend/c/cc.h's eh), made once per TU
+   when a cleanup variable is first declared: _Unwind_Resume, and .Lvcc_personality (the word holding
+   __gxx_personality_v0's address, .cfi_personality's operand; a try block's trampoline uses it too) */
+VPRIV void cxx_gen_eh_ready(cxx *c)
+{
+	cc *a = c->ast;
+
+	if (!a->o->eh || a->eh_resume_sym)
+		return;
+	a->eh_resume_sym = cxx_gen_runtime_symbol(c, "_Unwind_Resume", true);
+	a->eh_begin_catch_sym = cxx_gen_runtime_symbol(c, "__cxa_begin_catch", true);
+	a->eh_terminate_sym = cxx_gen_runtime_symbol(c, "_ZSt9terminatev", false);
+	if (!c->gen_eh_pers) {
+		c->gen_eh_pers = 1;
+		cxx_gen_file_asm(c, "\t.section\t.data.rel.ro,\"aw\",@progbits\n\t.p2align\t3\n.Lvcc_personality:\n\t.quad\t__gxx_personality_v0\n\t.text");
+	}
+}
+
 /*
  * A try block.  Its body was built as a function of its own (a closure's operator(), `call`, returning
  * int; `closure` is the object holding its captures).  The body is called through a small function

@@ -86,7 +86,7 @@ VPRIV void x64_dead_budget(codegen_context *e, uint32_t budget)
 		/* An opaque record or escaped label could add unrepresented entries
 		 * or edges. Decline the whole function without modifying any record.
 		 */
-		if (i->opcode >= X64_OP_COUNT || i->opcode == X64_OP_RAW || i->opcode == X64_OP_NAMED || i->opcode == X64_OP_JMPR || i->opcode == X64_OP_LEAL)
+		if (i->opcode >= X64_OP_COUNT || i->opcode == X64_OP_RAW || i->opcode == X64_OP_NAMED || i->opcode == X64_OP_EHMARK || i->opcode == X64_OP_JMPR || i->opcode == X64_OP_LEAL)
 			return;
 		if (k && (i->opcode == X64_OP_LABEL || x->records[k - 1].opcode == X64_OP_JMP || x->records[k - 1].opcode == X64_OP_JCC)) {
 			if (blocks == X_DEAD_BLOCKS)
