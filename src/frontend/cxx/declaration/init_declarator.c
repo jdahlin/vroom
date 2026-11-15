@@ -648,7 +648,17 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					   declarator, a noexcept(...) that completed a class, may have declared others since) */
 					if (context == CXX_CONTEXT_CLASS && decl_fn)
 						c->last_fn = decl_fn;
+					/* R X::f() { ... } outside its class: this is an X * (a const X * for f() const) */
+					ast_qualified_type this_save = c->this_type;
+					uint8_t this_const_save = c->this_const;
+					bool ooc_this = context == CXX_CONTEXT_NAMESPACE && qs && qs->kind == CXX_SCOPE_CLASS && qs->owner &&
+							qs->owner->ty != CXX_TY_UNKNOWN && qs->owner->ty && !(decl_fn && decl_fn->fn_static) && !(flags & DS_STATIC);
+
+					if (ooc_this)
+						c->this_type = qs->owner->ty, c->this_const = decl_fn ? decl_fn->fn_const & 1 : c->decl_const;
 					cxx_function_body_parse(c);
+					if (ooc_this)
+						c->this_type = this_save, c->this_const = this_const_save;
 					if (gen)
 						cxx_gen_function_end(c, decl_fn, c->snode);
 				}
