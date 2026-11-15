@@ -163,13 +163,16 @@ def one_staged(tu, last, outdir):
     return name, st, msg
 
 
-# doctest options per test: the test cases json's own build leaves out on x86-64 (unit-32bit's "32bit" checks
-# SIZE_MAX == 0xffffffff: json builds that TU with -m32)
-RUN_ARGS = {"unit-32bit": ["--test-case-exclude=32bit"]}
+# tests not run here: unit-32bit is json's -m32 build's (SIZE_MAX == 0xffffffff, the ranges of 32-bit types:
+# clang's x86-64 build fails 7 of its checks too)
+RUN_SKIP = {"unit-32bit": "a 32-bit test (json builds it with -m32)"}
+RUN_ARGS = {}
 
 
 def one_run(name, outdir):
     exe = os.path.join(outdir, name + ".exe")
+    if name in RUN_SKIP:
+        return name, "skip-run", RUN_SKIP[name]
     try:
         r = subprocess.run([exe, *RUN_ARGS.get(name, [])], capture_output=True, text=True, timeout=300, errors="replace", cwd=os.path.join(cp.CXX, "json", "tests"))
     except subprocess.TimeoutExpired:
