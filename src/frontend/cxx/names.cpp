@@ -55,23 +55,27 @@ static cxx_entity **cxx_scope_find_slot(cxx_scope *s, uint32_t name)
     return &s->slots[h];
 }
 
+static void cxx_scope_grow(cxx_scope *s)
+{
+    cxx_entity **old = s->slots;
+    uint32_t n = s->nslots;
+
+    s->nslots = n ? n * 2 : 16;
+    s->slots = (cxx_entity **)calloc(s->nslots, sizeof *s->slots);
+    for (uint32_t i = 0; i < n; i++)
+        if (old[i])
+            *cxx_scope_find_slot(s, old[i]->name) = old[i];
+    free(old);
+}
+
 VPRIV cxx_entity *cxx_declare(cxx *c, cxx_scope *s, uint32_t name, int kind)
 {
     cxx_entity *e, **slot;
 
     if (c->tentative || !name)
         return NULL;
-    if (s->nnames * 2 >= s->nslots) {
-        cxx_entity **old = s->slots;
-        uint32_t n = s->nslots;
-
-        s->nslots = n ? n * 2 : 16;
-        s->slots = (cxx_entity **)calloc(s->nslots, sizeof *s->slots);
-        for (uint32_t i = 0; i < n; i++)
-            if (old[i])
-                *cxx_scope_find_slot(s, old[i]->name) = old[i];
-        free(old);
-    }
+    if (s->nnames * 2 >= s->nslots)
+        cxx_scope_grow(s);
     slot = cxx_scope_find_slot(s, name);
     /* a redeclaration of a namespace or class keeps the first entity (its scope) */
     for (e = *slot; e; e = e->next)
