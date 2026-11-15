@@ -181,13 +181,15 @@ VPRIV void cxx_using_parse(cxx *c)
         bool is_typename = cxx_accept_kw(c, CXX_KW_typename);
 
         cxx_nested_name_parse(c, &q, &dep);
-        if (cxx_accept_kw(c, CXX_KW_operator)) {
-            cxx_operator_name_parse(c);
-        } else if (cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
-            uint32_t name = cxx_peek(c, 0)->id;
+        if (cxx_is_kw(c, CXX_KW_operator) || cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
+            uint32_t name;
 
+            if (cxx_accept_kw(c, CXX_KW_operator))
+                name = cxx_operator_name_parse(
+                    c); /* (using ns::operator""_json;) */
+            else
+                name = cxx_peek(c, 0)->id, cxx_advance(c);
             target = cxx_name_lookup(c, q, dep, name);
-            cxx_advance(c);
             if (target && !c->tentative) {
                 /* the names it brings in: each entity, by kind */
                 for (cxx_entity *t = target; t; t = t->next) {
