@@ -11,8 +11,8 @@ clang 23). Points the research could only infer, not verify, are marked *(unveri
 > The first time, do the work and note what it read. The next time, if what it
 > read is the same, reuse the result instead of redoing the work.
 
-- **Exact.** The check covers everything the work read, so the result equals a
-  run without the cache. Objects are byte-identical with and without each layer.
+- **Correctness target.** Replaying a hit must give the same result as processing
+  the region. The corpus comparisons below passed, but §6.11 gives two counterexamples.
 - **The work only happens when a cache misses.**
 - **Three layers**, each built on the one before (details in the sections named):
 
@@ -1259,6 +1259,107 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
     `VCC_DR=1` went from 16.2 to 12.4 G cycles, a larger gain than in
     instructions, because a hit replays no tokens.
   - Objects are identical before and after: PG 1570/1570, kernel 840/840.
+
+### 6.11 When a macro read depends on an earlier sibling (2026-11-15)
+
+**Test results.** `python3 bench/vcc-header-deps.py` compares Clang and
+`vpp --batch -j 1 -fsyntax-only` for two TUs in both orders, with and without
+`VPP_NOHC`. Static assertions inspect the value inside a header and selected
+state after the include. The harness disables parser snapshots and declaration
+replay. On Linux x86-64 targeting arm64 with Clang 23, 30 of 32 batch runs
+agreed with Clang. The two discrepancies both require a cache warmed by A
+before B. Each has a specific XFAIL and a passing result raises XPASS.
+
+| Family | What the second TU changes | Observed result |
+|---|---|---|
+| Counter pasted into a name | Advances the incoming counter by one. An earlier sibling defines `FLAG1`. | Warm B leaves `FLAG1` as an identifier. Its enum value is 8. Clang expands it to 99. |
+| Redefinition diagnostic | Adds `#define FLAG 2` before a sibling defines it as 9. | Warm B succeeds under `-Werror=macro-redefined`. Clang and uncached vcc reject B. |
+| Conditional write | First child replaces an incoming macro only under `DEBUG`. | Both orders pass. |
+| Defined then expanded | Parent tests definedness, child expands the same name with a different value. | Both pass. |
+| Once membership | B enters the once-header and changes its macro before entering the parent. | Both pass. |
+| Macro stack | Parent saves a macro, child redefines it, parent restores it. | Both pass. |
+| Final write | Child undefines a macro, parent subsequently defines it, main observes the result. | Both pass. |
+| Computed include | Different strings select different writers before a common reader. | Both pass. |
+
+The counter discrepancy was also observed in the preprocessed token stream and
+in arm64 object data. The diagnostic discrepancy needs no paste, builtin or
+conditional. In `pp/macro.cpp`, `define` inspects the previous definition with
+`mget` before calling `mdef`. The write is recorded. The read deciding whether
+to diagnose is missing. An entry recorded when the name was undefined can
+therefore pass validation when its definition conflicts.
+
+A separate oracle check exposed a baseline diagnostic difference. With
+`-Werror=#warnings`, A used `#pragma clang diagnostic ignored "-W#warnings"`
+before including a header containing `#warning cache_probe`. Clang 23
+accepted A, while vcc with `VPP_NOHC=1` rejected it. This case needs
+ordinary diagnostic-parity investigation before it can isolate cache behavior.
+
+**Lessons from other implementations.** HP's aCC automatic PCH work describes
+the same earlier-sibling dependency and validates a configuration for an
+ordered source prefix. GCC requires incoming macros affecting a PCH to agree.
+These coarser boundaries simplify validation. vcc reuses children in multiple
+parents and has to establish that condition at each child's position.
+[HP aCC paper](https://www.usenix.org/legacy/events/wiess2000/full_papers/krishnaswamy/krishnaswamy_html/)
+and [GCC PCH contract](https://gcc.gnu.org/onlinedocs/gcc/Precompiled-Headers.html).
+
+Clang module maps can name configuration macros that select module variants.
+Ordinary kernel headers provide no such inventory. Discovering dependencies
+during preprocessing preserves the existing source contract. ccache's direct
+mode documents the difficulty of noticing a header that would have been selected
+if it had existed. The analogous negative facts in vcc include an undefined
+macro and a failed include probe. Each needs an explicit validity check.
+[Clang configuration macros](https://clang.llvm.org/docs/Modules.html#configuration-macros-declaration)
+and [ccache direct mode](https://ccache.dev/manual/latest.html#_the_direct_mode).
+
+**Proposed contract.** For a fixed filesystem generation, accepting an entry
+must reproduce the token stream, locations, diagnostics, success status,
+dependency list and outgoing observable preprocessor state of executing the
+same include in the current TU. Candidate validation must leave the live TU
+untouched until every check succeeds. An invalid candidate is an ordinary miss.
+
+1. **Keep the compact summaries for literal names.** A read of an incoming
+   binding records absence, definedness or the actual definition according to
+   what the operation observes. A local write satisfies subsequent reads of
+   that name only up to the next write. A later value read before the first
+   write strengthens a preceding definedness check. The existing child
+   exclusions and final deltas implement this compression for fixed names.
+2. **Make diagnostic decisions tracked reads.** Start by using a recording
+   lookup for the old definition in `define`, including the no-warning path.
+   Exact definition identity is conservative and cheap to compare. Audit raw
+   macro-table reads for semantic decisions, leaving raw reads for validation
+   itself. Also audit warning state inherited from the includer, such as a
+   diagnostic pragma before the include. Mark regions whose diagnostic
+   decisions depend on untracked state ineligible until it is represented.
+3. **Stop unsafe counter reuse first.** When a counter-derived spelling is
+   looked up as a macro, decline to record that region and its open ancestors.
+   Preserve ordinary numeric counter output and unrelated child entries.
+   In `hc_valid` the current check rebuilds the spelling using the incoming
+   counter but looks it up in the parent's entry macro table. A child write
+   changes which binding exists at that point. Even a complete set of final
+   writes loses a definition introduced and removed around the lookup.
+4. **Measure before adding an ordered representation.** Count rejected regions
+   and bytes, compare `pphc` and actual compile instructions on the kernel and
+   PostgreSQL, and check the project's 1% performance gate. If the fallback
+   costs enough to matter, retain an ordered sequence only in entries needing
+   it. Record writes, child calls and dynamic probes in execution order. During
+   validation, resolve each generated name against a scratch macro table layered
+   over the incoming bindings, including overwritten and undefined values.
+   Advance the simulated counter at its recorded offsets. Key any memoized child
+   verdict on its effective inputs, or omit memoization on that path. Discard
+   scratch state on a miss. This validates one candidate. The expensive search
+   for alternative child splices in §6.6 is unnecessary.
+5. **Extend the oracle as each dependency is addressed.** Add counter transitions
+   9→10 and a transient write/read/undef around the pasted name, a previously
+   cached child hit while recording a new parent, identical vs conflicting
+   redefinitions and suppressed vs promoted diagnostics. Generate bounded
+   header trees with write/read/undef in different sibling orders. Compare
+   each TU's tokens against Clang, then compare warm vs uncached vcc's exit,
+   diagnostic IDs/locations, depfiles and object bytes. Keep TU names, source
+   locations and flags identical between warm and uncached object comparisons.
+   Replay minimized failures deterministically at one worker before exercising
+   shuffled jobs at six. For include-search misses, create a formerly absent
+   header across a vccd build-generation boundary and compare with a fresh
+   process. Existing search-path variations live in `bench/vcc-cachekey.py`.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
