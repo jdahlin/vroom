@@ -2343,6 +2343,31 @@ med 1,7 MiB. Tidsskillnaden var liten jämfört med spridningen (351–367 ms
 före, 350–384 ms efter). Att byta heap med `LD_PRELOAD=libmimalloc.so.3`
 gav högre max-RSS i båda fallen. Mätningen gäller en TU och en tråd.
 
+#### Återstående allokeringar i sqlite3.c
+
+På `14d6169a`, med samma indata och flaggor, loggades returadress och begärd
+storlek från länkarens fyra wrappers. `llvm-symbolizer` med radtabeller gav
+anropsstället även för inlinade funktioner. Summan blev åter 8 909 malloc,
+8 269 calloc och 3 293 realloc, och assemblerfilen var byte-identisk.
+
+| Arbetsdata | Anrop | Bedömning |
+|---|---:|---|
+| `vw_promote`, bad/sf/fof | 7 764 | Tre tabeller med känd storlek vid inträdet, 2 588 gånger. Samma arbetsminne som förenklingen kan användas. Nollställ sf. Hela bad och fof skrivs före läsning. |
+| `vw_promote`, fd/fnx/ms och cur/cst | 4 376 | Fält- och memset-listorna växer under passet. cur/cst får sin storlek först när fälten är kända. En ny get kan ogiltigförklara de tre första vyerna. |
+| `vw_deadparams`, stk | 1 522 | En stack utan nollställning. De sex tillväxterna av byggarens map är separata. |
+| `vw_condmerge`, cnt | 1 427 | En tabell med känd storlek, måste nollställas. |
+| `vw_split`, o | 642 | Temporär blockordning, kopieras tillbaka innan passet lämnas. |
+| `vw_vectorize`, hs/I/inl | 1 969 | hs lever medan I/inl skapas först vid en lämplig slinga. Enbart I stod för 35,45 MiB sammanlagt på 271 calloc. De 171 tillväxterna av touch tillkommer. |
+
+Första försöket bör vara de tre fasta tabellerna i promotion samt stk, cnt
+och o. Passen körs i följd. Återspelning av storlekarna i faktisk ordning,
+med fyra-byte-tabellerna först i promotion, ersätter 11 355 anrop och ger
+14 tillväxter av den gemensamma bufferten mot dagens 13. Det skulle ge
+9 117 allokeringsanrop totalt med samma maximala buffert (6 176 753 byte).
+Detta är en beräkning på spåret. Tid och RSS för en sådan ändring återstår
+att mäta. Hashtabellens ombyggnad (`vw_hslot`, 570 temporära kopior) kan ske
+inuti promotion och behöver en egen livstid.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
