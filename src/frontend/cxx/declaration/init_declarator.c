@@ -171,6 +171,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				e->abi_tag = cxx_abi_tag_scan(c, ds_from, c->pos);
 			if (e && ds_from < c->pos && cxx_word_scan(c, ds_from, c->pos, "__exclude_from_explicit_instantiation__"))
 				e->no_explicit_inst = 1;	/* (_LIBCPP_HIDE_FROM_ABI on a constructor: this TU's own) */
+			if (e && !e->abi_tag && (e->abi_tag = cxx_pragma_abi_tag(c, ds_from)))
+				e->no_explicit_inst = 1;	/* (libc++'s #pragma clang attribute region: tagged, hidden, this TU's own) */
 			if (e && !tmpl && dtor && !e->vslot)
 				cxx_vtable_declare(c, cxx_declaration_scope(c), e, (flags & DS_VIRTUAL) != 0);	/* (virtual ~X(), or overriding a base's) */
 			if (e && !tmpl)
@@ -330,6 +332,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && ds_from < c->pos &&
 			    cxx_word_scan(c, ds_from, c->pos, "__exclude_from_explicit_instantiation__"))
 				e->no_explicit_inst = 1;	/* (_LIBCPP_HIDE_FROM_ABI: always this TU's own) */
+			if (e && f && (kind == CXX_ENTITY_VALUE || kind == CXX_ENTITY_FUNCTION_TEMPLATE) && !e->abi_tag &&
+			    (e->abi_tag = cxx_pragma_abi_tag(c, ds_from)))
+				e->no_explicit_inst = 1;	/* (libc++'s #pragma clang attribute region: tagged, hidden, this TU's own) */
 			if (e && f && kind == CXX_ENTITY_VALUE && (flags & (DS_INLINE | DS_CONSTEXPR)))
 				e->fn_inline = 1;
 			if (e && f && kind == CXX_ENTITY_VALUE && (flags & DS_CONSTEXPR))

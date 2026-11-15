@@ -2245,3 +2245,16 @@ refererar men inte definierar, som clangs objekt definierar):
   tuple<_Args2...>)`) deduceras genom mönstermatchningen; instansens kod för två sådana paket görs ännu inte.
 cxx-strict: 196 funktioner saknas (213), 112 olika; en TU länkar inte (map-kod som nu nås:
 `__lazy_compare_result` via styckvis `pair`).
+
+## Status 136 (2026-11-15)
+- `#pragma clang attribute NAME.push(__attribute__((… __abi_tag__("x") …)), apply_to = function)` / `NAME.pop`:
+  regionerna av tokens registreras när de läses; en funktion som deklareras i en region utan egen tagg får
+  regionens tagg och räknas inte till en explicit instansiering.  libc++ (LLVM 23) taggar så varje funktion
+  i `_LIBCPP_BEGIN_NAMESPACE_STD` utom i headrar med explicita annoteringar (ostream, streambuf, ios,
+  fstream); förut bar bara funktioner med `_LIBCPP_HIDE_FROM_ABI` taggen (`pair(piecewise_construct_t, …)`
+  hette fel).
+- Funktionsmallar med flera typpaket som vart och ett står sist i en mall-id (`f(int, tl<A...>, tl<B...>)`):
+  den allmänna deduktionsvägen, instansens bindning med `cxx_bind_pack`, och mangling av ett deducerat paket
+  som `J … E` (namnen lika med clangs).
+Kvar: värdepaket i mall-id:n (`__integer_sequence<size_t, _I1...>` i `pair`:s inre styckvisa
+konstruktor): clang skriver då mallparameterdeklarationer (`TpTnm`) i namnet.  cxx-strict: 196 (oförändrat).

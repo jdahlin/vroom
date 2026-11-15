@@ -436,9 +436,15 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 			bind[i] = xargs[i];
 		}
 	}
-	if (f->pack_tp) {
+	uint32_t npk = 0;
+
+	for (uint32_t i = 0; i < p->params->ntparams; i++)
+		npk += p->params->tparams[i].pack;
+	if (f->pack_tp && (f->pack_param || npk <= 1)) {
 		/* f(A a, Ts&&... ts): the fixed parameters, then each further argument against the pack's pattern; or
-		   the pack only inside the parameters' types (get(tuple<Ts...>&)): deduced there, as a list */
+		   the pack only inside the parameters' types (get(tuple<Ts...>&)): deduced there, as a list.  (Several
+		   packs, each inside a parameter's type, pair(piecewise_construct_t, tuple<_Args1...>, tuple<_Args2...>):
+		   the general path below, each deduced as a list.) */
 		bool inside = !f->pack_param;
 		uint32_t ntp = p->params->ntparams, fixed = inside ? f->np : f->np - 1, pk = f->pack_tp - 1, ne = 0;
 		cxx_targ flat[32];

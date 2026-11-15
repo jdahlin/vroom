@@ -47,6 +47,54 @@ VPRIV uint32_t cxx_keyword_of(uint32_t id)
 	return 0;
 }
 
+/* #pragma clang attribute NAME.push(...) / NAME.pop: a region of tokens where every function declared gets the
+   attribute's abi tag (only the abi tag, with apply_to = function, is kept) */
+static void cxx_pragma_attribute_line(cxx *c, const char *s, uint32_t len)
+{
+	const char *p = memmem(s, len, "clang attribute", 15), *e = s + len, *dot, *q;
+	uint32_t h = 2166136261u;
+
+	if (!p)
+		return;
+	p += 15;
+	while (p < e && (*p == ' ' || *p == '\t'))
+		p++;
+	for (dot = p; dot < e && *dot != '.' && *dot != ' ' && *dot != '('; dot++)
+		h = (h ^ (unsigned char)*dot) * 16777619u;
+	if (dot >= e || *dot != '.')
+		return;	/* (an unnamed push: not one libc++ uses) */
+	if (dot + 4 <= e && !memcmp(dot + 1, "pop", 3)) {
+		for (uint32_t i = c->npr_regions; i-- > 0;)
+			if (c->pr_regions[i].open && c->pr_regions[i].name_h == h) {
+				c->pr_regions[i].open = 0, c->pr_regions[i].e = c->ntok;
+				break;
+			}
+		return;
+	}
+	if (dot + 5 > e || memcmp(dot + 1, "push", 4) || !memmem(dot, (size_t)(e - dot), "apply_to = function", 19))
+		return;
+	q = memmem(dot, (size_t)(e - dot), "__abi_tag__(\"", 13);
+	if (!q)
+		return;
+	q += 13;
+	const char *qe = memchr(q, '"', (size_t)(e - q));
+
+	if (!qe)
+		return;
+	if (c->npr_regions == c->cpr_regions)
+		c->pr_regions = realloc(c->pr_regions, (c->cpr_regions = c->cpr_regions ? c->cpr_regions * 2 : 64) * sizeof *c->pr_regions);
+	c->pr_regions[c->npr_regions++] = (struct cxx_pragma_region){ c->ntok, UINT32_MAX, vintern_copy(q, (uint32_t)(qe - q)), h, 1 };
+}
+
+/* the abi tag a #pragma clang attribute region gives a function declared at token pos (0: none) */
+VPRIV uint32_t cxx_pragma_abi_tag(cxx *c, uint32_t pos)
+{
+	for (uint32_t i = c->npr_regions; i-- > 0;)
+		if (pos >= c->pr_regions[i].b && pos < c->pr_regions[i].e)
+			return c->pr_regions[i].tag;
+	return 0;
+}
+
 VPRIV void cxx_tokens_read(cxx *c)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -67,7 +115,8 @@ VPRIV void cxx_tokens_read(cxx *c)
 				c->fork_pending = 1;
 				break;
 			}
-			continue;	/* #pragma lines: none matters to parsing json yet */
+			cxx_pragma_attribute_line(c, t.s, t.len);	/* (#pragma clang attribute push/pop: the regions of abi tags) */
+			continue;	/* (the other #pragma lines: none matters to parsing) */
 		}
 		if (c->ntok + 2 >= cap)
 			c->tok = realloc(c->tok, (cap *= 2) * sizeof(cxx_token));

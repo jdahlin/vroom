@@ -481,7 +481,12 @@ typedef struct cxx {
 	uint32_t gen_this;		/* a member function's body: the symbol of this (0: none) */
 	uint32_t gen_vtt;
 	struct cxx_gen_labels { uint32_t n, cap; uint32_t *name, *label; } *gen_labels;	/* ... its labels by name (goto, name:) */		/* ... a base-object constructor or destructor of a class with virtual bases: its VTT parameter */
-	uint32_t want_constant;		/* parsing a constant-expression (cxx_constant_expression_parse) */
+	uint32_t want_constant;
+	/* #pragma clang attribute NAME.push(__attribute__((... __abi_tag__("x") ...)), apply_to = function): the token ranges
+	   [b, e) it covers and its tag (libc++'s _LIBCPP_BEGIN_NAMESPACE_STD: every function's tag, unless the header
+	   uses explicit annotations) */
+	struct cxx_pragma_region { uint32_t b, e, tag, name_h; uint8_t open; } *pr_regions;
+	uint32_t npr_regions, cpr_regions;		/* parsing a constant-expression (cxx_constant_expression_parse) */
 	uint8_t gen_wrapper;		/* cxx_gen_function_end: a C1/D1 built whole (no members, bases or vptrs added) */
 	uint8_t gen_abi_complete;	/* cxx_gen_abi_type: the complete-object function's type (no VTT parameter) */
 	uint32_t eobj_node;		/* a member function named through an object: the object's node */
@@ -740,6 +745,7 @@ VPRIV bool cxx_class_vbase_path(cxx *c, ast_qualified_type derived, ast_qualifie
 typedef struct cxx_vtt { uint32_t size, nsub, nvp; ast_qualified_type sub[16]; uint32_t sub_at[16]; ast_qualified_type vp_vbase[32]; uint64_t vp_off[32]; } cxx_vtt;
 VPRIV bool cxx_vtt_layout(cxx *c, ast_qualified_type t, cxx_vtt *v);
 VPRIV uint32_t cxx_gen_label(cxx *c, uint32_t name, uint32_t loc);
+VPRIV uint32_t cxx_pragma_abi_tag(cxx *c, uint32_t pos);
 VPRIV bool cxx_gen_is_reference_public(cxx *c, ast_qualified_type t);
 VPRIV uint32_t cxx_gen_zero_public(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV bool cxx_gen_class_has_vbases(cxx *c, const cxx_scope *cls);

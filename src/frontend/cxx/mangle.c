@@ -1275,6 +1275,21 @@ static ast_qualified_type mg_strip_refs(cc *a, ast_qualified_type t)
 
 static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps, const cxx_targ *all)
 {
+	if ((*x).kind == 6) {
+		/* a deduced pack (its elements in a list): J <args> E */
+		mg_str(m, "J");
+		for (int64_t k = 0; k < (*x).v; k++) {
+			const cxx_targ *el = &(*x).list[(*x).t + k];
+
+			if (el->kind != 1 && el->kind != 2) {
+				m->bad = true;
+				return;
+			}
+			mg_template_arg(m, el, i, ps, NULL);	/* (a value: the pack parameter's type) */
+		}
+		mg_str(m, "E");
+		return;
+	}
 	if ((*x).kind == 1 && (*x).t != CXX_TY_UNKNOWN)
 		mg_type(m, (*x).t);
 	else if ((*x).kind == 5) {
