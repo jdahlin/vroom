@@ -1,0 +1,237 @@
+{
+  "target": "arm64",
+  "source_revision": "b56a4765f6cc7439350cd55642f141ec56bdb9ba",
+  "kernel_version": "7.4-rc2",
+  "vcc_revision": "41753926ac48e2a02805855421991c02004cb72b",
+  "host_cpu": "AMD Ryzen 7 9700X",
+  "workers": 6,
+  "configuration": "Inherited allmodconfig-derived configuration from prior run; sanitizer/CFI/RANDSTRUCT/compat VDSO exclusions preserved",
+  "corpus": {
+    "object_jobs": 36269,
+    "ordinary_c_jobs": 25268,
+    "module_c_jobs": 10848,
+    "assembly_jobs": 153,
+    "excluded_intentional_fortify_failures": 18
+  },
+  "vcc": {
+    "vir_mode": "bl",
+    "peak_rss_kib": 17595024,
+    "status": 0,
+    "jobs": 36269,
+    "c_jobs": 36116,
+    "wall_s": 84.29097321024165,
+    "cpu_s": 502.551979,
+    "command": [
+      "/source/vroom/work/allmod-fixes/vpp-fixed",
+      "--batch",
+      "/source/vroom/work/allmod-fixes/final-virbl/batch.jobs",
+      "-j",
+      "6",
+      "-C",
+      "/source/vroom/work/allmod-compare-20261113/clang",
+      "--stats",
+      "/source/vroom/work/allmod-fixes/final-virbl/batch.stats"
+    ],
+    "binary_sha256": "2002f4494b3eed40c0acef225a7a1e64c4b2d748c5edaa624cc0c8f02c46fbbe",
+    "passed": 36269,
+    "completed": 36269
+  },
+  "clang_reference": {
+    "wall_s": 2608.6200053123757,
+    "jobs": 36287,
+    "passed": 36269,
+    "compiler_cpu_s": 14307.895929999999,
+    "command": [
+      "make",
+      "-C",
+      "/source/vroom/work/linux-allmod-src",
+      "O=/source/vroom/work/allmod-compare-20261113/clang",
+      "ARCH=arm64",
+      "LLVM=1",
+      "CC=/usr/bin/python3 /source/vroom/work/allmod-compare-20261113/run.py --cc",
+      "-j6",
+      "-k",
+      "vmlinux",
+      "modules"
+    ],
+    "config_sha256": "18898a463fb01f2a7154ba57a2d0646a3300f07888810452195a96cdb06a4ea6",
+    "initial_build_status": 2,
+    "finish": {
+      "status": 0,
+      "wall_s": 26.63422457035631,
+      "reason": "Finish after installing missing gawk; no source or configuration change"
+    },
+    "final_build_status": 0,
+    "active_build_wall_s": 2635.254229882732,
+    "object_jobs": 36269,
+    "object_cpu_s": 14304.258151,
+    "ordinary_c_jobs": 25268,
+    "module_c_jobs": 10848,
+    "assembly_jobs": 153,
+    "fortify_test_jobs": 18,
+    "unexpected_compile_failures": []
+  },
+  "compiler_cpu_ratio": 28.463241114806156,
+  "batch_vs_fresh": {
+    "jobs": 36269,
+    "matched": 36269,
+    "mismatches": [],
+    "wall_s": 646.0209216768853,
+    "binary_sha256": "2002f4494b3eed40c0acef225a7a1e64c4b2d748c5edaa624cc0c8f02c46fbbe",
+    "vir_mode": "bls",
+    "function_counts": {
+      "lowered": 337030,
+      "not_lowered": 31,
+      "not_built": 263485,
+      "built": 337061
+    }
+  },
+  "methodology": [
+    "Same recorded object argv and configured source snapshot as the prior Clang measurement; dependency-output paths removed.",
+    "VCC_VIR=bl builds VIR and lowers supported functions at O2 or above; unsupported functions retain the direct-emitter fallback.",
+    "One fresh six-worker batch; OS filesystem caches not flushed; shared Ryzen host. Final timing ran without other task-owned compilers.",
+    "Fresh-process comparison uses bls (same lowering plus per-function reporting) and compares every ELF object byte for byte.",
+    "CPU ratio compares compiler CPU for the same 36,269 object jobs. Clang wall time includes full kbuild; vcc wall time is compilation only.",
+    "GCC skipped as requested. No vcc full-kernel link or boot validation; object parity does not prove all emitted code semantically correct.",
+    "Matched fixed direct-emitter timing ran after the fresh-process verification, without other task-owned compilers; both modes use identical binary, job list and six workers. Single passes, not confidence intervals."
+  ],
+  "fixes": [
+    {
+      "commit": "dd5679fa",
+      "fix": "Bound arm64 VIR jump-table filling when the highest case is UINT64_MAX; saturate range counts without overflow."
+    },
+    {
+      "commit": "6ea8ecd6",
+      "fix": "Parse arm64 address operands as symbols before operand keywords such as all."
+    },
+    {
+      "commit": "32e49671",
+      "fix": "Keep canonical-macro overflow definitions in immortal shared storage rather than TU-local arenas."
+    },
+    {
+      "commit": "c9da77f8",
+      "fix": "Search installed libc headers for explicit Linux targets."
+    },
+    {
+      "commit": "41753926",
+      "fix": "Correct macro-origin and initializer/short-circuit diagnostics without disabling Werror."
+    }
+  ],
+  "validation": {
+    "diagnostic_fixtures": {
+      "passed": 228,
+      "total": 228
+    },
+    "tiny_c_preprocessor": {
+      "passed": 494,
+      "total": 494
+    },
+    "tiny_c_sema_batch": {
+      "passed": 494,
+      "total": 494
+    },
+    "tiny_c_sema_process": {
+      "passed": 494,
+      "total": 494
+    },
+    "vir_runtime_suite": {
+      "passed": 326,
+      "known_xfail": 1
+    },
+    "assembler_object_parity": {
+      "passed": 66,
+      "total": 66
+    },
+    "asan_ubsan_original_failure_retries": {
+      "passed": 22,
+      "total": 22
+    },
+    "macro_cache_saturation_regression": "Fails before the fix; 8 outputs match fresh processes after it, release and ASan/UBSan. In premerge gate.",
+    "non_unity_build": "pass",
+    "known_unrelated_checks": "Tiny full preprocessing has 7 pre-existing assembly-only differences. Driver harness 155/230 vs baseline 153/230: both added libc probes fixed; 75 generated-Clang-version/Apple predefined-macro differences unchanged."
+  },
+  "previous_followups": {
+    "build_vir_without_lowering": {
+      "vir_mode": "1",
+      "peak_rss_kib": 17532936,
+      "status": 1,
+      "jobs": 36269,
+      "c_jobs": 36116,
+      "wall_s": 81.21520428592339,
+      "cpu_s": 483.20737599999995,
+      "command": [
+        "/source/vroom/work/allmod-compare-20261113/vpp",
+        "--batch",
+        "/source/vroom/work/allmod-compare-20261113/vcc-vir1/batch.jobs",
+        "-j",
+        "6",
+        "-C",
+        "/source/vroom/work/allmod-compare-20261113/clang",
+        "--stats",
+        "/source/vroom/work/allmod-compare-20261113/vcc-vir1/batch.stats"
+      ],
+      "binary_sha256": "540ed8f2805ce9774f1d4bcd98c063f1e13554cb72574fc03cfd68f1598fcd4b",
+      "passed": 36247,
+      "completed": 36269
+    },
+    "lowering_before_fix": {
+      "vir_mode": "bl",
+      "peak_rss_kib": 17532936,
+      "status": -11,
+      "jobs": 36269,
+      "c_jobs": 36116,
+      "wall_s": 71.37867235112935,
+      "cpu_s": 418.791418,
+      "command": [
+        "/source/vroom/work/allmod-compare-20261113/vpp",
+        "--batch",
+        "/source/vroom/work/allmod-compare-20261113/vcc-virbl/batch.jobs",
+        "-j",
+        "6",
+        "-C",
+        "/source/vroom/work/allmod-compare-20261113/clang",
+        "--stats",
+        "/source/vroom/work/allmod-compare-20261113/vcc-virbl/batch.stats"
+      ],
+      "binary_sha256": "540ed8f2805ce9774f1d4bcd98c063f1e13554cb72574fc03cfd68f1598fcd4b"
+    }
+  },
+  "artifacts_directory": "/source/vroom/work/allmod-fixes",
+  "reproduction": {
+    "timing_script": "/source/vroom/work/allmod-fixes/final-virbl.py",
+    "fresh_process_script": "/source/vroom/work/allmod-fixes/fresh.py",
+    "manifest": "/source/vroom/work/allmod-fixes/final-virbl/manifest.json",
+    "frozen_binary": "/source/vroom/work/allmod-fixes/vpp-fixed"
+  },
+  "function_instance_lowering_pct": 56.120596923466316,
+  "measurement_status": "All object jobs pass; full batch/fresh byte parity passes; kernel link and boot not tested",
+  "matched_fixed_direct": {
+    "vir_mode": "0",
+    "peak_rss_kib": 16759844,
+    "status": 0,
+    "jobs": 36269,
+    "c_jobs": 36116,
+    "wall_s": 78.41750463889912,
+    "cpu_s": 467.62289999999996,
+    "command": [
+      "/source/vroom/work/allmod-fixes/vpp-fixed",
+      "--batch",
+      "/source/vroom/work/allmod-fixes/final-direct/batch.jobs",
+      "-j",
+      "6",
+      "-C",
+      "/source/vroom/work/allmod-compare-20261113/clang",
+      "--stats",
+      "/source/vroom/work/allmod-fixes/final-direct/batch.stats"
+    ],
+    "binary_sha256": "2002f4494b3eed40c0acef225a7a1e64c4b2d748c5edaa624cc0c8f02c46fbbe",
+    "passed": 36269,
+    "completed": 36269
+  },
+  "lowering_overhead": {
+    "wall_s": 5.873468571342528,
+    "wall_pct": 7.489996778638863,
+    "cpu_s": 34.92907900000006,
+    "cpu_pct": 7.4694971097437834
+  }
+}

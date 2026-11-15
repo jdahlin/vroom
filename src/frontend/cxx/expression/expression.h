@@ -12,7 +12,6 @@
 
 #include "../cxx-internal.h"
 
-static void cxx_cast_expression_parse(cxx *c);
 static void cxx_unary_expression_parse(cxx *c);
 
 /* the functions of expression/, by file */
@@ -32,7 +31,8 @@ VPRIV bool cxx_starts_type(cxx *c);
 VPRIV void cxx_type_id_then_close(cxx *c);
 VPRIV bool cxx_paren_type_id_follows(cxx *c);
 VPRIV void cxx_type_then_init(cxx *c);
-VPRIV bool cxx_const_widens(cxx *c, ast_qualified_type from, ast_qualified_type to, int64_t v);
+VPRIV bool cxx_const_widens(cxx *c, ast_qualified_type from,
+                            ast_qualified_type to, int64_t v);
 VPRIV void cxx_functional_cast_type(cxx *c, ast_qualified_type cast_to);
 
 /* argument.c */
@@ -43,7 +43,8 @@ VPRIV void cxx_builtin_call_parse(cxx *c);
 VPRIV uint32_t cxx_closure_name(cxx *c, uint32_t serial);
 
 /* lambda.c */
-VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out);
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
+                               cxx_entity **call_out);
 VPRIV void cxx_lambda_parse(cxx *c);
 
 /* requires.c */

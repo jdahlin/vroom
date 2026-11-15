@@ -33,7 +33,10 @@
 #define VCCD_GENERATION_KEEP_MILLISECONDS 10000.0
 #define VCCD_GENERATION_GROUPS_MAX 64
 static pthread_mutex_t vccd_generation_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct { uint32_t pgrp; double ms; } vccd_generation_groups[VCCD_GENERATION_GROUPS_MAX];
+static struct {
+    uint32_t pgrp;
+    double ms;
+} vccd_generation_groups[VCCD_GENERATION_GROUPS_MAX];
 static int vccd_generation_group_count, vccd_generation_running_count;
 _Atomic unsigned long vccd_flush_count;
 
@@ -46,21 +49,22 @@ _Atomic int vccd_generation_restart_pending;
 static size_t vccd_generation_resident_megabytes(void)
 {
 #ifdef __APPLE__
-	struct mach_task_basic_info ti;
-	mach_msg_type_number_t n = MACH_TASK_BASIC_INFO_COUNT;
+    struct mach_task_basic_info ti;
+    mach_msg_type_number_t n = MACH_TASK_BASIC_INFO_COUNT;
 
-	if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&ti, &n) != KERN_SUCCESS)
-		return 0;
-	return (size_t)(ti.resident_size >> 20);
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&ti,
+                  &n) != KERN_SUCCESS)
+        return 0;
+    return (size_t)(ti.resident_size >> 20);
 #else
-	long pages = 0, res = 0;
-	FILE *f = fopen("/proc/self/statm", "r");
+    long pages = 0, res = 0;
+    FILE *f = fopen("/proc/self/statm", "r");
 
-	if (f && fscanf(f, "%ld %ld", &pages, &res) != 2)
-		res = 0;
-	if (f)
-		fclose(f);
-	return (size_t)res * (size_t)sysconf(_SC_PAGESIZE) >> 20;
+    if (f && fscanf(f, "%ld %ld", &pages, &res) != 2)
+        res = 0;
+    if (f)
+        fclose(f);
+    return (size_t)res * (size_t)sysconf(_SC_PAGESIZE) >> 20;
 #endif
 }
 
@@ -74,10 +78,11 @@ static size_t vccd_generation_resident_megabytes(void)
  */
 static bool vccd_generation_restart_is_due(void)
 {
-	const char *e = getenv("VCC_RESTART_MB");
-	size_t lim = e ? strtoul(e, NULL, 10) : 6144;
+    const char *e = getenv("VCC_RESTART_MB");
+    size_t lim = e ? strtoul(e, NULL, 10) : 6144;
 
-	return vccd_listen_fd >= 0 && vccd_self_executable[0] && vccd_generation_resident_megabytes() >= lim;
+    return vccd_listen_fd >= 0 && vccd_self_executable[0] &&
+           vccd_generation_resident_megabytes() >= lim;
 }
 
 /* the accept loop: during a restart it accepts nothing more (connections
@@ -86,108 +91,123 @@ static _Atomic int vccd_accept_parked;
 
 VPRIV void vccd_accept_park(void)
 {
-	if (!atomic_load(&vccd_generation_restart_pending))
-		return;
-	atomic_store(&vccd_accept_parked, 1);
-	while (atomic_load(&vccd_generation_restart_pending))	/* (until the exec, or its failure) */
-		usleep(1000);
-	atomic_store(&vccd_accept_parked, 0);
+    if (!atomic_load(&vccd_generation_restart_pending))
+        return;
+    atomic_store(&vccd_accept_parked, 1);
+    while (atomic_load(
+        &vccd_generation_restart_pending)) /* (until the exec, or its failure) */
+        usleep(1000);
+    atomic_store(&vccd_accept_parked, 0);
 }
 
 VPRIV void vccd_generation_restart(void)
 {
-	while (!atomic_load(&vccd_accept_parked))
-		usleep(1000);
-	for (;;) {	/* the other workers answer what they took (vccd_active_count counts us too) */
-		pthread_mutex_lock(&vccd_queue_lock);
-		if (atomic_load(&vccd_active_count) == 1) {
-			while (vccd_queue_head != vccd_queue_tail) {	/* still queued: never read */
-				int c = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
-				int32_t st = (int32_t)VCCD_STATUS_RETRY;
+    while (!atomic_load(&vccd_accept_parked))
+        usleep(1000);
+    for (
+        ;
+        ;) { /* the other workers answer what they took (vccd_active_count counts us too) */
+        pthread_mutex_lock(&vccd_queue_lock);
+        if (atomic_load(&vccd_active_count) == 1) {
+            while (vccd_queue_head !=
+                   vccd_queue_tail) { /* still queued: never read */
+                int c = vccd_queue_fds[vccd_queue_head++ % VCCD_QUEUE_SIZE];
+                int32_t st = (int32_t)VCCD_STATUS_RETRY;
 
-				(void)!write(c, &st, sizeof(st));
-				close(c);
-			}
-			break;	/* (vccd_queue_lock stays held: nobody takes another) */
-		}
-		pthread_mutex_unlock(&vccd_queue_lock);
-		usleep(1000);
-	}
-	{
-		char fd[16], **av = calloc((size_t)vccd_restart_argc + 3, sizeof(char *));
-		int k = 0;
+                (void)!write(c, &st, sizeof(st));
+                close(c);
+            }
+            break; /* (vccd_queue_lock stays held: nobody takes another) */
+        }
+        pthread_mutex_unlock(&vccd_queue_lock);
+        usleep(1000);
+    }
+    {
+        char fd[16], **av = (char **)(calloc((size_t)vccd_restart_argc + 3,
+                                             sizeof(char *)));
+        int k = 0;
 
-		for (int i = 0; i < vccd_restart_argc; i++) {
-			if (!strcmp(vccd_restart_argv[i], "--listen-fd")) {
-				i++;
-				continue;
-			}
-			av[k++] = vccd_restart_argv[i];
-		}
-		snprintf(fd, sizeof(fd), "%d", vccd_listen_fd);
-		av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
-		fprintf(stderr, "vccd: restarting (%zu MB resident; identifier table %s)\n", vccd_generation_resident_megabytes(),
-			atomic_load(&vtables_full) ? "full" : "not full");
-		vccd_counters_print();
-		fcntl(vccd_listen_fd, F_SETFD, 0);
-		fcntl(vccd_listen_fd, F_SETFL, 0);
-		execv(vccd_self_executable, av);
-		perror("vccd: restart");	/* go on with the old process */
-		fcntl(vccd_listen_fd, F_SETFD, FD_CLOEXEC);
-		fcntl(vccd_listen_fd, F_SETFL, O_NONBLOCK);
-		atomic_store(&vccd_generation_restart_pending, 0);
-		pthread_mutex_unlock(&vccd_queue_lock);
-	}
+        for (int i = 0; i < vccd_restart_argc; i++) {
+            if (!strcmp(vccd_restart_argv[i], "--listen-fd")) {
+                i++;
+                continue;
+            }
+            av[k++] = vccd_restart_argv[i];
+        }
+        snprintf(fd, sizeof(fd), "%d", vccd_listen_fd);
+        av[k++] = "--listen-fd", av[k++] = fd, av[k] = NULL;
+        fprintf(stderr,
+                "vccd: restarting (%zu MB resident; identifier table %s)\n",
+                vccd_generation_resident_megabytes(),
+                atomic_load(&vtables_full) ? "full" : "not full");
+        vccd_counters_print();
+        fcntl(vccd_listen_fd, F_SETFD, 0);
+        fcntl(vccd_listen_fd, F_SETFL, 0);
+        execv(vccd_self_executable, av);
+        perror("vccd: restart"); /* go on with the old process */
+        fcntl(vccd_listen_fd, F_SETFD, FD_CLOEXEC);
+        fcntl(vccd_listen_fd, F_SETFL, O_NONBLOCK);
+        atomic_store(&vccd_generation_restart_pending, 0);
+        pthread_mutex_unlock(&vccd_queue_lock);
+    }
 }
 
 /* 1: answer VCCD_STATUS_RETRY (the server is restarting); 2: the same, and
    then restart (vccd_generation_restart) */
 VPRIV int vccd_generation_enter(uint32_t pgrp)
 {
-	VLOCK(vccd_generation_lock);
-	if (atomic_load(&vccd_generation_restart_pending))
-		return 1;
-	if (atomic_load(&vtables_full) && !vccd_generation_running_count && vccd_listen_fd >= 0 && vccd_self_executable[0]) {
-		/* identifiers are never freed: a full table fails every later TU */
-		atomic_store(&vccd_generation_restart_pending, 1);
-		return 2;
-	}
-	if (pgrp) {
-		double t = vccd_clock_milliseconds();
-		int i, k = 0;
+    VLOCK(vccd_generation_lock);
+    if (atomic_load(&vccd_generation_restart_pending))
+        return 1;
+    if (atomic_load(&vtables_full) && !vccd_generation_running_count &&
+        vccd_listen_fd >= 0 && vccd_self_executable[0]) {
+        /* identifiers are never freed: a full table fails every later TU */
+        atomic_store(&vccd_generation_restart_pending, 1);
+        return 2;
+    }
+    if (pgrp) {
+        double t = vccd_clock_milliseconds();
+        int i, k = 0;
 
-		for (i = 0; i < vccd_generation_group_count; i++)
-			if (vccd_generation_groups[i].pgrp == pgrp)
-				break;
-		if (i == vccd_generation_group_count) {	/* a new build */
-			if (vccd_generation_group_count && !vccd_generation_running_count) {
-				if (vccd_generation_restart_is_due()) {
-					atomic_store(&vccd_generation_restart_pending, 1);
-					return 2;
-				}
-				lex_cache_flush();
-				pp_directory_cache_flush();
-				vccd_diagnostics_build_new();
-				pp_include_cache_flush();
-				atomic_fetch_add(&vccd_flush_count, 1);
-			} else if (vccd_generation_group_count) {	/* jobs are running: keep the caches, but check each answer once before it is reused */
-				vcache_new_epoch();
-			}
-			for (int j = 0; j < vccd_generation_group_count; j++)	/* forget the groups long gone */
-				if (t - vccd_generation_groups[j].ms < VCCD_GENERATION_KEEP_MILLISECONDS)
-					vccd_generation_groups[k++] = vccd_generation_groups[j];
-			vccd_generation_group_count = k < VCCD_GENERATION_GROUPS_MAX ? k : VCCD_GENERATION_GROUPS_MAX - 1;	/* (all live: the last one makes room) */
-			i = vccd_generation_group_count++;
-			vccd_generation_groups[i].pgrp = pgrp;
-		}
-		vccd_generation_groups[i].ms = t;
-	}
-	vccd_generation_running_count++;
-	return 0;
+        for (i = 0; i < vccd_generation_group_count; i++)
+            if (vccd_generation_groups[i].pgrp == pgrp)
+                break;
+        if (i == vccd_generation_group_count) { /* a new build */
+            if (vccd_generation_group_count && !vccd_generation_running_count) {
+                if (vccd_generation_restart_is_due()) {
+                    atomic_store(&vccd_generation_restart_pending, 1);
+                    return 2;
+                }
+                lex_cache_flush();
+                pp_directory_cache_flush();
+                vccd_diagnostics_build_new();
+                pp_include_cache_flush();
+                atomic_fetch_add(&vccd_flush_count, 1);
+            } else if (
+                vccd_generation_group_count) { /* jobs are running: keep the caches, but check each answer once before it is reused */
+                vcache_new_epoch();
+            }
+            for (int j = 0; j < vccd_generation_group_count;
+                 j++) /* forget the groups long gone */
+                if (t - vccd_generation_groups[j].ms <
+                    VCCD_GENERATION_KEEP_MILLISECONDS)
+                    vccd_generation_groups[k++] = vccd_generation_groups[j];
+            vccd_generation_group_count =
+                k < VCCD_GENERATION_GROUPS_MAX
+                    ? k
+                    : VCCD_GENERATION_GROUPS_MAX -
+                          1; /* (all live: the last one makes room) */
+            i = vccd_generation_group_count++;
+            vccd_generation_groups[i].pgrp = pgrp;
+        }
+        vccd_generation_groups[i].ms = t;
+    }
+    vccd_generation_running_count++;
+    return 0;
 }
 
 VPRIV void vccd_generation_leave(void)
 {
-	VLOCK(vccd_generation_lock);
-	vccd_generation_running_count--;
-}	/* connections taken by a worker, not yet answered */
+    VLOCK(vccd_generation_lock);
+    vccd_generation_running_count--;
+} /* connections taken by a worker, not yet answered */
