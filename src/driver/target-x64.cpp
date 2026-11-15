@@ -45,6 +45,10 @@ static const char *driver_target_features_parse(
             i++;
             continue;
         }
+        /* -mprefer-vector-width=N: a tuning hint (clang: the vectorizer's width), no feature;
+           Skia's SkOpts_ml4.cpp with -march=x86-64-v4 */
+        if (!strncmp(a, "-mprefer-vector-width=", 22))
+            continue;
         /* These driver switches control generated entry/return sequences. */
         if (!strcmp(a, "-mfunction-return=thunk-extern") ||
             !strcmp(a, "-mfunction-return=keep") ||
