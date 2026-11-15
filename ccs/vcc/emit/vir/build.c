@@ -1797,7 +1797,7 @@ VPRIV void vw_ecx_free(ecx *e)
 		return;
 	free(V->p), free(V->b), free(V->x), free(V->h), free(V->lh), free(V->fwd), free(V->lab), free(V->sl), free(V->act);
 	free(V->st), free(V->loc), free(V->vty), free(V->vsgn), free(V->pr), free(V->map), free(V->order), free(V->bmap);
-	vscratch_destroy(&V->simpbuf);
+	vscratch_destroy(&V->passbuf);
 	free(V->xslot), free(V->xspill), free(V->xlabel), free(V->xuses), free(V->xedgelab);
 	free(V);
 	e->vw = NULL;
@@ -1978,6 +1978,16 @@ static void vw_mark(vwst *V, uint32_t *stk, uint32_t *n, uint32_t v)
 	}
 }
 
+/* Each request invalidates the previous pass's views. */
+static void *vw_passbuf(ecx *e, uint64_t bytes)
+{
+	void *buf = bytes <= SIZE_MAX ? vscratch_get(&e->vw->passbuf, (size_t)bytes) : NULL;
+
+	if (!buf)
+		vw_fail(e, "out of memory");
+	return buf;
+}
+
 static void vw_deadparams(ecx *e)
 {
 	vwst *V = e->vw;
@@ -1985,9 +1995,7 @@ static void vw_deadparams(ecx *e)
 
 	GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
-	stk = malloc((size_t)(V->np + 1) * sizeof *stk);
-	if (!stk)
-		vw_fail(e, "out of memory");
+	stk = vw_passbuf(e, ((uint64_t)V->np + 1) * sizeof *stk);
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
@@ -2025,7 +2033,6 @@ static void vw_deadparams(ecx *e)
 			if (V->fwd[p] == p && !V->map[p])
 				V->fwd[p] = vw_undef(e, V->p[p].in.ty);
 	}
-	free(stk);
 }
 
 /* ---------------- slots to variables ---------------- */
@@ -2138,11 +2145,10 @@ static bool vw_promote(ecx *e)
 
 	if (!V->nsl)
 		return false;
-	bad = calloc(V->nsl, 1);
-	sf = calloc(V->nsl, sizeof *sf);
-	fof = malloc((size_t)V->np * sizeof *fof);	/* access -> field + 1 */
-	if (!bad || !fof || !sf)
-		vw_fail(e, "out of memory");
+	sf = vw_passbuf(e, ((uint64_t)V->nsl + np0) * sizeof *sf + V->nsl);
+	fof = sf + V->nsl;	/* access -> field + 1 */
+	bad = (uint8_t *)(fof + np0);
+	memset(sf, 0, (size_t)V->nsl * sizeof *sf);
 	for (uint32_t s = 0; s < V->nsl; s++)
 		bad[s] = V->sl[s].prom;	/* (an earlier run's: its stores are dead, its loads gone) */
 	/* a slot escapes when its address is anything but the address of a load or store (the
@@ -2379,9 +2385,6 @@ out:
 	free(ms);
 	free(fd);
 	free(fnx);
-	free(sf);
-	free(fof);
-	free(bad);
 	return done;
 }
 
@@ -3209,9 +3212,7 @@ static void vw_simplify(ecx *e)
 	S.kmask = kc - 1;
 	S.hmask = hc - 1;
 	size_t need = vw_simp_layout(e, &S, NULL, kc, hc);
-	void *buf = vscratch_get(&V->simpbuf, need);
-	if (!buf)
-		vw_fail(e, "out of memory");
+	void *buf = vw_passbuf(e, need);
 	vw_simp_layout(e, &S, buf, kc, hc);
 	stk = S.stack;
 	uint32_t *pcopy = S.cnt + S.n0 + 1;
@@ -3583,11 +3584,11 @@ static bool vw_cchain(vwst *V, uint32_t v, const uint32_t *cnt, uint32_t b)
 static bool vw_condmerge(ecx *e)
 {
 	vwst *V = e->vw;
-	uint32_t ncnt = V->np + V->norder + 1, *cnt = calloc(ncnt, sizeof *cnt);
+	uint64_t ncnt = (uint64_t)V->np + V->norder + 1;
+	uint32_t *cnt = vw_passbuf(e, ncnt * sizeof *cnt);
 	bool any = false, again = true;
 
-	if (!cnt)
-		vw_fail(e, "out of memory");
+	memset(cnt, 0, (size_t)ncnt * sizeof *cnt);
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
@@ -3729,7 +3730,6 @@ static bool vw_condmerge(ecx *e)
 			}
 		}
 	}
-	free(cnt);
 	if (any) {
 		uint32_t m = 0;
 
@@ -3792,10 +3792,8 @@ static void vw_split(ecx *e)
 		return;
 	/* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
 	{
-		uint32_t *o = malloc((size_t)V->norder * sizeof *o), m = 0;
+		uint32_t *o = vw_passbuf(e, (uint64_t)V->norder * sizeof *o), m = 0;
 
-		if (!o)
-			vw_fail(e, "out of memory");
 		for (uint32_t i = 0; i < n0; i++) {
 			uint32_t b = V->order[i];
 
@@ -3805,7 +3803,6 @@ static void vw_split(ecx *e)
 					o[m++] = V->order[j];
 		}
 		memcpy(V->order, o, (size_t)m * sizeof *o);
-		free(o);
 	}
 }
 

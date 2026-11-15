@@ -2368,6 +2368,20 @@ Detta är en beräkning på spåret. Tid och RSS för en sådan ändring återst
 att mäta. Hashtabellens ombyggnad (`vw_hslot`, 570 temporära kopior) kan ske
 inuti promotion och behöver en egen livstid.
 
+De fyra passen använder nu samma arbetsminne som förenklingen. På samma
+sqlite3.c, tolv omgångar enligt ovan med `2c17bf78` som bas, blev antalet
+allokeringsanrop precis 9 117 (4 157 malloc, 1 666 calloc, 3 294 realloc),
+mot 20 471 före. Antalet free sjönk från 70 771 till 59 416. Alla fyra
+assemblerfilerna var byte-identiska.
+
+| Heap | Tid före → efter (median, ms) | Max-RSS före → efter (median, KiB) |
+|---|---:|---:|
+| glibc 2.43 | 350,7 → 351,1 | 176 928 → 176 894 |
+| mimalloc 3.2.8 | 353,6 → 352,7 | 189 170 → 189 072 |
+
+Det ger 55,5 % färre anrop. Skillnaderna i tid och max-RSS ligger inom
+spridningen mellan körningarna för båda heaparna.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100

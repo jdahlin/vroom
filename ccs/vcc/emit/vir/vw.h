@@ -61,7 +61,7 @@ typedef struct vwst {
 	uint32_t *map; uint32_t cmap;		/* pre-IR value -> VIR value */
 	uint32_t *order; uint32_t norder, corder;	/* blocks in emission order */
 	uint32_t *bmap; uint32_t cbmap;		/* scratch */
-	vscratch simpbuf;		/* vw_simplify scratch, reused between functions */
+	vscratch passbuf;		/* shared by sequential passes in vw_emit */
 	uint64_t live[3], flive;		/* names in use */
 	uint32_t fprod[64];			/* per float name: the product (or its negation) the expression in hand just made, 0 none */
 	uint32_t cur;				/* the block being built */
