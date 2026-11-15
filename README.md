@@ -1,20 +1,19 @@
 <h1 align="center"><a href="doc/logos/hairpin-cartoon.png"><img src="doc/logos/hairpin-cartoon.png" alt="vroom" width="420"></a></h1>
 
-**vroom is a C toolchain built to get from a clean kernel tree to a bootable arm64 Linux image in under two seconds on an M1 Pro.** The goal is still ahead of us. A recorded cold build took 9.9 seconds, and the resulting kernel booted Debian.
+vroom is a C toolchain. Its compiler, `vcc`, can run one compile job on its own or share parsed headers across a parallel build through `vccd`. GNU make still drives the build.
 
-The compiler is called `vcc`. Set `CC=vcc` and make sends jobs to `vccd`, a long-lived process that compiles C, assembles code, builds archives and links the kernel. Clang bootstraps the tools. The kernel build itself runs entirely on vroom.
+## ⏱️ Compile times
 
-## ⏱️ Performance
+| Workload | Clang | vcc direct emitter | vcc with VIR |
+| --- | ---: | ---: | ---: |
+| SQLite 3.50.4, compile `sqlite3.c` for x86-64 Windows at `-O2` | 12.9 s | 0.25 s (**52×**) | 0.60 s (**22×**) |
+| Linux 7.4-rc2, compile 36,269 arm64 kernel and module objects (compiler CPU time) | 14,304 s | 468 s (**31×**) | 503 s (**28×**) |
 
-| Workload | Recorded time | What was timed |
-| --- | ---: | --- |
-| Cold arm64 kernel build on M1 Pro | **9.9 s** | 884 compile jobs. Wall time was 11.1 s including harness startup and shutdown. [Build notes](doc/PLAN-fas2.md) · [Debian boot log](results/boot-20261110-133025.log) |
-| Compile SQLite to an x86-64 object | **292 ms** direct · **571 ms** via VIR | 262,899 lines in one C file on a Ryzen 7 9700X running Linux. Median CPU time over three fresh compiler processes with the file cache retained. [Measurements](results/sqlite-compile-20261113.json) |
-| Tokenize the same SQLite source | **4.9 ms** | 9.3 MB and 1.14 million tokens on the Ryzen. Best of seven warm lexer passes, or 1.91 GB/s. [Lexer results](results/lexer-simd-20261113.json) |
+**SQLite.** All three builds produced the same verification hash in SQLite’s `speedtest1`. Running that test under Wine took 1.73× as long with the direct emitter’s code and 1.15× as long with VIR’s as with Clang’s. [SQLite benchmark notes](doc/PLAN-win64.md#win8-2026-11-14-zlib-sqlite-and-ffmpegs-c-fallbacks-by-vccs-own-toolchain-under-wine)
 
-About 840 kernel translation units each pull in 4–9 MB of source, but together they read just 44 MB of distinct text. Keeping tokens, macros and parsed declarations in one process lets the next compile reuse a header the previous one already read. Header functions stay as tokens until something uses them. Only about 2% need parsing.
+**Linux.** On a Ryzen 7 9700X, six vcc workers compiled the same object jobs Clang built from an arm64 configuration derived from `allmodconfig`. The vcc batch took 78 s of wall time with the direct emitter and 84 s with VIR. This run ended at object emission. [Kernel measurements](results/kernel-allmod-vir-fixed-20261113.json)
 
-The emitter writes object files directly. Kbuild still schedules the work, and a small shell inside `vccd` handles its common recipes. Several [kernel patches](patches/) shorten the serial part before the first compile.
+For an end-to-end build, the smaller arm64 configuration took **9.9 s** on an M1 Pro and booted Debian. The project goal is a cold build of that image in under two seconds. [Build notes](doc/PLAN-fas2.md) · [Boot log](results/boot-20261110-133025.log)
 
 ## 🔧 Build and try it
 
