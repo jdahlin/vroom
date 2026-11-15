@@ -23,6 +23,19 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
+			if (want_body && c->spec_claim && f->done[i].body && f->done[i].inst) {
+				/* template <> R f(P...) declared before, now defined: this entity is that specialization too
+				   (the same instance, so the same symbol) */
+				cxx_entity *spec = c->spec_claim, *was = f->done[i].inst;
+
+				c->spec_claim = NULL;
+				spec->is_instance = 1, spec->targs = was->targs, spec->ntargs = was->ntargs, spec->inst_pack_at = was->inst_pack_at;
+				spec->inst_params = was->inst_params, spec->inst_ftmpl = was->inst_ftmpl;
+				if (!spec->abi_tag)
+					spec->abi_tag = was->abi_tag;
+				c->bound_sig = f->done[i].sig, c->sig_requires = f->done[i].viable, c->call_instance = spec;
+				return f->done[i].ret;
+			}
 			if (!want_body || f->done[i].body) {
 				c->stats.bodies_cached++;
 				c->bound_sig = f->done[i].sig;
@@ -34,6 +47,27 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 			at = i;	/* its signature was parsed; now its body */
 			break;
 		}
+	if (want_body && c->spec_claim) {
+		/* template <> R f(P...) { ... }: these arguments' function is that declaration, its body its own;
+		   this one's is not instantiated (the signature is, for the call's types) */
+		cxx_entity *spec = c->spec_claim, *made;
+
+		c->spec_claim = NULL;
+		r = cxx_ftemplate_return(c, f, bind, false);
+		sig = c->bound_sig;
+		for (at = 0; at < f->ndone && !cxx_args_equal(f->done[at].args, bind, np); at++)
+			;
+		if (at == f->ndone || !(made = cxx_ftemplate_instance(c, p, bind, np)))
+			return r;
+		spec->is_instance = 1, spec->targs = made->targs, spec->ntargs = made->ntargs, spec->inst_pack_at = made->inst_pack_at;
+		spec->inst_params = made->inst_params, spec->inst_ftmpl = made->inst_ftmpl;
+		if (!spec->abi_tag)
+			spec->abi_tag = made->abi_tag;
+		free(made);
+		f->done[at].inst = spec, f->done[at].body = 1;
+		c->call_instance = spec, c->bound_sig = sig;
+		return r;
+	}
 	c->bound_sig = CXX_TY_UNKNOWN;
 	if (c->body_depth >= 64)
 		return at != UINT32_MAX ? f->done[at].ret : CXX_TY_UNKNOWN;
@@ -259,4 +293,49 @@ VPRIV ast_qualified_type cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f, con
 		}
 	c->sig_requires = viable;
 	return r;
+}
+
+/* template <> R f(P...): the template of set whose specialization for the arguments deduced from P... has
+   the type R(P...); spec becomes that specialization (its mangled name the instance's, the calls of those
+   arguments its) */
+VPRIV bool cxx_explicit_specialization_claim(cxx *c, cxx_entity *spec, cxx_entity *set)
+{
+	if (!spec || spec->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, spec->ty) != AST_TYPE_FUNCTION || spec->is_instance)
+		return false;
+	ast_qualified_type want = AST_QUALIFIED_TYPE_UNQUALIFIED(spec->ty);
+	const ctype *w = AST_TYPE(c->ast, want);
+	ast_qualified_type args[16];
+	uint8_t lval[16];
+
+	if (w->n > 16 || (w->flags & AST_TYPE_FLAG_VARIADIC))
+		return false;
+	for (uint32_t i = 0; i < w->n; i++) {
+		ast_qualified_type p = c->ast->params[w->aux + i];
+		bool ref = p != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && AST_TYPE(c->ast, p)->ext;
+
+		args[i] = ref ? AST_TYPE(c->ast, p)->base : p, lval[i] = ref && AST_TYPE(c->ast, p)->ext == 1;
+	}
+	for (cxx_entity *e = set; e; e = e->next) {
+		if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || !e->ftmpl || cxx_ftemplate_has_packs(e))
+			continue;
+		ast_qualified_type bs = c->bound_sig, r;
+		cxx_entity *ci = c->call_instance;
+		bool ok = false;
+		cxx_outer o;
+
+		cxx_outer_save(c, &o);	/* (deducing parses the template's signature: the declaration's parameters are kept) */
+
+		if (cxx_ftemplate_deduce(c, e, NULL, UINT32_MAX, args, lval, w->n, &r, false) == 1 && c->bound_sig != CXX_TY_UNKNOWN &&
+		    AST_QUALIFIED_TYPE_UNQUALIFIED(c->bound_sig) == want) {
+			c->spec_claim = spec, c->call_instance = NULL;
+			cxx_ftemplate_deduce(c, e, NULL, UINT32_MAX, args, lval, w->n, &r, true);
+			ok = c->call_instance == spec;
+			c->spec_claim = NULL;
+		}
+		cxx_outer_restore(c, &o);
+		c->bound_sig = bs, c->call_instance = ci;
+		if (ok)
+			return true;
+	}
+	return false;
 }

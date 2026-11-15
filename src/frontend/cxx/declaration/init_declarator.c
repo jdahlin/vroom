@@ -294,6 +294,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */
+			if (e && kind == CXX_ENTITY_VALUE && f && c->explicit_specialization && !c->template_depth && !c->tentative && !e->is_instance &&
+			    t != CXX_TY_UNKNOWN && !is_friend)
+				/* template <> R f(P...): the specialization of the function template f it is */
+				cxx_explicit_specialization_claim(c, e, cxx_lookup_in(c, cxx_declaration_scope(c), name, 0));
 			if (e && kind == CXX_ENTITY_VALUE && f && fn_ret_pattern != CXX_TY_UNKNOWN && !c->tentative)
 				e->has_ret_pattern = 1, e->ret_pattern = fn_ret_pattern, e->ret_variadic = fn_variadic;
 			if (e && kind == CXX_ENTITY_VALUE && auto_pattern != CXX_TY_UNKNOWN)

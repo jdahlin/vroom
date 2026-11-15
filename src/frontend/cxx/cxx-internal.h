@@ -503,7 +503,8 @@ typedef struct cxx {
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
 	uint32_t carg_brace[CXX_MAX_ARGS];
 	struct cxx_entity *carg_fnset[16];	/* ... its arguments that name a set of functions (f, &f, N::f: [over.over]) */
-	struct cxx_entity *op_fnset;	/* the next operator call's right operand, when it names a set of functions (os << endl) */
+	struct cxx_entity *op_fnset;
+	struct cxx_entity *spec_claim;	/* template <> R f(P...): the specialization the next instantiation of a body is (cxx_ftemplate_return) */	/* the next operator call's right operand, when it names a set of functions (os << endl) */
 	const uint32_t *gen_agg_brace;	/* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
 	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
@@ -831,6 +832,7 @@ VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
 VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
 VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
 VPRIV cxx_entity *cxx_fnset_of_expression(cxx *c, uint32_t start);
+VPRIV bool cxx_explicit_specialization_claim(cxx *c, cxx_entity *spec, cxx_entity *set);
 VPRIV cxx_entity *cxx_fnset_pick(cxx *c, cxx_entity *set, ast_qualified_type target, bool make);
 VPRIV uint32_t cxx_fnset_node(cxx *c, cxx_entity *set, ast_qualified_type target, uint32_t loc);
 VPRIV void cxx_fnset_fill(cxx *c, cxx_entity *f, cxx_entity *const *sets, uint32_t *nodes, uint32_t n, uint32_t loc);
