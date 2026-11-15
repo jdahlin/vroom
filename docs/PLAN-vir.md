@@ -2468,6 +2468,44 @@ binärerna i slumpad ordning gav 356,6 → 357,2 ms kompileringstid och
 eller max-RSS. SQLite-assemblerfilen var byte-identisk. TSVC på x86-64
 matchade clangs 151 kontrollsummor med 83 vektoriserade slingor.
 
+#### V4: var enter och instr tar tid i sqlite3.c (2026-11-15)
+
+Ren `0f8db22e`, samma SQLite, x86-64, glibc och flaggor som i CPU-profilen
+ovan. Åtta kompileringar på en kärna med ett prov per 260 003 användarcykler,
+DWARF-stackar på 4 KiB. Av 54 868 kompilatorprov kunde 2 997 hänföras till
+enter och 2 385 till instr via vir_alloc. Nedan räknas även anropade hjälpare.
+Andelarna är ungefärliga eftersom stackar kan vara avkortade och radtabellen
+ibland saknar rad för en inlinad instruktion.
+
+- **enter:** 45 % gick åt för att anpassa framåtkanter (conform inklusive
+  anropsslingan), 26 % för att ärva den valda föregångarens register och 9 %
+  för att poängsätta föregångarna. En separat räknare gav 70 950 block och
+  96 846 anrop till conform på framåtkanter. Av dem producerade 79 818 inga
+  flyttar. På 59 997 kanter var föregångaren den valda, blocket saknade
+  parametrar och var inget slinghuvud. Ingen sådan kant gav någon flytt.
+- **instr:** 21 % för tilldelning och bokföring av resultat, 13 % för vanliga
+  operander, 13 % för inledning och get_fix, 11 % för nästa användning och
+  sista användning, 9 % för placering av fasta operander samt 6 % för deras
+  registermasker. 8 % saknade källrad. Av 304 581 instr-anrop hade 292 211
+  högst två operander och bara 13 321 minst en operand med ett fast register.
+
+Fyra isolerade prototyper jämfördes var för sig mot basen. Två grupper om
+tolv omgångar med slumpad ordning inom varje omgång efter uppvärmning.
+Tabellen visar medianen av de parade skillnaderna för hela kompileringen.
+
+| Enskild ändring | Instruktioner | Cykler | Omgångar med färre cykler |
+|---|---:|---:|---:|
+| Hoppa över conform för den valda föregångaren utan blockparametrar eller slinghuvud | −1,27 % | −1,15 % | 11/12 |
+| Gå direkt till vanliga operander när ingen har fast register | −0,28 % | −0,37 % | 10/12 |
+| Fyll i x86:s opfix-tabell för att undvika tomma vx_fixed-anrop | −0,54 % | +0,02 % | 6/12 |
+| Skriv operandernas lägen direkt till utdata och ta bort en oläst nxt-skrivning | −0,04 % | +0,69 % | 4/12 |
+
+Samtliga gav byte-identisk assembler. Även med allokeringskontrollen gav de
+två första samma assembler utan anmärkning. Första försöket för en ändring i
+kompilatorn är att hoppa över den ärvda kanten under ovanstående villkor.
+Verifiera då även med syntetiska CFG:er, linjär reservallokering och arm64.
+Prototyperna ingår inte i kompilatorn.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
