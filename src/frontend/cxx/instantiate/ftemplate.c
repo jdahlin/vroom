@@ -325,6 +325,37 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 		f->sig = CXX_TY_UNKNOWN;
 }
 
+/* do two value template parameters' types read alike (enable_if_t<A, int> and enable_if_t<B, int>: the
+   overload of __init a definition outside the class is for), token for token to the , = or > that ends them */
+static bool cxx_tparam_types_alike(cxx *c, uint32_t a, uint32_t b)
+{
+	int d = 0;
+
+	if (!a || !b)
+		return false;
+	for (;; a++, b++) {
+		const cxx_token *x = &c->tok[a], *y = &c->tok[b];
+
+		if (a >= c->ntok || b >= c->ntok)
+			return false;
+		if (d == 0 && (x->kind == LEX_TOKEN_COMMA || x->kind == LEX_TOKEN_EQUAL || x->kind == LEX_TOKEN_GREATER || x->kind == LEX_TOKEN_GREATER_GREATER))
+			return y->kind == LEX_TOKEN_COMMA || y->kind == LEX_TOKEN_EQUAL || y->kind == LEX_TOKEN_GREATER || y->kind == LEX_TOKEN_GREATER_GREATER ||
+			       y->kind == LEX_TOKEN_IDENTIFIER;	/* (the definition may name it) */
+		if (d == 0 && x->kind == LEX_TOKEN_IDENTIFIER && (y->kind == LEX_TOKEN_COMMA || y->kind == LEX_TOKEN_GREATER || y->kind == LEX_TOKEN_GREATER_GREATER))
+			return true;	/* (the declaration names it, the definition does not) */
+		if (x->len != y->len || memcmp(x->s, y->s, x->len))
+			return false;
+		if (x->kind == LEX_TOKEN_LESS || x->kind == LEX_TOKEN_LEFT_PAREN)
+			d++;
+		else if ((x->kind == LEX_TOKEN_GREATER || x->kind == LEX_TOKEN_RIGHT_PAREN) && d)
+			d--;
+		else if (x->kind == LEX_TOKEN_GREATER_GREATER)
+			d -= 2;
+		if (d < 0)
+			return false;
+	}
+}
+
 /*
  * The return type with the deduced arguments: the signature re-parsed with them bound (member typedefs,
  * partial specializations: as for a real instance).  want_body: the function is the one called, in
@@ -370,6 +401,27 @@ VPRIV bool cxx_member_template_ooc_body(cxx *c, cxx_ftemplate *f, cxx_entity *in
 			    (x->pos ? t->oocs[i].params->ntparams == nbargs : !t->params || t->oocs[i].params->ntparams == t->params->ntparams) &&
 			    t->oocs[i].nparams == np && t->oocs[i].is_const == inst->fn_const)
 				d = &t->oocs[i], matches++;
+		if (matches > 1) {
+			/* ... and whose value template parameters' types are the declaration's (two __init(It, It),
+			   enable_if_t<input iterator> and enable_if_t<forward iterator>) */
+			const struct cxx_ooc *one = NULL;
+
+			matches = 0;
+			for (uint32_t i = 0; i < t->noocs; i++) {
+				bool alike = t->oocs[i].inner && t->oocs[i].name == inst->name && t->oocs[i].inner->ntparams == f->p.params->ntparams &&
+					     (x->pos ? t->oocs[i].params->ntparams == nbargs : !t->params || t->oocs[i].params->ntparams == t->params->ntparams) &&
+					     t->oocs[i].nparams == np && t->oocs[i].is_const == inst->fn_const;
+
+				for (uint32_t k = 0; alike && k < f->p.params->ntparams; k++) {
+					const cxx_tparam *pa = &f->p.params->tparams[k], *pb = &t->oocs[i].inner->tparams[k];
+
+					alike = pa->kind == pb->kind && (pa->kind != 2 || cxx_tparam_types_alike(c, pa->type_b, pb->type_b));
+				}
+				if (alike)
+					one = &t->oocs[i], matches++;
+			}
+			d = one;
+		}
 	}
 	if (matches != 1 || d->params->ntparams > nbargs + 1)
 		return false;

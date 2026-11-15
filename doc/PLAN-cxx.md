@@ -2457,3 +2457,13 @@ klassen inte är en mall.  Ett vcc-ensamt program med
 ett prvärde (`(b <=> a) == o`) läggs i en temporär först.  Test:
 `run/constexpr-ctor-globals.cpp`.  Strikt bänk: pass 8, inga fel.  Sviter
 gröna (111/111, 38/38, mangle, 350/350).
+
+## Status 154 (2026-11-15)
+Medlemsmallar definierade utanför klassmallen med flera överlagringar som bara
+skiljer sig i en värdemallparameter (`basic_string::__init` för input- och
+forward-iteratorer, `__enable_if_t<...> = 0`) fick ingen kropp (tvetydig
+matchning); nu jämförs värdeparametrarnas typer token för token mellan
+deklaration och definition.  `std::string(first, last)` kompileras.  Test:
+`run/ooc-member-template-overloads.cpp`.  Strikt bänk: pass 10 (från 8), 152
+saknas, inga fel.  Kvar: Tn-mangling av en egen aliasmall (inte enable_if)
+som värdeparameterns typ.  Sviter gröna (112/112, 38/38, mangle, 350/350).
