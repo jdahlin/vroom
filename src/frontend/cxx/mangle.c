@@ -2181,6 +2181,26 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home,
                 (size_t)snprintf(num, sizeof num, "%u", (unsigned)v->len - 10));
             mg_text(&m, v->s + 10, v->len - 10);
         }
+    } else if (conv && f->is_instance && v->len == 11 &&
+               !memcmp(v->s, "operator #t", 11)) {
+        /* a conversion function template's instance: cv and the template parameter its type is
+           (template <class T> operator T(): cvT_) */
+        uint32_t k = UINT32_MAX;
+
+        for (uint32_t i = 0; i < f->ntargs && k == UINT32_MAX; i++)
+            if (f->targs[i].kind == 1 &&
+                AST_QUALIFIED_TYPE_UNQUALIFIED(f->targs[i].t) ==
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(x->base))
+                k = i;
+        if (k == UINT32_MAX)
+            return false;
+        mg_str(&m, "cvT");
+        if (k) {
+            char num[16];
+
+            mg_text(&m, num, (size_t)snprintf(num, sizeof num, "%u", k - 1));
+        }
+        mg_str(&m, "_");
     } else if (conv) {
         mg_str(&m, "cv");
         mg_type(&m, x->base);
@@ -2202,6 +2222,14 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home,
     uint32_t pack_param = 0, tok_b[16], tok_e[16], ntok = 0;
     bool dt_guess = false, tok_params = false, tok_sig = false;
 
+    if (conv && f->is_instance && v->len == 11 &&
+        !memcmp(v->s, "operator #t", 11)) {
+        /* (a conversion template's instance: no return type ([mangle.function-type]), no parameters) */
+        if (x->n)
+            return false;
+        mg_str(&m, "v");
+        goto params_done;
+    }
     if (f->is_instance) {
         const ast_qualified_type *ph;
         uint32_t nph, pp = 0;

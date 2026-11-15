@@ -389,6 +389,43 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object,
         CXX_CALL_WHY();
         return;
     }
+    if (f->fn_defaulted && !f->fn_deleted && nargs == 1 && object && !arrow &&
+        args[0] && f->name == vintern_cstr("operator=") && f->member_of &&
+        f->member_of->owner && f->ty != CXX_TY_UNKNOWN &&
+        AST_TYPE(a, f->ty)->n == 1 &&
+        cxx_gen_is_reference(c, a->params[AST_TYPE(a, f->ty)->aux]) &&
+        AST_QUALIFIED_TYPE_UNQUALIFIED(
+            AST_TYPE(a, a->params[AST_TYPE(a, f->ty)->aux])->base) ==
+            AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty) &&
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, object)->ty) ==
+            AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty)) {
+        /* T& operator=(const T&) = default, (T&&) = default: inline, *({ parts; &object; }) (clang defines
+           the function; nothing else names it) */
+        ast_qualified_type t =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty);
+        bool move = AST_TYPE(a, a->params[AST_TYPE(a, f->ty)->aux])->ext == 2;
+        cc_id_list parts;
+        uint32_t blk, se, src = args[0];
+
+        cc_id_list_init(&parts);
+        if (AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, src)->ty) != t ||
+            !(AST_NODE_AT(a, src)->flags & AST_NODE_FLAG_LVALUE) ||
+            !cxx_gen_assign_parts(c, object, t, src, move, &parts, loc, 0)) {
+            CXX_CALL_WHY();
+            return;
+        }
+        cc_id_list_append(a, &parts,
+                          cc_statement_new(a, AST_NODE_EXPRESSION, loc,
+                                           cc_address_of_build(a, object, loc),
+                                           0, 0));
+        blk = cc_statement_new(a, AST_NODE_BLOCK, loc, 0,
+                               cc_id_list_freeze(a, &parts), parts.n);
+        se = cc_node_new(a, AST_NODE_STATEMENT_EXPRESSION,
+                         cc_type_pointer(a, AST_NODE_AT(a, object)->ty), loc);
+        AST_NODE_AT(a, se)->a = blk;
+        c->enode = cc_dereference_build(a, se, loc);
+        return;
+    }
     if (f->fn_defaulted && nargs == 1 && object && !arrow && args[0] &&
         cxx_gen_is_special(f) && vintern_ents[f->name].s[1] == 'c' &&
         f->member_of && f->member_of->owner &&

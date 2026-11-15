@@ -2815,10 +2815,18 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
             return true;
         }
         if (cc_type_is_record(c->ast, e)) {
-            cxx_scope *ds =
-                cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e));
-            cxx_entity *d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
+            cxx_scope *ds;
+            cxx_entity *d;
 
+            if (!(c->ast->tags[x->aux].flags & AST_RECORD_FLAG_COMPLETE) &&
+                !c->template_depth && !c->tentative)
+                cxx_type_require_complete(
+                    c,
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(
+                        e)); /* (an instance not completed yet: __wrap_iter<int *>) */
+            x = AST_TYPE(c->ast, e);
+            ds = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e));
+            d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
             if (!(c->ast->tags[x->aux].flags & AST_RECORD_FLAG_COMPLETE))
                 return false;
             *v = !(d && d->fn_deleted);

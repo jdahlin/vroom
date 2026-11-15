@@ -71,6 +71,9 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args,
 
 /* construct.c */
 VPRIV bool cxx_gen_needs_construction(cxx *c, ast_qualified_type t, int depth);
+VPRIV bool cxx_gen_assign_parts(cxx *c, uint32_t target, ast_qualified_type t,
+                                uint32_t src, bool move, cc_id_list *out,
+                                uint32_t loc, int depth);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
 VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t);

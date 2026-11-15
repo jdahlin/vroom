@@ -486,6 +486,18 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v,
                 cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
     }
     if (ok && ((cc_id_list *)c->ginit_list)->n &&
+        (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE) && !dtor &&
+        !cxx_class_polymorphic(c, t)) {
+        /* an inline variable of an empty class (std::piecewise_construct = piecewise_construct_t()): its
+           construction does nothing an object file must keep; defined here, zeroed (else nothing defines it) */
+        bool pod, empty;
+
+        if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &pod,
+                                  &empty) &&
+            empty && !cxx_class_has_member_initializer(c, t))
+            ((cc_id_list *)c->ginit_list)->n = 0;
+    }
+    if (ok && ((cc_id_list *)c->ginit_list)->n &&
         (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE)) {
         /* an inline variable built at start-up: not here (another TU's copy may be the one linked, constant
 		   and read-only: written to, it faults; strong_ordering::less, whose constexpr constructor is not

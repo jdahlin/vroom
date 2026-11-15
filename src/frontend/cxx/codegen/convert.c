@@ -274,6 +274,46 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to,
                      : 0;
         }
     }
+    if (!f && cls->has_conversion) {
+        /* a conversion function template (json's template <typename ValueType> operator ValueType() const):
+           its instance for the target type, T deduced as it ([temp.deduct.conv]: here, the pattern a bare
+           T, given as the explicit argument), when its return type is that */
+        for (uint32_t i = 0; i < cls->nslots && !f; i++)
+            for (cxx_entity *e = cls->slots[i]; e && !f; e = e->next) {
+                const vident *v = &vintern_ents[e->name];
+                cxx_targ xa =
+                    VCC_LITERAL(cxx_targ, .kind = 1,
+                                .t = AST_QUALIFIED_TYPE_UNQUALIFIED(to));
+                ast_qualified_type r = CXX_TY_UNKNOWN;
+                cxx_entity *ci = c->call_instance;
+
+                if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || v->len != 11 ||
+                    memcmp(v->s, "operator #t", 11))
+                    continue;
+                c->call_instance = NULL;
+                int dd =
+                    cxx_ftemplate_deduce(c, e, &xa, 1, NULL, NULL, 0, &r, true);
+
+                if (dd == 1 && c->call_instance &&
+                    c->call_instance->inst_ftmpl == e->ftmpl &&
+                    c->call_instance->ty == CXX_TY_UNKNOWN)
+                    /* (the pattern's return type, T, not known as one: the instance's type is T's, () ) */
+                    c->call_instance->ty = cxx_type_function(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), NULL, 0, false);
+                if (dd == 1 && c->call_instance &&
+                    c->call_instance->inst_ftmpl == e->ftmpl &&
+                    c->call_instance->ty != CXX_TY_UNKNOWN &&
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(
+                        AST_TYPE(a, c->call_instance->ty)->base) ==
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(to))
+                    f = c->call_instance;
+                c->call_instance = ci;
+                if (f && !f->sym)
+                    cxx_member_body_use(
+                        c,
+                        f); /* (its body: instantiated for code, as a call's) */
+            }
+    }
     if (f && f->next) {
         /* overloads that differ in cv (operator T() const and const volatile: std::atomic): the one with
 		   the fewest qualifiers the object's binds to */

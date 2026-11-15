@@ -606,6 +606,7 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 
     if (cxx_is_assignment_operator(c, &n)) {
         ast_qualified_type l = c->etype;
+        uint8_t l_lval = c->elval;
         bool built_in = l != CXX_TY_UNKNOWN &&
                         (cc_type_is_arithmetic(c->ast, l) ||
                          AST_TYPE_KIND(c->ast, l) == AST_TYPE_POINTER);
@@ -622,9 +623,33 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
         {
             uint32_t rn = c->enode;
 
+            ast_qualified_type rt = c->etype;
+            uint8_t unsure = c->eunsure, invalid = c->einvalid,
+                    missing = c->member_missing;
+
+            /* a = b of one class with no operator= declared: the implicit copy or move assignment, whose
+               result is a, an lvalue ([class.copy.assign]: assignable_from<T&, T> for json's iterators) */
+            bool implicit =
+                !built_in && optok == LEX_TOKEN_EQUAL && l != CXX_TY_UNKNOWN &&
+                rt != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, l) &&
+                AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY &&
+                !(AST_QUALIFIED_TYPE_QUALIFIERS(l) & AST_QUALIFIER_CONST) &&
+                AST_QUALIFIED_TYPE_UNQUALIFIED(l) ==
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(rt) &&
+                !cxx_class_user_special(c, l, vintern_cstr("operator="));
+
+            /* (the operands' value categories: a = b with b an lvalue takes operator=(const T&), not (T&&)) */
+            c->op_lv_set = 1, c->op_lv[0] = l_lval, c->op_lv[1] = c->elval;
             if (built_in || c->tentative ||
                 !cxx_operator_call_type(c, opid, l, &c->etype, 1))
                 cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
+            c->op_lv_set = 0;
+            if (implicit && c->etype == CXX_TY_UNKNOWN) {
+                /* (what looking for a declared operator= left: no doubt about this one) */
+                c->eunsure = unsure, c->einvalid = invalid,
+                c->member_missing = missing;
+                cxx_et(c, l, true);
+            }
             if (built_in)
                 cxx_gen_assignment(c, optok, ln, rn, oploc);
             else if (!c->tentative && c->call_resolved && c->call_picked)
@@ -667,7 +692,9 @@ VPRIV void cxx_expression_parse(cxx *c)
             uint32_t rn = c->enode;
             bool found;
 
-            c->op_lv_set = 1, c->op_lv[0] = ll;
+            c->op_lv_set = 1, c->op_lv[0] = ll,
+            c->op_lv[1] =
+                rl; /* (both operands': not what an earlier operator left in [1]) */
             found = cxx_operator_call_type(c, vintern_cstr("operator,"), lt,
                                            &ra, 1);
             c->op_lv_set = 0;

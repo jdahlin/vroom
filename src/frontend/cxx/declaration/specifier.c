@@ -893,10 +893,13 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
     }
     /* conversion: operator type-specifiers ptr-operators */
     cxx_scope *conv_class = NULL;
-    bool ptr = false;
+    bool ptr = false, member_template = false;
 
     for (cxx_scope *cs = c->scope; cs; cs = cs->parent)
-        if (cs->kind == CXX_SCOPE_CLASS) {
+        if (cs->kind == CXX_SCOPE_TEMPLATE && !conv_class)
+            member_template =
+                true; /* (a template's scope inside the class: template <class T> operator T()) */
+        else if (cs->kind == CXX_SCOPE_CLASS) {
             cs->has_conversion = 1;
             conv_class = cs;
             break;
@@ -910,8 +913,22 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
         cxx_ptr_operator_parse(c, conv_to != CXX_TY_UNKNOWN ? &conv_to : NULL))
         ptr = true;
     (void)ptr;
+    /* (a conversion template's instance, parsed again with its arguments bound and outside its class: the
+       function returns the type it names all the same) */
+    if (!conv_class && conv_to != CXX_TY_UNKNOWN && !c->template_depth &&
+        !cxx_type_has_placeholder(c, conv_to))
+        c->conv_last = conv_to;
     /* the type it converts to, for is_convertible and the like (a class's, not a template's) */
     if (conv_class && !c->tentative) {
+        if (member_template) {
+            /* template <class T> operator T(): a conversion function template, entered as
+               "operator #t" (each such template of the class one overload of it; mangle.c: cv <its return
+               type>); its instance for a target type is chosen by cxx_gen_convert_class */
+            conv_class->conv_unknown = 1;
+            if (conv_to != CXX_TY_UNKNOWN)
+                c->conv_last = conv_to;
+            return vintern_cstr("operator #t");
+        }
         if (conv_to == CXX_TY_UNKNOWN || c->template_depth ||
             cxx_type_has_placeholder(c, conv_to))
             conv_class->conv_unknown = 1;

@@ -857,6 +857,8 @@ VPRIV bool cxx_lookahead_fn(
     cxx *c,
     void (*fn)(
         cxx *)); /* expression.c: does fn parse at the current token (tentatively) */
+VPRIV bool cxx_gen_noted(void);
+VPRIV void cxx_gen_note_clear(void);
 VPRIV void cxx_gen_note_no_node(
     cxx *c,
     uint32_t

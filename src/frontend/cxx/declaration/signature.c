@@ -33,13 +33,20 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
         0; /* (and an expression that is ill-formed for sure: -> decltype(c.begin()) for an int) */
     c->sig_requires = 1;
     cxx_attributes_skip(c);
-    if (!(cxx_decl_specifiers_parse(c, ctor_class, false) &
-          (DS_TYPE | DS_MODIFIER)) &&
-        !ctor_class) {
+    int ds = cxx_decl_specifiers_parse(c, ctor_class, false);
+    /* operator T(): a conversion function has no decl-specifiers; its declarator names the type returned */
+    bool conv =
+        !(ds & DS_TYPE) && cxx_is_kw(c, CXX_KW_operator) &&
+        cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER &&
+        cxx_peek(c, 1)->kw != CXX_KW_new &&
+        cxx_peek(c, 1)->kw !=
+            CXX_KW_delete; /* (a type's name after operator: not operator-, new, delete) */
+
+    if (!(ds & (DS_TYPE | DS_MODIFIER)) && !ctor_class && !conv) {
         c->member_missing = missing, c->einvalid = invalid;
         return CXX_TY_UNKNOWN;
     }
-    c->type_in = ctor_class
+    c->type_in = ctor_class || conv
                      ? cc_type_basic(AST_TYPE_VOID)
                      : c->ds_type; /* (a constructor: nothing returned) */
     /* auto f(): the declarator over auto's placeholder; the body's first return gives the type */

@@ -674,9 +674,13 @@ VPRIV void cxx_compound_statement_parse(cxx *c)
     while (!cxx_is(c, LEX_TOKEN_RIGHT_BRACE)) {
         if (cxx_is(c, LEX_TOKEN_EOF))
             cxx_fail(c, "expected '}'");
+        bool noted = cxx_gen_noted();
+
         cxx_statement_parse(c);
         if (gen && c->snode && cxx_gen_on(c))
             cc_id_list_append(c->ast, &list, c->snode);
+        if (gen && cxx_gen_on(c) && !noted)
+            cxx_gen_note_clear(); /* (a statement built after all: its expressions' notes are no reason) */
     }
     cxx_advance(c);
     c->scope = outer;

@@ -306,6 +306,145 @@ VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target,
     return true;
 }
 
+/* target = src of class type t (move: src an xvalue), appended to out: its operator= when it declares one,
+   else the implicit one's parts (cxx_gen_assign_parts), else (trivially copyable) its bytes */
+static bool cxx_gen_assign_object(cxx *c, uint32_t target, ast_qualified_type t,
+                                  uint32_t src, bool move, cc_id_list *out,
+                                  uint32_t loc, int depth)
+{
+    cc *a = c->ast;
+    cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+    cxx_entity *own = NULL, *set;
+
+    if (!cls)
+        return false;
+    set = cxx_lookup_in(c, cls, vintern_cstr("operator="), 0);
+    for (cxx_entity *e = set; e && !own; e = e->next)
+        if (e->member_of == cls || e->kind == CXX_ENTITY_FUNCTION_TEMPLATE)
+            own = set;
+    if (own) {
+        ast_qualified_type at =
+            move ? AST_QUALIFIED_TYPE_UNQUALIFIED(t)
+                 : AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(
+                                          AST_QUALIFIED_TYPE_UNQUALIFIED(t)),
+                                      AST_QUALIFIER_CONST);
+        uint8_t lv = !move;
+        ast_qualified_type et = c->etype;
+        bool el = c->elval;
+
+        c->call_obj = 1;
+        cxx_call_type(c, own, CXX_TY_UNKNOWN, &at, &lv, 1);
+        c->etype = et, c->elval = el;
+        if (!c->call_resolved || !c->call_picked ||
+            c->call_picked->kind != CXX_ENTITY_VALUE ||
+            c->call_picked->fn_deleted)
+            return false;
+        cxx_member_body_use(c, c->call_picked);
+        c->enode = 0;
+        cxx_gen_call(c, c->call_picked, target, false, &src, 1, loc);
+        if (!c->enode)
+            return false;
+        cc_id_list_append(
+            a, out,
+            cc_statement_new(a, AST_NODE_EXPRESSION, loc, c->enode, 0, 0));
+        c->enode = 0;
+        return true;
+    }
+    if (cxx_gen_trivial_abi(c, t, 0) == 1) {
+        cc_id_list_append(
+            a, out,
+            cc_statement_new(
+                a, AST_NODE_EXPRESSION, loc,
+                cc_assignment_build(a, 0, target, cc_node_rvalue(a, src), loc),
+                0, 0));
+        return true;
+    }
+    return cxx_gen_assign_parts(c, target, t, src, move, out, loc, depth + 1);
+}
+
+/* T& operator=(const T&) = default, T& operator=(T&&) = default: each base, then each member assigned from
+   src's, in order ([class.copy.assign]/12; move: each moved) */
+VPRIV bool cxx_gen_assign_parts(cxx *c, uint32_t target, ast_qualified_type t,
+                                uint32_t src, bool move, cc_id_list *out,
+                                uint32_t loc, int depth)
+{
+    cc *a = c->ast;
+    cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+    ast_qualified_type bases[16];
+    uint32_t nb;
+    const tag *r;
+
+    if (!target || !src || !cls || depth > 8 ||
+        AST_TYPE_KIND(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) == AST_TYPE_UNION ||
+        cxx_class_vbases(c, t, NULL, NULL, 0))
+        return false; /* (a virtual base: assigned once, not done) */
+    nb = cxx_class_bases(c, t, bases, 16);
+    for (uint32_t i = 0; i < nb; i++) {
+        uint32_t tb = cxx_gen_base_object(c, target, bases[i], loc),
+                 sb = cxx_gen_base_object(c, src, bases[i], loc);
+
+        if (!tb || !sb ||
+            !cxx_gen_assign_object(c, tb,
+                                   AST_QUALIFIED_TYPE_UNQUALIFIED(bases[i]), sb,
+                                   move, out, loc, depth))
+            return false;
+    }
+    r = &a->tags[AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->aux];
+    for (uint32_t i = 0; i < r->nfield; i++) {
+        ast_qualified_type ft = r->f[i].ty;
+        uint32_t tm, sm;
+
+        if (!r->f[i].name)
+            continue; /* (the bases' bytes, done above) */
+        if (cxx_gen_is_reference(c, ft) ||
+            (AST_QUALIFIED_TYPE_QUALIFIERS(ft) & AST_QUALIFIER_CONST))
+            return false; /* (a reference or const member: the operator is deleted) */
+        tm = member(a, target, r->f[i].name, loc),
+        sm = member(a, src, r->f[i].name, loc);
+        if (!tm || !sm)
+            return false;
+        if (AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY) {
+            ast_qualified_type et = ft;
+            uint32_t zargs[3], saved = c->enode;
+
+            while (AST_TYPE_KIND(a, et) == AST_TYPE_ARRAY)
+                et = AST_TYPE(a, et)->base;
+            if (cc_type_is_record(a, et) && cxx_gen_trivial_abi(c, et, 0) != 1)
+                return false; /* (an array of such a class: not built yet) */
+            zargs[0] = cc_address_of_build(a, tm, loc),
+            zargs[1] = cc_address_of_build(a, sm, loc);
+            zargs[2] =
+                cc_node_integer_new(a, (i128)AST_TYPE(a, ft)->size,
+                                    cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+            c->enode = 0;
+            cxx_gen_builtin(c, "__builtin_memmove", 17, zargs, 3, loc);
+            if (!c->enode) {
+                c->enode = saved;
+                return false;
+            }
+            cc_id_list_append(
+                a, out,
+                cc_statement_new(a, AST_NODE_EXPRESSION, loc, c->enode, 0, 0));
+            c->enode = saved;
+            continue;
+        }
+        if (cc_type_is_record(a, ft)) {
+            if (!cxx_gen_assign_object(c, tm,
+                                       AST_QUALIFIED_TYPE_UNQUALIFIED(ft), sm,
+                                       move, out, loc, depth))
+                return false;
+            continue;
+        }
+        cc_id_list_append(
+            a, out,
+            cc_statement_new(
+                a, AST_NODE_EXPRESSION, loc,
+                cc_assignment_build(a, 0, tm, cc_node_rvalue(a, sm), loc), 0,
+                0));
+    }
+    return true;
+}
+
 VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t,
                                 const uint32_t *args, uint32_t nargs,
                                 cc_id_list *out, uint32_t loc)
@@ -410,6 +549,39 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t,
             false; /* (a base's constructor, found by name: not this class's) */
     uint32_t conv[1];
 
+    if (nargs == 1 && args[0] &&
+        cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) &&
+        AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != AST_TYPE_ARRAY &&
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) !=
+            AST_QUALIFIED_TYPE_UNQUALIFIED(t) &&
+        (!ctor || /* (no constructor chosen: the source's conversion function to T, if any) */
+         ctor->ty == CXX_TY_UNKNOWN || AST_TYPE(a, ctor->ty)->n < 1 ||
+         (!cc_type_is_record(a, a->params[AST_TYPE(a, ctor->ty)->aux]) &&
+          !(cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) &&
+            cc_type_is_record(
+                a,
+                AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->base))) ||
+         /* (a constructor template's instance for the source class itself, basic_string(const T&) with T
+            json: constrained on is_convertible<json, string_view>, which a conversion template decides and
+            vcc does not; the source's conversion function, clang's choice there) */
+         (ctor->is_instance &&
+          cxx_gen_is_reference(c, a->params[AST_TYPE(a, ctor->ty)->aux]) &&
+          AST_QUALIFIED_TYPE_UNQUALIFIED(
+              AST_TYPE(a, a->params[AST_TYPE(a, ctor->ty)->aux])->base) ==
+              AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty)))) {
+        /* T x = y, y of another class, through a constructor of T taking a scalar: that would convert y
+           to the scalar first, a second user-defined conversion ([over.best.ics]/4); y's own conversion to T
+           when it has one (json's template operator ValueType() to std::string, not to char const *) */
+        uint32_t v = cxx_gen_convert_class(
+            c, args[0], AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
+
+        if (v && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, v)->ty) ==
+                     AST_QUALIFIED_TYPE_UNQUALIFIED(t)) {
+            conv[0] = v, args = conv;
+            ctor = NULL,
+            found = false; /* (from the prvalue: constructed in place below) */
+        }
+    }
     if (ctor && nargs == 1 && args[0] &&
         cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) &&
         AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != AST_TYPE_ARRAY &&

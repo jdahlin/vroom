@@ -739,6 +739,17 @@ VPRIV uint32_t cxx_gen_chain(cxx *c, const cc_id_list *l, uint32_t last,
 
 /* an expression code generation gave no node (tokens start to here): the function's reason, unless one is
    known (VCC_CXX_GEN=4, VCC_CXX_MISSING: the innermost cause, not the statement that then has no node) */
+/* is a reason noted for the function being built (VCC_CXX_GEN=4); forget it */
+VPRIV bool cxx_gen_noted(void)
+{
+    return cxx_gen_why[0] != 0;
+}
+
+VPRIV void cxx_gen_note_clear(void)
+{
+    cxx_gen_why[0] = 0;
+}
+
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
 {
     int k;
