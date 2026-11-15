@@ -227,18 +227,24 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
     if (!cxx_is(c, LEX_TOKEN_LEFT_BRACE) && !cxx_is(c, LEX_TOKEN_COLON)) {
         /* an elaborated type specifier: refers to (or declares) the class */
         if (name) {
-            cxx_entity *found = cxx_name_lookup(c, q, dep, name);
+            /* class X; (not friend) declares X in this scope whatever an enclosing one has:
+               only this scope is looked in ([basic.lookup.elab]; Skia's SkSL::Program and
+               SkSL::RP::Program) */
+            bool own_scope =
+                !q && !dep && cxx_is(c, LEX_TOKEN_SEMICOLON) &&
+                !(key_pos && c->tok[key_pos - 1].kw == CXX_KW_friend);
+            cxx_scope *ds =
+                cxx_declaration_scope(c)->kind == CXX_SCOPE_FUNCTION_PARAMETERS
+                    ? cxx_enclosing_namespace(c)
+                    : cxx_declaration_scope(c);
+            cxx_entity *found = own_scope ? cxx_lookup_local(ds, name)
+                                          : cxx_name_lookup(c, q, dep, name);
 
             found = found ? cxx_entity_prefer(found, CXX_ENTITY_TYPE) : NULL;
             if (!found || (found->kind != CXX_ENTITY_TYPE &&
                            !cxx_entity_template(found))) {
                 if (!q && !dep && (cxx_is(c, LEX_TOKEN_SEMICOLON) || !found)) {
-                    e = cxx_declare(c,
-                                    cxx_declaration_scope(c)->kind ==
-                                            CXX_SCOPE_FUNCTION_PARAMETERS
-                                        ? cxx_enclosing_namespace(c)
-                                        : cxx_declaration_scope(c),
-                                    name,
+                    e = cxx_declare(c, ds, name,
                                     is_template ? CXX_ENTITY_TEMPLATE
                                                 : CXX_ENTITY_TYPE);
                     /* a member scope from the first declaration: X<args>:: reaches the specializations
