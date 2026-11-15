@@ -226,6 +226,20 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to, 
 		f = best;
 		if (!f || f->fn_deleted)
 			return 0;
+	} else if ((!f || f->kind != CXX_ENTITY_VALUE) && to != CXX_TY_UNKNOWN && !cc_type_is_record(a, to) && cc_type_is_arithmetic(a, to) && cls->nconv) {
+		/* to an arithmetic type with no conversion function to it: the one conversion function to an arithmetic
+		   type, then the standard conversion (static_cast<size_t>(pos) of a streampos: operator streamoff) */
+		ast_qualified_type via = CXX_TY_UNKNOWN;
+		uint32_t nvia = 0, r;
+
+		for (uint32_t i = 0; i < cls->nconv; i++)
+			if (cls->conv_types[i] != CXX_TY_UNKNOWN && cc_type_is_arithmetic(a, cls->conv_types[i]) && AST_TYPE_KIND(a, cls->conv_types[i]) != AST_TYPE_ENUM &&
+			    AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]) != via)
+				via = AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]), nvia++;
+		if (nvia != 1)
+			return 0;
+		r = cxx_gen_convert_class(c, x, via, loc);
+		return r ? cc_conversion_apply(a, cc_node_rvalue(a, r), AST_QUALIFIED_TYPE_UNQUALIFIED(to)) : 0;
 	} else if ((!f || f->kind != CXX_ENTITY_VALUE) && to != CXX_TY_UNKNOWN) {
 		/* no conversion function to that type: a conversion function template's instance for it, the type
 		   its first template parameter (template <class T, ...> operator T() const) */

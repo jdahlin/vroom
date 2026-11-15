@@ -276,6 +276,18 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					cxx_class_unverifiable(c);
 				if (type_of_typedef && type_of_typedef->members && !typedef_dependent)
 					e->members = type_of_typedef->members, e->specs = type_of_typedef->specs, e->nspecs = type_of_typedef->nspecs;
+				if (t != CXX_TY_UNKNOWN && !c->tentative && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+				    AST_QUALIFIED_TYPE_QUALIFIERS(t) == 0) {
+					/* typedef struct { ... } name;: the unnamed class's name for linkage ([dcl.typedef]/9), the
+					   one its mangling uses (glibc's mbstate_t: fpos<__mbstate_t>, std::streampos) */
+					cxx_scope *ts = cxx_tag_scope_get(c, t);
+
+
+					if (ts && ts->owner && ts->owner->name <= 1)
+						ts->owner->name = name;
+					else if (ts && !ts->owner && ts->kind == CXX_SCOPE_CLASS)
+						ts->owner = e;	/* (no entity of its own: the typedef's names it) */
+				}
 			}
 			if (e && kind == CXX_ENTITY_VALUE)
 				e->ty = t;	/* a variable's, a data member's, a function's type */

@@ -2730,3 +2730,13 @@ mangle).  Strikt bänk: pass 28, 112 saknas.
   `has_insertion_operator<value_t>` blir därför okänd (unit-inspection,
   unit-modifiers).  En funktion med bara `...` som parametrar får ingen kod.
 Sviter gröna (146/146, 38/38, mangle).  Strikt bänk: pass 29, 108 saknas.
+
+## Status 176 (2026-11-16)
+- `typedef struct { ... } name;`: den namnlösa klassen manglas med
+  typedefens namn ([dcl.typedef]/9).  glibc:s `__mbstate_t` i `std::fpos`
+  (`std::streampos`) kunde inte manglas: allt med en streampos saknade kod.
+- En klass med en enda konverteringsfunktion till en aritmetisk typ
+  omvandlas genom den till en annan aritmetisk typ
+  (`static_cast<size_t>(pos)`: `operator streamoff`).
+Test: `run/typedef-unnamed-class-mangling.cpp`.  Sviter gröna (147/147,
+38/38, mangle).  Strikt bänk: pass 29, 90 saknas (från 108).
