@@ -433,6 +433,10 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
     const ctype *ft;
     cxx_targ bind[64];
 
+    /* (this call's braced arguments, taken before evaluating the template deduces things of its own) */
+    const uint32_t *brace = c->deduce_brace;
+
+    c->deduce_brace = NULL;
     *ret = CXX_TY_UNKNOWN;
     if (!f) {
         c->why = CXX_WHY_NO_FTMPL;
@@ -694,7 +698,26 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
                                          inside ? UINT32_MAX : ne);
         return c->sig_requires == 1 ? 1 : c->sig_requires;
     }
+    bool skipped = false;
+
     for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+        if (brace && i < CXX_MAX_ARGS && brace[i] &&
+            f->pt[i] != CXX_TY_UNKNOWN) {
+            /* a braced list against T, T& or T&&: a non-deduced context ([temp.deduct.call]/1), T from its
+               default (pair(U1&&, U2&&) with U2 = T2 from {3, 4}); its type here, its last element's, is not
+               the list's */
+            ast_qualified_type P0 = f->pt[i];
+            void *owner;
+
+            if (AST_TYPE_KIND(c->ast, P0) == AST_TYPE_POINTER &&
+                AST_TYPE(c->ast, P0)->ext)
+                P0 = AST_TYPE(c->ast, P0)->base;
+            if (cxx_placeholder_of(c, AST_QUALIFIED_TYPE_UNQUALIFIED(P0),
+                                   &owner) >= 0) {
+                skipped = true;
+                continue;
+            }
+        }
         int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
 
         if (r <= 0 && getenv("VCC_CXX_SIG"))
@@ -704,6 +727,9 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
     }
     {
         int k = cxx_ftemplate_complete(c, f, bind);
+
+        if (k < 0 && skipped)
+            k = 0; /* (a parameter only a braced list stood for, with no default: no deduction, not unknown) */
 
         if (k <= 0 && getenv("VCC_CXX_SIG"))
             fprintf(stderr, "deduce: complete: %d\n", k);

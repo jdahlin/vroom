@@ -1049,7 +1049,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
                     c->gen_value_init = n == 0;
+                    memcpy(
+                        c->gen_call_brace, abr,
+                        sizeof abr); /* T x{a, {...}}: a list argument of a constructor a temporary of its
+                                           parameter's class */
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+                    memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
                 }
@@ -1303,7 +1308,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
                     c->gen_value_init = n == 0;
+                    memcpy(
+                        c->gen_call_brace, abr,
+                        sizeof abr); /* T x{a, {...}}: a list argument of a constructor a temporary of its
+                                           parameter's class */
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+                    memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
                 }

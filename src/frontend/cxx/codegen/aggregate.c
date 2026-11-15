@@ -482,9 +482,10 @@ VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt,
         if (!args[i] && i < 16 && braces[i] && cc_type_is_record(a, et)) {
             /* the element is a braced list itself, {"a", 1}: E{...} from its arguments, parsed again here for
 			   their code (its first parse was unevaluated) */
-            uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;
+            uint32_t pos = c->pos, an[CXX_MAX_ARGS], n, ebr[CXX_MAX_ARGS];
             ast_qualified_type at[CXX_MAX_ARGS];
             uint8_t al[CXX_MAX_ARGS];
+            bool ok;
 
             c->pos = braces[i];
             cxx_braced_arguments_parse(c);
@@ -495,8 +496,16 @@ VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt,
             memcpy(an, c->carg_nodes, sizeof an),
                 memcpy(at, c->cargs, n * sizeof *at),
                 memcpy(al, c->cargs_lval, n);
+            memcpy(ebr, c->carg_brace, sizeof ebr);
             cxx_ctor_use(c, et, at, al, n, true);
-            if (!cxx_gen_construct_at(c, slot, et, an, n, out, loc))
+            /* ({1, {1, 2}}: the element's own braced arguments, temporaries of its constructor's parameters, or
+               an aggregate's members) */
+            memcpy(c->gen_call_brace, ebr, sizeof ebr);
+            c->gen_agg_brace = ebr;
+            ok = cxx_gen_construct_at(c, slot, et, an, n, out, loc);
+            c->gen_agg_brace = NULL;
+            memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+            if (!ok)
                 goto fail;
             continue;
         }

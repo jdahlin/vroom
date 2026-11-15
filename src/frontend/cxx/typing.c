@@ -832,6 +832,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
             [CXX_MAX_ARGS]; /* (taken now: deducing and instantiating parse argument lists of their own) */
 
     memcpy(own_brace, c->carg_brace, sizeof own_brace);
+    bool brace_known = own_args;
+
+    if (c->call_brace) {
+        /* (cxx_ctor_use's: the list's own, though its arguments are a copy) */
+        memcpy(own_brace, c->call_brace, sizeof own_brace);
+        c->call_brace = NULL, brace_known = true;
+    }
     cxx_entity *own_fn[16] = {
         0}; /* the arguments that name a set of functions */
 
@@ -1001,10 +1008,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
             !e->fn_const && !e->fn_static)
             continue; /* (a const object: const member templates only) */
         if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
-            int d = nargs <= 16
-                        ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval,
-                                               nargs, &r, false)
-                        : -1;
+            int d;
+
+            c->deduce_brace = brace_known ? own_brace : NULL;
+            d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args,
+                                                   lval, nargs, &r, false)
+                            : -1;
+            c->deduce_brace = NULL;
 
             if (trace) {
                 fprintf(
@@ -1581,8 +1591,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
             ast_qualified_type r, et = result;
 
             c->call_instance = NULL;
+            c->deduce_brace = brace_known ? own_brace : NULL;
             cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs,
                                  &r, true);
+            c->deduce_brace = NULL;
             result = et != CXX_TY_UNKNOWN ? et : r;
             called_instance =
                 c->call_instance; /* (code generation: the function this call calls) */
@@ -1972,6 +1984,7 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
     c->call_obj =
         0; /* (a constructor has no object: what a member access in the arguments left) */
     if (set) {
+        c->call_brace = bcopy;
         cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval,
                            nargs,
                            nargs == 1 && args[0] != CXX_TY_UNKNOWN &&

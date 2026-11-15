@@ -782,6 +782,10 @@ typedef struct cxx {
         gen_agg_brace; /* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
     uint8_t
         gen_value_init; /* the next cxx_gen_construct_at with no arguments is T{}'s: value-initialization (zeroed first unless a user-provided constructor) */
+    const uint32_t *
+        call_brace; /* the next cxx_call_type_impl's braced arguments (cxx_ctor_use's; NULL: c->carg_brace) */
+    const uint32_t *
+        deduce_brace; /* the next function template deduction: its arguments that are braced lists (their '{', 0: none) */
     uint32_t gen_call_brace[CXX_MAX_ARGS];
     /* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */ /* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
     uint32_t
