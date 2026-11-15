@@ -52,7 +52,15 @@ VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc)
 {
     uint32_t n;
 
-    if (!cxx_gen_on(c) || !v->sym ||
+    if (!cxx_gen_on(c) || !v->sym)
+        return;
+    /* (extern T a[]: an array of unknown bound is named all the same, its elements of a type code is built for) */
+    bool unbounded = v->ty != CXX_TY_UNKNOWN &&
+                     AST_TYPE_KIND(c->ast, v->ty) == AST_TYPE_ARRAY &&
+                     !AST_TYPE(c->ast, v->ty)->n &&
+                     cxx_gen_object_type_ok(c, AST_TYPE(c->ast, v->ty)->base);
+
+    if (!unbounded &&
         !(cxx_gen_object_type_ok(c, v->ty) || cxx_gen_type_ok(c, v->ty)))
         return;
     if (v->has_value && v->ty != CXX_TY_UNKNOWN &&
@@ -408,6 +416,20 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
                     a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);
             }
             c->enode = x;
+            return;
+        }
+        if ((AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && !same &&
+            AST_TYPE_KIND(a, xt) != AST_TYPE_FUNCTION &&
+            AST_TYPE_KIND(a, bt) != AST_TYPE_FUNCTION) {
+            /* (T&)x, reinterpret_cast<T&>(x) of an object of another type: that object read as a T, *(T *)&x
+               ([expr.reinterpret.cast]/11: libc++'s operator>>(istream&, unsigned char&) is (char&)__c) */
+            ast_qualified_type pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
+
+            c->enode = cc_dereference_build(
+                a,
+                cc_cast_insert(a, cc_address_of_build(a, x, loc), pt,
+                               AST_CAST_POINTER_TO_POINTER),
+                loc);
         }
         return;
     }
@@ -568,8 +590,55 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y,
 {
     cc *a = c->ast;
 
-    if (!cxx_gen_on(c) || !cond || !x || !y)
+    if (!cxx_gen_on(c) || !cond || !y)
         return;
+    if (!x) {
+        /* GNU's a ?: b, a evaluated once: of two lvalues of one scalar type an lvalue, *(t = &a, *t ? t : &b);
+		   else C's node, which keeps a's value */
+        ast_qualified_type ct = AST_NODE_AT(a, cond)->ty,
+                           yt = AST_NODE_AT(a, y)->ty;
+
+        if (cc_type_is_record(a, ct) || cc_type_is_record(a, yt))
+            return;
+        if ((AST_NODE_AT(a, cond)->flags & AST_NODE_FLAG_LVALUE) &&
+            (AST_NODE_AT(a, y)->flags & AST_NODE_FLAG_LVALUE) &&
+            AST_QUALIFIED_TYPE_UNQUALIFIED(ct) ==
+                AST_QUALIFIED_TYPE_UNQUALIFIED(yt) &&
+            AST_TYPE_KIND(a, ct) != AST_TYPE_ARRAY) {
+            ast_qualified_type pt = cc_type_pointer(
+                a, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ct),
+                                      AST_QUALIFIED_TYPE_QUALIFIERS(ct) |
+                                          AST_QUALIFIED_TYPE_QUALIFIERS(yt)));
+            uint32_t tmp = cxx_gen_temporary(c, pt, loc), set, test, pick;
+
+            if (!tmp)
+                return;
+            set = cc_assignment_build(
+                a, 0, cxx_gen_var_node(c, tmp, loc),
+                cc_cast_insert(a, cc_address_of_build(a, cond, loc), pt,
+                               AST_CAST_NOP),
+                loc);
+            test = cc_condition_scalar(
+                a,
+                cc_conversion_decay(
+                    a, cc_dereference_build(
+                           a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)),
+                           loc)),
+                "'?:'");
+            pick = cc_conditional_build(
+                a, test, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)),
+                cc_cast_insert(a, cc_address_of_build(a, y, loc), pt,
+                               AST_CAST_NOP),
+                loc);
+            c->enode = cc_dereference_build(
+                a, cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, set, pick),
+                loc);
+            return;
+        }
+        c->enode = cc_conditional_build(a, cc_conversion_decay(a, cond), 0,
+                                        cc_conversion_decay(a, y), loc);
+        return;
+    }
     if (cc_type_is_record(a, AST_NODE_AT(a, cond)->ty))
         cond = cxx_gen_convert_class(
             c, cond, cc_type_basic(AST_TYPE_BOOL),
@@ -844,6 +913,9 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r,
 
     if (!cxx_gen_on(c) || !l || !r)
         return;
+    if (op == LEX_TOKEN_EQUAL && cxx_memptr_of(c, AST_NODE_AT(c->ast, l)->ty) &&
+        !(r = cxx_gen_memptr_convert(c, r, AST_NODE_AT(c->ast, l)->ty, loc)))
+        return; /* (a pointer to member: null, a base's converted) */
     switch (op) {
     case LEX_TOKEN_EQUAL:
         base = 0;

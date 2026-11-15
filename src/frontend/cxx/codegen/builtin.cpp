@@ -229,6 +229,36 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len,
             c->enode = cc_node_float_new(a, __builtin_nan(""), rt, loc);
             return;
         }
+        if ((cb->id == CC_BUILTIN_CLZG || cb->id == CC_BUILTIN_CTZG ||
+             cb->id == CC_BUILTIN_POPCOUNTG) &&
+            nargs >= 1 && nargs <= 2) {
+            /* (lowered as C lowers them: the operand's own width, the fallback for 0) */
+            uint32_t x = cc_node_rvalue(a, cc_conversion_decay(a, args[0])),
+                     fb = 0;
+            ast_qualified_type xt =
+                AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
+
+            if (AST_NODE_AT(a, x)->op == AST_NODE_CAST &&
+                cc_type_is_signed(a, xt)) {
+                /* (an argument promoted to int on its way here: the count is of its own type) */
+                uint32_t in = AST_NODE_AT(a, x)->a;
+                ast_qualified_type it =
+                    in ? AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, in)->ty)
+                       : CXX_TY_UNKNOWN;
+
+                if (it != CXX_TY_UNKNOWN && cc_type_is_integer(a, it) &&
+                    !cc_type_is_signed(a, it))
+                    x = in, xt = it;
+            }
+            if (!cc_type_is_integer(a, xt) || cc_type_is_signed(a, xt))
+                return;
+            if (nargs == 2)
+                fb = cc_conversion_apply(
+                    a, cc_node_rvalue(a, cc_conversion_decay(a, args[1])),
+                    cc_type_basic(AST_TYPE_INT));
+            c->enode = cc_builtin_bit_count_lower(a, cb->id, false, x, fb, loc);
+            return;
+        }
         cc_id_list_init(&l);
         for (uint32_t i = 0; i < nargs; i++) {
             uint32_t v = cc_node_rvalue(a, cc_conversion_decay(a, args[i]));

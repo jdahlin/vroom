@@ -24,6 +24,17 @@
 #include "../c/cc-internal.h" /* the shared AST (frontend/ast.h) and the code that builds it */
 #include "frontend/cxx/cxx.h"
 
+/* _Complex T is C's struct of two; to C++ it is an arithmetic type, no class: the front end's records leave it
+   out (C's own code, compiled before this in the unity TU, keeps cc_type_is_record as it is) */
+static inline bool cxx_record_not_complex(cc *a, ast_qualified_type t)
+{
+    return cc_type_is_record(a, t) &&
+           !(AST_TYPE_KIND(a, t) == AST_TYPE_STRUCT &&
+             (a->tags[AST_TYPE(a, t)->aux].flags &
+              (AST_RECORD_FLAG_COMPLEX | AST_RECORD_FLAG_MEMBER_POINTER)));
+}
+#define cc_type_is_record(a, t) cxx_record_not_complex((a), (t))
+
 #ifndef VPRIV
 #ifdef VCC_UNITY
 #define VPRIV static
@@ -181,6 +192,7 @@ typedef struct cxx_entity {
         member_of; /* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
     uint8_t
         fn_const; /* a member function declared const (bit 0), volatile (bit 1) */
+    uint8_t fn_ref; /* ... its ref-qualifier: 1 &, 2 && (0: none) */
     uint8_t
         fn_noexcept; /* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
     struct cxx_scope
@@ -292,7 +304,10 @@ struct cxx_scope {
     cxx_entity **vfuncs, **vown;
     uint32_t nvfuncs, cvfuncs, nvown, cvown;
     uint8_t vt_init, vt_bad,
-        vt_listed; /* vt_bad: more than one base with a vtable (thunks: not built yet) */
+        vt_listed; /* vt_bad: a vtable group not built here (virtual bases, nested secondary vtables) */
+    struct cxx_scope **
+        vt_sec; /* the secondary vtables: the bases with vtables after the primary one, in order */
+    uint32_t nvt_sec;
     uint32_t vt_sym; /* the vtable's AST symbol (_ZTV...) */
     ast_qualified_type
         *conv_types; /* ... the types its conversion functions convert to */
@@ -347,7 +362,14 @@ typedef struct cxx_gen_lambda {
     uint8_t def; /* the capture-default: 0 none, 1 [&], 2 [=] */
     uint8_t ex_this, bad;
     uint8_t
-        is_try; /* a try block's body, outlined: no return, break or continue out of it yet */
+        is_try; /* a try block's body, outlined: no break or continue out of it yet */
+    /* ... a return out of it: the value kept in ret_slot, an enclosing function's local (ret_ref: its address),
+       the body's own return 1; the caller then returns it (ret_used: one does) */
+    uint32_t ret_slot;
+    const struct cxx_entity
+        *ret_e; /* ... the slot's entity, captured by reference */
+    ast_qualified_type encl_ret;
+    uint8_t ret_ref, ret_void, ret_ok, ret_used;
     uint32_t nex;
     struct {
         uint32_t name;
@@ -377,6 +399,14 @@ typedef struct cxx_late {
 
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
 #define CXX_MAX_ARGS 1024
+
+/* a pointer to member type T C::* (memptr.c): its struct's tag, the class, the member's type, a member
+   function's cv (1 const, 2 volatile) */
+typedef struct cxx_memptr {
+    uint32_t tag;
+    ast_qualified_type cls, mem;
+    uint8_t quals, fn;
+} cxx_memptr;
 
 struct cxx_stats {
     uint32_t classes, classes_laid_out,
@@ -480,6 +510,9 @@ typedef struct cxx {
         sig_is_function; /* the last declarator's function is variadic; the last signature parsed was a function's */
     uint8_t fn_const,
         decl_const; /* the last function tail had const; the last declarator's function did */
+    uint8_t fn_ref, decl_ref; /* ... and its ref-qualifier (1 &, 2 &&) */
+    uint8_t
+        call_obj_rv; /* the member call's object is an rvalue (a & member does not take it, && one does) */
     int64_t
         evalue; /* the expression's value, when econst (an integer constant expression) */
     uint8_t econst;
@@ -552,7 +585,12 @@ typedef struct cxx {
     uint32_t sb_names[8], sb_locs[8], sb_n, sb_var,
         sb_serial; /* a structured binding being declared: its names, its variable */
     ast_qualified_type
-        memptr_ty; /* T C::*: one opaque (incomplete) type for every pointer to member, not built yet */
+        memptr_ty; /* T C::* of a class not known (dependent): one opaque (incomplete) type */
+    struct cxx_memptr
+        *memptrs; /* the pointer to member types made (memptr.c) */
+    uint32_t bmf_callee, bmf_this,
+        bmf_pre; /* x.*pmf: the function it names (a node) and the this to pass it */
+    uint32_t nmemptr, cmemptr;
     ast_qualified_type
         etype;     /* the last expression's type (CXX_TY_UNKNOWN: not known) */
     uint8_t elval; /* ... an lvalue */
@@ -707,7 +745,8 @@ typedef struct cxx {
         ginit_fn; /* a namespace-scope variable's initializer is being built: the function that runs it at start-up */
     void *ginit_list; /* ... and that function's statements */
     uint32_t ginit_serial;
-    uint32_t gen_atexit_sym, gen_dso_sym;
+    uint32_t gen_atexit_sym, gen_dso_sym, gen_guard_acquire_sym,
+        gen_guard_release_sym;
     uint32_t gen_try_serial; /* try blocks so far (their trampolines' names) */
     uint8_t gen_eh_pers;
     /* the personality routine's cell was emitted */ /* it delegates to another constructor; the body has a return statement */
@@ -766,10 +805,29 @@ typedef struct cxx {
         op_fnset; /* the next operator call's right operand, when it names a set of functions (os << endl) */
     const uint32_t *
         gen_agg_brace; /* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
+    uint8_t
+        gen_value_init; /* the next cxx_gen_construct_at with no arguments is T{}'s: value-initialization (zeroed first unless a user-provided constructor) */
+    const uint32_t *
+        call_brace; /* the next cxx_call_type_impl's braced arguments (cxx_ctor_use's; NULL: c->carg_brace) */
+    /* the try block just parsed (cxx_try_block_parse): its body returns (try_ret_used), through try_ret (a
+       copy of its closure's return state) */
+    /* function template instances whose body was wanted before the template's definition was seen
+       (cxx_ftemplate_deferred retries them at the end of the TU, a point of instantiation) */
+    void *ft_defer;
+    uint32_t nft_defer, cft_defer;
+    uint8_t ft_deferring;
+    uint8_t try_ret_used;
+    struct cxx_gen_lambda *try_ret;
+    uint8_t
+        deduce_xonly; /* the next deduction: the explicit template arguments alone (f<int> as a value) */
+    const uint32_t *
+        deduce_brace; /* the next function template deduction: its arguments that are braced lists (their '{', 0: none) */
     uint32_t gen_call_brace[CXX_MAX_ARGS];
     /* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */ /* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
     uint32_t
         new_count; /* a new-type-id: its array bound's node (new_array: it has one) */
+    struct cxx_entity *
+        spec_claim; /* template <> R f(P...): the specialization the next instantiation of a body is (cxx_ftemplate_return) */
     uint8_t new_array;
     uint32_t gen_pack_from,
         gen_pack_n; /* cxx_gen_function_begin: these parameters are a pack's elements (gen_pack_entity's) */
@@ -834,6 +892,8 @@ VPRIV bool cxx_lookahead_fn(
     cxx *c,
     void (*fn)(
         cxx *)); /* expression.c: does fn parse at the current token (tentatively) */
+VPRIV bool cxx_gen_noted(void);
+VPRIV void cxx_gen_note_clear(void);
 VPRIV void cxx_gen_note_no_node(
     cxx *c,
     uint32_t
@@ -977,7 +1037,7 @@ typedef struct cxx_spec {
     uint8_t v_void, v_bool, v_char, v_char8, v_char16, v_char32, v_wchar, v_int,
         v_float, v_double;
     uint8_t v_short, v_long, v_signed, v_unsigned, v_int128, v_float128,
-        v_float16, v_bf16, v_unknown, quals, v_auto;
+        v_float16, v_bf16, v_unknown, quals, v_auto, v_complex;
     ast_qualified_type named; /* a type name's type (0 with v_named unset) */
     uint8_t v_named;
 } cxx_spec;
@@ -1020,6 +1080,28 @@ enum {
     CXX_MEMBER_INITIALIZER,
     CXX_MEMBER_VIRTUAL
 };
+/* _Complex T: C's struct of two (cc_type_is_complex), an arithmetic type here, not a class */
+static inline bool cxx_type_is_complex(const cxx *c, ast_qualified_type t)
+{
+    return t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_STRUCT &&
+           (c->ast->tags[AST_TYPE(c->ast, t)->aux].flags &
+            AST_RECORD_FLAG_COMPLEX);
+}
+
+/* an object of type t is const: t is, or for an array its elements are (const int a[] at namespace scope:
+   internal, as const int x) */
+static inline bool cxx_type_const_object(const cxx *c, ast_qualified_type t)
+{
+    for (int d = 0; t != CXX_TY_UNKNOWN && d < 16; d++) {
+        if (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST)
+            return true;
+        if (AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
+            return false;
+        t = AST_TYPE(c->ast, t)->base;
+    }
+    return false;
+}
+
 /* the expression's type is a 64-bit unsigned one: a negative evalue is its value 2^63 and up (1ULL << 63) */
 static inline bool cxx_etype_unsigned64(const cxx *c)
 {
@@ -1151,6 +1233,11 @@ VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, ast_qualified_type t,
                                     uint32_t loc);
 VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t);
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);
+VPRIV uint32_t cxx_gen_implicit_assign(cxx *c, uint32_t target,
+                                       ast_qualified_type t, uint32_t src,
+                                       uint32_t loc);
+VPRIV uint32_t cxx_gen_braced_temp(cxx *c, ast_qualified_type t, uint32_t pos,
+                                   uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r,
                               uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow,
@@ -1173,7 +1260,8 @@ VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call,
 VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc);
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
 VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
                                cxx_entity **call_out);
@@ -1347,6 +1435,27 @@ VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
 VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
 VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
 VPRIV cxx_entity *cxx_fnset_of_expression(cxx *c, uint32_t start);
+VPRIV const cxx_memptr *cxx_memptr_of(cxx *c, ast_qualified_type t);
+VPRIV int cxx_placeholder_of(cxx *c, ast_qualified_type t, void **owner);
+VPRIV uint32_t cxx_gen_memptr_value(cxx *c, ast_qualified_type t, uint32_t v0,
+                                    uint32_t v1, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_null(cxx *c, ast_qualified_type t, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_of(cxx *c, cxx_entity *e, ast_qualified_type t,
+                                 uint32_t loc);
+VPRIV bool cxx_gen_base_offset(cxx *c, ast_qualified_type from,
+                               ast_qualified_type to, int64_t *off);
+VPRIV uint32_t cxx_gen_memptr_convert(cxx *c, uint32_t x, ast_qualified_type to,
+                                      uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_test(cxx *c, uint32_t x, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_compare(cxx *c, uint32_t x, uint32_t y, bool eq,
+                                      uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_apply(cxx *c, uint32_t obj, bool arrow,
+                                    uint32_t mpn, ast_qualified_type mpt,
+                                    uint32_t loc);
+VPRIV ast_qualified_type cxx_type_memptr(cxx *c, ast_qualified_type cls,
+                                         ast_qualified_type mem, uint8_t quals);
+VPRIV bool cxx_explicit_specialization_claim(cxx *c, cxx_entity *spec,
+                                             cxx_entity *set);
 VPRIV cxx_entity *cxx_fnset_pick(cxx *c, cxx_entity *set,
                                  ast_qualified_type target, bool make);
 VPRIV uint32_t cxx_fnset_node(cxx *c, cxx_entity *set,
@@ -1389,6 +1498,7 @@ VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs,
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);
+VPRIV void cxx_ftemplate_deferred(cxx *c);
 VPRIV void cxx_declaration_parse(cxx *c, int context);
 VPRIV bool cxx_starts_declaration(cxx *c);
 VPRIV void cxx_type_id_parse(cxx *c);

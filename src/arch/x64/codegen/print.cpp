@@ -554,6 +554,16 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
     }
     if (cfi)
         vtext_string_append(b, "\t.cfi_startproc\n");
+    if (cfi && x64_eh_wanted(e))
+        e->walk_state->eh_seen =
+            (uint8_t *)calloc(e->walk_state->eh_marks + 1, 1);
+    if (cfi &&
+        x64_eh_wanted(
+            e)) /* (C++: its exception table, the personality routine's) */
+        vtext_format_append(b,
+                            "\t.cfi_personality 155, "
+                            ".Lvcc_personality\n\t.cfi_lsda 27, .Lvcclsda%u\n",
+                            e->walk_state->function_symbol);
     if (e->unit->options->xcf & 1)
         vtext_string_append(b, "\tendbr64\n");
     for (int k = e->unit->options->pfe_m; k < e->unit->options->pfe_n; k++)
@@ -1054,6 +1064,12 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
             vtext_string_append(b, "\tjmpq\t*");
             x64_register_name_append(b, i->registers[1], 8);
             break;
+        case X64_OP_EHMARK:
+            vtext_format_append(
+                b, ".Lvcceh%u_%u:", e->walk_state->function_symbol, i->label);
+            if (e->walk_state->eh_seen && i->label <= e->walk_state->eh_marks)
+                e->walk_state->eh_seen[i->label] = 1;
+            break;
         case X64_OP_NAMED:
             codegen_reference_name_append(c, b, i->reference);
             vtext_char_append(b, ':');
@@ -1433,5 +1449,13 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
     vtext_char_append(b, '-');
     codegen_symbol_name_append(c, b, s);
     vtext_char_append(b, '\n');
+    if (cfi && x64_eh_wanted(e)) {
+        vtext_string_append(
+            b, "\t.pushsection\t.gcc_except_table,\"a\",@progbits\n");
+        x64_eh_table(e, b, s);
+        vtext_string_append(b, "\t.popsection\n");
+        free(e->walk_state->eh_seen);
+        e->walk_state->eh_seen = NULL;
+    }
     codegen_item_close(e, objitem);
 }

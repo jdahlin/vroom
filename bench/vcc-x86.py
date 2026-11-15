@@ -101,7 +101,7 @@ def reference(suite, name, path, flags, wd):
     with open(path, 'rb') as source:
         src = source.read().decode('latin-1')
     # the path too: a test that prints __FILE__ changes when its file moves
-    key = hashlib.sha1(('oracle-status-v3-native-runtime ' + os.path.relpath(path, ct.R) + ' ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1 ' + HEADER_HASH).encode()).hexdigest()[:16]
+    key = hashlib.sha1(('oracle-status-v4-native-runtime ' + os.path.relpath(path, ct.R) + ' ' + src + ' '.join(flags) + ' '.join(ct.CLFL) + ' '.join(BASE + LINK) + 'rt1 ' + HEADER_HASH).encode()).hexdigest()[:16]
     cf = f'{OUT}/ref/{suite}/{name}.json'
     try:
         with open(cf) as cache:
@@ -139,6 +139,12 @@ def reference(suite, name, path, flags, wd):
                 r['rc'] = rc; r['out'] = out
                 if suite in ('gcc', 'vcc') and rc != 0:
                     r['skip'] = 'ref-fail'; r['why'] = f'clang build exits {rc}'
+                else:
+                    # a second run: output that changes from run to run (addresses under ASLR, uninitialized
+                    # memory: ipa-sra-1, torture-matrix-2/-6) is no reference for vcc's
+                    rc2, out2, _ = run(f'{wd}/ref', diagnostics=True)
+                    if (rc2, out2) != (rc, out):
+                        r['skip'] = 'ref-nondeterministic'; r['why'] = "clang's build prints something else each run"
     os.makedirs(os.path.dirname(cf), exist_ok=True)
     with open(cf, 'w') as cache:
         json.dump(r, cache)

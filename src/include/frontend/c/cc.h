@@ -154,6 +154,10 @@ enum {
         64, /* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
     AST_RECORD_FLAG_GCC_STRUCT =
         2048, /* gcc_struct: not the Microsoft layout, whatever -mms-bitfields and #pragma ms_struct say */
+    AST_RECORD_FLAG_MEMBER_POINTER =
+        4096, /* C++'s T C::*: a struct of one or two longs (frontend/cxx/memptr.c) */
+    AST_RECORD_FLAG_ENUM_SCOPED =
+        8192, /* C++'s enum class: no implicit conversion to an integer */
 };
 
 typedef struct tag {
@@ -511,6 +515,8 @@ typedef struct
     int debug;    /* -g: DWARF line tables (ELF, COFF) */
     int dbg_version; /* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
     int cfi; /* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
+    int eh; /* C++ with exceptions (x86-64 ELF, cfi): cleanup variables run when an exception unwinds
+				   their scope (landing pads, .gcc_except_table) */
     int no_seh; /* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
     const char *dbg_dir,
         *dbg_name; /* the compilation directory and the main file, as named */

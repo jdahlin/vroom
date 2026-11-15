@@ -54,6 +54,8 @@ VPRIV walk_state *walk_state_get(codegen_context *e)
             ((size_t)c->nsym + 64) * sizeof(uint32_t)));
         W->constant_values = (codegen_value *)(codegen_memory_reserve(
             ((size_t)c->nsym + 64) * sizeof(codegen_value)));
+        W->constant_p_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
         W->label_instances = (uint32_t *)(codegen_memory_reserve(
             ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
         W->case_instances = (uint32_t *)(codegen_memory_reserve(
@@ -102,6 +104,8 @@ VPRIV void walk_context_free(codegen_context *e)
                ((size_t)c->nsym + 64) * sizeof(uint32_t));
         munmap(W->constant_values,
                ((size_t)c->nsym + 64) * sizeof(codegen_value));
+        munmap(W->constant_p_generations,
+               ((size_t)c->nsym + 64) * sizeof(uint32_t));
         munmap(W->label_instances, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
         munmap(W->case_instances, ((size_t)c->nnode + 64) * sizeof(uint32_t));
         munmap(W->cleanup_symbol_nodes,
@@ -401,42 +405,53 @@ VPRIV void walk_initializer_emit(codegen_context *e, const codegen_lvalue *d,
 
 /* ---------------- declarations ---------------- */
 
+/* fn(v) of a function taking one pointer, v the 8 bytes in frame slot `slot` (a cleanup, _Unwind_Resume) */
+VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
+                                   int64_t slot)
+{
+    cc *c = e->compile_context;
+    walk_argument a;
+    codegen_value r;
+
+    em_abi(e, c->syms[fn].ty);
+    WALK_LOWER(classify)(e, e->compile_context->t_size, &a, false);
+    a.slot = slot;
+    codegen_reference_note(
+        e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn));
+    e->has_calls = true;
+    em_abi(e, c->syms[fn].ty);
+    r = WALK_LOWER(call)(
+        e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a, 1,
+        false, NULL, codegen_type_primitive(AST_TYPE_VOID));
+    walk_value_free(e, &r);
+}
+
+/* cleanup(f) variable s: f(&s) */
+VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s)
+{
+    cc *c = e->compile_context;
+    uint32_t fn =
+        codegen_symbol_canonical(c, codegen_symbol_attributes(c, s)->cleanup);
+    codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                        .align = 8,
+                        .offset = walk_local_slot(e, s)};
+    int64_t slot = walk_slot_temporary(e, 8, 8);
+    int ra = WALK_LOWER(laddr)(e, &l);
+    codegen_lvalue d = {
+        .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = slot};
+
+    WALK_LOWER(store)(e, ra, &d, 8);
+    WALK_LOWER(tfree)(e, ra);
+    walk_call_slot_argument(e, fn, slot);
+}
+
 /* cleanup(f) variables: f(&var), innermost first, down to depth `to` (the stack stays) */
 VPRIV void walk_cleanups_run(codegen_context *e, int to)
 {
-    cc *c = e->compile_context;
     walk_state *W = e->walk_state;
 
-    for (int i = W->cleanup_count; i-- > to;) {
-        uint32_t s = W->cleanups[i],
-                 fn = codegen_symbol_canonical(
-                     c, codegen_symbol_attributes(c, s)->cleanup);
-        codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                            .align = 8,
-                            .offset = walk_local_slot(e, s)};
-        walk_argument a;
-        codegen_value r;
-
-        em_abi(e, c->syms[fn].ty);
-        WALK_LOWER(classify)(e, e->compile_context->t_size, &a, false);
-        a.slot = walk_slot_temporary(e, 8, 8);
-        {
-            int ra = WALK_LOWER(laddr)(e, &l);
-            codegen_lvalue d = {
-                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = a.slot};
-
-            WALK_LOWER(store)(e, ra, &d, 8);
-            WALK_LOWER(tfree)(e, ra);
-        }
-        codegen_reference_note(
-            e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn));
-        e->has_calls = true;
-        em_abi(e, c->syms[fn].ty);
-        r = WALK_LOWER(call)(
-            e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, fn), NULL, &a,
-            1, false, NULL, codegen_type_primitive(AST_TYPE_VOID));
-        walk_value_free(e, &r);
-    }
+    for (int i = W->cleanup_count; i-- > to;)
+        walk_cleanup_call(e, W->cleanups[i]);
 }
 
 static void walk_declaration_emit(codegen_context *e, const node *x)
@@ -515,6 +530,70 @@ static void walk_declaration_emit(codegen_context *e, const node *x)
                 codegen_integer_truncate(c, cv.i, y->ty));
             return;
         }
+    }
+    e->walk_state->constant_p_generations[s] = 0;
+    if (e->unit->options->opt && x->b &&
+        !(e->unit->symbol_flags[s] &
+          (CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_CONSTANT_WRITTEN |
+           CODEGEN_SYMBOL_CONSTANT_MULTIPLE)) &&
+        !e->unit->local_needs_memory[s] &&
+        !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+        !(T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+        !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) &&
+        y->sc != AST_STORAGE_REGISTER &&
+        !codegen_symbol_attributes(c, s)->cleanup &&
+        !walk_type_is_in_memory(e, y->ty) && !walk_type_is_wide(c, y->ty) &&
+        !walk_type_is_wide(c, N(x->b)->ty) &&
+        /* (an integer from an integer, or a float from an integer's conversion: a float's own value, a
+           bit cast, takes the general path) */
+        ((codegen_type_is_integer(c, y->ty) &&
+          codegen_type_is_integer(c, N(x->b)->ty)) ||
+         (codegen_type_is_float(c, y->ty) && N(x->b)->op == AST_NODE_CAST &&
+          N(x->b)->aux == AST_CAST_INTEGER_TO_FLOAT &&
+          codegen_type_is_integer(c, N(N(x->b)->a)->ty))) &&
+        KIND(c, N(x->b)->ty) != AST_TYPE_BOOL &&
+        KIND(c, y->ty) != AST_TYPE_BOOL) {
+        /* a local never written: its initializer generated first; a constant (a call inlined to one, int k =
+           move(2)) is the local's value, stored nowhere, and a float's (float a = move(1)) is known constant */
+        uint32_t init = x->b;
+
+        if (codegen_type_is_float(c, y->ty) && N(init)->op == AST_NODE_CAST &&
+            N(init)->aux == AST_CAST_INTEGER_TO_FLOAT &&
+            codegen_type_is_integer(c, N(N(init)->a)->ty) &&
+            !walk_type_is_wide(c, N(N(init)->a)->ty) &&
+            KIND(c, N(N(init)->a)->ty) != AST_TYPE_BOOL)
+            init =
+                N(init)
+                    ->a; /* (float a = move(1): the integer converted, its constant seen) */
+        codegen_value v = walk_value_emit(e, init);
+
+        if (v.kind == CODEGEN_VALUE_CONSTANT) {
+            if (codegen_type_is_integer(c, y->ty)) {
+                codegen_value k = walk_value_convert(e, v, N(init)->ty, y->ty);
+
+                if (k.kind == CODEGEN_VALUE_CONSTANT) {
+                    e->walk_state->constant_generations[s] =
+                        e->walk_state->generation;
+                    e->walk_state->constant_values[s] = k;
+                    return;
+                }
+                walk_value_free(e, &k);
+                v = codegen_value_constant(
+                    0); /* (not reached: an integer's conversion of a constant folds) */
+            } else
+                e->walk_state->constant_p_generations[s] =
+                    e->walk_state->generation;
+        }
+        {
+            codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                                .align = codegen_symbol_alignment(c, s)};
+            codegen_value cv = walk_value_convert(e, v, N(init)->ty, y->ty);
+
+            if (!WALK_LOWER(local)(e, s, &l))
+                l.offset = walk_local_slot(e, s);
+            walk_lvalue_store(e, &l, y->ty, &cv);
+        }
+        return;
     }
     {
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
@@ -2136,6 +2215,15 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 
         walk_vla_scan(e, y->body, &top);
     }
+    /* C++ exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
+	   landing pads that run the cleanups live there); x86-64's direct emitter only */
+    W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
+#ifndef WALK_LOWER_PREFIX
+    W->eh_fn = e->unit->options->eh && e->unit->options->cfi &&
+               W->cleanup_node_count > 0 && c->eh_resume_sym;
+#else
+    W->eh_fn = 0;
+#endif
     walk_statement_emit(e, y->body);
     if (walk_function_is_main(c, s) &&
         KIND(c, W->return_type) == AST_TYPE_INT) {
@@ -2145,6 +2233,10 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
             e, &z, codegen_type_primitive(AST_TYPE_INT),
             W->return_label); /* falling off the end of main returns 0 */
     }
+#ifndef WALK_LOWER_PREFIX
+    if (W->eh_fn)
+        WALK_LOWER(eh_pads)(e); /* (before the return label, jumped over) */
+#endif
     walk_label_place(e, W->return_label);
     WALK_LOWER(finish)(e, s);
     if (pa != pabuf)

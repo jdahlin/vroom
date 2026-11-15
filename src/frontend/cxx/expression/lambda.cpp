@@ -28,6 +28,50 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
     fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, outer, NULL);
     memset(&l, 0, sizeof l);
     l.def = 1, l.is_try = 1;
+    c->try_ret_used = 0, c->try_ret = NULL;
+    /* a return out of the body: the enclosing function's return type, its value kept in a local of the
+       enclosing function (a try inside a try's body: that body's own slot) */
+    if (c->gen_lambda && c->gen_lambda->is_try) {
+        l.ret_slot = c->gen_lambda->ret_slot,
+        l.encl_ret = c->gen_lambda->encl_ret;
+        l.ret_e = c->gen_lambda->ret_e;
+        l.ret_ref = c->gen_lambda->ret_ref,
+        l.ret_void = c->gen_lambda->ret_void;
+        l.ret_ok = c->gen_lambda->ret_ok;
+    } else if (!c->gen_lambda && c->gen_ret != CXX_TY_UNKNOWN && !c->gen_sret &&
+               c->gen_block) {
+        ast_qualified_type rt = c->gen_ret;
+
+        l.encl_ret = rt;
+        if (AST_TYPE_KIND(c->ast, rt) == AST_TYPE_VOID)
+            l.ret_void = 1, l.ret_ok = 1;
+        else {
+            bool ref = cxx_gen_is_reference_public(c, rt);
+            ast_qualified_type st =
+                ref ? cc_type_pointer(c->ast, AST_TYPE(c->ast, rt)->base)
+                    : AST_QUALIFIED_TYPE_UNQUALIFIED(rt);
+
+            if (ref || !cc_type_is_record(c->ast, st) ||
+                cxx_gen_trivial_abi(c, st, 0) == 1) {
+                l.ret_slot =
+                    cxx_gen_local(c, vintern_cstr("__vcc_try_ret"), st, loc);
+                if (l.ret_slot) {
+                    cc_id_list_append(
+                        c->ast, (cc_id_list *)c->gen_block,
+                        cc_node_new_operands(c->ast, AST_NODE_DECLARATION,
+                                             cc_type_basic(AST_TYPE_VOID), loc,
+                                             l.ret_slot, 0));
+                    cxx_entity *se = (cxx_entity *)calloc(1, sizeof *se);
+
+                    se->kind = CXX_ENTITY_VALUE,
+                    se->name = vintern_cstr("__vcc_try_ret");
+                    se->sym = l.ret_slot, se->ty = st, se->pack_index = -1;
+                    l.ret_e = se;
+                    l.ret_ref = ref, l.ret_ok = 1;
+                }
+            }
+        }
+    }
     if (call) {
         call->ty =
             cxx_type_function(c, cc_type_basic(AST_TYPE_INT), NULL, 0, false);
@@ -50,6 +94,14 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
     if (!(c->ast->syms[call->sym].flags & AST_SYMBOL_FLAG_DEFINED))
         return false;
     cxx_gen_lambda_object(c, &l, owner->ty, loc);
+    if (l.ret_used) {
+        static __thread cxx_gen_lambda kept[64];
+        static __thread uint32_t nkept;
+
+        kept[nkept % 64] =
+            l; /* (the caller's: its return statement after the call) */
+        c->try_ret = &kept[nkept++ % 64], c->try_ret_used = 1;
+    }
     *closure_node = c->enode, *call_out = call;
     c->enode = 0;
     return *closure_node != 0;

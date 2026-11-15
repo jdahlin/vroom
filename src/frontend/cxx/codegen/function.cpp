@@ -203,8 +203,9 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
             4) /* VCC_CXX_GEN=4: each function without code, why */
         fprintf(stderr, "nofn %.*s: %s\n", (int)vintern_ents[f->name].len,
                 vintern_ents[f->name].s, cxx_gen_why);
-    if (!ok)
-        cxx_gen_why[0] = 0;
+    cxx_gen_why[0] =
+        0; /* (a function built all the same leaves none either: an expression's note it recovered from is
+               not the next function's reason) */
 
     if (ok && cxx_gen_is_special(f) && c->gen_this && !c->gen_wrapper) {
         const vident *fv = &vintern_ents[f->name];

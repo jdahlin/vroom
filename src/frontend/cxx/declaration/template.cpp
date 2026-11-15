@@ -244,6 +244,17 @@ VPRIV void cxx_template_declaration_parse(cxx *c, int context)
     if (!cxx_is(
             c,
             LEX_TOKEN_LESS)) { /* explicit instantiation: template class X<int>; */
+        int kw = cxx_peek(c, 0)->kw;
+
+        if (kw != CXX_KW_class && kw != CXX_KW_struct && kw != CXX_KW_union) {
+            /* template R f<args>(params); of a function (or a member): it declares nothing new ([temp.explicit]
+               names a specialization of a template already declared); parsed as a declaration it would be a
+               non-template f, which overload resolution prefers to the template, mangled as none */
+            while (!cxx_is(c, LEX_TOKEN_SEMICOLON) && !cxx_is(c, LEX_TOKEN_EOF))
+                cxx_skip_balanced(c);
+            cxx_expect(c, LEX_TOKEN_SEMICOLON);
+            return;
+        }
         cxx_declaration_parse(c, context);
         return;
     }

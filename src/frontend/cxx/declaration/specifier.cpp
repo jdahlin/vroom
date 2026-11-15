@@ -230,10 +230,59 @@ no:
     return false;
 }
 
+/* decay_t<T>: no reference, no cv, an array's or a function's pointer */
+static ast_qualified_type cxx_common_decay(cxx *c, ast_qualified_type t)
+{
+    if (t == CXX_TY_UNKNOWN)
+        return t;
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER &&
+        AST_TYPE(c->ast, t)->ext)
+        t = AST_TYPE(c->ast, t)->base;
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY)
+        return cc_type_pointer(c->ast, AST_TYPE(c->ast, t)->base);
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_FUNCTION)
+        return cc_type_pointer(c->ast, t);
+    return AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+}
+
+/* common_type<A, B>'s type as __builtin_common_type gives it, for what vcc decides: one type after decay,
+   arithmetic types (the usual conversions), a pointer and nullptr_t; 0 none, -1 not known (two classes: a
+   specialization of common_type, std::chrono's, may give one) */
+static int cxx_common_pair(cxx *c, ast_qualified_type a, ast_qualified_type b,
+                           ast_qualified_type *out)
+{
+    cc *x = c->ast;
+
+    a = cxx_common_decay(c, a), b = cxx_common_decay(c, b);
+    if (a == CXX_TY_UNKNOWN || b == CXX_TY_UNKNOWN)
+        return -1;
+    if (a == b && AST_TYPE_KIND(x, a) != AST_TYPE_VOID) {
+        *out = a;
+        return 1;
+    }
+    if (cc_type_is_arithmetic(x, a) && cc_type_is_arithmetic(x, b)) {
+        *out = cc_type_arithmetic_conversion(x, a, b);
+        return 1;
+    }
+    if (c->nullptr_ty &&
+        ((AST_TYPE_KIND(x, a) == AST_TYPE_POINTER && b == c->nullptr_ty) ||
+         (AST_TYPE_KIND(x, b) == AST_TYPE_POINTER && a == c->nullptr_ty))) {
+        *out = a == c->nullptr_ty ? b : a;
+        return 1;
+    }
+    if (cc_type_is_record(x, a) || cc_type_is_record(x, b))
+        return -1;
+    return AST_TYPE_KIND(x, a) == AST_TYPE_POINTER ||
+                   AST_TYPE_KIND(x, b) == AST_TYPE_POINTER
+               ? -1
+               : 0; /* (pointers to different types: their composite, not done) */
+}
+
 /*
  * clang's builtin templates, as far as libc++ uses them:
  *   __make_integer_seq<Seq, T, N>     Seq<T, 0, 1, ..., N-1>
  *   __type_pack_element<I, Ts...>     the I-th of Ts
+ *   __builtin_common_type<Tmpl, TypeIdentity, Empty, Ts...>   TypeIdentity<common type of Ts>, or Empty
  * The result goes to c->last_type (unknown otherwise).
  */
 VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
@@ -263,6 +312,34 @@ VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
         r->kind = CXX_ENTITY_TYPE, r->ty = a[a[0].v + 1].t, r->pack_index = -1;
         r->members = cxx_type_class_scope(c, r->ty);
         c->last_type = r, c->last_type_dependent = 0;
+    } else if (v->len == 21 && !memcmp(v->s, "__builtin_common_type", 21) &&
+               n >= 3 && a[1].kind == 4 && a[2].kind == 1) {
+        /* libc++'s common_type<Ts...>: the types folded pairwise ([meta.trans.other]/3); one: with itself */
+        ast_qualified_type t = CXX_TY_UNKNOWN;
+        int r = n > 3;
+
+        for (uint32_t i = 3; i < n && r > 0; i++) {
+            if (a[i].kind != 1) {
+                r = -1;
+                break;
+            }
+            r = cxx_common_pair(c, i == 3 ? a[i].t : t, a[i].t, &t);
+        }
+        if (r > 0) {
+            cxx_targ ta = VCC_LITERAL(cxx_targ, .kind = 1, .t = t);
+            cxx_entity *inst = cxx_instantiate(
+                c, (cxx_entity *)(intptr_t)a[1].v, &ta, 1, false);
+
+            if (inst)
+                c->last_type = inst, c->last_type_dependent = 0;
+        } else if (r == 0) {
+            cxx_entity *e =
+                (cxx_entity *)calloc(1, sizeof *e); /* Empty: no type member */
+
+            e->kind = CXX_ENTITY_TYPE, e->ty = a[2].t, e->pack_index = -1;
+            e->members = cxx_type_class_scope(c, e->ty);
+            c->last_type = e, c->last_type_dependent = 0;
+        }
     }
 }
 
@@ -307,8 +384,10 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
     case CXX_KW___float128:
         sp->v_float128 = 1;
         break;
-    case CXX_KW__Float16:
     case CXX_KW___fp16:
+        sp->v_float16 = 2;
+        break;
+    case CXX_KW__Float16:
         sp->v_float16 = 1;
         break;
     case CXX_KW___bf16:
@@ -346,8 +425,12 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
     case CXX_KW___auto_type:
         sp->v_auto = 1, sp->v_unknown = 1;
         break; /* (deduced by the declaration) */
+    case CXX_KW__Complex:
+    case CXX_KW___complex__:
+        sp->v_complex = 1;
+        break; /* (of the type the others give: C's) */
     default:
-        sp->v_unknown = 1; /* _Complex: not built yet */
+        sp->v_unknown = 1;
     }
 }
 
@@ -634,23 +717,60 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, ast_qualified_type *t)
         cxx_scope *q;
         bool dep;
 
+        /* (T::* of a type parameter: its placeholder, for deduction) */
+        cxx_entity *first =
+            cxx_is(c, LEX_TOKEN_IDENTIFIER) &&
+                    cxx_peek(c, 1)->kind == LEX_TOKEN_COLON_COLON &&
+                    cxx_peek(c, 2)->kind == LEX_TOKEN_STAR
+                ? cxx_lookup(c, cxx_peek(c, 0)->id)
+                : NULL;
+        uint8_t fq =
+            c->fn_const &
+            3; /* (R (C::*)(P...) const: the function tail just parsed, the outer suffix's) */
+
         cxx_nested_name_parse(c, &q, &dep);
         if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {
-            /* a pointer to member: an opaque type of its own (no such values are built yet), so that a template's
-			   parameter of that form is a deduction that fails for other arguments, not one not known */
+            /* a pointer to member (memptr.c); of a class not known (dependent): an opaque type of its own, so
+			   that a template's parameter of that form is a deduction that fails for other arguments */
+            int mq = 0;
+            void *po;
+
             cxx_advance(c);
-            while (cxx_kw_is_cv(cxx_kw(c)))
+            while (cxx_kw_is_cv(cxx_kw(c))) {
+                mq |= cxx_kw(c) == CXX_KW_const ||
+                              cxx_kw(c) == CXX_KW___const ||
+                              cxx_kw(c) == CXX_KW___const__
+                          ? AST_QUALIFIER_CONST
+                          : 0;
                 cxx_advance(c);
+            }
             if (t) {
-                if (!c->memptr_ty)
-                    c->memptr_ty = AST_QUALIFIED_TYPE(
-                        c->ast
-                            ->tags[cc_tag_new(
-                                c->ast, AST_TYPE_STRUCT,
-                                vintern_cstr("__vcc_member_pointer"), 0)]
-                            .ty,
-                        0);
-                *t = c->memptr_ty;
+                ast_qualified_type cls =
+                    q && q->kind == CXX_SCOPE_CLASS && q->owner &&
+                            q->owner->ty != CXX_TY_UNKNOWN && !q->dependent
+                        ? q->owner->ty
+                    : first && first->kind == CXX_ENTITY_TYPE &&
+                            first->ty != CXX_TY_UNKNOWN &&
+                            cxx_placeholder_of(c, first->ty, &po) >= 0
+                        ? first->ty
+                        : CXX_TY_UNKNOWN;
+                ast_qualified_type mp =
+                    *t != CXX_TY_UNKNOWN && cls != CXX_TY_UNKNOWN
+                        ? cxx_type_memptr(c, cls, *t, fq)
+                        : CXX_TY_UNKNOWN;
+
+                if (mp == CXX_TY_UNKNOWN) {
+                    if (!c->memptr_ty)
+                        c->memptr_ty = AST_QUALIFIED_TYPE(
+                            c->ast
+                                ->tags[cc_tag_new(
+                                    c->ast, AST_TYPE_STRUCT,
+                                    vintern_cstr("__vcc_member_pointer"), 0)]
+                                .ty,
+                            0);
+                    mp = c->memptr_ty;
+                }
+                *t = cc_type_qualify(c->ast, mp, mq);
             }
             return true;
         }
@@ -716,7 +836,7 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
     }
     if (cxx_is_kw(c, CXX_KW_co_await)) {
         cxx_advance(c);
-        return 1;
+        return vintern_cstr("operator co_await");
     }
     if (k == LEX_TOKEN_LEFT_PAREN) {
         cxx_advance(c);
@@ -729,10 +849,25 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
         return vintern_cstr("operator[]");
     }
     if (k == LEX_TOKEN_STRING) { /* operator "" _suffix */
+        const cxx_token *t = cxx_peek(c, 0);
+        if (t->len < 2 || memcmp(t->s, "\"\"", 2))
+            cxx_fail(c, "expected an empty string in literal operator name");
+        const char *suffix = t->s + 2;
+        size_t len = t->len - 2;
+
         cxx_advance(c);
-        if (cxx_is(c, LEX_TOKEN_IDENTIFIER))
-            cxx_advance(c);
-        return 1;
+        if (!len) {
+            t = cxx_peek(c, 0);
+            cxx_expect(c, LEX_TOKEN_IDENTIFIER);
+            suffix = t->s;
+            len = t->len;
+        }
+        char *name = (char *)calloc(10 + len + 16, 1);
+        memcpy(name, "operator\"\"", 10);
+        memcpy(name + 10, suffix, len);
+        uint32_t id = vintern_copy(name, 10 + len);
+        free(name);
+        return id;
     }
     if (k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_HASH &&
         k != LEX_TOKEN_LEFT_BRACE && k != LEX_TOKEN_RIGHT_BRACE &&
@@ -758,10 +893,13 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
     }
     /* conversion: operator type-specifiers ptr-operators */
     cxx_scope *conv_class = NULL;
-    bool ptr = false;
+    bool ptr = false, member_template = false;
 
     for (cxx_scope *cs = c->scope; cs; cs = cs->parent)
-        if (cs->kind == CXX_SCOPE_CLASS) {
+        if (cs->kind == CXX_SCOPE_TEMPLATE && !conv_class)
+            member_template =
+                true; /* (a template's scope inside the class: template <class T> operator T()) */
+        else if (cs->kind == CXX_SCOPE_CLASS) {
             cs->has_conversion = 1;
             conv_class = cs;
             break;
@@ -775,8 +913,22 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
         cxx_ptr_operator_parse(c, conv_to != CXX_TY_UNKNOWN ? &conv_to : NULL))
         ptr = true;
     (void)ptr;
+    /* (a conversion template's instance, parsed again with its arguments bound and outside its class: the
+       function returns the type it names all the same) */
+    if (!conv_class && conv_to != CXX_TY_UNKNOWN && !c->template_depth &&
+        !cxx_type_has_placeholder(c, conv_to))
+        c->conv_last = conv_to;
     /* the type it converts to, for is_convertible and the like (a class's, not a template's) */
     if (conv_class && !c->tentative) {
+        if (member_template) {
+            /* template <class T> operator T(): a conversion function template, entered as
+               "operator #t" (each such template of the class one overload of it; mangle.c: cv <its return
+               type>); its instance for a target type is chosen by cxx_gen_convert_class */
+            conv_class->conv_unknown = 1;
+            if (conv_to != CXX_TY_UNKNOWN)
+                c->conv_last = conv_to;
+            return vintern_cstr("operator #t");
+        }
         if (conv_to == CXX_TY_UNKNOWN || c->template_depth ||
             cxx_type_has_placeholder(c, conv_to))
             conv_class->conv_unknown = 1;

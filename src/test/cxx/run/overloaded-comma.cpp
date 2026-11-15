@@ -15,3 +15,8 @@ int main() {
   int b = (i = 1, i + 1);	// the built-in one with scalars
   return m.n == 22 && b == 2 ? 0 : 1;
 }
+// (m, f as the first use of operator,<char[3]>: the right operand's value category is its own, not what an
+// earlier operator left: an lvalue array binds const T&)
+struct MB2 { int n = 0; template <class T> MB2 &operator,(const T &in) { n += (int)sizeof(in); return *this; } };
+static int first_use() { MB2 m; char f[3] = "ab"; m, f; return m.n; }
+static int check_first_use = first_use() == 3 ? 0 : (__builtin_trap(), 1);

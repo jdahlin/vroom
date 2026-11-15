@@ -173,6 +173,38 @@ VPRIV void cxx_binary_type(cxx *c, int op, ast_qualified_type l,
         l = cc_type_basic(AST_TYPE_INT);
     if (r != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, r) == AST_TYPE_ENUM)
         r = cc_type_basic(AST_TYPE_INT);
+    /* _Complex T with an arithmetic or complex operand: the complex type of the elements' common type
+	   (+ - * /), bool (== != && ||) */
+    if (l != CXX_TY_UNKNOWN && r != CXX_TY_UNKNOWN &&
+        (cxx_type_is_complex(c, l) || cxx_type_is_complex(c, r)) &&
+        (cxx_is_arith(c, l) || cxx_type_is_complex(c, l)) &&
+        (cxx_is_arith(c, r) || cxx_type_is_complex(c, r))) {
+        ast_qualified_type le =
+            cxx_type_is_complex(c, l)
+                ? c->ast->tags[AST_TYPE(c->ast, l)->aux].f[0].ty
+                : l;
+        ast_qualified_type re =
+            cxx_type_is_complex(c, r)
+                ? c->ast->tags[AST_TYPE(c->ast, r)->aux].f[0].ty
+                : r;
+
+        if (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS ||
+            op == LEX_TOKEN_STAR || op == LEX_TOKEN_SLASH)
+            cxx_et(c,
+                   cc_type_complex(
+                       c->ast, cc_type_arithmetic_conversion(
+                                   c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(le),
+                                   AST_QUALIFIED_TYPE_UNQUALIFIED(re))),
+                   false);
+        else if (op == LEX_TOKEN_EQUAL_EQUAL ||
+                 op == LEX_TOKEN_EXCLAMATION_EQUAL ||
+                 op == LEX_TOKEN_AMPERSAND_AMPERSAND ||
+                 op == LEX_TOKEN_PIPE_PIPE)
+            cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
+        else
+            cxx_et(c, CXX_TY_UNKNOWN, false);
+        return;
+    }
     switch (op) {
     case LEX_TOKEN_EQUAL_EQUAL:
     case LEX_TOKEN_EXCLAMATION_EQUAL:
@@ -271,6 +303,13 @@ VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue)
                false);
         return;
     case LEX_TOKEN_STAR:
+        if (t != CXX_TY_UNKNOWN && !c->template_depth &&
+            !cxx_type_has_placeholder(c, t) &&
+            (cxx_is_arith(c, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_VOID ||
+             AST_TYPE_KIND(c->ast, t) == AST_TYPE_ENUM) &&
+            !cc_type_is_record(c->ast, t))
+            CXX_INVALID(
+                c); /* (*i of an int: ill-formed for sure, a requirement on it false) */
         cxx_et(c, cxx_is_ptr(c, t) ? AST_TYPE(c->ast, t)->base : CXX_TY_UNKNOWN,
                true);
         return;
@@ -397,9 +436,11 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a,
          pt->kind == AST_TYPE_ENUM) &&
         ((at->kind >= AST_TYPE_BOOL && at->kind <= AST_TYPE_FLOAT128) ||
          at->kind == AST_TYPE_ENUM))
-        return pt->kind == AST_TYPE_ENUM
+        return pt->kind == AST_TYPE_ENUM || (at->kind == AST_TYPE_ENUM &&
+                                             (c->ast->tags[at->aux].flags &
+                                              AST_RECORD_FLAG_ENUM_SCOPED))
                    ? 3
-                   : 1; /* (nothing converts to an enumeration) */
+                   : 1; /* (nothing converts to an enumeration; an enum class to nothing) */
     if (pt->kind == AST_TYPE_POINTER && !pt->ext) {
         const ctype *pb = AST_TYPE(c->ast, pt->base);
         ast_qualified_type ab;
@@ -790,6 +831,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
     uint8_t skip_explicit = c->skip_explicit;
     bool no_literal = c->no_literal;
     uint8_t obj = c->call_obj; /* a member call's object: const or not */
+    uint8_t obj_rv =
+        c->call_obj_rv; /* ... an rvalue (a ref-qualified member: & does not take it) */
+
+    c->call_obj_rv = 0;
     /* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
     bool own_args =
         args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs &&
@@ -800,6 +845,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
             [CXX_MAX_ARGS]; /* (taken now: deducing and instantiating parse argument lists of their own) */
 
     memcpy(own_brace, c->carg_brace, sizeof own_brace);
+    bool brace_known = own_args;
+
+    if (c->call_brace) {
+        /* (cxx_ctor_use's: the list's own, though its arguments are a copy) */
+        memcpy(own_brace, c->call_brace, sizeof own_brace);
+        c->call_brace = NULL, brace_known = true;
+    }
     cxx_entity *own_fn[16] = {
         0}; /* the arguments that name a set of functions */
 
@@ -968,11 +1020,17 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
         if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 &&
             !e->fn_const && !e->fn_static)
             continue; /* (a const object: const member templates only) */
+        if (obj && e->member_of && !e->fn_static &&
+            ((e->fn_ref == 1 && obj_rv) || (e->fn_ref == 2 && !obj_rv)))
+            continue; /* (f() &: an lvalue object only; f() &&: an rvalue one, [over.match.funcs]/4) */
         if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
-            int d = nargs <= 16
-                        ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval,
-                                               nargs, &r, false)
-                        : -1;
+            int d;
+
+            c->deduce_brace = brace_known ? own_brace : NULL;
+            d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args,
+                                                   lval, nargs, &r, false)
+                            : -1;
+            c->deduce_brace = NULL;
 
             if (trace) {
                 fprintf(
@@ -1127,8 +1185,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
                     e->ty != CXX_TY_UNKNOWN &&
                     cand[d].e->member_of == e->member_of &&
                     cand[d].e->home == e->home && cand[d].e->name == e->name &&
-                    cand[d].e->fn_const ==
-                        e->fn_const) { /* (f() and f() const: two functions of one type here) */
+                    cand[d].e->fn_const == e->fn_const &&
+                    cand[d].e->fn_ref ==
+                        e->fn_ref) { /* (f() and f() const, f() & and f() &&: two functions of one type here) */
                     dup = true;
                     if (!cand[d].e->sym && e->sym)
                         cand[d].e = e;
@@ -1549,8 +1608,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
             ast_qualified_type r, et = result;
 
             c->call_instance = NULL;
+            c->deduce_brace = brace_known ? own_brace : NULL;
             cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs,
                                  &r, true);
+            c->deduce_brace = NULL;
             result = et != CXX_TY_UNKNOWN ? et : r;
             called_instance =
                 c->call_instance; /* (code generation: the function this call calls) */
@@ -1691,6 +1752,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj,
             (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST)
                 ? 2
                 : 1; /* a member operator: on this object, const or not */
+        c->call_obj_rv = have_lv && !lv[0]; /* (and an rvalue or not: x++ ++) */
         c->eunsure = unsure0,
         cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args,
                            have_lv ? lv + 1 : NULL, nargs, true);
@@ -1940,6 +2002,7 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
     c->call_obj =
         0; /* (a constructor has no object: what a member access in the arguments left) */
     if (set) {
+        c->call_brace = bcopy;
         cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, lval,
                            nargs,
                            nargs == 1 && args[0] != CXX_TY_UNKNOWN &&
@@ -2770,10 +2833,18 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
             return true;
         }
         if (cc_type_is_record(c->ast, e)) {
-            cxx_scope *ds =
-                cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e));
-            cxx_entity *d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
+            cxx_scope *ds;
+            cxx_entity *d;
 
+            if (!(c->ast->tags[x->aux].flags & AST_RECORD_FLAG_COMPLETE) &&
+                !c->template_depth && !c->tentative)
+                cxx_type_require_complete(
+                    c,
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(
+                        e)); /* (an instance not completed yet: __wrap_iter<int *>) */
+            x = AST_TYPE(c->ast, e);
+            ds = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e));
+            d = ds ? cxx_lookup_local(ds, cxx_dtor_id()) : NULL;
             if (!(c->ast->tags[x->aux].flags & AST_RECORD_FLAG_COMPLETE))
                 return false;
             *v = !(d && d->fn_deleted);

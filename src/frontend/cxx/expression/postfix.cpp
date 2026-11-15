@@ -1,6 +1,15 @@
 /* C++ expressions: postfix expressions (calls, members, subscripts) */
 #include "expression.h"
 
+/* did the call just resolved convert an argument by a user-defined conversion (its rank 3 or more)? */
+static bool cxx_call_ranks_converted(const cxx *c)
+{
+    for (uint32_t r = 0; r < c->call_nranks && r < 16; r++)
+        if (c->call_ranks[r] >= 3)
+            return true;
+    return false;
+}
+
 /* VCC_CXX_GEN=2: the innermost postfix expression of each function that code generation did not build */
 VPRIV void cxx_postfix_expression_parse(cxx *c)
 {
@@ -80,7 +89,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
             cxx_targ xa[8];
             uint32_t nx =
                 c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
-            uint8_t call_obj = c->call_obj;
+            uint8_t call_obj = c->call_obj, call_obj_rv = c->call_obj_rv;
             uint32_t ename = c->ename;
             bool missing = c->ename_missing;
             uint32_t on_args = 0, on_nodes[CXX_MAX_ARGS];
@@ -112,7 +121,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
-                c->call_obj = call_obj,
+                c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
                 cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval,
                                 c->ncargs);
                 if (!c->ncargs && !c->econst && !c->template_depth &&
@@ -171,8 +180,115 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
-                c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs,
-                                                      c->cargs_lval, c->ncargs);
+                c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
+                cxx_call_type(c, set, callee, c->cargs, c->cargs_lval,
+                              c->ncargs);
+                if (set && ename && !call_obj && c->call_resolved &&
+                    !c->unevaluated && /* (evaluated code: an unevaluated operand's verdicts stay ordinary
+                                          lookup's, which the SFINAE detection of json's traits reads) */
+                    c->call_picked &&
+                    (c->call_picked->kind == CXX_ENTITY_FUNCTION_TEMPLATE ||
+                     c->call_picked->inst_ftmpl ||
+                     cxx_call_ranks_converted(c)) &&
+                    !c->call_picked->member_of && !c->template_depth &&
+                    !c->tentative && c->ncargs && c->ncargs <= 16) {
+                    /* f(x) whose ordinary lookup picked a template: the functions argument-dependent
+                       lookup finds are candidates too, and a non-template that fits as well wins
+                       ([over.match.best]: json's int_to_string(alt_string&, size_t) beside its
+                       template); one candidate set in C++, the two compared here */
+                    ast_qualified_type o_type = c->etype;
+                    bool o_lval = c->elval;
+                    cxx_entity *o_pick = c->call_picked, *o_callee = c->ecallee,
+                               *o_inst = c->call_instance;
+                    uint8_t o_ranks[16],
+                        o_n = c->call_nranks, o_unsure = c->eunsure,
+                        o_inv = c->einvalid, o_inv_u = c->einvalid_unsure;
+                    bool take = false;
+
+                    memcpy(o_ranks, c->call_ranks, sizeof o_ranks);
+                    /* (the argument list as parsed: what the lookup instantiates parses lists of its own) */
+                    ast_qualified_type o_args[16];
+                    uint8_t o_lv[16];
+                    uint32_t o_nargs = c->ncargs, o_nodes[CXX_MAX_ARGS],
+                             o_brace[CXX_MAX_ARGS];
+
+                    memcpy(o_args, c->cargs, o_nargs * sizeof *o_args);
+                    memcpy(o_lv, c->cargs_lval, o_nargs);
+                    memcpy(o_nodes, c->carg_nodes, sizeof o_nodes);
+                    memcpy(o_brace, c->carg_brace, sizeof o_brace);
+                    cxx_adl_call_type(c, ename, o_args, o_lv, o_nargs);
+                    c->ncargs = o_nargs;
+                    memcpy(c->cargs, o_args, o_nargs * sizeof *o_args);
+                    memcpy(c->cargs_lval, o_lv, o_nargs);
+                    memcpy(c->carg_nodes, o_nodes, sizeof o_nodes);
+                    memcpy(c->carg_brace, o_brace, sizeof o_brace);
+                    if (c->etype != CXX_TY_UNKNOWN && c->call_resolved &&
+                        c->call_picked && c->call_picked != o_pick &&
+                        c->call_picked->kind == CXX_ENTITY_VALUE &&
+                        !c->call_picked->is_instance &&
+                        !c->call_picked->inst_ftmpl &&
+                        (!c->call_picked->member_of ||
+                         c->call_picked->member_of->kind != CXX_SCOPE_CLASS) &&
+                        c->call_nranks == o_n) {
+                        take = true;
+                        /* (a parameter of class type: the argument's class or a base of it, no conversion
+                           through a conversion function, which vcc's ranks do not always tell) */
+                        const ctype *pft =
+                            c->call_picked->ty != CXX_TY_UNKNOWN &&
+                                    AST_TYPE_KIND(c->ast, c->call_picked->ty) ==
+                                        AST_TYPE_FUNCTION
+                                ? AST_TYPE(c->ast, c->call_picked->ty)
+                                : NULL;
+
+                        take = pft != NULL;
+                        for (uint32_t r = 0;
+                             take && r < c->ncargs && r < pft->n; r++) {
+                            ast_qualified_type pt =
+                                c->ast->params[pft->aux + r];
+                            ast_qualified_type at = c->cargs[r];
+                            uint64_t off;
+
+                            if (pt != CXX_TY_UNKNOWN &&
+                                AST_TYPE_KIND(c->ast, pt) == AST_TYPE_POINTER &&
+                                AST_TYPE(c->ast, pt)->ext)
+                                pt = AST_TYPE(c->ast, pt)->base;
+                            if (at != CXX_TY_UNKNOWN &&
+                                AST_TYPE_KIND(c->ast, at) == AST_TYPE_POINTER &&
+                                AST_TYPE(c->ast, at)->ext)
+                                at = AST_TYPE(c->ast, at)->base;
+                            if (pt == CXX_TY_UNKNOWN || at == CXX_TY_UNKNOWN)
+                                take = false;
+                            else if (cc_type_is_record(c->ast, pt) &&
+                                     AST_TYPE_KIND(c->ast, pt) !=
+                                         AST_TYPE_ARRAY)
+                                take =
+                                    AST_QUALIFIED_TYPE_UNQUALIFIED(pt) ==
+                                        AST_QUALIFIED_TYPE_UNQUALIFIED(at) ||
+                                    (cc_type_is_record(c->ast, at) &&
+                                     AST_TYPE_KIND(c->ast, at) !=
+                                         AST_TYPE_ARRAY &&
+                                     cxx_class_base_offset(
+                                         c, AST_QUALIFIED_TYPE_UNQUALIFIED(at),
+                                         AST_QUALIFIED_TYPE_UNQUALIFIED(pt),
+                                         &off, 0));
+                        }
+                        for (uint32_t r = 0; take && r < o_n && r < 16; r++)
+                            take &=
+                                c->call_ranks[r] < 3 &&
+                                c->call_ranks[r] <=
+                                    o_ranks
+                                        [r]; /* (no worse, no user-defined conversion: as good, a
+                                                       non-template) */
+                    }
+                    if (!take) {
+                        c->etype = o_type, c->elval = o_lval,
+                        c->call_picked = o_pick, c->ecallee = o_callee,
+                        c->call_instance = o_inst, c->call_resolved = 1,
+                        c->call_nranks = o_n, c->eunsure = o_unsure,
+                        c->einvalid = o_inv, c->einvalid_unsure = o_inv_u;
+                        memcpy(c->call_ranks, o_ranks, sizeof o_ranks);
+                    }
+                }
                 cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
                 ast_qualified_type cty = c->etype;
                 if (set && c->call_resolved && c->call_picked &&
@@ -205,6 +321,22 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                             AST_QUALIFIED_TYPE_UNQUALIFIED(cty),
                                             cloc);
                     }
+                } else if (!set && callee_node &&
+                           callee_node == c->bmf_callee && c->bmf_this &&
+                           c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX &&
+                           an < CXX_MAX_ARGS) {
+                    /* (x.*pmf)(args): the function the pointer to member gives, this first */
+                    uint32_t th = c->bmf_this, pre = c->bmf_pre;
+
+                    memmove(anodes + 1, anodes, an * sizeof *anodes);
+                    anodes[0] = th;
+                    c->bmf_callee = c->bmf_this = c->bmf_pre = 0;
+                    cxx_gen_indirect_call(c, callee_node, anodes, an + 1, cloc);
+                    if (c->enode && pre)
+                        c->enode = cc_node_new_operands(
+                            c->ast, AST_NODE_COMMA,
+                            AST_NODE_AT(c->ast, c->enode)->ty, cloc, pre,
+                            c->enode);
                 } else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN &&
                            an != UINT32_MAX)
                     cxx_gen_indirect_call(
@@ -212,8 +344,13 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                         cloc); /* through a pointer to a function */
                 /* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */
-                if (c->etype == CXX_TY_UNKNOWN && ename &&
-                    (!set || c->none_viable)) {
+                if ((c->etype == CXX_TY_UNKNOWN ||
+                     (set && !c->call_resolved && !c->template_depth &&
+                      !c->tentative)) &&
+                    ename &&
+                    (!set || c->none_viable ||
+                     (!c->call_resolved && !c->template_depth &&
+                      !c->tentative))) { /* (or several fit as well: one ADL finds may fit better) */
                     bool none = c->none_viable || (!set && missing),
                          known = true;
 
@@ -251,6 +388,13 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
             cxx_scope *cls = NULL;
             uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
             bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
+            uint8_t obj_rv =
+                !arrow &&
+                (!c->elval ||
+                 (c->edecl != CXX_TY_UNKNOWN &&
+                  AST_TYPE_KIND(c->ast, c->edecl) == AST_TYPE_POINTER &&
+                  AST_TYPE(c->ast, c->edecl)->ext ==
+                      2)); /* (x.f() of an rvalue x, std::move(x).f(): f() && only) */
 
             /* x->m on an object of class type: (x.operator->())->m, again while the result is a class
 			   ([over.ref]: p->m is interpreted as (p.operator->())->m) */
@@ -344,6 +488,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                            AST_QUALIFIER_CONST)
                                               ? 2
                                               : 1;
+                            c->call_obj_rv = obj_rv;
                             c->eobj_node = obj_node,
                             c->eobj_arrow =
                                 arrow; /* (code generation: the call's object) */
@@ -381,6 +526,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                        AST_QUALIFIER_CONST)
                                           ? 2
                                           : 1;
+                        c->call_obj_rv = obj_rv;
                         c->eobj_node = obj_node,
                         c->eobj_arrow =
                             arrow; /* (code generation: the call's object) */
@@ -399,6 +545,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                        AST_QUALIFIER_CONST)
                                           ? 2
                                           : 1;
+                        c->call_obj_rv = obj_rv;
                         /* a data member of a const object is const (not a mutable one, not a reference):
 						   x.layout.begin_ptr() on a const x calls the const overload */
                         if (c->etype != CXX_TY_UNKNOWN && c->edecl_name &&

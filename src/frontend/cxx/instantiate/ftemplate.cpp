@@ -77,8 +77,10 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p,
         inst->home = ns ? ns : c->global;
     } else
         inst->home = p->home;
-    inst->fn_const = te->fn_const, inst->fn_static = te->fn_static,
-    inst->fn_inline = 1, inst->is_instance = 1;
+    inst->fn_const = te->fn_const, inst->fn_ref = te->fn_ref,
+    inst->fn_static = te->fn_static, inst->fn_inline = 1, inst->is_instance = 1;
+    inst->fn_internal =
+        te->fn_internal; /* (an instance of a static template: internal too, _ZL) */
     copy = (cxx_targ *)(malloc((nargs ? nargs : 1) * sizeof *copy));
     memcpy(copy, args, nargs * sizeof *copy);
     /* a value argument has its parameter's type (align<16> for template <size_type N>: unsigned long, what

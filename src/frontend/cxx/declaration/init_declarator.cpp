@@ -2,6 +2,22 @@
 #include "declaration.h"
 #include "../codegen/codegen.h"
 
+/* an earlier declaration of this variable in its scope gave it external linkage (extern const int n; then
+   const int n = 3; is that n, not an internal one: [basic.link]/3's "not previously declared extern") */
+static bool cxx_declared_extern_before(cxx *c, const cxx_entity *e,
+                                       uint32_t name)
+{
+    for (cxx_entity *x = cxx_lookup_in(c, cxx_declaration_scope(c), name, 0); x;
+         x = x->next)
+        if (x != e && x->kind == CXX_ENTITY_VALUE && x->sym &&
+            (c->ast->syms[x->sym].flags & AST_SYMBOL_FLAG_GLOBAL) &&
+            !x->fn_internal &&
+            (x->ty == CXX_TY_UNKNOWN ||
+             AST_TYPE_KIND(c->ast, x->ty) != AST_TYPE_FUNCTION))
+            return true;
+    return false;
+}
+
 VPRIV bool cxx_is_function_body_start(cxx *c)
 {
     return cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_COLON) ||
@@ -444,6 +460,13 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 e->ty =
                     t; /* a variable's, a data member's, a function's type */
             if (e && kind == CXX_ENTITY_VALUE && f &&
+                c->explicit_specialization && !c->template_depth &&
+                !c->tentative && !e->is_instance && t != CXX_TY_UNKNOWN &&
+                !is_friend)
+                /* template <> R f(P...): the specialization of the function template f it is */
+                cxx_explicit_specialization_claim(
+                    c, e, cxx_lookup_in(c, cxx_declaration_scope(c), name, 0));
+            if (e && kind == CXX_ENTITY_VALUE && f &&
                 fn_ret_pattern != CXX_TY_UNKNOWN && !c->tentative)
                 e->has_ret_pattern = 1, e->ret_pattern = fn_ret_pattern,
                 e->ret_variadic = fn_variadic;
@@ -462,9 +485,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                          !(AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY &&
                            !AST_TYPE(c->ast, t)->n) &&
                          (!cc_type_is_record(c->ast, t) ||
-                          !cxx_gen_needs_construction_public(c, t)))
+                          !cxx_gen_needs_construction_public(c, t) ||
+                          (AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
+                           !(flags & DS_CONSTEXPR))))
                     /* static int n = 3; constexpr char t[] = ...: in static storage, initialized by a constant (C's
-					   function-scope static); one with a dynamic initializer (a guard) is not built yet */
+					   function-scope static); static std::string s; a class's, constructed under a guard
+					   (cxx_gen_construct_local); a scalar's dynamic initializer is not built yet */
                     gen_local = e->sym =
                         cxx_gen_local_static(c, name, t, name_loc);
                 else if (!auto_e && t != CXX_TY_UNKNOWN &&
@@ -520,7 +546,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                              ? e
                              : NULL; /* (a friend's body too) */
             if (e && f)
-                e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept;
+                e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept,
+                e->fn_ref = c->decl_ref;
             if (e && f && kind == CXX_ENTITY_VALUE)
                 decl_fn = e;
             if (e && f && context == CXX_CONTEXT_CLASS && !is_friend)
@@ -559,9 +586,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 !(flags & DS_STATIC))
                 cxx_vtable_declare(c, cxx_declaration_scope(c), e,
                                    (flags & DS_VIRTUAL) != 0);
-            if (e && f && kind == CXX_ENTITY_VALUE &&
-                context != CXX_CONTEXT_CLASS && !is_friend &&
-                (flags & DS_STATIC))
+            if (e && f &&
+                (kind == CXX_ENTITY_VALUE ||
+                 kind ==
+                     CXX_ENTITY_FUNCTION_TEMPLATE) && /* (and its instances: _ZL) */
+                context != CXX_CONTEXT_CLASS &&
+                !is_friend && (flags & DS_STATIC))
                 e->fn_internal = 1;
             if (e && !f && kind == CXX_ENTITY_VALUE &&
                 context == CXX_CONTEXT_CLASS &&
@@ -580,8 +610,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 e->global_ns = cxx_declaration_scope(c) == c->global,
                 e->home = cxx_declaration_scope(c);
             if (e && global && kind == CXX_ENTITY_VALUE && !f &&
-                !(flags & DS_EXTERN_SEEN))
-                gen_var = e;
+                (!(flags & DS_EXTERN_SEEN) || cxx_is(c, LEX_TOKEN_EQUAL)))
+                gen_var =
+                    e; /* (extern const int n = 3; with its initializer is n's definition) */
             if (e && global && kind == CXX_ENTITY_VALUE && e->sym &&
                 (flags & DS_STATIC) && !c->tentative)
                 c->ast->syms[e->sym].sc =
@@ -612,20 +643,18 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
             } else if (e && global && kind == CXX_ENTITY_VALUE && !f &&
                        e->sym && !c->tentative && !e->c_linkage &&
                        (e->home != c->global ||
-                        (t != CXX_TY_UNKNOWN &&
-                         (AST_QUALIFIED_TYPE_QUALIFIERS(t) &
-                          AST_QUALIFIER_CONST) &&
+                        (cxx_type_const_object(c, t) &&
+                         !cxx_declared_extern_before(c, e, name) &&
                          !(flags & (DS_EXTERN_SEEN | DS_INLINE)) &&
                          !c->explicit_specialization)) &&
                        c->ast->syms[e->sym].ty == t && !e->mangled_var) {
                 /* (at the global scope too for a const one: constexpr P qq{8}; is _ZL2qq, internal) */
                 /* a namespace's variable: internal linkage written L (static, or const and not extern) */
-                bool internal =
-                    (flags & DS_STATIC) ||
-                    cxx_scope_in_unnamed_namespace(c, e->home) ||
-                    (t != CXX_TY_UNKNOWN &&
-                     (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) &&
-                     !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
+                bool internal = (flags & DS_STATIC) ||
+                                cxx_scope_in_unnamed_namespace(c, e->home) ||
+                                (cxx_type_const_object(c, t) &&
+                                 !(flags & (DS_EXTERN_SEEN | DS_INLINE)) &&
+                                 !cxx_declared_extern_before(c, e, name));
 
                 e->mangled_var = 1;
                 if (c->explicit_specialization) {
@@ -947,7 +976,24 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
 					   declarator, a noexcept(...) that completed a class, may have declared others since) */
                     if (context == CXX_CONTEXT_CLASS && decl_fn)
                         c->last_fn = decl_fn;
+                    /* R X::f() { ... } outside its class: this is an X * (a const X * for f() const) */
+                    ast_qualified_type this_save = c->this_type;
+                    uint8_t this_const_save = c->this_const;
+                    bool ooc_this = context == CXX_CONTEXT_NAMESPACE && qs &&
+                                    qs->kind == CXX_SCOPE_CLASS && qs->owner &&
+                                    qs->owner->ty != CXX_TY_UNKNOWN &&
+                                    qs->owner->ty &&
+                                    !(decl_fn && decl_fn->fn_static) &&
+                                    !(flags & DS_STATIC);
+
+                    if (ooc_this)
+                        c->this_type = qs->owner->ty,
+                        c->this_const =
+                            decl_fn ? decl_fn->fn_const & 1 : c->decl_const;
                     cxx_function_body_parse(c);
+                    if (ooc_this)
+                        c->this_type = this_save,
+                        c->this_const = this_const_save;
                     if (gen)
                         cxx_gen_function_end(c, decl_fn, c->snode);
                 }
@@ -1030,13 +1076,54 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 n = c->ncargs;
                 memcpy(an, c->carg_nodes, sizeof an);
                 memcpy(abr, c->carg_brace, sizeof abr);
+                if (gen_local && cxx_is_initializer_list(c, t) &&
+                    n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block &&
+                    !(n == 1 && c->cargs[0] != CXX_TY_UNKNOWN &&
+                      AST_QUALIFIED_TYPE_UNQUALIFIED(c->cargs[0]) ==
+                          AST_QUALIFIED_TYPE_UNQUALIFIED(t))) {
+                    /* std::initializer_list<E> v = {a, b}: its array and the list object, as auto v = {a, b}
+                       makes them; the variable a copy of the list (two pointers' worth) */
+                    uint32_t arr = 0, il;
+
+                    c->ctor_ilist_n = n;
+                    memcpy(c->ctor_ilist_types, c->cargs, n * sizeof *c->cargs),
+                        memcpy(c->ctor_ilist_lval, c->cargs_lval, n);
+                    memcpy(c->ctor_ilist_brace, c->carg_brace,
+                           sizeof c->ctor_ilist_brace);
+                    il = cxx_gen_initializer_list(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n,
+                        (cc_id_list *)c->gen_block, name_loc, &arr);
+                    if (il) {
+                        /* (declared with the list's two words as its initializer: trivially copyable, a
+                           const one too) */
+                        c->ast->syms[gen_local].body =
+                            cc_node_rvalue(c->ast, il);
+                        c->ast->syms[gen_local].flags |=
+                            AST_SYMBOL_FLAG_DEFINED;
+                        cc_id_list_append(
+                            c->ast, (cc_id_list *)c->gen_block,
+                            cc_node_new_operands(c->ast, AST_NODE_DECLARATION,
+                                                 cc_type_basic(AST_TYPE_VOID),
+                                                 name_loc, gen_local,
+                                                 c->ast->syms[gen_local].body));
+                    } else
+                        cxx_gen_fail(c);
+                    gen_declared = true;
+                    gen_local = 0; /* (built: not again below) */
+                }
                 cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
                 if (gen_local) {
                     c->gen_agg_brace =
                         n <= CXX_MAX_ARGS
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
+                    c->gen_value_init = n == 0;
+                    memcpy(
+                        c->gen_call_brace, abr,
+                        sizeof abr); /* T x{a, {...}}: a list argument of a constructor a temporary of its
+                                           parameter's class */
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+                    memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
                 }
@@ -1101,6 +1188,30 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                             unsized_static
                                 ? cxx_gen_local_static(c, name, t, name_loc)
                                 : cxx_gen_local(c, name, t, name_loc);
+                    } else
+                        cxx_gen_fail(c);
+                }
+                if (gen_global && t != CXX_TY_UNKNOWN &&
+                    AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY &&
+                    !AST_TYPE(c->ast, t)->n) {
+                    /* T a[] = {...} or = "text" at namespace scope: the bound, from the initializer */
+                    uint64_t n =
+                        !cxx_gen_on(c) ? 0
+                        : braced ? (c->brace_n != UINT32_MAX ? c->brace_n : 0)
+                        : c->enode && AST_TYPE_KIND(
+                                          c->ast,
+                                          AST_NODE_AT(c->ast, c->enode)->ty) ==
+                                          AST_TYPE_ARRAY
+                            ? AST_TYPE(c->ast,
+                                       AST_NODE_AT(c->ast, c->enode)->ty)
+                                  ->n
+                            : 0;
+
+                    if (n) {
+                        t = cc_type_array(c->ast, AST_TYPE(c->ast, t)->base, n,
+                                          0);
+                        ((cxx_entity *)gen_var)->ty = t;
+                        c->ast->syms[gen_var->sym].ty = t;
                     } else
                         cxx_gen_fail(c);
                 }
@@ -1259,13 +1370,54 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 n = c->ncargs;
                 memcpy(an, c->carg_nodes, sizeof an);
                 memcpy(abr, c->carg_brace, sizeof abr);
+                if (gen_local && cxx_is_initializer_list(c, t) &&
+                    n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block &&
+                    !(n == 1 && c->cargs[0] != CXX_TY_UNKNOWN &&
+                      AST_QUALIFIED_TYPE_UNQUALIFIED(c->cargs[0]) ==
+                          AST_QUALIFIED_TYPE_UNQUALIFIED(t))) {
+                    /* std::initializer_list<E> v = {a, b}: its array and the list object, as auto v = {a, b}
+                       makes them; the variable a copy of the list (two pointers' worth) */
+                    uint32_t arr = 0, il;
+
+                    c->ctor_ilist_n = n;
+                    memcpy(c->ctor_ilist_types, c->cargs, n * sizeof *c->cargs),
+                        memcpy(c->ctor_ilist_lval, c->cargs_lval, n);
+                    memcpy(c->ctor_ilist_brace, c->carg_brace,
+                           sizeof c->ctor_ilist_brace);
+                    il = cxx_gen_initializer_list(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n,
+                        (cc_id_list *)c->gen_block, name_loc, &arr);
+                    if (il) {
+                        /* (declared with the list's two words as its initializer: trivially copyable, a
+                           const one too) */
+                        c->ast->syms[gen_local].body =
+                            cc_node_rvalue(c->ast, il);
+                        c->ast->syms[gen_local].flags |=
+                            AST_SYMBOL_FLAG_DEFINED;
+                        cc_id_list_append(
+                            c->ast, (cc_id_list *)c->gen_block,
+                            cc_node_new_operands(c->ast, AST_NODE_DECLARATION,
+                                                 cc_type_basic(AST_TYPE_VOID),
+                                                 name_loc, gen_local,
+                                                 c->ast->syms[gen_local].body));
+                    } else
+                        cxx_gen_fail(c);
+                    gen_declared = true;
+                    gen_local = 0; /* (built: not again below) */
+                }
                 cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
                 if (gen_local) {
                     c->gen_agg_brace =
                         n <= CXX_MAX_ARGS
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
+                    c->gen_value_init = n == 0;
+                    memcpy(
+                        c->gen_call_brace, abr,
+                        sizeof abr); /* T x{a, {...}}: a list argument of a constructor a temporary of its
+                                           parameter's class */
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
+                    memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
                 }

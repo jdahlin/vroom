@@ -223,10 +223,13 @@ VPRIV bool cxx_gen_type_ok(cxx *c, ast_qualified_type t)
             AST_TYPE_KIND(c->ast, b) != AST_TYPE_ARRAY)
             return true;
         if (b != CXX_TY_UNKNOWN &&
-            AST_TYPE_KIND(c->ast, b) == AST_TYPE_FUNCTION)
-            return true; /* (a reference to a function: its address too) */
+            (AST_TYPE_KIND(c->ast, b) == AST_TYPE_FUNCTION ||
+             AST_TYPE_KIND(c->ast, b) == AST_TYPE_ARRAY))
+            return true; /* passing an array reference needs only its address, even with an unknown bound */
         return cxx_gen_object_type_ok(c, b);
     }
+    if (cxx_type_is_complex(c, t) || cxx_memptr_of(c, t))
+        return true; /* (_Complex T: C's struct of two, the code generator's; a pointer to member's struct) */
     if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION)
         return cxx_class_layout_info(c, t, &pod, &empty) &&
                pod && /* (an instance is completed here if it was not yet) */
@@ -304,6 +307,8 @@ VPRIV bool cxx_gen_object_type_ok(cxx *c, ast_qualified_type t)
     while (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY &&
            AST_TYPE(c->ast, t)->n)
         t = AST_TYPE(c->ast, t)->base;
+    if (cxx_type_is_complex(c, t) || cxx_memptr_of(c, t))
+        return true;
     if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) &&
         AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
         return cxx_gen_class_ok2(c, t, true);
@@ -688,6 +693,8 @@ VPRIV uint32_t cxx_gen_class_temp(cxx *c, ast_qualified_type t, uint32_t loc)
 
         memset(&at, 0, sizeof at);
         at.cleanup = cxx_gen_dtor_sym(dtor);
+        cxx_gen_eh_ready(
+            c); /* (with exceptions: run when one unwinds the scope too) */
         cc_attribute_apply_symbol(a, &a->syms[s], &at);
         c->gen_block_temps++;
     }
@@ -732,11 +739,25 @@ VPRIV uint32_t cxx_gen_chain(cxx *c, const cc_id_list *l, uint32_t last,
 
 /* an expression code generation gave no node (tokens start to here): the function's reason, unless one is
    known (VCC_CXX_GEN=4, VCC_CXX_MISSING: the innermost cause, not the statement that then has no node) */
+/* is a reason noted for the function being built (VCC_CXX_GEN=4); forget it */
+VPRIV bool cxx_gen_noted(void)
+{
+    return cxx_gen_why[0] != 0;
+}
+
+VPRIV void cxx_gen_note_clear(void)
+{
+    cxx_gen_why[0] = 0;
+}
+
 VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
 {
     int k;
 
-    if (c->gen_failed || cxx_gen_why[0])
+    if (c->gen_failed ||
+        (cxx_gen_why[0] &&
+         !getenv(
+             "VCC_CXX_GEN_LAST"))) /* (VCC_CXX_GEN_LAST: the last note, not the first) */
         return;
     k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "no node:");
     for (uint32_t i = start; i < c->pos && i < start + 14 && k > 0 &&
@@ -745,6 +766,15 @@ VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
         k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s",
                       (int)(c->tok[i].len < 30 ? c->tok[i].len : 30),
                       c->tok[i].s);
+    if (getenv("VCC_CXX_GEN_CONTEXT") && k > 0 && start) {
+        /* (VCC_CXX_GEN_CONTEXT: the 10 tokens before it too, to find a macro's or a header's) */
+        k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, "  after:");
+        for (uint32_t i = start > 10 ? start - 10 : 0;
+             i < start && k > 0 && k < (int)sizeof cxx_gen_why - 50; i++)
+            k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s",
+                          (int)(c->tok[i].len < 30 ? c->tok[i].len : 30),
+                          c->tok[i].s);
+    }
     if (k > 0 && k < (int)sizeof cxx_gen_why - 12)
         snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " -> %s",
                  c->etype == CXX_TY_UNKNOWN            ? "untyped"
