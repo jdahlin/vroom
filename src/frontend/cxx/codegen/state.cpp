@@ -261,11 +261,19 @@ VPRIV bool cxx_gen_class_ok2(cxx *c, ast_qualified_type t, bool objects)
     cxx_scope *cls;
     bool pod, empty;
 
+/* VCC_CXX_GEN=5: why a class's objects are not built (its tag's name, the check) */
 #define CK(x, why)                                                             \
     do {                                                                       \
-        if (x)                                                                 \
+        if (x) {                                                               \
+            if (getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) == 5 &&   \
+                t != CXX_TY_UNKNOWN && cc_type_is_record(a, t))                \
+                fprintf(                                                       \
+                    stderr, "class not built (%s): %.*s\n", why,               \
+                    (int)vintern_ents[a->tags[AST_TYPE(a, t)->aux].name].len,  \
+                    vintern_ents[a->tags[AST_TYPE(a, t)->aux].name].s);        \
             return false;                                                      \
-    } while (0) /* (why: what VCC_CXX_GEN would say) */
+        }                                                                      \
+    } while (0)
     CK(t == CXX_TY_UNKNOWN || (AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT &&
                                AST_TYPE_KIND(a, t) != AST_TYPE_UNION),
        "kind");
