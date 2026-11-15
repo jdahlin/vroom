@@ -11,6 +11,7 @@ VPRIV void cxx_outer_save(cxx *c, cxx_outer *o)
 	memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
 	o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval, o->ecallee = c->ecallee, o->last_fn = c->last_fn;
 	o->this_const = c->this_const, o->ret_capture = c->ret_capture, o->ret_lval = c->ret_lval, o->ret_type = c->ret_type;
+	o->ret_seen = c->ret_seen;	/* (an auto function's body parsed inside a lambda's: its returns are not the lambda's) */
 	c->ret_capture = 0;
 	o->unevaluated = c->unevaluated;
 	o->enode = c->enode, o->snode = c->snode, o->sdone = c->sdone, o->sdepth = c->sdepth, o->gen_block = c->gen_block;
@@ -26,6 +27,7 @@ VPRIV void cxx_outer_restore(cxx *c, cxx_outer *o)
 	free(o->targs), free(o->dp);
 	c->this_type = o->this_type, c->etype = o->etype, c->elval = o->elval, c->ecallee = o->ecallee, c->last_fn = o->last_fn;
 	c->this_const = o->this_const, c->ret_capture = o->ret_capture, c->ret_lval = o->ret_lval, c->ret_type = o->ret_type;
+	c->ret_seen = o->ret_seen;
 	c->unevaluated = o->unevaluated;
 	cxx_gen_unwind(c, o->gen_stack_depth);	/* (a body whose parse failed: the one around it goes on) */
 	c->enode = o->enode, c->snode = o->snode, c->sdone = o->sdone, c->sdepth = o->sdepth, c->gen_block = o->gen_block;

@@ -98,7 +98,7 @@ typedef struct cxx_outer {
 	bool elval;
 	cxx_entity *ecallee, *last_fn;
 	uint32_t unevaluated;
-	uint8_t this_const, ret_capture, ret_lval;
+	uint8_t this_const, ret_capture, ret_lval, ret_seen;
 	ast_qualified_type ret_type;
 	/* code generation: the expression and statement being built, and how many bodies are being built */
 	uint32_t enode, snode, sdone, sdepth, gen_stack_depth;

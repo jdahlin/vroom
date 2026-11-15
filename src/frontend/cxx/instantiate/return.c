@@ -15,7 +15,7 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 	uint32_t ntargs = c->ntargs, ndp = c->ndecl_params, ndd = c->decl_ndefaults;
 	cxx_param *dp;
 	ast_qualified_type this_type = c->this_type, etype = c->etype;
-	uint8_t this_const = c->this_const, ret_capture = c->ret_capture, ret_lval = c->ret_lval;
+	uint8_t this_const = c->this_const, ret_capture = c->ret_capture, ret_lval = c->ret_lval, ret_seen = c->ret_seen;
 	ast_qualified_type ret_type = c->ret_type;
 	bool elval = c->elval;
 	cxx_entity *ecallee = c->ecallee;
@@ -113,6 +113,7 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 	free(targs), free(dp);
 	c->this_type = this_type, c->etype = etype, c->elval = elval, c->ecallee = ecallee;
 	c->this_const = this_const, c->ret_capture = ret_capture, c->ret_lval = ret_lval, c->ret_type = ret_type;
+	c->ret_seen = ret_seen;	/* (the body's returns are not those of a lambda it is used in) */
 	c->unevaluated = unevaluated;
 	/* auto with no trailing type: only the body tells (an unevaluated call instantiates it too) */
 	if (!want_body && c->sig_auto && r == CXX_TY_UNKNOWN && viable == 1)

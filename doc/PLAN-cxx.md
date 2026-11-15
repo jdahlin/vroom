@@ -2332,3 +2332,11 @@ Nu const (inte mutable, inte referenser), som redan för `x.m` på ett const
 `x`; `decltype(m)` behåller den deklarerade typen.  Test:
 `run/const-this-members.cpp`.  Strikt bänk: pass 7, 170 saknas (från 184).
 Sviter gröna (99/99, 38/38, mangle, 350/350).
+
+## Status 144 (2026-11-15)
+`ret_seen` (en return med värde sedd) sparades inte när en funktion med
+deducerad returtyp instansierades inuti en lambdas kropp: lambdan utan
+return fick okänd returtyp och ingen kod (`__tree::__insert_range_unique`).
+Nu sparas och återställs den i `cxx_outer_save` och i return.c.  Test:
+`run/lambda-ret-auto-inside.cpp`.  Strikt bänk: pass 7, 168 saknas (från
+170).  Sviter gröna (100/100, 38/38, mangle, 350/350).
