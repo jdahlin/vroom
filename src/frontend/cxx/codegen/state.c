@@ -611,6 +611,14 @@ VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
 	for (uint32_t i = start; i < c->pos && i < start + 14 && k > 0 && k < (int)sizeof cxx_gen_why - 50; i++)
 		k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s", (int)(c->tok[i].len < 30 ? c->tok[i].len : 30), c->tok[i].s);
 	if (k > 0 && k < (int)sizeof cxx_gen_why - 12)
-		snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " -> %s", c->etype == CXX_TY_UNKNOWN ? "untyped" :
-			 cc_type_is_record(c->ast, c->etype) ? "class" : "typed");
+		k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " -> %s", c->etype == CXX_TY_UNKNOWN ? "untyped" :
+			      cc_type_is_record(c->ast, c->etype) ? "class" : "typed");
+	if (k > 0 && k < (int)sizeof cxx_gen_why - 24 && start < c->ntok) {
+		/* (where: the expression's line, of the file it is in) */
+		const char *name = "";
+		uint32_t nl = 0, line = 0, col = 0;
+
+		pp_location_describe(c->p, c->tok[start].loc, &name, &nl, &line, &col);
+		snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " (line %u)", line);
+	}
 }

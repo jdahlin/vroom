@@ -212,6 +212,7 @@ VPRIV uint32_t cxx_gen_braced_temp(cxx *c, ast_qualified_type t, uint32_t pos, u
 		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il;
 	}
 	(void)l;
+	c->gen_value_init = !n;	/* ({}: value-initialized) */
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, an, n, c->gen_block, loc))
 		return 0;	/* (constructed before the call, in its block: the temporary is an lvalue) */
 	return cxx_gen_var_node(c, tmp, loc);
@@ -399,7 +400,17 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 						pt = AST_TYPE(a, pt)->base;
 					if (f->def_scope)
 						c->scope = f->def_scope;
-					all[i] = cxx_gen_braced_temp(c, pt, dp, loc);
+					if (!cc_type_is_record(a, pt) && dp + 1 < c->ntok && c->tok[dp + 1].kind == LEX_TOKEN_RIGHT_BRACE &&
+					    (cc_type_is_integer(a, pt) || AST_TYPE_KIND(a, pt) == AST_TYPE_POINTER || AST_TYPE_KIND(a, pt) == AST_TYPE_ENUM ||
+					     AST_TYPE_KIND(a, pt) == AST_TYPE_BOOL)) {
+						/* int i = {}: value-initialized, zero */
+						uint32_t z = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc);
+
+						all[i] = AST_TYPE_KIND(a, pt) == AST_TYPE_POINTER ?
+							 cc_cast_insert(a, z, AST_QUALIFIED_TYPE_UNQUALIFIED(pt), AST_CAST_INTEGER_TO_POINTER) :
+							 cc_conversion_apply(a, z, AST_QUALIFIED_TYPE_UNQUALIFIED(pt));
+					} else
+						all[i] = cxx_gen_braced_temp(c, pt, dp, loc);
 					c->scope = saved, c->sdone = sdone, c->snode = snode, c->enode = 0;
 				}
 				if (!all[i])
@@ -650,8 +661,8 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uin
 	if (!c->call_resolved || !f || f->kind != CXX_ENTITY_VALUE || !obj || nargs > CXX_MAX_ARGS)
 		return;
 	for (uint32_t i = 0; i < nargs; i++)
-		if (!args[i])
-			return;
+		if (!args[i] && !(cxx_gen_has_this(f) && c->gen_call_brace[i]))
+			return;	/* (x = {...}: a braced list, a temporary of the parameter's class: cxx_gen_call) */
 	if (!cxx_gen_has_this(f) && !f->fn_static && f->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, f->ty) == AST_TYPE_FUNCTION &&
 	    AST_TYPE(c->ast, f->ty)->n == nargs && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, obj)->ty)) {
 		/* (a member of the object's class whose entity lacks its class, an instance's late member: found there) */

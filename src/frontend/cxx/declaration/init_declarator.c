@@ -683,6 +683,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 				if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
+					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
 					c->gen_agg_brace = NULL;
 					gen_declared = true;
@@ -837,6 +838,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
 				if (gen_local) {
 					c->gen_agg_brace = n <= CXX_MAX_ARGS ? abr : NULL;	/* (an aggregate's elements that are braced lists) */
+					c->gen_value_init = !n;	/* (T x{}, T x = {}: value-initialized) */
 					cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
 					c->gen_agg_brace = NULL;
 					gen_declared = true;

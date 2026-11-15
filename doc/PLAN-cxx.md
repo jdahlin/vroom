@@ -2545,3 +2545,22 @@ unit-class_iterator:s detektionstester (`(declval<Iter>()++)++` med
 `operator++(int)&`) går igenom.  Test: `run/ref-qualified-members.cpp`.
 Sviter gröna (122/122, 38/38, mangle).  Strikt bänk: pass 17, inga test-
 eller länkfel; 117 funktioner saknas.
+
+## Status 162 (2026-11-15)
+- `x = {...}` för ett klassobjekt: `x.operator=` med listan som ett eget
+  klammerargument (rangordnat som ett anrops, en temporär av parameterns
+  klass); med den implicita `operator=` en temporär av x:s klass, kopierad.
+  Förut blev listans sista element högerledet: jsons
+  `result["compiler"] = {{"family", "clang"}, ...}` gav en sträng och
+  unit-meta kastade.  Test: `run/assign-braced-list.cpp`.
+- `T x{}`, `T x = {}`, `x = {}`: värdeinitiering nollar först när
+  standardkonstruktorn inte är användardefinierad (jsons union `json_value`).
+- `T({...})`: ett klammerargument till en konstruktor blir en temporär av
+  parameterns klass även i en funktionell typomvandling (`json({1, 2})`).
+  Test: `run/functional-cast-braced-arg.cpp`.
+- Standardargument `= {}` för en skalär: noll.  Test: `run/default-arg-braced.cpp`.
+- VCC_CXX_MISSING/VCC_CXX_GEN=4: "no node" anger uttryckets rad, och ett
+  misslyckat försök att tolka `= {...}` som uttryck döljer inte längre den
+  verkliga orsaken.
+Sviter gröna (125/125, 38/38, mangle).  Strikt bänk: pass 18, inga test-
+eller länkfel.

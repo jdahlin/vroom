@@ -242,8 +242,26 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t, c
 	bool found = c->ctor_found;
 	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 
+	bool value_init = c->gen_value_init;
+
+	c->gen_value_init = 0;
 	if (!target || !cls || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS)
 		return false;
+	if (value_init && !nargs && (!found || !ctor || ctor->fn_defaulted) && !c->ctor_ilist) {
+		/* T{} of a class without a user-provided default constructor: zero-initialized, then default-constructed
+		   ([dcl.init.general]/9: json's union json_value, m_value = {}) */
+		uint32_t zargs[3], saved = c->enode;
+
+		zargs[0] = cc_address_of_build(a, target, loc);
+		zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc);
+		zargs[2] = cc_node_integer_new(a, (i128)AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->size, cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+		c->enode = 0;
+		cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+		if (!c->enode)
+			return false;
+		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, c->enode, 0, 0));
+		c->enode = saved;
+	}
 	uint32_t sliced;
 	if (nargs == 1 && args[0] && (AST_NODE_AT(a, args[0])->flags & AST_NODE_FLAG_LVALUE) && cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) &&
 	    AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != AST_TYPE_ARRAY && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(t)) {
@@ -429,6 +447,9 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, con
 	cc *a = c->ast;
 	cxx_entity *dtor;
 	cc_id_list *block = c->gen_block;
+	uint8_t value_init = c->gen_value_init;	/* (T x{}: for this object's construction, not one naming the destructor makes) */
+
+	c->gen_value_init = 0;
 	/* (what cxx_ctor_use chose: naming the destructor below resolves nothing, but keep it apart) */
 	cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
 	bool found = c->ctor_found, none = c->ctor_none;
@@ -464,8 +485,10 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, con
 	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il, c->ctor_ilist_n = il_n;
 	memcpy(c->ctor_ilist_types, il_types, sizeof il_types), memcpy(c->ctor_ilist_lval, il_lval, sizeof il_lval);
 	memcpy(c->ctor_ilist_brace, il_brace, sizeof il_brace);
+	c->gen_value_init = value_init;
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
+	c->gen_value_init = 0;
 }
 
 /* ---- new and delete ------------------------------------------------------------------------- */

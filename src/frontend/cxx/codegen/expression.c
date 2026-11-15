@@ -685,12 +685,16 @@ VPRIV uint32_t cxx_gen_default_argument(cxx *c, const cxx_entity *f, uint32_t k)
 
 	if (!f->defs || k >= f->ndefaults || !f->def_scope)
 		return 0;
+	bool keep_why = !cxx_gen_why[0];	/* (= {...}: the caller builds it; what this parse notes is no cause) */
+
 	c->pos = f->defs[2 * k], c->scope = f->def_scope, c->fail = &jb;
 	if (!setjmp(jb)) {
 		cxx_assignment_expression_parse(c);
 		if (c->pos == f->defs[2 * k + 1])
 			node = c->enode;
 	}
+	if (!node && keep_why && c->tok[f->defs[2 * k]].kind == LEX_TOKEN_LEFT_BRACE)
+		cxx_gen_why[0] = 0;
 	c->fail = outer_fail, c->pos = pos, c->scope = scope;
 	c->enode = enode, c->eobj_node = eobj, c->eobj_arrow = eobj_arrow, c->etype = etype, c->elval = elval, c->econst = econst;
 	c->evalue = evalue, c->einvalid = einvalid, c->eunsure = eunsure, c->call_resolved = call_resolved, c->none_viable = none_viable;

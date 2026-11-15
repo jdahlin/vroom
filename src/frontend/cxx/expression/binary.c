@@ -346,18 +346,49 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 			return;	/* a fold over = */
 		while (n--)
 			cxx_advance(c);
+		/* x = {...} of a class: x.operator=({...}), the list its parameter's (a temporary of its class, as a
+		   call's braced argument is: r["compiler"] = {{"family", "clang"}, ...} in json's meta()) */
+		bool braced = !built_in && cxx_is(c, LEX_TOKEN_LEFT_BRACE);
+		uint32_t bpos = c->pos;
+
+		c->unevaluated += braced;
 		cxx_initializer_parse(c);
+		c->unevaluated -= braced;
+		if (braced)
+			c->enode = 0;
 		{
 			uint32_t rn = c->enode;
 
-			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, &c->etype, 1))
+			if (braced && !c->tentative) {
+				/* (the list as the call's own one braced argument: overload resolution ranks it as one) */
+				if (!c->ccargs)
+					c->cargs = realloc(c->cargs, (c->ccargs = 16) * sizeof *c->cargs), c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
+				c->cargs[0] = c->etype, c->cargs_lval[0] = 0, c->ncargs = 1, c->carg_zero = 0;
+				memset(c->carg_brace, 0, sizeof c->carg_brace);
+				c->carg_brace[0] = bpos;
+			}
+			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, braced ? c->cargs : &c->etype, 1))
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
 			if (built_in)
 				cxx_gen_assignment(c, optok, ln, rn, oploc);
-			else if (!c->tentative && c->call_resolved && c->call_picked)
+			else if (!c->tentative && c->call_resolved && c->call_picked) {
+				if (braced)
+					c->gen_call_brace[0] = bpos;
 				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
-			else if (!c->tentative)
-				cxx_gen_assignment(c, optok, ln, rn, oploc);	/* (no operator= declared: the implicit one, a copy of the bytes where that is what it does) */
+				if (braced)
+					c->gen_call_brace[0] = 0;
+			} else if (!c->tentative && !braced)
+				cxx_gen_assignment(c, optok, ln, rn, oploc);
+			else if (!c->tentative && ln && l != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY &&
+				 cxx_gen_on(c) && cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)) &&
+				 !cxx_lookup_in(c, cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)), opid, 0)) {
+				/* x = {...} with the implicit operator=: a temporary of x's class from the list, copied */
+				uint32_t tn = cxx_gen_braced_temp(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l), bpos, oploc);
+
+				c->enode = 0;
+				if (tn)
+					cxx_gen_assignment(c, optok, ln, tn, oploc);
+			}	/* (no operator= declared: the implicit one, a copy of the bytes where that is what it does) */
 		}
 	}
 }

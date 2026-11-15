@@ -503,6 +503,7 @@ typedef struct cxx {
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
 	uint32_t carg_brace[CXX_MAX_ARGS];
 	const uint32_t *gen_agg_brace;	/* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
+	uint8_t gen_value_init;		/* the next cxx_gen_construct_at with no arguments is value-initialization (T{}, x = {}): zeroed first */
 	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
 	uint8_t new_array;
