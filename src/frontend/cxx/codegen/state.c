@@ -743,7 +743,10 @@ VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
 {
     int k;
 
-    if (c->gen_failed || cxx_gen_why[0])
+    if (c->gen_failed ||
+        (cxx_gen_why[0] &&
+         !getenv(
+             "VCC_CXX_GEN_LAST"))) /* (VCC_CXX_GEN_LAST: the last note, not the first) */
         return;
     k = snprintf(cxx_gen_why, sizeof cxx_gen_why, "no node:");
     for (uint32_t i = start; i < c->pos && i < start + 14 && k > 0 &&
@@ -752,6 +755,15 @@ VPRIV void cxx_gen_note_no_node(cxx *c, uint32_t start)
         k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s",
                       (int)(c->tok[i].len < 30 ? c->tok[i].len : 30),
                       c->tok[i].s);
+    if (getenv("VCC_CXX_GEN_CONTEXT") && k > 0 && start) {
+        /* (VCC_CXX_GEN_CONTEXT: the 10 tokens before it too, to find a macro's or a header's) */
+        k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, "  after:");
+        for (uint32_t i = start > 10 ? start - 10 : 0;
+             i < start && k > 0 && k < (int)sizeof cxx_gen_why - 50; i++)
+            k += snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " %.*s",
+                          (int)(c->tok[i].len < 30 ? c->tok[i].len : 30),
+                          c->tok[i].s);
+    }
     if (k > 0 && k < (int)sizeof cxx_gen_why - 12)
         snprintf(cxx_gen_why + k, sizeof cxx_gen_why - k, " -> %s",
                  c->etype == CXX_TY_UNKNOWN            ? "untyped"
