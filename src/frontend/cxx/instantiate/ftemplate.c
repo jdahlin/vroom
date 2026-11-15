@@ -154,6 +154,41 @@ VPRIV const ast_qualified_type *cxx_instance_placeholders(cxx *c, const cxx_enti
 }
 
 /* the template's declaration's first token (its decl-specifiers; 0: not known) */
+/* is template parameter i a type pack that every function parameter names only inside a template-id's
+   arguments (pair(piecewise_construct_t, tuple<_Args1...>, tuple<_Args2...>)), never as a parameter pack of its
+   own: then matching the parameter types deduces it (cxx_match_list) */
+static bool cxx_ftemplate_packs_in_ids(cxx *c, cxx_partial *p, uint32_t i, uint32_t start)
+{
+	uint32_t name = p->params->tparams[i].name, pos = 0, depth = 0, angle = 0;
+	bool seen = false;
+
+	(void)c;
+	if (!name)
+		return false;
+	/* the tokens of the declaration (from its decl-specifiers), up to the function body, ; or : */
+	for (pos = start; pos < c->ntok; pos++) {
+		int k = c->tok[pos].kind;
+
+		if (!depth && (k == LEX_TOKEN_LEFT_BRACE || k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_COLON))
+			break;
+		if (k == LEX_TOKEN_LEFT_PAREN)
+			depth++;
+		else if (k == LEX_TOKEN_RIGHT_PAREN && depth)
+			depth--;
+		else if (k == LEX_TOKEN_LESS)
+			angle++;
+		else if (k == LEX_TOKEN_GREATER && angle)
+			angle--;
+		else if (k == LEX_TOKEN_IDENTIFIER && c->tok[pos].id == name && depth) {
+			/* Pack... directly before > (the last argument of a template-id), inside the parameter list */
+			if (!angle || pos + 2 >= c->ntok || c->tok[pos + 1].kind != LEX_TOKEN_ELLIPSIS || c->tok[pos + 2].kind != LEX_TOKEN_GREATER)
+				return false;
+			seen = true;
+		}
+	}
+	return seen;
+}
+
 VPRIV uint32_t cxx_instance_decl_pos(const cxx_entity *inst)
 {
 	return inst->inst_ftmpl ? inst->inst_ftmpl->pos : 0;
@@ -228,7 +263,7 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 
 		for (uint32_t j = i + 1; j < p->params->ntparams; j++)
 			rest_defaulted &= !p->params->tparams[j].pack && p->params->tparams[j].def_b && p->params->tparams[j].kind != 3;
-		if (tp->pack && (tp->kind != 1 || (i + 1 != p->params->ntparams && !rest_defaulted)))
+		if (tp->pack && (tp->kind != 1 || (i + 1 != p->params->ntparams && !rest_defaulted && !cxx_ftemplate_packs_in_ids(c, p, i, f->pos))))
 			f->packs = 1;	/* (value packs, packs not last: not deduced; their placeholders still give the parameters'
 					   shapes, which rule the candidate out for arguments of another shape) */
 		if (tp->pack && !f->packs)

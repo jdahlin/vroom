@@ -65,7 +65,10 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 	memcpy(dp, c->decl_params, ndp * sizeof *dp);
 	binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
 	for (uint32_t i = 0; i < p->params->ntparams; i++)
-		cxx_bind(c, binding, &p->params->tparams[i], &bind[i]);
+		if (bind[i].kind == 6)	/* (a pack deduced from a template-id's arguments: tuple<_Args1...>) */
+			cxx_bind_pack(c, binding, &p->params->tparams[i], bind[i].list + bind[i].t, (uint32_t)bind[i].v);
+		else
+			cxx_bind(c, binding, &p->params->tparams[i], &bind[i]);
 	cxx_state_save(c, &s);
 	c->instantiating++;
 	c->fail = &jb;

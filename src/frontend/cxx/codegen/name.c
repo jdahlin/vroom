@@ -248,8 +248,9 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
 		return true;
 	}
 	c->mangle_guess = 0, c->mangle_internal = 0;
-	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of ? f->fn_const : 0, special ? 2 : 0, name, sizeof name))
+	if (!cxx_mangle_function(c, f, home, f->ty, f->member_of ? f->fn_const : 0, special ? 2 : 0, name, sizeof name)) {
 		return false;
+	}
 	bool internal_name = c->mangle_internal;	/* (an instance over a local or unnamed namespace's type: internal, as clang's) */
 	f->name_guess = c->mangle_guess;
 	if (f->name_guess && getenv("VCC_CXX_MANGLE_WHY"))

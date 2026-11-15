@@ -285,9 +285,10 @@ VPRIV bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t loc
 	c->pos = fe->nsdmi_pos, c->scope = fe->nsdmi_scope, c->fail = &jb;
 	c->gen_pre = first;
 	if (!setjmp(jb)) {
-		uint32_t an[CXX_MAX_ARGS], n = 0;
+		uint32_t an[CXX_MAX_ARGS], n = 0, abr[CXX_MAX_ARGS];
 		ast_qualified_type at[CXX_MAX_ARGS];
 		uint8_t lv[CXX_MAX_ARGS];
+		bool have_br = false;
 		bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE) || (cxx_is(c, LEX_TOKEN_EQUAL) && cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_BRACE);
 		bool record = cc_type_is_record(c->ast, fe->ty) && AST_TYPE_KIND(c->ast, fe->ty) != AST_TYPE_ARRAY;
 
@@ -299,6 +300,7 @@ VPRIV bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t loc
 				memcpy(an, c->carg_nodes, n * sizeof *an);
 				memcpy(at, c->cargs, n * sizeof *at);
 				memcpy(lv, c->cargs_lval, n * sizeof *lv);
+				memcpy(abr, c->carg_brace, sizeof abr), have_br = true;	/* (its elements that are braced lists: A a{{}}) */
 			}
 		} else {
 			cxx_assignment_expression_parse(c);
@@ -309,7 +311,9 @@ VPRIV bool cxx_gen_nsdmi(cxx *c, cxx_entity *fe, cc_id_list *first, uint32_t loc
 		if (n != UINT32_MAX && n <= CXX_MAX_ARGS) {
 			if (record)
 				cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(fe->ty), at, lv, n, braced);
+			c->gen_agg_brace = have_br ? abr : NULL;
 			cxx_gen_member_initializer(c, fe->name, CXX_TY_UNKNOWN, an, n, loc);
+			c->gen_agg_brace = NULL;
 			ok = cxx_gen_on(c);
 		}
 	}

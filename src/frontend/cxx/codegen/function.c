@@ -9,7 +9,9 @@
 #define CXX_BEGIN_WHY() do { \
 		if (getenv("VCC_CXX_GEN") && atoi(getenv("VCC_CXX_GEN")) >= 3 && f && !c->tentative && !c->template_depth && !c->unevaluated && \
 		    !(f->sym && (c->ast->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))) \
-			fprintf(stderr, "no begin (codegen.c:%d): %.*s\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s); \
+			fprintf(stderr, "no begin (function.c:%d): %.*s of %.*s\n", __LINE__, (int)vintern_ents[f->name].len, vintern_ents[f->name].s, \
+				f->member_of && f->member_of->owner ? (int)vintern_ents[f->member_of->owner->name].len : 1, \
+				f->member_of && f->member_of->owner ? vintern_ents[f->member_of->owner->name].s : "-"); \
 	} while (0)
 
 VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs, const cxx_param *ps, uint32_t nps)
@@ -124,6 +126,8 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 		c->gen_labels = NULL;
 	}
 
+	bool early_fail = !ok;	/* (a failure from here on, the bases' and members' parts: recorded below) */
+
 	if (!ok && c->gen && getenv("VCC_CXX_MISSING") && (f->sym || f->sym1)) {
 		/* VCC_CXX_MISSING: kept for cxx_gen_write_missing */
 		if (c->nmissing == c->cmissing)
@@ -225,6 +229,14 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 			}
 		if (!ok)
 			return;
+	}
+	if (!ok && !early_fail && getenv("VCC_CXX_MISSING") && (f->sym || f->sym1)) {
+		/* (a constructor's or destructor's bases, members or default member initializers not built) */
+		if (c->nmissing == c->cmissing)
+			c->missing = realloc(c->missing, (c->cmissing = c->cmissing ? c->cmissing * 2 : 64) * sizeof *c->missing);
+		c->missing[c->nmissing].sym = f->sym, c->missing[c->nmissing].sym1 = f->sym1;
+		c->missing[c->nmissing++].why = strdup(cxx_gen_is_special(f) ? (vintern_ents[f->name].s[1] == 'c' ?
+			"constructor: a base, member or default member initializer not built" : "destructor: a member or base not destroyed") : "function end");
 	}
 	if (!ok)
 		return;

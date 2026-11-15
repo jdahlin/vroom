@@ -2230,3 +2230,18 @@ TU; `unit-assert_macro` färre (487 mot 662), inte utrett.
   argument (förut "inte känd": `pair`:s piecewise-konstruktor gjorde `pair()` okänd).
 Kvar: kod för `f({})` när anropet evalueras (utanför decltype).  cxx-strict: 90 funktioner till, inga nya; 212
 summerat per TU, 3 av 70 TU:er klarar sina tester med vcc ensamt.
+
+## Status 135 (2026-11-15)
+Mot "varje funktion json behöver byggs av vcc" (strict-bänken räknar bara funktioner som ett objekt
+refererar men inte definierar, som clangs objekt definierar):
+- En klassmalls medlemmar med samma namn och antal parametrar definierade utanför klassen
+  (`basic_string::__move_assign(basic_string&, true_type)` och `(…, false_type)`): när flera passar parsas
+  varje definitions parameterlista i instansens klassräckvidd och den vars typer är deklarationens väljs.
+- En standardmedlemsinitierare `A a{{}}` (`std::array<char, 64> number_buffer{{}}` i json:s serializer):
+  elementens klammerlistor följer med (`gen_agg_brace`).
+- En konstruktor vars baser, medlemmar eller standardinitierare inte byggs står nu i VCC_CXX_MISSING med
+  orsak (förut "?").
+- Typpaket som bara förekommer sist i en mall-id:s argument (`pair(piecewise_construct_t, tuple<_Args1...>,
+  tuple<_Args2...>)`) deduceras genom mönstermatchningen; instansens kod för två sådana paket görs ännu inte.
+cxx-strict: 196 funktioner saknas (213), 112 olika; en TU länkar inte (map-kod som nu nås:
+`__lazy_compare_result` via styckvis `pair`).

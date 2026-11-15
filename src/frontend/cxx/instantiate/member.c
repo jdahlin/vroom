@@ -25,6 +25,55 @@ VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint3
 
 /* do the reference kinds of the parameters of the out-of-class definition at pos (& 1, && 2, none 0, as
    written) agree with e's declared parameters */
+/* do an out-of-class definition's parameter types (parsed in the instance's class scope, cs) equal the
+   declaration's?  -1 not known (the list did not parse) */
+static int cxx_ooc_types_agree(cxx *c, uint32_t pos, const cxx_entity *e, cxx_scope *cs)
+{
+	const ctype *ft = AST_TYPE(c->ast, e->ty);
+	uint32_t i = pos, depth = 0;
+	cxx_outer o;
+	jmp_buf jb;
+	volatile int r = -1;
+
+	for (; i < c->ntok && c->tok[i].kind != LEX_TOKEN_LEFT_BRACE && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
+		int kd = c->tok[i].kind;
+
+		if (kd == LEX_TOKEN_LESS)
+			depth++;
+		else if (kd == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && i > pos + 1 && c->tok[i - 1].kind == LEX_TOKEN_IDENTIFIER &&
+			 c->tok[i - 1].id == e->name)
+			break;
+	}
+	if (i >= c->ntok || c->tok[i].kind != LEX_TOKEN_LEFT_PAREN)
+		return -1;
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->unevaluated++;
+	c->fail = &jb;
+	c->pos = i;
+	c->scope = cs;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		cxx_parameter_clause_parse(c);
+		if (c->fn_nparams == ft->n) {
+			r = 1;
+			for (uint32_t k = 0; k < ft->n && r == 1; k++) {
+				ast_qualified_type a1 = c->fn_params[k], a2 = c->ast->params[ft->aux + k];
+
+				if (a1 == CXX_TY_UNKNOWN)
+					r = -1;
+				else if (AST_QUALIFIED_TYPE_UNQUALIFIED(a1) != AST_QUALIFIED_TYPE_UNQUALIFIED(a2))
+					r = 0;
+			}
+		} else
+			r = 0;
+	}
+	c->instantiating--, c->unevaluated--;
+	cxx_outer_restore(c, &o);
+	return r;
+}
+
 VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
 {
 	const ctype *ft = AST_TYPE(c->ast, e->ty);
@@ -121,6 +170,26 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 				d = &t->oocs[i], matches++;
 		if (!matches)
 			break;
+	}
+	if (matches > 1 && !x->pos) {
+		/* several with that many parameters and references alike (__move_assign(basic_string&, true_type)
+		   and (..., false_type)): the one whose parameter types are the declaration's */
+		struct cxx_ooc *one = NULL;
+		uint32_t n1 = 0;
+		bool unknown = false;
+
+		for (uint32_t i = 0; i < t->noocs; i++)
+			if (t->oocs[i].name == e->name && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner && !t->oocs[i].pack &&
+			    t->oocs[i].nparams == nparams && !t->oocs[i].partial && cxx_ooc_refs_agree(c, t->oocs[i].pos, e)) {
+				int k = cxx_ooc_types_agree(c, t->oocs[i].pos, e, cs);
+
+				if (k < 0)
+					unknown = true;
+				else if (k)
+					one = &t->oocs[i], n1++;
+			}
+		if (n1 == 1 && !unknown)
+			d = one, matches = 1;
 	}
 	if (!matches)
 		return;	/* (declared only: defined in another TU, or = default) */
