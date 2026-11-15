@@ -375,7 +375,17 @@ VPRIV void cxx_id_expression_parse(cxx *c)
                    template, its arguments all explicit: that instance, a function named */
                 cxx_entity *te =
                     cxx_entity_kind_find(e, CXX_ENTITY_FUNCTION_TEMPLATE);
-                bool one = te && !te->next && e == te;
+                bool one = te && e == te;
+
+                /* (one template declared, then defined: template <class T> static void func(); ... and its
+                   definition later, doctest's TEST_CASE_TEMPLATE; the defined one named) */
+                for (cxx_entity *o = te ? te->next : NULL; one && o;
+                     o = o->next)
+                    if (o->kind != CXX_ENTITY_FUNCTION_TEMPLATE ||
+                        o->name != te->name)
+                        one = false;
+                    else
+                        continue; /* (the first: the latest declaration, the definition) */
 
                 if (one && !c->template_depth &&
                     !cxx_is(c, LEX_TOKEN_LEFT_PAREN) && !te->member_of &&
@@ -398,6 +408,9 @@ VPRIV void cxx_id_expression_parse(cxx *c)
 
                         c->call_instance = ci, c->deduce_xonly = 0;
                         c->xargs_set = 0;
+                        cxx_member_body_use(
+                            c,
+                            inst); /* (its code: a call's would ask for it too) */
                         cxx_name_type(c, inst);
                         return;
                     }
