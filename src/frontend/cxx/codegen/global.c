@@ -185,7 +185,8 @@ VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc)
 /* the try statement: code = the call of the body through its trampoline; then the handler it names, if any */
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc)
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc)
 {
     cc *a = c->ast;
     uint32_t code = cxx_gen_temporary(c, cc_type_basic(AST_TYPE_INT), loc),
@@ -213,6 +214,18 @@ VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                          cc_assignment_build(
                              a, 0, cxx_gen_var_node(c, code, loc), call, loc),
                          0, 0));
+    if (ret_stmt) /* (the body returned, 1: the enclosing function returns) */
+        chain = cc_statement_new(
+            a, AST_NODE_IF, loc,
+            cc_condition_scalar(
+                a,
+                cc_binary_build(
+                    a, LEX_TOKEN_EQUAL_EQUAL,
+                    cc_node_rvalue(a, cxx_gen_var_node(c, code, loc)),
+                    cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc),
+                    loc),
+                "statement"),
+            ret_stmt, chain);
     cc_id_list_append(a, &l, chain);
     return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l),
                             l.n);

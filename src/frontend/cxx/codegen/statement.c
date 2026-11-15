@@ -442,8 +442,56 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
     if (!cxx_gen_on(c))
         return 0;
     if (c->gen_lambda && c->gen_lambda->is_try) {
-        cxx_gen_fail(c); /* (a return out of a try block: not built yet) */
-        return 0;
+        /* a return out of a try block's body (outlined): the value into the enclosing function's slot, then
+           the body returns 1, after which the enclosing function returns the slot's value */
+        cxx_gen_lambda *l = c->gen_lambda;
+        cc_id_list sl;
+
+        if (!l->ret_ok || (has_value && !e) || (!has_value && !l->ret_void)) {
+            cxx_gen_fail(c);
+            return 0;
+        }
+        cc_id_list_init(&sl);
+        if (has_value && l->ret_void) /* (return f(); of a void f) */
+            cc_id_list_append(
+                a, &sl, cc_statement_new(a, AST_NODE_EXPRESSION, loc, e, 0, 0));
+        else if (has_value) {
+            uint32_t v = cxx_gen_bind(c, e, l->encl_ret, loc);
+
+            if (!v) {
+                cxx_gen_fail(c);
+                return 0;
+            }
+            /* (the slot through the body's capture of it, by reference) */
+            int k = l->ret_e ? cxx_gen_capture(c, l, l->ret_e, loc) : -1;
+
+            if (k < 0 || !l->cap[k].by_ref) {
+                cxx_gen_fail(c);
+                return 0;
+            }
+            cc_id_list_append(
+                a, &sl,
+                cc_statement_new(
+                    a, AST_NODE_EXPRESSION, loc,
+                    cc_assignment_build(
+                        a, 0,
+                        cc_dereference_build(
+                            a,
+                            cc_node_rvalue(
+                                a, cxx_gen_var_node(c, l->cap[k].local, loc)),
+                            loc),
+                        v, loc),
+                    0, 0));
+        }
+        cc_id_list_append(
+            a, &sl,
+            cc_statement_new(
+                a, AST_NODE_RETURN, loc,
+                cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc), 0,
+                0));
+        l->ret_used = 1;
+        return cc_statement_new(a, AST_NODE_BLOCK, loc, 0,
+                                cc_id_list_freeze(a, &sl), sl.n);
     }
     if (has_value && e && AST_TYPE_KIND(a, c->gen_ret) == AST_TYPE_VOID &&
         AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == AST_TYPE_VOID) {

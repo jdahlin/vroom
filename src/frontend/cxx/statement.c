@@ -1192,12 +1192,17 @@ static void cxx_statement_parse1(cxx *c)
         uint32_t closure = 0, exc = 0, ti[8], hnode[8], nh = 0;
         cxx_entity *call = NULL;
         bool ok = gen;
+        struct cxx_gen_lambda *try_ret = NULL;
 
         cxx_advance(c);
         if (gen) {
             exc = cxx_gen_scratch(
                 c, cc_type_pointer(c->ast, cc_type_basic(AST_TYPE_VOID)), sloc);
             ok = cxx_try_block_parse(c, &closure, &call) && exc;
+            try_ret = c->try_ret_used
+                          ? c->try_ret
+                          : NULL; /* (taken now: a handler's try is its own) */
+            c->try_ret_used = 0, c->try_ret = NULL;
         } else
             cxx_compound_statement_parse(c);
         while (cxx_is_kw(c, CXX_KW_catch)) {
@@ -1269,11 +1274,42 @@ static void cxx_statement_parse1(cxx *c)
             c->scope = outer;
         }
         if (gen) {
+            /* the body returned (1): return from here too, the slot's value (inside another try block's body:
+               that body returns 1 in turn) */
+            uint32_t rst = 0;
+
+            if (ok && try_ret) {
+                cxx_gen_lambda *tl = try_ret;
+
+                if (c->gen_lambda && c->gen_lambda->is_try) {
+                    c->gen_lambda->ret_used = 1;
+                    rst = cc_statement_new(
+                        c->ast, AST_NODE_RETURN, sloc,
+                        cc_node_integer_new(c->ast, 1,
+                                            cc_type_basic(AST_TYPE_INT), sloc),
+                        0, 0);
+                } else if (tl->ret_void)
+                    rst = cxx_gen_return(c, 0, false, sloc);
+                else {
+                    uint32_t sv =
+                        cxx_gen_var_node_public(c, tl->ret_slot, sloc);
+
+                    rst = cxx_gen_return(
+                        c,
+                        tl->ret_ref
+                            ? cc_dereference_build(
+                                  c->ast, cc_node_rvalue(c->ast, sv), sloc)
+                            : sv,
+                        true, sloc);
+                }
+                if (!rst)
+                    ok = false;
+            }
             uint32_t st =
                 ok && nh
                     ? cxx_gen_try_statement(
                           c, cxx_gen_try(c, closure, call, ti, nh, exc, sloc),
-                          hnode, nh, sloc)
+                          hnode, nh, rst, sloc)
                     : 0;
 
             if (st && cxx_gen_on(c))

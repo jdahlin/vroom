@@ -190,7 +190,8 @@ VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc);
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc);
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV bool cxx_gen_global_finish(cxx *c, bool keep);
 VPRIV void cxx_gen_global_zeroed(cxx *c, const cxx_entity *v);

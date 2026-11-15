@@ -353,7 +353,14 @@ typedef struct cxx_gen_lambda {
     uint8_t def; /* the capture-default: 0 none, 1 [&], 2 [=] */
     uint8_t ex_this, bad;
     uint8_t
-        is_try; /* a try block's body, outlined: no return, break or continue out of it yet */
+        is_try; /* a try block's body, outlined: no break or continue out of it yet */
+    /* ... a return out of it: the value kept in ret_slot, an enclosing function's local (ret_ref: its address),
+       the body's own return 1; the caller then returns it (ret_used: one does) */
+    uint32_t ret_slot;
+    const struct cxx_entity
+        *ret_e; /* ... the slot's entity, captured by reference */
+    ast_qualified_type encl_ret;
+    uint8_t ret_ref, ret_void, ret_ok, ret_used;
     uint32_t nex;
     struct {
         uint32_t name;
@@ -789,6 +796,10 @@ typedef struct cxx {
         gen_value_init; /* the next cxx_gen_construct_at with no arguments is T{}'s: value-initialization (zeroed first unless a user-provided constructor) */
     const uint32_t *
         call_brace; /* the next cxx_call_type_impl's braced arguments (cxx_ctor_use's; NULL: c->carg_brace) */
+    /* the try block just parsed (cxx_try_block_parse): its body returns (try_ret_used), through try_ret (a
+       copy of its closure's return state) */
+    uint8_t try_ret_used;
+    struct cxx_gen_lambda *try_ret;
     uint8_t
         deduce_xonly; /* the next deduction: the explicit template arguments alone (f<int> as a value) */
     const uint32_t *
@@ -1231,7 +1242,8 @@ VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call,
 VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc);
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
 VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
                                cxx_entity **call_out);
