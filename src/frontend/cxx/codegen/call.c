@@ -321,6 +321,37 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 		}
 		return;
 	}
+	if (f->fn_defaulted && nargs == 1 && object && args[0] && f->name == vintern_cstr("operator=") && f->member_of && f->member_of->owner &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty) &&
+	    cxx_gen_defaulted_copy_trivial(c, f->member_of->owner->ty)) {
+		/* T &operator=(const T&) = default or (T&&) = default of a trivially copyable class: its bytes, the object
+		   the result (clang calls no function for it: iter_impl's in json) */
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty);
+		uint32_t target = arrow ? cc_dereference_build(a, cc_conversion_decay(a, object), loc) : object;
+		bool pod, empty;
+
+		if (!(AST_NODE_AT(a, target)->flags & AST_NODE_FLAG_LVALUE))
+			{ CXX_CALL_WHY(); return; }
+		if (AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, target)->ty) != t) {
+			ast_qualified_type pt = cc_type_pointer(a, t);
+			uint32_t addr = cc_address_of_build(a, target, loc);
+
+			target = cc_dereference_build(a, cc_cast_insert(a, addr, pt, cc_conversion_cast_kind(a, AST_NODE_AT(a, addr)->ty, pt, addr)), loc);
+		} else if (AST_NODE_AT(a, target)->ty != t)
+			target = cxx_gen_unqualified(c, target, loc);
+		if (cxx_class_layout_info(c, t, &pod, &empty) && empty)	/* (nothing copied: its byte may be another's) */
+			c->enode = cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, target)->ty, loc,
+							cc_cast_insert(a, cc_address_of_build(a, args[0], loc), cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID), target);
+		else {
+			uint32_t asg = cc_assignment_build(a, 0, target, cc_node_rvalue(a, args[0]), loc);
+			uint32_t addr = cc_address_of_build(a, target, loc);
+
+			/* (x = y, x): the object, an lvalue */
+			c->enode = cc_dereference_build(a, cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, addr)->ty, loc, asg, addr), loc);
+		}
+		AST_NODE_AT(a, c->enode)->flags |= AST_NODE_FLAG_LVALUE;
+		return;
+	}
 	ft = AST_TYPE(a, f->ty);
 	uint32_t bargs[CXX_MAX_ARGS];
 	{

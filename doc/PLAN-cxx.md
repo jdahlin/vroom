@@ -2511,3 +2511,17 @@ Tester: `run/string-literal-kinds.cpp`, `run/udl-string.cpp`.  Sviter gröna
   deklaration vars adress blev noll.  Test: `run/inline-var-empty-class.cpp`.
 Sviter gröna (118/118, 38/38, mangle).  Strikt bänk: pass 13, 117 saknas
 (från 152), ett testfel och tre länkfel att se på.
+
+## Status 159 (2026-11-15)
+- En förvald `operator=` (`(T&&) = default`, `(const T&) = default`) i en
+  trivialt kopierbar klass kopierar byten, objektet blir resultatet; clang
+  definierar ingen funktion för den (jsons `iter_impl`).  Test:
+  `run/defaulted-assign-trivial.cpp`.
+- `extern template R f<args>(params);` deklarerar inte längre en egen
+  icke-mall `f`, som överlagringsupplösningen föredrog och manglade utan
+  mallargument (libc++:s `operator+<char, ...>(char const*, string const&)`
+  blev odefinierad).  Kvar: `template R f<args>(params);` (en explicit
+  instansieringsdefinition) ger en svag definition, clangs är stark.  Test:
+  `run/extern-template-function.cpp`.
+Sviter gröna (120/120, 38/38, mangle).  Strikt bänk: pass 15, inga länkfel,
+två testfel (unit-class_iterator, unit-wstring).

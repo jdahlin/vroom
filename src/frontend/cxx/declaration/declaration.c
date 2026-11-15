@@ -1,6 +1,8 @@
 /* C++ declarations: simple, member and top-level declarations, extern templates */
 #include "declaration.h"
 
+static bool cxx_extern_function_template_id(cxx *c);
+
 VPRIV void cxx_simple_declaration_parse(cxx *c, int context, cxx_scope *cs)
 {
 	bool is_template = c->template_depth && c->scope->kind == CXX_SCOPE_TEMPLATE;
@@ -165,6 +167,15 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
 		}
 		if (cxx_peek(c, 1)->kw == CXX_KW_template) {	/* extern template class X<int>; */
 			cxx_advance(c);
+			if (cxx_peek(c, 1)->kw != CXX_KW_class && cxx_peek(c, 1)->kw != CXX_KW_struct && cxx_extern_function_template_id(c)) {
+				/* extern template R f<args>(params);: the specialization of a function template is the
+				   library's, its declaration the template's (not a function f of its own, which overload
+				   resolution would prefer: libc++'s operator+<char, ...>(char const*, string const&)) */
+				while (!cxx_is(c, LEX_TOKEN_SEMICOLON) && !cxx_is(c, LEX_TOKEN_EOF))
+					cxx_advance(c);
+				cxx_accept(c, LEX_TOKEN_SEMICOLON);
+				return;
+			}
 			if (cxx_peek(c, 1)->kw != CXX_KW_class && cxx_peek(c, 1)->kw != CXX_KW_struct)
 				cxx_extern_member_record(c);	/* extern template R X<args>::f(params); */
 			else if (!c->tentative && !c->template_depth) {
@@ -208,6 +219,38 @@ VPRIV void cxx_declaration_parse(cxx *c, int context)
  * elsewhere (libc++'s dylib: basic_string<char>'s copy constructor), kept on the instance's scope as its
  * name and number of parameters.  Nothing is consumed.
  */
+/* extern template R f<args>(params); at 'template': is the declarator a template-id (the token before the
+   parameter list, the first ( at depth 0, a '>')? */
+static bool cxx_extern_function_template_id(cxx *c)
+{
+	int depth = 0;
+
+	for (uint32_t i = c->pos + 1; i < c->ntok && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
+		int k = c->tok[i].kind;
+
+		if (k == LEX_TOKEN_IDENTIFIER && c->tok[i].len == 13 && !memcmp(c->tok[i].s, "__attribute__", 13)) {
+			int d = 0;
+
+			for (i++; i < c->ntok; i++) {
+				if (c->tok[i].kind == LEX_TOKEN_LEFT_PAREN)
+					d++;
+				else if (c->tok[i].kind == LEX_TOKEN_RIGHT_PAREN && !--d)
+					break;
+			}
+			continue;
+		}
+		if (k == LEX_TOKEN_LESS)
+			depth++;
+		else if (k == LEX_TOKEN_GREATER && depth)
+			depth--;
+		else if (k == LEX_TOKEN_GREATER_GREATER && depth)
+			depth = depth >= 2 ? depth - 2 : 0;
+		else if (k == LEX_TOKEN_LEFT_PAREN && !depth)
+			return c->tok[i - 1].kind == LEX_TOKEN_GREATER || c->tok[i - 1].kind == LEX_TOKEN_GREATER_GREATER;
+	}
+	return false;
+}
+
 VPRIV void cxx_extern_member_record(cxx *c)
 {
 	uint32_t save = c->pos, save_undo = c->nundo, open = 0, depth = 0, end, np = 0, name;
