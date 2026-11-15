@@ -112,6 +112,12 @@ typedef struct pp_opts {
     /* predef has -imacros (#__include_macros): no header cache */ /* markers: where predef's command-line part (-D/-U) starts */
 } pp_opts;
 
+/* digit separators (1'000): C23 and C++14 on (98 is C++98) */
+static inline bool pp_digit_separators(const pp_opts *o)
+{
+    return o->c23 || (o->cxx >= 14 && o->cxx < 98);
+}
+
 enum {
     PP_LINUX_AARCH64,
     PP_DARWIN,
