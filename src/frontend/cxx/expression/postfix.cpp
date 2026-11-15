@@ -503,7 +503,22 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 id = cxx_peek(c, 0)->id;
                 cxx_advance(c);
                 /* the object's type is not known here: name<...>( is a member template call if it parses */
-                if (cxx_is(c, LEX_TOKEN_LESS) &&
+                /* (a known class whose member of that name is no template: < is less-than, however
+				   what follows parses: a.n < 1 || a.n > (int)4, skcms) */
+                bool not_template = false;
+
+                if (!template_kw && cls && !q && !dep && !cls->dependent &&
+                    !cls->has_dependent_base && cxx_is(c, LEX_TOKEN_LESS)) {
+                    cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
+
+                    not_template = m && m->kind != CXX_ENTITY_DEPENDENT;
+                    for (cxx_entity *x = m; x && not_template; x = x->next)
+                        not_template =
+                            x->kind != CXX_ENTITY_TEMPLATE &&
+                            x->kind != CXX_ENTITY_FUNCTION_TEMPLATE &&
+                            !cxx_entity_template(x);
+                }
+                if (cxx_is(c, LEX_TOKEN_LESS) && !not_template &&
                     (template_kw ||
                      cxx_lookahead_fn(c, cxx_template_arguments_then_call))) {
                     cxx_entity *m =
