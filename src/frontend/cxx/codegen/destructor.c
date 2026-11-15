@@ -175,6 +175,7 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
 	}
 	if (!(d = cxx_gen_effective_destructor(c, t, 0)))
 		return;
+	cxx_member_body_use(c, d);	/* (called: an instance's body is instantiated, as at the end of a scope) */
 	if (d->fn_virtual && d->vslot && !(d->member_of && d->member_of->is_final)) {
 		/* p->~T() of a virtual destructor: the complete-object one (D1) through the vtable, tmp = &x;
 		   ((void (**)(T *))*(void ***)tmp)[slot](tmp) */
