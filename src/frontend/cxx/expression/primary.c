@@ -214,9 +214,159 @@ VPRIV void cxx_builtin_invoke_parse(cxx *c)
             c); /* (an arithmetic value: nothing to call; pointers to members: not decided) */
 }
 
+/* the ud-suffix of a string literal's piece: what follows its closing quote (an identifier, _json), or 0 */
+static uint32_t cxx_string_suffix_length(const cxx_token *x)
+{
+    uint32_t q = x->len;
+
+    while (q > 0 && x->s[q - 1] != '"')
+        q--;
+    if (!q || q == x->len ||
+        !(x->s[q] == '_' || isalpha((unsigned char)x->s[q])))
+        return 0;
+    return x->len - q;
+}
+
+/*
+ * "text"_suffix (a user-defined string literal, [lex.ext]/5): operator""_suffix("text", length), the
+ * literal as without its suffix (the pieces' suffixes left out while it is parsed); false: no suffix here.
+ */
+static bool cxx_user_defined_string_parse(cxx *c)
+{
+    uint32_t b = c->pos, e = b, sl = 0, loc = cxx_peek(c, 0)->loc;
+    const cxx_token *sx = NULL;
+
+    while (e < c->ntok && c->tok[e].kind >= LEX_TOKEN_STRING &&
+           c->tok[e].kind <= LEX_TOKEN_UTF32_STRING) {
+        uint32_t k = cxx_string_suffix_length(&c->tok[e]);
+
+        if (k)
+            sl = k, sx = &c->tok[e];
+        e++;
+    }
+    if (!sx)
+        return false;
+    char name[256];
+    uint32_t keep[64], n = e - b;
+
+    if (n > 64 || 10 + sl >= sizeof name)
+        return false;
+    memcpy(name, "operator\"\"", 10);
+    memcpy(name + 10, sx->s + sx->len - sl, sl);
+    uint32_t id = vintern_copy(name, 10 + sl);
+
+    for (uint32_t i = 0; i < n; i++) {
+        keep[i] = c->tok[b + i].len;
+        c->tok[b + i].len -= cxx_string_suffix_length(&c->tok[b + i]);
+    }
+    cxx_primary_expression_parse(c); /* (the string, its suffix not seen) */
+    for (uint32_t i = 0; i < n; i++)
+        c->tok[b + i].len = keep[i];
+
+    ast_qualified_type st = c->etype;
+    uint32_t sn = c->enode;
+    cxx_entity *set = cxx_lookup(c, id);
+
+    if (!set || st == CXX_TY_UNKNOWN ||
+        AST_TYPE_KIND(c->ast, st) != AST_TYPE_ARRAY || c->tentative) {
+        cxx_et(c, CXX_TY_UNKNOWN, false);
+        return true;
+    }
+    uint64_t len = AST_TYPE(c->ast, st)->n ? AST_TYPE(c->ast, st)->n - 1 : 0;
+    ast_qualified_type at[2] = {
+        cc_type_pointer(c->ast, AST_TYPE(c->ast, st)->base),
+        cc_type_basic(AST_TYPE_UNSIGNED_LONG)};
+    uint8_t lv[2] = {0, 0};
+
+    cxx_call_type(c, set, CXX_TY_UNKNOWN, at, lv, 2);
+    if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN &&
+        cxx_gen_on(c)) {
+        uint32_t an[2] = {
+            sn ? cc_conversion_decay(c->ast, sn) : 0,
+            cc_node_integer_new(c->ast, (i128)len,
+                                cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc)};
+
+        if (an[0])
+            cxx_gen_call(c, c->call_picked, 0, false, an, 2, loc);
+        else
+            cxx_gen_fail(c);
+    }
+    return true;
+}
+
+/*
+ * A string literal (its pieces concatenated): an lvalue of const E[N], E the C++ type of its kind
+ * (char, wchar_t, char8_t in C++20, char16_t, char32_t: each its own type here); the bytes decoded
+ * by C's cc_literal_string_build (escapes, \\u, UTF-8 to wide, raw strings).
+ */
+static void cxx_string_literal_parse(cxx *c)
+{
+    ptok local[16], *pt = local;
+    uint32_t n = 0, cap = 16, loc = cxx_peek(c, 0)->loc;
+    int kind = LEX_TOKEN_STRING;
+
+    while (cxx_kind(c) >= LEX_TOKEN_STRING &&
+           cxx_kind(c) <= LEX_TOKEN_UTF32_STRING) {
+        const cxx_token *x = cxx_peek(c, 0);
+
+        if (n == cap) {
+            ptok *more = (ptok *)malloc((cap *= 2) * sizeof *more);
+
+            memcpy(more, pt, n * sizeof *more);
+            if (pt != local)
+                free(pt);
+            pt = more;
+        }
+        memset(&pt[n], 0, sizeof pt[n]);
+        pt[n].s = x->s, pt[n].len = x->len, pt[n].loc = x->loc,
+        pt[n].kind = (uint8_t)x->kind;
+        n++;
+        if (x->kind != LEX_TOKEN_STRING)
+            kind = x->kind;
+        cxx_advance(c);
+    }
+    /* the element type: C++'s distinct character types (ext 1), const */
+    int ck = kind == LEX_TOKEN_WIDE_STRING    ? AST_TYPE_INT
+             : kind == LEX_TOKEN_UTF16_STRING ? AST_TYPE_UNSIGNED_SHORT
+             : kind == LEX_TOKEN_UTF32_STRING ? AST_TYPE_UNSIGNED_INT
+             : kind == LEX_TOKEN_UTF8_STRING && c->o->standard >= 20 &&
+                     c->o->standard != 98
+                 ? AST_TYPE_UNSIGNED_CHAR
+                 : AST_TYPE_CHAR;
+    ast_qualified_type et = cc_type_basic(ck);
+
+    if (ck != AST_TYPE_CHAR) {
+        ctype t = c->ast->ty[ck];
+
+        t.ext = 1;
+        et = AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0);
+    }
+    et = cc_type_qualify(c->ast, et, AST_QUALIFIER_CONST);
+    if (c->tentative) {
+        cxx_et(c, CXX_TY_UNKNOWN, false);
+        if (pt != local)
+            free(pt);
+        return;
+    }
+    uint32_t sn = cc_literal_string_build(c->ast, pt, n, loc);
+    ast_qualified_type at = cc_type_array(
+        c->ast, et, AST_TYPE(c->ast, AST_NODE_AT(c->ast, sn)->ty)->n, 0);
+
+    if (pt != local)
+        free(pt);
+    AST_NODE_AT(c->ast, sn)->ty = at;
+    cxx_et(c, at, true);
+    if (cxx_gen_on(c))
+        c->enode = sn;
+}
+
 VPRIV void cxx_primary_expression_parse(cxx *c)
 {
     cxx_token *t = cxx_peek(c, 0);
+
+    if (t->kind >= LEX_TOKEN_STRING && t->kind <= LEX_TOKEN_UTF32_STRING &&
+        cxx_user_defined_string_parse(c))
+        return;
 
     if (t->kind == LEX_TOKEN_IDENTIFIER && t->len == 16 &&
         !memcmp(t->s, "__builtin_invoke", 16) &&
@@ -295,6 +445,39 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
     case LEX_TOKEN_UTF16_CHARACTER:
     case LEX_TOKEN_UTF32_CHARACTER:
         cxx_advance(c);
+        if (t->s[t->len - 1] == '\'' && !c->tentative &&
+            t->kind != LEX_TOKEN_CHARACTER) {
+            /* (no user-defined suffix) a prefixed one: the value as C decodes it, of C++'s character type:
+               wchar_t, char8_t (C++20), char16_t, char32_t ('x' is a char below, not C's int) */
+            ptok pt;
+            ast_qualified_type ct;
+
+            memset(&pt, 0, sizeof pt);
+            pt.s = t->s, pt.len = t->len, pt.loc = t->loc,
+            pt.kind = (uint8_t)t->kind;
+            int64_t v = (int64_t)cc_literal_character_value(c->ast, &pt, &ct);
+            int ck =
+                t->kind == LEX_TOKEN_WIDE_CHARACTER    ? AST_TYPE_INT
+                : t->kind == LEX_TOKEN_UTF16_CHARACTER ? AST_TYPE_UNSIGNED_SHORT
+                : t->kind == LEX_TOKEN_UTF32_CHARACTER ? AST_TYPE_UNSIGNED_INT
+                : t->kind == LEX_TOKEN_UTF8_CHARACTER
+                    ? (c->o->standard >= 20 && c->o->standard != 98
+                           ? AST_TYPE_UNSIGNED_CHAR
+                           : AST_TYPE_CHAR)
+                    : (int)AST_TYPE_KIND(c->ast, ct);
+
+            ast_qualified_type et = cc_type_basic(ck);
+
+            if (t->kind != LEX_TOKEN_CHARACTER &&
+                !(t->kind == LEX_TOKEN_UTF8_CHARACTER && ck == AST_TYPE_CHAR)) {
+                ctype x = c->ast->ty[ck];
+
+                x.ext = 1;
+                et = AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &x), 0);
+            }
+            cxx_ec(c, et, v);
+            return;
+        }
         if (t->kind == LEX_TOKEN_CHARACTER &&
             t->s[t->len - 1] == '\'') { /* (no user-defined suffix) */
             int64_t cv = 0;
@@ -344,108 +527,9 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
     case LEX_TOKEN_WIDE_STRING:
     case LEX_TOKEN_UTF8_STRING:
     case LEX_TOKEN_UTF16_STRING:
-    case LEX_TOKEN_UTF32_STRING: {
-        uint32_t len = 0, cap;
-        bool plain = true;
-        char small[256], *buf = small;
-        const cxx_token *first_piece = cxx_peek(c, 0);
-
-        cap = sizeof small;
-
-        while (cxx_kind(c) >= LEX_TOKEN_STRING &&
-               cxx_kind(c) <= LEX_TOKEN_UTF32_STRING) {
-            const cxx_token *x = cxx_peek(c, 0);
-
-            plain &= x->kind == LEX_TOKEN_STRING && x->s[0] == '"' &&
-                     x->s[x->len - 1] == '"';
-            if (plain && len + x->len > cap) {
-                /* (the decoded bytes are never more than the spelling's) */
-                uint32_t ncap = (len + x->len) * 2;
-                char *nb = (char *)cc_heap_allocate(c->ast, ncap);
-
-                memcpy(nb, buf, len);
-                buf = nb, cap = ncap;
-            }
-            for (uint32_t i = 1; plain && i + 1 < x->len;) {
-                unsigned char ch = (unsigned char)x->s[i++];
-                uint32_t v;
-
-                if (ch != '\\') {
-                    buf[len++] = (char)ch;
-                    continue;
-                }
-                ch = (unsigned char)x->s[i++];
-                switch (ch) {
-                case 'n':
-                    v = '\n';
-                    break;
-                case 't':
-                    v = '\t';
-                    break;
-                case 'r':
-                    v = '\r';
-                    break;
-                case 'a':
-                    v = 7;
-                    break;
-                case 'b':
-                    v = 8;
-                    break;
-                case 'f':
-                    v = 12;
-                    break;
-                case 'v':
-                    v = 11;
-                    break;
-                case 'e':
-                case 'E':
-                    v = 27;
-                    break;
-                case '\\':
-                case '\'':
-                case '"':
-                case '?':
-                    v = ch;
-                    break;
-                case 'x':
-                    v = 0;
-                    if (i + 1 >= x->len || !isxdigit((unsigned char)x->s[i]))
-                        plain = false;
-                    while (i + 1 < x->len && isxdigit((unsigned char)x->s[i])) {
-                        unsigned char d = (unsigned char)x->s[i++];
-
-                        v = v * 16 + (d <= '9' ? d - '0' : (d | 32) - 'a' + 10);
-                    }
-                    break;
-                default:
-                    if (ch >= '0' && ch <= '7') {
-                        v = ch - '0';
-                        for (int k = 0; k < 2 && i + 1 < x->len &&
-                                        x->s[i] >= '0' && x->s[i] <= '7';
-                             k++)
-                            v = v * 8 + (uint32_t)(x->s[i++] - '0');
-                    } else
-                        plain = false, v = 0; /* (\u, \U: not built yet) */
-                }
-                if (v > 255)
-                    plain = false;
-                buf[len++] = (char)v;
-            }
-            cxx_advance(c);
-        }
-        /* "abc": an lvalue of const char[4] */
-        if (plain && !c->tentative) {
-            cxx_et(c,
-                   cc_type_array(c->ast,
-                                 cc_type_qualify(c->ast,
-                                                 cc_type_basic(AST_TYPE_CHAR),
-                                                 AST_QUALIFIER_CONST),
-                                 len + 1, 0),
-                   true);
-            cxx_gen_string(c, buf, len, first_piece->loc);
-        }
+    case LEX_TOKEN_UTF32_STRING:
+        cxx_string_literal_parse(c);
         return;
-    }
     case LEX_TOKEN_LEFT_PAREN:
         cxx_paren_expression_parse(c);
         c->edecl_name = 0; /* decltype((x)) is a reference */

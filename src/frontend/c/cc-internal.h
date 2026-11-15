@@ -540,7 +540,11 @@ CC_PRIVATE void cc_unused_variables_report(cc *c, uint32_t m);
 CC_PRIVATE uint32_t cc_literal_number_parse(cc *c, const ptok *t);
 CC_PRIVATE bool cc_token_kind_is_string(int k);
 CC_PRIVATE uint32_t cc_literal_string_parse(cc *c);
+CC_PRIVATE uint32_t cc_literal_string_build(cc *c, const ptok *tokens,
+                                            size_t count, uint32_t loc);
 CC_PRIVATE uint32_t cc_literal_character_build(cc *c);
+CC_PRIVATE i128 cc_literal_character_value(cc *c, const ptok *t,
+                                           ast_qualified_type *ty);
 /* constant-eval.c, object-representation.c */
 CC_PRIVATE i128 cc_constant_truncate(cc *c, i128 v, ast_qualified_type t);
 CC_PRIVATE bool cc_report_runtime_is_quiet(const cc *c);
