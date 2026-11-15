@@ -296,6 +296,11 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				else if (!auto_e && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, t)->n &&
 					 cxx_is(c, LEX_TOKEN_EQUAL) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local))
 					unsized_e = e, unsized_static = (flags & (DS_STATIC | DS_CONSTEXPR)) != 0;	/* T a[] = {...}: its symbol once the initializer gave the bound */
+				else if (!auto_e && (flags & DS_STATIC) && !(flags & DS_CONSTEXPR) && !cxx_tokens_have_kw(c, ds_from, c->pos, CXX_KW_thread_local) &&
+					 t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
+					/* static T x(args); of a class with a constructor or destructor: constructed when its
+					   declaration first runs, guarded (cxx_gen_construct_local) */
+					gen_local = e->sym = cxx_gen_local_static(c, name, t, name_loc);
 				else if (auto_e || (flags & (DS_STATIC | DS_CONSTEXPR)))
 					cxx_gen_fail(c);
 				else

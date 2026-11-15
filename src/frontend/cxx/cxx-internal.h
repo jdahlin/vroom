@@ -122,6 +122,14 @@ typedef struct cxx_targ {
 /* a type the parser cannot give yet (dependent, a template-id, auto, decltype): qty 0 is void */
 #define CXX_TY_UNKNOWN ((ast_qualified_type)0xFFFFFFFFu)
 
+/* an argument that is a name of functions (an overload set, a template-id), untyped: resolved against a
+   parameter of type pointer or reference to function (f(std::endl), os << std::endl) */
+typedef struct cxx_argset {
+	struct cxx_entity *set;
+	uint8_t nx;		/* explicit template arguments (255: none written) */
+	cxx_targ xa[4];
+} cxx_argset;
+
 typedef struct cxx_entity {
 	uint32_t name;			/* interned id */
 	uint8_t kind;
@@ -469,6 +477,7 @@ typedef struct cxx {
 	void *ginit_list;		/* ... and that function's statements */
 	uint32_t ginit_serial;
 	uint32_t gen_atexit_sym, gen_dso_sym;
+	uint32_t gen_guard_acquire_sym, gen_guard_release_sym;	/* __cxa_guard_acquire, __cxa_guard_release (0: not declared yet) */
 	uint32_t gen_try_serial;	/* try blocks so far (their trampolines' names) */
 	uint8_t gen_eh_pers;		/* the personality routine's cell was emitted */	/* it delegates to another constructor; the body has a return statement */
 	void *gen_pre;			/* a constructor's member initializers: statements before its body (a cc_id_list) */
@@ -503,6 +512,8 @@ typedef struct cxx {
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
 	uint32_t carg_brace[CXX_MAX_ARGS];
 	const uint32_t *gen_agg_brace;	/* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
+	cxx_argset carg_sets[16];	/* the last argument list's arguments that are untyped names of functions */
+	cxx_argset op_rset, op_rset_cur;	/* a binary operator's right operand that is one (pending; the resolution's) */
 	uint8_t gen_value_init;		/* the next cxx_gen_construct_at with no arguments is value-initialization (T{}, x = {}): zeroed first */
 	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
@@ -837,6 +848,9 @@ VPRIV bool cxx_template_id_spell(cxx *c, cxx_entity *te, const cxx_targ *a, uint
 
 /* expressions' types (typing.c) */
 VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue);
+VPRIV struct cxx_entity *cxx_function_for_target(cxx *c, const cxx_argset *as, ast_qualified_type p);
+VPRIV void cxx_argset_take(cxx *c, cxx_argset *as);
+VPRIV uint32_t cxx_gen_argset_value(cxx *c, const cxx_argset *as, ast_qualified_type p, uint32_t loc);
 VPRIV ast_qualified_type cxx_number_type(cxx *c, const cxx_token *t);
 VPRIV void cxx_binary_type(cxx *c, int op, ast_qualified_type l, ast_qualified_type r);
 VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue);

@@ -1,6 +1,20 @@
 /* C++ expressions: postfix expressions (calls, members, subscripts) */
 #include "expression.h"
 
+/* code generation: the arguments that are names of functions (no node yet), the functions they resolve to
+   for f's parameters (f(std::endl)) */
+static void cxx_fill_argsets(cxx *c, const cxx_entity *f, uint32_t *anodes, uint32_t an, const cxx_argset *as, uint32_t loc)
+{
+	const ctype *ft;
+
+	if (!f || f->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION || an == UINT32_MAX)
+		return;
+	ft = AST_TYPE(c->ast, f->ty);
+	for (uint32_t i = 0; i < an && i < 16 && i < ft->n; i++)
+		if (!anodes[i] && as[i].set)
+			anodes[i] = cxx_gen_argset_value(c, &as[i], c->ast->params[ft->aux + i], loc);
+}
+
 /* VCC_CXX_GEN=2: the innermost postfix expression of each function that code generation did not build */
 VPRIV void cxx_postfix_expression_parse(cxx *c)
 {
@@ -80,6 +94,9 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 				c->in_template_args = 0;
 				cxx_call_arguments_parse(c);
+				cxx_argset asets[16];
+
+				memcpy(asets, c->carg_sets, sizeof asets);	/* (resolving the call parses argument lists of its own) */
 				c->in_template_args = targs;
 				if (c->ncargs == UINT32_MAX || c->tentative)
 					cxx_et(c, CXX_TY_UNKNOWN, false);
@@ -104,7 +121,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 						}
 					}
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), (cxx_fill_argsets(c, c->call_picked, anodes, an, asets, cloc), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc)), c->gen_vmode = 0;
 				}
 				else if (!set && callee != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, callee) &&	/* (operator(): a member only) */
 					 (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
@@ -129,7 +146,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
 					ast_qualified_type cty = c->etype;
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), (cxx_fill_argsets(c, c->call_picked, anodes, an, asets, cloc), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc)), c->gen_vmode = 0;
 					if (c->want_constant && cpick && !an && !obj_node && !c->econst && !c->template_depth && cty != CXX_TY_UNKNOWN && c->etype == cty &&
 					    ((AST_TYPE_KIND(c->ast, cty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cty) <= AST_TYPE_UNSIGNED_LONG_LONG) ||
 					     AST_TYPE_KIND(c->ast, cty) == AST_TYPE_ENUM)) {
@@ -158,7 +175,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 						if (c->etype != CXX_TY_UNKNOWN && c->call_resolved && c->call_picked && an != UINT32_MAX &&
 						    (!c->call_picked->member_of || c->call_picked->fn_static || c->call_picked->member_of->kind != CXX_SCOPE_CLASS))
 							c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace),
-							cxx_gen_call(c, c->call_picked, 0, false, anodes, an, cloc), c->gen_vmode = 0;
+							(cxx_fill_argsets(c, c->call_picked, anodes, an, asets, cloc), cxx_gen_call(c, c->call_picked, 0, false, anodes, an, cloc)), c->gen_vmode = 0;
 						/* nothing by that name fits, here or in the arguments' namespaces */
 						c->einvalid = was || (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure);
 						if (c->einvalid && !was)

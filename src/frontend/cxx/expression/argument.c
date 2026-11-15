@@ -17,7 +17,11 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 	uint8_t lval[CXX_MAX_ARGS];
 	uint32_t n = 0;
 	uint32_t nodes[CXX_MAX_ARGS] = { 0 }, braces[CXX_MAX_ARGS] = { 0 }, zero = 0;
+	cxx_argset sets[16];
 	bool unknown = false, first_const = false;
+
+	for (uint32_t i = 0; i < 16; i++)
+		sets[i].set = NULL, sets[i].nx = 255;
 	int64_t first_value = 0;
 
 	cxx_expect(c, open);
@@ -93,6 +97,8 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 		}
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
+		if (n < 16 && !brace)
+			cxx_argset_take(c, &sets[n]);	/* (f(std::endl): resolved against the parameter) */
 		if (n < CXX_MAX_ARGS)
 			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode, braces[n] = brace ? start : 0,
 			zero |= (uint32_t)(c->econst && !c->evalue && !brace && c->etype != CXX_TY_UNKNOWN &&
@@ -111,6 +117,7 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
 	memcpy(c->carg_nodes, nodes, sizeof nodes);
 	memcpy(c->carg_brace, braces, sizeof braces);
+	memcpy(c->carg_sets, sets, sizeof sets);
 	c->carg_zero = zero;
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),

@@ -2572,3 +2572,20 @@ eller länkfel.
 Inbyggda mallar tolkas nu även som basspecificerare.  jsons
 `value_in_range_of` kompileras.  Test: `run/builtin-common-type.cpp`.
 Sviter gröna (126/126, 38/38, mangle).  Strikt bänk: pass 18, 115 saknas.
+
+## Status 164 (2026-11-15)
+- Ett namn på funktioner (en funktionsmall, ett mall-id, en
+  överlagringsmängd) som argument för en parameter av typen pekare eller
+  referens till funktion: funktionen av den typen, mallens argument
+  deducerade ur målets parametrar ([over.over], [temp.deduct.funcaddr]).
+  Både anrop och binära operatorer (`os << std::endl`).  Test:
+  `run/function-set-argument.cpp`.  Kvar: en funktion med en parameter av
+  typen referens till funktion byggs inte ("no begin").
+- Statiska lokala variabler av en klass med konstruktor eller destruktor
+  (`static std::string s;`) konstrueras första gången deklarationen nås,
+  med Itanium-vakt (`__cxa_guard_acquire`/`__cxa_guard_release`) och
+  destruktorn registrerad med `__cxa_atexit`; förut fick funktionen ingen
+  kod.  Ett undantag under konstruktionen avbryter inte vakten (byggs inte).
+  Test: `run/local-static-guarded.cpp`.
+Sviter gröna (128/128, 38/38, mangle).  Strikt bänk: pass 22 (från 18),
+107 funktioner saknas.

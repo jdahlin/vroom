@@ -442,8 +442,91 @@ VPRIV uint32_t cxx_gen_this_object(cxx *c, uint32_t loc)
  * it), and its destructor at the end of its scope (the emitter's scope cleanup, as C's
  * __attribute__((cleanup))).
  */
+/*
+ * A function-scope static of a class constructed when its declaration first runs ([stmt.dcl]/3), as the
+ * Itanium ABI guards it: if (first byte of guard == 0 && __cxa_guard_acquire(&guard)) { construct; register
+ * the destructor (__cxa_atexit); __cxa_guard_release(&guard); }.  The object and its guard are static
+ * storage of the function (zeroed); an exception while constructing does not abort the guard (not built).
+ */
+static void cxx_gen_construct_static(cxx *c, uint32_t s, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	cc_id_list *block = c->gen_block, inner;
+	cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist, *dtor = NULL;
+	bool found = c->ctor_found, none = c->ctor_none;
+	uint8_t value_init = c->gen_value_init;
+	ast_qualified_type ll = cc_type_basic(AST_TYPE_LONG_LONG), pll = cc_type_pointer(a, ll), vp = cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID));
+	uint32_t g, gaddr, cond, call, ar[3];
+
+	c->gen_value_init = 0;
+	if (!block || nargs > CXX_MAX_ARGS) {
+		cxx_gen_fail(c);
+		return;
+	}
+	if (cxx_gen_needs_destruction(c, t, 0)) {
+		dtor = cxx_gen_effective_destructor(c, t, 0);
+		if (!dtor || dtor->fn_deleted || !cxx_gen_name(c, dtor) || !dtor->sym1 || (cxx_member_body_use(c, dtor), 0)) {
+			cxx_gen_fail(c);
+			return;
+		}
+	}
+	if (!c->gen_guard_acquire_sym) {
+		c->gen_guard_acquire_sym = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr("__cxa_guard_acquire"), cxx_type_function(c, cc_type_basic(AST_TYPE_INT), &pll, 1, false), 0);
+		a->syms[c->gen_guard_acquire_sym].flags |= AST_SYMBOL_FLAG_GLOBAL, a->syms[c->gen_guard_acquire_sym].depth = 0;
+		c->gen_guard_release_sym = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr("__cxa_guard_release"), cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), &pll, 1, false), 0);
+		a->syms[c->gen_guard_release_sym].flags |= AST_SYMBOL_FLAG_GLOBAL, a->syms[c->gen_guard_release_sym].depth = 0;
+	}
+	if (dtor && !c->gen_atexit_sym) {
+		ast_qualified_type ps[3] = { vp, vp, vp };
+
+		c->gen_atexit_sym = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr("__cxa_atexit"), cxx_type_function(c, cc_type_basic(AST_TYPE_INT), ps, 3, false), 0);
+		a->syms[c->gen_atexit_sym].flags |= AST_SYMBOL_FLAG_GLOBAL, a->syms[c->gen_atexit_sym].depth = 0;
+		c->gen_dso_sym = cxx_gen_data_symbol(c, "__dso_handle", 0);
+	}
+	g = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, ll, loc);
+	a->syms[g].sc = AST_STORAGE_STATIC;
+	cc_id_list_append(a, block, cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, s, 0));
+	cc_id_list_append(a, block, cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, g, 0));
+	cc_id_list_init(&inner);
+	c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none, c->ctor_ilist = il;
+	c->gen_value_init = value_init;
+	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, &inner, loc)) {
+		c->gen_value_init = 0;
+		cxx_gen_fail(c);
+		return;
+	}
+	c->gen_value_init = 0;
+	if (dtor) {
+		ar[0] = cxx_gen_to_void_pointer(c, cxx_gen_function_node(c, cxx_gen_dtor_sym(dtor), loc));
+		ar[1] = cxx_gen_to_void_pointer(c, cc_address_of_build(a, cxx_gen_var_node(c, s, loc), loc));
+		ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
+		cc_id_list_append(a, &inner, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
+	}
+	ar[0] = cc_address_of_build(a, cxx_gen_var_node(c, g, loc), loc);
+	cc_id_list_append(a, &inner, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_runtime_call(c, c->gen_guard_release_sym, ar, 1, loc), 0, 0));
+	/* *(volatile char *)&guard == 0 && __cxa_guard_acquire(&guard) */
+	gaddr = cc_cast_insert(a, cc_address_of_build(a, cxx_gen_var_node(c, g, loc), loc),
+			       cc_type_pointer(a, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_VOLATILE)), AST_CAST_NOP);
+	cond = cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, cc_dereference_build(a, gaddr, loc)),
+			       cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc), loc);
+	ar[0] = cc_address_of_build(a, cxx_gen_var_node(c, g, loc), loc);
+	call = cxx_gen_runtime_call(c, c->gen_guard_acquire_sym, ar, 1, loc);
+	if (!cond || !call) {
+		cxx_gen_fail(c);
+		return;
+	}
+	cond = cc_binary_build(a, LEX_TOKEN_AMPERSAND_AMPERSAND, cond, call, loc);
+	cc_id_list_append(a, block, cc_statement_new(a, AST_NODE_IF, loc, cc_condition_scalar(a, cond, "statement"),
+						     cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &inner), inner.n), 0));
+}
+
 VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
+	if (c->ast->syms[s].sc == AST_STORAGE_STATIC) {	/* (static T x(args);: constructed once, guarded) */
+		cxx_gen_construct_static(c, s, t, args, nargs, loc);
+		return;
+	}
+	{
 	cc *a = c->ast;
 	cxx_entity *dtor;
 	cc_id_list *block = c->gen_block;
@@ -489,6 +572,7 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t, con
 	if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, s, loc), t, args, nargs, block, loc))
 		cxx_gen_fail(c);
 	c->gen_value_init = 0;
+}
 }
 
 /* ---- new and delete ------------------------------------------------------------------------- */

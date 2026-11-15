@@ -59,8 +59,22 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = c->elval;
 			uint8_t r_lval = c->elval;
 			bool rewritten = false;	/* a != b as !(a == b) (C++20's rewritten candidates) */
+			cxx_argset rset;
 
+			cxx_argset_take(c, &rset);	/* (os << std::endl: the right operand a name of functions) */
+			c->op_rset = rset;
 			bool found = !c->tentative && cxx_operator_call_type(c, opid, l, &c->etype, 1);
+
+			c->op_rset.set = NULL;
+			if (found && !rn && rset.set && c->call_resolved && c->call_picked && c->call_picked->ty != CXX_TY_UNKNOWN &&
+			    AST_TYPE_KIND(c->ast, c->call_picked->ty) == AST_TYPE_FUNCTION && cxx_gen_on(c)) {
+				/* its function, for the operator's parameter (a member's first, a non-member's second) */
+				const ctype *ft = AST_TYPE(c->ast, c->call_picked->ty);
+				uint32_t pi = c->call_picked->member_of && c->call_picked->member_of->kind == CXX_SCOPE_CLASS && !c->call_picked->fn_static ? 0 : 1;
+
+				if (pi < ft->n)
+					rn = cxx_gen_argset_value(c, &rset, c->ast->params[ft->aux + pi], oploc);
+			}
 
 			if (!c->tentative && (!found || !c->call_resolved) && op == LEX_TOKEN_EXCLAMATION_EQUAL && l != CXX_TY_UNKNOWN &&
 			    rt != CXX_TY_UNKNOWN && (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {

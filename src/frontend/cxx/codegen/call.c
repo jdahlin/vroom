@@ -19,6 +19,25 @@ VPRIV void cxx_gen_function_value(cxx *c, cxx_entity *f, uint32_t loc)
 	c->enode = n;
 }
 
+/* an argument that is a name of functions, for a parameter of type p: the function it resolves to, its
+   address for a pointer, the function for a reference (0: none) */
+VPRIV uint32_t cxx_gen_argset_value(cxx *c, const cxx_argset *as, ast_qualified_type p, uint32_t loc)
+{
+	cxx_entity *f = cxx_gen_on(c) ? cxx_function_for_target(c, as, p) : NULL;
+	uint32_t saved = c->enode, n;
+
+	if (!f)
+		return 0;
+	cxx_gen_function_value(c, f, loc);
+	n = c->enode;
+	c->enode = saved;
+	if (n && AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER && !AST_TYPE(c->ast, p)->ext)
+		n = cc_conversion_decay(c->ast, n);
+	else if (n && AST_TYPE_KIND(c->ast, p) == AST_TYPE_POINTER)	/* (F&: the function's address, as a reference is) */
+		n = cc_cast_insert(c->ast, cc_conversion_decay(c->ast, n), AST_QUALIFIED_TYPE_UNQUALIFIED(p), AST_CAST_NOP);
+	return n;
+}
+
 /* f(args): the function overload resolution picked, the arguments converted to its parameters' types */
 /* VCC_CXX_GEN=3: where cxx_gen_call gave up on a call, and the function called */
 #define CXX_CALL_WHY() do { \
