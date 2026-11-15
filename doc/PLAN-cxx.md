@@ -301,6 +301,11 @@ output), as `vcc-ctests.py` does for C.  Mangling has its own harness: every
 symbol of every clang-built object of the targets demangled and re-mangled
 by vcc.
 
+Operator names (§5.1.3 of the Itanium C++ ABI): literal suffixes (both token
+spellings) and `co_await` now retain their declaration names through object
+emission. The five symbols in `operator-names.cpp` match Clang 23, including
+an ordinary identifier beginning with `operator`.
+
 ### X4 Templates, with instantiation as a recorded unit
 
 Class, function, alias and variable templates; partial specialisation;

@@ -529,7 +529,7 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 	}
 	if (cxx_is_kw(c, CXX_KW_co_await)) {
 		cxx_advance(c);
-		return 1;
+		return vintern_cstr("operator co_await");
 	}
 	if (k == LEX_TOKEN_LEFT_PAREN) {
 		cxx_advance(c);
@@ -542,10 +542,25 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 		return vintern_cstr("operator[]");
 	}
 	if (k == LEX_TOKEN_STRING) {	/* operator "" _suffix */
+		const cxx_token *t = cxx_peek(c, 0);
+		if (t->len < 2 || memcmp(t->s, "\"\"", 2))
+			cxx_fail(c, "expected an empty string in literal operator name");
+		const char *suffix = t->s + 2;
+		size_t len = t->len - 2;
+
 		cxx_advance(c);
-		if (cxx_is(c, LEX_TOKEN_IDENTIFIER))
-			cxx_advance(c);
-		return 1;
+		if (!len) {
+			t = cxx_peek(c, 0);
+			cxx_expect(c, LEX_TOKEN_IDENTIFIER);
+			suffix = t->s;
+			len = t->len;
+		}
+		char *name = calloc(10 + len + 16, 1);
+		memcpy(name, "operator\"\"", 10);
+		memcpy(name + 10, suffix, len);
+		uint32_t id = vintern_copy(name, 10 + len);
+		free(name);
+		return id;
 	}
 	if (k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_HASH && k != LEX_TOKEN_LEFT_BRACE && k != LEX_TOKEN_RIGHT_BRACE &&
 	    k != LEX_TOKEN_RIGHT_PAREN && k != LEX_TOKEN_RIGHT_SQUARE && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_PERIOD &&

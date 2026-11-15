@@ -8,7 +8,7 @@ function symbols; vpp -fsyntax-only with VCC_CXX_MANGLE writes the name it mangl
 function defined at namespace scope.  The two sets must be equal; a name vcc does not mangle
 yet ("?name") is a failure.
 """
-import argparse, os, subprocess, sys, tempfile
+import argparse, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -27,13 +27,16 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for f in files:
             src, obj, out = os.path.join(TESTS, f), os.path.join(tmp, f + ".o"), os.path.join(tmp, f + ".names")
-            if subprocess.run([CLANG, "-std=c++17", "-stdlib=libc++", "-w", "-c", src, "-o", obj], capture_output=True).returncode:
+            with open(src) as source:
+                mode = re.search(r"^// std: (\S+)", source.read(), re.M)
+            std = "-std=" + (mode.group(1) if mode else "c++17")
+            if subprocess.run([CLANG, std, "-stdlib=libc++", "-w", "-c", src, "-o", obj], capture_output=True).returncode:
                 print("FAIL %s: clang++ rejects the test" % f)
                 bad += 1
                 continue
             nm = subprocess.run(["nm", "--defined-only", obj], capture_output=True, text=True).stdout
             want = sorted(l.split()[-1] for l in nm.splitlines() if l.split()[-2] in "TtWw")
-            r = subprocess.run([VPP, "-x", "c++", "-std=c++17", "-stdlib=libc++", "-w", "-fsyntax-only", src], capture_output=True, text=True,
+            r = subprocess.run([VPP, "-x", "c++", std, "-stdlib=libc++", "-w", "-fsyntax-only", src], capture_output=True, text=True,
                                env={**os.environ, "VCC_CXX_MANGLE": out})
             if r.returncode or not os.path.exists(out):
                 print("FAIL %s: vcc failed: %s" % (f, (r.stderr.strip().splitlines() or ["?"])[-1]))
