@@ -2660,3 +2660,13 @@ operand som kanske inte körs (`?:`: jsons `strict ? parser(..., nullptr,
 `cxx_gen_construct_temp` gör, och förstörs bara om grenen kördes.  Test:
 `run/conditional-class-argument.cpp`.  Sviter gröna (138/138, 38/38,
 mangle).  Strikt bänk: pass 26, 115 saknas.
+
+## Status 170 (2026-11-15)
+- `x = y` för en klass utan deklarerad `operator=` får typen `T&` (den
+  implicita), så requires-uttryck och libc++:s `assignable_from`/`movable`/
+  `weakly_incrementable` håller för `__wrap_iter`; `ranges::begin` och
+  `std::inserter` (C++20:s `ranges::iterator_t`) kompileras.
+- `__is_nothrow_destructible`/`__is_destructible` gör en klassmallsinstans
+  komplett först (förut "okänd").
+Test: `run/implicit-assign-typed.cpp`.  Sviter gröna (139/139, 38/38,
+mangle).  Strikt bänk: pass 26, 116 saknas.

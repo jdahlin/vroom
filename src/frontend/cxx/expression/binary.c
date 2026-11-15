@@ -401,8 +401,18 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 			/* (the operands' value categories: x = y of an lvalue y takes operator=(const T&), not (T&&)) */
 			if (!built_in && !c->tentative)
 				c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = braced ? 0 : c->elval;
+			ast_qualified_type rt0 = c->etype;
+
 			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, braced ? c->cargs : &c->etype, 1))
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
+			/* x = y of a class that declares no operator= (its implicit one, T& operator=(const T&) and
+			   (T&&)): an lvalue of x's type, from y of that class (libc++'s assignable_from<__wrap_iter&,
+			   __wrap_iter>) */
+			if (!built_in && c->etype == CXX_TY_UNKNOWN && opid == vintern_cstr("operator=") && ll && l != CXX_TY_UNKNOWN &&
+			    cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY && !(AST_QUALIFIED_TYPE_QUALIFIERS(l) & AST_QUALIFIER_CONST) &&
+			    !braced && rt0 != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(rt0) == AST_QUALIFIED_TYPE_UNQUALIFIED(l) &&
+			    cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)) && !cxx_lookup_in(c, cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)), opid, 0))
+				cxx_et(c, l, true);
 			if (built_in)
 				cxx_gen_assignment(c, optok, ln, rn, oploc);
 			else if (!c->tentative && c->call_resolved && c->call_picked) {
