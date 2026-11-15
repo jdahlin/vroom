@@ -10,6 +10,18 @@ static bool cxx_call_ranks_converted(const cxx *c)
     return false;
 }
 
+/* x.m / p->m: m's type as cxx_name_type gives it, but not const for being this's member in a const
+   member function: x is not this (Skia's SkDCubic::chopAt() const writing dst.pts[0] of a local dst);
+   x's own constness is applied by the caller */
+static void cxx_member_name_type(cxx *c, cxx_entity *m)
+{
+    uint8_t this_const = c->this_const;
+
+    c->this_const = 0;
+    cxx_name_type(c, m);
+    c->this_const = this_const;
+}
+
 /* VCC_CXX_GEN=2: the innermost postfix expression of each function that code generation did not build */
 VPRIV void cxx_postfix_expression_parse(cxx *c)
 {
@@ -483,7 +495,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                         cxx_entity *m = cxx_lookup_in(c, cls, oid, 0);
 
                         if (m && m->kind != CXX_ENTITY_DEPENDENT) {
-                            cxx_name_type(c, m);
+                            cxx_member_name_type(c, m);
                             c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) &
                                            AST_QUALIFIER_CONST)
                                               ? 2
@@ -555,7 +567,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
 
                     if (m && m->kind != CXX_ENTITY_DEPENDENT) {
-                        cxx_name_type(c, m);
+                        cxx_member_name_type(c, m);
                         c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) &
                                        AST_QUALIFIER_CONST)
                                           ? 2
