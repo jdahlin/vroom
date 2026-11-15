@@ -444,6 +444,12 @@ only done when the parity run is fully green; a change to `frontend/c/` when bot
 vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 
 ## CI and the premerge gate
+
+Install the local formatting hook with `pre-commit install` after installing
+the Python package `pre-commit`. The hook formats staged vcc C sources and
+headers using the pinned clang-format version. Review and stage any formatting
+edits before retrying the commit. CI runs the same hook on changed files
+before promotion. Exclusions live in `src/.clang-format-ignore`.
 `.github/workflows/premerge.yml` runs one reusable workflow per target in
 parallel (`arm64.yml`: jobs arm64, asan, tsan; x86-64 gets its own; `wasm.yml` is
 manual-only, not in the gate), each on GitHub's ubuntu-24.04-arm (tsan on
