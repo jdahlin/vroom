@@ -789,6 +789,8 @@ typedef struct cxx {
         gen_value_init; /* the next cxx_gen_construct_at with no arguments is T{}'s: value-initialization (zeroed first unless a user-provided constructor) */
     const uint32_t *
         call_brace; /* the next cxx_call_type_impl's braced arguments (cxx_ctor_use's; NULL: c->carg_brace) */
+    uint8_t
+        deduce_xonly; /* the next deduction: the explicit template arguments alone (f<int> as a value) */
     const uint32_t *
         deduce_brace; /* the next function template deduction: its arguments that are braced lists (their '{', 0: none) */
     uint32_t gen_call_brace[CXX_MAX_ARGS];

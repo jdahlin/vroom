@@ -371,6 +371,38 @@ VPRIV void cxx_id_expression_parse(cxx *c)
                         (c->cxargs = c->ntargs + 8) * sizeof *c->xargs));
                 memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
                 c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = e;
+                /* f<args> not called (fn g = f<long>, &f<int>, take(f<char>), auto g = f<int>): one function
+                   template, its arguments all explicit: that instance, a function named */
+                cxx_entity *te =
+                    cxx_entity_kind_find(e, CXX_ENTITY_FUNCTION_TEMPLATE);
+                bool one = te && !te->next && e == te;
+
+                if (one && !c->template_depth &&
+                    !cxx_is(c, LEX_TOKEN_LEFT_PAREN) && !te->member_of &&
+                    c->ntargs <= 32) {
+                    ast_qualified_type r = CXX_TY_UNKNOWN;
+                    cxx_entity *ci = c->call_instance;
+                    cxx_targ xa[32];
+                    uint32_t nx = c->ntargs;
+
+                    memcpy(xa, c->targs, nx * sizeof *xa);
+                    c->call_instance = NULL;
+                    c->deduce_xonly = 1;
+                    if (cxx_ftemplate_deduce(c, te, xa, nx, NULL, NULL, 0, &r,
+                                             true) == 1 &&
+                        c->call_instance &&
+                        c->call_instance->ty != CXX_TY_UNKNOWN &&
+                        AST_TYPE_KIND(c->ast, c->call_instance->ty) ==
+                            AST_TYPE_FUNCTION) {
+                        cxx_entity *inst = c->call_instance;
+
+                        c->call_instance = ci, c->deduce_xonly = 0;
+                        c->xargs_set = 0;
+                        cxx_name_type(c, inst);
+                        return;
+                    }
+                    c->call_instance = ci, c->deduce_xonly = 0;
+                }
             }
             return;
         }

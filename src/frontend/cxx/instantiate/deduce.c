@@ -437,6 +437,7 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
     const uint32_t *brace = c->deduce_brace;
 
     c->deduce_brace = NULL;
+    c->deduce_xonly = 0; /* (this call's: not a nested deduction's) */
     *ret = CXX_TY_UNKNOWN;
     if (!f) {
         c->why = CXX_WHY_NO_FTMPL;
@@ -534,8 +535,8 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
 								   parameters' types does not: pair's (piecewise_construct_t, tuple&, tuple&, __tuple_indices...)) */
         if (nargs > f->np && !f->variadic)
             return 0;
-        if (nargs + e->ndefaults < f->np)
-            return 0;
+        if (nargs + e->ndefaults < f->np && !c->deduce_xonly)
+            return 0; /* (f<int> named, not called: its parameters from the explicit arguments alone) */
     }
     /* explicit arguments: the first parameters (all of them: nothing left to deduce) */
     if (xargs) {
