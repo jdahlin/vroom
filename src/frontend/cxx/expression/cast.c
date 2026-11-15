@@ -80,6 +80,12 @@ VPRIV void cxx_functional_cast_type(cxx *c, ast_qualified_type cast_to)
 		xn = c->enode;
 		cxx_et(c, cast_to, false);
 		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	} else if (zero && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_VOID) {
+		/* void(): nothing, of type void (libc++'s __do_rehash: a, void(), b) */
+		cxx_ec(c, cc_type_basic(AST_TYPE_INT), 0);
+		xn = c->enode;
+		cxx_et(c, cast_to, false);
+		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
 	} else
 		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
 }

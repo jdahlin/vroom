@@ -179,6 +179,21 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to, 
 		return 0;
 	snprintf(nm, 32, "operator #%u", (unsigned)AST_QUALIFIED_TYPE_UNQUALIFIED(to));
 	f = cxx_lookup_in(c, cls, vintern_cstr(nm), 0);
+	if (!f && cc_type_is_arithmetic(a, to) && !cls->conv_unknown && !cls->nused) {
+		/* none to that type: the one conversion function to an arithmetic type, then a standard conversion
+		   (fpos's operator streamoff() for an off_t; [over.match.conv]) */
+		ast_qualified_type via = CXX_TY_UNKNOWN;
+		uint32_t n1 = 0;
+
+		for (uint32_t i = 0; i < cls->nconv; i++)
+			if (cc_type_is_arithmetic(a, cls->conv_types[i]) && AST_TYPE_KIND(a, cls->conv_types[i]) != AST_TYPE_POINTER)
+				via = AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]), n1++;
+		if (n1 == 1 && via != AST_QUALIFIED_TYPE_UNQUALIFIED(to)) {
+			uint32_t v = cxx_gen_convert_class(c, x, via, loc);
+
+			return v ? cc_conversion_apply(a, cc_node_rvalue(a, v), AST_QUALIFIED_TYPE_UNQUALIFIED(to)) : 0;
+		}
+	}
 	if (f && f->next) {
 		/* overloads that differ in cv (operator T() const and const volatile: std::atomic): the one with
 		   the fewest qualifiers the object's binds to */
