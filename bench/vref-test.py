@@ -88,6 +88,49 @@ with tempfile.TemporaryDirectory() as td:
             ),
         ]:
             run(directory, file, source, op, where, *params, fail=True)
+    fixtures = Path(__file__).resolve().parents[1] / "src/test/vref"
+    source = (fixtures / "pair-columns.c").read_text()
+    recipe = fixtures / "pair-columns.toml"
+    for file in ("columns.c", "columns.cpp"):
+        changed = run(directory, file, source, "recipe", recipe)
+        assert "right[row] = pairs[row].second;" in changed
+        subprocess.run(
+            [os.environ.get("CLANG", "clang"), file, "-o", "check"], cwd=directory, check=True
+        )
+        subprocess.run([directory / "check"], cwd=directory, check=True)
+        run(directory, file, source.replace("limit * 2", "limit * 3"), "recipe", recipe, fail=True)
+        run(
+            directory,
+            file,
+            source.replace("xs[used]", "xs /* keep */ [used]"),
+            "recipe",
+            recipe,
+            fail=True,
+        )
+        run(
+            directory,
+            file,
+            source.replace("free(xs);", "int old = xs[0]; free(xs);"),
+            "recipe",
+            recipe,
+            fail=True,
+        )
+    rule_file = directory / "bad.toml"
+    header = 'within = "int f ( int p ) {"\n'
+    for source, rules in [
+        ("int f(int p) { return p; }", "[ [rule] ]"),  # invalid TOML
+        ("int f(int p) { return p; }", '[[rule]]\nmatch="return @p"\nreplace="return p"\n' * 2),
+        (
+            "int f(int p) { { int p=1; } return p; }",
+            '[[rule]]\nmatch="return @p"\nreplace="return 0"',
+        ),
+        (
+            "#define F(x) (x)\nint f(int p) { return F(p); }",
+            '[[rule]]\nmatch="( p )"\nreplace="(1)"',
+        ),
+    ]:
+        rule_file.write_text(header + rules)
+        run(directory, "guard.c", source, "recipe", rule_file, fail=True)
     cpp = "namespace ns { int f(int p) { int n(p); n++; return n; } }\n"
     assert len(run(directory, "ns.cpp", cpp, "refs", "1:35")) == 3
 print(f"vref: {count} cases passed")

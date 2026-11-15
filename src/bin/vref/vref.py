@@ -111,9 +111,12 @@ class Unit:
                 found.append(i)
         return found
 
-    def check_range(self, lo, hi):
+    def check_range(self, lo, hi, *, whole_macros=False):
         require(
-            all(hi <= start or lo >= end for start, end in self.macros),
+            all(
+                hi <= start or lo >= end or (whole_macros and lo <= start and end <= hi)
+                for start, end in self.macros
+            ),
             "edit intersects a macro expansion",
         )
 
@@ -358,14 +361,183 @@ def plan(unit, args, i):
 SIGNATURE = {"add-param", "swap-param", "remove-param", "change-param-type"}
 
 
-def validate(before, after, edits):
+def storage_rules(storage):
+    """Derive growth, copy-out and teardown edits from a column-to-field map."""
+    keys = {"columns", "count", "capacity", "items", "index", "growth_sites", "initial_capacity"}
+    require(
+        isinstance(storage, dict) and set(storage) in (keys, keys | {"index_type"}),
+        "invalid storage description",
+    )
+
+    def name(value):
+        require(isinstance(value, str) and IDENT.fullmatch(value.encode()), "expected identifier")
+        return value
+
+    count, capacity, index = (name(storage[k]) for k in ("count", "capacity", "index"))
+    initial, items, columns = (storage[k] for k in ("initial_capacity", "items", "columns"))
+    require(
+        type(initial) is int and initial > 0 and isinstance(items, str) and items,
+        "invalid record storage",
+    )
+    require(isinstance(columns, list) and len(columns) > 1, "expected parallel columns")
+    grow = [
+        f"if ( @{count} == @{capacity} ) {{ @{capacity} = @{capacity} ? @{capacity} * 2 : {initial} ;"
+    ]
+    copy = [f"if ( @{count} ) {{"]
+    index_type = name(storage.get("index_type", "uint32_t"))
+    loop = [f"for ({index_type} {index} = 0; {index} < {count}; {index}++) {{"]
+    release = []
+    for column in columns:
+        require(
+            isinstance(column, dict) and set(column) == {"array", "type", "field", "output"},
+            "invalid column",
+        )
+        array, field = name(column["array"]), name(column["field"])
+        typ, dest = column["type"], column["output"]
+        require(
+            isinstance(typ, str) and isinstance(dest, str) and typ and dest,
+            "invalid type or output",
+        )
+        grow.append(
+            f"@{array} = ( {typ} * ) realloc ( @{array} , @{capacity} * sizeof * @{array} ) ;"
+        )
+        copy.append(f"memcpy ( {dest} , @{array} , @{count} * sizeof ( {typ} ) ) ;")
+        # Keep the destination a single lvalue when adding the subscript.
+        require(
+            re.fullmatch(r"[A-Za-z_]\w*(?: (?:->|\.) [A-Za-z_]\w*)*", dest, re.ASCII),
+            "output must be a token-spaced variable or member path",
+        )
+        loop.append(f"    {''.join(dest.split())}[{index}] = {items}[{index}].{field};")
+        release.append(f"free ( @{array} ) ;")
+    return [
+        {"match": " ".join([*grow, "}"]), "replace": "", "count": storage["growth_sites"]},
+        {"match": " ".join([*copy, "}"]), "replace": "\n".join([*loop, "}"])},
+        {"match": " ".join(release), "replace": ""},
+    ]
+
+
+def recipe_scope(unit, within):
+    words = unit.words
+    header = within.encode().split()
+    require(header and header[-1] == b"{", "within must end at the opening brace")
+    starts = [
+        i for i, w in enumerate(words) if w == header[0] and words[i : i + len(header)] == header
+    ]
+    require(len(starts) == 1, "expected one matching scope")
+    first = starts[0] + len(header)
+    depth = 1
+    for last in range(first, len(words)):
+        depth += (words[last] == b"{") - (words[last] == b"}")
+        if not depth:
+            break
+    require(depth == 0, "unbalanced scope")
+    locals_by_name = collections.defaultdict(set)
+    for pos, kind in unit.decls.items():
+        i = unit.index[pos]
+        if kind in (b"P", b"V") and starts[0] <= i < last:
+            locals_by_name[words[i]].add(pos)
+
+    return first, last, locals_by_name
+
+
+def recipe_rule(unit, rule, scope_info):
+    first, last, locals_by_name = scope_info
+    words = unit.words
+    require(
+        isinstance(rule, dict)
+        and set(rule) <= {"match", "replace", "before", "after", "count", "scope"},
+        "invalid recipe rule",
+    )
+    actions = set(rule) & {"replace", "before", "after"}
+    require(
+        len(actions) == 1 and isinstance(rule.get("match"), str),
+        "rule needs match and one action",
+    )
+    action = actions.pop()
+    pattern = rule["match"].encode().split()
+    require(pattern and isinstance(rule[action], str), "invalid pattern or replacement")
+    literals = []
+    targets = []
+    for j, token in enumerate(pattern):
+        if token.startswith(b"@"):
+            token = token[1:]
+            possible = locals_by_name[token]
+            require(len(possible) == 1, "ambiguous or missing local: " + token.decode())
+            targets.append((j, possible))
+        literals.append(token)
+    scope = rule.get("scope", "body")
+    require(scope in ("body", "file"), "unknown rule scope")
+    begin, end = (first, last) if scope == "body" else (0, len(words))
+    matches = []
+    for i in range(begin, end - len(pattern) + 1):
+        if words[i] != literals[0] or words[i : i + len(pattern)] != literals:
+            continue
+        if all(unit.bindings.get(unit.starts[i + j]) == t for j, t in targets):
+            matches.append(unit.span(i, i + len(pattern) - 1))
+    expected = rule.get("count", 1)
+    require(
+        type(expected) is int and expected > 0 and len(matches) == expected,
+        f"{rule['match']}: expected {expected} matches, found {len(matches)}",
+    )
+    return [recipe_replacement(unit, lo, hi, action, rule[action]) for lo, hi in matches]
+
+
+def recipe_replacement(unit, lo, hi, action, text):
+    if action == "before":
+        hi = lo
+    elif action == "after":
+        lo = hi
+    replacement = text.encode()
+    line = unit.data.rfind(b"\n", 0, lo) + 1
+    indent = unit.data[line:lo]
+    if indent.strip():
+        indent = b""
+    if not replacement and action == "replace":
+        eol = unit.data.find(b"\n", hi)
+        if eol >= 0 and not unit.data[line:lo].strip() and not unit.data[hi:eol].strip():
+            lo, hi = line, eol + 1
+    else:
+        replacement = replacement.replace(b"\n", b"\n" + indent)
+    require(
+        b"/*" not in unit.data[lo:hi] and b"//" not in unit.data[lo:hi],
+        "rule would discard a comment",
+    )
+    return lo, hi, replacement
+
+
+def recipe_edits(unit, path):
+    """Plan every rule against the same immutable, frontend-tokenized source."""
+    try:
+        import tomllib
+    except ImportError as exc:
+        raise Refusal("recipes require Python 3.11 or later") from exc
+
+    with path.open("rb") as stream:
+        spec = tomllib.load(stream)
+    require(
+        set(spec) in ({"within", "rule"}, {"within", "rule", "storage"})
+        and isinstance(spec["within"], str)
+        and isinstance(spec["rule"], list),
+        "recipe needs within and rule",
+    )
+    rules = spec["rule"]
+    if "storage" in spec:
+        rules = [*rules, *storage_rules(spec["storage"])]
+    scope_info = recipe_scope(unit, spec["within"])
+    edits = [edit for rule in rules for edit in recipe_rule(unit, rule, scope_info)]
+    require(len({lo for lo, _, _ in edits}) == len(edits), "rules share an edit start")
+    require(edits, "empty recipe")
+    return edits
+
+
+def validate(before, after, edits, *, whole_macros=False):
     """Check preserved occurrences against their declaration after each edit."""
     regions = []
     delta = 0
     for lo, hi, replacement in sorted(edits):
         start = lo + delta
         end = start + len(replacement)
-        after.check_range(start, end)
+        after.check_range(start, end, whole_macros=whole_macros)
         regions.append((lo, hi, start, end))
         delta = end - hi
 
@@ -390,6 +562,7 @@ def validate(before, after, edits):
         for target in targets:
             mapped = forward(target)
             if mapped is None:
+                require(target in before.index, "cannot locate rewritten binding")
                 key = before.decls.get(target), before.words[before.index[target]]
                 candidates = rewritten[key]
                 require(len(candidates) == 1, "cannot track declaration through edit")
@@ -417,6 +590,9 @@ def main():
         "change-param-type": ["param", "type"],
         "extract": ["end", "name"],
     }
+    recipe = commands.add_parser("recipe", help="apply a scoped token rewrite recipe")
+    recipe.add_argument("file", type=Path)
+    recipe.add_argument("recipe", type=Path)
     for op, params in specs.items():
         command = commands.add_parser(op)
         command.add_argument("file", type=Path)
@@ -430,22 +606,23 @@ def main():
     path = args.file.resolve()
     data = path.read_bytes()
     unit = Unit(path, data, flags)
-    i = unit.position(args.location)
+    is_recipe = args.op == "recipe"
+    i = None if is_recipe else unit.position(args.location)
     if args.op == "refs":
         for k in unit.occurrences(unit.target(i)):
             pos = unit.starts[k]
             line = bisect.bisect_right(unit.lines, pos)
             print(f"{args.file}:{line}:{pos - unit.lines[line - 1] + 1}")
         return
-    edits = plan(unit, args, i)
+    edits = recipe_edits(unit, args.recipe) if is_recipe else plan(unit, args, i)
     for lo, hi, _ in edits:
-        unit.check_range(lo, hi)
+        unit.check_range(lo, hi, whole_macros=is_recipe)
     updated = apply(data, edits)
     with tempfile.NamedTemporaryFile() as overlay:
         overlay.write(updated)
         overlay.flush()
         after = Unit(path, updated, flags, overlay.name)
-    validate(unit, after, edits)
+    validate(unit, after, edits, whole_macros=is_recipe)
     if args.op == "rename":
 
         def bindings(u):

@@ -50,3 +50,52 @@ compiler options, and verifies retained bindings before emitting the patch.
 Extend frontend hooks when an operation needs semantic information that the
 query stream does not yet contain. Run `python3 bench/vref-test.py` to check
 both languages, including applying, compiling and executing the resulting edits.
+
+## Storage migrations with recipes
+
+`vref recipe FILE RECIPE.toml -- FLAGS` plans several edits against the same
+source snapshot and validates the complete result in one frontend invocation
+after the initial query. This lets a declaration, its writers and its consumers
+change together. Recipe parsing uses Python 3.11 or later.
+
+A recipe selects one function with `within`, a sequence of physical lexer
+tokens ending in the opening brace. Write one token per space in match
+patterns. An `@name` matches a declaration or use with the frontend binding
+of that unique local or parameter in the selected scope. Other tokens match
+their spelling. Each rule requests `replace`, `before`, or `after`, and an
+exact match count (one by default). Use `scope = "file"` for an include or a
+declaration outside the function. A replacement containing newlines inherits
+the matched line's indentation. Recipes can supply complete macro invocations
+as source. Edits cutting through an expansion or discarding a comment fail.
+
+The optional `[storage]` operation describes parallel arrays by their local
+names, element types, record fields, and existing output destinations. From
+that table vref derives the patterns for the doubling/realloc blocks, guarded
+memcpy sequence, and frees. It removes those growth and release sites and
+generates a loop that copies record fields to the existing outputs. The recipe
+supplies the new allocation policy, record declaration and append expressions.
+Other allocation idioms need their own rules. See
+[pair-columns.toml](../src/test/vref/pair-columns.toml) for a two-column example.
+
+### Replay of the C++ parameter-list migration
+
+Use the vref binary and [parameter-list recipe](../src/test/vref/parameter-list.toml)
+from the tool checkout. Run from a separate checkout of `2df8ed5a`. On the
+x86-64 Linux development host the implementation parses in its C bootstrap
+dialect with these flags:
+
+```sh
+VREF_TREE=/path/to/vref-checkout
+file=src/frontend/cxx/declaration/declarator.cpp
+"$VREF_TREE/build/linux/src/vref" recipe "$file" \
+    "$VREF_TREE/src/test/vref/parameter-list.toml" -- \
+    -x c -std=gnu11 -Isrc/include --target=x86_64-linux-gnu \
+    -isystem /usr/lib/llvm-23/lib/clang/23/include \
+    -isystem /usr/include/x86_64-linux-gnu -isystem /usr/include > migration.patch &&
+git apply migration.patch &&
+test "$(git hash-object "$file")" = c73d49c71519ca57f515d558c17344709b46ecee
+```
+
+The expected blob is the reviewed parser implementation in PR #297. The
+recipe runs from the original source and compiler flags alone. The regression
+test and benchmark notes in that PR are separate from the storage edit.
