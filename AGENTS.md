@@ -69,6 +69,10 @@ relative to it); `TODO.md` stays at the top.
   `src/frontend/cxx/` (module `cxx_SRC`; the driver calls `cxx_run` for a
   C++ job; `VCC_CXX_PROGRESS=1` prints how many tokens it parsed);
   `bench/cxx-parse-tests.py` runs its cases in `src/test/cxx/parse`;
+  `bench/cxx-llvm.py [-j 6] [--std c++98] [PAT]` builds llvm-test-suite's
+  C++ programs (`bench/fetch-testsuites.sh llvm-test-suite`) with vcc, links
+  and runs them against clang++'s build (cached in `work/cxx-llvm-ref`; ~15 s
+  warm); `VCC_CXX_GEN=4` lists each function left without code and why;
   `bench/cxx-layout.py` has clang++ check every class layout it builds on json
   (`VCC_CXX_LAYOUT=FILE` writes them as static_asserts).
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree

@@ -2,9 +2,31 @@
 #include "codegen.h"
 
 /* T(args), T{args}: a temporary of class type, constructed (cxx_ctor_use was called for it) */
+static void cxx_gen_construct_temp1(cxx *c, ast_qualified_type t,
+                                    const uint32_t *args, uint32_t nargs,
+                                    uint32_t loc);
+
+/* (a temporary whose construction needs another of its kind for an argument, and so on: a constructor
+   chosen through a conversion vcc got wrong; past 64, not built rather than a stack overflow) */
+static __thread uint32_t cxx_gen_temp_depth;
+
 VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
                                   const uint32_t *args, uint32_t nargs,
                                   uint32_t loc)
+{
+    if (cxx_gen_temp_depth > 64) {
+        c->enode = 0;
+        cxx_gen_fail(c);
+        return;
+    }
+    cxx_gen_temp_depth++;
+    cxx_gen_construct_temp1(c, t, args, nargs, loc);
+    cxx_gen_temp_depth--;
+}
+
+static void cxx_gen_construct_temp1(cxx *c, ast_qualified_type t,
+                                    const uint32_t *args, uint32_t nargs,
+                                    uint32_t loc)
 {
     cc *a = c->ast;
     cxx_entity *picked = c->ctor_picked;
@@ -20,8 +42,15 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
         !cxx_gen_class_ok2(c, t, true))
         return;
     for (uint32_t i = 0; i < nargs; i++)
-        if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]))
-            return; /* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it) */
+        if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]) &&
+            !(i < CXX_MAX_ARGS && c->gen_call_brace[i]))
+            return; /* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it;
+                       T({...}): a constructor's braced argument, a temporary of its parameter's class) */
+    uint32_t call_brace[CXX_MAX_ARGS];
+
+    memcpy(
+        call_brace, c->gen_call_brace,
+        sizeof call_brace); /* (the temporary's destructor, made now, may make calls of its own) */
     if (nargs == 1 && args[0] && cxx_gen_prv_find(c, args[0]) &&
         AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == t) {
         c->enode = args[0]; /* T(a prvalue of T): that object */
@@ -47,6 +76,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
     }
     c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
     c->gen_agg_brace = agg_brace;
+    memcpy(c->gen_call_brace, call_brace, sizeof call_brace);
     cc_id_list_init(&l);
     if (!nargs &&
         (!(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) ||
@@ -218,7 +248,12 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, ast_qualified_type pt,
     c->none_viable = none_viable;
     c->etype = etype, c->elval = elval, c->econst = econst, c->evalue = evalue,
     c->einvalid = einvalid;
+    c->gen_cond_ok =
+        1; /* (an argument in an operand that may not run, a && f(lambda): a flagged temporary) */
     tmp = cxx_gen_class_temp(c, t, loc);
+    uint32_t live = c->gen_cond_live;
+
+    c->gen_cond_live = 0;
     if (!tmp)
         return 0;
     c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
@@ -228,6 +263,16 @@ VPRIV uint32_t cxx_gen_class_argument(cxx *c, uint32_t x, ast_qualified_type pt,
         cxx_gen_fail(c);
         return 0;
     }
+    if (live) /* (built: its cleanup destroys it now) */
+        cc_id_list_append(
+            a, &l,
+            cc_statement_new(
+                a, AST_NODE_EXPRESSION, loc,
+                cc_assignment_build(
+                    a, 0, cxx_gen_var_node(c, live, loc),
+                    cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc),
+                    loc),
+                0, 0));
     return cxx_gen_chain(
         c, &l, cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc), loc);
 }
@@ -246,6 +291,27 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to,
     char nm[64] = {0};
     uint32_t saved = c->enode, n;
 
+    if (x && cc_type_is_record(a, AST_NODE_AT(a, x)->ty) &&
+        AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_ARRAY &&
+        !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) &&
+        cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) == 1 && c->gen_block) {
+        /* a prvalue of a trivially copyable class (a <=> b's std::strong_ordering): held in a temporary,
+           its conversion function called on that */
+        ast_qualified_type xt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
+        uint32_t tmp = cxx_gen_temporary(c, xt, loc);
+
+        if (!tmp)
+            return 0;
+        x = cc_dereference_build(
+            a,
+            cc_node_new_operands(
+                a, AST_NODE_COMMA, cc_type_pointer(a, xt), loc,
+                cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), x,
+                                    loc),
+                cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc)),
+            loc);
+    }
     if (!x || !cc_type_is_record(a, AST_NODE_AT(a, x)->ty) ||
         AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_ARRAY ||
         !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) ||
@@ -255,6 +321,65 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to,
     snprintf(nm, 32, "operator #%u",
              (unsigned)AST_QUALIFIED_TYPE_UNQUALIFIED(to));
     f = cxx_lookup_in(c, cls, vintern_cstr(nm), 0);
+    if (!f && cc_type_is_arithmetic(a, to) && !cls->conv_unknown &&
+        !cls->nused) {
+        /* none to that type: the one conversion function to an arithmetic type, then a standard conversion
+		   (fpos's operator streamoff() for an off_t; [over.match.conv]) */
+        ast_qualified_type via = CXX_TY_UNKNOWN;
+        uint32_t n1 = 0;
+
+        for (uint32_t i = 0; i < cls->nconv; i++)
+            if (cc_type_is_arithmetic(a, cls->conv_types[i]) &&
+                AST_TYPE_KIND(a, cls->conv_types[i]) != AST_TYPE_POINTER)
+                via = AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]), n1++;
+        if (n1 == 1 && via != AST_QUALIFIED_TYPE_UNQUALIFIED(to)) {
+            uint32_t v = cxx_gen_convert_class(c, x, via, loc);
+
+            return v ? cc_conversion_apply(a, cc_node_rvalue(a, v),
+                                           AST_QUALIFIED_TYPE_UNQUALIFIED(to))
+                     : 0;
+        }
+    }
+    if (!f && cls->has_conversion) {
+        /* a conversion function template (json's template <typename ValueType> operator ValueType() const):
+           its instance for the target type, T deduced as it ([temp.deduct.conv]: here, the pattern a bare
+           T, given as the explicit argument), when its return type is that */
+        for (uint32_t i = 0; i < cls->nslots && !f; i++)
+            for (cxx_entity *e = cls->slots[i]; e && !f; e = e->next) {
+                const vident *v = &vintern_ents[e->name];
+                cxx_targ xa =
+                    VCC_LITERAL(cxx_targ, .kind = 1,
+                                .t = AST_QUALIFIED_TYPE_UNQUALIFIED(to));
+                ast_qualified_type r = CXX_TY_UNKNOWN;
+                cxx_entity *ci = c->call_instance;
+
+                if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || v->len != 11 ||
+                    memcmp(v->s, "operator #t", 11))
+                    continue;
+                c->call_instance = NULL;
+                int dd =
+                    cxx_ftemplate_deduce(c, e, &xa, 1, NULL, NULL, 0, &r, true);
+
+                if (dd == 1 && c->call_instance &&
+                    c->call_instance->inst_ftmpl == e->ftmpl &&
+                    c->call_instance->ty == CXX_TY_UNKNOWN)
+                    /* (the pattern's return type, T, not known as one: the instance's type is T's, () ) */
+                    c->call_instance->ty = cxx_type_function(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(to), NULL, 0, false);
+                if (dd == 1 && c->call_instance &&
+                    c->call_instance->inst_ftmpl == e->ftmpl &&
+                    c->call_instance->ty != CXX_TY_UNKNOWN &&
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(
+                        AST_TYPE(a, c->call_instance->ty)->base) ==
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(to))
+                    f = c->call_instance;
+                c->call_instance = ci;
+                if (f && !f->sym)
+                    cxx_member_body_use(
+                        c,
+                        f); /* (its body: instantiated for code, as a call's) */
+            }
+    }
     if (f && f->next) {
         /* overloads that differ in cv (operator T() const and const volatile: std::atomic): the one with
 		   the fewest qualifiers the object's binds to */
@@ -338,6 +463,10 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to,
 
     if (!x)
         return 0;
+    if (cxx_memptr_of(c, to))
+        return cxx_gen_memptr_convert(
+            c, x, to,
+            loc); /* (a pointer to member: null, a base's to a derived class's) */
     if (c->nullptr_ty &&
         AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_POINTER &&
         !AST_TYPE(a, AST_NODE_AT(a, x)->ty)->ext &&

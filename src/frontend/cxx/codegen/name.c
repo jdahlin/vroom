@@ -336,9 +336,11 @@ VPRIV bool cxx_gen_name(cxx *c, cxx_entity *f)
         a->syms[f->sym].depth =
             0; /* (made while a body is being built: a file-scope symbol all the same) */
     }
-    if (cxx_scope_in_unnamed_namespace(c, home) || internal_name) {
+    if (cxx_scope_in_unnamed_namespace(c, home) || internal_name ||
+        (f->fn_internal && !f->member_of && f->is_instance)) {
+        /* (an instance of a static function template too: local, not one linked once among TUs) */
         a->syms[f->sym].flags &=
-            ~AST_SYMBOL_FLAG_GLOBAL; /* (internal linkage, however the symbol was made) */
+            ~(AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_LINKONCE);
         a->syms[f->sym].sc = AST_STORAGE_STATIC;
     }
     memset(&at, 0, sizeof at);

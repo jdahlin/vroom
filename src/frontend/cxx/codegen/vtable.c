@@ -82,7 +82,13 @@ VPRIV void cxx_vtable_init(cxx *c, cxx_scope *cls)
         if (!b->nvfuncs)
             continue;
         if (cls->nvfuncs) {
-            cls->vt_bad = 1; /* (a second vtable, with thunks: not built yet) */
+            /* another base with a vtable: a secondary vtable of the group, its slots the final overriders
+			   (this class's through this-adjusting thunks); one with secondary vtables of its own: not yet */
+            if (b->nvt_sec)
+                cls->vt_bad = 1;
+            cls->vt_sec = (struct cxx_scope **)realloc(
+                cls->vt_sec, (cls->nvt_sec + 1) * sizeof *cls->vt_sec);
+            cls->vt_sec[cls->nvt_sec++] = b;
             continue;
         }
         for (uint32_t k = 0; k < b->nvfuncs; k++)
@@ -159,9 +165,12 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
     if ((cls->vt_bad &&
          !(cls->is_extern_inst && cxx_gen_class_has_vbases(c, cls))) ||
         !cls->nvfuncs)
-        return false; /* (vt_bad: secondary vtables with thunks, not built here; an extern template's instance with
-				   virtual bases has the library's vtable group, and calls of its bases' virtual functions go
-				   through their subobjects' own vptrs) */
+        return false;
+    if (cls->nvt_sec && c->ast->o->target != PP_LINUX_X86_64)
+        return false; /* (secondary vtables' thunks: written in x86-64 assembly) */
+    /* (vt_bad: a vtable group not built here; an extern template's instance with virtual bases has the
+       library's vtable group, and calls of its bases' virtual functions go through their subobjects' own
+       vptrs) */
     if (cxx_class_vbases(c, cls->owner->ty, NULL, NULL, 0) &&
         !cls->is_extern_inst)
         return false; /* (vbase offsets, construction vtables and a VTT: not built here; an extern template's
@@ -201,6 +210,16 @@ VPRIV bool cxx_vtable_usable(cxx *c, cxx_scope *cls)
     return true;
 }
 
+/* the vtable group's size in words: the primary vtable (offset to top, type info, slots), then each secondary one */
+VPRIV uint32_t cxx_vtable_words(const cxx_scope *cls)
+{
+    uint32_t n = cls->nvfuncs + 2;
+
+    for (uint32_t i = 0; i < cls->nvt_sec; i++)
+        n += cls->vt_sec[i]->nvfuncs + 2;
+    return n;
+}
+
 /* the vtable's symbol (_ZTV...), declared; the TU's end defines it where it belongs here (0: not built) */
 VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
 {
@@ -217,7 +236,7 @@ VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
     s = cc_symbol_new(
         a, AST_SYMBOL_VARIABLE, cls->owner->name,
         cc_type_array(a, cc_type_pointer(a, cc_type_basic(AST_TYPE_VOID)),
-                      cls->nvfuncs + 2, 0),
+                      cxx_vtable_words(cls), 0),
         0);
     a->syms[s].flags |= AST_SYMBOL_FLAG_GLOBAL;
     a->syms[s].depth = 0;
@@ -261,8 +280,49 @@ VPRIV uint32_t cxx_gen_vptr_store_at(cxx *c, cxx_scope *cls, uint32_t self,
             a, self, vppp,
             cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, vppp, self)),
         loc);
-    return cc_statement_new(a, AST_NODE_EXPRESSION, loc,
-                            cc_assignment_build(a, 0, target, addr, loc), 0, 0);
+    if (!cls->nvt_sec)
+        return cc_statement_new(a, AST_NODE_EXPRESSION, loc,
+                                cc_assignment_build(a, 0, target, addr, loc), 0,
+                                0);
+    /* each secondary vtable's address in its base subobject's vptr ((char *)this + the base's offset) */
+    uint32_t at = cls->nvfuncs + 2,
+             all = cc_assignment_build(a, 0, target, addr, loc);
+    ast_qualified_type cp = cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR));
+    uint32_t self_c = cc_cast_insert(
+        a, cc_node_rvalue(a, self), cp,
+        cc_conversion_cast_kind(a, AST_NODE_AT(a, self)->ty, cp, self));
+
+    for (uint32_t i = 0; i < cls->nvt_sec; i++) {
+        cxx_scope *b = cls->vt_sec[i];
+        int64_t off;
+
+        if (!b->owner ||
+            !cxx_gen_base_offset(c, cls->owner->ty, b->owner->ty, &off))
+            return 0;
+        uint32_t bp = cc_binary_build(
+            a, LEX_TOKEN_PLUS, self_c,
+            cc_node_integer_new(a, off, cc_type_basic(AST_TYPE_LONG), loc),
+            loc);
+        uint32_t bt = cc_dereference_build(
+            a,
+            cc_cast_insert(a, bp, vppp,
+                           cc_conversion_cast_kind(a, cp, vppp, bp)),
+            loc);
+        uint32_t ba = cc_binary_build(
+            a, LEX_TOKEN_PLUS,
+            cc_conversion_decay(a, cxx_gen_var_node(c, vs, loc)),
+            cc_node_integer_new(a, at + 2, cc_type_basic(AST_TYPE_LONG), loc),
+            loc);
+
+        uint32_t set = cc_assignment_build(a, 0, bt, ba, loc);
+
+        all = cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, set)->ty,
+                                   loc, all, set);
+        at += b->nvfuncs + 2;
+    }
+    return cc_statement_new(
+        a, AST_NODE_EXPRESSION, loc, all, 0,
+        0); /* (one expression: a new-expression chains it) */
 }
 
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc)
@@ -753,6 +813,68 @@ VPRIV void cxx_gen_complete_object_aliases(cxx *c)
     }
 }
 
+/* a this-adjusting thunk to function symbol s: _ZThn<off>_<s's name>, this -= off then s (x86-64; in a
+   COMDAT group, as clang's; 0: not built) */
+static uint32_t cxx_gen_thunk(cxx *c, uint32_t s, int64_t off,
+                              bool complete_dtor)
+{
+    cc *a = c->ast;
+    const char *t = s ? cxx_gen_symbol_asm_name(c, s) : NULL;
+    char name[2100], text[4600];
+    attrs at;
+    uint32_t ts;
+
+    if (!t || strncmp(t, "_Z", 2) || a->o->target != PP_LINUX_X86_64 ||
+        off <= 0)
+        return 0;
+    snprintf(name, sizeof name, "_ZThn%lld_%s", (long long)off, t + 2);
+    if (complete_dtor) {
+        /* (a complete-object destructor's thunk is named for D1, as clang's, whatever symbol it jumps to) */
+        char *d2 = strstr(name, "D2E");
+
+        if (d2)
+            d2[1] = '1';
+    }
+    if ((ts = cxx_gen_symbol_named(c, name, 0)))
+        return ts;
+    snprintf(text, sizeof text,
+             "\t.section\t.text.%s,\"axG\",@progbits,%s,comdat\n\t.weak\t%"
+             "s\n\t.type\t%s,@function\n%s:\n"
+             "\t.cfi_startproc\n\tsubq\t$%lld, "
+             "%%rdi\n\tjmp\t%s\n\t.cfi_endproc\n\t.size\t%s, .-%s\n\t.text",
+             name, name, name, name, name, (long long)off, t, name, name);
+    cxx_gen_file_asm(c, text);
+    ts = cc_symbol_new(a, AST_SYMBOL_FUNCTION, vintern_cstr("__vcc_thunk"),
+                       a->syms[s].ty, 0);
+    a->syms[ts].flags |= AST_SYMBOL_FLAG_GLOBAL;
+    a->syms[ts].depth = 0;
+    a->syms[ts].sc = AST_STORAGE_EXTERN;
+    memset(&at, 0, sizeof at);
+    at.asmname = cxx_gen_text(c, name) + 1;
+    cc_attribute_apply_symbol(a, &a->syms[ts], &at);
+    cxx_gen_symbol_named(c, a->strs[at.asmname - 1].s, ts);
+    /* (the target is called from assembly: kept) */
+    memset(&at, 0, sizeof at);
+    at.used = 1;
+    cc_attribute_apply_symbol(a, &a->syms[s], &at);
+    return ts;
+}
+
+/* a vtable slot's function symbol for e (a destructor: its complete-object one first, then the deleting one;
+   dtor_k says which), or the pure virtual handler; 0: not built */
+static uint32_t cxx_gen_vt_slot(cxx *c, cxx_entity *e, uint32_t dtor_k)
+{
+    if (e->fn_pure) {
+        if (!c->gen_pure_sym)
+            c->gen_pure_sym =
+                cxx_gen_runtime_symbol(c, "__cxa_pure_virtual", false);
+        return c->gen_pure_sym;
+    }
+    if (e->fn_deleted || !cxx_gen_name(c, e))
+        return 0;
+    return cxx_vt_is_dtor(e) ? (dtor_k ? e->sym0 : e->sym1) : e->sym;
+}
+
 VPRIV void cxx_gen_vtables_emit(cxx *c)
 {
     cc *a = c->ast;
@@ -813,6 +935,71 @@ VPRIV void cxx_gen_vtables_emit(cxx *c)
                 cc_cast_insert(a, val, vp,
                                cc_conversion_cast_kind(
                                    a, AST_NODE_AT(a, val)->ty, vp, val)));
+        }
+        /* the secondary vtables: -offset to top, the type info, the base's slots with their final overriders
+		   (this class's own through a thunk that moves this back to the whole object) */
+        for (uint32_t si = 0, at = cls->nvfuncs + 2; si < cls->nvt_sec && ok;
+             si++) {
+            cxx_scope *b = cls->vt_sec[si];
+            int64_t off;
+            uint32_t bdtor = 0;
+
+            if (!b->owner ||
+                !cxx_gen_base_offset(c, cls->owner->ty, b->owner->ty, &off)) {
+                ok = false;
+                break;
+            }
+            for (uint32_t k = 0; k < b->nvfuncs + 2 && ok; k++) {
+                uint32_t val, s = 0;
+
+                if (k == 0)
+                    val = cc_cast_insert(
+                        a,
+                        cc_node_integer_new(a, -off,
+                                            cc_type_basic(AST_TYPE_LONG), 0),
+                        vp, AST_CAST_INTEGER_TO_POINTER);
+                else if (k == 1)
+                    val = (s = cls->owner ? cxx_gen_typeinfo(c, cls->owner->ty)
+                                          : 0)
+                              ? cxx_gen_data_address(c, s, 0)
+                              : cc_node_integer_new(
+                                    a, 0, cc_type_basic(AST_TYPE_LONG), 0);
+                else {
+                    cxx_entity *bf = b->vfuncs[k - 2], *ov = NULL;
+                    uint32_t dk = cxx_vt_is_dtor(bf) ? bdtor++ : 0;
+
+                    for (uint32_t m = 0; m < cls->nvown && !ov; m++)
+                        if (cxx_vt_same(c, cls->vown[m], bf))
+                            ov = cls->vown[m];
+                    if (!ov && cxx_vt_is_dtor(bf))
+                        for (uint32_t m = 0; m < cls->nvfuncs && !ov; m++)
+                            if (cxx_vt_is_dtor(cls->vfuncs[m]) &&
+                                cls->vfuncs[m]->member_of == cls)
+                                ov =
+                                    cls->vfuncs
+                                        [m]; /* (an implicit destructor of this class) */
+                    if (ov && !ov->fn_pure) {
+                        s = cxx_gen_vt_slot(c, ov, dk);
+                        s = s ? cxx_gen_thunk(c, s, off,
+                                              cxx_vt_is_dtor(ov) && !dk)
+                              : 0;
+                    } else
+                        s = cxx_gen_vt_slot(c, ov ? ov : bf, dk);
+                    if (!s) {
+                        ok = false;
+                        break;
+                    }
+                    val = cxx_gen_function_node(c, s, 0);
+                }
+                cc_id_list_append(a, &v, at + k);
+                cc_id_list_append(a, &v, at + k);
+                cc_id_list_append(
+                    a, &v,
+                    cc_cast_insert(a, val, vp,
+                                   cc_conversion_cast_kind(
+                                       a, AST_NODE_AT(a, val)->ty, vp, val)));
+            }
+            at += b->nvfuncs + 2;
         }
         if (!ok)
             continue;

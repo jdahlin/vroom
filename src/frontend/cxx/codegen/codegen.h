@@ -71,6 +71,9 @@ VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args,
 
 /* construct.c */
 VPRIV bool cxx_gen_needs_construction(cxx *c, ast_qualified_type t, int depth);
+VPRIV bool cxx_gen_assign_parts(cxx *c, uint32_t target, ast_qualified_type t,
+                                uint32_t src, bool move, cc_id_list *out,
+                                uint32_t loc, int depth);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
 VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t);
@@ -187,7 +190,8 @@ VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc);
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc);
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV bool cxx_gen_global_finish(cxx *c, bool keep);
 VPRIV void cxx_gen_global_zeroed(cxx *c, const cxx_entity *v);
@@ -309,6 +313,8 @@ VPRIV uint32_t cxx_gen_vtt_for_base(cxx *c, cxx_scope *cls,
 VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f);
 VPRIV uint32_t cxx_gen_function_node(cxx *c, uint32_t s, uint32_t loc);
 VPRIV uint32_t cxx_gen_vptr_store(cxx *c, cxx_scope *cls, uint32_t loc);
+VPRIV uint32_t cxx_vtable_words(const cxx_scope *cls);
+VPRIV void cxx_gen_eh_ready(cxx *c);
 VPRIV bool cxx_gen_default_construct(cxx *c, uint32_t target,
                                      ast_qualified_type t, cc_id_list *out,
                                      uint32_t loc, int depth);

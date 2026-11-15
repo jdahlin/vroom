@@ -35,9 +35,11 @@
 #undef walk_call_can_inline
 #undef walk_call_emit
 #undef walk_call_inline
+#undef walk_call_slot_argument
 #undef walk_case_label_get
 #undef walk_cases_collect
 #undef walk_cast_emit
+#undef walk_cleanup_call
 #undef walk_cleanups_run
 #undef walk_comparison_fold
 #undef walk_comparison_value
@@ -64,6 +66,7 @@
 #undef walk_global_constant_value
 #undef walk_goto_emit
 #undef walk_increment_emit
+#undef walk_increment_emit_kept
 #undef walk_increment_value
 #undef walk_initializer_elements_store
 #undef walk_initializer_emit

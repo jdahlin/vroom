@@ -74,6 +74,10 @@ struct cc {
     struct cc_type_name *
         tyb; /* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
     unsigned tyk;
+    uint32_t
+        eh_resume_sym; /* C++ with exceptions: _Unwind_Resume, what a landing pad ends with (0: none yet) */
+    uint32_t eh_begin_catch_sym,
+        eh_terminate_sym; /* ... __cxa_begin_catch, std::terminate: a cleanup that throws terminates */
     jmp_buf bail;
     int errors;
     struct cc_recovery_point *

@@ -258,6 +258,8 @@ static codegen_value walk_pointer_add_vla(codegen_context *e, codegen_value p,
                                           ast_qualified_type pt, bool sub);
 static codegen_value walk_atomic_read_modify_write(codegen_context *e,
                                                    uint32_t n);
+static codegen_value walk_increment_emit_kept(codegen_context *e, uint32_t n,
+                                              codegen_lvalue *kept);
 VPRIV codegen_value walk_lvalue_reload(codegen_context *e,
                                        const codegen_lvalue *l,
                                        ast_qualified_type t);
@@ -599,6 +601,23 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
         walk_value_free(e, &v);
         return walk_lvalue_emit(e, x->b);
     }
+    case AST_NODE_PRE_INCREMENT:
+    case AST_NODE_PRE_DECREMENT:
+        /* ++x, --x as an lvalue (C++: f(--it) with a reference parameter): x, after the update */
+        if (!walk_type_is_in_memory(e, N(x->a)->ty) &&
+            !(T(c, N(x->a)->ty)->flags & AST_TYPE_FLAG_ATOMIC)) {
+            codegen_lvalue kl;
+            codegen_value v;
+
+            memset(&kl, 0, sizeof kl);
+            kl.offset = INT64_MIN; /* (not kept: left so) */
+            v = walk_increment_emit_kept(e, n, &kl);
+            if (kl.offset != INT64_MIN)
+                return kl;
+            walk_value_free(e, &v);
+            walk_unsupported_fail(e, n, "this lvalue");
+        }
+        break;
     case AST_NODE_COMPOUND_LITERAL: {
         /* (T){ ... }: an unnamed object (b), initialized where it is reached */
         uint32_t s = x->b;
@@ -2522,6 +2541,14 @@ static codegen_value walk_atomic_read_modify_write(codegen_context *e,
 /* ++x, x++, --x, x-- */
 static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 {
+    return walk_increment_emit_kept(e, n, NULL);
+}
+
+/* ++x, --x (and x++, x--); kept: for ++x and --x of a scalar in a register, x's lvalue, kept for the caller
+   (C++: ++x is x, an lvalue; 0 kind when it is not kept), the value none */
+static codegen_value walk_increment_emit_kept(codegen_context *e, uint32_t n,
+                                              codegen_lvalue *kept)
+{
     cc *c = e->compile_context;
     const node *x = N(n);
     ast_qualified_type t = N(x->a)->ty;
@@ -2577,6 +2604,11 @@ static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
     }
     r = walk_value_to_register(e, &nv);
     walk_lvalue_store_register(e, &l, t, r);
+    if (kept && !post && !l.is_bitfield) {
+        WALK_LOWER(tfree)(e, r);
+        *kept = l;
+        return codegen_value_constant(0);
+    }
     if (l.is_bitfield && !post) {
         WALK_LOWER(tfree)(e, r);
         nv = walk_bitfield_load(e, &l, t);
@@ -3773,8 +3805,23 @@ static int walk_builtin_constant_p(codegen_context *e, uint32_t arg)
          (cv.kind == CC_VALUE_ADDRESS && cv.str && cv.i == 0 && !cv.sym &&
           !cv.label)))
         return 1;
-    return !codegen_expression_has_side_effects(c, arg) &&
-           walk_expression_is_constant(e, arg);
+    if (codegen_expression_has_side_effects(c, arg))
+        return 0;
+    {
+        /* a local whose initializer generated to a constant (float a = move(1)), through conversions */
+        uint32_t r = arg;
+
+        while (N(r)->op == AST_NODE_CAST && N(r)->aux != AST_CAST_ARRAY_DECAY &&
+               N(r)->aux != AST_CAST_FUNCTION_DECAY &&
+               N(r)->aux != AST_CAST_VECTOR_ADDRESS)
+            r = N(r)->a;
+        if (N(r)->op == AST_NODE_VARIABLE &&
+            e->walk_state->constant_p_generations[N(r)->a] ==
+                e->walk_state->generation &&
+            e->walk_state->generation)
+            return 1;
+    }
+    return walk_expression_is_constant(e, arg);
 }
 
 static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)

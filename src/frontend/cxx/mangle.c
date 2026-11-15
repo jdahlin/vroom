@@ -1919,6 +1919,12 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
     case AST_TYPE_UINT128:
         mg_str(m, "o");
         return;
+    case AST_TYPE_FLOAT16:
+        mg_str(m, x->ext ? "Dh" : "DF16_");
+        return;
+    case AST_TYPE_BFLOAT16:
+        mg_str(m, PP_IS_X86_64(a->o->target) ? "DF16b" : "u6__bf16");
+        return;
     case AST_TYPE_FLOAT:
         mg_str(m, "f");
         return;
@@ -1957,14 +1963,67 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 
         if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
             return;
-        mg_text(m, num,
-                (size_t)snprintf(num, sizeof num, "A%u_", (unsigned)x->n));
+        mg_str(m, "A");
+        if (x->flags & AST_TYPE_FLAG_INCOMPLETE) {
+            if (x->ext == 1)
+                mg_str(m, "T_");
+            else if (x->ext)
+                mg_text(m, num,
+                        (size_t)snprintf(num, sizeof num, "T%u_",
+                                         (unsigned)x->ext - 2));
+        } else if (x->flags & AST_TYPE_FLAG_VLA) {
+            m->bad = true;
+            return;
+        } else
+            mg_text(m, num,
+                    (size_t)snprintf(
+                        num, sizeof num, "%llu",
+                        (unsigned long long)cc_type_array_length(a, t)));
+        mg_str(m, "_");
         mg_type(m, x->base);
         mg_remember(m, CXX_SUB_TYPE, NULL, t);
         return;
     }
     case AST_TYPE_STRUCT:
     case AST_TYPE_UNION:
+        if (x->kind == AST_TYPE_STRUCT &&
+            (a->tags[x->aux].flags & AST_RECORD_FLAG_MEMBER_POINTER)) {
+            /* M <class> <member type>: a member function's cv on its function type (M1BKFvvE) */
+            const cxx_memptr *mp = cxx_memptr_of(m->c, t);
+
+            if (!mp) {
+                m->bad = true;
+                return;
+            }
+            if (mg_substitution(m, CXX_SUB_TYPE, NULL,
+                                AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
+                return;
+            mg_str(m, "M");
+            mg_type(m, mp->cls);
+            if (mp->fn && mp->quals) {
+                mg_str(m, mp->quals & 2 ? (mp->quals & 1 ? "VK" : "V") : "K");
+                mg_type(
+                    m,
+                    mp->mem); /* (K F...E: not itself a candidate apart from the function type, as clang's) */
+            } else
+                mg_type(m, mp->mem);
+            mg_remember(m, CXX_SUB_TYPE, NULL,
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+            return;
+        }
+        if (x->kind == AST_TYPE_STRUCT &&
+            (a->tags[x->aux].flags & AST_RECORD_FLAG_COMPLEX) &&
+            a->tags[x->aux].nfield) {
+            /* _Complex T: C <T>, a substitution candidate */
+            if (mg_substitution(m, CXX_SUB_TYPE, NULL,
+                                AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
+                return;
+            mg_str(m, "C");
+            mg_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(a->tags[x->aux].f[0].ty));
+            mg_remember(m, CXX_SUB_TYPE, NULL,
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+            return;
+        }
         mg_class_type(m, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
         return;
     case AST_TYPE_ENUM: {
@@ -2016,19 +2075,20 @@ static const char *mg_operator(const vident *v, uint32_t nparams, bool member)
     static const struct {
         const char *spelling, *unary, *binary;
     } ops[] = {
-        {"+", "ps", "pl"},   {"-", "ng", "mi"},  {"*", "de", "ml"},
-        {"&", "ad", "an"},   {"/", NULL, "dv"},  {"%", NULL, "rm"},
-        {"|", NULL, "or"},   {"^", NULL, "eo"},  {"~", "co", NULL},
-        {"!", "nt", NULL},   {"=", NULL, "aS"},  {"<", NULL, "lt"},
-        {">", NULL, "gt"},   {"+=", NULL, "pL"}, {"-=", NULL, "mI"},
-        {"*=", NULL, "mL"},  {"/=", NULL, "dV"}, {"%=", NULL, "rM"},
-        {"&=", NULL, "aN"},  {"|=", NULL, "oR"}, {"^=", NULL, "eO"},
-        {"<<", NULL, "ls"},  {">>", NULL, "rs"}, {"<<=", NULL, "lS"},
-        {">>=", NULL, "rS"}, {"==", NULL, "eq"}, {"!=", NULL, "ne"},
-        {"<=", NULL, "le"},  {">=", NULL, "ge"}, {"<=>", NULL, "ss"},
-        {"&&", NULL, "aa"},  {"||", NULL, "oo"}, {"++", "pp", "pp"},
-        {"--", "mm", "mm"},  {",", NULL, "cm"},  {"->*", NULL, "pm"},
-        {"->", "pt", NULL},  {"()", "cl", "cl"}, {"[]", NULL, "ix"},
+        {"+", "ps", "pl"},         {"-", "ng", "mi"},  {"*", "de", "ml"},
+        {"&", "ad", "an"},         {"/", NULL, "dv"},  {"%", NULL, "rm"},
+        {"|", NULL, "or"},         {"^", NULL, "eo"},  {"~", "co", NULL},
+        {"!", "nt", NULL},         {"=", NULL, "aS"},  {"<", NULL, "lt"},
+        {">", NULL, "gt"},         {"+=", NULL, "pL"}, {"-=", NULL, "mI"},
+        {"*=", NULL, "mL"},        {"/=", NULL, "dV"}, {"%=", NULL, "rM"},
+        {"&=", NULL, "aN"},        {"|=", NULL, "oR"}, {"^=", NULL, "eO"},
+        {"<<", NULL, "ls"},        {">>", NULL, "rs"}, {"<<=", NULL, "lS"},
+        {">>=", NULL, "rS"},       {"==", NULL, "eq"}, {"!=", NULL, "ne"},
+        {"<=", NULL, "le"},        {">=", NULL, "ge"}, {"<=>", NULL, "ss"},
+        {"&&", NULL, "aa"},        {"||", NULL, "oo"}, {"++", "pp", "pp"},
+        {"--", "mm", "mm"},        {",", NULL, "cm"},  {"->*", NULL, "pm"},
+        {" co_await", "aw", NULL}, {"->", "pt", NULL}, {"()", "cl", "cl"},
+        {"[]", NULL, "ix"},
     };
     uint32_t operands = nparams + member;
 
@@ -2077,8 +2137,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home,
              : !strcmp(v->s, "operator delete[]") ? "da"
                                                   : NULL;
     }
-    if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
-        return false; /* (literal operators: later) */
+    bool literal = v->len > 10 && !memcmp(v->s, "operator\"\"", 10);
+    if (literal)
+        op = "li";
     /* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
     if (v->len && v->s[0] == ' ') {
         if (!member ||
@@ -2104,53 +2165,76 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home,
             mg_str(&m, "V");
         if (member && (is_const & 1))
             mg_str(&m, "K");
+        if (member && f->fn_ref)
+            mg_str(&m,
+                   f->fn_ref == 1
+                       ? "R"
+                       : "O"); /* (a ref-qualifier: f() & is R, f() && is O) */
         mg_prefix(&m, home);
-        if (f->fn_internal && !member && !op &&
-            !cxx_scope_in_unnamed_namespace(
-                c, home)) /* (none in an unnamed namespace) */
-            mg_str(&m, "L");
-        if (op)
-            mg_str(&m, op);
-        else if (conv) {
-            mg_str(&m, "cv");
-            mg_type(&m, x->base);
-        } else
-            mg_source_name(&m, f->name);
-        mg_abi_tag(&m, f->abi_tag);
-        if (f->is_instance)
-            mg_remember(
-                &m, CXX_SUB_TEMPLATE, mg_tkey(f),
-                0); /* (the template's name: a candidate before its arguments) */
-        if (f->is_instance)
-            mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at,
-                             f->inst_params);
+    } else if (mg_scope_is_std(&m, home))
+        mg_str(&m, "St");
+    if (f->fn_internal && !member && !op &&
+        !cxx_scope_in_unnamed_namespace(
+            c, home)) /* (none in an unnamed namespace) */
+        mg_str(&m, "L");
+    if (op) {
+        mg_str(&m, op);
+        if (literal) {
+            char num[16];
+            mg_text(
+                &m, num,
+                (size_t)snprintf(num, sizeof num, "%u", (unsigned)v->len - 10));
+            mg_text(&m, v->s + 10, v->len - 10);
+        }
+    } else if (conv && f->is_instance && v->len == 11 &&
+               !memcmp(v->s, "operator #t", 11)) {
+        /* a conversion function template's instance: cv and the template parameter its type is
+           (template <class T> operator T(): cvT_) */
+        uint32_t k = UINT32_MAX;
+
+        for (uint32_t i = 0; i < f->ntargs && k == UINT32_MAX; i++)
+            if (f->targs[i].kind == 1 &&
+                AST_QUALIFIED_TYPE_UNQUALIFIED(f->targs[i].t) ==
+                    AST_QUALIFIED_TYPE_UNQUALIFIED(x->base))
+                k = i;
+        if (k == UINT32_MAX)
+            return false;
+        mg_str(&m, "cvT");
+        if (k) {
+            char num[16];
+
+            mg_text(&m, num, (size_t)snprintf(num, sizeof num, "%u", k - 1));
+        }
+        mg_str(&m, "_");
+    } else if (conv) {
+        mg_str(&m, "cv");
+        mg_type(&m, x->base);
+    } else
+        mg_source_name(&m, f->name);
+    mg_abi_tag(&m, f->abi_tag);
+    if (f->is_instance)
+        mg_remember(
+            &m, CXX_SUB_TEMPLATE, mg_tkey(f),
+            0); /* (the template's name: a candidate before its arguments) */
+    if (f->is_instance)
+        mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at,
+                         f->inst_params);
+    if (mg_nested(&m, home))
         mg_str(&m, "E");
-    } else {
-        if (mg_scope_is_std(&m, home))
-            mg_str(&m, "St");
-        if (f->fn_internal && !member && !op &&
-            !cxx_scope_in_unnamed_namespace(
-                c, home)) /* (none in an unnamed namespace) */
-            mg_str(&m, "L");
-        if (op)
-            mg_str(&m, op);
-        else
-            mg_source_name(&m, f->name);
-        mg_abi_tag(&m, f->abi_tag);
-        if (f->is_instance)
-            mg_remember(
-                &m, CXX_SUB_TEMPLATE, mg_tkey(f),
-                0); /* (the template's name: a candidate before its arguments) */
-        if (f->is_instance)
-            mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at,
-                             f->inst_params);
-    }
     /* A function template's instance: its return type and its parameters as the template declares them
 	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
 	   among vcc's objects, not clang's name). */
     uint32_t pack_param = 0, tok_b[16], tok_e[16], ntok = 0;
     bool dt_guess = false, tok_params = false, tok_sig = false;
 
+    if (conv && f->is_instance && v->len == 11 &&
+        !memcmp(v->s, "operator #t", 11)) {
+        /* (a conversion template's instance: no return type ([mangle.function-type]), no parameters) */
+        if (x->n)
+            return false;
+        mg_str(&m, "v");
+        goto params_done;
+    }
     if (f->is_instance) {
         const ast_qualified_type *ph;
         uint32_t nph, pp = 0;

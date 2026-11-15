@@ -24,6 +24,27 @@ VPRIV void cxx_gen_file_asm(cxx *c, const char *text)
     a->tlasm[a->ntlasm++] = n;
 }
 
+/* C++ with exceptions: what the code generator's landing pads need (frontend/c/cc.h's eh), made once per TU
+   when a cleanup variable is first declared: _Unwind_Resume, and .Lvcc_personality (the word holding
+   __gxx_personality_v0's address, .cfi_personality's operand; a try block's trampoline uses it too) */
+VPRIV void cxx_gen_eh_ready(cxx *c)
+{
+    cc *a = c->ast;
+
+    if (!a->o->eh || a->eh_resume_sym)
+        return;
+    a->eh_resume_sym = cxx_gen_runtime_symbol(c, "_Unwind_Resume", true);
+    a->eh_begin_catch_sym =
+        cxx_gen_runtime_symbol(c, "__cxa_begin_catch", true);
+    a->eh_terminate_sym = cxx_gen_runtime_symbol(c, "_ZSt9terminatev", false);
+    if (!c->gen_eh_pers) {
+        c->gen_eh_pers = 1;
+        cxx_gen_file_asm(
+            c, "\t.section\t.data.rel.ro,\"aw\",@progbits\n\t.p2align\t3\n."
+               "Lvcc_personality:\n\t.quad\t__gxx_personality_v0\n\t.text");
+    }
+}
+
 /*
  * A try block.  Its body was built as a function of its own (a closure's operator(), `call`, returning
  * int; `closure` is the object holding its captures).  The body is called through a small function
@@ -164,7 +185,8 @@ VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc)
 /* the try statement: code = the call of the body through its trampoline; then the handler it names, if any */
 VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                                      const uint32_t *handlers,
-                                     uint32_t nhandlers, uint32_t loc)
+                                     uint32_t nhandlers, uint32_t ret_stmt,
+                                     uint32_t loc)
 {
     cc *a = c->ast;
     uint32_t code = cxx_gen_temporary(c, cc_type_basic(AST_TYPE_INT), loc),
@@ -192,6 +214,18 @@ VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call,
                          cc_assignment_build(
                              a, 0, cxx_gen_var_node(c, code, loc), call, loc),
                          0, 0));
+    if (ret_stmt) /* (the body returned, 1: the enclosing function returns) */
+        chain = cc_statement_new(
+            a, AST_NODE_IF, loc,
+            cc_condition_scalar(
+                a,
+                cc_binary_build(
+                    a, LEX_TOKEN_EQUAL_EQUAL,
+                    cc_node_rvalue(a, cxx_gen_var_node(c, code, loc)),
+                    cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc),
+                    loc),
+                "statement"),
+            ret_stmt, chain);
     cc_id_list_append(a, &l, chain);
     return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l),
                             l.n);
@@ -211,7 +245,14 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
 
     if (!a->o->emit || c->tentative || c->template_depth || c->instantiating ||
         c->gen || !v || !v->sym || !(v->global_ns || v->mangled_var) ||
-        !cxx_gen_object_type_ok(c, v->ty))
+        !(cxx_gen_object_type_ok(c, v->ty) ||
+          (v->ty != CXX_TY_UNKNOWN &&
+           AST_TYPE_KIND(a, v->ty) == AST_TYPE_ARRAY &&
+           !AST_TYPE(a, v->ty)->n &&
+           cxx_gen_object_type_ok(
+               c,
+               AST_TYPE(a, v->ty)
+                   ->base)))) /* (T a[] = {...}: its bound from the initializer) */
         return false;
     /* The initializer is built inside a function of its own: if it turns out not to be a constant, that
 	   function runs it when the program starts (.init_array), in the order of the definitions. */
@@ -458,6 +499,18 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v,
                 cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
     }
     if (ok && ((cc_id_list *)c->ginit_list)->n &&
+        (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE) && !dtor &&
+        !cxx_class_polymorphic(c, t)) {
+        /* an inline variable of an empty class (std::piecewise_construct = piecewise_construct_t()): its
+           construction does nothing an object file must keep; defined here, zeroed (else nothing defines it) */
+        bool pod, empty;
+
+        if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &pod,
+                                  &empty) &&
+            empty && !cxx_class_has_member_initializer(c, t))
+            ((cc_id_list *)c->ginit_list)->n = 0;
+    }
+    if (ok && ((cc_id_list *)c->ginit_list)->n &&
         (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE)) {
         /* an inline variable built at start-up: not here (another TU's copy may be the one linked, constant
 		   and read-only: written to, it faults; strong_ordering::less, whose constexpr constructor is not
@@ -488,6 +541,15 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init,
         cxx_gen_global_finish(c, false);
         return;
     }
+    if (!has_init && !failed) {
+        const cxx_memptr *mp = cxx_memptr_of(c, y->ty);
+
+        if (mp && !mp->fn) {
+            /* int C::*p;: zero-initialized, the null one, offset -1 (not zero bytes) */
+            init = cxx_gen_memptr_null(c, y->ty, 0), has_init = true;
+            y = &a->syms[v->sym];
+        }
+    }
     if (!has_init) {
         if (cc_type_is_record(a, y->ty) &&
             AST_TYPE_KIND(a, y->ty) != AST_TYPE_ARRAY &&
@@ -508,6 +570,13 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init,
         a->toplevel[a->ntoplevel++] = v->sym;
         return;
     }
+    if (!failed && init && cxx_memptr_of(c, y->ty)) {
+        /* a pointer to member: converted (null, a base's), its literal's list the constant initializer */
+        init = cxx_gen_memptr_convert(c, init, y->ty, 0);
+        y = &a->syms[v->sym];
+        if (init && AST_NODE_AT(a, init)->op == AST_NODE_COMPOUND_LITERAL)
+            init = AST_NODE_AT(a, init)->a;
+    }
     if (failed || !init) {
         cxx_gen_global_finish(
             c,
@@ -518,7 +587,10 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init,
         /* a constant initializer: in the object file */
         uint32_t k = init;
 
-        if (AST_NODE_AT(a, k)->op != AST_NODE_INITIALIZER)
+        if (AST_NODE_AT(a, k)->op == AST_NODE_STRING &&
+            AST_TYPE_KIND(a, y->ty) == AST_TYPE_ARRAY)
+            ; /* (char s[] = "text": the string itself, as C initializes the array) */
+        else if (AST_NODE_AT(a, k)->op != AST_NODE_INITIALIZER)
             k = cxx_gen_type_ok(c, v->ty) &&
                         !cc_type_is_record(a, AST_NODE_AT(a, k)->ty)
                     ? cc_conversion_apply(a, cc_conversion_decay(a, k),
