@@ -25,6 +25,23 @@ VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint3
 
 /* do the reference kinds of the parameters of the out-of-class definition at pos (& 1, && 2, none 0, as
    written) agree with e's declared parameters */
+/* __attribute__((...)) at i (an out-of-class definition's _LIBCPP_HIDE_FROM_ABI before its name): the token after it;
+   otherwise i */
+static uint32_t cxx_ooc_skip_attribute(const cxx *c, uint32_t i)
+{
+	while (i + 1 < c->ntok && c->tok[i].kw == CXX_KW___attribute__ && c->tok[i + 1].kind == LEX_TOKEN_LEFT_PAREN) {
+		uint32_t d = 0;
+
+		for (i++; i < c->ntok; i++)
+			if (c->tok[i].kind == LEX_TOKEN_LEFT_PAREN)
+				d++;
+			else if (c->tok[i].kind == LEX_TOKEN_RIGHT_PAREN && !--d)
+				break;
+		i++;
+	}
+	return i;
+}
+
 /* do an out-of-class definition's parameter types (parsed in the instance's class scope, cs) equal the
    declaration's?  -1 not known (the list did not parse) */
 static int cxx_ooc_types_agree(cxx *c, uint32_t pos, const cxx_entity *e, cxx_scope *cs)
@@ -35,15 +52,21 @@ static int cxx_ooc_types_agree(cxx *c, uint32_t pos, const cxx_entity *e, cxx_sc
 	jmp_buf jb;
 	volatile int r = -1;
 
-	for (; i < c->ntok && c->tok[i].kind != LEX_TOKEN_LEFT_BRACE && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
-		int kd = c->tok[i].kind;
+	bool special = vintern_ents[e->name].s[0] == ' ';	/* (" ctor": the class's name before the list) */
 
+	for (; i < c->ntok && c->tok[i].kind != LEX_TOKEN_LEFT_BRACE && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
+		int kd;
+
+		i = cxx_ooc_skip_attribute(c, i);
+		if (i >= c->ntok)
+			break;
+		kd = c->tok[i].kind;
 		if (kd == LEX_TOKEN_LESS)
 			depth++;
 		else if (kd == LEX_TOKEN_GREATER && depth)
 			depth--;
 		else if (kd == LEX_TOKEN_LEFT_PAREN && !depth && i > pos + 1 && c->tok[i - 1].kind == LEX_TOKEN_IDENTIFIER &&
-			 c->tok[i - 1].id == e->name)
+			 (c->tok[i - 1].id == e->name || (special && c->tok[i - 2].kind == LEX_TOKEN_COLON_COLON)))
 			break;
 	}
 	if (i >= c->ntok || c->tok[i].kind != LEX_TOKEN_LEFT_PAREN)
@@ -82,8 +105,12 @@ VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
 
 	/* to the parameter list: the ( after X<...>::name at depth 0 (operator(): its own () skipped) */
 	for (; i < c->ntok && c->tok[i].kind != LEX_TOKEN_LEFT_BRACE && c->tok[i].kind != LEX_TOKEN_SEMICOLON; i++) {
-		int kd = c->tok[i].kind;
+		int kd;
 
+		i = cxx_ooc_skip_attribute(c, i);
+		if (i >= c->ntok)
+			break;
+		kd = c->tok[i].kind;
 		if (kd == LEX_TOKEN_LESS)
 			depth++;
 		else if (kd == LEX_TOKEN_GREATER && depth)
@@ -171,16 +198,18 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		if (!matches)
 			break;
 	}
-	if (matches > 1 && !x->pos) {
+	if (matches > 1) {
 		/* several with that many parameters and references alike (__move_assign(basic_string&, true_type)
-		   and (..., false_type)): the one whose parameter types are the declaration's */
+		   and (..., false_type); vector<bool>(const allocator_type&) and (const vector&), a partial's): the
+		   one whose parameter types are the declaration's */
 		struct cxx_ooc *one = NULL;
 		uint32_t n1 = 0;
 		bool unknown = false;
 
 		for (uint32_t i = 0; i < t->noocs; i++)
 			if (t->oocs[i].name == e->name && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner && !t->oocs[i].pack &&
-			    t->oocs[i].nparams == nparams && !t->oocs[i].partial && cxx_ooc_refs_agree(c, t->oocs[i].pos, e)) {
+			    t->oocs[i].nparams == nparams && (x->pos ? t->oocs[i].partial && t->oocs[i].params->ntparams == nbargs : !t->oocs[i].partial) &&
+			    cxx_ooc_refs_agree(c, t->oocs[i].pos, e)) {
 				int k = cxx_ooc_types_agree(c, t->oocs[i].pos, e, cs);
 
 				if (k < 0)

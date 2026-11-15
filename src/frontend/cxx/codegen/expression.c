@@ -625,7 +625,10 @@ VPRIV void cxx_gen_base_assign(cxx *c, ast_qualified_type base, uint32_t x, uint
 		src = cc_dereference_build(a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);
 	}
 	{
-		uint32_t asg = cc_assignment_build(a, 0, tb, cc_node_rvalue(a, src), loc);
+		bool pod, empty;
+		/* (an empty class: no bytes; its one byte may be the derived class's first member, json's m_data) */
+		uint32_t asg = cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(base), &pod, &empty) && empty ?
+			       cc_address_of_build(a, src, loc) : cc_assignment_build(a, 0, tb, cc_node_rvalue(a, src), loc);
 
 		c->enode = cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, tb)->ty, loc, asg, tb);
 		AST_NODE_AT(a, c->enode)->flags |= AST_NODE_FLAG_LVALUE;

@@ -2285,3 +2285,18 @@ __node_alloc_)`).  Test: `run/ref-param-converting-ctor.cpp`.  Strikt bänk:
 pass 5 (från 3), inga länkfel; unit-large_json länkar men fallerar:
 `r = json(value_t::array)` ger fel värde (fanns före ändringen, nästa steg).
 Sviter gröna (94/94, 38/38, mangle, 350/350).
+
+## Status 140 (2026-11-15)
+Två felkompileringar som gjorde unit-large_json fel vid körning:
+- `B::operator=(x)` för en tom bas (jsons `json_base_class_t`) kopierade
+  basens ena byte över den härledda klassens första medlem: `r = json(...)`
+  gav null.  Nu kopieras inget.  Test: `run/empty-base-assign.cpp`.
+- Out-of-class-definitionernas parameterlista hittades vid första `(` efter
+  en identifierare, alltså i `__attribute__((...))` från
+  `_LIBCPP_HIDE_FROM_ABI`; `vector<bool>(const allocator_type&)` fick
+  kopieringskonstruktorns kropp (reserve allokerade enormt: bad_alloc).
+  Attribut hoppas nu över, typjämförelsen känner igen konstruktorer och
+  gäller även partiella specialiseringar.  Test: `run/ooc-partial-overloads.cpp`.
+Strikt bänk: pass 6, inga test- eller länkfel; 202 funktioner saknas
+(summerat), needed 214 rader (122 distinkta).  Sviter gröna (96/96, 38/38,
+mangle, 350/350).
