@@ -416,6 +416,20 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
                     a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);
             }
             c->enode = x;
+            return;
+        }
+        if ((AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && !same &&
+            AST_TYPE_KIND(a, xt) != AST_TYPE_FUNCTION &&
+            AST_TYPE_KIND(a, bt) != AST_TYPE_FUNCTION) {
+            /* (T&)x, reinterpret_cast<T&>(x) of an object of another type: that object read as a T, *(T *)&x
+               ([expr.reinterpret.cast]/11: libc++'s operator>>(istream&, unsigned char&) is (char&)__c) */
+            ast_qualified_type pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
+
+            c->enode = cc_dereference_build(
+                a,
+                cc_cast_insert(a, cc_address_of_build(a, x, loc), pt,
+                               AST_CAST_POINTER_TO_POINTER),
+                loc);
         }
         return;
     }
