@@ -1046,6 +1046,41 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 n = c->ncargs;
                 memcpy(an, c->carg_nodes, sizeof an);
                 memcpy(abr, c->carg_brace, sizeof abr);
+                if (gen_local && cxx_is_initializer_list(c, t) &&
+                    n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block &&
+                    !(n == 1 && c->cargs[0] != CXX_TY_UNKNOWN &&
+                      AST_QUALIFIED_TYPE_UNQUALIFIED(c->cargs[0]) ==
+                          AST_QUALIFIED_TYPE_UNQUALIFIED(t))) {
+                    /* std::initializer_list<E> v = {a, b}: its array and the list object, as auto v = {a, b}
+                       makes them; the variable a copy of the list (two pointers' worth) */
+                    uint32_t arr = 0, il;
+
+                    c->ctor_ilist_n = n;
+                    memcpy(c->ctor_ilist_types, c->cargs, n * sizeof *c->cargs),
+                        memcpy(c->ctor_ilist_lval, c->cargs_lval, n);
+                    memcpy(c->ctor_ilist_brace, c->carg_brace,
+                           sizeof c->ctor_ilist_brace);
+                    il = cxx_gen_initializer_list(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n,
+                        (cc_id_list *)c->gen_block, name_loc, &arr);
+                    if (il) {
+                        /* (declared with the list's two words as its initializer: trivially copyable, a
+                           const one too) */
+                        c->ast->syms[gen_local].body =
+                            cc_node_rvalue(c->ast, il);
+                        c->ast->syms[gen_local].flags |=
+                            AST_SYMBOL_FLAG_DEFINED;
+                        cc_id_list_append(
+                            c->ast, (cc_id_list *)c->gen_block,
+                            cc_node_new_operands(c->ast, AST_NODE_DECLARATION,
+                                                 cc_type_basic(AST_TYPE_VOID),
+                                                 name_loc, gen_local,
+                                                 c->ast->syms[gen_local].body));
+                    } else
+                        cxx_gen_fail(c);
+                    gen_declared = true;
+                    gen_local = 0; /* (built: not again below) */
+                }
                 cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
                 if (gen_local) {
                     c->gen_agg_brace =
@@ -1305,6 +1340,41 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 n = c->ncargs;
                 memcpy(an, c->carg_nodes, sizeof an);
                 memcpy(abr, c->carg_brace, sizeof abr);
+                if (gen_local && cxx_is_initializer_list(c, t) &&
+                    n != UINT32_MAX && n <= CXX_MAX_ARGS && c->gen_block &&
+                    !(n == 1 && c->cargs[0] != CXX_TY_UNKNOWN &&
+                      AST_QUALIFIED_TYPE_UNQUALIFIED(c->cargs[0]) ==
+                          AST_QUALIFIED_TYPE_UNQUALIFIED(t))) {
+                    /* std::initializer_list<E> v = {a, b}: its array and the list object, as auto v = {a, b}
+                       makes them; the variable a copy of the list (two pointers' worth) */
+                    uint32_t arr = 0, il;
+
+                    c->ctor_ilist_n = n;
+                    memcpy(c->ctor_ilist_types, c->cargs, n * sizeof *c->cargs),
+                        memcpy(c->ctor_ilist_lval, c->cargs_lval, n);
+                    memcpy(c->ctor_ilist_brace, c->carg_brace,
+                           sizeof c->ctor_ilist_brace);
+                    il = cxx_gen_initializer_list(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), an, n,
+                        (cc_id_list *)c->gen_block, name_loc, &arr);
+                    if (il) {
+                        /* (declared with the list's two words as its initializer: trivially copyable, a
+                           const one too) */
+                        c->ast->syms[gen_local].body =
+                            cc_node_rvalue(c->ast, il);
+                        c->ast->syms[gen_local].flags |=
+                            AST_SYMBOL_FLAG_DEFINED;
+                        cc_id_list_append(
+                            c->ast, (cc_id_list *)c->gen_block,
+                            cc_node_new_operands(c->ast, AST_NODE_DECLARATION,
+                                                 cc_type_basic(AST_TYPE_VOID),
+                                                 name_loc, gen_local,
+                                                 c->ast->syms[gen_local].body));
+                    } else
+                        cxx_gen_fail(c);
+                    gen_declared = true;
+                    gen_local = 0; /* (built: not again below) */
+                }
                 cxx_ctor_use(c, t, c->cargs, c->cargs_lval, c->ncargs, true);
                 if (gen_local) {
                     c->gen_agg_brace =
