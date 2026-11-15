@@ -55,6 +55,7 @@ typedef struct vvs {
 	ecx *e;
 	vvi *I; uint32_t n0;			/* per value below n0 */
 	uint32_t *touch; uint32_t ntouch, ctouch;
+	bool oom;				/* stop trying loops if the value table could not be allocated */
 	uint8_t *inl;				/* per block: in the loop */
 	uint32_t lb[64], nlb;			/* the loop's blocks, H first */
 	uint32_t H, P, L, X, jP, jL;		/* header, entry predecessor, latch, exit; their slots in H's predecessors */
@@ -971,6 +972,16 @@ static bool vv_reaches(vwst *V, uint32_t v, uint32_t p, uint32_t *budget)
 	return false;
 }
 
+/* Many candidates fail the lane or carried-value checks before using any record. */
+static bool vv_records(vvs *S)
+{
+	if (!S->I) {
+		S->I = calloc((size_t)S->n0 + 1, sizeof *S->I);
+		S->oom = !S->I;
+	}
+	return S->I != NULL;
+}
+
 static bool vv_loop(vvs *S)
 {
 	ecx *e = S->e;
@@ -1016,18 +1027,7 @@ static bool vv_loop(vvs *S)
 			return vv_no(S, "an initial value from inside the loop");
 		N = V->p[nx].in;
 		if (vv_chain(S, p, nx, &K, &kb)) {
-			vvi *ii = vv_get(S, init), kk = { .kind = VK_INV, .exact = 1, .c = K };
-			bool rep = vv_comb(&r, ii, &kk, 1);
-
-			if (S->nind == 32)
-				return vv_no(S, "too many inductions");
-			r.kind = VK_LIN, r.exact = rep && ii->exact && (ty != VT_I32 || kb);
-			if (!r.exact && rep && ii->exact && K == 1 && vv_ultctl(S, p) && (!vv_isk(ii) || ii->k >= 0))
-				r.exact = r.uns = 1;	/* (below an unsigned bound, stepping 1: it cannot wrap) */
-			if (!r.exact && ty != VT_I32)
-				return vv_no(S, "an induction without a linear form");
-			S->indk[S->nind] = K;
-			S->ind[S->nind++] = p;
+			r.kind = VK_LIN;
 		} else if ((ty == S->fty && ((N.op == VO_FADD || N.op == VO_FMUL) && (vw_find(V, N.a) == p || vw_find(V, N.b) == p) || (N.op == VO_FSUB || N.op == VO_FDIV) && vw_find(V, N.a) == p)) ||
 			   (ty == S->ity && ((N.op == VO_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VO_SUB && vw_find(V, N.a) == p)))) {
 			if (S->nred == 8)
@@ -1047,9 +1047,28 @@ static bool vv_loop(vvs *S)
 			return vv_no(S, ty == VT_F32 || ty == VT_F64 ? "a float carried around the loop (a reduction or a recurrence: order matters)" :
 					"a value carried around the loop that is neither an induction nor a sum");
 		}
+		if (!vv_records(S))
+			return false;
+		if (r.kind == VK_LIN) {
+			vvi *ii = vv_get(S, init), kk = { .kind = VK_INV, .exact = 1, .c = K };
+			bool rep = vv_comb(&r, ii, &kk, 1);
+
+			if (S->nind == 32)
+				return vv_no(S, "too many inductions");
+			r.exact = rep && ii->exact && (ty != VT_I32 || kb);
+			if (!r.exact && rep && ii->exact && K == 1 && vv_ultctl(S, p) && (!vv_isk(ii) || ii->k >= 0))
+				r.exact = r.uns = 1;	/* (below an unsigned bound, stepping 1: it cannot wrap) */
+			if (!r.exact && ty != VT_I32)
+				return vv_no(S, "an induction without a linear form");
+			S->indk[S->nind] = K;
+			S->ind[S->nind++] = p;
+		}
 		x = vv_touch(S, p);
 		*x = r;
 	}
+	/* Loops without live header parameters first use records during classification. */
+	if (!vv_records(S))
+		return false;
 	/* the instructions, in the order they run */
 	for (uint32_t i = 0; i < S->nlb; i++) {
 		uint32_t b = S->lb[i], tt = V->b[b].term;
@@ -1535,15 +1554,16 @@ static void vw_vectorize(ecx *e)
 		S.P = V->pr[V->b[H].pred + S.jP];
 		if (S.P == S.L)
 			continue;
-		if (!S.I) {
-			S.I = calloc((size_t)S.n0 + 1, sizeof *S.I);
+		if (!S.inl) {
 			S.inl = calloc((size_t)V->nb + 1, 1);
-			if (!S.I || !S.inl)
+			if (!S.inl)
 				break;
 		}
 		for (uint32_t k = 0; k < S.nlb; k++)
 			S.inl[S.lb[k]] = 1;
 		done = vv_loop(&S);
+		if (S.oom)
+			break;
 		if (done)
 			vv_place(&S);
 		if (!(vv_env() & 4)) {

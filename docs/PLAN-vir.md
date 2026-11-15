@@ -2440,6 +2440,22 @@ begärdes sammanlagt säger därmed litet om kostnaden för rensningen.
 Registerallokeringens instr/enter och förenklingens vw_cse_blk är större
 mål för arbetet med kompileringstid.
 
+#### Sen allokering av vektoriserarens värdetabell (2026-11-15)
+
+Värdetabellen S.I skapas när den första godtagna huvudparametern behöver
+en post, eller när passet når klassificeringen av instruktionerna. Den
+återanvänds för senare slingor i samma funktion. Funktionen kan fortfarande
+avstå från resten av vektoriseringen om allokeringen misslyckas.
+
+På samma sqlite3.c med glibc, mot `d572bd86`, sjönk antalet tabeller från
+271 till 171. Sammanlagd begärd storlek sjönk från 35,45 till 29,34 MiB.
+Tio separata instrumenterade körningar gav 0,574 → 0,526 ms i själva
+allokeringsanropen (råmedian per TU). Tolv omgångar med de oinstrumenterade
+binärerna i slumpad ordning gav 356,6 → 357,2 ms kompileringstid och
+176 924 → 176 968 KiB max-RSS (medianer). Ingen påvisbar skillnad i tid
+eller max-RSS. SQLite-assemblerfilen var byte-identisk. TSVC på x86-64
+matchade clangs 151 kontrollsummor med 83 vektoriserade slingor.
+
 ### Vad allokerarens kvalitet är värd: LLVM:s allokerare mot varandra (2026-11-12)
 
 Mätningen som "Mäts i V4" nedan utlovade.  sqlite3.c, speedtest1 `--size 100
