@@ -713,6 +713,8 @@ typedef struct cxx {
     uint32_t
         gen_notemp; /* inside a loop's condition or step, or a conditionally evaluated operand: no temporaries with destructors */
     uint32_t
+        gen_bind_depth; /* cxx_gen_bind calls in progress: a converting constructor's parameter binds again (bounded) */
+    uint32_t
         gen_block_temps; /* such temporaries declared in the block being built (a case label after one: not built) */
     struct cxx_prv *
         prvs; /* class prvalues: temporaries whose construction can still be aimed at another object */

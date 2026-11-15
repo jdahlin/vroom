@@ -456,8 +456,27 @@ VPRIV uint32_t cxx_gen_nullptr_object(cxx *c, uint32_t x, uint32_t loc)
     return x;
 }
 
+static uint32_t cxx_gen_bind_inner(cxx *c, uint32_t x, ast_qualified_type to,
+                                   uint32_t loc);
+
+/* a binding inside a binding: a temporary made by a converting constructor binds its argument to
+   that constructor's parameter; a cycle there (a copy constructor picked for a value whose type is
+   not known) overflowed the stack (Skia's bentleyottmann).  Past 16: no code, as for a form not built */
 VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to,
                             uint32_t loc)
+{
+    uint32_t r;
+
+    if (c->gen_bind_depth >= 16)
+        return 0;
+    c->gen_bind_depth++;
+    r = cxx_gen_bind_inner(c, x, to, loc);
+    c->gen_bind_depth--;
+    return r;
+}
+
+static uint32_t cxx_gen_bind_inner(cxx *c, uint32_t x, ast_qualified_type to,
+                                   uint32_t loc)
 {
     cc *a = c->ast;
 
