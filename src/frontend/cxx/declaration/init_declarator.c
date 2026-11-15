@@ -232,6 +232,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					/* (T X::m; of a member initialized in its class: the definition has that initializer, not
 					   built here: left to the uses, which take the value) */
 					c->ast->syms[m->sym].sc = AST_STORAGE_NONE;
+					if (flags & DS_INLINE)	/* inline T X::m = ...; (strong_ordering::less): weak where it is
+								   defined (cxx_gen_global_end), every TU that uses it defining it */
+						c->ast->syms[m->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
 					gen_var = m;
 					break;
 				}
@@ -372,8 +375,11 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				at.weak = 1;
 				cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
 				c->ast->syms[e->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
-			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && e->home != c->global && !e->c_linkage &&
+			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && !e->c_linkage &&
+				   (e->home != c->global || (t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) &&
+							     !(flags & (DS_EXTERN_SEEN | DS_INLINE)) && !c->explicit_specialization)) &&
 				   c->ast->syms[e->sym].ty == t && !e->mangled_var) {
+				/* (at the global scope too for a const one: constexpr P qq{8}; is _ZL2qq, internal) */
 				/* a namespace's variable: internal linkage written L (static, or const and not extern) */
 				bool internal = (flags & DS_STATIC) || cxx_scope_in_unnamed_namespace(c, e->home) ||
 						(t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
@@ -401,7 +407,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			    cxx_is(c, LEX_TOKEN_EQUAL) && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !c->tentative && !c->template_depth)
 				e->nsdmi_pos = c->pos, e->nsdmi_scope = c->scope;	/* (a static constant member's initializer: cxx_gen_static_member_value) */
 			if (e && kind == CXX_ENTITY_VALUE && !f && ((flags & DS_CONSTEXPR) || (t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST))) &&
-			    cxx_is(c, LEX_TOKEN_EQUAL)) {
+			    cxx_is(c, LEX_TOKEN_EQUAL) && !(context == CXX_CONTEXT_CLASS && !(flags & DS_STATIC))) {
+				/* (not a non-static data member: const bool ignore_comments = false; is a default, each
+				   constructor's mem-initializer may give another value) */
 				int64_t v;
 
 				cxx_advance(c);

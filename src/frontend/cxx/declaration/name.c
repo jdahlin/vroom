@@ -414,7 +414,7 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 				} else if (c->npacks_seen && !c->packs_overflow && c->instantiating && !c->tentative) {
 					cxx_entity *packs[8];
 					uint32_t np = c->npacks_seen, len = c->packs_seen[0]->npack, after = c->pos;
-					bool ok = true, was_invalid = c->member_missing || c->einvalid;
+					bool ok = true;
 
 					memcpy(packs, c->packs_seen, sizeof packs);
 					for (uint32_t k = 0; k < np; k++)
@@ -434,9 +434,12 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 								args[31].kind = 0;
 							continue;
 						}
+						uint8_t om = c->member_missing, oi = c->einvalid;
+
 						for (uint32_t k = 0; k < np; k++)
 							cxx_pack_element(c, packs[k], (int32_t)i);
 						c->pos = start;
+						c->member_missing = 0, c->einvalid = 0;	/* (this element's own verdict) */
 						cxx_template_argument_parse(c, &e);
 						ok = c->pos == end;
 						if (n < 32)
@@ -444,8 +447,12 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
 						else
 							args[31].kind = 0;
 						/* an element that is ill-formed ends the substitution (enable_if_t<Ps::value>...: the
-						   elements after a false one are not looked at; std::_And relies on it) */
-						if (ok && (c->member_missing || c->einvalid) && !was_invalid)
+						   elements after a false one are not looked at; std::_And relies on it), whatever was
+						   ill-formed before the expansion (__is_ostreamable asked for while it is chosen) */
+						bool bad = c->member_missing || c->einvalid;
+
+						c->member_missing |= om, c->einvalid |= oi;
+						if (ok && bad)
 							break;
 					}
 					for (uint32_t k = 0; k < np; k++)

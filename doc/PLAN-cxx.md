@@ -2420,3 +2420,28 @@ char(&)[2]>` blir okänd vid första användningen (då `<<` självt löses), s�
 `__and_helper` och därmed hela `<<`-mängden i std blir okänd och medlemmen
 `const void*` står kvar; senare användningar blir rätt.  Återskapas inte utan
 libc++.  Sviter gröna (107/107, 38/38, mangle, 350/350).
+
+## Status 152 (2026-11-15)
+Fyra felkompileringar (alla tysta) bakom unit-class_lexer:
+- `std::cout << "x"` skrev en pekare: ett element i en paketexpansion
+  (`__enable_if_t<_Pred::value>...`) som misslyckas avslutar nu substitutionen
+  även om något var ogiltigt före expansionen; vid lika mallar avgör "färre
+  mallparametrar" före regeln om deklaration/definition; och de rangordningar
+  `cxx_operator_call_type` jämför sätts när anropet är klart (inte före de
+  anrop som instansieringen gör).
+- `inline constexpr strong_ordering strong_ordering::less{...}` gavs (sedan
+  Status 137) som stark nollad definition som slog ut clangs: alla
+  jämförelser i programmet blev fel och doctest tyst.  En inline-variabel är
+  nu svag där den definieras med konstant värde och byggs aldrig vid start
+  (en annan TU:s kopia kan vara skrivskyddad); utan konstant värde bara
+  deklarerad (länkfel i stället för noll).  En const-variabel på global nivå
+  har intern länkning.
+- En const icke-statisk medlem med standardinitierare (`const bool
+  ignore_comments = false`) vek till sin standard: konstruktorns värde
+  ignorerades.
+- `x++`/`x--` på en klass (`operator++(int)`) byggs nu.
+Tester: `run/inline-static-members.cpp`, `run/const-member-default.cpp`,
+`run/postfix-class-ops.cpp`.  Strikt bänk: pass 8, inga test- eller länkfel,
+156 saknas.  Kvar: constexpr-konstruktorer evalueras inte (för vcc-ensamma
+program blir `strong_ordering::less` odefinierad).  Sviter gröna (110/110,
+38/38, mangle, 350/350).

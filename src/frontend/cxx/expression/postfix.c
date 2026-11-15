@@ -303,7 +303,25 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 			uint32_t xn = c->enode, oploc = cxx_peek(c, 0)->loc;
 			bool built_in = c->etype != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, c->etype) || AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_POINTER);
 
+			ast_qualified_type xt = c->etype;
+			uint8_t xl = c->elval;
+
 			cxx_advance(c);
+			if (!built_in && xt != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, xt) && AST_TYPE_KIND(c->ast, xt) != AST_TYPE_ARRAY && !c->tentative) {
+				/* x++ of a class: x.operator++(0), operator++(int) ([over.inc]): out++ of an iterator */
+				ast_qualified_type it = cc_type_basic(AST_TYPE_INT);
+
+				c->op_lv_set = 1, c->op_lv[0] = xl, c->op_lv[1] = 0;
+				if (cxx_operator_call_type(c, vintern_cstr(op == LEX_TOKEN_PLUS_PLUS ? "operator++" : "operator--"), xt, &it, 1) &&
+				    c->call_resolved && c->call_picked) {
+					uint32_t zero = cxx_gen_on(c) ? cc_node_integer_new(c->ast, 0, it, oploc) : 0;
+
+					cxx_gen_operator_call(c, xn, &zero, 1, oploc);
+				} else
+					cxx_et(c, CXX_TY_UNKNOWN, false);
+				c->op_lv_set = 0;
+				continue;
+			}
 			cxx_et(c, built_in ? AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype) : CXX_TY_UNKNOWN, false);
 			if (built_in)
 				cxx_gen_postfix(c, op, xn, oploc);

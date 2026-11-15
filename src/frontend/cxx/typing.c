@@ -802,12 +802,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 					else if (cxx_ftemplate_constrained(cand[a].e) != cxx_ftemplate_constrained(cand[b].e) &&
 						 ga >= 0 && ga == gb && cxx_ftemplate_has_body(cand[a].e) == cxx_ftemplate_has_body(cand[b].e))
 						better = cxx_ftemplate_constrained(cand[a].e), worse = !better;
-					/* as specialized as each other: a declaration and its definition are one function, the
-					   definition stands for it */
-					else if (cxx_ftemplate_has_body(cand[a].e) != cxx_ftemplate_has_body(cand[b].e) && cand[a].r == cand[b].r)
-						better = cxx_ftemplate_has_body(cand[a].e), worse = !better;
 					/* the same parameter types once bound, from fewer template parameters: the more
-					   specialized (operator<<(basic_ostream<char, T>&, char) against basic_ostream<C, T>&) */
+					   specialized (operator<<(basic_ostream<char, T>&, char) against basic_ostream<C, T>&);
+					   before the declaration-or-definition rule below, which is for one template (as many
+					   parameters), not two (os << " " otherwise depended on which bodies were seen) */
 					else if (cand[a].e->ftmpl && cand[b].e->ftmpl && nargs <= 16 &&
 						 cxx_ftemplate_params(cand[a].e->ftmpl)->ntparams != cxx_ftemplate_params(cand[b].e->ftmpl)->ntparams) {
 						bool identical = true;
@@ -817,6 +815,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 						if (identical)
 							better = cxx_ftemplate_params(cand[a].e->ftmpl)->ntparams < cxx_ftemplate_params(cand[b].e->ftmpl)->ntparams, worse = !better;
 					}
+					/* as specialized as each other: a declaration and its definition are one function, the
+					   definition stands for it */
+					else if (cxx_ftemplate_has_body(cand[a].e) != cxx_ftemplate_has_body(cand[b].e) && cand[a].r == cand[b].r)
+						better = cxx_ftemplate_has_body(cand[a].e), worse = !better;
 				}
 			}
 			wins = better && !worse;
@@ -981,6 +983,11 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 	c->call_resolved = best >= 0;
 	c->call_picked = best >= 0 ? (called_instance ? called_instance : cand[best].e) : NULL;
 	c->none_viable = best < 0 && !viable && !unknown;
+	c->call_nranks = 0;	/* (and its picked candidate's ranks, cxx_operator_call_type compares them) */
+	if (best >= 0 && cand[best].ranked && nargs <= 16) {
+		memcpy(c->call_ranks, cand[best].rank, nargs);
+		c->call_nranks = (uint8_t)nargs;
+	}
 	cxx_et(c, result, false);
 }
 

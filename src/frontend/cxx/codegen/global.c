@@ -266,6 +266,13 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, ast_qualified_type
 		ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
 		cc_id_list_append(a, c->ginit_list, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
 	}
+	if (ok && ((cc_id_list *)c->ginit_list)->n && (a->syms[v->sym].flags & AST_SYMBOL_FLAG_LINKONCE)) {
+		/* an inline variable built at start-up: not here (another TU's copy may be the one linked, constant
+		   and read-only: written to, it faults; strong_ordering::less, whose constexpr constructor is not
+		   evaluated here) -- a declaration, defined where its initializer is a constant */
+		cxx_gen_global_finish(c, false);
+		return;
+	}
 	if (cxx_gen_global_finish(c, ok && ((cc_id_list *)c->ginit_list)->n))
 		cxx_gen_global_zeroed(c, v);
 	else if (ok)
@@ -317,6 +324,13 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 		if (k && cxx_gen_static_ok(a, y->ty, k)) {
 			cxx_gen_global_finish(c, false);
 			y = &a->syms[v->sym];
+			if ((y->flags & AST_SYMBOL_FLAG_LINKONCE) && !(y->attrs && a->attr[y->attrs].weak)) {
+				attrs at;	/* (an inline variable defined here: weak, as every TU's copy is) */
+
+				memset(&at, 0, sizeof at);
+				at.weak = 1;
+				cc_attribute_apply_symbol(a, y, &at);
+			}
 			y->body = k;
 			y->flags |= AST_SYMBOL_FLAG_DEFINED;
 			a->toplevel[a->ntoplevel++] = v->sym;
@@ -326,6 +340,10 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 	/* not a constant: var = init when the program starts */
 	if (AST_NODE_AT(a, init)->op == AST_NODE_INITIALIZER || cxx_gen_is_reference(c, v->ty) || !cxx_gen_type_ok(c, v->ty) || cc_type_is_record(a, v->ty)) {
 		cxx_gen_global_finish(c, false);	/* (a list, a reference, a class by value: not built yet) */
+		return;
+	}
+	if (y->flags & AST_SYMBOL_FLAG_LINKONCE) {
+		cxx_gen_global_finish(c, false);	/* (an inline variable: not built at start-up, as above) */
 		return;
 	}
 	init = cxx_gen_bind(c, init, AST_QUALIFIED_TYPE_UNQUALIFIED(v->ty), 0);
