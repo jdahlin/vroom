@@ -66,6 +66,7 @@
 #undef walk_global_constant_value
 #undef walk_goto_emit
 #undef walk_increment_emit
+#undef walk_increment_emit_kept
 #undef walk_increment_value
 #undef walk_initializer_elements_store
 #undef walk_initializer_emit

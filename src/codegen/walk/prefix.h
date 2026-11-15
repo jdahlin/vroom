@@ -68,6 +68,7 @@
 #define walk_global_constant_value WALK_NAME(walk_global_constant_value)
 #define walk_goto_emit WALK_NAME(walk_goto_emit)
 #define walk_increment_emit WALK_NAME(walk_increment_emit)
+#define walk_increment_emit_kept WALK_NAME(walk_increment_emit_kept)
 #define walk_increment_value WALK_NAME(walk_increment_value)
 #define walk_initializer_elements_store WALK_NAME(walk_initializer_elements_store)
 #define walk_initializer_emit WALK_NAME(walk_initializer_emit)

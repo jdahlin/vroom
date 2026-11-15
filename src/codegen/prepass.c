@@ -186,6 +186,9 @@ static void codegen_prepass_written_mark(codegen_prepass_state *P, uint32_t n,
 
         if (x->op == AST_NODE_COMMA) {
             n = x->b; /* match the emitters' comma-lvalue addressing */
+        } else if (addr && (x->op == AST_NODE_PRE_INCREMENT ||
+                            x->op == AST_NODE_PRE_DECREMENT)) {
+            n = x->a; /* &++x (C++: ++x an lvalue): x's address */
         } else if (x->op == AST_NODE_MEMBER ||
                    (x->op == AST_NODE_CAST &&
                     (x->aux == AST_CAST_NOP ||
