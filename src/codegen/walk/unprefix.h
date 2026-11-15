@@ -5,6 +5,7 @@
 #undef WALK_LOWER_PREFIX
 #undef WALK_LOWER
 #define WALK_LOWER(name) x64_##name
+#undef walk_alloca
 #undef walk_argument_slot_store
 #undef walk_arithmetic_emit
 #undef walk_array_element_drop

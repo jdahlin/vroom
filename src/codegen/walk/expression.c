@@ -2779,7 +2779,7 @@ static bool walk_memory_call_inline(codegen_context *e, uint32_t n, int kind,
 }
 
 /* alloca(n) */
-static codegen_value wk_alloca(codegen_context *e, uint32_t an)
+static codegen_value walk_alloca(codegen_context *e, uint32_t an)
 {
     cc *c = e->compile_context;
     codegen_value v = walk_value_emit(e, an);
@@ -2937,7 +2937,7 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
             /* a declared alloca is clang's library builtin; MinGW has no such function */
             if (args != argbuf)
                 free(args);
-            return wk_alloca(e, c->lists[x->b]);
+            return walk_alloca(e, c->lists[x->b]);
         } else {
             codegen_reference_note(
                 e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, s));
@@ -3967,7 +3967,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
     }
     case CC_BUILTIN_ALLOCA:
     case CC_BUILTIN_ALLOCA_UNINITIALIZED:
-        return wk_alloca(e, arg[0]);
+        return walk_alloca(e, arg[0]);
     case CC_BUILTIN_CLZ:
     case CC_BUILTIN_CLZL:
     case CC_BUILTIN_CLZLL:
