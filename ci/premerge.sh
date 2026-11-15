@@ -98,6 +98,7 @@ arm64)
 	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step header-deps  python3 bench/vcc-header-deps.py
+	step header-fuzz  python3 bench/vcc-header-fuzz.py --seed 16 --cases 8
 	step embed-search python3 bench/vcc-embed-search.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"

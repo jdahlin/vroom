@@ -1413,6 +1413,21 @@ counter from a child made the suite fail in each of three separate mutation
 runs. The transient define/read/undef test also caught the missing write
 check when run on its own.
 
+**Differential fuzzing.** `python3 bench/vcc-header-fuzz.py --seed N --cases K`
+generates three to six nested headers per seed, with repeated includes,
+conditional writes, lazy aliases, guards, token paste and counter-derived
+names. Three TUs vary the incoming state. Every permutation starts a fresh
+batch, then revisits the same TUs in reverse. Each job compares preprocessed
+token kind and spelling to its own Clang reference. Repeating the order with
+the header cache disabled distinguishes a replay discrepancy from baseline
+preprocessor behavior. A failure preserves the sources, reference output and
+batch manifest. Rerun one family with `--seed N --cases 1`.
+
+Seeds 0–1023 passed 36,864 TU comparisons in each cache mode with 59,791
+header hits on the warm runs. Seed 18 caught the missing transient-write
+check in a deliberately modified binary: warm vcc emitted `K9` where
+Clang and uncached vcc emitted `1`. Premerge runs seeds 16–23.
+
 **Kernel measurement.** Linux x86-64 host, Linux 7.4-rc2 arm64 tinyconfig,
 Clang/LLVM 23, `make -j6 Image`. Each run starts with clean kbuild outputs
 and a fresh vccd, with a warm filesystem. Host programs, assembly, probes
