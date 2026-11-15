@@ -4,12 +4,13 @@
   bench/cxx-llvm.py [-j 6] [--std c++98] [-v] [PAT]
 
 Per program: clang++ -STD must accept it (else "skip: not STD"), clang++ builds and runs it (the
-reference: stdout and exit status, 20 s limit); then `vpp -x c++ -STD -c`, clang++ links the
-object, and the run must give the same stdout and exit status.  Prints one line per failure, the
+reference: stdout and exit status, 60 s limit; cached in work/cxx-llvm-ref by the source's mtime); then `vpp -x c++ -STD -c`, clang++ links the
+object, and the run must give the same stdout and exit status (stdin empty for both: the suite's input files are not
+fetched).  Prints one line per failure, the
 first error per category, and the count.  Sources: bench/fetch-testsuites.sh llvm-test-suite.
 Target-specific directories (X86, AMX, Vectorizer intrinsics) are left out.
 """
-import argparse, collections, glob, os, re, subprocess, sys, tempfile
+import argparse, base64, collections, glob, json, os, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,12 +18,14 @@ SUITE = os.path.join(ROOT, "work", "testsuites", "llvm-test-suite", "SingleSourc
 VPP = os.path.join(os.environ.get("VCC_BIN") or os.path.join(ROOT, "build", "linux", "src"), "vpp")
 CLANG = os.environ.get("CLANGXX", "/usr/lib/llvm-23/bin/clang++")
 SKIP_DIRS = ("/X86/", "/Matrix/", "/AArch64/", "/Vectorizer/")
-TIMEOUT = 20
+TIMEOUT = 60
+CACHE = os.path.join(ROOT, "work", "cxx-llvm-ref")	# clang's results per program and standard (kept: a loaded machine's timeouts
+						# would otherwise change the skips from run to run)
 
 
 def run(cmd, **kw):
     try:
-        return subprocess.run(cmd, capture_output=True, timeout=kw.pop("timeout", 120), **kw)
+        return subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=kw.pop("timeout", 120), **kw)
     except subprocess.TimeoutExpired:
         return None
 
@@ -32,19 +35,43 @@ def first(err):
     return lines[0]
 
 
+class Ref:
+    def __init__(self, rc, out):
+        self.returncode, self.stdout = rc, out
+
+
+def reference(path, rel, std, flags, base):
+    """clang's build of the program run: a Ref, or why it is skipped (a string); cached by the source's mtime"""
+    cf = os.path.join(CACHE, std, rel + ".json")
+    key = "2:%d" % os.stat(path).st_mtime_ns	# (2: programs read an empty stdin)
+    try:
+        d = json.load(open(cf))
+        if d["key"] == key:
+            return d["skip"] if d.get("skip") else Ref(d["rc"], base64.b64decode(d["out"]))
+    except (OSError, ValueError, KeyError):
+        pass
+    r = run([CLANG] + flags + ["-O0", "-c", path, "-o", base + ".ref.o"])
+    res = None
+    if r is None or r.returncode:
+        res = "not " + std
+    elif (lambda l: l is None or l.returncode)(run([CLANG, base + ".ref.o", "-o", base + ".ref", "-stdlib=libc++", "-lm"])):
+        res = "clang link"
+    else:
+        ref = run([base + ".ref"], cwd=os.path.dirname(path), timeout=TIMEOUT)
+        res = "too slow" if ref is None else Ref(ref.returncode, ref.stdout)
+    os.makedirs(os.path.dirname(cf), exist_ok=True)
+    json.dump({"key": key, "skip": res if isinstance(res, str) else None, "rc": getattr(res, "returncode", 0),
+               "out": base64.b64encode(getattr(res, "stdout", b"")).decode()}, open(cf, "w"))
+    return res
+
+
 def one(path, std, tmp):
     rel = os.path.relpath(path, SUITE)
     base = os.path.join(tmp, rel.replace("/", "_")[:-4])
     flags = ["-std=" + std, "-stdlib=libc++", "-w", "-I", os.path.dirname(path)]
-    r = run([CLANG] + flags + ["-O0", "-c", path, "-o", base + ".ref.o"])
-    if r is None or r.returncode:
-        return rel, "skip", "not " + std
-    r = run([CLANG, base + ".ref.o", "-o", base + ".ref", "-stdlib=libc++", "-lm"])
-    if r is None or r.returncode:
-        return rel, "skip", "clang link"
-    ref = run([base + ".ref"], cwd=os.path.dirname(path), timeout=TIMEOUT)
-    if ref is None:
-        return rel, "skip", "too slow"
+    ref = reference(path, rel, std, flags, base)
+    if isinstance(ref, str):
+        return rel, "skip", ref
     r = run([VPP, "-x", "c++"] + flags + ["-c", path, "-o", base + ".o"], env={**os.environ, "VCC_CXX_PROGRESS": "1"})
     if r is None:
         return rel, "fail", "vcc: timeout"

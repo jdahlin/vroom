@@ -48,7 +48,7 @@ VPRIV void cxx_paren_expression_parse(cxx *c)
 		cxx_compound_statement_parse(c);
 		if (gen) {
 			/* code generation: the block, its value its last statement's when that is an expression of a
-			   scalar type (or void); not built otherwise: a class's value is copied out before the block's
+			   scalar type, void or a class of plain data; not built otherwise: another class's value is copied out before the block's
 			   objects are destroyed, which the C node does not do */
 			uint32_t blk = cxx_gen_on(c) ? c->snode : 0, n = 0;
 			const node *bx = blk ? AST_NODE_AT(c->ast, blk) : NULL;
@@ -57,7 +57,11 @@ VPRIV void cxx_paren_expression_parse(cxx *c)
 				const node *last = AST_NODE_AT(c->ast, c->ast->lists[bx->b + bx->c - 1]);
 				ast_qualified_type t = last->op == AST_NODE_EXPRESSION && last->a ? AST_NODE_AT(c->ast, last->a)->ty : cc_type_basic(AST_TYPE_VOID);
 
-				if (!cc_type_is_record(c->ast, t) && c->etype != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, c->etype)) {
+				/* (a class of plain data, copied as C copies it, too) */
+				bool plain = !cc_type_is_record(c->ast, t) || (AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY && cxx_gen_type_ok(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) &&
+									       !cxx_gen_needs_construction_public(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)));
+
+				if (plain && c->etype != CXX_TY_UNKNOWN) {
 					n = cc_node_new(c->ast, AST_NODE_STATEMENT_EXPRESSION, AST_QUALIFIED_TYPE_UNQUALIFIED(t), sloc);
 					AST_NODE_AT(c->ast, n)->a = blk;
 				}
@@ -327,8 +331,12 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
 			cxx_skip_balanced(c);
 		if (t->kw == CXX_KW_true || t->kw == CXX_KW_false)
 			cxx_ec(c, cc_type_basic(AST_TYPE_BOOL), t->kw == CXX_KW_true);
-		else if (t->kw == CXX_KW___null)
-			cxx_et(c, cc_type_basic(AST_TYPE_LONG), false);
+		else if (t->kw == CXX_KW___null) {
+			/* NULL: the integer constant 0 of type long (a null pointer constant, as GCC's) */
+			cxx_ec(c, cc_type_basic(AST_TYPE_LONG), 0);
+			if (!c->tentative)
+				cxx_gen_integer(c, 0, cc_type_basic(AST_TYPE_LONG), t->loc);
+		}
 		else if ((t->kw == CXX_KW_nullptr || t->kw == CXX_KW___nullptr) && !c->tentative) {
 			cxx_et(c, cxx_nullptr_type(c), false);
 			cxx_gen_nullptr(c, t->loc);
