@@ -376,6 +376,12 @@ VPRIV void cxx_expression_parse(cxx *c)
 
 			c->enode = 0;
 			cxx_gen_comma(c, ln, rn, cloc);
+		} else if (c->etype != CXX_TY_UNKNOWN && c->elval && c->enode && ln && cxx_gen_on(c) &&
+			   (AST_NODE_AT(c->ast, c->enode)->flags & AST_NODE_FLAG_LVALUE)) {
+			/* a, b with b an object of class type: b, an lvalue (++n, ++it in a for's step), *(a, &b) */
+			uint32_t rn = c->enode, p = cc_address_of_build(c->ast, rn, cloc);
+
+			c->enode = cc_dereference_build(c->ast, cc_node_new_operands(c->ast, AST_NODE_COMMA, AST_NODE_AT(c->ast, p)->ty, cloc, ln, p), cloc);
 		} else
 			c->enode = 0;
 	}

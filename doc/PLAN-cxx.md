@@ -2340,3 +2340,11 @@ return fick okänd returtyp och ingen kod (`__tree::__insert_range_unique`).
 Nu sparas och återställs den i `cxx_outer_save` och i return.c.  Test:
 `run/lambda-ret-auto-inside.cpp`.  Strikt bänk: pass 7, 168 saknas (från
 170).  Sviter gröna (100/100, 38/38, mangle, 350/350).
+
+## Status 145 (2026-11-15)
+`a, b` där `b` är ett klassobjekt (`++cnt, ++it` i en for-loops steg, jsons
+serializer::dump) fick ingen nod; nu `*(a, &b)`, ett lvalue.  Test:
+`run/comma-class-operand.cpp`.  Strikt bänk: 210 saknas (dump når nu fler
+funktioner); störst nu construct.c:449 (58): globala/statiska aggregat med
+arraymedlem (`std::array`, `struct { int v[2]; } x = {{1, 2}}`) får ingen
+initierare.  Sviter gröna (101/101, 38/38, mangle, 350/350).
