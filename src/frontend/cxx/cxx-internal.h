@@ -440,6 +440,7 @@ typedef struct cxx {
 	uint8_t cond_decl;		/* parsing an if's or a switch's condition: a declaration there is a real one (code generation) */
 	ast_qualified_type conv_last;			/* the conversion-function-id just parsed: the type it converts to (the function's result) */
 	uint32_t gen_sret;		/* the function returns a class by address: the parameter that points to the result */
+	uint8_t call_ranks[16], call_nranks;	/* the picked candidate's conversion ranks, per argument (call_nranks 0: not ranked) */
 	uint8_t gen_cond_ok;			/* the next cxx_gen_class_temp may make a flagged temporary (gen_notemp) ... */
 	uint32_t gen_cond_live;			/* ... it did: T *live, to be set to the temporary's address once built */
 	uint32_t *gen_cdtor_tag, *gen_cdtor_sym, gen_ncdtor;	/* the "destroy if built" helpers, by record tag */

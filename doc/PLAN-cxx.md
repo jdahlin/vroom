@@ -2407,3 +2407,16 @@ Test: `run/conditional-class-convert.cpp`.  Strikt bänk: 149 saknas (från
 159); unit-class_lexer länkar nu och fallerar på ett äldre fel:
 `std::cout << " "` väljer `operator<<(const void*)` (nästa steg).
 Sviter gröna (106/106, 38/38, mangle, 350/350).
+
+## Status 151 (2026-11-15)
+En medlemsoperator som behöver en konvertering (`operator<<(const void *)`)
+avgjorde förut ensam; nu prövas även namnrymdens och ADL:s operatorer, och en
+som binder objektet exakt och konverterar operanden bättre vinner (`os << " "`
+med `operator<<(OS<C>&, const C *)`), som i en gemensam kandidatmängd.
+Kandidattaket 24 -> 64.  Test: `run/operator-member-vs-free.cpp`.
+Kvar (felkompilering, gör att unit-class_lexer fallerar): första `std::cout
+<< "x"` i en TU skriver en pekare: `__is_ostreamable<ostream&, const
+char(&)[2]>` blir okänd vid första användningen (då `<<` självt löses), så
+`__and_helper` och därmed hela `<<`-mängden i std blir okänd och medlemmen
+`const void*` står kvar; senare användningar blir rätt.  Återskapas inte utan
+libc++.  Sviter gröna (107/107, 38/38, mangle, 350/350).

@@ -510,7 +510,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 		args = acopy, lval = lcopy;
 	}
 	/* the viable candidates, each argument's conversion ranked */
-	struct cand { cxx_entity *e; ast_qualified_type r; uint8_t rank[16]; uint8_t ranked, tmpl; ast_qualified_type pt[16]; } cand[24];
+	struct cand { cxx_entity *e; ast_qualified_type r; uint8_t rank[16]; uint8_t ranked, tmpl; ast_qualified_type pt[16]; } cand[64];
 	cxx_entity *unk[8];	/* the templates whose deduction is not known */
 	uint32_t nunk = 0;
 	const char *tn = getenv("VCC_CXX_CAND");	/* trace the candidates of calls to this name */
@@ -611,7 +611,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 			r = ft->base;
 			sig = ft;
 		}
-		if (ncand == 24) {
+		if (ncand == 64) {
 			unknown = true;
 			continue;
 		}
@@ -912,6 +912,11 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 	c->none_viable = 0;	/* (this call's verdict, not that of the calls made while deducing its candidates) */
 	c->call_resolved = best >= 0;
 	c->call_picked = best >= 0 ? cand[best].e : NULL;
+	c->call_nranks = 0;
+	if (best >= 0 && cand[best].ranked && nargs <= 16) {
+		memcpy(c->call_ranks, cand[best].rank, nargs);
+		c->call_nranks = (uint8_t)(nargs ? nargs : 0);
+	}
 	if (best >= 0)
 		result = cand[best].r;
 	else if (!viable || !same || unknown) {
@@ -1027,7 +1032,22 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	uint8_t unsure0 = c->eunsure;
 	bool pending = false, pending_lval = false;
 	ast_qualified_type pending_type = CXX_TY_UNKNOWN;
+	/* a member that needs a conversion where a non-member may not (os << " ": operator<<(const void *) and
+	   operator<<(ostream&, const char *)): set aside while the non-members are tried, kept unless one binds
+	   the object exactly and converts the operand better */
+	bool mpick = false, m_lval = false;
+	ast_qualified_type m_type = CXX_TY_UNKNOWN;
+	cxx_entity *m_picked = NULL, *m_callee = NULL;
+	uint8_t m_obj = 0, m_unsure = 0, m_rank = 0, m_const = 0;
+	int64_t m_value = 0;
+#define OP_RESTORE_MEMBER() (cxx_et(c, m_type, m_lval), c->call_resolved = 1, c->call_picked = m_picked, c->call_obj = m_obj, \
+			      c->eunsure = m_unsure, c->ecallee = m_callee, c->econst = m_const, c->evalue = m_value, c->none_viable = 0, true)
 #define OP_ATTEMPT_DONE() do { \
+		if (c->call_resolved && mpick) { \
+			if (c->call_nranks == 2 && c->call_ranks[0] <= 1 && c->call_ranks[1] < m_rank) \
+				return true; \
+			return OP_RESTORE_MEMBER(); \
+		} \
 		if (c->call_resolved) \
 			return true; \
 		if (!c->none_viable && !pending) \
@@ -1053,7 +1073,12 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
 		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
-		OP_ATTEMPT_DONE();
+		if (c->call_resolved && nargs == 1 && c->call_nranks == 1 && c->call_ranks[0] >= 2 && !c->tentative) {
+			mpick = true, m_type = c->etype, m_lval = c->elval, m_picked = c->call_picked, m_obj = c->call_obj;
+			m_unsure = c->eunsure, m_callee = c->ecallee, m_const = c->econst, m_value = c->evalue, m_rank = c->call_ranks[0];
+			c->call_resolved = 0;
+		} else
+			OP_ATTEMPT_DONE();
 		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
 		   to function aside) */
 		if (vintern_ents[id].len == 10 && !memcmp(vintern_ents[id].s, "operator()", 10) && !c->tentative) {
@@ -1116,6 +1141,8 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 			OP_ATTEMPT_DONE();
 		}
 	}
+	if (mpick)
+		return OP_RESTORE_MEMBER();
 	if (pending) {
 		cxx_et(c, pending_type, pending_lval);
 		c->eunsure = 1;
