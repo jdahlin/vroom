@@ -260,7 +260,16 @@ static int cxx_ooc_types_agree(cxx *c, uint32_t pos, const cxx_entity *e, cxx_sc
 	return r;
 }
 
+static bool cxx_ooc_refs_agree2(cxx *c, uint32_t pos, const cxx_entity *e, bool loose);
+
 VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
+{
+	return cxx_ooc_refs_agree2(c, pos, e, false);
+}
+
+/* (loose: a parameter written without & or && agrees with any, its type a typedef that may be a reference:
+   vector's insert(const_iterator, const_reference) against (const_iterator, value_type&&)) */
+static bool cxx_ooc_refs_agree2(cxx *c, uint32_t pos, const cxx_entity *e, bool loose)
 {
 	const ctype *ft = AST_TYPE(c->ast, e->ty);
 	uint32_t i = pos, depth = 0, k = 0;
@@ -304,7 +313,7 @@ VPRIV bool cxx_ooc_refs_agree(cxx *c, uint32_t pos, const cxx_entity *e)
 				ast_qualified_type pt = c->ast->params[ft->aux + k];
 				int want = AST_TYPE_KIND(c->ast, pt) == AST_TYPE_POINTER ? AST_TYPE(c->ast, pt)->ext : 0;
 
-				if (want != ref)
+				if (want != ref && !(loose && !ref))
 					return false;
 			}
 			k++, ref = 0;
@@ -348,17 +357,24 @@ VPRIV void cxx_member_definition_use(cxx *c, cxx_entity *e)
 		bargs = x->pargs, nbargs = x->npargs;
 	}
 	nparams = AST_TYPE(c->ast, e->ty)->n;
-	for (int pass = 0; pass < 2 && matches != 1; pass++) {
+	uint32_t several = 0;
+
+	for (int pass = 0; pass < 3 && matches != 1; pass++) {
 		/* (pass 1, several with that many parameters: each parameter's reference kind as written must agree,
-		   function(const function&) against function(function&&)) */
+		   function(const function&) against function(function&&); pass 2, none did: a parameter written
+		   without one agrees with any) */
+		if (pass == 2 && (matches || several < 2))
+			break;
 		matches = 0, d = NULL;
 		for (uint32_t i = 0; i < t->noocs; i++)
 			if (t->oocs[i].name == e->name && t->oocs[i].is_const == e->fn_const && !t->oocs[i].inner &&
 			    (t->oocs[i].pack ? nparams + 1 >= t->oocs[i].nparams : t->oocs[i].nparams == nparams) &&
 			    (x->pos ? t->oocs[i].partial && t->oocs[i].params->ntparams == nbargs : !t->oocs[i].partial) &&
-			    (!pass || cxx_ooc_refs_agree(c, t->oocs[i].pos, e)))
+			    (!pass || cxx_ooc_refs_agree2(c, t->oocs[i].pos, e, pass == 2)))
 				d = &t->oocs[i], matches++;
-		if (!matches)
+		if (!pass)
+			several = matches;
+		if (!matches && pass != 1)
 			break;
 	}
 	if (matches > 1) {

@@ -211,12 +211,16 @@ VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue)
 		return;
 	case LEX_TOKEN_STAR:
 		cxx_et(c, cxx_is_ptr(c, t) ? AST_TYPE(c->ast, t)->base : CXX_TY_UNKNOWN, true);
+		if (cxx_is_arith(c, t) && !c->template_depth)
+			CXX_INVALID(c);	/* (*i of an integer: ill-formed, requires(T& t) { *t; } false for int) */
 		return;
 	case LEX_TOKEN_EXCLAMATION:
 		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_MINUS: case LEX_TOKEN_PLUS: case LEX_TOKEN_TILDE:
 		cxx_et(c, cxx_is_arith(c, t) ? cc_type_promote(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) : CXX_TY_UNKNOWN, false);
+		if (op != LEX_TOKEN_PLUS && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t)->ext && !c->template_depth)
+			CXX_INVALID(c);	/* (-p, ~p of a pointer) */
 		return;
 	case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
 		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? t : CXX_TY_UNKNOWN, true);

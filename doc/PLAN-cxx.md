@@ -2589,3 +2589,16 @@ Sviter gröna (126/126, 38/38, mangle).  Strikt bänk: pass 18, 115 saknas.
   Test: `run/local-static-guarded.cpp`.
 Sviter gröna (128/128, 38/38, mangle).  Strikt bänk: pass 22 (från 18),
 107 funktioner saknas.
+
+## Status 165 (2026-11-15)
+- Out-of-class-definitioner av medlemmar som bara skiljer sig i
+  referensslag, där en parameter skrivs med en typedef av en referens
+  (vector:s `insert(const_iterator, const_reference)` mot `(...,
+  value_type&&)`): ett tredje pass där en parameter utan `&`/`&&` stämmer
+  med vilken som helst.  Test: `run/ooc-typedef-reference.cpp`.
+- `*i` av ett heltal (och `-p`, `~p` av en pekare) är ogiltigt:
+  `requires(T &t) { *t; }` blir falskt för int, så libc++:s
+  iteratorbegrepp avvisar int och `vector::insert(pos, 5, 0xff)` väljer
+  antalsöverlagringen.  Test: `run/requires-deref-scalar.cpp`.  Kvar: en
+  efterställd requires-klausul ingår inte i vcc:s mangling (clangs `Q...E`).
+Sviter gröna (130/130, 38/38, mangle).  Strikt bänk: pass 22, 105 saknas.
