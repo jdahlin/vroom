@@ -1638,6 +1638,8 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 	case AST_TYPE_UNSIGNED_LONG_LONG: mg_str(m, "y"); return;
 	case AST_TYPE_INT128: mg_str(m, "n"); return;
 	case AST_TYPE_UINT128: mg_str(m, "o"); return;
+	case AST_TYPE_FLOAT16: mg_str(m, x->ext ? "Dh" : "DF16_"); return;
+	case AST_TYPE_BFLOAT16: mg_str(m, PP_IS_X86_64(a->o->target) ? "DF16b" : "u6__bf16"); return;
 	case AST_TYPE_FLOAT: mg_str(m, "f"); return;
 	case AST_TYPE_DOUBLE: mg_str(m, "d"); return;
 	case AST_TYPE_LONG_DOUBLE: mg_str(m, "e"); return;
@@ -1668,7 +1670,18 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
-		mg_text(m, num, (size_t)snprintf(num, sizeof num, "A%u_", (unsigned)x->n));
+		mg_str(m, "A");
+		if (x->flags & AST_TYPE_FLAG_INCOMPLETE) {
+			if (x->ext == 1)
+				mg_str(m, "T_");
+			else if (x->ext)
+				mg_text(m, num, (size_t)snprintf(num, sizeof num, "T%u_", (unsigned)x->ext - 2));
+		} else if (x->flags & AST_TYPE_FLAG_VLA) {
+			m->bad = true;
+			return;
+		} else
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, "%llu", (unsigned long long)cc_type_array_length(a, t)));
+		mg_str(m, "_");
 		mg_type(m, x->base);
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
@@ -1757,7 +1770,7 @@ static const char *mg_operator(const vident *v, uint32_t nparams, bool member)
 		{ "&=", NULL, "aN" }, { "|=", NULL, "oR" }, { "^=", NULL, "eO" }, { "<<", NULL, "ls" }, { ">>", NULL, "rs" }, { "<<=", NULL, "lS" },
 		{ ">>=", NULL, "rS" }, { "==", NULL, "eq" }, { "!=", NULL, "ne" }, { "<=", NULL, "le" }, { ">=", NULL, "ge" }, { "<=>", NULL, "ss" },
 		{ "&&", NULL, "aa" }, { "||", NULL, "oo" }, { "++", "pp", "pp" }, { "--", "mm", "mm" }, { ",", NULL, "cm" }, { "->*", NULL, "pm" },
-		{ "->", "pt", NULL }, { "()", "cl", "cl" }, { "[]", NULL, "ix" },
+		{ " co_await", "aw", NULL }, { "->", "pt", NULL }, { "()", "cl", "cl" }, { "[]", NULL, "ix" },
 	};
 	uint32_t operands = nparams + member;
 
@@ -1799,8 +1812,9 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 		op = !strcmp(v->s, "operator new") ? "nw" : !strcmp(v->s, "operator new[]") ? "na" :
 		     !strcmp(v->s, "operator delete") ? "dl" : !strcmp(v->s, "operator delete[]") ? "da" : NULL;
 	}
-	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
-		return false;	/* (literal operators: later) */
+	bool literal = v->len > 10 && !memcmp(v->s, "operator\"\"", 10);
+	if (literal)
+		op = "li";
 	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
 	if (v->len && v->s[0] == ' ') {
 		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))
@@ -1823,36 +1837,29 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 		if (member && (is_const & 1))
 			mg_str(&m, "K");
 		mg_prefix(&m, home);
-		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
-			mg_str(&m, "L");
-		if (op)
-			mg_str(&m, op);
-		else if (conv) {
-			mg_str(&m, "cv");
-			mg_type(&m, x->base);
-		} else
-			mg_source_name(&m, f->name);
-		mg_abi_tag(&m, f->abi_tag);
-		if (f->is_instance)
-			mg_remember(&m, CXX_SUB_TEMPLATE, mg_tkey(f), 0);	/* (the template's name: a candidate before its arguments) */
-		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
+	} else if (mg_scope_is_std(&m, home))
+		mg_str(&m, "St");
+	if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
+		mg_str(&m, "L");
+	if (op) {
+		mg_str(&m, op);
+		if (literal) {
+			char num[16];
+			mg_text(&m, num, (size_t)snprintf(num, sizeof num, "%u", (unsigned)v->len - 10));
+			mg_text(&m, v->s + 10, v->len - 10);
+		}
+	} else if (conv) {
+		mg_str(&m, "cv");
+		mg_type(&m, x->base);
+	} else
+		mg_source_name(&m, f->name);
+	mg_abi_tag(&m, f->abi_tag);
+	if (f->is_instance)
+		mg_remember(&m, CXX_SUB_TEMPLATE, mg_tkey(f), 0);	/* (the template's name: a candidate before its arguments) */
+	if (f->is_instance)
+		mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
+	if (mg_nested(&m, home))
 		mg_str(&m, "E");
-	} else {
-		if (mg_scope_is_std(&m, home))
-			mg_str(&m, "St");
-		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
-			mg_str(&m, "L");
-		if (op)
-			mg_str(&m, op);
-		else
-			mg_source_name(&m, f->name);
-		mg_abi_tag(&m, f->abi_tag);
-		if (f->is_instance)
-			mg_remember(&m, CXX_SUB_TEMPLATE, mg_tkey(f), 0);	/* (the template's name: a candidate before its arguments) */
-		if (f->is_instance)
-			mg_template_args(&m, f->targs, f->ntargs, f->inst_pack_at, f->inst_params);
-	}
 	/* A function template's instance: its return type and its parameters as the template declares them
 	   (T_ for a parameter), when that signature is known; else the instance's own types (unique and stable
 	   among vcc's objects, not clang's name). */

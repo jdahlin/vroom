@@ -57,6 +57,11 @@ static ast_qualified_type cxx_spec_type1(cxx *c, const cxx_spec *s)
 	else if (s->v_float) k = AST_TYPE_FLOAT;
 	else if (s->v_double) k = s->v_long ? AST_TYPE_LONG_DOUBLE : AST_TYPE_DOUBLE;
 	else if (s->v_float128) k = AST_TYPE_FLOAT128;
+	else if (s->v_float16 == 2) {
+		ctype t = c->ast->ty[AST_TYPE_FLOAT16];
+		t.ext = 1;	/* __fp16 is a distinct type with _Float16's representation */
+		return cc_type_qualify(c->ast, AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0), s->quals);
+	}
 	else if (s->v_float16) k = AST_TYPE_FLOAT16;
 	else if (s->v_bf16) k = AST_TYPE_BFLOAT16;
 	else if (s->v_int128) k = s->v_unsigned ? AST_TYPE_UINT128 : AST_TYPE_INT128;
