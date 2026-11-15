@@ -1748,8 +1748,15 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 		op = !strcmp(v->s, "operator new") ? "nw" : !strcmp(v->s, "operator new[]") ? "na" :
 		     !strcmp(v->s, "operator delete") ? "dl" : !strcmp(v->s, "operator delete[]") ? "da" : NULL;
 	}
+	char litop[96];
+
+	if (!op && v->len > 10 && !memcmp(v->s, "operator\"\"", 10) && v->len - 10 < 64) {
+		/* a literal operator: li <source-name> (operator""_json: li5_json) */
+		snprintf(litop, sizeof litop, "li%u%.*s", (unsigned)(v->len - 10), (int)(v->len - 10), v->s + 10);
+		op = litop;
+	}
 	if (v->len > 8 && !memcmp(v->s, "operator", 8) && !op && !conv)
-		return false;	/* (literal operators: later) */
+		return false;
 	/* a constructor or destructor: C1/D1 the complete object's, C2/D2 the base object's (variant) */
 	if (v->len && v->s[0] == ' ') {
 		if (!member || (variant != 1 && variant != 2 && !(variant == 3 && v->s[1] != 'c')))

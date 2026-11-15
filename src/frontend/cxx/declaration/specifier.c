@@ -539,11 +539,22 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 		cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
 		return vintern_cstr("operator[]");
 	}
-	if (k == LEX_TOKEN_STRING) {	/* operator "" _suffix */
+	if (k == LEX_TOKEN_STRING) {	/* operator "" _suffix, operator ""_suffix: named operator""_suffix */
+		const cxx_token *t = cxx_peek(c, 0);
+		const char *suf = t->s + 2;
+		uint32_t ns = t->len >= 2 ? t->len - 2 : 0;
+		char buf[96];
+
 		cxx_advance(c);
-		if (cxx_is(c, LEX_TOKEN_IDENTIFIER))
+		if (!ns && cxx_is(c, LEX_TOKEN_IDENTIFIER)) {
+			suf = cxx_peek(c, 0)->s, ns = cxx_peek(c, 0)->len;
 			cxx_advance(c);
-		return 1;
+		}
+		if (t->len < 2 || t->s[0] != '"' || t->s[1] != '"' || !ns || ns > 80)
+			return 1;
+		memcpy(buf, "operator\"\"", 10);
+		memcpy(buf + 10, suf, ns);
+		return vintern_copy(buf, 10 + ns);
 	}
 	if (k >= LEX_TOKEN_LEFT_SQUARE && k < LEX_TOKEN_HASH && k != LEX_TOKEN_LEFT_BRACE && k != LEX_TOKEN_RIGHT_BRACE &&
 	    k != LEX_TOKEN_RIGHT_PAREN && k != LEX_TOKEN_RIGHT_SQUARE && k != LEX_TOKEN_SEMICOLON && k != LEX_TOKEN_PERIOD &&

@@ -684,6 +684,7 @@ VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc);
 VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc);
 VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc);
+VPRIV void cxx_gen_string_kind(cxx *c, const char *text, size_t len, int esz, int kind, ast_qualified_type et, uint32_t loc);
 VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
 VPRIV void cxx_gen_static_cast_class(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
 VPRIV void cxx_gen_index(cxx *c, uint32_t base, uint32_t index, uint32_t loc);

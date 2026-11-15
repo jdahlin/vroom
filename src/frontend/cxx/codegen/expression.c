@@ -187,8 +187,9 @@ VPRIV void cxx_gen_postfix(cxx *c, int op, uint32_t x, uint32_t loc)
 	c->enode = r;
 }
 
-/* a string literal: its bytes (no escapes), NUL-terminated */
-VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc)
+/* a string literal: its elements (decoded, esz bytes each, len bytes without the terminating NUL element, which
+   text has after them), of element type et */
+VPRIV void cxx_gen_string_kind(cxx *c, const char *text, size_t len, int esz, int kind, ast_qualified_type et, uint32_t loc)
 {
 	cc *a = c->ast;
 	char *buf;
@@ -196,15 +197,21 @@ VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc)
 
 	if (!cxx_gen_on(c))
 		return;
-	buf = cc_heap_allocate(a, len + 1);
+	buf = cc_heap_allocate(a, len + (size_t)esz);
 	memcpy(buf, text, len);
-	buf[len] = 0;
+	memset(buf + len, 0, (size_t)esz);
 	si = a->nstr++;
-	a->strs[si] = (cstr){ buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING };
-	n = cc_node_new(a, AST_NODE_STRING, cc_type_array(a, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST), (uint64_t)len + 1, 0), loc);
+	a->strs[si] = (cstr){ buf, (uint32_t)(len / (size_t)esz) + 1, (uint8_t)esz, (uint8_t)kind };
+	n = cc_node_new(a, AST_NODE_STRING, cc_type_array(a, cc_type_qualify(a, et, AST_QUALIFIER_CONST), (uint64_t)(len / (size_t)esz) + 1, 0), loc);
 	AST_NODE_AT(a, n)->a = si;
 	AST_NODE_AT(a, n)->flags = AST_NODE_FLAG_LVALUE;
 	c->enode = n;
+}
+
+/* a string literal: its bytes (no escapes), NUL-terminated */
+VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc)
+{
+	cxx_gen_string_kind(c, text, len, 1, LEX_TOKEN_STRING, cc_type_basic(AST_TYPE_CHAR), loc);
 }
 
 /* static_cast<T>(x) for a class T: a temporary direct-initialized from x ([expr.static.cast]/4); a prvalue of T

@@ -2487,3 +2487,13 @@ och ett senare försök som valde (jsons dolda `operator<<`) ärvde det: doctest
 `has_insertion_operator<json>` blev okänd i instanser och `toString(json)`
 saknade kod.  Varje ADL-försök börjar nu med ingångens värde.  Sviter gröna
 (113/113, 38/38, mangle, 350/350).
+
+## Status 157 (2026-11-15)
+Stränglitteraler av alla slag: råa (`R"(...)"`), breda och UTF-16/32
+(`L"..."`, `u"..."`, `U"..."`, med `\u` och UTF-8 avkodade till element,
+surrogatpar), och teckenkonstanterna `L'x'`, `u'x'`, `U'x'` (wchar_t,
+char16_t, char32_t; `u8` är char som i C++11).  Litteraloperatorer
+(`operator ""_json`, båda stavningarna) får namnet `operator""_x` och
+manglas `li<n>_x`; `"..."_x` anropar dem med strängen och dess längd.
+Tester: `run/string-literal-kinds.cpp`, `run/udl-string.cpp`.  Sviter gröna
+(115/115, 38/38, mangle); strikt bänk pass 10, 152 saknas (fler kroppar nås).
