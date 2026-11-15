@@ -626,7 +626,10 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to,
             if (!x)
                 return 0;
         }
+        /* (a bit-field has no address: const T& to one binds a temporary holding its value,
+		   [dcl.init.ref]; Skia's SkToBool(fBitfields.fAntiAlias)) */
         if (!(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) ||
+            cc_node_bitfield(a, x) ||
             (cxx_gen_type_ok(c, rt) && !cc_type_is_record(a, rt) &&
              AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) !=
                  AST_QUALIFIED_TYPE_UNQUALIFIED(rt))) {
