@@ -209,9 +209,14 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
     }
     t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
     if (!cc_type_is_record(a, t) || !cxx_gen_needs_destruction(c, t, 0)) {
-        c->enode = cc_cast_insert(
-            a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc),
-            cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
+        /* nothing destroyed, the object's expression evaluated all the same ((--p)->~T() in valarray's
+           __clear: dropping it looped forever) */
+        c->enode =
+            cc_cast_insert(a,
+                           (AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE)
+                               ? cc_address_of_build(a, x, loc)
+                               : x,
+                           cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
         return;
     }
     if (!(d = cxx_gen_effective_destructor(c, t, 0)))
