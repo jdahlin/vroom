@@ -147,7 +147,17 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 								cxx_gen_integer(c, c->evalue, AST_QUALIFIED_TYPE_UNQUALIFIED(cty), cloc);
 						}
 					}
-					else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
+					else if (!set && callee_node && callee_node == c->bmf_callee && c->bmf_this && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX && an < CXX_MAX_ARGS) {
+						/* (x.*pmf)(args): the function the pointer to member gives, this first */
+						uint32_t th = c->bmf_this, pre = c->bmf_pre;
+
+						memmove(anodes + 1, anodes, an * sizeof *anodes);
+						anodes[0] = th;
+						c->bmf_callee = c->bmf_this = c->bmf_pre = 0;
+						cxx_gen_indirect_call(c, callee_node, anodes, an + 1, cloc);
+						if (c->enode && pre)
+							c->enode = cc_node_new_operands(c->ast, AST_NODE_COMMA, AST_NODE_AT(c->ast, c->enode)->ty, cloc, pre, c->enode);
+					} else if (!set && callee_node && c->etype != CXX_TY_UNKNOWN && an != UINT32_MAX)
 						cxx_gen_indirect_call(c, callee_node, anodes, an, cloc);	/* through a pointer to a function */
 					/* f(x) with no f that fits: the functions named f in the namespaces of the
 					   arguments' classes (argument-dependent lookup) */

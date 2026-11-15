@@ -628,6 +628,8 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 
 	if (!cxx_gen_on(c) || !l || !r)
 		return;
+	if (op == LEX_TOKEN_EQUAL && cxx_memptr_of(c, AST_NODE_AT(c->ast, l)->ty) && !(r = cxx_gen_memptr_convert(c, r, AST_NODE_AT(c->ast, l)->ty, loc)))
+		return;	/* (a pointer to member: null, a base's converted) */
 	switch (op) {
 	case LEX_TOKEN_EQUAL: base = 0; break;
 	case LEX_TOKEN_PLUS_EQUAL: base = LEX_TOKEN_PLUS; break;

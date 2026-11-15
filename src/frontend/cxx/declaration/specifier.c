@@ -457,17 +457,34 @@ VPRIV bool cxx_ptr_operator_parse(cxx *c, ast_qualified_type *t)
 		cxx_scope *q;
 		bool dep;
 
+		/* (T::* of a type parameter: its placeholder, for deduction) */
+		cxx_entity *first = cxx_is(c, LEX_TOKEN_IDENTIFIER) && cxx_peek(c, 1)->kind == LEX_TOKEN_COLON_COLON &&
+				    cxx_peek(c, 2)->kind == LEX_TOKEN_STAR ? cxx_lookup(c, cxx_peek(c, 0)->id) : NULL;
+		uint8_t fq = c->fn_const & 3;	/* (R (C::*)(P...) const: the function tail just parsed, the outer suffix's) */
+
 		cxx_nested_name_parse(c, &q, &dep);
 		if (c->pos != save && cxx_is(c, LEX_TOKEN_STAR)) {
-			/* a pointer to member: an opaque type of its own (no such values are built yet), so that a template's
-			   parameter of that form is a deduction that fails for other arguments, not one not known */
+			/* a pointer to member (memptr.c); of a class not known (dependent): an opaque type of its own, so
+			   that a template's parameter of that form is a deduction that fails for other arguments */
+			int mq = 0;
+			void *po;
+
 			cxx_advance(c);
-			while (cxx_kw_is_cv(cxx_kw(c)))
+			while (cxx_kw_is_cv(cxx_kw(c))) {
+				mq |= cxx_kw(c) == CXX_KW_const || cxx_kw(c) == CXX_KW___const || cxx_kw(c) == CXX_KW___const__ ? AST_QUALIFIER_CONST : 0;
 				cxx_advance(c);
+			}
 			if (t) {
-				if (!c->memptr_ty)
-					c->memptr_ty = AST_QUALIFIED_TYPE(c->ast->tags[cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("__vcc_member_pointer"), 0)].ty, 0);
-				*t = c->memptr_ty;
+				ast_qualified_type cls = q && q->kind == CXX_SCOPE_CLASS && q->owner && q->owner->ty != CXX_TY_UNKNOWN && !q->dependent ? q->owner->ty :
+							 first && first->kind == CXX_ENTITY_TYPE && first->ty != CXX_TY_UNKNOWN && cxx_placeholder_of(c, first->ty, &po) >= 0 ? first->ty : CXX_TY_UNKNOWN;
+				ast_qualified_type mp = *t != CXX_TY_UNKNOWN && cls != CXX_TY_UNKNOWN ? cxx_type_memptr(c, cls, *t, fq) : CXX_TY_UNKNOWN;
+
+				if (mp == CXX_TY_UNKNOWN) {
+					if (!c->memptr_ty)
+						c->memptr_ty = AST_QUALIFIED_TYPE(c->ast->tags[cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("__vcc_member_pointer"), 0)].ty, 0);
+					mp = c->memptr_ty;
+				}
+				*t = cc_type_qualify(c->ast, mp, mq);
 			}
 			return true;
 		}

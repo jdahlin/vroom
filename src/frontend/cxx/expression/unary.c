@@ -76,6 +76,60 @@ static bool cxx_sizeof_vla(cxx *c, ast_qualified_type t, uint32_t loc)
 	return true;
 }
 
+/* &C::m of a non-static data member or member function m of class C: a pointer to member (memptr.c), of the
+   class that declares m (&D::i of B's i is an int B::*); false (nothing consumed): no such name here */
+static bool cxx_address_of_member_parse(cxx *c)
+{
+	uint32_t p = c->pos + 1, save = c->pos, save_undo = c->nundo, loc = cxx_peek(c, 0)->loc;
+
+	if (c->tok[p].kind == LEX_TOKEN_COLON_COLON)
+		p++;
+	/* (a qualified name, then no call, member access or subscript: C::m alone) */
+	uint32_t q = p, nq = 0;
+
+	while (q + 2 < c->ntok && c->tok[q].kind == LEX_TOKEN_IDENTIFIER && c->tok[q + 1].kind == LEX_TOKEN_COLON_COLON)
+		q += 2, nq++;
+	if (!nq || q >= c->ntok || c->tok[q].kind != LEX_TOKEN_IDENTIFIER || c->tok[q].kw)
+		return false;
+	int nk = q + 1 < c->ntok ? c->tok[q + 1].kind : LEX_TOKEN_EOF;
+
+	if (nk == LEX_TOKEN_LEFT_PAREN || nk == LEX_TOKEN_LEFT_SQUARE || nk == LEX_TOKEN_PERIOD || nk == LEX_TOKEN_ARROW || nk == LEX_TOKEN_LESS)
+		return false;
+	cxx_scope *qs;
+	bool dep;
+
+	cxx_advance(c);
+	cxx_nested_name_parse(c, &qs, &dep);
+	if (dep || !qs || qs->kind != CXX_SCOPE_CLASS || c->pos != q) {
+		cxx_rewind(c, save, save_undo);
+		return false;
+	}
+	uint32_t name = cxx_peek(c, 0)->id;
+	cxx_entity *set = cxx_lookup_in(c, qs, name, 0), *m = NULL;
+	int nm = 0;
+
+	for (cxx_entity *e = set; e; e = e->next)
+		if (e->kind == CXX_ENTITY_VALUE && ((e->field_of && !e->fn_static && e->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e->ty) != AST_TYPE_FUNCTION) ||
+						    (e->member_of && !e->fn_static && e->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION)))
+			m = m ? m : e, nm++;
+	if (nm != 1) {	/* (none: a static member's address; overloads: not chosen here yet) */
+		cxx_rewind(c, save, save_undo);
+		return false;
+	}
+	cxx_advance(c);
+	cxx_scope *home = m->field_of ? m->field_of : m->member_of;
+	ast_qualified_type cls = home && home->owner ? home->owner->ty : CXX_TY_UNKNOWN;
+	ast_qualified_type t = cls == CXX_TY_UNKNOWN ? CXX_TY_UNKNOWN : cxx_type_memptr(c, cls, AST_QUALIFIED_TYPE_UNQUALIFIED(m->ty), m->field_of ? 0 : m->fn_const & 3);
+
+	cxx_et(c, t, false);
+	if (t != CXX_TY_UNKNOWN && !c->tentative && cxx_gen_on(c)) {
+		c->enode = cxx_gen_memptr_of(c, m, t, loc);
+		if (!c->enode)
+			cxx_gen_fail(c);
+	}
+	return true;
+}
+
 VPRIV void cxx_unary_expression_parse(cxx *c)
 {
 	uint32_t sloc;
@@ -92,6 +146,8 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 				return;
 			}
 		}
+		if (cxx_kind(c) == LEX_TOKEN_AMPERSAND && cxx_address_of_member_parse(c))
+			return;	/* &C::m: a pointer to member */
 		{
 			int op = cxx_kind(c);
 
@@ -106,7 +162,17 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 				int64_t v = c->evalue;
 				uint32_t xn = c->enode;
 
-				if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0)) {
+				if (op == LEX_TOKEN_EXCLAMATION && cxx_memptr_of(c, c->etype)) {
+					/* !mp: the null pointer to member */
+					cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
+					if (!c->tentative && cxx_gen_on(c)) {
+						uint32_t t = cxx_gen_memptr_test(c, xn, oploc);
+
+						c->enode = t ? cc_binary_build(c->ast, LEX_TOKEN_EQUAL_EQUAL, t, cc_node_integer_new(c->ast, 0, cc_type_basic(AST_TYPE_INT), oploc), oploc) : 0;
+						if (!c->enode)
+							cxx_gen_fail(c);
+					}
+				} else if (!c->tentative && !cxx_operator_call_type(c, opid, c->etype, NULL, 0)) {
 					cxx_unary_type(c, op, c->etype, c->elval);
 					cxx_gen_unary(c, op, xn, oploc);
 				} else if (!c->tentative && c->call_resolved && c->call_picked)

@@ -224,7 +224,7 @@ VPRIV bool cxx_shape_mismatch(cxx *c, ast_qualified_type P, ast_qualified_type A
 VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, ast_qualified_type P, ast_qualified_type A, bool lvalue, cxx_targ *bind)
 {
 	if (c->memptr_ty && P != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_UNQUALIFIED(P) == AST_QUALIFIED_TYPE_UNQUALIFIED(c->memptr_ty) && A != CXX_TY_UNKNOWN &&
-	    AST_QUALIFIED_TYPE_UNQUALIFIED(A) != AST_QUALIFIED_TYPE_UNQUALIFIED(c->memptr_ty) && !cc_type_is_record(c->ast, A))
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(A) != AST_QUALIFIED_TYPE_UNQUALIFIED(c->memptr_ty) && !cc_type_is_record(c->ast, A) && !cxx_memptr_of(c, A))
 		return 0;	/* (R C::* from something that is no pointer to member: no deduction) */
 	if (P == CXX_TY_UNKNOWN || !cxx_mentions_placeholder(c, P, 0))
 		return 1;	/* (non-deduced: its conversion is not checked here) */

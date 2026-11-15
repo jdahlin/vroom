@@ -382,6 +382,15 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 		cxx_gen_global_finish(c, false);
 		return;
 	}
+	if (!has_init && !failed) {
+		const cxx_memptr *mp = cxx_memptr_of(c, y->ty);
+
+		if (mp && !mp->fn) {
+			/* int C::*p;: zero-initialized, the null one, offset -1 (not zero bytes) */
+			init = cxx_gen_memptr_null(c, y->ty, 0), has_init = true;
+			y = &a->syms[v->sym];
+		}
+	}
 	if (!has_init) {
 		if (cc_type_is_record(a, y->ty) && AST_TYPE_KIND(a, y->ty) != AST_TYPE_ARRAY && cxx_gen_needs_construction(c, y->ty, 0)) {
 			/* T x; of a class with a constructor: default-initialized at start-up */
@@ -398,6 +407,13 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 		y->flags |= AST_SYMBOL_FLAG_TENTATIVE;
 		a->toplevel[a->ntoplevel++] = v->sym;
 		return;
+	}
+	if (!failed && init && cxx_memptr_of(c, y->ty)) {
+		/* a pointer to member: converted (null, a base's), its literal's list the constant initializer */
+		init = cxx_gen_memptr_convert(c, init, y->ty, 0);
+		y = &a->syms[v->sym];
+		if (init && AST_NODE_AT(a, init)->op == AST_NODE_COMPOUND_LITERAL)
+			init = AST_NODE_AT(a, init)->a;
 	}
 	if (failed || !init) {
 		cxx_gen_global_finish(c, false);	/* (an initializer not built yet: the variable stays a declaration) */

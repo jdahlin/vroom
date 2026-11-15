@@ -28,7 +28,8 @@
    out (C's own code, compiled before this in the unity TU, keeps cc_type_is_record as it is) */
 static inline bool cxx_record_not_complex(cc *a, ast_qualified_type t)
 {
-	return cc_type_is_record(a, t) && !(AST_TYPE_KIND(a, t) == AST_TYPE_STRUCT && (a->tags[AST_TYPE(a, t)->aux].flags & AST_RECORD_FLAG_COMPLEX));
+	return cc_type_is_record(a, t) && !(AST_TYPE_KIND(a, t) == AST_TYPE_STRUCT &&
+					    (a->tags[AST_TYPE(a, t)->aux].flags & (AST_RECORD_FLAG_COMPLEX | AST_RECORD_FLAG_MEMBER_POINTER)));
 }
 #define cc_type_is_record(a, t) cxx_record_not_complex((a), (t))
 
@@ -279,6 +280,14 @@ typedef struct cxx_late { uint32_t begin, end; cxx_scope *scope; uint8_t what; c
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
 #define CXX_MAX_ARGS 1024
 
+/* a pointer to member type T C::* (memptr.c): its struct's tag, the class, the member's type, a member
+   function's cv (1 const, 2 volatile) */
+typedef struct cxx_memptr {
+	uint32_t tag;
+	ast_qualified_type cls, mem;
+	uint8_t quals, fn;
+} cxx_memptr;
+
 typedef struct cxx {
 	pp *p;
 	const cxx_options *o;
@@ -381,7 +390,10 @@ typedef struct cxx {
 	uint8_t packs_overflow;
 	/* expressions' types (typing.c) */
 	uint32_t sb_names[8], sb_locs[8], sb_n, sb_var, sb_serial;	/* a structured binding being declared: its names, its variable */
-	ast_qualified_type memptr_ty;		/* T C::*: one opaque (incomplete) type for every pointer to member, not built yet */
+	ast_qualified_type memptr_ty;		/* T C::* of a class not known (dependent): one opaque (incomplete) type */
+	struct cxx_memptr *memptrs;		/* the pointer to member types made (memptr.c) */
+	uint32_t bmf_callee, bmf_this, bmf_pre;		/* x.*pmf: the function it names (a node) and the this to pass it */
+	uint32_t nmemptr, cmemptr;
 	ast_qualified_type etype;			/* the last expression's type (CXX_TY_UNKNOWN: not known) */
 	uint8_t elval;			/* ... an lvalue */
 	cxx_entity *ecallee;		/* a name that is a set of functions: for the call that follows */
@@ -860,6 +872,17 @@ VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
 VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
 VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
 VPRIV cxx_entity *cxx_fnset_of_expression(cxx *c, uint32_t start);
+VPRIV const cxx_memptr *cxx_memptr_of(cxx *c, ast_qualified_type t);
+VPRIV int cxx_placeholder_of(cxx *c, ast_qualified_type t, void **owner);
+VPRIV uint32_t cxx_gen_memptr_value(cxx *c, ast_qualified_type t, uint32_t v0, uint32_t v1, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_null(cxx *c, ast_qualified_type t, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_of(cxx *c, cxx_entity *e, ast_qualified_type t, uint32_t loc);
+VPRIV bool cxx_gen_base_offset(cxx *c, ast_qualified_type from, ast_qualified_type to, int64_t *off);
+VPRIV uint32_t cxx_gen_memptr_convert(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_test(cxx *c, uint32_t x, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_compare(cxx *c, uint32_t x, uint32_t y, bool eq, uint32_t loc);
+VPRIV uint32_t cxx_gen_memptr_apply(cxx *c, uint32_t obj, bool arrow, uint32_t mpn, ast_qualified_type mpt, uint32_t loc);
+VPRIV ast_qualified_type cxx_type_memptr(cxx *c, ast_qualified_type cls, ast_qualified_type mem, uint8_t quals);
 VPRIV bool cxx_explicit_specialization_claim(cxx *c, cxx_entity *spec, cxx_entity *set);
 VPRIV cxx_entity *cxx_fnset_pick(cxx *c, cxx_entity *set, ast_qualified_type target, bool make);
 VPRIV uint32_t cxx_fnset_node(cxx *c, cxx_entity *set, ast_qualified_type target, uint32_t loc);

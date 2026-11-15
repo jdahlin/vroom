@@ -1674,6 +1674,26 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 		return;
 	}
 	case AST_TYPE_STRUCT: case AST_TYPE_UNION:
+		if (x->kind == AST_TYPE_STRUCT && (a->tags[x->aux].flags & AST_RECORD_FLAG_MEMBER_POINTER)) {
+			/* M <class> <member type>: a member function's cv on its function type (M1BKFvvE) */
+			const cxx_memptr *mp = cxx_memptr_of(m->c, t);
+
+			if (!mp) {
+				m->bad = true;
+				return;
+			}
+			if (mg_substitution(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
+				return;
+			mg_str(m, "M");
+			mg_type(m, mp->cls);
+			if (mp->fn && mp->quals) {
+				mg_str(m, mp->quals & 2 ? (mp->quals & 1 ? "VK" : "V") : "K");
+				mg_type(m, mp->mem);	/* (K F...E: not itself a candidate apart from the function type, as clang's) */
+			} else
+				mg_type(m, mp->mem);
+			mg_remember(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+			return;
+		}
 		if (x->kind == AST_TYPE_STRUCT && (a->tags[x->aux].flags & AST_RECORD_FLAG_COMPLEX) && a->tags[x->aux].nfield) {
 			/* _Complex T: C <T>, a substitution candidate */
 			if (mg_substitution(m, CXX_SUB_TYPE, NULL, AST_QUALIFIED_TYPE_UNQUALIFIED(t)))

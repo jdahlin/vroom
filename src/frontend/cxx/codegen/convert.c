@@ -263,6 +263,8 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to, uint32_t 
 
 	if (!x)
 		return 0;
+	if (cxx_memptr_of(c, to))
+		return cxx_gen_memptr_convert(c, x, to, loc);	/* (a pointer to member: null, a base's to a derived class's) */
 	if (c->nullptr_ty && AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_POINTER && !AST_TYPE(a, AST_NODE_AT(a, x)->ty)->ext &&
 	    AST_QUALIFIED_TYPE_UNQUALIFIED(cxx_gen_is_reference(c, to) ? AST_TYPE(a, to)->base : to) == c->nullptr_ty) {
 		/* nullptr (a void * here) to a std::nullptr_t parameter: an object of that type */

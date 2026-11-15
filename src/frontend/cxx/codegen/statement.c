@@ -300,6 +300,8 @@ VPRIV uint32_t cxx_gen_condition(cxx *c, uint32_t e)
 {
 	if (!cxx_gen_on(c))
 		return 0;
+	if (e && cxx_memptr_of(c, AST_NODE_AT(c->ast, e)->ty))
+		e = cxx_gen_memptr_test(c, e, 0);	/* (a pointer to member: not the null one) */
 	if (e && cc_type_is_record(c->ast, AST_NODE_AT(c->ast, e)->ty))
 		e = cxx_gen_convert_class(c, e, cc_type_basic(AST_TYPE_BOOL), 0);	/* a class as a condition: its operator bool */
 	if (!e || cc_type_is_record(c->ast, AST_NODE_AT(c->ast, e)->ty)) {

@@ -42,6 +42,10 @@ VPRIV bool cxx_mentions_placeholder(cxx *c, ast_qualified_type t, int depth)
 		return false;
 	case AST_TYPE_STRUCT: case AST_TYPE_UNION: {
 		cxx_instance *ix = cxx_tag_info(c, t);
+		const cxx_memptr *mp = cxx_memptr_of(c, t);
+
+		if (mp)
+			return cxx_mentions_placeholder(c, mp->cls, depth + 1) || cxx_mentions_placeholder(c, mp->mem, depth + 1);
 
 		if (ix && ix->ttp)
 			return true;	/* (A<...> of a template template parameter) */
@@ -116,6 +120,14 @@ VPRIV bool cxx_match_type(cxx *c, cxx_partial *p, ast_qualified_type pat, ast_qu
 	pt = AST_TYPE(c->ast, pat), at = AST_TYPE(c->ast, arg);
 	if (pt->kind != at->kind)
 		return false;
+	{
+		/* M C::* against N D::*: C against D, M against N, the cv the same */
+		const cxx_memptr *pm = cxx_memptr_of(c, pat), *am = cxx_memptr_of(c, arg);
+
+		if (pm || am)
+			return pm && am && pm->fn == am->fn && pm->quals == am->quals && cxx_match_type(c, p, pm->cls, am->cls, bind, depth + 1) &&
+			       cxx_match_type(c, p, pm->mem, am->mem, bind, depth + 1);
+	}
 	switch (pt->kind) {
 	case AST_TYPE_POINTER:
 		return pt->ext == at->ext && cxx_match_type(c, p, pt->base, at->base, bind, depth + 1);

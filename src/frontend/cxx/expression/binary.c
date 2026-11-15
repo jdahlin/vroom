@@ -63,6 +63,39 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			uint8_t r_lval = c->elval;
 			bool rewritten = false;	/* a != b as !(a == b) (C++20's rewritten candidates) */
 
+			if ((op == CXX_TOKEN_PERIOD_STAR || op == CXX_TOKEN_ARROW_STAR) && cxx_memptr_of(c, rt) && l != CXX_TY_UNKNOWN &&
+			    (op == CXX_TOKEN_PERIOD_STAR ? cc_type_is_record(c->ast, l) : AST_TYPE_KIND(c->ast, l) == AST_TYPE_POINTER && !AST_TYPE(c->ast, l)->ext)) {
+				/* x.*mp, p->*mp built in: a data member (an lvalue of x's, always of *p's), or a member function to call */
+				const cxx_memptr *mp = cxx_memptr_of(c, rt);
+				ast_qualified_type ot = op == CXX_TOKEN_PERIOD_STAR ? l : AST_TYPE(c->ast, l)->base;
+				uint8_t oq = AST_QUALIFIED_TYPE_QUALIFIERS(ot) & (AST_QUALIFIER_CONST | AST_QUALIFIER_VOLATILE);
+
+				c->op_lv_set = 0;
+				if (mp->fn)
+					cxx_et(c, mp->mem, false);
+				else
+					cxx_et(c, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(mp->mem), AST_QUALIFIED_TYPE_QUALIFIERS(mp->mem) | oq),
+					       op == CXX_TOKEN_ARROW_STAR || ll);
+				if (!c->tentative && cxx_gen_on(c)) {
+					c->enode = cxx_gen_memptr_apply(c, ln, op == CXX_TOKEN_ARROW_STAR, rn, rt, oploc);
+					if (!c->enode)
+						cxx_gen_fail(c);
+				}
+				continue;
+			}
+			if ((op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL) && (cxx_memptr_of(c, l) || cxx_memptr_of(c, rt))) {
+				/* pointers to members compared (with each other, or with the null one: 0, nullptr) */
+				bool lm = cxx_memptr_of(c, l) != NULL;
+
+				c->op_lv_set = 0;
+				cxx_et(c, cc_type_basic(AST_TYPE_BOOL), false);
+				if (!c->tentative && cxx_gen_on(c)) {
+					c->enode = cxx_gen_memptr_compare(c, lm ? ln : rn, lm ? rn : ln, op == LEX_TOKEN_EQUAL_EQUAL, oploc);
+					if (!c->enode)
+						cxx_gen_fail(c);
+				}
+				continue;
+			}
 			cxx_entity *r_fnset = cxx_fnset_of_expression(c, rstart);	/* (os << endl: a set of functions) */
 
 			c->op_fnset = r_fnset;
