@@ -3476,6 +3476,15 @@ Vid båda optimeringsnivåerna och i båda konfigurationerna var objekten
 för sqlite3 och speedtest1 samt den länkade speedtest1 byteidentiska.
 Körtidsmätningen utgick.
 
+Värdverktygen kompileras nu med `-fno-exceptions` och länkas med
+C-drivrutinen. På x86-64 Linux behöver alla tio körbara filer bara libc,
+samt libm för vpp och vccd. Steg 2 och 3 gav identiska objekt och vpp.
+Mot C++-bygget på 2df8ed5a tog kompilering av en tom fil 0,24 ms mindre
+CPU-tid (median av 100 par). För SQLite blev skillnaden −0,30 % vid -O2
+(24 par) och −0,03 % vid -O3 (16 par). Båda 95-procentiga
+bootstrapintervallen omfattade noll. SQLite-objekten och speedtest1 var
+byteidentiska vid båda optimeringsnivåerna, även med VIR-kontrollerna.
+
 ### C++-kompatibilitet i kompilatorns C-källkod (2026-11-15)
 
 `make -C src -k -j6 vcc-cxx-check` granskar varje aktiv produktionsfil
