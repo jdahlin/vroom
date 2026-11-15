@@ -798,6 +798,11 @@ typedef struct cxx {
         call_brace; /* the next cxx_call_type_impl's braced arguments (cxx_ctor_use's; NULL: c->carg_brace) */
     /* the try block just parsed (cxx_try_block_parse): its body returns (try_ret_used), through try_ret (a
        copy of its closure's return state) */
+    /* function template instances whose body was wanted before the template's definition was seen
+       (cxx_ftemplate_deferred retries them at the end of the TU, a point of instantiation) */
+    void *ft_defer;
+    uint32_t nft_defer, cft_defer;
+    uint8_t ft_deferring;
     uint8_t try_ret_used;
     struct cxx_gen_lambda *try_ret;
     uint8_t
@@ -1480,6 +1485,7 @@ VPRIV void cxx_call_type_x(cxx *c, cxx_entity *set, const cxx_targ *xargs,
 
 /* parsing (declaration.c, expression.c, statement.c) */
 VPRIV void cxx_translation_unit_parse(cxx *c);
+VPRIV void cxx_ftemplate_deferred(cxx *c);
 VPRIV void cxx_declaration_parse(cxx *c, int context);
 VPRIV bool cxx_starts_declaration(cxx *c);
 VPRIV void cxx_type_id_parse(cxx *c);

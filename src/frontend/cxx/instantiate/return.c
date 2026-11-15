@@ -1,6 +1,98 @@
 /* C++ templates: function template signatures and bodies instantiated */
 #include "instantiate.h"
 
+/* a body wanted before its template's definition: retried at the end of the TU */
+typedef struct cxx_ft_defer {
+    cxx_ftemplate *f;
+    cxx_scope *home;
+    uint32_t name, np;
+    cxx_targ bind[64];
+} cxx_ft_defer;
+
+static void cxx_ftemplate_defer(cxx *c, cxx_ftemplate *f, const cxx_targ *bind,
+                                uint32_t np, uint32_t name)
+{
+    cxx_ft_defer *d;
+
+    if (c->ft_deferring || np > 64 || !f->p.home ||
+        f->p.home->kind == CXX_SCOPE_CLASS || c->nft_defer >= 4096)
+        return;
+    for (uint32_t i = 0; i < c->nft_defer; i++) {
+        d = (cxx_ft_defer *)c->ft_defer + i;
+        if (d->f == f && d->np == np &&
+            !memcmp(d->bind, bind, np * sizeof *bind))
+            return;
+    }
+    if (c->nft_defer == c->cft_defer)
+        c->ft_defer = realloc(
+            c->ft_defer, (c->cft_defer = c->cft_defer ? c->cft_defer * 2 : 16) *
+                             sizeof(cxx_ft_defer));
+    d = (cxx_ft_defer *)c->ft_defer + c->nft_defer++;
+    d->f = f, d->home = f->p.home, d->name = name, d->np = np;
+    memcpy(d->bind, bind, np * sizeof *bind);
+}
+
+/* at the end of the TU: each deferred body from the template's declaration that has one (template <class T>
+   static void f(); used, then defined: doctest's TEST_CASE_TEMPLATE functions) */
+VPRIV void cxx_ftemplate_deferred(cxx *c)
+{
+    uint8_t gen = c->gen;
+
+    if (!c->nft_defer)
+        return;
+    c->gen =
+        c->ast->o->emit
+            ? 1
+            : gen; /* (code for them: what instantiating inside a function would make) */
+    c->ft_deferring = 1;
+    for (uint32_t i = 0; i < c->nft_defer; i++) {
+        cxx_ft_defer d = ((cxx_ft_defer *)c->ft_defer)[i];
+
+        for (cxx_entity *e = cxx_lookup_in(c, d.home, d.name, 0); e;
+             e = e->next)
+            if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && e->ftmpl &&
+                e->ftmpl->defined &&
+                e->ftmpl->p
+                    .params && /* (the same record, defined since: its body now) */
+                e->ftmpl->p.params->ntparams == d.np) {
+                /* (the instance already named, its symbol referred to: the one whose body this makes) */
+                cxx_entity *old = NULL;
+                cxx_ftemplate *g = e->ftmpl;
+                uint32_t at = UINT32_MAX;
+
+                for (uint32_t k = 0; k < d.f->ndone; k++)
+                    if (d.f->done[k].n == d.np &&
+                        !memcmp(d.f->done[k].args, d.bind,
+                                d.np * sizeof *d.bind))
+                        old = d.f->done[k].inst, d.f->done[k].body = 0;
+                for (uint32_t k = 0; k < g->ndone; k++)
+                    if (g->done[k].n == d.np &&
+                        !memcmp(g->done[k].args, d.bind, d.np * sizeof *d.bind))
+                        at = k;
+                if (old && at == UINT32_MAX) {
+                    if (g->ndone == g->cdone)
+                        g->done = (cxx_fdone *)realloc(
+                            g->done, (g->cdone = g->cdone ? g->cdone * 2 : 4) *
+                                         sizeof *g->done);
+                    at = g->ndone++;
+                    memset(&g->done[at], 0, sizeof g->done[at]);
+                    g->done[at].args =
+                        (cxx_targ *)malloc((d.np ? d.np : 1) * sizeof *d.bind);
+                    memcpy(g->done[at].args, d.bind, d.np * sizeof *d.bind);
+                    g->done[at].n = d.np, g->done[at].viable = 1;
+                    g->done[at].ret = CXX_TY_UNKNOWN,
+                    g->done[at].sig = CXX_TY_UNKNOWN;
+                }
+                if (old && at != UINT32_MAX)
+                    g->done[at].inst = old, g->done[at].body = 0;
+                cxx_ftemplate_return(c, g, d.bind, true);
+                break;
+            }
+    }
+    c->ft_deferring = 0, c->gen = gen;
+    free(c->ft_defer), c->ft_defer = NULL, c->nft_defer = c->cft_defer = 0;
+}
+
 VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f,
                                               const cxx_targ *bind,
                                               bool want_body)
@@ -170,6 +262,9 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f,
             body = cxx_member_template_ooc_body(
                 c, f, inst, bind, np, UINT32_MAX, NULL,
                 0); /* (defined outside its class) */
+        if (want_body && !body && inst && viable == 1 && !f->defined)
+            cxx_ftemplate_defer(c, f, bind, np,
+                                inst->name); /* (declared only, so far) */
     } else
         c->stats.bodies_failed++;
     c->gen_instance = outer_gen_instance;

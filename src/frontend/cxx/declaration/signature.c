@@ -11,6 +11,8 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 {
     while (!cxx_is(c, LEX_TOKEN_EOF))
         cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
+    cxx_ftemplate_deferred(
+        c); /* (the end of the TU: a point of instantiation of every function template) */
 }
 
 /* a function template's signature, at its decl-specifiers (instantiate.c binds its parameters first) */

@@ -559,9 +559,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 !(flags & DS_STATIC))
                 cxx_vtable_declare(c, cxx_declaration_scope(c), e,
                                    (flags & DS_VIRTUAL) != 0);
-            if (e && f && kind == CXX_ENTITY_VALUE &&
-                context != CXX_CONTEXT_CLASS && !is_friend &&
-                (flags & DS_STATIC))
+            if (e && f &&
+                (kind == CXX_ENTITY_VALUE ||
+                 kind ==
+                     CXX_ENTITY_FUNCTION_TEMPLATE) && /* (and its instances: _ZL) */
+                context != CXX_CONTEXT_CLASS &&
+                !is_friend && (flags & DS_STATIC))
                 e->fn_internal = 1;
             if (e && !f && kind == CXX_ENTITY_VALUE &&
                 context == CXX_CONTEXT_CLASS &&
