@@ -8,6 +8,7 @@
  * released when the frame ends.  Instructions go to a64_asm(); everything
  * symbolic becomes an elf_fixup() resolved at the end.
  */
+#include "../lib/literal.h"
 #include "asimpl.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -17,7 +18,7 @@ VPRIV Sv svdup(As *a, const char *s, size_t n)
     char *p = (char *)rget(&a->defs, n + 1);
     memcpy(p, s, n);
     p[n] = 0;
-    return (Sv){p, (uint32_t)n};
+    return VCC_LITERAL(Sv, p, (uint32_t)n);
 }
 
 VPRIV uint32_t curline(As *a)
@@ -191,7 +192,7 @@ static void defer_op(As *a, int op, Val *x, const Val *y)
 {
     uint32_t t = tmpsym(a);
     elf_expr_sym(a->o, t, op, *x, *y);
-    *x = (Val){t, 0, 0};
+    *x = VCC_LITERAL(Val, t, 0, 0);
 }
 
 typedef struct {
@@ -244,7 +245,7 @@ static int parse_number(Lx *l, Val *v)
                 y = nl->fwd;
             }
             l->p = p + 1;
-            *v = (Val){y, 0, 0};
+            *v = VCC_LITERAL(Val, y, 0, 0);
             fold(l->a, v);
             return 0;
         }
@@ -265,7 +266,7 @@ static int parse_number(Lx *l, Val *v)
             p = q;
     }
     l->p = p;
-    *v = (Val){0, 0, (int64_t)x};
+    *v = VCC_LITERAL(Val, 0, 0, (int64_t)x);
     return 0;
 }
 
@@ -340,7 +341,7 @@ static int primary(Lx *l, Val *v)
         for (const char *q = s; q < p; q++)
             h = (h ^ (uint64_t)c_lower((unsigned char)*q)) * 1099511628211ull;
         l->p = p;
-        *v = (Val){0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61)};
+        *v = VCC_LITERAL(Val, 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61));
         return 0;
     }
     if (c_digit((unsigned char)c))
@@ -371,12 +372,12 @@ static int primary(Lx *l, Val *v)
         if (p < l->e && *p == '\'')
             p++;
         l->p = p;
-        *v = (Val){0, 0, x};
+        *v = VCC_LITERAL(Val, 0, 0, x);
         return 0;
     }
     if (c == '.' && (l->p + 1 >= l->e || !isidc((unsigned char)l->p[1]))) {
         l->p++;
-        *v = (Val){here(a), 0, 0};
+        *v = VCC_LITERAL(Val, here(a), 0, 0);
         return 0;
     }
     if (isids((unsigned char)c) || c == '"') {
@@ -397,7 +398,7 @@ static int primary(Lx *l, Val *v)
             l->p = p;
         }
         uint32_t y = sym(a, s, (size_t)(p - s));
-        *v = (Val){y, 0, 0};
+        *v = VCC_LITERAL(Val, y, 0, 0);
         if (a->nralias) {
             const char *rn = as_ralias(a, y);
             if (rn) { /* an alias of a register: as the register */
@@ -405,7 +406,8 @@ static int primary(Lx *l, Val *v)
                 for (const char *q = rn; *q; q++)
                     h = (h ^ (uint64_t)c_lower((unsigned char)*q)) *
                         1099511628211ull;
-                *v = (Val){0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61)};
+                *v = VCC_LITERAL(Val, 0, 0,
+                                 (int64_t)(h >> 2) | ((int64_t)1 << 61));
                 return 0;
             }
         }
@@ -589,7 +591,7 @@ static int apply(As *a, int op, Val *x, Val *y)
             return err(a, "expected absolute expression");
         uint32_t t = tmpsym(a);
         elf_expr_sym(a->o, t, op, *x, *y);
-        *x = (Val){t, 0, 0};
+        *x = VCC_LITERAL(Val, t, 0, 0);
         return 0;
     }
     int64_t p = x->c, q = y->c, r;
@@ -973,7 +975,7 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
             p++;
         if (p >= e)
             return err(a, "unterminated string");
-        *out = (Sv){s, (uint32_t)(p - s)};
+        *out = VCC_LITERAL(Sv, s, (uint32_t)(p - s));
         *pp = p + 1;
         return 0;
     }
@@ -982,7 +984,7 @@ static int parse_name(As *a, const char **pp, const char *e, Sv *out)
         p++;
     if (p == s)
         return err(a, "expected identifier");
-    *out = (Sv){s, (uint32_t)(p - s)};
+    *out = VCC_LITERAL(Sv, s, (uint32_t)(p - s));
     *pp = p;
     return 0;
 }
@@ -1377,9 +1379,10 @@ static int d_reloc(As *a, const char *p, const char *e)
                 if (k + size <= ch->used) {
                     /* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
                     uint8_t keep[8];
-                    memcpy(keep, ch->data + k, size);
-                    reloc_fixup(o, f, off - at, ch->data + k, type, v);
-                    memcpy(ch->data + k, keep, size);
+                    memcpy(keep, elf_chunk_data(ch) + k, size);
+                    reloc_fixup(o, f, off - at, elf_chunk_data(ch) + k, type,
+                                v);
+                    memcpy(elf_chunk_data(ch) + k, keep, size);
                     return 0;
                 }
                 if (k < ch->used)
@@ -2237,7 +2240,7 @@ static Sv first_word(const char *p, const char *e)
     const char *s = p;
     while (p < e && isidc((unsigned char)*p))
         p++;
-    return (Sv){s, (uint32_t)(p - s)};
+    return VCC_LITERAL(Sv, s, (uint32_t)(p - s));
 }
 
 static int is_loop_dir(Sv w)
@@ -2263,7 +2266,7 @@ static int collect_body(As *a, int macro, Sv *body)
         if (macro) {
             if (sveq(w, ".endm") || sveq(w, ".endmacro")) {
                 if (!depth) {
-                    *body = (Sv){start, (uint32_t)(raw - start)};
+                    *body = VCC_LITERAL(Sv, start, (uint32_t)(raw - start));
                     return 0;
                 }
                 depth--;
@@ -2272,7 +2275,7 @@ static int collect_body(As *a, int macro, Sv *body)
         } else {
             if (sveq(w, ".endr")) {
                 if (!depth) {
-                    *body = (Sv){start, (uint32_t)(raw - start)};
+                    *body = VCC_LITERAL(Sv, start, (uint32_t)(raw - start));
                     return 0;
                 }
                 depth--;
@@ -2331,7 +2334,7 @@ static int macro_arg_plain(const char **pp, const char *e, int vararg, Sv *out)
         while (q > p && (q[-1] == ' ' || q[-1] == '\t'))
             q--;
         *pp = e;
-        *out = (Sv){p, (uint32_t)(q - p)};
+        *out = VCC_LITERAL(Sv, p, (uint32_t)(q - p));
         return 1;
     }
     const char *s = p;
@@ -2386,7 +2389,7 @@ static int macro_arg_plain(const char **pp, const char *e, int vararg, Sv *out)
     if (depth)
         return 0;
     *pp = p;
-    *out = (Sv){s, (uint32_t)(end - s)};
+    *out = VCC_LITERAL(Sv, s, (uint32_t)(end - s));
     return 1;
 }
 
@@ -2403,7 +2406,7 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
         memcpy(buf, p, (size_t)(q - p));
         n = (size_t)(q - p);
         *pp = e;
-        *out = (Sv){buf, (uint32_t)n};
+        *out = VCC_LITERAL(Sv, buf, (uint32_t)n);
         return 0;
     }
     int depth = 0;
@@ -2473,7 +2476,7 @@ static int macro_arg(As *a, const char **pp, const char *e, int vararg, Sv *out)
         return err(a, "unbalanced parentheses in argument");
     a->xs.used = (size_t)((uint8_t *)buf - a->xs.base) + n;
     *pp = p;
-    *out = (Sv){buf, (uint32_t)n};
+    *out = VCC_LITERAL(Sv, buf, (uint32_t)n);
     return 0;
 }
 
@@ -2520,12 +2523,12 @@ static Tmpl tmpl_compile(As *a, vregion *r, Sv body, const Param *ps,
             } /* '\' and the name stay as they are */
             k = (int32_t)m, skip = j - i;
         }
-        t.p[t.n++] = (Piece){(uint32_t)lit, (uint32_t)(i - lit), k};
+        t.p[t.n++] = VCC_LITERAL(Piece, (uint32_t)lit, (uint32_t)(i - lit), k);
         i += skip;
         lit = i;
     }
     if (lit < n)
-        t.p[t.n++] = (Piece){(uint32_t)lit, (uint32_t)(n - lit), -1};
+        t.p[t.n++] = VCC_LITERAL(Piece, (uint32_t)lit, (uint32_t)(n - lit), -1);
     (void)a;
     return t;
 }
@@ -2554,8 +2557,8 @@ static Tmpl tmpl_compile_alt(vregion *r, Sv body, const Param *ps, uint32_t np)
                     !memcmp(ps[m].name.s, b + i, j - i))
                     break;
             if (m < np) {
-                t.p[t.n++] =
-                    (Piece){(uint32_t)lit, (uint32_t)(st - lit), (int32_t)m};
+                t.p[t.n++] = VCC_LITERAL(Piece, (uint32_t)lit,
+                                         (uint32_t)(st - lit), (int32_t)m);
                 lit = j;
             }
             i = j;
@@ -2565,7 +2568,7 @@ static Tmpl tmpl_compile_alt(vregion *r, Sv body, const Param *ps, uint32_t np)
             i++;
     }
     if (lit < n)
-        t.p[t.n++] = (Piece){(uint32_t)lit, (uint32_t)(n - lit), -1};
+        t.p[t.n++] = VCC_LITERAL(Piece, (uint32_t)lit, (uint32_t)(n - lit), -1);
     return t;
 }
 
@@ -2593,7 +2596,7 @@ static int alt_arg(As *a, const char **pp, const char *e, Sv *out)
         if (p >= e)
             return err(a, "expected '>'");
         p++;
-        *out = (Sv){o, (uint32_t)n};
+        *out = VCC_LITERAL(Sv, o, (uint32_t)n);
     }
     *pp = p;
     return 0;
@@ -2666,7 +2669,8 @@ static int d_macro(As *a, const char *p, const char *e)
         p++;
     if (p == s)
         return err(a, "expected identifier in '.macro' directive");
-    name = keep ? (Sv){s, (uint32_t)(p - s)} : svdup(a, s, (size_t)(p - s));
+    name = keep ? VCC_LITERAL(Sv, s, (uint32_t)(p - s))
+                : svdup(a, s, (size_t)(p - s));
     Param ps[64];
     uint32_t np = 0;
     p = ws(p, e);
@@ -2682,8 +2686,8 @@ static int d_macro(As *a, const char *p, const char *e)
             p++;
         if (p == s)
             return err(a, "expected identifier in '.macro' directive");
-        q->name =
-            keep ? (Sv){s, (uint32_t)(p - s)} : svdup(a, s, (size_t)(p - s));
+        q->name = keep ? VCC_LITERAL(Sv, s, (uint32_t)(p - s))
+                       : svdup(a, s, (size_t)(p - s));
         p = ws(p, e);
         if (p < e && *p == ':') {
             p = ws(p + 1, e);
@@ -2724,7 +2728,7 @@ static int d_macro(As *a, const char *p, const char *e)
     m->body =
         a->fr[a->nfr - 1].kind == FR_FILE ? body : svdup(a, body.s, body.n);
     m->count = 0;
-    m->t = (Tmpl){0, 0};
+    m->t = VCC_LITERAL(Tmpl, 0, 0);
     if (a->mcount * 2 >= a->mmask) {
         uint32_t nm = a->mmask * 2 + 1;
         Macro **t = (Macro **)rget(&a->defs, sizeof *t * (nm + 1));
@@ -2772,7 +2776,7 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
     p = ws(p, e);
     int hasvararg = np && m->params[np - 1].vararg;
     for (uint32_t k = 0; k < np; k++)
-        args[k] = (Sv){"", 0};
+        args[k] = VCC_LITERAL(Sv, "", 0);
     if (p < e) {
         for (;;) {
             /* keyword argument? */
@@ -2817,7 +2821,7 @@ static int invoke(As *a, Macro *m, const char *p, const char *e)
                 p = ws(p + 1, e);
                 if (p >= e) {
                     if (pi < np)
-                        set[pi] = 1, args[pi] = (Sv){"", 0};
+                        set[pi] = 1, args[pi] = VCC_LITERAL(Sv, "", 0);
                     break;
                 }
             }
@@ -2895,7 +2899,7 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
         return err(a, "expected identifier in '.irp' directive");
     Param par;
     memset(&par, 0, sizeof par);
-    par.name = (Sv){s, (uint32_t)(p - s)};
+    par.name = VCC_LITERAL(Sv, s, (uint32_t)(p - s));
     p = ws(p, e);
     if (p >= e || *p != ',')
         return err(a, "expected comma");
@@ -2925,7 +2929,7 @@ static int d_irp(As *a, const char *p, const char *e, int chars)
         nv = 0;
         Sv cv[1024];
         for (uint32_t i = 0; i < v.n && i < 1024; i++)
-            cv[nv++] = (Sv){v.s + i, 1};
+            cv[nv++] = VCC_LITERAL(Sv, v.s + i, 1);
         memcpy(vals, cv, sizeof(Sv) * nv);
     }
     size_t tot = 0;
@@ -2980,7 +2984,7 @@ static Sv trim(const char *p, const char *e)
     p = ws(p, e);
     while (e > p && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r'))
         e--;
-    return (Sv){p, (uint32_t)(e - p)};
+    return VCC_LITERAL(Sv, p, (uint32_t)(e - p));
 }
 
 /* .ifc/.ifnc operand: quoted string or text up to ',' */
@@ -3219,7 +3223,7 @@ static int directive(As *a, Sv w, const char *p, const char *e)
         break;
     case 'c':
         if (n > 4 && !memcmp(d, "cfi_", 4))
-            return d_cfi(a, (Sv){d, (uint32_t)n}, p, e);
+            return d_cfi(a, VCC_LITERAL(Sv, d, (uint32_t)n), p, e);
         if (IS("comm"))
             return d_comm(a, p, e, 0);
         if (IS("cpu"))
@@ -4350,10 +4354,10 @@ static void cfi_finish(As *a)
         struct Fde *f = &a->fde[i];
         elf_fixup(o, fr, at + pcbs[i], q + pcbs[i],
                   x86 ? R_X86_64_PC32 : R_AARCH64_PREL32,
-                  (Val){f->start, 0, 0});
+                  VCC_LITERAL(Val, f->start, 0, 0));
         elf_fixup(o, fr, at + pcbs[i] + 4, q + pcbs[i] + 4,
                   x86 ? R_X86_64_32 : R_AARCH64_ABS32,
-                  (Val){f->end, f->start, 0});
+                  VCC_LITERAL(Val, f->end, f->start, 0));
     }
 }
 
@@ -4834,8 +4838,9 @@ static int d_dwfile(As *a, const char *p, const char *e)
             return -1;
         b2[l2] = 0;
     }
-    Sv dir = two ? (Sv){b1, (uint32_t)l1} : (Sv){"", 0},
-       name = two ? (Sv){b2, (uint32_t)l2} : (Sv){b1, (uint32_t)l1};
+    Sv dir = two ? VCC_LITERAL(Sv, b1, (uint32_t)l1) : VCC_LITERAL(Sv, "", 0),
+       name = two ? VCC_LITERAL(Sv, b2, (uint32_t)l2)
+                  : VCC_LITERAL(Sv, b1, (uint32_t)l1);
     uint8_t md5[16];
     int hasmd5 = 0;
     for (;;) {
@@ -4892,8 +4897,9 @@ static int d_dwfile(As *a, const char *p, const char *e)
             if (name.s[i] == '/')
                 sl = name.s + i;
         if (sl && sl + 1 < name.s + name.n && sl > name.s) {
-            dir = (Sv){name.s, (uint32_t)(sl - name.s)};
-            name = (Sv){sl + 1, (uint32_t)(name.s + name.n - sl - 1)};
+            dir = VCC_LITERAL(Sv, name.s, (uint32_t)(sl - name.s));
+            name =
+                VCC_LITERAL(Sv, sl + 1, (uint32_t)(name.s + name.n - sl - 1));
             split = 1;
         }
     }
@@ -4903,7 +4909,7 @@ static int d_dwfile(As *a, const char *p, const char *e)
             char *cwd = (char *)rget(&a->defs, 4096);
             if (!getcwd(cwd, 4096))
                 cwd[0] = 0;
-            d = (Sv){cwd, (uint32_t)strlen(cwd)};
+            d = VCC_LITERAL(Sv, cwd, (uint32_t)strlen(cwd));
         }
         dw_dir(a, d);
     }
@@ -5062,8 +5068,8 @@ static uint32_t dw_str(ElfObj *o, uint32_t ls, Sv s)
     uint32_t off = 0;
     for (ElfChunk *c = f->head; c; c = c->next) {
         for (uint32_t i = 0; i < c->used;) {
-            size_t k = strlen((const char *)c->data + i);
-            if (k == s.n && !memcmp(c->data + i, s.s, s.n))
+            size_t k = strlen((const char *)elf_chunk_data(c) + i);
+            if (k == s.n && !memcmp(elf_chunk_data(c) + i, s.s, s.n))
                 return off + i;
             i += (uint32_t)k + 1;
         }
@@ -5252,7 +5258,7 @@ static void dwline_finish(As *a)
     for (uint32_t i = 0; i < nsfix; i++)
         elf_fixup(o, sec, at + sfix[2 * i], q + sfix[2 * i],
                   o->machine == EM_X86_64 ? R_X86_64_32 : R_AARCH64_ABS32,
-                  (Val){lsym, 0, (int64_t)sfix[2 * i + 1]});
+                  VCC_LITERAL(Val, lsym, 0, (int64_t)sfix[2 * i + 1]));
     for (uint32_t i = 0; i < nafix; i++) {
         struct DwLoc *l = &a->dwl[afix[2 * i + 1]];
         uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
@@ -5260,7 +5266,7 @@ static void dwline_finish(As *a)
         elf_define(o, y, l->frag, l->off);
         elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i],
                   o->machine == EM_X86_64 ? R_X86_64_64 : R_AARCH64_ABS64,
-                  (Val){y, 0, 0});
+                  VCC_LITERAL(Val, y, 0, 0));
     }
 }
 
@@ -5278,7 +5284,7 @@ static int d_symver(As *a, const char *p, const char *e)
     const char *q = p;
     while (q < e && *q != ',' && *q != ' ' && *q != '\t')
         q++;
-    v = (Sv){p, (uint32_t)(q - p)};
+    v = VCC_LITERAL(Sv, p, (uint32_t)(q - p));
     const char *at = (const char *)memchr(v.s, '@', v.n);
     if (!at)
         return err(a, "expected a '@' in the name");

@@ -1,4 +1,5 @@
 /* vcc code generator: functions: prologue, epilogue, finishing */
+#include "../../../lib/literal.h"
 #include "../../../emit/emitimpl.h"
 
 /* ---------------- functions ---------------- */
@@ -9,8 +10,8 @@ VPRIV void out_chunk(ecx *e, uint64_t key, size_t start)
 
     pthread_mutex_lock(&E->cmu);
     E->chunks[E->nchunk++] =
-        (chunk){key, e->out.p + start, e->out.n - start, e->rlog + e->rlog0,
-                (uint32_t)((e->nrlog - e->rlog0) / 2)};
+        VCC_LITERAL(chunk, key, e->out.p + start, e->out.n - start,
+                    e->rlog + e->rlog0, (uint32_t)((e->nrlog - e->rlog0) / 2));
     pthread_mutex_unlock(&E->cmu);
 }
 
@@ -77,9 +78,9 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec,
         it_close(e, h);
         h = it_open(e, IT_SYMHDR);
         sh = (symhdr *)it_room(e, sizeof *sh);
-        *sh = (symhdr){.sym = s,
-                       .p2 = (uint8_t)__builtin_ctz(align ? align : 1),
-                       .fn = fn};
+        *sh = VCC_LITERAL(symhdr, .sym = s,
+                          .p2 = (uint8_t)__builtin_ctz(align ? align : 1),
+                          .fn = fn);
         if (global) {
             sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
             if (a->visibility) {
@@ -192,7 +193,7 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
     ch = (code_hdr *)it_room(e, sizeof *ch);
     in =
         (ins *)it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
-#define PUT(...) (in[n++] = (ins){__VA_ARGS__})
+#define PUT(...) (in[n++] = VCC_LITERAL(ins, __VA_ARGS__))
     memcpy(in, e->in, (size_t)pre * sizeof(ins));
     n = pre;
     if (ctor & 8)
@@ -244,11 +245,9 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs,
 #undef PUT
     /* give back the unused room, then the inline asm text */
     b->n -= ((size_t)e->nin + 2 * (size_t)ncs + 8 - n) * sizeof(ins);
-    *ch = (code_hdr){.fid = s,
-                     .nin = n,
-                     .nraw = sym_labels ? (uint32_t)e->raw.n : 0,
-                     .nlabel = e->nlabel,
-                     .sym_labels = sym_labels};
+    *ch = VCC_LITERAL(code_hdr, .fid = s, .nin = n,
+                      .nraw = sym_labels ? (uint32_t)e->raw.n : 0,
+                      .nlabel = e->nlabel, .sym_labels = sym_labels);
     if (sym_labels)
         memcpy(it_room(e, e->raw.n), e->raw.p, e->raw.n);
     it_close(e, h);
@@ -341,19 +340,16 @@ static void expand_tables(ecx *e, uint32_t fid)
 
         d -= 6 + j->n;
         ins *o = &e->in[d];
-        o[0] = (ins){.op = I_ADR, .rd = R_X16, .label = x.label};
-        o[1] = (ins){.op = I_ADD,
-                     .sz = 1,
-                     .rd = R_X17,
-                     .rn = R_X16,
-                     .rm = x.rd,
-                     .sh = 2,
-                     .cond = (uint8_t)(x.cond ? 8 + 2 : 0)};
-        o[2] = (ins){.op = I_LD, .sz = 2, .cond = 1, .rd = R_X17, .rn = R_X17};
-        o[3] =
-            (ins){.op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16, .rm = R_X17};
-        o[4] = (ins){.op = I_BR, .rn = R_X16};
-        o[5] = (ins){.op = I_LABEL, .label = j->tab};
+        o[0] = VCC_LITERAL(ins, .op = I_ADR, .rd = R_X16, .label = x.label);
+        o[1] = VCC_LITERAL(ins, .op = I_ADD, .sz = 1, .rd = R_X17, .rn = R_X16,
+                           .rm = x.rd, .sh = 2,
+                           .cond = (uint8_t)(x.cond ? 8 + 2 : 0));
+        o[2] = VCC_LITERAL(ins, .op = I_LD, .sz = 2, .cond = 1, .rd = R_X17,
+                           .rn = R_X17);
+        o[3] = VCC_LITERAL(ins, .op = I_ADD, .sz = 1, .rd = R_X16, .rn = R_X16,
+                           .rm = R_X17);
+        o[4] = VCC_LITERAL(ins, .op = I_BR, .rn = R_X16);
+        o[5] = VCC_LITERAL(ins, .op = I_LABEL, .label = j->tab);
         for (uint32_t n = 0; n < j->n; n++) {
             uint32_t target = e->jtl[j->off + n];
 
@@ -362,13 +358,13 @@ static void expand_tables(ecx *e, uint32_t fid)
                 int len = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x",
                                    fid, target, fid, j->tab);
 
-                o[6 + n] = (ins){.op = I_RAW,
-                                 .off = (int32_t)e->raw.n,
-                                 .ref = (uint32_t)len};
+                o[6 + n] =
+                    VCC_LITERAL(ins, .op = I_RAW, .off = (int32_t)e->raw.n,
+                                .ref = (uint32_t)len);
                 tb_put(&e->raw, b, (size_t)len);
             } else {
-                o[6 + n] =
-                    (ins){.op = I_JTE, .off = (int32_t)target, .ref = j->tab};
+                o[6 + n] = VCC_LITERAL(ins, .op = I_JTE, .off = (int32_t)target,
+                                       .ref = j->tab);
             }
         }
     }
@@ -428,8 +424,8 @@ static void tbz_relax(ecx *e)
              r++) /* (-g rows after it move by the two records) */
             if (e->dl[r].k > k)
                 e->dl[r].k += 2;
-        e->in[--w] = (ins){.op = I_LABEL, .label = l};
-        e->in[--w] = (ins){.op = I_B, .label = t.label};
+        e->in[--w] = VCC_LITERAL(ins, .op = I_LABEL, .label = l);
+        e->in[--w] = VCC_LITERAL(ins, .op = I_B, .label = t.label);
         t.op = t.op == I_TBZ ? I_TBNZ : I_TBZ;
         t.label = l;
         e->lrefc[l] = 1;
@@ -477,13 +473,14 @@ static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave,
             continue;
         }
         if (t.sh) { /* in front of the prologue (shrink-wrapping): nothing to restore */
-            e->in[--w] = t.cond == 2
-                             ? (ins){.op = I_TAIL, .cond = 1, .ref = t.ref}
-                         : t.cond == 4 ? (ins){.op = I_RET}
-                                       : (ins){.op = I_BR, .rn = R_X16};
+            e->in[--w] =
+                t.cond == 2
+                    ? VCC_LITERAL(ins, .op = I_TAIL, .cond = 1, .ref = t.ref)
+                : t.cond == 4 ? VCC_LITERAL(ins, .op = I_RET)
+                              : VCC_LITERAL(ins, .op = I_BR, .rn = R_X16);
             if (t.cond == 3 && t.rn != R_X16)
-                e->in[--w] =
-                    (ins){.op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn};
+                e->in[--w] = VCC_LITERAL(ins, .op = I_MOV, .sz = 1, .rd = R_X16,
+                                         .rn = t.rn);
             continue;
         }
         if (t.cond == 4) {
@@ -495,50 +492,44 @@ static void tail_expand(ecx *e, const int *cs, int ncs, int32_t csave,
                 e->nin) /* the last record: falls into the shared epilogue */
                 continue;
             if (!dup) {
-                e->in[--w] = (ins){.op = I_B, .label = t.label};
+                e->in[--w] = VCC_LITERAL(ins, .op = I_B, .label = t.label);
                 continue;
             }
         }
         if (t.cond == 3 && t.rn != R_X16)
-            seq[q++] = (ins){.op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn};
+            seq[q++] =
+                VCC_LITERAL(ins, .op = I_MOV, .sz = 1, .rd = R_X16, .rn = t.rn);
         if (cfi)
-            seq[q++] = (ins){.op = I_NOP, .cond = NOP_CFI_REMEMBER};
+            seq[q++] = VCC_LITERAL(ins, .op = I_NOP, .cond = NOP_CFI_REMEMBER);
         for (int j = 0; j + 1 < ncs; j += 2)
-            seq[q++] = (ins){.op = I_LDP,
-                             .sz = 1,
-                             .rd = (uint8_t)cs[j],
-                             .ra = (uint8_t)cs[j + 1],
-                             .rn = (uint8_t)cs_base(),
-                             .imm = cs_off(csave, j)};
+            seq[q++] =
+                VCC_LITERAL(ins, .op = I_LDP, .sz = 1, .rd = (uint8_t)cs[j],
+                            .ra = (uint8_t)cs[j + 1], .rn = (uint8_t)cs_base(),
+                            .imm = cs_off(csave, j));
         if (ncs & 1)
-            seq[q++] = (ins){.op = I_LD,
-                             .sz = 3,
-                             .rd = (uint8_t)cs[ncs - 1],
-                             .rn = (uint8_t)cs_base(),
-                             .imm = cs_off(csave, ncs - 1)};
+            seq[q++] = VCC_LITERAL(
+                ins, .op = I_LD, .sz = 3, .rd = (uint8_t)cs[ncs - 1],
+                .rn = (uint8_t)cs_base(), .imm = cs_off(csave, ncs - 1));
         if (leaf)
             ;
         else if (FK.sleaf) {
-            seq[q++] =
-                (ins){.op = I_ADDI, .sz = 1, .rd = SP, .rn = SP, .imm = FK.fsz};
+            seq[q++] = VCC_LITERAL(ins, .op = I_ADDI, .sz = 1, .rd = SP,
+                                   .rn = SP, .imm = FK.fsz);
         } else {
             if (!FK.nomov)
-                seq[q++] = (ins){.op = I_MOV, .sz = 1, .rd = SP, .rn = R_FP};
-            seq[q++] = (ins){.op = I_LDP,
-                             .sz = 1,
-                             .rd = R_FP,
-                             .ra = R_LR,
-                             .rn = SP,
-                             .cond = 2,
-                             .imm = 16};
+                seq[q++] = VCC_LITERAL(ins, .op = I_MOV, .sz = 1, .rd = SP,
+                                       .rn = R_FP);
+            seq[q++] = VCC_LITERAL(ins, .op = I_LDP, .sz = 1, .rd = R_FP,
+                                   .ra = R_LR, .rn = SP, .cond = 2, .imm = 16);
         }
         if (cfi)
-            seq[q++] = (ins){.op = I_NOP, .cond = NOP_CFI_EPILOGUE};
-        seq[q++] = t.cond == 2   ? (ins){.op = I_TAIL, .cond = 1, .ref = t.ref}
-                   : t.cond == 4 ? (ins){.op = I_RET}
-                                 : (ins){.op = I_BR, .rn = R_X16};
+            seq[q++] = VCC_LITERAL(ins, .op = I_NOP, .cond = NOP_CFI_EPILOGUE);
+        seq[q++] = t.cond == 2
+                       ? VCC_LITERAL(ins, .op = I_TAIL, .cond = 1, .ref = t.ref)
+                   : t.cond == 4 ? VCC_LITERAL(ins, .op = I_RET)
+                                 : VCC_LITERAL(ins, .op = I_BR, .rn = R_X16);
         if (cfi)
-            seq[q++] = (ins){.op = I_NOP, .cond = NOP_CFI_RESTORE};
+            seq[q++] = VCC_LITERAL(ins, .op = I_NOP, .cond = NOP_CFI_RESTORE);
         w -= q;
         memcpy(&e->in[w], seq, q * sizeof(ins));
     }

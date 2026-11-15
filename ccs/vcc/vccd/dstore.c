@@ -13,6 +13,7 @@
  * One mutex: the store is touched only by jobs that have diagnostics (the
  * records) and by dedup lookups, both rare next to a compile.
  */
+#include "../lib/literal.h"
 #include "dstore.h"
 #include "../lib/defer.h"
 #include <pthread.h>
@@ -41,8 +42,12 @@ typedef struct tent {
 
 typedef struct istr {
     struct istr *next;
-    char s[];
 } istr;
+
+static inline char *istr_text(istr *p)
+{
+    return (char *)(p + 1);
+}
 
 #define NBUCKET 4096
 
@@ -100,12 +105,12 @@ static const char *intern(const char *s, bool path)
     }
     h = shash(s) & 1023;
     for (e = ibuckets[h]; e; e = e->next)
-        if (!strcmp(e->s, s))
-            return e->s;
+        if (!strcmp(istr_text(e), s))
+            return istr_text(e);
     e = (istr *)xrealloc(NULL, sizeof(*e) + strlen(s) + 1);
-    strcpy(e->s, s);
+    strcpy(istr_text(e), s);
     e->next = ibuckets[h], ibuckets[h] = e;
-    return e->s;
+    return istr_text(e);
 }
 
 static bool seen(pp_dsink *s, uint64_t key)
@@ -243,7 +248,8 @@ void dstore_end(dstore_job *j, int ok)
     }
     if (ok && j->nrec) {
         nt = (tent *)xrealloc(NULL, sizeof(*nt));
-        *nt = (tent){NULL, j->tu, j->json, j->njson, j->recs, j->nrec};
+        *nt =
+            VCC_LITERAL(tent, NULL, j->tu, j->json, j->njson, j->recs, j->nrec);
         j->tu = NULL, j->json = NULL, j->recs = NULL, j->nrec = 0;
     }
     {
@@ -294,7 +300,7 @@ static void count(kcount **v, unsigned *n, unsigned *c, const char *k, int err)
         *c = *c ? 2 * *c : 16;
         *v = (kcount *)xrealloc(*v, *c * sizeof(**v));
     }
-    (*v)[(*n)++] = (kcount){k, {!err, (unsigned)err}};
+    (*v)[(*n)++] = VCC_LITERAL(kcount, k, {!err, (unsigned)err});
 }
 
 static int kcmp(const void *a, const void *b)

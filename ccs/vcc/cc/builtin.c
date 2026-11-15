@@ -1,4 +1,5 @@
 /* vcc front end: builtins: the table and the special forms */
+#include "../lib/literal.h"
 #include "ccimpl.h"
 
 /* "too few/many arguments", as clang: the caret after the arguments, the callee's name underlined */
@@ -688,14 +689,15 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b,
              ((T(c, s->ty)->flags & TF_VLA) ||
               ((T(c, s->ty)->flags & TF_INCOMPLETE) && !s->body))))
             return false;
-        *b = (object_bound){.whole = object_init_extent(c, s->ty, s->body, 0),
-                            .storage = s->ty};
+        *b = VCC_LITERAL(object_bound,
+                         .whole = object_init_extent(c, s->ty, s->body, 0),
+                         .storage = s->ty);
         b->sub = b->whole;
         return true;
     }
     case N_STR:
-        *b = (object_bound){.whole =
-                                (uint64_t)c->strs[x->a].n * c->strs[x->a].esz};
+        *b = VCC_LITERAL(object_bound, .whole = (uint64_t)c->strs[x->a].n *
+                                                c->strs[x->a].esz);
         b->sub = b->whole;
         return true;
     case N_MEMBER: {
@@ -709,8 +711,8 @@ static bool object_lvalue_bound(cc *c, uint32_t n, object_bound *b,
             if (!is_array(c, f->ty) || (T(c, f->ty)->flags & TF_INCOMPLETE) ||
                 (flexible && mode != 3))
                 return false;
-            *b = (object_bound){
-                .whole = -1, .sub = ty_size(c, f->ty), .storage = f->ty};
+            *b = VCC_LITERAL(object_bound, .whole = -1,
+                             .sub = ty_size(c, f->ty), .storage = f->ty);
             return true;
         }
         b->offset += f->off / 8;
@@ -800,7 +802,7 @@ static bool object_pointer_bound(cc *c, uint32_t n, object_bound *b,
         }
         if (size > (ty_size(c, c->t_size) == 4 ? UINT32_MAX : UINT64_MAX))
             return false;
-        *b = (object_bound){.whole = (i128)size, .sub = (i128)size};
+        *b = VCC_LITERAL(object_bound, .whole = (i128)size, .sub = (i128)size);
         return true;
     }
     if (x->op == N_ADDR || (x->op == N_CAST && x->aux == CK_DECAY))

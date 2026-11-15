@@ -2,6 +2,7 @@
    zero. For |d| = 2^k, bias = ((unsigned)(n >> (w-1))) >> (w-k).
    Quotient = (n+bias) >> k, negated for d<0; remainder =
    ((n+bias) & (|d|-1)) - bias. Callers retain operand evaluation. */
+#include "../../lib/literal.h"
 #include "../emitimpl.h"
 
 VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r)
@@ -18,9 +19,9 @@ VPRIV bool em_sdivpow2(cc *c, qty ty, int op, i128 rhs, em_sdivpow2_recipe *r)
     mag = (uint64_t)(d < 0 ? -d : d);
     if (!mag || (mag & (mag - 1)))
         return false;
-    *r = (em_sdivpow2_recipe){.bits = (uint8_t)(tsize(c, ty) <= 4 ? 32 : 64),
-                              .shift = (uint8_t)__builtin_ctzll(mag),
-                              .negative = d < 0,
-                              .remainder = op == T_PERCENT};
+    *r = VCC_LITERAL(em_sdivpow2_recipe,
+                     .bits = (uint8_t)(tsize(c, ty) <= 4 ? 32 : 64),
+                     .shift = (uint8_t)__builtin_ctzll(mag), .negative = d < 0,
+                     .remainder = op == T_PERCENT);
     return true;
 }

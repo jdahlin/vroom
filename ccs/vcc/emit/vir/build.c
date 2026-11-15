@@ -32,6 +32,7 @@
  */
 #define WK_PREFIX vw_
 #define LO_PREFIX vw_
+#include "../../lib/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "../../vir/vir.h"
@@ -89,11 +90,9 @@ static uint32_t vw_put(ecx *e, uint32_t op, uint32_t ty, uint32_t fl,
 
     GROW(V->p, V->np, V->cp, 1);
     V->np++;
-    V->p[i] = (vwp){{(uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c},
-                    blk,
-                    0,
-                    e->curloc,
-                    0};
+    V->p[i] =
+        VCC_LITERAL(vwp, {(uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c}, blk,
+                    0, e->curloc, 0);
     if (V->sealing) {
         GROW(V->fwd, i, V->cfwd, 1);
         V->fwd[i] = i;
@@ -161,7 +160,7 @@ static uint32_t vw_newblk(ecx *e)
 
     GROW(V->b, V->nb, V->cb, 1);
     V->nb++;
-    V->b[b] = (vwb){0};
+    V->b[b] = VCC_LITERAL(vwb, 0);
     V->b[b].fin = VW_NOBLK;
     return b;
 }
@@ -580,7 +579,7 @@ VPRIV int vw_toreg(ecx *e, val *v, int size)
         return v->r;
     r = vw_treg(e);
     vw_set(e, r, vw_val(e, v, v->k == V_ADDR ? VT_PTR : VT_I64));
-    *v = (val){.k = V_REG, .r = (uint8_t)r};
+    *v = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     return r;
 }
 
@@ -615,7 +614,7 @@ VPRIV void vw_slot(ecx *e, int64_t off, uint64_t size, uint32_t align, int kind)
     V->nact = n;
     GROW(V->sl, V->nsl, V->csl, 1);
     V->sl[V->nsl] =
-        (vwslot){off, size, align ? align : 1, 0, 0, 0, VW_NOBLK, 0};
+        VCC_LITERAL(vwslot, off, size, align ? align : 1, 0, 0, 0, VW_NOBLK, 0);
     GROW(V->act, V->nact, V->cact, 1);
     V->act[V->nact++] = V->nsl++;
     /* a fresh object: what the store table knew about these bytes is gone */
@@ -847,7 +846,7 @@ VPRIV void vw_store(ecx *e, int rs, const lval *l, int size)
                 l->off < V->st[i].off + V->st[i].size)
                 V->st[i--] = V->st[--V->nst];
         GROW(V->st, V->nst, V->cst, 1);
-        V->st[V->nst++] = (vwstent){slot, l->off, size, v};
+        V->st[V->nst++] = VCC_LITERAL(vwstent, slot, l->off, size, v);
     } else {
         vw_st_clear(e, true); /* through a pointer: any exposed slot */
     }
@@ -906,7 +905,7 @@ VPRIV val vw_umulhi(ecx *e, val a, val b)
     int r = vw_resname(e, &a, &b);
 
     vw_set(e, r, vw_ins(e, VO_UMULHI, VT_I64, 0, x, y, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_smulhi(ecx *e, val a, val b)
@@ -915,7 +914,7 @@ VPRIV val vw_smulhi(ecx *e, val a, val b)
     int r = vw_resname(e, &a, &b);
 
     vw_set(e, r, vw_ins(e, VO_SMULHI, VT_I64, 0, x, y, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
@@ -941,14 +940,14 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
                                    : vw_ins(e, VO_NEG, VT_I64, 0, y, 0, 0);
             r = vw_resname(e, &a, &b);
             vw_set(e, r, vw_ins(e, VO_PTRADD, VT_PTR, 0, x, y, 0));
-            return (val){.k = V_REG, .r = (uint8_t)r};
+            return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
         }
         if (op == T_MINUS && at == VT_PTR && bt == VT_PTR) {
             x = vw_val(e, &a, VT_PTR);
             y = vw_val(e, &b, VT_PTR);
             r = vw_resname(e, &a, &b);
             vw_set(e, r, vw_ins(e, VO_PSUB, VT_I64, 0, x, y, 0));
-            return (val){.k = V_REG, .r = (uint8_t)r};
+            return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
         }
     }
     switch (op) {
@@ -1007,7 +1006,7 @@ VPRIV val vw_bin(ecx *e, int op, int size, bool sgn, val a, val b)
     r = vw_resname(e, &a, &b);
     /* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
     vw_set(e, r, vw_ins(e, vop, ty, fl, x, y, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_un(ecx *e, int op, int size, val a)
@@ -1016,7 +1015,7 @@ VPRIV val vw_un(ecx *e, int op, int size, val a)
     int r = vw_resname(e, &a, NULL);
 
     vw_set(e, r, vw_ins(e, op == T_MINUS ? VO_NEG : VO_NOT, ty, 0, x, 0, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV void vw_ext(ecx *e, int r, int from, bool sgn)
@@ -1090,7 +1089,7 @@ VPRIV val vw_cmp(ecx *e, int op, int size, bool sgn, val a, val b)
     int r = vw_resname(e, &a, &b);
 
     vw_set(e, r, c);
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* to lbl if c (an i32 or i64) is nonzero, else on */
@@ -1286,7 +1285,7 @@ VPRIV val vw_fconst(ecx *e, uint64_t bits, int size)
     vw_set(e, r,
            vw_k(e, VO_FCONST, size == 4 ? VT_F32 : VT_F64, 0, (uint32_t)bits,
                 size == 4 ? 0 : (uint32_t)(bits >> 32)));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* a is the product an expression just made (in its name still), or that negated: the fmul, else 0.
@@ -1348,7 +1347,7 @@ VPRIV val vw_fbin(ecx *e, int op, qty t, val a, val b)
     vw_set(e, r, v);
     if (vop == VO_FMUL)
         e->vw->fprod[r - VW_FNAME0] = v;
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_fneg(ecx *e, qty t, val a)
@@ -1364,7 +1363,7 @@ VPRIV val vw_fneg(ecx *e, qty t, val a)
     vw_set(e, r, v);
     if (prod)
         e->vw->fprod[r - VW_FNAME0] = v;
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_fsqrt(ecx *e, qty t, val a)
@@ -1373,7 +1372,7 @@ VPRIV val vw_fsqrt(ecx *e, qty t, val a)
     int r = vw_fres(e, &a, NULL);
 
     vw_set(e, r, vw_ins(e, VO_FSQRT, ty, 0, x, 0, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_root4(ecx *e, val a)
@@ -1427,7 +1426,7 @@ VPRIV val vw_fcmp(ecx *e, int op, qty t, val a, val b)
         vw_tfree(e, b.r);
     r = vw_treg(e);
     vw_set(e, r, vw_ins(e, VO_FCMP, VT_I32, cc, x, y, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
@@ -1446,7 +1445,7 @@ VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
             x = vw_ins(e, a == VT_F32 ? VO_FEXT : VO_FTRUNC, b, 0, x, 0, 0);
         r = vw_fres(e, &v, NULL);
         vw_set(e, r, x);
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     }
     if (tf) { /* integer to float */
         bool sg = wk_signed(c, from);
@@ -1469,7 +1468,7 @@ VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
             vw_tfree(e, v.r);
         r = vw_ftreg(e);
         vw_set(e, r, vw_ins(e, sg ? VO_S2F : VO_U2F, b, 0, x, 0, 0));
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     }
     if (KIND(c, to) == TY_BOOL) {
         uint32_t a = vw_fty(e, from);
@@ -1481,7 +1480,7 @@ VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
         vw_set(e, r,
                vw_ins(e, VO_FCMP, VT_I32, 1, x, vw_k(e, VO_FCONST, a, 0, 0, 0),
                       0));
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     }
     { /* float to integer */
         uint32_t a = vw_fty(e, from), it = ts == 8 ? VT_I64 : VT_I32;
@@ -1497,7 +1496,7 @@ VPRIV val vw_cvt(ecx *e, val v, qty from, qty to)
             vw_ext(e, r, ts, sg);
         else if (ts == 4 && sg)
             vw_ext(e, r, 4, true);
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     }
 }
 
@@ -1511,7 +1510,7 @@ VPRIV val vw_fbits(ecx *e, val v, int size)
     r = vw_treg(e);
     vw_set(e, r,
            vw_ins(e, VO_BITCAST, size == 4 ? VT_I32 : VT_I64, 0, x, 0, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* ---------------- builtins and the rest ---------------- */
@@ -1545,18 +1544,18 @@ VPRIV val vw_bitop(ecx *e, int bi, int size, val a)
         x = vw_ins(e, VO_BSWAP, VT_I32, 0, vw_conv(e, x, VT_I32), 0, 0);
         vw_set(e, r,
                vw_ins(e, VO_LSHR, VT_I32, 0, x, vw_iconst(e, VT_I32, 16), 0));
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     case BI_PARITY:
     case BI_PARITYL:
     case BI_PARITYLL:
         x = vw_ins(e, VO_POPCNT, ty, 0, x, 0, 0);
         vw_set(e, r, vw_ins(e, VO_AND, ty, 0, x, vw_iconst(e, ty, 1), 0));
-        return (val){.k = V_REG, .r = (uint8_t)r};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     default:
         vw_fail(e, "VIR: this builtin");
     }
     vw_set(e, r, vw_ins(e, op, ty, 0, x, 0, 0));
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* sequentially consistent; a result is zero-extended (an i32 for 4 bytes or less) */
@@ -1800,8 +1799,8 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
         uint32_t i = V->lh[lj] - 1;
 
         if (V->loc[i].sym == s && V->loc[i].inst == inst) {
-            *l = (lval){
-                .k = L_VAR, .ref = VW_VAR0 + i, .align = sym_align(c, s)};
+            *l = VCC_LITERAL(lval, .k = L_VAR, .ref = VW_VAR0 + i,
+                             .align = sym_align(c, s));
             return true;
         }
     }
@@ -1809,10 +1808,11 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
     GROW(V->loc, V->nloc, V->cloc, 1);
     GROW(V->vty, V->nloc, V->cvty, 1);
     GROW(V->vsgn, V->nloc, V->cvsgn, 1);
-    V->loc[V->nloc] = (vwloc){s, inst};
+    V->loc[V->nloc] = VCC_LITERAL(vwloc, s, inst);
     V->vty[V->nloc] = (uint8_t)ty;
     V->vsgn[V->nloc] = is_integer(c, t) && is_signed(c, t);
-    *l = (lval){.k = L_VAR, .ref = VW_VAR0 + V->nloc, .align = sym_align(c, s)};
+    *l = VCC_LITERAL(lval, .k = L_VAR, .ref = VW_VAR0 + V->nloc,
+                     .align = sym_align(c, s));
     V->nloc++;
     return true;
 }
@@ -1973,7 +1973,7 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n,
         int q = vw_ftreg(e);
 
         vw_set(e, q, v);
-        return (val){.k = V_REG, .r = (uint8_t)q};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)q);
     }
     {
         int q = vw_treg(e), size = wk_size(c, rt);
@@ -1986,7 +1986,7 @@ VPRIV val vw_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n,
             vw_set(e, q, vw_conv(e, v, VT_I32));
         else if (size < 8)
             vw_ext(e, q, size, sgn);
-        return (val){.k = V_REG, .r = (uint8_t)q};
+        return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)q);
     }
 }
 
@@ -2103,7 +2103,7 @@ VPRIV void vw_begin(ecx *e, uint32_t s)
     (void)s;
     V->np = 1; /* (0 is no instruction) */
     GROW(V->p, 0, V->cp, 1);
-    V->p[0] = (vwp){0};
+    V->p[0] = VCC_LITERAL(vwp, 0);
     V->nb = V->nx = V->nsl = V->nact = V->nst = V->nloc = V->nprom = 0;
     V->live[0] = V->live[1] = V->live[2] = 0;
     V->flive = 0;
@@ -2593,7 +2593,7 @@ static bool vw_promote(ecx *e)
                 continue;
             }
             GROW(ms, nms, cms, 1);
-            ms[nms] = (struct vwms){i, s, vw_rel(&V->p[a]), len};
+            ms[nms] = VCC_LITERAL(struct vwms, i, s, vw_rel(&V->p[a]), len);
             fof[i] = UINT32_MAX - nms++; /* (a memset: its index in ms) */
             continue;
         }
@@ -2626,7 +2626,7 @@ static bool vw_promote(ecx *e)
             GROW(fnx, nf, cfnx, 1);
             fnx[nf] = sf[s];
             sf[s] = nf + 1;
-            fd[nf++] = (vwfld){s, rel, size, VT_VOID};
+            fd[nf++] = VCC_LITERAL(vwfld, s, rel, size, VT_VOID);
         }
         if (ty != VT_VOID) {
             if (fd[k].ty != VT_VOID && fd[k].ty != ty) {
@@ -3096,7 +3096,8 @@ static bool vw_simp1(ecx *e, vwsimp *S, uint32_t q, uint32_t *r)
         if (xi.op == VO_EXT &&
             V->p[xi.a].in.ty == VT_I32) { /* a narrower extension, in i32 */
             vw_dec(V, S, x), vw_inc(V, S, xi.a);
-            V->p[q].in = (vir_ins){VO_EXT, VT_I32, xi.fl, xi.a, 0, 0};
+            V->p[q].in =
+                VCC_LITERAL(vir_ins, VO_EXT, VT_I32, xi.fl, xi.a, 0, 0);
             return true;
         }
         if (xi.op == VO_EXT &&
@@ -3482,8 +3483,8 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 
             if (!(in.fl & VIF_VOL) && vir_tysize(vt) &&
                 1u << VIF_W(in.fl) == vir_tysize(vt)) {
-                key = (vwhe){VO_LOAD,   vt, (uint32_t)VIF_W(in.fl), in.a, 0, 0,
-                             S->memgen, 0};
+                key = VCC_LITERAL(vwhe, VO_LOAD, vt, (uint32_t)VIF_W(in.fl),
+                                  in.a, 0, 0, S->memgen, 0);
                 t = vw_hlook(S, &key);
                 if (!t->v)
                     S->log[S->nlog++] = (uint32_t)(t - S->ht);
@@ -3492,8 +3493,8 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
             }
             if (!(in.fl & VIF_VOL) &&
                 (vt == VT_I32 || vt == VT_I64)) { /* (any load of its width) */
-                key = (vwhe){VO_STORE,  0, (uint32_t)VIF_W(in.fl), in.a, 0, 0,
-                             S->memgen, 0};
+                key = VCC_LITERAL(vwhe, VO_STORE, 0, (uint32_t)VIF_W(in.fl),
+                                  in.a, 0, 0, S->memgen, 0);
                 t = vw_hlook(S, &key);
                 if (!t->v)
                     S->log[S->nlog++] = (uint32_t)(t - S->ht);
@@ -3507,8 +3508,8 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
 
             if (in.fl & VIF_VOL)
                 continue;
-            key = (vwhe){VO_LOAD,   in.ty, in.fl & (3u | VIF_MS), in.a, 0, 0,
-                         S->memgen, 0};
+            key = VCC_LITERAL(vwhe, VO_LOAD, in.ty, in.fl & (3u | VIF_MS), in.a,
+                              0, 0, S->memgen, 0);
             if ((in.ty == VT_I32 || in.ty == VT_I64) && !vw_hlook(S, &key)->v) {
                 /* the value a store of this width left: truncated or extended to the load's */
                 vwhe sk = {VO_STORE,  0, (uint32_t)VIF_W(in.fl), in.a, 0, 0,
@@ -3519,14 +3520,12 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
                     v = vw_find(V, v);
                     vt = V->p[v].in.ty;
                     if (in.ty == VT_I32 && vt == VT_I64 && w == 2)
-                        V->p[q].in = (vir_ins){VO_TRUNC, VT_I32, 0, v, 0, 0};
+                        V->p[q].in =
+                            VCC_LITERAL(vir_ins, VO_TRUNC, VT_I32, 0, v, 0, 0);
                     else if (w < 3 && vir_tysize(vt) <= vir_tysize(in.ty))
-                        V->p[q].in = (vir_ins){VO_EXT,
-                                               (uint8_t)in.ty,
-                                               (uint16_t)(w | (in.fl & VIF_MS)),
-                                               v,
-                                               0,
-                                               0};
+                        V->p[q].in = VCC_LITERAL(
+                            vir_ins, VO_EXT, (uint8_t)in.ty,
+                            (uint16_t)(w | (in.fl & VIF_MS)), v, 0, 0);
                     else
                         v = 0;
                     if (v) {
@@ -3540,9 +3539,11 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
             vir_ins in = V->p[q].in;
 
             if (vw_commutes(op) && in.a > in.b)
-                key = (vwhe){op, in.ty, in.fl, in.b, in.a, in.c, S->blk, 0};
+                key = VCC_LITERAL(vwhe, op, in.ty, in.fl, in.b, in.a, in.c,
+                                  S->blk, 0);
             else
-                key = (vwhe){op, in.ty, in.fl, in.a, in.b, in.c, S->blk, 0};
+                key = VCC_LITERAL(vwhe, op, in.ty, in.fl, in.a, in.b, in.c,
+                                  S->blk, 0);
         } else
             continue;
         t = vw_hlook(S, &key);
@@ -3576,10 +3577,11 @@ static void vw_cse_blk(ecx *e, vwsimp *S_, uint32_t b)
             uint32_t v = vw_find(V, t->v), vt = V->p[v].in.ty;
 
             if (in.ty == VT_I32 && vt == VT_I64)
-                V->p[q].in = (vir_ins){VO_TRUNC, VT_I32, 0, v, 0, 0};
+                V->p[q].in = VCC_LITERAL(vir_ins, VO_TRUNC, VT_I32, 0, v, 0, 0);
             else if (in.ty == VT_I64 && vt == VT_I32 && VIF_W(in.fl) < 3)
-                V->p[q].in = (vir_ins){
-                    VO_EXT, VT_I64, (uint16_t)(in.fl & (3 | VIF_MS)), v, 0, 0};
+                V->p[q].in =
+                    VCC_LITERAL(vir_ins, VO_EXT, VT_I64,
+                                (uint16_t)(in.fl & (3 | VIF_MS)), v, 0, 0);
             else
                 v = 0;
             if (v) {
@@ -4077,7 +4079,7 @@ static bool vw_ifconv(ecx *e)
         for (uint32_t k = jf; k + 1 < V->b[J].npred; k++)
             V->pr[V->b[J].pred + k] = V->pr[V->b[J].pred + k + 1];
         V->b[J].npred--;
-        V->p[t].in = (vir_ins){VO_BR, VT_VOID, 0, J, 0, 0};
+        V->p[t].in = VCC_LITERAL(vir_ins, VO_BR, VT_VOID, 0, J, 0, 0);
         if (et)
             V->b[T].reach = 0;
         if (ef)
@@ -4292,8 +4294,10 @@ static bool vw_condmerge(ecx *e)
                     vw_fail(e, "VIR: joined conditions");
                 V->p[n].loc = V->p[t].loc;
                 cnt[n] = 1;
-                V->p[t].in = onfalse ? (vir_ins){VO_BRIF, VT_VOID, 0, n, O, X}
-                                     : (vir_ins){VO_BRIF, VT_VOID, 0, n, X, O};
+                V->p[t].in =
+                    onfalse
+                        ? VCC_LITERAL(vir_ins, VO_BRIF, VT_VOID, 0, n, O, X)
+                        : VCC_LITERAL(vir_ins, VO_BRIF, VT_VOID, 0, n, X, O);
                 /* X is entered from b now; O's entry from S goes */
                 V->pr[V->b[X].pred + ix] = b;
                 for (uint32_t p = V->b[O].phead; p; p = V->p[p].next)

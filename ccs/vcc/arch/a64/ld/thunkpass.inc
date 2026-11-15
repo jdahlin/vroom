@@ -1,3 +1,4 @@
+#include "../../../lib/literal.h"
 /* arm64 thunk pass: calls out of branch range get thunks, as lld does; part of ld/ld.c (#included there) */
 
 /* ---------------- thunk pass ---------------- */
@@ -148,7 +149,7 @@ static bool create_thunks(int pass)
 							uint32_t ts = new_isec(".text.thunk", K_THUNK, SHT_PROGBITS,
 									       SHF_ALLOC | SHF_EXECINSTR, 4);
 							d = &isds.v[di];
-							VVEC_PUSH(thunksecs, ((ThunkSec){0}), alloc);
+							VVEC_PUSH(thunksecs, (VCC_LITERAL(ThunkSec, 0)), alloc);
 							isecs.v[ts].aux = thunksecs.n - 1;
 							isecs.v[ts].osec = oi;
 							isecs.v[ts].isd = di;

@@ -1,4 +1,5 @@
 /* vcc code generator: record-level clean-ups once a function is generated */
+#include "../../../lib/literal.h"
 #include "../../../emit/emitimpl.h"
 
 /*
@@ -1308,9 +1309,10 @@ static fdef fclass(const ins *d)
     int w = d->sz ? 64 : 32, r = (int)d->imm, s = d->sh;
 
     if (d->op == I_UBFM && s != w - 1 && r == (s + 1) % w)
-        return (fdef){FD_LSL, d->rn, w - 1 - s, 0, 0};
+        return VCC_LITERAL(fdef, FD_LSL, d->rn, w - 1 - s, 0, 0);
     if ((d->op == I_UBFM || d->op == I_SBFM) && s == w - 1 && r > 0)
-        return (fdef){d->op == I_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0, 0};
+        return VCC_LITERAL(fdef, d->op == I_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0,
+                           0);
     if ((d->op == I_UBFM || d->op == I_SBFM) &&
         (s == 7 || s == 15 || (s == 31 && d->sz))) {
         int sg = d->op == I_SBFM ? 4 : 0, o = sg | (s == 7    ? 0
@@ -1318,16 +1320,16 @@ static fdef fclass(const ins *d)
                                                               : 2);
 
         if (r == 0)
-            return (fdef){FD_EXT, d->rn, 0, o, s + 1};
+            return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, o, s + 1);
         if (r > s && w - r <= 4) /* sbfiz/ubfiz: the field moved up by w - r */
-            return (fdef){FD_EXT, d->rn, w - r, o, s + 1};
+            return VCC_LITERAL(fdef, FD_EXT, d->rn, w - r, o, s + 1);
     }
     if (d->op == I_MOV && !d->sz && d->rn < 31)
-        return (fdef){FD_EXT, d->rn, 0, 2, 32};
+        return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, 2, 32);
     if (d->op == I_ANDI && (d->imm == 0xff || d->imm == 0xffff))
-        return (fdef){FD_EXT, d->rn, 0, d->imm == 0xff ? 0 : 1,
-                      d->imm == 0xff ? 8 : 16};
-    return (fdef){FD_NONE, 0, 0, 0, 0};
+        return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, d->imm == 0xff ? 0 : 1,
+                           d->imm == 0xff ? 8 : 16);
+    return VCC_LITERAL(fdef, FD_NONE, 0, 0, 0, 0);
 }
 
 /* x16/x17 are written by records that do not say so (an immediate or an offset that does
@@ -1515,15 +1517,13 @@ static bool fold1(ecx *e, uint32_t k)
                     continue;
                 if (di->op != I_MADD && i->op == I_SUB)
                     continue;
-                *i = (ins){
+                *i = VCC_LITERAL(
+                    ins,
                     .op = (uint8_t)(di->op == I_MADD
                                         ? (i->op == I_ADD ? I_MADD : I_MSUB)
                                         : di->op),
-                    .sz = i->sz,
-                    .rd = i->rd,
-                    .rn = di->rn,
-                    .rm = di->rm,
-                    .ra = (uint8_t)a};
+                    .sz = i->sz, .rd = i->rd, .rn = di->rn, .rm = di->rm,
+                    .ra = (uint8_t)a);
                 fdone(e, (uint32_t)d, k);
                 return true;
             }
@@ -1650,12 +1650,9 @@ static bool fold1(ecx *e, uint32_t k)
             f.sh + n > w || !fgpr(f.src) ||
             !fkept(e, (uint32_t)d, k, RB(f.src)))
             return false;
-        *i = (ins){.op = I_UBFM,
-                   .sz = i->sz,
-                   .rd = i->rd,
-                   .rn = (uint8_t)f.src,
-                   .imm = f.sh,
-                   .sh = (uint8_t)(f.sh + n - 1)};
+        *i = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz, .rd = i->rd,
+                         .rn = (uint8_t)f.src, .imm = f.sh,
+                         .sh = (uint8_t)(f.sh + n - 1));
         fdone(e, (uint32_t)d, k);
         return true;
     }
@@ -1787,11 +1784,10 @@ static bool fconst(ecx *e, uint32_t k)
                          (i->sz == 0 && u > 0x7fffffff)
                    : !logimm_ok(i->sz ? (uint64_t)v : (uint32_t)v, i->sz))
                 continue;
-            *i = (ins){.op = to[i->op],
-                       .sz = i->sz,
-                       .rd = i->rd,
-                       .rn = (uint8_t)a,
-                       .imm = as ? v : (i->sz ? v : (int64_t)(uint32_t)v)};
+            *i =
+                VCC_LITERAL(ins, .op = to[i->op], .sz = i->sz, .rd = i->rd,
+                            .rn = (uint8_t)a,
+                            .imm = as ? v : (i->sz ? v : (int64_t)(uint32_t)v));
             fdone(e, (uint32_t)d, k);
             return true;
         }
@@ -1826,11 +1822,8 @@ static void fmulk(ecx *e, uint32_t k)
         if (!c)
             continue;
         if (c == m) { /* -1: neg */
-            *i = (ins){.op = I_SUB,
-                       .sz = i->sz,
-                       .rd = i->rd,
-                       .rn = ZR,
-                       .rm = (uint8_t)a};
+            *i = VCC_LITERAL(ins, .op = I_SUB, .sz = i->sz, .rd = i->rd,
+                             .rn = ZR, .rm = (uint8_t)a);
             fdone(e, (uint32_t)d, k);
             return;
         }
@@ -1839,12 +1832,9 @@ static void fmulk(ecx *e, uint32_t k)
         if (c > 1 && !((c - 1) & (c - 2)) && sh < w) { /* (2^n + 1) << sh */
             n = __builtin_ctzll(c - 1);
             if (!sh) {
-                *i = (ins){.op = I_ADD,
-                           .sz = i->sz,
-                           .rd = i->rd,
-                           .rn = (uint8_t)a,
-                           .rm = (uint8_t)a,
-                           .sh = (uint8_t)n};
+                *i = VCC_LITERAL(ins, .op = I_ADD, .sz = i->sz, .rd = i->rd,
+                                 .rn = (uint8_t)a, .rm = (uint8_t)a,
+                                 .sh = (uint8_t)n);
                 fdone(e, (uint32_t)d, k);
                 return;
             }
@@ -1858,30 +1848,18 @@ static void fmulk(ecx *e, uint32_t k)
         if (!fkept(e, (uint32_t)d, k, RB(a)) || !(W.la[d] & RB(a)))
             continue;
         if (sh) { /* add r, a, a, lsl n; lsl d, r, sh */
-            in[d] = (ins){.op = I_ADD,
-                          .sz = i->sz,
-                          .rd = (uint8_t)r,
-                          .rn = (uint8_t)a,
-                          .rm = (uint8_t)a,
-                          .sh = (uint8_t)n};
-            *i = (ins){.op = I_UBFM,
-                       .sz = i->sz,
-                       .rd = i->rd,
-                       .rn = (uint8_t)r,
-                       .imm = (w - sh) % w,
-                       .sh = (uint8_t)(w - 1 - sh)};
+            in[d] = VCC_LITERAL(ins, .op = I_ADD, .sz = i->sz, .rd = (uint8_t)r,
+                                .rn = (uint8_t)a, .rm = (uint8_t)a,
+                                .sh = (uint8_t)n);
+            *i = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz, .rd = i->rd,
+                             .rn = (uint8_t)r, .imm = (w - sh) % w,
+                             .sh = (uint8_t)(w - 1 - sh));
         } else { /* lsl r, a, n; sub d, r, a */
-            in[d] = (ins){.op = I_UBFM,
-                          .sz = i->sz,
-                          .rd = (uint8_t)r,
-                          .rn = (uint8_t)a,
-                          .imm = (w - n) % w,
-                          .sh = (uint8_t)(w - 1 - n)};
-            *i = (ins){.op = I_SUB,
-                       .sz = i->sz,
-                       .rd = i->rd,
-                       .rn = (uint8_t)r,
-                       .rm = (uint8_t)a};
+            in[d] = VCC_LITERAL(ins, .op = I_UBFM, .sz = i->sz,
+                                .rd = (uint8_t)r, .rn = (uint8_t)a,
+                                .imm = (w - n) % w, .sh = (uint8_t)(w - 1 - n));
+            *i = VCC_LITERAL(ins, .op = I_SUB, .sz = i->sz, .rd = i->rd,
+                             .rn = (uint8_t)r, .rm = (uint8_t)a);
         }
         W.ro[d] = (uint16_t)roles(&in[d]);
         W.rr[d] = reads(&in[d], W.ro[d]);
@@ -1922,7 +1900,8 @@ static bool fbytes(ecx *e, uint32_t j, int r, int s, int sz, fbyte *b, int *nb,
         if (di->sz || di->rn >= 31 || di->ra == LD_VOLATILE || *nb >= FB_MAX ||
             (s & 7))
             return false;
-        b[(*nb)++] = (fbyte){(uint32_t)d, di->rn, di->imm, s, di->cond};
+        b[(*nb)++] =
+            VCC_LITERAL(fbyte, (uint32_t)d, di->rn, di->imm, s, di->cond);
         return true;
     }
     if (di->sz > sz)
@@ -2039,28 +2018,21 @@ static void fbswap(ecx *e, uint32_t k)
         in[ch[q]].op = DELETED;
         W.rr[ch[q]] = W.ww[ch[q]] = 0;
     }
-    in[first] = (ins){.op = I_LD,
-                      .sz = (uint8_t)lg,
-                      .rd = (uint8_t)rd,
-                      .rn = (uint8_t)base,
-                      .imm = lo};
+    in[first] = VCC_LITERAL(ins, .op = I_LD, .sz = (uint8_t)lg,
+                            .rd = (uint8_t)rd, .rn = (uint8_t)base, .imm = lo);
     W.ro[first] = (uint16_t)roles(&in[first]);
     W.rr[first] = reads(&in[first], W.ro[first]);
     W.ww[first] = writes(&in[first], W.ro[first]);
     in[k].op = DELETED;
     W.rr[k] = W.ww[k] = 0;
     if (!le)
-        in[at[0]] = (ins){.op = (uint8_t)(n == 2 ? I_REV16 : I_REV),
-                          .sz = (uint8_t)(n == 8 ? 1 : 0),
-                          .rd = (uint8_t)rd,
-                          .rn = (uint8_t)rd};
+        in[at[0]] = VCC_LITERAL(ins, .op = (uint8_t)(n == 2 ? I_REV16 : I_REV),
+                                .sz = (uint8_t)(n == 8 ? 1 : 0),
+                                .rd = (uint8_t)rd, .rn = (uint8_t)rd);
     if (sgn)
-        in[k] = (ins){.op = I_SBFM,
-                      .sz = (uint8_t)sz,
-                      .rd = (uint8_t)rd,
-                      .rn = (uint8_t)rd,
-                      .imm = 0,
-                      .sh = (uint8_t)(8 * n - 1)};
+        in[k] = VCC_LITERAL(ins, .op = I_SBFM, .sz = (uint8_t)sz,
+                            .rd = (uint8_t)rd, .rn = (uint8_t)rd, .imm = 0,
+                            .sh = (uint8_t)(8 * n - 1));
     for (uint32_t q = 0; q < 2; q++) {
         uint32_t j = q ? k : at[0];
 

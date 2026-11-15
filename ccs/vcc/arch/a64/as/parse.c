@@ -1,4 +1,5 @@
 /* arm64 instructions in GNU as syntax: registers and .req aliases, operands, literal pools, the statement */
+#include "../../../lib/literal.h"
 #include "../../../as/asimpl.h"
 
 /* ---------------------------------------------------------------- instructions */
@@ -354,7 +355,7 @@ static int parse_imm(As *a, const char **pp, const char *e, A64Op *op)
             int64_t x = 0;
             for (const char *t = d; t < q; t++)
                 x = x * 10 + (*t - '0');
-            op->v = (Val){0, 0, x};
+            op->v = VCC_LITERAL(Val, 0, 0, x);
             op->imm = x;
             op->hassym = 0;
             *pp = q;
@@ -839,7 +840,7 @@ VPRIV int instruction(As *a, const char *p, const char *e, size_t wn)
             }
         }
         uint32_t lab = pool_entry(a, ops[1].v, x ? 8 : 4);
-        ops[1].v = (Val){lab, 0, 0};
+        ops[1].v = VCC_LITERAL(Val, lab, 0, 0);
         ops[1].hassym = 1;
         ops[1].hash = 0;
         ops[1].imm = 0;

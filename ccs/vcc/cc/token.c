@@ -1,4 +1,5 @@
 /* vcc front end: the parser's token window over pp_next */
+#include "../lib/literal.h"
 #include "ccimpl.h"
 
 uint8_t kwclass[KW_END];
@@ -240,13 +241,13 @@ VPRIV bool expect_semi(cc *c, const char *after)
     if (c->tk[0].kind == T_COMMA || c->tk[0].kind == T_COLON) {
         /* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
         e = c->tk[0].loc;
-        fx = (pp_fixit){e, pp_tok_end(c->p, e), ";", VDA_MACHINE};
+        fx = VCC_LITERAL(pp_fixit, e, pp_tok_end(c->p, e), ";", VDA_MACHINE);
         report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
         next(c);
         return false;
     }
     e = pp_tok_end(c->p, c->prevloc);
-    fx = (pp_fixit){e, e, ";", semi_app(c)};
+    fx = VCC_LITERAL(pp_fixit, e, e, ";", semi_app(c));
     report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
     return true;
 }
@@ -299,7 +300,7 @@ VPRIV bool decl_comma_typo(cc *c)
     t = peek(c, 1);
     if (!(t->flags & TF_SOL) || might_be_declarator(c, t))
         return false;
-    fx = (pp_fixit){l, pp_tok_end(c->p, l), ";", VDA_MACHINE};
+    fx = VCC_LITERAL(pp_fixit, l, pp_tok_end(c->p, l), ";", VDA_MACHINE);
     report(c, "error", l, NULL, 0, &fx, 1,
            "expected ';' at end of declaration");
     next(c);
@@ -455,7 +456,8 @@ static void pragma(cc *c, const ptok *t)
                 keep = (char *)halloc(c, n + 1);
                 memcpy(keep, a, n);
                 keep[n] = 0;
-                c->strs[c->nstr] = (cstr){keep, (uint32_t)(n + 1), 1, T_STRING};
+                c->strs[c->nstr] =
+                    VCC_LITERAL(cstr, keep, (uint32_t)(n + 1), 1, T_STRING);
                 c->visstk[c->nvis++] =
                     ++c->nstr; /* (string index + 1, as attrs.visibility) */
             }

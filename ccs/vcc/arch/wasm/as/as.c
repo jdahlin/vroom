@@ -5,6 +5,7 @@
  * and relocations, resolved when the object is laid out (as LLVM MC does:
  * a relocatable field is always 5 or 10 bytes).
  */
+#include "../../../lib/literal.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -608,7 +609,7 @@ static void rel_add(wrel **r, uint32_t *n, uint32_t *c, uint8_t type,
                     uint32_t off, uint32_t sym, int64_t addend)
 {
     GROW(*r, *n, *c);
-    (*r)[(*n)++] = (wrel){type, off, sym, addend};
+    (*r)[(*n)++] = VCC_LITERAL(wrel, type, off, sym, addend);
 }
 
 static void fn_rel(was *a, uint8_t type, uint32_t sym, int64_t addend)
@@ -1267,7 +1268,8 @@ static int directive(was *a, const char *d, size_t dn, lx *l)
             sym_use(a, (uint32_t)sy, WS_FUNCTION);
             m->sym[sy].used_reloc = true;
             GROW(m->init, m->ninit, m->cinit);
-            m->init[m->ninit++] = (struct winit){a->prio, (uint32_t)sy};
+            m->init[m->ninit++] =
+                VCC_LITERAL(struct winit, a->prio, (uint32_t)sy);
         } while (accept(l, ','));
         return 0;
     }

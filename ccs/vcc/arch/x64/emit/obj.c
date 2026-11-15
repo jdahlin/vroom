@@ -1,5 +1,6 @@
 /* x86 records -> structured assembler operands. Encoding, relocations and
  * branch relaxation belong to the existing assembler, shared with -S input. */
+#include "../../../lib/literal.h"
 #include "x64impl.h"
 #include "../as/operand.h"
 
@@ -90,16 +91,16 @@ VPRIV bool x64_obj_record(ecx *e, const rec *i, rec *out)
 
 static XOp xo_reg(int r, int size)
 {
-    return (XOp){.kind = XK_REG,
-                 .cls = (uint8_t)(IS_XMM(r) ? XR_XMM : XR_GPR),
-                 .reg = (uint8_t)(IS_XMM(r) ? r - XMM0 : r),
-                 .size = (uint8_t)(IS_XMM(r) ? 16 : size),
-                 .needrex = !IS_XMM(r) && size == 1 && r >= 4};
+    return VCC_LITERAL(XOp, .kind = XK_REG,
+                       .cls = (uint8_t)(IS_XMM(r) ? XR_XMM : XR_GPR),
+                       .reg = (uint8_t)(IS_XMM(r) ? r - XMM0 : r),
+                       .size = (uint8_t)(IS_XMM(r) ? 16 : size),
+                       .needrex = !IS_XMM(r) && size == 1 && r >= 4);
 }
 
 static XOp xo_imm(int64_t v)
 {
-    return (XOp){.kind = XK_IMM, .v = {.c = v}, .hasv = 1};
+    return VCC_LITERAL(XOp, .kind = XK_IMM, .v = {.c = v}, .hasv = 1);
 }
 
 static uint32_t xo_label(rctx *R, uint32_t fid, uint32_t label)
@@ -223,10 +224,9 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
             break;
         case X_LEASCALE:
             mn = "lea";
-            o[0] = (XOp){.kind = XK_MEM,
-                         .base = (int8_t)i->r[1],
-                         .index = (int8_t)i->r[2],
-                         .scale = (uint8_t)(1u << i->sh)};
+            o[0] = VCC_LITERAL(XOp, .kind = XK_MEM, .base = (int8_t)i->r[1],
+                               .index = (int8_t)i->r[2],
+                               .scale = (uint8_t)(1u << i->sh));
             break;
         case X_ADD:
         case X_SUB:
@@ -300,9 +300,9 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
         case X_JMP:
         case X_JCC:
         case X_LEAL:
-            o[0] = (XOp){.kind = XK_EXPR,
-                         .v = as_val(R->as, xo_label(R, fid, i->label), 0),
-                         .hasv = 1};
+            o[0] = VCC_LITERAL(
+                XOp, .kind = XK_EXPR,
+                .v = as_val(R->as, xo_label(R, fid, i->label), 0), .hasv = 1);
             if (i->op == X_LEAL) {
                 mn = "lea";
                 sz = 8;
@@ -322,9 +322,9 @@ VPRIV int x64_replay(rctx *R, const char *p, size_t n)
             mn = "callq";
             sz = 0;
             count = 1;
-            o[0] = (XOp){.kind = XK_EXPR,
-                         .v = as_val(R->as, r_sym(R, i->ref), 0),
-                         .hasv = 1};
+            o[0] =
+                VCC_LITERAL(XOp, .kind = XK_EXPR,
+                            .v = as_val(R->as, r_sym(R, i->ref), 0), .hasv = 1);
             if (R->c->o->pic &&
                 (RKIND(i->ref) == RK_NAME || sym_needs_got(R->c, i->ref)))
                 o[0].mod = XM_PLT;

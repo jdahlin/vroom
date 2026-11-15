@@ -1,3 +1,4 @@
+#include "../../lib/literal.h"
 /*
  * The loop vectorizer (RESEARCH-vectors.md 6; SPEC-vir.md 7.5), #included by build.c: it works
  * on the pre-IR, after if-conversion and before the edges are split, where blocks and
@@ -102,7 +103,7 @@ static vvi *vv_get(vvs *S, uint32_t v)
 	const vwp *q;
 
 	if (v >= S->n0) {
-		bad = (vvi){ .kind = VK_BAD };
+		bad = VCC_LITERAL(vvi, .kind = VK_BAD);
 		return &bad;
 	}
 	x = &S->I[v];
@@ -110,11 +111,11 @@ static vvi *vv_get(vvs *S, uint32_t v)
 		return x;
 	q = &V->p[v];
 	if (q->blk != VW_NOBLK && S->inl[q->blk]) {	/* (used before it was classified: not in the chain's order) */
-		bad = (vvi){ .kind = VK_BAD };
+		bad = VCC_LITERAL(vvi, .kind = VK_BAD);
 		return &bad;
 	}
 	vv_touch(S, v);
-	*x = (vvi){ .kind = VK_INV, .exact = 1 };
+	*x = VCC_LITERAL(vvi, .kind = VK_INV, .exact = 1);
 	if (q->blk == VW_NOBLK && q->in.op == VO_ICONST) {
 		x->k = q->in.ty == VT_I32 ? (int64_t)(int32_t)q->in.b : (int64_t)((uint64_t)q->in.b | (uint64_t)q->in.c << 32);
 	} else if (q->blk == VW_NOBLK && q->in.op == VO_SYMADDR) {
@@ -160,7 +161,7 @@ static void vv_opaque(vvs *S, uint32_t q, vvi *r)
 	uint8_t ok = r->objk;
 	uint32_t ov = r->objv;
 
-	*r = (vvi){ .kind = VK_INV, .exact = 1, .nuse = r->nuse, .bv = q, .bs = 1 };
+	*r = VCC_LITERAL(vvi, .kind = VK_INV, .exact = 1, .nuse = r->nuse, .bv = q, .bs = 1);
 	if (S->e->vw->p[q].in.ty == VT_PTR) {
 		r->objk = ok ? ok : VJ_PTR, r->objv = ok ? ov : q;
 		if (!ok)
@@ -229,8 +230,8 @@ static bool vv_classify(vvs *S, uint32_t q)
 			const vvi *x = o[1 - kc];
 			uint64_t K = in.op == VO_MUL ? (uint64_t)o[kc]->k : 1ull << o[1]->k;
 
-			r = (vvi){ .kind = (uint8_t)(allinv ? VK_INV : VK_LIN), .c = (int64_t)((uint64_t)x->c * K), .bv = x->bv,
-				   .bs = (int64_t)((uint64_t)x->bs * K), .k = (int64_t)((uint64_t)x->k * K) };
+			r = VCC_LITERAL(vvi, .kind = (uint8_t)(allinv ? VK_INV : VK_LIN), .c = (int64_t)((uint64_t)x->c * K), .bv = x->bv,
+				   .bs = (int64_t)((uint64_t)x->bs * K), .k = (int64_t)((uint64_t)x->k * K));
 			r.exact = x->exact && (in.ty != VT_I32 || ((in.fl & VIF_NSW) && !x->uns));
 			if (!r.bs)
 				r.bv = 0;
@@ -278,7 +279,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 		if (allinv)
 			vv_opaque(S, q, &r);
 		else if (o[0]->kind == VK_LIN)
-			r = (vvi){ .kind = VK_LIN, .c = (int32_t)o[0]->c };
+			r = VCC_LITERAL(vvi, .kind = VK_LIN, .c = (int32_t)o[0]->c);
 		else
 			r.kind = o[0]->kind == VK_W32 ? VK_VEC : VK_BAD;
 		break;
@@ -343,12 +344,12 @@ static bool vv_classify(vvs *S, uint32_t q)
 		} else if (S->lg == 2 && VIF_W(in.fl) == 2 && in.ty == VT_I64 &&
 		           (o[0]->c == 4 || o[0]->c == -4)) {
 			if (S->nacc == 64) return vv_no(S, "too many accesses");
-			S->acc[S->nacc++] = (vvacc){q, S->pos, false};
+			S->acc[S->nacc++] = VCC_LITERAL(vvacc, q, S->pos, false);
 			r.kind = VK_W32;
 		} else if (VIF_W(in.fl) == S->lg && (in.ty == S->fty || in.ty == S->ity) && (o[0]->c && o[0]->c % S->esz == 0 && o[0]->c >= -(1 << 20) && o[0]->c <= (1 << 20))) {
 			if (S->nacc == 64)
 				return vv_no(S, "too many accesses");
-			S->acc[S->nacc++] = (vvacc){ q, S->pos, false };
+			S->acc[S->nacc++] = VCC_LITERAL(vvacc, q, S->pos, false);
 			r.kind = VK_VEC;
 		} else {
 			r.kind = VK_BAD;
@@ -369,7 +370,7 @@ static bool vv_classify(vvs *S, uint32_t q)
 			return vv_no(S, "a stored value that cannot be vectorized");
 		if (S->nacc == 64)
 			return vv_no(S, "too many accesses");
-		S->acc[S->nacc++] = (vvacc){ q, S->pos, true };
+		S->acc[S->nacc++] = VCC_LITERAL(vvacc, q, S->pos, true);
 		r.kind = VK_BAD;	/* (no value) */
 		break;
 	}
@@ -952,8 +953,10 @@ static bool vv_ultctl(vvs *S, uint32_t p)
 	if (c >= S->n0 || V->p[c].in.op != VO_ICMP || V->p[c].blk != S->H)
 		return false;
 	cc = V->p[c].in.fl & 15;
-	if (V->p[t].in.b == S->X)
-		cc = (uint32_t[]){ 1, 0, 5, 4, 3, 2, 9, 8, 7, 6 }[cc];
+	if (V->p[t].in.b == S->X) {
+		static const uint32_t inverse[] = {1, 0, 5, 4, 3, 2, 9, 8, 7, 6};
+		cc = inverse[cc];
+	}
 	return ((cc == 6 || cc == 1) && vw_find(V, V->p[c].in.a) == p) || ((cc == 8 || cc == 1) && vw_find(V, V->p[c].in.b) == p);
 }
 
@@ -1032,7 +1035,7 @@ static bool vv_loop(vvs *S)
 			   (ty == S->ity && ((N.op == VO_ADD && (vw_find(V, N.a) == p || vw_find(V, N.b) == p)) || (N.op == VO_SUB && vw_find(V, N.a) == p)))) {
 			if (S->nred == 8)
 				return vv_no(S, "too many sums");
-			S->red[S->nred++] = (vvred){ p, nx, vw_find(V, N.a) == p ? N.b : N.a, 0, 0 };
+			S->red[S->nred++] = VCC_LITERAL(vvred, p, nx, vw_find(V, N.a) == p ? N.b : N.a, 0, 0);
 			r.kind = VK_RED;
 		} else if ((ty == S->fty || (ty == S->ity && N.op == VO_SELECT)) && S->nfold < 8 && vv_reaches(V, nx, p, &budget) && (N.op == VO_SELECT || N.op == VO_FADD || N.op == VO_FSUB || N.op == VO_FMUL || N.op == VO_FDIV)) {
 			S->fold[S->nfold].p = p;
@@ -1581,7 +1584,7 @@ static void vw_vectorize(ecx *e)
 		for (uint32_t k = 0; k < S.nlb; k++)
 			S.inl[S.lb[k]] = 0;
 		for (uint32_t k = 0; k < S.ntouch; k++)
-			S.I[S.touch[k]] = (vvi){ 0 };
+			S.I[S.touch[k]] = VCC_LITERAL(vvi, 0);
 		S.ntouch = 0;
 	}
 	free(hs), free(S.I), free(S.inl), free(S.touch);

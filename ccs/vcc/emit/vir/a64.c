@@ -18,6 +18,7 @@
  * layout stays finish_function's.  Edge moves of a branch that is not a `br`
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
+#include "../../lib/literal.h"
 #include "../emitimpl.h"
 #include "vw.h"
 #include "../../vir/layout.h"
@@ -397,7 +398,7 @@ static void vl_regs(vir_regs *r, bool darwin, bool fcs)
 
     for (size_t i = 0; i < sizeof ops; i++)
         vl_opfix[ops[i]] = 1;
-    *r = (vir_regs){0};
+    *r = VCC_LITERAL(vir_regs, 0);
     r->alloc[0] = VL_ALLOC0;
     r->alloc[1] = VL_ALLOC1 | (fcs ? VL_FCS : 0);
     r->callee[0] = VL_ALLOC0 & ~VL_CALLER0;
@@ -895,7 +896,7 @@ static vlcc vl_brcond(vl *L, const vir_ins *in)
         L->fcc = -1, L->fzr = -1, L->fbit = -1;
         return c;
     }
-    return (vlcc){C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a), -1};
+    return VCC_LITERAL(vlcc, C_NE, vl_ix(L, 0, R_X16), vl_x(L->f, in->a), -1);
 }
 
 static void vl_bc(ecx *e, vlcc c, bool inv, uint32_t l)
@@ -1103,7 +1104,7 @@ static void vl_store(vl *L, const vir_ins *in)
     int w = VIF_W(in->fl);
     uint32_t v = L->ov[1];
     bool xa = L->xval && L->xval == L->ov[0];
-    lval l = xa ? (lval){.k = L_REG, .r = (uint8_t)L->xbase}
+    lval l = xa ? VCC_LITERAL(lval, .k = L_REG, .r = (uint8_t)L->xbase)
                 : vl_addr(L, in->fl, R_X16);
     int base_t = l.k == L_SYM ||
                  (l.k == L_REG && l.r == R_X16); /* the address needs x16 */
@@ -1538,7 +1539,7 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
                 e->lrefc[t] |= LREF_EXT;
             }
         }
-        e->jt[e->njt++] = (struct ejt){tab, off, (uint32_t)span + 1};
+        e->jt[e->njt++] = VCC_LITERAL(struct ejt, tab, off, (uint32_t)span + 1);
         ins *i = put(e, I_JT);
         i->rd = (uint8_t)ix;
         i->cond = ix != R_X17 && !x ? 2 : 0;
@@ -1631,7 +1632,7 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
           !vl_vecacc(f, m);
     if (mem)
         w = VIF_W(m->fl);
-    *x = (vlx){c, j, (uint8_t)(mem ? VX_MEM : 0), 3, 0, 0};
+    *x = VCC_LITERAL(vlx, c, j, (uint8_t)(mem ? VX_MEM : 0), 3, 0, 0);
     if (j + 1 == c && j > lo && vl_once(L, j) && !vl_isconst(f, f->ins[j].a) &&
         vl_iconst(f, f->ins[j].b) &&
         (f->ins[j].op == VO_MUL || f->ins[j].op == VO_SHL)) {
@@ -1650,9 +1651,8 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
                    !vl_isconst(f, e->a) &&
                    ((e->fl & VIF_MS) ? K >= INT32_MIN && K <= INT32_MAX
                                      : K >= 0 && K <= UINT32_MAX)) {
-            *x =
-                (vlx){q->a, e->a, VX_MADDL, (uint8_t)((e->fl & VIF_MS) ? 6 : 2),
-                      0,    K};
+            *x = VCC_LITERAL(vlx, q->a, e->a, VX_MADDL,
+                             (uint8_t)((e->fl & VIF_MS) ? 6 : 2), 0, K);
             return true;
         }
     }
@@ -1663,12 +1663,10 @@ static bool vl_cinfo(const vl *L, uint32_t b, uint32_t c, vlx *x)
         vir_sext_shift(f, j - 1, &signed_scale) && signed_scale <= 4 &&
         !vl_isconst(f, f->ins[j - 1].a)) {
         bool scaled_mem = mem && signed_scale == w;
-        *x = (vlx){j - 1,
-                   f->ins[j - 1].a,
-                   (uint8_t)(scaled_mem ? VX_MEM : VX_EXT),
-                   6,
-                   (uint8_t)(scaled_mem ? (signed_scale != 0) : signed_scale),
-                   0};
+        *x = VCC_LITERAL(
+            vlx, j - 1, f->ins[j - 1].a,
+            (uint8_t)(scaled_mem ? VX_MEM : VX_EXT), 6,
+            (uint8_t)(scaled_mem ? (signed_scale != 0) : signed_scale), 0);
         return true;
     }
     if (j + 1 == x->first && j >= lo && vl_once(L, j) &&
@@ -2429,7 +2427,7 @@ static void vl_ins(vl *L, uint32_t b, uint32_t i, uint8_t res)
         vl_assign(true, &f->extra[f->sig], &none, 0, &stk);
         if (l.k == L_SYM) {
             addr_of_ref(e, R_X17, l.ref, l.off);
-            l = (lval){.k = L_REG, .r = R_X17};
+            l = VCC_LITERAL(lval, .k = L_REG, .r = R_X17);
         }
         opi(e, I_ADDI, 1, t, R_FP, 16 + ((stk + 7) & ~7));
         mem(e, I_ST, 3, 0, t, l.k == L_FRAME ? FRAME : l.r, l.off);

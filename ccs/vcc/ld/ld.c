@@ -30,6 +30,7 @@
  * input section into one anonymous buffer that is written with one write().
  * No per-symbol malloc: everything comes from bump arenas.
  */
+#include "../lib/literal.h"
 #include "ld.h"
 #include "../arch/x64/reloc.h"
 #include "../lib/buf.h"
@@ -836,12 +837,12 @@ static bool ev_isabs(EV v)
 }
 static EV evabs(uint64_t x)
 {
-    return (EV){.kind = EV_ABS, .val = x, .align = 1};
+    return VCC_LITERAL(EV, .kind = EV_ABS, .val = x, .align = 1);
 }
 static EV evsec(EV a, bool fabs, uint64_t off)
 {
-    return (EV){
-        .kind = a.kind, .idx = a.idx, .fabs = fabs, .val = off, .align = 1};
+    return VCC_LITERAL(EV, .kind = a.kind, .idx = a.idx, .fabs = fabs,
+                       .val = off, .align = 1);
 }
 
 /* value of a global symbol as an expression value (getSymbolValue) */
@@ -1021,7 +1022,8 @@ static EV eval(Expr *e)
     case E_DOT:
         return dot_ev();
     case E_ADDR:
-        return (EV){.kind = EV_OSEC, .idx = e->sym, .val = 0, .align = 1};
+        return VCC_LITERAL(EV, .kind = EV_OSEC, .idx = e->sym, .val = 0,
+                           .align = 1);
     case E_LOADADDR:
         return evabs(osecs.v[e->sym].va); /* LMA == VMA here */
     case E_SIZEOF:
@@ -1538,7 +1540,7 @@ static Assign *pprovide(bool hidden)
     sexpect('(');
     char *name = sname();
     Assign *a;
-    VVEC_PUSH(provides, ((Provide){.sym = gintern(name)}), alloc);
+    VVEC_PUSH(provides, (VCC_LITERAL(Provide, .sym = gintern(name))), alloc);
     cur_provide = &provides.v[provides.n - 1];
     a = passign_rest(name);
     cur_provide = NULL;
@@ -1769,21 +1771,24 @@ static void psections(void)
             continue;
         if (sword("ASSERT")) {
             Assign *a = passert();
-            VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+            VVEC_PUSH(topcmds, (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)),
+                      alloc);
             sconsume(';');
             continue;
         }
         if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
             Assign *a = pprovide(true);
             if (a)
-                VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+                VVEC_PUSH(topcmds,
+                          (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)), alloc);
             sexpect(';');
             continue;
         }
         if (sword("PROVIDE")) {
             Assign *a = pprovide(false);
             if (a)
-                VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+                VVEC_PUSH(topcmds,
+                          (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)), alloc);
             sexpect(';');
             continue;
         }
@@ -1791,7 +1796,8 @@ static void psections(void)
         char *w = sname();
         Assign *a = passign_rest(w);
         if (a) {
-            VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+            VVEC_PUSH(topcmds, (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)),
+                      alloc);
             sexpect(';');
             continue;
         }
@@ -1958,21 +1964,24 @@ static void parse_script(const char *text, size_t len)
         }
         if (sword("ASSERT")) {
             Assign *a = passert();
-            VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+            VVEC_PUSH(topcmds, (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)),
+                      alloc);
             sconsume(';');
             continue;
         }
         if (sword("PROVIDE_HIDDEN") || sword("HIDDEN")) {
             Assign *a = pprovide(true);
             if (a)
-                VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+                VVEC_PUSH(topcmds,
+                          (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)), alloc);
             sexpect(';');
             continue;
         }
         if (sword("PROVIDE")) {
             Assign *a = pprovide(false);
             if (a)
-                VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+                VVEC_PUSH(topcmds,
+                          (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)), alloc);
             sexpect(';');
             continue;
         }
@@ -1980,7 +1989,8 @@ static void parse_script(const char *text, size_t len)
         char *w = sname();
         Assign *a = passign_rest(w);
         if (a) {
-            VVEC_PUSH(topcmds, ((Cmd){.kind = C_ASSIGN, .as = a}), alloc);
+            VVEC_PUSH(topcmds, (VCC_LITERAL(Cmd, .kind = C_ASSIGN, .as = a)),
+                      alloc);
             sexpect(';');
             continue;
         }
@@ -2145,7 +2155,7 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
             char *full = (char *)alloc(strlen(dir) + strlen(name) + 1);
             strcpy(full, name[0] == '/' ? "" : dir);
             strcat(full, name);
-            VVEC_PUSH(pending, ((Pending){.path = full}), alloc);
+            VVEC_PUSH(pending, (VCC_LITERAL(Pending, .path = full)), alloc);
         } else {
             if (size > n - off) {
                 error("%s(%s): archive member goes past the end of the file",
@@ -2155,7 +2165,8 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
             char *full = (char *)alloc(strlen(path) + strlen(name) + 3);
             sprintf(full, "%s(%s)", path, name);
             VVEC_PUSH(pending,
-                      ((Pending){.path = full, .buf = b + off, .size = size}),
+                      (VCC_LITERAL(Pending, .path = full, .buf = b + off,
+                                   .size = size)),
                       alloc);
             off += size + (size & 1);
         }
@@ -3068,7 +3079,8 @@ static void eh_frames(void)
                         capc = capc ? 2 * capc : 8;
                         cies = (struct Cie *)realloc(cies, capc * sizeof *cies);
                     }
-                    cies[ncie++] = (struct Cie){.sec = si, .rec = *ce};
+                    cies[ncie++] =
+                        VCC_LITERAL(struct Cie, .sec = si, .rec = *ce);
                 }
                 uint32_t p = eh_piece(si, &rec[r]);
 
@@ -3183,7 +3195,7 @@ static uint32_t match_isd(const char *name)
                 }
         }
     }
-    ncache[j] = (NameEnt){.name = name, .h = h, .isd = res};
+    ncache[j] = VCC_LITERAL(NameEnt, .name = name, .h = h, .isd = res);
     if (++ncount * 2 > ncmask + 1)
         ncache_grow();
     return res;
@@ -3524,7 +3536,8 @@ static void assign_sections(void)
                 found = k;
         if (found == NONE) {
             found = get_osec(is->name);
-            VVEC_PUSH(topcmds, ((Cmd){.kind = C_OSEC, .idx = found}), alloc);
+            VVEC_PUSH(topcmds, (VCC_LITERAL(Cmd, .kind = C_OSEC, .idx = found)),
+                      alloc);
             /* lld findOrphanPos, on the coarse ranks: the first output section of
 			 * the closest rank (sections without input sections do not count),
 			 * then past those as close whose rank is not above the orphan's */
@@ -3586,8 +3599,8 @@ static void assign_sections(void)
             ISD d = {.osec = found, .thunksec = NONE};
             VVEC_PUSH(isds, d, alloc);
             di = isds.n - 1;
-            VVEC_PUSH(osecs.v[found].cmds, ((Cmd){.kind = C_ISD, .idx = di}),
-                      alloc);
+            VVEC_PUSH(osecs.v[found].cmds,
+                      (VCC_LITERAL(Cmd, .kind = C_ISD, .idx = di)), alloc);
         }
         is->isd = di;
         VVEC_PUSH(isds.v[di].secs, orphans.v[i], alloc);
@@ -3879,7 +3892,7 @@ static int phnew(uint32_t type, uint32_t flags)
               .p_flags = flags,
               .p_align = type == PT_LOAD ? opt.max_page : 0};
     VVEC_PUSH(phdrs, p, alloc);
-    VVEC_PUSH(phsecs, ((PhdrSecs){.first = -1, .last = -1}), alloc);
+    VVEC_PUSH(phsecs, (VCC_LITERAL(PhdrSecs, .first = -1, .last = -1)), alloc);
     return phdrs.n - 1;
 }
 
@@ -4235,42 +4248,33 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
     eh->e_shstrndx = 1;
     /* shstr: "\0.text\0.data\0.symtab\0" in a small separate buffer */
     memcpy(shstr, "\0.text\0.data\0.symtab\0.strtab\0", 30);
-    sh[1] = (Shdr){.sh_name = 22,
-                   .sh_type = SHT_STRTAB,
-                   .sh_offset = (uint64_t)(shstr - (char *)b),
-                   .sh_size = 30,
-                   .sh_addralign = 1};
-    sh[2] = (Shdr){.sh_name = 1,
-                   .sh_type = SHT_PROGBITS,
-                   .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
-                   .sh_addralign = 4};
-    sh[3] = (Shdr){.sh_name = 7,
-                   .sh_type = SHT_PROGBITS,
-                   .sh_flags = SHF_ALLOC | SHF_WRITE,
-                   .sh_size = datasz,
-                   .sh_offset = (uint64_t)(shstr + 32 - (char *)b),
-                   .sh_addralign = 16};
-    sh[4] = (Shdr){.sh_name = 13,
-                   .sh_type = SHT_SYMTAB,
-                   .sh_offset = (uint64_t)((uint8_t *)sy - b),
-                   .sh_size = (n + 2) * sizeof(Sym),
-                   .sh_link = 1,
-                   .sh_info = 2,
-                   .sh_entsize = sizeof(Sym),
-                   .sh_addralign = 8};
+    sh[1] = VCC_LITERAL(Shdr, .sh_name = 22, .sh_type = SHT_STRTAB,
+                        .sh_offset = (uint64_t)(shstr - (char *)b),
+                        .sh_size = 30, .sh_addralign = 1);
+    sh[2] =
+        VCC_LITERAL(Shdr, .sh_name = 1, .sh_type = SHT_PROGBITS,
+                    .sh_flags = SHF_ALLOC | SHF_EXECINSTR, .sh_addralign = 4);
+    sh[3] = VCC_LITERAL(Shdr, .sh_name = 7, .sh_type = SHT_PROGBITS,
+                        .sh_flags = SHF_ALLOC | SHF_WRITE, .sh_size = datasz,
+                        .sh_offset = (uint64_t)(shstr + 32 - (char *)b),
+                        .sh_addralign = 16);
+    sh[4] =
+        VCC_LITERAL(Shdr, .sh_name = 13, .sh_type = SHT_SYMTAB,
+                    .sh_offset = (uint64_t)((uint8_t *)sy - b),
+                    .sh_size = (n + 2) * sizeof(Sym), .sh_link = 1,
+                    .sh_info = 2, .sh_entsize = sizeof(Sym), .sh_addralign = 8);
     /* the symbol strtab shares section 1 in the real object; here it's separate memory */
     str[0] = 0;
     memcpy(str + 1, "$d", 3);
     size_t so = 4;
-    sy[1] = (Sym){
-        .st_name = 1, .st_info = STB_LOCAL << 4 | STT_NOTYPE, .st_shndx = 3};
+    sy[1] = VCC_LITERAL(Sym, .st_name = 1,
+                        .st_info = STB_LOCAL << 4 | STT_NOTYPE, .st_shndx = 3);
     for (uint32_t i = 0; i < n; i++) {
         size_t l = strlen(names[i]);
         memcpy(str + so, names[i], l + 1);
-        sy[i + 2] = (Sym){.st_name = (uint32_t)so,
-                          .st_info = STB_GLOBAL << 4 | STT_NOTYPE,
-                          .st_shndx = 3,
-                          .st_value = 64 * (uint64_t)i};
+        sy[i + 2] = VCC_LITERAL(Sym, .st_name = (uint32_t)so,
+                                .st_info = STB_GLOBAL << 4 | STT_NOTYPE,
+                                .st_shndx = 3, .st_value = 64 * (uint64_t)i);
         so += l + 1;
     }
     Obj *o = (Obj *)alloc(sizeof *o);
@@ -4330,7 +4334,8 @@ static bool parse_args(int argc, char **argv)
                                              : NULL)
         const char *v;
         if (a[0] != '-' || !a[1]) {
-            VVEC_PUSH(opt.inputs, ((InputArg){.path = a, .whole = whole}),
+            VVEC_PUSH(opt.inputs,
+                      (VCC_LITERAL(InputArg, .path = a, .whole = whole)),
                       alloc);
             continue;
         }
@@ -4480,7 +4485,8 @@ static bool parse_args(int argc, char **argv)
             const char *f = find_lib(v);
 
             if (f)
-                VVEC_PUSH(opt.inputs, ((InputArg){.path = f, .whole = whole}),
+                VVEC_PUSH(opt.inputs,
+                          (VCC_LITERAL(InputArg, .path = f, .whole = whole)),
                           alloc);
             else
                 error("unable to find library -l%s", v);
@@ -4615,7 +4621,7 @@ static LSym *lsym(const char *name)
             !memcmp(lsyms.v[j].name, name, len))
             return &lsyms.v[j];
     lsyms.n++;
-    lsyms.v[j] = (LSym){.name = name, .len = len, .h = h};
+    lsyms.v[j] = VCC_LITERAL(LSym, .name = name, .len = len, .h = h);
     return &lsyms.v[j];
 }
 
@@ -4742,16 +4748,17 @@ static void load_inputs(void)
                 /* an input marker: the archive's members are read here */
                 VVEC_PUSH(
                     pending,
-                    ((Pending){.path = NULL,
-                               .size = c0,
-                               .buf = (const uint8_t *)(uintptr_t)lcand.n}),
+                    (VCC_LITERAL(Pending, .path = NULL, .size = c0,
+                                 .buf = (const uint8_t *)(uintptr_t)lcand.n)),
                     alloc);
                 continue;
             }
             add_archive(p, b, n);
             continue;
         }
-        VVEC_PUSH(pending, ((Pending){.path = p, .buf = b, .size = n}), alloc);
+        VVEC_PUSH(pending,
+                  (VCC_LITERAL(Pending, .path = p, .buf = b, .size = n)),
+                  alloc);
     }
     if (lazy) {
         for (uint32_t i = 0; i < pending.n; i++)
@@ -4923,10 +4930,10 @@ static bool assign_symbol(Assign *a, bool insec)
     EV v = apply_op(a->op, gsym_ev(a->sym), eval(a->e));
     EV old = s->ev;
     if (ev_isabs(v))
-        s->ev = (EV){.kind = EV_ABS, .val = ev_value(v), .align = 1};
+        s->ev = VCC_LITERAL(EV, .kind = EV_ABS, .val = ev_value(v), .align = 1);
     else
-        s->ev =
-            (EV){.kind = v.kind, .idx = v.idx, .val = ev_secoff(v), .align = 1};
+        s->ev = VCC_LITERAL(EV, .kind = v.kind, .idx = v.idx,
+                            .val = ev_secoff(v), .align = 1);
     s->type = v.type;
     return old.kind != s->ev.kind || old.idx != s->ev.idx ||
            old.val != s->ev.val;
@@ -5014,11 +5021,12 @@ static void add_script_symbol(Assign *a)
     if (a->hidden && visrank(s->vis) > visrank(STV_HIDDEN))
         s->vis = STV_HIDDEN;
     if (ev_isabs(v))
-        s->ev = (EV){.kind = EV_ABS,
-                     .val = v.kind != EV_ABS ? 0 : ev_value(v),
-                     .align = 1};
+        s->ev =
+            VCC_LITERAL(EV, .kind = EV_ABS,
+                        .val = v.kind != EV_ABS ? 0 : ev_value(v), .align = 1);
     else
-        s->ev = (EV){.kind = v.kind, .idx = v.idx, .val = 0, .align = 1};
+        s->ev =
+            VCC_LITERAL(EV, .kind = v.kind, .idx = v.idx, .val = 0, .align = 1);
 }
 
 static void process_symbol_assignments(void)
@@ -5416,7 +5424,7 @@ static void build_symtab(void)
         } else {
             at = idx++;
         }
-        gouts[ngouts++] = (GOut){.g = g, .idx = at, .local = true};
+        gouts[ngouts++] = VCC_LITERAL(GOut, .g = g, .idx = at, .local = true);
     }
     /* thunk symbols */
     uint64_t thunk0 = idx;
@@ -5434,7 +5442,8 @@ static void build_symtab(void)
             gouts[h++].str = so; /* same order as the first pass */
             continue;
         }
-        gouts[ngouts++] = (GOut){.g = g, .idx = (uint32_t)idx++, .str = so};
+        gouts[ngouts++] =
+            VCC_LITERAL(GOut, .g = g, .idx = (uint32_t)idx++, .str = so);
     }
     nsymout = idx;
     uint64_t tstr = gstr;
@@ -5696,7 +5705,7 @@ static void define_dynamic_sym(void)
         atomic_min64(&s->first, script_ord++);
     }
     s->state = GS_SCRIPT;
-    s->ev = (EV){.kind = EV_ISEC, .idx = dynamic_isec, .align = 1};
+    s->ev = VCC_LITERAL(EV, .kind = EV_ISEC, .idx = dynamic_isec, .align = 1);
     s->bind = STB_WEAK;
     s->type = STT_NOTYPE;
     s->vis = STV_HIDDEN;
@@ -6206,7 +6215,7 @@ static void declare(Assign *a)
     G *s = &gsyms[a->sym];
     s->state = GS_SCRIPT;
     s->scriptdef = 1;
-    s->ev = (EV){.kind = EV_ABS, .align = 1};
+    s->ev = VCC_LITERAL(EV, .kind = EV_ABS, .align = 1);
 }
 
 /* addScriptReferencedSymbolsToSymTable() + declareSymbols() */
@@ -6536,7 +6545,8 @@ static void start_stop_symbols(void)
                 osecs.v[topcmds.v[k].idx].discard)
                 continue;
             s->state = GS_SCRIPT;
-            s->ev = (EV){.kind = EV_OSEC, .idx = topcmds.v[k].idx, .align = 1};
+            s->ev = VCC_LITERAL(EV, .kind = EV_OSEC, .idx = topcmds.v[k].idx,
+                                .align = 1);
             s->vis = STV_PROTECTED;
             s->bind = STB_GLOBAL;
             s->type = STT_NOTYPE;
@@ -6677,7 +6687,7 @@ static int run(int argc, char **argv)
                     o->lgotidx =
                         (uint32_t *)alloc(o->firstg * sizeof(uint32_t));
                 o->lgotidx[k] = gotsyms.n + gotlocs.n;
-                VVEC_PUSH(gotlocs, ((GotLoc){i, k}), alloc);
+                VVEC_PUSH(gotlocs, (VCC_LITERAL(GotLoc, i, k)), alloc);
                 if (pic && o->sym[k].st_shndx != SHN_ABS)
                     isecs.v[got_isec].ndyn++;
             }
@@ -7216,8 +7226,9 @@ static int ld_relocatable(void)
     {
         Sym *sy = (Sym *)(rbuf + r_symoff);
         for (uint32_t i = 0; i < routs.n; i++)
-            sy[1 + i] = (Sym){.st_info = STB_LOCAL << 4 | STT_SECTION,
-                              .st_shndx = (uint16_t)routs.v[i].shidx};
+            sy[1 + i] =
+                VCC_LITERAL(Sym, .st_info = STB_LOCAL << 4 | STT_SECTION,
+                            .st_shndx = (uint16_t)routs.v[i].shidx);
     }
     phase("-r: copy, relocations, symbols");
 
@@ -7227,13 +7238,10 @@ static int ld_relocatable(void)
     for (uint32_t i = 0; i < routs.n; i++) {
         ROut *r = &routs.v[i];
         strcpy(shstr + r->nameoff, r->name);
-        shd[r->shidx] = (Shdr){.sh_name = r->nameoff,
-                               .sh_type = r->type,
-                               .sh_flags = r->flags,
-                               .sh_offset = r->off,
-                               .sh_size = r->size,
-                               .sh_addralign = r->align,
-                               .sh_entsize = r->entsize};
+        shd[r->shidx] = VCC_LITERAL(
+            Shdr, .sh_name = r->nameoff, .sh_type = r->type,
+            .sh_flags = r->flags, .sh_offset = r->off, .sh_size = r->size,
+            .sh_addralign = r->align, .sh_entsize = r->entsize);
         if (r->grp) { /* sh_link the symbol table, sh_info the signature */
             const ISec *gs = &isecs.v[r->grp - 1];
             const Obj *o = objs.v[gs->obj];
@@ -7247,39 +7255,28 @@ static int ld_relocatable(void)
         }
         if (r->nrela) {
             sprintf(shstr + r->relanameoff, ".rela%s", r->name);
-            shd[r->relaidx] =
-                (Shdr){.sh_name = r->relanameoff,
-                       .sh_type = SHT_RELA,
-                       .sh_flags = SHF_INFO_LINK | (r->member ? SHF_GROUP : 0),
-                       .sh_offset = r->relaoff,
-                       .sh_size = r->nrela * sizeof(Rela),
-                       .sh_link = r_symidx,
-                       .sh_info = r->shidx,
-                       .sh_addralign = 8,
-                       .sh_entsize = sizeof(Rela)};
+            shd[r->relaidx] = VCC_LITERAL(
+                Shdr, .sh_name = r->relanameoff, .sh_type = SHT_RELA,
+                .sh_flags = SHF_INFO_LINK | (r->member ? SHF_GROUP : 0),
+                .sh_offset = r->relaoff, .sh_size = r->nrela * sizeof(Rela),
+                .sh_link = r_symidx, .sh_info = r->shidx, .sh_addralign = 8,
+                .sh_entsize = sizeof(Rela));
         }
     }
     strcpy(shstr + shs_symtab, ".symtab");
     strcpy(shstr + shs_strtab, ".strtab");
     strcpy(shstr + shs_shstrtab, ".shstrtab");
-    shd[r_symidx] = (Shdr){.sh_name = (uint32_t)shs_symtab,
-                           .sh_type = SHT_SYMTAB,
-                           .sh_offset = r_symoff,
-                           .sh_size = r_nsyms * sizeof(Sym),
-                           .sh_link = r_stridx,
-                           .sh_info = (uint32_t)r_nlocal,
-                           .sh_addralign = 8,
-                           .sh_entsize = sizeof(Sym)};
-    shd[r_stridx] = (Shdr){.sh_name = (uint32_t)shs_strtab,
-                           .sh_type = SHT_STRTAB,
-                           .sh_offset = r_stroff,
-                           .sh_size = strsz,
-                           .sh_addralign = 1};
-    shd[r_shstridx] = (Shdr){.sh_name = (uint32_t)shs_shstrtab,
-                             .sh_type = SHT_STRTAB,
-                             .sh_offset = r_shstroff,
-                             .sh_size = r_shstrsize,
-                             .sh_addralign = 1};
+    shd[r_symidx] = VCC_LITERAL(
+        Shdr, .sh_name = (uint32_t)shs_symtab, .sh_type = SHT_SYMTAB,
+        .sh_offset = r_symoff, .sh_size = r_nsyms * sizeof(Sym),
+        .sh_link = r_stridx, .sh_info = (uint32_t)r_nlocal, .sh_addralign = 8,
+        .sh_entsize = sizeof(Sym));
+    shd[r_stridx] = VCC_LITERAL(Shdr, .sh_name = (uint32_t)shs_strtab,
+                                .sh_type = SHT_STRTAB, .sh_offset = r_stroff,
+                                .sh_size = strsz, .sh_addralign = 1);
+    shd[r_shstridx] = VCC_LITERAL(
+        Shdr, .sh_name = (uint32_t)shs_shstrtab, .sh_type = SHT_STRTAB,
+        .sh_offset = r_shstroff, .sh_size = r_shstrsize, .sh_addralign = 1);
     Ehdr *eh = (Ehdr *)rbuf;
     memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
     eh->e_type = 1;

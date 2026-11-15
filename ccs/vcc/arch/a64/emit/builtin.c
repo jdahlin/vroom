@@ -1,4 +1,5 @@
 /* vcc code generator: builtins */
+#include "../../../lib/literal.h"
 #include "../../../emit/emitimpl.h"
 
 /* ---------------- builtins ---------------- */
@@ -1513,8 +1514,8 @@ VPRIV val gen_builtin(ecx *e, uint32_t n)
         int nanregs[2];
         for (int i = 0; i < 2; i++) {
             if (x->aux == BI_ISLESSGREATER) {
-                saved[i] =
-                    (lval){.k = L_FRAME, .off = slot(e, 16, 16), .align = 16};
+                saved[i] = VCC_LITERAL(lval, .k = L_FRAME,
+                                       .off = slot(e, 16, 16), .align = 16);
                 store(e, &saved[i], ct, &operands[i]);
             }
             toreg2(e, &operands[i], false);

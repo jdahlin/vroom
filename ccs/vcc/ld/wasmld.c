@@ -12,6 +12,7 @@
  *
  * vlink runs this when called as wasm-ld or with -mwasm64.
  */
+#include "../lib/literal.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -241,7 +242,7 @@ static span rexpr(rd *r)
             break;
         }
     }
-    return (span){s, (uint32_t)(r->p - s)};
+    return VCC_LITERAL(span, s, (uint32_t)(r->p - s));
 }
 
 /* ---------------- the model of the inputs ---------------- */
@@ -565,9 +566,10 @@ static void parse_linking(obj *o, rd *r)
                         if (k != UINT32_MAX)
                             y->name = span_str(o->imp[k].field);
                         else if (y->kind == K_TABLE)
-                            y->name = span_str((span){
+                            y->name = span_str(VCC_LITERAL(
+                                span,
                                 (const uint8_t *)"__indirect_function_table",
-                                25});
+                                25));
                     }
                     break;
                 case K_DATA:
@@ -665,7 +667,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
                     nrels++;
                 }
             } else if (nm.n == 15 && !memcmp(nm.p, "target_features", 15))
-                o->features = (span){s.p, (uint32_t)(s.e - s.p)};
+                o->features = VCC_LITERAL(span, s.p, (uint32_t)(s.e - s.p));
             break;
         }
         case 1: {
@@ -681,7 +683,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
                 t0 = s.p;
                 rbytes(&s, ruleb(&s));
                 rbytes(&s, ruleb(&s));
-                o->types[i] = (span){t0, (uint32_t)(s.p - t0)};
+                o->types[i] = VCC_LITERAL(span, t0, (uint32_t)(s.p - t0));
             }
             break;
         }
@@ -1264,12 +1266,12 @@ static void mark_tgt(tgt t)
     if (t.kind == K_FUNCTION && t.idx < t.o->nfn && !t.o->fn[t.idx].live) {
         t.o->fn[t.idx].live = true;
         GROW(wl, nwl, cwl);
-        wl[nwl++] = (work){t.o, t.idx, 0};
+        wl[nwl++] = VCC_LITERAL(work, t.o, t.idx, 0);
     } else if (t.kind == K_DATA && t.y && t.y->seg < t.o->nseg &&
                !t.o->seg[t.y->seg].live) {
         t.o->seg[t.y->seg].live = true;
         GROW(wl, nwl, cwl);
-        wl[nwl++] = (work){t.o, t.y->seg, 1};
+        wl[nwl++] = VCC_LITERAL(work, t.o, t.y->seg, 1);
     } else if (t.kind == K_GLOBAL && t.idx < t.o->ngl) {
         t.o->gl[t.idx].live = true;
     } else if (t.kind == K_TAG && t.idx < t.o->ntag) {
@@ -1310,7 +1312,7 @@ static void gc(void)
                 mark_sym(o, i);
         if (!opt.gc) {
             for (uint32_t i = 0; i < o->nfn; i++)
-                mark_tgt((tgt){K_FUNCTION, o, i, NULL, NULL});
+                mark_tgt(VCC_LITERAL(tgt, K_FUNCTION, o, i, NULL, NULL));
         }
     }
     while (more) {
@@ -1463,7 +1465,8 @@ static uint32_t slot_of(gsym *g, obj *o, uint32_t fidx)
     GROW(lslots, nlslots, clslots);
     GROW(slot_func, nslots, cslot_func);
     slot_func[nslots++] = (uint32_t)o->fn[fidx].out;
-    lslots[nlslots] = (lslot){o, fidx, (uint32_t)(opt.table_base + nslots - 1)};
+    lslots[nlslots] =
+        VCC_LITERAL(lslot, o, fidx, (uint32_t)(opt.table_base + nslots - 1));
     return lslots[nlslots++].slot;
 }
 
@@ -1731,7 +1734,8 @@ static int write_module(void)
 
         if (c && c->live && c->state == G_SYNTH) {
             GROW(ofns, nof, cof);
-            ofns[nof] = (struct ofn){NULL, 0, c, otype((span){t_void, 2})};
+            ofns[nof] = VCC_LITERAL(struct ofn, NULL, 0, c,
+                                    otype(VCC_LITERAL(span, t_void, 2)));
             ctors = (int32_t)(nfi + nof++);
             c->out = ctors;
         }
@@ -1740,7 +1744,7 @@ static int write_module(void)
         for (uint32_t i = 0; i < objs[k]->nfn; i++)
             if (objs[k]->fn[i].live) {
                 GROW(ofns, nof, cof);
-                ofns[nof] = (struct ofn){objs[k], i, NULL, 0};
+                ofns[nof] = VCC_LITERAL(struct ofn, objs[k], i, NULL, 0);
                 objs[k]->fn[i].out = (int32_t)(nfi + nof++);
             }
     for (uint32_t i = 0; i < ngall; i++) {
@@ -1754,7 +1758,8 @@ static int write_module(void)
                               : 0;
 
             GROW(ofns, nof, cof);
-            ofns[nof] = (struct ofn){NULL, 0, g, otype(g->uo->types[ty])};
+            ofns[nof] =
+                VCC_LITERAL(struct ofn, NULL, 0, g, otype(g->uo->types[ty]));
             g->out = (int32_t)(nfi + nof++);
         }
     }
@@ -1768,15 +1773,15 @@ static int write_module(void)
             }
     /* globals: __stack_pointer, then the objects' */
     GROW(ogl, nog, cog);
-    ogl[nog++] = (struct oglob){pointer_type(), 1, {0}, 0, true};
+    ogl[nog++] = VCC_LITERAL(struct oglob, pointer_type(), 1, {0}, 0, true);
     sp_global = 0;
     for (uint32_t k = 0; k < nobjs; k++)
         for (uint32_t i = 0; i < objs[k]->ngl; i++)
             if (objs[k]->gl[i].live) {
                 GROW(ogl, nog, cog);
-                ogl[nog] =
-                    (struct oglob){objs[k]->gl[i].type, objs[k]->gl[i].mut,
-                                   objs[k]->gl[i].init, 0, false};
+                ogl[nog] = VCC_LITERAL(struct oglob, objs[k]->gl[i].type,
+                                       objs[k]->gl[i].mut, objs[k]->gl[i].init,
+                                       0, false);
                 objs[k]->gl[i].out = (int32_t)(ngi + nog++);
             }
     for (uint32_t i = 0; i < ngall; i++) {
@@ -1792,7 +1797,8 @@ static int write_module(void)
                  !strcmp(g->name, "__memory_base") ||
                  !strcmp(g->name, "__table_base")) {
             GROW(ogl, nog, cog);
-            ogl[nog] = (struct oglob){pointer_type(), 0, {0}, 0, true};
+            ogl[nog] =
+                VCC_LITERAL(struct oglob, pointer_type(), 0, {0}, 0, true);
             g->out = (int32_t)(ngi + nog++);
         } else {
             err("undefined global: %s", g->name);
@@ -1825,14 +1831,11 @@ static int write_module(void)
                         break;
                 if (j == nosegs) {
                     osegs = (oseg *)realloc(osegs, (nosegs + 1) * sizeof(oseg));
-                    osegs[nosegs] =
-                        (oseg){strdup(nm),
-                               0,
-                               0,
-                               0,
-                               !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"),
-                               !strcmp(nm, ".bss") || !strcmp(nm, ".tbss"),
-                               seg_order(nm)};
+                    osegs[nosegs] = VCC_LITERAL(
+                        oseg, strdup(nm), 0, 0, 0,
+                        !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"),
+                        !strcmp(nm, ".bss") || !strcmp(nm, ".tbss"),
+                        seg_order(nm));
                     nosegs++;
                 }
                 s->oseg = (int32_t)j;
@@ -1924,7 +1927,7 @@ static int write_module(void)
     }
     /* exports */
     GROW(ex, nex, cex);
-    ex[nex++] = (oexp){"memory", 2, 0};
+    ex[nex++] = VCC_LITERAL(oexp, "memory", 2, 0);
     for (int pass = 0; pass < 2; pass++)
         for (uint32_t i = 0; i < (pass ? opt.nexpi : opt.nexp); i++) {
             const char *nm = pass ? opt.exports_ifdef[i] : opt.exports[i];
@@ -1942,27 +1945,28 @@ static int write_module(void)
             if (g->state == G_SYNTH) {
                 if (g->kind == K_FUNCTION && g->out >= 0) {
                     GROW(ex, nex, cex);
-                    ex[nex++] = (oexp){g->name, 0, (uint32_t)g->out};
+                    ex[nex++] = VCC_LITERAL(oexp, g->name, 0, (uint32_t)g->out);
                 }
                 continue;
             }
             t = resolve(g->o, g->si);
             GROW(ex, nex, cex);
             if (t.kind == K_FUNCTION)
-                ex[nex++] = (oexp){g->name, 0, (uint32_t)t.o->fn[t.idx].out};
+                ex[nex++] =
+                    VCC_LITERAL(oexp, g->name, 0, (uint32_t)t.o->fn[t.idx].out);
             else if (t.kind == K_GLOBAL)
-                ex[nex++] = (oexp){g->name, 3, (uint32_t)t.o->gl[t.idx].out};
+                ex[nex++] =
+                    VCC_LITERAL(oexp, g->name, 3, (uint32_t)t.o->gl[t.idx].out);
             else if (t.kind == K_TAG)
-                ex[nex++] = (oexp){g->name, 4, (uint32_t)t.o->tag[t.idx].out};
+                ex[nex++] = VCC_LITERAL(oexp, g->name, 4,
+                                        (uint32_t)t.o->tag[t.idx].out);
             else if (t.kind == K_DATA) {
                 /* a data symbol: an immutable global holding its address */
                 GROW(ogl, nog, cog);
-                ogl[nog] = (struct oglob){pointer_type(),
-                                          0,
-                                          {0},
-                                          t.o->seg[t.y->seg].addr + t.y->off,
-                                          true};
-                ex[nex++] = (oexp){g->name, 3, ngi + nog++};
+                ogl[nog] =
+                    VCC_LITERAL(struct oglob, pointer_type(), 0, {0},
+                                t.o->seg[t.y->seg].addr + t.y->off, true);
+                ex[nex++] = VCC_LITERAL(oexp, g->name, 3, ngi + nog++);
             }
         next_export:;
         }
@@ -1974,7 +1978,7 @@ static int write_module(void)
     }
     if (opt.export_table) {
         GROW(ex, nex, cex);
-        ex[nex++] = (oexp){"__indirect_function_table", 1, 0};
+        ex[nex++] = VCC_LITERAL(oexp, "__indirect_function_table", 1, 0);
     }
     /* synthetic data symbols asked for as exports (__start_em_js ...) */
     for (uint32_t i = 0; i < opt.nexpi; i++) {
@@ -1984,9 +1988,10 @@ static int write_module(void)
 
         if (g && g->state == G_UNDEF && synth_data(g, &a)) {
             GROW(ogl, nog, cog);
-            ogl[nog] = (struct oglob){pointer_type(), 0, {0}, a, true};
+            ogl[nog] =
+                VCC_LITERAL(struct oglob, pointer_type(), 0, {0}, a, true);
             GROW(ex, nex, cex);
-            ex[nex++] = (oexp){g->name, 3, ngi + nog++};
+            ex[nex++] = VCC_LITERAL(oexp, g->name, 3, ngi + nog++);
         }
     }
     if (nerr)

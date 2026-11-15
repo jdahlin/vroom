@@ -1,6 +1,7 @@
 /* Wasm exact-cell DSE across structured joins. Control topology is recorded
  * by typed emitter hooks from entry; instruction text is never inspected.
  * Initial scope excludes loops, dispatchers, EH and dynamic frames. */
+#include "../../../lib/literal.h"
 #include "wimpl.h"
 
 #define WFLOW_EVENTS 8192u
@@ -41,11 +42,9 @@ static wflow_event *wf_event(ecx *e, int kind)
         W->capflow = cap;
     }
     wflow_event *f = &W->flow[W->nflow++];
-    *f = (wflow_event){.at = W->nmem,
-                       .kind = (uint8_t)kind,
-                       .token = UINT32_MAX,
-                       .end = UINT32_MAX,
-                       .alternate = UINT32_MAX};
+    *f = VCC_LITERAL(wflow_event, .at = W->nmem, .kind = (uint8_t)kind,
+                     .token = UINT32_MAX, .end = UINT32_MAX,
+                     .alternate = UINT32_MAX);
     return f;
 }
 
@@ -226,9 +225,9 @@ VPRIV void wflow_optimize(ecx *e)
         }
         if (target >= blocks)
             goto done;
-        edges[ne++] = (em_flow_edge){b, target};
+        edges[ne++] = VCC_LITERAL(em_flow_edge, b, target);
         if (fall && target != b + 1)
-            edges[ne++] = (em_flow_edge){b, b + 1};
+            edges[ne++] = VCC_LITERAL(em_flow_edge, b, b + 1);
     }
     budget = 64 + W->nmem + 32 * (blocks + ne);
     if (budget > WFLOW_WORK)

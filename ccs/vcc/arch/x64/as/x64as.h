@@ -6,6 +6,7 @@
  */
 #ifndef VCC_X64AS_H
 #define VCC_X64AS_H
+#include "../../../lib/literal.h"
 #include <stdbool.h>
 #include "../../../as/asimpl.h"
 
@@ -45,9 +46,9 @@ typedef struct {
     int vex, vvvv,
         vl; /* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
 } XForm;
-#define F(...) ((XForm){__VA_ARGS__})
+#define F(...) (VCC_LITERAL(XForm, __VA_ARGS__))
 
-#define OPB(...) ((const uint8_t[]){__VA_ARGS__})
+#define OPB(bytes) ((const uint8_t *)(bytes))
 enum { X64_NEXT = -2 }; /* a family's answer: not one of mine */
 
 VPRIV void eb(XEnc *x, int v);

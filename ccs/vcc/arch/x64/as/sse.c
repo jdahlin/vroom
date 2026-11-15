@@ -491,7 +491,7 @@ VPRIV int x64_i_ssepk(As *a, char *mn, XOp *o, int nops)
             int64_t c = 0;
             int ext = mn[1] == 'e';
             XForm f =
-                F(.opsz16 = 1, .op = ext ? OPB(0x0f, 0xc5) : OPB(0x0f, 0xc4),
+                F(.opsz16 = 1, .op = ext ? OPB("\x0f\xc5") : OPB("\x0f\xc4"),
                   .nop = 2, .reg = o[2].reg, .rm = &o[1], .isz = 1);
 
             if (o[1].kind == XK_EXPR)

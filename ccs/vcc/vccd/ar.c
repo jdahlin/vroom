@@ -37,6 +37,7 @@
  * Why: llvm-ar is a ~167 M-instruction process start on macOS (dyld binds
  * libLLVM.dylib), and Kbuild runs it once per directory (~420 times).
  */
+#include "../lib/literal.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -959,8 +960,8 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
                     after = true;
                     break;
                 default:
-                    err(&q, "ar: error: unsupported modifier '%c' in '%s'\n",
-                        (char[]){*c, 0}, ops);
+                    err(&q, "ar: error: unsupported modifier '%.1s' in '%s'\n",
+                        c, ops);
                     return rc;
                 }
             }
@@ -1120,7 +1121,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
             if (insert < 0)
                 insert = res.n;
             for (size_t j = 0; j < moved.n; j++)
-                ml_push(&res, (member){0});
+                ml_push(&res, VCC_LITERAL(member, 0));
             memmove(res.m + insert + moved.n, res.m + insert,
                     (res.n - moved.n - insert) * sizeof(member));
             memcpy(res.m + insert, moved.m, moved.n * sizeof(member));

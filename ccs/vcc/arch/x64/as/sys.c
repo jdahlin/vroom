@@ -29,12 +29,12 @@ VPRIV int x64_i_crdr(As *a, char *mn, XOp *o, int nops)
             g->kind = XK_MEM;
         if (to)
             return x64_emit_form(a, F(.w = g->kind == XK_REG && g->size == 8,
-                                      .op = OPB(0x8e), .nop = 1, .reg = sn,
+                                      .op = OPB("\x8e"), .nop = 1, .reg = sn,
                                       .rm = g));
-        return x64_emit_form(a,
-                             F(.w = g->kind == XK_REG && g->size == 8,
-                               .opsz16 = g->kind == XK_REG && g->size == 2,
-                               .op = OPB(0x8c), .nop = 1, .reg = sn, .rm = g));
+        return x64_emit_form(a, F(.w = g->kind == XK_REG && g->size == 8,
+                                  .opsz16 = g->kind == XK_REG && g->size == 2,
+                                  .op = OPB("\x8c"), .nop = 1, .reg = sn,
+                                  .rm = g));
     }
     /* ---- mov to and from control and debug registers (always 64-bit) ---- */
     if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq")) &&
@@ -416,7 +416,7 @@ VPRIV int x64_i_sys(As *a, char *mn, XOp *o, int nops)
             uint8_t b[2] = {0xcd, (uint8_t)o[0].v.c};
 
             if (o[0].v.c == 3) /* (MC: int $3 is int3) */
-                return x64_raw(a, (const uint8_t[]){0xcc}, 1);
+                return x64_raw(a, OPB("\xcc"), 1);
             return x64_raw(a, b, 2);
         }
     }

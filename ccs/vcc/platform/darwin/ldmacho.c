@@ -23,6 +23,7 @@
  * loads of symbols defined in the link are relaxed to ADRP+ADD, as ld64
  * does, so local data needs no rebase.
  */
+#include "../../lib/literal.h"
 #include "../../ld/ld.h"
 #include "../../lib/ldhash.h"
 
@@ -545,7 +546,7 @@ static uint32_t *got_g, *stub_g; /* slot -> global */
 static void add_fixup(uint64_t addr, uint64_t val)
 {
     VGROW(fixups, nfix, cap_fix);
-    fixups[nfix++] = (Fixup){addr, val};
+    fixups[nfix++] = VCC_LITERAL(Fixup, addr, val);
 }
 
 static uint32_t import_of(uint32_t g)
@@ -1353,15 +1354,15 @@ static int link_inputs(const char **inputs, uint32_t ninputs, const char *out,
             if (s >= o->nsect || o->osec[s] == NONE)
                 continue;
             syms = (OutSym *)realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
-            syms[nsyms++] =
-                (OutSym){nm, local_addr(o, i), N_SECT,
-                         (uint8_t)section_index_of(o->osec[s], order, nord), 0};
+            syms[nsyms++] = VCC_LITERAL(
+                OutSym, nm, local_addr(o, i), N_SECT,
+                (uint8_t)section_index_of(o->osec[s], order, nord), 0);
             nlocal++;
         }
     }
     syms = (OutSym *)realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
-    syms[nsyms++] =
-        (OutSym){"__mh_execute_header", BASE, N_SECT | N_EXT, 1, 0x10};
+    syms[nsyms++] = VCC_LITERAL(OutSym, "__mh_execute_header", BASE,
+                                N_SECT | N_EXT, 1, 0x10);
     nextdef++;
     for (uint32_t g = 0; g < ngs; g++)
         if (gs[g].obj != NONE || gs[g].common)
@@ -1378,9 +1379,9 @@ static int link_inputs(const char **inputs, uint32_t ninputs, const char *out,
         } else {
             osi = osec_get("__DATA", "__common", S_ZEROFILL);
         }
-        syms[nsyms++] = (OutSym){
-            x->name, x->addr, N_SECT | N_EXT,
-            (uint8_t)(osi == NONE ? 0 : section_index_of(osi, order, nord)), 0};
+        syms[nsyms++] = VCC_LITERAL(
+            OutSym, x->name, x->addr, N_SECT | N_EXT,
+            (uint8_t)(osi == NONE ? 0 : section_index_of(osi, order, nord)), 0);
         nextdef++;
     }
     /* "__mh_execute_header" sorts before user names in strcmp order only by chance: keep ld64's sort */
@@ -1402,8 +1403,8 @@ static int link_inputs(const char **inputs, uint32_t ninputs, const char *out,
     qsort(sorted, ns, sizeof(uint32_t), cmp_name);
     uint32_t undef0 = nsyms;
     for (uint32_t k = 0; k < ns; k++) {
-        syms[nsyms++] =
-            (OutSym){gs[sorted[k]].name, 0, N_UNDF | N_EXT, 0, 1u << 8};
+        syms[nsyms++] = VCC_LITERAL(OutSym, gs[sorted[k]].name, 0,
+                                    N_UNDF | N_EXT, 0, 1u << 8);
         gs[sorted[k]].calign =
             nsyms - 1; /* reused: symbol index of the import */
         nundef++;

@@ -1,4 +1,5 @@
 /* vcc front end: can a function body fall off its end (clang's CheckFallThrough, -Wreturn-type, -Winvalid-noreturn) */
+#include "../lib/literal.h"
 #include "ccimpl.h"
 
 /*
@@ -585,7 +586,7 @@ static pp_span uv_caserange(cc *c, uint32_t n)
         t = pp_src(c->p, b, b + n, &len);
 
     if (N(n)->op == N_DEFAULT || !t)
-        return (pp_span){b, b + 7};
+        return VCC_LITERAL(pp_span, b, b + 7);
     if (len > 4 && !memcmp(t, "case", 4))
         i = 4;
     while (i < len && (t[i] == ' ' || t[i] == '\t'))
@@ -594,7 +595,7 @@ static pp_span uv_caserange(cc *c, uint32_t n)
         ;
     while (e > i && (t[e - 1] == ' ' || t[e - 1] == '\t'))
         e--;
-    return (pp_span){b + (uint32_t)i, b + (uint32_t)e};
+    return VCC_LITERAL(pp_span, b + (uint32_t)i, b + (uint32_t)e);
 }
 
 /* leaving a branch: pending ifs inside it do not dominate what follows */
@@ -810,7 +811,7 @@ static void uv_ex(uwk *w, uint32_t e, ust *st, bool ignore)
             uv_pend(w, e, 3, &b4, &t, &f, true);
             uv_pend(w, e, 3, &b4, &f, &t, false);
         }
-        *st = (ust){0, 0, false};
+        *st = VCC_LITERAL(ust, 0, 0, false);
         uj(st, &t), uj(st, &f);
         return;
     }
@@ -917,7 +918,7 @@ static void uv_loop(uwk *w, const node *x, ust *st)
         uint32_t b0 = w->blk;
         bool last = (w->report && it) || it >= 8;
 
-        out = (ust){0, 0, false};
+        out = VCC_LITERAL(ust, 0, 0, false);
         w->brk = &brk, w->cont = &cont;
         if (x->op == N_DO) {
             uv_stmt(w, body, &s);
@@ -1360,13 +1361,14 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
             return false;
         pp_diagx(c->p, &d, "uninitialized use occurs here");
         if (kd != 3)
-            r[0] = (pp_span){cr.b, rng_np(c, x->b).b};
+            r[0] = VCC_LITERAL(pp_span, cr.b, rng_np(c, x->b).b);
         else if (f)
-            r[0] = (pp_span){cr.b, rng_np(c, x->b).b},
-            r[1] = (pp_span){rng_np(c, x->b).e, rng_np(c, x->c).e}, nr = 2;
+            r[0] = VCC_LITERAL(pp_span, cr.b, rng_np(c, x->b).b),
+            r[1] = VCC_LITERAL(pp_span, rng_np(c, x->b).e, rng_np(c, x->c).e),
+            nr = 2;
         else
-            r[0] = (pp_span){cr.b, rng_np(c, x->c).b};
-        d = (pp_dinfo){"note", r[0].b, r, nr, NULL, 0, NULL, 0};
+            r[0] = VCC_LITERAL(pp_span, cr.b, rng_np(c, x->c).b);
+        d = VCC_LITERAL(pp_dinfo, "note", r[0].b, r, nr, NULL, 0, NULL, 0);
         pp_diagx(c->p, &d, "remove the '%s' if its condition is always %s",
                  op[kd], f ? "true" : "false");
         return true;
@@ -1385,8 +1387,8 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
                 cr.b, cr.e, "1",
                 0}; /* (while: the condition becomes 1; for: it is removed) */
 
-            d = (pp_dinfo){"note",           cr.b, &cr, 1, &fx,
-                           x->op == N_WHILE, NULL, 0};
+            d = VCC_LITERAL(pp_dinfo, "note", cr.b, &cr, 1, &fx,
+                            x->op == N_WHILE, NULL, 0);
             pp_diagx(c->p, &d, "remove the condition if it is always true");
         }
         return true;
@@ -1416,7 +1418,8 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
                           IDF(y->name),
                           N(ln)->op == N_CASE ? "case" : "default"))
                 continue;
-            d = (pp_dinfo){"note", w->uloc[k], &w->ur[k], 1, NULL, 0, NULL, 0};
+            d = VCC_LITERAL(pp_dinfo, "note", w->uloc[k], &w->ur[k], 1, NULL, 0,
+                            NULL, 0);
             pp_diagx(c->p, &d, "uninitialized use occurs here");
             any = true;
         }
@@ -1429,19 +1432,20 @@ static bool uv_sometimes(cc *c, uwk *w, uint32_t k)
         return false;
     pp_diagx(c->p, &d, "uninitialized use occurs here");
     if (f) {
-        r[0] = (pp_span){c->span[w->sif[k]].b, c->span[x->b].b};
+        r[0] = VCC_LITERAL(pp_span, c->span[w->sif[k]].b, c->span[x->b].b);
         if (x->c) /* (after an expression statement: its ';') */
-            r[1] = (pp_span){N(x->b)->op == N_EXPR ? c->span[x->b].e
-                                                   : uv_send(c, x->b),
-                             uv_send(c, x->c)},
+            r[1] = VCC_LITERAL(pp_span,
+                               N(x->b)->op == N_EXPR ? c->span[x->b].e
+                                                     : uv_send(c, x->b),
+                               uv_send(c, x->c)),
             nr = 2;
     } else
-        r[0] = (pp_span){c->span[w->sif[k]].b,
-                         x->c ? c->span[x->c].b
-                         : N(x->b)->op == N_BLOCK
-                             ? uv_send(c, x->b)
-                             : c->span[x->b].e}; /* (no else: the whole if) */
-    d = (pp_dinfo){"note", r[0].b, r, nr, NULL, 0, NULL, 0};
+        r[0] = VCC_LITERAL(pp_span, c->span[w->sif[k]].b,
+                           x->c ? c->span[x->c].b
+                           : N(x->b)->op == N_BLOCK
+                               ? uv_send(c, x->b)
+                               : c->span[x->b].e); /* (no else: the whole if) */
+    d = VCC_LITERAL(pp_dinfo, "note", r[0].b, r, nr, NULL, 0, NULL, 0);
     pp_diagx(c->p, &d, "remove the 'if' if its condition is always %s",
              f ? "true" : "false");
     return true;
@@ -1500,7 +1504,7 @@ VPRIV void uninit_check(cc *c, uint32_t body, uint32_t first_label)
         w->report = true, w->nord = w->nself = 0, w->done = 0, w->blk = 0,
         w->spend = 0;
         memset(w->seen, 0, nl);
-        st = (ust){0, 0, true};
+        st = VCC_LITERAL(ust, 0, 0, true);
         uv_stmt(w, body, &st);
         if (!w->changed)
             break;

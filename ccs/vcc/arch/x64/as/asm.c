@@ -4,6 +4,7 @@
  * with clang's for the same text.  Jumps to labels are variable items the
  * assembler relaxes (as.c: as_branch).
  */
+#include "../../../lib/literal.h"
 #include "x64as.h"
 
 /* ---------------------------------------------------------------- operands */
@@ -533,7 +534,7 @@ VPRIV int x64_emit(As *a, XForm *f)
             x.fixat = x.n, x.fixtype = rt, x.fixsize = 4;
             x.fixv = dv;
             if (ripfix && !dsym && !rm->hasv)
-                x.fixv = (Val){0, 0, 0};
+                x.fixv = VCC_LITERAL(Val, 0, 0, 0);
             if (ripfix)
                 x.fixv.c -= 4 + f->isz; /* from the end of the instruction */
             if (ripfix && !dsym) {
@@ -678,23 +679,22 @@ VPRIV int x64_alu(As *a, int n, int sz, XOp *o, int nops)
         int sym = x64_imm(a, s, &f, &k);
 
         if (!b && !sym && fits8(k)) {
-            f.op = OPB(0x83), f.nop = 1, f.isz = 1, f.imm = k;
+            f.op = OPB("\x83"), f.nop = 1, f.isz = 1, f.imm = k;
         } else if (d->kind == XK_REG && d->reg == 0 && !d->hi8) {
             /* the accumulator's short form */
+            uint8_t op = (uint8_t)(n * 8 + (b ? 4 : 5));
+
             XForm g = F(.w = w, .opsz16 = p16,
-                        .op = (const uint8_t[]){(uint8_t)(n * 8 + (b ? 4 : 5))},
-                        .nop = 1,
+
+                        .op = &op, .nop = 1,
                         .isz = b         ? 1
                                : sz == 2 ? 2
                                          : 4,
                         .imm = k, .immsym = f.immsym, .immv = f.immv,
                         .immmod = f.immmod, .immsgn = 1);
-            uint8_t op = (uint8_t)(n * 8 + (b ? 4 : 5));
-
-            g.op = &op;
             return x64_emit(a, &g);
         } else {
-            f.op = b ? OPB(0x80) : OPB(0x81), f.nop = 1,
+            f.op = b ? OPB("\x80") : OPB("\x81"), f.nop = 1,
             f.isz = b         ? 1
                     : sz == 2 ? 2
                               : 4,

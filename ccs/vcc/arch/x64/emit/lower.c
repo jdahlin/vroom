@@ -1,4 +1,5 @@
 /* vcc code generator, x86-64: the walker's operations as records (x64impl.h) */
+#include "../../../lib/literal.h"
 #include "x64impl.h"
 
 #define X_MAXREC (1u << 22)
@@ -234,7 +235,7 @@ VPRIV int x64_toreg(ecx *e, val *v, int size)
 
         x64_mem(e, X_LEA, 8, r, &l, false);
     }
-    *v = (val){.k = V_REG, .r = (uint8_t)r};
+    *v = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     return r;
 }
 
@@ -427,7 +428,7 @@ static val x64_div(ecx *e, int op, int size, bool sgn, val a, val b)
             X->pushes--;
         }
     x64_tfree(e, rb);
-    return (val){.k = V_REG, .r = (uint8_t)ra};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)ra);
 }
 
 /* a shift by a register (op: X_SHL X_SHR X_SAR): the count in cl */
@@ -457,7 +458,7 @@ static val x64_shift(ecx *e, int op, int size, val a, val b)
     }
     if (rb != ra)
         x64_tfree(e, rb);
-    return (val){.k = V_REG, .r = (uint8_t)ra};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)ra);
 }
 
 VPRIV val x64_bin(ecx *e, int op, int size, bool sgn, val a, val b)
@@ -601,7 +602,7 @@ VPRIV val x64_cmp(ecx *e, int op, int size, bool sgn, val a, val b)
     rec *i = x64_op3(e, X_SETCC, 4, ra, XNOREG, XNOREG);
 
     i->cond = (uint8_t)cc;
-    return (val){.k = V_REG, .r = (uint8_t)ra};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)ra);
 }
 
 VPRIV void x64_cmpbr(ecx *e, int op, int size, bool sgn, val a, val b,
@@ -642,7 +643,7 @@ VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
         e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
         e->dl = (struct dbgrow *)realloc(e->dl, e->dlcap * sizeof *e->dl);
     }
-    e->dl[e->ndl++] = (struct dbgrow){nin, file, line, col};
+    e->dl[e->ndl++] = VCC_LITERAL(struct dbgrow, nin, file, line, col);
 }
 
 VPRIV void x64_label(ecx *e, uint32_t l)
@@ -927,7 +928,7 @@ VPRIV val x64_frame(ecx *e, bool ret, uint32_t level)
         l.off = 8;
         x64_mem(e, X_LD, 8, r, &l, false);
     }
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* a's bits counted SWAR-style (no popcnt in the x86-64 baseline): the count in a's register */
@@ -1016,7 +1017,7 @@ VPRIV val x64_bitop(ecx *e, int bi, int size, val a)
         efatal(e, e->curloc,
                "x86-64: builtin %d is not supported yet (PLAN-x86.md X3)", bi);
     }
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* n bytes below the stack pointer (nothing is pushed here: the stack stays 16-aligned) */
@@ -1028,7 +1029,7 @@ VPRIV val x64_alloca(ecx *e, val n)
     x64_op3(e, X_ANDI, 8, r, r, XNOREG)->imm = -16;
     x64_op3(e, X_SUB, 8, RSP, RSP, r);
     x64_mov(e, r, RSP);
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 VPRIV int x64_spget(ecx *e)
@@ -1053,7 +1054,7 @@ VPRIV val x64_fbits(ecx *e, val v, int size)
     if (size == 2)
         x64_op3(e, X_ANDI, 4, r, r, XNOREG)->imm = 0xffff;
     x64_tfree(e, v.r);
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* SSE4.2 string comparisons have fixed result registers and, with explicit
@@ -1122,7 +1123,7 @@ VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
     if (kind == 1) {
         lval l = {.k = L_FRAME, .off = wk_slot(e, 16, 16)};
         x64_store(e, blend ? XMM0 + 1 : XMM0, &l, 16);
-        result = (val){.k = V_REG, .r = (uint8_t)x64_laddr(e, &l)};
+        result = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)x64_laddr(e, &l));
     } else {
         int r = x64_treg(e);
         if (kind == 0)
@@ -1132,7 +1133,7 @@ VPRIV val x64_pcmpstr(ecx *e, uint32_t n)
             ins = x64_op3(e, X_SETCC, 4, r, XNOREG, XNOREG);
             ins->cond = cc[kind];
         }
-        result = (val){.k = V_REG, .r = (uint8_t)r};
+        result = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
     }
     for (int r = 0; r < 32; r++)
         if (saved[r]) {

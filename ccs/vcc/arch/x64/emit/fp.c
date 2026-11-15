@@ -1,6 +1,7 @@
 /* vcc code generator, x86-64: floating point (x64impl.h).  float and double
  * in SSE registers (scalar ss/sd); long double on the x87 stack, its values
  * in 16-byte frame slots (the walker holds their addresses, as for records). */
+#include "../../../lib/literal.h"
 #include "x64impl.h"
 
 VPRIV bool x64_ldmem(void)
@@ -22,7 +23,7 @@ static int x64_fsz(cc *c, qty t)
 }
 static val x64_vr(int r)
 {
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* an x87 instruction, with its memory operand l (NULL: none) */
@@ -64,12 +65,12 @@ VPRIV void x64_x87st(ecx *e, const lval *l)
 
 static lval x64_at(int r)
 {
-    return (lval){.k = L_REG, .r = (uint8_t)r, .align = 16};
+    return VCC_LITERAL(lval, .k = L_REG, .r = (uint8_t)r, .align = 16);
 }
 static lval x64_tmpslot(ecx *e, uint64_t n)
 {
-    return (lval){
-        .k = L_FRAME, .off = wk_slot(e, n, n >= 16 ? 16 : 8), .align = 8};
+    return VCC_LITERAL(lval, .k = L_FRAME,
+                       .off = wk_slot(e, n, n >= 16 ? 16 : 8), .align = 8);
 }
 
 /* a new long double object: its address in a temporary */

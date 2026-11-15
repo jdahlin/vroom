@@ -29,6 +29,7 @@
  * with what the replay would have written (stderr: "drcheck:").
  * VCC_DR_MAX_MB caps the entries' memory (default 512).
  */
+#include "../lib/literal.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -98,10 +99,12 @@ typedef struct fd {
     uint16_t off, size;
     uint8_t kind;
 } fd;
-#define FD(T, f, k) ((fd){offsetof(T, f), sizeof(((T *)0)->f), (uint8_t)(k)})
+#define FD(T, f, k)                                                            \
+    (VCC_LITERAL(fd, offsetof(T, f), sizeof(((T *)0)->f), (uint8_t)(k)))
 #define FDR(T, f0, f1, k)                                                      \
-    ((fd){offsetof(T, f0),                                                     \
-          offsetof(T, f1) + sizeof(((T *)0)->f1) - offsetof(T, f0), (k)})
+    (VCC_LITERAL(fd, offsetof(T, f0),                                          \
+                 offsetof(T, f1) + sizeof(((T *)0)->f1) - offsetof(T, f0),     \
+                 (k)))
 
 static int sym_fd(const sym *s, fd *o)
 {
@@ -830,7 +833,6 @@ typedef struct tcont {
     struct tcont *next;
     uint64_t h;
     uint32_t n;
-    char b[];
 } tcont;
 #define TC_NB 65536
 static tcont *_Atomic tc_tab[TC_NB];
@@ -848,17 +850,17 @@ static const void *tc_intern(const char *b, uint32_t n)
     j = (uint32_t)(h >> 40) & (TC_NB - 1);
     for (x = atomic_load_explicit(&tc_tab[j], memory_order_acquire); x;
          x = x->next)
-        if (x->h == h && x->n == n && !memcmp(x->b, b, n))
+        if (x->h == h && x->n == n && !memcmp(x + 1, b, n))
             return x;
     pthread_mutex_lock(&tc_mu);
     for (x = atomic_load_explicit(&tc_tab[j], memory_order_acquire); x;
          x = x->next)
-        if (x->h == h && x->n == n && !memcmp(x->b, b, n))
+        if (x->h == h && x->n == n && !memcmp(x + 1, b, n))
             break;
     if (!x) {
         x = (tcont *)malloc(sizeof(*x) + n);
         x->h = h, x->n = n;
-        memcpy(x->b, b, n);
+        memcpy(x + 1, b, n);
         x->next = atomic_load_explicit(&tc_tab[j], memory_order_relaxed);
         atomic_store_explicit(&tc_tab[j], x, memory_order_release);
         ADD(tc_bytes, sizeof(*x) + n);
@@ -1008,7 +1010,7 @@ static void w_sym(cc *c, uint32_t s)
     if (!s || s >= r->s0 ||
         wm_get(&r->wm, (uint64_t)W_SYM << 32 | s, r->ws.n) != UINT32_MAX)
         return;
-    VPUSH(r->ws, ((wsym){s, c->syms[s]}));
+    VPUSH(r->ws, (VCC_LITERAL(wsym, s, c->syms[s])));
     w_push(r, W_SYM, r->ws.n - 1);
 }
 
@@ -1039,7 +1041,7 @@ static void w_attr(cc *c, uint32_t a)
     if (!a || a >= r->a0 ||
         wm_get(&r->wm, (uint64_t)W_ATTR << 32 | a, r->wa.n) != UINT32_MAX)
         return;
-    VPUSH(r->wa, ((wattr){a, c->attr[a]}));
+    VPUSH(r->wa, (VCC_LITERAL(wattr, a, c->attr[a])));
     w_push(r, W_ATTR, r->wa.n - 1);
 }
 
@@ -1052,7 +1054,7 @@ static void w_str(cc *c, uint32_t s)
     if (!s || s >= r->st0 ||
         wm_get(&r->wm, (uint64_t)W_STR << 32 | s, r->wst.n) != UINT32_MAX)
         return;
-    VPUSH(r->wst, ((wstr){s, r->wb.n, *x}));
+    VPUSH(r->wst, (VCC_LITERAL(wstr, s, r->wb.n, *x)));
     VGROW(r->wb, n);
     memcpy(r->wb.v + r->wb.n, x->s, n);
     r->wb.n += (uint32_t)n;
@@ -1065,7 +1067,7 @@ static void w_list(cc *c, uint32_t l, uint32_t n)
     if (l >= r->l0 ||
         wm_get(&r->wm, (uint64_t)W_LIST << 32 | l, r->wl.n) != UINT32_MAX)
         return;
-    VPUSH(r->wl, ((wlist){l, n, r->wv.n}));
+    VPUSH(r->wl, (VCC_LITERAL(wlist, l, n, r->wv.n)));
     VGROW(r->wv, n);
     memcpy(r->wv.v + r->wv.n, &c->lists[l], n * sizeof(uint32_t));
     r->wv.n += n;
@@ -1226,8 +1228,9 @@ VPRIV __attribute__((noinline)) void dr_read(cc *c, int ns, uint32_t id,
         return;
     if (!rs_add(r, (uint64_t)ns << 31 | id))
         return;
-    VPUSH(r->rds, ((drread){id, s, s ? c->syms[s].flags : 0, (uint8_t)ns,
-                            (uint8_t)(s ? c->syms[s].kind : 0)}));
+    VPUSH(r->rds,
+          (VCC_LITERAL(drread, id, s, s ? c->syms[s].flags : 0, (uint8_t)ns,
+                       (uint8_t)(s ? c->syms[s].kind : 0))));
     if (s) {
         uint64_t t0 = ticks();
 
@@ -1291,7 +1294,7 @@ VPRIV __attribute__((noinline)) uint32_t dr_intern(cc *c, const ctype *t)
     r->real = c->tyhash, r->realcap = c->tyhcap, c->dr_on = 1;
     c->tyhash = r->rt, c->tyhcap = r->rcap;
     rt_insert(r, c, i);
-    VPUSH(r->ops, ((drop){OP_INTERN, i, 0, *t}));
+    VPUSH(r->ops, (VCC_LITERAL(drop, OP_INTERN, i, 0, *t)));
     if (i < r->y0)
         w_ty(c, i, true);
     return i;
@@ -1364,7 +1367,7 @@ VPRIV __attribute__((noinline)) qty dr_func(cc *c, qty ret, const qty *par,
 
 VPRIV __attribute__((noinline)) void dr_new(cc *c, uint32_t idx)
 {
-    VPUSH(c->dr->ops, ((drop){OP_NEW, idx, 0, c->ty[idx]}));
+    VPUSH(c->dr->ops, (VCC_LITERAL(drop, OP_NEW, idx, 0, c->ty[idx])));
 }
 
 VPRIV __attribute__((noinline)) void dr_pragma(cc *c, int kind)
@@ -1900,8 +1903,8 @@ static bool rel_build(drent *e)
     }
     for (uint32_t i = 0; i < e->l1 - e->l0; i++)
         if (e->lk[i] != K_IMM && e->lk[i] != LK_DEAD)
-            ok &= rel_one(e, &rl[RA_LIST], i * 4, (fd){0, 4, e->lk[i]},
-                          e->lists[i]);
+            ok &= rel_one(e, &rl[RA_LIST], i * 4,
+                          VCC_LITERAL(fd, 0, 4, e->lk[i]), e->lists[i]);
     n = attr_fd(f);
     for (uint32_t i = 0; i < e->a1 - e->a0; i++)
         ok &= rel_rec(e, &rl[RA_ATTR], i * (uint32_t)sizeof(attrs), &e->attr[i],
@@ -2444,7 +2447,7 @@ static void rec_close(cc *c, uint64_t endpos)
     e->nops = r->ops.n;
     e->opar = (qty *)xdup(r->opar.v, r->opar.n * sizeof(qty));
     e->fin = (ctype *)malloc((r->ops.n + 1) * sizeof(ctype));
-    x = (trx){c, e, r, true, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL};
+    x = VCC_LITERAL(trx, c, e, r, true, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
 
     /* the type log: every own type made by one op, content mappable */
     for (uint32_t i = 0; i < e->nops; i++) {

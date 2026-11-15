@@ -21,6 +21,7 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
+#include "../lib/literal.h"
 #include "ld.h"
 #include "../lib/hash.h"
 #include "../lib/defer.h"
@@ -264,7 +265,7 @@ static uint32_t st_add(StrTab *t, const char *s)
         t->cap = t->cap ? t->cap * 2 : 256;
         t->v = (StrEnt *)realloc(t->v, t->cap * sizeof(StrEnt));
     }
-    t->v[t->n] = (StrEnt){.s = s, .len = len, .h = h};
+    t->v[t->n] = VCC_LITERAL(StrEnt, .s = s, .len = len, .h = h);
     t->tab[j] = ++t->n;
     return t->n - 1;
 }
@@ -322,7 +323,7 @@ static void st_finalize(StrTab *t)
         uint64_t k = 0;
         for (uint32_t j = 0; j < 8; j++)
             k = k << 8 | (j < e->len ? (uint8_t)r[j] : 0);
-        p[i] = (SortEnt){k, r, e->len, e};
+        p[i] = VCC_LITERAL(SortEnt, k, r, e->len, e);
         ro += e->len;
     }
     /* LSD radix sort on the key, descending; ties (same last 8 bytes)
@@ -620,31 +621,23 @@ static int binary_in(int dirfd)
     Sym *y = (Sym *)(b + symoff);
     uint64_t val[3] = {0, dsz, dsz};
     for (int i = 0; i < 3; i++)
-        y[i + 1] = (Sym){.st_name = (uint32_t)st_find(&t, nm[i]),
-                         .st_info = STB_GLOBAL << 4,
-                         .st_shndx = (uint16_t)(i == 2 ? SHN_ABS : 3),
-                         .st_value = val[i]};
+        y[i + 1] = VCC_LITERAL(Sym, .st_name = (uint32_t)st_find(&t, nm[i]),
+                               .st_info = STB_GLOBAL << 4,
+                               .st_shndx = (uint16_t)(i == 2 ? SHN_ABS : 3),
+                               .st_value = val[i]);
     memcpy(b + datoff, data, dsz);
     Shdr *sh = (Shdr *)(b + shoff);
-    sh[1] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".strtab"),
-                   .sh_type = SHT_STRTAB,
-                   .sh_offset = stroff,
-                   .sh_size = t.size,
-                   .sh_addralign = 1};
-    sh[2] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".symtab"),
-                   .sh_type = SHT_SYMTAB,
-                   .sh_offset = symoff,
-                   .sh_size = 4 * sizeof(Sym),
-                   .sh_link = 1,
-                   .sh_info = 1,
-                   .sh_addralign = 8,
-                   .sh_entsize = sizeof(Sym)};
-    sh[3] = (Shdr){.sh_name = (uint32_t)st_find(&t, ".data"),
-                   .sh_type = SHT_PROGBITS,
-                   .sh_flags = SHF_WRITE | SHF_ALLOC,
-                   .sh_offset = datoff,
-                   .sh_size = dsz,
-                   .sh_addralign = 1};
+    sh[1] = VCC_LITERAL(Shdr, .sh_name = (uint32_t)st_find(&t, ".strtab"),
+                        .sh_type = SHT_STRTAB, .sh_offset = stroff,
+                        .sh_size = t.size, .sh_addralign = 1);
+    sh[2] = VCC_LITERAL(Shdr, .sh_name = (uint32_t)st_find(&t, ".symtab"),
+                        .sh_type = SHT_SYMTAB, .sh_offset = symoff,
+                        .sh_size = 4 * sizeof(Sym), .sh_link = 1, .sh_info = 1,
+                        .sh_addralign = 8, .sh_entsize = sizeof(Sym));
+    sh[3] =
+        VCC_LITERAL(Shdr, .sh_name = (uint32_t)st_find(&t, ".data"),
+                    .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
+                    .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1);
     return oerrors ? 1 : write_file(dirfd, oc.out, b, total, 0666);
 }
 
@@ -835,14 +828,11 @@ static int objcopy_run(int dirfd)
                     sec[k].parent = i;
     }
     uint32_t ehs = e.nph, phs = e.nph + 1;
-    seg[ehs] = (OSeg){
-        .origoff = 0, .filesz = sizeof(Ehdr), .index = ehs, .parent = -1};
-    seg[phs] = (OSeg){.origoff = eh->e_phoff,
-                      .vaddr = eh->e_phoff,
-                      .filesz = (uint64_t)eh->e_phentsize * eh->e_phnum,
-                      .align = 8,
-                      .index = phs,
-                      .parent = -1};
+    seg[ehs] = VCC_LITERAL(OSeg, .origoff = 0, .filesz = sizeof(Ehdr),
+                           .index = ehs, .parent = -1);
+    seg[phs] = VCC_LITERAL(OSeg, .origoff = eh->e_phoff, .vaddr = eh->e_phoff,
+                           .filesz = (uint64_t)eh->e_phentsize * eh->e_phnum,
+                           .align = 8, .index = phs, .parent = -1);
     for (uint32_t c = 0; c < ng; c++) {
         OSeg *ch = &seg[c];
         for (uint32_t p = 0; p < e.nph; p++) {
@@ -1124,14 +1114,12 @@ static int objcopy_run(int dirfd)
                 uint16_t shndx = y->shndx;
                 if (shndx && shndx < 0xff00)
                     shndx = shndx < ns ? sec[shndx].idx : 0;
-                d[y->idx] = (Sym){.st_name = sn->v[y->sidx].len
-                                                 ? (uint32_t)sn->v[y->sidx].off
-                                                 : 0,
-                                  .st_info = y->info,
-                                  .st_other = y->other,
-                                  .st_shndx = shndx,
-                                  .st_value = y->value,
-                                  .st_size = y->size};
+                d[y->idx] = VCC_LITERAL(
+                    Sym,
+                    .st_name =
+                        sn->v[y->sidx].len ? (uint32_t)sn->v[y->sidx].off : 0,
+                    .st_info = y->info, .st_other = y->other, .st_shndx = shndx,
+                    .st_value = y->value, .st_size = y->size);
             }
             s->link = sec[s->link].idx;
             s->info = maxlocal + 1;
@@ -1264,17 +1252,13 @@ static int objcopy_run(int dirfd)
             continue;
         if (s->type != SHT_NOBITS && s->size)
             memcpy(b + s->off, s->gen ? s->gen : s->data, s->size);
-        sh[s->idx] =
-            (Shdr){.sh_name = (uint32_t)st_find(&names, sname(s)),
-                   .sh_type = s->type,
-                   .sh_flags = s->flags,
-                   .sh_addr = s->addr,
-                   .sh_offset = s->off,
-                   .sh_size = s->size,
-                   .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link,
-                   .sh_info = s->info,
-                   .sh_addralign = s->align,
-                   .sh_entsize = s->entsize};
+        sh[s->idx] = VCC_LITERAL(
+            Shdr, .sh_name = (uint32_t)st_find(&names, sname(s)),
+            .sh_type = s->type, .sh_flags = s->flags, .sh_addr = s->addr,
+            .sh_offset = s->off, .sh_size = s->size,
+            .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link,
+            .sh_info = s->info, .sh_addralign = s->align,
+            .sh_entsize = s->entsize);
     }
     int rc =
         oerrors ? 1 : write_file(dirfd, oc.out, b, total, rel ? 0666 : 0777);
@@ -1492,7 +1476,8 @@ static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
     if (fd < 0 || fstat(fd, &st) < 0 || st.st_size < 8 ||
         pread(fd, magic, 8, 0) != 8 ||
         (memcmp(magic, "!<arch>\n", 8) && memcmp(magic, "!<thin>\n", 8))) {
-        nin_push(v, n, (NIn){.label = strdup(path), .path = strdup(path)});
+        nin_push(v, n,
+                 VCC_LITERAL(NIn, .label = strdup(path), .path = strdup(path)));
         return;
     }
     bool thin = magic[2] == 't';
@@ -1748,11 +1733,9 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
                 snprintf(owned[i], l, "%s%s%s", name, at2 ? "@@" : "@", vn);
                 name = owned[i];
             }
-            v[m++] = (NSym){.name = name,
-                            .addr = y->st_value,
-                            .size = y->st_size,
-                            .type = nm_type(&e, y),
-                            .defined = y->st_shndx != SHN_UNDEF};
+            v[m++] = VCC_LITERAL(NSym, .name = name, .addr = y->st_value,
+                                 .size = y->st_size, .type = nm_type(&e, y),
+                                 .defined = y->st_shndx != SHN_UNDEF);
         }
         if (!nosort)
             qsort(v, m, sizeof *v, numeric ? ncmp_num : ncmp_name);

@@ -17,6 +17,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include "../lib/literal.h"
 #include "../lib/vstack.h"
 #include <math.h>
 #include <pthread.h>
@@ -216,8 +217,9 @@ extern const char *const w_ped[]; /* { "pedantic" } */
         if (unlikely(ext_on((c), (flag), (groups)))) {                         \
             (c)->dms = (ms);                                                   \
             if (!((tf) & PF_MACRO))                                            \
-                (c)->dfx = (pp_fixit){(loc), (loc) + (uint32_t)strlen(ms), "", \
-                                      VDA_MACHINE};                            \
+                (c)->dfx =                                                     \
+                    VCC_LITERAL(pp_fixit, (loc), (loc) + (uint32_t)strlen(ms), \
+                                "", VDA_MACHINE);                              \
             ext_warn((c), (flag), (groups), (loc), __VA_ARGS__);               \
         }                                                                      \
     } while (0)
@@ -774,7 +776,7 @@ static inline bool typedef_id(cc *c, uint32_t id)
 static inline void setspan(cc *c, uint32_t n, uint32_t b)
 {
     if (n && !c->span[n].e)
-        c->span[n] = (pp_span){b, c->prevloc};
+        c->span[n] = VCC_LITERAL(pp_span, b, c->prevloc);
 }
 
 /* the tracked variable s is assigned inside an if/loop/switch nested deeper than its declaration */

@@ -1,4 +1,5 @@
 /* vcc code generator for WebAssembly: statements and local initialisers (wimpl.h) */
+#include "../../../lib/literal.h"
 #include "wimpl.h"
 
 /* ---------------- local initialisers ---------------- */
@@ -355,7 +356,7 @@ static void wgadd(ecx *e, uint32_t label, uint32_t d, uint32_t i)
 
     if (W->ngp >= 2 * WMAXGD)
         efatal(e, e->curloc, "wasm: too many labels");
-    W->gp[W->ngp++] = (wgp){label, d, i};
+    W->gp[W->ngp++] = VCC_LITERAL(wgp, label, d, i);
 }
 
 static uint32_t wgrec(ecx *e, uint32_t n, int pd, uint32_t pidx)
@@ -367,8 +368,8 @@ static uint32_t wgrec(ecx *e, uint32_t n, int pd, uint32_t pidx)
     if (W->ngd >= WMAXGD)
         efatal(e, N(n)->loc, "wasm: too many blocks");
     r = W->ngd++;
-    W->gd[r] = (wgd){
-        .node = n, .parent = pd, .pidx = pidx, .op = N(n)->op, .loop = -1};
+    W->gd[r] = VCC_LITERAL(wgd, .node = n, .parent = pd, .pidx = pidx,
+                           .op = N(n)->op, .loop = -1);
     return r;
 }
 
@@ -1117,10 +1118,10 @@ static void wswitch(ecx *e, uint32_t n)
             }
             if (W->nsw >= WMAXSW)
                 efatal(e, x->loc, "wasm: switch too large");
-            W->sw[W->nsw++] = (wswc){
-                em_trunc_to(c, c->ipool[N(s)->a], ct),
+            W->sw[W->nsw++] = VCC_LITERAL(
+                wswc, em_trunc_to(c, c->ipool[N(s)->a], ct),
                 em_trunc_to(c, c->ipool[N(s)->b ? N(s)->b : N(s)->a], ct),
-                W->nseg - 1 - seg0, false};
+                W->nseg - 1 - seg0, false);
         }
     }
     m = W->nseg - seg0;
@@ -1146,9 +1147,9 @@ static void wswitch(ecx *e, uint32_t n)
         }
         if (W->nsw >= WMAXSW)
             efatal(e, x->loc, "wasm: switch too large");
-        W->sw[W->nsw++] = (wswc){
-            em_trunc_to(c, c->ipool[y->a], ct),
-            em_trunc_to(c, c->ipool[y->b ? y->b : y->a], ct), m + j, false};
+        W->sw[W->nsw++] = VCC_LITERAL(
+            wswc, em_trunc_to(c, c->ipool[y->a], ct),
+            em_trunc_to(c, c->ipool[y->b ? y->b : y->a], ct), m + j, false);
     }
     ncase = W->nsw - sw0;
     t = wtmp(e, wide ? WT_I64 : k);
@@ -1314,7 +1315,8 @@ static void wswitch(ecx *e, uint32_t n)
 
             for (uint32_t i = 0; cases && i < ncase; i++) {
                 const wswc *s = &W->sw[sw0 + i];
-                cases[i] = (em_switch_case){s->lo, s->hi, (uint32_t)sb[s->seg]};
+                cases[i] = VCC_LITERAL(em_switch_case, s->lo, s->hi,
+                                       (uint32_t)sb[s->seg]);
             }
             tree = cases &&
                    em_switch_prepare(cases, ncase, k == WT_I32 ? 32 : 64, sg);

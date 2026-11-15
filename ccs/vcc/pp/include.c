@@ -1,4 +1,5 @@
 /* vcc preprocessor: include search, entering files, #include */
+#include "../lib/literal.h"
 #include "ppimpl.h"
 
 static char *pstrdup(pp *p, const char *s, size_t n)
@@ -170,7 +171,7 @@ static inline bool inc_same(const incent *e, uint64_t h, uint32_t sig,
                             size_t kl)
 {
     return e->hash == h && e->sig == sig && e->fsig == fsig &&
-           e->mode == mode && e->klen == kl && !memcmp(e->key, k, kl);
+           e->mode == mode && e->klen == kl && !memcmp(inc_key(e), k, kl);
 }
 
 /* e's answer holds for p: the directories it looked at are p's */
@@ -225,18 +226,11 @@ static void rec_lookup(pp *p, const ctx *from, const char *name, size_t nlen,
         return;
     }
     l = &r->lk[r->nlk++];
-    *l = (hlook){pstrdup(p, name, nlen),
-                 from ? from->spath : NULL,
-                 f ? path : NULL,
-                 f,
-                 from ? from->sdir : -1,
-                 f ? sdir : -1,
-                 (uint32_t)nlen,
-                 from ? from->sdl : 0,
-                 angled,
-                 next,
-                 from && from->f == &p->builtin,
-                 (uint8_t)(f ? dir_sys(p, sdir) : 0)};
+    *l = VCC_LITERAL(hlook, pstrdup(p, name, nlen), from ? from->spath : NULL,
+                     f ? path : NULL, f, from ? from->sdir : -1, f ? sdir : -1,
+                     (uint32_t)nlen, from ? from->sdl : 0, angled, next,
+                     from && from->f == &p->builtin,
+                     (uint8_t)(f ? dir_sys(p, sdir) : 0));
 }
 
 static const vlex_file *find_include_at(pp *p, const ctx *from,
@@ -343,11 +337,12 @@ static const vlex_file *find_include_at(pp *p, const ctx *from,
         m->hash = h, m->sig = sig, m->fsig = fsig, m->klen = (uint32_t)kl,
         m->mode = mode;
         m->used = used, m->usig = p->psig[used], m->sdir = *sdir, m->f = f;
-        memcpy(m->key, kb, kp);
+        char *key = (char *)(m + 1);
+        memcpy(key, kb, kp);
         m->path = NULL;
         if (f) {
-            memcpy(m->key + kp, *path, pl + 1);
-            m->path = m->key + kp;
+            memcpy(key + kp, *path, pl + 1);
+            m->path = key + kp;
         }
         for (;; i = (i + 1) & ((1u << INC_BITS) - 1)) {
             e = NULL;
@@ -577,7 +572,7 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
     oi = once_index(p, f);
     if (unlikely(p->rec.on) && p->rec.nord < HC_MAXORD &&
         (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0))
-        p->rec.ord[p->rec.nord++] = (honce){f, oi >= 0};
+        p->rec.ord[p->rec.nord++] = VCC_LITERAL(honce, f, oi >= 0);
     if (oi >= 0) {
         if (p->o->deps)
             dep_only(p, path, sys);
@@ -703,10 +698,10 @@ VPRIV void include(pp *p, ctx *c, uint32_t b, uint32_t e, int kind,
                                 kind == D_INCLUDE_NEXT, &fp, &dl);
 
         if (ie->sig == p->sig && ie->mode == mode && inc_valid(p, ie) &&
-            dl < ie->klen && !ie->key[dl] && !memcmp(ie->key, fp, dl)) {
+            dl < ie->klen && !inc_key(ie)[dl] && !memcmp(inc_key(ie), fp, dl)) {
             inc_used(p, ie->used);
             if (unlikely(p->rec.on) && ie->used)
-                rec_lookup(p, c, ie->key + dl + 1, ie->klen - dl - 1,
+                rec_lookup(p, c, inc_key(ie) + dl + 1, ie->klen - dl - 1,
                            c->vt[b].kind == T_LESS, kind == D_INCLUDE_NEXT,
                            ie->f, ie->sdir, ie->path);
             enter_file(p, ie->f, ie->path, ie->sdir);
@@ -1045,15 +1040,11 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc,
                 unsigned char v = (unsigned char)f->src[ob + i];
 
                 if (i) {
-                    *w++ = (ptok){",", 1, 0, loc, T_COMMA, 0, 0};
+                    *w++ = VCC_LITERAL(ptok, ",", 1, 0, loc, T_COMMA, 0, 0);
                 }
-                *w++ = (ptok){emb_digits + 4 * v,
-                              (uint32_t)strlen(emb_digits + 4 * v),
-                              0,
-                              loc,
-                              T_NUMBER,
-                              (uint8_t)(i ? TF_SPACE : 0),
-                              0};
+                *w++ = VCC_LITERAL(ptok, emb_digits + 4 * v,
+                                   (uint32_t)strlen(emb_digits + 4 * v), 0, loc,
+                                   T_NUMBER, (uint8_t)(i ? TF_SPACE : 0), 0);
             }
             w[-1].flags |= PF_EMBEND;
             if (m.nsuf)

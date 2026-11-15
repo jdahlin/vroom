@@ -1,4 +1,5 @@
 /* vcc front end: expressions: implicit conversions */
+#include "../lib/literal.h"
 #include "ccimpl.h"
 
 /* a floating constant to an integer: folded, as clang does (the kernel has no FP code); UINT32_MAX: not constant */
@@ -324,8 +325,8 @@ static void conv_error(cc *c, uint32_t n, qty to, const char *what,
         if (!is_ptr(c, to) && N(m)->op == N_ADDR &&
             compatible(c, QUNQ(N(N(m)->a)->ty), QUNQ(to)))
             h = "; remove &",
-            fx[0] =
-                (pp_fixit){rng_np(c, m).b, rng_np(c, m).b + 1, "", VDA_MAYBE},
+            fx[0] = VCC_LITERAL(pp_fixit, rng_np(c, m).b, rng_np(c, m).b + 1,
+                                "", VDA_MAYBE),
             nfx = 1;
     }
     snprintf(fl, sizeof fl, "%s [%s", h, flag);
@@ -1220,7 +1221,7 @@ VPRIV bool need_lvalue(cc *c, uint32_t n, uint32_t loc)
             pp_span vr = {v->plb, pp_tok_end(c->p, v->ple)};
 
             if (!v->ple)
-                vr = (pp_span){v->loc, v->loc};
+                vr = VCC_LITERAL(pp_span, v->loc, v->loc);
             report(c, "error", loc, &r, 1, NULL, 0,
                    "cannot assign to variable '%.*s' with const-qualified type "
                    "'%s'",

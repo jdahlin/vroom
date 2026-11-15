@@ -1,4 +1,5 @@
 /* vcc code generator, AST walker: expressions, lvalues, conditions (walk.h) */
+#include "../../lib/literal.h"
 #include "walk.h"
 #include "../../lib/vstack.h"
 #include "../../lib/f128.h"
@@ -88,7 +89,7 @@ VPRIV void wk_free(ecx *e, const val *v)
 
 static val wk_vreg(int r)
 {
-    return (val){.k = V_REG, .r = (uint8_t)r};
+    return VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r);
 }
 
 /* an address that may be 0 at run time: an undefined weak symbol's */
@@ -250,8 +251,8 @@ VPRIV int64_t wk_local(ecx *e, uint32_t s)
                 } else {
                     W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
                 }
-                W->lu[W->nlu++] =
-                    (struct wklslot){W->soff[s], (uint32_t)size, align, s};
+                W->lu[W->nlu++] = VCC_LITERAL(struct wklslot, W->soff[s],
+                                              (uint32_t)size, align, s);
             } else {
                 W->soff[s] = wk_pslot_kind(e, size, align, WK_SLOT_LOCAL);
             }
@@ -714,7 +715,7 @@ static val wk_bf_load(ecx *e, const lval *l, qty t)
         v = wk_bf_load_split(e, u, pos, w);
         pos = 0;
     } else {
-        v = (val){.k = V_REG, .r = (uint8_t)LO(treg)(e)};
+        v = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)LO(treg)(e));
         LO(load)(e, v.r, &u, us, false);
     }
     if (l->sgn) {
@@ -775,10 +776,10 @@ static void wk_bf_store(ecx *e, const lval *l, qty t, int rv)
     m = (w >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << w) - 1)) << pos;
     if (us < 8)
         m &= ((uint64_t)1 << (us * 8)) - 1;
-    old = (val){.k = V_REG, .r = (uint8_t)LO(treg)(e)};
+    old = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)LO(treg)(e));
     LO(load)(e, old.r, &u, us, false);
     old = LO(bin)(e, T_AMP, 8, false, old, vconst((i128)(int64_t)~m));
-    nv = (val){.k = V_REG, .r = (uint8_t)LO(treg)(e)};
+    nv = VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)LO(treg)(e));
     LO(mov)(e, nv.r, rv);
     if (pos)
         nv = LO(bin)(e, T_LESSLESS, 8, false, nv, vconst(pos));
@@ -858,7 +859,7 @@ static val wk_load(ecx *e, lval l, qty t)
     if (is_func(c, t) || wk_mem(e, t)) {
         /* the object itself: its address (arrays and functions decay; records, x87 long double) */
         if (l.k == L_SYM)
-            return (val){.k = V_ADDR, .ref = l.ref, .i = l.off};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = l.ref, .i = l.off);
         return wk_vreg(LO(laddr)(e, &l));
     }
     if (wk_freg(e, t)) {
@@ -946,7 +947,7 @@ static val wk_cast(ecx *e, uint32_t n)
         lval l = wk_lval(e, x->a);
 
         if (l.k == L_SYM)
-            return (val){.k = V_ADDR, .ref = l.ref, .i = l.off};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = l.ref, .i = l.off);
         return wk_vreg(LO(laddr)(e, &l));
     }
     case CK_FDECAY:
@@ -954,7 +955,7 @@ static val wk_cast(ecx *e, uint32_t n)
             uint32_t s = canon_sym(c, N(x->a)->a);
 
             note_ref(e, REF(RK_SYM, s));
-            return (val){.k = V_ADDR, .ref = REF(RK_SYM, s)};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = REF(RK_SYM, s));
         }
         return wk_gen(e, x->a);
     case CK_VOID: {
@@ -1200,9 +1201,8 @@ static val wk_arith(ecx *e, int op, qty t, val a, val b)
         em_divpow2(c, t, &op, &b.i);
     }
     if (a.k == V_ADDR && b.k == V_CONST && (op == T_PLUS || op == T_MINUS))
-        return (val){.k = V_ADDR,
-                     .ref = a.ref,
-                     .i = op == T_PLUS ? a.i + b.i : a.i - b.i};
+        return VCC_LITERAL(val, .k = V_ADDR, .ref = a.ref,
+                           .i = op == T_PLUS ? a.i + b.i : a.i - b.i);
     {
         val v = LO(bin)(e, op, wk_opw(c, t), wk_signed(c, t), a, b);
 
@@ -2262,7 +2262,7 @@ static void wk_argslot(ecx *e, wkarg *a, qty t, val v)
 
     a->slot =
         wk_slot(e, a->size > 8 ? (a->size + 7) & ~(uint64_t)7 : 8, a->align);
-    l = (lval){.k = L_FRAME, .off = a->slot, .align = 8};
+    l = VCC_LITERAL(lval, .k = L_FRAME, .off = a->slot, .align = 8);
     if (wk_mem(e, t)) {
         int rs = wk_reg(e, &v, prim(TY_ULONG)), rd = LO(laddr)(e, &l);
 
@@ -3471,7 +3471,8 @@ static val wk_builtin(ecx *e, uint32_t n)
             rr = wk_reg(e, &r, prim(TY_ULONG));
             if (uu == wk_signed(c, tr)) {
                 /* unsigned x unsigned into signed, or anything else into unsigned: the sign bit */
-                hi = (lval){.k = L_REG, .r = (uint8_t)rr, .off = 8, .align = 8};
+                hi = VCC_LITERAL(lval, .k = L_REG, .r = (uint8_t)rr, .off = 8,
+                                 .align = 8);
                 s = LO(treg)(e);
                 LO(load)(e, s, &hi, 8, false);
                 LO(tfree)(e, rr);
@@ -3501,7 +3502,7 @@ static val wk_builtin(ecx *e, uint32_t n)
         rr = wk_reg(e, &r, prim(TY_ULONG));
         cp = LO(treg)(e);
         LO(mov)(e, cp, rr);
-        lo = wk_conv(e, (val){.k = V_REG, .r = (uint8_t)cp}, w, tr);
+        lo = wk_conv(e, VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)cp), w, tr);
         if (em_bitint(c, tr) && T(c, tr)->n < 64) {
             unsigned shift = 64 - T(c, tr)->n;
 
@@ -3514,7 +3515,7 @@ static val wk_builtin(ecx *e, uint32_t n)
         wk_lfree(e, &l);
         back = wk_conv(e, lo, tr, w);
         return LO(wcmp)(e, T_EXCLAIMEQ, true,
-                        (val){.k = V_REG, .r = (uint8_t)rr}, back);
+                        VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)rr), back);
     }
     case BI_ISINF_SIGN:
     case BI_FPCLASSIFY:
@@ -3659,7 +3660,8 @@ static val wk_builtin(ecx *e, uint32_t n)
             LO(load)(e, r, &l, 2, false);
             wk_lfree(e, &l);
             return LO(bin)(e, T_GREATERGREATER, 4, false,
-                           (val){.k = V_REG, .r = (uint8_t)r}, vconst(15));
+                           VCC_LITERAL(val, .k = V_REG, .r = (uint8_t)r),
+                           vconst(15));
         }
         v = LO(fbits)(e, v, wk_size(c, at));
         return LO(bin)(e, T_GREATERGREATER, 8, false, v,
@@ -3789,7 +3791,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
             uint32_t s = canon_sym(c, x->a);
 
             note_ref(e, REF(RK_SYM, s));
-            return (val){.k = V_ADDR, .ref = REF(RK_SYM, s)};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = REF(RK_SYM, s));
         }
         {
             val k;
@@ -3851,11 +3853,11 @@ static val wk_gen_inner(ecx *e, uint32_t n)
             uint32_t s = canon_sym(c, N(x->a)->a);
 
             note_ref(e, REF(RK_SYM, s));
-            return (val){.k = V_ADDR, .ref = REF(RK_SYM, s)};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = REF(RK_SYM, s));
         }
         l = wk_lval(e, x->a);
         if (l.k == L_SYM)
-            return (val){.k = V_ADDR, .ref = l.ref, .i = l.off};
+            return VCC_LITERAL(val, .k = V_ADDR, .ref = l.ref, .i = l.off);
         return wk_vreg(LO(laddr)(e, &l));
     }
     case N_CAST: {
@@ -3905,7 +3907,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
         return wk_stmtexpr(e, n);
     case N_LABELADDR:
         note_ref(e, REF(RK_LBL, x->a));
-        return (val){.k = V_ADDR, .ref = REF(RK_LBL, x->a)};
+        return VCC_LITERAL(val, .k = V_ADDR, .ref = REF(RK_LBL, x->a));
     case N_BUILTIN:
         return wk_builtin(e, n);
     case N_VAARG: {
@@ -3915,7 +3917,7 @@ static val wk_gen_inner(ecx *e, uint32_t n)
         wk_scalar(e, n, x->ty);
         rp = LO(va_arg)(e, ra, x->ty);
         LO(tfree)(e, ra);
-        l = (lval){.k = L_REG, .r = (uint8_t)rp, .align = 8};
+        l = VCC_LITERAL(lval, .k = L_REG, .r = (uint8_t)rp, .align = 8);
         return wk_load(e, l, x->ty);
     }
     case N_FNUM: {

@@ -10,10 +10,11 @@
 #ifndef VPERF_H
 #define VPERF_H
 
+#include "literal.h"
 #include <stdint.h>
 
 typedef struct vperf {
-	uint64_t ins, cyc;
+    uint64_t ins, cyc;
 } vperf;
 
 #ifdef __APPLE__
@@ -22,24 +23,25 @@ typedef struct vperf {
 
 static inline vperf vperf_now(void)
 {
-	uint64_t c[2] = { 0, 0 };
+    uint64_t c[2] = {0, 0};
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-	syscall(SYS_thread_selfcounts, 1, c, sizeof(c));	/* 1: THSC_CPI, {instructions, cycles} */
+    syscall(SYS_thread_selfcounts, 1, c,
+            sizeof(c)); /* 1: THSC_CPI, {instructions, cycles} */
 #pragma clang diagnostic pop
-	return (vperf){ c[0], c[1] };
+    return VCC_LITERAL(vperf, c[0], c[1]);
 }
 #else
 static inline vperf vperf_now(void)
 {
-	return (vperf){ 0, 0 };
+    return VCC_LITERAL(vperf, 0, 0);
 }
 #endif
 
 static inline vperf vperf_sub(vperf a, vperf b)
 {
-	return (vperf){ a.ins - b.ins, a.cyc - b.cyc };
+    return VCC_LITERAL(vperf, a.ins - b.ins, a.cyc - b.cyc);
 }
 
 #endif
