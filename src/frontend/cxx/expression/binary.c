@@ -619,9 +619,13 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
             return; /* a fold over = */
         while (n--)
             cxx_advance(c);
+        /* a = {...}: the list is operator='s argument, a temporary of its parameter's class (its node is
+           not the list's: the last element's) */
+        uint32_t rbrace = cxx_is(c, LEX_TOKEN_LEFT_BRACE) ? c->pos : 0;
+
         cxx_initializer_parse(c);
         {
-            uint32_t rn = c->enode;
+            uint32_t rn = rbrace && !built_in ? 0 : c->enode;
 
             ast_qualified_type rt = c->etype;
             uint8_t unsure = c->eunsure, invalid = c->einvalid,
@@ -638,6 +642,26 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
                     AST_QUALIFIED_TYPE_UNQUALIFIED(rt) &&
                 !cxx_class_user_special(c, l, vintern_cstr("operator="));
 
+            /* a = {...} of a class: the list a T prvalue (operator=(T) or (T&&) takes it; the list's own
+               type, its last element's, is not the argument's) */
+            uint32_t btmp = 0;
+
+            if (rbrace && !built_in && !c->tentative && l != CXX_TY_UNKNOWN &&
+                cc_type_is_record(c->ast, l) &&
+                AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY &&
+                optok == LEX_TOKEN_EQUAL) {
+                ast_qualified_type et = c->etype;
+                bool el = c->elval;
+
+                if (cxx_gen_on(c))
+                    btmp = cxx_gen_braced_temp(
+                        c, AST_QUALIFIED_TYPE_UNQUALIFIED(l), rbrace, oploc);
+                c->etype = et, c->elval = el;
+                rt = AST_QUALIFIED_TYPE_UNQUALIFIED(l);
+                c->etype = rt, c->elval = 0;
+                rbrace = 0,
+                rn = btmp; /* (the temporary: an lvalue node, a prvalue of T) */
+            }
             /* (the operands' value categories: a = b with b an lvalue takes operator=(const T&), not (T&&)) */
             c->op_lv_set = 1, c->op_lv[0] = l_lval, c->op_lv[1] = c->elval;
             if (built_in || c->tentative ||
@@ -652,9 +676,27 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
             }
             if (built_in)
                 cxx_gen_assignment(c, optok, ln, rn, oploc);
-            else if (!c->tentative && c->call_resolved && c->call_picked)
+            else if (!c->tentative && btmp && implicit &&
+                     !(c->call_resolved && c->call_picked))
+                cxx_gen_assignment(c, optok, ln, btmp, oploc);
+            else if (!c->tentative && c->call_resolved && c->call_picked) {
+                if (rbrace) {
+                    memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+                    c->gen_call_brace[0] = rbrace;
+                }
                 cxx_gen_operator_call(c, ln, &rn, 1, oploc);
-            else if (!c->tentative)
+                memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+            } else if (!c->tentative && rbrace) {
+                /* a = {...} of a class with the implicit operator=: a = T{...}, a temporary of a's class */
+                uint32_t tmp = cxx_gen_on(c) && l != CXX_TY_UNKNOWN
+                                   ? cxx_gen_braced_temp(c, l, rbrace, oploc)
+                                   : 0;
+
+                if (tmp)
+                    cxx_gen_assignment(c, optok, ln, tmp, oploc);
+                else
+                    cxx_gen_fail(c);
+            } else if (!c->tentative)
                 cxx_gen_assignment(
                     c, optok, ln, rn,
                     oploc); /* (no operator= declared: the implicit one, a copy of the bytes where that is what it does) */

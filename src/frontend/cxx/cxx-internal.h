@@ -1198,6 +1198,8 @@ VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, ast_qualified_type t,
                                     uint32_t loc);
 VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t);
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);
+VPRIV uint32_t cxx_gen_braced_temp(cxx *c, ast_qualified_type t, uint32_t pos,
+                                   uint32_t loc);
 VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r,
                               uint32_t loc);
 VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow,
