@@ -287,8 +287,8 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
         return;
     /* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
     {
-        uint32_t *o = virbuild_pass_scratch_get(
-                     e, (uint64_t)V->block_order_count * sizeof *o),
+        uint32_t *o = (uint32_t *)(virbuild_pass_scratch_get(
+                     e, (uint64_t)V->block_order_count * sizeof *o)),
                  m = 0;
 
         for (uint32_t i = 0; i < n0; i++) {

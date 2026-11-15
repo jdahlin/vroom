@@ -1,6 +1,7 @@
 /* The pre-IR: instructions and blocks, constants, terminators (PLAN-vir.md V2). */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -8,7 +9,8 @@
 VPRIV virbuild_context *virbuild_context_get(codegen_context *e)
 {
     if (!e->vir_builder)
-        e->vir_builder = calloc(1, sizeof(virbuild_context));
+        e->vir_builder =
+            (struct virbuild_context *)(calloc(1, sizeof(virbuild_context)));
     return e->vir_builder;
 }
 
@@ -40,12 +42,9 @@ VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op,
 
     VIRBUILD_ARRAY_GROW(V->insns, V->insn_count, V->insn_capacity, 1);
     V->insn_count++;
-    V->insns[i] =
-        (virbuild_preir_insn){{(uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c},
-                              blk,
-                              0,
-                              e->current_location,
-                              0};
+    V->insns[i] = VCC_LITERAL(virbuild_preir_insn,
+                              {(uint8_t)op, (uint8_t)ty, (uint16_t)fl, a, b, c},
+                              blk, 0, e->current_location, 0);
     if (V->sealing) {
         VIRBUILD_ARRAY_GROW(V->forward, i, V->forward_capacity, 1);
         V->forward[i] = i;
@@ -115,7 +114,7 @@ VPRIV uint32_t virbuild_block_new(codegen_context *e)
 
     VIRBUILD_ARRAY_GROW(V->blocks, V->block_count, V->block_capacity, 1);
     V->block_count++;
-    V->blocks[b] = (virbuild_preir_block){0};
+    V->blocks[b] = VCC_LITERAL(virbuild_preir_block, 0);
     V->blocks[b].final_block = VIRBUILD_BLOCK_NONE;
     return b;
 }
@@ -129,7 +128,7 @@ VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l)
 
         while (nc <= l)
             nc *= 2;
-        V->labels = realloc(V->labels, nc * sizeof *V->labels);
+        V->labels = (uint32_t *)realloc(V->labels, nc * sizeof *V->labels);
         if (!V->labels)
             virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
         memset(V->labels + V->label_capacity, 0xff,

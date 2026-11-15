@@ -94,7 +94,7 @@ static const char *const vccd_capabilities_warning_groups[] = {
 
 static int vccd_capabilities_string_compare(const void *k, const void *e)
 {
-	return strcmp(k, *(const char *const *)e);
+	return strcmp((const char *)k, *(const char *const *)e);
 }
 
 /*

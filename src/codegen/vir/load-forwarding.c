@@ -159,15 +159,16 @@ virbuild_far_load_find(virbuild_context *V, virbuild_simplify_state *S,
                        uint32_t q, const virbuild_address *A, bool *ok)
 {
     const vir_insn *in = &V->insns[q].insn;
-    virbuild_value_entry key = {VIR_OP_LOAD | 0x100,
-                                in->type,
-                                (in->flags & (3 | VIR_INSN_FLAG_MS)) |
-                                    (A->slot ? 0x100 : 0),
-                                A->base,
-                                (uint32_t)(uint64_t)A->off,
-                                (uint32_t)((uint64_t)A->off >> 32),
-                                0,
-                                0};
+    virbuild_value_entry key = {
+        VIR_OP_LOAD | 0x100,
+        in->type,
+        (uint32_t)((in->flags & (3 | VIR_INSN_FLAG_MS)) |
+                   (A->slot ? 0x100 : 0)),
+        A->base,
+        (uint32_t)(uint64_t)A->off,
+        (uint32_t)((uint64_t)A->off >> 32),
+        0,
+        0};
     virbuild_value_entry *t = virbuild_value_table_lookup(S, &key);
     uint32_t l1 = t->value, hi = S->positions[q], ia;
 

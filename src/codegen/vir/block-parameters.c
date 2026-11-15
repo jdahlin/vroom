@@ -44,13 +44,13 @@ VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e)
         return false;
     /* per value: its first user edge (0 none) and its last; per edge: the parameter reading
 	 * the value, the next edge; the worklist and who is on it */
-    uint32_t *head =
-        calloc((size_t)np * 3 + (size_t)nedge * 2 + 2, sizeof *head);
+    uint32_t *head = (uint32_t *)(calloc((size_t)np * 3 + (size_t)nedge * 2 + 2,
+                                         sizeof *head));
     if (!head)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
     uint32_t *tail = head + np, *work = tail + np, *user = work + np,
              *next = user + nedge + 1;
-    uint8_t *queued = calloc(np, 1);
+    uint8_t *queued = (uint8_t *)calloc(np, 1);
     if (!queued) {
         free(head);
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
@@ -151,8 +151,8 @@ VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
     VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity,
                         V->insn_count + 1);
     memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
-    stk = virbuild_pass_scratch_get(e, ((uint64_t)V->insn_count + 1) *
-                                           sizeof *stk);
+    stk = (uint32_t *)(virbuild_pass_scratch_get(
+        e, ((uint64_t)V->insn_count + 1) * sizeof *stk));
     for (uint32_t i = 0; i < V->block_order_count; i++) {
         uint32_t b = V->block_order[i];
 

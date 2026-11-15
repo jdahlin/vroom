@@ -7,12 +7,12 @@
 #define WALK_PASTE_(p, n) p##n
 #define WALK_PASTE(p, n) WALK_PASTE_(p, n)
 #define WALK_NAME(n) WALK_PASTE(WALK_PREFIX, n)
+#define walk_alloca WALK_NAME(walk_alloca)
 #define walk_argument_slot_store WALK_NAME(walk_argument_slot_store)
 #define walk_arithmetic_emit WALK_NAME(walk_arithmetic_emit)
 #define walk_array_element_drop WALK_NAME(walk_array_element_drop)
 #define walk_array_element_find WALK_NAME(walk_array_element_find)
 #define walk_array_element_of WALK_NAME(walk_array_element_of)
-#define wk_alloca WALK_NAME(wk_alloca)
 #define walk_array_elements_clear WALK_NAME(walk_array_elements_clear)
 #define walk_assignment_emit WALK_NAME(walk_assignment_emit)
 #define walk_assignment_emit_inner WALK_NAME(walk_assignment_emit_inner)

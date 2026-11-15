@@ -6,6 +6,7 @@
  */
 #ifndef VCC_X64AS_H
 #define VCC_X64AS_H
+#include "common/literal.h"
 #include <stdbool.h>
 #include "../../../as/as-internal.h"
 
@@ -18,27 +19,36 @@
  * instructions whose GOTPCREL relaxes (REX_)GOTPCRELX, 1 for others that do.
  */
 typedef struct {
-	int w, opsz16, rep;		/* rep: a mandatory F2/F3 prefix */
-	const uint8_t *op; int nop;
-	int reg;			/* ModRM.reg (0..15) */
-	const XOp *rm;			/* register or memory */
-	int rex8;			/* an 8-bit register operand that needs REX (spl ...) */
-	int64_t imm; int isz; as_value immv; int immsym, immsgn, immmod;
-	int gotx;
-	int oreg;			/* a register in the last opcode byte, + 1 (0: none) */
-	int tuple, mask, zero;        /* EVEX disp8 scale (0 for legacy/VEX), writemask */
-	int vex, vvvv, vl;		/* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
+    int w, opsz16, rep; /* rep: a mandatory F2/F3 prefix */
+    const uint8_t *op;
+    int nop;
+    int reg;       /* ModRM.reg (0..15) */
+    const XOp *rm; /* register or memory */
+    int rex8;      /* an 8-bit register operand that needs REX (spl ...) */
+    int64_t imm;
+    int isz;
+    as_value immv;
+    int immsym, immsgn, immmod;
+    int gotx;
+    int oreg; /* a register in the last opcode byte, + 1 (0: none) */
+    int tuple, mask, zero; /* EVEX disp8 scale (0 for legacy/VEX), writemask */
+    int vex, vvvv,
+        vl; /* VEX: the second source (0..15), 256-bit; the map from op (0f, 0f 38, 0f 3a) */
 } XForm;
-#define F(...) ((XForm){ __VA_ARGS__ })
+#define F(...) VCC_LITERAL(XForm, __VA_ARGS__)
 
-#define OPB(...) ((const uint8_t[]){ __VA_ARGS__ })
-enum { X64_NEXT = -2 };	/* a family's answer: not one of mine */
+#define OPB(bytes) ((const uint8_t *)(bytes))
+enum { X64_NEXT = -2 }; /* a family's answer: not one of mine */
 
 VPRIV int fits8(int64_t v);
 VPRIV int fits32(int64_t v);
 VPRIV int isconst(as_context *a, as_value *v, int64_t *c);
 VPRIV int x64_rtype(int mod, int pcrel, int size, int sgn, int rexw, int gotx);
 VPRIV int x64_emit(as_context *a, XForm *f);
+static inline int x64_emit_form(as_context *a, XForm form)
+{
+    return x64_emit(a, &form);
+}
 VPRIV int x64_raw(as_context *a, const uint8_t *b, int n);
 VPRIV int x64_cc(const char *s);
 VPRIV int sfxsize(char c);
@@ -49,7 +59,8 @@ VPRIV int rex8(const XOp *o);
 VPRIV int split_sfx(const char *mn, char *stem, int *sz);
 VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops);
 VPRIV int x64_branch(as_context *a, int cc, ElfVal target, int mod);
-VPRIV int x64_sse(as_context *a, int pfx, int op, int w, int reg, const XOp *rm);
+VPRIV int x64_sse(as_context *a, int pfx, int op, int w, int reg,
+                  const XOp *rm);
 VPRIV int x64_x87m(as_context *a, int op, int digit, const XOp *m);
 VPRIV int x64_x87r(as_context *a, int op, int base, int i);
 

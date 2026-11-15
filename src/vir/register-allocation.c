@@ -13,6 +13,7 @@
  * per-value arrays are written before they are read, except nu/lend/end/hint
  * which sweep 5 clears for the values of the function (22.3).
  */
+#include "common/literal.h"
 #include "vir-internal.h"
 #include "vir/register-allocation.h"
 
@@ -92,7 +93,7 @@ static _Thread_local struct actx {
 } vir_alloc_thread_arrays_instance;
 
 #define R(p, n, sz)                                                            \
-    p = vreserve((size_t)(n) * (sz), MAP_NORESERVE, "vir: alloc")
+    p = (__typeof__(p))vreserve((size_t)(n) * (sz), MAP_NORESERVE, "vir: alloc")
 static void vir_alloc_thread_arrays_init(void)
 {
     size_t nv = VIR_MAX_INS;
@@ -1421,8 +1422,9 @@ static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
         } else if (!livein(a, v, b)) {
             continue;
         }
-        ax.pm[n++] = (vir_alloc_parallel_move){VIR_LOCATION_SLOT | ax.slot[v],
-                                               ax.eloc[v], v, VIR_EDIT_MOVE};
+        ax.pm[n++] =
+            VCC_LITERAL(vir_alloc_parallel_move, VIR_LOCATION_SLOT | ax.slot[v],
+                        ax.eloc[v], v, VIR_EDIT_MOVE);
     }
     for (uint32_t j = 0; j < ax.ent_n[b]; j++) {
         uint32_t v = ax.pv[ax.ent_off[b] + j], r = ax.pr[ax.ent_off[b] + j];
@@ -1433,12 +1435,14 @@ static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
         if (ax.estamp[v] == g) {
             if (ax.eloc[v] == r)
                 continue;
-            *m = (vir_alloc_parallel_move){r, ax.eloc[v], v, VIR_EDIT_MOVE};
+            *m = VCC_LITERAL(vir_alloc_parallel_move, r, ax.eloc[v], v,
+                             VIR_EDIT_MOVE);
         } else if (vir_alloc_value_is_constant(f, v)) {
-            *m = (vir_alloc_parallel_move){r, 0, v, VIR_EDIT_REMATERIALIZE};
+            *m = VCC_LITERAL(vir_alloc_parallel_move, r, 0, v,
+                             VIR_EDIT_REMATERIALIZE);
         } else if (ax.slot[v] != VIR_BLOCK_NONE) {
-            *m = (vir_alloc_parallel_move){r, VIR_LOCATION_SLOT | ax.slot[v], v,
-                                           VIR_EDIT_MOVE};
+            *m = VCC_LITERAL(vir_alloc_parallel_move, r,
+                             VIR_LOCATION_SLOT | ax.slot[v], v, VIR_EDIT_MOVE);
         } else {
             continue; /* not defined on this path (15.5, irreducible) */
         }
@@ -1457,8 +1461,8 @@ static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
             else
                 continue; /* unused parameter */
             if (vir_alloc_value_is_constant(f, x)) {
-                *m = (vir_alloc_parallel_move){dst, 0, x,
-                                               VIR_EDIT_REMATERIALIZE};
+                *m = VCC_LITERAL(vir_alloc_parallel_move, dst, 0, x,
+                                 VIR_EDIT_REMATERIALIZE);
                 n++;
                 continue;
             }
@@ -1473,14 +1477,15 @@ static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
                 continue;
             if (src == dst)
                 continue;
-            *m = (vir_alloc_parallel_move){dst, src, x, VIR_EDIT_MOVE};
+            *m = VCC_LITERAL(vir_alloc_parallel_move, dst, src, x,
+                             VIR_EDIT_MOVE);
             n++;
         }
     if (n) {
         vir_alloc_moves_sequence(a, n, nmask);
         ax.eidx[ax.soff[p] + k] = a->edge_count;
         ax.edge[a->edge_count++] =
-            (vir_alloc_edge){p, b, k, first, a->move_count - first};
+            VCC_LITERAL(vir_alloc_edge, p, b, k, first, a->move_count - first);
         a->out->statistics.edges++;
     }
 }

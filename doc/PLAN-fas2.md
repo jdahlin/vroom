@@ -3452,3 +3452,136 @@ alternating rounds with 28 preprocessed arm64 kernel files gave median user CPU
 0.825 → 0.791 s; two files were excluded after preflight and short samples on a shared
 host show no general speed change. Provenance is in
 `work/opt-profile/local-values-integration-{cost,cputime}/`.
+
+### C++-kompatibilitet i kompilatorns C-källkod (2026-11-15)
+
+`make -C src -k -j6 vcc-cxx-check` granskar varje aktiv produktionsfil
+i både C11 och GNU++20. Målet är frivilligt. Standardflaggorna gör alla
+pedantiska varningar till fel för att inventera återstående arbete.
+Med `CXX_CHECK_SRC` kan samma kontroll köras på en delmängd.
+
+På x86-64 Linux klarade alla 461 filer båda språklägena med Clang 23 och
+följande urval av de diagnostikgrupper som portningen åtgärdar:
+
+```sh
+make -C src -k -j6 vcc-cxx-check \
+  CXX_CHECK_FLAGS='-fsyntax-only -Werror=implicit-void-ptr-cast -Werror=c99-extensions -Wno-c99-designator -Werror=c++11-narrowing -Werror=address-of-temporary -Werror=reorder-init-list'
+```
+
+C-bygget klarade unity och separat kompilering. SQLite 3.50.4 gav
+byteidentisk x86-64-assembler mot ef55c939 vid -O2 och -O3. På en kärna,
+med varm indata och nio omgångar i blandad ordning, var median väggtid
+vid -O2 365 → 364 ms och vid -O3 367 → 367 ms. Högsta RSS var 173,5 MiB
+vid -O2 och 174,3 → 174,4 MiB vid -O3.
+
+#### Mätningar i det tidigare källträdet
+
+Följande mätningar och filnamn hör till prestandagrenen före portningen.
+Den grenen inventerade 197 filer.
+
+- 2026-11-15: Frivillig C++-inventering med `make -C ccs -k -j 6 vcc-cxx-check`.
+  Clang 23 syntaxkontrollerar 197 C-filer var för sig som GNU++20 på x86-64 Linux.
+  Fem struct-taggar i assembleraren flyttades till filnivå och pekarkonverteringar
+  förtydligades i arenor, buffertar och länkarens hashfunktioner. Antalet unika
+  felpositioner sjönk från 2 030 till 1 798. Det vanliga C-bygget gav byte-identisk
+  `vpp` före och efter. SQLite 3.50.4 vid -O2 tog 628 respektive 633 ms CPU att
+  kompilera (median av fem körningar på samma kärna). Även speedtest1-binären var
+  byte-identisk, med 89 respektive 88 ms CPU för `--size 10 --memdb --testset main`.
+- 2026-11-15: `vcc-cxx-check` kör nu två separata syntaxkontroller med
+  `-Wpedantic -Werror`. C11-passet lägger till `-Wc++-compat`, som bland
+  annat hittar implicita konverteringar av `void *` och C++-nyckelord som
+  identifierare. GNU++20-passet fångar även språkfel och C-tillägg. Kör
+  `make -C ccs -k -j 6 vcc-cxx-check` för hela inventeringen eller ange
+  `CXX_CHECK_SRC=vcc/lib/ldhash.c` för att kontrollera en fil i båda lägena.
+- 2026-11-15: De sista 554 implicita konverteringarna av `void *` är åtgärdade.
+  På x86-64 Linux klarade alla 197 C-filer `-Werror=implicit-void-ptr-cast`.
+  Alla 40 objekt och nio körbara filer i C-bygget var byte-identiska mot
+  3fc6ad0e. Därför behövdes ingen ny tidsmätning. För denna kompilator gav
+  jämförelsen med Clang 516/516 preprocessorfall och semantikkontrollen
+  487/487. Kärnans layoutkontroll gav 448/448. När även värdprogrammen
+  ingick hade baslinjen sedan tidigare 38 layoutfel.
+- 2026-11-15: Definitionerna av `hrec`, `lmark`, `pweak` och `vlx` ligger
+  på filnivå så att de syns även utanför den omslutande structen i C++.
+  Syntaxkontrollen av 197 filer gav 0 fel för medlemsåtkomst på ofullständig
+  typ (tidigare 247). Det vanliga C-byggets enda ändrade objekt var
+  preprocessorobjektet, där tre instruktioner fick ett nytt källradsnummer
+  för headercachens felsökning. På x86-64 Linux tog SQLite 3.50.4 vid -O2
+  602,11 → 602,78 ms CPU mot 9f6a424d (median av fem körningar).
+  De genererade objekten och speedtest1 var byte-identiska.
+- 2026-11-15: De 64 avsmalnande heltalskonverteringarna i initialiseringslistor
+  är åtgärdade. C++20-syntaxkontrollen av 197 filer gav 0 sådana fel med
+  samma varningsflaggor. Efter clang-format var 39 av 40 objekt och sju av
+  nio verktyg i C-bygget byte-identiska mot 55f8f750 på x86-64 Linux.
+  I pp.o ändrades en instruktion som lagrar källraden för headercachens
+  felsökning (211 → 224), vilket ändrade vpp och vccd. SQLite vid -O2 tog
+  600,43 → 603,48 ms CPU att kompilera (median av fem körningar, +0,51 %).
+  Båda SQLite-objekten och den länkade speedtest1 var byte-identiska,
+  så körtidsmätningen utgick.
+- 2026-11-15: C++20-kontrollen av 197 filer gav 0 fel för adresser till
+  temporära objekt (tidigare 60). Även adressen till ett temporärt heltal i
+  drivrutinens tokenhash är borta. C-bygget jämfördes med 0f8db22e på
+  x86-64 Linux. SQLite vid -O2 tog 601,48 → 598,79 ms CPU att kompilera
+  (median av fem körningar). Objekten och speedtest1 var byte-identiska,
+  så körtidsmätningen utgick. Separat assemblerade vasm samma SQLite-källas
+  assemblerutskrift på 176,09 → 176,76 ms CPU (median av 16 körningar)
+  och gav ett byte-identiskt objekt.
+- 2026-11-15: Alla 34 hopp som gick förbi lokala initialiseringar är åtgärdade
+  i C-bygget. C++20-syntaxkontrollen av 197 filer gav 0 sådana fel. Mot
+  01abb5c6 tog SQLite vid -O2 på x86-64 Linux 616,45 → 613,06 ms CPU att
+  kompilera (median av fem körningar). Objekten och speedtest1 var
+  byte-identiska, så körtidsmätningen utgick. Separat tog vasm
+  185,34 → 186,39 ms CPU (median av sex körningar) för samma assemblerkälla
+  och gav ett byte-identiskt objekt.
+- 2026-11-15: Fem lokala variabler med C++-nyckelorden `and` och `explicit`
+  som namn har bytt namn. Det tog bort 26 unika C++-fel i syntaxkontrollen
+  av 197 filer, utan nya diagnostikmeddelanden. Alla 40 objekt och nio verktyg
+  i C-bygget var byte-identiska mot 774e3bdf på x86-64 Linux. Även båda
+  SQLite-objekten vid -O2 och den länkade speedtest1 var byte-identiska,
+  så både kompilerings- och körtidsmätningen utgick.
+- 2026-11-15: Structdefinitionerna för `cparen`, `swcase`, `wklslot`,
+  `wktslot` och `winit` ligger nu på filnivå. C++20-syntaxkontrollen av
+  197 filer gav 0 fel för ofullständiga typer (tidigare 10 unika felställen).
+  Alla 40 objekt och nio verktyg i C-bygget var byte-identiska mot ea7fdf0a
+  på x86-64 Linux, liksom SQLite-objekten vid -O2 och den länkade speedtest1.
+  Därför utgick båda tidsmätningarna.
+- 2026-11-15: Alla sju const-objekt som C nollinitierade implicit har nu
+  explicita nollinitialiserare. Syntaxkontrollen av 197 filer gav 0 sådana
+  fel i både C och C++20 utan nya diagnostikmeddelanden. Mot 36bc2efe
+  ändrades en instruktion i pp.o när formateringen flyttade en källrad för
+  headercachens felsökning (93 → 108). På x86-64 Linux tog SQLite vid -O2
+  624,81 → 618,03 ms CPU att kompilera (median av 15 körningar per version).
+  SQLite-objekten och den länkade speedtest1 var byte-identiska, så
+  körtidsmätningen utgick.
+- 2026-11-15: Länkarens GOT-sökning delar en enda definition av `got_seen`,
+  och objcopy läser avgränsaren i `--dump-section` genom en const-pekare.
+  De sista två hårda C++-felen är borta. Alla 197 filer klarade
+  C++20-syntaxkontrollen med varningarna på. Kontrollen med `-Werror`
+  rapporterar fortfarande varningar som fel. Mot acae4477 var alla 40 objekt
+  och nio verktyg i C-bygget samt SQLite-objekten och speedtest1
+  byte-identiska på x86-64 Linux, så båda tidsmätningarna utgick.
+- 2026-11-15: Den största kvarvarande C++-varningsgruppen,
+  `-Wc99-extensions`, minskade från 785 unika källpositioner till 0 i
+  syntaxkontrollen av 197 filer. Av dem gällde 776 sammansatta literaler
+  och nio flexibla arraymedlemmar. C-bygget klarade både unity och separat
+  kompilering. Mot af7f0498 på x86-64 Linux tog SQLite vid -O2
+  599,18 → 599,37 ms CPU att kompilera (median av 15 körningar per version).
+  Båda SQLite-objekten och speedtest1 var byte-identiska, så körtidsmätningen
+  utgick. Vasm assemblerade samma SQLite-källa på 176,12 → 177,79 ms CPU
+  (median av tolv körningar per version) med byte-identiskt objekt.
+- 2026-11-15: Alla 71 varningsställen för fältdesignatorer i fel ordning
+  är åtgärdade. Clangs fix-it täckte 67 ställen. Fyra i arm64-optimeraren
+  ordnades för hand. C++20-syntaxkontrollen av 197 filer gav 0
+  `-Wreorder-init-list` med samma flaggor. Mot e3628991 var alla C-byggda
+  verktyg utom virtest byte-identiska på x86-64 Linux. Formateringen
+  flyttade självtestets källrader. Även SQLite-objekten vid -O2 och den
+  länkade speedtest1 var byte-identiska, så tidsmätningarna utgick.
+- 2026-11-15: ELF-, wasm- och Mach-O-länkarna samt nm/objcopy klarade
+  C11-kontrollen med `-Werror=implicit-void-ptr-cast` på x86-64 Linux.
+  I hela källträdet minskade antalet unika felpositioner för den varningen
+  från 1 162 till 857. C-bygget gav byte-identiska `vpp`, `vccd` och
+  `vlink` mot 782d2199. SQLite 3.50.4 vid -O2, median CPU-tid för fem
+  körningar på samma kärna: x86-64-kompilering 611,27 → 612,86 ms,
+  AArch64-länkning med `vlink -r` 1,21 → 1,18 ms och x86-64 speedtest1
+  87,07 → 86,71 ms. Både den länkade AArch64-objektfilen och den körbara
+  x86-64-filen var byte-identiska. Länkartester: vlink-opts 66/66,
+  vlink-bad 40/40.
