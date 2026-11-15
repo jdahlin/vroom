@@ -100,7 +100,7 @@ static bool vx_dense_switch(const vir_fn *f,const vir_ins *in,uint64_t *low,uint
 static void vx_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 {
 	const vir_ins *i = &f->ins[v];
-	const vx *target=ctx;
+	const vx *target=(const vx *)ctx;
 	bool r10=target && target->r10;
 	if (i->op == VO_PARAM) {
 		int stack;
@@ -201,7 +201,7 @@ static void vx_probe(vx *L,unsigned bit)
 static void vx_entry(void *ctx,uint32_t b,uint32_t pred,uint32_t v,
 		     uint8_t reg,bool stored,const char *decision)
 {
-	vbuf_f(ctx,"vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n",
+	vbuf_f((vbuf *)ctx,"vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n",
 		b,pred,v,reg,stored,decision);
 }
 static void vx_simd(vx *L, const char *op, int d, int a, int b)
@@ -368,7 +368,7 @@ static void vx_switch(vx *L, uint32_t block, const vir_ins *in, int selector)
 	bool wide = f->ins[in->a].ty == VT_I64;
 	uint32_t size = wide ? 8 : 4, stride = wide ? 5 : 3, n = f->extra[in->c];
 	const uint32_t *cases = &f->extra[in->c+1];
-	uint32_t *labels = malloc(((size_t)n+1)*sizeof *labels);
+	uint32_t *labels = (uint32_t *)malloc(((size_t)n+1)*sizeof *labels);
 	if (!labels) abort();
 	for (uint32_t k=0;k<=n;k++) labels[k]=vx_target(L,block,k,k?cases[stride*(k-1)+stride-1]:in->b);
 	uint64_t lo,span;
@@ -1077,7 +1077,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		framesz += f->slot[i].size + 16;
 	}
 	if (framesz > INT32_MAX / 2) return false;
-	L.uses=V->xuses=vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
+	L.uses=V->xuses=(uint8_t *)vx_grow(V->xuses,&V->cxuses,f->nins+1,1);
 	vir_uses(f,L.uses);L.r10=r10;
 	if(r10)regs.alloc[0]|=1u<<R10;
 	if(!vir_loops_build(f,&V->lp)){*why="VIR x86-64: loop analysis failed";return false;}
@@ -1121,11 +1121,11 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 		if (n) { *why = "VIR x86-64: allocation check failed"; return false; }
 	}
 	/* No partial function is published before x64_finish; a failed lowering retries the walker. */
-	L.edgelab=V->xedgelab=vx_grow(V->xedgelab,&V->cxedgelab,V->ao.nedge+1,sizeof(uint32_t));
+	L.edgelab=V->xedgelab=(uint32_t *)vx_grow(V->xedgelab,&V->cxedgelab,V->ao.nedge+1,sizeof(uint32_t));
 	memset(L.edgelab,0,V->ao.nedge*sizeof(uint32_t));
-	L.slot = V->xslot = vx_grow(V->xslot, &V->cxslot, f->nslot + 1, sizeof *L.slot);
-	L.spill = V->xspill = vx_grow(V->xspill, &V->cxspill, V->ao.nspill + 1, sizeof *L.spill);
-	L.label = V->xlabel = vx_grow(V->xlabel, &V->cxlabel, f->nblk + 1, sizeof *L.label);
+	L.slot = V->xslot = (int64_t *)vx_grow(V->xslot, &V->cxslot, f->nslot + 1, sizeof *L.slot);
+	L.spill = V->xspill = (int64_t *)vx_grow(V->xspill, &V->cxspill, V->ao.nspill + 1, sizeof *L.spill);
+	L.label = V->xlabel = (uint32_t *)vx_grow(V->xlabel, &V->cxlabel, f->nblk + 1, sizeof *L.label);
 	e->vtry = true; e->vfail = NULL;
 	if (_setjmp(e->bail)) {
 		*why = e->vfail ? e->vfail : "VIR x86-64: lowering failed";
@@ -1143,7 +1143,7 @@ VPRIV bool vw_x64(ecx *e, uint32_t sym, const char **why)
 	for (uint32_t k = 0; k < V->ao.nspill; k++) L.spill[k] = wk_slot(e, V->ao.ssz[k], V->ao.ssz[k]);
 	for (uint32_t b = 0; b < f->nblk; b++) L.label[b] = wk_newlabel(e);
 	L.ret = wk_newlabel(e);
-	uint32_t *layout=V->xlayout=vx_grow(V->xlayout,&V->cxlayout,5*f->nblk,sizeof(uint32_t));
+	uint32_t *layout=V->xlayout=(uint32_t *)vx_grow(V->xlayout,&V->cxlayout,5*f->nblk,sizeof(uint32_t));
 	L.order=layout;L.position=layout+f->nblk;L.rotation=layout+2*f->nblk;L.chase=layout+3*f->nblk;L.lp=&V->lp;
 	vir_layout_chases(f,L.o,L.chase,layout+4*f->nblk);
 	const char *rotate=getenv("VCC_VIR_ROT");

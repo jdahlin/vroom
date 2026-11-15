@@ -311,7 +311,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 				it_close(e, objitem);
 				objitem = it_open(e, code ? IT_X64 : IT_TEXT);
 				if (code) {
-					uint32_t *h = it_room(e, 8);
+					uint32_t *h = (uint32_t *)it_room(e, 8);
 					h[0] = s; h[1] = 0;
 				}
 				objcode = code;
@@ -567,7 +567,7 @@ VPRIV void x64_print(ecx *e, tbuf *b, uint32_t s)
 			tb_s(b, "#APP\n");
 			const char *p = e->raw.p + i->off, *end = p + i->ref;
 			while (p < end) {
-				const char *frame = memchr(p, 0, end - p);
+				const char *frame = (const char *)memchr(p, 0, end - p);
 				tb_put(b, p, (frame ? frame : end) - p);
 				if (!frame) break;
 				x64_reg(b, e->wk->falign > 16 ? R12 : RBP, 8);

@@ -263,7 +263,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 			}
 			if (!cs) { valid = false; break; }
 			size_t len = strcspn(cs, ",");
-			char *copy = alloca(len + 2);
+			char *copy = (char *)alloca(len + 2);
 			copy[0] = i < a->nout ? original[0] : ' ';
 			memcpy(copy + 1, cs, len);
 			copy[len + 1] = 0;
@@ -286,7 +286,7 @@ VPRIV void x64_asm(ecx *e, uint32_t n)
 	if (!selected) efatal(e, x->loc, "no allocatable x86 inline asm constraint alternative");
 	for (uint32_t i = 0; i < a->nlabel; i++) edges[i] = wk_newlabel(e);
 	if (a->nlabel) done = wk_newlabel(e);
-	op = alloca((nops + 1) * sizeof(xopnd));
+	op = (xopnd *)alloca((nops + 1) * sizeof(xopnd));
 	memset(op, 0, (nops + 1) * sizeof(xopnd));
 	/* the fixed registers: clobbers and register constraints */
 	for (uint32_t i = 0; i < a->nclob; i++) {

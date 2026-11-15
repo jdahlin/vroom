@@ -405,11 +405,11 @@ static void a64_switch_table(ecx *e, const em_switch_case *cases, uint32_t n, in
 	bcond(e, cond, dflt);
 	if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
 		e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
-		e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+		e->jtl = (uint32_t *)realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
 	}
 	if (e->njt == e->capjt) {
 		e->capjt = e->capjt ? e->capjt * 2 : 4;
-		e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+		e->jt = (struct ejt *)realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
 	}
 	if (!e->jtl || !e->jt)
 		abort();
@@ -445,7 +445,7 @@ static bool a64_switch_dispatch(ecx *e, uint32_t base, int r, int cx,
 		count += N(e->cases[k])->op == N_CASE;
 	if (count < 4)
 		return false;
-	em_switch_case *cases = malloc((size_t)count * sizeof *cases);
+	em_switch_case *cases = (em_switch_case *)malloc((size_t)count * sizeof *cases);
 	if (!cases)
 		return false;
 	uint32_t j = 0;
@@ -1007,7 +1007,7 @@ static uint32_t dbg_file(ecx *e, const char *name, uint32_t len)
 	if (!f) {
 		if (E->ndfile == E->dfcap) {
 			E->dfcap = E->dfcap ? 2 * E->dfcap : 16;
-			E->dfile = realloc(E->dfile, E->dfcap * sizeof *E->dfile);
+			E->dfile = (char **)realloc(E->dfile, E->dfcap * sizeof *E->dfile);
 		}
 		E->dfile[E->ndfile] = strndup(name, len);
 		f = ++E->ndfile;
@@ -1038,7 +1038,7 @@ VPRIV void dbg_row(ecx *e, uint32_t loc)
 		e->ndl--;	/* nothing emitted for the previous one */
 	if (e->ndl == e->dlcap) {
 		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
-		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
+		e->dl = (struct dbgrow *)realloc(e->dl, e->dlcap * sizeof *e->dl);
 	}
 	e->dl[e->ndl++] = (struct dbgrow){ e->nin, file, line, col };
 }

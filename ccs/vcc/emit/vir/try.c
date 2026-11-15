@@ -59,12 +59,12 @@ static bool vw_listed(ecx *e, uint32_t s)
 			size_t n = 0, cap = 1 << 16;
 			size_t k;
 
-			list = malloc(cap + 2);
+			list = (char *)malloc(cap + 2);
 			list[n++] = '\n';
 			while (list && (k = fread(list + n, 1, cap - n, fp)) > 0) {
 				n += k;
 				if (n == cap)
-					list = realloc(list, (cap *= 2) + 2);
+					list = (char *)realloc(list, (cap *= 2) + 2);
 			}
 			fclose(fp);
 			if (list) {

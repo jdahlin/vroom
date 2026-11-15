@@ -164,7 +164,7 @@ struct em_switch_values_data {
 VPRIV bool em_switch_values_queue(ecx *e, uint32_t n, const em_switch_values_recipe *r)
 {
  size_t len=(size_t)r->slots*r->element_bytes;
- struct em_switch_values_data *t=malloc(sizeof *t+len);
+ struct em_switch_values_data *t=(struct em_switch_values_data *)malloc(sizeof *t+len);
  if (!t) return false;
  t->node=n; t->slots=r->slots; t->bytes=r->element_bytes; t->next=NULL;
  for (unsigned i=0;i<r->slots;i++)

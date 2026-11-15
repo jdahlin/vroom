@@ -6,7 +6,7 @@
 
 VPRIV bool em_rec_copy_forward(const em_rec_copy_scan *s, uint32_t k, uint32_t end, uint8_t t, uint8_t v)
 {
-	unsigned char *records = s->records;
+	unsigned char *records = (unsigned char *)s->records;
 	uint64_t tb = (uint64_t)1 << t, vb = (uint64_t)1 << v;
 	uint32_t j, nrw = 0;
 	static _Thread_local uint32_t rw[256];

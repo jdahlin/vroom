@@ -101,25 +101,25 @@ static void ecx_init(ecx *e, emitter *E, vmreg *r)
 	e->E = E;
 	e->c = c;
 	e->capin = 1u << 24;
-	e->in = vmreg_get(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
+	e->in = (ins *)vmreg_get(&r[0], (size_t)e->capin * sizeof(ins), "emit.in");
 	tb_reg(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
 	tb_reg(&e->out, &r[2], (size_t)1 << 32, "emit.out");
 	tb_reg(&e->data, &r[3], (size_t)1 << 28, "emit.data");
-	e->rel = vmreg_get(&r[4], (size_t)1 << 26, "emit.rel");
-	e->b = vmreg_get(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
-	e->lm = vmreg_get(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
-	e->caselbl = vmreg_get(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
+	e->rel = (struct reloc *)vmreg_get(&r[4], (size_t)1 << 26, "emit.rel");
+	e->b = (bind *)vmreg_get(&r[5], (size_t)c->nsym * sizeof(bind) + 4096, "emit.b");
+	e->lm = (lbl *)vmreg_get(&r[6], (size_t)c->nlabel * sizeof(lbl) + 4096, "emit.lm");
+	e->caselbl = (uint32_t *)vmreg_get(&r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
 	e->caplabel = 1u << 22;
-	e->lrefc = vmreg_get(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
-	e->lkvi = vmreg_get(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
-	e->kvs = vmreg_get(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
-	e->cases = vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
-	e->weakref = vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
-	e->rlog = vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
-	e->sla = vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
+	e->lrefc = (uint32_t *)vmreg_get(&r[8], (size_t)e->caplabel * sizeof(uint32_t), "emit.lrefc");
+	e->lkvi = (uint32_t *)vmreg_get(&r[9], (size_t)e->caplabel * sizeof(uint32_t), "emit.lkvi");
+	e->kvs = (kvst *)vmreg_get(&r[10], (size_t)CAPKVS * sizeof(kvst), "emit.kvs");
+	e->cases = (uint32_t *)vmreg_get(&r[11], (size_t)1 << 24, "emit.cases");
+	e->weakref = (uint32_t *)vmreg_get(&r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
+	e->rlog = (uint32_t *)vmreg_get(&r[13], RLOG_CAP * sizeof(uint32_t), "emit.rlog");
+	e->sla = (slotal *)vmreg_get(&r[14], (size_t)CAPSLA * (sizeof(slotal) + sizeof(uint32_t)), "emit.sla");
 	e->sstk = (uint32_t *)(e->sla + CAPSLA);
 	/* nesting: reserved, touched only as deep as it goes (bounded by the parser's stack guard) */
-	e->loops = vmreg_get(&r[15], (size_t)CAPNEST * (sizeof(loopctx) + sizeof(uint32_t)), "emit.loops");
+	e->loops = (loopctx *)vmreg_get(&r[15], (size_t)CAPNEST * (sizeof(loopctx) + sizeof(uint32_t)), "emit.loops");
 	e->clean = (uint32_t *)(e->loops + CAPNEST);
 }
 
@@ -207,7 +207,7 @@ static void do_item(ecx *e, uint32_t it)
 
 static void *worker(void *arg)
 {
-	ecx *e = arg;
+	ecx *e = (ecx *)arg;
 	emitter *E = e->E;
 
 	pthread_mutex_lock(&E->mu);
@@ -234,7 +234,7 @@ static void *worker(void *arg)
 
 static int chunk_cmp(const void *a, const void *b)
 {
-	const chunk *x = a, *y = b;
+	const chunk *x = (const chunk *)a, *y = (const chunk *)b;
 
 	return x->key < y->key ? -1 : x->key > y->key;
 }
@@ -297,19 +297,19 @@ static int replay(cc *c, const cc_opts *o, const char *hp, size_t hn, const char
 	uint32_t *cache;
 	int r = 0;
 
-	R.loff = vmreg_get(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
+	R.loff = (uint32_t *)vmreg_get(&rr[0], (size_t)1 << 32, "emit.loff");	/* labels of one function */
 	tb_reg(&R.nb, &rr[1], 1 << 20, "emit.nb");
-	cache = vmreg_get(&rr[2], need * sizeof(uint32_t), "emit.rcache");
+	cache = (uint32_t *)vmreg_get(&rr[2], need * sizeof(uint32_t), "emit.rcache");
 	R.symc = cache;
 	R.strc = cache + c->nsym + 64;
 	R.lblc = R.strc + c->nstr + 64;
 	if (!wb) {
-		wb = reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
-		lsym = reserve((size_t)1 << 32);
-		lser = reserve((size_t)1 << 32);
-		lab = reserve((size_t)1 << 34);		/* per label */
-		pend = reserve((size_t)1 << 34);	/* per branch record */
-		pt = reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
+		wb = (uint32_t *)reserve((size_t)1 << 32);		/* words of one function (<= 6 per record) */
+		lsym = (uint32_t *)reserve((size_t)1 << 32);
+		lser = (uint32_t *)reserve((size_t)1 << 32);
+		lab = (rlab *)reserve((size_t)1 << 34);		/* per label */
+		pend = (rpend *)reserve((size_t)1 << 34);	/* per branch record */
+		pt = (rpatch *)reserve((size_t)1 << 34);		/* fixups of one function (<= 1 per record) */
 	}
 	R.wb = wb;
 	R.lsym = lsym;
@@ -366,13 +366,13 @@ static void keep_make(keep *K, cc *c, const emitter *E)
 		ne++;
 	}
 	K->nidx = c->nsym;
-	K->idx = reserve(K->nidx * sizeof(uint32_t));
+	K->idx = (uint32_t *)reserve(K->nidx * sizeof(uint32_t));
 	K->nent = ne;
-	K->ent = reserve(ne * sizeof(kent) + 64);
+	K->ent = (kent *)reserve(ne * sizeof(kent) + 64);
 	K->nbytes = nb;
-	K->bytes = reserve(nb + 64);
+	K->bytes = (char *)reserve(nb + 64);
 	K->nlogs = nl;
-	K->logs = reserve(nl * sizeof(uint32_t) + 64);
+	K->logs = (uint32_t *)reserve(nl * sizeof(uint32_t) + 64);
 	ne = 0;
 	for (uint32_t i = 0; i < E->nchunk; i++) {
 		const chunk *ch = &E->chunks[i];
@@ -414,27 +414,27 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	E.o = o;
 	E.mf = mf;
 	E.K = K;
-	E.claimed = vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
-	E.extref = vmreg_get(&er[1], c->nsym + 64, "emit.extref");
-	E.sflags = vmreg_get(&er[2], c->nsym + 64, "emit.sflags");
-	E.ffacts = vmreg_get(&er[14], c->nsym + 64, "emit.ffacts");
-	E.strdone = vmreg_get(&er[3], c->nstr + 64, "emit.strdone");
-	E.nflags = vmreg_get(&er[4], c->nnode + 64, "emit.nflags");
-	E.lref = vmreg_get(&er[5], c->nlabel + 64, "emit.lref");
-	E.lcdepth = vmreg_get(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
-	E.q = vmreg_get(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
-	E.chunks = vmreg_get(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
+	E.claimed = (_Atomic(uint8_t) *)vmreg_get(&er[0], c->nsym + 64, "emit.claimed");
+	E.extref = (_Atomic(uint8_t) *)vmreg_get(&er[1], c->nsym + 64, "emit.extref");
+	E.sflags = (uint8_t *)vmreg_get(&er[2], c->nsym + 64, "emit.sflags");
+	E.ffacts = (uint8_t *)vmreg_get(&er[14], c->nsym + 64, "emit.ffacts");
+	E.strdone = (_Atomic(uint8_t) *)vmreg_get(&er[3], c->nstr + 64, "emit.strdone");
+	E.nflags = (uint8_t *)vmreg_get(&er[4], c->nnode + 64, "emit.nflags");
+	E.lref = (uint8_t *)vmreg_get(&er[5], c->nlabel + 64, "emit.lref");
+	E.lcdepth = (uint16_t *)vmreg_get(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
+	E.q = (uint32_t *)vmreg_get(&er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
+	E.chunks = (chunk *)vmreg_get(&er[8], ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(chunk), "emit.chunks");
 	pthread_mutex_init(&E.mu, NULL);
 	pthread_cond_init(&E.cv, NULL);
 	pthread_mutex_init(&E.cmu, NULL);
 	pthread_mutex_init(&E.emu, NULL);
 	pthread_mutex_init(&E.dmu, NULL);
-	E.walked = vmreg_get(&er[9], c->nsym + 64, "emit.walked");
-	E.fnsize = vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
-	E.cwval = vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
-	E.luse = vmreg_get(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
-	E.lnoreg = vmreg_get(&er[16], c->nsym + 64, "emit.lnoreg");
-	E.lspan = vmreg_get(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
+	E.walked = (_Atomic(uint8_t) *)vmreg_get(&er[9], c->nsym + 64, "emit.walked");
+	E.fnsize = (uint16_t *)vmreg_get(&er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
+	E.cwval = (i128 *)vmreg_get(&er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
+	E.luse = (uint16_t *)vmreg_get(&er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
+	E.lnoreg = (uint8_t *)vmreg_get(&er[16], c->nsym + 64, "emit.lnoreg");
+	E.lspan = (uint32_t *)vmreg_get(&er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
 	{
 		const char *k = getenv("VCC_LREGS");
 
@@ -488,7 +488,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	t1 = now();
 	if (nthr > 64)
 		nthr = 64;
-	ctx = calloc((size_t)nthr, sizeof(ecx));
+	ctx = (ecx *)calloc((size_t)nthr, sizeof(ecx));
 	for (int i = 0; i < nthr; i++)
 		ecx_init(&ctx[i], &E, xr[i] = vmpool_take(&ecxpool));
 	{
@@ -562,7 +562,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 	}
 	{
 		tbuf tail;
-		struct iovec *iov = malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
+		struct iovec *iov = (struct iovec *)malloc(((size_t)E.nchunk + 2) * sizeof(struct iovec));
 		int k = 0;
 
 		tb_reg(&tail, &er[13], (size_t)1 << 26, "emit.tail");
@@ -572,7 +572,7 @@ static int emit_tu1(cc *c, const cc_opts *o, bool write_out, uint8_t *mf, bool *
 
 			for (int t = 0; t < nthr; t++)
 				nw += ctx[t].nweakref;
-			w = malloc((nw + 1) * sizeof(uint32_t));
+			w = (uint32_t *)malloc((nw + 1) * sizeof(uint32_t));
 			nw = 0;
 			for (int t = 0; t < nthr; t++)
 				for (uint32_t j = 0; j < ctx[t].nweakref; j++)
@@ -783,7 +783,7 @@ int emit_tu(cc *c, const cc_opts *o)
 	int n = r ? atoi(r) : 1, err = 0;
 	static vmpool mfpool = VMPOOL_INIT(1);
 	vmreg *mfr = vmpool_take(&mfpool);
-	uint8_t *mf = vmreg_get(mfr, c->nsym + 64, "emit.mf");
+	uint8_t *mf = (uint8_t *)vmreg_get(mfr, c->nsym + 64, "emit.mf");
 	bool again = false;
 	keep K[2];
 

@@ -19,27 +19,27 @@ VPRIV wst *w_state(ecx *e)
 		wpool = W->next;
 	pthread_mutex_unlock(&wpool_mu);
 	if (!W) {
-		W = calloc(1, sizeof *W);
+		W = (wst *)calloc(1, sizeof *W);
 		tb_init(&W->b, (size_t)1 << 32);
 		tb_init(&W->fn, (size_t)1 << 32);
 		tb_init(&W->decl, (size_t)1 << 30);
 		tb_init(&W->sig, (size_t)1 << 24);
-		W->lt = reserve(WMAXLOC);
+		W->lt = (uint8_t *)reserve(WMAXLOC);
 		for (int i = 0; i < 5; i++)
-			W->fl[i] = reserve(WMAXLOC * sizeof(uint32_t));
-		W->sw = reserve(WMAXSW * sizeof(wswc));
-		W->seg = reserve(WMAXSW * sizeof(uint32_t));
-		W->gd = reserve(WMAXGD * sizeof(wgd));
-		W->gdx = reserve(WMAXGD * sizeof(uint64_t));
-		W->gp = reserve(2 * WMAXGD * sizeof(wgp));
-		W->vszn = reserve(WMAXGD * sizeof(uint32_t));
-		W->vszl = reserve(WMAXGD * sizeof(uint32_t));
-		W->vb = reserve(WMAXGD * sizeof(wvb));
-		W->cl = reserve(WMAXGD * sizeof(wvb));
-		W->sj = reserve(WMAXGD * sizeof(uint32_t));
+			W->fl[i] = (uint32_t *)reserve(WMAXLOC * sizeof(uint32_t));
+		W->sw = (wswc *)reserve(WMAXSW * sizeof(wswc));
+		W->seg = (uint32_t *)reserve(WMAXSW * sizeof(uint32_t));
+		W->gd = (struct wgd *)reserve(WMAXGD * sizeof(wgd));
+		W->gdx = (uint64_t *)reserve(WMAXGD * sizeof(uint64_t));
+		W->gp = (struct wgp *)reserve(2 * WMAXGD * sizeof(wgp));
+		W->vszn = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
+		W->vszl = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
+		W->vb = (struct wvb *)reserve(WMAXGD * sizeof(wvb));
+		W->cl = (struct wvb *)reserve(WMAXGD * sizeof(wvb));
+		W->sj = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
 	}
 	/* per sym bindings: sized for this TU (generation-tagged: never cleared) */
-	W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
+	W->sb = (wbind *)reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
 	W->gen = 0;
 	W->decl.n = 0;
 	W->next = NULL;
@@ -316,7 +316,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
 			continue;
 		if (n == cap) {
 			cap = cap ? 2 * cap : 16;
-			d = realloc(d, cap * sizeof *d);
+			d = (uint64_t *)realloc(d, cap * sizeof *d);
 		}
 		/* priority, then position: a stable order */
 		d[n] = (uint64_t)(a->prio ? a->prio : 65535) << 40 | (uint64_t)n << 32 | s;
@@ -372,7 +372,7 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
 		if (ctx[t].w)
 			for (size_t i = 0; i < ctx[t].w->decl.n; i++)
 				n += ctx[t].w->decl.p[i] == '\n';
-	v = malloc((n + 1) * sizeof *v);
+	v = (const char **)malloc((n + 1) * sizeof *v);
 	for (int t = 0; t < nthr; t++) {
 		const tbuf *d;
 

@@ -17,30 +17,30 @@ VPRIV wkst *wk_state(ecx *e)
 	wkst *W = e->wk;
 
 	if (!W) {
-		W = calloc(1, sizeof *W);
-		W->cases = reserve(WK_MAXCASE * sizeof(wkcase));
+		W = (wkst *)calloc(1, sizeof *W);
+		W->cases = (wkcase *)reserve(WK_MAXCASE * sizeof(wkcase));
 		e->wk = W;
 	}
 	if (!W->sgen) {
 		/* sized for this TU (gen-tagged: never cleared); one TU per ecx */
-		W->sgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->soff = reserve(((size_t)c->nsym + 64) * sizeof(int64_t));
-		W->lgen = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-		W->ulbl = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-		W->cgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->clbl = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->kgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->kval = reserve(((size_t)c->nsym + 64) * sizeof(val));
-		W->linst = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-		W->cinst = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->csn = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->csg = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->lcn = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-		W->lcg = reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-		W->zgen = reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-		W->vgen = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->vinst = reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-		W->voff = reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
+		W->sgen = (uint32_t *)reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->soff = (int64_t *)reserve(((size_t)c->nsym + 64) * sizeof(int64_t));
+		W->lgen = (uint32_t *)reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
+		W->ulbl = (uint32_t *)reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
+		W->cgen = (uint32_t *)reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->clbl = (uint32_t *)reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->kgen = (uint32_t *)reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->kval = (val *)reserve(((size_t)c->nsym + 64) * sizeof(val));
+		W->linst = (uint32_t *)reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
+		W->cinst = (uint32_t *)reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->csn = (uint32_t *)reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->csg = (uint32_t *)reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->lcn = (uint32_t *)reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
+		W->lcg = (uint32_t *)reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
+		W->zgen = (uint32_t *)reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
+		W->vgen = (uint32_t *)reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->vinst = (uint32_t *)reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
+		W->voff = (int64_t *)reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
 	}
 	return W;
 }
@@ -720,7 +720,7 @@ static void wk_switch(ecx *e, uint32_t n)
 		uint32_t nc = 0;
 		for (uint32_t i = c0; i < W->ncases; i++)
 			nc += N(W->cases[i].node)->op != N_DEFAULT;
-		em_switch_case *cases = nc >= 4 ? malloc(nc * sizeof *cases) : NULL;
+		em_switch_case *cases = nc >= 4 ? (em_switch_case *)malloc(nc * sizeof *cases) : NULL;
 		uint32_t j = 0;
 		bool ranges = false;
 		for (uint32_t i = c0; cases && i < W->ncases; i++) {
@@ -747,7 +747,7 @@ static void wk_switch(ecx *e, uint32_t n)
 	bool tree = !bitset && !table && e->E->o->opt >= 1 && !e->E->noopt &&
 		em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE && !wk_mem(e, ct);
 	if (tree) {
-		em_switch_case *cases = malloc(count * sizeof *cases);
+		em_switch_case *cases = (em_switch_case *)malloc(count * sizeof *cases);
 		uint32_t j = 0;
 		for (uint32_t i = c0; cases && i < W->ncases; i++) {
 			wkcase *k = &W->cases[i];
@@ -1559,7 +1559,7 @@ VPRIV void wk_function(ecx *e, uint32_t s)
 	wkst *W = wk_state(e);
 	wkarg pabuf[256];
 	wkarg *pa = body->aux > sizeof pabuf / sizeof *pabuf ?
-		malloc((size_t)body->aux * sizeof *pa) : pabuf;
+		(wkarg *)malloc((size_t)body->aux * sizeof *pa) : pabuf;
 
 	walk_fn(e, s);
 	W->gen++;

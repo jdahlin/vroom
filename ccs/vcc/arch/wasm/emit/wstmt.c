@@ -514,7 +514,7 @@ static void wgscan(ecx *e, uint32_t n, int pd, uint32_t pidx)
 
 static int wgp_cmp(const void *a, const void *b)
 {
-	const wgp *p = a, *q = b;
+	const wgp *p = (const wgp *)a, *q = (const wgp *)b;
 
 	if (p->d != q->d)
 		return p->d < q->d ? -1 : 1;
@@ -530,7 +530,7 @@ static int wgdx_cmp(const void *a, const void *b)
 
 static int wglab_cmp(const void *a, const void *b)
 {
-	const wgp *p = a, *q = b;
+	const wgp *p = (const wgp *)a, *q = (const wgp *)b;
 
 	return p->label < q->label ? -1 : p->label > q->label;
 }
@@ -806,7 +806,7 @@ static void wgblock(ecx *e, const node *x, int r)
 	wgd *d = &W->gd[r];
 	uint32_t m = d->nseg;
 	bool notop = W->notop && W->notop == d->node && x->c && !wlabels(e->c, e->c->lists[x->b]);
-	int *sb = malloc(m * sizeof(int));
+	int *sb = (int *)malloc(m * sizeof(int));
 	tbuf *b = &W->b;
 
 	d->loop = wblock(e, "loop", WF_LOOP);
@@ -935,7 +935,7 @@ static void wnested_cases(cc *c, uint32_t n, uint32_t **v, uint32_t *nv, uint32_
 		case N_CASE: case N_DEFAULT:
 			if (*nv == *cap) {
 				*cap = *cap ? 2 * *cap : 16;
-				*v = realloc(*v, *cap * sizeof **v);
+				*v = (uint32_t *)realloc(*v, *cap * sizeof **v);
 			}
 			(*v)[(*nv)++] = n;
 			continue;
@@ -1102,7 +1102,7 @@ static void wswitch(ecx *e, uint32_t n)
 	brk = wblock(e, "block", WF_BLOCK);
 	if (g)
 		g->loop = wblock(e, "loop", WF_LOOP);
-	sb = malloc((m + nnc + 1) * sizeof(int));
+	sb = (int *)malloc((m + nnc + 1) * sizeof(int));
 	for (uint32_t j = m; j-- > 0;)
 		sb[j] = wblock(e, "block", WF_BLOCK);
 	for (uint32_t j = m + nnc; j-- > m;)
@@ -1194,7 +1194,7 @@ static void wswitch(ecx *e, uint32_t n)
 	} else if (em_switch_strategy(ncase, lo, hi, ranges, true) == EM_SWITCH_TABLE) {
 		/* dense: a branch table on t - lo */
 		uint32_t span = (uint32_t)(hi - lo) + 1;
-		uint32_t *tg = malloc(span * sizeof *tg);
+		uint32_t *tg = (uint32_t *)malloc(span * sizeof *tg);
 		int dflt = dseg != UINT32_MAX ? sb[dseg] : brk;
 		tbuf *b = &W->b;
 
@@ -1234,7 +1234,7 @@ static void wswitch(ecx *e, uint32_t n)
 		bool tree = false;
 		if (e->E->o->opt && !e->E->noopt &&
 		    em_switch_strategy(ncase, lo, hi, ranges, false) == EM_SWITCH_TREE) {
-			em_switch_case *cases = malloc(ncase * sizeof *cases);
+			em_switch_case *cases = (em_switch_case *)malloc(ncase * sizeof *cases);
 			bool sg = is_signed(c, ct);
 
 			for (uint32_t i = 0; cases && i < ncase; i++) {

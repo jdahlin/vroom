@@ -12,9 +12,9 @@ VPRIV xst *x64_state(ecx *e)
 	xst *X = e->x64;
 
 	if (!X) {
-		X = calloc(1, sizeof *X);
-		X->in = reserve(X_BUFREC * sizeof(rec));
-		X->tw = reserve(X_BUFREC * sizeof(rec));
+		X = (xst *)calloc(1, sizeof *X);
+		X->in = (rec *)reserve(X_BUFREC * sizeof(rec));
+		X->tw = (rec *)reserve(X_BUFREC * sizeof(rec));
 		X->capin = X_MAXREC;
 		e->x64 = X;
 	}
@@ -580,7 +580,7 @@ VPRIV void x64_dbgrow(ecx *e, uint32_t loc)
 		e->ndl--;	/* nothing emitted for the previous one */
 	if (e->ndl == e->dlcap) {
 		e->dlcap = e->dlcap ? 2 * e->dlcap : 256;
-		e->dl = realloc(e->dl, e->dlcap * sizeof *e->dl);
+		e->dl = (struct dbgrow *)realloc(e->dl, e->dlcap * sizeof *e->dl);
 	}
 	e->dl[e->ndl++] = (struct dbgrow){ nin, file, line, col };
 }
@@ -621,7 +621,7 @@ typedef struct x64_compact_debug {
 
 static void x64_compact_remap(void *ctx, uint32_t old, uint32_t next)
 {
-	x64_compact_debug *d = ctx;
+	x64_compact_debug *d = (x64_compact_debug *)ctx;
 
 	dbg_remap(d->e, &d->cursor, old, next);
 }

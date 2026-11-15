@@ -8,7 +8,7 @@ VPRIV uint32_t em_rec_unreachable(void *records, uint32_t count, size_t stride, 
 				const uint8_t *flow, size_t nflow,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx)
 {
-	unsigned char *base = records;
+	unsigned char *base = (unsigned char *)records;
 	uint32_t n = 0;
 	bool live = true;
 

@@ -39,7 +39,7 @@ VPRIV void wmem_alloc(ecx *e, uint64_t off, uint64_t size)
 		W->memfailed = true;
 		return;
 	}
-	W->alloc = wm_grow(W->alloc, &W->capalloc, W->nalloc + 1, sizeof(*W->alloc));
+	W->alloc = (walloc *)wm_grow(W->alloc, &W->capalloc, W->nalloc + 1, sizeof(*W->alloc));
 	W->alloc[W->nalloc++] = (walloc){ off, size, false };
 }
 
@@ -86,7 +86,7 @@ static wmem *wm_event(ecx *e, uint8_t kind)
 		W->memfailed = true;
 		return NULL;
 	}
-	W->mem = wm_grow(W->mem, &W->capmem, W->nmem + 1, sizeof(*W->mem));
+	W->mem = (wmem *)wm_grow(W->mem, &W->capmem, W->nmem + 1, sizeof(*W->mem));
 	wmem *m = &W->mem[W->nmem++];
 	*m = (wmem){ .kind = kind, .source = UINT32_MAX, .cache = UINT32_MAX };
 	return m;

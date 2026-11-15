@@ -23,7 +23,7 @@ static i128 em_switch_normalize(i128 v, unsigned bits, bool sg)
 
 static int em_switch_compare(const void *a, const void *b)
 {
-	const em_switch_case *x = a, *y = b;
+	const em_switch_case *x = (const em_switch_case *)a, *y = (const em_switch_case *)b;
 	return (x->lo > y->lo) - (x->lo < y->lo);
 }
 

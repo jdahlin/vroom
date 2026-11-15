@@ -2147,7 +2147,7 @@ static val wk_call(ecx *e, uint32_t n)
 
 	/* Keep common calls on the stack; large calls scale with their arity. */
 	if (x->c > sizeof argbuf / sizeof *argbuf &&
-	    !(args = malloc((size_t)x->c * sizeof *args)))
+	    !(args = (wkarg *)malloc((size_t)x->c * sizeof *args)))
 		efatal(e, x->loc, "out of memory");
 	if (KIND(c, f->base) != TY_VOID)
 		wk_scalar(e, n, f->base);

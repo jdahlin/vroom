@@ -8,7 +8,7 @@ typedef struct a64_unreachable_debug {
 
 static void a64_unreachable_remap(void *ctx, uint32_t old, uint32_t next)
 {
-	a64_unreachable_debug *d = ctx;
+	a64_unreachable_debug *d = (a64_unreachable_debug *)ctx;
 
 	dbg_remap(d->e, &d->cursor, old, next);
 }

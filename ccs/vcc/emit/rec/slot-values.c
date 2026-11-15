@@ -10,7 +10,7 @@ VPRIV bool em_slot_values_begin(em_slot_values *s, uint32_t cells)
 		return false;
 	if (cells > s->cap) {
 		s->cap = cells * 2;
-		s->a = realloc(s->a, (size_t)s->cap * sizeof(*s->a));
+		s->a = (em_slot_value *)realloc(s->a, (size_t)s->cap * sizeof(*s->a));
 		if (!s->a)
 			abort();
 	}

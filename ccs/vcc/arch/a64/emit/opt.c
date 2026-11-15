@@ -219,25 +219,25 @@ static void grow(uint32_t n, uint32_t nl)
 	if (n > W.cap) {
 		uint32_t c = n * 2;
 
-		W.la = realloc(W.la, c * sizeof(rmask));
-		W.rr = realloc(W.rr, c * sizeof(rmask));
-		W.ww = realloc(W.ww, c * sizeof(rmask));
-		W.blk = realloc(W.blk, c * sizeof(uint32_t));
-		W.bs = realloc(W.bs, c * sizeof(uint32_t));
-		W.be = realloc(W.be, c * sizeof(uint32_t));
-		W.s0 = realloc(W.s0, c * sizeof(int32_t));
-		W.s1 = realloc(W.s1, c * sizeof(int32_t));
-		W.in = realloc(W.in, c * sizeof(rmask));
-		W.out = realloc(W.out, c * sizeof(rmask));
-		W.use = realloc(W.use, c * sizeof(rmask));
-		W.def = realloc(W.def, c * sizeof(rmask));
-		W.ro = realloc(W.ro, c * sizeof(uint16_t));
+		W.la = (rmask *)realloc(W.la, c * sizeof(rmask));
+		W.rr = (rmask *)realloc(W.rr, c * sizeof(rmask));
+		W.ww = (rmask *)realloc(W.ww, c * sizeof(rmask));
+		W.blk = (uint32_t *)realloc(W.blk, c * sizeof(uint32_t));
+		W.bs = (uint32_t *)realloc(W.bs, c * sizeof(uint32_t));
+		W.be = (uint32_t *)realloc(W.be, c * sizeof(uint32_t));
+		W.s0 = (int32_t *)realloc(W.s0, c * sizeof(int32_t));
+		W.s1 = (int32_t *)realloc(W.s1, c * sizeof(int32_t));
+		W.in = (rmask *)realloc(W.in, c * sizeof(rmask));
+		W.out = (rmask *)realloc(W.out, c * sizeof(rmask));
+		W.use = (rmask *)realloc(W.use, c * sizeof(rmask));
+		W.def = (rmask *)realloc(W.def, c * sizeof(rmask));
+		W.ro = (uint16_t *)realloc(W.ro, c * sizeof(uint16_t));
 		if (!W.ro || !W.la || !W.rr || !W.ww || !W.blk || !W.bs || !W.be || !W.s0 || !W.s1 || !W.in || !W.out || !W.use || !W.def)
 			abort();
 		W.cap = c;
 	}
 	if (nl > W.lcap) {
-		W.lpos = realloc(W.lpos, (size_t)nl * 2 * sizeof(uint32_t));
+		W.lpos = (uint32_t *)realloc(W.lpos, (size_t)nl * 2 * sizeof(uint32_t));
 		if (!W.lpos)
 			abort();
 		W.lcap = nl * 2;
@@ -374,7 +374,7 @@ static bool is_copy(const ins *i)
  */
 static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v, bool apply)
 {
-	ecx *e = ctx;
+	ecx *e = (ecx *)ctx;
 	unsigned ro = W.ro[j];
 
 	if (!apply)
@@ -514,7 +514,7 @@ static void slots(ecx *e)
 	if (!em_slot_finish(cells))
 		return;
 	ncell = cells->count;
-	SL.rc = grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t));
+	SL.rc = (int32_t *)grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t));
 	for (uint32_t k = 0; k < n; k++) {
 		const ins *i = &in[k];
 		uint32_t id, cell;
@@ -863,12 +863,12 @@ static void exts(ecx *e)
 		return;	/* no extension to find redundant */
 	if (nb > XF.cap) {
 		XF.cap = nb * 2;
-		XF.in = realloc(XF.in, XF.cap * sizeof(xf));
-		XF.vis = realloc(XF.vis, XF.cap);
+		XF.in = (xf *)realloc(XF.in, XF.cap * sizeof(xf));
+		XF.vis = (uint8_t *)realloc(XF.vis, XF.cap);
 		if (!XF.in || !XF.vis)
 			abort();
 	}
-	XF.red = grow_to(XF.red, &XF.capr, n, 1);
+	XF.red = (uint8_t *)grow_to(XF.red, &XF.capr, n, 1);
 	memset(XF.red, 0, n);
 	for (uint32_t b = 0; b < nb; b++) {
 		const ins *l = &e->in[W.bs[b]];
@@ -1741,7 +1741,7 @@ static void flags(ecx *e)
 	if (nl > cap) {
 		cap = nl + nl / 2 + 64;
 		free(ls);
-		ls = malloc(2 * (size_t)cap * sizeof *ls);
+		ls = (uint32_t *)malloc(2 * (size_t)cap * sizeof *ls);
 		if (!ls)
 			abort();
 		lp = ls + cap;

@@ -468,7 +468,7 @@ static uint32_t r_relax(const ins *in, uint32_t nin, uint32_t *wb, uint32_t at, 
 	bool grew = true;
 
 	if (!cum)
-		cum = reserve((size_t)1 << 32);
+		cum = (uint32_t *)reserve((size_t)1 << 32);
 	while (grew) {
 		grew = false;
 		cum[0] = 0;
@@ -607,7 +607,7 @@ VPRIV int a64_replay(rctx *R, const code_hdr *h)
 		uint32_t npend = 0;
 
 		R->ser++;
-		for (const char *q = raw, *qe = raw + h->nraw; (q = memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
+		for (const char *q = raw, *qe = raw + h->nraw; (q = (const char *)memmem(q, (size_t)(qe - q), ".LBB", 4)); ) {
 			uint32_t fid = 0, l = 0;
 			const char *d = q += 4;
 

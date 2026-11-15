@@ -976,7 +976,7 @@ static bool vv_reaches(vwst *V, uint32_t v, uint32_t p, uint32_t *budget)
 static bool vv_records(vvs *S)
 {
 	if (!S->I) {
-		S->I = calloc((size_t)S->n0 + 1, sizeof *S->I);
+		S->I = (vvi *)calloc((size_t)S->n0 + 1, sizeof *S->I);
 		S->oom = !S->I;
 	}
 	return S->I != NULL;
@@ -1515,7 +1515,7 @@ static void vw_vectorize(ecx *e)
 
 	if (!vv_env() || e->E->o->general_regs_only || !vw_enabled(e->E->o))
 		return;
-	hs = malloc(((size_t)n0 + 1) * sizeof *hs);
+	hs = (uint32_t *)malloc(((size_t)n0 + 1) * sizeof *hs);
 	if (!hs)
 		return;
 	for (uint32_t i = 0; i < n0; i++)	/* (the candidates first: vectorizing adds blocks) */
@@ -1555,7 +1555,7 @@ static void vw_vectorize(ecx *e)
 		if (S.P == S.L)
 			continue;
 		if (!S.inl) {
-			S.inl = calloc((size_t)V->nb + 1, 1);
+			S.inl = (uint8_t *)calloc((size_t)V->nb + 1, 1);
 			if (!S.inl)
 				break;
 		}

@@ -367,8 +367,8 @@ VPRIV val x64_call(ecx *e, uint32_t ref, val *fn, const wkarg *a, int n, bool va
 	int64_t total = 0, pad;
 	uint32_t stackalign = 16;
 	int64_t savedsp = 0;
-	int64_t *place = calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
-	int *bregs = calloc((size_t)(n ? n : 1), sizeof *bregs);
+	int64_t *place = (int64_t *)calloc((size_t)(n ? n : 1), sizeof *place);	/* stack offset, or -1: registers */
+	int *bregs = (int *)calloc((size_t)(n ? n : 1), sizeof *bregs);
 	rec *i;
 
 	for (int k = 0; k < n; k++) {

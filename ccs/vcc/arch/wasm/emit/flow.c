@@ -28,7 +28,7 @@ static wflow_event *wf_event(ecx *e, int kind)
 	}
 	if (W->nflow == W->capflow) {
 		uint32_t cap = W->capflow ? W->capflow * 2 : 32;
-		wflow_event *p = realloc(W->flow, cap * sizeof(*p));
+		wflow_event *p = (wflow_event *)realloc(W->flow, cap * sizeof(*p));
 
 		if (!p) {
 			W->flowfailed = true;
@@ -136,8 +136,8 @@ VPRIV void wflow_optimize(ecx *e)
 	if (W->flowfailed || W->flowdepth || !W->flowjoins || W->flowstores < 2 ||
 	    W->dyn || W->nsj || W->ngdx || W->memfailed || !s->valid)
 		return;
-	map = calloc(s->count, 1);
-	bit = malloc(W->nmem);
+	map = (uint8_t *)calloc(s->count, 1);
+	bit = (uint8_t *)malloc(W->nmem);
 	if (!map || !bit)
 		goto done;
 	for (uint32_t i = 1; i < s->count; i++) {
@@ -166,9 +166,9 @@ VPRIV void wflow_optimize(ecx *e)
 		goto done;
 	/* Adjacency and solver storage are allocated only for an actual private
 	 * repeated-store candidate after complete function/cell collection. */
-	t = calloc(blocks, sizeof(*t));
-	edges = malloc((size_t)blocks * 2 * sizeof(*edges));
-	dead = calloc(W->nmem, 1);
+	t = (em_flow_transfer *)calloc(blocks, sizeof(*t));
+	edges = (em_flow_edge *)malloc((size_t)blocks * 2 * sizeof(*edges));
+	dead = (uint8_t *)calloc(W->nmem, 1);
 	if (!t || !edges || !dead)
 		goto done;
 	for (uint32_t b = 0; b < blocks; b++) {

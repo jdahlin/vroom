@@ -280,7 +280,7 @@ static void data_init(ecx *e, uint64_t off, qty ty, uint32_t init)
 
 static int rel_cmp(const void *a, const void *b)
 {
-	const struct reloc *x = a, *y = b;
+	const struct reloc *x = (const struct reloc *)a, *y = (const struct reloc *)b;
 
 	if (x->off != y->off)
 		return x->off < y->off ? -1 : 1;
@@ -307,7 +307,7 @@ static void rel_prep(ecx *e)
 static void data_item(ecx *e, uint64_t size, bool zero)
 {
 	size_t h = it_open(e, IT_DATA);
-	data_hdr *dh = it_room(e, sizeof *dh);
+	data_hdr *dh = (data_hdr *)it_room(e, sizeof *dh);
 	uint32_t nrel = 0;
 
 	if (zero) {
@@ -654,7 +654,7 @@ VPRIV void emit_string(ecx *e, uint32_t i)
 		memcpy(it_room(e, 4), &ref, 4);
 		it_close(e, h);
 		h = it_open(e, IT_BYTES);
-		q = it_room(e, m + asciz);
+		q = (char *)it_room(e, m + asciz);
 		memcpy(q, s->s, m);
 		if (asciz)
 			q[m] = 0;

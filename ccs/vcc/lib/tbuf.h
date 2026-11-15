@@ -23,7 +23,7 @@ typedef struct tbuf {
 
 static inline void tb_init(tbuf *b, size_t cap)
 {
-	b->p = vreserve(cap, MAP_NORESERVE, "vcc: mmap");
+	b->p = (char *)vreserve(cap, MAP_NORESERVE, "vcc: mmap");
 	b->n = 0;
 	b->cap = cap;
 }
@@ -31,7 +31,7 @@ static inline void tb_init(tbuf *b, size_t cap)
 /* a buffer in a reused region (arena.h) */
 static inline void tb_reg(tbuf *b, vmreg *r, size_t cap, const char *name)
 {
-	b->p = vmreg_get(r, cap, name);
+	b->p = (char *)vmreg_get(r, cap, name);
 	b->n = 0;
 	b->cap = cap;
 }
@@ -44,7 +44,7 @@ static inline VNONNULL(1) void tb_need(tbuf *b, size_t n)
 	}
 }
 
-static inline VNONNULL(1) void tb_put(tbuf *b, const char *s, size_t n)
+static inline VNONNULL(1) void tb_put(tbuf *b, const void *s, size_t n)
 {
 	tb_need(b, n);
 	memcpy(b->p + b->n, s, n);

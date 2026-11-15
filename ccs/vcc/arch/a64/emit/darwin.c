@@ -31,7 +31,7 @@ static bool starts(const char *p, const char *e, const char *w)
 static bool defined(const char *t, size_t tn, const char *s, size_t n)
 {
 	for (const char *p = t, *e = t + tn; p < e;) {
-		const char *nl = memchr(p, '\n', (size_t)(e - p));
+		const char *nl = (const char *)memchr(p, '\n', (size_t)(e - p));
 		const char *le = nl ? nl : e;
 
 		if ((size_t)(le - p) == n + 1 && !memcmp(p, s, n) && p[n] == ':')
@@ -62,7 +62,7 @@ static const char *reloc(tbuf *o, const char *p, const char *e, const char *spec
 static bool relocs(const char *p, const char *end)
 {
 	while (p < end) {
-		const char *nl = memchr(p, '\n', (size_t)(end - p));
+		const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
 		const char *le = nl ? nl : end;
 
 		if (starts(p, le, "\t.section") || starts(p, le, "\t.data") || starts(p, le, "\t.text") ||
@@ -96,7 +96,7 @@ static void section(tbuf *o, const char *p, const char *e, const char *end)
 		tb_s(o, "\t.section\t__DATA,__mod_term_func,mod_term_funcs\n");
 	} else if (*p == '"') {
 		/* section("seg,sect") as the attribute gave it */
-		const char *q = memchr(p + 1, '"', (size_t)(e - p - 1));
+		const char *q = (const char *)memchr(p + 1, '"', (size_t)(e - p - 1));
 
 		tb_s(o, "\t.section\t");
 		tb_put(o, p + 1, q ? (size_t)(q - p - 1) : 0);
@@ -116,7 +116,7 @@ VPRIV void darwin_text(tbuf *o, const char *t, size_t tn)
 	};
 
 	for (const char *p = t, *e = t + tn; p < e;) {
-		const char *nl = memchr(p, '\n', (size_t)(e - p));
+		const char *nl = (const char *)memchr(p, '\n', (size_t)(e - p));
 		const char *le = nl ? nl : e;
 
 		if (starts(p, le, "\t.type\t") || starts(p, le, "\t.size\t") || starts(p, le, "\t.protected\t") ||

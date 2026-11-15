@@ -69,7 +69,7 @@ VPRIV void sym_header(ecx *e, tbuf *b, uint32_t s, bool fn, const char *defsec, 
 
 		it_close(e, h);
 		h = it_open(e, IT_SYMHDR);
-		sh = it_room(e, sizeof *sh);
+		sh = (symhdr *)it_room(e, sizeof *sh);
 		*sh = (symhdr){ .sym = s, .p2 = (uint8_t)__builtin_ctz(align ? align : 1), .fn = fn };
 		if (global) {
 			sh->bind = (y->flags & SF_WEAK) ? STB_WEAK : STB_GLOBAL;
@@ -167,8 +167,8 @@ static void finish_direct(ecx *e, uint32_t s, uint32_t align, const int *cs, int
 	for (uint32_t k = 0; k < e->nin && !sym_labels; k++)
 		sym_labels = e->in[k].op == I_RAW;
 	h = it_open(e, IT_CODE);
-	ch = it_room(e, sizeof *ch);
-	in = it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
+	ch = (code_hdr *)it_room(e, sizeof *ch);
+	in = (ins *)it_room(e, ((size_t)e->nin + 2 * (size_t)ncs + 8) * sizeof(ins));
 #define PUT(...) (in[n++] = (ins){ __VA_ARGS__ })
 	memcpy(in, e->in, (size_t)pre * sizeof(ins));
 	n = pre;
@@ -241,7 +241,7 @@ typedef struct a64_fallthrough_debug {
 
 static void a64_fallthrough_remap(void *ctx, uint32_t old, uint32_t next)
 {
-	a64_fallthrough_debug *d = ctx;
+	a64_fallthrough_debug *d = (a64_fallthrough_debug *)ctx;
 
 	dbg_remap(d->e, &d->cursor, old, next);
 }
@@ -340,7 +340,7 @@ static void tbz_relax(ecx *e)
 		m += e->in[k].op == I_TBZ || e->in[k].op == I_TBNZ;
 	if (!m)
 		return;
-	at = malloc(((size_t)n + 1 + e->nlabel) * sizeof *at);
+	at = (uint32_t *)malloc(((size_t)n + 1 + e->nlabel) * sizeof *at);
 	if (!at)
 		abort();
 	uint32_t *lat = at + n + 1;

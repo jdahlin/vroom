@@ -237,6 +237,18 @@ ekvivalenstestning återstår. Genererade program använder inga externa anrop.
 
 ## Status
 
+### V2/V3 (2026-11-15): explicita pekarkonverteringar i emittern
+
+Den gemensamma emittern hade 202 av de 857 återstående positionerna med
+`-Wimplicit-void-ptr-cast`. Efter ändringarna i emittern, dess tre mål och
+de delade biblioteksrubrikerna återstod 554 i hela C-inventeringen och noll
+i emitterns unity-TU. Clang 23 byggde verktygen som C på x86-64 Linux.
+Både `vpp` och `vccd` var byte-identiska med 9a9de55d. SQLite 3.50.4 vid
+-O2 tog 600,99 → 599,04 ms CPU att kompilera. Körningen av speedtest1 tog
+86,49 → 86,60 ms CPU (median av fem körningar på samma kärna). Båda
+objektfilerna och den körbara filen var byte-identiska. Den egna AArch64-sviten
+gav 328/328 godkända och ett känt förväntat fel under QEMU.
+
 ### V1/V4 (2026-11-15): explicita pekarkonverteringar
 
 De 14 C-filerna i `vcc/vir/` klarar syntaxkontroll som GNU++20 med Clang 23

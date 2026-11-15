@@ -241,7 +241,7 @@ static void note_assign(pre *P, uint32_t s, uint32_t rhs)
  */
 VPRIV uint8_t *fn_once(cc *c)
 {
-	uint8_t *r = calloc((size_t)c->nsym + 64, 1);	/* refs in bits 0-1, calls in 2-3 (saturating) */
+	uint8_t *r = (uint8_t *)calloc((size_t)c->nsym + 64, 1);	/* refs in bits 0-1, calls in 2-3 (saturating) */
 
 	if (!r)
 		return NULL;
@@ -311,13 +311,13 @@ VPRIV void fn_isize(emitter *E, cc *c, uint32_t lim)
 	uint32_t n = c->nsym, *idx, *low, *stk, *cs, *ci, sp = 0, csp = 0, nidx = 0;
 	uint8_t *on;
 
-	E->inl_read = calloc((size_t)n + 64, 1);
-	E->cgoff = calloc((size_t)n + 64, 4);
-	E->cgn = calloc((size_t)n + 64, 4);
-	E->scc = calloc((size_t)n + 64, 4);
-	E->isz = calloc((size_t)n + 64, 2);
-	idx = calloc((size_t)n + 64, 4), low = calloc((size_t)n + 64, 4), stk = malloc(((size_t)n + 64) * 4);
-	cs = malloc(((size_t)n + 64) * 4), ci = malloc(((size_t)n + 64) * 4), on = calloc((size_t)n + 64, 1);
+	E->inl_read = (uint8_t *)calloc((size_t)n + 64, 1);
+	E->cgoff = (uint32_t *)calloc((size_t)n + 64, 4);
+	E->cgn = (uint32_t *)calloc((size_t)n + 64, 4);
+	E->scc = (uint32_t *)calloc((size_t)n + 64, 4);
+	E->isz = (uint16_t *)calloc((size_t)n + 64, 2);
+	idx = (uint32_t *)calloc((size_t)n + 64, 4), low = (uint32_t *)calloc((size_t)n + 64, 4), stk = (uint32_t *)malloc(((size_t)n + 64) * 4);
+	cs = (uint32_t *)malloc(((size_t)n + 64) * 4), ci = (uint32_t *)malloc(((size_t)n + 64) * 4), on = (uint8_t *)calloc((size_t)n + 64, 1);
 	if (!E->inl_read || !E->cgoff || !E->cgn || !E->scc || !E->isz || !idx || !low || !stk || !cs || !ci || !on)
 		abort();
 	E->cgrec = true;
@@ -552,7 +552,7 @@ static int walk(pre *P, uint32_t n)
 			emitter *E = P->E;
 
 			if (E->ncg == E->capcg) {
-				em_cg_edge *g = realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * sizeof *g);
+				em_cg_edge *g = (em_cg_edge *)realloc(E->cg, (size_t)(E->capcg = E->capcg ? 2 * E->capcg : 1024) * sizeof *g);
 
 				if (!g)
 					abort();

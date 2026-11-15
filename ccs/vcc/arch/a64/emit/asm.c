@@ -256,7 +256,7 @@ VPRIV void gen_asm(ecx *e, uint32_t n)
 		return;
 	if (nops > 64 || a->nlabel > 64)
 		efatal(e, x->loc, "too many asm operands");
-	op = alloca((nops + 1) * sizeof(asmopnd));
+	op = (asmopnd *)alloca((nops + 1) * sizeof(asmopnd));
 	memset(op, 0, (nops + 1) * sizeof(asmopnd));
 	/* clobbered registers: keep temporaries out of them */
 	for (uint32_t i = 0; i < a->nclob; i++) {

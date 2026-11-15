@@ -772,7 +772,7 @@ __attribute__((noinline)) VPRIV val gen_call(ecx *e, uint32_t n)
 	bool noret = false, inl;
 
 	/* more than MAXARGS (psql's sql_help.c passes ~260): on the heap */
-	if (na > MAXARGS && !(args = malloc((size_t)na * sizeof(*args))))
+	if (na > MAXARGS && !(args = (carg *)malloc((size_t)na * sizeof(*args))))
 		efatal(e, x->loc, "out of memory");
 	if (s) {
 		const sym *y = &c->syms[s];

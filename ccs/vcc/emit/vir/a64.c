@@ -26,6 +26,8 @@
 
 typedef struct vlarg { uint8_t reg; uint8_t size; int32_t stk; } vlarg;	/* reg VR_NONE: at stk */
 
+typedef struct { uint32_t l, e, to; } vl_transfer;
+
 typedef struct vl {
 	ecx *e;
 	vir_fn *f;
@@ -69,7 +71,7 @@ typedef struct vl {
 	uint32_t at;		/* the block whose place in the layout the code is at (a copy of another block's: vl_dup) */
 	int dup;		/* ... copies being lowered, one in another: vir_layout_duplicate */
 	bool fallok;		/* the code may fall through to the block after at (no edge moves follow) */
-	struct { uint32_t l, e, to; } tr[1024];	/* moves of a branch's edges, after the block */
+	vl_transfer tr[1024];	/* moves of a branch's edges, after the block */
 	uint32_t ntr;
 } vl;
 
@@ -196,7 +198,7 @@ static void vl_fixed(const vir_fn *f, uint32_t v, vir_fix *x, void *ctx)
 	switch (in->op) {
 	case VO_PARAM: {
 		uint32_t ng = VSIG_NGROUPS(f->extra[f->sig]);
-		vlarg *a = ng <= VL_MAXOP ? __builtin_alloca(sizeof(vlarg) * ng) : NULL;
+		vlarg *a = ng <= VL_MAXOP ? (vlarg *)__builtin_alloca(sizeof(vlarg) * ng) : NULL;
 
 		if (!a || in->a >= ng)
 			return;
@@ -1144,7 +1146,7 @@ static void vl_call(vl *L, uint32_t b, uint32_t i, const vir_ins *in)
 
 	if (ng + 1 > L->nop)
 		vl_fail(L, "VIR lowering: call operands");
-	a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
+	a = (vlarg *)__builtin_alloca(sizeof(vlarg) * (ng + 1));
 	uint8_t gm = 0;	/* the x registers the arguments are in */
 
 	vl_assign(DARWIN(e->c), &f->extra[in->b], a, ng, &stk);
@@ -1232,7 +1234,7 @@ static void vl_param(vl *L, const vir_ins *in, uint8_t res)
 
 	if (ng > VL_MAXOP || in->a >= ng)
 		vl_fail(L, "VIR lowering: a parameter");
-	a = __builtin_alloca(sizeof(vlarg) * ng);
+	a = (vlarg *)__builtin_alloca(sizeof(vlarg) * ng);
 	vl_assign(DARWIN(e->c), &f->extra[f->sig], a, ng, &stk);
 	if (a[in->a].reg != VR_NONE) {
 		if (res != VR_NONE && res != a[in->a].reg)
@@ -1284,11 +1286,11 @@ static void vl_switch(vl *L, uint32_t b, const vir_ins *in)
 		bcond(e, C_HI, dl);
 		if (e->njtl + (uint32_t)span + 1 > e->capjtl) {
 			e->capjtl = (e->njtl + (uint32_t)span + 1) * 2;
-			e->jtl = realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
+			e->jtl = (uint32_t *)realloc(e->jtl, (size_t)e->capjtl * sizeof *e->jtl);
 		}
 		if (e->njt == e->capjt) {
 			e->capjt = e->capjt ? e->capjt * 2 : 4;
-			e->jt = realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
+			e->jt = (struct ejt *)realloc(e->jt, (size_t)e->capjt * sizeof *e->jt);
 		}
 		if (!e->jtl || !e->jt)
 			abort();
@@ -1577,7 +1579,7 @@ static bool vl_sibcand(vl *L, uint32_t b, uint32_t i)
 {
 	const vir_fn *f = L->f;
 	uint32_t ng = VSIG_NGROUPS(f->extra[f->ins[i].b]);
-	vlarg *a = __builtin_alloca(sizeof(vlarg) * (ng + 1));
+	vlarg *a = (vlarg *)__builtin_alloca(sizeof(vlarg) * (ng + 1));
 	int32_t stk;
 
 	vl_assign(DARWIN(L->e->c), &f->extra[f->ins[i].b], a, ng, &stk);
@@ -2173,7 +2175,7 @@ static void vl_block(vl *L, uint32_t b)
 		vl_fail(L, "VIR lowering: a block without a terminator");
 	if (L->ntr) {	/* (a copy in vl_goto reuses L->tr) */
 		uint32_t n = L->ntr;
-		struct { uint32_t l, e, to; } *tr = __builtin_alloca(n * sizeof *tr);
+		vl_transfer *tr = (vl_transfer *)__builtin_alloca(n * sizeof *tr);
 
 		memcpy(tr, L->tr, n * sizeof *tr);
 		L->ntr = 0;
@@ -2292,8 +2294,8 @@ static bool vl_vcross(vir_fn *f)
 	if (!nv || !calls)
 		return false;
 	W = (nv + 63) / 64;
-	ix = malloc((size_t)f->nins * sizeof *ix);
-	in = calloc((size_t)(2 * f->nblk + 1) * W, sizeof *in);
+	ix = (uint32_t *)malloc((size_t)f->nins * sizeof *ix);
+	in = (uint64_t *)calloc((size_t)(2 * f->nblk + 1) * W, sizeof *in);
 	if (!ix || !in) {
 		free(ix), free(in);
 		return true;
@@ -2389,8 +2391,8 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 			on = !(x && *x == '0');
 		}
 		L.e = e, L.f = f;
-		VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
-		VLT.nf = vl_grow(VLT.nf, &VLT.cnf, f->nins + 1, 1);
+		VLT.lo32 = (uint8_t *)vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
+		VLT.nf = (uint8_t *)vl_grow(VLT.nf, &VLT.cnf, f->nins + 1, 1);
 		L.ret32 = KIND(c, ft->base) != TY_VOID && is_integer(c, ft->base) && tsize(c, ft->base) == 4;
 		L.tail = !(ft->flags & TF_VARIADIC) && em_tail_caller_ok(e, s) && !vl_notail(&L, VLT.lo32);
 		if (on && !e->E->noopt && !(e->E->o->cfi && !DARWIN(c))) {
@@ -2422,19 +2424,19 @@ VPRIV bool vw_a64(ecx *e, uint32_t s, const char **why)
 		free(msg.p);
 	}
 	L.e = e, L.f = f, L.o = &V->ao;
-	VLT.soff = vl_grow(VLT.soff, &VLT.cs, f->nslot + 1, sizeof(int64_t));
-	VLT.spoff = vl_grow(VLT.spoff, &VLT.csp, V->ao.nspill + 1, sizeof(int64_t));
-	VLT.lbl = vl_grow(VLT.lbl, &VLT.cl, f->nblk + 1, sizeof(uint32_t));
-	VLT.uses = vl_grow(VLT.uses, &VLT.cu, f->nins + 1, 1);
-	VLT.lo32 = vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
-	VLT.chs = vl_grow(VLT.chs, &VLT.cch, f->nblk + 1, sizeof(uint32_t));
-	VLT.path = vl_grow(VLT.path, &VLT.cpa, f->nblk + 1, sizeof(uint32_t));
+	VLT.soff = (int64_t *)vl_grow(VLT.soff, &VLT.cs, f->nslot + 1, sizeof(int64_t));
+	VLT.spoff = (int64_t *)vl_grow(VLT.spoff, &VLT.csp, V->ao.nspill + 1, sizeof(int64_t));
+	VLT.lbl = (uint32_t *)vl_grow(VLT.lbl, &VLT.cl, f->nblk + 1, sizeof(uint32_t));
+	VLT.uses = (uint8_t *)vl_grow(VLT.uses, &VLT.cu, f->nins + 1, 1);
+	VLT.lo32 = (uint8_t *)vl_grow(VLT.lo32, &VLT.c32, f->nins + 1, 1);
+	VLT.chs = (uint32_t *)vl_grow(VLT.chs, &VLT.cch, f->nblk + 1, sizeof(uint32_t));
+	VLT.path = (uint32_t *)vl_grow(VLT.path, &VLT.cpa, f->nblk + 1, sizeof(uint32_t));
 	L.soff = VLT.soff, L.spoff = VLT.spoff, L.lbl = VLT.lbl, L.uses = VLT.uses, L.lo32 = VLT.lo32;
 	L.chs = VLT.chs;
-	VLT.ord = vl_grow(VLT.ord, &VLT.co, f->nblk + 1, sizeof(uint32_t));
-	VLT.opos = vl_grow(VLT.opos, &VLT.cop, f->nblk + 1, sizeof(uint32_t));
-	VLT.hl = vl_grow(VLT.hl, &VLT.chl, f->nblk + 1, sizeof(uint32_t));
-	VLT.lbf = vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
+	VLT.ord = (uint32_t *)vl_grow(VLT.ord, &VLT.co, f->nblk + 1, sizeof(uint32_t));
+	VLT.opos = (uint32_t *)vl_grow(VLT.opos, &VLT.cop, f->nblk + 1, sizeof(uint32_t));
+	VLT.hl = (uint32_t *)vl_grow(VLT.hl, &VLT.chl, f->nblk + 1, sizeof(uint32_t));
+	VLT.lbf = (uint32_t *)vl_grow(VLT.lbf, &VLT.clf, f->nblk + 1, sizeof(uint32_t));
 	memset(VLT.lbf, 0, (size_t)(f->nblk + 1) * sizeof(uint32_t));
 	L.ord = VLT.ord, L.opos = VLT.opos, L.lp = &V->lp;
 	vir_layout_chases(f, L.o, L.chs, VLT.path);

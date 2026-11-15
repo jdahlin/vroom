@@ -6,7 +6,7 @@
 VPRIV uint32_t em_rec_fallthrough(void *records, uint32_t count, const em_rec_layout *layout,
 				void (*remap)(void *, uint32_t, uint32_t), void *ctx)
 {
-	unsigned char *base = records;
+	unsigned char *base = (unsigned char *)records;
 	uint32_t n = 0;
 
 	for (uint32_t k = 0; k < count; k++) {

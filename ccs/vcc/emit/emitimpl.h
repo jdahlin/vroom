@@ -309,6 +309,10 @@ typedef struct slotal {
 
 #define NVSZ 64		/* VLA size expressions live at once in a function */
 
+struct dbgrow { uint32_t k, file, line, col; };
+struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; };
+struct ejt { uint32_t tab, off, n; };
+
 typedef struct ecx {
 	emitter *E;
 	cc *c;
@@ -321,14 +325,14 @@ typedef struct ecx {
 	int novtag;		/* inside a volatile access: its records stay untagged */
 	uint32_t curloc;	/* innermost statement being generated (diagnostics) */
 	uint32_t reuse_from, reuse_to; /* temporary substitution within one pure expression */
-	struct dbgrow { uint32_t k, file, line, col; } *dl;	/* -g: a row at record k */
+	struct dbgrow *dl;	/* -g: a row at record k */
 	uint32_t ndl, dlcap;
 	const char *dlname;	/* the last file looked up, and its number */
 	uint32_t dlnlen, dlfile;
 	tbuf raw;		/* inline asm text */
 	tbuf out;		/* this thread's output text */
 	tbuf data;		/* scratch: data object bytes */
-	struct reloc { uint64_t off; uint32_t ref, seq; int64_t add; uint32_t sub, sz; } *rel;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
+	struct reloc *rel;	/* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
 	uint32_t nrel;
 	uint64_t relend;	/* end of the highest relocated word */
 	/* bindings */
@@ -392,7 +396,7 @@ typedef struct ecx {
 	uint32_t nweakref;
 	uint32_t ncases;
 	uint32_t *jtl, njtl, capjtl;	/* jump tables of the function: case labels, table after table */
-	struct ejt { uint32_t tab, off, n; } *jt;	/* table label, first entry in jtl, entries */
+	struct ejt *jt;	/* table label, first entry in jtl, entries */
 	uint32_t njt, capjt;
 	uint32_t *rlog;		/* this round's item logs: (RL_*, value) pairs */
 	size_t nrlog, rlog0;	/* ... and where the current item's starts */

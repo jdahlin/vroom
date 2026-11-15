@@ -580,7 +580,7 @@ F128_UNUSED static u128 q_parsep(const char *s, size_t n, int p)
 		}
 		/* limbs: the digits, 10^|E| and the shift below, with room */
 		b.cap = (int)(nd / 9 + 2 + (5000 + 40000 / 9) / 9 * 2 + 600);
-		b.w = calloc((size_t)b.cap, 4);
+		b.w = (uint32_t *)calloc((size_t)b.cap, 4);
 		b.n = 0;
 		for (size_t j = st; j < en; j++) {
 			if (s[j] == '.') {
@@ -608,7 +608,7 @@ F128_UNUSED static u128 q_parsep(const char *s, size_t n, int p)
 		if (e10 >= 0) {
 			int bits;
 
-			b.w = realloc(b.w, (size_t)(b.cap + e10 / 9 + 4) * 4);
+			b.w = (uint32_t *)realloc(b.w, (size_t)(b.cap + e10 / 9 + 4) * 4);
 			b.cap += (int)(e10 / 9 + 4);
 			for (long j = 0; j < e10; j++)
 				qb_mulsmall(&b, 10, 0);
@@ -622,18 +622,18 @@ F128_UNUSED static u128 q_parsep(const char *s, size_t n, int p)
 		}
 		/* D / 10^-E: shift D so that the quotient has 120 bits */
 		d.cap = (int)(-e10 / 9 + 8);
-		d.w = calloc((size_t)d.cap, 4);
+		d.w = (uint32_t *)calloc((size_t)d.cap, 4);
 		d.w[0] = 1, d.n = 1;
 		for (long j = 0; j < -e10; j++)
 			qb_mulsmall(&d, 10, 0);
 		k = qb_bits(&d) - qb_bits(&b) + 120;
 		if (k < 0) {	/* D is the longer one: shift 10^-E up instead */
-			d.w = realloc(d.w, (size_t)(d.n + -k / 32 + 4) * 4);
+			d.w = (uint32_t *)realloc(d.w, (size_t)(d.n + -k / 32 + 4) * 4);
 			d.cap = d.n + -k / 32 + 4;
 			qb_shl(&d, -k);
 		} else {
 			if (b.cap < b.n + k / 32 + 2) {
-				b.w = realloc(b.w, (size_t)(b.n + k / 32 + 4) * 4);
+				b.w = (uint32_t *)realloc(b.w, (size_t)(b.n + k / 32 + 4) * 4);
 				b.cap = b.n + k / 32 + 4;
 			}
 			qb_shl(&b, k);

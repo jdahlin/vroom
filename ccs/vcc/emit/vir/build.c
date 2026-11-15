@@ -49,7 +49,7 @@
 static vwst *vw_st(ecx *e)
 {
 	if (!e->vw)
-		e->vw = calloc(1, sizeof(vwst));
+		e->vw = (struct vwst *)calloc(1, sizeof(vwst));
 	return e->vw;
 }
 
@@ -59,7 +59,7 @@ static vwst *vw_st(ecx *e)
 		while (nc_ < (uint64_t)(n) + (k)) nc_ *= 2; \
 		void *q_ = realloc((p), nc_ * sizeof *(p)); \
 		if (!q_) vw_fail(e, "out of memory"); \
-		(p) = q_; (cap) = (uint32_t)nc_; \
+		(p) = (__typeof__(p))q_; (cap) = (uint32_t)nc_; \
 	} } while (0)
 
 static __attribute__((noreturn, cold)) void vw_fail(ecx *e, const char *why)
@@ -158,7 +158,7 @@ static uint32_t vw_lblk(ecx *e, uint32_t l)
 
 		while (nc <= l)
 			nc *= 2;
-		V->lab = realloc(V->lab, nc * sizeof *V->lab);
+		V->lab = (uint32_t *)realloc(V->lab, nc * sizeof *V->lab);
 		if (!V->lab)
 			vw_fail(e, "out of memory");
 		memset(V->lab + V->clab, 0xff, (nc - V->clab) * sizeof *V->lab);
@@ -208,7 +208,7 @@ static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 		/* the next size, inside the allocation when a larger function left one: the table a
 		 * function probes is as large as it needs, not as the largest one seen needed */
 		uint32_t oc = V->hcap, nc = oc ? oc * 2 : VW_H0, n = 0;
-		vwh *live = malloc(((size_t)V->hn + 1) * sizeof *live);
+		vwh *live = (vwh *)malloc(((size_t)V->hn + 1) * sizeof *live);
 
 		if (!live)
 			vw_fail(e, "out of memory");
@@ -217,7 +217,7 @@ static uint32_t *vw_hslot(ecx *e, uint32_t b, uint32_t var, bool add)
 				live[n++] = V->h[i];
 		if (nc > V->halloc) {
 			free(V->h);
-			V->h = calloc(nc, sizeof *V->h);
+			V->h = (vwh *)calloc(nc, sizeof *V->h);
 			if (!V->h) {
 				V->hcap = V->halloc = 0;
 				free(live);
@@ -1004,7 +1004,7 @@ VPRIV void vw_switch_bitset(ecx *e, int r, int size, const em_switch_bitset_reci
 
 static int vw_casecmp(const void *a, const void *b)
 {
-	const uint64_t *x = a, *y = b;
+	const uint64_t *x = (const uint64_t *)a, *y = (const uint64_t *)b;
 
 	return x[0] < y[0] ? -1 : x[0] > y[0];
 }
@@ -1013,7 +1013,7 @@ VPRIV void vw_switch_table(ecx *e, int r, int size, const em_switch_case *cases,
 {
 	vwst *V = e->vw;
 	uint32_t ty = vw_ity(size), x = vw_get(e, r, ty), st = size == 8 ? 5 : 3, m = 0;
-	uint64_t mask = size == 8 ? ~0ull : 0xffffffffull, *c3 = malloc((size_t)(2 * n + 1) * 3 * sizeof *c3);
+	uint64_t mask = size == 8 ? ~0ull : 0xffffffffull, *c3 = (uint64_t *)malloc((size_t)(2 * n + 1) * 3 * sizeof *c3);
 	uint32_t o;
 
 	if (!c3)
@@ -1446,7 +1446,7 @@ VPRIV bool vw_local(ecx *e, uint32_t s, lval *l)
 
 		if (nc > V->lhalloc) {
 			free(V->lh);
-			V->lh = malloc(nc * sizeof *V->lh);
+			V->lh = (uint32_t *)malloc(nc * sizeof *V->lh);
 			if (!V->lh) {
 				V->lhcap = V->lhalloc = 0;
 				vw_fail(e, "out of memory");
@@ -1995,7 +1995,7 @@ static void vw_deadparams(ecx *e)
 
 	GROW(V->map, 0, V->cmap, V->np + 1);
 	memset(V->map, 0, (size_t)V->np * sizeof *V->map);
-	stk = vw_passbuf(e, ((uint64_t)V->np + 1) * sizeof *stk);
+	stk = (uint32_t *)vw_passbuf(e, ((uint64_t)V->np + 1) * sizeof *stk);
 	for (uint32_t i = 0; i < V->norder; i++) {
 		uint32_t b = V->order[i];
 
@@ -2145,7 +2145,7 @@ static bool vw_promote(ecx *e)
 
 	if (!V->nsl)
 		return false;
-	sf = vw_passbuf(e, ((uint64_t)V->nsl + np0) * sizeof *sf + V->nsl);
+	sf = (uint32_t *)vw_passbuf(e, ((uint64_t)V->nsl + np0) * sizeof *sf + V->nsl);
 	fof = sf + V->nsl;	/* access -> field + 1 */
 	bad = (uint8_t *)(fof + np0);
 	memset(sf, 0, (size_t)V->nsl * sizeof *sf);
@@ -2303,7 +2303,7 @@ static bool vw_promote(ecx *e)
 	for (uint32_t k = 0; k < nf; k++)
 		V->vty[var0 + k] = (uint8_t)fd[k].ty;
 	V->nprom += nf;
-	cur = malloc((size_t)nf * 2 * sizeof *cur);
+	cur = (uint32_t *)malloc((size_t)nf * 2 * sizeof *cur);
 	if (!cur)
 		vw_fail(e, "out of memory");
 	cst = cur + nf;
@@ -2432,7 +2432,7 @@ static size_t vw_simp_layout(ecx *e, vwsimp *S, char *base, size_t kc, size_t hc
 
 #define VW_TABLE(field, count) do { \
 	size_t bytes; \
-	if (base) S->field = (void *)(base + used); \
+	if (base) S->field = (__typeof__(S->field))(base + used); \
 	if (__builtin_mul_overflow((size_t)(count), sizeof *S->field, &bytes) || \
 	    __builtin_add_overflow(used, bytes, &used)) vw_fail(e, "out of memory"); \
 } while (0)
@@ -3212,7 +3212,7 @@ static void vw_simplify(ecx *e)
 	S.kmask = kc - 1;
 	S.hmask = hc - 1;
 	size_t need = vw_simp_layout(e, &S, NULL, kc, hc);
-	void *buf = vw_passbuf(e, need);
+	char *buf = (char *)vw_passbuf(e, need);
 	vw_simp_layout(e, &S, buf, kc, hc);
 	stk = S.stack;
 	uint32_t *pcopy = S.cnt + S.n0 + 1;
@@ -3585,7 +3585,7 @@ static bool vw_condmerge(ecx *e)
 {
 	vwst *V = e->vw;
 	uint64_t ncnt = (uint64_t)V->np + V->norder + 1;
-	uint32_t *cnt = vw_passbuf(e, ncnt * sizeof *cnt);
+	uint32_t *cnt = (uint32_t *)vw_passbuf(e, ncnt * sizeof *cnt);
 	bool any = false, again = true;
 
 	memset(cnt, 0, (size_t)ncnt * sizeof *cnt);
@@ -3792,7 +3792,7 @@ static void vw_split(ecx *e)
 		return;
 	/* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
 	{
-		uint32_t *o = vw_passbuf(e, (uint64_t)V->norder * sizeof *o), m = 0;
+		uint32_t *o = (uint32_t *)vw_passbuf(e, (uint64_t)V->norder * sizeof *o), m = 0;
 
 		for (uint32_t i = 0; i < n0; i++) {
 			uint32_t b = V->order[i];

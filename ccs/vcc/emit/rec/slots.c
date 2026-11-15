@@ -16,7 +16,7 @@ static void *em_slot_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
 
 static int em_slot_cmp(const void *a, const void *b)
 {
-	const em_slot_range *x = a, *y = b;
+	const em_slot_range *x = (const em_slot_range *)a, *y = (const em_slot_range *)b;
 
 	if (x->id != y->id)
 		return x->id < y->id ? -1 : 1;
@@ -69,7 +69,7 @@ VPRIV bool em_slot_begin(em_slot_cells *s, uint32_t allocations)
 	s->valid = allocations > 0 && allocations <= 0x10000;
 	if (!s->valid)
 		return false;
-	s->a = em_slot_grow(s->a, &s->capa, allocations, sizeof(*s->a));
+	s->a = (em_slot_alloc *)em_slot_grow(s->a, &s->capa, allocations, sizeof(*s->a));
 	memset(s->a, 0, (size_t)allocations * sizeof(*s->a));
 	return true;
 }
@@ -86,7 +86,7 @@ VPRIV void em_slot_access(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 		/* Poison classification needs the range union, not multiplicity. */
 		if (s->nw && s->w[s->nw - 1].off == off && s->w[s->nw - 1].size == size)
 			return;
-		s->w = em_slot_grow(s->w, &s->capw, s->nw + 1, sizeof(*s->w));
+		s->w = (em_slot_range *)em_slot_grow(s->w, &s->capw, s->nw + 1, sizeof(*s->w));
 		s->w[s->nw++] = (em_slot_range){ 0, off, size, false, false };
 	} else {
 		em_slot_alloc *a = &s->a[id];
@@ -118,7 +118,7 @@ VPRIV void em_slot_detail(em_slot_cells *s, uint32_t id, int64_t off, uint32_t s
 	}
 	if (!id || s->a[id].state != 2)
 		return;
-	s->c = em_slot_grow(s->c, &s->capc, s->nm + 1, sizeof(*s->c));
+	s->c = (em_slot_range *)em_slot_grow(s->c, &s->capc, s->nm + 1, sizeof(*s->c));
 	s->c[s->nm++] = (em_slot_range){ id, off, size, false, false };
 }
 
@@ -188,7 +188,7 @@ VPRIV bool em_slot_finish(em_slot_cells *s)
 	}
 	if (s->nw) {
 		em_slot_sort(s->w, s->nw);
-		s->wend = em_slot_grow(s->wend, &s->capwe, s->nw, sizeof(*s->wend));
+		s->wend = (int64_t *)em_slot_grow(s->wend, &s->capwe, s->nw, sizeof(*s->wend));
 		for (uint32_t k = 0; k < s->nw; k++) {
 			int64_t end = s->w[k].off + s->w[k].size;
 
@@ -196,7 +196,7 @@ VPRIV bool em_slot_finish(em_slot_cells *s)
 		}
 	}
 	s->count = na + nm;
-	s->flags = em_slot_grow(s->flags, &s->capflags, s->count, 1);
+	s->flags = (uint8_t *)em_slot_grow(s->flags, &s->capflags, s->count, 1);
 	s->flags[0] = EM_SLOT_BAD;
 	for (uint32_t id = 1; id < na; id++) {
 		const em_slot_alloc *a = &s->a[id];
