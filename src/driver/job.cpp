@@ -306,8 +306,10 @@ static void driver_job_compile(struct driver_job *job, pp *p,
 #ifdef VCC_REFACTOR
     co.refactor =
         job->syntax_only && driver_environment_get(env, "VCC_REF_QUERY");
-    if (co.refactor)
+    if (co.refactor) {
         pp_refactor_tokens(p, co.outfd);
+        dprintf(co.outfd, "L 0 0 %s\n", job->cxx ? "c++" : "c");
+    }
 #endif
     char dbgdir[4096];
     if (job->debug)

@@ -131,6 +131,42 @@ with tempfile.TemporaryDirectory() as td:
     ]:
         rule_file.write_text(header + rules)
         run(directory, "guard.c", source, "recipe", rule_file, fail=True)
+    outline = directory / "outline.toml"
+    outline.write_text(
+        'within = "static int fill ( Box * p ) {"\n[outline_if]\n'
+        'match = "if ( @p -> n ) {"\nname = "increment"\nparameters = ["p"]\n'
+    )
+    source = """typedef struct { int n; } Box;
+static int fill(Box *p)
+{
+    if (p->n) {
+        int prior = p->n;
+        for (int i = 0; i < 2; ++i)
+            p->n += prior;
+    }
+    return p->n;
+}
+int main(void) { Box b = {2}; return fill(&b) != 6; }
+"""
+    for file in ("outline.c", "outline.cpp"):
+        changed = run(directory, file, source, "recipe", outline)
+        assert (
+            "static void increment(Box *p)" in changed
+            and "if (p->n)\n        increment(p);" in changed
+        )
+        subprocess.run(
+            [os.environ.get("CLANG", "clang"), file, "-o", "check"], cwd=directory, check=True
+        )
+        subprocess.run([directory / "check"], cwd=directory, check=True)
+        for blocked in ["return 1;", "p = 0;", "goto out;"]:
+            bad = source.replace("int prior =", blocked + "\n        int prior =").replace(
+                "    return p->n;", "out: return p->n;"
+            )
+            run(directory, file, bad, "recipe", outline, fail=True)
+        bad = source.replace("    if (p->n)", "    int extra = 1;\n    if (p->n)").replace(
+            "+= prior", "+= extra"
+        )
+        run(directory, file, bad, "recipe", outline, fail=True)
     cpp = "namespace ns { int f(int p) { int n(p); n++; return n; } }\n"
     assert len(run(directory, "ns.cpp", cpp, "refs", "1:35")) == 3
 print(f"vref: {count} cases passed")

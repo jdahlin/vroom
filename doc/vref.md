@@ -99,3 +99,21 @@ test "$(git hash-object "$file")" = c73d49c71519ca57f515d558c17344709b46ecee
 The expected blob is the reviewed parser implementation in PR #297. The
 recipe runs from the original source and compiler flags alone. The regression
 test and benchmark notes in that PR are separate from the storage edit.
+
+### Extract a guarded block
+
+An `[outline_if]` recipe keeps an `if` condition at its call site and moves
+the selected compound statement into a file-local void helper immediately
+before the enclosing function. Give it one `match` ending in the opening
+brace, the helper `name`, and the enclosing pointer `parameters` to pass.
+The helper's parameter declarations come from the original source. vref
+compares the moved tokens and their recorded name bindings after reparsing,
+including the bindings of arguments at the new call.
+
+Use this standalone operation for multiline blocks in file-scope functions
+whose inputs are simple named pointer parameters. It supports member access
+and, in C, forwarding the pointer as an ordinary argument. Control transfers,
+macro expansions and uses of additional enclosing locals are declined. The
+[scope-growth recipe](../src/test/vref/scope-growth.toml) extracts the rehash
+loop from `cxx_declare`. Run it with the same bootstrap flags as the storage
+migration, selecting `src/frontend/cxx/names.cpp`.

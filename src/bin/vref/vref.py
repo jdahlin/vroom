@@ -34,6 +34,7 @@ class Unit:
         self.bindings = collections.defaultdict(set)
         self.decls = {}
         self.macros = []
+        self.language = None
         self.indirect = set()
         env = dict(
             os.environ,
@@ -63,6 +64,8 @@ class Unit:
                 require(extra == b"0", "source contains line-spliced tokens")
                 self.starts.append(pos)
                 self.words.append(data[pos : pos + value])
+            elif kind == b"L":
+                self.language = extra
             elif kind == b"M":
                 self.macros.append((pos, value))
             elif pos < 0:
@@ -416,6 +419,15 @@ def storage_rules(storage):
     ]
 
 
+def closing_brace(words, opening, limit):
+    depth = 1
+    for i in range(opening + 1, limit):
+        depth += (words[i] == b"{") - (words[i] == b"}")
+        if not depth:
+            return i
+    raise Refusal("unbalanced scope")
+
+
 def recipe_scope(unit, within):
     words = unit.words
     header = within.encode().split()
@@ -425,12 +437,7 @@ def recipe_scope(unit, within):
     ]
     require(len(starts) == 1, "expected one matching scope")
     first = starts[0] + len(header)
-    depth = 1
-    for last in range(first, len(words)):
-        depth += (words[last] == b"{") - (words[last] == b"}")
-        if not depth:
-            break
-    require(depth == 0, "unbalanced scope")
+    last = closing_brace(words, first - 1, len(words))
     locals_by_name = collections.defaultdict(set)
     for pos, kind in unit.decls.items():
         i = unit.index[pos]
@@ -441,8 +448,6 @@ def recipe_scope(unit, within):
 
 
 def recipe_rule(unit, rule, scope_info):
-    first, last, locals_by_name = scope_info
-    words = unit.words
     require(
         isinstance(rule, dict)
         and set(rule) <= {"match", "replace", "before", "after", "count", "scope"},
@@ -454,8 +459,18 @@ def recipe_rule(unit, rule, scope_info):
         "rule needs match and one action",
     )
     action = actions.pop()
-    pattern = rule["match"].encode().split()
-    require(pattern and isinstance(rule[action], str), "invalid pattern or replacement")
+    require(isinstance(rule[action], str), "invalid replacement")
+    matches = recipe_matches(
+        unit, rule["match"], rule.get("scope", "body"), rule.get("count", 1), scope_info
+    )
+    return [recipe_replacement(unit, lo, hi, action, rule[action]) for lo, hi in matches]
+
+
+def recipe_matches(unit, match, scope, expected, scope_info):
+    first, last, locals_by_name = scope_info
+    words = unit.words
+    pattern = match.encode().split()
+    require(pattern, "invalid pattern or replacement")
     literals = []
     targets = []
     for j, token in enumerate(pattern):
@@ -465,7 +480,6 @@ def recipe_rule(unit, rule, scope_info):
             require(len(possible) == 1, "ambiguous or missing local: " + token.decode())
             targets.append((j, possible))
         literals.append(token)
-    scope = rule.get("scope", "body")
     require(scope in ("body", "file"), "unknown rule scope")
     begin, end = (first, last) if scope == "body" else (0, len(words))
     matches = []
@@ -474,12 +488,11 @@ def recipe_rule(unit, rule, scope_info):
             continue
         if all(unit.bindings.get(unit.starts[i + j]) == t for j, t in targets):
             matches.append(unit.span(i, i + len(pattern) - 1))
-    expected = rule.get("count", 1)
     require(
         type(expected) is int and expected > 0 and len(matches) == expected,
-        f"{rule['match']}: expected {expected} matches, found {len(matches)}",
+        f"{match}: expected {expected} matches, found {len(matches)}",
     )
-    return [recipe_replacement(unit, lo, hi, action, rule[action]) for lo, hi in matches]
+    return matches
 
 
 def recipe_replacement(unit, lo, hi, action, text):
@@ -505,6 +518,181 @@ def recipe_replacement(unit, lo, hi, action, text):
     return lo, hi, replacement
 
 
+def outline_if(unit, spec, within, scope_info):
+    """Keep the guard at its original site and move its compound statement."""
+    import textwrap
+
+    require(
+        isinstance(spec, dict) and set(spec) == {"match", "name", "parameters"},
+        "outline_if requires match, name and parameters",
+    )
+    require(
+        isinstance(spec["match"], str)
+        and isinstance(spec["name"], str)
+        and isinstance(spec["parameters"], list),
+        "invalid outline_if",
+    )
+    name = identifier(spec["name"])
+    pattern = spec["match"].split()
+    require(
+        pattern[:2] == ["if", "("] and pattern[-2:] == [")", "{"],
+        "outline_if must select a braced if",
+    )
+    require(name not in unit.words, "helper name already in use")
+    (anchor,) = recipe_matches(unit, spec["match"], "body", 1, scope_info)
+    begin, end = anchor
+    opening = unit.index[end - 1]
+    closing = closing_brace(unit.words, opening, scope_info[1])
+    block_end = unit.end(closing)
+    unit.check_range(begin, block_end)
+    words = unit.words[opening + 1 : closing]
+    forbidden = set(
+        b"return co_return co_await co_yield goto break continue case default this __func__ __FUNCTION__ __PRETTY_FUNCTION__ __builtin_alloca alloca asm __asm__ setjmp _setjmp sigsetjmp static #".split()
+    )
+    require(
+        not forbidden.intersection(words),
+        "block contains unsupported control flow or function context",
+    )
+    require(
+        not any(token.startswith(b"__builtin_") or b"\n" in token for token in words),
+        "block contains a builtin or multiline token",
+    )
+    # A conditional expression owns its colon. Any other colon may be a label.
+    questions = 0
+    for token in words:
+        if token == b"?":
+            questions += 1
+        elif token == b":":
+            require(questions > 0, "block contains a label")
+            questions -= 1
+    header_start = scope_info[0] - len(within.split())
+    require(
+        header_start == 0 or unit.words[header_start - 1] in (b";", b"}"),
+        "expected the complete function header after a top-level declaration",
+    )
+    require(
+        unit.words[:header_start].count(b"{") == unit.words[:header_start].count(b"}")
+        and b"::" not in unit.words[header_start : scope_info[0]],
+        "expected a file-scope function",
+    )
+    # Use the actual parameter declarator from the selected function.
+    captures = {}
+    args = []
+    declarations = []
+    for param in spec["parameters"]:
+        require(isinstance(param, str), "invalid helper parameter")
+        word = identifier(param)
+        target = scope_info[2].get(word, ())
+        require(len(target) == 1 and word not in args, "ambiguous helper parameter")
+        (pos,) = target
+        i = unit.index[pos]
+        require(
+            unit.decls[pos] == b"P"
+            and header_start < i < scope_info[0]
+            and i >= 3
+            and unit.words[i - 3] in (b"(", b",")
+            and IDENT.fullmatch(unit.words[i - 2])
+            and unit.words[i - 1] == b"*"
+            and unit.words[i + 1] in (b")", b","),
+            "expected a named pointer parameter of the enclosing function",
+        )
+        declarations.append(unit.data[unit.starts[i - 2] : unit.end(i)])
+        captures[pos] = word
+        args.append(word)
+    for i in range(opening + 1, closing):
+        bindings = unit.bindings.get(unit.starts[i], ())
+        for pos in bindings:
+            if pos in captures:
+                # Only C guarantees that an ordinary argument cannot bind to a reference.
+                arg = (
+                    unit.language == b"c"
+                    and unit.words[i + 1] in (b",", b")")
+                    and (
+                        unit.words[i - 1] == b","
+                        or (unit.words[i - 1] == b"(" and IDENT.fullmatch(unit.words[i - 2]))
+                    )
+                )
+                require(
+                    unit.words[i + 1] == b"->" or arg,
+                    "unsupported use of captured pointer",
+                )
+            elif unit.decls.get(pos) in (b"P", b"V"):
+                require(end <= pos < block_end, "block uses another local or parameter")
+    body = unit.data[end : unit.starts[closing]]
+    require(
+        body.startswith(b"\n") and not body.rsplit(b"\n", 1)[-1].strip(),
+        "expected a multiline compound statement",
+    )
+    body = textwrap.dedent(body.decode("utf-8")).strip("\n")
+    body = textwrap.indent(body, "    ").encode()
+    helper = (
+        b"static void "
+        + name
+        + b"("
+        + (b", ".join(declarations) or b"void")
+        + b")\n{\n"
+        + body
+        + b"\n}\n\n"
+    )
+    indent = unit.data[unit.data.rfind(b"\n", 0, begin) + 1 : begin]
+    require(not indent.strip(), "expected the guard on its own line")
+    guard_end = unit.end(opening - 1)
+    require(not unit.data[guard_end : unit.starts[opening]].strip(), "comment before block")
+    at = unit.starts[header_start]
+    return [
+        (at, at, helper),
+        (guard_end, block_end, b"\n" + indent + b"    " + name + b"(" + b", ".join(args) + b");"),
+    ]
+
+
+def verify_outline(before, after, edits):
+    """Compare bindings token for token in the relocated body and at the new call."""
+    (at, _, helper), (guard_end, block_end, call) = edits
+    old_open = bisect.bisect_left(before.starts, guard_end)
+    old_close = bisect.bisect_left(before.starts, block_end) - 1
+    first = after.index[at]
+    new_open = after.words.index(b"{", first)
+    offset = new_open - old_open
+    require(
+        before.words[old_open : old_close + 1] == after.words[new_open : old_close + offset + 1],
+        "moved block changed tokens",
+    )
+    captures = {
+        after.words[i]: after.starts[i]
+        for i in range(first, new_open)
+        if after.decls.get(after.starts[i]) == b"P"
+    }
+    call_start = guard_end + len(helper)
+    call_args = {
+        after.words[i]: after.bindings.get(after.starts[i], set())
+        for i in range(
+            bisect.bisect_left(after.starts, call_start),
+            bisect.bisect_left(after.starts, call_start + len(call)),
+        )
+        if after.words[i] in captures
+    }
+    for i in range(old_open + 1, old_close):
+        expected = set()
+        for dest in before.bindings.get(before.starts[i], ()):
+            if dest < at:
+                expected.add(dest)
+            elif dest < guard_end:
+                word = before.words[before.index[dest]]
+                require(
+                    word in captures and call_args.get(word) == {dest + len(helper)},
+                    "helper argument resolves to a different declaration",
+                )
+                expected.add(captures[word])
+            elif dest < block_end:
+                expected.add(after.starts[before.index[dest] + offset])
+            else:
+                expected.add(dest + len(helper) + len(call) - (block_end - guard_end))
+        require(
+            expected == after.bindings.get(after.starts[i + offset], set()),
+            "binding changed in moved block",
+        )
+
+
 def recipe_edits(unit, path):
     """Plan every rule against the same immutable, frontend-tokenized source."""
     try:
@@ -515,19 +703,23 @@ def recipe_edits(unit, path):
     with path.open("rb") as stream:
         spec = tomllib.load(stream)
     require(
-        set(spec) in ({"within", "rule"}, {"within", "rule", "storage"})
+        "within" in spec
+        and set(spec) <= {"within", "rule", "storage", "outline_if"}
         and isinstance(spec["within"], str)
-        and isinstance(spec["rule"], list),
+        and isinstance(spec.get("rule", []), list),
         "recipe needs within and rule",
     )
-    rules = spec["rule"]
+    rules = spec.get("rule", [])
     if "storage" in spec:
         rules = [*rules, *storage_rules(spec["storage"])]
     scope_info = recipe_scope(unit, spec["within"])
     edits = [edit for rule in rules for edit in recipe_rule(unit, rule, scope_info)]
+    if "outline_if" in spec:
+        require(not edits, "outline_if is a standalone recipe operation")
+        edits.extend(outline_if(unit, spec["outline_if"], spec["within"], scope_info))
     require(len({lo for lo, _, _ in edits}) == len(edits), "rules share an edit start")
     require(edits, "empty recipe")
-    return edits
+    return edits, "outline_if" in spec
 
 
 def validate(before, after, edits, *, whole_macros=False):
@@ -614,7 +806,7 @@ def main():
             line = bisect.bisect_right(unit.lines, pos)
             print(f"{args.file}:{line}:{pos - unit.lines[line - 1] + 1}")
         return
-    edits = recipe_edits(unit, args.recipe) if is_recipe else plan(unit, args, i)
+    edits, outlined = recipe_edits(unit, args.recipe) if is_recipe else (plan(unit, args, i), False)
     for lo, hi, _ in edits:
         unit.check_range(lo, hi, whole_macros=is_recipe)
     updated = apply(data, edits)
@@ -623,6 +815,8 @@ def main():
         overlay.flush()
         after = Unit(path, updated, flags, overlay.name)
     validate(unit, after, edits, whole_macros=is_recipe)
+    if outlined:
+        verify_outline(unit, after, edits)
     if args.op == "rename":
 
         def bindings(u):
