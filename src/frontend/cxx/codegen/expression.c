@@ -314,6 +314,13 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
 				x = cc_dereference_build(a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);
 			}
 			c->enode = x;
+		} else if ((AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && !cc_node_bitfield(a, x) && AST_TYPE_KIND(a, bt) != AST_TYPE_FUNCTION) {
+			/* (T&)x of an lvalue of another type: reinterpret_cast<T&>(x), *(T *)&x ([expr.cast]/4; libc++'s
+			   is >> (char&)__c of an unsigned char) */
+			ast_qualified_type pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
+			uint32_t addr = cc_conversion_decay(a, cc_address_of_build(a, x, loc));
+
+			c->enode = cc_dereference_build(a, cc_cast_insert(a, addr, pt, AST_CAST_NOP), loc);
 		}
 		return;
 	}

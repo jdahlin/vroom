@@ -2740,3 +2740,9 @@ Sviter gröna (146/146, 38/38, mangle).  Strikt bänk: pass 29, 108 saknas.
   (`static_cast<size_t>(pos)`: `operator streamoff`).
 Test: `run/typedef-unnamed-class-mangling.cpp`.  Sviter gröna (147/147,
 38/38, mangle).  Strikt bänk: pass 29, 90 saknas (från 108).
+
+## Status 177 (2026-11-16)
+`(T&)x` av ett lvalue av en annan typ är `reinterpret_cast<T&>(x)`,
+`*(T *)&x` (libc++:s `is >> (char&)__c` för en unsigned char).  Test:
+`run/cstyle-cast-reference.cpp`.  Sviter gröna (148/148, 38/38, mangle).
+Strikt bänk: pass 29, 85 saknas.
