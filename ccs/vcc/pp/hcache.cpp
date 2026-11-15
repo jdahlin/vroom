@@ -403,10 +403,32 @@ static bool tree_ok(pp *p, const hent *e, hexf *xs, int nx)
     return own_reads_ok(p, e, xs, nx) && kids_ok(p, e, xs, nx);
 }
 
+/* Monotone over the interner's lifetime. A writer sets its bit before the
+ * release publication of any entry containing that write. Thus a reader
+ * acquiring an entry also sees its transient and nested writes. An unrelated
+ * write may cause a conservative miss on a counter-derived name. */
+static _Atomic uint64_t hc_written[(1u << VINTERN_ID_BITS) / 64];
+
+VPRIV bool hc_ever_written(uint32_t id)
+{
+    return (atomic_load_explicit(&hc_written[id / 64], memory_order_relaxed) >>
+            (id % 64)) &
+           1;
+}
+
+VPRIV void hc_note_write(uint32_t id)
+{
+    if (!hc_ever_written(id))
+        atomic_fetch_or_explicit(&hc_written[id / 64], UINT64_C(1) << (id % 64),
+                                 memory_order_relaxed);
+}
+
 VPRIV bool hc_valid(pp *p, const hent *e)
 {
     hexf xs[HC_MAXLEV + 1];
 
+    if (e->fixed_counter && e->counter0 != p->counter)
+        return false;
     if (e->level >= 0 && e->level != p->nfile)
         return false;
     HV_FOR(e->rg, hread, r)
@@ -427,7 +449,24 @@ VPRIV bool hc_valid(pp *p, const hent *e)
     }
     if (e->nlk && dirs_differ(p, e) && !hc_looks_ok(p, e))
         return false;
-    return kids_ok(p, e, xs, 0);
+    if (!kids_ok(p, e, xs, 0))
+        return false; /* (before the costly counter-name lookups) */
+    for (uint32_t i = 0; i < e->ncrd; i++) {
+        const hcread *r = &e->crd[i];
+        char b[4096 + 40];
+        int dl = utoa(b + r->off, p->counter + r->rel);
+        size_t n = r->off + (size_t)dl + (r->len - r->off - r->dlen);
+        uint32_t id;
+
+        memcpy(b, r->s, r->off);
+        memcpy(b + r->off + dl, r->s + r->off + r->dlen,
+               r->len - r->off - r->dlen);
+        memset(b + n, 0, 16);
+        id = vintern_find(b, n, vintern_hash(b, n));
+        if (id && (mget(p, id) || hc_ever_written(id)))
+            return false;
+    }
+    return true;
 }
 
 /* an entry's text, children spliced in, __COUNTER__ values from base */

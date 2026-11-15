@@ -341,6 +341,17 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
     - Poster som träd (2026-11-08): en post lagrar bara sina egna läsningar, sina egna sista skrivningar (`HT_O`) och en lista med barnposter. Varje barn har de id:n föräldern skrev före barnet; barnets läsningar av dem är inte indata. Deltat tillämpas barn för barn och sedan det egna. Vid uppslag memoiseras ett barns utslag per `hc_try`, och räknarnamnen (`__COUNTER__`) kontrolleras sist. En variant över 64 per nyckel publiceras men listas inte, så att föräldern kan ha den som barn. Vid minnestaket blir de omslutande nivåerna ej cachebara. Lagrat `-E` 330 → 292 MB, tokens 430 → 361 MB, max RSS 735 → 691 MB respektive 1,35 → 1,27 GB; instruktioner 77,3 → 76,3 G, cykler lika inom bruset (load 6–9). Publiceringens bitar försvann nästan (`hc_vec` 193 → 14 samplingar), men nu kostar barnens validering och genomgången av barnets läsningar och skrivningar när det läggs till en förälder ungefär lika mycket.
     - Verifiering: `--vcc-tokhash` identisk med `VPP_NOHC=1` för alla C-TU:er, `vcc-diff.py cmp -j 6` 911/912, batch `--cmp` 873/873, `vcc-sema.py run` och `layout` 878/879, `fuzz-regress` grönt. TSan-körningen avbröts (för långsam på den delade maskinen) och är inte gjord.
   - vccd tar inte om filer och litar redan på att de är oföränderliga, och cachen ärver det.
+**Uppdatering 2026-11-15.** En omdefinition läser den gamla bindningen.
+För räknarnamn kontrolleras nu även tillfälliga skrivningar i regionen.
+När ett genererat namn behöver en konkret bindning får posten återanvändas
+vid samma ingångsräknare. `-Wvcc-uncacheable-header` anger orsaken när
+inspelningen måste överges. Paritet 516/516 mot Clang 23 i delad process
+och separat per TU. Arm64 tinyconfig på Linux x86-64, tre rena byggen per
+version med `-j6`: median 5,82 → 5,88 s, identisk Image. 446 C-jobb i vcc,
+tre med Clang i båda byggena på grund av befintliga länkfel. Samma 446 jobb
+i en process: 42,676 → 43,051 miljarder användarinstruktioner (+0,88 %).
+Se RESEARCH-preprocessor.md §6.12 för körvillkor och testmatris.
+
 ### Status 2.5 (2026-11-07): parser + sema, första version klar
 - 2.4 (header-cache) är medvetet uppskjuten: först hela kedjan, sedan fart.
 - `ccs/vcc/cc.c` (+ `cc.h`): rekursiv descent för GNU C11 med sema i samma pass. Typer internas (qty = index<<3 | kvalificerare), poster/symboler/noder är 32-bitars index i per-TU-arrayer som reserveras med mmap. Varje uttryck får sin typ, implicita konverteringar blir N_CAST-noder, och konstantuttryck utvärderas vid behov med clangs skillnad mellan ICE och vikbart (nollpekarkonstanter, alltså `__is_constexpr`, beror på den).

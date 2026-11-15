@@ -1370,6 +1370,77 @@ untouched until every check succeeds. An invalid candidate is an ordinary miss.
    header across a vccd build-generation boundary and compare with a fresh
    process. Existing search-path variations live in `bench/vcc-cachekey.py`.
 
+### 6.12 Reusing headers with counter-derived macro names (2026-11-15)
+
+The final implementation passes the transient-binding case without requiring
+every use of a pasted identifier to abandon its enclosing recordings.
+
+- For an unbound identifier with one counter digit run, save its spelling
+  template and relative counter. At replay, rebuild its name. Accept the probe
+  if the name is absent on entry and has no recorded write anywhere in the
+  process. A 1 MiB atomic bitmap indexed by interned ID remembers writes,
+  including earlier sibling writes and definitions undone before the include
+  returns. Bits are monotone. Recording sets a bit before publishing the
+  immutable entry, including when the last operation on the name is an undef.
+  Writes in another TU may conservatively disqualify the variant.
+- For a bound name, a previously written name, or a spelling that cannot be
+  relocated by that check, track the concrete macro read and require the same
+  incoming counter. Attaching a child propagates the restriction to its
+  parent whether the child was freshly recorded or replayed. The parent's own
+  incoming counter and validated execution path then reproduce the child's
+  counter at that include site. Output-only counters remain relocatable.
+- A `#define` records the previous macro binding. A conflicting redefinition
+  prevents publication even if a pragma suppressed its warning during this
+  run. The warning policy from §6.11 reports a rejected recording once at the
+  header where the reason was observed. It doesn't diagnose a counter mismatch
+  that simply selects another valid variant.
+- When attaching a large child to a parent that has touched at most 16 names,
+  the parent can list its prior writes as exclusions directly. The child only
+  consults exclusions for names it reads. This avoids walking a large subtree
+  to compute the same validity result for a short prefix.
+
+**Regression coverage.** `bench/vcc-header-deps.py` runs 11 header families in
+both TU orders, with and without the cache. Its 36 generated combinations
+vary the include depth, incoming binding, temporary parent write and counter
+base across 9→10. The matrix compares tokens to Clang and checks C static
+assertions in forward and reverse job order at one and six workers. Dedicated
+single-header probes require three hits in four jobs for unbound names and
+two hits for two separately bound variants. The warning tests cover default,
+warning, error and explicit suppression. The suite runs in under a second
+on the measurement host. It also passed with ASan/UBSan and TSan. Removing
+the old-binding read, the recorded-write check, or propagation of the fixed
+counter from a child made the suite fail in each of three separate mutation
+runs. The transient define/read/undef test also caught the missing write
+check when run on its own.
+
+**Kernel measurement.** Linux x86-64 host, Linux 7.4-rc2 arm64 tinyconfig,
+Clang/LLVM 23, `make -j6 Image`. Each run starts with clean kbuild outputs
+and a fresh vccd, with a warm filesystem. Host programs, assembly, probes
+and linking use LLVM. Compiling every target C file with the baseline vcc
+produced unresolved symbols at link. Both measured builds therefore use
+Clang for `kernel/sched/build_policy.c`, `kernel/dma/pool.c` and
+`mm/vmalloc.c`, and vccd for the other 446 C compilations. The source tree,
+flags, timestamp and build version are fixed. Three interleaved runs of each
+version produced byte-identical Images (SHA-256
+`3559e33851f17db4c3e22f52aa263bc267e9dd679a336db6cb315ce93dfd504e`).
+
+| Metric | Before fixes | Final |
+|---|---:|---:|
+| Median Image build wall time (s) | 5.82 | 5.88 |
+| Range, three builds (s) | 5.60–5.90 | 5.74–6.01 |
+| Median vccd user + system CPU (s) | 4.99 | 5.10 |
+| Median header data replayed in vccd (MB) | 230.6 | 230.8 |
+| Median user instructions for 446 C jobs (billions) | 42.676 | 43.051 |
+
+Count instructions separately by replaying those C command lines in sorted
+object order through one fresh `vpp --batch -j 1`, under
+`perf stat -e instructions:u`, three times per version. This isolates compiler
+work from make and LLVM. The final overhead is 0.88%. On that same stream the
+unconditional fallback took 84.663 billion instructions and pinning every
+generated name to one counter base took 47.505 billion. All 516 captured
+preprocessing units matched fresh Clang references in both batch and
+per-process comparisons. These measurements cover this kernel configuration.
+
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,
   DependencyDirectivesScanner.cpp (llvm-project `main`)

@@ -41,6 +41,14 @@ gäller.  Varje grind ska ha ett skript med tydligt grönt/rött resultat
 | G8 | vccd som default | TODO.md tier 2 tom. Autostart, versionskontroll mellan shim och server, fallback till ren process om vccd saknas eller kraschar. `vccd-test.py` + `vcc-stress.py --vccd` körs i timmar; fungerar i CI och containrar |
 | G9 | Paketering | En tagg ger via CI: källtarball, binära tarballs per plattform, Homebrew-formel, .deb, containeravbild. README, LICENSE (MIT) och THIRD-PARTY med ursprung och licens för clang-tabellerna (`caps.c`, `ppdata*.inc`), gcc c-torture och tcc tests2 |
 
+### G1/G6/G7, headercache 2026-11-15
+
+Två ordningsberoende cachefel har permanenta tester i premerge. En frivillig
+varning visar varför en header inte kunde lagras och kan göras till fel.
+516/516 preprocessorenheter matchar Clang i två körsätt. För arm64 tinyconfig
+kostar ändringen 0,88 % fler instruktioner i de 446 C-jobben. Villkor och
+begränsningar för kernelbygget finns i RESEARCH-preprocessor.md §6.12.
+
 ## Ordning
 
 Ordningen följer beroenden, inte datum.  Spår som inte rör samma filer

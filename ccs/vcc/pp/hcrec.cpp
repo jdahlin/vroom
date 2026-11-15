@@ -45,10 +45,33 @@ VPRIV uint16_t cp_chain(pp *p, uint16_t a, uint32_t d, uint16_t tail)
     }
 }
 
+/* a read of an identifier with __COUNTER__ digits: at replay its name differs */
+VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t,
+                                                  uintptr_t e)
+{
+    const cprov *c = &p->rec.cp[t->ctr];
+    char *d;
+
+    if (e || hc_ever_written(t->id) || c->next || t->len > 4096 ||
+        p->rec.ncrd == HC_MAXCRD) {
+        /* Same counter base gives the same concrete name, including multi-paste. */
+        p->rec.lev[p->rec.n - 1].fixed_counter = 1;
+        rec_read(p, t->id, e, 0);
+        return;
+    }
+    d = (char *)varena_alloc(&p->perm, t->len + 1);
+    memcpy(d, t->s, t->len); /* pasted: the spelling is clean */
+    p->rec.crd[p->rec.ncrd++] =
+        VCC_LITERAL(hcrd, d, t->len, c->off, c->len, c->val);
+}
+
 /* #define / #undef / pop_macro */
 VPRIV void mdef(pp *p, uint32_t id, const pmacro *m)
 {
-    if (unlikely(p->rec.on))
+    if (unlikely(p->rec.on)) {
+        p->rec.lev[p->rec.n - 1].has_writes = 1;
+        hc_note_write(id);
         touch_write(p, id);
+    }
     mset(p, id, m);
 }
