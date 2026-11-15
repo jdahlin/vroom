@@ -130,18 +130,21 @@ VPRIV void cxx_template_parameter_parse(cxx *c)
         cxx_advance(c);
         pack = cxx_accept(c, LEX_TOKEN_ELLIPSIS);
         if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c)) {
-            cxx_entity *e =
-                cxx_declare(c, c->scope, cxx_peek(c, 0)->id, CXX_ENTITY_TYPE);
-
             pname = cxx_peek(c, 0)->id;
-            if (e)
-                e->dependent = 1;
             cxx_advance(c);
         }
         if (cxx_accept(c, LEX_TOKEN_EQUAL)) {
             db = c->pos;
             cxx_type_id_parse(c);
             de = c->pos;
+        }
+        /* declared after its default: typename Attrs = Attrs<...> names the enclosing Attrs
+           ([basic.scope.pdecl]: a parameter's scope starts after its template-parameter) */
+        if (pname) {
+            cxx_entity *e = cxx_declare(c, c->scope, pname, CXX_ENTITY_TYPE);
+
+            if (e)
+                e->dependent = 1;
         }
         cxx_tparam_add(c, 1, pname, pack, db, de);
         return;
