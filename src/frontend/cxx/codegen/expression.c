@@ -163,10 +163,19 @@ VPRIV void cxx_gen_unary(cxx *c, int op, uint32_t x, uint32_t loc)
 	case LEX_TOKEN_PLUS_PLUS: case LEX_TOKEN_MINUS_MINUS:
 		if (!(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE))
 			return;
+		if (AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_BOOL && !cc_node_bitfield(a, x)) {
+			/* C++: ++x is x, an lvalue (its address taken: --it bound to a reference, libc++'s
+			   __iter_move(--__last_iter)): *(++*t, t) with t = &x, evaluated once (C's node is no lvalue) */
+			uint32_t pre = 0, t = cc_lowering_once(a, cc_address_of_build(a, x, loc), &pre), inc;
+
+			inc = cc_node_new(a, op == LEX_TOKEN_PLUS_PLUS ? AST_NODE_PRE_INCREMENT : AST_NODE_PRE_DECREMENT, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty), loc);
+			AST_NODE_AT(a, inc)->a = cc_dereference_build(a, cc_node_rvalue(a, t), loc);
+			r = cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, t)->ty, loc, inc, cc_node_rvalue(a, t));
+			r = cc_dereference_build(a, cc_lowering_sequence(a, pre, r), loc);
+			break;
+		}
 		r = cc_node_new(a, op == LEX_TOKEN_PLUS_PLUS ? AST_NODE_PRE_INCREMENT : AST_NODE_PRE_DECREMENT, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty), loc);
 		AST_NODE_AT(a, r)->a = x;
-		if (AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_BOOL)
-			AST_NODE_AT(a, r)->flags |= AST_NODE_FLAG_LVALUE;	/* (C++: ++x is an lvalue) */
 		break;
 	default:
 		return;

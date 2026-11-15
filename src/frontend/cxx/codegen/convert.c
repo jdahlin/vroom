@@ -219,6 +219,28 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to, 
 		f = best;
 		if (!f || f->fn_deleted)
 			return 0;
+	} else if ((!f || f->kind != CXX_ENTITY_VALUE) && to != CXX_TY_UNKNOWN) {
+		/* no conversion function to that type: a conversion function template's instance for it, the type
+		   its first template parameter (template <class T, ...> operator T() const) */
+		cxx_entity *was = c->call_instance, *pick = NULL;
+
+		f = NULL;
+		for (cxx_entity *e = cxx_lookup_in(c, cls, vintern_cstr("operator #tmpl"), 0); e && !pick; e = e->next) {
+			cxx_targ xa = { .kind = 1, .t = AST_QUALIFIED_TYPE_UNQUALIFIED(to) };
+			ast_qualified_type ret;
+			uint8_t oq = AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE_AT(a, x)->ty) & AST_QUALIFIER_CONST;
+
+			if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || (oq && !(e->fn_const & 1)))
+				continue;
+			c->call_instance = NULL;
+			if (cxx_ftemplate_deduce(c, e, &xa, 1, NULL, NULL, 0, &ret, true) == 1 && c->call_instance && ret != CXX_TY_UNKNOWN &&
+			    AST_QUALIFIED_TYPE_UNQUALIFIED(ret) == AST_QUALIFIED_TYPE_UNQUALIFIED(to))
+				pick = c->call_instance;
+		}
+		c->call_instance = was;
+		if (!pick)
+			return 0;
+		f = pick;
 	} else if (!f || f->kind != CXX_ENTITY_VALUE || f->fn_deleted)
 		return 0;
 	if (f->late && !f->late_done)

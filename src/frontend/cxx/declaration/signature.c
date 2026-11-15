@@ -31,11 +31,15 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return, b
 	c->einvalid = 0;	/* (and an expression that is ill-formed for sure: -> decltype(c.begin()) for an int) */
 	c->sig_requires = 1;
 	cxx_attributes_skip(c);
-	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class) {
+	bool conv_fn = false;
+
+	if (!(cxx_decl_specifiers_parse(c, ctor_class, false) & (DS_TYPE | DS_MODIFIER)) && !ctor_class && !(conv_fn = cxx_is_kw(c, CXX_KW_operator))) {
 		c->member_missing = missing, c->einvalid = invalid;
 		return CXX_TY_UNKNOWN;
 	}
-	c->type_in = ctor_class ? cc_type_basic(AST_TYPE_VOID) : c->ds_type;	/* (a constructor: nothing returned) */
+	conv_fn |= cxx_is_kw(c, CXX_KW_operator) && c->ds_type == CXX_TY_UNKNOWN;
+	/* (a constructor: nothing returned; a conversion function template: the type it names, its declarator's) */
+	c->type_in = ctor_class || conv_fn ? cc_type_basic(AST_TYPE_VOID) : c->ds_type;
 	/* auto f(): the declarator over auto's placeholder; the body's first return gives the type */
 	bool ret_auto = !ctor_class && c->ds_auto && c->ds_type == CXX_TY_UNKNOWN;
 	ast_qualified_type ret_pattern = CXX_TY_UNKNOWN;

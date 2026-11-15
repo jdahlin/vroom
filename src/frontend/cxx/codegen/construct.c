@@ -402,6 +402,19 @@ bitwise:
 		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, target, cc_node_rvalue(a, args[0]), loc), 0, 0));
 		return true;
 	}
+	if (nargs == 1 && args[0] && cc_type_is_record(a, AST_NODE_AT(a, args[0])->ty) && AST_TYPE_KIND(a, AST_NODE_AT(a, args[0])->ty) != AST_TYPE_ARRAY &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) != AST_QUALIFIED_TYPE_UNQUALIFIED(t) &&
+	    (!found || (ctor && ctor->fn_defaulted)) && !cxx_class_base_offset(c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty), AST_QUALIFIED_TYPE_UNQUALIFIED(t), &(uint64_t){ 0 }, 0)) {
+		/* T x = y, T x(y) of another class with no constructor of T's taking it: y's conversion function (or
+		   conversion function template) to T, the object copied from that ([dcl.init.general]/16.6.3) */
+		uint32_t y = cxx_gen_convert_class(c, args[0], AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
+
+		if (y && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(t)) {
+			c->ctor_picked = NULL, c->ctor_found = false;
+			cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &AST_NODE_AT(a, y)->ty, (const uint8_t[]){ 0 }, 1, false);
+			return cxx_gen_construct_at(c, target, t, &y, 1, out, loc);
+		}
+	}
 	if (!found && !(nargs == 1 && args[0] && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(t)))
 		return cxx_gen_aggregate_init(c, target, t, args, nargs, out, loc);
 	if (nargs == 1 && args[0] && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(t) && (AST_NODE_AT(a, args[0])->flags & AST_NODE_FLAG_LVALUE) &&

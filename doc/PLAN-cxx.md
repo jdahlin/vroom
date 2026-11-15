@@ -2635,3 +2635,20 @@ Dolda vänner i jsons serialiseringskedja (`NLOHMANN_DEFINE_TYPE_INTRUSIVE`,
   (`constructing`, `construct_depth`) gör det utan den omvandlingens
   begränsningar: `j = 5` i en `to_json` som `json(T&&)`:s noexcept instansierar.
 Sviter gröna (133/133, 38/38, mangle).  Strikt bänk: pass 24, 125 saknas.
+
+## Status 168 (2026-11-15)
+- `x = y` för en klass tar operandernas värdekategori: ett lvalue `y` väljer
+  `operator=(const T&)`.  Förut valdes `operator=(T&&)` även för lvalues,
+  så std::string:s flyttande tilldelning tömde källan (jsons
+  `from_json(j, string&)`: `j.get<T>()` tömde j:s strängar).  Test:
+  `run/assign-lvalue-copy.cpp`.
+- Konverteringsfunktionsmallar (`template <class T> operator T() const`,
+  jsons implicita omvandlingar) deklareras (som "operator #tmpl") och
+  instansieras för målklassen i `T x = y`, `T x(y)`, `T(y)`; manglas som
+  clangs (`cvT_`, ingen returtyp).  Test: `run/conversion-function-template.cpp`.
+- `__builtin_clzg`/`ctzg`/`popcountg` sänks till de fasta builtins (x86-64
+  saknade noden; std::sort:s `__log2i`).  Test: `run/builtin-clzg.cpp`.
+- `++x`/`--x` som lvalue byggs som `*(++*t, t)` (C:s nod är inget lvalue;
+  libc++:s `move_backward`).  Test: `run/preincrement-lvalue.cpp`.
+Sviter gröna (137/137, 38/38, mangle).  Strikt bänk: pass 25, alla TU:er
+kompileras, 127 funktioner saknas.

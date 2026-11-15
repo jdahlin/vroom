@@ -366,6 +366,7 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 
 	if (cxx_is_assignment_operator(c, &n)) {
 		ast_qualified_type l = c->etype;
+		bool ll = c->elval;
 		bool built_in = l != CXX_TY_UNKNOWN && (cc_type_is_arithmetic(c->ast, l) || AST_TYPE_KIND(c->ast, l) == AST_TYPE_POINTER);
 		uint32_t ln = c->enode, oploc = cxx_peek(c, 0)->loc, ntok = n;
 		int optok = cxx_operator_at(c, &ntok);
@@ -397,6 +398,9 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 				memset(c->carg_brace, 0, sizeof c->carg_brace);
 				c->carg_brace[0] = bpos;
 			}
+			/* (the operands' value categories: x = y of an lvalue y takes operator=(const T&), not (T&&)) */
+			if (!built_in && !c->tentative)
+				c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = braced ? 0 : c->elval;
 			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, braced ? c->cargs : &c->etype, 1))
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
 			if (built_in)

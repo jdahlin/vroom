@@ -1787,7 +1787,34 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 			mg_str(&m, op);
 		else if (conv) {
 			mg_str(&m, "cv");
-			mg_type(&m, x->base);
+			if (f->is_instance) {
+				/* a conversion function template's instance: the type as the template names it (cvT_) */
+				const ast_qualified_type *cph;
+				uint32_t cnph = 0, cpp = 0;
+				ast_qualified_type cds = cxx_instance_declared_sig(c, f, &cph, &cnph, &cpp);
+
+				ast_qualified_type ct = cds != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, cds) == AST_TYPE_FUNCTION ? AST_TYPE(a, cds)->base : CXX_TY_UNKNOWN;
+				uint32_t k = UINT32_MAX;
+
+				/* (the declared type a placeholder signature does not keep, void: the template parameter
+				   whose argument it is) */
+				if ((ct == CXX_TY_UNKNOWN || AST_TYPE_KIND(a, ct) == AST_TYPE_VOID) && cph)
+					for (uint32_t i = 0; i < f->ntargs && i < cnph && k == UINT32_MAX; i++)
+						if (f->targs[i].kind == 1 && AST_QUALIFIED_TYPE_UNQUALIFIED(f->targs[i].t) == AST_QUALIFIED_TYPE_UNQUALIFIED(x->base))
+							k = i;
+				if (k != UINT32_MAX)
+					ct = cph[k];
+				if (ct != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, ct) != AST_TYPE_VOID) {
+					const ast_qualified_type *ph0 = m.ph;
+					uint32_t nph0 = m.nph;
+
+					m.ph = cph, m.nph = cnph;
+					mg_type(&m, ct);
+					m.ph = ph0, m.nph = nph0;
+				} else
+					mg_type(&m, x->base);
+			} else
+				mg_type(&m, x->base);
 		} else
 			mg_source_name(&m, f->name);
 		mg_abi_tag(&m, f->abi_tag);
@@ -1859,7 +1886,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 		bool ok = true;
 
 		m.ph = m.tph, m.nph = m.ntph;
-		if (!(v->len && v->s[0] == ' ')) {
+		if (!(v->len && v->s[0] == ' ') && !conv) {
 			while (mt_word(&k, "static") || mt_word(&k, "inline") || mt_word(&k, "constexpr") || mt_word(&k, "friend") ||
 			       mt_word(&k, "explicit") || mt_word(&k, "virtual"))
 				k.p++;
@@ -1875,7 +1902,7 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 		m.n = save_n, m.nsubs = save_subs, m.bad = false, m.ph = ph0, m.nph = nph0;
 		c->mangle_guess = 1;
 	}
-	if (f->is_instance && !(v->len && v->s[0] == ' ')) {
+	if (f->is_instance && !(v->len && v->s[0] == ' ') && !conv) {	/* (a conversion function: no return type, [mangle]) */
 		const ast_qualified_type *ph0 = m.ph;
 		uint32_t nph0 = m.nph;
 

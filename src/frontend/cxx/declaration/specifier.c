@@ -644,9 +644,20 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
 	(void)ptr;
 	/* the type it converts to, for is_convertible and the like (a class's, not a template's) */
 	if (conv_class && !c->tentative) {
-		if (conv_to == CXX_TY_UNKNOWN || c->template_depth || cxx_type_has_placeholder(c, conv_to))
+		if (conv_to == CXX_TY_UNKNOWN || c->template_depth || cxx_type_has_placeholder(c, conv_to)) {
 			conv_class->conv_unknown = 1;
-		else {
+			/* a conversion function template, its own template header between it and its class (template
+			   <class T> operator T(): json's implicit conversions): entered as "operator #tmpl", a member
+			   template codegen instantiates for the type it converts to (cxx_gen_convert_class) */
+			bool own = false;
+
+			for (cxx_scope *s = c->scope; s && s != conv_class; s = s->parent)
+				own |= s->kind == CXX_SCOPE_TEMPLATE;
+			if (own) {
+				c->conv_last = conv_to;
+				return vintern_cstr("operator #tmpl");
+			}
+		} else {
 			/* (its name in the class: "operator #" and the type's number; mangle.c writes cv <type>) */
 			char nm[64] = { 0 };
 

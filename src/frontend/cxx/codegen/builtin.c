@@ -202,6 +202,35 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len, const uint32_t 
 				v = cc_conversion_apply(a, v, cc_builtin_signature_type(a, b->sig[i + 1]));
 			cc_id_list_append(a, &l, v);
 		}
+		if ((cb->id == CC_BUILTIN_CLZG || cb->id == CC_BUILTIN_CTZG || cb->id == CC_BUILTIN_POPCOUNTG) && l.n >= 1 && l.n <= 2) {
+			/* __builtin_clzg(x[, fallback]), ctzg, popcountg of an unsigned integer of up to 64 bits: the fixed
+			   width ones (as C lowers them, builtin-bit-count.c): x == 0 ? fallback : clz(x) - (width - bits) */
+			uint32_t x = l.v[0], pre = 0, fb = l.n == 2 ? l.v[1] : 0, fpre = 0, r, ln;
+			ast_qualified_type xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, cc_conversion_decay(a, args[0]))->ty);	/* (its own type: not the promoted one) */
+			unsigned bits = cc_type_is_integer(a, xt) ? (AST_TYPE_KIND(a, xt) == AST_TYPE_BOOL ? 1 : cc_type_integer_bits(a, xt)) : 0;
+			bool wide = bits > 32;
+			int fid = cb->id == CC_BUILTIN_CLZG ? (wide ? CC_BUILTIN_CLZLL : CC_BUILTIN_CLZ) :
+				  cb->id == CC_BUILTIN_CTZG ? (wide ? CC_BUILTIN_CTZLL : CC_BUILTIN_CTZ) : (wide ? CC_BUILTIN_POPCOUNTLL : CC_BUILTIN_POPCOUNT);
+			ast_qualified_type ut = cc_type_basic(wide ? AST_TYPE_UNSIGNED_LONG_LONG : AST_TYPE_UNSIGNED_INT), it = cc_type_basic(AST_TYPE_INT);
+			cc_id_list fl;
+
+			if (!bits || bits > 64 || cc_type_is_signed(a, xt))
+				return;
+			x = cc_lowering_once(a, x, &pre);
+			if (fb)
+				fb = cc_lowering_once(a, fb, &fpre);
+			cc_id_list_init(&fl);
+			cc_id_list_append(a, &fl, cc_conversion_apply(a, x, ut));
+			r = cc_builtin_node_new(a, fid, it, loc, &fl);
+			if (cb->id == CC_BUILTIN_CLZG && bits < (wide ? 64u : 32u))
+				r = cc_binary_build(a, LEX_TOKEN_MINUS, r, cc_node_integer_new(a, (wide ? 64 : 32) - bits, it, loc), loc);
+			if (fb && cb->id != CC_BUILTIN_POPCOUNTG) {
+				ln = cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, x), cc_node_integer_new(a, 0, it, loc), loc);
+				r = cc_conditional_build(a, ln, cc_conversion_apply(a, fb, it), r, loc);
+			}
+			c->enode = cc_lowering_sequence(a, pre, cc_lowering_sequence(a, fpre, cc_conversion_apply(a, r, rt)));
+			return;
+		}
 		c->enode = cc_builtin_node_new(a, cb->id, rt, loc, &l);
 		return;
 	}
