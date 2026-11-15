@@ -2467,3 +2467,16 @@ deklaration och definition.  `std::string(first, last)` kompileras.  Test:
 `run/ooc-member-template-overloads.cpp`.  Strikt bänk: pass 10 (från 8), 152
 saknas, inga fel.  Kvar: Tn-mangling av en egen aliasmall (inte enable_if)
 som värdeparameterns typ.  Sviter gröna (112/112, 38/38, mangle, 350/350).
+
+## Status 155 (2026-11-15)
+ADL i funktionsanrop (`operator<<(os, j)` vid namn) tog den första
+argumentnamnrymden som gav ett resultat: std:s överlagringar, som en json når
+via sin konverteringsfunktion, i stället för jsons dolda vän (exakt).  Nu
+hålls ett resultat som krävde en konvertering (eller inte kunde ordnas) undan
+medan övriga argument prövas; ett som inte är sämre för något argument och
+bättre för något vinner.  ADL görs också i ovärderade operander i tentativa
+parsningar, och ett arguments klassinstans görs komplett för sina vänner.
+Test: `run/adl-friend-after-conversion.cpp`.  Kvar: doctests
+`has_insertion_operator<json>` blir fortfarande okänd (det andra argumentets
+typ okänd i det sammanhanget).  Strikt bänk: pass 10, 152 saknas, inga fel.
+Sviter gröna (113/113, 38/38, mangle, 350/350).

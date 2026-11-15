@@ -2094,12 +2094,44 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 {
 	ast_qualified_type acopy[16];
 	uint8_t lcopy[16];
+	/* a resolution that needed a conversion (std's operator<< for a json, through its conversion function)
+	   is set aside while the other arguments' namespaces and friends are tried: one that converts no argument
+	   worse and some better wins (one candidate set in C++) */
+	bool held = false, h_lval = false;
+	ast_qualified_type h_type = CXX_TY_UNKNOWN;
+	cxx_entity *h_picked = NULL, *h_callee = NULL;
+	uint8_t h_ranks[16], h_n = 0, h_unsure = 0;
+#define ADL_DONE() do { \
+		if (c->etype != CXX_TY_UNKNOWN) { \
+			bool conv = false; \
+			for (uint32_t r_ = 0; r_ < c->call_nranks; r_++) \
+				conv |= c->call_ranks[r_] >= 2; \
+			if (held) { \
+				bool better = !h_n && c->call_resolved, worse = !c->call_resolved || (h_n && c->call_nranks != h_n); \
+				for (uint32_t r_ = 0; h_n && r_ < h_n && !worse; r_++) \
+					better |= c->call_ranks[r_] < h_ranks[r_], worse |= c->call_ranks[r_] > h_ranks[r_]; \
+				if (better && !worse) \
+					return; \
+				goto restore; \
+			} \
+			/* (not resolved, one type shared by candidates vcc could not order: held too, h_n 0) */ \
+			if (i + 1 >= nargs || (c->call_resolved && (!conv || !c->call_nranks || c->call_nranks > 16))) \
+				return; \
+			if (!c->call_resolved) \
+				c->call_nranks = 0; \
+			held = true, h_type = c->etype, h_lval = c->elval, h_picked = c->call_picked, h_callee = c->ecallee; \
+			h_n = c->call_nranks, h_unsure = c->eunsure; \
+			memcpy(h_ranks, c->call_ranks, h_n); \
+		} \
+	} while (0)
 
 	c->einvalid_unsure = 0;
-	if (nargs > 16 || c->tentative) {
+	if (nargs > 16 || (c->tentative && !c->unevaluated)) {
 		c->einvalid_unsure = 1;
 		return;
 	}
+	/* (in an unevaluated operand of a tentative parse too: decltype(operator<<(os, x)) in a partial
+	   specialization, doctest's has_insertion_operator, finds a hidden friend only this way) */
 	memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
 	for (uint32_t i = 0; i < nargs; i++) {
 		ast_qualified_type t = acopy[i];
@@ -2119,20 +2151,22 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
 				continue;
 			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			ADL_DONE();
 			if (c->etype != CXX_TY_UNKNOWN)
-				return;
+				continue;
 			if (!c->none_viable)
 				c->einvalid_unsure = 1;
 			continue;
 		}
+		if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
+			cxx_type_require_complete(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));	/* (an instance not built yet: its friends) */
 		if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || !(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))))
 			continue;
 		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */
 		if ((set = cxx_friend_lookup(c, t, name, 0))) {
 			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
-			if (c->etype != CXX_TY_UNKNOWN)
-				return;
-			if (!c->none_viable)
+			ADL_DONE();
+			if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 				c->einvalid_unsure = 1;
 		}
 		while (s && s->kind != CXX_SCOPE_NAMESPACE)
@@ -2140,12 +2174,20 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
 			continue;
 		cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
-		if (c->etype != CXX_TY_UNKNOWN)
-			return;	/* (the caller decides what this means for the expression's validity) */
-		if (!c->none_viable)
+		ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
+		if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 			c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */
 	}
+	if (held) {
+	restore:
+		cxx_et(c, h_type, h_lval);
+		c->call_resolved = h_picked != NULL, c->call_picked = h_picked, c->ecallee = h_callee, c->eunsure = h_unsure, c->none_viable = 0;
+		c->call_nranks = h_n;
+		memcpy(c->call_ranks, h_ranks, h_n);
+		return;
+	}
 	cxx_et(c, CXX_TY_UNKNOWN, false);
+#undef ADL_DONE
 }
 
 
