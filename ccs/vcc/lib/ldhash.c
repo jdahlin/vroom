@@ -65,7 +65,7 @@ static inline void acc512(uint64_t *acc, const uint8_t *in, const uint8_t *s) {
 }
 
 uint64_t ld_xxh3(const void *data, size_t len) {
-    const uint8_t *in = data, *s = kSecret;
+    const uint8_t *in = (const uint8_t *)data, *s = kSecret;
     if (len <= 16) {
         if (len > 8) {
             uint64_t lo = rd64(in) ^ (rd64(s + 24) ^ rd64(s + 32));
@@ -261,7 +261,7 @@ static void b3hash4(const uint8_t *const in[4], size_t nblocks, uint64_t ctr, in
 /* Chunk CVs four at a time, then the tree level by level (pairing adjacent
  * CVs with an odd one carried up gives BLAKE3's left-complete tree). */
 void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
-    const uint8_t *in = data;
+    const uint8_t *in = (const uint8_t *)data;
     uint32_t o[16];
     size_t nch = len ? (len + 1023) / 1024 : 1;
     if (nch == 1) {
@@ -302,7 +302,7 @@ void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
 }
 #else
 void ld_blake3(const void *data, size_t len, uint8_t *out, size_t outlen) {
-    const uint8_t *in = data;
+    const uint8_t *in = (const uint8_t *)data;
     uint32_t stack[54][8], o[16];
     int sp = 0;
     size_t nch = len ? (len + 1023) / 1024 : 1;
@@ -371,7 +371,7 @@ static void sha_block(uint32_t h[8], const uint8_t *p)
 void ld_sha256(const void *data, size_t len, uint8_t out[32])
 {
 	uint32_t h[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
-	const uint8_t *p = data;
+	const uint8_t *p = (const uint8_t *)data;
 	size_t n = len;
 	for (; n >= 64; n -= 64, p += 64)
 		sha_block(h, p);

@@ -234,6 +234,15 @@ self-check: self
 
 .PHONY: self self-check
 
+# Optional diagnostic pass over the C sources. Use make -k -j 6 to see all
+# incompatible files, or set CXX_CHECK_SRC to inspect a subset.
+CXX_CHECK_SRC ?= $(SELF_SRC)
+CXX_CHECK = $(addprefix check-cxx/,$(CXX_CHECK_SRC))
+.PHONY: vcc-cxx-check $(CXX_CHECK)
+vcc-cxx-check: $(CXX_CHECK)
+$(CXX_CHECK): check-cxx/%: %
+	$(HOST_CC) $(filter-out -std=c11,$(VCC_FAST)) -x c++ -std=gnu++20 -ferror-limit=0 -fsyntax-only $<
+
 # ---- fuzzing (fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
 # (fuzz/driver.c: replay + blind mutation) with Apple clang.

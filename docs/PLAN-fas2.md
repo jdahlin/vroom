@@ -371,6 +371,14 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - **Kvar:** register-cache för lokala variabler (allt går via stackslotar i dag), kodaren i stället för text (a64.c), PIC för vDSO, flyttal/VLA/TLS saknas, värdeintervall för de `error()`-anrop som nu tas bort.
 
 ### Status 2.7 (2026-11-07): assembler för kärnans `.S`, klar (inline asm kvar)
+- 2026-11-15: Frivillig C++-inventering med `make -C ccs -k -j 6 vcc-cxx-check`.
+  Clang 23 syntaxkontrollerar 197 C-filer var för sig som GNU++20 på x86-64 Linux.
+  Fem struct-taggar i assembleraren flyttades till filnivå och pekarkonverteringar
+  förtydligades i arenor, buffertar och länkarens hashfunktioner. Antalet unika
+  felpositioner sjönk från 2 030 till 1 798. Det vanliga C-bygget gav byte-identisk
+  `vpp` före och efter. SQLite 3.50.4 vid -O2 tog 628 respektive 633 ms CPU att
+  kompilera (median av fem körningar på samma kärna). Även speedtest1-binären var
+  byte-identisk, med 89 respektive 88 ms CPU för `--size 10 --memdb --testset main`.
 - `ccs/vcc/as.c` (GNU as-syntax), `a64.c`/`a64.h` (tabelldriven A64-kodare, delas med emittern), `elf.c`/`elf.h` (ELF-skrivare i minnet, mmap-reserverade regioner, ingen malloc; ett objekt per tråd). Drivrutin `vasm` (`make -C ccs vcc`).
 - Täckning efter inventering av de 30 `.S`-TU:erna: `.macro`/`.irp`/`.irpc`/`.rept`/`.exitm`/`.purgem`, `.if*` enligt MC:s AsmCond, `.pushsection`/`.popsection`/`.previous`/`.subsection`, data/`.inst`/`.incbin`/`.org`/`.fill`/`.align`-familjen, `.set`/`.equ` med lata variabler (framåtreferenser, alias ärver typ/storlek), `.type`/`.size`-uttryck, numeriska labels, `.req`, `ldr =` med litteralpooler, `:lo12:`/`:pg_hi21:`/`:abs_gN(_nc|_s):`. ~200 mnemonics (heltal, ldst, system, SIMD, SHA, CRC, MOPS); 1 625 sysreg-namn tagna en gång ur llvm-mc (`gen-sysreg.sh` → `a64sysreg.inc`). Ingen CFI behövs (kärnan bygger utan `.cfi_*` i dessa TU:er).
 - MC-beteenden som krävdes för byte-identitet: sektionsordning (`.strtab` först, `.rela` direkt efter sin sektion), StringTableBuilders svansdelning, symbolordning = registreringsordning (mappningssymbol före operandsymbol), sektionssymboler bara om en reloc använder dem, pc-relativa fixups mot lokala symboler i samma sektion löses, `$x`/`$d` per sektion men inte för utfyllnad, nop-utfyllnad med inledande nollor i kod.

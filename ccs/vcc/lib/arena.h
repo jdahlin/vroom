@@ -100,10 +100,15 @@ __attribute__((noinline, cold)) static void vmreg_dbg_put(vmreg *r, size_t used)
 {
 	size_t pg = (size_t)getpagesize(), lim = r->cap < ((size_t)8 << 30) ? r->cap : ((size_t)8 << 30);
 	size_t np = lim / pg, res = 0, bad = 0;
-	char *vec = malloc(np);
+#ifdef __APPLE__
+	typedef char mincore_byte;
+#else
+	typedef unsigned char mincore_byte;
+#endif
+	mincore_byte *vec = (mincore_byte *)malloc(np);
 	int i;
 
-	mincore(r->p, lim, (void *)vec);	/* char * on Darwin, unsigned char * on Linux */
+	mincore(r->p, lim, vec);
 	for (size_t k = 0; k < np; k++) {
 		char *pp = r->p + k * pg;
 
@@ -150,7 +155,7 @@ static inline VUSE VNONNULL(1) void *vmreg_get(vmreg *r, size_t n, const char *n
 		n = (n + VMREG_PAGE - 1) & ~(VMREG_PAGE - 1);
 		if (r->cap < n)	/* sizes that grow with the TU: double, from 64 MB of address space */
 			r->cap = r->cap * 2 > n ? r->cap * 2 : n > VMREG_MIN ? n : VMREG_MIN;
-		r->p = vmreg_map(r->cap);
+		r->p = (char *)vmreg_map(r->cap);
 	}
 	r->name = name;
 	r->busy = 1;
@@ -195,12 +200,12 @@ static inline vmreg *vmpool_take(vmpool *pl)
 	void **s;
 
 	pthread_mutex_lock(&pl->mu);
-	s = pl->free;
+	s = (void **)pl->free;
 	if (s)
 		pl->free = *s;
 	pthread_mutex_unlock(&pl->mu);
 	if (!s) {
-		s = calloc(1, sizeof(void *) + (size_t)pl->n * sizeof(vmreg));
+		s = (void **)calloc(1, sizeof(void *) + (size_t)pl->n * sizeof(vmreg));
 		if (!s)
 			abort();
 	}

@@ -42,7 +42,7 @@ static inline VNONNULL(1) void vbuf_put(vbuf *b, const void *s, size_t n)
 
 		while (c < b->n + n)
 			c *= 2;
-		b->p = realloc(b->p, c);
+		b->p = (char *)realloc(b->p, c);
 		if (!b->p)
 			abort();
 		b->cap = c;
@@ -84,7 +84,7 @@ static inline VNONNULL(1) void vsbuf_put(vsbuf *b, const void *s, size_t n)
 
 		while (cap < b->n + n)
 			cap *= 2;
-		if (!(p = realloc(b->p, cap))) {
+		if (!(p = (char *)realloc(b->p, cap))) {
 			b->oom = true;
 			return;
 		}
@@ -115,7 +115,7 @@ static inline VUSE VNONNULL(1) bool vzbuf_put(vzbuf *b, const char *s, size_t n)
 
 		while (b->n + n + 1 > cap)
 			cap *= 2;
-		p = realloc(b->p, cap);
+		p = (char *)realloc(b->p, cap);
 		if (!p)
 			return false;
 		b->p = p;
