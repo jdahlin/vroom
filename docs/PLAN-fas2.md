@@ -393,6 +393,16 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
 - Kvar: inline asm (operandsubstitution `%0`/`%[x]`/`%w`/`%x`/`%c`/`%l` och ett snippet-API på ett beständigt `As` bundet till emitterns `ElfObj`, se `assembler-interfaces.md` i anteckningsmappen), integration i `vccd` för `-c X.S` (pp-utdata direkt till `as_run` i minnet), CFI om emittern behöver `.cfi_*`.
 
 ### Status 2.8 (2026-11-07): länkare + objcopy, `vmlinux` och `Image` utan lld, bootar
+- 2026-11-15: ELF-, wasm- och Mach-O-länkarna samt nm/objcopy klarade
+  C11-kontrollen med `-Werror=implicit-void-ptr-cast` på x86-64 Linux.
+  I hela källträdet minskade antalet unika felpositioner för den varningen
+  från 1 162 till 857. C-bygget gav byte-identiska `vpp`, `vccd` och
+  `vlink` mot 782d2199. SQLite 3.50.4 vid -O2, median CPU-tid för fem
+  körningar på samma kärna: x86-64-kompilering 611,27 → 612,86 ms,
+  AArch64-länkning med `vlink -r` 1,21 → 1,18 ms och x86-64 speedtest1
+  87,07 → 86,71 ms. Både den länkade AArch64-objektfilen och den körbara
+  x86-64-filen var byte-identiska. Länkartester: vlink-opts 66/66,
+  vlink-bad 40/40.
 - `ccs/vcc/ld.c` (`vlink`, `ld_main()`): ELF-länkare för kärnans två länkar. Slutlänken med `vmlinux.lds` (skriptparser/-utvärderare med lld:s ExprValue-semantik, PROVIDE, orphan-placering, merge-sektioner i 32 xxh3-shards, AArch64-relokeringar inkl. ADRP+ADD→ADR-relaxering, thunkar enligt lld:s pass-ordning, phdrs, `.rela.dyn` för `-shared -z notext`, symtab/strtab i lld:s ordning, build-id) och `-r` (vmlinux.o för modpost). Indata mmap:as, tunga faser är parallella (egen trådpool, låsfri globaltabell), utdata byggs i en buffert och skrivs med en write. `ld_main` tar ett lås och kan anropas från vccd.
 - `ccs/vcc/objcopy.c` (`vobjcopy`/`vnm`, symlänkar till `vlink`): byggets objcopy/nm-användningar enligt llvm-objcopy 23:s ELF-skrivare (segmentbevarande layout, StringTableBuilder med svansdelning, symbolborttagning/-prefix, `--prefix-alloc-sections`, `-O binary`, `-j`, `--dump-section`) och llvm-nm:s BSD-format (`-p`/`-n`/`-S`).
 - **Acceptans:**

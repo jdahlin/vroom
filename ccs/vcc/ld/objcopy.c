@@ -168,7 +168,7 @@ static int elf_open(Elf *e, int dirfd, const char *path)
 	struct stat st;
 	fstat(fd, &st);
 	e->size = st.st_size;
-	e->buf = e->size ? mmap(NULL, e->size, PROT_READ, MAP_PRIVATE, fd, 0) : NULL;
+	e->buf = e->size ? (const uint8_t *)mmap(NULL, e->size, PROT_READ, MAP_PRIVATE, fd, 0) : NULL;
 	if (e->buf == MAP_FAILED || e->size < sizeof(Ehdr) || memcmp(e->buf, "\177ELF\2\1", 6)) {
 		oerror("'%s': not an ELF64 little-endian file", path);
 		e->buf = NULL;
@@ -203,7 +203,7 @@ typedef struct {
 static void st_grow(StrTab *t)
 {
 	uint32_t nm = t->tab ? (t->tmask + 1) * 2 : 1024;
-	uint32_t *nt = xcalloc(nm, 4);
+	uint32_t *nt = (uint32_t *)xcalloc(nm, 4);
 	for (uint32_t i = 0; i < t->n; i++) {
 		uint32_t j = t->v[i].h & (nm - 1);
 		while (nt[j])
@@ -221,10 +221,10 @@ static void st_reserve(StrTab *t, uint32_t n)
 		m *= 2;
 	if (t->tab && t->tmask + 1 >= m)
 		return;
-	t->v = realloc(t->v, (t->cap = n > t->cap ? n : t->cap) * sizeof(StrEnt));
+	t->v = (StrEnt *)realloc(t->v, (t->cap = n > t->cap ? n : t->cap) * sizeof(StrEnt));
 	t->tmask = m / 2 - 1;	/* st_grow doubles */
 	uint32_t *old = t->tab;
-	t->tab = xcalloc(1, 4);
+	t->tab = (uint32_t *)xcalloc(1, 4);
 	st_grow(t);
 	free(old);
 }
@@ -242,7 +242,7 @@ static uint32_t st_add(StrTab *t, const char *s)
 	}
 	if (t->n == t->cap) {
 		t->cap = t->cap ? t->cap * 2 : 256;
-		t->v = realloc(t->v, t->cap * sizeof(StrEnt));
+		t->v = (StrEnt *)realloc(t->v, t->cap * sizeof(StrEnt));
 	}
 	t->v[t->n] = (StrEnt){.s = s, .len = len, .h = h};
 	t->tab[j] = ++t->n;
@@ -270,7 +270,7 @@ static uint64_t st_find(const StrTab *t, const char *s)
 typedef struct { uint64_t key; const char *r; uint32_t len; StrEnt *e; } SortEnt;
 static int st_cmp(const void *a, const void *b)
 {
-	const SortEnt *p = a, *q = b;
+	const SortEnt *p = (const SortEnt *)a, *q = (const SortEnt *)b;
 	if (p->key != q->key)
 		return p->key < q->key ? 1 : -1;
 	uint32_t n = p->len < q->len ? p->len : q->len;
@@ -283,11 +283,11 @@ static int st_cmp(const void *a, const void *b)
 }
 static void st_finalize(StrTab *t)
 {
-	SortEnt *p = xcalloc(t->n, sizeof *p);
+	SortEnt *p = (SortEnt *)xcalloc(t->n, sizeof *p);
 	size_t tot = 0;
 	for (uint32_t i = 0; i < t->n; i++)
 		tot += t->v[i].len;
-	char *rev = xcalloc(tot + 8, 1);
+	char *rev = (char *)xcalloc(tot + 8, 1);
 	size_t ro = 0;
 	for (uint32_t i = 0; i < t->n; i++) {
 		StrEnt *e = &t->v[i];
@@ -302,7 +302,7 @@ static void st_finalize(StrTab *t)
 	}
 	/* LSD radix sort on the key, descending; ties (same last 8 bytes)
 	   are then sorted by the full comparison */
-	SortEnt *tmp = xcalloc(t->n, sizeof *tmp);
+	SortEnt *tmp = (SortEnt *)xcalloc(t->n, sizeof *tmp);
 	for (int sh = 0; sh < 64; sh += 8) {
 		uint32_t cnt[257] = {0};
 		for (uint32_t i = 0; i < t->n; i++)
@@ -400,7 +400,7 @@ static void set_flags(OSec *s, const char *f)
 	s->flags = (s->flags & ~mask) | nf;
 	if (s->type == SHT_NOBITS && (!(s->flags & SHF_ALLOC) || contents || load)) {
 		s->type = SHT_PROGBITS;	/* (llvm: zero-filled contents) */
-		s->gen = xcalloc(s->size + 1, 1);
+		s->gen = (uint8_t *)xcalloc(s->size + 1, 1);
 	}
 }
 
@@ -535,7 +535,7 @@ static int binary_in(int dirfd)
 		return 1;
 	}
 	size_t dsz = (size_t)st.st_size;
-	VAUTOFREE uint8_t *data = xcalloc(dsz + 1, 1);
+	VAUTOFREE uint8_t *data = (uint8_t *)xcalloc(dsz + 1, 1);
 	if (dsz && read(fd, data, dsz) != (ssize_t)dsz)
 		oerror("'%s': short read", oc.in);
 	char base[4096], nm[3][4200];
@@ -555,7 +555,7 @@ static int binary_in(int dirfd)
 	st_finalize(&t);
 	uint64_t stroff = sizeof(Ehdr), symoff = alignto(stroff + t.size, 8), datoff = symoff + 4 * sizeof(Sym);
 	uint64_t shoff = alignto(datoff + dsz, 8), total = shoff + 4 * sizeof(Shdr);
-	VAUTOFREE uint8_t *b = xcalloc(total, 1);
+	VAUTOFREE uint8_t *b = (uint8_t *)xcalloc(total, 1);
 	Ehdr *h = (Ehdr *)b;
 	memcpy(h->e_ident, "\177ELF\2\1\1", 7);
 	h->e_type = 1;
@@ -614,7 +614,7 @@ static int objcopy_run(int dirfd)
 	bool rel = eh->e_type == 1;
 	uint32_t ns = e.nsh;
 	VCLEANUP(oown_done) OOwn own = { 0 };
-	OSec *sec = own.sec = xcalloc(ns + oc.nadd + 1, sizeof *sec);
+	OSec *sec = own.sec = (OSec *)xcalloc(ns + oc.nadd + 1, sizeof *sec);
 	own.nsec = ns + oc.nadd + 1;
 	for (uint32_t i = 0; i < ns; i++) {
 		const Shdr *h = &e.sh[i];
@@ -666,7 +666,7 @@ static int objcopy_run(int dirfd)
 				if (sec[r].kind == SK_RELA && sec[r].info == k && !(sec[r].flags & SHF_ALLOC) && !sec[r].origname) {
 					size_t n = nl + 6;
 					sec[r].origname = sec[r].name;
-					sec[r].newname = xcalloc(n, 1);
+					sec[r].newname = (char *)xcalloc(n, 1);
 					snprintf(sec[r].newname, n, ".rela%s", s->name);
 					sec[r].name = sec[r].newname;
 				}
@@ -698,7 +698,7 @@ static int objcopy_run(int dirfd)
 		s->size = (uint64_t)st.st_size;
 		s->origoff = UINT64_MAX;
 		s->parent = -1;
-		s->gen = xcalloc(s->size + 1, 1);
+		s->gen = (uint8_t *)xcalloc(s->size + 1, 1);
 		if (s->size && read(fd, s->gen, s->size) != (ssize_t)s->size)
 			oerror("'%s': short read", eq + 1);
 		if (s->type == SHT_NOTE && s->size && s->size < 12)
@@ -733,7 +733,7 @@ static int objcopy_run(int dirfd)
 			s->size = sz;
 			s->origoff = UINT64_MAX;
 			s->parent = -1;
-			s->gen = xcalloc(sz, 1);
+			s->gen = (uint8_t *)xcalloc(sz, 1);
 			memcpy(s->gen, base, bl);
 			memcpy(s->gen + sz - 4, &crc, 4);
 			ns++;
@@ -742,7 +742,7 @@ static int objcopy_run(int dirfd)
 
 	/* segments: real ones, then the ELF header and program header "segments" */
 	uint32_t ng = e.nph + 2;
-	VAUTOFREE OSeg *seg = xcalloc(ng, sizeof *seg);
+	VAUTOFREE OSeg *seg = (OSeg *)xcalloc(ng, sizeof *seg);
 	for (uint32_t i = 0; i < e.nph; i++) {
 		seg[i].p = e.ph[i];
 		seg[i].origoff = seg[i].off = e.ph[i].p_offset;
@@ -839,7 +839,7 @@ static int objcopy_run(int dirfd)
 		const Sym *ys = (const Sym *)st->data;
 		const char *str = (const char *)e.buf + e.sh[st->link].sh_offset;
 		nsym = st->size / sizeof(Sym);
-		sym = own.sym = xcalloc(nsym, sizeof *sym);
+		sym = own.sym = (OSym *)xcalloc(nsym, sizeof *sym);
 		own.nsym = nsym;
 		for (uint32_t i = 0; i < nsym; i++) {
 			sym[i].name = str + ys[i].st_name;
@@ -854,7 +854,7 @@ static int objcopy_run(int dirfd)
 		VAUTOFREE bool *referenced = NULL;
 		/* llvm-objcopy's Symbol::Referenced: named by a kept relocation or group */
 		if ((oc.nunneeded && rel) || oc.nonly) {
-			referenced = xcalloc(nsym, 1);
+			referenced = (bool *)xcalloc(nsym, 1);
 			for (uint32_t k = 1; k < ns; k++) {
 				if (!sec[k].removed && sec[k].type == SHT_GROUP && sec[k].info < nsym)
 					referenced[sec[k].info] = true;
@@ -882,7 +882,7 @@ static int objcopy_run(int dirfd)
 				const char *nm = y->newname ? y->newname : y->name;
 				size_t a = strlen(oc.prefix_syms), b = strlen(nm);
 				char *old = y->newname;
-				y->newname = xcalloc(a + b + 1, 1);
+				y->newname = (char *)xcalloc(a + b + 1, 1);
 				memcpy(y->newname, oc.prefix_syms, a);
 				memcpy(y->newname + a, nm, b + 1);
 				free(old);
@@ -937,7 +937,7 @@ static int objcopy_run(int dirfd)
 			if (!base)
 				continue;
 			size_t n = strlen(rp) + pl + strlen(base) + 1;
-			s->newname = xcalloc(n, 1);
+			s->newname = (char *)xcalloc(n, 1);
 			snprintf(s->newname, n, "%s%s%s", rp, oc.prefix_alloc, base);
 		}
 	}
@@ -945,7 +945,7 @@ static int objcopy_run(int dirfd)
 	if (oc.binary) {
 		/* BinaryWriter: alloc sections with contents at LMA - min LMA */
 		uint64_t min = UINT64_MAX, total = 0;
-		VAUTOFREE uint64_t *lma = xcalloc(ns, 8);
+		VAUTOFREE uint64_t *lma = (uint64_t *)xcalloc(ns, 8);
 		for (uint32_t k = 1; k < ns; k++) {
 			OSec *s = &sec[k];
 			if (s->removed || !(s->flags & SHF_ALLOC))
@@ -963,7 +963,7 @@ static int objcopy_run(int dirfd)
 			if (lma[k] - min + s->size > total)
 				total = lma[k] - min + s->size;
 		}
-		uint8_t *b = total ? mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) : NULL;
+		uint8_t *b = total ? (uint8_t *)mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) : NULL;
 		for (uint32_t k = 1; k < ns; k++) {
 			OSec *s = &sec[k];
 			if (s->removed || !(s->flags & SHF_ALLOC) || s->type == SHT_NOBITS || !s->size)
@@ -1010,7 +1010,7 @@ static int objcopy_run(int dirfd)
 			continue;
 		if (k == symtab_i) {
 			s->size = (uint64_t)nsymout * sizeof(Sym);
-			s->gen = xcalloc(s->size, 1);
+			s->gen = (uint8_t *)xcalloc(s->size, 1);
 			Sym *d = (Sym *)s->gen;
 			for (uint32_t i = 0; i < nsym; i++) {
 				OSym *y = &sym[i];
@@ -1030,14 +1030,14 @@ static int objcopy_run(int dirfd)
 			if (!t) {
 				/* an unreferenced string table: llvm-objcopy empties it */
 				s->size = 1;
-				s->gen = xcalloc(1, 1);
+				s->gen = (uint8_t *)xcalloc(1, 1);
 				continue;
 			}
 			s->size = t->size;
-			s->gen = xcalloc(t->size, 1);
+			s->gen = (uint8_t *)xcalloc(t->size, 1);
 			st_write(t, s->gen);
 		} else if (s->kind == SK_RELA) {
-			s->gen = xcalloc(s->size, 1);
+			s->gen = (uint8_t *)xcalloc(s->size, 1);
 			const Rela *r = (const Rela *)s->data;
 			Rela *d = (Rela *)s->gen;
 			for (uint64_t j = 0; j < s->size / sizeof(Rela); j++) {
@@ -1053,7 +1053,7 @@ static int objcopy_run(int dirfd)
 	}
 
 	/* layout: segments, then sections outside segments by original offset */
-	VAUTOFREE uint32_t *order = xcalloc(ng, 4);
+	VAUTOFREE uint32_t *order = (uint32_t *)xcalloc(ng, 4);
 	for (uint32_t i = 0; i < ng; i++)
 		order[i] = i;
 	for (uint32_t i = 1; i < ng; i++) {
@@ -1074,7 +1074,7 @@ static int objcopy_run(int dirfd)
 		if (g->off + g->filesz > off)
 			off = g->off + g->filesz;
 	}
-	VAUTOFREE uint32_t *outside = xcalloc(ns, 4);
+	VAUTOFREE uint32_t *outside = (uint32_t *)xcalloc(ns, 4);
 	uint32_t nout = 0;
 	for (uint32_t k = 1; k < ns; k++) {
 		OSec *s = &sec[k];
@@ -1103,7 +1103,7 @@ static int objcopy_run(int dirfd)
 	}
 	uint64_t shoff = alignto(off, 8);
 	uint64_t total = shoff + (uint64_t)(nkept + 1) * sizeof(Shdr);
-	uint8_t *b = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+	uint8_t *b = (uint8_t *)mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 
 	/* segment bytes, then zero removed sections inside segments */
 	for (uint32_t i = 0; i < e.nph; i++)
@@ -1158,7 +1158,7 @@ static int objcopy_run(int dirfd)
 
 static void push(const char ***v, uint32_t *n, const char *s)
 {
-	*v = realloc(*v, (*n + 1) * sizeof(char *));
+	*v = (const char **)realloc(*v, (*n + 1) * sizeof(char *));
 	(*v)[(*n)++] = s;
 }
 
@@ -1273,7 +1273,7 @@ typedef struct {
 
 static int ncmp_name(const void *a, const void *b)
 {
-	const NSym *x = a, *y = b;
+	const NSym *x = (const NSym *)a, *y = (const NSym *)b;
 	int c = strcmp(x->name, y->name);
 	if (c)
 		return c;
@@ -1283,7 +1283,7 @@ static int ncmp_name(const void *a, const void *b)
 }
 static int ncmp_num(const void *a, const void *b)
 {
-	const NSym *x = a, *y = b;
+	const NSym *x = (const NSym *)a, *y = (const NSym *)b;
 	if (x->defined != y->defined)
 		return x->defined ? 1 : -1;
 	if (x->addr != y->addr)
@@ -1339,7 +1339,7 @@ typedef struct { char *label, *path; uint8_t *mem; size_t size; bool member; con
 
 static void nin_push(NIn **v, int *n, NIn x)
 {
-	*v = realloc(*v, (size_t)(*n + 1) * sizeof **v);
+	*v = (NIn *)realloc(*v, (size_t)(*n + 1) * sizeof **v);
 	(*v)[(*n)++] = x;
 }
 
@@ -1356,7 +1356,7 @@ static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
 	}
 	bool thin = magic[2] == 't';
 	size_t sz = (size_t)st.st_size;
-	const uint8_t *b = mmap(NULL, sz, PROT_READ, MAP_PRIVATE, fd, 0);
+	const uint8_t *b = (const uint8_t *)mmap(NULL, sz, PROT_READ, MAP_PRIVATE, fd, 0);
 	const char *longn = NULL;
 	size_t longsz = 0;
 	const char *slash = strrchr(path, '/');
@@ -1415,7 +1415,7 @@ static void nm_inputs(int dirfd, const char *path, NIn **v, int *n)
 					snprintf(full, sizeof full, "%.*s/%s", (int)(slash - path), path, name);
 				x.path = strdup(full);
 			} else {
-				x.mem = xcalloc(msz + 8, 1);
+				x.mem = (uint8_t *)xcalloc(msz + 8, 1);
 				memcpy(x.mem, h + 60, msz);
 				x.size = msz;
 			}
@@ -1433,7 +1433,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 	prog = "vnm";
 	bool nosort = false, numeric = false, size = false, undef = false, defd = false, ext = false, dyn = false;
 	bool fname = false;	/* -A/-o: each line starts with the file (archive:member) */
-	const char **files = xcalloc((size_t)argc + 1, sizeof *files);
+	const char **files = (const char **)xcalloc((size_t)argc + 1, sizeof *files);
 	int nf = 0;
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -1509,12 +1509,12 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		const Sym *ys = (const Sym *)(e.buf + st->sh_offset);
 		const char *str = (const char *)e.buf + e.sh[st->sh_link].sh_offset;
 		uint32_t n = st->sh_size / sizeof(Sym);
-		NSym *v = xcalloc(n, sizeof *v);
+		NSym *v = (NSym *)xcalloc(n, sizeof *v);
 		uint32_t m = 0;
 		/* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */
 		const uint16_t *versym = NULL;
 		const char *vname[256] = { 0 };
-		char **owned = dyn ? xcalloc(n, sizeof *owned) : NULL;
+		char **owned = dyn ? (char **)xcalloc(n, sizeof *owned) : NULL;
 		for (uint32_t k = 0; dyn && k < e.nsh; k++) {
 			const Shdr *h = &e.sh[k];
 			const uint8_t *d = e.buf + h->sh_offset;
@@ -1567,7 +1567,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 				const char *vn = vname[versym[i] & 0x7fff];
 				bool at2 = !(versym[i] & 0x8000) && y->st_shndx != SHN_UNDEF;
 				size_t l = strlen(name) + strlen(vn) + 3;
-				owned[i] = malloc(l);
+				owned[i] = (char *)malloc(l);
 				snprintf(owned[i], l, "%s%s%s", name, at2 ? "@@" : "@", vn);
 				name = owned[i];
 			}
@@ -1585,7 +1585,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 		size_t pl = strlen(pfx), cap = (size_t)m * (64 + pl) + 4096, len = 0;
 		for (uint32_t i = 0; i < m; i++)
 			cap += strlen(v[i].name);
-		char *buf = malloc(cap);
+		char *buf = (char *)malloc(cap);
 		for (uint32_t i = 0; i < m; i++) {
 			NSym *s = &v[i];
 			memcpy(buf + len, pfx, pl);

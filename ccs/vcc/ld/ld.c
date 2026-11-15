@@ -95,7 +95,7 @@ static void diag(const char *kind, const char *fmt, va_list ap)
 
 	va_copy(aq, ap);
 	n = vsnprintf(small, sizeof small, fmt, ap);
-	if (n >= (int)sizeof small && (m = malloc((size_t)n + 1)))
+	if (n >= (int)sizeof small && (m = (char *)malloc((size_t)n + 1)))
 		vsnprintf(m, (size_t)n + 1, fmt, aq);
 	va_end(aq);
 	if (!m)
@@ -204,7 +204,7 @@ static void *alloc(size_t n)
 	}
 	if ((size_t)(aend - acur) < n) {
 		size_t bs = n + sizeof(Block) + 16 > ARENA_BLOCK ? n + sizeof(Block) + 16 : ARENA_BLOCK;
-		Block *b = bigalloc(bs);
+		Block *b = (Block *)bigalloc(bs);
 		b->size = bs;
 		{
 			VLOCK(blocklock);
@@ -231,7 +231,7 @@ static void free_arenas(void)
 static char *astrdup(const char *s)
 {
 	size_t n = strlen(s);
-	char *p = alloc(n + 1);
+	char *p = (char *)alloc(n + 1);
 	memcpy(p, s, n + 1);
 	return p;
 }
@@ -975,7 +975,7 @@ static void sexpect(char c)
 }
 static char *sdup(const char *b, const char *e)
 {
-	char *p = alloc(e - b + 1);
+	char *p = (char *)alloc(e - b + 1);
 	memcpy(p, b, e - b);
 	p[e - b] = 0;
 	return p;
@@ -986,7 +986,7 @@ static char *sname(void)
 	sskip();
 	const char *b = sp;
 	if (sp < sp_end && *sp == '"') {
-		const char *e = memchr(sp + 1, '"', sp_end - sp - 1);
+		const char *e = (const char *)memchr(sp + 1, '"', sp_end - sp - 1);
 		if (!e) { serr("unterminated string"); sp = sp_end; return astrdup(""); }
 		sp = e + 1;
 		return sdup(b + 1, e);
@@ -1021,7 +1021,7 @@ static Expr *pexpr(void);
 
 static Expr *mk(uint8_t op)
 {
-	Expr *e = alloc(sizeof *e);
+	Expr *e = (Expr *)alloc(sizeof *e);
 	e->op = op;
 	return e;
 }
@@ -1268,7 +1268,7 @@ static Assign *passign_rest(const char *name)
 	if (!n || !strchr(op, '=') || !strcmp(op, "==") || !strcmp(op, "<=") || !strcmp(op, ">=") || !strcmp(op, "!="))
 		return NULL;
 	sp += n;
-	Assign *a = alloc(sizeof *a);
+	Assign *a = (Assign *)alloc(sizeof *a);
 	a->op = op[0] == '=' ? '=' : op[0];
 	a->sym = strcmp(name, ".") ? gintern(name) : NONE;
 	a->e = pexpr();
@@ -1296,7 +1296,7 @@ static Assign *pprovide(bool hidden)
 
 static Assign *passert(void)
 {
-	Assign *a = alloc(sizeof *a);
+	Assign *a = (Assign *)alloc(sizeof *a);
 	a->sym = NONE;
 	a->op = '=';
 	a->assert_ = true;
@@ -1737,7 +1737,7 @@ static uint8_t *map_file(const char *path, size_t *size)
 		error("cannot mmap %s", path);
 		return NULL;
 	}
-	return p;
+	return (uint8_t *)p;
 }
 
 typedef struct { const char *path; const uint8_t *buf; size_t size; } Pending;
@@ -1804,7 +1804,7 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
 			name = astrdup(nm);
 		}
 		if (thin) {
-			char *full = alloc(strlen(dir) + strlen(name) + 1);
+			char *full = (char *)alloc(strlen(dir) + strlen(name) + 1);
 			strcpy(full, name[0] == '/' ? "" : dir);
 			strcat(full, name);
 			VVEC_PUSH(pending, ((Pending){.path = full}), alloc);
@@ -1813,7 +1813,7 @@ static void add_archive(const char *path, const uint8_t *b, size_t n)
 				error("%s(%s): archive member goes past the end of the file", path, name);
 				return;
 			}
-			char *full = alloc(strlen(path) + strlen(name) + 3);
+			char *full = (char *)alloc(strlen(path) + strlen(name) + 3);
 			sprintf(full, "%s(%s)", path, name);
 			VVEC_PUSH(pending, ((Pending){.path = full, .buf = b + off, .size = size}), alloc);
 			off += size + (size & 1);
@@ -1956,7 +1956,7 @@ static void parse_obj(void *arg, size_t i)
 	}
 	if (((uintptr_t)o->buf & 7) && !o->mapped) {
 		/* a member of a regular archive (at 4 mod 8, after its header): the headers need 8-byte alignment */
-		uint8_t *c = alloc(o->size);
+		uint8_t *c = (uint8_t *)alloc(o->size);
 
 		memcpy(c, o->buf, o->size);
 		o->buf = c;
@@ -1988,7 +1988,7 @@ static void parse_obj(void *arg, size_t i)
 		}
 	}
 	if (o->nsym > o->firstg)
-		o->gs = alloc((o->nsym - o->firstg) * sizeof(uint32_t));
+		o->gs = (uint32_t *)alloc((o->nsym - o->firstg) * sizeof(uint32_t));
 }
 
 static bool is_content(const Shdr *s)
@@ -2133,7 +2133,7 @@ static void dedup_comdats(void)
 
 			if (!tab || (n + 1) * 2 > mask) {
 				uint32_t m = tab ? (mask + 1) * 2 : 1024;
-				__typeof__(tab) nt = calloc(m, sizeof *tab);
+				__typeof__(tab) nt = (__typeof__(tab))calloc(m, sizeof *tab);
 
 				for (uint32_t k = 0; tab && k <= mask; k++)
 					if (tab[k].name) {
@@ -2371,7 +2371,7 @@ static void fin_gsym(void *arg, size_t g)
 }
 static void final_addresses(void)
 {
-	isec_fva = alloc((size_t)isecs.n * sizeof(uint64_t));
+	isec_fva = (uint64_t *)alloc((size_t)isecs.n * sizeof(uint64_t));
 	pfor(isecs.n, fin_isec, NULL);
 	pfor(atomic_load(&ngsyms), fin_gsym, NULL);
 }
@@ -2491,7 +2491,7 @@ static EhRec *eh_split(uint32_t si, uint32_t *nrec)
 		e.r1 = r;
 		if (n == cap) {
 			cap = cap ? 2 * cap : 16;
-			v = realloc(v, cap * sizeof *v);
+			v = (EhRec *)realloc(v, cap * sizeof *v);
 		}
 		v[n++] = e;
 		off += e.size;
@@ -2553,7 +2553,7 @@ static uint32_t eh_piece(uint32_t si, const EhRec *e)
 	ISec src = isecs.v[si];
 	uint32_t p = new_isec(src.name, K_NORMAL, src.type, src.flags, 1);
 	ISec *is = &isecs.v[p];
-	Rela *rl = e->r1 > e->r0 ? alloc((e->r1 - e->r0) * sizeof(Rela)) : NULL;
+	Rela *rl = e->r1 > e->r0 ? (Rela *)alloc((e->r1 - e->r0) * sizeof(Rela)) : NULL;
 
 	for (uint32_t k = e->r0; k < e->r1; k++) {
 		rl[k - e->r0] = src.rela[k];
@@ -2631,7 +2631,7 @@ static void eh_frames(void)
 				if (c == ncie) {
 					if (ncie == capc) {
 						capc = capc ? 2 * capc : 8;
-						cies = realloc(cies, capc * sizeof *cies);
+						cies = (struct Cie *)realloc(cies, capc * sizeof *cies);
 					}
 					cies[ncie++] = (struct Cie){ .sec = si, .rec = *ce };
 				}
@@ -2700,7 +2700,7 @@ static uint32_t ncmask, ncount;
 static void ncache_grow(void)
 {
 	uint32_t ncap = (ncmask + 1) * 2;
-	NameEnt *nc = alloc(ncap * sizeof *nc);
+	NameEnt *nc = (NameEnt *)alloc(ncap * sizeof *nc);
 
 	memset(nc, 0, ncap * sizeof *nc);
 	for (uint32_t i = 0; i <= ncmask; i++)
@@ -2845,7 +2845,7 @@ static void ncache_init(void)
 	uint32_t ncap = 1024;
 	while (ncap < isecs.n / 4)
 		ncap *= 2;
-	ncache = alloc(ncap * sizeof *ncache);
+	ncache = (NameEnt *)alloc(ncap * sizeof *ncache);
 	memset(ncache, 0, ncap * sizeof *ncache);
 	ncmask = ncap - 1;
 	ncount = 0;
@@ -2871,8 +2871,8 @@ static const char *start_stop_name(const char *n)
  * __start_X/__stop_X reference keeps nothing (lld's default -z start-stop-gc) */
 static void gc_sections(const char *entry)
 {
-	uint8_t *live = calloc(isecs.n, 1);
-	uint32_t *work = malloc(isecs.n * sizeof(uint32_t)), nw = 0;
+	uint8_t *live = (uint8_t *)calloc(isecs.n, 1);
+	uint32_t *work = (uint32_t *)malloc(isecs.n * sizeof(uint32_t)), nw = 0;
 #define MARK(x) do { uint32_t m_ = (x); if (m_ < isecs.n && !live[m_] && isecs.v[m_].kind != K_NONE) { live[m_] = 1; work[nw++] = m_; } } while (0)
 
 	ncache_init();
@@ -3015,7 +3015,7 @@ static void assign_sections(void)
 	/* lld sortSections: orphans stable-sorted by rank (non-allocated last), then
 	 * placed one by one, each seeing those placed before it */
 	{
-		uint32_t n = orphans.n, *tmp = alloc(n * sizeof(uint32_t) + 1), k = 0;
+		uint32_t n = orphans.n, *tmp = (uint32_t *)alloc(n * sizeof(uint32_t) + 1), k = 0;
 
 		/* stable: by rank, non-allocated last */
 		for (uint32_t i = 0; i < n; i++) {
@@ -3185,7 +3185,7 @@ static void split_pieces(void *arg, size_t i)
 		for (uint64_t p = 0; p < n;) {
 			uint64_t q = p;
 			if (es == 1) {
-				const uint8_t *z = memchr(d + p, 0, n - p);
+				const uint8_t *z = (const uint8_t *)memchr(d + p, 0, n - p);
 				if (!z) { error("%s: string is not null terminated", is->name); return; }
 				q = z - d + 1;
 			} else {
@@ -3201,9 +3201,9 @@ static void split_pieces(void *arg, size_t i)
 			cnt++;
 			p = q;
 		}
-		m->inoff = alloc(cnt * 4);
-		m->hash = alloc(cnt * 4);
-		m->outoff = alloc(cnt * 4);
+		m->inoff = (uint32_t *)alloc(cnt * 4);
+		m->hash = (uint32_t *)alloc(cnt * 4);
+		m->outoff = (uint32_t *)alloc(cnt * 4);
 		uint32_t k = 0;
 		for (uint64_t p = 0; p < n;) {
 			uint64_t q, len;
@@ -3230,9 +3230,9 @@ static void split_pieces(void *arg, size_t i)
 		}
 	} else {
 		cnt = n / es;
-		m->inoff = alloc(cnt * 4);
-		m->hash = alloc(cnt * 4);
-		m->outoff = alloc(cnt * 4);
+		m->inoff = (uint32_t *)alloc(cnt * 4);
+		m->hash = (uint32_t *)alloc(cnt * 4);
+		m->outoff = (uint32_t *)alloc(cnt * 4);
 		for (uint32_t k = 0; k < cnt; k++) {
 			m->inoff[k] = k * es;
 			m->hash[k] = (uint32_t)ld_xxh3(d + (uint64_t)k * es, es) >> 1;
@@ -3260,9 +3260,9 @@ static void merge_shard(void *arg, size_t job_i)
 	while (cap < total / 16 + 16)
 		cap *= 2;
 	/* table of (mergein, piece) packed in u64; key compare by content */
-	uint64_t *tab = alloc((uint64_t)cap * 8);
+	uint64_t *tab = (uint64_t *)alloc((uint64_t)cap * 8);
 	memset(tab, 0xff, (uint64_t)cap * 8);
-	uint32_t *thash = alloc((uint64_t)cap * 4);
+	uint32_t *thash = (uint32_t *)alloc((uint64_t)cap * 4);
 	uint32_t used = 0;
 	uint64_t size = 0;
 	for (uint32_t k = 0; k < mg->members.n; k++) {
@@ -3277,8 +3277,8 @@ static void merge_shard(void *arg, size_t job_i)
 			if ((used + 1) * 2 > cap) {
 				/* grow */
 				uint32_t nc = cap * 2;
-				uint64_t *nt = alloc((uint64_t)nc * 8);
-				uint32_t *nh = alloc((uint64_t)nc * 4);
+				uint64_t *nt = (uint64_t *)alloc((uint64_t)nc * 8);
+				uint32_t *nh = (uint32_t *)alloc((uint64_t)nc * 4);
 				memset(nt, 0xff, (uint64_t)nc * 8);
 				for (uint32_t j = 0; j < cap; j++)
 					if (tab[j] != UINT64_MAX) {
@@ -3483,7 +3483,7 @@ static void count_locals(void *arg, size_t i)
 		if (scap < end) {
 			free(scratch);
 			scap = end < 4096 ? 4096 : end;
-			scratch = malloc((size_t)scap * sizeof *scratch);
+			scratch = (uint32_t (*)[2])malloc((size_t)scap * sizeof *scratch);
 		}
 		for (uint32_t s = 1; s < end; s++)
 			if (keep_local(o, &o->sym[s])) {
@@ -3493,7 +3493,7 @@ static void count_locals(void *arg, size_t i)
 				n++;
 				str += l + 1;
 			}
-		o->kept = alloc((size_t)n * sizeof *scratch + 1);
+		o->kept = (uint32_t (*)[2])alloc((size_t)n * sizeof *scratch + 1);
 		memcpy(o->kept, scratch, (size_t)n * sizeof *scratch);
 	}
 	o->nloc = n;
@@ -3632,7 +3632,7 @@ static void write_isec(void *arg, size_t j)
  * relocated FDEs */
 static int cmp_u64pair(const void *a, const void *b)
 {
-	const uint64_t *x = a, *y = b;
+	const uint64_t *x = (const uint64_t *)a, *y = (const uint64_t *)b;
 	return x[0] != y[0] ? (x[0] < y[0] ? -1 : 1) : x[1] < y[1] ? -1 : x[1] > y[1];	/* lld stable_sort: output order */
 }
 static void write_ehhdr(void)
@@ -3645,7 +3645,7 @@ static void write_ehhdr(void)
 		return;
 	uint64_t hva = isec_va(ehhdr_isec, 0);
 	uint8_t *h = out + osecs.v[ho].offset + isecs.v[ehhdr_isec].off;
-	uint64_t (*t)[2] = alloc((ehfdes.n + 1) * sizeof *t);
+	uint64_t (*t)[2] = (uint64_t (*)[2])alloc((ehfdes.n + 1) * sizeof *t);
 	uint32_t n = 0;
 	uint64_t ehva = 0;
 
@@ -3704,7 +3704,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 	for (uint32_t i = 0; i < n; i++)
 		strsz += strlen(names[i]) + 1;
 	size_t datasz = 64 * (size_t)n;
-	uint8_t *b = alloc(sizeof(Ehdr) + 5 * sizeof(Shdr) + (n + 2) * sizeof(Sym) + strsz + 64 + datasz);
+	uint8_t *b = (uint8_t *)alloc(sizeof(Ehdr) + 5 * sizeof(Shdr) + (n + 2) * sizeof(Sym) + strsz + 64 + datasz);
 	Ehdr *eh = (Ehdr *)b;
 	Shdr *sh = (Shdr *)(b + sizeof(Ehdr));
 	Sym *sy = (Sym *)(sh + 5);
@@ -3736,7 +3736,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 				  .st_shndx = 3, .st_value = 64 * (uint64_t)i};
 		so += l + 1;
 	}
-	Obj *o = alloc(sizeof *o);
+	Obj *o = (Obj *)alloc(sizeof *o);
 	o->path = "<vroom-stubs>";
 	o->buf = b;
 	o->size = (uint8_t *)shstr + 32 + datasz - b;
@@ -3747,7 +3747,7 @@ static Obj *make_stub_obj(const char **names, uint32_t n)
 	o->nsym = n + 2;
 	o->firstg = 2;
 	o->str = str;
-	o->gs = alloc(n * sizeof(uint32_t));
+	o->gs = (uint32_t *)alloc(n * sizeof(uint32_t));
 	return o;
 }
 
@@ -3765,7 +3765,7 @@ static const char *find_lib(const char *name)
 	for (uint32_t k = 0; k < opt.libdirs.n; k++) {
 		const char *d = opt.libdirs.v[k];
 		size_t n = strlen(d) + strlen(name) + 8;
-		char *p = alloc(n);
+		char *p = (char *)alloc(n);
 
 		if (name[0] == ':')
 			snprintf(p, n, "%s/%s", d, name + 1);
@@ -3913,7 +3913,7 @@ static LSym *lsym(const char *name)
 
 	if (!lsyms.v || (lsyms.n + 1) * 2 > lsyms.mask) {
 		uint32_t m = lsyms.v ? (lsyms.mask + 1) * 2 : 4096;
-		LSym *nv = calloc(m, sizeof(LSym));
+		LSym *nv = (LSym *)calloc(m, sizeof(LSym));
 
 		for (uint32_t k = 0; lsyms.v && k <= lsyms.mask; k++)
 			if (lsyms.v[k].name) {
@@ -3947,7 +3947,7 @@ static const Sym *lglobals(Pending *p, uint32_t *n, const char **str)
 			return NULL;
 	}
 	if ((uintptr_t)p->buf & 7) {
-		uint8_t *c = alloc(p->size);
+		uint8_t *c = (uint8_t *)alloc(p->size);
 
 		memcpy(c, p->buf, p->size);
 		p->buf = c;
@@ -4074,7 +4074,7 @@ static void load_inputs(void)
 		pending = lout;
 	}
 	for (uint32_t i = 0; i < pending.n; i++) {
-		Obj *o = alloc(sizeof *o);
+		Obj *o = (Obj *)alloc(sizeof *o);
 		o->path = pending.v[i].path;
 		o->buf = pending.v[i].buf;
 		o->size = pending.v[i].size;
@@ -4097,7 +4097,7 @@ static void alloc_isecs(uint32_t from)
 		uint32_t nc = isecs.cap ? isecs.cap : 1024;
 		while (nc < total + 1024)
 			nc *= 2;
-		ISec *nv = alloc((size_t)nc * sizeof(ISec));
+		ISec *nv = (ISec *)alloc((size_t)nc * sizeof(ISec));
 		if (isecs.n)
 			memcpy(nv, isecs.v, isecs.n * sizeof(ISec));
 		isecs.v = nv;
@@ -4117,10 +4117,10 @@ static void gtable_init(void)
 	while (cap < total * 2 + 4096)
 		cap *= 2;
 	hmask = cap - 1;
-	hnames = bigalloc((size_t)cap * sizeof(*hnames));
-	hword = bigalloc((size_t)cap * sizeof(*hword));
-	gnames = bigalloc((size_t)cap * sizeof(*gnames));
-	gsyms = bigalloc((size_t)cap * sizeof(G));
+	hnames = (_Atomic(const char *) *)bigalloc((size_t)cap * sizeof(*hnames));
+	hword = (_Atomic(uint64_t) *)bigalloc((size_t)cap * sizeof(*hword));
+	gnames = (const char **)bigalloc((size_t)cap * sizeof(*gnames));
+	gsyms = (G *)bigalloc((size_t)cap * sizeof(G));
 	atomic_store(&ngsyms, 0);
 }
 
@@ -4158,7 +4158,7 @@ static int write_output(void)
 
 static void hash_chunk(void *arg, size_t i)
 {
-	uint8_t *hashes = arg;
+	uint8_t *hashes = (uint8_t *)arg;
 	uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
 	ld_blake3(out + b, n, hashes + i * 20, 20);
 }
@@ -4205,7 +4205,7 @@ static bool assign_symbol(Assign *a, bool insec)
 		EV v = apply_op(a->op, dot_ev(), eval(a->e));
 		uint64_t val = ev_value(v);
 		if (insec && val < dot) {
-			char *m = alloc(160);
+			char *m = (char *)alloc(160);
 			snprintf(m, 160, "unable to move location counter (0x%llx) backward to 0x%llx for section '%s'",
 				 (unsigned long long)dot, (unsigned long long)val, osecs.v[cur_osec].name);
 			VVEC_PUSH(recorded, m, alloc);
@@ -4506,7 +4506,7 @@ static void finish_phdrs(void)
 	headers_loaded = !opt.nmagic && hsize <= min - base;
 	if (headers_loaded)
 		error("ELF headers in the first PT_LOAD are not supported (no SECTIONS gap below the first section)");
-	int *map = alloc(phdrs.n * sizeof(int));
+	int *map = (int *)alloc(phdrs.n * sizeof(int));
 	uint32_t w = 0;
 	for (uint32_t i = 0; i < phdrs.n; i++) {
 		Phdr *p = &phdrs.v[i];
@@ -4637,7 +4637,7 @@ static void build_symtab(void)
 {
 	pfor(objs.n, count_locals, NULL);
 	/* per-file hidden counts */
-	uint32_t *hcount = alloc((objs.n + 1) * sizeof(uint32_t));
+	uint32_t *hcount = (uint32_t *)alloc((objs.n + 1) * sizeof(uint32_t));
 	uint32_t nglob = 0, nhid = 0;
 	for (uint32_t i = 0; i < gorder.n; i++) {
 		uint32_t g = gorder.v[i];
@@ -4653,7 +4653,7 @@ static void build_symtab(void)
 	}
 	/* local indices */
 	uint64_t idx = 1, str = 1;
-	uint32_t *hnext = alloc((objs.n + 1) * sizeof(uint32_t));
+	uint32_t *hnext = (uint32_t *)alloc((objs.n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < objs.n; i++) {
 		Obj *o = objs.v[i];
 		o->loc0 = idx;
@@ -4665,10 +4665,10 @@ static void build_symtab(void)
 			idx += hcount[i];
 	}
 	/* hidden-only groups after all file groups */
-	uint32_t *grp_next = alloc((objs.n + 1) * sizeof(uint32_t));
+	uint32_t *grp_next = (uint32_t *)alloc((objs.n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < objs.n; i++)
 		grp_next[i] = NONE;
-	gouts = alloc((size_t)nglob * sizeof(GOut));
+	gouts = (GOut *)alloc((size_t)nglob * sizeof(GOut));
 	ngouts = 0;
 	uint64_t gstr = str;
 	/* first pass: place hidden symbols */
@@ -4749,7 +4749,7 @@ static void build_shstrtab(void)
 	size_t cap = 1;
 	for (uint32_t i = 0; i < outsecs.n; i++)
 		cap += strlen(osecs.v[outsecs.v[i]].name) + 1;
-	shstrtab_buf = alloc(cap);
+	shstrtab_buf = (uint8_t *)alloc(cap);
 	size_t n = 1;
 	for (uint32_t i = 0; i < outsecs.n; i++) {
 		OSec *os = &osecs.v[outsecs.v[i]];
@@ -4828,13 +4828,13 @@ static void write_build_id(void)
 	uint8_t *dst = out + osecs.v[isec_osec(buildid_isec)].offset + is->off + 16;
 	size_t hl = is->size - 16;
 	size_t nchunks = (filesize + (1u << 20) - 1) >> 20;
-	uint8_t *hashes = alloc(nchunks * 20 + 32);
+	uint8_t *hashes = (uint8_t *)alloc(nchunks * 20 + 32);
 	if (!strcmp(opt.build_id, "sha1") || !strcmp(opt.build_id, "tree")) {
 		pfor(nchunks, hash_chunk, hashes);
 		ld_blake3(hashes, nchunks * 20, dst, hl);
 	} else if (!strcmp(opt.build_id, "fast")) {
 		/* xxh3 of the chunk hashes (lld: --build-id=fast is xxh3_64bits per chunk) */
-		uint8_t *h8 = alloc(nchunks * 8);
+		uint8_t *h8 = (uint8_t *)alloc(nchunks * 8);
 		for (size_t i = 0; i < nchunks; i++) {
 			uint64_t b = (uint64_t)i << 20, n = filesize - b < (1u << 20) ? filesize - b : (1u << 20);
 			uint64_t x = ld_xxh3(out + b, n);
@@ -4980,7 +4980,7 @@ static void build_dynamic(void)
 	}
 	/* .gnu.hash: undefined symbols first, then stable by bucket */
 	uint32_t n = dsyms.n, nund = 0;
-	uint32_t *tmp = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	uint32_t *tmp = (uint32_t *)alloc((size_t)(n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < n; i++)
 		if (gsyms[dsyms.v[i]].state == GS_UNDEF || gsyms[dsyms.v[i]].demoted)
 			tmp[nund++] = dsyms.v[i];
@@ -4990,7 +4990,7 @@ static void build_dynamic(void)
 	gh_maskwords = 1;
 	while (gh_maskwords <= words)	/* llvm::NextPowerOf2: strictly greater */
 		gh_maskwords <<= 1;
-	dsym_hash = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	dsym_hash = (uint32_t *)alloc((size_t)(n + 1) * sizeof(uint32_t));
 	uint32_t w = nund;
 	for (uint32_t b = 0; b < gh_nbuckets; b++)
 		for (uint32_t i = 0; i < n; i++) {
@@ -5006,14 +5006,14 @@ static void build_dynamic(void)
 	/* .dynstr: symbol names, then the file's name and version names */
 	dynstr.n = dynstr_offs.n = 0;
 	VVEC_PUSH(dynstr, 0, alloc);
-	dsym_name = alloc((size_t)(n + 1) * sizeof(uint32_t));
+	dsym_name = (uint32_t *)alloc((size_t)(n + 1) * sizeof(uint32_t));
 	for (uint32_t i = 0; i < n; i++) {
 		gsyms[dsyms.v[i]].dynidx = i + 1;
 		dsym_hash[i] = gnu_hash(gname(dsyms.v[i]));
 		dsym_name[i] = dynstr_add(gname(dsyms.v[i]));
 	}
 	const char *fname = opt.soname ? opt.soname : opt.out;
-	vername_off = alloc((nverdefs + 1) * sizeof(uint32_t));
+	vername_off = (uint32_t *)alloc((nverdefs + 1) * sizeof(uint32_t));
 	if (nverdefs) {
 		soname_off = dynstr_add(fname);
 		for (uint32_t v = 0, k = 0; v < vernodes.n; v++)
@@ -5337,7 +5337,7 @@ static void add_synthetic_sections(void)
 	{
 		ISec *c = &isecs.v[comment_isec];
 		size_t n = strlen(opt.comment) + 1;
-		uint8_t *d = alloc(n);
+		uint8_t *d = (uint8_t *)alloc(n);
 		memcpy(d, opt.comment, n);
 		c->data = d;
 		c->size = n;
@@ -5435,7 +5435,7 @@ static void script_symbols(void)
 	script_ord = (uint64_t)(objs.n + 1) << 32;
 	for (uint32_t i = 0; i < refsyms.n; i++)
 		script_insert(refsyms.v[i]);
-	uint8_t *added = alloc(provides.n + 1);
+	uint8_t *added = (uint8_t *)alloc(provides.n + 1);
 	VVEC(uint32_t) stack = {0};
 	for (uint32_t i = 0; i < provides.n; i++) {
 		uint32_t g = provides.v[i].sym;
@@ -5508,7 +5508,7 @@ static void collect_stubs(void)
 
 static void write_stub_list(void)
 {
-	char *p = alloc(strlen(opt.out) + 16);
+	char *p = (char *)alloc(strlen(opt.out) + 16);
 	sprintf(p, "%s.vroom-stubs", opt.out);
 	FILE *f = NULL;
 	int fd = openat(dirfd_base, p, O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -5558,7 +5558,7 @@ static const char *suggest_one(const char *cand, Obj *ref, const char **where)
 static const char *suggest(const char *name, Obj *ref, const char **where)
 {
 	size_t n = strlen(name);
-	char *b = malloc(n + 2);
+	char *b = (char *)malloc(n + 2);
 	const char *r = NULL;
 
 	if (!b)
@@ -5856,7 +5856,7 @@ static int run(int argc, char **argv)
 	if (got_isec != NONE)
 		for (uint32_t i = 0; i < objs.n; i++)
 			if (objs.v[i]->buf && objs.v[i]->firstg)
-				objs.v[i]->lgot = calloc(objs.v[i]->firstg, 1);
+				objs.v[i]->lgot = (_Atomic(uint8_t) *)calloc(objs.v[i]->firstg, 1);
 	pfor(isecs.n, x86_ld ? x64_scan_relocs : scan_relocs, NULL);
 	/* .got: one slot per symbol, globals in symbol id order, then the locals by
 	 * file (lld postScanRelocations) */
@@ -5873,7 +5873,7 @@ static int run(int argc, char **argv)
 		for (uint32_t k = 0; o->lgot && k < o->firstg; k++)
 			if (o->lgot[k]) {
 				if (!o->lgotidx)
-					o->lgotidx = alloc(o->firstg * sizeof(uint32_t));
+					o->lgotidx = (uint32_t *)alloc(o->firstg * sizeof(uint32_t));
 				o->lgotidx[k] = gotsyms.n + gotlocs.n;
 				VVEC_PUSH(gotlocs, ((GotLoc){i, k}), alloc);
 				if (pic && o->sym[k].st_shndx != SHN_ABS)
@@ -5905,7 +5905,7 @@ static int run(int argc, char **argv)
 
 	/* room for thunk sections without moving isecs */
 	if (isecs.cap < isecs.n + 4096) {
-		ISec *nv = alloc((size_t)(isecs.n + 4096) * sizeof(ISec));
+		ISec *nv = (ISec *)alloc((size_t)(isecs.n + 4096) * sizeof(ISec));
 		memcpy(nv, isecs.v, isecs.n * sizeof(ISec));
 		isecs.v = nv;
 		isecs.cap = isecs.n + 4096;
@@ -5975,7 +5975,7 @@ static int run(int argc, char **argv)
 	assign_file_offsets();
 	phase("phdrs, symtab sizes, offsets");
 
-	out = bigalloc(filesize);
+	out = (uint8_t *)bigalloc(filesize);
 	/* RELATIVE relocations: per section, in address order */
 	if (reladyn_isec != NONE && ndyn) {
 		VVEC(uint32_t) dl = {0};
@@ -6106,7 +6106,7 @@ static void r_count_locals(void *arg, size_t i)
 		}
 	o->nloc = n;
 	o->locstr = str;
-	lmap[i] = o->firstg ? alloc(o->firstg * sizeof(uint32_t)) : NULL;
+	lmap[i] = o->firstg ? (uint32_t *)alloc(o->firstg * sizeof(uint32_t)) : NULL;
 }
 
 static void r_write_locals(void *arg, size_t i)
@@ -6221,7 +6221,7 @@ static int ld_relocatable(void)
 	uint32_t cap = 1024;
 	while (cap < isecs.n)
 		cap *= 2;
-	rmap = alloc(cap * sizeof(uint32_t));
+	rmap = (uint32_t *)alloc(cap * sizeof(uint32_t));
 	memset(rmap, 0xff, cap * sizeof(uint32_t));
 	rmask = cap - 1;
 	for (uint32_t i = 0; i < isecs.n; i++) {
@@ -6308,10 +6308,10 @@ static int ld_relocatable(void)
 	r_shstrsize = shs;
 
 	/* symbols: null, section symbols, locals per file, globals */
-	lmap = alloc(objs.n * sizeof(uint32_t *));
+	lmap = (uint32_t **)alloc(objs.n * sizeof(uint32_t *));
 	pfor(objs.n, r_count_locals, NULL);
-	r_loc0 = alloc(objs.n * sizeof(uint64_t));
-	r_locstr = alloc(objs.n * sizeof(uint64_t));
+	r_loc0 = (uint64_t *)alloc(objs.n * sizeof(uint64_t));
+	r_locstr = (uint64_t *)alloc(objs.n * sizeof(uint64_t));
 	uint64_t idx = 1 + routs.n, str = 1;
 	for (uint32_t i = 0; i < routs.n; i++)
 		routs.v[i].secsym = 1 + i;
@@ -6357,7 +6357,7 @@ static int ld_relocatable(void)
 	off += r_shstrsize;
 	uint64_t shoff_r = alignup(off, 8);
 	uint64_t fsize = shoff_r + (uint64_t)r_nsh * sizeof(Shdr);
-	rbuf = bigalloc(fsize);
+	rbuf = (uint8_t *)bigalloc(fsize);
 	phase("-r: layout");
 
 	/* contents and relocations */
@@ -6572,7 +6572,7 @@ struct rspmem { struct rspmem *next; };
 
 static void *rsp_alloc(struct rspmem **keep, size_t n)
 {
-	struct rspmem *m = malloc(sizeof *m + n);
+	struct rspmem *m = (struct rspmem *)malloc(sizeof *m + n);
 	if (!m) {
 		fputs("vld: out of memory\n", stderr);
 		exit(1);
@@ -6592,7 +6592,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 	/* n == i throughout: out[n] is written only after argv[i] is read, and
 	 * after the first expansion out and argv are the same vector */
 	int argc = *pargc, n = 0, nexp = 0;
-	char **argv = *pargv, **out = rsp_alloc(keep, (argc + 1) * sizeof *out);
+	char **argv = *pargv, **out = (char **)rsp_alloc(keep, (argc + 1) * sizeof *out);
 	for (int i = 0; i < argc; i++) {
 		const char *a = argv[i];
 		char *text = NULL;
@@ -6602,7 +6602,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 			struct stat st;
 			if (fd >= 0 && !fstat(fd, &st) && st.st_size >= 0) {
 				len = (size_t)st.st_size;
-				text = rsp_alloc(keep, len + 1);
+				text = (char *)rsp_alloc(keep, len + 1);
 				size_t got = 0;
 				while (got < len) {
 					ssize_t r = read(fd, text + got, len - got);
@@ -6623,7 +6623,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 		/* split in place: a word never grows when its quotes are removed */
 		char *p = text, *end = text + len;
 		int nw = 0;
-		char **words = rsp_alloc(keep, (len / 2 + 2) * sizeof *words);
+		char **words = (char **)rsp_alloc(keep, (len / 2 + 2) * sizeof *words);
 		while (p < end) {
 			while (p < end && isspace((unsigned char)*p))
 				p++;
@@ -6648,7 +6648,7 @@ static bool rsp_expand(int *pargc, char ***pargv, int dirfd, struct rspmem **kee
 		}
 		/* the words replace @FILE; an @ among them is expanded on the next pass */
 		int rest = argc - i - 1;
-		char **nargv = rsp_alloc(keep, (n + nw + rest + 1) * sizeof *nargv);
+		char **nargv = (char **)rsp_alloc(keep, (n + nw + rest + 1) * sizeof *nargv);
 		memcpy(nargv, out, n * sizeof *nargv);
 		memcpy(nargv + n, words, nw * sizeof *nargv);
 		memcpy(nargv + n + nw, argv + i + 1, rest * sizeof *nargv);

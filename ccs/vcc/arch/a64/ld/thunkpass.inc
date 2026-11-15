@@ -19,7 +19,7 @@ static void collect_calls(ISD *d)
 			n += type == R_AARCH64_CALL26 || type == R_AARCH64_JUMP26;
 		}
 	}
-	d->calls = alloc((size_t)n * sizeof(Call) + 1);
+	d->calls = (Call *)alloc((size_t)n * sizeof(Call) + 1);
 	d->ncalls = 0;
 	for (uint32_t s = 0; s < d->secs.n; s++) {
 		uint32_t si = d->secs.v[s];
@@ -160,7 +160,7 @@ static bool create_thunks(int pass)
 						if (dg != NONE)
 							tn.g = dsec == NONE ? dg : NONE;
 						const char *dn = dg != NONE ? gname(dg) : o->str + o->sym[symi].st_name;
-						char *nm = alloc(strlen(dn) + 20);
+						char *nm = (char *)alloc(strlen(dn) + 20);
 						sprintf(nm, "__AArch64ADRPThunk_%s", dn);
 						tn.name = nm;
 						ThunkSec *tsx = &thunksecs.v[isecs.v[d->thunksec].aux];

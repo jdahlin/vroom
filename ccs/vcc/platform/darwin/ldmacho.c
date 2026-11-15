@@ -88,7 +88,7 @@ static void *xmalloc(size_t n)
 	return p;
 }
 #define VGROW(v, n, cap) do { if ((n) >= (cap)) { (cap) = (cap) ? 2 * (cap) : 16; \
-	(v) = realloc((v), (cap) * sizeof(*(v))); if (!(v)) { fputs("vld: out of memory\n", errf); exit(1); } } } while (0)
+	(v) = (__typeof__(v))realloc((v), (cap) * sizeof(*(v))); if (!(v)) { fputs("vld: out of memory\n", errf); exit(1); } } } while (0)
 
 static inline uint32_t rd32(const void *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static inline void wr32(void *p, uint32_t v) { memcpy(p, &v, 4); }
@@ -187,7 +187,7 @@ static uint32_t gfind(const char *name, bool add)
 	if (!add)
 		return NONE;
 	if (2 * (ngs + 1) > ghmask) {	/* grow and rehash */
-		uint32_t nm = 2 * (ghmask + 1) - 1, *nh = xmalloc((nm + 1) * sizeof(uint32_t));
+		uint32_t nm = 2 * (ghmask + 1) - 1, *nh = (uint32_t *)xmalloc((nm + 1) * sizeof(uint32_t));
 		for (uint32_t i = 0; i < ngs; i++) {
 			uint32_t k = strhash(gs[i].name) & nm;
 			while (nh[k])
@@ -230,7 +230,7 @@ static char *read_whole(const char *path, size_t *n)
 		close(fd);
 		return NULL;
 	}
-	char *b = xmalloc((size_t)st.st_size + 1);
+	char *b = (char *)xmalloc((size_t)st.st_size + 1);
 	size_t got = 0;
 	while (got < (size_t)st.st_size) {
 		ssize_t r = read(fd, b + got, (size_t)st.st_size - got);
@@ -278,12 +278,12 @@ static bool load_libsystem(void)
 	sdk_version = v ? parse_version(v + 11) : 0;
 	free(js);
 	ex_mask = (1u << 15) - 1;
-	ex_hash = xmalloc((ex_mask + 1) * sizeof(uint32_t));
+	ex_hash = (uint32_t *)xmalloc((ex_mask + 1) * sizeof(uint32_t));
 	uint32_t count = 0;
 	bool arm = false;
 	char *p = tbd, *end = tbd + n;
 	while (p < end) {
-		char *line = p, *nl = memchr(p, '\n', (size_t)(end - p));
+		char *line = p, *nl = (char *)memchr(p, '\n', (size_t)(end - p));
 		char *le = nl ? nl : end;
 		p = nl ? nl + 1 : end;
 		char *k = line;
@@ -292,7 +292,7 @@ static bool load_libsystem(void)
 		bool syms = false;
 		if (!strncmp(k, "targets:", 8)) {
 			/* the list may continue on following lines up to ']' */
-			char *close = memchr(k, ']', (size_t)(end - k));
+			char *close = (char *)memchr(k, ']', (size_t)(end - k));
 			arm = false;
 			for (char *q = k; close && q < close; q++)
 				if (!strncmp(q, "arm64-macos", 11) || !strncmp(q, "arm64e-macos", 12))
@@ -305,7 +305,7 @@ static bool load_libsystem(void)
 			syms = true;
 		if (!syms)
 			continue;
-		char *q = memchr(k, '[', (size_t)(le - k));
+		char *q = (char *)memchr(k, '[', (size_t)(le - k));
 		if (!q)
 			continue;
 		q++;
@@ -317,7 +317,7 @@ static bool load_libsystem(void)
 			char *b = q, *e;
 			if (*q == '\'') {
 				b = ++q;
-				e = memchr(q, '\'', (size_t)(end - q));
+				e = (char *)memchr(q, '\'', (size_t)(end - q));
 				if (!e)
 					break;
 				q = e + 1;
@@ -330,7 +330,7 @@ static bool load_libsystem(void)
 			*e = 0;
 			if (arm && e > b) {
 				if (2 * (count + 1) > ex_mask) {
-					uint32_t nm = 2 * (ex_mask + 1) - 1, *nh = xmalloc((nm + 1) * sizeof(uint32_t));
+					uint32_t nm = 2 * (ex_mask + 1) - 1, *nh = (uint32_t *)xmalloc((nm + 1) * sizeof(uint32_t));
 					for (uint32_t i = 0; i <= ex_mask; i++)
 						if (ex_hash[i]) {
 							uint32_t h = strhash(tbd + ex_hash[i] - 1) & nm;
@@ -397,7 +397,7 @@ static bool read_obj(Obj *o)
 				error("%s: bad segment", o->path);
 				return false;
 			}
-			o->sect = xmalloc(ns * sizeof(Sect));
+			o->sect = (Sect *)xmalloc(ns * sizeof(Sect));
 			memcpy(o->sect, lc + 72, ns * sizeof(Sect));
 			o->nsect = ns;
 		} else if (cmd == LC_SYMTAB) {
@@ -466,7 +466,7 @@ static uint32_t got_of(uint32_t g)
 {
 	if (gs[g].got == NONE) {
 		gs[g].got = ngot++;
-		got_g = realloc(got_g, ngot * sizeof(uint32_t));
+		got_g = (uint32_t *)realloc(got_g, ngot * sizeof(uint32_t));
 		got_g[ngot - 1] = g;
 	}
 	return gs[g].got;
@@ -476,7 +476,7 @@ static uint32_t stub_of(uint32_t g)
 	if (gs[g].stub == NONE) {
 		got_of(g);
 		gs[g].stub = nstub++;
-		stub_g = realloc(stub_g, nstub * sizeof(uint32_t));
+		stub_g = (uint32_t *)realloc(stub_g, nstub * sizeof(uint32_t));
 		stub_g[nstub - 1] = g;
 	}
 	return gs[g].stub;
@@ -672,7 +672,7 @@ static void bput(Buf *b, const void *d, size_t n)
 {
 	if (b->n + n > b->cap) {
 		b->cap = (b->n + n) * 2 + 256;
-		b->p = realloc(b->p, b->cap);
+		b->p = (uint8_t *)realloc(b->p, b->cap);
 		if (!b->p) {
 			fputs("vld: out of memory\n", errf);
 			exit(1);
@@ -753,7 +753,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 	errf = err ? err : stderr;
 	reset();
 	const char *out = "a.out";
-	const char **inputs = xmalloc((size_t)argc * sizeof(char *));
+	const char **inputs = (const char **)xmalloc((size_t)argc * sizeof(char *));
 	uint32_t ninputs = 0;
 	for (int i = 1; i < argc; i++) {
 		const char *a = argv[i];
@@ -791,7 +791,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 	}
 
 	/* read inputs */
-	objs = xmalloc(ninputs * sizeof(Obj));
+	objs = (Obj *)xmalloc(ninputs * sizeof(Obj));
 	for (uint32_t i = 0; i < ninputs; i++) {
 		Obj *o = &objs[nobjs++];
 		o->path = inputs[i];
@@ -804,7 +804,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 			continue;
 		}
 		o->size = (size_t)st.st_size;
-		o->buf = xmalloc(o->size + 8);
+		o->buf = (uint8_t *)xmalloc(o->size + 8);
 		size_t got = 0;
 		while (got < o->size) {
 			ssize_t r = read(fd, o->buf + got, o->size - got);
@@ -830,8 +830,8 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 		Obj *o = &objs[oi];
 		if (o->minos > minos)
 			minos = o->minos;
-		o->osec = xmalloc((o->nsect + 1) * sizeof(uint32_t));
-		o->off = xmalloc((o->nsect + 1) * sizeof(uint64_t));
+		o->osec = (uint32_t *)xmalloc((o->nsect + 1) * sizeof(uint32_t));
+		o->off = (uint64_t *)xmalloc((o->nsect + 1) * sizeof(uint64_t));
 		for (uint32_t s = 0; s < o->nsect; s++) {
 			Sect *x = &o->sect[s];
 			uint32_t t = x->flags & 0xff;
@@ -860,10 +860,10 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 
 	/* symbols */
 	ghmask = 1023;
-	gh = xmalloc((ghmask + 1) * sizeof(uint32_t));
+	gh = (uint32_t *)xmalloc((ghmask + 1) * sizeof(uint32_t));
 	for (uint32_t oi = 0; oi < nobjs; oi++) {
 		Obj *o = &objs[oi];
-		o->gsym = xmalloc((o->nsym + 1) * sizeof(uint32_t));
+		o->gsym = (uint32_t *)xmalloc((o->nsym + 1) * sizeof(uint32_t));
 		for (uint32_t i = 0; i < o->nsym; i++) {
 			const Nlist *n = &o->sym[i];
 			o->gsym[i] = NONE;
@@ -952,7 +952,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 	osecs[os_got].size = 8ull * ngot;
 
 	/* output order: per segment, __text/__stubs first, zerofill last */
-	uint32_t *order = xmalloc((nosecs + 1) * sizeof(uint32_t)), nord = 0;
+	uint32_t *order = (uint32_t *)xmalloc((nosecs + 1) * sizeof(uint32_t)), nord = 0;
 	for (int seg = 0; seg < SEG_LINKEDIT; seg++)
 		for (int zf = 0; zf < 2; zf++)
 			for (uint32_t i = 0; i < nosecs; i++)
@@ -1144,9 +1144,9 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 	uint64_t ex_size = le.n - ex_off;
 
 	/* symbol table: locals, external definitions, imports */
-	OutSym *syms = xmalloc((ngs + 1 + 64) * sizeof(OutSym));
+	OutSym *syms = (OutSym *)xmalloc((ngs + 1 + 64) * sizeof(OutSym));
 	uint32_t nsyms = 0, nlocal = 0, nextdef = 0, nundef = 0;
-	uint32_t *sorted = xmalloc((ngs + 1) * sizeof(uint32_t)), ns = 0;
+	uint32_t *sorted = (uint32_t *)xmalloc((ngs + 1) * sizeof(uint32_t)), ns = 0;
 	for (uint32_t oi = 0; oi < nobjs; oi++) {
 		Obj *o = &objs[oi];
 		for (uint32_t i = 0; i < o->nsym; i++) {
@@ -1159,12 +1159,12 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 			uint32_t s = n->sect - 1u;
 			if (s >= o->nsect || o->osec[s] == NONE)
 				continue;
-			syms = realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
+			syms = (OutSym *)realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
 			syms[nsyms++] = (OutSym){nm, local_addr(o, i), N_SECT, (uint8_t)section_index_of(o->osec[s], order, nord), 0};
 			nlocal++;
 		}
 	}
-	syms = realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
+	syms = (OutSym *)realloc(syms, (nsyms + ngs + 2) * sizeof(OutSym));
 	syms[nsyms++] = (OutSym){"__mh_execute_header", BASE, N_SECT | N_EXT, 1, 0x10};
 	nextdef++;
 	for (uint32_t g = 0; g < ngs; g++)
@@ -1245,7 +1245,7 @@ static int link_macho(int argc, char **argv, int dirfd, FILE *err)
 	uint64_t filesize = segfile[SEG_LINKEDIT] + le_size;
 
 	/* ---- the image ---- */
-	uint8_t *img = xmalloc(filesize);
+	uint8_t *img = (uint8_t *)xmalloc(filesize);
 	Buf lc = {0};
 	{
 		uint32_t mh[8] = { MH_MAGIC_64, CPU_ARM64, 0, MH_EXECUTE, ncmds, sizeofcmds,

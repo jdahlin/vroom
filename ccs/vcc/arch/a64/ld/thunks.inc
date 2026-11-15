@@ -26,8 +26,8 @@ static void tr_put(uint32_t isec, uint32_t ri, uint32_t th)
 {
 	if (!tr_keys || tr_n * 2 >= tr_mask) {
 		uint32_t nm = tr_keys ? tr_mask * 2 + 1 : 1023;
-		uint64_t *nk = alloc((uint64_t)(nm + 1) * 8);
-		uint32_t *nv = alloc((uint64_t)(nm + 1) * 4);
+		uint64_t *nk = (uint64_t *)alloc((uint64_t)(nm + 1) * 8);
+		uint32_t *nv = (uint32_t *)alloc((uint64_t)(nm + 1) * 4);
 		memset(nk, 0xff, (uint64_t)(nm + 1) * 8);
 		for (uint32_t i = 0; tr_keys && i <= tr_mask; i++)
 			if (tr_keys[i] != UINT64_MAX) {

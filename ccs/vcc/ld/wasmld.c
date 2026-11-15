@@ -34,7 +34,7 @@ int wasm_ld_main(int argc, char **argv);
 	do { \
 		if ((n) >= (c)) { \
 			(c) = (c) ? (c) * 2 : 16; \
-			(p) = realloc((p), (size_t)(c) * sizeof(*(p))); \
+			(p) = (__typeof__(p))realloc((p), (size_t)(c) * sizeof(*(p))); \
 			if (!(p)) \
 				abort(); \
 		} \
@@ -63,7 +63,7 @@ static bool span_eq(span a, span b) { return a.n == b.n && !memcmp(a.p, b.p, a.n
 
 static char *span_str(span s)
 {
-	char *r = malloc(s.n + 1);
+	char *r = (char *)malloc(s.n + 1);
 
 	memcpy(r, s.p, s.n);
 	r[s.n] = 0;
@@ -82,7 +82,7 @@ static void ob_put(obuf *b, const void *s, size_t n)
 
 		while (c < b->n + n)
 			c *= 2;
-		b->p = realloc(b->p, c);
+		b->p = (uint8_t *)realloc(b->p, c);
 		if (!b->p)
 			abort();
 		b->cap = c;
@@ -372,15 +372,15 @@ static gsym *gfind(const char *s, size_t n, bool create)
 
 	if (!ght) {
 		ghcap = 1 << 16;
-		ght = calloc(ghcap, sizeof *ght);
+		ght = (gsym **)calloc(ghcap, sizeof *ght);
 	}
 	for (g = ght[h & (ghcap - 1)]; g; g = g->next)
 		if (g->hash == h && strlen(g->name) == n && !memcmp(g->name, s, n))
 			return g;
 	if (!create)
 		return NULL;
-	g = calloc(1, sizeof *g);
-	g->name = malloc(n + 1);
+	g = (gsym *)calloc(1, sizeof *g);
+	g->name = (char *)malloc(n + 1);
 	memcpy(g->name, s, n);
 	g->name[n] = 0;
 	g->hash = h;
@@ -429,7 +429,7 @@ static const uint8_t *map_file(const char *path, size_t *n)
 	*n = (size_t)st.st_size;
 	p = *n ? mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : (void *)"";
 	close(fd);
-	return p == MAP_FAILED ? NULL : p;
+	return p == MAP_FAILED ? NULL : (const uint8_t *)p;
 }
 
 static void parse_linking(obj *o, rd *r)
@@ -452,7 +452,7 @@ static void parse_linking(obj *o, rd *r)
 		if (t == 8) {
 			uint32_t n = (uint32_t)ruleb(&s);
 
-			o->sym = calloc(n + 1, sizeof(isym));
+			o->sym = (isym *)calloc(n + 1, sizeof(isym));
 			o->nsym = n;
 			for (uint32_t i = 0; i < n && !s.bad; i++) {
 				isym *y = &o->sym[i];
@@ -507,7 +507,7 @@ static void parse_linking(obj *o, rd *r)
 		} else if (t == 6) {
 			uint32_t n = (uint32_t)ruleb(&s);
 
-			o->init = calloc(n + 1, sizeof *o->init);
+			o->init = (__typeof__(o->init))calloc(n + 1, sizeof *o->init);
 			for (uint32_t i = 0; i < n && !s.bad; i++) {
 				o->init[i].prio = (uint32_t)ruleb(&s);
 				o->init[i].sym = (uint32_t)ruleb(&s);
@@ -524,14 +524,14 @@ static void parse_linking(obj *o, rd *r)
 
 static int cmp_rel(const void *a, const void *b)
 {
-	const irel *x = a, *y = b;
+	const irel *x = (const irel *)a, *y = (const irel *)b;
 
 	return x->off < y->off ? -1 : x->off > y->off;
 }
 
 static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 {
-	obj *o = calloc(1, sizeof *o);
+	obj *o = (obj *)calloc(1, sizeof *o);
 	rd r = { p + 8, p + n, false };
 	uint32_t secidx = 0, code_idx = UINT32_MAX, data_idx = UINT32_MAX;
 	const uint8_t *code0 = NULL, *data0 = NULL;
@@ -574,7 +574,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 		case 1: {
 			uint32_t k = (uint32_t)ruleb(&s);
 
-			o->types = calloc(k + 1, sizeof(span));
+			o->types = (span *)calloc(k + 1, sizeof(span));
 			o->ntypes = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				const uint8_t *t0;
@@ -591,10 +591,10 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 		case 2: {
 			uint32_t k = (uint32_t)ruleb(&s);
 
-			o->imp = calloc(k + 1, sizeof(iimp));
-			o->fimp = calloc(k + 1, sizeof(uint32_t));
-			o->gimp = calloc(k + 1, sizeof(uint32_t));
-			o->tagimp = calloc(k + 1, sizeof(uint32_t));
+			o->imp = (iimp *)calloc(k + 1, sizeof(iimp));
+			o->fimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
+			o->gimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
+			o->tagimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
 			o->nimp = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				iimp *m = &o->imp[i];
@@ -646,7 +646,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 		case 3: {
 			uint32_t k = (uint32_t)ruleb(&s);
 
-			o->fn = calloc(k + 1, sizeof(ifunc));
+			o->fn = (ifunc *)calloc(k + 1, sizeof(ifunc));
 			o->nfn = k;
 			for (uint32_t i = 0; i < k; i++) {
 				o->fn[i].type = (uint32_t)ruleb(&s);
@@ -657,7 +657,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 		case 6: {
 			uint32_t k = (uint32_t)ruleb(&s);
 
-			o->gl = calloc(k + 1, sizeof(iglob));
+			o->gl = (iglob *)calloc(k + 1, sizeof(iglob));
 			o->ngl = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				o->gl[i].type = r8(&s);
@@ -688,7 +688,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 
 			data_idx = secidx;
 			data0 = r.p - len;
-			o->seg = calloc(k + 1, sizeof(iseg));
+			o->seg = (iseg *)calloc(k + 1, sizeof(iseg));
 			o->nseg = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				uint64_t fl = ruleb(&s);
@@ -711,7 +711,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 		case 13: {
 			uint32_t k = (uint32_t)ruleb(&s);
 
-			o->tag = calloc(k + 1, sizeof *o->tag);
+			o->tag = (__typeof__(o->tag))calloc(k + 1, sizeof *o->tag);
 			o->ntag = k;
 			for (uint32_t i = 0; i < k && !s.bad; i++) {
 				r8(&s);		/* attribute: exception */
@@ -735,7 +735,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 	for (uint32_t k = 0; k < nrels; k++) {
 		rd s = { rels[k].p, rels[k].e, false };
 		uint32_t cnt = (uint32_t)ruleb(&s);
-		irel *v = calloc(cnt + 1, sizeof(irel));
+		irel *v = (irel *)calloc(cnt + 1, sizeof(irel));
 
 		for (uint32_t i = 0; i < cnt && !s.bad; i++) {
 			v[i].type = r8(&s);
@@ -1012,9 +1012,9 @@ static int load_path(const char *path)
 		const char *s = (const char *)p, *e = s + n;
 
 		while (s < e) {
-			const char *l = memchr(s, '\n', (size_t)(e - s)), *le = l ? l : e, *c;
+			const char *l = (const char *)memchr(s, '\n', (size_t)(e - s)), *le = l ? l : e, *c;
 
-			if (*s != '#' && (c = memchr(s, ':', (size_t)(le - s)))) {
+			if (*s != '#' && (c = (const char *)memchr(s, ':', (size_t)(le - s)))) {
 				gsym *g = gfind(s, (size_t)(c - s), true);
 				const char *d = c + 1;
 
@@ -1022,7 +1022,7 @@ static int load_path(const char *path)
 				while (d < le && *d == ' ')
 					d++;
 				if (d < le) {
-					g->deps = malloc((size_t)(le - d) + 1);
+					g->deps = (char *)malloc((size_t)(le - d) + 1);
 					memcpy(g->deps, d, (size_t)(le - d));
 					g->deps[le - d] = 0;
 				}
@@ -1635,7 +1635,7 @@ static int write_module(void)
 					if (!strcmp(osegs[j].name, nm))
 						break;
 				if (j == nosegs) {
-					osegs = realloc(osegs, (nosegs + 1) * sizeof(oseg));
+					osegs = (oseg *)realloc(osegs, (nosegs + 1) * sizeof(oseg));
 					osegs[nosegs] = (oseg){ strdup(nm), 0, 0, 0, !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"),
 								!strcmp(nm, ".bss") || !strcmp(nm, ".tbss"), seg_order(nm) };
 					nosegs++;
@@ -1646,8 +1646,8 @@ static int write_module(void)
 			}
 		/* stable order: TLS, .rodata, .data, others, .bss */
 		{
-			uint32_t *perm = malloc((nosegs + 1) * sizeof(uint32_t)), *inv = malloc((nosegs + 1) * sizeof(uint32_t)), n = 0;
-			oseg *ns = malloc((nosegs + 1) * sizeof(oseg));
+			uint32_t *perm = (uint32_t *)malloc((nosegs + 1) * sizeof(uint32_t)), *inv = (uint32_t *)malloc((nosegs + 1) * sizeof(uint32_t)), n = 0;
+			oseg *ns = (oseg *)malloc((nosegs + 1) * sizeof(oseg));
 
 			for (int ord = 0; ord <= 4; ord++)
 				for (uint32_t j = 0; j < nosegs; j++)
@@ -1847,7 +1847,7 @@ static int write_module(void)
 
 				if (osegs[j].bss)
 					continue;
-				buf = calloc(osegs[j].size + 1, 1);
+				buf = (uint8_t *)calloc(osegs[j].size + 1, 1);
 				for (uint32_t k = 0; k < nobjs; k++)
 					for (uint32_t i = 0; i < objs[k]->nseg; i++) {
 						iseg *s = &objs[k]->seg[i];
@@ -1869,7 +1869,7 @@ static int write_module(void)
 		}
 		/* function types: imports and functions (after the code: call_indirect types came first there) */
 		{
-			uint32_t *ftypes = malloc((nfi + nof + 1) * sizeof(uint32_t));
+			uint32_t *ftypes = (uint32_t *)malloc((nfi + nof + 1) * sizeof(uint32_t));
 
 			for (uint32_t i = 0; i < nfi; i++) {
 				isym *y = &fimps[i]->uo->sym[fimps[i]->usi];

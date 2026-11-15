@@ -16,7 +16,7 @@
 		uint32_t nc = (a).cap ? (a).cap * 2 : 8; \
 		void *nv = alloc(nc * sizeof(*(a).v)); \
 		if ((a).n) memcpy(nv, (a).v, (a).n * sizeof(*(a).v)); \
-		(a).v = nv; (a).cap = nc; \
+		(a).v = (__typeof__((a).v))nv; (a).cap = nc; \
 	} \
 	(a).v[(a).n++] = (x); \
 } while (0)

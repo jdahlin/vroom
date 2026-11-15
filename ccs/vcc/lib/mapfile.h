@@ -36,7 +36,7 @@ static inline VUSE VNONNULL_ALL bool vmap_file(const char *abs, vmapped *m, stru
 			close(fd);
 			return false;
 		}
-		m->p = p;
+		m->p = (const unsigned char *)p;
 		m->n = st->st_size;
 	}
 	close(fd);
