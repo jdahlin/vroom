@@ -1,5 +1,6 @@
 /* C++ declarations: declarators, parameter clauses, function tails, type-ids */
 #include "declaration.h"
+#include "common/vector.h"
 
 /* does a ( after decl-specifiers start a nested declarator (not parameters)? */
 VPRIV bool cxx_paren_is_nested_declarator(cxx *c)
@@ -389,11 +390,42 @@ VPRIV void cxx_parameter_clause_parse(cxx *c)
     c->implicit_typename = implicit;
 }
 
+typedef struct cxx_parsed_parameter {
+    uint32_t name;
+    ast_qualified_type signature_type, declared_type;
+} cxx_parsed_parameter;
+
+typedef struct cxx_parameter_list {
+    cxx_parsed_parameter *items;
+    uint32_t count, capacity;
+} cxx_parameter_list;
+
+static inline void cxx_parameter_append(cxx *c, cxx_parameter_list *list,
+                                        uint32_t name,
+                                        ast_qualified_type signature_type,
+                                        ast_qualified_type declared_type)
+{
+    if (unlikely(list->count == list->capacity)) {
+        size_t capacity = vvector_capacity(
+            list->capacity, (size_t)list->count + 1, sizeof *list->items);
+        if (!capacity || capacity > UINT32_MAX)
+            vout_of_memory();
+        /* Tentative parsing can longjmp out of this clause. The TU owns spills. */
+        cxx_parsed_parameter *items = (cxx_parsed_parameter *)cc_heap_allocate(
+            c->ast, capacity * sizeof *items);
+        memcpy(items, list->items, list->count * sizeof *items);
+        list->items = items;
+        list->capacity = (uint32_t)capacity;
+    }
+    list->items[list->count++] =
+        VCC_LITERAL(cxx_parsed_parameter, name, signature_type, declared_type);
+}
+
 VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 {
-    ast_qualified_type *types = NULL, *decls = NULL;
-    uint32_t *names = NULL;
-    uint32_t n = 0, cap = 0, ndefaults = 0, pack = UINT32_MAX, def_tok[16];
+    cxx_parsed_parameter local[8];
+    cxx_parameter_list parameters = {local, 0, sizeof local / sizeof *local};
+    uint32_t ndefaults = 0, pack = UINT32_MAX, def_tok[16];
     uint8_t variadic = 0, unknown = 0;
 
     cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
@@ -444,7 +476,7 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                         all = pe->pack[k].kind == 1 &&
                               pe->pack[k].t != CXX_TY_UNKNOWN;
                     if (all && !cxx_is(c, LEX_TOKEN_EQUAL) && pe->npack <= 32) {
-                        c->cpack_name = pname, c->cpack_at = n,
+                        c->cpack_name = pname, c->cpack_at = parameters.count,
                         c->cpack_n = pe->npack;
                         for (uint32_t k = 0; k < pe->npack; k++) {
                             bool q2, f2;
@@ -458,20 +490,9 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                             c->pos = decl_pos, c->type_in = et,
                             c->decl_pack = 0;
                             cxx_declarator_parse(c, true, &q2, &f2, NULL);
-                            if (n == cap) {
-                                cap = cap ? cap * 2 : 8;
-                                types = (ast_qualified_type *)realloc(
-                                    types, cap * sizeof *types);
-                                names = (uint32_t *)realloc(
-                                    names, cap * sizeof *names);
-                                decls = (ast_qualified_type *)realloc(
-                                    decls, cap * sizeof *decls);
-                            }
-                            names[n] = 0;
-                            decls[n] = types[n] =
-                                cxx_type_parameter_adjust(c, c->type_out);
-                            c->cpack_types[k] = types[n];
-                            n++;
+                            t = cxx_type_parameter_adjust(c, c->type_out);
+                            cxx_parameter_append(c, &parameters, 0, t, t);
+                            c->cpack_types[k] = t;
                         }
                         c->pos = end, c->decl_pack = 0;
                         if (!cxx_accept(c, LEX_TOKEN_COMMA))
@@ -481,10 +502,10 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                 }
             }
             if (c->decl_pack)
-                pack = n; /* a parameter pack: Ts&&... ts */
+                pack = parameters.count; /* a parameter pack: Ts&&... ts */
             t = cxx_type_parameter_adjust(c, c->type_out);
             /* in the body: the adjusted type with the declaration's own const (not part of the function's type) */
-            ast_qualified_type dt =
+            ast_qualified_type declared_type =
                 t == CXX_TY_UNKNOWN || c->type_out == CXX_TY_UNKNOWN ||
                         AST_TYPE_KIND(c->ast, c->type_out) == AST_TYPE_ARRAY ||
                         AST_TYPE_KIND(c->ast, c->type_out) == AST_TYPE_FUNCTION
@@ -520,19 +541,8 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                     if (all) {
                         cxx_advance(c);
                         for (uint32_t k = 0; k < pe->npack; k++) {
-                            if (n == cap) {
-                                cap = cap ? cap * 2 : 8;
-                                types = (ast_qualified_type *)realloc(
-                                    types, cap * sizeof *types);
-                                names = (uint32_t *)realloc(
-                                    names, cap * sizeof *names);
-                                decls = (ast_qualified_type *)realloc(
-                                    decls, cap * sizeof *decls);
-                            }
-                            names[n] = 0;
-                            decls[n] = types[n] =
-                                cxx_type_parameter_adjust(c, pe->pack[k].t);
-                            n++;
+                            t = cxx_type_parameter_adjust(c, pe->pack[k].t);
+                            cxx_parameter_append(c, &parameters, 0, t, t);
                         }
                         if (!cxx_accept(c, LEX_TOKEN_COMMA))
                             break;
@@ -548,7 +558,7 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
 
                 if (pe && pe->is_pack && pe->pack_placeholder) {
                     cxx_advance(c);
-                    pack = n;
+                    pack = parameters.count;
                 }
             }
             if (cxx_accept(
@@ -560,25 +570,16 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
             if (t == CXX_TY_UNKNOWN)
                 unknown = 1;
             /* (void): no parameters */
-            if (!(n == 0 && t == cc_type_basic(AST_TYPE_VOID) &&
+            if (!(parameters.count == 0 && t == cc_type_basic(AST_TYPE_VOID) &&
                   cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
-                if (n == cap) {
-                    cap = cap ? cap * 2 : 8;
-                    types = (ast_qualified_type *)realloc(types,
-                                                          cap * sizeof *types);
-                    names = (uint32_t *)realloc(names, cap * sizeof *names);
-                    decls = (ast_qualified_type *)realloc(decls,
-                                                          cap * sizeof *decls);
-                }
-                names[n] = pname;
-                decls[n] = dt;
-                types[n++] = t;
+                cxx_parameter_append(c, &parameters, pname, t, declared_type);
             }
             if (variadic || !cxx_accept(c, LEX_TOKEN_COMMA))
                 break;
         }
         cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
     }
+    uint32_t n = parameters.count;
     if (n > c->fn_cparams) {
         c->fn_cparams = n;
         c->fn_params = (ast_qualified_type *)(realloc(
@@ -588,19 +589,16 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
         c->fn_pdecl = (ast_qualified_type *)(realloc(
             c->fn_pdecl, n * sizeof(ast_qualified_type)));
     }
-    if (n) {
-        memcpy(c->fn_params, types, n * sizeof(ast_qualified_type));
-        memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
-        memcpy(c->fn_pdecl, decls, n * sizeof(ast_qualified_type));
+    for (uint32_t i = 0; i < n; i++) {
+        c->fn_params[i] = parameters.items[i].signature_type;
+        c->fn_pnames[i] = parameters.items[i].name;
+        c->fn_pdecl[i] = parameters.items[i].declared_type;
     }
     c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown,
     c->fn_ndefaults = ndefaults;
     c->fn_ndefs = ndefaults <= 8 ? ndefaults : 0;
     memcpy(c->fn_defs, def_tok, 2 * c->fn_ndefs * sizeof *def_tok);
     c->fn_pack = pack;
-    free(types);
-    free(names);
-    free(decls);
 }
 
 /* noexcept, noexcept(e), throw(...): 1 not throwing, 0 throwing, 2 not known (a condition not evaluated) */

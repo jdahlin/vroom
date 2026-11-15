@@ -2487,3 +2487,12 @@ och ett senare försök som valde (jsons dolda `operator<<`) ärvde det: doctest
 `has_insertion_operator<json>` blev okänd i instanser och `toString(json)`
 saknade kod.  Varje ADL-försök börjar nu med ingångens värde.  Sviter gröna
 (113/113, 38/38, mangle, 350/350).
+
+### Parameter-list storage (2026-11-15)
+
+Normal x86-64 Linux vpp, baseline `2df8ed5a`, Clang 23 host build. Median
+user instructions over 11 alternating pairs on one pinned CPU after warmup.
+Compiling a TU that calls nlohmann/json's `is_null()` and `is_array()` to an
+object went from 4,431,528,953 to 4,418,098,670 instructions (−0.30%), with
+identical object bytes. Parsing 6,000 declarations with 0–16 parameters went
+from 208,216,939 to 194,229,447 instructions (−6.72%).
