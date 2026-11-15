@@ -2267,3 +2267,12 @@ paket element för element, och constexpr-klassobjekt (std::piecewise_construct)
 emitteras.  Sviter gröna (92/92, 38/38, mangle, 350/350); strikt bänk: 188
 saknade (111 distinkta, från 196), länkfel kvar i unit-hash och
 unit-large_json (`__lazy_compare_result<less<void>, ...>`).
+
+## Status 138 (2026-11-15)
+En kandidat med paket och requires-klausul (variants `operator<=>(const
+variant<Ts...>&, ...)`) gav upp ("packs") innan argumenten prövades, så
+`a < b` för två strängar, omskrivet via `<=>`, blev otypat när `<variant>`
+(via `<iterator>`) kommit före `<map>`: `__lazy_compare_result<less<>, ...>`
+saknades.  Nu utesluts parametrar vars form argumentet inte kan ha först.
+Test: `run/spaceship-pack-candidate.cpp`.  Sviter gröna (93/93, 38/38, mangle,
+350/350).

@@ -455,6 +455,11 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 			return 0;
 		if (inside && nargs > fixed && !f->variadic)
 			return 0;
+		/* (a parameter whose shape the argument cannot have rules it out before the give-ups below:
+		   operator<=>(const variant<Ts...>&, ...) requires (...) for two strings) */
+		for (uint32_t i = 0; i < nargs && i < f->np; i++)
+			if (cxx_shape_mismatch(c, f->pt[i], args[i]))
+				return 0;
 		if (nargs - fixed > 16 || ntp > 16 || f->req_pos || (xargs && nxargs > pk)) {	/* (explicit elements of the pack: not mixed) */
 			c->why = CXX_WHY_PACKS;
 			return -1;
