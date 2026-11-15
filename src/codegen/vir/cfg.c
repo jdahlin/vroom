@@ -287,10 +287,10 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
         return;
     /* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
     {
-        uint32_t *o = malloc((size_t)V->block_order_count * sizeof *o), m = 0;
+        uint32_t *o = virbuild_pass_scratch_get(
+                     e, (uint64_t)V->block_order_count * sizeof *o),
+                 m = 0;
 
-        if (!o)
-            virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
         for (uint32_t i = 0; i < n0; i++) {
             uint32_t b = V->block_order[i];
 
@@ -301,6 +301,5 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
                     o[m++] = V->block_order[j];
         }
         memcpy(V->block_order, o, (size_t)m * sizeof *o);
-        free(o);
     }
 }

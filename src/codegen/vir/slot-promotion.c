@@ -147,11 +147,11 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
 
     if (!V->slot_count)
         return false;
-    bad = calloc(V->slot_count, 1);
-    sf = calloc(V->slot_count, sizeof *sf);
-    fof = malloc((size_t)V->insn_count * sizeof *fof); /* access -> field + 1 */
-    if (!bad || !fof || !sf)
-        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+    sf = virbuild_pass_scratch_get(
+        e, ((uint64_t)V->slot_count + np0) * sizeof *sf + V->slot_count);
+    fof = sf + V->slot_count;
+    bad = (uint8_t *)(fof + np0);
+    memset(sf, 0, (size_t)V->slot_count * sizeof *sf);
     for (uint32_t s = 0; s < V->slot_count; s++)
         bad[s] =
             V->slots[s]
@@ -436,8 +436,5 @@ out:
     free(ms);
     free(fd);
     free(fnx);
-    free(sf);
-    free(fof);
-    free(bad);
     return done;
 }

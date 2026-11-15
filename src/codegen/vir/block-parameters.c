@@ -151,9 +151,8 @@ VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
     VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity,
                         V->insn_count + 1);
     memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
-    stk = malloc((size_t)(V->insn_count + 1) * sizeof *stk);
-    if (!stk)
-        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+    stk = virbuild_pass_scratch_get(e, ((uint64_t)V->insn_count + 1) *
+                                           sizeof *stk);
     for (uint32_t i = 0; i < V->block_order_count; i++) {
         uint32_t b = V->block_order[i];
 
@@ -195,5 +194,4 @@ VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
                 V->forward[p] =
                     virbuild_undefined_value(e, V->insns[p].insn.type);
     }
-    free(stk);
 }

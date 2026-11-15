@@ -56,12 +56,11 @@ static bool virbuild_condition_is_chainable(virbuild_context *V, uint32_t v,
 VPRIV bool virbuild_conditions_merge(codegen_context *e)
 {
     virbuild_context *V = e->vir_builder;
-    uint32_t ncnt = V->insn_count + V->block_order_count + 1,
-             *cnt = calloc(ncnt, sizeof *cnt);
+    uint64_t ncnt = (uint64_t)V->insn_count + V->block_order_count + 1;
+    uint32_t *cnt = virbuild_pass_scratch_get(e, ncnt * sizeof *cnt);
     bool any = false, again = true;
 
-    if (!cnt)
-        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+    memset(cnt, 0, (size_t)ncnt * sizeof *cnt);
     for (uint32_t i = 0; i < V->block_order_count; i++) {
         uint32_t b = V->block_order[i];
 
@@ -253,7 +252,6 @@ VPRIV bool virbuild_conditions_merge(codegen_context *e)
             }
         }
     }
-    free(cnt);
     if (any) {
         uint32_t m = 0;
 
