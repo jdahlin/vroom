@@ -2276,3 +2276,12 @@ variant<Ts...>&, ...)`) gav upp ("packs") innan argumenten prövades, så
 saknades.  Nu utesluts parametrar vars form argumentet inte kan ha först.
 Test: `run/spaceship-pack-candidate.cpp`.  Sviter gröna (93/93, 38/38, mangle,
 350/350).
+
+## Status 139 (2026-11-15)
+En klassreferensparameter bunden till ett objekt av en annan klass utan
+konverteringsfunktion får nu en temporär från parameterklassens
+konverterande konstruktor (`unique_ptr<__node, __tree_deleter>(p,
+__node_alloc_)`).  Test: `run/ref-param-converting-ctor.cpp`.  Strikt bänk:
+pass 5 (från 3), inga länkfel; unit-large_json länkar men fallerar:
+`r = json(value_t::array)` ger fel värde (fanns före ändringen, nästa steg).
+Sviter gröna (94/94, 38/38, mangle, 350/350).

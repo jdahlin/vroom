@@ -262,8 +262,10 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to, uint32_t 
 			return cc_cast_insert(a, x, AST_QUALIFIED_TYPE_UNQUALIFIED(to), AST_CAST_NOP);
 		}
 
+		bool by_ctor = false;
+	again:
 		if (cc_type_is_record(a, rt) && AST_TYPE_KIND(a, rt) != AST_TYPE_ARRAY &&
-		    (!cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_ARRAY)) {
+		    (by_ctor || !cc_type_is_record(a, AST_NODE_AT(a, x)->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_ARRAY)) {
 			/* a reference to a class bound to a value of another type ("text" for a const std::string &): a
 			   temporary made by the class's converting constructor */
 			ast_qualified_type at[1] = { AST_NODE_AT(a, x)->ty };
@@ -303,8 +305,17 @@ VPRIV uint32_t cxx_gen_bind(cxx *c, uint32_t x, ast_qualified_type to, uint32_t 
 
 			if (cxx_class_base_offset(c, from, AST_QUALIFIED_TYPE_UNQUALIFIED(rt), &off, 0) || cxx_class_vbase_path(c, from, AST_QUALIFIED_TYPE_UNQUALIFIED(rt), &vk, &off))
 				x = cxx_gen_base_object(c, x, AST_QUALIFIED_TYPE_UNQUALIFIED(rt), loc);
-			else
-				x = cxx_gen_convert_class(c, x, AST_QUALIFIED_TYPE_UNQUALIFIED(rt), loc);
+			else {
+				uint32_t y = cxx_gen_convert_class(c, x, AST_QUALIFIED_TYPE_UNQUALIFIED(rt), loc);
+
+				if (!y && !by_ctor) {
+					/* (no conversion function: the class's converting constructor, a temporary;
+					   unique_ptr<T, D>(p, alloc) with D(Alloc&)) */
+					by_ctor = true;
+					goto again;
+				}
+				x = y;
+			}
 			if (!x)
 				return 0;
 		}
