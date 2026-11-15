@@ -1785,7 +1785,6 @@ static int d_leb(As *a, const char *p, const char *e, int sgn)
     if (a->dwlocp)
         loc_row(a);
     for (;;) {
-        int64_t v;
         Val x;
         if (val_expr(a, &p, e, &x))
             return -1;
@@ -1796,18 +1795,17 @@ static int d_leb(As *a, const char *p, const char *e, int sgn)
                 return err(a, "expected absolute expression");
             struct VarItem *vi = var_item(a, sgn ? VI_SLEB : VI_ULEB);
             vi->v = x;
-            goto next;
+        } else {
+            elf_data(a->o,
+                     a->cur); /* MC: a relaxable LEB gets no mapping symbol */
+            uint8_t t[16];
+            Buf8 b = {t, 0};
+            if (sgn)
+                sleb(&b, x.c);
+            else
+                uleb(&b, (uint64_t)x.c);
+            memcpy(elf_grow(a->o, a->cur, b.n), t, b.n);
         }
-        v = x.c;
-        elf_data(a->o, a->cur); /* MC: a relaxable LEB gets no mapping symbol */
-        uint8_t t[16];
-        Buf8 b = {t, 0};
-        if (sgn)
-            sleb(&b, v);
-        else
-            uleb(&b, (uint64_t)v);
-        memcpy(elf_grow(a->o, a->cur, b.n), t, b.n);
-    next:
         p = ws(p, e);
         if (p >= e)
             return 0;

@@ -1027,7 +1027,9 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv,
     int nq = 0, ni = 0, ns = 0, na = 0, n = 0, ne = 0;
     static __thread const char *dirs_e[64]; /* --embed-dir */
     const char *cmp = NULL, *out = NULL, *main_file = NULL, *depfile = NULL,
-               *deptarget = NULL;
+               *deptarget = NULL, *dfirst = NULL;
+    const char *dtarget;
+    int dnosys;
     const char *stdin_src = NULL; /* the input `-`, read whole */
     size_t stdin_len = 0;
     int errfd = env->errfd, status = 0, md = 0, mdeps = 0, mphony = 0,
@@ -1948,9 +1950,8 @@ static __attribute__((noinline)) int ppd_run1(int argc, char **argv,
     /* dependency rules, as clang: the target is -o (not for -M/-MM) or the
 	   source's basename with .o; -MD's file is the target's with .d */
     char dtbuf[4096], dfbuf[4200];
-    const char *dtarget = deptarget;
-    int dnosys = mdeps ? mdeps == 2 : md == 2;
-    const char *dfirst = NULL;
+    dtarget = deptarget;
+    dnosys = mdeps ? mdeps == 2 : md == 2;
 
     if (!dtarget)
         dtarget = out && strcmp(out, "-") && !mdeps
