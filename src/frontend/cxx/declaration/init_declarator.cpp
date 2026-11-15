@@ -922,6 +922,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         decl_fn->fn_inline =
                             1; /* (inline X::f() {...} outside its class: weak, as clang's) */
                     fs->fn = decl_fn;
+                    /* (this is const in a const member, whatever the last inline body was: Skia's
+					   SkReduceOrder::reduce after SkDQuad::collapsed() const) */
+                    c->this_const =
+                        decl_fn ? (decl_fn->fn_const & 1) : (c->decl_const & 1);
                     {
                         /* R X<A...>::f(As... a) of a class pack, its parameters expanded: a, a pack of those
 						   parameters (a... in the body: std::function's operator()) */

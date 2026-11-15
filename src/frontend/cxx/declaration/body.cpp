@@ -322,6 +322,8 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
         cxx_late_deduce(
             c, &l); /* (auto f(): its type, before its code is built) */
 
+        uint8_t this_const_save = c->this_const;
+
         c->pos = l.begin;
         c->this_const = l.fn && (l.fn->fn_const & 1);
         c->template_depth =
@@ -364,6 +366,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
         c->class_depth = depth;
         c->template_depth = tdepth;
         c->this_type = this_save;
+        c->this_const = this_const_save;
     }
     c->nlate = from;
 }
