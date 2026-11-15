@@ -62,7 +62,7 @@ VPRIV bool cxx_default_argument(cxx *c, const cxx_tparam *p, cxx_scope *binding,
 			c->in_template_args++;
 			cxx_conditional_expression_parse(c);
 			c->in_template_args--;
-			if (c->econst && c->evalue >= 0) {
+			if (c->econst && (c->evalue >= 0 || cxx_etype_unsigned64(c))) {
 				out->kind = 2, out->v = c->evalue;
 				if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)
 					out->t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);

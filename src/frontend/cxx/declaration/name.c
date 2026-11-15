@@ -371,7 +371,7 @@ VPRIV void cxx_template_argument_parse(cxx *c, cxx_targ *out)
 	c->in_template_args--, c->want_constant--;
 	/* a constant expression: its value */
 	/* (negative: its value in the parameter's type is not known here, size_t(-1) for one) */
-	if (!out->kind && c->econst && !c->tentative && !c->template_depth && c->evalue >= 0) {
+	if (!out->kind && c->econst && !c->tentative && !c->template_depth && (c->evalue >= 0 || cxx_etype_unsigned64(c))) {
 		out->kind = 2, out->v = c->evalue;
 		if (c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)
 			out->t = AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);	/* (its enumeration: part of the argument) */

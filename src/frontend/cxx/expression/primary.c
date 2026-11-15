@@ -42,7 +42,34 @@ VPRIV void cxx_paren_expression_parse(cxx *c)
 		return;
 	}
 	if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {	/* GNU statement expression ({ ... }) */
+		uint32_t sloc = cxx_peek(c, 0)->loc, outer_snode = c->snode;
+		bool gen = cxx_gen_on(c);
+
 		cxx_compound_statement_parse(c);
+		if (gen) {
+			/* code generation: the block, its value its last statement's when that is an expression of a
+			   scalar type (or void); not built otherwise: a class's value is copied out before the block's
+			   objects are destroyed, which the C node does not do */
+			uint32_t blk = cxx_gen_on(c) ? c->snode : 0, n = 0;
+			const node *bx = blk ? AST_NODE_AT(c->ast, blk) : NULL;
+
+			if (bx && bx->op == AST_NODE_BLOCK && bx->c) {
+				const node *last = AST_NODE_AT(c->ast, c->ast->lists[bx->b + bx->c - 1]);
+				ast_qualified_type t = last->op == AST_NODE_EXPRESSION && last->a ? AST_NODE_AT(c->ast, last->a)->ty : cc_type_basic(AST_TYPE_VOID);
+
+				if (!cc_type_is_record(c->ast, t) && c->etype != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, c->etype)) {
+					n = cc_node_new(c->ast, AST_NODE_STATEMENT_EXPRESSION, AST_QUALIFIED_TYPE_UNQUALIFIED(t), sloc);
+					AST_NODE_AT(c->ast, n)->a = blk;
+				}
+			} else if (bx && bx->op == AST_NODE_BLOCK && c->etype != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_VOID) {
+				n = cc_node_new(c->ast, AST_NODE_STATEMENT_EXPRESSION, cc_type_basic(AST_TYPE_VOID), sloc);
+				AST_NODE_AT(c->ast, n)->a = blk;
+			}
+			c->snode = outer_snode;
+			if (!n)
+				cxx_gen_fail(c);
+			c->enode = n;
+		}
 		cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
 		c->in_template_args = targs;
 		c->implicit_typename = implicit;

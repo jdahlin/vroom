@@ -114,9 +114,9 @@ VPRIV bool cxx_starts_declaration(cxx *c)
 	if (kw)
 		return cxx_kw_is_decl_specifier(kw) || cxx_kw_is_cv(kw) || cxx_kw_is_simple_type(kw) || cxx_kw_is_type_modifier(kw) ||
 		       kw == CXX_KW_class || kw == CXX_KW_struct || kw == CXX_KW_union || kw == CXX_KW_enum ||
-		       kw == CXX_KW_typename || kw == CXX_KW_using || kw == CXX_KW_static_assert || kw == CXX_KW_namespace ||
+		       kw == CXX_KW_typename || kw == CXX_KW_using || kw == CXX_KW_static_assert || kw == CXX_KW__Static_assert || kw == CXX_KW_namespace ||
 		       kw == CXX_KW_template || kw == CXX_KW___attribute__ || kw == CXX_KW__Atomic || kw == CXX_KW___extension__ ||
-		       kw == CXX_KW__BitInt;
+		       kw == CXX_KW__BitInt || kw == CXX_KW___typeof__ || kw == CXX_KW___typeof || kw == CXX_KW_typeof;
 	return false;
 }
 

@@ -17,6 +17,7 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 	uint8_t lval[CXX_MAX_ARGS];
 	uint32_t n = 0;
 	uint32_t nodes[CXX_MAX_ARGS] = { 0 }, braces[CXX_MAX_ARGS] = { 0 }, zero = 0;
+	cxx_entity *fnsets[16] = { 0 };
 	bool unknown = false, first_const = false;
 	int64_t first_value = 0;
 
@@ -34,6 +35,7 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 		bool brace = cxx_is(c, LEX_TOKEN_LEFT_BRACE);	/* (f({...}) too: its node is no expression's) */
 
 		c->unevaluated += brace;
+		c->fn_set_seen = NULL;
 		cxx_initializer_parse(c);
 		c->unevaluated -= brace;
 		if (brace)
@@ -93,6 +95,8 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 		}
 		if (c->etype == CXX_TY_UNKNOWN && !c->tentative)
 			c->eunsure = 1;	/* (the call may get a type whatever this argument is) */
+		if (n < 16 && !brace)
+			fnsets[n] = cxx_fnset_of_expression(c, start);
 		if (n < CXX_MAX_ARGS)
 			args[n] = c->etype, lval[n] = c->elval, nodes[n] = c->enode, braces[n] = brace ? start : 0,
 			zero |= (uint32_t)(c->econst && !c->evalue && !brace && c->etype != CXX_TY_UNKNOWN &&
@@ -111,6 +115,7 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
 	c->carg_const = n == 1 && !unknown && first_const, c->carg_value = first_value;
 	memcpy(c->carg_nodes, nodes, sizeof nodes);
 	memcpy(c->carg_brace, braces, sizeof braces);
+	memcpy(c->carg_fnset, fnsets, sizeof fnsets);
 	c->carg_zero = zero;
 	if (n > c->ccargs)
 		c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),

@@ -509,7 +509,9 @@ VPRIV void cxx_enum_specifier_parse(cxx *c)
 				break;
 		}
 		cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
-		c->last_type = e;
+		/* (an unnamed one: its type all the same, for typedef enum { } E; and enum { } x;) */
+		c->last_type = e ? e : et != CXX_TY_UNKNOWN ? cxx_type_entity(c, et) : NULL;
+		c->last_type_dependent = 0;
 	}
 }
 

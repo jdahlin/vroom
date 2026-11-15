@@ -67,7 +67,8 @@ typedef struct cxx_token {
 	X(__complex__) X(__builtin_bit_cast) X(__builtin_addressof) X(__declspec) X(__unaligned) X(__nullptr) \
 	X(__builtin_LINE) X(__builtin_FILE) X(__builtin_FUNCTION) X(__builtin_COLUMN) X(__builtin_FILE_NAME) \
 	X(__builtin_source_location) X(_Nullable) X(_Nonnull) X(_Null_unspecified) X(__builtin_types_compatible_p) \
-	X(__builtin_convertvector) X(__builtin_choose_expr) X(__builtin_shufflevector) X(typeof) X(__is_identifier) X(_BitInt)
+	X(__builtin_convertvector) X(__builtin_choose_expr) X(__builtin_shufflevector) X(typeof) X(__is_identifier) X(_BitInt) \
+	X(__char16_t) X(__char32_t)
 
 enum {
 	CXX_KW_NONE,
@@ -501,6 +502,8 @@ typedef struct cxx {
 	uint32_t carg_nodes[CXX_MAX_ARGS];	/* the last argument list's nodes */
 	uint32_t carg_zero;		/* ... which arguments are integer constants 0 (a null pointer constant; bit i: argument i) */
 	uint32_t carg_brace[CXX_MAX_ARGS];
+	struct cxx_entity *carg_fnset[16];	/* ... its arguments that name a set of functions (f, &f, N::f: [over.over]) */
+	struct cxx_entity *op_fnset;	/* the next operator call's right operand, when it names a set of functions (os << endl) */
 	const uint32_t *gen_agg_brace;	/* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
 	uint32_t gen_call_brace[CXX_MAX_ARGS];	/* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */	/* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
 	uint32_t new_count;		/* a new-type-id: its array bound's node (new_array: it has one) */
@@ -625,6 +628,13 @@ VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
+/* the expression's type is a 64-bit unsigned one: a negative evalue is its value 2^63 and up (1ULL << 63) */
+static inline bool cxx_etype_unsigned64(const cxx *c)
+{
+	int k = c->etype != CXX_TY_UNKNOWN ? (int)AST_TYPE_KIND(c->ast, c->etype) : -1;
+
+	return k == AST_TYPE_UNSIGNED_LONG || k == AST_TYPE_UNSIGNED_LONG_LONG;
+}
 VPRIV void cxx_enum_type(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc, ast_qualified_type underlying);
 VPRIV uint32_t cxx_symbol(cxx *c, int kind, uint32_t name, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_name_path_push(cxx *c, uint32_t name, uint32_t *saved_len, uint8_t *saved_valid);
@@ -820,6 +830,10 @@ VPRIV cxx_scope *cxx_type_class_scope(cxx *c, ast_qualified_type t);
 VPRIV cxx_scope *cxx_tag_scope_get(cxx *c, ast_qualified_type t);
 VPRIV void cxx_tag_home_set(cxx *c, ast_qualified_type t, cxx_scope *home);
 VPRIV cxx_scope *cxx_tag_home(cxx *c, ast_qualified_type t);
+VPRIV cxx_entity *cxx_fnset_of_expression(cxx *c, uint32_t start);
+VPRIV cxx_entity *cxx_fnset_pick(cxx *c, cxx_entity *set, ast_qualified_type target, bool make);
+VPRIV uint32_t cxx_fnset_node(cxx *c, cxx_entity *set, ast_qualified_type target, uint32_t loc);
+VPRIV void cxx_fnset_fill(cxx *c, cxx_entity *f, cxx_entity *const *sets, uint32_t *nodes, uint32_t n, uint32_t loc);
 VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, const ast_qualified_type *args, uint32_t nargs);
 VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x);
 VPRIV void cxx_tag_info_set(cxx *c, uint32_t tag, void *x);

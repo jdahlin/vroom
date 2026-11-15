@@ -88,8 +88,10 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					uint32_t abrace[CXX_MAX_ARGS];
+					cxx_entity *afns[16];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
+					memcpy(afns, c->carg_fnset, sizeof afns);
 					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 					if (!c->ncargs && !c->econst && !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
 					    AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UNSIGNED_LONG_LONG) {
@@ -104,7 +106,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 						}
 					}
 					if (c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_fnset_fill(c, c->call_picked, afns, anodes, an, cloc), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 				}
 				else if (!set && callee != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, callee) &&	/* (operator(): a member only) */
 					 (on_args = c->ncargs, memcpy(on_nodes, c->carg_nodes, sizeof on_nodes),
@@ -123,13 +125,15 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(anodes, c->carg_nodes, sizeof anodes);
 					uint32_t abrace[CXX_MAX_ARGS];
+					cxx_entity *afns[16];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
+					memcpy(afns, c->carg_fnset, sizeof afns);
 					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
 					ast_qualified_type cty = c->etype;
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
-						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
+						c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace), cxx_fnset_fill(c, c->call_picked, afns, anodes, an, cloc), cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes, an, cloc), c->gen_vmode = 0;
 					if (c->want_constant && cpick && !an && !obj_node && !c->econst && !c->template_depth && cty != CXX_TY_UNKNOWN && c->etype == cty &&
 					    ((AST_TYPE_KIND(c->ast, cty) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cty) <= AST_TYPE_UNSIGNED_LONG_LONG) ||
 					     AST_TYPE_KIND(c->ast, cty) == AST_TYPE_ENUM)) {
@@ -158,7 +162,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 						if (c->etype != CXX_TY_UNKNOWN && c->call_resolved && c->call_picked && an != UINT32_MAX &&
 						    (!c->call_picked->member_of || c->call_picked->fn_static || c->call_picked->member_of->kind != CXX_SCOPE_CLASS))
 							c->gen_vmode = vmode, memcpy(c->gen_call_brace, abrace, sizeof abrace),
-							cxx_gen_call(c, c->call_picked, 0, false, anodes, an, cloc), c->gen_vmode = 0;
+							cxx_fnset_fill(c, c->call_picked, afns, anodes, an, cloc), cxx_gen_call(c, c->call_picked, 0, false, anodes, an, cloc), c->gen_vmode = 0;
 						/* nothing by that name fits, here or in the arguments' namespaces */
 						c->einvalid = was || (c->etype == CXX_TY_UNKNOWN && none && known && !c->einvalid_unsure);
 						if (c->einvalid && !was)

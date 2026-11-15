@@ -173,6 +173,8 @@ VPRIV bool cxx_gen_type_ok(cxx *c, ast_qualified_type t)
 
 		if (b != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, b) && AST_TYPE_KIND(c->ast, b) != AST_TYPE_ARRAY)
 			return true;
+		if (b != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, b) == AST_TYPE_FUNCTION)
+			return true;	/* (a reference to a function: its address too) */
 		return cxx_gen_object_type_ok(c, b);
 	}
 	if (k == AST_TYPE_STRUCT || k == AST_TYPE_UNION)

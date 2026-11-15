@@ -50,6 +50,9 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			int64_t lv = c->evalue, rv, v;
 
 			c->gen_notemp += op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
+			uint32_t rstart = c->pos;
+
+			c->fn_set_seen = NULL;
 			cxx_binary_expression_parse(c, p + 1);
 			c->gen_notemp -= op == LEX_TOKEN_AMPERSAND_AMPERSAND || op == LEX_TOKEN_PIPE_PIPE;
 			rk = c->econst, rv = c->evalue;
@@ -60,7 +63,24 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 			uint8_t r_lval = c->elval;
 			bool rewritten = false;	/* a != b as !(a == b) (C++20's rewritten candidates) */
 
+			cxx_entity *r_fnset = cxx_fnset_of_expression(c, rstart);	/* (os << endl: a set of functions) */
+
+			c->op_fnset = r_fnset;
 			bool found = !c->tentative && cxx_operator_call_type(c, opid, l, &c->etype, 1);
+
+			c->op_fnset = NULL;
+			if (r_fnset && found && c->call_resolved && c->call_picked && !rn && !c->tentative) {
+				/* its argument: the function of the parameter's type (a member's first, a non-member's second) */
+				cxx_entity *pk = c->call_picked;
+				const ctype *pft = pk->kind == CXX_ENTITY_VALUE && pk->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, pk->ty) == AST_TYPE_FUNCTION ? AST_TYPE(c->ast, pk->ty) : NULL;
+				uint32_t pi = pk->member_of && !pk->fn_static ? 0 : 1;
+				ast_qualified_type ety = c->etype;
+				uint8_t elv = c->elval;
+
+				if (pft && pi < pft->n)
+					rn = cxx_fnset_node(c, r_fnset, c->ast->params[pft->aux + pi], oploc);
+				c->etype = ety, c->elval = elv;
+			}
 
 			if (!c->tentative && (!found || !c->call_resolved) && op == LEX_TOKEN_EXCLAMATION_EQUAL && l != CXX_TY_UNKNOWN &&
 			    rt != CXX_TY_UNKNOWN && (cc_type_is_record(c->ast, l) || cc_type_is_record(c->ast, rt))) {

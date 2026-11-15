@@ -330,7 +330,9 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 						known = c->etype;
 					else
 						known = cxx_type_reference(c, c->etype, false);
-				} else if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->elval)
+				} else if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->template_depth && kw != CXX_KW_decltype && kw != CXX_KW___decltype)
+					known = c->etype;	/* (typeof: the expression's type, of an lvalue too, without a reference) */
+				else if (!c->tentative && c->etype != CXX_TY_UNKNOWN && !c->elval)
 					known = c->etype;
 			}
 			cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
