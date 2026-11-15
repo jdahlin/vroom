@@ -138,6 +138,11 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 	}
 	cxx_et(c, v ? v->ty : CXX_TY_UNKNOWN, !(v && v->is_enumerator));	/* (an enumerator is a prvalue: E&& binds it) */
 	c->edecl_name = 1;
+	if (v && v->field_of && c->this_const && !v->is_mutable && !v->fn_static && c->etype != CXX_TY_UNKNOWN &&
+	    !(AST_TYPE_KIND(c->ast, v->ty) == AST_TYPE_POINTER && AST_TYPE(c->ast, v->ty)->ext))
+		/* a data member named alone in a const member function: this->m, const (not a mutable one, not a
+		   reference): t.f() calls the const overload, as for x.m of a const x */
+		c->etype = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(c->etype), AST_QUALIFIED_TYPE_QUALIFIERS(c->etype) | AST_QUALIFIER_CONST);
 	if (v && v->has_value && !v->placeholder)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	/* a constant static data member with its initializer in the class and no definition seen: its value (the

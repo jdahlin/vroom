@@ -2323,3 +2323,12 @@ kompileras; statement.c:982 borta ur bänken.  Strikt bänk: pass 6, 199 saknas
   förut (ingen offset).
 `use_facet` kompileras.  Test: `run/static-cast-hierarchy.cpp`.  Strikt bänk:
 pass 7, 184 saknas (från 199).  Sviter gröna (98/98, 38/38, mangle, 350/350).
+
+## Status 143 (2026-11-15)
+En datamedlem nämnd ensam i en const-medlemsfunktion (`this->m`) var inte
+const: `t.f()` valde icke-const-överlagringen, en tyst felkompilering
+(`map::begin() const` fick `__tree_iterator` i stället för const-iteratorn).
+Nu const (inte mutable, inte referenser), som redan för `x.m` på ett const
+`x`; `decltype(m)` behåller den deklarerade typen.  Test:
+`run/const-this-members.cpp`.  Strikt bänk: pass 7, 170 saknas (från 184).
+Sviter gröna (99/99, 38/38, mangle, 350/350).

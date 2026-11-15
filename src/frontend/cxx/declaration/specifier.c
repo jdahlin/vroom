@@ -324,6 +324,8 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class, bool is_templ
 
 					if (ref && AST_TYPE(c->ast, c->edecl)->base == c->etype)
 						known = c->edecl;	/* (as declared: T& or T&&) */
+					else if (c->edecl_name && c->edecl != CXX_TY_UNKNOWN && AST_QUALIFIED_TYPE_INDEX(c->edecl) == AST_QUALIFIED_TYPE_INDEX(c->etype))
+						known = c->edecl;	/* (a name: as declared, without the const of a const object's member) */
 					else if (c->edecl_name || !c->elval)
 						known = c->etype;
 					else
