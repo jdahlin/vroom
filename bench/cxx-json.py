@@ -29,6 +29,7 @@ STAGES = ["pp", "syntax", "obj", "link", "run"]
 CLANGXX = os.environ.get("CLANGXX", "/usr/lib/llvm-23/bin/clang++")
 UNDEF = {}       # TU -> its undefined symbols (link)
 NOFN = {}        # TU -> {function name: vcc's reason it has no code}
+NOREASON = {}    # undefined symbol -> tests where vcc gave no reason for it
 PROGRESS = {}    # TU -> (tokens parsed, tokens) from the syntax stage
 
 
@@ -203,9 +204,15 @@ def main():
                     rb[key] += 1
                     ra[key] += len(und) == 1
                     rex.setdefault(key, nm)
+                    if key.startswith("? (no reason"):
+                        NOREASON[u] = NOREASON.get(u, 0) + 1
         print("  link: the reasons blocking the most tests (tests, alone), e.g.:")
         for k, n in sorted(rb.items(), key=lambda kv: (-kv[1], -ra[kv[0]]))[:25]:
             print(f"  {n:3}x ({ra[k]:2} alone)  {k}   ({rex[k]})")
+        if NOREASON:
+            print("  link: undefined with no reason from vcc (no nofn line for the name):")
+            for u, n in sorted(NOREASON.items(), key=lambda kv: -kv[1])[:15]:
+                print(f"  {n:3}x  {u[:150]}")
         print("  link: the symbols blocking the most tests:")
         for u, n in sorted(block.items(), key=lambda kv: (-kv[1], -alone[kv[0]]))[:12]:
             why = next((NOFN[nm][short_name(u)] for nm in UNDEF if u in UNDEF[nm] and short_name(u) in NOFN.get(nm, {})), "?")
