@@ -829,6 +829,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
     uint8_t skip_explicit = c->skip_explicit;
     bool no_literal = c->no_literal;
     uint8_t obj = c->call_obj; /* a member call's object: const or not */
+    uint8_t obj_rv =
+        c->call_obj_rv; /* ... an rvalue (a ref-qualified member: & does not take it) */
+
+    c->call_obj_rv = 0;
     /* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
     bool own_args =
         args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs &&
@@ -1014,6 +1018,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
         if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 &&
             !e->fn_const && !e->fn_static)
             continue; /* (a const object: const member templates only) */
+        if (obj && e->member_of && !e->fn_static &&
+            ((e->fn_ref == 1 && obj_rv) || (e->fn_ref == 2 && !obj_rv)))
+            continue; /* (f() &: an lvalue object only; f() &&: an rvalue one, [over.match.funcs]/4) */
         if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
             int d;
 
@@ -1176,8 +1183,9 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
                     e->ty != CXX_TY_UNKNOWN &&
                     cand[d].e->member_of == e->member_of &&
                     cand[d].e->home == e->home && cand[d].e->name == e->name &&
-                    cand[d].e->fn_const ==
-                        e->fn_const) { /* (f() and f() const: two functions of one type here) */
+                    cand[d].e->fn_const == e->fn_const &&
+                    cand[d].e->fn_ref ==
+                        e->fn_ref) { /* (f() and f() const, f() & and f() &&: two functions of one type here) */
                     dup = true;
                     if (!cand[d].e->sym && e->sym)
                         cand[d].e = e;
@@ -1742,6 +1750,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj,
             (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST)
                 ? 2
                 : 1; /* a member operator: on this object, const or not */
+        c->call_obj_rv = have_lv && !lv[0]; /* (and an rvalue or not: x++ ++) */
         c->eunsure = unsure0,
         cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args,
                            have_lv ? lv + 1 : NULL, nargs, true);

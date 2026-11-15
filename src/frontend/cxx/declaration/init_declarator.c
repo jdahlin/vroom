@@ -519,7 +519,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                              ? e
                              : NULL; /* (a friend's body too) */
             if (e && f)
-                e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept;
+                e->fn_const = c->decl_const, e->fn_noexcept = c->decl_noexcept,
+                e->fn_ref = c->decl_ref;
             if (e && f && kind == CXX_ENTITY_VALUE)
                 decl_fn = e;
             if (e && f && context == CXX_CONTEXT_CLASS && !is_friend)

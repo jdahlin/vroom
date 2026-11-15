@@ -309,7 +309,7 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
             cxx_function_tail_parse(c);
             if (x)
                 x->trailing = c->fn_trailing, x->is_const = c->fn_const,
-                x->is_noexcept = c->fn_noexcept;
+                x->is_ref = c->fn_ref, x->is_noexcept = c->fn_noexcept;
             if (!nested)
                 c->decl_has_trailing = c->fn_has_trailing;
             *is_function = true;
@@ -329,11 +329,12 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
                    sfx[0].nnamed * sizeof *c->decl_params);
         c->ndecl_params = sfx[0].nnamed;
         c->decl_ndefaults = sfx[0].ndefaults, c->decl_const = sfx[0].is_const,
-        c->decl_variadic = sfx[0].variadic;
+        c->decl_ref = sfx[0].is_ref, c->decl_variadic = sfx[0].variadic;
         c->decl_noexcept = sfx[0].is_noexcept;
         c->decl_pack_param = sfx[0].pack;
     } else if (!nested && !c->tentative)
-        c->decl_ndefaults = 0, c->decl_const = 0, c->decl_noexcept = 0;
+        c->decl_ndefaults = 0, c->decl_const = 0, c->decl_noexcept = 0,
+        c->decl_ref = 0;
     for (uint32_t i = 0; i < nsfx; i++)
         if (sfx[i].is_function)
             free(sfx[i].named);
@@ -644,6 +645,7 @@ VPRIV int cxx_noexcept_parse(cxx *c)
 VPRIV void cxx_function_tail_parse(cxx *c)
 {
     uint8_t is_const = 0; /* 1: const, 2: volatile (the bits of fn_const) */
+    uint8_t is_ref = 0;   /* 1: &, 2: && */
     uint8_t is_noexcept = 0;
     cxx_scope *outer = c->scope;
 
@@ -665,6 +667,10 @@ VPRIV void cxx_function_tail_parse(cxx *c)
     for (;;) {
         if (cxx_kw_is_cv(cxx_kw(c)) || cxx_is(c, LEX_TOKEN_AMPERSAND) ||
             cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
+            if (cxx_is(c, LEX_TOKEN_AMPERSAND))
+                is_ref = 1;
+            else if (cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND))
+                is_ref = 2;
             is_const |= cxx_is_kw(c, CXX_KW_const)      ? 1
                         : cxx_is_kw(c, CXX_KW_volatile) ? 2
                                                         : 0;
@@ -692,10 +698,11 @@ VPRIV void cxx_function_tail_parse(cxx *c)
         c->scope = outer;
         c->fn_trailing = c->type_out; /* auto f() -> T: the return type */
         c->fn_const = is_const, c->fn_noexcept = is_noexcept,
-        c->fn_has_trailing = 1;
+        c->fn_has_trailing = 1, c->fn_ref = is_ref;
         return;
     }
     c->scope = outer;
+    c->fn_ref = is_ref;
     c->fn_trailing = CXX_TY_UNKNOWN, c->fn_const = is_const,
     c->fn_noexcept = is_noexcept, c->fn_has_trailing = 0;
 }

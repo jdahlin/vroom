@@ -213,8 +213,12 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
                         if (!c->enode)
                             cxx_gen_fail(c);
                     }
-                } else if (!c->tentative && !cxx_operator_call_type(
-                                                c, opid, c->etype, NULL, 0)) {
+                } else if (
+                    !c->tentative &&
+                    (c->op_lv_set = 1,
+                     c->op_lv[0] =
+                         c->elval, /* (++x of an rvalue: not operator++() &) */
+                     !cxx_operator_call_type(c, opid, c->etype, NULL, 0))) {
                     cxx_unary_type(c, op, c->etype, c->elval);
                     cxx_gen_unary(c, op, xn, oploc);
                 } else if (!c->tentative && c->call_resolved && c->call_picked)

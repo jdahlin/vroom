@@ -186,6 +186,7 @@ typedef struct cxx_entity {
         member_of; /* a member function: its class's scope (an instance's: its out-of-class definition is found by it) */
     uint8_t
         fn_const; /* a member function declared const (bit 0), volatile (bit 1) */
+    uint8_t fn_ref; /* ... its ref-qualifier: 1 &, 2 && (0: none) */
     uint8_t
         fn_noexcept; /* ... declared noexcept: 1, noexcept(false) or none: 0, a condition not known: 2 */
     struct cxx_scope
@@ -489,6 +490,9 @@ typedef struct cxx {
         sig_is_function; /* the last declarator's function is variadic; the last signature parsed was a function's */
     uint8_t fn_const,
         decl_const; /* the last function tail had const; the last declarator's function did */
+    uint8_t fn_ref, decl_ref; /* ... and its ref-qualifier (1 &, 2 &&) */
+    uint8_t
+        call_obj_rv; /* the member call's object is an rvalue (a & member does not take it, && one does) */
     int64_t
         evalue; /* the expression's value, when econst (an integer constant expression) */
     uint8_t econst;

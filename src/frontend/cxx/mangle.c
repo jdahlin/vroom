@@ -2165,6 +2165,11 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home,
             mg_str(&m, "V");
         if (member && (is_const & 1))
             mg_str(&m, "K");
+        if (member && f->fn_ref)
+            mg_str(&m,
+                   f->fn_ref == 1
+                       ? "R"
+                       : "O"); /* (a ref-qualifier: f() & is R, f() && is O) */
         mg_prefix(&m, home);
     } else if (mg_scope_is_std(&m, home))
         mg_str(&m, "St");

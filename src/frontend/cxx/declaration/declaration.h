@@ -32,7 +32,7 @@ enum {
 typedef struct cxx_suffix {
     ast_qualified_type trailing;
     uint32_t pack;
-    uint8_t is_const, is_noexcept;
+    uint8_t is_const, is_noexcept, is_ref;
     uint8_t is_function, variadic;
     int64_t n;
     uint32_t vla;

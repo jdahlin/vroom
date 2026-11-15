@@ -80,7 +80,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
             cxx_targ xa[8];
             uint32_t nx =
                 c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
-            uint8_t call_obj = c->call_obj;
+            uint8_t call_obj = c->call_obj, call_obj_rv = c->call_obj_rv;
             uint32_t ename = c->ename;
             bool missing = c->ename_missing;
             uint32_t on_args = 0, on_nodes[CXX_MAX_ARGS];
@@ -112,7 +112,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
-                c->call_obj = call_obj,
+                c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
                 cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval,
                                 c->ncargs);
                 if (!c->ncargs && !c->econst && !c->template_depth &&
@@ -171,8 +171,9 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
-                c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs,
-                                                      c->cargs_lval, c->ncargs);
+                c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
+                cxx_call_type(c, set, callee, c->cargs, c->cargs_lval,
+                              c->ncargs);
                 cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
                 ast_qualified_type cty = c->etype;
                 if (set && c->call_resolved && c->call_picked &&
@@ -267,6 +268,13 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
             cxx_scope *cls = NULL;
             uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
             bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
+            uint8_t obj_rv =
+                !arrow &&
+                (!c->elval ||
+                 (c->edecl != CXX_TY_UNKNOWN &&
+                  AST_TYPE_KIND(c->ast, c->edecl) == AST_TYPE_POINTER &&
+                  AST_TYPE(c->ast, c->edecl)->ext ==
+                      2)); /* (x.f() of an rvalue x, std::move(x).f(): f() && only) */
 
             /* x->m on an object of class type: (x.operator->())->m, again while the result is a class
 			   ([over.ref]: p->m is interpreted as (p.operator->())->m) */
@@ -360,6 +368,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                            AST_QUALIFIER_CONST)
                                               ? 2
                                               : 1;
+                            c->call_obj_rv = obj_rv;
                             c->eobj_node = obj_node,
                             c->eobj_arrow =
                                 arrow; /* (code generation: the call's object) */
@@ -397,6 +406,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                        AST_QUALIFIER_CONST)
                                           ? 2
                                           : 1;
+                        c->call_obj_rv = obj_rv;
                         c->eobj_node = obj_node,
                         c->eobj_arrow =
                             arrow; /* (code generation: the call's object) */
@@ -415,6 +425,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                                        AST_QUALIFIER_CONST)
                                           ? 2
                                           : 1;
+                        c->call_obj_rv = obj_rv;
                         /* a data member of a const object is const (not a mutable one, not a reference):
 						   x.layout.begin_ptr() on a const x calls the const overload */
                         if (c->etype != CXX_TY_UNKNOWN && c->edecl_name &&
