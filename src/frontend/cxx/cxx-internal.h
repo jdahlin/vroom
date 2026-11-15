@@ -324,6 +324,7 @@ typedef struct cxx {
 	uint32_t nbtypes;
 	uint8_t this_const;		/* the member function being parsed is const */
 	uint8_t call_obj;		/* the callee is a member of an object: 1 not const, 2 const (0: not known) */
+	uint8_t call_obj_rv;		/* ... that object: 1 an rvalue, 2 an lvalue (0: not known), for ref-qualified members */
 	struct cxx_class_build *build;	/* the innermost class being defined (types.c) */
 	ast_qualified_type anonymous_class;		/* the type of the last unnamed class defined (an anonymous member's) */
 	uint8_t defined_unnamed_class;	/* the last decl-specifiers defined an unnamed class */

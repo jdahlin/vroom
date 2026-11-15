@@ -528,7 +528,7 @@ VPRIV int cxx_noexcept_parse(cxx *c)
 /* cv, ref-qualifier, noexcept, attributes, -> trailing return type */
 VPRIV void cxx_function_tail_parse(cxx *c)
 {
-	uint8_t is_const = 0;	/* 1: const, 2: volatile (the bits of fn_const) */
+	uint8_t is_const = 0;	/* 1: const, 2: volatile, 4: &, 8: && (the bits of fn_const) */
 	uint8_t is_noexcept = 0;
 	cxx_scope *outer = c->scope;
 
@@ -548,7 +548,8 @@ VPRIV void cxx_function_tail_parse(cxx *c)
 	}
 	for (;;) {
 		if (cxx_kw_is_cv(cxx_kw(c)) || cxx_is(c, LEX_TOKEN_AMPERSAND) || cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND)) {
-			is_const |= cxx_is_kw(c, CXX_KW_const) ? 1 : cxx_is_kw(c, CXX_KW_volatile) ? 2 : 0;
+			is_const |= cxx_is_kw(c, CXX_KW_const) ? 1 : cxx_is_kw(c, CXX_KW_volatile) ? 2 : cxx_is(c, LEX_TOKEN_AMPERSAND) ? 4 :
+				    cxx_is(c, LEX_TOKEN_AMPERSAND_AMPERSAND) ? 8 : 0;
 			cxx_advance(c);
 			continue;
 		}

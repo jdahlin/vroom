@@ -2535,3 +2535,13 @@ parameterns typ stavas som en heltalstyp (bool görs 0/1).  jsons
 `is_iterator_of_multibyte<T>::value` väljer nu den breda strängadaptern:
 unit-wstring går igenom.  Test: `run/enum-value-template-arg.cpp`.
 Sviter gröna (121/121, 38/38, mangle).  Strikt bänk: pass 16.
+
+## Status 161 (2026-11-15)
+Referenskvalificerade medlemsfunktioner: `f() &` och `f() &&` sparas
+(bitarna 4 och 8 i `fn_const`), en kandidat med `&` utesluts för ett
+rvalue-objekt och en med `&&` för ett lvalue (medlemsåtkomst och
+medlemsoperatorer), och namnet manglas med `R`/`O` som clangs.
+unit-class_iterator:s detektionstester (`(declval<Iter>()++)++` med
+`operator++(int)&`) går igenom.  Test: `run/ref-qualified-members.cpp`.
+Sviter gröna (122/122, 38/38, mangle).  Strikt bänk: pass 17, inga test-
+eller länkfel; 117 funktioner saknas.

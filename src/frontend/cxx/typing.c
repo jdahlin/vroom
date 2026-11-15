@@ -452,6 +452,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 	uint8_t skip_explicit = c->skip_explicit;
 	bool no_literal = c->no_literal;
 	uint8_t obj = c->call_obj;	/* a member call's object: const or not */
+	uint8_t obj_rv = c->call_obj_rv;	/* ... an rvalue (1) or an lvalue (2): f() & and f() && */
 	/* the arguments the last argument list parsed (its integer constants 0 known: c->carg_zero) */
 	bool own_args = args && nargs && nargs <= 16 && nargs == c->ncargs && c->cargs && (args == c->cargs || !memcmp(args, c->cargs, nargs * sizeof *args));
 	uint32_t own_zero = c->carg_zero, own_brace[CXX_MAX_ARGS];	/* (taken now: deducing and instantiating parse argument lists of their own) */
@@ -459,14 +460,14 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 	memcpy(own_brace, c->carg_brace, sizeof own_brace);
 	bool have_lval = lval != NULL;
 
-	c->none_viable = 0, c->call_obj = 0;
+	c->none_viable = 0, c->call_obj = 0, c->call_obj_rv = 0;
 	c->skip_explicit = 0, c->no_literal = 0;	/* (this call's; the calls made while deducing are their own) */
 	/* no object written: this, in a member function (only when the candidates are members that differ in const) */
 	if (!obj && set && c->this_type != CXX_TY_UNKNOWN && c->this_type) {
 		bool any_const = false;
 
 		for (cxx_entity *e = set; e; e = e->next)
-			any_const |= e->fn_const;
+			any_const |= (e->fn_const & 3) != 0;
 		if (any_const)
 			obj = c->this_const ? 2 : 1;
 	}
@@ -569,7 +570,8 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 			unknown |= e->fn_explicit == 2;
 			continue;	/* (copy-initialization: not through an explicit constructor) */
 		}
-		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && obj == 2 && !e->fn_const && !e->fn_static)
+		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->fn_static && ((obj == 2 && !(e->fn_const & 1)) ||
+		    (obj_rv == 1 && (e->fn_const & 4)) || (obj_rv == 2 && (e->fn_const & 8))))
 			continue;	/* (a const object: const member templates only) */
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
 			int d = nargs <= 16 ? cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r, false) : -1;
@@ -606,8 +608,10 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 			ft = AST_TYPE(c->ast, e->ty);
 			if (!((nargs <= ft->n && nargs + e->ndefaults >= ft->n) || ((ft->flags & AST_TYPE_FLAG_VARIADIC) && nargs >= ft->n)))
 				continue;
-			if (obj == 2 && !e->fn_const && !e->fn_static)
+			if (obj == 2 && !(e->fn_const & 1) && !e->fn_static)
 				continue;	/* (a const object: const members only) */
+			if ((obj_rv == 1 && (e->fn_const & 4)) || (obj_rv == 2 && (e->fn_const & 8)))
+				continue;	/* (f() & on an rvalue, f() && on an lvalue) */
 			r = ft->base;
 			sig = ft;
 		}
@@ -767,13 +771,13 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 						worse = true;
 				}
 			}
-			if (!better && !worse && (obj == 1 || obj == 2) && cand[a].e->fn_const != cand[b].e->fn_const && !cand[a].e->fn_static &&
-			    !cand[b].e->fn_static && (cand[a].e->fn_const & cand[b].e->fn_const) == (cand[a].e->fn_const < cand[b].e->fn_const ? cand[a].e->fn_const : cand[b].e->fn_const) &&
-			    (obj == 1 || ((cand[a].e->fn_const & cand[b].e->fn_const) & 1))) {
+			if (!better && !worse && (obj == 1 || obj == 2) && (cand[a].e->fn_const & 3) != (cand[b].e->fn_const & 3) && !cand[a].e->fn_static &&
+			    !cand[b].e->fn_static && ((cand[a].e->fn_const & 3) & (cand[b].e->fn_const & 3)) == ((cand[a].e->fn_const & 3) < (cand[b].e->fn_const & 3) ? (cand[a].e->fn_const & 3) : (cand[b].e->fn_const & 3)) &&
+			    (obj == 1 || (((cand[a].e->fn_const & 3) & (cand[b].e->fn_const & 3)) & 1))) {
 				/* the implicit object argument is one of the conversions ranked: a non-const object binds to
 				   the f() better than to the f() const ([over.match.best]/2.1, [over.ics.rank]/3.2.6), before
 				   anything about templates */
-				better = cand[a].e->fn_const < cand[b].e->fn_const, worse = !better;	/* (and f() const over f() const volatile) */
+				better = (cand[a].e->fn_const & 3) < (cand[b].e->fn_const & 3), worse = !better;	/* (and f() const over f() const volatile) */
 			}
 			if (!better && !worse) {
 				if (!cand[a].tmpl && cand[b].tmpl)
@@ -1079,6 +1083,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	set = cls ? cxx_lookup_in(c, cls, id, 0) : NULL;
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
+		c->call_obj_rv = have_lv ? (lv[0] ? 2 : 1) : 0;
 		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
 		if (c->call_resolved && nargs == 1 && c->call_nranks == 1 && c->call_ranks[0] >= 2 && !c->tentative) {
 			mpick = true, m_type = c->etype, m_lval = c->elval, m_picked = c->call_picked, m_obj = c->call_obj;

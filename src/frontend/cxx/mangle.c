@@ -1778,6 +1778,8 @@ VPRIV bool cxx_mangle_function(cxx *c, const cxx_entity *f, cxx_scope *home, ast
 			mg_str(&m, "V");
 		if (member && (is_const & 1))
 			mg_str(&m, "K");
+		if (member && (is_const & 12))
+			mg_str(&m, is_const & 4 ? "R" : "O");	/* (a ref-qualifier: f() &, f() &&) */
 		mg_prefix(&m, home);
 		if (f->fn_internal && !member && !op && !cxx_scope_in_unnamed_namespace(c, home))	/* (none in an unnamed namespace) */
 			mg_str(&m, "L");

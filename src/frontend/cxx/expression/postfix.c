@@ -64,7 +64,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 				bool obj_arrow = c->eobj_arrow;
 				cxx_targ xa[8];
 				uint32_t nx = c->xargs_set && c->nxargs <= 8 ? c->nxargs : UINT32_MAX;
-				uint8_t call_obj = c->call_obj;
+				uint8_t call_obj = c->call_obj, call_obj_rv = c->call_obj_rv;
 				uint32_t ename = c->ename;
 				bool missing = c->ename_missing;
 				uint32_t on_args = 0, on_nodes[CXX_MAX_ARGS];
@@ -90,7 +90,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					uint32_t abrace[CXX_MAX_ARGS];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
-					c->call_obj = call_obj, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
+					c->call_obj = call_obj, c->call_obj_rv = call_obj_rv, cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval, c->ncargs);
 					if (!c->ncargs && !c->econst && !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
 					    AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, c->etype) <= AST_TYPE_UNSIGNED_LONG_LONG) {
 						/* f<args>() of a constexpr function template: its value, a constant */
@@ -125,7 +125,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					uint32_t abrace[CXX_MAX_ARGS];
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
-					c->call_obj = call_obj, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					c->call_obj = call_obj, c->call_obj_rv = call_obj_rv, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
 					cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
 					ast_qualified_type cty = c->etype;
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))
@@ -170,6 +170,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 		case LEX_TOKEN_PERIOD: case LEX_TOKEN_ARROW: {
 			/* the object's class: its scope, for the member's lookup */
 			ast_qualified_type obj = c->etype;
+			uint8_t obj_rv = cxx_is(c, LEX_TOKEN_ARROW) ? 2 : c->etype == CXX_TY_UNKNOWN ? 0 : c->elval ? 2 : 1;	/* (*p is an lvalue) */
 			cxx_scope *cls = NULL;
 			uint32_t obj_node = c->enode, mloc = cxx_peek(c, 0)->loc;
 			bool arrow = cxx_is(c, LEX_TOKEN_ARROW);
@@ -242,7 +243,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 						if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 							cxx_name_type(c, m);
-							c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
+							c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1, c->call_obj_rv = obj_rv;
 							c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 						} else if (!m && !cls->dependent && !cls->has_dependent_base)
 							CXX_INVALID(c);
@@ -265,7 +266,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 							c->xargs = realloc(c->xargs, (c->cxargs = c->ntargs + 8) * sizeof *c->xargs);
 						memcpy(c->xargs, c->targs, c->ntargs * sizeof *c->xargs);
 						c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = m;
-						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
+						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1, c->call_obj_rv = obj_rv;
 						c->eobj_node = obj_node, c->eobj_arrow = arrow;	/* (code generation: the call's object) */
 					} else if (cls && !q && !dep && !m && !cls->dependent && !cls->has_dependent_base && !c->tentative)
 						CXX_INVALID(c);	/* no such member template */
@@ -277,7 +278,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
 						cxx_name_type(c, m);
-						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;
+						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1, c->call_obj_rv = obj_rv;
 						/* a data member of a const object is const (not a mutable one, not a reference):
 						   x.layout.begin_ptr() on a const x calls the const overload */
 						if (c->etype != CXX_TY_UNKNOWN && c->edecl_name && !c->ecallee && (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST)) {
