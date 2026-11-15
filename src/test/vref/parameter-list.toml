@@ -1,0 +1,106 @@
+within = "VPRIV void cxx_parameter_clause_body_parse ( cxx * c ) {"
+
+# The old columns are listed in allocation and copy-out order.
+[storage]
+count = "n"
+capacity = "cap"
+initial_capacity = 8
+growth_sites = 3
+items = "parameters.items"
+index = "i"
+columns = [
+    {array="types", type="ast_qualified_type", field="signature_type", output="c -> fn_params"},
+    {array="names", type="uint32_t", field="name", output="c -> fn_pnames"},
+    {array="decls", type="ast_qualified_type", field="declared_type", output="c -> fn_pdecl"},
+]
+
+[[rule]]
+match = "# include \"declaration.h\""
+after = '''
+
+#include "common/vector.h"'''
+scope = "file"
+
+[[rule]]
+match = "VPRIV void cxx_parameter_clause_body_parse ( cxx * c ) {"
+before = '''
+typedef struct cxx_parsed_parameter {
+    uint32_t name;
+    ast_qualified_type signature_type, declared_type;
+} cxx_parsed_parameter;
+
+typedef struct cxx_parameter_list {
+    cxx_parsed_parameter *items;
+    uint32_t count, capacity;
+} cxx_parameter_list;
+
+static inline void cxx_parameter_append(cxx *c, cxx_parameter_list *list,
+                                        uint32_t name,
+                                        ast_qualified_type signature_type,
+                                        ast_qualified_type declared_type)
+{
+    if (unlikely(list->count == list->capacity)) {
+        size_t capacity = vvector_capacity(
+            list->capacity, (size_t)list->count + 1, sizeof *list->items);
+        if (!capacity || capacity > UINT32_MAX)
+            vout_of_memory();
+        /* Tentative parsing can longjmp out of this clause. The TU owns spills. */
+        cxx_parsed_parameter *items = (cxx_parsed_parameter *)cc_heap_allocate(
+            c->ast, capacity * sizeof *items);
+        memcpy(items, list->items, list->count * sizeof *items);
+        list->items = items;
+        list->capacity = (uint32_t)capacity;
+    }
+    list->items[list->count++] =
+        VCC_LITERAL(cxx_parsed_parameter, name, signature_type, declared_type);
+}
+
+'''
+scope = "file"
+
+[[rule]]
+match = "ast_qualified_type * @types = NULL , * @decls = NULL ; uint32_t * @names = NULL ; uint32_t @n = 0 , @cap = 0 ,"
+replace = '''
+cxx_parsed_parameter local[8];
+cxx_parameter_list parameters = {local, 0, sizeof local / sizeof *local};
+uint32_t'''
+
+[[rule]]
+match = "@names [ @n ] = 0 ; @decls [ @n ] = @types [ @n ] = cxx_type_parameter_adjust ( c , c -> type_out ) ; c -> cpack_types [ k ] = @types [ @n ] ; @n ++ ;"
+replace = '''
+t = cxx_type_parameter_adjust(c, c->type_out);
+cxx_parameter_append(c, &parameters, 0, t, t);
+c->cpack_types[k] = t;'''
+
+[[rule]]
+match = "@names [ @n ] = 0 ; @decls [ @n ] = @types [ @n ] = cxx_type_parameter_adjust ( c , pe -> pack [ k ] . t ) ; @n ++ ;"
+replace = '''
+t = cxx_type_parameter_adjust(c, pe->pack[k].t);
+cxx_parameter_append(c, &parameters, 0, t, t);'''
+
+[[rule]]
+match = "@names [ @n ] = pname ; @decls [ @n ] = @dt ; @types [ @n ++ ] = t ;"
+replace = "cxx_parameter_append(c, &parameters, pname, t, declared_type);"
+
+[[rule]]
+match = "c -> cpack_at = @n"
+replace = "c->cpack_at = parameters.count"
+
+[[rule]]
+match = "@pack = @n ;"
+replace = "pack = parameters.count;"
+count = 2
+
+[[rule]]
+match = "! ( @n == 0"
+replace = "!(parameters.count == 0"
+
+[[rule]]
+match = "ast_qualified_type @dt ="
+replace = "ast_qualified_type declared_type ="
+
+[[rule]]
+match = "if ( @n > c -> fn_cparams )"
+replace = '''
+uint32_t n = parameters.count;
+if (n > c->fn_cparams)'''

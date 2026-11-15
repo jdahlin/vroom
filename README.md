@@ -32,6 +32,8 @@ bench/vccd-kbuild.sh work/build-X -j 6
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60
 ```
 
+Build the C and C++ source refactoring tool separately with `make -C src -j 6 vref`. It previews local renames, signature changes and statement extraction as unified diffs. [vref commands and supported forms](doc/vref.md)
+
 ## Compiler status
 
 The main targets are arm64 Linux (ELF) and macOS (Mach-O). The x86-64 Linux and WebAssembly backends are in development. There's also a [browser build of the compiler](contrib/wasm/).

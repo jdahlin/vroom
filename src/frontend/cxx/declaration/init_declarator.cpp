@@ -122,6 +122,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                           ((flags & DS_CONSTEXPR) ? AST_QUALIFIER_CONST : 0))
                 : base;
         name = cxx_declarator_parse(c, false, &q, &f, &qs);
+#ifdef VCC_REFACTOR
+        uint32_t ref_token = c->ref_declarator;
+#endif
         if (q && context == CXX_CONTEXT_BLOCK && c->tentative)
             cxx_fail(
                 c,
@@ -354,7 +357,31 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     ? NULL
                     : cxx_declare(c, cxx_declaration_scope(c), name, kind);
             bool is_friend = false;
-
+#ifdef VCC_REFACTOR
+            if (e && c->ast->o->refactor && ref_token &&
+                context == CXX_CONTEXT_BLOCK && !f &&
+                kind == CXX_ENTITY_VALUE && !(flags & DS_EXTERN_SEEN)) {
+                cxx_token *nt = &c->tok[ref_token - 1];
+                e->ref_loc = nt->loc;
+                pp_refactor_binding(c->p, c->ast->o->outfd, 'V', nt->loc,
+                                    nt->loc, name, nt->macro);
+            }
+            if (e && c->ast->o->refactor && ref_token && !f && global &&
+                kind == CXX_ENTITY_VALUE) {
+                cxx_token *nt = &c->tok[ref_token - 1];
+                e->ref_loc = nt->loc;
+                pp_refactor_binding(c->p, c->ast->o->outfd, 'D', nt->loc,
+                                    nt->loc, name, nt->macro);
+            }
+            if (e && c->ast->o->refactor && ref_token && f && !q &&
+                !c->template_depth && context == CXX_CONTEXT_NAMESPACE &&
+                c->scope == c->global && (flags & DS_STATIC)) {
+                cxx_token *nt = &c->tok[ref_token - 1];
+                e->ref_loc = nt->loc;
+                pp_refactor_binding(c->p, c->ast->o->outfd, 'F', nt->loc,
+                                    nt->loc, name, nt->macro);
+            }
+#endif
             /* a friend function declared in a class: not a member, not found by ordinary lookup; a call
 			   with an argument of the class finds it (kept in the class's friends) */
             if ((flags & DS_FRIEND) && f && context == CXX_CONTEXT_CLASS &&

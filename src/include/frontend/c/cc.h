@@ -494,6 +494,9 @@ typedef struct
     int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
     int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
     int outfd;
+#ifdef VCC_REFACTOR
+    int refactor; /* vref syntax query: emit physical tokens and resolved occurrences */
+#endif
     const char *
         field_uses; /* VCC_FIELD_USES: the selection file (test aid; after outfd: not in the cache key) */
     int lint; /* vpp --lint: the style checks (frontend/c/naming-lint.cpp); not in the decl cache key */

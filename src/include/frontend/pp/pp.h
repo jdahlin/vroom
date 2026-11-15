@@ -358,6 +358,11 @@ enum { DIAG_STYLE_VCC, DIAG_STYLE_CLANG, DIAG_STYLE_NARRATED };
 /* the end of the TU's diagnostics: the last JSON record, the SARIF log (diag_summary_print calls it) */
 void diag_finish(pp *p);
 /* clang's location of the end of the main file: its last newline, or its end without one */
+#ifdef VCC_REFACTOR
+void pp_refactor_tokens(pp *p, int fd);
+void pp_refactor_binding(const pp *p, int fd, char role, uint32_t loc,
+                         uint32_t declaration, uint32_t id, bool macro);
+#endif
 uint32_t pp_main_file_end(const pp *p);
 uint32_t pp_include_point_find(const pp *p, uint32_t loc);
 /* -fspell-checking-limit= as given (0: default, -1: none, -2: off) */

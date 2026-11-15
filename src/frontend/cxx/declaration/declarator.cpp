@@ -96,6 +96,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
                                     bool *is_function, cxx_scope **qscope)
 {
     uint32_t name = 0, nested = 0, nested_end = 0;
+#ifdef VCC_REFACTOR
+    uint32_t ref_token = 0;
+#endif
     ast_qualified_type t = c->type_in;
     cxx_suffix sfx[8];
     uint32_t nsfx = 0;
@@ -142,6 +145,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
         } while (cxx_accept(c, LEX_TOKEN_COMMA));
         cxx_expect(c, LEX_TOKEN_RIGHT_SQUARE);
         cxx_attributes_skip(c);
+#ifdef VCC_REFACTOR
+        c->ref_declarator = 0;
+#endif
         if (pack || c->sb_n > 8 || abstract_ok) {
             c->sb_n = 0;
             c->type_out = CXX_TY_UNKNOWN;
@@ -171,6 +177,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
         if (cxx_accept(c, LEX_TOKEN_TILDE)) {
             if (!cxx_is(c, LEX_TOKEN_IDENTIFIER))
                 cxx_fail(c, "expected a class name after '~'");
+#ifdef VCC_REFACTOR
+            ref_token = c->pos + 1;
+#endif
             name = cxx_peek(c, 0)->id;
             cxx_advance(c);
             if (cxx_is(c, LEX_TOKEN_LESS))
@@ -187,6 +196,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
                 cxx_template_arguments_parse(
                     c); /* operator+<char, ...>( : a specialization */
         } else if (cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c)) {
+#ifdef VCC_REFACTOR
+            ref_token = c->pos + 1;
+#endif
             name = cxx_peek(c, 0)->id;
             cxx_advance(c);
             /* an explicit specialization's or a qualified template's arguments */
@@ -294,6 +306,10 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
                                       ? malloc(c->fn_nparams * sizeof *x->named)
                                       : NULL);
                 for (uint32_t k = 0; k < c->fn_nparams; k++)
+#ifdef VCC_REFACTOR
+                    x->named[k].ref_token =
+                        c->ast->o->refactor ? c->fn_ref_tokens[k] : 0,
+#endif
                     x->named[k].name = c->fn_pnames[k],
                     x->named[k].ty = c->fn_pdecl[k];
                 nsfx++;
@@ -367,6 +383,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
         c->pos = nested + 1;
         c->type_in = t;
         name = cxx_declarator_parse(c, abstract_ok, &q2, &f2, qscope);
+#ifdef VCC_REFACTOR
+        ref_token = c->ref_declarator;
+#endif
         *is_function = f2 || (*is_function && !pointer);
         t = c->type_out;
         cxx_expect(c, LEX_TOKEN_RIGHT_PAREN);
@@ -376,6 +395,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
         *qualified = q2;
     }
     c->type_out = t;
+#ifdef VCC_REFACTOR
+    c->ref_declarator = ref_token;
+#endif
     return name;
 }
 
@@ -418,6 +440,9 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
             c->type_in = c->ds_type;
             c->decl_pack = 0;
             pname = cxx_declarator_parse(c, true, &q, &f, NULL);
+#ifdef VCC_REFACTOR
+            uint32_t ref_token = c->ref_declarator;
+#endif
             if (c->decl_pack && !c->template_depth && !c->tentative &&
                 !c->sig_own_pack) { /* (a function template instance's own pack: expanded below) */
                 /* Ts... args (Ts&&..., const Ts&...) in an instance, Ts a bound type pack: a parameter per
@@ -570,7 +595,11 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                     decls = (ast_qualified_type *)realloc(decls,
                                                           cap * sizeof *decls);
                 }
+#ifdef VCC_REFACTOR
+                names[n] = c->ast->o->refactor ? ref_token : pname;
+#else
                 names[n] = pname;
+#endif
                 decls[n] = dt;
                 types[n++] = t;
             }
@@ -581,6 +610,11 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
     }
     if (n > c->fn_cparams) {
         c->fn_cparams = n;
+#ifdef VCC_REFACTOR
+        if (c->ast->o->refactor)
+            c->fn_ref_tokens =
+                (uint32_t *)realloc(c->fn_ref_tokens, n * sizeof(uint32_t));
+#endif
         c->fn_params = (ast_qualified_type *)(realloc(
             c->fn_params, n * sizeof(ast_qualified_type)));
         c->fn_pnames =
@@ -590,7 +624,14 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
     }
     if (n) {
         memcpy(c->fn_params, types, n * sizeof(ast_qualified_type));
-        memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
+#ifdef VCC_REFACTOR
+        if (c->ast->o->refactor) {
+            memcpy(c->fn_ref_tokens, names, n * sizeof(uint32_t));
+            for (uint32_t i = 0; i < n; i++)
+                c->fn_pnames[i] = names[i] ? c->tok[names[i] - 1].id : 0;
+        } else
+#endif
+            memcpy(c->fn_pnames, names, n * sizeof(uint32_t));
         memcpy(c->fn_pdecl, decls, n * sizeof(ast_qualified_type));
     }
     c->fn_nparams = n, c->fn_variadic = variadic, c->fn_unknown = unknown,
@@ -644,6 +685,9 @@ VPRIV void cxx_function_tail_parse(cxx *c)
         cxx_param *save = (cxx_param *)malloc(n * sizeof *save);
 
         for (uint32_t i = 0; i < n; i++)
+#ifdef VCC_REFACTOR
+            save[i].ref_token = c->ast->o->refactor ? c->fn_ref_tokens[i] : 0,
+#endif
             save[i].name = c->fn_pnames[i], save[i].ty = c->fn_pdecl[i];
         cxx_scope_push(c, ps);
         cxx_params_declare(c, ps, save, n);

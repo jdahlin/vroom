@@ -1157,6 +1157,11 @@ static uint32_t cc_primary_parse(cc *c)
             }
         }
         s = cc_symbol_lookup(c, id);
+#ifdef VCC_REFACTOR
+        if (unlikely(c->o->refactor) && s)
+            pp_refactor_binding(c->p, c->o->outfd, 'R', loc, c->syms[s].loc, id,
+                                t->flags & PP_TOKEN_FLAG_FROM_MACRO);
+#endif
         next(c);
         if (likely(s))
             return cc_primary_symbol_build(c, s, id, loc);

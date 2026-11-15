@@ -70,6 +70,8 @@ build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
+	build vref
+	step vref python3 bench/vref-test.py --bin-dir "$BUILD"
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
