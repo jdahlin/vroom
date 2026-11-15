@@ -55,9 +55,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='vcc-host-dispatch-') as tmp:
         d = Path(tmp)
         (d/'crc.c').write_text(PROBE)
-        subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
+        subprocess.run([hostenv.llvm('clang'), '-x', 'c', '-O2', '-march=x86-64', '-D_GNU_SOURCE',
                         '-I'+str(ROOT/'ccs'), str(d/'crc.c'),
-                        str(ROOT/'ccs/vcc/lib/intern.c'), '-pthread', '-o', str(d/'crc')], check=True)
+                        str(ROOT/'ccs/vcc/lib/intern.cpp'), '-pthread', '-o', str(d/'crc')], check=True)
         src = d/'input.c'
         src.write_text(''.join('/*'+'x'*n+'*/\nconst char *s%d="%s\\\"";\n' % (n,'y'*n)
                                for n in (15,16,17,31,32,33,63,64,65,127,128,129)) +

@@ -1,5 +1,5 @@
 #include "../../../lib/literal.h"
-/* arm64 thunk pass: calls out of branch range get thunks, as lld does; part of ld/ld.c (#included there) */
+/* arm64 thunk pass: calls out of branch range get thunks, as lld does; part of ld/ld.cpp (#included there) */
 
 /* ---------------- thunk pass ---------------- */
 

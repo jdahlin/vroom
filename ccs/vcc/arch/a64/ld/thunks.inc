@@ -1,4 +1,4 @@
-/* arm64 range-extension thunks: their records and the (isec, reloc) -> thunk map; part of ld/ld.c (#included there) */
+/* arm64 range-extension thunks: their records and the (isec, reloc) -> thunk map; part of ld/ld.cpp (#included there) */
 
 /* ---------------- thunks ---------------- */
 

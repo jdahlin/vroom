@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/rec/slots.c"
+#include "vcc/emit/rec/slots.cpp"
 typedef struct { uint32_t id; int64_t off; uint32_t size; } test_access;
 static uint32_t seed = 0x11223344;
 static unsigned next(void) { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
@@ -143,7 +143,7 @@ def main():
                         *flags, str(source), '-o', str(binary)], check=True, timeout=30)
         subprocess.run([str(binary)], check=True, timeout=10)
         if args.check_mutation:
-            implementation=(Path(R)/'ccs/vcc/emit/rec/slots.c').read_text()
+            implementation=(Path(R)/'ccs/vcc/emit/rec/slots.cpp').read_text()
             implementation=implementation.replace('#include "../emitimpl.h"',
                 '#include "'+str(Path(R)/'ccs/vcc/emit/emitimpl.h')+'"')
             mutations = [
@@ -152,7 +152,7 @@ def main():
             ]
             for name, dropped in mutations:
                 assert dropped != implementation
-                source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.c"',dropped))
+                source.write_text(SOURCE.replace('#include "vcc/emit/rec/slots.cpp"',dropped))
                 subprocess.run([args.cc,'-std=gnu11','-O1','-g','-I',str(Path(R)/'ccs'),
                                 *flags,str(source),'-o',str(binary)],check=True,timeout=30)
                 result=subprocess.run([str(binary)],capture_output=True,cwd=tmp,timeout=10)

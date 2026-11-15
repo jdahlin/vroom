@@ -9,10 +9,10 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/arch/x64/emit/effects.c"
-#include "vcc/emit/flow/graph.c"
-#include "vcc/emit/flow/maskflow.c"
-#include "vcc/arch/x64/emit/dead.c"
+#include "vcc/arch/x64/emit/effects.cpp"
+#include "vcc/emit/flow/graph.cpp"
+#include "vcc/emit/flow/maskflow.cpp"
+#include "vcc/arch/x64/emit/dead.cpp"
 #define OP(o,s,d,a,b) ((rec){.op=o,.sz=s,.r={d,a,b,XNOREG}})
 #define IMM(r) OP(X_MOVI,8,r,XNOREG,XNOREG)
 #define MOV(d,a) OP(X_MOV,8,d,a,XNOREG)

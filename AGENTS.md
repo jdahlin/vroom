@@ -10,7 +10,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`ccs/vcc/vccd/caps.c`, `ccs/vcc/pp/ppdata*.inc` via `gen-ppdata.sh`).
+  (`ccs/vcc/vccd/caps.cpp`, `ccs/vcc/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
@@ -32,10 +32,10 @@ relative to it); `TODO.md` stays at the top.
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used only at `-O2`,
   built by compiling the shared walker a second time against a virtual
   lowering target.  Update the status of a step in `PLAN-vir.md`.
-- `ccs/vcc/emit/vir/vec.inc` (#included by `build.c`): the loop vectorizer, on
+- `ccs/vcc/emit/vir/vec.inc` (#included by `build.cpp`): the loop vectorizer, on
   the builder's pre-IR; `VCC_VIR_VEC=0` turns it off, `r` reports each
   innermost loop to stderr, `n` keeps loop constants unhoisted (`vv_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
-- `ccs/vcc/emit/vir/a64.c`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
+- `ccs/vcc/emit/vir/a64.cpp`: VIR's arm64 lowering.  `VCC_VIR_ROT=0` keeps VIR's block order (no loop
   rotation), `VCC_VIR_SHRINK=0` the prologue at the function's entry (no shrink-wrapping); `VCC_VL_PROBE=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.
 - `RESEARCH-vectors.md`: vector values in VIR (how Cranelift, Wasm SIMD, B3,
@@ -52,98 +52,98 @@ relative to it); `TODO.md` stays at the top.
   - `lib/`: shared data structures and helpers, header-only unless noted:
     reservations, regions and arenas (`arena.h`), byte buffers (`buf.h`),
     the emitter's text buffer (`tbuf.h`), growable arrays (`vec.h`), string
-    hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.c`), file mapping (`mapfile.h`),
-    interning (`intern.c`), binary128 (`f128.h`), thread counters
+    hashes (`hash.h`; XXH3/BLAKE3 in `ldhash.cpp`), file mapping (`mapfile.h`),
+    interning (`intern.cpp`), binary128 (`f128.h`), thread counters
     (`vperf.h`), scoped resources through `cleanup` (`defer.h`: VAUTOFREE,
     VAUTOCLOSE, VLOCK; not across a longjmp), attributes for our own
     declarations (`attr.h`: VUSE, VNONNULL) and overflow-checked bounds for
     sizes read from input files (`ckd.h`: vckd_range, vckd_add, vckd_mul).
     Variants not yet merged are listed in TODO.md.
-  - `lex/`: SIMD lexer and token cache; `lextest.c` drives it.
+  - `lex/`: SIMD lexer and token cache; `lextest.cpp` drives it.
   - `pp/`: preprocessor (pull model, clang-exact expansion), its generated
     tables (`ppdata*.inc` via `gen-ppdata.sh`) and the include-directory cache.
   - `cc/`: parser + sema (GNU C11, clang's layout and constant rules).
   - `emit/`: code generator (straight from the AST): the shared part, state
-    and types (`emitimpl.h`), the work queue and threads (`tu.c`), data
+    and types (`emitimpl.h`), the work queue and threads (`tu.cpp`), data
     objects, the prepass; the arm64 part is `arch/a64/emit/`.
-  - `as/`: GNU as syntax (`as.c`: statements, directives, macros,
+  - `as/`: GNU as syntax (`as.cpp`: statements, directives, macros,
     conditionals, expressions; internal header `asimpl.h`; one module with
-    `arch/<cpu>/as/parse.c`, `as_SRC`) and the standalone `vasm` driver.
+    `arch/<cpu>/as/parse.cpp`, `as_SRC`) and the standalone `vasm` driver.
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
-    and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
+    and its layout; with `arch/<cpu>/obj/fixup.cpp` and `platform/linux/elf.cpp`
     one module (`obj_SRC`, internal header `objimpl.h`).
   - `vir/`: VIR, the SSA IR of `-O2` (SPEC-vir.md; one module `vir_SRC`, a unity
     TU like `as`, linked into no compiler tool yet): `vir.h` the public format
-    (instruction, block, slot, function, the opcode table `table.c` that the
-    printer, parser and verifier all read), `vir.c` the thread's reservations
+    (instruction, block, slot, function, the opcode table `table.cpp` that the
+    printer, parser and verifier all read), `vir.cpp` the thread's reservations
     and construction (hash-consed constants, `extra` lists), `vir_cfg`,
     `vir_dom`, `vir_uses`, `vir_canon`, and the unit tables of the text form;
-    `print.c`, `parse.c` (arbitrary bytes fail as `file:line:col`, never crash)
-    and `verify.c` (every rule of SPEC section 12); `virimpl.h` is internal.
-    Depends on nothing in `cc/`, `emit/` or `arch/`.  `virtest.c` is the tool
+    `print.cpp`, `parse.cpp` (arbitrary bytes fail as `file:line:col`, never crash)
+    and `verify.cpp` (every rule of SPEC section 12); `virimpl.h` is internal.
+    Depends on nothing in `cc/`, `emit/` or `arch/`.  `virtest.cpp` is the tool
     (`virtest FILE`; `--no-verify`, `--bless`, `--selftest` for the builder API).
     The interpreter, `virgen` and the fuzz target (the rest of step V1) are not
     written yet.  Tests: `tests/vir/` (`bad/RULE-name.vir`, `canon/`, `dom/`).
-  - `ld/`: the linker `vlink` (`ld.c`, one TU; also linked into vccd, which
+  - `ld/`: the linker `vlink` (`ld.cpp`, one TU; also linked into vccd, which
     calls `ld_main` per link) and `vobjcopy`/`vnm`;
-    `wasmld.c` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
-  - `driver/`: one compile job from a clang command line (`ppdriver.c`), the
-    declaration cache (`ccsnap.c`) and `vpp`, the driver for parity tests.
-  - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.c`),
-    the capability table (`caps.c`), and what runs inside vccd: kbuild's
-    fixdep, the archiver (`ar.c`: thin archives, llvm-ar-identical, so the
-    build uses no llvm-ar) and `rsh.c`, kbuild's recipe subset of sh, run for
-    `vsh` (`build/ccs/vsh/sh`, shim.c with `-DVSH`), make's SHELL in
+    `wasmld.cpp` is vlink for WebAssembly (as `wasm-ld` or with `-mwasm64`).
+  - `driver/`: one compile job from a clang command line (`ppdriver.cpp`), the
+    declaration cache (`ccsnap.cpp`) and `vpp`, the driver for parity tests.
+  - `vccd/`: the server, the `vcc`/`vas`/`vld`/`var`/`vsh` shim (`shim.cpp`),
+    the capability table (`caps.cpp`), and what runs inside vccd: kbuild's
+    fixdep, the archiver (`ar.cpp`: thin archives, llvm-ar-identical, so the
+    build uses no llvm-ar) and `rsh.cpp`, kbuild's recipe subset of sh, run for
+    `vsh` (`build/ccs/vsh/sh`, shim.cpp with `-DVSH`), make's SHELL in
     `bench/vccd-kbuild.sh`; anything outside the subset goes to `$VSH_REAL`.
     Without `--backend-sock` vccd runs the whole kernel build itself: probes,
     `-E`/`-c`/`-S` (stdin too), links (vld in-process; `--ld PROG` spawns
     one), nm/objcopy behind the `vcc-nm`/`vcc-objcopy` shims, and the host
-    programs (vcc + `ldmacho.c`, macOS only); nothing falls back to clang.
-  - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.c`:
-    registers, `.req`, operands, literal pools), the encoder (`as/enc.c`,
+    programs (vcc + `ldmacho.cpp`, macOS only); nothing falls back to clang.
+  - `arch/a64/`: arm64: instructions in GNU as syntax (`as/parse.cpp`:
+    registers, `.req`, operands, literal pools), the encoder (`as/enc.cpp`,
     `a64.h`), system registers,
-    relocation types (`reloc.h`), fixups (`obj/fixup.c`: in place or a
+    relocation types (`reloc.h`), fixups (`obj/fixup.cpp`: in place or a
     relocation, as LLVM MC), the linker's relocation scan, relocation
     application and range-extension thunks (`ld/*.inc`, #included by
-    `ld/ld.c` where they were: the linker is not a split module yet);
+    `ld/ld.cpp` where they were: the linker is not a split module yet);
     `emit/`: instruction records and register names (`ins.h`, `a64impl.h`,
     included by `emit/emitimpl.h`), expressions, statements, calls (AAPCS64
-    and Apple's), builtins, inline asm, the record optimizer (`opt.c`), the
-    printer (`print.c`) and the encoder of records (`obj.c`).  It is compiled
+    and Apple's), builtins, inline asm, the record optimizer (`opt.cpp`), the
+    printer (`print.cpp`) and the encoder of records (`obj.cpp`).  It is compiled
     in the `emit` unity TU (`emit_SRC`), so VPRIV stays static.
   - `emit/walk/` and `emit/rec/`: the shared AST walker (`walk.h`: folding,
     frame slots, labels, the call sequence; it calls a CPU only through
     `LO()`) and the machine records with their per-CPU op table (`rec.h`),
     PLAN-x86.md's layers 1 and 3; `arch/x64/emit/`: x86-64's lowering
-    (`x64impl.h`, `lower.c`), two-address pass and AT&T printer (`print.c`).
+    (`x64impl.h`, `lower.cpp`), two-address pass and AT&T printer (`print.cpp`).
     x86-64 is their only user; arm64 moves to them later (TODO.md).
     `walk/prefix.h` is generated from the walker's definitions: with
     `WK_PREFIX`/`LO_PREFIX` defined the walker compiles a second time under
     other names (`bench/gen-walkprefix.py`; PLAN-vir.md).
   - `arch/x64/as/`: the x86-64 assembler, AT&T syntax with MC's encodings:
-    operands, the encoder (REX and VEX) and the dispatcher in `asm.c`
-    (shared header `x64as.h`), one file per instruction family (`sys.c`,
-    `gpr.c`, `x87.c`, `sse.c`, `avx.c`); `vas-obj.py` checks `x86-*.s`.
+    operands, the encoder (REX and VEX) and the dispatcher in `asm.cpp`
+    (shared header `x64as.h`), one file per instruction family (`sys.cpp`,
+    `gpr.cpp`, `x87.cpp`, `sse.cpp`, `avx.cpp`); `vas-obj.py` checks `x86-*.s`.
   - `arch/wasm/emit/`: the WebAssembly (wasm64) code generator, AST to
-    LLVM's wasm `.s` (`wimpl.h`; `wasm.c` functions, ABI, header; `wexpr.c`,
-    `wcall.c`, `wstmt.c`), also in the `emit` unity TU: every name starts
+    LLVM's wasm `.s` (`wimpl.h`; `wasm.cpp` functions, ABI, header; `wexpr.cpp`,
+    `wcall.cpp`, `wstmt.cpp`), also in the `emit` unity TU: every name starts
     with `w`.  `emit/` picks it per target (`WASM(c)`); PLAN-wasm.md.
-  - `arch/wasm/as/`: the wasm assembler (`as.c`, model in `was.h`, interface
+  - `arch/wasm/as/`: the wasm assembler (`as.cpp`, model in `was.h`, interface
     `wasmas.h`): LLVM's wasm `.s` to a relocatable object; `-c` for wasm64
     and `vasm --target=wasm64-...` go through it.
-  - `platform/linux/`: the ELF writer (`elf.c`: relocations, string table,
+  - `platform/linux/`: the ELF writer (`elf.cpp`: relocations, string table,
     file layout as LLVM MC).
   - `platform/darwin/`: the Mach-O writer; vld's Mach-O executables
-    (`ldmacho.c`: libSystem only, chained fixups, ad-hoc signature, chosen
+    (`ldmacho.cpp`: libSystem only, chained fixups, ad-hoc signature, chosen
     when the first input is Mach-O; the kernel's host programs); Apple PMU
-    counters (`pmc.c`).
-  - `platform/wasm/`: the wasm object writer (`wasm.c`: layout, symbol table,
+    counters (`pmc.cpp`).
+  - `platform/wasm/`: the wasm object writer (`wasm.cpp`: layout, symbol table,
     relocations as LLVM's WasmObjectWriter, byte for byte).
   - `pp/`, `cc/` and `emit/` (with `arch/<cpu>/emit/`) are directories of
     files by topic, one internal header each (`ppimpl.h`, `ccimpl.h`, `emitimpl.h`) with the types, macros
     and prototypes the files share; a shared function is `VPRIV` (static in
     the unity build).  Each such module is compiled as one TU by default
-    (`obj/unity/MOD.c` #includes the files in `MOD_SRC`, SQLite style); `make
+    (`obj/unity/MOD.cpp` #includes the files in `MOD_SRC`, SQLite style); `make
     VCC_UNITY=` compiles file by file, and every file must compile alone.
   - `phase1/`: the clang-based phase 1 tools (`vroomd`, `vroom-cc`, PCH
     prefix) and `vroom-ld`, the ld.lld wrapper the -O0 kernel build links with.
@@ -159,7 +159,8 @@ relative to it); `TODO.md` stays at the top.
 
 ## Build and test
 ```
-make -C ccs -j 6 vcc                # all vcc tools (pp/ cc/ emit/ one TU each, ccache if installed)
+make -C ccs -j 6 vcc                # all vcc tools, hosted in GNU C++20
+make -C ccs -j 6 vcc VCC_LANG=c     # build the implementation as C11 for bootstrap comparisons
 make -C ccs -j 6 vcc VCC_UNITY= OUT=../build/ccs-parts   # file by file: each file compiles alone
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
@@ -222,7 +223,7 @@ bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: n
 bench/vcc-explain.py                # docs/diag pages: the wrong example gives the id, the fixed one nothing
 bench/gen-explain.py [--check]      # driver/explain.inc from ccs/vcc/docs/diag/*.md (vcc --explain ID)
 bench/gen-walkprefix.py [--check]   # emit/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
-build/ccs/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.c) on a synthetic target: dump + counters, checker at every register count
+build/ccs/viralloc --sweep F.vir     # VIR register allocation (vir/alloc.cpp) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # ccs/vcc/tests/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple (~1 s)
@@ -277,7 +278,7 @@ vcc-sema.py runs are green (878/879: modpost.c lacks a generated header).
 ## CI and the premerge gate
 
 Install the local formatting hook with `pre-commit install` after installing
-the Python package `pre-commit`. The hook formats staged vcc C sources and
+the Python package `pre-commit`. The hook formats staged vcc implementation sources and
 headers using the pinned clang-format version. Review and stage any formatting
 edits before retrying the commit. CI runs the same hook on changed files
 before promotion. Exclusions live in `ccs/vcc/.clang-format-ignore`.

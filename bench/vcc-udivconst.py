@@ -10,10 +10,10 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "vcc/emit/opt/udivconst.c"
+#include "vcc/emit/opt/udivconst.cpp"
 #include "vcc/arch/x64/emit/x64impl.h"
-#include "vcc/emit/walk/udivconst.c"
-#include "vcc/arch/a64/emit/udivconst.c"
+#include "vcc/emit/walk/udivconst.cpp"
+#include "vcc/arch/a64/emit/udivconst.cpp"
 VPRIV int x64_nfree(ecx *e) { return 8 - __builtin_popcount(e->x64->live & X_TEMPS); }
 /* The typed wrapper is unused in this arithmetic-only contract. */
 VPRIV i128 em_trunc_to(cc *c, i128 v, qty t) { (void)c; (void)t; return v; }

@@ -2,6 +2,7 @@
 """Shared single-operation multiplication recipes against a modular oracle."""
 import argparse
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -9,7 +10,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "vcc/emit/opt/mulconst.c"
+#include "vcc/emit/opt/mulconst.cpp"
 static uint64_t state = UINT64_C(0x948e612f6c010757);
 static uint64_t next(void) { state ^= state << 13; state ^= state >> 7; state ^= state << 17; return state; }
 int main(void)
@@ -57,12 +58,13 @@ def main():
                 raise RuntimeError(result.stderr.decode())
         compile_run(SOURCE)
         if args.check_mutation:
-            implementation = (Path(R) / 'ccs/vcc/emit/opt/mulconst.c').read_text()
+            implementation = (Path(R) / 'ccs/vcc/emit/opt/mulconst.cpp').read_text()
             implementation = implementation.replace('#include "../emitimpl.h"',
                 '#include "' + str(Path(R) / 'ccs/vcc/emit/emitimpl.h') + '"')
-            changed = implementation.replace('case 3: return 1;', 'case 3: return 2;')
-            assert changed != implementation
-            compile_run(SOURCE.replace('#include "vcc/emit/opt/mulconst.c"', changed), True)
+            changed, matches = re.subn(r'\bcase\s+3\s*:\s*return\s+1\s*;', 'case 3: return 2;', implementation)
+            if matches != 1:
+                raise RuntimeError(f'expected one multiply-by-three recipe, found {matches}')
+            compile_run(SOURCE.replace('#include "vcc/emit/opt/mulconst.cpp"', changed), True)
     print('shared constant-multiply recipe contracts: PASS')
 
 

@@ -249,6 +249,22 @@ Både `vpp` och `vccd` var byte-identiska med 9a9de55d. SQLite 3.50.4 vid
 objektfilerna och den körbara filen var byte-identiska. Den egna AArch64-sviten
 gav 328/328 godkända och ett känt förväntat fel under QEMU.
 
+### V4 (2026-11-15): slingjustering i allokeringskontrollen
+
+På x86-64 får slingan som sammanför två blocktillstånd i `vir/allocchk.c`
+attributet `code_align(64)` när värdkompilatorn stöder det. I Clang 23:s
+C11- och GNU++20-byggen låg slingans början på en 64-bytesgräns även när
+utfyllnad lades före objektfilen vid länkning. C11 är fortsatt standard.
+
+SQLite 3.50.4, x86-64 vid -O2, `VCC_VIR=bvls VCC_VIR_CHECK=1`, Ryzen 7
+9700X: 16 omgångar på CPU 6 med alla fyra byggen och balanserad körordning.
+Medianen av omgångarnas C++/C-skillnad i CPU-tid sjönk från +2,06 % till
++0,30 % (95 % bootstrapintervall för den senare: −0,16 till +1,21 %).
+Mot respektive ursprungsbygge ändrades C med +0,22 % och C++ med −1,43 %.
+Alla fyra gav byte-identiska SQLite-objekt. Allokerartesterna gav 21/21 i
+båda språklägena och mutationskontrollen fångade samma 3 515 av 3 638 som
+före ändringen.
+
 ### V1/V4 (2026-11-15): explicita pekarkonverteringar
 
 De 14 C-filerna i `vcc/vir/` klarar syntaxkontroll som GNU++20 med Clang 23

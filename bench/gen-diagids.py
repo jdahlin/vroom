@@ -6,7 +6,7 @@ Each format string a diagnostic call in vcc passes (found as in
 bench/vcc-diagcov.py) gets an id: the name of the clang diagnostic it
 matches (clang's .td files, bench/clangdiag.py), or, when clang has none,
 `vcc_` and the format's words.  The table is checked in, like ppdata*.inc:
-the build needs no clang and no .td files.  pp/diag.c looks a record's
+the build needs no clang and no .td files.  pp/diag.cpp looks a record's
 format up in it (binary search, only on the error path) and keeps the id.
 
   bench/gen-diagids.py           regenerate ccs/vcc/pp/diagids.inc
@@ -55,7 +55,7 @@ def explicit_ids():
     for d in cov.DIRS:
         for root, _, files in os.walk(f'{cov.V}/{d}'):
             for f in files:
-                if f.endswith('.c'):
+                if f.endswith('.cpp'):
                     src = open(os.path.join(root, f), errors='replace').read()
                     got |= set(re.findall(r'->id = "(\w+)"', src))
                     got |= {x for p in re.findall(r'->id = [^;]*\? "(\w+)" : "(\w+)"', src) for x in p}

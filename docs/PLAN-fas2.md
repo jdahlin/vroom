@@ -467,6 +467,33 @@ aldrig i bygget. Ett TU-test (`bench/vcc-diff.py`) körs över alla kärnfiler.
   verktyg utom virtest byte-identiska på x86-64 Linux. Formateringen
   flyttade självtestets källrader. Även SQLite-objekten vid -O2 och den
   länkade speedtest1 var byte-identiska, så tidsmätningarna utgick.
+- 2026-11-15: C11- och GNU++20-provbyggen av samma `vpp` (1a384bcc,
+  Clang 23, unity, -O3) kompilerade sqlite3.c för x86-64 vid -O2 med
+  `VCC_VIR=bvls VCC_VIR_CHECK=1`. På Ryzen 7 9700X var C++-byggets
+  CPU-tid 2,13 % högre på CPU 4 och 1,61 % högre på CPU 2 (median av
+  20 respektive 10 par, balanserad slumpad körordning). Åtta cykelprofilerade
+  kompileringar per bygge pekade på tillståndssammanslagningen i
+  `vir/allocchk.c:block` (191 → 246 miljoner cykler per kompilering för
+  hela funktionen). Funktionens maskinkod före relokering var byte-identisk.
+  Den heta slingans början låg 32 respektive 48 byte in i en 64-bytesrad.
+  Med samma objekt och 48 bytes utfyllnad före C++-byggets allocchk.o
+  sjönk CPU-tiden 1,46 %. Omvänt ökade den 1,44 % när C-byggets kontroll
+  fick C++-byggets sidförskjutning. Utan allokeringskontrollen var skillnaden
+  +0,23 % (95 % bootstrapintervall −0,08 till +1,45 %, 10 par).
+  Båda språklägena gav samma SQLite-objekt. C är fortsatt byggspråk.
+- 2026-11-15: Normalbygget använder nu GNU++20. De 197 implementationsfilerna
+  har suffixet `.cpp`; `make -C ccs vcc VCC_LANG=c` väljer C11 uttryckligen.
+  Unity, separat kompilering och C11-bygget gick igenom på x86-64 Linux.
+  C-sviten gav 328/328 godkända och ett väntat fel. SQLite-objektet var
+  byte-identiskt med föregående C++-bygge.
+- Självbygge: den C++-byggda kompilatorn på x86-64 kompilerade källorna
+  som C11 vid -O0 för AArch64 Linux. Den nya kompilatorn kördes under QEMU
+  och byggde sig själv igen. Alla 21 objekt och den länkade `vpp` blev
+  byte-identiska, och båda stegen kompilerade ett körbart x86-64-prov.
+  Clang-drivrutinen skötte systemlänkningen. AArch64-självbygget vid -O3
+  avbröts vid körning under initieringen av nyckelorden. Det inhemska
+  x86-64-självbygget saknar bland annat CPU-dispatch- och SIMD-intrinsics.
+  Vcc:s egen front-end stöder ännu inte `-std=gnu++20`.
 - `ccs/vcc/as.c` (GNU as-syntax), `a64.c`/`a64.h` (tabelldriven A64-kodare, delas med emittern), `elf.c`/`elf.h` (ELF-skrivare i minnet, mmap-reserverade regioner, ingen malloc; ett objekt per tråd). Drivrutin `vasm` (`make -C ccs vcc`).
 - Täckning efter inventering av de 30 `.S`-TU:erna: `.macro`/`.irp`/`.irpc`/`.rept`/`.exitm`/`.purgem`, `.if*` enligt MC:s AsmCond, `.pushsection`/`.popsection`/`.previous`/`.subsection`, data/`.inst`/`.incbin`/`.org`/`.fill`/`.align`-familjen, `.set`/`.equ` med lata variabler (framåtreferenser, alias ärver typ/storlek), `.type`/`.size`-uttryck, numeriska labels, `.req`, `ldr =` med litteralpooler, `:lo12:`/`:pg_hi21:`/`:abs_gN(_nc|_s):`. ~200 mnemonics (heltal, ldst, system, SIMD, SHA, CRC, MOPS); 1 625 sysreg-namn tagna en gång ur llvm-mc (`gen-sysreg.sh` → `a64sysreg.inc`). Ingen CFI behövs (kärnan bygger utan `.cfi_*` i dessa TU:er).
 - MC-beteenden som krävdes för byte-identitet: sektionsordning (`.strtab` först, `.rela` direkt efter sin sektion), StringTableBuilders svansdelning, symbolordning = registreringsordning (mappningssymbol före operandsymbol), sektionssymboler bara om en reloc använder dem, pc-relativa fixups mot lokala symboler i samma sektion löses, `$x`/`$d` per sektion men inte för utfyllnad, nop-utfyllnad med inledande nollor i kod.
