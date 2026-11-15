@@ -335,8 +335,19 @@ static void cxx_for_parse(cxx *c)
 					uint32_t vs = cxx_gen_local(c, var->name, var->ty, rloc);
 
 					if (vs) {
+						uint32_t el = cxx_gen_range_for_element(c, &gr);
+
 						var->sym = vs;
-						cxx_gen_local_declare(c, vs, cxx_gen_range_for_element(c, &gr), true, rloc);
+						if (el && var->ty != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, var->ty) && AST_TYPE_KIND(c->ast, var->ty) != AST_TYPE_ARRAY) {
+							/* for (T x : r) of a class T: x copy-initialized from each element, a constructor's
+							   (json's for (auto j : values)) */
+							ast_qualified_type at[1] = { AST_NODE_AT(c->ast, el)->ty };
+							uint8_t lv[1] = { (AST_NODE_AT(c->ast, el)->flags & AST_NODE_FLAG_LVALUE) != 0 };
+
+							cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(var->ty), at, lv, 1, false);
+							cxx_gen_construct_local(c, vs, AST_QUALIFIED_TYPE_UNQUALIFIED(var->ty), &el, 1, rloc);
+						} else
+							cxx_gen_local_declare(c, vs, el, true, rloc);
 					}
 					c->snode = 0;
 					cxx_statement_parse(c);

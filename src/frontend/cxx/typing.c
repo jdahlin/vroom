@@ -2354,6 +2354,12 @@ static int cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth)
 	return r;
 }
 
+/* are the class's copy and move assignments trivial (1), not (0), not known (-1) */
+VPRIV int cxx_class_assignment_trivial(cxx *c, ast_qualified_type t)
+{
+	return cxx_class_assign_trivial(c, t, 0);
+}
+
 /* the one scalar type (arithmetic, an enumeration, a pointer) class t's conversion functions (or a base's)
    give, for a built-in operator its object is an operand of (atomic<int> == 4); CXX_TY_UNKNOWN: none, several
    or not known */

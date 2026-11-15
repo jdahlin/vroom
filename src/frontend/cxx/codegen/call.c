@@ -350,7 +350,7 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 	}
 	if (f->fn_defaulted && nargs == 1 && object && args[0] && f->name == vintern_cstr("operator=") && f->member_of && f->member_of->owner &&
 	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty) &&
-	    cxx_gen_defaulted_copy_trivial(c, f->member_of->owner->ty)) {
+	    cxx_gen_defaulted_copy_trivial(c, f->member_of->owner->ty) && cxx_class_assignment_trivial(c, AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty)) == 1) {
 		/* T &operator=(const T&) = default or (T&&) = default of a trivially copyable class: its bytes, the object
 		   the result (clang calls no function for it: iter_impl's in json) */
 		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty);
@@ -377,6 +377,36 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 			c->enode = cc_dereference_build(a, cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, addr)->ty, loc, asg, addr), loc);
 		}
 		AST_NODE_AT(a, c->enode)->flags |= AST_NODE_FLAG_LVALUE;
+		return;
+	}
+	if (f->fn_defaulted && !f->fn_deleted && nargs == 1 && object && args[0] && f->name == vintern_cstr("operator=") && f->member_of && f->member_of->owner &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty) && f->ty != CXX_TY_UNKNOWN &&
+	    AST_TYPE(a, f->ty)->n == 1) {
+		/* a defaulted operator= of a class that is not trivially copyable (std::map's): its bases and members
+		   assigned in order, the object the result (no function emitted, as for the trivial one) */
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty), pt = a->params[AST_TYPE(a, f->ty)->aux];
+		bool move = AST_TYPE_KIND(a, pt) == AST_TYPE_POINTER && AST_TYPE(a, pt)->ext == 2;
+		uint32_t target = arrow ? cc_dereference_build(a, cc_conversion_decay(a, object), loc) : object, src = args[0], addr, chain;
+		cc_id_list parts;
+
+		if (!(AST_NODE_AT(a, target)->flags & AST_NODE_FLAG_LVALUE))
+			{ CXX_CALL_WHY(); return; }
+		if (!(AST_NODE_AT(a, src)->flags & AST_NODE_FLAG_LVALUE)) {
+			/* (a prvalue: in a temporary, then assigned from) */
+			uint32_t tmp = cxx_gen_temporary(c, t, loc);
+
+			if (!tmp)
+				{ CXX_CALL_WHY(); return; }
+			src = cc_dereference_build(a, cc_node_new_operands(a, AST_NODE_COMMA, cc_type_pointer(a, t), loc,
+									  cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), src, loc),
+									  cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc)), loc);
+		}
+		cc_id_list_init(&parts);
+		if (!cxx_gen_defaulted_assign_parts(c, target, t, src, move, &parts, loc))
+			{ CXX_CALL_WHY(); return; }
+		addr = cc_address_of_build(a, target, loc);
+		chain = cxx_gen_chain(c, &parts, addr, loc);
+		c->enode = chain ? cc_dereference_build(a, chain, loc) : 0;
 		return;
 	}
 	ft = AST_TYPE(a, f->ty);

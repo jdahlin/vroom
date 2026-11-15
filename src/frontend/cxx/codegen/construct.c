@@ -128,6 +128,82 @@ VPRIV bool cxx_gen_default_construct_parts(cxx *c, uint32_t target, ast_qualifie
  * source's base subobjects, the vptr, then each member (a class one by its constructor, the others copied).
  * src: the source object (an lvalue).
  */
+/* x = y (or, with move, x = std::move(y)) for one subobject of class or scalar type t: the assignment's
+   expression (0: not built) */
+static uint32_t cxx_gen_assign_one(cxx *c, uint32_t tx, uint32_t sx, ast_qualified_type t, bool move, uint32_t loc)
+{
+	cc *a = c->ast;
+	uint32_t saved = c->enode, r;
+
+	if (!cc_type_is_record(a, t))
+		return cc_assignment_build(a, 0, tx, cc_node_rvalue(a, sx), loc);
+	if (AST_TYPE_KIND(a, t) == AST_TYPE_ARRAY)
+		return 0;
+	{
+		ast_qualified_type at[1] = { move ? AST_QUALIFIED_TYPE_UNQUALIFIED(t) :
+					     AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(AST_QUALIFIED_TYPE_UNQUALIFIED(t)), AST_QUALIFIER_CONST) };
+
+		c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = !move;
+		if (!cxx_operator_call_type(c, vintern_cstr("operator="), AST_QUALIFIED_TYPE_UNQUALIFIED(t), at, 1) || !c->call_resolved || !c->call_picked) {
+			c->op_lv_set = 0;
+			c->enode = saved;
+			/* (no operator= of its own: its implicit one, a copy of its bytes where that is what it does) */
+			return cxx_gen_defaulted_copy_trivial(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) ? cc_assignment_build(a, 0, tx, cc_node_rvalue(a, sx), loc) : 0;
+		}
+		c->enode = 0;
+		cxx_gen_operator_call(c, tx, &sx, 1, loc);
+		r = c->enode;
+		c->enode = saved;
+		return r;
+	}
+}
+
+/*
+ * T &operator=(const T&) = default, (T&&) = default of a class that is not trivially copyable: each base and
+ * member assigned in order (by its own operator=, std::move'd for a move), into out ([class.copy.assign]/12).
+ * false: not built (an array or reference member, a const one).
+ */
+VPRIV bool cxx_gen_defaulted_assign_parts(cxx *c, uint32_t target, ast_qualified_type t, uint32_t src, bool move, cc_id_list *out, uint32_t loc)
+{
+	cc *a = c->ast;
+	ast_qualified_type bases[16];
+	uint32_t nb, x;
+	const tag *r;
+
+	if (!target || !src || !cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) || AST_TYPE_KIND(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) == AST_TYPE_UNION ||
+	    cxx_class_polymorphic(c, t))
+		return false;
+	nb = cxx_class_bases(c, t, bases, 16);
+	for (uint32_t i = 0; i < nb; i++) {
+		uint32_t tb = cxx_gen_base_object(c, target, bases[i], loc), sb = cxx_gen_base_object(c, src, bases[i], loc);
+		bool pod, empty;
+
+		if (!tb || !sb)
+			return false;
+		if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(bases[i]), &pod, &empty) && empty)
+			continue;	/* (an empty base: nothing; its byte may be a member's) */
+		if (!(x = cxx_gen_assign_one(c, tb, sb, bases[i], move, loc)))
+			return false;
+		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, x, 0, 0));
+	}
+	r = &a->tags[AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->aux];
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		ast_qualified_type ft = r->f[i].ty;
+		uint32_t tm, sm;
+
+		if (!r->f[i].name)
+			continue;	/* (the bases' bytes, done above) */
+		if (AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY || (AST_TYPE_KIND(a, ft) == AST_TYPE_POINTER && AST_TYPE(a, ft)->ext) ||
+		    (AST_QUALIFIED_TYPE_QUALIFIERS(ft) & AST_QUALIFIER_CONST))
+			return false;
+		tm = member(a, target, r->f[i].name, loc), sm = member(a, src, r->f[i].name, loc);
+		if (!tm || !sm || !(x = cxx_gen_assign_one(c, tm, sm, ft, move, loc)))
+			return false;
+		cc_id_list_append(a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, x, 0, 0));
+	}
+	return true;
+}
+
 VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target, ast_qualified_type t, uint32_t src, cc_id_list *out, uint32_t loc, int depth)
 {
 	cc *a = c->ast;

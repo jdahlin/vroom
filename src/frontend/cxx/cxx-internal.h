@@ -743,6 +743,8 @@ VPRIV bool cxx_gen_lambda_finish(cxx *c, cxx_gen_lambda *l, cxx_entity *owner, u
 VPRIV void cxx_gen_lambda_object(cxx *c, cxx_gen_lambda *l, ast_qualified_type t, uint32_t loc);
 VPRIV void cxx_name_type(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_operator_call(cxx *c, uint32_t obj, const uint32_t *args, uint32_t nargs, uint32_t loc);
+VPRIV int cxx_class_assignment_trivial(cxx *c, ast_qualified_type t);
+VPRIV bool cxx_gen_defaulted_assign_parts(cxx *c, uint32_t target, ast_qualified_type t, uint32_t src, bool move, cc_id_list *out, uint32_t loc);
 VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc);
 VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e, bool virt_kw);
 VPRIV void cxx_gen_vtables_emit(cxx *c);

@@ -2670,3 +2670,16 @@ mangle).  Strikt bänk: pass 26, 115 saknas.
   komplett först (förut "okänd").
 Test: `run/implicit-assign-typed.cpp`.  Sviter gröna (139/139, 38/38,
 mangle).  Strikt bänk: pass 26, 116 saknas.
+
+## Status 171 (2026-11-15)
+- En förvald `operator=` i en klass som inte är trivialt kopierbar
+  (std::map:s, en medlem med egen `operator=`) byggs medlem för medlem på
+  anropsplatsen (baser, sedan medlemmar, var och en med sin `operator=`,
+  flyttad för `(T&&)`); den triviala vägen kräver nu också att
+  tilldelningarna är triviala (förut kopierades byten även när en medlem
+  hade en egen `operator=`).  Test: `run/defaulted-assign-memberwise.cpp`.
+- `for (T x : r)` med en klass `T` by value: `x` konstrueras från varje
+  element (förut "inte byggd").  Test: `run/range-for-class-by-value.cpp`.
+- Kvar (sett i testerna): en fältmedlem eller lokal fältvariabel av en klass
+  med initierare (`E e[3] = { E(1), ... }`) byggs inte.
+Sviter gröna (141/141, 38/38, mangle).  Strikt bänk: pass 27, 112 saknas.
