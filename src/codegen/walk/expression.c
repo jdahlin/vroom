@@ -3805,8 +3805,23 @@ static int walk_builtin_constant_p(codegen_context *e, uint32_t arg)
          (cv.kind == CC_VALUE_ADDRESS && cv.str && cv.i == 0 && !cv.sym &&
           !cv.label)))
         return 1;
-    return !codegen_expression_has_side_effects(c, arg) &&
-           walk_expression_is_constant(e, arg);
+    if (codegen_expression_has_side_effects(c, arg))
+        return 0;
+    {
+        /* a local whose initializer generated to a constant (float a = move(1)), through conversions */
+        uint32_t r = arg;
+
+        while (N(r)->op == AST_NODE_CAST && N(r)->aux != AST_CAST_ARRAY_DECAY &&
+               N(r)->aux != AST_CAST_FUNCTION_DECAY &&
+               N(r)->aux != AST_CAST_VECTOR_ADDRESS)
+            r = N(r)->a;
+        if (N(r)->op == AST_NODE_VARIABLE &&
+            e->walk_state->constant_p_generations[N(r)->a] ==
+                e->walk_state->generation &&
+            e->walk_state->generation)
+            return 1;
+    }
+    return walk_expression_is_constant(e, arg);
 }
 
 static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)

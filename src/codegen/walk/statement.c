@@ -54,6 +54,8 @@ VPRIV walk_state *walk_state_get(codegen_context *e)
             ((size_t)c->nsym + 64) * sizeof(uint32_t)));
         W->constant_values = (codegen_value *)(codegen_memory_reserve(
             ((size_t)c->nsym + 64) * sizeof(codegen_value)));
+        W->constant_p_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
         W->label_instances = (uint32_t *)(codegen_memory_reserve(
             ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
         W->case_instances = (uint32_t *)(codegen_memory_reserve(
@@ -102,6 +104,8 @@ VPRIV void walk_context_free(codegen_context *e)
                ((size_t)c->nsym + 64) * sizeof(uint32_t));
         munmap(W->constant_values,
                ((size_t)c->nsym + 64) * sizeof(codegen_value));
+        munmap(W->constant_p_generations,
+               ((size_t)c->nsym + 64) * sizeof(uint32_t));
         munmap(W->label_instances, ((size_t)c->nlabel + 64) * sizeof(uint32_t));
         munmap(W->case_instances, ((size_t)c->nnode + 64) * sizeof(uint32_t));
         munmap(W->cleanup_symbol_nodes,
@@ -526,6 +530,70 @@ static void walk_declaration_emit(codegen_context *e, const node *x)
                 codegen_integer_truncate(c, cv.i, y->ty));
             return;
         }
+    }
+    e->walk_state->constant_p_generations[s] = 0;
+    if (e->unit->options->opt && x->b &&
+        !(e->unit->symbol_flags[s] &
+          (CODEGEN_SYMBOL_WRITTEN | CODEGEN_SYMBOL_CONSTANT_WRITTEN |
+           CODEGEN_SYMBOL_CONSTANT_MULTIPLE)) &&
+        !e->unit->local_needs_memory[s] &&
+        !(AST_QUALIFIED_TYPE_QUALIFIERS(y->ty) & AST_QUALIFIER_VOLATILE) &&
+        !(T(c, y->ty)->flags & AST_TYPE_FLAG_ATOMIC) &&
+        !(y->flags & AST_SYMBOL_FLAG_ADDRESS_TAKEN) &&
+        y->sc != AST_STORAGE_REGISTER &&
+        !codegen_symbol_attributes(c, s)->cleanup &&
+        !walk_type_is_in_memory(e, y->ty) && !walk_type_is_wide(c, y->ty) &&
+        !walk_type_is_wide(c, N(x->b)->ty) &&
+        /* (an integer from an integer, or a float from an integer's conversion: a float's own value, a
+           bit cast, takes the general path) */
+        ((codegen_type_is_integer(c, y->ty) &&
+          codegen_type_is_integer(c, N(x->b)->ty)) ||
+         (codegen_type_is_float(c, y->ty) && N(x->b)->op == AST_NODE_CAST &&
+          N(x->b)->aux == AST_CAST_INTEGER_TO_FLOAT &&
+          codegen_type_is_integer(c, N(N(x->b)->a)->ty))) &&
+        KIND(c, N(x->b)->ty) != AST_TYPE_BOOL &&
+        KIND(c, y->ty) != AST_TYPE_BOOL) {
+        /* a local never written: its initializer generated first; a constant (a call inlined to one, int k =
+           move(2)) is the local's value, stored nowhere, and a float's (float a = move(1)) is known constant */
+        uint32_t init = x->b;
+
+        if (codegen_type_is_float(c, y->ty) && N(init)->op == AST_NODE_CAST &&
+            N(init)->aux == AST_CAST_INTEGER_TO_FLOAT &&
+            codegen_type_is_integer(c, N(N(init)->a)->ty) &&
+            !walk_type_is_wide(c, N(N(init)->a)->ty) &&
+            KIND(c, N(N(init)->a)->ty) != AST_TYPE_BOOL)
+            init =
+                N(init)
+                    ->a; /* (float a = move(1): the integer converted, its constant seen) */
+        codegen_value v = walk_value_emit(e, init);
+
+        if (v.kind == CODEGEN_VALUE_CONSTANT) {
+            if (codegen_type_is_integer(c, y->ty)) {
+                codegen_value k = walk_value_convert(e, v, N(init)->ty, y->ty);
+
+                if (k.kind == CODEGEN_VALUE_CONSTANT) {
+                    e->walk_state->constant_generations[s] =
+                        e->walk_state->generation;
+                    e->walk_state->constant_values[s] = k;
+                    return;
+                }
+                walk_value_free(e, &k);
+                v = codegen_value_constant(
+                    0); /* (not reached: an integer's conversion of a constant folds) */
+            } else
+                e->walk_state->constant_p_generations[s] =
+                    e->walk_state->generation;
+        }
+        {
+            codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                                .align = codegen_symbol_alignment(c, s)};
+            codegen_value cv = walk_value_convert(e, v, N(init)->ty, y->ty);
+
+            if (!WALK_LOWER(local)(e, s, &l))
+                l.offset = walk_local_slot(e, s);
+            walk_lvalue_store(e, &l, y->ty, &cv);
+        }
+        return;
     }
     {
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,

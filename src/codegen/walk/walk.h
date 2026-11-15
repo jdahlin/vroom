@@ -153,6 +153,9 @@ typedef struct walk_state {
     /* Constants for locals or parameters never written, bound per sym when kgen == gen. */
     uint32_t *constant_generations;
     codegen_value *constant_values;
+    /* locals never written whose initializer was a constant only once generated (an inlined call's result,
+       float a = move(1)): __builtin_constant_p's 1, as clang's optimizer folds it; kgen == gen */
+    uint32_t *constant_p_generations;
     /* inlining: the copy being generated (0: the function itself), labels per copy */
     uint32_t instance, instance_count, *label_instances, *case_instances;
     struct walk_inline_call *
