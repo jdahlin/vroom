@@ -306,6 +306,28 @@ spellings) and `co_await` now retain their declaration names through object
 emission. The five symbols in `operator-names.cpp` match Clang 23, including
 an ordinary identifier beginning with `operator`.
 
+The type encoder distinguishes unknown, zero, 64-bit constant and direct
+template-parameter array bounds. References to arrays of unknown or zero
+bound can pass through code generation. `__fp16`, `_Float16` and `__bf16`
+have distinct encodings. The six definitions in `mangle/types.cpp` have
+identical symbol names to Clang 23 on x86-64 and AArch64 Linux.
+
+Remaining conformance work against [Itanium §5.1](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
+crosses the parser, type system and emitter. Concrete probes on x86-64:
+
+| Declaration or entity | Clang 23 | Frontend gap |
+| --- | --- | --- |
+| `void fp(void (*)() noexcept)` | `_Z2fpPDoFvvE` | Function-pointer type loses the exception specification and produces `_Z2fpPFvvE`. |
+| `void owner(int R::*)` | `_Z5ownerM1Ri` | No mangled symbol; the owner and member must form a distinct type. |
+| `void lanes(V,V)` with a four-int GNU vector | `_Z5lanesDv4_iS_` | C++ declaration processing drops the vector attribute, producing `_Z5lanesii`. |
+| Lambda call operator | Enclosing encoding and closure identity | Code generation assigns a TU-local serial name. |
+
+For conformance, compare defined and undefined symbols in object files from
+separate translation units. The syntax-only dump also includes unused inline
+definitions and cannot detect definitions dropped during code generation.
+Dependent template expressions, local discriminators, special names and
+substitution numbering need independent fixtures before claiming full coverage.
+
 ### X4 Templates, with instantiation as a recorded unit
 
 Class, function, alias and variable templates; partial specialisation;

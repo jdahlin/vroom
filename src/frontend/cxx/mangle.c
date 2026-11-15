@@ -1638,6 +1638,8 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 	case AST_TYPE_UNSIGNED_LONG_LONG: mg_str(m, "y"); return;
 	case AST_TYPE_INT128: mg_str(m, "n"); return;
 	case AST_TYPE_UINT128: mg_str(m, "o"); return;
+	case AST_TYPE_FLOAT16: mg_str(m, x->ext ? "Dh" : "DF16_"); return;
+	case AST_TYPE_BFLOAT16: mg_str(m, PP_IS_X86_64(a->o->target) ? "DF16b" : "u6__bf16"); return;
 	case AST_TYPE_FLOAT: mg_str(m, "f"); return;
 	case AST_TYPE_DOUBLE: mg_str(m, "d"); return;
 	case AST_TYPE_LONG_DOUBLE: mg_str(m, "e"); return;
@@ -1668,7 +1670,18 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
-		mg_text(m, num, (size_t)snprintf(num, sizeof num, "A%u_", (unsigned)x->n));
+		mg_str(m, "A");
+		if (x->flags & AST_TYPE_FLAG_INCOMPLETE) {
+			if (x->ext == 1)
+				mg_str(m, "T_");
+			else if (x->ext)
+				mg_text(m, num, (size_t)snprintf(num, sizeof num, "T%u_", (unsigned)x->ext - 2));
+		} else if (x->flags & AST_TYPE_FLAG_VLA) {
+			m->bad = true;
+			return;
+		} else
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, "%llu", (unsigned long long)cc_type_array_length(a, t)));
+		mg_str(m, "_");
 		mg_type(m, x->base);
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;

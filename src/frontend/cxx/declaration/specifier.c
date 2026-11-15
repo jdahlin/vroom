@@ -215,7 +215,8 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
 	case CXX_KW_double: sp->v_double = 1; break;
 	case CXX_KW___int128: sp->v_int128 = 1; break;
 	case CXX_KW___float128: sp->v_float128 = 1; break;
-	case CXX_KW__Float16: case CXX_KW___fp16: sp->v_float16 = 1; break;
+	case CXX_KW___fp16: sp->v_float16 = 2; break;
+	case CXX_KW__Float16: sp->v_float16 = 1; break;
 	case CXX_KW___bf16: sp->v_bf16 = 1; break;
 	case CXX_KW_short: sp->v_short = 1; break;
 	case CXX_KW_long: sp->v_long++; break;
