@@ -47,6 +47,28 @@ VPRIV uint32_t cxx_keyword_of(uint32_t id)
 	return 0;
 }
 
+/* a keyword of the TU's standard, as clang: C++11's and C++20's are identifiers before them
+   (libc++'s C++03 mode defines nullptr, decltype, static_assert and typedefs char16_t), and
+   __char16_t/__char32_t spell char16_t/char32_t in every mode */
+static uint16_t cxx_keyword_in(cxx *c, uint32_t id)
+{
+	uint16_t kw = (uint16_t)cxx_keyword_of(id);
+	int std = c->o->standard == 98 ? 3 : c->o->standard;
+
+	switch (kw) {
+	case CXX_KW___char16_t: return CXX_KW_char16_t;
+	case CXX_KW___char32_t: return CXX_KW_char32_t;
+	case CXX_KW_alignas: case CXX_KW_alignof: case CXX_KW_char16_t: case CXX_KW_char32_t: case CXX_KW_constexpr:
+	case CXX_KW_decltype: case CXX_KW_noexcept: case CXX_KW_nullptr: case CXX_KW_static_assert: case CXX_KW_thread_local:
+		return std >= 11 ? kw : 0;
+	case CXX_KW_char8_t: case CXX_KW_concept: case CXX_KW_consteval: case CXX_KW_constinit: case CXX_KW_co_await:
+	case CXX_KW_co_return: case CXX_KW_co_yield: case CXX_KW_requires:
+		return std >= 20 ? kw : 0;
+	default:
+		return kw;
+	}
+}
+
 /* #pragma clang attribute NAME.push(...) / NAME.pop: a region of tokens where every function declared gets the
    attribute's abi tag (only the abi tag, with apply_to = function, is kept) */
 static void cxx_pragma_attribute_line(cxx *c, const char *s, uint32_t len)
@@ -142,7 +164,7 @@ VPRIV void cxx_tokens_read(cxx *c)
 		if (t.kind == LEX_TOKEN_EOF)
 			break;
 		if (t.kind == LEX_TOKEN_IDENTIFIER)
-			x->kw = (uint16_t)cxx_keyword_of(t.id);
+			x->kw = cxx_keyword_in(c, t.id);
 		/* joins: the previous token and this one adjacent in memory */
 		if (c->ntok) {
 			cxx_token *pv = &c->tok[c->ntok - 1];

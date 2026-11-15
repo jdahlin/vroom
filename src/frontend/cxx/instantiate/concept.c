@@ -378,7 +378,7 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
 	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
 	if (!setjmp(jb)) {
 		for (int guard = 0; guard < 64; guard++) {
-			if (cxx_is_kw(c, CXX_KW_using) || cxx_is_kw(c, CXX_KW_typedef) || cxx_is_kw(c, CXX_KW_static_assert)) {
+			if (cxx_is_kw(c, CXX_KW_using) || cxx_is_kw(c, CXX_KW_typedef) || cxx_is_kw(c, CXX_KW_static_assert) || cxx_is_kw(c, CXX_KW__Static_assert)) {
 				cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
 				continue;
 			}
