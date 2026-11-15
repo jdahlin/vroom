@@ -2,9 +2,31 @@
 #include "codegen.h"
 
 /* T(args), T{args}: a temporary of class type, constructed (cxx_ctor_use was called for it) */
+static void cxx_gen_construct_temp1(cxx *c, ast_qualified_type t,
+                                    const uint32_t *args, uint32_t nargs,
+                                    uint32_t loc);
+
+/* (a temporary whose construction needs another of its kind for an argument, and so on: a constructor
+   chosen through a conversion vcc got wrong; past 64, not built rather than a stack overflow) */
+static __thread uint32_t cxx_gen_temp_depth;
+
 VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
                                   const uint32_t *args, uint32_t nargs,
                                   uint32_t loc)
+{
+    if (cxx_gen_temp_depth > 64) {
+        c->enode = 0;
+        cxx_gen_fail(c);
+        return;
+    }
+    cxx_gen_temp_depth++;
+    cxx_gen_construct_temp1(c, t, args, nargs, loc);
+    cxx_gen_temp_depth--;
+}
+
+static void cxx_gen_construct_temp1(cxx *c, ast_qualified_type t,
+                                    const uint32_t *args, uint32_t nargs,
+                                    uint32_t loc)
 {
     cc *a = c->ast;
     cxx_entity *picked = c->ctor_picked;
