@@ -179,6 +179,8 @@ bench/var-cmp.py work/build-x       # vcc ar against llvm-ar on an llvm-ar-built
 bench/vsh-test.py                   # vsh/rsh against dash on small recipes
 bench/vobjcopy-cmp.sh               # vnm/vobjcopy against llvm-nm/llvm-objcopy on the build's uses
 bench/vobjcopy-any.py work/build-X  # ... and with other options on 200 random .o files
+python3 bench/vcc-header-fuzz.py --seed 0 --cases 64  # nested headers vs clang, six warm-cache TU orders
+python3 bench/vcc-header-deps.py     # nested macro dependencies, Clang parity, cache hits and warning policy
 bench/vcc-driver.py                 # driver: command lines vs clang (predefines from -O), <1 s
 bench/vcc-fpcheck.py -j 6           # no generated FP/SIMD code under -mgeneral-regs-only (~10 s)
 bench/vcc-cfi.py -j 6               # -fasynchronous-unwind-tables: .eh_frame per function, .text unchanged (~1 min)

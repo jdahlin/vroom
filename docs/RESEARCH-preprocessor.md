@@ -11,8 +11,8 @@ clang 23). Points the research could only infer, not verify, are marked *(unveri
 > The first time, do the work and note what it read. The next time, if what it
 > read is the same, reuse the result instead of redoing the work.
 
-- **Exact.** The check covers everything the work read, so the result equals a
-  run without the cache. Objects are byte-identical with and without each layer.
+- **Correctness target.** Replaying a hit must give the same result as processing
+  the region. The corpus comparisons below passed, and §6.11 records two regressions and their fixes.
 - **The work only happens when a cache misses.**
 - **Three layers**, each built on the one before (details in the sections named):
 
@@ -1259,6 +1259,202 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
     `VCC_DR=1` went from 16.2 to 12.4 G cycles, a larger gain than in
     instructions, because a hit replays no tokens.
   - Objects are identical before and after: PG 1570/1570, kernel 840/840.
+
+### 6.11 When a macro read depends on an earlier sibling (2026-11-15)
+
+**Before the fix.** `python3 bench/vcc-header-deps.py` compares Clang and
+`vpp --batch -j 1 -fsyntax-only` for two TUs in both orders, with and without
+`VPP_NOHC`. Static assertions inspect the value inside a header and selected
+state after the include. The harness disables parser snapshots and declaration
+replay. On Linux x86-64 targeting arm64 with Clang 23, 30 of 32 batch runs
+agreed with Clang. The two discrepancies both require a cache warmed by A
+before B. Both were reproduced as XFAILs.
+
+| Family | What the second TU changes | Observed result |
+|---|---|---|
+| Counter pasted into a name | Advances the incoming counter by one. An earlier sibling defines `FLAG1`. | Warm B leaves `FLAG1` as an identifier. Its enum value is 8. Clang expands it to 99. |
+| Redefinition diagnostic | Adds `#define FLAG 2` before a sibling defines it as 9. | Warm B succeeds under `-Werror=macro-redefined`. Clang and uncached vcc reject B. |
+| Conditional write | First child replaces an incoming macro only under `DEBUG`. | Both orders pass. |
+| Defined then expanded | Parent tests definedness, child expands the same name with a different value. | Both pass. |
+| Once membership | B enters the once-header and changes its macro before entering the parent. | Both pass. |
+| Macro stack | Parent saves a macro, child redefines it, parent restores it. | Both pass. |
+| Final write | Child undefines a macro, parent subsequently defines it, main observes the result. | Both pass. |
+| Computed include | Different strings select different writers before a common reader. | Both pass. |
+
+The counter discrepancy was also observed in the preprocessed token stream and
+in arm64 object data. The diagnostic discrepancy needs no paste, builtin or
+conditional. In `pp/macro.cpp`, `define` inspects the previous definition with
+`mget` before calling `mdef`. The write is recorded. The read deciding whether
+to diagnose is missing. An entry recorded when the name was undefined can
+therefore pass validation when its definition conflicts.
+
+A separate oracle check exposed a baseline diagnostic difference. With
+`-Werror=#warnings`, A used `#pragma clang diagnostic ignored "-W#warnings"`
+before including a header containing `#warning cache_probe`. Clang 23
+accepted A, while vcc with `VPP_NOHC=1` rejected it. This case needs
+ordinary diagnostic-parity investigation before it can isolate cache behavior.
+
+**Initial fix.** Tracking the incoming definition fixes the silent redefinition.
+The conservative counter fix discards regions looking up a counter-derived
+name and their ancestors. A ninth regression defines a name in the parent,
+reads it in a child and undefines it before returning to the TU. All 36
+ordered batches agree with Clang. The opt-in `-Wvcc-uncacheable-header`
+reports the header and the reason when a recording must be abandoned.
+`-Werror=vcc-uncacheable-header` promotes it to an error. An ordinary miss
+can record a new valid entry and stays silent.
+
+**Lessons from other implementations.** HP's aCC automatic PCH work describes
+the same earlier-sibling dependency and validates a configuration for an
+ordered source prefix. GCC requires incoming macros affecting a PCH to agree.
+These coarser boundaries simplify validation. vcc reuses children in multiple
+parents and has to establish that condition at each child's position.
+[HP aCC paper](https://www.usenix.org/legacy/events/wiess2000/full_papers/krishnaswamy/krishnaswamy_html/)
+and [GCC PCH contract](https://gcc.gnu.org/onlinedocs/gcc/Precompiled-Headers.html).
+
+Clang module maps can name configuration macros that select module variants.
+Ordinary kernel headers provide no such inventory. Discovering dependencies
+during preprocessing preserves the existing source contract. ccache's direct
+mode documents the difficulty of noticing a header that would have been selected
+if it had existed. The analogous negative facts in vcc include an undefined
+macro and a failed include probe. Each needs an explicit validity check.
+[Clang configuration macros](https://clang.llvm.org/docs/Modules.html#configuration-macros-declaration)
+and [ccache direct mode](https://ccache.dev/manual/latest.html#_the_direct_mode).
+
+**Proposed contract.** For a fixed filesystem generation, accepting an entry
+must reproduce the token stream, locations, diagnostics, success status,
+dependency list and outgoing observable preprocessor state of executing the
+same include in the current TU. Candidate validation must leave the live TU
+untouched until every check succeeds. An invalid candidate is an ordinary miss.
+
+1. **Keep the compact summaries for literal names.** A read of an incoming
+   binding records absence, definedness or the actual definition according to
+   what the operation observes. A local write satisfies subsequent reads of
+   that name only up to the next write. A later value read before the first
+   write strengthens a preceding definedness check. The existing child
+   exclusions and final deltas implement this compression for fixed names.
+2. **Make diagnostic decisions tracked reads.** Start by using a recording
+   lookup for the old definition in `define`, including the no-warning path.
+   Exact definition identity is conservative and cheap to compare. Audit raw
+   macro-table reads for semantic decisions, leaving raw reads for validation
+   itself. Also audit warning state inherited from the includer, such as a
+   diagnostic pragma before the include. Mark regions whose diagnostic
+   decisions depend on untracked state ineligible until it is represented.
+3. **Stop unsafe counter reuse first.** When a counter-derived spelling is
+   looked up as a macro, decline to record that region and its open ancestors.
+   Preserve ordinary numeric counter output and unrelated child entries.
+   In `hc_valid` the current check rebuilds the spelling using the incoming
+   counter but looks it up in the parent's entry macro table. A child write
+   changes which binding exists at that point. Even a complete set of final
+   writes loses a definition introduced and removed around the lookup.
+4. **Measure before adding an ordered representation.** Count rejected regions
+   and bytes, compare `pphc` and actual compile instructions on the kernel and
+   PostgreSQL, and check the project's 1% performance gate. If the fallback
+   costs enough to matter, retain an ordered sequence only in entries needing
+   it. Record writes, child calls and dynamic probes in execution order. During
+   validation, resolve each generated name against a scratch macro table layered
+   over the incoming bindings, including overwritten and undefined values.
+   Advance the simulated counter at its recorded offsets. Key any memoized child
+   verdict on its effective inputs, or omit memoization on that path. Discard
+   scratch state on a miss. This validates one candidate. The expensive search
+   for alternative child splices in §6.6 is unnecessary.
+5. **Extend the oracle as each dependency is addressed.** Add counter transitions
+   9→10 and a transient write/read/undef around the pasted name, a previously
+   cached child hit while recording a new parent, identical vs conflicting
+   redefinitions and suppressed vs promoted diagnostics. Generate bounded
+   header trees with write/read/undef in different sibling orders. Compare
+   each TU's tokens against Clang, then compare warm vs uncached vcc's exit,
+   diagnostic IDs/locations, depfiles and object bytes. Keep TU names, source
+   locations and flags identical between warm and uncached object comparisons.
+   Replay minimized failures deterministically at one worker before exercising
+   shuffled jobs at six. For include-search misses, create a formerly absent
+   header across a vccd build-generation boundary and compare with a fresh
+   process. Existing search-path variations live in `bench/vcc-cachekey.py`.
+
+### 6.12 Reusing headers with counter-derived macro names (2026-11-15)
+
+The final implementation passes the transient-binding case without requiring
+every use of a pasted identifier to abandon its enclosing recordings.
+
+- For an unbound identifier with one counter digit run, save its spelling
+  template and relative counter. At replay, rebuild its name. Accept the probe
+  if the name is absent on entry and has no recorded write anywhere in the
+  process. A 1 MiB atomic bitmap indexed by interned ID remembers writes,
+  including earlier sibling writes and definitions undone before the include
+  returns. Bits are monotone. Recording sets a bit before publishing the
+  immutable entry, including when the last operation on the name is an undef.
+  Writes in another TU may conservatively disqualify the variant.
+- For a bound name, a previously written name, or a spelling that cannot be
+  relocated by that check, track the concrete macro read and require the same
+  incoming counter. Attaching a child propagates the restriction to its
+  parent whether the child was freshly recorded or replayed. The parent's own
+  incoming counter and validated execution path then reproduce the child's
+  counter at that include site. Output-only counters remain relocatable.
+- A `#define` records the previous macro binding. A conflicting redefinition
+  prevents publication even if a pragma suppressed its warning during this
+  run. The warning policy from §6.11 reports a rejected recording once at the
+  header where the reason was observed. It doesn't diagnose a counter mismatch
+  that simply selects another valid variant.
+- When attaching a large child to a parent that has touched at most 16 names,
+  the parent can list its prior writes as exclusions directly. The child only
+  consults exclusions for names it reads. This avoids walking a large subtree
+  to compute the same validity result for a short prefix.
+
+**Regression coverage.** `bench/vcc-header-deps.py` runs 11 header families in
+both TU orders, with and without the cache. Its 36 generated combinations
+vary the include depth, incoming binding, temporary parent write and counter
+base across 9→10. The matrix compares tokens to Clang and checks C static
+assertions in forward and reverse job order at one and six workers. Dedicated
+single-header probes require three hits in four jobs for unbound names and
+two hits for two separately bound variants. The warning tests cover default,
+warning, error and explicit suppression. The suite runs in under a second
+on the measurement host. It also passed with ASan/UBSan and TSan. Removing
+the old-binding read, the recorded-write check, or propagation of the fixed
+counter from a child made the suite fail in each of three separate mutation
+runs. The transient define/read/undef test also caught the missing write
+check when run on its own.
+
+**Differential fuzzing.** `python3 bench/vcc-header-fuzz.py --seed N --cases K`
+generates three to six nested headers per seed, with repeated includes,
+conditional writes, lazy aliases, guards, token paste and counter-derived
+names. Three TUs vary the incoming state. Every permutation starts a fresh
+batch, then revisits the same TUs in reverse. Each job compares preprocessed
+token kind and spelling to its own Clang reference. Repeating the order with
+the header cache disabled distinguishes a replay discrepancy from baseline
+preprocessor behavior. A failure preserves the sources, reference output and
+batch manifest. Rerun one family with `--seed N --cases 1`.
+
+Seeds 0–1023 passed 36,864 TU comparisons in each cache mode with 59,791
+header hits on the warm runs. Seed 18 caught the missing transient-write
+check in a deliberately modified binary: warm vcc emitted `K9` where
+Clang and uncached vcc emitted `1`. Premerge runs seeds 16–23.
+
+**Kernel measurement.** Linux x86-64 host, Linux 7.4-rc2 arm64 tinyconfig,
+Clang/LLVM 23, `make -j6 Image`. Each run starts with clean kbuild outputs
+and a fresh vccd, with a warm filesystem. Host programs, assembly, probes
+and linking use LLVM. Compiling every target C file with the baseline vcc
+produced unresolved symbols at link. Both measured builds therefore use
+Clang for `kernel/sched/build_policy.c`, `kernel/dma/pool.c` and
+`mm/vmalloc.c`, and vccd for the other 446 C compilations. The source tree,
+flags, timestamp and build version are fixed. Three interleaved runs of each
+version produced byte-identical Images (SHA-256
+`3559e33851f17db4c3e22f52aa263bc267e9dd679a336db6cb315ce93dfd504e`).
+
+| Metric | Before fixes | Final |
+|---|---:|---:|
+| Median Image build wall time (s) | 5.82 | 5.88 |
+| Range, three builds (s) | 5.60–5.90 | 5.74–6.01 |
+| Median vccd user + system CPU (s) | 4.99 | 5.10 |
+| Median header data replayed in vccd (MB) | 230.6 | 230.8 |
+| Median user instructions for 446 C jobs (billions) | 42.676 | 43.051 |
+
+Count instructions separately by replaying those C command lines in sorted
+object order through one fresh `vpp --batch -j 1`, under
+`perf stat -e instructions:u`, three times per version. This isolates compiler
+work from make and LLVM. The final overhead is 0.88%. On that same stream the
+unconditional fallback took 84.663 billion instructions and pinning every
+generated name to one counter base took 47.505 billion. All 516 captured
+preprocessing units matched fresh Clang references in both batch and
+per-process comparisons. These measurements cover this kernel configuration.
 
 ## Sources
 - clang: TokenLexer.cpp, PPMacroExpansion.cpp, Preprocessor.cpp, MacroArgs.cpp,

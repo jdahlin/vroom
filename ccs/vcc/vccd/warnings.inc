@@ -1173,6 +1173,7 @@
 "varargs",
 "variadic-macro-arguments-omitted",
 "variadic-macros",
+"vcc-uncacheable-header",
 "vec-elem-size",
 "vector-conversion",
 "vector-conversions",

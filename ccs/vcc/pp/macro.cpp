@@ -193,7 +193,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
         named_variadic(p, c, vt, b, e);
     {
         /* -Wmacro-redefined: a different definition replacing a live one */
-        uintptr_t o = mget(p, m->name);
+        uintptr_t o = mread(p, m->name);
         const pmacro *om = (const pmacro *)(o & ~(uintptr_t)1);
 
         if (unlikely(o && !(o & 1) && om != m && !om->builtin &&
@@ -202,6 +202,7 @@ VPRIV void define(pp *p, ctx *c, uint32_t b, uint32_t e)
             pp_span r = {nloc, nloc + vt[b].len};
             pp_dinfo d = {"warning", nloc, &r, 0, NULL, 0, NULL, 0};
 
+            HC_BAD_REASON(p, "conflicting macro redefinition");
             /* (in <built-in>: the predefines are exempt, -D on the command line is not, as clang) */
             if ((c->f != &p->builtin || vt[b].off >= p->o->predef_cmdl) &&
                 pp_warnx(p, "macro-redefined", true, NULL, &d,

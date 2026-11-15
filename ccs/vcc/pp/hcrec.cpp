@@ -52,8 +52,11 @@ VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t,
     const cprov *c = &p->rec.cp[t->ctr];
     char *d;
 
-    if (e || c->next || p->rec.ncrd >= HC_MAXCRD || t->len > 4096) {
-        HC_BAD(p); /* such a name defined as a macro, or two runs: give up */
+    if (e || hc_ever_written(t->id) || c->next || t->len > 4096 ||
+        p->rec.ncrd == HC_MAXCRD) {
+        /* Same counter base gives the same concrete name, including multi-paste. */
+        p->rec.lev[p->rec.n - 1].fixed_counter = 1;
+        rec_read(p, t->id, e, 0);
         return;
     }
     d = (char *)varena_alloc(&p->perm, t->len + 1);
@@ -65,7 +68,10 @@ VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t,
 /* #define / #undef / pop_macro */
 VPRIV void mdef(pp *p, uint32_t id, const pmacro *m)
 {
-    if (unlikely(p->rec.on))
+    if (unlikely(p->rec.on)) {
+        p->rec.lev[p->rec.n - 1].has_writes = 1;
+        hc_note_write(id);
         touch_write(p, id);
+    }
     mset(p, id, m);
 }
