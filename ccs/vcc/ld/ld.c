@@ -3096,7 +3096,7 @@ static void eh_frames(void)
         }
         {
             /* lld: a zero-length CIE as the terminator glibc expects; the section word aligned */
-            static const uint8_t zero4[4];
+            static const uint8_t zero4[4] = {0};
             EhRec t = {.size = 4};
             uint32_t tp = eh_piece(id->secs.v[first], &t);
 

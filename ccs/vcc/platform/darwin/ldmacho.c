@@ -812,7 +812,7 @@ static void b16(Buf *b, uint16_t v)
 }
 static void bpad(Buf *b, size_t a)
 {
-    static const uint8_t z[16];
+    static const uint8_t z[16] = {0};
     while (b->n % a)
         bput(b, z, 1);
 }

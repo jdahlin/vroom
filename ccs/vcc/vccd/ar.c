@@ -452,7 +452,7 @@ static void le32(vsbuf *b, uint32_t v)
     vsbuf_put(b, c, 4);
 }
 
-static const char zeros8[8];
+static const char zeros8[8] = {0};
 
 /*
  * llvm-ar's Darwin (BSD) format, what it writes on macOS when an archive's
