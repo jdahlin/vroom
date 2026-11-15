@@ -2133,6 +2133,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 	/* (in an unevaluated operand of a tentative parse too: decltype(operator<<(os, x)) in a partial
 	   specialization, doctest's has_insertion_operator, finds a hidden friend only this way) */
 	memcpy(acopy, args, nargs * sizeof *args), memcpy(lcopy, lval, nargs);
+	uint8_t unsure0 = c->eunsure;	/* (each attempt's own verdict: an earlier one's unsure set does not stay on a later pick) */
 	for (uint32_t i = 0; i < nargs; i++) {
 		ast_qualified_type t = acopy[i];
 		cxx_scope *s;
@@ -2150,7 +2151,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 				s = s->parent;
 			if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
 				continue;
-			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
 			ADL_DONE();
 			if (c->etype != CXX_TY_UNKNOWN)
 				continue;
@@ -2164,7 +2165,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 			continue;
 		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */
 		if ((set = cxx_friend_lookup(c, t, name, 0))) {
-			cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
 			ADL_DONE();
 			if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 				c->einvalid_unsure = 1;
@@ -2173,7 +2174,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 			s = s->parent;
 		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT)
 			continue;
-		cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+		c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
 		ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
 		if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 			c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */

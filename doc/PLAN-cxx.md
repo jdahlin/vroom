@@ -2480,3 +2480,10 @@ Test: `run/adl-friend-after-conversion.cpp`.  Kvar: doctests
 `has_insertion_operator<json>` blir fortfarande okänd (det andra argumentets
 typ okänd i det sammanhanget).  Strikt bänk: pass 10, 152 saknas, inga fel.
 Sviter gröna (113/113, 38/38, mangle, 350/350).
+
+## Status 156 (2026-11-15)
+Ett ADL-försök som inte kunde ordna sina kandidater lämnade `eunsure` satt,
+och ett senare försök som valde (jsons dolda `operator<<`) ärvde det: doctests
+`has_insertion_operator<json>` blev okänd i instanser och `toString(json)`
+saknade kod.  Varje ADL-försök börjar nu med ingångens värde.  Sviter gröna
+(113/113, 38/38, mangle, 350/350).
