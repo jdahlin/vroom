@@ -410,10 +410,27 @@ static void cxx_for_parse(cxx *c)
                     uint32_t vs = cxx_gen_local(c, var->name, var->ty, rloc);
 
                     if (vs) {
+                        uint32_t en = cxx_gen_range_for_element(c, &gr);
+
                         var->sym = vs;
-                        cxx_gen_local_declare(c, vs,
-                                              cxx_gen_range_for_element(c, &gr),
-                                              true, rloc);
+                        if (en && cc_type_is_record(c->ast, var->ty) &&
+                            AST_TYPE_KIND(c->ast, var->ty) != AST_TYPE_ARRAY &&
+                            AST_QUALIFIED_TYPE_UNQUALIFIED(
+                                AST_NODE_AT(c->ast, en)->ty) !=
+                                AST_QUALIFIED_TYPE_UNQUALIFIED(var->ty)) {
+                            /* for (std::string s : {"a", "b"}): the variable copy-initialized from each
+                               element, through T's converting constructor */
+                            ast_qualified_type at = AST_NODE_AT(c->ast, en)->ty;
+                            uint8_t lv = (AST_NODE_AT(c->ast, en)->flags &
+                                          AST_NODE_FLAG_LVALUE) != 0;
+
+                            c->skip_explicit = 1;
+                            cxx_ctor_use(c, var->ty, &at, &lv, 1, false);
+                            c->skip_explicit = 0;
+                            cxx_gen_construct_local(c, vs, var->ty, &en, 1,
+                                                    rloc);
+                        } else
+                            cxx_gen_local_declare(c, vs, en, true, rloc);
                     }
                     c->snode = 0;
                     cxx_statement_parse(c);

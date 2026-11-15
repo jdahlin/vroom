@@ -20,8 +20,15 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
         !cxx_gen_class_ok2(c, t, true))
         return;
     for (uint32_t i = 0; i < nargs; i++)
-        if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]))
-            return; /* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it) */
+        if (!args[i] && !(c->gen_agg_brace && c->gen_agg_brace[i]) &&
+            !(i < CXX_MAX_ARGS && c->gen_call_brace[i]))
+            return; /* (an aggregate's element that is a braced list has no node: cxx_gen_aggregate_init parses it;
+                       T({...}): a constructor's braced argument, a temporary of its parameter's class) */
+    uint32_t call_brace[CXX_MAX_ARGS];
+
+    memcpy(
+        call_brace, c->gen_call_brace,
+        sizeof call_brace); /* (the temporary's destructor, made now, may make calls of its own) */
     if (nargs == 1 && args[0] && cxx_gen_prv_find(c, args[0]) &&
         AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == t) {
         c->enode = args[0]; /* T(a prvalue of T): that object */
@@ -47,6 +54,7 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t,
     }
     c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
     c->gen_agg_brace = agg_brace;
+    memcpy(c->gen_call_brace, call_brace, sizeof call_brace);
     cc_id_list_init(&l);
     if (!nargs &&
         (!(found && picked && picked->member_of == cxx_tag_scope_get(c, t)) ||

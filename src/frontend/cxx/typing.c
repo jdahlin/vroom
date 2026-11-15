@@ -303,6 +303,13 @@ VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue)
                false);
         return;
     case LEX_TOKEN_STAR:
+        if (t != CXX_TY_UNKNOWN && !c->template_depth &&
+            !cxx_type_has_placeholder(c, t) &&
+            (cxx_is_arith(c, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_VOID ||
+             AST_TYPE_KIND(c->ast, t) == AST_TYPE_ENUM) &&
+            !cc_type_is_record(c->ast, t))
+            CXX_INVALID(
+                c); /* (*i of an int: ill-formed for sure, a requirement on it false) */
         cxx_et(c, cxx_is_ptr(c, t) ? AST_TYPE(c->ast, t)->base : CXX_TY_UNKNOWN,
                true);
         return;
