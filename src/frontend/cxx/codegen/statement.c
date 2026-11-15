@@ -450,8 +450,13 @@ VPRIV uint32_t cxx_gen_local(cxx *c, uint32_t name, ast_qualified_type t, uint32
    constant (cxx_gen_local_declare checks it) */
 VPRIV uint32_t cxx_gen_local_static(cxx *c, uint32_t name, ast_qualified_type t, uint32_t loc)
 {
-	uint32_t s = cxx_gen_local(c, name, t, loc);
+	uint32_t s;
 
+	/* (a class's object: written when its declaration first runs, so not in read-only data even if const;
+	   static const CP one{1, 2, 3}) */
+	if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
+		t = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) & ~AST_QUALIFIER_CONST);
+	s = cxx_gen_local(c, name, t, loc);
 	if (s)
 		c->ast->syms[s].sc = AST_STORAGE_STATIC;
 	return s;

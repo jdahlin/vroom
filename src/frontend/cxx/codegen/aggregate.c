@@ -69,7 +69,7 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
 			if (k < nargs && !args[k] && have_braces && braces[k]) {
 				/* the array's own braced list (std::array<char, 4> t = {{'t', 'r', 'u', 'e'}}): parsed again here,
 				   its elements in order, the rest keep their zero */
-				uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;
+				uint32_t pos = c->pos, an[CXX_MAX_ARGS], abr[CXX_MAX_ARGS], n;
 
 				c->pos = braces[k];
 				cxx_braced_arguments_parse(c);
@@ -78,13 +78,32 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
 				if (n == UINT32_MAX || n > CXX_MAX_ARGS || n > AST_TYPE(a, ft)->n)
 					return false;
 				memcpy(an, c->carg_nodes, n * sizeof *an);
+				memcpy(abr, c->carg_brace, n * sizeof *abr);
 				for (uint32_t j = 0; j < n; j++) {
 					uint32_t el, v;
 
-					if (!an[j] || cc_type_is_record(a, AST_NODE_AT(a, an[j])->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, an[j])->ty) == AST_TYPE_ARRAY)
-						return false;
 					el = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, member(a, target, r->f[i].name, loc)),
 									cc_node_integer_new(a, (i128)j, cc_type_basic(AST_TYPE_LONG), loc), loc), loc);
+					if (!an[j] && abr[j] && cc_type_is_record(a, et) && AST_TYPE_KIND(a, et) != AST_TYPE_ARRAY) {
+						/* an element of class type from its own braced list (std::array<cached_power, 79>
+						   kCachedPowers = {{{...}, ...}}): that aggregate, built in place */
+						uint32_t ean[CXX_MAX_ARGS], ebr[CXX_MAX_ARGS], en;
+
+						c->pos = abr[j];
+						cxx_braced_arguments_parse(c);
+						c->pos = pos;
+						en = c->ncargs;
+						if (en == UINT32_MAX || en > CXX_MAX_ARGS)
+							return false;
+						memcpy(ean, c->carg_nodes, en * sizeof *ean);
+						memcpy(ebr, c->carg_brace, en * sizeof *ebr);
+						c->gen_agg_brace = ebr;
+						if (!cxx_gen_aggregate_init(c, el, et, ean, en, out, loc))
+							return false;
+						continue;
+					}
+					if (!an[j] || cc_type_is_record(a, AST_NODE_AT(a, an[j])->ty) || AST_TYPE_KIND(a, AST_NODE_AT(a, an[j])->ty) == AST_TYPE_ARRAY)
+						return false;
 					if (et != AST_QUALIFIED_TYPE_UNQUALIFIED(et)) {
 						ast_qualified_type pt = cc_type_pointer(a, AST_QUALIFIED_TYPE_UNQUALIFIED(et));
 						uint32_t addr = cc_address_of_build(a, el, loc);

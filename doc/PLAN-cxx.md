@@ -2348,3 +2348,15 @@ serializer::dump) fick ingen nod; nu `*(a, &b)`, ett lvalue.  Test:
 funktioner); störst nu construct.c:449 (58): globala/statiska aggregat med
 arraymedlem (`std::array`, `struct { int v[2]; } x = {{1, 2}}`) får ingen
 initierare.  Sviter gröna (101/101, 38/38, mangle, 350/350).
+
+## Status 146 (2026-11-15)
+Aggregat med arraymedlemmar på namnrymdsnivå och som statiska lokaler:
+- ett globalt aggregat vars lista inte är skalärer (`A2 x = {{1, 2}}`,
+  `std::array` av structar) byggs vid programstart som en lokals, i stället
+  för att lämnas odefinierat;
+- en arraymedlems element av klasstyp från egna listor (`kCachedPowers`,
+  `utility_table`) byggs på plats, rekursivt;
+- en `static const` lokal av klasstyp hamnade i .rodata men skrevs vid
+  körning (segfault, fanns förut); nu skrivbar.
+Test: `run/aggregate-array-members.cpp`.  Strikt bänk: pass 7, 167 saknas
+(från 210).  Sviter gröna (102/102, 38/38, mangle, 350/350).

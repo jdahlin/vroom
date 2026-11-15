@@ -680,10 +680,19 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					gen_declared = true;
 				}
 				if (gobj) {	/* ... at namespace scope: a constructor when the program starts, or the aggregate's values */
+					uint32_t ri;
+
 					if (c->ctor_found && c->ctor_picked)
 						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
-					else
-						cxx_gen_global_end(c, gen_var, cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc), true);
+					else if ((ri = cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc)) || !cxx_gen_on(c) || n > CXX_MAX_ARGS)
+						cxx_gen_global_end(c, gen_var, ri, true);	/* (an aggregate of scalars: its values) */
+					else {
+						/* an aggregate with array or class members ({{1, 2}}, std::array): built when the
+						   program starts, as a local's is */
+						c->gen_agg_brace = abr;
+						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
+						c->gen_agg_brace = NULL;
+					}
 					gen_declared = true;
 				}
 			} else {
@@ -825,10 +834,19 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					gen_declared = true;
 				}
 				if (gobj) {
+					uint32_t ri;
+
 					if (c->ctor_found && c->ctor_picked)
 						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
-					else	/* (a list for an aggregate of scalars: its values; else not built yet) */
-						cxx_gen_global_end(c, gen_var, cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc), true);
+					else if ((ri = cxx_gen_record_initializer(c, t, an, n <= CXX_MAX_ARGS ? n : UINT32_MAX, name_loc)) || !cxx_gen_on(c) || n > CXX_MAX_ARGS)
+						cxx_gen_global_end(c, gen_var, ri, true);	/* (an aggregate of scalars: its values) */
+					else {
+						/* an aggregate with array or class members ({{1, 2}}, std::array): built when the
+						   program starts, as a local's is */
+						c->gen_agg_brace = abr;
+						cxx_gen_global_object(c, gen_var, t, an, n, name_loc);
+						c->gen_agg_brace = NULL;
+					}
 					gen_declared = true;
 				}
 			} else if (gen_local && !c->tentative && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY &&
