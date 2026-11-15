@@ -29,8 +29,23 @@ VPRIV bool cxx_paren_is_nested_declarator(cxx *c)
         if (cxx_entity_is_type(cxx_entity_prefer(e, CXX_ENTITY_TYPE)) &&
             !e->next && e->kind == CXX_ENTITY_TYPE)
             return false; /* (T ...) parameters */
-        if (cxx_peek(c, 2)->kind == LEX_TOKEN_COLON_COLON)
+        if (cxx_peek(c, 2)->kind == LEX_TOKEN_COLON_COLON) {
+            /* (N::E *): a parameter of the type N::E (void(std::byte *)), not the declarator (N::x) */
+            cxx_entity *q = e;
+            uint32_t k = 3;
+
+            while (q && q->members &&
+                   cxx_peek(c, k)->kind == LEX_TOKEN_IDENTIFIER) {
+                q = cxx_lookup_local(q->members, cxx_peek(c, k)->id);
+                if (cxx_peek(c, k + 1)->kind != LEX_TOKEN_COLON_COLON)
+                    break;
+                k += 2;
+            }
+            if (q && q != e &&
+                cxx_entity_is_type(cxx_entity_prefer(q, CXX_ENTITY_TYPE)))
+                return false;
             return cxx_peek(c, 3)->kind == LEX_TOKEN_IDENTIFIER;
+        }
         return cxx_peek(c, 2)->kind == LEX_TOKEN_RIGHT_PAREN ||
                cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_PAREN ||
                cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_SQUARE;
