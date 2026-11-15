@@ -783,6 +783,7 @@ VPRIV uint32_t cxx_ftemplate_pos(const cxx_entity *e);
 VPRIV ast_qualified_type cxx_nullptr_type(cxx *c);
 VPRIV void cxx_template_name_default_parse(cxx *c, cxx_targ *out);
 VPRIV void cxx_template_member_template_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *outer, cxx_scope *inner, cxx_scope *home, uint32_t pos, uint32_t nparams, uint8_t is_const);
+VPRIV uint32_t cxx_constexpr_ctor_values(cxx *c, cxx_entity *ctor, const int64_t *argv, uint32_t nargs, uint32_t *names, int64_t *values, uint32_t cap);
 VPRIV void cxx_template_member_class_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, uint32_t pos);
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, cxx_scope *home, uint32_t pos,
 					    uint32_t nparams, uint8_t is_const, bool partial);

@@ -39,9 +39,22 @@ VPRIV uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t loc
 	const tag *r;
 	uint32_t e = 0;
 
-	if (!cc_type_is_record(a, t) || AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) != t || AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT ||
-	    !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) || !(AST_NODE_AT(a, y)->flags & AST_NODE_FLAG_LVALUE))
+	uint32_t pre = 0, side[2] = { x, y };
+
+	if (!cc_type_is_record(a, t) || AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) != t || AST_TYPE_KIND(a, t) != AST_TYPE_STRUCT)
 		return 0;
+	for (int k = 0; k < 2; k++)
+		if (!(AST_NODE_AT(a, side[k])->flags & AST_NODE_FLAG_LVALUE)) {
+			/* a prvalue ((b <=> a) == greater): in a temporary first, evaluated once */
+			uint32_t tmp = cxx_gen_type_ok(c, t) || cxx_gen_trivial_abi(c, t, 0) == 1 ? cxx_gen_temporary(c, t, loc) : 0, set;
+
+			if (!tmp)
+				return 0;
+			set = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), side[k], loc);
+			pre = pre ? cc_node_new_operands(a, AST_NODE_COMMA, AST_NODE_AT(a, set)->ty, loc, pre, set) : set;
+			side[k] = cxx_gen_var_node(c, tmp, loc);
+		}
+	x = side[0], y = side[1];
 	r = &a->tags[AST_TYPE(a, t)->aux];
 	for (uint32_t i = 0; i < r->nfield; i++) {
 		int k = AST_TYPE_KIND(a, r->f[i].ty);
@@ -53,7 +66,8 @@ VPRIV uint32_t cxx_gen_defaulted_eq(cxx *c, uint32_t x, uint32_t y, uint32_t loc
 				    cc_node_rvalue(a, member(a, y, r->f[i].name, loc)), loc);
 		e = e ? cc_binary_build(a, LEX_TOKEN_AMPERSAND_AMPERSAND, e, q, loc) : q;
 	}
-	return e ? cc_conversion_apply(a, e, cc_type_basic(AST_TYPE_BOOL)) : cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_BOOL), loc);
+	e = e ? cc_conversion_apply(a, e, cc_type_basic(AST_TYPE_BOOL)) : cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_BOOL), loc);
+	return pre ? cc_node_new_operands(a, AST_NODE_COMMA, cc_type_basic(AST_TYPE_BOOL), loc, pre, e) : e;
 }
 
 /* is f std::forward, std::move, std::move_if_noexcept or std::as_const (in std or libc++'s std::__1)? */

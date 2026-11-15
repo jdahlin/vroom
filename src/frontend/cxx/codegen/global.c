@@ -237,12 +237,99 @@ VPRIV uint32_t cxx_gen_unqualified(cxx *c, uint32_t x, uint32_t loc)
  * A namespace-scope object of class type t, initialized from args (cxx_ctor_use was called for it): built
  * by the start-up function, and its destructor registered to run at exit (__cxa_atexit).
  */
+/*
+ * T x(args) or T x{args} at namespace scope whose constructor is constexpr and simple
+ * (cxx_constexpr_ctor_values) with constant arguments: the object's bytes in the object file, its members of
+ * integer type from the mem-initializers, the others zero (0: not built so).
+ */
+static uint32_t cxx_gen_constexpr_object(cxx *c, cxx_entity *ctor, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc)
+{
+	cc *a = c->ast;
+	int64_t argv[8], values[32];
+	uint32_t names[32], n;
+	cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+	const tag *r;
+	cc_id_list l;
+	uint32_t init;
+	ast_qualified_type bases[2];
+
+	if (!ctor || nargs > 8 || !cls || AST_TYPE_KIND(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) != AST_TYPE_STRUCT ||
+	    cxx_class_polymorphic(c, t) || cxx_class_bases(c, t, bases, 2) || cxx_gen_needs_destruction(c, t, 0))
+		return 0;
+	for (uint32_t i = 0; i < nargs; i++) {
+		i128 v;
+
+		if (!args[i] || !cc_constant_integer(a, args[i], &v))
+			return 0;
+		argv[i] = (int64_t)v;
+	}
+	n = cxx_constexpr_ctor_values(c, ctor, argv, nargs, names, values, 32);
+	if (n == UINT32_MAX)
+		return 0;
+	r = &a->tags[AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->aux];
+	cc_id_list_init(&l);
+	for (uint32_t i = 0; i < r->nfield; i++) {
+		ast_qualified_type ft = r->f[i].ty;
+		cxx_entity *fe;
+		uint32_t k = n;
+
+		if (r->f[i].bitfield || !r->f[i].name || ft == CXX_TY_UNKNOWN ||
+		    !((AST_TYPE_KIND(a, ft) >= AST_TYPE_BOOL && AST_TYPE_KIND(a, ft) <= AST_TYPE_UNSIGNED_LONG_LONG) || AST_TYPE_KIND(a, ft) == AST_TYPE_ENUM))
+			return 0;	/* (integer members only) */
+		for (uint32_t j = 0; j < n; j++)
+			if (names[j] == r->f[i].name)
+				k = j;
+		fe = cxx_lookup_local(cls, r->f[i].name);
+		if (k == n && fe && fe->nsdmi_pos)
+			return 0;	/* (a default member initializer: not read here) */
+		cc_id_list_append(a, &l, k < n ? cc_conversion_apply(a, cc_node_integer_new(a, (i128)values[k], cc_type_basic(AST_TYPE_LONG_LONG), loc),
+								      AST_QUALIFIED_TYPE_UNQUALIFIED(ft)) : 0);
+	}
+	for (uint32_t j = 0; j < n; j++) {	/* (every name a member of this class: not a base's) */
+		bool mine = false;
+
+		for (uint32_t i = 0; i < r->nfield; i++)
+			mine |= r->f[i].name == names[j];
+		if (!mine)
+			return 0;
+	}
+	init = cc_node_new(a, AST_NODE_INITIALIZER, AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
+	AST_NODE_AT(a, init)->aux = 0;
+	AST_NODE_AT(a, init)->c = l.n;
+	AST_NODE_AT(a, init)->b = cc_id_list_freeze(a, &l);
+	return init;
+}
+
 VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v, ast_qualified_type t, const uint32_t *args, uint32_t nargs, uint32_t loc)
 {
 	cc *a = c->ast;
 	cxx_entity *picked = c->ctor_picked, *dtor = NULL;
 	bool found = c->ctor_found, none = c->ctor_none, ok = c->ginit_fn && cxx_gen_on(c);
 	bool needs = ok && cxx_gen_needs_destruction(c, t, 0);
+
+	if (ok && found && picked) {	/* (constexpr or not: an empty body over constants does the same at start-up) */
+		uint32_t k = cxx_gen_constexpr_object(c, picked, t, args, nargs, loc);
+
+		if (k && cxx_gen_static_ok(a, AST_QUALIFIED_TYPE_UNQUALIFIED(a->syms[v->sym].ty), k)) {
+			/* (a constant: in the object file, as clang's constexpr object is) */
+			sym *y;
+
+			cxx_gen_global_finish(c, false);
+			y = &a->syms[v->sym];
+			if ((y->flags & AST_SYMBOL_FLAG_LINKONCE) && !(y->attrs && a->attr[y->attrs].weak)) {
+				attrs at;
+
+				memset(&at, 0, sizeof at);
+				at.weak = 1;
+				cc_attribute_apply_symbol(a, y, &at);
+			}
+			y->body = k;
+			y->flags |= AST_SYMBOL_FLAG_DEFINED;
+			a->toplevel[a->ntoplevel++] = v->sym;
+			return;
+		}
+		c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
+	}
 
 	if (ok && needs) {
 		dtor = cxx_gen_effective_destructor(c, t, 0);

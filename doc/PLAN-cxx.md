@@ -2445,3 +2445,15 @@ Tester: `run/inline-static-members.cpp`, `run/const-member-default.cpp`,
 156 saknas.  Kvar: constexpr-konstruktorer evalueras inte (för vcc-ensamma
 program blir `strong_ordering::less` odefinierad).  Sviter gröna (110/110,
 38/38, mangle, 350/350).
+
+## Status 153 (2026-11-15)
+Konstruktorer med tom kropp och konstanta mem-initierare (`strong_ordering(
+_OrdResult v) : __value_(_ValueT(v)) {}`) evalueras nu för globala objekt och
+inline statiska medlemmar med konstanta argument: heltalsmedlemmarna ur
+mem-initierarna (parametrarna bundna till argumenten), resten noll, som
+konstant data (svag för inline).  Parameternamnen tas ur tokens när
+klassen inte är en mall.  Ett vcc-ensamt program med
+`std::strong_ordering::less` länkar och kör rätt.  Defaulted `operator==` på
+ett prvärde (`(b <=> a) == o`) läggs i en temporär först.  Test:
+`run/constexpr-ctor-globals.cpp`.  Strikt bänk: pass 8, inga fel.  Sviter
+gröna (111/111, 38/38, mangle, 350/350).

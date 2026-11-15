@@ -11,6 +11,110 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 						.is_const = is_const, .partial = partial, .pack = c->decl_pack_param < nparams };
 }
 
+/*
+ * A constructor (constexpr, or one that might be) whose body is empty and whose mem-initializers are integer constant expressions of
+ * its parameters (strong_ordering(_OrdResult v) : __value_(_ValueT(v)) {}), called with constant arguments:
+ * each initialized member's name and value, evaluated with the parameters bound to the arguments.  The
+ * number of members (names, values), UINT32_MAX: not such a constructor, or not constant.
+ */
+VPRIV uint32_t cxx_constexpr_ctor_values(cxx *c, cxx_entity *ctor, const int64_t *argv, uint32_t nargs, uint32_t *names, int64_t *values, uint32_t cap)
+{
+	uint32_t i, n = 0, pnames[8];
+	volatile uint32_t result = UINT32_MAX;
+	cxx_scope *ps;
+	cxx_outer o;
+	jmp_buf jb;
+
+	if (!ctor || !ctor->body_begin || !ctor->body_scope || nargs > 8 || ctor->ty == CXX_TY_UNKNOWN ||
+	    AST_TYPE_KIND(c->ast, ctor->ty) != AST_TYPE_FUNCTION || AST_TYPE(c->ast, ctor->ty)->n != nargs)
+		return UINT32_MAX;
+	i = ctor->body_begin;
+	if (c->tok[i].kind != LEX_TOKEN_COLON)
+		return UINT32_MAX;	/* (no mem-initializers: nothing to evaluate here) */
+	{
+		/* the parameters' names: the ( ... ) before the mem-initializers (after it: noexcept, attributes) */
+		uint32_t j = i, d = 0, np = 0;
+
+		while (j > 0 && c->tok[j - 1].kind != LEX_TOKEN_RIGHT_PAREN)
+			j--;	/* (noexcept: its own parentheses are not handled; such a constructor is not built here) */
+		if (!j || (j >= 2 && c->tok[j - 2].kw == CXX_KW_noexcept))
+			return UINT32_MAX;
+		for (uint32_t k = j - 1; k > 0; k--) {
+			int kd = c->tok[k].kind;
+
+			if (kd == LEX_TOKEN_RIGHT_PAREN || kd == LEX_TOKEN_GREATER || kd == LEX_TOKEN_RIGHT_SQUARE)
+				d++;
+			else if (kd == LEX_TOKEN_LEFT_PAREN || kd == LEX_TOKEN_LESS || kd == LEX_TOKEN_LEFT_SQUARE) {
+				if (--d == 0)
+					break;
+			} else if (d == 1 && (kd == LEX_TOKEN_COMMA || c->tok[k + 1].kind == LEX_TOKEN_RIGHT_PAREN || c->tok[k + 1].kind == LEX_TOKEN_COMMA) &&
+				   kd == LEX_TOKEN_IDENTIFIER && !c->tok[k].kw && np < 8)
+				pnames[np++] = c->tok[k].id;	/* (the last name of each parameter, right to left) */
+		}
+		if (np != nargs)
+			return UINT32_MAX;
+		for (uint32_t k = 0; k < np / 2; k++) {
+			uint32_t t = pnames[k];
+
+			pnames[k] = pnames[np - 1 - k], pnames[np - 1 - k] = t;
+		}
+	}
+	ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, ctor->body_scope, NULL);
+	for (uint32_t k = 0; k < nargs; k++) {
+		cxx_entity *pe;
+
+		if (!(pe = cxx_declare(c, ps, pnames[k], CXX_ENTITY_VALUE)))
+			return UINT32_MAX;
+		pe->ty = c->ast->params[AST_TYPE(c->ast, ctor->ty)->aux + k], pe->has_value = 1, pe->value = argv[k];
+	}
+	cxx_outer_save(c, &o);
+	c->instantiating++, c->unevaluated++, c->tentative++;
+	c->fail = &jb;
+	c->scope = ps;
+	c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+	if (!setjmp(jb)) {
+		bool ok = true;
+
+		c->pos = i + 1;
+		while (ok) {
+			uint32_t name;
+			int close;
+
+			if (!cxx_is(c, LEX_TOKEN_IDENTIFIER) || n >= cap) {
+				ok = false;
+				break;
+			}
+			name = cxx_peek(c, 0)->id;
+			cxx_advance(c);
+			if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))
+				close = LEX_TOKEN_RIGHT_PAREN;
+			else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE))
+				close = LEX_TOKEN_RIGHT_BRACE;
+			else {
+				ok = false;
+				break;
+			}
+			cxx_advance(c);
+			c->econst = 0;
+			cxx_assignment_expression_parse(c);
+			if (!c->econst || !cxx_is(c, close)) {
+				ok = false;	/* (not one integer constant: a call, several arguments) */
+				break;
+			}
+			names[n] = name, values[n++] = c->evalue;
+			cxx_advance(c);
+			if (!cxx_accept(c, LEX_TOKEN_COMMA))
+				break;
+		}
+		/* the body: empty ({ }) */
+		if (ok && cxx_is(c, LEX_TOKEN_LEFT_BRACE) && cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_BRACE)
+			result = n;
+	}
+	c->instantiating--, c->unevaluated--, c->tentative--;
+	cxx_outer_restore(c, &o);
+	return result;
+}
+
 /* template<...> class X<...>::Y { }: a member class of a class template defined outside it (basic_ostream's
    sentry); pos is its class-key, params the definition's template parameters */
 VPRIV void cxx_template_member_class_definition(cxx *c, cxx_entity *te, uint32_t name, cxx_scope *params, uint32_t pos)
