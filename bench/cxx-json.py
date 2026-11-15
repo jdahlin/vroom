@@ -29,6 +29,7 @@ STAGES = ["pp", "syntax", "obj", "link", "run"]
 CLANGXX = os.environ.get("CLANGXX", "/usr/lib/llvm-23/bin/clang++")
 UNDEF = {}       # TU -> its undefined symbols (link)
 NOFN = {}        # TU -> {function name: vcc's reason it has no code}
+MISS = {}        # TU -> {mangled name: vcc's reason}
 NOREASON = {}    # undefined symbol -> tests where vcc gave no reason for it
 PROGRESS = {}    # TU -> (tokens parsed, tokens) from the syntax stage
 
@@ -60,6 +61,17 @@ def main_object(fl, outdir):
     return o
 
 
+_DEM = {}
+
+
+def demangle(sym):
+    """a mangled name demangled (c++filt), cached"""
+    if sym not in _DEM:
+        r = subprocess.run(["c++filt", sym], capture_output=True, text=True)
+        _DEM[sym] = r.stdout.strip() or sym
+    return _DEM[sym]
+
+
 def short_name(sym):
     """a demangled symbol's function name, without scopes, template arguments or parameters"""
     s, d, out = sym, 0, []
@@ -75,17 +87,25 @@ def link(name, src, fl, base, outdir):
     o, exe = os.path.join(outdir, name + ".o0.o"), os.path.join(outdir, name + ".exe")
     try:
         r = subprocess.run([VPP, *base, "-O0", "-c", src, "-o", o], capture_output=True, text=True, timeout=300, errors="replace",
-                           env={**os.environ, "VCC_CXX_GEN": "4"})
+                           env={**os.environ, "VCC_CXX_GEN": "4", "VCC_CXX_MISSING": o + ".miss"})
     except subprocess.TimeoutExpired:
         return name, "link", "vcc: timeout"
     NOFN[name] = {}
+    MISS[name] = {}     # mangled name -> vcc's reason (VCC_CXX_MISSING): exact, unlike NOFN's short names
+    try:
+        for l in open(o + ".miss", errors="replace"):
+            m, _, why = l.rstrip("\n").partition("\t")
+            MISS[name][m] = why
+    except OSError:
+        pass
     for l in r.stderr.splitlines():
         m = re.match(r"nofn (.*?): (.*)", l)
         if m and m.group(1).strip() not in NOFN[name]:
             NOFN[name][m.group(1).strip()] = m.group(2)
     if r.returncode:
         return name, "link", "vcc: " + first_error(r.stderr)
-    r = subprocess.run([CLANGXX, "-stdlib=libc++", main_object(fl, outdir), o, "-o", exe], capture_output=True, text=True, errors="replace")
+    r = subprocess.run([CLANGXX, "-stdlib=libc++", "-Wl,--no-demangle", main_object(fl, outdir), o, "-o", exe], capture_output=True,
+                       text=True, errors="replace")
     if r.returncode:
         und = sorted(set(m.group(1) for m in re.finditer(r"undefined reference to `([^']*)'", r.stderr)))
         UNDEF[name] = und
@@ -197,7 +217,7 @@ def main():
         for nm, und in UNDEF.items():
             seen = set()
             for u in und:
-                why = NOFN.get(nm, {}).get(short_name(u), "? (no reason: not defined where used)")
+                why = MISS.get(nm, {}).get(u) or NOFN.get(nm, {}).get(short_name(demangle(u)), "? (no reason: not defined where used)")
                 key = re.sub(r"\s+", " ", why)[:110]
                 if key not in seen:
                     seen.add(key)
@@ -212,11 +232,12 @@ def main():
         if NOREASON:
             print("  link: undefined with no reason from vcc (no nofn line for the name):")
             for u, n in sorted(NOREASON.items(), key=lambda kv: -kv[1])[:15]:
-                print(f"  {n:3}x  {u[:150]}")
+                print(f"  {n:3}x  {demangle(u)[:150]}")
         print("  link: the symbols blocking the most tests:")
         for u, n in sorted(block.items(), key=lambda kv: (-kv[1], -alone[kv[0]]))[:12]:
-            why = next((NOFN[nm][short_name(u)] for nm in UNDEF if u in UNDEF[nm] and short_name(u) in NOFN.get(nm, {})), "?")
-            print(f"  {n:3}x ({alone[u]:2} alone)  {u[:110]}\n            {why[:150]}")
+            why = next((MISS[nm][u] for nm in UNDEF if u in UNDEF[nm] and u in MISS.get(nm, {})), None) or \
+                next((NOFN[nm][short_name(demangle(u))] for nm in UNDEF if u in UNDEF[nm] and short_name(demangle(u)) in NOFN.get(nm, {})), "?")
+            print(f"  {n:3}x ({alone[u]:2} alone)  {demangle(u)[:110]}\n            {why[:150]}")
     return 0 if at["ok"] == len(res) else 1
 
 
