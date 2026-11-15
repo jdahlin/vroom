@@ -16,6 +16,8 @@ VPRIV void cxx_outer_save(cxx *c, cxx_outer *o)
 	o->unevaluated = c->unevaluated;
 	o->enode = c->enode, o->snode = c->snode, o->sdone = c->sdone, o->sdepth = c->sdepth, o->gen_block = c->gen_block;
 	o->gen_stack_depth = c->gen_stack_depth;
+	o->constructing = c->constructing, o->construct_depth = c->construct_depth;
+	c->constructing = 0, c->construct_depth = 0;	/* (a body or a signature parsed: no conversion of its own being tried) */
 }
 
 VPRIV void cxx_outer_restore(cxx *c, cxx_outer *o)
@@ -31,6 +33,7 @@ VPRIV void cxx_outer_restore(cxx *c, cxx_outer *o)
 	c->unevaluated = o->unevaluated;
 	cxx_gen_unwind(c, o->gen_stack_depth);	/* (a body whose parse failed: the one around it goes on) */
 	c->enode = o->enode, c->snode = o->snode, c->sdone = o->sdone, c->sdepth = o->sdepth, c->gen_block = o->gen_block;
+	c->constructing = o->constructing, c->construct_depth = o->construct_depth;
 }
 
 /* ---- function templates: deduction from a call's argument types -------------------------- */

@@ -2701,3 +2701,18 @@ aritmetisk typ; förut blev den "okänd" och gjorde hela anropet otypat
 (libc++:s `__function::__is_null(__f)`): `std::function` från en lambda
 kompileras.  Test: `run/member-pointer-overload-not-viable.cpp`.  Sviter
 gröna (144/144, 38/38, mangle).  Strikt bänk: pass 28, 111 saknas.
+
+## Status 174 (2026-11-16)
+- Högst en användardefinierad omvandling ([over.best.ics]/4): en
+  konverterande konstruktors klassparameter tar ingen andra (`int *` är
+  ingen `It<const T>`), så `is_convertible<int, json::const_iterator>` är
+  falskt och jsons `insert(pos, 5)` väljer `(pos, json&&)`.  En
+  initializer_list-parameter görs aldrig av ett argument utan klamrar.
+- En kropp eller signatur som tolkas (`cxx_outer_save`) gör det utan
+  omgivande omvandlingsförsöks `constructing`/`construct_depth`.
+- `__is_nothrow_assignable`: trivialt tilldelningsbara klasser (en union med
+  egna konstruktorer) är nothrow; annars den valda `operator=`:s noexcept
+  och, för en parameter by value, konstruktorns.  Kvar: noexcept-villkoret
+  i jsons egen `operator=` blir fel (`is_nothrow_move_assignable<json>`, unit-concepts).
+Test: `run/single-user-conversion.cpp`.  Sviter gröna (145/145, 38/38,
+mangle).  Strikt bänk: pass 28, 112 saknas.

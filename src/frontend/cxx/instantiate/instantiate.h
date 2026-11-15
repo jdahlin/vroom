@@ -103,6 +103,8 @@ typedef struct cxx_outer {
 	/* code generation: the expression and statement being built, and how many bodies are being built */
 	uint32_t enode, snode, sdone, sdepth, gen_stack_depth;
 	void *gen_block;
+	ast_qualified_type constructing;	/* (the conversion being tried around it: not this parse's) */
+	uint8_t construct_depth;
 } cxx_outer;
 
 typedef struct cxx_fdone { cxx_targ *args; ast_qualified_type ret, sig; uint8_t body; int8_t viable; uint32_t n; int64_t value; cxx_entity *inst; } cxx_fdone;

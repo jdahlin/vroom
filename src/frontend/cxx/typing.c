@@ -364,8 +364,15 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, boo
 		}
 		if (!by_ctor && !by_conv)
 			return 3;
+		/* (std::initializer_list from anything but a braced list, which is ranked apart: no conversion makes one) */
+		if (!by_conv && cxx_is_initializer_list(c, p))
+			return 3;
 		/* T(const T&) for an argument that is not a T: converting it to T first is this conversion again */
 		if (c->constructing && AST_QUALIFIED_TYPE_UNQUALIFIED(p) == c->constructing && !by_conv)
+			return 3;
+		/* (within a user-defined conversion being tried, a constructor's parameter: no second one,
+		   [over.best.ics]/4 -- int * is no It<const T> for It's It(const It<const T>&)) */
+		if (by_ctor && !by_conv && c->construct_depth >= 1)
 			return 3;
 		/* a constructor of the parameter's class takes the argument (implicitly): a user-defined
 		   conversion (5: worse than any standard one) */
@@ -1746,9 +1753,46 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualifie
 				*v = 1;
 				return true;
 			}
+			if (nothrow && cxx_class_assign_trivial(c, l, 0) == 1) {
+				*v = 1;	/* (trivial assignments, a union of scalars with constructors of its own: json_value) */
+				return true;
+			}
 			if (!nothrow && cxx_gen_trivial_abi(c, l, 0) == 0) {
 				*v = 0;
 				return true;
+			}
+			if (nothrow && !c->tentative) {
+				/* (its operator= for that argument: whether it is declared noexcept, when that is known --
+				   json's operator=(basic_json) noexcept(...)) */
+				ast_qualified_type at[1] = { r };
+				ast_qualified_type et = c->etype;
+				bool el = c->elval;
+				int rv = -1;
+
+				c->op_lv_set = 1, c->op_lv[0] = 1, c->op_lv[1] = !(AST_TYPE_KIND(c->ast, t[1]) == AST_TYPE_POINTER && AST_TYPE(c->ast, t[1])->ext == 2) &&
+										     AST_TYPE_KIND(c->ast, t[1]) == AST_TYPE_POINTER;
+				bool rlv = c->op_lv[1];
+
+				if (cxx_operator_call_type(c, vintern_cstr("operator="), l, at, 1) && c->call_resolved && c->call_picked &&
+				    c->call_picked->fn_noexcept != 2 && c->call_picked->ty != CXX_TY_UNKNOWN && AST_TYPE(c->ast, c->call_picked->ty)->n == 1) {
+					cxx_entity *op = c->call_picked;
+					ast_qualified_type pt = c->ast->params[AST_TYPE(c->ast, op->ty)->aux];
+
+					rv = op->fn_noexcept == 1;
+					if (rv && cc_type_is_record(c->ast, pt) && !(AST_TYPE_KIND(c->ast, pt) == AST_TYPE_POINTER && AST_TYPE(c->ast, pt)->ext)) {
+						/* (a parameter by value: also its construction from the argument, the copy or move) */
+						uint8_t lv1[1] = { rlv };
+
+						cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(pt), at, lv1, 1, false);
+						rv = c->ctor_found && c->ctor_picked && c->ctor_picked->fn_noexcept != 2 ? c->ctor_picked->fn_noexcept == 1 : -1;
+					}
+				}
+				c->op_lv_set = 0;
+				cxx_et(c, et, el);
+				if (rv >= 0) {
+					*v = rv;
+					return true;
+				}
 			}
 		}
 		return false;
