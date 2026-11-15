@@ -617,7 +617,14 @@ static void cxx_condition_parse(cxx *c)
     for (;;) {
         if (cxx_condition_declaration_parse(c))
             break;
-        if (cxx_declaration_statement_try(c)) {
+        /* (T x = e / T x{e}: only a declaration, even when T is not found yet: a class template's
+		   member typedef in its member's body; Skia's SkBitSet::forEachSetIndex) */
+        bool name_name = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) &&
+                         cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER &&
+                         !cxx_peek(c, 1)->kw &&
+                         (cxx_peek(c, 2)->kind == LEX_TOKEN_EQUAL ||
+                          cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_BRACE);
+        if (name_name || cxx_declaration_statement_try(c)) {
             /* a declaration: init-statement ending in ; or a condition declaration */
             uint32_t save = c->pos;
             cxx_mark m;
