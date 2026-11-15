@@ -184,6 +184,8 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 cxx_call_type(c, set, callee, c->cargs, c->cargs_lval,
                               c->ncargs);
                 if (set && ename && !call_obj && c->call_resolved &&
+                    !c->unevaluated && /* (evaluated code: an unevaluated operand's verdicts stay ordinary
+                                          lookup's, which the SFINAE detection of json's traits reads) */
                     c->call_picked &&
                     (c->call_picked->kind == CXX_ENTITY_FUNCTION_TEMPLATE ||
                      c->call_picked->inst_ftmpl ||
@@ -204,8 +206,22 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     bool take = false;
 
                     memcpy(o_ranks, c->call_ranks, sizeof o_ranks);
-                    cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval,
-                                      c->ncargs);
+                    /* (the argument list as parsed: what the lookup instantiates parses lists of its own) */
+                    ast_qualified_type o_args[16];
+                    uint8_t o_lv[16];
+                    uint32_t o_nargs = c->ncargs, o_nodes[CXX_MAX_ARGS],
+                             o_brace[CXX_MAX_ARGS];
+
+                    memcpy(o_args, c->cargs, o_nargs * sizeof *o_args);
+                    memcpy(o_lv, c->cargs_lval, o_nargs);
+                    memcpy(o_nodes, c->carg_nodes, sizeof o_nodes);
+                    memcpy(o_brace, c->carg_brace, sizeof o_brace);
+                    cxx_adl_call_type(c, ename, o_args, o_lv, o_nargs);
+                    c->ncargs = o_nargs;
+                    memcpy(c->cargs, o_args, o_nargs * sizeof *o_args);
+                    memcpy(c->cargs_lval, o_lv, o_nargs);
+                    memcpy(c->carg_nodes, o_nodes, sizeof o_nodes);
+                    memcpy(c->carg_brace, o_brace, sizeof o_brace);
                     if (c->etype != CXX_TY_UNKNOWN && c->call_resolved &&
                         c->call_picked && c->call_picked != o_pick &&
                         c->call_picked->kind == CXX_ENTITY_VALUE &&
