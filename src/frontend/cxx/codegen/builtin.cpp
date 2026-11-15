@@ -260,6 +260,17 @@ VPRIV void cxx_gen_builtin(cxx *c, const char *name, size_t len,
             return;
         }
         cc_id_list_init(&l);
+        if (cb->id == CC_BUILTIN_CLZG || cb->id == CC_BUILTIN_CTZG ||
+            cb->id == CC_BUILTIN_POPCOUNTG ||
+            cb->id == CC_BUILTIN_STDC_COUNT_ONES ||
+            cb->id == CC_BUILTIN_STDC_TRAILING_ZEROS) {
+            /* the generic forms (libc++'s __countl_zero: __builtin_clzg): lowered as C lowers them,
+			   to the fixed-width builtins every target has */
+            for (uint32_t i = 0; i < nargs; i++)
+                cc_id_list_append(a, &l, args[i]);
+            c->enode = cc_builtin_bit_count_lower(a, cb->id, &l, loc);
+            return;
+        }
         for (uint32_t i = 0; i < nargs; i++) {
             uint32_t v = cc_node_rvalue(a, cc_conversion_decay(a, args[i]));
 
