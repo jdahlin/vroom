@@ -10,7 +10,7 @@ assembler, linker, behind `vcc`/`vas`/`vld` shims and the `vccd` server.
   parallel, minimal allocation, mmap, separate I/O and CPU threads).
 - No clang dependency at run time.  Data taken from clang once (capability
   tables, predefined macros, `__has_*` answers) lives in generated files
-  (`src/server/capabilities.c`, `src/frontend/pp/ppdata*.inc` via `gen-ppdata.sh`).
+  (`src/server/capabilities.cpp`, `src/frontend/pp/ppdata*.inc` via `gen-ppdata.sh`).
 - Do not replace make.
 - The machine is shared: keep benchmarks short and use `-j 6` for
   parallel diff runs.
@@ -132,7 +132,7 @@ relative to it); `TODO.md` stays at the top.
     conditionals, expressions; internal header `as-internal.h`; one module with
     `arch/<cpu>/as/parse.c`, `as_SRC`).
   - `obj/`: the in-memory object (`obj.h`: sections, frags, symbols, fixups)
-    and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.c`
+    and its layout; with `arch/<cpu>/obj/fixup.c` and `platform/linux/elf.cpp`
     one module (`obj_SRC`, internal header `objimpl.h`).
   - `vir/`: VIR, the SSA IR of `-O2` (SPEC-vir.md; one module `vir_SRC`, a unity
     TU like `as`): `vir.h` the public format
@@ -225,11 +225,11 @@ relative to it); `TODO.md` stays at the top.
     COFF objects (`coff.c`: the writer, as MC's WinCOFFObjectWriter;
     `unwind.c`: `.xdata`/`.pdata` from the SEH frames, as Win64EH), in the
     obj module; `obj_set_format(o, OBJ_COFF)` selects it (obj.h, "COFF"),
-    which the code generator's `-c` (codegen/unit-emit.c) and the driver's
+    which the code generator's `-c` (codegen/unit-emit.cpp) and the driver's
     `.s`/`.S` path do for the target.  The assembler's COFF directives
     (`.def`, `.section` flags and COMDAT, `.seh_*`, ...) are
-    `as/coff-directives.c`.  vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
-    one TU like `ld/ld.c` that #includes `pe-options.c`, `pe-input.c`,
+    `as/coff-directives.cpp`.  vlink's PE/COFF linker for MinGW x86-64 (`pe-linker.c`,
+    one TU like `ld/ld.cpp` that #includes `pe-options.c`, `pe-input.c`,
     `pe-resolve.c`, `pe-export.c`, `pe-layout.c`, `pe-write.c`; model in
     `pe-linker-internal.h`, COFF/PE constants in `include/platform/win/coff-format.h`, shared with `coff.c`): chosen
     when the first input is COFF x86-64 or by `-m i386pep`; ld.lld's MinGW
@@ -275,7 +275,8 @@ relative to it); `TODO.md` stays at the top.
 
 ## Build and test
 ```
-make -C src -j 6 vcc                # all vcc tools (frontend/pp/ frontend/c/ codegen/ one TU each, ccache if installed)
+make -C src -j 6 vcc                # all vcc tools, hosted in GNU C++20
+make -C src -j 6 vcc VCC_LANG=c     # build the implementation as C11
 make -C src -j 6 vcc VCC_UNITY= OUT=../build/src-parts   # file by file: each file compiles alone
 bench/vcc-diff.py ref -j 6          # clang -E references (once, ~1 min)
 bench/vcc-diff.py cmp -j 6 --kernel # preprocessor parity, kernel TUs
@@ -306,7 +307,7 @@ bench/vlink-dyn.py                  # x86-64 dynamic executables against glibc: 
 bench/vlink-macho.py --base DIR      # vld's Mach-O linker vs a base build: 80 test programs linked, compared, run (macOS, ~1 min)
 bench/vlink-pe.py [--run]           # vlink's PE linker vs ld.lld -m i386pep: options, errors, DLL+implib, -g objects (clang's, vcc's) with -s/--strip-debug/--gc-sections, byte-identical (~15 s; --run: under Wine)
 bench/vlink-pe-bad.py               # corrupt COFF objects/archives/import records: vlink (ASan) fails cleanly (~1 min)
-build/src/task-test                 # port/task.c: the pool and budget (also under TSan, <1 s)
+build/src/task-test                 # port/task.cpp: the pool and budget (also under TSan, <1 s)
 bench/sched-measure.py batch|emit|link|vccd|kbuild-log   # scheduling measurements A-F of doc/review/quality-scheduling.md
 bench/vcc-pic.py                    # GOT and TLS relocations per -fno-pic/-fPIE/-fPIC vs clang (<1 s)
 bench/vcc-volatile.py               # volatile loads/stores kept one for one at -O1, -O2 and -O3 (test/volatile, <1 s)
@@ -329,7 +330,7 @@ bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.was
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)
-bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.c): cases with /* diag-vpp-flags: --lint */
+bench/vcc-diag.py lint_naming       # vpp --lint (style checks, off elsewhere; frontend/c/naming-lint.cpp): cases with /* diag-vpp-flags: --lint */
 bench/vcc-diag.py --bin-dir build/src-asan   # ... with a sanitizer build (also vcc-mutate.py, VCC_BIN=$PWD/build/src-asan)
 bench/vcc-diag.py --bless PATTERN   # ... rewrite the snapshots of a changed message (review the diff)
 src/tools/gen-diagids.py [--check]      # diag/diagnostic-ids.inc: each diagnostic format's id (clang's name or vcc_*)
@@ -351,12 +352,12 @@ bench/vcc-mutate.py -j 6 --fix       # ... vcc --fix on every rejected mutant: n
 bench/vcc-explain.py                # doc/diag pages: the wrong example gives the id, the fixed one nothing
 src/tools/gen-explain.py [--check]      # driver/explain.inc from doc/diag/*.md (vcc --explain ID)
 src/tools/gen-walkprefix.py [--check]   # codegen/walk/prefix.h: the walker's function names, WK_PREFIX compiles it under another name (VIR)
-build/src/viralloc --sweep F.vir     # VIR register allocation (vir/register-allocation.c) on a synthetic target: dump + counters, checker at every register count
+build/src/viralloc --sweep F.vir     # VIR register allocation (vir/register-allocation.cpp) on a synthetic target: dump + counters, checker at every register count
 bench/vir-alloc.py [--bless]        # src/test/vir-alloc: expected dumps and sweeps (<1 s); `random -n N`: generated functions (~1 s/unit)
 bench/vir-alloc.py mutate|time      # the checker catches corrupted allocations; ns per VIR instruction (budget 200 for now, target 60: SPEC 22.1)
 bench/vir-failures.py [-n N]        # why VIR gives up on functions (-fvir-stats; reasons: codegen/vir/failure.h; --level -O3): suites, kernel, PostgreSQL, SQLite, most frequent first (~1 min)
 bench/record-passes.py -j 3 [-n 200]  # arm64 record clean-ups: records each pass changes, -O1 (direct emitter) vs -O2 (VIR) (VCC_REC_STATS=1); suites, kernel sample, SQLite (~1 min)
-bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (-fvir-passes=time: codegen/vir/pass-table.c; -NAME, only=, verify); --bisect PAT leaves passes out one by one
+bench/vir-passes.py -j 3 [-n 200]   # VIR builder: runs, changed, instructions and share of the build per pass (-fvir-passes=time: codegen/vir/pass-table.cpp; -NAME, only=, verify); --bisect PAT leaves passes out one by one
 bench/vcc-bflayout.py               # generated bit-field records, layouts checked by clang, Linux + Apple + x86-64 + Windows (MS layout, ms_struct/gcc_struct) (~2 s)
 bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, bits vs clang (~2 s; T x86_64-linux-gnu / x86_64-w64-mingw32: x87)
 bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)

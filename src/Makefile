@@ -38,11 +38,13 @@ HOST_ARCH := $(shell uname -m)
 HOST_OS   := $(shell uname -s)
 ifeq ($(HOST_OS),Darwin)
 HOST_CC    = /usr/bin/clang
+HOST_CXX   = /usr/bin/clang++
 HOST_DEFS  = -D_DARWIN_C_SOURCE
 HOST_LIBS  =
 HOST_CPU   = -mcpu=apple-m1
 else
 HOST_CC    = clang
+HOST_CXX   = clang++
 HOST_RESOURCE := $(shell $(HOST_CC) -print-resource-dir)/include
 HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(HOST_RESOURCE)"' $(TOOL_DEFS)
 HOST_LIBS  = -lm
@@ -57,7 +59,16 @@ else
 HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
-VCC_CC     = $(CCACHE) $(HOST_CC)
+VCC_LANG ?= c++
+ifeq ($(VCC_LANG),c++)
+VCC_CC = $(CCACHE) $(HOST_CXX)
+VCC_DIALECT = -x c++ -std=gnu++20
+else ifeq ($(VCC_LANG),c)
+VCC_CC = $(CCACHE) $(HOST_CC)
+VCC_DIALECT = -x c -std=c11
+else
+$(error VCC_LANG must be c or c++)
+endif
 VCC_LINK   = $(VCC_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
@@ -65,7 +76,7 @@ VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 # include/: the headers other modules include (common/region.h, frontend/pp/pp.h, ...)
 VCC_INC    = -I$(abspath include)
-VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
+VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -87,28 +98,28 @@ OBJ        = $(OUT)/obj
 
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
 
-o = $(patsubst %.c,$(OBJ)/%.o,$(1))
+o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 # WebAssembly is off by default (disabled 2026-11-13, doc/PLAN-wasm.md): its
 # sources are not built and a wasm target is an error.  `make VCC_WASM=1` builds it.
 VCC_WASM ?=
-AS_FILES = arch/a64/as/enc.c platform/darwin/macho.c $(if $(VCC_WASM),arch/wasm/as/as.c platform/wasm/wasm.c)
-as_SRC   = as/as.c as/symbol.c as/expression.c as/section.c as/data-directives.c as/macro.c as/conditional.c as/call-frame-information.c as/variable-items.c \
-           as/dwarf-line-table.c as/coff-directives.c platform/darwin/apple-dialect-translate.c arch/a64/as/parse.c arch/x64/as/asm.c arch/x64/as/sys.c arch/x64/as/gpr.c \
-           arch/x64/as/x87.c arch/x64/as/sse.c arch/x64/as/avx.c
+AS_FILES = arch/a64/as/enc.cpp platform/darwin/macho.cpp $(if $(VCC_WASM),arch/wasm/as/as.cpp platform/wasm/wasm.cpp)
+as_SRC   = as/as.cpp as/symbol.cpp as/expression.cpp as/section.cpp as/data-directives.cpp as/macro.cpp as/conditional.cpp as/call-frame-information.cpp as/variable-items.cpp \
+           as/dwarf-line-table.cpp as/coff-directives.cpp platform/darwin/apple-dialect-translate.cpp arch/a64/as/parse.cpp arch/x64/as/asm.cpp arch/x64/as/sys.cpp arch/x64/as/gpr.cpp \
+           arch/x64/as/x87.cpp arch/x64/as/sse.cpp arch/x64/as/avx.cpp
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
-common_SRC = common/archive-reader.c common/fail.c common/intern.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c
-port_SRC   = port/crc32c.c port/stack-guard.c port/job-regions.c port/task.c
+common_SRC = common/archive-reader.cpp common/fail.cpp common/intern.cpp common/digest-xxh3.cpp common/digest-blake3.cpp common/digest-sha256.cpp
+port_SRC   = port/crc32c.cpp port/stack-guard.cpp port/job-regions.cpp port/task.cpp
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_ASM = $(if $(filter x86_64,$(HOST_ARCH)),frontend/lex/x86-simd.S)
 LEX_OBJECT = $(patsubst %.S,$(OBJ)/%.o,$(LEX_ASM))
-LEX_SRC = frontend/lex/lex.c frontend/c/keywords.c
-PP_SRC  = frontend/pp/dircache.c driver/declaration-cache.c
-VCCD_SRC = server/diagnostics-store.c server/capabilities.c utils/fixdep.c utils/ar.c utils/shell.c
-# the server proper (vccd.c has main), one TU like the split modules; diagnostics-store.c and capabilities.c stay apart
-server_SRC = $(filter-out server/diagnostics-store.c server/capabilities.c,$(wildcard server/*.c))
+LEX_SRC = frontend/lex/lex.cpp frontend/c/keywords.cpp
+PP_SRC  = frontend/pp/dircache.cpp driver/declaration-cache.cpp
+VCCD_SRC = server/diagnostics-store.cpp server/capabilities.cpp utils/fixdep.cpp utils/ar.cpp utils/shell.cpp
+# the server proper (vccd.cpp has main), one TU like the split modules; diagnostics-store.cpp and capabilities.cpp stay apart
+server_SRC = $(filter-out server/diagnostics-store.cpp server/capabilities.cpp,$(wildcard server/*.cpp))
 # Split modules: a list of files each (MOD_SRC, in this order).  By default
-# each module is compiled as one TU (obj/unity/MOD.c #includes its files, as
+# each module is compiled as one TU (obj/unity/MOD.cpp #includes its files, as
 # SQLite's amalgamation), so the code generator sees all of it, also in `make
 # self` where there is no LTO, and what the files share stays static (VPRIV in
 # the headers).  `make VCC_UNITY=` compiles the files one by one.
@@ -116,16 +127,16 @@ SPLIT_MODS = cc pp codegen driver
 # the object writer: the model, the CPU's fixups, the ELF writer (linked with as)
 # VIR (SPEC-vir.md): the format and its tools, register allocation (V4); linked into the
 # compiler for codegen/vir/ (VIR, -O2 and up)
-vir_SRC  = vir/opcode-table.c vir/vir.c vir/print.c vir/parse.c vir/verify.c vir/facts.c vir/layout.c vir/compact.c vir/pass-list.c $(wildcard vir/pass/*.c)
-VIRA_SRC = vir/loops.c vir/register-allocation.c vir/register-allocation-check.c vir/register-allocation-print.c	# (not in the unity TU: own statics)
-obj_SRC  = obj/obj.c arch/a64/obj/fixup.c arch/x64/obj/fixup.c platform/linux/elf.c platform/win/coff.c platform/win/unwind.c
+vir_SRC  = vir/opcode-table.cpp vir/vir.cpp vir/print.cpp vir/parse.cpp vir/verify.cpp vir/facts.cpp vir/layout.cpp vir/compact.cpp vir/pass-list.cpp $(wildcard vir/pass/*.cpp)
+VIRA_SRC = vir/loops.cpp vir/register-allocation.cpp vir/register-allocation-check.cpp vir/register-allocation-print.cpp	# (not in the unity TU: own statics)
+obj_SRC  = obj/obj.cpp arch/a64/obj/fixup.cpp arch/x64/obj/fixup.cpp platform/linux/elf.cpp platform/win/coff.cpp platform/win/unwind.cpp
 # with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
-cc_SRC   = $(filter-out frontend/c/keywords.c frontend/c/replay.c,$(wildcard frontend/c/*.c)) frontend/c/replay.c $(wildcard frontend/cxx/*.c) $(wildcard frontend/cxx/codegen/*.c) $(wildcard frontend/cxx/declaration/*.c) $(wildcard frontend/cxx/expression/*.c) $(wildcard frontend/cxx/instantiate/*.c)
-# the compile job (driver_job_run); declaration-cache.c stays a TU of its own
-driver_SRC = $(filter-out driver/declaration-cache.c,$(wildcard driver/*.c))
+cc_SRC   = $(filter-out frontend/c/keywords.cpp frontend/c/replay.cpp,$(wildcard frontend/c/*.cpp)) frontend/c/replay.cpp $(wildcard frontend/cxx/*.cpp) $(wildcard frontend/cxx/codegen/*.cpp) $(wildcard frontend/cxx/declaration/*.cpp) $(wildcard frontend/cxx/expression/*.cpp) $(wildcard frontend/cxx/instantiate/*.cpp)
+# the compile job (driver_job_run); declaration-cache.cpp stays a TU of its own
+driver_SRC = $(filter-out driver/declaration-cache.cpp,$(wildcard driver/*.cpp))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)
-pp_SRC   = $(filter-out frontend/pp/dircache.c,$(wildcard frontend/pp/*.c)) $(wildcard diag/*.c)
-codegen_SRC = $(wildcard codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/a64/vir/*.c $(if $(VCC_WASM),arch/wasm/codegen/*.c) codegen/walk/*.c arch/x64/codegen/*.c arch/x64/vir/*.c codegen/vir/*.c)
+pp_SRC   = $(filter-out frontend/pp/dircache.cpp,$(wildcard frontend/pp/*.cpp)) $(wildcard diag/*.cpp)
+codegen_SRC = $(wildcard codegen/*.cpp codegen/opt/*.cpp codegen/rec/*.cpp codegen/flow/*.cpp arch/a64/codegen/*.cpp arch/a64/vir/*.cpp $(if $(VCC_WASM),arch/wasm/codegen/*.cpp) codegen/walk/*.cpp arch/x64/codegen/*.cpp arch/x64/vir/*.cpp codegen/vir/*.cpp)
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
@@ -134,30 +145,35 @@ PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
-# the ELF linker's parts, in the order ld/ld.c includes them (one TU, VCC_UNITY;
+# the ELF linker's parts, in the order ld/ld.cpp includes them (one TU, VCC_UNITY;
 # ld-internal.h is what they share); with `make VCC_UNITY=` each part is compiled
-# on its own, and vlink-main.c (main, under VLD_MAIN) only for vlink
-ld_SRC  = $(shell sed -n 's|^\#include "\.\./\(.*\.c\)"$$|\1|p; s|^\#include "\([a-z][^"/]*\.c\)"$$|ld/\1|p' ld/ld.c)
-LD_PARTS = $(filter-out ld/vlink-main.c,$(ld_SRC))
-LD_SRC  = $(LIB_SRC) ld/objcopy.c $(if $(VCC_WASM),ld/wasmld.c) platform/darwin/macho-linker.c platform/win/pe-linker.c
+# on its own, and vlink-main.cpp (main, under VLD_MAIN) only for vlink
+ld_SRC  = $(shell sed -n 's|^\#include "\.\./\(.*\.cpp\)"$$|\1|p; s|^\#include "\([a-z][^"/]*\.cpp\)"$$|ld/\1|p' ld/ld.cpp)
+LD_PARTS = $(filter-out ld/vlink-main.cpp,$(ld_SRC))
+LD_SRC  = $(LIB_SRC) ld/objcopy.cpp $(if $(VCC_WASM),ld/wasmld.cpp) platform/darwin/macho-linker.cpp platform/win/pe-linker.cpp
 
-$(OBJ)/%.o: %.S Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
-	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_INC) -MMD -MP -c $< -o $@
+LANG_STAMP = $(OBJ)/.lang-$(VCC_LANG)
+$(LANG_STAMP): | $(OBJ)
+	@rm -f $(OBJ)/.lang-c $(OBJ)/.lang-c++
+	@touch $@
 
-$(OBJ)/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
+$(OBJ)/%.o: %.S Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_INC) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
+
+$(OBJ)/%.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj vir server)
-$(UNITY_C): $(OBJ)/unity/%.c: FORCE
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.cpp,$(SPLIT_MODS) as obj vir server)
+$(UNITY_C): $(OBJ)/unity/%.cpp: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
-$(UNITY_C:.c=.o): %.o: %.c Makefile $(BOOTSTRAP_COMPILER)
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+$(UNITY_C:.cpp=.o): %.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER)
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 FORCE:
 .PHONY: FORCE
@@ -165,56 +181,60 @@ FORCE:
 
 # lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
 # since -mno-outline is a code generator option the bitcode does not keep
-$(OBJ)/no/%.o: %.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
+$(OBJ)/no/%.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) $(if $(filter-out x86_64,$(HOST_ARCH)),-mno-outline) -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(if $(filter-out x86_64,$(HOST_ARCH)),-mno-outline) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 $(OBJ)/ld/ld.o $(OBJ)/ld/vlink-main.o: XFLAGS = -DVLD_MAIN
 
 # the ELF linker with main() for vlink, and without it for vccd (links, nm and
 # objcopy run in its worker threads)
-VLINK_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ld.o,$(call o,$(LD_PARTS) ld/vlink-main.c))
-VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.c platform/darwin/macho-linker.c platform/win/pe-linker.c)
-$(OBJ)/ld/ldlib.o: ld/ld.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
+VLINK_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ld.o,$(call o,$(LD_PARTS) ld/vlink-main.cpp))
+VCCD_LD_OBJ = $(if $(VCC_UNITY),$(OBJ)/ld/ldlib.o,$(call o,$(LD_PARTS))) $(call o,ld/objcopy.cpp platform/darwin/macho-linker.cpp platform/win/pe-linker.cpp)
+$(OBJ)/ld/ldlib.o: ld/ld.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
-$(OUT)/vpp: $(call o,bin/vpp/vpp.c $(LEX_SRC) $(LIB_SRC)) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
+$(OUT)/vpp: $(call o,bin/vpp/vpp.cpp $(LEX_SRC) $(LIB_SRC)) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
 $(OUT)/vccd: $(call o,$(VCCD_SRC) $(LEX_SRC) $(LIB_SRC)) $(call mod,server) $(LEX_OBJECT) $(AS_OBJ) $(PP_OBJ) $(VCCD_LD_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
 
-LEXTEST_SRC = bin/lextest/lextest.c port/darwin/pmc.c $(LEX_SRC) $(LIB_SRC)
+LEXTEST_SRC = bin/lextest/lextest.cpp port/darwin/pmc.cpp $(LEX_SRC) $(LIB_SRC)
 ifeq ($(HOST_ARCH),x86_64)
 # x86 has no machine outliner. Reuse the normal objects in non-LTO builds.
-LEXTEST_OBJ = $(if $(VCC_LTO),$(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC)),$(call o,$(LEXTEST_SRC)))
+LEXTEST_OBJ = $(if $(VCC_LTO),$(patsubst %.cpp,$(OBJ)/no/%.o,$(LEXTEST_SRC)),$(call o,$(LEXTEST_SRC)))
 else
-LEXTEST_OBJ = $(patsubst %.c,$(OBJ)/no/%.o,$(LEXTEST_SRC))
+LEXTEST_OBJ = $(patsubst %.cpp,$(OBJ)/no/%.o,$(LEXTEST_SRC))
 endif
 $(OUT)/lextest: $(LEXTEST_OBJ) $(LEX_OBJECT)
 	$(VCC_LINK) -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) -pthread $^ -o $@
 
-$(OUT)/vasm: $(call o,bin/vasm/vasm.c $(LIB_SRC)) $(AS_OBJ)
+$(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
-$(OUT)/virtest: $(call o,bin/virtest/virtest.c $(LIB_SRC)) $(call mod,vir)
+$(OUT)/virtest: $(call o,bin/virtest/virtest.cpp $(LIB_SRC)) $(call mod,vir)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
-VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.c
-$(OUT)/viralloc: $(call o,bin/viralloc/viralloc.c $(VIRALLOC_SRC) $(LIB_SRC)) $(call mod,vir)
+VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp
+$(OUT)/viralloc: $(call o,bin/viralloc/viralloc.cpp $(VIRALLOC_SRC) $(LIB_SRC)) $(call mod,vir)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
-# vlink: the linker (ld.c) as a standalone tool; vobjcopy/vnm by argv[0]
+# vlink: the linker (ld.cpp) as a standalone tool; vobjcopy/vnm by argv[0]
 $(OUT)/vlink: $(VLINK_LD_OBJ) $(call o,$(LD_SRC))
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
-# task-test: the unit test of port/task.c (vtask.h)
-$(OUT)/task-test: $(call o,test/port/task-test.c port/task.c)
+$(OBJ)/test/port/task-test.o: test/port/task-test.c Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
+	@mkdir -p $(dir $@)
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
+
+# task-test: the unit test of port/task.cpp (vtask.h)
+$(OUT)/task-test: $(OBJ)/test/port/task-test.o $(call o,port/task.cpp)
 	$(VCC_LINK) $(VCC_LDFLAGS) -pthread $^ -o $@
 task-test: $(OUT)/task-test
 .PHONY: task-test
@@ -223,9 +243,9 @@ $(OUT)/vcc: $(OBJ)/bin/vcc/shim.o | $(OUT)
 	$(VCC_LINK) $(VCC_LDFLAGS) $< -o $@
 
 # vsh: make's SHELL; named sh so make still execs simple commands directly
-$(OBJ)/bin/vcc/vsh.o: bin/vcc/shim.c Makefile $(BOOTSTRAP_COMPILER) | $(OBJ)
+$(OBJ)/bin/vcc/vsh.o: bin/vcc/shim.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_CFLAGS) -DVSH -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_CFLAGS) -DVSH -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 $(OUT)/vsh/sh: $(OBJ)/bin/vcc/vsh.o | $(OUT)
 	mkdir -p $(OUT)/vsh
@@ -237,7 +257,7 @@ $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy: $(OUT)/vcc
 $(OBJ):
 	mkdir -p $@ $@/no
 
--include $(wildcard $(OBJ)/*.d $(OBJ)/*/*.d $(OBJ)/*/*/*.d $(OBJ)/*/*/*/*.d $(OBJ)/*/*/*/*/*.d)
+-include $(wildcard $(OBJ)/*.dep $(OBJ)/*/*.dep $(OBJ)/*/*/*.dep $(OBJ)/*/*/*/*.dep $(OBJ)/*/*/*/*/*.dep)
 
 # ---- sanitizer variants of the vcc tools (AGENTS.md, "Sanitizers") ----
 # Own OUT (and so own obj/), -O1 -g; the normal build is unchanged.
@@ -277,7 +297,7 @@ endif
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_LANG=c VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
@@ -286,21 +306,21 @@ self-check: self
 
 .PHONY: self self-check
 
-# Check the production C dialect and the prospective C++ dialect independently:
+# Check the bootstrap C dialect and the host C++ dialect independently:
 # a C warning must not hide the C++ diagnostics for that file under make -k.
 # Use make -k -j 6 vcc-cxx-check, or set CXX_CHECK_SRC to inspect a subset.
 CXX_CHECK_SRC ?= $(sort $(AS_SRC) $(LIB_SRC) $(LEX_SRC) $(PP_SRC) $(VCCD_SRC) $(server_SRC) \
                  $(SPLIT_SRC) $(vir_SRC) $(VIRALLOC_SRC) $(LD_SRC) $(ld_SRC) \
-                 $(wildcard bin/*/*.c) port/darwin/pmc.c)
+                 $(wildcard bin/*/*.cpp) port/darwin/pmc.cpp)
 C_COMPAT_CHECK = $(addprefix check-c-compat/,$(CXX_CHECK_SRC))
 CXX_CHECK = $(addprefix check-cxx/,$(CXX_CHECK_SRC))
 CXX_CHECK_FLAGS = -Wpedantic -Werror -ferror-limit=0 -fsyntax-only
 .PHONY: vcc-cxx-check $(C_COMPAT_CHECK) $(CXX_CHECK)
 vcc-cxx-check: $(C_COMPAT_CHECK) $(CXX_CHECK)
 $(C_COMPAT_CHECK): check-c-compat/%: %
-	$(HOST_CC) $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
+	$(HOST_CC) -x c -std=c11 $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
 $(CXX_CHECK): check-cxx/%: %
-	$(HOST_CC) $(filter-out -std=c11,$(VCC_FAST)) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
+	$(HOST_CXX) $(VCC_FAST) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
 
 # ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
@@ -328,13 +348,13 @@ $(FUZZ_OUT):
 	mkdir -p $@
 
 $(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_ASM) $(LEX_SRC) $(LIB_SRC) -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_ASM) $(LEX_SRC) $(LIB_SRC) -o $@
+$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.c frontend/pp/*.h diag/*.c) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(pp_SRC) frontend/pp/dircache.c $(LEX_ASM) $(LEX_SRC) $(LIB_SRC) -o $@
+$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
 # replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass
 fuzz-regress: fuzz

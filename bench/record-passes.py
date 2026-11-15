@@ -4,7 +4,7 @@
 vpp counts per pass, with VCC_REC_STATS=1, the records it changes, removes or
 adds, separately for functions that came through VIR's lowering and through
 the direct emitter (stderr: "vcc rec-pass: path=vir pass=copies_1 runs=N
-changed=N removed=N added=N", src/arch/a64/codegen/opt.c).  This harness runs
+changed=N removed=N added=N", src/arch/a64/codegen/opt.cpp).  This harness runs
 vpp -c over TU sets twice, at -O1 (the direct emitter) and at -O2 (VIR),
 and prints per pass the records changed (changed + removed + added) in each
 mode, most active in VIR's mode first: the top of the table moves into VIR

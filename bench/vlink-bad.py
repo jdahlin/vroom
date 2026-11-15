@@ -101,7 +101,7 @@ def ar_cases(o):
     yield 'ar-longname-offset', ar([('//', b'xx/\n'), ('/9999', o)])
     yield 'ar-longname-truncated', ar([('//', b'xx/\n')])[:-2]
 
-# ---- wasm64: vlink -mwasm64 (ld/wasmld.c) ----
+# ---- wasm64: vlink -mwasm64 (ld/wasmld.cpp) ----
 def uleb(b, j):
     v = s = 0
     while True:
@@ -183,7 +183,7 @@ def wasm_cases(o):
     yield 'wasm-ar-count-past-member', arch('/', be(1000) + be(mo) + names), False
     yield 'wasm-ar-member-past-end', good[:-(len(o) // 2)], False
     yield 'wasm-ar-member-offset-wraps', arch('/', be(1) + be(0xffffffe0) + names), False
-    # counts and indices from the object (ld/wasmld.c: rcount, obj_indices_ok, rel_fits)
+    # counts and indices from the object (ld/wasmld.cpp: rcount, obj_indices_ok, rel_fits)
     yield 'wasm-func-count-wraps', wasm_edit(o, lambda i, p: i == 3, lambda p: enc(0xffffffff) + p[uleb(p, 0)[1]:]), False
     yield 'wasm-func-type-range', wasm_edit(o, lambda i, p: i == 3, lambda p: p[:uleb(p, 0)[1]] + enc(1000) + p[uleb(p, uleb(p, 0)[1])[1]:]), False
     yield 'wasm-reloc-past-function', wasm_reloc_off(o), False

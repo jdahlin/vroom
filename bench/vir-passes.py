@@ -5,7 +5,7 @@
   bench/vir-passes.py --bisect [--suite vcc|gcc|tcc|inline] PAT [--bin-dir DIR]
   bench/vir-passes.py --bisect --cmd 'SHELL COMMAND' [--bin-dir DIR]
 
-The builder's passes run from one table (src/codegen/vir/pass-table.c).  With
+The builder's passes run from one table (src/codegen/vir/pass-table.cpp).  With
 -fvir-stats -fvir-passes=time, vpp prints per TU and pass
 "vcc vir-pass: pass=NAME runs=N changed=N instructions=N" (changed is `-` for
 a pass that does not say), plus two totals: @build (the walk and every pass,

@@ -7,7 +7,7 @@
 #   lib      a call of `symbol`; for the C++-only ones (operator new and delete, vcc's own names).
 #            clang's library builtins (__builtin_memcpy, __builtin_sin, ...) are not listed: they come
 #            from src/frontend/c/libbuiltins.inc (gen-libbuiltins.py), and the generator rejects them here.
-#   node     the C front end's builtin node of the same name (frontend/c/builtin-table.c), lowered by
+#   node     the C front end's builtin node of the same name (frontend/c/builtin-table.cpp), lowered by
 #            the code generator; its operands as given.
 #   fclass   C's node of a floating-point classification: its operand of a floating type (any).
 #   atomic   C's node; the result is what the first argument points to (signature `*`), or void.

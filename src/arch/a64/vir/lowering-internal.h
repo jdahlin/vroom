@@ -8,13 +8,6 @@
 #include "../../../codegen/vir/lowering-driver.h"
 #include "vir/layout.h"
 
-/* data several files read: static in the unity TU, defined once (compares.c, function.c) otherwise */
-#ifdef VCC_UNITY
-#define A64_VIR_DATA static
-#else
-#define A64_VIR_DATA extern
-#endif
-
 #define A64_VIR_OPERAND_MAX 512
 
 typedef struct a64_vir_argument {
@@ -237,11 +230,10 @@ static inline bool a64_vir_value_is_folded(const a64_vir_context *L, uint32_t v)
 
 typedef struct a64_vir_chain a64_vir_chain;
 
-A64_VIR_DATA _Thread_local struct a64_vir_thread_state
-    a64_vir_thread_state_instance;
-A64_VIR_DATA const uint8_t a64_vir_integer_condition_codes[10];
-A64_VIR_DATA const int8_t a64_vir_float_condition_codes[8];
-A64_VIR_DATA const uint8_t a64_vir_condition_swapped[10];
+extern _Thread_local struct a64_vir_thread_state a64_vir_thread_state_instance;
+extern const uint8_t a64_vir_integer_condition_codes[10];
+extern const int8_t a64_vir_float_condition_codes[8];
+extern const uint8_t a64_vir_condition_swapped[10];
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L,
                                                         const char *why);

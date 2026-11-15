@@ -1,7 +1,7 @@
 /*
  * The C keywords and the preprocessor's directive and builtin names, with
  * their identifier ids KW_*.  They are interned first, in this order, so the
- * preprocessor and parser can switch on an id.  frontend/c/keywords.c
+ * preprocessor and parser can switch on an id.  frontend/c/keywords.cpp
  * registers the names with the interner at start-up, before any vintern_init.
  */
 #ifndef VCC_FRONTEND_C_KEYWORDS_H
@@ -9,8 +9,8 @@
 
 #include "common/intern.h"
 
-#define KEYWORDS(X) \
-	X(auto) X(break) X(case) X(char) X(const) X(continue) X(default) X(do) \
+#define KEYWORDS(X)                                                                                                                                                                          \
+        X(auto) X(break) X(case) X(char) X(const) X(continue) X(default) X(do) \
 	X(double) X(else) X(enum) X(extern) X(float) X(for) X(goto) X(if) \
 	X(inline) X(int) X(long) X(register) X(restrict) X(return) X(short) \
 	X(signed) X(sizeof) X(static) X(struct) X(switch) X(typedef) X(union) \
@@ -39,13 +39,13 @@
 	X(__INCLUDE_LEVEL__) X(__TIMESTAMP__) X(once)
 
 enum {
-	KW_NONE,
+    KW_NONE,
 #define X(k) KW_##k,
-	KEYWORDS(X)
+    KEYWORDS(X)
 #undef X
-	KW_VA_ARGS,	/* __VA_ARGS__ */
-	KW_VA_OPT,	/* __VA_OPT__ */
-	KW_END
+        KW_VA_ARGS, /* __VA_ARGS__ */
+    KW_VA_OPT,      /* __VA_OPT__ */
+    KW_END
 };
 #define KW_COUNT (KW_END - 1)
 

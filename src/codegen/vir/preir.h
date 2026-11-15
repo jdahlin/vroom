@@ -1,7 +1,7 @@
 /*
  * The VIR builder: the walker's lowering interface (codegen/walk/proto.h) as a
  * virtual target, virbuild_ (SPEC-vir.md section 19, PLAN-vir.md V2).  The walker
- * is compiled a second time against it (codegen/vir/walker-instance.c); what it builds is
+ * is compiled a second time against it (codegen/vir/walker-instance.cpp); what it builds is
  * a function in VIR, handed to vir_canon and from there to the allocator and
  * a real target's lowering (codegen/vir/a64.c).
  *

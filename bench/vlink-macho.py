@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vlink-macho.py: vld's Mach-O linker (platform/darwin/macho-linker.c) against a
+"""vlink-macho.py: vld's Mach-O linker (platform/darwin/macho-linker.cpp) against a
 base build, on programs of src/test/vcc (macOS only).
 
   bench/vlink-macho.py --base DIR [--bin-dir DIR] [-n N]

@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "codegen/rec/slot-values.c"
+#include "codegen/rec/slot-values.cpp"
 
 static void block_boundaries(record_slot_values *s)
 {

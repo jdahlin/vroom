@@ -5,7 +5,7 @@
 
 Each test is one C file that includes the headers it tests and returns the
 number of failed CHECKs; it is compiled here with the host C compiler ($CC,
-else cc) against -Isrc/include and common/fail.c, under ASan and UBSan when
+else cc) against -Isrc/include and common/fail.cpp, under ASan and UBSan when
 that compiler has them, with warnings as errors, and run.  Needs only the
 checkout (no build of vcc), so it is part of ci/premerge.sh.
 """
@@ -15,7 +15,7 @@ R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T = f'{R}/src/test/common'
 OUT = f'{R}/build/common-test'
 CC = os.environ.get('CC', 'cc')
-SOURCES = [f'{R}/src/common/fail.c']
+SOURCES = [f'{R}/src/common/fail.cpp']
 
 
 def sanitizer_flags():
@@ -27,7 +27,7 @@ def sanitizer_flags():
 
 def run_one(name, flags):
     exe = f'{OUT}/{name}'
-    cmd = [CC, '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-pthread', f'-I{R}/src/include', f'-I{T}',
+    cmd = [CC, '-x', 'c', '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-pthread', f'-I{R}/src/include', f'-I{T}',
            *flags, f'{T}/{name}.c', *SOURCES, '-o', exe]
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode:

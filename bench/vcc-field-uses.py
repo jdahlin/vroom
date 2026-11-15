@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VCC_FIELD_USES (src/frontend/c/field-uses.c, doc/quality/DESIGN-field-uses.md):
+VCC_FIELD_USES (src/frontend/c/field-uses.cpp, doc/quality/DESIGN-field-uses.md):
 the uses of selected struct fields that vpp reports, as snapshots.
 
 Every src/test/field-uses/NAME.c starts with `/* select: OWNER.FIELD [NEW] */`

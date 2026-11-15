@@ -116,8 +116,8 @@ def read(p):
 
 
 def build(rows):
-    words = {o: n for o, n, _, _ in rows if not o.endswith(('.h', '.c'))}
-    paths = {o: n for o, n, _, _ in rows if o.endswith(('.h', '.c'))}
+    words = {o: n for o, n, _, _ in rows if not o.endswith(('.h', '.c', '.cpp'))}
+    paths = {o: n for o, n, _, _ in rows if o.endswith(('.h', '.c', '.cpp'))}
     pats = []
     if words:
         pats.append(re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(re.escape(w) for w in sorted(words, key=len, reverse=True)) + r')(?![A-Za-z0-9_])'))
@@ -134,7 +134,7 @@ def include_closure(texts):
     """path -> set of paths it includes, transitively (C files and headers)."""
     direct = {}
     for p, t in texts.items():
-        if not p.endswith(('.c', '.h', '.inc')):
+        if not p.endswith(('.c', '.cpp', '.h', '.inc')):
             continue
         d = []
         for m in INC_RX.finditer(t):
@@ -254,7 +254,7 @@ def leftovers(texts, rows, edited, other, relevant=None):
     rx = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(re.escape(w) for w in sorted(olds, key=len, reverse=True)) + r')(?![A-Za-z0-9_])')
     out = []
     for p, t in texts.items():
-        isc = p.endswith(('.c', '.h', '.inc'))
+        isc = p.endswith(('.c', '.cpp', '.h', '.inc'))
         rng = [(m.start(), m.end(), 'comment' if m.group(0)[0] == '/' else 'string') for m in C_TOK.finditer(t)] if isc else []
         ri = 0
         rel = os.path.relpath(p, R)
@@ -376,7 +376,7 @@ def fields_main(av):
                 problems.append(f'macro: {tag}: {n} is a macro in a translation unit')
         drx = re.compile(r'^[ \t]*#[ \t]*define[ \t]+' + re.escape(r.new) + r'\b', re.M)
         for p, t in texts.items():
-            if p.endswith(('.c', '.h', '.inc')) and '/src/test/' not in p and drx.search(t):
+            if p.endswith(('.c', '.cpp', '.h', '.inc')) and '/src/test/' not in p and drx.search(t):
                 problems.append(f'macro: {tag}: {os.path.relpath(p, R)} defines a macro {r.new}')
                 break
         if r.new in kw:
@@ -423,7 +423,7 @@ def fields_main(av):
         for r in rows:
             fs = {u[6] for u in by_row[id(r)]}
             orx = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(re.escape(o) for o in r.cands) + r')(?![A-Za-z0-9_])')
-            fs |= {os.path.relpath(p, R) for p, t in texts.items() if p.endswith(('.c', '.h', '.inc')) and orx.search(t)}
+            fs |= {os.path.relpath(p, R) for p, t in texts.items() if p.endswith(('.c', '.cpp', '.h', '.inc')) and orx.search(t)}
             relevant.setdefault(r.old, set()).update(fs)
     left = leftovers(texts, [r for r in rows if id(r) not in done], edited, other, relevant)
     shown = 0
@@ -599,7 +599,7 @@ def main():
     wrx = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
     pub_names = {o for o, _, _, _ in pubr}
     for p, t in texts.items():
-        if not p.endswith(('.c', '.h', '.inc')):
+        if not p.endswith(('.c', '.cpp', '.h', '.inc')):
             continue
         # scoped: a new name only collides in the files its row applies to
         tag = ('pub' if p in users else '') + ('loc' if p.startswith(local) else '') if scoped else 'all'
@@ -626,7 +626,7 @@ def main():
     if words:
         wrx2 = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(re.escape(w) for w in words) + r')(?![A-Za-z0-9_])')
         for p, t in texts.items():
-            if not p.endswith(('.c', '.h', '.inc')):
+            if not p.endswith(('.c', '.cpp', '.h', '.inc')):
                 continue
             for i, l in enumerate(t.split('\n'), 1):
                 for m in strrx.finditer(l):
@@ -641,7 +641,7 @@ def main():
     def file_pats(p):
         if not scoped:
             return words, paths, pats
-        isc = p.endswith(('.c', '.h', '.inc'))
+        isc = p.endswith(('.c', '.cpp', '.h', '.inc'))
         rs = []
         if not isc or p in users:
             rs += pubr
@@ -667,7 +667,7 @@ def main():
             counts[o] = counts.get(o, 0) + 1
             return n
         u = t
-        if scoped and p.endswith(('.c', '.h', '.inc')):
+        if scoped and p.endswith(('.c', '.cpp', '.h', '.inc')):
             # code gets every row; a comment only the names that cannot be English words
             # (an underscore, upper case, or a call `name(`); strings only on #include lines
             def comment_sub(m):
@@ -695,7 +695,7 @@ def main():
                 gap = pat.sub(sub, gap)
             out.append(gap)
             u = ''.join(out)
-        elif p.endswith(('.c', '.h', '.inc')):
+        elif p.endswith(('.c', '.cpp', '.h', '.inc')):
             # not inside string literals (output text stays as it is), except #include lines
             lit = re.compile(r'"(?:[^"\\\n]|\\.)*"')
             def line(l):

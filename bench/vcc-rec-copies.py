@@ -9,9 +9,9 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "arch/x64/codegen/effects.c"
-#include "codegen/rec/copies.c"
-#include "arch/x64/codegen/copies.c"
+#include "arch/x64/codegen/effects.cpp"
+#include "codegen/rec/copies.cpp"
+#include "arch/x64/codegen/copies.cpp"
 #define OP(op_,sz_,d_,a_,b_) ((record){ .opcode=op_, .size=sz_, .registers={d_,a_,b_,X64_REGISTER_NONE} })
 #define CP(d,s) OP(X64_OP_MOV,8,d,s,X64_REGISTER_NONE)
 #define IMM(d) OP(X64_OP_MOVI,8,d,X64_REGISTER_NONE,X64_REGISTER_NONE)

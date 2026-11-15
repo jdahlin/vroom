@@ -6,7 +6,7 @@
 The C++ front end's builtins, one table sorted by name (codegen/builtin.c looks a name up by
 binary search, then picks the entry with the call's number of arguments).  The list is checked
 against the C front end's tables:
-  - a `node`, `fclass` or `atomic` entry must name one of frontend/c/builtin-table.c's builtins;
+  - a `node`, `fclass` or `atomic` entry must name one of frontend/c/builtin-table.cpp's builtins;
   - a `lib` entry must not be one of clang's library builtins (frontend/c/libbuiltins.inc,
     gen-libbuiltins.py), which the C++ front end takes from there;
   - every signature letter must be one cc_builtin_signature_type reads (or `.`, `*`, `&`, `=`).
@@ -22,7 +22,7 @@ SRC = os.path.join(HERE, '..', 'frontend')
 LIST = os.path.join(SRC, 'cxx', 'codegen', 'builtins.list')
 OUT = os.path.join(SRC, 'cxx', 'codegen', 'builtins.inc')
 KINDS = {'lib': 'CXX_BI_LIB', 'node': 'CXX_BI_NODE', 'fclass': 'CXX_BI_FCLASS', 'atomic': 'CXX_BI_ATOMIC', 'special': 'CXX_BI_SPECIAL', 'parsed': None}
-LETTERS = set('vbChiulLwWzdfcDpPsS')	# frontend/c/builtin-table.c cc_builtin_signature_type
+LETTERS = set('vbChiulLwWzdfcDpPsS')	# frontend/c/builtin-table.cpp cc_builtin_signature_type
 EXTRA = set('.*&=')
 
 
@@ -30,7 +30,7 @@ def fail(msg):
     sys.exit(f'gen-cxx-builtins.py: {msg}')
 
 
-ctable = set(re.findall(r'\{\s*"(__[A-Za-z0-9_]+)"\s*,\s*CC_BUILTIN_', open(os.path.join(SRC, 'c', 'builtin-table.c')).read()))
+ctable = set(re.findall(r'\{\s*"(__[A-Za-z0-9_]+)"\s*,\s*CC_BUILTIN_', open(os.path.join(SRC, 'c', 'builtin-table.cpp')).read()))
 libtable = set(re.findall(r'\{ "(__builtin_[A-Za-z0-9_]+)", "', open(os.path.join(SRC, 'c', 'libbuiltins.inc')).read()))
 entries, seen, listed = [], set(), set()
 for n, line in enumerate(open(LIST), 1):
@@ -47,7 +47,7 @@ for n, line in enumerate(open(LIST), 1):
     if (kind == 'lib') != bool(rest) or len(rest) > 1:
         fail(f'{LIST}:{n}: {name}: a lib entry (and only one) has a symbol')
     if kind in ('node', 'fclass', 'atomic') and name not in ctable:
-        fail(f'{LIST}:{n}: {name}: not in frontend/c/builtin-table.c')
+        fail(f'{LIST}:{n}: {name}: not in frontend/c/builtin-table.cpp')
     if kind == 'lib' and name in libtable:
         fail(f'{LIST}:{n}: {name}: one of clang\'s library builtins (libbuiltins.inc): not listed here')
     if (name, len(sig) - 1) in seen:

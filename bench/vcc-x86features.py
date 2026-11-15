@@ -34,7 +34,7 @@ if a.all_features:
 with tempfile.TemporaryDirectory() as td:
  probe=pathlib.Path(td)/'probe'
  fixture=pathlib.Path(td)/'native-fixture'
- run([a.clang,'-O2','-Wall','-Wextra','-Werror','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(ROOT/'bench/data/x86native-test.c'),'-o',str(fixture)])
+ run([a.clang,'-x','c','-O2','-Wall','-Wextra','-Werror','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(ROOT/'bench/data/x86native-test.c'),'-o',str(fixture)])
  run([str(fixture)])
  if not a.vpp:
   src=pathlib.Path(td)/'probe.c'
@@ -59,7 +59,7 @@ int main(int argc,char **argv) {
  x86_features_finish(&f,disabled);buf out={0};driver_x86_feature_predefines_append(&out,f,cpu);fwrite(out.p,1,out.n,stdout);free(out.p);return 0;
 }
 ''')
-  run([a.clang,'-O2','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(src),str(ROOT/'src/common/fail.c'),'-o',str(probe)])
+  run([a.clang,'-x','c','-O2','-I'+str(ROOT),'-I'+str(ROOT/'src/include'),str(src),str(ROOT/'src/common/fail.cpp'),'-o',str(probe)])
  def check(case):
   cpu,opts=case
   ref=[a.clang,'--target=x86_64-unknown-linux-gnu','-march='+cpu,'-dM','-E','-x','c',empty.name]

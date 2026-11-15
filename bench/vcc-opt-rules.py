@@ -924,7 +924,7 @@ def check_unusedinit(assembly, arch, optimized=True):
     text = body(assembly, 'ui_float_conversion', wasm)
     if arch == 'aarch64':
         # The a64 printer emits FP instructions as .inst. Ignore register
-        # fields, using the opcode from arch/a64/as/enc.c's fdiv entry.
+        # fields, using the opcode from arch/a64/as/enc.cpp's fdiv entry.
         words = [int(word, 16) for word in re.findall(r'\.inst\s+0x([0-9a-fA-F]+)', text)]
         fp_divide = any(word & 0xffe0fc00 == 0x1e601800 for word in words)
         conversion = any(word & 0xfffffc00 == 0x1e780000 for word in words)

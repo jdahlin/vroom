@@ -160,7 +160,7 @@ struct cc {
 
     char *heap, *hp, *hend; /* bump allocator for everything else */
     struct cc_declarator_operation
-        *dops; /* declarator op stack (frontend/c/declarator.c) */
+        *dops; /* declarator op stack (frontend/c/declarator.cpp) */
     uint32_t ndops, capdops;
 
     /* scopes: identifier id -> innermost binding (sym index) */
@@ -253,7 +253,7 @@ struct cc {
     /* VCC_DRCOV: delivered positions of file-scope declaration starts (UINT64_MAX: lookahead) */
     uint64_t *drb;
     uint32_t ndrb, cdrb;
-    /* VCC_DR / VCC_DRREC: per-region declaration replay (frontend/c/replay.c) */
+    /* VCC_DR / VCC_DRREC: per-region declaration replay (frontend/c/replay.cpp) */
     struct drrec *dr;
     uint8_t dr_on; /* a region is being recorded: the hooks log */
 };

@@ -238,7 +238,7 @@ typedef struct codegen_inline_search_state {
 
 #define CODEGEN_RECORD_PASS_MAX 24
 
-/* -fvir-passes (codegen/vir/pass-table.c reads it, once per TU) */
+/* -fvir-passes (codegen/vir/pass-table.cpp reads it, once per TU) */
 typedef struct virbuild_pass_switch {
     uint64_t skip;   /* bit per row: left out */
     uint64_t verify; /* bit per row: the check runs after it */
@@ -315,7 +315,7 @@ typedef struct codegen_unit {
     const codegen_keep
         *previous_keep; /* the previous round's functions, or NULL */
     bool stats;
-    /* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.c) */
+    /* -fvir-stats: functions through VIR and the reasons it gave up on one (codegen/vir/build-attempt.cpp) */
     bool vir_statistics;
     _Atomic uint64_t vir_attempted, vir_lowered,
         vir_built; /* vir_built: built but not lowered (-fno-vir-lower) */
@@ -1227,7 +1227,7 @@ VPRIV void a64_call_memory_function_emit(codegen_context *e, int fn, int a0,
 VPRIV void a64_function_finish(
     codegen_context *e,
     uint32_t
-        s); /* arch/a64/codegen/func.c: optimise, lay out and print the records */
+        s); /* arch/a64/codegen/func.cpp: optimise, lay out and print the records */
 VPRIV bool codegen_symbol_needs_got(cc *c, uint32_t ref);
 enum { WIN64_IMP = 1, WIN64_REFPTR };
 VPRIV int sym_win64_indirect(
@@ -1269,7 +1269,7 @@ VPRIV void store(codegen_context *e, codegen_lvalue *l, ast_qualified_type t,
 VPRIV void extend(codegen_context *e, int rd, int rs, int from, bool sgn);
 VPRIV int lreg_of(codegen_context *e, uint32_t s);
 VPRIV void opt_function(codegen_context *e);
-/* arch/a64/codegen/unreachable.c */
+/* arch/a64/codegen/unreachable.cpp */
 VPRIV void a64_unreachable_remove(codegen_context *e);
 enum { OPF_ALL = 1, OPF_CALL = 2, OPF_FRAME = 4 };
 VPRIV uint64_t a64_registers_used(codegen_context *e, unsigned *fl);
@@ -1415,13 +1415,9 @@ VPRIV bool a64_vir_function_lower(
     const char **why); /* codegen/vir/a64.c: the built VIR as arm64 records */
 /* data, not a function: without VCC_UNITY a declaration without extern would
    be a tentative definition in every file that includes this header */
-#ifdef VCC_UNITY
-VPRIV const virbuild_failure_info
-    virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
-#else
 extern const virbuild_failure_info
     virbuild_failure_table[VIRBUILD_FAILURE_COUNT];
-#endif
+
 VPRIV void virbuild_statistics_print(
     codegen_unit
         *E); /* -fvir-stats: one line of totals, one per reason (stderr) */

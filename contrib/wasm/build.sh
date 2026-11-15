@@ -2,7 +2,7 @@
 # vcc's compiler (vpp) as WebAssembly (emscripten, memory64), for the
 # compiler explorer page (contrib/wasm/explorer/).  Output: build/wasm/, the page
 # with the compiler in build/wasm/site/.  Needs emscripten (brew install
-# emscripten).  src/port/wasm/mman.c says what is different from the native build.
+# emscripten).  src/port/wasm/mman.cpp says what is different from the native build.
 # VCC=path/to/vpp: vcc compiles itself (PLAN-wasm.md W6), every object from
 # vcc's wasm64 generator and assembler with emscripten's libc headers; emcc
 # only links.  vcc's own <arm_neon.h>/<arm_acle.h> give the intrinsics in C.
@@ -12,16 +12,16 @@ W=../contrib/wasm
 OUT=${OUT:-../build/wasm}
 mkdir -p $OUT/obj
 CFLAGS="-Iport/wasm/compat -Iinclude -std=c11 -O2 -sMEMORY64=1 -msimd128 -mfpu=neon -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter ${WFLAGS}"
-SRC="bin/vpp/vpp.c frontend/lex/lex.c common/intern.c frontend/c/keywords.c common/fail.c port/crc32c.c port/stack-guard.c port/job-regions.c arch/a64/as/enc.c platform/darwin/macho.c arch/wasm/as/as.c platform/wasm/wasm.c
- frontend/pp/dircache.c driver/declaration-cache.c common/digest-xxh3.c common/digest-blake3.c common/digest-sha256.c"
+SRC="bin/vpp/vpp.cpp frontend/lex/lex.cpp common/intern.cpp frontend/c/keywords.cpp common/fail.cpp port/crc32c.cpp port/stack-guard.cpp port/job-regions.cpp arch/a64/as/enc.cpp platform/darwin/macho.cpp arch/wasm/as/as.cpp platform/wasm/wasm.cpp
+ frontend/pp/dircache.cpp driver/declaration-cache.cpp common/digest-xxh3.cpp common/digest-blake3.cpp common/digest-sha256.cpp"
 for m in as obj cc pp emit driver; do
 	case $m in
-	as) f="as/as.c arch/a64/as/parse.c";;
-	obj) f="obj/obj.c arch/a64/obj/fixup.c platform/linux/elf.c";;
-	cc) f=$(ls frontend/c/*.c);;
-	pp) f="$(ls frontend/pp/*.c | grep -v dircache) $(ls diag/*.c)";;
-	emit) f=$(ls codegen/*.c codegen/opt/*.c codegen/rec/*.c codegen/flow/*.c arch/a64/codegen/*.c arch/wasm/codegen/*.c);;
-	driver) f=$(ls driver/*.c | grep -v declaration-cache);;
+	as) f="as/as.cpp arch/a64/as/parse.cpp";;
+	obj) f="obj/obj.cpp arch/a64/obj/fixup.cpp platform/linux/elf.cpp";;
+	cc) f=$(ls frontend/c/*.cpp);;
+	pp) f="$(ls frontend/pp/*.cpp | grep -v dircache) $(ls diag/*.cpp)";;
+	emit) f=$(ls codegen/*.cpp codegen/opt/*.cpp codegen/rec/*.cpp codegen/flow/*.cpp arch/a64/codegen/*.cpp arch/wasm/codegen/*.cpp);;
+	driver) f=$(ls driver/*.cpp | grep -v declaration-cache);;
 	esac
 	{ echo '#define VCC_UNITY 1'; for x in $f; do echo "#include \"$PWD/$x\""; done; } > $OUT/obj/u-$m.c
 	SRC="$SRC $OUT/obj/u-$m.c"
@@ -29,16 +29,17 @@ done
 if [ -n "$VCC" ]; then
 	SR=$(em-config CACHE)/sysroot
 	RES=$(${LLVM:-/opt/homebrew/opt/llvm}/bin/clang -print-resource-dir)/include
-	COMPILE="$VCC --target=wasm64-unknown-emscripten -nostdinc -isystem $RES -isystem $SR/include/wasm64-emscripten
+	COMPILE="$VCC -x c --target=wasm64-unknown-emscripten -nostdinc -isystem $RES -isystem $SR/include/wasm64-emscripten
 	 -isystem $SR/include -Iinclude -std=c11 -O2 -D_GNU_SOURCE -DVCC_INCDIR=\"/vcc/include\" -Wno-unused-parameter -mllvm -wasm-enable-sjlj ${WFLAGS}"
 	LFLAGS=-sSUPPORT_LONGJMP=wasm	# setjmp through wasm exception handling, as vcc compiles it
 else
-	COMPILE="emcc $CFLAGS"
+	COMPILE="emcc -x c $CFLAGS"
 fi
 OBJS=
 pids=
-for s in $SRC port/wasm/mman.c; do
-	o=$OUT/obj/$(echo $s | sed 's,.*/,,; s,\.c$,.o,')
+for s in $SRC port/wasm/mman.cpp; do
+	name=${s##*/}
+	o=$OUT/obj/${name%.*}.o
 	OBJS="$OBJS $o"
 	$COMPILE -c $s -o $o &
 	pids="$pids $!"

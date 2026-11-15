@@ -9,8 +9,8 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "codegen/flow/graph.c"
-#include "codegen/flow/maskflow.c"
+#include "codegen/flow/graph.cpp"
+#include "codegen/flow/maskflow.cpp"
 
 /* Independent oracle: for one bit, find a path to a use or live exit before
    any definition kills the old value. It reads the original edge list, not

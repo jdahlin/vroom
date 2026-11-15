@@ -257,7 +257,7 @@ def list_sources(root):
             dirs[:] = [x for x in dirs if x not in SKIP[key]]
         dirs.sort()
         for n in sorted(names):
-            if n.endswith(('.c', '.h', '.inc')):
+            if n.endswith(('.c', '.cpp', '.h', '.inc')):
                 out.append(os.path.relpath(f'{d}/{n}', root))
     return out
 

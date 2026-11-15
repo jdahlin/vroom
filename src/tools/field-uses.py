@@ -7,14 +7,14 @@
 SELECTION: lines `OWNER.FIELD [NEW]` or `OWNER.*` (`#` starts a comment).  The
 tool runs vpp -fsyntax-only with VCC_FIELD_USES=SELECTION over every translation
 unit of vcc, in each configuration, and merges the reports of the mode
-(frontend/c/field-uses.c, doc/quality/DESIGN-field-uses.md).  Its only user
+(frontend/c/field-uses.cpp, doc/quality/DESIGN-field-uses.md).  Its only user
 is rename-table.py --fields.
 
 Configurations (default: every one this host can run):
   files  make vcc VCC_UNITY=       unity  make vcc            x86  files for x86_64-apple-darwin (macOS)
   asan, tsan  files with -fsanitize=...                       wasm  make vcc VCC_WASM=1 VCC_UNITY=
   fuzz   make fuzz
-The TU list is the Makefile's, never a glob: src/ld/*.c are pieces of ld/ld.c.
+The TU list is the Makefile's, never a glob: src/ld/*.c are pieces of ld/ld.cpp.
 
 --commands FILE: no make; one `CWD<TAB>COMMAND` per line (CWD relative to --root,
 default the checkout), for tests.
@@ -60,7 +60,7 @@ def compile_args(argv):
             flags.append(a)
         elif a.startswith('-'):
             pass
-        elif a.endswith('.c'):
+        elif a.endswith(('.c', '.cpp')):
             srcs.append(a)
     return flags, srcs
 
@@ -101,11 +101,11 @@ def make_commands(cfg, tmp, jobs):
     out = f'{tmp}/{derived.get(cfg, cfg)}'
     src = f'{R}/src'
     rel = os.path.relpath(out, src)
-    cmd = ['make', '-C', src, '-n', '-B'] + args + [f'OUT={rel}', 'CCACHE=']
+    cmd = ['make', '-C', src, '-n', '-B'] + args + ['VCC_LANG=c', f'OUT={rel}', 'CCACHE=']
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode:
         sys.exit(f'field-uses: {" ".join(cmd)} failed:\n{p.stderr}')
-    unity = sorted(set(re.findall(r'\S*obj/unity/[\w.-]+\.c', p.stdout)))
+    unity = sorted(set(re.findall(r'\S*obj/unity/[\w.-]+\.cpp', p.stdout)))
     if unity:   # generated for real: the dry run only names them
         subprocess.run(['make', '-C', src, '-j', str(jobs), f'OUT={rel}', 'CCACHE='] + [os.path.relpath(u, src) if os.path.isabs(u) else u for u in unity],
                        check=True, capture_output=True)
@@ -135,6 +135,8 @@ def run_tu(job, sel, vpp, root):
     cwd, flags, source = job
     env = dict(os.environ)
     env.update(ENV)
+    if source.endswith('.cpp'):
+        flags = [*flags, '-x', 'c']
     env['VCC_FIELD_USES'] = sel
     p = subprocess.run(['nice', '-n', '10', vpp, '-fsyntax-only', '-w'] + flags + [source], cwd=cwd, env=env, capture_output=True, text=True)
     return job, p

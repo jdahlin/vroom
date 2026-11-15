@@ -56,7 +56,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='vcc-host-dispatch-') as tmp:
         d = Path(tmp)
         (d/'crc.c').write_text(PROBE)
-        crc_source = ROOT/'src/port/crc32c.c'
+        crc_source = ROOT/'src/port/crc32c.cpp'
         crc_input = crc_source
         link_flags = []
         if platform.system() == 'Linux':
@@ -71,7 +71,7 @@ def main():
             flags += ['-isystem', '/usr/include']
             crc_input = d/'crc32c.o'
             link_flags = ['-no-pie']
-            compiled = subprocess.run([bins/'vpp', *flags, '-c', crc_source, '-o', crc_input],
+            compiled = subprocess.run([bins/'vpp', *flags, '-x', 'c', '-c', crc_source, '-o', crc_input],
                                       capture_output=True, text=True)
             if compiled.returncode or 'crc_word_hw: lowered, 0 spills' not in compiled.stderr:
                 raise RuntimeError('CRC word helper did not lower spill-free:\n'+compiled.stderr)
@@ -81,9 +81,9 @@ def main():
             if ops.count('crc32q') != 2 or any(op.startswith(('call', 'jmp')) for op in ops):
                 raise RuntimeError('expected both CRC updates inline in crc_pair_hw:\n'+pair)
         subprocess.run([hostenv.llvm('clang'), '-O2', '-march=x86-64', '-D_GNU_SOURCE',
-                        '-I'+str(ROOT/'src/include'), str(d/'crc.c'),
-                        str(ROOT/'src/common/intern.c'), str(ROOT/'src/common/fail.c'),
-                        str(crc_input), str(ROOT/'src/port/job-regions.c'), '-pthread', *link_flags, '-o', str(d/'crc')], check=True)
+                        '-I'+str(ROOT/'src/include'), str(d/'crc.c'), '-x', 'c',
+                        str(ROOT/'src/common/intern.cpp'), str(ROOT/'src/common/fail.cpp'),
+                        str(ROOT/'src/port/job-regions.cpp'), '-x', 'none' if crc_input.suffix == '.o' else 'c', str(crc_input), '-pthread', *link_flags, '-o', str(d/'crc')], check=True)
         src = d/'input.c'
         src.write_text(''.join('/*'+'x'*n+'*/\nconst char *s%d="%s\\\"";\n' % (n,'y'*n)
                                for n in (15,16,17,31,32,33,63,64,65,127,128,129)) +

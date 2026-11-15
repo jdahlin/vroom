@@ -52,7 +52,7 @@ done > $T/q.c
 sed -n 's/^\(__is_target_[a-z_]*\)(\(.*\)$/"\1" "\2" \1(\2)/p' $T/lit | LC_ALL=C sort -u >> $T/q.c
 sed -n 's/^\(__has_[a-z_]*\)(\(.*::.*\)$/"\1" "\2" \1(\2)/p' $T/lit | LC_ALL=C sort -u >> $T/q.c
 {
-	echo "#ifdef PPDATA_X86_HAS	/* frontend/pp/builtin.c */"
+	echo "#ifdef PPDATA_X86_HAS	/* frontend/pp/builtin.cpp */"
 	echo "/* x86-64 Linux: the nonzero answers, sorted by (query, name) for bsearch */"
 	echo "static const struct { const char *q, *name; int v; } has_tab_x86[] = {"
 	$CL $FX -ferror-limit=0 -E -P -x c $T/q.c 2>/dev/null | awk 'NF==3 && $3 ~ /^[0-9]+L?$/ && $3 != "0"' |

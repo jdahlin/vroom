@@ -21,4 +21,4 @@
 #define lex_scratch_size vlex_scratch_size_ref
 #define lex_token_spell vlex_spell_ref
 #define lex_token_name vtok_name_ref
-#include "../../frontend/lex/lex.c"
+#include "../../frontend/lex/lex.cpp"

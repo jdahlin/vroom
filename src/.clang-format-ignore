@@ -6,4 +6,4 @@
 test/**
 codegen/walk/prefix.h
 codegen/walk/unprefix.h
-server/capabilities.c
+server/capabilities.cpp

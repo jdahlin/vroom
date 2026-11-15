@@ -6,7 +6,7 @@ text shows.  Reads `-fdiagnostics-format=json` lines and the source files
 they name (physical "path", relative to --cwd), never "rendered", and
 prints what vcc's text output prints, byte for byte, including the
 "In file included from" lines and the "N errors generated." summary.
-Two styles, as vcc's: "vcc" (the default, src/diag/render-vcc.c: several
+Two styles, as vcc's: "vcc" (the default, src/diag/render-vcc.cpp: several
 lines, labels, folded notes, help) and "clang" (-fdiagnostics-style=clang).
 A change to either renderer in C changes this file too.
 
@@ -17,7 +17,7 @@ import re, json, os, sys
 
 
 def cp_width(c):
-    """diag/source-line.c diag_codepoint_width: 2 for East Asian wide and emoji, 0 for combining marks"""
+    """diag/source-line.cpp diag_codepoint_width: 2 for East Asian wide and emoji, 0 for combining marks"""
     if 0x300 <= c <= 0x36f or 0x200b <= c <= 0x200f or 0xfe00 <= c <= 0xfe0f:
         return 0
     if (0x1100 <= c <= 0x115f or (0x2e80 <= c <= 0xa4cf and c != 0x303f) or 0xac00 <= c <= 0xd7a3 or
@@ -28,7 +28,7 @@ def cp_width(c):
 
 
 def pad_at(s, ls, le, f):
-    """diag/render-clang.c diag_snippet_is_padded_at: an insertion widens clang's caret line unless a blank is next to it"""
+    """diag/render-clang.cpp diag_snippet_is_padded_at: an insertion widens clang's caret line unless a blank is next to it"""
     x = f['start']['offset']
     if f.get('end') and f['end'].get('offset') != x:
         return False
@@ -36,7 +36,7 @@ def pad_at(s, ls, le, f):
 
 
 def dcols(s, b, e, col=0):
-    """display columns of s[b:e] from col (diag/source-line.c diag_columns_width): tabs to the next multiple of 8,
+    """display columns of s[b:e] from col (diag/source-line.cpp diag_columns_width): tabs to the next multiple of 8,
     UTF-8 by its code point's width, a malformed byte one column"""
     i = b
     while i < e:
@@ -195,7 +195,7 @@ class Renderer:
         if fixes:
             out += b' ' * (width + 2) + b'| ' + bytes(fl) + b'\n'
 
-    # ---- vcc's style (src/diag/render-vcc.c) ----
+    # ---- vcc's style (src/diag/render-vcc.cpp) ----
 
     def head(self, d, out):
         """the first line (and include stack); the source and the location's offset, or None"""

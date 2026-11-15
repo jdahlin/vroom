@@ -6,7 +6,7 @@
  * for the same text.
  *
  * as.c parses and encodes instructions into the model below;
- * platform/wasm/wasm.c lays the model out as an object.
+ * platform/wasm/wasm.cpp lays the model out as an object.
  */
 #ifndef VCC_WAS_H
 #define VCC_WAS_H
@@ -157,7 +157,7 @@ typedef struct wmod {
     bool w32; /* wasm32: 32-bit memory and addresses */
 } wmod;
 
-/* platform/wasm/wasm.c */
+/* platform/wasm/wasm.cpp */
 int wasm_write(wmod *m, vbuffer *out);
 
 /* as.c, shared with wasm.c */

@@ -9,7 +9,7 @@ from hostenv import R, llvm
 
 SOURCE = r'''
 #include <assert.h>
-#include "codegen/opt/unusedinit.c"
+#include "codegen/opt/unusedinit.cpp"
 static ctype types[AST_TYPE_KIND_COUNT+2];
 static sym symbols[5];
 static attrs attributes[5];

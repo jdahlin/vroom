@@ -61,8 +61,8 @@ STEPS = {
                'x86native.h', 'x86native-data.inc', 'x86native-LICENSE.txt')],
            ('src/lib/x86features.h', 'src/arch/x64/x86features.h'),
            ('src/lib/x86features-data.inc', 'src/arch/x64/x86features-data.inc'),
-           ('src/platform/darwin/pmc.c', 'src/port/darwin/pmc.c'),
-           ('contrib/wasm/mman.c', 'src/port/wasm/mman.c'),
+           ('src/platform/darwin/pmc.c', 'src/port/darwin/pmc.cpp'),
+           ('contrib/wasm/mman.c', 'src/port/wasm/mman.cpp'),
            ('contrib/wasm/compat/', 'src/port/wasm/compat/')],
     # the language side under frontend/, code generation as codegen/, vccd's parts
     # apart, one directory per program's main under bin/
@@ -70,7 +70,7 @@ STEPS = {
            ('src/pp/diagout.c', 'src/frontend/diag/diagout.c'),
            ('src/pp/diagtext.c', 'src/frontend/diag/diagtext.c'),
            ('src/pp/diagids.inc', 'src/frontend/diag/diagids.inc'),
-           ('src/lex/lextest.c', 'src/bin/lextest/lextest.c'),
+           ('src/lex/lextest.c', 'src/bin/lextest/lextest.cpp'),
            ('src/lex/lexdiff.py', 'src/bin/lextest/lexdiff.py'),
            ('src/lex/lexpmc.sh', 'src/bin/lextest/lexpmc.sh'),
            ('src/lex/', 'src/frontend/lex/'),
@@ -80,15 +80,15 @@ STEPS = {
            ('src/arch/a64/emit/', 'src/arch/a64/codegen/'),
            ('src/arch/x64/emit/', 'src/arch/x64/codegen/'),
            ('src/arch/wasm/emit/', 'src/arch/wasm/codegen/'),
-           ('src/vccd/shim.c', 'src/bin/vcc/shim.c'),
+           ('src/vccd/shim.c', 'src/bin/vcc/shim.cpp'),
            *[(f'src/vccd/{f}', f'src/server/{f}') for f in (
                'vccd.c', 'dstore.c', 'dstore.h', 'caps.c', 'caps.h', 'warnings.inc', 'gen-warnings.sh')],
            *[(f'src/vccd/{f}', f'src/utils/{f}') for f in (
                'ar.c', 'ar.h', 'rsh.c', 'rsh.h', 'fixdep.c', 'fixdep.h')],
-           ('src/as/vasm.c', 'src/bin/vasm/vasm.c'),
-           ('src/driver/vpp.c', 'src/bin/vpp/vpp.c'),
-           ('src/vir/virtest.c', 'src/bin/virtest/virtest.c'),
-           ('src/vir/viralloc.c', 'src/bin/viralloc/viralloc.c')],
+           ('src/as/vasm.c', 'src/bin/vasm/vasm.cpp'),
+           ('src/driver/vpp.c', 'src/bin/vpp/vpp.cpp'),
+           ('src/vir/virtest.c', 'src/bin/virtest/virtest.cpp'),
+           ('src/vir/viralloc.c', 'src/bin/viralloc/viralloc.cpp')],
     # the headers other modules include -> src/include/, mirroring the tree
     # (PostgreSQL's src/include); included as "common/arena.h" with -Isrc/include
     'T4': [*[(f'src/{h}', f'src/include/{h}') for h in PUBLIC_T4],

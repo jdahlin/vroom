@@ -4,7 +4,7 @@ difference from clang's C ones, per target and C++ standard (PLAN-cxx.md X2).
 
   src/tools/gen-cxxpredef.py [CLANG]     (default clang-23)
 
-driver/predef.c appends the C base table (ppdata-predef.inc, ppdata-x86.inc)
+driver/predef.cpp appends the C base table (ppdata-predef.inc, ppdata-x86.inc)
 and then, for a C++ job, the entry for its target and -std: #undef lines for
 macros C has and C++ does not, #define lines for the new or changed ones.
 The C side is clang's default C standard (gnu17), so __STDC_VERSION__ is

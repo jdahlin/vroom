@@ -10,10 +10,10 @@ from hostenv import R, llvm
 SOURCE = r'''
 #define VCC_UNITY
 #include <assert.h>
-#include "codegen/opt/sdivconst.c"
+#include "codegen/opt/sdivconst.cpp"
 #include "arch/x64/codegen/x64-internal.h"
-#include "codegen/walk/division-signed-constant.c"
-#include "arch/a64/codegen/sdivconst.c"
+#include "codegen/walk/division-signed-constant.cpp"
+#include "arch/a64/codegen/sdivconst.cpp"
 VPRIV int x64_nfree(codegen_context *e) { return 8 - __builtin_popcount(e->x64_context->temporaries_in_use & X64_TEMPORARIES); }
 VPRIV i128 em_trunc_to(cc *c, i128 v, ast_qualified_type t) { (void)c; (void)t; return v; }
 VPRIV void slot_tag(codegen_context *e, a64_record *i, int64_t off, int64_t len)

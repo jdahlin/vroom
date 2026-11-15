@@ -466,7 +466,7 @@ VPRIV void as_gen_dwarf_prefix(as_context *a, as_text w, const char *e);
 VPRIV void as_gen_dwarf_label(as_context *a, const char *s, size_t n);
 VPRIV void as_gen_dwarf_section(as_context *a, uint32_t sec);
 VPRIV void as_gen_dwarf_finish(as_context *a);
-/* arch/x64/as/asm.c (EM_X86_64 objects) */
+/* arch/x64/as/asm.cpp (EM_X86_64 objects) */
 VPRIV int x64_as_instruction_assemble(as_context *a, const char *p,
                                       const char *e, size_t wn);
 /* variable-items.c: an x86-64 jump as a relaxed variable item (cc 16: jmp) */

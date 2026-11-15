@@ -206,7 +206,7 @@ static inline void elf_set_machine(ElfObj *o, int m)
     o->machine = (uint16_t)m;
 } /* kept across elf_reset */
 /* The file format the object is written in.  OBJ_COFF (x86-64 only, the Windows x64 target): elf_finish,
- * elf_emit and elf_write_file write a COFF object (platform/win/coff.c) and the model's sections and
+ * elf_emit and elf_write_file write a COFF object (platform/win/coff.cpp) and the model's sections and
  * symbols carry COFF meanings, see "COFF" below. */
 enum { OBJ_ELF = 0, OBJ_COFF = 1 };
 static inline void obj_set_format(ElfObj *o, int f)
@@ -380,7 +380,7 @@ size_t macho_finish(ElfObj *o);
 void macho_emit(ElfObj *o, uint8_t *out);
 
 /*
- * COFF (o->format == OBJ_COFF; platform/win/coff.c and unwind.c), byte-compatible with LLVM MC's
+ * COFF (o->format == OBJ_COFF; platform/win/coff.cpp and unwind.c), byte-compatible with LLVM MC's
  * WinCOFFObjectWriter and Win64EH for x86_64-w64-mingw32.
  *
  *   sections  ElfSec.flags holds the IMAGE_SCN_* characteristics without the alignment bits (those
@@ -448,7 +448,7 @@ void coff_align_common(ElfObj *o, uint32_t sym, unsigned log2_align);
 int obj_pcrel_resolves_locally(ElfObj *o, const ElfSym *y);
 
 /*
- * Windows x64 unwind information (platform/win/unwind.c, as MC's Win64EH, UNWIND_INFO version 1): the
+ * Windows x64 unwind information (platform/win/unwind.cpp, as MC's Win64EH, UNWIND_INFO version 1): the
  * .seh_* directives as calls.  Each call that stands for a position takes `label`, a temporary symbol
  * the caller has defined there (in the function's section); the unwind codes are label - start
  * differences, resolved at layout.  coff_seh_end writes the function's UNWIND_INFO to .xdata (or the

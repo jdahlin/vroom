@@ -50,7 +50,7 @@ static void spin(unsigned k)
 
 static void count_item(void *arg, size_t i)
 {
-	counts *c = arg;
+	counts *c = (counts *)arg;
 	int now = atomic_fetch_add(&c->concurrent, 1) + 1, m;
 
 	while ((m = atomic_load(&c->max_concurrent)) < now && !atomic_compare_exchange_weak(&c->max_concurrent, &m, now))
@@ -63,10 +63,10 @@ static void count_item(void *arg, size_t i)
 
 static counts *counts_new(size_t n, unsigned spin_k)
 {
-	counts *c = calloc(1, sizeof(*c));
+	counts *c = (counts *)calloc(1, sizeof(*c));
 
 	c->n = n;
-	c->seen = calloc(n ? n : 1, sizeof(*c->seen));
+	c->seen = (_Atomic int *)calloc(n ? n : 1, sizeof(*c->seen));
 	c->spin = spin_k;
 	return c;
 }
@@ -204,7 +204,7 @@ typedef struct inner_arg {
 
 static void inner_item(void *arg, size_t j)
 {
-	inner_arg *a = arg;
+	inner_arg *a = (inner_arg *)arg;
 
 	atomic_fetch_add(&a->n->seen[a->outer][j], 1);
 	spin(2000);
@@ -212,7 +212,7 @@ static void inner_item(void *arg, size_t j)
 
 static void outer_item(void *arg, size_t i)
 {
-	nested *n = arg;
+	nested *n = (nested *)arg;
 	inner_arg a = { n, i };
 
 	vtask_parallel_for(64, n->width, inner_item, &a, 0);
@@ -221,7 +221,7 @@ static void outer_item(void *arg, size_t i)
 static void test_nested(void)
 {
 	for (int b = 1; b <= 8; b *= 2) {
-		nested *n = calloc(1, sizeof(*n));
+		nested *n = (nested *)calloc(1, sizeof(*n));
 
 		vtask_budget_set(b);
 		n->width = 4;
