@@ -876,6 +876,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     if (qs->owner)
                         for (uint32_t i = 0; i < qs->owner->nspecs; i++)
                             cxx_scope_use(c, fs, qs->owner->specs[i]);
+                    /* X::Y::f: then X's members, after Y's (a nested class's member sees its enclosing
+					   classes' names: Skia's SkYUVAPixmapInfo::SupportedDataTypes::All and DataType) */
+                    if (qs->kind == CXX_SCOPE_CLASS)
+                        for (cxx_scope *u = qs->parent;
+                             u && u->kind == CXX_SCOPE_CLASS; u = u->parent)
+                            cxx_scope_use(c, fs, u);
                 }
                 cxx_scope_push(c, fs);
                 cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
