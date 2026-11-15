@@ -702,6 +702,22 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs,
     bool skipped = false;
 
     for (uint32_t i = 0; i < nargs && i < f->np; i++) {
+        if (xargs && nxargs != UINT32_MAX && f->pt[i] != CXX_TY_UNKNOWN) {
+            /* a parameter of type T (T&, T&&, cv T&) whose T was given explicitly (s3<Pol, Less &>(a, b, c)):
+               nothing deduced from it, the argument converted to it ([temp.deduct.call]/1: an explicitly
+               specified parameter takes part in no deduction) */
+            ast_qualified_type P0 = f->pt[i];
+            void *owner;
+            int k;
+
+            if (AST_TYPE_KIND(c->ast, P0) == AST_TYPE_POINTER &&
+                AST_TYPE(c->ast, P0)->ext)
+                P0 = AST_TYPE(c->ast, P0)->base;
+            k = cxx_placeholder_of(c, AST_QUALIFIED_TYPE_UNQUALIFIED(P0),
+                                   &owner);
+            if (k >= 0 && owner == p && (uint32_t)k < nxargs && bind[k].kind)
+                continue;
+        }
         if (brace && i < CXX_MAX_ARGS && brace[i] &&
             f->pt[i] != CXX_TY_UNKNOWN) {
             /* a braced list against T, T& or T&&: a non-deduced context ([temp.deduct.call]/1), T from its
