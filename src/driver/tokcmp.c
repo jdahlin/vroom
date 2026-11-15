@@ -12,6 +12,7 @@
  * the token copies are freed: do not keep pointers into them.  The token hash covers kind, spacing
  * flags, location, spelling and the file names (VPP_TOKCOUNT=1 only counts).
  */
+#include "common/literal.h"
 #include "driver-internal.h"
 
 #ifdef __APPLE__
@@ -28,11 +29,11 @@
 static lex_file driver_tokens_lex_string(const char *s, size_t n)
 {
     lex_file f = {0};
-    char *src = mmap(NULL, n + 4096, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANON, -1, 0);
-    lex_token *tok =
-        mmap(NULL, (n + 2) * sizeof(lex_token), PROT_READ | PROT_WRITE,
-             MAP_PRIVATE | MAP_ANON, -1, 0);
+    char *src = (char *)mmap(NULL, n + 4096, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANON, -1, 0);
+    lex_token *tok = (lex_token *)(mmap(NULL, (n + 2) * sizeof(lex_token),
+                                        PROT_READ | PROT_WRITE,
+                                        MAP_PRIVATE | MAP_ANON, -1, 0));
     size_t sn = lex_scratch_size(n) + 4096;
     void *scr =
         mmap(NULL, sn, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -95,8 +96,8 @@ static int driver_tokens_compare_buffers(const lex_file *pa, const lex_file *pb,
 static uint64_t driver_tokens_hash(const lex_file *f)
 {
     size_t cap = (size_t)f->size + (size_t)f->ntok * 5 + 64, n = 0;
-    unsigned char *b =
-        mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    unsigned char *b = (unsigned char *)mmap(NULL, cap, PROT_READ | PROT_WRITE,
+                                             MAP_PRIVATE | MAP_ANON, -1, 0);
     uint64_t h;
 
     for (uint32_t i = 0; i < f->ntok; i++) {
@@ -108,7 +109,8 @@ static uint64_t driver_tokens_hash(const lex_file *f)
             break;
         b[n] = (unsigned char)t->kind;
         l = driver_tokens_spelling_get(f, t, (char *)b + n + 5);
-        memcpy(b + n + 1, &(uint32_t){(uint32_t)l}, 4);
+        uint32_t length = (uint32_t)l;
+        memcpy(b + n + 1, &length, sizeof length);
         n += 5 + l;
     }
     h = vdigest_xxh3(b, n) ^ f->ntok;
@@ -177,8 +179,8 @@ int driver_tokens_compare(const char *ours, size_t on, const char *refpath)
         return 2;
     }
     if (!ba) {
-        ba = malloc(1 << 20);
-        bb = malloc(1 << 20);
+        ba = (char *)malloc(1 << 20);
+        bb = (char *)malloc(1 << 20);
     }
     lex_identifiers_not_interned =
         1; /* the copies are freed: nothing may point into them */
@@ -193,8 +195,8 @@ int driver_tokens_compare(const char *ours, size_t on, const char *refpath)
         return 0;
     }
     {
-        char *m =
-            mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0);
+        char *m = (char *)(mmap(NULL, (size_t)st.st_size + 1, PROT_READ,
+                                MAP_PRIVATE, fd, 0));
 
         VCLOSE(fd);
         B = driver_tokens_lex_string(m, (size_t)st.st_size);

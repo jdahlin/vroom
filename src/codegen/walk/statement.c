@@ -12,6 +12,7 @@
  * parameters to the arguments, and its returns go to a label (wkinl); the prepass (prepass.c) says
  * whether a function may be inlined.
  */
+#include "common/literal.h"
 #include "walk.h"
 
 /* ---------------- state ---------------- */
@@ -30,48 +31,49 @@ VPRIV walk_state *walk_state_get(codegen_context *e)
     walk_state *W = e->walk_state;
 
     if (!W) {
-        W = calloc(1, sizeof *W);
-        W->cases = codegen_memory_reserve(WALK_CASE_MAX * sizeof(walk_case));
+        W = (walk_state *)calloc(1, sizeof *W);
+        W->cases = (walk_case *)(codegen_memory_reserve(WALK_CASE_MAX *
+                                                        sizeof(walk_case)));
         e->walk_state = W;
     }
     if (!W->symbol_generations) {
         /* sized for this TU (gen-tagged: never cleared); one TU per ecx */
-        W->symbol_generations =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-        W->symbol_offsets =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(int64_t));
-        W->label_generations =
-            codegen_memory_reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-        W->user_labels =
-            codegen_memory_reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-        W->case_generations =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-        W->case_labels =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-        W->constant_generations =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-        W->constant_values = codegen_memory_reserve(((size_t)c->nsym + 64) *
-                                                    sizeof(codegen_value));
-        W->label_instances =
-            codegen_memory_reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-        W->case_instances =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-        W->cleanup_symbol_nodes =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-        W->cleanup_symbol_generations =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-        W->label_cleanup_nodes =
-            codegen_memory_reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-        W->label_cleanup_generations =
-            codegen_memory_reserve(((size_t)c->nlabel + 64) * sizeof(uint32_t));
-        W->vla_zero_generations =
-            codegen_memory_reserve(((size_t)c->nsym + 64) * sizeof(uint32_t));
-        W->vla_generations =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-        W->vla_instances =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(uint32_t));
-        W->vla_offsets =
-            codegen_memory_reserve(((size_t)c->nnode + 64) * sizeof(int64_t));
+        W->symbol_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
+        W->symbol_offsets = (int64_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(int64_t)));
+        W->label_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
+        W->user_labels = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
+        W->case_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(uint32_t)));
+        W->case_labels = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(uint32_t)));
+        W->constant_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
+        W->constant_values = (codegen_value *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(codegen_value)));
+        W->label_instances = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
+        W->case_instances = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(uint32_t)));
+        W->cleanup_symbol_nodes = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
+        W->cleanup_symbol_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
+        W->label_cleanup_nodes = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
+        W->label_cleanup_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nlabel + 64) * sizeof(uint32_t)));
+        W->vla_zero_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nsym + 64) * sizeof(uint32_t)));
+        W->vla_generations = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(uint32_t)));
+        W->vla_instances = (uint32_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(uint32_t)));
+        W->vla_offsets = (int64_t *)(codegen_memory_reserve(
+            ((size_t)c->nnode + 64) * sizeof(int64_t)));
     }
     return W;
 }
@@ -147,7 +149,7 @@ VPRIV int64_t walk_slot_temporary(codegen_context *e, uint64_t size,
 
     if (W->temporary_slot_in_use_count < WALK_TEMPORARY_SLOT_MAX)
         W->temporary_slots_in_use[W->temporary_slot_in_use_count++] =
-            (struct walk_temporary_slot){o, (uint32_t)size, align};
+            VCC_LITERAL(struct walk_temporary_slot, o, (uint32_t)size, align);
     return o;
 }
 
@@ -311,10 +313,10 @@ static void walk_initializer_elements_store(codegen_context *e,
         /* the literal's bytes (up to the array's size; the rest is zero) */
         const cstr *s = &c->strs[x->a];
         uint64_t n = (uint64_t)s->n * s->esz, cap = codegen_type_size(c, ty);
-        codegen_lvalue src = {
-            .kind = CODEGEN_LVALUE_SYMBOL,
-            .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_STRING, x->a),
-            .align = s->esz};
+        codegen_lvalue src = {.kind = CODEGEN_LVALUE_SYMBOL,
+                              .align = s->esz,
+                              .reference = CODEGEN_REFERENCE_MAKE(
+                                  CODEGEN_REFERENCE_STRING, x->a)};
         int rd, rs;
 
         if (n > cap)
@@ -410,8 +412,8 @@ VPRIV void walk_cleanups_run(codegen_context *e, int to)
                  fn = codegen_symbol_canonical(
                      c, codegen_symbol_attributes(c, s)->cleanup);
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                            .offset = walk_local_slot(e, s),
-                            .align = 8};
+                            .align = 8,
+                            .offset = walk_local_slot(e, s)};
         walk_argument a;
         codegen_value r;
 
@@ -421,7 +423,7 @@ VPRIV void walk_cleanups_run(codegen_context *e, int to)
         {
             int ra = WALK_LOWER(laddr)(e, &l);
             codegen_lvalue d = {
-                .kind = CODEGEN_LVALUE_FRAME, .offset = a.slot, .align = 8};
+                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = a.slot};
 
             WALK_LOWER(store)(e, ra, &d, 8);
             WALK_LOWER(tfree)(e, ra);
@@ -577,8 +579,8 @@ static void walk_vla_scan(codegen_context *e, uint32_t n, uint32_t *top)
             y->sc != AST_STORAGE_STATIC && y->sc != AST_STORAGE_EXTERN &&
             (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)) {
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = walk_local_slot(e, x->a) + 8,
-                                .align = 8};
+                                .align = 8,
+                                .offset = walk_local_slot(e, x->a) + 8};
             codegen_value z = codegen_value_constant(0);
             int r = WALK_LOWER(toreg)(e, &z);
 
@@ -765,8 +767,8 @@ static void walk_cases_collect(codegen_context *e, uint32_t n)
         if (W->case_count == WALK_CASE_MAX)
             codegen_fatal_report(e, x->loc, "too many case labels");
         W->cases[W->case_count++] =
-            (walk_case){x->op == AST_NODE_CASE ? c->ipool[x->a] : 0,
-                        x->op == AST_NODE_CASE ? c->ipool[x->b] : 0, n};
+            VCC_LITERAL(walk_case, x->op == AST_NODE_CASE ? c->ipool[x->a] : 0,
+                        x->op == AST_NODE_CASE ? c->ipool[x->b] : 0, n);
         walk_cases_collect(e, x->c);
         return;
     case AST_NODE_BLOCK:
@@ -865,7 +867,8 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
             W->case_count = c0;
             if (W->loop_count == WALK_LOOP_MAX)
                 codegen_fatal_report(e, x->loc, "statements nested too deeply");
-            W->loop[W->loop_count++] = (walk_loop){lbrk, 0, W->cleanup_count};
+            W->loop[W->loop_count++] =
+                VCC_LITERAL(walk_loop, lbrk, 0, W->cleanup_count);
             W->switch_is_constant = true, W->switch_selected_case = sel;
             WALK_LOWER(jump)(
                 e,
@@ -908,7 +911,8 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
         uint32_t nc = 0;
         for (uint32_t i = c0; i < W->case_count; i++)
             nc += N(W->cases[i].node)->op != AST_NODE_DEFAULT;
-        em_switch_case *cases = nc >= 4 ? malloc(nc * sizeof *cases) : NULL;
+        em_switch_case *cases =
+            (em_switch_case *)(nc >= 4 ? malloc(nc * sizeof *cases) : NULL);
         uint32_t j = 0;
         bool ranges = false;
         for (uint32_t i = c0; cases && i < W->case_count; i++) {
@@ -917,7 +921,7 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
             if (N(k->node)->op == AST_NODE_DEFAULT)
                 ldef = l;
             else {
-                cases[j++] = (em_switch_case){k->low, k->high, l};
+                cases[j++] = VCC_LITERAL(em_switch_case, k->low, k->high, l);
                 ranges |= k->low != k->high;
             }
         }
@@ -939,7 +943,7 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
         em_switch_strategy(count, 0, 0, false, false) == EM_SWITCH_TREE &&
         !walk_type_is_in_memory(e, ct);
     if (tree) {
-        em_switch_case *cases = malloc(count * sizeof *cases);
+        em_switch_case *cases = (em_switch_case *)malloc(count * sizeof *cases);
         uint32_t j = 0;
         for (uint32_t i = c0; cases && i < W->case_count; i++) {
             walk_case *k = &W->cases[i];
@@ -947,7 +951,7 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
             if (N(k->node)->op == AST_NODE_DEFAULT)
                 ldef = l;
             else
-                cases[j++] = (em_switch_case){k->low, k->high, l};
+                cases[j++] = VCC_LITERAL(em_switch_case, k->low, k->high, l);
         }
         /* A default label is not a comparison. */
         tree = cases && em_switch_prepare(cases, j, (unsigned)w * 8, sg);
@@ -973,16 +977,18 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
                           k->low == k->high ? LEX_TOKEN_EQUAL_EQUAL
                                             : LEX_TOKEN_GREATER_EQUAL,
                           ct,
-                          (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                          .register_number = (uint8_t)r},
+                          VCC_LITERAL(codegen_value,
+                                      .kind = CODEGEN_VALUE_REGISTER,
+                                      .register_number = (uint8_t)r),
                           codegen_value_constant(k->low))
                     : WALK_LOWER(wcmp)(
                           e,
                           k->low == k->high ? LEX_TOKEN_EQUAL_EQUAL
                                             : LEX_TOKEN_GREATER_EQUAL,
                           sg,
-                          (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                          .register_number = (uint8_t)r},
+                          VCC_LITERAL(codegen_value,
+                                      .kind = CODEGEN_VALUE_REGISTER,
+                                      .register_number = (uint8_t)r),
                           codegen_value_constant(k->low));
             uint32_t skip = walk_label_new(e);
 
@@ -995,21 +1001,24 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
             t = codegen_type_is_bitint_big(c, ct)
                     ? WALK_LOWER(bigcmp)(
                           e, LEX_TOKEN_LESS_EQUAL, ct,
-                          (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                          .register_number = (uint8_t)r},
+                          VCC_LITERAL(codegen_value,
+                                      .kind = CODEGEN_VALUE_REGISTER,
+                                      .register_number = (uint8_t)r),
                           codegen_value_constant(k->high))
                     : WALK_LOWER(wcmp)(
                           e, LEX_TOKEN_LESS_EQUAL, sg,
-                          (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                          .register_number = (uint8_t)r},
+                          VCC_LITERAL(codegen_value,
+                                      .kind = CODEGEN_VALUE_REGISTER,
+                                      .register_number = (uint8_t)r),
                           codegen_value_constant(k->high));
             WALK_LOWER(tkeep)(e, r);
             WALK_LOWER(brz)(e, t, 4, true, l);
             walk_label_place(e, skip);
         } else if (k->low == k->high) {
             WALK_LOWER(cmpbr)(e, LEX_TOKEN_EQUAL_EQUAL, w, sg,
-                              (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                              .register_number = (uint8_t)r},
+                              VCC_LITERAL(codegen_value,
+                                          .kind = CODEGEN_VALUE_REGISTER,
+                                          .register_number = (uint8_t)r),
                               codegen_value_constant(k->low), l);
             WALK_LOWER(tkeep)(e, r);
         } else {
@@ -1017,13 +1026,15 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
             uint32_t skip = walk_label_new(e);
 
             WALK_LOWER(cmpbr)(e, LEX_TOKEN_LESS, w, sg,
-                              (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                              .register_number = (uint8_t)r},
+                              VCC_LITERAL(codegen_value,
+                                          .kind = CODEGEN_VALUE_REGISTER,
+                                          .register_number = (uint8_t)r),
                               codegen_value_constant(k->low), skip);
             WALK_LOWER(tkeep)(e, r);
             WALK_LOWER(cmpbr)(e, LEX_TOKEN_LESS_EQUAL, w, sg,
-                              (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                              .register_number = (uint8_t)r},
+                              VCC_LITERAL(codegen_value,
+                                          .kind = CODEGEN_VALUE_REGISTER,
+                                          .register_number = (uint8_t)r),
                               codegen_value_constant(k->high), l);
             WALK_LOWER(tkeep)(e, r);
             walk_label_place(e, skip);
@@ -1035,7 +1046,8 @@ static void walk_switch_emit(codegen_context *e, uint32_t n)
         WALK_LOWER(jump)(e, ldef);
     if (W->loop_count == WALK_LOOP_MAX)
         codegen_fatal_report(e, x->loc, "statements nested too deeply");
-    W->loop[W->loop_count++] = (walk_loop){lbrk, 0, W->cleanup_count};
+    W->loop[W->loop_count++] =
+        VCC_LITERAL(walk_loop, lbrk, 0, W->cleanup_count);
     {
         bool on0 = W->switch_is_constant;
 
@@ -1056,7 +1068,8 @@ static void walk_loop_push(codegen_context *e, uint32_t brk, uint32_t cont)
     if (W->loop_count == WALK_LOOP_MAX)
         codegen_fatal_report(e, e->current_location,
                              "statements nested too deeply");
-    W->loop[W->loop_count++] = (walk_loop){brk, cont, W->cleanup_count};
+    W->loop[W->loop_count++] =
+        VCC_LITERAL(walk_loop, brk, cont, W->cleanup_count);
 }
 
 VPRIV void walk_goto_emit(codegen_context *e, uint32_t label)
@@ -1233,8 +1246,8 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
         }
         if (vs) {
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = walk_local_slot(e, vs) + 8,
-                                .align = 8};
+                                .align = 8,
+                                .offset = walk_local_slot(e, vs) + 8};
             int r = WALK_LOWER(treg)(e);
 
             WALK_LOWER(load)(e, r, &l, 8, false);
@@ -1438,8 +1451,8 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
             if (x->a && KIND(c, I->return_type) != AST_TYPE_VOID) {
                 const node *result = N(x->a);
                 codegen_lvalue t = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = I->return_slot,
-                                    .align = 16};
+                                    .align = 16,
+                                    .offset = I->return_slot};
 
                 /* The inline result slot is private until the call finishes. */
                 if (result->op == AST_NODE_COMPOUND_LITERAL &&
@@ -1498,9 +1511,9 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
                       codegen_symbol_is_local_variable(c, N(x->a)->a))) {
                     codegen_lvalue t = {
                         .kind = CODEGEN_LVALUE_FRAME,
+                        .align = 16,
                         .offset = walk_slot_temporary(
-                            e, codegen_type_size(c, W->return_type), 16),
-                        .align = 16};
+                            e, codegen_type_size(c, W->return_type), 16)};
                     int rt = WALK_LOWER(laddr)(e, &t);
 
                     WALK_LOWER(copy)(e, rt, r,
@@ -1514,9 +1527,9 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
             if (!W->return_record.is_in_memory && W->return_record.size % 8) {
                 codegen_lvalue t = {
                     .kind = CODEGEN_LVALUE_FRAME,
+                    .align = 8,
                     .offset = walk_slot_temporary(
-                        e, (W->return_record.size + 7) & ~(uint64_t)7, 8),
-                    .align = 8};
+                        e, (W->return_record.size + 7) & ~(uint64_t)7, 8)};
                 int rt = WALK_LOWER(laddr)(e, &t);
 
                 WALK_LOWER(copy)(e, rt, r, W->return_record.size);
@@ -1530,19 +1543,19 @@ static void walk_statement_emit_inner(codegen_context *e, uint32_t n)
             if (W->cleanup_count) {
                 /* the value parked while the cleanups run */
                 codegen_lvalue t = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = walk_slot_temporary(e, 8, 8),
-                                    .align = 8};
+                                    .align = 8,
+                                    .offset = walk_slot_temporary(e, 8, 8)};
                 int r = walk_value_to_register(e, &v);
 
                 WALK_LOWER(store)(e, r, &t, 8);
                 WALK_LOWER(tfree)(e, r);
                 walk_cleanups_run(e, 0);
-                v = (codegen_value){
-                    .kind = CODEGEN_VALUE_REGISTER,
+                v = VCC_LITERAL(
+                    codegen_value, .kind = CODEGEN_VALUE_REGISTER,
                     .register_number =
                         (uint8_t)(codegen_type_is_float(c, W->return_type)
                                       ? WALK_LOWER(ftreg)(e)
-                                      : WALK_LOWER(treg)(e))};
+                                      : WALK_LOWER(treg)(e)));
                 WALK_LOWER(load)(e, v.register_number, &t, 8, false);
             }
             WALK_LOWER(ret)(e, &v, W->return_type, W->return_label);
@@ -1769,12 +1782,12 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     const node *x = N(n), *body = N(c->syms[s].body);
     walk_inline_call I = {.outer = W->inline_call,
                           .function = s,
-                          .call = n,
                           .end_label = walk_label_new(e),
+                          .call = n,
                           .return_type = T(c, c->syms[s].ty)->base,
                           .cleanup_base = W->cleanup_count,
-                          .constant_is_ok = true,
-                          .vla_base = W->vla_count};
+                          .vla_base = W->vla_count,
+                          .constant_is_ok = true};
     uint32_t inst0 = W->instance;
     int64_t saved_sp = 0;
     codegen_value res;
@@ -1824,13 +1837,13 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
                 walk_type_is_in_memory(e, pt) || codegen_type_is_float(c, pt)) {
                 codegen_lvalue l = {
                     .kind = CODEGEN_LVALUE_FRAME,
+                    .align = 8,
                     .offset = walk_slot_temporary(
                         e,
                         codegen_type_size(c, pt) ? codegen_type_size(c, pt) : 8,
                         codegen_type_alignment(c, pt) < 8
                             ? 8
-                            : codegen_type_alignment(c, pt)),
-                    .align = 8};
+                            : codegen_type_alignment(c, pt))};
 
                 as[i] = (int64_t)l.offset;
                 if (walk_type_is_in_memory(e, pt)) {
@@ -1850,7 +1863,7 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
             uint32_t p = c->lists[body->a + i];
             ast_qualified_type pt = c->syms[p].ty;
             codegen_lvalue l,
-                t = {.kind = CODEGEN_LVALUE_FRAME, .offset = as[i], .align = 8};
+                t = {.kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = as[i]};
             codegen_value v;
 
             if (!as[i] &&
@@ -1870,9 +1883,9 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
 			   (VIR), else the frame slot */
             W->instance = W->instance_count + 1;
             if (!WALK_LOWER(local)(e, p, &l))
-                l = (codegen_lvalue){.kind = CODEGEN_LVALUE_FRAME,
-                                     .offset = walk_local_slot(e, p),
-                                     .align = codegen_symbol_alignment(c, p)};
+                l = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME,
+                                .align = codegen_symbol_alignment(c, p),
+                                .offset = walk_local_slot(e, p));
             W->instance = inst0;
             W->constant_generations[p] = 0;
             if ((av[i].kind == CODEGEN_VALUE_CONSTANT ||
@@ -1925,8 +1938,8 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
     /* alloca belongs to this function instance, including its early returns. */
     if (e->unit->node_flags[c->syms[s].body] & CODEGEN_NODE_HAS_ALLOCA) {
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                            .offset = saved_sp = walk_slot_temporary(e, 8, 8),
-                            .align = 8};
+                            .align = 8,
+                            .offset = saved_sp = walk_slot_temporary(e, 8, 8)};
         int r = WALK_LOWER(spget)(e);
         WALK_LOWER(store)(e, r, &l, 8);
         WALK_LOWER(tfree)(e, r);
@@ -1944,14 +1957,15 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
         W->symbol_generations[l.symbol] = 0;
         if (W->temporary_slot_free_count < WALK_TEMPORARY_SLOT_MAX)
             W->temporary_slots_free[W->temporary_slot_free_count++] =
-                (struct walk_temporary_slot){l.offset, l.size, l.align};
+                VCC_LITERAL(struct walk_temporary_slot, l.offset, l.size,
+                            l.align);
     }
     W->inline_call = I.outer;
     W->instance = inst0;
     walk_label_place(e, I.end_label);
     if (saved_sp) {
         codegen_lvalue l = {
-            .kind = CODEGEN_LVALUE_FRAME, .offset = saved_sp, .align = 8};
+            .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = saved_sp};
         int r = WALK_LOWER(treg)(e);
         WALK_LOWER(load)(e, r, &l, 8, false);
         WALK_LOWER(spset)(e, r);
@@ -1967,17 +1981,17 @@ VPRIV codegen_value walk_call_inline(codegen_context *e, uint32_t n, uint32_t s)
         return I.constant;
     {
         codegen_lvalue t = {
-            .kind = CODEGEN_LVALUE_FRAME, .offset = I.return_slot, .align = 16};
+            .kind = CODEGEN_LVALUE_FRAME, .align = 16, .offset = I.return_slot};
 
         if (walk_type_is_in_memory(e, I.return_type))
-            return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                   .register_number =
-                                       (uint8_t)WALK_LOWER(laddr)(e, &t)};
-        res = (codegen_value){
-            .kind = CODEGEN_VALUE_REGISTER,
-            .register_number = (uint8_t)(codegen_type_is_float(c, I.return_type)
-                                             ? WALK_LOWER(ftreg)(e)
-                                             : WALK_LOWER(treg)(e))};
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number =
+                                   (uint8_t)WALK_LOWER(laddr)(e, &t));
+        res = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                          .register_number =
+                              (uint8_t)(codegen_type_is_float(c, I.return_type)
+                                            ? WALK_LOWER(ftreg)(e)
+                                            : WALK_LOWER(treg)(e)));
         WALK_LOWER(load)(e, res.register_number, &t,
                          walk_type_size(c, I.return_type),
                          walk_type_is_signed(c, I.return_type));
@@ -2004,9 +2018,10 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     const node *body = N(y->body);
     walk_state *W = walk_state_get(e);
     walk_argument pabuf[256];
-    walk_argument *pa = body->aux > sizeof pabuf / sizeof *pabuf
-                            ? malloc((size_t)body->aux * sizeof *pa)
-                            : pabuf;
+    walk_argument *pa =
+        (walk_argument *)(body->aux > sizeof pabuf / sizeof *pabuf
+                              ? malloc((size_t)body->aux * sizeof *pa)
+                              : pabuf);
 
     codegen_function_prepass_request(e, s);
     W->generation++;
@@ -2020,7 +2035,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     W->return_type = ft->base;
     W->function_symbol = s;
     e->known_value_count = e->array_element_count = e->known_values_valid = 0;
-    W->return_record = (walk_argument){0};
+    W->return_record = VCC_LITERAL(walk_argument, 0);
     W->cleanup_count = W->vla_count = 0;
     W->instance = 0;
     W->inline_call = NULL;
@@ -2095,7 +2110,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
             KIND(c, c->syms[p].ty) == AST_TYPE_FLOAT) {
             /* the double narrowed to the float the parameter is, in place */
             codegen_lvalue l = {
-                .kind = CODEGEN_LVALUE_FRAME, .offset = pa[i].slot, .align = 8};
+                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = pa[i].slot};
             codegen_value v = {.kind = CODEGEN_VALUE_REGISTER,
                                .register_number =
                                    (uint8_t)WALK_LOWER(ftreg)(e)};

@@ -7,6 +7,7 @@
  * what is known now: absolute symbols, equal symbols and two symbols defined in the same frag; a
  * difference across frags stays a value for the fixup or variable-item code.  Parsing never allocates
  * outside the context and reports through as_error_report. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- expressions */
@@ -71,7 +72,7 @@ static void as_value_defer_operation(as_context *a, int op, as_value *x,
 {
     uint32_t t = as_symbol_temporary(a);
     elf_expr_sym(a->object, t, op, *x, *y);
-    *x = (as_value){t, 0, 0};
+    *x = VCC_LITERAL(as_value, t, 0, 0);
 }
 
 typedef struct {
@@ -125,7 +126,7 @@ static int as_number_parse(as_expression_reader *l, as_value *v)
                 y = nl->forward;
             }
             l->cursor = p + 1;
-            *v = (as_value){y, 0, 0};
+            *v = VCC_LITERAL(as_value, y, 0, 0);
             as_value_fold(l->context, v);
             return 0;
         }
@@ -146,7 +147,7 @@ static int as_number_parse(as_expression_reader *l, as_value *v)
             p = q;
     }
     l->cursor = p;
-    *v = (as_value){0, 0, (int64_t)x};
+    *v = VCC_LITERAL(as_value, 0, 0, (int64_t)x);
     return 0;
 }
 
@@ -222,7 +223,8 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
             h = (h ^ (uint64_t)as_char_to_lower((unsigned char)*q)) *
                 1099511628211ull;
         l->cursor = p;
-        *v = (as_value){0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61)};
+        *v =
+            VCC_LITERAL(as_value, 0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61));
         return 0;
     }
     if (as_char_is_digit((unsigned char)c))
@@ -253,13 +255,13 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
         if (p < l->end && *p == '\'')
             p++;
         l->cursor = p;
-        *v = (as_value){0, 0, x};
+        *v = VCC_LITERAL(as_value, 0, 0, x);
         return 0;
     }
     if (c == '.' && (l->cursor + 1 >= l->end ||
                      !as_char_is_identifier((unsigned char)l->cursor[1]))) {
         l->cursor++;
-        *v = (as_value){as_label_temporary_define(a), 0, 0};
+        *v = VCC_LITERAL(as_value, as_label_temporary_define(a), 0, 0);
         return 0;
     }
     if (as_char_is_identifier_start((unsigned char)c) || c == '"' ||
@@ -285,7 +287,7 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
             l->cursor = p;
         }
         uint32_t y = as_symbol_intern(a, s, (size_t)(p - s));
-        *v = (as_value){y, 0, 0};
+        *v = VCC_LITERAL(as_value, y, 0, 0);
         if (a->register_alias_count) {
             const char *rn = as_register_alias_find(a, y);
             if (rn) { /* an alias of a register: as the register */
@@ -293,7 +295,8 @@ static int as_expression_primary_parse(as_expression_reader *l, as_value *v)
                 for (const char *q = rn; *q; q++)
                     h = (h ^ (uint64_t)as_char_to_lower((unsigned char)*q)) *
                         1099511628211ull;
-                *v = (as_value){0, 0, (int64_t)(h >> 2) | ((int64_t)1 << 61)};
+                *v = VCC_LITERAL(as_value, 0, 0,
+                                 (int64_t)(h >> 2) | ((int64_t)1 << 61));
                 return 0;
             }
         }
@@ -483,7 +486,7 @@ static int as_operator_apply(as_context *a, int op, as_value *x, as_value *y)
             return as_error_report(a, "expected absolute expression");
         uint32_t t = as_symbol_temporary(a);
         elf_expr_sym(a->object, t, op, *x, *y);
-        *x = (as_value){t, 0, 0};
+        *x = VCC_LITERAL(as_value, t, 0, 0);
         return 0;
     }
     int64_t p = x->c, q = y->c, r;

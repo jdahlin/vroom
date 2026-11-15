@@ -33,7 +33,7 @@ static uint32_t pp_header_cache_signature_intern(char *b, size_t n)
             break;
         }
     if (r == PP_HEADER_CACHE_NONE && pp_signature_count < (1 << 16)) {
-        char *c = malloc(n ? n : 1);
+        char *c = (char *)malloc(n ? n : 1);
 
         memcpy(c, b, n);
         pp_signature_strings[pp_signature_count] = c;
@@ -48,7 +48,7 @@ static uint32_t pp_header_cache_signature_intern(char *b, size_t n)
 VPRIV bool pp_header_cache_signatures_get(const pp_opts *o, uint32_t *sig,
                                           uint32_t *psig)
 {
-    char *b = malloc(1 << 17);
+    char *b = (char *)malloc(1 << 17);
     size_t n = 0;
     bool ok = true;
 
@@ -117,10 +117,11 @@ VPRIV pp_header_cache_key *pp_header_cache_key_get(uint32_t sig,
             if (!make)
                 return NULL;
             if (!mine) {
-                char *sp = pp_shared_allocate(sl + 1);
+                char *sp = (char *)pp_shared_allocate(sl + 1);
 
                 memcpy(sp, spath, sl + 1);
-                mine = pp_shared_allocate(sizeof(*mine));
+                mine =
+                    (pp_header_cache_key *)(pp_shared_allocate(sizeof(*mine)));
                 mine->hash = h;
                 mine->f = f;
                 mine->spath = sp;
@@ -156,8 +157,8 @@ VPRIV int pp_once_file_find(const pp *p, const lex_file *f)
 VPRIV void pp_once_file_add(pp *p, const lex_file *f)
 {
     if (p->once_file_count == p->once_file_capacity) {
-        const lex_file **n = varena_alloc(
-            &p->permanent_region, 2 * p->once_file_capacity * sizeof(*n));
+        const lex_file **n = (const lex_file **)(varena_alloc(
+            &p->permanent_region, 2 * p->once_file_capacity * sizeof(*n)));
 
         memcpy(n, p->once_files, p->once_file_count * sizeof(*n));
         p->once_files = n;

@@ -74,7 +74,7 @@ static void driver_source_assemble(struct driver_job *job,
         return;
     }
     /* padded: the lexer reads 16 bytes past the end */
-    VAUTOFREE char *t = calloc(1, (size_t)st.st_size + 64);
+    VAUTOFREE char *t = (char *)(calloc(1, (size_t)st.st_size + 64));
     ssize_t got = t ? read(fd, t, (size_t)st.st_size) : -1;
 
     VCLOSE(fd);
@@ -235,66 +235,66 @@ static void driver_job_compile(struct driver_job *job, pp *p,
     cc_options co = {
         .target = job->pp_options.target,
         .unsigned_char = job->pp_options.unsigned_char,
-        .dump_layouts = job->layout_checks,
-        .lint = job->lint,
         .ms_anon = job->ms_anonymous_structs,
+        .strict_flex_arrays = job->strict_flex_arrays,
         .short_wchar = job->short_wchar || job->target_win64,
         .ms_bitfields =
             job->ms_bitfields >= 0 ? job->ms_bitfields : job->target_win64,
-        .strict_flex_arrays = job->strict_flex_arrays,
         .std = job->standard,
-        .c2y = job->standard == 23 && job->standard_version &&
-               !strcmp(job->standard_version, "202400L"),
         .implicit_int = job->standard == 89 || job->allow_implicit_int,
-        .implicit_fn = job->standard == 89 || job->allow_implicit_function,
-        .conv_warn = job->conversion_warning_flags,
-        .strict_std = job->strict_standard,
-        .fast_math = job->fast_math && (job->math_flags & 7) == 7,
-        .no_fp_contract = job->no_fp_contract,
         .gnu89_inline = job->gnu89_inline,
-        .no_builtin = job->freestanding || job->no_builtin,
-        .no_jump_tables = job->no_jump_tables,
         .instrument = job->instrument_functions,
-        .wasm_sjlj = job->sjlj,
+        .vcc_kernel = job->vcc_kernel,
+        .lse = job->lse,
         .x86_features = job->x64_features,
         .x86_disabled = job->x64_features_disabled,
-        .x86_features_set = job->target_x64,
         .x86_raw = job->x64_features_raw,
         .x86_override_on = job->x64_features_forced_on,
         .x86_override_off = job->x64_features_forced_off,
+        .x86_features_set = job->target_x64,
         .general_regs_only = job->general_regs_only ||
                              (job->target_x64 && (job->no_sse || job->no_sse2)),
-        .vcc_kernel = job->vcc_kernel,
-        .lse = job->lse,
+        .fast_math = job->fast_math && (job->math_flags & 7) == 7,
+        .no_fp_contract = job->no_fp_contract,
+        .no_jump_tables = job->no_jump_tables,
+        .no_builtin = job->freestanding || job->no_builtin,
+        .wasm_sjlj = job->sjlj,
+        .implicit_fn = job->standard == 89 || job->allow_implicit_function,
+        .c2y = job->standard == 23 && job->standard_version &&
+               !strcmp(job->standard_version, "202400L"),
+        .strict_std = job->strict_standard,
+        .conv_warn = job->conversion_warning_flags,
+        .dump_layouts = job->layout_checks,
+        .omit_frame_pointer =
+            job->target_x64 &&
+            (job->omit_frame_pointer < 0 ? job->optimization_level > 0
+                                         : job->omit_frame_pointer),
+        .sibling_calls = job->sibling_calls,
+        .outfd = env->outfd,
+        .lint = job->lint,
         .opt = job->optimization_level,
         .optimize = driver_optimization_resolve(job),
-        .vir_aid = job->vir_aid,
+        /* (Windows: no GOT; PE images are relocated) */ .vir_aid =
+            job->vir_aid,
         .wrapv = job->wrapv,
-        .pic = job->target_win64 ? 0
-               : job->pic        ? 2
-               : job->pie        ? 1
-                                 : 0,
-        /* (Windows: no GOT; PE images are relocated) */ .tlsmodel =
-            job->tls_model,
         .sections = job->function_data_sections,
         .debug = job->debug,
         .dbg_version = job->dwarf_version,
         .cfi = job->cfi > 0,
         .no_seh = job->no_seh,
         .dbg_name = job->main_file,
-        .omit_frame_pointer =
-            job->target_x64 &&
-            (job->omit_frame_pointer < 0 ? job->optimization_level > 0
-                                         : job->omit_frame_pointer),
-        .sibling_calls = job->sibling_calls,
+        .tlsmodel = job->tls_model,
+        .pic = job->target_win64 ? 0
+               : job->pic        ? 2
+               : job->pie        ? 1
+                                 : 0,
         .xcf = job->target_x64 ? job->x64_hardening_flags : 0,
         .pfe_n = job->target_x64 ? job->patchable_entry_count : 0,
         .pfe_m = job->patchable_entry_before,
         .sprot = job->target_x64 ? job->stack_protector : 0,
         .sp_gs = job->stack_protector_guard_gs,
-        .sp_sym = job->stack_protector_guard_symbol,
         .autozero = job->target_x64 ? job->auto_variables_zero : 0,
-        .outfd = env->outfd};
+        .sp_sym = job->stack_protector_guard_symbol};
     int fd = -1;
     char outpath[4096], outtmp[4200];
     bool outrename = false;
@@ -505,30 +505,30 @@ driver_job_run_one(int argc, char **argv, const driver_environment *env)
     struct driver_job jobstore =
                           {
                               .errfd = env->errfd,
-                              .hosted = 1,
-                              .ms_bitfields = -1,
-                              .raw_assembler = -1,
-                              .march_has_lse = -1,
-                              .mcpu_has_lse = -1,
-                              .pie = -1,
-                              .cfi = -1,
-                              .unwind_tables = -1,
-                              .x64_cpu = "x86-64",
-                              .omit_frame_pointer = -1,
-                              .unsigned_char = -1,
-                              .trigraphs = -1,
-                              .gnu89_inline = -1,
                               .predefines = {.region = &br[0]},
                               .command_line_defines = {.region = &br[1]},
                               .include_text = {.region = &br[2]},
                               .include_macros_text = {.region = &br[3]},
+                              .target_x64 = 1,
+                              .ms_bitfields = -1,
+                              .hosted = 1,
+                              .raw_assembler = -1,
+                              .march_has_lse = -1,
+                              .mcpu_has_lse = -1,
+                              .pie = -1,
+                              .unwind_tables = -1,
+                              .cfi = -1,
+                              .x64_cpu = "x86-64",
+                              .omit_frame_pointer = -1,
+                              .unsigned_char = -1,
+                              .trigraphs = -1,
     /* no --target: the host's own userland (Darwin on a Mac, glibc aarch64 or x86-64 on Linux) */
 #ifdef __APPLE__
                               .darwin = 1,
 #endif
 #if defined(__x86_64__) && !defined(__APPLE__)
-                              .target_x64 =
-                                  1, /* x86_64-linux-gnu (PLAN-x86.md) */
+                              .gnu89_inline =
+                                  -1, /* x86_64-linux-gnu (PLAN-x86.md) */
 #endif
                           },
                       *job = &jobstore;

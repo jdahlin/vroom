@@ -1,6 +1,7 @@
 /* If-conversion of diamonds and triangles into selects. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -296,7 +297,8 @@ VPRIV bool virbuild_if_convert(codegen_context *e)
             V->predecessors[V->blocks[J].predecessor_first + k] =
                 V->predecessors[V->blocks[J].predecessor_first + k + 1];
         V->blocks[J].predecessor_count--;
-        V->insns[t].insn = (vir_insn){VIR_OP_BR, VIR_TYPE_VOID, 0, J, 0, 0};
+        V->insns[t].insn =
+            VCC_LITERAL(vir_insn, VIR_OP_BR, VIR_TYPE_VOID, 0, J, 0, 0);
         if (et)
             V->blocks[T].is_reachable = 0;
         if (ef)

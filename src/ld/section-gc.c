@@ -10,8 +10,10 @@
 VPRIV void ld_sections_garbage_collect(struct ld_context *ctx,
                                        const char *entry)
 {
-    uint8_t *live = calloc(ctx->inputs.sections.n, 1);
-    uint32_t *work = malloc(ctx->inputs.sections.n * sizeof(uint32_t)), nw = 0;
+    uint8_t *live = (uint8_t *)calloc(ctx->inputs.sections.n, 1);
+    uint32_t *work = (uint32_t *)(malloc(ctx->inputs.sections.n *
+                                         sizeof(uint32_t))),
+             nw = 0;
 #define LD_SECTION_GARBAGE_MARK(x)                                             \
     do {                                                                       \
         uint32_t m_ = (x);                                                     \

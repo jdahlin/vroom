@@ -133,7 +133,7 @@ __attribute__((noinline)) static inline bool vbuffer_make_room(vbuffer *b,
     cap = b->cap ? b->cap * 2 : 4096;
     while (cap < b->n + extra + 1)
         cap *= 2;
-    p = realloc(b->p, cap);
+    p = (char *)realloc(b->p, cap);
     if (!p) {
         b->failed = true;
         if (!(b->flags & VBUFFER_STICKY))

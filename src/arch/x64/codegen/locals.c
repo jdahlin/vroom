@@ -1,5 +1,6 @@
 /* x86 persistent scalar homes. Selection and escape policy live in opt/locals.c;
    this file only supplies physical homes and preserves the System V ABI. */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 /* A home adds a save and restore; a stack parameter also needs an entry load.
@@ -80,10 +81,10 @@ VPRIV bool x64_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
         return false;
     for (unsigned i = 0; i < X->local_register_count; i++)
         if (X->local_symbols[i] == s) {
-            *l = (codegen_lvalue){
-                .kind = CODEGEN_LVALUE_LOCAL_REGISTER,
+            *l = VCC_LITERAL(
+                codegen_lvalue, .kind = CODEGEN_LVALUE_LOCAL_REGISTER,
                 .register_number = X->local_registers[i],
-                .align = codegen_symbol_alignment(e->compile_context, s)};
+                .align = codegen_symbol_alignment(e->compile_context, s));
             return true;
         }
     return false;

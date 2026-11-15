@@ -55,7 +55,7 @@ static const uint8_t *pe_file_map(const char *path, size_t *size)
     *size = (size_t)st.st_size;
     if (!*size) {
         close(fd);
-        static const uint8_t empty[1];
+        static const uint8_t empty[1] = {0};
         return empty;
     }
     void *p = mmap(NULL, *size, PROT_READ, MAP_PRIVATE, fd, 0);
@@ -66,7 +66,7 @@ static const uint8_t *pe_file_map(const char *path, size_t *size)
     }
     pe_mapping m = {p, *size};
     PE_PUSH(pe_mappings, pe_mapping_count, pe_mapping_capacity, m);
-    return p;
+    return (const uint8_t *)p;
 }
 
 /* ---------------- the global symbol table ---------------- */
@@ -74,7 +74,7 @@ static const uint8_t *pe_file_map(const char *path, size_t *size)
 static void pe_symbols_init(void)
 {
     pe_hash_mask = (1u << 14) - 1;
-    pe_hash = calloc(pe_hash_mask + 1, sizeof *pe_hash);
+    pe_hash = (pe_symbol **)calloc(pe_hash_mask + 1, sizeof *pe_hash);
     if (!pe_hash)
         pe_oom();
 }
@@ -101,7 +101,7 @@ static pe_symbol *pe_sym_find(const char *name)
 static void pe_hash_grow(void)
 {
     uint32_t nmask = pe_hash_mask * 2 + 1;
-    pe_symbol **nh = calloc(nmask + 1, sizeof *nh);
+    pe_symbol **nh = (pe_symbol **)calloc(nmask + 1, sizeof *nh);
     if (!nh)
         pe_oom();
     for (uint32_t i = 0; i < pe_global_count; i++) {
@@ -125,7 +125,7 @@ static pe_symbol *pe_sym_insert(const char *name, size_t n, bool *inserted)
     }
     if (pe_global_count >= pe_hash_mask)
         pe_hash_grow();
-    s = pe_alloc(sizeof *s);
+    s = (pe_symbol *)pe_alloc(sizeof *s);
     s->name = pe_strndup(name, n);
     s->name_len = (uint32_t)n;
     s->kind = PE_SYM_UNDEFINED;
@@ -308,7 +308,7 @@ static const char *pe_obj_symbol_name(pe_file *f, const uint8_t *cs,
             return "";
         }
         const char *s = f->strtab + off;
-        const char *e = memchr(s, 0, f->strtab_size - off);
+        const char *e = (const char *)memchr(s, 0, f->strtab_size - off);
         if (!e) {
             pe_error("%s: unterminated symbol name", pe_file_name(f));
             *len = 0;
@@ -337,7 +337,7 @@ static void pe_file_chunk_add(pe_file *f, pe_chunk *c)
 
 static pe_chunk *pe_chunk_new(uint8_t kind)
 {
-    pe_chunk *c = pe_alloc(sizeof *c);
+    pe_chunk *c = (pe_chunk *)pe_alloc(sizeof *c);
     c->kind = kind;
     c->live = true;
     c->has_data = true;
@@ -452,12 +452,14 @@ static bool pe_obj_validate(pe_file *f)
         }
         f->strtab = (const char *)st;
     } else {
-        static const char empty[4];
+        static const char empty[4] = {0};
         f->strtab = empty;
         f->strtab_size = 4;
     }
-    f->sections = pe_alloc(((size_t)f->nsections + 1) * sizeof *f->sections);
-    f->secnames = pe_alloc(((size_t)f->nsections + 1) * sizeof *f->secnames);
+    f->sections = (coff_section_header *)(pe_alloc(((size_t)f->nsections + 1) *
+                                                   sizeof *f->sections));
+    f->secnames = (const char **)(pe_alloc(((size_t)f->nsections + 1) *
+                                           sizeof *f->secnames));
     for (uint32_t i = 1; i <= f->nsections; i++) {
         const uint8_t *s =
             d + shoff + (size_t)(i - 1) * COFF_SECTION_HEADER_SIZE;
@@ -532,7 +534,7 @@ static bool pe_obj_validate(pe_file *f)
 
 static pe_symbol *pe_local_new(pe_file *f, const uint8_t *cs, uint8_t kind)
 {
-    pe_symbol *s = pe_alloc(sizeof *s);
+    pe_symbol *s = (pe_symbol *)pe_alloc(sizeof *s);
     size_t n;
     const char *name = pe_obj_symbol_name(f, cs, &n);
     s->name =
@@ -614,7 +616,8 @@ static bool pe_obj_parse(pe_file *f)
 {
     if (!pe_obj_validate(f))
         return false;
-    f->sparse = pe_alloc(((size_t)f->nsections + 1) * sizeof *f->sparse);
+    f->sparse =
+        (pe_chunk **)(pe_alloc(((size_t)f->nsections + 1) * sizeof *f->sparse));
     for (uint32_t i = 1; i <= f->nsections; i++) {
         if (f->sections[i].characteristics & IMAGE_SCN_LNK_COMDAT)
             f->sparse[i] = PE_PENDING_COMDAT;
@@ -622,24 +625,26 @@ static bool pe_obj_parse(pe_file *f)
             f->sparse[i] = pe_section_read(f, i, false);
         }
     }
-    f->syms = pe_alloc(((size_t)f->nsyms + 1) * sizeof *f->syms);
-    const uint8_t **comdat_defs =
-        pe_alloc(((size_t)f->nsections + 1) * sizeof *comdat_defs);
-    uint32_t *pending = pe_alloc(((size_t)f->nsyms + 1) * sizeof *pending);
+    f->syms =
+        (pe_symbol **)(pe_alloc(((size_t)f->nsyms + 1) * sizeof *f->syms));
+    const uint8_t **comdat_defs = (const uint8_t **)(pe_alloc(
+        ((size_t)f->nsections + 1) * sizeof *comdat_defs));
+    uint32_t *pending =
+        (uint32_t *)(pe_alloc(((size_t)f->nsyms + 1) * sizeof *pending));
     uint32_t npending = 0;
     struct {
         pe_symbol *sym;
         uint32_t tag;
         uint32_t characteristics;
-    } *weak = pe_alloc(((size_t)f->nsyms + 1) * sizeof *weak);
+    } *weak = (__typeof__(weak))pe_alloc(((size_t)f->nsyms + 1) * sizeof *weak);
     uint32_t nweak = 0;
     const char *fn = pe_file_name(f);
     struct {
         const char *s;
         size_t n;
         uint32_t sec;
-    } *prevailing_names =
-        pe_alloc(((size_t)f->nsections + 1) * sizeof *prevailing_names);
+    } *prevailing_names = (__typeof__(prevailing_names))pe_alloc(
+        ((size_t)f->nsections + 1) * sizeof *prevailing_names);
     uint32_t nprevailing = 0;
 
     for (uint32_t i = 0; i < f->nsyms; i++) {
@@ -957,13 +962,14 @@ static bool pe_import_parse(pe_file *f)
     }
     const char *p = (const char *)d + COFF_IMPORT_HEADER_SIZE,
                *end = (const char *)d + f->size;
-    const char *z1 = memchr(p, 0, (size_t)(end - p));
+    const char *z1 = (const char *)(memchr(p, 0, (size_t)(end - p)));
     if (!z1) {
         pe_error("%s: broken import library", pe_file_name(f));
         return false;
     }
     const char *dll = z1 + 1;
-    const char *z2 = dll < end ? memchr(dll, 0, (size_t)(end - dll)) : NULL;
+    const char *z2 =
+        (const char *)(dll < end ? memchr(dll, 0, (size_t)(end - dll)) : NULL);
     if (!z2) {
         pe_error("%s: broken import library", pe_file_name(f));
         return false;
@@ -995,7 +1001,8 @@ static bool pe_import_parse(pe_file *f)
     }
     case IMPORT_NAME_EXPORTAS: {
         const char *x = z2 + 1;
-        const char *z3 = x < end ? memchr(x, 0, (size_t)(end - x)) : NULL;
+        const char *z3 =
+            (const char *)(x < end ? memchr(x, 0, (size_t)(end - x)) : NULL);
         f->external_name = z3 ? pe_strndup(x, (size_t)(z3 - x)) : "";
         break;
     }
@@ -1098,7 +1105,7 @@ static bool pe_archive_member(pe_archive *a, uint32_t off, const uint8_t **body,
 static pe_archive *pe_archive_open(const char *path, const uint8_t *data,
                                    size_t size)
 {
-    pe_archive *a = pe_alloc(sizeof *a);
+    pe_archive *a = (pe_archive *)pe_alloc(sizeof *a);
     a->path = path;
     a->data = data;
     a->size = size;
@@ -1146,12 +1153,15 @@ static pe_archive *pe_archive_open(const char *path, const uint8_t *data,
             goto bad;
         const char *names = (const char *)idx + (size_t)n * 2,
                    *nend = (const char *)second + second_size;
-        a->symbols = calloc(n ? n : 1, sizeof *a->symbols);
+        a->symbols =
+            (__typeof__(a->symbols))calloc(n ? n : 1, sizeof *a->symbols);
         if (!a->symbols)
             pe_oom();
         for (uint32_t i = 0; i < n; i++) {
             const char *z =
-                names < nend ? memchr(names, 0, (size_t)(nend - names)) : NULL;
+                (const char *)(names < nend
+                                   ? memchr(names, 0, (size_t)(nend - names))
+                                   : NULL);
             uint16_t ix = pe_rd16(idx + (size_t)i * 2);
             if (!z || ix == 0 || ix > m)
                 goto bad;
@@ -1168,12 +1178,15 @@ static pe_archive *pe_archive_open(const char *path, const uint8_t *data,
             goto bad;
         const char *names = (const char *)first + 4 + (size_t)n * 4,
                    *nend = (const char *)first + first_size;
-        a->symbols = calloc(n ? n : 1, sizeof *a->symbols);
+        a->symbols =
+            (__typeof__(a->symbols))calloc(n ? n : 1, sizeof *a->symbols);
         if (!a->symbols)
             pe_oom();
         for (uint32_t i = 0; i < n; i++) {
             const char *z =
-                names < nend ? memchr(names, 0, (size_t)(nend - names)) : NULL;
+                (const char *)(names < nend
+                                   ? memchr(names, 0, (size_t)(nend - names))
+                                   : NULL);
             if (!z)
                 goto bad;
             a->symbols[i].name = names;
@@ -1194,7 +1207,7 @@ static bool pe_archive_seen_insert(pe_archive *a, uint32_t off)
     uint32_t key = off + 1;
     if (a->seen_count * 2 >= a->seen_capacity) {
         uint32_t ncap = a->seen_capacity ? a->seen_capacity * 2 : 64;
-        uint32_t *ns = calloc(ncap, sizeof *ns);
+        uint32_t *ns = (uint32_t *)calloc(ncap, sizeof *ns);
         if (!ns)
             pe_oom();
         for (uint32_t i = 0; i < a->seen_capacity; i++)

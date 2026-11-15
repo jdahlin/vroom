@@ -246,8 +246,8 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
                                              : (cxx_entity *)NULL);
             cs = cxx_scope_new(c, CXX_SCOPE_CLASS, c->scope, te);
             if (te && !c->tentative) {
-                te->specs =
-                    realloc(te->specs, (te->nspecs + 1) * sizeof *te->specs);
+                te->specs = (cxx_scope **)(realloc(
+                    te->specs, (te->nspecs + 1) * sizeof *te->specs));
                 te->specs[te->nspecs++] = cs;
                 if (c->template_depth) /* a partial specialization: matched when te is instantiated */
                     cxx_template_partial(c, te, c->scope, target, spec_less,
@@ -257,7 +257,7 @@ VPRIV void cxx_class_specifier_parse(cxx *c, bool is_template)
                         cxx_instance_named(c, te, spec_args, nspec_args);
                     if (!explicit_instance) {
                         explicit_instance =
-                            calloc(1, sizeof *explicit_instance);
+                            (cxx_entity *)calloc(1, sizeof *explicit_instance);
                         explicit_instance->name = name,
                         explicit_instance->kind = CXX_ENTITY_TYPE;
                         explicit_instance->ty = CXX_TY_UNKNOWN;
@@ -435,7 +435,8 @@ VPRIV uint32_t cxx_class_body_parse(cxx *c, cxx_scope *cs)
         /* an instance: its member functions' bodies wait for a call that uses them */
         for (uint32_t i = late_from; i < c->nlate; i++)
             if (c->late[i].fn && !c->late[i].fn->late) {
-                c->late[i].fn->late = malloc(sizeof(cxx_late));
+                c->late[i].fn->late =
+                    (struct cxx_late *)(malloc(sizeof(cxx_late)));
                 *c->late[i].fn->late = c->late[i];
                 c->late[i].fn->late->template_depth = 0;
             } else

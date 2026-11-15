@@ -1,6 +1,7 @@
 /* Physical-register and observable effects of x86 records. Keep this alongside
  * the printer: several records expand into multiple machine instructions.
  */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 #define X64_REGISTER_BIT(r) (UINT64_C(1) << (r))
@@ -219,20 +220,20 @@ VPRIV record_effects x64_record_effects(const codegen_context *e,
                                         const record *i)
 {
     if (i->opcode >= X64_OP_COUNT)
-        return (record_effects){.defines = X64_ALL_REGISTERS,
-                                .used = X64_ALL_REGISTERS,
-                                .flags = X_MEM | RECORD_EFFECT_FLOAT |
-                                         RECORD_EFFECT_BARRIER | X_R | X_W,
-                                .branch = RECORD_BRANCH_INDIRECT};
+        return VCC_LITERAL(record_effects, .defines = X64_ALL_REGISTERS,
+                           .used = X64_ALL_REGISTERS,
+                           .flags = X_MEM | RECORD_EFFECT_FLOAT |
+                                    RECORD_EFFECT_BARRIER | X_R | X_W,
+                           .branch = RECORD_BRANCH_INDIRECT);
     const record_op_descriptor *d = &x64_op_descriptors[i->opcode];
     /* A newly added opcode without metadata must be opaque, never a no-op. */
     if (!d->registers && !d->branch && !d->flags && !d->implicit_defined &&
         !d->implicit_used)
-        return (record_effects){.defines = X64_ALL_REGISTERS,
-                                .used = X64_ALL_REGISTERS,
-                                .flags = X_MEM | RECORD_EFFECT_FLOAT |
-                                         RECORD_EFFECT_BARRIER | X_R | X_W,
-                                .branch = RECORD_BRANCH_INDIRECT};
+        return VCC_LITERAL(record_effects, .defines = X64_ALL_REGISTERS,
+                           .used = X64_ALL_REGISTERS,
+                           .flags = X_MEM | RECORD_EFFECT_FLOAT |
+                                    RECORD_EFFECT_BARRIER | X_R | X_W,
+                           .branch = RECORD_BRANCH_INDIRECT);
     record_effects f = {.defines = d->implicit_defined,
                         .used = d->implicit_used,
                         .flags = d->flags,
@@ -270,8 +271,9 @@ VPRIV record_effects x64_record_effects(const codegen_context *e,
             X64_REGISTER_BIT(R12); /* printer's realigned local-frame base */
     if (i->opcode == X64_OP_RESUME_FRAME) {
         if (e && e->walk_state && e->walk_state->frame_alignment <= 16)
-            f = (record_effects){
-                .flags = RECORD_EFFECT_BARRIER}; /* printer emits nothing */
+            f = VCC_LITERAL(
+                record_effects,
+                .flags = RECORD_EFFECT_BARRIER); /* printer emits nothing */
         else if (!e || !e->walk_state)
             f.used |= X64_REGISTER_BIT(
                 R12); /* unknown alignment may preserve its old value */

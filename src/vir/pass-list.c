@@ -59,14 +59,14 @@ static const char *vir_analyses_check(vir_function *f, uint8_t keeps)
 
     if (!vir_alloc_checker || !nb)
         return NULL;
-    snap = malloc((size_t)nb * sizeof *snap);
+    snap = (vir_block *)(malloc((size_t)nb * sizeof *snap));
     if (!snap)
         return NULL;
     memcpy(snap, f->blocks, (size_t)nb * sizeof *snap);
     if ((vir_alloc_checker & VIR_VALID_CFG) && end >= mark &&
         end <= f->extra_count) {
         nl = end - mark;
-        lists = malloc((size_t)(nl ? nl : 1) * 4);
+        lists = (uint32_t *)(malloc((size_t)(nl ? nl : 1) * 4));
         if (!lists) {
             free(snap);
             return NULL;

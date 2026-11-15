@@ -1,4 +1,5 @@
 /* vcc front end: constant evaluation (integer constant expressions and foldable ones, as clang) */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 CC_PRIVATE i128 cc_constant_truncate(cc *c, i128 v, ast_qualified_type t)
@@ -219,7 +220,7 @@ static bool cc_constexpr_subobject(cc *c, uint32_t n, cc_constexpr_object *out,
     const node *x = AST_NODE(n);
     cc_constexpr_object obj;
 
-    *out = (cc_constexpr_object){.ty = x->ty};
+    *out = VCC_LITERAL(cc_constexpr_object, .ty = x->ty);
     switch (x->op) {
     case AST_NODE_VARIABLE: {
         const sym *s = &c->syms[x->a];

@@ -97,7 +97,7 @@ static inline void acc512(uint64_t *acc, const uint8_t *in, const uint8_t *s)
 
 uint64_t vdigest_xxh3(const void *data, size_t len)
 {
-    const uint8_t *in = data, *s = kSecret;
+    const uint8_t *in = (const uint8_t *)data, *s = kSecret;
     if (len <= 16) {
         if (len > 8) {
             uint64_t lo = rd64(in) ^ (rd64(s + 24) ^ rd64(s + 32));

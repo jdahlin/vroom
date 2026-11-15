@@ -6,6 +6,7 @@
  * The table and the entries are job regions (port/job-regions.h) that
  * outlive a job; the hash is CRC32C over 8-byte words (port/crc32c.h).
  */
+#include "common/literal.h"
 #include "port/crc32c.h"
 #include <stdatomic.h>
 #include <pthread.h>
@@ -116,7 +117,8 @@ static __attribute__((noinline)) uint32_t insert(const char *s, size_t len,
                     atomic_fetch_sub_explicit(&nent, 1, memory_order_relaxed);
                     vintern_full();
                 }
-                vintern_ents[id] = (vident){s, (uint32_t)len, hash, w0, w1};
+                vintern_ents[id] =
+                    VCC_LITERAL(vident, s, (uint32_t)len, hash, w0, w1);
             }
             if (atomic_compare_exchange_strong_explicit(
                     &slots[i], &v, (uint64_t)hash << 32 | id,
@@ -247,9 +249,9 @@ void vintern_preset(const char *const *names, size_t n)
 static void init_once(void)
 {
     /* lazily backed: only touched pages cost anything */
-    slots = reserve(NSLOT * sizeof(*slots));
-    vintern_ents = reserve(MAX_ENT * sizeof(*vintern_ents));
-    copy_buf = reserve(COPY_MAX);
+    slots = (_Atomic(uint64_t) *)(reserve(NSLOT * sizeof(*slots)));
+    vintern_ents = (vident *)(reserve(MAX_ENT * sizeof(*vintern_ents)));
+    copy_buf = (char *)reserve(COPY_MAX);
     for (size_t i = 0; i < npreset; i++) {
         uint32_t id = vintern_cstr(preset[i]);
 
@@ -271,6 +273,6 @@ vintern_cache *vintern_local(void)
     static _Thread_local vintern_cache *c;
 
     if (!c)
-        c = reserve(sizeof(*c));
+        c = (vintern_cache *)(reserve(sizeof(*c)));
     return c;
 }

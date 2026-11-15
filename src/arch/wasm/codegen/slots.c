@@ -3,6 +3,7 @@
  * The serializer preserves every address and RHS evaluation and consumes the
  * same typed operand-stack inputs as the original operation.
  */
+#include "common/literal.h"
 #include "wimpl.h"
 
 #define WMAXMEM 65536u
@@ -40,9 +41,9 @@ VPRIV void wmem_alloc(ecx *e, uint64_t off, uint64_t size)
         W->memfailed = true;
         return;
     }
-    W->alloc =
-        wm_grow(W->alloc, &W->capalloc, W->nalloc + 1, sizeof(*W->alloc));
-    W->alloc[W->nalloc++] = (walloc){off, size, false};
+    W->alloc = (walloc *)wm_grow(W->alloc, &W->capalloc, W->nalloc + 1,
+                                 sizeof(*W->alloc));
+    W->alloc[W->nalloc++] = VCC_LITERAL(walloc, off, size, false);
 }
 
 VPRIV uint32_t wmem_id(ecx *e, uint64_t off)
@@ -89,9 +90,10 @@ static wmem *wm_event(ecx *e, uint8_t kind)
         W->memfailed = true;
         return NULL;
     }
-    W->mem = wm_grow(W->mem, &W->capmem, W->nmem + 1, sizeof(*W->mem));
+    W->mem = (wmem *)wm_grow(W->mem, &W->capmem, W->nmem + 1, sizeof(*W->mem));
     wmem *m = &W->mem[W->nmem++];
-    *m = (wmem){.kind = kind, .source = UINT32_MAX, .cache = UINT32_MAX};
+    *m = VCC_LITERAL(wmem, .source = UINT32_MAX, .cache = UINT32_MAX,
+                     .kind = kind);
     return m;
 }
 

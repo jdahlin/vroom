@@ -460,6 +460,21 @@ typedef struct codegen_slot_allocation {
 #define CODEGEN_VLA_SIZE_MAX                                                   \
     64 /* VLA size expressions live at once in a function */
 
+struct codegen_jump_table {
+    uint32_t table_label, first_entry, entry_count;
+};
+
+struct codegen_data_relocation {
+    uint64_t offset;
+    uint32_t reference, sequence;
+    int64_t addend;
+    uint32_t subtrahend, size_bytes;
+};
+
+struct codegen_debug_row {
+    uint32_t record_index, file, line, column;
+};
+
 typedef struct codegen_context {
     codegen_unit *unit;
     cc *compile_context;
@@ -476,9 +491,7 @@ typedef struct codegen_context {
         current_location; /* innermost statement being generated (diagnostics) */
     uint32_t reuse_from,
         reuse_to; /* temporary substitution within one pure expression */
-    struct codegen_debug_row {
-        uint32_t record_index, file, line, column;
-    } *debug_rows; /* -g: a row at record k */
+    struct codegen_debug_row *debug_rows; /* -g: a row at record k */
     uint32_t debug_row_count, debug_row_capacity;
     const char
         *debug_last_file_name; /* the last file looked up, and its number */
@@ -486,12 +499,8 @@ typedef struct codegen_context {
     tbuf raw;  /* inline asm text */
     tbuf out;  /* this thread's output text */
     tbuf data; /* scratch: data object bytes */
-    struct codegen_data_relocation {
-        uint64_t offset;
-        uint32_t reference, sequence;
-        int64_t addend;
-        uint32_t subtrahend, size_bytes;
-    } *relocations; /* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
+    struct codegen_data_relocation
+        *relocations; /* sub: ref subtracted (0: none); sz 4 or 8 (0: 8) */
     uint32_t relocation_count;
     uint64_t relocation_end; /* end of the highest relocated word */
     /* bindings */
@@ -576,9 +585,8 @@ typedef struct codegen_context {
     uint32_t case_count;
     uint32_t *jump_table_labels, jump_table_label_count,
         jump_table_label_capacity; /* jump tables of the function: case labels, table after table */
-    struct codegen_jump_table {
-        uint32_t table_label, first_entry, entry_count;
-    } *jump_tables; /* table label, first entry in jtl, entries */
+    struct codegen_jump_table
+        *jump_tables; /* table label, first entry in jtl, entries */
     uint32_t jump_table_count, jump_table_capacity;
     uint32_t *round_log; /* this round's item logs: (RL_*, value) pairs */
     size_t round_log_count,

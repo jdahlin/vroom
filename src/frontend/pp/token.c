@@ -1,4 +1,5 @@
 /* vcc preprocessor: token contexts: the stack of token sources pp_token_next reads from */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 /* ---------------- tokens ---------------- */
@@ -70,7 +71,8 @@ VPRIV char *pp_token_spell_to(char *dst, const ptok *t)
 VPRIV ptok *pp_scratch_tokens_take(pp *p, size_t base, uint32_t *n)
 {
     size_t k = p->scratch_token_count - base;
-    ptok *r = varena_alloc(&p->temporary_region, (k ? k : 1) * sizeof(ptok));
+    ptok *r = (ptok *)(varena_alloc(&p->temporary_region,
+                                    (k ? k : 1) * sizeof(ptok)));
 
     memcpy(r, p->scratch_tokens + base, k * sizeof(ptok));
     p->scratch_token_count = base;
@@ -129,14 +131,14 @@ VPRIV void pp_top_event_record(pp *p, const void *e, uint32_t base,
     if (p->top_events_full)
         return;
     if (!p->top_events)
-        p->top_events =
-            varena_alloc(&p->permanent_region, 1024 * sizeof(pp_topev));
+        p->top_events = (pp_topev *)(varena_alloc(&p->permanent_region,
+                                                  1024 * sizeof(pp_topev)));
     if (p->top_event_count == 1024) {
         p->top_events_full = 1;
         return;
     }
     p->top_events[p->top_event_count++] =
-        (pp_topev){e, p->tokens_delivered, base, ctr, end, hit};
+        VCC_LITERAL(pp_topev, e, p->tokens_delivered, base, ctr, end, hit);
 }
 
 /* the next token, no macro expansion; runs directives in file contexts */
@@ -325,7 +327,7 @@ VPRIV __attribute__((noinline, cold)) void pp_dollar_split(pp *p, ptok *t)
     if (!id || !pp_macro_table_get(p, id))
         return;
     {
-        ptok *n = varena_alloc(&p->temporary_region, sizeof(*n));
+        ptok *n = (ptok *)(varena_alloc(&p->temporary_region, sizeof(*n)));
 
         *n = *t;
         n->s = t->s + 1, n->len = t->len - 1, n->id = id, n->loc = t->loc + 1;

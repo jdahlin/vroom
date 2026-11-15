@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: addresses, loads and stores. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 /* load or store at operand 0's address: lv for the symbol or frame cases, else base register */
@@ -12,10 +13,8 @@ VPRIV codegen_lvalue a64_vir_address_get(a64_vir_context *L, uint32_t w, int t)
         a64_vir_value_is_constant(L->function, v) &&
         L->function->insns[v].op == VIR_OP_SLOTADDR) {
         l.kind = CODEGEN_LVALUE_FRAME;
-        l.offset =
-            L->slot_offsets[L->function->insns[v].a] +
-            a64_vir_constant_bits(&(vir_insn){.b = L->function->insns[v].b,
-                                              .c = L->function->insns[v].c});
+        l.offset = L->slot_offsets[L->function->insns[v].a] +
+                   a64_vir_constant_bits(&L->function->insns[v]);
         return l;
     }
     if (L->operand_registers[0] == VIR_REGISTER_NONE &&
@@ -23,8 +22,7 @@ VPRIV codegen_lvalue a64_vir_address_get(a64_vir_context *L, uint32_t w, int t)
         L->function->insns[v].op == VIR_OP_SYMADDR) {
         l.kind = CODEGEN_LVALUE_SYMBOL;
         l.reference = L->function->insns[v].a;
-        l.offset = a64_vir_constant_bits(&(vir_insn){
-            .b = L->function->insns[v].b, .c = L->function->insns[v].c});
+        l.offset = a64_vir_constant_bits(&L->function->insns[v]);
         l.align = 1u << VIR_INSN_FLAG_ALIGN_LOG2(w);
         return l;
     }
@@ -155,8 +153,8 @@ VPRIV void a64_vir_store_lower(a64_vir_context *L, const vir_insn *in)
     uint32_t v = L->operand_values[1];
     bool xa = L->index_value && L->index_value == L->operand_values[0];
     codegen_lvalue l =
-        xa ? (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                              .register_number = (uint8_t)L->index_base}
+        xa ? VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                         .register_number = (uint8_t)L->index_base)
            : a64_vir_address_get(L, in->flags, R_X16);
     int base_t = l.kind == CODEGEN_LVALUE_SYMBOL ||
                  (l.kind == CODEGEN_LVALUE_REGISTER &&
@@ -243,8 +241,7 @@ static int a64_vir_memory_block_address_get(a64_vir_context *L, uint32_t k,
         a64_vir_value_is_constant(L->function, v) &&
         L->function->insns[v].op == VIR_OP_SLOTADDR) {
         *off = L->slot_offsets[L->function->insns[v].a] +
-               a64_vir_constant_bits(&(vir_insn){.b = L->function->insns[v].b,
-                                                 .c = L->function->insns[v].c});
+               a64_vir_constant_bits(&L->function->insns[v]);
         return A64_REGISTER_FRAME;
     }
     return a64_vir_operand_general_register(L, k, t);

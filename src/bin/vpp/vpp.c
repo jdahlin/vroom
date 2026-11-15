@@ -113,14 +113,14 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
         perror(file);
         return 2;
     }
-    s = malloc((size_t)st.st_size + 1);
+    s = (char *)(malloc((size_t)st.st_size + 1));
     if (read(fd, s, (size_t)st.st_size) != st.st_size)
         return 2;
     s[st.st_size] = 0;
     close(fd);
     for (char *c = s; *c; c++)
         vpp_job_count += *c == '\n';
-    vpp_jobs = calloc((size_t)vpp_job_count, sizeof(*vpp_jobs));
+    vpp_jobs = (vpp_job *)(calloc((size_t)vpp_job_count, sizeof(*vpp_jobs)));
     vpp_job_count = 0;
     for (char *l = s; *l; l = e + 1) {
         int n = 1;
@@ -134,7 +134,7 @@ static int vpp_batch_run(const char *file, int nthr, const char *statsf)
         for (c = l; *c; c++)
             n += *c == 0x1f;
         j = &vpp_jobs[vpp_job_count++];
-        j->argv = calloc((size_t)n + 5, sizeof(char *));
+        j->argv = (char **)(calloc((size_t)n + 5, sizeof(char *)));
         ref = strsep(&l, "\x1f");
         j->argv[j->argc++] = "vpp";
         if (vpp_compare_mode) {
@@ -289,7 +289,8 @@ int main(int argc, char **argv)
         if (fd < 0 || fstat(fd, &st))
             return 2;
         return driver_tokens_compare(
-            mmap(NULL, (size_t)st.st_size + 1, PROT_READ, MAP_PRIVATE, fd, 0),
+            (const char *)(mmap(NULL, (size_t)st.st_size + 1, PROT_READ,
+                                MAP_PRIVATE, fd, 0)),
             (size_t)st.st_size, argv[3]);
     }
     if (argc >= 3 && !strcmp(argv[1], "--batch")) {

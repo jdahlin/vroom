@@ -1,4 +1,5 @@
 /* vcc front end: the errors and warnings of implicit conversions, in clang's words */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 static void cc_conversion_parameter_note(cc *c);
@@ -133,9 +134,9 @@ static void cc_conversion_error_report(cc *c, uint32_t n, ast_qualified_type to,
                 c, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(AST_NODE(m)->a)->ty),
                 AST_QUALIFIED_TYPE_UNQUALIFIED(to)))
             h = "; remove &",
-            fx[0] = (diag_fixit){cc_node_range_bare(c, m).b,
-                                 cc_node_range_bare(c, m).b + 1, "",
-                                 DIAG_APPLICABILITY_MAYBE},
+            fx[0] = VCC_LITERAL(diag_fixit, cc_node_range_bare(c, m).b,
+                                cc_node_range_bare(c, m).b + 1, "",
+                                DIAG_APPLICABILITY_MAYBE),
             nfx = 1;
     }
     snprintf(fl, sizeof fl, "%s [%s", h, flag);
@@ -712,7 +713,7 @@ CC_PRIVATE void cc_conversion_bitfield_constant_check(cc *c, const field *f,
         bool one = sg && w == 1 && x == 1;
 
         diag_info d = {"warning", at, op ? r : NULL,   op ? 1 : 0,
-                       NULL,      0,  op ? "=" : NULL, op ? 1 : 0};
+                       NULL,      0,  op ? "=" : NULL, (uint32_t)(op ? 1 : 0)};
 
         diag_warning_report(c->p,
                             one ? "single-bit-bitfield-constant-conversion"
@@ -734,7 +735,7 @@ CC_PRIVATE const char *cc_type_array_name(cc *c, ast_qualified_type t)
 
     if (!sp)
         return s;
-    o = cc_heap_allocate(c, strlen(s) + 1);
+    o = (char *)(cc_heap_allocate(c, strlen(s) + 1));
     memcpy(o, s, (size_t)(sp - s));
     strcpy(o + (sp - s), sp + 1);
     return o;

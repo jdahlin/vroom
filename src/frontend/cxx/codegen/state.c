@@ -1,4 +1,5 @@
 /* C++ code generation: the state of the body being built (nesting, failure), which types and classes code is built for */
+#include "common/literal.h"
 #include "codegen.h"
 
 #ifndef VCC_UNITY
@@ -35,9 +36,9 @@ typedef struct cxx_gen_saved {
 
 VPRIV void cxx_gen_push(cxx *c)
 {
-    cxx_gen_saved *s = malloc(sizeof *s);
+    cxx_gen_saved *s = (cxx_gen_saved *)malloc(sizeof *s);
 
-    s->next = c->gen_stack;
+    s->next = (struct cxx_gen_saved *)c->gen_stack;
     s->gen = c->gen, s->gen_failed = c->gen_failed, s->gen_level = c->gen_level;
     s->enode = c->enode, s->snode = c->snode, s->sdone = c->sdone,
     s->sdepth = c->sdepth;
@@ -62,7 +63,7 @@ VPRIV void cxx_gen_push(cxx *c)
 
 VPRIV void cxx_gen_pop(cxx *c)
 {
-    cxx_gen_saved *s = c->gen_stack;
+    cxx_gen_saved *s = (cxx_gen_saved *)c->gen_stack;
 
     c->gen_stack = s->next;
     c->gen_stack_depth--;
@@ -518,9 +519,10 @@ VPRIV void cxx_gen_prv_add(cxx *c, uint32_t node, uint32_t expr, uint32_t call,
                            uint32_t tmp)
 {
     if (c->nprvs == c->cprvs)
-        c->prvs = realloc(c->prvs, (c->cprvs = c->cprvs ? c->cprvs * 2 : 64) *
-                                       sizeof *c->prvs);
-    c->prvs[c->nprvs++] = (cxx_prv){node, expr, call, tmp};
+        c->prvs = (struct cxx_prv *)(realloc(
+            c->prvs,
+            (c->cprvs = c->cprvs ? c->cprvs * 2 : 64) * sizeof *c->prvs));
+    c->prvs[c->nprvs++] = VCC_LITERAL(cxx_prv, node, expr, call, tmp);
 }
 
 /* the prvalue is constructed in the object at `address` instead of its temporary (copy elision): the

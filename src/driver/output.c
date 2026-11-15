@@ -158,12 +158,12 @@ VPRIV void driver_object_state_acquire(void)
         driver_object_state_free_list = s->next;
     pthread_mutex_unlock(&driver_object_state_lock);
     if (!s) {
-        s = calloc(1, sizeof(*s));
+        s = (struct driver_object_state *)(calloc(1, sizeof(*s)));
         s->assembler = as_new();
         s->object = elf_new();
-        s->buffer =
-            mmap(NULL, DRIVER_OBJECT_BUFFER_CAPACITY, PROT_READ | PROT_WRITE,
-                 MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+        s->buffer = (uint8_t *)mmap(
+            NULL, DRIVER_OBJECT_BUFFER_CAPACITY, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
         if (s->buffer == MAP_FAILED)
             abort();
     }

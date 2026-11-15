@@ -23,6 +23,12 @@ typedef struct a64_vir_argument {
     int32_t stack_offset;
 } a64_vir_argument; /* reg VIR_REGISTER_NONE: at stk */
 
+struct a64_vir_chain {
+    uint32_t first, xv;
+    uint8_t kind, opt, sh;
+    int64_t k;
+};
+
 typedef struct a64_vir_context {
     codegen_context *context;
     vir_function *function;
@@ -66,11 +72,7 @@ typedef struct a64_vir_context {
         index_value; /* a ptradd the next load or store addresses through as [base, index] (0 none) */
     uint32_t chain_first,
         chain_consumer; /* the chain a64_vir_chain_fold folds: its first instruction, its consumer (xc VIR_BLOCK_NONE none) */
-    struct a64_vir_chain {
-        uint32_t first, xv;
-        uint8_t kind, opt, sh;
-        int64_t k;
-    } xx;                           /* ... a64_vir_chain_info_get's answer */
+    struct a64_vir_chain xx;        /* ... a64_vir_chain_info_get's answer */
     int index_base, index_register; /* ... its base register, the index's */
     uint8_t index_extension,
         index_shift; /* ... the index's extension (2 uxtw, 3 lsl, 6 sxtw), scaled by the access size */

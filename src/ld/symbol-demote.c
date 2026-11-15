@@ -1,10 +1,11 @@
 /* Demoting symbols to local, and the __start_X/__stop_X symbols. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV void ld_symbols_demote(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
     if (s->state == LD_SYMBOL_STATE_OBJECT && s->input_section != LD_NONE) {
         uint32_t os = ld_input_section_output_section(ctx, s->input_section);
@@ -39,10 +40,9 @@ VPRIV void ld_start_stop_symbols_define(struct ld_context *ctx)
                 ctx->script.sections.v[ctx->script.commands.v[k].index].discard)
                 continue;
             s->state = LD_SYMBOL_STATE_SCRIPT;
-            s->expression_value =
-                (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION,
-                                      .index = ctx->script.commands.v[k].index,
-                                      .alignment = 1};
+            s->expression_value = VCC_LITERAL(
+                ld_expression_value, .kind = LD_VALUE_KIND_OUTPUT_SECTION,
+                .index = ctx->script.commands.v[k].index, .alignment = 1);
             s->visibility = STV_PROTECTED;
             s->binding = STB_GLOBAL;
             s->type = STT_NOTYPE;

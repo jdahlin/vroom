@@ -1,5 +1,6 @@
 /* Loading all inputs, allocating their sections, and setting up and freeing the global table. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV void ld_inputs_load(struct ld_context *ctx)
@@ -29,12 +30,12 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
             uint32_t before = ctx->dso.dsos.n;
             ld_dso_add(ctx, p, b, n, ctx->options.inputs.v[i].as_needed);
             if (lazy && ctx->dso.dsos.n > before)
-                VVEC_PUSH(
-                    ctx->inputs.pending,
-                    ((ld_pending_member){
-                        .size = SIZE_MAX,
-                        .file_bytes = (const uint8_t *)(uintptr_t)before}),
-                    ld_region_alloc);
+                VVEC_PUSH(ctx->inputs.pending,
+                          (VCC_LITERAL(ld_pending_member,
+                                       .file_bytes =
+                                           (const uint8_t *)(uintptr_t)before,
+                                       .size = SIZE_MAX)),
+                          ld_region_alloc);
             continue;
         }
         if (varchive_format_detect(b, n) != VARCHIVE_FORMAT_NONE) {
@@ -51,11 +52,11 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
                 ctx->inputs.pending.n = before;
                 /* an input marker: the archive's members are read here */
                 VVEC_PUSH(ctx->inputs.pending,
-                          ((ld_pending_member){
-                              .path = NULL,
-                              .size = c0,
-                              .file_bytes = (const uint8_t *)(uintptr_t)
-                                                ctx->inputs.lazy_candidates.n}),
+                          (VCC_LITERAL(ld_pending_member, .path = NULL,
+                                       .file_bytes =
+                                           (const uint8_t *)(uintptr_t)
+                                               ctx->inputs.lazy_candidates.n,
+                                       .size = c0)),
                           ld_region_alloc);
                 continue;
             }
@@ -63,7 +64,8 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
             continue;
         }
         VVEC_PUSH(ctx->inputs.pending,
-                  ((ld_pending_member){.path = p, .file_bytes = b, .size = n}),
+                  (VCC_LITERAL(ld_pending_member, .path = p, .file_bytes = b,
+                               .size = n)),
                   ld_region_alloc);
     }
     if (lazy) {
@@ -81,7 +83,7 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
         ctx->inputs.pending = ctx->inputs.lazy_order;
     }
     for (uint32_t i = 0; i < ctx->inputs.pending.n; i++) {
-        ld_object *o = ld_region_alloc(sizeof *o);
+        ld_object *o = (ld_object *)ld_region_alloc(sizeof *o);
         o->path = ctx->inputs.pending.v[i].path;
         o->file_bytes = ctx->inputs.pending.v[i].file_bytes;
         o->size = ctx->inputs.pending.v[i].size;
@@ -105,8 +107,8 @@ VPRIV void ld_input_sections_alloc(struct ld_context *ctx, uint32_t from)
             ctx->inputs.sections.cap ? ctx->inputs.sections.cap : 1024;
         while (nc < total + 1024)
             nc *= 2;
-        ld_input_section *nv =
-            ld_region_alloc((size_t)nc * sizeof(ld_input_section));
+        ld_input_section *nv = (ld_input_section *)(ld_region_alloc(
+            (size_t)nc * sizeof(ld_input_section)));
         if (ctx->inputs.sections.n)
             memcpy(nv, ctx->inputs.sections.v,
                    ctx->inputs.sections.n * sizeof(ld_input_section));
@@ -130,14 +132,14 @@ VPRIV void ld_global_table_init(struct ld_context *ctx)
     while (cap < total * 2 + 4096)
         cap *= 2;
     ctx->symbols.slot_mask = cap - 1;
-    ctx->symbols.slot_names =
-        ld_region_large_alloc((size_t)cap * sizeof(*ctx->symbols.slot_names));
-    ctx->symbols.slot_words =
-        ld_region_large_alloc((size_t)cap * sizeof(*ctx->symbols.slot_words));
-    ctx->symbols.names =
-        ld_region_large_alloc((size_t)cap * sizeof(*ctx->symbols.names));
-    ctx->symbols.globals =
-        ld_region_large_alloc((size_t)cap * sizeof(ld_global_symbol));
+    ctx->symbols.slot_names = (_Atomic(const char *) *)(ld_region_large_alloc(
+        (size_t)cap * sizeof(*ctx->symbols.slot_names)));
+    ctx->symbols.slot_words = (_Atomic(uint64_t) *)(ld_region_large_alloc(
+        (size_t)cap * sizeof(*ctx->symbols.slot_words)));
+    ctx->symbols.names = (const char **)(ld_region_large_alloc(
+        (size_t)cap * sizeof(*ctx->symbols.names)));
+    ctx->symbols.globals = (ld_global_symbol *)(ld_region_large_alloc(
+        (size_t)cap * sizeof(ld_global_symbol)));
     atomic_store(&ctx->symbols.count, 0);
 }
 

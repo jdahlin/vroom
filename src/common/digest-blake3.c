@@ -266,7 +266,7 @@ void vdigest_blake3(const void *data, size_t len, uint8_t *out, size_t outlen)
 #else
 void vdigest_blake3(const void *data, size_t len, uint8_t *out, size_t outlen)
 {
-    const uint8_t *in = data;
+    const uint8_t *in = (const uint8_t *)data;
     uint32_t stack[54][8], o[16];
     int sp = 0;
     size_t nch = len ? (len + 1023) / 1024 : 1;

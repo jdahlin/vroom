@@ -128,6 +128,9 @@ typedef struct wfunc {
     bool done;
 } wfunc;
 
+struct winit {
+    uint32_t prio, sym;
+};
 typedef struct wmod {
     wsym *sym;
     uint32_t nsym, csym;
@@ -144,9 +147,7 @@ typedef struct wmod {
     uint32_t nseg, cseg;
     wseg *cust; /* custom sections (.custom_section.NAME): bytes only */
     uint32_t ncust, ccust;
-    struct winit {
-        uint32_t prio, sym;
-    } *init; /* .init_array entries: the init functions */
+    struct winit *init; /* .init_array entries: the init functions */
     uint32_t ninit, cinit;
     wfunc *fn;
     uint32_t nfn, cfn;

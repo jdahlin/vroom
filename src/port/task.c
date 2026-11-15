@@ -17,6 +17,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* sched_getaffinity, CPU_COUNT */
 #endif
+#include "common/literal.h"
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -247,7 +248,8 @@ static vtask_thread *thread_create_locked(void)
     pthread_attr_t at;
     pthread_t th;
 
-    if (nthreads >= VTASK_MAX_THREADS || !(t = calloc(1, sizeof(*t))))
+    if (nthreads >= VTASK_MAX_THREADS ||
+        !(t = (vtask_thread *)(calloc(1, sizeof(*t)))))
         return NULL;
     if (!stack_fixed) {
         stack_fixed = true;
@@ -328,7 +330,7 @@ static void loop_run(vtask_loop *l)
 
 static void *thread_main(void *arg)
 {
-    vtask_thread *t = arg;
+    vtask_thread *t = (vtask_thread *)arg;
 
     self = t;
     pthread_mutex_lock(&mu);
@@ -472,7 +474,7 @@ void vtask_spawn(vtask_fn *fn, void *arg)
     pthread_mutex_lock(&mu);
     if (jobq_tail - jobq_head == jobq_cap) {
         size_t cap = jobq_cap ? 2 * jobq_cap : 256;
-        vtask_job *q = malloc(cap * sizeof(*q));
+        vtask_job *q = (vtask_job *)(malloc(cap * sizeof(*q)));
 
         if (!q) {
             fputs("vtask: out of memory\n", stderr);
@@ -486,7 +488,7 @@ void vtask_spawn(vtask_fn *fn, void *arg)
         jobq = q;
         jobq_cap = cap;
     }
-    jobq[jobq_tail++ & (jobq_cap - 1)] = (vtask_job){fn, arg};
+    jobq[jobq_tail++ & (jobq_cap - 1)] = VCC_LITERAL(vtask_job, fn, arg);
     njobs++;
     dispatch_locked();
     pthread_mutex_unlock(&mu);

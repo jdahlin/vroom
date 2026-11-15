@@ -23,6 +23,7 @@
  * loads of symbols defined in the link are relaxed to ADRP+ADD, as ld64
  * does, so local data needs no rebase.
  */
+#include "common/literal.h"
 #include "ld/ld.h"
 #include "common/digest.h"
 #include "common/string-index.h"
@@ -199,7 +200,7 @@ static void *macho_alloc(struct macho_context *ctx, size_t n)
     do {                                                                       \
         if ((n) >= (cap)) {                                                    \
             (cap) = (cap) ? 2 * (cap) : 16;                                    \
-            (v) = realloc((v), (cap) * sizeof(*(v)));                          \
+            (v) = (__typeof__(v))realloc((v), (cap) * sizeof(*(v)));           \
             if (!(v)) {                                                        \
                 fputs("vld: out of memory\n", ctx->diagnostics.error_stream);  \
                 exit(1);                                                       \
@@ -331,7 +332,7 @@ static char *macho_file_read(struct macho_context *ctx, const char *path,
         close(fd);
         return NULL;
     }
-    char *b = macho_alloc(ctx, (size_t)st.st_size + 1);
+    char *b = (char *)(macho_alloc(ctx, (size_t)st.st_size + 1));
     size_t got = 0;
     while (got < (size_t)st.st_size) {
         ssize_t r = read(fd, b + got, (size_t)st.st_size - got);
@@ -380,7 +381,7 @@ static bool macho_libsystem_read(struct macho_context *ctx)
     bool arm = false;
     char *p = macho_libsystem_text, *end = macho_libsystem_text + n;
     while (p < end) {
-        char *line = p, *nl = memchr(p, '\n', (size_t)(end - p));
+        char *line = p, *nl = (char *)(memchr(p, '\n', (size_t)(end - p)));
         char *le = nl ? nl : end;
         p = nl ? nl + 1 : end;
         char *k = line;
@@ -389,7 +390,7 @@ static bool macho_libsystem_read(struct macho_context *ctx)
         bool syms = false;
         if (!strncmp(k, "targets:", 8)) {
             /* the list may continue on following lines up to ']' */
-            char *close = memchr(k, ']', (size_t)(end - k));
+            char *close = (char *)(memchr(k, ']', (size_t)(end - k)));
             arm = false;
             for (char *q = k; close && q < close; q++)
                 if (!strncmp(q, "arm64-macos", 11) ||
@@ -406,7 +407,7 @@ static bool macho_libsystem_read(struct macho_context *ctx)
             syms = true;
         if (!syms)
             continue;
-        char *q = memchr(k, '[', (size_t)(le - k));
+        char *q = (char *)(memchr(k, '[', (size_t)(le - k)));
         if (!q)
             continue;
         q++;
@@ -418,7 +419,7 @@ static bool macho_libsystem_read(struct macho_context *ctx)
             char *b = q, *e;
             if (*q == '\'') {
                 b = ++q;
-                e = memchr(q, '\'', (size_t)(end - q));
+                e = (char *)(memchr(q, '\'', (size_t)(end - q)));
                 if (!e)
                     break;
                 q = e + 1;
@@ -500,7 +501,8 @@ static bool macho_object_read(struct macho_context *ctx, macho_object *o)
                 macho_error_report(ctx, "%s: bad segment", o->path);
                 return false;
             }
-            o->sections = macho_alloc(ctx, ns * sizeof(macho_section_header));
+            o->sections = (macho_section_header *)(macho_alloc(
+                ctx, ns * sizeof(macho_section_header)));
             memcpy(o->sections, lc + 72, ns * sizeof(macho_section_header));
             o->section_count = ns;
         } else if (cmd == LC_SYMTAB) {
@@ -554,7 +556,7 @@ static void macho_fixup_add(struct macho_context *ctx, uint64_t addr,
                             uint64_t val)
 {
     MACHO_VECTOR_GROW(ctx->fixups, ctx->fixup_count, ctx->fixup_capacity);
-    ctx->fixups[ctx->fixup_count++] = (macho_fixup){addr, val};
+    ctx->fixups[ctx->fixup_count++] = VCC_LITERAL(macho_fixup, addr, val);
 }
 
 static uint32_t macho_import_index(struct macho_context *ctx, uint32_t g)
@@ -571,8 +573,8 @@ static uint32_t macho_got_slot_index(struct macho_context *ctx, uint32_t g)
 {
     if (ctx->globals[g].got_slot == MACHO_NONE) {
         ctx->globals[g].got_slot = ctx->got_count++;
-        ctx->got_globals =
-            realloc(ctx->got_globals, ctx->got_count * sizeof(uint32_t));
+        ctx->got_globals = (uint32_t *)(realloc(
+            ctx->got_globals, ctx->got_count * sizeof(uint32_t)));
         ctx->got_globals[ctx->got_count - 1] = g;
     }
     return ctx->globals[g].got_slot;
@@ -582,8 +584,8 @@ static uint32_t macho_stub_index(struct macho_context *ctx, uint32_t g)
     if (ctx->globals[g].stub_slot == MACHO_NONE) {
         macho_got_slot_index(ctx, g);
         ctx->globals[g].stub_slot = ctx->stub_count++;
-        ctx->stub_globals =
-            realloc(ctx->stub_globals, ctx->stub_count * sizeof(uint32_t));
+        ctx->stub_globals = (uint32_t *)(realloc(
+            ctx->stub_globals, ctx->stub_count * sizeof(uint32_t)));
         ctx->stub_globals[ctx->stub_count - 1] = g;
     }
     return ctx->globals[g].stub_slot;
@@ -835,7 +837,7 @@ static void macho_buffer_append(struct macho_context *ctx, macho_buffer *b,
 {
     if (b->length + n > b->capacity) {
         b->capacity = (b->length + n) * 2 + 256;
-        b->bytes = realloc(b->bytes, b->capacity);
+        b->bytes = (uint8_t *)realloc(b->bytes, b->capacity);
         if (!b->bytes) {
             fputs("vld: out of memory\n", ctx->diagnostics.error_stream);
             exit(1);
@@ -862,7 +864,7 @@ static void macho_buffer_append_u16(struct macho_context *ctx, macho_buffer *b,
 static void macho_buffer_pad(struct macho_context *ctx, macho_buffer *b,
                              size_t a)
 {
-    static const uint8_t z[16];
+    static const uint8_t z[16] = {0};
     while (b->length % a)
         macho_buffer_append(ctx, b, z, 1);
 }
@@ -886,9 +888,11 @@ static int macho_named_global_cmp(const void *a, const void *b)
 static void macho_global_ids_sort_by_name(struct macho_context *ctx,
                                           uint32_t *ids, uint32_t n)
 {
-    macho_named_global *v = macho_alloc(ctx, (size_t)n * sizeof *v);
+    macho_named_global *v =
+        (macho_named_global *)(macho_alloc(ctx, (size_t)n * sizeof *v));
     for (uint32_t i = 0; i < n; i++)
-        v[i] = (macho_named_global){ctx->globals[ids[i]].name, ids[i]};
+        v[i] =
+            VCC_LITERAL(macho_named_global, ctx->globals[ids[i]].name, ids[i]);
     qsort(v, n, sizeof *v, macho_named_global_cmp);
     for (uint32_t i = 0; i < n; i++)
         ids[i] = v[i].id;
@@ -936,20 +940,28 @@ static uint32_t macho_section_index_find(uint32_t osi, const uint32_t *order,
 
 /* one link; the state is the link's own (struct macho_context), so vccd's workers can run
    several at once; only the libSystem export table is shared (macho_libsystem_load) */
+static int macho_link_finish(struct macho_context *ctx, const char **inputs,
+                             int status)
+{
+    free(inputs);
+    macho_context_destroy(ctx);
+    return status;
+}
+
 int macho_link(int argc, char **argv, int dirfd, FILE *err)
 {
-    struct macho_context *ctx = calloc(1, sizeof *ctx);
+    struct macho_context *ctx = (struct macho_context *)calloc(1, sizeof *ctx);
     if (!ctx) {
         fputs("vld: out of memory\n", err ? err : stderr);
         return 1;
     }
     ctx->diagnostics =
-        (struct ld_diagnostics){.error_stream = err ? err : stderr,
-                                .program = "vld",
-                                .error_limit = 20};
+        VCC_LITERAL(struct ld_diagnostics, .error_stream = err ? err : stderr,
+                    .program = "vld", .error_limit = 20);
     ctx->text_section = ctx->stubs_section = ctx->got_section = MACHO_NONE;
     const char *out = "a.out";
-    const char **inputs = macho_alloc(ctx, (size_t)argc * sizeof(char *));
+    const char **inputs =
+        (const char **)(macho_alloc(ctx, (size_t)argc * sizeof(char *)));
     uint32_t ninputs = 0;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -998,10 +1010,11 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     if (!ninputs)
         macho_error_report(ctx, "no input files");
     if (atomic_load(&ctx->diagnostics.error_count))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
 
     /* read inputs */
-    ctx->objects = macho_alloc(ctx, ninputs * sizeof(macho_object));
+    ctx->objects =
+        (macho_object *)(macho_alloc(ctx, ninputs * sizeof(macho_object)));
     for (uint32_t i = 0; i < ninputs; i++) {
         macho_object *o = &ctx->objects[ctx->object_count++];
         o->path = inputs[i];
@@ -1015,7 +1028,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
             continue;
         }
         o->size = (size_t)st.st_size;
-        o->file_bytes = macho_alloc(ctx, o->size + 8);
+        o->file_bytes = (uint8_t *)macho_alloc(ctx, o->size + 8);
         size_t got = 0;
         while (got < o->size) {
             ssize_t r = read(fd, o->file_bytes + got, o->size - got);
@@ -1028,7 +1041,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
             macho_error_report(ctx, "%s: cannot read", inputs[i]);
     }
     if (atomic_load(&ctx->diagnostics.error_count))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
 
     /* output sections: __text and __stubs first in __TEXT, __got alone in __DATA_CONST */
     ctx->text_section = macho_output_section_get(ctx, "__TEXT", "__text",
@@ -1046,10 +1059,10 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
         macho_object *o = &ctx->objects[oi];
         if (o->minimum_os_version > minos)
             minos = o->minimum_os_version;
-        o->output_sections =
-            macho_alloc(ctx, (o->section_count + 1) * sizeof(uint32_t));
-        o->section_offsets =
-            macho_alloc(ctx, (o->section_count + 1) * sizeof(uint64_t));
+        o->output_sections = (uint32_t *)(macho_alloc(
+            ctx, (o->section_count + 1) * sizeof(uint32_t)));
+        o->section_offsets = (uint64_t *)(macho_alloc(
+            ctx, (o->section_count + 1) * sizeof(uint64_t)));
         for (uint32_t s = 0; s < o->section_count; s++) {
             macho_section_header *x = &o->sections[s];
             uint32_t t = x->flags & 0xff;
@@ -1088,8 +1101,8 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     /* symbols */
     for (uint32_t oi = 0; oi < ctx->object_count; oi++) {
         macho_object *o = &ctx->objects[oi];
-        o->global_ids =
-            macho_alloc(ctx, (o->symbol_count + 1) * sizeof(uint32_t));
+        o->global_ids = (uint32_t *)(macho_alloc(ctx, (o->symbol_count + 1) *
+                                                          sizeof(uint32_t)));
         for (uint32_t i = 0; i < o->symbol_count; i++) {
             const macho_nlist *n = &o->symbols[i];
             o->global_ids[i] = MACHO_NONE;
@@ -1156,7 +1169,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
         if (ctx->globals[g].object == MACHO_NONE && !ctx->globals[g].common)
             need_sys = true;
     if (need_sys && !macho_libsystem_load(ctx))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
     if (!macho_sdk_version)
         macho_libsystem_load(ctx);
     for (uint32_t g = 0; g < ctx->global_count; g++) {
@@ -1177,19 +1190,19 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     if (gmain == MACHO_NONE || ctx->globals[gmain].object == MACHO_NONE)
         macho_error_report(ctx, "undefined symbol: _main");
     if (atomic_load(&ctx->diagnostics.error_count))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
 
     /* scan relocations: stubs, GOT slots, pointer fixups (addresses come later) */
     /* (pass 0 needs no addresses except for fixups, which are redone after layout) */
     macho_relocations_process(ctx, 0, NULL);
     if (atomic_load(&ctx->diagnostics.error_count))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
     ctx->output_sections[ctx->stubs_section].size = 12ull * ctx->stub_count;
     ctx->output_sections[ctx->got_section].size = 8ull * ctx->got_count;
 
     /* output order: per segment, __text/__stubs first, zerofill last */
-    uint32_t *order = macho_alloc(ctx, (ctx->output_section_count + 1) *
-                                           sizeof(uint32_t)),
+    uint32_t *order = (uint32_t *)(macho_alloc(
+                 ctx, (ctx->output_section_count + 1) * sizeof(uint32_t))),
              nord = 0;
     for (int seg = 0; seg < SEG_LINKEDIT; seg++)
         for (int zf = 0; zf < 2; zf++)
@@ -1318,7 +1331,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
                                (unsigned long long)ctx->fixups[k].value);
     }
     if (atomic_load(&ctx->diagnostics.error_count))
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
 
     /* ---- __LINKEDIT ---- */
     macho_buffer le = {0};
@@ -1416,11 +1429,11 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     uint64_t ex_size = le.length - ex_off;
 
     /* symbol table: locals, external definitions, imports */
-    macho_output_symbol *syms = macho_alloc(
-        ctx, (ctx->global_count + 1 + 64) * sizeof(macho_output_symbol));
+    macho_output_symbol *syms = (macho_output_symbol *)(macho_alloc(
+        ctx, (ctx->global_count + 1 + 64) * sizeof(macho_output_symbol)));
     uint32_t nsyms = 0, nlocal = 0, nextdef = 0, nundef = 0;
-    uint32_t *sorted =
-                 macho_alloc(ctx, (ctx->global_count + 1) * sizeof(uint32_t)),
+    uint32_t *sorted = (uint32_t *)(macho_alloc(ctx, (ctx->global_count + 1) *
+                                                         sizeof(uint32_t))),
              ns = 0;
     for (uint32_t oi = 0; oi < ctx->object_count; oi++) {
         macho_object *o = &ctx->objects[oi];
@@ -1435,20 +1448,22 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
             uint32_t s = n->section_number - 1u;
             if (s >= o->section_count || o->output_sections[s] == MACHO_NONE)
                 continue;
-            syms = realloc(syms, (nsyms + ctx->global_count + 2) *
-                                     sizeof(macho_output_symbol));
-            syms[nsyms++] = (macho_output_symbol){
-                nm, macho_local_symbol_address(ctx, o, i), N_SECT,
-                (uint8_t)macho_section_index_find(o->output_sections[s], order,
-                                                  nord),
-                0};
+            syms = (macho_output_symbol *)(realloc(
+                syms,
+                (nsyms + ctx->global_count + 2) * sizeof(macho_output_symbol)));
+            syms[nsyms++] =
+                VCC_LITERAL(macho_output_symbol, nm,
+                            macho_local_symbol_address(ctx, o, i), N_SECT,
+                            (uint8_t)macho_section_index_find(
+                                o->output_sections[s], order, nord),
+                            0);
             nlocal++;
         }
     }
-    syms = realloc(syms, (nsyms + ctx->global_count + 2) *
-                             sizeof(macho_output_symbol));
-    syms[nsyms++] = (macho_output_symbol){
-        "__mh_execute_header", MACHO_IMAGE_BASE, N_SECT | N_EXT, 1, 0x10};
+    syms = (macho_output_symbol *)(realloc(
+        syms, (nsyms + ctx->global_count + 2) * sizeof(macho_output_symbol)));
+    syms[nsyms++] = VCC_LITERAL(macho_output_symbol, "__mh_execute_header",
+                                MACHO_IMAGE_BASE, N_SECT | N_EXT, 1, 0x10);
     nextdef++;
     for (uint32_t g = 0; g < ctx->global_count; g++)
         if (ctx->globals[g].object != MACHO_NONE || ctx->globals[g].common)
@@ -1467,12 +1482,12 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
             osi =
                 macho_output_section_get(ctx, "__DATA", "__common", S_ZEROFILL);
         }
-        syms[nsyms++] = (macho_output_symbol){
-            x->name, x->address, N_SECT | N_EXT,
+        syms[nsyms++] = VCC_LITERAL(
+            macho_output_symbol, x->name, x->address, N_SECT | N_EXT,
             (uint8_t)(osi == MACHO_NONE
                           ? 0
                           : macho_section_index_find(osi, order, nord)),
-            0};
+            0);
         nextdef++;
     }
     /* "__mh_execute_header" sorts before user names in strcmp order only by chance: keep ld64's sort */
@@ -1494,8 +1509,9 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     macho_global_ids_sort_by_name(ctx, sorted, ns);
     uint32_t undef0 = nsyms;
     for (uint32_t k = 0; k < ns; k++) {
-        syms[nsyms++] = (macho_output_symbol){ctx->globals[sorted[k]].name, 0,
-                                              N_UNDF | N_EXT, 0, 1u << 8};
+        syms[nsyms++] =
+            VCC_LITERAL(macho_output_symbol, ctx->globals[sorted[k]].name, 0,
+                        N_UNDF | N_EXT, 0, 1u << 8);
         ctx->globals[sorted[k]].common_alignment =
             nsyms - 1; /* reused: symbol index of the import */
         nundef++;
@@ -1542,7 +1558,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     uint64_t filesize = segfile[SEG_LINKEDIT] + le_size;
 
     /* ---- the image ---- */
-    uint8_t *img = macho_alloc(ctx, filesize);
+    uint8_t *img = (uint8_t *)macho_alloc(ctx, filesize);
     macho_buffer lc = {0};
     {
         uint32_t mh[8] = {MH_MAGIC_64,
@@ -1834,7 +1850,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
     free(sorted);
     if (atomic_load(&ctx->diagnostics.error_count)) {
         free(img);
-        goto fail;
+        return macho_link_finish(ctx, inputs, 1);
     }
 
     /* write: a fresh file (a running binary must not be overwritten in place) */
@@ -1847,7 +1863,7 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
             macho_error_report(ctx, "cannot create %s: %s", tmp,
                                strerror(errno));
             free(img);
-            goto fail;
+            return macho_link_finish(ctx, inputs, 1);
         }
         size_t done = 0;
         while (done < filesize) {
@@ -1866,14 +1882,8 @@ int macho_link(int argc, char **argv, int dirfd, FILE *err)
                 macho_error_report(ctx, "cannot rename to %s: %s", out,
                                    strerror(errno));
             unlinkat(dirfd, tmp, 0);
-            goto fail;
+            return macho_link_finish(ctx, inputs, 1);
         }
     }
-    free(inputs);
-    macho_context_destroy(ctx);
-    return 0;
-fail:
-    free(inputs);
-    macho_context_destroy(ctx);
-    return 1;
+    return macho_link_finish(ctx, inputs, 0);
 }

@@ -1,5 +1,6 @@
 /* x86 records -> structured assembler operands. Encoding, relocations and
  * branch relaxation belong to the existing assembler, shared with -S input. */
+#include "common/literal.h"
 #include "x64-internal.h"
 #include "../as/operand.h"
 
@@ -287,10 +288,10 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p,
             break;
         case X64_OP_LEASCALE:
             op = X64O_LEA;
-            o[0] = (XOp){.kind = XK_MEM,
-                         .base = (int8_t)i->registers[1],
-                         .index = (int8_t)i->registers[2],
-                         .scale = (uint8_t)(1u << i->shift)};
+            o[0] = VCC_LITERAL(XOp, .kind = XK_MEM,
+                               .base = (int8_t)i->registers[1],
+                               .index = (int8_t)i->registers[2],
+                               .scale = (uint8_t)(1u << i->shift));
             break;
         case X64_OP_ADD:
         case X64_OP_SUB:
@@ -370,14 +371,11 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p,
         case X64_OP_LEAL:
             op = X64O_LEA;
             sz = 8;
-            o[0] =
-                (XOp){.kind = XK_MEM,
-                      .base = 16,
-                      .index = -1,
-                      .scale = 1,
-                      .hasv = 1,
-                      .v = as_symbol_value(
-                          R->assembler, x64_encode_label(R, fid, i->label), 0)};
+            o[0] = VCC_LITERAL(
+                XOp, .kind = XK_MEM, .base = 16, .index = -1, .scale = 1,
+                .v = as_symbol_value(R->assembler,
+                                     x64_encode_label(R, fid, i->label), 0),
+                .hasv = 1);
             break;
         case X64_OP_CALLR:
         case X64_OP_JMPR:

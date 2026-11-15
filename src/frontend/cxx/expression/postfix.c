@@ -339,9 +339,9 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                         cxx_entity_kind_find(m, CXX_ENTITY_FUNCTION_TEMPLATE) &&
                         !c->tentative) {
                         if (c->ntargs > c->cxargs)
-                            c->xargs =
-                                realloc(c->xargs, (c->cxargs = c->ntargs + 8) *
-                                                      sizeof *c->xargs);
+                            c->xargs = (cxx_targ *)(realloc(
+                                c->xargs, (c->cxargs = c->ntargs + 8) *
+                                              sizeof *c->xargs));
                         memcpy(c->xargs, c->targs,
                                c->ntargs * sizeof *c->xargs);
                         c->nxargs = c->ntargs, c->xargs_set = 1, c->ecallee = m;

@@ -80,7 +80,8 @@ VPRIV void cxx_guide_record(cxx *c, cxx_entity *te, uint32_t i)
         if (!from)
             return;
     }
-    te->guides = realloc(te->guides, (te->nguides + 1) * sizeof *te->guides);
+    te->guides = (struct cxx_guide *)(realloc(
+        te->guides, (te->nguides + 1) * sizeof *te->guides));
     te->guides[te->nguides++] = g;
 }
 

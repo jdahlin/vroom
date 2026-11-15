@@ -1,4 +1,5 @@
 /* C++ templates: members of class template instances defined outside their class */
+#include "common/literal.h"
 #include "instantiate.h"
 
 VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
@@ -8,16 +9,12 @@ VPRIV void cxx_template_member_definition(cxx *c, cxx_entity *te, uint32_t name,
 {
     cxx_template *t = cxx_template_of(te);
 
-    t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
-    t->oocs[t->noocs++] =
-        (struct cxx_ooc){.name = name,
-                         .pos = pos,
-                         .nparams = nparams,
-                         .params = params,
-                         .home = home,
-                         .is_const = is_const,
-                         .partial = partial,
-                         .pack = c->decl_pack_param < nparams};
+    t->oocs =
+        (struct cxx_ooc *)(realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs));
+    t->oocs[t->noocs++] = VCC_LITERAL(
+        struct cxx_ooc, .name = name, .pos = pos, .nparams = nparams,
+        .params = params, .home = home, .is_const = is_const,
+        .partial = partial, .pack = c->decl_pack_param < nparams);
 }
 
 /* template<...> template<...> R X<...>::f(...) { }: a member template defined outside its class template */
@@ -28,14 +25,11 @@ VPRIV void cxx_template_member_template_definition(
     cxx_template *t = cxx_template_of(te);
 
     (void)c;
-    t->oocs = realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs);
-    t->oocs[t->noocs++] = (struct cxx_ooc){.name = name,
-                                           .pos = pos,
-                                           .nparams = nparams,
-                                           .params = outer,
-                                           .home = home,
-                                           .inner = inner,
-                                           .is_const = is_const};
+    t->oocs =
+        (struct cxx_ooc *)(realloc(t->oocs, (t->noocs + 1) * sizeof *t->oocs));
+    t->oocs[t->noocs++] = VCC_LITERAL(
+        struct cxx_ooc, .name = name, .pos = pos, .nparams = nparams,
+        .params = outer, .home = home, .inner = inner, .is_const = is_const);
 }
 
 /* do the reference kinds of the parameters of the out-of-class definition at pos (& 1, && 2, none 0, as

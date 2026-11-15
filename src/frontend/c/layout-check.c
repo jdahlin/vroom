@@ -50,7 +50,7 @@ static void cc_layout_check_fields(cc *c, vbuffer *o, const char *rname,
 
 CC_PRIVATE void cc_layout_check(cc *c)
 {
-    char *storage = malloc(1 << 20);
+    char *storage = (char *)malloc(1 << 20);
     vbuffer o;
     char rn[512];
 

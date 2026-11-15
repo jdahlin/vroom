@@ -1,4 +1,5 @@
 /* vcc front end: clang's library builtins and standard functions, and implicit declarations of them */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- library builtins (frontend/c/libbuiltins.inc, from clang) ---------------- */
@@ -270,15 +271,15 @@ CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc)
                       : cc_type_size(c, ret) == 8 ? "__powidf2"
                                                   : "__powitf2";
             size_t ll = strlen(lib), pre = c->o->target == PP_DARWIN ? 1 : 0;
-            char *keep = cc_heap_allocate(c, ll + pre + 1);
+            char *keep = (char *)cc_heap_allocate(c, ll + pre + 1);
             attrs a;
 
             keep[0] = '_';
             memcpy(keep + pre, lib, ll + 1);
             memset(&a, 0, sizeof(a));
             a.asmname = c->nstr + 1;
-            c->strs[c->nstr++] =
-                (cstr){keep, (uint32_t)(ll + pre + 1), 1, LEX_TOKEN_STRING};
+            c->strs[c->nstr++] = VCC_LITERAL(
+                cstr, keep, (uint32_t)(ll + pre + 1), 1, LEX_TOKEN_STRING);
             cc_attribute_apply_symbol(c, &c->syms[s], &a);
             return s;
         }

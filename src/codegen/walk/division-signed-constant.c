@@ -7,6 +7,7 @@
  * the lowering interface WALK_LOWER() (smulhi for 64 bits, a widened multiply for 32), so it is the same for
  * every CPU and for VIR.  The caller checks _ok first and keeps operand evaluation order.
  */
+#include "common/literal.h"
 #include "walk.h"
 
 /* The saved input and materialized magic are the peak two extra registers.
@@ -65,11 +66,11 @@ VPRIV codegen_value walk_division_signed_constant_emit(
     if (r->remainder) {
         q = WALK_LOWER(bin)(e, LEX_TOKEN_STAR, size, false, q,
                             codegen_value_constant(r->divisor));
-        return WALK_LOWER(bin)(
-            e, LEX_TOKEN_MINUS, size, false,
-            (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                            .register_number = (uint8_t)saved},
-            q);
+        return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false,
+                               VCC_LITERAL(codegen_value,
+                                           .kind = CODEGEN_VALUE_REGISTER,
+                                           .register_number = (uint8_t)saved),
+                               q);
     }
     return r->negative ? WALK_LOWER(un)(e, LEX_TOKEN_MINUS, size, q) : q;
 }

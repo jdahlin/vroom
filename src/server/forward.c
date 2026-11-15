@@ -81,7 +81,8 @@ VPRIV int vccd_backend_forward_argv(const struct vccd_request *r, int argc,
         len += strlen(argv[i]) + 1;
     for (char **e = r->envp; *e; e++, envc++)
         len += strlen(*e) + 1;
-    if (len > VCCD_PROTOCOL_PAYLOAD_MAX || !(raw = malloc(sizeof(*nh) + len)))
+    if (len > VCCD_PROTOCOL_PAYLOAD_MAX ||
+        !(raw = (char *)(malloc(sizeof(*nh) + len))))
         return 127;
     nh = (struct vccd_request_header *)raw;
     *nh = *h;

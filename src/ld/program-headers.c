@@ -183,7 +183,8 @@ VPRIV void ld_program_headers_finish(struct ld_context *ctx)
         ld_error_report(ctx,
                         "ELF headers in the first PT_LOAD are not supported "
                         "(no SECTIONS gap below the first section)");
-    int *map = ld_region_alloc(ctx->layout.program_headers.n * sizeof(int));
+    int *map =
+        (int *)(ld_region_alloc(ctx->layout.program_headers.n * sizeof(int)));
     uint32_t w = 0;
     for (uint32_t i = 0; i < ctx->layout.program_headers.n; i++) {
         elf_program_header *p = &ctx->layout.program_headers.v[i];

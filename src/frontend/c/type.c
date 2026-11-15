@@ -148,7 +148,8 @@ CC_PRIVATE uint32_t cc_type_intern(cc *c, const ctype *t)
             c->tyhash[i] = idx;
             if (c->nty * 2 > c->tyhcap) { /* grow */
                 uint32_t ncap = c->tyhcap * 2,
-                         *nh = cc_heap_allocate(c, ncap * sizeof(uint32_t));
+                         *nh = (uint32_t *)(cc_heap_allocate(
+                             c, ncap * sizeof(uint32_t)));
 
                 memset(nh, 0, ncap * sizeof(uint32_t));
                 for (uint32_t j = 0; j < c->tyhcap; j++) {
@@ -190,9 +191,10 @@ CC_PRIVATE uint32_t cc_type_new(cc *c, int kind)
 CC_PRIVATE ast_qualified_type cc_type_bitint(cc *c, unsigned bits, bool unsign)
 {
     if (bits > 128) {
-        ctype t = {.kind = unsign ? AST_TYPE_UNSIGNED_BITINT : AST_TYPE_BITINT,
-                   .size = 8 * (((uint64_t)bits + 63) / 64),
+        ctype t = {.kind = (uint8_t)(unsign ? AST_TYPE_UNSIGNED_BITINT
+                                            : AST_TYPE_BITINT),
                    .align = 8,
+                   .size = 8 * (((uint64_t)bits + 63) / 64),
                    .n = bits};
         return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);
     }
@@ -207,10 +209,10 @@ CC_PRIVATE ast_qualified_type cc_type_bitint(cc *c, unsigned bits, bool unsign)
                : size == 8 ? AST_TYPE_LONG_LONG
                            : AST_TYPE_INT128;
     ctype t = {.kind = (uint8_t)(kind + unsign),
-               .size = size,
                .align = size > 8 && (CC_X86_64(c) || PP_IS_WASM(c->o->target))
                             ? 8
                             : size,
+               .size = size,
                .n = bits};
 
     return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);
@@ -243,8 +245,8 @@ CC_PRIVATE ast_qualified_type cc_type_pointer(cc *c, ast_qualified_type base)
     }
     {
         ctype t = {.kind = AST_TYPE_POINTER,
-                   .size = CC_PTRSIZE(c),
                    .align = CC_PTRSIZE(c),
+                   .size = CC_PTRSIZE(c),
                    .base = base};
 
         i = cc_type_intern(c, &t);
@@ -259,8 +261,8 @@ CC_PRIVATE ast_qualified_type cc_type_array(cc *c, ast_qualified_type elem,
     const ctype *e = AST_TYPE(c, elem);
     ctype t = {.kind = AST_TYPE_ARRAY,
                .flags = (uint8_t)flags,
-               .base = elem,
-               .align = e->align};
+               .align = e->align,
+               .base = elem};
 
     if (!(flags & (AST_TYPE_FLAG_INCOMPLETE | AST_TYPE_FLAG_VLA))) {
         t.n = (uint32_t)n;
@@ -282,8 +284,8 @@ CC_PRIVATE ast_qualified_type cc_type_vla(cc *c, ast_qualified_type elem,
 {
     ctype t = {.kind = AST_TYPE_ARRAY,
                .flags = AST_TYPE_FLAG_VLA,
-               .base = elem,
                .align = AST_TYPE(c, elem)->align,
+               .base = elem,
                .n = sizenode};
 
     return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);
@@ -358,7 +360,8 @@ CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret,
             c->fnhash[i] = idx;
             if (++c->nfn * 2 > c->fnhcap) {
                 uint32_t ncap = c->fnhcap * 2,
-                         *nh = cc_heap_allocate(c, ncap * sizeof(uint32_t));
+                         *nh = (uint32_t *)(cc_heap_allocate(
+                             c, ncap * sizeof(uint32_t)));
 
                 memset(nh, 0, ncap * sizeof(uint32_t));
                 for (uint32_t j = 0; j < c->fnhcap; j++) {
@@ -429,11 +432,11 @@ CC_PRIVATE ast_qualified_type cc_type_vector(cc *c, ast_qualified_type elem,
     const ctype *e = AST_TYPE(c, elem);
     /* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
     ctype t = {.kind = AST_TYPE_VECTOR,
-               .base = AST_QUALIFIED_TYPE_UNQUALIFIED(elem),
-               .size = size,
                .align = size > 16 && !PP_IS_WASM(c->o->target) && !CC_X86_64(c)
                             ? 16
-                            : size};
+                            : size,
+               .size = size,
+               .base = AST_QUALIFIED_TYPE_UNQUALIFIED(elem)};
 
     t.n = e->size ? (uint32_t)(size / e->size) : 0;
     return AST_QUALIFIED_TYPE(cc_type_intern(c, &t), 0);

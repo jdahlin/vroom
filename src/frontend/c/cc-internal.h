@@ -17,6 +17,7 @@
  * pointer constants depend on the difference: __is_constexpr), and the
  * types of builtins.
  */
+#include "common/literal.h"
 #include "port/stack-guard.h"
 #include <math.h>
 #include <pthread.h>
@@ -283,8 +284,9 @@ extern const char *const cc_warning_group_pedantic[]; /* { "pedantic" } */
         if (unlikely(cc_extension_is_enabled((c), (flag), (groups)))) {        \
             (c)->dms = (ms);                                                   \
             if (!((tf) & PP_TOKEN_FLAG_FROM_MACRO))                            \
-                (c)->dfx = (diag_fixit){(loc), (loc) + (uint32_t)strlen(ms),   \
-                                        "", DIAG_APPLICABILITY_MACHINE};       \
+                (c)->dfx = VCC_LITERAL(diag_fixit, (loc),                      \
+                                       (loc) + (uint32_t)strlen(ms), "",       \
+                                       DIAG_APPLICABILITY_MACHINE);            \
             cc_report_extension((c), (flag), (groups), (loc), __VA_ARGS__);    \
         }                                                                      \
     } while (0)

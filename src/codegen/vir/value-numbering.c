@@ -1,6 +1,7 @@
 /* The simplifier's value numbering: constants, pure instructions and loads of the dominators. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -103,14 +104,10 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
 
             if (!(in.flags & VIR_INSN_FLAG_VOL) && vir_type_size(vt) &&
                 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == vir_type_size(vt)) {
-                key = (virbuild_value_entry){VIR_OP_LOAD,
-                                             vt,
-                                             VIR_INSN_FLAG_WIDTH_LOG2(in.flags),
-                                             in.a,
-                                             0,
-                                             0,
-                                             S->memory_generation,
-                                             0};
+                key =
+                    VCC_LITERAL(virbuild_value_entry, VIR_OP_LOAD, vt,
+                                (uint32_t)(VIR_INSN_FLAG_WIDTH_LOG2(in.flags)),
+                                in.a, 0, 0, S->memory_generation, 0);
                 t = virbuild_value_table_lookup(S, &key);
                 if (!t->value)
                     S->table_log[S->table_log_count++] =
@@ -121,14 +118,10 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
             if (!(in.flags & VIR_INSN_FLAG_VOL) &&
                 (vt == VIR_TYPE_I32 ||
                  vt == VIR_TYPE_I64)) { /* (any load of its width) */
-                key = (virbuild_value_entry){VIR_OP_STORE,
-                                             0,
-                                             VIR_INSN_FLAG_WIDTH_LOG2(in.flags),
-                                             in.a,
-                                             0,
-                                             0,
-                                             S->memory_generation,
-                                             0};
+                key =
+                    VCC_LITERAL(virbuild_value_entry, VIR_OP_STORE, 0,
+                                (uint32_t)(VIR_INSN_FLAG_WIDTH_LOG2(in.flags)),
+                                in.a, 0, 0, S->memory_generation, 0);
                 t = virbuild_value_table_lookup(S, &key);
                 if (!t->value)
                     S->table_log[S->table_log_count++] =
@@ -143,25 +136,21 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
 
             if (in.flags & VIR_INSN_FLAG_VOL)
                 continue;
-            key = (virbuild_value_entry){VIR_OP_LOAD,
-                                         in.type,
-                                         in.flags & (3 | VIR_INSN_FLAG_MS),
-                                         in.a,
-                                         0,
-                                         0,
-                                         S->memory_generation,
-                                         0};
+            key = VCC_LITERAL(virbuild_value_entry, VIR_OP_LOAD, in.type,
+                              (uint32_t)(in.flags & (3 | VIR_INSN_FLAG_MS)),
+                              in.a, 0, 0, S->memory_generation, 0);
             if ((in.type == VIR_TYPE_I32 || in.type == VIR_TYPE_I64) &&
                 !virbuild_value_table_lookup(S, &key)->value) {
                 /* the value a store of this width left: truncated or extended to the load's */
-                virbuild_value_entry sk = {VIR_OP_STORE,
-                                           0,
-                                           VIR_INSN_FLAG_WIDTH_LOG2(in.flags),
-                                           in.a,
-                                           0,
-                                           0,
-                                           S->memory_generation,
-                                           0};
+                virbuild_value_entry sk = {
+                    VIR_OP_STORE,
+                    0,
+                    (uint32_t)(VIR_INSN_FLAG_WIDTH_LOG2(in.flags)),
+                    in.a,
+                    0,
+                    0,
+                    S->memory_generation,
+                    0};
                 uint32_t v = virbuild_value_table_lookup(S, &sk)->value,
                          w = VIR_INSN_FLAG_WIDTH_LOG2(in.flags), vt;
 
@@ -169,17 +158,14 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
                     v = virbuild_value_resolve(V, v);
                     vt = V->insns[v].insn.type;
                     if (in.type == VIR_TYPE_I32 && vt == VIR_TYPE_I64 && w == 2)
-                        V->insns[q].insn =
-                            (vir_insn){VIR_OP_TRUNC, VIR_TYPE_I32, 0, v, 0, 0};
+                        V->insns[q].insn = VCC_LITERAL(
+                            vir_insn, VIR_OP_TRUNC, VIR_TYPE_I32, 0, v, 0, 0);
                     else if (w < 3 &&
                              vir_type_size(vt) <= vir_type_size(in.type))
-                        V->insns[q].insn = (vir_insn){
-                            VIR_OP_EXT,
-                            (uint8_t)in.type,
-                            (uint16_t)(w | (in.flags & VIR_INSN_FLAG_MS)),
-                            v,
-                            0,
-                            0};
+                        V->insns[q].insn = VCC_LITERAL(
+                            vir_insn, VIR_OP_EXT, (uint8_t)in.type,
+                            (uint16_t)(w | (in.flags & VIR_INSN_FLAG_MS)), v, 0,
+                            0);
                     else
                         v = 0;
                     if (v) {
@@ -214,11 +200,11 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
                 }
             }
             if (virbuild_opcode_is_commutative(op) && in.a > in.b)
-                key = (virbuild_value_entry){op,   in.type, in.flags,   in.b,
-                                             in.a, in.c,    generation, 0};
+                key = VCC_LITERAL(virbuild_value_entry, op, in.type, in.flags,
+                                  in.b, in.a, in.c, generation, 0);
             else
-                key = (virbuild_value_entry){op,   in.type, in.flags,   in.a,
-                                             in.b, in.c,    generation, 0};
+                key = VCC_LITERAL(virbuild_value_entry, op, in.type, in.flags,
+                                  in.a, in.b, in.c, generation, 0);
         } else
             continue;
         t = virbuild_value_table_lookup(S, &key);
@@ -258,17 +244,13 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
                      vt = V->insns[v].insn.type;
 
             if (in.type == VIR_TYPE_I32 && vt == VIR_TYPE_I64)
-                V->insns[q].insn =
-                    (vir_insn){VIR_OP_TRUNC, VIR_TYPE_I32, 0, v, 0, 0};
+                V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_TRUNC,
+                                               VIR_TYPE_I32, 0, v, 0, 0);
             else if (in.type == VIR_TYPE_I64 && vt == VIR_TYPE_I32 &&
                      VIR_INSN_FLAG_WIDTH_LOG2(in.flags) < 3)
-                V->insns[q].insn =
-                    (vir_insn){VIR_OP_EXT,
-                               VIR_TYPE_I64,
-                               (uint16_t)(in.flags & (3 | VIR_INSN_FLAG_MS)),
-                               v,
-                               0,
-                               0};
+                V->insns[q].insn = VCC_LITERAL(
+                    vir_insn, VIR_OP_EXT, VIR_TYPE_I64,
+                    (uint16_t)(in.flags & (3 | VIR_INSN_FLAG_MS)), v, 0, 0);
             else
                 v = 0;
             if (v) {

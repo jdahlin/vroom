@@ -20,7 +20,7 @@ CC_PRIVATE ast_qualified_type cc_type_complex(cc *c, ast_qualified_type et)
         tag *r = &c->tags[ti];
 
         r->nfield = 2;
-        r->f = cc_heap_allocate(c, 2 * sizeof(field));
+        r->f = (field *)(cc_heap_allocate(c, 2 * sizeof(field)));
         memset(r->f, 0, 2 * sizeof(field));
         r->f[0].ty = r->f[1].ty = cc_type_basic(k);
         r->f[1].off = 8 * cc_type_size(c, cc_type_basic(k));

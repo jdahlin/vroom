@@ -1,5 +1,6 @@
 /* ld_link_run(): the passes of one ELF link, in order. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
@@ -118,7 +119,8 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
             if (ctx->inputs.objects.v[i]->file_bytes &&
                 ctx->inputs.objects.v[i]->first_global_index)
                 ctx->inputs.objects.v[i]->local_needs_got =
-                    calloc(ctx->inputs.objects.v[i]->first_global_index, 1);
+                    (_Atomic(uint8_t) *)calloc(
+                        ctx->inputs.objects.v[i]->first_global_index, 1);
     ld_parallel_for(
         ctx->inputs.sections.n,
         ctx->inputs.x86 ? x64_ld_relocation_scan : a64_ld_relocation_scan, ctx);
@@ -150,11 +152,12 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
              k++)
             if (o->local_needs_got[k]) {
                 if (!o->local_got_index)
-                    o->local_got_index = ld_region_alloc(o->first_global_index *
-                                                         sizeof(uint32_t));
+                    o->local_got_index = (uint32_t *)(ld_region_alloc(
+                        o->first_global_index * sizeof(uint32_t)));
                 o->local_got_index[k] =
                     ctx->output.got_symbols.n + ctx->output.got_locals.n;
-                VVEC_PUSH(ctx->output.got_locals, ((ld_got_location){i, k}),
+                VVEC_PUSH(ctx->output.got_locals,
+                          (VCC_LITERAL(ld_got_location, i, k)),
                           ld_region_alloc);
                 if (ctx->relocations.pic && o->symbols[k].st_shndx != SHN_ABS)
                     ctx->inputs.sections.v[ctx->output.got_section]
@@ -201,8 +204,9 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
 
     /* room for thunk sections without moving isecs */
     if (ctx->inputs.sections.cap < ctx->inputs.sections.n + 4096) {
-        ld_input_section *nv = ld_region_alloc(
-            (size_t)(ctx->inputs.sections.n + 4096) * sizeof(ld_input_section));
+        ld_input_section *nv = (ld_input_section *)(ld_region_alloc(
+            (size_t)(ctx->inputs.sections.n + 4096) *
+            sizeof(ld_input_section)));
         memcpy(nv, ctx->inputs.sections.v,
                ctx->inputs.sections.n * sizeof(ld_input_section));
         ctx->inputs.sections.v = nv;
@@ -301,7 +305,7 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
     ld_file_offsets_assign(ctx);
     ld_phase_time_report(ctx, "phdrs, symtab sizes, offsets");
 
-    ctx->output.image = ld_region_large_alloc(ctx->layout.file_size);
+    ctx->output.image = (uint8_t *)ld_region_large_alloc(ctx->layout.file_size);
     /* RELATIVE relocations: per section, in address order */
     if (ctx->output.rela_dyn_section != LD_NONE && ctx->output.relative_count) {
         VVEC(uint32_t) dl = {0};

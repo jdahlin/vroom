@@ -100,7 +100,7 @@ static uint8_t vir_synth_return_register(const vir_function *f, uint32_t sig,
 static void vir_synth_fixed_registers_get(const vir_function *f, uint32_t v,
                                           vir_register_constraint *x, void *ctx)
 {
-    const vir_synthetic_target *t = ctx;
+    const vir_synthetic_target *t = (const vir_synthetic_target *)ctx;
     const vir_insn *in = &f->insns[v];
     uint8_t reg[VIR_REGISTER_CONSTRAINT_MAX];
 

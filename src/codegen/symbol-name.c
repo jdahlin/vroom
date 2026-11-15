@@ -70,7 +70,7 @@ VPRIV uint32_t codegen_symbol_canonical(cc *c, uint32_t s)
 
 VPRIV const attrs *codegen_symbol_attributes(cc *c, uint32_t s)
 {
-    static const attrs none;
+    static const attrs none = {0};
 
     return c->syms[s].attrs ? &c->attr[c->syms[s].attrs] : &none;
 }

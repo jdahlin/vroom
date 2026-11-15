@@ -1,5 +1,6 @@
 /* The address-assignment state and the functions that turn a section or symbol into an address (lld's ExprValue). */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- address-assignment state ---------------- */
@@ -108,17 +109,15 @@ VPRIV bool ld_expression_value_is_absolute(ld_expression_value v)
 }
 VPRIV ld_expression_value ld_expression_value_absolute_make(uint64_t x)
 {
-    return (ld_expression_value){
-        .kind = LD_VALUE_KIND_ABSOLUTE, .value = x, .alignment = 1};
+    return VCC_LITERAL(ld_expression_value, .kind = LD_VALUE_KIND_ABSOLUTE,
+                       .value = x, .alignment = 1);
 }
 VPRIV ld_expression_value ld_expression_value_in_section_make(
     ld_expression_value a, bool fabs, uint64_t off)
 {
-    return (ld_expression_value){.kind = a.kind,
-                                 .index = a.index,
-                                 .force_absolute = fabs,
-                                 .value = off,
-                                 .alignment = 1};
+    return VCC_LITERAL(ld_expression_value, .kind = a.kind,
+                       .force_absolute = fabs, .index = a.index, .value = off,
+                       .alignment = 1);
 }
 
 /* value of a global symbol as an expression value (getSymbolValue) */
@@ -126,7 +125,7 @@ VPRIV ld_expression_value
 ld_global_symbol_expression_value(struct ld_context *ctx, uint32_t g)
 {
     ld_global_symbol *s = &ctx->symbols.globals[g];
-    ld_expression_value v = {.alignment = 1, .type = s->type};
+    ld_expression_value v = {.type = s->type, .alignment = 1};
     if (s->state == LD_SYMBOL_STATE_SCRIPT) {
         v.kind = s->expression_value.kind;
         v.index = s->expression_value.index;

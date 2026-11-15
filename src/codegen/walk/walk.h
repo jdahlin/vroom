@@ -80,6 +80,16 @@ typedef struct walk_inline_call {
 
 #define WALK_TEMPORARY_SLOT_MAX 1024
 
+struct walk_local_slot_entry {
+    int64_t offset;
+    uint32_t size, align, symbol;
+};
+
+struct walk_temporary_slot {
+    int64_t offset;
+    uint32_t size, align;
+};
+
 typedef struct walk_state {
     int64_t frame_offset; /* bytes of locals below the frame base so far */
     uint32_t frame_alignment;
@@ -87,19 +97,13 @@ typedef struct walk_state {
 	   statement ends (statement expressions give their value outside the
 	   inner statements), so later statements reuse it.  tu: those of the
 	   statements being walked (a stack, marked per statement); tf: free. */
-    struct walk_temporary_slot {
-        int64_t offset;
-        uint32_t size, align;
-    } temporary_slots_in_use[WALK_TEMPORARY_SLOT_MAX],
+    struct walk_temporary_slot temporary_slots_in_use[WALK_TEMPORARY_SLOT_MAX],
         temporary_slots_free[WALK_TEMPORARY_SLOT_MAX];
     uint32_t temporary_slot_in_use_count, temporary_slot_free_count,
         statement_depth;
     /* the locals of the inline copies being walked: free (and unbound) when
 	   the copy ends; inlocal: inside a copy's parameters or body */
-    struct walk_local_slot_entry {
-        int64_t offset;
-        uint32_t size, align, symbol;
-    } local_slots[WALK_TEMPORARY_SLOT_MAX];
+    struct walk_local_slot_entry local_slots[WALK_TEMPORARY_SLOT_MAX];
     uint32_t local_slot_count, inline_local_depth;
     uint32_t label_count; /* local labels handed out in this function (1..) */
     uint32_t generation;  /* bindings below are valid when their gen is this */

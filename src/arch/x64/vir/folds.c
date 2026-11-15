@@ -1,5 +1,6 @@
 /* x86-64 lowering of VIR: constants, memory operands and the folds into one instruction. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV bool x64_vir_value_immediate(const vir_function *f, uint32_t v,
@@ -301,11 +302,11 @@ VPRIV codegen_lvalue x64_vir_memory_operand(x64_vir_context *L, uint32_t value,
 {
     const vir_insn *addr = &L->function->insns[value];
     if (x64_vir_is_frame_operand(L->function, value))
-        return (codegen_lvalue){.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = L->slot[addr->a] +
-                                          x64_vir_constant_bits(addr)};
-    return (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                            .register_number = reg};
+        return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME,
+                           .offset =
+                               L->slot[addr->a] + x64_vir_constant_bits(addr));
+    return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                       .register_number = (uint8_t)(reg));
 }
 
 /* Small constant blocks do not need REP's fixed registers or their clobbers.

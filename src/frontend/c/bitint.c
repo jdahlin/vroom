@@ -1,5 +1,6 @@
 /* Wide constant values are constructed only while parsing. Published AST words
  * are immutable, including while emitters concurrently evaluate initializers. */
+#include "common/literal.h"
 #include "cc-internal.h"
 #include "common/bigint.h"
 
@@ -32,7 +33,7 @@ CC_PRIVATE uint32_t cc_bitint_node_new_integer(cc *c, i128 value,
                                                uint32_t loc)
 {
     size_t n = (size_t)(cc_type_size(c, t) / 4);
-    uint32_t *a = calloc(n, 4);
+    uint32_t *a = (uint32_t *)calloc(n, 4);
     if (!a)
         cc_report_fatal(c, loc, "out of memory");
     for (size_t i = 0; i < n; i++)
@@ -49,7 +50,7 @@ CC_PRIVATE uint32_t cc_bitint_literal_parse(cc *c, const char *s, size_t len,
                                             uint32_t loc)
 {
     size_t cap = len / 8 + 4;
-    uint32_t *a = calloc(cap, 4);
+    uint32_t *a = (uint32_t *)calloc(cap, 4);
     if (!a)
         cc_report_fatal(c, loc, "out of memory");
     size_t used = 1;
@@ -90,7 +91,7 @@ CC_PRIVATE uint32_t cc_bitint_literal_parse(cc *c, const char *s, size_t len,
     ast_qualified_type t = cc_type_bitint(c, bits, unsign);
     size_t n = (size_t)(cc_type_size(c, t) / 4);
     if (n > cap) {
-        uint32_t *p = realloc(a, n * 4);
+        uint32_t *p = (uint32_t *)realloc(a, n * 4);
         if (!p) {
             free(a);
             cc_report_fatal(c, loc, "out of memory");
@@ -139,7 +140,7 @@ static bool cc_bitint_to_float(cc *c, const cc_value *a,
     if (!cc_bitint_value_is_valid(c, a))
         return false;
     size_t n = a->nbig;
-    uint32_t *words = malloc(n * 4);
+    uint32_t *words = (uint32_t *)malloc(n * 4);
     if (!words)
         return false;
     bool neg = cc_type_is_signed(c, from) && (c->lists[a->big + n - 1] >> 31);
@@ -251,7 +252,7 @@ CC_PRIVATE bool cc_bitint_conversion_is_exact(cc *c, const cc_value *v,
     if (!cc_bitint_value_is_valid(c, v))
         return false;
     size_t n = v->nbig;
-    uint32_t *a = malloc(n * 4);
+    uint32_t *a = (uint32_t *)malloc(n * 4);
     if (!a)
         return false;
     bool neg = cc_type_is_signed(c, from) && (c->lists[v->big + n - 1] >> 31);
@@ -308,7 +309,7 @@ CC_PRIVATE char *cc_bitint_value_format(cc *c, const cc_value *v,
     if (!cc_bitint_value_is_valid(c, v))
         return NULL;
     size_t n = v->nbig;
-    uint32_t *a = malloc(n * 4);
+    uint32_t *a = (uint32_t *)malloc(n * 4);
     if (!a)
         return NULL;
     bool neg = cc_type_is_signed(c, from) && (c->lists[v->big + n - 1] >> 31);
@@ -318,7 +319,7 @@ CC_PRIVATE char *cc_bitint_value_format(cc *c, const cc_value *v,
         memcpy(a, c->lists + v->big, n * 4);
     while (n > 1 && !a[n - 1])
         n--;
-    char *text = malloc(n * 8 + 4);
+    char *text = (char *)malloc(n * 8 + 4);
     if (!text) {
         free(a);
         return NULL;
@@ -369,23 +370,20 @@ CC_PRIVATE bool cc_bitint_read_eval(cc *c, uint32_t n, cc_value *v)
         if (x->aux == AST_CAST_INTEGER_TO_FLOAT && cc_type_is_float(c, x->ty))
             return cc_bitint_to_float(c, &a, AST_NODE(x->a)->ty, x->ty, v);
         if (x->aux == AST_CAST_BOOL) {
-            *v = (cc_value){.kind = CC_VALUE_INTEGER,
-                            .ice = a.ice,
-                            .i = cc_bitint_value_is_nonzero(c, &a)};
+            *v = VCC_LITERAL(cc_value, .kind = CC_VALUE_INTEGER, .ice = a.ice,
+                             .i = cc_bitint_value_is_nonzero(c, &a));
             return true;
         }
         if (cc_type_is_integer(c, x->ty) && !cc_type_is_bitint(c, x->ty)) {
-            *v = (cc_value){.kind = CC_VALUE_INTEGER,
-                            .ice = a.ice,
-                            .i = cc_constant_truncate(c, a.i, x->ty)};
+            *v = VCC_LITERAL(cc_value, .kind = CC_VALUE_INTEGER, .ice = a.ice,
+                             .i = cc_constant_truncate(c, a.i, x->ty));
             return true;
         }
     }
     if (x->op == AST_NODE_UNARY && x->aux == LEX_TOKEN_EXCLAMATION &&
         cc_constant_eval(c, x->a, &a) && a.kind == CC_VALUE_BITINT) {
-        *v = (cc_value){.kind = CC_VALUE_INTEGER,
-                        .ice = a.ice,
-                        .i = !cc_bitint_value_is_nonzero(c, &a)};
+        *v = VCC_LITERAL(cc_value, .kind = CC_VALUE_INTEGER, .ice = a.ice,
+                         .i = !cc_bitint_value_is_nonzero(c, &a));
         return true;
     }
     if (x->op == AST_NODE_BINARY && !cc_type_is_bitint(c, x->ty) &&
@@ -421,8 +419,8 @@ CC_PRIVATE bool cc_bitint_read_eval(cc *c, uint32_t n, cc_value *v)
         default:
             return false;
         }
-        *v = (cc_value){
-            .kind = CC_VALUE_INTEGER, .ice = a.ice && b.ice, .i = out};
+        *v = VCC_LITERAL(cc_value, .kind = CC_VALUE_INTEGER,
+                         .ice = a.ice && b.ice, .i = out);
         return true;
     }
     return false;
@@ -453,7 +451,7 @@ CC_PRIVATE uint32_t cc_bitint_node_fold(cc *c, uint32_t node_index)
          !(x->op == AST_NODE_CAST && a.kind == CC_VALUE_FLOAT)))
         return node_index;
     size_t n = (size_t)(cc_type_size(c, to) / 4);
-    uint32_t *buf = calloc(n * 4 + 2, 4);
+    uint32_t *buf = (uint32_t *)calloc(n * 4 + 2, 4);
     if (!buf)
         cc_report_fatal(c, x->loc, "out of memory");
     uint32_t *l = buf, *r = l + n, *out = r + n, *scratch = out + n;
@@ -533,7 +531,7 @@ CC_PRIVATE uint32_t cc_bitint_node_fold(cc *c, uint32_t node_index)
                 vbi_neg(l, l, n);
             if (neg2)
                 vbi_neg(r, r, n);
-            uint32_t *division = calloc(n * 2 + 2, 4);
+            uint32_t *division = (uint32_t *)calloc(n * 2 + 2, 4);
             if (!division)
                 cc_report_fatal(c, x->loc, "out of memory");
             vbi_div(out, division, l, r, n, division + n + 1);
@@ -561,7 +559,7 @@ CC_PRIVATE uint32_t cc_bitint_node_fold(cc *c, uint32_t node_index)
         else if (x->op == AST_NODE_BINARY && x->aux == LEX_TOKEN_MINUS)
             overflow = sa != sb && so != sa;
         else if (x->op == AST_NODE_BINARY && x->aux == LEX_TOKEN_STAR) {
-            uint32_t *full = calloc(n * 6, 4);
+            uint32_t *full = (uint32_t *)calloc(n * 6, 4);
             if (!full)
                 cc_report_fatal(c, x->loc, "out of memory");
             vbi_copy(full, n * 2, l, n, sa);

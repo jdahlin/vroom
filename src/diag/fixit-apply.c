@@ -1,4 +1,5 @@
 /* Applying fix-its to files (--fix) and the unified diff of the change. */
+#include "common/literal.h"
 #include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
@@ -33,17 +34,19 @@ static void diag_fixit_edit_add(const pp *p, diag_fixit_edit_list *x,
             k->e - f->location_base > f->lex_file->size || !f->lex_file->path)
             continue;
         if (x->n == x->cap)
-            x->v = realloc(x->v,
-                           (x->cap = x->cap ? x->cap * 2 : 64) * sizeof(*x->v));
-        x->v[x->n] = (diag_fixit_edit){f->lex_file, k->b - f->location_base,
-                                       k->e - f->location_base, x->n, k->s};
+            x->v = (diag_fixit_edit *)(realloc(
+                x->v, (x->cap = x->cap ? x->cap * 2 : 64) * sizeof(*x->v)));
+        x->v[x->n] =
+            VCC_LITERAL(diag_fixit_edit, f->lex_file, k->b - f->location_base,
+                        k->e - f->location_base, x->n, k->s);
         x->n++;
     }
 }
 
 static int diag_fixit_edit_compare(const void *a, const void *b)
 {
-    const diag_fixit_edit *x = a, *y = b;
+    const diag_fixit_edit *x = (const diag_fixit_edit *)a,
+                          *y = (const diag_fixit_edit *)b;
 
     if (x->f != y->f)
         return x->f < y->f ? -1 : 1;

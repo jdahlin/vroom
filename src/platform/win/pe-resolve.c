@@ -83,7 +83,7 @@ static uint32_t pe_directive_tokens(const char *s, size_t n, char ***out)
             i++;
         if (i >= n)
             break;
-        char *tok = pe_alloc(n - i + 1);
+        char *tok = (char *)pe_alloc(n - i + 1);
         size_t k = 0;
         bool quoted = false;
         while (i < n) {
@@ -275,7 +275,7 @@ static bool pe_is_short_import(const uint8_t *d, size_t n)
 static void pe_buffer_add(const char *path, const char *parent,
                           const uint8_t *d, size_t n)
 {
-    pe_file *f = pe_alloc(sizeof *f);
+    pe_file *f = (pe_file *)pe_alloc(sizeof *f);
     f->path = path;
     f->parent = parent;
     f->data = d;
@@ -496,7 +496,7 @@ static void pe_undefined_locations(pe_file *f, uint32_t symindex, char **out,
                                  best->name)
                      : pe_format("\n>>> referenced by %s", pe_file_name(f));
             size_t ln = strlen(loc);
-            char *nb = pe_alloc(*len + ln + 1);
+            char *nb = (char *)pe_alloc(*len + ln + 1);
             memcpy(nb, *out, *len);
             memcpy(nb + *len, loc, ln + 1);
             *out = nb;

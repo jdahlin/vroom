@@ -1,6 +1,7 @@
 /* vcc code generator, x86-64: floating point (x64-internal.h).  float and double
  * in SSE registers (scalar ss/sd); long double on the x87 stack, its values
  * in 16-byte frame slots (the walker holds their addresses, as for records). */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 VPRIV bool x64_ldmem(void)
@@ -22,8 +23,8 @@ static int x64_fsz(cc *c, ast_qualified_type t)
 }
 static codegen_value x64_vr(int r)
 {
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* an x87 instruction, with its memory operand l (NULL: none) */
@@ -66,16 +67,13 @@ VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l)
 
 static codegen_lvalue x64_at(int r)
 {
-    return (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                            .register_number = (uint8_t)r,
-                            .align = 16};
+    return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                       .register_number = (uint8_t)r, .align = 16);
 }
 static codegen_lvalue x64_tmpslot(codegen_context *e, uint64_t n)
 {
-    return (codegen_lvalue){.kind = CODEGEN_LVALUE_FRAME,
-                            .offset =
-                                walk_slot_temporary(e, n, n >= 16 ? 16 : 8),
-                            .align = 8};
+    return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 8,
+                       .offset = walk_slot_temporary(e, n, n >= 16 ? 16 : 8));
 }
 
 /* a new long double object: its address in a temporary */
@@ -572,16 +570,18 @@ static codegen_value x64_qcvt(codegen_context *e, codegen_value v,
                    v.kind == CODEGEN_VALUE_REGISTER ? v.register_number
                                                     : x64_toreg(e, &v)};
 
-        if (fq)
+        if (fq) {
+            tfarg arg = {TQ, a.r};
             return x64_tfcall(
                 e,
                 k == AST_TYPE_LONG_DOUBLE ? CODEGEN_LIBRARY_TRUNCTFXF2
                 : k == AST_TYPE_FLOAT     ? CODEGEN_LIBRARY_TRUNCTFSF2
                                           : CODEGEN_LIBRARY_TRUNCTFDF2,
-                &(tfarg){TQ, a.r}, 1,
+                &arg, 1,
                 k == AST_TYPE_LONG_DOUBLE ? TX
                 : k == AST_TYPE_FLOAT     ? TF
                                           : TD);
+        }
         return x64_tfcall(e,
                           k == AST_TYPE_LONG_DOUBLE
                               ? CODEGEN_LIBRARY_EXTENDXFTF2
@@ -743,9 +743,10 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v,
         return x64_cvt(e, v, codegen_type_primitive(AST_TYPE_FLOAT), to);
     }
     if (KIND(c, to) == AST_TYPE_BFLOAT16) {
-        if (x64_isq(c, from))
-            return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFBF2,
-                              &(tfarg){TQ, x64_toreg(e, &v)}, 1, TF);
+        if (x64_isq(c, from)) {
+            tfarg arg = {TQ, x64_toreg(e, &v)};
+            return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFBF2, &arg, 1, TF);
+        }
         if (KIND(c, from) == AST_TYPE_FLOAT16)
             v = x64_cvt(e, v, from, codegen_type_primitive(AST_TYPE_FLOAT)),
             from = codegen_type_primitive(AST_TYPE_FLOAT);
@@ -767,9 +768,10 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v,
         return x64_cvt(e, v, codegen_type_primitive(AST_TYPE_FLOAT), to);
     }
     if (KIND(c, to) == AST_TYPE_FLOAT16) {
-        if (x64_isq(c, from))
-            return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFHF2,
-                              &(tfarg){TQ, x64_toreg(e, &v)}, 1, TF);
+        if (x64_isq(c, from)) {
+            tfarg arg = {TQ, x64_toreg(e, &v)};
+            return x64_tfcall(e, CODEGEN_LIBRARY_TRUNCTFHF2, &arg, 1, TF);
+        }
         if (!ff)
             v = x64_cvt(e, v, from, codegen_type_primitive(AST_TYPE_DOUBLE)),
             from = codegen_type_primitive(AST_TYPE_DOUBLE);

@@ -2,6 +2,7 @@
  * Keep the original writes until slot promotion proves the local is private. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "simplify.h"
@@ -20,9 +21,8 @@ static void virbuild_record_copy_replace(codegen_context *e, uint32_t b,
     virbuild_context *V = e->vir_builder;
     vir_insn copy = V->insns[q].insn;
     uint32_t next = V->insns[q].next, last = q;
-    V->insns[q].insn = (vir_insn){
-        VIR_OP_MEMSET, VIR_TYPE_VOID, 0, copy.a, V->insns[init->zero].insn.b,
-        copy.c};
+    V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_MEMSET, VIR_TYPE_VOID, 0,
+                                   copy.a, V->insns[init->zero].insn.b, copy.c);
     for (uint32_t j = 0; j < init->count; j++) {
         vir_insn store = V->insns[init->fields[j]].insn;
         uint32_t off = V->insns[store.a].insn.b, addr = copy.a;
@@ -83,12 +83,13 @@ static bool virbuild_record_word_forward(codegen_context *e, uint32_t q,
     }
     uint32_t type = V->insns[field].insn.type;
     if (width == 3 && type == VIR_TYPE_PTR)
-        V->insns[q].insn = (vir_insn){VIR_OP_P2I, VIR_TYPE_I64, 0, field, 0, 0};
+        V->insns[q].insn =
+            VCC_LITERAL(vir_insn, VIR_OP_P2I, VIR_TYPE_I64, 0, field, 0, 0);
     else if (width == 3 && type == VIR_TYPE_I64)
         V->forward[q] = field;
     else if (width < 3 && (type == VIR_TYPE_I32 || type == VIR_TYPE_I64))
-        V->insns[q].insn =
-            (vir_insn){VIR_OP_EXT, VIR_TYPE_I64, width, field, 0, 0};
+        V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_EXT, VIR_TYPE_I64,
+                                       (uint16_t)(width), field, 0, 0);
     else
         return false;
     return true;
@@ -105,7 +106,8 @@ typedef struct {
 static virbuild_copy_slot *virbuild_slot_operand_counts(codegen_context *e)
 {
     virbuild_context *V = e->vir_builder;
-    virbuild_copy_slot *uses = calloc(V->slot_count, sizeof *uses);
+    virbuild_copy_slot *uses =
+        (virbuild_copy_slot *)calloc(V->slot_count, sizeof *uses);
     bool returns_twice = false;
     if (!uses)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
@@ -175,7 +177,8 @@ static bool virbuild_record_call_forward(codegen_context *e, uint32_t call_id,
     if (!returning)
         (*slot_uses)[dst.a].escaped = true; /* now passed to a call */
     V->extra[call.c + 1] = copy.a;
-    V->insns[copy_id].insn = (vir_insn){VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0};
+    V->insns[copy_id].insn =
+        VCC_LITERAL(vir_insn, VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0);
     return true;
 }
 

@@ -1,4 +1,5 @@
 /* vcc code generator: functions: prologue, epilogue, finishing */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /* ---------------- functions ---------------- */
@@ -52,11 +53,11 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     for (uint32_t k = 0; k < e->record_count && !sym_labels; k++)
         sym_labels = e->records[k].opcode == A64_OP_RAW;
     h = codegen_item_open(e, CODEGEN_ITEM_CODE);
-    ch = codegen_item_room_need(e, sizeof *ch);
-    in = codegen_item_room_need(
+    ch = (codegen_code_header *)codegen_item_room_need(e, sizeof *ch);
+    in = (a64_record *)(codegen_item_room_need(
         e,
-        ((size_t)e->record_count + 2 * (size_t)ncs + 8) * sizeof(a64_record));
-#define PUT(...) (in[n++] = (a64_record){__VA_ARGS__})
+        ((size_t)e->record_count + 2 * (size_t)ncs + 8) * sizeof(a64_record)));
+#define PUT(...) (in[n++] = VCC_LITERAL(a64_record, __VA_ARGS__))
     memcpy(in, e->records, (size_t)pre * sizeof(a64_record));
     n = pre;
     if (ctor & 8)
@@ -64,8 +65,8 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     else if (a64_frame_shape.is_stack_pointer_leaf)
         PUT(.opcode = A64_OP_SUBI, .size = 1, .rd = SP, .rn = SP,
             .immediate = a64_frame_shape.frame_size);
-    else if (PUT(.opcode = A64_OP_STP, .size = 1, .rd = R_FP, .ra = R_LR,
-                 .rn = SP, .condition = 1, .immediate = -16),
+    else if (PUT(.opcode = A64_OP_STP, .size = 1, .rd = R_FP, .rn = SP,
+                 .ra = R_LR, .condition = 1, .immediate = -16),
              PUT(.opcode = A64_OP_MOV, .size = 1, .rd = R_FP, .rn = SP),
              e->frame_alignment > 16) { /* sp = (sp - frame) & -falign */
         PUT(.opcode = A64_OP_SUBI, .size = 1, .rd = R_X16, .rn = SP,
@@ -78,7 +79,7 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     }
     for (int k = 0; k + 1 < ncs; k += 2)
         PUT(.opcode = A64_OP_STP, .size = 1, .rd = (uint8_t)cs[k],
-            .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(),
+            .rn = (uint8_t)a64_frame_save_base(), .ra = (uint8_t)cs[k + 1],
             .immediate = a64_frame_save_offset(csave, k));
     if (ncs & 1)
         PUT(.opcode = A64_OP_ST, .size = 3, .rd = (uint8_t)cs[ncs - 1],
@@ -92,7 +93,7 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     n += e->record_count - rest;
     for (int k = 0; k + 1 < ncs; k += 2)
         PUT(.opcode = A64_OP_LDP, .size = 1, .rd = (uint8_t)cs[k],
-            .ra = (uint8_t)cs[k + 1], .rn = (uint8_t)a64_frame_save_base(),
+            .rn = (uint8_t)a64_frame_save_base(), .ra = (uint8_t)cs[k + 1],
             .immediate = a64_frame_save_offset(csave, k));
     if (ncs & 1)
         PUT(.opcode = A64_OP_LD, .size = 3, .rd = (uint8_t)cs[ncs - 1],
@@ -106,7 +107,7 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     } else {
         if (!a64_frame_shape.no_move)
             PUT(.opcode = A64_OP_MOV, .size = 1, .rd = SP, .rn = R_FP);
-        PUT(.opcode = A64_OP_LDP, .size = 1, .rd = R_FP, .ra = R_LR, .rn = SP,
+        PUT(.opcode = A64_OP_LDP, .size = 1, .rd = R_FP, .rn = SP, .ra = R_LR,
             .condition = 2, .immediate = 16);
     }
     if (tail)
@@ -118,11 +119,9 @@ static void a64_function_items_finish(codegen_context *e, uint32_t s,
     b->n -= ((size_t)e->record_count + 2 * (size_t)ncs + 8 - n) *
             sizeof(a64_record);
     *ch =
-        (codegen_code_header){.function_id = s,
-                              .record_count = n,
-                              .raw_count = sym_labels ? (uint32_t)e->raw.n : 0,
-                              .label_count = e->label_count,
-                              .symbol_labels = sym_labels};
+        VCC_LITERAL(codegen_code_header, .function_id = s, .record_count = n,
+                    .raw_count = sym_labels ? (uint32_t)e->raw.n : 0,
+                    .label_count = e->label_count, .symbol_labels = sym_labels);
     if (sym_labels)
         memcpy(codegen_item_room_need(e, e->raw.n), e->raw.p, e->raw.n);
     codegen_item_close(e, h);
@@ -152,7 +151,7 @@ typedef struct a64_fallthrough_debug {
 
 static void a64_fallthrough_remap(void *ctx, uint32_t old, uint32_t next)
 {
-    a64_fallthrough_debug *d = ctx;
+    a64_fallthrough_debug *d = (a64_fallthrough_debug *)ctx;
 
     codegen_debug_rows_remap(d->context, &d->cursor, old, next);
 }
@@ -224,27 +223,19 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
 
         d -= 6 + j->entry_count;
         a64_record *o = &e->records[d];
-        o[0] =
-            (a64_record){.opcode = A64_OP_ADR, .rd = R_X16, .label = x.label};
-        o[1] = (a64_record){.opcode = A64_OP_ADD,
-                            .size = 1,
-                            .rd = R_X17,
-                            .rn = R_X16,
-                            .rm = x.rd,
-                            .shift = 2,
-                            .condition = x.condition ? 8 + 2 : 0};
-        o[2] = (a64_record){.opcode = A64_OP_LD,
-                            .size = 2,
-                            .condition = 1,
-                            .rd = R_X17,
-                            .rn = R_X17};
-        o[3] = (a64_record){.opcode = A64_OP_ADD,
-                            .size = 1,
-                            .rd = R_X16,
-                            .rn = R_X16,
-                            .rm = R_X17};
-        o[4] = (a64_record){.opcode = A64_OP_BR, .rn = R_X16};
-        o[5] = (a64_record){.opcode = A64_OP_LABEL, .label = j->table_label};
+        o[0] = VCC_LITERAL(a64_record, .opcode = A64_OP_ADR, .rd = R_X16,
+                           .label = x.label);
+        o[1] = VCC_LITERAL(a64_record, .opcode = A64_OP_ADD, .size = 1,
+                           .rd = R_X17, .rn = R_X16, .rm = x.rd,
+                           .condition = (uint8_t)(x.condition ? 8 + 2 : 0),
+                           .shift = 2);
+        o[2] = VCC_LITERAL(a64_record, .opcode = A64_OP_LD, .size = 2,
+                           .rd = R_X17, .rn = R_X17, .condition = 1);
+        o[3] = VCC_LITERAL(a64_record, .opcode = A64_OP_ADD, .size = 1,
+                           .rd = R_X16, .rn = R_X16, .rm = R_X17);
+        o[4] = VCC_LITERAL(a64_record, .opcode = A64_OP_BR, .rn = R_X16);
+        o[5] = VCC_LITERAL(a64_record, .opcode = A64_OP_LABEL,
+                           .label = j->table_label);
         for (uint32_t n = 0; n < j->entry_count; n++) {
             uint32_t target = e->jump_table_labels[j->first_entry + n];
 
@@ -253,14 +244,14 @@ static void a64_jump_tables_expand(codegen_context *e, uint32_t fid)
                 int len = snprintf(b, sizeof b, "\t.word\t.LBB%x_%x-.LBB%x_%x",
                                    fid, target, fid, j->table_label);
 
-                o[6 + n] = (a64_record){.opcode = A64_OP_RAW,
-                                        .offset = (int32_t)e->raw.n,
-                                        .reference = (uint32_t)len};
+                o[6 + n] = VCC_LITERAL(a64_record, .opcode = A64_OP_RAW,
+                                       .offset = (int32_t)e->raw.n,
+                                       .reference = (uint32_t)len);
                 vtext_append(&e->raw, b, (size_t)len);
             } else {
-                o[6 + n] = (a64_record){.opcode = A64_OP_JTE,
-                                        .offset = (int32_t)target,
-                                        .reference = j->table_label};
+                o[6 + n] = VCC_LITERAL(a64_record, .opcode = A64_OP_JTE,
+                                       .offset = (int32_t)target,
+                                       .reference = j->table_label);
             }
         }
     }
@@ -282,7 +273,7 @@ static void a64_test_branch_relax(codegen_context *e)
              e->records[k].opcode == A64_OP_TBNZ;
     if (!m)
         return;
-    at = malloc(((size_t)n + 1 + e->label_count) * sizeof *at);
+    at = (uint32_t *)(malloc(((size_t)n + 1 + e->label_count) * sizeof *at));
     if (!at)
         abort();
     uint32_t *lat = at + n + 1;
@@ -321,8 +312,10 @@ static void a64_test_branch_relax(codegen_context *e)
              r++) /* (-g rows after it move by the two records) */
             if (e->debug_rows[r].record_index > k)
                 e->debug_rows[r].record_index += 2;
-        e->records[--w] = (a64_record){.opcode = A64_OP_LABEL, .label = l};
-        e->records[--w] = (a64_record){.opcode = A64_OP_B, .label = t.label};
+        e->records[--w] =
+            VCC_LITERAL(a64_record, .opcode = A64_OP_LABEL, .label = l);
+        e->records[--w] =
+            VCC_LITERAL(a64_record, .opcode = A64_OP_B, .label = t.label);
         t.opcode = t.opcode == A64_OP_TBZ ? A64_OP_TBNZ : A64_OP_TBZ;
         t.label = l;
         e->label_reference_counts[l] = 1;
@@ -375,15 +368,16 @@ static void a64_tail_expand(codegen_context *e, const int *cs, int ncs,
         }
         if (t.shift) { /* in front of the prologue (shrink-wrapping): nothing to restore */
             e->records[--w] =
-                t.condition == 2 ? (a64_record){.opcode = A64_OP_TAIL,
-                                                .condition = 1,
-                                                .reference = t.reference}
+                t.condition == 2
+                    ? VCC_LITERAL(a64_record, .opcode = A64_OP_TAIL,
+                                  .condition = 1, .reference = t.reference)
                 : t.condition == 4
-                    ? (a64_record){.opcode = A64_OP_RET}
-                    : (a64_record){.opcode = A64_OP_BR, .rn = R_X16};
+                    ? VCC_LITERAL(a64_record, .opcode = A64_OP_RET)
+                    : VCC_LITERAL(a64_record, .opcode = A64_OP_BR, .rn = R_X16);
             if (t.condition == 3 && t.rn != R_X16)
-                e->records[--w] = (a64_record){
-                    .opcode = A64_OP_MOV, .size = 1, .rd = R_X16, .rn = t.rn};
+                e->records[--w] =
+                    VCC_LITERAL(a64_record, .opcode = A64_OP_MOV, .size = 1,
+                                .rd = R_X16, .rn = t.rn);
             continue;
         }
         if (t.condition == 4) {
@@ -395,64 +389,56 @@ static void a64_tail_expand(codegen_context *e, const int *cs, int ncs,
                 e->record_count) /* the last record: falls into the shared epilogue */
                 continue;
             if (!dup) {
-                e->records[--w] =
-                    (a64_record){.opcode = A64_OP_B, .label = t.label};
+                e->records[--w] = VCC_LITERAL(a64_record, .opcode = A64_OP_B,
+                                              .label = t.label);
                 continue;
             }
         }
         if (t.condition == 3 && t.rn != R_X16)
-            seq[q++] = (a64_record){
-                .opcode = A64_OP_MOV, .size = 1, .rd = R_X16, .rn = t.rn};
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_MOV, .size = 1,
+                                   .rd = R_X16, .rn = t.rn);
         if (cfi)
-            seq[q++] = (a64_record){.opcode = A64_OP_NOP,
-                                    .condition = A64_NOP_CFI_REMEMBER};
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_NOP,
+                                   .condition = A64_NOP_CFI_REMEMBER);
         for (int j = 0; j + 1 < ncs; j += 2)
-            seq[q++] =
-                (a64_record){.opcode = A64_OP_LDP,
-                             .size = 1,
-                             .rd = (uint8_t)cs[j],
-                             .ra = (uint8_t)cs[j + 1],
-                             .rn = (uint8_t)a64_frame_save_base(),
-                             .immediate = a64_frame_save_offset(csave, j)};
+            seq[q++] = VCC_LITERAL(
+                a64_record, .opcode = A64_OP_LDP, .size = 1,
+                .rd = (uint8_t)cs[j], .rn = (uint8_t)a64_frame_save_base(),
+                .ra = (uint8_t)cs[j + 1],
+                .immediate = a64_frame_save_offset(csave, j));
         if (ncs & 1)
-            seq[q++] = (a64_record){.opcode = A64_OP_LD,
-                                    .size = 3,
-                                    .rd = (uint8_t)cs[ncs - 1],
-                                    .rn = (uint8_t)a64_frame_save_base(),
-                                    .immediate =
-                                        a64_frame_save_offset(csave, ncs - 1)};
+            seq[q++] =
+                VCC_LITERAL(a64_record, .opcode = A64_OP_LD, .size = 3,
+                            .rd = (uint8_t)cs[ncs - 1],
+                            .rn = (uint8_t)a64_frame_save_base(),
+                            .immediate = a64_frame_save_offset(csave, ncs - 1));
         if (leaf)
             ;
         else if (a64_frame_shape.is_stack_pointer_leaf) {
-            seq[q++] = (a64_record){.opcode = A64_OP_ADDI,
-                                    .size = 1,
-                                    .rd = SP,
-                                    .rn = SP,
-                                    .immediate = a64_frame_shape.frame_size};
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_ADDI, .size = 1,
+                                   .rd = SP, .rn = SP,
+                                   .immediate = a64_frame_shape.frame_size);
         } else {
             if (!a64_frame_shape.no_move)
-                seq[q++] = (a64_record){
-                    .opcode = A64_OP_MOV, .size = 1, .rd = SP, .rn = R_FP};
-            seq[q++] = (a64_record){.opcode = A64_OP_LDP,
-                                    .size = 1,
-                                    .rd = R_FP,
-                                    .ra = R_LR,
-                                    .rn = SP,
-                                    .condition = 2,
-                                    .immediate = 16};
+                seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_MOV,
+                                       .size = 1, .rd = SP, .rn = R_FP);
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_LDP, .size = 1,
+                                   .rd = R_FP, .rn = SP, .ra = R_LR,
+                                   .condition = 2, .immediate = 16);
         }
         if (cfi)
-            seq[q++] = (a64_record){.opcode = A64_OP_NOP,
-                                    .condition = A64_NOP_CFI_EPILOGUE};
-        seq[q++] = t.condition == 2 ? (a64_record){.opcode = A64_OP_TAIL,
-                                                   .condition = 1,
-                                                   .reference = t.reference}
-                   : t.condition == 4
-                       ? (a64_record){.opcode = A64_OP_RET}
-                       : (a64_record){.opcode = A64_OP_BR, .rn = R_X16};
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_NOP,
+                                   .condition = A64_NOP_CFI_EPILOGUE);
+        seq[q++] =
+            t.condition == 2
+                ? VCC_LITERAL(a64_record, .opcode = A64_OP_TAIL, .condition = 1,
+                              .reference = t.reference)
+            : t.condition == 4
+                ? VCC_LITERAL(a64_record, .opcode = A64_OP_RET)
+                : VCC_LITERAL(a64_record, .opcode = A64_OP_BR, .rn = R_X16);
         if (cfi)
-            seq[q++] = (a64_record){.opcode = A64_OP_NOP,
-                                    .condition = A64_NOP_CFI_RESTORE};
+            seq[q++] = VCC_LITERAL(a64_record, .opcode = A64_OP_NOP,
+                                   .condition = A64_NOP_CFI_RESTORE);
         w -= q;
         memcpy(&e->records[w], seq, q * sizeof(a64_record));
     }

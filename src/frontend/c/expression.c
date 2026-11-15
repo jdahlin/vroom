@@ -1,4 +1,5 @@
 /* vcc front end: expression semantic actions (operators, members) and primary and postfix parsing */
+#include "common/literal.h"
 #include <ctype.h>
 
 #include "cc-internal.h"
@@ -795,12 +796,13 @@ static uint32_t cc_function_name_build(cc *c, uint32_t loc)
     const sym *f = c->fn ? &c->syms[c->fn] : NULL;
     int len = 0;
     const char *s = f ? cc_identifier_name(f->name, &len) : "";
-    char *buf = cc_heap_allocate(c, (size_t)len + 1);
+    char *buf = (char *)(cc_heap_allocate(c, (size_t)len + 1));
     uint32_t si = c->nstr++, n;
 
     memcpy(buf, s, (size_t)len);
     buf[len] = 0;
-    c->strs[si] = (cstr){buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING};
+    c->strs[si] =
+        VCC_LITERAL(cstr, buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING);
     n = cc_node_new(
         c, AST_NODE_STRING,
         cc_type_array(c, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST),
@@ -1103,8 +1105,8 @@ CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc)
                  rp = tok(c)->loc;
 
         if (b >= loc && b - loc < 65536 && rp >= e && rp - e < 65536)
-            c->paren[n] = (struct cc_node_parentheses){(uint16_t)(b - loc),
-                                                       (uint16_t)(rp - e)};
+            c->paren[n] = VCC_LITERAL(struct cc_node_parentheses,
+                                      (uint16_t)(b - loc), (uint16_t)(rp - e));
     }
     cc_token_expect_close(c, LEX_TOKEN_RIGHT_PAREN, loc, n);
     AST_NODE(n)->flags |= AST_NODE_FLAG_PARENTHESIZED;

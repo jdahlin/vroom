@@ -1,4 +1,5 @@
 /* vcc front end: overloadable: Itanium mangling as clang does it for C */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- overloadable: Itanium mangling as clang does it for C ---------------- */
@@ -183,11 +184,11 @@ static uint32_t cc_mangle_overload(cc *c, uint32_t s)
         cc_mangle_append_text(&m, "z");
     if (m.full)
         return 0;
-    keep = cc_heap_allocate(c, m.n + 1);
+    keep = (char *)cc_heap_allocate(c, m.n + 1);
     memcpy(keep, m.b, m.n);
     keep[m.n] = 0;
     si = c->nstr++;
-    c->strs[si] = (cstr){keep, m.n + 1, 1, LEX_TOKEN_STRING};
+    c->strs[si] = VCC_LITERAL(cstr, keep, m.n + 1, 1, LEX_TOKEN_STRING);
     return si + 1;
 }
 

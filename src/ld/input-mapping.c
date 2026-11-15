@@ -1,5 +1,6 @@
 /* Mapping input files and reading archives into the list of pending members. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- loading ---------------- */
@@ -60,10 +61,12 @@ VPRIV void ld_archive_add(struct ld_context *ctx, const char *path,
         const char *name =
             ld_script_text_duplicate(m.name, m.name + m.name_length);
         if (cursor.thin) {
-            char *full = ld_region_alloc(strlen(dir) + strlen(name) + 1);
+            char *full =
+                (char *)(ld_region_alloc(strlen(dir) + strlen(name) + 1));
             strcpy(full, name[0] == '/' ? "" : dir);
             strcat(full, name);
-            VVEC_PUSH(ctx->inputs.pending, ((ld_pending_member){.path = full}),
+            VVEC_PUSH(ctx->inputs.pending,
+                      (VCC_LITERAL(ld_pending_member, .path = full)),
                       ld_region_alloc);
         } else {
             if (!m.data_fits) {
@@ -72,11 +75,12 @@ VPRIV void ld_archive_add(struct ld_context *ctx, const char *path,
                     path, name);
                 return;
             }
-            char *full = ld_region_alloc(strlen(path) + strlen(name) + 3);
+            char *full =
+                (char *)(ld_region_alloc(strlen(path) + strlen(name) + 3));
             sprintf(full, "%s(%s)", path, name);
             VVEC_PUSH(ctx->inputs.pending,
-                      ((ld_pending_member){
-                          .path = full, .file_bytes = m.data, .size = m.size}),
+                      (VCC_LITERAL(ld_pending_member, .path = full,
+                                   .file_bytes = m.data, .size = m.size)),
                       ld_region_alloc);
         }
     }

@@ -34,7 +34,7 @@ VPRIV int ld_output_file_write(struct ld_context *ctx)
 
 VPRIV void ld_build_id_chunk_hash(void *arg, size_t i)
 {
-    const ld_build_id_job *job = arg;
+    const ld_build_id_job *job = (const ld_build_id_job *)arg;
     uint64_t b = (uint64_t)i << 20,
              n = job->size - b < (1u << 20) ? job->size - b : (1u << 20);
     vdigest_blake3(job->image + b, n, job->hashes + i * 20, 20);

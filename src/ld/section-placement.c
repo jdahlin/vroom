@@ -1,5 +1,6 @@
 /* The header size, the input-section-name cache, committing sections to output sections, and lld's orphan section ranking. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- layout ---------------- */
@@ -20,7 +21,8 @@ VPRIV uint64_t ld_headers_size(struct ld_context *ctx)
 static void ld_name_cache_grow(struct ld_context *ctx)
 {
     uint32_t ncap = (ctx->layout.name_cache_mask + 1) * 2;
-    ld_name_cache_entry *nc = ld_region_alloc(ncap * sizeof *nc);
+    ld_name_cache_entry *nc =
+        (ld_name_cache_entry *)ld_region_alloc(ncap * sizeof *nc);
 
     memset(nc, 0, ncap * sizeof *nc);
     for (uint32_t i = 0; i <= ctx->layout.name_cache_mask; i++)
@@ -66,8 +68,8 @@ VPRIV uint32_t ld_input_section_description_match(struct ld_context *ctx,
                 }
         }
     }
-    ctx->layout.name_cache[j] = (ld_name_cache_entry){
-        .name = name, .hash = h, .input_description = res};
+    ctx->layout.name_cache[j] = VCC_LITERAL(
+        ld_name_cache_entry, .name = name, .hash = h, .input_description = res);
     if (++ctx->layout.name_cache_count * 2 > ctx->layout.name_cache_mask + 1)
         ld_name_cache_grow(ctx);
     return res;
@@ -83,7 +85,8 @@ typedef struct {
 
 static int ld_section_sort_entry_cmp(const void *a, const void *b)
 {
-    const ld_section_sort_entry *x = a, *y = b;
+    const ld_section_sort_entry *x = (const ld_section_sort_entry *)a,
+                                *y = (const ld_section_sort_entry *)b;
     if (x->name || y->name) {
         int c = strcmp(x->name, y->name);
         if (c)
@@ -99,10 +102,11 @@ VPRIV void ld_section_ids_sort(struct ld_context *ctx, uint32_t *ids,
 {
     if (n < 2)
         return;
-    ld_section_sort_entry *t = ld_region_alloc((uint64_t)n * sizeof *t);
+    ld_section_sort_entry *t =
+        (ld_section_sort_entry *)(ld_region_alloc((uint64_t)n * sizeof *t));
     for (uint32_t i = 0; i < n; i++) {
         const ld_input_section *is = &ctx->inputs.sections.v[ids[i]];
-        t[i] = (ld_section_sort_entry){.section = ids[i]};
+        t[i] = VCC_LITERAL(ld_section_sort_entry, .section = ids[i]);
         if (order == LD_SECTION_ORDER_NAME)
             t[i].name = is->name;
         else if (order == LD_SECTION_ORDER_ALIGNMENT_DESCENDING)
@@ -229,8 +233,8 @@ VPRIV void ld_name_cache_init(struct ld_context *ctx)
     uint32_t ncap = 1024;
     while (ncap < ctx->inputs.sections.n / 4)
         ncap *= 2;
-    ctx->layout.name_cache =
-        ld_region_alloc(ncap * sizeof *ctx->layout.name_cache);
+    ctx->layout.name_cache = (ld_name_cache_entry *)ld_region_alloc(
+        ncap * sizeof *ctx->layout.name_cache);
     memset(ctx->layout.name_cache, 0, ncap * sizeof *ctx->layout.name_cache);
     ctx->layout.name_cache_mask = ncap - 1;
     ctx->layout.name_cache_count = 0;

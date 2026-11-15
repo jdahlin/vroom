@@ -1,4 +1,5 @@
 /* vcc code generator: expressions */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 #include "port/stack-guard.h"
 
@@ -233,9 +234,10 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
         v = gen(e, x->c);
         move_to(e, r, r2, &v, t);
         deflabel(e, lend);
-        return wide ? (codegen_value){.kind = CODEGEN_VALUE_REGISTER_PAIR,
-                                      .register_number = (uint8_t)r,
-                                      .register_high = (uint8_t)r2}
+        return wide ? VCC_LITERAL(codegen_value,
+                                  .kind = CODEGEN_VALUE_REGISTER_PAIR,
+                                  .register_number = (uint8_t)r,
+                                  .register_high = (uint8_t)r2)
                     : codegen_value_register(r);
     }
     {
@@ -270,10 +272,11 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
     deflabel(e, lend);
     if (vd)
         return codegen_value_none();
-    return wide ? (codegen_value){.kind = CODEGEN_VALUE_REGISTER_PAIR,
-                                  .register_number = (uint8_t)r,
-                                  .register_high = (uint8_t)r2}
-                : codegen_value_register(r);
+    return wide
+               ? VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER_PAIR,
+                             .register_number = (uint8_t)r,
+                             .register_high = (uint8_t)r2)
+               : codegen_value_register(r);
 }
 
 static codegen_value gen_logical(codegen_context *e, uint32_t n)
@@ -405,9 +408,9 @@ static codegen_value vlane(codegen_context *e, ast_qualified_type t, int r,
         ast_qualified_type et = T(c, t)->base;
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_REGISTER,
                             .register_number = (uint8_t)r,
+                            .align = codegen_type_alignment(c, et),
                             .offset =
-                                (int64_t)i * (int64_t)codegen_type_size(c, et),
-                            .align = codegen_type_alignment(c, et)};
+                                (int64_t)i * (int64_t)codegen_type_size(c, et)};
 
         if (codegen_type_is_bool_vector(c, t))
             l.offset = i / 8, l.is_bitfield = 1, l.width = 1,
@@ -506,9 +509,9 @@ static codegen_value gen_vlanes(codegen_context *e, int op,
         {
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_REGISTER,
                                 .register_number = (uint8_t)rd,
+                                .align = codegen_type_alignment(c, rte),
                                 .offset = (int64_t)i *
-                                          (int64_t)codegen_type_size(c, rte),
-                                .align = codegen_type_alignment(c, rte)};
+                                          (int64_t)codegen_type_size(c, rte)};
 
             if (codegen_type_is_bool_vector(c, rt))
                 l.offset = i / 8, l.is_bitfield = 1, l.width = 1,
@@ -1442,10 +1445,10 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
         case AST_CAST_BIT_CAST: {
             ast_qualified_type from = N(x->a)->ty;
             codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                                .align = codegen_type_alignment(c, x->ty),
                                 .offset = a64_frame_slot_allocate(
                                     e, codegen_type_size(c, x->ty),
-                                    codegen_type_alignment(c, x->ty)),
-                                .align = codegen_type_alignment(c, x->ty)};
+                                    codegen_type_alignment(c, x->ty))};
             if (N(x->a)->flags & AST_NODE_FLAG_LVALUE) {
                 codegen_lvalue src = gen_lval(e, x->a);
                 if (src.dynamic_bit_slot) {
@@ -1522,8 +1525,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
 
             for (uint64_t i = 0; i < nl; i++) {
                 codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = sl + (int64_t)(i * es),
-                                    .align = codegen_type_alignment(c, et)};
+                                    .align = codegen_type_alignment(c, et),
+                                    .offset = sl + (int64_t)(i * es)};
 
                 if (codegen_type_is_bool_vector(c, x->ty))
                     l.offset = sl + i / 8, l.is_bitfield = 1, l.width = 1,
@@ -1541,8 +1544,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
                 a64_frame_slot_allocate(e, codegen_type_size(c, x->ty),
                                         codegen_type_alignment(c, x->ty));
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = sl,
-                                .align = codegen_type_alignment(c, x->ty)};
+                                .align = codegen_type_alignment(c, x->ty),
+                                .offset = sl};
             codegen_value v = gen(e, x->a);
             int r;
 
@@ -1607,8 +1610,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
         int64_t sl = a64_frame_slot_allocate(e, 2 * es,
                                              codegen_type_alignment(c, x->ty));
         codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                            .offset = sl,
-                            .align = codegen_type_alignment(c, et)};
+                            .align = codegen_type_alignment(c, et),
+                            .offset = sl};
         codegen_value v = gen(e, x->a);
         int r;
 

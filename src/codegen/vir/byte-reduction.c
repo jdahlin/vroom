@@ -29,8 +29,10 @@ VPRIV bool virbuild_byte_or_reduce(virbuild_vectorize_state *S)
         return false;
     /* Normalize the common i < count and i <= last forms. */
     unsigned cc = cmp.flags & 15;
-    if (branch.b == S->exit)
-        cc = (unsigned[]){1, 0, 5, 4, 3, 2, 9, 8, 7, 6}[cc];
+    if (branch.b == S->exit) {
+        static const unsigned inverse[] = {1, 0, 5, 4, 3, 2, 9, 8, 7, 6};
+        cc = inverse[cc];
+    }
     if ((cc != 2 && cc != 3 && cc != 6 && cc != 7) || limit < 0 || limit > 256)
         return false;
     unsigned count = (unsigned)limit + (cc == 3 || cc == 7);

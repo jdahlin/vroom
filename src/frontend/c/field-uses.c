@@ -2,6 +2,7 @@
    place it resolves a name to a struct or union field (declaration, `.`, `->`, designator,
    offsetof); at the end of the TU the uses of the selected fields are printed, one line
    each, with the bytes a rename has to edit (doc/quality/DESIGN-field-uses.md). */
+#include "common/literal.h"
 #include "cc-internal.h"
 #include <errno.h>
 
@@ -71,7 +72,7 @@ static __attribute__((format(printf, 2, 3))) void fu_printf(fu *u,
             u->nout += (size_t)n;
             return;
         }
-        u->out = fu_grow(u->out, u->capout, &u->capout, 1);
+        u->out = (char *)fu_grow(u->out, u->capout, &u->capout, 1);
     }
 }
 
@@ -87,7 +88,7 @@ CC_PRIVATE void cc_field_uses_begin(cc *c, const char *path)
     FILE *f = fopen(path, "r");
     char *line = NULL;
     size_t cap = 0;
-    fu *u = calloc(1, sizeof *u);
+    fu *u = (fu *)calloc(1, sizeof *u);
     size_t scap = 0;
 
     c->field_uses = u;
@@ -131,7 +132,7 @@ CC_PRIVATE void cc_field_uses_begin(cc *c, const char *path)
             c->errors++;
             continue;
         }
-        u->sel = fu_grow(u->sel, u->nsel, &scap, sizeof *u->sel);
+        u->sel = (fu_sel *)fu_grow(u->sel, u->nsel, &scap, sizeof *u->sel);
         x = &u->sel[u->nsel++];
         x->owner = strndup(spec, (size_t)(dot - spec));
         x->field = strdup(dot + 1);
@@ -144,7 +145,7 @@ CC_PRIVATE void cc_field_uses_begin(cc *c, const char *path)
     }
     free(line);
     fclose(f);
-    u->fids = malloc((u->nsel + 1) * sizeof(uint32_t));
+    u->fids = (uint32_t *)(malloc((u->nsel + 1) * sizeof(uint32_t)));
     for (uint32_t i = 0; i < u->nsel; i++)
         if (!u->sel[i].star)
             u->fids[u->nfids++] = u->sel[i].fid;
@@ -162,7 +163,8 @@ CC_PRIVATE void cc_field_uses_def(cc *c, uint32_t ti)
 {
     fu *u = c->field_uses;
 
-    u->defs = fu_grow(u->defs, u->ndefs, &u->capdefs, sizeof *u->defs);
+    u->defs = (__typeof__(u->defs))fu_grow(u->defs, u->ndefs, &u->capdefs,
+                                           sizeof *u->defs);
     u->defs[u->ndefs].tag = ti;
     u->defs[u->ndefs++].loc = tok(c)->loc;
 }
@@ -173,7 +175,8 @@ CC_PRIVATE void cc_field_uses_name_keep(cc *c)
 
     u->pend = *tok(c);
     if (c->in_struct) {
-        u->names = fu_grow(u->names, u->nnames, &u->capnames, sizeof *u->names);
+        u->names = (ptok *)fu_grow(u->names, u->nnames, &u->capnames,
+                                   sizeof *u->names);
         u->names[u->nnames++] = *tok(c);
     }
 }
@@ -182,9 +185,9 @@ static void fu_add(cc *c, int role, uint32_t tag, uint32_t idx, const ptok *t)
 {
     fu *u = c->field_uses;
 
-    u->use = fu_grow(u->use, u->nuse, &u->capuse, sizeof *u->use);
-    u->use[u->nuse++] =
-        (fu_use){.t = *t, .tag = tag, .idx = idx, .role = (uint8_t)role};
+    u->use = (fu_use *)fu_grow(u->use, u->nuse, &u->capuse, sizeof *u->use);
+    u->use[u->nuse++] = VCC_LITERAL(fu_use, .t = *t, .tag = tag, .idx = idx,
+                                    .role = (uint8_t)role);
 }
 
 /* a member declaration: the declarator's name token is the one kept at loc */
@@ -331,9 +334,9 @@ CC_PRIVATE void cc_field_uses_finish(cc *c)
     uint32_t n = c->ntag;
     char main_name[600];
 
-    u->defloc = calloc(n + 1, sizeof(uint32_t));
-    u->cont_tag = malloc((n + 1) * sizeof(uint32_t));
-    u->cont_fld = calloc(n + 1, sizeof(uint32_t));
+    u->defloc = (uint32_t *)(calloc(n + 1, sizeof(uint32_t)));
+    u->cont_tag = (uint32_t *)(malloc((n + 1) * sizeof(uint32_t)));
+    u->cont_fld = (uint32_t *)(calloc(n + 1, sizeof(uint32_t)));
     for (uint32_t i = 0; i <= n; i++)
         u->cont_tag[i] = FU_NONE;
     snprintf(main_name, sizeof main_name, "%s",
@@ -399,7 +402,7 @@ CC_PRIVATE void cc_field_uses_finish(cc *c)
         for (uint32_t i = 0; i < u->nsel; i++)
             sel |= !strcmp(u->sel[i].owner, owner);
         if (sel) {
-            char def[600], *nm = calloc(1, 1 << 16);
+            char def[600], *nm = (char *)calloc(1, 1 << 16);
 
             fu_where(c, u->defloc[ti] ? u->defloc[ti] : c->tags[ti].loc, def,
                      sizeof def, false);

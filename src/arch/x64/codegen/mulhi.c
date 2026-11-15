@@ -1,4 +1,5 @@
 /* High products, using implicit RDX:RAX unsigned/signed multiplication. */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 static codegen_value x64_mulhi(codegen_context *e, codegen_value a,
@@ -23,8 +24,8 @@ static codegen_value x64_mulhi(codegen_context *e, codegen_value a,
     /* The result retains a's register ownership, even when both inputs alias. */
     if (rb != ra)
         x64_tfree(e, rb);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)ra};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)ra);
 }
 
 VPRIV codegen_value x64_umulhi(codegen_context *e, codegen_value a,

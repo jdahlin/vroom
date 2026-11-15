@@ -70,7 +70,8 @@ typedef struct as_macro {
     uint32_t parameter_count;
     as_text body;
     uint32_t invocation_count;
-    as_template template; /* compiled at the first instantiation (template.pieces == 0 before) */
+    as_template
+        asm_template; /* compiled at the first instantiation (template.pieces == 0 before) */
     struct as_macro *next;
 } as_macro;
 
@@ -108,6 +109,51 @@ typedef struct {
     uint32_t symbol;
     ElfVal value;
 } as_variable; /* .set with a non-absolute value */
+
+struct as_variable_item {
+    uint32_t fragment, end_symbol;
+    uint8_t kind, log2_alignment, code, fill;
+    uint64_t max, size;
+    as_value value;
+};
+
+struct as_frame_description {
+    uint32_t start, end, first_instruction, instruction_count, return_register;
+    uint8_t is_simple, is_signal, uses_b_key;
+    /* .cfi_personality, .cfi_lsda: the personality routine and the language-specific data (C++ exceptions) */
+    uint8_t has_personality, has_lsda, personality_encoding, lsda_encoding;
+    as_value personality, lsda;
+};
+
+struct as_dwarf_row {
+    uint32_t fragment, file, line, column, discriminator, isa;
+    uint64_t offset;
+    uint8_t flags;
+};
+
+struct as_cfi_instruction {
+    uint8_t operation;
+    uint32_t register_first, register_second, label;
+    int64_t offset;
+    const uint8_t *escape_bytes;
+};
+
+struct as_dwarf_file {
+    as_text name;
+    uint32_t directory;
+    uint8_t md5[16];
+    uint8_t is_set, has_md5;
+};
+
+struct as_gen_label {
+    as_text name;
+    uint32_t file, line, symbol;
+};
+
+struct as_gen_name {
+    as_text name;
+    uint32_t file;
+};
 
 struct as_context {
     ElfObj *object;
@@ -149,21 +195,9 @@ struct as_context {
     int altmacro_mode;  /* .altmacro mode */
     uint32_t end_line; /* the line after the input's last (errors at the end) */
     /* .cfi_*: instructions of all FDEs, the FDEs, the open one */
-    struct as_cfi_instruction {
-        uint8_t operation;
-        uint32_t register_first, register_second, label;
-        int64_t offset;
-        const uint8_t *escape_bytes;
-    } *cfi_instructions;
+    struct as_cfi_instruction *cfi_instructions;
     uint32_t cfi_instruction_count, cfi_instruction_capacity;
-    struct as_frame_description {
-        uint32_t start, end, first_instruction, instruction_count,
-            return_register;
-        uint8_t is_simple, is_signal, uses_b_key;
-        /* .cfi_personality, .cfi_lsda: the personality routine and the language-specific data (C++ exceptions) */
-        uint8_t has_personality, has_lsda, personality_encoding, lsda_encoding;
-        as_value personality, lsda;
-    } *frame_descriptions;
+    struct as_frame_description *frame_descriptions;
     uint32_t frame_description_count, frame_description_capacity;
     int in_frame_description,
         cfi_eh_frame_selected; /* inside .cfi_startproc; .cfi_sections without .eh_frame: 1 */
@@ -178,22 +212,13 @@ struct as_context {
     const char *
         debug_directory; /* -g: the compilation directory (as_debug_directory_set; NULL without -g) */
     int dwarf_version; /* this run's: the option, else 4 for COFF and 5 otherwise; .file 0 makes it 5 */
-    struct as_dwarf_file {
-        as_text name;
-        uint32_t directory;
-        uint8_t md5[16];
-        uint8_t is_set, has_md5;
-    } *dwarf_files;
+    struct as_dwarf_file *dwarf_files;
     uint32_t dwarf_file_count,
         dwarf_file_capacity; /* file slots by number (0 = root) */
     as_text *dwarf_directories;
     uint32_t dwarf_directory_count,
         dwarf_directory_capacity; /* directories; [0] is the root file's */
-    struct as_dwarf_row {
-        uint32_t fragment, file, line, column, discriminator, isa;
-        uint64_t offset;
-        uint8_t flags;
-    } *dwarf_rows, dwarf_row_pending;
+    struct as_dwarf_row *dwarf_rows, dwarf_row_pending;
     uint32_t dwarf_row_count, dwarf_row_capacity;
     int dwarf_row_is_pending, dwarf_table_is_due;
     /* -g on an assembler source (MC's GenDwarfForAssembly): on from as_begin while debug_directory is
@@ -205,15 +230,9 @@ struct as_context {
         gen_section_capacity; /* in order: .text first */
     uint8_t
         *gen_section_code; /* per gen_sections entry: it has an instruction */
-    struct as_gen_label {
-        as_text name;
-        uint32_t file, line, symbol;
-    } *gen_labels;
+    struct as_gen_label *gen_labels;
     uint32_t gen_label_count, gen_label_capacity;
-    struct as_gen_name {
-        as_text name;
-        uint32_t file;
-    } *gen_names; /* cpp files given a number */
+    struct as_gen_name *gen_names; /* cpp files given a number */
     uint32_t gen_name_count, gen_name_capacity;
     const char
         *cpp_file; /* the last cpp line marker's file (NULL: none seen) */
@@ -223,12 +242,7 @@ struct as_context {
         dwarf_producer; /* DW_AT_producer (as_dwarf_producer_set; NULL: "vcc") */
     /* variable-size items at the end of a split frag (.prefalign, alignment
 	   after one, .uleb128/.sleb128 of a label difference), relaxed at the end */
-    struct as_variable_item {
-        uint32_t fragment, end_symbol;
-        uint8_t kind, log2_alignment, code, fill;
-        uint64_t max, size;
-        as_value value;
-    } *variable_items;
+    struct as_variable_item *variable_items;
     uint32_t variable_item_count,
         variable_item_capacity; /* a .loc waits for its instruction; a table is due */
     uint32_t *variable_rank,

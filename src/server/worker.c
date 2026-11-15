@@ -22,12 +22,13 @@ static struct vccd_worker *vccd_worker_buffers_get(void)
     static _Thread_local struct vccd_worker w;
 
     if (!w.raw) {
-        w.raw =
-            mmap(NULL,
-                 sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
-                 PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        w.strings = mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *),
-                         PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        w.raw = (char *)(mmap(
+            NULL,
+            sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
+            PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0));
+        w.strings = (char **)(mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *),
+                                   PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANON, -1, 0));
         if (w.raw == MAP_FAILED || w.strings == MAP_FAILED) {
             perror("vccd: mmap");
             exit(1);

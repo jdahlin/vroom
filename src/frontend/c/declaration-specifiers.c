@@ -1,4 +1,5 @@
 /* vcc front end: declaration specifiers, tags and typeof */
+#include "common/literal.h"
 #include <ctype.h>
 
 #include "cc-internal.h"
@@ -466,7 +467,8 @@ cc_declaration_specifiers_tag_semicolon_recover(cc *c, int kind)
         c->ntk = 1;
     memmove(t + 1, t, c->ntk * sizeof(*t));
     c->ntk++;
-    t[0] = (ptok){.s = ";", .len = 1, .loc = e, .kind = LEX_TOKEN_SEMICOLON};
+    t[0] = VCC_LITERAL(ptok, .s = ";", .len = 1, .loc = e,
+                       .kind = LEX_TOKEN_SEMICOLON);
 }
 
 /* after a struct, union or enum body: clang's missing ';' when what follows cannot

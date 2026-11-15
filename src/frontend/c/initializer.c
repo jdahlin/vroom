@@ -1,4 +1,5 @@
 /* vcc front end: initializers */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* at '{': "{}" before C23 (clang -pedantic) */
@@ -41,7 +42,8 @@ typedef struct cc_initializer_list {
 static cc_initializer_list *cc_initializer_list_new(cc *c,
                                                     ast_qualified_type ty)
 {
-    cc_initializer_list *l = cc_heap_allocate(c, sizeof(cc_initializer_list));
+    cc_initializer_list *l = (cc_initializer_list *)(cc_heap_allocate(
+        c, sizeof(cc_initializer_list)));
 
     memset(l, 0, sizeof(*l));
     l->ty = ty;
@@ -57,9 +59,10 @@ static cc_initializer_list *cc_initializer_list_new(cc *c,
 
         l->isunion = (r->flags & AST_RECORD_FLAG_UNION) != 0;
         l->n = r->nfield;
-        l->slot = cc_heap_allocate(c, (r->nfield + 1) * sizeof(uint32_t));
-        l->sub = cc_heap_allocate(c, (r->nfield + 1) *
-                                         sizeof(cc_initializer_list *));
+        l->slot = (uint32_t *)(cc_heap_allocate(c, (r->nfield + 1) *
+                                                       sizeof(uint32_t)));
+        l->sub = (struct cc_initializer_list **)(cc_heap_allocate(
+            c, (r->nfield + 1) * sizeof(cc_initializer_list *)));
         memset(l->slot, 0, (r->nfield + 1) * sizeof(uint32_t));
         memset(l->sub, 0, (r->nfield + 1) * sizeof(cc_initializer_list *));
     }
@@ -71,20 +74,23 @@ static cc_initializer_list *cc_initializer_list_new(cc *c,
 static cc_initializer_list *
 cc_initializer_list_copy(cc *c, const cc_initializer_list *from)
 {
-    cc_initializer_list *s = cc_heap_allocate(c, sizeof(*s));
+    cc_initializer_list *s =
+        (cc_initializer_list *)(cc_heap_allocate(c, sizeof(*s)));
     *s = *from;
     s->shared = false;
     if (s->array) {
-        s->runs = cc_heap_allocate(c, s->caprun * sizeof(cc_initializer_run));
+        s->runs = (cc_initializer_run *)(cc_heap_allocate(
+            c, s->caprun * sizeof(cc_initializer_run)));
         if (s->nrun)
             memcpy(s->runs, from->runs, s->nrun * sizeof(cc_initializer_run));
         for (uint32_t i = 0; i < s->nrun; i++)
             if (s->runs[i].sub)
                 s->runs[i].sub->shared = true;
     } else {
-        s->slot = cc_heap_allocate(c, (s->n + 1) * sizeof(uint32_t));
-        s->sub =
-            cc_heap_allocate(c, (s->n + 1) * sizeof(cc_initializer_list *));
+        s->slot =
+            (uint32_t *)(cc_heap_allocate(c, (s->n + 1) * sizeof(uint32_t)));
+        s->sub = (struct cc_initializer_list **)(cc_heap_allocate(
+            c, (s->n + 1) * sizeof(cc_initializer_list *)));
         memcpy(s->slot, from->slot, (s->n + 1) * sizeof(uint32_t));
         memcpy(s->sub, from->sub, (s->n + 1) * sizeof(cc_initializer_list *));
         for (uint64_t i = 0; i < s->n; i++)
@@ -109,8 +115,8 @@ static void cc_initializer_list_run_set(cc *c, cc_initializer_list *l,
 {
     if (l->nrun == l->caprun) {
         uint32_t ncap = l->caprun ? l->caprun * 2 : 8;
-        cc_initializer_run *nr =
-            cc_heap_allocate(c, ncap * sizeof(cc_initializer_run));
+        cc_initializer_run *nr = (cc_initializer_run *)(cc_heap_allocate(
+            c, ncap * sizeof(cc_initializer_run)));
 
         if (l->nrun)
             memcpy(nr, l->runs, l->nrun * sizeof(cc_initializer_run));
@@ -131,7 +137,7 @@ static void cc_initializer_list_run_set(cc *c, cc_initializer_list *l,
     if (sub && lo != hi)
         sub->shared = true;
     l->runs[l->nrun++] =
-        (cc_initializer_run){(uint32_t)lo, (uint32_t)hi, node, sub};
+        VCC_LITERAL(cc_initializer_run, (uint32_t)lo, (uint32_t)hi, node, sub);
     if (hi + 1 > l->max)
         l->max = hi + 1;
 }
@@ -746,9 +752,12 @@ static uint64_t cc_initializer_list_designation(cc *c, cc_initializer_list *l,
     uint64_t pos = cc_initializer_list_designation_path(c, l, st, &cursor);
     if (cursor.n > 1) {
         cc_initializer_list *small[16],
-            **parents = cursor.n <= 16
-                            ? small
-                            : cc_heap_allocate(c, cursor.n * sizeof(*parents));
+            **parents =
+                (cc_initializer_list **)(cursor.n <= 16
+                                             ? small
+                                             : cc_heap_allocate(
+                                                   c, cursor.n *
+                                                          sizeof(*parents)));
         parents[0] = l;
         for (uint32_t i = 1; i < cursor.n; i++)
             parents[i] =

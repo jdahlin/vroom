@@ -558,7 +558,7 @@ typedef struct vir_unit_signature {
     uint32_t offset, count;
 } vir_unit_signature; /* words [off, off+n) of unit->sigw */
 typedef struct vir_unit_asm {
-    const char *template;
+    const char *asm_template;
     uint32_t output_count, input_count, clobber_count, labels;
     const char **outputs, **inputs, **clobbers;
 } vir_unit_asm;

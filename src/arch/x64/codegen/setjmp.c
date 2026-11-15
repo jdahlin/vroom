@@ -1,5 +1,6 @@
 /* x86-64 nonlocal jumps: private resume snapshots keep the public
  * three-pointer builtin buffer layout compatible with clang. */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 /* buf: rbp, the resume label, rsp (as clang); 0 now, 1 at the label */
@@ -58,8 +59,8 @@ VPRIV codegen_value x64_setjmp(codegen_context *e, int rb)
             x64_record_emit_memory(
                 e, X64_OP_LD, X64_REGISTER_IS_XMM(q) ? 16 : 8, q, &slot, false);
         }
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV void x64_longjmp(codegen_context *e, int rb)

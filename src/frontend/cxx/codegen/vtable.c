@@ -33,9 +33,9 @@ VPRIV bool cxx_vt_same(cxx *c, const cxx_entity *x, const cxx_entity *y)
 VPRIV void cxx_vt_push(cxx_scope *cls, cxx_entity *e)
 {
     if (cls->nvfuncs == cls->cvfuncs)
-        cls->vfuncs = realloc(
+        cls->vfuncs = (cxx_entity **)(realloc(
             cls->vfuncs, (cls->cvfuncs = cls->cvfuncs ? cls->cvfuncs * 2 : 8) *
-                             sizeof *cls->vfuncs);
+                             sizeof *cls->vfuncs));
     cls->vfuncs[cls->nvfuncs++] = e;
 }
 
@@ -143,9 +143,9 @@ VPRIV void cxx_vtable_declare(cxx *c, cxx_scope *cls, cxx_entity *e,
             e->fn_pure = 1;
     }
     if (cls->nvown == cls->cvown)
-        cls->vown =
-            realloc(cls->vown, (cls->cvown = cls->cvown ? cls->cvown * 2 : 8) *
-                                   sizeof *cls->vown);
+        cls->vown = (cxx_entity **)(realloc(
+            cls->vown, (cls->cvown = cls->cvown ? cls->cvown * 2 : 8) *
+                           sizeof *cls->vown));
     cls->vown[cls->nvown++] = e;
 }
 
@@ -227,9 +227,9 @@ VPRIV uint32_t cxx_vtable_symbol(cxx *c, cxx_scope *cls)
     cc_attribute_apply_symbol(a, &a->syms[s], &at);
     cls->vt_sym = s;
     if (c->nvt_list == c->cvt_list)
-        c->vt_list = realloc(
+        c->vt_list = (cxx_scope **)(realloc(
             c->vt_list, (c->cvt_list = c->cvt_list ? c->cvt_list * 2 : 32) *
-                            sizeof *c->vt_list);
+                            sizeof *c->vt_list));
     c->vt_list[c->nvt_list++] = cls;
     /* a class template's instance: its virtual functions' bodies are wanted now (the vtable names them) */
     for (uint32_t i = 0; i < cls->nvfuncs; i++)
@@ -455,7 +455,7 @@ VPRIV void cxx_gen_complete_object_function(cxx *c, cxx_entity *f)
         (ft->flags & AST_TYPE_FLAG_VARIADIC))
         return;
     nvb = cxx_class_vbases(c, cls->owner->ty, vb, off, 16);
-    w = calloc(1, sizeof *w);
+    w = (cxx_entity *)calloc(1, sizeof *w);
     *w = *f;
     w->sym = f->sym1, w->sym1 = 0, w->sym0 = 0, w->fn_virtual = 0,
     w->has_vtt = 0;
@@ -718,7 +718,7 @@ VPRIV void cxx_gen_complete_object_aliases(cxx *c)
     struct {
         const char *name;
         uint32_t sym;
-    } *t = (void *)c->sym_names;
+    } *t = (__typeof__(t))(void *)c->sym_names;
 
     for (uint32_t k = 0; k < c->csym_names; k++) {
         const char *nm = t[k].name;
@@ -991,9 +991,9 @@ VPRIV uint32_t cxx_gen_typeinfo(cxx *c, ast_qualified_type t)
             return 0;
         cls->ti_sym = cxx_gen_data_symbol(c, name, 0);
         if (c->nti_list == c->cti_list)
-            c->ti_list = realloc(
+            c->ti_list = (cxx_scope **)(realloc(
                 c->ti_list, (c->cti_list = c->cti_list ? c->cti_list * 2 : 32) *
-                                sizeof *c->ti_list);
+                                sizeof *c->ti_list));
         c->ti_list[c->nti_list++] = cls;
         return cls->ti_sym;
     }

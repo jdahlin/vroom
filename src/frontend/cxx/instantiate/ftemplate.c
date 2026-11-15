@@ -5,9 +5,10 @@ VPRIV void cxx_outer_save(cxx *c, cxx_outer *o)
 {
     cxx_state_save(c, &o->s);
     o->ntargs = c->ntargs, o->ndp = c->ndecl_params, o->ndd = c->decl_ndefaults;
-    o->targs = malloc((o->ntargs ? o->ntargs : 1) * sizeof *o->targs);
+    o->targs =
+        (cxx_targ *)(malloc((o->ntargs ? o->ntargs : 1) * sizeof *o->targs));
     memcpy(o->targs, c->targs, o->ntargs * sizeof *o->targs);
-    o->dp = malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp);
+    o->dp = (cxx_param *)(malloc((o->ndp ? o->ndp : 1) * sizeof *o->dp));
     memcpy(o->dp, c->decl_params, o->ndp * sizeof *o->dp);
     o->this_type = c->this_type, o->etype = c->etype, o->elval = c->elval,
     o->ecallee = c->ecallee, o->last_fn = c->last_fn;
@@ -58,7 +59,7 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p,
 
     if (!te || !p->home)
         return NULL;
-    inst = calloc(1, sizeof *inst);
+    inst = (cxx_entity *)calloc(1, sizeof *inst);
     inst->name = te->name, inst->kind = CXX_ENTITY_VALUE,
     inst->ty = CXX_TY_UNKNOWN, inst->pack_index = -1;
     if (p->home->kind == CXX_SCOPE_CLASS &&
@@ -75,7 +76,7 @@ VPRIV cxx_entity *cxx_ftemplate_instance(cxx *c, cxx_partial *p,
         inst->home = p->home;
     inst->fn_const = te->fn_const, inst->fn_static = te->fn_static,
     inst->fn_inline = 1, inst->is_instance = 1;
-    copy = malloc((nargs ? nargs : 1) * sizeof *copy);
+    copy = (cxx_targ *)(malloc((nargs ? nargs : 1) * sizeof *copy));
     memcpy(copy, args, nargs * sizeof *copy);
     /* a value argument has its parameter's type (align<16> for template <size_type N>: unsigned long, what
 	   the mangled name writes), the parameters before it bound */
@@ -117,7 +118,7 @@ VPRIV cxx_ftemplate *cxx_ftemplate_new(cxx *c, cxx_scope *params,
                                        cxx_scope *home, uint32_t pos,
                                        cxx_scope *ctor_class)
 {
-    cxx_ftemplate *f = calloc(1, sizeof *f);
+    cxx_ftemplate *f = (cxx_ftemplate *)calloc(1, sizeof *f);
 
     (void)c;
     f->p.params = params, f->p.home = home, f->pos = pos,
@@ -233,7 +234,8 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
     if (p->params->ntparams > 64)
         return;
     binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
-    p->ph = calloc(p->params->ntparams + 1, sizeof *p->ph);
+    p->ph =
+        (ast_qualified_type *)calloc(p->params->ntparams + 1, sizeof *p->ph);
     for (uint32_t i = 0; i < p->params->ntparams; i++) {
         const cxx_tparam *tp = &p->params->tparams[i];
         cxx_entity *e;
@@ -287,8 +289,8 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
             if (tag >= c->ntag_placeholder) {
                 uint32_t nn = tag + 1024;
 
-                c->tag_placeholder = realloc(c->tag_placeholder,
-                                             nn * sizeof *c->tag_placeholder);
+                c->tag_placeholder = (__typeof__(c->tag_placeholder))realloc(
+                    c->tag_placeholder, nn * sizeof *c->tag_placeholder);
                 memset(c->tag_placeholder + c->ntag_placeholder, 0,
                        (nn - c->ntag_placeholder) * sizeof *c->tag_placeholder);
                 c->ntag_placeholder = nn;
@@ -317,7 +319,8 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
             /* each parameter's type on its own: one that vcc cannot form does not stop the others */
             f->np = c->ndecl_params, f->variadic = c->decl_variadic,
             f->has_pt = 1;
-            f->pt = malloc((f->np ? f->np : 1) * sizeof *f->pt);
+            f->pt = (ast_qualified_type *)(malloc((f->np ? f->np : 1) *
+                                                  sizeof *f->pt));
             for (uint32_t i = 0; i < f->np; i++)
                 f->pt[i] = c->decl_params[i].ty;
             /* the pack's parameter: the last one, its type a pattern over the pack's placeholder */

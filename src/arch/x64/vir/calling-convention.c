@@ -95,7 +95,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
                                        vir_register_constraint *x, void *ctx)
 {
     const vir_insn *i = &f->insns[v];
-    const x64_vir_context *target = ctx;
+    const x64_vir_context *target = (const x64_vir_context *)ctx;
     bool r10 = target && target->scratch_register10, ms = target && target->ms;
     if (i->op == VIR_OP_PARAM) {
         int stack;

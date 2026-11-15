@@ -6,7 +6,7 @@
    when out of memory */
 VPRIV struct ld_context *ld_context_create(FILE *error_stream, int directory_fd)
 {
-    struct ld_context *ctx = calloc(1, sizeof *ctx);
+    struct ld_context *ctx = (struct ld_context *)calloc(1, sizeof *ctx);
 
     if (!ctx)
         return NULL;

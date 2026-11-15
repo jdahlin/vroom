@@ -10,6 +10,7 @@
  * the main file 1.  Users: arm64's and x86-64's direct emitters, and VIR's lowering driver
  * (codegen/vir/lowering-driver.c) at each block and each run of f->loc (x86-64 through x64_dbgrow).
  */
+#include "common/literal.h"
 #include "codegen-internal.h"
 
 /* the .file number of a presumed file name (1-based; under dmu, shared by the threads) */
@@ -36,8 +37,8 @@ static uint32_t codegen_debug_file_find(codegen_context *e, const char *name,
             E->debug_file_capacity =
                 E->debug_file_capacity ? 2 * E->debug_file_capacity : 16;
             E->debug_files =
-                realloc(E->debug_files,
-                        E->debug_file_capacity * sizeof *E->debug_files);
+                (char **)realloc(E->debug_files, E->debug_file_capacity *
+                                                     sizeof *E->debug_files);
         }
         E->debug_files[E->debug_file_count] = strndup(name, len);
         f = ++E->debug_file_count;
@@ -78,11 +79,11 @@ VPRIV void codegen_debug_row_add(codegen_context *e, uint32_t loc)
     if (e->debug_row_count == e->debug_row_capacity) {
         e->debug_row_capacity =
             e->debug_row_capacity ? 2 * e->debug_row_capacity : 256;
-        e->debug_rows = realloc(e->debug_rows,
-                                e->debug_row_capacity * sizeof *e->debug_rows);
+        e->debug_rows = (struct codegen_debug_row *)realloc(
+            e->debug_rows, e->debug_row_capacity * sizeof *e->debug_rows);
     }
     e->debug_rows[e->debug_row_count++] =
-        (struct codegen_debug_row){e->record_count, file, line, col};
+        VCC_LITERAL(struct codegen_debug_row, e->record_count, file, line, col);
 }
 
 VPRIV void codegen_debug_rows_remap(codegen_context *e, uint32_t *j, uint32_t k,

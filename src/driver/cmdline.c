@@ -448,8 +448,8 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
             /* warning options, in order, for diag_warning_state (some are also handled below);
 			   -pedantic is -Wpedantic, -pedantic-errors also -Werror=pedantic (two entries) */
             if (!job->warning_arguments)
-                job->warning_arguments = calloc(
-                    (size_t)argc * 2 + 1, sizeof(*job->warning_arguments));
+                job->warning_arguments = (const char **)(calloc(
+                    (size_t)argc * 2 + 1, sizeof(*job->warning_arguments)));
             if (!strcmp(a, "-pedantic") || !strcmp(a, "--pedantic"))
                 job->warning_arguments[job->warning_argument_count++] =
                     "-Wpedantic";

@@ -4,6 +4,7 @@
  * field is read as the tools always read it (strtoull on the field, which
  * stops at the first space) and never past the end of the archive.
  */
+#include "common/literal.h"
 #include "common/archive-reader.h"
 
 #include <stdlib.h>
@@ -26,12 +27,10 @@ varchive_format varchive_format_detect(const void *bytes, size_t size)
 void varchive_cursor_init(varchive_cursor *cursor, const void *bytes,
                           size_t size)
 {
-    *cursor = (varchive_cursor){
-        .bytes = bytes,
-        .size = size,
-        .offset = VARCHIVE_MAGIC_SIZE,
-        .thin = varchive_format_detect(bytes, size) == VARCHIVE_FORMAT_THIN,
-    };
+    *cursor = VCC_LITERAL(varchive_cursor, .bytes = (const uint8_t *)bytes,
+                          .size = size, .offset = VARCHIVE_MAGIC_SIZE,
+                          .thin = varchive_format_detect(bytes, size) ==
+                                  VARCHIVE_FORMAT_THIN, );
 }
 
 /* a decimal field of the header: at most n bytes, as strtoull reads it */
@@ -83,14 +82,11 @@ bool varchive_member_next(varchive_cursor *cursor, varchive_member *member)
     size_t after = cursor->size - cursor->offset -
                    VARCHIVE_HEADER_SIZE; /* bytes after the header */
 
-    *member = (varchive_member){
-        .header = h,
-        .header_offset = cursor->offset,
-        .kind = VARCHIVE_MEMBER_FILE,
-        .name_kind = VARCHIVE_NAME_SHORT,
+    *member = VCC_LITERAL(
+        varchive_member, .header = h, .header_offset = cursor->offset,
+        .kind = VARCHIVE_MEMBER_FILE, .name_kind = VARCHIVE_NAME_SHORT,
         .header_valid = h[58] == '`' && h[59] == '\n',
-        .stored_size = varchive_field_number(h + 48, 10),
-    };
+        .stored_size = varchive_field_number(h + 48, 10), );
     if (h[0] == '/' && h[1] == '/' && h[2] == ' ')
         member->kind = VARCHIVE_MEMBER_LONG_NAMES;
     else if (h[0] == '/' && (h[1] == ' ' || !memcmp(h, "/SYM64/", 7)))

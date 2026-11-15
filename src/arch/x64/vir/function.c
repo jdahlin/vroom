@@ -5,13 +5,14 @@
  * Keep vector instructions in opaque records until the record vocabulary has SIMD ops.
  */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 /* The callbacks of the shared driver (codegen/vir/lowering-driver.h) */
 
 static void vx_target_block_begin(void *ctx, uint32_t b)
 {
-    x64_vir_context *L = ctx;
+    x64_vir_context *L = (x64_vir_context *)ctx;
 
     L->map_block = b;
     L->compare_condition = UINT32_MAX;
@@ -21,7 +22,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
 
 static void vx_target_block_enter(void *ctx, uint32_t b)
 {
-    x64_vir_context *L = ctx;
+    x64_vir_context *L = (x64_vir_context *)ctx;
 
     L->block_current = b;
     L->may_fall_through = true;
@@ -31,7 +32,7 @@ static void vx_target_instruction(void *ctx, uint32_t b, uint32_t i,
                                   const uint8_t *opr, uint32_t nopr,
                                   uint8_t res)
 {
-    x64_vir_context *L = ctx;
+    x64_vir_context *L = (x64_vir_context *)ctx;
     vx_mark(L, true, 9, b, i, i, res, VIR_REGISTER_NONE, VIR_BLOCK_NONE);
     x64_vir_insn_lower(L, b, i, opr, nopr, res);
     vx_mark(L, false, 9, 0, 0, 0, 0, 0, 0);
@@ -41,7 +42,7 @@ static void vx_target_instruction(void *ctx, uint32_t b, uint32_t i,
 
 static void vx_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
 {
-    x64_vir_context *L = ctx;
+    x64_vir_context *L = (x64_vir_context *)ctx;
     vx_mark(L, true, 8, L->map_block, L->map_value, L->map_value,
             VIR_REGISTER_NONE, res, VIR_BLOCK_NONE);
     x64_vir_slot_access(L, false, res, slot);
@@ -51,12 +52,12 @@ static void vx_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
 
 static void vx_target_edit(void *ctx, const vir_edit *x)
 {
-    vx_edit(ctx, x);
+    vx_edit((x64_vir_context *)ctx, x);
 }
 
 static void vx_target_edge_moves(void *ctx, uint32_t g)
 {
-    vx_edge_moves(ctx, g);
+    vx_edge_moves((x64_vir_context *)ctx, g);
 }
 
 static void vx_target_label(void *ctx, uint32_t label)
@@ -67,7 +68,7 @@ static void vx_target_label(void *ctx, uint32_t label)
 /* the edge blocks, all after the last block: a label, the edge's moves, a jump */
 static void vx_target_after_blocks(void *ctx)
 {
-    x64_vir_context *L = ctx;
+    x64_vir_context *L = (x64_vir_context *)ctx;
     const vir_alloc_out *o = L->allocation;
 
     for (uint32_t g = 0; g < o->edge_count; g++)
@@ -99,8 +100,9 @@ static void vx_entry(void *ctx, uint32_t b, uint32_t pred, uint32_t v,
                      uint8_t reg, bool stored, const char *decision)
 {
     vbuffer_format_append(
-        ctx, "vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n", b,
-        pred, v, reg, stored, decision);
+        (vbuffer *)ctx,
+        "vl-entry b=%u pred=%u v=%u reg=%u stored=%u decision=%s\n", b, pred, v,
+        reg, stored, decision);
 }
 
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
@@ -188,7 +190,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         *why = VIRBUILD_FAILURE(x64_frame_size);
         return false;
     }
-    L.uses = V->lowering_uses = x64_vir_array_grow(
+    L.uses = V->lowering_uses = (uint8_t *)x64_vir_array_grow(
         V->lowering_uses, &V->lowering_uses_capacity, f->insn_count + 1, 1);
     vir_uses_count(f, L.uses);
     L.scratch_register10 = r10;
@@ -270,19 +272,19 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         }
     }
     /* No partial function is published before x64_finish; a failed lowering retries the walker. */
-    L.edge_labels = V->lowering_edge_labels = x64_vir_array_grow(
+    L.edge_labels = V->lowering_edge_labels = (uint32_t *)(x64_vir_array_grow(
         V->lowering_edge_labels, &V->lowering_edge_label_capacity,
-        V->allocation.edge_count + 1, sizeof(uint32_t));
+        V->allocation.edge_count + 1, sizeof(uint32_t)));
     memset(L.edge_labels, 0, V->allocation.edge_count * sizeof(uint32_t));
-    L.slot = V->lowering_slots =
-        x64_vir_array_grow(V->lowering_slots, &V->lowering_slot_capacity,
-                           f->slot_count + 1, sizeof *L.slot);
-    L.spill = V->lowering_spills =
-        x64_vir_array_grow(V->lowering_spills, &V->lowering_spill_capacity,
-                           V->allocation.spill_count + 1, sizeof *L.spill);
-    L.label = V->lowering_labels =
-        x64_vir_array_grow(V->lowering_labels, &V->lowering_label_capacity,
-                           f->block_count + 1, sizeof *L.label);
+    L.slot = V->lowering_slots = (int64_t *)x64_vir_array_grow(
+        V->lowering_slots, &V->lowering_slot_capacity, f->slot_count + 1,
+        sizeof *L.slot);
+    L.spill = V->lowering_spills = (int64_t *)x64_vir_array_grow(
+        V->lowering_spills, &V->lowering_spill_capacity,
+        V->allocation.spill_count + 1, sizeof *L.spill);
+    L.label = V->lowering_labels = (uint32_t *)x64_vir_array_grow(
+        V->lowering_labels, &V->lowering_label_capacity, f->block_count + 1,
+        sizeof *L.label);
     e->vir_try = true;
     e->vir_failure_reason = NULL;
     if (_setjmp(e->bail_jump)) {
@@ -318,30 +320,22 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     for (uint32_t b = 0; b < f->block_count; b++)
         L.label[b] = walk_label_new(e);
     L.ret = walk_label_new(e);
-    uint32_t *layout = V->lowering_layout =
-        x64_vir_array_grow(V->lowering_layout, &V->lowering_layout_capacity,
-                           5 * f->block_count, sizeof(uint32_t));
+    uint32_t *layout = V->lowering_layout = (uint32_t *)(x64_vir_array_grow(
+        V->lowering_layout, &V->lowering_layout_capacity, 5 * f->block_count,
+        sizeof(uint32_t)));
     L.order = layout;
     L.position = layout + f->block_count;
     L.rotations = layout + 2 * f->block_count;
     L.chase = layout + 3 * f->block_count;
     L.loops = &V->loops;
-    L.drv =
-        (virbuild_lowering){.target = &vx_lowering_target,
-                            .ctx = &L,
-                            .f = f,
-                            .o = &V->allocation,
-                            .lp = &V->loops,
-                            .order = L.order,
-                            .position = L.position,
-                            .rotation = L.rotations,
-                            .chase = L.chase,
-                            .path = layout + 4 * f->block_count,
-                            .block_label = L.label,
-                            .optimize = !e->unit->cleanups_disabled,
-                            .rotate = e->unit->options->optimize.rotate_loops,
-                            .row = e->unit->options->debug ? x64_dbgrow : NULL,
-                            .row_e = e};
+    L.drv = VCC_LITERAL(
+        virbuild_lowering, .target = &vx_lowering_target, .ctx = &L, .f = f,
+        .o = &V->allocation, .lp = &V->loops, .order = L.order,
+        .position = L.position, .rotation = L.rotations, .chase = L.chase,
+        .path = layout + 4 * f->block_count, .block_label = L.label,
+        .optimize = !e->unit->cleanups_disabled,
+        .rotate = e->unit->options->optimize.rotate_loops,
+        .row = e->unit->options->debug ? x64_dbgrow : NULL, .row_e = e);
 
     for (int r = 0; r < 16; r++) {
         if (V->allocation.callee[0] >> r & 1)

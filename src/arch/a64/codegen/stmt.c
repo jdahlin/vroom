@@ -1,4 +1,5 @@
 /* vcc code generator: local initialisers, cleanups, statements */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /* ---------------- local initialisers ---------------- */
@@ -301,8 +302,8 @@ VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want)
             v = gen(e, N(vstmt)->a);
             if (vslot != 1) {
                 codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = vslot,
-                                    .align = codegen_type_alignment(c, vt)};
+                                    .align = codegen_type_alignment(c, vt),
+                                    .offset = vslot};
                 int r;
 
                 store(e, &d, vt, &v);
@@ -438,16 +439,16 @@ static void a64_switch_table(codegen_context *e, const em_switch_case *cases,
         e->jump_table_label_capacity) {
         e->jump_table_label_capacity =
             (e->jump_table_label_count + (uint32_t)span + 1) * 2;
-        e->jump_table_labels =
-            realloc(e->jump_table_labels, (size_t)e->jump_table_label_capacity *
-                                              sizeof *e->jump_table_labels);
+        e->jump_table_labels = (uint32_t *)(realloc(
+            e->jump_table_labels, (size_t)e->jump_table_label_capacity *
+                                      sizeof *e->jump_table_labels));
     }
     if (e->jump_table_count == e->jump_table_capacity) {
         e->jump_table_capacity =
             e->jump_table_capacity ? e->jump_table_capacity * 2 : 4;
-        e->jump_tables =
-            realloc(e->jump_tables,
-                    (size_t)e->jump_table_capacity * sizeof *e->jump_tables);
+        e->jump_tables = (struct codegen_jump_table *)(realloc(
+            e->jump_tables,
+            (size_t)e->jump_table_capacity * sizeof *e->jump_tables));
     }
     if (!e->jump_table_labels || !e->jump_tables)
         abort();
@@ -464,7 +465,7 @@ static void a64_switch_table(codegen_context *e, const em_switch_case *cases,
         }
     }
     e->jump_tables[e->jump_table_count++] =
-        (struct codegen_jump_table){tab, off, (uint32_t)span + 1};
+        VCC_LITERAL(struct codegen_jump_table, tab, off, (uint32_t)span + 1);
     a64_record *i = a64_record_emit(e, A64_OP_JT);
     i->rd = (uint8_t)t;
     i->label = tab;
@@ -485,7 +486,8 @@ static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r,
         count += N(e->cases[k])->op == AST_NODE_CASE;
     if (count < 4)
         return false;
-    em_switch_case *cases = malloc((size_t)count * sizeof *cases);
+    em_switch_case *cases =
+        (em_switch_case *)(malloc((size_t)count * sizeof *cases));
     if (!cases)
         return false;
     uint32_t j = 0;
@@ -493,8 +495,8 @@ static bool a64_switch_dispatch(codegen_context *e, uint32_t base, int r,
     for (uint32_t k = base; k < e->case_count; k++) {
         uint32_t cn = e->cases[k];
         if (N(cn)->op == AST_NODE_CASE) {
-            cases[j++] = (em_switch_case){
-                c->ipool[N(cn)->a], c->ipool[N(cn)->b], e->case_labels[cn]};
+            cases[j++] = VCC_LITERAL(em_switch_case, c->ipool[N(cn)->a],
+                                     c->ipool[N(cn)->b], e->case_labels[cn]);
             ranges |= c->ipool[N(cn)->a] != c->ipool[N(cn)->b];
         }
     }
@@ -657,7 +659,8 @@ static void gen_switch(codegen_context *e, uint32_t n)
     }
     e->case_count = base + (e->case_count -
                             base); /* keep the labels until the body is done */
-    e->loops[e->loop_count++] = (codegen_loop){lbrk, 0, e->cleanup_count};
+    e->loops[e->loop_count++] =
+        VCC_LITERAL(codegen_loop, lbrk, 0, e->cleanup_count);
     e->is_reachable = false;
     gen_stmt(e, x->b);
     e->loop_count--;
@@ -683,8 +686,8 @@ static void gen_return(codegen_context *e, const node *x)
     if (f->is_inlined) {
         if (!codegen_type_is_void(c, rt) && x->a) {
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = f->return_slot,
-                                .align = codegen_type_alignment(c, rt)};
+                                .align = codegen_type_alignment(c, rt),
+                                .offset = f->return_slot};
 
             if (v.kind == CODEGEN_VALUE_CONSTANT ||
                 v.kind == CODEGEN_VALUE_ADDRESS) {
@@ -752,7 +755,7 @@ static void gen_return(codegen_context *e, const node *x)
             } else {
                 int64_t sl = a64_frame_slot_allocate(e, 16, 16);
                 codegen_lvalue l = {
-                    .kind = CODEGEN_LVALUE_FRAME, .offset = sl, .align = 16};
+                    .kind = CODEGEN_LVALUE_FRAME, .align = 16, .offset = sl};
 
                 store(e, &l, rt, &v);
                 val_free(e, &v);
@@ -1179,7 +1182,7 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
         gen_cond(e, x->a, false, lbrk);
         e->frame_offset = codegen_compound_literal_keep(e, mark);
         e->loops[e->loop_count++] =
-            (codegen_loop){lbrk, lhead, e->cleanup_count};
+            VCC_LITERAL(codegen_loop, lbrk, lhead, e->cleanup_count);
         gen_stmt(e, x->b);
         e->loop_count--;
         a64_jump_emit(e, lhead);
@@ -1193,7 +1196,7 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
         deflabel_loop(e, lhead,
                       e->unit->node_flags[n] & CODEGEN_NODE_HAS_LABEL);
         e->loops[e->loop_count++] =
-            (codegen_loop){lbrk, lcont, e->cleanup_count};
+            VCC_LITERAL(codegen_loop, lbrk, lcont, e->cleanup_count);
         gen_stmt(e, x->b);
         e->loop_count--;
         deflabel(e, lcont);
@@ -1227,7 +1230,7 @@ static void gen_stmt1(codegen_context *e, uint32_t n)
             e->frame_offset = codegen_compound_literal_keep(e, m2);
         }
         e->loops[e->loop_count++] =
-            (codegen_loop){lbrk, lcont, e->cleanup_count};
+            VCC_LITERAL(codegen_loop, lbrk, lcont, e->cleanup_count);
         gen_stmt(e, body);
         e->loop_count--;
         deflabel(e, lcont);

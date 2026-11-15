@@ -598,14 +598,15 @@ CC_PRIVATE void cc_builtin_table_init(void)
     /* the table is shared by all TUs; building it twice is harmless */
     for (uint32_t i = 0; cc_builtin_table[i].name; i++) {
         size_t l = strlen(cc_builtin_table[i].name);
-        char *s = malloc(l + 17);
+        char *s = (char *)malloc(l + 17);
         uint32_t id;
 
         memcpy(s, cc_builtin_table[i].name, l);
         memset(s + l, 0, 17);
         id = vintern_copy(s, l);
         if (!cc_builtin_directory[id >> CC_DIRECTORY_BITS]) {
-            uint32_t *pg = calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t));
+            uint32_t *pg =
+                (uint32_t *)(calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t)));
 
             cc_builtin_directory[id >> CC_DIRECTORY_BITS] = pg;
         }

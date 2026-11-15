@@ -6,15 +6,18 @@ VPRIV void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
     if (c->tentative)
         return;
     if (c->nlate == c->clate)
-        c->late = realloc(c->late, (c->clate = c->clate ? c->clate * 2 : 64) *
-                                       sizeof *c->late);
+        c->late = (cxx_late *)(realloc(
+            c->late,
+            (c->clate = c->clate ? c->clate * 2 : 64) * sizeof *c->late));
     c->late[c->nlate].begin = begin, c->late[c->nlate].end = end,
     c->late[c->nlate].scope = c->scope;
     c->late[c->nlate].nparams = c->ndecl_params;
     c->late[c->nlate].template_depth = c->template_depth;
     c->late[c->nlate].fn = c->last_fn, c->last_fn = NULL;
     c->late[c->nlate].params =
-        c->ndecl_params ? malloc(c->ndecl_params * sizeof(cxx_param)) : NULL;
+        (cxx_param *)(c->ndecl_params
+                          ? malloc(c->ndecl_params * sizeof(cxx_param))
+                          : NULL);
     if (c->ndecl_params)
         memcpy(c->late[c->nlate].params, c->decl_params,
                c->ndecl_params * sizeof(cxx_param));
@@ -24,8 +27,8 @@ VPRIV void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
         c->late[c->nlate].pack_name = c->cpack_name,
         c->late[c->nlate].pack_at = c->cpack_at,
         c->late[c->nlate].pack_n = c->cpack_n;
-        c->late[c->nlate].pack_types =
-            malloc((c->cpack_n ? c->cpack_n : 1) * sizeof(ast_qualified_type));
+        c->late[c->nlate].pack_types = (ast_qualified_type *)(malloc(
+            (c->cpack_n ? c->cpack_n : 1) * sizeof(ast_qualified_type)));
         memcpy(c->late[c->nlate].pack_types, c->cpack_types,
                c->cpack_n * sizeof(ast_qualified_type));
     }
@@ -43,10 +46,12 @@ VPRIV void cxx_late_pack_declare(cxx *c, const cxx_late *l, cxx_scope *fs)
         return;
     pe->is_pack = 1, pe->pack_index = -1, pe->ty = CXX_TY_UNKNOWN,
     pe->npack = l->pack_n;
-    pe->pack = calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack);
+    pe->pack =
+        (struct cxx_targ *)calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack);
     for (uint32_t i = 0; i < l->pack_n; i++)
         pe->pack[i].kind = 1, pe->pack[i].t = l->pack_types[i];
-    pe->pack_syms = calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack_syms);
+    pe->pack_syms =
+        (uint32_t *)calloc(l->pack_n ? l->pack_n : 1, sizeof *pe->pack_syms);
     c->gen_pack_entity = pe, c->gen_pack_from = l->pack_at,
     c->gen_pack_n = l->pack_n;
 }

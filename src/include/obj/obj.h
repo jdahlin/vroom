@@ -80,8 +80,13 @@ enum { STV_DEFAULT = 0, STV_INTERNAL = 1, STV_HIDDEN = 2, STV_PROTECTED = 3 };
 typedef struct ElfChunk {
     struct ElfChunk *next;
     uint32_t used, cap;
-    uint8_t data[];
+
 } ElfChunk;
+
+static inline uint8_t *elf_chunk_data(ElfChunk *p)
+{
+    return (uint8_t *)(p + 1);
+}
 
 typedef struct {
     uint32_t sec;  /* owning section */
@@ -251,7 +256,7 @@ static inline void elf_section_bytes_copy(ElfObj *o, uint32_t s, uint8_t *d)
         uint8_t *q = d + fr->base;
 
         for (ElfChunk *ch = fr->head; ch; ch = ch->next) {
-            memcpy(q, ch->data, ch->used);
+            memcpy(q, elf_chunk_data(ch), ch->used);
             q += ch->used;
         }
     }
@@ -274,7 +279,7 @@ static inline uint8_t *elf_grow(ElfObj *o, uint32_t frag, size_t n)
     ElfFrag *f = elf_frag(o, frag);
     ElfChunk *c = f->tail;
     if (c && c->cap - c->used >= n) {
-        uint8_t *p = c->data + c->used;
+        uint8_t *p = elf_chunk_data(c) + c->used;
         c->used += (uint32_t)n;
         f->size += n;
         return p;

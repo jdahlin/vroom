@@ -1,5 +1,6 @@
 /* Declaring the symbols a script defines or references (lld's addScriptReferencedSymbolsToSymTable and declareSymbols). */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV void ld_script_assignments_for_each(struct ld_context *ctx,
@@ -54,8 +55,8 @@ static void ld_script_symbol_declare(struct ld_context *ctx, ld_assignment *a)
     ld_global_symbol *s = &ctx->symbols.globals[a->symbol];
     s->state = LD_SYMBOL_STATE_SCRIPT;
     s->defined_by_script = 1;
-    s->expression_value =
-        (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE, .alignment = 1};
+    s->expression_value = VCC_LITERAL(
+        ld_expression_value, .kind = LD_VALUE_KIND_ABSOLUTE, .alignment = 1);
 }
 
 /* addScriptReferencedSymbolsToSymTable() + declareSymbols() */
@@ -64,7 +65,7 @@ VPRIV void ld_script_symbols_declare(struct ld_context *ctx)
     ctx->symbols.script_order = (uint64_t)(ctx->inputs.objects.n + 1) << 32;
     for (uint32_t i = 0; i < ctx->script.referenced_symbols.n; i++)
         ld_script_symbol_insert(ctx, ctx->script.referenced_symbols.v[i]);
-    uint8_t *added = ld_region_alloc(ctx->script.provides.n + 1);
+    uint8_t *added = (uint8_t *)ld_region_alloc(ctx->script.provides.n + 1);
     VVEC(uint32_t) stack = {0};
     for (uint32_t i = 0; i < ctx->script.provides.n; i++) {
         uint32_t g = ctx->script.provides.v[i].symbol;

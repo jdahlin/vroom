@@ -187,7 +187,7 @@ VPRIV cxx_entity *cxx_instantiate_now(cxx *c, cxx_entity *te,
     }
     if (!t->params && !pick)
         late = true;
-    inst = calloc(1, sizeof *inst);
+    inst = (cxx_entity *)calloc(1, sizeof *inst);
     inst->name = te->name, inst->kind = CXX_ENTITY_TYPE,
     inst->ty = CXX_TY_UNKNOWN;
     x = cxx_instance_add(c, t, full, n, h);
@@ -460,7 +460,8 @@ VPRIV void cxx_instance_complete_body(cxx *c, cxx_entity *inst)
                     cxx_bind(c, binding, &pick->params->tparams[i], &bind[i]);
             x->pos = pick->key_pos;
             x->npargs = pick->params->ntparams;
-            x->pargs = malloc((x->npargs ? x->npargs : 1) * sizeof *x->pargs);
+            x->pargs = (cxx_targ *)(malloc((x->npargs ? x->npargs : 1) *
+                                           sizeof *x->pargs));
             memcpy(x->pargs, bind, x->npargs * sizeof *bind);
         } else {
             binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, t->home, NULL);
@@ -571,7 +572,7 @@ VPRIV void cxx_tag_instance_set(cxx *c, uint32_t tag, void *x)
         uint32_t nn = tag + 1024;
 
         c->tag_instance =
-            realloc(c->tag_instance, nn * sizeof *c->tag_instance);
+            (void **)realloc(c->tag_instance, nn * sizeof *c->tag_instance);
         memset(c->tag_instance + c->ntag_instance, 0,
                (nn - c->ntag_instance) * sizeof *c->tag_instance);
         c->ntag_instance = nn;

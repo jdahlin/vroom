@@ -1,4 +1,5 @@
 /* vcc code generator, x86-64: the walker's operations as records (x64-internal.h) */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 #define X64_RECORD_MAX (1u << 22)
@@ -14,10 +15,11 @@ VPRIV x64_lowering_context *x64_context_get(codegen_context *e)
     x64_lowering_context *X = e->x64_context;
 
     if (!X) {
-        X = calloc(1, sizeof *X);
-        X->records = codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
-        X->two_address_records =
-            codegen_memory_reserve(X64_RECORD_BUFFER * sizeof(record));
+        X = (x64_lowering_context *)calloc(1, sizeof *X);
+        X->records = (record *)(codegen_memory_reserve(X64_RECORD_BUFFER *
+                                                       sizeof(record)));
+        X->two_address_records = (record *)(codegen_memory_reserve(
+            X64_RECORD_BUFFER * sizeof(record)));
         X->record_capacity = X64_RECORD_MAX;
         e->x64_context = X;
     }
@@ -257,8 +259,8 @@ VPRIV int x64_toreg(codegen_context *e, codegen_value *v)
 
         x64_record_emit_memory(e, X64_OP_LEA, 8, r, &l, false);
     }
-    *v = (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                         .register_number = (uint8_t)r};
+    *v = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                     .register_number = (uint8_t)r);
     return r;
 }
 
@@ -499,8 +501,8 @@ static codegen_value x64_div(codegen_context *e, int op, int size, bool sgn,
             X->outstanding_pushes--;
         }
     x64_tfree(e, rb);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)ra};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)ra);
 }
 
 /* a shift by a register (op: X64_OP_SHL X64_OP_SHR X64_OP_SAR): the count in cl */
@@ -533,8 +535,8 @@ static codegen_value x64_shift(codegen_context *e, int op, int size,
     }
     if (rb != ra)
         x64_tfree(e, rb);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)ra};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)ra);
 }
 
 VPRIV codegen_value x64_bin(codegen_context *e, int op, int size, bool sgn,
@@ -692,8 +694,8 @@ VPRIV codegen_value x64_cmp(codegen_context *e, int op, int size, bool sgn,
         e, X64_OP_SETCC, 4, ra, X64_REGISTER_NONE, X64_REGISTER_NONE);
 
     i->condition = (uint8_t)cc;
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)ra};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)ra);
 }
 
 VPRIV void x64_cmpbr(codegen_context *e, int op, int size, bool sgn,
@@ -736,11 +738,11 @@ VPRIV void x64_dbgrow(codegen_context *e, uint32_t loc)
     if (e->debug_row_count == e->debug_row_capacity) {
         e->debug_row_capacity =
             e->debug_row_capacity ? 2 * e->debug_row_capacity : 256;
-        e->debug_rows = realloc(e->debug_rows,
-                                e->debug_row_capacity * sizeof *e->debug_rows);
+        e->debug_rows = (struct codegen_debug_row *)realloc(
+            e->debug_rows, e->debug_row_capacity * sizeof *e->debug_rows);
     }
     e->debug_rows[e->debug_row_count++] =
-        (struct codegen_debug_row){nin, file, line, col};
+        VCC_LITERAL(struct codegen_debug_row, nin, file, line, col);
 }
 
 VPRIV void x64_label(codegen_context *e, uint32_t l)
@@ -795,7 +797,7 @@ typedef struct x64_compact_debug {
 
 static void x64_compact_remap(void *ctx, uint32_t old, uint32_t next)
 {
-    x64_compact_debug *d = ctx;
+    x64_compact_debug *d = (x64_compact_debug *)ctx;
 
     codegen_debug_rows_remap(d->context, &d->cursor, old, next);
 }
@@ -1060,8 +1062,8 @@ VPRIV codegen_value x64_frame(codegen_context *e, bool ret, uint32_t level)
         x64_record_emit_three_registers(e, X64_OP_FRAMEADDR, 8, r,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE);
     }
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* a's bits counted SWAR-style (no popcnt in the x86-64 baseline): the count in a's register */
@@ -1170,8 +1172,8 @@ VPRIV codegen_value x64_bitop(codegen_context *e, int bi, int size,
             e, e->current_location,
             "x86-64: builtin %d is not supported yet (PLAN-x86.md X3)", bi);
     }
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* n bytes below the stack pointer (nothing is pushed here: the stack stays 16-aligned) */
@@ -1205,8 +1207,8 @@ VPRIV codegen_value x64_alloca(codegen_context *e, codegen_value n)
     }
     x64_record_emit_three_registers(e, X64_OP_SUB, 8, RSP, RSP, r);
     x64_mov(e, r, RSP);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV int x64_spget(codegen_context *e)
@@ -1234,8 +1236,8 @@ VPRIV codegen_value x64_fbits(codegen_context *e, codegen_value v, int size)
                                         X64_REGISTER_NONE)
             ->immediate = 0xffff;
     x64_tfree(e, v.register_number);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* SSE4.2 string comparisons have fixed result registers and, with explicit
@@ -1262,8 +1264,8 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
         int rd = walk_value_to_register(e, &d);
         x64_record_emit_three_registers(e, X64_OP_CRC32, size, ra, ra, rd);
         x64_tfree(e, rd);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)ra};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)ra);
     }
     bool blend = x->aux == CC_BUILTIN_X86_BLENDVB;
     uint32_t fn = e->walk_state->inline_call
@@ -1276,8 +1278,8 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
     if (!blend)
         cc_eval(c, arg[x->c - 1], &cv);
     unsigned mode = blend ? 1 : (unsigned)cv.i, kind = mode & 7;
-    bool explicit = (mode & 8) != 0;
-    unsigned count = blend ? 3 : explicit ? 4 : 2;
+    bool explicit_length = (mode & 8) != 0;
+    unsigned count = blend ? 3 : explicit_length ? 4 : 2;
     if (!blend)
         cc_eval(c, arg[count], &cv);
     unsigned control = blend ? 0 : (unsigned)cv.i;
@@ -1285,10 +1287,10 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
     uint32_t live = e->x64_context->temporaries_in_use;
     uint32_t fixed = (1u << XMM0) | (1u << (XMM0 + 1)) |
                      (blend ? (1u << (XMM0 + 2)) : (1u << RCX)) |
-                     (explicit ? (1u << RAX) | (1u << RDX) : 0);
+                     (explicit_length ? (1u << RAX) | (1u << RDX) : 0);
     x64_nofp(e);
     for (unsigned i = 0; i < count; i++) {
-        bool vector = !explicit || !(i & 1);
+        bool vector = !explicit_length || !(i & 1);
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
                             .offset = slot[i] = walk_slot_temporary(
                                 e, vector ? 16 : 4, vector ? 16 : 4)};
@@ -1311,7 +1313,7 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
         }
     e->x64_context->temporaries_in_use |= fixed;
     for (unsigned i = 0; i < count; i++) {
-        bool vector = !explicit || !(i & 1);
+        bool vector = !explicit_length || !(i & 1);
         int r = blend    ? XMM0 + (i == 2 ? 0 : (int)i + 1)
                 : vector ? (i == 0 ? XMM0 : (XMM0 + 1))
                 : i == 1 ? RAX
@@ -1320,15 +1322,15 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
         x64_load(e, r, &l, vector ? 16 : 4, false);
     }
     record *ins = x64_record_emit(e, blend ? X64_OP_BLENDVB : X64_OP_PCMPSTR);
-    ins->condition = (explicit ? 0 : 2) | (kind == 1 ? 0 : 1);
+    ins->condition = (explicit_length ? 0 : 2) | (kind == 1 ? 0 : 1);
     ins->immediate = control;
     codegen_value result;
     if (kind == 1) {
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
                             .offset = walk_slot_temporary(e, 16, 16)};
         x64_store(e, blend ? XMM0 + 1 : XMM0, &l, 16);
-        result = (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                 .register_number = (uint8_t)x64_laddr(e, &l)};
+        result = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                             .register_number = (uint8_t)x64_laddr(e, &l));
     } else {
         int r = x64_treg(e);
         if (kind == 0)
@@ -1345,8 +1347,8 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
                 e, X64_OP_SETCC, 4, r, X64_REGISTER_NONE, X64_REGISTER_NONE);
             ins->condition = cc[kind];
         }
-        result = (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                 .register_number = (uint8_t)r};
+        result = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                             .register_number = (uint8_t)r);
     }
     for (int r = 0; r < 32; r++)
         if (saved[r]) {

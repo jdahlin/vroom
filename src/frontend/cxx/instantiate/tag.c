@@ -6,7 +6,7 @@ VPRIV void cxx_tag_grow(void ***arr, uint32_t *n, uint32_t tag)
     if (tag >= *n) {
         uint32_t nn = tag + 1024;
 
-        *arr = realloc(*arr, nn * sizeof **arr);
+        *arr = (void **)realloc(*arr, nn * sizeof **arr);
         memset(*arr + *n, 0, (nn - *n) * sizeof **arr);
         *n = nn;
     }
@@ -25,7 +25,7 @@ VPRIV cxx_instance *cxx_tag_info(cxx *c, ast_qualified_type t)
     if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t))
         return NULL;
     tag = AST_TYPE(c->ast, t)->aux;
-    return tag < c->ntag_info ? c->tag_info[tag] : NULL;
+    return (cxx_instance *)(tag < c->ntag_info ? c->tag_info[tag] : NULL);
 }
 
 /*

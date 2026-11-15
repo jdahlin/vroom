@@ -1,4 +1,5 @@
 /* vcc front end: lazy bodies (see lztok in ccint.h) */
+#include "common/literal.h"
 #include <stdatomic.h>
 
 #include "cc-internal.h"
@@ -108,13 +109,9 @@ CC_PRIVATE void cc_lazy_body_capture(cc *c, uint32_t s, const cc_declarator *d)
     ptok t;
     bool eof = false;
 
-    *L = (cc_lazy_function){s,        c->nlzt,
-                            0,        c->nsym,
-                            d->name,  d->loc,
-                            d->psyms, d->npsyms,
-                            d->plb,   d->ple,
-                            0,        0,
-                            {0},      c->npack ? c->pack[c->npack - 1] : 0};
+    *L = VCC_LITERAL(cc_lazy_function, s, c->nlzt, 0, c->nsym, d->name, d->loc,
+                     d->psyms, d->npsyms, d->plb, d->ple, 0, 0, {0},
+                     c->npack ? c->pack[c->npack - 1] : 0);
     if (pp_lazy_body_skip(c->p, &c->tk[0], &L->z)) {
         /* replayed from the header cache: the entry has the tokens, nothing passes through */
         L->hc = 1;

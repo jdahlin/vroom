@@ -1732,8 +1732,8 @@ static void *lex_region_allocate(size_t n)
     if ((size_t)(lex_region_end - lex_region_cursor) < n) {
         size_t sz = n > (64u << 20) ? n : (64u << 20);
 
-        p = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1,
-                 0);
+        p = (char *)mmap(NULL, sz, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANON, -1, 0);
         if (p == MAP_FAILED) {
             perror("vcc: mmap");
             abort();
@@ -1763,7 +1763,7 @@ static _Thread_local size_t lex_scratch_bytes;
  */
 static char *lex_file_read(int fd, size_t size, size_t *got)
 {
-    char *b = lex_region_allocate(
+    char *b = (char *)lex_region_allocate(
         size + 128); /* not always fresh: lex_region_trim gives tails back */
     size_t n = 0;
 
@@ -1832,7 +1832,7 @@ static void lex_source_tokenize_mode(lex_file *f, const char *src, size_t size,
         if (lex_scratch == MAP_FAILED)
             abort();
     }
-    tok = lex_region_allocate((size + 2) * sizeof(lex_token));
+    tok = (lex_token *)(lex_region_allocate((size + 2) * sizeof(lex_token)));
     f->src = src;
     f->size = (uint32_t)size;
     f->ntok = lex_tokenize_mode(src, size, tok, lex_scratch, digraphs);
@@ -1850,7 +1850,7 @@ static void lex_source_tokenize(lex_file *f, const char *src, size_t size)
  * and comments and the spacing of adjacent tokens used by stringization. */
 const lex_file *lex_file_without_digraphs(const lex_file *f)
 {
-    lex_file *nf = lex_region_allocate(sizeof(*nf));
+    lex_file *nf = (lex_file *)(lex_region_allocate(sizeof(*nf)));
 
     memset(nf, 0, sizeof(*nf));
     nf->path = f->path;
@@ -1912,8 +1912,13 @@ typedef struct lex_cache_entry {
     _Atomic int
         racy; /* modified just before it was read: checked at every lookup (below) */
     uint64_t sm[2]; /* size and mtime (ns) of the file as read */
-    char path[];
+
 } lex_cache_entry;
+
+static inline const char *lex_cache_path(const lex_cache_entry *p)
+{
+    return (const char *)(p + 1);
+}
 
 /*
  * Validation (vccd, Q-SCHED-01).  A new make that starts while jobs of another
@@ -1940,7 +1945,7 @@ static bool entry_fresh(const lex_cache_entry *e, int st)
 {
     struct stat s;
 
-    if (stat(e->path, &s))
+    if (stat(lex_cache_path(e), &s))
         return st == LEX_CACHE_MISSING;
     if (st != LEX_CACHE_OK)
         return false; /* it exists now */
@@ -1977,17 +1982,19 @@ static lex_cache_entry *lex_cache_entry_get(const char *path, size_t len,
     *ins = false;
     for (;;) {
         for (lex_cache_entry *e = head; e != seen; e = e->next)
-            if (e->hash == h && e->len == len && !memcmp(e->path, path, len) &&
+            if (e->hash == h && e->len == len &&
+                !memcmp(lex_cache_path(e), path, len) &&
                 !atomic_load_explicit(&e->dead, memory_order_relaxed))
                 return e; /* mine, if allocated, is wasted arena space: rare */
         if (!mine) {
-            mine = lex_region_allocate(sizeof(*mine) + len + 1);
+            mine = (lex_cache_entry *)(lex_region_allocate(sizeof(*mine) + len +
+                                                           1));
             memset(mine, 0, sizeof(*mine));
             mine->hash = h;
             mine->len = (uint32_t)len;
-            memcpy(mine->path, path, len);
-            mine->path[len] = 0;
-            mine->f.path = mine->path;
+            memcpy(((char *)(mine + 1)), path, len);
+            ((char *)(mine + 1))[len] = 0;
+            mine->f.path = ((char *)(mine + 1));
             atomic_init(&mine->state, st0);
             atomic_init(&mine->epoch, vcache_epoch());
         }
@@ -2039,17 +2046,18 @@ static void lex_cache_entry_publish(lex_cache_entry *e, bool ok)
 const lex_file *lex_file_trigraphs_replace(const lex_file *f)
 {
     static const char from[] = "=/'()!<>-", to[] = "#\\^[]|{}~";
-    const char *s = f->src, *q = memmem(s, f->size, "??", 2);
+    const char *s = f->src, *q = (const char *)memmem(s, f->size, "??", 2);
     size_t n = f->size, o = 0;
     char *b;
     lex_file *nf;
 
     while (q && (q + 2 >= s + n || !strchr(from, q[2]) || !q[2]))
-        q = q + 1 < s + n ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2)
-                          : NULL;
+        q = (const char *)(q + 1 < s + n
+                               ? memmem(q + 1, (size_t)(s + n - q - 1), "??", 2)
+                               : NULL);
     if (!q)
         return f;
-    b = lex_region_allocate(n + 128);
+    b = (char *)lex_region_allocate(n + 128);
     for (size_t i = 0; i < n; i++) {
         const char *t;
 
@@ -2062,7 +2070,7 @@ const lex_file *lex_file_trigraphs_replace(const lex_file *f)
         }
     }
     memset(b + o, 0, 128);
-    nf = lex_region_allocate(sizeof(*nf));
+    nf = (lex_file *)(lex_region_allocate(sizeof(*nf)));
     memset(nf, 0, sizeof(*nf));
     nf->path = f->path;
     nf->dev = f->dev;
@@ -2086,7 +2094,7 @@ static size_t lex_literal_or_comment_skip(const char *s, size_t n, size_t i)
         return i;
     }
     if (s[i] == '/' && i + 1 < n && s[i + 1] == '*') {
-        const char *e = memmem(s + i + 2, n - i - 2, "*/", 2);
+        const char *e = (const char *)memmem(s + i + 2, n - i - 2, "*/", 2);
 
         return e ? (size_t)(e - s) + 2 : n;
     }
@@ -2109,8 +2117,8 @@ const lex_file *lex_file_digit_separators_remove(const lex_file *f)
     lex_file *nf;
 
     /* quick: a ' between two alphanumerics somewhere at all */
-    for (const char *q = memchr(s, '\'', n); q;
-         q = memchr(q + 1, '\'', (size_t)(s + n - q - 1)))
+    for (const char *q = (const char *)memchr(s, '\'', n); q;
+         q = (const char *)(memchr(q + 1, '\'', (size_t)(s + n - q - 1))))
         if (q > s && q + 1 < s + n && lex_character_is_alphanumeric(q[-1]) &&
             lex_character_is_alphanumeric(q[1])) {
             any = true;
@@ -2118,7 +2126,7 @@ const lex_file *lex_file_digit_separators_remove(const lex_file *f)
         }
     if (!any)
         return f;
-    b = lex_region_allocate(n + 128);
+    b = (char *)lex_region_allocate(n + 128);
     any = false;
     while (i < n) {
         char ch = s[i];
@@ -2160,7 +2168,7 @@ const lex_file *lex_file_digit_separators_remove(const lex_file *f)
     if (!any)
         return f;
     memset(b + o, 0, 128);
-    nf = lex_region_allocate(sizeof(*nf));
+    nf = (lex_file *)(lex_region_allocate(sizeof(*nf)));
     memset(nf, 0, sizeof(*nf));
     nf->path = f->path;
     nf->dev = f->dev;
@@ -2181,9 +2189,10 @@ const lex_file *lex_file_c89_convert(const lex_file *f)
 
     if (!memmem(s, n, "//", 2))
         return f;
-    for (const char *q = s; (q = memmem(q, (size_t)(s + n - q), "//", 2)); q++)
+    for (const char *q = s;
+         (q = (const char *)(memmem(q, (size_t)(s + n - q), "//", 2))); q++)
         cnt++;
-    b = lex_region_allocate(n + cnt + 128);
+    b = (char *)lex_region_allocate(n + cnt + 128);
     cnt = 0;
     while (i < n) {
         char ch = s[i];
@@ -2206,7 +2215,7 @@ const lex_file *lex_file_c89_convert(const lex_file *f)
     if (!cnt)
         return f;
     memset(b + o, 0, 128);
-    nf = lex_region_allocate(sizeof(*nf));
+    nf = (lex_file *)(lex_region_allocate(sizeof(*nf)));
     memset(nf, 0, sizeof(*nf));
     nf->path = f->path;
     nf->dev = f->dev;
@@ -2235,7 +2244,7 @@ const lex_file *lex_file_get(const char *path, size_t len)
     e = lex_cache_entry_get(path, len, LEX_CACHE_LOADING, &ins);
 
     if (ins) {
-        bool ok = lex_file_load(&e->f, e->path, e->sm);
+        bool ok = lex_file_load(&e->f, lex_cache_path(e), e->sm);
 
         lex_cache_entry_publish(e, ok);
         return ok ? &e->f : NULL;
@@ -2265,7 +2274,7 @@ const lex_file *lex_file_get(const char *path, size_t len)
         if (st == LEX_CACHE_QUEUED &&
             lex_cache_entry_claim(e, LEX_CACHE_QUEUED, LEX_CACHE_LOADING)) {
             /* not reached by the I/O threads yet: do it here */
-            bool ok = lex_file_load(&e->f, e->path, e->sm);
+            bool ok = lex_file_load(&e->f, lex_cache_path(e), e->sm);
 
             lex_cache_entry_publish(e, ok);
             return ok ? &e->f : NULL;
@@ -2324,7 +2333,7 @@ static void *lex_prefetch_thread_run(void *arg)
 
             uint64_t id[4];
 
-            if (lex_source_read(e->path, &src, &size, id)) {
+            if (lex_source_read(lex_cache_path(e), &src, &size, id)) {
                 e->f.dev = id[0];
                 e->f.ino = id[1];
                 e->sm[0] = id[2];
@@ -2372,7 +2381,7 @@ void lex_file_prefetch(const char *path, size_t len)
         size_t cap = lex_prefetch_queue_capacity
                          ? 2 * lex_prefetch_queue_capacity
                          : 4096;
-        lex_cache_entry **q = malloc(cap * sizeof(*q));
+        lex_cache_entry **q = (lex_cache_entry **)(malloc(cap * sizeof(*q)));
 
         for (size_t i = 0;
              i < lex_prefetch_queue_tail - lex_prefetch_queue_head; i++)

@@ -28,7 +28,7 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd,
     while (!names || (n = pp_file_names(p, names, cap, nosys)) == cap) {
         free(names);
         cap = cap ? 2 * cap : 4096;
-        names = malloc(cap * sizeof(*names));
+        names = (const char **)(malloc(cap * sizeof(*names)));
     }
     driver_buffer d = {.region = &driver_buffer_region[3]};
     int r;

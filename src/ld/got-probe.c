@@ -6,7 +6,7 @@
 
 static void ld_got_find(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     const ld_input_section *is = &ctx->inputs.sections.v[i];
     if (is->kind == LD_SECTION_KIND_NONE ||
         atomic_load_explicit(&ctx->relocations.got_seen, memory_order_relaxed))

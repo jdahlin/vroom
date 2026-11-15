@@ -6,7 +6,7 @@
 
 static void ld_merge_pieces_split(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_merge_input *m = &ctx->inputs.merge_inputs.v[i];
     ld_input_section *is = &ctx->inputs.sections.v[m->input_section];
     const uint8_t *d = is->data;
@@ -17,7 +17,7 @@ static void ld_merge_pieces_split(void *arg, size_t i)
         for (uint64_t p = 0; p < n;) {
             uint64_t q = p;
             if (es == 1) {
-                const uint8_t *z = memchr(d + p, 0, n - p);
+                const uint8_t *z = (const uint8_t *)memchr(d + p, 0, n - p);
                 if (!z) {
                     ld_error_report(ctx, "%s: string is not null terminated",
                                     is->name);
@@ -37,9 +37,9 @@ static void ld_merge_pieces_split(void *arg, size_t i)
             cnt++;
             p = q;
         }
-        m->input_offsets = ld_region_alloc(cnt * 4);
-        m->hash = ld_region_alloc(cnt * 4);
-        m->output_offsets = ld_region_alloc(cnt * 4);
+        m->input_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
+        m->hash = (uint32_t *)ld_region_alloc(cnt * 4);
+        m->output_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
         uint32_t k = 0;
         for (uint64_t p = 0; p < n;) {
             uint64_t q, len;
@@ -66,9 +66,9 @@ static void ld_merge_pieces_split(void *arg, size_t i)
         }
     } else {
         cnt = n / es;
-        m->input_offsets = ld_region_alloc(cnt * 4);
-        m->hash = ld_region_alloc(cnt * 4);
-        m->output_offsets = ld_region_alloc(cnt * 4);
+        m->input_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
+        m->hash = (uint32_t *)ld_region_alloc(cnt * 4);
+        m->output_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
         for (uint32_t k = 0; k < cnt; k++) {
             m->input_offsets[k] = k * es;
             m->hash[k] = (uint32_t)vdigest_xxh3(d + (uint64_t)k * es, es) >> 1;
@@ -80,7 +80,7 @@ static void ld_merge_pieces_split(void *arg, size_t i)
 /* one shard of one merge section: dedup in insertion order */
 static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t mi = job_i / 32, shard = job_i % 32;
     ld_merge_section *mg = &ctx->inputs.merge_sections.v[mi];
     uint32_t total = 0;
@@ -90,9 +90,9 @@ static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
     while (cap < total / 16 + 16)
         cap *= 2;
     /* table of (mergein, piece) packed in u64; key compare by content */
-    uint64_t *tab = ld_region_alloc((uint64_t)cap * 8);
+    uint64_t *tab = (uint64_t *)(ld_region_alloc((uint64_t)cap * 8));
     memset(tab, 0xff, (uint64_t)cap * 8);
-    uint32_t *thash = ld_region_alloc((uint64_t)cap * 4);
+    uint32_t *thash = (uint32_t *)(ld_region_alloc((uint64_t)cap * 4));
     uint32_t used = 0;
     uint64_t size = 0;
     for (uint32_t k = 0; k < mg->members.n; k++) {
@@ -107,8 +107,8 @@ static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
             if ((used + 1) * 2 > cap) {
                 /* grow */
                 uint32_t nc = cap * 2;
-                uint64_t *nt = ld_region_alloc((uint64_t)nc * 8);
-                uint32_t *nh = ld_region_alloc((uint64_t)nc * 4);
+                uint64_t *nt = (uint64_t *)(ld_region_alloc((uint64_t)nc * 8));
+                uint32_t *nh = (uint32_t *)(ld_region_alloc((uint64_t)nc * 4));
                 memset(nt, 0xff, (uint64_t)nc * 8);
                 for (uint32_t j = 0; j < cap; j++)
                     if (tab[j] != UINT64_MAX) {
@@ -156,7 +156,7 @@ static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
 
 static void ld_merge_input_fix(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_merge_input *m = &ctx->inputs.merge_inputs.v[i];
     ld_merge_section *mg =
         &ctx->inputs.merge_sections

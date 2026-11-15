@@ -1,10 +1,11 @@
 /* C++ templates: templates, the instance cache, spelling */
+#include "common/literal.h"
 #include "instantiate.h"
 
 VPRIV cxx_template *cxx_template_of(cxx_entity *e)
 {
     if (!e->tmpl)
-        e->tmpl = calloc(1, sizeof *e->tmpl);
+        e->tmpl = (cxx_template *)calloc(1, sizeof *e->tmpl);
     return e->tmpl;
 }
 
@@ -16,7 +17,7 @@ VPRIV void cxx_template_define_path(cxx *c, cxx_entity *e, cxx_template *t)
         const vident *v = &vintern_ents[e->name];
         size_t n = c->name_path_len;
 
-        t->path = malloc(n + 2 + v->len + 1);
+        t->path = (char *)malloc(n + 2 + v->len + 1);
         memcpy(t->path, c->name_path, n);
         if (n)
             t->path[n++] = ':', t->path[n++] = ':';
@@ -72,10 +73,10 @@ VPRIV void cxx_template_partial(cxx *c, cxx_entity *e, cxx_scope *params,
         return;
     t = cxx_template_of(e);
     t->has_partial = 1;
-    cxx_partial *np = calloc(1, sizeof *np);
+    cxx_partial *np = (cxx_partial *)calloc(1, sizeof *np);
 
-    t->partials =
-        realloc(t->partials, (t->npartials + 1) * sizeof *t->partials);
+    t->partials = (cxx_partial **)(realloc(
+        t->partials, (t->npartials + 1) * sizeof *t->partials));
     np->params = params, np->home = home, np->less_pos = less_pos,
     np->key_pos = key_pos, np->req_pos = req_pos;
     t->partials[t->npartials] = np;
@@ -89,12 +90,11 @@ VPRIV void cxx_tparam_add(cxx *c, int kind, uint32_t name, bool pack,
 
     if (s->kind != CXX_SCOPE_TEMPLATE || c->tentative)
         return;
-    s->tparams = realloc(s->tparams, (s->ntparams + 1) * sizeof *s->tparams);
-    s->tparams[s->ntparams++] = (cxx_tparam){.kind = (uint8_t)kind,
-                                             .pack = pack,
-                                             .name = name,
-                                             .def_b = def_b,
-                                             .def_e = def_e};
+    s->tparams = (cxx_tparam *)(realloc(s->tparams, (s->ntparams + 1) *
+                                                        sizeof *s->tparams));
+    s->tparams[s->ntparams++] =
+        VCC_LITERAL(cxx_tparam, .kind = (uint8_t)kind, .pack = pack,
+                    .name = name, .def_b = def_b, .def_e = def_e);
 }
 
 /* ---- the cache --------------------------------------------------------------------------- */
@@ -154,7 +154,7 @@ VPRIV cxx_instance *cxx_instance_add(cxx *c, cxx_template *t, const cxx_targ *a,
         uint32_t oc = c->cinstances;
 
         c->cinstances = oc ? oc * 2 : 256;
-        tab = calloc(c->cinstances, sizeof *tab);
+        tab = (cxx_instance **)calloc(c->cinstances, sizeof *tab);
         for (uint32_t i = 0; i < oc; i++)
             if (old[i])
                 for (uint32_t k = old[i]->hash & (c->cinstances - 1);;
@@ -166,9 +166,9 @@ VPRIV cxx_instance *cxx_instance_add(cxx *c, cxx_template *t, const cxx_targ *a,
         free(old);
         c->instances = (void *)tab;
     }
-    x = calloc(1, sizeof *x);
+    x = (cxx_instance *)calloc(1, sizeof *x);
     x->t = t, x->nargs = n, x->hash = h;
-    x->args = malloc((n ? n : 1) * sizeof *a);
+    x->args = (cxx_targ *)(malloc((n ? n : 1) * sizeof *a));
     memcpy(x->args, a, n * sizeof *a);
     for (uint32_t i = h & (c->cinstances - 1);;
          i = (i + 1) & (c->cinstances - 1))
@@ -280,7 +280,8 @@ VPRIV void cxx_tag_scope_set(cxx *c, uint32_t tag, cxx_scope *s)
     if (tag >= c->ntag_scope) {
         uint32_t nn = tag + 1024;
 
-        c->tag_scope = realloc(c->tag_scope, nn * sizeof *c->tag_scope);
+        c->tag_scope =
+            (cxx_scope **)realloc(c->tag_scope, nn * sizeof *c->tag_scope);
         memset(c->tag_scope + c->ntag_scope, 0,
                (nn - c->ntag_scope) * sizeof *c->tag_scope);
         c->ntag_scope = nn;
@@ -294,13 +295,13 @@ VPRIV void cxx_tag_spelling_set(cxx *c, uint32_t tag, const char *s, size_t n)
         uint32_t nn = tag + 1024;
 
         c->tag_spelling =
-            realloc(c->tag_spelling, nn * sizeof *c->tag_spelling);
+            (char **)realloc(c->tag_spelling, nn * sizeof *c->tag_spelling);
         memset(c->tag_spelling + c->ntag_spelling, 0,
                (nn - c->ntag_spelling) * sizeof *c->tag_spelling);
         c->ntag_spelling = nn;
     }
     free(c->tag_spelling[tag]);
-    c->tag_spelling[tag] = malloc(n + 1);
+    c->tag_spelling[tag] = (char *)malloc(n + 1);
     memcpy(c->tag_spelling[tag], s, n);
     c->tag_spelling[tag][n] = 0;
 }

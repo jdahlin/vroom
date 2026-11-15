@@ -22,6 +22,7 @@
  * read), the paint flag, GNU ", ## __VA_ARGS__", and the leading-space
  * propagation that stringification makes visible.
  */
+#include "common/literal.h"
 #include "port/stack-guard.h"
 #include <pthread.h>
 #include <setjmp.h>
@@ -264,6 +265,52 @@ typedef struct pp_file_entry {
    command-line state, once per TU, so the common case (off, no pragmas) is one test */
 enum { PP_WARNING_C2Y, PP_WARNING_VARIADIC_MACRO, PP_WARNING_COUNT };
 
+struct pp_recording {
+    int on; /* n > 0 */
+    int level_count,
+        uncacheable_levels; /* levels; levels [0, nbad) are not cacheable */
+    int uncacheable_line;
+    uint32_t serial;
+    pp_header_cache_level levels[PP_HEADER_CACHE_LEVEL_MAX];
+    pp_header_cache_touch_record *touches;
+    uint32_t touch_count;
+    pp_header_cache_once_mark *once_marks;
+    uint32_t once_mark_count;
+    pp_header_cache_counter_position *counter_positions;
+    uint32_t counter_position_count;
+    pp_header_cache_counter_read *counter_reads;
+    uint32_t counter_read_count;
+    pp_header_cache_recorded_segment *segments;
+    uint32_t segment_count;
+    pp_header_cache_recorded_child *
+        children; /* child entries, in order (their reads and writes are theirs) */
+    uint32_t child_count;
+    uint32_t *child_exclusions;
+    uint32_t child_exclusion_count;
+    pp_header_cache_lookup *lookups; /* the levels' own lookups (hlook) */
+    uint32_t lookup_count;
+    pp_header_cache_counter_provenance
+        *counter_provenance; /* indexed by ptok.ctr */
+    uint32_t counter_provenance_count;
+    ptok *tokens; /* tokens handed out (token mode) */
+    uint32_t token_count;
+    char *spellings; /* their spellings that live in per-TU memory */
+    size_t spelling_bytes;
+};
+
+struct pp_line_mark {             /* #line / GNU line markers */
+    uint32_t file, offset;        /* in fent fe, from byte offset off on */
+    uint32_t physical_line, line; /* physical line pline is line */
+    const char *name;             /* presumed file name, or NULL */
+    uint32_t name_length;
+};
+
+struct pp_diagnostic_node {
+    uint32_t prev;
+    uint8_t act;
+    char name[59];
+};
+
 struct pp {
     uintptr_t *macro_directory[PP_MACRO_DIRECTORY_SIZE];
     const pp_opts *options;
@@ -311,11 +358,7 @@ struct pp {
     uint32_t pushed_macro_count;
     /* #pragma clang/GCC diagnostic: states are a persistent list (node: one flag's mapping and
 	   the state it was set in, 0: the command line's); the transitions are by location */
-    struct pp_diagnostic_node {
-        uint32_t prev;
-        uint8_t act;
-        char name[59];
-    } *diagnostic_nodes;
+    struct pp_diagnostic_node *diagnostic_nodes;
     struct {
         uint32_t loc, st;
     } *diagnostic_transitions;
@@ -353,12 +396,7 @@ struct pp {
     uint32_t
         diagnostic_previous_location; /* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
     uint8_t diagnostic_previous_level;
-    struct pp_line_mark {             /* #line / GNU line markers */
-        uint32_t file, offset;        /* in fent fe, from byte offset off on */
-        uint32_t physical_line, line; /* physical line pline is line */
-        const char *name;             /* presumed file name, or NULL */
-        uint32_t name_length;
-    } *line_marks;
+    struct pp_line_mark *line_marks;
     uint32_t line_mark_count;
     int warning_count;
     int in_directive; /* evaluating a directive's tokens (#if, #include, #line) */
@@ -402,38 +440,7 @@ struct pp {
     uint32_t
         options_signature; /* base signature (PP_HEADER_CACHE_NONE: no cache) */
     uint32_t *search_path_signatures; /* search path prefix ids, [0, ndirs] */
-    struct pp_recording {
-        int on; /* n > 0 */
-        int level_count,
-            uncacheable_levels; /* levels; levels [0, nbad) are not cacheable */
-        int uncacheable_line;
-        uint32_t serial;
-        pp_header_cache_level levels[PP_HEADER_CACHE_LEVEL_MAX];
-        pp_header_cache_touch_record *touches;
-        uint32_t touch_count;
-        pp_header_cache_once_mark *once_marks;
-        uint32_t once_mark_count;
-        pp_header_cache_counter_position *counter_positions;
-        uint32_t counter_position_count;
-        pp_header_cache_counter_read *counter_reads;
-        uint32_t counter_read_count;
-        pp_header_cache_recorded_segment *segments;
-        uint32_t segment_count;
-        pp_header_cache_recorded_child *
-            children; /* child entries, in order (their reads and writes are theirs) */
-        uint32_t child_count;
-        uint32_t *child_exclusions;
-        uint32_t child_exclusion_count;
-        pp_header_cache_lookup *lookups; /* the levels' own lookups (hlook) */
-        uint32_t lookup_count;
-        pp_header_cache_counter_provenance
-            *counter_provenance; /* indexed by ptok.ctr */
-        uint32_t counter_provenance_count;
-        ptok *tokens; /* tokens handed out (token mode) */
-        uint32_t token_count;
-        char *spellings; /* their spellings that live in per-TU memory */
-        size_t spelling_bytes;
-    } recording;
+    struct pp_recording recording;
     uint64_t *recording_stamps
         [PP_MACRO_DIRECTORY_SIZE]; /* per id: serial << 32 | index in rec.touches */
     struct {
@@ -762,8 +769,8 @@ static inline uintptr_t *pp_macro_table_slot(pp *p, uint32_t id)
     uintptr_t **pg = &p->macro_directory[id >> PP_MACRO_PAGE_BITS];
 
     if (unlikely(!*pg)) {
-        *pg = varena_alloc(&p->permanent_region,
-                           PP_MACRO_PAGE_SIZE * sizeof(uintptr_t));
+        *pg = (uintptr_t *)(varena_alloc(
+            &p->permanent_region, PP_MACRO_PAGE_SIZE * sizeof(uintptr_t)));
         memset(*pg, 0, PP_MACRO_PAGE_SIZE * sizeof(uintptr_t));
     }
     return &(*pg)[id & (PP_MACRO_PAGE_SIZE - 1)];
@@ -804,7 +811,7 @@ pp_header_cache_touch(pp *p, uint32_t id, bool *isnew)
     }
     *isnew = true;
     p->recording.touches[p->recording.touch_count] =
-        (pp_header_cache_touch_record){id, 0, 0, *s};
+        VCC_LITERAL(pp_header_cache_touch_record, id, 0, 0, *s);
     *s = (uint64_t)ser << 32 | p->recording.touch_count;
     return &p->recording.touches[p->recording.touch_count++];
 }

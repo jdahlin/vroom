@@ -23,13 +23,13 @@ VPRIV void driver_buffer_append(driver_buffer *b, const char *s, size_t n)
         while (nc < b->length + n + 256)
             nc *= 2;
         if (!b->capacity && b->region && nc == DRIVER_BUFFER_REGION_SIZE) {
-            b->data = vjob_region_acquire(b->region, DRIVER_BUFFER_REGION_SIZE,
-                                          "ppdriver.buf");
+            b->data = (char *)vjob_region_acquire(
+                b->region, DRIVER_BUFFER_REGION_SIZE, "ppdriver.buf");
             b->capacity = DRIVER_BUFFER_REGION_SIZE;
             goto put;
         }
-        np = mmap(NULL, nc, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1,
-                  0);
+        np = (char *)mmap(NULL, nc, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANON, -1, 0);
         if (np == MAP_FAILED)
             abort();
         if (b->data) {

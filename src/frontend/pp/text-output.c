@@ -1,4 +1,5 @@
 /* vcc preprocessor: the -E printer: spacing, line markers, comments and the output buffer */
+#include "common/literal.h"
 #include "pp-internal.h"
 #include <ctype.h>
 
@@ -24,7 +25,7 @@ VPRIV void pp_output_reserve(pp *p, size_t n)
     nc = p->output_capacity ? p->output_capacity * 2 : 1u << 24;
     while (nc < p->output_length + n)
         nc *= 2;
-    np = pp_address_space_reserve(nc);
+    np = (char *)pp_address_space_reserve(nc);
     if (p->output) {
         memcpy(np, p->output, p->output_length);
         munmap(p->output, p->output_capacity);
@@ -821,8 +822,9 @@ spaced:
                 PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX)
                 p->recording
                     .counter_positions[p->recording.counter_position_count++] =
-                    (pp_header_cache_counter_position){
-                        p->output_length + c->offset, c->length, c->value};
+                    VCC_LITERAL(pp_header_cache_counter_position,
+                                p->output_length + c->offset, c->length,
+                                c->value);
             else
                 PP_HEADER_CACHE_REGION_REJECT(p);
         }

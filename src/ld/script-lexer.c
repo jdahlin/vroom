@@ -80,7 +80,7 @@ VPRIV void ld_script_character_expect(struct ld_context *ctx, char c)
 }
 VPRIV char *ld_script_text_duplicate(const char *b, const char *e)
 {
-    char *p = ld_region_alloc(e - b + 1);
+    char *p = (char *)ld_region_alloc(e - b + 1);
     memcpy(p, b, e - b);
     p[e - b] = 0;
     return p;
@@ -91,8 +91,9 @@ VPRIV char *ld_script_name_parse(struct ld_context *ctx)
     ld_script_whitespace_skip(ctx);
     const char *b = ctx->script.cursor;
     if (ctx->script.cursor < ctx->script.end && *ctx->script.cursor == '"') {
-        const char *e = memchr(ctx->script.cursor + 1, '"',
-                               ctx->script.end - ctx->script.cursor - 1);
+        const char *e =
+            (const char *)memchr(ctx->script.cursor + 1, '"',
+                                 ctx->script.end - ctx->script.cursor - 1);
         if (!e) {
             ld_script_error_report(ctx, "unterminated string");
             ctx->script.cursor = ctx->script.end;

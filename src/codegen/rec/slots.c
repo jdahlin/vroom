@@ -1,6 +1,7 @@
 /* Exact allocation ranges for load forwarding and dead-store elimination.
  * No instruction decoding, liveness, or target operand policy lives here.
  */
+#include "common/literal.h"
 #include "../codegen-internal.h"
 
 static void *record_slot_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
@@ -16,7 +17,8 @@ static void *record_slot_grow(void *p, uint32_t *cap, uint32_t n, size_t size)
 
 static int record_slot_compare(const void *a, const void *b)
 {
-    const record_slot_range *x = a, *y = b;
+    const record_slot_range *x = (const record_slot_range *)a,
+                            *y = (const record_slot_range *)b;
 
     if (x->id != y->id)
         return x->id < y->id ? -1 : 1;
@@ -70,8 +72,9 @@ VPRIV bool record_slot_begin(record_slot_cells *s, uint32_t allocations)
     s->valid = allocations > 0 && allocations <= 0x10000;
     if (!s->valid)
         return false;
-    s->allocations = record_slot_grow(s->allocations, &s->allocation_capacity,
-                                      allocations, sizeof(*s->allocations));
+    s->allocations = (record_slot_allocation *)(record_slot_grow(
+        s->allocations, &s->allocation_capacity, allocations,
+        sizeof(*s->allocations)));
     memset(s->allocations, 0, (size_t)allocations * sizeof(*s->allocations));
     return true;
 }
@@ -90,10 +93,11 @@ VPRIV void record_slot_access(record_slot_cells *s, uint32_t id, int64_t off,
         if (s->write_count && s->writes[s->write_count - 1].offset == off &&
             s->writes[s->write_count - 1].size == size)
             return;
-        s->writes = record_slot_grow(s->writes, &s->write_capacity,
-                                     s->write_count + 1, sizeof(*s->writes));
+        s->writes = (record_slot_range *)(record_slot_grow(
+            s->writes, &s->write_capacity, s->write_count + 1,
+            sizeof(*s->writes)));
         s->writes[s->write_count++] =
-            (record_slot_range){0, off, size, false, false};
+            VCC_LITERAL(record_slot_range, 0, off, size, false, false);
     } else {
         record_slot_allocation *a = &s->allocations[id];
 
@@ -125,10 +129,10 @@ VPRIV void record_slot_detail(record_slot_cells *s, uint32_t id, int64_t off,
     }
     if (!id || s->allocations[id].state != 2)
         return;
-    s->cells = record_slot_grow(s->cells, &s->cell_capacity, s->cell_count + 1,
-                                sizeof(*s->cells));
+    s->cells = (record_slot_range *)(record_slot_grow(
+        s->cells, &s->cell_capacity, s->cell_count + 1, sizeof(*s->cells)));
     s->cells[s->cell_count++] =
-        (record_slot_range){id, off, size, false, false};
+        VCC_LITERAL(record_slot_range, id, off, size, false, false);
 }
 
 /* Retain the first exact range only when a distinct second range appears.
@@ -200,9 +204,9 @@ VPRIV bool record_slot_finish(record_slot_cells *s)
     }
     if (s->write_count) {
         record_slot_sort(s->writes, s->write_count);
-        s->write_ends =
-            record_slot_grow(s->write_ends, &s->write_end_capacity,
-                             s->write_count, sizeof(*s->write_ends));
+        s->write_ends = (int64_t *)(record_slot_grow(
+            s->write_ends, &s->write_end_capacity, s->write_count,
+            sizeof(*s->write_ends)));
         for (uint32_t k = 0; k < s->write_count; k++) {
             int64_t end = s->writes[k].offset + s->writes[k].size;
 
@@ -211,7 +215,8 @@ VPRIV bool record_slot_finish(record_slot_cells *s)
         }
     }
     s->count = na + nm;
-    s->flags = record_slot_grow(s->flags, &s->flag_capacity, s->count, 1);
+    s->flags =
+        (uint8_t *)record_slot_grow(s->flags, &s->flag_capacity, s->count, 1);
     s->flags[0] = RECORD_SLOT_BAD;
     for (uint32_t id = 1; id < na; id++) {
         const record_slot_allocation *a = &s->allocations[id];

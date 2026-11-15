@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: the switch instruction. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
@@ -53,16 +54,16 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
             e->jump_table_label_capacity) {
             e->jump_table_label_capacity =
                 (e->jump_table_label_count + (uint32_t)span + 1) * 2;
-            e->jump_table_labels = realloc(
+            e->jump_table_labels = (uint32_t *)(realloc(
                 e->jump_table_labels, (size_t)e->jump_table_label_capacity *
-                                          sizeof *e->jump_table_labels);
+                                          sizeof *e->jump_table_labels));
         }
         if (e->jump_table_count == e->jump_table_capacity) {
             e->jump_table_capacity =
                 e->jump_table_capacity ? e->jump_table_capacity * 2 : 4;
-            e->jump_tables =
-                realloc(e->jump_tables, (size_t)e->jump_table_capacity *
-                                            sizeof *e->jump_tables);
+            e->jump_tables = (struct codegen_jump_table *)(realloc(
+                e->jump_tables,
+                (size_t)e->jump_table_capacity * sizeof *e->jump_tables));
         }
         if (!e->jump_table_labels || !e->jump_tables)
             abort();
@@ -95,8 +96,8 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
                 e->label_reference_counts[t] |= CODEGEN_LABEL_EXTERNAL;
             }
         }
-        e->jump_tables[e->jump_table_count++] =
-            (struct codegen_jump_table){tab, off, (uint32_t)span + 1};
+        e->jump_tables[e->jump_table_count++] = VCC_LITERAL(
+            struct codegen_jump_table, tab, off, (uint32_t)span + 1);
         a64_record *i = a64_record_emit(e, A64_OP_JT);
         i->rd = (uint8_t)ix;
         i->condition = ix != R_X17 && !x ? 2 : 0;

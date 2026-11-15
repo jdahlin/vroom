@@ -79,7 +79,7 @@ uint32_t pp_include_point_find(const pp *p, uint32_t loc)
             while (j < end && (s[j] == ' ' || s[j] == '\t'))
                 j++;
             if (end - j > 7 && !memcmp(s + j, "include", 7)) {
-                const char *nl = memchr(s + j, '\n', end - j);
+                const char *nl = (const char *)memchr(s + j, '\n', end - j);
 
                 if (!nl)
                     break;
@@ -87,7 +87,7 @@ uint32_t pp_include_point_find(const pp *p, uint32_t loc)
             }
         }
         {
-            const char *nl = memchr(s + i, '\n', end - i);
+            const char *nl = (const char *)memchr(s + i, '\n', end - i);
 
             if (!nl)
                 break;

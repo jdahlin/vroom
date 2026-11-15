@@ -1,4 +1,5 @@
 /* Macro backtraces: a location inside an expansion, its notes and the fix-it mapped out of a macro. */
+#include "common/literal.h"
 #include "../pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
@@ -173,7 +174,9 @@ struct pp_macro_define_record {
 
 static int pp_macro_definition_compare(const void *a, const void *b)
 {
-    const struct pp_macro_define_record *x = a, *y = b;
+    const struct pp_macro_define_record
+        *x = (const struct pp_macro_define_record *)a,
+        *y = (const struct pp_macro_define_record *)b;
 
     return x->name != y->name ? (x->name < y->name ? -1 : 1)
            : x->loc < y->loc  ? -1
@@ -205,7 +208,8 @@ static void pp_macro_definition_index_update(pp *p)
                                  ? p->macro_definition_site_capacity * 2
                                  : 1024;
                 struct pp_macro_define_record *n =
-                    varena_alloc(&p->permanent_region, c * sizeof(*n));
+                    (struct pp_macro_define_record *)(varena_alloc(
+                        &p->permanent_region, c * sizeof(*n)));
 
                 if (p->macro_definition_site_count)
                     memcpy(n, p->macro_definition_sites,
@@ -214,8 +218,8 @@ static void pp_macro_definition_index_update(pp *p)
                 p->macro_definition_site_capacity = c;
             }
             p->macro_definition_sites[p->macro_definition_site_count++] =
-                (struct pp_macro_define_record){
-                    q[k].id, p->files[i].location_base + q[k].off, i, k};
+                VCC_LITERAL(struct pp_macro_define_record, q[k].id,
+                            p->files[i].location_base + q[k].off, i, k);
         }
     }
     p->macro_definition_site_files = p->file_count;
@@ -291,9 +295,8 @@ static int pp_expansion_chain_build(pp *p, const pp_macro *m, const char *ms,
 
         if ((!m->parameter_indices || !m->parameter_indices[i]) &&
             t->len == mlen && !memcmp(m->source + t->off, ms, mlen)) {
-            out[n] = (pp_expansion_frame){
-                m,     ft, e->location_base, i, e->location_base + ft[i].off,
-                t->len};
+            out[n] = VCC_LITERAL(pp_expansion_frame, m, ft, e->location_base, i,
+                                 e->location_base + ft[i].off, t->len);
             return n + 1;
         }
     }
@@ -329,8 +332,8 @@ static int pp_expansion_chain_build(pp *p, const pp_macro *m, const char *ms,
                     }
                 }
             }
-            out[n] = (pp_expansion_frame){
-                m, ft, e->location_base, i, e->location_base + ft[i].off, len};
+            out[n] = VCC_LITERAL(pp_expansion_frame, m, ft, e->location_base, i,
+                                 e->location_base + ft[i].off, len);
             return r;
         }
     }

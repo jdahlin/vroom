@@ -6,6 +6,7 @@
  * operation consumes its input register: the remainder case keeps a copy of the bias in a separate
  * temporary.  d == 1 (shift 0) is handled without a bias.
  */
+#include "common/literal.h"
 #include "walk.h"
 
 /* All operations consume their input register; retain a separate bias for %. */
@@ -26,8 +27,9 @@ VPRIV codegen_value walk_division_signed_power_of_two_emit(
     rb = WALK_LOWER(treg)(e);
     WALK_LOWER(mov)(e, rb, ra);
     bias = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true,
-                           (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                           .register_number = (uint8_t)rb},
+                           VCC_LITERAL(codegen_value,
+                                       .kind = CODEGEN_VALUE_REGISTER,
+                                       .register_number = (uint8_t)rb),
                            codegen_value_constant(r->bits - 1));
     bias = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, false, bias,
                            codegen_value_constant(r->bits - r->shift));
@@ -38,10 +40,10 @@ VPRIV codegen_value walk_division_signed_power_of_two_emit(
         a = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, a, bias);
         a = WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, a,
                             codegen_value_constant(((i128)1 << r->shift) - 1));
-        return WALK_LOWER(bin)(
-            e, LEX_TOKEN_MINUS, size, false, a,
-            (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                            .register_number = (uint8_t)saved});
+        return WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false, a,
+                               VCC_LITERAL(codegen_value,
+                                           .kind = CODEGEN_VALUE_REGISTER,
+                                           .register_number = (uint8_t)saved));
     }
     a = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, size, false, a, bias);
     a = WALK_LOWER(bin)(e, LEX_TOKEN_GREATER_GREATER, size, true, a,

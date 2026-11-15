@@ -1,4 +1,5 @@
 /* vcc front end: literals: numbers, characters, strings */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- literals ---------------- */
@@ -526,7 +527,7 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
         ptok *t = tok(c);
         if (count == cap) {
             cap *= 2;
-            ptok *more = malloc(cap * sizeof(*more));
+            ptok *more = (ptok *)(malloc(cap * sizeof(*more)));
             if (!more)
                 cc_report_fatal(c, loc, "out of memory");
             memcpy(more, tokens, count * sizeof(*more));
@@ -554,7 +555,7 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
         const char *s = t->s, *e;
 
         if (unlikely(t->flags & LEX_TOKEN_FLAG_SPLICED))
-            s = pp_token_spell(t, tmp = malloc(t->len + 1), &sl);
+            s = pp_token_spell(t, tmp = (char *)malloc(t->len + 1), &sl);
         e = s + sl - 1;
         /* each source byte gives at most 4 bytes */
         if (unlikely(buf + n + sl * 4 + 16 > c->hend)) {
@@ -570,7 +571,8 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
             uint32_t v;
 
             if (esz == 1) {
-                const char *q = memchr(s, '\\', (size_t)(e - s));
+                const char *q =
+                    (const char *)(memchr(s, '\\', (size_t)(e - s)));
 
                 if (!q)
                     q = e;
@@ -629,12 +631,12 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
     memset(buf + n, 0, (size_t)esz);
     n += (size_t)esz;
     {
-        char *keep = cc_heap_allocate(c, n);
+        char *keep = (char *)cc_heap_allocate(c, n);
         uint32_t si = c->nstr++;
         ast_qualified_type et;
 
-        c->strs[si] = (cstr){keep, (uint32_t)(n / (size_t)esz), (uint8_t)esz,
-                             (uint8_t)kind};
+        c->strs[si] = VCC_LITERAL(cstr, keep, (uint32_t)(n / (size_t)esz),
+                                  (uint8_t)esz, (uint8_t)kind);
         et = esz == 1
                  ? cc_type_basic(kind == LEX_TOKEN_UTF8_STRING &&
                                          cc_keyword_map == cc_keyword_map_c23

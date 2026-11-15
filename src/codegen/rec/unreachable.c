@@ -9,7 +9,7 @@ record_unreachable_remove(void *records, uint32_t count, size_t stride,
                           size_t op_offset, const uint8_t *flow, size_t nflow,
                           void (*remap)(void *, uint32_t, uint32_t), void *ctx)
 {
-    unsigned char *base = records;
+    unsigned char *base = (unsigned char *)records;
     uint32_t n = 0;
     bool live = true;
 

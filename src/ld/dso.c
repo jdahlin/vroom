@@ -13,6 +13,7 @@
  *     (absolute paths or -lNAME), as glibc's libc.so does.
  */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 #define SHT_GNU_VERDEF_ 0x6ffffffdu
@@ -29,7 +30,7 @@ static void ld_dso_tab_put(struct ld_context *ctx, const char *name, uint32_t d,
         (ctx->dso.symbols.n + 1) * 2 > ctx->dso.symbols.mask) {
         uint32_t m =
             ctx->dso.symbols.v ? (ctx->dso.symbols.mask + 1) * 2 : 4096;
-        DsoSym *nv = ld_region_alloc((size_t)m * sizeof(DsoSym));
+        DsoSym *nv = (DsoSym *)(ld_region_alloc((size_t)m * sizeof(DsoSym)));
         memset(nv, 0, (size_t)m * sizeof(DsoSym));
 
         for (uint32_t k = 0; ctx->dso.symbols.v && k <= ctx->dso.symbols.mask;
@@ -51,8 +52,8 @@ static void ld_dso_tab_put(struct ld_context *ctx, const char *name, uint32_t d,
             !memcmp(ctx->dso.symbols.v[j].name, name, len))
             return; /* an earlier object's definition wins */
     ctx->dso.symbols.n++;
-    ctx->dso.symbols.v[j] =
-        (DsoSym){.name = name, .len = len, .h = h, .dso = d, .idx = idx};
+    ctx->dso.symbols.v[j] = VCC_LITERAL(DsoSym, .name = name, .len = len,
+                                        .h = h, .dso = d, .idx = idx);
 }
 
 VPRIV const DsoSym *ld_dso_lookup(struct ld_context *ctx, const char *name)
@@ -184,7 +185,8 @@ static bool ld_dso_read(struct ld_context *ctx, Dso *d)
             }
             if (pass == 0) {
                 d->nver = maxndx + 1;
-                d->vername = ld_region_alloc(d->nver * sizeof(char *));
+                d->vername =
+                    (const char **)(ld_region_alloc(d->nver * sizeof(char *)));
                 memset(d->vername, 0, d->nver * sizeof(char *));
             }
         }
@@ -208,7 +210,7 @@ static bool ld_dso_read(struct ld_context *ctx, Dso *d)
 VPRIV void ld_dso_add(struct ld_context *ctx, const char *path,
                       const uint8_t *buf, size_t size, bool as_needed)
 {
-    Dso *d = ld_region_alloc(sizeof *d);
+    Dso *d = (Dso *)ld_region_alloc(sizeof *d);
 
     memset(d, 0, sizeof *d);
     d->path = path;
@@ -216,7 +218,7 @@ VPRIV void ld_dso_add(struct ld_context *ctx, const char *path,
     d->size = size;
     d->as_needed = as_needed;
     if (((uintptr_t)buf & 7)) {
-        uint8_t *c = ld_region_alloc(size);
+        uint8_t *c = (uint8_t *)ld_region_alloc(size);
 
         memcpy(c, buf, size);
         d->buf = c;
@@ -327,7 +329,8 @@ static void ld_expand_script(struct ld_context *ctx, ld_input_vector *outv,
             faccessat(ctx->options.directory_fd, word, R_OK, 0)) {
             /* a relative name: the script's directory, then the library path (as lld) */
             const char *sl = strrchr(path, '/');
-            char *c = ld_region_alloc(strlen(path) + strlen(word) + 2);
+            char *c =
+                (char *)(ld_region_alloc(strlen(path) + strlen(word) + 2));
 
             sprintf(c, "%.*s/%s", sl ? (int)(sl - path) : 1, sl ? path : ".",
                     word);
@@ -336,9 +339,9 @@ static void ld_expand_script(struct ld_context *ctx, ld_input_vector *outv,
                  faccessat(ctx->options.directory_fd, file, R_OK, 0) &&
                  k < ctx->options.library_directories.n;
                  k++) {
-                c = ld_region_alloc(
+                c = (char *)(ld_region_alloc(
                     strlen(ctx->options.library_directories.v[k]) +
-                    strlen(word) + 2);
+                    strlen(word) + 2));
                 sprintf(c, "%s/%s", ctx->options.library_directories.v[k],
                         word);
                 file = c;
@@ -352,12 +355,11 @@ static void ld_expand_script(struct ld_context *ctx, ld_input_vector *outv,
                 continue;
             }
         }
-        ld_input_expand(
-            ctx, outv,
-            (ld_input_argument){.path = file,
-                                .whole = whole,
-                                .as_needed = as_needed_depth >= 0 || asn},
-            depth + 1);
+        ld_input_expand(ctx, outv,
+                        VCC_LITERAL(ld_input_argument, .path = file,
+                                    .whole = whole,
+                                    .as_needed = as_needed_depth >= 0 || asn),
+                        depth + 1);
     }
 }
 

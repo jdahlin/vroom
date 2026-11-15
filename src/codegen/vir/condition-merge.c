@@ -1,6 +1,7 @@
 /* Two branches to a common destination become one. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -57,7 +58,8 @@ VPRIV bool virbuild_conditions_merge(codegen_context *e)
 {
     virbuild_context *V = e->vir_builder;
     uint64_t ncnt = (uint64_t)V->insn_count + V->block_order_count + 1;
-    uint32_t *cnt = virbuild_pass_scratch_get(e, ncnt * sizeof *cnt);
+    uint32_t *cnt =
+        (uint32_t *)virbuild_pass_scratch_get(e, ncnt * sizeof *cnt);
     bool any = false, again = true;
 
     memset(cnt, 0, (size_t)ncnt * sizeof *cnt);
@@ -228,10 +230,11 @@ VPRIV bool virbuild_conditions_merge(codegen_context *e)
                     virbuild_fail(e, VIRBUILD_FAILURE(joined_conditions));
                 V->insns[n].location = V->insns[t].location;
                 cnt[n] = 1;
-                V->insns[t].insn =
-                    onfalse
-                        ? (vir_insn){VIR_OP_BRIF, VIR_TYPE_VOID, 0, n, O, X}
-                        : (vir_insn){VIR_OP_BRIF, VIR_TYPE_VOID, 0, n, X, O};
+                V->insns[t].insn = onfalse
+                                       ? VCC_LITERAL(vir_insn, VIR_OP_BRIF,
+                                                     VIR_TYPE_VOID, 0, n, O, X)
+                                       : VCC_LITERAL(vir_insn, VIR_OP_BRIF,
+                                                     VIR_TYPE_VOID, 0, n, X, O);
                 /* X is entered from b now; O's entry from S goes */
                 V->predecessors[V->blocks[X].predecessor_first + ix] = b;
                 for (uint32_t p = V->blocks[O].first_parameter; p;

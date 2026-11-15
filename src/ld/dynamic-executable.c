@@ -1,5 +1,6 @@
 /* x86-64 dynamic executable sections, imports, PLT, and default layout. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV uint32_t xstr_add(struct ld_context *ctx, const char *str)
@@ -36,7 +37,7 @@ VPRIV void dyn_add_sections(struct ld_context *ctx)
         return;
     if (ctx->options.dynlinker && !ctx->options.no_dynlinker) {
         size_t n = strlen(ctx->options.dynlinker) + 1;
-        uint8_t *d = ld_region_alloc(n);
+        uint8_t *d = (uint8_t *)ld_region_alloc(n);
 
         memcpy(d, ctx->options.dynlinker, n);
         ctx->dyn.interp_isec =
@@ -145,11 +146,10 @@ VPRIV void define_reserved(struct ld_context *ctx)
         s->state = LD_SYMBOL_STATE_SCRIPT;
         s->dso1 = 0;
         s->object = LD_NONE;
-        s->expression_value = (ld_expression_value){
-            .kind = LD_VALUE_KIND_OUTPUT_SECTION,
-            .index = LD_OUTPUT_SECTION_AETHER,
-            .value = 0,
-            .alignment = 1}; /* (not absolute; set after layout) */
+        s->expression_value = VCC_LITERAL(
+            ld_expression_value, .kind = LD_VALUE_KIND_OUTPUT_SECTION,
+            .index = LD_OUTPUT_SECTION_AETHER, .value = 0,
+            .alignment = 1); /* (not absolute; set after layout) */
         s->type = STT_NOTYPE;
         s->size = 0;
         s->binding = STB_GLOBAL;
@@ -244,10 +244,9 @@ VPRIV void patch_reserved(struct ld_context *ctx)
         else
             v = end;
         ctx->symbols.globals[ctx->dyn.reserved_g[i]].expression_value =
-            (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION,
-                                  .index = first,
-                                  .value = v - base,
-                                  .alignment = 1};
+            VCC_LITERAL(ld_expression_value,
+                        .kind = LD_VALUE_KIND_OUTPUT_SECTION, .index = first,
+                        .value = v - base, .alignment = 1);
     }
 }
 
@@ -394,7 +393,7 @@ VPRIV uint64_t dyn_plt_va(struct ld_context *ctx, const ld_global_symbol *s)
 
 static int cmp_xdsym(const void *a, const void *b, void *arg)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
     uint32_t hx = ld_symbol_name_gnu_hash(ld_global_name(ctx, x)) %
                   ctx->dyn.xgh_nb,
@@ -408,7 +407,7 @@ static void dyn_symbols_sort(struct ld_context *ctx, uint32_t first, uint32_t n)
 {
     /* Stable bottom-up merge sort: hash buckets then global id. */
     uint32_t *a = ctx->dyn.xdsyms.v + first;
-    uint32_t *tmp = ld_region_alloc((size_t)n * sizeof *tmp);
+    uint32_t *tmp = (uint32_t *)(ld_region_alloc((size_t)n * sizeof *tmp));
     for (uint64_t width = 1; width < n; width *= 2) {
         for (uint64_t lo = 0; lo < n; lo += width * 2) {
             uint64_t mid = lo + width < n ? lo + width : n;
@@ -472,11 +471,10 @@ VPRIV void dyn_localize(struct ld_context *ctx)
 
         if (s->canon) {
             s->state = LD_SYMBOL_STATE_SCRIPT;
-            s->expression_value =
-                (ld_expression_value){.kind = LD_VALUE_KIND_INPUT_SECTION,
-                                      .index = ctx->dyn.plt_isec,
-                                      .value = 16 * ((uint64_t)s->pltidx + 1),
-                                      .alignment = 1};
+            s->expression_value = VCC_LITERAL(
+                ld_expression_value, .kind = LD_VALUE_KIND_INPUT_SECTION,
+                .index = ctx->dyn.plt_isec,
+                .value = 16 * ((uint64_t)s->pltidx + 1), .alignment = 1);
             s->type = STT_FUNC;
         } else if (s->needcopy) {
             if (!y->st_size)
@@ -520,11 +518,11 @@ VPRIV void dyn_localize(struct ld_context *ctx)
                     q->dso1 = s->dso1;
                     q->dsym = k;
                     q->state = LD_SYMBOL_STATE_SCRIPT;
-                    q->expression_value = (ld_expression_value){
-                        .kind = LD_VALUE_KIND_INPUT_SECTION,
-                        .index = ctx->dyn.copy_isec,
-                        .value = coff,
-                        .alignment = 1};
+                    q->expression_value =
+                        VCC_LITERAL(ld_expression_value,
+                                    .kind = LD_VALUE_KIND_INPUT_SECTION,
+                                    .index = ctx->dyn.copy_isec, .value = coff,
+                                    .alignment = 1);
                     q->needcopy = 2;
                     q->type = z->st_info & 15;
                     q->size = z->st_size;
@@ -547,11 +545,11 @@ VPRIV void dyn_localize(struct ld_context *ctx)
                 if (z->st_value == v && z->st_shndx == y->st_shndx &&
                     (z->st_info & 15) != STT_FUNC) {
                     q->state = LD_SYMBOL_STATE_SCRIPT;
-                    q->expression_value = (ld_expression_value){
-                        .kind = LD_VALUE_KIND_INPUT_SECTION,
-                        .index = ctx->dyn.copy_isec,
-                        .value = coff,
-                        .alignment = 1};
+                    q->expression_value =
+                        VCC_LITERAL(ld_expression_value,
+                                    .kind = LD_VALUE_KIND_INPUT_SECTION,
+                                    .index = ctx->dyn.copy_isec, .value = coff,
+                                    .alignment = 1);
                     q->needcopy = 2; /* an alias: no relocation of its own */
                     q->binding =
                         z->st_info >> 4 == STB_WEAK ? STB_WEAK : STB_GLOBAL;
@@ -560,11 +558,9 @@ VPRIV void dyn_localize(struct ld_context *ctx)
                 }
             }
             s->state = LD_SYMBOL_STATE_SCRIPT;
-            s->expression_value =
-                (ld_expression_value){.kind = LD_VALUE_KIND_INPUT_SECTION,
-                                      .index = ctx->dyn.copy_isec,
-                                      .value = coff,
-                                      .alignment = 1};
+            s->expression_value = VCC_LITERAL(
+                ld_expression_value, .kind = LD_VALUE_KIND_INPUT_SECTION,
+                .index = ctx->dyn.copy_isec, .value = coff, .alignment = 1);
             s->needcopy = 1;
             coff += y->st_size;
         } else
@@ -584,7 +580,7 @@ VPRIV void dyn_after_scan(struct ld_context *ctx)
     uint32_t ng = atomic_load(&ctx->symbols.count);
 
     /* exported definitions: -E, or named by a shared object's undefined symbol */
-    ctx->dyn.xexport = ld_region_alloc(ng + 1);
+    ctx->dyn.xexport = (uint8_t *)ld_region_alloc(ng + 1);
     memset(ctx->dyn.xexport, 0, ng + 1);
     for (uint32_t d = 0; d < ctx->dso.dsos.n; d++) {
         const Dso *so = ctx->dso.dsos.v[d];
@@ -637,9 +633,9 @@ VPRIV void dyn_after_scan(struct ld_context *ctx)
     ctx->dyn.xsymndx = nund + 1;
     ctx->dyn.xstr.n = 0;
     VVEC_PUSH(ctx->dyn.xstr, 0, ld_region_alloc);
-    ctx->dyn.xname = ld_region_alloc((n + 1) * sizeof(uint32_t));
-    ctx->dyn.xhash = ld_region_alloc((n + 1) * sizeof(uint32_t));
-    ctx->dyn.xver = ld_region_alloc((n + 1) * sizeof(uint16_t));
+    ctx->dyn.xname = (uint32_t *)(ld_region_alloc((n + 1) * sizeof(uint32_t)));
+    ctx->dyn.xhash = (uint32_t *)(ld_region_alloc((n + 1) * sizeof(uint32_t)));
+    ctx->dyn.xver = (uint16_t *)(ld_region_alloc((n + 1) * sizeof(uint16_t)));
     /* DT_NEEDED: every shared object, an --as-ctx->dyn.needed one only when used */
     ctx->dyn.needed.n = 0;
     for (uint32_t d = 0; d < ctx->dso.dsos.n; d++)

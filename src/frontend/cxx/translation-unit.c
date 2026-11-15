@@ -78,7 +78,7 @@ int cxx_run(pp *p, const cc_options *co, const cxx_options *o)
     memset(&c, 0, sizeof c);
     c.p = p;
     c.o = o;
-    c.ast = malloc(sizeof(cc));
+    c.ast = (cc *)(malloc(sizeof(cc)));
     cc_translation_unit_init(c.ast, p, co); /* the builtin types, the tables */
     c.name_path_valid = 1;
     c.trace = getenv("VCC_CXX_TRACE") != NULL;

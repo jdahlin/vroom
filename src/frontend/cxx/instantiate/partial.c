@@ -13,7 +13,8 @@ VPRIV void cxx_partial_evaluate(cxx *c, cxx_partial *p)
     p->evaluated = 1;
     p->ok = 0;
     binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
-    p->ph = calloc(p->params->ntparams + 1, sizeof *p->ph);
+    p->ph =
+        (ast_qualified_type *)calloc(p->params->ntparams + 1, sizeof *p->ph);
     for (uint32_t i = 0; i < p->params->ntparams; i++) {
         const cxx_tparam *tp = &p->params->tparams[i];
         cxx_entity *e;
@@ -47,8 +48,8 @@ VPRIV void cxx_partial_evaluate(cxx *c, cxx_partial *p)
             if (tag >= c->ntag_placeholder) {
                 uint32_t nn = tag + 1024;
 
-                c->tag_placeholder = realloc(c->tag_placeholder,
-                                             nn * sizeof *c->tag_placeholder);
+                c->tag_placeholder = (__typeof__(c->tag_placeholder))realloc(
+                    c->tag_placeholder, nn * sizeof *c->tag_placeholder);
                 memset(c->tag_placeholder + c->ntag_placeholder, 0,
                        (nn - c->ntag_placeholder) * sizeof *c->tag_placeholder);
                 c->ntag_placeholder = nn;
@@ -73,7 +74,8 @@ VPRIV void cxx_partial_evaluate(cxx *c, cxx_partial *p)
     if (!setjmp(jb)) {
         cxx_template_arguments_parse(c);
         p->npattern = c->ntargs;
-        p->pattern = malloc((c->ntargs ? c->ntargs : 1) * sizeof *p->pattern);
+        p->pattern = (cxx_targ *)(malloc((c->ntargs ? c->ntargs : 1) *
+                                         sizeof *p->pattern));
         memcpy(p->pattern, c->targs, c->ntargs * sizeof *p->pattern);
         p->ok = 1;
         for (uint32_t i = 0; i < p->npattern; i++) {
@@ -232,7 +234,7 @@ VPRIV bool cxx_partial_complete(cxx *c, cxx_partial *p, const cxx_scope *ps,
     if (n > ps->ntparams)
         return false;
     empty = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
-    p->pattern = realloc(p->pattern, n * sizeof *p->pattern);
+    p->pattern = (cxx_targ *)realloc(p->pattern, n * sizeof *p->pattern);
     p->primary = ps, p->primary_d = d;
     for (uint32_t i = p->npattern; i < n; i++) {
         const cxx_tparam *tp = &ps->tparams[i];

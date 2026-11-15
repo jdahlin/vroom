@@ -12,19 +12,21 @@ static bool em_flow_live_grow(em_flow_live *live, uint32_t blocks)
         return false;
     /* Keep each old pointer valid if any later allocation fails. Capacity is
 	 * committed only when all buffers can accommodate the new function. */
-    uint64_t *m = realloc(live->in, (size_t)capacity * sizeof(*m));
+    uint64_t *m =
+        (uint64_t *)(realloc(live->in, (size_t)capacity * sizeof(*m)));
     if (!m)
         return false;
     live->in = m;
-    m = realloc(live->out, (size_t)capacity * sizeof(*m));
+    m = (uint64_t *)(realloc(live->out, (size_t)capacity * sizeof(*m)));
     if (!m)
         return false;
     live->out = m;
-    uint32_t *q = realloc(live->queue, (size_t)capacity * sizeof(*q));
+    uint32_t *q =
+        (uint32_t *)(realloc(live->queue, (size_t)capacity * sizeof(*q)));
     if (!q)
         return false;
     live->queue = q;
-    uint8_t *queued = realloc(live->queued, (size_t)capacity);
+    uint8_t *queued = (uint8_t *)(realloc(live->queued, (size_t)capacity));
     if (!queued)
         return false;
     live->queued = queued;

@@ -440,7 +440,8 @@ static bool cc_return_path_sequence(cc *c, const node *x, uint32_t i,
                                     bool reach, bool brk, cc_return_path *P)
 {
     uint32_t j = i;
-    uint8_t small[64], *end = i <= sizeof small ? small : malloc(i);
+    uint8_t small[64],
+        *end = (uint8_t *)(i <= sizeof small ? small : malloc(i));
     bool r = reach;
 
     if (!end) {
@@ -692,7 +693,7 @@ cc_return_type_check(cc *c, uint32_t s, uint32_t body, uint32_t rbrace,
     if (!d)
         return;
     f.lab0 = lab0, f.nlab = c->nlabel - lab0;
-    f.lab = f.nlab <= sizeof small ? small : calloc(f.nlab, 1);
+    f.lab = (uint8_t *)(f.nlab <= sizeof small ? small : calloc(f.nlab, 1));
     memset(f.lab, 0, f.nlab <= sizeof small ? f.nlab : 0);
     if (k == 1) {
         do { /* again while a goto reaches a new label (each pass reaches more) */

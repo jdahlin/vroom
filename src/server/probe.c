@@ -125,7 +125,7 @@ VPRIV int vccd_fd_read_all(int fd, char **buf, size_t *len)
         ssize_t k;
 
         if (cap - n < 65536) {
-            char *nb = realloc(b, cap = cap ? cap * 2 : 1 << 16);
+            char *nb = (char *)realloc(b, cap = cap ? cap * 2 : 1 << 16);
 
             if (!nb)
                 break;

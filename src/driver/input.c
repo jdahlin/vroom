@@ -23,7 +23,7 @@ driver_input_stdin_read(int fd, int errfd, const char **src, size_t *len)
         ssize_t k;
 
         if (icap - n < 65536) {
-            char *nb = realloc(ib, icap = icap ? icap * 2 : 1 << 20);
+            char *nb = (char *)realloc(ib, icap = icap ? icap * 2 : 1 << 20);
 
             if (!nb) {
                 dprintf(errfd, "vcc: error: out of memory reading stdin\n");

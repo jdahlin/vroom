@@ -19,6 +19,7 @@
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV _Thread_local struct a64_vir_thread_state a64_vir_thread_state_instance;
@@ -27,7 +28,7 @@ VPRIV _Thread_local struct a64_vir_thread_state a64_vir_thread_state_instance;
 
 static void vl_target_block_begin(void *ctx, uint32_t b)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
     const vir_alloc_out *o = L->allocation;
 
     L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
@@ -45,7 +46,7 @@ static void vl_target_block_begin(void *ctx, uint32_t b)
 /* the label defined by the layout loop: the prologue's nop, and what the code at it may do */
 static void vl_target_block_enter(void *ctx, uint32_t b)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
 
     if (b == L->save_point)
         a64_record_emit(L->context, A64_OP_NOP)->condition = A64_NOP_PROLOGUE;
@@ -60,7 +61,7 @@ static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i,
                                   const uint8_t *opr, uint32_t nopr,
                                   uint8_t res)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
     codegen_context *e = L->context;
 
     (void)opr; /* (the driver filled L->ov and L->opr) */
@@ -76,17 +77,17 @@ static void vl_target_instruction(void *ctx, uint32_t b, uint32_t i,
 
 static void vl_target_result_spill(void *ctx, uint8_t res, uint32_t slot)
 {
-    a64_vir_register_spill(ctx, res, slot, R_X16);
+    a64_vir_register_spill((a64_vir_context *)ctx, res, slot, R_X16);
 }
 
 static void vl_target_edit(void *ctx, const vir_edit *x)
 {
-    vl_edit(ctx, x);
+    vl_edit((a64_vir_context *)ctx, x);
 }
 
 static void vl_target_edge_moves(void *ctx, uint32_t g)
 {
-    a64_vir_edge_moves_emit(ctx, g);
+    a64_vir_edge_moves_emit((a64_vir_context *)ctx, g);
 }
 
 static void vl_target_label(void *ctx, uint32_t label)
@@ -97,7 +98,7 @@ static void vl_target_label(void *ctx, uint32_t label)
 /* the block's branches' edges with moves: a small block each after it (a label, the moves, a jump) */
 static void vl_target_block_end(void *ctx, uint32_t b)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
 
     if (L->context->is_reachable)
         a64_vir_fail(L, VIRBUILD_FAILURE(lowering_block_without_terminator));
@@ -105,7 +106,7 @@ static void vl_target_block_end(void *ctx, uint32_t b)
         uint32_t n = L->edge_branch_count;
         struct {
             uint32_t l, e, to;
-        } *tr = __builtin_alloca(n * sizeof *tr);
+        } *tr = (__typeof__(tr))__builtin_alloca(n * sizeof *tr);
 
         memcpy(tr, L->edge_branches, n * sizeof *tr);
         L->edge_branch_count = 0;
@@ -123,12 +124,12 @@ static void vl_target_block_end(void *ctx, uint32_t b)
 
 static void vl_target_body_begin(void *ctx)
 {
-    a64_vir_callee_saved_float_save(ctx, false, R_X16);
+    a64_vir_callee_saved_float_save((a64_vir_context *)ctx, false, R_X16);
 }
 
 static void vl_target_after_blocks(void *ctx)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
 
     for (uint32_t b = 0;
          b < L->function->block_count && L->save_point != VIR_BLOCK_NONE; b++)
@@ -145,7 +146,7 @@ static void vl_target_after_blocks(void *ctx)
 
 static void vl_target_fail(void *ctx, const char *why)
 {
-    a64_vir_fail(ctx, why);
+    a64_vir_fail((a64_vir_context *)ctx, why);
 }
 
 static void vl_target_order_adjust(void *ctx);
@@ -181,7 +182,7 @@ static const virbuild_lowering_target vl_lowering_target = {
  */
 static void vl_target_order_adjust(void *ctx)
 {
-    a64_vir_context *L = ctx;
+    a64_vir_context *L = (a64_vir_context *)ctx;
     const vir_function *f = L->function;
     uint32_t n = f->block_count;
 
@@ -250,8 +251,8 @@ static bool a64_vir_vectors_cross_call(vir_function *f)
     if (!nv || !calls)
         return false;
     W = (nv + 63) / 64;
-    ix = malloc((size_t)f->insn_count * sizeof *ix);
-    in = calloc((size_t)(2 * f->block_count + 1) * W, sizeof *in);
+    ix = (uint32_t *)(malloc((size_t)f->insn_count * sizeof *ix));
+    in = (uint64_t *)(calloc((size_t)(2 * f->block_count + 1) * W, sizeof *in));
     if (!ix || !in) {
         free(ix), free(in);
         return true;
@@ -346,14 +347,15 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         vir_alloc_options ao = {0};
 
         L.context = e, L.function = f;
-        a64_vir_thread_state_instance.low32 =
-            a64_vir_array_grow(a64_vir_thread_state_instance.low32,
-                               &a64_vir_thread_state_instance.low32_capacity,
-                               f->insn_count + 1, 1);
-        a64_vir_thread_state_instance.needs_fallthrough = a64_vir_array_grow(
-            a64_vir_thread_state_instance.needs_fallthrough,
-            &a64_vir_thread_state_instance.fallthrough_capacity,
-            f->insn_count + 1, 1);
+        a64_vir_thread_state_instance.low32 = (uint8_t *)a64_vir_array_grow(
+            a64_vir_thread_state_instance.low32,
+            &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1,
+            1);
+        a64_vir_thread_state_instance.needs_fallthrough =
+            (uint8_t *)a64_vir_array_grow(
+                a64_vir_thread_state_instance.needs_fallthrough,
+                &a64_vir_thread_state_instance.fallthrough_capacity,
+                f->insn_count + 1, 1);
         L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID &&
                   codegen_type_is_integer(c, ft->base) &&
                   codegen_type_size(c, ft->base) == 4;
@@ -397,80 +399,74 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         free(msg.p);
     }
     L.context = e, L.function = f, L.allocation = &V->allocation;
-    a64_vir_thread_state_instance.slot_offsets =
-        a64_vir_array_grow(a64_vir_thread_state_instance.slot_offsets,
-                           &a64_vir_thread_state_instance.slot_offset_capacity,
-                           f->slot_count + 1, sizeof(int64_t));
+    a64_vir_thread_state_instance.slot_offsets = (int64_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.slot_offsets,
+        &a64_vir_thread_state_instance.slot_offset_capacity, f->slot_count + 1,
+        sizeof(int64_t)));
     a64_vir_thread_state_instance.spill_offsets =
-        a64_vir_array_grow(a64_vir_thread_state_instance.spill_offsets,
-                           &a64_vir_thread_state_instance.spill_offset_capacity,
-                           V->allocation.spill_count + 1, sizeof(int64_t));
-    a64_vir_thread_state_instance.labels =
-        a64_vir_array_grow(a64_vir_thread_state_instance.labels,
-                           &a64_vir_thread_state_instance.label_capacity,
-                           f->block_count + 1, sizeof(uint32_t));
-    a64_vir_thread_state_instance.uses = a64_vir_array_grow(
+        (int64_t *)(a64_vir_array_grow(
+            a64_vir_thread_state_instance.spill_offsets,
+            &a64_vir_thread_state_instance.spill_offset_capacity,
+            V->allocation.spill_count + 1, sizeof(int64_t)));
+    a64_vir_thread_state_instance.labels = (uint32_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.labels,
+        &a64_vir_thread_state_instance.label_capacity, f->block_count + 1,
+        sizeof(uint32_t)));
+    a64_vir_thread_state_instance.uses = (uint8_t *)a64_vir_array_grow(
         a64_vir_thread_state_instance.uses,
         &a64_vir_thread_state_instance.uses_capacity, f->insn_count + 1, 1);
-    a64_vir_thread_state_instance.low32 = a64_vir_array_grow(
+    a64_vir_thread_state_instance.low32 = (uint8_t *)a64_vir_array_grow(
         a64_vir_thread_state_instance.low32,
         &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1, 1);
-    a64_vir_thread_state_instance.chases =
-        a64_vir_array_grow(a64_vir_thread_state_instance.chases,
-                           &a64_vir_thread_state_instance.chase_capacity,
-                           f->block_count + 1, sizeof(uint32_t));
-    a64_vir_thread_state_instance.path =
-        a64_vir_array_grow(a64_vir_thread_state_instance.path,
-                           &a64_vir_thread_state_instance.path_capacity,
-                           f->block_count + 1, sizeof(uint32_t));
+    a64_vir_thread_state_instance.chases = (uint32_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.chases,
+        &a64_vir_thread_state_instance.chase_capacity, f->block_count + 1,
+        sizeof(uint32_t)));
+    a64_vir_thread_state_instance.path = (uint32_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.path,
+        &a64_vir_thread_state_instance.path_capacity, f->block_count + 1,
+        sizeof(uint32_t)));
     L.slot_offsets = a64_vir_thread_state_instance.slot_offsets,
     L.spill_offsets = a64_vir_thread_state_instance.spill_offsets,
     L.labels = a64_vir_thread_state_instance.labels,
     L.uses = a64_vir_thread_state_instance.uses,
     L.low32 = a64_vir_thread_state_instance.low32;
     L.chases = a64_vir_thread_state_instance.chases;
-    a64_vir_thread_state_instance.order =
-        a64_vir_array_grow(a64_vir_thread_state_instance.order,
-                           &a64_vir_thread_state_instance.order_capacity,
-                           f->block_count + 1, sizeof(uint32_t));
-    a64_vir_thread_state_instance.order_positions = a64_vir_array_grow(
-        a64_vir_thread_state_instance.order_positions,
-        &a64_vir_thread_state_instance.order_position_capacity,
-        f->block_count + 1, sizeof(uint32_t));
-    a64_vir_thread_state_instance.head_labels =
-        a64_vir_array_grow(a64_vir_thread_state_instance.head_labels,
-                           &a64_vir_thread_state_instance.head_label_capacity,
-                           f->block_count + 1, sizeof(uint32_t));
-    a64_vir_thread_state_instance.epilogue_labels = a64_vir_array_grow(
-        a64_vir_thread_state_instance.epilogue_labels,
-        &a64_vir_thread_state_instance.epilogue_label_capacity,
-        f->block_count + 1, sizeof(uint32_t));
+    a64_vir_thread_state_instance.order = (uint32_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.order,
+        &a64_vir_thread_state_instance.order_capacity, f->block_count + 1,
+        sizeof(uint32_t)));
+    a64_vir_thread_state_instance.order_positions =
+        (uint32_t *)(a64_vir_array_grow(
+            a64_vir_thread_state_instance.order_positions,
+            &a64_vir_thread_state_instance.order_position_capacity,
+            f->block_count + 1, sizeof(uint32_t)));
+    a64_vir_thread_state_instance.head_labels = (uint32_t *)(a64_vir_array_grow(
+        a64_vir_thread_state_instance.head_labels,
+        &a64_vir_thread_state_instance.head_label_capacity, f->block_count + 1,
+        sizeof(uint32_t)));
+    a64_vir_thread_state_instance.epilogue_labels =
+        (uint32_t *)(a64_vir_array_grow(
+            a64_vir_thread_state_instance.epilogue_labels,
+            &a64_vir_thread_state_instance.epilogue_label_capacity,
+            f->block_count + 1, sizeof(uint32_t)));
     memset(a64_vir_thread_state_instance.epilogue_labels, 0,
            (size_t)(f->block_count + 1) * sizeof(uint32_t));
     L.order = a64_vir_thread_state_instance.order,
     L.order_positions = a64_vir_thread_state_instance.order_positions,
     L.loops = &V->loops;
-    L.drv = (virbuild_lowering){
-        .target = &vl_lowering_target,
-        .ctx = &L,
-        .f = f,
-        .o = L.allocation,
-        .lp = L.loops,
-        .order = L.order,
+    L.drv = VCC_LITERAL(
+        virbuild_lowering, .target = &vl_lowering_target, .ctx = &L, .f = f,
+        .o = L.allocation, .lp = L.loops, .order = L.order,
         .position = L.order_positions,
         .rotation = a64_vir_thread_state_instance.head_labels,
-        .chase = L.chases,
-        .path = a64_vir_thread_state_instance.path,
-        .block_label = L.labels,
-        .optimize = !e->unit->cleanups_disabled,
+        .chase = L.chases, .path = a64_vir_thread_state_instance.path,
+        .block_label = L.labels, .optimize = !e->unit->cleanups_disabled,
         .rotate = e->unit->options->optimize.rotate_loops,
-        .operand_value = L.operand_values,
-        .operand_reg = L.operand_registers,
-        .max_operands = A64_VIR_OPERAND_MAX,
-        .skip_at = &L.skip,
+        .operand_value = L.operand_values, .operand_reg = L.operand_registers,
+        .max_operands = A64_VIR_OPERAND_MAX, .skip_at = &L.skip,
         .row = e->unit->options->debug ? codegen_debug_row_add : NULL,
-        .row_e = e,
-    };
+        .row_e = e, );
     L.ret32 = KIND(c, ft->base) != AST_TYPE_VOID &&
               codegen_type_is_integer(c, ft->base) &&
               codegen_type_size(c, ft->base) == 4;

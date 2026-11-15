@@ -48,6 +48,19 @@ typedef struct cc_lazy_function {
         pack; /* #pragma pack in force at the definition (bytes, 0: none): its local records */
 } cc_lazy_function;
 
+struct pweak {
+    uint32_t key, alias, loc, sym;
+};
+
+struct cc_node_parentheses {
+    uint16_t l, r;
+};
+
+struct cc_switch_case {
+    i128 lo, hi;
+    uint32_t loc;
+};
+
 struct cc {
     /* the AST code generation reads (frontend/ast.h), first: its per-node tables stay in reach of
 	   a scaled load and of ldp (doc/quality/MEASURE-ast-split.md); c->syms and c->ast.syms are
@@ -142,9 +155,8 @@ struct cc {
         [AST_TYPE_KIND_COUNT]; /* _Complex <kind>: its record type (0: not made yet) */
     diag_span *
         span; /* per node: first and last token (start locations), 0: unknown */
-    struct cc_node_parentheses {
-        uint16_t l, r;
-    } *paren; /* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
+    struct cc_node_parentheses *
+        paren; /* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 
     char *heap, *hp, *hend; /* bump allocator for everything else */
     struct cc_declarator_operation
@@ -165,11 +177,8 @@ struct cc {
     uint32_t *
         switch_cases; /* AST_NODE_CASE/AST_NODE_DEFAULT nodes of the innermost switch */
     int in_loop, in_switch, in_stmtexpr;
-    bool sw_default; /* the innermost switch has a default label */
-    struct cc_switch_case {
-        i128 lo, hi;
-        uint32_t loc;
-    } *cases; /* the open switches' case labels */
+    bool sw_default;              /* the innermost switch has a default label */
+    struct cc_switch_case *cases; /* the open switches' case labels */
     uint32_t ncase, capcase, case_base;
     ast_qualified_type switch_ty;
     int unevaluated; /* sizeof / typeof / _Alignof operand */
@@ -211,9 +220,7 @@ struct cc {
     int nvis;
     bool ms_struct; /* #pragma ms_struct on/off/reset */
     /* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
-    struct pweak {
-        uint32_t key, alias, loc, sym;
-    } *pweak;
+    struct pweak *pweak;
     uint32_t npweak,
         cpweak; /* (the done aliases, sym set, stay for the end-of-TU check) */
 

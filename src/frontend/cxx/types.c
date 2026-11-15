@@ -100,10 +100,10 @@ VPRIV ast_qualified_type cxx_type_reference(cxx *c, ast_qualified_type base,
     }
     {
         ctype t = {.kind = AST_TYPE_POINTER,
-                   .size = CC_PTRSIZE(c->ast),
+                   .ext = (uint16_t)(rvalue ? 2 : 1),
                    .align = CC_PTRSIZE(c->ast),
-                   .base = base,
-                   .ext = (uint16_t)(rvalue ? 2 : 1)};
+                   .size = CC_PTRSIZE(c->ast),
+                   .base = base};
 
         return AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0);
     }
@@ -118,11 +118,11 @@ VPRIV ast_qualified_type cxx_type_array(cxx *c, ast_qualified_type elem,
         /* a pattern's T[N]: an incomplete array that remembers which value parameter is its bound (ext: its
 		   index + 1); deduction binds it to an argument array's length */
         ctype t = {.kind = AST_TYPE_ARRAY,
-                   .size = 0,
-                   .align = AST_TYPE(c->ast, elem)->align,
-                   .base = elem,
                    .flags = AST_TYPE_FLAG_INCOMPLETE,
-                   .ext = (uint16_t)(-3 - n + 1)};
+                   .ext = (uint16_t)(-3 - n + 1),
+                   .align = AST_TYPE(c->ast, elem)->align,
+                   .size = 0,
+                   .base = elem};
 
         return AST_QUALIFIED_TYPE(cc_type_intern(c->ast, &t), 0);
     }
@@ -235,7 +235,7 @@ static uint32_t cxx_record_tag(cxx *c, ast_qualified_type t)
 VPRIV void cxx_class_begin(cxx *c, cxx_entity *e, uint32_t name, uint32_t loc,
                            bool is_union, int skip, bool is_class)
 {
-    cxx_class_build *b = calloc(1, sizeof *b);
+    cxx_class_build *b = (cxx_class_build *)calloc(1, sizeof *b);
 
     b->outer = c->build;
     /* (a class nested in a non-public part of another, or in one clang cannot check: not checked either) */
@@ -748,9 +748,10 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, ast_qualified_type t,
         return;
     }
     if (b->nf == b->cf) {
-        b->f = realloc(b->f, (b->cf = b->cf ? b->cf * 2 : 8) * sizeof *b->f);
-        b->nua = realloc(b->nua, b->cf);
-        b->falign = realloc(b->falign, b->cf * sizeof *b->falign);
+        b->f = (field *)(realloc(b->f, (b->cf = b->cf ? b->cf * 2 : 8) *
+                                           sizeof *b->f));
+        b->nua = (uint8_t *)realloc(b->nua, b->cf);
+        b->falign = (uint32_t *)realloc(b->falign, b->cf * sizeof *b->falign);
     }
     b->nua[b->nf] = c->attr_nua && bitfield_width < 0;
     b->falign[b->nf] = c->attr_align;
@@ -776,6 +777,9 @@ VPRIV void cxx_class_field(cxx *c, uint32_t name, ast_qualified_type t,
 
 VPRIV void cxx_class_end(cxx *c)
 {
+    static const char *const skip_reason[] = {
+        "template",  "base",           "virtual",   "member",
+        "bit-field", "specialization", "attribute", "empty base"};
     cxx_class_build *b = c->build;
 
     c->build = b->outer;
@@ -795,10 +799,7 @@ VPRIV void cxx_class_end(cxx *c)
             fprintf(stderr, "no layout: %.*s: %s%s%.*s\n",
                     c->name_path_valid ? (int)c->name_path_len : 1,
                     c->name_path_valid ? c->name_path : "?",
-                    (const char *[]){"template", "base", "virtual", "member",
-                                     "bit-field", "specialization", "attribute",
-                                     "empty base"}[b->skip],
-                    b->skip_name ? " " : "",
+                    skip_reason[b->skip], b->skip_name ? " " : "",
                     b->skip_name ? (int)vintern_ents[b->skip_name].len : 0,
                     b->skip_name ? vintern_ents[b->skip_name].s : "");
         if (c->build && b->skip >= 0)
@@ -817,6 +818,7 @@ VPRIV void cxx_class_end(cxx *c)
 		   space at offset 0; a non-POD one's tail padding goes to what follows (its data size) */
         /* a class with virtual functions: its primary base (the first base with a vptr) comes first, at
 		   offset 0, and shares its vptr; with no such base the class's own vptr is its first 8 bytes */
+        uint32_t first = 0;
         int primary = -1;
         bool polymorphic = b->virt;
 
@@ -870,7 +872,6 @@ VPRIV void cxx_class_end(cxx *c)
             nonempty++;
         }
         /* (the first member that takes space: an empty [[no_unique_address]] one is checked with them below) */
-        uint32_t first = 0;
 
         while (first < b->nf && b->nua[first] &&
                AST_TYPE_KIND(c->ast, b->f[first].ty) != AST_TYPE_ARRAY &&
@@ -901,10 +902,11 @@ VPRIV void cxx_class_end(cxx *c)
 		   a type there, or one of an empty base's type, is not done here); one that is not POD for
 		   layout gives its tail padding to what follows, as a base does */
         uint32_t nlay = 0, nfields_nonempty = 0;
-        field *lay = malloc((b->nf + 2) * sizeof *lay);
-        uint32_t *fa = calloc(b->nf + 2, sizeof *fa),
-                 *at = malloc((b->nf + 2) * sizeof *at);
-        ast_qualified_type *orig = malloc((b->nf + 2) * sizeof *orig);
+        field *lay = (field *)(malloc((b->nf + 2) * sizeof *lay));
+        uint32_t *fa = (uint32_t *)calloc(b->nf + 2, sizeof *fa),
+                 *at = (uint32_t *)(malloc((b->nf + 2) * sizeof *at));
+        ast_qualified_type *orig =
+            (ast_qualified_type *)(malloc((b->nf + 2) * sizeof *orig));
 
         if (off) {
             memset(&lay[0], 0, sizeof *lay);
@@ -954,7 +956,7 @@ VPRIV void cxx_class_end(cxx *c)
             goto done;
         }
         nf = b->nf + (off ? 1 : 0);
-        f = cc_heap_allocate(c->ast, (nf ? nf : 1) * sizeof(field));
+        f = (field *)(cc_heap_allocate(c->ast, (nf ? nf : 1) * sizeof(field)));
         r->nfield = nlay;
         r->f = lay;
         if (b->packed)
@@ -1051,7 +1053,7 @@ VPRIV ast_qualified_type cxx_nullptr_type(cxx *c)
         uint32_t ti =
             cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("nullptr_t"), 0);
         tag *r = &c->ast->tags[ti];
-        field *f = cc_heap_allocate(c->ast, sizeof *f);
+        field *f = (field *)cc_heap_allocate(c->ast, sizeof *f);
         cxx_class_info *bi;
 
         /* (laid out as one void *, as clang's: code passes and stores it as such a struct) */

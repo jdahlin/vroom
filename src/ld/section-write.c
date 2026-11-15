@@ -4,7 +4,7 @@
 
 VPRIV void ld_input_section_write(void *arg, size_t j)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t si = ctx->output.write_jobs.v[j];
     ld_input_section *is = &ctx->inputs.sections.v[si];
     uint32_t oi = ld_input_section_output_section(ctx, si);

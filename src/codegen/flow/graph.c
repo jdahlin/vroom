@@ -25,7 +25,8 @@ VPRIV bool em_flow_build(em_flow_graph *g, uint32_t blocks,
                 capacity > UINT32_MAX / 2 ? (uint32_t)words : capacity * 2;
         if ((uint64_t)capacity > SIZE_MAX / sizeof(uint32_t))
             capacity = (uint32_t)words;
-        uint32_t *p = realloc(g->storage, (size_t)capacity * sizeof(*p));
+        uint32_t *p =
+            (uint32_t *)(realloc(g->storage, (size_t)capacity * sizeof(*p)));
         if (!p)
             return false;
         g->storage = p;

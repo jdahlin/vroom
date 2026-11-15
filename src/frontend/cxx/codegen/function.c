@@ -147,7 +147,7 @@ VPRIV bool cxx_gen_function_begin(cxx *c, cxx_entity *f, cxx_scope *fs,
     }
     c->gen_psyms = cc_id_list_freeze(a, &psyms), c->gen_npsyms = psyms.n;
     c->gen_pre = calloc(1, sizeof(cc_id_list));
-    cc_id_list_init(c->gen_pre);
+    cc_id_list_init((cc_id_list *)c->gen_pre);
     c->ngen_init_names = 0, c->ngen_init_bases = 0, c->gen_delegates = 0,
     c->gen_returns = 0, c->gen_why = 0;
     c->gen_ret = ft->base;
@@ -165,12 +165,12 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
 {
     cc *a = c->ast;
     bool ok = c->gen && !c->gen_failed && body;
-    cc_id_list *pre = c->gen_pre;
+    cc_id_list *pre = (cc_id_list *)c->gen_pre;
 
     if (!ok && c->gen && getenv("VCC_CXX_MISSING") && (f->sym || f->sym1)) {
         /* VCC_CXX_MISSING: kept for cxx_gen_write_missing */
         if (c->nmissing == c->cmissing)
-            c->missing = realloc(
+            c->missing = (__typeof__(c->missing))realloc(
                 c->missing, (c->cmissing = c->cmissing ? c->cmissing * 2 : 64) *
                                 sizeof *c->missing);
         c->missing[c->nmissing].sym = f->sym,
@@ -268,7 +268,7 @@ VPRIV void cxx_gen_function_end(cxx *c, cxx_entity *f, uint32_t body)
         if (!list) {
             FILE *lf = fopen(getenv("VCC_CXX_NOGEN"), "r");
 
-            list = calloc(1, 1 << 24);
+            list = (char *)calloc(1, 1 << 24);
             if (lf) {
                 nlist = fread(list + 1, 1, (1 << 24) - 2, lf);
                 fclose(lf);

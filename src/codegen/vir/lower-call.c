@@ -1,6 +1,7 @@
 /* The walker's lowering interface for calls, parameters and returns, and the start and end of a function. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -175,8 +176,8 @@ VPRIV codegen_value virbuild_wide_helper_call(codegen_context *e, int helper,
     }
     int r = virbuild_ftreg(e);
     virbuild_register_write(e, r, call);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* Pass a pointer to the walker's private, padded argument or result object. */
@@ -254,8 +255,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
             uint32_t pc = virbuild_piece_class(r, j);
             int q = pc == VIR_CLASS_INT ? virbuild_treg(e) : virbuild_ftreg(e);
             codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
-                                 .offset = r->slot + 8 * j,
-                                 .align = 8};
+                                 .align = 8,
+                                 .offset = r->slot + 8 * j};
             virbuild_register_write(e, q, values[j]);
             virbuild_store(e, q, &at, pc == VIR_CLASS_F32 ? 4 : 8);
             virbuild_tfree(e, q);
@@ -268,8 +269,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
         int q = virbuild_ftreg(e);
 
         virbuild_register_write(e, q, v);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)q};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)q);
     }
     {
         int q = virbuild_treg(e), size = walk_type_size(c, rt);
@@ -283,8 +284,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
                                     virbuild_value_convert(e, v, VIR_TYPE_I32));
         else if (size < 8)
             virbuild_ext(e, q, size, sgn);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)q};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)q);
     }
 }
 
@@ -350,7 +351,7 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n,
         }
         if (walk_type_is_in_memory(e, ty)) {
             codegen_lvalue at = {
-                .kind = CODEGEN_LVALUE_FRAME, .offset = a[k].slot, .align = 8};
+                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = a[k].slot};
             q = !a[k].is_in_memory && pc != VIR_CLASS_INT ? virbuild_ftreg(e)
                                                           : virbuild_treg(e);
             virbuild_register_write(e, q, v);
@@ -390,7 +391,7 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n,
                                                : (int)a[k].size);
         } else {
             codegen_lvalue s = {
-                .kind = CODEGEN_LVALUE_FRAME, .offset = a[k].slot, .align = 8};
+                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = a[k].slot};
 
             virbuild_store(e, q, &s, 8);
         }
@@ -399,7 +400,7 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n,
     if (sret) {
         int q = virbuild_treg(e);
         codegen_lvalue at = {
-            .kind = CODEGEN_LVALUE_FRAME, .offset = r->slot, .align = 8};
+            .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = r->slot};
         virbuild_register_write(e, q, pv0 - 1);
         virbuild_store(e, q, &at, 8);
         virbuild_tfree(e, q);
@@ -483,7 +484,7 @@ VPRIV void virbuild_begin(codegen_context *e, uint32_t s)
     V->indirect_count = 0;
     V->insn_count = 1; /* (0 is no instruction) */
     VIRBUILD_ARRAY_GROW(V->insns, 0, V->insn_capacity, 1);
-    V->insns[0] = (virbuild_preir_insn){0};
+    V->insns[0] = VCC_LITERAL(virbuild_preir_insn, 0);
     V->block_count = V->extra_count = V->slot_count = V->active_slot_count =
         V->store_count = V->location_count = V->promoted_count = 0;
     V->live_names[0] = V->live_names[1] = V->live_names[2] = 0;

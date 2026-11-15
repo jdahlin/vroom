@@ -20,7 +20,7 @@ VPRIV const pp_context *pp_file_context_current(const pp *p)
 
 static void pp_token_number_make(pp *p, ptok *t, unsigned long long v)
 {
-    char *b = varena_alloc(&p->temporary_region, 40);
+    char *b = (char *)varena_alloc(&p->temporary_region, 40);
     int n = pp_unsigned_format(b, v);
 
     memset(b + n, 0, 16);
@@ -35,7 +35,7 @@ static void pp_token_number_make(pp *p, ptok *t, unsigned long long v)
 
 static void pp_token_string_make(pp *p, ptok *t, const char *s, size_t n)
 {
-    char *b = varena_alloc(&p->temporary_region, 2 * n + 24), *w = b;
+    char *b = (char *)varena_alloc(&p->temporary_region, 2 * n + 24), *w = b;
 
     *w++ = '"';
     for (size_t i = 0; i < n; i++) {
@@ -57,7 +57,7 @@ static void pp_token_string_make(pp *p, ptok *t, const char *s, size_t n)
 /* put t back: it is read again next */
 static void pp_token_unread(pp *p, const ptok *t)
 {
-    ptok *c = varena_alloc(&p->temporary_region, sizeof(*c));
+    ptok *c = (ptok *)(varena_alloc(&p->temporary_region, sizeof(*c)));
 
     *c = *t;
     pp_context_tokens_push(p, c, 1, 0, 0, 0);
@@ -408,7 +408,7 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
                 sp++;
                 l--;
             }
-            d = varena_alloc(&p->temporary_region, l + 16);
+            d = (char *)varena_alloc(&p->temporary_region, l + 16);
             memcpy(d, "pragma ", 7);
             dn = 7;
             for (size_t i = 1; i + 1 < l; i++) {

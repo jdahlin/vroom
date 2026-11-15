@@ -23,7 +23,7 @@ typedef struct tbuf {
 
 static inline void vtext_init(tbuf *b, size_t cap)
 {
-    b->p = vreserve(cap, MAP_NORESERVE, "vcc: mmap");
+    b->p = (char *)vreserve(cap, MAP_NORESERVE, "vcc: mmap");
     b->n = 0;
     b->cap = cap;
 }
@@ -32,7 +32,7 @@ static inline void vtext_init(tbuf *b, size_t cap)
 static inline void vtext_region_init(tbuf *b, vjob_region *r, size_t cap,
                                      const char *name)
 {
-    b->p = vjob_region_acquire(r, cap, name);
+    b->p = (char *)vjob_region_acquire(r, cap, name);
     b->n = 0;
     b->cap = cap;
 }

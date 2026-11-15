@@ -1,4 +1,5 @@
 /* vcc front end: declarators */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 enum {
@@ -373,7 +374,7 @@ cc_declarator_operations_grow(cc *c, cc_declarator_operation *old,
         cc_report_fatal(c, tok(c)->loc, "declarator too complex");
     while (nc < need)
         nc *= 2;
-    p = cc_heap_allocate(c, nc * sizeof(*p));
+    p = (cc_declarator_operation *)(cc_heap_allocate(c, nc * sizeof(*p)));
     memcpy(p, old, used * sizeof(*p));
     *cap = nc;
     return p;
@@ -431,10 +432,9 @@ CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok,
             if ((uint32_t)np == pcap)
                 ptrs =
                     cc_declarator_operations_grow(c, ptrs, np, &pcap, pcap + 1);
-            ptrs[np++] = (cc_declarator_operation){
-                .kind = 0,
-                .q = (uint8_t)q,
-                .fl = (uint16_t)(blk ? AST_TYPE_FLAG_BLOCK : 0)};
+            ptrs[np++] =
+                VCC_LITERAL(cc_declarator_operation, .kind = 0, .q = (uint8_t)q,
+                            .fl = (uint16_t)(blk ? AST_TYPE_FLAG_BLOCK : 0));
             continue;
         }
         if (cc_token_is_keyword(c, KW___attribute__) ||
@@ -571,8 +571,8 @@ CC_PRIVATE ast_qualified_type cc_declarator_apply(cc *c, ast_qualified_type t,
             if (o->fl & AST_TYPE_FLAG_BLOCK) {
                 ctype b = {.kind = AST_TYPE_POINTER,
                            .flags = AST_TYPE_FLAG_BLOCK,
-                           .size = CC_PTRSIZE(c),
                            .align = CC_PTRSIZE(c),
+                           .size = CC_PTRSIZE(c),
                            .base = t};
 
                 t = AST_QUALIFIED_TYPE(cc_type_intern(c, &b),

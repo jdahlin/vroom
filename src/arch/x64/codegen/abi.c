@@ -1,6 +1,7 @@
 /* vcc code generator, x86-64: the System V ABI: classification, calls,
  * parameters, results, varargs (x64-internal.h).  The walker's entry points
  * dispatch to abi-win64.c when e->msabi says the convention is Microsoft's. */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 /* ---------------- classification (System V 3.2.3) ---------------- */
@@ -407,8 +408,8 @@ VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l);
 
 static codegen_lvalue x64_fr(int64_t off)
 {
-    return (codegen_lvalue){
-        .kind = CODEGEN_LVALUE_FRAME, .offset = off, .align = 8};
+    return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 8,
+                       .offset = off);
 }
 
 VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
@@ -473,9 +474,10 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     int64_t total = 0, pad;
     uint32_t stackalign = 16;
     int64_t savedsp = 0;
-    int64_t *place = calloc((size_t)(n ? n : 1),
-                            sizeof *place); /* stack offset, or -1: registers */
-    int *bregs = calloc((size_t)(n ? n : 1), sizeof *bregs);
+    int64_t *place =
+        (int64_t *)(calloc((size_t)(n ? n : 1),
+                           sizeof *place)); /* stack offset, or -1: registers */
+    int *bregs = (int *)(calloc((size_t)(n ? n : 1), sizeof *bregs));
     record *i;
 
     for (int k = 0; k < n; k++) {
@@ -730,15 +732,15 @@ VPRIV codegen_value x64_call_value(codegen_context *e, codegen_value *fn,
         int q = x64_ftreg(e);
 
         x64_mov(e, q, XMM0);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)q};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)q);
     }
     {
         int q = x64_treg(e);
 
         x64_mov(e, q, R11);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)q};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)q);
     }
 }
 

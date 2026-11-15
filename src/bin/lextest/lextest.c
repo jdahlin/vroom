@@ -71,7 +71,7 @@ static int lextest_dump(const char *arg)
         fprintf(stderr, "lextest: cannot read %s\n", path);
         return 1;
     }
-    buf = malloc(f->size + 1);
+    buf = (char *)malloc(f->size + 1);
     for (uint32_t i = 0; i < f->ntok; i++) {
         const lex_token *t = &f->tok[i];
         size_t l;
@@ -123,13 +123,13 @@ static void lextest_list_read(const char *list)
         if (lextest_path_count == cap) {
             cap = cap ? cap * 2 : 4096;
             lextest_paths =
-                realloc(lextest_paths, cap * sizeof(*lextest_paths));
-            lextest_path_lengths = realloc(lextest_path_lengths,
-                                           cap * sizeof(*lextest_path_lengths));
+                (char **)(realloc(lextest_paths, cap * sizeof(*lextest_paths)));
+            lextest_path_lengths = (size_t *)(realloc(
+                lextest_path_lengths, cap * sizeof(*lextest_path_lengths)));
         }
         lextest_path_lengths[lextest_path_count] = n;
-        lextest_paths[lextest_path_count] =
-            calloc(1, n + 8); /* lex_file_get hashes by words: path[n + 7] */
+        lextest_paths[lextest_path_count] = (char *)calloc(
+            1, n + 8); /* lex_file_get hashes by words: path[n + 7] */
         memcpy(lextest_paths[lextest_path_count++], line, n);
     }
     fclose(fp);
@@ -202,8 +202,8 @@ static int lextest_core(const char *list, int repetitions)
     double t0, best = 1e9;
 
     lextest_list_read(list);
-    src = calloc(lextest_path_count, sizeof(*src));
-    sz = calloc(lextest_path_count, sizeof(*sz));
+    src = (const char **)(calloc(lextest_path_count, sizeof(*src)));
+    sz = (size_t *)(calloc(lextest_path_count, sizeof(*sz)));
     for (size_t i = 0; i < lextest_path_count; i++) {
         const lex_file *f = lex_file_get(
             lextest_paths[i], lextest_path_lengths[i]); /* maps + warms */
@@ -216,7 +216,7 @@ static int lextest_core(const char *list, int repetitions)
         bytes += sz[i];
     }
     scratch = malloc(lex_scratch_size(max));
-    out = malloc((max + 2) * sizeof(lex_token));
+    out = (lex_token *)(malloc((max + 2) * sizeof(lex_token)));
     lex_identifiers_not_interned =
         getenv("NOINTERN") ? atoi(getenv("NOINTERN")) : 0;
     int pmc = getenv("PMC") && !pmc_init(getenv("PMC"));
@@ -287,7 +287,7 @@ static int lextest_identifier_check(const char *list)
         if (!f)
             continue;
         if (cap < f->size + 1)
-            buf = realloc(buf, cap = f->size + 1);
+            buf = (char *)realloc(buf, cap = f->size + 1);
         for (uint32_t j = 0; j < f->ntok; j++) {
             const lex_token *t = &f->tok[j];
             size_t l;

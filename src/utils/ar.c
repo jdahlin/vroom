@@ -47,6 +47,7 @@
  * Why: llvm-ar is a ~167 M-instruction process start on macOS (dyld binds
  * libLLVM.dylib), and Kbuild runs it once per directory (~420 times).
  */
+#include "common/literal.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -112,7 +113,7 @@ static bool ar_member_list_push(ar_member_list *l, ar_member m)
 {
     if (l->count == l->capacity) {
         size_t cap = l->capacity ? l->capacity * 2 : 256;
-        ar_member *p = realloc(l->members, cap * sizeof(*p));
+        ar_member *p = (ar_member *)(realloc(l->members, cap * sizeof(*p)));
 
         if (!p)
             return false;
@@ -149,7 +150,8 @@ static void ar_buffer_finish(vbuffer *b)
 static char *ar_path_normalize(const char *base, const char *path)
 {
     size_t bl = path[0] == '/' ? 0 : strlen(base), pl = strlen(path), n = 0;
-    char *in = malloc(bl + pl + 2), *out = malloc(bl + pl + 2), *s;
+    char *in = (char *)malloc(bl + pl + 2), *out = (char *)malloc(bl + pl + 2),
+         *s;
 
     if (!in || !out) {
         free(in);
@@ -220,7 +222,7 @@ static char *ar_path_relative(const char *dir, const char *abs)
         if (dir[i] == '/')
             up++;
     rest = abs + last + (abs[last] == '/');
-    if (!(r = malloc(up * 3 + strlen(rest) + 1)))
+    if (!(r = (char *)(malloc(up * 3 + strlen(rest) + 1))))
         return NULL;
     for (p = r; up--; p += 3)
         memcpy(p, "../", 3);
@@ -398,7 +400,7 @@ static void ar_symbol_add(ar_symbol_table *t, uint32_t member,
 
     if (t->count == t->capacity) {
         size_t cap = t->capacity ? t->capacity * 2 : 1024;
-        ar_symbol *p = realloc(t->symbols, cap * sizeof(*p));
+        ar_symbol *p = (ar_symbol *)(realloc(t->symbols, cap * sizeof(*p)));
 
         if (!p) {
             t->failed = true;
@@ -411,8 +413,8 @@ static void ar_symbol_add(ar_symbol_table *t, uint32_t member,
         t->failed = true;
         return;
     }
-    t->symbols[t->count++] =
-        (ar_symbol){(uint32_t)t->names.n, (uint32_t)(pl + length), member};
+    t->symbols[t->count++] = VCC_LITERAL(ar_symbol, (uint32_t)t->names.n,
+                                         (uint32_t)(pl + length), member);
     vbuffer_append(&t->names, prefix, pl);
     vbuffer_append(&t->names, name, length);
     vbuffer_append(&t->names, "", 1);
@@ -826,7 +828,7 @@ static long ar_symbols_first_occurrences(const ar_symbol_table *t, bool *keep)
 
     while (cap < 2 * t->count)
         cap *= 2;
-    if (!(slot = malloc(cap * sizeof(*slot))))
+    if (!(slot = (uint32_t *)(malloc(cap * sizeof(*slot)))))
         return -1;
     memset(slot, 0xff, cap * sizeof(*slot));
     for (size_t i = 0; i < t->count; i++) {
@@ -895,7 +897,8 @@ static void ar_symbol_table_header_append(const ar_request *q, vbuffer *b,
 
 static void ar_buffer_append_u32_be(vbuffer *b, uint32_t v)
 {
-    unsigned char c[4] = {v >> 24, v >> 16, v >> 8, v};
+    unsigned char c[4] = {(unsigned char)(v >> 24), (unsigned char)(v >> 16),
+                          (unsigned char)(v >> 8), (unsigned char)(v)};
 
     vbuffer_append(b, c, 4);
 }
@@ -909,12 +912,13 @@ static const char *ar_path_base(const char *p)
 
 static void ar_buffer_append_u32_le(vbuffer *b, uint32_t v)
 {
-    unsigned char c[4] = {v, v >> 8, v >> 16, v >> 24};
+    unsigned char c[4] = {(unsigned char)(v), (unsigned char)(v >> 8),
+                          (unsigned char)(v >> 16), (unsigned char)(v >> 24)};
 
     vbuffer_append(b, c, 4);
 }
 
-static const char ar_zero_padding[8];
+static const char ar_zero_padding[8] = {0};
 
 /*
  * llvm-ar's Darwin (BSD) format, what it writes on macOS when an archive's
@@ -930,7 +934,7 @@ static bool ar_bsd_symbol_table_build(ar_request *q, vbuffer *out,
 {
     VCLEANUP(ar_symbol_table_finish)
     ar_symbol_table syms = {.names = VBUFFER_STICKY_INIT};
-    VAUTOFREE uint64_t *mpos = calloc(l->count + 1, sizeof *mpos);
+    VAUTOFREE uint64_t *mpos = (uint64_t *)calloc(l->count + 1, sizeof *mpos);
     uint64_t pos, symsize = 0, total;
     vfile_mapping d;
 
@@ -1072,7 +1076,7 @@ static bool ar_long_names_build(const ar_member_list *l, bool thin, bool coff,
     names->n = 0;
     while (slots < 2 * l->count)
         slots *= 2;
-    if (!(slot = malloc(slots * sizeof(*slot))))
+    if (!(slot = (size_t *)(malloc(slots * sizeof(*slot)))))
         return false;
     memset(slot, 0xff, slots * sizeof(*slot));
     for (size_t i = 0; i < l->count; i++) {
@@ -1131,7 +1135,8 @@ static bool ar_archive_write(ar_request *q, const char *archive_abs,
             return false;
         goto write;
     }
-    if (!(name_offset = calloc(l->count + 1, sizeof(*name_offset)))) {
+    if (!(name_offset =
+              (uint64_t *)(calloc(l->count + 1, sizeof(*name_offset))))) {
         ar_error_report(q, "ar: error: %s%s\n", "out of memory", "");
         return false;
     }
@@ -1152,8 +1157,8 @@ static bool ar_archive_write(ar_request *q, const char *archive_abs,
     } else {
         long kept;
 
-        if (!(keep = calloc(total + 1, sizeof(*keep))) ||
-            !(sorted = calloc(2 * total + 1, sizeof(*sorted))) ||
+        if (!(keep = (bool *)(calloc(total + 1, sizeof(*keep)))) ||
+            !(sorted = (uint32_t *)(calloc(2 * total + 1, sizeof(*sorted)))) ||
             (kept = ar_symbols_first_occurrences(&syms, keep)) < 0) {
             ar_error_report(q, "ar: error: %s%s\n", "out of memory", "");
             return false;
@@ -1170,7 +1175,8 @@ static bool ar_archive_write(ar_request *q, const char *archive_abs,
 
     vbuffer_append(&out, thin ? "!<thin>\n" : "!<arch>\n", 8);
     if (l->count || symtab) {
-        VAUTOFREE uint64_t *mpos = calloc(l->count + 1, sizeof *mpos);
+        VAUTOFREE uint64_t *mpos =
+            (uint64_t *)calloc(l->count + 1, sizeof *mpos);
 
         if (!mpos)
             return false;
@@ -1300,7 +1306,7 @@ write:
         return false;
     }
 
-    if (!(tmp = malloc(strlen(archive_abs) + 20)))
+    if (!(tmp = (char *)(malloc(strlen(archive_abs) + 20))))
         return false;
     sprintf(tmp, "%s.tmp-ar-XXXXXX", archive_abs);
     if ((fd = mkstemp(tmp)) < 0) {
@@ -1423,7 +1429,7 @@ static int ar_regular_archive_operate(ar_request *q, const vfile_mapping *d,
                                       int nfiles)
 {
     MLIST ar_member_list l = {0};
-    VAUTOFREE bool *found = calloc((size_t)nfiles + 1, 1);
+    VAUTOFREE bool *found = (bool *)(calloc((size_t)nfiles + 1, 1));
     SBUF vbuffer out = VBUFFER_STICKY_INIT;
     int rc = 0;
 
@@ -1497,7 +1503,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
     ar_old_format format = {0};
     ar_kind kind = AR_KIND_GNU;
 
-    if (!(files = calloc(argc, sizeof(*files))))
+    if (!(files = (char **)(calloc(argc, sizeof(*files)))))
         return 1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1562,8 +1568,8 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
                     break;
                 default:
                     ar_error_report(
-                        &q, "ar: error: unsupported modifier '%c' in '%s'\n",
-                        (char[]){*c, 0}, ops);
+                        &q, "ar: error: unsupported modifier '%.1s' in '%s'\n",
+                        c, ops);
                     return rc;
                 }
             }
@@ -1660,7 +1666,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
     {
         /* llvm-ar's computeNewArchiveMembers for r and m */
-        VAUTOFREE bool *used = calloc(nfiles + 1, sizeof(bool));
+        VAUTOFREE bool *used = (bool *)(calloc(nfiles + 1, sizeof(bool)));
         long insert = -1;
 
         if (!used)
@@ -1729,7 +1735,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
             if (insert < 0)
                 insert = res.count;
             for (size_t j = 0; j < moved.count; j++)
-                ar_member_list_push(&res, (ar_member){0});
+                ar_member_list_push(&res, VCC_LITERAL(ar_member, 0));
             memmove(res.members + insert + moved.count, res.members + insert,
                     (res.count - moved.count - insert) * sizeof(ar_member));
             memcpy(res.members + insert, moved.members,

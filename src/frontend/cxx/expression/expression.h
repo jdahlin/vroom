@@ -12,7 +12,6 @@
 
 #include "../cxx-internal.h"
 
-static void cxx_cast_expression_parse(cxx *c);
 static void cxx_unary_expression_parse(cxx *c);
 
 /* the functions of expression/, by file */

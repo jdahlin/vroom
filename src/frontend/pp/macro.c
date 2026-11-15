@@ -6,7 +6,7 @@
 #define PP_MACRO_CANONICAL_TABLE_BITS 18
 static _Atomic(const pp_macro *)
     pp_macro_canonical_table[1u << PP_MACRO_CANONICAL_TABLE_BITS];
-const lex_token pp_macro_empty_body[1];
+const lex_token pp_macro_empty_body[1] = {0};
 
 static uint32_t pp_macro_hash(const pp_macro *m)
 {
@@ -67,11 +67,12 @@ static const pp_macro *pp_macro_canonical_get(const pp_macro *m)
                 uint32_t hi = m->body_count ? m->body[m->body_count - 1].off +
                                                   m->body[m->body_count - 1].len
                                             : 0;
-                char *t = pp_shared_allocate(hi - lo + 64);
+                char *t = (char *)pp_shared_allocate(hi - lo + 64);
                 lex_token *v =
-                    m->body_count
-                        ? pp_shared_allocate(m->body_count * sizeof(lex_token))
-                        : (lex_token *)pp_macro_empty_body;
+                    (lex_token *)(m->body_count
+                                      ? pp_shared_allocate(m->body_count *
+                                                           sizeof(lex_token))
+                                      : (lex_token *)pp_macro_empty_body);
 
                 memcpy(t, m->source + lo, hi - lo);
                 memset(t + (hi - lo), 0, 64);
@@ -79,13 +80,14 @@ static const pp_macro *pp_macro_canonical_get(const pp_macro *m)
                     v[j] = m->body[j];
                     v[j].off -= lo;
                 }
-                c = pp_shared_allocate(sizeof(*c));
+                c = (pp_macro *)(pp_shared_allocate(sizeof(*c)));
                 *c = *m;
                 c->body = v;
                 c->source = t;
                 c->hash = h;
                 if (m->parameter_indices) {
-                    uint8_t *x = pp_shared_allocate(m->body_count + 1);
+                    uint8_t *x =
+                        (uint8_t *)pp_shared_allocate(m->body_count + 1);
 
                     memcpy(x, m->parameter_indices, m->body_count);
                     c->parameter_indices = x;
@@ -157,8 +159,9 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
                 pp_token_invalid_report(p, c->source + vt[i].off, vt[i].len,
                                         c->location + vt[i].off);
     if (!m) {
-        pp_macro *n = site ? pp_shared_allocate(sizeof(*n))
-                           : varena_alloc(&p->permanent_region, sizeof(*n));
+        pp_macro *n =
+            (pp_macro *)(site ? pp_shared_allocate(sizeof(*n))
+                              : varena_alloc(&p->permanent_region, sizeof(*n)));
 
         err = pp_define_parse(vt, b, e, n,
                               site ? pp_memory_shared_allocate

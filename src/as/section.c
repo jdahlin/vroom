@@ -7,6 +7,7 @@
  * .prefalign split goes on in its continuation, so a frag taken from cur or prev goes through
  * as_fragment_latest first.  .section flags and types are checked against ELF's
  * (SHF_MERGE needs an entry size, SHF_GROUP a group) and fail the assembly when wrong. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- sections */
@@ -79,7 +80,7 @@ VPRIV int as_name_parse(as_context *a, const char **pp, const char *e,
             p++;
         if (p >= e)
             return as_error_report(a, "unterminated string");
-        *out = (as_text){s, (uint32_t)(p - s)};
+        *out = VCC_LITERAL(as_text, s, (uint32_t)(p - s));
         *pp = p + 1;
         return 0;
     }
@@ -89,7 +90,7 @@ VPRIV int as_name_parse(as_context *a, const char **pp, const char *e,
         p++;
     if (p == s)
         return as_error_report(a, "expected identifier");
-    *out = (as_text){s, (uint32_t)(p - s)};
+    *out = VCC_LITERAL(as_text, s, (uint32_t)(p - s));
     *pp = p;
     return 0;
 }

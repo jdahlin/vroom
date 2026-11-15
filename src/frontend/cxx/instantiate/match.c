@@ -200,9 +200,9 @@ VPRIV bool cxx_match_type(cxx *c, cxx_partial *p, ast_qualified_type pat,
                                     depth + 1))
                     return false;
             rest = at->n - fixed;
-            list =
-                calloc(rest ? rest : 1,
-                       sizeof *list); /* (the binding points into it: kept) */
+            list = (cxx_targ *)calloc(
+                rest ? rest : 1,
+                sizeof *list); /* (the binding points into it: kept) */
             for (uint32_t k = 0; k < rest; k++)
                 list[k].kind = 1,
                 list[k].t = c->ast->params[at->aux + fixed + k];

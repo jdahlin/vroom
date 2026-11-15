@@ -12,6 +12,7 @@
  *
  * vlink runs this when called as wasm-ld or with -mwasm64.
  */
+#include "common/literal.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -34,7 +35,7 @@ int wasm_ld_main(int argc, char **argv);
     do {                                                                       \
         if ((n) >= (c)) {                                                      \
             (c) = (c) ? (c) * 2 : 16;                                          \
-            (p) = realloc((p), (size_t)(c) * sizeof(*(p)));                    \
+            (p) = (__typeof__(p))realloc((p), (size_t)(c) * sizeof(*(p)));     \
             if (!(p))                                                          \
                 abort();                                                       \
         }                                                                      \
@@ -66,7 +67,7 @@ static bool span_eq(span a, span b)
 
 static char *span_str(span s)
 {
-    char *r = malloc(s.n + 1);
+    char *r = (char *)malloc(s.n + 1);
 
     memcpy(r, s.p, s.n);
     r[s.n] = 0;
@@ -85,7 +86,7 @@ static void ob_put(obuf *b, const void *s, size_t n)
 
         while (c < b->n + n)
             c *= 2;
-        b->p = realloc(b->p, c);
+        b->p = (uint8_t *)realloc(b->p, c);
         if (!b->p)
             abort();
         b->cap = c;
@@ -254,7 +255,7 @@ static span rexpr(rd *r)
             break;
         }
     }
-    return (span){s, (uint32_t)(r->p - s)};
+    return VCC_LITERAL(span, s, (uint32_t)(r->p - s));
 }
 
 /* ---------------- the model of the inputs ---------------- */
@@ -466,15 +467,15 @@ static gsym *gfind(const char *s, size_t n, bool create)
 
     if (!ght) {
         ghcap = 1 << 16;
-        ght = calloc(ghcap, sizeof *ght);
+        ght = (gsym **)calloc(ghcap, sizeof *ght);
     }
     for (g = ght[h & (ghcap - 1)]; g; g = g->next)
         if (g->hash == h && strlen(g->name) == n && !memcmp(g->name, s, n))
             return g;
     if (!create)
         return NULL;
-    g = calloc(1, sizeof *g);
-    g->name = malloc(n + 1);
+    g = (gsym *)calloc(1, sizeof *g);
+    g->name = (char *)malloc(n + 1);
     memcpy(g->name, s, n);
     g->name[n] = 0;
     g->hash = h;
@@ -526,7 +527,7 @@ static const uint8_t *map_file(const char *path, size_t *n)
     *n = (size_t)st.st_size;
     p = *n ? mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : (void *)"";
     close(fd);
-    return p == MAP_FAILED ? NULL : p;
+    return p == MAP_FAILED ? NULL : (const uint8_t *)p;
 }
 
 static void parse_linking(obj *o, rd *r)
@@ -549,7 +550,7 @@ static void parse_linking(obj *o, rd *r)
         if (t == 8) {
             uint32_t n = rcount(&s);
 
-            o->sym = calloc(n + 1, sizeof(isym));
+            o->sym = (isym *)calloc(n + 1, sizeof(isym));
             o->nsym = n;
             for (uint32_t i = 0; i < n && !s.bad; i++) {
                 isym *y = &o->sym[i];
@@ -578,9 +579,10 @@ static void parse_linking(obj *o, rd *r)
                         if (k != UINT32_MAX)
                             y->name = span_str(o->imp[k].field);
                         else if (y->kind == K_TABLE)
-                            y->name = span_str((span){
+                            y->name = span_str(VCC_LITERAL(
+                                span,
                                 (const uint8_t *)"__indirect_function_table",
-                                25});
+                                25));
                     }
                     break;
                 case K_DATA:
@@ -614,7 +616,7 @@ static void parse_linking(obj *o, rd *r)
         } else if (t == 6) {
             uint32_t n = rcount(&s);
 
-            o->init = calloc(n + 1, sizeof *o->init);
+            o->init = (__typeof__(o->init))calloc(n + 1, sizeof *o->init);
             for (uint32_t i = 0; i < n && !s.bad; i++) {
                 o->init[i].prio = (uint32_t)ruleb(&s);
                 o->init[i].sym = (uint32_t)ruleb(&s);
@@ -631,7 +633,7 @@ static void parse_linking(obj *o, rd *r)
 
 static int cmp_rel(const void *a, const void *b)
 {
-    const irel *x = a, *y = b;
+    const irel *x = (const irel *)a, *y = (const irel *)b;
 
     return x->off < y->off ? -1 : x->off > y->off;
 }
@@ -752,7 +754,7 @@ static bool obj_indices_ok(obj *o)
 
 static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 {
-    obj *o = calloc(1, sizeof *o);
+    obj *o = (obj *)calloc(1, sizeof *o);
     rd r = {p + 8, p + n, false};
     uint32_t secidx = 0, code_idx = UINT32_MAX, data_idx = UINT32_MAX;
     const uint8_t *code0 = NULL, *data0 = NULL;
@@ -792,13 +794,13 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
                     nrels++;
                 }
             } else if (nm.n == 15 && !memcmp(nm.p, "target_features", 15))
-                o->features = (span){s.p, (uint32_t)(s.e - s.p)};
+                o->features = VCC_LITERAL(span, s.p, (uint32_t)(s.e - s.p));
             break;
         }
         case 1: {
             uint32_t k = rcount(&s);
 
-            o->types = calloc(k + 1, sizeof(span));
+            o->types = (span *)calloc(k + 1, sizeof(span));
             o->ntypes = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 const uint8_t *t0;
@@ -808,17 +810,17 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
                 t0 = s.p;
                 rbytes(&s, ruleb(&s));
                 rbytes(&s, ruleb(&s));
-                o->types[i] = (span){t0, (uint32_t)(s.p - t0)};
+                o->types[i] = VCC_LITERAL(span, t0, (uint32_t)(s.p - t0));
             }
             break;
         }
         case 2: {
             uint32_t k = rcount(&s);
 
-            o->imp = calloc(k + 1, sizeof(iimp));
-            o->fimp = calloc(k + 1, sizeof(uint32_t));
-            o->gimp = calloc(k + 1, sizeof(uint32_t));
-            o->tagimp = calloc(k + 1, sizeof(uint32_t));
+            o->imp = (iimp *)calloc(k + 1, sizeof(iimp));
+            o->fimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
+            o->gimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
+            o->tagimp = (uint32_t *)calloc(k + 1, sizeof(uint32_t));
             o->nimp = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 iimp *m = &o->imp[i];
@@ -870,7 +872,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
         case 3: {
             uint32_t k = rcount(&s);
 
-            o->fn = calloc(k + 1, sizeof(ifunc));
+            o->fn = (ifunc *)calloc(k + 1, sizeof(ifunc));
             o->nfn = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 o->fn[i].type = (uint32_t)ruleb(&s);
@@ -881,7 +883,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
         case 6: {
             uint32_t k = rcount(&s);
 
-            o->gl = calloc(k + 1, sizeof(iglob));
+            o->gl = (iglob *)calloc(k + 1, sizeof(iglob));
             o->ngl = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 o->gl[i].type = r8(&s);
@@ -912,7 +914,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
 
             data_idx = secidx;
             data0 = r.p - len;
-            o->seg = calloc(k + 1, sizeof(iseg));
+            o->seg = (iseg *)calloc(k + 1, sizeof(iseg));
             o->nseg = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 uint64_t fl = ruleb(&s);
@@ -935,7 +937,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
         case 13: {
             uint32_t k = rcount(&s);
 
-            o->tag = calloc(k + 1, sizeof *o->tag);
+            o->tag = (__typeof__(o->tag))calloc(k + 1, sizeof *o->tag);
             o->ntag = k;
             for (uint32_t i = 0; i < k && !s.bad; i++) {
                 r8(&s); /* attribute: exception */
@@ -965,7 +967,7 @@ static obj *parse_obj(const char *name, const uint8_t *p, size_t n)
     for (uint32_t k = 0; k < nrels; k++) {
         rd s = {rels[k].p, rels[k].e, false};
         uint32_t cnt = rcount(&s);
-        irel *v = calloc(cnt + 1, sizeof(irel));
+        irel *v = (irel *)calloc(cnt + 1, sizeof(irel));
 
         for (uint32_t i = 0; i < cnt && !s.bad; i++) {
             v[i].type = r8(&s);
@@ -1055,6 +1057,11 @@ static void reference(gsym *g, obj *o, uint32_t si, bool weak)
 /* the output's address width: the objects' memory (0 until one has it) */
 static int memw;
 #define W32 (memw == 32)
+
+static inline uint8_t pointer_type(void)
+{
+    return W32 ? 0x7f : 0x7e;
+}
 
 static void add_obj(obj *o)
 {
@@ -1272,10 +1279,11 @@ static int load_path(const char *path)
         const char *s = (const char *)p, *e = s + n;
 
         while (s < e) {
-            const char *l = memchr(s, '\n', (size_t)(e - s)), *le = l ? l : e,
-                       *c;
+            const char *l = (const char *)memchr(s, '\n', (size_t)(e - s)),
+                       *le = l ? l : e, *c;
 
-            if (*s != '#' && (c = memchr(s, ':', (size_t)(le - s)))) {
+            if (*s != '#' &&
+                (c = (const char *)memchr(s, ':', (size_t)(le - s)))) {
                 gsym *g = gfind(s, (size_t)(c - s), true);
                 const char *d = c + 1;
 
@@ -1283,7 +1291,7 @@ static int load_path(const char *path)
                 while (d < le && *d == ' ')
                     d++;
                 if (d < le) {
-                    g->deps = malloc((size_t)(le - d) + 1);
+                    g->deps = (char *)malloc((size_t)(le - d) + 1);
                     memcpy(g->deps, d, (size_t)(le - d));
                     g->deps[le - d] = 0;
                 }
@@ -1406,12 +1414,12 @@ static void mark_tgt(tgt t)
     if (t.kind == K_FUNCTION && t.idx < t.o->nfn && !t.o->fn[t.idx].live) {
         t.o->fn[t.idx].live = true;
         GROW(wl, nwl, cwl);
-        wl[nwl++] = (work){t.o, t.idx, 0};
+        wl[nwl++] = VCC_LITERAL(work, t.o, t.idx, 0);
     } else if (t.kind == K_DATA && t.y && t.y->seg < t.o->nseg &&
                !t.o->seg[t.y->seg].live) {
         t.o->seg[t.y->seg].live = true;
         GROW(wl, nwl, cwl);
-        wl[nwl++] = (work){t.o, t.y->seg, 1};
+        wl[nwl++] = VCC_LITERAL(work, t.o, t.y->seg, 1);
     } else if (t.kind == K_GLOBAL && t.idx < t.o->ngl) {
         t.o->gl[t.idx].live = true;
     } else if (t.kind == K_TAG && t.idx < t.o->ntag) {
@@ -1452,7 +1460,7 @@ static void gc(void)
                 mark_sym(o, i);
         if (!opt.gc) {
             for (uint32_t i = 0; i < o->nfn; i++)
-                mark_tgt((tgt){K_FUNCTION, o, i, NULL, NULL});
+                mark_tgt(VCC_LITERAL(tgt, K_FUNCTION, o, i, NULL, NULL));
         }
     }
     while (more) {
@@ -1605,7 +1613,8 @@ static uint32_t slot_of(gsym *g, obj *o, uint32_t fidx)
     GROW(lslots, nlslots, clslots);
     GROW(slot_func, nslots, cslot_func);
     slot_func[nslots++] = (uint32_t)o->fn[fidx].out;
-    lslots[nlslots] = (lslot){o, fidx, (uint32_t)(opt.table_base + nslots - 1)};
+    lslots[nlslots] =
+        VCC_LITERAL(lslot, o, fidx, (uint32_t)(opt.table_base + nslots - 1));
     return lslots[nlslots++].slot;
 }
 
@@ -1873,7 +1882,8 @@ static int write_module(void)
 
         if (c && c->live && c->state == G_SYNTH) {
             GROW(ofns, nof, cof);
-            ofns[nof] = (struct ofn){NULL, 0, c, otype((span){t_void, 2})};
+            ofns[nof] = VCC_LITERAL(struct ofn, NULL, 0, c,
+                                    otype(VCC_LITERAL(span, t_void, 2)));
             ctors = (int32_t)(nfi + nof++);
             c->out = ctors;
         }
@@ -1882,7 +1892,7 @@ static int write_module(void)
         for (uint32_t i = 0; i < objs[k]->nfn; i++)
             if (objs[k]->fn[i].live) {
                 GROW(ofns, nof, cof);
-                ofns[nof] = (struct ofn){objs[k], i, NULL, 0};
+                ofns[nof] = VCC_LITERAL(struct ofn, objs[k], i, NULL, 0);
                 objs[k]->fn[i].out = (int32_t)(nfi + nof++);
             }
     for (uint32_t i = 0; i < ngall; i++) {
@@ -1896,7 +1906,8 @@ static int write_module(void)
                               : 0;
 
             GROW(ofns, nof, cof);
-            ofns[nof] = (struct ofn){NULL, 0, g, otype(g->uo->types[ty])};
+            ofns[nof] =
+                VCC_LITERAL(struct ofn, NULL, 0, g, otype(g->uo->types[ty]));
             g->out = (int32_t)(nfi + nof++);
         }
     }
@@ -1910,15 +1921,15 @@ static int write_module(void)
             }
     /* globals: __stack_pointer, then the objects' */
     GROW(ogl, nog, cog);
-    ogl[nog++] = (struct oglob){W32 ? 0x7f : 0x7e, 1, {0}, 0, true};
+    ogl[nog++] = VCC_LITERAL(struct oglob, pointer_type(), 1, {0}, 0, true);
     sp_global = 0;
     for (uint32_t k = 0; k < nobjs; k++)
         for (uint32_t i = 0; i < objs[k]->ngl; i++)
             if (objs[k]->gl[i].live) {
                 GROW(ogl, nog, cog);
-                ogl[nog] =
-                    (struct oglob){objs[k]->gl[i].type, objs[k]->gl[i].mut,
-                                   objs[k]->gl[i].init, 0, false};
+                ogl[nog] = VCC_LITERAL(struct oglob, objs[k]->gl[i].type,
+                                       objs[k]->gl[i].mut, objs[k]->gl[i].init,
+                                       0, false);
                 objs[k]->gl[i].out = (int32_t)(ngi + nog++);
             }
     for (uint32_t i = 0; i < ngall; i++) {
@@ -1934,7 +1945,8 @@ static int write_module(void)
                  !strcmp(g->name, "__memory_base") ||
                  !strcmp(g->name, "__table_base")) {
             GROW(ogl, nog, cog);
-            ogl[nog] = (struct oglob){W32 ? 0x7f : 0x7e, 0, {0}, 0, true};
+            ogl[nog] =
+                VCC_LITERAL(struct oglob, pointer_type(), 0, {0}, 0, true);
             g->out = (int32_t)(ngi + nog++);
         } else {
             err("undefined global: %s", g->name);
@@ -1966,15 +1978,12 @@ static int write_module(void)
                     if (!strcmp(osegs[j].name, nm))
                         break;
                 if (j == nosegs) {
-                    osegs = realloc(osegs, (nosegs + 1) * sizeof(oseg));
-                    osegs[nosegs] =
-                        (oseg){strdup(nm),
-                               0,
-                               0,
-                               0,
-                               !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"),
-                               !strcmp(nm, ".bss") || !strcmp(nm, ".tbss"),
-                               seg_order(nm)};
+                    osegs = (oseg *)realloc(osegs, (nosegs + 1) * sizeof(oseg));
+                    osegs[nosegs] = VCC_LITERAL(
+                        oseg, strdup(nm), 0, 0, 0,
+                        !strcmp(nm, ".tdata") || !strcmp(nm, ".tbss"),
+                        !strcmp(nm, ".bss") || !strcmp(nm, ".tbss"),
+                        seg_order(nm));
                     nosegs++;
                 }
                 s->oseg = (int32_t)j;
@@ -1983,9 +1992,11 @@ static int write_module(void)
             }
         /* stable order: TLS, .rodata, .data, others, .bss */
         {
-            uint32_t *perm = malloc((nosegs + 1) * sizeof(uint32_t)),
-                     *inv = malloc((nosegs + 1) * sizeof(uint32_t)), n = 0;
-            oseg *ns = malloc((nosegs + 1) * sizeof(oseg));
+            uint32_t *perm =
+                         (uint32_t *)malloc((nosegs + 1) * sizeof(uint32_t)),
+                     *inv = (uint32_t *)malloc((nosegs + 1) * sizeof(uint32_t)),
+                     n = 0;
+            oseg *ns = (oseg *)malloc((nosegs + 1) * sizeof(oseg));
 
             for (int ord = 0; ord <= 4; ord++)
                 for (uint32_t j = 0; j < nosegs; j++)
@@ -2064,7 +2075,7 @@ static int write_module(void)
     }
     /* exports */
     GROW(ex, nex, cex);
-    ex[nex++] = (oexp){"memory", 2, 0};
+    ex[nex++] = VCC_LITERAL(oexp, "memory", 2, 0);
     for (int pass = 0; pass < 2; pass++)
         for (uint32_t i = 0; i < (pass ? opt.nexpi : opt.nexp); i++) {
             const char *nm = pass ? opt.exports_ifdef[i] : opt.exports[i];
@@ -2082,27 +2093,28 @@ static int write_module(void)
             if (g->state == G_SYNTH) {
                 if (g->kind == K_FUNCTION && g->out >= 0) {
                     GROW(ex, nex, cex);
-                    ex[nex++] = (oexp){g->name, 0, (uint32_t)g->out};
+                    ex[nex++] = VCC_LITERAL(oexp, g->name, 0, (uint32_t)g->out);
                 }
                 continue;
             }
             t = resolve(g->o, g->si);
             GROW(ex, nex, cex);
             if (t.kind == K_FUNCTION)
-                ex[nex++] = (oexp){g->name, 0, (uint32_t)t.o->fn[t.idx].out};
+                ex[nex++] =
+                    VCC_LITERAL(oexp, g->name, 0, (uint32_t)t.o->fn[t.idx].out);
             else if (t.kind == K_GLOBAL)
-                ex[nex++] = (oexp){g->name, 3, (uint32_t)t.o->gl[t.idx].out};
+                ex[nex++] =
+                    VCC_LITERAL(oexp, g->name, 3, (uint32_t)t.o->gl[t.idx].out);
             else if (t.kind == K_TAG)
-                ex[nex++] = (oexp){g->name, 4, (uint32_t)t.o->tag[t.idx].out};
+                ex[nex++] = VCC_LITERAL(oexp, g->name, 4,
+                                        (uint32_t)t.o->tag[t.idx].out);
             else if (t.kind == K_DATA) {
                 /* a data symbol: an immutable global holding its address */
                 GROW(ogl, nog, cog);
-                ogl[nog] = (struct oglob){W32 ? 0x7f : 0x7e,
-                                          0,
-                                          {0},
-                                          t.o->seg[t.y->seg].addr + t.y->off,
-                                          true};
-                ex[nex++] = (oexp){g->name, 3, ngi + nog++};
+                ogl[nog] =
+                    VCC_LITERAL(struct oglob, pointer_type(), 0, {0},
+                                t.o->seg[t.y->seg].addr + t.y->off, true);
+                ex[nex++] = VCC_LITERAL(oexp, g->name, 3, ngi + nog++);
             }
         next_export:;
         }
@@ -2114,7 +2126,7 @@ static int write_module(void)
     }
     if (opt.export_table) {
         GROW(ex, nex, cex);
-        ex[nex++] = (oexp){"__indirect_function_table", 1, 0};
+        ex[nex++] = VCC_LITERAL(oexp, "__indirect_function_table", 1, 0);
     }
     /* synthetic data symbols asked for as exports (__start_em_js ...) */
     for (uint32_t i = 0; i < opt.nexpi; i++) {
@@ -2124,9 +2136,10 @@ static int write_module(void)
 
         if (g && g->state == G_UNDEF && synth_data(g, &a)) {
             GROW(ogl, nog, cog);
-            ogl[nog] = (struct oglob){W32 ? 0x7f : 0x7e, 0, {0}, a, true};
+            ogl[nog] =
+                VCC_LITERAL(struct oglob, pointer_type(), 0, {0}, a, true);
             GROW(ex, nex, cex);
-            ex[nex++] = (oexp){g->name, 3, ngi + nog++};
+            ex[nex++] = VCC_LITERAL(oexp, g->name, 3, ngi + nog++);
         }
     }
     if (nerr)
@@ -2197,7 +2210,7 @@ static int write_module(void)
 
                 if (osegs[j].bss)
                     continue;
-                buf = calloc(osegs[j].size + 1, 1);
+                buf = (uint8_t *)calloc(osegs[j].size + 1, 1);
                 for (uint32_t k = 0; k < nobjs; k++)
                     for (uint32_t i = 0; i < objs[k]->nseg; i++) {
                         iseg *s = &objs[k]->seg[i];
@@ -2222,7 +2235,8 @@ static int write_module(void)
         }
         /* function types: imports and functions (after the code: call_indirect types came first there) */
         {
-            uint32_t *ftypes = malloc((nfi + nof + 1) * sizeof(uint32_t));
+            uint32_t *ftypes =
+                (uint32_t *)malloc((nfi + nof + 1) * sizeof(uint32_t));
 
             for (uint32_t i = 0; i < nfi; i++) {
                 isym *y = &fimps[i]->uo->sym[fimps[i]->usi];

@@ -127,8 +127,9 @@ VPRIV void cxx_arguments_parse(cxx *c, int open, int close)
     memcpy(c->carg_brace, braces, sizeof braces);
     c->carg_zero = zero;
     if (n > c->ccargs)
-        c->cargs = realloc(c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs),
-        c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
+        c->cargs = (ast_qualified_type *)(realloc(
+            c->cargs, (c->ccargs = n + 16) * sizeof *c->cargs)),
+        c->cargs_lval = (uint8_t *)realloc(c->cargs_lval, c->ccargs);
     memcpy(c->cargs, args, (n < CXX_MAX_ARGS ? n : 16) * sizeof *args);
     if (n)
         memcpy(c->cargs_lval, lval, n < CXX_MAX_ARGS ? n : 16);

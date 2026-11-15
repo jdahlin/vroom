@@ -74,7 +74,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             return;
         if (v == L->big_endian_value) {
             codegen_lvalue at = {.kind = CODEGEN_LVALUE_REGISTER,
-                                 .register_number = L->big_endian_base,
+                                 .register_number =
+                                     (uint8_t)(L->big_endian_base),
                                  .offset = L->big_endian_offset};
             if (L->big_endian_is_indexed) {
                 record *r = x64_record_emit_three_registers(
@@ -380,10 +381,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                 : left >= 2 ? 2
                                             : 1;
                     int tmp = width == 16 ? XMM0 + 14 : L->general_temporary;
-                    codegen_lvalue src = {.kind = CODEGEN_LVALUE_REGISTER,
-                                          .register_number =
-                                              x64_vir_register_number(r),
-                                          .offset = pos};
+                    codegen_lvalue src = {
+                        .kind = CODEGEN_LVALUE_REGISTER,
+                        .register_number =
+                            (uint8_t)(x64_vir_register_number(r)),
+                        .offset = pos};
                     codegen_lvalue dst = {.kind = CODEGEN_LVALUE_REGISTER,
                                           .register_number = RSP,
                                           .offset = off - 16 + pos};

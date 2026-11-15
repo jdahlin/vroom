@@ -16,8 +16,10 @@ enum { DIAG_PRAGMA_IGNORED = 1, DIAG_PRAGMA_WARNING, DIAG_PRAGMA_ERROR };
 static void diag_pragma_state_push(pp *p, uint32_t st, uint32_t loc)
 {
     if (!p->diagnostic_transitions)
-        p->diagnostic_transitions = varena_alloc(
-            &p->permanent_region, 4096 * sizeof(*p->diagnostic_transitions));
+        p->diagnostic_transitions =
+            (__typeof__(p->diagnostic_transitions))varena_alloc(
+                &p->permanent_region,
+                4096 * sizeof(*p->diagnostic_transitions));
     if (p->diagnostic_transition_count < 4096)
         p->diagnostic_transitions[p->diagnostic_transition_count].loc = loc,
         p->diagnostic_transitions[p->diagnostic_transition_count++].st = st;
@@ -64,8 +66,8 @@ VPRIV void diag_pragma_handle(pp *p, const char *q, const char *e, uint32_t loc)
         (n > 3 && !memcmp(q, "no-", 3)))
         return;
     if (!p->diagnostic_nodes) {
-        p->diagnostic_nodes = varena_alloc(&p->permanent_region,
-                                           4096 * sizeof(*p->diagnostic_nodes));
+        p->diagnostic_nodes = (struct pp_diagnostic_node *)(varena_alloc(
+            &p->permanent_region, 4096 * sizeof(*p->diagnostic_nodes)));
         memset(&p->diagnostic_nodes[0], 0, sizeof(*p->diagnostic_nodes));
         p->diagnostic_node_count = 1;
     }

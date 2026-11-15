@@ -1,4 +1,5 @@
 /* C++ expressions: requires-expressions */
+#include "common/literal.h"
 #include "expression.h"
 
 VPRIV void cxx_requires_expression_parse(cxx *c)
@@ -94,11 +95,11 @@ VPRIV void cxx_requires_expression_parse(cxx *c)
                     cxx_targ a[32];
 
                     if (c->ntargs < 31) {
-                        a[0] = (cxx_targ){
-                            .kind = 1,
+                        a[0] = VCC_LITERAL(
+                            cxx_targ, .kind = 1,
                             .t = xv != CXX_TY_UNKNOWN ? xv
                                  : lv ? cxx_type_reference(c, et, false)
-                                      : et};
+                                      : et);
                         memcpy(a + 1, c->targs, c->ntargs * sizeof *a);
                         r = cxx_concept_value(c, ce, a, c->ntargs + 1);
                     } else

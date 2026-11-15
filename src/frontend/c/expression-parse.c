@@ -1,4 +1,5 @@
 /* vcc front end: expression parsers: unary, cast, binary, conditional, assignment, comma, sizeof */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- expressions: unary, cast, binary ---------------- */
@@ -31,7 +32,7 @@ static uint32_t cc_sizeof_type_build(cc *c, ast_qualified_type t, uint32_t loc,
     }
     if (!cc_type_complete(c, t)) {
         r = e ? cc_node_range(c, e)
-              : (diag_span){r.b, pp_token_end_find(c->p, r.e)};
+              : VCC_LITERAL(diag_span, r.b, pp_token_end_find(c->p, r.e));
         report(c, "error", loc, &r, 1, NULL, 0,
                "invalid application of 'sizeof' to an incomplete type '%s'",
                tyname(c, t));
@@ -80,9 +81,9 @@ static uint32_t cc_sizeof_operand_parse(cc *c, ast_qualified_type *ty,
             *ty = cc_type_name_parse(c);
             cc_token_expect_match(c, LEX_TOKEN_RIGHT_PAREN, ploc);
             if (r)
-                *r = (diag_span){
-                    ploc,
-                    c->prevloc}; /* resolved by cc_sizeof_type_build if needed */
+                *r = VCC_LITERAL(
+                    diag_span, ploc,
+                    c->prevloc); /* resolved by cc_sizeof_type_build if needed */
             return UINT32_MAX;
         }
         c->unevaluated++;
@@ -266,7 +267,7 @@ static __attribute__((noinline)) uint32_t cc_unary_operator_parse(cc *c)
                 AST_NODE(cl)->flags = AST_NODE_FLAG_LVALUE;
                 n = cc_postfix_parse(c, cl);
                 return cc_sizeof_type_build(c, AST_NODE(n)->ty, loc, n,
-                                            (diag_span){0, 0});
+                                            VCC_LITERAL(diag_span, 0, 0));
             }
             return cc_sizeof_type_build(c, ty, loc, 0, r);
         }
@@ -274,7 +275,7 @@ static __attribute__((noinline)) uint32_t cc_unary_operator_parse(cc *c)
             cc_report_error(c, loc,
                             "invalid application of 'sizeof' to bit-field");
         return cc_sizeof_type_build(c, AST_NODE(n)->ty, loc, n,
-                                    (diag_span){0, 0});
+                                    VCC_LITERAL(diag_span, 0, 0));
     }
     case KW__Alignof:
     case KW___alignof__:

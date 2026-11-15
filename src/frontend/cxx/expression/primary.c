@@ -223,7 +223,8 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
             else if (t->len == 4 && t->s[1] == '\\') {
                 static const char from[] = "ntr0\\'\"abfv",
                                   to[] = "\n\t\r\0\\'\"\a\b\f\v";
-                const char *p = memchr(from, t->s[2], sizeof from - 1);
+                const char *p =
+                    (const char *)memchr(from, t->s[2], sizeof from - 1);
 
                 if (p)
                     cv = to[p - from];
@@ -255,7 +256,7 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
             if (plain && len + x->len > cap) {
                 /* (the decoded bytes are never more than the spelling's) */
                 uint32_t ncap = (len + x->len) * 2;
-                char *nb = cc_heap_allocate(c->ast, ncap);
+                char *nb = (char *)cc_heap_allocate(c->ast, ncap);
 
                 memcpy(nb, buf, len);
                 buf = nb, cap = ncap;
@@ -889,9 +890,11 @@ VPRIV void cxx_primary_expression_parse(cxx *c)
                         memcpy(sbr, c->carg_brace, sizeof sbr);
                     cast_to = cxx_ctad(c, ctad_te, st, sl, sn);
                     if (c->ccargs < sn)
-                        c->cargs = realloc(c->cargs, (c->ccargs = sn + 16) *
-                                                         sizeof *c->cargs),
-                        c->cargs_lval = realloc(c->cargs_lval, c->ccargs);
+                        c->cargs = (ast_qualified_type *)(realloc(
+                            c->cargs,
+                            (c->ccargs = sn + 16) * sizeof *c->cargs)),
+                        c->cargs_lval =
+                            (uint8_t *)realloc(c->cargs_lval, c->ccargs);
                     c->ncargs = sn, c->carg_zero = szero;
                     memcpy(c->carg_nodes, snodes, sn * sizeof *snodes),
                         memcpy(c->cargs, st, sn * sizeof *st);

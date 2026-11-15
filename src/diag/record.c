@@ -1,4 +1,5 @@
 /* The diagnostic record: ids, level names and the builder that fills it. */
+#include "common/literal.h"
 #include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
@@ -76,7 +77,7 @@ VPRIV int diag_level_from_name(const char *what)
 
 static char *dstr(pp *p, const char *s, size_t n)
 {
-    char *r = varena_alloc(&p->permanent_region, n + 1);
+    char *r = (char *)varena_alloc(&p->permanent_region, n + 1);
 
     memcpy(r, s, n);
     r[n] = 0;
@@ -111,7 +112,8 @@ static void diag_message_vector_suffix_append(char *m, size_t cap)
 diag_record *diag_record_begin_va(pp *p, int level, uint32_t loc,
                                   const char *fmt, va_list ap)
 {
-    diag_record *d = varena_alloc(&p->permanent_region, sizeof(*d));
+    diag_record *d =
+        (diag_record *)(varena_alloc(&p->permanent_region, sizeof(*d)));
     char msg[2048];
     int n = vsnprintf(msg, sizeof(msg), fmt, ap);
 
@@ -153,15 +155,15 @@ void diag_record_label_add(pp *p, diag_record *d, uint32_t b, uint32_t e,
 {
     if (d->nspan == d->cspan) {
         uint32_t c = d->cspan ? d->cspan * 2 : 4;
-        diag_record_span *n =
-            varena_alloc(&p->permanent_region, c * sizeof(*n));
+        diag_record_span *n = (diag_record_span *)(varena_alloc(
+            &p->permanent_region, c * sizeof(*n)));
 
         if (d->nspan)
             memcpy(n, d->span, d->nspan * sizeof(*n));
         d->span = n, d->cspan = c;
     }
-    d->span[d->nspan++] =
-        (diag_record_span){b, e, label ? dstr(p, label, strlen(label)) : NULL};
+    d->span[d->nspan++] = VCC_LITERAL(
+        diag_record_span, b, e, label ? dstr(p, label, strlen(label)) : NULL);
 }
 
 int diag_art_style(const pp *p)
@@ -203,15 +205,15 @@ void diag_record_fixit_add(pp *p, diag_record *d, uint32_t b, uint32_t e,
     app &= ~DIAG_APPLICABILITY_NAME;
     if (d->nfix == d->cfix) {
         uint32_t c = d->cfix ? d->cfix * 2 : 4;
-        diag_record_fixit *n =
-            varena_alloc(&p->permanent_region, c * sizeof(*n));
+        diag_record_fixit *n = (diag_record_fixit *)(varena_alloc(
+            &p->permanent_region, c * sizeof(*n)));
 
         if (d->nfix)
             memcpy(n, d->fix, d->nfix * sizeof(*n));
         d->fix = n, d->cfix = c;
     }
-    d->fix[d->nfix++] =
-        (diag_record_fixit){b, e, dstr(p, s, strlen(s)), (uint8_t)app};
+    d->fix[d->nfix++] = VCC_LITERAL(diag_record_fixit, b, e,
+                                    dstr(p, s, strlen(s)), (uint8_t)app);
 }
 
 void diag_record_flag_set(diag_record *d, const char *flag)

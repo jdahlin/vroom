@@ -105,7 +105,7 @@ static inline VUSE VNONNULL(1) void *vjob_region_acquire(vjob_region *r,
             r->cap = r->cap * 2 > n        ? r->cap * 2
                      : n > VJOB_REGION_MIN ? n
                                            : VJOB_REGION_MIN;
-        r->p = vjob_region_map(r->cap);
+        r->p = (char *)vjob_region_map(r->cap);
     }
     r->name = name;
     r->busy = 1;
@@ -150,12 +150,13 @@ static inline vjob_region *vjob_region_pool_take(vjob_region_pool *pl)
     void **s;
 
     pthread_mutex_lock(&pl->mu);
-    s = pl->free;
+    s = (void **)pl->free;
     if (s)
         pl->free = *s;
     pthread_mutex_unlock(&pl->mu);
     if (!s) {
-        s = calloc(1, sizeof(void *) + (size_t)pl->n * sizeof(vjob_region));
+        s = (void **)(calloc(1, sizeof(void *) +
+                                    (size_t)pl->n * sizeof(vjob_region)));
         if (!s)
             vout_of_memory();
     }

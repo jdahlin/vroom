@@ -27,8 +27,9 @@ VPRIV void ld_gap_fills_write(struct ld_context *ctx)
                                 ctx, ld_expression_eval(ctx, os->fill));
         if (!v)
             continue;
-        uint8_t f[4] = {v >> 24, v >> 16, v >> 8,
-                        v}; /* big-endian (lld readFill) */
+        uint8_t f[4] = {(uint8_t)(v >> 24), (uint8_t)(v >> 16),
+                        (uint8_t)(v >> 8),
+                        (uint8_t)(v)}; /* big-endian (lld readFill) */
         uint8_t *b = ctx->output.image + os->offset;
         uint64_t at = 0;
         for (uint32_t k = 0; k < os->commands.n; k++) {

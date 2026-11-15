@@ -208,8 +208,8 @@ VPRIV codegen_lvalue gen_lval(codegen_context *e, uint32_t n)
                       codegen_type_primitive(AST_TYPE_UNSIGNED_LONG),
                       codegen_value_register(rb), codegen_value_constant(7));
             codegen_lvalue bs = {.kind = CODEGEN_LVALUE_FRAME,
-                                 .offset = a64_frame_slot_allocate(e, 8, 8),
-                                 .align = 8};
+                                 .align = 8,
+                                 .offset = a64_frame_slot_allocate(e, 8, 8)};
             store(e, &bs, codegen_type_primitive(AST_TYPE_UNSIGNED_LONG), &bit);
             val_free(e, &bit);
             i = arith(e, LEX_TOKEN_GREATER_GREATER,
@@ -260,8 +260,8 @@ VPRIV codegen_lvalue gen_lval(codegen_context *e, uint32_t n)
             if (e->frame_offset > e->compound_literal_top)
                 e->compound_literal_top = e->frame_offset;
             codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = sl,
-                                .align = codegen_symbol_alignment(c, s)};
+                                .align = codegen_symbol_alignment(c, s),
+                                .offset = sl};
 
             gen_init_local(e, &d, y->ty, x->a);
             return d;
@@ -348,8 +348,8 @@ static codegen_value ldar_load(codegen_context *e, codegen_lvalue *l,
 		 * rather than returning the address of mutable atomic storage. */
         codegen_lvalue tmp = {
             .kind = CODEGEN_LVALUE_FRAME,
-            .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz),
-            .align = 1u << sz};
+            .align = 1u << sz,
+            .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz)};
         a64_lvalue_store(e, r, &tmp, 0, 1u << sz);
         tfree(e, r);
         return laddr(e, &tmp);
@@ -371,15 +371,15 @@ static void stlr_store(codegen_context *e, codegen_lvalue *l,
         ast_qualified_type plain = AST_QUALIFIED_TYPE(T(c, t)->n, 0);
         uint64_t bytes = codegen_type_size(c, plain);
         codegen_lvalue src = {.kind = CODEGEN_LVALUE_REGISTER,
-                              .register_number = toreg(e, v),
+                              .register_number = (uint8_t)(toreg(e, v)),
                               .align = codegen_type_alignment(c, plain)};
         if (bytes != (1u << sz)) {
             /* Atomic layout may round a three-byte record up to four bytes.
 			 * Do not read the rounded padding past the source object. */
             codegen_lvalue tmp = {
                 .kind = CODEGEN_LVALUE_FRAME,
-                .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz),
-                .align = 1u << sz};
+                .align = 1u << sz,
+                .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz)};
             a64_lvalue_store(e, ZR, &tmp, 0, 1u << sz);
             codegen_value addr = laddr(e, &tmp);
             copy_mem(e, toreg(e, &addr), src.register_number, bytes);
@@ -500,9 +500,9 @@ static codegen_value bf_load_big(codegen_context *e, const codegen_lvalue *l,
     uint64_t size = codegen_type_size(e->compile_context, t);
     codegen_lvalue dst = {
         .kind = CODEGEN_LVALUE_FRAME,
+        .align = 8,
         .offset = a64_frame_slot_allocate(
-            e, size, codegen_type_alignment(e->compile_context, t)),
-        .align = 8};
+            e, size, codegen_type_alignment(e->compile_context, t))};
     int fill = treg(e);
     a64_record_emit_move_immediate(e, 1, fill, 0);
     for (uint64_t off = 0; off < size; off += 8) {
@@ -566,8 +566,8 @@ static codegen_value load1(codegen_context *e, codegen_lvalue *l,
     }
     if (l->dynamic_bit_slot) {
         codegen_lvalue bs = {.kind = CODEGEN_LVALUE_FRAME,
-                             .offset = l->dynamic_bit_slot,
-                             .align = 8};
+                             .align = 8,
+                             .offset = l->dynamic_bit_slot};
         r = treg(e);
         a64_lvalue_load(e, r, l, 1, 0);
         codegen_value v =
@@ -726,8 +726,8 @@ static void store1(codegen_context *e, codegen_lvalue *l, ast_qualified_type t,
     }
     if (l->dynamic_bit_slot) {
         codegen_lvalue bs = {.kind = CODEGEN_LVALUE_FRAME,
-                             .offset = l->dynamic_bit_slot,
-                             .align = 8};
+                             .align = 8,
+                             .offset = l->dynamic_bit_slot};
         codegen_value mask =
             arith(e, LEX_TOKEN_LESS_LESS,
                   codegen_type_primitive(AST_TYPE_UNSIGNED_LONG),

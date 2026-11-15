@@ -10,7 +10,8 @@
 
 static void *ld_response_alloc(struct ld_response_memory **keep, size_t n)
 {
-    struct ld_response_memory *m = malloc(sizeof *m + n);
+    struct ld_response_memory *m =
+        (struct ld_response_memory *)malloc(sizeof *m + n);
     if (!m) {
         fputs("vld: out of memory\n", stderr);
         exit(1);
@@ -32,7 +33,7 @@ VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd,
 	 * after the first expansion out and argv are the same vector */
     int argc = *pargc, n = 0, nexp = 0;
     char **argv = *pargv,
-         **out = ld_response_alloc(keep, (argc + 1) * sizeof *out);
+         **out = (char **)(ld_response_alloc(keep, (argc + 1) * sizeof *out));
     for (int i = 0; i < argc; i++) {
         const char *a = argv[i];
         char *text = NULL;
@@ -42,7 +43,7 @@ VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd,
             struct stat st;
             if (fd >= 0 && !fstat(fd, &st) && st.st_size >= 0) {
                 len = (size_t)st.st_size;
-                text = ld_response_alloc(keep, len + 1);
+                text = (char *)ld_response_alloc(keep, len + 1);
                 size_t got = 0;
                 while (got < len) {
                     ssize_t r = read(fd, text + got, len - got);
@@ -63,7 +64,8 @@ VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd,
         /* split in place: a word never grows when its quotes are removed */
         char *p = text, *end = text + len;
         int nw = 0;
-        char **words = ld_response_alloc(keep, (len / 2 + 2) * sizeof *words);
+        char **words =
+            (char **)(ld_response_alloc(keep, (len / 2 + 2) * sizeof *words));
         while (p < end) {
             while (p < end && isspace((unsigned char)*p))
                 p++;
@@ -88,8 +90,8 @@ VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd,
         }
         /* the words replace @FILE; an @ among them is expanded on the next pass */
         int rest = argc - i - 1;
-        char **nargv =
-            ld_response_alloc(keep, (n + nw + rest + 1) * sizeof *nargv);
+        char **nargv = (char **)(ld_response_alloc(keep, (n + nw + rest + 1) *
+                                                             sizeof *nargv));
         memcpy(nargv, out, n * sizeof *nargv);
         memcpy(nargv + n, words, nw * sizeof *nargv);
         memcpy(nargv + n + nw, argv + i + 1, rest * sizeof *nargv);

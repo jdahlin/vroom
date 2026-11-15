@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: one instruction. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
@@ -446,8 +447,8 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
         a64_vir_arguments_assign(true, &f->extra[f->signature], &none, 0, &stk);
         if (l.kind == CODEGEN_LVALUE_SYMBOL) {
             a64_reference_address_emit(e, R_X17, l.reference, l.offset);
-            l = (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                                 .register_number = R_X17};
+            l = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                            .register_number = R_X17);
         }
         a64_record_emit_immediate(e, A64_OP_ADDI, 1, t, R_FP,
                                   16 + ((stk + 7) & ~7));

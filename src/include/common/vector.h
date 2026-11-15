@@ -69,7 +69,7 @@ static inline size_t vvector_capacity(size_t cap, size_t need, size_t size)
             vv_p_ = realloc((v), vv_cap_ * sizeof(*(v)));                      \
             if (!vv_p_)                                                        \
                 vout_of_memory();                                              \
-            (v) = vv_p_;                                                       \
+            (v) = (__typeof__(v))vv_p_;                                        \
             (cap) = (__typeof__(cap))vv_cap_;                                  \
         }                                                                      \
     } while (0)
@@ -94,7 +94,7 @@ static inline size_t vvector_capacity(size_t cap, size_t need, size_t size)
             vv_p_ = alloc(vv_cap_ * sizeof(*(v)));                             \
             if ((n))                                                           \
                 memcpy(vv_p_, (v), (size_t)(n) * sizeof(*(v)));                \
-            (v) = vv_p_;                                                       \
+            (v) = (__typeof__(v))vv_p_;                                        \
             (cap) = (__typeof__(cap))vv_cap_;                                  \
         }                                                                      \
     } while (0)
@@ -124,7 +124,7 @@ static inline size_t vvector_capacity(size_t cap, size_t need, size_t size)
             void *nv = alloc(nc * sizeof(*(a).v));                             \
             if ((a).n)                                                         \
                 memcpy(nv, (a).v, (a).n * sizeof(*(a).v));                     \
-            (a).v = nv;                                                        \
+            (a).v = (__typeof__((a).v))nv;                                     \
             (a).cap = nc;                                                      \
         }                                                                      \
         (a).v[(a).n++] = (x);                                                  \

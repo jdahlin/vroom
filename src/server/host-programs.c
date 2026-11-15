@@ -78,9 +78,10 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
     }
 
     /* compile + link: the compile options, then per source "-c SRC -o TMP" */
-    char **cav = malloc(((size_t)r->argc + 8) * sizeof(char *));
-    char **lav = malloc(((size_t)r->argc + 8) * sizeof(char *));
-    char (*tmp)[4096] = nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL;
+    char **cav = (char **)(malloc(((size_t)r->argc + 8) * sizeof(char *)));
+    char **lav = (char **)(malloc(((size_t)r->argc + 8) * sizeof(char *)));
+    char (*tmp)[4096] =
+        (char (*)[4096])(nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL);
     int status = 0, nc = 1, nl = 3, ntmp = 0;
 
     if (!cav || !lav || (nsrc && !tmp)) {

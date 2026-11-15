@@ -13,8 +13,8 @@ VPRIV void a64_ld_thunk_relocation_record(struct ld_context *ctx, uint32_t isec,
         uint32_t nm = ctx->relocations.thunk_redirect_keys
                           ? ctx->relocations.thunk_redirect_mask * 2 + 1
                           : 1023;
-        uint64_t *nk = ld_region_alloc((uint64_t)(nm + 1) * 8);
-        uint32_t *nv = ld_region_alloc((uint64_t)(nm + 1) * 4);
+        uint64_t *nk = (uint64_t *)(ld_region_alloc((uint64_t)(nm + 1) * 8));
+        uint32_t *nv = (uint32_t *)(ld_region_alloc((uint64_t)(nm + 1) * 4));
         memset(nk, 0xff, (uint64_t)(nm + 1) * 8);
         for (uint32_t i = 0; ctx->relocations.thunk_redirect_keys &&
                              i <= ctx->relocations.thunk_redirect_mask;

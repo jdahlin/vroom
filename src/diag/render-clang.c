@@ -117,7 +117,7 @@ static void diag_snippet_line_render(pp *p, vbuffer *b, const pp_file_entry *e,
     {
         uint32_t lw = diag_columns_width(s, ls, le, 0) + 1,
                  ccol = caret ? diag_columns_width(s, ls, off, 0) : UINT32_MAX;
-        char *m = calloc(lw + 1, 1);
+        char *m = (char *)calloc(lw + 1, 1);
 
         memset(m, ' ', lw);
         for (uint32_t i = 0; i < d->nspan; i++) {

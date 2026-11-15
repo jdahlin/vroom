@@ -479,9 +479,10 @@ static int wbf_bytes(ecx *e, const wlv *l)
 
     if (nb > 16)
         efatal(e, e->curloc, "wasm: a bit-field over 16 bytes");
-    if (nb > 8)
-        return 8 + wbf_bytes(e, &(wlv){.bitoff = 0,
-                                       .width = l->bitoff + l->width - 64});
+    if (nb > 8) {
+        wlv high = {.width = (uint16_t)(l->bitoff + l->width - 64)};
+        return 8 + wbf_bytes(e, &high);
+    }
     return nb <= 1 ? 1 : nb <= 2 ? 2 : nb <= 4 ? 4 : 8;
 }
 

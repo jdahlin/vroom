@@ -109,7 +109,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
             if (member)
                 cxx_class_field(c, 0, base, c->tok[start].loc,
                                 w < 0 ? -2 : (int)w);
-            goto next;
+            if (!cxx_accept(c, LEX_TOKEN_COMMA))
+                break;
+            continue;
         }
         c->type_in =
             is_auto
@@ -608,9 +610,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
         if (member && !f && name > 1 && cs && !c->tentative &&
             !c->template_depth) {
             /* (its type, for the class's implicit copy, move and assignment) */
-            cs->field_types =
-                realloc(cs->field_types,
-                        (cs->nfield_types + 1) * sizeof *cs->field_types);
+            cs->field_types = (ast_qualified_type *)(realloc(
+                cs->field_types,
+                (cs->nfield_types + 1) * sizeof *cs->field_types));
             cs->field_types[cs->nfield_types++] = t;
         }
         if (member && !f && name > 1) {
@@ -822,13 +824,14 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
 
                             pe->is_pack = 1, pe->pack_index = -1,
                             pe->ty = CXX_TY_UNKNOWN, pe->npack = pn;
-                            pe->pack = calloc(pn ? pn : 1, sizeof *pe->pack);
+                            pe->pack = (struct cxx_targ *)calloc(
+                                pn ? pn : 1, sizeof *pe->pack);
                             for (uint32_t j = 0; j < pn; j++)
                                 pe->pack[j].kind = 1,
                                 pe->pack[j].t =
                                     c->decl_params[c->cpack_at + j].ty;
-                            pe->pack_syms =
-                                calloc(pn ? pn : 1, sizeof *pe->pack_syms);
+                            pe->pack_syms = (uint32_t *)calloc(
+                                pn ? pn : 1, sizeof *pe->pack_syms);
                             c->gen_pack_entity = pe,
                             c->gen_pack_from = c->cpack_at, c->gen_pack_n = pn;
                         }
@@ -1147,7 +1150,6 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                 gen_declared = true;
             }
         }
-    next:
         if (auto_gen && !gen_declared)
             cxx_gen_fail(c); /* (auto with a list, or no type: not built yet) */
         /* code generation: a local with no initializer; one with a form of initializer not built yet */

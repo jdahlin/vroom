@@ -1,6 +1,7 @@
 /* The walker's lowering interface for values: conversions, registers, integer and floating point operations. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -221,8 +222,8 @@ VPRIV int virbuild_toreg(codegen_context *e, codegen_value *v)
         virbuild_walker_value_get(
             e, v,
             v->kind == CODEGEN_VALUE_ADDRESS ? VIR_TYPE_PTR : VIR_TYPE_I64));
-    *v = (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                         .register_number = (uint8_t)r};
+    *v = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                     .register_number = (uint8_t)r);
     return r;
 }
 
@@ -252,8 +253,8 @@ VPRIV codegen_value virbuild_umulhi(codegen_context *e, codegen_value a,
 
     virbuild_register_write(
         e, r, virbuild_insn_append(e, VIR_OP_UMULHI, VIR_TYPE_I64, 0, x, y, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_smulhi(codegen_context *e, codegen_value a,
@@ -265,8 +266,8 @@ VPRIV codegen_value virbuild_smulhi(codegen_context *e, codegen_value a,
 
     virbuild_register_write(
         e, r, virbuild_insn_append(e, VIR_OP_SMULHI, VIR_TYPE_I64, 0, x, y, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_bin(codegen_context *e, int op, int size, bool sgn,
@@ -301,8 +302,8 @@ VPRIV codegen_value virbuild_bin(codegen_context *e, int op, int size, bool sgn,
                                     virbuild_insn_append(e, VIR_OP_PTRADD,
                                                          VIR_TYPE_PTR, 0, x, y,
                                                          0));
-            return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                   .register_number = (uint8_t)r};
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number = (uint8_t)r);
         }
         if (op == LEX_TOKEN_MINUS && at == VIR_TYPE_PTR && bt == VIR_TYPE_PTR) {
             x = virbuild_walker_value_get(e, &a, VIR_TYPE_PTR);
@@ -311,8 +312,8 @@ VPRIV codegen_value virbuild_bin(codegen_context *e, int op, int size, bool sgn,
             virbuild_register_write(
                 e, r,
                 virbuild_insn_append(e, VIR_OP_PSUB, VIR_TYPE_I64, 0, x, y, 0));
-            return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                   .register_number = (uint8_t)r};
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number = (uint8_t)r);
         }
     }
     switch (op) {
@@ -375,8 +376,8 @@ VPRIV codegen_value virbuild_bin(codegen_context *e, int op, int size, bool sgn,
     /* signed +, -, *: overflow is undefined (not under -fwrapv), which is what makes an index linear */
     virbuild_register_write(e, r,
                             virbuild_insn_append(e, vop, ty, fl, x, y, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_un(codegen_context *e, int op, int size,
@@ -390,8 +391,8 @@ VPRIV codegen_value virbuild_un(codegen_context *e, int op, int size,
         e, r,
         virbuild_insn_append(e, op == LEX_TOKEN_MINUS ? VIR_OP_NEG : VIR_OP_NOT,
                              ty, 0, x, 0, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV void virbuild_ext(codegen_context *e, int r, int from, bool sgn)
@@ -485,8 +486,8 @@ VPRIV codegen_value virbuild_cmp(codegen_context *e, int op, int size, bool sgn,
     int r = virbuild_result_register_pick(e, &a, &b);
 
     virbuild_register_write(e, r, c);
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* to lbl if c (an i32 or i64) is nonzero, else on */
@@ -562,7 +563,7 @@ VPRIV void virbuild_switch_bitset(codegen_context *e, int r, int size,
 
 static int virbuild_switch_case_compare(const void *a, const void *b)
 {
-    const uint64_t *x = a, *y = b;
+    const uint64_t *x = (const uint64_t *)a, *y = (const uint64_t *)b;
 
     return x[0] < y[0] ? -1 : x[0] > y[0];
 }
@@ -576,7 +577,7 @@ VPRIV void virbuild_switch_table(codegen_context *e, int r, int size,
              x = virbuild_register_read(e, r, ty), st = size == 8 ? 5 : 3,
              m = 0;
     uint64_t mask = size == 8 ? ~0ull : 0xffffffffull,
-             *c3 = malloc((size_t)(2 * n + 1) * 3 * sizeof *c3);
+             *c3 = (uint64_t *)(malloc((size_t)(2 * n + 1) * 3 * sizeof *c3));
     uint32_t o;
 
     if (!c3)
@@ -642,8 +643,8 @@ VPRIV codegen_value virbuild_wide_pack(codegen_context *e, uint32_t lo,
                                        uint32_t hi)
 {
     codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
-                         .offset = walk_slot_temporary(e, 16, 16),
-                         .align = 8};
+                         .align = 8,
+                         .offset = walk_slot_temporary(e, 16, 16)};
     int q = virbuild_treg(e);
     virbuild_register_write(e, q, lo);
     virbuild_store(e, q, &at, 8);
@@ -652,8 +653,8 @@ VPRIV codegen_value virbuild_wide_pack(codegen_context *e, uint32_t lo,
     virbuild_store(e, q, &at, 8);
     virbuild_tfree(e, q);
     at.offset -= 8;
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = virbuild_laddr(e, &at)};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)(virbuild_laddr(e, &at)));
 }
 
 static void virbuild_wide_unpack(codegen_context *e, codegen_value v,
@@ -862,8 +863,8 @@ VPRIV codegen_value virbuild_wcmp(codegen_context *e, int op, bool sgn,
     virbuild_register_write(
         e, q,
         virbuild_insn_append(e, VIR_OP_SELECT, VIR_TYPE_I32, 0, eq, lo, hi));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = q};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)(q));
 }
 
 static codegen_value virbuild_wide_float_convert(codegen_context *e,
@@ -947,8 +948,8 @@ VPRIV codegen_value virbuild_wcvt(codegen_context *e, codegen_value v,
         virbuild_register_write(e, q, w[0]);
         virbuild_ext(e, q, walk_type_size(c, to), walk_type_is_signed(c, to));
     }
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = q};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)(q));
 }
 
 /* ---------------- floating point ---------------- */
@@ -988,8 +989,8 @@ VPRIV codegen_value virbuild_fconst(codegen_context *e, uint64_t bits, int size)
         virbuild_constant_make(
             e, VIR_OP_FCONST, size == 4 ? VIR_TYPE_F32 : VIR_TYPE_F64, 0,
             (uint32_t)bits, size == 4 ? 0 : (uint32_t)(bits >> 32)));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* a is the product an expression just made (in its name still), or that negated: the fmul, else 0.
@@ -1060,8 +1061,8 @@ VPRIV codegen_value virbuild_fbin(codegen_context *e, int op,
     virbuild_register_write(e, r, v);
     if (vop == VIR_OP_FMUL)
         e->vir_builder->float_products[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_fneg(codegen_context *e, ast_qualified_type t,
@@ -1082,8 +1083,8 @@ VPRIV codegen_value virbuild_fneg(codegen_context *e, ast_qualified_type t,
     virbuild_register_write(e, r, v);
     if (prod)
         e->vir_builder->float_products[r - VIRBUILD_FLOAT_REGISTER_FIRST] = v;
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_fsqrt(codegen_context *e, ast_qualified_type t,
@@ -1095,8 +1096,8 @@ VPRIV codegen_value virbuild_fsqrt(codegen_context *e, ast_qualified_type t,
 
     virbuild_register_write(
         e, r, virbuild_insn_append(e, VIR_OP_FSQRT, ty, 0, x, 0, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_root4(codegen_context *e, codegen_value a)
@@ -1154,8 +1155,8 @@ VPRIV codegen_value virbuild_fcmp(codegen_context *e, int op,
     r = virbuild_treg(e);
     virbuild_register_write(
         e, r, virbuild_insn_append(e, VIR_OP_FCMP, VIR_TYPE_I32, cc, x, y, 0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 VPRIV codegen_value virbuild_cvt(codegen_context *e, codegen_value v,
@@ -1178,8 +1179,8 @@ VPRIV codegen_value virbuild_cvt(codegen_context *e, codegen_value v,
                 0);
         r = virbuild_float_result_register(e, &v, NULL);
         virbuild_register_write(e, r, x);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     }
     if (tf) { /* integer to float */
         bool sg = walk_type_is_signed(c, from);
@@ -1215,8 +1216,8 @@ VPRIV codegen_value virbuild_cvt(codegen_context *e, codegen_value v,
             e, r,
             virbuild_insn_append(e, sg ? VIR_OP_S2F : VIR_OP_U2F, b, 0, x, 0,
                                  0));
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     }
     if (KIND(c, to) == AST_TYPE_BOOL) {
         uint32_t a = virbuild_float_type(e, from);
@@ -1230,8 +1231,8 @@ VPRIV codegen_value virbuild_cvt(codegen_context *e, codegen_value v,
             virbuild_insn_append(
                 e, VIR_OP_FCMP, VIR_TYPE_I32, 1, x,
                 virbuild_constant_make(e, VIR_OP_FCONST, a, 0, 0, 0), 0));
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     }
     { /* float to integer */
         uint32_t a = virbuild_float_type(e, from),
@@ -1249,8 +1250,8 @@ VPRIV codegen_value virbuild_cvt(codegen_context *e, codegen_value v,
             virbuild_ext(e, r, ts, sg);
         else if (ts == 4 && sg)
             virbuild_ext(e, r, 4, true);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     }
 }
 
@@ -1269,6 +1270,6 @@ VPRIV codegen_value virbuild_fbits(codegen_context *e, codegen_value v,
         virbuild_insn_append(e, VIR_OP_BITCAST,
                              size == 4 ? VIR_TYPE_I32 : VIR_TYPE_I64, 0, x, 0,
                              0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }

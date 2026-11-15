@@ -14,6 +14,7 @@
  * The -fvir-* options (cc_vir_aids) are the developer's aids, taken here too: they select
  * nothing a user needs and are not in vccd's capability table.
  */
+#include "common/literal.h"
 #include "driver-internal.h"
 
 enum { /* a row's index */
@@ -133,9 +134,10 @@ VPRIV cc_optimizations driver_optimization_resolve(const struct driver_job *job)
     /* VIR is -O2's code generator: an option does not bring it to a lower level, and without
 	   it there is nothing for the other rows to work on */
     vir = on[DRIVER_OPT_vir] && job->optimization_level >= 2;
-    return (cc_optimizations){
+    cc_optimizations result = {
 #define X(field, name, level) .field = vir && on[DRIVER_OPT_##field],
         CC_OPTIMIZATIONS(X)
 #undef X
     };
+    return result;
 }

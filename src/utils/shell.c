@@ -7,6 +7,7 @@
  * lets `printf ... | xargs TOOL` become one TOOL call with the words
  * appended.
  */
+#include "common/literal.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -45,14 +46,15 @@ static bool shell_token_push(struct shell_token_list *v, int kind, bool assign,
 {
     if (v->count == v->capacity) {
         int cap = v->capacity ? 2 * v->capacity : 64;
-        struct shell_token *t = realloc(v->tokens, cap * sizeof(*t));
+        struct shell_token *t =
+            (struct shell_token *)(realloc(v->tokens, cap * sizeof(*t)));
 
         if (!t)
             return false;
         v->tokens = t;
         v->capacity = cap;
     }
-    v->tokens[v->count++] = (struct shell_token){kind, assign, s};
+    v->tokens[v->count++] = VCC_LITERAL(struct shell_token, kind, assign, s);
     return true;
 }
 
@@ -196,7 +198,8 @@ static struct shell_command *shell_script_command_add(struct shell_script *sc)
 {
     if (sc->count == sc->capacity) {
         int cap = sc->capacity ? 2 * sc->capacity : 16;
-        struct shell_command *c = realloc(sc->commands, cap * sizeof(*c));
+        struct shell_command *c =
+            (struct shell_command *)(realloc(sc->commands, cap * sizeof(*c)));
 
         if (!c)
             return NULL;
@@ -223,7 +226,7 @@ static char **shell_words_to_argv(struct shell_token *t, int n, vbuffer *extra)
             while (*p && *p != ' ' && *p != '\t' && *p != '\n')
                 p++;
         }
-    v = malloc((n + nx + 1) * sizeof(*v));
+    v = (char **)(malloc((n + nx + 1) * sizeof(*v)));
     if (!v)
         return NULL;
     for (i = 0; i < n; i++)

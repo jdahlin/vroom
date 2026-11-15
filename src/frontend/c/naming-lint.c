@@ -74,7 +74,8 @@ static bool lint_name_ok(const lint_module *m, const char *name, uint32_t len)
         size_t n = strlen(m->prefix[k]);
 
         if (n == 1) { /* v + facility + _ */
-            const char *u = len > 2 ? memchr(name + 1, '_', len - 1) : NULL;
+            const char *u =
+                (const char *)(len > 2 ? memchr(name + 1, '_', len - 1) : NULL);
 
             if (name[0] == 'v' && u && u > name + 1)
                 return true;

@@ -15,6 +15,7 @@
  * The callee-saved set (rbx rbp rdi rsi r12-r15 xmm6-xmm15) is print.c's: its prologue saves those
  * the body writes.
  */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 static const uint8_t x64w_gpr[4] = {RCX, RDX, R8, R9};
@@ -35,12 +36,12 @@ VPRIV void x64w_classify(codegen_context *e, ast_qualified_type t,
     uint64_t size = codegen_type_size(c, t);
     int k = KIND(c, t);
 
-    *a = (walk_argument){.size = size,
-                         .is_unnamed = unnamed,
-                         .is_vector = codegen_type_is_vector(c, t),
-                         .align = codegen_type_alignment(c, t) > 8
-                                      ? codegen_type_alignment(c, t)
-                                      : 8};
+    *a = VCC_LITERAL(walk_argument, .is_vector = codegen_type_is_vector(c, t),
+                     .is_unnamed = unnamed,
+                     .align = codegen_type_alignment(c, t) > 8
+                                  ? codegen_type_alignment(c, t)
+                                  : 8,
+                     .size = size);
     if (codegen_type_is_record(c, t) || codegen_type_is_array(c, t)) {
         /* "Any argument that doesn't fit in 8 bytes, or is not 1, 2, 4, or 8 bytes, must be
 		   passed by reference" (an empty record too) */
@@ -120,19 +121,19 @@ static bool x64w_byref(const walk_argument *a)
 
 static codegen_lvalue x64w_fr(int64_t off)
 {
-    return (codegen_lvalue){
-        .kind = CODEGEN_LVALUE_FRAME, .offset = off, .align = 8};
+    return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 8,
+                       .offset = off);
 }
 
 /* the first size bytes of xmm0 stored to the frame slot at off (X64_OP_ST) or loaded from the object at
    [r] (X64_OP_LD, off the register): a short vector result, no wider than it is */
 VPRIV void x64w_xmm_part(codegen_context *e, int op, int64_t off, int size)
 {
-    codegen_lvalue m = op == X64_OP_ST
-                           ? x64w_fr(off)
-                           : (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                                              .register_number = (uint8_t)off,
-                                              .align = 1};
+    codegen_lvalue m =
+        op == X64_OP_ST
+            ? x64w_fr(off)
+            : VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                          .register_number = (uint8_t)off, .align = 1);
 
     if (size == 8 || size == 4) {
         x64_record_emit_memory(e, op, size, XMM0, &m, false);

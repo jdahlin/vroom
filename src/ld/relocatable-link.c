@@ -1,5 +1,6 @@
 /* ld -r: relocatable output. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ================= ld -r ================= */
@@ -44,7 +45,7 @@ static uint32_t ld_relocatable_section_create(struct ld_context *ctx,
 
 static void ld_relocatable_locals_count(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     uint32_t n = 0;
     uint64_t str = 0;
@@ -60,14 +61,15 @@ static void ld_relocatable_locals_count(void *arg, size_t i)
     o->kept_local_count = n;
     o->local_string_bytes = str;
     ctx->relocatable.local_symbol_map[i] =
-        o->first_global_index
-            ? ld_region_alloc(o->first_global_index * sizeof(uint32_t))
-            : NULL;
+        (uint32_t *)(o->first_global_index
+                         ? ld_region_alloc(o->first_global_index *
+                                           sizeof(uint32_t))
+                         : NULL);
 }
 
 static void ld_relocatable_locals_write(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes)
         return;
@@ -113,7 +115,7 @@ static void ld_relocatable_locals_write(void *arg, size_t i)
 
 static void ld_relocatable_globals_write(void *arg, size_t c)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t b = c * 4096, e = b + 4096 < ctx->symbols.order.n
                                    ? b + 4096
                                    : ctx->symbols.order.n;
@@ -155,7 +157,7 @@ static void ld_relocatable_globals_write(void *arg, size_t c)
 
 static void ld_relocatable_input_section_write(void *arg, size_t j)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t si = ctx->output.write_jobs.v[j];
     ld_input_section *is = &ctx->inputs.sections.v[si];
     ld_relocatable_section *r =
@@ -211,7 +213,8 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     uint32_t cap = 1024;
     while (cap < ctx->inputs.sections.n)
         cap *= 2;
-    ctx->relocatable.section_map = ld_region_alloc(cap * sizeof(uint32_t));
+    ctx->relocatable.section_map =
+        (uint32_t *)(ld_region_alloc(cap * sizeof(uint32_t)));
     memset(ctx->relocatable.section_map, 0xff, cap * sizeof(uint32_t));
     ctx->relocatable.section_map_mask = cap - 1;
     for (uint32_t i = 0; i < ctx->inputs.sections.n; i++) {
@@ -309,13 +312,13 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     ctx->relocatable.shstrtab_size = shs;
 
     /* symbols: null, section symbols, locals per file, globals */
-    ctx->relocatable.local_symbol_map =
-        ld_region_alloc(ctx->inputs.objects.n * sizeof(uint32_t *));
+    ctx->relocatable.local_symbol_map = (uint32_t **)(ld_region_alloc(
+        ctx->inputs.objects.n * sizeof(uint32_t *)));
     ld_parallel_for(ctx->inputs.objects.n, ld_relocatable_locals_count, ctx);
     ctx->relocatable.local_first_index =
-        ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t));
+        (uint64_t *)(ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t)));
     ctx->relocatable.local_string_offsets =
-        ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t));
+        (uint64_t *)(ld_region_alloc(ctx->inputs.objects.n * sizeof(uint64_t)));
     uint64_t idx = 1 + ctx->relocatable.sections.n, str = 1;
     for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
         ctx->relocatable.sections.v[i].section_symbol = 1 + i;
@@ -362,7 +365,7 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     uint64_t shoff_r = ld_value_align_up(off, 8);
     uint64_t fsize = shoff_r + (uint64_t)ctx->relocatable.section_header_count *
                                    sizeof(elf_section_header);
-    ctx->relocatable.image = ld_region_large_alloc(fsize);
+    ctx->relocatable.image = (uint8_t *)ld_region_large_alloc(fsize);
     ld_phase_time_report(ctx, "-r: layout");
 
     /* contents and relocations */
@@ -418,10 +421,10 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
         elf_symbol *sy = (elf_symbol *)(ctx->relocatable.image +
                                         ctx->relocatable.symtab_offset);
         for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++)
-            sy[1 + i] = (elf_symbol){
-                .st_info = STB_LOCAL << 4 | STT_SECTION,
-                .st_shndx =
-                    ctx->relocatable.sections.v[i].section_header_index};
+            sy[1 + i] = VCC_LITERAL(
+                elf_symbol, .st_info = STB_LOCAL << 4 | STT_SECTION,
+                .st_shndx = (uint16_t)(ctx->relocatable.sections.v[i]
+                                           .section_header_index));
     }
     ld_phase_time_report(ctx, "-r: copy, relocations, symbols");
 
@@ -433,14 +436,10 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
         ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
         strcpy(shstr + r->name_offset, r->name);
-        shd[r->section_header_index] =
-            (elf_section_header){.sh_name = r->name_offset,
-                                 .sh_type = r->type,
-                                 .sh_flags = r->flags,
-                                 .sh_offset = r->offset,
-                                 .sh_size = r->size,
-                                 .sh_addralign = r->alignment,
-                                 .sh_entsize = r->entry_size};
+        shd[r->section_header_index] = VCC_LITERAL(
+            elf_section_header, .sh_name = r->name_offset, .sh_type = r->type,
+            .sh_flags = r->flags, .sh_offset = r->offset, .sh_size = r->size,
+            .sh_addralign = r->alignment, .sh_entsize = r->entry_size);
         if (r->group) { /* sh_link the symbol table, sh_info the signature */
             const ld_input_section *gs = &ctx->inputs.sections.v[r->group - 1];
             const ld_object *o = ctx->inputs.objects.v[gs->object];
@@ -458,43 +457,36 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
         }
         if (r->rela_count) {
             sprintf(shstr + r->rela_name_offset, ".rela%s", r->name);
-            shd[r->rela_section_header_index] = (elf_section_header){
-                .sh_name = r->rela_name_offset,
-                .sh_type = SHT_RELA,
-                .sh_flags =
-                    SHF_INFO_LINK | (r->is_group_member ? SHF_GROUP : 0),
-                .sh_offset = r->rela_offset,
-                .sh_size = r->rela_count * sizeof(elf_rela),
-                .sh_link = ctx->relocatable.symtab_index,
-                .sh_info = r->section_header_index,
-                .sh_addralign = 8,
-                .sh_entsize = sizeof(elf_rela)};
+            shd[r->rela_section_header_index] =
+                VCC_LITERAL(elf_section_header, .sh_name = r->rela_name_offset,
+                            .sh_type = SHT_RELA,
+                            .sh_flags = SHF_INFO_LINK |
+                                        (r->is_group_member ? SHF_GROUP : 0),
+                            .sh_offset = r->rela_offset,
+                            .sh_size = r->rela_count * sizeof(elf_rela),
+                            .sh_link = ctx->relocatable.symtab_index,
+                            .sh_info = r->section_header_index,
+                            .sh_addralign = 8, .sh_entsize = sizeof(elf_rela));
         }
     }
     strcpy(shstr + shs_symtab, ".symtab");
     strcpy(shstr + shs_strtab, ".strtab");
     strcpy(shstr + shs_shstrtab, ".shstrtab");
-    shd[ctx->relocatable.symtab_index] = (elf_section_header){
-        .sh_name = shs_symtab,
-        .sh_type = SHT_SYMTAB,
-        .sh_offset = ctx->relocatable.symtab_offset,
+    shd[ctx->relocatable.symtab_index] = VCC_LITERAL(
+        elf_section_header, .sh_name = (uint32_t)(shs_symtab),
+        .sh_type = SHT_SYMTAB, .sh_offset = ctx->relocatable.symtab_offset,
         .sh_size = ctx->relocatable.symbol_count * sizeof(elf_symbol),
         .sh_link = ctx->relocatable.strtab_index,
-        .sh_info = ctx->relocatable.local_count,
-        .sh_addralign = 8,
-        .sh_entsize = sizeof(elf_symbol)};
-    shd[ctx->relocatable.strtab_index] =
-        (elf_section_header){.sh_name = shs_strtab,
-                             .sh_type = SHT_STRTAB,
-                             .sh_offset = ctx->relocatable.strtab_offset,
-                             .sh_size = strsz,
-                             .sh_addralign = 1};
-    shd[ctx->relocatable.shstrtab_index] =
-        (elf_section_header){.sh_name = shs_shstrtab,
-                             .sh_type = SHT_STRTAB,
-                             .sh_offset = ctx->relocatable.shstrtab_offset,
-                             .sh_size = ctx->relocatable.shstrtab_size,
-                             .sh_addralign = 1};
+        .sh_info = (uint32_t)(ctx->relocatable.local_count), .sh_addralign = 8,
+        .sh_entsize = sizeof(elf_symbol));
+    shd[ctx->relocatable.strtab_index] = VCC_LITERAL(
+        elf_section_header, .sh_name = (uint32_t)(shs_strtab),
+        .sh_type = SHT_STRTAB, .sh_offset = ctx->relocatable.strtab_offset,
+        .sh_size = strsz, .sh_addralign = 1);
+    shd[ctx->relocatable.shstrtab_index] = VCC_LITERAL(
+        elf_section_header, .sh_name = (uint32_t)(shs_shstrtab),
+        .sh_type = SHT_STRTAB, .sh_offset = ctx->relocatable.shstrtab_offset,
+        .sh_size = ctx->relocatable.shstrtab_size, .sh_addralign = 1);
     elf_file_header *eh = (elf_file_header *)ctx->relocatable.image;
     memcpy(eh->e_ident, "\177ELF\2\1\1", 7);
     eh->e_type = 1;

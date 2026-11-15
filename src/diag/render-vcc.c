@@ -1,4 +1,5 @@
 /* Vcc's own text style and its flush. */
+#include "common/literal.h"
 #include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
@@ -114,15 +115,12 @@ static bool mk(const pp_file_entry *e, uint32_t b, uint32_t en, char ch,
         en = size;
     if (en == b)
         en = b + 1; /* a point */
-    *m = (mark){b,
-                en,
-                lstart(s, b),
-                lstart(s, en - 1 < size ? en - 1 : (size ? size - 1 : 0)),
-                label,
-                ch,
-                (uint8_t)(ch == '^'   ? 3
-                          : ch == '~' ? 2
-                                      : 1)};
+    *m = VCC_LITERAL(mark, b, en, lstart(s, b),
+                     lstart(s, en - 1 < size ? en - 1 : (size ? size - 1 : 0)),
+                     label, ch,
+                     (uint8_t)(ch == '^'   ? 3
+                               : ch == '~' ? 2
+                                           : 1));
     if (m->le < m->lb)
         m->le = m->lb;
     return true;
@@ -203,9 +201,9 @@ static void diag_vcc_snippet_line_render(pp *p, vbuffer *b,
     }
     vbuffer_string_append(b, "\n");
     /* the marks: each column to the mark that wins it */
-    row = calloc(lw + 2, 1);
+    row = (char *)calloc(lw + 2, 1);
     {
-        uint8_t *pri = calloc(lw + 2, 1);
+        uint8_t *pri = (uint8_t *)calloc(lw + 2, 1);
 
         memset(row, ' ', lw + 1);
         for (int i = 0; i < nm; i++) {

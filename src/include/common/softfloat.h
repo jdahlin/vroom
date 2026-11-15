@@ -653,7 +653,7 @@ F128_UNUSED static u128 vsoftfloat_parse_with_precision(const char *s, size_t n,
         }
         /* limbs: the digits, 10^|E| and the shift below, with room */
         b.cap = (int)(nd / 9 + 2 + (5000 + 40000 / 9) / 9 * 2 + 600);
-        b.w = calloc((size_t)b.cap, 4);
+        b.w = (uint32_t *)(calloc((size_t)b.cap, 4));
         if (!b.w)
             vout_of_memory();
         b.n = 0;
@@ -683,7 +683,7 @@ F128_UNUSED static u128 vsoftfloat_parse_with_precision(const char *s, size_t n,
         if (e10 >= 0) {
             int bits;
 
-            b.w = realloc(b.w, (size_t)(b.cap + e10 / 9 + 4) * 4);
+            b.w = (uint32_t *)(realloc(b.w, (size_t)(b.cap + e10 / 9 + 4) * 4));
             if (!b.w)
                 vout_of_memory();
             b.cap += (int)(e10 / 9 + 4);
@@ -699,7 +699,7 @@ F128_UNUSED static u128 vsoftfloat_parse_with_precision(const char *s, size_t n,
         }
         /* D / 10^-E: shift D so that the quotient has 120 bits */
         d.cap = (int)(-e10 / 9 + 8);
-        d.w = calloc((size_t)d.cap, 4);
+        d.w = (uint32_t *)(calloc((size_t)d.cap, 4));
         if (!d.w)
             vout_of_memory();
         d.w[0] = 1, d.n = 1;
@@ -707,14 +707,15 @@ F128_UNUSED static u128 vsoftfloat_parse_with_precision(const char *s, size_t n,
             vsoftfloat_big_multiply_small(&d, 10, 0);
         k = vsoftfloat_big_bit_count(&d) - vsoftfloat_big_bit_count(&b) + 120;
         if (k < 0) { /* D is the longer one: shift 10^-E up instead */
-            d.w = realloc(d.w, (size_t)(d.n + -k / 32 + 4) * 4);
+            d.w = (uint32_t *)(realloc(d.w, (size_t)(d.n + -k / 32 + 4) * 4));
             if (!d.w)
                 vout_of_memory();
             d.cap = d.n + -k / 32 + 4;
             vsoftfloat_big_shift_left(&d, -k);
         } else {
             if (b.cap < b.n + k / 32 + 2) {
-                b.w = realloc(b.w, (size_t)(b.n + k / 32 + 4) * 4);
+                b.w =
+                    (uint32_t *)(realloc(b.w, (size_t)(b.n + k / 32 + 4) * 4));
                 if (!b.w)
                     vout_of_memory();
                 b.cap = b.n + k / 32 + 4;

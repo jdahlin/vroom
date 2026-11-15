@@ -1,5 +1,6 @@
 #ifndef VCC_COMMON_SCRATCH_H
 #define VCC_COMMON_SCRATCH_H
+#include "common/literal.h"
 #include <stdlib.h>
 
 /* Reusable heap-backed workspace for passes that can size all tables up front.
@@ -26,7 +27,7 @@ static inline void *vscratch_get(vscratch *s, size_t bytes)
 static inline void vscratch_destroy(vscratch *s)
 {
     free(s->p);
-    *s = (vscratch){0};
+    *s = VCC_LITERAL(vscratch, 0);
 }
 
 #endif

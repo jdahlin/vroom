@@ -1,6 +1,7 @@
 /* Wasm exact-cell DSE across structured joins. Control topology is recorded
  * by typed emitter hooks from entry; instruction text is never inspected.
  * Initial scope excludes loops, dispatchers, EH and dynamic frames. */
+#include "common/literal.h"
 #include "wimpl.h"
 
 #define WFLOW_EVENTS 8192u
@@ -31,7 +32,7 @@ static wflow_event *wf_event(ecx *e, int kind)
     }
     if (W->nflow == W->capflow) {
         uint32_t cap = W->capflow ? W->capflow * 2 : 32;
-        wflow_event *p = realloc(W->flow, cap * sizeof(*p));
+        wflow_event *p = (wflow_event *)realloc(W->flow, cap * sizeof(*p));
 
         if (!p) {
             W->flowfailed = true;
@@ -41,11 +42,9 @@ static wflow_event *wf_event(ecx *e, int kind)
         W->capflow = cap;
     }
     wflow_event *f = &W->flow[W->nflow++];
-    *f = (wflow_event){.at = W->nmem,
-                       .kind = (uint8_t)kind,
-                       .token = UINT32_MAX,
-                       .end = UINT32_MAX,
-                       .alternate = UINT32_MAX};
+    *f = VCC_LITERAL(wflow_event, .at = W->nmem, .token = UINT32_MAX,
+                     .end = UINT32_MAX, .alternate = UINT32_MAX,
+                     .kind = (uint8_t)kind);
     return f;
 }
 
@@ -138,13 +137,15 @@ VPRIV void wflow_optimize(ecx *e)
     em_flow_transfer *t = NULL;
     em_flow_edge *edges = NULL;
     uint32_t stores[64] = {0}, bits = 0, ne = 0, blocks = W->nflow + 1;
+    uint64_t all;
+    uint32_t budget;
     bool candidate = false;
 
     if (W->flowfailed || W->flowdepth || !W->flowjoins || W->flowstores < 2 ||
         W->dyn || W->nsj || W->ngdx || W->memfailed || !s->valid)
         return;
-    map = calloc(s->count, 1);
-    bit = malloc(W->nmem);
+    map = (uint8_t *)calloc(s->count, 1);
+    bit = (uint8_t *)malloc(W->nmem);
     if (!map || !bit)
         goto done;
     for (uint32_t i = 1; i < s->count; i++) {
@@ -156,7 +157,7 @@ VPRIV void wflow_optimize(ecx *e)
     }
     if (!bits)
         goto done;
-    uint64_t all = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+    all = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
     for (uint32_t i = 0; i < W->nmem; i++) {
         wmem *m = &W->mem[i];
         bit[i] = UINT8_MAX;
@@ -173,9 +174,9 @@ VPRIV void wflow_optimize(ecx *e)
         goto done;
     /* Adjacency and solver storage are allocated only for an actual private
 	 * repeated-store candidate after complete function/cell collection. */
-    t = calloc(blocks, sizeof(*t));
-    edges = malloc((size_t)blocks * 2 * sizeof(*edges));
-    dead = calloc(W->nmem, 1);
+    t = (em_flow_transfer *)calloc(blocks, sizeof(*t));
+    edges = (em_flow_edge *)malloc((size_t)blocks * 2 * sizeof(*edges));
+    dead = (uint8_t *)calloc(W->nmem, 1);
     if (!t || !edges || !dead)
         goto done;
     for (uint32_t b = 0; b < blocks; b++) {
@@ -224,11 +225,11 @@ VPRIV void wflow_optimize(ecx *e)
         }
         if (target >= blocks)
             goto done;
-        edges[ne++] = (em_flow_edge){b, target};
+        edges[ne++] = VCC_LITERAL(em_flow_edge, b, target);
         if (fall && target != b + 1)
-            edges[ne++] = (em_flow_edge){b, b + 1};
+            edges[ne++] = VCC_LITERAL(em_flow_edge, b, b + 1);
     }
-    uint32_t budget = 64 + W->nmem + 32 * (blocks + ne);
+    budget = 64 + W->nmem + 32 * (blocks + ne);
     if (budget > WFLOW_WORK)
         budget = WFLOW_WORK;
     if (!em_flow_build(&W->flowgraph, blocks, edges, ne, true) ||

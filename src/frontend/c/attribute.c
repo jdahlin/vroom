@@ -152,7 +152,7 @@ CC_PRIVATE void cc_attribute_table_init(void)
 
             if (!cc_attribute_directory[id >> CC_DIRECTORY_BITS])
                 cc_attribute_directory[id >> CC_DIRECTORY_BITS] =
-                    calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t));
+                    (uint32_t *)(calloc(CC_DIRECTORY_PAGE, sizeof(uint32_t)));
             cc_attribute_directory[id >> CC_DIRECTORY_BITS]
                                   [id & (CC_DIRECTORY_PAGE - 1)] = (uint32_t)i;
         }

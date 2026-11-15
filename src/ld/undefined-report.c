@@ -26,7 +26,7 @@ static const char *ld_spelling_suggestion_find(struct ld_context *ctx,
                                                const char **where)
 {
     size_t n = strlen(name);
-    char *b = malloc(n + 2);
+    char *b = (char *)malloc(n + 2);
     const char *r = NULL;
 
     if (!b)

@@ -41,7 +41,7 @@ static char *viralloc_file_read(const char *path, size_t *n)
     fseek(fp, 0, SEEK_END);
     sz = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    b = malloc((size_t)sz + 1);
+    b = (char *)(malloc((size_t)sz + 1));
     if (!b || (sz > 0 && fread(b, 1, (size_t)sz, fp) != (size_t)sz)) {
         fclose(fp);
         free(b);

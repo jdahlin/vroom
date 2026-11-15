@@ -20,6 +20,7 @@
  * by its ".weak.NAME.default[.UNIQUE]" definition; then one .file symbol per .file name.  The header's
  * time stamp is 0.  Names longer than 8 are in the string table, tail-merged as StringTableBuilder does.
  */
+#include "common/literal.h"
 #include "../../obj/objimpl.h"
 #include "platform/win/coff-format.h"
 #include "common/leb128.h"
@@ -93,7 +94,7 @@ VPRIV void *coff_grow(ElfObj *o, void *old, uint32_t count, uint32_t *capacity,
 VPRIV CoffState *coff_state(ElfObj *o)
 {
     if (!o->coff) {
-        o->coff = rpush(&o->arena, sizeof *o->coff, 8);
+        o->coff = (struct CoffState *)rpush(&o->arena, sizeof *o->coff, 8);
         memset(o->coff, 0, sizeof *o->coff);
         o->coff->current = -1;
     }
@@ -160,11 +161,11 @@ void coff_section_late(ElfObj *o, uint32_t sec)
 void coff_file_name(ElfObj *o, const char *name, uint32_t len)
 {
     CoffState *c = coff_state(o);
-    char *p = rpush(&o->arena, len + 1, 1);
+    char *p = (char *)rpush(&o->arena, len + 1, 1);
     memcpy(p, name, len);
     p[len] = 0;
-    c->files = coff_grow(o, c->files, c->file_count, &c->file_capacity,
-                         sizeof *c->files);
+    c->files = (__typeof__(c->files))coff_grow(
+        o, c->files, c->file_count, &c->file_capacity, sizeof *c->files);
     c->files[c->file_count].name = p;
     c->files[c->file_count].length = len;
     c->file_count++;
@@ -221,7 +222,7 @@ static void coff_relocation(ElfObj *o, CoffOut *w, ElfFix *x, uint64_t P,
         c += 4; /* relative to the end of the field */
     x64_patch(o, x, c);
     w->relocations[w->relocation_count++] =
-        (CoffRelocation){(uint32_t)P, target, type};
+        VCC_LITERAL(CoffRelocation, (uint32_t)P, target, type);
     elf_sec(o, sec)->nfix_reloc++;
 }
 
@@ -342,8 +343,8 @@ static void coff_resolve(ElfObj *o, CoffOut *w, ElfFix *x)
 
 static uint32_t coff_entry_add(ElfObj *o, CoffOut *w, int kind, uint32_t ref)
 {
-    w->entries = coff_grow(o, w->entries, w->entry_count, &w->entry_capacity,
-                           sizeof *w->entries);
+    w->entries = (CoffEntry *)coff_grow(o, w->entries, w->entry_count,
+                                        &w->entry_capacity, sizeof *w->entries);
     CoffEntry *e = &w->entries[w->entry_count];
     memset(e, 0, sizeof *e);
     e->kind = (uint8_t)kind;
@@ -370,7 +371,7 @@ static int coff_is_external(const ElfSym *y)
 static void coff_strings(ElfObj *o, CoffOut *w, vstring_ref *v, uint32_t n)
 {
     uint32_t size = vstring_table_layout(v, n, 4);
-    uint8_t *t = rpush(&o->arena, size, 8);
+    uint8_t *t = (uint8_t *)rpush(&o->arena, size, 8);
 
     put(t, size, 4);
     vstring_table_fill(t, v, n, 0);
@@ -382,7 +383,7 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
 {
     uint32_t ns = o->nsec;
     CoffState *cs = o->coff;
-    w->entry_of = rpush(&o->arena, sizeof(uint32_t) * o->nsym, 8);
+    w->entry_of = (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * o->nsym, 8));
     memset(w->entry_of, 0, sizeof(uint32_t) * o->nsym);
     /* sections, each with its COMDAT symbol */
     for (uint32_t i = 1; i < ns; i++) {
@@ -448,7 +449,7 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
                       : coff_is_external(y) ? COFF_CLASS_EXTERNAL
                                             : COFF_CLASS_STATIC;
         if (e->kind == COFF_ENTRY_WEAK_DEFAULT) {
-            char *n = rpush(&o->arena, y->len + 16, 1);
+            char *n = (char *)rpush(&o->arena, y->len + 16, 1);
             memcpy(n, ".weak.", 6);
             memcpy(n + 6, y->name, y->len);
             memcpy(n + 6 + y->len, ".default", 9);
@@ -497,7 +498,8 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
                 CoffEntry *e = &w->entries[i];
                 if (e->kind != COFF_ENTRY_WEAK_DEFAULT)
                     continue;
-                char *n = rpush(&o->arena, e->length + unique->length + 2, 1);
+                char *n =
+                    (char *)rpush(&o->arena, e->length + unique->length + 2, 1);
                 memcpy(n, e->name, e->length);
                 n[e->length] = '.';
                 memcpy(n + e->length + 1, unique->name, unique->length);
@@ -521,20 +523,22 @@ static void coff_symbols(ElfObj *o, CoffOut *w)
     }
     w->symbol_count = index;
     /* the string table: long section names, then long symbol names */
-    vstring_ref *sv =
-        rpush(&o->arena, sizeof(vstring_ref) * (ns + w->entry_count + 1), 8);
+    vstring_ref *sv = (vstring_ref *)(rpush(
+        &o->arena, sizeof(vstring_ref) * (ns + w->entry_count + 1), 8));
     uint32_t n = 0;
     for (uint32_t i = 1; i < ns; i++) {
         uint32_t s = w->creation[i];
         ElfSec *se = elf_sec(o, s);
         w->section_string[s] = 0;
         if (se->len > 8)
-            sv[n++] = (vstring_ref){se->name, se->len, &w->section_string[s]};
+            sv[n++] = VCC_LITERAL(vstring_ref, se->name, se->len,
+                                  &w->section_string[s]);
     }
     for (uint32_t i = 0; i < w->entry_count; i++) {
         CoffEntry *e = &w->entries[i];
         if (e->length > 8)
-            sv[n++] = (vstring_ref){e->name, e->length, &e->string_offset};
+            sv[n++] =
+                VCC_LITERAL(vstring_ref, e->name, e->length, &e->string_offset);
     }
     coff_strings(o, w, sv, n);
 }
@@ -561,7 +565,7 @@ static void coff_uleb(uint8_t *p, uint32_t *n, uint32_t v)
 
 size_t coff_finish(ElfObj *o)
 {
-    CoffOut *w = rpush(&o->arena, sizeof *w, 8);
+    CoffOut *w = (CoffOut *)rpush(&o->arena, sizeof *w, 8);
     memset(w, 0, sizeof *w);
     o->fin = w;
     if (o->machine != EM_X86_64) {
@@ -576,7 +580,7 @@ size_t coff_finish(ElfObj *o)
         w->addrsig =
             coff_section(o, ".llvm_addrsig", 13, COFF_SCN_LNK_REMOVE, 0, 0);
     uint32_t ns = o->nsec;
-    w->creation = rpush(&o->arena, sizeof(uint32_t) * ns, 8);
+    w->creation = (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * ns, 8));
     uint32_t late = o->coff ? o->coff->late_count : 0, k = 1;
     for (uint32_t s = 1; s < ns; s++) {
         int is_late = 0;
@@ -596,7 +600,8 @@ size_t coff_finish(ElfObj *o)
     }
     elf_layout(o);
     /* section numbers: associative COMDAT sections after the others (MC, for link.exe) */
-    w->section_number = rpush(&o->arena, sizeof(uint32_t) * ns * 4, 8);
+    w->section_number =
+        (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * ns * 4, 8));
     w->section_order = w->section_number + ns;
     w->section_entry = w->section_number + 2 * ns;
     w->section_string = w->section_number + 3 * ns;
@@ -626,7 +631,7 @@ size_t coff_finish(ElfObj *o)
         }
         se->nfix_reloc = 0;
     }
-    w->is_comdat_key = rpush(&o->arena, o->nsym + 1, 8);
+    w->is_comdat_key = (uint8_t *)rpush(&o->arena, o->nsym + 1, 8);
     memset(w->is_comdat_key, 0, o->nsym + 1);
     for (uint32_t s = 1; s < ns;
          s++) /* (MC: a relocation names a temporary COMDAT symbol itself) */
@@ -634,15 +639,17 @@ size_t coff_finish(ElfObj *o)
             elf_sec(o, s)->comdat != COFF_SELECT_ASSOCIATIVE)
             w->is_comdat_key[elf_sec(o, s)->group] = 1;
     /* fixups, in layout order */
-    w->relocations =
-        rpush(&o->arena, sizeof(CoffRelocation) * (o->nfix + 1), 8);
-    w->symidx = rpush(&o->arena, sizeof(uint32_t) * (o->nfix + 1), 8);
+    w->relocations = (CoffRelocation *)(rpush(
+        &o->arena, sizeof(CoffRelocation) * (o->nfix + 1), 8));
+    w->symidx =
+        (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * (o->nfix + 1), 8));
     ElfFix *fx = (ElfFix *)o->fixes.base;
     ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i)
     coff_resolve(o, w, &fx[i]);
     if (o->has_err)
         return 0;
-    w->relocation_first = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);
+    w->relocation_first =
+        (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8));
     for (uint32_t s = 1, k = 0; s <= ns; s++) {
         w->relocation_first[s] = k;
         if (s < ns)
@@ -661,7 +668,8 @@ size_t coff_finish(ElfObj *o)
         put(x->p, index, 4);
     }
     if (w->addrsig) { /* the symbols' indices (a temporary: its section's), registered ones only */
-        uint8_t *b = rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
+        uint8_t *b =
+            (uint8_t *)(rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1));
         uint32_t n = 0;
         for (uint32_t i = 0; i < o->naddrsig; i++) {
             ElfSym *y = elf_symp(o, o->addrsig[i]);
@@ -683,7 +691,8 @@ size_t coff_finish(ElfObj *o)
     if (o->has_err)
         return 0;
     /* file offsets: each section's data, then its relocations */
-    w->raw_offset = rpush(&o->arena, sizeof(uint64_t) * ns * 2, 8);
+    w->raw_offset =
+        (uint64_t *)(rpush(&o->arena, sizeof(uint64_t) * ns * 2, 8));
     w->relocation_offset = w->raw_offset + ns;
     uint64_t off = 20 + 40 * (uint64_t)(ns - 1);
     for (uint32_t i = 1; i < ns; i++) {
@@ -736,7 +745,7 @@ static void coff_section_name(uint8_t *p, const ElfSec *se,
 
 void coff_emit(ElfObj *o, uint8_t *b)
 {
-    CoffOut *w = o->fin;
+    CoffOut *w = (CoffOut *)o->fin;
     CoffState *cs = o->coff;
     uint32_t ns = o->nsec, crc_table[256];
     memset(b, 0, w->size);
@@ -750,7 +759,7 @@ void coff_emit(ElfObj *o, uint8_t *b)
     put(b + 2, ns - 1, 2);
     put(b + 8, w->symbol_offset, 4);
     put(b + 12, w->symbol_count, 4);
-    uint32_t *crc = rpush(&o->arena, sizeof(uint32_t) * ns, 8);
+    uint32_t *crc = (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * ns, 8));
     for (uint32_t s = 1; s < ns; s++) {
         ElfSec *se = elf_sec(o, s);
         uint32_t n = se->nfix_reloc, c = 0;

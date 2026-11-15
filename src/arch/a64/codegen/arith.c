@@ -1,4 +1,5 @@
 /* vcc code generator: integer helpers, truth tests, casts, arithmetic */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /* ---------------- integer helpers ---------------- */
@@ -812,9 +813,9 @@ VPRIV codegen_value a64_bigcvt(codegen_context *e, codegen_value v,
             int hi = treg(e);
             a64_record_emit_memory(e, A64_OP_LD, 3, 0, hi, p, 8);
             val_free(e, &v);
-            return (codegen_value){.kind = CODEGEN_VALUE_REGISTER_PAIR,
-                                   .register_number = (uint8_t)lo,
-                                   .register_high = (uint8_t)hi};
+            return VCC_LITERAL(
+                codegen_value, .kind = CODEGEN_VALUE_REGISTER_PAIR,
+                .register_number = (uint8_t)lo, .register_high = (uint8_t)hi);
         }
         val_free(e, &v);
         if (codegen_type_size(c, to) < 8)

@@ -1,5 +1,6 @@
 /* -shared output: symbol versions, .dynsym, .dynstr, hash tables, .dynamic. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- -shared: versions, dynamic sections, PHDRS ---------------- */
@@ -90,9 +91,8 @@ VPRIV void ld_dynamic_symbol_define(struct ld_context *ctx)
     }
     s->state = LD_SYMBOL_STATE_SCRIPT;
     s->expression_value =
-        (ld_expression_value){.kind = LD_VALUE_KIND_INPUT_SECTION,
-                              .index = ctx->output.dynamic_section,
-                              .alignment = 1};
+        VCC_LITERAL(ld_expression_value, .kind = LD_VALUE_KIND_INPUT_SECTION,
+                    .index = ctx->output.dynamic_section, .alignment = 1);
     s->binding = STB_WEAK;
     s->type = STT_NOTYPE;
     s->visibility = STV_HIDDEN;
@@ -122,7 +122,8 @@ VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
     }
     /* .gnu.hash: undefined symbols first, then stable by bucket */
     uint32_t n = ctx->dynamic.symbols.n, nund = 0;
-    uint32_t *tmp = ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t));
+    uint32_t *tmp =
+        (uint32_t *)(ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t)));
     for (uint32_t i = 0; i < n; i++)
         if (ctx->symbols.globals[ctx->dynamic.symbols.v[i]].state ==
                 LD_SYMBOL_STATE_UNDEFINED ||
@@ -136,7 +137,7 @@ VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
            words) /* llvm::NextPowerOf2: strictly greater */
         ctx->dynamic.gnu_hash_mask_words <<= 1;
     ctx->dynamic.symbol_hashes =
-        ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t));
+        (uint32_t *)(ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t)));
     uint32_t w = nund;
     for (uint32_t b = 0; b < ctx->dynamic.gnu_hash_buckets; b++)
         for (uint32_t i = 0; i < n; i++) {
@@ -157,7 +158,7 @@ VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
     ctx->dynamic.strings.n = ctx->dynamic.string_offsets.n = 0;
     VVEC_PUSH(ctx->dynamic.strings, 0, ld_region_alloc);
     ctx->dynamic.symbol_names =
-        ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t));
+        (uint32_t *)(ld_region_alloc((size_t)(n + 1) * sizeof(uint32_t)));
     for (uint32_t i = 0; i < n; i++) {
         ctx->symbols.globals[ctx->dynamic.symbols.v[i]].dynamic_index = i + 1;
         ctx->dynamic.symbol_hashes[i] = ld_symbol_name_gnu_hash(
@@ -167,8 +168,8 @@ VPRIV void ld_dynamic_sections_build(struct ld_context *ctx)
     }
     const char *fname =
         ctx->options.soname ? ctx->options.soname : ctx->options.output_path;
-    ctx->dynamic.version_name_offsets = ld_region_alloc(
-        (ctx->script.version_definition_count + 1) * sizeof(uint32_t));
+    ctx->dynamic.version_name_offsets = (uint32_t *)(ld_region_alloc(
+        (ctx->script.version_definition_count + 1) * sizeof(uint32_t)));
     if (ctx->script.version_definition_count) {
         ctx->dynamic.soname_offset = ld_dynamic_string_add(ctx, fname);
         for (uint32_t v = 0, k = 0; v < ctx->script.version_nodes.n; v++)

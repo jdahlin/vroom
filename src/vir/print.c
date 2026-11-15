@@ -817,7 +817,7 @@ void vir_print_unit(vbuffer *b, const vir_unit *u)
         const vir_unit_asm *a = &u->asms[i];
 
         vir_print_append_format(&p, "asm !%u ", i);
-        vir_print_string_append(&p, a->template);
+        vir_print_string_append(&p, a->asm_template);
         vir_print_append(&p, " outs(");
         for (uint32_t k = 0; k < a->output_count; k++) {
             vir_print_append(&p, k ? ", " : "");

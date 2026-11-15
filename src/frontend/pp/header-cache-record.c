@@ -1,4 +1,5 @@
 /* vcc preprocessor: header cache: recording what a region reads and writes while it runs */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 /* a child entry wrote id: not the level's own write any more */
@@ -17,8 +18,8 @@ VPRIV uint64_t *pp_header_cache_stamp_slot(pp *p, uint32_t id)
     uint64_t **pg = &p->recording_stamps[id >> PP_MACRO_PAGE_BITS];
 
     if (unlikely(!*pg)) {
-        *pg = varena_alloc(&p->permanent_region,
-                           PP_MACRO_PAGE_SIZE * sizeof(uint64_t));
+        *pg = (uint64_t *)(varena_alloc(&p->permanent_region,
+                                        PP_MACRO_PAGE_SIZE * sizeof(uint64_t)));
         memset(*pg, 0, PP_MACRO_PAGE_SIZE * sizeof(uint64_t));
     }
     return &(*pg)[id & (PP_MACRO_PAGE_SIZE - 1)];
@@ -46,7 +47,8 @@ VPRIV uint16_t pp_header_cache_counter_provenance_new(pp *p, uint32_t val,
         return 0;
     }
     p->recording.counter_provenance[++p->recording.counter_provenance_count] =
-        (pp_header_cache_counter_provenance){val, off, (uint16_t)len, next};
+        VCC_LITERAL(pp_header_cache_counter_provenance, val, off, (uint16_t)len,
+                    next);
     return (uint16_t)p->recording.counter_provenance_count;
 }
 
@@ -83,11 +85,11 @@ pp_header_cache_counter_read_record(pp *p, const ptok *t, uintptr_t e)
             p); /* such a name defined as a macro, or two runs: give up */
         return;
     }
-    d = varena_alloc(&p->permanent_region, t->len + 1);
+    d = (char *)varena_alloc(&p->permanent_region, t->len + 1);
     memcpy(d, t->s, t->len); /* pasted: the spelling is clean */
     p->recording.counter_reads[p->recording.counter_read_count++] =
-        (pp_header_cache_counter_read){d, t->len, c->offset, c->length,
-                                       c->value};
+        VCC_LITERAL(pp_header_cache_counter_read, d, t->len, c->offset,
+                    c->length, c->value);
 }
 
 /* #define / #undef / pop_macro */
@@ -144,10 +146,9 @@ VPRIV void pp_header_cache_token_record(pp *p, const ptok *t)
 
             if (r->counter_position_count <
                 PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX)
-                r->counter_positions[r->counter_position_count++] =
-                    (pp_header_cache_counter_position){
-                        r->token_count - 1,
-                        (uint32_t)c->offset << 16 | c->length, c->value};
+                r->counter_positions[r->counter_position_count++] = VCC_LITERAL(
+                    pp_header_cache_counter_position, r->token_count - 1,
+                    (uint32_t)c->offset << 16 | c->length, c->value);
             else
                 PP_HEADER_CACHE_REGION_REJECT(p);
         }
@@ -219,8 +220,9 @@ pp_header_cache_child_exclusions_collect(pp *p, const pp_header_cache_entry *e,
 
         if (e->children[i].exclusion_count &&
             lex_character_next < PP_HEADER_CACHE_LEVEL_MAX)
-            xs[m++] = (pp_header_cache_exclusion_run){
-                e->children[i].exclusions, e->children[i].exclusion_count};
+            xs[m++] = VCC_LITERAL(pp_header_cache_exclusion_run,
+                                  e->children[i].exclusions,
+                                  e->children[i].exclusion_count);
         pp_header_cache_child_exclusions_collect(p, e->children[i].e, xs, m);
     }
 }
@@ -264,7 +266,8 @@ VPRIV void pp_header_cache_child_attach(pp *p, const pp_header_cache_entry *e)
         n = w;
         r->child_exclusion_count = x0 + n;
     }
-    r->children[r->child_count++] = (pp_header_cache_recorded_child){e, x0, n};
+    r->children[r->child_count++] =
+        VCC_LITERAL(pp_header_cache_recorded_child, e, x0, n);
     pp_header_cache_child_writes_mark(p, e);
 }
 _Thread_local ptok *pp_recording_spare_tokens;
@@ -291,28 +294,34 @@ VPRIV void pp_header_cache_region_begin(pp *p, pp_header_cache_key *k)
         pp_recording_spare_buffers.t = NULL;
     }
     if (!r->touches) {
-        r->touches = pp_address_space_reserve(
-            PP_HEADER_CACHE_TOUCH_MAX * sizeof(pp_header_cache_touch_record));
-        r->once_marks = pp_address_space_reserve(
-            PP_HEADER_CACHE_ONCE_MARK_MAX * sizeof(pp_header_cache_once_mark));
+        r->touches = (pp_header_cache_touch_record *)(pp_address_space_reserve(
+            PP_HEADER_CACHE_TOUCH_MAX * sizeof(pp_header_cache_touch_record)));
+        r->once_marks = (pp_header_cache_once_mark *)(pp_address_space_reserve(
+            PP_HEADER_CACHE_ONCE_MARK_MAX * sizeof(pp_header_cache_once_mark)));
         r->counter_positions =
-            pp_address_space_reserve(PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX *
-                                     sizeof(pp_header_cache_counter_position));
+            (pp_header_cache_counter_position *)(pp_address_space_reserve(
+                PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX *
+                sizeof(pp_header_cache_counter_position)));
         r->counter_reads =
-            pp_address_space_reserve(PP_HEADER_CACHE_COUNTER_READ_MAX *
-                                     sizeof(pp_header_cache_counter_read));
+            (pp_header_cache_counter_read *)(pp_address_space_reserve(
+                PP_HEADER_CACHE_COUNTER_READ_MAX *
+                sizeof(pp_header_cache_counter_read)));
         r->segments =
-            pp_address_space_reserve(PP_HEADER_CACHE_SEGMENT_MAX *
-                                     sizeof(pp_header_cache_recorded_segment));
-        r->counter_provenance = pp_address_space_reserve(
-            (PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX + 1) *
-            sizeof(pp_header_cache_counter_provenance));
-        r->children = pp_address_space_reserve(
-            PP_HEADER_CACHE_CHILD_MAX * sizeof(pp_header_cache_recorded_child));
-        r->child_exclusions = pp_address_space_reserve(
-            PP_HEADER_CACHE_CHILD_EXCLUSION_MAX * sizeof(uint32_t));
-        r->lookups = pp_address_space_reserve(PP_HEADER_CACHE_LOOKUP_MAX *
-                                              sizeof(pp_header_cache_lookup));
+            (pp_header_cache_recorded_segment *)(pp_address_space_reserve(
+                PP_HEADER_CACHE_SEGMENT_MAX *
+                sizeof(pp_header_cache_recorded_segment)));
+        r->counter_provenance =
+            (pp_header_cache_counter_provenance *)(pp_address_space_reserve(
+                (PP_HEADER_CACHE_COUNTER_PROVENANCE_MAX + 1) *
+                sizeof(pp_header_cache_counter_provenance)));
+        r->children =
+            (pp_header_cache_recorded_child *)(pp_address_space_reserve(
+                PP_HEADER_CACHE_CHILD_MAX *
+                sizeof(pp_header_cache_recorded_child)));
+        r->child_exclusions = (uint32_t *)(pp_address_space_reserve(
+            PP_HEADER_CACHE_CHILD_EXCLUSION_MAX * sizeof(uint32_t)));
+        r->lookups = (pp_header_cache_lookup *)(pp_address_space_reserve(
+            PP_HEADER_CACHE_LOOKUP_MAX * sizeof(pp_header_cache_lookup)));
     }
     if (p->output_mode == 2 && !r->tokens) {
         if (pp_recording_spare_tokens) {
@@ -320,10 +329,10 @@ VPRIV void pp_header_cache_region_begin(pp *p, pp_header_cache_key *k)
             r->spellings = pp_recording_spare_spellings;
             pp_recording_spare_tokens = NULL;
         } else {
-            r->tokens = pp_address_space_reserve(PP_HEADER_CACHE_TOKEN_MAX *
-                                                 sizeof(ptok));
-            r->spellings =
-                pp_address_space_reserve(PP_HEADER_CACHE_SPELLING_BYTES_MAX);
+            r->tokens = (ptok *)(pp_address_space_reserve(
+                PP_HEADER_CACHE_TOKEN_MAX * sizeof(ptok)));
+            r->spellings = (char *)pp_address_space_reserve(
+                PP_HEADER_CACHE_SPELLING_BYTES_MAX);
         }
     }
     if (!r->level_count) {

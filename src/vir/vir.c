@@ -16,6 +16,7 @@
  * constant or extra tables) sets the thread's fail flag and the builder call returns 0; the caller
  * checks vir_is_failed() before using the function.
  */
+#include "common/literal.h"
 #include "vir-internal.h"
 
 /* ---------------- the thread's reservations (22.2) ---------------- */
@@ -28,31 +29,35 @@ vir_context *vir_context_get(void)
 
     if (c)
         return c;
-    c = calloc(1, sizeof(*c));
+    c = (vir_context *)(calloc(1, sizeof(*c)));
     if (!c)
         abort();
     for (int i = 0; i < 2; i++) {
-        c->insns[i] = vreserve((size_t)VIR_MAX_INS * sizeof(vir_insn),
-                               MAP_NORESERVE, "vir: ins");
-        c->blocks[i] = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_block),
-                                MAP_NORESERVE, "vir: blk");
-        c->locations[i] = vreserve((size_t)VIR_MAX_LOC * sizeof(vir_location),
-                                   MAP_NORESERVE, "vir: loc");
+        c->insns[i] = (vir_insn *)(vreserve(
+            (size_t)VIR_MAX_INS * sizeof(vir_insn), MAP_NORESERVE, "vir: ins"));
+        c->blocks[i] =
+            (vir_block *)(vreserve((size_t)VIR_MAX_BLK * sizeof(vir_block),
+                                   MAP_NORESERVE, "vir: blk"));
+        c->locations[i] = (vir_location *)(vreserve((size_t)VIR_MAX_LOC *
+                                                        sizeof(vir_location),
+                                                    MAP_NORESERVE, "vir: loc"));
     }
-    c->slots = vreserve((size_t)VIR_MAX_SLOT * sizeof(vir_slot), MAP_NORESERVE,
-                        "vir: slot");
-    c->extra_words =
-        vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: extra");
-    c->scratch = vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: tmp");
-    c->auxiliary = vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE, "vir: aux");
-    c->ctab =
-        vreserve(((size_t)1 << VIR_CONSTANT_TABLE_BITS) * sizeof(*c->ctab),
-                 MAP_NORESERVE, "vir: constants");
+    c->slots = (vir_slot *)(vreserve((size_t)VIR_MAX_SLOT * sizeof(vir_slot),
+                                     MAP_NORESERVE, "vir: slot"));
+    c->extra_words = (uint32_t *)(vreserve((size_t)VIR_MAX_EXTRA * 4,
+                                           MAP_NORESERVE, "vir: extra"));
+    c->scratch = (uint32_t *)(vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE,
+                                       "vir: tmp"));
+    c->auxiliary = (uint32_t *)(vreserve((size_t)VIR_MAX_INS * 4, MAP_NORESERVE,
+                                         "vir: aux"));
+    c->ctab = (struct vir_cent *)(vreserve(
+        ((size_t)1 << VIR_CONSTANT_TABLE_BITS) * sizeof(*c->ctab),
+        MAP_NORESERVE, "vir: constants"));
     for (int i = 0; i < 6; i++)
-        c->bs[i] = vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE,
-                            "vir: block scratch");
-    c->sc =
-        vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE, "vir: successors");
+        c->bs[i] = (uint32_t *)(vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE,
+                                         "vir: block scratch"));
+    c->sc = (uint32_t *)(vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE,
+                                  "vir: successors"));
     vir_context_thread = c;
     return c;
 }
@@ -336,7 +341,8 @@ void vir_operand_iterator_init(vir_operand_iterator *it, vir_function *f,
     const vir_opcode_info *oi = &vir_opcode_table[in->op];
     uint32_t op = in->op, ne = f->extra_count;
 
-    *it = (vir_operand_iterator){.function = f, .insn = in, .stride = 1};
+    *it = VCC_LITERAL(vir_operand_iterator, .function = f, .insn = in,
+                      .stride = 1);
     if (op >= VIR_OP_TARGET_FIRST || !oi->name)
         return;
     it->field_mask =
@@ -848,7 +854,8 @@ VPRIV void *vir_unit_alloc(vir_unit *u, size_t n)
         abort();
     if (u->heap_size == u->heap_capacity) {
         u->heap_capacity = u->heap_capacity ? u->heap_capacity * 2 : 64;
-        u->heap = realloc(u->heap, u->heap_capacity * sizeof(void *));
+        u->heap =
+            (void **)(realloc(u->heap, u->heap_capacity * sizeof(void *)));
         if (!u->heap)
             abort();
     }
@@ -858,7 +865,7 @@ VPRIV void *vir_unit_alloc(vir_unit *u, size_t n)
 
 VPRIV const char *vir_unit_string_copy(vir_unit *u, const char *s, size_t n)
 {
-    char *p = vir_unit_alloc(u, n + 1);
+    char *p = (char *)vir_unit_alloc(u, n + 1);
 
     memcpy(p, s, n);
     p[n] = 0;
@@ -869,7 +876,8 @@ VPRIV const char *vir_unit_string_copy(vir_unit *u, const char *s, size_t n)
     do {                                                                       \
         if ((n) == (cap)) {                                                    \
             (cap) = (cap) ? (cap) * 2 : 16;                                    \
-            (arr) = realloc((arr), (size_t)(cap) * sizeof(*(arr)));            \
+            (arr) = (__typeof__(arr))realloc((arr),                            \
+                                             (size_t)(cap) * sizeof(*(arr)));  \
             if (!(arr))                                                        \
                 abort();                                                       \
         }                                                                      \
@@ -921,8 +929,8 @@ uint32_t vir_unit_signature_words_intern(vir_unit *u, const uint32_t *w,
     while (u->signature_word_count + n > u->signature_word_capacity) {
         u->signature_word_capacity =
             u->signature_word_capacity ? u->signature_word_capacity * 2 : 64;
-        u->signature_words =
-            realloc(u->signature_words, (size_t)u->signature_word_capacity * 4);
+        u->signature_words = (uint32_t *)(realloc(
+            u->signature_words, (size_t)u->signature_word_capacity * 4));
         if (!u->signature_words)
             abort();
     }
@@ -948,23 +956,24 @@ static void *vir_array_duplicate(const void *p, size_t n)
 static void vir_function_copy(vir_function *d, const vir_function *f)
 {
     *d = *f;
-    d->insns =
-        vir_array_duplicate(f->insns, (size_t)f->insn_count * sizeof(vir_insn));
-    d->blocks = vir_array_duplicate(f->blocks,
-                                    (size_t)f->block_count * sizeof(vir_block));
-    d->slot =
-        vir_array_duplicate(f->slot, (size_t)f->slot_count * sizeof(vir_slot));
-    d->extra = vir_array_duplicate(f->extra, (size_t)f->extra_count * 4);
-    d->locations = vir_array_duplicate(f->locations, (size_t)f->location_count *
-                                                         sizeof(vir_location));
+    d->insns = (vir_insn *)(vir_array_duplicate(
+        f->insns, (size_t)f->insn_count * sizeof(vir_insn)));
+    d->blocks = (vir_block *)(vir_array_duplicate(
+        f->blocks, (size_t)f->block_count * sizeof(vir_block)));
+    d->slot = (vir_slot *)(vir_array_duplicate(f->slot, (size_t)f->slot_count *
+                                                            sizeof(vir_slot)));
+    d->extra =
+        (uint32_t *)(vir_array_duplicate(f->extra, (size_t)f->extra_count * 4));
+    d->locations = (vir_location *)(vir_array_duplicate(
+        f->locations, (size_t)f->location_count * sizeof(vir_location)));
     d->scratch = NULL;
 }
 
 void vir_function_save(vir_unit *u, const vir_function *f, uint32_t sym)
 {
     VIR_UNIT_GROW(u->functions, u->function_count, u->function_capacity);
-    u->function_symbols = realloc(
-        u->function_symbols, (size_t)u->function_capacity * sizeof(uint32_t));
+    u->function_symbols = (uint32_t *)(realloc(
+        u->function_symbols, (size_t)u->function_capacity * sizeof(uint32_t)));
     if (!u->function_symbols)
         abort();
     vir_function_copy(&u->functions[u->function_count], f);

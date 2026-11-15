@@ -1,4 +1,5 @@
 /* vcc preprocessor: process-wide allocation, the per-file token skeleton, arenas */
+#include "common/literal.h"
 #include "pp-internal.h"
 #include "common/vector.h"
 
@@ -16,7 +17,8 @@ VPRIV void *pp_shared_allocate(size_t n)
     size_t off;
 
     if (unlikely(!b0)) {
-        char *b = pp_address_space_reserve(PP_SHARED_REGION_SIZE), *z = NULL;
+        char *b = (char *)pp_address_space_reserve(PP_SHARED_REGION_SIZE),
+             *z = NULL;
 
         if (__atomic_compare_exchange_n(&pp_shared_region_base, &z, b, 0,
                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
@@ -121,7 +123,7 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
 {
     const lex_token *t = f->tok;
     uint32_t n = f->ntok, count = 0, sp = 0, *stk;
-    pp_skeleton *fi = pp_shared_allocate(sizeof(*fi));
+    pp_skeleton *fi = (pp_skeleton *)(pp_shared_allocate(sizeof(*fi)));
     pp_directive_span *d;
 
     /* Keep just the directive positions. The second pass only needs
@@ -131,15 +133,16 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
     for (uint32_t i = 0; i < n; i++)
         if (pp_token_starts_directive(&t[i]))
             VVECTOR_APPEND(positions, count, capacity, i);
-    d = pp_shared_allocate(((size_t)count + 1) * sizeof(*d));
-    stk = malloc(((size_t)count + 1) * sizeof(*stk));
+    d = (pp_directive_span *)(pp_shared_allocate(((size_t)count + 1) *
+                                                 sizeof(*d)));
+    stk = (uint32_t *)(malloc(((size_t)count + 1) * sizeof(*stk)));
     for (uint32_t nd = 0; nd < count; nd++) {
         uint32_t i = positions[nd], e, k;
 
         for (e = i + 1; e < n && !(t[e].flags & LEX_TOKEN_FLAG_LINE_START); e++)
             ;
         k = pp_directive_kind_find(f, i + 1, e);
-        d[nd] = (pp_directive_span){i, e, 0, k};
+        d[nd] = VCC_LITERAL(pp_directive_span, i, e, 0, k);
         switch (k) {
         case PP_DIRECTIVE_IF:
         case PP_DIRECTIVE_IFDEF:
@@ -174,10 +177,11 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
     free(stk);
     free(positions);
     fi->directives = d;
-    fi->macros = pp_shared_allocate(((size_t)count + 1) *
-                                    sizeof(*fi->macros)); /* fresh: zero */
+    fi->macros = (_Atomic(const pp_macro *) *)(pp_shared_allocate(
+        ((size_t)count + 1) * sizeof(*fi->macros))); /* fresh: zero */
     fi->include_answers =
-        pp_shared_allocate(((size_t)count + 1) * sizeof(*fi->include_answers));
+        (_Atomic(const pp_include_answer *) *)(pp_shared_allocate(
+            ((size_t)count + 1) * sizeof(*fi->include_answers)));
     fi->directive_count = count;
     /*
 	 * Include guard: the file is one #ifndef X / #if !defined(X) group
@@ -217,13 +221,13 @@ VPRIV const pp_skeleton *pp_skeleton_get(const lex_file *f, bool *fresh)
 
     *fresh = false;
     if (likely(fi != NULL))
-        return fi;
+        return (const pp_skeleton *)fi;
     fi = pp_skeleton_build(f);
     if (!__atomic_compare_exchange_n(&w->pp, &z, fi, 0, __ATOMIC_ACQ_REL,
                                      __ATOMIC_ACQUIRE))
-        return z; /* lost the race; ours is wasted */
+        return (const pp_skeleton *)z; /* lost the race; ours is wasted */
     *fresh = true;
-    return fi;
+    return (const pp_skeleton *)fi;
 }
 
 /* 1-based line of byte offset off */
@@ -238,11 +242,13 @@ VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi,
         uint32_t *z = NULL, c = 0;
 
         const char *end = f->src + f->size;
-        for (const char *p = f->src; (p = memchr(p, '\n', end - p)); p++)
+        for (const char *p = f->src;
+             (p = (const char *)memchr(p, '\n', end - p)); p++)
             c++;
-        l = pp_shared_allocate(((size_t)c + 1) * sizeof(*l));
+        l = (uint32_t *)(pp_shared_allocate(((size_t)c + 1) * sizeof(*l)));
         c = 0;
-        for (const char *p = f->src; (p = memchr(p, '\n', end - p)); p++)
+        for (const char *p = f->src;
+             (p = (const char *)memchr(p, '\n', end - p)); p++)
             l[c++] = (uint32_t)(p - f->src);
         __atomic_store_n(&fi->line_count, c,
                          __ATOMIC_RELAXED); /* a loser writes it too */

@@ -1,4 +1,5 @@
 /* vcc code generator for WebAssembly: state, locals, frame, functions (wimpl.h) */
+#include "common/literal.h"
 #include <stdarg.h>
 #include "wimpl.h"
 
@@ -19,27 +20,27 @@ VPRIV wst *w_state(ecx *e)
         wpool = W->next;
     pthread_mutex_unlock(&wpool_mu);
     if (!W) {
-        W = calloc(1, sizeof *W);
+        W = (wst *)calloc(1, sizeof *W);
         vtext_init(&W->b, (size_t)1 << 32);
         vtext_init(&W->fn, (size_t)1 << 32);
         vtext_init(&W->decl, (size_t)1 << 30);
         vtext_init(&W->sig, (size_t)1 << 24);
-        W->lt = reserve(WMAXLOC);
+        W->lt = (uint8_t *)reserve(WMAXLOC);
         for (int i = 0; i < 5; i++)
-            W->fl[i] = reserve(WMAXLOC * sizeof(uint32_t));
-        W->sw = reserve(WMAXSW * sizeof(wswc));
-        W->seg = reserve(WMAXSW * sizeof(uint32_t));
-        W->gd = reserve(WMAXGD * sizeof(wgd));
-        W->gdx = reserve(WMAXGD * sizeof(uint64_t));
-        W->gp = reserve(2 * WMAXGD * sizeof(wgp));
-        W->vszn = reserve(WMAXGD * sizeof(uint32_t));
-        W->vszl = reserve(WMAXGD * sizeof(uint32_t));
-        W->vb = reserve(WMAXGD * sizeof(wvb));
-        W->cl = reserve(WMAXGD * sizeof(wvb));
-        W->sj = reserve(WMAXGD * sizeof(uint32_t));
+            W->fl[i] = (uint32_t *)reserve(WMAXLOC * sizeof(uint32_t));
+        W->sw = (wswc *)reserve(WMAXSW * sizeof(wswc));
+        W->seg = (uint32_t *)reserve(WMAXSW * sizeof(uint32_t));
+        W->gd = (struct wgd *)reserve(WMAXGD * sizeof(wgd));
+        W->gdx = (uint64_t *)reserve(WMAXGD * sizeof(uint64_t));
+        W->gp = (struct wgp *)reserve(2 * WMAXGD * sizeof(wgp));
+        W->vszn = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
+        W->vszl = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
+        W->vb = (struct wvb *)reserve(WMAXGD * sizeof(wvb));
+        W->cl = (struct wvb *)reserve(WMAXGD * sizeof(wvb));
+        W->sj = (uint32_t *)reserve(WMAXGD * sizeof(uint32_t));
     }
     /* per sym bindings: sized for this TU (generation-tagged: never cleared) */
-    W->sb = reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
+    W->sb = (wbind *)reserve(((size_t)e->c->nsym + 64) * sizeof(wbind));
     W->gen = 0;
     W->decl.n = 0;
     W->next = NULL;
@@ -106,34 +107,34 @@ VPRIV wabi wclassify(cc *c, ast_qualified_type t)
     int k = wty(c, t);
 
     if (k != WT_MEM)
-        return (wabi){WA_SCALAR, (uint8_t)k, t, 0};
+        return VCC_LITERAL(wabi, WA_SCALAR, (uint8_t)k, t, 0);
     if (is_record(c, t)) {
         ast_qualified_type s;
 
         if (tsize(c, t) == 0)
-            return (wabi){WA_IGNORE, 0, 0, 0};
+            return VCC_LITERAL(wabi, WA_IGNORE, 0, 0, 0);
         s = wsingle(c, t);
         if (s && is_bvec(c, s))
             return wclassify(c, s);
         if (s && !is_record(c, s) && !is_vec(c, s)) {
             k = wty(c, s);
             if (k != WT_MEM)
-                return (wabi){WA_SCALAR, (uint8_t)k, s, 0};
+                return VCC_LITERAL(wabi, WA_SCALAR, (uint8_t)k, s, 0);
             if (tsize(c, s) == 16 && !is_array(c, s))
-                return (wabi){WA_PAIR, WT_I64, s, 2};
+                return VCC_LITERAL(wabi, WA_PAIR, WT_I64, s, 2);
         }
-        return (wabi){WA_IND, (uint8_t)WPT(c), t, 0};
+        return VCC_LITERAL(wabi, WA_IND, (uint8_t)WPT(c), t, 0);
     }
     if (tsize(c, t) == 16 && (is_integer(c, t) || is_flt(c, t)))
-        return (wabi){WA_PAIR, WT_I64, t, 2};
+        return VCC_LITERAL(wabi, WA_PAIR, WT_I64, t, 2);
     if (is_vec(c, t)) {
         /* lane by lane (no simd128), as clang */
         ast_qualified_type b = T(c, t)->base;
 
-        return (wabi){WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t,
-                      T(c, t)->ext ?: T(c, t)->n};
+        return VCC_LITERAL(wabi, WA_PAIR, (uint8_t)wrep(c, wty(c, b)), t,
+                           T(c, t)->ext ?: T(c, t)->n);
     }
-    return (wabi){WA_IND, (uint8_t)WPT(c), t, 0};
+    return VCC_LITERAL(wabi, WA_IND, (uint8_t)WPT(c), t, 0);
 }
 
 VPRIV wabi wclassify_ret(cc *c, ast_qualified_type t)
@@ -141,11 +142,11 @@ VPRIV wabi wclassify_ret(cc *c, ast_qualified_type t)
     wabi a;
 
     if (is_void(c, t))
-        return (wabi){WA_IGNORE, 0, 0, 0};
+        return VCC_LITERAL(wabi, WA_IGNORE, 0, 0, 0);
     a = wclassify(c, t);
     if (a.k == WA_PAIR && a.n == 1 && is_vec(c, t))
-        return (wabi){WA_SCALAR, a.st, T(c, t)->base,
-                      0}; /* one lane: as it is, as LLVM */
+        return VCC_LITERAL(wabi, WA_SCALAR, a.st, T(c, t)->base,
+                           0); /* one lane: as it is, as LLVM */
     if (a.k == WA_PAIR)
         a.k =
             WA_IND; /* an i128 or vector result: through a pointer, as LLVM demotes it */
@@ -328,7 +329,7 @@ VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
             continue;
         if (n == cap) {
             cap = cap ? 2 * cap : 16;
-            d = realloc(d, cap * sizeof *d);
+            d = (uint64_t *)realloc(d, cap * sizeof *d);
         }
         /* priority, then position: a stable order */
         d[n] =
@@ -398,7 +399,7 @@ VPRIV void wasm_header(cc *c, tbuf *hdr, ecx *ctx, int nthr)
         if (ctx[t].w)
             for (size_t i = 0; i < ctx[t].w->decl.n; i++)
                 n += ctx[t].w->decl.p[i] == '\n';
-    v = malloc((n + 1) * sizeof *v);
+    v = (const char **)malloc((n + 1) * sizeof *v);
     for (int t = 0; t < nthr; t++) {
         const tbuf *d;
 

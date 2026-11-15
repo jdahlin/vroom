@@ -1,4 +1,5 @@
 /* A fixed-size direct-mapped table; collisions discard opportunities only. */
+#include "common/literal.h"
 #include "../codegen-internal.h"
 
 _Static_assert((EM_VALUES_SLOTS & (EM_VALUES_SLOTS - 1)) == 0,
@@ -49,6 +50,6 @@ VPRIV bool em_values_insert(em_value_table *t, em_value_key key, uint32_t value)
     if (!em_values_step(t) || !value)
         return false;
     t->entries[em_values_hash(key)] =
-        (em_value_entry){.key = key, .value = value};
+        VCC_LITERAL(em_value_entry, .key = key, .value = value);
     return true;
 }

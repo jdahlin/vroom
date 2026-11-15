@@ -123,8 +123,8 @@ VPRIV void vccd_generation_restart(void)
         usleep(1000);
     }
     {
-        char fd[16],
-            **av = calloc((size_t)vccd_restart_argc + 3, sizeof(char *));
+        char fd[16], **av = (char **)(calloc((size_t)vccd_restart_argc + 3,
+                                             sizeof(char *)));
         int k = 0;
 
         for (int i = 0; i < vccd_restart_argc; i++) {

@@ -305,7 +305,8 @@ static vbuffer *cc_type_name_buffer(cc *c)
 {
     struct cc_type_name *s;
 
-    if (unlikely(!c->tyb) && !(c->tyb = malloc(8 * sizeof(*c->tyb))))
+    if (unlikely(!c->tyb) &&
+        !(c->tyb = (struct cc_type_name *)(malloc(8 * sizeof(*c->tyb)))))
         abort();
     s = &c->tyb[c->tyk++ & 7];
     vbuffer_fixed(&s->buffer, s->bytes, sizeof(s->bytes));

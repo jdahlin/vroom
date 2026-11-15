@@ -64,7 +64,7 @@ static void pp_builtin_macros_init(void)
     for (size_t i = 0;
          i < sizeof(pp_builtin_macro_names) / sizeof(pp_builtin_macro_names[0]);
          i++) {
-        pp_macro *m = pp_shared_allocate(sizeof(*m));
+        pp_macro *m = (pp_macro *)(pp_shared_allocate(sizeof(*m)));
 
         memset(m, 0, sizeof(*m));
         m->kind = PP_MACRO_BUILTIN;
@@ -84,10 +84,10 @@ static __attribute__((noinline, cold)) const lex_file *
 pp_stdin_file_lex(pp *p, const pp_opts *o)
 {
     size_t ml = o->main_len;
-    char *ms = pp_shared_allocate(ml + 129);
-    lex_file *f = varena_alloc(&p->permanent_region, sizeof(*f));
-    lex_token *mt =
-        varena_alloc(&p->permanent_region, (ml + 2) * sizeof(lex_token));
+    char *ms = (char *)pp_shared_allocate(ml + 129);
+    lex_file *f = (lex_file *)(varena_alloc(&p->permanent_region, sizeof(*f)));
+    lex_token *mt = (lex_token *)(varena_alloc(&p->permanent_region,
+                                               (ml + 2) * sizeof(lex_token)));
     void *lex_scratch =
         vjob_region_acquire(&pp_translation_unit_regions[7],
                             lex_scratch_size(ml) + 4096, "pp.lexscratch");
@@ -106,10 +106,10 @@ pp_stdin_file_lex(pp *p, const pp_opts *o)
 
 pp *pp_open(const pp_opts *o)
 {
-    pp *p = vjob_region_acquire(
+    pp *p = (pp *)(vjob_region_acquire(
         &(pp_translation_unit_regions =
               vjob_region_pool_take(&pp_translation_unit_pool))[0],
-        sizeof(pp), "pp");
+        sizeof(pp), "pp"));
     const lex_file *mf;
     size_t n = strlen(o->predef);
     char *src;
@@ -128,35 +128,36 @@ pp *pp_open(const pp_opts *o)
     p->diagnostic_color =
         o->diag_color > 0 ||
         (o->diag_color == 0 && isatty(o->errfd ? o->errfd : 2));
-    p->contexts =
-        vjob_region_acquire(&pp_translation_unit_regions[1],
-                            PP_CONTEXT_MAX * sizeof(pp_context), "pp.cx");
-    p->permanent_region.base = vjob_region_acquire(
+    p->contexts = (pp_context *)(vjob_region_acquire(
+        &pp_translation_unit_regions[1], PP_CONTEXT_MAX * sizeof(pp_context),
+        "pp.cx"));
+    p->permanent_region.base = (uint8_t *)vjob_region_acquire(
         &pp_translation_unit_regions[2], 1ull << 30, "pp.perm");
     p->permanent_region.used = 0;
     p->permanent_region.cap = 1ull << 30;
-    p->temporary_region.base = vjob_region_acquire(
+    p->temporary_region.base = (uint8_t *)vjob_region_acquire(
         &pp_translation_unit_regions[3], 1ull << 32, "pp.tmp");
     p->temporary_region.used = 0;
     p->temporary_region.cap = 1ull << 32;
-    p->search_path_signatures = varena_alloc(
-        &p->permanent_region, ((size_t)o->ndirs + 1) * sizeof(uint32_t));
+    p->search_path_signatures = (uint32_t *)(varena_alloc(
+        &p->permanent_region, ((size_t)o->ndirs + 1) * sizeof(uint32_t)));
     if (!pp_header_cache_signatures_get(o, &p->options_signature,
                                         p->search_path_signatures))
         p->options_signature = PP_HEADER_CACHE_NONE;
-    p->scratch_tokens =
-        vjob_region_acquire(&pp_translation_unit_regions[4],
-                            PP_SCRATCH_TOKENS_MAX * sizeof(ptok), "pp.sv");
-    p->files = vjob_region_acquire(&pp_translation_unit_regions[5],
-                                   (1u << 20) * sizeof(pp_file_entry), "pp.fe");
-    p->once_files =
-        varena_alloc(&p->permanent_region, 256 * sizeof(*p->once_files));
+    p->scratch_tokens = (ptok *)(vjob_region_acquire(
+        &pp_translation_unit_regions[4], PP_SCRATCH_TOKENS_MAX * sizeof(ptok),
+        "pp.sv"));
+    p->files = (pp_file_entry *)(vjob_region_acquire(
+        &pp_translation_unit_regions[5], (1u << 20) * sizeof(pp_file_entry),
+        "pp.fe"));
+    p->once_files = (const lex_file **)(varena_alloc(
+        &p->permanent_region, 256 * sizeof(*p->once_files)));
     p->once_file_capacity = 256;
-    p->pushed_macros =
-        varena_alloc(&p->permanent_region, 4096 * sizeof(*p->pushed_macros));
-    p->line_marks =
-        vjob_region_acquire(&pp_translation_unit_regions[6],
-                            65536 * sizeof(*p->line_marks), "pp.lm");
+    p->pushed_macros = (__typeof__(p->pushed_macros))varena_alloc(
+        &p->permanent_region, 4096 * sizeof(*p->pushed_macros));
+    p->line_marks = (struct pp_line_mark *)(vjob_region_acquire(
+        &pp_translation_unit_regions[6], 65536 * sizeof(*p->line_marks),
+        "pp.lm"));
     {
         static pthread_once_t once = PTHREAD_ONCE_INIT;
 
@@ -184,7 +185,7 @@ pp *pp_open(const pp_opts *o)
     } else {
         /* the caller's string is unpadded; lex_file_get hashes by words (ASan) */
         size_t ml = strlen(o->main);
-        char *mp = varena_alloc(&p->permanent_region, ml + 16);
+        char *mp = (char *)varena_alloc(&p->permanent_region, ml + 16);
 
         memcpy(mp, o->main, ml);
         memset(mp + ml, 0, 16);
@@ -227,11 +228,12 @@ pp *pp_open(const pp_opts *o)
     p->base_file_name_length = p->files[0].name_length;
 
     /* "<built-in>": the predefines, -D/-U and -include, on top of the main file */
-    src = pp_shared_allocate(
+    src = (char *)pp_shared_allocate(
         n + 129); /* interned identifiers point into it: immortal */
     memcpy(src, o->predef, n);
     memset(src + n, 0, 129);
-    tok = varena_alloc(&p->permanent_region, (n + 2) * sizeof(lex_token));
+    tok = (lex_token *)(varena_alloc(&p->permanent_region,
+                                     (n + 2) * sizeof(lex_token)));
     lex_scratch =
         vjob_region_acquire(&pp_translation_unit_regions[7],
                             lex_scratch_size(n) + 4096, "pp.lexscratch");
@@ -265,7 +267,7 @@ size_t pp_file_names(const pp *p, const char **lex_token_kind_names, size_t max,
 
     while (cap < 2 * p->file_count)
         cap *= 2;
-    tab = cap <= 1024 ? stk : malloc(cap * sizeof(*tab));
+    tab = (uint32_t *)(cap <= 1024 ? stk : malloc(cap * sizeof(*tab)));
     if (!tab)
         abort();
     memset(tab, 0, cap * sizeof(*tab));

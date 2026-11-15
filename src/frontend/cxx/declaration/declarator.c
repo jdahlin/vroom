@@ -224,9 +224,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
         /* (tentative: cxx_scope_use records nothing; a member scope pushed as is) */
         cxx_scope *ms = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
 
-        ms->used =
-            malloc(sizeof *ms->used *
-                   (1 + ((*qscope)->owner ? (*qscope)->owner->nspecs : 0)));
+        ms->used = (cxx_scope **)(malloc(
+            sizeof *ms->used *
+            (1 + ((*qscope)->owner ? (*qscope)->owner->nspecs : 0))));
         ms->used[ms->nused++] = *qscope;
         if ((*qscope)->owner)
             for (uint32_t i = 0; i < (*qscope)->owner->nspecs; i++)
@@ -278,18 +278,21 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
                 x->is_function = 1, x->variadic = c->fn_variadic;
                 x->nparams = c->fn_unknown ? UINT32_MAX : c->fn_nparams;
                 x->params =
-                    c->fn_nparams && !c->fn_unknown
-                        ? malloc(c->fn_nparams * sizeof(ast_qualified_type))
-                        : NULL;
+                    (ast_qualified_type *)(c->fn_nparams && !c->fn_unknown
+                                               ? malloc(
+                                                     c->fn_nparams *
+                                                     sizeof(ast_qualified_type))
+                                               : NULL);
                 if (x->params)
                     memcpy(x->params, c->fn_params,
                            c->fn_nparams * sizeof(ast_qualified_type));
                 /* the names, for the body (the parameters' own types, unknown ones too) */
                 x->nnamed = c->fn_nparams, x->ndefaults = c->fn_ndefaults,
                 x->pack = c->fn_pack;
-                x->named = c->fn_nparams
-                               ? malloc(c->fn_nparams * sizeof *x->named)
-                               : NULL;
+                x->named =
+                    (cxx_param *)(c->fn_nparams
+                                      ? malloc(c->fn_nparams * sizeof *x->named)
+                                      : NULL);
                 for (uint32_t k = 0; k < c->fn_nparams; k++)
                     x->named[k].name = c->fn_pnames[k],
                     x->named[k].ty = c->fn_pdecl[k];
@@ -311,9 +314,9 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified,
     /* the body's parameters: the first suffix's, when it is a function (not a pointer to one) */
     if (nsfx && sfx[0].is_function && !nested && !c->tentative) {
         if (sfx[0].nnamed > c->cdecl_params)
-            c->decl_params =
-                realloc(c->decl_params, (c->cdecl_params = sfx[0].nnamed) *
-                                            sizeof *c->decl_params);
+            c->decl_params = (cxx_param *)(realloc(
+                c->decl_params,
+                (c->cdecl_params = sfx[0].nnamed) * sizeof *c->decl_params));
         if (sfx[0].nnamed)
             memcpy(c->decl_params, sfx[0].named,
                    sfx[0].nnamed * sizeof *c->decl_params);
@@ -457,9 +460,12 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                             cxx_declarator_parse(c, true, &q2, &f2, NULL);
                             if (n == cap) {
                                 cap = cap ? cap * 2 : 8;
-                                types = realloc(types, cap * sizeof *types);
-                                names = realloc(names, cap * sizeof *names);
-                                decls = realloc(decls, cap * sizeof *decls);
+                                types = (ast_qualified_type *)realloc(
+                                    types, cap * sizeof *types);
+                                names = (uint32_t *)realloc(
+                                    names, cap * sizeof *names);
+                                decls = (ast_qualified_type *)realloc(
+                                    decls, cap * sizeof *decls);
                             }
                             names[n] = 0;
                             decls[n] = types[n] =
@@ -516,9 +522,12 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                         for (uint32_t k = 0; k < pe->npack; k++) {
                             if (n == cap) {
                                 cap = cap ? cap * 2 : 8;
-                                types = realloc(types, cap * sizeof *types);
-                                names = realloc(names, cap * sizeof *names);
-                                decls = realloc(decls, cap * sizeof *decls);
+                                types = (ast_qualified_type *)realloc(
+                                    types, cap * sizeof *types);
+                                names = (uint32_t *)realloc(
+                                    names, cap * sizeof *names);
+                                decls = (ast_qualified_type *)realloc(
+                                    decls, cap * sizeof *decls);
                             }
                             names[n] = 0;
                             decls[n] = types[n] =
@@ -555,9 +564,11 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
                   cxx_is(c, LEX_TOKEN_RIGHT_PAREN))) {
                 if (n == cap) {
                     cap = cap ? cap * 2 : 8;
-                    types = realloc(types, cap * sizeof *types);
-                    names = realloc(names, cap * sizeof *names);
-                    decls = realloc(decls, cap * sizeof *decls);
+                    types = (ast_qualified_type *)realloc(types,
+                                                          cap * sizeof *types);
+                    names = (uint32_t *)realloc(names, cap * sizeof *names);
+                    decls = (ast_qualified_type *)realloc(decls,
+                                                          cap * sizeof *decls);
                 }
                 names[n] = pname;
                 decls[n] = dt;
@@ -570,9 +581,12 @@ VPRIV void cxx_parameter_clause_body_parse(cxx *c)
     }
     if (n > c->fn_cparams) {
         c->fn_cparams = n;
-        c->fn_params = realloc(c->fn_params, n * sizeof(ast_qualified_type));
-        c->fn_pnames = realloc(c->fn_pnames, n * sizeof(uint32_t));
-        c->fn_pdecl = realloc(c->fn_pdecl, n * sizeof(ast_qualified_type));
+        c->fn_params = (ast_qualified_type *)(realloc(
+            c->fn_params, n * sizeof(ast_qualified_type)));
+        c->fn_pnames =
+            (uint32_t *)(realloc(c->fn_pnames, n * sizeof(uint32_t)));
+        c->fn_pdecl = (ast_qualified_type *)(realloc(
+            c->fn_pdecl, n * sizeof(ast_qualified_type)));
     }
     if (n) {
         memcpy(c->fn_params, types, n * sizeof(ast_qualified_type));
@@ -627,7 +641,7 @@ VPRIV void cxx_function_tail_parse(cxx *c)
         !c->fn_variadic) {
         cxx_scope *ps = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL);
         uint32_t n = c->fn_nparams;
-        cxx_param *save = malloc(n * sizeof *save);
+        cxx_param *save = (cxx_param *)malloc(n * sizeof *save);
 
         for (uint32_t i = 0; i < n; i++)
             save[i].name = c->fn_pnames[i], save[i].ty = c->fn_pdecl[i];

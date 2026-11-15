@@ -364,8 +364,8 @@ VPRIV void cxx_extern_member_record(cxx *c)
             cxx_rewind(c, save, save_undo);
             return;
         }
-        c->externs =
-            realloc(c->externs, (c->nexterns + 1) * sizeof *c->externs);
+        c->externs = (struct cxx_extern_member *)(realloc(
+            c->externs, (c->nexterns + 1) * sizeof *c->externs));
         m = &c->externs[c->nexterns++];
         memset(m, 0, sizeof *m);
         m->of = of, m->nargs = nta, m->name = name, m->nparams = np;

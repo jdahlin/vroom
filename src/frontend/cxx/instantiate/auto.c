@@ -9,7 +9,7 @@ VPRIV bool cxx_type_has_placeholder(cxx *c, ast_qualified_type t)
 /* an entity for a computed type (a builtin transform's result): a type name, a class's members reachable */
 VPRIV cxx_entity *cxx_type_entity(cxx *c, ast_qualified_type t)
 {
-    cxx_entity *e = calloc(1, sizeof *e);
+    cxx_entity *e = (cxx_entity *)calloc(1, sizeof *e);
 
     e->kind = CXX_ENTITY_TYPE, e->ty = t, e->pack_index = -1;
     if (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t)) {
@@ -30,12 +30,12 @@ VPRIV ast_qualified_type cxx_auto_type(cxx *c)
         uint32_t tag =
             cc_tag_new(c->ast, AST_TYPE_STRUCT, vintern_cstr("auto"), 0);
 
-        c->auto_owner = calloc(1, sizeof *c->auto_owner);
+        c->auto_owner = (struct cxx_partial *)calloc(1, sizeof *c->auto_owner);
         if (tag >= c->ntag_placeholder) {
             uint32_t nn = tag + 1024;
 
-            c->tag_placeholder =
-                realloc(c->tag_placeholder, nn * sizeof *c->tag_placeholder);
+            c->tag_placeholder = (__typeof__(c->tag_placeholder))realloc(
+                c->tag_placeholder, nn * sizeof *c->tag_placeholder);
             memset(c->tag_placeholder + c->ntag_placeholder, 0,
                    (nn - c->ntag_placeholder) * sizeof *c->tag_placeholder);
             c->ntag_placeholder = nn;

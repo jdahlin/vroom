@@ -13,6 +13,7 @@
  * sort of the loops, one pass over the blocks.  The scratch is per thread; the result is valid
  * until the next call on that thread.
  */
+#include "common/literal.h"
 #include "vir-internal.h"
 #include "vir/register-allocation.h"
 
@@ -26,19 +27,19 @@ static void vir_loops_thread_init(void)
 {
     if (vir_loops_thread_arrays.l)
         return;
-    vir_loops_thread_arrays.l = vreserve((size_t)VIR_MAX_BLK * sizeof(vir_loop),
-                                         MAP_NORESERVE, "vir: loops");
-    vir_loops_thread_arrays.inner =
-        vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-    vir_loops_thread_arrays.stk =
-        vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops");
-    vir_loops_thread_arrays.rng =
-        vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops");
+    vir_loops_thread_arrays.l = (vir_loop *)(vreserve(
+        (size_t)VIR_MAX_BLK * sizeof(vir_loop), MAP_NORESERVE, "vir: loops"));
+    vir_loops_thread_arrays.inner = (uint32_t *)(vreserve(
+        (size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops"));
+    vir_loops_thread_arrays.stk = (uint32_t *)(vreserve(
+        (size_t)VIR_MAX_BLK * 4, MAP_NORESERVE, "vir: loops"));
+    vir_loops_thread_arrays.rng = (uint32_t (*)[2])(
+        vreserve((size_t)VIR_MAX_BLK * 8, MAP_NORESERVE, "vir: loops"));
 }
 
 static int by_head(const void *a, const void *b)
 {
-    const vir_loop *x = a, *y = b;
+    const vir_loop *x = (const vir_loop *)a, *y = (const vir_loop *)b;
 
     return x->head < y->head ? -1 : x->head > y->head;
 }
@@ -73,7 +74,7 @@ bool vir_loops_build(vir_function *f, vir_loops *lp)
         while (sp && st[sp - 1][1] < b) {
             sp--;
             vir_loops_thread_arrays.l[nl++] =
-                (vir_loop){st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0};
+                VCC_LITERAL(vir_loop, st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0);
         }
         if (sp && st[sp - 1][1] < e) {
             st[sp - 1][1] = e;
@@ -90,7 +91,7 @@ bool vir_loops_build(vir_function *f, vir_loops *lp)
     while (sp) {
         sp--;
         vir_loops_thread_arrays.l[nl++] =
-            (vir_loop){st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0};
+            VCC_LITERAL(vir_loop, st[sp][0], st[sp][1], VIR_BLOCK_NONE, 0);
     }
     qsort(vir_loops_thread_arrays.l, nl, sizeof(vir_loop), by_head);
     /* phase 2: parents, depths and each block's innermost loop */

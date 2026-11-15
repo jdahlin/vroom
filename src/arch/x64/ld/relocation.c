@@ -64,7 +64,7 @@ static bool x64_ld_relocation_needs_got(struct ld_context *ctx,
 
 VPRIV void x64_ld_got_find(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     const ld_input_section *is = &ctx->inputs.sections.v[i];
 
     if (is->kind == LD_SECTION_KIND_NONE || is->object == LD_NONE ||
@@ -80,7 +80,7 @@ VPRIV void x64_ld_got_find(void *arg, size_t i)
 
 VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_input_section *is = &ctx->inputs.sections.v[i];
     if (!is->rela_count || is->kind == LD_SECTION_KIND_NONE ||
         is->object == LD_NONE)

@@ -25,7 +25,7 @@ VPRIV int vccd_program_spawn(const struct vccd_request *r, const char *prog)
 
     while (r->envp[nall])
         nall++;
-    env = malloc((nall + 1) * sizeof(char *));
+    env = (char **)(malloc((nall + 1) * sizeof(char *)));
     for (char **e = r->envp; *e; e++)
         if (strncmp(*e, "DYLD_", 5) && strncmp(*e, "LD_PRELOAD=", 11) &&
             strncmp(*e, "LD_LIBRARY_PATH=", 16) &&

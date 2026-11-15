@@ -21,6 +21,7 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
+#include "common/literal.h"
 #include "ld/ld.h"
 #include "common/archive-reader.h"
 #include "common/hash.h"
@@ -230,7 +231,7 @@ typedef struct {
 static void objcopy_string_table_grow(objcopy_string_table *t)
 {
     uint32_t nm = t->hash_table ? (t->hash_mask + 1) * 2 : 1024;
-    uint32_t *nt = objcopy_zeroed_alloc(nm, 4);
+    uint32_t *nt = (uint32_t *)objcopy_zeroed_alloc(nm, 4);
     for (uint32_t i = 0; i < t->count; i++) {
         uint32_t j = t->entries[i].hash & (nm - 1);
         while (nt[j])
@@ -248,12 +249,12 @@ static void objcopy_string_table_reserve(objcopy_string_table *t, uint32_t n)
         m *= 2;
     if (t->hash_table && t->hash_mask + 1 >= m)
         return;
-    t->entries =
-        realloc(t->entries, (t->capacity = n > t->capacity ? n : t->capacity) *
-                                sizeof(objcopy_string_entry));
+    t->entries = (objcopy_string_entry *)(realloc(
+        t->entries, (t->capacity = n > t->capacity ? n : t->capacity) *
+                        sizeof(objcopy_string_entry)));
     t->hash_mask = m / 2 - 1; /* objcopy_string_table_grow doubles */
     uint32_t *old = t->hash_table;
-    t->hash_table = objcopy_zeroed_alloc(1, 4);
+    t->hash_table = (uint32_t *)objcopy_zeroed_alloc(1, 4);
     objcopy_string_table_grow(t);
     free(old);
 }
@@ -271,11 +272,11 @@ static uint32_t objcopy_string_table_add(objcopy_string_table *t, const char *s)
     }
     if (t->count == t->capacity) {
         t->capacity = t->capacity ? t->capacity * 2 : 256;
-        t->entries =
-            realloc(t->entries, t->capacity * sizeof(objcopy_string_entry));
+        t->entries = (objcopy_string_entry *)(realloc(
+            t->entries, t->capacity * sizeof(objcopy_string_entry)));
     }
-    t->entries[t->count] =
-        (objcopy_string_entry){.string = s, .length = len, .hash = h};
+    t->entries[t->count] = VCC_LITERAL(objcopy_string_entry, .string = s,
+                                       .length = len, .hash = h);
     t->hash_table[j] = ++t->count;
     return t->count - 1;
 }
@@ -307,7 +308,8 @@ typedef struct {
 } objcopy_sort_entry;
 static int objcopy_string_table_cmp(const void *a, const void *b)
 {
-    const objcopy_sort_entry *p = a, *q = b;
+    const objcopy_sort_entry *p = (const objcopy_sort_entry *)a,
+                             *q = (const objcopy_sort_entry *)b;
     if (p->key != q->key)
         return p->key < q->key ? 1 : -1;
     uint32_t n = p->length < q->length ? p->length : q->length;
@@ -320,11 +322,12 @@ static int objcopy_string_table_cmp(const void *a, const void *b)
 }
 static void objcopy_string_table_finalize(objcopy_string_table *t)
 {
-    objcopy_sort_entry *p = objcopy_zeroed_alloc(t->count, sizeof *p);
+    objcopy_sort_entry *p =
+        (objcopy_sort_entry *)objcopy_zeroed_alloc(t->count, sizeof *p);
     size_t tot = 0;
     for (uint32_t i = 0; i < t->count; i++)
         tot += t->entries[i].length;
-    char *rev = objcopy_zeroed_alloc(tot + 8, 1);
+    char *rev = (char *)objcopy_zeroed_alloc(tot + 8, 1);
     size_t ro = 0;
     for (uint32_t i = 0; i < t->count; i++) {
         objcopy_string_entry *e = &t->entries[i];
@@ -334,12 +337,13 @@ static void objcopy_string_table_finalize(objcopy_string_table *t)
         uint64_t k = 0;
         for (uint32_t j = 0; j < 8; j++)
             k = k << 8 | (j < e->length ? (uint8_t)r[j] : 0);
-        p[i] = (objcopy_sort_entry){k, r, e->length, e};
+        p[i] = VCC_LITERAL(objcopy_sort_entry, k, r, e->length, e);
         ro += e->length;
     }
     /* LSD radix sort on the key, descending; ties (same last 8 bytes)
 	   are then sorted by the full comparison */
-    objcopy_sort_entry *tmp = objcopy_zeroed_alloc(t->count, sizeof *tmp);
+    objcopy_sort_entry *tmp =
+        (objcopy_sort_entry *)objcopy_zeroed_alloc(t->count, sizeof *tmp);
     for (int sh = 0; sh < 64; sh += 8) {
         uint32_t cnt[257] = {0};
         for (uint32_t i = 0; i < t->count; i++)
@@ -459,7 +463,7 @@ static void objcopy_section_flags_set(objcopy_section *s, const char *f)
     if (s->type == SHT_NOBITS &&
         (!(s->flags & SHF_ALLOC) || contents || load)) {
         s->type = SHT_PROGBITS; /* (llvm: zero-filled contents) */
-        s->generated_contents = objcopy_zeroed_alloc(s->size + 1, 1);
+        s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(s->size + 1, 1);
     }
 }
 
@@ -611,7 +615,7 @@ static int objcopy_binary_input(int dirfd)
         return 1;
     }
     size_t dsz = (size_t)st.st_size;
-    VAUTOFREE uint8_t *data = objcopy_zeroed_alloc(dsz + 1, 1);
+    VAUTOFREE uint8_t *data = (uint8_t *)objcopy_zeroed_alloc(dsz + 1, 1);
     if (dsz && read(fd, data, dsz) != (ssize_t)dsz)
         objcopy_error_report("'%s': short read", objcopy_options.input_path);
     char base[4096], nm[3][4200];
@@ -635,7 +639,7 @@ static int objcopy_binary_input(int dirfd)
              datoff = symoff + 4 * sizeof(elf_symbol);
     uint64_t shoff = objcopy_value_align_up(datoff + dsz, 8),
              total = shoff + 4 * sizeof(elf_section_header);
-    VAUTOFREE uint8_t *b = objcopy_zeroed_alloc(total, 1);
+    VAUTOFREE uint8_t *b = (uint8_t *)objcopy_zeroed_alloc(total, 1);
     elf_file_header *h = (elf_file_header *)b;
     memcpy(h->e_ident, "\177ELF\2\1\1", 7);
     h->e_type = 1;
@@ -650,35 +654,29 @@ static int objcopy_binary_input(int dirfd)
     elf_symbol *y = (elf_symbol *)(b + symoff);
     uint64_t val[3] = {0, dsz, dsz};
     for (int i = 0; i < 3; i++)
-        y[i + 1] = (elf_symbol){
+        y[i + 1] = VCC_LITERAL(
+            elf_symbol,
             .st_name = (uint32_t)objcopy_string_table_find(&t, nm[i]),
             .st_info = STB_GLOBAL << 4,
-            .st_shndx = i == 2 ? SHN_ABS : 3,
-            .st_value = val[i]};
+            .st_shndx = (uint16_t)(i == 2 ? SHN_ABS : 3), .st_value = val[i]);
     memcpy(b + datoff, data, dsz);
     elf_section_header *sh = (elf_section_header *)(b + shoff);
-    sh[1] = (elf_section_header){
-        .sh_name = (uint32_t)objcopy_string_table_find(&t, ".strtab"),
-        .sh_type = SHT_STRTAB,
-        .sh_offset = stroff,
-        .sh_size = t.size,
-        .sh_addralign = 1};
-    sh[2] = (elf_section_header){
+    sh[1] = VCC_LITERAL(elf_section_header,
+                        .sh_name =
+                            (uint32_t)objcopy_string_table_find(&t, ".strtab"),
+                        .sh_type = SHT_STRTAB, .sh_offset = stroff,
+                        .sh_size = t.size, .sh_addralign = 1);
+    sh[2] = VCC_LITERAL(
+        elf_section_header,
         .sh_name = (uint32_t)objcopy_string_table_find(&t, ".symtab"),
-        .sh_type = SHT_SYMTAB,
-        .sh_offset = symoff,
-        .sh_size = 4 * sizeof(elf_symbol),
-        .sh_link = 1,
-        .sh_info = 1,
-        .sh_addralign = 8,
-        .sh_entsize = sizeof(elf_symbol)};
-    sh[3] = (elf_section_header){
-        .sh_name = (uint32_t)objcopy_string_table_find(&t, ".data"),
-        .sh_type = SHT_PROGBITS,
-        .sh_flags = SHF_WRITE | SHF_ALLOC,
-        .sh_offset = datoff,
-        .sh_size = dsz,
-        .sh_addralign = 1};
+        .sh_type = SHT_SYMTAB, .sh_offset = symoff,
+        .sh_size = 4 * sizeof(elf_symbol), .sh_link = 1, .sh_info = 1,
+        .sh_addralign = 8, .sh_entsize = sizeof(elf_symbol));
+    sh[3] =
+        VCC_LITERAL(elf_section_header,
+                    .sh_name = (uint32_t)objcopy_string_table_find(&t, ".data"),
+                    .sh_type = SHT_PROGBITS, .sh_flags = SHF_WRITE | SHF_ALLOC,
+                    .sh_offset = datoff, .sh_size = dsz, .sh_addralign = 1);
     return atomic_load(&objcopy_diagnostics.error_count)
                ? 1
                : objcopy_file_write(dirfd, objcopy_options.output_path, b,
@@ -717,7 +715,8 @@ static int objcopy_run(int dirfd)
     uint32_t ns = e.section_header_count;
     VCLEANUP(objcopy_owned_free) objcopy_owned own = {0};
     objcopy_section *sec = own.sections =
-        objcopy_zeroed_alloc(ns + objcopy_options.add_count + 1, sizeof *sec);
+        (objcopy_section *)objcopy_zeroed_alloc(
+            ns + objcopy_options.add_count + 1, sizeof *sec);
     own.section_count = ns + objcopy_options.add_count + 1;
     for (uint32_t i = 0; i < ns; i++) {
         const elf_section_header *h = &e.section_headers[i];
@@ -776,7 +775,7 @@ static int objcopy_run(int dirfd)
                     !sec[r].original_name) {
                     size_t n = nl + 6;
                     sec[r].original_name = sec[r].name;
-                    sec[r].new_name = objcopy_zeroed_alloc(n, 1);
+                    sec[r].new_name = (char *)objcopy_zeroed_alloc(n, 1);
                     snprintf(sec[r].new_name, n, ".rela%s", s->name);
                     sec[r].name = sec[r].new_name;
                 }
@@ -813,7 +812,7 @@ static int objcopy_run(int dirfd)
         s->size = (uint64_t)st.st_size;
         s->original_offset = UINT64_MAX;
         s->parent_segment = -1;
-        s->generated_contents = objcopy_zeroed_alloc(s->size + 1, 1);
+        s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(s->size + 1, 1);
         if (s->size &&
             read(fd, s->generated_contents, s->size) != (ssize_t)s->size)
             objcopy_error_report("'%s': short read", eq + 1);
@@ -854,7 +853,7 @@ static int objcopy_run(int dirfd)
             s->size = sz;
             s->original_offset = UINT64_MAX;
             s->parent_segment = -1;
-            s->generated_contents = objcopy_zeroed_alloc(sz, 1);
+            s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(sz, 1);
             memcpy(s->generated_contents, base, bl);
             memcpy(s->generated_contents + sz - 4, &crc, 4);
             ns++;
@@ -863,7 +862,8 @@ static int objcopy_run(int dirfd)
 
     /* segments: real ones, then the ELF header and program header "segments" */
     uint32_t ng = e.program_header_count + 2;
-    VAUTOFREE objcopy_segment *seg = objcopy_zeroed_alloc(ng, sizeof *seg);
+    VAUTOFREE objcopy_segment *seg =
+        (objcopy_segment *)objcopy_zeroed_alloc(ng, sizeof *seg);
     for (uint32_t i = 0; i < e.program_header_count; i++) {
         seg[i].program_header = e.program_headers[i];
         seg[i].original_offset = seg[i].offset = e.program_headers[i].p_offset;
@@ -880,17 +880,13 @@ static int objcopy_run(int dirfd)
                     sec[k].parent_segment = i;
     }
     uint32_t ehs = e.program_header_count, phs = e.program_header_count + 1;
-    seg[ehs] = (objcopy_segment){.original_offset = 0,
-                                 .file_size = sizeof(elf_file_header),
-                                 .index = ehs,
-                                 .parent_segment = -1};
-    seg[phs] =
-        (objcopy_segment){.original_offset = eh->e_phoff,
-                          .virtual_address = eh->e_phoff,
-                          .file_size = (uint64_t)eh->e_phentsize * eh->e_phnum,
-                          .alignment = 8,
-                          .index = phs,
-                          .parent_segment = -1};
+    seg[ehs] = VCC_LITERAL(objcopy_segment, .original_offset = 0,
+                           .file_size = sizeof(elf_file_header), .index = ehs,
+                           .parent_segment = -1);
+    seg[phs] = VCC_LITERAL(objcopy_segment, .original_offset = eh->e_phoff,
+                           .file_size = (uint64_t)eh->e_phentsize * eh->e_phnum,
+                           .virtual_address = eh->e_phoff, .alignment = 8,
+                           .index = phs, .parent_segment = -1);
     for (uint32_t c = 0; c < ng; c++) {
         objcopy_segment *ch = &seg[c];
         for (uint32_t p = 0; p < e.program_header_count; p++) {
@@ -908,7 +904,7 @@ static int objcopy_run(int dirfd)
 
     /* --dump-section */
     for (uint32_t i = 0; i < objcopy_options.dump_count; i++) {
-        char *eq = strchr(objcopy_options.dump_sections[i], '=');
+        const char *eq = strchr(objcopy_options.dump_sections[i], '=');
         if (!eq) {
             objcopy_error_report("bad --dump-section %s",
                                  objcopy_options.dump_sections[i]);
@@ -990,7 +986,8 @@ static int objcopy_run(int dirfd)
         const char *str =
             (const char *)e.file_bytes + e.section_headers[st->link].sh_offset;
         nsym = st->size / sizeof(elf_symbol);
-        sym = own.symbols = objcopy_zeroed_alloc(nsym, sizeof *sym);
+        sym = own.symbols =
+            (objcopy_symbol *)objcopy_zeroed_alloc(nsym, sizeof *sym);
         own.symbol_count = nsym;
         for (uint32_t i = 0; i < nsym; i++) {
             sym[i].name = str + ys[i].st_name;
@@ -1009,7 +1006,7 @@ static int objcopy_run(int dirfd)
         /* llvm-objcopy's Symbol::Referenced: named by a kept relocation or group */
         if ((objcopy_options.unneeded_count && rel) ||
             objcopy_options.only_count) {
-            referenced = objcopy_zeroed_alloc(nsym, 1);
+            referenced = (bool *)objcopy_zeroed_alloc(nsym, 1);
             for (uint32_t k = 1; k < ns; k++) {
                 if (!sec[k].removed && sec[k].type == SHT_GROUP &&
                     sec[k].info < nsym)
@@ -1045,7 +1042,7 @@ static int objcopy_run(int dirfd)
                 size_t a = strlen(objcopy_options.prefix_symbols),
                        b = strlen(nm);
                 char *old = y->new_name;
-                y->new_name = objcopy_zeroed_alloc(a + b + 1, 1);
+                y->new_name = (char *)objcopy_zeroed_alloc(a + b + 1, 1);
                 memcpy(y->new_name, objcopy_options.prefix_symbols, a);
                 memcpy(y->new_name + a, nm, b + 1);
                 free(old);
@@ -1110,7 +1107,7 @@ static int objcopy_run(int dirfd)
             if (!base)
                 continue;
             size_t n = strlen(rp) + pl + strlen(base) + 1;
-            s->new_name = objcopy_zeroed_alloc(n, 1);
+            s->new_name = (char *)objcopy_zeroed_alloc(n, 1);
             snprintf(s->new_name, n, "%s%s%s", rp,
                      objcopy_options.prefix_alloc_sections, base);
         }
@@ -1119,7 +1116,7 @@ static int objcopy_run(int dirfd)
     if (objcopy_options.binary) {
         /* BinaryWriter: alloc sections with contents at LMA - min LMA */
         uint64_t min = UINT64_MAX, total = 0;
-        VAUTOFREE uint64_t *lma = objcopy_zeroed_alloc(ns, 8);
+        VAUTOFREE uint64_t *lma = (uint64_t *)objcopy_zeroed_alloc(ns, 8);
         for (uint32_t k = 1; k < ns; k++) {
             objcopy_section *s = &sec[k];
             if (s->removed || !(s->flags & SHF_ALLOC))
@@ -1140,9 +1137,10 @@ static int objcopy_run(int dirfd)
             if (lma[k] - min + s->size > total)
                 total = lma[k] - min + s->size;
         }
-        uint8_t *b = total ? mmap(NULL, total, PROT_READ | PROT_WRITE,
-                                  MAP_ANON | MAP_PRIVATE, -1, 0)
-                           : NULL;
+        uint8_t *b =
+            (uint8_t *)(total ? mmap(NULL, total, PROT_READ | PROT_WRITE,
+                                     MAP_ANON | MAP_PRIVATE, -1, 0)
+                              : NULL);
         for (uint32_t k = 1; k < ns; k++) {
             objcopy_section *s = &sec[k];
             if (s->removed || !(s->flags & SHF_ALLOC) ||
@@ -1195,7 +1193,7 @@ static int objcopy_run(int dirfd)
             continue;
         if (k == symtab_i) {
             s->size = (uint64_t)nsymout * sizeof(elf_symbol);
-            s->generated_contents = objcopy_zeroed_alloc(s->size, 1);
+            s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(s->size, 1);
             elf_symbol *d = (elf_symbol *)s->generated_contents;
             for (uint32_t i = 0; i < nsym; i++) {
                 objcopy_symbol *y = &sym[i];
@@ -1204,16 +1202,14 @@ static int objcopy_run(int dirfd)
                 uint16_t shndx = y->original_section_index;
                 if (shndx && shndx < 0xff00)
                     shndx = shndx < ns ? sec[shndx].new_index : 0;
-                d[y->new_index] = (elf_symbol){
+                d[y->new_index] = VCC_LITERAL(
+                    elf_symbol,
                     .st_name =
                         sn->entries[y->string_index].length
                             ? (uint32_t)sn->entries[y->string_index].offset
                             : 0,
-                    .st_info = y->info,
-                    .st_other = y->other,
-                    .st_shndx = shndx,
-                    .st_value = y->value,
-                    .st_size = y->size};
+                    .st_info = y->info, .st_other = y->other, .st_shndx = shndx,
+                    .st_value = y->value, .st_size = y->size);
             }
             s->link = sec[s->link].new_index;
             s->info = maxlocal + 1;
@@ -1225,14 +1221,14 @@ static int objcopy_run(int dirfd)
             if (!t) {
                 /* an unreferenced string table: llvm-objcopy empties it */
                 s->size = 1;
-                s->generated_contents = objcopy_zeroed_alloc(1, 1);
+                s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(1, 1);
                 continue;
             }
             s->size = t->size;
-            s->generated_contents = objcopy_zeroed_alloc(t->size, 1);
+            s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(t->size, 1);
             objcopy_string_table_write(t, s->generated_contents);
         } else if (s->kind == OBJCOPY_SECTION_KIND_RELA) {
-            s->generated_contents = objcopy_zeroed_alloc(s->size, 1);
+            s->generated_contents = (uint8_t *)objcopy_zeroed_alloc(s->size, 1);
             const elf_rela *r = (const elf_rela *)s->data;
             elf_rela *d = (elf_rela *)s->generated_contents;
             for (uint64_t j = 0; j < s->size / sizeof(elf_rela); j++) {
@@ -1251,7 +1247,7 @@ static int objcopy_run(int dirfd)
     }
 
     /* layout: segments, then sections outside segments by original offset */
-    VAUTOFREE uint32_t *order = objcopy_zeroed_alloc(ng, 4);
+    VAUTOFREE uint32_t *order = (uint32_t *)objcopy_zeroed_alloc(ng, 4);
     for (uint32_t i = 0; i < ng; i++)
         order[i] = i;
     for (uint32_t i = 1; i < ng; i++) {
@@ -1275,7 +1271,7 @@ static int objcopy_run(int dirfd)
         if (g->offset + g->file_size > off)
             off = g->offset + g->file_size;
     }
-    VAUTOFREE uint32_t *outside = objcopy_zeroed_alloc(ns, 4);
+    VAUTOFREE uint32_t *outside = (uint32_t *)objcopy_zeroed_alloc(ns, 4);
     uint32_t nout = 0;
     for (uint32_t k = 1; k < ns; k++) {
         objcopy_section *s = &sec[k];
@@ -1307,8 +1303,8 @@ static int objcopy_run(int dirfd)
     }
     uint64_t shoff = objcopy_value_align_up(off, 8);
     uint64_t total = shoff + (uint64_t)(nkept + 1) * sizeof(elf_section_header);
-    uint8_t *b = mmap(NULL, total, PROT_READ | PROT_WRITE,
-                      MAP_ANON | MAP_PRIVATE, -1, 0);
+    uint8_t *b = (uint8_t *)mmap(NULL, total, PROT_READ | PROT_WRITE,
+                                 MAP_ANON | MAP_PRIVATE, -1, 0);
 
     /* segment bytes, then zero removed sections inside segments */
     for (uint32_t i = 0; i < e.program_header_count; i++)
@@ -1359,18 +1355,15 @@ static int objcopy_run(int dirfd)
             memcpy(b + s->new_offset,
                    s->generated_contents ? s->generated_contents : s->data,
                    s->size);
-        sh[s->new_index] = (elf_section_header){
+        sh[s->new_index] = VCC_LITERAL(
+            elf_section_header,
             .sh_name = (uint32_t)objcopy_string_table_find(
                 &names, objcopy_section_name(s)),
-            .sh_type = s->type,
-            .sh_flags = s->flags,
-            .sh_addr = s->address,
-            .sh_offset = s->new_offset,
-            .sh_size = s->size,
+            .sh_type = s->type, .sh_flags = s->flags, .sh_addr = s->address,
+            .sh_offset = s->new_offset, .sh_size = s->size,
             .sh_link = s->type == 0x6fff4c03 && changed ? 0 : s->link,
-            .sh_info = s->info,
-            .sh_addralign = s->alignment,
-            .sh_entsize = s->entry_size};
+            .sh_info = s->info, .sh_addralign = s->alignment,
+            .sh_entsize = s->entry_size);
     }
     int rc = atomic_load(&objcopy_diagnostics.error_count)
                  ? 1
@@ -1383,14 +1376,15 @@ static int objcopy_run(int dirfd)
 static void objcopy_name_list_append(const char ***v, uint32_t *n,
                                      const char *s)
 {
-    *v = realloc(*v, (*n + 1) * sizeof(char *));
+    *v = (const char **)(realloc(*v, (*n + 1) * sizeof(char *)));
     (*v)[(*n)++] = s;
 }
 
 int objcopy_main(int argc, char **argv, int dirfd, FILE *err)
 {
-    objcopy_diagnostics = (struct ld_diagnostics){
-        .error_stream = err ? err : stderr, .program = "vobjcopy"};
+    objcopy_diagnostics =
+        VCC_LITERAL(struct ld_diagnostics, .error_stream = err ? err : stderr,
+                    .program = "vobjcopy");
     memset(&objcopy_options, 0, sizeof objcopy_options);
     const char *files[2];
     int nf = 0;
@@ -1533,7 +1527,7 @@ typedef struct {
 
 static int nm_symbol_name_cmp(const void *a, const void *b)
 {
-    const nm_symbol *x = a, *y = b;
+    const nm_symbol *x = (const nm_symbol *)a, *y = (const nm_symbol *)b;
     int c = strcmp(x->name, y->name);
     if (c)
         return c;
@@ -1543,7 +1537,7 @@ static int nm_symbol_name_cmp(const void *a, const void *b)
 }
 static int nm_symbol_address_cmp(const void *a, const void *b)
 {
-    const nm_symbol *x = a, *y = b;
+    const nm_symbol *x = (const nm_symbol *)a, *y = (const nm_symbol *)b;
     if (x->defined != y->defined)
         return x->defined ? 1 : -1;
     if (x->addr != y->addr)
@@ -1629,7 +1623,7 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
             4; /* (windres writes 0 for an empty table; llvm reads it as 4) */
     if (nsym && strtab + strsize > n)
         return false;
-    nm_symbol *v = objcopy_zeroed_alloc(nsym + 1, sizeof *v);
+    nm_symbol *v = (nm_symbol *)objcopy_zeroed_alloc(nsym + 1, sizeof *v);
     uint32_t m = 0;
     for (uint32_t i = 0; i < nsym; i++) {
         const uint8_t *y = p + symptr + (uint64_t)i * COFF_SYMBOL_SIZE;
@@ -1639,7 +1633,7 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
         char *name;
 
         if (pe_rd32(y)) {
-            name = objcopy_zeroed_alloc(9, 1);
+            name = (char *)objcopy_zeroed_alloc(9, 1);
             memcpy(name, y, 8);
         } else {
             uint32_t off = pe_rd32(y + 4);
@@ -1648,7 +1642,7 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
                 return false;
             }
             const char *s = (const char *)p + strtab + off,
-                       *e = memchr(s, 0, strsize - off);
+                       *e = (const char *)memchr(s, 0, strsize - off);
             if (!e) {
                 free(v);
                 return false;
@@ -1704,8 +1698,8 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
         bool defined = !undefined;
         if ((undef && defined) || (defd && !defined) || (ext && !global))
             continue;
-        v[m++] = (nm_symbol){
-            .name = name, .addr = value, .type = c, .defined = defined};
+        v[m++] = VCC_LITERAL(nm_symbol, .name = name, .addr = value, .type = c,
+                             .defined = defined);
     }
     *out = v, *count = m;
     return true;
@@ -1723,13 +1717,13 @@ static bool nm_coff_import_symbols(const uint8_t *p, size_t n, bool undef,
     *out = NULL, *count = 0;
     if ((uint64_t)COFF_IMPORT_HEADER_SIZE + size > n || !memchr(name, 0, size))
         return false;
-    nm_symbol *v = objcopy_zeroed_alloc(2, sizeof *v);
+    nm_symbol *v = (nm_symbol *)objcopy_zeroed_alloc(2, sizeof *v);
     char c = type == IMPORT_CODE    ? 'T'
              : type == IMPORT_DATA  ? 'D'
              : type == IMPORT_CONST ? 'R'
                                     : '?';
     size_t l = strlen(name);
-    char *imp = objcopy_zeroed_alloc(l + 7, 1);
+    char *imp = (char *)objcopy_zeroed_alloc(l + 7, 1);
 
     memcpy(imp, "__imp_", 6);
     memcpy(imp + 6, name, l);
@@ -1738,9 +1732,11 @@ static bool nm_coff_import_symbols(const uint8_t *p, size_t n, bool undef,
         return true;
     }
     (void)ext; /* (both are global) */
-    v[(*count)++] = (nm_symbol){.name = imp, .type = c, .defined = true};
+    v[(*count)++] =
+        VCC_LITERAL(nm_symbol, .name = imp, .type = c, .defined = true);
     if (type == IMPORT_CODE)
-        v[(*count)++] = (nm_symbol){.name = name, .type = c, .defined = true};
+        v[(*count)++] =
+            VCC_LITERAL(nm_symbol, .name = name, .type = c, .defined = true);
     *out = v;
     return true;
 }
@@ -1756,7 +1752,7 @@ typedef struct {
 
 static void nm_input_append(nm_input **v, int *n, nm_input x)
 {
-    *v = realloc(*v, (size_t)(*n + 1) * sizeof **v);
+    *v = (nm_input *)(realloc(*v, (size_t)(*n + 1) * sizeof **v));
     (*v)[(*n)++] = x;
 }
 
@@ -1770,7 +1766,8 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
         pread(fd, magic, 8, 0) != 8 ||
         varchive_format_detect(magic, 8) == VARCHIVE_FORMAT_NONE) {
         nm_input_append(
-            v, n, (nm_input){.label = strdup(path), .path = strdup(path)});
+            v, n,
+            VCC_LITERAL(nm_input, .label = strdup(path), .path = strdup(path)));
         return;
     }
     VAUTOUNMAP vfile_mapping m;
@@ -1810,7 +1807,8 @@ static void nm_inputs_collect(int dirfd, const char *path, nm_input **v, int *n)
                          path, name);
             x.path = strdup(full);
         } else {
-            x.member_bytes = objcopy_zeroed_alloc(member.size + 8, 1);
+            x.member_bytes =
+                (uint8_t *)objcopy_zeroed_alloc(member.size + 8, 1);
             memcpy(x.member_bytes, member.data, member.size);
             x.size = member.size;
         }
@@ -1835,7 +1833,7 @@ static void nm_symbols_print(FILE *out, nm_symbol *v, uint32_t m,
     size_t pl = strlen(pfx), cap = (size_t)m * (64 + pl) + 4096, len = 0;
     for (uint32_t i = 0; i < m; i++)
         cap += strlen(v[i].name);
-    char *buf = malloc(cap);
+    char *buf = (char *)malloc(cap);
     for (uint32_t i = 0; i < m; i++) {
         nm_symbol *s = &v[i];
         memcpy(buf + len, pfx, pl);
@@ -1860,13 +1858,15 @@ static void nm_symbols_print(FILE *out, nm_symbol *v, uint32_t m,
 
 int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
 {
-    objcopy_diagnostics = (struct ld_diagnostics){
-        .error_stream = err ? err : stderr, .program = "vnm"};
+    objcopy_diagnostics =
+        VCC_LITERAL(struct ld_diagnostics, .error_stream = err ? err : stderr,
+                    .program = "vnm");
     bool nosort = false, numeric = false, size = false, undef = false,
          defd = false, ext = false, dyn = false;
     bool fname =
         false; /* -A/-o: each line starts with the file (archive:member) */
-    const char **files = objcopy_zeroed_alloc((size_t)argc + 1, sizeof *files);
+    const char **files =
+        (const char **)(objcopy_zeroed_alloc((size_t)argc + 1, sizeof *files));
     int nf = 0;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1985,12 +1985,13 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
         const char *str = (const char *)e.file_bytes +
                           e.section_headers[st->sh_link].sh_offset;
         uint32_t n = st->sh_size / sizeof(elf_symbol);
-        nm_symbol *v = objcopy_zeroed_alloc(n, sizeof *v);
+        nm_symbol *v = (nm_symbol *)objcopy_zeroed_alloc(n, sizeof *v);
         uint32_t m = 0;
         /* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */
         const uint16_t *versym = NULL;
         const char *vname[256] = {0};
-        char **owned = dyn ? objcopy_zeroed_alloc(n, sizeof *owned) : NULL;
+        char **owned =
+            (char **)(dyn ? objcopy_zeroed_alloc(n, sizeof *owned) : NULL);
         for (uint32_t k = 0; dyn && k < e.section_header_count; k++) {
             const elf_section_header *h = &e.section_headers[k];
             const uint8_t *d = e.file_bytes + h->sh_offset;
@@ -2061,15 +2062,14 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
                 const char *vn = vname[versym[i] & 0x7fff];
                 bool at2 = !(versym[i] & 0x8000) && y->st_shndx != SHN_UNDEF;
                 size_t l = strlen(name) + strlen(vn) + 3;
-                owned[i] = malloc(l);
+                owned[i] = (char *)malloc(l);
                 snprintf(owned[i], l, "%s%s%s", name, at2 ? "@@" : "@", vn);
                 name = owned[i];
             }
-            v[m++] = (nm_symbol){.name = name,
-                                 .addr = y->st_value,
+            v[m++] = VCC_LITERAL(nm_symbol, .name = name, .addr = y->st_value,
                                  .size = y->st_size,
                                  .type = nm_symbol_type_letter(&e, y),
-                                 .defined = y->st_shndx != SHN_UNDEF};
+                                 .defined = y->st_shndx != SHN_UNDEF);
         }
         nm_symbols_print(out, v, m, &in[f], fname, nosort, numeric, size, 16);
         for (uint32_t i = 0; owned && i < n; i++)

@@ -1,4 +1,5 @@
 /* vcc preprocessor: what the C front end asks of header-cache hits: top-level events, hit regions, skipping a hit */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 const pp_topev *pp_top_events(const pp *p, uint32_t *n)
@@ -48,8 +49,8 @@ const pp_hitreg *pp_hit_regions(const pp *p, uint32_t *n)
 VPRIV void pp_coverage_hit_begin(pp *p, int d0)
 {
     if (!p->hit_regions)
-        p->hit_regions = varena_alloc(&p->permanent_region,
-                                      PP_COVERAGE_HIT_MAX * sizeof(pp_hitreg));
+        p->hit_regions = (pp_hitreg *)(varena_alloc(
+            &p->permanent_region, PP_COVERAGE_HIT_MAX * sizeof(pp_hitreg)));
     if (p->context_depth > d0 && p->contexts[d0].type == PP_CONTEXT_SERVED &&
         p->contexts[d0].entry == p->header_cache_last_entry) {
         if (p->open_hit_count < 64) {
@@ -70,10 +71,10 @@ VPRIV void pp_coverage_hit_end(pp *p)
         p->open_hit_count--;
         if (p->hit_region_count < PP_COVERAGE_HIT_MAX &&
             p->tokens_delivered > p->open_hits[p->open_hit_count].pos)
-            p->hit_regions[p->hit_region_count++] = (pp_hitreg){
-                p->open_hits[p->open_hit_count].pos, p->tokens_delivered,
-                (uint32_t)p->file_context_count,
-                p->open_hits[p->open_hit_count].he};
+            p->hit_regions[p->hit_region_count++] = VCC_LITERAL(
+                pp_hitreg, p->open_hits[p->open_hit_count].pos,
+                p->tokens_delivered, (uint32_t)p->file_context_count,
+                p->open_hits[p->open_hit_count].he);
     }
 }
 

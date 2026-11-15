@@ -146,7 +146,8 @@ VPRIV void a64_vir_call_lower(a64_vir_context *L, uint32_t b, uint32_t i,
 
     if (ng + 1 > L->operand_count)
         a64_vir_fail(L, VIRBUILD_FAILURE(call_operands));
-    a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
+    a = (a64_vir_argument *)(__builtin_alloca(sizeof(a64_vir_argument) *
+                                              (ng + 1)));
     uint8_t gm = 0; /* the x registers the arguments are in */
 
     a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->compile_context),
@@ -248,7 +249,7 @@ VPRIV void a64_vir_parameter_lower(a64_vir_context *L, const vir_insn *in,
 
     if (ng > A64_VIR_OPERAND_MAX || in->a >= ng)
         a64_vir_fail(L, VIRBUILD_FAILURE(lowering_parameter));
-    a = __builtin_alloca(sizeof(a64_vir_argument) * ng);
+    a = (a64_vir_argument *)(__builtin_alloca(sizeof(a64_vir_argument) * ng));
     a64_vir_arguments_assign(CODEGEN_IS_DARWIN(e->compile_context),
                              &f->extra[f->signature], a, ng, &stk);
     if (a[in->a].reg != VIR_REGISTER_NONE) {

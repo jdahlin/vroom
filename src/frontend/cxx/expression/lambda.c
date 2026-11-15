@@ -13,7 +13,7 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node,
     uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial),
              loc = cxx_peek(c, 0)->loc, bnode;
     uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
-    cxx_entity *owner = calloc(1, sizeof *owner), *call;
+    cxx_entity *owner = (cxx_entity *)calloc(1, sizeof *owner), *call;
     cxx_scope *outer = c->scope, *cs, *fs;
     cxx_gen_lambda l;
 
@@ -143,7 +143,8 @@ VPRIV void cxx_lambda_parse(cxx *c)
                 if (pe) {
                     pe->is_pack = 1, pe->pack_index = -1,
                     pe->ty = CXX_TY_UNKNOWN, pe->npack = lp_n;
-                    pe->pack = calloc(lp_n ? lp_n : 1, sizeof *pe->pack);
+                    pe->pack = (struct cxx_targ *)calloc(lp_n ? lp_n : 1,
+                                                         sizeof *pe->pack);
                     for (uint32_t j = 0; j < lp_n; j++)
                         pe->pack[j].kind = 1,
                         pe->pack[j].t = c->fn_pdecl[lp_at + j];
@@ -257,7 +258,7 @@ VPRIV void cxx_lambda_parse(cxx *c)
         /* (its name: $_N and a number of the TU's own, so that templates instantiated with it in two TUs differ) */
         uint32_t serial = c->lambda_serial++,
                  lname = cxx_closure_name(c, serial), tag;
-        cxx_entity *owner = calloc(1, sizeof *owner), *call;
+        cxx_entity *owner = (cxx_entity *)calloc(1, sizeof *owner), *call;
         cxx_scope *cs;
 
         tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
@@ -328,11 +329,12 @@ VPRIV void cxx_lambda_parse(cxx *c)
                 /* (the pack's parameters, for the code: a pack of their symbols) */
                 gpe->is_pack = 1, gpe->pack_index = -1,
                 gpe->ty = CXX_TY_UNKNOWN, gpe->npack = lp_n;
-                gpe->pack = calloc(lp_n ? lp_n : 1, sizeof *gpe->pack);
+                gpe->pack = (struct cxx_targ *)calloc(lp_n ? lp_n : 1,
+                                                      sizeof *gpe->pack);
                 for (uint32_t j = 0; j < lp_n; j++)
                     gpe->pack[j].kind = 1, gpe->pack[j].t = params[lp_at + j];
                 gpe->pack_syms =
-                    calloc(lp_n ? lp_n : 1, sizeof *gpe->pack_syms);
+                    (uint32_t *)calloc(lp_n ? lp_n : 1, sizeof *gpe->pack_syms);
                 for (uint32_t j = 0; j < lp_n; j++)
                     ps[lp_at + j].name = 0;
                 c->gen_pack_entity = gpe, c->gen_pack_from = lp_at,

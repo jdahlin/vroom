@@ -56,11 +56,12 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args,
         cxx_bind(c, binding, tp, &args[i]);
     }
     if (f->ndone == f->cdone)
-        f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) *
-                                       sizeof *f->done);
+        f->done = (cxx_fdone *)(realloc(
+            f->done,
+            (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done));
     at = f->ndone++;
     memset(&f->done[at], 0, sizeof f->done[at]);
-    f->done[at].args = malloc((given ? given : 1) * sizeof *args);
+    f->done[at].args = (cxx_targ *)(malloc((given ? given : 1) * sizeof *args));
     memcpy(f->done[at].args, args, given * sizeof *args);
     f->done[at].n = given,
     f->done[at].viable = -1; /* (a concept that names itself: not known) */
@@ -89,13 +90,14 @@ VPRIV void cxx_vtemplate_special(cxx *c, cxx_ftemplate *f, cxx_scope *params,
                                  cxx_scope *home, uint32_t less_pos,
                                  uint32_t init_pos)
 {
-    cxx_vspec *sp = calloc(1, sizeof *sp);
+    cxx_vspec *sp = (cxx_vspec *)calloc(1, sizeof *sp);
 
     /* (an explicit specialization: no parameters) */
     sp->p.params =
         params ? params : cxx_scope_new(c, CXX_SCOPE_TEMPLATE, home, NULL);
     sp->p.home = home, sp->p.less_pos = less_pos, sp->init_pos = init_pos;
-    f->vspecs = realloc(f->vspecs, (f->nvspecs + 1) * sizeof *f->vspecs);
+    f->vspecs = (cxx_vspec **)(realloc(f->vspecs,
+                                       (f->nvspecs + 1) * sizeof *f->vspecs));
     f->vspecs[f->nvspecs++] = sp;
 }
 
@@ -213,11 +215,12 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args,
         pos = f->pos;
     }
     if (f->ndone == f->cdone)
-        f->done = realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) *
-                                       sizeof *f->done);
+        f->done = (cxx_fdone *)(realloc(
+            f->done,
+            (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done));
     at = f->ndone++;
     memset(&f->done[at], 0, sizeof f->done[at]);
-    f->done[at].args = malloc((n ? n : 1) * sizeof *args);
+    f->done[at].args = (cxx_targ *)(malloc((n ? n : 1) * sizeof *args));
     memcpy(f->done[at].args, args, n * sizeof *args);
     f->done[at].n = n, f->done[at].viable = -1;
     cxx_outer_save(c, &o);
@@ -328,12 +331,12 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
     c->instantiating--, c->body_depth--;
     cxx_outer_restore(c, &o);
     if (f->nconsts == f->cconsts)
-        f->consts =
-            realloc(f->consts, (f->cconsts = f->cconsts ? f->cconsts * 2 : 4) *
-                                   sizeof *f->consts);
+        f->consts = (cxx_fdone *)(realloc(
+            f->consts, (f->cconsts = f->cconsts ? f->cconsts * 2 : 4) *
+                           sizeof *f->consts));
     at = f->nconsts++;
     memset(&f->consts[at], 0, sizeof f->consts[at]);
-    f->consts[at].args = malloc((n ? n : 1) * sizeof *args);
+    f->consts[at].args = (cxx_targ *)(malloc((n ? n : 1) * sizeof *args));
     memcpy(f->consts[at].args, args, n * sizeof *args);
     f->consts[at].n = n, f->consts[at].viable = known ? 1 : -1,
     f->consts[at].value = v;

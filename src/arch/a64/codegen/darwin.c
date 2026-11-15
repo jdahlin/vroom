@@ -33,7 +33,7 @@ static bool a64_darwin_label_is_defined(const char *t, size_t tn, const char *s,
                                         size_t n)
 {
     for (const char *p = t, *e = t + tn; p < e;) {
-        const char *nl = memchr(p, '\n', (size_t)(e - p));
+        const char *nl = (const char *)(memchr(p, '\n', (size_t)(e - p)));
         const char *le = nl ? nl : e;
 
         if ((size_t)(le - p) == n + 1 && !memcmp(p, s, n) && p[n] == ':')
@@ -66,7 +66,7 @@ static const char *a64_darwin_relocation_translate(tbuf *o, const char *p,
 static bool a64_darwin_data_has_relocations(const char *p, const char *end)
 {
     while (p < end) {
-        const char *nl = memchr(p, '\n', (size_t)(end - p));
+        const char *nl = (const char *)(memchr(p, '\n', (size_t)(end - p)));
         const char *le = nl ? nl : end;
 
         if (a64_darwin_text_starts_with(p, le, "\t.section") ||
@@ -114,7 +114,7 @@ static void a64_darwin_section_translate(tbuf *o, const char *p, const char *e,
             o, "\t.section\t__DATA,__mod_term_func,mod_term_funcs\n");
     } else if (*p == '"') {
         /* section("seg,sect") as the attribute gave it */
-        const char *q = memchr(p + 1, '"', (size_t)(e - p - 1));
+        const char *q = (const char *)(memchr(p + 1, '"', (size_t)(e - p - 1)));
 
         vtext_string_append(o, "\t.section\t");
         vtext_append(o, p + 1, q ? (size_t)(q - p - 1) : 0);
@@ -139,7 +139,7 @@ VPRIV void a64_darwin_text_translate(tbuf *o, const char *t, size_t tn)
     };
 
     for (const char *p = t, *e = t + tn; p < e;) {
-        const char *nl = memchr(p, '\n', (size_t)(e - p));
+        const char *nl = (const char *)(memchr(p, '\n', (size_t)(e - p)));
         const char *le = nl ? nl : e;
 
         if (a64_darwin_text_starts_with(p, le, "\t.type\t") ||

@@ -1,4 +1,5 @@
 /* vcc front end: AST node constructors */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- nodes ---------------- */
@@ -23,11 +24,12 @@ CC_PRIVATE diag_span cc_node_range_bare(cc *c, uint32_t n)
            AST_NODE(n)->a)
         n = AST_NODE(n)->a;
     if (!n)
-        return (diag_span){0, 0};
+        return VCC_LITERAL(diag_span, 0, 0);
     if (!c->span[n].e)
-        return (diag_span){AST_NODE(n)->loc,
-                           pp_token_end_find(c->p, AST_NODE(n)->loc)};
-    return (diag_span){c->span[n].b, pp_token_end_find(c->p, c->span[n].e)};
+        return VCC_LITERAL(diag_span, AST_NODE(n)->loc,
+                           pp_token_end_find(c->p, AST_NODE(n)->loc));
+    return VCC_LITERAL(diag_span, c->span[n].b,
+                       pp_token_end_find(c->p, c->span[n].e));
 }
 
 /* ... with its outermost parentheses (clang's ParenExpr) */
@@ -66,7 +68,8 @@ CC_PRIVATE void cc_id_list_init(cc_id_list *v)
 CC_PRIVATE void cc_id_list_append(cc *c, cc_id_list *v, uint32_t x)
 {
     if (unlikely(v->n == v->cap)) {
-        uint32_t *nv = cc_heap_allocate(c, v->cap * 2 * sizeof(uint32_t));
+        uint32_t *nv =
+            (uint32_t *)(cc_heap_allocate(c, v->cap * 2 * sizeof(uint32_t)));
 
         memcpy(nv, v->v, v->n * sizeof(uint32_t));
         v->v = nv;

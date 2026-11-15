@@ -7,6 +7,7 @@
  * A symbol or label operand becomes a fixup recorded in the ElfObj (never a number here), so
  * relaxation and relocation stay in the object.  Pending literal pools live in the context
  * (a->literal_pools) and are written by .ltorg (a64_as_pools_ltorg) or at as_end (a64_as_pools_flush).  A malformed statement fails the assembly through as_error_report. */
+#include "common/literal.h"
 #include "../../../as/as-internal.h"
 
 /* ---------------------------------------------------------------- instructions */
@@ -366,7 +367,7 @@ static int parse_imm(as_context *a, const char **pp, const char *e, A64Op *op)
             int64_t x = 0;
             for (const char *t = d; t < q; t++)
                 x = x * 10 + (*t - '0');
-            op->v = (as_value){0, 0, x};
+            op->v = VCC_LITERAL(as_value, 0, 0, x);
             op->imm = x;
             op->hassym = 0;
             *pp = q;
@@ -549,7 +550,7 @@ static uint32_t pool_entry(as_context *a, as_value v, uint32_t size)
     if (a->literal_pool_count == a->literal_pool_capacity) {
         uint32_t nc =
             a->literal_pool_capacity ? a->literal_pool_capacity * 2 : 64;
-        Pool *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+        Pool *t = (Pool *)as_region_alloc(&a->definitions, sizeof *t * nc);
         if (a->literal_pool_count)
             memcpy(t, a->literal_pools, sizeof *t * a->literal_pool_count);
         a->literal_pools = t;
@@ -633,6 +634,7 @@ VPRIV int a64_as_instruction_assemble(as_context *a, const char *p,
     A64Op ops[AS_OPERANDS_MAX];
     int nop = 0;
     uint32_t w;
+    const char *msg = NULL;
     A64Fix fx;
     fx.type = 0;
     p = as_whitespace_skip(p, e);
@@ -857,13 +859,12 @@ VPRIV int a64_as_instruction_assemble(as_context *a, const char *p,
             }
         }
         uint32_t lab = pool_entry(a, ops[1].v, x ? 8 : 4);
-        ops[1].v = (as_value){lab, 0, 0};
+        ops[1].v = VCC_LITERAL(as_value, lab, 0, 0);
         ops[1].hassym = 1;
         ops[1].hash = 0;
         ops[1].imm = 0;
     }
 enc:;
-    const char *msg = 0;
     if (a64_asm(mn, mlen, ops, nop, &w, &fx, &msg)) {
         if (as_trace_level != 2)
             return as_error_report(a, "%s: %s", mn,

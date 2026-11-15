@@ -7,7 +7,7 @@ VPRIV uint32_t record_fallthrough_drop(
     void *records, uint32_t count, const record_layout *layout,
     void (*remap)(void *, uint32_t, uint32_t), void *ctx)
 {
-    unsigned char *base = records;
+    unsigned char *base = (unsigned char *)records;
     uint32_t n = 0;
 
     for (uint32_t k = 0; k < count; k++) {

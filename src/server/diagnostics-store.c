@@ -13,6 +13,7 @@
  * One mutex: the store is touched only by jobs that have diagnostics (the
  * records) and by dedup lookups, both rare next to a compile.
  */
+#include "common/literal.h"
 #include "diagnostics-store.h"
 #include "common/scoped-cleanup.h"
 #include <pthread.h>
@@ -42,8 +43,13 @@ typedef struct vccd_diagnostics_unit {
 
 typedef struct vccd_diagnostics_interned_string {
     struct vccd_diagnostics_interned_string *next;
-    char text[];
 } vccd_diagnostics_interned_string;
+
+static inline char *
+vccd_diagnostics_string_text(vccd_diagnostics_interned_string *p)
+{
+    return (char *)(p + 1);
+}
 
 #define VCCD_DIAGNOSTICS_BUCKETS 4096
 
@@ -69,7 +75,9 @@ static void *vccd_diagnostics_realloc(void *p, size_t n)
 
 static char *vccd_diagnostics_strdup(const char *s)
 {
-    return s ? strcpy(vccd_diagnostics_realloc(NULL, strlen(s) + 1), s) : NULL;
+    return s ? strcpy((char *)(vccd_diagnostics_realloc(NULL, strlen(s) + 1)),
+                      s)
+             : NULL;
 }
 
 static uint32_t vccd_diagnostics_string_hash(const char *s)
@@ -103,13 +111,14 @@ static const char *vccd_diagnostics_string_intern(const char *s, bool path)
     }
     h = vccd_diagnostics_string_hash(s) & 1023;
     for (e = vccd_diagnostics_string_buckets[h]; e; e = e->next)
-        if (!strcmp(e->text, s))
-            return e->text;
-    e = vccd_diagnostics_realloc(NULL, sizeof(*e) + strlen(s) + 1);
-    strcpy(e->text, s);
+        if (!strcmp(vccd_diagnostics_string_text(e), s))
+            return vccd_diagnostics_string_text(e);
+    e = (vccd_diagnostics_interned_string *)(vccd_diagnostics_realloc(
+        NULL, sizeof(*e) + strlen(s) + 1));
+    strcpy(vccd_diagnostics_string_text(e), s);
     e->next = vccd_diagnostics_string_buckets[h],
     vccd_diagnostics_string_buckets[h] = e;
-    return e->text;
+    return vccd_diagnostics_string_text(e);
 }
 
 static bool vccd_diagnostics_key_is_seen(diag_sink *s, uint64_t key)
@@ -124,7 +133,7 @@ static bool vccd_diagnostics_key_is_seen(diag_sink *s, uint64_t key)
         size_t nc = vccd_diagnostics_dedup_capacity
                         ? 2 * vccd_diagnostics_dedup_capacity
                         : 1024;
-        uint64_t *n = calloc(nc, sizeof(*n));
+        uint64_t *n = (uint64_t *)(calloc(nc, sizeof(*n)));
 
         if (!n)
             abort();
@@ -160,7 +169,7 @@ static void vccd_diagnostics_json_append(vccd_diagnostics_job *j, const char *s,
 {
     if (j->json_length + n > j->json_capacity) {
         j->json_capacity = (j->json_length + n) * 2 + 256;
-        j->json = vccd_diagnostics_realloc(j->json, j->json_capacity);
+        j->json = (char *)vccd_diagnostics_realloc(j->json, j->json_capacity);
     }
     memcpy(j->json + j->json_length, s, n);
     j->json_length += n;
@@ -203,8 +212,9 @@ static void vccd_diagnostics_record_add(diag_sink *s, const diag_sink_record *r)
     }
     if (j->record_count == j->record_capacity) {
         j->record_capacity = j->record_capacity ? 2 * j->record_capacity : 8;
-        j->records = vccd_diagnostics_realloc(
-            j->records, j->record_capacity * sizeof(*j->records));
+        j->records =
+            (struct vccd_diagnostics_record *)(vccd_diagnostics_realloc(
+                j->records, j->record_capacity * sizeof(*j->records)));
     }
     j->records[j->record_count++] = d;
     if (!r->json || s->nojson || r->jlen < 2 || r->json[0] != '{') {
@@ -228,7 +238,7 @@ void vccd_diagnostics_job_begin(vccd_diagnostics_job *j, const char *cwd,
     j->sink.seen = vccd_diagnostics_key_is_seen;
     j->sink.record = vccd_diagnostics_record_add;
     n = (src[0] == '/' || !cwd ? 0 : strlen(cwd) + 1) + strlen(src) + 1;
-    j->unit_path = vccd_diagnostics_realloc(NULL, n);
+    j->unit_path = (char *)vccd_diagnostics_realloc(NULL, n);
     if (src[0] == '/' || !cwd)
         strcpy(j->unit_path, src);
     else
@@ -259,10 +269,10 @@ void vccd_diagnostics_job_end(vccd_diagnostics_job *j, int ok)
             (size_t)snprintf(n, sizeof n, ",\"omitted\":%u}\n", j->omitted));
     }
     if (ok && j->record_count) {
-        nt = vccd_diagnostics_realloc(NULL, sizeof(*nt));
-        *nt = (vccd_diagnostics_unit){NULL,       j->unit_path,
-                                      j->json,    j->json_length,
-                                      j->records, j->record_count};
+        nt = (vccd_diagnostics_unit *)(vccd_diagnostics_realloc(NULL,
+                                                                sizeof(*nt)));
+        *nt = VCC_LITERAL(vccd_diagnostics_unit, NULL, j->unit_path, j->json,
+                          j->json_length, j->records, j->record_count);
         j->unit_path = NULL, j->json = NULL, j->records = NULL,
         j->record_count = 0;
     }
@@ -319,14 +329,17 @@ static void vccd_diagnostics_key_count_add(vccd_diagnostics_key_count **v,
         }
     if (*n == *c) {
         *c = *c ? 2 * *c : 16;
-        *v = vccd_diagnostics_realloc(*v, *c * sizeof(**v));
+        *v = (vccd_diagnostics_key_count *)(vccd_diagnostics_realloc(
+            *v, *c * sizeof(**v)));
     }
-    (*v)[(*n)++] = (vccd_diagnostics_key_count){k, {!err, err}};
+    (*v)[(*n)++] =
+        VCC_LITERAL(vccd_diagnostics_key_count, k, {!err, (unsigned int)(err)});
 }
 
 static int vccd_diagnostics_key_compare(const void *a, const void *b)
 {
-    const vccd_diagnostics_key_count *x = a, *y = b;
+    const vccd_diagnostics_key_count *x = (const vccd_diagnostics_key_count *)a,
+                                     *y = (const vccd_diagnostics_key_count *)b;
     unsigned tx = x->counts[0] + x->counts[1], ty = y->counts[0] + y->counts[1];
 
     return tx != ty ? (tx < ty) - (tx > ty) : strcmp(x->key, y->key);
@@ -388,8 +401,8 @@ int vccd_diagnostics_query(const char *what, int fd, int errfd)
         for (vccd_diagnostics_unit *t = vccd_diagnostics_unit_buckets[b]; t;
              t = t->next) {
             if (n == c)
-                all = vccd_diagnostics_realloc(all, (c = c ? 2 * c : 64) *
-                                                        sizeof(*all));
+                all = (vccd_diagnostics_unit **)(vccd_diagnostics_realloc(
+                    all, (c = c ? 2 * c : 64) * sizeof(*all)));
             all[n++] = t;
         }
     if (n)
@@ -422,7 +435,8 @@ int vccd_diagnostics_query(const char *what, int fd, int errfd)
                 vccd_diagnostics_duplicate_count == 1 ? "" : "s");
         for (unsigned i = 0; i < nfl; i++)
             if (strcmp(fl[i].key, "(no flag)")) {
-                char *f = vccd_diagnostics_realloc(NULL, strlen(fl[i].key) + 3);
+                char *f = (char *)(vccd_diagnostics_realloc(
+                    NULL, strlen(fl[i].key) + 3));
 
                 strcpy(f, "-W"), strcat(f, fl[i].key);
                 fl[i].key = f;

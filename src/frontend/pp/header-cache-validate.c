@@ -1,4 +1,5 @@
 /* vcc preprocessor: header cache: may an #include be a region, and does an entry's recorded input match this TU */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 /* can an #include here be a region? */
@@ -113,8 +114,8 @@ static bool pp_header_cache_children_valid(pp *p,
 
             if (k->exclusion_count &&
                 lex_character_next < PP_HEADER_CACHE_LEVEL_MAX)
-                xs[m++] = (pp_header_cache_exclusion_set){k->exclusions,
-                                                          k->exclusion_count};
+                xs[m++] = VCC_LITERAL(pp_header_cache_exclusion_set,
+                                      k->exclusions, k->exclusion_count);
             ok = pp_header_cache_tree_valid(p, k->e, xs, m);
         }
         if (!ok)

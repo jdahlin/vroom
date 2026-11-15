@@ -299,10 +299,10 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
                 return as_error_report(a, "invalid operand for instruction");
             if (o[0].kind == XK_EXPR)
                 o[0].kind = XK_MEM;
-            return x64_emit(
-                a, &F(.w = z == 8, .opsz16 = z == 2, .rep = 0xf2,
-                      .rex8 = z == 1 && o[0].kind == XK_REG && o[0].needrex,
-                      .op = ops, .nop = 3, .reg = o[1].reg, .rm = &o[0]));
+            return x64_emit_form(
+                a, F(.w = z == 8, .opsz16 = z == 2, .rep = 0xf2, .op = ops,
+                     .nop = 3, .reg = o[1].reg, .rm = &o[0],
+                     .rex8 = z == 1 && o[0].kind == XK_REG && o[0].needrex));
         }
         /* pinsrd/pextrd/pinsrq/pextrq/pextrb/pinsrb */
         if (nops == 3 && o[0].kind == XK_IMM &&
@@ -333,10 +333,10 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
              !strcmp(mn, "wrfsbase") || !strcmp(mn, "wrgsbase"))) {
             uint8_t ops[2] = {0x0f, 0xae};
 
-            return x64_emit(
-                a, &F(.w = o[0].size == 8, .rep = 0xf3, .op = ops, .nop = 2,
-                      .reg = (mn[0] == 'w' ? 2 : 0) + (mn[2] == 'g'),
-                      .rm = &o[0]));
+            return x64_emit_form(
+                a,
+                F(.w = o[0].size == 8, .rep = 0xf3, .op = ops, .nop = 2,
+                  .reg = (mn[0] == 'w' ? 2 : 0) + (mn[2] == 'g'), .rm = &o[0]));
         }
         if (nops == 0 && (!strcmp(mn, "emms") || !strcmp(mn, "fnclex") ||
                           !strcmp(mn, "mwaitx") || !strcmp(mn, "monitorx"))) {
@@ -356,12 +356,12 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
 
             if (o[0].kind == XK_EXPR)
                 o[0].kind = XK_MEM;
-            return x64_emit(a, &F(.op = ops, .nop = 1,
-                                  .reg = !strcmp(mn, "fnsave")    ? 6
-                                         : !strcmp(mn, "frstor")  ? 4
-                                         : !strcmp(mn, "fnstenv") ? 6
-                                                                  : 4,
-                                  .rm = &o[0]));
+            return x64_emit_form(a, F(.op = ops, .nop = 1,
+                                      .reg = !strcmp(mn, "fnsave")    ? 6
+                                             : !strcmp(mn, "frstor")  ? 4
+                                             : !strcmp(mn, "fnstenv") ? 6
+                                                                      : 4,
+                                      .rm = &o[0]));
         }
     }
     return X64_NEXT;
@@ -482,9 +482,9 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
                     int64_t c = 0;
                     uint8_t ops[2] = {0x0f, si[i].op};
                     XForm f =
-                        F(.rep = si[i].pfx == 0x66 ? 0 : si[i].pfx,
-                          .opsz16 = si[i].pfx == 0x66, .op = ops, .nop = 2,
-                          .reg = o[2].reg, .rm = &o[1], .isz = 1);
+                        F(.opsz16 = si[i].pfx == 0x66,
+                          .rep = si[i].pfx == 0x66 ? 0 : si[i].pfx, .op = ops,
+                          .nop = 2, .reg = o[2].reg, .rm = &o[1], .isz = 1);
 
                     if (o[1].kind == XK_EXPR)
                         o[1].kind = XK_MEM;
@@ -499,7 +499,7 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
             int64_t c = 0;
             int ext = mn[1] == 'e';
             XForm f =
-                F(.opsz16 = 1, .op = ext ? OPB(0x0f, 0xc5) : OPB(0x0f, 0xc4),
+                F(.opsz16 = 1, .op = ext ? OPB("\x0f\xc5") : OPB("\x0f\xc4"),
                   .nop = 2, .reg = o[2].reg, .rm = &o[1], .isz = 1);
 
             if (o[1].kind == XK_EXPR)
@@ -527,10 +527,10 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
                     if (strlen(pr[k]) == n - 5 &&
                         !memcmp(mn + 3, pr[k], n - 5)) {
                         uint8_t ops[2] = {0x0f, 0xc2};
-                        XForm f =
-                            F(.rep = pfx == 0x66 || pfx == 1 ? 0 : pfx,
-                              .opsz16 = pfx == 0x66, .op = ops, .nop = 2,
-                              .reg = o[1].reg, .rm = &o[0], .isz = 1, .imm = k);
+                        XForm f = F(.opsz16 = pfx == 0x66,
+                                    .rep = pfx == 0x66 || pfx == 1 ? 0 : pfx,
+                                    .op = ops, .nop = 2, .reg = o[1].reg,
+                                    .rm = &o[0], .imm = k, .isz = 1);
 
                         if (o[0].kind == XK_EXPR)
                             o[0].kind = XK_MEM;

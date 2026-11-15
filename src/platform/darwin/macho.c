@@ -25,6 +25,7 @@
  * is written.  vcc -S's Darwin output reaches here through the assembler after
  * apple-dialect-translate.c has turned it into the GNU dialect.
  */
+#include "common/literal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -190,7 +191,7 @@ static int user_sec(ElfObj *o, Mo *m, const ElfSec *se)
     if (!memchr(p, ',', se->len))
         return 0;
     while (nf < 4) {
-        const char *q = memchr(p, ',', (size_t)(e - p));
+        const char *q = (const char *)(memchr(p, ',', (size_t)(e - p)));
         const char *z = q ? q : e;
         while (p < z && *p == ' ')
             p++;
@@ -224,7 +225,7 @@ static int user_sec(ElfObj *o, Mo *m, const ElfSec *se)
     }
     for (const char *a = nf > 3 ? f[3] : NULL, *ae = a ? f[3] + fl[3] : NULL;
          a && a < ae;) {
-        const char *z = memchr(a, '+', (size_t)(ae - a));
+        const char *z = (const char *)(memchr(a, '+', (size_t)(ae - a)));
         if (!z)
             z = ae;
         size_t k = 0;
@@ -320,10 +321,10 @@ static void addrel(ElfObj *o, Mo *m, int ms, uint32_t addr, uint32_t symnum,
                    int pcrel, int len, int ext, int type)
 {
     (void)o;
-    m->rel[ms][m->nrel[ms]++] =
-        (MRel){addr, (symnum & 0xffffff) | (uint32_t)pcrel << 24 |
-                         (uint32_t)len << 25 | (uint32_t)ext << 27 |
-                         (uint32_t)type << 28};
+    m->rel[ms][m->nrel[ms]++] = VCC_LITERAL(
+        MRel, addr,
+        (symnum & 0xffffff) | (uint32_t)pcrel << 24 | (uint32_t)len << 25 |
+            (uint32_t)ext << 27 | (uint32_t)type << 28);
 }
 
 static void symrel(ElfObj *o, Mo *m, int ms, uint32_t addr, uint32_t sid,
@@ -505,18 +506,18 @@ static uint64_t al(uint64_t v, uint64_t a)
 size_t macho_finish(ElfObj *o)
 {
     uint32_t ns = o->nsec;
-    Mo *m = zalloc(o, sizeof *m);
+    Mo *m = (Mo *)zalloc(o, sizeof *m);
     if (!m)
         return 0;
     o->fin = m;
     elf_layout(o);
     if (o->has_err)
         return 0;
-    m->map = zalloc(o, ns + 1);
-    m->vaddr = zalloc(o, sizeof(uint64_t) * (ns + 1));
-    m->needsym = zalloc(o, o->nsym + 1);
-    m->nlidx = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
-    m->strx = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
+    m->map = (int8_t *)zalloc(o, ns + 1);
+    m->vaddr = (uint64_t *)(zalloc(o, sizeof(uint64_t) * (ns + 1)));
+    m->needsym = (uint8_t *)zalloc(o, o->nsym + 1);
+    m->nlidx = (uint32_t *)(zalloc(o, sizeof(uint32_t) * (o->nsym + 1)));
+    m->strx = (uint32_t *)(zalloc(o, sizeof(uint32_t) * (o->nsym + 1)));
     if (o->has_err)
         return 0;
     /* sections */
@@ -598,7 +599,7 @@ size_t macho_finish(ElfObj *o)
         }
         for (int k = 0; k < M_N; k++)
             if (cnt[k])
-                m->rel[k] = zalloc(o, sizeof(MRel) * cnt[k]);
+                m->rel[k] = (MRel *)(zalloc(o, sizeof(MRel) * cnt[k]));
         if (o->has_err)
             return 0;
     }
@@ -610,7 +611,7 @@ size_t macho_finish(ElfObj *o)
     if (o->has_err)
         return 0;
     /* symbols: locals, external definitions, undefined */
-    m->nl = zalloc(o, sizeof(uint32_t) * (o->nsym + 1));
+    m->nl = (uint32_t *)(zalloc(o, sizeof(uint32_t) * (o->nsym + 1)));
     if (!m->nl)
         return 0;
     uint32_t n = 0;
@@ -667,7 +668,7 @@ size_t macho_finish(ElfObj *o)
         uint32_t size = 1;
         for (uint32_t k = 0; k < n; k++)
             size += elf_symp(o, m->nl[k])->len + 1;
-        m->str = zalloc(o, size + 8);
+        m->str = (char *)zalloc(o, size + 8);
         if (!m->str)
             return 0;
         uint32_t at = 1;
@@ -735,7 +736,7 @@ static void pname(uint8_t *p, const char *s)
 
 void macho_emit(ElfObj *o, uint8_t *b)
 {
-    Mo *m = o->fin;
+    Mo *m = (Mo *)o->fin;
     uint32_t ns = o->nsec;
     uint64_t vmsize = 0, fileend = m->dataoff;
 

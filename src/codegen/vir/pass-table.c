@@ -26,6 +26,7 @@
  */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -213,7 +214,7 @@ static uint64_t virbuild_pass_switch_names_parse(const char *s, const char *end)
     uint64_t m = 0;
 
     while (s < end) {
-        const char *q = memchr(s, '+', (size_t)(end - s));
+        const char *q = (const char *)(memchr(s, '+', (size_t)(end - s)));
 
         if (!q)
             q = end;
@@ -250,7 +251,7 @@ VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *s)
     uint32_t valid = 0;
     char msg[200];
 
-    *w = (virbuild_pass_switch){0};
+    *w = VCC_LITERAL(virbuild_pass_switch, 0);
 
     for (uint32_t i = 0; i < VIRBUILD_PASS_COUNT; i++)
         if (virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_REQUIRED)
@@ -416,14 +417,15 @@ static virbuild_pass_tu *virbuild_pass_counts_find(codegen_unit *E)
     if (vir_count_n == virbuild_pass_count_capacity) {
         uint32_t nc =
             virbuild_pass_count_capacity ? 2 * virbuild_pass_count_capacity : 8;
-        virbuild_pass_tu *t =
-            realloc(virbuild_pass_count_units, nc * sizeof *t);
+        virbuild_pass_tu *t = (virbuild_pass_tu *)realloc(
+            virbuild_pass_count_units, nc * sizeof *t);
 
         if (!t)
             return NULL;
         virbuild_pass_count_units = t, virbuild_pass_count_capacity = nc;
     }
-    virbuild_pass_count_units[vir_count_n] = (virbuild_pass_tu){.E = E};
+    virbuild_pass_count_units[vir_count_n] =
+        VCC_LITERAL(virbuild_pass_tu, .E = E);
     return &virbuild_pass_count_units[vir_count_n++];
 }
 

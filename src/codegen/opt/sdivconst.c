@@ -7,6 +7,7 @@
  * For 0<=n<H, writing n=a*d+r leaves 0<=r+n/H<d. For n=-u,
  * 0<u<=H, 0<r+u/H<=d; floor is -a-1 and the sign correction adds one.
  * Thus equality preserves every signed input, including the minimum. */
+#include "common/literal.h"
 #include "../codegen-internal.h"
 
 VPRIV bool em_sdivconst32(int32_t divisor, bool remainder,
@@ -16,10 +17,8 @@ VPRIV bool em_sdivconst32(int32_t divisor, bool remainder,
 
     if (!d || !(d & (d - 1)))
         return false;
-    *r = (em_sdivconst_recipe){.divisor = d,
-                               .bits = 32,
-                               .negative = divisor < 0,
-                               .remainder = remainder};
+    *r = VCC_LITERAL(em_sdivconst_recipe, .divisor = d, .bits = 32,
+                     .negative = divisor < 0, .remainder = remainder);
     unsigned log = 31 - (unsigned)__builtin_clz(d);
     uint64_t numerator = UINT64_C(1) << (31 + log);
     uint64_t magic = numerator / d;
@@ -40,10 +39,8 @@ VPRIV bool em_sdivconst64(int64_t divisor, bool remainder,
 
     if (!d || !(d & (d - 1)))
         return false;
-    *r = (em_sdivconst_recipe){.divisor = d,
-                               .bits = 64,
-                               .negative = divisor < 0,
-                               .remainder = remainder};
+    *r = VCC_LITERAL(em_sdivconst_recipe, .divisor = d, .bits = 64,
+                     .negative = divisor < 0, .remainder = remainder);
     unsigned log = 63 - (unsigned)__builtin_clzll(d);
     u128 numerator = (u128)1 << (63 + log);
     u128 magic = numerator / d;

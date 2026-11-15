@@ -28,7 +28,8 @@ typedef struct vstring_ref {
 
 static inline int vstring_ref_tail_compare(const void *pa, const void *pb)
 {
-    const vstring_ref *a = pa, *b = pb;
+    const vstring_ref *a = (const vstring_ref *)pa,
+                      *b = (const vstring_ref *)pb;
 
     for (uint32_t i = 0;; i++) {
         int ca = i < a->n ? (unsigned char)a->s[a->n - 1 - i] : -1;

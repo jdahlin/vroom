@@ -41,8 +41,13 @@ typedef struct pp_directory_node {
     _Atomic int state;
     _Atomic uint32_t
         epoch; /* the cache epoch (lex.h) a PP_DIRECTORY_MISSING answer was last checked in */
-    char path[];
+
 } pp_directory_node;
+
+static inline char *pp_directory_path(pp_directory_node *p)
+{
+    return (char *)(p + 1);
+}
 
 #define PP_DIRECTORY_CACHE_TABLE_BITS 14
 static _Atomic(pp_directory_node *)
@@ -67,8 +72,9 @@ static void *pp_directory_cache_allocate(size_t n)
     size_t off;
 
     if (!b0) {
-        char *b = mmap(NULL, PP_DIRECTORY_CACHE_SIZE, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANON, -1, 0),
+        char *b = (char *)mmap(NULL, PP_DIRECTORY_CACHE_SIZE,
+                               PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON,
+                               -1, 0),
              *z = NULL;
 
         if (b == MAP_FAILED)
@@ -98,14 +104,15 @@ static pp_directory_node *pp_directory_cache_node_get(const char *path,
     for (;;) {
         for (pp_directory_node *e = head; e != seen; e = e->next)
             if (e->hash == h && e->path_length == plen &&
-                !memcmp(e->path, path, plen))
+                !memcmp(pp_directory_path(e), path, plen))
                 return e;
         if (!mine) {
-            mine = pp_directory_cache_allocate(sizeof(*mine) + plen + 17);
+            mine = (pp_directory_node *)(pp_directory_cache_allocate(
+                sizeof(*mine) + plen + 17));
             mine->hash = h;
             mine->path_length = (uint32_t)plen;
-            memcpy(mine->path, path, plen);
-            memset(mine->path + plen, 0, 17);
+            memcpy(pp_directory_path(mine), path, plen);
+            memset(pp_directory_path(mine) + plen, 0, 17);
         }
         mine->next = head;
         seen = head;
@@ -128,7 +135,8 @@ static int pp_directory_state_probe(pp_directory_node *n)
         PP_DIRECTORY_MISSING) { /* a directory that was missing may have been made since */
         if (atomic_load_explicit(&n->epoch, memory_order_relaxed) == cur)
             return s;
-        if (!stat(n->path_length ? n->path : ".", &st) && S_ISDIR(st.st_mode)) {
+        if (!stat(n->path_length ? pp_directory_path(n) : ".", &st) &&
+            S_ISDIR(st.st_mode)) {
             atomic_store_explicit(&n->state, PP_DIRECTORY_EXISTS,
                                   memory_order_release);
             return PP_DIRECTORY_EXISTS;
@@ -140,7 +148,8 @@ static int pp_directory_state_probe(pp_directory_node *n)
         atomic_compare_exchange_strong(&n->state, &s, PP_DIRECTORY_PROBING)) {
         atomic_fetch_add_explicit(&pp_directory_probe_count, 1,
                                   memory_order_relaxed);
-        s = !stat(n->path_length ? n->path : ".", &st) && S_ISDIR(st.st_mode)
+        s = !stat(n->path_length ? pp_directory_path(n) : ".", &st) &&
+                    S_ISDIR(st.st_mode)
                 ? PP_DIRECTORY_EXISTS
                 : PP_DIRECTORY_MISSING;
         atomic_store_explicit(&n->epoch, cur, memory_order_relaxed);

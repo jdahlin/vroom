@@ -13,6 +13,7 @@
  * group never inlined into itself), and the result does not depend on thread order.  The facts must stay conservative: a variable wrongly called
  * unwritten becomes a constant in the generated code.
  */
+#include "common/literal.h"
 #include "codegen-internal.h"
 #include "common/scoped-cleanup.h"
 
@@ -318,8 +319,9 @@ static void codegen_prepass_assignment_note(codegen_prepass_state *P,
  */
 VPRIV uint8_t *codegen_function_once_flags(cc *c)
 {
-    uint8_t *r = calloc((size_t)c->nsym + 64,
-                        1); /* refs in bits 0-1, calls in 2-3 (saturating) */
+    uint8_t *r = (uint8_t *)(calloc(
+        (size_t)c->nsym + 64,
+        1)); /* refs in bits 0-1, calls in 2-3 (saturating) */
 
     if (!r)
         return NULL;
@@ -421,17 +423,17 @@ VPRIV void codegen_inline_sizes_init(codegen_unit *E, cc *c, void *edge_space)
 {
     size_t n = (size_t)c->nsym + 64;
 
-    E->inline_parameter_reads = calloc(n, 1);
-    E->call_edge_offsets = calloc(n, 4);
-    E->call_edge_counts = calloc(n, 4);
-    E->recursion_groups = calloc(n, 4);
-    E->inline_sizes = calloc(n, 2);
-    E->inline_sized = calloc(n, 1);
+    E->inline_parameter_reads = (uint8_t *)calloc(n, 1);
+    E->call_edge_offsets = (uint32_t *)calloc(n, 4);
+    E->call_edge_counts = (uint32_t *)calloc(n, 4);
+    E->recursion_groups = (uint32_t *)calloc(n, 4);
+    E->inline_sizes = (uint16_t *)calloc(n, 2);
+    E->inline_sized = (_Atomic(uint8_t) *)calloc(n, 1);
     if (!E->inline_parameter_reads || !E->call_edge_offsets ||
         !E->call_edge_counts || !E->recursion_groups || !E->inline_sizes ||
         !E->inline_sized)
         vout_of_memory();
-    E->call_edges = edge_space;
+    E->call_edges = (codegen_call_edge *)edge_space;
     E->call_edge_count = 0;
     pthread_mutex_init(&E->call_edge_mutex, NULL);
     pthread_mutex_init(&E->inline_size_mutex, NULL);
@@ -478,10 +480,11 @@ static void codegen_inline_search(codegen_unit *E, cc *c, uint32_t r)
     if (!G->index) {
         size_t n = (size_t)c->nsym + 64;
 
-        G->index = calloc(n, 4), G->low = calloc(n, 4),
-        G->stack = malloc(n * 4);
-        G->calls = malloc(n * 4), G->next = malloc(n * 4),
-        G->on_stack = calloc(n, 1);
+        G->index = (uint32_t *)calloc(n, 4), G->low = (uint32_t *)calloc(n, 4),
+        G->stack = (uint32_t *)malloc(n * 4);
+        G->calls = (uint32_t *)malloc(n * 4),
+        G->next = (uint32_t *)malloc(n * 4),
+        G->on_stack = (uint8_t *)calloc(n, 1);
         if (!G->index || !G->low || !G->stack || !G->calls || !G->next ||
             !G->on_stack)
             vout_of_memory();
@@ -803,20 +806,20 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             P->E->once[P->fn] |= 2;
         if (callee && P->record_calls) {
             if (P->call_count == codegen_prepass_call_capacity) {
-                codegen_call_edge *g =
-                    realloc(codegen_prepass_calls,
-                            (size_t)(codegen_prepass_call_capacity =
-                                         codegen_prepass_call_capacity
-                                             ? 2 * codegen_prepass_call_capacity
-                                             : 1024) *
-                                sizeof *g);
+                codegen_call_edge *g = (codegen_call_edge *)(realloc(
+                    codegen_prepass_calls,
+                    (size_t)(codegen_prepass_call_capacity =
+                                 codegen_prepass_call_capacity
+                                     ? 2 * codegen_prepass_call_capacity
+                                     : 1024) *
+                        sizeof *g));
 
                 if (!g)
                     vout_of_memory();
                 codegen_prepass_calls = g;
             }
-            codegen_prepass_calls[P->call_count++] =
-                (codegen_call_edge){codegen_symbol_canonical(c, callee), n};
+            codegen_prepass_calls[P->call_count++] = VCC_LITERAL(
+                codegen_call_edge, codegen_symbol_canonical(c, callee), n);
         }
         lab = codegen_prepass_node_walk(P, x->a);
     }

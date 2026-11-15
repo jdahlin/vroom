@@ -1,5 +1,6 @@
 /* ld_input_sections_assign: matching input sections to the script's output sections, orphans, and the order within each. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV void ld_input_sections_assign(struct ld_context *ctx)
@@ -56,7 +57,8 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
 	 * placed one by one, each seeing those placed before it */
     {
         uint32_t n = ctx->layout.orphans.n,
-                 *tmp = ld_region_alloc(n * sizeof(uint32_t) + 1), k = 0;
+                 *tmp = (uint32_t *)(ld_region_alloc(n * sizeof(uint32_t) + 1)),
+                 k = 0;
 
         /* stable: by rank, non-allocated last */
         for (uint32_t i = 0; i < n; i++) {
@@ -92,10 +94,11 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
                 found = k;
         if (found == LD_NONE) {
             found = ld_output_section_find(ctx, oname);
-            VVEC_PUSH(ctx->script.commands,
-                      ((ld_command){.kind = LD_COMMAND_OUTPUT_SECTION,
-                                    .index = found}),
-                      ld_region_alloc);
+            VVEC_PUSH(
+                ctx->script.commands,
+                (VCC_LITERAL(ld_command, .kind = LD_COMMAND_OUTPUT_SECTION,
+                             .index = found)),
+                ld_region_alloc);
             /* lld findOrphanPos, on the coarse ranks: the first output section of
 			 * the closest rank (sections without input sections do not count),
 			 * then past those as close whose rank is not above the orphan's */
@@ -173,11 +176,11 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
                                               .thunk_section = LD_NONE};
             VVEC_PUSH(ctx->script.input_descriptions, d, ld_region_alloc);
             di = ctx->script.input_descriptions.n - 1;
-            VVEC_PUSH(
-                ctx->script.sections.v[found].commands,
-                ((ld_command){.kind = LD_COMMAND_INPUT_SECTION_DESCRIPTION,
-                              .index = di}),
-                ld_region_alloc);
+            VVEC_PUSH(ctx->script.sections.v[found].commands,
+                      (VCC_LITERAL(ld_command,
+                                   .kind = LD_COMMAND_INPUT_SECTION_DESCRIPTION,
+                                   .index = di)),
+                      ld_region_alloc);
         }
         is->input_description = di;
         VVEC_PUSH(ctx->script.input_descriptions.v[di].sections,
@@ -214,10 +217,10 @@ VPRIV void ld_input_sections_assign(struct ld_context *ctx)
                         break;
                 }
                 if (m == ctx->inputs.merge_sections.n) {
-                    ld_merge_section mg = {.flags = is->flags,
+                    ld_merge_section mg = {.output_section = oi,
+                                           .flags = is->flags,
                                            .entry_size = is->entry_size,
-                                           .alignment = is->alignment,
-                                           .output_section = oi};
+                                           .alignment = is->alignment};
                     uint32_t syn = ld_input_section_create(
                         ctx, ctx->inputs.sections.v[si].name,
                         LD_SECTION_KIND_MERGE, ctx->inputs.sections.v[si].type,

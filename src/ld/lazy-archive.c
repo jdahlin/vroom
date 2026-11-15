@@ -1,5 +1,6 @@
 /* Lazy archive members: which are extracted and in which order, as lld. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---- lazy archives: which members, in which order (as lld) ----
@@ -20,7 +21,8 @@ static ld_lazy_symbol *ld_lazy_symbol_find(struct ld_context *ctx,
         uint32_t m = ctx->inputs.lazy_symbols.v
                          ? (ctx->inputs.lazy_symbols.mask + 1) * 2
                          : 4096;
-        ld_lazy_symbol *nv = calloc(m, sizeof(ld_lazy_symbol));
+        ld_lazy_symbol *nv =
+            (ld_lazy_symbol *)(calloc(m, sizeof(ld_lazy_symbol)));
 
         for (uint32_t k = 0;
              ctx->inputs.lazy_symbols.v && k <= ctx->inputs.lazy_symbols.mask;
@@ -46,7 +48,7 @@ static ld_lazy_symbol *ld_lazy_symbol_find(struct ld_context *ctx,
             return &ctx->inputs.lazy_symbols.v[j];
     ctx->inputs.lazy_symbols.n++;
     ctx->inputs.lazy_symbols.v[j] =
-        (ld_lazy_symbol){.name = name, .length = len, .hash = h};
+        VCC_LITERAL(ld_lazy_symbol, .name = name, .length = len, .hash = h);
     return &ctx->inputs.lazy_symbols.v[j];
 }
 
@@ -62,7 +64,7 @@ static const elf_symbol *ld_lazy_object_globals(struct ld_context *ctx,
             return NULL;
     }
     if ((uintptr_t)p->file_bytes & 7) {
-        uint8_t *c = ld_region_alloc(p->size);
+        uint8_t *c = (uint8_t *)ld_region_alloc(p->size);
 
         memcpy(c, p->file_bytes, p->size);
         p->file_bytes = c;

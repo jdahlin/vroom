@@ -1,4 +1,5 @@
 /* vcc code generator for WebAssembly: calls, variadic arguments, builtins (wimpl.h) */
+#include "common/literal.h"
 #include "wimpl.h"
 #include "common/softfloat.h"
 
@@ -572,8 +573,9 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
             lib = true;
             va = lg.va;
             nfix = lg.np;
-            r = (wabi){lg.r == WT_NONE ? WA_IGNORE : WA_SCALAR, lg.r, f->base,
-                       0};
+            r = VCC_LITERAL(wabi,
+                            (uint8_t)(lg.r == WT_NONE ? WA_IGNORE : WA_SCALAR),
+                            lg.r, f->base, 0);
         }
     }
 
@@ -617,7 +619,8 @@ VPRIV int wcall(ecx *e, uint32_t n, bool want)
                 vo = (vo + al - 1) & ~(uint64_t)(al - 1);
                 wslot_addr(e, vbuf_slot + vo);
                 if (ind) {
-                    warg(e, an, at, (wabi){WA_IND, (uint8_t)WPT(c), at, 0});
+                    warg(e, an, at,
+                         VCC_LITERAL(wabi, WA_IND, (uint8_t)WPT(c), at, 0));
                     wiu(e, WASM32(c) ? "i32.store" : "i64.store", 0);
                 } else {
                     wexpr(e, an, true);

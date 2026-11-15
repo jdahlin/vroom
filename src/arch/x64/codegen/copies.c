@@ -64,7 +64,7 @@ static unsigned x64_copy_fields(const record *i)
 static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to,
                              bool apply)
 {
-    codegen_context *e = ctx;
+    codegen_context *e = (codegen_context *)ctx;
     record *i = &e->x64_context->records[j];
     unsigned fields = x64_copy_fields(i);
     if (!fields)
@@ -88,7 +88,7 @@ static bool x64_copy_rewrite(void *ctx, uint32_t j, uint8_t from, uint8_t to,
 static bool x64_copy_inspect(void *ctx, uint32_t j, uint64_t *read,
                              uint64_t *write)
 {
-    codegen_context *e = ctx;
+    codegen_context *e = (codegen_context *)ctx;
     record_effects f = x64_record_effects(e, &e->x64_context->records[j]);
     if (f.branch != RECORD_BRANCH_NONE ||
         (f.flags &

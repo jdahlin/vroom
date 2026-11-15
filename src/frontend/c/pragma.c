@@ -1,4 +1,5 @@
 /* vcc front end: #pragma pack, weak, visibility and ms_struct */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* #pragma pack as clang: pack(AST_NODE), pack(), push[, id][, AST_NODE], pop[, id][, AST_NODE],
@@ -135,8 +136,9 @@ CC_PRIVATE void cc_pragma_parse(cc *c, const ptok *t)
             if (c->nvis)
                 c->nvis--;
         } else if (e - q >= 4 && !memcmp(q, "push", 4)) {
-            const char *a = memchr(q, '(', (size_t)(e - q)),
-                       *b = a ? memchr(a, ')', (size_t)(e - a)) : NULL;
+            const char *a = (const char *)(memchr(q, '(', (size_t)(e - q))),
+                       *b = (const char *)(a ? memchr(a, ')', (size_t)(e - a))
+                                             : NULL);
 
             if (a && b && c->nvis < 16) {
                 size_t n;
@@ -147,11 +149,11 @@ CC_PRIVATE void cc_pragma_parse(cc *c, const ptok *t)
                 while (b > a && (b[-1] == ' ' || b[-1] == '\t'))
                     b--;
                 n = (size_t)(b - a);
-                keep = cc_heap_allocate(c, n + 1);
+                keep = (char *)cc_heap_allocate(c, n + 1);
                 memcpy(keep, a, n);
                 keep[n] = 0;
-                c->strs[c->nstr] =
-                    (cstr){keep, (uint32_t)(n + 1), 1, LEX_TOKEN_STRING};
+                c->strs[c->nstr] = VCC_LITERAL(cstr, keep, (uint32_t)(n + 1), 1,
+                                               LEX_TOKEN_STRING);
                 c->visstk[c->nvis++] =
                     ++c->nstr; /* (string index + 1, as attrs.visibility) */
             }

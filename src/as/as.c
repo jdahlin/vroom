@@ -2,16 +2,17 @@
  * (the input, macro and .rept expansions), the statement scanner, directive dispatch, the
  * instruction hand-off, and the lifecycle (as_new, as_begin, as_snippet_assemble, as_end).
  * Everything else is in the files beside it, one job each; as_SRC in the Makefile lists them. */
+#include "common/literal.h"
 #include "as-internal.h"
 #include <ctype.h>
 #include <stdbool.h>
 
 VPRIV as_text as_text_duplicate(as_context *a, const char *s, size_t n)
 {
-    char *p = as_region_alloc(&a->definitions, n + 1);
+    char *p = (char *)as_region_alloc(&a->definitions, n + 1);
     memcpy(p, s, n);
     p[n] = 0;
-    return (as_text){p, (uint32_t)n};
+    return VCC_LITERAL(as_text, p, (uint32_t)n);
 }
 
 VPRIV uint32_t as_line_current(as_context *a)
@@ -346,7 +347,8 @@ static int as_symbol_assign(as_context *a, as_text n, const char *p,
                         memcpy(nb, a->register_aliases,
                                sizeof *a->register_aliases *
                                    a->register_alias_count);
-                    a->register_aliases = nb, a->register_alias_capacity = nc;
+                    a->register_aliases = (__typeof__(a->register_aliases))nb,
+                    a->register_alias_capacity = nc;
                 }
                 a->register_aliases[a->register_alias_count].sym = y;
                 memset(a->register_aliases[a->register_alias_count].reg, 0, 8);
@@ -432,7 +434,8 @@ as_directive_dispatch(as_context *a, as_text w, const char *p, const char *e)
                 uint32_t nc = a->addrsig_symbol_capacity
                                   ? a->addrsig_symbol_capacity * 2
                                   : 64;
-                uint32_t *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+                uint32_t *t = (uint32_t *)as_region_alloc(&a->definitions,
+                                                          sizeof *t * nc);
                 if (a->addrsig_symbol_count)
                     memcpy(t, a->addrsig_symbols,
                            sizeof *t * a->addrsig_symbol_count);
@@ -474,7 +477,8 @@ as_directive_dispatch(as_context *a, as_text w, const char *p, const char *e)
         break;
     case 'c':
         if (n > 4 && !memcmp(d, "cfi_", 4))
-            return as_directive_cfi(a, (as_text){d, (uint32_t)n}, p, e);
+            return as_directive_cfi(a, VCC_LITERAL(as_text, d, (uint32_t)n), p,
+                                    e);
         if (AS_DIRECTIVE_IS("comm"))
             return as_directive_comm(a, p, e, 0);
         if (AS_DIRECTIVE_IS("cpu"))
@@ -790,7 +794,7 @@ as_directive_dispatch(as_context *a, as_text w, const char *p, const char *e)
                     as_region_alloc(&a->definitions, sizeof *a->symvers * nc);
                 if (a->symver_count)
                     memcpy(t, a->symvers, sizeof *a->symvers * a->symver_count);
-                a->symvers = t;
+                a->symvers = (__typeof__(a->symvers))t;
                 a->symver_capacity = nc;
             }
             a->symvers[a->symver_count].orig = ya;
@@ -928,8 +932,8 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
         as_text reg = as_text_trim(q + 4, e);
         if (a->alias_count == a->alias_capacity) {
             uint32_t nc = a->alias_capacity ? a->alias_capacity * 2 : 64;
-            as_register_alias *t =
-                as_region_alloc(&a->definitions, sizeof *t * nc);
+            as_register_alias *t = (as_register_alias *)as_region_alloc(
+                &a->definitions, sizeof *t * nc);
             if (a->alias_count)
                 memcpy(t, a->aliases, sizeof *t * a->alias_count);
             a->aliases = t;
@@ -967,12 +971,12 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 
 as_context *as_new(void)
 {
-    as_context *a = as_region_reserve(sizeof *a);
-    a->expansion_text.base = as_region_reserve((size_t)1 << 32);
+    as_context *a = (as_context *)as_region_reserve(sizeof *a);
+    a->expansion_text.base = (uint8_t *)(as_region_reserve((size_t)1 << 32));
     a->expansion_text.cap = (size_t)1 << 32;
-    a->definitions.base = as_region_reserve((size_t)1 << 30);
+    a->definitions.base = (uint8_t *)(as_region_reserve((size_t)1 << 30));
     a->definitions.cap = (size_t)1 << 30;
-    a->statement_buffer.base = as_region_reserve((size_t)1 << 24);
+    a->statement_buffer.base = (uint8_t *)(as_region_reserve((size_t)1 << 24));
     a->statement_buffer.cap = (size_t)1 << 24;
     return a;
 }
@@ -1063,22 +1067,22 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
     a->dwarf_row_pending.flags = 1;
     a->macro_mask = 255;
     a->macro_count = 0;
-    a->macro_table = as_region_alloc(&a->definitions,
-                                     sizeof(as_macro *) * (a->macro_mask + 1));
+    a->macro_table = (as_macro **)(as_region_alloc(
+        &a->definitions, sizeof(as_macro *) * (a->macro_mask + 1)));
     memset(a->macro_table, 0, sizeof(as_macro *) * (a->macro_mask + 1));
     a->literal_pool_count = 0;
     a->literal_pool_capacity = 0;
     a->literal_pools = 0;
     a->variable_mask = 63;
     a->variable_count = 0;
-    a->variables = as_region_alloc(&a->definitions, sizeof(as_variable) *
-                                                        (a->variable_mask + 1));
+    a->variables = (as_variable *)(as_region_alloc(
+        &a->definitions, sizeof(as_variable) * (a->variable_mask + 1)));
     memset(a->variables, 0, sizeof(as_variable) * (a->variable_mask + 1));
     a->numeric_label_mask = 255;
     a->numeric_label_count = 0;
-    a->numeric_labels =
-        as_region_alloc(&a->definitions,
-                        sizeof(as_numeric_label) * (a->numeric_label_mask + 1));
+    a->numeric_labels = (as_numeric_label *)(as_region_alloc(
+        &a->definitions,
+        sizeof(as_numeric_label) * (a->numeric_label_mask + 1)));
     memset(a->numeric_labels, 0,
            sizeof(as_numeric_label) * (a->numeric_label_mask + 1));
     elf_reset(o);
@@ -1242,8 +1246,9 @@ ElfVal as_symbol_value(as_context *a, uint32_t y, int64_t c)
         }
     }
     if (y && (elf_symp(a->object, y)->flags & ESYM_ABS))
-        return (ElfVal){0, 0, (int64_t)elf_symp(a->object, y)->value + c};
-    return (ElfVal){y, 0, c};
+        return VCC_LITERAL(ElfVal, 0, 0,
+                           (int64_t)elf_symp(a->object, y)->value + c);
+    return VCC_LITERAL(ElfVal, y, 0, c);
 }
 
 /* "y:" at the current position */

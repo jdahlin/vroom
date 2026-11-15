@@ -1,6 +1,7 @@
 /* The simplifier's rewrite rules: what one instruction becomes, given its operands. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -234,8 +235,8 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
                 VIR_TYPE_I32) { /* a narrower extension, in i32 */
             virbuild_use_count_decrement(V, S, x),
                 virbuild_use_count_increment(V, S, xi.a);
-            V->insns[q].insn =
-                (vir_insn){VIR_OP_EXT, VIR_TYPE_I32, xi.flags, xi.a, 0, 0};
+            V->insns[q].insn = VCC_LITERAL(vir_insn, VIR_OP_EXT, VIR_TYPE_I32,
+                                           xi.flags, xi.a, 0, 0);
             return true;
         }
         if (xi.op == VIR_OP_EXT &&

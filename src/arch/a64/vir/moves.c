@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: failing out, registers and constants, the allocator's moves, spills and reloads, labels and the edges of branches. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L,
@@ -38,15 +39,12 @@ static void a64_vir_constant_materialize(a64_vir_context *L, uint32_t v, int rd)
         a64_record_emit_move_immediate(e, 1, rd, a64_vir_constant_bits(k));
         return;
     case VIR_OP_SYMADDR:
-        a64_reference_address_emit(
-            e, rd, k->a,
-            a64_vir_constant_bits(&(vir_insn){.b = k->b, .c = k->c}));
+        a64_reference_address_emit(e, rd, k->a, a64_vir_constant_bits(k));
         return;
     case VIR_OP_SLOTADDR:
-        a64_record_emit_immediate(
-            e, A64_OP_ADDI, 1, rd, A64_REGISTER_FRAME,
-            L->slot_offsets[k->a] +
-                a64_vir_constant_bits(&(vir_insn){.b = k->b, .c = k->c}));
+        a64_record_emit_immediate(e, A64_OP_ADDI, 1, rd, A64_REGISTER_FRAME,
+                                  L->slot_offsets[k->a] +
+                                      a64_vir_constant_bits(k));
         return;
     default:
         a64_vir_fail(L, VIRBUILD_FAILURE(constant_not_materializable));

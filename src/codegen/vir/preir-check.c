@@ -187,8 +187,10 @@ static bool virbuild_preir_check_successors_are_ok(virbuild_preir_checker *k,
 static void virbuild_preir_check_order(virbuild_preir_checker *k)
 {
     virbuild_context *V = k->context;
-    uint8_t *reach = calloc((size_t)V->block_count + 1, 1);
-    uint32_t *stk = malloc(((size_t)V->block_count + 1) * sizeof *stk), sp = 0;
+    uint8_t *reach = (uint8_t *)(calloc((size_t)V->block_count + 1, 1));
+    uint32_t *stk = (uint32_t *)(malloc(((size_t)V->block_count + 1) *
+                                        sizeof *stk)),
+             sp = 0;
 
     if (!reach || !stk) {
         virbuild_preir_check_fail(k, "out of memory in the check");
@@ -354,9 +356,9 @@ VPRIV const char *virbuild_preir_check(codegen_context *e, uint32_t valid,
         snprintf(buf, n, "no values (value 0, none, is missing)");
         return buf;
     }
-    k.is_live = calloc((size_t)V->insn_count + 1, 1);
-    k.in_order = calloc((size_t)V->block_count + 1, 1);
-    seen = calloc((size_t)V->insn_count + 1, 1);
+    k.is_live = (uint8_t *)(calloc((size_t)V->insn_count + 1, 1));
+    k.in_order = (uint8_t *)(calloc((size_t)V->block_count + 1, 1));
+    seen = (uint8_t *)(calloc((size_t)V->insn_count + 1, 1));
     if (!k.is_live || !k.in_order || !seen) {
         virbuild_preir_check_fail(&k, "out of memory in the check");
         goto out;

@@ -22,7 +22,7 @@ static void db_put(DBuf *b, const char *s, size_t n)
 {
     if (b->n + n + 64 > b->cap) {
         b->cap = (b->n + n + 64) * 2;
-        b->p = realloc(b->p, b->cap);
+        b->p = (char *)realloc(b->p, b->cap);
     }
     memcpy(b->p + b->n, s, n);
     b->n += n;
@@ -214,7 +214,7 @@ static bool dt_neon(DBuf *b, const char *s, const char *c)
         m++;
     if (!isalpha((unsigned char)*s) || memchr(s, ':', (size_t)(m - s)))
         return false; /* a label */
-    d = memchr(s, '.', (size_t)(m - s));
+    d = (const char *)(memchr(s, '.', (size_t)(m - s)));
     if (!d) {
         /* "mov d0, v1[1]": the lane size from the scalar register */
         static const char *const lane[] = {".b", ".h", ".s", ".d"};
@@ -222,7 +222,7 @@ static bool dt_neon(DBuf *b, const char *s, const char *c)
 
         while (r < c && (*r == ' ' || *r == '\t'))
             r++;
-        lb = memchr(r, '[', (size_t)(c - r));
+        lb = (const char *)(memchr(r, '[', (size_t)(c - r)));
         if (!lb || r + 1 >= c || !strchr("bhsd", *r) ||
             !isdigit((unsigned char)r[1]) || memchr(r, '.', (size_t)(c - r)))
             return false;
@@ -327,7 +327,7 @@ char *macho_dialect_translate(const char *t, size_t n, size_t *outn)
     };
 
     for (const char *p = t, *e = t + n; p < e;) {
-        const char *nl = memchr(p, '\n', (size_t)(e - p));
+        const char *nl = (const char *)(memchr(p, '\n', (size_t)(e - p)));
         const char *le = nl ? nl : e;
         const char *c = p;
         bool quote = false;

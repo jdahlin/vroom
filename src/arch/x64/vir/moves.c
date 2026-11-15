@@ -138,7 +138,7 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
         /* Rematerialization may run between a compare and its branch. */
         if (x64_vir_constant_bits(i)) {
             codegen_lvalue offset = {.kind = CODEGEN_LVALUE_REGISTER,
-                                     .register_number = d,
+                                     .register_number = (uint8_t)(d),
                                      .offset = x64_vir_constant_bits(i)};
             x64_record_emit_memory(L->context, X64_OP_LEA, 8, d, &offset,
                                    false);
@@ -154,11 +154,11 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                 ->immediate = x64_vir_constant_bits(i);
     } else {
         codegen_lvalue a = {
-            .kind = i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME
-                                             : CODEGEN_LVALUE_SYMBOL,
+            .kind = (uint8_t)(i->op == VIR_OP_SLOTADDR ? CODEGEN_LVALUE_FRAME
+                                                       : CODEGEN_LVALUE_SYMBOL),
+            .reference = i->a,
             .offset = x64_vir_constant_bits(i) +
-                      (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0),
-            .reference = i->a};
+                      (i->op == VIR_OP_SLOTADDR ? L->slot[i->a] : 0)};
         x64_record_emit_memory(L->context, X64_OP_LEA, 8, d, &a, false);
     }
 }

@@ -86,7 +86,8 @@ VPRIV bool a64_vir_call_is_sibling_candidate(a64_vir_context *L, uint32_t b,
 {
     const vir_function *f = L->function;
     uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->insns[i].b]);
-    a64_vir_argument *a = __builtin_alloca(sizeof(a64_vir_argument) * (ng + 1));
+    a64_vir_argument *a = (a64_vir_argument *)(__builtin_alloca(
+        sizeof(a64_vir_argument) * (ng + 1)));
     int32_t stk;
 
     a64_vir_arguments_assign(CODEGEN_IS_DARWIN(L->context->compile_context),

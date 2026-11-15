@@ -1,5 +1,6 @@
 /* Segment membership helpers and the assignment of file offsets to output sections. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- output sections: liveness, flags ---------------- */
@@ -42,8 +43,8 @@ VPRIV int ld_segment_create(struct ld_context *ctx, uint32_t type,
         .p_align = type == PT_LOAD ? ctx->options.max_page_size : 0};
     VVEC_PUSH(ctx->layout.program_headers, p, ld_region_alloc);
     VVEC_PUSH(ctx->layout.program_header_sections,
-              ((ld_segment_sections){.first_output_section = -1,
-                                     .last_output_section = -1}),
+              (VCC_LITERAL(ld_segment_sections, .first_output_section = -1,
+                           .last_output_section = -1)),
               ld_region_alloc);
     return ctx->layout.program_headers.n - 1;
 }

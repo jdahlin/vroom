@@ -1,4 +1,5 @@
 /* vcc front end: implicit conversions: casts, decay, promotion, rvalues and lvalue checks */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* a floating constant to an integer: folded, as clang does (the kernel has no FP code); UINT32_MAX: not constant */
@@ -353,7 +354,7 @@ CC_PRIVATE bool cc_node_require_lvalue(cc *c, uint32_t n, uint32_t loc)
             diag_span vr = {v->plb, pp_token_end_find(c->p, v->ple)};
 
             if (!v->ple)
-                vr = (diag_span){v->loc, v->loc};
+                vr = VCC_LITERAL(diag_span, v->loc, v->loc);
             report(c, "error", loc, &r, 1, NULL, 0,
                    "cannot assign to variable '%.*s' with const-qualified type "
                    "'%s'",

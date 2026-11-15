@@ -1,4 +1,5 @@
 /* vcc arm64 code generator: frame slots, addresses and typed loads and stores that VIR's lowering shares with the walker */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /* a stack slot: returns its offset (A64_REGISTER_FRAME base) */
@@ -35,7 +36,7 @@ VPRIV int64_t a64_frame_slot_allocate(codegen_context *e, uint64_t size,
         e->frame_maximum = e->frame_offset;
     if (e->slot_allocation_count < CODEGEN_SLOT_ALLOCATION_CAPACITY) {
         e->slot_allocations[e->slot_allocation_count] =
-            (codegen_slot_allocation){-e->frame_offset, size};
+            VCC_LITERAL(codegen_slot_allocation, -e->frame_offset, size);
         e->live_slots[e->live_slot_count++] = e->slot_allocation_count;
     }
     e->slot_allocation_count++;

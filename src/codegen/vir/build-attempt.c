@@ -19,6 +19,7 @@
  */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -157,13 +158,13 @@ VPRIV void virbuild_function_list_read(codegen_unit *E, const char *path)
 
     if (!fp)
         vjob_fail_errno(path);
-    list = malloc(cap + 2);
+    list = (char *)malloc(cap + 2);
     if (!list)
         vout_of_memory();
     list[n++] = '\n';
     while ((k = fread(list + n, 1, cap - n, fp)) > 0) {
         n += k;
-        if (n == cap && !(list = realloc(list, (cap *= 2) + 2)))
+        if (n == cap && !(list = (char *)(realloc(list, (cap *= 2) + 2))))
             vout_of_memory();
     }
     fclose(fp);
@@ -207,7 +208,9 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
         e->unit->vir_attempted++;
     timed = e->unit->vir_statistics && e->unit->vir_pass_switch.time;
     virbuild_pass_list(&npass);
-    vperf c0 = e->unit->vir_statistics ? vperformance_now() : (vperf){0, 0}, c1;
+    vperf c0 = e->unit->vir_statistics ? vperformance_now()
+                                       : VCC_LITERAL(vperf, 0, 0),
+          c1;
     if (timed)
         t0 = vperformance_now();
     {
@@ -223,7 +226,8 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
     e->vir_try = false;
     if (m & VIRBUILD_MODE_REPORT)
         virbuild_function_name_get(e, s, nm, sizeof nm);
-    c1 = e->unit->vir_statistics ? vperformance_now() : (vperf){0, 0};
+    c1 =
+        e->unit->vir_statistics ? vperformance_now() : VCC_LITERAL(vperf, 0, 0);
     if (e->vir_failure_reason) {
         if (e->unit->vir_statistics)
             e->unit->vir_cost_build_failed += c1.ins - c0.ins;

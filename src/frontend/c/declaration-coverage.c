@@ -27,7 +27,7 @@ CC_PRIVATE void cc_replay_coverage_boundary(cc *c)
 {
     if (c->ndrb == c->cdrb) {
         c->cdrb = c->cdrb ? c->cdrb * 2 : 4096;
-        c->drb = realloc(c->drb, c->cdrb * sizeof(uint64_t));
+        c->drb = (uint64_t *)(realloc(c->drb, c->cdrb * sizeof(uint64_t)));
     }
     if (c->ntk == 1)
         c->drb[c->ndrb++] = pp_token_count(c->p) - 1;

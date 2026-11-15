@@ -13,7 +13,7 @@
 static char **vccd_argv_with_extra(const struct vccd_request *r,
                                    const char *extra)
 {
-    char **av = malloc(((size_t)r->argc + 2) * sizeof(char *));
+    char **av = (char **)(malloc(((size_t)r->argc + 2) * sizeof(char *)));
     int n = 0;
 
     if (!av)

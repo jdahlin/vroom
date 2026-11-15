@@ -199,7 +199,7 @@ VPRIV void cxx_bind_pack(cxx *c, cxx_scope *binding, const cxx_tparam *p,
         return;
     e->dependent = 0, e->is_pack = 1, e->pack_index = -1,
     e->ty = CXX_TY_UNKNOWN;
-    e->pack = malloc((n ? n : 1) * sizeof *e->pack);
+    e->pack = (struct cxx_targ *)(malloc((n ? n : 1) * sizeof *e->pack));
     memcpy(e->pack, list, n * sizeof *list);
     e->npack = n;
 }

@@ -12,7 +12,7 @@ VPRIV void ld_synthetic_sections_add(struct ld_context *ctx)
         ld_input_section *c =
             &ctx->inputs.sections.v[ctx->output.comment_section];
         size_t n = strlen(ctx->options.comment) + 1;
-        uint8_t *d = ld_region_alloc(n);
+        uint8_t *d = (uint8_t *)ld_region_alloc(n);
         memcpy(d, ctx->options.comment, n);
         c->data = d;
         c->size = n;

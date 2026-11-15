@@ -47,11 +47,12 @@ void vjob_region_debug_release(vjob_region *r, size_t used)
     size_t pg = (size_t)getpagesize(),
            lim = r->cap < ((size_t)8 << 30) ? r->cap : ((size_t)8 << 30);
     size_t np = lim / pg, res = 0, bad = 0;
-    char *vec = malloc(np);
+    char *vec = (char *)malloc(np);
     int i;
 
     mincore(r->p, lim,
-            (void *)vec); /* char * on Darwin, unsigned char * on Linux */
+            (unsigned char *)((
+                void *)vec)); /* char * on Darwin, unsigned char * on Linux */
     for (size_t k = 0; k < np; k++) {
         char *pp = r->p + k * pg;
 

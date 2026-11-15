@@ -36,12 +36,13 @@ VPRIV int x64_i_crdr(as_context *a, char *mn, XOp *o, int nops)
         if (g->kind == XK_EXPR)
             g->kind = XK_MEM;
         if (to)
-            return x64_emit(a,
-                            &F(.w = g->kind == XK_REG && g->size == 8,
-                               .op = OPB(0x8e), .nop = 1, .reg = sn, .rm = g));
-        return x64_emit(a, &F(.w = g->kind == XK_REG && g->size == 8,
-                              .opsz16 = g->kind == XK_REG && g->size == 2,
-                              .op = OPB(0x8c), .nop = 1, .reg = sn, .rm = g));
+            return x64_emit_form(a, F(.w = g->kind == XK_REG && g->size == 8,
+                                      .op = OPB("\x8e"), .nop = 1, .reg = sn,
+                                      .rm = g));
+        return x64_emit_form(a, F(.w = g->kind == XK_REG && g->size == 8,
+                                  .opsz16 = g->kind == XK_REG && g->size == 2,
+                                  .op = OPB("\x8c"), .nop = 1, .reg = sn,
+                                  .rm = g));
     }
     /* ---- mov to and from control and debug registers (always 64-bit) ---- */
     if (nops == 2 && (!strcmp(mn, "mov") || !strcmp(mn, "movq")) &&
@@ -54,7 +55,8 @@ VPRIV int x64_i_crdr(as_context *a, char *mn, XOp *o, int nops)
 
         if (g->kind != XK_REG || g->cls != XR_GPR || g->size != 8)
             return as_error_report(a, "invalid operand for instruction");
-        return x64_emit(a, &F(.op = ops, .nop = 2, .reg = sr->reg, .rm = g));
+        return x64_emit_form(a,
+                             F(.op = ops, .nop = 2, .reg = sr->reg, .rm = g));
     }
     return X64_NEXT;
 }
@@ -303,10 +305,10 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
                           o[0].cls == XR_GPR))
                         return as_error_report(
                             a, "invalid operand for instruction");
-                    return x64_emit(
-                        a, &F(.w = sm[i].w, .opsz16 = sm[i].pre == 0x66,
-                              .rep = sm[i].pre == 0xf3 ? 0xf3 : 0, .op = ops,
-                              .nop = 2, .reg = sm[i].d, .rm = &o[0]));
+                    return x64_emit_form(
+                        a, F(.w = sm[i].w, .opsz16 = sm[i].pre == 0x66,
+                             .rep = sm[i].pre == 0xf3 ? 0xf3 : 0, .op = ops,
+                             .nop = 2, .reg = sm[i].d, .rm = &o[0]));
                 }
         /* rdrand/rdseed/rdpid reg */
         if (nops == 1 && o[0].kind == XK_REG && o[0].cls == XR_GPR &&
@@ -316,10 +318,10 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
             bool pid = mn[2] == 'p';
             int z = o[0].size;
 
-            return x64_emit(a, &F(.w = !pid && z == 8, .opsz16 = z == 2,
-                                  .rep = pid ? 0xf3 : 0, .op = ops, .nop = 2,
-                                  .reg = mn[2] == 's' || pid ? 7 : 6,
-                                  .rm = &o[0]));
+            return x64_emit_form(
+                a, F(.w = !pid && z == 8, .opsz16 = z == 2,
+                     .rep = pid ? 0xf3 : 0, .op = ops, .nop = 2,
+                     .reg = mn[2] == 's' || pid ? 7 : 6, .rm = &o[0]));
         }
         /* movnti reg, mem */
         if (nops == 2 && !strncmp(mn, "movnti", 6) && o[0].kind == XK_REG &&
@@ -328,19 +330,19 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
 
             if (o[1].kind == XK_EXPR)
                 o[1].kind = XK_MEM;
-            return x64_emit(a, &F(.w = o[0].size == 8, .op = ops, .nop = 2,
-                                  .reg = o[0].reg, .rm = &o[1]));
+            return x64_emit_form(a, F(.w = o[0].size == 8, .op = ops, .nop = 2,
+                                      .reg = o[0].reg, .rm = &o[1]));
         }
         /* lsl/lar rm, reg */
         if (nops == 2 && (!strncmp(mn, "lsl", 3) || !strncmp(mn, "lar", 3)) &&
             strlen(mn) <= 4 && o[1].kind == XK_REG) {
-            uint8_t ops[2] = {0x0f, mn[1] == 's' ? 0x03 : 0x02};
+            uint8_t ops[2] = {0x0f, (uint8_t)(mn[1] == 's' ? 0x03 : 0x02)};
 
             if (o[0].kind == XK_EXPR)
                 o[0].kind = XK_MEM;
-            return x64_emit(a, &F(.w = o[1].size == 8, .opsz16 = o[1].size == 2,
-                                  .op = ops, .nop = 2, .reg = o[1].reg,
-                                  .rm = &o[0]));
+            return x64_emit_form(a, F(.w = o[1].size == 8,
+                                      .opsz16 = o[1].size == 2, .op = ops,
+                                      .nop = 2, .reg = o[1].reg, .rm = &o[0]));
         }
         /* in/out with %dx or an imm8 port */
         if ((!strncmp(mn, "in", 2) || !strncmp(mn, "out", 3)) && nops == 2) {
@@ -381,8 +383,9 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
 
             if (o[1].kind == XK_EXPR)
                 o[1].kind = XK_MEM;
-            return x64_emit(a, &F(.w = o[0].size == 8, .opsz16 = u, .op = ops,
-                                  .nop = 3, .reg = o[0].reg, .rm = &o[1]));
+            return x64_emit_form(a,
+                                 F(.w = o[0].size == 8, .opsz16 = u, .op = ops,
+                                   .nop = 3, .reg = o[0].reg, .rm = &o[1]));
         }
         if (nops == 1 &&
             (!strncmp(mn, "incssp", 6) || !strncmp(mn, "rdssp", 5)) &&
@@ -390,8 +393,9 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
             bool inc = mn[0] == 'i';
             uint8_t ops[2] = {0x0f, (uint8_t)(inc ? 0xae : 0x1e)};
 
-            return x64_emit(a, &F(.w = o[0].size == 8, .rep = 0xf3, .op = ops,
-                                  .nop = 2, .reg = inc ? 5 : 1, .rm = &o[0]));
+            return x64_emit_form(a,
+                                 F(.w = o[0].size == 8, .rep = 0xf3, .op = ops,
+                                   .nop = 2, .reg = inc ? 5 : 1, .rm = &o[0]));
         }
         /* invpcid m128, r64: 66 0f 38 82 /r */
         if (nops == 2 && !strcmp(mn, "invpcid") && o[1].kind == XK_REG &&
@@ -400,8 +404,8 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
 
             if (o[0].kind == XK_EXPR)
                 o[0].kind = XK_MEM;
-            return x64_emit(a, &F(.opsz16 = 1, .op = ops, .nop = 3,
-                                  .reg = o[1].reg, .rm = &o[0]));
+            return x64_emit_form(a, F(.opsz16 = 1, .op = ops, .nop = 3,
+                                      .reg = o[1].reg, .rm = &o[0]));
         }
         /* ret/lret $imm16 */
         if (nops == 1 && o[0].kind == XK_IMM && !o[0].v.add && !o[0].v.sub &&
@@ -421,7 +425,7 @@ VPRIV int x64_i_sys(as_context *a, char *mn, XOp *o, int nops)
             uint8_t b[2] = {0xcd, (uint8_t)o[0].v.c};
 
             if (o[0].v.c == 3) /* (MC: int $3 is int3) */
-                return x64_raw(a, (const uint8_t[]){0xcc}, 1);
+                return x64_raw(a, OPB("\xcc"), 1);
             return x64_raw(a, b, 2);
         }
     }

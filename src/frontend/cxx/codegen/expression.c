@@ -1,4 +1,5 @@
 /* C++ code generation: literals, variables and the built-in operators */
+#include "common/literal.h"
 #include "codegen.h"
 
 VPRIV void cxx_gen_integer(cxx *c, int64_t v, ast_qualified_type t,
@@ -256,11 +257,12 @@ VPRIV void cxx_gen_string(cxx *c, const char *text, size_t len, uint32_t loc)
 
     if (!cxx_gen_on(c))
         return;
-    buf = cc_heap_allocate(a, len + 1);
+    buf = (char *)cc_heap_allocate(a, len + 1);
     memcpy(buf, text, len);
     buf[len] = 0;
     si = a->nstr++;
-    a->strs[si] = (cstr){buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING};
+    a->strs[si] =
+        VCC_LITERAL(cstr, buf, (uint32_t)len + 1, 1, LEX_TOKEN_STRING);
     n = cc_node_new(
         a, AST_NODE_STRING,
         cc_type_array(a, AST_QUALIFIED_TYPE(AST_TYPE_CHAR, AST_QUALIFIER_CONST),

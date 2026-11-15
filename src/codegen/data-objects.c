@@ -12,6 +12,7 @@
  * statics it points to get emitted too.  Errors (an object too large, a non-constant initializer)
  * longjmp to e->bail and drop this object only.
  */
+#include "common/literal.h"
 #include "codegen-internal.h"
 #include "common/softfloat.h"
 
@@ -52,8 +53,9 @@ static void codegen_data_relocation_add(codegen_context *e, uint64_t off,
                                         uint32_t ref, int64_t add, int n)
 {
     codegen_data_store(e, off, 0, n);
-    e->relocations[e->relocation_count] = (struct codegen_data_relocation){
-        off, ref, e->relocation_count, add, 0, n == 8 ? 0 : (uint32_t)n};
+    e->relocations[e->relocation_count] =
+        VCC_LITERAL(struct codegen_data_relocation, off, ref,
+                    e->relocation_count, add, 0, n == 8 ? 0 : (uint32_t)n);
     e->relocation_count++;
     if (off + (uint64_t)n > e->relocation_end)
         e->relocation_end = off + (uint64_t)n;
@@ -341,16 +343,14 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
                 /* label difference: ref - sub, resolved by the assembler */
                 codegen_data_store(e, off, 0, n);
                 e->relocations[e->relocation_count] =
-                    (struct codegen_data_relocation){
-                        off,
-                        CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL,
-                                               cv.label - 1),
-                        e->relocation_count,
-                        (int64_t)cv.i,
-                        CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL,
-                                               cv.sublabel - 1) +
-                            1,
-                        (uint32_t)n};
+                    VCC_LITERAL(struct codegen_data_relocation, off,
+                                CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL,
+                                                       cv.label - 1),
+                                e->relocation_count, (int64_t)cv.i,
+                                CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL,
+                                                       cv.sublabel - 1) +
+                                    1,
+                                (uint32_t)n);
                 e->relocation_count++;
                 if (off + n > e->relocation_end)
                     e->relocation_end = off + n;
@@ -399,7 +399,9 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
 
 static int codegen_data_relocation_compare(const void *a, const void *b)
 {
-    const struct codegen_data_relocation *x = a, *y = b;
+    const struct codegen_data_relocation
+        *x = (const struct codegen_data_relocation *)a,
+        *y = (const struct codegen_data_relocation *)b;
 
     if (x->offset != y->offset)
         return x->offset < y->offset ? -1 : 1;
@@ -428,19 +430,19 @@ static void codegen_data_item_append(codegen_context *e, uint64_t size,
                                      bool zero)
 {
     size_t h = codegen_item_open(e, CODEGEN_ITEM_DATA);
-    codegen_data_header *dh = codegen_item_room_need(e, sizeof *dh);
+    codegen_data_header *dh =
+        (codegen_data_header *)codegen_item_room_need(e, sizeof *dh);
     uint32_t nrel = 0;
 
     if (zero) {
-        *dh = (codegen_data_header){.size = size, .zero = 1};
+        *dh = VCC_LITERAL(codegen_data_header, .size = size, .zero = 1);
     } else {
         codegen_data_relocations_sort(e);
         while (nrel < e->relocation_count && e->relocations[nrel].offset < size)
             nrel++;
-        *dh =
-            (codegen_data_header){.size = size,
-                                  .count = e->data.n < size ? e->data.n : size,
-                                  .relocation_count = nrel};
+        *dh = VCC_LITERAL(codegen_data_header, .size = size,
+                          .count = e->data.n < size ? e->data.n : size,
+                          .relocation_count = nrel);
         memcpy(
             codegen_item_room_need(e, nrel * sizeof(codegen_item_relocation)),
             e->relocations, nrel * sizeof(codegen_item_relocation));
@@ -669,7 +671,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
             h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
             *(codegen_object_size *)codegen_item_room_need(
                 e, sizeof(codegen_object_size)) =
-                (codegen_object_size){.symbol = s, .size = size};
+                VCC_LITERAL(codegen_object_size, .symbol = s, .size = size);
             codegen_item_close(e, h);
             e->unit->object_total++;
             codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
@@ -801,7 +803,7 @@ VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s)
         h = codegen_item_open(e, CODEGEN_ITEM_OBJECT_SIZE);
         *(codegen_object_size *)codegen_item_room_need(
             e, sizeof(codegen_object_size)) =
-            (codegen_object_size){.symbol = s, .size = size};
+            VCC_LITERAL(codegen_object_size, .symbol = s, .size = size);
         codegen_item_close(e, h);
         e->unit->object_total++;
         codegen_chunk_add(e, ((uint64_t)s << 1) | 1, start);
@@ -879,7 +881,7 @@ VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i)
         memcpy(codegen_item_room_need(e, 4), &ref, 4);
         codegen_item_close(e, h);
         h = codegen_item_open(e, CODEGEN_ITEM_BYTES);
-        q = codegen_item_room_need(e, m + asciz);
+        q = (char *)codegen_item_room_need(e, m + asciz);
         memcpy(q, s->s, m);
         if (asciz)
             q[m] = 0;

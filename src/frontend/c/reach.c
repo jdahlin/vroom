@@ -369,7 +369,7 @@ CC_PRIVATE int cc_reach_body_falls_off(cc *c, uint32_t body,
     uint32_t nl = c->nlabel - first_label;
 
     f.first = first_label, f.nlab = nl;
-    f.lab = nl <= sizeof(small) ? small : calloc(nl, 1);
+    f.lab = (uint8_t *)(nl <= sizeof(small) ? small : calloc(nl, 1));
     if (!f.lab)
         return 0;
     if (nl <= sizeof(small))

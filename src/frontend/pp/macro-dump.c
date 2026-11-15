@@ -18,7 +18,7 @@ static void pp_macro_dump_append(char **b, size_t *n, size_t *cap,
 {
     if (*n + l + 1 > *cap) {
         *cap = (*n + l + 1) * 2;
-        *b = realloc(*b, *cap);
+        *b = (char *)realloc(*b, *cap);
     }
     memcpy(*b + *n, s, l);
     *n += l;
@@ -31,7 +31,7 @@ static void pp_macro_dump_token(char **b, size_t *n, size_t *cap,
 
     if (t->flags & LEX_TOKEN_FLAG_SPLICED) {
         /* without the line splices, as clang (a long string literal: a heap copy) */
-        char *w = t->len <= sizeof(tmp) ? tmp : malloc(t->len + 16);
+        char *w = (char *)(t->len <= sizeof(tmp) ? tmp : malloc(t->len + 16));
         size_t l = lex_token_spell(src, t, w);
 
         pp_macro_dump_append(b, n, cap, w, l);
@@ -101,7 +101,7 @@ static void pp_macro_define_event_print(pp *p, uint32_t id, const pp_macro *m)
  * <built-in>'s directives (the command line's -D/-U) one by one */
 VPRIV void pp_macro_define_events_flush(pp *p)
 {
-    uint8_t *done = calloc(p->define_event_count + 1, 1);
+    uint8_t *done = (uint8_t *)calloc(p->define_event_count + 1, 1);
 
     p->define_events_printed = 1;
     for (int k = 0; k < p->options->ndd_order; k++) {
@@ -133,7 +133,7 @@ VPRIV void pp_macro_define_event_record(pp *p, uint32_t id, const pp_macro *m,
 {
     if (builtin && !p->define_events_printed) {
         if (p->define_event_count == p->define_event_capacity)
-            p->define_events = realloc(
+            p->define_events = (__typeof__(p->define_events))realloc(
                 p->define_events,
                 (p->define_event_capacity = p->define_event_capacity
                                                 ? 2 * p->define_event_capacity
@@ -165,8 +165,8 @@ int pp_macros_dump(pp *p, char **out, size_t *len)
             if (!m || m->kind == PP_MACRO_BUILTIN)
                 continue;
             if (nid == capid)
-                ids = realloc(ids, (capid = capid ? capid * 2 : 1024) *
-                                       sizeof(*ids));
+                ids = (uint32_t *)(realloc(
+                    ids, (capid = capid ? capid * 2 : 1024) * sizeof(*ids)));
             ids[nid++] = d << PP_MACRO_PAGE_BITS | k;
         }
     }
@@ -177,7 +177,7 @@ int pp_macros_dump(pp *p, char **out, size_t *len)
         pp_macro_dump_one(&b, &n, &cap, ids[i], m);
     }
     free(ids);
-    *out = b ? b : calloc(1, 1);
+    *out = (char *)(b ? b : calloc(1, 1));
     *len = n;
     return 0;
 }

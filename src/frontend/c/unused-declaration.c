@@ -1,4 +1,5 @@
 /* vcc front end: warnings for variables, statics and typedefs that were never used */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* errors other than clang's DefaultError warnings (-Wint-conversion...): clang's
@@ -48,7 +49,7 @@ CC_PRIVATE void cc_unused_variables_report(cc *c, uint32_t m)
             }
             continue;
         }
-        r = (diag_span){y->loc, pp_token_end_find(c->p, y->loc)};
+        r = VCC_LITERAL(diag_span, y->loc, pp_token_end_find(c->p, y->loc));
         {
             diag_info d = {"warning",
                            y->loc,

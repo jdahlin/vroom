@@ -9,6 +9,7 @@
  * discards the queue (em_switch_values_reset) so regeneration does not duplicate tables.  Used through
  * adapters in walk/switch-values.c, arm64 and wasm.
  */
+#include "common/literal.h"
 #include "../codegen-internal.h"
 
 typedef struct svproof {
@@ -171,8 +172,8 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
             } else {
                 if (p.n == 64)
                     return false;
-                p.cases[p.n++] =
-                    (em_switch_case){c->ipool[x->a], c->ipool[x->b], 0};
+                p.cases[p.n++] = VCC_LITERAL(em_switch_case, c->ipool[x->a],
+                                             c->ipool[x->b], 0);
             }
             s = x->c;
         }
@@ -207,15 +208,11 @@ VPRIV bool em_switch_values_plan(cc *c, uint32_t n, em_switch_values_recipe *r)
     /* A literal selector already has a cheaper existing selected-case path. */
     if (N(sw->a)->op == AST_NODE_NUMBER)
         return false;
-    *r = (em_switch_values_recipe){.lo = lo,
-                                   .fallback = p.fallback,
-                                   .ty = p.ty,
-                                   .destination = p.destination,
-                                   .slots = (uint16_t)slots,
-                                   .selector_bits = (uint8_t)bits,
-                                   .element_bytes =
-                                       (uint8_t)codegen_type_size(c, p.ty),
-                                   .is_return = p.is_return};
+    *r = VCC_LITERAL(em_switch_values_recipe, .lo = lo, .fallback = p.fallback,
+                     .ty = p.ty, .destination = p.destination,
+                     .slots = (uint16_t)slots, .selector_bits = (uint8_t)bits,
+                     .element_bytes = (uint8_t)codegen_type_size(c, p.ty),
+                     .is_return = p.is_return);
     for (unsigned i = 0; i < slots; i++)
         r->values[i] = p.fallback;
     for (unsigned i = 0; i < p.n; i++) {
@@ -232,14 +229,19 @@ struct em_switch_values_data {
     uint32_t node;
     uint16_t slots;
     uint8_t bytes;
-    unsigned char data[];
 };
+
+static inline unsigned char *switch_value_bytes(struct em_switch_values_data *p)
+{
+    return (unsigned char *)(p + 1);
+}
 
 VPRIV bool em_switch_values_queue(codegen_context *e, uint32_t n,
                                   const em_switch_values_recipe *r)
 {
     size_t len = (size_t)r->slots * r->element_bytes;
-    struct em_switch_values_data *t = malloc(sizeof *t + len);
+    struct em_switch_values_data *t =
+        (struct em_switch_values_data *)malloc(sizeof *t + len);
     if (!t)
         return false;
     t->node = n;
@@ -248,7 +250,7 @@ VPRIV bool em_switch_values_queue(codegen_context *e, uint32_t n,
     t->next = NULL;
     for (unsigned i = 0; i < r->slots; i++)
         for (unsigned b = 0; b < r->element_bytes; b++)
-            t->data[i * r->element_bytes + b] =
+            switch_value_bytes(t)[i * r->element_bytes + b] =
                 (unsigned char)(r->values[i] >> (8 * b));
     struct em_switch_values_data **tail = &e->switch_values;
     while (*tail)
@@ -294,14 +296,14 @@ VPRIV void em_switch_values_emit(codegen_context *e)
             memcpy(codegen_item_room_need(e, 4), &ref, 4);
             codegen_item_close(e, h);
             h = codegen_item_open(e, CODEGEN_ITEM_BYTES);
-            memcpy(codegen_item_room_need(e, len), t->data, len);
+            memcpy(codegen_item_room_need(e, len), switch_value_bytes(t), len);
             codegen_item_close(e, h);
         } else {
             codegen_reference_name_append(e->compile_context, &e->out, ref);
             vtext_string_append(&e->out, ":\n");
             for (size_t i = 0; i < len; i++) {
                 vtext_string_append(&e->out, "\t.byte\t");
-                vtext_unsigned_append(&e->out, t->data[i]);
+                vtext_unsigned_append(&e->out, switch_value_bytes(t)[i]);
                 vtext_char_append(&e->out, '\n');
             }
             if (WASM(e->compile_context)) {

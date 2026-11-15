@@ -41,7 +41,7 @@
 
 static inline void vdefer_free(void *pp)
 {
-    void **p = pp;
+    void **p = (void **)pp;
 
     free(*p);
     *p = NULL;

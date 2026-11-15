@@ -1,6 +1,7 @@
 /* Bounded physical-register liveness before two-address lowering. Topology and
  * convergence are shared; x86 retains effects, flags and epilogue contracts.
  */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 #define X_DEAD_BLOCKS 256
@@ -59,7 +60,7 @@ static bool x64_dead_edge(uint32_t from, uint32_t to, uint32_t *count)
 {
     if (*count == X_DEAD_EDGES)
         return false;
-    x64_dead_work.edges[(*count)++] = (em_flow_edge){from, to};
+    x64_dead_work.edges[(*count)++] = VCC_LITERAL(em_flow_edge, from, to);
     return true;
 }
 

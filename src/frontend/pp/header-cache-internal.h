@@ -135,11 +135,16 @@ typedef struct pp_header_cache_segment {
  * way wherever it occurs.
  */
 typedef struct pp_header_cache_chunk {
-    uint64_t h;
+    _Alignas(16) uint64_t h;
     uint32_t n,
         element_size; /* elements, element size (1: a blob of n bytes) */
-    _Alignas(16) char d[];
+
 } pp_header_cache_chunk;
+
+static inline const char *pp_header_chunk_data(const pp_header_cache_chunk *p)
+{
+    return (const char *)(p + 1);
+}
 
 typedef struct pp_header_cache_vector {
     const pp_header_cache_chunk *const *chunks;
@@ -149,7 +154,8 @@ typedef struct pp_header_cache_vector {
 /* for (const T *x ...) over the elements of v; break leaves only the inner loop */
 #define PP_HEADER_CACHE_VECTOR_FOR(v, T, x)                                    \
     for (uint32_t hvi_ = 0; hvi_ < (v).chunk_count; hvi_++)                    \
-        for (const T *x = (const T *)(const void *)(v).chunks[hvi_]->d,        \
+        for (const T *x = (const T *)(const void *)pp_header_chunk_data(       \
+                         (v).chunks[hvi_]),                                    \
                      *x##_e = x + (v).chunks[hvi_]->n;                         \
              x < x##_e; x++)
 

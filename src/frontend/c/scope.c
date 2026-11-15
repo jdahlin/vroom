@@ -8,7 +8,8 @@ CC_PRIVATE uint32_t *cc_scope_slot(cc *c, uint32_t **dir, uint32_t id)
     uint32_t **pg = &dir[id >> CC_DIRECTORY_BITS];
 
     if (unlikely(!*pg)) {
-        *pg = cc_heap_allocate(c, CC_DIRECTORY_PAGE * sizeof(uint32_t));
+        *pg = (uint32_t *)(cc_heap_allocate(c, CC_DIRECTORY_PAGE *
+                                                   sizeof(uint32_t)));
         memset(*pg, 0, CC_DIRECTORY_PAGE * sizeof(uint32_t));
     }
     return &(*pg)[id & (CC_DIRECTORY_PAGE - 1)];
@@ -62,7 +63,8 @@ CC_PRIVATE void cc_scope_prototype_bindings_save(cc *c, uint32_t s)
         return;
     if (c->nptag == c->cptag) {
         uint32_t cap = c->cptag ? c->cptag * 2 : 16;
-        uint32_t *p = cc_heap_allocate(c, (size_t)cap * sizeof(*p));
+        uint32_t *p =
+            (uint32_t *)(cc_heap_allocate(c, (size_t)cap * sizeof(*p)));
 
         if (c->nptag)
             memcpy(p, c->ptag, (size_t)c->nptag * sizeof(*p));

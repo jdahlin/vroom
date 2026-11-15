@@ -1,5 +1,6 @@
 /* Evaluation of linker-script expressions with lld's ExprValue rules. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- expressions: evaluation (lld ExprValue rules) ---------------- */
@@ -151,10 +152,9 @@ VPRIV ld_expression_value ld_expression_eval(struct ld_context *ctx,
     case LD_EXPRESSION_DOT:
         return ld_dot_expression_value(ctx);
     case LD_EXPRESSION_ADDRESS:
-        return (ld_expression_value){.kind = LD_VALUE_KIND_OUTPUT_SECTION,
-                                     .index = e->symbol,
-                                     .value = 0,
-                                     .alignment = 1};
+        return VCC_LITERAL(ld_expression_value,
+                           .kind = LD_VALUE_KIND_OUTPUT_SECTION,
+                           .index = e->symbol, .value = 0, .alignment = 1);
     case LD_EXPRESSION_LOAD_ADDRESS:
         return ld_expression_value_absolute_make(
             ctx->script.sections.v[e->symbol].address); /* LMA == VMA here */

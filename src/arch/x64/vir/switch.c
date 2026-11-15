@@ -61,7 +61,7 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block,
     bool wide = f->insns[in->a].type == VIR_TYPE_I64;
     uint32_t size = wide ? 8 : 4, stride = wide ? 5 : 3, n = f->extra[in->c];
     const uint32_t *cases = &f->extra[in->c + 1];
-    uint32_t *labels = malloc(((size_t)n + 1) * sizeof *labels);
+    uint32_t *labels = (uint32_t *)(malloc(((size_t)n + 1) * sizeof *labels));
     if (!labels)
         abort();
     for (uint32_t k = 0; k <= n; k++)

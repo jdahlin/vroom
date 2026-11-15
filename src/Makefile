@@ -286,6 +286,22 @@ self-check: self
 
 .PHONY: self self-check
 
+# Check the production C dialect and the prospective C++ dialect independently:
+# a C warning must not hide the C++ diagnostics for that file under make -k.
+# Use make -k -j 6 vcc-cxx-check, or set CXX_CHECK_SRC to inspect a subset.
+CXX_CHECK_SRC ?= $(sort $(AS_SRC) $(LIB_SRC) $(LEX_SRC) $(PP_SRC) $(VCCD_SRC) $(server_SRC) \
+                 $(SPLIT_SRC) $(vir_SRC) $(VIRALLOC_SRC) $(LD_SRC) $(ld_SRC) \
+                 $(wildcard bin/*/*.c) port/darwin/pmc.c)
+C_COMPAT_CHECK = $(addprefix check-c-compat/,$(CXX_CHECK_SRC))
+CXX_CHECK = $(addprefix check-cxx/,$(CXX_CHECK_SRC))
+CXX_CHECK_FLAGS = -Wpedantic -Werror -ferror-limit=0 -fsyntax-only
+.PHONY: vcc-cxx-check $(C_COMPAT_CHECK) $(CXX_CHECK)
+vcc-cxx-check: $(C_COMPAT_CHECK) $(CXX_CHECK)
+$(C_COMPAT_CHECK): check-c-compat/%: %
+	$(HOST_CC) $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
+$(CXX_CHECK): check-cxx/%: %
+	$(HOST_CC) $(filter-out -std=c11,$(VCC_FAST)) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
+
 # ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
 # (test/fuzz/driver.c: replay + blind mutation) with Apple clang.

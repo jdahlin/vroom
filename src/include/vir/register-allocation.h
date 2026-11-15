@@ -21,6 +21,7 @@
 #ifndef VCC_VIR_ALLOC_H
 #define VCC_VIR_ALLOC_H
 
+#include "common/literal.h"
 #include "vir/vir.h"
 
 enum {
@@ -69,7 +70,7 @@ typedef struct vir_register_constraint {
 
 static inline void vir_fix_clear(vir_register_constraint *x)
 {
-    *x = (vir_register_constraint){0};
+    *x = VCC_LITERAL(vir_register_constraint, 0);
     for (int i = 0; i < VIR_REGISTER_CONSTRAINT_MAX; i++)
         x->operands[i] = VIR_REGISTER_NONE;
     x->result = VIR_REGISTER_NONE;

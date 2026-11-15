@@ -172,7 +172,8 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                 if (pe && pe->kind == CXX_ENTITY_VALUE) {
                     pe->is_pack = 1, pe->pack_index = -1,
                     pe->ty = CXX_TY_UNKNOWN, pe->npack = pack_n;
-                    pe->pack = calloc(pack_n ? pack_n : 1, sizeof *pe->pack);
+                    pe->pack = (struct cxx_targ *)calloc(pack_n ? pack_n : 1,
+                                                         sizeof *pe->pack);
                     for (uint32_t i = 0; i < pack_n; i++)
                         pe->pack[i].kind = 1, pe->pack[i].t = pack_types[i];
                 }
@@ -198,7 +199,8 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                     /* its default arguments, for the calls that leave them out: parsed again in this scope
 					   (the template's parameters are bound in it) */
                     gi->ndefaults = (uint16_t)c->decl_ndefaults;
-                    gi->defs = malloc(2 * c->fn_ndefs * sizeof *gi->defs);
+                    gi->defs =
+                        (uint32_t *)malloc(2 * c->fn_ndefs * sizeof *gi->defs);
                     memcpy(gi->defs, c->fn_defs,
                            2 * c->fn_ndefs * sizeof *gi->defs);
                     gi->def_scope = fs;
@@ -216,13 +218,13 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                         /* As... a of a class's pack, expanded: a, a pack of the parameters (a... in the body) */
                         pe->is_pack = 1, pe->pack_index = -1,
                         pe->ty = CXX_TY_UNKNOWN, pe->npack = cpack_n;
-                        pe->pack =
-                            calloc(cpack_n ? cpack_n : 1, sizeof *pe->pack);
+                        pe->pack = (struct cxx_targ *)calloc(
+                            cpack_n ? cpack_n : 1, sizeof *pe->pack);
                         for (uint32_t i = 0; i < cpack_n; i++)
                             pe->pack[i].kind = 1,
                             pe->pack[i].t = cpack_types[i];
-                        pe->pack_syms = calloc(cpack_n ? cpack_n : 1,
-                                               sizeof *pe->pack_syms);
+                        pe->pack_syms = (uint32_t *)calloc(
+                            cpack_n ? cpack_n : 1, sizeof *pe->pack_syms);
                         c->gen_pack_entity = pe, c->gen_pack_from = cpack_at,
                         c->gen_pack_n = cpack_n;
                     }
@@ -262,8 +264,8 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                          pe->npack ==
                              pack_n)) { /* (an unnamed pack: its elements unused) */
                         if (pe) {
-                            pe->pack_syms = calloc(pack_n ? pack_n : 1,
-                                                   sizeof *pe->pack_syms);
+                            pe->pack_syms = (uint32_t *)calloc(
+                                pack_n ? pack_n : 1, sizeof *pe->pack_syms);
                             c->gen_pack_entity = pe, c->gen_pack_from = at,
                             c->gen_pack_n = pack_n;
                         }

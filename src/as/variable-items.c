@@ -37,7 +37,7 @@ VPRIV struct as_variable_item *as_variable_item_add(as_context *a, int kind)
         if (a->variable_item_count)
             memcpy(t, a->variable_items,
                    sizeof *a->variable_items * a->variable_item_count);
-        a->variable_items = t;
+        a->variable_items = (struct as_variable_item *)t;
         a->variable_item_capacity = nc;
     }
     struct as_variable_item *v = &a->variable_items[a->variable_item_count++];
@@ -255,12 +255,12 @@ VPRIV void as_variable_items_finish(as_context *a)
         elf_frag(o, a->variable_items[i].fragment)->aux = i + 1;
     uint32_t count =
         o->nsec + (uint32_t)(o->frags.cap / sizeof(ElfFrag)) - 1 - o->nfrag;
-    a->variable_rank =
-        as_region_alloc(&a->definitions, sizeof(uint32_t) * count);
-    a->variable_size_tree =
-        as_region_alloc(&a->definitions, sizeof(uint64_t) * count);
-    a->variable_offsets_previous =
-        as_region_alloc(&a->definitions, sizeof(uint64_t) * count);
+    a->variable_rank = (uint32_t *)(as_region_alloc(&a->definitions,
+                                                    sizeof(uint32_t) * count));
+    a->variable_size_tree = (uint64_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint64_t) * count));
+    a->variable_offsets_previous = (uint64_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint64_t) * count));
     memset(a->variable_size_tree, 0, sizeof(uint64_t) * count);
     a->variable_rank_count = count - 1;
     uint32_t rank = 0;
@@ -274,8 +274,8 @@ VPRIV void as_variable_items_finish(as_context *a)
                                             ? a->variable_items[p->aux - 1].size
                                             : 0));
         }
-    uint64_t *prev = as_region_alloc(
-        &a->definitions, sizeof(uint64_t) * (a->variable_item_count + 1));
+    uint64_t *prev = (uint64_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint64_t) * (a->variable_item_count + 1)));
     /* pass -1 lays out the items with every jump short (MC's first layout); then each pass
 	   relaxes the jumps against the previous pass's layout and lays the rest out again */
     for (int it = -1;; it++) {

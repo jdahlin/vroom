@@ -268,8 +268,8 @@ static void driver_snapshot_pointers_translate(driver_snapshot_coder *k,
         (ast_asm_statement *)img[DRIVER_SNAPSHOT_ARRAY_ASM_STATEMENTS];
 
 #define P(x)                                                                   \
-    ((x) = enc ? driver_snapshot_pointer_encode(k, (x))                        \
-               : driver_snapshot_pointer_decode(k, (x)))
+    ((x) = (__typeof__(x))(enc ? driver_snapshot_pointer_encode(k, (x))        \
+                               : driver_snapshot_pointer_decode(k, (x))))
     for (uint32_t i = 0; i < c->ntag; i++)
         P(tg[i].f);
     for (uint32_t i = 0; i < c->nstr; i++)
@@ -287,8 +287,8 @@ static void driver_snapshot_state_translate(driver_snapshot_coder *k, cc *s,
                                             bool enc)
 {
 #define P(x)                                                                   \
-    ((x) = enc ? driver_snapshot_pointer_encode(k, (x))                        \
-               : driver_snapshot_pointer_decode(k, (x)))
+    ((x) = (__typeof__(x))(enc ? driver_snapshot_pointer_encode(k, (x))        \
+                               : driver_snapshot_pointer_decode(k, (x))))
     P(s->ptag);
     P(s->tyhash);
     P(s->fnhash); /* (dops: the TU keeps its own, see driver_snapshot_restore) */
@@ -362,8 +362,8 @@ driver_snapshot_take(const cc *c, const driver_snapshot_node *n, uint32_t base)
         driver_snapshot_image_capacity =
             (tot + ((size_t)1 << 24)) & ~(((size_t)1 << 24) - 1);
         driver_snapshot_image_buffer =
-            mmap(NULL, driver_snapshot_image_capacity, PROT_READ | PROT_WRITE,
-                 MAP_PRIVATE | MAP_ANON, -1, 0);
+            (char *)mmap(NULL, driver_snapshot_image_capacity,
+                         PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
         if (driver_snapshot_image_buffer == MAP_FAILED) {
             driver_snapshot_image_buffer = NULL,
             driver_snapshot_image_capacity = 0;
@@ -382,7 +382,7 @@ driver_snapshot_take(const cc *c, const driver_snapshot_node *n, uint32_t base)
 #undef ENC
     if (k.failed)
         return NULL;
-    s = driver_snapshot_allocate(sizeof(*s));
+    s = (driver_snapshot *)(driver_snapshot_allocate(sizeof(*s)));
     s->state = *c;
     driver_snapshot_state_translate(&k, &s->state, true);
     s->state.prevloc = driver_snapshot_location_encode(&k, c->prevloc);
@@ -398,8 +398,8 @@ driver_snapshot_take(const cc *c, const driver_snapshot_node *n, uint32_t base)
                         DRIVER_SNAPSHOT_PAGE_SIZE;
 
             s->arrays[a].bytes = sz[a];
-            s->arrays[a].pages =
-                driver_snapshot_allocate((np ? np : 1) * sizeof(char *));
+            s->arrays[a].pages = (const char **)(driver_snapshot_allocate(
+                (np ? np : 1) * sizeof(char *)));
             own += np * sizeof(char *);
             for (size_t i = 0; i < np; i++) {
                 size_t len = sz[a] - i * DRIVER_SNAPSHOT_PAGE_SIZE <
@@ -416,7 +416,8 @@ driver_snapshot_take(const cc *c, const driver_snapshot_node *n, uint32_t base)
                     s->arrays[a].pages[i] = par->arrays[a].pages[i];
                     continue;
                 }
-                pg = driver_snapshot_allocate(DRIVER_SNAPSHOT_PAGE_SIZE);
+                pg =
+                    (char *)driver_snapshot_allocate(DRIVER_SNAPSHOT_PAGE_SIZE);
                 memcpy(pg, src, len);
                 s->arrays[a].pages[i] = pg;
                 own += DRIVER_SNAPSHOT_PAGE_SIZE;
@@ -518,7 +519,7 @@ static driver_snapshot_node *driver_snapshot_root_get(uint64_t sig)
         for (r = h; r; r = r->next)
             if (r->signature == sig)
                 return &r->node;
-        r = calloc(1, sizeof(*r));
+        r = (struct driver_snapshot_root *)(calloc(1, sizeof(*r)));
         r->signature = sig;
         r->next = h;
         if (atomic_compare_exchange_strong_explicit(&driver_snapshot_roots, &h,
@@ -542,7 +543,7 @@ static driver_snapshot_node *driver_snapshot_node_child(driver_snapshot_node *n,
                 return x;
         if (!make)
             return NULL;
-        x = calloc(1, sizeof(*x));
+        x = (driver_snapshot_node *)(calloc(1, sizeof(*x)));
         x->element = e;
         x->counter = ctr;
         x->parent = n;
@@ -576,7 +577,8 @@ void driver_declaration_cache_begin(cc *c)
     c->dc = NULL;
     if (driver_snapshot_disabled)
         return;
-    c->dc = calloc(1, sizeof(struct driver_declaration_cache_state));
+    c->dc = (struct driver_declaration_cache_state *)(calloc(
+        1, sizeof(struct driver_declaration_cache_state)));
     c->dc->node =
         driver_snapshot_root_get(driver_snapshot_options_signature(c->o));
 }

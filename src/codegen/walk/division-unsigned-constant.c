@@ -7,6 +7,7 @@
  * WALK_LOWER(umulhi) for 64), so it is the same for every CPU and for VIR.  A divisor above 2^(W-1) is just a
  * compare.  The caller checks _ok first and keeps operand evaluation order.
  */
+#include "common/literal.h"
 #include "walk.h"
 
 /* During multiplication, a saved numerator and a materialized large magic
@@ -74,8 +75,9 @@ VPRIV codegen_value walk_division_unsigned_constant_emit(
         q = WALK_LOWER(bin)(e, LEX_TOKEN_STAR, size, false, q,
                             codegen_value_constant(r->divisor));
         q = WALK_LOWER(bin)(e, LEX_TOKEN_MINUS, size, false,
-                            (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                            .register_number = (uint8_t)saved},
+                            VCC_LITERAL(codegen_value,
+                                        .kind = CODEGEN_VALUE_REGISTER,
+                                        .register_number = (uint8_t)saved),
                             q);
     }
     return q;

@@ -1,4 +1,5 @@
 /* vcc front end: struct, union and enum bodies */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 _Thread_local cc_record_scratch cc_record_scratch_thread;
@@ -9,9 +10,9 @@ static void cc_record_scratch_grow(cc_record_scratch *x, uint32_t need)
 
     while (cap < need)
         cap *= 2;
-    x->fs = realloc(x->fs, cap * sizeof(field));
-    x->fa = realloc(x->fa, cap * sizeof(uint32_t));
-    x->fp = realloc(x->fp, cap);
+    x->fs = (field *)(realloc(x->fs, cap * sizeof(field)));
+    x->fa = (uint32_t *)(realloc(x->fa, cap * sizeof(uint32_t)));
+    x->fp = (uint8_t *)realloc(x->fp, cap);
     if (!x->fs || !x->fa || !x->fp) {
         fputs("vcc: out of memory\n", stderr);
         abort();
@@ -25,7 +26,7 @@ static __attribute__((noinline, cold)) void
 cc_record_member_semicolon_expect(cc *c)
 {
     uint32_t e = pp_token_end_find(c->p, c->prevloc);
-    diag_fixit fx = {e, e, ";", cc_token_semicolon_approximate(c)};
+    diag_fixit fx = {e, e, ";", (uint8_t)(cc_token_semicolon_approximate(c))};
     bool end = cc_token_is(c, LEX_TOKEN_RIGHT_BRACE);
 
     report(c, end ? "warning" : "error", e, NULL, 0, &fx, 1,
@@ -114,7 +115,8 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c,
                     cc_report_fatal(c, ds.loc, "too many members");
                 if (base + nf >= x->cap)
                     cc_record_scratch_grow(x, base + nf + 1);
-                x->fs[base + nf] = (field){.ty = ds.ty, .loc = ds.loc};
+                x->fs[base + nf] =
+                    VCC_LITERAL(field, .ty = ds.ty, .loc = ds.loc);
                 x->fa[base + nf] =
                     ds.at.aligned > ds.align ? ds.at.aligned : ds.align;
                 x->fp[base + nf] = ds.at.packed;
@@ -148,7 +150,8 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c,
                 diag_span wr;
 
                 cc_constant_expression_parse(c, &w, &wn);
-                wr = wn ? cc_node_range(c, wn) : (diag_span){d.loc, d.loc};
+                wr = wn ? cc_node_range(c, wn)
+                        : VCC_LITERAL(diag_span, d.loc, d.loc);
                 if (!cc_type_complete(c, t))
                     ; /* clang: only "field has incomplete type", below */
                 else if (!cc_type_is_integer(c, t))
@@ -245,7 +248,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_record_body_parse(cc *c,
     c->in_struct--;
     cc_attribute_list_parse(c, &post);
     r = &c->tags[ti];
-    r->f = cc_heap_allocate(c, (nf + 1) * sizeof(field));
+    r->f = (field *)(cc_heap_allocate(c, (nf + 1) * sizeof(field)));
     memcpy(r->f, &x->fs[base], nf * sizeof(field));
     fs = r->f;
     r->nfield = nf;

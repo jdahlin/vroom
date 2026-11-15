@@ -91,7 +91,7 @@ static pe_partial *pe_partial_get(const char *name, uint32_t chars)
         else
             lo = mid + 1;
     }
-    pe_partial *p = pe_alloc(sizeof *p);
+    pe_partial *p = (pe_partial *)pe_alloc(sizeof *p);
     p->name = name;
     p->chars = chars;
     PE_PUSH(pe_partials, pe_partial_count, pe_partial_capacity, p);
@@ -125,7 +125,7 @@ static pe_output *pe_output_get(const char *name, uint32_t chars)
     for (uint32_t i = 0; i < pe_output_count; i++)
         if (!strcmp(pe_outputs[i]->name, name) && pe_outputs[i]->chars == chars)
             return pe_outputs[i];
-    pe_output *o = pe_alloc(sizeof *o);
+    pe_output *o = (pe_output *)pe_alloc(sizeof *o);
     o->name = name;
     o->chars = chars;
     PE_PUSH(pe_outputs, pe_output_count, pe_output_capacity, o);
@@ -144,7 +144,8 @@ static pe_output *pe_output_find(const char *name)
 static const char *pe_output_section_name(const char *name)
 {
     size_t n = strcspn(name, "$");
-    const char *dot = n > 1 ? memchr(name + 1, '.', n - 1) : NULL;
+    const char *dot =
+        (const char *)(n > 1 ? memchr(name + 1, '.', n - 1) : NULL);
     if (dot)
         n = (size_t)(dot - name);
     return name[n] ? pe_strndup(name, n) : name;
@@ -198,7 +199,8 @@ static bool pe_idata_create(void)
         if (!known)
             PE_PUSH(dlls, ndll, capdll, f->dll_name);
     }
-    pe_file **group = malloc((pe_import_count + 1) * sizeof *group);
+    pe_file **group =
+        (pe_file **)(malloc((pe_import_count + 1) * sizeof *group));
     if (!group)
         pe_oom();
     for (uint32_t d = 0; d < ndll; d++) {
@@ -433,7 +435,7 @@ static void pe_create_sections(void)
             pe_output_add(o, p->chunks[k]);
     }
     /* discardable sections last, .debug_* after the others, .rsrc before them */
-    pe_output **sorted = malloc(pe_output_count * sizeof *sorted);
+    pe_output **sorted = (pe_output **)malloc(pe_output_count * sizeof *sorted);
     if (!sorted)
         pe_oom();
     uint32_t n = 0;
@@ -529,7 +531,7 @@ static void pe_runtime_pseudo_relocs(void)
         pe_synth(PE_CHUNK_PSEUDO_RELOC_TABLE, n ? 12 + 12 * n : 0, 4);
     if (n) {
         /* (into the arena: the table lives as long as the link) */
-        pe_pseudo_reloc *keep = pe_alloc(n * sizeof *keep);
+        pe_pseudo_reloc *keep = (pe_pseudo_reloc *)pe_alloc(n * sizeof *keep);
         memcpy(keep, rels, n * sizeof *keep);
         free(rels);
         rels = keep;
@@ -645,7 +647,7 @@ static void pe_export_table(void)
     pe_chunk *ords = pe_synth(PE_CHUNK_EXPORT_ORDINALS, nnames * 2, 1);
     pe_chunk *dir =
         pe_synth(PE_CHUNK_EXPORT_DIRECTORY, PE_EXPORT_DIRECTORY_SIZE, 4);
-    pe_chunk **strs = pe_alloc((nnames + 1) * sizeof *strs);
+    pe_chunk **strs = (pe_chunk **)(pe_alloc((nnames + 1) * sizeof *strs));
     uint32_t k = 0;
     for (uint32_t i = 0; i < cfg.nexports; i++)
         if (!cfg.exports[i].no_name) {
@@ -731,7 +733,7 @@ typedef struct {
 
 static int pe_baserel_cmp(const void *a, const void *b)
 {
-    const pe_baserel *x = a, *y = b;
+    const pe_baserel *x = (const pe_baserel *)a, *y = (const pe_baserel *)b;
     return x->rva < y->rva ? -1 : x->rva > y->rva;
 }
 
@@ -747,7 +749,7 @@ static void pe_baserel_blocks(pe_baserel *v, uint32_t n)
             j++;
         uint32_t size = (uint32_t)pe_align_up((j - i) * 2 + 8, 4);
         pe_chunk *c = pe_synth(PE_CHUNK_BASEREL_BLOCK, size, 4);
-        c->bytes = pe_alloc(size);
+        c->bytes = (uint8_t *)pe_alloc(size);
         pe_wr32(c->bytes, page);
         pe_wr32(c->bytes + 4, size);
         for (uint32_t k = i; k < j; k++)

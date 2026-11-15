@@ -183,7 +183,7 @@ typedef struct virbuild_context {
             void *q_ = realloc((p), nc_ * sizeof *(p));                        \
             if (!q_)                                                           \
                 virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));             \
-            (p) = q_;                                                          \
+            (p) = (__typeof__(p))q_;                                           \
             (cap) = (uint32_t)nc_;                                             \
         }                                                                      \
     } while (0)

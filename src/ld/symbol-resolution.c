@@ -40,7 +40,7 @@ VPRIV void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 
             if (!tab || (n + 1) * 2 > mask) {
                 uint32_t m = tab ? (mask + 1) * 2 : 1024;
-                __typeof__(tab) nt = calloc(m, sizeof *tab);
+                __typeof__(tab) nt = (__typeof__(nt))calloc(m, sizeof *tab);
 
                 for (uint32_t k = 0; tab && k <= mask; k++)
                     if (tab[k].name) {
@@ -82,7 +82,7 @@ VPRIV void ld_comdat_groups_deduplicate(struct ld_context *ctx)
 
 VPRIV void ld_object_symbols_resolve(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes)
         return;
@@ -119,7 +119,7 @@ VPRIV void ld_object_symbols_resolve(void *arg, size_t i)
 
 VPRIV void ld_duplicate_symbols_check(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes)
         return;
@@ -144,7 +144,7 @@ VPRIV void ld_duplicate_symbols_check(void *arg, size_t i)
 /* fill state/value of every global from its winning definition */
 VPRIV void ld_global_symbol_finish(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t g = ctx->symbols.order.v[i];
     ld_global_symbol *s = &ctx->symbols.globals[g];
     s->visibility =

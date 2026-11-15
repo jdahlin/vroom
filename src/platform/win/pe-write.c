@@ -54,12 +54,12 @@ static size_t pe_strtab_group(uint32_t from, uint32_t to, size_t size)
 {
     if (from >= to)
         return size;
-    vstring_ref *v = malloc((to - from) * sizeof *v);
+    vstring_ref *v = (vstring_ref *)(malloc((to - from) * sizeof *v));
     if (!v)
         pe_oom();
     for (uint32_t i = from; i < to; i++)
-        v[i - from] = (vstring_ref){pe_strings[i].s, pe_strings[i].n,
-                                    &pe_strings[i].offset};
+        v[i - from] = VCC_LITERAL(vstring_ref, pe_strings[i].s, pe_strings[i].n,
+                                  &pe_strings[i].offset);
     size = vstring_table_layout(v, to - from, (uint32_t)size);
     vstring_table_fill((uint8_t *)pe_strtab, v, to - from, 4);
     free(v);
@@ -73,7 +73,7 @@ static void pe_strtab_finalize(void)
     size_t total = 0;
     for (uint32_t i = 0; i < pe_string_count; i++)
         total += pe_strings[i].n + 1;
-    pe_strtab = malloc(total + 1);
+    pe_strtab = (char *)malloc(total + 1);
     if (!pe_strtab)
         pe_oom();
     size_t size = pe_strtab_group(0, pe_section_string_count, 4);
@@ -360,7 +360,7 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
     case PE_CHUNK_PSEUDO_RELOC_TABLE: {
         if (!c->aux_count)
             break;
-        pe_pseudo_reloc *rels = c->aux;
+        pe_pseudo_reloc *rels = (pe_pseudo_reloc *)c->aux;
         pe_wr32(buf, 0);
         pe_wr32(buf + 4, 0);
         pe_wr32(buf + 8, 1);
@@ -391,7 +391,7 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
         pe_wr64(buf, pe_symbol_rva(c->sym) + cfg.image_base);
         break;
     case PE_CHUNK_EXPORT_DIRECTORY: {
-        pe_chunk *dll = c->aux;
+        pe_chunk *dll = (pe_chunk *)c->aux;
         memset(buf, 0, PE_EXPORT_DIRECTORY_SIZE);
         pe_wr32(buf + 12, dll->rva);
         pe_wr32(buf + 16, pe_export_base);
@@ -414,7 +414,7 @@ static void pe_chunk_write(pe_chunk *c, uint8_t *buf, uint8_t *image)
         }
         break;
     case PE_CHUNK_EXPORT_NAME_POINTERS: {
-        pe_chunk **strs = c->aux;
+        pe_chunk **strs = (pe_chunk **)c->aux;
         for (uint32_t i = 0; i < c->aux_count; i++)
             pe_wr32(buf + 4 * i, strs[i]->rva);
         break;
@@ -643,7 +643,7 @@ static bool pe_write_run(void)
             (unsigned long long)pe_file_size);
         return false;
     }
-    uint8_t *img = calloc(1, pe_file_size ? pe_file_size : 1);
+    uint8_t *img = (uint8_t *)calloc(1, pe_file_size ? pe_file_size : 1);
     if (!img)
         pe_oom();
     /* sections: code gaps are int3 */

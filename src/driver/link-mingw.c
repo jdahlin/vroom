@@ -209,14 +209,14 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
     }
 
     size_t cap = (size_t)argc * 2 + 96;
-    char **cav = malloc(((size_t)argc + 8) * sizeof(char *)),
-         **lav = malloc(cap * sizeof(char *));
+    char **cav = (char **)(malloc(((size_t)argc + 8) * sizeof(char *))),
+         **lav = (char **)(malloc(cap * sizeof(char *)));
     char (*tmp)[PATH_MAX + 32] =
-        nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL;
-    char (*own)[PATH_MAX + 64] = malloc(
-        ((size_t)argc + 16) * sizeof(*own)); /* paths and -lX made here */
-    char **wl =
-        malloc(((size_t)argc + 1) * sizeof(char *)); /* the -Wl, copies */
+        (char (*)[4128])(nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL);
+    char (*own)[PATH_MAX + 64] = (char (*)[4160])(malloc(
+        ((size_t)argc + 16) * sizeof(*own))); /* paths and -lX made here */
+    char **wl = (char **)(malloc(((size_t)argc + 1) *
+                                 sizeof(char *))); /* the -Wl, copies */
     int nc = 1, nl = 0, ntmp = 0, nown = 0, nwl = 0, status = 0;
 
     if (!cav || !lav || (nsrc && !tmp) || !own || !wl) {
@@ -267,7 +267,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
         lav[nl++] = "--subsystem";
         lav[nl++] = (char *)subsystem;
     }
-    lav[nl++] = static_ ? "-Bstatic" : "-Bdynamic";
+    lav[nl++] = (char *)(static_ ? "-Bstatic" : "-Bdynamic");
     if (shared) {
         lav[nl++] = "-e";
         lav[nl++] = "DllMainCRTStartup";

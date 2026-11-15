@@ -24,6 +24,7 @@
 #ifndef VCC_COMMON_STRING_INDEX_H
 #define VCC_COMMON_STRING_INDEX_H
 
+#include "common/literal.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,7 +85,7 @@ static inline void vstring_index_add(vstring_index *t, const void *entries,
 
         if (!nn)
             vout_of_memory();
-        ns = calloc(nn, sizeof *ns);
+        ns = (uint32_t *)calloc(nn, sizeof *ns);
         if (!ns)
             vout_of_memory();
         for (uint32_t i = 0; i < t->nslot; i++) {
@@ -107,7 +108,7 @@ static inline void vstring_index_add(vstring_index *t, const void *entries,
 static inline void vstring_index_free(vstring_index *t)
 {
     free(t->slot);
-    *t = (vstring_index){0};
+    *t = VCC_LITERAL(vstring_index, 0);
 }
 
 #endif

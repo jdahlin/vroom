@@ -14,6 +14,7 @@
  * function only.  Called per TU on the job's thread, which may itself be one of the shared pool's.
  * Environment: VCC_EMIT_REPEAT=N generates N times for profiling.
  */
+#include "common/literal.h"
 #include "codegen-internal.h"
 #ifdef VCC_WASM
 #include "arch/wasm/as/wasmas.h"
@@ -125,45 +126,47 @@ static void codegen_context_init(codegen_context *e, codegen_unit *E,
     e->unit = E;
     e->compile_context = c;
     e->record_capacity = 1u << 24;
-    e->records = vjob_region_acquire(
-        &r[0], (size_t)e->record_capacity * sizeof(a64_record), "emit.in");
+    e->records = (a64_record *)(vjob_region_acquire(
+        &r[0], (size_t)e->record_capacity * sizeof(a64_record), "emit.in"));
     vtext_region_init(&e->raw, &r[1], (size_t)1 << 28, "emit.raw");
     vtext_region_init(&e->out, &r[2], (size_t)1 << 32, "emit.out");
     vtext_region_init(&e->data, &r[3], (size_t)1 << 28, "emit.data");
-    e->relocations = vjob_region_acquire(&r[4], (size_t)1 << 26, "emit.rel");
-    e->bindings = vjob_region_acquire(
-        &r[5], (size_t)c->nsym * sizeof(codegen_binding) + 4096, "emit.b");
-    e->label_map = vjob_region_acquire(
-        &r[6], (size_t)c->nlabel * sizeof(codegen_label) + 4096, "emit.lm");
-    e->case_labels = vjob_region_acquire(
-        &r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl");
+    e->relocations = (struct codegen_data_relocation *)(vjob_region_acquire(
+        &r[4], (size_t)1 << 26, "emit.rel"));
+    e->bindings = (codegen_binding *)(vjob_region_acquire(
+        &r[5], (size_t)c->nsym * sizeof(codegen_binding) + 4096, "emit.b"));
+    e->label_map = (codegen_label *)(vjob_region_acquire(
+        &r[6], (size_t)c->nlabel * sizeof(codegen_label) + 4096, "emit.lm"));
+    e->case_labels = (uint32_t *)(vjob_region_acquire(
+        &r[7], (size_t)c->nnode * sizeof(uint32_t) + 4096, "emit.caselbl"));
     e->label_capacity = 1u << 22;
-    e->label_reference_counts = vjob_region_acquire(
-        &r[8], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lrefc");
-    e->label_known_values_index = vjob_region_acquire(
-        &r[9], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lkvi");
-    e->known_value_states = vjob_region_acquire(
+    e->label_reference_counts = (uint32_t *)(vjob_region_acquire(
+        &r[8], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lrefc"));
+    e->label_known_values_index = (uint32_t *)(vjob_region_acquire(
+        &r[9], (size_t)e->label_capacity * sizeof(uint32_t), "emit.lkvi"));
+    e->known_value_states = (codegen_known_values *)(vjob_region_acquire(
         &r[10],
         (size_t)CODEGEN_KNOWN_VALUES_CAPACITY * sizeof(codegen_known_values),
-        "emit.kvs");
-    e->cases = vjob_region_acquire(&r[11], (size_t)1 << 24, "emit.cases");
-    e->weak_references = vjob_region_acquire(
-        &r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref");
-    e->round_log = vjob_region_acquire(
-        &r[13], CODEGEN_LOG_CAPACITY * sizeof(uint32_t), "emit.rlog");
-    e->slot_allocations = vjob_region_acquire(
+        "emit.kvs"));
+    e->cases = (uint32_t *)(vjob_region_acquire(&r[11], (size_t)1 << 24,
+                                                "emit.cases"));
+    e->weak_references = (uint32_t *)(vjob_region_acquire(
+        &r[12], (size_t)c->nsym * sizeof(uint32_t) + 4096, "emit.weakref"));
+    e->round_log = (uint32_t *)(vjob_region_acquire(
+        &r[13], CODEGEN_LOG_CAPACITY * sizeof(uint32_t), "emit.rlog"));
+    e->slot_allocations = (codegen_slot_allocation *)(vjob_region_acquire(
         &r[14],
         (size_t)CODEGEN_SLOT_ALLOCATION_CAPACITY *
             (sizeof(codegen_slot_allocation) + sizeof(uint32_t)),
-        "emit.sla");
+        "emit.sla"));
     e->live_slots =
         (uint32_t *)(e->slot_allocations + CODEGEN_SLOT_ALLOCATION_CAPACITY);
     /* nesting: reserved, touched only as deep as it goes (bounded by the parser's stack guard) */
-    e->loops =
-        vjob_region_acquire(&r[15],
-                            (size_t)CODEGEN_NESTING_CAPACITY *
-                                (sizeof(codegen_loop) + sizeof(uint32_t)),
-                            "emit.loops");
+    e->loops = (codegen_loop *)(vjob_region_acquire(
+        &r[15],
+        (size_t)CODEGEN_NESTING_CAPACITY *
+            (sizeof(codegen_loop) + sizeof(uint32_t)),
+        "emit.loops"));
     e->cleanups = (uint32_t *)(e->loops + CODEGEN_NESTING_CAPACITY);
 }
 
@@ -264,7 +267,7 @@ static void codegen_work_item_run(codegen_context *e, uint32_t it)
 
 static void *codegen_worker_run(void *arg)
 {
-    codegen_context *e = arg;
+    codegen_context *e = (codegen_context *)arg;
     codegen_unit *E = e->unit;
 
     pthread_mutex_lock(&E->queue_mutex);
@@ -297,7 +300,8 @@ static void codegen_drain_slot_run(void *arg, size_t i)
 
 static int codegen_chunk_compare(const void *a, const void *b)
 {
-    const codegen_chunk *x = a, *y = b;
+    const codegen_chunk *x = (const codegen_chunk *)a,
+                        *y = (const codegen_chunk *)b;
 
     return x->key < y->key ? -1 : x->key > y->key;
 }
@@ -377,22 +381,25 @@ static int codegen_chunks_commit(cc *c, const cc_options *o, const char *hp,
     uint32_t *cache;
     int r = 0;
 
-    R.label_word_offsets = vjob_region_acquire(
-        &rr[0], (size_t)1 << 32, "emit.loff"); /* labels of one function */
+    R.label_word_offsets = (uint32_t *)(vjob_region_acquire(
+        &rr[0], (size_t)1 << 32, "emit.loff")); /* labels of one function */
     vtext_region_init(&R.name_buffer, &rr[1], 1 << 20, "emit.nb");
-    cache = vjob_region_acquire(&rr[2], need * sizeof(uint32_t), "emit.rcache");
+    cache = (uint32_t *)(vjob_region_acquire(&rr[2], need * sizeof(uint32_t),
+                                             "emit.rcache"));
     R.symbol_cache = cache;
     R.string_cache = cache + c->nsym + 64;
     R.label_cache = R.string_cache + c->nstr + 64;
     if (!wb) {
-        wb = codegen_memory_reserve(
-            (size_t)1 << 32); /* words of one function (<= 6 per record) */
-        lsym = codegen_memory_reserve((size_t)1 << 32);
-        lser = codegen_memory_reserve((size_t)1 << 32);
-        lab = codegen_memory_reserve((size_t)1 << 34);  /* per label */
-        pend = codegen_memory_reserve((size_t)1 << 34); /* per branch record */
-        pt = codegen_memory_reserve(
-            (size_t)1 << 34); /* fixups of one function (<= 1 per record) */
+        wb = (uint32_t *)(codegen_memory_reserve(
+            (size_t)1 << 32)); /* words of one function (<= 6 per record) */
+        lsym = (uint32_t *)(codegen_memory_reserve((size_t)1 << 32));
+        lser = (uint32_t *)(codegen_memory_reserve((size_t)1 << 32));
+        lab = (codegen_commit_label *)(codegen_memory_reserve(
+            (size_t)1 << 34)); /* per label */
+        pend = (codegen_commit_pending_branch *)(codegen_memory_reserve(
+            (size_t)1 << 34)); /* per branch record */
+        pt = (codegen_commit_patch *)(codegen_memory_reserve(
+            (size_t)1 << 34)); /* fixups of one function (<= 1 per record) */
     }
     R.word_buffer = wb;
     R.label_symbols = lsym;
@@ -455,13 +462,15 @@ static void codegen_keep_make(codegen_keep *K, cc *c, const codegen_unit *E)
         ne++;
     }
     K->index_count = c->nsym;
-    K->indexes = codegen_memory_reserve(K->index_count * sizeof(uint32_t));
+    K->indexes =
+        (uint32_t *)(codegen_memory_reserve(K->index_count * sizeof(uint32_t)));
     K->entry_count = ne;
-    K->entries = codegen_memory_reserve(ne * sizeof(codegen_keep_entry) + 64);
+    K->entries = (codegen_keep_entry *)(codegen_memory_reserve(
+        ne * sizeof(codegen_keep_entry) + 64));
     K->byte_count = nb;
-    K->bytes = codegen_memory_reserve(nb + 64);
+    K->bytes = (char *)codegen_memory_reserve(nb + 64);
     K->log_count = nl;
-    K->logs = codegen_memory_reserve(nl * sizeof(uint32_t) + 64);
+    K->logs = (uint32_t *)(codegen_memory_reserve(nl * sizeof(uint32_t) + 64));
     ne = 0;
     for (uint32_t i = 0; i < E->chunk_count; i++) {
         const codegen_chunk *ch = &E->chunks[i];
@@ -541,41 +550,48 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
     E.options = o;
     E.inline_everywhere = mf;
     E.previous_keep = K;
-    E.claimed = vjob_region_acquire(&er[0], c->nsym + 64, "emit.claimed");
-    E.symbol_referenced =
-        vjob_region_acquire(&er[1], c->nsym + 64, "emit.extref");
+    E.claimed = (_Atomic(uint8_t) *)vjob_region_acquire(&er[0], c->nsym + 64,
+                                                        "emit.claimed");
+    E.symbol_referenced = (_Atomic(uint8_t) *)vjob_region_acquire(
+        &er[1], c->nsym + 64, "emit.extref");
     E.refptr = CODEGEN_IS_WIN64(c)
-                   ? calloc(c->nsym + 64, 1)
+                   ? (__typeof__(E.refptr))calloc(c->nsym + 64, 1)
                    : NULL; /* (Windows only: the .refptr. stubs) */
-    E.symbol_flags = vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
-    E.float_facts = vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
-    E.strings_done = vjob_region_acquire(&er[3], c->nstr + 64, "emit.strdone");
-    E.node_flags = vjob_region_acquire(&er[4], c->nnode + 64, "emit.nflags");
-    E.label_flags = vjob_region_acquire(&er[5], c->nlabel + 64, "emit.lref");
-    E.label_cleanup_depth =
-        vjob_region_acquire(&er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth");
-    E.queue = vjob_region_acquire(
-        &er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q");
-    E.chunks = vjob_region_acquire(
+    E.symbol_flags =
+        (uint8_t *)vjob_region_acquire(&er[2], c->nsym + 64, "emit.sflags");
+    E.float_facts =
+        (uint8_t *)vjob_region_acquire(&er[14], c->nsym + 64, "emit.ffacts");
+    E.strings_done = (_Atomic(uint8_t) *)vjob_region_acquire(
+        &er[3], c->nstr + 64, "emit.strdone");
+    E.node_flags =
+        (uint8_t *)vjob_region_acquire(&er[4], c->nnode + 64, "emit.nflags");
+    E.label_flags =
+        (uint8_t *)vjob_region_acquire(&er[5], c->nlabel + 64, "emit.lref");
+    E.label_cleanup_depth = (uint16_t *)(vjob_region_acquire(
+        &er[6], (size_t)c->nlabel * 2 + 64, "emit.lcdepth"));
+    E.queue = (uint32_t *)(vjob_region_acquire(
+        &er[7], ((size_t)c->nsym + c->nstr + 64) * sizeof(uint32_t), "emit.q"));
+    E.chunks = (codegen_chunk *)(vjob_region_acquire(
         &er[8],
         ((size_t)c->nsym + c->nstr + c->ntlasm + 64) * sizeof(codegen_chunk),
-        "emit.chunks");
+        "emit.chunks"));
     pthread_mutex_init(&E.queue_mutex, NULL);
     pthread_cond_init(&E.queue_condition, NULL);
     pthread_mutex_init(&E.chunk_mutex, NULL);
     pthread_mutex_init(&E.diagnostic_mutex, NULL);
     pthread_mutex_init(&E.debug_mutex, NULL);
-    E.walked = vjob_region_acquire(&er[9], c->nsym + 64, "emit.walked");
-    E.function_node_counts = vjob_region_acquire(
-        &er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize");
-    E.constant_written_values = vjob_region_acquire(
-        &er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval");
-    E.local_use_weights = vjob_region_acquire(
-        &er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse");
+    E.walked = (_Atomic(uint8_t) *)vjob_region_acquire(&er[9], c->nsym + 64,
+                                                       "emit.walked");
+    E.function_node_counts = (uint16_t *)(vjob_region_acquire(
+        &er[10], (c->nsym + 64) * sizeof(uint16_t), "emit.fnsize"));
+    E.constant_written_values = (i128 *)(vjob_region_acquire(
+        &er[11], (c->nsym + 64) * sizeof(i128), "emit.cwval"));
+    E.local_use_weights = (uint16_t *)(vjob_region_acquire(
+        &er[15], (c->nsym + 64) * sizeof(uint16_t), "emit.luse"));
     E.local_needs_memory =
-        vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
-    E.function_local_span = vjob_region_acquire(
-        &er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan");
+        (uint8_t *)vjob_region_acquire(&er[16], c->nsym + 64, "emit.lnoreg");
+    E.function_local_span = (uint32_t *)(vjob_region_acquire(
+        &er[17], (c->nsym + 64) * 2 * sizeof(uint32_t), "emit.lspan"));
     {
         const char *k = getenv("VCC_LREGS");
 
@@ -646,7 +662,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
     t1 = codegen_clock_seconds();
     if (nthr > 64)
         nthr = 64;
-    ctx = calloc((size_t)nthr, sizeof(codegen_context));
+    ctx = (codegen_context *)(calloc((size_t)nthr, sizeof(codegen_context)));
     for (int i = 0; i < nthr; i++)
         codegen_context_init(
             &ctx[i], &E, xr[i] = vjob_region_pool_take(&codegen_context_pool));
@@ -724,8 +740,8 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
     }
     {
         tbuf tail;
-        struct iovec *iov =
-            malloc(((size_t)E.chunk_count + 2) * sizeof(struct iovec));
+        struct iovec *iov = (struct iovec *)(malloc(
+            ((size_t)E.chunk_count + 2) * sizeof(struct iovec)));
         int k = 0;
 
         vtext_region_init(&tail, &er[13], (size_t)1 << 26, "emit.tail");
@@ -735,7 +751,7 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
 
             for (int t = 0; t < nthr; t++)
                 nw += ctx[t].weak_reference_count;
-            w = malloc((nw + 1) * sizeof(uint32_t));
+            w = (uint32_t *)(malloc((nw + 1) * sizeof(uint32_t)));
             nw = 0;
             for (int t = 0; t < nthr; t++)
                 for (uint32_t j = 0; j < ctx[t].weak_reference_count; j++)
@@ -902,11 +918,11 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
         else
             vtext_string_append(
                 &tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
-        iov[k++] = (struct iovec){hdr.p, hdr.n};
+        iov[k++] = VCC_LITERAL(struct iovec, hdr.p, hdr.n);
         for (uint32_t i = 0; i < E.chunk_count; i++)
-            iov[k++] =
-                (struct iovec){(void *)E.chunks[i].text, E.chunks[i].length};
-        iov[k++] = (struct iovec){tail.p, tail.n};
+            iov[k++] = VCC_LITERAL(struct iovec, (void *)E.chunks[i].text,
+                                   E.chunks[i].length);
+        iov[k++] = VCC_LITERAL(struct iovec, tail.p, tail.n);
         *again = E.newly_marked_count != 0 && !last;
         if (*again && next && !E.errors)
             codegen_keep_make(next, c, &E);
@@ -920,7 +936,8 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
                     vtext_init(&all, (size_t)1 << 32);
                 all.n = 0;
                 for (int i = 0; i < k; i++)
-                    vtext_append(&all, iov[i].iov_base, iov[i].iov_len);
+                    vtext_append(&all, (const char *)(iov[i].iov_base),
+                                 iov[i].iov_len);
 #ifdef VCC_WASM
                 if (WASM(c)) {
                     uint8_t *ob;
@@ -961,9 +978,10 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
                 }
                 all.n = mo.n = 0;
                 for (int i = 0; i < k; i++)
-                    vtext_append(&all, iov[i].iov_base, iov[i].iov_len);
+                    vtext_append(&all, (const char *)(iov[i].iov_base),
+                                 iov[i].iov_len);
                 a64_darwin_text_translate(&mo, all.p, all.n);
-                iov[0] = (struct iovec){mo.p, mo.n};
+                iov[0] = VCC_LITERAL(struct iovec, mo.p, mo.n);
                 k = 1;
             }
             for (int i = 0; i < k;) {
@@ -1074,7 +1092,7 @@ int codegen_unit_emit(cc *c, const cc_options *o)
     int n = r ? atoi(r) : 1, err = 0;
     static vjob_region_pool mfpool = VJOB_REGION_POOL_INIT(1);
     vjob_region *mfr = vjob_region_pool_take(&mfpool);
-    uint8_t *mf = vjob_region_acquire(mfr, c->nsym + 64, "emit.mf");
+    uint8_t *mf = (uint8_t *)vjob_region_acquire(mfr, c->nsym + 64, "emit.mf");
     bool again = false;
     codegen_keep K[2];
 

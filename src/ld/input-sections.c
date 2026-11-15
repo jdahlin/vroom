@@ -20,7 +20,7 @@ static bool ld_section_header_is_content(const elf_section_header *s)
 
 VPRIV void ld_input_sections_fill(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes)
         return;
@@ -87,11 +87,11 @@ VPRIV void ld_gnu_property_drop(struct ld_context *ctx)
     const uint32_t want = ctx->inputs.x86
                               ? 0xc0000002u
                               : 0xc0000000u; /* X86 / AARCH64 FEATURE_1_AND */
-    uint32_t and = ~0u;
+    uint32_t property_mask = ~0u;
 
     if (ctx->options.relocatable)
         return;
-    for (uint32_t i = 0; i < ctx->inputs.objects.n && and; i++) {
+    for (uint32_t i = 0; i < ctx->inputs.objects.n && property_mask; i++) {
         ld_object *o = ctx->inputs.objects.v[i];
         uint32_t f = 0;
 
@@ -124,9 +124,9 @@ VPRIV void ld_gnu_property_drop(struct ld_context *ctx)
                 p = d + ((dn + 7) & ~7u);
             }
         }
-        and &= f;
+        property_mask &= f;
     }
-    if (and)
+    if (property_mask)
         return;
     for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
         ld_object *o = ctx->inputs.objects.v[i];

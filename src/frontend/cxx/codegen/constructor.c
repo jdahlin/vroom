@@ -54,7 +54,7 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name,
         if (!target ||
             !cxx_gen_construct_at(c, target,
                                   AST_QUALIFIED_TYPE_UNQUALIFIED(class_type),
-                                  args, nargs, c->gen_pre, loc)) {
+                                  args, nargs, (cc_id_list *)c->gen_pre, loc)) {
             c->gen_base_type = 0;
             cxx_gen_fail(c);
             return;
@@ -114,7 +114,7 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name,
                     c->gen_init_names[c->ngen_init_names++] = name;
                 if (!cxx_gen_construct_at(
                         c, target, AST_QUALIFIED_TYPE_UNQUALIFIED(fe->ty), args,
-                        nargs, c->gen_pre, loc))
+                        nargs, (cc_id_list *)c->gen_pre, loc))
                     cxx_gen_fail(c);
                 return;
             }
@@ -148,7 +148,7 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name,
                     c, AST_QUALIFIED_TYPE_UNQUALIFIED(mt), 0) &&
                 !cxx_gen_construct_at(c, target,
                                       AST_QUALIFIED_TYPE_UNQUALIFIED(mt), args,
-                                      nargs, c->gen_pre, loc))
+                                      nargs, (cc_id_list *)c->gen_pre, loc))
                 cxx_gen_fail(c);
             return;
         }
@@ -181,12 +181,12 @@ VPRIV void cxx_gen_member_initializer(cxx *c, uint32_t name,
                     c, AST_QUALIFIED_TYPE_UNQUALIFIED(mt), 0) &&
                 !cxx_gen_construct_at(c, target,
                                       AST_QUALIFIED_TYPE_UNQUALIFIED(mt), args,
-                                      nargs, c->gen_pre, loc))
+                                      nargs, (cc_id_list *)c->gen_pre, loc))
                 cxx_gen_fail(c);
             return;
         }
         if (!cxx_gen_construct_at(c, target, AST_QUALIFIED_TYPE_UNQUALIFIED(mt),
-                                  args, nargs, c->gen_pre, loc))
+                                  args, nargs, (cc_id_list *)c->gen_pre, loc))
             cxx_gen_fail(c);
         return;
     }

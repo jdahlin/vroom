@@ -9,6 +9,7 @@
  * range, since the graph rules read them.  Phase 2 builds the graph and the
  * dominators and checks C, D and N.
  */
+#include "common/literal.h"
 #include "vir-internal.h"
 
 typedef struct vir_verify_state {
@@ -300,7 +301,7 @@ static bool vir_verify_exposure_build(vir_function *f, uint8_t *mark,
     g->memory_values = malloc(total);
     if (!g->memory_values)
         return false;
-    g->head = g->memory_values;
+    g->head = (uint32_t *)g->memory_values;
     g->queue = g->head + f->insn_count;
     g->edge = (vir_verify_exposure_edge *)(g->queue + f->insn_count);
     g->slots = (uint8_t *)(g->edge + nedges);
@@ -327,7 +328,8 @@ static bool vir_verify_exposure_build(vir_function *f, uint8_t *mark,
             if (kind == VIR_VERIFY_EXPOSURE_SINK)
                 vir_verify_exposure_enqueue(mark, g->queue, &last, v);
             else if (kind == VIR_VERIFY_EXPOSURE_FLOW) {
-                g->edge[at] = (vir_verify_exposure_edge){v, g->head[out]};
+                g->edge[at] =
+                    VCC_LITERAL(vir_verify_exposure_edge, v, g->head[out]);
                 g->head[out] = at++;
             }
         }

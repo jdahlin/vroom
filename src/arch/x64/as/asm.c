@@ -567,7 +567,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     ElfChunk *chunk = frag->tail;
     uint64_t off = frag->size;
     bool direct = chunk && chunk->cap - chunk->used >= sizeof bytes + 4 + 8;
-    uint8_t *p = direct ? chunk->data + chunk->used : bytes;
+    uint8_t *p = direct ? elf_chunk_data(chunk) + chunk->used : bytes;
     uint8_t *out = p;
     if (seg)
         *out++ = seg;
@@ -752,23 +752,21 @@ VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops)
         int sym = x64_imm(a, s, &f, &k);
 
         if (!b && !sym && fits8(k)) {
-            f.op = OPB(0x83), f.nop = 1, f.isz = 1, f.imm = k;
+            f.op = OPB("\x83"), f.nop = 1, f.isz = 1, f.imm = k;
         } else if (d->kind == XK_REG && d->reg == 0 && !d->hi8) {
             /* the accumulator's short form */
-            XForm g = F(.w = w, .opsz16 = p16,
-                        .op = (const uint8_t[]){(uint8_t)(n * 8 + (b ? 4 : 5))},
-                        .nop = 1,
+            XForm g = F(.w = w, .opsz16 = p16, .nop = 1, .imm = k,
                         .isz = b         ? 1
                                : sz == 2 ? 2
                                          : 4,
-                        .imm = k, .immsym = f.immsym, .immv = f.immv,
-                        .immmod = f.immmod, .immsgn = 1);
+                        .immv = f.immv, .immsym = f.immsym, .immsgn = 1,
+                        .immmod = f.immmod);
             uint8_t op = (uint8_t)(n * 8 + (b ? 4 : 5));
 
             g.op = &op;
             return x64_emit(a, &g);
         } else {
-            f.op = b ? OPB(0x80) : OPB(0x81), f.nop = 1,
+            f.op = b ? OPB("\x80") : OPB("\x81"), f.nop = 1,
             f.isz = b         ? 1
                     : sz == 2 ? 2
                               : 4,
@@ -779,17 +777,17 @@ VPRIV int x64_alu(as_context *a, int n, int sz, XOp *o, int nops)
     if (s->kind == XK_REG) {
         uint8_t op = (uint8_t)(n * 8 + (b ? 0 : 1));
 
-        return x64_emit(a,
-                        &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1,
-                           .reg = s->reg, .rm = d, .rex8 = rex8(s) || rex8(d)));
+        return x64_emit_form(a, F(.w = w, .opsz16 = p16, .op = &op, .nop = 1,
+                                  .reg = s->reg, .rm = d,
+                                  .rex8 = rex8(s) || rex8(d)));
     }
     if (d->kind == XK_REG) {
         uint8_t op = (uint8_t)(n * 8 + (b ? 2 : 3));
 
         /* (a load form relaxes GOTPCRELX, MC's list: adc add and cmp or sbb sub xor) */
-        return x64_emit(a,
-                        &F(.w = w, .opsz16 = p16, .op = &op, .nop = 1,
-                           .reg = d->reg, .rm = s, .rex8 = rex8(d), .gotx = 2));
+        return x64_emit_form(a, F(.w = w, .opsz16 = p16, .op = &op, .nop = 1,
+                                  .reg = d->reg, .rm = s, .rex8 = rex8(d),
+                                  .gotx = 2));
     }
     return as_error_report(a, "invalid operand for instruction");
 }
@@ -822,8 +820,9 @@ VPRIV int x64_sse(as_context *a, int pfx, int op, int w, int reg, const XOp *rm)
 {
     uint8_t ops[2] = {0x0f, (uint8_t)op};
 
-    return x64_emit(a, &F(.rep = pfx == 0x66 ? 0 : pfx, .opsz16 = pfx == 0x66,
-                          .w = w, .op = ops, .nop = 2, .reg = reg, .rm = rm));
+    return x64_emit_form(a, F(.w = w, .opsz16 = pfx == 0x66,
+                              .rep = pfx == 0x66 ? 0 : pfx, .op = ops, .nop = 2,
+                              .reg = reg, .rm = rm));
 }
 
 /* x87 with a memory operand: op /digit */
@@ -831,7 +830,7 @@ VPRIV int x64_x87m(as_context *a, int op, int digit, const XOp *m)
 {
     uint8_t b = (uint8_t)op;
 
-    return x64_emit(a, &F(.op = &b, .nop = 1, .reg = digit, .rm = m));
+    return x64_emit_form(a, F(.op = &b, .nop = 1, .reg = digit, .rm = m));
 }
 
 VPRIV int x64_x87r(as_context *a, int op, int base, int i)

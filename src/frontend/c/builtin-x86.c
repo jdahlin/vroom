@@ -8,8 +8,8 @@ CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,
                                                  ast_qualified_type rt,
                                                  uint32_t loc)
 {
-    bool explicit = strstr(b->name, "pcmpestr") != NULL;
-    unsigned count = explicit ? 5 : 3;
+    bool explicit_length = strstr(b->name, "pcmpestr") != NULL;
+    unsigned count = explicit_length ? 5 : 3;
     i128 imm;
     if (!CC_X86_64(c)) {
         cc_report_error(c, loc, "'%s' requires an x86-64 target", b->name);
@@ -32,7 +32,7 @@ CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,
                     : name[1] == 'z' ? 6
                                      : 0;
     cc_id_list_append(c, args,
-                      cc_node_integer_new(c, kind | (explicit ? 8 : 0),
+                      cc_node_integer_new(c, kind | (explicit_length ? 8 : 0),
                                           cc_type_basic(AST_TYPE_INT), loc));
     return cc_builtin_node_new(c, CC_BUILTIN_X86_PCMPSTR, rt, loc, args);
 }

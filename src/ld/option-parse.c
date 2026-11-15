@@ -1,5 +1,6 @@
 /* Command-line parsing (ld_arguments_parse) and library search. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- main link ---------------- */
@@ -16,7 +17,7 @@ VPRIV const char *ld_library_find(struct ld_context *ctx, const char *name)
     for (uint32_t k = 0; k < ctx->options.library_directories.n; k++) {
         const char *d = ctx->options.library_directories.v[k];
         size_t n = strlen(d) + strlen(name) + 8;
-        char *p = ld_region_alloc(n);
+        char *p = (char *)ld_region_alloc(n);
 
         if (name[0] == ':')
             snprintf(p, n, "%s/%s", d, name + 1);
@@ -49,12 +50,10 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
                                              : NULL)
         const char *v;
         if (a[0] != '-' || !a[1]) {
-            VVEC_PUSH(
-                ctx->options.inputs,
-                ((ld_input_argument){.path = a,
-                                     .whole = whole,
-                                     .as_needed = ctx->options.as_needed}),
-                ld_region_alloc);
+            VVEC_PUSH(ctx->options.inputs,
+                      (VCC_LITERAL(ld_input_argument, .path = a, .whole = whole,
+                                   .as_needed = ctx->options.as_needed)),
+                      ld_region_alloc);
             continue;
         }
         if (LD_ARGUMENT_IS("-o") && i + 1 < argc) {
@@ -245,9 +244,8 @@ VPRIV bool ld_arguments_parse(struct ld_context *ctx, int argc, char **argv)
             if (f)
                 VVEC_PUSH(
                     ctx->options.inputs,
-                    ((ld_input_argument){.path = f,
-                                         .whole = whole,
-                                         .as_needed = ctx->options.as_needed}),
+                    (VCC_LITERAL(ld_input_argument, .path = f, .whole = whole,
+                                 .as_needed = ctx->options.as_needed)),
                     ld_region_alloc);
             else
                 ld_error_report(ctx, "unable to find library -l%s", v);

@@ -61,7 +61,7 @@ VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call,
     }
     if (!exc)
         return 0;
-    text = malloc(cap);
+    text = (char *)malloc(cap);
 #define ASM(...) (n += (size_t)snprintf(text + n, cap - n, __VA_ARGS__))
     if (!c->gen_eh_pers) {
         c->gen_eh_pers = 1;
@@ -215,7 +215,7 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
         return false;
     /* The initializer is built inside a function of its own: if it turns out not to be a constant, that
 	   function runs it when the program starts (.init_array), in the order of the definitions. */
-    f = calloc(1, sizeof *f);
+    f = (cxx_entity *)calloc(1, sizeof *f);
     f->kind = CXX_ENTITY_VALUE, f->name = vintern_cstr("__vcc_init"),
     f->pack_index = -1;
     f->ty = cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), NULL, 0, false);
@@ -236,7 +236,7 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
     }
     c->ginit_fn = f;
     c->ginit_list = calloc(1, sizeof(cc_id_list));
-    cc_id_list_init(c->ginit_list);
+    cc_id_list_init((cc_id_list *)c->ginit_list);
     c->gen_block = c->ginit_list;
     return true;
 }
@@ -246,7 +246,7 @@ VPRIV bool cxx_gen_global_finish(cxx *c, bool keep)
 {
     cc *a = c->ast;
     cxx_entity *f = c->ginit_fn;
-    cc_id_list *l = c->ginit_list;
+    cc_id_list *l = (cc_id_list *)c->ginit_list;
     uint32_t body = 0;
     bool defined;
 
@@ -321,7 +321,7 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v,
     c->ctor_picked = picked, c->ctor_found = found, c->ctor_none = none;
     ok = ok && cxx_gen_construct_at(c, cxx_gen_var_node(c, v->sym, loc),
                                     AST_QUALIFIED_TYPE_UNQUALIFIED(t), args,
-                                    nargs, c->ginit_list, loc);
+                                    nargs, (cc_id_list *)c->ginit_list, loc);
     if (ok && dtor) {
         /* __cxa_atexit(destructor, &object, &__dso_handle) */
         ast_qualified_type vp =
@@ -344,7 +344,7 @@ VPRIV void cxx_gen_global_object(cxx *c, const cxx_entity *v,
             c, cc_address_of_build(a, cxx_gen_var_node(c, v->sym, loc), loc));
         ar[2] = cxx_gen_data_address(c, c->gen_dso_sym, 0);
         cc_id_list_append(
-            a, c->ginit_list,
+            a, (cc_id_list *)c->ginit_list,
             cc_statement_new(
                 a, AST_NODE_EXPRESSION, loc,
                 cxx_gen_runtime_call(c, c->gen_atexit_sym, ar, 3, loc), 0, 0));
@@ -362,7 +362,7 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init,
     cc *a = c->ast;
     sym *y = &a->syms[v->sym];
     bool failed = c->gen_failed || !cxx_gen_on(c);
-    cc_id_list *l = c->ginit_list;
+    cc_id_list *l = (cc_id_list *)c->ginit_list;
 
     if (!c->ginit_fn) {
         c->gen = 0;

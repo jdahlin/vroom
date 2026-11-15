@@ -1,4 +1,5 @@
 /* vcc code generator: object backend: records -> machine code */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 static uint32_t a64_commit_label(codegen_commit_context *R, uint32_t fid,
@@ -367,14 +368,14 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
         return 1;
     case A64_OP_ADRP:
         w[0] = 0x90000000u | a64_encode_register_field(i->rd);
-        *f = (codegen_commit_fixup){0, 0, R_AARCH64_ADR_PREL_PG_HI21,
-                                    i->reference, i->offset};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_AARCH64_ADR_PREL_PG_HI21,
+                         i->reference, i->offset);
         return 1;
     case A64_OP_ADDLO:
         w[0] = a64_addsub_imm(1, 0, 0, a64_encode_register_field(i->rd),
                               a64_encode_register_field(i->rn), 0, 0);
-        *f = (codegen_commit_fixup){0, 0, R_AARCH64_ADD_ABS_LO12_NC,
-                                    i->reference, i->offset};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_AARCH64_ADD_ABS_LO12_NC,
+                         i->reference, i->offset);
         return 1;
     case A64_OP_LDLO:
     case A64_OP_STLO: {
@@ -387,8 +388,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
 
         w[0] = a64_ldst_uoff(i->size, 0, opc, a64_encode_register_field(i->rd),
                              a64_encode_register_field(i->rn), 0);
-        *f = (codegen_commit_fixup){0, 0, lo12[i->size], i->reference,
-                                    i->offset};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, lo12[i->size],
+                         i->reference, i->offset);
         return 1;
     }
     case A64_OP_LDGOT:
@@ -396,8 +397,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
         w[0] = 0x90000000u | a64_encode_register_field(i->rd);
         w[1] = a64_ldst_uoff(3, 0, 1, a64_encode_register_field(i->rd),
                              a64_encode_register_field(i->rd), 0);
-        *f = (codegen_commit_fixup){0, 0, R_AARCH64_ADR_GOT_PAGE, i->reference,
-                                    0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_AARCH64_ADR_GOT_PAGE,
+                         i->reference, 0);
         return 2;
     case A64_OP_ADR:
         if (loff) {
@@ -406,7 +407,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
             return 1;
         }
         w[0] = 0x10000000u | a64_encode_register_field(i->rd);
-        *f = (codegen_commit_fixup){0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 1, R_AARCH64_ADR_PREL_LO21,
+                         i->label, 0);
         return 1;
     case A64_OP_JTE:
         if (loff) {
@@ -415,7 +417,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
             return 1;
         }
         w[0] = 0;
-        *f = (codegen_commit_fixup){0, 1, R_AARCH64_ADR_PREL_LO21, i->label, 0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 1, R_AARCH64_ADR_PREL_LO21,
+                         i->label, 0);
         return 1;
     case A64_OP_B:
     case A64_OP_BC:
@@ -443,24 +446,26 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
             break;
         }
         if (!loff)
-            *f = (codegen_commit_fixup){0, 1,
-                                        i->opcode == A64_OP_B ? R_AARCH64_JUMP26
-                                        : i->opcode == A64_OP_TBZ ||
-                                                i->opcode == A64_OP_TBNZ
-                                            ? R_AARCH64_TSTBR14
-                                            : R_AARCH64_CONDBR19,
-                                        i->label, 0};
+            *f = VCC_LITERAL(codegen_commit_fixup, 0, 1,
+                             i->opcode == A64_OP_B ? R_AARCH64_JUMP26
+                             : i->opcode == A64_OP_TBZ ||
+                                     i->opcode == A64_OP_TBNZ
+                                 ? R_AARCH64_TSTBR14
+                                 : R_AARCH64_CONDBR19,
+                             i->label, 0);
         return 1;
     }
     case A64_OP_TAIL:
         if (!i->condition)
             return 0;
         w[0] = 0x14000000u;
-        *f = (codegen_commit_fixup){0, 0, R_AARCH64_JUMP26, i->reference, 0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_AARCH64_JUMP26,
+                         i->reference, 0);
         return 1;
     case A64_OP_BL:
         w[0] = 0x94000000u;
-        *f = (codegen_commit_fixup){0, 0, R_AARCH64_CALL26, i->reference, 0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_AARCH64_CALL26,
+                         i->reference, 0);
         return 1;
     case A64_OP_BLR:
         w[0] = a64_blr(a64_encode_register_field(i->rn));
@@ -490,16 +495,17 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
             w[0] = 0xd53bd041u;
             w[1] = 0x91400020u;
             w[2] = 0x91000000u;
-            *f = (codegen_commit_fixup){1, 0, R_AARCH64_TLSLE_ADD_TPREL_HI12,
-                                        i->reference, 0};
+            *f = VCC_LITERAL(codegen_commit_fixup, 1, 0,
+                             R_AARCH64_TLSLE_ADD_TPREL_HI12, i->reference, 0);
             return 3;
         case A64_TLS_INITIAL_EXEC: /* mrs x1, tpidr_el0; adrp x0, :gottprel:; ldr x0, [x0, :gottprel_lo12:]; add x0, x1, x0 */
             w[0] = 0xd53bd041u;
             w[1] = 0x90000000u;
             w[2] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
             w[3] = 0x8b000020u;
-            *f = (codegen_commit_fixup){
-                1, 0, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, i->reference, 0};
+            *f = VCC_LITERAL(codegen_commit_fixup, 1, 0,
+                             R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, i->reference,
+                             0);
             return 4;
         case A64_TLS_DESCRIPTOR: /* adrp x0; ldr x1, [x0]; add x0, x0; blr x1 (.tlsdesccall); mrs x1, tpidr_el0; add x0, x1, x0 */
             w[0] = 0x90000000u;
@@ -508,8 +514,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
             w[3] = a64_blr(1);
             w[4] = 0xd53bd041u;
             w[5] = 0x8b000020u;
-            *f = (codegen_commit_fixup){0, 0, R_AARCH64_TLSDESC_ADR_PAGE21,
-                                        i->reference, 0};
+            *f = VCC_LITERAL(codegen_commit_fixup, 0, 0,
+                             R_AARCH64_TLSDESC_ADR_PAGE21, i->reference, 0);
             return 6;
         }
         /* adrp x0, ref@TLVPPAGE; ldr x0, [x0, ref@TLVPPAGEOFF]; ldr x16, [x0]; blr x16 */
@@ -517,7 +523,8 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
         w[1] = a64_ldst_uoff(3, 0, 1, 0, 0, 0);
         w[2] = a64_ldst_uoff(3, 0, 1, 16, 0, 0);
         w[3] = a64_blr(16);
-        *f = (codegen_commit_fixup){0, 0, R_VCC_TLVP_PAGE21, i->reference, 0};
+        *f = VCC_LITERAL(codegen_commit_fixup, 0, 0, R_VCC_TLVP_PAGE21,
+                         i->reference, 0);
         return 4;
     }
     return 0;
@@ -610,7 +617,7 @@ a64_commit_label_state(codegen_commit_context *R, uint32_t l)
     codegen_commit_label *L = &R->labels[l];
 
     if (L->serial != R->serial)
-        *L = (codegen_commit_label){R->serial, 0, 0, 0, 0};
+        *L = VCC_LITERAL(codegen_commit_label, R->serial, 0, 0, 0, 0);
     return L;
 }
 
@@ -704,7 +711,7 @@ static uint32_t a64_commit_relax(const a64_record *in, uint32_t nin,
     bool grew = true;
 
     if (!cum)
-        cum = codegen_memory_reserve((size_t)1 << 32);
+        cum = (uint32_t *)(codegen_memory_reserve((size_t)1 << 32));
     while (grew) {
         grew = false;
         cum[0] = 0;
@@ -869,7 +876,7 @@ VPRIV int a64_function_commit(codegen_commit_context *R,
 
         R->serial++;
         for (const char *q = raw, *qe = raw + h->raw_count;
-             (q = memmem(q, (size_t)(qe - q), ".LBB", 4));) {
+             (q = (const char *)(memmem(q, (size_t)(qe - q), ".LBB", 4)));) {
             uint32_t fid = 0, l = 0;
             const char *d = q += 4;
 
@@ -942,8 +949,8 @@ VPRIV int a64_function_commit(codegen_commit_context *R,
                         codegen_commit_pending_branch *pd =
                             &R->pending[npend++];
 
-                        *pd = (codegen_commit_pending_branch){L->pending, k,
-                                                              frag, off, p};
+                        *pd = VCC_LITERAL(codegen_commit_pending_branch,
+                                          L->pending, k, frag, off, p);
                         L->pending = npend;
                         a64_encode_record(i, w, &f, NULL, 0);
                         memcpy(p, w, 4);

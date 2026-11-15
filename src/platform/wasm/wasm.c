@@ -79,7 +79,7 @@ static void pad_sleb(uint8_t *p, int64_t v, int n)
 /* a section: id and a 5-byte size patched by sec_end */
 static size_t sec_begin(vbuffer *b, uint8_t id, const char *name)
 {
-    static const uint8_t z[5];
+    static const uint8_t z[5] = {0};
     size_t at;
 
     put8(b, id);
@@ -320,10 +320,10 @@ int wasm_write(wmod *m, vbuffer *o)
                 }
             }
         }
-    L.tmap = calloc(m->nsig + 1, sizeof(uint32_t));
-    L.types = calloc(m->nsig + 1, sizeof(uint32_t));
-    L.funcs = calloc(m->nfn + 1, sizeof(uint32_t));
-    L.imps = calloc(m->nsym + 1, sizeof(uint32_t));
+    L.tmap = (uint32_t *)calloc(m->nsig + 1, sizeof(uint32_t));
+    L.types = (uint32_t *)calloc(m->nsig + 1, sizeof(uint32_t));
+    L.funcs = (uint32_t *)calloc(m->nfn + 1, sizeof(uint32_t));
+    L.imps = (uint32_t *)calloc(m->nsym + 1, sizeof(uint32_t));
     if (!L.tmap || !L.types || !L.funcs || !L.imps)
         abort();
 
@@ -425,7 +425,8 @@ int wasm_write(wmod *m, vbuffer *o)
                     b->kind == WS_FUNCTION && !b->elem) {
                     if (L.nelems >= L.celems) {
                         L.celems = L.celems ? 2 * L.celems : 16;
-                        L.elems = realloc(L.elems, L.celems * sizeof(uint32_t));
+                        L.elems = (uint32_t *)realloc(
+                            L.elems, L.celems * sizeof(uint32_t));
                     }
                     L.elems[L.nelems++] = b->index;
                     b->elem = L.nelems;
@@ -551,9 +552,9 @@ int wasm_write(wmod *m, vbuffer *o)
     if (L.nfuncs) {
         size_t at = sec_begin(o, SEC_CODE, NULL), p0 = at + 5;
 
-        cbase = calloc(L.nfuncs, sizeof(uint64_t));
-        crel = calloc(L.nfuncs, sizeof(wrel *));
-        cn = calloc(L.nfuncs, sizeof(uint32_t));
+        cbase = (uint64_t *)calloc(L.nfuncs, sizeof(uint64_t));
+        crel = (wrel **)calloc(L.nfuncs, sizeof(wrel *));
+        cn = (uint32_t *)calloc(L.nfuncs, sizeof(uint32_t));
         uleb(o, L.nfuncs);
         for (uint32_t k = 0; k < L.nfuncs; k++) {
             wfunc *f = &m->fn[L.funcs[k]];
@@ -587,9 +588,9 @@ int wasm_write(wmod *m, vbuffer *o)
     if (m->nseg) {
         size_t at = sec_begin(o, SEC_DATA, NULL), p0 = at + 5;
 
-        dbase = calloc(m->nseg, sizeof(uint64_t));
-        drel = calloc(m->nseg, sizeof(wrel *));
-        dn = calloc(m->nseg, sizeof(uint32_t));
+        dbase = (uint64_t *)calloc(m->nseg, sizeof(uint64_t));
+        drel = (wrel **)calloc(m->nseg, sizeof(wrel *));
+        dn = (uint32_t *)calloc(m->nseg, sizeof(uint32_t));
         uleb(o, m->nseg);
         for (uint32_t k = 0; k < m->nseg; k++) {
             wseg *g = &m->seg[k];

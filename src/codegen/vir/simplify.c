@@ -1,6 +1,7 @@
 /* The simplifier's driver and the pass that gives each access its own address. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -134,15 +135,17 @@ static void virbuild_literal_memcmp_fold(codegen_context *e,
             bits |= (uint64_t)(unsigned char)str->s[i] << (8 * i);
         uint32_t type = size == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
         uint32_t value = virbuild_constant_integer(e, type, bits);
-        V->insns[id].insn = (vir_insn){
-            VIR_OP_LOAD, type, size == 8 ? 3 : size == 4 ? 2 : size == 2,
-            ptr,         0,    0};
+        V->insns[id].insn = VCC_LITERAL(vir_insn, VIR_OP_LOAD, (uint8_t)(type),
+                                        (uint16_t)(size == 8   ? 3
+                                                   : size == 4 ? 2
+                                                               : size == 2),
+                                        ptr, 0, 0);
         if (branch) {
-            V->insns[trunc].insn =
-                (vir_insn){VIR_OP_ICMP, VIR_TYPE_I32, 1, id, value, 0};
+            V->insns[trunc].insn = VCC_LITERAL(vir_insn, VIR_OP_ICMP,
+                                               VIR_TYPE_I32, 1, id, value, 0);
         } else {
             V->insns[trunc].insn =
-                (vir_insn){VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0};
+                VCC_LITERAL(vir_insn, VIR_OP_NOP, VIR_TYPE_VOID, 0, 0, 0, 0);
             V->insns[q].insn.a = id;
             V->insns[q].insn.b = value;
         }
@@ -166,7 +169,7 @@ static size_t virbuild_simplify_layout(codegen_context *e,
     do {                                                                       \
         size_t bytes;                                                          \
         if (base)                                                              \
-            S->field = (void *)(base + used);                                  \
+            S->field = (__typeof__(S->field))(base + used);                    \
         if (__builtin_mul_overflow((size_t)(count), sizeof *S->field,          \
                                    &bytes) ||                                  \
             __builtin_add_overflow(used, bytes, &used))                        \
@@ -220,7 +223,7 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
     S.value_table_mask = hc - 1;
     size_t need = virbuild_simplify_layout(e, &S, NULL, kc, hc);
     void *buf = virbuild_pass_scratch_get(e, need);
-    virbuild_simplify_layout(e, &S, buf, kc, hc);
+    virbuild_simplify_layout(e, &S, (char *)buf, kc, hc);
     stk = S.stack;
     uint32_t *pointer_copies = S.use_counts + S.constant_start + 1;
     /* uses */

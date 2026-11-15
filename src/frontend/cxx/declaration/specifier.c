@@ -1,4 +1,5 @@
 /* C++ declarations: decl-specifiers, type names, pointer operators */
+#include "common/literal.h"
 #include "declaration.h"
 
 VPRIV bool cxx_kw_is_simple_type(int kw)
@@ -248,7 +249,7 @@ VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
 
         args[0] = a[1];
         for (int64_t i = 0; i < a[2].v; i++)
-            args[i + 1] = (cxx_targ){.kind = 2, .v = i};
+            args[i + 1] = VCC_LITERAL(cxx_targ, .kind = 2, .v = i);
         inst = cxx_instantiate(c, (cxx_entity *)(intptr_t)a[0].v, args,
                                (uint32_t)a[2].v + 1, false);
         if (inst)
@@ -256,7 +257,7 @@ VPRIV void cxx_builtin_template(cxx *c, uint32_t id, const cxx_targ *a,
     } else if (v->len == 19 && !memcmp(v->s, "__type_pack_element", 19) &&
                n >= 2 && a[0].kind == 2 && a[0].v >= 0 && a[0].v + 1 < n &&
                a[a[0].v + 1].kind == 1) {
-        cxx_entity *r = calloc(
+        cxx_entity *r = (cxx_entity *)calloc(
             1, sizeof *r); /* (a type with no name: an entity of its own) */
 
         r->kind = CXX_ENTITY_TYPE, r->ty = a[a[0].v + 1].t, r->pack_index = -1;
@@ -679,7 +680,7 @@ VPRIV void cxx_defaults_record(cxx *c, cxx_entity *e)
     if (c->tentative || !e->ndefaults || c->fn_ndefs != e->ndefaults ||
         c->template_depth)
         return;
-    e->defs = malloc(2 * c->fn_ndefs * sizeof *e->defs);
+    e->defs = (uint32_t *)malloc(2 * c->fn_ndefs * sizeof *e->defs);
     memcpy(e->defs, c->fn_defs, 2 * c->fn_ndefs * sizeof *e->defs);
     e->def_scope = c->scope;
 }
@@ -773,9 +774,9 @@ VPRIV uint32_t cxx_operator_name_parse(cxx *c)
             /* (its name in the class: "operator #" and the type's number; mangle.c writes cv <type>) */
             char nm[64] = {0};
 
-            conv_class->conv_types =
-                realloc(conv_class->conv_types,
-                        (conv_class->nconv + 1) * sizeof(ast_qualified_type));
+            conv_class->conv_types = (ast_qualified_type *)(realloc(
+                conv_class->conv_types,
+                (conv_class->nconv + 1) * sizeof(ast_qualified_type)));
             conv_class->conv_types[conv_class->nconv++] = conv_to;
             snprintf(nm, 32, "operator #%u",
                      (unsigned)AST_QUALIFIED_TYPE_UNQUALIFIED(conv_to));

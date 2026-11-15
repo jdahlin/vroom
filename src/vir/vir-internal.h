@@ -32,6 +32,10 @@
 
 /* The thread's reservations (22.2), made once; the generation stamps the
  * constant table (22.3) so that nothing is cleared per function. */
+struct vir_cent {
+    uint32_t gen, val;
+};
+
 struct vir_context {
     vir_insn *insns[2]; /* source and destination of a copying sweep */
     int current;
@@ -40,9 +44,7 @@ struct vir_context {
     uint32_t *extra_words, *scratch, *auxiliary;
     vir_location *locations[2];
     int block_current, location_current;
-    struct vir_cent {
-        uint32_t gen, val;
-    } *ctab;
+    struct vir_cent *ctab;
     uint32_t gen, ncon; /* the current generation; constants in the table */
     bool fail;
     uint32_t cfg_mark,

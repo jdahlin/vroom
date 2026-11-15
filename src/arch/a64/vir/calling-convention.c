@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: the ABI (AAPCS64, Apple's), the fixed operands of calls, parameters and returns, and the registers offered to the allocator. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 /* where each argument of signature w goes (AAPCS64; Apple: unnamed on the stack, named
@@ -81,9 +82,10 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
     case VIR_OP_PARAM: {
         uint32_t ng = VIR_SIGNATURE_GROUP_COUNT(f->extra[f->signature]);
         a64_vir_argument *a =
-            ng <= A64_VIR_OPERAND_MAX
-                ? __builtin_alloca(sizeof(a64_vir_argument) * ng)
-                : NULL;
+            (a64_vir_argument *)(ng <= A64_VIR_OPERAND_MAX
+                                     ? __builtin_alloca(
+                                           sizeof(a64_vir_argument) * ng)
+                                     : NULL);
 
         if (!a || in->a >= ng)
             return;
@@ -223,7 +225,7 @@ static const uint8_t a64_vir_operand_fixes[256] = {
 VPRIV void a64_vir_registers_describe(vir_target_registers *r, bool darwin,
                                       bool fcs)
 {
-    *r = (vir_target_registers){0};
+    *r = VCC_LITERAL(vir_target_registers, 0);
     r->alloc[0] = A64_VIR_ALLOCATABLE_INTEGER;
     r->alloc[1] =
         A64_VIR_ALLOCATABLE_FLOAT | (fcs ? A64_VIR_CALLEE_SAVED_FLOAT_LOW : 0);

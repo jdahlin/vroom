@@ -1,5 +1,6 @@
 /* The second half of the symbol table: sizing, layout of globals and locals, and filling it in parallel. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- symbol table ---------------- */
@@ -40,7 +41,7 @@ static void ld_global_symbol_record_store(struct ld_context *ctx, elf_symbol *d,
 
 static void ld_local_symbols_write(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes || !o->kept_local_count)
         return;
@@ -75,7 +76,7 @@ static void ld_local_symbols_write(void *arg, size_t i)
 
 static void ld_global_symbols_write(void *arg, size_t c)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     uint32_t b = c * 4096, e = b + 4096 < ctx->symbol_table.global_count
                                    ? b + 4096
                                    : ctx->symbol_table.global_count;
@@ -118,8 +119,8 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
 {
     ld_parallel_for(ctx->inputs.objects.n, ld_local_symbols_count, ctx);
     /* per-file hidden counts */
-    uint32_t *hcount =
-        ld_region_alloc((ctx->inputs.objects.n + 1) * sizeof(uint32_t));
+    uint32_t *hcount = (uint32_t *)(ld_region_alloc(
+        (ctx->inputs.objects.n + 1) * sizeof(uint32_t)));
     uint32_t nglob = 0, nhid = 0;
     for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
         uint32_t g = ctx->symbols.order.v[i];
@@ -135,8 +136,8 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
     }
     /* local indices */
     uint64_t idx = 1, str = 1;
-    uint32_t *hnext =
-        ld_region_alloc((ctx->inputs.objects.n + 1) * sizeof(uint32_t));
+    uint32_t *hnext = (uint32_t *)(ld_region_alloc((ctx->inputs.objects.n + 1) *
+                                                   sizeof(uint32_t)));
     for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
         ld_object *o = ctx->inputs.objects.v[i];
         o->first_local_output_index = idx;
@@ -148,12 +149,12 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
             idx += hcount[i];
     }
     /* hidden-only groups after all file groups */
-    uint32_t *grp_next =
-        ld_region_alloc((ctx->inputs.objects.n + 1) * sizeof(uint32_t));
+    uint32_t *grp_next = (uint32_t *)(ld_region_alloc(
+        (ctx->inputs.objects.n + 1) * sizeof(uint32_t)));
     for (uint32_t i = 0; i < ctx->inputs.objects.n; i++)
         grp_next[i] = LD_NONE;
-    ctx->symbol_table.globals =
-        ld_region_alloc((size_t)nglob * sizeof(ld_global_symbol_output));
+    ctx->symbol_table.globals = (ld_global_symbol_output *)(ld_region_alloc(
+        (size_t)nglob * sizeof(ld_global_symbol_output)));
     ctx->symbol_table.global_count = 0;
     uint64_t gstr = str;
     /* first pass: place hidden symbols */
@@ -177,8 +178,8 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
             at = idx++;
         }
         ctx->symbol_table.globals[ctx->symbol_table.global_count++] =
-            (ld_global_symbol_output){
-                .global_symbol = g, .index = at, .is_local = true};
+            VCC_LITERAL(ld_global_symbol_output, .global_symbol = g,
+                        .index = at, .is_local = true);
     }
     /* thunk symbols */
     uint64_t thunk0 = idx;
@@ -198,8 +199,8 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
             continue;
         }
         ctx->symbol_table.globals[ctx->symbol_table.global_count++] =
-            (ld_global_symbol_output){
-                .global_symbol = g, .index = idx++, .string_offset = so};
+            VCC_LITERAL(ld_global_symbol_output, .global_symbol = g,
+                        .index = (uint32_t)(idx++), .string_offset = so);
     }
     ctx->symbol_table.symbol_count = idx;
     uint64_t tstr = gstr;

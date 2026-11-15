@@ -25,7 +25,8 @@
     do {                                                                       \
         if ((a).n == (a).cap) {                                                \
             (a).cap = (a).cap ? (a).cap * 2 : 64;                              \
-            (a).v = realloc((a).v, (size_t)(a).cap * sizeof(*(a).v));          \
+            (a).v = (__typeof__((a).v))realloc((a).v, (size_t)(a).cap *        \
+                                                          sizeof(*(a).v));     \
             if (!(a).v)                                                        \
                 abort();                                                       \
         }                                                                      \
@@ -69,7 +70,7 @@ static uint32_t vir_parse_name_get(vir_parse_names *m, const char *s,
         uint32_t nc = m->capacity ? m->capacity * 2 : 64;
 
         free(m->table);
-        m->table = calloc(nc, 4);
+        m->table = (uint32_t *)calloc(nc, 4);
         if (!m->table)
             abort();
         m->capacity = nc;
@@ -273,7 +274,8 @@ static void vir_parse_string_append(vir_parse_state *p, int c)
 {
     if (p->block_name_count == p->string_capacity) {
         p->string_capacity = p->string_capacity ? p->string_capacity * 2 : 256;
-        p->string_buffer = realloc(p->string_buffer, p->string_capacity);
+        p->string_buffer =
+            (char *)realloc(p->string_buffer, p->string_capacity);
         if (!p->string_buffer)
             abort();
     }
@@ -773,7 +775,7 @@ static void vir_parse_signature_declaration(vir_parse_state *p)
     res0 = vir_parse_group(p, &res1);
     vir_parse_newline_expect(p);
     {
-        uint32_t *all = malloc((size_t)(3 + w.n) * 4);
+        uint32_t *all = (uint32_t *)(malloc((size_t)(3 + w.n) * 4));
 
         if (!all)
             abort();
@@ -827,7 +829,7 @@ static void vir_parse_asm_declaration(vir_parse_state *p)
     {
         size_t n;
 
-        a.template = vir_parse_token_string(p, st, &n);
+        a.asm_template = vir_parse_token_string(p, st, &n);
     }
     for (int k = 0; k < 3; k++) {
         PV(const char *) l = {0};
@@ -847,7 +849,8 @@ static void vir_parse_asm_declaration(vir_parse_state *p)
             }
         vir_parse_punctuation_expect(p, ')');
         *cnt[k] = l.n;
-        *lst[k] = vir_unit_alloc(p->unit, (size_t)l.n * sizeof(char *));
+        *lst[k] = (const char **)(vir_unit_alloc(p->unit,
+                                                 (size_t)l.n * sizeof(char *)));
         if (l.n)
             memcpy((void *)*lst[k], l.v, (size_t)l.n * sizeof(char *));
         VIR_PARSE_VECTOR_FREE(l);
@@ -860,8 +863,9 @@ static void vir_parse_asm_declaration(vir_parse_state *p)
     if (p->unit->asm_count == p->unit->asm_capacity) {
         p->unit->asm_capacity =
             p->unit->asm_capacity ? p->unit->asm_capacity * 2 : 8;
-        p->unit->asms = realloc(p->unit->asms, (size_t)p->unit->asm_capacity *
-                                                   sizeof(vir_unit_asm));
+        p->unit->asms = (vir_unit_asm *)(realloc(p->unit->asms,
+                                                 (size_t)p->unit->asm_capacity *
+                                                     sizeof(vir_unit_asm)));
         if (!p->unit->asms)
             abort();
     }
@@ -1001,8 +1005,8 @@ static void vir_parse_data_declaration(vir_parse_state *p)
             }
             if (u->item_count == u->item_capacity) {
                 u->item_capacity = u->item_capacity ? u->item_capacity * 2 : 64;
-                u->item = realloc(u->item,
-                                  (size_t)u->item_capacity * sizeof(vir_item));
+                u->item = (vir_item *)(realloc(
+                    u->item, (size_t)u->item_capacity * sizeof(vir_item)));
                 if (!u->item)
                     abort();
             }
@@ -1346,7 +1350,7 @@ static void vir_parse_flags(vir_parse_state *p, vir_insn *in)
 static void vir_parse_opcode_split(const vir_parse_token *t, const char **nm_,
                                    size_t *nl, const char **sfx, size_t *sl)
 {
-    const char *d = memchr(t->string, '.', t->len);
+    const char *d = (const char *)memchr(t->string, '.', t->len);
 
     *nm_ = t->string;
     if (d) {
@@ -1580,7 +1584,7 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
         vir_parse_operand_list(p, 1, VIR_PARSE_LIST_MODE_LIST, 0, &n);
         vir_parse_punctuation_expect(p, ')');
         {
-            uint32_t *w = calloc((size_t)n + 1, 4);
+            uint32_t *w = (uint32_t *)(calloc((size_t)n + 1, 4));
 
             if (!w)
                 abort();
@@ -1637,7 +1641,7 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
             }
         vir_parse_punctuation_expect(p, ')');
         {
-            uint32_t *all = malloc(((size_t)w.n + 2) * 4);
+            uint32_t *all = (uint32_t *)(malloc(((size_t)w.n + 2) * 4));
 
             if (!all)
                 abort();
@@ -1678,7 +1682,7 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
                 }
             vir_parse_punctuation_expect(p, ']');
             {
-                uint32_t *all = calloc((size_t)nl2 + 2, 4);
+                uint32_t *all = (uint32_t *)(calloc((size_t)nl2 + 2, 4));
 
                 if (!all)
                     abort();
@@ -1784,7 +1788,7 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
             }
         vir_parse_punctuation_expect(p, ']');
         {
-            uint32_t *all = calloc((size_t)n + 1, 4);
+            uint32_t *all = (uint32_t *)(calloc((size_t)n + 1, 4));
 
             if (!all)
                 abort();
@@ -1804,7 +1808,7 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
 
         vir_parse_operand_list(p, 2, VIR_PARSE_LIST_MODE_LIST, 0, &n);
         {
-            uint32_t *all = calloc((size_t)n + 1, 4);
+            uint32_t *all = (uint32_t *)(calloc((size_t)n + 1, 4));
 
             if (!all)
                 abort();
@@ -2070,7 +2074,7 @@ static void vir_parse_function_finish(vir_parse_state *p,
                                "undefined block %.*s",
                                (int)p->block_records.entries.v[i].name_length,
                                p->block_records.entries.v[i].string);
-    cid = calloc((size_t)p->constant_definitions.n + 1, 4);
+    cid = (uint32_t *)(calloc((size_t)p->constant_definitions.n + 1, 4));
     if (!cid)
         abort();
     /* constants written as instructions: in text order, not unified */
@@ -2183,7 +2187,7 @@ static void vir_parse_function_finish(vir_parse_state *p,
             if (ty != VIR_TYPE_I32 && ty != VIR_TYPE_I64)
                 vir_parse_error_at(p, ps_->line, ps_->column,
                                    "a switch operand is i32 or i64");
-            w = malloc(((size_t)n * st + 1) * 4);
+            w = (uint32_t *)(malloc(((size_t)n * st + 1) * 4));
             if (!w)
                 abort();
             w[0] = n;

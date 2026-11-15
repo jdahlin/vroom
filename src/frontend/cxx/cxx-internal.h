@@ -358,6 +358,30 @@ typedef struct cxx_late {
 /* the most arguments (or braced-list elements) a call or list keeps typed: more is not built */
 #define CXX_MAX_ARGS 256
 
+struct cxx_stats {
+    uint32_t classes, classes_laid_out,
+        classes_skipped[16]; /* (by CXX_SKIP_*) */
+    uint32_t declarations, declarations_typed, symbols, expressions,
+        expressions_typed;
+    uint32_t asserts_true, asserts_false,
+        asserts_unknown; /* static_asserts outside templates */
+    uint32_t calls, calls_typed,
+        why[12]; /* calls outside templates; why a call has no type (CXX_WHY_*) */
+    uint32_t ooc_bodies, ooc_failed,
+        ooc_ambiguous; /* class template members defined outside the class, instantiated */
+    uint32_t functions,
+        functions_generated; /* function definitions at namespace scope; with code */
+    uint32_t bodies, bodies_failed, bodies_cached, body_depth_max,
+        member_bodies,
+        member_bodies_failed; /* function template bodies instantiated */
+};
+
+struct cxx_extern_member {
+    struct cxx_entity *of;
+    cxx_targ args[4];
+    uint32_t nargs, name, nparams;
+};
+
 typedef struct cxx {
     pp *p;
     const cxx_options *o;
@@ -442,23 +466,7 @@ typedef struct cxx {
     void *
         class_info; /* per AST tag: a laid-out class's data size, POD-ness, emptiness (types.c) */
     uint32_t nclass_info;
-    struct cxx_stats {
-        uint32_t classes, classes_laid_out,
-            classes_skipped[16]; /* (by CXX_SKIP_*) */
-        uint32_t declarations, declarations_typed, symbols, expressions,
-            expressions_typed;
-        uint32_t asserts_true, asserts_false,
-            asserts_unknown; /* static_asserts outside templates */
-        uint32_t calls, calls_typed,
-            why[12]; /* calls outside templates; why a call has no type (CXX_WHY_*) */
-        uint32_t ooc_bodies, ooc_failed,
-            ooc_ambiguous; /* class template members defined outside the class, instantiated */
-        uint32_t functions,
-            functions_generated; /* function definitions at namespace scope; with code */
-        uint32_t bodies, bodies_failed, bodies_cached, body_depth_max,
-            member_bodies,
-            member_bodies_failed; /* function template bodies instantiated */
-    } stats;
+    struct cxx_stats stats;
     /* instantiation (instantiate.c) */
     cxx_targ *targs; /* the last template argument list's arguments */
     uint32_t ntargs, ctargs;
@@ -636,11 +644,8 @@ typedef struct cxx {
         const char *name;
         uint32_t sym;
     } *sym_names;
-    struct cxx_extern_member {
-        struct cxx_entity *of;
-        cxx_targ args[4];
-        uint32_t nargs, name, nparams;
-    } *externs; /* extern template R X<args>::f(...): defined elsewhere */
+    struct cxx_extern_member
+        *externs; /* extern template R X<args>::f(...): defined elsewhere */
     uint32_t nexterns;
     struct {
         uint32_t sym, sym1;

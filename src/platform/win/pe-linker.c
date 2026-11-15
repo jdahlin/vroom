@@ -26,6 +26,7 @@
  *   pe-layout.c     partial/output sections, synthetic chunks, addresses
  *   pe-write.c      relocations, headers, symbol table, build id, -Map
  */
+#include "common/literal.h"
 #include "ld/ld.h"
 #include "common/digest.h"
 #include "common/hash.h"
@@ -88,7 +89,7 @@ static void *pe_alloc(size_t n)
     n = (n + 15) & ~(size_t)15;
     if (!pe_arena || pe_arena->used + n > pe_arena->cap) {
         size_t cap = n > (1u << 20) ? n : (1u << 20);
-        pe_arena_block *b = malloc(sizeof *b + 16 + cap);
+        pe_arena_block *b = (pe_arena_block *)malloc(sizeof *b + 16 + cap);
         if (!b)
             pe_oom();
         b->next = pe_arena;
@@ -113,7 +114,7 @@ static void pe_arena_free(void)
 
 static char *pe_strndup(const char *s, size_t n)
 {
-    char *p = pe_alloc(n + 1);
+    char *p = (char *)pe_alloc(n + 1);
     memcpy(p, s, n);
     p[n] = 0;
     return p;
@@ -133,7 +134,7 @@ static char *pe_format(const char *fmt, ...)
     va_copy(aq, ap);
     int n = vsnprintf(NULL, 0, fmt, ap);
     va_end(ap);
-    char *p = pe_alloc((size_t)n + 1);
+    char *p = (char *)(pe_alloc((size_t)n + 1));
     vsnprintf(p, (size_t)n + 1, fmt, aq);
     va_end(aq);
     return p;

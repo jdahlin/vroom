@@ -39,7 +39,7 @@ static char *virtest_file_read(const char *path, size_t *n)
     fseek(fp, 0, SEEK_END);
     sz = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    b = malloc((size_t)sz + 1);
+    b = (char *)(malloc((size_t)sz + 1));
     if (!b || (sz > 0 && fread(b, 1, (size_t)sz, fp) != (size_t)sz)) {
         fclose(fp);
         free(b);
@@ -251,7 +251,7 @@ static int virtest_selftest(void)
                             VIR_BLOCK_NONE},
                  boff[10] = {0};
         vir_alloc_out o = {
-            .slot_offsets = soff, .edge_indices = eidx, .block_offsets = boff};
+            .block_offsets = boff, .edge_indices = eidx, .slot_offsets = soff};
         vir_layout_chases_compute(&f, &o, chase, path);
         VIRTEST_CHECK(chase[0] == 0 && chase[1] == 1 && chase[2] == 1 &&
                       chase[3] == 3);
@@ -278,7 +278,7 @@ static int virtest_selftest(void)
                             {.first = 0, .insn_count = 2},
                             {.first = 2, .insn_count = 1}};
         vir_function g = {
-            .insns = ins, .blocks = blk, .insn_count = 3, .block_count = 3};
+            .insns = ins, .insn_count = 3, .blocks = blk, .block_count = 3};
         vir_loops lp = {0};
         uint32_t rotation[3] = {VIR_BLOCK_NONE, VIR_BLOCK_NONE, VIR_BLOCK_NONE};
         VIRTEST_CHECK(

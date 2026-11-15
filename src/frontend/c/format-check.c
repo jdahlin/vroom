@@ -1,4 +1,5 @@
 /* vcc front end: -Wformat, printf format strings against their arguments (clang's CheckFormatHandler) */
+#include "common/literal.h"
 #include "cc-internal.h"
 #include <ctype.h>
 
@@ -1015,7 +1016,7 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args,
                         cl >= CC_FORMAT_TYPE_POINTER_CHAR &&
                             cl <= CC_FORMAT_TYPE_POINTER_UNSIGNED_CHAR,
                         ft, sizeof(ft));
-                    fx = (diag_fixit){sr.b, sr.e, ft, 0};
+                    fx = VCC_LITERAL(diag_fixit, sr.b, sr.e, ft, 0);
                 }
                 cc_format_check_report(
                     &x, "format", r[1].b, r, 2, code > 1 ? &fx : NULL, code > 1,

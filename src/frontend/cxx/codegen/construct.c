@@ -562,7 +562,7 @@ VPRIV void cxx_gen_construct_local(cxx *c, uint32_t s, ast_qualified_type t,
 {
     cc *a = c->ast;
     cxx_entity *dtor;
-    cc_id_list *block = c->gen_block;
+    cc_id_list *block = (cc_id_list *)c->gen_block;
     /* (what cxx_ctor_use chose: naming the destructor below resolves nothing, but keep it apart) */
     cxx_entity *picked = c->ctor_picked, *il = c->ctor_ilist;
     bool found = c->ctor_found, none = c->ctor_none;

@@ -44,7 +44,7 @@ VPRIV void ld_stubs_collect(struct ld_context *ctx)
 
 VPRIV void ld_stub_list_write(struct ld_context *ctx)
 {
-    char *p = ld_region_alloc(strlen(ctx->options.output_path) + 16);
+    char *p = (char *)(ld_region_alloc(strlen(ctx->options.output_path) + 16));
     sprintf(p, "%s.vroom-stubs", ctx->options.output_path);
     FILE *f = NULL;
     int fd = openat(ctx->options.directory_fd, p, O_WRONLY | O_CREAT | O_TRUNC,

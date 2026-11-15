@@ -22,9 +22,6 @@
 #include <stdio.h>
 #include "../cxx-internal.h"
 
-static bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
-                               uint32_t n, char *buf, size_t cap, size_t *len);
-
 /* a partial specialization: its parameters, its argument pattern's tokens, its class-key */
 typedef struct cxx_partial {
     cxx_scope *params, *home;
@@ -46,6 +43,12 @@ typedef struct cxx_partial {
         *ph; /* per parameter: its placeholder type (a type parameter) */
 } cxx_partial;
 
+struct cxx_ooc {
+    uint32_t name, pos, nparams;
+    cxx_scope *params, *home, *inner;
+    uint8_t is_const, partial, pack;
+};
+
 struct cxx_template {
     cxx_partial **
         partials; /* (each allocated on its own: instances keep pointers to the one they were made from) */
@@ -60,11 +63,7 @@ struct cxx_template {
     uint8_t is_alias, has_partial;
     char *path; /* its qualified name (the layout dump), NULL: not nameable */
     /* its members defined outside the class: template<...> R X<...>::f(...) { } */
-    struct cxx_ooc {
-        uint32_t name, pos, nparams;
-        cxx_scope *params, *home, *inner;
-        uint8_t is_const, partial, pack;
-    } *oocs; /* (inner: a member template's own parameters) */
+    struct cxx_ooc *oocs; /* (inner: a member template's own parameters) */
     uint32_t noocs;
 };
 

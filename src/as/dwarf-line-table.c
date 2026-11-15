@@ -15,6 +15,7 @@
  * seen), each non-temporary label there a DW_TAG_label, and the end adds .debug_info, .debug_abbrev,
  * .debug_aranges and (several sections, DWARF 3 and later) .debug_ranges or .debug_rnglists.  Its
  * sections are .text and, on ELF, every allocated executable one named by .section. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- DWARF lines */
@@ -53,7 +54,8 @@ static uint32_t as_dwarf_directory_find_from(as_context *a, as_text d,
     if (a->dwarf_directory_count == a->dwarf_directory_capacity) {
         uint32_t nc =
             a->dwarf_directory_capacity ? a->dwarf_directory_capacity * 2 : 16;
-        as_text *t = as_region_alloc(&a->definitions, sizeof *t * nc);
+        as_text *t =
+            (as_text *)as_region_alloc(&a->definitions, sizeof *t * nc);
         if (a->dwarf_directory_count)
             memcpy(t, a->dwarf_directories,
                    sizeof *t * a->dwarf_directory_count);
@@ -81,8 +83,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
         a->gen_dwarf = 0;
         a->dwarf_file_count = a->dwarf_directory_count = 0;
     }
-    char *b1 = as_region_alloc(&a->definitions, (size_t)(e - p) + 1),
-         *b2 = as_region_alloc(&a->definitions, (size_t)(e - p) + 1);
+    char *b1 = (char *)(as_region_alloc(&a->definitions, (size_t)(e - p) + 1)),
+         *b2 = (char *)(as_region_alloc(&a->definitions, (size_t)(e - p) + 1));
     size_t l1, l2 = 0;
     if (as_string_parse(a, &p, e, b1, &l1))
         return -1;
@@ -94,9 +96,10 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
             return -1;
         b2[l2] = 0;
     }
-    as_text dir = two ? (as_text){b1, (uint32_t)l1} : (as_text){"", 0},
-            name =
-                two ? (as_text){b2, (uint32_t)l2} : (as_text){b1, (uint32_t)l1};
+    as_text dir = two ? VCC_LITERAL(as_text, b1, (uint32_t)l1)
+                      : VCC_LITERAL(as_text, "", 0),
+            name = two ? VCC_LITERAL(as_text, b2, (uint32_t)l2)
+                       : VCC_LITERAL(as_text, b1, (uint32_t)l1);
     uint8_t md5[16];
     int hasmd5 = 0;
     for (;;) {
@@ -143,8 +146,8 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
         uint32_t nc = a->dwarf_file_capacity ? a->dwarf_file_capacity : 16;
         while (nc <= n)
             nc *= 2;
-        struct as_dwarf_file *t =
-            as_region_alloc(&a->definitions, sizeof *t * nc);
+        struct as_dwarf_file *t = (struct as_dwarf_file *)as_region_alloc(
+            &a->definitions, sizeof *t * nc);
         memset(t, 0, sizeof *t * nc);
         if (a->dwarf_file_count)
             memcpy(t, a->dwarf_files, sizeof *t * a->dwarf_file_count);
@@ -160,7 +163,7 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
     if (!v5 && n && two && a->debug_directory &&
         dir.length == strlen(a->debug_directory) &&
         !memcmp(dir.text, a->debug_directory, dir.length))
-        two = 0, dir = (as_text){"", 0};
+        two = 0, dir = VCC_LITERAL(as_text, "", 0);
     if (!two &&
         n) { /* "sub/y.h": directory "sub", name "y.h" (MC's tryGetFile) */
         const char *sl = 0;
@@ -168,21 +171,21 @@ VPRIV int as_directive_file(as_context *a, const char *p, const char *e)
             if (name.text[i] == '/')
                 sl = name.text + i;
         if (sl && sl + 1 < name.text + name.length && (sl > name.text || !v5)) {
-            dir =
-                (as_text){name.text, sl > name.text ? (uint32_t)(sl - name.text)
-                                                    : 1}; /* ("/x.h": "/") */
-            name =
-                (as_text){sl + 1, (uint32_t)(name.text + name.length - sl - 1)};
+            dir = VCC_LITERAL(as_text, name.text,
+                              sl > name.text ? (uint32_t)(sl - name.text)
+                                             : 1); /* ("/x.h": "/") */
+            name = VCC_LITERAL(as_text, sl + 1,
+                               (uint32_t)(name.text + name.length - sl - 1));
             split = 1;
         }
     }
     if (!a->dwarf_directory_count) { /* directory 0: the root file's, else the compilation directory */
         as_text d = dir;
         if (n) {
-            char *cwd = as_region_alloc(&a->definitions, 4096);
+            char *cwd = (char *)as_region_alloc(&a->definitions, 4096);
             if (!getcwd(cwd, 4096))
                 cwd[0] = 0;
-            d = (as_text){cwd, (uint32_t)strlen(cwd)};
+            d = VCC_LITERAL(as_text, cwd, (uint32_t)strlen(cwd));
         }
         as_dwarf_directory_find(a, d);
     }
@@ -275,8 +278,8 @@ static struct as_dwarf_row *as_dwarf_row_new(as_context *a)
 {
     if (a->dwarf_row_count == a->dwarf_row_capacity) {
         uint32_t nc = a->dwarf_row_capacity ? a->dwarf_row_capacity * 2 : 256;
-        struct as_dwarf_row *t =
-            as_region_alloc(&a->definitions, sizeof *t * nc);
+        struct as_dwarf_row *t = (struct as_dwarf_row *)as_region_alloc(
+            &a->definitions, sizeof *t * nc);
         if (a->dwarf_row_count)
             memcpy(t, a->dwarf_rows, sizeof *t * a->dwarf_row_count);
         a->dwarf_rows = t;
@@ -353,8 +356,9 @@ static uint32_t as_dwarf_string_add(ElfObj *o, uint32_t ls, as_text s)
     uint32_t off = 0;
     for (ElfChunk *c = f->head; c; c = c->next) {
         for (uint32_t i = 0; i < c->used;) {
-            size_t k = strlen((const char *)c->data + i);
-            if (k == s.length && !memcmp(c->data + i, s.text, s.length))
+            size_t k = strlen((const char *)elf_chunk_data(c) + i);
+            if (k == s.length &&
+                !memcmp(elf_chunk_data(c) + i, s.text, s.length))
                 return off + i;
             i += (uint32_t)k + 1;
         }
@@ -429,11 +433,11 @@ VPRIV void as_dwarf_line_finish(as_context *a)
         for (uint32_t i = 1; i < a->dwarf_file_count; i++)
             cap += a->dwarf_files[i].name.length;
     }
-    as_byte_span b = {as_region_alloc(&a->definitions, cap), 0};
-    uint32_t *sfix =
-        as_region_alloc(&a->definitions, sizeof(uint32_t) * 2 *
-                                             (a->dwarf_file_count +
-                                              a->dwarf_directory_count + 1));
+    as_byte_span b = {(uint8_t *)as_region_alloc(&a->definitions, cap), 0};
+    uint32_t *sfix = (uint32_t *)(as_region_alloc(
+        &a->definitions,
+        sizeof(uint32_t) * 2 *
+            (a->dwarf_file_count + a->dwarf_directory_count + 1)));
     uint32_t nsfix = 0;
     b.n = 4;
     b.p[b.n++] = (uint8_t)a->dwarf_version;
@@ -513,10 +517,11 @@ program:;
     memcpy(b.p + hl, &hlen, 4);
     /* sequences: one per section, in order of first row */
     as_fragment_offsets_cache(o);
-    uint32_t *afix = as_region_alloc(
-        &a->definitions, sizeof(uint32_t) * 2 * (a->dwarf_row_count + 1));
+    uint32_t *afix = (uint32_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint32_t) * 2 * (a->dwarf_row_count + 1)));
     uint32_t nafix = 0;
-    uint8_t *done = as_region_alloc(&a->definitions, a->dwarf_row_count + 1);
+    uint8_t *done =
+        (uint8_t *)as_region_alloc(&a->definitions, a->dwarf_row_count + 1);
     memset(done, 0, a->dwarf_row_count + 1);
     for (uint32_t s = 0; s < a->dwarf_row_count; s++) {
         if (done[s])
@@ -605,7 +610,7 @@ program:;
                   coff                      ? R_VCC_COFF_SECREL32
                   : o->machine == EM_X86_64 ? R_X86_64_32
                                             : R_AARCH64_ABS32,
-                  (as_value){lsym, 0, (int64_t)sfix[2 * i + 1]});
+                  VCC_LITERAL(as_value, lsym, 0, (int64_t)sfix[2 * i + 1]));
     for (uint32_t i = 0; i < nafix; i++) {
         struct as_dwarf_row *l = &a->dwarf_rows[afix[2 * i + 1]];
         uint32_t y = elf_sym_anon(o, ".Ltmp", 5);
@@ -613,7 +618,7 @@ program:;
         elf_define(o, y, l->fragment, l->offset);
         elf_fixup(o, sec, at + afix[2 * i], q + afix[2 * i],
                   o->machine == EM_X86_64 ? R_X86_64_64 : R_AARCH64_ABS64,
-                  (as_value){y, 0, 0});
+                  VCC_LITERAL(as_value, y, 0, 0));
     }
 }
 
@@ -686,7 +691,8 @@ static void as_gen_file_register(as_context *a, uint32_t n, const char *dir,
                                  const char *name, const uint8_t *md5)
 {
     size_t dl = dir ? strlen(dir) : 0, nl = strlen(name);
-    char *t = as_region_alloc(&a->definitions, 2 * (dl + nl) + 96), *q = t;
+    char *t = (char *)(as_region_alloc(&a->definitions, 2 * (dl + nl) + 96)),
+         *q = t;
     q += sprintf(q, "%u ", n);
     for (int k = 0; k < 2; k++) {
         const char *x = k ? name : dir;
@@ -719,8 +725,9 @@ static void as_gen_dwarf_section_push(as_context *a, uint32_t sec)
             return;
     if (a->gen_section_count == a->gen_section_capacity) {
         uint32_t nc = a->gen_section_capacity ? 2 * a->gen_section_capacity : 8;
-        uint32_t *t = as_region_alloc(&a->definitions, sizeof *t * nc);
-        uint8_t *c = as_region_alloc(&a->definitions, nc);
+        uint32_t *t =
+            (uint32_t *)as_region_alloc(&a->definitions, sizeof *t * nc);
+        uint8_t *c = (uint8_t *)as_region_alloc(&a->definitions, nc);
         if (a->gen_section_count)
             memcpy(t, a->gen_sections, sizeof *t * a->gen_section_count),
                 memcpy(c, a->gen_section_code, a->gen_section_count);
@@ -749,7 +756,8 @@ VPRIV void as_gen_dwarf_start(as_context *a, const char *text, size_t len)
         if (*name == '/')
             name++;
     }
-    a->gen_names = as_region_alloc(&a->definitions, sizeof *a->gen_names * 16);
+    a->gen_names = (struct as_gen_name *)as_region_alloc(
+        &a->definitions, sizeof *a->gen_names * 16);
     a->gen_name_capacity = 16;
     if (a->dwarf_version >= 5) {
         uint8_t md5[16];
@@ -758,7 +766,7 @@ VPRIV void as_gen_dwarf_start(as_context *a, const char *text, size_t len)
         a->gen_file = 0;
     } else { /* (file 1 at the first instruction or label: MC's enabledGenDwarfForAssembly) */
         a->gen_names[0] =
-            (struct as_gen_name){{name, (uint32_t)strlen(name)}, 1};
+            VCC_LITERAL(struct as_gen_name, {name, (uint32_t)strlen(name)}, 1);
         a->gen_name_count = 1;
         a->gen_file = 1;
         a->dwarf_table_is_due = 1;
@@ -820,15 +828,16 @@ VPRIV int as_gen_dwarf_instruction(as_context *a)
         if (i == a->gen_name_count) {
             if (a->gen_name_count == a->gen_name_capacity) {
                 uint32_t nc = 2 * a->gen_name_capacity;
-                struct as_gen_name *t =
-                    as_region_alloc(&a->definitions, sizeof *t * nc);
+                struct as_gen_name *t = (struct as_gen_name *)as_region_alloc(
+                    &a->definitions, sizeof *t * nc);
                 memcpy(t, a->gen_names, sizeof *t * a->gen_name_count);
                 a->gen_names = t;
                 a->gen_name_capacity = nc;
             }
             uint32_t f = a->dwarf_file_count > 1 ? a->dwarf_file_count : 1;
             as_gen_file_register(a, f, NULL, a->cpp_file, NULL);
-            a->gen_names[i] = (struct as_gen_name){{a->cpp_file, n}, f};
+            a->gen_names[i] =
+                VCC_LITERAL(struct as_gen_name, {a->cpp_file, n}, f);
             a->gen_name_count++;
         }
         a->gen_file = a->gen_names[i].file;
@@ -874,8 +883,8 @@ VPRIV void as_gen_dwarf_label(as_context *a, const char *s, size_t n)
         return;
     if (a->gen_label_count == a->gen_label_capacity) {
         uint32_t nc = a->gen_label_capacity ? 2 * a->gen_label_capacity : 64;
-        struct as_gen_label *t =
-            as_region_alloc(&a->definitions, sizeof *t * nc);
+        struct as_gen_label *t = (struct as_gen_label *)as_region_alloc(
+            &a->definitions, sizeof *t * nc);
         if (a->gen_label_count)
             memcpy(t, a->gen_labels, sizeof *t * a->gen_label_count);
         a->gen_labels = t;
@@ -894,8 +903,8 @@ VPRIV void as_gen_dwarf_label(as_context *a, const char *s, size_t n)
         top->kind == AS_FRAME_FILE
             ? (uint32_t)((int64_t)top->statement_line + a->cpp_line_delta)
             : top->statement_line;
-    a->gen_labels[a->gen_label_count++] =
-        (struct as_gen_label){as_text_duplicate(a, s, n), a->gen_file, line, y};
+    a->gen_labels[a->gen_label_count++] = VCC_LITERAL(
+        struct as_gen_label, as_text_duplicate(a, s, n), a->gen_file, line, y);
 }
 
 /* a temporary symbol at the end of section sec (its size after relaxation) */
@@ -1001,23 +1010,23 @@ VPRIV void as_gen_dwarf_finish(as_context *a)
     size_t cap = 256 + 64 * (size_t)ns + 32 * (size_t)a->gen_label_count +
                  name_len + strlen(producer) + strlen(cdir) +
                  root->name.length + dl;
-    as_byte_span b = {as_region_alloc(&a->definitions, cap), 0};
-    struct as_gen_fixup *fx =
-        as_region_alloc(&a->definitions,
-                        sizeof *fx * (8 + 2 * (size_t)ns + a->gen_label_count));
+    as_byte_span b = {(uint8_t *)as_region_alloc(&a->definitions, cap), 0};
+    struct as_gen_fixup *fx = (struct as_gen_fixup *)(as_region_alloc(
+        &a->definitions,
+        sizeof *fx * (8 + 2 * (size_t)ns + a->gen_label_count)));
     uint32_t nfx = 0;
     /* .debug_aranges: version 2, the unit's offset, address size 8, padded to 16; (start, length) per section */
     as_gen_put(&b, 0, 4);
     as_gen_put(&b, 2, 2);
-    fx[nfx++] = (struct as_gen_fixup){
-        (uint32_t)b.n, off32, {elf_sec(o, info)->sym, 0, 0}};
+    fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, off32,
+                            {elf_sec(o, info)->sym, 0, 0});
     as_gen_put(&b, 0, 4);
     as_gen_put(&b, 8, 1);
     as_gen_put(&b, 0, 1);
     as_gen_put(&b, 0, 4);
     for (uint32_t i = 0; i < ns; i++) {
-        fx[nfx++] = (struct as_gen_fixup){
-            (uint32_t)b.n, addr64, {elf_sec(o, a->gen_sections[i])->sym, 0, 0}};
+        fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, addr64,
+                                {elf_sec(o, a->gen_sections[i])->sym, 0, 0});
         as_gen_put(&b, 0, 8);
         as_gen_put(&b, as_gen_dwarf_section_size(o, a->gen_sections[i]), 8);
     }
@@ -1046,10 +1055,9 @@ VPRIV void as_gen_dwarf_finish(as_context *a)
                 b.p[b.n++] = 7;
             else
                 as_gen_put(&b, UINT64_MAX, 8);
-            fx[nfx++] = (struct as_gen_fixup){
-                (uint32_t)b.n,
-                addr64,
-                {elf_sec(o, a->gen_sections[i])->sym, 0, 0}};
+            fx[nfx++] =
+                VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, addr64,
+                            {elf_sec(o, a->gen_sections[i])->sym, 0, 0});
             as_gen_put(&b, 0, 8);
             if (v >= 5)
                 as_leb128_unsigned_append(&b, size);
@@ -1098,8 +1106,8 @@ VPRIV void as_gen_dwarf_finish(as_context *a)
         as_gen_put(&b, 1, 1);
         as_gen_put(&b, 8, 1);
     }
-    fx[nfx++] = (struct as_gen_fixup){
-        (uint32_t)b.n, off32, {elf_sec(o, abbrev)->sym, 0, 0}};
+    fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, off32,
+                            {elf_sec(o, abbrev)->sym, 0, 0});
     as_gen_put(&b, 0, 4);
     if (v < 5)
         as_gen_put(&b, 8, 1);
@@ -1107,21 +1115,20 @@ VPRIV void as_gen_dwarf_finish(as_context *a)
     uint32_t stmt =
         o->nfix +
         nfx; /* (its symbol once .debug_line exists: MC creates it after these) */
-    fx[nfx++] = (struct as_gen_fixup){
-        (uint32_t)b.n, off32, {elf_sec(o, abbrev)->sym, 0, 0}};
+    fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, off32,
+                            {elf_sec(o, abbrev)->sym, 0, 0});
     as_gen_put(&b, 0, 4);
     if (ranges) {
-        fx[nfx++] = (struct as_gen_fixup){
-            (uint32_t)b.n, off32, {elf_sec(o, rng)->sym, 0, v >= 5 ? 12 : 0}};
+        fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, off32,
+                                {elf_sec(o, rng)->sym, 0, v >= 5 ? 12 : 0});
         as_gen_put(&b, 0, 4);
     } else {
-        fx[nfx++] = (struct as_gen_fixup){
-            (uint32_t)b.n, addr64, {elf_sec(o, a->gen_sections[0])->sym, 0, 0}};
+        fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, addr64,
+                                {elf_sec(o, a->gen_sections[0])->sym, 0, 0});
         as_gen_put(&b, 0, 8);
-        fx[nfx++] = (struct as_gen_fixup){
-            (uint32_t)b.n,
-            addr64,
-            {as_gen_dwarf_section_end(o, a->gen_sections[0]), 0, 0}};
+        fx[nfx++] = VCC_LITERAL(
+            struct as_gen_fixup, (uint32_t)b.n, addr64,
+            {as_gen_dwarf_section_end(o, a->gen_sections[0]), 0, 0});
         as_gen_put(&b, 0, 8);
     }
     if (dl) {
@@ -1139,8 +1146,8 @@ VPRIV void as_gen_dwarf_finish(as_context *a)
         as_gen_string(&b, l->name.text, l->name.length);
         as_gen_put(&b, l->file, 4);
         as_gen_put(&b, l->line, 4);
-        fx[nfx++] =
-            (struct as_gen_fixup){(uint32_t)b.n, addr64, {l->symbol, 0, 0}};
+        fx[nfx++] = VCC_LITERAL(struct as_gen_fixup, (uint32_t)b.n, addr64,
+                                {l->symbol, 0, 0});
         as_gen_put(&b, 0, 8);
     }
     b.p[b.n++] = 0;

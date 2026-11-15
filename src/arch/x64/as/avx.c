@@ -156,9 +156,9 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         if (!strcmp(mn, "vpmovmskb") && nops == 2 && o[0].kind == XK_REG &&
             o[0].cls == XR_XMM && dst->kind == XK_REG && dst->cls == XR_GPR &&
             dst->size == 4)
-            return x64_emit(a, &F(.op = OPB(0x0f, 0xd7), .nop = 2, .opsz16 = 1,
-                                  .vex = 1, .vl = o[0].size == 32,
-                                  .reg = dst->reg, .rm = o));
+            return x64_emit_form(a, F(.opsz16 = 1, .op = OPB("\x0f\xd7"),
+                                      .nop = 2, .reg = dst->reg, .rm = o,
+                                      .vex = 1, .vl = o[0].size == 32));
         /* moves: vmovdqa/vmovdqu/vmovaps/vmovups (load 6f/28/10, store 7f/29/11), vmovd/vmovq */
         if (nops == 2 && (!strcmp(mn, "vmovdqa") || !strcmp(mn, "vmovdqu") ||
                           !strcmp(mn, "vmovaps") || !strcmp(mn, "vmovups") ||
@@ -178,14 +178,15 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             /* MC: a register move whose source needs VEX.B takes the store form (2-byte VEX) */
             if (!store && m->kind == XK_REG && (m->reg & 8) && !(r->reg & 8)) {
                 ops[1] = (uint8_t)(dq ? 0x7f : al ? 0x29 : 0x11);
-                return x64_emit(a,
-                                &F(.opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : 0,
-                                   .op = ops, .nop = 2, .reg = m->reg, .rm = r,
-                                   .vex = 1, .vl = r->size == 32));
+                return x64_emit_form(a, F(.opsz16 = pp == 1,
+                                          .rep = pp == 2 ? 0xf3 : 0, .op = ops,
+                                          .nop = 2, .reg = m->reg, .rm = r,
+                                          .vex = 1, .vl = r->size == 32));
             }
-            return x64_emit(a, &F(.opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : 0,
-                                  .op = ops, .nop = 2, .reg = r->reg, .rm = m,
-                                  .vex = 1, .vl = r->size == 32));
+            return x64_emit_form(a,
+                                 F(.opsz16 = pp == 1, .rep = pp == 2 ? 0xf3 : 0,
+                                   .op = ops, .nop = 2, .reg = r->reg, .rm = m,
+                                   .vex = 1, .vl = r->size == 32));
         }
         if (nops == 2 && (!strcmp(mn, "vmovd") || !strcmp(mn, "vmovq"))) {
             bool q = mn[4] == 'q';
@@ -197,22 +198,23 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
                 g->kind = XK_MEM;
             if (q && g->kind != XK_REG && tox) { /* vmovq m64, xmm: f3 0f 7e */
                 uint8_t o2[2] = {0x0f, 0x7e};
-                return x64_emit(a, &F(.rep = 0xf3, .op = o2, .nop = 2,
-                                      .reg = x->reg, .rm = g, .vex = 1));
+                return x64_emit_form(a, F(.rep = 0xf3, .op = o2, .nop = 2,
+                                          .reg = x->reg, .rm = g, .vex = 1));
             }
             if (q && g->kind != XK_REG && !tox) { /* vmovq xmm, m64: 66 0f d6 */
                 uint8_t o2[2] = {0x0f, 0xd6};
-                return x64_emit(a, &F(.opsz16 = 1, .op = o2, .nop = 2,
-                                      .reg = x->reg, .rm = g, .vex = 1));
+                return x64_emit_form(a, F(.opsz16 = 1, .op = o2, .nop = 2,
+                                          .reg = x->reg, .rm = g, .vex = 1));
             }
             if (q && g->kind == XK_REG &&
                 g->cls == XR_XMM) { /* vmovq xmm, xmm: f3 0f 7e */
                 uint8_t o2[2] = {0x0f, 0x7e};
-                return x64_emit(a, &F(.rep = 0xf3, .op = o2, .nop = 2,
-                                      .reg = o[1].reg, .rm = &o[0], .vex = 1));
+                return x64_emit_form(a,
+                                     F(.rep = 0xf3, .op = o2, .nop = 2,
+                                       .reg = o[1].reg, .rm = &o[0], .vex = 1));
             }
-            return x64_emit(a, &F(.w = q, .opsz16 = 1, .op = ops, .nop = 2,
-                                  .reg = x->reg, .rm = g, .vex = 1));
+            return x64_emit_form(a, F(.w = q, .opsz16 = 1, .op = ops, .nop = 2,
+                                      .reg = x->reg, .rm = g, .vex = 1));
         }
         /* vextracti128/vextractf128 $i, ymm, xmm/m: 66 0f3a 39/19 (reg = the ymm) */
         if (nops == 3 && o[0].kind == XK_IMM &&
@@ -258,7 +260,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
         if (nops == 4 && !strcmp(mn, "vpblendvb")) {
             uint8_t ops[3] = {0x0f, 0x3a, 0x4c};
             XForm f = F(.opsz16 = 1, .op = ops, .nop = 3, .reg = o[3].reg,
-                        .rm = &o[1], .vvvv = o[2].reg, .isz = 1, .vex = 1,
+                        .rm = &o[1], .isz = 1, .vex = 1, .vvvv = o[2].reg,
                         .vl = o[3].size == 32);
 
             if (o[1].kind == XK_EXPR)
@@ -331,10 +333,11 @@ VPRIV int x64_i_avx512(as_context *a, char *mn, XOp *o, int n)
         if (n != 2 + binary + imm)
             break;
         XOp *dst = &o[n - 1], *rm = &o[imm];
-        uint8_t bytes[] = {0x0f, ops[i].map == 2 ? 0x38 : 0x3a, ops[i].opcode};
-        XForm f = F(.op = bytes, .nop = 3, .vex = 1, .tuple = ops[i].tuple,
-                    .w = ops[i].w, .opsz16 = ops[i].prefix == 1,
-                    .rep = ops[i].prefix == 2 ? 0xf3 : 0);
+        uint8_t bytes[] = {0x0f, (uint8_t)(ops[i].map == 2 ? 0x38 : 0x3a),
+                           ops[i].opcode};
+        XForm f = F(.w = ops[i].w, .opsz16 = ops[i].prefix == 1,
+                    .rep = ops[i].prefix == 2 ? 0xf3 : 0, .op = bytes, .nop = 3,
+                    .tuple = ops[i].tuple, .vex = 1);
         if (ops[i].map == 1)
             bytes[1] = bytes[2], f.nop = 2;
         if (form == K_STORE) {

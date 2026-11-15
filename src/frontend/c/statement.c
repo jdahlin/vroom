@@ -1,4 +1,5 @@
 /* vcc front end: statements (asm statements and switch checks included) */
+#include "common/literal.h"
 #include "cc-internal.h"
 #include <ctype.h>
 
@@ -69,7 +70,8 @@ typedef struct cc_switch_case_order {
 
 static int cc_statement_case_compare(const void *ap, const void *bp)
 {
-    const cc_switch_case_order *a = ap, *b = bp;
+    const cc_switch_case_order *a = (const cc_switch_case_order *)ap,
+                               *b = (const cc_switch_case_order *)bp;
 
     if (a->v.lo != b->v.lo)
         return a->v.lo < b->v.lo ? -1 : 1;
@@ -83,12 +85,12 @@ static void cc_statement_switch_duplicates_check(cc *c)
 
     if (n <= 64)
         return;
-    a = cc_heap_allocate(c, n * sizeof(*a));
+    a = (cc_switch_case_order *)(cc_heap_allocate(c, n * sizeof(*a)));
     for (uint32_t i = 0; i < n; i++) {
         struct cc_switch_case v = c->cases[c->case_base + i];
 
         if (v.lo <= v.hi)
-            a[count++] = (cc_switch_case_order){v, i};
+            a[count++] = VCC_LITERAL(cc_switch_case_order, v, i);
     }
     qsort(a, count, sizeof(*a), cc_statement_case_compare);
     if (!count)
@@ -301,19 +303,21 @@ CC_PRIVATE uint32_t cc_asm_statement_parse(cc *c, bool toplevel)
     a = &c->asms[ai];
     a->nout = outs.n / 3;
     a->nin = ins.n / 3;
-    a->ops =
-        cc_heap_allocate(c, (a->nout + a->nin + 1) * sizeof(ast_asm_operand));
+    a->ops = (ast_asm_operand *)(cc_heap_allocate(
+        c, (a->nout + a->nin + 1) * sizeof(ast_asm_operand)));
     for (uint32_t i = 0; i < a->nout; i++)
-        a->ops[i] = (ast_asm_operand){outs.v[3 * i], outs.v[3 * i + 1],
-                                      outs.v[3 * i + 2]};
+        a->ops[i] = VCC_LITERAL(ast_asm_operand, outs.v[3 * i],
+                                outs.v[3 * i + 1], outs.v[3 * i + 2]);
     for (uint32_t i = 0; i < a->nin; i++)
-        a->ops[a->nout + i] =
-            (ast_asm_operand){ins.v[3 * i], ins.v[3 * i + 1], ins.v[3 * i + 2]};
+        a->ops[a->nout + i] = VCC_LITERAL(ast_asm_operand, ins.v[3 * i],
+                                          ins.v[3 * i + 1], ins.v[3 * i + 2]);
     a->nclob = clob.n;
-    a->clob = cc_heap_allocate(c, (clob.n + 1) * sizeof(uint32_t));
+    a->clob =
+        (uint32_t *)(cc_heap_allocate(c, (clob.n + 1) * sizeof(uint32_t)));
     memcpy(a->clob, clob.v, clob.n * sizeof(uint32_t));
     a->nlabel = labs.n;
-    a->labels = cc_heap_allocate(c, (labs.n + 1) * sizeof(uint32_t));
+    a->labels =
+        (uint32_t *)(cc_heap_allocate(c, (labs.n + 1) * sizeof(uint32_t)));
     memcpy(a->labels, labs.v, labs.n * sizeof(uint32_t));
     cc_token_expect_semicolon(c, "after asm statement");
     n = cc_statement_new(c, AST_NODE_ASM, loc, ai, 0, 0);
@@ -692,9 +696,11 @@ static uint32_t cc_labeled_statement_head_parse(cc *c)
                 }
             if (c->ncase == c->capcase) {
                 c->capcase = c->capcase ? c->capcase * 2 : 64;
-                c->cases = realloc(c->cases, c->capcase * sizeof(*c->cases));
+                c->cases = (struct cc_switch_case *)(realloc(
+                    c->cases, c->capcase * sizeof(*c->cases)));
             }
-            c->cases[c->ncase++] = (struct cc_switch_case){lo, hi, vloc};
+            c->cases[c->ncase++] =
+                VCC_LITERAL(struct cc_switch_case, lo, hi, vloc);
         }
         s = 0;
         c->ipool[c->nipool] = lo;
@@ -827,7 +833,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
             if (c->o->std != 89)
                 cc_scope_close(c);
             n = cc_statement_new(c, AST_NODE_IF, loc, cnd, th, el);
-            c->span[n] = (diag_span){loc, rp};
+            c->span[n] = VCC_LITERAL(diag_span, loc, rp);
             return n;
         }
     }
@@ -1018,6 +1024,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
         cc_token_expect_semicolon(c, "after continue statement");
         return cc_statement_new(c, AST_NODE_CONTINUE, loc, 0, 0, 0);
     case KW_return: {
+        static const char *const return_group[] = {"return-type", NULL};
         uint32_t e = 0;
         ast_qualified_type rt = c->fn ? AST_TYPE(c, c->syms[c->fn].ty)->base
                                       : cc_type_basic(AST_TYPE_INT);
@@ -1048,8 +1055,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
                 diag_span r = cc_node_range(c, e);
 
                 cc_report_flag_error(
-                    c, "return-mismatch",
-                    (const char *const[]){"return-type", NULL}, loc, &r, 1,
+                    c, "return-mismatch", return_group, loc, &r, 1,
                     "void function '%.*s' should not return a value",
                     CC_IDENTIFIER(c->syms[c->fn].name));
             } else if (cc_type_is_void(c, rt) && c->fn) /* (clang -pedantic) */
@@ -1059,8 +1065,7 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
                     CC_IDENTIFIER(c->syms[c->fn].name));
         } else if (c->fn && !cc_type_is_void(c, rt) && !c->o->implicit_int) {
             cc_report_flag_error(
-                c, "return-mismatch",
-                (const char *const[]){"return-type", NULL}, loc, NULL, 0,
+                c, "return-mismatch", return_group, loc, NULL, 0,
                 "non-void function '%.*s' should return a value",
                 CC_IDENTIFIER(c->syms[c->fn].name));
         }

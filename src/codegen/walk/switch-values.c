@@ -7,6 +7,7 @@
  * least three free temporaries.  The eligibility itself is the shared proof's, in
  * em_switch_values_plan.
  */
+#include "common/literal.h"
 #include "walk.h"
 
 VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n)
@@ -41,12 +42,13 @@ VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n)
                             codegen_value_constant(shift));
     codegen_lvalue table = {
         .kind = CODEGEN_LVALUE_SYMBOL,
-        .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE, n),
-        .align = p.element_bytes};
+        .align = p.element_bytes,
+        .reference = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE, n)};
     int base = WALK_LOWER(laddr)(e, &table);
     v = WALK_LOWER(bin)(e, LEX_TOKEN_PLUS, 8, false, v,
-                        (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                        .register_number = (uint8_t)base});
+                        VCC_LITERAL(codegen_value,
+                                    .kind = CODEGEN_VALUE_REGISTER,
+                                    .register_number = (uint8_t)base));
     codegen_lvalue at = {.kind = CODEGEN_LVALUE_REGISTER,
                          .register_number = v.register_number,
                          .align = p.element_bytes};

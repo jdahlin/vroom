@@ -49,7 +49,7 @@ VPRIV void *ld_region_alloc(size_t n)
         size_t bs = n + sizeof(ld_region_block) + 16 > LD_REGION_BLOCK_SIZE
                         ? n + sizeof(ld_region_block) + 16
                         : LD_REGION_BLOCK_SIZE;
-        ld_region_block *b = ld_region_large_alloc(bs);
+        ld_region_block *b = (ld_region_block *)ld_region_large_alloc(bs);
         b->size = bs;
         {
             VLOCK(ld_region_blocks_lock);
@@ -76,7 +76,7 @@ VPRIV void ld_regions_free(void)
 VPRIV char *ld_region_string_duplicate(const char *s)
 {
     size_t n = strlen(s);
-    char *p = ld_region_alloc(n + 1);
+    char *p = (char *)ld_region_alloc(n + 1);
     memcpy(p, s, n + 1);
     return p;
 }

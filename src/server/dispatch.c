@@ -19,7 +19,8 @@ static int vccd_request_dispatch(const struct vccd_request *r,
 /* driver_mingw_link_run's linker: ld_main with the request's cwd and stderr */
 static int vccd_mingw_link(int argc, char **argv, void *ctx)
 {
-    return vccd_linker_run_in_process(ctx, argc, argv);
+    return vccd_linker_run_in_process((const struct vccd_request *)ctx, argc,
+                                      argv);
 }
 
 VPRIV int vccd_request_handle(const struct vccd_request *r, const char **kind)
@@ -203,8 +204,9 @@ static int vccd_request_dispatch(const struct vccd_request *r,
         /* vcc compiles, the backend links the object with the command's options */
         const char *in = vccd_request_input_find(r), *out = NULL,
                    *td = getenv("TMPDIR");
-        char tmp[4096], **av = malloc((size_t)(r->argc + 4) * sizeof(char *)),
-                        **lv;
+        char tmp[4096],
+            **av = (char **)(malloc((size_t)(r->argc + 4) * sizeof(char *))),
+            **lv;
         bool deps = false, mt = false;
         int n = 0, ln = 0, fd, st;
         driver_environment e = {.cwd = r->cwd,
@@ -220,7 +222,7 @@ static int vccd_request_dispatch(const struct vccd_request *r,
             goto plain;
         }
         close(fd);
-        lv = malloc((size_t)(r->argc + 1) * sizeof(char *));
+        lv = (char **)(malloc((size_t)(r->argc + 1) * sizeof(char *)));
         for (int i = 0; i < r->argc; i++) {
             const char *a = r->argv[i];
 

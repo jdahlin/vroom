@@ -13,7 +13,7 @@ VPRIV void ld_section_name_table_build(struct ld_context *ctx)
             strlen(
                 ctx->script.sections.v[ctx->layout.output_sections.v[i]].name) +
             1;
-    ctx->output.shstrtab = ld_region_alloc(cap);
+    ctx->output.shstrtab = (uint8_t *)ld_region_alloc(cap);
     size_t n = 1;
     for (uint32_t i = 0; i < ctx->layout.output_sections.n; i++) {
         ld_output_section *os =
@@ -129,7 +129,7 @@ VPRIV void ld_build_id_write(struct ld_context *ctx)
                    is->offset + 16;
     size_t hl = is->size - 16;
     size_t nchunks = (ctx->layout.file_size + (1u << 20) - 1) >> 20;
-    uint8_t *hashes = ld_region_alloc(nchunks * 20 + 32);
+    uint8_t *hashes = (uint8_t *)ld_region_alloc(nchunks * 20 + 32);
     if (!strcmp(ctx->options.build_id, "sha1") ||
         !strcmp(ctx->options.build_id, "tree")) {
         ld_build_id_job job = {ctx->output.image, ctx->layout.file_size,
@@ -138,7 +138,7 @@ VPRIV void ld_build_id_write(struct ld_context *ctx)
         vdigest_blake3(hashes, nchunks * 20, dst, hl);
     } else if (!strcmp(ctx->options.build_id, "fast")) {
         /* xxh3 of the chunk hashes (lld: --build-id=fast is xxh3_64bits per chunk) */
-        uint8_t *h8 = ld_region_alloc(nchunks * 8);
+        uint8_t *h8 = (uint8_t *)ld_region_alloc(nchunks * 8);
         for (size_t i = 0; i < nchunks; i++) {
             uint64_t b = (uint64_t)i << 20,
                      n = ctx->layout.file_size - b < (1u << 20)

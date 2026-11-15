@@ -313,7 +313,7 @@ static bool cc_bit_cast_memo_add(cc_bit_cast_state *state, uint32_t n)
         if (state->capacity > SIZE_MAX / (2 * sizeof(*state->valid)))
             return false;
         size_t capacity = state->capacity ? state->capacity * 2 : 32;
-        uint32_t *valid = calloc(capacity, sizeof(*valid));
+        uint32_t *valid = (uint32_t *)(calloc(capacity, sizeof(*valid)));
         if (!valid)
             return false;
         for (size_t i = 0; i < state->capacity; i++) {

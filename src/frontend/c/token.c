@@ -1,4 +1,5 @@
 /* vcc front end: the parser's token window over pp_token_next, and the diagnostics of a missing token */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 uint8_t cc_keyword_class[KW_END];
@@ -179,7 +180,7 @@ cc_token_expect_fail(cc *c, const char *what)
     if (n >= 3 && n <= 5 && what[0] == '\'' && what[n - 1] == '\'' &&
         c->prevloc && !(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO)) {
         uint32_t e = pp_token_end_find(c->p, c->prevloc);
-        char *s = cc_heap_allocate(c, n - 1);
+        char *s = (char *)cc_heap_allocate(c, n - 1);
         diag_fixit fx = {e, e, s, DIAG_APPLICABILITY_MAYBE};
 
         memcpy(s, what + 1, n - 2), s[n - 2] = 0;
@@ -252,14 +253,15 @@ CC_PRIVATE bool cc_token_expect_semicolon(cc *c, const char *after)
     if (c->tk[0].kind == LEX_TOKEN_COMMA || c->tk[0].kind == LEX_TOKEN_COLON) {
         /* clang's common typo: ',' or ':' for ';', replaced; parsing goes on after it */
         e = c->tk[0].loc;
-        fx = (diag_fixit){e, pp_token_end_find(c->p, e), ";",
-                          DIAG_APPLICABILITY_MACHINE};
+        fx = VCC_LITERAL(diag_fixit, e, pp_token_end_find(c->p, e), ";",
+                         DIAG_APPLICABILITY_MACHINE);
         report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
         next(c);
         return false;
     }
     e = pp_token_end_find(c->p, c->prevloc);
-    fx = (diag_fixit){e, e, ";", cc_token_semicolon_approximate(c)};
+    fx = VCC_LITERAL(diag_fixit, e, e, ";",
+                     (uint8_t)(cc_token_semicolon_approximate(c)));
     report(c, "error", e, NULL, 0, &fx, 1, "expected ';' %s", after);
     return true;
 }
@@ -314,8 +316,8 @@ CC_PRIVATE bool cc_declaration_comma_typo(cc *c)
     if (!(t->flags & LEX_TOKEN_FLAG_LINE_START) ||
         cc_token_might_be_declarator(c, t))
         return false;
-    fx = (diag_fixit){l, pp_token_end_find(c->p, l), ";",
-                      DIAG_APPLICABILITY_MACHINE};
+    fx = VCC_LITERAL(diag_fixit, l, pp_token_end_find(c->p, l), ";",
+                     DIAG_APPLICABILITY_MACHINE);
     report(c, "error", l, NULL, 0, &fx, 1,
            "expected ';' at end of declaration");
     next(c);

@@ -1,5 +1,6 @@
 /* Script symbol assignments and the address-assignment passes over output sections. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ================= script symbols and address assignment ================= */
@@ -56,7 +57,7 @@ static bool ld_script_symbol_assign(struct ld_context *ctx, ld_assignment *a,
             ld_expression_eval(ctx, a->expression));
         uint64_t val = ld_expression_value_resolve(ctx, v);
         if (insec && val < ctx->layout.dot) {
-            char *m = ld_region_alloc(160);
+            char *m = (char *)ld_region_alloc(160);
             snprintf(m, 160,
                      "unable to move location counter (0x%llx) backward to "
                      "0x%llx for section '%s'",
@@ -78,16 +79,14 @@ static bool ld_script_symbol_assign(struct ld_context *ctx, ld_assignment *a,
         ld_expression_eval(ctx, a->expression));
     ld_expression_value old = s->expression_value;
     if (ld_expression_value_is_absolute(v))
-        s->expression_value =
-            (ld_expression_value){.kind = LD_VALUE_KIND_ABSOLUTE,
-                                  .value = ld_expression_value_resolve(ctx, v),
-                                  .alignment = 1};
+        s->expression_value = VCC_LITERAL(
+            ld_expression_value, .kind = LD_VALUE_KIND_ABSOLUTE,
+            .value = ld_expression_value_resolve(ctx, v), .alignment = 1);
     else
-        s->expression_value = (ld_expression_value){
-            .kind = v.kind,
-            .index = v.index,
-            .value = ld_expression_value_section_offset(ctx, v),
-            .alignment = 1};
+        s->expression_value =
+            VCC_LITERAL(ld_expression_value, .kind = v.kind, .index = v.index,
+                        .value = ld_expression_value_section_offset(ctx, v),
+                        .alignment = 1);
     s->type = v.type;
     return old.kind != s->expression_value.kind ||
            old.index != s->expression_value.index ||
@@ -186,15 +185,16 @@ static void ld_script_symbol_add(struct ld_context *ctx, ld_assignment *a)
         ld_visibility_rank(s->visibility) > ld_visibility_rank(STV_HIDDEN))
         s->visibility = STV_HIDDEN;
     if (ld_expression_value_is_absolute(v))
-        s->expression_value = (ld_expression_value){
-            .kind = LD_VALUE_KIND_ABSOLUTE,
-            .value = v.kind != LD_VALUE_KIND_ABSOLUTE
-                         ? 0
-                         : ld_expression_value_resolve(ctx, v),
-            .alignment = 1};
+        s->expression_value =
+            VCC_LITERAL(ld_expression_value, .kind = LD_VALUE_KIND_ABSOLUTE,
+                        .value = v.kind != LD_VALUE_KIND_ABSOLUTE
+                                     ? 0
+                                     : ld_expression_value_resolve(ctx, v),
+                        .alignment = 1);
     else
-        s->expression_value = (ld_expression_value){
-            .kind = v.kind, .index = v.index, .value = 0, .alignment = 1};
+        s->expression_value =
+            VCC_LITERAL(ld_expression_value, .kind = v.kind, .index = v.index,
+                        .value = 0, .alignment = 1);
 }
 
 VPRIV void ld_symbol_assignments_process(struct ld_context *ctx)

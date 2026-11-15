@@ -1,4 +1,5 @@
 /* vcc code generator, x86-64: two-address form and the AT&T printer (x64-internal.h) */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 /* ---------------- two-address form ---------------- */
@@ -74,24 +75,21 @@ VPRIV void x64_two_address_convert(codegen_context *e)
             } else {
                 int t = X64_REGISTER_IS_XMM(i->registers[2]) ? XMM15 : R11;
 
-                o[n++] = (record){.opcode = X64_OP_MOV,
-                                  .size = 8,
-                                  .registers = {(uint8_t)t, i->registers[2],
-                                                X64_REGISTER_NONE,
-                                                X64_REGISTER_NONE}};
-                o[n++] = (record){
-                    .opcode = X64_OP_MOV,
-                    .size = 8,
+                o[n++] = VCC_LITERAL(record, .opcode = X64_OP_MOV, .size = 8,
+                                     .registers = {(uint8_t)t, i->registers[2],
+                                                   X64_REGISTER_NONE,
+                                                   X64_REGISTER_NONE});
+                o[n++] = VCC_LITERAL(
+                    record, .opcode = X64_OP_MOV, .size = 8,
                     .registers = {i->registers[0], i->registers[1],
-                                  X64_REGISTER_NONE, X64_REGISTER_NONE}};
+                                  X64_REGISTER_NONE, X64_REGISTER_NONE});
                 rhs = (uint8_t)t;
             }
         } else {
-            o[n++] =
-                (record){.opcode = X64_OP_MOV,
-                         .size = 8,
-                         .registers = {i->registers[0], i->registers[1],
-                                       X64_REGISTER_NONE, X64_REGISTER_NONE}};
+            o[n++] = VCC_LITERAL(record, .opcode = X64_OP_MOV, .size = 8,
+                                 .registers = {i->registers[0], i->registers[1],
+                                               X64_REGISTER_NONE,
+                                               X64_REGISTER_NONE});
         }
         o[n] = *i;
         o[n].registers[1] = i->registers[0];
@@ -691,7 +689,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                 objitem = codegen_item_open(e, code ? CODEGEN_ITEM_X64
                                                     : CODEGEN_ITEM_TEXT);
                 if (code) {
-                    uint32_t *h = codegen_item_room_need(e, 8);
+                    uint32_t *h = (uint32_t *)codegen_item_room_need(e, 8);
                     h[0] = s;
                     h[1] = 0;
                 }

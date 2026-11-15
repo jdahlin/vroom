@@ -2,14 +2,15 @@
  * round-up/add-correction algorithm described in Hacker's Delight ch.10 and
  * libdivide's unsigned32 generator (https://github.com/ridiculousfish/libdivide).
  * No division by a runtime value or machine-register assumptions live here. */
+#include "common/literal.h"
 #include "../codegen-internal.h"
 
 VPRIV bool em_udivconst32(uint32_t d, bool remainder, em_udivconst_recipe *r)
 {
     if (!d || !(d & (d - 1)))
         return false; /* Zero and powers of two keep their existing paths. */
-    *r =
-        (em_udivconst_recipe){.divisor = d, .bits = 32, .remainder = remainder};
+    *r = VCC_LITERAL(em_udivconst_recipe, .divisor = d, .bits = 32,
+                     .remainder = remainder);
     if (d > UINT32_C(0x80000000)) {
         r->compare = true; /* The quotient is at most one. */
         return true;
@@ -36,8 +37,8 @@ VPRIV bool em_udivconst64(uint64_t d, bool remainder, em_udivconst_recipe *r)
 {
     if (!d || !(d & (d - 1)))
         return false;
-    *r =
-        (em_udivconst_recipe){.divisor = d, .bits = 64, .remainder = remainder};
+    *r = VCC_LITERAL(em_udivconst_recipe, .divisor = d, .bits = 64,
+                     .remainder = remainder);
     if (d > (UINT64_C(1) << 63)) {
         r->compare = true;
         return true;

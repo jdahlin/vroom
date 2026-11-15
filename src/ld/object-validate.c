@@ -183,7 +183,7 @@ VPRIV bool ld_object_is_valid(struct ld_context *ctx, ld_object *o,
 
 VPRIV void ld_object_parse(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_object *o = ctx->inputs.objects.v[i];
     if (!o->file_bytes) {
         o->file_bytes = ld_file_map(ctx, o->path, &o->size);
@@ -193,7 +193,7 @@ VPRIV void ld_object_parse(void *arg, size_t i)
     }
     if (((uintptr_t)o->file_bytes & 7) && !o->mapped) {
         /* a member of a regular archive (at 4 mod 8, after its header): the headers need 8-byte alignment */
-        uint8_t *c = ld_region_alloc(o->size);
+        uint8_t *c = (uint8_t *)ld_region_alloc(o->size);
 
         memcpy(c, o->file_bytes, o->size);
         o->file_bytes = c;
@@ -244,6 +244,6 @@ VPRIV void ld_object_parse(void *arg, size_t i)
         }
     }
     if (o->symbol_count > o->first_global_index)
-        o->global_slots = ld_region_alloc(
-            (o->symbol_count - o->first_global_index) * sizeof(uint32_t));
+        o->global_slots = (uint32_t *)(ld_region_alloc(
+            (o->symbol_count - o->first_global_index) * sizeof(uint32_t)));
 }

@@ -1,5 +1,6 @@
 /* arm64 thunk pass: calls out of branch range get thunks, as lld does (a part of the ELF linker, ld/ld-internal.h) */
 
+#include "common/literal.h"
 #include "../../../ld/ld-internal.h"
 
 /* ---------------- thunk pass ---------------- */
@@ -25,7 +26,8 @@ static void a64_ld_thunk_calls_collect(struct ld_context *ctx,
             n += type == R_AARCH64_CALL26 || type == R_AARCH64_JUMP26;
         }
     }
-    d->calls = ld_region_alloc((size_t)n * sizeof(a64_ld_call) + 1);
+    d->calls = (struct a64_ld_call *)(ld_region_alloc(
+        (size_t)n * sizeof(a64_ld_call) + 1));
     d->call_count = 0;
     for (uint32_t s = 0; s < d->sections.n; s++) {
         uint32_t si = d->sections.v[s];
@@ -175,7 +177,7 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
                                 SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 4);
                             d = &ctx->script.input_descriptions.v[di];
                             VVEC_PUSH(ctx->relocations.thunk_sections,
-                                      ((a64_ld_thunk_section){0}),
+                                      (VCC_LITERAL(a64_ld_thunk_section, 0)),
                                       ld_region_alloc);
                             ctx->inputs.sections.v[ts].auxiliary_index =
                                 ctx->relocations.thunk_sections.n - 1;
@@ -196,7 +198,7 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
                             dg != LD_NONE
                                 ? ld_global_name(ctx, dg)
                                 : o->string_table + o->symbols[symi].st_name;
-                        char *nm = ld_region_alloc(strlen(dn) + 20);
+                        char *nm = (char *)(ld_region_alloc(strlen(dn) + 20));
                         sprintf(nm, "__AArch64ADRPThunk_%s", dn);
                         tn.name = nm;
                         a64_ld_thunk_section *tsx =

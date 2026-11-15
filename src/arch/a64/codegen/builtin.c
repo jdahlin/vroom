@@ -1,4 +1,5 @@
 /* vcc code generator: builtins */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /* ---------------- builtins ---------------- */
@@ -516,7 +517,8 @@ VPRIV codegen_value va_arg_(codegen_context *e, const node *x)
             al16 = size > 8;
             goto stack;
         }
-        int hn, hb = a64_abi_hfa_classify(c, t, &hn);
+        int hn, hb;
+        hb = a64_abi_hfa_classify(c, t, &hn);
 
         if (hb) {
             /* an HFA: hn v registers, copied together into a temporary */
@@ -1004,9 +1006,9 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
         for (unsigned i = 0; i < nr; i++) {
             codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
                                 .register_number = (uint8_t)rd,
+                                .align = codegen_type_alignment(c, re),
                                 .offset = (int64_t)i *
-                                          (int64_t)codegen_type_size(c, re),
-                                .align = codegen_type_alignment(c, re)};
+                                          (int64_t)codegen_type_size(c, re)};
             codegen_value v;
 
             if (x->aux == CC_BUILTIN_SHUFFLEVECTOR) {
@@ -1014,9 +1016,9 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                 codegen_lvalue s = {
                     .kind = CODEGEN_LVALUE_REGISTER,
                     .register_number = (uint8_t)(k < (int64_t)na ? ra : rb),
+                    .align = codegen_type_alignment(c, ae),
                     .offset = (k < (int64_t)na ? k : k - (int64_t)na) *
-                              (int64_t)codegen_type_size(c, ae),
-                    .align = codegen_type_alignment(c, ae)};
+                              (int64_t)codegen_type_size(c, ae)};
 
                 if (codegen_type_is_bool_vector(c, at)) {
                     int64_t j = k < (int64_t)na ? k : k - na;
@@ -1025,11 +1027,11 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                 }
                 v = k < 0 ? codegen_value_constant(0) : load(e, &s, ae);
             } else {
-                codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
-                                    .register_number = (uint8_t)ra,
-                                    .offset = (int64_t)i *
-                                              (int64_t)codegen_type_size(c, ae),
-                                    .align = codegen_type_alignment(c, ae)};
+                codegen_lvalue s = {
+                    .kind = CODEGEN_LVALUE_REGISTER,
+                    .register_number = (uint8_t)ra,
+                    .align = codegen_type_alignment(c, ae),
+                    .offset = (int64_t)i * (int64_t)codegen_type_size(c, ae)};
                 int ck = codegen_type_is_float(c, ae)
                              ? (codegen_type_is_float(c, re)
                                     ? AST_CAST_FLOAT_TO_FLOAT
@@ -1566,10 +1568,9 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
         int nanregs[2];
         for (int i = 0; i < 2; i++) {
             if (x->aux == CC_BUILTIN_ISLESSGREATER) {
-                saved[i] = (codegen_lvalue){
-                    .kind = CODEGEN_LVALUE_FRAME,
-                    .offset = a64_frame_slot_allocate(e, 16, 16),
-                    .align = 16};
+                saved[i] = VCC_LITERAL(
+                    codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 16,
+                    .offset = a64_frame_slot_allocate(e, 16, 16));
                 store(e, &saved[i], ct, &operands[i]);
             }
             toreg2(e, &operands[i], false);

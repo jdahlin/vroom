@@ -50,7 +50,7 @@ static inline bool vfile_map_fd(int fd, vfile_mapping *m, struct stat *st)
         p = mmap(NULL, st->st_size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (p == MAP_FAILED)
             return false;
-        m->p = p;
+        m->p = (const unsigned char *)p;
         m->n = st->st_size;
     }
     return true;
@@ -127,7 +127,7 @@ static inline VUSE VNONNULL_ALL void *vfile_read(int dirfd, const char *path,
         errno = saved;
         return NULL;
     }
-    data = malloc((size_t)st.st_size + 1);
+    data = (char *)(malloc((size_t)st.st_size + 1));
     if (!data) {
         close(fd);
         errno = ENOMEM;
@@ -158,7 +158,7 @@ static inline VUSE VNONNULL_ALL void *vfile_read(int dirfd, const char *path,
 
 static inline VNONNULL(2) bool vfile_write_all(int fd, const void *p, size_t n)
 {
-    const char *c = p;
+    const char *c = (const char *)p;
 
     while (n) {
         ssize_t w = write(fd, c, n);

@@ -33,8 +33,13 @@
 typedef struct fixdep_item {
     struct fixdep_item *next;
     unsigned int len, hash;
-    char name[];
+
 } fixdep_item;
+
+static inline char *fixdep_item_name(fixdep_item *p)
+{
+    return (char *)(p + 1);
+}
 
 #define FIXDEP_HASH_SIZE 256
 
@@ -55,12 +60,13 @@ static bool fixdep_table_contains(const char *name, unsigned int len,
     fixdep_item *a;
 
     for (a = tab[hash % FIXDEP_HASH_SIZE]; a; a = a->next)
-        if (a->hash == hash && a->len == len && !memcmp(a->name, name, len))
+        if (a->hash == hash && a->len == len &&
+            !memcmp(fixdep_item_name(a), name, len))
             return true;
-    a = malloc(sizeof(*a) + len);
+    a = (fixdep_item *)(malloc(sizeof(*a) + len));
     if (!a)
         abort();
-    memcpy(a->name, name, len);
+    memcpy(fixdep_item_name(a), name, len);
     a->len = len;
     a->hash = hash;
     a->next = tab[hash % FIXDEP_HASH_SIZE];
@@ -307,7 +313,7 @@ static char *fixdep_file_read(const char *cwd, const char *path, char *abs,
     fd = open(abs, O_RDONLY);
     if (fd < 0)
         return NULL;
-    if (fstat(fd, &st) || !(buf = malloc((size_t)st.st_size + 1))) {
+    if (fstat(fd, &st) || !(buf = (char *)(malloc((size_t)st.st_size + 1)))) {
         close(fd);
         return NULL;
     }

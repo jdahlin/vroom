@@ -84,7 +84,7 @@ VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o,
 
 static void ld_input_section_final_address_set(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_input_section *is = &ctx->inputs.sections.v[i];
     uint32_t os = ld_input_section_output_section(ctx, i);
     ctx->relocations.final_section_addresses[i] =
@@ -96,7 +96,7 @@ static void ld_input_section_final_address_set(void *arg, size_t i)
 }
 static void ld_global_symbol_final_address_set(void *arg, size_t g)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_global_symbol *s = &ctx->symbols.globals[g];
     s->is_undefined = s->state == LD_SYMBOL_STATE_UNDEFINED || s->demoted;
     if (!s->is_undefined) {
@@ -106,8 +106,8 @@ static void ld_global_symbol_final_address_set(void *arg, size_t g)
 }
 VPRIV void ld_final_addresses_compute(struct ld_context *ctx)
 {
-    ctx->relocations.final_section_addresses =
-        ld_region_alloc((size_t)ctx->inputs.sections.n * sizeof(uint64_t));
+    ctx->relocations.final_section_addresses = (uint64_t *)(ld_region_alloc(
+        (size_t)ctx->inputs.sections.n * sizeof(uint64_t)));
     ld_parallel_for(ctx->inputs.sections.n, ld_input_section_final_address_set,
                     ctx);
     ld_parallel_for(atomic_load(&ctx->symbols.count),

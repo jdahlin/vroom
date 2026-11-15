@@ -35,8 +35,8 @@ VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b,
 		 * function probes is as large as it needs, not as the largest one seen needed */
         uint32_t oc = V->variable_entry_capacity,
                  nc = oc ? oc * 2 : VIRBUILD_VARIABLE_TABLE_INITIAL, n = 0;
-        virbuild_variable_entry *live =
-            malloc(((size_t)V->variable_entry_count + 1) * sizeof *live);
+        virbuild_variable_entry *live = (virbuild_variable_entry *)(malloc(
+            ((size_t)V->variable_entry_count + 1) * sizeof *live));
 
         if (!live)
             virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
@@ -45,7 +45,8 @@ VPRIV uint32_t *virbuild_variable_slot(codegen_context *e, uint32_t b,
                 live[n++] = V->variable_entries[i];
         if (nc > V->variable_entry_allocated) {
             free(V->variable_entries);
-            V->variable_entries = calloc(nc, sizeof *V->variable_entries);
+            V->variable_entries = (virbuild_variable_entry *)calloc(
+                nc, sizeof *V->variable_entries);
             if (!V->variable_entries) {
                 V->variable_entry_capacity = V->variable_entry_allocated = 0;
                 free(live);

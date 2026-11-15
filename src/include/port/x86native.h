@@ -7,6 +7,7 @@
  */
 #ifndef VCC_PORT_X86NATIVE_H
 #define VCC_PORT_X86NATIVE_H
+#include "common/literal.h"
 #include "arch/x64/x86features.h"
 /* Injectable reads let tests exercise missing leaves and OS-save masks without
  * executing unsupported instructions on the test machine. Return true on error. */
@@ -70,7 +71,7 @@ static inline bool x86_native_detect(const x86_native_io *io,
         name = "";
         x86_cpu_features("x86-64", features);
     }
-    *disabled = (x86_features){{0}};
+    *disabled = VCC_LITERAL(x86_features, {0});
     for (unsigned i = 0;
          i < sizeof(x86_native_known) / sizeof(*x86_native_known); i++) {
         unsigned bit = x86_native_known[i];

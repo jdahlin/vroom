@@ -9,6 +9,7 @@
  * as_directive_dispatch calls as_directive_coff first for a COFF object (a->object->format); it returns
  * 1 when it took the directive (its result in *rc), 0 to let the common directives run.  The state is
  * the open .def (a->coff_symbol_definition), reset by as_begin. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 static as_text as_coff_word(const char *p, const char *e)
@@ -16,7 +17,7 @@ static as_text as_coff_word(const char *p, const char *e)
     const char *s = p;
     while (p < e && (as_char_is_identifier((unsigned char)*p) || *p == '@'))
         p++;
-    return (as_text){s, (uint32_t)(p - s)};
+    return VCC_LITERAL(as_text, s, (uint32_t)(p - s));
 }
 
 static int as_coff_end_check(as_context *a, const char *p, const char *e)
@@ -631,7 +632,8 @@ VPRIV int as_directive_coff(as_context *a, as_text w, const char *p,
     size_t n = w.length - 1;
 #define IS(x) (n == sizeof(x) - 1 && !memcmp(d, x, n))
     if (n > 4 && !memcmp(d, "seh_", 4)) {
-        *rc = as_coff_seh(a, (as_text){d + 4, (uint32_t)(n - 4)}, p, e);
+        *rc = as_coff_seh(a, VCC_LITERAL(as_text, d + 4, (uint32_t)(n - 4)), p,
+                          e);
         return 1;
     }
     if (IS("def")) {

@@ -10,6 +10,7 @@
 #ifndef VCC_PORT_PERFORMANCE_COUNTERS_H
 #define VCC_PORT_PERFORMANCE_COUNTERS_H
 
+#include "common/literal.h"
 #include <stdint.h>
 
 typedef struct vperf {
@@ -50,7 +51,7 @@ static int vperformance_linux_key_error;
 
 static void vperformance_linux_close(void *p)
 {
-    vperformance_linux_group *g = p;
+    vperformance_linux_group *g = (vperformance_linux_group *)p;
 
     if (g->cycles >= 0)
         close(g->cycles);
@@ -75,7 +76,7 @@ static inline vperf vperformance_now(void)
         pthread_once(&vperformance_linux_once, vperformance_linux_key_init);
         if (vperformance_linux_key_error ||
             pthread_setspecific(vperformance_linux_key, &g))
-            return (vperf){0, 0};
+            return VCC_LITERAL(vperf, 0, 0);
         memset(&a, 0, sizeof a);
         a.size = sizeof a;
         a.type = PERF_TYPE_HARDWARE;
@@ -97,8 +98,8 @@ static inline vperf vperformance_now(void)
     uint64_t v[3] = {0, 0, 0}; /* nr, instructions, cycles */
 
     if (g.leader < 0 || read(g.leader, v, sizeof v) != (ssize_t)sizeof v)
-        return (vperf){0, 0};
-    return (vperf){v[1], v[2]};
+        return VCC_LITERAL(vperf, 0, 0);
+    return VCC_LITERAL(vperf, v[1], v[2]);
 }
 
 #else
@@ -110,7 +111,7 @@ static inline vperf vperformance_now(void)
 
 static inline vperf vperformance_subtract(vperf a, vperf b)
 {
-    return (vperf){a.ins - b.ins, a.cyc - b.cyc};
+    return VCC_LITERAL(vperf, a.ins - b.ins, a.cyc - b.cyc);
 }
 
 #endif

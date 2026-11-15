@@ -18,6 +18,7 @@
  * returned to the caller with nothing changed; epilogue directives are checked and otherwise ignored
  * (version 1 has no epilogue codes).  Chained unwind information and version 2 are not written.
  */
+#include "common/literal.h"
 #include "../../obj/objimpl.h"
 
 #define SEH_NO_FRAME ".seh_ directive must appear within an active frame"
@@ -47,8 +48,8 @@ const char *coff_seh_proc(ElfObj *o, uint32_t function_sym, uint32_t label)
     CoffState *c = coff_state(o);
     if (c->current >= 0)
         return "Starting a function before ending the previous one!";
-    c->frames = coff_grow(o, c->frames, c->frame_count, &c->frame_capacity,
-                          sizeof *c->frames);
+    c->frames = (CoffSehFrame *)coff_grow(
+        o, c->frames, c->frame_count, &c->frame_capacity, sizeof *c->frames);
     CoffSehFrame *f = &c->frames[c->frame_count];
     memset(f, 0, sizeof *f);
     f->function = function_sym;
@@ -64,10 +65,10 @@ static void coff_seh_code(ElfObj *o, CoffSehFrame *f, int op, uint32_t label,
                           unsigned reg, uint64_t offset)
 {
     CoffState *c = o->coff;
-    c->codes = coff_grow(o, c->codes, c->code_count, &c->code_capacity,
-                         sizeof *c->codes);
+    c->codes = (CoffSehCode *)coff_grow(o, c->codes, c->code_count,
+                                        &c->code_capacity, sizeof *c->codes);
     c->codes[c->code_count++] =
-        (CoffSehCode){(uint8_t)op, (uint8_t)reg, label, offset};
+        VCC_LITERAL(CoffSehCode, (uint8_t)op, (uint8_t)reg, label, offset);
     f->count++;
 }
 
@@ -211,10 +212,10 @@ static uint32_t coff_seh_table_section(ElfObj *o, uint32_t text, int pdata)
     if (text == elf_find_section(o, ".text", 5, 0))
         return coff_section(o, base, 6, flags, 0, 0);
     if (t->flags & COFF_SCN_LNK_COMDAT) {
-        const char *dollar = memchr(t->name, '$', t->len);
+        const char *dollar = (const char *)memchr(t->name, '$', t->len);
         uint32_t k =
             dollar ? (uint32_t)(t->len - (uint32_t)(dollar + 1 - t->name)) : 0;
-        char *n = rpush(&o->arena, 8 + k, 1);
+        char *n = (char *)rpush(&o->arena, 8 + k, 1);
         memcpy(n, base, 6);
         n[6] = '$';
         if (k)
@@ -244,7 +245,7 @@ static void coff_seh_offset(ElfObj *o, uint32_t frag, uint32_t label,
     uint64_t at = elf_frag(o, frag)->size;
     uint8_t *p = elf_grow(o, frag, 1);
     *p = 0;
-    elf_fixup(o, frag, at, p, R_X86_64_8, (ElfVal){label, begin, 0});
+    elf_fixup(o, frag, at, p, R_X86_64_8, VCC_LITERAL(ElfVal, label, begin, 0));
 }
 
 static void coff_seh_rva(ElfObj *o, uint32_t frag, uint32_t sym)
@@ -252,7 +253,8 @@ static void coff_seh_rva(ElfObj *o, uint32_t frag, uint32_t sym)
     uint64_t at = elf_frag(o, frag)->size;
     uint8_t *p = elf_grow(o, frag, 4);
     memset(p, 0, 4);
-    elf_fixup(o, frag, at, p, R_VCC_COFF_IMGREL32, (ElfVal){sym, 0, 0});
+    elf_fixup(o, frag, at, p, R_VCC_COFF_IMGREL32,
+              VCC_LITERAL(ElfVal, sym, 0, 0));
 }
 
 static unsigned coff_seh_slots(const CoffSehCode *k)

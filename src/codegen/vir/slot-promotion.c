@@ -1,6 +1,7 @@
 /* Frame slots to variables: a slot whose address does not escape becomes SSA values. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -147,8 +148,8 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
 
     if (!V->slot_count)
         return false;
-    sf = virbuild_pass_scratch_get(
-        e, ((uint64_t)V->slot_count + np0) * sizeof *sf + V->slot_count);
+    sf = (uint32_t *)(virbuild_pass_scratch_get(
+        e, ((uint64_t)V->slot_count + np0) * sizeof *sf + V->slot_count));
     fof = sf + V->slot_count;
     bad = (uint8_t *)(fof + np0);
     memset(sf, 0, (size_t)V->slot_count * sizeof *sf);
@@ -214,8 +215,9 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
                 continue;
             }
             VIRBUILD_ARRAY_GROW(ms, nms, cms, 1);
-            ms[nms] = (struct virbuild_promote_memset){
-                i, s, virbuild_promote_relative_offset(&V->insns[a]), len};
+            ms[nms] = VCC_LITERAL(
+                struct virbuild_promote_memset, i, s,
+                virbuild_promote_relative_offset(&V->insns[a]), len);
             fof[i] = UINT32_MAX - nms++; /* (a memset: its index in ms) */
             continue;
         }
@@ -250,7 +252,8 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             VIRBUILD_ARRAY_GROW(fnx, nf, cfnx, 1);
             fnx[nf] = sf[s];
             sf[s] = nf + 1;
-            fd[nf++] = (virbuild_promote_field){s, rel, size, VIR_TYPE_VOID};
+            fd[nf++] = VCC_LITERAL(virbuild_promote_field, s, rel, size,
+                                   VIR_TYPE_VOID);
         }
         if (ty != VIR_TYPE_VOID) {
             if (fd[k].type != VIR_TYPE_VOID && fd[k].type != ty) {
@@ -338,7 +341,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
     for (uint32_t k = 0; k < nf; k++)
         V->variable_types[var0 + k] = (uint8_t)fd[k].type;
     V->promoted_count += nf;
-    cur = malloc((size_t)nf * 2 * sizeof *cur);
+    cur = (uint32_t *)(malloc((size_t)nf * 2 * sizeof *cur));
     if (!cur)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
     cst = cur + nf;

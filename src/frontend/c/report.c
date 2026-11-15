@@ -183,7 +183,8 @@ CC_PRIVATE void cc_report_runtime(cc *c, diag_record *d)
     }
     if (c->nrtq == c->rtqcap) {
         c->rtqcap = c->rtqcap ? c->rtqcap * 2 : 8;
-        c->rtq = realloc(c->rtq, c->rtqcap * sizeof(diag_record *));
+        c->rtq = (diag_record **)(realloc(c->rtq,
+                                          c->rtqcap * sizeof(diag_record *)));
     }
     c->rtq[c->nrtq++] = d;
 }
@@ -397,7 +398,7 @@ cc_report_runtime_defer(cc *c, const char *flag, const char *const *groups,
     diag_record_flag_set(d, flag);
     d->werror = lv == DIAG_LEVEL_ERROR;
     if (ms) { /* (a copy: the record waits for the body's end) */
-        char *m = cc_heap_allocate(c, mlen + 1);
+        char *m = (char *)cc_heap_allocate(c, mlen + 1);
 
         memcpy(m, ms, mlen), m[mlen] = 0;
         diag_record_macro_set(d, m, mlen);

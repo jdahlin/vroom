@@ -607,7 +607,7 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
                                 const uint8_t *lval, uint32_t nargs,
                                 bool operator_call, uint8_t *verdict)
 {
-    static const uint8_t none[16];
+    static const uint8_t none[16] = {0};
     cxx_entity *first = NULL;
     uint32_t viable = 0;
     uint8_t skip_explicit = c->skip_explicit;

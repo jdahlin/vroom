@@ -1,4 +1,5 @@
 /* vcc preprocessor: #embed (C23) and __has_embed: parameters, search, the file's bytes as integer literals */
+#include "common/literal.h"
 #include <errno.h>
 #include "pp-internal.h"
 #include "port/file.h"
@@ -44,8 +45,8 @@ static bool pp_embed_tokens_read(pp *p, const ptok **out, uint32_t *n, bool exp)
             buf[k++] = t;
     }
     {
-        ptok *c =
-            varena_alloc(&p->temporary_region, (k ? k : 1) * sizeof(ptok));
+        ptok *c = (ptok *)(varena_alloc(&p->temporary_region,
+                                        (k ? k : 1) * sizeof(ptok)));
 
         memcpy(c, buf, k * sizeof(ptok));
         *out = c, *n = k;
@@ -332,7 +333,7 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
             vfile_unmap(&raw_);
             return;
         }
-        o = w = varena_alloc(&p->temporary_region, nt * sizeof(ptok));
+        o = w = (ptok *)(varena_alloc(&p->temporary_region, nt * sizeof(ptok)));
         if (on) {
             if (m.prefix_count) /* no prefix: m.pre is NULL, and memcpy's arguments are nonnull */
                 memcpy(w, m.prefix, m.prefix_count * sizeof(ptok)),
@@ -341,16 +342,14 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
                 unsigned char v = raw_.p[ob + i];
 
                 if (i) {
-                    *w++ = (ptok){",", 1, 0, loc, LEX_TOKEN_COMMA, 0, 0};
+                    *w++ = VCC_LITERAL(ptok, ",", 1, 0, loc, LEX_TOKEN_COMMA, 0,
+                                       0);
                 }
-                *w++ =
-                    (ptok){pp_embed_digit_spellings + 4 * v,
-                           (uint32_t)strlen(pp_embed_digit_spellings + 4 * v),
-                           0,
-                           loc,
-                           LEX_TOKEN_NUMBER,
-                           (uint8_t)(i ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0),
-                           0};
+                *w++ = VCC_LITERAL(
+                    ptok, pp_embed_digit_spellings + 4 * v,
+                    (uint32_t)strlen(pp_embed_digit_spellings + 4 * v), 0, loc,
+                    LEX_TOKEN_NUMBER,
+                    (uint8_t)(i ? LEX_TOKEN_FLAG_SPACE_BEFORE : 0), 0);
             }
             w[-1].flags |= PP_TOKEN_FLAG_EMBED_END;
             if (m.suffix_count)

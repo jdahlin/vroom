@@ -157,7 +157,7 @@ CC_PRIVATE void cc_function_body_fold(cc *c, uint32_t sym0, uint32_t node0)
     }
     if (!query)
         return;
-    uint8_t *stable = calloc(nsym, 1);
+    uint8_t *stable = (uint8_t *)calloc(nsym, 1);
     if (!stable)
         return;
     for (uint32_t i = sym0; i < nsym; i++) {

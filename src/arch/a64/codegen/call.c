@@ -72,7 +72,7 @@ static void unpark(codegen_context *e, a64_call_argument *a)
         a->value = codegen_value_register(r);
     } else {
         codegen_lvalue l = {
-            .kind = CODEGEN_LVALUE_FRAME, .offset = a->slot, .align = 8};
+            .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = a->slot};
 
         a->value = load(e, &l, a->type);
     }
@@ -753,8 +753,8 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s,
         return F.constant;
     {
         codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                            .offset = F.return_slot,
-                            .align = codegen_type_alignment(c, rty)};
+                            .align = codegen_type_alignment(c, rty),
+                            .offset = F.return_slot};
 
         res = load(e, &l, rty);
     }
@@ -892,7 +892,8 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     bool noret = false, inl;
 
     /* more than MAXARGS (psql's sql_help.c passes ~260): on the heap */
-    if (na > MAXARGS && !(args = malloc((size_t)na * sizeof(*args))))
+    if (na > MAXARGS &&
+        !(args = (a64_call_argument *)(malloc((size_t)na * sizeof(*args)))))
         codegen_fatal_report(e, x->loc, "out of memory");
     if (s) {
         const sym *y = &c->syms[s];

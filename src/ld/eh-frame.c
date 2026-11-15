@@ -1,5 +1,6 @@
 /* Merging .eh_frame input into one output section as lld's EhFrameSection does: CIE/FDE splitting, deduplication and pieces. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- .eh_frame (lld's EhFrameSection) ---------------- */
@@ -62,7 +63,7 @@ VPRIV ld_eh_frame_record *ld_eh_frame_records_split(struct ld_context *ctx,
         e.end_relocation = r;
         if (n == cap) {
             cap = cap ? 2 * cap : 16;
-            v = realloc(v, cap * sizeof *v);
+            v = (ld_eh_frame_record *)realloc(v, cap * sizeof *v);
         }
         v[n++] = e;
         off += e.size;
@@ -149,11 +150,11 @@ static uint32_t ld_eh_frame_record_section_make(struct ld_context *ctx,
     uint32_t p = ld_input_section_create(ctx, src.name, LD_SECTION_KIND_NORMAL,
                                          src.type, src.flags, 1);
     ld_input_section *is = &ctx->inputs.sections.v[p];
-    elf_rela *rl =
-        e->end_relocation > e->first_relocation
-            ? ld_region_alloc((e->end_relocation - e->first_relocation) *
-                              sizeof(elf_rela))
-            : NULL;
+    elf_rela *rl = (elf_rela *)(e->end_relocation > e->first_relocation
+                                    ? ld_region_alloc((e->end_relocation -
+                                                       e->first_relocation) *
+                                                      sizeof(elf_rela))
+                                    : NULL);
 
     for (uint32_t k = e->first_relocation; k < e->end_relocation; k++) {
         rl[k - e->first_relocation] = src.rela[k];
@@ -245,9 +246,10 @@ VPRIV void ld_eh_frame_merge(struct ld_context *ctx)
                 if (c == ncie) {
                     if (ncie == capc) {
                         capc = capc ? 2 * capc : 8;
-                        cies = realloc(cies, capc * sizeof *cies);
+                        cies = (struct Cie *)realloc(cies, capc * sizeof *cies);
                     }
-                    cies[ncie++] = (struct Cie){.sec = si, .rec = *ce};
+                    cies[ncie++] =
+                        VCC_LITERAL(struct Cie, .sec = si, .rec = *ce);
                 }
                 uint32_t p = ld_eh_frame_record_section_make(ctx, si, &rec[r]);
 
@@ -279,7 +281,7 @@ VPRIV void ld_eh_frame_merge(struct ld_context *ctx)
         }
         {
             /* lld: a zero-length CIE as the terminator glibc expects; the section word aligned */
-            static const uint8_t zero4[4];
+            static const uint8_t zero4[4] = {0};
             ld_eh_frame_record t = {.size = 4};
             uint32_t tp =
                 ld_eh_frame_record_section_make(ctx, id->sections.v[first], &t);

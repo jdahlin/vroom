@@ -64,9 +64,9 @@ static bool pp_macro_arguments_collect_inner(pp *p, const pp_macro *m,
     a->variadic_elided = false;
     /* pre, then st, ln, preln, then prest: one allocation */
     {
-        char *b = varena_alloc(
+        char *b = (char *)(varena_alloc(
             &p->temporary_region,
-            slots * (sizeof(*a->preexpanded) + 3 * sizeof(uint32_t) + 1));
+            slots * (sizeof(*a->preexpanded) + 3 * sizeof(uint32_t) + 1)));
 
         a->preexpanded = (const ptok **)b;
         a->starts = (uint32_t *)(b + slots * sizeof(*a->preexpanded));
@@ -406,7 +406,7 @@ static void pp_macro_argument_stringify(pp *p, const ptok *t, uint32_t n,
     uint16_t runs[64];
     uint32_t roff[64], nr = 0;
 
-    b = w = varena_alloc(&p->temporary_region, cap + 16);
+    b = w = (char *)varena_alloc(&p->temporary_region, cap + 16);
     *w++ = '"';
     for (uint32_t i = 0; i < n; i++) {
         uint16_t rc = unlikely(t[i].ctr) && p->recording.on ? t[i].ctr : 0;
@@ -683,7 +683,8 @@ static bool pp_paste_is_valid(const ptok *l, const ptok *r)
 
 static ptok pp_paste_tokens(pp *p, const ptok *l, const ptok *r)
 {
-    char *b = varena_alloc(&p->temporary_region, l->len + r->len + 24), *w;
+    char *b = (char *)varena_alloc(&p->temporary_region, l->len + r->len + 24),
+         *w;
     ptok t = *l;
     int k;
     uint32_t ll;
@@ -995,7 +996,7 @@ static void pp_macro_body_substitute_simple(pp *p, const pp_macro *m,
                 p->line_start_context_depth != p->context_depth;
         return;
     }
-    r = w = varena_alloc(&p->temporary_region, n * sizeof(ptok));
+    r = w = (ptok *)(varena_alloc(&p->temporary_region, n * sizeof(ptok)));
     for (uint32_t i = 0; i < nb; i++) {
         const lex_token *cur = &body[i];
         uint32_t k = pidx ? pidx[i] : 0;

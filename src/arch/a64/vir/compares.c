@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: compares, their conditions and the branches that read them (cmp, ccmp, cbz, tbz, folds into a branch). */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 VPRIV const uint8_t a64_vir_integer_condition_codes[10] = {
@@ -167,9 +168,9 @@ VPRIV a64_vir_condition a64_vir_branch_condition_get(a64_vir_context *L,
         L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
         return c;
     }
-    return (a64_vir_condition){A64_CONDITION_NE,
-                               a64_vir_operand_general_register(L, 0, R_X16),
-                               a64_vir_value_is_64_bit(L->function, in->a), -1};
+    return VCC_LITERAL(a64_vir_condition, A64_CONDITION_NE,
+                       a64_vir_operand_general_register(L, 0, R_X16),
+                       a64_vir_value_is_64_bit(L->function, in->a), -1);
 }
 
 VPRIV void a64_vir_branch_conditional_emit(codegen_context *e,

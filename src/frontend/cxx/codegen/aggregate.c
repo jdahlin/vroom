@@ -270,7 +270,7 @@ VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt,
     cc *a = c->ast;
     ast_qualified_type lt = cc_type_basic(AST_TYPE_LONG), et, pt;
     uint32_t arr = 0, il, begin, size;
-    cc_id_list *saved = c->gen_block;
+    cc_id_list *saved = (cc_id_list *)c->gen_block;
     ast_qualified_type types[CXX_MAX_ARGS];
     uint8_t lvals[CXX_MAX_ARGS];
     uint32_t types_n =

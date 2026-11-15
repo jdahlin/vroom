@@ -1,4 +1,5 @@
 /* C++ code generation: members, this, the symbols of functions and variables (their mangled names) */
+#include "common/literal.h"
 #include "codegen.h"
 
 /* base.name or base->name, a data member */
@@ -100,11 +101,11 @@ VPRIV uint32_t cxx_gen_text(cxx *c, const char *text)
 {
     cc *a = c->ast;
     size_t n = strlen(text);
-    char *keep = cc_heap_allocate(a, n + 1);
+    char *keep = (char *)cc_heap_allocate(a, n + 1);
     uint32_t si = a->nstr++;
 
     memcpy(keep, text, n + 1);
-    a->strs[si] = (cstr){keep, (uint32_t)n + 1, 1, LEX_TOKEN_STRING};
+    a->strs[si] = VCC_LITERAL(cstr, keep, (uint32_t)n + 1, 1, LEX_TOKEN_STRING);
     return si;
 }
 
@@ -174,7 +175,7 @@ VPRIV bool cxx_gen_name_defined(cxx *c, const char *nm)
         uint32_t ocap = c->cgen_names, ncap = ocap ? ocap * 2 : 1024;
         char **old = c->gen_names;
 
-        c->gen_names = calloc(ncap, sizeof *c->gen_names);
+        c->gen_names = (char **)calloc(ncap, sizeof *c->gen_names);
         c->cgen_names = ncap, c->ngen_names = 0;
         for (uint32_t k = 0; k < ocap; k++)
             if (old[k])
@@ -204,13 +205,14 @@ VPRIV uint32_t cxx_gen_symbol_named(cxx *c, const char *name, uint32_t s)
         void *old = c->sym_names;
         uint32_t ocap = c->csym_names;
 
-        c->sym_names = calloc(ncap, sizeof *c->sym_names);
+        c->sym_names =
+            (__typeof__(c->sym_names))calloc(ncap, sizeof *c->sym_names);
         c->csym_names = ncap, c->nsym_names = 0;
         for (uint32_t k = 0; k < ocap; k++) {
             struct {
                 const char *name;
                 uint32_t sym;
-            } *o = old;
+            } *o = (__typeof__(o))old;
 
             if (o[k].name)
                 cxx_gen_symbol_named(c, o[k].name, o[k].sym);

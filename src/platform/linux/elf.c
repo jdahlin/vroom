@@ -18,6 +18,7 @@
  * the way StringTableBuilder does (strings sorted by reversed spelling,
  * descending; a string that ends the previous one shares its bytes).
  */
+#include "common/literal.h"
 #include "../../obj/objimpl.h"
 #include "common/string-table.h"
 
@@ -102,7 +103,7 @@ VPRIV void elf_reloc(ElfObj *o, Out *w, ElfFix *x, uint64_t P, uint32_t type,
 static void build_strtab(ElfObj *o, Out *w, vstring_ref *v, uint32_t n)
 {
     uint32_t size = vstring_table_layout(v, n, 1);
-    uint8_t *t = rpush(&o->arena, size, 8);
+    uint8_t *t = (uint8_t *)rpush(&o->arena, size, 8);
 
     t[0] = 0;
     vstring_table_fill(t, v, n, 0);
@@ -123,12 +124,12 @@ size_t elf_finish(ElfObj *o)
 {
     if (o->format == OBJ_COFF)
         return coff_finish(o);
-    Out *w = rpush(&o->arena, sizeof *w, 8);
+    Out *w = (Out *)rpush(&o->arena, sizeof *w, 8);
     *w = out_of(o);
     o->fin = w;
     elf_layout(o);
     /* fixups, in layout order */
-    w->rel = rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8);
+    w->rel = (Rel *)(rpush(&o->arena, sizeof(Rel) * (o->nfix + 1), 8));
     ElfFix *fx = (ElfFix *)o->fixes.base;
     ELF_EACH_FIXUP_IN_LAYOUT(o, fx, i)
     elf_resolve(o, w, &fx[i]);
@@ -141,7 +142,7 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
     if (o->has_err)
         return 0;
     /* relocations are already grouped by section (sections processed in order) */
-    w->relbeg = rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8);
+    w->relbeg = (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8));
     {
         uint32_t k = 0;
         for (uint32_t s = 1; s < ns; s++) {
@@ -171,7 +172,8 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
         }
     }
     /* symbol table: locals then globals, creation order */
-    w->symtab = rpush(&o->arena, sizeof(uint32_t) * o->nsym * 2, 8);
+    w->symtab =
+        (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * o->nsym * 2, 8));
     uint32_t *glob = w->symtab + o->nsym;
     uint32_t nl = 0, ng = 0;
     uint32_t *rl = (uint32_t *)o->regs.base;
@@ -223,7 +225,8 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
     w->symtab_idx = idx++;
     w->nshdr = idx;
     if (w->as_idx) { /* ULEB128 symbol indices of the listed symbols in the symbol table */
-        w->as_data = rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1);
+        w->as_data =
+            (uint8_t *)(rpush(&o->arena, 5 * (size_t)o->naddrsig + 1, 1));
         uint32_t n = 0;
         for (uint32_t i = 0; i < o->naddrsig; i++) {
             uint32_t id = o->addrsig[i];
@@ -249,28 +252,31 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
     }
     /* strings */
     uint32_t nstr = 0, cap = w->nsymtab + 2 * ns + 4;
-    vstring_ref *sv = rpush(&o->arena, sizeof(vstring_ref) * cap, 8);
-    w->secname = rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8);
+    vstring_ref *sv =
+        (vstring_ref *)(rpush(&o->arena, sizeof(vstring_ref) * cap, 8));
+    w->secname = (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * ns * 2, 8));
     w->relaname = w->secname + ns;
     uint32_t *symname =
-        rpush(&o->arena, sizeof(uint32_t) * (w->nsymtab + 1), 8);
+        (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * (w->nsymtab + 1), 8));
     for (uint32_t s = 1; s < ns; s++) {
         ElfSec *se = elf_sec(o, s);
-        sv[nstr++] = (vstring_ref){se->name, se->len, &w->secname[s]};
+        sv[nstr++] =
+            VCC_LITERAL(vstring_ref, se->name, se->len, &w->secname[s]);
         if (se->rela_idx) {
-            char *rn = rpush(&o->arena, se->len + 6, 1);
+            char *rn = (char *)rpush(&o->arena, se->len + 6, 1);
             memcpy(rn, ".rela", 5);
             memcpy(rn + 5, se->name, se->len);
             rn[se->len + 5] = 0;
-            sv[nstr++] = (vstring_ref){rn, se->len + 5, &w->relaname[s]};
+            sv[nstr++] =
+                VCC_LITERAL(vstring_ref, rn, se->len + 5, &w->relaname[s]);
         }
     }
-    sv[nstr++] = (vstring_ref){".symtab", 7, &w->symtab_name};
+    sv[nstr++] = VCC_LITERAL(vstring_ref, ".symtab", 7, &w->symtab_name);
     if (w->as_idx)
-        sv[nstr++] = (vstring_ref){".llvm_addrsig", 13, &w->as_name};
+        sv[nstr++] = VCC_LITERAL(vstring_ref, ".llvm_addrsig", 13, &w->as_name);
     if (ngroup)
-        sv[nstr++] = (vstring_ref){".group", 6, &w->group_name};
-    sv[nstr++] = (vstring_ref){".strtab", 7, &w->strtab_name};
+        sv[nstr++] = VCC_LITERAL(vstring_ref, ".group", 6, &w->group_name);
+    sv[nstr++] = VCC_LITERAL(vstring_ref, ".strtab", 7, &w->strtab_name);
     for (uint32_t k = 0; k < w->nsymtab; k++) {
         ElfSym *y = elf_symp(o, w->symtab[k]);
         if (y->flags & ESYM_SECTION) {
@@ -281,14 +287,14 @@ static size_t elf_finish_tail(ElfObj *o, Out *w)
             symname[k] = 0;
             continue;
         }
-        sv[nstr++] = (vstring_ref){y->name, y->len, &symname[k]};
+        sv[nstr++] = VCC_LITERAL(vstring_ref, y->name, y->len, &symname[k]);
     }
     build_strtab(o, w, sv, nstr);
     for (uint32_t k = 0; k < w->nsymtab; k++)
         elf_symp(o, w->symtab[k])->size_sub =
             symname[k]; /* reuse: name offset */
     /* file offsets */
-    w->secoff = rpush(&o->arena, sizeof(uint64_t) * ns * 3, 8);
+    w->secoff = (uint64_t *)(rpush(&o->arena, sizeof(uint64_t) * ns * 3, 8));
     w->relaoff = w->secoff + ns;
     w->goff = w->secoff + 2 * ns;
     uint64_t off = 64;
@@ -371,7 +377,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
         coff_emit(o, b);
         return;
     }
-    Out *w = o->fin;
+    Out *w = (Out *)o->fin;
     uint32_t ns = o->nsec;
     memset(b, 0, w->size);
     static const uint8_t ident[16] = {0x7f, 'E', 'L', 'F', 2, 1, 1, 0};
@@ -518,7 +524,7 @@ int elf_write_file(ElfObj *o, const char *path)
     size_t n = elf_finish(o);
     if (!n)
         return -1;
-    uint8_t *b = rpush(&o->arena, n, 16);
+    uint8_t *b = (uint8_t *)rpush(&o->arena, n, 16);
     elf_emit(o, b);
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) {

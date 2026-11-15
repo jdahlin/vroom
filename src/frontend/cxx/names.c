@@ -9,6 +9,7 @@
  * say otherwise.  Declarations made during a tentative parse are not
  * recorded: a tentative parse only decides, the real parse follows.
  */
+#include "common/literal.h"
 #include "cxx-internal.h"
 
 static cxx_entity cxx_dependent_entity = {.kind = CXX_ENTITY_DEPENDENT,
@@ -22,7 +23,7 @@ VPRIV cxx_entity *cxx_entity_dependent(void)
 VPRIV cxx_scope *cxx_scope_new(cxx *c, int kind, cxx_scope *parent,
                                cxx_entity *owner)
 {
-    cxx_scope *s = calloc(1, sizeof *s);
+    cxx_scope *s = (cxx_scope *)calloc(1, sizeof *s);
 
     (void)c;
     s->kind = (uint8_t)kind, s->parent = parent, s->owner = owner;
@@ -65,7 +66,7 @@ VPRIV cxx_entity *cxx_declare(cxx *c, cxx_scope *s, uint32_t name, int kind)
         uint32_t n = s->nslots;
 
         s->nslots = n ? n * 2 : 16;
-        s->slots = calloc(s->nslots, sizeof *s->slots);
+        s->slots = (cxx_entity **)calloc(s->nslots, sizeof *s->slots);
         for (uint32_t i = 0; i < n; i++)
             if (old[i])
                 *cxx_scope_find_slot(s, old[i]->name) = old[i];
@@ -78,7 +79,7 @@ VPRIV cxx_entity *cxx_declare(cxx *c, cxx_scope *s, uint32_t name, int kind)
             (kind == CXX_ENTITY_NAMESPACE || kind == CXX_ENTITY_TYPE ||
              kind == CXX_ENTITY_TEMPLATE))
             return e;
-    e = calloc(1, sizeof *e);
+    e = (cxx_entity *)calloc(1, sizeof *e);
     e->name = name, e->kind = (uint8_t)kind;
     e->ty = CXX_TY_UNKNOWN;
     e->pack_index = -1;
@@ -99,8 +100,9 @@ VPRIV void cxx_scope_use(cxx *c, cxx_scope *s, cxx_scope *used)
         if (s->used[i] == used)
             return;
     if (s->nused == s->cused)
-        s->used = realloc(s->used, (s->cused = s->cused ? s->cused * 2 : 4) *
-                                       sizeof *s->used);
+        s->used = (cxx_scope **)(realloc(
+            s->used,
+            (s->cused = s->cused ? s->cused * 2 : 4) * sizeof *s->used));
     s->used[s->nused++] = used;
 }
 
@@ -148,16 +150,16 @@ static cxx_entity *cxx_lookup_merged(cxx_scope *s, uint32_t name,
         }
     for (int k = 0; k < 2; k++)
         for (const cxx_entity *t = k ? inl : own; t; t = t->next) {
-            cxx_entity *n = malloc(sizeof *n);
+            cxx_entity *n = (cxx_entity *)malloc(sizeof *n);
 
             *n = *t;
             n->next = NULL;
             *tail = n, tail = &n->next;
         }
     if (nmerged == cmerged)
-        merged = realloc(merged, (cmerged = cmerged ? cmerged * 2 : 16) *
-                                     sizeof *merged);
-    merged[nmerged++] = (cxx_merged){s, name, own, inl, head};
+        merged = (cxx_merged *)(realloc(
+            merged, (cmerged = cmerged ? cmerged * 2 : 16) * sizeof *merged));
+    merged[nmerged++] = VCC_LITERAL(cxx_merged, s, name, own, inl, head);
     return head;
 }
 

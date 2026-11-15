@@ -222,9 +222,10 @@ VPRIV int as_directive_reloc(as_context *a, const char *p, const char *e)
                 if (k + size <= ch->used) {
                     /* llvm-mc keeps the bytes and adds the relocation; the field is not patched */
                     uint8_t keep[8];
-                    memcpy(keep, ch->data + k, size);
-                    as_reloc_fixup_add(o, f, off - at, ch->data + k, type, v);
-                    memcpy(ch->data + k, keep, size);
+                    memcpy(keep, elf_chunk_data(ch) + k, size);
+                    as_reloc_fixup_add(o, f, off - at, elf_chunk_data(ch) + k,
+                                       type, v);
+                    memcpy(elf_chunk_data(ch) + k, keep, size);
                     return 0;
                 }
                 if (k < ch->used)
@@ -378,7 +379,8 @@ VPRIV int as_directive_ascii(as_context *a, const char *p, const char *e, int z)
         char sbuf[4096],
             *buf = sbuf; /* the decoded string is no longer than its source */
         size_t n;
-        if ((size_t)(e - p) > sizeof sbuf && !(buf = malloc((size_t)(e - p))))
+        if ((size_t)(e - p) > sizeof sbuf &&
+            !(buf = (char *)(malloc((size_t)(e - p)))))
             return as_error_report(a, "out of memory");
         if (as_string_parse(a, &p, e, buf, &n)) {
             if (buf != sbuf)
@@ -678,20 +680,19 @@ VPRIV int as_directive_leb128(as_context *a, const char *p, const char *e,
             struct as_variable_item *vi = as_variable_item_add(
                 a, sgn ? AS_VARIABLE_ITEM_SLEB : AS_VARIABLE_ITEM_ULEB);
             vi->value = x;
-            goto next;
+        } else {
+            v = x.c;
+            elf_data(
+                a->object,
+                a->fragment_current); /* MC: a relaxable LEB gets no mapping symbol */
+            uint8_t t[16];
+            as_byte_span b = {t, 0};
+            if (sgn)
+                as_leb128_signed_append(&b, v);
+            else
+                as_leb128_unsigned_append(&b, (uint64_t)v);
+            memcpy(elf_grow(a->object, a->fragment_current, b.n), t, b.n);
         }
-        v = x.c;
-        elf_data(
-            a->object,
-            a->fragment_current); /* MC: a relaxable LEB gets no mapping symbol */
-        uint8_t t[16];
-        as_byte_span b = {t, 0};
-        if (sgn)
-            as_leb128_signed_append(&b, v);
-        else
-            as_leb128_unsigned_append(&b, (uint64_t)v);
-        memcpy(elf_grow(a->object, a->fragment_current, b.n), t, b.n);
-    next:
         p = as_whitespace_skip(p, e);
         if (p >= e)
             return 0;

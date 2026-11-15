@@ -201,7 +201,7 @@ VPRIV const char *pp_define_parse(const lex_token *vt, uint32_t b, uint32_t e,
          m->body[m->body_count - 1].kind == LEX_TOKEN_HASH_HASH))
         return "'##' cannot appear at either end of a macro expansion";
     if (np) {
-        pidx = mem(mc, m->body_count + 1);
+        pidx = (uint8_t *)mem(mc, m->body_count + 1);
         for (uint32_t j = 0; j < m->body_count; j++) {
             pidx[j] = 0;
             if (m->body[j].kind != LEX_TOKEN_IDENTIFIER)
@@ -230,7 +230,7 @@ VPRIV const char *pp_define_parse(const lex_token *vt, uint32_t b, uint32_t e,
 
 VPRIV void *pp_memory_permanent_allocate(void *a, size_t n)
 {
-    return varena_alloc(a, n);
+    return varena_alloc((varena *)a, n);
 }
 VPRIV void *pp_memory_shared_allocate(void *a, size_t n)
 {
@@ -248,7 +248,7 @@ static uint32_t pp_pragma_macro_name_read(const char *s, size_t n)
     if (s == e)
         return 0;
     s++;
-    q = memchr(s, '"', (size_t)(e - s));
+    q = (const char *)(memchr(s, '"', (size_t)(e - s)));
     if (!q || q == s)
         return 0;
     {
@@ -469,7 +469,7 @@ static void pp_line_directive_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
         size_t l;
         const char *s = pp_token_spell(&f, tmp, &l);
 
-        w = varena_alloc(&p->permanent_region, l + 1);
+        w = (char *)varena_alloc(&p->permanent_region, l + 1);
         m->name = w;
         for (size_t i = 1; i + 1 < l; i++) {
             if (s[i] == '\\' && i + 2 < l)
@@ -701,7 +701,7 @@ pass:
             /* clang -E re-lexes the line as tokens: one space where there was
 		 * any, and one before the end of the line if a blank or comment is */
             size_t n = 0, cap = (size_t)(l->off + l->len - f->off) + 2;
-            char *s = varena_alloc(&p->temporary_region, cap + 16);
+            char *s = (char *)varena_alloc(&p->temporary_region, cap + 16);
             const char *q = c->source + l->off + l->len;
 
             for (uint32_t i = b; i < e; i++) {

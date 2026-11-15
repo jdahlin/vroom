@@ -6,6 +6,7 @@
  * statement except the conditional directives themselves, which it hands to as_directive_conditional
  * first, so an ignored branch is never parsed and cannot report errors.  A misplaced .else or .endif
  * fails the assembly with MC's message. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- conditionals */
@@ -33,7 +34,7 @@ VPRIV as_text as_text_trim(const char *p, const char *e)
     p = as_whitespace_skip(p, e);
     while (e > p && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r'))
         e--;
-    return (as_text){p, (uint32_t)(e - p)};
+    return VCC_LITERAL(as_text, p, (uint32_t)(e - p));
 }
 
 /* .ifc/.ifnc operand: quoted string or text up to ',' */

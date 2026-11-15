@@ -31,7 +31,8 @@ static const char *vasm_file_map(const char *path, size_t *n)
     struct stat st;
     fstat(fd, &st);
     *n = (size_t)st.st_size;
-    const char *p = *n ? mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : "";
+    const char *p =
+        (const char *)(*n ? mmap(NULL, *n, PROT_READ, MAP_PRIVATE, fd, 0) : "");
     close(fd);
     return p;
 }
@@ -66,8 +67,9 @@ int main(int argc, char **argv)
     if (bench) {
         /* inputs mapped once and touched, so this measures the assembler */
         int nf = argc - first;
-        const char **ps = calloc((size_t)nf, sizeof *ps);
-        size_t *ns = calloc((size_t)nf, sizeof *ns), tin = 0, tout = 0;
+        const char **ps = (const char **)(calloc((size_t)nf, sizeof *ps));
+        size_t *ns = (size_t *)(calloc((size_t)nf, sizeof *ns)), tin = 0,
+               tout = 0;
         static uint8_t *buf;
         static size_t cap;
         volatile unsigned sink = 0;
@@ -91,7 +93,7 @@ int main(int argc, char **argv)
                 size_t k = elf_finish(o);
                 if (k > cap) {
                     cap = k * 2;
-                    buf = realloc(buf, cap);
+                    buf = (uint8_t *)realloc(buf, cap);
                 }
                 elf_emit(o, buf);
                 if (!r) {
@@ -205,7 +207,7 @@ int main(int argc, char **argv)
                     o->err[0] ? o->err : "cannot lay out the object");
             return 1;
         }
-        uint8_t *ob = malloc(on);
+        uint8_t *ob = (uint8_t *)malloc(on);
         FILE *f = fopen(out, "wb");
         if (!ob)
             return 1;

@@ -1,4 +1,5 @@
 /* vcc preprocessor: include search, entering files, #include */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 /*
@@ -27,12 +28,18 @@ struct pp_include_answer {
     uint32_t epoch; /* the cache epoch (lex.h) it was computed in */
     const lex_file *f;
     const char *path;
-    char key[]; /* includer's directory, '\0', name; zero padded to 8 */
+    /* includer's directory, '\0', name; zero padded to 8 */
 };
+
+static inline const char *
+pp_include_answer_key(const struct pp_include_answer *p)
+{
+    return (const char *)(p + 1);
+}
 
 VPRIV char *pp_string_copy(pp *p, const char *s, size_t n)
 {
-    char *d = varena_alloc(&p->permanent_region, n + 1);
+    char *d = (char *)varena_alloc(&p->permanent_region, n + 1);
 
     memcpy(d, s, n);
     d[n] = 0;
@@ -172,7 +179,7 @@ static const lex_file *pp_include_find_inner(pp *p, const pp_context *from,
     *used = (uint32_t)p->options->ndirs; /* not in any of them */
     /* frameworks: <Fw/h.h> -> DIR/Fw.framework/Headers/h.h */
     if (angled && !next) {
-        const char *sl = memchr(name, '/', nlen);
+        const char *sl = (const char *)memchr(name, '/', nlen);
 
         for (int k = 0; sl && k < p->options->nfwdirs; k++) {
             int l = snprintf(buf, sizeof(buf), "%s/%.*s.framework/Headers/%.*s",
@@ -211,7 +218,7 @@ static inline bool pp_include_answer_matches(const pp_include_answer *e,
 {
     return e->hash == h && e->signature == sig &&
            e->search_path_signature == fsig && e->mode == mode &&
-           e->key_length == kl && !memcmp(e->key, k, kl);
+           e->key_length == kl && !memcmp(pp_include_answer_key(e), k, kl);
 }
 
 /* e's answer holds for p: the directories it looked at are p's */
@@ -277,19 +284,13 @@ static void pp_include_lookup_record(pp *p, const pp_context *from,
         return;
     }
     l = &r->lookups[r->lookup_count++];
-    *l = (pp_header_cache_lookup){pp_string_copy(p, name, nlen),
-                                  from ? from->spelled_path : NULL,
-                                  f ? path : NULL,
-                                  f,
-                                  from ? from->search_directory : -1,
-                                  f ? sdir : -1,
-                                  (uint32_t)nlen,
-                                  from ? from->spelled_directory_length : 0,
-                                  angled,
-                                  next,
-                                  from && from->lex_file == &p->builtin_file,
-                                  f ? pp_include_directory_is_system(p, sdir)
-                                    : 0};
+    *l =
+        VCC_LITERAL(pp_header_cache_lookup, pp_string_copy(p, name, nlen),
+                    from ? from->spelled_path : NULL, f ? path : NULL, f,
+                    from ? from->search_directory : -1, f ? sdir : -1,
+                    (uint32_t)nlen, from ? from->spelled_directory_length : 0,
+                    angled, next, from && from->lex_file == &p->builtin_file,
+                    (uint8_t)(f ? pp_include_directory_is_system(p, sdir) : 0));
 }
 
 static const lex_file *
@@ -405,18 +406,19 @@ pp_include_find_at(pp *p, const pp_context *from, const char *name, size_t nlen,
         goto done;
     {
         size_t pl = f ? strlen(*path) : 0;
-        pp_include_answer *m = pp_shared_allocate(sizeof(*m) + kp + pl + 1);
+        pp_include_answer *m =
+            (pp_include_answer *)(pp_shared_allocate(sizeof(*m) + kp + pl + 1));
 
         m->hash = h, m->signature = sig, m->search_path_signature = fsig,
         m->key_length = (uint32_t)kl, m->mode = mode;
         m->used = used, m->used_signature = p->search_path_signatures[used],
         m->search_directory = *sdir, m->f = f;
         m->epoch = ep;
-        memcpy(m->key, kb, kp);
+        memcpy(((char *)(m + 1)), kb, kp);
         m->path = NULL;
         if (f) {
-            memcpy(m->key + kp, *path, pl + 1);
-            m->path = m->key + kp;
+            memcpy(((char *)(m + 1)) + kp, *path, pl + 1);
+            m->path = ((char *)(m + 1)) + kp;
         }
         if (stale &&
             atomic_compare_exchange_strong_explicit(
@@ -461,7 +463,7 @@ static void pp_file_entry_add(pp *p, pp_context *c, const lex_file *f,
     if (from && !strncmp(name, from, strlen(from))) {
         const char *to = p->options->prefix_to ? p->options->prefix_to : "";
         size_t fl = strlen(from), tl = strlen(to);
-        char *d = varena_alloc(&p->permanent_region, tl + nl - fl + 1);
+        char *d = (char *)varena_alloc(&p->permanent_region, tl + nl - fl + 1);
 
         memcpy(d, to, tl);
         memcpy(d + tl, name + fl, nl - fl + 1);
@@ -670,7 +672,7 @@ VPRIV void pp_file_enter(pp *p, const lex_file *f, const char *path,
         (oi < 0 || oi < (int)p->recording.levels[p->recording.level_count - 1]
                             .once_files_at_start))
         p->recording.once_marks[p->recording.once_mark_count++] =
-            (pp_header_cache_once_mark){f, oi >= 0};
+            VCC_LITERAL(pp_header_cache_once_mark, f, oi >= 0);
     if (oi >= 0) {
         if (p->options->deps)
             pp_dependency_add(p, path, sys);
@@ -811,11 +813,13 @@ VPRIV void pp_include_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
 
         if (ie->signature == p->options_signature && ie->mode == mode &&
             pp_include_answer_is_valid(p, ie) && dl < ie->key_length &&
-            !ie->key[dl] && !memcmp(ie->key, fp, dl)) {
+            !pp_include_answer_key(ie)[dl] &&
+            !memcmp(pp_include_answer_key(ie), fp, dl)) {
             pp_include_search_prefix_record(p, ie->used);
             if (unlikely(p->recording.on) && ie->used)
                 pp_include_lookup_record(
-                    p, c, ie->key + dl + 1, ie->key_length - dl - 1,
+                    p, c, pp_include_answer_key(ie) + dl + 1,
+                    ie->key_length - dl - 1,
                     c->lexed_tokens[b].kind == LEX_TOKEN_LESS,
                     kind == PP_DIRECTIVE_INCLUDE_NEXT, ie->f,
                     ie->search_directory, ie->path);

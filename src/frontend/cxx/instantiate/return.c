@@ -42,10 +42,11 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f,
         return at != UINT32_MAX ? f->done[at].ret : CXX_TY_UNKNOWN;
     if (at == UINT32_MAX) {
         if (f->ndone == f->cdone)
-            f->done =
-                realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) *
-                                     sizeof *f->done);
-        f->done[f->ndone].args = malloc((np ? np : 1) * sizeof *bind);
+            f->done = (cxx_fdone *)(realloc(
+                f->done,
+                (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done));
+        f->done[f->ndone].args =
+            (cxx_targ *)(malloc((np ? np : 1) * sizeof *bind));
         memcpy(f->done[f->ndone].args, bind, np * sizeof *bind);
         f->done[f->ndone].ret = CXX_TY_UNKNOWN,
         f->done[f->ndone].sig = CXX_TY_UNKNOWN, f->done[f->ndone].body = 0;
@@ -67,9 +68,9 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f,
         inst = f->done[at].inst;
     }
     /* what the enclosing parse still uses */
-    targs = malloc((ntargs ? ntargs : 1) * sizeof *targs);
+    targs = (cxx_targ *)(malloc((ntargs ? ntargs : 1) * sizeof *targs));
     memcpy(targs, c->targs, ntargs * sizeof *targs);
-    dp = malloc((ndp ? ndp : 1) * sizeof *dp);
+    dp = (cxx_param *)(malloc((ndp ? ndp : 1) * sizeof *dp));
     memcpy(dp, c->decl_params, ndp * sizeof *dp);
     binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, p->home, NULL);
     for (uint32_t i = 0; i < p->params->ntparams; i++)
@@ -206,12 +207,12 @@ VPRIV ast_qualified_type cxx_ftemplate_return_pack(cxx *c, cxx_ftemplate *f,
         }
     if (at == UINT32_MAX) {
         if (f->ndone == f->cdone)
-            f->done =
-                realloc(f->done, (f->cdone = f->cdone ? f->cdone * 2 : 4) *
-                                     sizeof *f->done);
+            f->done = (cxx_fdone *)(realloc(
+                f->done,
+                (f->cdone = f->cdone ? f->cdone * 2 : 4) * sizeof *f->done));
         at = f->ndone++;
         memset(&f->done[at], 0, sizeof f->done[at]);
-        f->done[at].args = malloc((nx ? nx : 1) * sizeof *acopy);
+        f->done[at].args = (cxx_targ *)(malloc((nx ? nx : 1) * sizeof *acopy));
         memcpy(f->done[at].args, acopy, nx * sizeof *acopy);
         f->done[at].n = nx + 1000; /* (apart from the fixed-length entries) */
         f->done[at].ret = CXX_TY_UNKNOWN, f->done[at].sig = CXX_TY_UNKNOWN,

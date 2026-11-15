@@ -35,9 +35,9 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
         if (values[i].kind != CODEGEN_VALUE_CONSTANT) {
             int r = walk_value_to_register(e, &values[i]);
             codegen_lvalue to = {.kind = CODEGEN_LVALUE_FRAME,
+                                 .align = 8,
                                  .offset = slots[i] =
-                                     walk_slot_temporary(e, 8, 8),
-                                 .align = 8};
+                                     walk_slot_temporary(e, 8, 8)};
 
             x64_store(e, r, &to, 8);
             walk_value_free(e, &values[i]);
@@ -47,7 +47,7 @@ VPRIV bool x64_tail_return(codegen_context *e, uint32_t expr)
         ast_qualified_type ty = N(c->lists[call->b + i])->ty;
         if (slots[i]) {
             codegen_lvalue from = {
-                .kind = CODEGEN_LVALUE_FRAME, .offset = slots[i], .align = 8};
+                .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = slots[i]};
 
             x64_load(e,
                      ms ? x64w_argreg((int)i) : x64_argument_register((int)i),

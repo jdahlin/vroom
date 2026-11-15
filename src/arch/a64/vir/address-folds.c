@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: folding an address or an index chain into the instruction that uses it. */
 
+#include "common/literal.h"
 #include "lowering-internal.h"
 
 /* ptradd i (operands collected) with a constant offset, used once, by the next
@@ -73,7 +74,8 @@ VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b,
           !a64_vir_access_is_vector(f, m);
     if (mem)
         w = VIR_INSN_FLAG_WIDTH_LOG2(m->flags);
-    *x = (a64_vir_chain){c, j, mem ? A64_VIR_CHAIN_MEM : 0, 3, 0, 0};
+    *x = VCC_LITERAL(a64_vir_chain, c, j,
+                     (uint8_t)(mem ? A64_VIR_CHAIN_MEM : 0), 3, 0, 0);
     if (j + 1 == c && j > lo && a64_vir_value_is_folded(L, j) &&
         !a64_vir_value_is_constant(f, f->insns[j].a) &&
         a64_vir_value_is_integer_constant(f, f->insns[j].b) &&
@@ -97,12 +99,9 @@ VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b,
                    ((e->flags & VIR_INSN_FLAG_MS)
                         ? K >= INT32_MIN && K <= INT32_MAX
                         : K >= 0 && K <= UINT32_MAX)) {
-            *x = (a64_vir_chain){q->a,
-                                 e->a,
-                                 A64_VIR_CHAIN_MADDL,
-                                 (e->flags & VIR_INSN_FLAG_MS) ? 6 : 2,
-                                 0,
-                                 K};
+            *x = VCC_LITERAL(a64_vir_chain, q->a, e->a, A64_VIR_CHAIN_MADDL,
+                             (uint8_t)((e->flags & VIR_INSN_FLAG_MS) ? 6 : 2),
+                             0, K);
             return true;
         }
     }
@@ -114,12 +113,10 @@ VPRIV bool a64_vir_chain_info_get(const a64_vir_context *L, uint32_t b,
         vir_sign_extend_shift_match(f, j - 1, &signed_scale) &&
         signed_scale <= 4 && !a64_vir_value_is_constant(f, f->insns[j - 1].a)) {
         bool scaled_mem = mem && signed_scale == w;
-        *x = (a64_vir_chain){j - 1,
-                             f->insns[j - 1].a,
-                             scaled_mem ? A64_VIR_CHAIN_MEM : A64_VIR_CHAIN_EXT,
-                             6,
-                             scaled_mem ? (signed_scale != 0) : signed_scale,
-                             0};
+        *x = VCC_LITERAL(
+            a64_vir_chain, j - 1, f->insns[j - 1].a,
+            (uint8_t)(scaled_mem ? A64_VIR_CHAIN_MEM : A64_VIR_CHAIN_EXT), 6,
+            (uint8_t)(scaled_mem ? (signed_scale != 0) : signed_scale), 0);
         return true;
     }
     if (j + 1 == x->first && j >= lo && a64_vir_value_is_folded(L, j) &&

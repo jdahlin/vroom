@@ -1,4 +1,5 @@
 /* C++ expressions: binary, conditional, assignment and constant expressions */
+#include "../codegen/codegen.h"
 #include "expression.h"
 
 VPRIV int cxx_binary_precedence(cxx *c, uint32_t *ntok)

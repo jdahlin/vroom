@@ -1,6 +1,7 @@
 /* The walker's lowering interface for memory: frame slots, loads and stores, locals. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -26,8 +27,9 @@ VPRIV void virbuild_slot(codegen_context *e, int64_t off, uint64_t size,
     }
     V->active_slot_count = n;
     VIRBUILD_ARRAY_GROW(V->slots, V->slot_count, V->slot_capacity, 1);
-    V->slots[V->slot_count] = (virbuild_preir_slot){
-        off, size, align ? align : 1, 0, 0, 0, VIRBUILD_BLOCK_NONE, 0, 0};
+    V->slots[V->slot_count] =
+        VCC_LITERAL(virbuild_preir_slot, off, size, align ? align : 1, 0, 0, 0,
+                    VIRBUILD_BLOCK_NONE, 0, 0);
     VIRBUILD_ARRAY_GROW(V->active_slots, V->active_slot_count,
                         V->active_slot_capacity, 1);
     V->active_slots[V->active_slot_count++] = V->slot_count++;
@@ -300,7 +302,7 @@ VPRIV void virbuild_store(codegen_context *e, int rs, const codegen_lvalue *l,
                 V->stores[i--] = V->stores[--V->store_count];
         VIRBUILD_ARRAY_GROW(V->stores, V->store_count, V->store_capacity, 1);
         V->stores[V->store_count++] =
-            (virbuild_store_entry){slot, l->offset, size, v};
+            VCC_LITERAL(virbuild_store_entry, slot, l->offset, size, v);
     } else {
         virbuild_store_table_clear(
             e, true); /* through a pointer: any exposed slot */
@@ -429,7 +431,7 @@ VPRIV bool virbuild_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
 
         if (nc > V->local_hash_allocated) {
             free(V->local_hash);
-            V->local_hash = malloc(nc * sizeof *V->local_hash);
+            V->local_hash = (uint32_t *)malloc(nc * sizeof *V->local_hash);
             if (!V->local_hash) {
                 V->local_hash_capacity = V->local_hash_allocated = 0;
                 virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
@@ -453,10 +455,9 @@ VPRIV bool virbuild_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
         uint32_t i = V->local_hash[lj] - 1;
 
         if (V->locations[i].symbol == s && V->locations[i].instance == inst) {
-            *l =
-                (codegen_lvalue){.kind = CODEGEN_LVALUE_VARIABLE,
-                                 .reference = VIRBUILD_LOCAL_VARIABLE_FIRST + i,
-                                 .align = codegen_symbol_alignment(c, s)};
+            *l = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_VARIABLE,
+                             .align = codegen_symbol_alignment(c, s),
+                             .reference = VIRBUILD_LOCAL_VARIABLE_FIRST + i);
             return true;
         }
     }
@@ -467,14 +468,14 @@ VPRIV bool virbuild_local(codegen_context *e, uint32_t s, codegen_lvalue *l)
                         V->variable_type_capacity, 1);
     VIRBUILD_ARRAY_GROW(V->variable_is_signed, V->location_count,
                         V->variable_is_signed_capacity, 1);
-    V->locations[V->location_count] = (virbuild_location){s, inst};
+    V->locations[V->location_count] = VCC_LITERAL(virbuild_location, s, inst);
     V->variable_types[V->location_count] = (uint8_t)ty;
     V->variable_is_signed[V->location_count] =
         codegen_type_is_integer(c, t) && codegen_type_is_signed(c, t);
-    *l = (codegen_lvalue){.kind = CODEGEN_LVALUE_VARIABLE,
-                          .reference =
-                              VIRBUILD_LOCAL_VARIABLE_FIRST + V->location_count,
-                          .align = codegen_symbol_alignment(c, s)};
+    *l = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_VARIABLE,
+                     .align = codegen_symbol_alignment(c, s),
+                     .reference =
+                         VIRBUILD_LOCAL_VARIABLE_FIRST + V->location_count);
     V->location_count++;
     return true;
 }

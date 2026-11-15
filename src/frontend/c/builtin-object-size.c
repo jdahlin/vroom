@@ -1,4 +1,5 @@
 /* vcc front end: the __builtin_object_size analysis; see builtin-table.c for where a builtin's other facts live */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* Object-size queries never evaluate their pointer operand. Track an address's
@@ -90,16 +91,16 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n,
               ((AST_TYPE(c, s->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) &&
                !s->body))))
             return false;
-        *b = (cc_object_bound){
-            .whole =
-                cc_builtin_object_size_initializer_extent(c, s->ty, s->body, 0),
-            .storage = s->ty};
+        *b = VCC_LITERAL(cc_object_bound,
+                         .whole = cc_builtin_object_size_initializer_extent(
+                             c, s->ty, s->body, 0),
+                         .storage = s->ty);
         b->sub = b->whole;
         return true;
     }
     case AST_NODE_STRING:
-        *b = (cc_object_bound){.whole = (uint64_t)c->strs[x->a].n *
-                                        c->strs[x->a].esz};
+        *b = VCC_LITERAL(cc_object_bound, .whole = (uint64_t)c->strs[x->a].n *
+                                                   c->strs[x->a].esz);
         b->sub = b->whole;
         return true;
     case AST_NODE_MEMBER: {
@@ -114,8 +115,8 @@ static bool cc_builtin_object_size_lvalue_bound(cc *c, uint32_t n,
                 (AST_TYPE(c, f->ty)->flags & AST_TYPE_FLAG_INCOMPLETE) ||
                 (flexible && mode != 3))
                 return false;
-            *b = (cc_object_bound){
-                .whole = -1, .sub = cc_type_size(c, f->ty), .storage = f->ty};
+            *b = VCC_LITERAL(cc_object_bound, .whole = -1,
+                             .sub = cc_type_size(c, f->ty), .storage = f->ty);
             return true;
         }
         b->offset += f->off / 8;
@@ -226,7 +227,8 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n,
         }
         if (size > (cc_type_size(c, c->t_size) == 4 ? UINT32_MAX : UINT64_MAX))
             return false;
-        *b = (cc_object_bound){.whole = (i128)size, .sub = (i128)size};
+        *b = VCC_LITERAL(cc_object_bound, .whole = (i128)size,
+                         .sub = (i128)size);
         return true;
     }
     if (x->op == AST_NODE_ADDRESS ||

@@ -1,4 +1,5 @@
 /* vcc front end: #pragma weak, pending names and aliases */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* ---------------- #pragma weak ---------------- */
@@ -15,20 +16,22 @@ static void cc_pragma_weak_push(cc *c, uint32_t key, uint32_t alias,
 {
     if (c->npweak == c->cpweak) {
         c->cpweak = c->cpweak ? 2 * c->cpweak : 8;
-        c->pweak = realloc(c->pweak, c->cpweak * sizeof(*c->pweak));
+        c->pweak =
+            (struct pweak *)(realloc(c->pweak, c->cpweak * sizeof(*c->pweak)));
     }
-    c->pweak[c->npweak++] = (struct pweak){key, alias, loc, s};
+    c->pweak[c->npweak++] = VCC_LITERAL(struct pweak, key, alias, loc, s);
 }
 
 static uint32_t cc_pragma_weak_identifier_string(cc *c, uint32_t id)
 {
     int l;
     const char *s = cc_identifier_name(id, &l);
-    char *k = cc_heap_allocate(c, (size_t)l + 1);
+    char *k = (char *)(cc_heap_allocate(c, (size_t)l + 1));
 
     memcpy(k, s, (size_t)l);
     k[l] = 0;
-    c->strs[c->nstr++] = (cstr){k, (uint32_t)l + 1, 1, LEX_TOKEN_STRING};
+    c->strs[c->nstr++] =
+        VCC_LITERAL(cstr, k, (uint32_t)l + 1, 1, LEX_TOKEN_STRING);
     return c->nstr; /* (attrs hold index + 1) */
 }
 

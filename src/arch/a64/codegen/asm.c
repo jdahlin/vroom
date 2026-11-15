@@ -108,7 +108,7 @@ VPRIV void a64_asm_emit(codegen_context *e, uint32_t n)
         return;
     if (nops > 64 || a->nlabel > 64)
         codegen_fatal_report(e, x->loc, "too many asm operands");
-    op = alloca((nops + 1) * sizeof(a64_asm_operand));
+    op = (a64_asm_operand *)(alloca((nops + 1) * sizeof(a64_asm_operand)));
     memset(op, 0, (nops + 1) * sizeof(a64_asm_operand));
     /* clobbered registers: keep temporaries out of them */
     for (uint32_t i = 0; i < a->nclob; i++) {
@@ -300,8 +300,8 @@ VPRIV void a64_asm_emit(codegen_context *e, uint32_t n)
                             : 8,
                         16);
                     codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                        .offset = sl,
-                                        .align = 16};
+                                        .align = 16,
+                                        .offset = sl};
                     int r;
 
                     store(e, &l, o->type, &v);

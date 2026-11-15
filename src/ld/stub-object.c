@@ -1,5 +1,6 @@
 /* The in-memory stub object that defines the symbols the -O0 kernel references only in dead branches. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 /* ---------------- stubs for unresolved symbols (-O0 dead branches) ---------------- */
@@ -24,9 +25,9 @@ VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx,
     for (uint32_t i = 0; i < n; i++)
         strsz += strlen(names[i]) + 1;
     size_t datasz = 64 * (size_t)n;
-    uint8_t *b = ld_region_alloc(
+    uint8_t *b = (uint8_t *)(ld_region_alloc(
         sizeof(elf_file_header) + 5 * sizeof(elf_section_header) +
-        (n + 2) * sizeof(elf_symbol) + strsz + 64 + datasz);
+        (n + 2) * sizeof(elf_symbol) + strsz + 64 + datasz));
     elf_file_header *eh = (elf_file_header *)b;
     elf_section_header *sh =
         (elf_section_header *)(b + sizeof(elf_file_header));
@@ -41,46 +42,38 @@ VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx,
     eh->e_shstrndx = 1;
     /* shstr: "\0.text\0.data\0.symtab\0" in a small separate buffer */
     memcpy(shstr, "\0.text\0.data\0.symtab\0.strtab\0", 30);
-    sh[1] = (elf_section_header){.sh_name = 22,
-                                 .sh_type = SHT_STRTAB,
-                                 .sh_offset = (uint64_t)(shstr - (char *)b),
-                                 .sh_size = 30,
-                                 .sh_addralign = 1};
-    sh[2] = (elf_section_header){.sh_name = 1,
-                                 .sh_type = SHT_PROGBITS,
-                                 .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
-                                 .sh_addralign = 4};
+    sh[1] =
+        VCC_LITERAL(elf_section_header, .sh_name = 22, .sh_type = SHT_STRTAB,
+                    .sh_offset = (uint64_t)(shstr - (char *)b), .sh_size = 30,
+                    .sh_addralign = 1);
+    sh[2] =
+        VCC_LITERAL(elf_section_header, .sh_name = 1, .sh_type = SHT_PROGBITS,
+                    .sh_flags = SHF_ALLOC | SHF_EXECINSTR, .sh_addralign = 4);
     sh[3] =
-        (elf_section_header){.sh_name = 7,
-                             .sh_type = SHT_PROGBITS,
-                             .sh_flags = SHF_ALLOC | SHF_WRITE,
-                             .sh_size = datasz,
-                             .sh_offset = (uint64_t)(shstr + 32 - (char *)b),
-                             .sh_addralign = 16};
-    sh[4] = (elf_section_header){.sh_name = 13,
-                                 .sh_type = SHT_SYMTAB,
-                                 .sh_offset = (uint64_t)((uint8_t *)sy - b),
-                                 .sh_size = (n + 2) * sizeof(elf_symbol),
-                                 .sh_link = 1,
-                                 .sh_info = 2,
-                                 .sh_entsize = sizeof(elf_symbol),
-                                 .sh_addralign = 8};
+        VCC_LITERAL(elf_section_header, .sh_name = 7, .sh_type = SHT_PROGBITS,
+                    .sh_flags = SHF_ALLOC | SHF_WRITE,
+                    .sh_offset = (uint64_t)(shstr + 32 - (char *)b),
+                    .sh_size = datasz, .sh_addralign = 16);
+    sh[4] = VCC_LITERAL(
+        elf_section_header, .sh_name = 13, .sh_type = SHT_SYMTAB,
+        .sh_offset = (uint64_t)((uint8_t *)sy - b),
+        .sh_size = (n + 2) * sizeof(elf_symbol), .sh_link = 1, .sh_info = 2,
+        .sh_addralign = 8, .sh_entsize = sizeof(elf_symbol));
     /* the symbol strtab shares section 1 in the real object; here it's separate memory */
     str[0] = 0;
     memcpy(str + 1, "$d", 3);
     size_t so = 4;
-    sy[1] = (elf_symbol){
-        .st_name = 1, .st_info = STB_LOCAL << 4 | STT_NOTYPE, .st_shndx = 3};
+    sy[1] = VCC_LITERAL(elf_symbol, .st_name = 1,
+                        .st_info = STB_LOCAL << 4 | STT_NOTYPE, .st_shndx = 3);
     for (uint32_t i = 0; i < n; i++) {
         size_t l = strlen(names[i]);
         memcpy(str + so, names[i], l + 1);
-        sy[i + 2] = (elf_symbol){.st_name = (uint32_t)so,
-                                 .st_info = STB_GLOBAL << 4 | STT_NOTYPE,
-                                 .st_shndx = 3,
-                                 .st_value = 64 * (uint64_t)i};
+        sy[i + 2] = VCC_LITERAL(elf_symbol, .st_name = (uint32_t)so,
+                                .st_info = STB_GLOBAL << 4 | STT_NOTYPE,
+                                .st_shndx = 3, .st_value = 64 * (uint64_t)i);
         so += l + 1;
     }
-    ld_object *o = ld_region_alloc(sizeof *o);
+    ld_object *o = (ld_object *)ld_region_alloc(sizeof *o);
     o->path = "<vroom-stubs>";
     o->file_bytes = b;
     o->size = (uint8_t *)shstr + 32 + datasz - b;
@@ -91,6 +84,6 @@ VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx,
     o->symbol_count = n + 2;
     o->first_global_index = 2;
     o->string_table = str;
-    o->global_slots = ld_region_alloc(n * sizeof(uint32_t));
+    o->global_slots = (uint32_t *)(ld_region_alloc(n * sizeof(uint32_t)));
     return o;
 }

@@ -34,7 +34,7 @@ static bool ld_local_symbol_is_kept(struct ld_context *ctx, const ld_object *o,
 /* which locals go to .symtab, remembered (index, name length) for ld_local_symbols_write */
 VPRIV void ld_local_symbols_count(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     static __thread uint32_t (*ld_local_symbols_scratch)[2];
     static __thread uint32_t ld_local_symbols_scratch_capacity;
     ld_object *o = ctx->inputs.objects.v[i];
@@ -46,9 +46,9 @@ VPRIV void ld_local_symbols_count(void *arg, size_t i)
         if (ld_local_symbols_scratch_capacity < end) {
             free(ld_local_symbols_scratch);
             ld_local_symbols_scratch_capacity = end < 4096 ? 4096 : end;
-            ld_local_symbols_scratch =
+            ld_local_symbols_scratch = (uint32_t (*)[2])(
                 malloc((size_t)ld_local_symbols_scratch_capacity *
-                       sizeof *ld_local_symbols_scratch);
+                       sizeof *ld_local_symbols_scratch));
         }
         for (uint32_t s = 1; s < end; s++)
             if (ld_local_symbol_is_kept(ctx, o, &o->symbols[s])) {
@@ -59,8 +59,8 @@ VPRIV void ld_local_symbols_count(void *arg, size_t i)
                 n++;
                 str += l + 1;
             }
-        o->kept_locals =
-            ld_region_alloc((size_t)n * sizeof *ld_local_symbols_scratch + 1);
+        o->kept_locals = (uint32_t (*)[2])(
+            ld_region_alloc((size_t)n * sizeof *ld_local_symbols_scratch + 1));
         memcpy(o->kept_locals, ld_local_symbols_scratch,
                (size_t)n * sizeof *ld_local_symbols_scratch);
     }

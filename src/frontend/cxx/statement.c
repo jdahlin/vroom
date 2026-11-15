@@ -774,7 +774,7 @@ static void cxx_statement_parse1(cxx *c)
         break;
     }
     switch (cxx_kw(c)) {
-    case CXX_KW_if:
+    case CXX_KW_if: {
         cxx_advance(c);
         uint8_t is_constexpr = cxx_accept_kw(c, CXX_KW_constexpr);
         int taken =
@@ -859,6 +859,7 @@ static void cxx_statement_parse1(cxx *c)
         } else if (cond_gen && cpre.n)
             cxx_gen_fail(c);
         return;
+    }
     case CXX_KW_switch:
     case CXX_KW_while: {
         cxx_scope *s = cxx_scope_new(c, CXX_SCOPE_BLOCK, c->scope, NULL),
@@ -1167,9 +1168,10 @@ static void cxx_statement_parse1(cxx *c)
 
             memset(r, 0, sizeof *r);
             r->tmpl = tmpl, r->vol = vol, r->extended = 0;
-            r->ops = cc_heap_allocate(a, sizeof(ast_asm_operand));
-            r->clob = cc_heap_allocate(a, sizeof(uint32_t));
-            r->labels = cc_heap_allocate(a, sizeof(uint32_t));
+            r->ops = (ast_asm_operand *)(cc_heap_allocate(
+                a, sizeof(ast_asm_operand)));
+            r->clob = (uint32_t *)(cc_heap_allocate(a, sizeof(uint32_t)));
+            r->labels = (uint32_t *)(cc_heap_allocate(a, sizeof(uint32_t)));
             cxx_gen_statement(
                 c, cxx_gen_new_statement(c, AST_NODE_ASM, aloc, ai, 0, 0));
         }

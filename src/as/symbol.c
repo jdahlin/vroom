@@ -7,6 +7,7 @@
  * materialised at as_end), both in the context's definitions region.  Redefinition and a bad attribute
  * fail the assembly.  .symver is applied at the end (as_symver_finish) because the versioned name may
  * be defined after it. */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- symbols */
@@ -39,8 +40,8 @@ VPRIV as_numeric_label *as_numeric_label_find(as_context *a, uint32_t num)
 {
     if (a->numeric_label_count * 2 >= a->numeric_label_mask) {
         uint32_t nm = a->numeric_label_mask * 2 + 1;
-        as_numeric_label *t =
-            as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
+        as_numeric_label *t = (as_numeric_label *)(as_region_alloc(
+            &a->definitions, sizeof *t * (nm + 1)));
         memset(t, 0, sizeof *t * (nm + 1));
         for (uint32_t i = 0; i <= a->numeric_label_mask; i++) {
             if (!a->numeric_labels[i].current && !a->numeric_labels[i].forward)
@@ -68,7 +69,8 @@ VPRIV as_variable *as_variable_slot_find(as_context *a, uint32_t y, int create)
 {
     if (create && a->variable_count * 2 >= a->variable_mask) {
         uint32_t nm = a->variable_mask * 2 + 1;
-        as_variable *t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
+        as_variable *t = (as_variable *)(as_region_alloc(&a->definitions,
+                                                         sizeof *t * (nm + 1)));
         memset(t, 0, sizeof *t * (nm + 1));
         for (uint32_t i = 0; i <= a->variable_mask; i++) {
             if (!a->variables[i].symbol)
@@ -228,8 +230,8 @@ VPRIV int as_directive_symver(as_context *a, const char *p, const char *e)
     const char *q = p;
     while (q < e && *q != ',' && *q != ' ' && *q != '\t')
         q++;
-    v = (as_text){p, (size_t)(q - p)};
-    const char *at = memchr(v.text, '@', v.length);
+    v = VCC_LITERAL(as_text, p, (uint32_t)((size_t)(q - p)));
+    const char *at = (const char *)memchr(v.text, '@', v.length);
     if (!at)
         return as_error_report(a, "expected a '@' in the name");
     int rm = 0;
@@ -251,7 +253,7 @@ VPRIV int as_directive_symver(as_context *a, const char *p, const char *e)
         void *t = as_region_alloc(&a->definitions, sizeof *a->symvers * nc);
         if (a->symver_count)
             memcpy(t, a->symvers, sizeof *a->symvers * a->symver_count);
-        a->symvers = t;
+        a->symvers = (__typeof__(a->symvers))t;
         a->symver_capacity = nc;
     }
     a->symvers[a->symver_count].orig = yo;
@@ -293,12 +295,12 @@ VPRIV void as_symver_finish(as_context *a)
             continue;
         }
         int def = (s->flags & ESYM_DEFINED) != 0, rm = (int)a->symvers[i].rm;
-        const char *at = memchr(t->name, '@', t->len);
+        const char *at = (const char *)memchr(t->name, '@', t->len);
         if (at && t->len - (size_t)(at - t->name) >= 3 &&
             !memcmp(at, "@@@", 3)) {
             /* name@@@v: @@ when defined here, @ otherwise */
             size_t k = (size_t)(at - t->name);
-            char *n = as_region_alloc(&a->definitions, t->len);
+            char *n = (char *)as_region_alloc(&a->definitions, t->len);
             memcpy(n, t->name, k + 1);
             if (def) {
                 memcpy(n + k + 1, at + 2, t->len - k - 2);

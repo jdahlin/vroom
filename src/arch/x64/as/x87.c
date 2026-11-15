@@ -35,7 +35,7 @@ VPRIV int x64_i_x87(as_context *a, char *mn, XOp *o, int nops)
             if (o[0].kind == XK_EXPR)
                 o[0].kind = XK_MEM;
             if (!strcmp(mn, "fstenv")) {
-                if (x64_raw(a, (uint8_t[]){0x9b}, 1))
+                if (x64_raw(a, OPB("\x9b"), 1))
                     return -1;
                 return x64_x87m(a, 0xd9, 6, &o[0]);
             }

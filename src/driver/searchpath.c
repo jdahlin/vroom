@@ -71,7 +71,7 @@ VPRIV void driver_searchpath_alloc(struct driver_job *job, int argc,
     if (5 * per > dircap) {
         free(dirv);
         dircap = 5 * per;
-        dirv = malloc(dircap * sizeof(*dirv));
+        dirv = (const char **)(malloc(dircap * sizeof(*dirv)));
     }
     job->quote_directories = dirv, job->include_directories = dirv + per,
     job->system_directories = dirv + 2 * per,

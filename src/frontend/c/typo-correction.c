@@ -1,4 +1,5 @@
 /* vcc front end: "did you mean" for undeclared identifiers and keywords (clang's typo correction) */
+#include "common/literal.h"
 #include "cc-internal.h"
 
 /* Levenshtein distance, giving up above max */
@@ -219,11 +220,11 @@ CC_PRIVATE uint32_t cc_undeclared_report(cc *c, const char *msg, uint32_t id,
     if (s || k) {
         int m;
         const char *t = cc_identifier_name(s ? c->syms[s].name : k, &m);
-        char *fs = cc_heap_allocate(c, (size_t)m + 1);
+        char *fs = (char *)(cc_heap_allocate(c, (size_t)m + 1));
         diag_fixit fx;
 
         memcpy(fs, t, m), fs[m] = 0;
-        fx = (diag_fixit){r.b, r.e, fs, DIAG_APPLICABILITY_MAYBE};
+        fx = VCC_LITERAL(diag_fixit, r.b, r.e, fs, DIAG_APPLICABILITY_MAYBE);
         report(c, "error", loc, &r, 1, &fx, 1,
                tn ? "unknown type name '%.*s'; did you mean '%s'?"
                   : "use of undeclared identifier '%.*s'; did you mean '%s'?",

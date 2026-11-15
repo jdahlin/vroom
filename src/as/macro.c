@@ -7,6 +7,7 @@
  * the frame's mark.  Nesting is limited by AS_FRAMES_MAX and reported as an error, and so is a
  * missing .endm or .endr.  \@ counts instantiations through a->macro_instance_count; .altmacro changes the argument
  * syntax (a->altmacro_mode). */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- macros */
@@ -27,7 +28,7 @@ VPRIV as_text as_text_first_word(const char *p, const char *e)
     const char *s = p;
     while (p < e && as_char_is_identifier((unsigned char)*p))
         p++;
-    return (as_text){s, (uint32_t)(p - s)};
+    return VCC_LITERAL(as_text, s, (uint32_t)(p - s));
 }
 
 static int as_directive_is_loop(as_text w)
@@ -53,7 +54,8 @@ static int as_macro_body_collect(as_context *a, int macro, as_text *body)
         if (macro) {
             if (as_text_equals(w, ".endm") || as_text_equals(w, ".endmacro")) {
                 if (!depth) {
-                    *body = (as_text){start, (uint32_t)(raw - start)};
+                    *body =
+                        VCC_LITERAL(as_text, start, (uint32_t)(raw - start));
                     return 0;
                 }
                 depth--;
@@ -62,7 +64,8 @@ static int as_macro_body_collect(as_context *a, int macro, as_text *body)
         } else {
             if (as_text_equals(w, ".endr")) {
                 if (!depth) {
-                    *body = (as_text){start, (uint32_t)(raw - start)};
+                    *body =
+                        VCC_LITERAL(as_text, start, (uint32_t)(raw - start));
                     return 0;
                 }
                 depth--;
@@ -122,7 +125,7 @@ static int as_macro_argument_parse_plain(const char **pp, const char *e,
         while (q > p && (q[-1] == ' ' || q[-1] == '\t'))
             q--;
         *pp = e;
-        *out = (as_text){p, (uint32_t)(q - p)};
+        *out = VCC_LITERAL(as_text, p, (uint32_t)(q - p));
         return 1;
     }
     const char *s = p;
@@ -177,7 +180,7 @@ static int as_macro_argument_parse_plain(const char **pp, const char *e,
     if (depth)
         return 0;
     *pp = p;
-    *out = (as_text){s, (uint32_t)(end - s)};
+    *out = VCC_LITERAL(as_text, s, (uint32_t)(end - s));
     return 1;
 }
 
@@ -196,7 +199,7 @@ static int as_macro_argument_parse(as_context *a, const char **pp,
         memcpy(buf, p, (size_t)(q - p));
         n = (size_t)(q - p);
         *pp = e;
-        *out = (as_text){buf, (uint32_t)n};
+        *out = VCC_LITERAL(as_text, buf, (uint32_t)n);
         return 0;
     }
     int depth = 0;
@@ -269,7 +272,7 @@ static int as_macro_argument_parse(as_context *a, const char **pp,
     a->expansion_text.used =
         (size_t)((uint8_t *)buf - a->expansion_text.base) + n;
     *pp = p;
-    *out = (as_text){buf, (uint32_t)n};
+    *out = VCC_LITERAL(as_text, buf, (uint32_t)n);
     return 0;
 }
 
@@ -282,13 +285,15 @@ static as_template as_template_compile(as_context *a, vregion *r, as_text body,
 {
     const char *b = body.text;
     size_t n = body.length, nbs = 0;
-    for (const char *q = b; (q = memchr(q, '\\', (size_t)(b + n - q))); q++)
+    for (const char *q = b;
+         (q = (const char *)(memchr(q, '\\', (size_t)(b + n - q)))); q++)
         nbs++;
-    as_template t = {as_region_alloc(r, sizeof(as_template_piece) * (nbs + 1)),
+    as_template t = {(as_template_piece *)(as_region_alloc(
+                         r, sizeof(as_template_piece) * (nbs + 1))),
                      0};
     size_t lit = 0, i = 0;
     while (i < n) {
-        const char *q = memchr(b + i, '\\', n - i);
+        const char *q = (const char *)memchr(b + i, '\\', n - i);
         if (!q)
             break;
         i = (size_t)(q - b);
@@ -317,14 +322,14 @@ static as_template as_template_compile(as_context *a, vregion *r, as_text body,
             } /* '\' and the name stay as they are */
             k = (int32_t)m, skip = j - i;
         }
-        t.pieces[t.count++] =
-            (as_template_piece){(uint32_t)lit, (uint32_t)(i - lit), k};
+        t.pieces[t.count++] = VCC_LITERAL(as_template_piece, (uint32_t)lit,
+                                          (uint32_t)(i - lit), k);
         i += skip;
         lit = i;
     }
     if (lit < n)
-        t.pieces[t.count++] =
-            (as_template_piece){(uint32_t)lit, (uint32_t)(n - lit), -1};
+        t.pieces[t.count++] = VCC_LITERAL(as_template_piece, (uint32_t)lit,
+                                          (uint32_t)(n - lit), -1);
     (void)a;
     return t;
 }
@@ -337,8 +342,9 @@ static as_template as_template_compile_altmacro(vregion *r, as_text body,
 {
     const char *b = body.text;
     size_t n = body.length;
-    as_template t = {
-        as_region_alloc(r, sizeof(as_template_piece) * (n / 2 + 2)), 0};
+    as_template t = {(as_template_piece *)(as_region_alloc(
+                         r, sizeof(as_template_piece) * (n / 2 + 2))),
+                     0};
     size_t lit = 0, i = 0;
     while (i < n) {
         size_t st = i;
@@ -357,8 +363,9 @@ static as_template as_template_compile_altmacro(vregion *r, as_text body,
                     !memcmp(ps[m].name.text, b + i, j - i))
                     break;
             if (m < np) {
-                t.pieces[t.count++] = (as_template_piece){
-                    (uint32_t)lit, (uint32_t)(st - lit), (int32_t)m};
+                t.pieces[t.count++] =
+                    VCC_LITERAL(as_template_piece, (uint32_t)lit,
+                                (uint32_t)(st - lit), (int32_t)m);
                 lit = j;
             }
             i = j;
@@ -368,8 +375,8 @@ static as_template as_template_compile_altmacro(vregion *r, as_text body,
             i++;
     }
     if (lit < n)
-        t.pieces[t.count++] =
-            (as_template_piece){(uint32_t)lit, (uint32_t)(n - lit), -1};
+        t.pieces[t.count++] = VCC_LITERAL(as_template_piece, (uint32_t)lit,
+                                          (uint32_t)(n - lit), -1);
     return t;
 }
 
@@ -388,7 +395,8 @@ static int as_macro_argument_parse_altmacro(as_context *a, const char **pp,
         int k = snprintf(buf, sizeof buf, "%lld", (long long)v);
         *out = as_text_duplicate(a, buf, (size_t)k);
     } else {
-        char *o = as_region_alloc(&a->definitions, (size_t)(e - p) + 1);
+        char *o =
+            (char *)(as_region_alloc(&a->definitions, (size_t)(e - p) + 1));
         size_t n = 0;
         for (p++; p < e && *p != '>'; p++) {
             if (*p == '!' && p + 1 < e)
@@ -398,7 +406,7 @@ static int as_macro_argument_parse_altmacro(as_context *a, const char **pp,
         if (p >= e)
             return as_error_report(a, "expected '>'");
         p++;
-        *out = (as_text){o, (uint32_t)n};
+        *out = VCC_LITERAL(as_text, o, (uint32_t)n);
     }
     *pp = p;
     return 0;
@@ -475,7 +483,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
         p++;
     if (p == s)
         return as_error_report(a, "expected identifier in '.macro' directive");
-    name = keep ? (as_text){s, (uint32_t)(p - s)}
+    name = keep ? VCC_LITERAL(as_text, s, (uint32_t)(p - s))
                 : as_text_duplicate(a, s, (size_t)(p - s));
     as_macro_parameter ps[64];
     uint32_t np = 0;
@@ -493,7 +501,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
         if (p == s)
             return as_error_report(a,
                                    "expected identifier in '.macro' directive");
-        q->name = keep ? (as_text){s, (uint32_t)(p - s)}
+        q->name = keep ? VCC_LITERAL(as_text, s, (uint32_t)(p - s))
                        : as_text_duplicate(a, s, (size_t)(p - s));
         p = as_whitespace_skip(p, e);
         if (p < e && *p == ':') {
@@ -526,10 +534,10 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
     as_text body;
     if (as_macro_body_collect(a, 1, &body))
         return -1;
-    as_macro *m = as_region_alloc(&a->definitions, sizeof *m);
+    as_macro *m = (as_macro *)as_region_alloc(&a->definitions, sizeof *m);
     m->name = name;
-    m->params = as_region_alloc(&a->definitions,
-                                sizeof(as_macro_parameter) * (np ? np : 1));
+    m->params = (as_macro_parameter *)(as_region_alloc(
+        &a->definitions, sizeof(as_macro_parameter) * (np ? np : 1)));
     memcpy(m->params, ps, sizeof(as_macro_parameter) * np);
     m->parameter_count = np;
     /* file text outlives the macro (as_snippet_assemble's contract); expansions do not */
@@ -537,10 +545,11 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
                   ? body
                   : as_text_duplicate(a, body.text, body.length);
     m->invocation_count = 0;
-    m->template = (as_template){0, 0};
+    m->asm_template = VCC_LITERAL(as_template, 0, 0);
     if (a->macro_count * 2 >= a->macro_mask) {
         uint32_t nm = a->macro_mask * 2 + 1;
-        as_macro **t = as_region_alloc(&a->definitions, sizeof *t * (nm + 1));
+        as_macro **t = (as_macro **)(as_region_alloc(&a->definitions,
+                                                     sizeof *t * (nm + 1)));
         memset(t, 0, sizeof *t * (nm + 1));
         for (uint32_t i = 0; i <= a->macro_mask; i++)
             for (as_macro *x = a->macro_table[i], *nx; x; x = nx) {
@@ -589,7 +598,7 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p,
     p = as_whitespace_skip(p, e);
     int hasvararg = np && m->params[np - 1].is_variadic;
     for (uint32_t k = 0; k < np; k++)
-        args[k] = (as_text){"", 0};
+        args[k] = VCC_LITERAL(as_text, "", 0);
     if (p < e) {
         for (;;) {
             /* keyword argument? */
@@ -636,7 +645,7 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p,
                 p = as_whitespace_skip(p + 1, e);
                 if (p >= e) {
                     if (pi < np)
-                        set[pi] = 1, args[pi] = (as_text){"", 0};
+                        set[pi] = 1, args[pi] = VCC_LITERAL(as_text, "", 0);
                     break;
                 }
             }
@@ -670,10 +679,10 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p,
         tt = as_template_compile_altmacro(&a->definitions, m->body, m->params,
                                           np);
     else {
-        if (!m->template.pieces)
-            m->template = as_template_compile(a, &a->definitions, m->body,
-                                              m->params, np, 1);
-        tt = m->template;
+        if (!m->asm_template.pieces)
+            m->asm_template = as_template_compile(a, &a->definitions, m->body,
+                                                  m->params, np, 1);
+        tt = m->asm_template;
     }
     char *o = (char *)as_region_alloc(
         &a->expansion_text, as_template_expand_bound(m->body, args, np));
@@ -725,7 +734,7 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e,
         return as_error_report(a, "expected identifier in '.irp' directive");
     as_macro_parameter par;
     memset(&par, 0, sizeof par);
-    par.name = (as_text){s, (uint32_t)(p - s)};
+    par.name = VCC_LITERAL(as_text, s, (uint32_t)(p - s));
     p = as_whitespace_skip(p, e);
     if (p >= e || *p != ',')
         return as_error_report(a, "expected comma");
@@ -756,7 +765,7 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e,
         nv = 0;
         as_text cv[1024];
         for (uint32_t i = 0; i < v.length && i < 1024; i++)
-            cv[nv++] = (as_text){v.text + i, 1};
+            cv[nv++] = VCC_LITERAL(as_text, v.text + i, 1);
         memcpy(vals, cv, sizeof(as_text) * nv);
     }
     size_t tot = 0;

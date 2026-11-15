@@ -55,13 +55,13 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign,
     int st, argc = 0, envc = 0;
 
     if (!vccd_recipe_request_buffer) {
-        vccd_recipe_request_buffer =
-            mmap(NULL,
-                 sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
-                 PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        vccd_recipe_request_strings =
-            mmap(NULL, VCCD_STRINGS_MAX * sizeof(char *),
-                 PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        vccd_recipe_request_buffer = (char *)(mmap(
+            NULL,
+            sizeof(struct vccd_request_header) + VCCD_PROTOCOL_PAYLOAD_MAX,
+            PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0));
+        vccd_recipe_request_strings = (char **)(mmap(
+            NULL, VCCD_STRINGS_MAX * sizeof(char *), PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON, -1, 0));
         if (vccd_recipe_request_buffer == MAP_FAILED ||
             vccd_recipe_request_strings == MAP_FAILED) {
             vccd_recipe_request_buffer = NULL;

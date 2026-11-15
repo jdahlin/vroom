@@ -1,5 +1,6 @@
 /* The linker script's statements: assignments, PROVIDE, ASSERT, input and output section descriptions, SECTIONS, PHDRS, VERSION, and ld_script_parse. */
 
+#include "common/literal.h"
 #include "ld-internal.h"
 
 VPRIV uint32_t ld_output_section_find(struct ld_context *ctx, const char *name)
@@ -27,7 +28,7 @@ static ld_assignment *ld_script_assignment_rest_parse(struct ld_context *ctx,
         !strcmp(op, ">=") || !strcmp(op, "!="))
         return NULL;
     ctx->script.cursor += n;
-    ld_assignment *a = ld_region_alloc(sizeof *a);
+    ld_assignment *a = (ld_assignment *)ld_region_alloc(sizeof *a);
     a->operator_character = op[0] == '=' ? '=' : op[0];
     a->symbol = strcmp(name, ".") ? ld_global_name_intern(ctx, name) : LD_NONE;
     a->expression = ld_script_expression_parse(ctx);
@@ -40,9 +41,10 @@ static ld_assignment *ld_script_provide_parse(struct ld_context *ctx,
     ld_script_character_expect(ctx, '(');
     char *name = ld_script_name_parse(ctx);
     ld_assignment *a;
-    VVEC_PUSH(ctx->script.provides,
-              ((ld_provide){.symbol = ld_global_name_intern(ctx, name)}),
-              ld_region_alloc);
+    VVEC_PUSH(
+        ctx->script.provides,
+        (VCC_LITERAL(ld_provide, .symbol = ld_global_name_intern(ctx, name))),
+        ld_region_alloc);
     ctx->script.current_provide =
         &ctx->script.provides.v[ctx->script.provides.n - 1];
     a = ld_script_assignment_rest_parse(ctx, name);
@@ -59,7 +61,7 @@ static ld_assignment *ld_script_provide_parse(struct ld_context *ctx,
 
 static ld_assignment *ld_script_assert_parse(struct ld_context *ctx)
 {
-    ld_assignment *a = ld_region_alloc(sizeof *a);
+    ld_assignment *a = (ld_assignment *)ld_region_alloc(sizeof *a);
     a->symbol = LD_NONE;
     a->operator_character = '=';
     a->is_assert = true;
@@ -297,10 +299,10 @@ static bool ld_script_assignment_statement_parse(struct ld_context *ctx,
     *start = ctx->script.cursor;
     if (ld_script_word_consume(ctx, "ASSERT")) {
         a = ld_script_assert_parse(ctx);
-        VVEC_PUSH(
-            ctx->script.commands,
-            ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}),
-            ld_region_alloc);
+        VVEC_PUSH(ctx->script.commands,
+                  (VCC_LITERAL(ld_command, .kind = LD_COMMAND_ASSIGNMENT,
+                               .assignment = a)),
+                  ld_region_alloc);
         ld_script_character_consume(ctx, ';');
         return true;
     }
@@ -317,10 +319,10 @@ static bool ld_script_assignment_statement_parse(struct ld_context *ctx,
             return false;
     }
     if (a)
-        VVEC_PUSH(
-            ctx->script.commands,
-            ((ld_command){.kind = LD_COMMAND_ASSIGNMENT, .assignment = a}),
-            ld_region_alloc);
+        VVEC_PUSH(ctx->script.commands,
+                  (VCC_LITERAL(ld_command, .kind = LD_COMMAND_ASSIGNMENT,
+                               .assignment = a)),
+                  ld_region_alloc);
     ld_script_character_expect(ctx, ';');
     return true;
 }

@@ -1,6 +1,7 @@
 /* The walker's lowering interface for builtins and control: atomics, varargs, labels, jumps; what the builder does not handle. */
 #define WALK_PREFIX virbuild_
 #define WALK_LOWER_PREFIX virbuild_
+#include "common/literal.h"
 #include "../walk/walk.h"
 #include "../walk/proto.h"
 #include "preir.h"
@@ -64,8 +65,8 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size,
     case CC_BUILTIN_POPCOUNTL:
     case CC_BUILTIN_POPCOUNTLL:
         virbuild_register_write(e, r, virbuild_population_count(e, ty, x));
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     case CC_BUILTIN_BSWAP32:
     case CC_BUILTIN_BSWAP64:
         op = VIR_OP_BSWAP;
@@ -79,8 +80,8 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size,
             virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, x,
                                  virbuild_constant_integer(e, VIR_TYPE_I32, 16),
                                  0));
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     case CC_BUILTIN_PARITY:
     case CC_BUILTIN_PARITYL:
     case CC_BUILTIN_PARITYLL:
@@ -89,8 +90,8 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size,
             e, r,
             virbuild_insn_append(e, VIR_OP_AND, ty, 0, x,
                                  virbuild_constant_integer(e, ty, 1), 0));
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     default:
         virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));
     }
@@ -100,8 +101,8 @@ VPRIV codegen_value virbuild_bitop(codegen_context *e, int bi, int size,
             e, op, ty,
             op == VIR_OP_CTZ || op == VIR_OP_CLZ ? VIR_INSN_FLAG_NZ : 0, x, 0,
             0));
-    return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                           .register_number = (uint8_t)r};
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)r);
 }
 
 /* sequentially consistent; a result is zero-extended (an i32 for 4 bytes or less) */
@@ -313,7 +314,7 @@ VPRIV void virbuild_retrec(codegen_context *e, int raddr,
                            const walk_argument *r, uint32_t lbl)
 {
     codegen_lvalue at = {
-        .kind = CODEGEN_LVALUE_FRAME, .offset = r->slot, .align = 8};
+        .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = r->slot};
     int q;
     if (r->is_in_memory) {
         q = virbuild_treg(e);
@@ -325,9 +326,9 @@ VPRIV void virbuild_retrec(codegen_context *e, int raddr,
                           : r->size == 4                         ? VIR_TYPE_F32
                                                                  : VIR_TYPE_F64;
             q = ty == VIR_TYPE_I64 ? virbuild_treg(e) : virbuild_ftreg(e);
-            at = (codegen_lvalue){.kind = CODEGEN_LVALUE_REGISTER,
-                                  .register_number = raddr,
-                                  .offset = 8 * j};
+            at = VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_REGISTER,
+                             .register_number = (uint8_t)(raddr),
+                             .offset = 8 * j);
             virbuild_load(e, q, &at, ty == VIR_TYPE_F32 ? 4 : 8, false);
             uint32_t v = virbuild_register_read(e, q, ty);
             virbuild_variable_write(e, VIRBUILD_RESULT_VARIABLE + j,

@@ -1,4 +1,5 @@
 /* vcc preprocessor: header cache: building a region's entry when it ends and publishing it */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 static void *pp_header_cache_copy(pp *p, const void *s, size_t n)
@@ -16,7 +17,8 @@ static const char *pp_header_cache_string_share(pp *p, const char *s, size_t n)
 
     if (s >= sb && s < sb + (1ull << 34) && !s[n])
         return s; /* already shared (a replayed entry's): immortal */
-    return pp_header_cache_blob_get(p, s, n); /* NUL-terminated, shared */
+    return (const char *)pp_header_cache_blob_get(
+        p, s, n); /* NUL-terminated, shared */
 }
 
 /* pp_header_cache_blob_get of a token's spelling, through a small cache of recent ones */
@@ -37,25 +39,26 @@ static const char *pp_header_cache_spelling_blob(pp *p, const char *s,
         if (d) {
             memcpy(&y, d, 4);
             if (((const pp_header_cache_chunk
-                      *)(const void *)(d - offsetof(pp_header_cache_chunk, d)))
+                      *)(const void *)(d - sizeof(pp_header_cache_chunk)))
                         ->n == len &&
                 !((x ^ y) & mk))
                 return d;
         }
-        return p->punctuator_blobs[kind] = pp_header_cache_blob_get(p, s, len);
+        return p->punctuator_blobs[kind] =
+                   (const char *)pp_header_cache_blob_get(p, s, len);
     }
     memcpy(&w, s, 8); /* (spellings are readable 16 bytes past their end) */
     if (len < 8)
         w &= ~(~0ull << (8 * len));
     h = (uint32_t)(((w ^ len) * 0x9E3779B97F4A7C15ull) >> 52);
-    d = p->blob_cache[h];
+    d = (const char *)(p->blob_cache[h]);
     if (d &&
         ((const pp_header_cache_chunk
-              *)(const void *)(d - offsetof(pp_header_cache_chunk, d)))
+              *)(const void *)(d - sizeof(pp_header_cache_chunk)))
                 ->n == len &&
         !memcmp(d, s, len))
         return d;
-    d = pp_header_cache_blob_get(p, s, len);
+    d = (const char *)pp_header_cache_blob_get(p, s, len);
     p->blob_cache[h] = d;
     return d;
 }
@@ -70,10 +73,12 @@ static void pp_header_cache_tokens_collect(pp *p,
              nc = r->counter_position_count - L->counter_positions_at_start;
     size_t own = end - L->text_at_start, w = 0, at = L->text_at_start,
            skipped = 0;
-    pp_header_cache_segment *sg = pp_header_cache_allocate(
-        p, (ns ? ns : 1) * sizeof(pp_header_cache_segment));
-    pp_header_cache_counter_run *ct = pp_header_cache_allocate(
-        p, (nc ? nc : 1) * sizeof(pp_header_cache_counter_run));
+    pp_header_cache_segment *sg =
+        (pp_header_cache_segment *)(pp_header_cache_allocate(
+            p, (ns ? ns : 1) * sizeof(pp_header_cache_segment)));
+    pp_header_cache_counter_run *ct =
+        (pp_header_cache_counter_run *)(pp_header_cache_allocate(
+            p, (nc ? nc : 1) * sizeof(pp_header_cache_counter_run)));
     uint32_t ci = L->counter_positions_at_start;
     pp_header_cache_token *tk;
     ptok *xt = NULL;
@@ -82,8 +87,8 @@ static void pp_header_cache_tokens_collect(pp *p,
 
     for (uint32_t i = L->segments_at_start; i < r->segment_count; i++)
         own -= r->segments[i].end - r->segments[i].start;
-    tk = varena_alloc(&p->temporary_region,
-                      (own ? own : 1) * sizeof(pp_header_cache_token));
+    tk = (pp_header_cache_token *)(varena_alloc(
+        &p->temporary_region, (own ? own : 1) * sizeof(pp_header_cache_token)));
     for (uint32_t i = L->segments_at_start; i <= r->segment_count; i++) {
         size_t to = i < r->segment_count ? r->segments[i].start : end;
 
@@ -91,19 +96,19 @@ static void pp_header_cache_tokens_collect(pp *p,
                r->counter_positions[ci].position < to;
              ci++)
             ct[ci - L->counter_positions_at_start] =
-                (pp_header_cache_counter_run){
-                    (uint32_t)(r->counter_positions[ci].position -
-                               L->text_at_start - skipped),
-                    r->counter_positions[ci].len,
-                    r->counter_positions[ci].val - L->counter_at_start};
+                VCC_LITERAL(pp_header_cache_counter_run,
+                            (uint32_t)(r->counter_positions[ci].position -
+                                       L->text_at_start - skipped),
+                            r->counter_positions[ci].len,
+                            r->counter_positions[ci].val - L->counter_at_start);
         for (; at < to; at++, w++) {
             ptok t = r->tokens[at];
             pp_header_cache_token *h = &tk[w];
 
             t.loc = t.loc ? t.loc - L->location_base_at_start + 1 : 0;
             t.ctr = 0;
-            *h = (pp_header_cache_token){0, t.loc, t.kind, t.flags,
-                                         (uint16_t)t.len};
+            *h = VCC_LITERAL(pp_header_cache_token, 0, t.loc, t.kind, t.flags,
+                             (uint16_t)t.len);
             /* (a clean identifier is spelled as its id: --vcc-tokhash checks both) */
             if (t.kind == LEX_TOKEN_IDENTIFIER && t.id &&
                 !(t.flags & LEX_TOKEN_FLAG_SPLICED) && t.len <= 0xffff) {
@@ -122,26 +127,26 @@ static void pp_header_cache_tokens_collect(pp *p,
             }
             /* escape: the full token, its spelling stored */
             if (lex_character_next == xcap) {
-                ptok *n2 =
-                    varena_alloc(&p->temporary_region,
-                                 (xcap = xcap ? 2 * xcap : 16) * sizeof(ptok));
+                ptok *n2 = (ptok *)(varena_alloc(&p->temporary_region,
+                                                 (xcap = xcap ? 2 * xcap : 16) *
+                                                     sizeof(ptok)));
 
                 if (lex_character_next)
                     memcpy(n2, xt, lex_character_next * sizeof(ptok));
                 xt = n2;
             }
-            t.s = pp_header_cache_blob_get(p, t.s, t.len);
+            t.s = (const char *)pp_header_cache_blob_get(p, t.s, t.len);
             xt[lex_character_next] = t;
-            *h = (pp_header_cache_token){lex_character_next++, t.loc, t.kind,
-                                         PP_HEADER_CACHE_TOKEN_ESCAPE, 0};
+            *h = VCC_LITERAL(pp_header_cache_token, lex_character_next++, t.loc,
+                             t.kind, PP_HEADER_CACHE_TOKEN_ESCAPE, 0);
         }
         if (i < r->segment_count) {
-            sg[i - L->segments_at_start] = (pp_header_cache_segment){
-                (uint32_t)w,
+            sg[i - L->segments_at_start] = VCC_LITERAL(
+                pp_header_cache_segment, (uint32_t)w,
                 r->segments[i].counter_at_start - L->counter_at_start,
                 r->segments[i].child,
                 r->segments[i].location_base_at_start -
-                    L->location_base_at_start};
+                    L->location_base_at_start);
             skipped += r->segments[i].end - r->segments[i].start;
             at = r->segments[i].end;
         }
@@ -152,7 +157,8 @@ static void pp_header_cache_tokens_collect(pp *p,
 
         for (size_t k = 0; k < w; k++)
             nb += tk[k].kind == LEX_TOKEN_LEFT_BRACE;
-        br = pp_header_cache_allocate(p, (nb ? nb : 1) * 2 * sizeof(uint32_t));
+        br = (uint32_t *)(pp_header_cache_allocate(p, (nb ? nb : 1) * 2 *
+                                                          sizeof(uint32_t)));
         nb = 0;
         for (size_t k = 0; k < w; k++) {
             if (tk[k].kind == LEX_TOKEN_LEFT_BRACE) {
@@ -169,12 +175,13 @@ static void pp_header_cache_tokens_collect(pp *p,
         e->brace_pairs = br;
         e->brace_pair_count = nb;
     }
-    e->own_tokens = pp_header_cache_blob_get(
-        p, tk, own * sizeof(pp_header_cache_token)); /* (16-aligned) */
+    e->own_tokens = (const pp_header_cache_token *)(pp_header_cache_blob_get(
+        p, tk, own * sizeof(pp_header_cache_token))); /* (16-aligned) */
     e->escape_tokens =
-        lex_character_next
-            ? pp_header_cache_copy(p, xt, lex_character_next * sizeof(ptok))
-            : NULL;
+        (const ptok *)(lex_character_next
+                           ? pp_header_cache_copy(
+                                 p, xt, lex_character_next * sizeof(ptok))
+                           : NULL);
     e->own_length = own;
     e->total_length = end - L->text_at_start;
     e->segments = sg;
@@ -245,7 +252,8 @@ static pp_header_cache_entry *
 pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
 {
     struct pp_recording *r = &p->recording;
-    pp_header_cache_entry *e = pp_header_cache_allocate(p, sizeof(*e));
+    pp_header_cache_entry *e =
+        (pp_header_cache_entry *)(pp_header_cache_allocate(p, sizeof(*e)));
     uint32_t nrg = 0, nru = 0, nrv = 0, ndl = 0, *ru;
     pp_header_cache_read *rg, *rv, *dl;
     pp_header_cache_file *fe;
@@ -266,10 +274,14 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
         ndl += (t->flags & PP_HEADER_CACHE_TOUCH_OWN) != 0;
     }
     /* scratch in tmp: the stored form is the shared chunks */
-    rg = varena_alloc(&p->temporary_region, (nrg ? nrg : 1) * sizeof(*rg));
-    ru = varena_alloc(&p->temporary_region, (nru ? nru : 1) * sizeof(*ru));
-    rv = varena_alloc(&p->temporary_region, (nrv ? nrv : 1) * sizeof(*rv));
-    dl = varena_alloc(&p->temporary_region, (ndl ? ndl : 1) * sizeof(*dl));
+    rg = (pp_header_cache_read *)(varena_alloc(&p->temporary_region,
+                                               (nrg ? nrg : 1) * sizeof(*rg)));
+    ru = (uint32_t *)(varena_alloc(&p->temporary_region,
+                                   (nru ? nru : 1) * sizeof(*ru)));
+    rv = (pp_header_cache_read *)(varena_alloc(&p->temporary_region,
+                                               (nrv ? nrv : 1) * sizeof(*rv)));
+    dl = (pp_header_cache_read *)(varena_alloc(&p->temporary_region,
+                                               (ndl ? ndl : 1) * sizeof(*dl)));
     nrg = nru = nrv = ndl = 0;
     for (uint32_t i = L->touches_at_start; i < r->touch_count; i++) {
         const pp_header_cache_touch_record *t = &r->touches[i];
@@ -277,16 +289,17 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
         if (t->flags & PP_HEADER_CACHE_TOUCH_READ) {
             if ((t->flags & PP_HEADER_CACHE_TOUCH_GUARD) &&
                 (t->v == PP_HEADER_CACHE_DEFINED || !t->v))
-                rg[nrg++] = (pp_header_cache_read){t->id, 0, t->v};
+                rg[nrg++] = VCC_LITERAL(pp_header_cache_read, t->id, 0, t->v);
             else if (t->v)
-                rv[nrv++] = (pp_header_cache_read){t->id, 0, t->v};
+                rv[nrv++] = VCC_LITERAL(pp_header_cache_read, t->id, 0, t->v);
             else
                 ru[nru++] = t->id;
         }
         if (t->flags &
             PP_HEADER_CACHE_TOUCH_OWN) /* (a child's last write is in the child) */
-            dl[ndl++] = (pp_header_cache_read){
-                t->id, 0, pp_macro_table_get(p, t->id) & ~(uintptr_t)1};
+            dl[ndl++] =
+                VCC_LITERAL(pp_header_cache_read, t->id, 0,
+                            pp_macro_table_get(p, t->id) & ~(uintptr_t)1);
     }
     atomic_fetch_add_explicit(&pp_header_cache_statistics.nru, nru,
                               memory_order_relaxed);
@@ -303,29 +316,32 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
     e->writes = pp_header_cache_vector_store(p, dl, ndl, sizeof(*dl));
     {
         uint32_t nk = r->child_count - L->children_at_start;
-        pp_header_cache_child *kd = pp_header_cache_allocate(
-            p, (nk ? nk : 1) * sizeof(pp_header_cache_child));
+        pp_header_cache_child *kd =
+            (pp_header_cache_child *)(pp_header_cache_allocate(
+                p, (nk ? nk : 1) * sizeof(pp_header_cache_child)));
 
         for (uint32_t i = 0; i < nk; i++) {
             const pp_header_cache_recorded_child *k =
                 &r->children[L->children_at_start + i];
 
-            kd[i] = (pp_header_cache_child){
-                k->e,
-                k->exclusion_count
-                    ? pp_header_cache_copy(
-                          p, r->child_exclusions + k->exclusions_start,
-                          k->exclusion_count * sizeof(uint32_t))
-                    : NULL,
-                k->exclusion_count};
+            kd[i] = VCC_LITERAL(
+                pp_header_cache_child, k->e,
+                (const uint32_t
+                     *)(k->exclusion_count
+                            ? pp_header_cache_copy(
+                                  p, r->child_exclusions + k->exclusions_start,
+                                  k->exclusion_count * sizeof(uint32_t))
+                            : NULL),
+                k->exclusion_count);
         }
         e->children = kd;
         e->child_count = nk;
     }
     e->lookup_count = r->lookup_count - L->lookups_at_start;
     if (e->lookup_count) {
-        pp_header_cache_lookup *lk = pp_header_cache_allocate(
-            p, e->lookup_count * sizeof(pp_header_cache_lookup));
+        pp_header_cache_lookup *lk =
+            (pp_header_cache_lookup *)(pp_header_cache_allocate(
+                p, e->lookup_count * sizeof(pp_header_cache_lookup)));
 
         for (uint32_t i = 0; i < e->lookup_count; i++) {
             const pp_header_cache_lookup *l =
@@ -343,31 +359,29 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
         }
         e->lookups = lk;
     }
-    e->once_marks =
-        pp_header_cache_copy(p, r->once_marks + L->once_marks_at_start,
-                             (r->once_mark_count - L->once_marks_at_start) *
-                                 sizeof(pp_header_cache_once_mark));
+    e->once_marks = (const pp_header_cache_once_mark *)(pp_header_cache_copy(
+        p, r->once_marks + L->once_marks_at_start,
+        (r->once_mark_count - L->once_marks_at_start) *
+            sizeof(pp_header_cache_once_mark)));
     e->once_mark_count = r->once_mark_count - L->once_marks_at_start;
-    e->once_additions = pp_header_cache_copy(
+    e->once_additions = (const lex_file *const *)(pp_header_cache_copy(
         p, p->once_files + L->once_files_at_start,
-        (p->once_file_count - L->once_files_at_start) * sizeof(*p->once_files));
+        (p->once_file_count - L->once_files_at_start) *
+            sizeof(*p->once_files)));
     e->once_addition_count = p->once_file_count - L->once_files_at_start;
     e->file_count = p->file_count - L->files_at_start;
-    fe = pp_header_cache_allocate(p, (e->file_count ? e->file_count : 1) *
-                                         sizeof(pp_header_cache_file));
+    fe = (pp_header_cache_file *)(pp_header_cache_allocate(
+        p, (e->file_count ? e->file_count : 1) * sizeof(pp_header_cache_file)));
     for (uint32_t i = 0; i < e->file_count; i++) {
         const pp_file_entry *f = &p->files[L->files_at_start + i];
 
-        fe[i] = (pp_header_cache_file){
-            f->lex_file,
-            f->skeleton,
+        fe[i] = VCC_LITERAL(
+            pp_header_cache_file, f->lex_file, f->skeleton,
             pp_header_cache_string_share(p, f->name, f->name_length),
             pp_header_cache_string_share(p, f->spelled_path,
                                          strlen(f->spelled_path)),
-            f->name_length,
-            f->location_base - L->location_base_at_start,
-            f->is_system,
-            f->guard_open};
+            f->name_length, f->location_base - L->location_base_at_start,
+            f->is_system, f->guard_open);
     }
     e->files = fe;
     e->token_span = p->next_location_base - L->location_base_at_start;
@@ -377,20 +391,21 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
     e->search_directory_count = L->ndirs;
     e->search_path_signature = p->search_path_signatures[L->ndirs];
     {
-        pp_header_cache_counter_name_read *cr = pp_header_cache_allocate(
-            p, (r->counter_read_count - L->counter_reads_at_start
-                    ? r->counter_read_count - L->counter_reads_at_start
-                    : 1) *
-                   sizeof(pp_header_cache_counter_name_read));
+        pp_header_cache_counter_name_read *cr =
+            (pp_header_cache_counter_name_read *)(pp_header_cache_allocate(
+                p, (r->counter_read_count - L->counter_reads_at_start
+                        ? r->counter_read_count - L->counter_reads_at_start
+                        : 1) *
+                       sizeof(pp_header_cache_counter_name_read)));
 
         for (uint32_t i = L->counter_reads_at_start; i < r->counter_read_count;
              i++) {
             const pp_header_cache_counter_read *c = &r->counter_reads[i];
 
-            cr[i - L->counter_reads_at_start] =
-                (pp_header_cache_counter_name_read){
-                    pp_header_cache_string_share(p, c->s, c->len), c->len,
-                    c->off, c->dlen, c->val - L->counter_at_start};
+            cr[i - L->counter_reads_at_start] = VCC_LITERAL(
+                pp_header_cache_counter_name_read,
+                pp_header_cache_string_share(p, c->s, c->len), c->len, c->off,
+                c->dlen, c->val - L->counter_at_start);
         }
         e->counter_name_reads = cr;
         e->counter_name_read_count =
@@ -405,40 +420,42 @@ pp_header_cache_entry_publish(pp *p, const pp_header_cache_level *L, size_t end)
                  nc = r->counter_position_count - L->counter_positions_at_start;
         size_t own = end - L->text_at_start;
         char *t;
-        pp_header_cache_segment *sg = pp_header_cache_allocate(
-            p, (ns ? ns : 1) * sizeof(pp_header_cache_segment));
-        pp_header_cache_counter_run *ct = pp_header_cache_allocate(
-            p, (nc ? nc : 1) * sizeof(pp_header_cache_counter_run));
+        pp_header_cache_segment *sg =
+            (pp_header_cache_segment *)(pp_header_cache_allocate(
+                p, (ns ? ns : 1) * sizeof(pp_header_cache_segment)));
+        pp_header_cache_counter_run *ct =
+            (pp_header_cache_counter_run *)(pp_header_cache_allocate(
+                p, (nc ? nc : 1) * sizeof(pp_header_cache_counter_run)));
         size_t w = 0, at = L->text_at_start, skipped = 0;
         uint32_t ci = L->counter_positions_at_start;
 
         for (uint32_t i = L->segments_at_start; i < r->segment_count; i++)
             own -= r->segments[i].end - r->segments[i].start;
-        t = varena_alloc(&p->temporary_region, own + 1);
+        t = (char *)varena_alloc(&p->temporary_region, own + 1);
         for (uint32_t i = L->segments_at_start; i <= r->segment_count; i++) {
             size_t to = i < r->segment_count ? r->segments[i].start : end;
 
             for (; ci < r->counter_position_count &&
                    r->counter_positions[ci].position < to;
                  ci++)
-                ct[ci - L->counter_positions_at_start] =
-                    (pp_header_cache_counter_run){
-                        (uint32_t)(r->counter_positions[ci].position -
-                                   L->text_at_start - skipped),
-                        r->counter_positions[ci].len,
-                        r->counter_positions[ci].val - L->counter_at_start};
+                ct[ci - L->counter_positions_at_start] = VCC_LITERAL(
+                    pp_header_cache_counter_run,
+                    (uint32_t)(r->counter_positions[ci].position -
+                               L->text_at_start - skipped),
+                    r->counter_positions[ci].len,
+                    r->counter_positions[ci].val - L->counter_at_start);
             memcpy(t + w, p->output + at, to - at);
             w += to - at;
             if (i < r->segment_count) {
-                sg[i - L->segments_at_start] = (pp_header_cache_segment){
-                    (uint32_t)w,
+                sg[i - L->segments_at_start] = VCC_LITERAL(
+                    pp_header_cache_segment, (uint32_t)w,
                     r->segments[i].counter_at_start - L->counter_at_start,
-                    r->segments[i].child, 0};
+                    r->segments[i].child, 0);
                 skipped += r->segments[i].end - r->segments[i].start;
                 at = r->segments[i].end;
             }
         }
-        e->own_text = pp_header_cache_blob_get(
+        e->own_text = (const char *)pp_header_cache_blob_get(
             p, t, own); /* variants often print the same */
         e->own_length = own;
         e->total_length = end - L->text_at_start;
@@ -568,11 +585,10 @@ VPRIV void pp_header_cache_region_end(pp *p)
         r->counter_position_count = L->counter_positions_at_start;
         r->segment_count = L->segments_at_start;
         if (e->has_content)
-            r->segments[r->segment_count++] =
-                (pp_header_cache_recorded_segment){
-                    L->text_at_start,
-                    p->output_mode == 2 ? r->token_count : p->output_length, e,
-                    L->counter_at_start, L->location_base_at_start};
+            r->segments[r->segment_count++] = VCC_LITERAL(
+                pp_header_cache_recorded_segment, L->text_at_start,
+                p->output_mode == 2 ? r->token_count : p->output_length, e,
+                L->counter_at_start, L->location_base_at_start);
         pp_header_cache_child_attach(p, e);
     }
 }

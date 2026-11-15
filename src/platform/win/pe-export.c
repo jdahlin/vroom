@@ -141,7 +141,7 @@ static void pe_auto_export(void)
 
 static int pe_export_cmp(const void *a, const void *b)
 {
-    const pe_export *x = a, *y = b;
+    const pe_export *x = (const pe_export *)a, *y = (const pe_export *)b;
     int c = strcmp(x->name, y->name);
     return c;
 }
@@ -355,9 +355,9 @@ static bool pe_implib_write(const char *path)
         memset(&mem, 0, sizeof mem);
         mem.name = dll;
         size_t dn = strlen(dll) + 1;
-        uint8_t *name = pe_alloc(dn + (dn & 1));
+        uint8_t *name = (uint8_t *)(pe_alloc(dn + (dn & 1)));
         memcpy(name, dll, dn);
-        static const uint8_t dir[20];
+        static const uint8_t dir[20] = {0};
         pe_mini_section secs[2] = {
             {".idata$2",
              IMAGE_SCN_ALIGN_4BYTES | IMAGE_SCN_CNT_INITIALIZED_DATA |
@@ -388,7 +388,7 @@ static bool pe_implib_write(const char *path)
              IMAGE_SYM_CLASS_EXTERNAL},
         };
         pe_mini_object(&mem.body, secs, 2, syms, 7);
-        mem.syms = pe_alloc(sizeof(char *));
+        mem.syms = (const char **)(pe_alloc(sizeof(char *)));
         mem.syms[0] = syms[0].name;
         mem.nsyms = 1;
         PE_PUSH(m, nm, capm, mem);
@@ -397,7 +397,7 @@ static bool pe_implib_write(const char *path)
     {
         memset(&mem, 0, sizeof mem);
         mem.name = dll;
-        static const uint8_t z[20];
+        static const uint8_t z[20] = {0};
         pe_mini_section secs[1] = {
             {".idata$3",
              IMAGE_SCN_ALIGN_4BYTES | IMAGE_SCN_CNT_INITIALIZED_DATA |
@@ -409,7 +409,7 @@ static bool pe_implib_write(const char *path)
         pe_mini_symbol syms[1] = {
             {"__NULL_IMPORT_DESCRIPTOR", 0, 1, IMAGE_SYM_CLASS_EXTERNAL}};
         pe_mini_object(&mem.body, secs, 1, syms, 1);
-        mem.syms = pe_alloc(sizeof(char *));
+        mem.syms = (const char **)(pe_alloc(sizeof(char *)));
         mem.syms[0] = "__NULL_IMPORT_DESCRIPTOR";
         mem.nsyms = 1;
         PE_PUSH(m, nm, capm, mem);
@@ -418,7 +418,7 @@ static bool pe_implib_write(const char *path)
     {
         memset(&mem, 0, sizeof mem);
         mem.name = dll;
-        static const uint8_t z[8];
+        static const uint8_t z[8] = {0};
         pe_mini_section secs[2] = {
             {".idata$5",
              IMAGE_SCN_ALIGN_8BYTES | IMAGE_SCN_CNT_INITIALIZED_DATA |
@@ -438,7 +438,7 @@ static bool pe_implib_write(const char *path)
         pe_mini_symbol syms[1] = {{pe_format("\x7f%s_NULL_THUNK_DATA", base), 0,
                                    1, IMAGE_SYM_CLASS_EXTERNAL}};
         pe_mini_object(&mem.body, secs, 2, syms, 1);
-        mem.syms = pe_alloc(sizeof(char *));
+        mem.syms = (const char **)(pe_alloc(sizeof(char *)));
         mem.syms[0] = syms[0].name;
         mem.nsyms = 1;
         PE_PUSH(m, nm, capm, mem);
@@ -465,7 +465,7 @@ static bool pe_implib_write(const char *path)
         pe_bytes_u16(&mem.body, (uint16_t)(type | name_type << 2));
         pe_bytes_put(&mem.body, e->name, ln + 1);
         pe_bytes_put(&mem.body, dll, dn + 1);
-        mem.syms = pe_alloc(2 * sizeof(char *));
+        mem.syms = (const char **)(pe_alloc(2 * sizeof(char *)));
         mem.syms[0] = pe_format("__imp_%s", e->name);
         mem.nsyms = 1;
         if (type == IMPORT_CODE)
@@ -476,7 +476,7 @@ static bool pe_implib_write(const char *path)
     uint32_t nsym = 0;
     for (uint32_t i = 0; i < nm; i++)
         nsym += m[i].nsyms;
-    pe_ar_sym *as = calloc(nsym ? nsym : 1, sizeof *as);
+    pe_ar_sym *as = (pe_ar_sym *)calloc(nsym ? nsym : 1, sizeof *as);
     if (!as)
         pe_oom();
     uint32_t k = 0;
@@ -488,7 +488,7 @@ static bool pe_implib_write(const char *path)
             names_size += strlen(m[i].syms[j]) + 1;
         }
     pe_bytes longnames = {0};
-    const char **hdrname = pe_alloc(nm * sizeof *hdrname);
+    const char **hdrname = (const char **)pe_alloc(nm * sizeof *hdrname);
     if (strlen(dll) + 1 > 15) {
         pe_bytes_put(&longnames, dll, strlen(dll));
         pe_bytes_put(&longnames, "/\n", 2);
@@ -501,7 +501,7 @@ static bool pe_implib_write(const char *path)
                  (second_size & 1);
     if (longnames.n)
         off += 60 + longnames.n + (longnames.n & 1);
-    uint32_t *member_off = pe_alloc(nm * sizeof *member_off);
+    uint32_t *member_off = (uint32_t *)pe_alloc(nm * sizeof *member_off);
     for (uint32_t i = 0; i < nm; i++) {
         member_off[i] = (uint32_t)off;
         off += 60 + m[i].body.n + (m[i].body.n & 1);

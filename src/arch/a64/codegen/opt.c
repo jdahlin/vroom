@@ -1,4 +1,5 @@
 /* vcc code generator: record-level clean-ups once a function is generated */
+#include "common/literal.h"
 #include "../../../codegen/codegen-internal.h"
 
 /*
@@ -322,26 +323,34 @@ static void grow(uint32_t n, uint32_t nl)
     if (n > W.cap) {
         uint32_t c = n * 2;
 
-        W.la = realloc(W.la, c * sizeof(record_register_mask));
-        W.rr = realloc(W.rr, c * sizeof(record_register_mask));
-        W.ww = realloc(W.ww, c * sizeof(record_register_mask));
-        W.blk = realloc(W.blk, c * sizeof(uint32_t));
-        W.bs = realloc(W.bs, c * sizeof(uint32_t));
-        W.be = realloc(W.be, c * sizeof(uint32_t));
-        W.s0 = realloc(W.s0, c * sizeof(int32_t));
-        W.s1 = realloc(W.s1, c * sizeof(int32_t));
-        W.in = realloc(W.in, c * sizeof(record_register_mask));
-        W.out = realloc(W.out, c * sizeof(record_register_mask));
-        W.use = realloc(W.use, c * sizeof(record_register_mask));
-        W.def = realloc(W.def, c * sizeof(record_register_mask));
-        W.ro = realloc(W.ro, c * sizeof(uint16_t));
+        W.la = (record_register_mask *)(realloc(
+            W.la, c * sizeof(record_register_mask)));
+        W.rr = (record_register_mask *)(realloc(
+            W.rr, c * sizeof(record_register_mask)));
+        W.ww = (record_register_mask *)(realloc(
+            W.ww, c * sizeof(record_register_mask)));
+        W.blk = (uint32_t *)(realloc(W.blk, c * sizeof(uint32_t)));
+        W.bs = (uint32_t *)(realloc(W.bs, c * sizeof(uint32_t)));
+        W.be = (uint32_t *)(realloc(W.be, c * sizeof(uint32_t)));
+        W.s0 = (int32_t *)(realloc(W.s0, c * sizeof(int32_t)));
+        W.s1 = (int32_t *)(realloc(W.s1, c * sizeof(int32_t)));
+        W.in = (record_register_mask *)(realloc(
+            W.in, c * sizeof(record_register_mask)));
+        W.out = (record_register_mask *)(realloc(
+            W.out, c * sizeof(record_register_mask)));
+        W.use = (record_register_mask *)(realloc(
+            W.use, c * sizeof(record_register_mask)));
+        W.def = (record_register_mask *)(realloc(
+            W.def, c * sizeof(record_register_mask)));
+        W.ro = (uint16_t *)(realloc(W.ro, c * sizeof(uint16_t)));
         if (!W.ro || !W.la || !W.rr || !W.ww || !W.blk || !W.bs || !W.be ||
             !W.s0 || !W.s1 || !W.in || !W.out || !W.use || !W.def)
             abort();
         W.cap = c;
     }
     if (nl > W.lcap) {
-        W.lpos = realloc(W.lpos, (size_t)nl * 2 * sizeof(uint32_t));
+        W.lpos =
+            (uint32_t *)(realloc(W.lpos, (size_t)nl * 2 * sizeof(uint32_t)));
         if (!W.lpos)
             abort();
         W.lcap = nl * 2;
@@ -488,7 +497,7 @@ static bool is_copy(const a64_record *i)
 static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v,
                              bool apply)
 {
-    codegen_context *e = ctx;
+    codegen_context *e = (codegen_context *)ctx;
     unsigned ro = W.ro[j];
 
     if (!apply)
@@ -631,7 +640,7 @@ static void slots(codegen_context *e)
     if (!record_slot_finish(cells))
         return;
     ncell = cells->count;
-    SL.rc = grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t));
+    SL.rc = (int32_t *)(grow_to(SL.rc, &SL.caprc, n, sizeof(int32_t)));
     for (uint32_t k = 0; k < n; k++) {
         const a64_record *i = &in[k];
         uint32_t id, cell;
@@ -1031,12 +1040,12 @@ static void exts(codegen_context *e)
         return; /* no extension to find redundant */
     if (nb > XF.cap) {
         XF.cap = nb * 2;
-        XF.in = realloc(XF.in, XF.cap * sizeof(xf));
-        XF.vis = realloc(XF.vis, XF.cap);
+        XF.in = (xf *)(realloc(XF.in, XF.cap * sizeof(xf)));
+        XF.vis = (uint8_t *)realloc(XF.vis, XF.cap);
         if (!XF.in || !XF.vis)
             abort();
     }
-    XF.red = grow_to(XF.red, &XF.capr, n, 1);
+    XF.red = (uint8_t *)grow_to(XF.red, &XF.capr, n, 1);
     memset(XF.red, 0, n);
     for (uint32_t b = 0; b < nb; b++) {
         const a64_record *l = &e->records[W.bs[b]];
@@ -1328,11 +1337,11 @@ static fdef fclass(const a64_record *d)
     int w = d->size ? 64 : 32, r = (int)d->immediate, s = d->shift;
 
     if (d->opcode == A64_OP_UBFM && s != w - 1 && r == (s + 1) % w)
-        return (fdef){FD_LSL, d->rn, w - 1 - s, 0, 0};
+        return VCC_LITERAL(fdef, FD_LSL, d->rn, w - 1 - s, 0, 0);
     if ((d->opcode == A64_OP_UBFM || d->opcode == A64_OP_SBFM) && s == w - 1 &&
         r > 0)
-        return (fdef){d->opcode == A64_OP_UBFM ? FD_LSR : FD_ASR, d->rn, r, 0,
-                      0};
+        return VCC_LITERAL(fdef, d->opcode == A64_OP_UBFM ? FD_LSR : FD_ASR,
+                           d->rn, r, 0, 0);
     if ((d->opcode == A64_OP_UBFM || d->opcode == A64_OP_SBFM) &&
         (s == 7 || s == 15 || (s == 31 && d->size))) {
         int sg = d->opcode == A64_OP_SBFM ? 4 : 0, o = sg | (s == 7    ? 0
@@ -1340,17 +1349,17 @@ static fdef fclass(const a64_record *d)
                                                                        : 2);
 
         if (r == 0)
-            return (fdef){FD_EXT, d->rn, 0, o, s + 1};
+            return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, o, s + 1);
         if (r > s && w - r <= 4) /* sbfiz/ubfiz: the field moved up by w - r */
-            return (fdef){FD_EXT, d->rn, w - r, o, s + 1};
+            return VCC_LITERAL(fdef, FD_EXT, d->rn, w - r, o, s + 1);
     }
     if (d->opcode == A64_OP_MOV && !d->size && d->rn < 31)
-        return (fdef){FD_EXT, d->rn, 0, 2, 32};
+        return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, 2, 32);
     if (d->opcode == A64_OP_ANDI &&
         (d->immediate == 0xff || d->immediate == 0xffff))
-        return (fdef){FD_EXT, d->rn, 0, d->immediate == 0xff ? 0 : 1,
-                      d->immediate == 0xff ? 8 : 16};
-    return (fdef){FD_NONE, 0, 0, 0, 0};
+        return VCC_LITERAL(fdef, FD_EXT, d->rn, 0, d->immediate == 0xff ? 0 : 1,
+                           d->immediate == 0xff ? 8 : 16);
+    return VCC_LITERAL(fdef, FD_NONE, 0, 0, 0, 0);
 }
 
 /* x16/x17 are written by records that do not say so (an immediate or an offset that does
@@ -1544,16 +1553,15 @@ static bool fold1(codegen_context *e, uint32_t k)
                     continue;
                 if (di->opcode != A64_OP_MADD && i->opcode == A64_OP_SUB)
                     continue;
-                *i = (a64_record){.opcode = di->opcode == A64_OP_MADD
-                                                ? (i->opcode == A64_OP_ADD
-                                                       ? A64_OP_MADD
-                                                       : A64_OP_MSUB)
-                                                : di->opcode,
-                                  .size = i->size,
-                                  .rd = i->rd,
-                                  .rn = di->rn,
-                                  .rm = di->rm,
-                                  .ra = (uint8_t)a};
+                *i = VCC_LITERAL(
+                    a64_record,
+                    .opcode =
+                        (uint8_t)(di->opcode == A64_OP_MADD
+                                      ? (i->opcode == A64_OP_ADD ? A64_OP_MADD
+                                                                 : A64_OP_MSUB)
+                                      : di->opcode),
+                    .size = i->size, .rd = i->rd, .rn = di->rn, .rm = di->rm,
+                    .ra = (uint8_t)a);
                 fdone(e, (uint32_t)d, k);
                 return true;
             }
@@ -1685,12 +1693,9 @@ static bool fold1(codegen_context *e, uint32_t k)
             f.sh + n > w || !fgpr(f.src) ||
             !fkept(e, (uint32_t)d, k, RB(f.src)))
             return false;
-        *i = (a64_record){.opcode = A64_OP_UBFM,
-                          .size = i->size,
-                          .rd = i->rd,
-                          .rn = (uint8_t)f.src,
-                          .immediate = f.sh,
-                          .shift = (uint8_t)(f.sh + n - 1)};
+        *i = VCC_LITERAL(a64_record, .opcode = A64_OP_UBFM, .size = i->size,
+                         .rd = i->rd, .rn = (uint8_t)f.src,
+                         .shift = (uint8_t)(f.sh + n - 1), .immediate = f.sh);
         fdone(e, (uint32_t)d, k);
         return true;
     }
@@ -1828,12 +1833,10 @@ static bool fconst(codegen_context *e, uint32_t k)
                    : !a64_logical_immediate_is_encodable(
                          i->size ? (uint64_t)v : (uint32_t)v, i->size))
                 continue;
-            *i = (a64_record){
-                .opcode = to[i->opcode],
-                .size = i->size,
-                .rd = i->rd,
-                .rn = (uint8_t)a,
-                .immediate = as ? v : (i->size ? v : (int64_t)(uint32_t)v)};
+            *i = VCC_LITERAL(a64_record, .opcode = to[i->opcode],
+                             .size = i->size, .rd = i->rd, .rn = (uint8_t)a,
+                             .immediate =
+                                 as ? v : (i->size ? v : (int64_t)(uint32_t)v));
             fdone(e, (uint32_t)d, k);
             return true;
         }
@@ -1869,11 +1872,8 @@ static void fmulk(codegen_context *e, uint32_t k)
         if (!c)
             continue;
         if (c == m) { /* -1: neg */
-            *i = (a64_record){.opcode = A64_OP_SUB,
-                              .size = i->size,
-                              .rd = i->rd,
-                              .rn = ZR,
-                              .rm = (uint8_t)a};
+            *i = VCC_LITERAL(a64_record, .opcode = A64_OP_SUB, .size = i->size,
+                             .rd = i->rd, .rn = ZR, .rm = (uint8_t)a);
             fdone(e, (uint32_t)d, k);
             return;
         }
@@ -1882,12 +1882,9 @@ static void fmulk(codegen_context *e, uint32_t k)
         if (c > 1 && !((c - 1) & (c - 2)) && sh < w) { /* (2^n + 1) << sh */
             n = __builtin_ctzll(c - 1);
             if (!sh) {
-                *i = (a64_record){.opcode = A64_OP_ADD,
-                                  .size = i->size,
-                                  .rd = i->rd,
-                                  .rn = (uint8_t)a,
-                                  .rm = (uint8_t)a,
-                                  .shift = (uint8_t)n};
+                *i = VCC_LITERAL(a64_record, .opcode = A64_OP_ADD,
+                                 .size = i->size, .rd = i->rd, .rn = (uint8_t)a,
+                                 .rm = (uint8_t)a, .shift = (uint8_t)n);
                 fdone(e, (uint32_t)d, k);
                 return;
             }
@@ -1901,30 +1898,21 @@ static void fmulk(codegen_context *e, uint32_t k)
         if (!fkept(e, (uint32_t)d, k, RB(a)) || !(W.la[d] & RB(a)))
             continue;
         if (sh) { /* add r, a, a, lsl n; lsl d, r, sh */
-            in[d] = (a64_record){.opcode = A64_OP_ADD,
-                                 .size = i->size,
-                                 .rd = (uint8_t)r,
-                                 .rn = (uint8_t)a,
-                                 .rm = (uint8_t)a,
-                                 .shift = (uint8_t)n};
-            *i = (a64_record){.opcode = A64_OP_UBFM,
-                              .size = i->size,
-                              .rd = i->rd,
-                              .rn = (uint8_t)r,
-                              .immediate = (w - sh) % w,
-                              .shift = (uint8_t)(w - 1 - sh)};
+            in[d] =
+                VCC_LITERAL(a64_record, .opcode = A64_OP_ADD, .size = i->size,
+                            .rd = (uint8_t)r, .rn = (uint8_t)a,
+                            .rm = (uint8_t)a, .shift = (uint8_t)n);
+            *i = VCC_LITERAL(a64_record, .opcode = A64_OP_UBFM, .size = i->size,
+                             .rd = i->rd, .rn = (uint8_t)r,
+                             .shift = (uint8_t)(w - 1 - sh),
+                             .immediate = (w - sh) % w);
         } else { /* lsl r, a, n; sub d, r, a */
-            in[d] = (a64_record){.opcode = A64_OP_UBFM,
-                                 .size = i->size,
-                                 .rd = (uint8_t)r,
-                                 .rn = (uint8_t)a,
-                                 .immediate = (w - n) % w,
-                                 .shift = (uint8_t)(w - 1 - n)};
-            *i = (a64_record){.opcode = A64_OP_SUB,
-                              .size = i->size,
-                              .rd = i->rd,
-                              .rn = (uint8_t)r,
-                              .rm = (uint8_t)a};
+            in[d] = VCC_LITERAL(a64_record, .opcode = A64_OP_UBFM,
+                                .size = i->size, .rd = (uint8_t)r,
+                                .rn = (uint8_t)a, .shift = (uint8_t)(w - 1 - n),
+                                .immediate = (w - n) % w);
+            *i = VCC_LITERAL(a64_record, .opcode = A64_OP_SUB, .size = i->size,
+                             .rd = i->rd, .rn = (uint8_t)r, .rm = (uint8_t)a);
         }
         W.ro[d] = (uint16_t)roles(&in[d]);
         W.rr[d] = reads(&in[d], W.ro[d]);
@@ -1965,8 +1953,8 @@ static bool fbytes(codegen_context *e, uint32_t j, int r, int s, int sz,
         if (di->size || di->rn >= 31 || di->ra == A64_LOAD_VOLATILE ||
             *nb >= FB_MAX || (s & 7))
             return false;
-        b[(*nb)++] =
-            (fbyte){(uint32_t)d, di->rn, di->immediate, s, di->condition};
+        b[(*nb)++] = VCC_LITERAL(fbyte, (uint32_t)d, di->rn, di->immediate, s,
+                                 di->condition);
         return true;
     }
     if (di->size > sz)
@@ -2085,28 +2073,24 @@ static void fbswap(codegen_context *e, uint32_t k)
         in[ch[q]].opcode = DELETED;
         W.rr[ch[q]] = W.ww[ch[q]] = 0;
     }
-    in[first] = (a64_record){.opcode = A64_OP_LD,
-                             .size = (uint8_t)lg,
-                             .rd = (uint8_t)rd,
-                             .rn = (uint8_t)base,
-                             .immediate = lo};
+    in[first] =
+        VCC_LITERAL(a64_record, .opcode = A64_OP_LD, .size = (uint8_t)lg,
+                    .rd = (uint8_t)rd, .rn = (uint8_t)base, .immediate = lo);
     W.ro[first] = (uint16_t)roles(&in[first]);
     W.rr[first] = reads(&in[first], W.ro[first]);
     W.ww[first] = writes(&in[first], W.ro[first]);
     in[k].opcode = DELETED;
     W.rr[k] = W.ww[k] = 0;
     if (!le)
-        in[at[0]] = (a64_record){.opcode = n == 2 ? A64_OP_REV16 : A64_OP_REV,
-                                 .size = (uint8_t)(n == 8 ? 1 : 0),
-                                 .rd = (uint8_t)rd,
-                                 .rn = (uint8_t)rd};
+        in[at[0]] = VCC_LITERAL(
+            a64_record, .opcode = (uint8_t)(n == 2 ? A64_OP_REV16 : A64_OP_REV),
+            .size = (uint8_t)(n == 8 ? 1 : 0), .rd = (uint8_t)rd,
+            .rn = (uint8_t)rd);
     if (sgn)
-        in[k] = (a64_record){.opcode = A64_OP_SBFM,
-                             .size = (uint8_t)sz,
-                             .rd = (uint8_t)rd,
-                             .rn = (uint8_t)rd,
-                             .immediate = 0,
-                             .shift = (uint8_t)(8 * n - 1)};
+        in[k] =
+            VCC_LITERAL(a64_record, .opcode = A64_OP_SBFM, .size = (uint8_t)sz,
+                        .rd = (uint8_t)rd, .rn = (uint8_t)rd,
+                        .shift = (uint8_t)(8 * n - 1), .immediate = 0);
     for (uint32_t q = 0; q < 2; q++) {
         uint32_t j = q ? k : at[0];
 
@@ -2168,7 +2152,7 @@ static void flags(codegen_context *e)
     if (nl > cap) {
         cap = nl + nl / 2 + 64;
         free(ls);
-        ls = malloc(2 * (size_t)cap * sizeof *ls);
+        ls = (uint32_t *)(malloc(2 * (size_t)cap * sizeof *ls));
         if (!ls)
             abort();
         lp = ls + cap;
@@ -2278,8 +2262,8 @@ static void copies(codegen_context *e)
         .flags_stride = sizeof(*W.ro),
         .opaque_mask = OP_ALL,
         .read = W.rr,
-        .write = W.ww,
         .live = W.la,
+        .write = W.ww,
         .rewrite = a64_copy_rewrite,
         .ctx = e,
     };
@@ -2334,7 +2318,7 @@ VPRIV void rp_snap(codegen_context *e)
     if (e->record_count > rp_cap) {
         free(rp_buf);
         rp_cap = e->record_count + 1024;
-        rp_buf = malloc((size_t)rp_cap * sizeof(a64_record));
+        rp_buf = (a64_record *)(malloc((size_t)rp_cap * sizeof(a64_record)));
         if (!rp_buf)
             abort();
     }

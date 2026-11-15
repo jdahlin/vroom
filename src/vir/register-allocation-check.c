@@ -444,13 +444,13 @@ uint32_t vir_alloc_check(vir_function *f, const vir_target_registers *rg,
 
     if (!nb)
         return 0;
-    c.names = calloc(f->insn_count, 4);
-    ent = calloc(nb, sizeof(*ent));
-    seen = calloc(nb, 1);
-    inwl = calloc(nb, 1);
-    wl = calloc(nb, 4);
-    st = calloc(c.location_count, 4);
-    tmp = calloc(c.location_count, 4);
+    c.names = (uint32_t *)calloc(f->insn_count, 4);
+    ent = (uint32_t **)(calloc(nb, sizeof(*ent)));
+    seen = (bool *)calloc(nb, 1);
+    inwl = (bool *)calloc(nb, 1);
+    wl = (uint32_t *)calloc(nb, 4);
+    st = (uint32_t *)calloc(c.location_count, 4);
+    tmp = (uint32_t *)calloc(c.location_count, 4);
     if (!c.names || !ent || !seen || !inwl || !wl || !st || !tmp)
         abort();
     for (uint32_t i = 0; i < f->insn_count; i++)
@@ -460,7 +460,7 @@ uint32_t vir_alloc_check(vir_function *f, const vir_target_registers *rg,
              i < f->blocks[b].first + f->blocks[b].insn_count; i++)
             if (f->insns[i].type != VIR_TYPE_VOID)
                 c.names[i] = n++;
-        ent[b] = calloc(c.location_count, 4);
+        ent[b] = (uint32_t *)calloc(c.location_count, 4);
         if (!ent[b])
             abort();
     }

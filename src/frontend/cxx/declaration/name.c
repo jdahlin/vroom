@@ -603,7 +603,8 @@ VPRIV void cxx_template_arguments_parse(cxx *c)
     c->implicit_typename = implicit;
     /* the arguments, for the caller to read at once (a nested list overwrites them) */
     if (n > c->ctargs)
-        c->targs = realloc(c->targs, (c->ctargs = n + 8) * sizeof *c->targs);
+        c->targs = (cxx_targ *)(realloc(c->targs, (c->ctargs = n + 8) *
+                                                      sizeof *c->targs));
     if (n)
         memcpy(c->targs, args, n * sizeof *args);
     c->ntargs = n;

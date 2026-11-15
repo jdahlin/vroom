@@ -10,8 +10,8 @@ VPRIV bool record_slot_values_begin(record_slot_values *s, uint32_t cells)
         return false;
     if (cells > s->capacity) {
         s->capacity = cells * 2;
-        s->values =
-            realloc(s->values, (size_t)s->capacity * sizeof(*s->values));
+        s->values = (record_slot_value *)(realloc(
+            s->values, (size_t)s->capacity * sizeof(*s->values)));
         if (!s->values)
             abort();
     }

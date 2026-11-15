@@ -23,7 +23,7 @@ static void ld_diagnostic_print(struct ld_diagnostics *d, const char *kind,
 
     va_copy(aq, ap);
     n = vsnprintf(small, sizeof small, fmt, ap);
-    if (n >= (int)sizeof small && (m = malloc((size_t)n + 1)))
+    if (n >= (int)sizeof small && (m = (char *)(malloc((size_t)n + 1))))
         vsnprintf(m, (size_t)n + 1, fmt, aq);
     va_end(aq);
     if (!m)

@@ -39,7 +39,7 @@ VPRIV void a64_ld_relocation_target_classify(struct ld_context *ctx,
 
 VPRIV void a64_ld_relocation_scan(void *arg, size_t i)
 {
-    struct ld_context *ctx = arg;
+    struct ld_context *ctx = (struct ld_context *)arg;
     ld_input_section *is = &ctx->inputs.sections.v[i];
     if (!is->rela_count || is->kind == LD_SECTION_KIND_NONE ||
         is->object == LD_NONE)

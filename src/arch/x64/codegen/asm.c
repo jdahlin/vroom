@@ -1,4 +1,5 @@
 /* vcc code generator, x86-64: inline asm in AT&T syntax (for -S) */
+#include "common/literal.h"
 #include "x64-internal.h"
 
 /*
@@ -239,8 +240,8 @@ static codegen_value x64_asm_bits_transport(codegen_context *e, codegen_value v,
                             .register_number = (uint8_t)r};
         x64_load(e, dst, &l, size, false);
         walk_value_free(e, &v);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)dst};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)dst);
     }
     if (codegen_type_is_float(e->compile_context, t)) {
         int r = walk_value_to_register(e, &v);
@@ -250,8 +251,8 @@ static codegen_value x64_asm_bits_transport(codegen_context *e, codegen_value v,
         walk_value_free(e, &v);
         r = x64_treg(e);
         x64_load(e, r, &l, size, false);
-        return (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                               .register_number = (uint8_t)r};
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number = (uint8_t)r);
     }
     return v;
 }
@@ -265,12 +266,13 @@ static void x64_asm_operand_park(codegen_context *e, x64_asm_operand *o)
         o->value = x64_asm_bits_transport(e, o->value, o->type, o->size);
     int r = walk_value_to_register(e, &o->value);
     codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                        .offset = o->parked_slot = walk_slot_temporary(e, 8, 8),
-                        .align = 8};
+                        .align = 8,
+                        .offset = o->parked_slot =
+                            walk_slot_temporary(e, 8, 8)};
 
     x64_store(e, r, &l, o->is_float ? o->size : 8);
     walk_value_free(e, &o->value);
-    o->value = (codegen_value){0};
+    o->value = VCC_LITERAL(codegen_value, 0);
 }
 
 /* a callee-saved register the asm uses: saved by the prologue */
@@ -349,7 +351,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
                 break;
             }
             size_t len = strcspn(cs, ",");
-            char *copy = alloca(len + 2);
+            char *copy = (char *)alloca(len + 2);
             copy[0] = i < a->nout ? original[0] : ' ';
             memcpy(copy + 1, cs, len);
             copy[len + 1] = 0;
@@ -383,7 +385,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
         edges[i] = walk_label_new(e);
     if (a->nlabel)
         done = walk_label_new(e);
-    op = alloca((nops + 1) * sizeof(x64_asm_operand));
+    op = (x64_asm_operand *)(alloca((nops + 1) * sizeof(x64_asm_operand)));
     memset(op, 0, (nops + 1) * sizeof(x64_asm_operand));
     /* the fixed registers: clobbers and register constraints */
     for (uint32_t i = 0; i < a->nclob; i++) {
@@ -452,9 +454,9 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
         if (fixed & (1u << r)) {
             if ((X->temporaries_in_use | homes) & (1u << r)) {
                 codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
+                                    .align = 8,
                                     .offset = sslot[r] = walk_slot_temporary(
-                                        e, r >= XMM0 ? 16 : 8, 16),
-                                    .align = 8};
+                                        e, r >= XMM0 ? 16 : 8, 16)};
 
                 x64_record_emit_memory(e, X64_OP_ST, r >= XMM0 ? 16 : 8, r, &s,
                                        false);
@@ -528,9 +530,9 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
             /* the address waits in a slot: four outputs through pointers and four fixed
 			   registers (cpuid) would leave no temporaries */
             codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
+                                .align = 8,
                                 .offset = o->address_parked_slot =
-                                    walk_slot_temporary(e, 8, 8),
-                                .align = 8};
+                                    walk_slot_temporary(e, 8, 8)};
 
             x64_record_emit_memory(e, X64_OP_ST, 8, o->lvalue.register_number,
                                    &s, false);
@@ -652,10 +654,10 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
                          (address || codegen_type_is_array(c, N(an)->ty)) &&
                          !codegen_symbol_is_local_variable(c, N(an)->a)))) {
                 /* &sym under -fPIC: an immediate, as clang (the asm names the symbol) */
-                v = (codegen_value){.kind = CODEGEN_VALUE_ADDRESS,
-                                    .reference = CODEGEN_REFERENCE_MAKE(
-                                        CODEGEN_REFERENCE_SYMBOL,
-                                        codegen_symbol_canonical(c, N(an)->a))};
+                v = VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_ADDRESS,
+                                .reference = CODEGEN_REFERENCE_MAKE(
+                                    CODEGEN_REFERENCE_SYMBOL,
+                                    codegen_symbol_canonical(c, N(an)->a)));
             } else {
                 v = walk_value_emit(e, en);
             }
@@ -684,11 +686,10 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
                                      "impossible constraint in asm: '%s'", cs);
             /* a value for a memory operand: in a slot */
             o->kind = X64_ASM_OPERAND_MEMORY;
-            o->lvalue = (codegen_lvalue){
-                .kind = CODEGEN_LVALUE_FRAME,
+            o->lvalue = VCC_LITERAL(
+                codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 16,
                 .offset = walk_slot_temporary(
-                    e, o->size > 8 ? (uint64_t)o->size : 8, 16),
-                .align = 16};
+                    e, o->size > 8 ? (uint64_t)o->size : 8, 16));
             if (walk_type_is_in_memory(e, o->type)) {
                 v = walk_lvalue_store_memory(e, &o->lvalue, o->type, v);
                 walk_value_free(e, &v);
@@ -714,9 +715,9 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
         if (o->fixed) {
             /* parked until the fixed registers are loaded, last */
             codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
+                                .align = 8,
                                 .offset = o->parked_slot =
-                                    walk_slot_temporary(e, 8, 8),
-                                .align = 8};
+                                    walk_slot_temporary(e, 8, 8)};
             int r = walk_value_to_register(e, &v);
 
             x64_record_emit_memory(e, X64_OP_ST, o->is_float ? o->size : 8, r,
@@ -742,16 +743,17 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
         } else {
             o->register_number =
                 (uint8_t)(o->is_float ? x64_ftreg(e) : x64_treg(e));
-            o->value = (codegen_value){.kind = CODEGEN_VALUE_REGISTER,
-                                       .register_number = o->register_number};
+            o->value =
+                VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                            .register_number = o->register_number);
         }
     }
     /* the fixed registers loaded last: nothing evaluated after can clobber them */
     for (uint32_t i = 0; i < nops; i++)
         if (op[i].parked_slot) {
             codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = op[i].parked_slot,
-                                .align = 8};
+                                .align = 8,
+                                .offset = op[i].parked_slot};
 
             x64_record_emit_memory(e, X64_OP_LD,
                                    op[i].is_float ? op[i].size : 8,
@@ -1033,8 +1035,8 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
                 continue;
             if (o->address_parked_slot) {
                 codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = o->address_parked_slot,
-                                    .align = 8};
+                                    .align = 8,
+                                    .offset = o->address_parked_slot};
 
                 o->lvalue.register_number = (uint8_t)x64_treg(e);
                 x64_record_emit_memory(e, X64_OP_LD, 8,
@@ -1056,8 +1058,8 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
         for (int r = 0; r < 32; r++)
             if (saved & (1u << r)) {
                 codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
-                                    .offset = sslot[r],
-                                    .align = 8};
+                                    .align = 8,
+                                    .offset = sslot[r]};
 
                 x64_record_emit_memory(e, X64_OP_LD, r >= XMM0 ? 16 : 8, r, &s,
                                        false);

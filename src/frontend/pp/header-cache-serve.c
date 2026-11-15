@@ -1,4 +1,5 @@
 /* vcc preprocessor: header cache: serving a valid entry, as tokens to pp_token_next or as text to pp_text_render */
+#include "common/literal.h"
 #include "pp-internal.h"
 
 static void pp_header_cache_serve_push(pp *p, const pp_header_cache_entry *e,
@@ -41,7 +42,8 @@ static __attribute__((noinline)) void
 pp_header_cache_counter_spell(pp *p, const pp_header_cache_entry *e,
                               uint32_t *ci, uint32_t k, unsigned cbase, ptok *t)
 {
-    char *b = varena_alloc(&p->permanent_region, t->len + 24 * 4 + 32), *w = b;
+    char *b = (char *)varena_alloc(&p->permanent_region, t->len + 24 * 4 + 32),
+         *w = b;
     uint32_t at = 0;
 
     while (*ci < e->counter_run_count && e->counter_runs[*ci].off == k) {
@@ -109,15 +111,8 @@ int pp_lazy_body_skip(pp *p, const ptok *lb, pp_lazy *z)
     }
     if (lo >= e->brace_pair_count || e->brace_pairs[2 * lo] != k)
         return 0;
-    *z = (pp_lazy){e,
-                   k,
-                   e->brace_pairs[2 * lo + 1],
-                   c->location,
-                   c->counter_base,
-                   c->next_counter_run,
-                   k,
-                   0,
-                   0};
+    *z = VCC_LITERAL(pp_lazy, e, k, e->brace_pairs[2 * lo + 1], c->location,
+                     c->counter_base, c->next_counter_run, k, 0, 0);
     z->rloc = e->own_tokens[z->close].loc
                   ? c->location + e->own_tokens[z->close].loc - 1
                   : 0;
@@ -132,7 +127,7 @@ int pp_lazy_body_skip(pp *p, const ptok *lb, pp_lazy *z)
 
 void pp_lazy_body_token_get(pp *p, pp_lazy *z, ptok *t)
 {
-    const pp_header_cache_entry *e = z->e;
+    const pp_header_cache_entry *e = (const pp_header_cache_entry *)z->e;
     uint32_t k = z->k++;
 
     pp_header_cache_token_load(t, &e->own_tokens[k], e->escape_tokens,
@@ -176,10 +171,10 @@ static void pp_header_cache_entry_apply(pp *p, const pp_header_cache_entry *e)
                 if (r->segment_count < PP_HEADER_CACHE_SEGMENT_MAX &&
                     r->token_count + e->total_length <
                         PP_HEADER_CACHE_TOKEN_MAX) {
-                    r->segments[r->segment_count++] =
-                        (pp_header_cache_recorded_segment){
-                            r->token_count, r->token_count + e->total_length, e,
-                            c0, p->next_location_base};
+                    r->segments[r->segment_count++] = VCC_LITERAL(
+                        pp_header_cache_recorded_segment, r->token_count,
+                        r->token_count + e->total_length, e, c0,
+                        p->next_location_base);
                     r->token_count += e->total_length;
                     reserve = true;
                 } else {
@@ -207,8 +202,8 @@ static void pp_header_cache_entry_apply(pp *p, const pp_header_cache_entry *e)
         if (L) {
             if (r->segment_count < PP_HEADER_CACHE_SEGMENT_MAX)
                 r->segments[r->segment_count++] =
-                    (pp_header_cache_recorded_segment){st, p->output_length, e,
-                                                       c0, 0};
+                    VCC_LITERAL(pp_header_cache_recorded_segment, st,
+                                p->output_length, e, c0, 0);
             else
                 PP_HEADER_CACHE_REGION_REJECT(p);
         }
@@ -241,9 +236,8 @@ static void pp_header_cache_entry_apply(pp *p, const pp_header_cache_entry *e)
 
             if (r->counter_read_count < PP_HEADER_CACHE_COUNTER_READ_MAX)
                 r->counter_reads[r->counter_read_count++] =
-                    (pp_header_cache_counter_read){c->s, c->len, c->off,
-                                                   c->digit_length,
-                                                   c0 + c->relative};
+                    VCC_LITERAL(pp_header_cache_counter_read, c->s, c->len,
+                                c->off, c->digit_length, c0 + c->relative);
             else
                 PP_HEADER_CACHE_REGION_REJECT(p);
         }

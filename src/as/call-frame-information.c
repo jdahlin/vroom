@@ -7,6 +7,7 @@
  * ranges are label differences that need the final layout.  Errors (an unfinished .cfi_startproc,
  * CFI across sections, more than 8 distinct CIEs, .debug_frame) fail the assembly.  DWARF register
  * numbers follow the object's machine (arm64 or x86-64). */
+#include "common/literal.h"
 #include "as-internal.h"
 
 /* ---------------------------------------------------------------- CFI */
@@ -118,7 +119,8 @@ static struct as_cfi_instruction *as_cfi_instruction_push(as_context *a,
         uint32_t nc =
             a->cfi_instruction_capacity ? a->cfi_instruction_capacity * 2 : 256;
         struct as_cfi_instruction *t =
-            as_region_alloc(&a->definitions, sizeof *t * nc);
+            (struct as_cfi_instruction *)as_region_alloc(&a->definitions,
+                                                         sizeof *t * nc);
         if (a->cfi_instruction_count)
             memcpy(t, a->cfi_instructions,
                    sizeof *t * a->cfi_instruction_count);
@@ -169,7 +171,8 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p,
                               ? a->frame_description_capacity * 2
                               : 64;
             struct as_frame_description *t =
-                as_region_alloc(&a->definitions, sizeof *t * nc);
+                (struct as_frame_description *)as_region_alloc(&a->definitions,
+                                                               sizeof *t * nc);
             if (a->frame_description_count)
                 memcpy(t, a->frame_descriptions,
                        sizeof *t * a->frame_description_count);
@@ -250,7 +253,8 @@ VPRIV int as_directive_cfi(as_context *a, as_text w, const char *p,
         return 0;
     }
     if (AS_CFI_DIRECTIVE_IS("cfi_escape")) {
-        uint8_t *b = as_region_alloc(&a->definitions, (size_t)(e - p) + 1);
+        uint8_t *b =
+            (uint8_t *)(as_region_alloc(&a->definitions, (size_t)(e - p) + 1));
         uint32_t n = 0;
         while (p < e) {
             int64_t v;
@@ -354,9 +358,9 @@ VPRIV void as_cfi_frame_emit(as_context *a)
     struct {
         size_t off;
         as_value v;
-    } *ptrs = as_region_alloc(&a->definitions,
-                              sizeof *ptrs *
-                                  (2 * (size_t)a->frame_description_count + 8));
+    } *ptrs = (__typeof__(ptrs))as_region_alloc(
+        &a->definitions,
+        sizeof *ptrs * (2 * (size_t)a->frame_description_count + 8));
     uint32_t nptrs = 0;
     size_t cap = 64;
     for (uint32_t i = 0; i < a->frame_description_count; i++) {
@@ -371,12 +375,12 @@ VPRIV void as_cfi_frame_emit(as_context *a)
     for (uint32_t i = 0; i < a->cfi_instruction_count; i++)
         if (a->cfi_instructions[i].operation == AS_CFI_ESCAPE)
             cap += (size_t)a->cfi_instructions[i].offset;
-    as_byte_span b = {as_region_alloc(&a->definitions, cap), 0};
-    size_t *pcbs = as_region_alloc(&a->definitions,
-                                   sizeof(size_t) * a->frame_description_count);
+    as_byte_span b = {(uint8_t *)as_region_alloc(&a->definitions, cap), 0};
+    size_t *pcbs = (size_t *)(as_region_alloc(
+        &a->definitions, sizeof(size_t) * a->frame_description_count));
     /* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
-    uint32_t *ord = as_region_alloc(
-        &a->definitions, sizeof(uint32_t) * a->frame_description_count);
+    uint32_t *ord = (uint32_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint32_t) * a->frame_description_count));
     for (uint32_t i = 0; i < a->frame_description_count; i++) {
         struct as_frame_description *f = &a->frame_descriptions[i];
         uint32_t key = (uint32_t)f->is_signal << 30 |
@@ -616,9 +620,9 @@ VPRIV void as_cfi_frame_emit(as_context *a)
             uint32_t i = ord[oi];
             struct as_frame_description *f = &a->frame_descriptions[i];
             elf_fixup(o, fr, at + pcbs[i], q + pcbs[i], R_X86_64_64,
-                      (as_value){f->start, 0, 0});
+                      VCC_LITERAL(as_value, f->start, 0, 0));
             elf_fixup(o, fr, at + pcbs[i] + 8, q + pcbs[i] + 8, R_X86_64_64,
-                      (as_value){f->end, f->start, 0});
+                      VCC_LITERAL(as_value, f->end, f->start, 0));
         }
         return;
     }
@@ -630,16 +634,18 @@ VPRIV void as_cfi_frame_emit(as_context *a)
             size_t off;
             uint32_t type;
             as_value v;
-        } *fix = as_region_alloc(&a->definitions, sizeof *fix * (nfix + 1)), t;
+        } *fix = (__typeof__(fix))as_region_alloc(&a->definitions,
+                                                  sizeof *fix * (nfix + 1)),
+          t;
 
         for (uint32_t i = 0; i < a->frame_description_count; i++) {
             struct as_frame_description *f = &a->frame_descriptions[i];
             fix[n].off = pcbs[i],
             fix[n].type = x86 ? R_X86_64_PC32 : R_AARCH64_PREL32,
-            fix[n++].v = (as_value){f->start, 0, 0};
+            fix[n++].v = VCC_LITERAL(as_value, f->start, 0, 0);
             fix[n].off = pcbs[i] + 4,
             fix[n].type = x86 ? R_X86_64_32 : R_AARCH64_ABS32,
-            fix[n++].v = (as_value){f->end, f->start, 0};
+            fix[n++].v = VCC_LITERAL(as_value, f->end, f->start, 0);
         }
         for (uint32_t k = 0; k < nptrs; k++)
             fix[n].off = ptrs[k].off,

@@ -231,7 +231,7 @@ static void pe_def_file_read(const char *path)
             close(fd);
         return;
     }
-    char *text = pe_alloc((size_t)st.st_size + 1);
+    char *text = (char *)(pe_alloc((size_t)st.st_size + 1));
     ssize_t got = read(fd, text, (size_t)st.st_size);
     close(fd);
     if (got < 0)

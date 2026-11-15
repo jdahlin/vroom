@@ -4,7 +4,7 @@
 
 VPRIV ld_expression *ld_script_expression_create(uint8_t op)
 {
-    ld_expression *e = ld_region_alloc(sizeof *e);
+    ld_expression *e = (ld_expression *)ld_region_alloc(sizeof *e);
     e->operation = op;
     return e;
 }

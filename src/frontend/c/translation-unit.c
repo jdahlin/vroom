@@ -30,45 +30,61 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
     c->ext_off = -1; /* (cc_extension_is_enabled: computed at its first use) */
     c->o = o;
     cc_regions = vjob_region_pool_take(&cc_region_pool);
-    c->ty = vjob_region_acquire(&cc_regions[0], (size_t)1 << 30, "cc.ty");
-    c->params =
-        vjob_region_acquire(&cc_regions[1], (size_t)1 << 28, "cc.params");
-    c->tags = vjob_region_acquire(&cc_regions[2], (size_t)1 << 28, "cc.tags");
-    c->syms = vjob_region_acquire(&cc_regions[3], (size_t)1 << 30, "cc.syms");
-    c->nodes = vjob_region_acquire(&cc_regions[4], (size_t)1 << 32, "cc.nodes");
-    c->lists = vjob_region_acquire(&cc_regions[5], (size_t)1 << 30, "cc.lists");
-    c->ipool = vjob_region_acquire(&cc_regions[6], (size_t)1 << 30, "cc.ipool");
-    c->fpool = vjob_region_acquire(&cc_regions[7], (size_t)1 << 26, "cc.fpool");
-    c->strs = vjob_region_acquire(&cc_regions[8], (size_t)1 << 28, "cc.strs");
-    c->labels =
-        vjob_region_acquire(&cc_regions[9], (size_t)1 << 26, "cc.labels");
-    c->attr = vjob_region_acquire(&cc_regions[10], (size_t)1 << 28, "cc.attr");
-    c->asms = vjob_region_acquire(&cc_regions[11], (size_t)1 << 28, "cc.asms");
-    c->sstack =
-        vjob_region_acquire(&cc_regions[12], (size_t)1 << 28, "cc.sstack");
-    c->toplevel =
-        vjob_region_acquire(&cc_regions[13], (size_t)1 << 26, "cc.toplevel");
-    c->tlasm =
-        vjob_region_acquire(&cc_regions[14], (size_t)1 << 24, "cc.tlasm");
-    c->heap = c->hp =
-        vjob_region_acquire(&cc_regions[15], (size_t)1 << 32, "cc.heap");
-    c->ptrc = vjob_region_acquire(&cc_regions[16], (size_t)1 << 30, "cc.ptrc");
-    c->span = vjob_region_acquire(&cc_regions[17], (size_t)1 << 31, "cc.span");
-    c->lzt = vjob_region_acquire(&cc_regions[18], (size_t)1 << 32, "cc.lzt");
-    c->lzf = vjob_region_acquire(&cc_regions[19], (size_t)1 << 28, "cc.lzf");
-    c->lzs = vjob_region_acquire(&cc_regions[20], (size_t)1 << 31, "cc.lzs");
-    c->paren =
-        vjob_region_acquire(&cc_regions[21], (size_t)1 << 30, "cc.paren");
+    c->ty = (ctype *)(vjob_region_acquire(&cc_regions[0], (size_t)1 << 30,
+                                          "cc.ty"));
+    c->params = (ast_qualified_type *)(vjob_region_acquire(
+        &cc_regions[1], (size_t)1 << 28, "cc.params"));
+    c->tags = (tag *)(vjob_region_acquire(&cc_regions[2], (size_t)1 << 28,
+                                          "cc.tags"));
+    c->syms = (sym *)(vjob_region_acquire(&cc_regions[3], (size_t)1 << 30,
+                                          "cc.syms"));
+    c->nodes = (node *)(vjob_region_acquire(&cc_regions[4], (size_t)1 << 32,
+                                            "cc.nodes"));
+    c->lists = (uint32_t *)(vjob_region_acquire(&cc_regions[5], (size_t)1 << 30,
+                                                "cc.lists"));
+    c->ipool = (i128 *)(vjob_region_acquire(&cc_regions[6], (size_t)1 << 30,
+                                            "cc.ipool"));
+    c->fpool = (double *)(vjob_region_acquire(&cc_regions[7], (size_t)1 << 26,
+                                              "cc.fpool"));
+    c->strs = (cstr *)(vjob_region_acquire(&cc_regions[8], (size_t)1 << 28,
+                                           "cc.strs"));
+    c->labels = (label *)(vjob_region_acquire(&cc_regions[9], (size_t)1 << 26,
+                                              "cc.labels"));
+    c->attr = (attrs *)(vjob_region_acquire(&cc_regions[10], (size_t)1 << 28,
+                                            "cc.attr"));
+    c->asms = (ast_asm_statement *)(vjob_region_acquire(
+        &cc_regions[11], (size_t)1 << 28, "cc.asms"));
+    c->sstack = (uint32_t *)(vjob_region_acquire(&cc_regions[12],
+                                                 (size_t)1 << 28, "cc.sstack"));
+    c->toplevel = (uint32_t *)(vjob_region_acquire(
+        &cc_regions[13], (size_t)1 << 26, "cc.toplevel"));
+    c->tlasm = (uint32_t *)(vjob_region_acquire(&cc_regions[14],
+                                                (size_t)1 << 24, "cc.tlasm"));
+    c->heap = c->hp = (char *)(vjob_region_acquire(&cc_regions[15],
+                                                   (size_t)1 << 32, "cc.heap"));
+    c->ptrc = (uint32_t *)(vjob_region_acquire(&cc_regions[16], (size_t)1 << 30,
+                                               "cc.ptrc"));
+    c->span = (diag_span *)(vjob_region_acquire(&cc_regions[17],
+                                                (size_t)1 << 31, "cc.span"));
+    c->lzt = (cc_lazy_token *)(vjob_region_acquire(&cc_regions[18],
+                                                   (size_t)1 << 32, "cc.lzt"));
+    c->lzf = (cc_lazy_function *)(vjob_region_acquire(
+        &cc_regions[19], (size_t)1 << 28, "cc.lzf"));
+    c->lzs = (char *)(vjob_region_acquire(&cc_regions[20], (size_t)1 << 31,
+                                          "cc.lzs"));
+    c->paren = (struct cc_node_parentheses *)(vjob_region_acquire(
+        &cc_regions[21], (size_t)1 << 30, "cc.paren"));
     c->hend = c->heap + ((size_t)1 << 32);
     c->capdops = 4096;
-    c->dops = cc_heap_allocate(c, c->capdops * sizeof(cc_declarator_operation));
+    c->dops = (struct cc_declarator_operation *)(cc_heap_allocate(
+        c, c->capdops * sizeof(cc_declarator_operation)));
     c->ndops = 0;
     cc_record_scratch_thread.n = 0;
     c->tyhcap = 1 << 16;
-    c->tyhash = cc_heap_allocate(c, c->tyhcap * sizeof(uint32_t));
+    c->tyhash = (uint32_t *)(cc_heap_allocate(c, c->tyhcap * sizeof(uint32_t)));
     memset(c->tyhash, 0, c->tyhcap * sizeof(uint32_t));
     c->fnhcap = 1 << 14;
-    c->fnhash = cc_heap_allocate(c, c->fnhcap * sizeof(uint32_t));
+    c->fnhash = (uint32_t *)(cc_heap_allocate(c, c->fnhcap * sizeof(uint32_t)));
     memset(c->fnhash, 0, c->fnhcap * sizeof(uint32_t));
     /* index 0 of every table is "none" */
     c->nsym = c->nnode = c->ntag = c->nlabel = c->nattr = c->nstr = 1;
@@ -77,8 +93,8 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
     /* basic types: index == kind */
     for (int k = 0; k < AST_TYPE_POINTER; k++) {
         ctype t = {.kind = (uint8_t)k,
-                   .size = cc_basic_types[k].size,
-                   .align = cc_basic_types[k].align};
+                   .align = cc_basic_types[k].align,
+                   .size = cc_basic_types[k].size};
 
         if (k == AST_TYPE_LONG_DOUBLE && o->target == PP_DARWIN)
             t.size = 8, t.align = 8;
@@ -149,7 +165,7 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
             ast_qualified_type vp =
                 cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 
-            r->f = cc_heap_allocate(c, 4 * sizeof(field));
+            r->f = (field *)(cc_heap_allocate(c, 4 * sizeof(field)));
             memset(r->f, 0, 4 * sizeof(field));
             r->nfield = 4;
             r->f[0].ty = r->f[1].ty = cc_type_basic(AST_TYPE_UNSIGNED_INT);
@@ -168,7 +184,7 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
             ast_qualified_type vp =
                 cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
 
-            r->f = cc_heap_allocate(c, 5 * sizeof(field));
+            r->f = (field *)(cc_heap_allocate(c, 5 * sizeof(field)));
             memset(r->f, 0, 5 * sizeof(field));
             r->nfield = 5;
             r->f[0].ty = r->f[1].ty = r->f[2].ty = vp;
@@ -221,8 +237,8 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
 				   register or its 256-bit predicate. */
                 bool pred = i >= 13;
                 ctype t = {.kind = AST_TYPE_SVE_BUILTIN,
-                           .size = pred ? 32 : 256,
-                           .align = pred ? 2 : 16,
+                           .align = pred ? 2u : 16u,
+                           .size = pred ? 32u : 256u,
                            .aux = name};
 
                 s = cc_symbol_new(c, AST_SYMBOL_TYPEDEF, name,
@@ -303,7 +319,7 @@ static void cc_tables_init(void)
 int cc_translation_unit_run(pp *p, const cc_options *o)
 {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
-    cc *c = malloc(sizeof(cc));
+    cc *c = (cc *)(malloc(sizeof(cc)));
     int errors;
 
     pthread_once(&once, cc_tables_init); /* vccd runs TUs on many threads */
