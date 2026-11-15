@@ -3685,3 +3685,176 @@ Antalet anrop sjönk tydligt utan någon tydlig tidsvinst vid -O3.
 Assembly var byteidentisk med basen efter varje steg vid både -O2 och -O3
 på x86-64, samt efter sista steget vid -O3 på arm64 med VIR-kontroller.
 TSVC gav samma 151 kontrollsummor som clang vid -O1, -O2 och -O3.
+
+### SQLite-profiler från prestandagrenen (2026-11-15)
+
+Mätningarna nedan gjordes på `perf/vir-x86-sqlite` före portningen till main.
+Funktionsnamn, miljövariabler och revisionsnummer avser den grenen.
+Avsnittet ovan redovisar ommätningen på main. Den ärvda framåtkanten
+landade i `f8662d04`; de tre övriga registerallokatorförsöken i tabellen
+nedan mättes som separata prototyper.
+
+#### V2: arbetsminne i vw_simplify (2026-11-15)
+
+Förenklingspasset storleksberäknar sina tabeller före körning. Varje emit-tråd
+återanvänder ett sammanhängande arbetsminne mellan funktionerna i TU:n och
+nollställer bara de tabeller som kräver det. Ägaren finns i byggaren också om
+passet lämnas med `longjmp`; minnet frigörs när emit-kontexten stängs.
+
+SQLite 3.50.4, `sqlite3.c`, 1 422 funktioner sänkta genom VIR. Före är
+`ee8154be`. Linux x86-64, Ryzen 7 9700X, clang 23, en kärna,
+`VCC_THREADS=1 VCC_VIR=bl vpp --target=x86_64-linux-gnu -O2 -S` med
+`-DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION` och systemhuvuden
+som i `bench/sqlite/vir-x86.py`. Tolv omgångar med slumpad ordning,
+ny process per kompilering, varm filcache, utdata till /dev/null. Tid och
+max-RSS är medianer. Separata körningar räknade anrop från vcc:s objekt med
+länkarens `--wrap` och skrev assembler som var byte-identisk i alla fyra fall.
+
+| Pass | Heap | malloc + calloc + realloc | free | Tid (ms) | Max-RSS (MiB) |
+|---|---|---:|---:|---:|---:|
+| Före | glibc 2.43 | 53 942 | 104 254 | 359,3 | 171,1 |
+| Arbetsminne | glibc 2.43 | 20 471 | 70 771 | 353,8 | 172,8 |
+| Före | mimalloc 3.2.8 | 53 942 | 104 254 | 360,6 | 186,5 |
+| Arbetsminne | mimalloc 3.2.8 | 20 471 | 70 771 | 356,9 | 184,8 |
+
+Arbetsminnet tog bort 62 % av allokeringsanropen. Med glibc steg max-RSS
+med 1,7 MiB. Tidsskillnaden var liten jämfört med spridningen (351–367 ms
+före, 350–384 ms efter). Att byta heap med `LD_PRELOAD=libmimalloc.so.3`
+gav högre max-RSS i båda fallen. Mätningen gäller en TU och en tråd.
+
+#### Återstående allokeringar i sqlite3.c
+
+På `14d6169a`, med samma indata och flaggor, loggades returadress och begärd
+storlek från länkarens fyra wrappers. `llvm-symbolizer` med radtabeller gav
+anropsstället även för inlinade funktioner. Summan blev åter 8 909 malloc,
+8 269 calloc och 3 293 realloc, och assemblerfilen var byte-identisk.
+
+| Arbetsdata | Anrop | Bedömning |
+|---|---:|---|
+| `vw_promote`, bad/sf/fof | 7 764 | Tre tabeller med känd storlek vid inträdet, 2 588 gånger. Samma arbetsminne som förenklingen kan användas. Nollställ sf. Hela bad och fof skrivs före läsning. |
+| `vw_promote`, fd/fnx/ms och cur/cst | 4 376 | Fält- och memset-listorna växer under passet. cur/cst får sin storlek först när fälten är kända. En ny get kan ogiltigförklara de tre första vyerna. |
+| `vw_deadparams`, stk | 1 522 | En stack utan nollställning. De sex tillväxterna av byggarens map är separata. |
+| `vw_condmerge`, cnt | 1 427 | En tabell med känd storlek, måste nollställas. |
+| `vw_split`, o | 642 | Temporär blockordning, kopieras tillbaka innan passet lämnas. |
+| `vw_vectorize`, hs/I/inl | 1 969 | hs lever medan I/inl skapas först vid en lämplig slinga. Enbart I stod för 35,45 MiB sammanlagt på 271 calloc. De 171 tillväxterna av touch tillkommer. |
+
+Första försöket bör vara de tre fasta tabellerna i promotion samt stk, cnt
+och o. Passen körs i följd. Återspelning av storlekarna i faktisk ordning,
+med fyra-byte-tabellerna först i promotion, ersätter 11 355 anrop och ger
+14 tillväxter av den gemensamma bufferten mot dagens 13. Det skulle ge
+9 117 allokeringsanrop totalt med samma maximala buffert (6 176 753 byte).
+Detta är en beräkning på spåret. Tid och RSS för en sådan ändring återstår
+att mäta. Hashtabellens ombyggnad (`vw_hslot`, 570 temporära kopior) kan ske
+inuti promotion och behöver en egen livstid.
+
+De fyra passen använder nu samma arbetsminne som förenklingen. På samma
+sqlite3.c, tolv omgångar enligt ovan med `2c17bf78` som bas, blev antalet
+allokeringsanrop precis 9 117 (4 157 malloc, 1 666 calloc, 3 294 realloc),
+mot 20 471 före. Antalet free sjönk från 70 771 till 59 416. Alla fyra
+assemblerfilerna var byte-identiska.
+
+| Heap | Tid före → efter (median, ms) | Max-RSS före → efter (median, KiB) |
+|---|---:|---:|
+| glibc 2.43 | 350,7 → 351,1 | 176 928 → 176 894 |
+| mimalloc 3.2.8 | 353,6 → 352,7 | 189 170 → 189 072 |
+
+Det ger 55,5 % färre anrop. Skillnaderna i tid och max-RSS ligger inom
+spridningen mellan körningarna för båda heaparna.
+
+#### CPU-profil efter delat arbetsminne (2026-11-15)
+
+Mätt på en ren kopia av `0d72765e`, med samma SQLite 3.50.4-TU, flaggor och
+glibc som ovan. Ryzen 7 9700X, en kärna, varm filcache, ny process varje gång,
+clang 23 med produktionsflaggor och radtabeller. Tio körningar med `perf stat`
+gav i medeltal 351,1 ms väggtid, 1,739 miljarder användarcykler och 3,536
+miljarder instruktioner. I tio separata körningar var medianen för användartid
+313 ms och för systemtid 37 ms.
+
+Tio kompileringar med `perf record -e cycles:u -c 700001 --call-graph dwarf,4096`
+gav 25 104 stickprov och inga tappade prov. Andelar av hela inspelningen,
+avrundade. Egen andel inkluderar inlinad kod. Anropskedjorna överlappar och
+kan vara avkortade vid stackgränsen.
+
+| Funktion | Egen andel | Med anrop |
+|---|---:|---:|
+| vw_emit | 5,1 % | 42,4 % |
+| vir_alloc | 7,2 % | 16,7 % |
+| vw_simplify | 9,8 % | 10,2 % |
+| vw_promote | 6,3 % | 7,6 % |
+| vw_readv | 3,5 % | 6,6 % |
+| vir_canon | 3,9 % | 5,0 % |
+| vw_hslot | 4,0 % | 4,1 % |
+
+Radtabellerna förklarar var de inlinade cyklerna hamnar. Av 1 801 egna prov
+i vir_alloc låg 795 i instr med inlinade hjälpare och 723 i enter. Av 2 468
+egna prov i vw_simplify låg 968 i vw_cse_blk med inlinade hjälpare.
+
+Vektoriseraren mättes i två separata instrumenterade byggen. Båda gav samma
+assembler som det oinstrumenterade bygget, byte för byte. För tid användes
+CLOCK_MONOTONIC_RAW kring varje operation, tolv körningar, median per TU.
+Hela passet tog cirka 1,54 ms över 1 427 anrop. S.I:s 271 calloc tog cirka
+0,56 ms, inklusive eventuell nollning i libc. De 634 explicita
+rensningsslingorna tog cirka 5 µs sammanlagt, och free av S.I cirka 20 µs.
+Råmedianerna för de tre regionerna var 568, 15 och 25 µs. Två angränsande
+klockavläsningar kostade cirka 16 ns. Den justerade siffran för rensningen
+är därför ungefärlig. Senare sidfel tillskrivs inte calloc.
+
+För täckning markerades varje index som lästes eller skrevs av vektoriseraren,
+med en separat markeringstabell per funktion. Av 663 786 reserverade poster
+à 56 byte användes 3 448 distinkta poster (0,52 %). I 100 av 271 tabeller
+användes ingen post. I den största användes 58 av 46 591. Efter slingorna
+skrevs 3 667 poster med nollor, inklusive återbesök. De 35,45 MiB som
+begärdes sammanlagt säger därmed litet om kostnaden för rensningen.
+Registerallokeringens instr/enter och förenklingens vw_cse_blk är större
+mål för arbetet med kompileringstid.
+
+#### Sen allokering av vektoriserarens värdetabell (2026-11-15)
+
+Värdetabellen S.I skapas när den första godtagna huvudparametern behöver
+en post, eller när passet når klassificeringen av instruktionerna. Den
+återanvänds för senare slingor i samma funktion. Funktionen kan fortfarande
+avstå från resten av vektoriseringen om allokeringen misslyckas.
+
+På samma sqlite3.c med glibc, mot `d572bd86`, sjönk antalet tabeller från
+271 till 171. Sammanlagd begärd storlek sjönk från 35,45 till 29,34 MiB.
+Tio separata instrumenterade körningar gav 0,574 → 0,526 ms i själva
+allokeringsanropen (råmedian per TU). Tolv omgångar med de oinstrumenterade
+binärerna i slumpad ordning gav 356,6 → 357,2 ms kompileringstid och
+176 924 → 176 968 KiB max-RSS (medianer). Ingen påvisbar skillnad i tid
+eller max-RSS. SQLite-assemblerfilen var byte-identisk. TSVC på x86-64
+matchade clangs 151 kontrollsummor med 83 vektoriserade slingor.
+
+#### V4: var enter och instr tar tid i sqlite3.c (2026-11-15)
+
+Ren `0f8db22e`, samma SQLite, x86-64, glibc och flaggor som i CPU-profilen
+ovan. Åtta kompileringar på en kärna med ett prov per 260 003 användarcykler,
+DWARF-stackar på 4 KiB. Av 54 868 kompilatorprov kunde 2 997 hänföras till
+enter och 2 385 till instr via vir_alloc. Nedan räknas även anropade hjälpare.
+Andelarna är ungefärliga eftersom stackar kan vara avkortade och radtabellen
+ibland saknar rad för en inlinad instruktion.
+
+- **enter:** 45 % gick åt för att anpassa framåtkanter (conform inklusive
+  anropsslingan), 26 % för att ärva den valda föregångarens register och 9 %
+  för att poängsätta föregångarna. En separat räknare gav 70 950 block och
+  96 846 anrop till conform på framåtkanter. Av dem producerade 79 818 inga
+  flyttar. På 59 997 kanter var föregångaren den valda, blocket saknade
+  parametrar och var inget slinghuvud. Ingen sådan kant gav någon flytt.
+- **instr:** 21 % för tilldelning och bokföring av resultat, 13 % för vanliga
+  operander, 13 % för inledning och get_fix, 11 % för nästa användning och
+  sista användning, 9 % för placering av fasta operander samt 6 % för deras
+  registermasker. 8 % saknade källrad. Av 304 581 instr-anrop hade 292 211
+  högst två operander och bara 13 321 minst en operand med ett fast register.
+
+Fyra isolerade prototyper jämfördes var för sig mot basen. Två grupper om
+tolv omgångar med slumpad ordning inom varje omgång efter uppvärmning.
+Tabellen visar medianen av de parade skillnaderna för hela kompileringen.
+
+| Enskild ändring | Instruktioner | Cykler | Omgångar med färre cykler |
+|---|---:|---:|---:|
+| Hoppa över conform för den valda föregångaren utan blockparametrar eller slinghuvud | −1,27 % | −1,15 % | 11/12 |
+| Gå direkt till vanliga operander när ingen har fast register | −0,28 % | −0,37 % | 10/12 |
+| Fyll i x86:s opfix-tabell för att undvika tomma vx_fixed-anrop | −0,54 % | +0,02 % | 6/12 |
+| Skriv operandernas lägen direkt till utdata och ta bort en oläst nxt-skrivning | −0,04 % | +0,69 % | 4/12 |
+
+Samtliga gav byte-identisk assembler. Även med allokeringskontrollen gav de
+två första samma assembler utan anmärkning.
