@@ -269,6 +269,27 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to,
     char nm[64] = {0};
     uint32_t saved = c->enode, n;
 
+    if (x && cc_type_is_record(a, AST_NODE_AT(a, x)->ty) &&
+        AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_ARRAY &&
+        !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) &&
+        cxx_gen_trivial_abi(c, AST_NODE_AT(a, x)->ty, 0) == 1 && c->gen_block) {
+        /* a prvalue of a trivially copyable class (a <=> b's std::strong_ordering): held in a temporary,
+           its conversion function called on that */
+        ast_qualified_type xt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty);
+        uint32_t tmp = cxx_gen_temporary(c, xt, loc);
+
+        if (!tmp)
+            return 0;
+        x = cc_dereference_build(
+            a,
+            cc_node_new_operands(
+                a, AST_NODE_COMMA, cc_type_pointer(a, xt), loc,
+                cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), x,
+                                    loc),
+                cc_address_of_build(a, cxx_gen_var_node(c, tmp, loc), loc)),
+            loc);
+    }
     if (!x || !cc_type_is_record(a, AST_NODE_AT(a, x)->ty) ||
         AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) == AST_TYPE_ARRAY ||
         !(AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) ||

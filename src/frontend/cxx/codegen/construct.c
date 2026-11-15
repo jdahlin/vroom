@@ -315,9 +315,15 @@ static bool cxx_gen_assign_object(cxx *c, uint32_t target, ast_qualified_type t,
     cc *a = c->ast;
     cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
     cxx_entity *own = NULL, *set;
+    bool pod, empty;
 
     if (!cls)
         return false;
+    if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &pod,
+                              &empty) &&
+        empty && cxx_gen_trivial_abi(c, t, 0) == 1)
+        return true; /* (an empty class: nothing to assign; its byte may be another member's, an empty base's
+                        or [[no_unique_address]]) */
     set = cxx_lookup_in(c, cls, vintern_cstr("operator="), 0);
     for (cxx_entity *e = set; e && !own; e = e->next)
         if (e->member_of == cls || e->kind == CXX_ENTITY_FUNCTION_TEMPLATE)
@@ -443,6 +449,68 @@ VPRIV bool cxx_gen_assign_parts(cxx *c, uint32_t target, ast_qualified_type t,
                 0));
     }
     return true;
+}
+
+/* target = src through t's implicit copy or move assignment (no operator= declared): src converted to t first
+   when of another type (alt_string = "text": a temporary by t's converting constructor); the parts assigned
+   (cxx_gen_assign_parts), the bytes for a trivially copyable class; target, an lvalue (0: not built) */
+VPRIV uint32_t cxx_gen_implicit_assign(cxx *c, uint32_t target,
+                                       ast_qualified_type t, uint32_t src,
+                                       uint32_t loc)
+{
+    cc *a = c->ast;
+    cc_id_list parts;
+    uint32_t blk, se;
+    bool move;
+
+    t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+    if (!target || !src || !cxx_gen_on(c))
+        return 0;
+    if (AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, src)->ty) != t) {
+        uint32_t p = cxx_gen_class_argument(c, src, t, loc);
+
+        if (!p)
+            return 0;
+        src = cc_dereference_build(a, p, loc), move = true;
+    } else
+        move = !(AST_NODE_AT(a, src)->flags & AST_NODE_FLAG_LVALUE) ||
+               cxx_gen_prv_find(c, src);
+    {
+        bool pod, empty;
+
+        if (cxx_class_layout_info(c, t, &pod, &empty) && empty &&
+            cxx_gen_trivial_abi(c, t, 0) == 1)
+            /* (an empty class: nothing assigned, src evaluated; its byte may be another member's,
+               [[no_unique_address]] __unique_ptr_array_bounds_stateless) */
+            return cc_dereference_build(
+                a,
+                cc_node_new_operands(
+                    a, AST_NODE_COMMA,
+                    cc_type_pointer(a, AST_NODE_AT(a, target)->ty), loc,
+                    cc_cast_insert(a, cc_node_rvalue(a, src),
+                                   cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID),
+                    cc_address_of_build(a, target, loc)),
+                loc);
+    }
+    if (cxx_gen_trivial_abi(c, t, 0) == 1)
+        return cc_assignment_build(
+            a, 0, target, cc_node_rvalue(a, src),
+            loc); /* (its bytes, from any value: ({ ...; s; })) */
+    if (!(AST_NODE_AT(a, src)->flags & AST_NODE_FLAG_LVALUE))
+        return 0;
+    cc_id_list_init(&parts);
+    if (!cxx_gen_assign_parts(c, target, t, src, move, &parts, loc, 0))
+        return 0;
+    cc_id_list_append(a, &parts,
+                      cc_statement_new(a, AST_NODE_EXPRESSION, loc,
+                                       cc_address_of_build(a, target, loc), 0,
+                                       0));
+    blk = cc_statement_new(a, AST_NODE_BLOCK, loc, 0,
+                           cc_id_list_freeze(a, &parts), parts.n);
+    se = cc_node_new(a, AST_NODE_STATEMENT_EXPRESSION,
+                     cc_type_pointer(a, AST_NODE_AT(a, target)->ty), loc);
+    AST_NODE_AT(a, se)->a = blk;
+    return cc_dereference_build(a, se, loc);
 }
 
 VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t,

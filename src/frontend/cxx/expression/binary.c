@@ -641,6 +641,35 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
                 AST_QUALIFIED_TYPE_UNQUALIFIED(l) ==
                     AST_QUALIFIED_TYPE_UNQUALIFIED(rt) &&
                 !cxx_class_user_special(c, l, vintern_cstr("operator="));
+            /* ... or a = y of another type T converts to by a constructor (alt_string = "text": the
+               implicit one, from a temporary T(y)) */
+            bool implicit_conv = false;
+
+            if (!implicit && !built_in && optok == LEX_TOKEN_EQUAL &&
+                l != CXX_TY_UNKNOWN && rt != CXX_TY_UNKNOWN &&
+                cc_type_is_record(c->ast, l) &&
+                AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY && !rbrace &&
+                !(AST_QUALIFIED_TYPE_QUALIFIERS(l) & AST_QUALIFIER_CONST) &&
+                !c->tentative && !c->template_depth &&
+                !cxx_class_user_special(c, l, vintern_cstr("operator=")) &&
+                !cxx_lookup_in(
+                    c,
+                    cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)),
+                    vintern_cstr("operator="), 0)) {
+                ast_qualified_type at = rt, et = c->etype;
+                uint8_t al = c->elval;
+                bool el = c->elval;
+
+                c->skip_explicit = 2;
+                cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l), &at, &al, 1,
+                             false);
+                c->skip_explicit = 0;
+                implicit = implicit_conv =
+                    c->ctor_found && c->ctor_picked &&
+                    c->ctor_picked->kind == CXX_ENTITY_VALUE &&
+                    !c->ctor_picked->fn_deleted;
+                c->etype = et, c->elval = el;
+            }
 
             /* a = {...} of a class: the list a T prvalue (operator=(T) or (T&&) takes it; the list's own
                type, its last element's, is not the argument's) */
@@ -676,10 +705,20 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
             }
             if (built_in)
                 cxx_gen_assignment(c, optok, ln, rn, oploc);
-            else if (!c->tentative && btmp && implicit &&
-                     !(c->call_resolved && c->call_picked))
-                cxx_gen_assignment(c, optok, ln, btmp, oploc);
-            else if (!c->tentative && c->call_resolved && c->call_picked) {
+            else if (!c->tentative && implicit &&
+                     !(c->call_resolved && c->call_picked) && (btmp || rn)) {
+                /* the implicit operator=: from b, or the list's temporary, or b converted (implicit_conv) */
+                uint32_t v = cxx_gen_implicit_assign(
+                    c, ln, AST_QUALIFIED_TYPE_UNQUALIFIED(l), btmp ? btmp : rn,
+                    oploc);
+
+                (void)implicit_conv;
+                c->enode = 0;
+                if (v)
+                    c->enode = v;
+                else if (cxx_gen_on(c))
+                    cxx_gen_fail(c);
+            } else if (!c->tentative && c->call_resolved && c->call_picked) {
                 if (rbrace) {
                     memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
                     c->gen_call_brace[0] = rbrace;
