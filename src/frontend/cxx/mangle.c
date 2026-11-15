@@ -1276,7 +1276,18 @@ static ast_qualified_type mg_strip_refs(cc *a, ast_qualified_type t)
 static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const cxx_scope *ps, const cxx_targ *all)
 {
 	if ((*x).kind == 6) {
-		/* a deduced pack (its elements in a list): J <args> E */
+		/* a deduced pack (its elements in a list): J <args> E; an empty one of a non-type parameter declares
+		   the parameter first, Tp Tn <type> (its elements cannot tell the type: clang's TpTnmJE) */
+		if (!(*x).v && ps && i < ps->ntparams && ps->tparams[i].kind == 2) {
+			const char *vt = mg_value_type(m, ps, i);
+
+			if (!vt) {
+				m->bad = true;
+				return;
+			}
+			mg_str(m, "TpTn");
+			mg_str(m, vt);
+		}
 		mg_str(m, "J");
 		for (int64_t k = 0; k < (*x).v; k++) {
 			const cxx_targ *el = &(*x).list[(*x).t + k];
@@ -1292,7 +1303,17 @@ static void mg_template_arg(cxx_mangler *m, const cxx_targ *x, uint32_t i, const
 	}
 	if ((*x).kind == 1 && (*x).t != CXX_TY_UNKNOWN)
 		mg_type(m, (*x).t);
-	else if ((*x).kind == 5) {
+	else if ((*x).kind == 5 && m->tps && (*x).v >= 0 && (uint64_t)(*x).v < m->tps->ntparams && m->tps->tparams[(*x).v].kind == 2) {
+		/* a value pack's expansion (is<size_t, I...>): X sp <its parameter> E */
+		char num[16];
+
+		mg_str(m, "Xsp");
+		if ((*x).v)
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, "T%d_", (int)(*x).v - 1));
+		else
+			mg_str(m, "T_");
+		mg_str(m, "E");
+	} else if ((*x).kind == 5) {
 		/* a pattern's pack expansion (tuple<Ts...> in a declared signature): Dp <the pack's parameter> */
 		if (!m->ph || (*x).v < 0 || (uint64_t)(*x).v >= m->nph || !m->ph[(*x).v]) {
 			m->bad = true;

@@ -263,7 +263,8 @@ VPRIV void cxx_ftemplate_evaluate(cxx *c, cxx_ftemplate *f)
 
 		for (uint32_t j = i + 1; j < p->params->ntparams; j++)
 			rest_defaulted &= !p->params->tparams[j].pack && p->params->tparams[j].def_b && p->params->tparams[j].kind != 3;
-		if (tp->pack && (tp->kind != 1 || (i + 1 != p->params->ntparams && !rest_defaulted && !cxx_ftemplate_packs_in_ids(c, p, i, f->pos))))
+		if (tp->pack && ((tp->kind != 1 && !(tp->kind == 2 && cxx_ftemplate_packs_in_ids(c, p, i, f->pos))) ||
+				 (tp->kind == 1 && i + 1 != p->params->ntparams && !rest_defaulted && !cxx_ftemplate_packs_in_ids(c, p, i, f->pos))))
 			f->packs = 1;	/* (value packs, packs not last: not deduced; their placeholders still give the parameters'
 					   shapes, which rule the candidate out for arguments of another shape) */
 		if (tp->pack && !f->packs)

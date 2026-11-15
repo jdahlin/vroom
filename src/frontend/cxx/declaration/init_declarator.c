@@ -640,7 +640,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				if (cxx_is(c, LEX_TOKEN_LEFT_PAREN))	/* = delete("reason") */
 					cxx_skip_balanced(c);
 			} else if (object && !cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
-				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
+				bool gobj = global && gen_var && (!(flags & DS_CONSTEXPR) || cc_type_is_record(c->ast, t)) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_initializer_parse(c);	/* copy-initialization: a constructor from the value */
 				{
@@ -665,7 +665,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			} else if (object) {
 				/* T x = { ... }: copy-list-initialization, as T x{ ... } (its explicit constructors: not told apart) */
 				uint32_t an[CXX_MAX_ARGS], n, abr[CXX_MAX_ARGS];
-				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
+				/* (a constexpr one of a class too: an object, the address of which may be taken, std::piecewise_construct) */
+				bool gobj = global && gen_var && (!(flags & DS_CONSTEXPR) || cc_type_is_record(c->ast, t)) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
@@ -810,7 +811,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		} else if (cxx_is(c, LEX_TOKEN_LEFT_BRACE)) {
 			if (object) {
 				uint32_t an[CXX_MAX_ARGS], n, abr[CXX_MAX_ARGS];
-				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
+				bool gobj = global && gen_var && (!(flags & DS_CONSTEXPR) || cc_type_is_record(c->ast, t)) && cxx_gen_global_begin(c, gen_var);
 
 				cxx_braced_arguments_parse(c);
 				n = c->ncargs;
@@ -847,7 +848,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 		} else if (!f && cxx_is(c, LEX_TOKEN_LEFT_PAREN)) {
 			if (object) {
 				uint32_t an[CXX_MAX_ARGS], n;
-				bool gobj = global && gen_var && !(flags & DS_CONSTEXPR) && cxx_gen_global_begin(c, gen_var);
+				bool gobj = global && gen_var && (!(flags & DS_CONSTEXPR) || cc_type_is_record(c->ast, t)) && cxx_gen_global_begin(c, gen_var);
 
 				uint32_t pbr[CXX_MAX_ARGS];
 

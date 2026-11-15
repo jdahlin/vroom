@@ -1465,6 +1465,30 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualifie
 	bool ref;
 #define IS(s) (len == sizeof s - 1 && !memcmp(n, s, len))
 
+	if (nt == 2 && (IS("__reference_constructs_from_temporary") || IS("__reference_converts_from_temporary"))) {
+		/* would T (a reference) bound to an expression of type U make a temporary: its referent not U's type nor a
+		   base of it (a conversion's result); not a reference: false */
+		ast_qualified_type r = t[0], u = t[1];
+
+		if (r == CXX_TY_UNKNOWN || u == CXX_TY_UNKNOWN)
+			return false;
+		if (AST_TYPE_KIND(c->ast, r) != AST_TYPE_POINTER || !AST_TYPE(c->ast, r)->ext) {
+			*v = 0;
+			return true;
+		}
+		r = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, r)->base);
+		if (AST_TYPE_KIND(c->ast, u) == AST_TYPE_POINTER && AST_TYPE(c->ast, u)->ext)
+			u = AST_TYPE(c->ast, u)->base;
+		u = AST_QUALIFIED_TYPE_UNQUALIFIED(u);
+		if (r == u || (cc_type_is_record(c->ast, r) && cc_type_is_record(c->ast, u) && cxx_derives(c, u, r, 0))) {
+			*v = 0;
+			return true;
+		}
+		if (cc_type_is_record(c->ast, r) || cc_type_is_record(c->ast, u))
+			return false;	/* (a class conversion: whether it binds directly is not decided here) */
+		*v = 1;	/* (scalars of another type: a converted temporary) */
+		return true;
+	}
 	if (nt == 2 && IS("__is_same")) {
 		*v = t[0] == t[1];
 		return true;

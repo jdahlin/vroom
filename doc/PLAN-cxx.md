@@ -2258,3 +2258,12 @@ cxx-strict: 196 funktioner saknas (213), 112 olika; en TU länkar inte (map-kod 
   som `J … E` (namnen lika med clangs).
 Kvar: värdepaket i mall-id:n (`__integer_sequence<size_t, _I1...>` i `pair`:s inre styckvisa
 konstruktor): clang skriver då mallparameterdeklarationer (`TpTnm`) i namnet.  cxx-strict: 196 (oförändrat).
+
+## Status 137 (2026-11-15)
+std::pair:s piecewise-konstruktor, värdepaket i mangling (`TpTn` för tomt
+paket, `XspT_E` för expansion i typ), `__reference_constructs_from_temporary`
+och `__reference_converts_from_temporary`, `cxx_args_equal` jämför deducerade
+paket element för element, och constexpr-klassobjekt (std::piecewise_construct)
+emitteras.  Sviter gröna (92/92, 38/38, mangle, 350/350); strikt bänk: 188
+saknade (111 distinkta, från 196), länkfel kvar i unit-hash och
+unit-large_json (`__lazy_compare_result<less<void>, ...>`).

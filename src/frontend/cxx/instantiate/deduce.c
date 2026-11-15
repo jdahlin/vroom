@@ -420,7 +420,8 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		return -1;
 	}
 	(void)ft;
-	if (!f->pack_tp) {	/* (a pack takes any number of arguments) */
+	if (!f->pack_tp || (!f->pack_param && !f->variadic)) {	/* (a pack takes any number of arguments; one only inside the
+								   parameters' types does not: pair's (piecewise_construct_t, tuple&, tuple&, __tuple_indices...)) */
 		if (nargs > f->np && !f->variadic)
 			return 0;
 		if (nargs + e->ndefaults < f->np)

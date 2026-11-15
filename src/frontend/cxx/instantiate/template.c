@@ -95,9 +95,12 @@ VPRIV uint32_t cxx_instance_hash(const cxx_template *t, const cxx_targ *a, uint3
 
 VPRIV bool cxx_args_equal(const cxx_targ *a, const cxx_targ *b, uint32_t n)
 {
-	for (uint32_t i = 0; i < n; i++)
+	for (uint32_t i = 0; i < n; i++) {
 		if (a[i].kind != b[i].kind || (a[i].kind == 1 ? a[i].t != b[i].t : a[i].v != b[i].v) || (a[i].kind == 2 && a[i].t != b[i].t))
 			return false;	/* (a value's enumeration type is part of it) */
+		if (a[i].kind == 6 && a[i].v > 0 && (!a[i].list || !b[i].list || !cxx_args_equal(a[i].list + a[i].t, b[i].list + b[i].t, (uint32_t)a[i].v)))
+			return false;	/* (a deduced pack: its elements, not only how many) */
+	}
 	return true;
 }
 
