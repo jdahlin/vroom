@@ -37,11 +37,13 @@ CCACHE    ?= $(shell command -v ccache 2>/dev/null)
 HOST_OS   := $(shell uname -s)
 ifeq ($(HOST_OS),Darwin)
 HOST_CC    = /usr/bin/clang
+HOST_CXX   = /usr/bin/clang++
 HOST_DEFS  = -D_DARWIN_C_SOURCE
 HOST_LIBS  =
 HOST_CPU   = -mcpu=apple-m1
 else
 HOST_CC    = clang
+HOST_CXX   = clang++
 HOST_DEFS  = -D_GNU_SOURCE -DVCC_RESDIR='"$(shell $(HOST_CC) -print-resource-dir)/include"' $(TOOL_DEFS)
 HOST_LIBS  = -lm
 # Apple cores (implementer 0x61: Docker Desktop, Asahi, a VM on a Mac) report no
@@ -55,12 +57,22 @@ else
 HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
-VCC_CC     = $(CCACHE) $(HOST_CC)
+# Host language for the vcc tools. The bootstrap compiler still accepts C.
+VCC_LANG ?= c++
+ifeq ($(VCC_LANG),c++)
+VCC_CC = $(CCACHE) $(HOST_CXX)
+VCC_DIALECT = -x c++ -std=gnu++20 -Wpedantic
+else ifeq ($(VCC_LANG),c)
+VCC_CC = $(CCACHE) $(HOST_CC)
+VCC_DIALECT = -std=c11
+else
+$(error VCC_LANG must be c or c++)
+endif
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
-VCC_CFLAGS = -std=c11 -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
+VCC_CFLAGS = -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) -DVCC_INCDIR='"$(abspath vcc/include)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -111,9 +123,15 @@ AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
 AS_OBJ  = $(call o,$(AS_FILES)) $(call mod,as) $(call mod,obj)
 LD_SRC  = vcc/ld/ld.c vcc/lib/ldhash.c vcc/ld/objcopy.c vcc/ld/wasmld.c vcc/platform/darwin/ldmacho.c
 
-$(OBJ)/%.o: vcc/%.c Makefile | $(OBJ)
+# Rebuild language-dependent artifacts when reusing OUT in another mode.
+LANG_STAMP = $(OBJ)/.lang-$(VCC_LANG)
+$(LANG_STAMP): | $(OBJ)
+	@rm -f $(OBJ)/.lang-c $(OBJ)/.lang-c++
+	@touch $@
+
+$(OBJ)/%.o: vcc/%.c Makefile $(LANG_STAMP) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -c $< -o $@
 
 # rewritten only when the list of files changes
 UNITY_C = $(patsubst %,$(OBJ)/unity/%.c,$(SPLIT_MODS) as obj vir)
@@ -122,8 +140,8 @@ $(UNITY_C): $(OBJ)/unity/%.c: FORCE
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
-$(UNITY_C:.c=.o): %.o: %.c Makefile
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+$(UNITY_C:.c=.o): %.o: %.c Makefile $(LANG_STAMP)
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 
 FORCE:
 .PHONY: FORCE
@@ -131,17 +149,17 @@ FORCE:
 
 # lextest is built with -mno-outline (stable code layout for PMC runs); no LTO,
 # since -mno-outline is a code generator option the bitcode does not keep
-$(OBJ)/no/%.o: vcc/%.c Makefile | $(OBJ)
+$(OBJ)/no/%.o: vcc/%.c Makefile $(LANG_STAMP) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) -mno-outline -MMD -MP -c $< -o $@
 
 $(OBJ)/ld/ld.o: XFLAGS = -DVLD_MAIN
 
 # the linker without main(), for vccd (links, nm and objcopy run in its worker threads)
 VCCD_LD_OBJ = $(OBJ)/ld/ldlib.o $(call o,vcc/ld/objcopy.c vcc/platform/darwin/ldmacho.c)
-$(OBJ)/ld/ldlib.o: vcc/ld/ld.c Makefile | $(OBJ)
+$(OBJ)/ld/ldlib.o: vcc/ld/ld.c Makefile $(LANG_STAMP) | $(OBJ)
 	@mkdir -p $(dir $@)
-	$(VCC_CC) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -c $< -o $@
 
 $(OUT)/vpp: $(call o,vcc/driver/vpp.c $(LEX_SRC)) $(AS_OBJ) $(PP_OBJ)
 	$(VCC_CC) $(VCC_LDFLAGS) -pthread $^ -o $@ $(HOST_LIBS)
@@ -170,13 +188,13 @@ $(OUT)/vlink: $(call o,$(LD_SRC))
 	ln -sf vlink $(OUT)/vobjcopy
 	ln -sf vlink $(OUT)/vnm
 
-$(OUT)/vcc: vcc/vccd/shim.c protocol.h | $(OUT)
-	$(VCC_CC) $(VCC_CFLAGS) $< -o $@
+$(OUT)/vcc: vcc/vccd/shim.c protocol.h Makefile $(LANG_STAMP) | $(OUT)
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_CFLAGS) $< -o $@
 
 # vsh: make's SHELL; named sh so make still execs simple commands directly
-$(OUT)/vsh/sh: vcc/vccd/shim.c protocol.h | $(OUT)
+$(OUT)/vsh/sh: vcc/vccd/shim.c protocol.h Makefile $(LANG_STAMP) | $(OUT)
 	mkdir -p $(OUT)/vsh
-	$(VCC_CC) $(VCC_CFLAGS) -DVSH $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_CFLAGS) -DVSH $< -o $@
 
 $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy: $(OUT)/vcc
 	ln -sf vcc $@
@@ -234,7 +252,7 @@ self-check: self
 
 .PHONY: self self-check
 
-# Check the production C dialect and the prospective C++ dialect independently:
+# Check the bootstrap C dialect and the default C++ dialect independently:
 # a C warning must not hide the C++ diagnostics for that file under make -k.
 # Use make -k -j 6 vcc-cxx-check, or set CXX_CHECK_SRC to inspect a subset.
 CXX_CHECK_SRC ?= $(SELF_SRC)
@@ -244,9 +262,9 @@ CXX_CHECK_FLAGS = -Wpedantic -Werror -ferror-limit=0 -fsyntax-only
 .PHONY: vcc-cxx-check $(C_COMPAT_CHECK) $(CXX_CHECK)
 vcc-cxx-check: $(C_COMPAT_CHECK) $(CXX_CHECK)
 $(C_COMPAT_CHECK): check-c-compat/%: %
-	$(HOST_CC) $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
+	$(HOST_CC) -std=c11 $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
 $(CXX_CHECK): check-cxx/%: %
-	$(HOST_CC) $(filter-out -std=c11,$(VCC_FAST)) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
+	$(HOST_CXX) $(VCC_FAST) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
 
 # ---- fuzzing (fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
