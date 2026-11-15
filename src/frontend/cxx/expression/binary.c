@@ -252,6 +252,37 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 				ast_qualified_type b2 = AST_TYPE(c->ast, t2)->base, b3 = AST_TYPE(c->ast, t3)->base;
 
 				cxx_et(c, cc_type_pointer(c->ast, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(b2), AST_QUALIFIED_TYPE_QUALIFIERS(b2) | AST_QUALIFIED_TYPE_QUALIFIERS(b3))), false);
+			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && !c->tentative && !c->template_depth &&
+				   (cc_type_is_record(c->ast, t2) != cc_type_is_record(c->ast, t3)) &&
+				   AST_TYPE_KIND(c->ast, cc_type_is_record(c->ast, t2) ? t2 : t3) != AST_TYPE_ARRAY) {
+				/* a class and another type that converts to it by a constructor (c ? std::string(...) : ""):
+				   a prvalue of the class, the other operand converted in its own branch ([expr.cond]/4) */
+				bool cls2 = cc_type_is_record(c->ast, t2);
+				ast_qualified_type ct = AST_QUALIFIED_TYPE_UNQUALIFIED(cls2 ? t2 : t3), ot = cls2 ? t3 : t2, at[1];
+				uint8_t lv[1] = { cls2 ? c->elval : l2 };
+				uint32_t on = cls2 ? n3 : n2;
+
+				at[0] = AST_TYPE_KIND(c->ast, ot) == AST_TYPE_ARRAY ? cc_type_pointer(c->ast, AST_TYPE(c->ast, ot)->base) : ot;
+				if (AST_TYPE_KIND(c->ast, ot) == AST_TYPE_ARRAY)
+					lv[0] = 0;
+				c->skip_explicit = 2;
+				cxx_ctor_use(c, ct, at, lv, 1, false);
+				c->skip_explicit = 0;
+				if (c->ctor_found && c->ctor_picked && c->ctor_picked->fn_explicit != 1) {
+					cxx_et(c, ct, false);
+					if (cxx_gen_on(c) && on) {
+						c->gen_notemp++;	/* (built only when its branch runs) */
+						cxx_gen_construct_temp(c, ct, &on, 1, qloc);
+						c->gen_notemp--;
+						on = c->enode;
+						if (cls2)
+							n3 = on;
+						else
+							n2 = on;
+						cxx_et(c, ct, false);
+					}
+				} else
+					cxx_et(c, CXX_TY_UNKNOWN, false);
 			} else
 				cxx_et(c, CXX_TY_UNKNOWN, false);
 			/* (built as a value: where the result is used as an lvalue, a ? x : y = 1, the assignment's

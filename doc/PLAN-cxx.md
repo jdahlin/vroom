@@ -2395,3 +2395,15 @@ Värden och antal konstruktioner som clangs; temporärerna lever till blockets
 slut (som förut).  Test: `run/conditional-temporaries.cpp`.  Strikt bänk:
 pass 8, 159 saknas (från 153: mer kod nås).  Sviter gröna (105/105, 38/38,
 mangle, 350/350).
+
+## Status 150 (2026-11-15)
+`c ? klass : annat` där det andra konverteras till klassen med en
+konstruktor ([expr.cond]/4, jsons `byte_ != 0 ? concat(...) : ""`): en
+prvärde-temporär, konverteringen byggd i sin egen gren.  `?:` med två
+lvärden tar inte längre en prvärde-temporär som lvärde (resultatet blev
+objektet självt i stället för en kopia), och en temporär som förstörs via
+pekare (`flagged`) används inte som resultatobjekt för den andra grenen.
+Test: `run/conditional-class-convert.cpp`.  Strikt bänk: 149 saknas (från
+159); unit-class_lexer länkar nu och fallerar på ett äldre fel:
+`std::cout << " "` väljer `operator<<(const void*)` (nästa steg).
+Sviter gröna (106/106, 38/38, mangle, 350/350).

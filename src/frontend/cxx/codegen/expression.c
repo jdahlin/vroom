@@ -415,7 +415,8 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 		return;
 	if (cc_type_is_record(a, AST_NODE_AT(a, x)->ty) && cc_type_is_record(a, AST_NODE_AT(a, y)->ty) &&
 	    AST_TYPE_KIND(a, AST_NODE_AT(a, x)->ty) != AST_TYPE_ARRAY && AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, x)->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, y)->ty) &&
-	    (AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && (AST_NODE_AT(a, y)->flags & AST_NODE_FLAG_LVALUE)) {
+	    (AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && (AST_NODE_AT(a, y)->flags & AST_NODE_FLAG_LVALUE) &&
+	    !cxx_gen_prv_find(c, x) && !cxx_gen_prv_find(c, y)) {
 		/* c ? a : b of two lvalues of one class: an lvalue of it (const if either is), *(c ? &a : &b) */
 		ast_qualified_type t = AST_NODE_AT(a, x)->ty, u = AST_NODE_AT(a, y)->ty;
 		ast_qualified_type rt = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t), AST_QUALIFIED_TYPE_QUALIFIERS(t) | AST_QUALIFIED_TYPE_QUALIFIERS(u)), pt = cc_type_pointer(a, rt);
@@ -434,7 +435,7 @@ VPRIV void cxx_gen_conditional(cxx *c, uint32_t cond, uint32_t x, uint32_t y, ui
 		cxx_prv *px = cxx_gen_prv_find(c, x), *py = cxx_gen_prv_find(c, y);
 		/* (an operand that is a temporary just built, T(7): the result, built there; the other branch
 		   constructs into it, so neither is copied twice) */
-		int own = py && py->tmp && !py->call ? 1 : px && px->tmp && !px->call ? 0 : -1;
+		int own = py && py->tmp && !py->call && !py->flagged ? 1 : px && px->tmp && !px->call && !px->flagged ? 0 : -1;
 		uint32_t tmp = own >= 0 ? (own ? py->tmp : px->tmp) : cxx_gen_class_temp(c, t, loc), side[2] = { x, y }, br[2];
 
 		if (!tmp)

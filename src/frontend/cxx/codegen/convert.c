@@ -91,6 +91,12 @@ VPRIV void cxx_gen_construct_temp(cxx *c, ast_qualified_type t, const uint32_t *
 		cxx_gen_prv_add(c, node, expr, call, tmp);
 	else
 		cxx_gen_prv_add(c, node, 0, 0, tmp);
+	if (live) {
+		cxx_prv *p = cxx_gen_prv_find(c, node);
+
+		if (p)
+			p->flagged = 1;
+	}
 	c->enode = node;
 }
 

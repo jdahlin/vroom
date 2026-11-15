@@ -502,6 +502,12 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 			n = cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, n, cc_node_new_operands(a, AST_NODE_COMMA, pt, loc, set, cc_address_of_build(a, cxx_gen_var_node(c, ret_tmp, loc), loc)));
 			n = cc_dereference_build(a, n, loc);
 			cxx_gen_prv_add(c, n, 0, 0, ret_tmp);
+			{
+				cxx_prv *p = cxx_gen_prv_find(c, n);
+
+				if (p)
+					p->flagged = 1;
+			}
 		} else {
 			n = cc_dereference_build(a, n, loc);
 			cxx_gen_prv_add(c, n, expr, call, ret_tmp);

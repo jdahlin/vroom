@@ -430,7 +430,7 @@ VPRIV void cxx_gen_prv_add(cxx *c, uint32_t node, uint32_t expr, uint32_t call, 
 {
 	if (c->nprvs == c->cprvs)
 		c->prvs = realloc(c->prvs, (c->cprvs = c->cprvs ? c->cprvs * 2 : 64) * sizeof *c->prvs);
-	c->prvs[c->nprvs++] = (cxx_prv){ node, expr, call, tmp };
+	c->prvs[c->nprvs++] = (cxx_prv){ node, expr, call, tmp, 0 };
 }
 
 /* the prvalue is constructed in the object at `address` instead of its temporary (copy elision): the

@@ -16,6 +16,7 @@ typedef struct cxx_prv {
 	uint32_t expr;		/* the expression that constructs it (a call that takes the object's address first) */
 	uint32_t call;		/* ... that call (0: built some other way, cannot be aimed elsewhere) */
 	uint32_t tmp;		/* the temporary's symbol */
+	uint8_t flagged;	/* ... destroyed through a pointer set where it is built (an operand that may not run) */
 } cxx_prv;
 
 /* VCC_CXX_GEN=4: the first thing not built in the function being built (state.c) */
