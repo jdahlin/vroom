@@ -96,6 +96,7 @@ CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_build(cc *c, const cc_builtin *b
 CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_rotate_build(cc *c, const cc_builtin *b, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc, uint32_t x, uint32_t fb, uint32_t loc);
 CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n, cc_object_bound *b, unsigned depth, unsigned mode);
 CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc);
 CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want, const cc_id_list *args);

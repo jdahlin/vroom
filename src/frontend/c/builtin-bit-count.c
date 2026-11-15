@@ -107,9 +107,8 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_bitint(cc *c, int id, uint32_t x, uint3
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 {
 	cc_id_list args;
-	uint32_t x, r, pre, fbpre = 0, fb = 0;
+	uint32_t x, fb = 0;
 	ast_qualified_type xt;
-	unsigned bits, width;
 
 	bool stdc = id == CC_BUILTIN_STDC_COUNT_ONES || id == CC_BUILTIN_STDC_TRAILING_ZEROS;
 	if (stdc)
@@ -127,8 +126,6 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 		cc_report_error(c, AST_NODE(x)->loc, "1st argument must be a scalar unsigned integer type");
 		return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
 	}
-	bits = AST_TYPE_KIND(c, xt) == AST_TYPE_BOOL ? 1 : cc_type_integer_bits(c, xt);
-	width = bits > 64 ? 128 : bits > 32 ? 64 : 32;
 	if (args.n == 2) {
 		uint32_t y = cc_conversion_decay(c, args.v[1]);
 		ast_qualified_type ft = cc_node_promoted_type(c, y);
@@ -138,6 +135,17 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 		}
 		fb = cc_conversion_apply(c, y, cc_type_basic(AST_TYPE_INT));
 	}
+	return cc_builtin_bit_count_lower(c, id, stdc, x, fb, loc);
+}
+
+/* the generic bit count of x (an unsigned integer, decayed), fb its value for 0 (0: none; an int), from
+   nodes: C's builtin call above, C++'s */
+CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc, uint32_t x, uint32_t fb, uint32_t loc)
+{
+	ast_qualified_type xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(x)->ty);
+	unsigned bits = AST_TYPE_KIND(c, xt) == AST_TYPE_BOOL ? 1 : cc_type_integer_bits(c, xt), width = bits > 64 ? 128 : bits > 32 ? 64 : 32;
+	uint32_t r, pre, fbpre = 0;
+
 	if (stdc && id == CC_BUILTIN_CTZG) fb = cc_node_integer_new(c, bits, cc_type_basic(AST_TYPE_INT), loc);
 	if (bits > 128) {
 		r = cc_builtin_bit_count_bitint(c, id, x, fb, bits, loc);
