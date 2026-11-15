@@ -14,3 +14,12 @@ int X::Y::f()
     int n = 0;
     return static_cast<D>(n) == D::a;
 }
+
+// ... and in its parameters
+struct V {
+    enum class E { a };
+    struct W {
+        bool g(E) const;
+    };
+};
+bool V::W::g(E e) const { return e == E::a; }
