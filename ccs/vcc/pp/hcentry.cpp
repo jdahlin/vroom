@@ -350,15 +350,6 @@ static void hc_apply(pp *p, const hent *e)
             else
                 HC_BAD(p);
         }
-        for (uint32_t i = 0; i < e->ncrd; i++) {
-            const hcread *c = &e->crd[i];
-
-            if (r->ncrd < HC_MAXCRD)
-                r->crd[r->ncrd++] = VCC_LITERAL(hcrd, c->s, c->len, c->off,
-                                                c->dlen, c0 + c->rel);
-            else
-                HC_BAD(p);
-        }
     }
     for (uint32_t i = 0; i < e->nfe; i++) {
         const hfent *h = &e->fe[i];
@@ -460,7 +451,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
     if (!r->t && rec_spare.t) {
         /* this thread's last pp's buffers: counts are reset below, contents need no clearing */
         r->t = rec_spare.t, r->ord = rec_spare.ord, r->ctr = rec_spare.ctr;
-        r->crd = rec_spare.crd, r->seg = rec_spare.seg, r->cp = rec_spare.cp;
+        r->seg = rec_spare.seg, r->cp = rec_spare.cp;
         r->kid = rec_spare.kid, r->kex = rec_spare.kex, r->lk = rec_spare.lk;
         rec_spare.t = NULL;
     }
@@ -468,7 +459,6 @@ VPRIV void hc_begin(pp *p, hkey *k)
         r->t = (htouch *)vm(HC_MAXT * sizeof(htouch));
         r->ord = (honce *)vm(HC_MAXORD * sizeof(honce));
         r->ctr = (hcpos *)vm(HC_MAXCP * sizeof(hcpos));
-        r->crd = (hcrd *)vm(HC_MAXCRD * sizeof(hcrd));
         r->seg = (hsegr *)vm(HC_MAXSEG * sizeof(hsegr));
         r->cp = (cprov *)vm((HC_MAXCP + 1) * sizeof(cprov));
         r->kid = (hkidr *)vm(HC_MAXKID * sizeof(hkidr));
@@ -485,7 +475,7 @@ VPRIV void hc_begin(pp *p, hkey *k)
         }
     }
     if (!r->n) {
-        r->nt = r->nord = r->nctr = r->ncrd = r->nseg = r->ncp = 0;
+        r->nt = r->nord = r->nctr = r->nseg = r->ncp = 0;
         r->nkid = r->nkex = 0;
         r->nlk = 0;
         r->ntk = 0;
@@ -495,12 +485,12 @@ VPRIV void hc_begin(pp *p, hkey *k)
     L = &r->lev[r->n++];
     r->on = 1;
     L->k = k;
+    L->skip_reason = NULL;
     L->serial = ++r->serial;
     L->depth = p->depth;
     L->t0 = r->nt;
     L->o0 = r->nord;
     L->c0 = r->nctr;
-    L->r0 = r->ncrd;
     L->s0 = r->nseg;
     L->k0 = r->nkid;
     L->x0 = r->nkex;
@@ -679,7 +669,7 @@ static void hc_account(const hent *e, const hkey *k)
 {
     static _Atomic int pub_ = -1;
     size_t rd = R16(e->rg.n * sizeof(hread)) + R16(e->ru.n * 4) +
-                R16(e->rv.n * sizeof(hread)) + R16(e->ncrd * sizeof(hcread));
+                R16(e->rv.n * sizeof(hread));
     size_t dl = R16(e->dl.n * sizeof(hread)),
            on = R16(e->nord * sizeof(honce)) + R16(e->noadd * 8);
     size_t fe = R16(e->nfe * sizeof(hfent)), tx,
@@ -815,20 +805,6 @@ static hent *publish(pp *p, const hlev *L, size_t end)
     e->level = L->uses_level ? (int32_t)L->nfile : -1;
     e->ndirs = L->ndirs;
     e->psig = p->psig[L->ndirs];
-    {
-        hcread *cr = (hcread *)hsalloc(
-            p, (r->ncrd - L->r0 ? r->ncrd - L->r0 : 1) * sizeof(hcread));
-
-        for (uint32_t i = L->r0; i < r->ncrd; i++) {
-            const hcrd *c = &r->crd[i];
-
-            cr[i - L->r0] =
-                VCC_LITERAL(hcread, hstrdup(p, c->s, c->len), c->len, c->off,
-                            c->dlen, c->val - L->counter0);
-        }
-        e->crd = cr;
-        e->ncrd = r->ncrd - L->r0;
-    }
     if (p->tokmode == 2) {
         if (end > L->text0)
             publish_tok(p, L, end, e);
@@ -893,8 +869,18 @@ VPRIV void hc_end(pp *p)
     if (r->n - 1 < r->nbad || p->errors != L->errors0 ||
         p->warns != L->warns0 || p->nlm != L->nlm0 ||
         p->npushed != L->npushed0 || p->nonce < L->nonce0) {
-        if (r->n - 1 >= r->nbad)
+        if (r->n - 1 >= r->nbad) {
             r->nbad = r->n; /* the enclosing regions saw it too */
+            L->skip_reason = p->nlm != L->nlm0
+                                 ? "line mapping changed"
+                                 : "preprocessor state or diagnostics changed";
+        }
+        if (L->skip_reason && pp_wc_maybe(p, PPW_UNCACHEABLE)) {
+            pp_dinfo d = {"warning", L->base0, NULL, 0, NULL, 0, NULL, 0};
+
+            pp_warnx(p, "vcc-uncacheable-header", false, NULL, &d,
+                     "header cannot be cached: %s", L->skip_reason);
+        }
         atomic_fetch_add_explicit(&hstat.uncacheable, 1, memory_order_relaxed);
         if (getenv("VPP_HC_DEBUG")) {
             char b[512];

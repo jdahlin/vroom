@@ -25,6 +25,12 @@ cases = {
          'read.h': '#define P_(a,b) a##b\n#define P(a,b) P_(a,b)\n'
                    'enum { selected = P(FLAG,__COUNTER__) };\n'},
         [check_value(enum, 7), check_value(enum + 'enum { advance = __COUNTER__ };\n', 99)]),
+    'transient-counter-binding': (
+        {'both.h': '#define FLAG1 99\n#include "read.h"\n#undef FLAG1\n',
+         'read.h': '#define P_(a,b) a##b\n#define P(a,b) P_(a,b)\n'
+                   'enum { selected = P(FLAG,__COUNTER__) };\n'},
+        [check_value(enum + advance, expected) + '#ifdef FLAG1\n#error leaked FLAG1\n#endif\n'
+         for advance, expected in (('', 7), ('enum { advance = __COUNTER__ };\n', 99))]),
     'redefinition': (
         {'both.h': CHILDREN, 'write.h': '#define FLAG 9\n',
          'read.h': 'enum { selected = FLAG };\n'},
@@ -93,22 +99,38 @@ def run_case(directory, name, headers, mains):
             wanted = [expected[i] for i in order]
             if result.returncode != int(any(actual)):
                 raise RuntimeError(result.stdout + result.stderr)
-            # TODO.md "Ordered preprocessor cache dependencies". Match only the observed failures.
-            known = cached and order == (0, 1) and name in ('counter-paste', 'redefinition')
-            if known and actual == wanted:
-                raise RuntimeError(f'XPASS {name}: remove its expected failure')
-            if known and name == 'counter-paste':
-                wanted = [0, 1]
-                if 'wrong selected value' not in result.stderr:
-                    raise RuntimeError(result.stderr)
-            if known and name == 'redefinition':
-                wanted = [0, 0]
             if actual != wanted or (name == 'redefinition' and 1 in wanted
                                     and 'macro redefined' not in result.stderr):
                 raise RuntimeError(f'{name} {order} cached={cached}: {actual} vs {wanted}\n'
                                    + result.stderr)
-            if known:
-                print(f'XFAIL {name}, warm 0 -> 1')
+
+
+def check_cache_warning(directory):
+    warning = 'vcc-uncacheable-header'
+    source = directory / 'main.c'
+    source.write_text(INCLUDE)
+    (directory / 'both.h').write_text('#include "read.h"\n')
+    leaf = directory / 'read.h'
+    for body, reason in (
+        ('#define P_(a,b) a##b\n#define P(a,b) P_(a,b)\nint P(x,__COUNTER__);\n',
+         'macro name depends on __COUNTER__'),
+        ('#pragma push_macro("X")\n#pragma pop_macro("X")\n', 'macro stack operation'),
+        ('enum { x = __COUNTER__ };\n', None),
+    ):
+        leaf.write_text(body)
+        for flags, severity in (([], None), ([f'-W{warning}'], 'warning'),
+                                ([f'-Werror={warning}'], 'error'),
+                                ([f'-W{warning}', f'-Wno-{warning}'], None)):
+            result = subprocess.run([VPP, *FLAGS, '-Werror=unknown-warning-option', *flags, source],
+                                    capture_output=True, text=True)
+            expected = bool(reason and severity)
+            if result.returncode != int(expected and severity == 'error'):
+                raise RuntimeError(result.stderr)
+            messages = [line for line in result.stderr.splitlines() if 'header cannot be cached' in line]
+            if len(messages) != int(expected) or (expected and
+                    (str(leaf) not in messages[0] or f'{severity}: header cannot be cached: {reason}'
+                     not in messages[0])):
+                raise RuntimeError(f'{flags}: unexpected cache diagnostics\n{result.stderr}')
 
 
 with tempfile.TemporaryDirectory(prefix='vcc-header-deps-') as tmp:
@@ -116,4 +138,5 @@ with tempfile.TemporaryDirectory(prefix='vcc-header-deps-') as tmp:
         directory = Path(tmp) / name
         directory.mkdir()
         run_case(directory, name, headers, mains)
+    check_cache_warning(Path(tmp))
 print(f'{len(cases)} header families, both orders, cache on/off')

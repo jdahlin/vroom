@@ -427,24 +427,7 @@ VPRIV bool hc_valid(pp *p, const hent *e)
     }
     if (e->nlk && dirs_differ(p, e) && !hc_looks_ok(p, e))
         return false;
-    if (!kids_ok(p, e, xs, 0))
-        return false; /* (before the costly counter-name lookups) */
-    for (uint32_t i = 0; i < e->ncrd; i++) {
-        const hcread *r = &e->crd[i];
-        char b[4096 + 40];
-        int dl = utoa(b + r->off, p->counter + r->rel);
-        size_t n = r->off + (size_t)dl + (r->len - r->off - r->dlen);
-        uint32_t id;
-
-        memcpy(b, r->s, r->off);
-        memcpy(b + r->off + dl, r->s + r->off + r->dlen,
-               r->len - r->off - r->dlen);
-        memset(b + n, 0, 16);
-        id = vintern_find(b, n, vintern_hash(b, n));
-        if (id && mget(p, id))
-            return false;
-    }
-    return true;
+    return kids_ok(p, e, xs, 0);
 }
 
 /* an entry's text, children spliced in, __COUNTER__ values from base */

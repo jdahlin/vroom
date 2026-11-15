@@ -317,7 +317,7 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out,
     if (word(&q, e, "push_macro")) {
         uint32_t id = pragma_macro_name(q, (size_t)(e - q));
 
-        HC_BAD(p);
+        HC_BAD_REASON(p, "macro stack operation");
         if (id && p->npushed < 4096) {
             p->pushed[p->npushed].id = id;
             p->pushed[p->npushed++].m = mread(p, id) & ~(uintptr_t)1;
@@ -348,7 +348,7 @@ VPRIV int pragma_text(pp *p, const char *s, size_t n, uint32_t loc, ptok *out,
         r = q;
         if ((word(&r, e, "clang") || word(&r, e, "GCC")) &&
             word(&r, e, "diagnostic")) {
-            HC_BAD(p); /* (a replay would not run it) */
+            HC_BAD_REASON(p, "diagnostic pragma");
             diag_pragma(p, r, e,
                         loc); /* (and kept in the output, as clang -E) */
         }

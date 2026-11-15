@@ -404,6 +404,8 @@ VPRIV void pp_wc_fill(pp *p)
 
     p->wc_o = p->o;
     p->wc[PPW_C2Y] = pp_wstate(p, "c2y-extensions", false, g) != 0;
+    p->wc[PPW_UNCACHEABLE] =
+        pp_wstate(p, "vcc-uncacheable-header", false, NULL) != 0;
     p->wc[PPW_VARIADIC] = pp_wstate(p, "variadic-macros", false, g) != 0;
 }
 

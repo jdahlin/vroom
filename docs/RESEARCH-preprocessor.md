@@ -12,7 +12,7 @@ clang 23). Points the research could only infer, not verify, are marked *(unveri
 > read is the same, reuse the result instead of redoing the work.
 
 - **Correctness target.** Replaying a hit must give the same result as processing
-  the region. The corpus comparisons below passed, but §6.11 gives two counterexamples.
+  the region. The corpus comparisons below passed, and §6.11 records two regressions and their fixes.
 - **The work only happens when a cache misses.**
 - **Three layers**, each built on the one before (details in the sections named):
 
@@ -1262,13 +1262,13 @@ pp at a region start, at any depth, as `pp_top_events` gives for the top level.
 
 ### 6.11 When a macro read depends on an earlier sibling (2026-11-15)
 
-**Test results.** `python3 bench/vcc-header-deps.py` compares Clang and
+**Before the fix.** `python3 bench/vcc-header-deps.py` compares Clang and
 `vpp --batch -j 1 -fsyntax-only` for two TUs in both orders, with and without
 `VPP_NOHC`. Static assertions inspect the value inside a header and selected
 state after the include. The harness disables parser snapshots and declaration
 replay. On Linux x86-64 targeting arm64 with Clang 23, 30 of 32 batch runs
 agreed with Clang. The two discrepancies both require a cache warmed by A
-before B. Each has a specific XFAIL and a passing result raises XPASS.
+before B. Both were reproduced as XFAILs.
 
 | Family | What the second TU changes | Observed result |
 |---|---|---|
@@ -1293,6 +1293,15 @@ A separate oracle check exposed a baseline diagnostic difference. With
 before including a header containing `#warning cache_probe`. Clang 23
 accepted A, while vcc with `VPP_NOHC=1` rejected it. This case needs
 ordinary diagnostic-parity investigation before it can isolate cache behavior.
+
+**Initial fix.** Tracking the incoming definition fixes the silent redefinition.
+The conservative counter fix discards regions looking up a counter-derived
+name and their ancestors. A ninth regression defines a name in the parent,
+reads it in a child and undefines it before returning to the TU. All 36
+ordered batches agree with Clang. The opt-in `-Wvcc-uncacheable-header`
+reports the header and the reason when a recording must be abandoned.
+`-Werror=vcc-uncacheable-header` promotes it to an error. An ordinary miss
+can record a new valid entry and stays silent.
 
 **Lessons from other implementations.** HP's aCC automatic PCH work describes
 the same earlier-sibling dependency and validates a configuration for an

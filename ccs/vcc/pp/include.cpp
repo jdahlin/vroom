@@ -570,9 +570,13 @@ VPRIV void enter_file(pp *p, const vlex_file *f, const char *path, int32_t sdir)
         return;
     }
     oi = once_index(p, f);
-    if (unlikely(p->rec.on) && p->rec.nord < HC_MAXORD &&
-        (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0))
-        p->rec.ord[p->rec.nord++] = VCC_LITERAL(honce, f, oi >= 0);
+    if (unlikely(p->rec.on) &&
+        (oi < 0 || oi < (int)p->rec.lev[p->rec.n - 1].nonce0)) {
+        if (p->rec.nord < HC_MAXORD)
+            p->rec.ord[p->rec.nord++] = VCC_LITERAL(honce, f, oi >= 0);
+        else
+            HC_BAD_REASON(p, "too many #pragma once membership checks");
+    }
     if (oi >= 0) {
         if (p->o->deps)
             dep_only(p, path, sys);
@@ -1023,9 +1027,7 @@ VPRIV void embed(pp *p, ctx *c, uint32_t b, uint32_t e, uint32_t loc,
     if (p->o->deps && !emb_is_main(p, path))
         dep_only(p, path, false);
     emb_range(f, &m, &ob, &on);
-    if (p->rec
-            .n) /* the header cache does not record #embed's bytes: the open regions are not cached */
-        p->rec.nbad = p->rec.n;
+    HC_BAD_REASON(p, "#embed reads external bytes");
     {
         uint64_t nt = on ? m.npre + 2 * on - 1 + m.nsuf : m.nemp;
         ptok *o, *w;

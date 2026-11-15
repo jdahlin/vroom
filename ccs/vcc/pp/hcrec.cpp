@@ -45,23 +45,6 @@ VPRIV uint16_t cp_chain(pp *p, uint16_t a, uint32_t d, uint16_t tail)
     }
 }
 
-/* a read of an identifier with __COUNTER__ digits: at replay its name differs */
-VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t,
-                                                  uintptr_t e)
-{
-    const cprov *c = &p->rec.cp[t->ctr];
-    char *d;
-
-    if (e || c->next || p->rec.ncrd >= HC_MAXCRD || t->len > 4096) {
-        HC_BAD(p); /* such a name defined as a macro, or two runs: give up */
-        return;
-    }
-    d = (char *)varena_alloc(&p->perm, t->len + 1);
-    memcpy(d, t->s, t->len); /* pasted: the spelling is clean */
-    p->rec.crd[p->rec.ncrd++] =
-        VCC_LITERAL(hcrd, d, t->len, c->off, c->len, c->val);
-}
-
 /* #define / #undef / pop_macro */
 VPRIV void mdef(pp *p, uint32_t id, const pmacro *m)
 {

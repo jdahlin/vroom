@@ -432,12 +432,9 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
   `[0] = side(), [0] = side()` evaluates both.
   *Validate:* T1 `desig_override.c`, static and automatic variants, with
   side-effect counters (clang's behaviour is the oracle).
-- [ ] **Ordered preprocessor cache dependencies** [R]. A pasted counter name
-  can bind to a macro written by an earlier sibling, and a cached `#define`
-  can suppress a redefinition error. Reproducers and controls in
-  `bench/vcc-header-deps.py`. See RESEARCH-preprocessor.md §6.11.
-  *Validate:* remove both XFAILs as each fix lands, compare both TU orders to
-  Clang and uncached vcc, then run kernel parity and the cache cost measurements.
+- [x] **Ordered preprocessor cache dependencies** [R]. The header-deps suite
+  checks both TU orders against Clang, including a transient binding across a
+  child include and a conflicting macro redefinition. See RESEARCH-preprocessor.md §6.11.
 - [x] **Header/snapshot cache keys incomplete** [R].  *Done:* `opt_sig` hashes every
   `cc_opts` field before `outfd` (cc.h says parse options go there) plus emit;
   `sig_of` adds wargs and error_limit; `bench/vcc-cachekey.py` 6/6 (the decl

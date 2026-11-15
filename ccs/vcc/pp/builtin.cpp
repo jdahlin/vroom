@@ -265,7 +265,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
         break;
     }
     case B_BASE_FILE:
-        HC_BAD(p);
+        HC_BAD_REASON(p, "__BASE_FILE__ depends on the translation unit");
         mkstr(p, t, p->base_name, p->base_namelen);
         break;
     case B_COUNTER:
@@ -275,7 +275,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
                 t->loc); /* (the kernel's __UNIQUE_ID: keep the common case one test) */
         if (p->rec.on) {
             if (p->in_dir)
-                HC_BAD(p); /* the value decides something */
+                HC_BAD_REASON(p, "directive depends on __COUNTER__");
             mknum(p, t, p->counter);
             t->ctr = new_cprov(p, p->counter, 0, t->len, 0);
             p->counter++;
@@ -293,7 +293,7 @@ VPRIV int builtin(pp *p, const pmacro *m, ptok *t)
     case B_TIMESTAMP: {
         time_t now = p->o->has_epoch ? (time_t)p->o->epoch : time(NULL);
 
-        HC_BAD(p);
+        HC_BAD_REASON(p, "date or time macro");
         struct tm tm;
         struct stat st;
 

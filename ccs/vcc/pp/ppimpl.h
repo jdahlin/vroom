@@ -247,7 +247,6 @@ typedef struct fent {
  *     include guards).  Definitions are shared pointers (see pmacro), so
  *     "same definition" is pointer equality;
  *   - #pragma once membership of the files it would enter;
- *   - names pasted from __COUNTER__ that it looks up (must be undefined);
  *
  * and its effects: the final value of every macro it wrote, the files it
  * marked once, the files it entered (dependencies, locations), the counter
@@ -264,7 +263,8 @@ typedef struct fent {
  * the same #include (file, search dir, spelling, nesting level, system
  * header or not) replays an entry whose inputs all match the current state
  * instead of running the header.  Regions that print diagnostics, change
- * #line state, use push/pop_macro, __DATE__/__TIME__/__TIMESTAMP__/
+ * #line state, look up a counter-derived name, use push/pop_macro,
+ * __DATE__/__TIME__/__TIMESTAMP__/
  * __BASE_FILE__ or __COUNTER__ in a directive are not cached.  Entries are
  * immutable and shared by all threads.
  */
@@ -301,12 +301,6 @@ typedef struct cprov {
 typedef struct hctr {
     uint32_t off, len, rel; /* own-text offset; value - counter at entry */
 } hctr; /* tokens: off = own-token index, len = byte offset << 16 | length */
-
-/* a lookup of an identifier pasted from __COUNTER__ (it was undefined) */
-typedef struct hcread {
-    const char *s;
-    uint32_t len, off, dlen, rel;
-} hcread;
 
 typedef struct hent hent;
 
@@ -417,7 +411,6 @@ struct hent {
     const htok *tk;   /* token entries: own tokens */
     const ptok *xtk;  /* their escapes (HF_X) */
     const hctr *ctr;
-    const hcread *crd;
     const hseg *seg;
     /*
 	 * Child entries in order: their reads are this entry's inputs except
@@ -440,7 +433,7 @@ struct hent {
         br; /* token entries: outermost '{' '}' pairs of the own tokens with no child
 				   inside, (open, close) own-token indices, by open (pp_lazy_skip) */
     uint32_t nbr;
-    uint32_t nord, noadd, nfe, nctr, ncrd, nseg, span, counter_delta;
+    uint32_t nord, noadd, nfe, nctr, nseg, span, counter_delta;
     uint8_t has_text, first_sol, col_end, pend_out;
     uint8_t edir_end;
     uint8_t pk, pk_L,
@@ -477,11 +470,6 @@ typedef struct hcpos { /* __COUNTER__ digits in the output */
     uint32_t len, val;
 } hcpos;
 
-typedef struct hcrd { /* hcread while recording: absolute value */
-    const char *s;
-    uint32_t len, off, dlen, val;
-} hcrd;
-
 typedef struct hsegr { /* a child entry's text (tokens) in the output */
     size_t start, end;
     const hent *child;
@@ -491,9 +479,10 @@ typedef struct hsegr { /* a child entry's text (tokens) in the output */
 
 typedef struct hlev {
     hkey *k;
+    const char *skip_reason;
     uint32_t serial;
     int depth, errors0, warns0, text_started;
-    uint32_t t0, o0, c0, r0, s0; /* starts in the stacks below */
+    uint32_t t0, o0, c0, s0; /* starts in the stacks below */
     uint32_t fe0, base0, nonce0, nlm0, npushed0;
     unsigned counter0;
     size_t text0;
@@ -510,7 +499,7 @@ typedef struct hkidr { /* a child entry of a level while recording */
 
 /* -pedantic warnings on hot paths (__COUNTER__, every #define of a variadic macro): their
    command-line state, once per TU, so the common case (off, no pragmas) is one test */
-enum { PPW_C2Y, PPW_VARIADIC, PPW_N };
+enum { PPW_C2Y, PPW_VARIADIC, PPW_UNCACHEABLE, PPW_N };
 
 struct hrec {
     int on;      /* n > 0 */
@@ -524,8 +513,6 @@ struct hrec {
     uint32_t nord;
     hcpos *ctr;
     uint32_t nctr;
-    hcrd *crd;
-    uint32_t ncrd;
     hsegr *seg;
     uint32_t nseg;
     hkidr
@@ -693,13 +680,17 @@ struct pp {
 /* the open regions are not cacheable (something in them depends on more than we record) */
 VPRIV void diag_pragma(pp *p, const char *q, const char *e, uint32_t loc);
 VPRIV void diag_file_end(pp *p, uint32_t fe);
-#define HC_BAD(p)                                                              \
+/* Record the first local cause. Ancestors are also discarded, but diagnosing
+ * each one would repeat the same warning up the include stack. */
+#define HC_BAD_REASON(p, reason)                                               \
     do {                                                                       \
-        if ((p)->rec.n) {                                                      \
+        if ((p)->rec.n > (p)->rec.nbad) {                                      \
+            (p)->rec.lev[(p)->rec.n - 1].skip_reason = (reason);               \
             (p)->rec.nbad = (p)->rec.n;                                        \
             (p)->rec.badline = __LINE__;                                       \
         }                                                                      \
     } while (0)
+#define HC_BAD(p) HC_BAD_REASON(p, "preprocessor state could not be recorded")
 
 VPRIV void pp_wc_fill(pp *p);
 
@@ -714,8 +705,6 @@ static inline bool pp_wc_maybe(pp *p, int k)
 #define HC_MAXT (1u << 24)
 
 #define HC_MAXCP 65535u
-
-#define HC_MAXCRD 65536u
 
 /* ---------------- header cache: shared table ---------------- */
 
@@ -783,7 +772,6 @@ typedef struct {
     htouch *t;
     honce *ord;
     hcpos *ctr;
-    hcrd *crd;
     hsegr *seg;
     hkidr *kid;
     uint32_t *kex;
@@ -872,8 +860,6 @@ VPRIV __attribute__((noinline)) void rec_read(pp *p, uint32_t id, uintptr_t e,
 VPRIV uint16_t new_cprov(pp *p, uint32_t val, uint32_t off, uint32_t len,
                          uint16_t next);
 VPRIV uint16_t cp_chain(pp *p, uint16_t a, uint32_t d, uint16_t tail);
-VPRIV __attribute__((noinline)) void rec_ctr_read(pp *p, const ptok *t,
-                                                  uintptr_t e);
 static inline uintptr_t mread_tok(pp *p, const ptok *t, int def);
 static inline uintptr_t mread(pp *p, uint32_t id);
 static inline bool mdefined(pp *p, uint32_t id);
@@ -1093,7 +1079,7 @@ static inline uintptr_t mread_tok(pp *p, const ptok *t, int def)
 
     if (unlikely(p->rec.on)) {
         if (t->ctr)
-            rec_ctr_read(p, t, e);
+            HC_BAD_REASON(p, "macro name depends on __COUNTER__");
         else
             rec_read(p, t->id, e, def);
     }
