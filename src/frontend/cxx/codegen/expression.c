@@ -39,7 +39,13 @@ VPRIV void cxx_gen_variable(cxx *c, const cxx_entity *v, uint32_t loc)
 {
 	uint32_t n;
 
-	if (!cxx_gen_on(c) || !v->sym || !(cxx_gen_object_type_ok(c, v->ty) || cxx_gen_type_ok(c, v->ty)))
+	if (!cxx_gen_on(c) || !v->sym)
+		return;
+	/* (extern T a[]: an array of unknown bound is named all the same, its elements of a type code is built for) */
+	bool unbounded = v->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, v->ty) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, v->ty)->n &&
+			 cxx_gen_object_type_ok(c, AST_TYPE(c->ast, v->ty)->base);
+
+	if (!unbounded && !(cxx_gen_object_type_ok(c, v->ty) || cxx_gen_type_ok(c, v->ty)))
 		return;
 	if (v->has_value && v->ty != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(v->ty) & AST_QUALIFIER_CONST) && !c->ast->syms[v->sym].depth &&
 	    !(c->ast->syms[v->sym].flags & (AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_TENTATIVE)) &&

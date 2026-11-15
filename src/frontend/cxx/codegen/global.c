@@ -155,7 +155,8 @@ VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v)
 	attrs at;
 
 	if (!a->o->emit || c->tentative || c->template_depth || c->instantiating || c->gen || !v || !v->sym || !(v->global_ns || v->mangled_var) ||
-	    !cxx_gen_object_type_ok(c, v->ty))
+	    !(cxx_gen_object_type_ok(c, v->ty) || (v->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(a, v->ty) == AST_TYPE_ARRAY && !AST_TYPE(a, v->ty)->n &&
+						   cxx_gen_object_type_ok(c, AST_TYPE(a, v->ty)->base))))	/* (T a[] = {...}: its bound from the initializer) */
 		return false;
 	/* The initializer is built inside a function of its own: if it turns out not to be a constant, that
 	   function runs it when the program starts (.init_array), in the order of the definitions. */
@@ -406,7 +407,9 @@ VPRIV void cxx_gen_global_end(cxx *c, const cxx_entity *v, uint32_t init, bool h
 		/* a constant initializer: in the object file */
 		uint32_t k = init;
 
-		if (AST_NODE_AT(a, k)->op != AST_NODE_INITIALIZER)
+		if (AST_NODE_AT(a, k)->op == AST_NODE_STRING && AST_TYPE_KIND(a, y->ty) == AST_TYPE_ARRAY)
+			;	/* (char s[] = "text": the string itself, as C initializes the array) */
+		else if (AST_NODE_AT(a, k)->op != AST_NODE_INITIALIZER)
 			k = cxx_gen_type_ok(c, v->ty) && !cc_type_is_record(a, AST_NODE_AT(a, k)->ty) ? cc_conversion_apply(a, cc_conversion_decay(a, k), AST_QUALIFIED_TYPE_UNQUALIFIED(y->ty)) : 0;
 		if (k && cxx_gen_static_ok(a, y->ty, k)) {
 			cxx_gen_global_finish(c, false);

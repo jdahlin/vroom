@@ -1,6 +1,18 @@
 /* C++ declarations: init-declarators (a declaration's declarators and their initializers or bodies) */
 #include "declaration.h"
 
+
+/* an earlier declaration of this variable in its scope gave it external linkage (extern const int n; then
+   const int n = 3; is that n, not an internal one: [basic.link]/3's "not previously declared extern") */
+static bool cxx_declared_extern_before(cxx *c, const cxx_entity *e, uint32_t name)
+{
+	for (cxx_entity *x = cxx_lookup_in(c, cxx_declaration_scope(c), name, 0); x; x = x->next)
+		if (x != e && x->kind == CXX_ENTITY_VALUE && x->sym && (c->ast->syms[x->sym].flags & AST_SYMBOL_FLAG_GLOBAL) && !x->fn_internal &&
+		    (x->ty == CXX_TY_UNKNOWN || AST_TYPE_KIND(c->ast, x->ty) != AST_TYPE_FUNCTION))
+			return true;
+	return false;
+}
+
 VPRIV bool cxx_is_function_body_start(cxx *c)
 {
 	return cxx_is(c, LEX_TOKEN_LEFT_BRACE) || cxx_is(c, LEX_TOKEN_COLON) || cxx_is_kw(c, CXX_KW_try);
@@ -372,8 +384,8 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			if (e && global && kind == CXX_ENTITY_VALUE && !e->sym)
 				e->sym = cxx_symbol(c, f ? AST_SYMBOL_FUNCTION : AST_SYMBOL_VARIABLE, name, t, name_loc), e->c_linkage = c->c_linkage > 0,
 				e->global_ns = cxx_declaration_scope(c) == c->global, e->home = cxx_declaration_scope(c);
-			if (e && global && kind == CXX_ENTITY_VALUE && !f && !(flags & DS_EXTERN_SEEN))
-				gen_var = e;
+			if (e && global && kind == CXX_ENTITY_VALUE && !f && (!(flags & DS_EXTERN_SEEN) || cxx_is(c, LEX_TOKEN_EQUAL)))
+				gen_var = e;	/* (extern const int n = 3; with its initializer is n's definition) */
 			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
 				c->ast->syms[e->sym].sc = AST_STORAGE_STATIC;	/* (internal linkage) */
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !(flags & (DS_TYPEDEF | DS_FRIEND)) &&
@@ -395,13 +407,13 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				cc_attribute_apply_symbol(c->ast, &c->ast->syms[e->sym], &at);
 				c->ast->syms[e->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
 			} else if (e && global && kind == CXX_ENTITY_VALUE && !f && e->sym && !c->tentative && !e->c_linkage &&
-				   (e->home != c->global || (t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) &&
+				   (e->home != c->global || (cxx_type_const_object(c, t) && !cxx_declared_extern_before(c, e, name) &&
 							     !(flags & (DS_EXTERN_SEEN | DS_INLINE)) && !c->explicit_specialization)) &&
 				   c->ast->syms[e->sym].ty == t && !e->mangled_var) {
 				/* (at the global scope too for a const one: constexpr P qq{8}; is _ZL2qq, internal) */
 				/* a namespace's variable: internal linkage written L (static, or const and not extern) */
 				bool internal = (flags & DS_STATIC) || cxx_scope_in_unnamed_namespace(c, e->home) ||
-						(t != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)));
+						(cxx_type_const_object(c, t) && !(flags & (DS_EXTERN_SEEN | DS_INLINE)) && !cxx_declared_extern_before(c, e, name));
 
 				e->mangled_var = 1;
 				if (c->explicit_specialization) {
@@ -743,6 +755,19 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						t = cc_type_array(c->ast, AST_TYPE(c->ast, t)->base, n, 0);
 						unsized_e->ty = t;
 						gen_local = unsized_e->sym = unsized_static ? cxx_gen_local_static(c, name, t, name_loc) : cxx_gen_local(c, name, t, name_loc);
+					} else
+						cxx_gen_fail(c);
+				}
+				if (gen_global && t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY && !AST_TYPE(c->ast, t)->n) {
+					/* T a[] = {...} or = "text" at namespace scope: the bound, from the initializer */
+					uint64_t n = !cxx_gen_on(c) ? 0 : braced ? (c->brace_n != UINT32_MAX ? c->brace_n : 0) :
+						     c->enode && AST_TYPE_KIND(c->ast, AST_NODE_AT(c->ast, c->enode)->ty) == AST_TYPE_ARRAY ?
+						     AST_TYPE(c->ast, AST_NODE_AT(c->ast, c->enode)->ty)->n : 0;
+
+					if (n) {
+						t = cc_type_array(c->ast, AST_TYPE(c->ast, t)->base, n, 0);
+						((cxx_entity *)gen_var)->ty = t;
+						c->ast->syms[gen_var->sym].ty = t;
 					} else
 						cxx_gen_fail(c);
 				}

@@ -629,6 +629,20 @@ VPRIV bool cxx_class_has_member_initializer(cxx *c, ast_qualified_type t);
 VPRIV void cxx_class_access(cxx *c, int non_public);
 VPRIV void cxx_class_member_traits(cxx *c, int what);	/* CXX_MEMBER_*: what makes a class non-POD */
 enum { CXX_MEMBER_USER_SPECIAL = 1, CXX_MEMBER_INITIALIZER, CXX_MEMBER_VIRTUAL };
+/* an object of type t is const: t is, or for an array its elements are (const int a[] at namespace scope:
+   internal, as const int x) */
+static inline bool cxx_type_const_object(const cxx *c, ast_qualified_type t)
+{
+	for (int d = 0; t != CXX_TY_UNKNOWN && d < 16; d++) {
+		if (AST_QUALIFIED_TYPE_QUALIFIERS(t) & AST_QUALIFIER_CONST)
+			return true;
+		if (AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY)
+			return false;
+		t = AST_TYPE(c->ast, t)->base;
+	}
+	return false;
+}
+
 /* the expression's type is a 64-bit unsigned one: a negative evalue is its value 2^63 and up (1ULL << 63) */
 static inline bool cxx_etype_unsigned64(const cxx *c)
 {
