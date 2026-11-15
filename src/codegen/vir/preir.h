@@ -34,6 +34,7 @@
 /* The VIR builder's state (codegen/vir/): one per ecx, reused by every function. */
 #ifndef VCC_CODEGEN_VIR_PREIR_H
 #define VCC_CODEGEN_VIR_PREIR_H
+#include "common/scratch.h"
 #include "vir/vir.h"
 #include "vir/register-allocation.h"
 
@@ -133,7 +134,8 @@ typedef struct virbuild_context {
     uint32_t block_order_count,
         block_order_capacity; /* blocks in emission order */
     uint32_t *block_map;
-    uint32_t block_map_capacity;              /* scratch */
+    uint32_t block_map_capacity; /* scratch */
+    vscratch pass_scratch; /* reused by sequential passes on this worker */
     uint64_t live_names[3], live_float_names; /* names in use */
     uint32_t float_products
         [64]; /* per float name: the product (or its negation) the expression in hand just made, 0 none */
@@ -244,6 +246,7 @@ static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
 
 /* what the files share (each defined in the file named) */
 /* preir.c */
+VPRIV void *virbuild_pass_scratch_get(codegen_context *e, uint64_t bytes);
 VPRIV virbuild_context *virbuild_context_get(codegen_context *e);
 VPRIV __attribute__((noreturn, cold)) void virbuild_fail(codegen_context *e,
                                                          const char *why);

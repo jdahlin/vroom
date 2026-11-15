@@ -20,6 +20,17 @@ VPRIV __attribute__((noreturn, cold)) void virbuild_fail(codegen_context *e,
     _longjmp(e->bail_jump, 1);
 }
 
+/* Each request invalidates earlier views into this worker's scratch storage. */
+VPRIV void *virbuild_pass_scratch_get(codegen_context *e, uint64_t bytes)
+{
+    void *buf = bytes <= SIZE_MAX
+                    ? vscratch_get(&e->vir_builder->pass_scratch, (size_t)bytes)
+                    : NULL;
+    if (!buf)
+        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+    return buf;
+}
+
 VPRIV uint32_t virbuild_preir_insn_add(codegen_context *e, uint32_t op,
                                        uint32_t ty, uint32_t fl, uint32_t a,
                                        uint32_t b, uint32_t c, uint32_t blk)

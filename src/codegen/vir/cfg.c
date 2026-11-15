@@ -164,19 +164,9 @@ VPRIV void virbuild_block_dominators_compute(codegen_context *e,
                                              virbuild_simplify_state *S)
 {
     virbuild_context *V = e->vir_builder;
-    uint32_t n = V->block_order_count,
-             *ri = malloc(((size_t)V->block_count + 1) * sizeof *ri);
+    uint32_t n = V->block_order_count, *ri = S->reverse_postorder_index;
     bool changed = true;
 
-    S->immediate_dominators =
-        malloc(((size_t)V->block_count + 1) * sizeof *S->immediate_dominators);
-    S->dominator_first_child =
-        malloc(((size_t)V->block_count + 1) * sizeof *S->dominator_first_child);
-    S->dominator_next_sibling = malloc(((size_t)V->block_count + 1) *
-                                       sizeof *S->dominator_next_sibling);
-    if (!ri || !S->immediate_dominators || !S->dominator_first_child ||
-        !S->dominator_next_sibling)
-        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
     for (uint32_t b = 0; b < V->block_count; b++)
         ri[b] = VIRBUILD_BLOCK_NONE,
         S->immediate_dominators[b] = VIRBUILD_BLOCK_NONE,
@@ -220,7 +210,6 @@ VPRIV void virbuild_block_dominators_compute(codegen_context *e,
         S->dominator_next_sibling[b] = S->dominator_first_child[d];
         S->dominator_first_child[d] = b;
     }
-    free(ri);
 }
 
 VPRIV uint32_t virbuild_block_predecessor_index(const virbuild_context *V,

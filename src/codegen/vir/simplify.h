@@ -20,6 +20,8 @@ typedef struct virbuild_value_entry {
 } virbuild_value_entry; /* (key) -> value */
 
 typedef struct virbuild_simplify_state {
+    uint32_t *
+        stack; /* shared by passes over loops, dominators and dead instructions */
     uint32_t *use_counts,
         constant_start; /* uses per value; values from n0 on are the pass's constants */
     virbuild_value_entry *value_table;
@@ -27,7 +29,7 @@ typedef struct virbuild_simplify_state {
         value_table_mask; /* pure instructions and loads of the dominators, by content */
     uint32_t *table_log,
         table_log_count; /* ... the entries added, in order (undone leaving a block) */
-    uint32_t *constant_table, constant_table_mask, constant_count,
+    uint32_t *constant_table, constant_table_mask,
         constant_entry_count; /* constants: value + 1 */
     uint32_t memory_generation, block_generations,
         *end_generations; /* the memory state loads are keyed by; per block at its end */

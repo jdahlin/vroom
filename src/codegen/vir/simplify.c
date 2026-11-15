@@ -150,6 +150,54 @@ static void virbuild_literal_memcmp_fold(codegen_context *e,
     }
 }
 
+/* Size the workspace before assigning pointers: growth may move the backing allocation.
+ * Every table except the trailing byte flags has four-byte alignment. */
+static size_t virbuild_simplify_layout(codegen_context *e,
+                                       virbuild_simplify_state *S, char *base,
+                                       size_t kc, size_t hc)
+{
+    virbuild_context *V = e->vir_builder;
+    size_t nv = (size_t)V->insn_count + 1,
+           block_count = (size_t)V->block_count + 1,
+           nr = (size_t)V->block_order_count + 1;
+    size_t used = 0;
+
+#define VIRBUILD_TABLE(field, count)                                           \
+    do {                                                                       \
+        size_t bytes;                                                          \
+        if (base)                                                              \
+            S->field = (void *)(base + used);                                  \
+        if (__builtin_mul_overflow((size_t)(count), sizeof *S->field,          \
+                                   &bytes) ||                                  \
+            __builtin_add_overflow(used, bytes, &used))                        \
+            virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));                 \
+    } while (0)
+    VIRBUILD_TABLE(stack, nv > 2 * block_count ? nv : 2 * block_count);
+    VIRBUILD_TABLE(table_log, 2 * nv);
+    VIRBUILD_TABLE(end_generations, block_count);
+    VIRBUILD_TABLE(immediate_dominators, block_count);
+    VIRBUILD_TABLE(dominator_first_child, block_count);
+    VIRBUILD_TABLE(dominator_next_sibling, block_count);
+    VIRBUILD_TABLE(reverse_postorder_index, block_count);
+    VIRBUILD_TABLE(writers, nv);
+    VIRBUILD_TABLE(loop_innermost, nr);
+    VIRBUILD_TABLE(loop_start, nr);
+    VIRBUILD_TABLE(loop_end, nr);
+    VIRBUILD_TABLE(loop_parent, nr);
+    /* Only this suffix needs zeroing on reuse. */
+    size_t clear = used;
+    VIRBUILD_TABLE(value_table, hc);
+    VIRBUILD_TABLE(constant_table, kc);
+    VIRBUILD_TABLE(use_counts, 2 * nv);
+    VIRBUILD_TABLE(positions, nv);
+    VIRBUILD_TABLE(block_end_positions, block_count);
+    VIRBUILD_TABLE(loop_is_merged, nr);
+#undef VIRBUILD_TABLE
+    if (base)
+        memset(base + clear, 0, used - clear);
+    return used;
+}
+
 VPRIV void virbuild_function_simplify(codegen_context *e)
 {
     virbuild_context *V = e->vir_builder;
@@ -157,23 +205,23 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
     uint32_t *stk, ns = 0;
     bool has_memcmp = false;
 
-    S.constant_start = V->insn_count;
-    S.use_counts =
-        calloc(2 * ((size_t)S.constant_start + 1), sizeof *S.use_counts);
-    stk = malloc(((size_t)S.constant_start + 1) * sizeof *stk);
-    {
-        uint32_t kc = 16;
+    uint64_t hc = 16, kc = 16, nonconst = 0;
 
-        for (uint32_t i = 0; i < V->insn_count; i++)
-            S.constant_count += V->insns[i].block == VIRBUILD_BLOCK_NONE;
-        while (kc < 2 * (V->insn_count +
-                         64)) /* (and the constants the pass makes) */
-            kc *= 2;
-        S.constant_table = calloc(kc, sizeof *S.constant_table);
-        S.constant_table_mask = kc - 1;
-    }
-    if (!S.use_counts || !stk || !S.constant_table)
+    S.constant_start = V->insn_count;
+    for (uint32_t i = 0; i < V->insn_count; i++)
+        nonconst += V->insns[i].block != VIRBUILD_BLOCK_NONE;
+    while (kc < 2 * ((uint64_t)V->insn_count + 64))
+        kc *= 2;
+    while (hc < 2 * nonconst + 2)
+        hc *= 2;
+    if (kc > UINT32_MAX || hc > UINT32_MAX)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
+    S.constant_table_mask = kc - 1;
+    S.value_table_mask = hc - 1;
+    size_t need = virbuild_simplify_layout(e, &S, NULL, kc, hc);
+    void *buf = virbuild_pass_scratch_get(e, need);
+    virbuild_simplify_layout(e, &S, buf, kc, hc);
+    stk = S.stack;
     uint32_t *pointer_copies = S.use_counts + S.constant_start + 1;
     /* uses */
     for (uint32_t i = 0; i < V->block_order_count; i++) {
@@ -230,20 +278,8 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
     virbuild_block_dominators_compute(e, &S);
     virbuild_far_load_init(e, &S);
     {
-        uint32_t cap = 16, top = 0,
-                 *bst = malloc((size_t)(V->block_count + 1) * 2 * sizeof *bst);
+        uint32_t top = 0, *bst = S.stack;
 
-        while (cap < 2 * (V->insn_count - S.constant_count) + 2)
-            cap *= 2;
-        S.value_table = calloc(cap, sizeof *S.value_table);
-        S.value_table_mask = cap - 1;
-        S.table_log =
-            malloc((2 * (size_t)V->insn_count + 2) *
-                   sizeof *S.table_log); /* (a store or a load adds two) */
-        S.end_generations =
-            malloc(((size_t)V->block_count + 1) * sizeof *S.end_generations);
-        if (!S.value_table || !S.table_log || !bst || !S.end_generations)
-            virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
         bst[top++] = V->block_order[0], bst[top++] = 0;
         while (top) {
             uint32_t ph = bst[--top], b = bst[--top];
@@ -268,7 +304,6 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
                  c != VIRBUILD_BLOCK_NONE; c = S.dominator_next_sibling[c])
                 bst[top++] = c, bst[top++] = 0;
         }
-        free(bst);
     }
     virbuild_address_offsets_fold(e, &S);
     /* what nothing reads */
@@ -313,13 +348,4 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
         if (term && V->insns[term].insn.op == VIR_OP_BRIF)
             virbuild_literal_memcmp_fold(e, &S, term);
     }
-    free(S.value_table), free(S.table_log), free(S.end_generations),
-        free(S.constant_table);
-    free(S.immediate_dominators), free(S.dominator_first_child),
-        free(S.dominator_next_sibling);
-    free(S.positions), free(S.writers), free(S.reverse_postorder_index),
-        free(S.block_end_positions), free(S.loop_innermost), free(S.loop_start),
-        free(S.loop_end), free(S.loop_parent), free(S.loop_is_merged);
-    free(S.use_counts);
-    free(stk);
 }

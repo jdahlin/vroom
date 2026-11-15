@@ -567,6 +567,7 @@ VPRIV void virbuild_ecx_free(codegen_context *e)
 
     if (!V)
         return;
+    vscratch_destroy(&V->pass_scratch);
     free(V->indirect_targets);
     free(V->insns), free(V->blocks), free(V->extra), free(V->variable_entries),
         free(V->local_hash), free(V->forward), free(V->labels), free(V->slots),

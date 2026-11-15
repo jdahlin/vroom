@@ -97,27 +97,8 @@ VPRIV void virbuild_far_load_init(codegen_context *e,
     virbuild_context *V = e->vir_builder;
     uint32_t n = V->block_order_count, pos = 0, sp = 0, nl = 0, *stk, *iend;
 
-    S->positions = calloc((size_t)S->constant_start + 1, sizeof *S->positions);
-    S->writers = malloc(((size_t)S->constant_start + 1) * sizeof *S->writers);
-    S->reverse_postorder_index = malloc(((size_t)V->block_count + 1) *
-                                        sizeof *S->reverse_postorder_index);
-    S->block_end_positions =
-        calloc((size_t)V->block_count + 1, sizeof *S->block_end_positions);
-    S->loop_innermost = malloc(((size_t)n + 1) * sizeof *S->loop_innermost);
-    S->loop_start = malloc(((size_t)n + 1) * sizeof *S->loop_start);
-    S->loop_end = malloc(((size_t)n + 1) * sizeof *S->loop_end);
-    S->loop_parent = malloc(((size_t)n + 1) * sizeof *S->loop_parent);
-    S->loop_is_merged = calloc((size_t)n + 1, 1);
-    stk = malloc(((size_t)n + 1) * sizeof *stk);
-    iend = malloc(((size_t)n + 1) * sizeof *iend);
-    if (!S->positions || !S->writers || !S->reverse_postorder_index ||
-        !S->block_end_positions || !S->loop_innermost || !S->loop_start ||
-        !S->loop_end || !S->loop_parent || !S->loop_is_merged || !stk || !iend)
-        virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
-    for (uint32_t b = 0; b < V->block_count; b++)
-        S->reverse_postorder_index[b] = VIRBUILD_BLOCK_NONE;
-    for (uint32_t i = 0; i < n; i++)
-        S->reverse_postorder_index[V->block_order[i]] = i;
+    stk = S->stack;
+    iend = stk + n;
     for (uint32_t i = 0; i < n; i++) {
         uint32_t b = V->block_order[i];
 
@@ -169,7 +150,6 @@ VPRIV void virbuild_far_load_init(codegen_context *e,
         }
         S->loop_innermost[i] = sp ? stk[sp - 1] : VIRBUILD_BLOCK_NONE;
     }
-    free(stk), free(iend);
 }
 
 /* load q of the bytes at A: the table's entry for them, and whether its load (an earlier
