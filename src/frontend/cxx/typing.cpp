@@ -2390,6 +2390,15 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
                 *v = 0;
                 return true;
             }
+            /* (T& = T&& without a user-declared assignment, its bases' and members' trivial: trivial,
+			   so it cannot throw either, whatever the destructor is or whether the class is POD for
+			   layout; libc++'s optional<T>: is_trivially_move_assignable<SkMatrix>, and
+			   is_nothrow_move_assignable of a T with ~T()) */
+            if (!cxx_class_polymorphic(c, l) &&
+                cxx_class_assign_trivial(c, l, 0) == 1) {
+                *v = 1;
+                return true;
+            }
         }
         return false;
     }
@@ -2895,6 +2904,25 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
                 }
                 if (trivially && pod) {
                     *v = 1;
+                    return true;
+                }
+            }
+            if ((IS("__is_trivially_destructible") ||
+                 IS("__has_trivial_destructor")) &&
+                cc_type_is_record(c->ast, e)) {
+                /* a class not POD for layout: trivially destructible when nothing in it needs destroying
+				   (cxx_gen_needs_destruction's false is proven), not when its own destructor is user-provided,
+				   virtual or deleted (libc++'s optional<T> of such a T: is_trivially_destructible picks its
+				   storage base); else not known */
+                cxx_entity *d = cxx_gen_declared_destructor(c, e);
+
+                if (!cxx_gen_needs_destruction(c, e, 0)) {
+                    *v = 1;
+                    return true;
+                }
+                if (d && (d->fn_virtual || d->fn_deleted ||
+                          !(d->fn_defaulted && !d->fn_ooc_default))) {
+                    *v = 0;
                     return true;
                 }
             }

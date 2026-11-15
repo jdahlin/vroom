@@ -927,6 +927,9 @@ VPRIV ast_qualified_type cxx_ctad(
     cxx *c, cxx_entity *te, const ast_qualified_type *args, const uint8_t *lval,
     uint32_t nargs); /* declaration.c: Name{args} of a class template */
 VPRIV int cxx_gen_trivial_abi(cxx *c, ast_qualified_type t, int depth);
+VPRIV bool cxx_gen_needs_destruction(cxx *c, ast_qualified_type t, int depth);
+VPRIV struct cxx_entity *cxx_gen_declared_destructor(cxx *c,
+                                                     ast_qualified_type t);
 /* codegen/state.c: copied as C does (1), by address (0), not known (-1) */ /* codegen/function.c: VCC_CXX_MISSING, the functions without code */
 VPRIV void cxx_tokens_read(cxx *c);
 VPRIV const char *cxx_token_kind_spelling(int kind);
