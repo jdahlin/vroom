@@ -2312,3 +2312,14 @@ dess `operator bool` (även explicit).  Test: `run/ooc-member-class.cpp`
 (symbolerna som clangs).  `ostream << string` (`__put_character_sequence`)
 kompileras; statement.c:982 borta ur bänken.  Strikt bänk: pass 6, 199 saknas
 (från 202).  Sviter gröna (97/97, 38/38, mangle, 350/350).
+
+## Status 142 (2026-11-15)
+- Statiska datamedlemmar i en explicit specialiserad klass (`ctype<char>::id`)
+  får nu sin variabel (villkoret mot `explicit_specialization` gällde
+  variabelmallar, inte klasskontext).
+- `static_cast<D&>(b)` ned i hierarkin (basen inte först: minus offset) byggs;
+  `static_cast<D*>(p)`/`static_cast<B*>(d)` mellan klasspekare flyttar pekaren
+  med basens offset och behåller null.  Pekarfallet felkompilerades tyst
+  förut (ingen offset).
+`use_facet` kompileras.  Test: `run/static-cast-hierarchy.cpp`.  Strikt bänk:
+pass 7, 184 saknas (från 199).  Sviter gröna (98/98, 38/38, mangle, 350/350).

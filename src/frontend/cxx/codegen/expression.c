@@ -278,6 +278,18 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
 			c->enode = b;
 			return;
 		}
+		if ((AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && !same && cc_type_is_record(a, xt) && cc_type_is_record(a, bt) &&
+		    AST_TYPE_KIND(a, xt) != AST_TYPE_ARRAY && AST_TYPE_KIND(a, bt) != AST_TYPE_ARRAY && cxx_class_base_offset(c, bt, xt, &off, 0)) {
+			/* static_cast<D&>(b) of a B that is a non-virtual base of D: the D it is in, off bytes before it
+			   ([expr.static.cast]/2; use_facet's static_cast<const ctype<char>&>(*facet)) */
+			ast_qualified_type cp = cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR));
+			uint32_t p = cc_cast_insert(a, cc_address_of_build(a, x, loc), cp, AST_CAST_NOP);
+
+			if (off)
+				p = cc_binary_build(a, LEX_TOKEN_MINUS, p, cc_node_integer_new(a, (i128)off, cc_type_basic(AST_TYPE_LONG), loc), loc);
+			c->enode = cc_dereference_build(a, cc_cast_insert(a, p, cc_type_pointer(a, AST_TYPE(a, to)->base), AST_CAST_NOP), loc);
+			return;
+		}
 		if ((AST_NODE_AT(a, x)->flags & AST_NODE_FLAG_LVALUE) && same) {
 			if (AST_NODE_AT(a, x)->ty != AST_TYPE(a, to)->base) {
 				ast_qualified_type pt = cc_type_pointer(a, AST_TYPE(a, to)->base);
@@ -302,6 +314,38 @@ VPRIV void cxx_gen_cast(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
 	x = cc_conversion_decay(a, x);
 	if (!cxx_gen_type_ok(c, AST_NODE_AT(a, x)->ty) || cc_type_is_record(a, AST_NODE_AT(a, x)->ty))
 		return;
+	{
+		/* static_cast<D*>(b) or static_cast<B*>(d) between pointers to classes, one a base of the other: the
+		   pointer moved by the base's offset, a null pointer kept null */
+		ast_qualified_type xt = AST_NODE_AT(a, x)->ty;
+
+		if (AST_TYPE_KIND(a, xt) == AST_TYPE_POINTER && !AST_TYPE(a, xt)->ext && AST_TYPE_KIND(a, to) == AST_TYPE_POINTER && !AST_TYPE(a, to)->ext) {
+			ast_qualified_type fb = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, xt)->base), tb = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, to)->base);
+			uint64_t off = 0;
+			int dir = 0;
+
+			if (fb != tb && cc_type_is_record(a, fb) && cc_type_is_record(a, tb) && AST_TYPE_KIND(a, fb) != AST_TYPE_ARRAY &&
+			    AST_TYPE_KIND(a, tb) != AST_TYPE_ARRAY && AST_TYPE(a, fb)->aux != AST_TYPE(a, tb)->aux)
+				dir = cxx_class_base_offset(c, tb, fb, &off, 0) ? -1 : cxx_class_base_offset(c, fb, tb, &off, 0) ? 1 : 0;
+			if (dir && off) {
+				ast_qualified_type cp = cc_type_pointer(a, cc_type_basic(AST_TYPE_CHAR));
+				uint32_t tmp = cxx_gen_temporary(c, xt, loc), set, moved;
+
+				if (!tmp)
+					return;
+				set = cc_assignment_build(a, 0, cxx_gen_var_node(c, tmp, loc), cc_node_rvalue(a, x), loc);
+				moved = cc_binary_build(a, dir < 0 ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS,
+							cc_cast_insert(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), cp, AST_CAST_NOP),
+							cc_node_integer_new(a, (i128)off, cc_type_basic(AST_TYPE_LONG), loc), loc);
+				moved = cc_cast_insert(a, moved, AST_QUALIFIED_TYPE_UNQUALIFIED(to), AST_CAST_NOP);
+				c->enode = cc_node_new_operands(a, AST_NODE_COMMA, AST_QUALIFIED_TYPE_UNQUALIFIED(to), loc, set,
+								cc_conditional_build(a, cc_condition_scalar(a, cc_node_rvalue(a, cxx_gen_var_node(c, tmp, loc)), "'static_cast'"),
+										     moved, cc_cast_insert(a, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_LONG), loc),
+													   AST_QUALIFIED_TYPE_UNQUALIFIED(to), AST_CAST_INTEGER_TO_POINTER), loc));
+				return;
+			}
+		}
+	}
 	c->enode = cc_cast_insert(a, x, AST_QUALIFIED_TYPE_UNQUALIFIED(to), cc_conversion_cast_kind(a, AST_NODE_AT(a, x)->ty, AST_QUALIFIED_TYPE_UNQUALIFIED(to), x));
 }
 

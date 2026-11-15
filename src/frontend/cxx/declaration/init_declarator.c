@@ -355,9 +355,9 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 			if (e && global && kind == CXX_ENTITY_VALUE && e->sym && (flags & DS_STATIC) && !c->tentative)
 				c->ast->syms[e->sym].sc = AST_STORAGE_STATIC;	/* (internal linkage) */
 			if (e && !f && kind == CXX_ENTITY_VALUE && context == CXX_CONTEXT_CLASS && (flags & DS_STATIC) && !(flags & (DS_TYPEDEF | DS_FRIEND)) &&
-			    !e->sym && !c->tentative && !c->template_depth && !c->explicit_specialization && t != CXX_TY_UNKNOWN) {
+			    !e->sym && !c->tentative && !c->template_depth && t != CXX_TY_UNKNOWN) {
 				/* a static data member: a variable of its own, named in its class (defined where the class's
-				   definition outside it is, or inline) */
+				   definition outside it is, or inline; in an explicit specialization's class too, ctype<char>::id) */
 				e->sym = cxx_symbol(c, AST_SYMBOL_VARIABLE, name, t, name_loc), e->home = cxx_declaration_scope(c);
 				if (e->sym)
 					c->ast->syms[e->sym].sc = AST_STORAGE_EXTERN;
