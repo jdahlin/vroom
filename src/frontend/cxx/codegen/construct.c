@@ -315,8 +315,35 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t,
     bool found = c->ctor_found;
     cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
 
+    bool value_init = c->gen_value_init;
+
+    c->gen_value_init = 0;
     if (!target || !cls || nargs == UINT32_MAX || nargs > CXX_MAX_ARGS)
         return false;
+    if (value_init && !nargs &&
+        !(found && ctor && ctor->member_of == cls && !ctor->fn_defaulted)) {
+        /* T{} or f({}) of a class without a user-provided default constructor: zeroed, then default-constructed
+           ([dcl.init.general]/9.1.2) */
+        uint32_t zargs[3], saved = c->enode, zero;
+
+        zargs[0] = cc_address_of_build(a, target, loc);
+        zargs[1] = cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc);
+        zargs[2] = cc_node_integer_new(
+            a, (i128)AST_TYPE(a, AST_QUALIFIED_TYPE_UNQUALIFIED(t))->size,
+            cc_type_basic(AST_TYPE_UNSIGNED_LONG), loc);
+        c->enode = 0;
+        cxx_gen_builtin(c, "__builtin_memset", 16, zargs, 3, loc);
+        zero = c->enode;
+        c->enode = saved;
+        if (!zero)
+            return false;
+        cc_id_list_append(
+            a, out, cc_statement_new(a, AST_NODE_EXPRESSION, loc, zero, 0, 0));
+        c->ctor_picked = ctor, c->ctor_found = found;
+        if (!cxx_gen_needs_construction(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                                        0))
+            return true;
+    }
     uint32_t sliced;
     if (nargs == 1 && args[0] &&
         (AST_NODE_AT(a, args[0])->flags & AST_NODE_FLAG_LVALUE) &&

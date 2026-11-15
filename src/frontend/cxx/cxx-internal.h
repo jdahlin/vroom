@@ -780,6 +780,8 @@ typedef struct cxx {
         op_fnset; /* the next operator call's right operand, when it names a set of functions (os << endl) */
     const uint32_t *
         gen_agg_brace; /* the next aggregate initialization: its elements that are braced lists (their '{'; NULL: none known) */
+    uint8_t
+        gen_value_init; /* the next cxx_gen_construct_at with no arguments is T{}'s: value-initialization (zeroed first unless a user-provided constructor) */
     uint32_t gen_call_brace[CXX_MAX_ARGS];
     /* the next cxx_gen_call's arguments that are braced lists (their '{'; carg_brace saved at the call) */ /* ... an argument that is a braced list itself: its '{' (its node 0; 0: not one) */
     uint32_t

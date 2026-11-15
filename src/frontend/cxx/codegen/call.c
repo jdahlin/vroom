@@ -277,6 +277,7 @@ VPRIV uint32_t cxx_gen_braced_temp(cxx *c, ast_qualified_type t, uint32_t pos,
         c->ctor_ilist = il;
     }
     (void)l;
+    c->gen_value_init = n == 0;
     if (!cxx_gen_construct_at(c, cxx_gen_var_node(c, tmp, loc), t, an, n,
                               (cc_id_list *)c->gen_block, loc))
         return 0; /* (constructed before the call, in its block: the temporary is an lvalue) */

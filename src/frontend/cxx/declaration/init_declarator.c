@@ -1048,6 +1048,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         n <= CXX_MAX_ARGS
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
+                    c->gen_value_init = n == 0;
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
@@ -1301,6 +1302,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         n <= CXX_MAX_ARGS
                             ? abr
                             : NULL; /* (an aggregate's elements that are braced lists) */
+                    c->gen_value_init = n == 0;
                     cxx_gen_construct_local(c, gen_local, t, an, n, name_loc);
                     c->gen_agg_brace = NULL;
                     gen_declared = true;
