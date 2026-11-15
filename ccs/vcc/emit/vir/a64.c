@@ -28,6 +28,8 @@ typedef struct vlarg { uint8_t reg; uint8_t size; int32_t stk; } vlarg;	/* reg V
 
 typedef struct { uint32_t l, e, to; } vl_transfer;
 
+typedef struct vlx { uint32_t first, xv; uint8_t kind, opt, sh; int64_t k; } vlx;
+
 typedef struct vl {
 	ecx *e;
 	vir_fn *f;
@@ -58,7 +60,7 @@ typedef struct vl {
 	int64_t poff;		/* ... and offset */
 	uint32_t xval;		/* a ptradd the next load or store addresses through as [base, index] (0 none) */
 	uint32_t xfirst, xc;	/* the chain vl_cfold folds: its first instruction, its consumer (xc VIR_NOBLK none) */
-	struct vlx { uint32_t first, xv; uint8_t kind, opt, sh; int64_t k; } xx;	/* ... vl_cinfo's answer */
+	vlx xx;	/* ... vl_cinfo's answer */
 	int xbase, xreg;	/* ... its base register, the index's */
 	uint8_t xopt, xsh;	/* ... the index's extension (2 uxtw, 3 lsl, 6 sxtw), scaled by the access size */
 	uint32_t ei, eend;	/* the block's edits: the next one, the end */
@@ -1374,7 +1376,6 @@ static bool vl_pfold(vl *L, uint32_t b, uint32_t i)
 static bool vl_once(const vl *L, uint32_t v) { return L->uses[v] == 1 && L->o->slot[v] == VIR_NOBLK; }
 
 enum { VX_MEM = 1, VX_EXT, VX_LSL, VX_MADDL };
-typedef struct vlx vlx;
 
 /* the index operand (b) of c, a ptradd, add or sub of 64 bits, built by the instructions right
  * before c, each used once by the next, that c folds:

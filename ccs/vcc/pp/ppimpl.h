@@ -436,6 +436,43 @@ typedef struct hkidr {		/* a child entry of a level while recording */
    command-line state, once per TU, so the common case (off, no pragmas) is one test */
 enum { PPW_C2Y, PPW_VARIADIC, PPW_N };
 
+struct hrec {
+	int on;		/* n > 0 */
+	int n, nbad;	/* levels; levels [0, nbad) are not cacheable */
+	int badline;
+	uint32_t serial;
+	hlev lev[HC_MAXLEV];
+	htouch *t;
+	uint32_t nt;
+	honce *ord;
+	uint32_t nord;
+	hcpos *ctr;
+	uint32_t nctr;
+	hcrd *crd;
+	uint32_t ncrd;
+	hsegr *seg;
+	uint32_t nseg;
+	hkidr *kid;	/* child entries, in order (their reads and writes are theirs) */
+	uint32_t nkid;
+	uint32_t *kex;
+	uint32_t nkex;
+	hlook *lk;	/* the levels' own lookups (hlook) */
+	uint32_t nlk;
+	cprov *cp;	/* indexed by ptok.ctr */
+	uint32_t ncp;
+	ptok *tk;	/* tokens handed out (token mode) */
+	uint32_t ntk;
+	char *sb;	/* their spellings that live in per-TU memory */
+	size_t nsb;
+};
+
+struct lmark {		/* #line / GNU line markers */
+	uint32_t fe, off;	/* in fent fe, from byte offset off on */
+	uint32_t pline, line;	/* physical line pline is line */
+	const char *name;	/* presumed file name, or NULL */
+	uint32_t namelen;
+};
+
 struct pp {
 	uintptr_t *mdir[NMDIR];
 	const pp_opts *o;
@@ -490,12 +527,7 @@ struct pp {
 	vdiag *tpend;		/* vcc's text style: the record not yet rendered (its notes may follow) */
 	uint32_t dlast1;	/* clang's LastLoc + 1 (0: none) and LastLevel: the previous record's */
 	uint8_t dlastlv;
-	struct lmark {		/* #line / GNU line markers */
-		uint32_t fe, off;	/* in fent fe, from byte offset off on */
-		uint32_t pline, line;	/* physical line pline is line */
-		const char *name;	/* presumed file name, or NULL */
-		uint32_t namelen;
-	} *lm;
+	struct lmark *lm;
 	uint32_t nlm;
 	int warns;
 	int in_dir;		/* evaluating a directive's tokens (#if, #include, #line) */
@@ -528,35 +560,7 @@ struct pp {
 	int tokmode;		/* 0 unset, 1 text (pp_text), 2 tokens (pp_next) */
 	uint32_t sig;		/* base signature (HNONE: no cache) */
 	uint32_t *psig;		/* search path prefix ids, [0, ndirs] */
-	struct hrec {
-		int on;		/* n > 0 */
-		int n, nbad;	/* levels; levels [0, nbad) are not cacheable */
-		int badline;
-		uint32_t serial;
-		hlev lev[HC_MAXLEV];
-		htouch *t;
-		uint32_t nt;
-		honce *ord;
-		uint32_t nord;
-		hcpos *ctr;
-		uint32_t nctr;
-		hcrd *crd;
-		uint32_t ncrd;
-		hsegr *seg;
-		uint32_t nseg;
-		hkidr *kid;	/* child entries, in order (their reads and writes are theirs) */
-		uint32_t nkid;
-		uint32_t *kex;
-		uint32_t nkex;
-		hlook *lk;	/* the levels' own lookups (hlook) */
-		uint32_t nlk;
-		cprov *cp;	/* indexed by ptok.ctr */
-		uint32_t ncp;
-		ptok *tk;	/* tokens handed out (token mode) */
-		uint32_t ntk;
-		char *sb;	/* their spellings that live in per-TU memory */
-		size_t nsb;
-	} rec;
+	struct hrec rec;
 	uint64_t *rst[NMDIR];	/* per id: serial << 32 | index in rec.t */
 	struct { const void *e; uint32_t gen, ok; } hm[4096];	/* child entry verdicts in one hc_try */
 	uint32_t hgen;

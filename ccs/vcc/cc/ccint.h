@@ -115,6 +115,7 @@ typedef struct lzfn {
 	pp_lazy z;
 } lzfn;
 
+struct pweak { uint32_t key, alias, loc, sym; };
 
 struct cc {
 	pp *p;
@@ -251,7 +252,7 @@ struct cc {
 	int nvis;
 	bool ms_struct;		/* #pragma ms_struct on/off/reset */
 	/* #pragma weak (decl.c): waiting for key's declaration (alias: 0, or the weak alias of key) */
-	struct pweak { uint32_t key, alias, loc, sym; } *pweak;
+	struct pweak *pweak;
 	uint32_t npweak, cpweak;	/* (the done aliases, sym set, stay for the end-of-TU check) */
 
 	/* builtin types */
