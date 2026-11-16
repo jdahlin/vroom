@@ -287,8 +287,20 @@ VPRIV bool cxx_gen_aggregate_init(cxx *c, uint32_t target, ast_qualified_type t,
         if (!m || AST_TYPE_KIND(a, ft) == AST_TYPE_ARRAY)
             return false;
         if (k >= nargs) {
-            if (fe && fe->has_nsdmi)
-                return false; /* (a default initializer after the elements: needs this, not built yet) */
+            if (fe && fe->has_nsdmi) {
+                /* [dcl.init.aggr]/6.1: an element not explicitly initialized that has a default member
+                   initializer is initialized from it; parsed again for this object (this is none there:
+                   an initializer naming another member is not built) */
+                uint32_t gthis = c->gen_this, gobj = c->gen_nsdmi_object;
+                bool ok;
+
+                c->gen_this = 0, c->gen_nsdmi_object = target;
+                ok = cxx_gen_nsdmi(c, fe, out, loc);
+                c->gen_this = gthis, c->gen_nsdmi_object = gobj;
+                if (!ok)
+                    return false;
+                continue;
+            }
             if (cc_type_is_record(a, ft) &&
                 cxx_gen_needs_construction(c, ft, 0) &&
                 !cxx_gen_default_construct(c, m, ft, out, loc, 1))
