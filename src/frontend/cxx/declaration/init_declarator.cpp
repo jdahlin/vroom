@@ -1048,13 +1048,28 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     while (d &&
                            (d->kind != CXX_ENTITY_VALUE || d->member_of != qs))
                         d = d->next;
+                    bool dtor = false;
+
                     for (uint32_t i = start; d && i < c->pos; i++)
                         if (c->tok[i].kind ==
                             LEX_TOKEN_TILDE) { /* (a destructor's definition, not another member's) */
-                            d->fn_defaulted = 1;
+                            d->fn_defaulted = 1, dtor = true;
                             cxx_gen_defaulted_destructor(c, d);
                             break;
                         }
+                    /* X::X(const X&) = default; X::X(X&&) = default; X::X() = default: the constructor
+                       the class declares, defined here (Skia's SkColorInfo) */
+                    if (!dtor && qs->owner && qs->owner->name == name &&
+                        !qs->dependent && !qs->owner->instance) {
+                        cxx_entity *k = cxx_member_function_find(
+                            c, qs, cxx_ctor_id(), c->decl_params,
+                            c->ndecl_params, c->decl_const);
+
+                        if (k && k->member_of == qs) {
+                            k->fn_defaulted = 1;
+                            cxx_gen_defaulted_constructor(c, k);
+                        }
+                    }
                 }
                 cxx_advance(c);
                 if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) /* = delete("reason") */
@@ -1196,8 +1211,13 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     braced
                         ? c->pos
                         : 0; /* (auto x = {...}: the list, parsed again below) */
+                /* a constexpr or const integer's initializer: a constant expression, constexpr calls folded
+                   (Skia's constexpr SkColor SK_ColorRED = SkColorSetARGB(0xFF, 0xFF, 0, 0)) */
+                uint8_t want = const_e || (flags & DS_CONSTEXPR);
 
+                c->want_constant += want;
                 cxx_initializer_parse(c);
+                c->want_constant -= want;
                 if (unsized_e && cxx_gen_on(c)) {
                     /* the bound: the list's elements, or the string literal's length */
                     uint64_t n =

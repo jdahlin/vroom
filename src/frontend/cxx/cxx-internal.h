@@ -663,6 +663,8 @@ typedef struct cxx {
     uint8_t
         carg_const; /* the argument list was one integer constant expression */
     int64_t carg_value; /* ... its value */
+    uint8_t
+        gen_parts_move; /* cxx_gen_copy_construct_parts for T(T&&) = default: class members moved */
     uint8_t const_eval,
         const_eval_gen; /* inside cxx_const_call (and the code generation outside it) */
     uint8_t
@@ -1165,6 +1167,7 @@ VPRIV void cxx_function_body_parse(cxx *c);
 VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
+VPRIV void cxx_gen_defaulted_constructor(cxx *c, cxx_entity *d);
 /* the expression is ill-formed for sure (VCC_CXX_SIG=2: where vcc decided so) */
 #define CXX_INVALID(c) cxx_invalid_note(c, __FILE__, __LINE__)
 static inline void cxx_invalid_note(cxx *c, const char *file, int line)
