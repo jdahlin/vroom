@@ -362,6 +362,37 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 			return 0;
 		}
 		cc_id_list_init(&s);
+		if (l->ret_sret) {
+			/* into the enclosing function's result object: what its own return does, with a local of this
+			   body holding that object's address; its last return (the address) becomes return 1 */
+			int k = has_value && e ? cxx_gen_capture(c, l, l->ret_slot, loc) : -1;
+			ast_qualified_type pt = l->ret_slot->ty;
+			uint32_t sp, r, saved_sret = c->gen_sret, last;
+			ast_qualified_type saved_ret = c->gen_ret;
+
+			if (k < 0 || !(sp = cc_symbol_new(a, AST_SYMBOL_VARIABLE, 0, pt, loc))) {
+				cxx_gen_fail(c);
+				return 0;
+			}
+			a->syms[sp].sc = AST_STORAGE_AUTO;
+			cc_id_list_append(a, &s, cc_node_new_operands(a, AST_NODE_DECLARATION, cc_type_basic(AST_TYPE_VOID), loc, sp, 0));
+			cc_id_list_append(a, &s, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, sp, loc),
+					  cc_node_rvalue(a, cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, l->cap[k].local, loc)), loc)), loc), 0, 0));
+			c->gen_lambda = NULL, c->gen_sret = sp, c->gen_ret = rt;
+			r = cxx_gen_return(c, e, true, loc);
+			c->gen_lambda = l, c->gen_sret = saved_sret, c->gen_ret = saved_ret;
+			/* (its last statement, through nested blocks: the return of the address) */
+			for (last = r; last && AST_NODE_AT(a, last)->op == AST_NODE_BLOCK && AST_NODE_AT(a, last)->c;)
+				last = a->lists[AST_NODE_AT(a, last)->b + AST_NODE_AT(a, last)->c - 1];
+			if (!r || !last || AST_NODE_AT(a, last)->op != AST_NODE_RETURN || last == r) {
+				cxx_gen_fail(c);
+				return 0;
+			}
+			AST_NODE_AT(a, last)->a = cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc);
+			cc_id_list_append(a, &s, r);
+			l->ret_used = 1;
+			return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &s), s.n);
+		}
 		if (AST_TYPE_KIND(a, rt) == AST_TYPE_VOID) {
 			if (has_value && e)
 				cc_id_list_append(a, &s, cc_statement_new(a, AST_NODE_EXPRESSION, loc, e, 0, 0));

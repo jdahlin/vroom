@@ -128,6 +128,8 @@ VPRIV uint32_t cxx_gen_try_returned(cxx *c, const cxx_entity *slot, uint32_t loc
 	ast_qualified_type rt = c->gen_ret;
 	uint32_t v = 0;
 
+	if (c->gen_sret)	/* (a class returned by address: built in the caller's object already) */
+		return cc_statement_new(c->ast, AST_NODE_RETURN, loc, cc_node_rvalue(c->ast, cxx_gen_var_node(c, c->gen_sret, loc)), 0, 0);
 	if (AST_TYPE_KIND(c->ast, rt) != AST_TYPE_VOID) {
 		v = cxx_gen_var_node(c, slot->sym, loc);
 		if (cxx_gen_is_reference(c, rt))

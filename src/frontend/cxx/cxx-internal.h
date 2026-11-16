@@ -261,6 +261,7 @@ typedef struct cxx_gen_lambda {
 	uint8_t ex_this, bad;
 	uint8_t is_try;		/* a try block's body, outlined: no break or continue out of it yet */
 	uint8_t ret_used;	/* is_try: a return in it stored the result in ret_slot and returned 1 */
+	uint8_t ret_sret;	/* is_try: ret_slot is the enclosing function's result address (a class returned by address) */
 	struct cxx_entity *ret_slot;	/* is_try: the enclosing function's variable for its result (NULL: no return built) */
 	ast_qualified_type ret_ty;	/* is_try: the enclosing function's return type */
 	uint32_t nex;

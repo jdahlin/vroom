@@ -2931,3 +2931,12 @@ gräns nej: `std::is_default_constructible<char[8]>` var okänd, så jsons
 Test: `run/trait-array-default-constructible.cpp`.  Kvar:
 `__is_constructible(int[2], int)` (C++20:s aggregatinitiering med parentes)
 ger nej, clang ja.  Sviter gröna (174/174, 38/38, mangle).
+
+## Status 201 (2026-11-16)
+`return` av en klass som returneras via adress inuti ett try-block: kroppen
+fångar den omgivande funktionens resultatadress och bygger objektet där
+(som funktionens egen return, med en lokal som håller adressen; dess sista
+`return adress` blir `return 1`), och try-satsen returnerar adressen.  Jsons
+`value(json_pointer, default)`, även standardvärdet via catch.  Test:
+`run/return-class-in-try.cpp` (räknar levande objekt), som misslyckas utan
+ändringen.  Sviter gröna (175/175, 38/38, mangle).

@@ -10,7 +10,8 @@
 VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out, cxx_entity **ret_slot, bool *ret_used)
 {
 	ast_qualified_type rt = c->gen_ret;
-	bool can_return = !c->gen_lambda && !c->gen_sret && rt != CXX_TY_UNKNOWN;
+	bool can_return = !c->gen_lambda && rt != CXX_TY_UNKNOWN;
+	uint32_t outer_sret = c->gen_sret;
 	uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial), loc = cxx_peek(c, 0)->loc, bnode;
 	uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
 	cxx_entity *owner = calloc(1, sizeof *owner), *call;
@@ -29,7 +30,15 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call
 	memset(&l, 0, sizeof l);
 	l.def = 1, l.is_try = 1;
 	*ret_slot = NULL, *ret_used = false;
-	if (can_return) {
+	if (can_return && outer_sret) {
+		/* return of a class returned by address: built in the enclosing function's result object, its
+		   address captured (json's value(ptr, default): try { return ptr.get_checked(this).get<T>(); }) */
+		cxx_entity *rs = calloc(1, sizeof *rs);
+
+		rs->kind = CXX_ENTITY_VALUE, rs->name = vintern_cstr(" try result"), rs->pack_index = -1;
+		rs->ty = c->ast->syms[outer_sret].ty, rs->sym = outer_sret;
+		l.ret_slot = rs, l.ret_ty = rt, l.ret_sret = 1;
+	} else if (can_return) {
 		/* return in the body: the result kept in a variable of the enclosing function (a reference's
 		   referent's address), the body's call returning 1; the try statement then returns it */
 		ast_qualified_type st = cxx_gen_is_reference(c, rt) ? cc_type_pointer(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, rt)->base)) :
