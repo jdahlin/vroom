@@ -108,8 +108,11 @@ VPRIV void cxx_unary_expression_parse(cxx *c)
 					cxx_gen_unary(c, op, xn, oploc);
 				} else if (!c->tentative && c->call_resolved && c->call_picked)
 					cxx_gen_operator_call(c, xn, NULL, 0, oploc);
-				else if (!c->tentative)
+				else if (!c->tentative) {
+					if (op == LEX_TOKEN_EXCLAMATION && c->etype == CXX_TY_UNKNOWN)
+						cxx_unary_type(c, op, xt, xl);	/* (!x of a class with no operator!: bool) */
 					cxx_gen_unary(c, op, xn, oploc);	/* (no operator function: a conversion of the operand, !x) */
+				}
 				if (k && (op == LEX_TOKEN_EXCLAMATION || op == LEX_TOKEN_MINUS || op == LEX_TOKEN_PLUS || op == LEX_TOKEN_TILDE)) {
 					c->evalue = op == LEX_TOKEN_EXCLAMATION ? !v : op == LEX_TOKEN_MINUS ? (int64_t)(0 - (uint64_t)v) :
 						    op == LEX_TOKEN_TILDE ? ~v : v;

@@ -3069,3 +3069,8 @@ sparade inte de klammrade elementen (`carg_brace`) och gav dem inte vidare
 som `gen_agg_brace`, så aggregatets medlemmar som själva är listor fick
 ingen nod.  Nu som för temporären `T{...}`.
 Test: `run/new-aggregate-nested-braces.cpp`.  Sviter gröna (187/187, 38/38, mangle).
+
+`!x` av en klass utan `operator!` (json unit-udt `CHECK(!optPerson)`,
+`shared_ptr` med explicit `operator bool`): typen är `bool` (x omvandlas
+kontextuellt), tidigare okänd så att anropet runt det inte fick någon nod.
+Test: `run/not-explicit-bool-class.cpp`.  Sviter gröna (188/188, 38/38, mangle).

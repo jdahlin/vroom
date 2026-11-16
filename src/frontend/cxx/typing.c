@@ -215,7 +215,9 @@ VPRIV void cxx_unary_type(cxx *c, int op, ast_qualified_type t, bool lvalue)
 			CXX_INVALID(c);	/* (*i of an integer: ill-formed, requires(T& t) { *t; } false for int) */
 		return;
 	case LEX_TOKEN_EXCLAMATION:
-		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) ? cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
+		/* (!x of a class: x contextually converted to bool, its explicit operator bool too; [expr.unary.op]/9) */
+		cxx_et(c, cxx_is_arith(c, t) || cxx_is_ptr(c, t) || (t != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY) ?
+		       cc_type_basic(AST_TYPE_BOOL) : CXX_TY_UNKNOWN, false);
 		return;
 	case LEX_TOKEN_MINUS: case LEX_TOKEN_PLUS: case LEX_TOKEN_TILDE:
 		cxx_et(c, cxx_is_arith(c, t) ? cc_type_promote(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(t)) : CXX_TY_UNKNOWN, false);
