@@ -37,6 +37,11 @@ by step once it covers what that front end does.
   (implementation-defined or undefined behavior) made as clang makes it is
   no extension: its tag is `[impl.clang]`.  `grep -rn '\[ext\.'` lists the
   extensions in the code, `grep -rn '\[impl\.'` the choices.
+- **No conditional operator.**  `a ? b : c` (and GNU's `a ?: b`) is not
+  used in the front end's code: an if/else, a switch, a table or a small
+  named helper says the same more plainly.  The pre-commit hook
+  `no-conditional-operator` (`src/tools/check-no-conditional-operator.py`,
+  which skips comments and literals) rejects one, in CI too.
 - **Memory is held by owners** (`src/include/frontend/cplusplus/owned.h`:
   `owned_array`, `owned_buffer`, `owned_string`, RAII): no `free()`,
   `malloc()`, `realloc()` or `strdup()` outside that header.  The pre-commit

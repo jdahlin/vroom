@@ -82,10 +82,14 @@ int preprocessor::clang_dynamic_macro(preprocessing_token &name,
                                       owned_buffer &text)
 {
     if (m.dynamic == dynamic_macro::file_name) {
-        source_position p =
-            files.position(name.expansion ? name.expansion : name.location);
-        const char *f = strrchr(p.file_name, '/');
-        string_literal_of(f ? f + 1 : p.file_name, text.get());
+        source_location at = name.location;
+        if (name.expansion)
+            at = name.expansion;
+        source_position p = files.position(at);
+        const char *f = p.file_name;
+        if (const char *slash = strrchr(f, '/'))
+            f = slash + 1;
+        string_literal_of(f, text.get());
         return 1;
     }
     if (m.dynamic == dynamic_macro::flt_eval_method) {
@@ -241,12 +245,16 @@ uint64_t check_variant(const implementation_defined_behavior &b)
 int compare_check(check_kind kind, const char *name, size_t n,
                   const feature_check &c)
 {
-    if (kind != c.kind)
-        return kind < c.kind ? -1 : 1;
+    if (kind < c.kind)
+        return -1;
+    if (kind > c.kind)
+        return 1;
     int r = strncmp(name, c.operand, n);
     if (r)
         return r;
-    return c.operand[n] ? -1 : 0;
+    if (c.operand[n])
+        return -1;
+    return 0;
 }
 
 int64_t answer(const implementation_defined_behavior &b, check_kind kind,
@@ -275,8 +283,10 @@ int64_t answer(const implementation_defined_behavior &b, check_kind kind,
 bool has_feature(const implementation_defined_behavior &b, const char *name,
                  size_t length, bool extension)
 {
-    return answer(b, extension ? check_kind::extension : check_kind::feature,
-                  name, length) != 0;
+    check_kind kind = check_kind::feature;
+    if (extension)
+        kind = check_kind::extension;
+    return answer(b, kind, name, length) != 0;
 }
 
 int64_t has_gnu_attribute(const implementation_defined_behavior &b,
@@ -303,9 +313,10 @@ int64_t clang_cpp_attribute_value(const implementation_defined_behavior &b,
                                   const char *operand, size_t length,
                                   bool c_attribute)
 {
-    return answer(
-        b, c_attribute ? check_kind::c_attribute : check_kind::cpp_attribute,
-        operand, length);
+    check_kind kind = check_kind::cpp_attribute;
+    if (c_attribute)
+        kind = check_kind::c_attribute;
+    return answer(b, kind, operand, length);
 }
 
 int64_t clang_declspec_attribute_value(const implementation_defined_behavior &b,

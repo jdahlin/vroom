@@ -40,7 +40,10 @@ bool preprocessor::gnu_dynamic_macro(const macro_definition &m,
                               (unsigned)(inclusions.size() - 1));
         return true;
     case dynamic_macro::base_file:
-        string_literal_of(main_file ? main_file->name.c_str() : "", text.get());
+        if (main_file)
+            string_literal_of(main_file->name.c_str(), text.get());
+        else
+            string_literal_of("", text.get());
         return true;
     case dynamic_macro::timestamp: {
         struct stat st;

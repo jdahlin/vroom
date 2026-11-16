@@ -95,12 +95,16 @@ int preprocessor::parse_embed_parameters(const preprocessing_token *t, size_t n,
             i++;
         }
         bool clang = scope.size() && is_named(scope, "clang");
-        int which = !scope.size() && is_named(name, "limit")      ? 1
-                    : !scope.size() && is_named(name, "prefix")   ? 2
-                    : !scope.size() && is_named(name, "suffix")   ? 3
-                    : !scope.size() && is_named(name, "if_empty") ? 4
-                    : clang && is_named(name, "offset")           ? 5
-                                                                  : 0;
+        /* 1 limit, 2 prefix, 3 suffix, 4 if_empty, 5 clang::offset */
+        static constexpr const char *standard[] = {"limit", "prefix", "suffix",
+                                                   "if_empty"};
+        int which = 0;
+        if (!scope.size()) {
+            for (int k = 0; k < 4; k++)
+                if (is_named(name, standard[k]))
+                    which = k + 1;
+        } else if (clang && is_named(name, "offset"))
+            which = 5;
         if (!which) {
             if (in_has_embed)
                 return 0;
@@ -158,14 +162,19 @@ int preprocessor::parse_embed_parameters(const preprocessing_token *t, size_t n,
                     << 0;
                 return -1;
             }
-            (which == 1 ? p.limit : p.offset) = value;
+            if (which == 1)
+                p.limit = value;
+            else
+                p.offset = value;
             continue;
         }
-        owned_array<preprocessing_token> &to = which == 2   ? p.prefix
-                                               : which == 3 ? p.suffix
-                                                            : p.if_empty;
+        owned_array<preprocessing_token> *to = &p.if_empty;
+        if (which == 2)
+            to = &p.prefix;
+        else if (which == 3)
+            to = &p.suffix;
         for (const preprocessing_token &k : inside)
-            to.append(k);
+            to->append(k);
     }
     return 1;
 }
@@ -198,7 +207,10 @@ bool preprocessor::embedded_size(const char *path, const embed_parameters &p,
     if (stat(path, &st) != 0)
         return false;
     uint64_t n = (uint64_t)st.st_size;
-    n = p.offset < n ? n - p.offset : 0;
+    if (p.offset < n)
+        n -= p.offset;
+    else
+        n = 0;
     if (p.has_limit && p.limit < n)
         n = p.limit;
     *size = n;
@@ -261,9 +273,10 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
             vbuffer_append(header.get(), ">", 1);
             parameters_at++;
         } else {
-            diagnostics.issue(diagnostic_id::err_pp_expects_filename,
-                              tokens.empty() ? first.location
-                                             : tokens[0].location);
+            source_location at = first.location;
+            if (!tokens.empty())
+                at = tokens[0].location;
+            diagnostics.issue(diagnostic_id::err_pp_expects_filename, at);
             return;
         }
     }
@@ -312,7 +325,9 @@ void preprocessor::clang_embed_directive(const preprocessing_token &name)
                 int c = fgetc(f);
                 if (c == EOF)
                     break;
-                vbuffer_format_append(text.get(), i ? ",%d" : "%d", c);
+                if (i)
+                    vbuffer_append(text.get(), ",", 1);
+                vbuffer_format_append(text.get(), "%d", c);
             }
         }
         if (f)

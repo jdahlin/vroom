@@ -61,7 +61,9 @@ template <typename T> class owned_array
     {
         if (n <= capacity)
             return;
-        size_t grown = capacity ? capacity * 2 : 16;
+        size_t grown = 16;
+        if (capacity)
+            grown = capacity * 2;
         if (grown < n)
             grown = n;
         T *p = static_cast<T *>(
@@ -172,7 +174,9 @@ class owned_buffer
     }
     const char *data() const
     {
-        return buffer.p ? buffer.p : "";
+        if (!buffer.p)
+            return "";
+        return buffer.p;
     }
     size_t size() const
     {
@@ -279,7 +283,9 @@ class owned_string
     }
     const char *c_str() const
     {
-        return characters ? characters : "";
+        if (!characters)
+            return "";
+        return characters;
     }
 
   private:

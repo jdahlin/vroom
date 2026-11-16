@@ -82,7 +82,10 @@ void source_file::add_line_directive(source_location next_line, uint32_t line,
     uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
-        (physical_line_starts[mid] <= next_line ? lo : hi) = mid;
+        if (physical_line_starts[mid] <= next_line)
+            lo = mid;
+        else
+            hi = mid;
     }
     size_t offset = presumed_names.size();
     char *copy = presumed_names.extend(length + 1);
@@ -103,7 +106,10 @@ source_position source_file::position(source_location location) const
     uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
-        (physical_line_starts[mid] <= location ? lo : hi) = mid;
+        if (physical_line_starts[mid] <= location)
+            lo = mid;
+        else
+            hi = mid;
     }
     source_position p = {name, lo + 1, location - physical_line_starts[lo] + 1};
     for (size_t i = presumed_lines.size(); i-- > 0;)
@@ -193,9 +199,11 @@ source_files::entry &source_files::add_text(const char *name, const char *text,
 preprocessing_token source_files::next(entry &e, bool header_name_permitted)
 {
     lexing_in in(diagnostics, e.base);
-    preprocessing_token t = header_name_permitted
-                                ? e.lex.next_allowing_header_name()
-                                : e.lex.next();
+    preprocessing_token t;
+    if (header_name_permitted)
+        t = e.lex.next_allowing_header_name();
+    else
+        t = e.lex.next();
     t.location += e.base;
     return t;
 }
@@ -207,7 +215,10 @@ const source_files::entry *source_files::find(source_location location) const
         return nullptr;
     while (hi - lo > 1) {
         size_t mid = (lo + hi) / 2;
-        (files[mid].base <= location ? lo : hi) = mid;
+        if (files[mid].base <= location)
+            lo = mid;
+        else
+            hi = mid;
     }
     return &files[lo];
 }
@@ -233,7 +244,9 @@ source_files::first_character(const preprocessing_token &token) const
     if (!e || e->scratch)
         return token.location;
     lexer::translation_character c = e->lex.peek(token.location - e->base);
-    return token.location + (c.extent ? c.extent - 1 : 0);
+    if (!c.extent)
+        return token.location;
+    return token.location + c.extent - 1;
 }
 
 size_t source_files::spelling(const preprocessing_token &token,

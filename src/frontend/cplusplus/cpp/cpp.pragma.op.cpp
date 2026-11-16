@@ -22,19 +22,23 @@ bool preprocessor::pragma_operator(const preprocessing_token &name)
     preprocessing_token t[3];
     for (int i = 0; i < 3; i++) {
         bool more = read_expanded(t[i]);
-        bool ok =
-            more &&
-            (i == 0
-                 ? is_operator(t[0], preprocessing_op_or_punc::LEFT_PARENTHESIS)
-             : i == 1 ? t[1].kind == preprocessing_token_kind::string_literal &&
-                            (t[1].prefix == encoding_prefix::none ||
-                             t[1].prefix == encoding_prefix::L) &&
-                            !t[1].raw
-                      : is_operator(
-                            t[2], preprocessing_op_or_punc::RIGHT_PARENTHESIS));
+        bool ok = false;
+        if (!more)
+            ok = false;
+        else if (i == 0)
+            ok = is_operator(t[0], preprocessing_op_or_punc::LEFT_PARENTHESIS);
+        else if (i == 1)
+            ok = t[1].kind == preprocessing_token_kind::string_literal &&
+                 (t[1].prefix == encoding_prefix::none ||
+                  t[1].prefix == encoding_prefix::L) &&
+                 !t[1].raw;
+        else
+            ok = is_operator(t[2], preprocessing_op_or_punc::RIGHT_PARENTHESIS);
         if (!ok) {
-            diagnostics.issue(diagnostic_id::err__Pragma_malformed,
-                              more ? t[i].location : name.location);
+            source_location at = name.location;
+            if (more)
+                at = t[i].location;
+            diagnostics.issue(diagnostic_id::err__Pragma_malformed, at);
             if (more && t[i].kind != preprocessing_token_kind::end_of_file)
                 push_tokens(&t[i], 1, -1, false);
             else if (more)
@@ -44,7 +48,10 @@ bool preprocessor::pragma_operator(const preprocessing_token &name)
     }
     owned_buffer s, text;
     files.spelling(t[1], s.get());
-    size_t begin = s.data()[0] == 'L' ? 2 : 1, end = s.size() - 1;
+    /* after the L prefix, if any, and the opening quote */
+    size_t begin = 1, end = s.size() - 1;
+    if (s.data()[0] == 'L')
+        begin = 2;
     for (size_t i = begin; i < end; i++) {
         char c = s.data()[i];
         if (c == '\\' && i + 1 < end &&
@@ -55,9 +62,12 @@ bool preprocessor::pragma_operator(const preprocessing_token &name)
     source_files::entry &e =
         files.add_text("<scratch space>", text.data(), text.size(), true);
     owned_array<preprocessing_token> tokens;
+    source_location expansion = name.location;
+    if (name.expansion)
+        expansion = name.expansion;
     for (preprocessing_token p = files.next(e);
          p.kind != preprocessing_token_kind::end_of_file; p = files.next(e)) {
-        p.expansion = name.expansion ? name.expansion : name.location;
+        p.expansion = expansion;
         tokens.append(p);
     }
     pragma_end = t[2].location;

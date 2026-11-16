@@ -71,10 +71,14 @@ static bool find_literal_start(const lexer &l, uint32_t at,
     uint32_t p = at;
     for (int i = 0; i < 4; i++) {
         lexer::translation_character t = l.peek(p);
-        letters[i] = t.extent ? (char)t.character : 0;
-        /* where the character itself is: after any splices before it (a
-           quote is never a trigraph) */
-        positions[i] = p + (t.extent ? t.extent - 1 : 0);
+        letters[i] = 0;
+        positions[i] = p;
+        if (t.extent) {
+            letters[i] = (char)t.character;
+            /* where the character itself is: after any splices before it
+               (a quote is never a trigraph) */
+            positions[i] = p + t.extent - 1;
+        }
         p += t.extent;
     }
     bool unicode_and_raw =
@@ -101,6 +105,14 @@ static bool find_literal_start(const lexer &l, uint32_t at,
         return false;
     *start = {prefix, raw, (unsigned char)letters[i], positions[i]};
     return true;
+}
+
+/* a character-literal (') or a string-literal (") by its quote */
+static preprocessing_token_kind quoted_literal_kind(unsigned char quote)
+{
+    if (quote == '"')
+        return preprocessing_token_kind::string_literal;
+    return preprocessing_token_kind::character_literal;
 }
 
 /*
@@ -249,19 +261,18 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         if (literal.raw) {
             bool ok;
             end = scan_raw_string(literal.quote_at, token, &ok);
-            token.kind = ok ? preprocessing_token_kind::string_literal
-                            : preprocessing_token_kind::other_character;
-            if (!ok)
+            if (ok)
+                token.kind = preprocessing_token_kind::string_literal;
+            else {
+                token.kind = preprocessing_token_kind::other_character;
                 token.raw = false;
+            }
         } else {
-            token.kind = literal.quote == '"'
-                             ? preprocessing_token_kind::string_literal
-                             : preprocessing_token_kind::character_literal;
+            token.kind = quoted_literal_kind(literal.quote);
             end = scan_character_or_string_literal(literal.quote_at, token);
         }
     } else if (c == '\'' || c == '"') {
-        token.kind = c == '"' ? preprocessing_token_kind::string_literal
-                              : preprocessing_token_kind::character_literal;
+        token.kind = quoted_literal_kind(c);
         end = scan_character_or_string_literal(start, token);
     } else if (is_identifier_start(code_point) &&
                (c != '\\' || (ucn && code_point >= 0xA0))) {
@@ -284,10 +295,13 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         /* "each non-white-space character that cannot be one of the above":
            an extended character is one character, the bytes of its UTF-8 */
         token.kind = preprocessing_token_kind::other_character;
-        uint32_t n = c >= 0x80 ? decode_utf8(p + start + t.extent - 1,
-                                             file.size - start, &code_point)
-                               : 0;
-        end = start + t.extent + (n ? n - 1 : 0);
+        uint32_t n = 0;
+        if (c >= 0x80)
+            n = decode_utf8(p + start + t.extent - 1, file.size - start,
+                            &code_point);
+        end = start + t.extent;
+        if (n)
+            end += n - 1;
         if (c == '\\' && !ucn)
             scan_universal_character_name(start, &code_point, true);
         else if (c == '\\') {
@@ -343,10 +357,12 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         uint32_t suffix_end = scan_ud_suffix(end, token);
         if (suffix_end != end) {
             token.ud_suffix_offset = end - start;
-            token.kind =
-                token.kind == preprocessing_token_kind::character_literal
-                    ? preprocessing_token_kind::user_defined_character_literal
-                    : preprocessing_token_kind::user_defined_string_literal;
+            if (token.kind == preprocessing_token_kind::character_literal)
+                token.kind =
+                    preprocessing_token_kind::user_defined_character_literal;
+            else
+                token.kind =
+                    preprocessing_token_kind::user_defined_string_literal;
             end = suffix_end;
         }
     }

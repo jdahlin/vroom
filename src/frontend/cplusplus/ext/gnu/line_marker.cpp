@@ -46,9 +46,9 @@ void preprocessor::gnu_line_marker(const preprocessing_token &digits)
     /* clang warns of a line marker written in a source file (-Wgnu-line-marker,
        with -pedantic), not of those in its predefined macros' */
     if (inclusions.back().file->index != predefines_file)
-        diagnostics.issue(diagnostic_id::ext_pp_gnu_line_directive,
-                          operands.size() > 1 ? operands[1].location
-                                              : directive_end);
+        diagnostics.issue(
+            diagnostic_id::ext_pp_gnu_line_directive,
+            location_of(operands.data(), operands.size(), 1, directive_end));
     if (operands.size() > 1)
         set_presumed_line(number, presumed.data(), presumed.size());
     else

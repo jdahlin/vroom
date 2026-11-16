@@ -74,7 +74,9 @@ unsigned __int128 round_to_format(const char *s, size_t n,
                 full_exponent > exponent ||
                 (full_exponent == exponent &&
                  (full & (((unsigned __int128)1 << 112) - 1)) != 0);
-            return above_half ? 1 : 0;
+            if (above_half)
+                return 1;
+            return 0;
         } else
             return 0;
     }
@@ -99,10 +101,14 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
                                            token &out)
 {
     out.literal = literal_kind::floating_point_literal;
-    out.type = a.float_suffix     ? fundamental_type::float_
-               : a.long_suffix    ? fundamental_type::long_double
-               : a.float16_suffix ? fundamental_type::float16
-                                  : fundamental_type::double_;
+    if (a.float_suffix)
+        out.type = fundamental_type::float_;
+    else if (a.long_suffix)
+        out.type = fundamental_type::long_double;
+    else if (a.float16_suffix)
+        out.type = fundamental_type::float16;
+    else
+        out.type = fundamental_type::double_;
 
     /*
      * [lex.fcon]/2: "In the significand, the sequence of digits or

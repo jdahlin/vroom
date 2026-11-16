@@ -14,3 +14,10 @@ repos:
         entry: '(^|[^_a-zA-Z0-9.>])(free|malloc|calloc|realloc|strdup|strndup)\s*\('
         files: ^src/(frontend/cplusplus|include/frontend/cplusplus|bin/cxxlex)/.*\.(cpp|h|inc)$
         exclude: ^src/include/frontend/cplusplus/owned\.h$
+      # ... and writes no conditional operator (?:): if/else, a switch, a table
+      # or a named helper instead (doc/PLAN-cxx-spec.md, Conventions).
+      - id: no-conditional-operator
+        name: C++ front end uses no conditional operator (?:)
+        language: python
+        entry: src/tools/check-no-conditional-operator.py
+        files: ^src/(frontend/cplusplus|include/frontend/cplusplus|bin/cxxlex)/.*\.(cpp|h)$

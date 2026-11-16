@@ -72,7 +72,9 @@ uint32_t lexer::scan_preprocessing_op_or_punc(uint32_t at,
     uint32_t q = at;
     for (int i = 0; i < 4; i++) {
         translation_character t = peek(q);
-        c[i] = t.extent ? t.character : 0;
+        c[i] = 0;
+        if (t.extent)
+            c[i] = t.character;
         q += t.extent;
         end[i] = q;
     }

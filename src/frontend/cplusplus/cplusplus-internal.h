@@ -156,6 +156,15 @@ inline bool is_end(const preprocessing_token &t)
 {
     return t.kind == preprocessing_token_kind::end_of_file;
 }
+/* where tokens[i] is, or `otherwise` when there are not that many */
+inline source_location location_of(const preprocessing_token *tokens,
+                                   size_t count, size_t i,
+                                   source_location otherwise)
+{
+    if (i < count)
+        return tokens[i].location;
+    return otherwise;
+}
 inline bool is_string_literal(const preprocessing_token &t)
 {
     return t.kind == preprocessing_token_kind::string_literal ||

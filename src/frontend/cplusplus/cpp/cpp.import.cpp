@@ -50,8 +50,11 @@ bool preprocessor::module_or_import_directive(preprocessing_token &first)
     if (contexts.size() || names_object_like_macro(first))
         return false;
     inclusion &in = inclusions.back();
-    preprocessing_token next =
-        in.has_lookahead ? in.lookahead : files.next(*in.file, is_import);
+    preprocessing_token next;
+    if (in.has_lookahead)
+        next = in.lookahead;
+    else
+        next = files.next(*in.file, is_import);
     in.has_lookahead = false;
     bool directive = false;
     if (is_import)
@@ -72,8 +75,10 @@ bool preprocessor::module_or_import_directive(preprocessing_token &first)
     unread_file_token(next);
     if (!directive)
         return false;
-    first.kind = is_import ? preprocessing_token_kind::import_keyword
-                           : preprocessing_token_kind::module_keyword;
+    if (is_import)
+        first.kind = preprocessing_token_kind::import_keyword;
+    else
+        first.kind = preprocessing_token_kind::module_keyword;
     return true;
 }
 

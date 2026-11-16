@@ -93,8 +93,11 @@ uint32_t lexer::scan_pp_number(uint32_t at, bool *spelling_differs)
             if (!n || !is_identifier_continue(code_point))
                 return at;
             scan_universal_character_name(at, &code_point, true);
-            *spelling_differs |=
-                n != (t.extent - 1) + (code_point > 0xFFFF ? 10u : 6u);
+            /* \uXXXX is 6 characters, \UXXXXXXXX 10 */
+            uint32_t written = 6;
+            if (code_point > 0xFFFF)
+                written = 10;
+            *spelling_differs |= n != (t.extent - 1) + written;
             at += n;
             previous = 0;
             continue;
@@ -163,9 +166,13 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
     /* "'''_opt digit": a digit separator follows a digit and is followed by
        one; reported where a sequence of digits starts or ends with one */
     auto check_separator = [&](size_t position, bool after_digits) {
-        if (after_digits ? position == 0 : position >= n)
+        size_t q = position;
+        if (after_digits) {
+            if (position == 0)
+                return;
+            q = position - 1;
+        } else if (position >= n)
             return;
-        size_t q = after_digits ? position - 1 : position;
         if (s[q] != '\'')
             return;
         diagnostics.issue(diagnostic_id::err_digit_separator_not_between_digits,
@@ -176,8 +183,11 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
     auto skip_digits = [&](size_t j, unsigned base) {
         for (; j < n; j++) {
             unsigned char c = (unsigned char)s[j];
-            bool digit = base == 16 ? is_hexadecimal_digit(c)
-                                    : is_digit(c) && (unsigned)(c - '0') < base;
+            bool digit;
+            if (base == 16)
+                digit = is_hexadecimal_digit(c);
+            else
+                digit = is_digit(c) && (unsigned)(c - '0') < base;
             if (!digit && c != '\'')
                 break;
         }
@@ -228,7 +238,7 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
     auto decimal_or_octal_rest = [&](size_t j) {
         if (j < n && is_hexadecimal_digit((unsigned char)s[j]) && s[j] != 'e' &&
             s[j] != 'E' && !is_valid_ud_suffix(behavior, s + j, n - j)) {
-            invalid_digit(j, a.base == 8 ? 1 : 0);
+            invalid_digit(j, a.base == 8);
             return j;
         }
         if (j < n && s[j] == '.') {
@@ -315,10 +325,11 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
          *
          * C++14's (N3472), an extension before.
          */
-        diagnostics.issue(behavior.has(language_feature::binary_literals)
-                              ? diagnostic_id::warn_cxx11_compat_binary_literal
-                              : diagnostic_id::ext_binary_literal_cxx14,
-                          at);
+        if (behavior.has(language_feature::binary_literals))
+            diagnostics.issue(diagnostic_id::warn_cxx11_compat_binary_literal,
+                              at);
+        else
+            diagnostics.issue(diagnostic_id::ext_binary_literal_cxx14, at);
         a.base = 2;
         a.digits_begin = i = 2;
         i = skip_digits(i, 2);
@@ -335,7 +346,7 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
          */
         a.base = 8;
         i = skip_digits(1, 8);
-        a.digits_begin = i != 1 ? 1 : 0;
+        a.digits_begin = i != 1;
         if (i < n && is_digit((unsigned char)s[i])) {
             size_t end = skip_digits(i, 10);
             if (end < n && (s[end] == '.' || s[end] == 'e' || s[end] == 'E')) {

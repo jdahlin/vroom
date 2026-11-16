@@ -14,6 +14,14 @@
 namespace cplusplus
 {
 
+/* the diagnostic of a #line or line marker without a number */
+static diagnostic_id requires_integer(bool gnu_marker)
+{
+    if (gnu_marker)
+        return diagnostic_id::err_pp_linemarker_requires_integer;
+    return diagnostic_id::err_pp_line_requires_integer;
+}
+
 /* [cpp.line]/3: "If the digit sequence specifies zero or a number greater
    than 2147483647, the behavior is undefined"; clang allows both, with
    warnings.  False if the token is no digit-sequence. */
@@ -21,10 +29,7 @@ bool preprocessor::line_number(const preprocessing_token &t, bool gnu_marker,
                                uint32_t *value)
 {
     if (t.kind != preprocessing_token_kind::pp_number) {
-        diagnostics.issue(
-            gnu_marker ? diagnostic_id::err_pp_linemarker_requires_integer
-                       : diagnostic_id::err_pp_line_requires_integer,
-            t.location);
+        diagnostics.issue(requires_integer(gnu_marker), t.location);
         return false;
     }
     owned_buffer s;
@@ -41,10 +46,7 @@ bool preprocessor::line_number(const preprocessing_token &t, bool gnu_marker,
         }
         uint32_t next = v * 10 + (uint32_t)(c - '0');
         if (next < v) {
-            diagnostics.issue(
-                gnu_marker ? diagnostic_id::err_pp_linemarker_requires_integer
-                           : diagnostic_id::err_pp_line_requires_integer,
-                t.location);
+            diagnostics.issue(requires_integer(gnu_marker), t.location);
             return false;
         }
         v = next;
@@ -130,8 +132,9 @@ void preprocessor::directive_line(const preprocessing_token &name)
     if (number == 0)
         diagnostics.issue(diagnostic_id::ext_pp_line_zero,
                           operands[0].location);
-    uint32_t limit =
-        behavior.has(language_feature::long_long) ? 2147483648u : 32768u;
+    uint32_t limit = 32768u;
+    if (behavior.has(language_feature::long_long))
+        limit = 2147483648u;
     if (number >= limit)
         diagnostics.issue(diagnostic_id::ext_pp_line_too_big,
                           operands[0].location)

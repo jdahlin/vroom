@@ -34,12 +34,10 @@ bool preprocessor::concatenate(preprocessing_token &left,
     files.spelling(right, text.get());
     preprocessing_token result;
     if (!spelled(text.data(), text.size(), &result)) {
-        diagnostics
-            .issue(behavior.has(extension::microsoft_invalid_paste)
-                       ? diagnostic_id::ext_pp_bad_paste_ms
-                       : diagnostic_id::err_pp_bad_paste,
-                   at)
-            .text(text.data(), text.size());
+        diagnostic_id id = diagnostic_id::err_pp_bad_paste;
+        if (behavior.has(extension::microsoft_invalid_paste))
+            id = diagnostic_id::ext_pp_bad_paste_ms;
+        diagnostics.issue(id, at).text(text.data(), text.size());
         return false;
     }
     result.at_start_of_line = left.at_start_of_line;

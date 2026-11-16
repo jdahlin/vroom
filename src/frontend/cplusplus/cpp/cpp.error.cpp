@@ -35,20 +35,17 @@ void preprocessor::directive_error(const preprocessing_token &name,
                                    bool warning)
 {
     /* C++23's; [ext.clang] clang_later_edition_features before */
-    if (warning)
-        diagnostics.issue(
-            behavior.has(language_feature::warning_directive)
-                ? diagnostic_id::warn_cxx23_compat_warning_directive
-                : diagnostic_id::ext_pp_warning_directive,
-            name.location)
-            << 1;
+    diagnostic_id id = diagnostic_id::err_pp_hash_error;
+    if (warning) {
+        diagnostic_id edition = diagnostic_id::ext_pp_warning_directive;
+        if (behavior.has(language_feature::warning_directive))
+            edition = diagnostic_id::warn_cxx23_compat_warning_directive;
+        diagnostics.issue(edition, name.location) << 1;
+        id = diagnostic_id::pp_hash_warning;
+    }
     owned_buffer message;
     rest_of_line(name.location + name.extent, message);
-    diagnostics
-        .issue(warning ? diagnostic_id::pp_hash_warning
-                       : diagnostic_id::err_pp_hash_error,
-               name.location)
-        .text(message.data(), message.size());
+    diagnostics.issue(id, name.location).text(message.data(), message.size());
     diagnostics_suppressed quiet(diagnostics);
     skip_rest_of_directive();
 }

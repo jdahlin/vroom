@@ -77,30 +77,35 @@ keyword_status flag_status(const implementation_defined_behavior &b,
     case KEYWORD_WCHARSUPPORT:
         return keyword_status::enabled;
     case KEYWORD_KEYCXX11:
-        return b.has(language_feature::cplusplus_11_keywords)
-                   ? keyword_status::enabled
-                   : keyword_status::future;
+        if (b.has(language_feature::cplusplus_11_keywords))
+            return keyword_status::enabled;
+        return keyword_status::future;
     case KEYWORD_KEYCXX20:
-        return b.has(language_feature::cplusplus_20_keywords)
-                   ? keyword_status::enabled
-                   : keyword_status::future;
+        if (b.has(language_feature::cplusplus_20_keywords))
+            return keyword_status::enabled;
+        return keyword_status::future;
     case KEYWORD_KEYCOROUTINES:
-        return b.has(language_feature::cplusplus_20_keywords)
-                   ? keyword_status::enabled
-                   : keyword_status::unknown;
+        if (b.has(language_feature::cplusplus_20_keywords))
+            return keyword_status::enabled;
+        return keyword_status::unknown;
     case KEYWORD_KEYGNU:
-        return b.gnu_extensions ? keyword_status::extension
-                                : keyword_status::unknown;
+        if (b.gnu_extensions)
+            return keyword_status::extension;
+        return keyword_status::unknown;
     case KEYWORD_KEYMS:
-        return b.microsoft_extensions ? keyword_status::extension
-                                      : keyword_status::unknown;
+        if (b.microsoft_extensions)
+            return keyword_status::extension;
+        return keyword_status::unknown;
     case KEYWORD_KEYMSCOMPAT:
-        return b.microsoft_compatibility ? keyword_status::enabled
-                                         : keyword_status::unknown;
+        if (b.microsoft_compatibility)
+            return keyword_status::enabled;
+        return keyword_status::unknown;
     case KEYWORD_CHAR8SUPPORT:
-        return b.char8_t_keyword                       ? keyword_status::enabled
-               : b.has(language_feature::char8_t_type) ? keyword_status::unknown
-                                                       : keyword_status::future;
+        if (b.char8_t_keyword)
+            return keyword_status::enabled;
+        if (b.has(language_feature::char8_t_type))
+            return keyword_status::unknown;
+        return keyword_status::future;
     default:
         /* KEYC99, KEYC23, KEYNOCXX (C only), KEYMODULES (clang makes import
            and module identifiers and handles them in phase 4), HALFSUPPORT
@@ -122,8 +127,9 @@ keyword_status keyword_status_of(const implementation_defined_behavior &b,
     }
     if (flags & KEYWORD_KEYALL)
         status = keyword_status::enabled;
-    return status == keyword_status::unknown ? keyword_status::disabled
-                                             : status;
+    if (status == keyword_status::unknown)
+        return keyword_status::disabled;
+    return status;
 }
 
 } // namespace
@@ -136,9 +142,14 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
         int mid = (lo + hi) / 2;
         const char *k = keywords[mid].spelling;
         size_t n = strlen(k);
-        int c = memcmp(k, spelling, n < length ? n : length);
-        if (!c)
-            c = n < length ? -1 : n > length ? 1 : 0;
+        size_t common = n;
+        if (length < common)
+            common = length;
+        int c = memcmp(k, spelling, common);
+        if (!c && n < length)
+            c = -1;
+        else if (!c && n > length)
+            c = 1;
         if (!c) {
             /* [ext.clang] clang_no_operator_names: -fno-operator-names
                makes and, or, ... identifiers */
@@ -146,10 +157,9 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
                 !behavior.operator_names)
                 return -1;
             keyword_status s = keyword_status_of(behavior, keywords[mid].flags);
-            return s == keyword_status::enabled ||
-                           s == keyword_status::extension
-                       ? mid
-                       : -1;
+            if (s == keyword_status::enabled || s == keyword_status::extension)
+                return mid;
+            return -1;
         }
         if (c < 0)
             lo = mid + 1;

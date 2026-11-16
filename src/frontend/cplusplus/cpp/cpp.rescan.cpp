@@ -169,7 +169,9 @@ bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
 void preprocessor::finish_replacement(const preprocessing_token &name,
                                       owned_array<preprocessing_token> &result)
 {
-    source_location expansion = name.expansion ? name.expansion : name.location;
+    source_location expansion = name.location;
+    if (name.expansion)
+        expansion = name.expansion;
     size_t kept = 0;
     for (size_t i = 0; i < result.size(); i++) {
         /* [cpp.rescan]/1: "all placemarker preprocessing tokens are

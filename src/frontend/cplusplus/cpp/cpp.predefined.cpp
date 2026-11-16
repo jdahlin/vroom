@@ -172,8 +172,12 @@ bool preprocessor::feature_operand(const preprocessing_token &name,
        written */
     bool expand = name_is_has_cpp_attribute(name);
     for (;;) {
-        if (!(expand ? read_expanded(t) : read_unexpanded(t)) ||
-            t.kind == preprocessing_token_kind::end_of_file) {
+        bool more;
+        if (expand)
+            more = read_expanded(t);
+        else
+            more = read_unexpanded(t);
+        if (!more || t.kind == preprocessing_token_kind::end_of_file) {
             diagnostics.issue(diagnostic_id::err_pp_expected_after, t.location)
                 << "'('"
                 << "')'";
@@ -200,8 +204,10 @@ bool preprocessor::feature_operand(const preprocessing_token &name,
         files.spelling(inside[0], operand.get());
         return true;
     }
-    diagnostics.issue(diagnostic_id::err_feature_check_malformed,
-                      inside.empty() ? t.location : inside[0].location);
+    source_location at = t.location;
+    if (!inside.empty())
+        at = inside[0].location;
+    diagnostics.issue(diagnostic_id::err_feature_check_malformed, at);
     return false;
 }
 
@@ -224,9 +230,10 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
     case dynamic_macro::file: {
         /* [cpp.predefined]/1: "The presumed name of the current source file
            (a character string literal)" */
-        source_position p =
-            files.position(name.expansion ? name.expansion : name.location);
-        string_literal_of(p.file_name, text.get());
+        source_location at = name.location;
+        if (name.expansion)
+            at = name.expansion;
+        string_literal_of(files.position(at).file_name, text.get());
         break;
     }
     case dynamic_macro::date:
@@ -234,8 +241,10 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
         /* [cpp.predefined]/1: "The date of translation of the source file",
            "The time of translation" */
         diagnostics.issue(diagnostic_id::warn_pp_date_time, name.location);
-        vbuffer_string_append(
-            text.get(), m.dynamic == dynamic_macro::date ? date : time_of_day);
+        if (m.dynamic == dynamic_macro::date)
+            vbuffer_string_append(text.get(), date);
+        else
+            vbuffer_string_append(text.get(), time_of_day);
         break;
     case dynamic_macro::pragma_operator:
         return pragma_operator(name);
@@ -266,8 +275,9 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
                                 operand.data(), operand.size());
         /* [impl.clang] a date-like version as a long literal, as Table 18
            writes them; 1 (an attribute with no version) as it is */
-        vbuffer_format_append(text.get(), value > 1 ? "%lldL" : "%lld",
-                              (long long)value);
+        vbuffer_format_append(text.get(), "%lld", (long long)value);
+        if (value > 1)
+            vbuffer_append(text.get(), "L", 1);
         break;
     }
     default:

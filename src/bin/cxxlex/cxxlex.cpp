@@ -66,11 +66,13 @@ static void write_claim(vbuffer *out, const lexer &l, const token &t,
     if (t.literal == literal_kind::floating_point_literal) {
         /* the bits of the value: __builtin_bit_cast to an unsigned integer
            of the format's width */
-        const char *bits =
-            t.type == fundamental_type::float16   ? "unsigned short"
-            : t.type == fundamental_type::float_  ? "unsigned int"
-            : t.type == fundamental_type::double_ ? "unsigned long long"
-                                                  : "unsigned __int128";
+        const char *bits = "unsigned __int128";
+        if (t.type == fundamental_type::float16)
+            bits = "unsigned short";
+        else if (t.type == fundamental_type::float_)
+            bits = "unsigned int";
+        else if (t.type == fundamental_type::double_)
+            bits = "unsigned long long";
         vbuffer_format_append(
             out,
             "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
@@ -129,7 +131,10 @@ static bool parse_edition(const char *s, implementation_defined_behavior *b)
     bool gnu = !strncmp(s, "gnu++", 5);
     if (!gnu && strncmp(s, "c++", 3))
         return false;
-    s += gnu ? 5 : 3;
+    if (gnu)
+        s += 5;
+    else
+        s += 3;
     for (const auto &n : names)
         if (!strcmp(s, n.name)) {
             *b = implementation_defined_behavior::for_edition(n.edition, gnu);
@@ -201,8 +206,12 @@ int main(int argc, char **argv)
                 (strlen(w) <= 2 || !a[strlen(w)]))
                 matched = strlen(w);
         if (matched) {
-            operand =
-                a[matched] ? a + matched : (i + 1 < argc ? argv[++i] : "");
+            if (a[matched])
+                operand = a + matched;
+            else if (i + 1 < argc)
+                operand = argv[++i];
+            else
+                operand = "";
             char kind = a[1];
             if (kind == 'D' || kind == 'U') {
                 owned_buffer line;
@@ -220,12 +229,13 @@ int main(int argc, char **argv)
                 memcpy(pp_options.command_line.extend(line.size()), line.data(),
                        line.size());
             } else {
-                include_search search =
-                    !strcmp(a, "-iquote") || !strncmp(a, "-iquote", 7)
-                        ? include_search::quote
-                    : !strncmp(a, "-I", 2)          ? include_search::angled
-                    : !strncmp(a, "-idirafter", 10) ? include_search::after
-                                                    : include_search::system;
+                include_search search = include_search::system;
+                if (!strcmp(a, "-iquote") || !strncmp(a, "-iquote", 7))
+                    search = include_search::quote;
+                else if (!strncmp(a, "-I", 2))
+                    search = include_search::angled;
+                else if (!strncmp(a, "-idirafter", 10))
+                    search = include_search::after;
                 pp_options.include_directories.append({operand, search});
             }
             continue;
@@ -297,7 +307,9 @@ int main(int argc, char **argv)
         for (const diagnostic_message &m : diagnostics.messages)
             diagnostics.render(m, messages.get());
         fwrite(messages.data(), 1, messages.size(), stderr);
-        return diagnostics.error_count ? 1 : 0;
+        if (diagnostics.error_count)
+            return 1;
+        return 0;
     };
 
     if (raw) {
@@ -409,19 +421,24 @@ int main(int argc, char **argv)
         }
         for (size_t k = 0; k < pieces; k++) {
             const preprocessing_token &piece = tokens[i + k];
-            const char *name = pieces > 1 ? clang_token_name(l, piece)
-                                          : clang_token_name(l, t);
+            const char *name = clang_token_name(l, t);
+            if (pieces > 1)
+                name = clang_token_name(l, piece);
             spelling.clear();
             if (piece.kind != preprocessing_token_kind::end_of_file)
                 files.spelling(piece, spelling.get());
             const source_files::entry *e = files.find(piece.location);
+            /* a replaced token is where its invocation is; its physical
+               characters only when it is not */
+            source_location place = piece.location;
+            const unsigned char *physical = nullptr;
+            if (piece.expansion)
+                place = piece.expansion;
+            else if (e)
+                physical =
+                    e->file.physical_characters + piece.location - e->base;
             write_token(out.get(), name, spelling.data(), spelling.size(),
-                        files.position(piece.expansion ? piece.expansion
-                                                       : piece.location),
-                        &files, piece, false,
-                        e && !piece.expansion ? e->file.physical_characters +
-                                                    piece.location - e->base
-                                              : nullptr);
+                        files.position(place), &files, piece, false, physical);
         }
         i += pieces - 1;
     }

@@ -52,7 +52,7 @@ void preprocessor::gnu_pragma_diagnostic(const preprocessing_token *t,
     else {
         /* at the token after the kind */
         diagnostics.issue(diagnostic_id::warn_pragma_diagnostic_invalid,
-                          count > 2 ? t[2].location : pragma_end);
+                          location_of(t, count, 2, pragma_end));
         return;
     }
     /* the option: string literals, concatenated */
@@ -65,7 +65,7 @@ void preprocessor::gnu_pragma_diagnostic(const preprocessing_token *t,
     }
     if (i == 2) {
         (diagnostics.issue(diagnostic_id::err_expected_string_literal,
-                           i < count ? t[i].location : directive_end)
+                           location_of(t, count, i, directive_end))
          << 0)
             << "pragma diagnostic";
         return;

@@ -40,8 +40,9 @@ uint32_t preprocessor::identifier(const char *s, size_t n)
     uint32_t h = hash_spelling(s, n);
     if (identifier_slots.size() < 2 * identifiers.size() + 16) {
         /* grow the table to keep it at most half full */
-        size_t size =
-            identifier_slots.size() ? identifier_slots.size() * 2 : 1024;
+        size_t size = 1024;
+        if (identifier_slots.size())
+            size = identifier_slots.size() * 2;
         identifier_slots.resize(size);
         memset(identifier_slots.data(), 0, size * sizeof(uint32_t));
         for (uint32_t i = 0; i < identifiers.size(); i++) {
@@ -97,6 +98,14 @@ void append_utf8(vbuffer *out, uint32_t c)
     vbuffer_append(out, b, n);
 }
 
+/* the value of a hexadecimal digit */
+uint32_t hexadecimal_value(char c)
+{
+    if (is_digit((unsigned char)c))
+        return (uint32_t)(c - '0');
+    return (uint32_t)((c | 32) - 'a' + 10);
+}
+
 /* the code point of the universal-character-name at s[i] ('\' 'u' or 'U'
    or 'N'), and its length; 0 if there is none */
 size_t universal_character_name(const char *s, size_t n, size_t i, uint32_t *c)
@@ -118,22 +127,24 @@ size_t universal_character_name(const char *s, size_t n, size_t i, uint32_t *c)
             for (size_t k = j + 1; k < close; k++) {
                 if (!is_hexadecimal_digit((unsigned char)s[k]))
                     return 0;
-                v = v * 16 + (uint32_t)(is_digit((unsigned char)s[k])
-                                            ? s[k] - '0'
-                                            : (s[k] | 32) - 'a' + 10);
+                v = v * 16 + hexadecimal_value(s[k]);
             }
         *c = v;
-        return v ? close + 1 - i : 0;
+        if (!v)
+            return 0;
+        return close + 1 - i;
     }
-    size_t digits = kind == 'u' ? 4 : kind == 'U' ? 8 : 0;
+    size_t digits = 0;
+    if (kind == 'u')
+        digits = 4;
+    else if (kind == 'U')
+        digits = 8;
     if (!digits || j + digits > n)
         return 0;
     for (size_t k = j; k < j + digits; k++) {
         if (!is_hexadecimal_digit((unsigned char)s[k]))
             return 0;
-        v = v * 16 + (uint32_t)(is_digit((unsigned char)s[k])
-                                    ? s[k] - '0'
-                                    : (s[k] | 32) - 'a' + 10);
+        v = v * 16 + hexadecimal_value(s[k]);
     }
     *c = v;
     return 2 + digits;
@@ -214,13 +225,10 @@ bool preprocessor::check_macro_name(const preprocessing_token &name,
         char aka[8];
         snprintf(aka, sizeof aka, "'%s'",
                  preprocessing_op_or_punc_spelling(op));
-        quoted(diagnostics.issue(
-                   behavior.has(extension::microsoft_operator_name_macros)
-                       ? diagnostic_id::ext_pp_operator_used_as_macro_name
-                       : diagnostic_id::err_pp_operator_used_as_macro_name,
-                   name.location),
-               name)
-            << aka;
+        diagnostic_id id = diagnostic_id::err_pp_operator_used_as_macro_name;
+        if (behavior.has(extension::microsoft_operator_name_macros))
+            id = diagnostic_id::ext_pp_operator_used_as_macro_name;
+        quoted(diagnostics.issue(id, name.location), name) << aka;
         if (!behavior.has(extension::microsoft_operator_name_macros))
             return false; /* [ext.microsoft] otherwise */
     }
@@ -331,12 +339,14 @@ void preprocessor::directive_define(const preprocessing_token &directive)
             diagnostics.issue(
                 diagnostic_id::ext_c99_whitespace_required_after_macro_name,
                 t.location);
+        else if (t.kind == preprocessing_token_kind::other_character ||
+                 is_operator(t, preprocessing_op_or_punc::AT))
+            diagnostics.issue(
+                diagnostic_id::ext_missing_whitespace_after_macro_name,
+                t.location);
         else
             diagnostics.issue(
-                t.kind == preprocessing_token_kind::other_character ||
-                        is_operator(t, preprocessing_op_or_punc::AT)
-                    ? diagnostic_id::ext_missing_whitespace_after_macro_name
-                    : diagnostic_id::warn_missing_whitespace_after_macro_name,
+                diagnostic_id::warn_missing_whitespace_after_macro_name,
                 t.location);
     }
 
@@ -583,11 +593,13 @@ bool preprocessor::parameter_list(macro_definition &m,
             /* [cpp.replace]/12: '# define' identifier lparen '...' ')';
                C++11's (N1653), [ext.clang] clang_later_edition_features in
                C++98 */
-            diagnostics.issue(
-                behavior.has(language_feature::variadic_macros)
-                    ? diagnostic_id::warn_cxx98_compat_variadic_macro
-                    : diagnostic_id::ext_variadic_macro,
-                t.location);
+            if (behavior.has(language_feature::variadic_macros))
+                diagnostics.issue(
+                    diagnostic_id::warn_cxx98_compat_variadic_macro,
+                    t.location);
+            else
+                diagnostics.issue(diagnostic_id::ext_variadic_macro,
+                                  t.location);
             t = directive_token();
             if (!is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
                 diagnostics.issue(
@@ -642,10 +654,12 @@ bool preprocessor::parameter_list(macro_definition &m,
             m.variadic = m.named_variadic = true;
             return true;
         }
-        diagnostics.issue(
-            is_end(t) ? diagnostic_id::err_pp_missing_rparen_in_macro_def
-                      : diagnostic_id::err_pp_expected_comma_in_arg_list,
-            t.location);
+        if (is_end(t))
+            diagnostics.issue(diagnostic_id::err_pp_missing_rparen_in_macro_def,
+                              t.location);
+        else
+            diagnostics.issue(diagnostic_id::err_pp_expected_comma_in_arg_list,
+                              t.location);
         return false;
     }
 }
@@ -756,10 +770,10 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
     size_t n = arguments.size();
     if (n > m.parameter_count) {
         const argument &extra = arguments[m.parameter_count];
-        diagnostics.issue(diagnostic_id::err_too_many_args_in_macro_invoc,
-                          extra.begin < extra.end
-                              ? tokens[extra.begin].location
-                              : right_parenthesis->location);
+        source_location at = right_parenthesis->location;
+        if (extra.begin < extra.end)
+            at = tokens[extra.begin].location;
+        diagnostics.issue(diagnostic_id::err_too_many_args_in_macro_invoc, at);
         quoted(diagnostics.issue(diagnostic_id::note_macro_here, m.location),
                name);
         return false;

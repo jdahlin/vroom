@@ -82,7 +82,9 @@ bool group_reaches(const char *setting, size_t length, const char *group,
         return false;
     for (const char *s = g->subgroups; *s;) {
         const char *e = strchr(s, ' ');
-        size_t n = e ? (size_t)(e - s) : strlen(s);
+        size_t n = strlen(s);
+        if (e)
+            n = (size_t)(e - s);
         if (group_reaches(s, n, group, depth + 1))
             return true;
         s += n + (e != nullptr);
@@ -149,8 +151,9 @@ diagnostic_severity diagnostic_options::severity(diagnostic_id id) const
         s = diagnostic_severity::fatal;
         break;
     default:
-        return d.kind == diagnostic_class::REMARK ? diagnostic_severity::ignored
-                                                  : diagnostic_severity::note;
+        if (d.kind == diagnostic_class::REMARK)
+            return diagnostic_severity::ignored;
+        return diagnostic_severity::note;
     }
     if (d.kind == diagnostic_class::ERROR)
         return s;
@@ -203,7 +206,10 @@ diagnostic_message &diagnostic_message::text(const char *t, size_t length)
     if (argument_count < 4) {
         diagnostic_argument &a = arguments[argument_count++];
         a.is_integer = false;
-        a.length = (uint8_t)(length < sizeof a.text ? length : sizeof a.text);
+        size_t kept = length;
+        if (kept > sizeof a.text)
+            kept = sizeof a.text;
+        a.length = (uint8_t)kept;
         memcpy(a.text, t, a.length);
     }
     return *this;
@@ -357,7 +363,10 @@ static void format_into(const diagnostic_message &message, const char *f,
             int depth = 1;
             body = ++f;
             while (*f && depth) {
-                depth += *f == '{' ? 1 : *f == '}' ? -1 : 0;
+                if (*f == '{')
+                    depth++;
+                else if (*f == '}')
+                    depth--;
                 f++;
             }
             body_length = (size_t)(f - body - 1);
@@ -403,8 +412,11 @@ void diagnostic_consumer::render(const diagnostic_message &message,
 {
     static constexpr const char *severities[] = {
         "ignored", "note", "remark", "warning", "error", "fatal error"};
-    source_position p = files ? files->position(message.location)
-                              : file->position(message.location);
+    source_position p;
+    if (files)
+        p = files->position(message.location);
+    else
+        p = file->position(message.location);
     vbuffer_format_append(out, "%s:%u:%u: %s: ", p.file_name, p.line, p.column,
                           severities[static_cast<int>(message.severity)]);
     diagnostic_text(message, out);

@@ -105,53 +105,103 @@ preprocessing_op_or_punc operator_of(const preprocessor &p,
     return preprocessing_op_or_punc::count;
 }
 
-/* the precedence of a binary operator, [impl.clang] as clang numbers them: 0 for the end
-   of the expression, ~0u for a token that is no binary operator */
+/*
+ * [expr]: the binary operators' precedence is the grammar's: each of these
+ * nonterminals has the next one as its operands, from the loosest
+ *
+ *     expression:                 expression ',' assignment-expression  [expr.comma]
+ *     conditional-expression:     logical-or-expression '?' expression ':' ...  [expr.cond]
+ *     logical-or-expression:      ... '||' logical-and-expression       [expr.log.or]
+ *     logical-and-expression:     ... '&&' inclusive-or-expression      [expr.log.and]
+ *     inclusive-or-expression:    ... '|' exclusive-or-expression       [expr.or]
+ *     exclusive-or-expression:    ... '^' and-expression                [expr.xor]
+ *     and-expression:             ... '&' equality-expression           [expr.bit.and]
+ *     equality-expression:        ... '==' relational-expression ...    [expr.eq]
+ *     relational-expression:      ... '<' compare-expression ...        [expr.rel]
+ *     shift-expression:           ... '<<' additive-expression ...      [expr.shift]
+ *     additive-expression:        ... '+' multiplicative-expression ... [expr.add]
+ *     multiplicative-expression:  ... '*' pm-expression ...             [expr.mul]
+ *
+ * [expr.spaceship]'s compare-expression (<=>) lies between relational and
+ * shift, but its result is no integer ([cpp.cond]/1 wants an "integral
+ * constant expression"): as in clang, <=> is no operator of #if.  The
+ * levels are numbered so that a higher one binds tighter; 0 ends the
+ * expression (its end, or a ) closing it), and colon is the ':' of ?:,
+ * read only by the conditional-expression.
+ */
+enum binary_level : unsigned {
+    ends_expression = 0,
+    colon = 2,
+    comma_expression,
+    conditional_expression,
+    logical_or_expression,
+    logical_and_expression,
+    inclusive_or_expression,
+    exclusive_or_expression,
+    and_expression,
+    equality_expression,
+    relational_expression,
+    shift_expression,
+    additive_expression,
+    multiplicative_expression,
+    no_binary_operator = ~0u,
+};
+
+struct binary_operator {
+    preprocessing_op_or_punc op;
+    binary_level level;
+};
+
+constexpr binary_operator binary_operators[] = {
+    {preprocessing_op_or_punc::STAR, multiplicative_expression},
+    {preprocessing_op_or_punc::SLASH, multiplicative_expression},
+    {preprocessing_op_or_punc::PERCENT, multiplicative_expression},
+    {preprocessing_op_or_punc::PLUS, additive_expression},
+    {preprocessing_op_or_punc::MINUS, additive_expression},
+    {preprocessing_op_or_punc::LESS_LESS, shift_expression},
+    {preprocessing_op_or_punc::GREATER_GREATER, shift_expression},
+    {preprocessing_op_or_punc::LESS, relational_expression},
+    {preprocessing_op_or_punc::GREATER, relational_expression},
+    {preprocessing_op_or_punc::LESS_EQUAL, relational_expression},
+    {preprocessing_op_or_punc::GREATER_EQUAL, relational_expression},
+    {preprocessing_op_or_punc::EQUAL_EQUAL, equality_expression},
+    {preprocessing_op_or_punc::EXCLAMATION_EQUAL, equality_expression},
+    {preprocessing_op_or_punc::AMPERSAND, and_expression},
+    {preprocessing_op_or_punc::CARET, exclusive_or_expression},
+    {preprocessing_op_or_punc::BAR, inclusive_or_expression},
+    {preprocessing_op_or_punc::AMPERSAND_AMPERSAND, logical_and_expression},
+    {preprocessing_op_or_punc::BAR_BAR, logical_or_expression},
+    {preprocessing_op_or_punc::QUESTION, conditional_expression},
+    {preprocessing_op_or_punc::COMMA, comma_expression},
+    {preprocessing_op_or_punc::COLON, colon},
+    {preprocessing_op_or_punc::RIGHT_PARENTHESIS, ends_expression},
+};
+
+/* the level of the binary operator a token is (alternative tokens too) */
 unsigned precedence(const preprocessor &p, const preprocessing_token &t)
 {
-    using op = preprocessing_op_or_punc;
     if (is_end(t))
-        return 0;
-    switch (operator_of(p, t)) {
-    case op::PERCENT:
-    case op::SLASH:
-    case op::STAR:
-        return 14;
-    case op::PLUS:
-    case op::MINUS:
-        return 13;
-    case op::LESS_LESS:
-    case op::GREATER_GREATER:
-        return 12;
-    case op::LESS_EQUAL:
-    case op::LESS:
-    case op::GREATER_EQUAL:
-    case op::GREATER:
-        return 11;
-    case op::EXCLAMATION_EQUAL:
-    case op::EQUAL_EQUAL:
-        return 10;
-    case op::AMPERSAND:
-        return 9;
-    case op::CARET:
-        return 8;
-    case op::BAR:
-        return 7;
-    case op::AMPERSAND_AMPERSAND:
-        return 6;
-    case op::BAR_BAR:
-        return 5;
-    case op::QUESTION:
-        return 4;
-    case op::COMMA:
-        return 3;
-    case op::COLON:
-        return 2;
-    case op::RIGHT_PARENTHESIS:
-        return 0;
-    default:
-        return ~0u;
-    }
+        return ends_expression;
+    preprocessing_op_or_punc o = operator_of(p, t);
+    for (const binary_operator &b : binary_operators)
+        if (b.op == o)
+            return b.level;
+    return no_binary_operator;
+}
+
+/* the low `width` bits of a value as an intmax_t or uintmax_t: zero-extended,
+   or sign-extended when the type is signed (with m the sign bit,
+   (x ^ m) - m copies it into every bit above) */
+uint64_t value_of_width(uint64_t bits, unsigned width, bool is_signed)
+{
+    if (width >= 64)
+        return bits;
+    uint64_t mask = (UINT64_C(1) << width) - 1;
+    bits &= mask;
+    if (!is_signed)
+        return bits;
+    uint64_t sign = UINT64_C(1) << (width - 1);
+    return (bits ^ sign) - sign;
 }
 
 bool condition_word(const preprocessor &p, const preprocessing_token &t,
@@ -187,10 +237,10 @@ static bool evaluate_defined(preprocessor &p,
     if (parenthesized)
         r.advance_unexpanded();
     if (!is_identifier(r.token)) {
-        p.diagnostics.issue(is_end(r.token)
-                                ? diagnostic_id::err_pp_missing_macro_name
-                                : diagnostic_id::err_pp_macro_not_identifier,
-                            r.token.location);
+        diagnostic_id id = diagnostic_id::err_pp_macro_not_identifier;
+        if (is_end(r.token))
+            id = diagnostic_id::err_pp_missing_macro_name;
+        p.diagnostics.issue(id, r.token.location);
         return false;
     }
     preprocessing_op_or_punc alternative;
@@ -224,12 +274,12 @@ static bool evaluate_defined(preprocessor &p,
     /* [cpp.cond]/10: "If the token defined is generated as a result of this
        replacement process ... the behavior is undefined": [impl.clang] clang evaluates
        it, with a warning */
-    if (defined.expansion)
-        p.diagnostics.issue(
-            p.expansion_is_function_like(defined)
-                ? diagnostic_id::warn_defined_in_function_type_macro
-                : diagnostic_id::warn_defined_in_object_type_macro,
-            defined.expansion);
+    if (defined.expansion) {
+        diagnostic_id id = diagnostic_id::warn_defined_in_object_type_macro;
+        if (p.expansion_is_function_like(defined))
+            id = diagnostic_id::warn_defined_in_function_type_macro;
+        p.diagnostics.issue(id, defined.expansion);
+    }
     return true;
 }
 
@@ -314,13 +364,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
            the value of its type, as intmax_t or uintmax_t */
         unsigned width = fundamental_type_width(p.behavior, converted.type);
         bool is_signed = fundamental_type_is_signed(p.behavior, converted.type);
-        uint64_t bits = converted.value;
-        if (width < 64) {
-            bits &= (UINT64_C(1) << width) - 1;
-            if (is_signed && (bits >> (width - 1)) & 1)
-                bits |= ~((UINT64_C(1) << width) - 1);
-        }
-        v.bits = bits;
+        v.bits = value_of_width(converted.value, width, is_signed);
         /* [cpp.cond]/12: "whether a single-character character-literal may
            have a negative value is implementation-defined": [impl.clang]
            the literal is unsigned when its type is, and stays so */
@@ -346,7 +390,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
         if (!evaluate_value(p, r, v, live))
             return false;
         if (!is_operator(r.token, op::RIGHT_PARENTHESIS)) {
-            if (!evaluate_binary(p, r, v, 1, live))
+            if (!evaluate_binary(p, r, v, colon, live))
                 return false;
             if (!is_operator(r.token, op::RIGHT_PARENTHESIS)) {
                 p.diagnostics.issue(diagnostic_id::err_pp_expected_rparen,
@@ -432,7 +476,7 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
 {
     using op = preprocessing_op_or_punc;
     unsigned peek = precedence(p, r.token);
-    if (peek == ~0u) {
+    if (peek == no_binary_operator) {
         unexpected_operator(p, left, r.token);
         return false;
     }
@@ -452,12 +496,14 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
             return false;
         unsigned this_precedence = peek;
         peek = precedence(p, r.token);
-        if (peek == ~0u) {
+        if (peek == no_binary_operator) {
             unexpected_operator(p, right, r.token);
             return false;
         }
         /* [expr.cond]: the operand after ? is an expression */
-        unsigned right_minimum = o == op::QUESTION ? 3 : this_precedence + 1;
+        unsigned right_minimum = this_precedence + 1;
+        if (o == op::QUESTION)
+            right_minimum = comma_expression;
         if (peek >= right_minimum) {
             if (!evaluate_binary(p, r, right, right_minimum, right_live))
                 return false;
@@ -499,8 +545,10 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
                 }
             } else if (is_unsigned)
                 result = left.bits % right.bits;
+            else if (b == -1)
+                result = 0; /* INT64_MIN % -1 overflows in C++ */
             else
-                result = (b == -1) ? 0 : (uint64_t)(a % b);
+                result = (uint64_t)(a % b);
             break;
         case op::SLASH:
             if (right.bits == 0) {
@@ -530,7 +578,9 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
             if (left.is_unsigned) {
                 overflow =
                     shift >= 64 || (shift && (left.bits >> (64 - shift)) != 0);
-                result = shift >= 64 ? 0 : left.bits << shift;
+                result = 0;
+                if (shift < 64)
+                    result = left.bits << shift;
             } else {
                 /* APInt::sshl_ov: the bits shifted out are not all the sign */
                 if (shift >= 64) {
@@ -538,8 +588,10 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
                     result = 0;
                 } else {
                     result = left.bits << shift;
-                    overflow = shift && ((a < 0 ? ~left.bits : left.bits) >>
-                                         (63 - shift)) != 0;
+                    uint64_t magnitude = left.bits;
+                    if (a < 0)
+                        magnitude = ~left.bits;
+                    overflow = shift && (magnitude >> (63 - shift)) != 0;
                 }
             }
             break;
@@ -550,8 +602,10 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
                 overflow = true;
                 shift = 63;
             }
-            result =
-                left.is_unsigned ? left.bits >> shift : (uint64_t)(a >> shift);
+            if (left.is_unsigned)
+                result = left.bits >> shift;
+            else
+                result = (uint64_t)(a >> shift);
             break;
         }
         case op::PLUS:
@@ -573,19 +627,31 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
             }
             break;
         case op::LESS_EQUAL:
-            result = is_unsigned ? left.bits <= right.bits : a <= b;
+            if (is_unsigned)
+                result = left.bits <= right.bits;
+            else
+                result = a <= b;
             is_unsigned = false;
             break;
         case op::LESS:
-            result = is_unsigned ? left.bits < right.bits : a < b;
+            if (is_unsigned)
+                result = left.bits < right.bits;
+            else
+                result = a < b;
             is_unsigned = false;
             break;
         case op::GREATER_EQUAL:
-            result = is_unsigned ? left.bits >= right.bits : a >= b;
+            if (is_unsigned)
+                result = left.bits >= right.bits;
+            else
+                result = a >= b;
             is_unsigned = false;
             break;
         case op::GREATER:
-            result = is_unsigned ? left.bits > right.bits : a > b;
+            if (is_unsigned)
+                result = left.bits > right.bits;
+            else
+                result = a > b;
             is_unsigned = false;
             break;
         case op::EXCLAMATION_EQUAL:
@@ -637,7 +703,10 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
             if (!evaluate_binary(p, r, otherwise, this_precedence,
                                  after_colon_live))
                 return false;
-            result = left.bits != 0 ? right.bits : otherwise.bits;
+            if (left.bits != 0)
+                result = right.bits;
+            else
+                result = otherwise.bits;
             is_unsigned = right.is_unsigned || otherwise.is_unsigned;
             peek = precedence(p, r.token);
             break;
@@ -678,12 +747,12 @@ bool preprocessor::evaluate_condition(source_location at)
         if (state == 1 &&
             is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
             state = 2;
+        else if (condition_word(*this, t, "__has_include") ||
+                 condition_word(*this, t, "__has_include_next") ||
+                 condition_word(*this, t, "__has_embed"))
+            state = 1;
         else
-            state = condition_word(*this, t, "__has_include") ||
-                            condition_word(*this, t, "__has_include_next") ||
-                            condition_word(*this, t, "__has_embed")
-                        ? 1
-                        : 0;
+            state = 0;
     }
     (void)at;
     uint64_t v;
@@ -704,7 +773,7 @@ bool preprocessor::evaluate_expression(const preprocessing_token *tokens,
     value v;
     bool ok = evaluate_value(*this, r, v, true);
     if (ok && !is_end(r.token)) {
-        ok = evaluate_binary(*this, r, v, 4, true);
+        ok = evaluate_binary(*this, r, v, conditional_expression, true);
         if (ok && !is_end(r.token)) {
             diagnostics.issue(diagnostic_id::err_pp_expected_eol,
                               r.token.location);
@@ -760,13 +829,44 @@ bool preprocessor::evaluate_defined_condition(const preprocessing_token &name,
     return (m >= 0) != negated;
 }
 
+/* the %select index of #elif (0), #elifdef (1) and #elifndef (2) in
+   clang's messages */
+static int elif_select(directive_kind kind)
+{
+    if (kind == directive_kind::elifdef)
+        return 1;
+    if (kind == directive_kind::elifndef)
+        return 2;
+    return 0;
+}
+
+/* #elifdef and #elifndef: C++23's; [ext.clang] clang_later_edition_features
+   before */
+static void diagnose_elifdef_edition(preprocessor &p,
+                                     const preprocessing_token &name,
+                                     directive_kind kind)
+{
+    diagnostic_id id = diagnostic_id::ext_cxx23_pp_directive;
+    if (p.behavior.has(language_feature::elifdef_directives))
+        id = diagnostic_id::warn_cxx23_compat_pp_directive;
+    p.diagnostics.issue(id, name.location) << elif_select(kind);
+}
+
+/* the condition of #if, #ifdef, #ifndef, #elif, #elifdef or #elifndef */
+static bool condition_holds(preprocessor &p, const preprocessing_token &name,
+                            directive_kind kind)
+{
+    if (kind == directive_kind::if_ || kind == directive_kind::elif)
+        return p.evaluate_condition(name.location);
+    bool negated =
+        kind == directive_kind::ifndef || kind == directive_kind::elifndef;
+    return p.evaluate_defined_condition(name, negated);
+}
+
 void preprocessor::directive_if(const preprocessing_token &name,
                                 directive_kind kind)
 {
-    bool condition =
-        kind == directive_kind::if_
-            ? evaluate_condition(name.location)
-            : evaluate_defined_condition(name, kind == directive_kind::ifndef);
+    bool condition = condition_holds(*this, name, kind);
     conditionals.append({name.location, condition, false});
     if (!condition)
         skip_group();
@@ -777,32 +877,25 @@ void preprocessor::directive_if(const preprocessing_token &name,
 void preprocessor::directive_elif_else(const preprocessing_token &name,
                                        directive_kind kind)
 {
-    int which = kind == directive_kind::elifdef    ? 1
-                : kind == directive_kind::elifndef ? 2
-                                                   : 0;
-    /* C++23's; [ext.clang] clang_later_edition_features before */
+    int which = elif_select(kind);
+    bool is_else = kind == directive_kind::else_;
     if (kind == directive_kind::elifdef || kind == directive_kind::elifndef)
-        diagnostics.issue(behavior.has(language_feature::elifdef_directives)
-                              ? diagnostic_id::warn_cxx23_compat_pp_directive
-                              : diagnostic_id::ext_cxx23_pp_directive,
-                          name.location)
-            << which;
+        diagnose_elifdef_edition(*this, name, kind);
     if (conditionals.size() <= inclusions.back().conditional_depth) {
-        diagnostics.issue(kind == directive_kind::else_
-                              ? diagnostic_id::pp_err_else_without_if
-                              : diagnostic_id::pp_err_elif_without_if,
-                          name.location)
-            << which;
+        diagnostic_id id = diagnostic_id::pp_err_elif_without_if;
+        if (is_else)
+            id = diagnostic_id::pp_err_else_without_if;
+        diagnostics.issue(id, name.location) << which;
         skip_rest_of_directive();
         return;
     }
     conditional &c = conditionals[conditionals.size() - 1];
-    if (c.else_seen)
-        diagnostics.issue(kind == directive_kind::else_
-                              ? diagnostic_id::pp_err_else_after_else
-                              : diagnostic_id::pp_err_elif_after_else,
-                          name.location)
-            << which;
+    if (c.else_seen) {
+        diagnostic_id id = diagnostic_id::pp_err_elif_after_else;
+        if (is_else)
+            id = diagnostic_id::pp_err_else_after_else;
+        diagnostics.issue(id, name.location) << which;
+    }
     if (kind == directive_kind::else_) {
         c.else_seen = true;
         expect_end_of_directive("else");
@@ -859,9 +952,7 @@ void preprocessor::skip_group()
             kind = find_directive(behavior, s.data(), s.size());
         }
         conditional &c = conditionals[conditionals.size() - 1];
-        int which = kind == directive_kind::elifdef    ? 1
-                    : kind == directive_kind::elifndef ? 2
-                                                       : 0;
+        int which = elif_select(kind);
         switch (kind) {
         case directive_kind::if_:
         case directive_kind::ifdef:
@@ -894,25 +985,14 @@ void preprocessor::skip_group()
         case directive_kind::elifndef:
             if (depth)
                 break;
-            /* C++23's; [ext.clang] clang_later_edition_features before */
             if (kind != directive_kind::elif)
-                diagnostics.issue(
-                    behavior.has(language_feature::elifdef_directives)
-                        ? diagnostic_id::warn_cxx23_compat_pp_directive
-                        : diagnostic_id::ext_cxx23_pp_directive,
-                    name.location)
-                    << which;
+                diagnose_elifdef_edition(*this, name, kind);
             if (c.else_seen)
                 diagnostics.issue(diagnostic_id::pp_err_elif_after_else,
                                   name.location)
                     << which;
             if (!c.group_taken) {
-                bool condition =
-                    kind == directive_kind::elif
-                        ? evaluate_condition(name.location)
-                        : evaluate_defined_condition(
-                              name, kind == directive_kind::elifndef);
-                if (condition) {
+                if (condition_holds(*this, name, kind)) {
                     c.group_taken = true;
                     return;
                 }
@@ -979,7 +1059,10 @@ void preprocessor::suggest_conditional_directive(
     static constexpr const char *candidates[] = {"if",      "ifdef",   "ifndef",
                                                  "elif",    "else",    "endif",
                                                  "elifdef", "elifndef"};
-    size_t count = behavior.has(language_feature::elifdef_directives) ? 8 : 6;
+    /* #elifdef and #elifndef only where they are directives */
+    size_t count = 6;
+    if (behavior.has(language_feature::elifdef_directives))
+        count = 8;
     const char *best = nullptr;
     size_t n = s.size(), best_distance = SIZE_MAX;
     for (size_t i = 0; i < count; i++)
@@ -990,7 +1073,9 @@ void preprocessor::suggest_conditional_directive(
             break;
         }
     if (!best) {
-        size_t limit = n < 3 ? n - 1 : n / 3;
+        size_t limit = n / 3;
+        if (n < 3)
+            limit = n - 1;
         for (size_t i = 0; i < count; i++) {
             size_t d = edit_distance(s.data(), n, candidates[i],
                                      strlen(candidates[i]));
@@ -1117,10 +1202,12 @@ bool preprocessor::has_include(expression_reader &r,
         after = include_next_start(name);
     bool system;
     owned_buffer path;
-    *result =
-        embed ? find_embed(header.data() + 1, header.size() - 2, angled, path)
-              : find_header(header.data() + 1, header.size() - 2, angled, after,
-                            path, &directory, &system);
+    if (embed)
+        *result =
+            find_embed(header.data() + 1, header.size() - 2, angled, path);
+    else
+        *result = find_header(header.data() + 1, header.size() - 2, angled,
+                              after, path, &directory, &system);
     if (embed && *result) {
         /* C23 6.10.1: __STDC_EMBED_FOUND__ 1, __STDC_EMBED_EMPTY__ 2; an
            unknown parameter is not found */

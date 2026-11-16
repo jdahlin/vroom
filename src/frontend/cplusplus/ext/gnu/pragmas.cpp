@@ -35,9 +35,13 @@ static bool pragma_macro_name(preprocessor &p, const preprocessing_token *t,
         !p.string_contents(t[2], name)) {
         owned_buffer which;
         p.files.spelling(t[0], which.get());
+        /* at the string, or the token before where it should be */
+        size_t where = 2;
+        if (count < 3)
+            where = 1;
         p.diagnostics
             .issue(diagnostic_id::err_pragma_push_pop_macro_malformed,
-                   count > 1 ? t[count > 2 ? 2 : 1].location : at)
+                   location_of(t, count, where, at))
             .text(which.data(), which.size());
         return false;
     }
@@ -67,15 +71,14 @@ void preprocessor::pragma_message(const preprocessing_token *t, size_t count,
          (i >= count ||
           !is_operator(t[i], preprocessing_op_or_punc::RIGHT_PARENTHESIS)))) {
         diagnostics.issue(diagnostic_id::err_pragma_message_malformed,
-                          i < count ? t[i].location : directive_end)
+                          location_of(t, count, i, directive_end))
             << kind;
         return;
     }
-    diagnostics
-        .issue(kind == 2 ? diagnostic_id::err_pragma_message
-                         : diagnostic_id::warn_pragma_message,
-               t[0].location)
-        .text(message.data(), message.size());
+    diagnostic_id id = diagnostic_id::warn_pragma_message;
+    if (kind == 2)
+        id = diagnostic_id::err_pragma_message;
+    diagnostics.issue(id, t[0].location).text(message.data(), message.size());
 }
 
 /* true if the pragma is one of these */
@@ -163,7 +166,7 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
             vbuffer_append(header.get(), ">", 1);
         } else {
             diagnostics.issue(diagnostic_id::err_pp_expects_filename,
-                              count > 2 ? t[2].location : directive_end);
+                              location_of(t, count, 2, directive_end));
             return true;
         }
         owned_buffer path;
@@ -188,8 +191,10 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
     }
     if (gcc && (spelled_as(files, t[1], "warning") ||
                 spelled_as(files, t[1], "error"))) {
-        pragma_message(t + 1, count - 1,
-                       spelled_as(files, t[1], "warning") ? 1 : 2);
+        int kind = 2; /* GCC error */
+        if (spelled_as(files, t[1], "warning"))
+            kind = 1;
+        pragma_message(t + 1, count - 1, kind);
         return true;
     }
     return false;

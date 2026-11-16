@@ -109,8 +109,9 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
                 break;
             name[length++] = (char)t.character;
         }
-        uint32_t value =
-            length ? code_point_of_unicode_name(name, length) : UINT32_MAX;
+        uint32_t value = UINT32_MAX;
+        if (length)
+            value = code_point_of_unicode_name(name, length);
         if (issue) {
             if (value == UINT32_MAX)
                 diagnostics.issue(diagnostic_id::err_invalid_ucn_name, at)
@@ -127,7 +128,9 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
         return q - at;
     }
     p += kind.extent;
-    uint32_t digits = kind.character == 'u' ? 4 : 8, value = 0, found = 0;
+    uint32_t digits = 8, value = 0, found = 0;
+    if (kind.character == 'u')
+        digits = 4;
     bool delimited = kind.character == 'u' && peek(p).character == '{';
     if (delimited)
         p += peek(p).extent;
@@ -136,8 +139,9 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
         if (!is_hexadecimal_digit(d.character) ||
             (!delimited && found == digits))
             break;
-        unsigned v = is_digit(d.character) ? d.character - '0'
-                                           : (d.character | 32) - 'a' + 10;
+        unsigned v = (unsigned)((d.character | 32) - 'a' + 10);
+        if (is_digit(d.character))
+            v = d.character - '0';
         if (value > 0x10FFFF)
             value = 0x110000; /* stays out of range */
         else
@@ -148,12 +152,11 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
     if (delimited) {
         translation_character close = peek(p);
         if (close.character != '}' || !found) {
+            diagnostic_id unfinished = diagnostic_id::warn_delimited_ucn_empty;
+            if (found)
+                unfinished = diagnostic_id::warn_delimited_ucn_incomplete;
             if (issue && !diagnostics.suppressed)
-                diagnostics.issue(
-                    found ? diagnostic_id::warn_delimited_ucn_incomplete
-                          : diagnostic_id::warn_delimited_ucn_empty,
-                    at)
-                    << "u";
+                diagnostics.issue(unfinished, at) << "u";
             return 0;
         }
         p += close.extent;
@@ -216,7 +219,9 @@ int base64_digit(char c)
         return c - 'a' + 26;
     if (c >= '0' && c <= '9')
         return c - '0' + 52;
-    return c == '+' ? 62 : 63;
+    if (c == '+')
+        return 62;
+    return 63;
 }
 
 /* one entry of unicode_names at `at`, decoded onto the previous name in
@@ -238,8 +243,17 @@ size_t decode_name_entry(size_t at, char *name, size_t *length,
 
 int compare_names(const char *a, size_t an, const char *b, size_t bn)
 {
-    int c = memcmp(a, b, an < bn ? an : bn);
-    return c ? c : an < bn ? -1 : an > bn ? 1 : 0;
+    size_t common = an;
+    if (bn < common)
+        common = bn;
+    int c = memcmp(a, b, common);
+    if (c)
+        return c;
+    if (an < bn)
+        return -1;
+    if (an > bn)
+        return 1;
+    return 0;
 }
 
 /* The Unicode Standard 3.12, "Conjoining Jamo Behavior": the names of the
@@ -295,11 +309,16 @@ VPRIV uint32_t code_point_of_unicode_name(const char *name, size_t n)
         for (size_t k = p + 1; hex && k < n; k++) {
             char c = name[k];
             hex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
-            cp = cp << 4 | (uint32_t)(c <= '9' ? c - '0' : c - 'A' + 10);
+            uint32_t v = (uint32_t)(c - 'A' + 10);
+            if (c <= '9')
+                v = (uint32_t)(c - '0');
+            cp = cp << 4 | v;
         }
         /* the name is spelled with exactly four digits below U+10000 */
-        if (hex && cp >= r.first && cp <= r.last &&
-            digits == (cp > 0xFFFF ? 5u : 4u))
+        unsigned expected = 4;
+        if (cp > 0xFFFF)
+            expected = 5;
+        if (hex && cp >= r.first && cp <= r.last && digits == expected)
             return cp;
     }
 
@@ -314,7 +333,10 @@ VPRIV uint32_t code_point_of_unicode_name(const char *name, size_t n)
         size_t mid = (lo + hi) / 2;
         decode_name_entry(unicode_name_block_offsets[mid], current, &length,
                           &cp);
-        (compare_names(current, length, name, n) <= 0 ? lo : hi) = mid;
+        if (compare_names(current, length, name, n) <= 0)
+            lo = mid;
+        else
+            hi = mid;
     }
     size_t at = unicode_name_block_offsets[lo];
     for (size_t k = 0; k < UNICODE_NAME_BLOCK &&

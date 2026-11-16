@@ -112,6 +112,17 @@ void preprocessor::va_opt(substitution &s, uint32_t at,
  * parameter is replaced by a placemarker preprocessing token instead".
  * Returns the index after the operand.
  */
+/* the index after the operand of a # whose operand is at `at`: a parameter,
+   or __VA_OPT__ ( ... ) */
+static uint32_t after_stringize_operand(preprocessor &p,
+                                        preprocessor::substitution &s,
+                                        uint32_t at)
+{
+    if (p.is_va_opt(s.m, p.elements[at]))
+        return p.va_opt_end(at + 1, s.end) + 1;
+    return at + 1;
+}
+
 uint32_t preprocessor::paste_operand(substitution &s, uint32_t at,
                                      owned_array<preprocessing_token> &out)
 {
@@ -119,8 +130,7 @@ uint32_t preprocessor::paste_operand(substitution &s, uint32_t at,
     if (is_operator(e.token, preprocessing_op_or_punc::HASH) &&
         s.m.function_like && at + 1 < s.end) {
         out.append(stringize_operand(s, at + 1));
-        const replacement_element &operand = elements[at + 1];
-        return is_va_opt(s.m, operand) ? va_opt_end(at + 2, s.end) + 1 : at + 2;
+        return after_stringize_operand(*this, s, at + 1);
     }
     if (is_va_opt(s.m, e)) {
         va_opt(s, at, out);
@@ -194,12 +204,11 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
             /* [impl.clang] white space before the ## is the deleted ##'s */
             s.next_space = false;
             /* [ext.gnu] gnu_comma_paste */
-            if (uint32_t used = behavior.has(extension::gnu_comma_paste)
-                                    ? gnu_comma_paste(s, i, out)
-                                    : 0) {
-                i += used;
-                continue;
-            }
+            if (behavior.has(extension::gnu_comma_paste))
+                if (uint32_t used = gnu_comma_paste(s, i, out)) {
+                    i += used;
+                    continue;
+                }
             owned_array<preprocessing_token> right;
             uint32_t after = paste_operand(s, i + 1, right);
             preprocessing_token &left = out[out.size() - 1];
@@ -221,8 +230,7 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
             string.after_white_space = s.next_space;
             s.next_space = false;
             out.append(string);
-            i = is_va_opt(m, elements[i + 1]) ? va_opt_end(i + 2, s.end) + 1
-                                              : i + 2;
+            i = after_stringize_operand(*this, s, i + 1);
             continue;
         }
         if (is_va_opt(m, e)) {

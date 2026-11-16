@@ -49,10 +49,19 @@ fundamental_type first_type_in_list(const implementation_defined_behavior &b,
     };
     bool decimal = a.base == 10;
     *represented = true;
-    for (int i = a.long_long_suffix ? 4 : a.long_suffix ? 2 : 0; i < 6; i++) {
+    int first = 0;
+    if (a.long_long_suffix)
+        first = 4;
+    else if (a.long_suffix)
+        first = 2;
+    for (int i = first; i < 6; i++) {
         fundamental_type t = types[i];
         bool is_signed = fundamental_type_is_signed(b, t);
-        if (is_signed ? a.unsigned_suffix : decimal && !a.unsigned_suffix)
+        /* a u suffix allows only the unsigned types; without one a decimal
+           literal only the signed ones */
+        if (is_signed && a.unsigned_suffix)
+            continue;
+        if (!is_signed && decimal && !a.unsigned_suffix)
             continue;
         unsigned value_bits = fundamental_type_width(b, t) - is_signed;
         if (value_bits >= 64 || value >> value_bits == 0)
@@ -83,7 +92,9 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
         unsigned char c = (unsigned char)a.spelling[i];
         if (c == '\'')
             continue;
-        unsigned digit = is_digit(c) ? c - '0' : (c | 32) - 'a' + 10;
+        unsigned digit = (unsigned)((c | 32) - 'a' + 10);
+        if (is_digit(c))
+            digit = c - '0';
         if (value > (~(unsigned __int128)0 - digit) / a.base)
             beyond_128_bits = true;
         value = value * a.base + digit;
@@ -101,14 +112,17 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
            the value, with a sign bit for the signed type (whose N is at least
            2); clang's widest is BITINT_MAXWIDTH, 128 here */
         unsigned width = value_bits + !a.unsigned_suffix;
-        if (width < (a.unsigned_suffix ? 1u : 2u))
-            width = a.unsigned_suffix ? 1 : 2;
-        out.type = a.unsigned_suffix
-                       ? fundamental_type::unsigned_bit_precise_int
-                       : fundamental_type::bit_precise_int;
+        unsigned narrowest = 2;
+        out.type = fundamental_type::bit_precise_int;
+        if (a.unsigned_suffix) {
+            narrowest = 1;
+            out.type = fundamental_type::unsigned_bit_precise_int;
+        }
+        if (width < narrowest)
+            width = narrowest;
         if (beyond_128_bits || width > behavior.bit_precise_maximum_width) {
             diagnostics.issue(diagnostic_id::err_integer_literal_too_large, at)
-                << (a.unsigned_suffix ? 1 : 0);
+                << (int)a.unsigned_suffix;
             out.value_known = false;
             return;
         }
@@ -121,11 +135,11 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
            units contains an integer-literal that cannot be represented by
            any of the allowed types."  No extended integer type is wider than
            unsigned long long here. */
-        diagnostics.issue(a.size_suffix
-                              ? diagnostic_id::err_size_t_literal_too_large
-                              : diagnostic_id::err_integer_literal_too_large,
-                          at)
-            << 1;
+        diagnostic_id too_large_id =
+            diagnostic_id::err_integer_literal_too_large;
+        if (a.size_suffix)
+            too_large_id = diagnostic_id::err_size_t_literal_too_large;
+        diagnostics.issue(too_large_id, at) << 1;
         out.type = fundamental_type::unsigned_long_long_int;
         out.value_known = false;
         return;
@@ -133,12 +147,13 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
     if (a.size_suffix) {
         /* P0330R8 (C++23): z is the signed integer type corresponding to
            std::size_t, uz is std::size_t */
-        diagnostics.issue(behavior.has(language_feature::size_t_suffix)
-                              ? diagnostic_id::warn_cxx20_compat_size_t_suffix
-                              : diagnostic_id::ext_cxx23_size_t_suffix,
-                          at);
-        out.type = a.unsigned_suffix ? fundamental_type::unsigned_long_int
-                                     : fundamental_type::long_int;
+        diagnostic_id suffix_id = diagnostic_id::ext_cxx23_size_t_suffix;
+        if (behavior.has(language_feature::size_t_suffix))
+            suffix_id = diagnostic_id::warn_cxx20_compat_size_t_suffix;
+        diagnostics.issue(suffix_id, at);
+        out.type = fundamental_type::long_int;
+        if (a.unsigned_suffix)
+            out.type = fundamental_type::unsigned_long_int;
         if (!a.unsigned_suffix && value >> 63)
             diagnostics.issue(diagnostic_id::err_size_t_literal_too_large, at)
                 << 0;
