@@ -82,21 +82,21 @@ token lexer::convert(const preprocessing_token &pp)
         convert_character_literal(spelling_buffer.p, spelling_buffer.n, out);
         break;
     case preprocessing_token_kind::string_literal:
-        spelling(pp, &spelling_buffer);
-        out.kind = token_kind::literal;
-        convert_string_literal(spelling_buffer.p, spelling_buffer.n, out);
-        break;
-    case preprocessing_token_kind::user_defined_character_literal:
     case preprocessing_token_kind::user_defined_string_literal:
-        /* [lex.ext]: the literal before the ud-suffix has its value as any
-           other ([lex.ext]/5-8 pass it to the literal operator) */
+        /* a string literal on its own: a concatenation of one */
+        free(spelling_buffer.p);
+        return convert_string_literals(&pp, 1);
+    case preprocessing_token_kind::user_defined_character_literal:
+        /* [lex.ext]/6: the character-literal before the ud-suffix has its
+           value as any other, which the literal operator receives */
         spelling(pp, &spelling_buffer);
         out.kind = token_kind::literal;
-        if (pp.kind == preprocessing_token_kind::user_defined_character_literal)
-            convert_character_literal(spelling_buffer.p, pp.ud_suffix_offset,
-                                      out);
-        else
-            convert_string_literal(spelling_buffer.p, pp.ud_suffix_offset, out);
+        {
+            size_t close = spelling_buffer.n;
+            while (close > 0 && spelling_buffer.p[close - 1] != '\'')
+                close--;
+            convert_character_literal(spelling_buffer.p, close, out);
+        }
         out.literal = literal_kind::user_defined_literal;
         break;
     case preprocessing_token_kind::preprocessing_op_or_punc:

@@ -35,7 +35,7 @@ TESTS = os.path.join(R, 'src', 'test', 'cxx', 'lex')
 FRONTEND = os.path.join(R, 'src', 'frontend', 'cplusplus')
 
 # clang -cc1 options that change lexing (passed to both), and options taking a value
-KEEP = re.compile(r'^(-std=.*|-fms-extensions|-fms-compatibility|-f(no-)?char8_t|-f?(no-)?trigraphs|'
+KEEP = re.compile(r'^(-D\S+|-U\S+|-std=.*|-fms-extensions|-fms-compatibility|-f(no-)?char8_t|-f?(no-)?trigraphs|'
                   r'-f(no-)?dollars-in-identifiers|-pedantic(-errors)?|-W[^l].*|-w|-fdeclspec|-fgnu-keywords)$')
 VALUE = {'-triple', '-x', '-o', '-I', '-include', '-isystem', '-verify', '-target-cpu', '-D', '-U', '-main-file-name'}
 
@@ -268,8 +268,16 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
     res['raw'] = first_difference(a, b) if a != b else ''
     # tokens: phase 7 on clang -E's output
     ii = os.path.join(tmp, re.sub(r'\W', '_', rel) + '-' + str(abs(hash(tuple(opts)))) + '.ii')
-    # clang deletes -o's file after an error (#error in a test): take stdout
-    e_out, _ = run([clang, '-cc1', '-E', '-I', '.', '-I', 'Inputs'] + opts + [name], cwd=d)
+    # A test without preprocessing directives is its own phase 4 output, so
+    # phase 7 runs on it as it is: clang -E also miscounts the lines after a
+    # raw string literal that spans lines (it does not count its new-lines).
+    # Otherwise clang -E's output (from stdout: clang deletes -o's file after
+    # an error, as an #error in a test makes).
+    source = open(test, encoding='utf-8', errors='replace').read()
+    if not re.search(r'^\s*(#|%:|\?\?=)', source, re.M) and not any(o.startswith('-D') for o in opts):
+        e_out = source
+    else:
+        e_out, _ = run([clang, '-cc1', '-E', '-I', '.', '-I', 'Inputs'] + opts + [name], cwd=d)
     open(ii, 'w').write(e_out)
     if e_out:
         ours_t, ours_t_err = run([cxxlex, '-dump-tokens'] + opts + [ii])

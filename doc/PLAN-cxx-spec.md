@@ -53,8 +53,8 @@ and value (integer, character, every code unit of a string) as
 clang is understood: the standard is followed where clang is not, or the
 difference is a later phase's.
 
-Now (2026-11-16): raw 99/99, tokens 99/99, values 99/99, diags 99/99, 5 of
-them known differences.
+Now (2026-11-16): 114 runs of 59 tests, raw, tokens, values and diags all
+114/114, 6 of them known differences.
 
 ## Steps
 
@@ -65,9 +65,14 @@ them known differences.
   literals (escapes, universal-character-names, UTF-8/16/32); phase 7 for
   identifiers, keywords, alternative tokens, operators, integer literals
   (values, Table 8 types), the types of floating-point literals.  Per-edition
-  rules are named features (`diff/language-features.inc`).  Missing: values
-  of floating-point literals, phase 6 (string concatenation, Table 11),
-  `\N{}`, Unicode white space and homoglyph diagnostics.
+  rules are named features (`diff/language-features.inc`).  Floating-point
+  values ([lex.fcon]/2-3, nearest, ties to even; binary16/32/64/128) and
+  phase 6 (`lexer::convert_string_literals`: [lex.string]/11 Table 11,
+  [lex.ext]/8 ud-suffixes) are done.  Missing: `\N{}`, Unicode white space
+  and homoglyph diagnostics; correctly rounded subnormal floats (rounded
+  twice now).
+- Our own tests: `src/test/cxx/lex/spec/`, one file per subclause, built from
+  the standard's examples (`lex.string.cpp`).
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`
   exists, every quoted production matches the spec's), in CI.
 - **L3** the preprocessor (`[cpp]`) on these tokens, or an adapter from vcc's

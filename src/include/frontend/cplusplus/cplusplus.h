@@ -392,6 +392,10 @@ class lexer
     size_t spelling(const preprocessing_token &token, vbuffer *out) const;
     /* [lex.phases]/1.7: "Each preprocessing token is converted into a token" */
     token convert(const preprocessing_token &token);
+    /* [lex.phases]/1.5-1.6: adjacent string-literal preprocessing tokens
+       (user-defined ones too) concatenated into one token */
+    token convert_string_literals(const preprocessing_token *pieces,
+                                  size_t count);
 
     const source_file &file;
     const implementation_defined_behavior &behavior;
@@ -425,8 +429,9 @@ class lexer
                            source_location at, encoding_prefix prefix);
     void convert_character_literal(const char *spelling, size_t length,
                                    token &out);
-    void convert_string_literal(const char *spelling, size_t length,
-                                token &out);
+    bool append_string_literal_piece(const char *spelling, size_t length,
+                                     const preprocessing_token &piece,
+                                     encoding_prefix prefix);
     /* [lex.string]: the code units of the string literals converted so far */
     const uint32_t *string_code_units() const
     {

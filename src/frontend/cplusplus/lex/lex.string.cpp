@@ -229,46 +229,24 @@ void lexer::append_encoded(uint32_t code_point, encoding_prefix prefix)
 }
 
 /*
- * Phase 5 for one string-literal ([lex.phases]/1.5): its s-chars, or the
- * r-chars of a raw string literal, as code units of its encoding; and its
- * element type ([lex.string]/5-10).  The size of [lex.string]/13 is
- * string_length + 1 once phase 6 has concatenated it with its neighbours.
+ * Phase 5 for one piece of a string literal ([lex.phases]/1.5): its s-chars,
+ * or the r-chars of a raw string literal, appended as code units of the
+ * encoding of `prefix`, which is the concatenation's ([lex.string]/11), not
+ * necessarily the piece's own.  `length` ends at the closing quote's end (a
+ * ud-suffix excluded).  Returns false after an error.
  */
-void lexer::convert_string_literal(const char *spelling, size_t length,
-                                   token &out)
+bool lexer::append_string_literal_piece(const char *spelling, size_t length,
+                                        const preprocessing_token &piece,
+                                        encoding_prefix prefix)
 {
-    encoding_prefix prefix = out.preprocessing.prefix;
-    source_location at = out.preprocessing.location;
-    out.literal = literal_kind::string_literal;
-    switch (prefix) {
-    case encoding_prefix::u8:
-        /* [lex.string]/6: "array of n const char8_t"; char before C++20
-           ([diff.cpp17.lex]/5) */
-        out.type = behavior.char8_t_keyword ? fundamental_type::char8_t_
-                                            : fundamental_type::char_;
-        break;
-    case encoding_prefix::u:
-        out.type = fundamental_type::char16_t_;
-        break;
-    case encoding_prefix::U:
-        out.type = fundamental_type::char32_t_;
-        break;
-    case encoding_prefix::L:
-        out.type = fundamental_type::wchar_t_;
-        break;
-    default:
-        out.type = fundamental_type::char_;
-        break;
-    }
-    out.string_offset = (uint32_t)code_unit_count;
-
+    source_location at = piece.location;
+    bool error = false;
     size_t i = 0;
     while (i < length && spelling[i] != '"')
         i++;
     size_t end = length - 1; /* the closing quote */
-    bool error = false;
 
-    if (out.preprocessing.raw) {
+    if (piece.raw) {
         /* [lex.string]: raw-string: '"' d-char-sequence_opt '('
            r-char-sequence_opt ')' d-char-sequence_opt '"'.  [lex.string]/3
            Note 2: "A source-file new-line in a raw string literal results in
@@ -321,8 +299,118 @@ void lexer::convert_string_literal(const char *spelling, size_t length,
                 append_code_unit(c.value);
         }
     }
+    return !error;
+}
+
+/* [lex.string]/5-10: the element type of a string literal of an encoding */
+static fundamental_type element_type(const implementation_defined_behavior &b,
+                                     encoding_prefix prefix)
+{
+    switch (prefix) {
+    case encoding_prefix::u8:
+        /* [lex.string]/6: "array of n const char8_t"; char before C++20
+           ([diff.cpp17.lex]/5) */
+        return b.char8_t_keyword ? fundamental_type::char8_t_
+                                 : fundamental_type::char_;
+    case encoding_prefix::u:
+        return fundamental_type::char16_t_;
+    case encoding_prefix::U:
+        return fundamental_type::char32_t_;
+    case encoding_prefix::L:
+        return fundamental_type::wchar_t_;
+    default:
+        return fundamental_type::char_;
+    }
+}
+
+/*
+ * Phases 5 and 6 for adjacent string literals ([lex.phases]/1.5-1.6): one
+ * string-literal token.
+ *
+ * [lex.string]/11: "In translation phase 6, adjacent string-literals are
+ * concatenated.  If both string-literals have the same encoding-prefix, the
+ * resulting concatenated string-literal has that encoding-prefix.  If one
+ * string-literal has no encoding-prefix, it is treated as a string-literal of
+ * the same encoding-prefix as the other operand.  If a UTF-8 string literal
+ * token is adjacent to a wide string literal token, the program is
+ * ill-formed.  Any other concatenations are conditionally-supported with
+ * implementation-defined behavior."  This implementation does not support the
+ * others.  "Characters in concatenated strings are kept distinct": each piece
+ * is converted on its own, after its encoding is known.
+ *
+ * [lex.ext]/8: "During concatenation, ud-suffixes are removed and ignored
+ * ... all the participating user-defined-string-literals shall have the same
+ * ud-suffix and that suffix is applied to the result of the concatenation."
+ */
+token lexer::convert_string_literals(const preprocessing_token *pieces,
+                                     size_t count)
+{
+    token out;
+    out.kind = token_kind::literal;
+    out.literal = literal_kind::string_literal;
+    out.preprocessing = pieces[0];
+
+    encoding_prefix prefix = encoding_prefix::none;
+    bool error = false;
+    for (size_t k = 0; k < count; k++) {
+        encoding_prefix p = pieces[k].prefix;
+        if (p == encoding_prefix::none || p == prefix)
+            continue;
+        if (prefix == encoding_prefix::none)
+            prefix = p;
+        else if (!error) {
+            diagnostics.issue(diagnostic_id::err_unsupported_string_concat,
+                              pieces[k].location);
+            error = true;
+        }
+    }
+    out.preprocessing.prefix = prefix;
+    out.type = element_type(behavior, prefix);
+
+    vbuffer spelling_buffer = {}, suffix = {};
+    size_t suffix_piece = count;
+    out.string_offset = (uint32_t)code_unit_count;
+    for (size_t k = 0; k < count; k++) {
+        const preprocessing_token &piece = pieces[k];
+        spelling_buffer.n = 0;
+        lexer::spelling(piece, &spelling_buffer);
+        size_t length = spelling_buffer.n;
+        if (piece.kind ==
+            preprocessing_token_kind::user_defined_string_literal) {
+            /* the ud-suffix follows the closing quote */
+            size_t close = length;
+            while (close > 0 && spelling_buffer.p[close - 1] != '"')
+                close--;
+            const char *s = spelling_buffer.p + close;
+            size_t n = length - close;
+            if (suffix_piece == count) {
+                vbuffer_append(&suffix, s, n);
+                suffix_piece = k;
+            } else if (suffix.n != n || memcmp(suffix.p, s, n)) {
+                diagnostics
+                    .issue(diagnostic_id::err_string_concat_mixed_suffix,
+                           piece.location)
+                    .text(suffix.p, suffix.n)
+                    .text(s, n);
+                error = true;
+            }
+            length = close;
+        }
+        /* every piece is converted, so that each one's errors are reported */
+        if (!append_string_literal_piece(spelling_buffer.p, length, piece,
+                                         prefix))
+            error = true;
+    }
+    if (suffix_piece != count) {
+        out.literal = literal_kind::user_defined_literal;
+        out.preprocessing.kind =
+            preprocessing_token_kind::user_defined_string_literal;
+    }
+    free(spelling_buffer.p);
+    free(suffix.p);
     out.string_length = (uint32_t)(code_unit_count - out.string_offset);
     out.value_known = !error;
+    return out;
 }
 
 } // namespace cplusplus
