@@ -119,6 +119,10 @@ constexpr bool is_white_space_character(unsigned char c)
            c == '\r';
 }
 
+VPRIV size_t format_code_point(uint32_t code_point, char out[12]);
+/* clang's extension: white space other than [lex.charset]/1's (U+00A0 ...) */
+VPRIV bool is_unicode_white_space(uint32_t code_point);
+
 /* ---- [lex.operators] --------------------------------------------------- */
 
 VPRIV const char *

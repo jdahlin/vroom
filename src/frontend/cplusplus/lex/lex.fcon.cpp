@@ -44,6 +44,44 @@ floating_point_format format_of(const implementation_defined_behavior &b,
     }
 }
 
+/*
+ * The scaled value rounded once, to nearest with ties to even, into a format.
+ * The parser rounds to a number of fraction bits within binary128's exponent
+ * range; a value below the format's smallest normal has fewer bits in the
+ * format (a subnormal), so it is parsed again at exactly that many, then
+ * moved into the format, which no longer rounds.
+ */
+unsigned __int128 round_to_format(const char *s, size_t n,
+                                  const floating_point_format &f)
+{
+    unsigned __int128 wide =
+        vsoftfloat_parse_with_precision(s, n, f.fraction_bits);
+    if (f.fraction_bits == 112)
+        return wide;
+    int exponent = (int)((wide >> 112) & 0x7FFF) - 16383; /* unbiased */
+    int minimum_exponent = 1 - f.bias;                    /* of a normal */
+    if (wide && exponent < minimum_exponent) {
+        int subnormal_bits = f.fraction_bits - (minimum_exponent - exponent);
+        if (subnormal_bits >= 0)
+            wide = vsoftfloat_parse_with_precision(s, n, subnormal_bits);
+        else if (subnormal_bits == -1) {
+            /* about half the smallest subnormal 2^k (the coarse parse may
+               have rounded up to it): the nearest is 2^k above 2^(k-1), 0 at
+               or below it (exactly 2^(k-1) is a tie, to the even 0) */
+            unsigned __int128 full = vsoftfloat_parse_with_precision(s, n, 112);
+            int full_exponent = (int)((full >> 112) & 0x7FFF) - 16383;
+            bool above_half =
+                full_exponent > exponent ||
+                (full_exponent == exponent &&
+                 (full & (((unsigned __int128)1 << 112) - 1)) != 0);
+            return above_half ? 1 : 0;
+        } else
+            return 0;
+    }
+    return vsoftfloat_truncate(wide, f.fraction_bits, f.maximum_exponent,
+                               f.bias);
+}
+
 } // namespace
 
 /*
@@ -106,16 +144,7 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
      * roundTiesToEven), and, as clang, only warns out of range.
      */
     floating_point_format f = format_of(behavior, out.type);
-    unsigned __int128 binary128 = vsoftfloat_parse_with_precision(
-        significand_and_exponent, n, f.fraction_bits);
-    unsigned __int128 bits;
-    if (f.fraction_bits == 112)
-        bits = binary128;
-    else
-        /* TODO: rounding to the precision first and to the format's
-           exponent range second rounds twice for subnormal results */
-        bits = vsoftfloat_truncate(binary128, f.fraction_bits,
-                                   f.maximum_exponent, f.bias);
+    unsigned __int128 bits = round_to_format(significand_and_exponent, n, f);
     /* the literal has no sign: its bits are its magnitude */
     unsigned __int128 infinity = (unsigned __int128)f.maximum_exponent
                                  << f.fraction_bits;

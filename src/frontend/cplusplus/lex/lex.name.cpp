@@ -18,6 +18,8 @@
  * two properties.  An extended character written in UTF-8 is, by
  * [lex.phases]/1.1, the universal-character-name that designates it.
  */
+#include <stdio.h>
+
 #include "../cplusplus-internal.h"
 
 namespace cplusplus
@@ -25,11 +27,118 @@ namespace cplusplus
 
 #include "lex.name.inc"
 
+/*
+ * UAX #31 section 7.1, the Mathematical Compatibility Notation Profile:
+ * ID_Compat_Math_Start (partial differential, nabla, infinity and their bold
+ * and italic forms) and ID_Compat_Math_Continue (superscript and subscript
+ * digits and signs).  Not in [lex.name]; clang's extension, which only
+ * changes programs that are ill-formed without it (a character of neither
+ * XID property is a preprocessing token of its own, [lex.pptoken]/1).
+ */
+static constexpr code_point_range mathematical_notation_start_ranges[] = {
+    {0x2202, 0x2202},   {0x2207, 0x2207},   {0x221E, 0x221E},
+    {0x1D6C1, 0x1D6C1}, {0x1D6DB, 0x1D6DB}, {0x1D6FB, 0x1D6FB},
+    {0x1D715, 0x1D715}, {0x1D735, 0x1D735}, {0x1D74F, 0x1D74F},
+    {0x1D76F, 0x1D76F}, {0x1D789, 0x1D789}, {0x1D7A9, 0x1D7A9},
+    {0x1D7C3, 0x1D7C3},
+};
+static constexpr code_point_range mathematical_notation_continue_ranges[] = {
+    {0x00B2, 0x00B3}, {0x00B9, 0x00B9}, {0x2070, 0x2070},
+    {0x2074, 0x207E}, {0x2080, 0x208E},
+};
+
+static bool is_mathematical_notation(uint32_t code_point, bool first)
+{
+    return code_point_in(mathematical_notation_start_ranges,
+                         sizeof mathematical_notation_start_ranges /
+                             sizeof *mathematical_notation_start_ranges,
+                         code_point) ||
+           (!first &&
+            code_point_in(mathematical_notation_continue_ranges,
+                          sizeof mathematical_notation_continue_ranges /
+                              sizeof *mathematical_notation_continue_ranges,
+                          code_point));
+}
+
+/*
+ * Characters an identifier may contain that look like a punctuator or are
+ * invisible (clang's list, Lexer.cpp): a warning, since the identifier is
+ * well-formed but unlikely to be meant.  0: invisible.
+ */
+static constexpr struct homoglyph {
+    uint32_t code_point;
+    char looks_like;
+} homoglyphs[] = {
+    {0x00AD, 0},   {0x01C3, '!'}, {0x037E, ';'},  {0x200B, 0},    {0x200C, 0},
+    {0x200D, 0},   {0x2060, 0},   {0x2061, 0},    {0x2062, 0},    {0x2063, 0},
+    {0x2064, 0},   {0x2212, '-'}, {0x2215, '/'},  {0x2216, '\\'}, {0x2217, '*'},
+    {0x2223, '|'}, {0x2227, '^'}, {0x2236, ':'},  {0x223C, '~'},  {0xA789, ':'},
+    {0xFEFF, 0},   {0xFF01, '!'}, {0xFF03, '#'},  {0xFF04, '$'},  {0xFF05, '%'},
+    {0xFF06, '&'}, {0xFF08, '('}, {0xFF09, ')'},  {0xFF0A, '*'},  {0xFF0B, '+'},
+    {0xFF0C, ','}, {0xFF0D, '-'}, {0xFF0E, '.'},  {0xFF0F, '/'},  {0xFF1A, ':'},
+    {0xFF1B, ';'}, {0xFF1C, '<'}, {0xFF1D, '='},  {0xFF1E, '>'},  {0xFF1F, '?'},
+    {0xFF20, '@'}, {0xFF3B, '['}, {0xFF3C, '\\'}, {0xFF3D, ']'},  {0xFF3E, '^'},
+    {0xFF5B, '{'}, {0xFF5C, '|'}, {0xFF5D, '}'},  {0xFF5E, '~'},
+};
+
+/* the code point as clang names it in a diagnostic: <U+XXXX> */
+VPRIV size_t format_code_point(uint32_t code_point, char out[12])
+{
+    return (size_t)snprintf(out, 12, "%04X", code_point);
+}
+
+/*
+ * An extended character (a universal-character-name, or written in UTF-8) in
+ * an identifier, after the identifier's first element when `first` is
+ * false: whether it is one, and the diagnostics of clang's extensions and
+ * warnings for it.
+ */
+bool lexer::accept_extended_identifier_character(uint32_t code_point,
+                                                 bool first, source_location at,
+                                                 bool written_in_utf8)
+{
+    char hex[12];
+    if (first ? is_identifier_start(code_point)
+              : is_identifier_continue(code_point)) {
+        if (code_point >= 0x80 &&
+            !code_point_in(
+                first ? xid_start_ranges : xid_continue_ranges,
+                first
+                    ? sizeof xid_start_ranges / sizeof *xid_start_ranges
+                    : sizeof xid_continue_ranges / sizeof *xid_continue_ranges,
+                code_point)) {
+            size_t n = format_code_point(code_point, hex);
+            diagnostics.issue(diagnostic_id::ext_mathematical_notation, at)
+                .text(hex, n);
+        }
+        if (written_in_utf8)
+            for (const homoglyph &h : homoglyphs)
+                if (h.code_point == code_point) {
+                    size_t n = format_code_point(code_point, hex);
+                    if (h.looks_like)
+                        diagnostics
+                            .issue(diagnostic_id::warn_utf8_symbol_homoglyph,
+                                   at)
+                            .text(hex, n)
+                            .text(&h.looks_like, 1);
+                    else
+                        diagnostics
+                            .issue(diagnostic_id::warn_utf8_symbol_zero_width,
+                                   at)
+                            .text(hex, n);
+                }
+        return true;
+    }
+    return false;
+}
+
 bool lexer::is_identifier_start(uint32_t code_point) const
 {
     if (code_point < 0x80)
         return is_nondigit((unsigned char)code_point) ||
                (code_point == '$' && behavior.dollar_in_identifier);
+    if (is_mathematical_notation(code_point, true))
+        return true;
     return code_point_in(xid_start_ranges,
                          sizeof xid_start_ranges / sizeof *xid_start_ranges,
                          code_point);
@@ -41,6 +150,8 @@ bool lexer::is_identifier_continue(uint32_t code_point) const
         return is_nondigit((unsigned char)code_point) ||
                is_digit((unsigned char)code_point) ||
                (code_point == '$' && behavior.dollar_in_identifier);
+    if (is_mathematical_notation(code_point, false))
+        return true;
     return code_point_in(
         xid_continue_ranges,
         sizeof xid_continue_ranges / sizeof *xid_continue_ranges, code_point);
@@ -73,19 +184,17 @@ uint32_t lexer::scan_identifier(uint32_t at, bool *spelling_differs)
         } else if (t.character == '\\') {
             uint32_t code_point,
                 n = scan_universal_character_name(at, &code_point, false);
-            if (!n || !(first ? is_identifier_start(code_point)
-                              : is_identifier_continue(code_point)))
+            /* [lex.name]/1: "Each universal-character-name in an identifier
+               shall designate a character whose encoding in ISO/IEC 10646
+               falls into one of the ranges specified in Table 2", which
+               starts at U+00A8: one naming a basic or control character is
+               no identifier-nondigit, but a preprocessing token of its own
+               ([lex.charset]/2 makes it ill-formed) */
+            if (!n || code_point < 0xA0 ||
+                !(first ? is_identifier_start(code_point)
+                        : is_identifier_continue(code_point)))
                 return at;
-            /* [lex.charset]/2: "If a universal-character-name outside the
-               c-char-sequence, s-char-sequence, or r-char-sequence of a
-               character-literal or string-literal ... corresponds to a
-               control character or to a character in the basic source
-               character set, the program is ill-formed." */
-            if (code_point < 0x80) {
-                char c8 = (char)code_point;
-                diagnostics.issue(diagnostic_id::err_ucn_escape_basic_scs, at)
-                    .text(&c8, 1);
-            }
+            accept_extended_identifier_character(code_point, first, at, false);
             scan_universal_character_name(at, &code_point, true);
             *spelling_differs |= n != t.extent; /* a splice inside it */
             at += n;
@@ -94,8 +203,8 @@ uint32_t lexer::scan_identifier(uint32_t at, bool *spelling_differs)
         } else if (t.character >= 0x80) {
             uint32_t code_point, n = decode_utf8(p + at + t.extent - 1,
                                                  file.size - at, &code_point);
-            if (!n || !(first ? is_identifier_start(code_point)
-                              : is_identifier_continue(code_point)))
+            if (!n || !accept_extended_identifier_character(code_point, first,
+                                                            at, true))
                 return at;
             *spelling_differs |= t.extent != 1;
             at += t.extent - 1 + n;

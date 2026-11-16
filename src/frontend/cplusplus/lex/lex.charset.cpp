@@ -143,4 +143,24 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
     return p - at;
 }
 
+/*
+ * The characters of Unicode's White_Space property beyond [lex.charset]/1's
+ * five (and U+180E, White_Space before Unicode 6.3).  [lex.pptoken]/2's white
+ * space is only "space, horizontal tab, new-line, vertical tab, and
+ * form-feed", so U+00A0 is a preprocessing token of the last category and
+ * the program is ill-formed ([lex.pptoken]/1); clang, and this
+ * implementation, take it as white space after a warning, an extension
+ * ([intro.compliance]/8) that changes only ill-formed programs.
+ */
+VPRIV bool is_unicode_white_space(uint32_t code_point)
+{
+    static constexpr code_point_range white_space[] = {
+        {0x0085, 0x0085}, {0x00A0, 0x00A0}, {0x1680, 0x1680},
+        {0x180E, 0x180E}, {0x2000, 0x200A}, {0x2028, 0x2029},
+        {0x202F, 0x202F}, {0x205F, 0x205F}, {0x3000, 0x3000},
+    };
+    return code_point_in(white_space, sizeof white_space / sizeof *white_space,
+                         code_point);
+}
+
 } // namespace cplusplus

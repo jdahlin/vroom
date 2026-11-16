@@ -424,6 +424,9 @@ class lexer
     uint32_t scan_ud_suffix(uint32_t at, preprocessing_token &token);
     bool is_identifier_start(uint32_t code_point) const;
     bool is_identifier_continue(uint32_t code_point) const;
+    bool accept_extended_identifier_character(uint32_t code_point, bool first,
+                                              source_location at,
+                                              bool written_in_utf8);
     struct c_char;
     c_char evaluate_c_char(const char *spelling, size_t length, size_t *i,
                            source_location at, encoding_prefix prefix);
@@ -452,6 +455,10 @@ class lexer
     size_t code_unit_count = 0, code_unit_capacity = 0;
     uint32_t position = 0;
     bool at_start_of_line = true, after_white_space = false;
+    /* where the previous preprocessing token ended, and whether it was an
+       identifier: a character that cannot continue it is diagnosed so */
+    uint32_t previous_end = UINT32_MAX;
+    bool previous_identifier = false;
 };
 
 const char *preprocessing_op_or_punc_spelling(preprocessing_op_or_punc op);

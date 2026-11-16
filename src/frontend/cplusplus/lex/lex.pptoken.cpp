@@ -189,6 +189,26 @@ preprocessing_token lexer::lex(bool header_name_permitted)
                 continue;
             }
         }
+        if (t.character >= 0x80) {
+            uint32_t code_point,
+                n = decode_utf8(p + start + t.extent - 1, file.size - start,
+                                &code_point);
+            if (n && is_unicode_white_space(code_point)) {
+                diagnostics.issue(diagnostic_id::ext_unicode_whitespace, start);
+                position = start + t.extent - 1 + n;
+                after_white_space = true;
+                if (options.retain_white_space) {
+                    /* a token of its own, as the character is no white space
+                       of [lex.charset]/1 */
+                    token.kind = preprocessing_token_kind::white_space;
+                    token.extent = position - start;
+                    at_start_of_line = false;
+                    after_white_space = false;
+                    return token;
+                }
+                continue;
+            }
+        }
         break;
     }
 
@@ -245,7 +265,8 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         token.kind = c == '"' ? preprocessing_token_kind::string_literal
                               : preprocessing_token_kind::character_literal;
         end = scan_character_or_string_literal(start, token);
-    } else if (is_identifier_start(code_point) && (c != '\\' || ucn)) {
+    } else if (is_identifier_start(code_point) &&
+               (c != '\\' || (ucn && code_point >= 0xA0))) {
         token.kind = preprocessing_token_kind::identifier;
         end = scan_identifier(start, &differs);
         token.spelling_differs = differs;
@@ -271,11 +292,48 @@ preprocessing_token lexer::lex(bool header_name_permitted)
         end = start + t.extent + (n ? n - 1 : 0);
         if (c == '\\' && !ucn)
             scan_universal_character_name(start, &code_point, true);
+        else if (c == '\\') {
+            /* [lex.charset]/2: "If a universal-character-name outside the
+               c-char-sequence, s-char-sequence, or r-char-sequence of a
+               character-literal or string-literal ... corresponds to a
+               control character or to a character in the basic source
+               character set, the program is ill-formed." */
+            end = start + ucn;
+            scan_universal_character_name(start, &code_point, true);
+            if (code_point >= 0x20 && code_point < 0x7F) {
+                char basic = (char)code_point;
+                diagnostics
+                    .issue(diagnostic_id::err_ucn_escape_basic_scs, start)
+                    .text(&basic, 1);
+            } else if (code_point < 0xA0)
+                diagnostics.issue(diagnostic_id::err_ucn_control_character,
+                                  start);
+        }
         if (n) {
-            char hex[16];
-            int length = snprintf(hex, sizeof hex, "%04X", code_point);
-            diagnostics.issue(diagnostic_id::err_character_not_allowed, start)
-                .text(hex, (size_t)length);
+            /* [lex.pptoken]/1: a character that is none of the forms makes
+               the program ill-formed once it reaches phase 7; clang says
+               why when it is next to an identifier or could only continue
+               one */
+            char hex[12];
+            size_t length = format_code_point(code_point, hex);
+            if (is_identifier_continue(code_point))
+                diagnostics
+                        .issue(
+                            diagnostic_id::err_character_not_allowed_identifier,
+                            start)
+                        .text(hex, length)
+                    << 1;
+            else if (previous_identifier && previous_end == start)
+                diagnostics
+                        .issue(
+                            diagnostic_id::err_character_not_allowed_identifier,
+                            start)
+                        .text(hex, length)
+                    << 0;
+            else
+                diagnostics
+                    .issue(diagnostic_id::err_character_not_allowed, start)
+                    .text(hex, length);
         }
     }
 
@@ -297,6 +355,8 @@ preprocessing_token lexer::lex(bool header_name_permitted)
     token.location = start;
     token.extent = end - start;
     position = end;
+    previous_end = end;
+    previous_identifier = token.kind == preprocessing_token_kind::identifier;
     at_start_of_line = false;
     after_white_space = false;
     return token;

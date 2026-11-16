@@ -75,8 +75,9 @@ Now (2026-11-16): 114 runs of 59 tests, raw, tokens, values and diags all
   the standard's examples (`lex.string.cpp`).
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`
   exists, every quoted production matches the spec's), in CI.
-- **L3** the preprocessor (`[cpp]`) on these tokens, or an adapter from vcc's
-  existing pp: to decide.
+- **L3** phase 4: not a new preprocessor.  vcc's C preprocessor
+  (`src/frontend/pp`) stays; the front end takes its output through an
+  adapter when it needs phase 4 (decided 2026-11-16).
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 
