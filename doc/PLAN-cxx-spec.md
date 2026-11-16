@@ -113,12 +113,16 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   came from (clang's expansion location).  `cxxlex -dump-tokens` now runs
   phases 1-7 as `clang -cc1 -dump-tokens`; `cxxlex -E [-dM]`.
   `bench/cxx-pp.py`: clang's test/Preprocessor (run as C++) and
-  test/CXX/cpp: 534 runs of 377 tests, tokens 462, diagnostics 354, macros
-  495; 212 tests pass every run.  Left: `__has_feature`/`__has_builtin`/
-  `__has_attribute` data from clang (stubs answer 0), `#pragma clang
-  diagnostic`, `#embed`, UCNs in macro names as their characters, the
-  leading-space and line-start flags in the remaining cases, the standard's
-  examples as tests (`src/test/cxx/cpp/spec/`), known-differences.
+  test/CXX/cpp, 354 tests that can run here (23 make their inputs at run
+  time): 505 runs, tokens 466, error lines 415, the front end's own
+  diagnostics 376, macros (-dM) 487; 239 tests pass every run.  The
+  extensions are `ext/` (Conventions); clang's `__has_*` answers are data
+  (`ext/clang/feature-checks.inc`).  Left: `#embed` (C23, clang's in C++;
+  about 30 runs), error recovery as clang's (what is left of a malformed
+  invocation or `_Pragma`), `#pragma clang diagnostic`, the parser-phase
+  pragmas clang turns into annotations, Microsoft's search rules and
+  `__pragma`, the standard's examples as tests (`src/test/cxx/cpp/spec/`),
+  known-differences, the tests in CI (they are read from work/ now).
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 
