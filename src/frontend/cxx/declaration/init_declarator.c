@@ -683,11 +683,21 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					ast_qualified_type it = c->etype;
 					uint8_t ilv = c->elval;
 
-					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_ARRAY)	/* (an array, "text": a pointer to its first element) */
-						it = cc_type_pointer(c->ast, AST_TYPE(c->ast, it)->base), ilv = 0;
-					else if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_FUNCTION)	/* (a function: a pointer to it) */
-						it = cc_type_pointer(c->ast, it), ilv = 0;
-					cxx_ctor_use(c, t, &it, &ilv, 1, false);
+					bool tried = false;
+
+					if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_ARRAY && ilv) {
+						/* an lvalue array as it is first (json j = nbs: basic_json(CompatibleType&&) binds
+						   const int(&)[3]); no constructor takes it: a pointer to its first element */
+						cxx_ctor_use(c, t, &it, &ilv, 1, false);
+						tried = c->ctor_found && c->ctor_picked;
+					}
+					if (!tried) {
+						if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_ARRAY)	/* (an array, "text": a pointer to its first element) */
+							it = cc_type_pointer(c->ast, AST_TYPE(c->ast, it)->base), ilv = 0;
+						else if (it != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, it) == AST_TYPE_FUNCTION)	/* (a function: a pointer to it) */
+							it = cc_type_pointer(c->ast, it), ilv = 0;
+						cxx_ctor_use(c, t, &it, &ilv, 1, false);
+					}
 					if (gen_local) {	/* code generation: the constructor's call, or a copy */
 						cxx_gen_construct_local(c, gen_local, t, &in, 1, name_loc);
 						gen_declared = true;

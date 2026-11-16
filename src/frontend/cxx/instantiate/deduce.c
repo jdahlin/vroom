@@ -187,6 +187,8 @@ VPRIV bool cxx_shape_mismatch(cxx *c, ast_qualified_type P, ast_qualified_type A
 		P = pt->base, pt = AST_TYPE(c->ast, P);
 	if (cxx_placeholder_of(c, P, &owner) >= 0)
 		return false;	/* a bare T: anything */
+	if (cxx_type_has_placeholder(c, A))
+		return false;	/* (an argument of a pattern's placeholder type: its shape is not known yet) */
 	at = AST_TYPE(c->ast, A);
 	if (pt->kind == AST_TYPE_STRUCT || pt->kind == AST_TYPE_UNION) {
 		cxx_instance *ip = cxx_tag_info(c, P);
@@ -232,6 +234,13 @@ VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, ast_qualified_type P, ast_
 		c->why = CXX_WHY_ARG;
 		return -1;	/* (void: a type vcc got wrong; no argument has it) */
 	}
+	if (cxx_type_has_placeholder(c, A) && AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext &&
+	    AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, AST_TYPE(c->ast, P)->base) == AST_TYPE_ARRAY) {
+		/* const T (&)[N] against a pattern's placeholder (a partial specialization's A, not bound yet): not
+		   known, not no match (json's has_to_json<json, int[3]> through to_json(j, const T(&arr)[N])) */
+		c->why = CXX_WHY_ARG;
+		return -1;
+	}
 	if (AST_TYPE_KIND(c->ast, P) == AST_TYPE_POINTER && AST_TYPE(c->ast, P)->ext) {
 		int ext = AST_TYPE(c->ast, P)->ext;
 		void *owner;
@@ -242,6 +251,16 @@ VPRIV int cxx_deduce_argument(cxx *c, cxx_partial *p, ast_qualified_type P, ast_
 			A = cxx_type_reference(c, A, false);
 		else
 			A = AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(A), AST_QUALIFIED_TYPE_QUALIFIERS(A) | AST_QUALIFIED_TYPE_QUALIFIERS(P));	/* (const T& binds what is not const too) */
+		if (P != CXX_TY_UNKNOWN && A != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, P) == AST_TYPE_ARRAY && AST_TYPE_KIND(c->ast, A) == AST_TYPE_ARRAY &&
+		    AST_TYPE(c->ast, P)->base != CXX_TY_UNKNOWN && AST_TYPE(c->ast, A)->base != CXX_TY_UNKNOWN) {
+			/* const T (&)[N] with an int[3]: the element as const as P's (the qualifiers of an array are its
+			   elements'; json's to_json(j, const T(&arr)[N])) */
+			ast_qualified_type pe = AST_TYPE(c->ast, P)->base, ae = AST_TYPE(c->ast, A)->base;
+			uint32_t extra = AST_QUALIFIED_TYPE_QUALIFIERS(pe) & ~AST_QUALIFIED_TYPE_QUALIFIERS(ae);
+
+			if (extra)
+				A = cc_type_array(c->ast, AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(ae), AST_QUALIFIED_TYPE_QUALIFIERS(ae) | extra), AST_TYPE(c->ast, A)->n, 0);
+		}
 	} else {
 		/* by value: arrays and functions decay, top-level cv goes */
 		const ctype *at = AST_TYPE(c->ast, A);

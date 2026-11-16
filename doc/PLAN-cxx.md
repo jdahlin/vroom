@@ -3050,3 +3050,16 @@ som misslyckas utan ändringen.  Sviter gröna (184/184, 38/38, mangle).
 `std::deque` kompilerar, länkar och kör.  Tester:
 `run/template-static-member-out-of-class.cpp` (misslyckas utan ändringen).
 Sviter gröna (185/185, 38/38, mangle).
+
+## Status 214 (2026-11-16)
+Fält och `const T (&)[N]` (jsons `json j = nbs` via `to_json(j, const
+T(&arr)[N])` och `has_to_json<json, int[3]>`):
+- deduktion: elementen lika const som P:s (int[3] binder const T(&)[N]); ett
+  argument av ett mönsters platshållartyp ger "okänt", inte "ingen matchning"
+  (även formkontrollen), så en partiell specialisering med void_t avvisas inte;
+- rangordning: ett rvalue-fält binder `const T(&)[N]` (const sitter på elementen);
+- `T x = arr`: ett lvalue-fält prövas som det är innan det blir en pekare
+  (en T&&-konstruktormall binder fältet);
+- mangling: `T[N]` med N en värdeparameter skrivs `A T<i>_ _` som clang.
+Test: `run/array-ref-param-deduction.cpp` (symbolerna lika med clangs).
+Sviter gröna (186/186, 38/38, mangle).

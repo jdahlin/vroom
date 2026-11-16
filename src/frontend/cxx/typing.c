@@ -287,7 +287,8 @@ static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, boo
 						    (cc_type_is_record(c->ast, a) && cc_type_is_record(c->ast, pt->base) &&
 						     cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(a)) && cxx_derives(c, a, pt->base, 0)));
 
-		if (have_lvalue && (pt->ext == 2 ? lvalue && (same || !cc_type_is_record(c->ast, pt->base)) : !lvalue && !(AST_QUALIFIED_TYPE_QUALIFIERS(pt->base) & AST_QUALIFIER_CONST)))
+		if (have_lvalue && (pt->ext == 2 ? lvalue && (same || !cc_type_is_record(c->ast, pt->base)) : !lvalue && !(AST_QUALIFIED_TYPE_QUALIFIERS(pt->base) & AST_QUALIFIER_CONST) &&
+				     !(AST_TYPE_KIND(c->ast, pt->base) == AST_TYPE_ARRAY && (AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(c->ast, pt->base)->base) & AST_QUALIFIER_CONST))))	/* (const T(&)[N]: its elements' const) */
 			return 3;
 		p = pt->base;
 		pt = AST_TYPE(c->ast, p);

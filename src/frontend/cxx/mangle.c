@@ -1656,7 +1656,15 @@ static void mg_type(cxx_mangler *m, ast_qualified_type t)
 
 		if (mg_substitution(m, CXX_SUB_TYPE, NULL, t))
 			return;
-		mg_text(m, num, (size_t)snprintf(num, sizeof num, "A%u_", (unsigned)x->n));
+		if (x->ext) {
+			/* T[N] in a signature, N a value parameter: A <its parameter> _ (clang's RAT0__KT_ for const T(&)[N]) */
+			if (x->ext == 1)
+				mg_str(m, "AT_");
+			else
+				mg_text(m, num, (size_t)snprintf(num, sizeof num, "AT%u_", (unsigned)(x->ext - 2)));
+			mg_str(m, "_");
+		} else
+			mg_text(m, num, (size_t)snprintf(num, sizeof num, "A%u_", (unsigned)x->n));
 		mg_type(m, x->base);
 		mg_remember(m, CXX_SUB_TYPE, NULL, t);
 		return;
