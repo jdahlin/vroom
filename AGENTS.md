@@ -405,6 +405,8 @@ bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs
 bench/vas-corpus.py -j 6 --target x86_64-w64-mingw32   # ... COFF objects (test runtime headers, no sysroot; ~2 min)
 bench/vas-corpus.py -j 6 -g [--as-g] --target x86_64-w64-mingw32   # ... clang -S -g (DWARF 4 line tables; -O '0 -gdwarf-5'); --as-g: -g to both assemblers too
 bench/vas-mutate.py -n 20000 --bin-dir build/linux/src-asan   # mutated win64-*.s: vasm (ASan) never crashes (~1 min)
+bench/cxx-skia.py -j 6 [DIR...]     # Skia (work/skia-src/skia) -fsyntax-only -std=c++20, first errors bucketed (src/core: 232/232, ~5 s)
+bench/skia/build.sh [--clean]      # Skia's GN build with vcc only (vpp -c, vlink, var; CPU backend): failed steps, functions with code (~25 s)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)
                                    # build: "warnings: N, not from clang: M" (M must be 0; logs in work/build-pg-*.build.log)

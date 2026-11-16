@@ -114,6 +114,8 @@ typedef struct cxx_saved {
     char name_path[512];
     cxx_entity *target, *target2, *last_type;
     uint8_t last_type_dependent, dependent_seen;
+    uint32_t
+        want_constant; /* (a body instantiated inside a constant expression: none of its own) */
     ast_qualified_type ds_type, type_in, type_out;
 } cxx_saved;
 

@@ -10,6 +10,18 @@ static bool cxx_call_ranks_converted(const cxx *c)
     return false;
 }
 
+/* x.m / p->m: m's type as cxx_name_type gives it, but not const for being this's member in a const
+   member function: x is not this (Skia's SkDCubic::chopAt() const writing dst.pts[0] of a local dst);
+   x's own constness is applied by the caller */
+static void cxx_member_name_type(cxx *c, cxx_entity *m)
+{
+    uint8_t this_const = c->this_const;
+
+    c->this_const = 0;
+    cxx_name_type(c, m);
+    c->this_const = this_const;
+}
+
 /* VCC_CXX_GEN=2: the innermost postfix expression of each function that code generation did not build */
 VPRIV void cxx_postfix_expression_parse(cxx *c)
 {
@@ -119,11 +131,34 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 uint32_t abrace[CXX_MAX_ARGS];
                 cxx_entity *afns[16];
 
+                uint8_t xkmask = c->carg_kmask;
+                int64_t xkval[8];
+
+                memcpy(xkval, c->carg_kval, sizeof xkval);
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
                 c->call_obj = call_obj, c->call_obj_rv = call_obj_rv,
                 cxx_call_type_x(c, set, xa, nx, c->cargs, c->cargs_lval,
                                 c->ncargs);
+                if (c->want_constant && an && an <= 8 &&
+                    xkmask == (uint8_t)((1u << an) - 1) && !obj_node &&
+                    c->call_resolved && c->call_picked && !c->econst &&
+                    !c->template_depth && c->etype != CXX_TY_UNKNOWN &&
+                    ((AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL &&
+                      AST_TYPE_KIND(c->ast, c->etype) <=
+                          AST_TYPE_UNSIGNED_LONG_LONG) ||
+                     AST_TYPE_KIND(c->ast, c->etype) == AST_TYPE_ENUM)) {
+                    /* f<args>(constants) of a constexpr function template (SkAlignedSTStorage<RoundUp<T>(N), T>) */
+                    ast_qualified_type rt =
+                        AST_QUALIFIED_TYPE_UNQUALIFIED(c->etype);
+                    int64_t v;
+
+                    if (cxx_const_call(c, c->call_picked, xkval, an, &v)) {
+                        cxx_ec(c, rt,
+                               rt == cc_type_basic(AST_TYPE_BOOL) ? v != 0 : v);
+                        continue;
+                    }
+                }
                 if (!c->ncargs && !c->econst && !c->template_depth &&
                     c->etype != CXX_TY_UNKNOWN &&
                     AST_TYPE_KIND(c->ast, c->etype) >= AST_TYPE_BOOL &&
@@ -177,6 +212,10 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 memcpy(anodes, c->carg_nodes, sizeof anodes);
                 uint32_t abrace[CXX_MAX_ARGS];
                 cxx_entity *afns[16];
+                uint8_t akmask = c->carg_kmask;
+                int64_t akval[8];
+
+                memcpy(akval, c->carg_kval, sizeof akval);
 
                 memcpy(abrace, c->carg_brace, sizeof abrace);
                 memcpy(afns, c->carg_fnset, sizeof afns);
@@ -299,7 +338,8 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     cxx_gen_call(c, c->call_picked, obj_node, obj_arrow, anodes,
                                  an, cloc),
                     c->gen_vmode = 0;
-                if (c->want_constant && cpick && !an && !obj_node &&
+                if (c->want_constant && cpick && an <= 8 &&
+                    akmask == (uint8_t)((1u << an) - 1) && !obj_node &&
                     !c->econst && !c->template_depth && cty != CXX_TY_UNKNOWN &&
                     c->etype == cty &&
                     ((AST_TYPE_KIND(c->ast, cty) >= AST_TYPE_BOOL &&
@@ -310,7 +350,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     int64_t cv;
                     uint32_t keep = c->enode;
 
-                    if (cxx_const_call(c, cpick, &cv)) {
+                    if (cxx_const_call(c, cpick, akval, an, &cv)) {
                         c->econst = 1,
                         c->evalue =
                             cty == cc_type_basic(AST_TYPE_BOOL) ? cv != 0 : cv,
@@ -483,7 +523,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                         cxx_entity *m = cxx_lookup_in(c, cls, oid, 0);
 
                         if (m && m->kind != CXX_ENTITY_DEPENDENT) {
-                            cxx_name_type(c, m);
+                            cxx_member_name_type(c, m);
                             c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) &
                                            AST_QUALIFIER_CONST)
                                               ? 2
@@ -503,7 +543,22 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                 id = cxx_peek(c, 0)->id;
                 cxx_advance(c);
                 /* the object's type is not known here: name<...>( is a member template call if it parses */
-                if (cxx_is(c, LEX_TOKEN_LESS) &&
+                /* (a known class whose member of that name is no template: < is less-than, however
+				   what follows parses: a.n < 1 || a.n > (int)4, skcms) */
+                bool not_template = false;
+
+                if (!template_kw && cls && !q && !dep && !cls->dependent &&
+                    !cls->has_dependent_base && cxx_is(c, LEX_TOKEN_LESS)) {
+                    cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
+
+                    not_template = m && m->kind != CXX_ENTITY_DEPENDENT;
+                    for (cxx_entity *x = m; x && not_template; x = x->next)
+                        not_template =
+                            x->kind != CXX_ENTITY_TEMPLATE &&
+                            x->kind != CXX_ENTITY_FUNCTION_TEMPLATE &&
+                            !cxx_entity_template(x);
+                }
+                if (cxx_is(c, LEX_TOKEN_LESS) && !not_template &&
                     (template_kw ||
                      cxx_lookahead_fn(c, cxx_template_arguments_then_call))) {
                     cxx_entity *m =
@@ -540,7 +595,7 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
                     cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
 
                     if (m && m->kind != CXX_ENTITY_DEPENDENT) {
-                        cxx_name_type(c, m);
+                        cxx_member_name_type(c, m);
                         c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) &
                                        AST_QUALIFIER_CONST)
                                           ? 2

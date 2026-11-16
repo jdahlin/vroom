@@ -434,6 +434,52 @@ VPRIV void cxx_spec_keyword(cxx_spec *sp, int kw)
     }
 }
 
+/* do the tokens read [::]a::b::Name [<...>] auto|decltype (cheap, before the lookahead)? */
+static bool cxx_qualified_constraint_shape(cxx *c)
+{
+    uint32_t i = c->pos;
+
+    if (c->tok[i].kind == LEX_TOKEN_COLON_COLON)
+        i++;
+    while (i + 1 < c->ntok && c->tok[i].kind == LEX_TOKEN_IDENTIFIER &&
+           c->tok[i + 1].kind == LEX_TOKEN_COLON_COLON)
+        i += 2;
+    if (i >= c->ntok || c->tok[i].kind != LEX_TOKEN_IDENTIFIER)
+        return false;
+    i++;
+    if (i < c->ntok && c->tok[i].kind == LEX_TOKEN_LESS) {
+        int d = 0;
+
+        for (; i < c->ntok; i++) {
+            int k = c->tok[i].kind;
+
+            if (k == LEX_TOKEN_LESS || k == LEX_TOKEN_LEFT_PAREN)
+                d++;
+            else if (k == LEX_TOKEN_GREATER || k == LEX_TOKEN_RIGHT_PAREN)
+                d--;
+            else if (k == LEX_TOKEN_GREATER_GREATER)
+                d -= 2;
+            else if (k == LEX_TOKEN_SEMICOLON || k == LEX_TOKEN_LEFT_BRACE)
+                return false;
+            if (d <= 0) {
+                i++;
+                break;
+            }
+        }
+    }
+    return i < c->ntok &&
+           (c->tok[i].kw == CXX_KW_auto || c->tok[i].kw == CXX_KW_decltype);
+}
+
+/* a qualified type-constraint, then auto or decltype: n::Concept<args> auto (a lookahead) */
+static void cxx_qualified_constraint_auto(cxx *c)
+{
+    if (!cxx_constraint_name_parse(c))
+        cxx_fail(c, "expected a concept");
+    if (!cxx_is_kw(c, CXX_KW_auto) && !cxx_is_kw(c, CXX_KW_decltype))
+        cxx_fail(c, "expected 'auto' after a type constraint");
+}
+
 VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class,
                                     bool is_template)
 {
@@ -623,6 +669,15 @@ VPRIV int cxx_decl_specifiers_parse(cxx *c, cxx_scope *ctor_class,
             flags |= DS_TYPE;
             sp.v_named = 1;
             sp.named = c->last_type ? c->last_type->ty : CXX_TY_UNKNOWN;
+        } else if (!(flags & DS_TYPE) &&
+                   ((cxx_is(c, LEX_TOKEN_IDENTIFIER) && !kw &&
+                     cxx_peek(c, 1)->kind == LEX_TOKEN_COLON_COLON) ||
+                    cxx_is(c, LEX_TOKEN_COLON_COLON)) &&
+                   cxx_qualified_constraint_shape(c) &&
+                   cxx_lookahead_fn(c, cxx_qualified_constraint_auto)) {
+            /* n::Concept<args> auto (Skia's std::invocable<Record> auto &&fn) */
+            cxx_constraint_name_parse(c);
+            sp.v_unknown = 1;
         } else if (!(flags & (DS_TYPE | DS_MODIFIER)) &&
                    (kw == CXX_KW_typename ||
                     ((cxx_is(c, LEX_TOKEN_IDENTIFIER) && !kw) ||

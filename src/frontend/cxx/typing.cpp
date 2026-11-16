@@ -1604,14 +1604,21 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set,
         if (called->kind == CXX_ENTITY_VALUE)
             cxx_member_body_use(c, called);
         else if (called->kind == CXX_ENTITY_FUNCTION_TEMPLATE &&
-                 !c->unevaluated && !c->tentative && nargs <= 16) {
+                 (!c->unevaluated || c->const_eval) && !c->tentative &&
+                 nargs <= 16) {
             ast_qualified_type r, et = result;
+            uint8_t gen = c->gen;
 
+            /* (in a constexpr call's evaluation, cxx_const_call: the instance is wanted for its value;
+               its own function is built as the code outside would build it) */
+            if (c->unevaluated)
+                c->gen = c->const_eval_gen;
             c->call_instance = NULL;
             c->deduce_brace = brace_known ? own_brace : NULL;
             cxx_ftemplate_deduce(c, called, xargs, nxargs, args, lval, nargs,
                                  &r, true);
             c->deduce_brace = NULL;
+            c->gen = gen;
             result = et != CXX_TY_UNKNOWN ? et : r;
             called_instance =
                 c->call_instance; /* (code generation: the function this call calls) */
@@ -1974,6 +1981,40 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
                 if (!c->ctor_ilist ||
                     ft->n < AST_TYPE(c->ast, c->ctor_ilist->ty)->n)
                     c->ctor_ilist = e;
+            }
+        }
+        if (c->ctor_ilist && args) {
+            /* not viable when an element plainly does not convert to E (SkSpan<SkPoint>{ptr, 4}: a pointer
+               is no SkPoint, an aggregate): then the other constructors ([over.match.list]) */
+            ast_qualified_type et = cxx_initializer_list_element(
+                c, c->ast->params[AST_TYPE(c->ast, c->ctor_ilist->ty)->aux]);
+            cxx_scope *es =
+                et != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, et)
+                    ? cxx_type_class_scope(c,
+                                           AST_QUALIFIED_TYPE_UNQUALIFIED(et))
+                    : NULL;
+            bool aggregate = es && !es->dependent && !es->has_dependent_base &&
+                             !cxx_lookup_in(c, es, cxx_ctor_id(), 0);
+
+            for (uint32_t i = 0;
+                 et != CXX_TY_UNKNOWN && i < nargs && i < CXX_MAX_ARGS; i++) {
+                ast_qualified_type at = args[i];
+                int ak, ek = (int)AST_TYPE_KIND(c->ast, et);
+                bool ascalar;
+
+                if (at == CXX_TY_UNKNOWN || c->carg_brace[i])
+                    continue;
+                ak = (int)AST_TYPE_KIND(c->ast, at);
+                ascalar = cc_type_is_arithmetic(c->ast, at) ||
+                          ak == AST_TYPE_POINTER || ak == AST_TYPE_ENUM;
+                if ((aggregate && ascalar) ||
+                    (cc_type_is_arithmetic(c->ast, et) &&
+                     ak == AST_TYPE_POINTER && !AST_TYPE(c->ast, at)->ext) ||
+                    (ek == AST_TYPE_POINTER && !AST_TYPE(c->ast, et)->ext &&
+                     cc_type_is_arithmetic(c->ast, at))) {
+                    c->ctor_ilist = NULL;
+                    break;
+                }
             }
         }
         if (c->ctor_ilist) {
@@ -2388,6 +2429,15 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
             }
             if (!nothrow && cxx_gen_trivial_abi(c, l, 0) == 0) {
                 *v = 0;
+                return true;
+            }
+            /* (T& = T&& without a user-declared assignment, its bases' and members' trivial: trivial,
+			   so it cannot throw either, whatever the destructor is or whether the class is POD for
+			   layout; libc++'s optional<T>: is_trivially_move_assignable<SkMatrix>, and
+			   is_nothrow_move_assignable of a T with ~T()) */
+            if (!cxx_class_polymorphic(c, l) &&
+                cxx_class_assign_trivial(c, l, 0) == 1) {
+                *v = 1;
                 return true;
             }
         }
@@ -2895,6 +2945,25 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len,
                 }
                 if (trivially && pod) {
                     *v = 1;
+                    return true;
+                }
+            }
+            if ((IS("__is_trivially_destructible") ||
+                 IS("__has_trivial_destructor")) &&
+                cc_type_is_record(c->ast, e)) {
+                /* a class not POD for layout: trivially destructible when nothing in it needs destroying
+				   (cxx_gen_needs_destruction's false is proven), not when its own destructor is user-provided,
+				   virtual or deleted (libc++'s optional<T> of such a T: is_trivially_destructible picks its
+				   storage base); else not known */
+                cxx_entity *d = cxx_gen_declared_destructor(c, e);
+
+                if (!cxx_gen_needs_destruction(c, e, 0)) {
+                    *v = 1;
+                    return true;
+                }
+                if (d && (d->fn_virtual || d->fn_deleted ||
+                          !(d->fn_defaulted && !d->fn_ooc_default))) {
+                    *v = 0;
                     return true;
                 }
             }

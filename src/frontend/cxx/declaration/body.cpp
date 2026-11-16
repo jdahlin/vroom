@@ -15,7 +15,15 @@ VPRIV void cxx_late_add(cxx *c, uint32_t begin, uint32_t end, int what)
     c->late[c->nlate].template_depth = c->template_depth;
     if (c->last_fn && !what)
         c->last_fn->body_begin = begin, c->last_fn->body_end = end,
-        c->last_fn->body_scope = c->scope;
+        c->last_fn->body_scope = c->scope, free(c->last_fn->body_params),
+        c->last_fn->body_params =
+            (cxx_param *)(c->ndecl_params
+                              ? malloc(c->ndecl_params * sizeof(cxx_param))
+                              : NULL),
+        c->last_fn->body_nparams = c->ndecl_params,
+        c->ndecl_params ? (void)memcpy(c->last_fn->body_params, c->decl_params,
+                                       c->ndecl_params * sizeof(cxx_param))
+                        : (void)0;
     c->late[c->nlate].fn = c->last_fn, c->last_fn = NULL;
     c->late[c->nlate].params =
         (cxx_param *)(c->ndecl_params
@@ -85,14 +93,17 @@ VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps,
 /* : mem-initializers, then { body } (or a function-try-block) */
 VPRIV void cxx_function_body_parse(cxx *c)
 {
-    uint32_t implicit = c->implicit_typename;
+    uint32_t implicit = c->implicit_typename, want = c->want_constant;
     uint8_t valid = c->name_path_valid;
 
     c->implicit_typename = 0;
     c->name_path_valid = 0; /* local classes: not nameable outside */
+    c->want_constant =
+        0; /* (a body parsed inside a constant expression, a class completed there: none) */
     cxx_function_body_inner_parse(c);
     c->implicit_typename = implicit;
     c->name_path_valid = valid;
+    c->want_constant = want;
 }
 
 /* one mem-initializer, with its code: a member of this class by name, else a base class (or the class itself: a
@@ -322,6 +333,8 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
         cxx_late_deduce(
             c, &l); /* (auto f(): its type, before its code is built) */
 
+        uint8_t this_const_save = c->this_const;
+
         c->pos = l.begin;
         c->this_const = l.fn && (l.fn->fn_const & 1);
         c->template_depth =
@@ -364,6 +377,7 @@ VPRIV void cxx_late_parse_all(cxx *c, uint32_t from)
         c->class_depth = depth;
         c->template_depth = tdepth;
         c->this_type = this_save;
+        c->this_const = this_const_save;
     }
     c->nlate = from;
 }

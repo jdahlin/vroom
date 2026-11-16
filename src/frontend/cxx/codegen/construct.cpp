@@ -77,6 +77,68 @@ VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d)
     }
 }
 
+/*
+ * X::X() = default;, X::X(const X&) = default; or X::X(X&&) = default; outside its class: the function, built
+ * here as clang does (not inline: other TUs call it).  A copy or move does the class's bases, vptr and members
+ * from the parameter's (cxx_gen_copy_construct_parts; a move moves its class members), nothing else.
+ */
+VPRIV void cxx_gen_defaulted_constructor(cxx *c, cxx_entity *d)
+{
+    cc *a = c->ast;
+    ast_qualified_type t, pt;
+    cxx_scope *fs;
+    cxx_param p[1];
+    uint32_t loc, src, body;
+    cc_id_list l;
+    bool ok, move;
+
+    if (!d || !d->member_of || !d->member_of->owner || d->fn_deleted ||
+        (t = d->member_of->owner->ty) == CXX_TY_UNKNOWN ||
+        d->ty == CXX_TY_UNKNOWN ||
+        AST_TYPE_KIND(a, d->ty) != AST_TYPE_FUNCTION ||
+        AST_TYPE(a, d->ty)->n > 1 || !a->o->emit || c->tentative ||
+        c->unevaluated || d->member_of->dependent)
+        return;
+    d->fn_ooc_default = 1, d->fn_inline = 0;
+    if (!AST_TYPE(a, d->ty)->n) {
+        cxx_gen_constructor_body(c, t, d);
+        return;
+    }
+    pt = a->params[AST_TYPE(a, d->ty)->aux];
+    if (!cxx_gen_is_reference(c, pt) || d->gen_tried)
+        return;
+    move = !(AST_QUALIFIED_TYPE_QUALIFIERS(AST_TYPE(a, pt)->base) &
+             AST_QUALIFIER_CONST) &&
+           AST_TYPE(a, pt)->ext >= 2;
+    p[0].name = 0, p[0].ty = pt;
+    d->gen_tried = 2;
+    fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->member_of, NULL);
+    if (!cxx_gen_function_begin(c, d, fs, p, 1)) {
+        d->gen_tried = 1;
+        return;
+    }
+    loc = a->syms[d->sym].loc;
+    src = cc_dereference_build(
+        a,
+        cc_node_rvalue(
+            a, cxx_gen_var_node(c, a->lists[c->gen_psyms + c->gen_npsyms - 1],
+                                loc)),
+        loc);
+    cc_id_list_init(&l);
+    c->gen_parts_move = move;
+    ok = src && cxx_gen_copy_construct_parts(c, cxx_gen_this_object(c, loc), t,
+                                             src, &l, loc, 0);
+    c->gen_parts_move = 0;
+    c->gen_delegates =
+        1; /* (the bases and members: done above, not default-constructed after) */
+    if (!ok)
+        c->gen_failed = 1;
+    body = cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l),
+                            l.n);
+    cxx_gen_function_end(c, d, body);
+    d->gen_tried = 1;
+}
+
 /* the destructor the class declares (NULL: none) */
 VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t)
 {
@@ -165,6 +227,9 @@ VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target,
         uint8_t lv[1] = {1};
         bool ok;
 
+        if (c->gen_parts_move) /* (T(T&&) = default: the base moved) */
+            at[0] = AST_QUALIFIED_TYPE_UNQUALIFIED(bases[i]), lv[0] = 0;
+
         if (!tb || !sb)
             return false;
         cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(bases[i]), at, lv, 1,
@@ -246,6 +311,8 @@ VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target,
             }
             if (et != ft)
                 return false; /* (an array of arrays of such a class: not built yet) */
+            if (c->gen_parts_move) /* (T(T&&) = default: the member moved) */
+                at[0] = AST_QUALIFIED_TYPE_UNQUALIFIED(ft), lv[0] = 0;
             cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(ft), at, lv, 1,
                          false);
             if (c->ctor_picked && c->ctor_picked->fn_deleted) {
@@ -716,6 +783,7 @@ VPRIV bool cxx_gen_construct_at(cxx *c, uint32_t target, ast_qualified_type t,
         goto bitwise;
     }
     if (found && ctor && ctor->fn_defaulted && !ctor->fn_deleted &&
+        !ctor->fn_ooc_default && /* (defined outside its class: called) */
         nargs == 1 && args[0] &&
         AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) ==
             AST_QUALIFIED_TYPE_UNQUALIFIED(t) &&

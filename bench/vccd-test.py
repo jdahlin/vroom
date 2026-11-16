@@ -181,6 +181,26 @@ def wrong_fd_count():
     finally: v.stop()
 
 @test()
+def ar_response_file():
+    """var rcs lib.a @lib.a.rsp (GN's archives): the response file's words are the members"""
+    d = tempfile.mkdtemp(prefix='vccd-ar-')
+    v = Vccd()
+    try:
+        for n in ('a', 'b c'):
+            tu(d, f'{n}.c', f'int {n.replace(" ", "_")}(void) {{ return 1; }}\n')
+            st, err = v.cc(d, f'{n}.c', out=f'{n}.o')
+            check(st == 0, f'cc {n}.c: {st} {err[-300:]}')
+        open(f'{d}/lib.a.rsp', 'w').write('a.o "b c.o"\n')
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        p = subprocess.run([f'{os.path.dirname(SHIM)}/var', 'rcs', 'lib.a', '@lib.a.rsp'], cwd=d, env=env,
+                           capture_output=True, text=True, timeout=30)
+        check(p.returncode == 0, f'var rcs: {p.returncode} {p.stderr[-300:]}')
+        p = subprocess.run([f'{os.path.dirname(SHIM)}/var', 't', 'lib.a'], cwd=d, env=env, capture_output=True,
+                           text=True, timeout=30)
+        check(p.stdout.split('\n')[:2] == ['a.o', 'b c.o'], f'members {p.stdout!r}')
+    finally: v.stop()
+
+@test()
 def spawned_tool_env_clean():
     """a link spawned for a request gets the request's env minus the dynamic loader's variables"""
     d0 = tempfile.mkdtemp(prefix='vccd-ld-')

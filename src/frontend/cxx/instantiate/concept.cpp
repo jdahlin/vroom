@@ -66,6 +66,8 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args,
     f->done[at].n = given,
     f->done[at].viable = -1; /* (a concept that names itself: not known) */
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = f->pos;
@@ -224,6 +226,8 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args,
     memcpy(f->done[at].args, args, n * sizeof *args);
     f->done[at].n = n, f->done[at].viable = -1;
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = pos;
@@ -248,7 +252,8 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args,
  * label): its value, when its body is return expr; with expr a constant.  Its tokens are parsed again, as
  * cxx_ftemplate_const_call does a template's.  False: not known.
  */
-VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
+VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, const int64_t *args,
+                          uint32_t nargs, int64_t *out)
 {
     const cxx_late *l = f ? f->late : NULL;
     uint32_t begin, end;
@@ -281,9 +286,28 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
         (!whole_template &&
          (f->ty == CXX_TY_UNKNOWN ||
           AST_TYPE_KIND(c->ast, f->ty) != AST_TYPE_FUNCTION ||
-          AST_TYPE(c->ast, f->ty)->n)))
+          AST_TYPE(c->ast, f->ty)->n != nargs)))
         return false;
-    if (f->cx_state == 1)
+    /* an instance of a function template whose body was not parsed yet (a call in an unevaluated operand,
+       or inside another constexpr call's body): parsed now, which records it (cxx_function_signature_parse) */
+    if (nargs && !f->body_end && f->inst_ftmpl && f->targs &&
+        f->inst_ftmpl->p.params &&
+        f->ntargs == f->inst_ftmpl->p.params->ntparams)
+        cxx_ftemplate_return(c, f->inst_ftmpl, f->targs, true);
+    /* f(args): its parameters, named in the definition, bound to the arguments' values */
+    if (nargs && (whole_template || !f->body_end || f->body_nparams != nargs ||
+                  !f->body_params))
+        return false;
+    if (nargs)
+        for (uint32_t i = 0; i < nargs; i++) {
+            ast_qualified_type pt = f->body_params[i].ty;
+            int k = pt == CXX_TY_UNKNOWN ? -1 : (int)AST_TYPE_KIND(c->ast, pt);
+
+            if (!((k >= AST_TYPE_BOOL && k <= AST_TYPE_UNSIGNED_LONG_LONG) ||
+                  k == AST_TYPE_ENUM))
+                return false;
+        }
+    else if (f->cx_state == 1)
         return *out = f->cx_value,
                true; /* (a failure is not kept: tried too early, a later use may succeed) */
     if (l)
@@ -338,18 +362,86 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
         else if (!depth && k == LEX_TOKEN_LEFT_BRACE)
             break;
     }
-    if (pos + 1 >= end || c->tok[pos + 1].kw != CXX_KW_return)
+    /* before the return: statements that do nothing in a constant evaluation, an assertion compiled out
+       (SkASSERT under NDEBUG: static_cast<void>(0);), (void)x; or an empty statement */
+    uint32_t ret = pos + 1;
+
+    while (ret < end) {
+        const cxx_token *t = &c->tok[ret];
+        bool skip = t->kind == LEX_TOKEN_SEMICOLON ||
+                    (t->kw == CXX_KW_static_cast && ret + 3 < end &&
+                     c->tok[ret + 1].kind == LEX_TOKEN_LESS &&
+                     c->tok[ret + 2].kw == CXX_KW_void &&
+                     c->tok[ret + 3].kind == LEX_TOKEN_GREATER) ||
+                    (t->kind == LEX_TOKEN_LEFT_PAREN && ret + 2 < end &&
+                     c->tok[ret + 1].kw == CXX_KW_void &&
+                     c->tok[ret + 2].kind == LEX_TOKEN_RIGHT_PAREN);
+        uint32_t d = 0;
+
+        if (!skip)
+            break;
+        for (; ret < end; ret++) {
+            int k = c->tok[ret].kind;
+
+            if (k == LEX_TOKEN_LEFT_PAREN || k == LEX_TOKEN_LEFT_SQUARE ||
+                k == LEX_TOKEN_LEFT_BRACE)
+                d++;
+            else if ((k == LEX_TOKEN_RIGHT_PAREN ||
+                      k == LEX_TOKEN_RIGHT_SQUARE ||
+                      k == LEX_TOKEN_RIGHT_BRACE) &&
+                     d)
+                d--;
+            else if (!d && k == LEX_TOKEN_SEMICOLON)
+                break;
+        }
+        ret++;
+    }
+    if (ret >= end || c->tok[ret].kw != CXX_KW_return)
         return false;
     uint8_t gen = c->gen, gen_failed = c->gen_failed;
     uint32_t enode = c->enode;
 
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
+    uint8_t const_eval = c->const_eval, const_eval_gen = c->const_eval_gen;
+    /* (the call being folded: what resolving it found, which the body's own calls and operators reuse) */
+    uint8_t call_resolved = c->call_resolved, none_viable = c->none_viable,
+            call_nranks = c->call_nranks, call_ranks[16];
+    cxx_entity *call_picked = c->call_picked, *call_instance = c->call_instance;
+
+    memcpy(call_ranks, c->call_ranks, sizeof call_ranks);
+
+    if (!c->const_eval)
+        c->const_eval_gen = gen;
+    c->const_eval = 1;
     c->body_depth++, c->unevaluated++;
     c->gen =
         0; /* (typed only: nothing of it is built into the function around the call) */
     c->fail = &jb;
-    c->pos = pos + 2;
+    c->pos = ret + 1;
     c->scope = cxx_scope_new(c, CXX_SCOPE_BLOCK, bscope, NULL);
+    for (uint32_t i = 0; i < nargs; i++) {
+        cxx_entity *pe;
+        ast_qualified_type pt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(f->body_params[i].ty);
+        int64_t av = args[i];
+        uint64_t size = AST_TYPE(c->ast, pt)->size;
+
+        if (AST_TYPE_KIND(c->ast, pt) == AST_TYPE_BOOL)
+            av = av != 0;
+        else if (size && size < 8) {
+            int sh = (int)(64 - size * 8);
+
+            av = cc_type_is_signed(c->ast, pt)
+                     ? (int64_t)((uint64_t)av << sh) >> sh
+                     : (int64_t)(((uint64_t)av << sh) >> sh);
+        }
+        if (f->body_params[i].name > 1 &&
+            (pe = cxx_declare(c, c->scope, f->body_params[i].name,
+                              CXX_ENTITY_VALUE)))
+            pe->dependent = 0, pe->value = av, pe->has_value = 1, pe->ty = pt;
+    }
     c->template_depth = 0, c->in_template_args = 0,
     c->explicit_specialization = 0, c->class_depth = 0,
     c->implicit_typename = 0;
@@ -361,8 +453,13 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, int64_t *out)
     }
     c->body_depth--;
     cxx_outer_restore(c, &o);
+    c->const_eval = const_eval, c->const_eval_gen = const_eval_gen;
+    c->call_resolved = call_resolved, c->none_viable = none_viable,
+    c->call_nranks = call_nranks, c->call_picked = call_picked,
+    c->call_instance = call_instance;
+    memcpy(c->call_ranks, call_ranks, sizeof call_ranks);
     c->gen = gen, c->gen_failed = gen_failed, c->enode = enode;
-    if (known)
+    if (known && !nargs)
         f->cx_state = 1, f->cx_value = v;
     *out = v;
     return known;
@@ -429,6 +526,8 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
     for (uint32_t i = 0; i < n; i++)
         cxx_bind(c, binding, &ps->tparams[i], &args[i]);
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = pos + 1;

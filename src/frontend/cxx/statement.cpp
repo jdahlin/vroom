@@ -479,12 +479,20 @@ static void cxx_for_parse(cxx *c)
     if (gen)
         c->gen_block = outer_block;
     c->gen_notemp++;
-    if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
-        cxx_expression_parse(c);
-        if (gen)
-            gcond = cxx_gen_condition(c, c->enode);
+    if (!cxx_is(c, LEX_TOKEN_SEMICOLON) && cxx_declaration_statement_try(c)) {
+        /* for (init; auto r = it.next(); ): a condition declaration, made anew each iteration
+           (its ; ends it as a declaration's; no code for it yet) */
+        cxx_declaration_parse(c, CXX_CONTEXT_BLOCK);
+        if (gen && cxx_gen_on(c) && !c->tentative && !c->template_depth)
+            cxx_gen_fail(c);
+    } else {
+        if (!cxx_is(c, LEX_TOKEN_SEMICOLON)) {
+            cxx_expression_parse(c);
+            if (gen)
+                gcond = cxx_gen_condition(c, c->enode);
+        }
+        cxx_expect(c, LEX_TOKEN_SEMICOLON);
     }
-    cxx_expect(c, LEX_TOKEN_SEMICOLON);
     if (!cxx_is(c, LEX_TOKEN_RIGHT_PAREN)) {
         cxx_expression_parse(c);
         has_step = true, gstep = c->enode;
@@ -609,7 +617,14 @@ static void cxx_condition_parse(cxx *c)
     for (;;) {
         if (cxx_condition_declaration_parse(c))
             break;
-        if (cxx_declaration_statement_try(c)) {
+        /* (T x = e / T x{e}: only a declaration, even when T is not found yet: a class template's
+		   member typedef in its member's body; Skia's SkBitSet::forEachSetIndex) */
+        bool name_name = cxx_is(c, LEX_TOKEN_IDENTIFIER) && !cxx_kw(c) &&
+                         cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER &&
+                         !cxx_peek(c, 1)->kw &&
+                         (cxx_peek(c, 2)->kind == LEX_TOKEN_EQUAL ||
+                          cxx_peek(c, 2)->kind == LEX_TOKEN_LEFT_BRACE);
+        if (name_name || cxx_declaration_statement_try(c)) {
             /* a declaration: init-statement ending in ; or a condition declaration */
             uint32_t save = c->pos;
             cxx_mark m;

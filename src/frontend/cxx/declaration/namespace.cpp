@@ -258,7 +258,9 @@ VPRIV void cxx_static_assert_parse(cxx *c)
 
     cxx_advance(c);
     cxx_expect(c, LEX_TOKEN_LEFT_PAREN);
+    c->want_constant++; /* (constexpr calls folded: static_assert(f(2) == 3)) */
     cxx_assignment_expression_parse(c);
+    c->want_constant--;
     known = c->econst && !c->tentative && !c->template_depth,
     value = c->evalue != 0;
     if (!c->tentative && !c->template_depth && !c->unevaluated) {

@@ -576,7 +576,9 @@ VPRIV cxx_entity *cxx_gen_constructor_body(cxx *c, ast_qualified_type t,
                : d->gen_tried == 2 ? d
                                    : NULL;
     d->gen_tried = 2;
-    d->fn_inline = 1;
+    if (!d->fn_ooc_default)
+        d->fn_inline =
+            1; /* (X::X() = default; outside the class: the TU's own definition) */
     fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, cls, NULL);
     if (!cxx_gen_function_begin(c, d, fs, NULL, 0)) {
         d->gen_tried = 1;

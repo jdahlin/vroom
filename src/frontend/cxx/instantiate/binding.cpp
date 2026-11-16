@@ -18,6 +18,7 @@ VPRIV void cxx_state_save(cxx *c, cxx_saved *s)
     s->last_type_dependent = c->last_type_dependent;
     s->ds_type = c->ds_type, s->type_in = c->type_in, s->type_out = c->type_out;
     s->dependent_seen = c->dependent_seen;
+    s->want_constant = c->want_constant, c->want_constant = 0;
 }
 
 VPRIV void cxx_state_restore(cxx *c, const cxx_saved *s)
@@ -28,6 +29,7 @@ VPRIV void cxx_state_restore(cxx *c, const cxx_saved *s)
     c->class_depth = s->class_depth, c->nlate = s->nlate;
     c->scope = s->scope, c->fail = s->fail,
     c->explicit_specialization = s->explicit_specialization;
+    c->want_constant = s->want_constant;
     c->layout_attributes = s->layout_attributes;
     while (c->build != s->build) { /* (classes an error left open) */
         struct cxx_class_build *b = c->build;
@@ -282,3 +284,23 @@ VPRIV bool cxx_instance_spell(cxx *c, const cxx_template *t, const cxx_targ *a,
 }
 
 /* ---- partial specializations --------------------------------------------------------------- */
+
+/* std::initializer_list<E>'s E (a reference to one too); CXX_TY_UNKNOWN: not an instance known here */
+VPRIV ast_qualified_type cxx_initializer_list_element(cxx *c,
+                                                      ast_qualified_type t)
+{
+    cxx_scope *s;
+    const cxx_instance *x;
+
+    if (t == CXX_TY_UNKNOWN)
+        return CXX_TY_UNKNOWN;
+    if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER &&
+        AST_TYPE(c->ast, t)->ext)
+        t = AST_TYPE(c->ast, t)->base;
+    if (!cc_type_is_record(c->ast, t) ||
+        !(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))) ||
+        !s->owner || !(x = s->owner->instance) || x->nargs < 1 ||
+        x->args[0].kind != 1)
+        return CXX_TY_UNKNOWN;
+    return x->args[0].t;
+}

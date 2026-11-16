@@ -283,7 +283,26 @@ VPRIV ast_qualified_type cxx_function_signature_parse(cxx *c, bool any_return,
                         c->gen_pack_entity = NULL;
                     }
                 }
+                /* a constexpr instance (RoundUp<int>): its body and parameters, for cxx_const_call */
+                bool keep_body = gi && (ds & DS_CONSTEXPR) && !c->tentative &&
+                                 !gi->body_end && pack_n == UINT32_MAX;
+                if (keep_body) {
+                    free(gi->body_params);
+                    gi->body_params =
+                        (cxx_param *)(c->ndecl_params
+                                          ? malloc(c->ndecl_params *
+                                                   sizeof(cxx_param))
+                                          : NULL);
+                    gi->body_nparams = c->ndecl_params;
+                    if (c->ndecl_params)
+                        memcpy(gi->body_params, c->decl_params,
+                               c->ndecl_params * sizeof(cxx_param));
+                }
+                uint32_t body_at = c->pos;
                 cxx_function_body_parse(c);
+                if (keep_body)
+                    gi->body_begin = body_at, gi->body_end = c->pos,
+                    gi->body_scope = fs, gi->fn_constexpr = 1;
                 if (gen)
                     cxx_gen_function_end(c, gi, c->snode);
             }

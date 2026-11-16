@@ -876,6 +876,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     if (qs->owner)
                         for (uint32_t i = 0; i < qs->owner->nspecs; i++)
                             cxx_scope_use(c, fs, qs->owner->specs[i]);
+                    /* X::Y::f: then X's members, after Y's (a nested class's member sees its enclosing
+					   classes' names: Skia's SkYUVAPixmapInfo::SupportedDataTypes::All and DataType) */
+                    if (qs->kind == CXX_SCOPE_CLASS)
+                        for (cxx_scope *u = qs->parent;
+                             u && u->kind == CXX_SCOPE_CLASS; u = u->parent)
+                            cxx_scope_use(c, fs, u);
                 }
                 cxx_scope_push(c, fs);
                 cxx_params_declare(c, fs, c->decl_params, c->ndecl_params);
@@ -916,6 +922,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         decl_fn->fn_inline =
                             1; /* (inline X::f() {...} outside its class: weak, as clang's) */
                     fs->fn = decl_fn;
+                    /* (this is const in a const member, whatever the last inline body was: Skia's
+					   SkReduceOrder::reduce after SkDQuad::collapsed() const) */
+                    c->this_const =
+                        decl_fn ? (decl_fn->fn_const & 1) : (c->decl_const & 1);
                     {
                         /* R X<A...>::f(As... a) of a class pack, its parameters expanded: a, a pack of those
 						   parameters (a... in the body: std::function's operator()) */
@@ -990,7 +1000,28 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                         c->this_type = qs->owner->ty,
                         c->this_const =
                             decl_fn ? decl_fn->fn_const & 1 : c->decl_const;
+                    /* a constexpr function's body and parameters, for cxx_const_call (its calls in
+                       constant expressions: template<int N> A<f(N)>) */
+                    uint32_t body_at = c->pos;
+                    bool keep_body = context != CXX_CONTEXT_CLASS && decl_fn &&
+                                     decl_fn->fn_constexpr && !c->tentative &&
+                                     !c->template_depth && !decl_fn->body_end;
+                    if (keep_body) {
+                        free(decl_fn->body_params);
+                        decl_fn->body_params =
+                            (cxx_param *)(c->ndecl_params
+                                              ? malloc(c->ndecl_params *
+                                                       sizeof(cxx_param))
+                                              : NULL);
+                        decl_fn->body_nparams = c->ndecl_params;
+                        if (c->ndecl_params)
+                            memcpy(decl_fn->body_params, c->decl_params,
+                                   c->ndecl_params * sizeof(cxx_param));
+                    }
                     cxx_function_body_parse(c);
+                    if (keep_body)
+                        decl_fn->body_begin = body_at,
+                        decl_fn->body_end = c->pos, decl_fn->body_scope = fs;
                     if (ooc_this)
                         c->this_type = this_save,
                         c->this_const = this_const_save;
@@ -1017,13 +1048,28 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     while (d &&
                            (d->kind != CXX_ENTITY_VALUE || d->member_of != qs))
                         d = d->next;
+                    bool dtor = false;
+
                     for (uint32_t i = start; d && i < c->pos; i++)
                         if (c->tok[i].kind ==
                             LEX_TOKEN_TILDE) { /* (a destructor's definition, not another member's) */
-                            d->fn_defaulted = 1;
+                            d->fn_defaulted = 1, dtor = true;
                             cxx_gen_defaulted_destructor(c, d);
                             break;
                         }
+                    /* X::X(const X&) = default; X::X(X&&) = default; X::X() = default: the constructor
+                       the class declares, defined here (Skia's SkColorInfo) */
+                    if (!dtor && qs->owner && qs->owner->name == name &&
+                        !qs->dependent && !qs->owner->instance) {
+                        cxx_entity *k = cxx_member_function_find(
+                            c, qs, cxx_ctor_id(), c->decl_params,
+                            c->ndecl_params, c->decl_const);
+
+                        if (k && k->member_of == qs) {
+                            k->fn_defaulted = 1;
+                            cxx_gen_defaulted_constructor(c, k);
+                        }
+                    }
                 }
                 cxx_advance(c);
                 if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) /* = delete("reason") */
@@ -1165,8 +1211,13 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                     braced
                         ? c->pos
                         : 0; /* (auto x = {...}: the list, parsed again below) */
+                /* a constexpr or const integer's initializer: a constant expression, constexpr calls folded
+                   (Skia's constexpr SkColor SK_ColorRED = SkColorSetARGB(0xFF, 0xFF, 0, 0)) */
+                uint8_t want = const_e || (flags & DS_CONSTEXPR);
 
+                c->want_constant += want;
                 cxx_initializer_parse(c);
+                c->want_constant -= want;
                 if (unsized_e && cxx_gen_on(c)) {
                     /* the bound: the list's elements, or the string literal's length */
                     uint64_t n =

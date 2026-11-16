@@ -90,6 +90,5 @@
 #include "link-run.cpp"
 #include "relocatable-link.cpp"
 #include "macho-probe.cpp"
-#include "response-files.cpp"
 #include "link-entry.cpp"
 #include "vlink-main.cpp"
