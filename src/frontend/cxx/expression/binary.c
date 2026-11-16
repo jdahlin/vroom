@@ -63,7 +63,9 @@ VPRIV void cxx_binary_expression_parse(cxx *c, int min)
 
 			cxx_argset_take(c, &rset);	/* (os << std::endl: the right operand a name of functions) */
 			c->op_rset = rset;
+			c->op_no_literal = !(lk && !lv) && !(rk && !rv);	/* (int < S of declval<int>(): no 0 to be a null pointer) */
 			bool found = !c->tentative && cxx_operator_call_type(c, opid, l, &c->etype, 1);
+			c->op_no_literal = 0;
 
 			c->op_rset.set = NULL;
 			if (found && !rn && rset.set && c->call_resolved && c->call_picked && c->call_picked->ty != CXX_TY_UNKNOWN &&

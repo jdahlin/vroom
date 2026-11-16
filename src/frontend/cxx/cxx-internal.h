@@ -428,7 +428,7 @@ typedef struct cxx {
 	uint8_t carg_const;		/* the argument list was one integer constant expression */
 	int64_t carg_value;		/* ... its value */
 	ast_qualified_type constructing;		/* the class whose constructors are being tried for a conversion (its copy constructor does not take a converted argument) */
-	uint8_t no_literal, rank_no_literal;	/* the next call's arguments are types, not expressions (a trait's): an integer is no null pointer constant; while ranking */
+	uint8_t no_literal, rank_no_literal, op_no_literal;	/* op_no_literal: the next operator's operands are no constant 0 */
 	uint32_t einvalid_at;		/* where einvalid was last set (VCC_CXX_SIG) */
 	uint8_t op_lv_set, op_lv[17];	/* the next operator call's operands: lvalues or not (the object first) */
 	/* code generation (codegen.c): the AST of the function body being parsed */

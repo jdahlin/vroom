@@ -1192,6 +1192,9 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 
 	memcpy(lv, c->op_lv, sizeof lv);
 	c->op_lv_set = 0;
+	bool op_nl = c->op_no_literal;	/* (operands that are no constant 0: an integer is no null pointer constant) */
+
+	c->op_no_literal = 0;
 	c->call_resolved = 0, c->call_picked = NULL;	/* (what an earlier call picked is not this operator's function) */
 	if (id <= 1 || obj == CXX_TY_UNKNOWN || nargs > 16)
 		return false;
@@ -1209,7 +1212,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	if (set && set->kind != CXX_ENTITY_DEPENDENT) {
 		c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1;	/* a member operator: on this object, const or not */
 		c->call_obj_rv = have_lv ? (lv[0] ? 2 : 1) : 0;
-		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
+		c->no_literal = op_nl, c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, args, have_lv ? lv + 1 : NULL, nargs, true);
 		if (c->call_resolved && nargs == 1 && c->call_nranks == 1 && c->call_ranks[0] >= 2 && !c->tentative) {
 			mpick = true, m_type = c->etype, m_lval = c->elval, m_picked = c->call_picked, m_obj = c->call_obj;
 			m_unsure = c->eunsure, m_callee = c->ecallee, m_const = c->econst, m_value = c->evalue, m_rank = c->call_ranks[0];
@@ -1232,7 +1235,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
-		c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+		c->no_literal = op_nl, c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 		OP_ATTEMPT_DONE();
 	}
 	/* the operator functions in the namespaces of the operands' classes (argument-dependent lookup):
@@ -1281,7 +1284,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 			set = cxx_lookup_in(c, ns, id, 0);
 			if (!set || set->kind == CXX_ENTITY_DEPENDENT)
 				continue;
-			c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+			c->no_literal = op_nl, c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 			OP_ATTEMPT_DONE();
 		}
 		/* ... and the friends the operands' classes declare (hidden friends: found this way only) */
@@ -1289,7 +1292,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 			set = cxx_friend_lookup(c, all[i], id, 0);
 			if (!set)
 				continue;
-			c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
+			c->no_literal = op_nl, c->eunsure = unsure0, cxx_call_type_impl(c, set, CXX_TY_UNKNOWN, NULL, UINT32_MAX, all, have_lv ? lv : NULL, nargs + 1, true);
 			OP_ATTEMPT_DONE();
 		}
 	}

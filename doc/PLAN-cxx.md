@@ -3001,3 +3001,12 @@ före överlagringsupplösningen: att lösa anropet instansierar kod som
 återanvänder c->cargs, så i jsons `iteration_proxy_value::key() const` såg
 den ett argument i stället för två och behöll mallen `int_to_string<alt_string>`
 (unit-alt-string länkade inte).  Sviter gröna (180/180, 38/38, mangle).
+
+## Status 209 (2026-11-16)
+En binär operators heltalsoperand som inte är konstanten 0 är ingen
+nollpekarkonstant: `declval<int>() < declval<S>()` med bara
+`operator<(const char *, const S&)` är ogiltigt (förut "kanske", alltså
+giltigt i ett void_t-test).  Jsons `is_comparable<less<>, alt_string, int>`
+blev sant, och `j["foo"][0]` valde `operator[](KeyType&&)` med KeyType = int
+(unit-alt-string länkade inte).  Test: `run/int-operand-not-null-pointer.cpp`,
+som misslyckas utan ändringen.  Sviter gröna (181/181, 38/38, mangle).
