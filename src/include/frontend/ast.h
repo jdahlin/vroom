@@ -2,7 +2,7 @@
 #define VCC_FRONTEND_AST_H
 /*
  * The AST that code generation reads, shared by the C front end
- * (frontend/c/) and the C++ front end (frontend/cxx/, PLAN-cxx.md X1).
+ * (frontend/c/).
  *
  * The record types (ctype, field, tag, sym, node and their enumerators) are
  * in frontend/c/cc.h; here are the side tables and struct ast, the tables

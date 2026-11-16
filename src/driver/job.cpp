@@ -226,9 +226,9 @@ static void driver_job_compile(struct driver_job *job, pp *p,
             return;
         }
     }
-    if (job->cxx && !job->syntax_only) {
+    if (job->cxx) { /* the C++ front end is being rewritten (frontend/cplusplus) */
         dprintf(job->errfd,
-                "vcc: error: C++ code generation is not implemented yet\n");
+                "vcc: error: C++ compilation is not supported yet\n");
         job->status = 1;
         return;
     }
@@ -345,21 +345,7 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         unsigned long long t1 = driver_clock_nanoseconds();
         vperf v1 = vperformance_now();
 
-        if (job->cxx) { /* C++ (PLAN-cxx.md): the same options and AST */
-            cxx_options xo = {.standard = job->cxx,
-                              .errfd = job->errfd,
-                              .progress = driver_environment_get(
-                                              env, "VCC_CXX_PROGRESS") != NULL};
-
-            extern const char *cxx_fork_output;
-
-            job->status = cxx_run(p, &co, &xo) || pp_error_count(p) ? 1 : 0;
-            if (cxx_fork_output)
-                job->output_file =
-                    cxx_fork_output; /* (a TU forked after a shared prefix: its own object) */
-        } else
-            job->status =
-                cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
+        job->status = cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
         driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
         driver_phase_add(DRIVER_PHASE_COMPILE, v1);
         driver_tokens_taken += pp_token_count(p);
