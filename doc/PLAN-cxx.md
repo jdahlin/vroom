@@ -3019,3 +3019,12 @@ innan mallgrenen; dessutom gick `int i = c` efter `double d = c` genom
 instansen för double i en oändlig rekursion (vpp kraschade).  Test:
 `run/conversion-template-to-scalar.cpp`, som misslyckas utan ändringen.
 Sviter gröna (182/182, 38/38, mangle).
+
+## Status 211 (2026-11-16)
+`void()` som uttryck (ett prvalue av typen void, inget utvärderas: libc++:s
+`for (__pp = __cp, void(), __cp = __cp->__next_; ...)` i hashtabellens rehash),
+och destruktorn för en klass med en anonym union-medlem av klasstyp
+(`__hash_node`s `union { value_type __value_; }`): unionens medlemmar förstörs
+inte implicit, så de hoppas över.  `std::unordered_map`/`unordered_set` med
+rehash kompilerar och kör.  Test: `run/void-expr-and-anon-union-dtor.cpp`, som
+misslyckas utan ändringen.  Sviter gröna (183/183, 38/38, mangle).

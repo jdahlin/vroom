@@ -133,6 +133,8 @@ VPRIV bool cxx_gen_destructor_rest(cxx *c, cc_id_list *after, uint32_t loc)
 			}
 			continue;
 		}
+		if (!r->f[i].name && AST_TYPE_KIND(a, et) == AST_TYPE_UNION)
+			continue;	/* (an anonymous union: its members are not destroyed implicitly; __hash_node's __value_) */
 		if (!r->f[i].name || et != ft)
 			return false;	/* (anonymous members, arrays of arrays of classes with destructors: not built yet) */
 		if (!cxx_gen_destroy(c, member(a, cxx_gen_this_object(c, loc), r->f[i].name, loc), AST_QUALIFIED_TYPE_UNQUALIFIED(ft), after, loc))

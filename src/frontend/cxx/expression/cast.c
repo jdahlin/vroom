@@ -74,7 +74,13 @@ VPRIV void cxx_functional_cast_type(cxx *c, ast_qualified_type cast_to)
 	if ((k || zero) && cast_to != CXX_TY_UNKNOWN &&
 	    ((AST_TYPE_KIND(c->ast, cast_to) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, cast_to) <= AST_TYPE_UINT128) || AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_ENUM))
 		cxx_ec(c, cast_to, v);
-	else if (zero && cast_to != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_POINTER || cc_type_is_arithmetic(c->ast, cast_to))) {
+	else if (zero && cast_to != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_VOID) {
+		/* void(): a prvalue of type void, nothing evaluated (libc++'s __pp = __cp, void(), __cp = ...) */
+		cxx_ec(c, cc_type_basic(AST_TYPE_INT), 0);
+		xn = c->enode;
+		cxx_et(c, cast_to, false);
+		cxx_gen_cast(c, xn, cast_to, c->tok[c->pos ? c->pos - 1 : 0].loc);
+	} else if (zero && cast_to != CXX_TY_UNKNOWN && (AST_TYPE_KIND(c->ast, cast_to) == AST_TYPE_POINTER || cc_type_is_arithmetic(c->ast, cast_to))) {
 		/* T() of a pointer or floating type: 0 converted (a null pointer, 0.0) */
 		cxx_ec(c, cc_type_basic(AST_TYPE_INT), 0);
 		xn = c->enode;
