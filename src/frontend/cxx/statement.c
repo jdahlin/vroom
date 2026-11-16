@@ -279,7 +279,7 @@ static void cxx_for_parse(cxx *c)
 				if (c->tok[k].kind == LEX_TOKEN_IDENTIFIER && !c->tok[k].kw && c->tok[k - 1].kind == LEX_TOKEN_COMMA)
 					cxx_declare(c, fs, c->tok[k].id, CXX_ENTITY_VALUE);	/* structured bindings */
 			cxx_expect(c, LEX_TOKEN_COLON);
-			uint32_t rloc = cxx_peek(c, 0)->loc, rnode = 0, elems[64], nelems = 0;
+			uint32_t rloc = cxx_peek(c, 0)->loc, rnode = 0, elems[CXX_MAX_ARGS], nelems = 0;
 			ast_qualified_type brace_elem = CXX_TY_UNKNOWN, rrt = CXX_TY_UNKNOWN;
 			bool braced = cxx_is(c, LEX_TOKEN_LEFT_BRACE), list_ok = braced;
 
@@ -298,14 +298,14 @@ static void cxx_for_parse(cxx *c)
 					if (et == CXX_TY_UNKNOWN || (brace_elem != CXX_TY_UNKNOWN && brace_elem != et))
 						list_ok = false;
 					brace_elem = et;
-					if (nelems < 64)
+					if (nelems < CXX_MAX_ARGS)
 						elems[nelems] = c->enode;
 					nelems++;
 					if (!cxx_accept(c, LEX_TOKEN_COMMA))
 						break;
 				}
 				cxx_expect(c, LEX_TOKEN_RIGHT_BRACE);
-				if (nelems > 64)
+				if (nelems > CXX_MAX_ARGS)
 					list_ok = false;
 			} else {
 				cxx_initializer_parse(c);

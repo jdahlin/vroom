@@ -2863,3 +2863,9 @@ medlemmar som själva bara har en implicit operator= (udt:s `contact` →
 `person` → `name` → `std::string`).  Testet
 `run/implicit-assign-nontrivial-member.cpp` utökat.  Sviter gröna (167/167,
 38/38, mangle).
+
+## Status 193 (2026-11-16)
+En range-for över en klammerlista byggs med upp till CXX_MAX_ARGS element
+(gränsen var 64; jsons unit-testsuites har listor med upp till 195 filnamn).
+Test: `run/range-for-long-braced-list.cpp`, som misslyckas utan ändringen.
+Sviter gröna (168/168, 38/38, mangle).
