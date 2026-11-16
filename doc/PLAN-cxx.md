@@ -3028,3 +3028,11 @@ och destruktorn för en klass med en anonym union-medlem av klasstyp
 inte implicit, så de hoppas över.  `std::unordered_map`/`unordered_set` med
 rehash kompilerar och kör.  Test: `run/void-expr-and-anon-union-dtor.cpp`, som
 misslyckas utan ändringen.  Sviter gröna (183/183, 38/38, mangle).
+
+## Status 212 (2026-11-16)
+Ett anrop av `T(const T&) = default` eller `T(T&&) = default` för en klass som
+inte är trivialt kopierbar byggs på plats, medlem för medlem, efter att
+klammerargument blivit temporära objekt: `value_type({"one", 1})` anropade
+libc++:s `pair(pair&&) = default` som en funktion som aldrig definierades
+(unit-modifiers länkade inte).  Test: `run/defaulted-move-ctor-called.cpp`,
+som misslyckas utan ändringen.  Sviter gröna (184/184, 38/38, mangle).

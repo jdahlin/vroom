@@ -437,6 +437,23 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 			args = bargs;
 		}
 	}
+	if (f->fn_defaulted && !f->fn_deleted && nargs == 1 && object && !arrow && args[0] && f->name == cxx_ctor_id() && f->member_of && f->member_of->owner &&
+	    AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, args[0])->ty) == AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty) &&
+	    (AST_NODE_AT(a, args[0])->flags & AST_NODE_FLAG_LVALUE) && (AST_NODE_AT(a, object)->flags & AST_NODE_FLAG_LVALUE) &&
+	    !(f->sym && (a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))) {
+		/* T(const T&) = default, T(T&&) = default called (pair(pair&&) for value_type({"one", 1})'s temporary):
+		   what it does, in place, member by member; no function emitted, as for the trivial one */
+		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(f->member_of->owner->ty);
+		cc_id_list parts;
+		uint32_t chain;
+
+		cc_id_list_init(&parts);
+		if (!cxx_gen_copy_construct_parts(c, object, t, args[0], &parts, loc, 0))
+			{ CXX_CALL_WHY(); return; }
+		chain = cxx_gen_chain(c, &parts, cc_node_integer_new(a, 0, cc_type_basic(AST_TYPE_INT), loc), loc);
+		c->enode = chain ? cc_cast_insert(a, chain, cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID) : 0;
+		return;
+	}
 	if (nargs < ft->n && ft->n <= 32 && ft->n - nargs <= f->ndefaults && f->defs && !(ft->flags & AST_TYPE_FLAG_VARIADIC)) {
 		/* the arguments left out: the parameters' default arguments */
 		uint32_t n = ft->n, first = n - f->ndefaults;
