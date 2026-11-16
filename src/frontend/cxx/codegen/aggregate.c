@@ -330,7 +330,7 @@ VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt, const ui
 		uint32_t slot = cc_dereference_build(a, cc_binary_build(a, LEX_TOKEN_PLUS, cc_conversion_decay(a, cxx_gen_var_node(c, arr, loc)),
 								  cc_node_integer_new(a, i, lt, loc), loc), loc);
 
-		if (!args[i] && i < 16 && braces[i] && cc_type_is_record(a, et)) {
+		if (!args[i] && i < CXX_MAX_ARGS && braces[i] && cc_type_is_record(a, et)) {
 			/* the element is a braced list itself, {"a", 1}: E{...} from its arguments, parsed again here for
 			   their code (its first parse was unevaluated) */
 			uint32_t pos = c->pos, an[CXX_MAX_ARGS], n;

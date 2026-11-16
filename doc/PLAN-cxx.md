@@ -2834,3 +2834,10 @@ operatorer och för vanliga anrop ([basic.lookup.argdep]/3): jsons
 `json_reverse_iterator` ärver `std::reverse_iterator` och hittar std:s
 `operator==`/`operator!=`.  Test: `run/adl-through-base-class.cpp`.  Sviter
 gröna (164/164, 38/38, mangle).
+
+## Status 189 (2026-11-16)
+Ett element i en initializer_list som självt är en klammerlista byggs även på
+index 16 och senare (gränsen var 16, matrisen rymmer CXX_MAX_ARGS): jsons
+`json j_values = {..., {{"first", 1}, ...}, ...}` med 22 element i
+unit-comparison.  Test: `run/ilist-braced-element-past-16.cpp`, som
+misslyckas utan ändringen.  Sviter gröna (165/165, 38/38).
