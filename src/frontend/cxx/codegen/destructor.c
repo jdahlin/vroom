@@ -203,6 +203,7 @@ VPRIV void cxx_gen_destroy_object(cxx *c, uint32_t x, bool arrow, uint32_t loc)
 	}
 	if (cxx_class_polymorphic(c, t) && !d->fn_virtual)
 		return;	/* (a non-virtual destructor of a class with virtual functions: the static type's, as written) */
+	cxx_member_body_use(c, d);	/* (p->~T() alone may be what uses it: an instance's destructor body, __destroy_at's) */
 	cxx_gen_call(c, d, x, false, NULL, 0, loc);
 }
 

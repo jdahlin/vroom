@@ -1366,7 +1366,7 @@ static uint32_t cxx_brace_count(cxx *c, uint32_t pos)
 /* can std::initializer_list<E> (il) take the braced list's elements: an element that is a braced list of more
    than one element is no scalar E's ([dcl.init.list]/3.10: vector<uint8_t>{{1, 2, 3}} is a copy of the vector
    the inner list makes, not a list of one byte) */
-static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, uint32_t nargs)
+static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qualified_type *args, uint32_t nargs)
 {
 	cxx_scope *s;
 	cxx_entity *vt;
@@ -1383,6 +1383,12 @@ static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, uint32_t nargs
 			uint32_t k = cxx_brace_count(c, c->carg_brace[i]);
 
 			if (k != UINT32_MAX && k > 1)
+				return false;
+		} else if (args && args[i] != CXX_TY_UNKNOWN && cc_type_is_arithmetic(c->ast, e)) {
+			/* (string{"~"}: a char array or pointer is no char, the const char * constructor is the one) */
+			int k = AST_TYPE_KIND(c->ast, args[i]);
+
+			if (k == AST_TYPE_ARRAY || k == AST_TYPE_POINTER || k == AST_TYPE_FUNCTION)
 				return false;
 		}
 	return true;
@@ -1429,7 +1435,7 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
 			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux]) &&
-			    cxx_ilist_elements_fit(c, c->ast->params[ft->aux], nargs)) {
+			    cxx_ilist_elements_fit(c, c->ast->params[ft->aux], args, nargs)) {
 				/* (the one with fewest parameters: vector(initializer_list) before (initializer_list, allocator)) */
 				if (!c->ctor_ilist || ft->n < AST_TYPE(c->ast, c->ctor_ilist->ty)->n)
 					c->ctor_ilist = e;

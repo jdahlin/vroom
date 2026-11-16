@@ -138,8 +138,11 @@ VPRIV ast_qualified_type cxx_ftemplate_return(cxx *c, cxx_ftemplate *f, const cx
 		return cxx_ftemplate_return(c, f, bind, true);
 	for (uint32_t i = 0; i < f->ndone; i++)
 		if (cxx_args_equal(f->done[i].args, bind, np)) {
-			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN)
-				f->done[i].ret = r, f->done[i].sig = sig;
+			if (r != CXX_TY_UNKNOWN || f->done[i].ret == CXX_TY_UNKNOWN) {
+				f->done[i].ret = r;
+				if (sig != CXX_TY_UNKNOWN || f->done[i].sig == CXX_TY_UNKNOWN)
+					f->done[i].sig = sig;	/* (a known signature kept: a body's parse may not give it again) */
+			}
 			if (!want_body || viable != 1)
 				f->done[i].viable = viable;	/* (not viable, however it was found out) */
 			r = f->done[i].ret, sig = f->done[i].sig, viable = f->done[i].viable;

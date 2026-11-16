@@ -102,7 +102,8 @@ VPRIV uint32_t cxx_declarator_parse(cxx *c, bool abstract_ok, bool *qualified, b
 	cxx_attributes_skip(c);
 	/* a pack declarator (Ts... ts, Ts&&...): not T... in a template argument list, that is an expansion */
 	if (cxx_is(c, LEX_TOKEN_ELLIPSIS) && (cxx_peek(c, 1)->kind == LEX_TOKEN_IDENTIFIER || cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_PAREN ||
-					      cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE || !c->in_template_argument)) {
+					      cxx_peek(c, 1)->kind == LEX_TOKEN_LEFT_SQUARE || cxx_peek(c, 1)->kind == LEX_TOKEN_RIGHT_PAREN ||
+					      !c->in_template_argument)) {	/* (A&&...) before ')': a function parameter pack, never an expansion */
 		cxx_advance(c);
 		c->decl_pack = 1;
 	}

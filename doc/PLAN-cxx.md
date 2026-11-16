@@ -2761,3 +2761,14 @@ valbar ([temp.deduct]/11.10).  Test: `run/array-return-not-viable.cpp`.
 Kvar: jsons `is_getable<json, char[8]>` blir ändå okänd (from_json-kedjan
 för `char(&)[8]`), så `j.value("k", "default")` saknar kod.  Sviter gröna
 (151/151, 38/38, mangle).  Strikt bänk: pass 31, 83 saknas.
+
+## Status 180 (2026-11-16)
+`T{"~"}` väljer inte längre en `initializer_list<char>`-konstruktor: ett fält,
+en pekare eller en funktion som argument är inget aritmetiskt element, så
+`const char *`-konstruktorn används.  Det var jsons `escape()` (`/addrgss/...`
+i unit-diagnostic-positions).  Dessutom: `p->~T()` instansierar destruktorns
+kropp, `...)` är en paketdeklarator även i ett mallargument, och en känd
+signatur i mallcachen skrivs inte över med okänd.  Tester:
+`run/ilist-ctor-not-from-pointer.cpp`, `run/explicit-dtor-call-instance.cpp`,
+`run/unnamed-param-pack-detect.cpp`, `run/template-sig-cache-kept.cpp`.
+Sviter gröna (155/155, 38/38).
