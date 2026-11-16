@@ -182,7 +182,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				e->ty = known ? cxx_type_function(c, cc_type_basic(AST_TYPE_VOID), ps, c->ndecl_params, false) : CXX_TY_UNKNOWN;
 				e->ndefaults = (uint16_t)c->decl_ndefaults, cxx_defaults_record(c, e);
 				c->last_fn = e;	/* (its body: parsed when used) */
-			} else if (e && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
+			} else
+				c->last_fn = NULL;	/* (a constructor template's body is its own: not the one declared before it,
+						   basic_ifstream(const string&) then template <class _Tp> basic_ifstream(const _Tp&)) */
+			if (e && tmpl && !dtor && c->template_depth == 1 && c->scope == c->ftmpl_scope) {
 				e->ndefaults = (uint16_t)c->decl_ndefaults;
 				e->ftmpl = cxx_ftemplate_new(c, c->scope, c->scope->parent, c->ftmpl_begin, cs);
 				cxx_ftemplate_requires(e->ftmpl, c->ftmpl_req);

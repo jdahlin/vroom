@@ -2869,3 +2869,12 @@ En range-for över en klammerlista byggs med upp till CXX_MAX_ARGS element
 (gränsen var 64; jsons unit-testsuites har listor med upp till 195 filnamn).
 Test: `run/range-for-long-braced-list.cpp`, som misslyckas utan ändringen.
 Sviter gröna (168/168, 38/38, mangle).
+
+## Status 194 (2026-11-16)
+En konstruktormall efter en konstruktor som bara deklareras (utan kropp) tog
+dess plats som "senaste funktion": mallens kropp i klassen registrerades som
+den förras, och dess definition utanför klassen användes aldrig (libc++:s
+`basic_ifstream(const string&)` följd av `template <class _Tp>
+basic_ifstream(const _Tp&)`; unit-msgpack länkade inte).  Test:
+`run/ctor-template-after-declared-ctor.cpp`, som misslyckas utan ändringen.
+Sviter gröna (169/169, 38/38, mangle).
