@@ -2923,3 +2923,11 @@ konstruktorns anrop (gen_call_brace) och till aggregatinitieringen: jsons
 `json::object_t o = {{"array", {1, 2, 3, 4}}, ...}` i unit-conversions.  Test:
 `run/ilist-element-nested-braces.cpp`, som misslyckas utan ändringen.  Sviter
 gröna (173/173, 38/38, mangle).
+
+## Status 200 (2026-11-16)
+`__is_constructible(T[N])` (och nothrow/default) är som för T, ett fält utan
+gräns nej: `std::is_default_constructible<char[8]>` var okänd, så jsons
+`is_getable<json, char[8]>` och därmed `j.value("k", "default")` gav inget.
+Test: `run/trait-array-default-constructible.cpp`.  Kvar:
+`__is_constructible(int[2], int)` (C++20:s aggregatinitiering med parentes)
+ger nej, clang ja.  Sviter gröna (174/174, 38/38, mangle).

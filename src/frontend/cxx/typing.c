@@ -2145,6 +2145,18 @@ VPRIV bool cxx_trait_value(cxx *c, const char *n, size_t len, const ast_qualifie
 	/* T(): scalars and pointers yes, references, void, functions and arrays of unknown bound no; a class's
 	   default constructor decides for a class */
 	if (IS("__is_constructible") || IS("__is_nothrow_constructible") || IS("__is_default_constructible")) {
+		if (k == AST_TYPE_ARRAY) {
+			/* T[N](): as its element (char[8] in json's is_getable<json, char[8]>); T[]: no */
+			ast_qualified_type e = t[0];
+
+			while (AST_TYPE_KIND(c->ast, e) == AST_TYPE_ARRAY && AST_TYPE(c->ast, e)->n)
+				e = AST_TYPE(c->ast, e)->base;
+			if (AST_TYPE_KIND(c->ast, e) == AST_TYPE_ARRAY) {
+				*v = 0;
+				return true;
+			}
+			return cxx_trait_value(c, n, len, &e, 1, v);
+		}
 		if ((k >= AST_TYPE_BOOL && k <= AST_TYPE_FLOAT128) || (k == AST_TYPE_POINTER && !x->ext) || k == AST_TYPE_ENUM) {
 			*v = 1;
 			return true;
