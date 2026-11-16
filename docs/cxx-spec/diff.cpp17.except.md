@@ -1,5 +1,0 @@
-# C.1.8 [[except]](except.md): exception handling [diff.cpp17.except]
-
-[Contents](README.md) · up: [C.1 C++ and ISO C++ 2017 \[diff.cpp17\]](diff.cpp17.md) · prev: [C.1.7 [[temp]](temp.md): templates \[diff.cpp17.temp\]](diff.cpp17.temp.md) · next: [C.1.9 [[library]](lib/library.md): library introduction \[diff.cpp17.library\]](diff.cpp17.library.md)
-
-**1** **Affected subclause:** [[except.spec]](except.spec.md) <br>**Change:** Remove `throw()` exception specification. <br>**Rationale:** Removal of obsolete feature that has been replaced by `noexcept`. <br>**Effect on original feature:** A valid C++ 2017 function declaration, member function declaration, function pointer declaration, or function reference declaration that uses `throw()` for its exception specification will be rejected as ill-formed in this International Standard. It should simply be replaced with `noexcept` for no change of meaning since C++ 2017. [*Note 1*: There is no way to write a function declaration that is non-throwing in this International Standard and is also non-throwing in C++ 2003 except by using the preprocessor to generate a different token sequence in each case. — *end note*]

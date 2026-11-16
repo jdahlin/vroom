@@ -1,5 +1,0 @@
-# 17.6.2.4 Data races [new.delete.dataraces]
-
-[Contents](../README.md) · up: [17.6.2 Storage allocation and deallocation \[new.delete\]](new.delete.md) · prev: [17.6.2.3 Non-allocating forms \[new.delete.placement\]](new.delete.placement.md) · next: [17.6.3 Storage allocation errors \[alloc.errors\]](alloc.errors.md)
-
-**1** For purposes of determining the existence of data races, the library versions of `operator new`, user replacement versions of global `operator new`, the C standard library functions `aligned_alloc`, `calloc`, and `malloc`, the library versions of `operator delete`, user replacement versions of `operator delete`, the C standard library function `free`, and the C standard library function `realloc` shall not introduce a data race ([[res.on.data.races]](res.on.data.races.md)). Calls to these functions that allocate or deallocate a particular unit of storage shall occur in a single total order, and each such deallocation call shall happen before ([[intro.multithread]](../intro.multithread.md)) the next allocation (if any) in this order.

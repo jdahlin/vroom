@@ -1,5 +1,0 @@
-# 6.4.4 Function parameter scope [basic.scope.param]
-
-[Contents](README.md) · up: [6.4 Scope \[basic.scope\]](basic.scope.md) · prev: [6.4.3 Block scope \[basic.scope.block\]](basic.scope.block.md) · next: [6.4.5 Function scope \[basic.funscope\]](basic.funscope.md)
-
-**1** A function parameter (including one appearing in a *lambda-declarator*) or function-local predefined variable ([[dcl.fct.def]](dcl.fct.def.md)) has *function parameter scope*. The potential scope of a parameter or function-local predefined variable begins at its point of declaration. If the nearest enclosing function declarator is not the declarator of a function definition, the potential scope ends at the end of that function declarator. Otherwise, if the function has a *function-try-block* the potential scope ends at the end of the last associated handler. Otherwise the potential scope ends at the end of the outermost block of the function definition. A parameter name shall not be redeclared in the outermost block of the function definition nor in the outermost block of any handler associated with a *function-try-block*.

@@ -1,0 +1,7 @@
+# 7.6.1.3 Explicit type conversion (functional notation) [expr.type.conv]
+
+[Contents](../README.md) · up: [7.6.1 Postfix expressions \[expr.post\]](expr.post.md) · prev: [7.6.1.2 Function call \[expr.call\]](expr.call.md) · next: [7.6.1.4 Class member access \[expr.ref\]](expr.ref.md)
+
+**1** A *simple-type-specifier* ([[dcl.type.simple]](../dcl/dcl.type.simple.md)) or *typename-specifier* ([[temp.res]](../temp/temp.res.md)) followed by a parenthesized optional *expression-list* or by a *braced-init-list* (the initializer) constructs a value of the specified type given the initializer. If the type is a placeholder for a deduced class type, it is replaced by the return type of the function selected by overload resolution for class template deduction ([[over.match.class.deduct]](../over/over.match.class.deduct.md)) for the remainder of this subclause.
+
+**2** If the initializer is a parenthesized single expression, the type conversion expression is equivalent to the corresponding cast expression ([[expr.cast]](expr.cast.md)). Otherwise, if the type is *cv* `void` and the initializer is `()` or `{}` (after pack expansion, if any), the expression is a prvalue of the specified type that performs no initialization. Otherwise, the expression is a prvalue of the specified type whose result object is direct-initialized ([[dcl.init]](../dcl/dcl.init.md)) with the initializer. If the initializer is a parenthesized optional *expression-list*, the specified type shall not be an array type.

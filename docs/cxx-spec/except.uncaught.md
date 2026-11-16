@@ -1,5 +1,0 @@
-# 14.6.2 The `std::uncaught_exceptions()` function [except.uncaught]
-
-[Contents](README.md) · up: [14.6 Special functions \[except.special\]](except.special.md) · prev: [14.6.1 The `std::terminate` function \[except.terminate\]](except.terminate.md) · next: [15 Preprocessing directives \[cpp\]](cpp.md)
-
-**1** An exception is considered uncaught after completing the initialization of the exception object ([[except.throw]](except.throw.md)) until completing the activation of a handler for the exception ([[except.handle]](except.handle.md)). [*Note 1*: As a consequence, an exception is considered uncaught during any stack unwinding resulting from it being thrown. — *end note*] If an exception is rethrown ([[expr.throw]](expr.throw.md), [[propagation]](lib/propagation.md)), it is considered uncaught from the point of rethrow until the rethrown exception is caught. The function `std::uncaught_exceptions()` ([[uncaught.exceptions]](lib/uncaught.exceptions.md)) returns the number of uncaught exceptions in the current thread.

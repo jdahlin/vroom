@@ -1,0 +1,9 @@
+# 32.2.5.1 In general [thread.req.lockable.general]
+
+[Contents](../../README.md) · up: [32.2.5 Requirements for *Cpp17Lockable* types \[thread.req.lockable\]](thread.req.lockable.md) · prev: [32.2.5 Requirements for *Cpp17Lockable* types \[thread.req.lockable\]](thread.req.lockable.md) · next: [32.2.5.2 *Cpp17BasicLockable* requirements \[thread.req.lockable.basic\]](thread.req.lockable.basic.md)
+
+**1** An *execution agent* is an entity such as a thread that may perform work in parallel with other execution agents. [*Note 1*: Implementations or users can introduce other kinds of agents such as processes or thread-pool tasks. — *end note*] The calling agent is determined by context, e.g., the calling thread that contains the call, and so on.
+
+**2** [*Note 2*: Some lockable objects are “agent oblivious” in that they work for any execution agent model because they do not determine or store the agent’s ID (e.g., an ordinary spin lock). — *end note*]
+
+**3** The standard library templates `unique_lock` ([[thread.lock.unique]](thread.lock.unique.md)), `shared_lock` ([[thread.lock.shared]](thread.lock.shared.md)), `scoped_lock` ([[thread.lock.scoped]](thread.lock.scoped.md)), `lock_guard` ([[thread.lock.guard]](thread.lock.guard.md)), `lock`, `try_lock` ([[thread.lock.algorithm]](thread.lock.algorithm.md)), and `condition_variable_any` ([[thread.condition.condvarany]](thread.condition.condvarany.md)) all operate on user-supplied lockable objects. The *Cpp17BasicLockable* requirements, the *Cpp17Lockable* requirements, and the *Cpp17TimedLockable* requirements list the requirements imposed by these library types in order to acquire or release ownership of a `lock` by a given execution agent. [*Note 3*: The nature of any lock ownership and any synchronization it entails are not part of these requirements. — *end note*]
