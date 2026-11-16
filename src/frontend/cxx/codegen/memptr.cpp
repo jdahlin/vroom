@@ -333,8 +333,14 @@ VPRIV uint32_t cxx_gen_memptr_convert(cxx *c, uint32_t x, ast_qualified_type to,
         (cc_type_is_integer(a, ft) && cc_eval(a, x, &cv) &&
          cv.kind == CC_VALUE_INTEGER && !cv.i))
         return cxx_gen_memptr_null(c, to, loc);
+    /* (a data member's type may gain const or volatile: int X::* to const int X::*, [conv.qual]) */
     if (!(mf = cxx_memptr_of(c, ft)) || mf->fn != mt->fn ||
-        mf->mem != mt->mem || mf->quals != mt->quals ||
+        (mf->mem != mt->mem && (mt->fn ||
+                                AST_QUALIFIED_TYPE_UNQUALIFIED(mf->mem) !=
+                                    AST_QUALIFIED_TYPE_UNQUALIFIED(mt->mem) ||
+                                (AST_QUALIFIED_TYPE_QUALIFIERS(mf->mem) &
+                                 ~AST_QUALIFIED_TYPE_QUALIFIERS(mt->mem)))) ||
+        mf->quals != mt->quals ||
         !cxx_gen_base_offset(c, mt->cls, mf->cls, &off))
         return 0;
     if (!mt->fn && cxx_gen_memptr_part_const(c, x, 0, &v0))
