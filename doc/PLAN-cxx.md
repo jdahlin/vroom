@@ -3116,3 +3116,14 @@ kandidater har samma rang: den vars parameter är argumentets befordrade typ
 (underliggande typ för en uppräkning, `int` för smala heltal, `double` för
 `float`).  Test: `run/overload-promotion-beats-conversion.cpp` (som clang).
 Hela jsonsviten: 36 funktioner kvar (37), inga regressioner.
+
+`T{x}` med x av klassen T (eller härledd) initieras från x före en
+`initializer_list`-konstruktor ([dcl.init.list]/3.2: `std::string{std::move(s)}`,
+`name{std::move(name_)}` i json unit-udt_macro); en klass som inte omvandlas
+till elementtypen är inget element.  ADL: en basklass dolda vän och
+namnrymdens funktion för den härledda klassen vägs mot varandra (jsons
+`NLOHMANN_DEFINE_DERIVED_TYPE_NON_INTRUSIVE`, tidigare fel kod: basens
+`to_json`).  cxx-strict hoppar över unit-32bit (32-bitars `size_t`, blir aldrig
+klar på en 64-bitarsvärd, inte heller med clang).
+Tester: `run/braced-from-same-class-not-ilist.cpp`,
+`run/adl-base-friend-vs-namespace-function.cpp`.  json: pass 49, 0 fel.

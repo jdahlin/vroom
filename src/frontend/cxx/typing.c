@@ -1513,6 +1513,13 @@ static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qual
 
 			if (k == AST_TYPE_ARRAY || k == AST_TYPE_POINTER || k == AST_TYPE_FUNCTION)
 				return false;
+			/* (a class that converts to no arithmetic type: no element either) */
+			if (cc_type_is_record(c->ast, args[i]) && !cxx_type_has_placeholder(c, args[i])) {
+				cxx_scope *as = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[i]));
+
+				if (as && !as->has_dependent_base && !as->dependent && cxx_class_converts_to(c, as, AST_QUALIFIED_TYPE_UNQUALIFIED(e), 0) == 0)
+					return false;
+			}
 		}
 	return true;
 }
@@ -1548,7 +1555,14 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *
 	memcpy(c->carg_brace, bcopy, sizeof bcopy);
 	set = cxx_lookup_in(c, cls, cxx_ctor_id(), 0);
 	c->ctor_none = !set;
-	if (set && braced && nargs) {
+	/* T{x} with x a T (or of a class derived from T): initialized from x, before any initializer_list
+	   constructor ([dcl.init.list]/3.2: std::string{std::move(s)}) */
+	bool from_same = braced && nargs == 1 && args && args[0] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, args[0]) &&
+			 AST_TYPE_KIND(c->ast, args[0]) != AST_TYPE_ARRAY && !(bcopy[0] && bcopy[0] < c->ntok && c->tok[bcopy[0]].kind == LEX_TOKEN_LEFT_BRACE) &&
+			 (AST_QUALIFIED_TYPE_UNQUALIFIED(args[0]) == AST_QUALIFIED_TYPE_UNQUALIFIED(t) ||
+			  (cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(args[0])) && cxx_derives(c, args[0], t, 0)));
+
+	if (set && braced && nargs && !from_same) {
 		/* T{a, b}: a constructor whose first parameter is std::initializer_list (the rest defaulted); T{}:
 		   value-initialization, the default constructor ([dcl.init.list] 3.5) */
 		for (cxx_entity *e = set; e; e = e->next) {
@@ -2472,7 +2486,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 				goto restore; \
 			} \
 			/* (not resolved, one type shared by candidates vcc could not order: held too, h_n 0) */ \
-			if (i + 1 >= nargs || (c->call_resolved && (!conv || !c->call_nranks || c->call_nranks > 16))) \
+			if ((i + 1 >= nargs && !more_) || (c->call_resolved && (!conv || !c->call_nranks || c->call_nranks > 16))) \
 				return; \
 			if (!c->call_resolved) \
 				c->call_nranks = 0; \
@@ -2481,6 +2495,10 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 			memcpy(h_ranks, c->call_ranks, h_n); \
 		} \
 	} while (0)
+
+	/* more_: other places for this argument still to be tried (a base's hidden friend is found before the
+	   namespace's function for the derived class: to_json(j, D) of json's derived-type macros) */
+	bool more_ = false;
 
 	c->einvalid_unsure = 0;
 	if (nargs > 16 || (c->tentative && !c->unevaluated)) {
@@ -2523,7 +2541,9 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 		/* (a friend the class declares: swap(a, b), to_json(j, x) defined in the class) */
 		if ((set = cxx_friend_lookup(c, t, name, 0))) {
 			c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+			more_ = true;
 			ADL_DONE();
+			more_ = false;
 			if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 				c->einvalid_unsure = 1;
 		}
@@ -2552,7 +2572,9 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 				if (!(set = cxx_lookup_in(c, nsl[k], name, 0)) || set->kind == CXX_ENTITY_DEPENDENT || !cxx_adl_has_functions(c, set))
 					continue;	/* (what ADL finds is functions only: json's nlohmann::from_json, an object, is not one) */
 				c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+				more_ = k + 1 < nns;
 				ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
+				more_ = false;
 				if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
 					c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */
 			}

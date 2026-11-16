@@ -82,7 +82,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("pat", nargs="?", default="")
     a = ap.parse_args()
-    tus = [t for t in cp.tus("json") if a.pat in t[0] and t[0] != "unit"]
+    # unit-32bit: built for a 32-bit size_t, it never finishes on a 64-bit host (clang's build neither)
+    SKIP = {"unit", "unit-32bit"}
+    tus = [t for t in cp.tus("json") if a.pat in t[0] and t[0] not in SKIP]
     outdir = os.path.join(cp.outdir("json", "vcc"), "strict")
     os.makedirs(outdir, exist_ok=True)
     main_obj = os.path.join(outdir, "unit-main.o")
