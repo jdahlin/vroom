@@ -2973,3 +2973,13 @@ väljs (alt_strings egen `int_to_string(alt_string&, size_t)` för jsons
 `int_to_string(result, value)`; unit-alt-string länkade inte).  Test:
 `run/adl-nontemplate-beats-template.cpp`, som misslyckas utan ändringen.
 Sviter gröna (179/179, 38/38, mangle).
+
+## Status 206 (2026-11-16)
+`obj(args)` där klassens operator() bara tar argumentet genom en konvertering
+(char till int) märktes ogiltigt: valet läggs undan för att jämföras med
+icke-medlemmar och call_resolved nollställs, och kontrollen "ingen operator()
+passar" såg bara det.  Så `decltype(declval<F>()(declval<A>()))` föll, och
+libc++:s `__invoke` av jsons lambda med `unsigned char` (unit-json_patch
+länkade inte).  Test: `run/decltype-call-operator-conversion.cpp`, som
+misslyckas utan ändringen.  Kvar (separat): en returtyp `-> decltype(...)`
+manglas som `v`, clang skriver uttrycket.  Sviter gröna (180/180, 38/38, mangle).

@@ -1218,7 +1218,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 			OP_ATTEMPT_DONE();
 		/* obj(args) and no operator() of its class takes them: ill-formed (a conversion to a pointer
 		   to function aside) */
-		if (vintern_ents[id].len == 10 && !memcmp(vintern_ents[id].s, "operator()", 10) && !c->tentative) {
+		if (vintern_ents[id].len == 10 && !memcmp(vintern_ents[id].s, "operator()", 10) && !c->tentative && !mpick) {	/* (mpick: one fits, set aside) */
 			bool known = true;
 
 			for (uint32_t i = 0; i < nargs; i++)
