@@ -247,7 +247,7 @@ def check(test, opts, clang, cxxlex, regexes, issued):
     d, name = os.path.dirname(test), os.path.basename(test)
     lang = ['-x', 'c++'] if not name.endswith('.cpp') else []
     res = {}
-    ours, ours_err, rc = run([cxxlex, '-dump-tokens'] + opts + [name], cwd=d)
+    ours, ours_err, rc = run([cxxlex, '-dump-tokens', '-phase4-diagnostics-only'] + opts + [name], cwd=d)
     if rc == 2 and 'unsupported -std' in ours_err:
         return test, ' '.join(opts), None  # an edition the front end does not have
     if rc < 0 or rc > 1:

@@ -660,6 +660,7 @@ enum class dynamic_macro : uint8_t {
     is_target_os,
     is_target_environment,
     building_module,
+    is_target_variant,
     flt_eval_method,
     has_constexpr_builtin,
 };
@@ -958,8 +959,8 @@ class preprocessor
                     owned_buffer &path);
     bool embedded_size(const char *path, const embed_parameters &p,
                        uint64_t *size);
-    bool gnu_comma_paste(substitution &s, uint32_t at,
-                         owned_array<preprocessing_token> &out);
+    uint32_t gnu_comma_paste(substitution &s, uint32_t at,
+                             owned_array<preprocessing_token> &out);
     bool gnu_pragma(const preprocessing_token *tokens, size_t count);
     void gnu_define_dynamic_macros();
     bool gnu_dynamic_macro(const macro_definition &m, owned_buffer &text);
@@ -981,6 +982,7 @@ class preprocessor
                            bool function_like);
     void define_dynamic_macros();
     bool replace_dynamic(preprocessing_token &name, const macro_definition &m);
+    bool name_is_has_cpp_attribute(const preprocessing_token &t);
     bool feature_operand(const preprocessing_token &name, owned_buffer &operand,
                          owned_buffer &scope);
 };

@@ -322,7 +322,14 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
                 bits |= ~((UINT64_C(1) << width) - 1);
         }
         v.bits = bits;
-        v.is_unsigned = !is_signed && width >= 64;
+        /* [cpp.cond]/12: "whether a single-character character-literal may
+           have a negative value is implementation-defined": [impl.clang]
+           the literal is unsigned when its type is, and stays so */
+        v.is_unsigned = !is_signed;
+        /* clang: an ordinary literal, a multicharacter one too, is as
+           signed as plain char */
+        if (t.prefix == encoding_prefix::none)
+            v.is_unsigned = !p.behavior.plain_char_is_signed;
         r.advance();
         return true;
     }

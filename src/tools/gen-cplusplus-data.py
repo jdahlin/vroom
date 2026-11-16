@@ -344,7 +344,12 @@ def feature_check_queries():
         except Exception:
             continue
         names.update(re.findall(r'\b(__\w+)\b', text))
-    queries += [('builtin', n) for n in sorted(names) if not n.endswith('_')]
+    # type traits and other keyword-builtins: the spellings of lex.key.inc
+    for m in re.finditer(r'^KEYWORD\("(__\w+)"', open(os.path.join(OUT, 'lex', 'lex.key.inc')).read(), re.M):
+        names.add(m.group(1))
+    builtins = sorted(n for n in names if not n.endswith('_'))
+    queries += [('builtin', n) for n in builtins]
+    queries += [('constexpr_builtin', n) for n in builtins if n.startswith('__builtin')]
     return queries
 
 
@@ -352,7 +357,8 @@ def feature_checks(clang='clang-23'):
     import subprocess
     macro = {'feature': '__has_feature', 'extension': '__has_extension', 'builtin': '__has_builtin',
              'attribute': '__has_attribute', 'cpp_attribute': '__has_cpp_attribute',
-             'c_attribute': '__has_c_attribute', 'declspec_attribute': '__has_declspec_attribute'}
+             'c_attribute': '__has_c_attribute', 'declspec_attribute': '__has_declspec_attribute',
+             'constexpr_builtin': '__has_constexpr_builtin'}
     queries = feature_check_queries()
     source = ''.join(f'@{i} {macro[k]}({n})\n' for i, (k, n) in enumerate(queries))
     rows = {}

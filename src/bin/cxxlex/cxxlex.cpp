@@ -177,6 +177,9 @@ int main(int argc, char **argv)
          trigraph_set = false, trigraphs = false, preprocess = false,
          definitions = false;
     bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
+    /* clang -cc1 -dump-tokens does not convert literals: phase 7's
+       diagnostics are not issued (bench/cxx-pp.py) */
+    bool phase4_only = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -237,6 +240,8 @@ int main(int argc, char **argv)
             raw = false;
         else if (!strcmp(a, "-literal-claims"))
             raw = false, claims = true;
+        else if (!strcmp(a, "-phase4-diagnostics-only"))
+            phase4_only = true;
         else if (!strcmp(a, "-E"))
             preprocess = true;
         else if (!strcmp(a, "-dM"))
@@ -359,6 +364,8 @@ int main(int argc, char **argv)
 
     /* phases 5 to 7 */
     const lexer &l = files.phase7();
+    if (phase4_only)
+        diagnostics.suppressed++;
     auto embedded = [&](const preprocessing_token &t) {
         const source_files::entry *e = files.find(t.location);
         return e && e->scratch && !strcmp(e->name.c_str(), "<embed>");

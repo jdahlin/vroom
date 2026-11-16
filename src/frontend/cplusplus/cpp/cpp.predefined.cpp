@@ -138,6 +138,15 @@ void string_literal_of(const char *s, vbuffer *out)
  * checks too, which also take a string literal.  False (and the
  * diagnostic) if it has neither form.
  */
+bool preprocessor::name_is_has_cpp_attribute(const preprocessing_token &t)
+{
+    /* and [impl.clang] the other attribute checks */
+    return spelled_as(files, t, "__has_cpp_attribute") ||
+           spelled_as(files, t, "__has_attribute") ||
+           spelled_as(files, t, "__has_c_attribute") ||
+           spelled_as(files, t, "__has_declspec_attribute");
+}
+
 bool preprocessor::feature_operand(const preprocessing_token &name,
                                    owned_buffer &operand, owned_buffer &scope)
 {
@@ -156,8 +165,12 @@ bool preprocessor::feature_operand(const preprocessing_token &name,
     }
     unsigned depth = 1;
     owned_array<preprocessing_token> inside;
+    /* [cpp.cond]/5: __has_cpp_attribute's operand "after macro
+       expansion"; [impl.clang] __has_builtin's, __has_feature's, ... as
+       written */
+    bool expand = name_is_has_cpp_attribute(name);
     for (;;) {
-        if (!read_expanded(t) ||
+        if (!(expand ? read_expanded(t) : read_unexpanded(t)) ||
             t.kind == preprocessing_token_kind::end_of_file) {
             diagnostics.issue(diagnostic_id::err_pp_expected_after, t.location)
                 << "'('"

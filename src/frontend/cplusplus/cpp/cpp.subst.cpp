@@ -194,9 +194,10 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
             /* [impl.clang] white space before the ## is the deleted ##'s */
             s.next_space = false;
             /* [ext.gnu] gnu_comma_paste */
-            if (behavior.has(extension::gnu_comma_paste) &&
-                gnu_comma_paste(s, i, out)) {
-                i += 2;
+            if (uint32_t used = behavior.has(extension::gnu_comma_paste)
+                                    ? gnu_comma_paste(s, i, out)
+                                    : 0) {
+                i += used;
                 continue;
             }
             owned_array<preprocessing_token> right;

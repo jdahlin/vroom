@@ -47,6 +47,8 @@ void preprocessor::clang_define_dynamic_macros()
         {"__is_target_vendor", dynamic_macro::is_target_vendor},
         {"__is_target_os", dynamic_macro::is_target_os},
         {"__is_target_environment", dynamic_macro::is_target_environment},
+        {"__is_target_variant_os", dynamic_macro::is_target_variant},
+        {"__is_target_variant_environment", dynamic_macro::is_target_variant},
         {"__building_module", dynamic_macro::building_module},
     };
     for (const auto &c : checks)
@@ -61,6 +63,18 @@ void preprocessor::clang_define_dynamic_macros()
                        false);
     define_dynamic("__has_constexpr_builtin",
                    dynamic_macro::has_constexpr_builtin, true);
+}
+
+static bool has_constexpr_builtin(const implementation_defined_behavior &b,
+                                  const char *name, size_t length);
+static bool target_is(const char *o, size_t n, const char *word)
+{
+    if (strlen(word) != n)
+        return false;
+    for (size_t i = 0; i < n; i++)
+        if ((o[i] | 32) != (word[i] | 32) && o[i] != word[i])
+            return false;
+    return true;
 }
 
 int preprocessor::clang_dynamic_macro(preprocessing_token &name,
@@ -118,27 +132,49 @@ int preprocessor::clang_dynamic_macro(preprocessing_token &name,
         value = has_feature(behavior, o, n,
                             m.dynamic == dynamic_macro::has_extension);
         break;
-    case dynamic_macro::has_builtin:
+    case dynamic_macro::has_builtin: {
+        /* clang counts its target checks as builtins */
+        static constexpr const char *target_checks[] = {
+            "__is_target_arch",       "__is_target_vendor",
+            "__is_target_os",         "__is_target_environment",
+            "__is_target_variant_os", "__is_target_variant_environment"};
         value = has_builtin(behavior, operand.data(), operand.size());
+        for (const char *c : target_checks)
+            value |= strlen(c) == operand.size() &&
+                     !memcmp(c, operand.data(), operand.size());
         break;
+    }
     case dynamic_macro::is_identifier:
         value = lookup_keyword(behavior, operand.data(), operand.size()) < 0;
         break;
+    /* the documented target aarch64-unknown-linux-gnu, names compared
+       ignoring case as clang's triple parser does */
     case dynamic_macro::is_target_arch:
-        value = (n == 7 && !memcmp(o, "aarch64", 7)) ||
-                (n == 5 && !memcmp(o, "arm64", 5));
+        value = target_is(o, n, "aarch64") || target_is(o, n, "arm64");
         break;
     case dynamic_macro::is_target_vendor:
-        value = n == 7 && !memcmp(o, "unknown", 7);
+        value = target_is(o, n, "unknown");
         break;
     case dynamic_macro::is_target_os:
-        value = n == 5 && !memcmp(o, "linux", 5);
+        value = target_is(o, n, "linux");
         break;
     case dynamic_macro::is_target_environment:
-        value = n == 3 && !memcmp(o, "gnu", 3);
+        value = target_is(o, n, "gnu");
+        break;
+    case dynamic_macro::is_target_variant:
+        value = 0; /* a Darwin target's variant: none here */
+        break;
+    case dynamic_macro::has_constexpr_builtin:
+        value = has_constexpr_builtin(behavior, operand.data(), operand.size());
         break;
     case dynamic_macro::has_warning:
-        /* "-Wgroup": whether the group exists */
+        /* "-Wgroup": whether the group exists; the operand is a string */
+        if (operand.data()[0] != '"') {
+            diagnostics.issue(diagnostic_id::err_expected_string_literal,
+                              name.location)
+                << 0 << "'__has_warning'";
+            return 2;
+        }
         if (operand.size() > 4 && operand.data()[1] == '-' &&
             operand.data()[2] == 'W') {
             char group[64];
@@ -163,6 +199,7 @@ enum class check_kind : uint8_t {
     attribute,
     builtin,
     c_attribute,
+    constexpr_builtin,
     cpp_attribute,
     declspec_attribute,
     extension,
@@ -252,6 +289,12 @@ bool has_builtin(const implementation_defined_behavior &b, const char *name,
                  size_t length)
 {
     return answer(b, check_kind::builtin, name, length) != 0;
+}
+
+static bool has_constexpr_builtin(const implementation_defined_behavior &b,
+                                  const char *name, size_t length)
+{
+    return answer(b, check_kind::constexpr_builtin, name, length) != 0;
 }
 
 /* [cpp.cond]/6: "For other attributes recognized by the implementation,
