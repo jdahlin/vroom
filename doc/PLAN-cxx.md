@@ -2994,3 +2994,10 @@ kandidater mitt i kodgenereringen och lämnade kroppar markerade som misslyckade
 operator= från en annan typ (alt_string = "text"): den konverterande
 konstruktorns temporära objekt, sedan medlem för medlem (flyttat).  Testet
 `run/implicit-assign-nontrivial-member.cpp` utökat.  Sviter gröna (180/180).
+
+## Status 208 (2026-11-16)
+ADL-kontrollen efter ett mallval läser argumentens typer från en kopia gjord
+före överlagringsupplösningen: att lösa anropet instansierar kod som
+återanvänder c->cargs, så i jsons `iteration_proxy_value::key() const` såg
+den ett argument i stället för två och behöll mallen `int_to_string<alt_string>`
+(unit-alt-string länkade inte).  Sviter gröna (180/180, 38/38, mangle).
