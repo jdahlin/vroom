@@ -2887,3 +2887,11 @@ anropet okänt bara om den annars är valbar (pair:s, för en vectors iterator).
 Jsons `ordered_map(It, It, alloc)`.  Test:
 `run/ilist-ctor-elements-not-convertible.cpp`, som misslyckas utan ändringen.
 Sviter gröna (170/170, 38/38, mangle).
+
+## Status 196 (2026-11-16)
+Rättelse till status 195: kontrollen att initializer_list-elementen
+konverterar löser egna anrop, som skrev över argumentposterna (vilka element
+som är klammerlistor); nu sparas och återställs de.  Utan det föll jsons
+`json j = {{"foo", 1}, "foo", "baz"}` (16 funktioner, strikt bänk 36 i stället
+för 39).  Test: `run/ilist-mixed-braced-and-converted.cpp` (täcker blandningen;
+felet själv syns i bänken, inte i testet).  Sviter gröna (171/171).

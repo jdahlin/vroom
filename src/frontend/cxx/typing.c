@@ -1414,11 +1414,20 @@ static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qual
 		ast_qualified_type et = c->etype;
 		bool el = c->elval;
 		bool fits = true;
+		uint32_t n = nargs < CXX_MAX_ARGS ? nargs : CXX_MAX_ARGS;
+		/* (the ranking resolves calls of its own, which reuse the argument records: the list's are kept) */
+		uint32_t *br = malloc(sizeof c->carg_brace), ncargs = c->ncargs;
 
-		for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS && fits; i++)
-			if (!(c->carg_brace[i] && c->carg_brace[i] < c->ntok && c->tok[c->carg_brace[i]].kind == LEX_TOKEN_LEFT_BRACE) &&
+		if (!br)
+			return true;
+		memcpy(br, c->carg_brace, sizeof c->carg_brace);
+		for (uint32_t i = 0; i < n && fits; i++)
+			if (!(br[i] && br[i] < c->ntok && c->tok[br[i]].kind == LEX_TOKEN_LEFT_BRACE) &&
 			    args && args[i] != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, args[i]))
 				fits = cxx_arg_rank(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e), args[i], lval ? lval[i] != 0 : false, lval != NULL) < 6;
+		memcpy(c->carg_brace, br, sizeof c->carg_brace);
+		free(br);
+		c->ncargs = ncargs;
 		c->etype = et, c->elval = el;
 		return fits;
 	}
