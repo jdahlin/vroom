@@ -3063,3 +3063,9 @@ T(&arr)[N])` och `has_to_json<json, int[3]>`):
 - mangling: `T[N]` med N en värdeparameter skrivs `A T<i>_ _` som clang.
 Test: `run/array-ref-param-deduction.cpp` (symbolerna lika med clangs).
 Sviter gröna (186/186, 38/38, mangle).
+
+`new T{{42}, {"x"}, e}` för ett aggregat (json unit-udt): new-uttrycket
+sparade inte de klammrade elementen (`carg_brace`) och gav dem inte vidare
+som `gen_agg_brace`, så aggregatets medlemmar som själva är listor fick
+ingen nod.  Nu som för temporären `T{...}`.
+Test: `run/new-aggregate-nested-braces.cpp`.  Sviter gröna (187/187, 38/38, mangle).

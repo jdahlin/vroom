@@ -8,6 +8,8 @@ VPRIV void cxx_new_expression_parse(cxx *c)
 	bool array = false, braced = false;
 	ast_qualified_type t = CXX_TY_UNKNOWN, at[CXX_MAX_ARGS];
 	uint8_t lv[CXX_MAX_ARGS];
+	uint32_t abr[CXX_MAX_ARGS];
+	cxx_argset asets[16];
 
 	cxx_accept(c, LEX_TOKEN_COLON_COLON);
 	cxx_expect_kw(c, CXX_KW_new);
@@ -46,6 +48,8 @@ init:
 			memcpy(init, c->carg_nodes, (size_t)ninit * sizeof *init);
 			memcpy(at, c->cargs, (size_t)ninit * sizeof *at);
 			memcpy(lv, c->cargs_lval, (size_t)ninit);
+			memcpy(abr, c->carg_brace, sizeof abr);
+			memcpy(asets, c->carg_sets, sizeof asets);
 		}
 	}
 	if (t == CXX_TY_UNKNOWN || c->tentative || ninit == -2 || nplace == UINT32_MAX) {
@@ -55,8 +59,16 @@ init:
 	if (!c->template_depth && cc_type_is_record(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ARRAY && !array)
 		cxx_ctor_use(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), ninit > 0 ? at : NULL, ninit > 0 ? lv : NULL, ninit > 0 ? (uint32_t)ninit : 0, braced);
 	cxx_et(c, cc_type_pointer(c->ast, t), false);
-	if (!c->template_depth)
+	if (!c->template_depth) {
+		if (ninit > 0) {
+			memcpy(c->gen_call_brace, abr, sizeof abr);	/* new T({...}): the list a temporary of the parameter's class */
+			memcpy(c->gen_call_sets, asets, sizeof asets);
+		}
+		c->gen_agg_brace = braced && ninit > 0 ? abr : NULL;	/* new T{{1}, {"x"}}: an aggregate's elements that are braced lists */
 		cxx_gen_new(c, t, place, nplace, count, array, init, ninit, loc);
+		c->gen_agg_brace = NULL;
+		memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+	}
 }
 
 VPRIV void cxx_unary_expression_parse(cxx *c)
