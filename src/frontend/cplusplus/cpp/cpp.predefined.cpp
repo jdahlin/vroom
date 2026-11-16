@@ -58,10 +58,17 @@ unsigned predefined_variant(const implementation_defined_behavior &b)
 void preprocessor::write_predefined_macros(vbuffer *out) const
 {
     uint64_t bit = UINT64_C(1) << predefined_variant(behavior);
-    for (const predefined_macro &m : predefined_macros)
-        if (m.variants & bit)
-            vbuffer_format_append(out, "#define %s %s\n", m.name,
-                                  m.replacement);
+    for (const predefined_macro &m : predefined_macros) {
+        if (!(m.variants & bit))
+            continue;
+        /* [impl.clang] -fms-compatibility (MSVC) drops these */
+        if (behavior.microsoft_compatibility &&
+            (!strcmp(m.name, "__STDC__") ||
+             !strcmp(m.name, "__STRICT_ANSI__") ||
+             !strcmp(m.name, "__private_extern__")))
+            continue;
+        vbuffer_format_append(out, "#define %s %s\n", m.name, m.replacement);
+    }
 }
 
 int32_t preprocessor::define_dynamic(const char *name, dynamic_macro dynamic,
@@ -233,7 +240,9 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
         int64_t value =
             cpp_attribute_value(behavior, scope.data(), scope.size(),
                                 operand.data(), operand.size());
-        vbuffer_format_append(text.get(), value ? "%lldL" : "%lld",
+        /* [impl.clang] a date-like version as a long literal, as Table 18
+           writes them; 1 (an attribute with no version) as it is */
+        vbuffer_format_append(text.get(), value > 1 ? "%lldL" : "%lld",
                               (long long)value);
         break;
     }

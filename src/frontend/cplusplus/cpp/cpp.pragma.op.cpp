@@ -61,6 +61,11 @@ bool preprocessor::pragma_operator(const preprocessing_token &name)
         tokens.append(p);
     }
     execute_pragma(tokens.data(), tokens.size(), name.location);
+    /* [impl.clang] the pragma is a line of its own: the next token starts
+       a line */
+    pending_flags = true;
+    pending_start_of_line = true;
+    pending_white_space = false;
     return true;
 }
 

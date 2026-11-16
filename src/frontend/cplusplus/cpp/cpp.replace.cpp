@@ -73,11 +73,96 @@ uint32_t preprocessor::identifier(const char *s, size_t n)
     }
 }
 
+namespace
+{
+
+void append_utf8(vbuffer *out, uint32_t c)
+{
+    unsigned char b[4];
+    size_t n;
+    if (c < 0x80)
+        b[0] = (unsigned char)c, n = 1;
+    else if (c < 0x800)
+        b[0] = (unsigned char)(0xC0 | c >> 6),
+        b[1] = (unsigned char)(0x80 | (c & 0x3F)), n = 2;
+    else if (c < 0x10000)
+        b[0] = (unsigned char)(0xE0 | c >> 12),
+        b[1] = (unsigned char)(0x80 | (c >> 6 & 0x3F)),
+        b[2] = (unsigned char)(0x80 | (c & 0x3F)), n = 3;
+    else
+        b[0] = (unsigned char)(0xF0 | c >> 18),
+        b[1] = (unsigned char)(0x80 | (c >> 12 & 0x3F)),
+        b[2] = (unsigned char)(0x80 | (c >> 6 & 0x3F)),
+        b[3] = (unsigned char)(0x80 | (c & 0x3F)), n = 4;
+    vbuffer_append(out, b, n);
+}
+
+/* the code point of the universal-character-name at s[i] ('\' 'u' or 'U'
+   or 'N'), and its length; 0 if there is none */
+size_t universal_character_name(const char *s, size_t n, size_t i, uint32_t *c)
+{
+    if (i + 1 >= n || s[i] != '\\')
+        return 0;
+    char kind = s[i + 1];
+    size_t j = i + 2;
+    uint32_t v = 0;
+    if ((kind == 'u' || kind == 'N') && j < n && s[j] == '{') {
+        size_t close = j + 1;
+        while (close < n && s[close] != '}')
+            close++;
+        if (close >= n)
+            return 0;
+        if (kind == 'N')
+            v = code_point_of_unicode_name(s + j + 1, close - j - 1);
+        else
+            for (size_t k = j + 1; k < close; k++) {
+                if (!is_hexadecimal_digit((unsigned char)s[k]))
+                    return 0;
+                v = v * 16 + (uint32_t)(is_digit((unsigned char)s[k])
+                                            ? s[k] - '0'
+                                            : (s[k] | 32) - 'a' + 10);
+            }
+        *c = v;
+        return v ? close + 1 - i : 0;
+    }
+    size_t digits = kind == 'u' ? 4 : kind == 'U' ? 8 : 0;
+    if (!digits || j + digits > n)
+        return 0;
+    for (size_t k = j; k < j + digits; k++) {
+        if (!is_hexadecimal_digit((unsigned char)s[k]))
+            return 0;
+        v = v * 16 + (uint32_t)(is_digit((unsigned char)s[k])
+                                    ? s[k] - '0'
+                                    : (s[k] | 32) - 'a' + 10);
+    }
+    *c = v;
+    return 2 + digits;
+}
+
+} // namespace
+
+/* [lex.charset]/2: a universal-character-name designates the character
+   whose code point it gives, so ü and the character itself spell one
+   identifier: the table keys on its UTF-8 */
 uint32_t preprocessor::identifier(const preprocessing_token &t)
 {
     spelling_buffer.clear();
     files.spelling(t, spelling_buffer.get());
-    return identifier(spelling_buffer.data(), spelling_buffer.size());
+    const char *s = spelling_buffer.data();
+    size_t n = spelling_buffer.size();
+    if (!memchr(s, '\\', n))
+        return identifier(s, n);
+    owned_buffer canonical;
+    for (size_t i = 0; i < n;) {
+        uint32_t c;
+        size_t length = universal_character_name(s, n, i, &c);
+        if (length) {
+            append_utf8(canonical.get(), c);
+            i += length;
+        } else
+            vbuffer_append(canonical.get(), s + i++, 1);
+    }
+    return identifier(canonical.data(), canonical.size());
 }
 
 const char *preprocessor::identifier_spelling(uint32_t id, size_t *n) const
@@ -428,7 +513,9 @@ void preprocessor::directive_define(const preprocessing_token &directive)
         if (is_language_defined(old))
             diagnostics.issue(diagnostic_id::ext_pp_redef_builtin_macro,
                               name.location);
-        else if (!identical_definitions(m, old)) {
+        /* [impl.clang] the other predefined macros may be redefined
+           without a warning */
+        else if (!old.predefined && !identical_definitions(m, old)) {
             quoted(diagnostics.issue(diagnostic_id::ext_pp_macro_redef,
                                      name.location),
                    name);
