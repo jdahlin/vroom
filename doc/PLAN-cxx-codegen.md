@@ -505,6 +505,29 @@ recorded here:
 - **S0 Measure.**  `cxxparse -stats` reports time; `bench/cxx-parse-speed.py`
   reports ns per token, tentative parses and rewound tokens against clang
   `-fsyntax-only` on json.hpp, libstdc++'s headers and `CXX/drs`.
+  Status (2026-11-16, done): `cxxparse -stats` prints nanoseconds and peak
+  resident bytes, `-tokens-only` the same for phases 1-7 alone;
+  `bench/cxx-parse-speed.py [--headers [PAT]]` (`CXX/drs` left out: it is a
+  test directory, not one TU).  Baseline, M1 Pro, best of 3:
+
+  | input | tokens | phases 1-7 | parser | vcc | clang -E | clang -fsyntax-only |
+  |---|---|---|---|---|---|---|
+  | json.hpp (libstdc++ 14, gnu++17) | 844 642 | 1403 ns/token | 236 ns/token | 1.38 s | 0.12 s | 0.98 s |
+  | each libstdc++ header alone (1 run) | 7.52 M | 1458 | 165 | 12.2 s | | 7.0 s |
+
+  So the front end with no semantics is 0.57-0.71x clang's with them, and
+  phases 1-7 are 86 % of its time: about 9x clang -E.  A sample of
+  `-tokens-only` on json.hpp: `memcmp` and `strlen` from
+  `lexer::scan_preprocessing_op_or_punc` (a linear scan of every
+  operator's spelling per punctuator, `lex.operators.cpp`) and
+  `lookup_keyword`, then the lexer itself; the cost of PLAN-cxx-spec's
+  decision 4 (compliance first).  The parser does 148 000 tentative
+  parses and rewinds 565 613 tokens on json.hpp, two thirds of its tokens.
+  Consequence for the order: the input path comes first.  S1 is preceded
+  by S0b, phases 1-7 at clang -E's speed or better (the operator and
+  keyword tables as direct lookups, the lexer's fast paths), and S2's
+  compact tokens and S5's shared header cache matter more than the
+  parser's own cost.
 - **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the
   member-specification as one pass with ranges, the recognizer at the hot
   disambiguation sites, one lookup per token.  Gate: PLAN-cxx-parse's

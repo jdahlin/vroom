@@ -345,6 +345,7 @@ bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run nati
 bench/vcc-abi.py --target wasm64    # [needs VCC_WASM=1; not maintained] ... for wasm64 (or wasm32; --vlink), emcc + node (~20 s)
 bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.wasm built by vcc itself vs the emcc build: -S byte for byte (W6, ~40 s)
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
+bench/cxx-parse-speed.py [--headers [PAT]]   # C++ front end (cxxparse) ns/token, phases 1-7 and parser apart, vs clang -E / -fsyntax-only on json.hpp and libstdc++ (S0 of PLAN-cxx-codegen; ~10 s, all headers ~1 min)
 bench/cxx-pp.py -j 6 [-v] [PAT]     # C++ front end phase 4 (cxxlex) vs clang -cc1 on clang's Preprocessor tests: tokens, diagnostics, -dM (~2 min)
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)
 bench/vcc-field-uses.py -j 6       # VCC_FIELD_USES: every use of selected struct fields with its bytes, snapshots (src/test/field-uses, <1 s)

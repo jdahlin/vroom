@@ -23,13 +23,23 @@
  *                                            an encoding clang checks
  *                                            (declarator-claims.h)
  *   cxxparse -stats ...                      tokens, nodes, tentative parses,
- *                                            lookups, scaffolding nodes
+ *                                            lookups, scaffolding nodes, the
+ *                                            time from the start of phase 1
+ *                                            to the end of the parse and the
+ *                                            peak resident memory
+ *   cxxparse -stats -tokens-only ...         the same for phases 1-7 alone:
+ *                                            every token made, none parsed
+ *                                            (bench/cxx-parse-speed.py takes
+ *                                            the difference)
  *   cxxparse -selftest                       the parts no grammar uses yet
  *
  * OPTIONS are cxxlex's (src/bin/cxxlex/command-line.h).  The exit status is
  * 1 if a diagnostic was an error, 2 if the file cannot be read.
  */
+#include <sys/resource.h>
+
 #include "../cxxlex/command-line.h"
+#include "port/clock.h"
 #include "frontend/cplusplus/parse.h"
 
 #include "declarator-claims.h"
@@ -281,7 +291,8 @@ int main(int argc, char **argv)
     command_line options("cxxparse");
     bool dump_syntax = false, dump_declarations = false, dump_tokens = false,
          stats = false, phase4_only = false, debug_fallbacks = false,
-         expression_claims = false, declaration_claims = false;
+         expression_claims = false, declaration_claims = false,
+         tokens_only = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -304,6 +315,8 @@ int main(int argc, char **argv)
             debug_fallbacks = true;
         else if (!strcmp(a, "-stats"))
             stats = true;
+        else if (!strcmp(a, "-tokens-only"))
+            tokens_only = true;
         else if (!strcmp(a, "-fsyntax-only"))
             ;
         else if (options.option(argc, argv, i))
@@ -312,10 +325,12 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr, "usage: cxxparse [-fsyntax-only|-dump-syntax|"
-                        "-dump-declarations|-dump-tokens|-expression-claims|"
-                        "-declaration-claims|-stats] [clang -cc1 options] "
-                        "FILE\n       cxxparse -selftest\n");
+        fprintf(
+            stderr,
+            "usage: cxxparse [-fsyntax-only|-dump-syntax|"
+            "-dump-declarations|-dump-tokens|-expression-claims|"
+            "-declaration-claims|-stats [-tokens-only]] [clang -cc1 options] "
+            "FILE\n       cxxparse -selftest\n");
         return 2;
     }
     options.apply();
@@ -327,6 +342,7 @@ int main(int argc, char **argv)
     files.file_options.preprocessed_input =
         (path_length > 3 && !strcmp(path + path_length - 3, ".ii")) ||
         (path_length > 2 && !strcmp(path + path_length - 2, ".i"));
+    double start = vclock_seconds();
     preprocessor pp(files, options.pp_options);
     if (!pp.start(path)) {
         fprintf(stderr, "cxxparse: cannot read %s\n", path);
@@ -344,6 +360,32 @@ int main(int argc, char **argv)
             return 1;
         return 0;
     };
+
+    /* the peak resident memory, in bytes (ru_maxrss is bytes on Darwin,
+       KiB on Linux) */
+    auto peak_resident = []() {
+        struct rusage usage;
+        getrusage(RUSAGE_SELF, &usage);
+#ifdef __APPLE__
+        return (unsigned long long)usage.ru_maxrss;
+#else
+        return (unsigned long long)usage.ru_maxrss * 1024;
+#endif
+    };
+    if (tokens_only) {
+        token_index i = 0;
+        while (!tokens.at_end(i))
+            i++;
+        double seconds = vclock_seconds() - start;
+        if (stats)
+            vbuffer_format_append(out.get(),
+                                  "tokens %llu\nnanoseconds %llu\n"
+                                  "peak-resident-bytes %llu\n",
+                                  (unsigned long long)tokens.made(),
+                                  (unsigned long long)(seconds * 1e9),
+                                  peak_resident());
+        return finish();
+    }
 
     if (dump_tokens) {
         /* as cxxlex -dump-tokens: the same lines from the same tokens,
@@ -400,6 +442,7 @@ int main(int argc, char **argv)
     parser p(tokens, tree, names, diagnostics);
     p.debug_fallbacks = debug_fallbacks;
     p.translation_unit();
+    double seconds = vclock_seconds() - start;
 
     if (dump_syntax)
         tree.dump(tree.root, tokens, out.get());
@@ -515,12 +558,14 @@ int main(int argc, char **argv)
             out.get(),
             "tokens %llu\nnodes %llu\ntentative-parses %llu\nrewinds %llu\n"
             "rewound-tokens %llu\nlookups %llu\nunparsed %llu\n"
-            "erroneous %llu\n",
+            "erroneous %llu\nbeyond-step %llu\nnanoseconds %llu\n"
+            "peak-resident-bytes %llu\n",
             (unsigned long long)s.tokens, (unsigned long long)s.nodes,
             (unsigned long long)s.tentative_parses,
             (unsigned long long)s.rewinds, (unsigned long long)s.rewound_tokens,
             (unsigned long long)s.lookups, (unsigned long long)s.unparsed,
-            (unsigned long long)s.erroneous);
+            (unsigned long long)s.erroneous, (unsigned long long)s.beyond_step,
+            (unsigned long long)(seconds * 1e9), peak_resident());
     }
     return finish();
 }
