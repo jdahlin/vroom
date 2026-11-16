@@ -273,6 +273,31 @@ VPRIV bool cxx_enum_is_scoped(cxx *c, ast_qualified_type t)
 	return false;
 }
 
+/* is from to to an integral or floating-point promotion ([conv.prom], [conv.fpprom]): a narrow integer or bool
+   to int, an unscoped enumeration to its underlying type or that type's promotion, float to double */
+static bool cxx_is_promotion(cxx *c, ast_qualified_type from, ast_qualified_type to)
+{
+	cc *a = c->ast;
+	int fk, tk;
+
+	if (from == CXX_TY_UNKNOWN || to == CXX_TY_UNKNOWN)
+		return false;
+	from = AST_QUALIFIED_TYPE_UNQUALIFIED(from), to = AST_QUALIFIED_TYPE_UNQUALIFIED(to);
+	fk = AST_TYPE_KIND(a, from), tk = AST_TYPE_KIND(a, to);
+	if (from == to || tk == AST_TYPE_ENUM)
+		return false;
+	if (fk == AST_TYPE_FLOAT)
+		return tk == AST_TYPE_DOUBLE;
+	if (fk == AST_TYPE_ENUM) {
+		ast_qualified_type b = AST_TYPE(a, from)->base;
+
+		if (cxx_enum_is_scoped(c, from) || b == CXX_TY_UNKNOWN)
+			return false;
+		return AST_QUALIFIED_TYPE_UNQUALIFIED(b) == to || cc_type_promote(a, b) == to;
+	}
+	return fk >= AST_TYPE_BOOL && fk <= AST_TYPE_UNSIGNED_LONG_LONG && cc_type_promote(a, from) == to && to != from;
+}
+
 static int cxx_arg_rank0(cxx *c, ast_qualified_type p, ast_qualified_type a, bool lvalue, bool have_lvalue)
 {
 	const ctype *pt, *at;
@@ -877,6 +902,28 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 					else if ((AST_QUALIFIED_TYPE_QUALIFIERS(pa) & AST_QUALIFIED_TYPE_QUALIFIERS(pb)) == AST_QUALIFIED_TYPE_QUALIFIERS(pb))
 						worse = true;
 				}
+			}
+			if (!better && !worse && args) {
+				/* the same rank, a promotion against another conversion: the promotion ([over.ics.rank]/4.2:
+				   os << e of an unscoped enumeration is operator<<(int), not the char16_t one) */
+				for (uint32_t n = 0; n < nargs && n < 16; n++) {
+					ast_qualified_type pa = cand[a].pt[n], pb = cand[b].pt[n];
+
+					if (pa == CXX_TY_UNKNOWN || pb == CXX_TY_UNKNOWN || args[n] == CXX_TY_UNKNOWN || cand[a].rank[n] != 2 || cand[b].rank[n] != 2)
+						continue;
+					if (AST_TYPE_KIND(c->ast, pa) == AST_TYPE_POINTER && AST_TYPE(c->ast, pa)->ext)
+						pa = AST_TYPE(c->ast, pa)->base;
+					if (AST_TYPE_KIND(c->ast, pb) == AST_TYPE_POINTER && AST_TYPE(c->ast, pb)->ext)
+						pb = AST_TYPE(c->ast, pb)->base;
+					bool ppa = cxx_is_promotion(c, args[n], pa), ppb = cxx_is_promotion(c, args[n], pb);
+
+					if (ppa && !ppb)
+						better = true;
+					else if (ppb && !ppa)
+						worse = true;
+				}
+				if (better && worse)
+					better = worse = false;
 			}
 			if (!better && !worse && args) {
 				/* derived to base: to a nearer base is better (B over A for a C : B : A [over.ics.rank]; json's

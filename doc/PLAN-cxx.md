@@ -3106,3 +3106,13 @@ Uppräkningar och C++20:s ordningar (json `value_t`):
   `partial_ordering` (`return order[l] <=> order[r];`, `std::is_lt(a <=> b)`).
 Test: `run/enum-user-operators-and-ordering-conversion.cpp` (som clang).
 unit-comparison: 5 -> 2 funktioner.  Sviter gröna (191/191, 38/38, mangle).
+
+Överlagring: en heltals- eller flyttalsbefordran slår en annan
+standardomvandling av samma rang ([over.ics.rank]/4.2).  vcc rangordnade
+inte befordringar, så `os << e` av en oavgränsad uppräkning var tvetydig
+mellan `operator<<(int)` och de borttagna `char16_t`/`char32_t`-varianterna
+(libc++:s `__is_ostreamable`, doctests `toString`).  Nu ett avgörande när två
+kandidater har samma rang: den vars parameter är argumentets befordrade typ
+(underliggande typ för en uppräkning, `int` för smala heltal, `double` för
+`float`).  Test: `run/overload-promotion-beats-conversion.cpp` (som clang).
+Hela jsonsviten: 36 funktioner kvar (37), inga regressioner.
