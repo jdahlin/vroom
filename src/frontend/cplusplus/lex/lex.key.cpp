@@ -174,6 +174,16 @@ VPRIV const char *keyword_clang_name(int keyword)
     return keywords[keyword].clang_name;
 }
 
+VPRIV int keyword_table_size()
+{
+    return keyword_count;
+}
+
+VPRIV const char *keyword_spelling(int keyword)
+{
+    return keywords[keyword].spelling;
+}
+
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op)
 {

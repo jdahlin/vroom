@@ -20,30 +20,7 @@
  * are ignored.  Diagnostics go to stderr as clang prints them; the exit status
  * is 1 if there was an error.
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "frontend/cplusplus/cplusplus.h"
-
-using namespace cplusplus;
-
-static void write_escaped(vbuffer *out, const char *s, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c == '\\' || c == '"')
-            vbuffer_format_append(out, "\\%c", c);
-        else if (c == '\n')
-            vbuffer_string_append(out, "\\n");
-        else if (c == '\t')
-            vbuffer_string_append(out, "\\t");
-        else if (c < 0x20 || c >= 0x7f)
-            vbuffer_format_append(out, "\\%03o", c);
-        else
-            vbuffer_append(out, &c, 1);
-    }
-}
+#include "command-line.h"
 
 /*
  * A literal's type and value as static_asserts clang can check:
@@ -109,141 +86,20 @@ static bool is_string(const preprocessing_token &pp)
            pp.kind == preprocessing_token_kind::user_defined_string_literal;
 }
 
-static bool parse_edition(const char *s, implementation_defined_behavior *b)
-{
-    static const struct {
-        const char *name;
-        standard_edition edition;
-    } names[] = {{"98", standard_edition::cplusplus_98},
-                 {"03", standard_edition::cplusplus_98},
-                 {"0x", standard_edition::cplusplus_11},
-                 {"11", standard_edition::cplusplus_11},
-                 {"1y", standard_edition::cplusplus_14},
-                 {"14", standard_edition::cplusplus_14},
-                 {"1z", standard_edition::cplusplus_17},
-                 {"17", standard_edition::cplusplus_17},
-                 {"2a", standard_edition::cplusplus_20},
-                 {"20", standard_edition::cplusplus_20},
-                 {"2b", standard_edition::cplusplus_23},
-                 {"23", standard_edition::cplusplus_23},
-                 {"2c", standard_edition::cplusplus_26},
-                 {"26", standard_edition::cplusplus_26}};
-    bool gnu = !strncmp(s, "gnu++", 5);
-    if (!gnu && strncmp(s, "c++", 3))
-        return false;
-    if (gnu)
-        s += 5;
-    else
-        s += 3;
-    for (const auto &n : names)
-        if (!strcmp(s, n.name)) {
-            *b = implementation_defined_behavior::for_edition(n.edition, gnu);
-            return true;
-        }
-    return false;
-}
-
-/* one token as clang -cc1 -dump-raw-tokens / -dump-tokens prints it */
-static void write_token(vbuffer *out, const char *name, const char *spelling,
-                        size_t n, source_position p, const source_files *files,
-                        const preprocessing_token &pp, bool raw,
-                        const unsigned char *physical)
-{
-    vbuffer_format_append(out, "%s '", name);
-    write_escaped(out, spelling, n);
-    vbuffer_format_append(out, "'\tLoc=<%s:%u:%u", p.file_name, p.line,
-                          p.column);
-    if (files && pp.expansion) {
-        source_position s = files->position(pp.location);
-        vbuffer_format_append(out, " <Spelling=%s:%u:%u>", s.file_name, s.line,
-                              s.column);
-    }
-    vbuffer_string_append(out, ">");
-    if (pp.at_start_of_line)
-        vbuffer_string_append(out, " [StartOfLine]");
-    if (pp.after_white_space && !raw)
-        vbuffer_string_append(out, " [LeadingSpace]");
-    if (pp.spelling_differs && physical) {
-        vbuffer_string_append(out, " [UnClean='");
-        write_escaped(out, reinterpret_cast<const char *>(physical), pp.extent);
-        vbuffer_string_append(out, "']");
-    }
-    vbuffer_string_append(out, "\n");
-}
-
 int main(int argc, char **argv)
 {
-    implementation_defined_behavior behavior =
-        implementation_defined_behavior::for_edition(
-            standard_edition::cplusplus_17, true);
-    diagnostic_options diagnostic_settings;
-    preprocessor_options pp_options;
-    bool raw = false, claims = false, char8_set = false, char8 = false,
-         trigraph_set = false, trigraphs = false, preprocess = false,
-         definitions = false;
-    bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
+    command_line options("cxxlex");
+    implementation_defined_behavior &behavior = options.behavior;
+    diagnostic_options &diagnostic_settings = options.diagnostic_settings;
+    preprocessor_options &pp_options = options.pp_options;
+    bool raw = false, claims = false, preprocess = false, definitions = false;
     /* clang -cc1 -dump-tokens does not convert literals: phase 7's
        diagnostics are not issued (bench/cxx-pp.py) */
-    bool phase4_only = false, no_operator_names = false;
+    bool phase4_only = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
-        /* -D, -U, -I and their kin take their operand joined or apart */
-        const char *operand = nullptr;
-        static constexpr const char *with_operand[] = {
-            "-D",
-            "-U",
-            "-I",
-            "-iquote",
-            "-isystem",
-            "-idirafter",
-            "-internal-isystem",
-            "-internal-externc-isystem"};
-        size_t matched = 0;
-        for (const char *w : with_operand)
-            if (!strncmp(a, w, strlen(w)) && strlen(w) > matched &&
-                (strlen(w) <= 2 || !a[strlen(w)]))
-                matched = strlen(w);
-        if (matched) {
-            if (a[matched])
-                operand = a + matched;
-            else if (i + 1 < argc)
-                operand = argv[++i];
-            else
-                operand = "";
-            char kind = a[1];
-            if (kind == 'D' || kind == 'U') {
-                owned_buffer line;
-                if (kind == 'D') {
-                    const char *eq = strchr(operand, '=');
-                    if (eq)
-                        vbuffer_format_append(line.get(), "#define %.*s %s\n",
-                                              (int)(eq - operand), operand,
-                                              eq + 1);
-                    else
-                        vbuffer_format_append(line.get(), "#define %s 1\n",
-                                              operand);
-                } else
-                    vbuffer_format_append(line.get(), "#undef %s\n", operand);
-                memcpy(pp_options.command_line.extend(line.size()), line.data(),
-                       line.size());
-            } else {
-                include_search search = include_search::system;
-                if (!strcmp(a, "-iquote") || !strncmp(a, "-iquote", 7))
-                    search = include_search::quote;
-                else if (!strncmp(a, "-I", 2))
-                    search = include_search::angled;
-                else if (!strncmp(a, "-idirafter", 10))
-                    search = include_search::after;
-                pp_options.include_directories.append({operand, search});
-            }
-            continue;
-        }
-        if (!strncmp(a, "--embed-dir=", 12)) {
-            pp_options.embed_directories.append(a + 12);
-            continue;
-        }
         if (!strcmp(a, "-dump-raw-tokens"))
             raw = true;
         else if (!strcmp(a, "-dump-tokens"))
@@ -256,31 +112,8 @@ int main(int argc, char **argv)
             preprocess = true;
         else if (!strcmp(a, "-dM"))
             definitions = true;
-        else if (!strcmp(a, "-undef"))
-            pp_options.predefined_macros = false;
-        else if (!strncmp(a, "-std=", 5)) {
-            if (!parse_edition(a + 5, &behavior)) {
-                fprintf(stderr, "cxxlex: unsupported %s\n", a);
-                return 2;
-            }
-        } else if (!strcmp(a, "-fno-operator-names"))
-            no_operator_names = true;
-        else if (!strcmp(a, "-fms-extensions"))
-            ms = true;
-        else if (!strcmp(a, "-fms-compatibility"))
-            ms = ms_compat = true;
-        else if (!strcmp(a, "-fchar8_t") || !strcmp(a, "-fno-char8_t"))
-            char8_set = true, char8 = a[2] == 'c';
-        else if (!strcmp(a, "-trigraphs") || !strcmp(a, "-ftrigraphs") ||
-                 !strcmp(a, "-fno-trigraphs"))
-            trigraph_set = true, trigraphs = strcmp(a, "-fno-trigraphs") != 0;
-        else if (!strcmp(a, "-fdollars-in-identifiers") ||
-                 !strcmp(a, "-fno-dollars-in-identifiers"))
-            dollar_set = true, dollar = a[2] == 'd';
-        else if (diagnostic_settings.parse(a))
+        else if (options.option(argc, argv, i))
             ;
-        else if (!strcmp(a, "-x") || !strcmp(a, "-triple") || !strcmp(a, "-o"))
-            i++;
         else if (a[0] != '-' || !a[1])
             path = a;
     }
@@ -289,16 +122,7 @@ int main(int argc, char **argv)
                         "-dM] [clang -cc1 options] FILE\n");
         return 2;
     }
-    if (char8_set)
-        behavior.char8_t_keyword = char8;
-    if (trigraph_set)
-        behavior.trigraphs = trigraphs;
-    if (dollar_set)
-        behavior.dollar_in_identifier = dollar;
-    behavior.microsoft_extensions = ms;
-    behavior.operator_names = !no_operator_names;
-    behavior.microsoft_compatibility = ms_compat;
-
+    options.apply();
     diagnostic_consumer diagnostics(diagnostic_settings);
     owned_buffer out, spelling;
     auto finish = [&]() {

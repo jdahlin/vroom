@@ -44,6 +44,8 @@ EXTENSION(clang_embed, clang,
 EXTENSION(clang_unicode_white_space, clang,
           "white space beyond [lex.charset]/1's (U+00A0, U+2000, ...), with a warning")
 
+EXTENSION(clang_deleted_function_message, clang,
+          "C++26's = delete(\"reason\") (P2573R2) in earlier editions, with a warning")
 EXTENSION(clang_no_operator_names, clang,
           "-fno-operator-names: and, or, ... are identifiers ([lex.digraph]/2 off)")
 

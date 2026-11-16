@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "frontend/cplusplus/cplusplus.h"
+#include "frontend/cplusplus/parse.h"
 
 #ifdef VCC_UNITY
 #define VPRIV static
@@ -135,6 +136,9 @@ preprocessing_op_or_punc_clang_name(preprocessing_op_or_punc op);
 VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
                          const char *spelling, size_t length);
 VPRIV const char *keyword_clang_name(int keyword);
+/* the keyword table: its size, and an entry's spelling */
+VPRIV int keyword_table_size();
+VPRIV const char *keyword_spelling(int keyword);
 /* [lex.key]/2: and, or, ...: the operator they stand for */
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
@@ -198,6 +202,16 @@ VPRIV int64_t clang_declspec_attribute_value(
     const implementation_defined_behavior &b, const char *name, size_t length);
 VPRIV bool has_builtin(const implementation_defined_behavior &b,
                        const char *name, size_t length);
+
+/* ---- parse ------------------------------------------------------------- */
+
+/* [lex.operators]: whether a token is the operator or punctuator op, in
+   either of its spellings ([lex.digraph]) */
+inline bool is_operator(const token &t, preprocessing_op_or_punc op)
+{
+    return t.kind == token_kind::operator_or_punctuator &&
+           preprocessing_op_or_punc_primary(t.op_or_punc) == op;
+}
 
 } // namespace cplusplus
 

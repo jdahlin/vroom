@@ -1,0 +1,443 @@
+/*
+ * dcl.decl.cpp: [dcl.decl] Declarators.
+ *
+ *     init-declarator-list:
+ *         init-declarator
+ *         init-declarator-list , init-declarator
+ *
+ * [dcl.decl]/1: "A declarator declares a single variable, function, or
+ * type, within a declaration."  The parse also records what the
+ * declarator declares as far as the grammar needs it (declarator_facts):
+ * its declarator-id, and the first derivation applied to it
+ * ([dcl.meaning]/1).
+ */
+#include "../cplusplus-internal.h"
+
+namespace cplusplus
+{
+
+/*
+ *     init-declarator:
+ *         declarator initializer_opt
+ *         declarator requires-clause
+ *
+ * With first, the declarator is the last pending child already (the
+ * caller parsed it to see whether the declaration is a function-definition).
+ * The requires-clause is P7's.
+ */
+node_index parser::init_declarator(const decl_specifier_facts &specifiers,
+                                   declarator_facts &facts, bool first)
+{
+    size_t mark;
+    token_index first_token;
+    if (first) {
+        mark = pending.size() - 1;
+        syntax_child c = pending.back();
+        if (c.is_token())
+            first_token = c.index();
+        else
+            first_token = tree[c.index()].first_token;
+    } else {
+        mark = begin_node();
+        first_token = position;
+        declarator(declarator_form::concrete, facts);
+        if (failed())
+            return 0;
+        /* [basic.scope.pdecl]/1: the point of declaration is after the
+           complete declarator, before the initializer */
+        if (facts.name && !facts.qualified_id) {
+            name_kind kind = name_kind::other;
+            if (specifiers.typedef_)
+                kind = name_kind::type_name;
+            names.declare(facts.name, kind);
+        }
+    }
+    if (at(standard_keyword::requires_))
+        return beyond_this_step();
+    if (!initializer() && !failed())
+        return 0; /* no initializer: the declarator passes through */
+    if (failed())
+        return 0;
+    return finish_node(syntax_kind::init_declarator, mark, first_token);
+}
+
+/*
+ *     declarator:
+ *         ptr-declarator
+ *         noptr-declarator parameters-and-qualifiers trailing-return-type
+ *
+ *     abstract-declarator:
+ *         ptr-abstract-declarator
+ *         noptr-abstract-declarator_opt parameters-and-qualifiers trailing-return-type
+ *         abstract-pack-declarator
+ *
+ * The second alternatives are the first with a trailing-return-type after
+ * the last parameters-and-qualifiers: the noptr part ends with them, which
+ * the ptr-declarator parse finds first; the trailing-return-type is then
+ * added around it.  abstract-pack-declarator is P7's.
+ */
+node_index parser::declarator(declarator_form form, declarator_facts &facts)
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    ptr_declarator(form, facts);
+    if (failed())
+        return 0;
+    if (!at(preprocessing_op_or_punc::ARROW))
+        return facts.node;
+    /* [dcl.fct]/2's second form: only after parameters-and-qualifiers that
+       are the declarator's last part */
+    const syntax_child last = pending.back();
+    if (last.is_token() ||
+        (tree[last.index()].kind != syntax_kind::noptr_declarator &&
+         tree[last.index()].kind != syntax_kind::noptr_abstract_declarator &&
+         tree[last.index()].kind != syntax_kind::parameters_and_qualifiers))
+        return expected("parameters-and-qualifiers before '->'", "dcl.decl");
+    trailing_return_type();
+    if (failed())
+        return 0;
+    facts.trailing_return = true;
+    syntax_kind kind = syntax_kind::declarator;
+    if (!facts.has_id)
+        kind = syntax_kind::abstract_declarator;
+    facts.node = finish_node(kind, mark, first);
+    return facts.node;
+}
+
+/*
+ *     ptr-declarator:
+ *         noptr-declarator
+ *         ptr-operator ptr-declarator
+ *
+ *     ptr-abstract-declarator:
+ *         noptr-abstract-declarator
+ *         ptr-operator ptr-abstract-declarator_opt
+ *
+ * [dcl.ptr]/1, [dcl.ref]/1, [dcl.mptr]/1: in T D where D is ptr-operator
+ * D1, the ptr-operator applies to what D1 declares after D1's own parts:
+ * it is the first derivation only when D1 has none.
+ */
+node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
+{
+    if (at(standard_keyword::decltype_))
+        /* decltype-specifier :: begins a ptr-operator's or a
+           declarator-id's nested-name-specifier: P3 */
+        return beyond_this_step();
+    if (!at_ptr_operator())
+        return noptr_declarator(form, facts);
+    size_t mark = begin_node();
+    token_index first = position;
+    derivation kind = derivation::none;
+    ptr_operator(&kind);
+    if (failed())
+        return 0;
+    bool inner = form != declarator_form::abstract || at_ptr_operator() ||
+                 at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                 at(preprocessing_op_or_punc::LEFT_BRACKET);
+    if (form == declarator_form::either &&
+        !(at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
+          at(preprocessing_op_or_punc::TILDE) ||
+          at(preprocessing_op_or_punc::ELLIPSIS) || at_ptr_operator() ||
+          at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+          at(preprocessing_op_or_punc::LEFT_BRACKET)))
+        inner = false;
+    if (inner) {
+        ptr_declarator(form, facts);
+        if (failed())
+            return 0;
+    }
+    if (facts.first == derivation::none)
+        facts.first = kind;
+    syntax_kind node = syntax_kind::ptr_declarator;
+    if (!facts.has_id)
+        node = syntax_kind::ptr_abstract_declarator;
+    facts.node = finish_node(node, mark, first);
+    return facts.node;
+}
+
+/*
+ *     noptr-declarator:
+ *         declarator-id attribute-specifier-seq_opt
+ *         noptr-declarator parameters-and-qualifiers
+ *         noptr-declarator [ constant-expression_opt ] attribute-specifier-seq_opt
+ *         ( ptr-declarator )
+ *
+ *     noptr-abstract-declarator:
+ *         noptr-abstract-declarator_opt parameters-and-qualifiers
+ *         noptr-abstract-declarator_opt [ constant-expression_opt ] attribute-specifier-seq_opt
+ *         ( ptr-abstract-declarator )
+ *
+ * The constant-expression is P3's, kept as its tokens; the
+ * attribute-specifier-seqs are P2's.
+ */
+node_index parser::noptr_declarator(declarator_form form,
+                                    declarator_facts &facts)
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    bool head = false;
+    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+        form != declarator_form::abstract)
+        /* [ identifier-list ]: a structured binding ([dcl.struct.bind]): P5 */
+        return beyond_this_step();
+    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        form == declarator_form::abstract && !parameters_follow(form) &&
+        !(at_ptr_operator_at(1) ||
+          at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) ||
+          at(preprocessing_op_or_punc::LEFT_BRACKET, 1))) {
+        /* ( ptr-abstract-declarator ) needs a ptr-abstract-declarator: a
+           ( before anything else is not this declarator's (int(nullptr) in
+           auto (*p)() -> int(nullptr); is an initializer) */
+        return 0;
+    }
+    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        !(form != declarator_form::concrete && parameters_follow(form))) {
+        /* ( ptr-declarator ) */
+        add_token();
+        ptr_declarator(form, facts);
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return expected("')' to close the declarator", "dcl.decl");
+        head = true;
+    } else if (form != declarator_form::abstract &&
+               (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
+                at(preprocessing_op_or_punc::TILDE) ||
+                at(preprocessing_op_or_punc::ELLIPSIS))) {
+        declarator_id(facts);
+        if (failed())
+            return 0;
+        head = true;
+    } else if (form == declarator_form::concrete) {
+        return expected("a declarator", "dcl.decl");
+    }
+    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
+        return beyond_this_step(); /* an attribute-specifier-seq: P2 */
+
+    unsigned suffixes = 0;
+    for (;;) {
+        if (at(preprocessing_op_or_punc::LEFT_BRACKET)) {
+            add_token();
+            static constexpr preprocessing_op_or_punc stops[] = {
+                preprocessing_op_or_punc::RIGHT_BRACKET};
+            unparsed_until(stops, 1);
+            if (!accept(preprocessing_op_or_punc::RIGHT_BRACKET))
+                return expected("']' to close the array bound", "dcl.array");
+            if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+                at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
+                return beyond_this_step();
+            if (facts.first == derivation::none)
+                facts.first = derivation::array;
+        } else if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+                   (head || suffixes || form != declarator_form::concrete)) {
+            if (form != declarator_form::concrete) {
+                if (!parameters_follow(form))
+                    break;
+                parameters_and_qualifiers();
+                if (failed())
+                    return 0;
+            } else {
+                /* [dcl.ambig.res]/1: "the resolution is to consider any
+                   construct that could possibly be a declaration a
+                   declaration": parameters, unless they do not parse; then
+                   the ( is an initializer's */
+                failure_state failed_with;
+                bool parsed = false;
+                {
+                    tentative_parse attempt(*this);
+                    parameters_and_qualifiers();
+                    if (!failed()) {
+                        attempt.commit();
+                        parsed = true;
+                    } else {
+                        failed_with = failure;
+                    }
+                }
+                if (!parsed) {
+                    if (failed_with.beyond_step)
+                        return beyond_this_step();
+                    /* ... but only when the parenthesis could hold an
+                       expression-list: one that starts with a
+                       decl-specifier other than a type a functional cast
+                       could name (int(1), S{}) cannot */
+                    if (!parenthesis_could_be_initializer()) {
+                        failure = failed_with;
+                        return 0;
+                    }
+                    break;
+                }
+            }
+            if (facts.first == derivation::none)
+                facts.first = derivation::function;
+        } else {
+            break;
+        }
+        suffixes++;
+    }
+    if (!head && !suffixes)
+        return 0; /* noptr-abstract-declarator_opt: nothing */
+    if (!suffixes && pending.size() == mark + 1) {
+        /* declarator-id alone: it passes through */
+        return 0;
+    }
+    syntax_kind node = syntax_kind::noptr_declarator;
+    if (!facts.has_id)
+        node = syntax_kind::noptr_abstract_declarator;
+    facts.node = finish_node(node, mark, first);
+    return facts.node;
+}
+
+/*
+ * Whether ( at the current token could start an initializer's ( expression-list )
+ * ([dcl.init]/1): not when what follows is a decl-specifier that no
+ * expression starts with: a storage-class or function specifier, typedef,
+ * a cv-qualifier, or a type keyword or type-name not followed by ( or {
+ * ([expr.type.conv]: int(1), T{}).
+ */
+bool parser::parenthesis_could_be_initializer()
+{
+    const token &t = peek(1);
+    standard_keyword k = keyword_of(t);
+    switch (k) {
+    case standard_keyword::static_:
+    case standard_keyword::extern_:
+    case standard_keyword::thread_local_:
+    case standard_keyword::mutable_:
+    case standard_keyword::typedef_:
+    case standard_keyword::inline_:
+    case standard_keyword::constexpr_:
+    case standard_keyword::consteval_:
+    case standard_keyword::constinit_:
+    case standard_keyword::const_:
+    case standard_keyword::volatile_:
+    case standard_keyword::register_:
+        return false;
+    case standard_keyword::char_:
+    case standard_keyword::char8_t_:
+    case standard_keyword::char16_t_:
+    case standard_keyword::char32_t_:
+    case standard_keyword::wchar_t_:
+    case standard_keyword::bool_:
+    case standard_keyword::short_:
+    case standard_keyword::int_:
+    case standard_keyword::long_:
+    case standard_keyword::signed_:
+    case standard_keyword::unsigned_:
+    case standard_keyword::float_:
+    case standard_keyword::double_:
+    case standard_keyword::void_:
+        return at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 2) ||
+               at(preprocessing_op_or_punc::LEFT_BRACE, 2);
+    default:
+        break;
+    }
+    if (type_name_follows(1) && !nested_name_specifier_follows(1))
+        return at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 2) ||
+               at(preprocessing_op_or_punc::LEFT_BRACE, 2);
+    return true;
+}
+
+/*
+ *     ptr-operator:
+ *         * attribute-specifier-seq_opt cv-qualifier-seq_opt
+ *         & attribute-specifier-seq_opt
+ *         && attribute-specifier-seq_opt
+ *         nested-name-specifier * attribute-specifier-seq_opt cv-qualifier-seq_opt
+ */
+bool parser::at_ptr_operator_at(unsigned ahead)
+{
+    position += ahead;
+    bool found = at_ptr_operator();
+    position -= ahead;
+    return found;
+}
+
+bool parser::at_ptr_operator()
+{
+    if (at(preprocessing_op_or_punc::STAR) ||
+        at(preprocessing_op_or_punc::AMPERSAND) ||
+        at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+        return true;
+    /* nested-name-specifier * : the name's '::'s, then '*' */
+    unsigned i = 0;
+    if (at(preprocessing_op_or_punc::COLON_COLON))
+        i++;
+    bool any = i > 0;
+    while (at_identifier(i) &&
+           at(preprocessing_op_or_punc::COLON_COLON, i + 1)) {
+        i += 2;
+        any = true;
+    }
+    return any && at(preprocessing_op_or_punc::STAR, i);
+}
+
+node_index parser::ptr_operator(derivation *kind)
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    bool qualifiers = true;
+    if (at(preprocessing_op_or_punc::STAR)) {
+        *kind = derivation::pointer;
+        add_token();
+    } else if (at(preprocessing_op_or_punc::AMPERSAND) ||
+               at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) {
+        *kind = derivation::reference;
+        add_token();
+        qualifiers = false;
+    } else {
+        scope_index scope = 0;
+        bool known = false;
+        nested_name_specifier(&scope, &known);
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::STAR))
+            return expected("'*' after the nested-name-specifier", "dcl.mptr");
+        *kind = derivation::member_pointer;
+    }
+    if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
+        at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
+        return beyond_this_step();
+    if (qualifiers)
+        cv_qualifier_seq();
+    return finish_node(syntax_kind::ptr_operator, mark, first);
+}
+
+/*
+ *     cv-qualifier-seq:
+ *         cv-qualifier cv-qualifier-seq_opt
+ *
+ *     cv-qualifier:
+ *         const
+ *         volatile
+ */
+node_index parser::cv_qualifier_seq()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    while (accept(standard_keyword::const_) ||
+           accept(standard_keyword::volatile_))
+        ;
+    if (position == first)
+        return 0;
+    if (position == first + 1)
+        return 0; /* one cv-qualifier passes through */
+    return finish_node(syntax_kind::cv_qualifier_seq, mark, first);
+}
+
+/*
+ *     trailing-return-type:
+ *         -> type-id
+ */
+node_index parser::trailing_return_type()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    add_token();
+    type_id();
+    if (failed())
+        return 0;
+    return finish_node(syntax_kind::trailing_return_type, mark, first);
+}
+
+} // namespace cplusplus

@@ -43,6 +43,8 @@ LANGUAGE_FEATURE(delimited_escape_sequences, cplusplus_23, never, "P2290R3: deli
 /* C++26 */
 LANGUAGE_FEATURE(raw_string_delimiter_dollar_at_grave, cplusplus_26, never,
                  "P2558R2: $ @ ` in the basic character set")
+LANGUAGE_FEATURE(deleted_function_message, cplusplus_26, never,
+                 "P2573R2: = delete(\"should have a reason\")")
 /* [cpp] */
 LANGUAGE_FEATURE(long_long, cplusplus_11, never, "N1811: long long, in #if too ([cpp.cond]/12)")
 LANGUAGE_FEATURE(variadic_macros, cplusplus_11, never,

@@ -1,0 +1,28 @@
+# Lines of clang's tests where a declaration of ours is none of clang's
+# top-level declarations and the reason is clang's, not a boundary of ours
+# (bench/cxx-parse.py, "decls").  PATH:LINE reason; PATH relative to
+# clang/test.
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp:47 clang leaves out the static_assert: it names `e`, whose declaration on line 44 was invalid
+# ... and lines where clang's accept/reject (bench/cxx-parse.py, "syntax")
+# is not the standard's.  [implimits]: the quantities are minimums, and
+# exceeding clang's own limits is no syntax error.
+Parser/function-parameter-limit.cpp:11 [implimits] clang's limit of 65535 parameters
+Parser/function-parameter-limit.cpp:21 [implimits] clang's limit of 65535 parameters
+Parser/nested_function_prototype_overflow.cpp:4 [implimits] clang's limit on nested declarators
+Parser/max-tokens.cpp:5 clang's -fmax-tokens (a limit of its own, a warning made an error)
+# #pragma clang attribute: a pragma clang handles in its parser, not the
+# standard's grammar ([cpp.pragma]/1: implementation-defined)
+Parser/pragma-attribute.cpp:5 #pragma clang attribute push without a pop
+Parser/pragma-attribute.cpp:119 #pragma clang attribute pop without a push
+Parser/pragma-attribute.cpp:143 _Pragma("clang attribute pop") without a push
+Parser/pragma-attribute.cpp:221 #pragma clang attribute errors, reported at the next declaration
+Parser/pragma-attribute-declspec.cpp:5 #pragma clang attribute errors, reported at the next declaration
+# clang's error recovery: where it resumes after an erroneous declaration
+Parser/cxx-template-decl.cpp:248 }; after an erroneous template-declaration
+Parser/cxx-template-decl.cpp:252 }; after an erroneous template-declaration
+Parser/cxx-attributes-missing-closing.cpp:5 ;; after an unclosed [[
+Parser/cxx0x-attributes.cpp:123 class D final alignas ([l) {}]{}); recovered as clang does not
+# the standard followed where clang applies a later paper to every edition
+CXX/dcl.dcl/p4-0x.cpp:21 n4861 [dcl.pre] allows any string-literal in static_assert; clang applies P2361R6 (unevaluated strings, no encoding prefix) as a DR
+# a semantic rule clang reports from its parser
+CXX/drs/cwg30xx.cpp:12 [basic.scope.param]: a parameter declared twice is a redeclaration error, not a syntax error
