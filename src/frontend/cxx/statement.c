@@ -775,17 +775,57 @@ static void cxx_statement_parse1(cxx *c)
 		bool is_while = cxx_is_kw(c, CXX_KW_while);
 		uint32_t gen_cond, gen_body;
 
+		/* code generation: what a condition declaration declares (while (auto t = get()), switch (int k = f()))
+		   goes in a list of its own: the switch's block around it, the while's each iteration */
+		cc_id_list cpre;
+		void *cond_outer = c->gen_block;
+		uint32_t cond_temps = c->gen_block_temps;
+		bool cond_gen = cxx_gen_on(c) && c->gen_block;
+
+		cpre.n = 0;
 		cxx_advance(c);
 		cxx_scope_push(c, s);
+		if (cond_gen) {
+			cc_id_list_init(&cpre);
+			c->gen_block = &cpre;
+			c->gen_block_temps = 0;
+		}
 		c->gen_notemp += is_while;	/* (evaluated once per iteration: no temporaries with destructors) */
+		c->cond_decl = 1;
 		cxx_condition_parse(c);
+		c->cond_decl = 0;
 		c->gen_notemp -= is_while;
 		gen_cond = is_while ? cxx_gen_condition(c, c->enode) : cxx_gen_switch_value(c, c->enode);
+		if (cond_gen) {
+			c->gen_block = cond_outer;
+			c->gen_block_temps = cond_temps;
+		}
 		cxx_substatement_parse(c);
 		gen_body = cxx_gen_nested(c, sloc);
 		c->scope = outer;
-		if (gen_cond && gen_body && cxx_gen_on(c))
-			cxx_gen_statement(c, cxx_gen_new_statement(c, is_while ? AST_NODE_WHILE : AST_NODE_SWITCH, sloc, gen_cond, gen_body, 0));
+		if (gen_cond && gen_body && cxx_gen_on(c)) {
+			uint32_t st;
+
+			if (cond_gen && cpre.n && is_while) {
+				/* while (T x = e) body: while (1) { T x = e; if (x) ; else break; body } */
+				uint32_t empty = cxx_gen_new_statement(c, AST_NODE_BLOCK, sloc, 0, 0, 0);
+				uint32_t brk = cxx_gen_new_statement(c, AST_NODE_BREAK, sloc, 0, 0, 0);
+
+				cc_id_list_append(c->ast, &cpre, cxx_gen_new_statement(c, AST_NODE_IF, sloc, gen_cond, empty, brk));
+				cc_id_list_append(c->ast, &cpre, gen_body);
+				st = cxx_gen_new_statement(c, AST_NODE_WHILE, sloc,
+							   cc_condition_scalar(c->ast, cc_node_integer_new(c->ast, 1, cc_type_basic(AST_TYPE_INT), sloc), "statement"),
+							   cxx_gen_new_statement(c, AST_NODE_BLOCK, sloc, 0, cc_id_list_freeze(c->ast, &cpre), cpre.n), 0);
+			} else {
+				st = cxx_gen_new_statement(c, is_while ? AST_NODE_WHILE : AST_NODE_SWITCH, sloc, gen_cond, gen_body, 0);
+				if (cond_gen && cpre.n) {
+					cc_id_list_append(c->ast, &cpre, st);
+					st = cxx_gen_new_statement(c, AST_NODE_BLOCK, sloc, 0, cc_id_list_freeze(c->ast, &cpre), cpre.n);
+				}
+			}
+			cxx_gen_statement(c, st);
+		} else if (cond_gen && cpre.n)
+			cxx_gen_fail(c);
 		return;
 	}
 	case CXX_KW_do: {

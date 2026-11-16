@@ -2905,3 +2905,13 @@ ints.end())`, unit-bson och unit-ubjson).  Inget eget test: ett trait som vcc
 inte kan avgöra utan bibliotekshuvuden har jag inte hittat (`__is_trivially_assignable`
 på en klass med mall-operator= får en typ men inget värde i en malls villkor,
 ett separat glapp).  Verifierat med jsons fall.  Sviter gröna (171/171, 38/38, mangle).
+
+## Status 198 (2026-11-16)
+`while (T x = e)` och `switch (T x = e)` deklarerar och initierar variabeln
+(förut bara `if`): while blir `while (1) { T x = e; if (x) ; else break; body }`,
+switch får blocket runt sig.  I en mallinstans byggdes villkoret förut som
+bara `e` medan kroppens `x` aldrig fick ett värde: jsons
+`while (auto element_type = get())` i binary_reader läste skräp, och
+unit-bson snurrade (felkompilering; körningen tog tid i stället för att ge
+fel).  Test: `run/condition-declaration-while-switch.cpp` (med continue),
+som misslyckas utan ändringen.  Sviter gröna (172/172, 38/38, mangle).
