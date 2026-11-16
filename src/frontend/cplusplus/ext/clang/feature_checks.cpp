@@ -79,7 +79,28 @@ int preprocessor::clang_dynamic_macro(preprocessing_token &name,
     int64_t value = 0;
     switch (m.dynamic) {
     case dynamic_macro::has_attribute:
-        value = scope.size() ? 0 : has_gnu_attribute(behavior, o, n);
+        if (scope.size()) {
+            /* clang: a scoped name is asked as [[scope::name]] */
+            owned_buffer full;
+            vbuffer_format_append(full.get(), "%.*s::%.*s", (int)scope.size(),
+                                  scope.data(), (int)n, o);
+            value = clang_cpp_attribute_value(behavior, full.data(),
+                                              full.size(), false) != 0;
+        } else
+            value = has_gnu_attribute(behavior, o, n);
+        break;
+    case dynamic_macro::has_c_attribute: {
+        owned_buffer full;
+        if (scope.size())
+            vbuffer_format_append(full.get(), "%.*s::", (int)scope.size(),
+                                  scope.data());
+        vbuffer_append(full.get(), o, n);
+        value =
+            clang_cpp_attribute_value(behavior, full.data(), full.size(), true);
+        break;
+    }
+    case dynamic_macro::has_declspec_attribute:
+        value = clang_declspec_attribute_value(behavior, o, n);
         break;
     case dynamic_macro::has_feature:
     case dynamic_macro::has_extension:
@@ -122,26 +143,121 @@ int preprocessor::clang_dynamic_macro(preprocessing_token &name,
     return 1;
 }
 
-/* the data, from clang once: not generated yet, every answer is 0 */
+/* ---- the answers, from clang once (feature-checks.inc) ---------------- */
+
+namespace
+{
+
+enum class check_kind : uint8_t {
+    attribute,
+    builtin,
+    c_attribute,
+    cpp_attribute,
+    declspec_attribute,
+    extension,
+    feature
+};
+
+struct feature_check {
+    check_kind kind;
+    const char *operand;
+    int64_t value;
+    uint64_t variants;
+};
+
+constexpr feature_check feature_checks[] = {
+#define FEATURE_CHECK(kind, operand, value, variants)                          \
+    {check_kind::kind, operand, value, variants},
+#include "feature-checks.inc"
+#undef FEATURE_CHECK
+};
+
+/* the variant bit of cpp.predefined.inc's mode */
+uint64_t check_variant(const implementation_defined_behavior &b)
+{
+    static constexpr standard_edition editions[] = {
+        standard_edition::cplusplus_98, standard_edition::cplusplus_11,
+        standard_edition::cplusplus_14, standard_edition::cplusplus_17,
+        standard_edition::cplusplus_20, standard_edition::cplusplus_23,
+        standard_edition::cplusplus_26};
+    unsigned e = 0;
+    for (unsigned i = 0; i < 7; i++)
+        if (b.edition == editions[i])
+            e = i;
+    bool char8_default = b.edition >= standard_edition::cplusplus_20;
+    return UINT64_C(1)
+           << (((e * 2 + b.gnu_extensions) * 2 + b.microsoft_extensions) * 2 +
+               (b.char8_t_keyword != char8_default));
+}
+
+int compare_check(check_kind kind, const char *name, size_t n,
+                  const feature_check &c)
+{
+    if (kind != c.kind)
+        return kind < c.kind ? -1 : 1;
+    int r = strncmp(name, c.operand, n);
+    if (r)
+        return r;
+    return c.operand[n] ? -1 : 0;
+}
+
+int64_t answer(const implementation_defined_behavior &b, check_kind kind,
+               const char *name, size_t n)
+{
+    size_t lo = 0, hi = sizeof feature_checks / sizeof feature_checks[0];
+    uint64_t bit = check_variant(b);
+    /* the rows of one operand are adjacent (one per value) */
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (compare_check(kind, name, n, feature_checks[mid]) > 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    for (; lo < sizeof feature_checks / sizeof feature_checks[0] &&
+           !compare_check(kind, name, n, feature_checks[lo]);
+         lo++)
+        if (feature_checks[lo].variants & bit)
+            return feature_checks[lo].value;
+    return 0;
+}
+
+} // namespace
+
 bool has_feature(const implementation_defined_behavior &b, const char *name,
                  size_t length, bool extension)
 {
-    (void)b, (void)name, (void)length, (void)extension;
-    return false;
+    return answer(b, extension ? check_kind::extension : check_kind::feature,
+                  name, length) != 0;
 }
 
 int64_t has_gnu_attribute(const implementation_defined_behavior &b,
                           const char *name, size_t length)
 {
-    (void)b, (void)name, (void)length;
-    return 0;
+    return answer(b, check_kind::attribute, name, length);
 }
 
 bool has_builtin(const implementation_defined_behavior &b, const char *name,
                  size_t length)
 {
-    (void)b, (void)name, (void)length;
-    return false;
+    return answer(b, check_kind::builtin, name, length) != 0;
+}
+
+/* [cpp.cond]/6: "For other attributes recognized by the implementation,
+   the value is implementation-defined": clang's; operand is scope::name */
+int64_t clang_cpp_attribute_value(const implementation_defined_behavior &b,
+                                  const char *operand, size_t length,
+                                  bool c_attribute)
+{
+    return answer(
+        b, c_attribute ? check_kind::c_attribute : check_kind::cpp_attribute,
+        operand, length);
+}
+
+int64_t clang_declspec_attribute_value(const implementation_defined_behavior &b,
+                                       const char *name, size_t length)
+{
+    return answer(b, check_kind::declspec_attribute, name, length);
 }
 
 } // namespace cplusplus

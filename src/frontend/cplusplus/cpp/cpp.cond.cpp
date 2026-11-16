@@ -33,6 +33,7 @@
  * choices are followed (its PPExpressions.cpp).
  */
 #include <stdio.h>
+#include <sys/stat.h>
 
 #include "../cplusplus-internal.h"
 
@@ -249,10 +250,12 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
     case preprocessing_token_kind::identifier: {
         if (condition_word(p, t, "defined"))
             return evaluate_defined(p, r, v);
-        /* [ext.clang] clang_has_include_next */
+        /* [ext.clang] clang_has_include_next, clang_embed (__has_embed) */
         if (condition_word(p, t, "__has_include") ||
             (condition_word(p, t, "__has_include_next") &&
-             p.behavior.has(extension::clang_has_include_next))) {
+             p.behavior.has(extension::clang_has_include_next)) ||
+            (condition_word(p, t, "__has_embed") &&
+             p.behavior.has(extension::clang_feature_checks))) {
             int64_t found;
             if (!p.has_include(r, t, condition_word(p, t, "__has_include_next"),
                                &found))
@@ -984,6 +987,25 @@ bool preprocessor::has_include(expression_reader &r,
     }
     angled = header.data()[0] == '<';
     r.advance_unexpanded();
+    bool embed = condition_word(*this, name, "__has_embed"), parameters = false;
+    if (embed) {
+        /* [ext.clang] embed-parameters: skipped; a file found is 1, an
+           empty one 2 (C23 6.10.1) */
+        unsigned depth = 0;
+        while (!is_end(r.token) &&
+               (depth ||
+                !is_operator(r.token,
+                             preprocessing_op_or_punc::RIGHT_PARENTHESIS))) {
+            parameters = true;
+            if (is_operator(r.token,
+                            preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                depth++;
+            else if (is_operator(r.token,
+                                 preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                depth--;
+            r.advance();
+        }
+    }
     if (!is_operator(r.token, preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         diagnostics.issue(diagnostic_id::err_pp_expected_after,
                           r.token.location)
@@ -1001,6 +1023,12 @@ bool preprocessor::has_include(expression_reader &r,
     owned_buffer path;
     *result = find_header(header.data() + 1, header.size() - 2, angled, after,
                           path, &directory, &system);
+    if (embed && *result) {
+        struct stat st;
+        if (stat(path.data(), &st) == 0 && st.st_size == 0)
+            *result = 2;
+        (void)parameters;
+    }
     return true;
 }
 
@@ -1040,13 +1068,18 @@ int64_t cpp_attribute_value(const implementation_defined_behavior &b,
         {"nodiscard", 201907},          {"noreturn", 200809},
         {"unlikely", 201803},
     };
-    (void)b;
-    if (scope_length)
+    if (!scope_length)
+        for (const auto &a : table18)
+            if (strlen(a.name) == length && !memcmp(a.name, name, length))
+                return a.value;
+    /* [ext.clang] the attributes clang recognizes */
+    if (!b.has(extension::clang_feature_checks))
         return 0;
-    for (const auto &a : table18)
-        if (strlen(a.name) == length && !memcmp(a.name, name, length))
-            return a.value;
-    return 0;
+    owned_buffer full;
+    if (scope_length)
+        vbuffer_format_append(full.get(), "%.*s::", (int)scope_length, scope);
+    vbuffer_append(full.get(), name, length);
+    return clang_cpp_attribute_value(b, full.data(), full.size(), false);
 }
 
 } // namespace cplusplus

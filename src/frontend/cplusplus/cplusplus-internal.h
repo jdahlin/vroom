@@ -182,6 +182,11 @@ VPRIV bool has_feature(const implementation_defined_behavior &b,
                        const char *name, size_t length, bool extension);
 VPRIV int64_t has_gnu_attribute(const implementation_defined_behavior &b,
                                 const char *name, size_t length);
+VPRIV int64_t
+clang_cpp_attribute_value(const implementation_defined_behavior &b,
+                          const char *operand, size_t length, bool c_attribute);
+VPRIV int64_t clang_declspec_attribute_value(
+    const implementation_defined_behavior &b, const char *name, size_t length);
 VPRIV bool has_builtin(const implementation_defined_behavior &b,
                        const char *name, size_t length);
 

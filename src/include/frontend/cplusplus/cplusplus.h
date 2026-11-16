@@ -210,9 +210,12 @@ struct diagnostic_options {
     bool pedantic = false, pedantic_errors = false, warnings_as_errors = false,
          no_warnings = false;
     /* -W<group> (true) and -Wno-<group> (false), in command line order */
+    /* -W<group>, -Wno-<group>, -Werror=<group> (error 1), -Wno-error=<group>
+       (error -1) */
     struct group_setting {
         const char *group;
         bool enabled;
+        int8_t error;
     } group_settings[32];
     unsigned group_setting_count = 0;
 

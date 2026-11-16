@@ -296,6 +296,93 @@ def predefined(clang='clang-23'):
     return '\n'.join(lines) + '\n'
 
 
+# [ext.clang] clang_feature_checks: the names clang's tables have, asked of
+# clang in each mode (the variants of cpp.predefined.inc); only the nonzero
+# answers are kept
+def llvm_file(path):
+    import subprocess
+    for w in (os.path.join(R, 'work'), work_dir()):
+        p = subprocess.run(['git', '-C', os.path.join(w, 'testsuites', 'llvm'), 'show', 'HEAD:' + path],
+                           capture_output=True, text=True)
+        if p.returncode == 0:
+            return p.stdout
+    raise FileNotFoundError(path + ': bench/fetch-testsuites.sh llvm')
+
+
+def feature_check_queries():
+    """(kind, operand) for every name clang's tables have"""
+    queries = []
+    features = llvm_file('clang/include/clang/Basic/Features.def')
+    for m in re.finditer(r'^(FEATURE|EXTENSION)\((\w+),', features, re.M):
+        queries.append(('feature', m.group(2)))
+        queries.append(('extension', m.group(2)))
+    attrs = llvm_file('clang/include/clang/Basic/Attr.td')
+    gnu, cxx, c23, declspec = set(), set(), set(), set()
+    for m in re.finditer(r'(GNU|GCC|Clang|CXX11|C23|Declspec)<"([^"]*)"(?:\s*,\s*"([^"]*)")?', attrs):
+        kind, a, b = m.groups()
+        if kind == 'GNU':
+            gnu.add(a)
+        elif kind == 'GCC':
+            gnu.add(a); cxx.add(('gnu', a)); c23.add(('gnu', a))
+        elif kind == 'Clang':
+            gnu.add(a); cxx.add(('clang', a)); c23.add(('clang', a))
+        elif kind == 'CXX11' and b is not None:
+            cxx.add((a, b))
+        elif kind == 'C23' and b is not None:
+            c23.add((a, b))
+        elif kind == 'Declspec':
+            declspec.add(a)
+    queries += [('attribute', n) for n in sorted(gnu)]
+    queries += [('cpp_attribute', f'{ns}::{n}' if ns else n) for ns, n in sorted(cxx)]
+    queries += [('c_attribute', f'{ns}::{n}' if ns else n) for ns, n in sorted(c23)]
+    queries += [('declspec_attribute', n) for n in sorted(declspec)]
+    names = set()
+    for f in ('Builtins.td', 'BuiltinsAArch64.td', 'BuiltinsAArch64Base.td', 'Builtins.def',
+              'BuiltinsARMBase.td', 'TokenKinds.def'):
+        try:
+            text = llvm_file('clang/include/clang/Basic/' + f)
+        except Exception:
+            continue
+        names.update(re.findall(r'\b(__\w+)\b', text))
+    queries += [('builtin', n) for n in sorted(names) if not n.endswith('_')]
+    return queries
+
+
+def feature_checks(clang='clang-23'):
+    import subprocess
+    macro = {'feature': '__has_feature', 'extension': '__has_extension', 'builtin': '__has_builtin',
+             'attribute': '__has_attribute', 'cpp_attribute': '__has_cpp_attribute',
+             'c_attribute': '__has_c_attribute', 'declspec_attribute': '__has_declspec_attribute'}
+    queries = feature_check_queries()
+    source = ''.join(f'@{i} {macro[k]}({n})\n' for i, (k, n) in enumerate(queries))
+    rows = {}
+    for e, edition in enumerate(EDITIONS):
+        for gnu in (0, 1):
+            for ms in (0, 1):
+                for char8 in (0, 1):
+                    variant = ((e * 2 + gnu) * 2 + ms) * 2 + char8
+                    args = [clang, '-cc1', '-triple', PREDEFINE_TRIPLE, '-x', 'c++', '-E', '-P',
+                            f'-std={"gnu" if gnu else "c"}++{edition}', '-w', '-']
+                    if ms:
+                        args.append('-fms-extensions')
+                    if char8:
+                        args.append('-fno-char8_t' if edition not in ('98', '11', '14', '17') else '-fchar8_t')
+                    out = subprocess.run(args, input=source, capture_output=True, text=True).stdout
+                    for m in re.finditer(r'^@(\d+) (\d+)L?$', out, re.M):
+                        value = int(m.group(2))
+                        if value:
+                            key = queries[int(m.group(1))] + (value,)
+                            rows[key] = rows.get(key, 0) | (1 << variant)
+    version = subprocess_version(clang)
+    lines = [HEADER % f'{version}: its answers to __has_feature, __has_builtin, ... ({PREDEFINE_TRIPLE})',
+             '/* FEATURE_CHECK(kind, operand, value, variants): the nonzero answers, in',
+             '   the modes whose bit is set (as cpp/cpp.predefined.inc), sorted by kind',
+             '   and operand */']
+    for (kind, name, value), mask in sorted(rows.items()):
+        lines.append(f'FEATURE_CHECK({kind}, {c_string(name)}, {value}, 0x{mask:014x}ull)')
+    return '\n'.join(lines) + '\n'
+
+
 def subprocess_version(clang):
     import subprocess
     out = subprocess.run([clang, '--version'], capture_output=True, text=True).stdout
@@ -315,6 +402,7 @@ def main():
         'lex/lex.name.inc': xid(),
         'lex/lex.charset.names.inc': names(),
         'cpp/cpp.predefined.inc': predefined(),
+        'ext/clang/feature-checks.inc': feature_checks(),
     }
     stale = 0
     for rel, text in files.items():

@@ -113,11 +113,15 @@ bool diagnostic_options::parse(const char *argument)
         warnings_as_errors = true;
     else if (!strcmp(argument, "-w"))
         no_warnings = true;
+    else if (!strncmp(argument, "-Werror=", 8) && group_setting_count < 32)
+        group_settings[group_setting_count++] = {argument + 8, true, 1};
+    else if (!strncmp(argument, "-Wno-error=", 11) && group_setting_count < 32)
+        group_settings[group_setting_count++] = {argument + 11, true, -1};
     else if (!strncmp(argument, "-Wno-", 5) && group_setting_count < 32)
-        group_settings[group_setting_count++] = {argument + 5, false};
+        group_settings[group_setting_count++] = {argument + 5, false, 0};
     else if (!strncmp(argument, "-W", 2) && argument[2] &&
              !strchr(argument, '=') && group_setting_count < 32)
-        group_settings[group_setting_count++] = {argument + 2, true};
+        group_settings[group_setting_count++] = {argument + 2, true, 0};
     else
         return false;
     return true;
@@ -148,10 +152,18 @@ diagnostic_severity diagnostic_options::severity(diagnostic_id id) const
     if (d.kind == diagnostic_class::ERROR)
         return s;
     bool explicit_setting = false;
+    int error = 0;
     if (*d.group)
         for (unsigned i = 0; i < group_setting_count; i++)
             if (group_reaches(group_settings[i].group,
                               strlen(group_settings[i].group), d.group, 0)) {
+                if (group_settings[i].error) {
+                    /* -Werror=x also enables x; -Wno-error=x only demotes */
+                    error = group_settings[i].error;
+                    if (error > 0 && s == diagnostic_severity::ignored)
+                        s = diagnostic_severity::warning;
+                    continue;
+                }
                 explicit_setting = true;
                 if (!group_settings[i].enabled)
                     s = diagnostic_severity::ignored;
@@ -167,7 +179,8 @@ diagnostic_severity diagnostic_options::severity(diagnostic_id id) const
     }
     if (s == diagnostic_severity::warning && no_warnings)
         s = diagnostic_severity::ignored;
-    if (s == diagnostic_severity::warning && warnings_as_errors)
+    if (s == diagnostic_severity::warning &&
+        (error > 0 || (warnings_as_errors && error == 0)))
         s = diagnostic_severity::error;
     return s;
 }

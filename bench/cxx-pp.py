@@ -12,8 +12,13 @@ RUN line, with its preprocessor and language options:
           token's kind, spelling, place (the macro invocation's for a
           replaced token), spelling place (not for clang's scratch space)
           and [StartOfLine]/[LeadingSpace]
-  diags   the diagnostics of clang's Lex and Common components (every one
-          the front end could issue), from both runs: place, level, text
+  errors  the lines with an error, of clang's Lex and Common components
+          (those the front end could issue), from both runs: [intro.compliance]/2
+          asks for "at least one diagnostic message" for an ill-formed
+          program, so where an error is, not its text, is compared; warnings
+          are counted but do not fail a run
+  diags   the diagnostics the front end issues somewhere (its own, already
+          written): place, level and text as clang's, warnings included
   macros  cxxlex -E -dM vs clang -cc1 -E -dM: the macros defined at the end
 
 Usage: bench/cxx-pp.py [-v] [-j N] [--bin-dir DIR] [--list] [PATTERN...]
@@ -82,13 +87,17 @@ def run_lines(path):
         lines.append(cur.strip())
         cur = ''
     out = []
+    # a test that makes its inputs at run time (split-file, files under %t)
+    # cannot run here
+    if any('split-file' in l or re.search(r'%clang_cc1[^|]*%t', l) for l in lines):
+        return None
     for line in lines:
         cmd = line.split('|')[0]
         if '%clang_cc1' not in cmd or 'not ' in cmd.split('%clang_cc1')[0].replace('not %', ''):
             pass
         if '%clang_cc1' not in cmd:
             continue
-        args = cmd.split()
+        args = cmd.replace('%S', '.').replace('%p', '.').split()
         args = args[args.index('%clang_cc1') + 1:]
         lang, opts, i = None, [], 0
         while i < len(args):
@@ -149,16 +158,21 @@ def parse_tokens(text):
     return out
 
 
-def lex_diagnostics():
-    """regexes of the text of every diagnostic of clang's Lex and Common"""
+def lex_diagnostics(used_only=False):
+    """regexes of the text of every diagnostic of clang's Lex and Common, or
+    of those the front end issues somewhere"""
+    used = set()
+    for path in glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True):
+        used.update(re.findall(r'diagnostic_id::(\w+)', open(path).read()))
     inc = open(os.path.join(FRONTEND, 'intro', 'diagnostic-messages.inc')).read()
     out = []
     for m in re.finditer(r'^DIAGNOSTIC\((\w+), (\w+), \w+, "[^"]*", "((?:[^"\\]|\\.)*)"\)$', inc, re.M):
-        if m.group(2) == 'NOTE':
+        if m.group(2) == 'NOTE' or (used_only and m.group(1) not in used):
             continue
         fmt = bytes(m.group(3), 'utf-8').decode('unicode_escape')
-        if fmt in ('%0',):
-            out.append(re.compile(r'.*'))
+        if fmt in ('%0',):  # #error's, #pragma message's: any text
+            if not used_only:
+                out.append(re.compile(r'.*'))
             continue
         out.append(re.compile(format_regex(fmt)))
     return out
@@ -229,7 +243,7 @@ def first_difference(a, b):
     return ''
 
 
-def check(test, opts, clang, cxxlex, regexes):
+def check(test, opts, clang, cxxlex, regexes, issued):
     d, name = os.path.dirname(test), os.path.basename(test)
     lang = ['-x', 'c++'] if not name.endswith('.cpp') else []
     res = {}
@@ -238,13 +252,21 @@ def check(test, opts, clang, cxxlex, regexes):
         return test, ' '.join(opts), None  # an edition the front end does not have
     if rc < 0 or rc > 1:
         res['tokens'] = f'cxxlex failed ({rc}): {ours_err[-200:]}'
-        res['diags'] = res['macros'] = 'not run'
+        res['errors'] = res['diags'] = res['macros'] = 'not run'
+        res['#warnings'] = 0
         return test, ' '.join(opts), res
     _, theirs, _ = run([clang, '-cc1', '-dump-tokens'] + lang + opts + [name], cwd=d)
     a, b = parse_tokens(ours), parse_tokens(theirs)
     res['tokens'] = first_difference(a, b) if a != b else ''
     mine, theirs_d = parse_diagnostics(ours_err, regexes), parse_diagnostics(theirs, regexes)
-    missing, extra = sorted(theirs_d - mine), sorted(mine - theirs_d)
+    errors = lambda d: {(f, row) for f, row, _, level, _ in d if level != 'warning'}
+    missing, extra = sorted(errors(theirs_d) - errors(mine)), sorted(errors(mine) - errors(theirs_d))
+    res['errors'] = '' if not missing and not extra else \
+        f'clang only {len(missing)} {missing[:3]} cxxlex only {len(extra)} {extra[:3]}'
+    warned = lambda d: {(f, row, msg) for f, row, _, level, msg in d if level == 'warning'}
+    res['#warnings'] = len(warned(theirs_d) ^ warned(mine))
+    own = lambda d: {x for x in d if any(r.fullmatch(x[4]) for r in issued)}
+    missing, extra = sorted(own(theirs_d) - own(mine)), sorted(own(mine) - own(theirs_d))
     res['diags'] = '' if not missing and not extra else \
         f'missing {len(missing)} {missing[:2]} extra {len(extra)} {extra[:2]}'
     ours_m, _, _ = run([cxxlex, '-E', '-dM'] + opts + [name], cwd=d)
@@ -291,11 +313,16 @@ def main():
     if args.patterns:
         found = [t for t in found if any(p in t for p in args.patterns)]
     regexes = lex_diagnostics()
-    jobs = [(t, o) for t in found for o in run_lines(t) or [['-std=gnu++17']]]
+    issued = lex_diagnostics(used_only=True)
+    runnable = {t: run_lines(t) for t in found}
+    unrunnable = [t for t, r in runnable.items() if r is None]
+    found = [t for t in found if runnable[t] is not None]
+    jobs = [(t, o) for t in found for o in runnable[t] or [['-std=gnu++17']]]
     with concurrent.futures.ThreadPoolExecutor(args.j) as pool:
-        results = list(pool.map(lambda j: check(j[0], j[1], clang, cxxlex, regexes), jobs))
+        results = list(pool.map(lambda j: check(j[0], j[1], clang, cxxlex, regexes, issued), jobs))
     known = known_differences()
-    kinds = ('tokens', 'diags', 'macros')
+    kinds = ('tokens', 'errors', 'diags', 'macros')
+    warnings_differ = 0
     passed = dict.fromkeys(kinds, 0)
     all_ok = known_runs = 0
     per_test = {}
@@ -303,6 +330,7 @@ def main():
     results = [r for r in results if r[2] is not None]
     for test, opts, res in results:
         rel = os.path.relpath(test, llvm) if test.startswith(llvm) else os.path.relpath(test, SPEC)
+        warnings_differ += res.pop('#warnings')
         bad = {k: v for k, v in res.items() if v}
         excused = bad and set(bad) <= (known.get(f'{rel} [{opts}]') or known.get(rel) or set())
         known_runs += bool(excused)
@@ -319,7 +347,9 @@ def main():
     print(f'{n} runs of {len(found)} tests: ' + ', '.join(f'{k} {v}/{n}' for k, v in passed.items()) +
           f'; all three {all_ok}/{n} ({known_runs} known differences); '
           f'tests with every run passing {sum(per_test.values())}/{len(per_test)}' +
-          (f' ({skipped} runs in editions cxxlex lacks)' if skipped else ''))
+          (f' ({skipped} runs in editions cxxlex lacks)' if skipped else '') +
+          f'; warnings differing (not compared): {warnings_differ}' +
+          f'; {len(unrunnable)} tests make their inputs at run time (not run)')
     return 0 if all_ok == n else 1
 
 
