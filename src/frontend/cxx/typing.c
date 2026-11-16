@@ -661,8 +661,23 @@ static void cxx_call_type_impl1(cxx *c, cxx_entity *set, ast_qualified_type call
 			return;
 		}
 		if (skip_explicit && e->fn_explicit && !(skip_explicit == 2 && e->fn_explicit == 2)) {
-			unknown |= e->fn_explicit == 2;
-			continue;	/* (copy-initialization: not through an explicit constructor) */
+			/* (copy-initialization: not through an explicit constructor; one explicit(cond) vcc cannot decide
+			   leaves the call unknown only when it is viable otherwise: pair's, for a vector's iterator) */
+			if (e->fn_explicit == 2) {
+				bool viable_here = true;
+
+				if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE) {
+					ast_qualified_type r0;
+
+					viable_here = nargs <= 16 && cxx_ftemplate_deduce(c, e, xargs, nxargs, args, lval, nargs, &r0, false) != 0;
+				} else if (e->kind == CXX_ENTITY_VALUE && e->ty != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, e->ty) == AST_TYPE_FUNCTION) {
+					const ctype *ft0 = AST_TYPE(c->ast, e->ty);
+
+					viable_here = (ft0->flags & AST_TYPE_FLAG_VARIADIC) ? nargs + e->ndefaults >= ft0->n : nargs <= ft0->n && nargs + e->ndefaults >= ft0->n;
+				}
+				unknown |= viable_here;
+			}
+			continue;
 		}
 		if (e->kind == CXX_ENTITY_FUNCTION_TEMPLATE && !e->fn_static && ((obj == 2 && !(e->fn_const & 1)) ||
 		    (obj_rv == 1 && (e->fn_const & 4)) || (obj_rv == 2 && (e->fn_const & 8))))
@@ -1381,7 +1396,7 @@ static uint32_t cxx_brace_count(cxx *c, uint32_t pos)
 /* can std::initializer_list<E> (il) take the braced list's elements: an element that is a braced list of more
    than one element is no scalar E's ([dcl.init.list]/3.10: vector<uint8_t>{{1, 2, 3}} is a copy of the vector
    the inner list makes, not a list of one byte) */
-static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qualified_type *args, uint32_t nargs)
+static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs)
 {
 	cxx_scope *s;
 	cxx_entity *vt;
@@ -1391,8 +1406,22 @@ static bool cxx_ilist_elements_fit(cxx *c, ast_qualified_type il, const ast_qual
 		il = AST_TYPE(c->ast, il)->base;
 	/* (E: its value_type) */
 	if (!(s = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(il))) || !(vt = cxx_lookup_local(s, vintern_cstr("value_type"))) ||
-	    vt->kind != CXX_ENTITY_TYPE || (e = vt->ty) == CXX_TY_UNKNOWN || cc_type_is_record(c->ast, e))
+	    vt->kind != CXX_ENTITY_TYPE || (e = vt->ty) == CXX_TY_UNKNOWN)
 		return true;
+	if (cc_type_is_record(c->ast, e)) {
+		/* a class element: an argument that does not convert to it at all rules the list constructor out
+		   (vector<pair<const K, V>>{first, last, alloc} in json's ordered_map: the iterator-range one) */
+		ast_qualified_type et = c->etype;
+		bool el = c->elval;
+		bool fits = true;
+
+		for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS && fits; i++)
+			if (!(c->carg_brace[i] && c->carg_brace[i] < c->ntok && c->tok[c->carg_brace[i]].kind == LEX_TOKEN_LEFT_BRACE) &&
+			    args && args[i] != CXX_TY_UNKNOWN && !cxx_type_has_placeholder(c, args[i]))
+				fits = cxx_arg_rank(c, AST_QUALIFIED_TYPE_UNQUALIFIED(e), args[i], lval ? lval[i] != 0 : false, lval != NULL) < 6;
+		c->etype = et, c->elval = el;
+		return fits;
+	}
 	for (uint32_t i = 0; i < nargs && i < CXX_MAX_ARGS; i++)
 		if (c->carg_brace[i] && c->carg_brace[i] < c->ntok && c->tok[c->carg_brace[i]].kind == LEX_TOKEN_LEFT_BRACE) {
 			uint32_t k = cxx_brace_count(c, c->carg_brace[i]);
@@ -1450,7 +1479,7 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t, const ast_qualified_type *
 				continue;
 			ft = AST_TYPE(c->ast, e->ty);
 			if (ft->n >= 1 && ft->n <= 1u + e->ndefaults && cxx_is_initializer_list(c, c->ast->params[ft->aux]) &&
-			    cxx_ilist_elements_fit(c, c->ast->params[ft->aux], args, nargs)) {
+			    cxx_ilist_elements_fit(c, c->ast->params[ft->aux], args, lval, nargs)) {
 				/* (the one with fewest parameters: vector(initializer_list) before (initializer_list, allocator)) */
 				if (!c->ctor_ilist || ft->n < AST_TYPE(c->ast, c->ctor_ilist->ty)->n)
 					c->ctor_ilist = e;

@@ -2878,3 +2878,12 @@ den förras, och dess definition utanför klassen användes aldrig (libc++:s
 basic_ifstream(const _Tp&)`; unit-msgpack länkade inte).  Test:
 `run/ctor-template-after-declared-ctor.cpp`, som misslyckas utan ändringen.
 Sviter gröna (169/169, 38/38, mangle).
+
+## Status 195 (2026-11-16)
+`C{first, last, alloc}` av en behållare med klasselement väljer inte
+initializer_list-konstruktorn när ett argument inte konverterar till elementet
+alls; en konstruktor med `explicit(villkor)` som vcc inte kan avgöra gör
+anropet okänt bara om den annars är valbar (pair:s, för en vectors iterator).
+Jsons `ordered_map(It, It, alloc)`.  Test:
+`run/ilist-ctor-elements-not-convertible.cpp`, som misslyckas utan ändringen.
+Sviter gröna (170/170, 38/38, mangle).
