@@ -1,0 +1,7 @@
+# C.4.9 [[utilities]](lib/utilities.md): general utilities library [diff.cpp03.utilities]
+
+[Contents](README.md) · up: [C.4 C++ and ISO C++ 2003 \[diff.cpp03\]](diff.cpp03.md) · prev: [C.4.8 [[diagnostics]](lib/diagnostics.md): diagnostics library \[diff.cpp03.diagnostics\]](diff.cpp03.diagnostics.md) · next: [C.4.10 [[strings]](lib/strings.md): strings library \[diff.cpp03.strings\]](diff.cpp03.strings.md)
+
+**1** **Affected subclause:** [[util.dynamic.safety]](lib/util.dynamic.safety.md) <br>**Change:** Minimal support for garbage-collected regions. <br>**Rationale:** Required by new feature. <br>**Effect on original feature:** Valid C++ 2003 code, compiled without traceable pointer support, that interacts with newer C++ code using regions declared reachable may have different runtime behavior.
+
+**2** **Affected subclauses:** [[refwrap]](lib/refwrap.md), [[arithmetic.operations]](lib/arithmetic.operations.md), [[comparisons]](lib/comparisons.md), [[logical.operations]](lib/logical.operations.md), [[bitwise.operations]](lib/bitwise.operations.md) <br>**Change:** Standard function object types no longer derived from `std::unary_function` or `std::binary_function`. <br>**Rationale:** Superseded by new feature; `unary_function` and `binary_function` are no longer defined. <br>**Effect on original feature:** Valid C++ 2003 code that depends on function object types being derived from `unary_function` or `binary_function` may fail to compile in this International Standard.

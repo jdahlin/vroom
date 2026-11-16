@@ -1,0 +1,5 @@
+# C.4.7 [[support]](lib/support.md): language support library [diff.cpp03.language.support]
+
+[Contents](README.md) · up: [C.4 C++ and ISO C++ 2003 \[diff.cpp03\]](diff.cpp03.md) · prev: [C.4.6 [[library]](lib/library.md): library introduction \[diff.cpp03.library\]](diff.cpp03.library.md) · next: [C.4.8 [[diagnostics]](lib/diagnostics.md): diagnostics library \[diff.cpp03.diagnostics\]](diff.cpp03.diagnostics.md)
+
+**1** **Affected subclause:** [[new.delete.single]](lib/new.delete.single.md) <br>**Change:** `operator new` may throw exceptions other than `std::bad_alloc`. <br>**Rationale:** Consistent application of `noexcept`. <br>**Effect on original feature:** Valid C++ 2003 code that assumes that global `operator new` only throws `std::bad_alloc` may execute differently in this International Standard. Valid C++ 2003 code that replaces the global replaceable `operator new` is ill-formed in this International Standard, because the exception specification of `throw(std::bad_alloc)` was removed.

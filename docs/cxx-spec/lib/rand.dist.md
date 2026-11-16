@@ -1,0 +1,32 @@
+# 26.6.8 Random number distribution class templates [rand.dist]
+
+[Contents](../README.md) · up: [26.6 Random number generation \[rand\]](rand.md) · prev: [26.6.7.2 Function template `generate_canonical` \[rand.util.canonical\]](rand.util.canonical.md) · next: [26.6.8.1 In general \[rand.dist.general\]](rand.dist.general.md)
+
+## Subclauses
+
+- [26.6.8.1 In general \[rand.dist.general\]](rand.dist.general.md)
+- [26.6.8.2 Uniform distributions \[rand.dist.uni\]](rand.dist.uni.md)
+  - [26.6.8.2.1 Class template `uniform_int_distribution` \[rand.dist.uni.int\]](rand.dist.uni.int.md)
+  - [26.6.8.2.2 Class template `uniform_real_distribution` \[rand.dist.uni.real\]](rand.dist.uni.real.md)
+- [26.6.8.3 Bernoulli distributions \[rand.dist.bern\]](rand.dist.bern.md)
+  - [26.6.8.3.1 Class `bernoulli_distribution` \[rand.dist.bern.bernoulli\]](rand.dist.bern.bernoulli.md)
+  - [26.6.8.3.2 Class template `binomial_distribution` \[rand.dist.bern.bin\]](rand.dist.bern.bin.md)
+  - [26.6.8.3.3 Class template `geometric_distribution` \[rand.dist.bern.geo\]](rand.dist.bern.geo.md)
+  - [26.6.8.3.4 Class template `negative_binomial_distribution` \[rand.dist.bern.negbin\]](rand.dist.bern.negbin.md)
+- [26.6.8.4 Poisson distributions \[rand.dist.pois\]](rand.dist.pois.md)
+  - [26.6.8.4.1 Class template `poisson_distribution` \[rand.dist.pois.poisson\]](rand.dist.pois.poisson.md)
+  - [26.6.8.4.2 Class template `exponential_distribution` \[rand.dist.pois.exp\]](rand.dist.pois.exp.md)
+  - [26.6.8.4.3 Class template `gamma_distribution` \[rand.dist.pois.gamma\]](rand.dist.pois.gamma.md)
+  - [26.6.8.4.4 Class template `weibull_distribution` \[rand.dist.pois.weibull\]](rand.dist.pois.weibull.md)
+  - [26.6.8.4.5 Class template `extreme_value_distribution` \[rand.dist.pois.extreme\]](rand.dist.pois.extreme.md)
+- [26.6.8.5 Normal distributions \[rand.dist.norm\]](rand.dist.norm.md)
+  - [26.6.8.5.1 Class template `normal_distribution` \[rand.dist.norm.normal\]](rand.dist.norm.normal.md)
+  - [26.6.8.5.2 Class template `lognormal_distribution` \[rand.dist.norm.lognormal\]](rand.dist.norm.lognormal.md)
+  - [26.6.8.5.3 Class template `chi_squared_distribution` \[rand.dist.norm.chisq\]](rand.dist.norm.chisq.md)
+  - [26.6.8.5.4 Class template `cauchy_distribution` \[rand.dist.norm.cauchy\]](rand.dist.norm.cauchy.md)
+  - [26.6.8.5.5 Class template `fisher_f_distribution` \[rand.dist.norm.f\]](rand.dist.norm.f.md)
+  - [26.6.8.5.6 Class template `student_t_distribution` \[rand.dist.norm.t\]](rand.dist.norm.t.md)
+- [26.6.8.6 Sampling distributions \[rand.dist.samp\]](rand.dist.samp.md)
+  - [26.6.8.6.1 Class template `discrete_distribution` \[rand.dist.samp.discrete\]](rand.dist.samp.discrete.md)
+  - [26.6.8.6.2 Class template `piecewise_constant_distribution` \[rand.dist.samp.pconst\]](rand.dist.samp.pconst.md)
+  - [26.6.8.6.3 Class template `piecewise_linear_distribution` \[rand.dist.samp.plinear\]](rand.dist.samp.plinear.md)

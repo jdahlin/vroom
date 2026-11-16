@@ -1,0 +1,5 @@
+# 12.4.1.3 Initialization by constructor [over.match.ctor]
+
+[Contents](README.md) · up: [12.4.1 Candidate functions and argument lists \[over.match.funcs\]](over.match.funcs.md) · prev: [12.4.1.2 Operators in expressions \[over.match.oper\]](over.match.oper.md) · next: [12.4.1.4 Copy-initialization of class by user-defined conversion \[over.match.copy\]](over.match.copy.md)
+
+**1** When objects of class type are direct-initialized ([[dcl.init]](dcl.init.md)), copy-initialized from an expression of the same or a derived class type ([[dcl.init]](dcl.init.md)), or default-initialized ([[dcl.init]](dcl.init.md)), overload resolution selects the constructor. For direct-initialization or default-initialization that is not in the context of copy-initialization, the candidate functions are all the constructors of the class of the object being initialized. For copy-initialization (including default initialization in the context of copy-initialization), the candidate functions are all the converting constructors ([[class.conv.ctor]](class.conv.ctor.md)) of that class. The argument list is the *expression-list* or *assignment-expression* of the *initializer*.

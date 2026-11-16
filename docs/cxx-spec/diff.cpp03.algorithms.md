@@ -1,0 +1,5 @@
+# C.4.12 [[algorithms]](lib/algorithms.md): algorithms library [diff.cpp03.algorithms]
+
+[Contents](README.md) · up: [C.4 C++ and ISO C++ 2003 \[diff.cpp03\]](diff.cpp03.md) · prev: [C.4.11 [[containers]](lib/containers.md): containers library \[diff.cpp03.containers\]](diff.cpp03.containers.md) · next: [C.4.13 [[numerics]](lib/numerics.md): numerics library \[diff.cpp03.numerics\]](diff.cpp03.numerics.md)
+
+**1** **Affected subclause:** [[algorithms.general]](lib/algorithms.general.md) <br>**Change:** Result state of inputs after application of some algorithms. <br>**Rationale:** Required by new feature. <br>**Effect on original feature:** A valid C++ 2003 program may detect that an object with a valid but unspecified state has a different valid but unspecified state with this International Standard. For example, `std::remove` and `std::remove_if` may leave the tail of the input sequence with a different set of values than previously.

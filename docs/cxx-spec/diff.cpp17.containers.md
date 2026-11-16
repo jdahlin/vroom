@@ -1,0 +1,5 @@
+# C.1.10 [[containers]](lib/containers.md): containers library [diff.cpp17.containers]
+
+[Contents](README.md) · up: [C.1 C++ and ISO C++ 2017 \[diff.cpp17\]](diff.cpp17.md) · prev: [C.1.9 [[library]](lib/library.md): library introduction \[diff.cpp17.library\]](diff.cpp17.library.md) · next: [C.1.11 [[iterators]](lib/iterators.md): iterators library \[diff.cpp17.iterators\]](diff.cpp17.iterators.md)
+
+**1** **Affected subclauses:** [[forwardlist]](lib/forwardlist.md), [[list]](lib/list.md) <br>**Change:** Return types of `remove`, `remove_if`, and `unique` changed from `void` to `container::size_type`. <br>**Rationale:** Improve efficiency and convenience of finding number of removed elements. <br>**Effect on original feature:** Code that depends on the return types might have different semantics in this International Standard. Translation units compiled against this version of C++ may be incompatible with translation units compiled against C++ 2017, either failing to link or having undefined behavior.
