@@ -79,8 +79,20 @@ node_index parser::unary_expression()
     }
     if (at(standard_keyword::sizeof_)) {
         add_token();
-        if (at(preprocessing_op_or_punc::ELLIPSIS))
-            return beyond_this_step();
+        if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+            /* [expr.sizeof]/5: sizeof ... ( identifier ) (C++11) */
+            if (!tokens.files.behavior.has(language_feature::variadic_templates))
+                return beyond_this_step();
+            add_token();
+            if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                return expected("'(' after sizeof...", "expr.sizeof");
+            if (!at_identifier())
+                return expected("an identifier in sizeof...", "expr.sizeof");
+            add_token();
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' after the identifier", "expr.sizeof");
+            return finish_node(syntax_kind::unary_expression, mark, first);
+        }
         bool type = false;
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
             type = parenthesized_type_id(false);
@@ -138,6 +150,9 @@ node_index parser::unary_expression()
  */
 node_index parser::noexcept_expression()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     add_token();

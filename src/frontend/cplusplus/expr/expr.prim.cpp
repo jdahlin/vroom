@@ -23,7 +23,8 @@ namespace cplusplus
  * expression whose type, value, and value category are identical to those
  * of E."
  *
- * lambda-expression is expr.prim.lambda.cpp's, fold-expression and requires-expression P7's.
+ * lambda-expression is expr.prim.lambda.cpp's, fold-expression and
+ * requires-expression expr.prim.fold.cpp's.
  */
 node_index parser::primary_expression()
 {
@@ -37,10 +38,11 @@ node_index parser::primary_expression()
         if (at(preprocessing_op_or_punc::LEFT_BRACE, 1))
             /* [ext.gnu] a statement expression, ({ ... }): P9 */
             return beyond_this_step();
-        if (at(preprocessing_op_or_punc::ELLIPSIS, 1))
-            return beyond_this_step(); /* fold-expression */
+        if (fold_expression_follows())
+            return fold_expression();
         size_t mark = begin_node();
         token_index first = position;
+        flag_set greater(greater_is_operator, true);
         add_token();
         expression();
         if (failed())
@@ -60,8 +62,9 @@ node_index parser::primary_expression()
     if (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
         at(standard_keyword::decltype_) || at(standard_keyword::operator_))
         return id_expression(false);
+    if (at(standard_keyword::requires_))
+        return requires_expression();
     switch (keyword_of(peek())) {
-    case standard_keyword::requires_:
     /* an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */
     case standard_keyword::template_:
     case standard_keyword::extension:

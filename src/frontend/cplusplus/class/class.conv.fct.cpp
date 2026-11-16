@@ -29,6 +29,9 @@ node_index parser::conversion_type_id()
     token_index first = position;
     decl_specifier_facts specifiers;
     specifiers.type_specifier_seq = true;
+    /* CWG2413: a conversion-type-id is a type-id-only context (C++20,
+       with [temp.res]/5) */
+    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, true);
     if (failed())
         return 0;

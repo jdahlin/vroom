@@ -66,6 +66,9 @@ namespace cplusplus
 
 node_index parser::lambda_expression()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     const implementation_defined_behavior &b = tokens.files.behavior;
     if (!b.has(language_feature::lambda_expressions))
         return beyond_this_step();
@@ -75,8 +78,31 @@ node_index parser::lambda_expression()
     lambda_introducer();
     if (failed())
         return 0;
-    if (at(preprocessing_op_or_punc::LESS))
-        return beyond_this_step(); /* a template-parameter-list: P7 */
+    /* lambda-introducer < template-parameter-list > requires-clause_opt
+       lambda-declarator compound-statement (P0428R2, C++20) */
+    declarative_region template_parameters(names,
+                                           scope_kind::template_parameter);
+    if (at(preprocessing_op_or_punc::LESS)) {
+        if (!b.has(language_feature::lambda_template_parameters))
+            return beyond_this_step();
+        add_token();
+        {
+            flag_set closing(greater_is_operator, false);
+            if (at_closing_angle())
+                return expected("a template-parameter", "expr.prim.lambda");
+            template_parameter_list();
+            if (failed())
+                return 0;
+        }
+        if (!accept_closing_angle())
+            return expected("'>' to end the template-parameter-list",
+                            "expr.prim.lambda");
+        if (at(standard_keyword::requires_)) {
+            requires_clause();
+            if (failed())
+                return 0;
+        }
+    }
     scope_index enclosing = names.current();
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         scope_index parameters = 0;
@@ -175,14 +201,28 @@ node_index parser::capture()
         return finish_node(syntax_kind::simple_capture, mark, first);
     }
     bool reference = accept(preprocessing_op_or_punc::AMPERSAND);
-    if (at(preprocessing_op_or_punc::ELLIPSIS))
-        return beyond_this_step(); /* an init-capture pack: P7 */
+    /* init-capture: &_opt ... identifier initializer (P0780R2, C++20) */
+    bool init_pack = false;
+    if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+        if (!b.has(language_feature::init_capture_packs))
+            return beyond_this_step();
+        add_token();
+        init_pack = true;
+    }
     if (!at_identifier())
         return expected("a capture", "expr.prim.lambda.capture");
     uint32_t name = tokens.identifier(position);
     add_token();
-    if (at(preprocessing_op_or_punc::ELLIPSIS))
-        return beyond_this_step(); /* a pack expansion: P7 */
+    /* simple-capture ... : a pack expansion ([temp.variadic]/5) */
+    if (!init_pack && at(preprocessing_op_or_punc::ELLIPSIS)) {
+        add_token();
+        return finish_node(syntax_kind::simple_capture, mark, first);
+    }
+    if (init_pack && !at(preprocessing_op_or_punc::EQUAL) &&
+        !at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        !at(preprocessing_op_or_punc::LEFT_BRACE))
+        return expected("an initializer after the init-capture pack",
+                        "expr.prim.lambda.capture");
     if (at(preprocessing_op_or_punc::EQUAL) ||
         at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
         at(preprocessing_op_or_punc::LEFT_BRACE)) {
@@ -215,7 +255,11 @@ node_index parser::lambda_declarator(scope_index *parameters)
     add_token(); /* ( */
     scope_index enclosing = names.current();
     *parameters = names.enter(scope_kind::function_prototype);
-    parameter_declaration_clause();
+    {
+        /* [temp.res]/5: a parameter-declaration in a lambda-declarator */
+        flag_set implicit(parameters_implicit_typename, true);
+        parameter_declaration_clause();
+    }
     if (failed())
         return 0;
     if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
@@ -266,8 +310,11 @@ node_index parser::lambda_declarator(scope_index *parameters)
         if (failed())
             return 0;
     }
-    if (at(standard_keyword::requires_))
-        return beyond_this_step(); /* requires-clause: P7 */
+    if (at(standard_keyword::requires_)) {
+        requires_clause();
+        if (failed())
+            return 0;
+    }
     names.reenter(enclosing);
     return finish_node(syntax_kind::lambda_declarator, mark, first);
 }

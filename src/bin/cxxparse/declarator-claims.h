@@ -171,6 +171,11 @@ class declarator_claims
             if (c.is_token()) {
                 const token &t = tokens[c.index()];
                 if (t.kind == token_kind::identifier) {
+                    /* a template-name alone: a deduced class type, whose
+                       type the claim cannot say */
+                    for (token_index n : tree.template_names_as_types)
+                        if (n == c.index())
+                            return false;
                     /* a type-name */
                     tokens.spelling(c.index(), type.get());
                     named = true;
@@ -248,6 +253,12 @@ class declarator_claims
                 named = true;
                 break;
             case syntax_kind::simple_type_specifier:
+                for (token_index n : tree.template_names_as_types)
+                    if (n >= child.first_token && n < child.end_token)
+                        return false;
+                verbatim(child.first_token, child.end_token, type.get());
+                named = true;
+                break;
             case syntax_kind::elaborated_type_specifier:
             case syntax_kind::elaborated_enum_specifier:
                 verbatim(child.first_token, child.end_token, type.get());

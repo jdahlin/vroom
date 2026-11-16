@@ -102,3 +102,26 @@ LANGUAGE_FEATURE(variadic_arguments_may_be_omitted, cplusplus_20, never,
                  "[cpp.replace]/5: at least as many arguments as parameters excluding the ... (P1042R1)")
 LANGUAGE_FEATURE(warning_directive, cplusplus_23, never, "P2437R1: #warning ([cpp.error])")
 LANGUAGE_FEATURE(elifdef_directives, cplusplus_23, never, "P2334R1: #elifdef and #elifndef ([cpp.cond])")
+/* templates (P7 of doc/PLAN-cxx-parse.md) */
+LANGUAGE_FEATURE(right_angle_brackets, cplusplus_11, never,
+                 "[diff.cpp03.temp]/1: >> ends two template-argument-lists (N1757)")
+LANGUAGE_FEATURE(variadic_templates, cplusplus_11, never, "N2242: parameter packs and pack expansions")
+LANGUAGE_FEATURE(alias_templates, cplusplus_11, never, "N2258: alias templates")
+LANGUAGE_FEATURE(extern_templates, cplusplus_11, never, "N1987: extern template")
+LANGUAGE_FEATURE(variable_templates, cplusplus_14, never, "N3651: variable templates")
+LANGUAGE_FEATURE(fold_expressions, cplusplus_17, never, "N4295: fold-expression")
+LANGUAGE_FEATURE(template_auto_parameters, cplusplus_17, never,
+                 "P0127R2: a template-parameter of placeholder type")
+LANGUAGE_FEATURE(typename_template_template_parameters, cplusplus_17, never,
+                 "N4051: typename in a template template parameter")
+LANGUAGE_FEATURE(deduction_guides, cplusplus_17, never, "P0091R3: deduction-guide")
+LANGUAGE_FEATURE(concepts, cplusplus_20, never,
+                 "P0734R0: concept-definition, requires-clause, requires-expression")
+LANGUAGE_FEATURE(abbreviated_function_templates, cplusplus_20, never,
+                 "P1141R2: placeholders with a type-constraint, abbreviated function templates")
+LANGUAGE_FEATURE(lambda_template_parameters, cplusplus_20, never,
+                 "P0428R2: a template-parameter-list after the lambda-introducer")
+LANGUAGE_FEATURE(implicit_typename, cplusplus_20, never,
+                 "P0634R3: [temp.res]/5, contexts where a qualified-id names a type")
+LANGUAGE_FEATURE(init_capture_packs, cplusplus_20, never,
+                 "P0780R2: an init-capture pack, ...identifier initializer")

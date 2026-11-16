@@ -168,6 +168,7 @@ static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
         bool parentheses;
     };
     owned_array<level> path;
+    token_index split_written = UINT32_MAX;
     auto enter = [&](node_index n) {
         const syntax_node &s = tree[n];
         if (s.kind == syntax_kind::decltype_specifier ||
@@ -204,7 +205,19 @@ static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
             continue;
         }
         syntax_child c = tree.children(top.node)[top.next_child++];
-        if (c.is_token())
+        if (c.is_token() && tree.is_split(c.index())) {
+            /* a split '>>': its first '>', then the rest */
+            if (split_written != c.index()) {
+                vbuffer_append(out, "> ", 2);
+                split_written = c.index();
+            } else {
+                owned_buffer spelling;
+                tokens.spelling(c.index(), spelling.get());
+                vbuffer_append(out, spelling.data() + 1, spelling.size() - 1);
+                vbuffer_append(out, " ", 1);
+                split_written = UINT32_MAX;
+            }
+        } else if (c.is_token())
             write_tokens(tokens, c.index(), c.index() + 1, out);
         else
             enter(c.index());

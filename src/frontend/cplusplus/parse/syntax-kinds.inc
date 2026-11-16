@@ -179,6 +179,36 @@ SYNTAX_NODE(attribute_argument_clause, "attribute-argument-clause", "dcl.attr.gr
 SYNTAX_NODE(balanced_token_seq, "balanced-token-seq", "dcl.attr.grammar")
 SYNTAX_NODE(balanced_token, "balanced-token", "dcl.attr.grammar")
 
+/* [temp.pre], [temp.param], [temp.names], [temp.res], [temp.concept],
+   [temp.explicit], [temp.expl.spec], [temp.deduct.guide] */
+SYNTAX_NODE(template_declaration, "template-declaration", "temp.pre")
+SYNTAX_NODE(template_head, "template-head", "temp.pre")
+SYNTAX_NODE(template_parameter_list, "template-parameter-list", "temp.pre")
+SYNTAX_NODE(requires_clause, "requires-clause", "temp.pre")
+SYNTAX_NODE(constraint_logical_or_expression, "constraint-logical-or-expression", "temp.pre")
+SYNTAX_NODE(constraint_logical_and_expression, "constraint-logical-and-expression", "temp.pre")
+SYNTAX_NODE(type_parameter, "type-parameter", "temp.param")
+SYNTAX_NODE(type_constraint, "type-constraint", "temp.param")
+SYNTAX_NODE(simple_template_id, "simple-template-id", "temp.names")
+SYNTAX_NODE(template_id, "template-id", "temp.names")
+SYNTAX_NODE(template_argument_list, "template-argument-list", "temp.names")
+SYNTAX_NODE(typename_specifier, "typename-specifier", "temp.res")
+SYNTAX_NODE(concept_definition, "concept-definition", "temp.concept")
+SYNTAX_NODE(explicit_instantiation, "explicit-instantiation", "temp.explicit")
+SYNTAX_NODE(explicit_specialization, "explicit-specialization", "temp.expl.spec")
+SYNTAX_NODE(deduction_guide, "deduction-guide", "temp.deduct.guide")
+/* [expr.prim.fold], [expr.prim.req] */
+SYNTAX_NODE(fold_expression, "fold-expression", "expr.prim.fold")
+SYNTAX_NODE(requires_expression, "requires-expression", "expr.prim.req")
+SYNTAX_NODE(requirement_parameter_list, "requirement-parameter-list", "expr.prim.req")
+SYNTAX_NODE(requirement_body, "requirement-body", "expr.prim.req")
+SYNTAX_NODE(requirement_seq, "requirement-seq", "expr.prim.req")
+SYNTAX_NODE(simple_requirement, "simple-requirement", "expr.prim.req.simple")
+SYNTAX_NODE(type_requirement, "type-requirement", "expr.prim.req.type")
+SYNTAX_NODE(compound_requirement, "compound-requirement", "expr.prim.req.compound")
+SYNTAX_NODE(return_type_requirement, "return-type-requirement", "expr.prim.req.compound")
+SYNTAX_NODE(nested_requirement, "nested-requirement", "expr.prim.req.nested")
+
 /*
  * Scaffolding, not grammar: both are counted, and both are at zero on
  * well-formed input when the parser is complete.

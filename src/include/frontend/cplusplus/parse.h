@@ -166,6 +166,16 @@ class syntax_tree
        it was with node_count nodes */
     void truncate(size_t node_count);
 
+    /* [temp.names]/3: the '>>' (or '>=', '>>=') tokens whose first '>'
+       ended a template-argument-list: such a token is the child of two
+       nodes, the first '>' and the rest */
+    owned_array<token_index> split_tokens;
+    bool is_split(token_index t) const;
+    /* the template-names used as a type without a template-argument-list:
+       a placeholder for a deduced class type ([dcl.type.class.deduct]) or,
+       in its class, the injected-class-name ([temp.local]/1) */
+    owned_array<token_index> template_names_as_types;
+
     /* the tree under n as indented lines: a nonterminal and where it
        starts, then its children; a token as its spelling in quotes */
     void dump(node_index n, token_stream &tokens, vbuffer *out) const;
@@ -191,13 +201,31 @@ class syntax_tree
 enum class name_kind : uint8_t {
     not_declared,
     type_name,
+    /* a class template, an alias template or a template template
+       parameter: its template-id names a type ([temp.names]/1) */
     template_name,
     namespace_name,
     /* a variable, enumerator, ...: declared, and none of the above */
     other,
     /* a function ([temp.names]/2 tells it from other) */
     function,
+    /* a function template, a variable template ([temp.names]/2: "an
+       overload set that contains a function template"), a concept
+       ([temp.concept]/2) */
+    function_template,
+    variable_template,
+    concept_name,
 };
+
+/* whether a name of kind k is a template-name ([temp.names]/2: "name
+   lookup finds a template-name or an overload set that contains a
+   function template") */
+inline bool is_template_kind(name_kind k)
+{
+    return k == name_kind::template_name ||
+           k == name_kind::function_template ||
+           k == name_kind::variable_template || k == name_kind::concept_name;
+}
 
 /* [basic.scope]: the declarative regions the syntax makes */
 enum class scope_kind : uint8_t {
@@ -249,11 +277,34 @@ class declared_names
     /* [basic.scope.declarative]/1: the name is introduced into the current
        declarative region; a class-name with the region of its
        member-specification ([class.pre]/1), when it has one */
-    void declare(uint32_t name, name_kind kind, scope_index region = 0);
+    void declare(uint32_t name, name_kind kind, scope_index region = 0,
+                 bool dependent = false);
     /* ... into another region: an elaborated-type-specifier's
        ([basic.scope.pdecl]/7), a class defined by a qualified name */
     void declare_in(scope_index in, uint32_t name, name_kind kind,
-                    scope_index region = 0);
+                    scope_index region = 0, bool dependent = false);
+    /* [basic.scope.temparam]/1: a template parameter, in the
+       template-parameter scope that is current; dependent: it is a type or
+       template whose members are not known until it is substituted
+       ([temp.dep.type]/7) */
+    void declare_template_parameter(uint32_t name, name_kind kind);
+    /* the scope a declaration that is not a template parameter belongs
+       to: [temp.pre]/2 "The declaration in a template-declaration (if
+       any) shall ... declare or define a function, a class, or a
+       variable", whose name is in the scope that encloses the
+       template-head's */
+    scope_index declaring_scope() const;
+    /* how many lookups have found a dependent name ([temp.dep]): a
+       caller that compares it before and after a construct knows whether
+       the construct names one */
+    uint64_t dependent_found = 0;
+    /* whether a region encloses the current one (the current instantiation
+       of a class template is named inside it, [temp.dep.type]/1) */
+    bool encloses_current(scope_index region) const;
+    /* the template-parameter scopes of an out-of-class member definition
+       ([temp.mem]/1, [temp.local]/8): searched after the member's class
+       when the declarator-id put the names in its region */
+    owned_array<scope_index> template_parameters_in_effect;
     /* [basic.scope.pdecl]/7: "the smallest namespace or block scope that
        contains the declaration" */
     scope_index nearest_namespace_or_block() const;
@@ -282,11 +333,13 @@ class declared_names
        the order listed ...; name lookup ends as soon as a declaration is
        found for the name"; *scope is the region of the namespace-name or
        class-name found */
-    name_kind lookup_unqualified(uint32_t name, scope_index *scope = nullptr);
+    name_kind lookup_unqualified(uint32_t name, scope_index *scope = nullptr,
+                                 bool *dependent = nullptr);
     /* [basic.lookup.qual]: the name in the namespace a
        nested-name-specifier named */
     name_kind lookup_qualified(scope_index in, uint32_t name,
-                               scope_index *scope = nullptr);
+                               scope_index *scope = nullptr,
+                               bool *dependent = nullptr);
 
     struct recorded_lookup {
         uint32_t name;
@@ -314,6 +367,9 @@ class declared_names
         /* the region of a namespace-name, or of a class-name's
            member-specification (0: none known) */
         scope_index scope;
+        /* a type or template that depends on a template parameter
+           ([temp.dep.type]) */
+        bool dependent = false;
     };
     struct scope {
         scope_kind kind;
@@ -393,6 +449,12 @@ struct declarator_facts {
        ([basic.scope.class]/1, [class.mfct]/2, [class.static.data]/3) */
     bool has_member_of = false;
     scope_index member_of = 0;
+    /* the declarator-id is a template-id ([temp.expl.spec], partial
+       specializations of variable templates): it declares no new name */
+    bool template_id = false;
+    /* ... id-expression: a declarator-id that declares a pack
+       ([temp.variadic]/4) */
+    bool pack = false;
 };
 
 /* what a decl-specifier-seq said that the rest of the declaration needs */
@@ -408,6 +470,11 @@ struct decl_specifier_facts {
     bool type_specifier_seq = false;
     /* how many decl-specifiers the sequence has */
     unsigned count = 0;
+    /* in: [temp.res]/5's contexts, where a qualified-id that names a member
+       of an unknown specialization is assumed to name a type */
+    bool implicit_typename = false;
+    /* out: a name in the sequence depends on a template parameter */
+    bool dependent = false;
     /* [dcl.type.elab]/1: an elaborated-type-specifier, whether it has the
        form class-key attribute-specifier-seq_opt identifier, and where its
        attribute-specifier-seq is (an elaborated-type-specifier may have one
@@ -455,6 +522,14 @@ enum class name_class : uint8_t {
        ([class.qual]/2: "the name is instead considered to name the
        constructor of class C") */
     constructor,
+    /* a member of an unknown specialization ([temp.dep.type]/6): T::x with
+       T a template parameter.  [temp.res]/6: it "denotes a non-type"
+       unless typename says otherwise or the context assumes a type
+       ([temp.res]/5) */
+    dependent,
+    /* a concept-name, with its template arguments: the type-constraint of
+       a placeholder-type-specifier ([dcl.spec.auto]) */
+    concept_,
 };
 
 /* the forms a declarator can take */
@@ -503,6 +578,8 @@ class parser
     token_index position = 0;
     const token &peek(unsigned ahead = 0)
     {
+        if (split_active && !ahead)
+            return split_rest;
         return tokens[position + ahead];
     }
     bool at(preprocessing_op_or_punc op, unsigned ahead = 0);
@@ -514,6 +591,7 @@ class parser
     }
     void consume()
     {
+        split_active = false;
         position++;
     }
     standard_keyword keyword_of(const token &t) const;
@@ -533,6 +611,7 @@ class parser
     void add_token()
     {
         pending.append(syntax_child::token(position));
+        split_active = false;
         position++;
     }
     /* how many namespace-bodies and linkage-specification braces enclose
@@ -624,7 +703,9 @@ class parser
       private:
         parser &p;
         token_index position;
-        size_t pending, nodes, messages, errors, lookups;
+        size_t pending, nodes, messages, errors, lookups, splits;
+        bool split_active;
+        token split_rest;
         declared_names::mark names;
         failure_state failure;
         bool committed = false;
@@ -720,10 +801,14 @@ class parser
     node_index decltype_specifier();
 
     /* ---- [expr.prim.id], [expr.prim.id.qual] */
-    /* nested-name-specifier_opt: 0 if none; *scope is the namespace it
-       names when it names one, *known whether every name in it was found */
+    /* nested-name-specifier_opt: 0 if none; *scope is the namespace or
+       class it names when it names one, *known whether every name in it
+       was found; qualifier_dependent: it names a type that depends on a
+       template parameter ([temp.dep.type]), whose members are members of
+       an unknown specialization */
     node_index nested_name_specifier(scope_index *scope, bool *known,
                                      bool template_ids = true);
+    bool qualifier_dependent = false;
     bool nested_name_specifier_follows(unsigned ahead);
     node_index declarator_id(declarator_facts &facts);
 
@@ -921,6 +1006,91 @@ class parser
     node_index namespace_alias_definition();
     node_index using_directive();
     node_index linkage_specification();
+
+    /* ---- [temp], [temp.names], [temp.res], [temp.variadic] */
+    /* [temp.names]/3: whether '>' and '>>' are operators.  Not in a
+       template-argument-list (nor a template-parameter-list,
+       [temp.param]/16) outside the brackets nested in it */
+    bool greater_is_operator = true;
+    /* [temp.names]/3: "the first non-nested >> is treated as two
+       consecutive but distinct > tokens": the current token is the second
+       of them (or the rest of a >= or >>=), split_rest */
+    bool split_active = false;
+    token split_rest;
+    /* [temp.res]/5: the parameter-declarations parsed now assume a
+       qualified-id names a type (those of a member-declaration, of a
+       declarator with a qualified declarator-id, of a lambda-declarator or
+       requirement-parameter-list, of a non-type template-parameter), and
+       the type-id parsed now is in a type-id-only context */
+    bool parameters_implicit_typename = false;
+    bool type_id_only = false;
+    /* the scope a template-declaration's declaration declares its name in
+       (none: UINT32_MAX); a declaration there declares a template */
+    scope_index template_scope = UINT32_MAX;
+    /* the kind a declaration that would declare plain declares: a
+       template's ([temp.pre]/1) when it is the template-declaration's */
+    name_kind declared_kind(name_kind plain);
+    /* the lookahead after the '>' of the template-argument-list whose '<'
+       is at tokens[ahead], brackets balanced; 0 when none ends before a
+       ';', '{' or '}' */
+    unsigned angle_group_end(unsigned ahead);
+    bool named_pack_follows();
+    bool binary_operator_follows();
+    /* in the declaration of an explicit-instantiation or
+       explicit-specialization ([dcl.type.elab]/1) */
+    bool explicit_declaration = false;
+    bool explicit_instantiation_ = false;
+    /* the scope a template-declaration, explicit-specialization or
+       explicit-instantiation declares its name in ([temp.pre]/5: "the
+       init-declarator-list in the declaration shall contain at most one
+       declarator") */
+    scope_index single_declarator_scope = UINT32_MAX;
+    /* [temp.pre]/5: a second declarator, or one after a class template's
+       definition: the failure at the current token, else false */
+    bool template_declarator_violates(const decl_specifier_facts &specifiers,
+                                      bool first);
+    /* the last name of the last nested-name-specifier parsed, before its
+       template-argument-list if any ([class.qual]/2) */
+    uint32_t last_qualifier_name = 0;
+    bool abstract_pack_follows();
+    /* the token ends a template-argument-list: '>', or '>>', '>=', '>>='
+       of which the first '>' does ([temp.names]/3) */
+    bool at_closing_angle();
+    bool accept_closing_angle();
+    /* template-declaration, explicit-specialization or
+       explicit-instantiation at template (or extern template); declaration
+       parses the declaration they contain (a member-declaration in a
+       class) */
+    node_index template_declaration(node_index (parser::*declaration)());
+    node_index explicit_instantiation(node_index (parser::*declaration)());
+    node_index template_head();
+    node_index template_parameter_list();
+    node_index template_parameter();
+    /* a type-constraint at tokens[ahead]: nested-name-specifier_opt
+       concept-name < template-argument-list_opt >_opt; *length its tokens */
+    bool type_constraint_follows(unsigned ahead, unsigned *length);
+    node_index type_constraint();
+    node_index requires_clause();
+    node_index constraint_logical_or_expression();
+    node_index concept_definition();
+    bool deduction_guide_follows();
+    node_index deduction_guide();
+    /* < template-argument-list_opt > at the current '<', its tokens and
+       the list pending; with the name before it since mark, a node of
+       kind (simple-template-id or template-id) */
+    node_index template_id_rest(size_t mark, token_index first,
+                                syntax_kind kind);
+    node_index template_argument_list();
+    node_index template_argument();
+    /* [temp.names]/2: the identifier at the current token followed by <
+       names a template: kind is what lookup found */
+    bool names_template(name_kind kind, bool qualified, bool template_keyword);
+    node_index typename_specifier();
+    /* [expr.prim.fold], [expr.prim.req], [expr.sizeof]'s sizeof ... */
+    bool fold_expression_follows();
+    node_index fold_expression();
+    node_index requires_expression();
+    node_index requirement();
 
   private:
     parser_statistics counters;

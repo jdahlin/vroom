@@ -11,7 +11,8 @@
  *
  * This is a stand-in for [basic.lookup], not an implementation of it: a
  * class's members and its bases' when they are classes it knows, no
- * hiding rules beyond the order of the scopes, nothing of templates
+ * hiding rules beyond the order of the scopes; of templates their kinds,
+ * their parameters' scopes and which names depend on a parameter
  * (doc/PLAN-cxx-parse.md lists what each step adds).
  */
 #include "../cplusplus-internal.h"
@@ -105,16 +106,48 @@ void declared_names::leave()
     current_scope = scopes[current_scope].enclosing;
 }
 
-void declared_names::declare(uint32_t name, name_kind kind, scope_index region)
+void declared_names::declare(uint32_t name, name_kind kind, scope_index region,
+                             bool dependent)
 {
-    declare_in(current_scope, name, kind, region);
+    declare_in(declaring_scope(), name, kind, region, dependent);
 }
 
 void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
-                                scope_index region)
+                                scope_index region, bool dependent)
 {
-    scopes[in].declarations.append({name, kind, region});
+    scopes[in].declarations.append({name, kind, region, dependent});
     journal.append(in);
+}
+
+void declared_names::declare_template_parameter(uint32_t name, name_kind kind)
+{
+    /* [temp.param]/3: "A type-parameter whose identifier does not follow an
+       ellipsis defines its identifier to be a typedef-name (if declared
+       without template) or template-name (if declared with template) in
+       the scope of the template declaration"; a type or template parameter
+       is a dependent type ([temp.dep.type]/7) */
+    bool dependent =
+        kind == name_kind::type_name || kind == name_kind::template_name;
+    scopes[current_scope].declarations.append({name, kind, 0, dependent});
+    journal.append(current_scope);
+}
+
+scope_index declared_names::declaring_scope() const
+{
+    scope_index s = current_scope;
+    while (scopes[s].kind == scope_kind::template_parameter)
+        s = scopes[s].enclosing;
+    return s;
+}
+
+bool declared_names::encloses_current(scope_index region) const
+{
+    for (scope_index s = current_scope;; s = scopes[s].enclosing) {
+        if (s == region)
+            return true;
+        if (s == global_namespace)
+            return false;
+    }
 }
 
 scope_index declared_names::nearest_namespace_or_block() const
@@ -184,32 +217,49 @@ void declared_names::rollback(mark m)
     current_scope = m.current;
 }
 
-name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope)
+name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
+                                             bool *dependent)
 {
     /* [basic.lookup.unqual]/1: "In all the cases listed in
        [basic.lookup.unqual], the scopes are searched for a declaration in
        the order listed in each of the respective categories; name lookup
        ends as soon as a declaration is found for the name." */
     name_kind found = name_kind::not_declared;
+    const declaration *d = nullptr;
+    bool parameters_searched = false;
     for (scope_index s = current_scope;; s = scopes[s].enclosing) {
-        const declaration *d = find(s, name);
+        /* [temp.local]/8: in the definition of a member of a class
+           template outside the class, the template's parameters are found
+           after the class's members and before the namespace's */
+        if (!parameters_searched && scopes[s].kind == scope_kind::namespace_) {
+            parameters_searched = true;
+            for (size_t i = template_parameters_in_effect.size();
+                 !d && i-- > 0;)
+                d = find(template_parameters_in_effect[i], name);
+            if (d)
+                break;
+        }
+        d = find(s, name);
         if (!d && complete_contexts && scopes[s].complete)
             d = find(scopes[s].complete, name);
-        if (d) {
-            found = d->kind;
-            if (scope)
-                *scope = d->scope;
+        if (d || s == global_namespace)
             break;
-        }
-        if (s == global_namespace)
-            break;
+    }
+    if (d) {
+        found = d->kind;
+        if (scope)
+            *scope = d->scope;
+        if (dependent)
+            *dependent = d->dependent;
+        if (d->dependent)
+            dependent_found++;
     }
     lookups.append({name, current_scope, false, found});
     return found;
 }
 
 name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
-                                           scope_index *scope)
+                                           scope_index *scope, bool *dependent)
 {
     /* [basic.lookup.qual]/1: "The name of a class or namespace member or
        enumerator can be referred to after the :: scope resolution operator
@@ -223,6 +273,10 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
         found = d->kind;
         if (scope)
             *scope = d->scope;
+        if (dependent)
+            *dependent = d->dependent;
+        if (d->dependent)
+            dependent_found++;
     }
     lookups.append({name, in, true, found});
     return found;

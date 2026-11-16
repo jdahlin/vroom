@@ -122,6 +122,19 @@ constexpr unsigned binary_production_count =
     sizeof binary_productions / sizeof binary_productions[0];
 
 /* the level whose operator the token is; binary_production_count if it is none */
+unsigned level_of_operator(const token &t);
+
+} // namespace
+
+bool parser::binary_operator_follows()
+{
+    return level_of_operator(peek()) != binary_production_count;
+}
+
+namespace
+{
+
+/* the level whose operator the token is; binary_production_count if it is none */
 unsigned level_of_operator(const token &t)
 {
     if (t.kind != token_kind::operator_or_punctuator)
@@ -145,9 +158,10 @@ unsigned level_of_operator(const token &t)
  * followed by an operator of a higher level is first the left operand of
  * that one.  With no operator, the cast-expression passes through.
  *
- * A '>' is always the greater-than operator here: where it instead ends a
- * template-argument-list ([temp.names]/3) is P7's.  A fold-operator before
- * '...' ([expr.prim.fold]) is P7's too.
+ * A '>' is the greater-than operator except where it ends a
+ * template-argument-list ([temp.names]/3: greater_is_operator).  A
+ * fold-operator before '...' is only in a fold-expression's parentheses
+ * ([expr.prim.fold]).
  */
 node_index parser::binary_expression(unsigned lowest_level)
 {
@@ -160,8 +174,14 @@ node_index parser::binary_expression(unsigned lowest_level)
         unsigned level = level_of_operator(peek());
         if (level == binary_production_count || level < lowest_level)
             break;
+        /* [temp.names]/3: in a template-argument-list the first
+           non-nested > ends it */
+        if (!greater_is_operator && at_closing_angle())
+            break;
+        /* [expr.prim.fold]/1: a fold-expression is parenthesized */
         if (at(preprocessing_op_or_punc::ELLIPSIS, 1))
-            return beyond_this_step(); /* fold-expression: P7 */
+            return expected("'(' around the fold-expression",
+                            "expr.prim.fold");
         add_token();
         binary_expression(level + 1);
         if (failed())
@@ -188,8 +208,10 @@ node_index parser::expression()
     if (failed())
         return 0;
     while (at(preprocessing_op_or_punc::COMMA)) {
+        /* , ... ends a pack's list (an initializer-list, a
+           template-argument-list): its caller's */
         if (at(preprocessing_op_or_punc::ELLIPSIS, 1))
-            return beyond_this_step(); /* fold-expression: P7 */
+            break;
         add_token();
         assignment_expression();
         if (failed())

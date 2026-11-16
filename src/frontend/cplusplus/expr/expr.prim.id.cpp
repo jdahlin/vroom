@@ -36,24 +36,80 @@ namespace cplusplus
  */
 bool parser::nested_name_specifier_follows(unsigned ahead)
 {
-    return at(preprocessing_op_or_punc::COLON_COLON, ahead) ||
-           (at_identifier(ahead) &&
-            at(preprocessing_op_or_punc::COLON_COLON, ahead + 1));
+    if (at(preprocessing_op_or_punc::COLON_COLON, ahead))
+        return true;
+    if (!at_identifier(ahead))
+        return false;
+    if (at(preprocessing_op_or_punc::COLON_COLON, ahead + 1))
+        return true;
+    if (!at(preprocessing_op_or_punc::LESS, ahead + 1))
+        return false;
+    name_kind kind = names.lookup_unqualified(tokens.identifier(position + ahead));
+    if (!is_template_kind(kind))
+        return false;
+    unsigned end = angle_group_end(ahead + 1);
+    return end && at(preprocessing_op_or_punc::COLON_COLON, end);
+}
+
+/*
+ * One component of a nested-name-specifier at the current token, before
+ * its '::': template_opt identifier or template_opt simple-template-id.
+ * Its length in tokens, or 0 when it is none.  A '<' after the name begins
+ * a template-argument-list when [temp.names]/2-4 say so (names_template;
+ * after a dependent specifier only after template).
+ */
+static unsigned nested_component_length(parser &p, bool qualified, bool known,
+                                        scope_index scope, bool *arguments,
+                                        bool *template_keyword)
+{
+    unsigned i = 0;
+    *template_keyword = false;
+    *arguments = false;
+    if (qualified && p.at(standard_keyword::template_)) {
+        *template_keyword = true;
+        i = 1;
+    }
+    if (!p.at_identifier(i))
+        return 0;
+    if (p.at(preprocessing_op_or_punc::COLON_COLON, i + 1))
+        return i + 1;
+    if (!p.at(preprocessing_op_or_punc::LESS, i + 1))
+        return 0;
+    bool names = *template_keyword;
+    if (!names && known) {
+        uint32_t name = p.tokens.identifier(p.position + i);
+        name_kind kind = qualified ? p.names.lookup_qualified(scope, name)
+                                   : p.names.lookup_unqualified(name);
+        names = p.names_template(kind, qualified, false) &&
+                kind != name_kind::function &&
+                kind != name_kind::not_declared;
+    }
+    if (!names)
+        return 0;
+    unsigned end = p.angle_group_end(i + 1);
+    if (!end || !p.at(preprocessing_op_or_punc::COLON_COLON, end))
+        return 0;
+    *arguments = true;
+    return end;
 }
 
 node_index parser::nested_name_specifier(scope_index *scope, bool *known,
                                          bool template_ids)
 {
+    (void)template_ids;
     size_t mark = begin_node();
     token_index first = position;
     bool qualified = false;
     *known = true;
     *scope = names.current();
+    qualifier_dependent = false;
+    last_qualifier_name = 0;
     if (at(preprocessing_op_or_punc::COLON_COLON)) {
         add_token();
         *scope = declared_names::global_namespace;
         qualified = true;
     } else if (at(standard_keyword::decltype_)) {
+        uint64_t before = names.dependent_found;
         decltype_specifier();
         if (failed())
             return 0;
@@ -61,49 +117,95 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
             return expected("'::' after the decltype-specifier",
                             "expr.prim.id.qual");
         *known = false;
+        qualifier_dependent = names.dependent_found != before;
         qualified = true;
     }
-    while (at_identifier() && at(preprocessing_op_or_punc::COLON_COLON, 1)) {
+    for (;;) {
+        /* pack-index-specifier :: (P2662R3, C++26): a later edition's */
+        if (at_identifier() && at(preprocessing_op_or_punc::ELLIPSIS, 1) &&
+            at(preprocessing_op_or_punc::LEFT_BRACKET, 2))
+            return beyond_this_step();
+        bool arguments = false, template_keyword = false;
+        unsigned length = nested_component_length(
+            *this, qualified, *known, *scope, &arguments, &template_keyword);
+        if (!length)
+            break;
+        if (template_keyword)
+            add_token();
         uint32_t name = tokens.identifier(position);
+        scope_index found = 0;
+        name_kind kind = name_kind::not_declared;
+        bool found_dependent = false;
         if (*known) {
-            scope_index found = 0;
-            name_kind kind;
             if (qualified)
-                kind = names.lookup_qualified(*scope, name, &found);
+                kind = names.lookup_qualified(*scope, name, &found,
+                                              &found_dependent);
             else
-                kind = names.lookup_unqualified(name, &found);
-            bool in_class =
-                qualified && names.kind_of(*scope) == scope_kind::class_;
-            if (kind == name_kind::namespace_name)
-                *scope = found;
-            else if (kind == name_kind::type_name && found &&
-                     names.kind_of(found) == scope_kind::class_)
-                *scope = found; /* a class whose members the parser knows */
-            else if (kind == name_kind::type_name)
-                *known = false; /* an enumeration, a typedef-name */
-            else if (kind == name_kind::not_declared && in_class)
-                /* a member of a base the parser does not know */
-                *known = false;
-            else
-                /* [basic.lookup.qual]/1: "If the name found does not
-                   designate a namespace or a class, enumeration, or
-                   dependent type, the program is ill-formed": a semantic
-                   rule; a name declared where the parser cannot see it
-                   (in a template) is the same to it */
-                return beyond_this_step();
+                kind = names.lookup_unqualified(name, &found,
+                                                &found_dependent);
         }
+        bool in_class =
+            qualified && *known && names.kind_of(*scope) == scope_kind::class_;
+        size_t id_mark = begin_node();
+        token_index id_first = position;
         add_token();
-        add_token();
+        bool arguments_dependent = false;
+        if (arguments) {
+            uint64_t before = names.dependent_found;
+            template_id_rest(id_mark, id_first,
+                             syntax_kind::simple_template_id);
+            if (failed())
+                return 0;
+            arguments_dependent = names.dependent_found != before;
+        }
+        if (!*known) {
+            /* [temp.res]/4: a name after a dependent nested-name-specifier
+               "is implicitly assumed to name a type"; after another type
+               the parser cannot look into it is unknown */
+        } else if (kind == name_kind::namespace_name && !arguments) {
+            *scope = found;
+        } else if (kind == name_kind::template_name && arguments && found &&
+                   names.kind_of(found) == scope_kind::class_) {
+            /* a specialization of a class template: its members are looked
+               up in the primary template, whose members the parser knows
+               (the current instantiation, [temp.dep.type]/1, in an
+               out-of-class member's declarator-id); one that depends on a
+               template parameter is dependent outside the template */
+            *scope = found;
+            if (arguments_dependent && !names.encloses_current(found))
+                qualifier_dependent = true;
+        } else if ((kind == name_kind::type_name ||
+                    kind == name_kind::template_name) &&
+                   found && names.kind_of(found) == scope_kind::class_ &&
+                   (!found_dependent || names.encloses_current(found))) {
+            /* a class whose members the parser knows, or a class template's
+               injected-class-name ([temp.local]/1) */
+            *scope = found;
+        } else if (kind == name_kind::type_name ||
+                   kind == name_kind::template_name) {
+            *known = false; /* an enumeration, a typedef-name, a
+                               specialization */
+            if (found_dependent || arguments_dependent)
+                qualifier_dependent = true;
+        } else if ((kind == name_kind::not_declared && in_class) ||
+                   template_keyword) {
+            /* a member of a base the parser does not know */
+            *known = false;
+        } else {
+            /* [basic.lookup.qual]/1: "If the name found does not
+               designate a namespace or a class, enumeration, or dependent
+               type, the program is ill-formed": a semantic rule; a name
+               declared where the parser cannot see it is the same to it */
+            return beyond_this_step();
+        }
+        last_qualifier_name = name;
+        add_token(); /* :: */
         qualified = true;
     }
-    /* a template-id, in the specifier or after it: P7.  An expression's
-       caller decides what a '<' after its name is (template_ids false). */
-    if (at(standard_keyword::template_) ||
-        (template_ids && at_identifier() &&
-         at(preprocessing_op_or_punc::LESS, 1)))
-        return beyond_this_step();
     if (position == first)
         return 0;
+    if (qualifier_dependent)
+        names.dependent_found++;
     return finish_node(syntax_kind::nested_name_specifier, mark, first);
 }
 
@@ -153,13 +255,46 @@ node_index parser::id_expression(bool member)
     scope_index scope = 0;
     bool known = true;
     node_index qualifier = 0;
-    if (nested_name_specifier_follows(0) || at(standard_keyword::decltype_)) {
+    unsigned end = 0;
+    if (member && at(standard_keyword::template_) && at_identifier(1) &&
+        at(preprocessing_op_or_punc::LESS, 2) && (end = angle_group_end(2)) &&
+        at(preprocessing_op_or_punc::COLON_COLON, end)) {
+        /* . template simple-template-id :: unqualified-id: a member of a
+           class template's specialization named in the object's class */
+        size_t qualifier_mark = begin_node();
+        token_index qualifier_first = position;
+        add_token();
+        size_t id_mark = begin_node();
+        token_index id_first = position;
+        add_token();
+        template_id_rest(id_mark, id_first, syntax_kind::simple_template_id);
+        if (failed())
+            return 0;
+        add_token(); /* :: */
+        qualifier = finish_node(syntax_kind::nested_name_specifier,
+                                qualifier_mark, qualifier_first);
+        known = false;
+        qualifier_dependent = false;
+    } else if (nested_name_specifier_follows(0) ||
+               at(standard_keyword::decltype_)) {
         qualifier = nested_name_specifier(&scope, &known, false);
         if (failed())
             return 0;
     }
-    if (at(standard_keyword::template_))
-        return beyond_this_step();
+    /* [temp.names]/4: "A < is interpreted as the delimiter of a
+       template-argument-list if it follows a name that is not a
+       conversion-function-id and ... that is preceded by the keyword
+       template" */
+    bool template_keyword = false;
+    if (at(standard_keyword::template_)) {
+        if (!qualifier && !member)
+            return expected("an id-expression", "expr.prim.id");
+        add_token();
+        template_keyword = true;
+        if (!at_identifier() && !at(standard_keyword::operator_))
+            return expected("a template-id after template", "temp.names");
+    }
+    bool dependent_qualifier = qualifier && qualifier_dependent;
     if (at(standard_keyword::operator_)) {
         operator_unqualified_id();
         if (failed())
@@ -173,9 +308,17 @@ node_index parser::id_expression(bool member)
             if (failed())
                 return 0;
         } else if (at_identifier()) {
+            size_t id_mark = begin_node();
+            token_index id_first = position;
             add_token();
-            if (at(preprocessing_op_or_punc::LESS))
-                return beyond_this_step();
+            if (at(preprocessing_op_or_punc::LESS)) {
+                /* ~ simple-template-id names the destructor of a
+                   specialization ([class.dtor]/1) */
+                template_id_rest(id_mark, id_first,
+                                 syntax_kind::simple_template_id);
+                if (failed())
+                    return 0;
+            }
         } else {
             return expected("a type-name or decltype-specifier after '~'",
                             "expr.prim.id.unqual");
@@ -190,24 +333,43 @@ node_index parser::id_expression(bool member)
             else
                 kind = names.lookup_unqualified(name);
         }
+        size_t id_mark = begin_node();
+        token_index id_first = position;
         add_token();
-        if (kind == name_kind::template_name)
-            return beyond_this_step();
-        if (kind == name_kind::not_declared)
+        if (kind == name_kind::not_declared && !template_keyword)
             unknown_name = true;
-        /* [temp.names]/2: "A name is also considered to refer to a
-           template if it is an unqualified-id followed by a < and name
-           lookup either finds one or more functions or finds nothing."
-           (P0846R0, C++20: before it a function's name before < is an
-           operand of <) */
-        if (at(preprocessing_op_or_punc::LESS) && kind == name_kind::function &&
-            !qualifier &&
-            tokens.files.behavior.has(
-                language_feature::function_names_before_less))
-            return beyond_this_step();
-        if (at(preprocessing_op_or_punc::LESS) && kind != name_kind::other &&
-            kind != name_kind::function)
-            return beyond_this_step();
+        if (at(preprocessing_op_or_punc::LESS)) {
+            if (template_keyword ||
+                (known && !member && is_template_kind(kind))) {
+                template_id_rest(id_mark, id_first,
+                                 syntax_kind::simple_template_id);
+                if (failed())
+                    return 0;
+            } else if ((member || (!known && !dependent_qualifier) ||
+                        (known && !qualifier &&
+                         names_template(kind, false, false))) &&
+                       !dependent_qualifier) {
+                /* [temp.names]/2: "A name is also considered to refer to a
+                   template if it is an unqualified-id followed by a < and
+                   name lookup either finds one or more functions or finds
+                   nothing" (P0846R0, C++20); a member's name and a name of
+                   a class the parser does not know may be a template's: the
+                   tokens are a template-id when they parse as one and a
+                   call or a '::' follows */
+                tentative_parse attempt(*this);
+                template_id_rest(id_mark, id_first,
+                                 syntax_kind::simple_template_id);
+                if (!failed() &&
+                    (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                     at(preprocessing_op_or_punc::COLON_COLON) ||
+                     (!member && known && !qualifier))) {
+                    attempt.commit();
+                    unknown_name = false;
+                }
+            }
+        }
+    } else if (template_keyword) {
+        return expected("a template-id after template", "temp.names");
     } else if (qualifier) {
         return expected("an unqualified-id after the nested-name-specifier",
                         "expr.prim.id.qual");
@@ -252,8 +414,14 @@ node_index parser::id_expression(bool member)
  */
 node_index parser::declarator_id(declarator_facts &facts)
 {
-    if (at(preprocessing_op_or_punc::ELLIPSIS))
-        return beyond_this_step();
+    /* [dcl.decl]/4: declarator-id: ..._opt id-expression, a function
+       parameter pack ([temp.variadic]/3) */
+    if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+        if (!tokens.files.behavior.has(language_feature::variadic_templates))
+            return beyond_this_step();
+        add_token();
+        facts.pack = true;
+    }
     size_t mark = begin_node();
     token_index first = position;
     scope_index scope = 0;
@@ -267,9 +435,11 @@ node_index parser::declarator_id(declarator_facts &facts)
         facts.has_member_of = true;
         facts.member_of = scope;
     }
-    if (at(standard_keyword::template_))
-        return beyond_this_step();
+    bool dependent_qualifier = qualifier && qualifier_dependent;
+    uint32_t qualifier_name = last_qualifier_name;
+    bool template_keyword = qualifier && accept(standard_keyword::template_);
     node_index unqualified = 0;
+    size_t id_mark = begin_node();
     if (at(standard_keyword::operator_)) {
         unqualified = operator_unqualified_id();
         if (failed())
@@ -293,8 +463,32 @@ node_index parser::declarator_id(declarator_facts &facts)
         return expected("an identifier", "expr.prim.id.unqual");
     }
     (void)unqualified;
-    if (at(preprocessing_op_or_punc::LESS))
-        return beyond_this_step(); /* a template-id: P7 */
+    if (at(preprocessing_op_or_punc::LESS) && dependent_qualifier &&
+        !template_keyword)
+        return violates("template before a dependent template-name",
+                        "temp.names", position - 1);
+    /* [class.qual]/2: the name of a constructor after its class's
+       nested-name-specifier names the constructor: no template-arguments */
+    if (at(preprocessing_op_or_punc::LESS) && qualifier && !unqualified &&
+        tokens[position - 1].kind == token_kind::identifier &&
+        tokens.identifier(position - 1) == qualifier_name)
+        return violates("no template-argument-list after a constructor's "
+                        "name",
+                        "class.qual", position);
+    if (at(preprocessing_op_or_punc::LESS)) {
+        /* a template-id: an explicit specialization's or a partial
+           specialization's name ([temp.expl.spec], [temp.spec.partial]),
+           which declares no new name */
+        syntax_kind kind = syntax_kind::template_id;
+        if (tokens[facts.id_first].kind == token_kind::identifier &&
+            unqualified == 0)
+            kind = syntax_kind::simple_template_id;
+        template_id_rest(id_mark, facts.id_first, kind);
+        if (failed())
+            return 0;
+        facts.template_id = true;
+        facts.name = 0;
+    }
     facts.id_last = position - 1;
     if (!qualifier)
         return 0; /* an unqualified-id passes through */

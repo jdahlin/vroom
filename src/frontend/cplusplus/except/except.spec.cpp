@@ -13,6 +13,9 @@ namespace cplusplus
 
 node_index parser::noexcept_specifier()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     add_token();

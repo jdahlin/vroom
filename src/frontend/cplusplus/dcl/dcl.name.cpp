@@ -24,7 +24,13 @@ node_index parser::type_id()
     token_index first = position;
     decl_specifier_facts specifiers;
     specifiers.type_specifier_seq = true;
-    decl_specifier_seq(specifiers, true);
+    /* [temp.res]/5: a type-id-only context is this type-id's, not the
+       type-ids nested in it */
+    specifiers.implicit_typename = type_id_only && tokens.files.behavior.has(language_feature::implicit_typename);
+    {
+        flag_set nested(type_id_only, false);
+        decl_specifier_seq(specifiers, true);
+    }
     if (failed())
         return 0;
     if (!specifiers.node)

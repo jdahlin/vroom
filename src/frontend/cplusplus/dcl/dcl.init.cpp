@@ -103,6 +103,9 @@ node_index parser::initializer_clause()
  */
 node_index parser::braced_init_list()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     nesting_level level(*this);
     if (!nesting_within_limit("an initializer nested no deeper than this "
                               "implementation's limit"))

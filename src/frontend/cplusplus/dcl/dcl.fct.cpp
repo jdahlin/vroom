@@ -42,6 +42,9 @@ bool parser::parameters_follow(declarator_form form)
 
 node_index parser::parameters_and_qualifiers(scope_index *parameters)
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     add_token();
@@ -168,6 +171,9 @@ node_index parser::parameter_declaration()
     if (at(standard_keyword::this_))
         return beyond_this_step();
     decl_specifier_facts specifiers;
+    /* [temp.res]/5: where the parameter's context says (a member's,
+       a requires-expression's, a template-parameter's ...) */
+    specifiers.implicit_typename = parameters_implicit_typename && tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
@@ -183,8 +189,10 @@ node_index parser::parameter_declaration()
     if (failed())
         return 0;
     if (facts.name && !facts.qualified_id)
-        names.declare(facts.name, name_kind::other);
+        names.declare_in(names.current(), facts.name, name_kind::other);
     if (accept(preprocessing_op_or_punc::EQUAL)) {
+        /* [temp.res]/5: not in a default argument */
+        flag_set implicit(parameters_implicit_typename, false);
         if (list_initialization_missing())
             return 0;
         if (collecting_members) {

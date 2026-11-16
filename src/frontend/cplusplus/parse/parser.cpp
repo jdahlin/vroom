@@ -149,7 +149,9 @@ parser::tentative_parse::tentative_parse(parser &p)
     : p(p), position(p.position), pending(p.pending.size()),
       nodes(p.tree.size()), messages(p.diagnostics.messages.size()),
       errors(p.diagnostics.error_count), lookups(p.names.lookups.size()),
-      names(p.names.journal_mark()), failure(p.failure)
+      splits(p.tree.split_tokens.size()), split_active(p.split_active),
+      split_rest(p.split_rest), names(p.names.journal_mark()),
+      failure(p.failure)
 {
     p.counters.tentative_parses++;
     p.speculation++;
@@ -168,6 +170,9 @@ parser::tentative_parse::~tentative_parse()
     p.diagnostics.messages.resize(messages);
     p.diagnostics.error_count = errors;
     p.names.lookups.resize(lookups);
+    p.tree.split_tokens.resize(splits);
+    p.split_active = split_active;
+    p.split_rest = split_rest;
     p.names.rollback(names);
     p.failure = failure;
 }

@@ -41,10 +41,6 @@ bool uses_later_grammar(parser &p, token_index first, token_index end,
     for (token_index i = first; i < end; i++) {
         const token &t = p.tokens[i];
         switch (p.keyword_of(t)) {
-        case standard_keyword::template_:
-        case standard_keyword::requires_:
-        case standard_keyword::concept_:
-        case standard_keyword::typename_:
         case standard_keyword::asm_:
         case standard_keyword::export_:
         case standard_keyword::extension:
@@ -311,9 +307,13 @@ node_index parser::declaration_alternative()
            export-declaration ([module]): P8 */
         n = beyond_this_step();
     } else if (at(standard_keyword::template_) ||
-               at(standard_keyword::export_)) {
-        /* template-declaration and its kin (P7), export-declaration
-           (P8) */
+               (at(standard_keyword::extern_) &&
+                at(standard_keyword::template_, 1))) {
+        n = template_declaration(&parser::declaration_alternative);
+    } else if (deduction_guide_follows()) {
+        n = deduction_guide();
+    } else if (at(standard_keyword::export_)) {
+        /* export-declaration (P8) */
         n = beyond_this_step();
     } else {
         n = block_or_function_declaration();
@@ -352,6 +352,9 @@ node_index parser::block_or_function_declaration()
     if (failed())
         return 0;
     decl_specifier_facts specifiers;
+    /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
+       simple-declaration or a function-definition in namespace scope" */
+    specifiers.implicit_typename = !block_scope && tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
@@ -387,8 +390,16 @@ parser::simple_declaration_rest(size_t mark, token_index first,
            instantiation or it has one of the following forms: class-key
            attribute-specifier-seq_opt identifier ; ..." (the others are
            friend declarations, P5's) */
+        /* [temp.explicit]/1: "A class, function, variable, or member
+           template specialization can be explicitly instantiated": no
+           enumeration */
+        if (explicit_instantiation_ && specifiers.elaborated &&
+            keyword_of(tokens[specifiers.elaborated_at]) ==
+                standard_keyword::enum_)
+            return violates("no enumeration in an explicit-instantiation",
+                            "temp.explicit", specifiers.elaborated_at);
         if (specifiers.elaborated && specifiers.count == 1 &&
-            !specifiers.elaborated_declaring_form)
+            !specifiers.elaborated_declaring_form && !explicit_declaration)
             return violates("an elaborated-type-specifier alone only as "
                             "class-key attribute-specifier-seq_opt "
                             "identifier ;",
@@ -422,6 +433,8 @@ parser::simple_declaration_rest(size_t mark, token_index first,
     declarator_facts facts;
     size_t list_mark = begin_node();
     token_index list_first = position;
+    if (template_declarator_violates(specifiers, true))
+        return 0;
     declarator(declarator_form::concrete, facts);
     if (failed())
         return 0;
@@ -434,9 +447,22 @@ parser::simple_declaration_rest(size_t mark, token_index first,
             kind = name_kind::function;
         if (specifiers.typedef_)
             kind = name_kind::type_name;
-        names.declare(facts.name, kind);
+        names.declare(facts.name, declared_kind(kind), 0,
+                      specifiers.typedef_ && specifiers.dependent);
     }
     bool function = facts.first == derivation::function;
+    /* [dcl.decl]/1: init-declarator: declarator requires-clause, and
+       [dcl.fct.def.general]/1: declarator requires-clause function-body */
+    /* [dcl.decl]/3 as clang reads it: "trailing requires clause can only
+       be used when declaring a function" */
+    if (at(standard_keyword::requires_) && !function)
+        return violates("a requires-clause only after a function's declarator",
+                            "dcl.decl", position);
+    if (at(standard_keyword::requires_)) {
+        requires_clause();
+        if (failed())
+            return 0;
+    }
     /* function-body: ctor-initializer_opt compound-statement (a
        constructor's ctor-initializer, [class.base.init]),
        function-try-block, = default ;, = delete ; */
@@ -462,8 +488,6 @@ parser::simple_declaration_rest(size_t mark, token_index first,
             return 0;
         return finish_node(syntax_kind::function_definition, mark, first);
     }
-    if (function && at(standard_keyword::requires_))
-        return beyond_this_step(); /* requires-clause: P7 */
     if (!specifiers.node && !facts.qualified_id)
         /* nodeclspec-function-declaration is a member's, or an
            explicit-specialization's: a declaration at namespace scope
@@ -479,6 +503,8 @@ parser::simple_declaration_rest(size_t mark, token_index first,
         return 0;
     unsigned count = 1;
     while (accept(preprocessing_op_or_punc::COMMA)) {
+        if (template_declarator_violates(specifiers, false))
+            return 0;
         declarator_facts next;
         init_declarator(specifiers, next, false);
         if (failed())
@@ -542,6 +568,8 @@ node_index parser::alias_declaration()
     size_t type_mark = begin_node();
     token_index type_first = position;
     decl_specifier_facts specifiers;
+    /* [temp.res]/5: the defining-type-id of an alias-declaration */
+    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, true);
     if (failed())
         return 0;
@@ -554,7 +582,8 @@ node_index parser::alias_declaration()
     finish_node(syntax_kind::defining_type_id, type_mark, type_first);
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the alias-declaration", "dcl.pre");
-    names.declare(name, name_kind::type_name);
+    names.declare(name, declared_kind(name_kind::type_name), 0,
+                  specifiers.dependent);
     return finish_node(syntax_kind::alias_declaration, mark, first);
 }
 

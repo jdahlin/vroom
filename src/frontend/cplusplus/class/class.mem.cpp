@@ -183,9 +183,14 @@ node_index parser::class_body(uint32_t name, scope_index region)
         return unparsed_group();
     add_token(); /* { */
     scope_index outer = names.current();
+    /* [temp.local]/1: a class template's injected-class-name is a
+       template-name, or a type-name without template arguments */
+    name_kind injected = name_kind::type_name;
+    if (name && declared_kind(name_kind::type_name) == name_kind::template_name)
+        injected = name_kind::template_name;
     names.reenter(region);
     if (name)
-        names.declare(name, name_kind::type_name, region);
+        names.declare(name, injected, region);
     uint32_t enclosing_class = member_class_name;
     member_class_name = name;
     enclosing_braces++;
@@ -250,6 +255,9 @@ node_index parser::member_declaration()
  */
 node_index parser::member_declaration_alternative()
 {
+    /* [temp.res]/5: "a parameter-declaration in a member-declaration,
+       unless that parameter-declaration appears in a default argument" */
+    flag_set implicit(parameters_implicit_typename, true);
     size_t mark = begin_node();
     token_index first = position;
     if (at(preprocessing_op_or_punc::SEMICOLON)) {
@@ -267,7 +275,11 @@ node_index parser::member_declaration_alternative()
         return static_assert_declaration();
     if (at(standard_keyword::enum_) && opaque_enum_declaration_follows())
         return opaque_enum_declaration();
-    if (at(standard_keyword::template_) || at(standard_keyword::export_))
+    if (at(standard_keyword::template_))
+        return template_declaration(&parser::member_declaration_alternative);
+    if (deduction_guide_follows())
+        return deduction_guide();
+    if (at(standard_keyword::export_))
         return beyond_this_step();
     /* an attribute-specifier-seq before a using-declaration: clang's
        extension, P9's */
@@ -283,6 +295,9 @@ node_index parser::member_declaration_alternative()
         return 0;
     decl_specifier_facts specifiers;
     specifiers.constructor_name = member_class_name;
+    /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
+       member-declaration" */
+    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
@@ -305,7 +320,7 @@ node_index parser::member_declaration_alternative()
            class-key attribute-specifier-seq_opt identifier ;, or in a
            friend declaration */
         if (specifiers.elaborated && specifiers.count == 1 &&
-            !specifiers.elaborated_declaring_form)
+            !specifiers.elaborated_declaring_form && !explicit_declaration)
             return violates("an elaborated-type-specifier alone only as "
                             "class-key attribute-specifier-seq_opt "
                             "identifier ;",
@@ -316,6 +331,8 @@ node_index parser::member_declaration_alternative()
     size_t list_mark = begin_node();
     token_index list_first = position;
     bool definition = false;
+    if (template_declarator_violates(specifiers, true))
+        return 0;
     member_declarator(specifiers, list_mark, list_first, true, &definition);
     if (failed())
         return 0;
@@ -330,6 +347,8 @@ node_index parser::member_declaration_alternative()
                         "dcl.attr.grammar", attributes_at);
     unsigned count = 1;
     while (accept(preprocessing_op_or_punc::COMMA)) {
+        if (template_declarator_violates(specifiers, false))
+            return 0;
         member_declarator(specifiers, begin_node(), position, false,
                           &definition);
         if (failed())
@@ -435,11 +454,20 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
             kind = name_kind::function;
         if (specifiers.typedef_)
             kind = name_kind::type_name;
-        names.declare(facts.name, kind);
+        names.declare(facts.name, declared_kind(kind), 0,
+                      specifiers.typedef_ && specifiers.dependent);
     }
     bool function = facts.first == derivation::function;
     bool virt = false;
-    if (function && at_virt_specifier()) {
+    /* [class.mem.general]/1: member-declarator: declarator requires-clause */
+    if (at(standard_keyword::requires_) && !function)
+        return violates("a requires-clause only after a function's declarator",
+                            "dcl.decl", position);
+    if (at(standard_keyword::requires_)) {
+        requires_clause();
+        if (failed())
+            return 0;
+    } else if (function && at_virt_specifier()) {
         virt_specifier_seq();
         if (failed())
             return 0;
@@ -460,8 +488,6 @@ node_index parser::member_declarator(const decl_specifier_facts &specifiers,
         *definition = true;
         return 0;
     }
-    if (at(standard_keyword::requires_))
-        return beyond_this_step(); /* requires-clause: P7 */
     bool more = virt;
     if (at(preprocessing_op_or_punc::EQUAL) && function &&
         spelled_zero(*this, 1)) {
