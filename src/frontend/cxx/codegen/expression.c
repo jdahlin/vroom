@@ -693,11 +693,13 @@ VPRIV void cxx_gen_assignment(cxx *c, int op, uint32_t l, uint32_t r, uint32_t l
 		ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE_AT(a, l)->ty);
 		uint32_t src = r, chain;
 		cxx_prv *p = cxx_gen_prv_find(c, r);	/* (a call's prvalue: its node may be marked an lvalue, its temporary) */
-		bool move = !(AST_NODE_AT(a, r)->flags & AST_NODE_FLAG_LVALUE) || (p && p->call);
+		bool prv = !(AST_NODE_AT(a, r)->flags & AST_NODE_FLAG_LVALUE) || (p && p->call);
+		bool move = prv || c->gen_assign_rv;	/* (an xvalue, std::move(y): moved from where it is) */
 		cc_id_list parts;
 
+		c->gen_assign_rv = 0;
 		cc_id_list_init(&parts);
-		if (move) {
+		if (prv) {
 			/* (a prvalue: built in a temporary first, once) */
 			uint32_t tmp;
 

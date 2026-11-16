@@ -442,6 +442,7 @@ typedef struct cxx {
 	uint32_t gen_psyms, gen_npsyms;	/* the function's parameter symbols (a list in the AST) */
 	ast_qualified_type gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
+	uint8_t gen_assign_rv;		/* the next cxx_gen_assignment's right operand is an rvalue (an xvalue: moved from) */
 	char **gen_names;		/* the mangled names of the functions defined so far, a hash set (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
 	/* a constructor's initializers so far: the members (names) and bases (types) they construct */

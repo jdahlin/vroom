@@ -421,6 +421,7 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 			if (!built_in && !c->tentative)
 				c->op_lv_set = 1, c->op_lv[0] = ll, c->op_lv[1] = braced ? 0 : c->elval;
 			ast_qualified_type rt0 = c->etype;
+			bool r_rvalue = !c->elval;
 
 			if (built_in || c->tentative || !cxx_operator_call_type(c, opid, l, braced ? c->cargs : &c->etype, 1))
 				cxx_et(c, built_in ? l : CXX_TY_UNKNOWN, built_in);
@@ -440,8 +441,11 @@ VPRIV void cxx_assignment_expression_parse(cxx *c)
 				cxx_gen_operator_call(c, ln, &rn, 1, oploc);
 				if (braced)
 					c->gen_call_brace[0] = 0;
-			} else if (!c->tentative && !braced)
+			} else if (!c->tentative && !braced) {
+				c->gen_assign_rv = r_rvalue;	/* (the implicit operator=: moves from an xvalue) */
 				cxx_gen_assignment(c, optok, ln, rn, oploc);
+				c->gen_assign_rv = 0;
+			}
 			else if (!c->tentative && ln && l != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, l) && AST_TYPE_KIND(c->ast, l) != AST_TYPE_ARRAY &&
 				 cxx_gen_on(c) && cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)) &&
 				 !cxx_lookup_in(c, cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(l)), opid, 0)) {

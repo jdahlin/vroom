@@ -1,5 +1,5 @@
 // x = y of a class with no operator= of its own and a member that has one (json's udt name, a std::string in
-// it): each member assigned by its own operator=, moved from a prvalue, copied from an lvalue
+// it): each member assigned by its own operator=, moved from a prvalue or an xvalue, copied from an lvalue
 static int copies, moves;
 struct S {
 	int v;
@@ -20,6 +20,9 @@ int main()
 	int a = p.name.s.v, ak = p.name.k;
 	p.name = get<Name>(8);
 	int b = p.name.s.v;
+	Name w(9);
+	p.name = static_cast<Name &&>(w);
+	int c = p.name.s.v, wv = w.s.v;
 	p.name = q.name;
-	return a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && moves == 2 && copies == 1 ? 0 : 1;
+	return a == 7 && ak == 14 && b == 8 && p.name.s.v == 5 && p.name.k == 10 && q.name.s.v == 5 && c == 9 && wv == -1 && moves == 3 && copies == 1 ? 0 : 1;
 }
