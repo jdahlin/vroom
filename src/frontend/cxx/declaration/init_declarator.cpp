@@ -1070,6 +1070,19 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context,
                             cxx_gen_defaulted_constructor(c, k);
                         }
                     }
+                    /* X& X::operator=(const X&) = default; (and X&&): the assignment, defined here */
+                    if (!dtor && !qs->dependent && qs->owner &&
+                        !qs->owner->instance &&
+                        name == vintern_cstr("operator=")) {
+                        cxx_entity *k = cxx_member_function_find(
+                            c, qs, name, c->decl_params, c->ndecl_params,
+                            c->decl_const);
+
+                        if (k && k->member_of == qs) {
+                            k->fn_defaulted = 1;
+                            cxx_gen_defaulted_assignment(c, k);
+                        }
+                    }
                 }
                 cxx_advance(c);
                 if (cxx_is(c, LEX_TOKEN_LEFT_PAREN)) /* = delete("reason") */

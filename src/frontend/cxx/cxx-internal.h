@@ -1170,6 +1170,7 @@ VPRIV void cxx_member_body_use(cxx *c, cxx_entity *e);
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_constructor(cxx *c, cxx_entity *d);
+VPRIV void cxx_gen_defaulted_assignment(cxx *c, cxx_entity *d);
 /* the expression is ill-formed for sure (VCC_CXX_SIG=2: where vcc decided so) */
 #define CXX_INVALID(c) cxx_invalid_note(c, __FILE__, __LINE__)
 static inline void cxx_invalid_note(cxx *c, const char *file, int line)
@@ -1250,6 +1251,8 @@ VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
 VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, ast_qualified_type t,
                                     uint32_t loc);
 VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t);
+/* is the class's copy/move assignment trivial: 1 yes, 0 no, -1 not known */
+VPRIV int cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth);
 VPRIV ast_qualified_type cxx_initializer_list_element(cxx *c,
                                                       ast_qualified_type t);
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);

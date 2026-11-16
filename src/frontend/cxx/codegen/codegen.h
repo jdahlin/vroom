@@ -77,6 +77,7 @@ VPRIV bool cxx_gen_assign_parts(cxx *c, uint32_t target, ast_qualified_type t,
 VPRIV void cxx_gen_destructor_parts_use(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_destructor(cxx *c, cxx_entity *d);
 VPRIV void cxx_gen_defaulted_constructor(cxx *c, cxx_entity *d);
+VPRIV void cxx_gen_defaulted_assignment(cxx *c, cxx_entity *d);
 VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t);
 VPRIV bool cxx_gen_needs_destruction(cxx *c, ast_qualified_type t, int depth);
 VPRIV bool cxx_gen_copy_construct_parts(cxx *c, uint32_t target,
