@@ -94,6 +94,11 @@ scope_index declared_names::enter(scope_kind kind)
     return current_scope;
 }
 
+void declared_names::reenter(scope_index region)
+{
+    current_scope = region;
+}
+
 void declared_names::leave()
 {
     current_scope = scopes[current_scope].enclosing;

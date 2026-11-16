@@ -37,6 +37,38 @@ const char *syntax_kind_subclause(syntax_kind kind)
     return syntax_kinds[static_cast<size_t>(kind)].subclause;
 }
 
+bool syntax_kind_is_expression(syntax_kind kind)
+{
+    switch (kind) {
+    case syntax_kind::primary_expression:
+    case syntax_kind::qualified_id:
+    case syntax_kind::postfix_expression:
+    case syntax_kind::unary_expression:
+    case syntax_kind::noexcept_expression:
+    case syntax_kind::new_expression:
+    case syntax_kind::delete_expression:
+    case syntax_kind::cast_expression:
+    case syntax_kind::pm_expression:
+    case syntax_kind::multiplicative_expression:
+    case syntax_kind::additive_expression:
+    case syntax_kind::shift_expression:
+    case syntax_kind::compare_expression:
+    case syntax_kind::relational_expression:
+    case syntax_kind::equality_expression:
+    case syntax_kind::and_expression:
+    case syntax_kind::exclusive_or_expression:
+    case syntax_kind::inclusive_or_expression:
+    case syntax_kind::logical_and_expression:
+    case syntax_kind::logical_or_expression:
+    case syntax_kind::conditional_expression:
+    case syntax_kind::assignment_expression:
+    case syntax_kind::expression:
+        return true;
+    default:
+        return false;
+    }
+}
+
 syntax_tree::syntax_tree()
 {
     /* node 0 is no node */

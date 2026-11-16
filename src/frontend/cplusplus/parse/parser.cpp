@@ -96,6 +96,28 @@ node_index parser::violates(const char *rule, const char *subclause,
     return 0;
 }
 
+/*
+ * [implimits]/1: "Because computers are finite, C++ implementations are
+ * inevitably limited in the size of the programs they can successfully
+ * process."  /2's "Nesting levels of parenthesized expressions within a
+ * full-expression [256]" is a recommended minimum; the limit here is for
+ * every way an expression or an initializer nests (operands of unary
+ * operators and casts, the operands of ?: and of assignments, braces), so
+ * that the parser's own recursion is bounded.  A tentative parse does not
+ * undo having passed it: the declaration is ill-formed for it.
+ */
+bool parser::nesting_within_limit(const char *what)
+{
+    if (nesting <= nesting_limit && !nesting_limit_exceeded)
+        return true;
+    if (!nesting_limit_exceeded) {
+        nesting_limit_exceeded = true;
+        nesting_limit_at = position;
+    }
+    violates(what, "implimits", position);
+    return false;
+}
+
 node_index parser::beyond_this_step()
 {
     failure.beyond_step = true;
@@ -206,6 +228,24 @@ preprocessing_op_or_punc opening_bracket(preprocessing_op_or_punc closing)
 }
 
 } // namespace
+
+/* the lookahead after the bracketed group at tokens[ahead]: after the
+   bracket that closes it, or the end of the translation unit */
+unsigned parser::group_end(unsigned ahead)
+{
+    if (closing_bracket(peek(ahead)) == preprocessing_op_or_punc::count)
+        return ahead;
+    unsigned depth = 0;
+    for (unsigned i = ahead;; i++) {
+        const token &t = peek(i);
+        if (tokens.at_end(position + i))
+            return i;
+        if (closing_bracket(t) != preprocessing_op_or_punc::count)
+            depth++;
+        else if (is_closing_bracket(t) && !--depth)
+            return i + 1;
+    }
+}
 
 /*
  * Scaffolding (doc/PLAN-cxx-parse.md, "opaque"): the tokens of one

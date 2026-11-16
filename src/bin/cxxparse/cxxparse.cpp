@@ -12,6 +12,16 @@
  *   cxxparse -dump-tokens ...                phase 7's tokens through the
  *                                            parser's token stream, as
  *                                            cxxlex -dump-tokens prints them
+ *   cxxparse -expression-claims ...          one line per expression: where
+ *                                            its declaration ends, its tokens,
+ *                                            and the same with every operator's
+ *                                            operands parenthesized as the tree
+ *                                            has them (bench/cxx-parse.py has
+ *                                            clang compare the two)
+ *   cxxparse -declaration-claims ...         one line per declared name: the
+ *                                            type its declarator gives it, in
+ *                                            an encoding clang checks
+ *                                            (declarator-claims.h)
  *   cxxparse -stats ...                      tokens, nodes, tentative parses,
  *                                            lookups, scaffolding nodes
  *   cxxparse -selftest                       the parts no grammar uses yet
@@ -21,6 +31,8 @@
  */
 #include "../cxxlex/command-line.h"
 #include "frontend/cplusplus/parse.h"
+
+#include "declarator-claims.h"
 
 static bool check(bool condition, const char *what)
 {
@@ -121,11 +133,142 @@ static int selftest()
     return 1;
 }
 
+/* the tokens [first, end) as they are spelled, a space after each */
+static void write_tokens(token_stream &tokens, token_index first,
+                         token_index end, vbuffer *out)
+{
+    for (token_index t = first; t < end; t++) {
+        tokens.spelling(t, out);
+        vbuffer_append(out, " ", 1);
+    }
+}
+
+/*
+ * The tokens of node n, with parentheses around every expression that has
+ * an operator: what the tree says the operands of each operator are.
+ * [expr.prim.paren]/1: "The parenthesized expression can be used in exactly
+ * the same contexts as those where E can be used, and with the same
+ * meaning, except as otherwise indicated."  The exceptions are left as
+ * written: the operand of decltype ([dcl.type.decltype]/1: an
+ * unparenthesized id-expression or class member access), a qualified-id
+ * (the operand of & in [expr.unary.op]/4 forms a pointer to member only
+ * when it is not enclosed in parentheses), and a call or a type's
+ * ( expression-list_opt ): (T()) before an operand is ( type-id ), a cast
+ * ([dcl.ambig.res]/2), and nothing binds more tightly than they do, so
+ * their own parentheses would say nothing.
+ */
+static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
+                                node_index root, vbuffer *out)
+{
+    /* the nodes being written, outermost first (a chain of a thousand
+       additions is a thousand nodes deep: no recursion) */
+    struct level {
+        node_index node;
+        uint32_t next_child;
+        bool parentheses;
+    };
+    owned_array<level> path;
+    auto enter = [&](node_index n) {
+        const syntax_node &s = tree[n];
+        if (s.kind == syntax_kind::decltype_specifier ||
+            s.kind == syntax_kind::unparsed ||
+            s.kind == syntax_kind::erroneous) {
+            write_tokens(tokens, s.first_token, s.end_token, out);
+            return;
+        }
+        bool parentheses = syntax_kind_is_expression(s.kind) &&
+                           s.kind != syntax_kind::qualified_id &&
+                           s.kind != syntax_kind::primary_expression;
+        if (s.kind == syntax_kind::postfix_expression && s.child_count) {
+            syntax_child last = tree.children(n)[s.child_count - 1];
+            if (last.is_token() &&
+                tokens[last.index()].kind ==
+                    token_kind::operator_or_punctuator &&
+                preprocessing_op_or_punc_primary(
+                    tokens[last.index()].op_or_punc) ==
+                    preprocessing_op_or_punc::RIGHT_PARENTHESIS)
+                parentheses = false;
+        }
+        if (parentheses)
+            vbuffer_append(out, "( ", 2);
+        path.append({n, 0, parentheses});
+    };
+    enter(root);
+    while (!path.empty()) {
+        level &top = path.back();
+        const syntax_node &s = tree[top.node];
+        if (top.next_child == s.child_count) {
+            if (top.parentheses)
+                vbuffer_append(out, ") ", 2);
+            path.resize(path.size() - 1);
+            continue;
+        }
+        syntax_child c = tree.children(top.node)[top.next_child++];
+        if (c.is_token())
+            write_tokens(tokens, c.index(), c.index() + 1, out);
+        else
+            enter(c.index());
+    }
+}
+
+/*
+ * -expression-claims: for each expression that is not part of another (and
+ * has an operator), a line
+ *
+ *     FILE <tab> LINE:COLUMN <tab> the expression <tab> it parenthesized
+ *
+ * where LINE:COLUMN is just after the declaration the expression is in (a
+ * declaration of a declaration-seq), a place where a static_assert about
+ * the expression can stand.  A declaration with a token a macro made is
+ * left out: its tokens are not at one place in the file.  So is an
+ * expression that gets no parentheses: there is nothing to check.
+ */
+static void write_expression_claims(const syntax_tree &tree,
+                                    token_stream &tokens, node_index n,
+                                    node_index declaration, bool in_sequence,
+                                    vbuffer *out)
+{
+    const syntax_node &s = tree[n];
+    if (in_sequence) {
+        declaration = n;
+        for (token_index t = s.first_token; t < s.end_token; t++)
+            if (tokens[t].preprocessing.expansion)
+                return;
+    }
+    if (declaration && syntax_kind_is_expression(s.kind) &&
+        s.kind != syntax_kind::qualified_id) {
+        const syntax_node &d = tree[declaration];
+        source_position end = tokens.position(d.end_token - 1);
+        uint32_t extent = tokens[d.end_token - 1].preprocessing.extent;
+        owned_buffer written, parenthesized;
+        write_tokens(tokens, s.first_token, s.end_token, written.get());
+        write_parenthesized(tree, tokens, n, parenthesized.get());
+        if (written.size() == parenthesized.size() &&
+            !memcmp(written.data(), parenthesized.data(), written.size()))
+            return;
+        vbuffer_format_append(out, "%s\t%u:%u\t", end.file_name, end.line,
+                              end.column + extent);
+        vbuffer_append(out, written.data(), written.size());
+        vbuffer_append(out, "\t", 1);
+        vbuffer_append(out, parenthesized.data(), parenthesized.size());
+        vbuffer_append(out, "\n", 1);
+        return;
+    }
+    for (uint32_t i = 0; i < s.child_count; i++) {
+        syntax_child c = tree.children(n)[i];
+        if (!c.is_token())
+            write_expression_claims(tree, tokens, c.index(), declaration,
+                                    s.kind == syntax_kind::declaration_seq,
+                                    out);
+    }
+}
+
 int main(int argc, char **argv)
 {
     command_line options("cxxparse");
     bool dump_syntax = false, dump_declarations = false, dump_tokens = false,
-         stats = false, phase4_only = false, debug_fallbacks = false;
+         stats = false, phase4_only = false, debug_fallbacks = false,
+         expression_claims = false, declaration_claims = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -138,6 +281,10 @@ int main(int argc, char **argv)
             dump_declarations = true;
         else if (!strcmp(a, "-dump-tokens"))
             dump_tokens = true;
+        else if (!strcmp(a, "-expression-claims"))
+            expression_claims = true;
+        else if (!strcmp(a, "-declaration-claims"))
+            declaration_claims = true;
         else if (!strcmp(a, "-phase4-diagnostics-only"))
             phase4_only = true;
         else if (!strcmp(a, "-debug-fallbacks"))
@@ -152,10 +299,10 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr,
-                "usage: cxxparse [-fsyntax-only|-dump-syntax|"
-                "-dump-declarations|-dump-tokens|-stats] [clang -cc1 options] "
-                "FILE\n       cxxparse -selftest\n");
+        fprintf(stderr, "usage: cxxparse [-fsyntax-only|-dump-syntax|"
+                        "-dump-declarations|-dump-tokens|-expression-claims|"
+                        "-declaration-claims|-stats] [clang -cc1 options] "
+                        "FILE\n       cxxparse -selftest\n");
         return 2;
     }
     options.apply();
@@ -243,6 +390,10 @@ int main(int argc, char **argv)
 
     if (dump_syntax)
         tree.dump(tree.root, tokens, out.get());
+    if (expression_claims)
+        write_expression_claims(tree, tokens, tree.root, 0, false, out.get());
+    if (declaration_claims)
+        declarator_claims(tree, tokens, p, out.get()).write(tree.root);
     if (dump_declarations) {
         /* translation-unit: declaration-seq_opt; per declaration, whether
            it has an erroneous node, and whether a declaration in it was

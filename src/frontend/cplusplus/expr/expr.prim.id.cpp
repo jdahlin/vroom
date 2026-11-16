@@ -1,7 +1,7 @@
 /*
- * expr.prim.id.cpp: [expr.prim.id] Names, as far as declarators use them:
- * the declarator-id of [dcl.decl] and the nested-name-specifier of
- * [expr.prim.id.qual].  The id-expressions of expressions are P3's.
+ * expr.prim.id.cpp: [expr.prim.id] Names: the id-expression of an
+ * expression, the declarator-id of [dcl.decl] and the
+ * nested-name-specifier of [expr.prim.id.qual].
  *
  *     id-expression:
  *         unqualified-id
@@ -28,7 +28,10 @@ namespace cplusplus
  * considers only namespaces, types, and templates whose specializations are
  * types").  *scope is the namespace the specifier names when it names one;
  * *known is false once it names a class, whose members the parser does not
- * know until P5.  decltype-specifier :: is P3's, simple-template-id :: P7's.
+ * know until P5; so it is after decltype-specifier ::
+ * ([expr.prim.id.qual]/1: "The type denoted by a decltype-specifier in a
+ * nested-name-specifier shall be a class or enumeration type").
+ * simple-template-id :: is P7's.
  */
 bool parser::nested_name_specifier_follows(unsigned ahead)
 {
@@ -37,7 +40,8 @@ bool parser::nested_name_specifier_follows(unsigned ahead)
             at(preprocessing_op_or_punc::COLON_COLON, ahead + 1));
 }
 
-node_index parser::nested_name_specifier(scope_index *scope, bool *known)
+node_index parser::nested_name_specifier(scope_index *scope, bool *known,
+                                         bool template_ids)
 {
     size_t mark = begin_node();
     token_index first = position;
@@ -47,6 +51,15 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known)
     if (at(preprocessing_op_or_punc::COLON_COLON)) {
         add_token();
         *scope = declared_names::global_namespace;
+        qualified = true;
+    } else if (at(standard_keyword::decltype_)) {
+        decltype_specifier();
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::COLON_COLON))
+            return expected("'::' after the decltype-specifier",
+                            "expr.prim.id.qual");
+        *known = false;
         qualified = true;
     }
     while (at_identifier() && at(preprocessing_op_or_punc::COLON_COLON, 1)) {
@@ -74,12 +87,111 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known)
         add_token();
         qualified = true;
     }
-    if (at(standard_keyword::template_) || at(standard_keyword::decltype_) ||
-        (at_identifier() && at(preprocessing_op_or_punc::LESS, 1)))
+    /* a template-id, in the specifier or after it: P7.  An expression's
+       caller decides what a '<' after its name is (template_ids false). */
+    if (at(standard_keyword::template_) ||
+        (template_ids && at_identifier() &&
+         at(preprocessing_op_or_punc::LESS, 1)))
         return beyond_this_step();
     if (position == first)
         return 0;
     return finish_node(syntax_kind::nested_name_specifier, mark, first);
+}
+
+/*
+ * The id-expression of an expression ([expr.prim.id]/1):
+ *
+ *     id-expression:
+ *         unqualified-id
+ *         qualified-id
+ *
+ *     unqualified-id:
+ *         identifier
+ *         operator-function-id
+ *         conversion-function-id
+ *         literal-operator-id
+ *         ~ type-name
+ *         ~ decltype-specifier
+ *         template-id
+ *
+ *     qualified-id:
+ *         nested-name-specifier template_opt unqualified-id
+ *
+ * An identifier passes through; ~ type-name is an unqualified-id node, and
+ * only after a nested-name-specifier or, with member, after . or ->
+ * ([expr.unary.op]/10: "a ~ followed by a type-name or decltype-specifier
+ * in a member access expression or qualified-id is unambiguously parsed as
+ * a destructor name").  The operator names are P5's, template and
+ * template-ids P7's.
+ *
+ * [expr.prim.id.unqual]/1: "An identifier is only an id-expression if it
+ * has been suitably declared", which is the semantic analysis's to check.
+ * What the grammar needs is whether a '<' after the name begins a
+ * template-argument-list ([temp.names]/3: "When a name is considered to be
+ * a template-name, and it is followed by a <, the < is always taken as the
+ * delimiter of a template-argument-list and never as the less-than
+ * operator"): it does not after a name declared as a variable, function or
+ * enumerator, and after any other name the tokens are P7's to read.  A
+ * member's name ([basic.lookup.classref]/1: "The identifier is first looked
+ * up in the class of the object expression") and a name of a class's scope
+ * are unknown here until P5.
+ */
+node_index parser::id_expression(bool member)
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    scope_index scope = 0;
+    bool known = true;
+    node_index qualifier = 0;
+    if (nested_name_specifier_follows(0) || at(standard_keyword::decltype_)) {
+        qualifier = nested_name_specifier(&scope, &known, false);
+        if (failed())
+            return 0;
+    }
+    if (at(standard_keyword::template_) || at(standard_keyword::operator_))
+        return beyond_this_step();
+    if (at(preprocessing_op_or_punc::TILDE) && (qualifier || member)) {
+        size_t tilde_mark = begin_node();
+        token_index tilde_first = position;
+        add_token();
+        if (at(standard_keyword::decltype_)) {
+            decltype_specifier();
+            if (failed())
+                return 0;
+        } else if (at_identifier()) {
+            add_token();
+            if (at(preprocessing_op_or_punc::LESS))
+                return beyond_this_step();
+        } else {
+            return expected("a type-name or decltype-specifier after '~'",
+                            "expr.prim.id.unqual");
+        }
+        finish_node(syntax_kind::unqualified_id, tilde_mark, tilde_first);
+    } else if (at_identifier()) {
+        uint32_t name = tokens.identifier(position);
+        name_kind kind = name_kind::not_declared;
+        if (!member && known) {
+            if (qualifier)
+                kind = names.lookup_qualified(scope, name);
+            else
+                kind = names.lookup_unqualified(name);
+        }
+        add_token();
+        if (kind == name_kind::template_name)
+            return beyond_this_step();
+        if (kind == name_kind::not_declared)
+            unknown_name = true;
+        if (at(preprocessing_op_or_punc::LESS) && kind != name_kind::other)
+            return beyond_this_step();
+    } else if (qualifier) {
+        return expected("an unqualified-id after the nested-name-specifier",
+                        "expr.prim.id.qual");
+    } else {
+        return expected("an id-expression", "expr.prim.id");
+    }
+    if (!qualifier)
+        return 0; /* an unqualified-id passes through */
+    return finish_node(syntax_kind::qualified_id, mark, first);
 }
 
 /*

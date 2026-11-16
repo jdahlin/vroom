@@ -34,7 +34,8 @@ namespace
  * ([dcl.enum]: enum-key attribute-specifier-seq_opt nested-name-specifier_opt
  * identifier :) or an attribute-using-prefix's ([dcl.attr.grammar]:
  * [[ using attribute-namespace :).  Others are a later step's (bit-fields,
- * base-clauses, ctor-initializers, labels, the conditional operator).
+ * base-clauses, ctor-initializers, labels); the ':' of a
+ * conditional-expression ([expr.cond]) is counted by its '?'.
  */
 bool colon_of_this_step(parser &p, token_index first, token_index i)
 {
@@ -93,8 +94,18 @@ bool colon_of_this_step(parser &p, token_index first, token_index i)
  */
 bool uses_later_grammar(parser &p, token_index first, token_index end)
 {
+    /* the '?' whose ':' has not come yet */
+    unsigned conditionals = 0;
     for (token_index i = first; i < end; i++) {
         const token &t = p.tokens[i];
+        if (is_operator(t, preprocessing_op_or_punc::QUESTION)) {
+            conditionals++;
+            continue;
+        }
+        if (is_operator(t, preprocessing_op_or_punc::COLON) && conditionals) {
+            conditionals--;
+            continue;
+        }
         switch (p.keyword_of(t)) {
         case standard_keyword::template_:
         case standard_keyword::operator_:
@@ -202,6 +213,8 @@ node_index parser::declaration()
 {
     token_index first = position;
     failure_state failed_with;
+    unknown_name = false;
+    nesting_limit_exceeded = false;
     {
         tentative_parse attempt(*this);
         size_t mark = begin_node();
@@ -268,6 +281,21 @@ node_index parser::declaration()
         }
         failed_with = failure;
     }
+    bool limit = nesting_limit_exceeded;
+    if (limit) {
+        /* [implimits]: the declaration nests deeper than this
+           implementation parses, which is its diagnostic whatever else a
+           tentative parse then found */
+        failed_with = failure_state();
+        failed_with.failed = true;
+        failed_with.at = nesting_limit_at;
+        failed_with.expected = "an expression or initializer nested no "
+                               "deeper than this implementation's limit";
+        failed_with.subclause = "implimits";
+        failed_with.id = diagnostic_id::parse_violation;
+        unknown_name = false;
+        nesting_limit_exceeded = false;
+    }
     /* the tokens were not a declaration of the grammar written so far */
     if (debug_fallbacks) {
         const char *why = "expected ";
@@ -280,7 +308,10 @@ node_index parser::declaration()
     }
     size_t messages = diagnostics.messages.size();
     node_index n = unparsed_declaration();
-    if (failed_with.beyond_step || uses_later_grammar(*this, first, position)) {
+    /* a declaration that named something the parser does not know may have
+       failed for what the name is (a type, a template): a later step's */
+    if (!limit && (failed_with.beyond_step || unknown_name ||
+                   uses_later_grammar(*this, first, position))) {
         counters.beyond_step++;
         if (tree[n].kind == syntax_kind::erroneous) {
             /* the splitter's bracket diagnostics are about tokens a later
@@ -451,8 +482,6 @@ parser::simple_declaration_rest(size_t mark, token_index first,
  *     static_assert-declaration:
  *       static_assert ( constant-expression ) ;
  *       static_assert ( constant-expression , string-literal ) ;
- *
- * The constant-expression is P3's: kept as its tokens.
  */
 node_index parser::static_assert_declaration()
 {
@@ -461,10 +490,9 @@ node_index parser::static_assert_declaration()
     add_token();
     if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return expected("'(' after static_assert", "dcl.pre");
-    static constexpr preprocessing_op_or_punc stops[] = {
-        preprocessing_op_or_punc::COMMA};
-    if (!unparsed_until(stops, 1))
-        return expected("a constant-expression", "dcl.pre");
+    constant_expression();
+    if (failed())
+        return 0;
     if (accept(preprocessing_op_or_punc::COMMA)) {
         if (peek().literal != literal_kind::string_literal)
             return expected("a string-literal", "dcl.pre");

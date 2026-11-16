@@ -205,6 +205,9 @@ VPRIV bool has_builtin(const implementation_defined_behavior &b,
 
 /* ---- parse ------------------------------------------------------------- */
 
+/* [dcl.type.simple]: the simple-type-specifiers that are one keyword */
+VPRIV bool is_simple_type_keyword(standard_keyword k);
+
 /* [lex.operators]: whether a token is the operator or punctuator op, in
    either of its spellings ([lex.digraph]) */
 inline bool is_operator(const token &t, preprocessing_op_or_punc op)

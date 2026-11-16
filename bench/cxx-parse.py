@@ -23,6 +23,29 @@ option sets bench/cxx-pp.py reads), per run:
            more memory than the machine has).
   syntax   (from P1) declarations without an (unparsed) node: accepted or
            rejected as clang does (V4a); counted, not compared, in P0
+  claims   (from P3) cxxparse -expression-claims gives each expression and
+           the same tokens with the operands of every operator in
+           parentheses, as the tree groups them.  After the expression's
+           declaration, clang compiles
+               static_assert(__is_same(decltype((E)), decltype((P))));
+               static_assert((E) == (P) || (E) != (E));     (a NaN)
+           so it checks our reading of precedence, of the casts and of
+           sizeof without anyone comparing trees (V4b).  A claim is verified
+           by value when both hold, by type when E is no constant clang can
+           compare (or no number: two array temporaries are equal in no
+           reading), refuted when one fails or P does not compile where E
+           does, and not checkable when E itself does not compile there
+           (a parameter's name, an erroneous test).  C++11 and later runs.
+           cxxparse -declaration-claims gives each declared name and the type
+           its decl-specifier-seq and declarator give it ([dcl.meaning]),
+           built of alias templates that say how: pointer_to<array_of<
+           function<int(char)>, (3)>>.  clang compiles
+               static_assert(__is_same(decltype(NAME), CLAIM));
+           (NAME itself for a typedef-name), so it checks how *, &, [] and ()
+           nest, the cv-qualifiers and the combinations of type specifiers.
+           Verified, refuted, or not checkable: clang rejects the
+           declaration, or the name has no decltype there (an overloaded
+           function is verified when one of its overloads has the type).
 
   --mutate N   also N token mutants (a token deleted, duplicated, or a
                bracket inserted) of each test, through cxxparse only: the
@@ -30,6 +53,7 @@ option sets bench/cxx-pp.py reads), per run:
 
 clang's side is cached in work/cxx-parse-ref (VCC_PARSE_NOCACHE=1 asks it
 again), so a run after the first costs about cxxparse's time.
+VCC_PARSE_UNCHECKED=1 lists the declared names clang has no type for.
 
 Usage: bench/cxx-parse.py [-v] [-j N] [--bin-dir DIR] [--mutate N] [PATTERN...]
 Prints one line per failing run (all with -v) and a summary.
@@ -387,6 +411,7 @@ def check(test, opts, clang, cxxlex, cxxparse):
         res['fail'].append(('syntax', f'we reject the declaration at {b[0]}:{b[1]}, clang accepts it'))
     for b in res['syntax']['we_accept']:
         res['fail'].append(('syntax', f'we accept the declaration at {b[0]}:{b[1]}, clang rejects it'))
+    check_claims(test, opts, clang, cxxparse, res, {line for line, column in any_errors})
     if CLANG_SYNTAX_ERROR.search(c[2]):
         res['clang_syntax_error'] = True
         return res
@@ -416,6 +441,178 @@ def check(test, opts, clang, cxxlex, cxxparse):
     return res
 
 
+CLAIMS_FILE = 'cxx-claims'
+DECLARATORS_FILE = 'cxx-declarators'
+# what cxxparse -declaration-claims builds its claims of (declarator-claims.h)
+PRELUDE = """namespace vcc_claim {
+template <class T> using pointer_to = T *;
+template <class T> using lvalue_reference_to = T &;
+template <class T> using rvalue_reference_to = T &&;
+template <class T, decltype(sizeof 0) N> using array_of = T[N];
+template <class T> using array_of_unknown_bound = T[];
+template <class T, class C> using pointer_to_member_of = T C::*;
+template <class T> using const_ = const T;
+template <class T> using volatile_ = volatile T;
+template <class F> using function = F;
+}
+"""
+
+
+def claim_lines(cxxparse, mode, opts, test, fields):
+    """the lines of cxxparse MODE about the test file itself, split at tabs;
+    bytes as characters, as the test file is read"""
+    cwd = os.path.dirname(test)
+    try:
+        out = subprocess.run([cxxparse, mode] + opts + [os.path.basename(test)], cwd=cwd, capture_output=True,
+                             timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return []
+    if out.returncode not in (0, 1):
+        return []
+    found = []
+    for line in out.stdout.decode('latin-1').split('\n'):
+        parts = line.split('\t')
+        if len(parts) == fields and os.path.normpath(os.path.join(cwd, parts[0])) == os.path.normpath(test):
+            found.append(parts[1:])
+    return found
+
+
+def check_claims(test, opts, clang, cxxparse, res, error_lines):
+    """V4b: see the module's docstring.  res['claims'] and
+    res['declarators'] get the counts, res['fail'] one entry per refuted
+    claim.  error_lines: the lines clang reports an error on in the test as
+    it is."""
+    counts = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
+    declarators = {'verified': 0, 'overload': 0, 'refuted': 0, 'rejected': 0, 'unchecked': 0}
+    res['claims'] = counts
+    res['declarators'] = declarators
+    std = next((o[5:] for o in opts if o.startswith('-std=')), 'c++17')
+    if re.fullmatch(r'(c|gnu)\+\+(98|03)', std):
+        return
+    cwd = os.path.dirname(test)
+    name = os.path.basename(test)
+    claims = []
+    for place, e, p in claim_lines(cxxparse, '-expression-claims', opts, test, 4):
+        row, column = map(int, place.split(':'))
+        claims.append((row, column, e.strip(), p.strip()))
+    declared = []
+    for said, place, kind, declared_name, claim in claim_lines(cxxparse, '-declaration-claims', opts, test, 6):
+        row, column = map(int, place.split(':'))
+        declared.append((row, column, tuple(map(int, said.split('-'))), kind, declared_name, claim))
+    if not claims and not declared:
+        return
+    # bytes as characters: the columns are bytes
+    lines = open(test, 'rb').read().decode('latin-1').split('\n')
+    places = {}
+    for k, c in enumerate(claims):
+        places.setdefault(c[:2], ([], []))[0].append(k)
+    for k, c in enumerate(declared):
+        places.setdefault(c[:2], ([], []))[1].append(k)
+    for row, column in sorted(places, reverse=True):
+        if row > len(lines):
+            continue
+        block = ''
+        for k in places[(row, column)][0]:
+            e, p = claims[k][2], claims[k][3]
+            block += (f'\n#line {4 * k + 1} "{CLAIMS_FILE}"\n'
+                      f'static_assert(__is_same(decltype(({e})), decltype(({e}))));\n'
+                      f'static_assert(__is_same(decltype(({e})), decltype(({p}))));\n'
+                      f'static_assert(({e}) == ({p}) || ({e}) != ({e}));\n'
+                      f'static_assert(__is_arithmetic(__remove_cvref(decltype(({e})))) || '
+                      f'__is_enum(__remove_cvref(decltype(({e})))));')
+        for k in places[(row, column)][1]:
+            _, _, _, kind, declared_name, claim = declared[k]
+            # the type the name has: of a typedef-name the name itself
+            has = declared_name if kind.startswith('type') else f'decltype({declared_name})'
+            asked = has
+            if kind.endswith('[]'):
+                # the bound an initializer or an earlier declaration gave is
+                # no part of what the declarator says
+                asked = f'__remove_extent({has})[]'
+            overload = ';'
+            if kind.startswith('function'):
+                # an overloaded name has no decltype: is there a function of
+                # the claimed type?
+                overload = (f'static_assert(sizeof(static_cast<::vcc_claim::pointer_to<{claim}>>(&{declared_name}))'
+                            f' != 0);')
+            block += (f'\n#line {3 * k + 1} "{DECLARATORS_FILE}"\n'
+                      f'static_assert(__is_same({asked}, {asked}));\n'
+                      f'static_assert(__is_same({asked}, {claim}));\n'
+                      f'{overload}')
+        text = lines[row - 1]
+        lines[row - 1] = (text[:column - 1] + block + f'\n#line {row} "{name}"\n' +
+                          ' ' * (column - 1) + text[column - 1:])
+    source = (f'#line 1 "{CLAIMS_FILE}-prelude"\n' + PRELUDE + f'#line 1 "{name}"\n' +
+              '\n'.join(lines)).encode('latin-1')
+
+    def compile_claims():
+        try:
+            r = subprocess.run([clang, '-cc1'] + TRIPLE + ['-x', 'c++'] + opts +
+                               ['-fsyntax-only', '-ferror-limit', '0', '-w', '-'],
+                               cwd=cwd, input=source, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return None
+        return r.stderr.decode('utf-8', 'replace')
+    stderr = cached('claims:' + hashlib.sha256(source).hexdigest(), clang, test, opts, compile_claims)
+    if stderr is None:
+        counts['unchecked'] += len(claims)
+        declarators['unchecked'] += len(declared)
+        return
+
+    def errors_of(file):
+        """line of FILE -> clang's errors there; an error in a template (one
+        of the prelude's: an array of references, a function returning an
+        array) is where its `in instantiation ... requested here` note is"""
+        errors = {}
+        last = None
+        for line in stderr.split('\n'):
+            m = re.match(r'^(.+?):(\d+):\d+: (?:fatal )?(error|warning|note): (.*)$', line)
+            if not m:
+                continue
+            if m.group(3) == 'error':
+                last = m.group(4)
+                if m.group(1) == file:
+                    errors.setdefault(int(m.group(2)), []).append(last)
+            elif m.group(3) == 'warning':
+                last = None
+            elif last and m.group(1) == file and 'in instantiation of' in m.group(4):
+                errors.setdefault(int(m.group(2)), []).append(last)
+        return errors
+    errors = errors_of(CLAIMS_FILE)
+    for k, (row, column, e, p) in enumerate(claims):
+        probe, same_type, same_value, no_number = (errors.get(4 * k + i) for i in (1, 2, 3, 4))
+        if probe:
+            counts['unchecked'] += 1
+        elif same_type or (not no_number and any('static assertion failed' in x for x in same_value or ())):
+            counts['refuted'] += 1
+            res['fail'].append(('claims', f'the expression before {row}:{column}: `{e}` is not `{p}`: '
+                                          f'{(same_type or same_value)[0]}'))
+        elif same_value:
+            counts['type'] += 1
+        else:
+            counts['value'] += 1
+    errors = errors_of(DECLARATORS_FILE)
+    for k, (row, column, said, kind, declared_name, claim) in enumerate(declared):
+        probe, same_type, no_overload = (errors.get(3 * k + i) for i in (1, 2, 3))
+        if any(said[0] <= line <= said[1] for line in error_lines):
+            # clang rejects the declaration: what it then declares is its
+            # recovery's
+            declarators['rejected'] += 1
+        elif probe:
+            if kind.startswith('function') and not no_overload:
+                declarators['overload'] += 1
+            else:
+                declarators['unchecked'] += 1
+                if os.environ.get('VCC_PARSE_UNCHECKED'):
+                    res['fail'].append(('unchecked', f'{row}: {kind} {declared_name}: {probe[0]}'))
+        elif same_type:
+            declarators['refuted'] += 1
+            res['fail'].append(('claims', f'the declaration before {row}:{column}: `{declared_name}` is no '
+                                          f'`{claim}`: {same_type[0]}'))
+        else:
+            declarators['verified'] += 1
+
+
 def mutants(test, n, seed):
     """n token mutants of test's text: a token deleted, duplicated, or a
     bracket inserted at a token boundary"""
@@ -442,7 +639,9 @@ def check_mutants(test, opts, cxxparse, n):
             path = os.path.join(td, f'm{k}.cpp')
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(text)
-            st = run([cxxparse, '-fsyntax-only'] + opts + [path], os.path.dirname(test), timeout=10)[0]
+            st, _, err = run([cxxparse, '-fsyntax-only'] + opts + [path], os.path.dirname(test), timeout=10)
+            if st == 2 and 'unsupported -std' in err:
+                break  # an edition cxxparse does not have: the run is skipped
             if st not in (0, 1):
                 keep = os.path.join(R, 'build', 'cxx-parse-mutants')
                 os.makedirs(keep, exist_ok=True)
@@ -488,7 +687,9 @@ def main():
         if a.mutate:
             results += list(ex.map(lambda j: check_mutants(j[0], j[1], cxxparse, a.mutate),
                                    [j for i, j in enumerate(jobs) if j[0] != jobs[i - 1][0] or i == 0]))
-    counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0}
+    counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0, 'claims': 0, 'unchecked': 0}
+    claims = {'value': 0, 'type': 0, 'refuted': 0, 'unchecked': 0}
+    declarators = {'verified': 0, 'overload': 0, 'refuted': 0, 'rejected': 0, 'unchecked': 0}
     syntax = {'agree': 0, 'we_reject': 0, 'we_accept': 0, 'not_comparable': 0}
     compared = agree = syntax_errors = 0
     unparsed = erroneous = skipped = 0
@@ -511,6 +712,10 @@ def main():
             syntax[k] += v if isinstance(v, int) else len(v)
         unparsed += r.get('unparsed', 0)
         erroneous += r.get('erroneous', 0)
+        for k in claims:
+            claims[k] += r.get('claims', {}).get(k, 0)
+        for k in declarators:
+            declarators[k] += r.get('declarators', {}).get(k, 0)
         if r['fail'] or a.v:
             rel = os.path.relpath(r['test'], os.path.join(cxxpp.work_dir(), 'testsuites', 'llvm', 'clang', 'test'))
             if rel.startswith('..'):
@@ -526,6 +731,11 @@ def main():
     print(f'syntax: {syntax["agree"]} declarations accepted or rejected as clang does, '
           f'{syntax["we_reject"]} we reject and clang accepts, {syntax["we_accept"]} we accept and clang rejects, '
           f'{syntax["not_comparable"]} kept as tokens (a later step\'s grammar)')
+    print(f'claims: {claims["value"]} expressions verified by value, {claims["type"]} by type, '
+          f'{claims["refuted"]} refuted, {claims["unchecked"]} not checkable; '
+          f'{declarators["verified"]} declared types verified, {declarators["overload"]} as one of a name\'s '
+          f'overloads, {declarators["refuted"]} refuted, {declarators["rejected"]} in declarations clang rejects, '
+          f'{declarators["unchecked"]} not checkable')
     return 1 if any(counts.values()) else 0
 
 

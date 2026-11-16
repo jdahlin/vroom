@@ -189,7 +189,9 @@ node_index parser::attribute_specifier_seq(bool appertains_to_type)
  *         attribute-list , attribute ...
  *
  * Which of type-id and constant-expression an alignment-specifier holds is
- * P3's ([dcl.ambig.res]/2): its parentheses are kept as their tokens.
+ * [dcl.ambig.res]/2's rule: a type-id when the tokens can be one.  Its
+ * ellipsis ([dcl.align]/1: "An alignment-specifier with an ellipsis is a
+ * pack expansion") is P7's.
  * [dcl.attr.grammar]/2: "If an attribute-specifier contains an
  * attribute-using-prefix, the attribute-list following that
  * attribute-using-prefix shall not contain an attribute-scoped-token".
@@ -207,9 +209,19 @@ node_index parser::attribute_specifier(attribute_facts &facts)
         add_token();
         if (!at(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             return expected("'(' after alignas", "dcl.align");
-        unparsed_group();
-        if (failed())
-            return 0;
+        if (at(preprocessing_op_or_punc::ELLIPSIS, group_end(0) - 2))
+            return beyond_this_step();
+        if (!parenthesized_type_id(false)) {
+            if (failed())
+                return 0;
+            add_token();
+            constant_expression();
+            if (failed())
+                return 0;
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' to close the alignment-specifier",
+                                "dcl.align");
+        }
         return finish_node(syntax_kind::alignment_specifier, mark, first);
     }
     add_token(); /* [ */

@@ -93,7 +93,13 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
          tree[last.index()].kind != syntax_kind::noptr_abstract_declarator &&
          tree[last.index()].kind != syntax_kind::parameters_and_qualifiers))
         return expected("parameters-and-qualifiers before '->'", "dcl.decl");
+    /* [basic.scope.param]/1: the parameters' scope "ends at the end of
+       that function declarator", after the trailing-return-type */
+    if (facts.has_parameters)
+        names.reenter(facts.parameters);
     trailing_return_type();
+    if (facts.has_parameters)
+        names.leave();
     if (failed())
         return 0;
     facts.trailing_return = true;
@@ -119,10 +125,6 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
  */
 node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
 {
-    if (at(standard_keyword::decltype_))
-        /* decltype-specifier :: begins a ptr-operator's or a
-           declarator-id's nested-name-specifier: P3 */
-        return beyond_this_step();
     if (!at_ptr_operator())
         return noptr_declarator(form, facts);
     size_t mark = begin_node();
@@ -167,8 +169,7 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
  *         noptr-abstract-declarator_opt [ constant-expression_opt ] attribute-specifier-seq_opt
  *         ( ptr-abstract-declarator )
  *
- * The constant-expression is P3's, kept as its tokens.  An
- * attribute-specifier-seq follows only a declarator-id or an array's ']':
+ * An attribute-specifier-seq follows only a declarator-id or an array's ']':
  * [[ anywhere else in a declarator is no attribute-specifier, and
  * [dcl.attr.grammar]/7 forbids it.
  */
@@ -182,7 +183,7 @@ node_index parser::noptr_declarator(declarator_form form,
         at(preprocessing_op_or_punc::LEFT_BRACKET, 1))
         return misplaced_attribute_brackets();
     if (at(preprocessing_op_or_punc::LEFT_BRACKET) &&
-        form != declarator_form::abstract)
+        form == declarator_form::concrete)
         /* [ identifier-list ]: a structured binding ([dcl.struct.bind]): P5 */
         return beyond_this_step();
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
@@ -228,9 +229,11 @@ node_index parser::noptr_declarator(declarator_form form,
             return misplaced_attribute_brackets();
         if (at(preprocessing_op_or_punc::LEFT_BRACKET)) {
             add_token();
-            static constexpr preprocessing_op_or_punc stops[] = {
-                preprocessing_op_or_punc::RIGHT_BRACKET};
-            unparsed_until(stops, 1);
+            if (!at(preprocessing_op_or_punc::RIGHT_BRACKET)) {
+                constant_expression();
+                if (failed())
+                    return 0;
+            }
             if (!accept(preprocessing_op_or_punc::RIGHT_BRACKET))
                 return expected("']' to close the array bound", "dcl.array");
             attribute_specifier_seq(true);
@@ -243,9 +246,10 @@ node_index parser::noptr_declarator(declarator_form form,
             if (form != declarator_form::concrete) {
                 if (!parameters_follow(form))
                     break;
-                parameters_and_qualifiers();
+                parameters_and_qualifiers(&facts.parameters);
                 if (failed())
                     return 0;
+                facts.has_parameters = true;
             } else {
                 /* [dcl.ambig.res]/1: "the resolution is to consider any
                    construct that could possibly be a declaration a
@@ -255,10 +259,11 @@ node_index parser::noptr_declarator(declarator_form form,
                 bool parsed = false;
                 {
                     tentative_parse attempt(*this);
-                    parameters_and_qualifiers();
+                    parameters_and_qualifiers(&facts.parameters);
                     if (!failed()) {
                         attempt.commit();
                         parsed = true;
+                        facts.has_parameters = true;
                     } else {
                         failed_with = failure;
                     }
@@ -306,6 +311,9 @@ node_index parser::noptr_declarator(declarator_form form,
  */
 bool parser::parenthesis_could_be_initializer()
 {
+    /* ( ) is no initializer: the expression-list is not optional */
+    if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 1))
+        return false;
     const token &t = peek(1);
     standard_keyword k = keyword_of(t);
     switch (k) {
@@ -370,8 +378,15 @@ bool parser::at_ptr_operator()
         return true;
     /* nested-name-specifier * : the name's '::'s, then '*' */
     unsigned i = 0;
-    if (at(preprocessing_op_or_punc::COLON_COLON))
+    if (at(preprocessing_op_or_punc::COLON_COLON)) {
         i++;
+    } else if (at(standard_keyword::decltype_)) {
+        /* decltype-specifier :: */
+        i = group_end(1);
+        if (!at(preprocessing_op_or_punc::COLON_COLON, i))
+            return false;
+        i++;
+    }
     bool any = i > 0;
     while (at_identifier(i) &&
            at(preprocessing_op_or_punc::COLON_COLON, i + 1)) {

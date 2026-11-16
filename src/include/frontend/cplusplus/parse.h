@@ -92,6 +92,9 @@ enum class syntax_kind : uint16_t {
    it ("" for the scaffolding kinds) */
 const char *syntax_kind_name(syntax_kind kind);
 const char *syntax_kind_subclause(syntax_kind kind);
+/* whether the nonterminal is an expression's ([expr.prim] to [expr.comma]):
+   a node that has a value, which parentheses around it do not change */
+bool syntax_kind_is_expression(syntax_kind kind);
 
 /* a node of the translation unit's syntax tree; 0 is no node */
 using node_index = uint32_t;
@@ -232,6 +235,9 @@ class declared_names
     scope_index enter_namespace(uint32_t name, bool inline_);
     /* a new region of another kind inside the current one */
     scope_index enter(scope_kind kind);
+    /* a region made by enter() is the current one again: a function
+       declarator's parameters, whose scope goes on after the ')' */
+    void reenter(scope_index region);
     void leave();
     scope_index current() const
     {
@@ -347,6 +353,10 @@ struct declarator_facts {
     derivation first = derivation::none;
     /* noptr-declarator parameters-and-qualifiers trailing-return-type */
     bool trailing_return = false;
+    /* the function parameter scope of the declarator's last
+       parameters-and-qualifiers ([basic.scope.param]/1) */
+    bool has_parameters = false;
+    scope_index parameters = 0;
 };
 
 /* what a decl-specifier-seq said that the rest of the declaration needs */
@@ -384,6 +394,24 @@ struct attribute_facts {
     bool standard = false;
     token_index standard_at = 0;
     const char *standard_subclause = nullptr;
+};
+
+/* what a name at a place in the tokens is, to the grammar */
+enum class name_class : uint8_t {
+    /* no identifier there */
+    none,
+    /* a type-name: a type-specifier */
+    type,
+    /* declared, not as a type: where a declarator would start, or an
+       id-expression */
+    not_a_type,
+    /* not declared, or declared where the parser cannot see (a class's
+       member, a template's): a later step's */
+    unknown,
+    /* C::C or C::~C: the declarator-id of a constructor or destructor
+       ([class.qual]/2: "the name is instead considered to name the
+       constructor of class C") */
+    constructor,
 };
 
 /* the forms a declarator can take */
@@ -469,6 +497,37 @@ class parser
     unsigned enclosing_braces = 0;
     /* cxxparse -debug-fallbacks: why each declaration was not parsed */
     bool debug_fallbacks = false;
+    /* an expression of the current declaration named something
+       declared_names does not know (a template, a class's member, a name
+       declared in a part kept as tokens): if the declaration then does not
+       parse, that may be for what the name is, so it is kept as tokens */
+    bool unknown_name = false;
+    /* [dcl.ambig.res]/2's second reading (dcl.ambig.res.cpp): a name the
+       parser cannot classify is taken for a type-name, to see whether the
+       tokens could be a type-id at all */
+    bool unknown_names_are_types = false;
+    /* how deeply the expressions and initializers being parsed nest
+       ([implimits]/2), and the most this implementation accepts */
+    unsigned nesting = 0;
+    static constexpr unsigned nesting_limit = 1024;
+    /* the current declaration went past the limit, at this token: its
+       diagnostic is this one, whatever a tentative parse made of it */
+    bool nesting_limit_exceeded = false;
+    token_index nesting_limit_at = 0;
+    /* [implimits]/2: counts one more level for the caller's scope (level);
+       past the limit the parse fails, and 0 is returned */
+    bool nesting_within_limit(const char *what);
+    struct nesting_level {
+        parser &p;
+        explicit nesting_level(parser &p) : p(p)
+        {
+            p.nesting++;
+        }
+        ~nesting_level()
+        {
+            p.nesting--;
+        }
+    };
     /* the token if it is op: added, true */
     bool accept(preprocessing_op_or_punc op);
     bool accept(standard_keyword k);
@@ -540,6 +599,10 @@ class parser
     /* a bracketed group, ( ) [ ] or { }, at the current token, as an
        unparsed node of all its tokens */
     node_index unparsed_group();
+    /* the lookahead after the bracketed group that starts at
+       tokens[ahead], its brackets balanced (ahead itself if no bracket
+       opens there) */
+    unsigned group_end(unsigned ahead);
 
     /* ---- [dcl.attr.grammar] */
     /* an attribute-specifier starts at tokens[ahead]: [[ or alignas */
@@ -590,6 +653,11 @@ class parser
     bool at_decl_specifier(bool unknown_names);
     node_index decl_specifier_seq(decl_specifier_facts &facts,
                                   bool type_specifiers_only);
+    /* the name at tokens[ahead ...]: ::_opt (identifier ::)* identifier,
+       looked up; *length is how many tokens it has.  With template_ids, a
+       name followed by < is unknown (a template-id is P7's) */
+    name_class classify_name(unsigned ahead, unsigned *length,
+                             bool template_ids = true);
     /* a type-name at the current token (after any nested-name-specifier):
        the identifier names a type in the scope the lookup finds */
     bool type_name_follows(unsigned ahead);
@@ -600,7 +668,8 @@ class parser
     /* ---- [expr.prim.id], [expr.prim.id.qual] */
     /* nested-name-specifier_opt: 0 if none; *scope is the namespace it
        names when it names one, *known whether every name in it was found */
-    node_index nested_name_specifier(scope_index *scope, bool *known);
+    node_index nested_name_specifier(scope_index *scope, bool *known,
+                                     bool template_ids = true);
     bool nested_name_specifier_follows(unsigned ahead);
     node_index declarator_id(declarator_facts &facts);
 
@@ -617,7 +686,8 @@ class parser
     bool at_ptr_operator_at(unsigned ahead);
     node_index ptr_operator(derivation *kind);
     node_index cv_qualifier_seq();
-    node_index parameters_and_qualifiers();
+    /* *parameters: the function parameter scope it made */
+    node_index parameters_and_qualifiers(scope_index *parameters = nullptr);
     bool parameters_follow(declarator_form form);
     node_index parameter_declaration_clause();
     node_index parameter_declaration();
@@ -627,7 +697,48 @@ class parser
 
     /* ---- [dcl.init], [dcl.fct.def.general] */
     node_index initializer();
+    node_index initializer_clause();
+    node_index braced_init_list();
+    /* a braced-init-list where C++03 has none (anywhere but in the = { }
+       of an aggregate's initializer): when one starts here in an edition
+       without list-initialization, the parse fails as an extension's */
+    bool list_initialization_missing();
+    /* in_braces: a braced-init-list's, whose ',' before the '}' is not
+       the list's */
+    node_index initializer_list(bool in_braces);
+    node_index designated_initializer_list();
     node_index function_body();
+
+    /* ---- [dcl.ambig.res] */
+    /* ( type-id ) at the current '(' when the tokens can be that
+       ([dcl.ambig.res]/2); with cast, only when a cast-expression can
+       follow.  True: the three are added.  False: nothing is, and the
+       parse has failed if what the tokens are is a later step's to say. */
+    bool parenthesized_type_id(bool cast);
+    bool cast_expression_follows();
+
+    /* ---- [expr.prim] to [expr.comma], [expr.const] */
+    node_index primary_expression();
+    /* an id-expression of an expression; member: after . or ->, where the
+       name is the object's class's to look up ([basic.lookup.classref]) */
+    node_index id_expression(bool member);
+    node_index postfix_expression();
+    node_index expression_list();
+    node_index unary_expression();
+    node_index noexcept_expression();
+    node_index new_expression();
+    node_index new_type_id();
+    node_index new_declarator();
+    node_index delete_expression();
+    node_index cast_expression();
+    /* pm-expression to logical-or-expression: the operators of level
+       lowest_level and above ([expr.mptr.oper] to [expr.log.or]) */
+    node_index binary_expression(unsigned lowest_level);
+    /* *conditional: the second alternative matched */
+    node_index conditional_expression(bool *conditional = nullptr);
+    node_index assignment_expression();
+    node_index expression();
+    node_index constant_expression();
 
     /* ---- [basic.namespace], [dcl.link] */
     node_index namespace_definition();
