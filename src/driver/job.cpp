@@ -345,7 +345,8 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         unsigned long long t1 = driver_clock_nanoseconds();
         vperf v1 = vperformance_now();
 
-        job->status = cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
+        job->status =
+            cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
         driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
         driver_phase_add(DRIVER_PHASE_COMPILE, v1);
         driver_tokens_taken += pp_token_count(p);
