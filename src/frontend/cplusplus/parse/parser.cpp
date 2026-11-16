@@ -384,7 +384,10 @@ node_index parser::unparsed_declaration()
                     t.keyword == keyword.struct_ ||
                     t.keyword == keyword.union_ || t.keyword == keyword.enum_)
                     class_key = true;
-                else if (t.keyword == keyword.namespace_ && position == first)
+                else if (t.keyword == keyword.namespace_ && !equal)
+                    /* [namespace.def]: inline_opt namespace ... {, also
+                       after export ([module.interface]) or attributes;
+                       namespace X = Y; is an alias and has no body */
                     block_of_declarations = true;
             } else if (t.kind == token_kind::literal &&
                        t.literal == literal_kind::string_literal &&

@@ -86,7 +86,8 @@ def tests():
     found = sorted(glob.glob(os.path.join(llvm, 'Parser', '*.cpp')) +
                    [f for f in glob.glob(os.path.join(llvm, 'CXX', '**', '*.cpp'), recursive=True)
                     if os.sep + 'cpp' + os.sep not in f and os.sep + 'lex' + os.sep not in f])
-    found += sorted(glob.glob(os.path.join(OURS, 'spec', '*.cpp')) + glob.glob(os.path.join(OURS, 'gram', '*.cpp')))
+    found += sorted(glob.glob(os.path.join(OURS, 'spec', '**', '*.cpp'), recursive=True) +
+                    glob.glob(os.path.join(OURS, 'gram', '**', '*.cpp'), recursive=True))
     return found
 
 
