@@ -205,9 +205,12 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
                 unread_file_token(t);
                 return t;
             }
+            source_files::entry *left = in.file;
             leave_file();
             if (!inclusions.empty())
                 continue;
+            if (left == main_file)
+                warn_unused_macros();
             /* the end of the main file stays the end */
             inclusions.append({main_file, -1, 0, 0, false, true, t});
         }

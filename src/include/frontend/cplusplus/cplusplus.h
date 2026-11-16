@@ -245,6 +245,19 @@ class diagnostic_consumer
     /* while positive, issue() discards: the lexer looks ahead without consuming */
     unsigned suppressed = 0;
 
+    /* #pragma clang diagnostic ([ext.gnu], ext/gnu/pragma_diagnostic.cpp):
+       the severity of a -W group from here on; false if there is no such
+       group */
+    bool map_group(const char *group, diagnostic_severity severity);
+    /* the severity a diagnostic issued now would have */
+    diagnostic_severity severity_now(diagnostic_id id) const;
+    /* a diagnostic with the severity it had when the condition for it was
+       met (clang's -Wunused-macros, decided at the #define) */
+    diagnostic_message &issue_as(diagnostic_id id, source_location location,
+                                 diagnostic_severity severity);
+    void push_mappings();
+    bool pop_mappings();
+
     /* a diagnostic message to which the caller adds the arguments; a
        message that maps to "ignored" is discarded when the next is issued */
     diagnostic_message &issue(diagnostic_id id, source_location location);
@@ -253,6 +266,12 @@ class diagnostic_consumer
 
   private:
     diagnostic_message discarded;
+    struct group_mapping {
+        char group[64];
+        diagnostic_severity severity;
+    };
+    owned_array<group_mapping> mappings;
+    owned_array<uint32_t> mapping_pushes;
 };
 
 const char *diagnostic_name(diagnostic_id id);
@@ -848,6 +867,15 @@ class preprocessor
     owned_array<replacement_element> elements;
     owned_array<uint32_t> parameters;
     owned_array<int32_t> definition_order;
+    /* -Wunused-macros: the macros of the main file to warn of if unused,
+       with the severity at their definition */
+    struct unused_candidate {
+        int32_t macro;
+        diagnostic_severity severity;
+    };
+    owned_array<unused_candidate> unused_candidates;
+    void warn_unused_macros();
+    void warn_unused_macro(int32_t macro);
     bool check_macro_name(const preprocessing_token &name, bool definition);
     bool is_language_defined(const macro_definition &m) const;
     bool identical_definitions(const macro_definition &a,
@@ -943,6 +971,7 @@ class preprocessor
         int32_t macro;
     };
     owned_array<pushed_macro> pushed_macros;
+    source_location pragma_end = 0;
 
     /* ---- the extensions (ext/VENDOR/) */
     void gnu_line_marker(const preprocessing_token &digits);
@@ -965,6 +994,7 @@ class preprocessor
     uint32_t gnu_comma_paste(substitution &s, uint32_t at,
                              owned_array<preprocessing_token> &out);
     bool gnu_pragma(const preprocessing_token *tokens, size_t count);
+    void gnu_pragma_diagnostic(const preprocessing_token *tokens, size_t count);
     void gnu_define_dynamic_macros();
     bool gnu_dynamic_macro(const macro_definition &m, owned_buffer &text);
     void clang_define_dynamic_macros();

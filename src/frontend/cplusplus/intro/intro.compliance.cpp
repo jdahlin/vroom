@@ -72,6 +72,9 @@ const diagnostic_group_description *find_group(const char *name, size_t length)
 bool group_reaches(const char *setting, size_t length, const char *group,
                    unsigned depth)
 {
+    /* -Weverything: every warning group */
+    if (length == 10 && !memcmp(setting, "everything", 10))
+        return true;
     if (strlen(group) == length && !memcmp(setting, group, length))
         return true;
     const diagnostic_group_description *g = find_group(setting, length);
@@ -211,10 +214,61 @@ diagnostic_message &diagnostic_message::operator<<(const char *t)
     return text(t, strlen(t));
 }
 
+bool diagnostic_consumer::map_group(const char *group,
+                                    diagnostic_severity severity)
+{
+    if ((!find_group(group, strlen(group)) && strcmp(group, "everything")) ||
+        strlen(group) >= 64)
+        return false;
+    group_mapping m{};
+    memcpy(m.group, group, strlen(group));
+    m.severity = severity;
+    mappings.append(m);
+    return true;
+}
+
+void diagnostic_consumer::push_mappings()
+{
+    mapping_pushes.append((uint32_t)mappings.size());
+}
+
+bool diagnostic_consumer::pop_mappings()
+{
+    if (mapping_pushes.empty())
+        return false;
+    mappings.resize(mapping_pushes.back());
+    mapping_pushes.resize(mapping_pushes.size() - 1);
+    return true;
+}
+
 diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
                                                source_location location)
 {
+    return issue_as(id, location, severity_now(id));
+}
+
+diagnostic_severity diagnostic_consumer::severity_now(diagnostic_id id) const
+{
     diagnostic_severity severity = options.severity(id);
+    /* the latest #pragma diagnostic that reaches the diagnostic's group */
+    const diagnostic_description &d = descriptions[static_cast<int>(id)];
+    if (*d.group && severity != diagnostic_severity::note)
+        for (size_t i = mappings.size(); i-- > 0;)
+            if (group_reaches(mappings[i].group, strlen(mappings[i].group),
+                              d.group, 0)) {
+                severity = mappings[i].severity;
+                if (severity == diagnostic_severity::warning &&
+                    options.no_warnings)
+                    severity = diagnostic_severity::ignored;
+                break;
+            }
+    return severity;
+}
+
+diagnostic_message &diagnostic_consumer::issue_as(diagnostic_id id,
+                                                  source_location location,
+                                                  diagnostic_severity severity)
+{
     /* clang: after a fatal error no diagnostic is issued */
     if (suppressed || severity == diagnostic_severity::ignored || fatal_count) {
         discarded = diagnostic_message{};
@@ -278,10 +332,12 @@ void append_argument(const diagnostic_argument &a, vbuffer *out)
 
 /* clang's format language, the part the lexer's messages use: %N, %select,
    %sN (an 's' unless the argument is 1), %plural{1:a|:b}N */
-void diagnostic_text(const diagnostic_message &message, vbuffer *out)
+/* the format [f, end) with the arguments substituted; an alternative of a
+   %select is itself a format (%1 inside %select{in %1|...}0) */
+static void format_into(const diagnostic_message &message, const char *f,
+                        const char *end, vbuffer *out)
 {
-    const char *f = descriptions[static_cast<int>(message.id)].format;
-    while (*f) {
+    while (f < end && *f) {
         if (*f != '%') {
             vbuffer_append(out, f++, 1);
             continue;
@@ -312,9 +368,12 @@ void diagnostic_text(const diagnostic_message &message, vbuffer *out)
         if (index >= message.argument_count)
             continue;
         const diagnostic_argument &a = message.arguments[index];
-        if (name_length == 6 && !memcmp(name, "select", 6))
-            append_alternative(body, body_length, a.integer, out);
-        else if (name_length == 1 && *name == 's') {
+        if (name_length == 6 && !memcmp(name, "select", 6)) {
+            owned_buffer alternative;
+            append_alternative(body, body_length, a.integer, alternative.get());
+            format_into(message, alternative.data(),
+                        alternative.data() + alternative.size(), out);
+        } else if (name_length == 1 && *name == 's') {
             if (a.integer != 1)
                 vbuffer_append(out, "s", 1);
         } else if (name_length == 6 && !memcmp(name, "plural", 6)) {
@@ -331,6 +390,12 @@ void diagnostic_text(const diagnostic_message &message, vbuffer *out)
         } else
             append_argument(a, out);
     }
+}
+
+void diagnostic_text(const diagnostic_message &message, vbuffer *out)
+{
+    const char *f = descriptions[static_cast<int>(message.id)].format;
+    format_into(message, f, f + strlen(f), out);
 }
 
 void diagnostic_consumer::render(const diagnostic_message &message,

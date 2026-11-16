@@ -107,6 +107,16 @@ void preprocessor::directive_pragma(const preprocessing_token &name)
     for (preprocessing_token t = directive_token(); !is_end(t);
          t = directive_token())
         tokens.append(t);
+    /* where the directive's new-line is, after any comment: clang's end of
+       a directive, where some of its pragma diagnostics are */
+    pragma_end = directive_end;
+    if (const source_files::entry *e = files.find(directive_end)) {
+        uint32_t at = directive_end - e->base;
+        while (at < e->file.size && e->file.physical_characters[at] != '\n' &&
+               e->file.physical_characters[at] != '\r')
+            at++;
+        pragma_end = e->base + at;
+    }
     execute_pragma(tokens.data(), tokens.size(), name.location);
 }
 

@@ -7,6 +7,7 @@
  *     #pragma GCC poison x y        x and y may no longer be used
  *     #pragma GCC system_header     the rest of the file is a system header
  *     #pragma GCC dependency "f"    the file f must exist
+ *     #pragma GCC diagnostic ...    pragma_diagnostic.cpp
  *     #pragma GCC warning "text"    a warning, an error
  *     #pragma GCC error "text"
  *   [ext.gnu] gnu_push_pop_macro (GCC manual 6.62.13)
@@ -123,6 +124,10 @@ bool preprocessor::gnu_pragma(const preprocessing_token *t, size_t count)
          clang = spelled_as(files, t[0], "clang");
     if (!(gcc || clang) || count < 2 || !behavior.has(extension::gnu_pragmas))
         return false;
+    if (spelled_as(files, t[1], "diagnostic")) {
+        gnu_pragma_diagnostic(t + 1, count - 1);
+        return true;
+    }
     if (spelled_as(files, t[1], "poison")) {
         for (size_t i = 2; i < count; i++) {
             if (!is_identifier(t[i])) {

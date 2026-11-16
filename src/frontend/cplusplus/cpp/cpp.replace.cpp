@@ -523,7 +523,40 @@ void preprocessor::directive_define(const preprocessing_token &directive)
                               old.location);
         }
     }
-    add_definition(m);
+    if (previous >= 0)
+        warn_unused_macro(previous);
+    int32_t index = add_definition(m);
+    /* clang's -Wunused-macros: a macro of the main file, as the severity is
+       where it is defined */
+    if (inclusions.size() == 1 && !m.predefined &&
+        inclusions.back().file == main_file) {
+        diagnostic_severity s =
+            diagnostics.severity_now(diagnostic_id::pp_macro_not_used);
+        if (s != diagnostic_severity::ignored)
+            unused_candidates.append({index, s});
+    }
+}
+
+/* the warning of a macro defined and never used, when its definition
+   ends (#undef, a redefinition, the end of the main file) */
+void preprocessor::warn_unused_macro(int32_t macro)
+{
+    for (size_t i = 0; i < unused_candidates.size(); i++)
+        if (unused_candidates[i].macro == macro) {
+            if (!macros[macro].used)
+                diagnostics.issue_as(diagnostic_id::pp_macro_not_used,
+                                     macros[macro].location,
+                                     unused_candidates[i].severity);
+            unused_candidates[i] = unused_candidates.back();
+            unused_candidates.resize(unused_candidates.size() - 1);
+            return;
+        }
+}
+
+void preprocessor::warn_unused_macros()
+{
+    while (!unused_candidates.empty())
+        warn_unused_macro(unused_candidates[0].macro);
 }
 
 /*
@@ -637,6 +670,7 @@ void preprocessor::directive_undef(const preprocessing_token &directive)
         if (is_language_defined(macros[m]) && !system_header_at(name.location))
             diagnostics.issue(diagnostic_id::ext_pp_undef_builtin_macro,
                               name.location);
+        warn_unused_macro(m);
         identifiers[id].macro = -1;
     }
     expect_end_of_directive("undef");

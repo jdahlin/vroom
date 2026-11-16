@@ -60,6 +60,7 @@ bool preprocessor::pragma_operator(const preprocessing_token &name)
         p.expansion = name.expansion ? name.expansion : name.location;
         tokens.append(p);
     }
+    pragma_end = t[2].location;
     execute_pragma(tokens.data(), tokens.size(), name.location);
     /* [impl.clang] the pragma is a line of its own: the next token starts
        a line */
