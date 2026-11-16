@@ -82,7 +82,10 @@ void source_file::add_line_directive(source_location next_line, uint32_t line,
     uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
-        (physical_line_starts[mid] <= next_line ? lo : hi) = mid;
+        if (physical_line_starts[mid] <= next_line)
+            lo = mid;
+        else
+            hi = mid;
     }
     size_t offset = presumed_names.size();
     char *copy = presumed_names.extend(length + 1);
@@ -103,7 +106,10 @@ source_position source_file::position(source_location location) const
     uint32_t lo = 0, hi = (uint32_t)physical_line_starts.size();
     while (hi - lo > 1) {
         uint32_t mid = (lo + hi) / 2;
-        (physical_line_starts[mid] <= location ? lo : hi) = mid;
+        if (physical_line_starts[mid] <= location)
+            lo = mid;
+        else
+            hi = mid;
     }
     source_position p = {name, lo + 1, location - physical_line_starts[lo] + 1};
     for (size_t i = presumed_lines.size(); i-- > 0;)
@@ -114,6 +120,155 @@ source_position source_file::position(source_location location) const
             break;
         }
     return p;
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+/* ---- [lex.separate]/1: the source files of a translation unit --------- */
+
+namespace
+{
+
+/* while a file's lexer runs, the locations it issues are offsets in it */
+struct lexing_in {
+    diagnostic_consumer &diagnostics;
+    source_location saved;
+    lexing_in(diagnostic_consumer &d, source_location base)
+        : diagnostics(d), saved(d.location_base)
+    {
+        diagnostics.location_base = base;
+    }
+    ~lexing_in()
+    {
+        diagnostics.location_base = saved;
+    }
+};
+
+} // namespace
+
+source_files::source_files(const implementation_defined_behavior &b,
+                           diagnostic_consumer &d)
+    : behavior(b), diagnostics(d), conversion(b, d, {})
+{
+    conversion.file.from_memory("", "", 0);
+    conversion.lex.files = this;
+}
+
+void source_files::place(entry &e)
+{
+    e.base = next_base;
+    e.index = (uint32_t)files.size() - 1;
+    e.lex.files = this;
+    /* one location past the end: the end of file has a place of its own */
+    next_base += e.file.size + 1;
+}
+
+source_files::entry *source_files::open(const char *path)
+{
+    return open(path, file_options);
+}
+
+source_files::entry *source_files::open(const char *path, lexer_options o)
+{
+    source_file read;
+    if (!read.open(path))
+        return nullptr;
+    entry &e = files.make(behavior, diagnostics, o);
+    e.file = static_cast<source_file &&>(read);
+    e.name = owned_string(path, strlen(path));
+    e.file.name = e.name.c_str();
+    place(e);
+    return &e;
+}
+
+source_files::entry &source_files::add_text(const char *name, const char *text,
+                                            size_t length, bool scratch,
+                                            lexer_options o)
+{
+    entry &e = files.make(behavior, diagnostics, o);
+    e.name = owned_string(name, strlen(name));
+    e.file.from_memory(e.name.c_str(), text, length);
+    e.scratch = scratch;
+    place(e);
+    return e;
+}
+
+preprocessing_token source_files::next(entry &e, bool header_name_permitted)
+{
+    lexing_in in(diagnostics, e.base);
+    preprocessing_token t;
+    if (header_name_permitted)
+        t = e.lex.next_allowing_header_name();
+    else
+        t = e.lex.next();
+    t.location += e.base;
+    return t;
+}
+
+const source_files::entry *source_files::find(source_location location) const
+{
+    size_t lo = 0, hi = files.size();
+    if (!hi || location < files[0].base)
+        return nullptr;
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        if (files[mid].base <= location)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    return &files[lo];
+}
+
+bool source_files::is_scratch(source_location location) const
+{
+    const entry *e = find(location);
+    return e && e->scratch;
+}
+
+source_position source_files::position(source_location location) const
+{
+    const entry *e = find(location);
+    if (!e)
+        return {"<unknown>", 0, 0};
+    return e->file.position(location - e->base);
+}
+
+source_location
+source_files::first_character(const preprocessing_token &token) const
+{
+    const entry *e = find(token.location);
+    if (!e || e->scratch)
+        return token.location;
+    lexer::translation_character c = e->lex.peek(token.location - e->base);
+    if (!c.extent)
+        return token.location;
+    return token.location + c.extent - 1;
+}
+
+size_t source_files::spelling(const preprocessing_token &token,
+                              vbuffer *out) const
+{
+    const entry *e = find(token.location);
+    if (!e)
+        return 0;
+    preprocessing_token local = token;
+    local.location -= e->base;
+    return e->lex.spelling_in_file(local, out);
+}
+
+token source_files::convert(const preprocessing_token &token)
+{
+    return conversion.lex.convert(token);
+}
+
+token source_files::convert_string_literals(const preprocessing_token *pieces,
+                                            size_t count)
+{
+    return conversion.lex.convert_string_literals(pieces, count);
 }
 
 } // namespace cplusplus

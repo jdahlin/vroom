@@ -52,7 +52,11 @@ unsigned char trigraph_replacement(unsigned char third)
 /* the length of an end-of-line indicator at p (LF, CR LF, CR), 0 if none */
 uint32_t end_of_line_length(const unsigned char *p)
 {
-    return p[0] == '\n' ? 1 : p[0] == '\r' ? 1 + (p[1] == '\n') : 0;
+    if (p[0] == '\n')
+        return 1;
+    if (p[0] == '\r')
+        return 1 + (p[1] == '\n');
+    return 0;
 }
 
 } // namespace
@@ -101,7 +105,9 @@ static lexer::translation_character translate(const lexer &l, uint32_t at,
         while (p[after] == ' ' || p[after] == '\t' || p[after] == '\v' ||
                p[after] == '\f')
             after++;
-        uint32_t eol = after < l.file.size ? end_of_line_length(p + after) : 0;
+        uint32_t eol = 0;
+        if (after < l.file.size)
+            eol = end_of_line_length(p + after);
         if (!eol) {
             if (issue && length == 3)
                 l.diagnostics.issue(diagnostic_id::trigraph_converted, at)
@@ -152,6 +158,14 @@ lexer::translation_character lexer::read(uint32_t at)
  */
 size_t lexer::spelling(const preprocessing_token &token, vbuffer *out) const
 {
+    if (files)
+        return files->spelling(token, out);
+    return spelling_in_file(token, out);
+}
+
+size_t lexer::spelling_in_file(const preprocessing_token &token,
+                               vbuffer *out) const
+{
     const unsigned char *p = file.physical_characters;
     size_t before = out->n;
     if (!token.spelling_differs) {
@@ -169,10 +183,9 @@ size_t lexer::spelling(const preprocessing_token &token, vbuffer *out) const
             if (token.raw && t.character == '"') {
                 /* the closing quote is the token's last physical character,
                    but phases 1 and 2 still apply to a ud-suffix after it */
-                uint32_t close =
-                    token.ud_suffix_offset
-                        ? token.location + token.ud_suffix_offset - 1
-                        : end - 1;
+                uint32_t close = end - 1;
+                if (token.ud_suffix_offset)
+                    close = token.location + token.ud_suffix_offset - 1;
                 vbuffer_append(out, p + at, close - at + 1);
                 at = close + 1;
             }

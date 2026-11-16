@@ -93,20 +93,34 @@ VPRIV size_t format_code_point(uint32_t code_point, char out[12])
  * false: whether it is one, and the diagnostics of clang's extensions and
  * warnings for it.
  */
+/* whether a code point may start an identifier (first) or continue one */
+static bool identifier_character_allowed(const lexer &l, uint32_t code_point,
+                                         bool first)
+{
+    if (first)
+        return l.is_identifier_start(code_point);
+    return l.is_identifier_continue(code_point);
+}
+
+/* whether a code point is XID_Start (first) or XID_Continue */
+static bool in_xid_ranges(uint32_t code_point, bool first)
+{
+    if (first)
+        return code_point_in(xid_start_ranges,
+                             sizeof xid_start_ranges / sizeof *xid_start_ranges,
+                             code_point);
+    return code_point_in(
+        xid_continue_ranges,
+        sizeof xid_continue_ranges / sizeof *xid_continue_ranges, code_point);
+}
+
 bool lexer::accept_extended_identifier_character(uint32_t code_point,
                                                  bool first, source_location at,
                                                  bool written_in_utf8)
 {
     char hex[12];
-    if (first ? is_identifier_start(code_point)
-              : is_identifier_continue(code_point)) {
-        if (code_point >= 0x80 &&
-            !code_point_in(
-                first ? xid_start_ranges : xid_continue_ranges,
-                first
-                    ? sizeof xid_start_ranges / sizeof *xid_start_ranges
-                    : sizeof xid_continue_ranges / sizeof *xid_continue_ranges,
-                code_point)) {
+    if (identifier_character_allowed(*this, code_point, first)) {
+        if (code_point >= 0x80 && !in_xid_ranges(code_point, first)) {
             size_t n = format_code_point(code_point, hex);
             diagnostics.issue(diagnostic_id::ext_mathematical_notation, at)
                 .text(hex, n);
@@ -191,8 +205,7 @@ uint32_t lexer::scan_identifier(uint32_t at, bool *spelling_differs)
                no identifier-nondigit, but a preprocessing token of its own
                ([lex.charset]/2 makes it ill-formed) */
             if (!n || code_point < 0xA0 ||
-                !(first ? is_identifier_start(code_point)
-                        : is_identifier_continue(code_point)))
+                !identifier_character_allowed(*this, code_point, first))
                 return at;
             accept_extended_identifier_character(code_point, first, at, false);
             scan_universal_character_name(at, &code_point, true);

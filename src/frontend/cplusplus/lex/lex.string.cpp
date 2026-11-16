@@ -43,7 +43,7 @@ uint32_t lexer::scan_character_or_string_literal(uint32_t at,
         if (!t.extent || t.character == '\n' || t.character == '\r') {
             diagnostics.issue(diagnostic_id::ext_unterminated_char_or_string,
                               at)
-                << (quote == '"' ? 1 : 0);
+                << (int)(quote == '"');
             token.kind = preprocessing_token_kind::other_character;
             return p;
         }
@@ -113,16 +113,13 @@ uint32_t lexer::scan_raw_string(uint32_t quote, preprocessing_token &token,
             break;
         if (c == '$' || c == '@' || c == '`') {
             char text = (char)c;
-            diagnostics
-                .issue(
-                    behavior.has(
-                        language_feature::raw_string_delimiter_dollar_at_grave)
-                        ? diagnostic_id::
-                              warn_cxx26_compat_raw_string_literal_character_set
-                        : diagnostic_id::
-                              ext_cxx26_raw_string_literal_character_set,
-                    delimiter + length)
-                .text(&text, 1);
+            diagnostic_id id =
+                diagnostic_id::ext_cxx26_raw_string_literal_character_set;
+            if (behavior.has(
+                    language_feature::raw_string_delimiter_dollar_at_grave))
+                id = diagnostic_id::
+                    warn_cxx26_compat_raw_string_literal_character_set;
+            diagnostics.issue(id, delimiter + length).text(&text, 1);
         }
         length++;
     }
@@ -147,7 +144,9 @@ uint32_t lexer::scan_raw_string(uint32_t quote, preprocessing_token &token,
         while (r < file.size && p[r] != '"')
             r++;
         *ok = false;
-        return r < file.size ? r + 1 : r;
+        if (r < file.size)
+            return r + 1;
+        return r;
     }
     /* "r-char: any member of the source character set, except a right
        parenthesis ) followed by the initial d-char-sequence (which may be
@@ -303,8 +302,9 @@ static fundamental_type element_type(const implementation_defined_behavior &b,
     case encoding_prefix::u8:
         /* [lex.string]/6: "array of n const char8_t"; char before C++20
            ([diff.cpp17.lex]/5) */
-        return b.char8_t_keyword ? fundamental_type::char8_t_
-                                 : fundamental_type::char_;
+        if (b.char8_t_keyword)
+            return fundamental_type::char8_t_;
+        return fundamental_type::char_;
     case encoding_prefix::u:
         return fundamental_type::char16_t_;
     case encoding_prefix::U:

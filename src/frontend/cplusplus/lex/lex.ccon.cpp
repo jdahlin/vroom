@@ -25,6 +25,14 @@
 namespace cplusplus
 {
 
+/* the value of a hexadecimal-digit */
+static unsigned escape_digit_value(unsigned char h)
+{
+    if (is_digit(h))
+        return h - '0';
+    return (unsigned)((h | 32) - 'a' + 10);
+}
+
 /* the largest value one code unit of an encoding holds */
 VPRIV uint32_t largest_code_unit(const implementation_defined_behavior &b,
                                  encoding_prefix prefix)
@@ -35,7 +43,9 @@ VPRIV uint32_t largest_code_unit(const implementation_defined_behavior &b,
     case encoding_prefix::U:
         return 0xFFFFFFFF;
     case encoding_prefix::L:
-        return b.wchar_t_width >= 32 ? 0xFFFFFFFF : (1u << b.wchar_t_width) - 1;
+        if (b.wchar_t_width >= 32)
+            return 0xFFFFFFFF;
+        return (1u << b.wchar_t_width) - 1;
     default:
         return 0xFF;
     }
@@ -124,7 +134,9 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
         return c;
     }
 
-    unsigned char e = (unsigned char)(start + 1 < n ? s[start + 1] : 0);
+    unsigned char e = 0;
+    if (start + 1 < n)
+        e = (unsigned char)s[start + 1];
     *i = start + 2;
     switch (e) {
     /* [lex.ccon]/6, Table 9: simple-escape-sequence */
@@ -169,17 +181,19 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
     case 'U': {
         /* [lex.charset]/2 universal-character-name, and from C++23 \u{...} */
         size_t j = start + 2;
-        uint32_t value = 0, digits = 0, want = e == 'u' ? 4 : 8;
+        uint32_t value = 0, digits = 0, want = 8;
+        if (e == 'u')
+            want = 4;
         bool delimited = e == 'u' && j < n && s[j] == '{';
         if (delimited)
             j++;
         while (j < n && is_hexadecimal_digit((unsigned char)s[j]) &&
                (delimited || digits < want)) {
             unsigned char h = (unsigned char)s[j++];
-            value = value > 0x10FFFF
-                        ? 0x110000
-                        : value << 4 |
-                              (is_digit(h) ? h - '0' : (h | 32) - 'a' + 10);
+            if (value > 0x10FFFF)
+                value = 0x110000;
+            else
+                value = value << 4 | escape_digit_value(h);
             digits++;
         }
         if (delimited) {
@@ -267,7 +281,9 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
            \o{...} are C++23's (P2290R3). */
         size_t j = start + 2;
         bool delimited = j < n && s[j] == '{';
-        unsigned base = e == 'x' ? 16 : 8;
+        unsigned base = 8;
+        if (e == 'x')
+            base = 16;
         if (e == 'o' && !delimited) {
             d.issue(diagnostic_id::err_delimited_escape_missing_brace, here)
                 .text("o", 1);
@@ -283,7 +299,7 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
             unsigned char h = (unsigned char)s[j];
             unsigned v;
             if (base == 16 && is_hexadecimal_digit(h))
-                v = is_digit(h) ? h - '0' : (h | 32) - 'a' + 10;
+                v = escape_digit_value(h);
             else if (base == 8 && h >= '0' && h <= '7')
                 v = h - '0';
             else
@@ -294,7 +310,9 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
         }
         if (delimited) {
             if (j >= n || s[j] != '}') {
-                char bad = j < n ? s[j] : 0;
+                char bad = 0;
+                if (j < n)
+                    bad = s[j];
                 d.issue(diagnostic_id::err_delimited_escape_invalid,
                         at + (uint32_t)j)
                     .text(&bad, 1);
@@ -324,7 +342,7 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
            clang) for the others */
         if (overflow || value > largest_code_unit(b, prefix)) {
             d.issue(diagnostic_id::err_escape_too_large, here)
-                << (base == 16 ? 0 : 1);
+                << (int)(base != 16);
             c.error = true;
         }
         c.value = (uint32_t)value;
@@ -429,8 +447,10 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
     case encoding_prefix::u8:
         /* [lex.ccon]/2: "a character-literal of type char8_t"; before C++20
            (and with -fno-char8_t) char */
-        out.type = behavior.char8_t_keyword ? fundamental_type::char8_t_
-                                            : fundamental_type::char_;
+        if (behavior.char8_t_keyword)
+            out.type = fundamental_type::char8_t_;
+        else
+            out.type = fundamental_type::char_;
         break;
     case encoding_prefix::u:
         out.type = fundamental_type::char16_t_;
@@ -442,7 +462,10 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
         out.type = fundamental_type::wchar_t_;
         break;
     default:
-        out.type = count > 1 ? fundamental_type::int_ : fundamental_type::char_;
+        if (count > 1)
+            out.type = fundamental_type::int_;
+        else
+            out.type = fundamental_type::char_;
         break;
     }
 
@@ -452,10 +475,11 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
                conditionally-supported, has type int, and has an
                implementation-defined value": the code units one after the
                other, the last the least significant byte, as GCC and clang */
-            diagnostics.issue(
-                count == 4 ? diagnostic_id::warn_four_char_character_literal
-                           : diagnostic_id::warn_multichar_character_literal,
-                at);
+            diagnostic_id multichar =
+                diagnostic_id::warn_multichar_character_literal;
+            if (count == 4)
+                multichar = diagnostic_id::warn_four_char_character_literal;
+            diagnostics.issue(multichar, at);
             if (multicharacter_too_long && !error)
                 diagnostics.issue(diagnostic_id::warn_char_constant_too_large,
                                   at);
@@ -467,7 +491,7 @@ void lexer::convert_character_literal(const char *spelling, size_t length,
            c-chars is ill-formed", the same for UTF-16 and UTF-32; clang also
            for wide ones ([lex.ccon]/5 leaves them implementation-defined) */
         diagnostics.issue(diagnostic_id::err_multichar_character_literal, at)
-            << (prefix == encoding_prefix::L ? 0 : 1);
+            << (int)(prefix != encoding_prefix::L);
         error = true;
     }
     uint64_t value = last;

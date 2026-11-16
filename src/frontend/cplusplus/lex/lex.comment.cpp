@@ -85,7 +85,10 @@ uint32_t lexer::scan_comment(uint32_t at)
                like an attempt */
             diagnostics.issue(diagnostic_id::warn_nested_block_comment, at);
         after_star = t.character == '*';
-        at += t.extent ? t.extent : 1;
+        if (t.extent)
+            at += t.extent;
+        else
+            at += 1;
     }
 }
 

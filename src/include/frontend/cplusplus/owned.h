@@ -61,7 +61,9 @@ template <typename T> class owned_array
     {
         if (n <= capacity)
             return;
-        size_t grown = capacity ? capacity * 2 : 16;
+        size_t grown = 16;
+        if (capacity)
+            grown = capacity * 2;
         if (grown < n)
             grown = n;
         T *p = static_cast<T *>(
@@ -103,6 +105,14 @@ template <typename T> class owned_array
     const T &operator[](size_t i) const
     {
         return elements[i];
+    }
+    T &back()
+    {
+        return elements[count - 1];
+    }
+    const T &back() const
+    {
+        return elements[count - 1];
     }
     T *data()
     {
@@ -164,7 +174,9 @@ class owned_buffer
     }
     const char *data() const
     {
-        return buffer.p ? buffer.p : "";
+        if (!buffer.p)
+            return "";
+        return buffer.p;
     }
     size_t size() const
     {
@@ -177,6 +189,64 @@ class owned_buffer
 
   private:
     vbuffer buffer = {};
+};
+
+/* objects of any type T, each made in place at an address that does not
+   change, all destroyed with the owner (the source files of a translation
+   unit and their lexers, which refer to each other) */
+/* placement in storage owned_objects allocated (the C++ runtime's operator
+   new is not linked) */
+struct owned_placement {};
+
+} // namespace cplusplus
+
+inline void *operator new(size_t, cplusplus::owned_placement, void *p) noexcept
+{
+    return p;
+}
+
+namespace cplusplus
+{
+
+template <typename T> class owned_objects
+{
+  public:
+    owned_objects() = default;
+    ~owned_objects()
+    {
+        for (size_t i = pointers.size(); i-- > 0;) {
+            pointers[i]->~T();
+            ::free(pointers[i]);
+        }
+    }
+    owned_objects(const owned_objects &) = delete;
+    owned_objects &operator=(const owned_objects &) = delete;
+
+    template <typename... A> T &make(A &&...arguments)
+    {
+        void *storage = ::malloc(sizeof(T));
+        if (!storage)
+            abort();
+        T *object =
+            new (owned_placement{}, storage) T(static_cast<A &&>(arguments)...);
+        pointers.append(object);
+        return *object;
+    }
+    T &operator[](size_t i)
+    {
+        return *pointers[i];
+    }
+    const T &operator[](size_t i) const
+    {
+        return *pointers[i];
+    }
+    size_t size() const
+    {
+        return pointers.size();
+    }
+
+  private:
+    owned_array<T *> pointers;
 };
 
 /* a NUL-terminated copy of n characters */
@@ -213,7 +283,9 @@ class owned_string
     }
     const char *c_str() const
     {
-        return characters ? characters : "";
+        if (!characters)
+            return "";
+        return characters;
     }
 
   private:

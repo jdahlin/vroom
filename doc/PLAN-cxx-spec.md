@@ -26,6 +26,22 @@ by step once it covers what that front end does.
   Where clang departs from n4861 (a later paper applied as a DR, an
   extension), the comment says so and names the paper (P1949R7 for
   identifiers, P2290R3 for `\u{}`, P0330R8 for `z`).
+- **Extensions are named, gated and kept apart.**  Each one is a row of
+  `ext/extensions.inc` (`EXTENSION(name, vendor, reference)`, vendor `gnu`,
+  `clang`, `microsoft` or `vcc`, and where that implementation documents
+  it); code asks `behavior.has(extension::name)`, so each can be turned off.
+  The code is in `ext/VENDOR/` where it can be (`ext/gnu/line_marker.cpp`,
+  `ext/clang/feature_checks.cpp`, ...), the standard's file keeping one
+  call; a call site, or extension code that cannot move, has the tag
+  `[ext.VENDOR]` in its comment.  A choice the standard leaves open
+  (implementation-defined or undefined behavior) made as clang makes it is
+  no extension: its tag is `[impl.clang]`.  `grep -rn '\[ext\.'` lists the
+  extensions in the code, `grep -rn '\[impl\.'` the choices.
+- **No conditional operator.**  `a ? b : c` (and GNU's `a ?: b`) is not
+  used in the front end's code: an if/else, a switch, a table or a small
+  named helper says the same more plainly.  The pre-commit hook
+  `no-conditional-operator` (`src/tools/check-no-conditional-operator.py`,
+  which skips comments and literals) rejects one, in CI too.
 - **Memory is held by owners** (`src/include/frontend/cplusplus/owned.h`:
   `owned_array`, `owned_buffer`, `owned_string`, RAII): no `free()`,
   `malloc()`, `realloc()` or `strdup()` outside that header.  The pre-commit
@@ -88,8 +104,42 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   adapter from vcc's C preprocessor).  The context the lexer needs
   (header-names after `#include`/`import`, the end of a directive's line)
   comes from it.
+  Status (2026-11-16, in progress): every subclause has its file: groups and
+  directives (`cpp.pre`), conditional inclusion with the `#if` evaluator as
+  intmax_t/uintmax_t (`cpp.cond`), inclusion with clang's search order
+  (`cpp.include`), definitions and invocations (`cpp.replace`, `#undef` in
+  it), substitution with `__VA_OPT__` (`cpp.subst`), `#`, `##` with
+  placemarkers, rescanning as a stack of token contexts (`cpp.rescan`),
+  `#line` and GNU line markers, `#error`/`#warning`, the phase-4 pragmas,
+  `_Pragma`, the module and import directives, and clang's predefined macros
+  per edition/GNU/MS/char8_t mode (`cpp/cpp.predefined.inc`, from clang -dM
+  once).  Locations: `source_files` puts every file and every piece of
+  scratch text in one space, so a token knows its file and the invocation it
+  came from (clang's expansion location).  `cxxlex -dump-tokens` now runs
+  phases 1-7 as `clang -cc1 -dump-tokens`; `cxxlex -E [-dM]`.
+  `bench/cxx-pp.py`: clang's test/Preprocessor (run as C++) and
+  test/CXX/cpp, 354 tests that can run here (23 make their inputs at run
+  time): 505 runs, tokens 472, error lines 457, the front end's own
+  diagnostics 419, macros (-dM) 488; 278 tests pass every run.  The
+  extensions are `ext/` (Conventions); clang's `__has_*` answers are data
+  (`ext/clang/feature-checks.inc`); `#embed` is `ext/clang/embed.cpp` (21
+  of its 29 tests pass, the rest are error recovery).  Left: error recovery as clang's (what is left of a malformed
+  invocation or `_Pragma`), the parser-phase pragmas clang turns into
+  annotations, Microsoft's header search, the standard's examples as tests (`src/test/cxx/cpp/spec/`),
+  known-differences, the tests in CI (they are read from work/ now).
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
+
+## Decisions (2026-11-16, during L3)
+
+5. Diagnostics: clang's ids and texts stay as data for now, but matching
+   clang's wording is not a goal.  The harnesses compare where an error is
+   ([intro.compliance]/2), and the text only of diagnostics already written.
+   The front end's diagnostics move to vcc's diagnostic system (spans,
+   labels, the vcc/clang/narrated styles, JSON, SARIF) later, once the
+   non-error path (preprocessor, then parser) works.
+6. Extensions are named in `ext/extensions.inc`, gated by
+   `behavior.has(extension::...)` and kept in `ext/VENDOR/` (Conventions).
 
 ## Decisions (review of PR #307, 2026-11-16)
 

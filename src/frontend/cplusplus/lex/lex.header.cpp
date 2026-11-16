@@ -26,7 +26,9 @@ namespace cplusplus
 uint32_t lexer::scan_header_name(uint32_t at, bool *ok)
 {
     translation_character open = peek(at);
-    unsigned char close = open.character == '<' ? '>' : '"';
+    unsigned char close = '"';
+    if (open.character == '<')
+        close = '>';
     uint32_t p = at + open.extent;
     for (;;) {
         translation_character t = peek(p);

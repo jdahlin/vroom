@@ -51,12 +51,13 @@ uint32_t lexer::scan_ud_suffix(uint32_t at, preprocessing_token &token)
         return at;
 
     if (!behavior.has(language_feature::user_defined_literals)) {
-        diagnostics.issue(
-            t.character == '_'
-                ? diagnostic_id::warn_cxx11_compat_user_defined_literal
-                : diagnostic_id::
-                      warn_cxx11_compat_reserved_user_defined_literal,
-            at);
+        if (t.character == '_')
+            diagnostics.issue(
+                diagnostic_id::warn_cxx11_compat_user_defined_literal, at);
+        else
+            diagnostics.issue(
+                diagnostic_id::warn_cxx11_compat_reserved_user_defined_literal,
+                at);
         return at;
     }
     if (!extended && t.character != '_') {
@@ -84,11 +85,12 @@ uint32_t lexer::scan_ud_suffix(uint32_t at, preprocessing_token &token)
             }
         }
         if (!library) {
-            diagnostics.issue(
-                behavior.microsoft_compatibility
-                    ? diagnostic_id::ext_ms_reserved_user_defined_literal
-                    : diagnostic_id::ext_reserved_user_defined_literal,
-                at);
+            if (behavior.microsoft_compatibility)
+                diagnostics.issue(
+                    diagnostic_id::ext_ms_reserved_user_defined_literal, at);
+            else
+                diagnostics.issue(
+                    diagnostic_id::ext_reserved_user_defined_literal, at);
             return at;
         }
     }

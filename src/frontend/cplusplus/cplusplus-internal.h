@@ -139,6 +139,66 @@ VPRIV const char *keyword_clang_name(int keyword);
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
 
+/* ---- [cpp] ------------------------------------------------------------ */
+
+inline bool is_operator(const preprocessing_token &t,
+                        preprocessing_op_or_punc op)
+{
+    return t.kind == preprocessing_token_kind::preprocessing_op_or_punc &&
+           preprocessing_op_or_punc_primary(t.op_or_punc) == op;
+}
+inline bool is_identifier(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::identifier;
+}
+/* the end of a directive's line, as preprocessor::directive_token gives it */
+inline bool is_end(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::end_of_file;
+}
+/* where tokens[i] is, or `otherwise` when there are not that many */
+inline source_location location_of(const preprocessing_token *tokens,
+                                   size_t count, size_t i,
+                                   source_location otherwise)
+{
+    if (i < count)
+        return tokens[i].location;
+    return otherwise;
+}
+inline bool is_string_literal(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::string_literal ||
+           t.kind == preprocessing_token_kind::user_defined_string_literal;
+}
+
+/* whether a token is the identifier word */
+VPRIV bool spelled_as(const source_files &files, const preprocessing_token &t,
+                      const char *word);
+VPRIV directive_kind find_directive(const implementation_defined_behavior &b,
+                                    const char *spelling, size_t length);
+
+/* a spelling's identifier, the hash the table keys on */
+VPRIV uint32_t hash_spelling(const char *s, size_t n);
+
+/* [cpp.cond]/6: __has_cpp_attribute's value of an attribute-token (0: none) */
+VPRIV int64_t cpp_attribute_value(const implementation_defined_behavior &b,
+                                  const char *scope, size_t scope_length,
+                                  const char *name, size_t name_length);
+/* a string literal of s's characters, " and \ escaped */
+VPRIV void string_literal_of(const char *s, vbuffer *out);
+/* [ext.clang]: clang's __has_feature (extension false) and __has_extension */
+VPRIV bool has_feature(const implementation_defined_behavior &b,
+                       const char *name, size_t length, bool extension);
+VPRIV int64_t has_gnu_attribute(const implementation_defined_behavior &b,
+                                const char *name, size_t length);
+VPRIV int64_t
+clang_cpp_attribute_value(const implementation_defined_behavior &b,
+                          const char *operand, size_t length, bool c_attribute);
+VPRIV int64_t clang_declspec_attribute_value(
+    const implementation_defined_behavior &b, const char *name, size_t length);
+VPRIV bool has_builtin(const implementation_defined_behavior &b,
+                       const char *name, size_t length);
+
 } // namespace cplusplus
 
 #endif
