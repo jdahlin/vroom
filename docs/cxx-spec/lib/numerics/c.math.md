@@ -1,0 +1,33 @@
+# 26.8 Mathematical functions for floating-point types [c.math]
+
+[Contents](../../README.md) · up: [26 Numerics library \[numerics\]](numerics.md) · prev: [26.7.10 `valarray` range access \[valarray.range\]](valarray.range.md) · next: [26.8.1 Header `<cmath>` synopsis \[cmath.syn\]](cmath.syn.md)
+
+## Subclauses
+
+- [26.8.1 Header `<cmath>` synopsis \[cmath.syn\]](cmath.syn.md)
+- [26.8.2 Absolute values \[c.math.abs\]](c.math.abs.md)
+- [26.8.3 Three-dimensional hypotenuse \[c.math.hypot3\]](c.math.hypot3.md)
+- [26.8.4 Linear interpolation \[c.math.lerp\]](c.math.lerp.md)
+- [26.8.5 Classification / comparison functions \[c.math.fpclass\]](c.math.fpclass.md)
+- [26.8.6 Mathematical special functions \[sf.cmath\]](sf.cmath.md)
+  - [26.8.6.1 Associated Laguerre polynomials \[sf.cmath.assoc.laguerre\]](sf.cmath.assoc.laguerre.md)
+  - [26.8.6.2 Associated Legendre functions \[sf.cmath.assoc.legendre\]](sf.cmath.assoc.legendre.md)
+  - [26.8.6.3 Beta function \[sf.cmath.beta\]](sf.cmath.beta.md)
+  - [26.8.6.4 Complete elliptic integral of the first kind \[sf.cmath.comp.ellint.1\]](sf.cmath.comp.ellint.1.md)
+  - [26.8.6.5 Complete elliptic integral of the second kind \[sf.cmath.comp.ellint.2\]](sf.cmath.comp.ellint.2.md)
+  - [26.8.6.6 Complete elliptic integral of the third kind \[sf.cmath.comp.ellint.3\]](sf.cmath.comp.ellint.3.md)
+  - [26.8.6.7 Regular modified cylindrical Bessel functions \[sf.cmath.cyl.bessel.i\]](sf.cmath.cyl.bessel.i.md)
+  - [26.8.6.8 Cylindrical Bessel functions of the first kind \[sf.cmath.cyl.bessel.j\]](sf.cmath.cyl.bessel.j.md)
+  - [26.8.6.9 Irregular modified cylindrical Bessel functions \[sf.cmath.cyl.bessel.k\]](sf.cmath.cyl.bessel.k.md)
+  - [26.8.6.10 Cylindrical Neumann functions \[sf.cmath.cyl.neumann\]](sf.cmath.cyl.neumann.md)
+  - [26.8.6.11 Incomplete elliptic integral of the first kind \[sf.cmath.ellint.1\]](sf.cmath.ellint.1.md)
+  - [26.8.6.12 Incomplete elliptic integral of the second kind \[sf.cmath.ellint.2\]](sf.cmath.ellint.2.md)
+  - [26.8.6.13 Incomplete elliptic integral of the third kind \[sf.cmath.ellint.3\]](sf.cmath.ellint.3.md)
+  - [26.8.6.14 Exponential integral \[sf.cmath.expint\]](sf.cmath.expint.md)
+  - [26.8.6.15 Hermite polynomials \[sf.cmath.hermite\]](sf.cmath.hermite.md)
+  - [26.8.6.16 Laguerre polynomials \[sf.cmath.laguerre\]](sf.cmath.laguerre.md)
+  - [26.8.6.17 Legendre polynomials \[sf.cmath.legendre\]](sf.cmath.legendre.md)
+  - [26.8.6.18 Riemann zeta function \[sf.cmath.riemann.zeta\]](sf.cmath.riemann.zeta.md)
+  - [26.8.6.19 Spherical Bessel functions of the first kind \[sf.cmath.sph.bessel\]](sf.cmath.sph.bessel.md)
+  - [26.8.6.20 Spherical associated Legendre functions \[sf.cmath.sph.legendre\]](sf.cmath.sph.legendre.md)
+  - [26.8.6.21 Spherical Neumann functions \[sf.cmath.sph.neumann\]](sf.cmath.sph.neumann.md)

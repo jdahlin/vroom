@@ -1,0 +1,7 @@
+# C.4.4 [[class]](../class/class.md): classes [diff.cpp03.class]
+
+[Contents](../README.md) · up: [C.4 C++ and ISO C++ 2003 \[diff.cpp03\]](diff.cpp03.md) · prev: [C.4.3 [[dcl.dcl]](../dcl/dcl.dcl.md): declarations \[diff.cpp03.dcl.dcl\]](diff.cpp03.dcl.dcl.md) · next: [C.4.5 [[temp]](../temp/temp.md): templates \[diff.cpp03.temp\]](diff.cpp03.temp.md)
+
+**1** **Affected subclauses:** [[class.default.ctor]](../class/class.default.ctor.md), [[class.dtor]](../class/class.dtor.md), [[class.copy.ctor]](../class/class.copy.ctor.md), [[class.copy.assign]](../class/class.copy.assign.md) <br>**Change:** Implicitly-declared special member functions are defined as deleted when the implicit definition would have been ill-formed. <br>**Rationale:** Improves template argument deduction failure. <br>**Effect on original feature:** A valid C++ 2003 program that uses one of these special member functions in a context where the definition is not required (e.g., in an expression that is not potentially evaluated) becomes ill-formed.
+
+**2** **Affected subclause:** [[class.dtor]](../class/class.dtor.md) <br>**Change:** User-declared destructors have an implicit exception specification. <br>**Rationale:** Clarification of destructor requirements. <br>**Effect on original feature:** Valid C++ 2003 code may execute differently in this International Standard. In particular, destructors that throw exceptions will call `std::terminate` (without calling `std::unexpected`) if their exception specification is non-throwing.
