@@ -23,14 +23,68 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
 #include "keywords.inc"
 #undef STANDARD_KEYWORD
     };
+    /* ... and an extension's keywords, when the extension is on */
+    struct alternate {
+        const char *spelling;
+        standard_keyword keyword;
+        extension from;
+    };
+    static constexpr alternate alternates[] = {
+#define ALTERNATE_KEYWORD(spelling, keyword, extension_)                       \
+    {spelling, standard_keyword::keyword, extension::extension_},
+#include "../ext/extension-keywords.inc"
+    };
+    struct own {
+        const char *spelling;
+        extension_keyword keyword;
+        extension from;
+    };
+    static constexpr own owns[] = {
+#define EXTENSION_KEYWORD(name, spelling, extension_)                          \
+    {spelling, extension_keyword::name, extension::extension_},
+#include "../ext/extension-keywords.inc"
+    };
+    const implementation_defined_behavior &behavior = tokens.files.behavior;
     int size = keyword_table_size();
     keyword_kinds.resize(static_cast<size_t>(size));
+    extension_kinds.resize(static_cast<size_t>(size));
     for (int i = 0; i < size; i++) {
         keyword_kinds[i] = standard_keyword::extension;
+        extension_kinds[i] = extension_keyword::none;
         for (const named &n : standard)
             if (!strcmp(n.spelling, keyword_spelling(i)))
                 keyword_kinds[i] = n.keyword;
+        for (const alternate &a : alternates)
+            if (!strcmp(a.spelling, keyword_spelling(i)) &&
+                behavior.has(a.from))
+                keyword_kinds[i] = a.keyword;
+        for (const own &o : owns)
+            if (!strcmp(o.spelling, keyword_spelling(i)) &&
+                behavior.has(o.from))
+                extension_kinds[i] = o.keyword;
     }
+    /* [ext.clang] clang_type_trait_names: the token stream makes a trait's
+       keyword an identifier when no '(' follows */
+    if (behavior.has(extension::clang_type_trait_names)) {
+        tokens.revertible_keywords.resize(static_cast<size_t>(size));
+        for (int i = 0; i < size; i++)
+            tokens.revertible_keywords[i] =
+                extension_kinds[i] == extension_keyword::type_trait ||
+                extension_kinds[i] == extension_keyword::type_transformation;
+    }
+}
+
+extension_keyword parser::extension_keyword_of(const token &t) const
+{
+    if (t.kind != token_kind::keyword || t.keyword < 0 ||
+        static_cast<size_t>(t.keyword) >= extension_kinds.size())
+        return extension_keyword::none;
+    return extension_kinds[t.keyword];
+}
+
+bool parser::at(extension_keyword k, unsigned ahead)
+{
+    return extension_keyword_of(peek(ahead)) == k;
 }
 
 standard_keyword parser::keyword_of(const token &t) const
@@ -59,6 +113,14 @@ bool parser::at_identifier(unsigned ahead)
 bool parser::accept(preprocessing_op_or_punc op)
 {
     if (!at(op))
+        return false;
+    add_token();
+    return true;
+}
+
+bool parser::accept(extension_keyword k)
+{
+    if (!at(k))
         return false;
     add_token();
     return true;

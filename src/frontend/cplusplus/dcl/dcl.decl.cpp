@@ -17,6 +17,29 @@ namespace cplusplus
 {
 
 /*
+ * [basic.scope.declarative]/1: the name the declarator declares, as what
+ * the decl-specifier-seq and the declarator make it: a typedef-name, a
+ * function, or another entity.  [dcl.typedef]/2: a typedef-name is a
+ * synonym of its type; of a class's, the class's members are found
+ * through it ([basic.lookup.qual]/1).
+ */
+void parser::declare_declarator(const decl_specifier_facts &specifiers,
+                                const declarator_facts &facts)
+{
+    name_kind kind = name_kind::other;
+    if (facts.first == derivation::function)
+        kind = name_kind::function;
+    scope_index region = 0;
+    if (specifiers.typedef_) {
+        kind = name_kind::type_name;
+        if (facts.first == derivation::none)
+            region = specifiers.type_region;
+    }
+    names.declare(facts.name, declared_kind(kind), region,
+                  specifiers.typedef_ && specifiers.dependent);
+}
+
+/*
  *     init-declarator:
  *         declarator initializer_opt
  *         declarator requires-clause
@@ -47,15 +70,8 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
             return 0;
         /* [basic.scope.pdecl]/1: the point of declaration is after the
            complete declarator, before the initializer */
-        if (facts.name && !facts.qualified_id) {
-            name_kind kind = name_kind::other;
-            if (facts.first == derivation::function)
-                kind = name_kind::function;
-            if (specifiers.typedef_)
-                kind = name_kind::type_name;
-            names.declare(facts.name, declared_kind(kind), 0,
-                          specifiers.typedef_ && specifiers.dependent);
-        }
+        if (facts.name && !facts.qualified_id)
+            declare_declarator(specifiers, facts);
     }
     /* init-declarator: declarator requires-clause ([dcl.decl]/1); that
        its declarator declares a templated function is [dcl.decl]/3's
@@ -105,8 +121,11 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
     ptr_declarator(form, facts);
     if (failed())
         return 0;
-    if (!at(preprocessing_op_or_punc::ARROW))
+    if (!at(preprocessing_op_or_punc::ARROW)) {
+        if (gnu_declarator_suffix_follows(facts)) /* [ext.gnu] */
+            return gnu_declarator_suffix(mark, first, facts);
         return facts.node;
+    }
     /* [dcl.fct]/2's second form: only after parameters-and-qualifiers that
        are the declarator's last part */
     const syntax_child last = pending.back();
@@ -129,6 +148,8 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
     if (!facts.has_id)
         kind = syntax_kind::abstract_declarator;
     facts.node = finish_node(kind, mark, first);
+    if (gnu_declarator_suffix_follows(facts)) /* [ext.gnu] */
+        return gnu_declarator_suffix(mark, first, facts);
     return facts.node;
 }
 
@@ -498,13 +519,17 @@ node_index parser::ptr_operator(derivation *kind)
  *     cv-qualifier:
  *         const
  *         volatile
+ *
+ * [ext.gnu] gnu_restrict: __restrict__ is a cv-qualifier too (GCC manual
+ * 7.3, C99's restrict in C++).
  */
 node_index parser::cv_qualifier_seq()
 {
     size_t mark = begin_node();
     token_index first = position;
     while (accept(standard_keyword::const_) ||
-           accept(standard_keyword::volatile_))
+           accept(standard_keyword::volatile_) ||
+           accept(extension_keyword::restrict))
         ;
     if (position == first)
         return 0;

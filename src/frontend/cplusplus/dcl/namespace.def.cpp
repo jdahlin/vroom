@@ -103,6 +103,14 @@ node_index parser::namespace_definition()
         names.enter_namespace(0, inline_);
         entered++;
     }
+    /* [ext.gnu] GCC's attributes of a namespace follow its name
+       (namespace std __attribute__ ((__visibility__ ("default"))) { ...) */
+    if (kind == syntax_kind::nested_namespace_definition && at_gnu_attribute())
+        return violates("no attributes on a nested-namespace-definition",
+                        "ext.gnu", position);
+    gnu_attributes_opt();
+    if (failed())
+        return 0;
     if (!accept(preprocessing_op_or_punc::LEFT_BRACE))
         return expected("'{' to begin the namespace-body", "namespace.def");
     enclosing_braces++;

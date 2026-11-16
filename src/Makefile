@@ -143,8 +143,7 @@ SPLIT_MODS = cc pp codegen driver
 vir_SRC  = vir/opcode-table.cpp vir/vir.cpp vir/print.cpp vir/parse.cpp vir/verify.cpp vir/facts.cpp vir/layout.cpp vir/compact.cpp vir/pass-list.cpp $(wildcard vir/pass/*.cpp)
 VIRA_SRC = vir/loops.cpp vir/register-allocation.cpp vir/register-allocation-check.cpp vir/register-allocation-print.cpp	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.cpp arch/a64/obj/fixup.cpp arch/x64/obj/fixup.cpp platform/linux/elf.cpp platform/win/coff.cpp platform/win/unwind.cpp
-# with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
-cc_SRC   = $(filter-out frontend/c/keywords.cpp frontend/c/replay.cpp,$(wildcard frontend/c/*.cpp)) frontend/c/replay.cpp $(wildcard frontend/cxx/*.cpp) $(wildcard frontend/cxx/codegen/*.cpp) $(wildcard frontend/cxx/declaration/*.cpp) $(wildcard frontend/cxx/expression/*.cpp) $(wildcard frontend/cxx/instantiate/*.cpp)
+cc_SRC   = $(filter-out frontend/c/keywords.cpp frontend/c/replay.cpp,$(wildcard frontend/c/*.cpp)) frontend/c/replay.cpp
 # the compile job (driver_job_run); declaration-cache.cpp stays a TU of its own
 driver_SRC = $(filter-out driver/declaration-cache.cpp,$(wildcard driver/*.cpp))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)

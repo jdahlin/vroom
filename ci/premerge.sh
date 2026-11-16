@@ -76,7 +76,6 @@ arm64)
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
-	step cxx-builtins-generated python3 src/tools/gen-cxx-builtins.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
 	step cxxparse-selftest "$BUILD/cxxparse" -selftest

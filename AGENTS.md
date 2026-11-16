@@ -69,19 +69,12 @@ relative to it); `TODO.md` stays at the top.
   test the instantiation cache and per-symbol codegen on libc++'s tests and
   nlohmann/json.  Update a step's status there.  `bench/cxx-profile.py
   build|report|base TARGET` (json, libcxx, duckdb, simdjson, catch2; sources
-  in `work/cxx`) is X0's clang-only measurement; `bench/cxx-json.py
-  [--stage pp|syntax|obj]` is the proof of concept's progress on json (the
-  only C++ test case for now); `src/tools/gen-cxxpredef.py` regenerates the
-  C++ predefines and `__has_*` answers from clang++.  The C++ front end is
-  `src/frontend/cxx/` (module `cxx_SRC`; the driver calls `cxx_run` for a
-  C++ job; `VCC_CXX_PROGRESS=1` prints how many tokens it parsed);
-  `bench/cxx-parse-tests.py` runs its cases in `src/test/cxx/parse`;
-  `bench/cxx-llvm.py [-j 6] [--std c++98] [PAT]` builds llvm-test-suite's
-  C++ programs (`bench/fetch-testsuites.sh llvm-test-suite`) with vcc, links
-  and runs them against clang++'s build (cached in `work/cxx-llvm-ref`; ~15 s
-  warm); `VCC_CXX_GEN=4` lists each function left without code and why;
-  `bench/cxx-layout.py` has clang++ check every class layout it builds on json
-  (`VCC_CXX_LAYOUT=FILE` writes them as static_asserts).
+  in `work/cxx`) is X0's clang-only measurement; `src/tools/gen-cxxpredef.py`
+  regenerates the C++ predefines and `__has_*` answers from clang++.  The
+  first front end (`src/frontend/cxx/`) was removed on 2026-11-16; the new
+  one, written against the standard, is `src/frontend/cplusplus/`
+  (`PLAN-cxx-spec.md`, `PLAN-cxx-parse.md`; `cxxlex`, `cxxparse`).  Until it
+  is wired into the driver, a C++ compile job is an error (`-E` works).
 - `src/`: the toolchain; `src/Makefile` builds into `build/src/`.  The tree
   follows PostgreSQL's (`PLAN-tree.md`): generic code in the component
   directories, code for one target CPU in `arch/<cpu>/<component>/`, code for
@@ -413,7 +406,6 @@ bench/vas-corpus.py -j 6 [-O2] [PAT] # clang -S of the test C files: clang -c vs
 bench/vas-corpus.py -j 6 --target x86_64-w64-mingw32   # ... COFF objects (test runtime headers, no sysroot; ~2 min)
 bench/vas-corpus.py -j 6 -g [--as-g] --target x86_64-w64-mingw32   # ... clang -S -g (DWARF 4 line tables; -O '0 -gdwarf-5'); --as-g: -g to both assemblers too
 bench/vas-mutate.py -n 20000 --bin-dir build/linux/src-asan   # mutated win64-*.s: vasm (ASan) never crashes (~1 min)
-bench/cxx-skia.py -j 6 [DIR...]     # Skia (work/skia-src/skia) -fsyntax-only -std=c++20, first errors bucketed (src/core: 232/232, ~5 s)
 bench/skia/build.sh [--clean]      # Skia's GN build with vcc only (vpp -c, vlink, var; CPU backend): failed steps, functions with code (~25 s)
 bench/pg/build.sh clang && bench/pg/build.sh vcc   # PostgreSQL (macOS, meson+ninja): build + meson test (~2 min each)
 bench/pg/build.sh vccd             # ... CC = vcc shim + private vccd (VCC_DELEGATE=bench/pg/cc for the rest)

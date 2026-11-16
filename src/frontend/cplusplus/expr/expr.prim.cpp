@@ -64,6 +64,8 @@ node_index parser::primary_expression()
         return id_expression(false);
     if (at(standard_keyword::requires_))
         return requires_expression();
+    if (at(extension_keyword::type_trait)) /* [ext.clang] */
+        return clang_type_trait_expression();
     switch (keyword_of(peek())) {
     /* an extension's keyword (__builtin_va_arg, __is_same, ...): P9 */
     case standard_keyword::template_:

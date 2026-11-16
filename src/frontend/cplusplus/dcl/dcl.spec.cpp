@@ -373,6 +373,18 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
     bool has_other_specifier = false, has_auto = false;
     uint64_t dependent_before = names.dependent_found;
     for (;;) {
+        /* [ext.gnu] GCC manual 6.39: "An attribute specifier list may
+           appear immediately before a declarator ... and among the
+           declaration specifiers"; not a specifier of its own */
+        if (at_gnu_attribute()) {
+            gnu_attribute_specifier();
+            if (failed())
+                return 0;
+            continue;
+        }
+        /* [ext.gnu] gnu_restrict: a cv-qualifier ([dcl.decl]) */
+        if (accept(extension_keyword::restrict))
+            continue;
         standard_keyword k = keyword_of(peek());
         token_index specifier = position;
         /* before C++11 auto is a storage-class-specifier
@@ -471,6 +483,14 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::type_transformation)) {
+            /* [ext.clang] a simple-type-specifier */
+            if (facts.has_defining_type_specifier)
+                break;
+            clang_type_transformation();
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::extension) {
             /* an extension's keyword (P9) */
             return beyond_this_step();
@@ -511,9 +531,11 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 k = standard_keyword::auto_;
             } else if (c == name_class::type || (c == name_class::dependent &&
                                                  facts.implicit_typename)) {
+                last_type_region = 0;
                 simple_type_specifier_with_name();
                 if (failed())
                     return 0;
+                facts.type_region = last_type_region;
                 facts.has_defining_type_specifier = true;
             } else if (c == name_class::unknown && unknown_names_are_types &&
                        !at(preprocessing_op_or_punc::LESS, length) &&
@@ -571,7 +593,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
            attribute-specifier-seq ends the sequence ([dcl.spec]/1: it
            "appertains to the type determined by the preceding
            decl-specifiers") */
-        if (at_attribute_specifier()) {
+        if (at_attribute_specifier() && !at_gnu_attribute()) {
             attribute_specifier_seq(true);
             if (failed())
                 return 0;
@@ -638,10 +660,14 @@ node_index parser::simple_type_specifier_with_name()
     add_token();
     name_kind kind = name_kind::not_declared;
     bool dependent = false;
+    scope_index region = 0;
     if (!qualifier)
-        kind = names.lookup_unqualified(name, nullptr, &dependent);
+        kind = names.lookup_unqualified(name, &region, &dependent);
     else if (known)
-        kind = names.lookup_qualified(scope, name, nullptr, &dependent);
+        kind = names.lookup_qualified(scope, name, &region, &dependent);
+    /* the class the type-name names (a class template's, for one of its
+       specializations): a typedef-name of it names its members too */
+    last_type_region = region;
     if (kind == name_kind::template_name && !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
     if (at(preprocessing_op_or_punc::LESS) && qualifier &&
@@ -802,11 +828,14 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             names.reenter(scope);
         scope_index region = names.enter(scope_kind::class_);
         names.reenter(outer);
-        if (name && !qualifier && !template_id)
+        if (name && !qualifier && !template_id) {
+            names.define_class(names.declaring_scope(), name, region);
             names.declare(name, declared_kind(name_kind::type_name), region);
-        else if (name && known && !template_id)
+        } else if (name && known && !template_id) {
+            names.define_class(scope, name, region);
             names.declare_in(scope, name, declared_kind(name_kind::type_name),
                              region);
+        }
         if (at(preprocessing_op_or_punc::COLON)) {
             base_clause(region);
             if (failed())
@@ -828,7 +857,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     facts.elaborated = true;
     facts.elaborated_at = first;
     facts.elaborated_declaring_form = !qualifier;
-    if (attributes) {
+    /* [ext.gnu] GCC's attributes are not the standard's
+       attribute-specifier-seq this rule is about */
+    if (attributes && !only_gnu_attributes(tree, attributes)) {
         facts.elaborated_attributes = true;
         facts.elaborated_attributes_at = attributes_at;
     }
@@ -837,11 +868,17 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         found = names.lookup_unqualified(name);
     if (!qualifier && !template_id && !facts.friend_ &&
         found != name_kind::type_name && found != name_kind::template_name) {
+        /* the class's region, empty until a class-specifier defines it
+           (names.define_class): a typedef-name of the class made before
+           the definition finds its members */
+        scope_index outer = names.current();
+        scope_index region = names.enter(scope_kind::class_);
+        names.reenter(outer);
         if (facts.count == 0 && at(preprocessing_op_or_punc::SEMICOLON))
-            names.declare(name, declared_kind(name_kind::type_name));
+            names.declare(name, declared_kind(name_kind::type_name), region);
         else
             names.declare_in(names.nearest_namespace_or_block(), name,
-                             name_kind::type_name);
+                             name_kind::type_name, region);
     }
     return finish_node(syntax_kind::elaborated_type_specifier, mark, first);
 }

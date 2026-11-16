@@ -743,9 +743,16 @@ class declarator_claims
     }
 
     /* whether the declaration has an attribute-scoped-token or an
-       attribute-using-prefix: an attribute that is not the standard's */
+       attribute-using-prefix: an attribute that is not the standard's; or
+       any extension's construct (a node of ext/, a keyword the standard
+       does not have: __restrict, __int128), whose meaning the claims'
+       encoding does not have */
     bool has_vendor_attribute(node_index declaration) const
     {
+        for (token_index t = tree[declaration].first_token;
+             t < tree[declaration].end_token; t++)
+            if (p.keyword_of(tokens[t]) == standard_keyword::extension)
+                return true;
         owned_array<node_index> work;
         work.append(declaration);
         while (!work.empty()) {
@@ -753,7 +760,8 @@ class declarator_claims
             work.resize(work.size() - 1);
             const syntax_node &s = tree[n];
             if (s.kind == syntax_kind::attribute_scoped_token ||
-                s.kind == syntax_kind::attribute_using_prefix)
+                s.kind == syntax_kind::attribute_using_prefix ||
+                !strncmp(syntax_kind_subclause(s.kind), "ext.", 4))
                 return true;
             for (uint32_t i = 0; i < s.child_count; i++)
                 if (!tree.children(n)[i].is_token())

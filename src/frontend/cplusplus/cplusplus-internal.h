@@ -205,6 +205,11 @@ VPRIV bool has_builtin(const implementation_defined_behavior &b,
 
 /* ---- parse ------------------------------------------------------------- */
 
+/* [ext.gnu] the attribute-specifier-seq at n is GCC's __attribute__ alone */
+VPRIV bool only_gnu_attributes(const syntax_tree &tree, node_index n);
+/* ... has one of GCC's */
+VPRIV bool has_gnu_attribute(const syntax_tree &tree, node_index n);
+
 /* [dcl.type.simple]: the simple-type-specifiers that are one keyword */
 VPRIV bool is_simple_type_keyword(standard_keyword k);
 
