@@ -1,0 +1,5 @@
+# Lines of clang's tests where a declaration of ours is none of clang's
+# top-level declarations and the reason is clang's, not a boundary of ours
+# (bench/cxx-parse.py, "decls").  PATH:LINE reason; PATH relative to
+# clang/test.
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp:47 clang leaves out the static_assert: it names `e`, whose declaration on line 44 was invalid
