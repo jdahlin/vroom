@@ -66,6 +66,8 @@ VPRIV int cxx_concept_value(cxx *c, cxx_entity *e, const cxx_targ *args,
     f->done[at].n = given,
     f->done[at].viable = -1; /* (a concept that names itself: not known) */
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = f->pos;
@@ -224,6 +226,8 @@ VPRIV bool cxx_vtemplate_value(cxx *c, cxx_entity *e, const cxx_targ *args,
     memcpy(f->done[at].args, args, n * sizeof *args);
     f->done[at].n = n, f->done[at].viable = -1;
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = pos;
@@ -398,6 +402,8 @@ VPRIV bool cxx_const_call(cxx *c, cxx_entity *f, const int64_t *args,
     uint32_t enode = c->enode;
 
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     uint8_t const_eval = c->const_eval, const_eval_gen = c->const_eval_gen;
     /* (the call being folded: what resolving it found, which the body's own calls and operators reuse) */
     uint8_t call_resolved = c->call_resolved, none_viable = c->none_viable,
@@ -520,6 +526,8 @@ VPRIV bool cxx_ftemplate_const_call(cxx *c, cxx_entity *e, const cxx_targ *args,
     for (uint32_t i = 0; i < n; i++)
         cxx_bind(c, binding, &ps->tparams[i], &args[i]);
     cxx_outer_save(c, &o);
+    c->want_constant =
+        o.s.want_constant; /* (an evaluation: its calls fold too) */
     c->instantiating++, c->body_depth++, c->unevaluated++;
     c->fail = &jb;
     c->pos = pos + 1;

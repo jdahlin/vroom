@@ -1248,6 +1248,8 @@ VPRIV void cxx_gen_ordering_test(cxx *c, uint32_t ord, int op, uint32_t loc);
 VPRIV void cxx_gen_ordering_reverse(cxx *c, uint32_t ord, ast_qualified_type t,
                                     uint32_t loc);
 VPRIV bool cxx_is_initializer_list(cxx *c, ast_qualified_type t);
+VPRIV ast_qualified_type cxx_initializer_list_element(cxx *c,
+                                                      ast_qualified_type t);
 VPRIV bool cxx_class_converts_public(cxx *c, cxx_scope *cls);
 VPRIV uint32_t cxx_gen_implicit_assign(cxx *c, uint32_t target,
                                        ast_qualified_type t, uint32_t src,

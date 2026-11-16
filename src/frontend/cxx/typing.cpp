@@ -1983,6 +1983,40 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
                     c->ctor_ilist = e;
             }
         }
+        if (c->ctor_ilist && args) {
+            /* not viable when an element plainly does not convert to E (SkSpan<SkPoint>{ptr, 4}: a pointer
+               is no SkPoint, an aggregate): then the other constructors ([over.match.list]) */
+            ast_qualified_type et = cxx_initializer_list_element(
+                c, c->ast->params[AST_TYPE(c->ast, c->ctor_ilist->ty)->aux]);
+            cxx_scope *es =
+                et != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, et)
+                    ? cxx_type_class_scope(c,
+                                           AST_QUALIFIED_TYPE_UNQUALIFIED(et))
+                    : NULL;
+            bool aggregate = es && !es->dependent && !es->has_dependent_base &&
+                             !cxx_lookup_in(c, es, cxx_ctor_id(), 0);
+
+            for (uint32_t i = 0;
+                 et != CXX_TY_UNKNOWN && i < nargs && i < CXX_MAX_ARGS; i++) {
+                ast_qualified_type at = args[i];
+                int ak, ek = (int)AST_TYPE_KIND(c->ast, et);
+                bool ascalar;
+
+                if (at == CXX_TY_UNKNOWN || c->carg_brace[i])
+                    continue;
+                ak = (int)AST_TYPE_KIND(c->ast, at);
+                ascalar = cc_type_is_arithmetic(c->ast, at) ||
+                          ak == AST_TYPE_POINTER || ak == AST_TYPE_ENUM;
+                if ((aggregate && ascalar) ||
+                    (cc_type_is_arithmetic(c->ast, et) &&
+                     ak == AST_TYPE_POINTER && !AST_TYPE(c->ast, at)->ext) ||
+                    (ek == AST_TYPE_POINTER && !AST_TYPE(c->ast, et)->ext &&
+                     cc_type_is_arithmetic(c->ast, at))) {
+                    c->ctor_ilist = NULL;
+                    break;
+                }
+            }
+        }
         if (c->ctor_ilist) {
             cxx_entity *il = c->ctor_ilist;
             uint32_t br[CXX_MAX_ARGS];

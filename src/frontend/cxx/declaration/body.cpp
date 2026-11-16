@@ -93,14 +93,17 @@ VPRIV void cxx_params_declare(cxx *c, cxx_scope *fs, const cxx_param *ps,
 /* : mem-initializers, then { body } (or a function-try-block) */
 VPRIV void cxx_function_body_parse(cxx *c)
 {
-    uint32_t implicit = c->implicit_typename;
+    uint32_t implicit = c->implicit_typename, want = c->want_constant;
     uint8_t valid = c->name_path_valid;
 
     c->implicit_typename = 0;
     c->name_path_valid = 0; /* local classes: not nameable outside */
+    c->want_constant =
+        0; /* (a body parsed inside a constant expression, a class completed there: none) */
     cxx_function_body_inner_parse(c);
     c->implicit_typename = implicit;
     c->name_path_valid = valid;
+    c->want_constant = want;
 }
 
 /* one mem-initializer, with its code: a member of this class by name, else a base class (or the class itself: a
