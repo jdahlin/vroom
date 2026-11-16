@@ -114,14 +114,13 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   phases 1-7 as `clang -cc1 -dump-tokens`; `cxxlex -E [-dM]`.
   `bench/cxx-pp.py`: clang's test/Preprocessor (run as C++) and
   test/CXX/cpp, 354 tests that can run here (23 make their inputs at run
-  time): 505 runs, tokens 470, error lines 449, the front end's own
-  diagnostics 412, macros (-dM) 488; 273 tests pass every run.  The
+  time): 505 runs, tokens 472, error lines 457, the front end's own
+  diagnostics 419, macros (-dM) 488; 278 tests pass every run.  The
   extensions are `ext/` (Conventions); clang's `__has_*` answers are data
   (`ext/clang/feature-checks.inc`); `#embed` is `ext/clang/embed.cpp` (21
   of its 29 tests pass, the rest are error recovery).  Left: error recovery as clang's (what is left of a malformed
-  invocation or `_Pragma`), `#pragma clang diagnostic`, the parser-phase
-  pragmas clang turns into annotations, Microsoft's search rules and
-  `__pragma`, the standard's examples as tests (`src/test/cxx/cpp/spec/`),
+  invocation or `_Pragma`), the parser-phase pragmas clang turns into
+  annotations, Microsoft's header search, the standard's examples as tests (`src/test/cxx/cpp/spec/`),
   known-differences, the tests in CI (they are read from work/ now).
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
