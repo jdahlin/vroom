@@ -231,7 +231,13 @@ def load(d=None):
                     r['default'] = p[7:].lower()
                 elif p.startswith('CatBackend') or p == 'BackendInfo':
                     r['category'] = r['category'] or 'Backend Issue'
+            sm = hm and re.match(r'\s*(\w+)\.Summary\s*$', hm.group(2))
+            if sm:
+                r['summary_of'] = sm.group(1)  # the text of another diagnostic
             diags[name] = r
+    for r in diags.values():
+        if r.get('summary_of') in diags:
+            r['text'] = diags[r['summary_of']]['text']
     for r in diags.values():
         g = r['group']
         if g and g in groups:

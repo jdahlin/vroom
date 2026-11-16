@@ -93,6 +93,11 @@ const char *diagnostic_name(diagnostic_id id)
 {
     return descriptions[static_cast<int>(id)].name;
 }
+bool diagnostic_group_exists(const char *name)
+{
+    return find_group(name, strlen(name)) != nullptr;
+}
+
 const char *diagnostic_group(diagnostic_id id)
 {
     return descriptions[static_cast<int>(id)].group;
@@ -204,7 +209,15 @@ diagnostic_message &diagnostic_consumer::issue(diagnostic_id id,
     diagnostic_message m{};
     m.id = id;
     m.severity = severity;
-    m.location = location;
+    m.location = location + location_base;
+    /* clang issues no warnings in system headers */
+    if (severity == diagnostic_severity::warning && files) {
+        const source_files::entry *e = files->find(m.location);
+        if (e && e->system_header) {
+            discarded = diagnostic_message{};
+            return discarded;
+        }
+    }
     if (severity >= diagnostic_severity::error)
         error_count++;
     else if (severity == diagnostic_severity::warning)
@@ -309,7 +322,8 @@ void diagnostic_consumer::render(const diagnostic_message &message,
 {
     static constexpr const char *severities[] = {
         "ignored", "note", "remark", "warning", "error", "fatal error"};
-    source_position p = file->position(message.location);
+    source_position p = files ? files->position(message.location)
+                              : file->position(message.location);
     vbuffer_format_append(out, "%s:%u:%u: %s: ", p.file_name, p.line, p.column,
                           severities[static_cast<int>(message.severity)]);
     diagnostic_text(message, out);

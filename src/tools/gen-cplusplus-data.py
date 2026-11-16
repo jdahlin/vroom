@@ -253,6 +253,56 @@ def names():
     return '\n'.join(lines) + '\n'
 
 
+# [cpp.predefined]: clang's predefined macros for the documented target, in
+# each mode the front end has: edition x GNU (-std=gnu++NN) x -fms-extensions
+# x char8_t switched from the edition's default (-fchar8_t / -fno-char8_t)
+EDITIONS = ['98', '11', '14', '17', '20', '23', '26']
+PREDEFINE_TRIPLE = 'aarch64-unknown-linux-gnu'
+
+
+def predefined_set(clang, edition, gnu, ms, char8_switched):
+    import subprocess
+    args = [clang, '-cc1', '-triple', PREDEFINE_TRIPLE, '-x', 'c++',
+            f'-std={"gnu" if gnu else "c"}++{edition}', '-dM', '-E', '/dev/null']
+    if ms:
+        args.append('-fms-extensions')
+    if char8_switched:
+        args.append('-fno-char8_t' if int(edition) >= 20 and edition != '98' else '-fchar8_t')
+    out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    d = {}
+    for line in out.splitlines():
+        if line.startswith('#define '):
+            name, _, body = line[8:].partition(' ')
+            d[name] = body
+    return d
+
+
+def predefined(clang='clang-23'):
+    rows = {}
+    for e, edition in enumerate(EDITIONS):
+        for gnu in (0, 1):
+            for ms in (0, 1):
+                for char8 in (0, 1):
+                    variant = ((e * 2 + gnu) * 2 + ms) * 2 + char8
+                    for name, body in predefined_set(clang, edition, gnu, ms, char8).items():
+                        rows[(name, body)] = rows.get((name, body), 0) | (1 << variant)
+    version = subprocess_version(clang)
+    lines = [HEADER % f'{version} -cc1 -triple {PREDEFINE_TRIPLE} -dM -E',
+             '/* PREDEFINED_MACRO(variants, name, replacement): defined in the modes',
+             '   whose bit is set, bit ((edition * 2 + gnu) * 2 + ms) * 2 + char8_t',
+             '   switched, editions 98 11 14 17 20 23 26 */']
+    for (name, body), mask in sorted(rows.items()):
+        lines.append(f'PREDEFINED_MACRO(0x{mask:014x}ull, {c_string(name)}, {c_string(body)})')
+    return '\n'.join(lines) + '\n'
+
+
+def subprocess_version(clang):
+    import subprocess
+    out = subprocess.run([clang, '--version'], capture_output=True, text=True).stdout
+    m = re.search(r'clang version (\S+)', out)
+    return f'clang {m.group(1)}' if m else clang
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     check = '--check' in sys.argv
@@ -264,6 +314,7 @@ def main():
         'lex/lex.key.inc': keywords(td),
         'lex/lex.name.inc': xid(),
         'lex/lex.charset.names.inc': names(),
+        'cpp/cpp.predefined.inc': predefined(),
     }
     stale = 0
     for rel, text in files.items():

@@ -88,6 +88,26 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   adapter from vcc's C preprocessor).  The context the lexer needs
   (header-names after `#include`/`import`, the end of a directive's line)
   comes from it.
+  Status (2026-11-16, in progress): every subclause has its file: groups and
+  directives (`cpp.pre`), conditional inclusion with the `#if` evaluator as
+  intmax_t/uintmax_t (`cpp.cond`), inclusion with clang's search order
+  (`cpp.include`), definitions and invocations (`cpp.replace`, `#undef` in
+  it), substitution with `__VA_OPT__` (`cpp.subst`), `#`, `##` with
+  placemarkers, rescanning as a stack of token contexts (`cpp.rescan`),
+  `#line` and GNU line markers, `#error`/`#warning`, the phase-4 pragmas,
+  `_Pragma`, the module and import directives, and clang's predefined macros
+  per edition/GNU/MS/char8_t mode (`cpp/cpp.predefined.inc`, from clang -dM
+  once).  Locations: `source_files` puts every file and every piece of
+  scratch text in one space, so a token knows its file and the invocation it
+  came from (clang's expansion location).  `cxxlex -dump-tokens` now runs
+  phases 1-7 as `clang -cc1 -dump-tokens`; `cxxlex -E [-dM]`.
+  `bench/cxx-pp.py`: clang's test/Preprocessor (run as C++) and
+  test/CXX/cpp: 534 runs of 377 tests, tokens 462, diagnostics 354, macros
+  495; 212 tests pass every run.  Left: `__has_feature`/`__has_builtin`/
+  `__has_attribute` data from clang (stubs answer 0), `#pragma clang
+  diagnostic`, `#embed`, UCNs in macro names as their characters, the
+  leading-space and line-start flags in the remaining cases, the standard's
+  examples as tests (`src/test/cxx/cpp/spec/`), known-differences.
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 

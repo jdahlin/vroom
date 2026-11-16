@@ -139,6 +139,46 @@ VPRIV const char *keyword_clang_name(int keyword);
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
 
+/* ---- [cpp] ------------------------------------------------------------ */
+
+inline bool is_operator(const preprocessing_token &t,
+                        preprocessing_op_or_punc op)
+{
+    return t.kind == preprocessing_token_kind::preprocessing_op_or_punc &&
+           preprocessing_op_or_punc_primary(t.op_or_punc) == op;
+}
+inline bool is_identifier(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::identifier;
+}
+/* the end of a directive's line, as preprocessor::directive_token gives it */
+inline bool is_end(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::end_of_file;
+}
+inline bool is_string_literal(const preprocessing_token &t)
+{
+    return t.kind == preprocessing_token_kind::string_literal ||
+           t.kind == preprocessing_token_kind::user_defined_string_literal;
+}
+
+VPRIV directive_kind find_directive(const char *spelling, size_t length);
+
+/* a spelling's identifier, the hash the table keys on */
+VPRIV uint32_t hash_spelling(const char *s, size_t n);
+
+/* [cpp.cond]/6: __has_cpp_attribute's value of an attribute-token (0: none) */
+VPRIV int64_t cpp_attribute_value(const implementation_defined_behavior &b,
+                                  const char *scope, size_t scope_length,
+                                  const char *name, size_t name_length);
+/* clang's __has_feature (extension false) and __has_extension */
+VPRIV bool has_feature(const implementation_defined_behavior &b,
+                       const char *name, size_t length, bool extension);
+VPRIV int64_t has_gnu_attribute(const implementation_defined_behavior &b,
+                                const char *name, size_t length);
+VPRIV bool has_builtin(const implementation_defined_behavior &b,
+                       const char *name, size_t length);
+
 } // namespace cplusplus
 
 #endif

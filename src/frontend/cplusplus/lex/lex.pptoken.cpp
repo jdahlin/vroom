@@ -188,7 +188,8 @@ preprocessing_token lexer::lex(bool header_name_permitted)
             uint32_t code_point,
                 n = decode_utf8(p + start + t.extent - 1, file.size - start,
                                 &code_point);
-            if (n && is_unicode_white_space(code_point)) {
+            if (n && is_unicode_white_space(code_point) &&
+                !options.preprocessed_input) {
                 diagnostics.issue(diagnostic_id::ext_unicode_whitespace, start);
                 position = start + t.extent - 1 + n;
                 after_white_space = true;
@@ -304,7 +305,8 @@ preprocessing_token lexer::lex(bool header_name_permitted)
                 diagnostics.issue(diagnostic_id::err_ucn_control_character,
                                   start);
         }
-        if (n) {
+        /* clang does not diagnose it in phase 4's output */
+        if (n && !options.preprocessed_input) {
             /* [lex.pptoken]/1: a character that is none of the forms makes
                the program ill-formed once it reaches phase 7; clang says
                why when it is next to an identifier or could only continue

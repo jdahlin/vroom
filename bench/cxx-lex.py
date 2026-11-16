@@ -148,6 +148,8 @@ def lexer_diagnostics():
     """name -> regex of the message of each diagnostic the lexer issues"""
     used = set()
     for path in glob.glob(os.path.join(FRONTEND, '**', '*.cpp'), recursive=True):
+        if os.sep + 'cpp' + os.sep in path:  # phase 4's are bench/cxx-pp.py's
+            continue
         used.update(re.findall(r'diagnostic_id::(\w+)', open(path).read()))
     out = {}
     inc = open(os.path.join(FRONTEND, 'intro', 'diagnostic-messages.inc')).read()

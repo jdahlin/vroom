@@ -101,6 +101,12 @@ static void write_claim(vbuffer *out, const lexer &l, const token &t,
         (unsigned long long)t.value);
 }
 
+static bool is_string(const preprocessing_token &pp)
+{
+    return pp.kind == preprocessing_token_kind::string_literal ||
+           pp.kind == preprocessing_token_kind::user_defined_string_literal;
+}
+
 static bool parse_edition(const char *s, implementation_defined_behavior *b)
 {
     static const struct {
@@ -132,25 +138,107 @@ static bool parse_edition(const char *s, implementation_defined_behavior *b)
     return false;
 }
 
+/* one token as clang -cc1 -dump-raw-tokens / -dump-tokens prints it */
+static void write_token(vbuffer *out, const char *name, const char *spelling,
+                        size_t n, source_position p, const source_files *files,
+                        const preprocessing_token &pp, bool raw,
+                        const unsigned char *physical)
+{
+    vbuffer_format_append(out, "%s '", name);
+    write_escaped(out, spelling, n);
+    vbuffer_format_append(out, "'\tLoc=<%s:%u:%u", p.file_name, p.line,
+                          p.column);
+    if (files && pp.expansion) {
+        source_position s = files->position(pp.location);
+        vbuffer_format_append(out, " <Spelling=%s:%u:%u>", s.file_name, s.line,
+                              s.column);
+    }
+    vbuffer_string_append(out, ">");
+    if (pp.at_start_of_line)
+        vbuffer_string_append(out, " [StartOfLine]");
+    if (pp.after_white_space && !raw)
+        vbuffer_string_append(out, " [LeadingSpace]");
+    if (pp.spelling_differs && physical) {
+        vbuffer_string_append(out, " [UnClean='");
+        write_escaped(out, reinterpret_cast<const char *>(physical), pp.extent);
+        vbuffer_string_append(out, "']");
+    }
+    vbuffer_string_append(out, "\n");
+}
+
 int main(int argc, char **argv)
 {
     implementation_defined_behavior behavior =
         implementation_defined_behavior::for_edition(
             standard_edition::cplusplus_17, true);
     diagnostic_options diagnostic_settings;
+    preprocessor_options pp_options;
     bool raw = false, claims = false, char8_set = false, char8 = false,
-         trigraph_set = false, trigraphs = false;
+         trigraph_set = false, trigraphs = false, preprocess = false,
+         definitions = false;
     bool dollar_set = false, dollar = true, ms = false, ms_compat = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
+        /* -D, -U, -I and their kin take their operand joined or apart */
+        const char *operand = nullptr;
+        static constexpr const char *with_operand[] = {
+            "-D",
+            "-U",
+            "-I",
+            "-iquote",
+            "-isystem",
+            "-idirafter",
+            "-internal-isystem",
+            "-internal-externc-isystem"};
+        size_t matched = 0;
+        for (const char *w : with_operand)
+            if (!strncmp(a, w, strlen(w)) && strlen(w) > matched &&
+                (strlen(w) <= 2 || !a[strlen(w)]))
+                matched = strlen(w);
+        if (matched) {
+            operand =
+                a[matched] ? a + matched : (i + 1 < argc ? argv[++i] : "");
+            char kind = a[1];
+            if (kind == 'D' || kind == 'U') {
+                owned_buffer line;
+                if (kind == 'D') {
+                    const char *eq = strchr(operand, '=');
+                    if (eq)
+                        vbuffer_format_append(line.get(), "#define %.*s %s\n",
+                                              (int)(eq - operand), operand,
+                                              eq + 1);
+                    else
+                        vbuffer_format_append(line.get(), "#define %s 1\n",
+                                              operand);
+                } else
+                    vbuffer_format_append(line.get(), "#undef %s\n", operand);
+                memcpy(pp_options.command_line.extend(line.size()), line.data(),
+                       line.size());
+            } else {
+                include_search search =
+                    !strcmp(a, "-iquote") || !strncmp(a, "-iquote", 7)
+                        ? include_search::quote
+                    : !strncmp(a, "-I", 2)          ? include_search::angled
+                    : !strncmp(a, "-idirafter", 10) ? include_search::after
+                                                    : include_search::system;
+                pp_options.include_directories.append({operand, search});
+            }
+            continue;
+        }
         if (!strcmp(a, "-dump-raw-tokens"))
             raw = true;
         else if (!strcmp(a, "-dump-tokens"))
             raw = false;
         else if (!strcmp(a, "-literal-claims"))
             raw = false, claims = true;
+        else if (!strcmp(a, "-E"))
+            preprocess = true;
+        else if (!strcmp(a, "-dM"))
+            definitions = true;
+        else if (!strcmp(a, "-undef"))
+            pp_options.predefined_macros = false;
         else if (!strncmp(a, "-std=", 5)) {
             if (!parse_edition(a + 5, &behavior)) {
                 fprintf(stderr, "cxxlex: unsupported %s\n", a);
@@ -176,8 +264,8 @@ int main(int argc, char **argv)
             path = a;
     }
     if (!path) {
-        fprintf(stderr, "usage: cxxlex [-dump-raw-tokens|-dump-tokens] [clang "
-                        "-cc1 options] FILE\n");
+        fprintf(stderr, "usage: cxxlex [-dump-raw-tokens|-dump-tokens|-E|-E "
+                        "-dM] [clang -cc1 options] FILE\n");
         return 2;
     }
     if (char8_set)
@@ -189,128 +277,128 @@ int main(int argc, char **argv)
     behavior.microsoft_extensions = ms;
     behavior.microsoft_compatibility = ms_compat;
 
-    source_file file;
-    if (!file.open(path)) {
+    diagnostic_consumer diagnostics(diagnostic_settings);
+    owned_buffer out, spelling;
+    auto finish = [&]() {
+        fwrite(out.data(), 1, out.size(), stdout);
+        owned_buffer messages;
+        for (const diagnostic_message &m : diagnostics.messages)
+            diagnostics.render(m, messages.get());
+        fwrite(messages.data(), 1, messages.size(), stderr);
+        return diagnostics.error_count ? 1 : 0;
+    };
+
+    if (raw) {
+        /* phase 3 alone, on the file as it is */
+        source_file file;
+        if (!file.open(path)) {
+            fprintf(stderr, "cxxlex: cannot read %s\n", path);
+            return 2;
+        }
+        diagnostics.file = &file;
+        lexer_options options;
+        options.retain_white_space = options.retain_comments = true;
+        lexer l(file, behavior, diagnostics, options);
+        for (preprocessing_token pp = l.next();
+             pp.kind != preprocessing_token_kind::end_of_file; pp = l.next()) {
+            spelling.clear();
+            l.spelling(pp, spelling.get());
+            write_token(out.get(), clang_token_name(l, pp), spelling.data(),
+                        spelling.size(), file.position(pp.location), nullptr,
+                        pp, true, file.physical_characters + pp.location);
+        }
+        return finish();
+    }
+
+    /* phases 1 to 4 */
+    source_files files(behavior, diagnostics);
+    diagnostics.files = &files;
+    size_t path_length = strlen(path);
+    files.file_options.preprocessed_input =
+        (path_length > 3 && !strcmp(path + path_length - 3, ".ii")) ||
+        (path_length > 2 && !strcmp(path + path_length - 2, ".i"));
+    preprocessor pp(files, pp_options);
+    if (!pp.start(path)) {
         fprintf(stderr, "cxxlex: cannot read %s\n", path);
         return 2;
     }
-    diagnostic_consumer diagnostics(diagnostic_settings);
-    diagnostics.file = &file;
-    lexer_options options;
-    options.retain_white_space = options.retain_comments = raw;
-    lexer l(file, behavior, diagnostics, options);
-
-    owned_buffer out, spelling;
-    /* the preprocessing tokens phase 7 sees: all of them for
-       -dump-raw-tokens; for preprocessed input the ones outside directives,
-       a line directive ([cpp.line]/5: # digit-sequence "s-char-sequence")
-       giving the presumed lines */
     owned_array<preprocessing_token> tokens;
     for (;;) {
-        preprocessing_token pp = l.next();
-        while (!raw && pp.at_start_of_line &&
-               pp.kind == preprocessing_token_kind::preprocessing_op_or_punc &&
-               preprocessing_op_or_punc_primary(pp.op_or_punc) ==
-                   preprocessing_op_or_punc::HASH) {
-            preprocessing_token number = l.next();
-            if (!number.at_start_of_line &&
-                number.kind == preprocessing_token_kind::pp_number) {
-                preprocessing_token name = l.next();
-                spelling.clear();
-                l.spelling(number, spelling.get());
-                unsigned long line = strtoul(spelling.data(), nullptr, 10);
-                if (!name.at_start_of_line &&
-                    name.kind == preprocessing_token_kind::string_literal) {
-                    spelling.clear();
-                    l.spelling(name, spelling.get());
-                    /* [cpp.line]/4: the line after the directive's new-line */
-                    uint32_t next = name.location + name.extent;
-                    while (next < file.size &&
-                           file.physical_characters[next] != '\n')
-                        next++;
-                    file.add_line_directive(next + 1, (uint32_t)line,
-                                            spelling.data() + 1,
-                                            spelling.size() - 2);
-                }
-                pp = name;
-            } else
-                pp = number;
-            while (!pp.at_start_of_line &&
-                   pp.kind != preprocessing_token_kind::end_of_file)
-                pp = l.next();
-        }
-        tokens.append(pp);
-        if (pp.kind == preprocessing_token_kind::end_of_file)
+        preprocessing_token t = pp.next();
+        tokens.append(t);
+        if (t.kind == preprocessing_token_kind::end_of_file)
             break;
     }
+    if (definitions) {
+        pp.write_definitions(out.get());
+        return finish();
+    }
+    if (preprocess) {
+        /* the preprocessing tokens, a new line where a line started, a
+           space where white space was (clang -E -P without its spacing
+           heuristics) */
+        bool first = true;
+        for (const preprocessing_token &t : tokens) {
+            if (t.kind == preprocessing_token_kind::end_of_file)
+                break;
+            if (!first && t.at_start_of_line)
+                vbuffer_append(out.get(), "\n", 1);
+            else if (!first && t.after_white_space)
+                vbuffer_append(out.get(), " ", 1);
+            first = false;
+            files.spelling(t, out.get());
+        }
+        if (!first)
+            vbuffer_append(out.get(), "\n", 1);
+        return finish();
+    }
 
-    auto is_string = [](const preprocessing_token &pp) {
-        return pp.kind == preprocessing_token_kind::string_literal ||
-               pp.kind == preprocessing_token_kind::user_defined_string_literal;
-    };
+    /* phases 5 to 7 */
+    const lexer &l = files.phase7();
     for (size_t i = 0; i < tokens.size(); i++) {
-        const preprocessing_token &pp = tokens[i];
-        if (raw && pp.kind == preprocessing_token_kind::end_of_file)
-            break;
+        const preprocessing_token &p = tokens[i];
         /* [lex.phases]/1.6: adjacent string literals become one token; each
            piece is still printed as clang prints it */
         size_t pieces = 1;
         token t;
-        if (!raw && is_string(pp)) {
+        if (is_string(p)) {
             while (i + pieces < tokens.size() && is_string(tokens[i + pieces]))
                 pieces++;
-            t = l.convert_string_literals(&tokens[i], pieces);
-        } else if (!raw)
-            t = l.convert(pp);
+            t = files.convert_string_literals(&tokens[i], pieces);
+        } else
+            t = files.convert(p);
         if (claims) {
-            if (pp.kind != preprocessing_token_kind::end_of_file) {
+            if (p.kind != preprocessing_token_kind::end_of_file) {
                 /* the claim is about the concatenation, spelled as its pieces */
                 spelling.clear();
                 for (size_t k = 0; k < pieces; k++) {
                     if (k)
                         vbuffer_append(spelling.get(), " ", 1);
-                    l.spelling(tokens[i + k], spelling.get());
+                    files.spelling(tokens[i + k], spelling.get());
                 }
                 write_claim(out.get(), l, t, spelling.data(), spelling.size(),
-                            file.position(pp.location));
+                            files.position(p.location));
             }
             i += pieces - 1;
             continue;
         }
         for (size_t k = 0; k < pieces; k++) {
             const preprocessing_token &piece = tokens[i + k];
-            const char *name = raw || pieces > 1 ? clang_token_name(l, piece)
-                                                 : clang_token_name(l, t);
+            const char *name = pieces > 1 ? clang_token_name(l, piece)
+                                          : clang_token_name(l, t);
             spelling.clear();
             if (piece.kind != preprocessing_token_kind::end_of_file)
-                l.spelling(piece, spelling.get());
-            source_position p = file.position(piece.location);
-            vbuffer_format_append(out.get(), "%s '", name);
-            write_escaped(out.get(), spelling.data(), spelling.size());
-            vbuffer_format_append(out.get(), "'\tLoc=<%s:%u:%u>", p.file_name,
-                                  p.line, p.column);
-            if (piece.at_start_of_line)
-                vbuffer_string_append(out.get(), " [StartOfLine]");
-            if (piece.after_white_space && !raw)
-                vbuffer_string_append(out.get(), " [LeadingSpace]");
-            if (piece.spelling_differs) {
-                vbuffer_string_append(out.get(), " [UnClean='");
-                write_escaped(
-                    out.get(),
-                    reinterpret_cast<const char *>(file.physical_characters) +
-                        piece.location,
-                    piece.extent);
-                vbuffer_string_append(out.get(), "']");
-            }
-            vbuffer_string_append(out.get(), "\n");
+                files.spelling(piece, spelling.get());
+            const source_files::entry *e = files.find(piece.location);
+            write_token(out.get(), name, spelling.data(), spelling.size(),
+                        files.position(piece.expansion ? piece.expansion
+                                                       : piece.location),
+                        &files, piece, false,
+                        e && !piece.expansion ? e->file.physical_characters +
+                                                    piece.location - e->base
+                                              : nullptr);
         }
         i += pieces - 1;
     }
-    fwrite(out.data(), 1, out.size(), stdout);
-
-    owned_buffer messages;
-    for (const diagnostic_message &m : diagnostics.messages)
-        diagnostics.render(m, messages.get());
-    fwrite(messages.data(), 1, messages.size(), stderr);
-    return diagnostics.error_count ? 1 : 0;
+    return finish();
 }

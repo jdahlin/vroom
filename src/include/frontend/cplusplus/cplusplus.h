@@ -29,6 +29,8 @@
 namespace cplusplus
 {
 
+class source_files;
+
 /* ---- [intro.scope], [intro.defs], [intro.compliance] ------------------- */
 
 /* [intro.scope]/1: "This document specifies requirements for implementations
@@ -161,7 +163,7 @@ struct diagnostic_argument {
     bool is_integer;
     uint8_t length;
     int64_t integer;
-    char text[46];
+    char text[238];
 };
 
 /* [intro.defs] "diagnostic message: message belonging to an
@@ -208,7 +210,12 @@ class diagnostic_consumer
     {
     }
     const diagnostic_options &options;
+    /* where locations are: one file, or a translation unit's files */
     const source_file *file = nullptr;
+    const source_files *files = nullptr;
+    /* added to each location issued: a lexer's locations are offsets in its
+       file, which source_files places in the translation unit's */
+    source_location location_base = 0;
     owned_array<diagnostic_message> messages;
     size_t error_count = 0, warning_count = 0;
     /* while positive, issue() discards: the lexer looks ahead without consuming */
@@ -226,6 +233,8 @@ class diagnostic_consumer
 
 const char *diagnostic_name(diagnostic_id id);
 const char *diagnostic_group(diagnostic_id id);
+/* whether -W<name> names a warning group (clang's __has_warning) */
+bool diagnostic_group_exists(const char *name);
 /* clang's format with the arguments substituted */
 void diagnostic_text(const diagnostic_message &message, vbuffer *out);
 
@@ -245,6 +254,9 @@ enum class preprocessing_token_kind : uint8_t {
     preprocessing_op_or_punc,
     /* "each non-white-space character that cannot be one of the above" */
     other_character,
+    /* [cpp.concat]/2: "a placemarker preprocessing token", which "exist[s]
+       only within translation phase 4" */
+    placemarker,
     /* not preprocessing tokens; returned only when asked for
        ([lex.phases]/1.3 leaves retaining white space unspecified) */
     white_space,
@@ -277,10 +289,17 @@ struct preprocessing_token {
     /* [lex.string]/1: "A string-literal that has an R in the prefix is a raw
        string literal" */
     bool raw = false;
+    /* [cpp.rescan]/3: a macro name that was not replaced because it named
+       the macro being replaced: "no longer available for further
+       replacement" */
+    bool not_replaceable = false;
     encoding_prefix prefix = encoding_prefix::none;
     preprocessing_op_or_punc op_or_punc = preprocessing_op_or_punc::count;
     source_location location = 0; /* the first physical character */
     uint32_t extent = 0;          /* the number of physical characters */
+    /* phase 4: where the macro invocation that produced the token is, the
+       name of the outermost one (0: the token is not from a macro) */
+    source_location expansion = 0;
     /* [lex.ext]: where the ud-suffix starts in the physical characters (0: none) */
     uint32_t ud_suffix_offset = 0;
 };
@@ -288,6 +307,9 @@ struct preprocessing_token {
 struct lexer_options {
     /* return white space and comments as tokens (clang's -dump-raw-tokens) */
     bool retain_white_space = false, retain_comments = false;
+    /* the input is phase 4's output (clang's -x c++-cpp-output, a .ii
+       file): clang's extensions to white space are off */
+    bool preprocessed_input = false;
 };
 
 /* ---- [lex.token], phase 7 --------------------------------------------- */
@@ -386,8 +408,13 @@ class lexer
        can be (after #include or import, or in a has-include-expression) */
     preprocessing_token next_allowing_header_name();
     /* the spelling of a preprocessing token: its characters after phases 1
-       and 2, reverted inside a raw string literal ([lex.pptoken]/3.1) */
+       and 2, reverted inside a raw string literal ([lex.pptoken]/3.1); with
+       files set, the token's location is the translation unit's and its
+       file may be another */
     size_t spelling(const preprocessing_token &token, vbuffer *out) const;
+    size_t spelling_in_file(const preprocessing_token &token,
+                            vbuffer *out) const;
+    const source_files *files = nullptr;
     /* [lex.phases]/1.7: "Each preprocessing token is converted into a token" */
     token convert(const preprocessing_token &token);
     /* [lex.phases]/1.5-1.6: adjacent string-literal preprocessing tokens
@@ -465,6 +492,428 @@ preprocessing_op_or_punc_primary(preprocessing_op_or_punc op);
    -dump-raw-tokens (preprocessing tokens) and -dump-tokens (tokens) */
 const char *clang_token_name(const lexer &l, const preprocessing_token &token);
 const char *clang_token_name(const lexer &l, const token &token);
+
+/* ---- [lex.separate]/1: the source files of a translation unit ---------- */
+
+/*
+ * [lex.separate]/1: "A source file together with all the headers and source
+ * files included via the preprocessing directive #include, less any source
+ * lines skipped by any of the conditional inclusion preprocessing directives,
+ * is called a translation unit."  Each source file read, and each piece of
+ * text phase 4 makes ([cpp.stringize], [cpp.concat], __LINE__: clang's
+ * "scratch space"), gets a range of one space of source_locations, so that a
+ * location also names its file.  Location 0 is no place.  Each file has its
+ * own lexer, whose locations are offsets in the file; next() moves them into
+ * the translation unit's space.
+ */
+class source_files
+{
+  public:
+    struct entry {
+        entry(const implementation_defined_behavior &behavior,
+              diagnostic_consumer &diagnostics, lexer_options options)
+            : lex(file, behavior, diagnostics, options)
+        {
+        }
+        source_file file;
+        lexer lex;
+        owned_string name;
+        source_location base = 0;
+        uint32_t index = 0;
+        /* text made by phase 4, not read from a file */
+        bool scratch = false;
+        /* found in a system directory, or #pragma GCC system_header: clang
+           issues no warnings there */
+        bool system_header = false;
+    };
+
+    source_files(const implementation_defined_behavior &behavior,
+                 diagnostic_consumer &diagnostics);
+    source_files(const source_files &) = delete;
+    source_files &operator=(const source_files &) = delete;
+
+    /* the source file at path, or nullptr if it cannot be read */
+    entry *open(const char *path);
+    entry *open(const char *path, lexer_options options);
+    /* the options of the files open() reads */
+    lexer_options file_options;
+    /* text that is not a file: the predefined macros, the command line's,
+       or a preprocessing token phase 4 spelled ("<scratch space>") */
+    entry &add_text(const char *name, const char *text, size_t length,
+                    bool scratch, lexer_options options = {});
+    /* [lex.pptoken]/3: the next preprocessing token of a file, located in
+       the translation unit */
+    preprocessing_token next(entry &e, bool header_name_permitted = false);
+
+    const entry *find(source_location location) const;
+    entry &operator[](size_t i)
+    {
+        return files[i];
+    }
+    size_t size() const
+    {
+        return files.size();
+    }
+    bool is_scratch(source_location location) const;
+    source_position position(source_location location) const;
+    size_t spelling(const preprocessing_token &token, vbuffer *out) const;
+    /* phase 7 of tokens from any of the files ([lex.phases]/1.5-1.7) */
+    token convert(const preprocessing_token &token);
+    token convert_string_literals(const preprocessing_token *pieces,
+                                  size_t count);
+    const lexer &phase7() const
+    {
+        return conversion.lex;
+    }
+
+    const implementation_defined_behavior &behavior;
+    diagnostic_consumer &diagnostics;
+
+  private:
+    owned_objects<entry> files;
+    entry conversion; /* an empty file: its lexer converts any file's tokens */
+    source_location next_base = 1;
+    void place(entry &e);
+};
+
+/* ---- [cpp]: preprocessing directives, translation phase 4 -------------- */
+
+/* how the implementation-defined places of [cpp.include]/2-3 are given:
+   clang's -iquote, -I, -isystem and -idirafter */
+enum class include_search : uint8_t { quote, angled, system, after };
+
+struct preprocessor_options {
+    struct include_directory {
+        const char *path;
+        include_search search;
+    };
+    owned_array<include_directory> include_directories;
+    /* -D and -U, in command line order, as the #define and #undef lines of
+       clang's "<command line>" file */
+    owned_array<char> command_line;
+    /* clang's -undef: no predefined macros but [cpp.predefined]/1's dynamic
+       ones (__FILE__, __LINE__, ...) */
+    bool predefined_macros = true;
+    /* [cpp.include]/6: "up to an implementation-defined nesting limit" */
+    unsigned include_nesting_limit = 200;
+    /* for clang's -dM: keep definitions in the order made */
+    bool keep_definition_order = false;
+};
+
+/* the macros an implementation defines whose replacement is computed where
+   they are used ([cpp.predefined]/1 __FILE__, __LINE__, __DATE__, __TIME__),
+   the operators that [cpp.cond]/7 treats as macro names, and clang's own */
+enum class dynamic_macro : uint8_t {
+    none,
+    file,
+    line,
+    date,
+    time,
+    counter,
+    include_level,
+    base_file,
+    file_name,
+    timestamp,
+    pragma_operator,
+    has_include,
+    has_include_next,
+    has_cpp_attribute,
+    has_attribute,
+    has_c_attribute,
+    has_declspec_attribute,
+    has_builtin,
+    has_feature,
+    has_extension,
+    has_warning,
+    is_identifier,
+    has_embed,
+    is_target_arch,
+    is_target_vendor,
+    is_target_os,
+    is_target_environment,
+    building_module,
+};
+
+/* [cpp.replace]: one element of a replacement list: a preprocessing token,
+   and which parameter it names (-1: none) */
+struct replacement_element {
+    preprocessing_token token;
+    int16_t parameter;
+};
+
+/* [cpp.import]/5: "Each #define directive encountered when preprocessing
+   each translation unit in a program results in a distinct macro
+   definition." */
+struct macro_definition {
+    uint32_t name = 0; /* the macro name's identifier ([cpp.replace]/8) */
+    source_location location = 0; /* the point of definition */
+    /* the replacement list: elements [first_element, first_element + length) */
+    uint32_t first_element = 0, length = 0;
+    /* the identifier-list's identifiers */
+    uint32_t first_parameter = 0;
+    uint16_t parameter_count = 0;
+    bool function_like = false;
+    /* [cpp.replace]/15: "If there is a ... immediately preceding the )" */
+    bool variadic = false;
+    /* GNU's named variable arguments: #define f(args...) */
+    bool named_variadic = false;
+    bool predefined = false;
+    dynamic_macro dynamic = dynamic_macro::none;
+    /* [cpp.rescan]/3: the macro is being replaced: its name is not */
+    bool being_replaced = false;
+    bool used = false;
+    /* the definition this one replaced (#pragma push_macro), or -1 */
+    int32_t pushed = -1;
+};
+
+/* [cpp.pre]: the directive names "appearing after a # in the syntax", and
+   the conditionally-supported-directives this implementation supports */
+enum class directive_kind : uint8_t {
+    unknown,
+    include,
+    include_next, /* GNU */
+    import,       /* Objective-C's and Microsoft's #import */
+    define,
+    undef,
+    line,
+    error,
+    warning, /* C++23 ([cpp.error]) */
+    pragma,
+    if_,
+    ifdef,
+    ifndef,
+    elif,
+    elifdef,  /* C++23 */
+    elifndef, /* C++23 */
+    else_,
+    endif,
+    ident, /* GNU, as #sccs */
+    embed, /* C23, an extension in C++ */
+};
+
+class preprocessor
+{
+  public:
+    preprocessor(source_files &files, const preprocessor_options &options);
+    preprocessor(const preprocessor &) = delete;
+    preprocessor &operator=(const preprocessor &) = delete;
+
+    /* the main source file, after the predefined macros and the command
+       line's; false if it cannot be read */
+    bool start(const char *path);
+    /* [lex.phases]/1.4: the next preprocessing token after phase 4:
+       directives executed, macros replaced, included files in place */
+    preprocessing_token next();
+
+    /* clang's -dM: the macro definitions in effect, one #define line each */
+    void write_definitions(vbuffer *out);
+
+    source_files &files;
+    const preprocessor_options &options;
+    const implementation_defined_behavior &behavior;
+    diagnostic_consumer &diagnostics;
+
+    /* the implementation, one file per subclause */
+
+    /* ---- identifiers: their spellings, and the macro each one names */
+    struct identifier_entry {
+        uint32_t spelling_offset, length, hash;
+        int32_t macro;
+        bool poisoned;
+    };
+    owned_array<identifier_entry> identifiers;
+    owned_array<char> identifier_spellings;
+    owned_array<uint32_t> identifier_slots;
+    owned_buffer spelling_buffer;
+    uint32_t identifier(const char *spelling, size_t length);
+    uint32_t identifier(const preprocessing_token &token);
+    const char *identifier_spelling(uint32_t id, size_t *length) const;
+    diagnostic_message &quoted(diagnostic_message &m,
+                               const preprocessing_token &token);
+
+    /* ---- [cpp.pre]: groups, and where the preprocessing tokens come from */
+    struct inclusion {
+        source_files::entry *file;
+        /* the place in the search the file was found in (clang's
+           #include_next), -1 if none */
+        int32_t directory;
+        /* the conditional nesting when the file was entered */
+        uint32_t conditional_depth;
+        source_location included_at;
+        bool system_header;
+        bool has_lookahead;
+        preprocessing_token lookahead;
+    };
+    owned_array<inclusion> inclusions;
+    source_files::entry *main_file = nullptr;
+    uint32_t predefines_file = UINT32_MAX;
+    /* the end of the directive's last token so far */
+    source_location directive_end = 0;
+    /* the last token read from a source file (__LINE__) */
+    source_location last_file_location = 0;
+    unsigned collecting_arguments = 0, in_condition = 0;
+    bool read_from_file = false;
+    bool started = false;
+    void execute_definitions(source_files::entry &file);
+    preprocessing_token read_file_token(bool header_name_permitted = false);
+    void unread_file_token(const preprocessing_token &token);
+    bool at_directive(const preprocessing_token &token);
+    void execute_directive(const preprocessing_token &hash);
+    preprocessing_token directive_token(bool header_name_permitted = false);
+    void skip_rest_of_directive();
+    void expect_end_of_directive(const char *directive);
+    void leave_file();
+    bool system_header_at(source_location location) const;
+
+    /* ---- [cpp.cond] */
+    struct conditional {
+        source_location location;
+        bool group_taken; /* a group of the if-section was processed */
+        bool else_seen;
+    };
+    owned_array<conditional> conditionals;
+    implementation_defined_behavior condition_behavior;
+    source_file condition_file;
+    lexer condition_lexer; /* phase 7 of #if's literals, as intmax_t */
+    struct value;
+    struct expression_reader;
+    void directive_if(const preprocessing_token &name, directive_kind kind);
+    void directive_elif_else(const preprocessing_token &name,
+                             directive_kind kind);
+    void directive_endif(const preprocessing_token &name);
+    void skip_group();
+    preprocessing_token directive_token_or_line();
+    bool evaluate_condition(source_location at);
+    bool evaluate_defined_condition(const preprocessing_token &name,
+                                    bool negated);
+    bool expansion_is_function_like(const preprocessing_token &token) const;
+    bool has_include(expression_reader &reader, const preprocessing_token &name,
+                     bool next, int64_t *result);
+
+    /* ---- [cpp.include] */
+    struct included_once {
+        uint64_t device, inode;
+    };
+    owned_array<included_once> once_files;
+    void directive_include(const preprocessing_token &name,
+                           directive_kind kind);
+    bool header_name_from_tokens(const preprocessing_token &first,
+                                 owned_buffer &header, source_location *at);
+    bool find_header(const char *name, size_t length, bool angled,
+                     int32_t after_directory, owned_buffer &path,
+                     int32_t *directory, bool *system);
+    int32_t include_next_start(const preprocessing_token &name);
+    void include_once();
+
+    /* ---- [cpp.replace], [cpp.scope] */
+    owned_array<macro_definition> macros;
+    owned_array<replacement_element> elements;
+    owned_array<uint32_t> parameters;
+    owned_array<int32_t> definition_order;
+    bool check_macro_name(const preprocessing_token &name, bool definition);
+    bool is_language_defined(const macro_definition &m) const;
+    bool identical_definitions(const macro_definition &a,
+                               const macro_definition &b) const;
+    int32_t add_definition(const macro_definition &m);
+    void directive_define(const preprocessing_token &name);
+    bool parameter_list(macro_definition &m, owned_array<uint32_t> &names);
+    void directive_undef(const preprocessing_token &name);
+
+    /* ---- [cpp.subst], [cpp.stringize], [cpp.concat], [cpp.rescan]: the
+       replacement of macro invocations, as a stack of token contexts read
+       before the rest of the source file */
+    struct token_context {
+        uint32_t begin, end, next;
+        int32_t macro; /* being replaced while the context is read, or -1 */
+        bool barrier;  /* reading stops at the end ([cpp.subst]/1) */
+        bool unused;
+    };
+    owned_array<token_context> contexts;
+    owned_array<preprocessing_token> context_tokens;
+    struct argument {
+        uint32_t begin, end;                  /* the argument's tokens */
+        int32_t expanded_begin, expanded_end; /* -1: not yet replaced */
+    };
+    struct substitution {
+        const macro_definition &m;
+        owned_array<argument> &arguments;
+        owned_array<preprocessing_token> &tokens;
+        uint32_t end; /* of the elements substituted */
+    };
+    /* the white space and line start of a macro name replaced by nothing,
+       which the next token takes */
+    bool pending_flags = false, pending_start_of_line = false,
+         pending_white_space = false;
+    void push_tokens(const preprocessing_token *tokens, size_t count,
+                     int32_t macro, bool barrier);
+    void pop_context();
+    bool read_unexpanded(preprocessing_token &token);
+    bool read_expanded(preprocessing_token &token);
+    bool peek_left_parenthesis();
+    bool replace_macro(preprocessing_token &name, int32_t macro);
+    void finish_replacement(const preprocessing_token &name,
+                            owned_array<preprocessing_token> &result);
+    bool collect_arguments(const preprocessing_token &name,
+                           const macro_definition &m,
+                           owned_array<argument> &arguments,
+                           owned_array<preprocessing_token> &tokens,
+                           preprocessing_token *right_parenthesis);
+    void substitute(const preprocessing_token &name, const macro_definition &m,
+                    owned_array<argument> &arguments,
+                    owned_array<preprocessing_token> &tokens,
+                    owned_array<preprocessing_token> &out);
+    void substitute_range(substitution &s, uint32_t first,
+                          owned_array<preprocessing_token> &out);
+    void expand_argument(argument &a, owned_array<preprocessing_token> &tokens);
+    uint32_t va_opt_end(uint32_t open, uint32_t end) const;
+    bool is_va_opt(const macro_definition &m, const replacement_element &e);
+    void va_opt(substitution &s, uint32_t at,
+                owned_array<preprocessing_token> &out);
+    uint32_t paste_operand(substitution &s, uint32_t at,
+                           owned_array<preprocessing_token> &out);
+    preprocessing_token stringize_operand(substitution &s, uint32_t at);
+    preprocessing_token stringize(const preprocessing_token *tokens,
+                                  size_t count, source_location at);
+    bool concatenate(preprocessing_token &left,
+                     const preprocessing_token &right, source_location at);
+    bool spelled(const char *text, size_t length, preprocessing_token *out);
+
+    /* ---- [cpp.line], [cpp.error], [cpp.pragma], [cpp.pragma.op] */
+    bool line_number(const preprocessing_token &token, bool gnu_marker,
+                     uint32_t *value);
+    bool string_contents(const preprocessing_token &token, owned_buffer &out);
+    void set_presumed_line(uint32_t line, const char *name, size_t length);
+    void directive_line(const preprocessing_token &name, bool gnu_marker);
+    void rest_of_line(source_location from, owned_buffer &out);
+    void directive_error(const preprocessing_token &name, bool warning);
+    void directive_pragma(const preprocessing_token &name);
+    void execute_pragma(const preprocessing_token *tokens, size_t count,
+                        source_location at);
+    void pragma_message(const preprocessing_token *tokens, size_t count,
+                        int kind);
+    bool pragma_operator(const preprocessing_token &name);
+    struct pushed_macro {
+        uint32_t name;
+        int32_t macro;
+    };
+    owned_array<pushed_macro> pushed_macros;
+
+    /* ---- [cpp.module], [cpp.import] */
+    bool module_or_import_directive(preprocessing_token &first);
+    bool begins_module_directive(const preprocessing_token &next);
+    bool names_object_like_macro(const preprocessing_token &token);
+
+    /* ---- [cpp.predefined] */
+    uint32_t counter = 0;
+    char date[16] = "", time_of_day[16] = "";
+    void write_predefined_macros(vbuffer *out) const;
+    int32_t define_dynamic(const char *name, dynamic_macro dynamic,
+                           bool function_like);
+    void define_dynamic_macros();
+    bool replace_dynamic(preprocessing_token &name, const macro_definition &m);
+    bool feature_operand(const preprocessing_token &name, owned_buffer &operand,
+                         owned_buffer &scope);
+};
 
 } // namespace cplusplus
 

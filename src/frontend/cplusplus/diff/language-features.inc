@@ -43,3 +43,14 @@ LANGUAGE_FEATURE(delimited_escape_sequences, cplusplus_23, never, "P2290R3: deli
 /* C++26 */
 LANGUAGE_FEATURE(raw_string_delimiter_dollar_at_grave, cplusplus_26, never,
                  "P2558R2: $ @ ` in the basic character set")
+/* [cpp] */
+LANGUAGE_FEATURE(long_long, cplusplus_11, never, "N1811: long long, in #if too ([cpp.cond]/12)")
+LANGUAGE_FEATURE(variadic_macros, cplusplus_11, never,
+                 "N1653: C99's preprocessor: variadic macros, empty macro arguments")
+LANGUAGE_FEATURE(modules, cplusplus_20, never,
+                 "[diff.cpp17.lex]/1: New identifiers with special meaning (module, import)")
+LANGUAGE_FEATURE(va_opt, cplusplus_20, never, "P0306R4, P1042R1: __VA_OPT__ ([cpp.subst])")
+LANGUAGE_FEATURE(variadic_arguments_may_be_omitted, cplusplus_20, never,
+                 "[cpp.replace]/5: at least as many arguments as parameters excluding the ... (P1042R1)")
+LANGUAGE_FEATURE(warning_directive, cplusplus_23, never, "P2437R1: #warning ([cpp.error])")
+LANGUAGE_FEATURE(elifdef_directives, cplusplus_23, never, "P2334R1: #elifdef and #elifndef ([cpp.cond])")

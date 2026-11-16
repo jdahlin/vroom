@@ -152,6 +152,14 @@ lexer::translation_character lexer::read(uint32_t at)
  */
 size_t lexer::spelling(const preprocessing_token &token, vbuffer *out) const
 {
+    if (files)
+        return files->spelling(token, out);
+    return spelling_in_file(token, out);
+}
+
+size_t lexer::spelling_in_file(const preprocessing_token &token,
+                               vbuffer *out) const
+{
     const unsigned char *p = file.physical_characters;
     size_t before = out->n;
     if (!token.spelling_differs) {
