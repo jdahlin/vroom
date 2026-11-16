@@ -2006,8 +2006,14 @@ VPRIV void cxx_ctor_use(cxx *c, ast_qualified_type t,
                     ? cxx_type_class_scope(c,
                                            AST_QUALIFIED_TYPE_UNQUALIFIED(et))
                     : NULL;
-            bool aggregate = es && !es->dependent && !es->has_dependent_base &&
-                             !cxx_lookup_in(c, es, cxx_ctor_id(), 0);
+            bool aggregate = es && !es->dependent && !es->has_dependent_base;
+
+            /* ([dcl.init.aggr]/1: no user-declared constructor; the default one code generation made for
+               E{} is none) */
+            for (cxx_entity *k =
+                     aggregate ? cxx_lookup_in(c, es, cxx_ctor_id(), 0) : NULL;
+                 k && aggregate; k = k->next)
+                aggregate = k->kind == CXX_ENTITY_VALUE && k->fn_implicit;
 
             for (uint32_t i = 0;
                  et != CXX_TY_UNKNOWN && i < nargs && i < CXX_MAX_ARGS; i++) {
