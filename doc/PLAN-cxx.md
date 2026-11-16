@@ -3010,3 +3010,12 @@ giltigt i ett void_t-test).  Jsons `is_comparable<less<>, alt_string, int>`
 blev sant, och `j["foo"][0]` valde `operator[](KeyType&&)` med KeyType = int
 (unit-alt-string länkade inte).  Test: `run/int-operand-not-null-pointer.cpp`,
 som misslyckas utan ändringen.  Sviter gröna (181/181, 38/38, mangle).
+
+## Status 210 (2026-11-16)
+En skalär från en klass som bara har en konverteringsfunktionsmall
+(`double d = j`, jsons `number_float_t d{j}`): mallens instans för typen.
+Grenen för aritmetiska mål såg bara icke-mall-konverteringar och gav upp
+innan mallgrenen; dessutom gick `int i = c` efter `double d = c` genom
+instansen för double i en oändlig rekursion (vpp kraschade).  Test:
+`run/conversion-template-to-scalar.cpp`, som misslyckas utan ändringen.
+Sviter gröna (182/182, 38/38, mangle).

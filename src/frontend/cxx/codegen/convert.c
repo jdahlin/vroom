@@ -196,6 +196,29 @@ VPRIV void cxx_gen_call(cxx *c, cxx_entity *f, uint32_t object, bool arrow, cons
 
 /* an object of class type as a value of the scalar type `to`: its conversion function to exactly that type
    (operator bool for a condition); 0: none, or not built */
+/* no conversion function to `to`: a conversion function template's instance for it, the type its first
+   template parameter (template <class T, ...> operator T() const).  NULL: none. */
+static cxx_entity *cxx_gen_conversion_template(cxx *c, cxx_scope *cls, uint32_t x, ast_qualified_type to)
+{
+	cc *a = c->ast;
+	cxx_entity *was = c->call_instance, *pick = NULL;
+
+	for (cxx_entity *e = cxx_lookup_in(c, cls, vintern_cstr("operator #tmpl"), 0); e && !pick; e = e->next) {
+		cxx_targ xa = { .kind = 1, .t = AST_QUALIFIED_TYPE_UNQUALIFIED(to) };
+		ast_qualified_type ret;
+		uint8_t oq = AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE_AT(a, x)->ty) & AST_QUALIFIER_CONST;
+
+		if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || (oq && !(e->fn_const & 1)))
+			continue;
+		c->call_instance = NULL;
+		if (cxx_ftemplate_deduce(c, e, &xa, 1, NULL, NULL, 0, &ret, true) == 1 && c->call_instance && ret != CXX_TY_UNKNOWN &&
+		    AST_QUALIFIED_TYPE_UNQUALIFIED(ret) == AST_QUALIFIED_TYPE_UNQUALIFIED(to))
+			pick = c->call_instance;
+	}
+	c->call_instance = was;
+	return pick;
+}
+
 VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to, uint32_t loc)
 {
 	cc *a = c->ast;
@@ -236,32 +259,24 @@ VPRIV uint32_t cxx_gen_convert_class(cxx *c, uint32_t x, ast_qualified_type to, 
 			if (cls->conv_types[i] != CXX_TY_UNKNOWN && cc_type_is_arithmetic(a, cls->conv_types[i]) && AST_TYPE_KIND(a, cls->conv_types[i]) != AST_TYPE_ENUM &&
 			    AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]) != via)
 				via = AST_QUALIFIED_TYPE_UNQUALIFIED(cls->conv_types[i]), nvia++;
-		if (nvia != 1)
+		if (nvia > 1)
 			return 0;
-		r = cxx_gen_convert_class(c, x, via, loc);
-		return r ? cc_conversion_apply(a, cc_node_rvalue(a, r), AST_QUALIFIED_TYPE_UNQUALIFIED(to)) : 0;
-	} else if ((!f || f->kind != CXX_ENTITY_VALUE) && to != CXX_TY_UNKNOWN) {
-		/* no conversion function to that type: a conversion function template's instance for it, the type
-		   its first template parameter (template <class T, ...> operator T() const) */
-		cxx_entity *was = c->call_instance, *pick = NULL;
+		if (nvia == 1 && via != AST_QUALIFIED_TYPE_UNQUALIFIED(to)) {	/* (its own type: the lookup above missed it, a template's instance) */
+			static __thread int depth;
 
-		f = NULL;
-		for (cxx_entity *e = cxx_lookup_in(c, cls, vintern_cstr("operator #tmpl"), 0); e && !pick; e = e->next) {
-			cxx_targ xa = { .kind = 1, .t = AST_QUALIFIED_TYPE_UNQUALIFIED(to) };
-			ast_qualified_type ret;
-			uint8_t oq = AST_QUALIFIED_TYPE_QUALIFIERS(AST_NODE_AT(a, x)->ty) & AST_QUALIFIER_CONST;
-
-			if (e->kind != CXX_ENTITY_FUNCTION_TEMPLATE || (oq && !(e->fn_const & 1)))
-				continue;
-			c->call_instance = NULL;
-			if (cxx_ftemplate_deduce(c, e, &xa, 1, NULL, NULL, 0, &ret, true) == 1 && c->call_instance && ret != CXX_TY_UNKNOWN &&
-			    AST_QUALIFIED_TYPE_UNQUALIFIED(ret) == AST_QUALIFIED_TYPE_UNQUALIFIED(to))
-				pick = c->call_instance;
+			if (depth > 4)
+				return 0;
+			depth++;
+			r = cxx_gen_convert_class(c, x, via, loc);
+			depth--;
+			return r ? cc_conversion_apply(a, cc_node_rvalue(a, r), AST_QUALIFIED_TYPE_UNQUALIFIED(to)) : 0;
 		}
-		c->call_instance = was;
-		if (!pick)
+		/* (none: a conversion function template's instance, as below; json's double d = j) */
+		if (!(f = cxx_gen_conversion_template(c, cls, x, to)))
 			return 0;
-		f = pick;
+	} else if ((!f || f->kind != CXX_ENTITY_VALUE) && to != CXX_TY_UNKNOWN) {
+		if (!(f = cxx_gen_conversion_template(c, cls, x, to)))
+			return 0;
 	} else if (!f || f->kind != CXX_ENTITY_VALUE || f->fn_deleted)
 		return 0;
 	if (f->late && !f->late_done)
