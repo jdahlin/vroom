@@ -29,8 +29,11 @@ and instantiation are later plans.
    in `ext/VENDOR/`, entered through one call at the place in the grammar
    where it applies and only when `behavior.has(extension::NAME)`.  None is
    written before a test corpus needs it (P9).
-4. **Compliance before speed** (Decision 4 of PLAN-cxx-spec): one
-   measurement per step (ns per token), no tuning.
+4. **Designed for speed, tuned later.**  The data layout and interfaces
+   are chosen now so that they can be micro-optimized and cached without a
+   rewrite (below), but no tuning is done until the whole pipeline runs and
+   profiles show where the time goes (Decision 4 of PLAN-cxx-spec).  One
+   measurement per step (ns per token) so regressions are visible.
 
 ## Architecture
 
@@ -138,6 +141,46 @@ Every disambiguation rule is tentative parsing, as the standard words them
 initializers are kept as token ranges and parsed at the class's `}`),
 [dcl.fct]/trailing return vs abstract declarator.  One file each, with the
 standard's examples as the first tests.
+
+### Built to be optimized and cached later
+
+Nothing here is tuned in P0-P9; these are constraints on the design so that
+tuning and caching need no change of interfaces.
+
+- **Flat, indexable storage.**  Nodes live in per-TU arenas, referred to by
+  32-bit indexes, not pointers; children are contiguous ranges.  A tree can
+  then be copied, memory-mapped, hashed and relocated as a block, and a
+  later SoA layout or node packing is local to `syntax_tree`.
+- **Tokens by index.**  The parser holds token indexes into the token
+  stream's buffer, never copies of `token`; spellings stay in the source or
+  the interned table.  A cached token stream (one per header) can replace
+  the live one behind the same interface.
+- **Pure functions of their inputs.**  Parsing a declaration depends only on
+  its tokens and the `declared_names` state it reads; that state is
+  recorded as a list of (name, kind) lookups so a cached result can be
+  checked before reuse, as vcc's C preprocessor does for header replay
+  (`docs/RESEARCH-preprocessor.md`).
+- **Cache points named now**, each a boundary with a hashable key and no
+  hidden state crossing it:
+  - an included header's token stream (key: file identity + macro state
+    read, already modelled in the C side's header cache);
+  - a header's parsed declarations and the names they declare (key: the
+    above + the `declared_names` lookups it made);
+  - a template's tokens and tree, kept unparsed until used, instantiated
+    later per argument list (key: template + arguments): the parser keeps
+    template bodies as token ranges plus a tree, never only a tree;
+  - inline function bodies and complete-class contexts parsed lazily (only
+    when used or emitted), which [class.mem]/6 already forces us to defer.
+- **Thread-safe by construction.**  No global mutable state: everything is
+  on the parser or the TU, so TUs parse in parallel in vccd and a shared
+  cache needs only its own lock.
+- **Hot paths kept narrow.**  Token kind checks are table lookups on a
+  small enum (no string compares outside `declared_names`), the keyword set
+  is known from the lexer, and tentative parsing is a mark/rewind of an
+  index, so SIMD scanning or a faster lookup table can drop in later.
+- **Measured, not guessed.**  `cxxparse -stats` counts tokens, nodes,
+  tentative parses and their rewinds, and lookups; those counters decide
+  what gets optimized and what gets cached once the pipeline is complete.
 
 ### Diagnostics
 
@@ -432,3 +475,6 @@ standard's order ([basic.lookup] in full, [conv], [expr]'s types,
 6. **No extension before P9**, including `__attribute__`: clang tests that
    use one are "known difference: extension" until then.
 7. **A separate tool `cxxparse`** rather than more modes in `cxxlex`.
+8. **Optimizable and cacheable by design, not tuned yet**: index-based
+   storage, recorded lookups and named cache points (headers, templates,
+   lazy bodies) from P0; optimization only after the full pipeline runs.
