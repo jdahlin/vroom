@@ -279,8 +279,11 @@ node_index parser::member_declaration_alternative()
         return template_declaration(&parser::member_declaration_alternative);
     if (deduction_guide_follows())
         return deduction_guide();
+    /* [module.interface]/1: "An export-declaration shall appear only at
+       namespace scope" */
     if (at(standard_keyword::export_))
-        return beyond_this_step();
+        return violates("an export-declaration only at namespace scope",
+                        "module.interface", position);
     /* an attribute-specifier-seq before a using-declaration: clang's
        extension, P9's */
     unsigned after_attributes = attribute_specifier_seq_end(0);

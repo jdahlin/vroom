@@ -564,6 +564,18 @@ class parser
 
     /* [basic.link]: translation-unit; the tree's root */
     node_index translation_unit();
+    /* [module] */
+    bool at_phase4_keyword(preprocessing_token_kind kind, unsigned ahead = 0);
+    bool at_module_declaration();
+    bool at_private_module_fragment();
+    node_index module_name();
+    node_index module_partition();
+    node_index module_declaration();
+    node_index module_import_declaration();
+    node_index export_declaration();
+    node_index module_unit_rest(bool global_fragment);
+    void declaration_seq_until_module(bool private_);
+    bool in_export_declaration = false;
 
     parser_statistics statistics();
 

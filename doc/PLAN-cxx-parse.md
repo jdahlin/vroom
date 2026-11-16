@@ -794,6 +794,29 @@ The first grammar, about 55 nonterminals.
 
 - [module] (8 nonterminals), [cpp.module]'s tokens from the preprocessor.
 - Tests: `CXX/module`, `Parser/cxx-modules-*.cppm`.
+- Status: done (2026-11-16).
+  - `module/module.unit.cpp`: module-declaration, module-name,
+    module-partition, module-name-qualifier, module-import-declaration (a
+    module-name, a partition or a header-name), export-declaration (one
+    declaration, braces, or `export import`), global-module-fragment and
+    private-module-fragment; translation-unit's second alternative in
+    `basic/basic.link.cpp`.  export-keyword, import-keyword and
+    module-keyword are read by their phase-4 preprocessing kind
+    (`at_phase4_keyword`); `export` elsewhere is the keyword.
+  - Checked: no export-declaration inside another or in a class
+    ([module.interface]/1), an import only at global namespace scope
+    ([module.import]/1), no `module` or `import` in a module-name, a
+    module-declaration only where translation-unit puts it.  Before C++20,
+    `export template` (C++98) is P9's and any other `export` an error.
+  - `cxxparse -dump-declarations` lists a module unit's declarations
+    across its fragments.
+  - V4a: 20338 declarations as clang, 0 rejected that clang accepts, 29
+    accepted that clang rejects (P7's 8 declarations, and two "module not
+    found": clang has no module files, not syntax), 2152 kept as tokens;
+    6275 `unparsed`.  `CXX/module` keeps three declarations as tokens, all
+    `__attribute__`/`__declspec` (P9).  V1: 622 citations, 275 productions,
+    0 wrong; module 8 of 8.  V6: cxx-lex 121/121.  There are no `.cppm`
+    tests in the harness's corpus (it reads `*.cpp`).
 
 ### P9. Real code and the extensions it needs
 

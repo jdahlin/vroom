@@ -42,7 +42,6 @@ bool uses_later_grammar(parser &p, token_index first, token_index end,
         const token &t = p.tokens[i];
         switch (p.keyword_of(t)) {
         case standard_keyword::asm_:
-        case standard_keyword::export_:
         case standard_keyword::extension:
             return true;
         default:
@@ -301,11 +300,18 @@ node_index parser::declaration_alternative()
         n = linkage_specification();
     } else if (at(standard_keyword::static_assert_)) {
         n = static_assert_declaration();
-    } else if ((at_identifier() || peek().kind == token_kind::invalid) &&
-               starts_module_declaration()) {
-        /* module-declaration, module-import-declaration and
-           export-declaration ([module]): P8 */
-        n = beyond_this_step();
+    } else if (at_phase4_keyword(preprocessing_token_kind::import_keyword)) {
+        n = module_import_declaration();
+    } else if (at_phase4_keyword(preprocessing_token_kind::export_keyword) &&
+               !at_module_declaration()) {
+        n = export_declaration();
+    } else if (at_phase4_keyword(preprocessing_token_kind::module_keyword) ||
+               at_phase4_keyword(preprocessing_token_kind::export_keyword)) {
+        /* [basic.link]/2: a module-declaration, a global or private module
+           fragment only where translation-unit puts them */
+        n = expected("a declaration (a module-declaration only at the start "
+                     "of the translation unit)",
+                     "basic.link");
     } else if (at(standard_keyword::template_) ||
                (at(standard_keyword::extern_) &&
                 at(standard_keyword::template_, 1))) {
@@ -313,8 +319,7 @@ node_index parser::declaration_alternative()
     } else if (deduction_guide_follows()) {
         n = deduction_guide();
     } else if (at(standard_keyword::export_)) {
-        /* export-declaration (P8) */
-        n = beyond_this_step();
+        n = export_declaration();
     } else {
         n = block_or_function_declaration();
     }
