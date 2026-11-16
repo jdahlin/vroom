@@ -619,7 +619,22 @@ VPRIV int cxx_ftemplate_deduce1(cxx *c, cxx_entity *e, const cxx_targ *xargs, ui
 		return c->sig_requires == 1 ? 1 : c->sig_requires;
 	}
 	for (uint32_t i = 0; i < nargs && i < f->np; i++) {
-		int r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
+		int r;
+
+		{
+			/* T, const T&, T&& with T given explicitly (j.template value<std::string>("k", "default")): nothing
+			   to deduce, the argument converts ([temp.arg.explicit]/7), which overload ranking checks */
+			ast_qualified_type b0 = f->pt[i];
+			void *owner;
+			int ix;
+
+			if (b0 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, b0) == AST_TYPE_POINTER && AST_TYPE(c->ast, b0)->ext)
+				b0 = AST_TYPE(c->ast, b0)->base;
+			if (xargs && nxargs != UINT32_MAX && b0 != CXX_TY_UNKNOWN && (ix = cxx_placeholder_of(c, AST_QUALIFIED_TYPE_UNQUALIFIED(b0), &owner)) >= 0 &&
+			    owner == p && (uint32_t)ix < nxargs && ix < (int)p->params->ntparams && !p->params->tparams[ix].pack)
+				continue;
+		}
+		r = cxx_deduce_argument(c, p, f->pt[i], args[i], lval[i], bind);
 
 		if (r > 0 && args[i] != CXX_TY_UNKNOWN &&
 		    (cc_type_is_record(c->ast, args[i]) || cc_type_is_arithmetic(c->ast, args[i])) && cxx_ftemplate_param_is_member_pointer(c, f, i)) {

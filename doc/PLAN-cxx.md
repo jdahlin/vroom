@@ -2940,3 +2940,11 @@ fångar den omgivande funktionens resultatadress och bygger objektet där
 `value(json_pointer, default)`, även standardvärdet via catch.  Test:
 `run/return-class-in-try.cpp` (räknar levande objekt), som misslyckas utan
 ändringen.  Sviter gröna (175/175, 38/38, mangle).
+
+## Status 202 (2026-11-16)
+En parameter `T`, `const T&` eller `T&&` vars T ges explicit (`f<S>("text")`)
+deduceras inte: argumentet konverterar, vilket rangordningen prövar
+([temp.arg.explicit]/7).  Förut prövades mönstret mot `char[N]` och kandidaten
+föll bort: jsons `j.template value<std::string>("k", "default")`.  Test:
+`run/explicit-targ-converting-arg.cpp`, som misslyckas utan ändringen.  Sviter
+gröna (176/176, 38/38, mangle).
