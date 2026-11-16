@@ -143,6 +143,33 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 
 					memcpy(abrace, c->carg_brace, sizeof abrace);
 					c->call_obj = call_obj, c->call_obj_rv = call_obj_rv, cxx_call_type(c, set, callee, c->cargs, c->cargs_lval, c->ncargs);
+					if (set && c->call_resolved && c->call_picked && c->call_picked->inst_ftmpl && !call_obj && ename && !c->tentative &&
+					    c->ncargs <= 16 && c->etype != CXX_TY_UNKNOWN) {
+						/* f(x) resolved to a template by ordinary lookup: a non-template the arguments' namespaces
+						   declare, exact for every argument, is better ([over.match.best]/2.4; alt_string's own
+						   int_to_string(alt_string&, size_t) for json's int_to_string(result, value)) */
+						ast_qualified_type et0 = c->etype;
+						bool el0 = c->elval;
+						cxx_entity *p0 = c->call_picked, *ec0 = c->ecallee;
+						uint8_t nr0 = c->call_nranks, r0[16], u0 = c->eunsure, cst0 = c->econst;
+						int64_t v0 = c->evalue;
+						bool exact = false;
+
+						memcpy(r0, c->call_ranks, sizeof r0);
+						cxx_adl_call_type(c, ename, c->cargs, c->cargs_lval, c->ncargs);
+						if (c->call_resolved && c->call_picked && c->call_picked != p0 && !c->call_picked->inst_ftmpl &&
+						    c->call_picked->kind == CXX_ENTITY_VALUE && c->etype != CXX_TY_UNKNOWN && c->call_nranks == c->ncargs) {
+							exact = true;
+							for (uint32_t k = 0; k < c->call_nranks; k++)
+								exact &= c->call_ranks[k] == 0;
+						}
+						if (!exact) {
+							cxx_et(c, et0, el0);
+							c->call_resolved = 1, c->call_picked = p0, c->ecallee = ec0, c->call_nranks = nr0;
+							memcpy(c->call_ranks, r0, sizeof r0);
+							c->eunsure = u0, c->econst = cst0, c->evalue = v0;
+						}
+					}
 					cxx_entity *cpick = c->call_resolved ? c->call_picked : NULL;
 					ast_qualified_type cty = c->etype;
 					if (set && c->call_resolved && c->call_picked && c->etype != CXX_TY_UNKNOWN && (!call_obj || obj_node))

@@ -2965,3 +2965,11 @@ gjorde `r.w` av en lokal `r` const, så `r.w.push_back(1)` och `r.w = {...}`
 valde inget (jsons `json_pointer::top()`: `result.reference_tokens =
 {reference_tokens[0]}`).  Test: `run/member-of-local-after-const-fn.cpp`, som
 misslyckas utan ändringen.  Sviter gröna (178/178, 38/38, mangle).
+
+## Status 205 (2026-11-16)
+`f(x)` som vanlig uppslagning löser till en mall: en icke-mall i argumentens
+namnrymder, exakt för varje argument, är bättre ([over.match.best]/2.4) och
+väljs (alt_strings egen `int_to_string(alt_string&, size_t)` för jsons
+`int_to_string(result, value)`; unit-alt-string länkade inte).  Test:
+`run/adl-nontemplate-beats-template.cpp`, som misslyckas utan ändringen.
+Sviter gröna (179/179, 38/38, mangle).
