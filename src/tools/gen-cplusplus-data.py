@@ -46,13 +46,18 @@ def c_string(s):
     return '"' + ''.join(out) + '"'
 
 
+# diagnostics from clang's other components that the front end issues in
+# phases clang gives to Sema: [lex.fcon]/3's range of a floating-point literal
+OTHER_DIAGNOSTICS = {'warn_float_overflow', 'warn_float_underflow'}
+
+
 def diagnostics(td):
     diags, groups, _ = clangdiag.load(td)
     version = os.path.basename(td.rstrip('/'))
     names = sorted(n for n, r in diags.items()
-                   if r['file'] in ('DiagnosticLexKinds.td', 'DiagnosticCommonKinds.td'))
+                   if r['file'] in ('DiagnosticLexKinds.td', 'DiagnosticCommonKinds.td') or n in OTHER_DIAGNOSTICS)
     group_names = sorted({g[0] for g in groups.values()} | {diags[n]['group'] for n in names if diags[n]['group']})
-    lines = [HEADER % f"clang {version}'s Diagnostic{{Lex,Common}}Kinds.td",
+    lines = [HEADER % f"clang {version}'s Diagnostic{{Lex,Common}}Kinds.td and a few of Sema's",
              '/* DIAGNOSTIC(name, class, default mapping, -W group or "", format) */']
     for n in names:
         r = diags[n]

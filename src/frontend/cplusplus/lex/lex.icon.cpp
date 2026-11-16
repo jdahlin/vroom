@@ -75,36 +75,45 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
        optional separating single quotes are ignored when determining the
        value."  [lex.icon]/2: "The hexadecimal-digits a through f and A
        through F have decimal values ten through fifteen." */
-    uint64_t value = 0;
-    bool too_large = false;
-    unsigned value_bits = 0; /* bits of the value, for _BitInt(N) */
+    /* the value in 128 bits: wide enough for every integer type and the
+       widest bit-precise type here */
+    unsigned __int128 value = 0;
+    bool beyond_128_bits = false;
     for (size_t i = a.digits_begin; i < a.suffix_begin; i++) {
         unsigned char c = (unsigned char)a.spelling[i];
         if (c == '\'')
             continue;
         unsigned digit = is_digit(c) ? c - '0' : (c | 32) - 'a' + 10;
-        if (value > (UINT64_MAX - digit) / a.base)
-            too_large = true;
+        if (value > (~(unsigned __int128)0 - digit) / a.base)
+            beyond_128_bits = true;
         value = value * a.base + digit;
     }
-    for (uint64_t v = value; v; v >>= 1)
+    unsigned value_bits = 0;
+    for (unsigned __int128 v = value; v; v >>= 1)
         value_bits++;
+    bool too_large = beyond_128_bits || value_bits > 64;
     out.literal = literal_kind::integer_literal;
-    out.value = value;
+    out.value = (uint64_t)value;
     out.value_known = true;
 
     if (a.bit_precise_suffix) {
-        /* C23 6.4.4.1: the width is the smallest that holds the value (and a
-           sign bit for the signed _BitInt(N), whose N is at least 2); the
-           value of a wider one is not kept yet */
+        /* C23 6.4.4.1: the width N of _BitInt(N) is the smallest that holds
+           the value, with a sign bit for the signed type (whose N is at least
+           2); clang's widest is BITINT_MAXWIDTH, 128 here */
+        unsigned width = value_bits + !a.unsigned_suffix;
+        if (width < (a.unsigned_suffix ? 1u : 2u))
+            width = a.unsigned_suffix ? 1 : 2;
         out.type = a.unsigned_suffix
                        ? fundamental_type::unsigned_bit_precise_int
                        : fundamental_type::bit_precise_int;
-        out.bit_precise_width =
-            (uint16_t)(too_large ? 0 : value_bits + !a.unsigned_suffix);
-        if (out.bit_precise_width < (a.unsigned_suffix ? 1 : 2))
-            out.bit_precise_width = a.unsigned_suffix ? 1 : 2;
-        out.value_known = !too_large;
+        if (beyond_128_bits || width > behavior.bit_precise_maximum_width) {
+            diagnostics.issue(diagnostic_id::err_integer_literal_too_large, at)
+                << (a.unsigned_suffix ? 1 : 0);
+            out.value_known = false;
+            return;
+        }
+        out.bit_precise_width = (uint16_t)width;
+        out.value_known = value_bits <= 64;
         return;
     }
     if (too_large) {
@@ -136,7 +145,7 @@ void lexer::convert_integer_literal(const pp_number_analysis &a, token &out)
         return;
     }
     bool represented;
-    out.type = first_type_in_list(behavior, a, value, &represented);
+    out.type = first_type_in_list(behavior, a, (uint64_t)value, &represented);
     if (!represented)
         /* [lex.icon]/4: "If an integer-literal cannot be represented by any
            type in its list and an extended integer type can represent its

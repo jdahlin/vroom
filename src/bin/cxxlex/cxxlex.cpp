@@ -58,12 +58,29 @@ static void write_claim(vbuffer *out, const lexer &l, const token &t,
 {
     if (t.kind != token_kind::literal || !t.value_known ||
         t.literal == literal_kind::user_defined_literal ||
-        t.literal == literal_kind::floating_point_literal ||
         t.type == fundamental_type::bit_precise_int ||
         t.type == fundamental_type::unsigned_bit_precise_int)
         return;
     const char *type = fundamental_type_name(t.type);
     vbuffer_format_append(out, "#line %u \"%s\"\n", p.line, p.file_name);
+    if (t.literal == literal_kind::floating_point_literal) {
+        /* the bits of the value: __builtin_bit_cast to an unsigned integer
+           of the format's width */
+        const char *bits =
+            t.type == fundamental_type::float16   ? "unsigned short"
+            : t.type == fundamental_type::float_  ? "unsigned int"
+            : t.type == fundamental_type::double_ ? "unsigned long long"
+                                                  : "unsigned __int128";
+        vbuffer_format_append(
+            out,
+            "_Static_assert(__is_same(__decltype(%.*s), %s), \"\"); "
+            "_Static_assert(__builtin_bit_cast(%s, %.*s) == "
+            "(((unsigned __int128)0x%llxull << 64) | 0x%llxull), \"\");\n",
+            (int)n, spelling, type, bits, (int)n, spelling,
+            (unsigned long long)t.floating_bits_high,
+            (unsigned long long)t.floating_bits_low);
+        return;
+    }
     if (t.literal == literal_kind::string_literal) {
         vbuffer_format_append(out,
                               "_Static_assert(__is_same(__decltype(%.*s), "

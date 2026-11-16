@@ -78,6 +78,12 @@ struct implementation_defined_behavior {
     bool plain_char_is_signed = false;
     /* [basic.fundamental]/1: the widths in bits of the standard integer types */
     uint8_t int_width = 32, long_width = 64, long_long_width = 64;
+    /* [basic.fundamental]/12: "The value representation of floating-point
+       types is implementation-defined": IEEE binary32, binary64 and, for
+       long double, binary128 (aarch64 Linux; 52 where it is binary64) */
+    uint8_t long_double_fraction_bits = 112;
+    /* the widest _BitInt(N) (C23's BITINT_MAXWIDTH), clang's extension */
+    uint16_t bit_precise_maximum_width = 128;
     /* [basic.fundamental]/8: wchar_t's width and signedness */
     uint8_t wchar_t_width = 32;
     bool wchar_t_is_signed = false;
@@ -355,6 +361,9 @@ struct token {
     /* a string literal: its code units in lexer::string_code_units(),
        without the terminating '\0' of [lex.string]/12 */
     uint32_t string_offset = 0, string_length = 0;
+    /* the bits of a floating-point literal's value in its format
+       (binary16/32/64/128), when value_known */
+    uint64_t floating_bits_low = 0, floating_bits_high = 0;
     /* N of _BitInt(N) */
     uint16_t bit_precise_width = 0;
     /* the value of an integer or boolean literal, when value_known */

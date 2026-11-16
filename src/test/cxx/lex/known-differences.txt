@@ -24,3 +24,7 @@ llvm/CXX/lex/lex.literal/lex.ext/p3.cpp | diags | needs [lex.ext]/3, [over.liter
 # turns back into import/module keywords.
 llvm/CXX/lex/lex.pptoken/p3-2a.cpp | tokens | needs phase 4 ([cpp.import])
 llvm/Lexer/cxx20-module-directive.cpp | tokens | needs phase 4 ([cpp.module])
+# [lex.ext]/4: 1e5000_x is passed as the long double 1e5000L only if lookup
+# finds a literal operator taking long double; clang's range warning comes
+# from that call.
+llvm/CXX/lex/lex.literal/lex.ext/p4.cpp | diags | needs [lex.ext]/4, [over.literal]

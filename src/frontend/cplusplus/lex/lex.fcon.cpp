@@ -1,16 +1,50 @@
 /*
- * lex.fcon.cpp: [lex.fcon] Floating-point literals: the type of a pp-number
- * that lex.ppnumber.cpp read as a floating-point-literal.  Its value
- * ([lex.fcon]/2-3) is a later step.
+ * lex.fcon.cpp: [lex.fcon] Floating-point literals: the type and value of a
+ * pp-number that lex.ppnumber.cpp read as a floating-point-literal.
  *
  *     floating-point-literal:
  *         decimal-floating-point-literal
  *         hexadecimal-floating-point-literal
  */
+#include "common/softfloat.h"
+
 #include "../cplusplus-internal.h"
 
 namespace cplusplus
 {
+
+namespace
+{
+
+/* a floating-point type's format ([basic.fundamental]/12): fraction bits,
+   the largest biased exponent, the bias; and the extreme values clang names
+   in its range diagnostics */
+struct floating_point_format {
+    int fraction_bits, maximum_exponent, bias;
+    const char *maximum, *minimum;
+};
+
+floating_point_format format_of(const implementation_defined_behavior &b,
+                                fundamental_type type)
+{
+    switch (type) {
+    case fundamental_type::float16:
+        return {10, 0x1F, 15, "6.5504E+4", "5.9604645E-8"};
+    case fundamental_type::float_:
+        return {23, 0xFF, 127, "3.40282347E+38", "1.40129846E-45"};
+    case fundamental_type::long_double:
+        if (b.long_double_fraction_bits == 112)
+            return {112, 0x7FFF, 16383,
+                    "1.18973149535723176508575932662800702E+4932",
+                    "6.47517511943802511092443895822764655E-4966"};
+        [[fallthrough]];
+    default:
+        return {52, 0x7FF, 1023, "1.7976931348623157E+308",
+                "4.9406564584124654E-324"};
+    }
+}
+
+} // namespace
 
 /*
  * [lex.fcon]/1: "The type of a floating-point-literal is determined by its
@@ -31,6 +65,78 @@ void lexer::convert_floating_point_literal(const pp_number_analysis &a,
                : a.long_suffix    ? fundamental_type::long_double
                : a.float16_suffix ? fundamental_type::float16
                                   : fundamental_type::double_;
+
+    /*
+     * [lex.fcon]/2: "In the significand, the sequence of digits or
+     * hexadecimal-digits and optional period are interpreted as a base N real
+     * number s ... Any optional separating single quotes are ignored when
+     * determining the value. ... The scaled value of the literal is s x 10^e
+     * for a decimal-floating-point-literal and s x 2^e for a
+     * hexadecimal-floating-point-literal."
+     */
+    char significand_and_exponent[512];
+    size_t n = 0;
+    bool nonzero = false;
+    bool in_exponent = false;
+    for (size_t i = 0;
+         i < a.suffix_begin && n + 1 < sizeof significand_and_exponent; i++) {
+        char c = a.spelling[i];
+        if (c == '\'')
+            continue;
+        if (i >= 2 && (c == 'e' || c == 'E' || c == 'p' || c == 'P') &&
+            (a.base == 10 || c == 'p' || c == 'P'))
+            in_exponent = true;
+        if (!in_exponent &&
+            ((c >= '1' && c <= '9') ||
+             (a.base == 16 && i >= 2 &&
+              is_hexadecimal_digit((unsigned char)c) && c != '0')))
+            nonzero = true;
+        significand_and_exponent[n++] = c;
+    }
+    if (a.suffix_begin >= sizeof significand_and_exponent)
+        return; /* the value of a longer one is left unknown */
+
+    /*
+     * [lex.fcon]/3: "If the scaled value is not in the range of
+     * representable values for its type, the program is ill-formed.
+     * Otherwise, the value of a floating-point-literal is the scaled value if
+     * representable, else the larger or smaller representable value nearest
+     * the scaled value, chosen in an implementation-defined manner."  This
+     * implementation chooses the nearest, ties to even (IEEE 754
+     * roundTiesToEven), and, as clang, only warns out of range.
+     */
+    floating_point_format f = format_of(behavior, out.type);
+    unsigned __int128 binary128 = vsoftfloat_parse_with_precision(
+        significand_and_exponent, n, f.fraction_bits);
+    unsigned __int128 bits;
+    if (f.fraction_bits == 112)
+        bits = binary128;
+    else
+        /* TODO: rounding to the precision first and to the format's
+           exponent range second rounds twice for subnormal results */
+        bits = vsoftfloat_truncate(binary128, f.fraction_bits,
+                                   f.maximum_exponent, f.bias);
+    /* the literal has no sign: its bits are its magnitude */
+    unsigned __int128 infinity = (unsigned __int128)f.maximum_exponent
+                                 << f.fraction_bits;
+    char type_name[32];
+    int type_length = snprintf(type_name, sizeof type_name, "'%s'",
+                               fundamental_type_name(out.type));
+    if (bits == infinity)
+        diagnostics
+                .issue(diagnostic_id::warn_float_overflow,
+                       out.preprocessing.location)
+                .text(type_name, (size_t)type_length)
+            << f.maximum;
+    else if (bits == 0 && nonzero)
+        diagnostics
+                .issue(diagnostic_id::warn_float_underflow,
+                       out.preprocessing.location)
+                .text(type_name, (size_t)type_length)
+            << f.minimum;
+    out.floating_bits_low = (uint64_t)bits;
+    out.floating_bits_high = (uint64_t)(bits >> 64);
+    out.value_known = true;
 }
 
 } // namespace cplusplus

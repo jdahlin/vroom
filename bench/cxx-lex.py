@@ -233,7 +233,13 @@ def parse_diagnostics(text, regexes, skip_lines=()):
     return out
 
 
+# cxxlex's implementation-defined behavior is clang's for this target
+TRIPLE = ['-triple', 'aarch64-unknown-linux-gnu']
+
+
 def run(cmd, cwd=None):
+    if len(cmd) > 1 and cmd[1] == '-cc1' and '-triple' not in cmd:
+        cmd = cmd[:2] + TRIPLE + cmd[2:]
     p = subprocess.run(cmd, capture_output=True, text=True, errors='replace', cwd=cwd, timeout=60)
     return p.stdout, p.stderr
 
@@ -280,7 +286,7 @@ def check(test, opts, clang, cxxlex, regexes, tmp):
         # has keep their types and values
         claim_opts = [re.sub(r'^-std=(c|gnu)\+\+(98|03)$', r'-std=\1++11', o)
                       for o in opts if o.startswith('-std=') or o.startswith('-f')]
-        _, failed = run([clang, '-cc1', '-fsyntax-only', '-triple', 'aarch64-unknown-linux-gnu', '-ferror-limit', '0',
+        _, failed = run([clang, '-cc1', '-fsyntax-only', '-ferror-limit', '0',
                          '-Wno-everything'] + claim_opts + [cpp])
         errors = [line for line in failed.splitlines() if ': error: ' in line]
         res['values'] = f'{len(errors)} claims fail, first: {errors[0]}' if errors else ''
