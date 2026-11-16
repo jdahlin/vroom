@@ -7,8 +7,10 @@
  * function that has the exception table (cxx_gen_try).  *closure_node: the closure object; false: not
  * built (the body is parsed all the same).
  */
-VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out)
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out, cxx_entity **ret_slot, bool *ret_used)
 {
+	ast_qualified_type rt = c->gen_ret;
+	bool can_return = !c->gen_lambda && !c->gen_sret && rt != CXX_TY_UNKNOWN;
 	uint32_t serial = c->lambda_serial++, lname = cxx_closure_name(c, serial), loc = cxx_peek(c, 0)->loc, bnode;
 	uint32_t tag = cc_tag_new(c->ast, AST_TYPE_STRUCT, lname, 0);
 	cxx_entity *owner = calloc(1, sizeof *owner), *call;
@@ -26,6 +28,20 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call
 	fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, outer, NULL);
 	memset(&l, 0, sizeof l);
 	l.def = 1, l.is_try = 1;
+	*ret_slot = NULL, *ret_used = false;
+	if (can_return) {
+		/* return in the body: the result kept in a variable of the enclosing function (a reference's
+		   referent's address), the body's call returning 1; the try statement then returns it */
+		ast_qualified_type st = cxx_gen_is_reference(c, rt) ? cc_type_pointer(c->ast, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, rt)->base)) :
+					AST_QUALIFIED_TYPE_UNQUALIFIED(rt);
+		cxx_entity *rs = calloc(1, sizeof *rs);
+
+		rs->kind = CXX_ENTITY_VALUE, rs->name = vintern_cstr(" try result"), rs->pack_index = -1, rs->ty = st;
+		if (AST_TYPE_KIND(c->ast, rt) == AST_TYPE_VOID || (rs->sym = cxx_gen_scratch(c, st, loc)))
+			l.ret_slot = rs, l.ret_ty = rt;
+		else
+			free(rs);
+	}
 	if (call) {
 		call->ty = cxx_type_function(c, cc_type_basic(AST_TYPE_INT), NULL, 0, false);
 		call->fn_const = 1, call->member_of = cs;
@@ -42,6 +58,7 @@ VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call
 		cxx_gen_fail(c);
 	cxx_gen_function_end(c, call, bnode);
 	c->scope = outer;
+	*ret_slot = l.ret_slot, *ret_used = l.ret_used;
 	if (!(c->ast->syms[call->sym].flags & AST_SYMBOL_FLAG_DEFINED))
 		return false;
 	cxx_gen_lambda_object(c, &l, owner->ty, loc);

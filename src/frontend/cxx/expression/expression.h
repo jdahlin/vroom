@@ -43,7 +43,7 @@ VPRIV void cxx_builtin_call_parse(cxx *c);
 VPRIV uint32_t cxx_closure_name(cxx *c, uint32_t serial);
 
 /* lambda.c */
-VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out);
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out, cxx_entity **ret_slot, bool *ret_used);
 VPRIV void cxx_lambda_parse(cxx *c);
 
 /* requires.c */

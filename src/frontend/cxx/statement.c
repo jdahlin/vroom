@@ -968,13 +968,13 @@ static void cxx_statement_parse1(cxx *c)
 		   exception table; then the handlers, each entered when that call says so */
 		bool gen = cxx_gen_on(c) && c->gen_block && !c->tentative && !c->template_depth;
 		uint32_t closure = 0, exc = 0, ti[8], hnode[8], nh = 0;
-		cxx_entity *call = NULL;
-		bool ok = gen;
+		cxx_entity *call = NULL, *ret_slot = NULL;
+		bool ok = gen, ret_used = false;
 
 		cxx_advance(c);
 		if (gen) {
 			exc = cxx_gen_scratch(c, cc_type_pointer(c->ast, cc_type_basic(AST_TYPE_VOID)), sloc);
-			ok = cxx_try_block_parse(c, &closure, &call) && exc;
+			ok = cxx_try_block_parse(c, &closure, &call, &ret_slot, &ret_used) && exc;
 		} else
 			cxx_compound_statement_parse(c);
 		while (cxx_is_kw(c, CXX_KW_catch)) {
@@ -1037,7 +1037,13 @@ static void cxx_statement_parse1(cxx *c)
 			c->scope = outer;
 		}
 		if (gen) {
-			uint32_t st = ok && nh ? cxx_gen_try_statement(c, cxx_gen_try(c, closure, call, ti, nh, exc, sloc), hnode, nh, sloc) : 0;
+			uint32_t returned = 0, st;
+
+			if (ok && ret_used) {
+				returned = cxx_gen_try_returned(c, ret_slot, sloc);
+				ok = returned != 0;
+			}
+			st = ok && nh ? cxx_gen_try_statement(c, cxx_gen_try(c, closure, call, ti, nh, exc, sloc), hnode, nh, returned, sloc) : 0;
 
 			if (st && cxx_gen_on(c))
 				cxx_gen_statement(c, st);

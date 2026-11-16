@@ -2787,3 +2787,11 @@ statisk `operator()` på ett temporärt objekt, byggs i anroparens objekt
 `vector<vector<bool>> e = {{...}}` länkar nu).  Tester:
 `run/constexpr-auto-local.cpp`, `run/return-static-call-prvalue.cpp`.
 Sviter gröna (158/158, 38/38, mangle).
+
+## Status 183 (2026-11-16)
+`return` i ett try-blocks kropp: värdet sparas i en variabel i den omgivande
+funktionen (en referens som adressen till det den refererar), kroppens anrop
+returnerar 1 och try-satsen returnerar det sparade (jsons `at()`).  Void,
+skalärer och referenser; en klass som returneras via adress och try i en
+lambda byggs inte än.  Test: `run/return-in-try.cpp`.  Sviter gröna (159/159,
+38/38).

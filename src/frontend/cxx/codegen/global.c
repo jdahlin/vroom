@@ -121,8 +121,23 @@ VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc)
 	return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 }
 
+/* the return statement after a try block whose body returned: what the body kept (a reference's referent,
+   through its address) */
+VPRIV uint32_t cxx_gen_try_returned(cxx *c, const cxx_entity *slot, uint32_t loc)
+{
+	ast_qualified_type rt = c->gen_ret;
+	uint32_t v = 0;
+
+	if (AST_TYPE_KIND(c->ast, rt) != AST_TYPE_VOID) {
+		v = cxx_gen_var_node(c, slot->sym, loc);
+		if (cxx_gen_is_reference(c, rt))
+			v = cc_dereference_build(c->ast, cc_node_rvalue(c->ast, v), loc);
+	}
+	return cxx_gen_return(c, v, v != 0, loc);
+}
+
 /* the try statement: code = the call of the body through its trampoline; then the handler it names, if any */
-VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc)
+VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t returned, uint32_t loc)
 {
 	cc *a = c->ast;
 	uint32_t code = cxx_gen_temporary(c, cc_type_basic(AST_TYPE_INT), loc), chain = 0;
@@ -138,6 +153,9 @@ VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *hand
 	}
 	cc_id_list_init(&l);
 	cc_id_list_append(a, &l, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, cxx_gen_var_node(c, code, loc), call, loc), 0, 0));
+	if (returned)	/* (1: the body returned; `returned` returns what it kept) */
+		chain = cc_statement_new(a, AST_NODE_IF, loc, cc_condition_scalar(a, cc_binary_build(a, LEX_TOKEN_EQUAL_EQUAL, cc_node_rvalue(a, cxx_gen_var_node(c, code, loc)),
+					 cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc), loc), "statement"), returned, chain);
 	cc_id_list_append(a, &l, chain);
 	return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l), l.n);
 }

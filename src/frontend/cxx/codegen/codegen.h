@@ -122,7 +122,7 @@ VPRIV void cxx_gen_file_asm(cxx *c, const char *text);
 VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc);
 VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
-VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc);
+VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t returned, uint32_t loc);
 VPRIV bool cxx_gen_global_begin(cxx *c, const cxx_entity *v);
 VPRIV bool cxx_gen_global_finish(cxx *c, bool keep);
 VPRIV void cxx_gen_global_zeroed(cxx *c, const cxx_entity *v);

@@ -259,7 +259,10 @@ typedef struct cxx_gen_lambda {
 	uint32_t floor;		/* symbols made before this one belong to the enclosing functions */
 	uint8_t def;		/* the capture-default: 0 none, 1 [&], 2 [=] */
 	uint8_t ex_this, bad;
-	uint8_t is_try;		/* a try block's body, outlined: no return, break or continue out of it yet */
+	uint8_t is_try;		/* a try block's body, outlined: no break or continue out of it yet */
+	uint8_t ret_used;	/* is_try: a return in it stored the result in ret_slot and returned 1 */
+	struct cxx_entity *ret_slot;	/* is_try: the enclosing function's variable for its result (NULL: no return built) */
+	ast_qualified_type ret_ty;	/* is_try: the enclosing function's return type */
 	uint32_t nex;
 	struct { uint32_t name; uint8_t by_ref; } ex[16];	/* the captures the list names */
 	uint32_t n;
@@ -735,9 +738,10 @@ VPRIV void cxx_gen_throw(cxx *c, uint32_t x, bool has_operand, uint32_t loc);
 VPRIV uint32_t cxx_gen_typeinfo(cxx *c, ast_qualified_type t);
 VPRIV uint32_t cxx_gen_try(cxx *c, uint32_t closure, cxx_entity *call, const uint32_t *ti, uint32_t nhandlers, uint32_t exc, uint32_t loc);
 VPRIV uint32_t cxx_gen_scratch(cxx *c, ast_qualified_type t, uint32_t loc);
-VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t loc);
+VPRIV uint32_t cxx_gen_try_statement(cxx *c, uint32_t call, const uint32_t *handlers, uint32_t nhandlers, uint32_t returned, uint32_t loc);
+VPRIV uint32_t cxx_gen_try_returned(cxx *c, const struct cxx_entity *slot, uint32_t loc);
 VPRIV uint32_t cxx_gen_return_zero(cxx *c, uint32_t body, uint32_t loc);
-VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out);
+VPRIV bool cxx_try_block_parse(cxx *c, uint32_t *closure_node, cxx_entity **call_out, cxx_entity **ret_slot, bool *ret_used);
 VPRIV uint32_t cxx_gen_catch_begin(cxx *c, uint32_t exc, ast_qualified_type decl_type, uint32_t *var, cc_id_list *list, uint32_t loc);
 VPRIV bool cxx_mangle_type(cxx *c, ast_qualified_type t, char *buf, size_t cap);
 VPRIV bool cxx_gen_lambda_symbol(cxx *c, cxx_entity *call, uint32_t serial);

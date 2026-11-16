@@ -351,8 +351,36 @@ VPRIV uint32_t cxx_gen_return(cxx *c, uint32_t e, bool has_value, uint32_t loc)
 	if (!cxx_gen_on(c))
 		return 0;
 	if (c->gen_lambda && c->gen_lambda->is_try) {
-		cxx_gen_fail(c);	/* (a return out of a try block: not built yet) */
-		return 0;
+		/* return out of a try block's body: the result in the enclosing function's variable, then 1 for
+		   the try statement, which returns it */
+		cxx_gen_lambda *l = c->gen_lambda;
+		ast_qualified_type rt = l->ret_ty;
+		cc_id_list s;
+
+		if (!l->ret_slot) {
+			cxx_gen_fail(c);	/* (a class returned by address, a try in a lambda: not built yet) */
+			return 0;
+		}
+		cc_id_list_init(&s);
+		if (AST_TYPE_KIND(a, rt) == AST_TYPE_VOID) {
+			if (has_value && e)
+				cc_id_list_append(a, &s, cc_statement_new(a, AST_NODE_EXPRESSION, loc, e, 0, 0));
+		} else {
+			int k;
+			uint32_t v, slot;
+
+			if (!has_value || !e || !(v = cxx_gen_bind(c, e, rt, loc)) || (k = cxx_gen_capture(c, l, l->ret_slot, loc)) < 0) {
+				cxx_gen_fail(c);
+				return 0;
+			}
+			slot = cc_dereference_build(a, cc_node_rvalue(a, cxx_gen_var_node(c, l->cap[k].local, loc)), loc);
+			if (cxx_gen_is_reference(c, rt))
+				v = cc_cast_insert(a, cc_node_rvalue(a, v), l->ret_slot->ty, AST_CAST_NOP);
+			cc_id_list_append(a, &s, cc_statement_new(a, AST_NODE_EXPRESSION, loc, cc_assignment_build(a, 0, slot, cc_node_rvalue(a, v), loc), 0, 0));
+		}
+		cc_id_list_append(a, &s, cc_statement_new(a, AST_NODE_RETURN, loc, cc_node_integer_new(a, 1, cc_type_basic(AST_TYPE_INT), loc), 0, 0));
+		l->ret_used = 1;
+		return cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &s), s.n);
 	}
 	if (has_value && e && AST_TYPE_KIND(a, c->gen_ret) == AST_TYPE_VOID && AST_TYPE_KIND(a, AST_NODE_AT(a, e)->ty) == AST_TYPE_VOID) {
 		/* return f(); in a void function (C++ allows it, C does not): f(), then return */
