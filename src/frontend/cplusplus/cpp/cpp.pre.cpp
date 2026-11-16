@@ -311,6 +311,18 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
         files.spelling(name, spelling.get());
         kind = find_directive(behavior, spelling.data(), spelling.size());
     }
+    /* [cpp.replace]/13's undefined behavior: [impl.clang] #include and
+       #pragma in a macro's arguments are errors, the others are executed */
+    if (collecting_arguments &&
+        (kind == directive_kind::include ||
+         kind == directive_kind::include_next ||
+         kind == directive_kind::import || kind == directive_kind::pragma)) {
+        (diagnostics.issue(diagnostic_id::err_embedded_directive, name.location)
+         << 1)
+            .text(spelling.data(), spelling.size());
+        skip_rest_of_directive();
+        return;
+    }
     switch (kind) {
     case directive_kind::include:
     case directive_kind::include_next:
