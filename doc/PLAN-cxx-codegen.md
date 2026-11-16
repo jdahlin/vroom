@@ -14,8 +14,11 @@ Decided in review (2026-11-16):
   recognizes each construct, and what is built is the typed tree.  No
   syntax tree is kept in the compiler.  This reverses decision 1 of
   PLAN-cxx-parse (section 3.2 says what changes there).
-- **The target is VIR.**  Section 3.6 has the two routes to it; which one
+- **The target is VIR.**  Section 3.5 has the two routes to it; which one
   is still to confirm.
+- **Speed decides the architecture** (section 3.0): nothing analyzed twice
+  in a build, nothing analyzed that is not used, no token parsed twice;
+  steps S0-S7 (section 6) come before CG1.
 
 Working assumption, to confirm: the typed tree is the shared AST the C
 front end already builds (`struct ast`), grown with C++'s kinds, so C and
@@ -119,6 +122,91 @@ Each answers a cause above.
    (symbol, linkage, body).
 
 ## 3. Architecture
+
+### 3.0 Performance architecture
+
+What decides speed, from measurements already in `doc/`:
+
+- 30x clang -O2 on json's 71 TUs is 8.1 s; the front end must stay at
+  least 4.5x faster than clang's, or the TUs must share work
+  (PLAN-cxx.md, "Can json reach 30x").
+- On json, 86 % of clang's time is front end and 53 % instantiation;
+  85 % of the function and class instantiations repeat one done in
+  another TU (PLAN-cxx.md X0).
+- The old front end spent 11.0 of its 13.7 s on headers every TU parsed
+  again; with the headers parsed once (a fork server) the suite took
+  3.7 s, with vcc generating about 1 % of the code (PLAN-cxx.md status
+  23, 40).
+- The C front end's largest measured wins: lazy header bodies taken
+  zero-copy from the header cache (-45 % instructions), the header cache
+  (-35 % cycles), a resident vccd (-20 %), prefix snapshots (-10 %).
+  Declaration replay, which copies records into each TU, did not pay
+  (`quality/MEASURE-replay.md`).
+- The parser (read from the code, not measured): every declaration and
+  statement is a tentative parse kept when it succeeds (`dcl.pre.cpp`,
+  `stmt.pre.cpp`); every member-specification is parsed twice, the first
+  pass thrown away (`class.mem.cpp`); every `(` tries a type-id first; a
+  name is looked up two or three times; lookup scans linearly, a scope is
+  a `malloc`, a token costs at least 112 bytes.  Recorded speed: 250-370
+  ns per token, none on json.
+
+So per-token speed matters, but less than doing less work, in this order:
+never analyze the same header declaration, inline body or instantiation
+twice in a build; never analyze a body nobody uses; never parse a token
+twice.
+
+1. **Layered, immutable, shared state.**  The tables of the typed tree
+   (types, records, symbols, nodes, lists, pools) and C++'s entities live
+   in two layers: a shared one, frozen and read lock-free by every TU
+   thread of vccd, published as the header cache is
+   (`pp_shared_allocate`); and the TU's own, in per-TU regions as
+   `cc_translation_unit_init` has them (`vjob_region`).  One 32-bit index
+   space says which layer an entry is in; a TU reads shared entries in
+   place and never copies them.  The unit of sharing is a header-cache
+   region analyzed at file scope, keyed as prefix snapshots are and
+   validated by the lookups it made (PLAN-cxx X4, X5).  A fork after the
+   common prefix (the old `cxx_fork_tus`) is the first version and stays
+   the fallback.
+2. **Bodies and templates on demand, analyzed once per build.**  Inline
+   functions' and members' bodies and template definitions are token
+   ranges, taken zero-copy where the header cache has the braces
+   (`pp_lazy_body_skip`, as `frontend/c/lazy-body.cpp`).  The first use
+   parses one into a typed tree, dependent for a template, in the shared
+   layer.  Instantiation substitutes that tree and is cached by
+   (template, arguments) with its recorded lookups.  [temp.res]/8 lets an
+   uninstantiated template go undiagnosed; vccd analyzes an unused inline
+   body once per build for its diagnostics.  Complete-class contexts
+   ([class.mem]/6) are such ranges too, parsed when the class is
+   complete: this replaces the member-specification's first pass.
+3. **One pass in the parser, nothing built and rewound.**  Error recovery
+   is not a tentative parse: a declaration or statement that fails is
+   reported and skipped, its pending children truncated; one that
+   succeeds is never rewound, so actions at `finish_node` stand.
+   Disambiguation ([dcl.ambig.res], [stmt.ambig], the cast's `(`,
+   template arguments) is a recognizer that builds nothing and answers
+   from lookups; then the chosen reading is parsed once.  A name is looked
+   up once per token (a cache keyed by token index), and each lookup
+   records its token.  Scopes are C's: an identifier-indexed directory of
+   the innermost binding, shadow chains and a scope stack
+   (`frontend/c/scope.cpp`); members are in per-entity hashed tables in
+   the layer that owns them; no `malloc` per scope.  Tokens stay compact
+   (the header cache's 12-byte form), their values decoded when asked.
+4. **Actions at `finish_node`.**  The node's kind selects the action, so
+   the grammar functions stay as they are; the recorder of 3.2 is the
+   other set.  Rules return 24-byte nodes of the shared AST with
+   interned types (`cc_type_intern`, the function-type hash), C++'s
+   entities in side tables of the same layers.  No mode flags: the
+   recognizer is the speculation, unevaluated operands are nodes never
+   lowered.
+5. **Code generation per symbol, streamed and shared.**  Emission is a
+   queue of (symbol, linkage, body): a non-inline definition is queued
+   when its body is analyzed, so the code generator works while the
+   parser goes on; LINKONCE symbols come in by reference as
+   `codegen_work_enqueue` does.  A COMDAT function's object bytes are
+   cached in vccd by mangled name and a hash of body and options
+   (PLAN-cxx X5).  -O0 and -O1 take the direct paths, -O2 and up VIR, as
+   for C: at 30 ns to build and 200 to allocate per VIR instruction
+   (SPEC-vir 22.1), VIR at -O0 would be the largest cost.
 
 ```
 tokens ─ parse/ ──────────> typed tree ─ lower/ + abi/ ─> C-level typed tree
@@ -410,6 +498,29 @@ per token from tokens to typed tree and per node lowered, against Status
 133's 0.6 s of front end per json TU.
 
 ## 6. Steps
+
+First the performance base of 3.0, each step measured and its numbers
+recorded here:
+
+- **S0 Measure.**  `cxxparse -stats` reports time; `bench/cxx-parse-speed.py`
+  reports ns per token, tentative parses and rewound tokens against clang
+  `-fsyntax-only` on json.hpp, libstdc++'s headers and `CXX/drs`.
+- **S1 The parser without build-and-rewind** (3.0 item 3): recovery, the
+  member-specification as one pass with ranges, the recognizer at the hot
+  disambiguation sites, one lookup per token.  Gate: PLAN-cxx-parse's
+  V1-V6 numbers unchanged.
+- **S2 Regions and lookup tables**: `vjob_region` arenas, C's scope
+  directory, compact tokens, no `malloc` on the hot path.
+- **S3 Actions and the first typed nodes**: the class-free programs of
+  `src/test/cxx/run/` at -O1 and -O2 (CG1's start).
+- **S4 Bodies on demand** (3.0 item 2), with the share skipped on json.
+- **S5 The shared layer in vccd** (3.0 item 1); json's CPU with it on and
+  off.
+- **S6 Instantiation once per build**, with a verify mode.
+- **S7 Code generation per symbol, streamed, and the code cache**: objects
+  byte-identical with the caches on and off.
+
+Then CG0-CG9 on that base:
 
 The parser's steps go on against the recorder at their own pace.  Semantic
 analysis has no plan yet; each step below names what it needs from it.
