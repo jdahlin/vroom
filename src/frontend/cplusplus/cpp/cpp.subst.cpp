@@ -2,7 +2,7 @@
  * cpp.subst.cpp: [cpp.subst] Argument substitution, and the # and ##
  * operators applied as the replacement list is read ([cpp.stringize]/2:
  * "The order of evaluation of # and ## operators is unspecified": here
- * left to right, as clang).
+ * left to right, [impl.clang] as clang).
  *
  *     va-opt-replacement:
  *         '__VA_OPT__ (' pp-tokens_opt ')'
@@ -176,7 +176,7 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
     const macro_definition &m = s.m;
     while (i < s.end) {
         const replacement_element &e = elements[i];
-        /* clang: white space before a token of the replacement list (not
+        /* [impl.clang] white space before a token of the replacement list (not
            after a ##) goes to the next token substituted, through empty
            arguments */
         if (i > m.first_element &&
@@ -191,21 +191,9 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
            preceding preprocessing token is concatenated with the following
            preprocessing token" */
         if (is_operator(e.token, op::HASH_HASH) && !out.empty()) {
-            /* GNU: , ## __VA_ARGS__ drops the comma when there are no
-               variable arguments */
-            const replacement_element &next = elements[i + 1];
-            if (m.variadic && next.parameter == m.parameter_count - 1 &&
-                is_operator(out[out.size() - 1], op::COMMA)) {
-                const argument &a = s.arguments[next.parameter];
-                if (a.begin == a.end) {
-                    out.resize(out.size() - 1);
-                    out.append(placemarker(next.token.location));
-                } else {
-                    diagnostics.issue(diagnostic_id::ext_paste_comma,
-                                      e.token.location);
-                    for (uint32_t k = a.begin; k < a.end; k++)
-                        out.append(s.tokens[k]);
-                }
+            /* [ext.gnu] gnu_comma_paste */
+            if (behavior.has(extension::gnu_comma_paste) &&
+                gnu_comma_paste(s, i, out)) {
                 i += 2;
                 continue;
             }

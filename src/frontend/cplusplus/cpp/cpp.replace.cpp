@@ -14,8 +14,9 @@
  *     lparen:
  *         a '(' character not immediately preceded by white-space
  *
- * Which diagnostics a malformed definition gets is clang's choice (its
- * PPDirectives.cpp), as is GNU's named variable arguments (#define f(x...)).
+ * [impl.clang] Which diagnostics a malformed definition gets is clang's
+ * choice (its PPDirectives.cpp).  [ext.gnu] gnu_named_variadic_macro:
+ * #define f(args...).
  */
 #include <stdio.h>
 
@@ -85,7 +86,7 @@ const char *preprocessor::identifier_spelling(uint32_t id, size_t *n) const
     return identifier_spellings.data() + identifiers[id].spelling_offset;
 }
 
-/* an identifier as clang prints one in a message: 'name' */
+/* [impl.clang] an identifier as clang prints one in a message: 'name' */
 diagnostic_message &preprocessor::quoted(diagnostic_message &m,
                                          const preprocessing_token &t)
 {
@@ -104,7 +105,7 @@ diagnostic_message &preprocessor::quoted(diagnostic_message &m,
  * is not an identifier ... Therefore it is not possible to define a macro
  * whose name is the same as that of an alternative token";
  * [cpp.predefined]/4 makes defining "defined" undefined behavior, an error
- * in clang.
+ * in clang ([impl.clang]).
  */
 bool preprocessor::check_macro_name(const preprocessing_token &name,
                                     bool definition)
@@ -129,14 +130,14 @@ bool preprocessor::check_macro_name(const preprocessing_token &name,
         snprintf(aka, sizeof aka, "'%s'",
                  preprocessing_op_or_punc_spelling(op));
         quoted(diagnostics.issue(
-                   behavior.microsoft_extensions
+                   behavior.has(extension::microsoft_operator_name_macros)
                        ? diagnostic_id::ext_pp_operator_used_as_macro_name
                        : diagnostic_id::err_pp_operator_used_as_macro_name,
                    name.location),
                name)
             << aka;
-        if (!behavior.microsoft_extensions)
-            return false;
+        if (!behavior.has(extension::microsoft_operator_name_macros))
+            return false; /* [ext.microsoft] otherwise */
     }
     if (s.size() == 7 && !memcmp(s.data(), "defined", 7)) {
         diagnostics.issue(diagnostic_id::err_defined_macro_name, name.location);
@@ -148,7 +149,7 @@ bool preprocessor::check_macro_name(const preprocessing_token &name,
 
 /* [cpp.predefined]/4: "If any of the pre-defined macro names in this
    subclause, or the identifier defined, is the subject of a #define or a
-   #undef preprocessing directive, the behavior is undefined": clang warns
+   #undef preprocessing directive, the behavior is undefined": [impl.clang] clang warns
    for its dynamic macros, and for __STDC*, __cplusplus and __cpp* from its
    predefined macros */
 bool preprocessor::is_language_defined(const macro_definition &m) const
@@ -420,7 +421,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
        macro (see below) may be redefined by another #define preprocessing
        directive provided that the second definition is an object-like macro
        definition and the two replacement lists are identical, otherwise the
-       program is ill-formed": clang warns */
+       program is ill-formed": [impl.clang] clang warns */
     int32_t previous = identifiers[m.name].macro;
     if (previous >= 0 && !system_header_at(name.location)) {
         const macro_definition &old = macros[previous];
@@ -459,7 +460,9 @@ bool preprocessor::parameter_list(macro_definition &m,
             return false;
         }
         if (is_operator(t, preprocessing_op_or_punc::ELLIPSIS)) {
-            /* [cpp.replace]/12: '# define' identifier lparen '...' ')' */
+            /* [cpp.replace]/12: '# define' identifier lparen '...' ')';
+               C++11's (N1653), [ext.clang] clang_later_edition_features in
+               C++98 */
             diagnostics.issue(
                 behavior.has(language_feature::variadic_macros)
                     ? diagnostic_id::warn_cxx98_compat_variadic_macro
@@ -503,8 +506,10 @@ bool preprocessor::parameter_list(macro_definition &m,
             return true;
         if (is_operator(t, preprocessing_op_or_punc::COMMA))
             continue;
-        if (is_operator(t, preprocessing_op_or_punc::ELLIPSIS)) {
-            /* GNU: the variable arguments named by the last parameter */
+        if (is_operator(t, preprocessing_op_or_punc::ELLIPSIS) &&
+            behavior.has(extension::gnu_named_variadic_macro)) {
+            /* [ext.gnu] gnu_named_variadic_macro: the variable arguments
+               named by the last parameter */
             diagnostics.issue(diagnostic_id::ext_named_variadic_macro,
                               t.location);
             t = directive_token();
@@ -637,7 +642,7 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
     if (n < m.parameter_count) {
         if (m.variadic && n + 1 == m.parameter_count) {
             /* the variable arguments left out: C++20's [cpp.replace]/5;
-               before, a C++20 feature clang accepts */
+               [ext.clang] clang_later_edition_features before C++20 */
             if (!behavior.has(
                     language_feature::variadic_arguments_may_be_omitted))
                 diagnostics.issue(diagnostic_id::ext_cxx_missing_varargs_arg,

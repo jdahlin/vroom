@@ -26,6 +26,17 @@ by step once it covers what that front end does.
   Where clang departs from n4861 (a later paper applied as a DR, an
   extension), the comment says so and names the paper (P1949R7 for
   identifiers, P2290R3 for `\u{}`, P0330R8 for `z`).
+- **Extensions are named, gated and kept apart.**  Each one is a row of
+  `ext/extensions.inc` (`EXTENSION(name, vendor, reference)`, vendor `gnu`,
+  `clang`, `microsoft` or `vcc`, and where that implementation documents
+  it); code asks `behavior.has(extension::name)`, so each can be turned off.
+  The code is in `ext/VENDOR/` where it can be (`ext/gnu/line_marker.cpp`,
+  `ext/clang/feature_checks.cpp`, ...), the standard's file keeping one
+  call; a call site, or extension code that cannot move, has the tag
+  `[ext.VENDOR]` in its comment.  A choice the standard leaves open
+  (implementation-defined or undefined behavior) made as clang makes it is
+  no extension: its tag is `[impl.clang]`.  `grep -rn '\[ext\.'` lists the
+  extensions in the code, `grep -rn '\[impl\.'` the choices.
 - **Memory is held by owners** (`src/include/frontend/cplusplus/owned.h`:
   `owned_array`, `owned_buffer`, `owned_string`, RAII): no `free()`,
   `malloc()`, `realloc()` or `strdup()` outside that header.  The pre-commit

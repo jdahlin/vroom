@@ -50,7 +50,7 @@ preprocessing_token preprocessor::stringize(const preprocessing_token *tokens,
             char c = spelling.data()[k];
             if (literal && (c == '"' || c == '\\'))
                 vbuffer_append(text.get(), "\\", 1);
-            /* clang: a new-line (inside a raw string literal) is written
+            /* [impl.clang] a new-line (inside a raw string literal) is written
                as an escape sequence */
             if (c == '\n') {
                 vbuffer_append(text.get(), "\\n", 2);
@@ -60,7 +60,7 @@ preprocessing_token preprocessor::stringize(const preprocessing_token *tokens,
         }
     }
     /* "If the replacement that results is not a valid character string
-       literal, the behavior is undefined": clang drops a final \ that
+       literal, the behavior is undefined": [impl.clang] clang drops a final \ that
        would escape the closing quote */
     size_t backslashes = 0;
     while (backslashes < text.size() - 1 &&

@@ -29,7 +29,7 @@
  * in a group that is skipped."
  *
  * Where the evaluation of the controlling expression is not specified
- * ([cpp.cond]/10's undefined behavior, which diagnostics are issued), clang's
+ * ([cpp.cond]/10's undefined behavior, which diagnostics are issued), [impl.clang] clang's
  * choices are followed (its PPExpressions.cpp).
  */
 #include <stdio.h>
@@ -103,7 +103,7 @@ preprocessing_op_or_punc operator_of(const preprocessor &p,
     return preprocessing_op_or_punc::count;
 }
 
-/* the precedence of a binary operator, as clang numbers them: 0 for the end
+/* the precedence of a binary operator, [impl.clang] as clang numbers them: 0 for the end
    of the expression, ~0u for a token that is no binary operator */
 unsigned precedence(const preprocessor &p, const preprocessing_token &t)
 {
@@ -220,7 +220,7 @@ static bool evaluate_defined(preprocessor &p,
     }
     r.advance();
     /* [cpp.cond]/10: "If the token defined is generated as a result of this
-       replacement process ... the behavior is undefined": clang evaluates
+       replacement process ... the behavior is undefined": [impl.clang] clang evaluates
        it, with a warning */
     if (defined.expansion)
         p.diagnostics.issue(
@@ -249,8 +249,10 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
     case preprocessing_token_kind::identifier: {
         if (condition_word(p, t, "defined"))
             return evaluate_defined(p, r, v);
+        /* [ext.clang] clang_has_include_next */
         if (condition_word(p, t, "__has_include") ||
-            condition_word(p, t, "__has_include_next")) {
+            (condition_word(p, t, "__has_include_next") &&
+             p.behavior.has(extension::clang_has_include_next))) {
             int64_t found;
             if (!p.has_include(r, t, condition_word(p, t, "__has_include_next"),
                                &found))
@@ -606,7 +608,7 @@ static bool evaluate_binary(preprocessor &p, preprocessor::expression_reader &r,
             break;
         case op::COMMA:
             /* [expr.const]/5.?: a comma operator is not in a constant
-               expression's grammar before C++11's relaxation; clang: an
+               expression's grammar before C++11's relaxation; [impl.clang] an
                extension in C++ */
             if (live)
                 p.diagnostics.issue(diagnostic_id::ext_pp_comma_expr, at);
@@ -758,6 +760,7 @@ void preprocessor::directive_elif_else(const preprocessing_token &name,
     int which = kind == directive_kind::elifdef    ? 1
                 : kind == directive_kind::elifndef ? 2
                                                    : 0;
+    /* C++23's; [ext.clang] clang_later_edition_features before */
     if (kind == directive_kind::elifdef || kind == directive_kind::elifndef)
         diagnostics.issue(behavior.has(language_feature::elifdef_directives)
                               ? diagnostic_id::warn_cxx23_compat_pp_directive
@@ -833,7 +836,7 @@ void preprocessor::skip_group()
         if (is_identifier(name)) {
             owned_buffer s;
             files.spelling(name, s.get());
-            kind = find_directive(s.data(), s.size());
+            kind = find_directive(behavior, s.data(), s.size());
         }
         conditional &c = conditionals[conditionals.size() - 1];
         int which = kind == directive_kind::elifdef    ? 1
@@ -871,6 +874,7 @@ void preprocessor::skip_group()
         case directive_kind::elifndef:
             if (depth)
                 break;
+            /* C++23's; [ext.clang] clang_later_edition_features before */
             if (kind != directive_kind::elif)
                 diagnostics.issue(
                     behavior.has(language_feature::elifdef_directives)
@@ -1043,27 +1047,6 @@ int64_t cpp_attribute_value(const implementation_defined_behavior &b,
         if (strlen(a.name) == length && !memcmp(a.name, name, length))
             return a.value;
     return 0;
-}
-
-bool has_feature(const implementation_defined_behavior &b, const char *name,
-                 size_t length, bool extension)
-{
-    (void)b, (void)name, (void)length, (void)extension;
-    return false;
-}
-
-int64_t has_gnu_attribute(const implementation_defined_behavior &b,
-                          const char *name, size_t length)
-{
-    (void)b, (void)name, (void)length;
-    return 0;
-}
-
-bool has_builtin(const implementation_defined_behavior &b, const char *name,
-                 size_t length)
-{
-    (void)b, (void)name, (void)length;
-    return false;
 }
 
 } // namespace cplusplus

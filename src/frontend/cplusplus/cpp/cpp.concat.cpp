@@ -15,7 +15,8 @@ namespace cplusplus
 {
 
 /* left becomes the concatenation of left and right; false if they do not
-   form one preprocessing token, which clang diagnoses, keeping both */
+   form one preprocessing token: [impl.clang] an error, both kept
+   ([ext.microsoft] microsoft_invalid_paste: a warning) */
 bool preprocessor::concatenate(preprocessing_token &left,
                                const preprocessing_token &right,
                                source_location at)
@@ -34,7 +35,7 @@ bool preprocessor::concatenate(preprocessing_token &left,
     preprocessing_token result;
     if (!spelled(text.data(), text.size(), &result)) {
         diagnostics
-            .issue(behavior.microsoft_extensions
+            .issue(behavior.has(extension::microsoft_invalid_paste)
                        ? diagnostic_id::ext_pp_bad_paste_ms
                        : diagnostic_id::err_pp_bad_paste,
                    at)

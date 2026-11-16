@@ -46,3 +46,50 @@ const char *language_feature_reference(language_feature feature)
 }
 
 } // namespace cplusplus
+
+namespace cplusplus
+{
+
+namespace
+{
+
+struct extension_description {
+    const char *name;
+    extension_vendor vendor;
+    const char *reference;
+};
+
+constexpr extension_description extensions[] = {
+#define EXTENSION(name, vendor, reference)                                     \
+    {#name, extension_vendor::vendor, reference},
+#include "../ext/extensions.inc"
+#undef EXTENSION
+};
+
+} // namespace
+
+bool implementation_defined_behavior::has(extension e) const
+{
+    unsigned vendor = (unsigned)extensions[static_cast<int>(e)].vendor;
+    if (vendor == (unsigned)extension_vendor::microsoft)
+        return microsoft_extensions;
+    return (extension_vendors >> vendor & 1) &&
+           !(extensions_off >> static_cast<int>(e) & 1);
+}
+
+const char *extension_name(extension e)
+{
+    return extensions[static_cast<int>(e)].name;
+}
+
+extension_vendor extension_vendor_of(extension e)
+{
+    return extensions[static_cast<int>(e)].vendor;
+}
+
+const char *extension_reference(extension e)
+{
+    return extensions[static_cast<int>(e)].reference;
+}
+
+} // namespace cplusplus

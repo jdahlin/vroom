@@ -56,6 +56,19 @@ enum class language_feature : uint8_t {
     count
 };
 const char *language_feature_name(language_feature feature);
+
+/* [intro.compliance]/8: the extensions, by the implementation they come
+   from (frontend/cplusplus/ext/extensions.inc) */
+enum class extension_vendor : uint8_t { gnu, clang, microsoft, vcc };
+enum class extension : uint8_t {
+#define EXTENSION(name, vendor, reference) name,
+#include "../../../frontend/cplusplus/ext/extensions.inc"
+#undef EXTENSION
+    count
+};
+const char *extension_name(extension e);
+extension_vendor extension_vendor_of(extension e);
+const char *extension_reference(extension e);
 const char *language_feature_reference(language_feature feature);
 
 /*
@@ -96,6 +109,14 @@ struct implementation_defined_behavior {
                                                        bool gnu_extensions);
     /* whether the edition in effect has a feature ([diff]) */
     bool has(language_feature feature) const;
+    /* the vendors whose extensions are on (clang and GNU's always, as in
+       clang; Microsoft's with -fms-extensions), and those turned off one by
+       one */
+    uint8_t extension_vendors =
+        1 << (int)extension_vendor::gnu | 1 << (int)extension_vendor::clang;
+    uint64_t extensions_off = 0;
+    /* whether an extension is on */
+    bool has(extension e) const;
 };
 
 /* ---- source files: [lex.separate], [lex.phases], [cpp.line] ------------ */
@@ -886,7 +907,7 @@ class preprocessor
                      uint32_t *value);
     bool string_contents(const preprocessing_token &token, owned_buffer &out);
     void set_presumed_line(uint32_t line, const char *name, size_t length);
-    void directive_line(const preprocessing_token &name, bool gnu_marker);
+    void directive_line(const preprocessing_token &name);
     void rest_of_line(source_location from, owned_buffer &out);
     void directive_error(const preprocessing_token &name, bool warning);
     void directive_pragma(const preprocessing_token &name);
@@ -900,6 +921,19 @@ class preprocessor
         int32_t macro;
     };
     owned_array<pushed_macro> pushed_macros;
+
+    /* ---- the extensions (ext/VENDOR/) */
+    void gnu_line_marker(const preprocessing_token &digits);
+    void gnu_ident_directive(const preprocessing_token &name);
+    bool gnu_comma_paste(substitution &s, uint32_t at,
+                         owned_array<preprocessing_token> &out);
+    bool gnu_pragma(const preprocessing_token *tokens, size_t count);
+    void gnu_define_dynamic_macros();
+    bool gnu_dynamic_macro(const macro_definition &m, owned_buffer &text);
+    void clang_define_dynamic_macros();
+    /* 0: not clang's, 1: replaced by text, 2: diagnosed, nothing to read */
+    int clang_dynamic_macro(preprocessing_token &name,
+                            const macro_definition &m, owned_buffer &text);
 
     /* ---- [cpp.module], [cpp.import] */
     bool module_or_import_directive(preprocessing_token &first);

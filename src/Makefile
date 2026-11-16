@@ -230,7 +230,7 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 # the C++ front end written against the standard (src/frontend/cplusplus,
 # doc/PLAN-cxx-spec.md): C++20 code, so not in a VCC_LANG=c build; cxxlex
 # drives its lexer for bench/cxx-lex.py
-cplusplus_SRC = $(wildcard frontend/cplusplus/*/*.cpp)
+cplusplus_SRC = $(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp)
 $(OUT)/cxxlex: $(call o,bin/cxxlex/cxxlex.cpp $(LIB_SRC)) $(call mod,cplusplus)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 

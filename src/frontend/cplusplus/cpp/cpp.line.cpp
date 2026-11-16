@@ -1,6 +1,6 @@
 /*
- * cpp.line.cpp: [cpp.line] Line control, and GNU's line markers
- * (# digit-sequence "s-char-sequence" flags_opt), which clang -E writes.
+ * cpp.line.cpp: [cpp.line] Line control.  GNU's line markers are
+ * ext/gnu/line_marker.cpp.
  *
  * [cpp.line]/2: "The line number of the current source line is one greater
  * than the number of new-line characters read or introduced in translation
@@ -103,84 +103,55 @@ void preprocessor::set_presumed_line(uint32_t line, const char *name,
  * /5 "The preprocessing tokens after line on the directive are processed
  * just as in normal text".
  */
-void preprocessor::directive_line(const preprocessing_token &name,
-                                  bool gnu_marker)
+void preprocessor::directive_line(const preprocessing_token &name)
 {
-    owned_array<preprocessing_token> operands;
-    if (gnu_marker) {
-        operands.append(name);
-        for (preprocessing_token t = directive_token(); !is_end(t);
-             t = directive_token())
-            operands.append(t);
-    } else {
-        owned_array<preprocessing_token> line;
-        for (preprocessing_token t = directive_token(); !is_end(t);
-             t = directive_token())
-            line.append(t);
-        size_t depth = contexts.size();
-        push_tokens(line.data(), line.size(), -1, true);
-        for (preprocessing_token t; read_expanded(t);)
-            operands.append(t);
-        while (contexts.size() > depth)
-            pop_context();
-    }
+    (void)name;
+    owned_array<preprocessing_token> line, operands;
+    for (preprocessing_token t = directive_token(); !is_end(t);
+         t = directive_token())
+        line.append(t);
+    size_t depth = contexts.size();
+    push_tokens(line.data(), line.size(), -1, true);
+    for (preprocessing_token t; read_expanded(t);)
+        operands.append(t);
+    while (contexts.size() > depth)
+        pop_context();
     if (operands.empty()) {
         diagnostics.issue(diagnostic_id::err_pp_line_requires_integer,
                           directive_end);
         return;
     }
     uint32_t number;
-    if (!line_number(operands[0], gnu_marker, &number))
+    if (!line_number(operands[0], false, &number))
         return;
-    if (!gnu_marker) {
-        if (number == 0)
-            diagnostics.issue(diagnostic_id::ext_pp_line_zero,
-                              operands[0].location);
-        uint32_t limit =
-            behavior.has(language_feature::long_long) ? 2147483648u : 32768u;
-        if (number >= limit)
-            diagnostics.issue(diagnostic_id::ext_pp_line_too_big,
-                              operands[0].location)
-                << (int64_t)limit;
-        else if (behavior.has(language_feature::long_long) && number >= 32768)
-            diagnostics.issue(diagnostic_id::warn_cxx98_compat_pp_line_too_big,
-                              operands[0].location);
-    }
+    /* [cpp.line]/3: "If the digit sequence specifies zero or a number
+       greater than 2147483647, the behavior is undefined": [impl.clang]
+       both are accepted, with warnings, and C++98's limit is 32767 */
+    if (number == 0)
+        diagnostics.issue(diagnostic_id::ext_pp_line_zero,
+                          operands[0].location);
+    uint32_t limit =
+        behavior.has(language_feature::long_long) ? 2147483648u : 32768u;
+    if (number >= limit)
+        diagnostics.issue(diagnostic_id::ext_pp_line_too_big,
+                          operands[0].location)
+            << (int64_t)limit;
+    else if (behavior.has(language_feature::long_long) && number >= 32768)
+        diagnostics.issue(diagnostic_id::warn_cxx98_compat_pp_line_too_big,
+                          operands[0].location);
     owned_buffer presumed;
-    bool named = false;
-    if (operands.size() > 1) {
-        if (!string_contents(operands[1], presumed)) {
-            diagnostics.issue(
-                gnu_marker ? diagnostic_id::err_pp_linemarker_invalid_filename
-                           : diagnostic_id::err_pp_line_invalid_filename,
-                operands[1].location);
-            return;
-        }
-        named = true;
+    if (operands.size() > 1 && !string_contents(operands[1], presumed)) {
+        /* [cpp.line]/1: "The string-literal of a #line directive, if
+           present, shall be a character string literal." */
+        diagnostics.issue(diagnostic_id::err_pp_line_invalid_filename,
+                          operands[1].location);
+        return;
     }
-    if (gnu_marker) {
-        /* GNU's flags: 1 entering a file, 2 leaving one, 3 a system
-           header, 4 extern "C" */
-        for (size_t i = 2; i < operands.size(); i++) {
-            owned_buffer flag;
-            files.spelling(operands[i], flag.get());
-            if (operands[i].kind != preprocessing_token_kind::pp_number ||
-                flag.size() != 1 || flag.data()[0] < '1' ||
-                flag.data()[0] > '4') {
-                diagnostics.issue(diagnostic_id::err_pp_linemarker_invalid_flag,
-                                  operands[i].location);
-                return;
-            }
-        }
-        if (inclusions.back().file->index != predefines_file)
-            diagnostics.issue(diagnostic_id::ext_pp_gnu_line_directive,
-                              operands.size() > 1 ? operands[1].location
-                                                  : directive_end);
-    } else if (operands.size() > 2)
+    if (operands.size() > 2)
         diagnostics.issue(diagnostic_id::ext_pp_extra_tokens_at_eol,
                           operands[2].location)
             << "line";
-    if (named)
+    if (operands.size() > 1)
         set_presumed_line(number, presumed.data(), presumed.size());
     else
         set_presumed_line(number, nullptr, 0);

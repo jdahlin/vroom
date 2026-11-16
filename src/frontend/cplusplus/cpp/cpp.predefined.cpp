@@ -7,16 +7,14 @@
  *
  * The macros whose replacement never changes ([cpp.predefined]/3: "The
  * values of the predefined macros (except for __FILE__ and __LINE__) remain
- * constant throughout the translation unit") are clang's for the documented
+ * constant throughout the translation unit") are [impl.clang] clang's for the documented
  * target in the edition and mode in effect (cpp/cpp.predefined.inc, taken
  * from clang once), defined by a file of #define lines as clang's
  * "<built-in>".  [cpp.predefined]/4: "Any other predefined macro names shall
  * begin with a leading underscore followed by an uppercase letter or a
- * second underscore": clang's include linux and unix in GNU modes.
+ * second underscore": [ext.gnu] clang's include linux and unix in GNU modes.
  */
 #include <stdio.h>
-#include <sys/stat.h>
-#include <time.h>
 
 #include "../cplusplus-internal.h"
 
@@ -77,6 +75,9 @@ int32_t preprocessor::define_dynamic(const char *name, dynamic_macro dynamic,
     return add_definition(m);
 }
 
+/* [cpp.predefined]/1's macros whose replacement depends on where they are
+   used, and the operators of [cpp.cond] and [cpp.pragma.op] that act as
+   macro names; then the extensions' */
 void preprocessor::define_dynamic_macros()
 {
     static constexpr struct {
@@ -88,37 +89,20 @@ void preprocessor::define_dynamic_macros()
         {"__LINE__", dynamic_macro::line, false},
         {"__DATE__", dynamic_macro::date, false},
         {"__TIME__", dynamic_macro::time, false},
-        {"__COUNTER__", dynamic_macro::counter, false},
-        {"__INCLUDE_LEVEL__", dynamic_macro::include_level, false},
-        {"__BASE_FILE__", dynamic_macro::base_file, false},
-        {"__FILE_NAME__", dynamic_macro::file_name, false},
-        {"__TIMESTAMP__", dynamic_macro::timestamp, false},
         {"_Pragma", dynamic_macro::pragma_operator, false},
         {"__has_include", dynamic_macro::has_include, true},
-        {"__has_include_next", dynamic_macro::has_include_next, true},
         {"__has_cpp_attribute", dynamic_macro::has_cpp_attribute, true},
-        {"__has_attribute", dynamic_macro::has_attribute, true},
-        {"__has_c_attribute", dynamic_macro::has_c_attribute, true},
-        {"__has_declspec_attribute", dynamic_macro::has_declspec_attribute,
-         true},
-        {"__has_builtin", dynamic_macro::has_builtin, true},
-        {"__has_feature", dynamic_macro::has_feature, true},
-        {"__has_extension", dynamic_macro::has_extension, true},
-        {"__has_warning", dynamic_macro::has_warning, true},
-        {"__is_identifier", dynamic_macro::is_identifier, true},
-        {"__has_embed", dynamic_macro::has_embed, true},
-        {"__is_target_arch", dynamic_macro::is_target_arch, true},
-        {"__is_target_vendor", dynamic_macro::is_target_vendor, true},
-        {"__is_target_os", dynamic_macro::is_target_os, true},
-        {"__is_target_environment", dynamic_macro::is_target_environment, true},
-        {"__building_module", dynamic_macro::building_module, true},
     };
     for (const auto &d : dynamic)
         define_dynamic(d.name, d.dynamic, d.function_like);
+    if (behavior.has(extension::gnu_common_predefined_macros))
+        gnu_define_dynamic_macros(); /* [ext.gnu] */
+    if (behavior.has(extension::clang_feature_checks))
+        clang_define_dynamic_macros(); /* [ext.clang] */
 }
 
 /* a string literal of the characters of s, " and \ escaped */
-static void string_literal_of(const char *s, vbuffer *out)
+void string_literal_of(const char *s, vbuffer *out)
 {
     vbuffer_append(out, "\"", 1);
     for (; *s; s++) {
@@ -129,8 +113,18 @@ static void string_literal_of(const char *s, vbuffer *out)
     vbuffer_append(out, "\"", 1);
 }
 
-/* the identifier operand of __has_feature(x) and its kin: false (and the
-   diagnostic) if there is none */
+/*
+ * [cpp.cond]:
+ *
+ *     has-attribute-expression:
+ *         '__has_cpp_attribute (' pp-tokens ')'
+ *
+ * [cpp.cond]/5: "interpreting the pp-tokens, after macro expansion, as an
+ * attribute-token": identifier or attribute-namespace :: identifier
+ * ([dcl.attr.grammar]).  [ext.clang] The operand of clang's feature
+ * checks too, which also take a string literal.  False (and the
+ * diagnostic) if it has neither form.
+ */
 bool preprocessor::feature_operand(const preprocessing_token &name,
                                    owned_buffer &operand, owned_buffer &scope)
 {
@@ -190,50 +184,29 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
     owned_buffer text;
     switch (m.dynamic) {
     case dynamic_macro::line: {
-        /* clang: the line of the end of the outermost invocation, which is
-           the last token read from the source file */
+        /* [cpp.predefined]/1: "The presumed line number (within the current
+           source file) of the current source line"; [impl.clang] the line
+           of the end of the outermost invocation, which is the last token
+           read from the source file */
         source_position p = files.position(last_file_location);
         vbuffer_format_append(text.get(), "%u", p.line);
         break;
     }
-    case dynamic_macro::file:
-    case dynamic_macro::file_name: {
+    case dynamic_macro::file: {
+        /* [cpp.predefined]/1: "The presumed name of the current source file
+           (a character string literal)" */
         source_position p =
             files.position(name.expansion ? name.expansion : name.location);
-        const char *f = p.file_name;
-        if (m.dynamic == dynamic_macro::file_name && strrchr(f, '/'))
-            f = strrchr(f, '/') + 1;
-        string_literal_of(f, text.get());
+        string_literal_of(p.file_name, text.get());
         break;
     }
-    case dynamic_macro::base_file:
-        string_literal_of(main_file ? main_file->name.c_str() : "", text.get());
-        break;
     case dynamic_macro::date:
     case dynamic_macro::time:
+        /* [cpp.predefined]/1: "The date of translation of the source file",
+           "The time of translation" */
         diagnostics.issue(diagnostic_id::warn_pp_date_time, name.location);
         vbuffer_string_append(
             text.get(), m.dynamic == dynamic_macro::date ? date : time_of_day);
-        break;
-    case dynamic_macro::timestamp: {
-        struct stat st;
-        const char *path = inclusions.back().file->name.c_str();
-        char stamp[64];
-        if (stat(path, &st) == 0) {
-            struct tm t;
-            localtime_r(&st.st_mtime, &t);
-            strftime(stamp, sizeof stamp, "\"%a %b %e %H:%M:%S %Y\"", &t);
-        } else
-            snprintf(stamp, sizeof stamp, "\"??? ??? ?? ??:??:?? ????\"");
-        vbuffer_string_append(text.get(), stamp);
-        break;
-    }
-    case dynamic_macro::counter:
-        vbuffer_format_append(text.get(), "%u", counter++);
-        break;
-    case dynamic_macro::include_level:
-        vbuffer_format_append(text.get(), "%u",
-                              (unsigned)(inclusions.size() - 1));
         break;
     case dynamic_macro::pragma_operator:
         return pragma_operator(name);
@@ -249,72 +222,33 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
                                  name.location),
                name);
         return true;
-    default: {
+    case dynamic_macro::has_cpp_attribute: {
+        /* [cpp.cond]/5: "replaced by a non-zero pp-number matching the form
+           of an integer-literal if the implementation supports an attribute
+           with the name specified ..., and by 0 otherwise" */
         owned_buffer operand, scope;
-        int64_t value = 0;
         if (!feature_operand(name, operand, scope))
             return true;
-        const char *o = operand.data();
-        size_t n = operand.size();
-        /* clang accepts __name__ for name */
-        if (n > 4 && o[0] == '_' && o[1] == '_' && o[n - 1] == '_' &&
-            o[n - 2] == '_' && m.dynamic != dynamic_macro::is_identifier)
-            o += 2, n -= 4;
-        switch (m.dynamic) {
-        case dynamic_macro::has_cpp_attribute:
-            value =
-                cpp_attribute_value(behavior, scope.data(), scope.size(), o, n);
-            break;
-        case dynamic_macro::has_attribute:
-            value = scope.size() ? 0 : has_gnu_attribute(behavior, o, n);
-            break;
-        case dynamic_macro::has_feature:
-        case dynamic_macro::has_extension:
-            value = cplusplus::has_feature(
-                behavior, o, n, m.dynamic == dynamic_macro::has_extension);
-            break;
-        case dynamic_macro::has_builtin:
-            value = has_builtin(behavior, operand.data(), operand.size());
-            break;
-        case dynamic_macro::is_identifier: {
-            value =
-                lookup_keyword(behavior, operand.data(), operand.size()) < 0;
-            break;
-        }
-        case dynamic_macro::is_target_arch:
-            value = (n == 7 && !memcmp(o, "aarch64", 7)) ||
-                    (n == 5 && !memcmp(o, "arm64", 5));
-            break;
-        case dynamic_macro::is_target_vendor:
-            value = n == 7 && !memcmp(o, "unknown", 7);
-            break;
-        case dynamic_macro::is_target_os:
-            value = n == 5 && !memcmp(o, "linux", 5);
-            break;
-        case dynamic_macro::is_target_environment:
-            value = n == 3 && !memcmp(o, "gnu", 3);
-            break;
-        case dynamic_macro::has_warning: {
-            /* "-Wgroup": whether the group exists */
-            value = 0;
-            if (operand.size() > 4 && operand.data()[1] == '-' &&
-                operand.data()[2] == 'W') {
-                char group[64];
-                snprintf(group, sizeof group, "%.*s", (int)operand.size() - 4,
-                         operand.data() + 3);
-                value = diagnostic_group_exists(group);
-            }
-            break;
-        }
-        default:
-            value = 0;
-            break;
-        }
-        vbuffer_format_append(text.get(), "%lld", (long long)value);
-        if (m.dynamic == dynamic_macro::has_cpp_attribute && value)
-            vbuffer_append(text.get(), "L", 1);
+        int64_t value =
+            cpp_attribute_value(behavior, scope.data(), scope.size(),
+                                operand.data(), operand.size());
+        vbuffer_format_append(text.get(), value ? "%lldL" : "%lld",
+                              (long long)value);
         break;
     }
+    default:
+        /* the extensions' */
+        if (behavior.has(extension::gnu_common_predefined_macros) &&
+            gnu_dynamic_macro(m, text)) /* [ext.gnu] */
+            break;
+        if (behavior.has(extension::clang_feature_checks)) { /* [ext.clang] */
+            int done = clang_dynamic_macro(name, m, text);
+            if (done == 2)
+                return true;
+            if (done == 1)
+                break;
+        }
+        return false;
     }
     preprocessing_token t;
     spelled(text.data(), text.size(), &t);

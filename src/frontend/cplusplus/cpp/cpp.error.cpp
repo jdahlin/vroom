@@ -1,6 +1,6 @@
 /*
  * cpp.error.cpp: [cpp.error] Error directive, and C++23's #warning
- * (P2437R1), clang's in every edition.
+ * (P2437R1), [ext.clang] in every edition.
  *
  * [cpp.error]/1: "A preprocessing directive of the form # error
  * pp-tokens_opt new-line causes the implementation to produce a diagnostic
@@ -13,7 +13,7 @@ namespace cplusplus
 {
 
 /* the rest of the directive's logical line as written (phases 1 and 2
-   applied), as clang's message has it: its characters, comments included,
+   applied), [impl.clang] as clang's message has it: its characters, comments included,
    leading spaces removed */
 void preprocessor::rest_of_line(source_location from, owned_buffer &out)
 {
@@ -34,6 +34,7 @@ void preprocessor::rest_of_line(source_location from, owned_buffer &out)
 void preprocessor::directive_error(const preprocessing_token &name,
                                    bool warning)
 {
+    /* C++23's; [ext.clang] clang_later_edition_features before */
     if (warning)
         diagnostics.issue(
             behavior.has(language_feature::warning_directive)

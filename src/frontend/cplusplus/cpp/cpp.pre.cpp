@@ -43,17 +43,18 @@ preprocessor::preprocessor(source_files &f, const preprocessor_options &o)
     condition_lexer.files = &files;
 }
 
-/* [cpp.pre]: the directive names; elifdef and elifndef are C++23's
-   (P2334R1), clang's in every edition with a warning */
-directive_kind find_directive(const char *s, size_t n)
+/* [cpp.pre]: the directive names "appearing after a # in the syntax";
+   elifdef, elifndef and warning are C++23's (P2334R1, P2437R1), whose use
+   in earlier editions clang accepts with a warning
+   ([ext.clang] clang_later_edition_features, directive_elif_else) */
+directive_kind find_directive(const implementation_defined_behavior &b,
+                              const char *s, size_t n)
 {
     static constexpr struct {
         const char *name;
         directive_kind kind;
     } names[] = {
         {"include", directive_kind::include},
-        {"include_next", directive_kind::include_next},
-        {"import", directive_kind::import},
         {"define", directive_kind::define},
         {"undef", directive_kind::undef},
         {"line", directive_kind::line},
@@ -68,12 +69,25 @@ directive_kind find_directive(const char *s, size_t n)
         {"elifndef", directive_kind::elifndef},
         {"else", directive_kind::else_},
         {"endif", directive_kind::endif},
-        {"ident", directive_kind::ident},
-        {"sccs", directive_kind::ident},
-        {"embed", directive_kind::embed},
     };
     for (const auto &d : names)
         if (strlen(d.name) == n && !memcmp(d.name, s, n))
+            return d.kind;
+    /* [cpp.pre]/2: conditionally-supported-directives, the extensions'
+       (ext/) */
+    static constexpr struct {
+        const char *name;
+        directive_kind kind;
+        extension e;
+    } extended[] = {
+        {"include_next", directive_kind::include_next,
+         extension::gnu_include_next},
+        {"ident", directive_kind::ident, extension::gnu_ident_directive},
+        {"sccs", directive_kind::ident, extension::gnu_ident_directive},
+        {"import", directive_kind::import, extension::clang_import_directive},
+    };
+    for (const auto &d : extended)
+        if (strlen(d.name) == n && !memcmp(d.name, s, n) && b.has(d.e))
             return d.kind;
     return directive_kind::unknown;
 }
@@ -168,7 +182,7 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             /* [cpp.replace]/13: "If there are sequences of preprocessing
                tokens within the list of arguments that would otherwise act
                as preprocessing directives, the behavior is undefined"; as
-               clang, they act as directives */
+               [impl.clang] they act as directives */
             if (collecting_arguments)
                 diagnostics.issue(diagnostic_id::ext_embedded_directive,
                                   t.location);
@@ -240,7 +254,7 @@ void preprocessor::skip_rest_of_directive()
 }
 
 /* footnote 2 of [cpp.cond]: "a preprocessing token shall not follow a #else
-   or #endif directive before the terminating new-line character"; clang
+   or #endif directive before the terminating new-line character"; [impl.clang] clang
    warns of the extra tokens there and after other directives' operands */
 void preprocessor::expect_end_of_directive(const char *directive)
 {
@@ -270,16 +284,17 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
        no effect." */
     if (is_end(name))
         return;
-    /* GNU's line marker: # digit-sequence "s-char-sequence" flags */
-    if (name.kind == preprocessing_token_kind::pp_number) {
-        directive_line(name, true);
+    /* [ext.gnu] gnu_line_marker: # digit-sequence "s-char-sequence" flags */
+    if (name.kind == preprocessing_token_kind::pp_number &&
+        behavior.has(extension::gnu_line_marker)) {
+        gnu_line_marker(name);
         return;
     }
     directive_kind kind = directive_kind::unknown;
     owned_buffer spelling;
     if (is_identifier(name)) {
         files.spelling(name, spelling.get());
-        kind = find_directive(spelling.data(), spelling.size());
+        kind = find_directive(behavior, spelling.data(), spelling.size());
     }
     switch (kind) {
     case directive_kind::include:
@@ -294,7 +309,7 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
         directive_undef(name);
         return;
     case directive_kind::line:
-        directive_line(name, false);
+        directive_line(name);
         return;
     case directive_kind::error:
     case directive_kind::warning:
@@ -317,19 +332,13 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
     case directive_kind::endif:
         directive_endif(name);
         return;
-    case directive_kind::ident: {
-        diagnostics.issue(diagnostic_id::ext_pp_ident_directive, name.location);
-        preprocessing_token s = directive_token();
-        if (!is_string_literal(s))
-            diagnostics.issue(diagnostic_id::err_pp_malformed_ident,
-                              s.location);
-        skip_rest_of_directive();
+    case directive_kind::ident: /* [ext.gnu] */
+        gnu_ident_directive(name);
         return;
-    }
     default:
         /* [cpp.pre]/2: "A conditionally-supported-directive is
            conditionally-supported with implementation-defined semantics":
-           none is supported, as in clang */
+           [impl.clang] none is supported, as in clang */
         diagnostics.issue(diagnostic_id::err_pp_invalid_directive,
                           name.location)
             << 0;
@@ -346,7 +355,7 @@ preprocessing_token preprocessor::next()
         read_unexpanded(t);
         if (pending_flags) {
             /* a macro replaced by nothing leaves its line start and white
-               space to the next token on its line (clang) */
+               space to the next token on its line ([impl.clang]) */
             if (!(read_from_file && t.at_start_of_line)) {
                 t.at_start_of_line |= pending_start_of_line;
                 t.after_white_space |= pending_white_space;

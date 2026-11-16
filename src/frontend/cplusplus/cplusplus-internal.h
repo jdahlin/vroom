@@ -162,7 +162,11 @@ inline bool is_string_literal(const preprocessing_token &t)
            t.kind == preprocessing_token_kind::user_defined_string_literal;
 }
 
-VPRIV directive_kind find_directive(const char *spelling, size_t length);
+/* whether a token is the identifier word */
+VPRIV bool spelled_as(const source_files &files, const preprocessing_token &t,
+                      const char *word);
+VPRIV directive_kind find_directive(const implementation_defined_behavior &b,
+                                    const char *spelling, size_t length);
 
 /* a spelling's identifier, the hash the table keys on */
 VPRIV uint32_t hash_spelling(const char *s, size_t n);
@@ -171,7 +175,9 @@ VPRIV uint32_t hash_spelling(const char *s, size_t n);
 VPRIV int64_t cpp_attribute_value(const implementation_defined_behavior &b,
                                   const char *scope, size_t scope_length,
                                   const char *name, size_t name_length);
-/* clang's __has_feature (extension false) and __has_extension */
+/* a string literal of s's characters, " and \ escaped */
+VPRIV void string_literal_of(const char *s, vbuffer *out);
+/* [ext.clang]: clang's __has_feature (extension false) and __has_extension */
 VPRIV bool has_feature(const implementation_defined_behavior &b,
                        const char *name, size_t length, bool extension);
 VPRIV int64_t has_gnu_attribute(const implementation_defined_behavior &b,

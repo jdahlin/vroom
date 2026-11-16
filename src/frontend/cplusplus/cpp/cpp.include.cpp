@@ -4,7 +4,7 @@
  * [cpp.include]/1: "A #include directive shall identify a header or source
  * file that can be processed by the implementation."  The places searched
  * ([cpp.include]/2: "a sequence of implementation-defined places") are
- * clang's: for "q-char-sequence" the directory of the including file, then
+ * [impl.clang] clang's: for "q-char-sequence" the directory of the including file, then
  * -iquote's; for both forms then -I's, -isystem's and -idirafter's, each in
  * command line order.  A file is named as clang names it: the directory, a
  * slash and the q-char-sequence or h-char-sequence.
@@ -98,29 +98,13 @@ bool preprocessor::find_header(const char *name, size_t length, bool angled,
     return false;
 }
 
-/* clang's #include_next: the search starts after the directory the
-   including file was found in */
-int32_t preprocessor::include_next_start(const preprocessing_token &name)
-{
-    if (inclusions.size() <= 1) {
-        diagnostics.issue(diagnostic_id::pp_include_next_in_primary,
-                          name.location);
-        return -1;
-    }
-    int32_t d = inclusions.back().directory;
-    if (d < 0)
-        diagnostics.issue(diagnostic_id::pp_include_next_absolute_path,
-                          name.location);
-    return d;
-}
-
 /*
  * The header-name of [cpp.include]/4's form: "The preprocessing tokens
  * after include in the directive are processed just as in normal text ...
  * The method by which a sequence of preprocessing tokens between a < and a
  * > preprocessing token pair or a pair of " characters is combined into a
  * single header name preprocessing token is implementation-defined": as
- * clang, their spellings, a space where white space preceded a token.
+ * [impl.clang] clang, their spellings, a space where white space preceded a token.
  * Footnote 1: "adjacent string-literals are not concatenated".
  */
 bool preprocessor::header_name_from_tokens(const preprocessing_token &first,
@@ -183,8 +167,9 @@ bool preprocessor::header_name_from_tokens(const preprocessing_token &first,
 /*
  * [cpp.include]/2: "# include < h-char-sequence > new-line ... causes the
  * replacement of that directive by the entire contents of the header";
- * /3 the same for "q-char-sequence"; /4 the form with pp-tokens.  Clang's
- * #include_next and #import (included once) go through here too.
+ * /3 the same for "q-char-sequence"; /4 the form with pp-tokens.  The
+ * extensions #include_next ([ext.gnu]) and #import ([ext.clang]) go
+ * through here too.
  */
 void preprocessor::directive_include(const preprocessing_token &name,
                                      directive_kind kind)
@@ -194,6 +179,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
     char directive_text[16];
     snprintf(directive_text, sizeof directive_text, "%.*s",
              (int)directive.size(), directive.data());
+    /* [ext.gnu] gnu_include_next, [ext.clang] clang_import_directive */
     if (kind == directive_kind::include_next)
         diagnostics.issue(diagnostic_id::ext_pp_include_next_directive,
                           name.location);
@@ -219,7 +205,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
     }
     bool angled = header.data()[0] == '<';
     int32_t after = -1;
-    if (kind == directive_kind::include_next)
+    if (kind == directive_kind::include_next) /* [ext.gnu] */
         after = include_next_start(name);
 
     owned_buffer path;
@@ -247,7 +233,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
             .text(header.data() + 1, header.size() - 2);
         return;
     }
-    if (kind == directive_kind::import)
+    if (kind == directive_kind::import) /* [ext.clang]: included once */
         once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     file->system_header = system;
     inclusions.append({file,
