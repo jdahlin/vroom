@@ -494,7 +494,7 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object, bool arrow
 			{ CXX_CALL_WHY(); return; }	/* (a non-trivial class through ...: not built yet; a trivial one is passed as C passes it) */
 	if (!cxx_gen_on(c) || !cxx_gen_name(c, f) || !f->sym)
 		{ CXX_CALL_WHY(); return; }
-	if (f->name_guess && !(a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED))
+	if (f->name_guess && !(a->syms[f->sym].flags & AST_SYMBOL_FLAG_DEFINED) && !cxx_gen_being_built(c, f->sym))
 		{ CXX_CALL_WHY(); return; }	/* (a name only vcc gives, and no code of vcc's for it: nothing would define it) */
 	ft = AST_TYPE(a, f->ty);
 	cc_id_list_init(&list);

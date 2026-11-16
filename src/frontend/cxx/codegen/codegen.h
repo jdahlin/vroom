@@ -162,6 +162,7 @@ VPRIV void cxx_gen_delete(cxx *c, uint32_t p, bool array, uint32_t loc);
 VPRIV bool cxx_gen_on(cxx *c);
 VPRIV void cxx_gen_push(cxx *c);
 VPRIV void cxx_gen_pop(cxx *c);
+VPRIV bool cxx_gen_being_built(cxx *c, uint32_t s);
 VPRIV void cxx_gen_unwind(cxx *c, uint32_t depth);
 VPRIV void cxx_gen_fail_at(cxx *c, const char *file, int line);
 VPRIV bool cxx_gen_static_ok(cc *a, ast_qualified_type ty, uint32_t init);

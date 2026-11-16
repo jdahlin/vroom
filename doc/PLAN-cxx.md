@@ -2802,3 +2802,12 @@ En värdeparameter som mallargument i en malls signatur (`Q<L>` i
 funktionen inget namn och ingen kod (jsons konvertering `json(ordered_json)`,
 `construct_at` av dess par).  Test: `run/value-param-in-template-arg.cpp`
 (symbolerna lika med clangs).  Sviter gröna (160/160, 38/38, mangle).
+
+## Status 185 (2026-11-16)
+Ett anrop till en funktion vars namn bara är vcc:s gissning (`Tn <enable_if-uttryck>`
+skrivs inte än) tillåts när funktionens kropp byggs just nu, här eller runt
+omkring: kroppen definierar namnet (jsons `json(const ordered_json &)` anropas
+igen via `construct_at` för dess element).  Test:
+`run/call-back-into-instance-being-built.cpp`, som misslyckas utan ändringen;
+`cxx-run-tests.py` tar `// guessed-names: N` (högst N lokala namn får skilja
+sig från clangs).  Sviter gröna (161/161, 38/38, mangle).

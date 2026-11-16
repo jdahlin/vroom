@@ -52,6 +52,18 @@ VPRIV void cxx_gen_push(cxx *c)
 	c->gen_stack_depth++;
 }
 
+/* is the function with symbol s one whose body is being built, here or around (a call back into it: its
+   definition is on its way) */
+VPRIV bool cxx_gen_being_built(cxx *c, uint32_t s)
+{
+	if (s && c->ast->fn == s)
+		return true;
+	for (const cxx_gen_saved *g = c->gen_stack; s && g; g = g->next)
+		if (g->ast_fn == s)
+			return true;
+	return false;
+}
+
 VPRIV void cxx_gen_pop(cxx *c)
 {
 	cxx_gen_saved *s = c->gen_stack;
