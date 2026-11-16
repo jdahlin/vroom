@@ -710,6 +710,26 @@ VPRIV void cxx_gen_local_declare(cxx *c, uint32_t s, uint32_t init,
  * T a[N] = { x, y, ... } with scalar elements: the initializer list's node from the last braced list's
  * elements (0: not built: nested lists, an array of unknown bound, too many elements).
  */
+/* an element or member of an aggregate's initializer, converted to its type: a pointer to member through
+   cxx_gen_memptr_convert (null, a base's, a const member's), as one alone is (0: not built) */
+static uint32_t cxx_gen_aggregate_element(cxx *c, uint32_t x,
+                                          ast_qualified_type et, uint32_t loc)
+{
+    cc *a = c->ast;
+
+    if (!x)
+        return 0;
+    if (cxx_memptr_of(c, et)) {
+        uint32_t y = cxx_gen_memptr_convert(c, x, et, loc);
+
+        if (y && AST_NODE_AT(a, y)->op == AST_NODE_COMPOUND_LITERAL &&
+            AST_NODE_AT(a, y)->a)
+            y = AST_NODE_AT(a, y)->a; /* (its list: a constant initializer) */
+        return y;
+    }
+    return cc_conversion_apply(a, cc_conversion_decay(a, x), et);
+}
+
 VPRIV uint32_t cxx_gen_array_initializer(cxx *c, ast_qualified_type t,
                                          uint32_t loc)
 {
@@ -726,12 +746,14 @@ VPRIV uint32_t cxx_gen_array_initializer(cxx *c, ast_qualified_type t,
         return 0;
     cc_id_list_init(&v);
     for (uint32_t i = 0; i < c->brace_n; i++) {
+        uint32_t e = cxx_gen_aggregate_element(
+            c, c->brace_nodes[i], AST_QUALIFIED_TYPE_UNQUALIFIED(x->base), loc);
+
+        if (!e)
+            return 0;
         cc_id_list_append(a, &v, i);
         cc_id_list_append(a, &v, i);
-        cc_id_list_append(
-            a, &v,
-            cc_conversion_apply(a, cc_conversion_decay(a, c->brace_nodes[i]),
-                                AST_QUALIFIED_TYPE_UNQUALIFIED(x->base)));
+        cc_id_list_append(a, &v, e);
     }
     n = cc_node_new(a, AST_NODE_INITIALIZER, t, loc);
     AST_NODE_AT(a, n)->aux = 1;
@@ -778,11 +800,13 @@ VPRIV uint32_t cxx_gen_record_initializer(cxx *c, ast_qualified_type t,
             return 0; /* (a default member initializer: not read here) */
         if (i < n && !nodes[i])
             return 0;
-        cc_id_list_append(
-            a, &v,
-            i < n ? cc_conversion_apply(a, cc_conversion_decay(a, nodes[i]),
-                                        AST_QUALIFIED_TYPE_UNQUALIFIED(ft))
-                  : 0);
+        uint32_t e = 0;
+
+        if (i < n &&
+            !(e = cxx_gen_aggregate_element(
+                  c, nodes[i], AST_QUALIFIED_TYPE_UNQUALIFIED(ft), loc)))
+            return 0;
+        cc_id_list_append(a, &v, e);
     }
     init = cc_node_new(a, AST_NODE_INITIALIZER,
                        AST_QUALIFIED_TYPE_UNQUALIFIED(t), loc);
