@@ -41,6 +41,8 @@ bool syntax_kind_is_expression(syntax_kind kind)
 {
     switch (kind) {
     case syntax_kind::primary_expression:
+    case syntax_kind::fold_expression:
+    case syntax_kind::requires_expression:
     case syntax_kind::qualified_id:
     case syntax_kind::postfix_expression:
     case syntax_kind::unary_expression:
@@ -89,6 +91,14 @@ node_index syntax_tree::make(syntax_kind kind, const syntax_child *children,
     return static_cast<node_index>(nodes.size() - 1);
 }
 
+bool syntax_tree::is_split(token_index t) const
+{
+    for (token_index s : split_tokens)
+        if (s == t)
+            return true;
+    return false;
+}
+
 void syntax_tree::truncate(size_t node_count)
 {
     if (node_count >= nodes.size())
@@ -122,6 +132,28 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
         tokens.spelling(t, out);
         vbuffer_append(out, "'", 1);
     };
+    /* a split token ([temp.names]/3) is written as what each child is: the
+       first '>', then the rest */
+    token_index last_split = 0;
+    bool in_split = false;
+    auto write_child_token = [&](token_index t) {
+        if (!is_split(t)) {
+            write_spelling(t);
+            return;
+        }
+        if (!in_split || last_split != t) {
+            vbuffer_string_append(out, "'>'");
+            in_split = true;
+            last_split = t;
+            return;
+        }
+        owned_buffer spelling;
+        tokens.spelling(t, spelling.get());
+        vbuffer_append(out, "'", 1);
+        vbuffer_append(out, spelling.data() + 1, spelling.size() - 1);
+        vbuffer_append(out, "'", 1);
+        in_split = false;
+    };
     auto write_line = [&](node_index node, size_t depth) {
         const syntax_node &s = nodes[node];
         for (size_t i = 0; i < depth; i++)
@@ -152,7 +184,7 @@ void syntax_tree::dump(node_index n, token_stream &tokens, vbuffer *out) const
         if (c.is_token()) {
             for (size_t i = 0; i < path.size(); i++)
                 vbuffer_append(out, "  ", 2);
-            write_spelling(c.index());
+            write_child_token(c.index());
             vbuffer_append(out, "\n", 1);
         } else {
             write_line(c.index(), path.size());

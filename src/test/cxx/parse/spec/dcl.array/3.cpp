@@ -1,6 +1,6 @@
 // [dcl.array] Example 3 (paragraph 8), docs/cxx-spec/dcl/dcl.array.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P5
+// status: annotated
 
 extern int x[10];
 struct S {
@@ -12,5 +12,5 @@ int S::y[];             // OK: bound is 10
 
 void f() {
   extern int x[];
-  int i = sizeof(x);    // error: incomplete object type
+  int i = sizeof(x);    // error: incomplete object type // semantic
 }

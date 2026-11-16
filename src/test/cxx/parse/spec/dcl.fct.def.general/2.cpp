@@ -1,5 +1,5 @@
 // [dcl.fct.def.general] Example 2 (paragraph 8), docs/cxx-spec/dcl/dcl.fct.def.general.md
-// needs: P5
+// needs: P5 (__func__ in a ctor-initializer: S is not declared here)
 // status: annotated
 
 struct S {

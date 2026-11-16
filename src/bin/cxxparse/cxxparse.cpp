@@ -168,6 +168,7 @@ static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
         bool parentheses;
     };
     owned_array<level> path;
+    token_index split_written = UINT32_MAX;
     auto enter = [&](node_index n) {
         const syntax_node &s = tree[n];
         if (s.kind == syntax_kind::decltype_specifier ||
@@ -204,7 +205,19 @@ static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
             continue;
         }
         syntax_child c = tree.children(top.node)[top.next_child++];
-        if (c.is_token())
+        if (c.is_token() && tree.is_split(c.index())) {
+            /* a split '>>': its first '>', then the rest */
+            if (split_written != c.index()) {
+                vbuffer_append(out, "> ", 2);
+                split_written = c.index();
+            } else {
+                owned_buffer spelling;
+                tokens.spelling(c.index(), spelling.get());
+                vbuffer_append(out, spelling.data() + 1, spelling.size() - 1);
+                vbuffer_append(out, " ", 1);
+                split_written = UINT32_MAX;
+            }
+        } else if (c.is_token())
             write_tokens(tokens, c.index(), c.index() + 1, out);
         else
             enter(c.index());
@@ -400,13 +413,43 @@ int main(int argc, char **argv)
            kept as tokens because it uses a later step's grammar (an
            unparsed node that is a whole declaration: a child of a
            declaration-seq or a linkage-specification) */
-        const syntax_node &unit = tree[tree.root];
-        if (unit.child_count) {
-            node_index seq = tree.children(tree.root)[0].index();
+        /* a module unit's declarations: those of its global module
+           fragment, its module-declaration, its purview and its private
+           module fragment, in order */
+        owned_array<node_index> declarations;
+        auto add_seq = [&](node_index seq) {
             for (uint32_t i = 0; i < tree[seq].child_count; i++) {
                 syntax_child c = tree.children(seq)[i];
-                if (c.is_token())
-                    continue;
+                if (!c.is_token())
+                    declarations.append(c.index());
+            }
+        };
+        const syntax_node &unit = tree[tree.root];
+        for (uint32_t u = 0; u < unit.child_count; u++) {
+            syntax_child part = tree.children(tree.root)[u];
+            if (part.is_token())
+                continue;
+            const syntax_node &x = tree[part.index()];
+            if (x.kind == syntax_kind::declaration_seq) {
+                add_seq(part.index());
+            } else if (x.kind == syntax_kind::global_module_fragment ||
+                       x.kind == syntax_kind::private_module_fragment) {
+                for (uint32_t k = 0; k < x.child_count; k++) {
+                    syntax_child y = tree.children(part.index())[k];
+                    if (y.is_token())
+                        continue;
+                    if (tree[y.index()].kind == syntax_kind::declaration_seq)
+                        add_seq(y.index());
+                    else
+                        declarations.append(y.index());
+                }
+            } else {
+                declarations.append(part.index());
+            }
+        }
+        {
+            for (node_index declaration : declarations) {
+                syntax_child c = syntax_child::node(declaration);
                 const syntax_node &d = tree[c.index()];
                 bool erroneous = false, fallback = false;
                 owned_buffer opaque;

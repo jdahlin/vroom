@@ -42,6 +42,9 @@ bool parser::parameters_follow(declarator_form form)
 
 node_index parser::parameters_and_qualifiers(scope_index *parameters)
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     add_token();
@@ -76,8 +79,11 @@ node_index parser::parameters_and_qualifiers(scope_index *parameters)
         if (failed())
             return 0;
     } else if (at(standard_keyword::throw_)) {
-        /* a dynamic-exception-specification (removed in C++20, [diff.cpp17.except]): P6 */
-        return beyond_this_step();
+        /* C++14's parameters-and-qualifiers has exception-specification_opt
+           here, a dynamic-exception-specification or noexcept-specifier */
+        dynamic_exception_specification();
+        if (failed())
+            return 0;
     }
     attribute_specifier_seq(true);
     if (failed())
@@ -159,7 +165,17 @@ node_index parser::parameter_declaration()
     attribute_specifier_seq();
     if (failed())
         return 0;
+    /* C++23's explicit object parameter (P0847R7, "this
+       decl-specifier-seq declarator") is not C++20's grammar: a later
+       edition's, P9's */
+    if (at(standard_keyword::this_))
+        return beyond_this_step();
     decl_specifier_facts specifiers;
+    /* [temp.res]/5: where the parameter's context says (a member's,
+       a requires-expression's, a template-parameter's ...) */
+    specifiers.implicit_typename =
+        parameters_implicit_typename &&
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
@@ -175,11 +191,27 @@ node_index parser::parameter_declaration()
     if (failed())
         return 0;
     if (facts.name && !facts.qualified_id)
-        names.declare(facts.name, name_kind::other);
+        names.declare_in(names.current(), facts.name, name_kind::other);
     if (accept(preprocessing_op_or_punc::EQUAL)) {
+        /* [temp.res]/5: not in a default argument */
+        flag_set implicit(parameters_implicit_typename, false);
         if (list_initialization_missing())
             return 0;
-        initializer_clause();
+        if (collecting_members) {
+            /* a default argument is a complete-class context
+               ([class.mem]/6): not read in the first pass over the
+               member-specification (class.mem.cpp) */
+            static const preprocessing_op_or_punc stops[] = {
+                preprocessing_op_or_punc::COMMA,
+                preprocessing_op_or_punc::RIGHT_PARENTHESIS,
+                preprocessing_op_or_punc::ELLIPSIS};
+            unparsed_until(stops, 3);
+        } else if (member_declarator_context) {
+            complete_class_context context(names);
+            initializer_clause();
+        } else {
+            initializer_clause();
+        }
         if (failed())
             return 0;
     }

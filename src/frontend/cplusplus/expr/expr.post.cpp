@@ -48,6 +48,9 @@ namespace cplusplus
  */
 node_index parser::postfix_expression()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     node_index n = 0;
@@ -61,10 +64,15 @@ node_index parser::postfix_expression()
         add_token();
         if (!accept(preprocessing_op_or_punc::LESS))
             return expected("'<' after the cast's keyword", "expr.post");
-        type_id();
+        {
+            flag_set closing(greater_is_operator, false);
+            /* [temp.res]/5: the type-id of a static_cast ... */
+            flag_set only(type_id_only, true);
+            type_id();
+        }
         if (failed())
             return 0;
-        if (!accept(preprocessing_op_or_punc::GREATER))
+        if (!accept_closing_angle())
             return expected("'>' after the type-id", "expr.post");
         if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
             return expected("'(' before the cast's operand", "expr.post");
@@ -94,8 +102,13 @@ node_index parser::postfix_expression()
         }
         n = finish_node(syntax_kind::postfix_expression, mark, first);
         break;
-    case standard_keyword::auto_:
     case standard_keyword::typename_:
+        /* [expr.type.conv]: typename-specifier ( expression-list_opt ) or
+           braced-init-list */
+        typename_specifier();
+        type = true;
+        break;
+    case standard_keyword::auto_:
         return beyond_this_step();
     case standard_keyword::decltype_:
         /* decltype-specifier :: begins a qualified-id */

@@ -55,6 +55,30 @@ LANGUAGE_FEATURE(list_initialization, cplusplus_11, never,
                  "N2672: a braced-init-list outside = { }")
 LANGUAGE_FEATURE(designated_initializers, cplusplus_20, never,
                  "P0329R4: designated-initializer-list")
+/* [dcl.struct.bind], [dcl.fct.spec] */
+LANGUAGE_FEATURE(structured_bindings, cplusplus_17, never, "P0217R3: structured bindings")
+LANGUAGE_FEATURE(conditional_explicit, cplusplus_20, never,
+                 "P0892R2: explicit ( constant-expression )")
+/* [class] */
+LANGUAGE_FEATURE(default_member_initializers, cplusplus_11, never,
+                 "N2756: a brace-or-equal-initializer of a non-static data member")
+LANGUAGE_FEATURE(override_control, cplusplus_11, never,
+                 "N3272: the virt-specifiers override and final, class-virt-specifier final")
+LANGUAGE_FEATURE(bit_field_default_member_initializers, cplusplus_20, never,
+                 "P0683R1: a default member initializer of a bit-field")
+/* [expr.prim.lambda] */
+LANGUAGE_FEATURE(lambda_expressions, cplusplus_11, never, "N2927: lambda-expression")
+LANGUAGE_FEATURE(init_captures, cplusplus_14, never, "N3648: init-capture")
+LANGUAGE_FEATURE(constexpr_lambdas, cplusplus_17, never, "P0170R1: constexpr in a lambda-declarator")
+LANGUAGE_FEATURE(star_this_capture, cplusplus_17, never, "P0018R3: the simple-capture * this")
+/* [except.spec] */
+LANGUAGE_FEATURE(dynamic_exception_specifications, cplusplus_98, cplusplus_17,
+                 "[diff.cpp14.except]/1: Remove dynamic exception specifications")
+LANGUAGE_FEATURE(empty_throw_exception_specification, cplusplus_98, cplusplus_20,
+                 "[diff.cpp17.except]/1: Remove throw() exception specification")
+/* [temp.names] */
+LANGUAGE_FEATURE(function_names_before_less, cplusplus_20, never,
+                 "P0846R0: an unqualified-id that names functions before < is a template-name")
 /* [stmt] */
 LANGUAGE_FEATURE(range_based_for, cplusplus_11, never, "N2930: the range-based for statement")
 LANGUAGE_FEATURE(selection_init_statement, cplusplus_17, never,
@@ -78,3 +102,26 @@ LANGUAGE_FEATURE(variadic_arguments_may_be_omitted, cplusplus_20, never,
                  "[cpp.replace]/5: at least as many arguments as parameters excluding the ... (P1042R1)")
 LANGUAGE_FEATURE(warning_directive, cplusplus_23, never, "P2437R1: #warning ([cpp.error])")
 LANGUAGE_FEATURE(elifdef_directives, cplusplus_23, never, "P2334R1: #elifdef and #elifndef ([cpp.cond])")
+/* templates (P7 of doc/PLAN-cxx-parse.md) */
+LANGUAGE_FEATURE(right_angle_brackets, cplusplus_11, never,
+                 "[diff.cpp03.temp]/1: >> ends two template-argument-lists (N1757)")
+LANGUAGE_FEATURE(variadic_templates, cplusplus_11, never, "N2242: parameter packs and pack expansions")
+LANGUAGE_FEATURE(alias_templates, cplusplus_11, never, "N2258: alias templates")
+LANGUAGE_FEATURE(extern_templates, cplusplus_11, never, "N1987: extern template")
+LANGUAGE_FEATURE(variable_templates, cplusplus_14, never, "N3651: variable templates")
+LANGUAGE_FEATURE(fold_expressions, cplusplus_17, never, "N4295: fold-expression")
+LANGUAGE_FEATURE(template_auto_parameters, cplusplus_17, never,
+                 "P0127R2: a template-parameter of placeholder type")
+LANGUAGE_FEATURE(typename_template_template_parameters, cplusplus_17, never,
+                 "N4051: typename in a template template parameter")
+LANGUAGE_FEATURE(deduction_guides, cplusplus_17, never, "P0091R3: deduction-guide")
+LANGUAGE_FEATURE(concepts, cplusplus_20, never,
+                 "P0734R0: concept-definition, requires-clause, requires-expression")
+LANGUAGE_FEATURE(abbreviated_function_templates, cplusplus_20, never,
+                 "P1141R2: placeholders with a type-constraint, abbreviated function templates")
+LANGUAGE_FEATURE(lambda_template_parameters, cplusplus_20, never,
+                 "P0428R2: a template-parameter-list after the lambda-introducer")
+LANGUAGE_FEATURE(implicit_typename, cplusplus_20, never,
+                 "P0634R3: [temp.res]/5, contexts where a qualified-id names a type")
+LANGUAGE_FEATURE(init_capture_packs, cplusplus_20, never,
+                 "P0780R2: an init-capture pack, ...identifier initializer")

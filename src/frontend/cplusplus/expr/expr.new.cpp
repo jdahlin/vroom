@@ -24,6 +24,9 @@ namespace cplusplus
  */
 node_index parser::new_expression()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     accept(preprocessing_op_or_punc::COLON_COLON);
@@ -101,6 +104,9 @@ node_index parser::new_type_id()
     token_index first = position;
     decl_specifier_facts specifiers;
     specifiers.type_specifier_seq = true;
+    /* [temp.res]/5: "a type-id in a new-expression" */
+    specifiers.implicit_typename =
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, true);
     if (failed())
         return 0;

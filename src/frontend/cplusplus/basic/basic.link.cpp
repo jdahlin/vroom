@@ -17,9 +17,14 @@ node_index parser::translation_unit()
 {
     size_t mark = begin_node();
     token_index first = position;
-    /* the second alternative ([module.unit]) is not written yet: its
-       module-declaration is one of the unparsed declarations for now */
-    declaration_seq(false);
+    /* the second alternative: a module unit ([module.unit]), from C++20 */
+    if (tokens.files.behavior.has(language_feature::modules) &&
+        (at_module_declaration() ||
+         (at_phase4_keyword(preprocessing_token_kind::module_keyword) &&
+          at(preprocessing_op_or_punc::SEMICOLON, 1))))
+        module_unit_rest(!at_module_declaration());
+    else
+        declaration_seq(false);
     tree.root = finish_node(syntax_kind::translation_unit, mark, first);
     pending.resize(mark);
     return tree.root;

@@ -1,6 +1,6 @@
 // [dcl.ambig.res] Example 3 (paragraph 3), docs/cxx-spec/dcl/dcl.ambig.res.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P5
+// status: annotated
 
 class C { };
 void f(int(C)) { }              // void f(int(*fp)(C c)) { }
@@ -9,6 +9,6 @@ void f(int(C)) { }              // void f(int(*fp)(C c)) { }
 int g(C);
 
 void foo() {
-  f(1);                         // error: cannot convert 1 to function pointer
+  f(1);                         // error: cannot convert 1 to function pointer // semantic
   f(g);                         // OK
 }

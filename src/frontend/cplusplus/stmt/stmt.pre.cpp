@@ -22,7 +22,7 @@
  * [stmt.pre]/1: "The optional attribute-specifier-seq appertains to the
  * respective statement": with one, the statement is a statement node of
  * the attributes and the alternative; without, the alternative passes
- * through.  try-block is P6's.
+ * through.  try-block is except.pre.cpp's.
  */
 #include "stmt.ambig.h"
 
@@ -177,9 +177,11 @@ node_index parser::statement_alternative()
     case standard_keyword::goto_:
         return with_attributes(*this, [&] { return jump_statement(); });
     case standard_keyword::try_:
+        return with_attributes(*this, [&] { return try_block(); });
     /* coroutine-return-statement ([stmt.return.coroutine]) */
     case standard_keyword::co_return_:
-        return beyond_this_step(); /* P6 */
+        return with_attributes(*this,
+                               [&] { return coroutine_return_statement(); });
     default:
         break;
     }

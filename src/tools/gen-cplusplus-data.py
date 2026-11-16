@@ -126,7 +126,13 @@ def keywords(td):
             continue
         bits = [f for f in re.split(r'[|()\s]+', flags) if f and f != '0']
         mapped = [('KEYWORD_' + f) if f in KNOWN_FLAGS else 'KEYWORD_OTHER' for f in bits]
-        out[spelling] = (name, '|'.join(sorted(set(mapped))) or '0')
+        entry = (name, '|'.join(sorted(set(mapped))) or '0')
+        # a spelling that is a keyword and also another language's alias
+        # (OpenCL's private for __private): the entry that can hold for C++
+        # is the one kept
+        if spelling in out and entry[1] == 'KEYWORD_OTHER':
+            continue
+        out[spelling] = entry
     version = os.path.basename(td.rstrip('/'))
     lines = [HEADER % f"clang {version}'s TokenKinds.def and TransformTypeTraits.def",
              '/* KEYWORD(spelling, clang token name, flags) in spelling order */']

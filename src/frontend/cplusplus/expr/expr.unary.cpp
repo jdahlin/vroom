@@ -62,7 +62,7 @@ bool is_unary_operator(const token &t)
  * begins is [dcl.ambig.res]/2's rule.  [expr.alignof]/1: "The operand shall
  * be a type-id".
  *
- * await-expression is P6's and sizeof ... ( identifier ) P7's.  The first
+ * await-expression is expr.await.cpp's and sizeof ... ( identifier ) P7's.  The first
  * alternative passes its postfix-expression on.
  */
 node_index parser::unary_expression()
@@ -79,8 +79,21 @@ node_index parser::unary_expression()
     }
     if (at(standard_keyword::sizeof_)) {
         add_token();
-        if (at(preprocessing_op_or_punc::ELLIPSIS))
-            return beyond_this_step();
+        if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+            /* [expr.sizeof]/5: sizeof ... ( identifier ) (C++11) */
+            if (!tokens.files.behavior.has(
+                    language_feature::variadic_templates))
+                return beyond_this_step();
+            add_token();
+            if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                return expected("'(' after sizeof...", "expr.sizeof");
+            if (!at_identifier())
+                return expected("an identifier in sizeof...", "expr.sizeof");
+            add_token();
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' after the identifier", "expr.sizeof");
+            return finish_node(syntax_kind::unary_expression, mark, first);
+        }
         bool type = false;
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
             type = parenthesized_type_id(false);
@@ -122,7 +135,7 @@ node_index parser::unary_expression()
          at(standard_keyword::delete_, 1)))
         return delete_expression();
     if (at(standard_keyword::co_await_))
-        return beyond_this_step();
+        return await_expression();
     return postfix_expression();
 }
 
@@ -138,6 +151,9 @@ node_index parser::unary_expression()
  */
 node_index parser::noexcept_expression()
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     size_t mark = begin_node();
     token_index first = position;
     add_token();

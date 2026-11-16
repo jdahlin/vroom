@@ -1,5 +1,5 @@
 // [dcl.link] Example 2 (paragraph 5), docs/cxx-spec/dcl/dcl.link.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: well-formed (as far as the example says)
 
 extern "C"                      // the name f1 and its function type have C language linkage;

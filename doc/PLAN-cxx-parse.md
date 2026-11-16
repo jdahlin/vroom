@@ -628,6 +628,62 @@ The first grammar, about 55 nonterminals.
   `cxx0x-override-control-keywords.cpp`, `cxx-friend.cpp`,
   `cxx-default-args.cpp`, `cxx1z-decomposition.cpp`,
   `cxx2a-bitfield-init.cpp`.
+- Status (2026-11-16): done.
+  - A class body is read twice ([class.mem]/6).  The first pass, inside a
+    tentative parse, reads the member-declarations with the
+    complete-class contexts (function bodies, ctor-initializers, default
+    member initializers, default arguments, nested class bodies) kept as
+    tokens, and keeps the names it declared; the second pass reads it all
+    with those names visible from the complete-class contexts.  A class's
+    region in `declared_names` is carried by its class-name; bases join
+    the region's lookup; `S::f` in a declarator-id puts the parameters,
+    body and a static member's initializer in S's region.
+  - The constructor decision: the class's own name before `(` (or an
+    attribute-specifier-seq and `(`) followed by what can begin a
+    parameter-declaration ends the decl-specifier-seq; a constructor does
+    not redeclare the injected-class-name.  `S::S` names the constructor
+    ([class.qual]/2).
+  - Rules clang checks while parsing and the standard states:
+    [class.mem]/12 (only a constructor, destructor or conversion function
+    omits the decl-specifier-seq), /14 (each virt-specifier at most once),
+    [class.friend]/2 (no class defined in a friend declaration), friend
+    only in a member-declaration, [dcl.attr.grammar]/5 (attributes on a
+    friend declaration only on a definition), [dcl.fct.def.default]/1 by
+    the declarator-id (an identifier other than the class's, or an
+    operator other than `=` and the comparisons, is not defaulted),
+    [dcl.array]/7 (no omitted bound on a non-static data member),
+    [over.literal]/1 on every piece of a concatenated string-literal.  In
+    C++20 a function's name before `<` is a template-name ([temp.names]/2,
+    P0846R0): such an expression is P7's (`name_kind::function`).
+  - A later edition's or an extension's, so P9's: C++23's explicit object
+    parameter (`this T self`), C++26's `friend T, U;`, Microsoft's ATL
+    attributes and `= 0 { }`, attributes on a using-declaration.  A
+    declaration kept as tokens that runs into the enclosing `}` is still
+    erroneous (it ends with `;` or `}` in every step).  An undeclared
+    class-or-decltype marks the declaration as naming something unknown.
+  - The keyword table: `private` lexed as an identifier, because
+    `gen-cplusplus-data.py` let an alias with only KEYWORD_OTHER override
+    the keyword's own entry; fixed, `lex.key.inc` regenerated.
+  - Harness fixes: `-verify` was taken as an option with a value, so the
+    option after it was dropped (`-fms-extensions` among others): every
+    harness that reads RUN lines through `cxx-pp.py` now runs those
+    options (cxx-pp: 515 runs instead of 505, tokens 480 instead of 471;
+    the newly run option sets that fail are preprocessor work, not this
+    step's).  `cxx-parse.py` gives a test that includes `<...>` clang's
+    resource directory (`stddef.h`), counts an error just after a part
+    kept as tokens, on its last line, as that part's, and a claim whose
+    type is inaccessible at the probe ("is a private member") as not
+    checkable.
+  - V4a: 2203 runs, 12247 declarations as clang, 0 rejected that clang
+    accepts, 0 accepted that clang rejects, 10194 kept as tokens; 31388
+    `unparsed` and 1032 `erroneous` nodes.  V4b: 0 refuted.  V1: 492
+    citations, 213 productions, 0 wrong; class 25 of 25, over 4 of 4.  V2:
+    155 examples of [class.*], [over.*] and [dcl.struct.bind] extracted
+    and annotated (`needs:`, each error line `// syntax-error` when clang's
+    parser reports it, else `// semantic`).  V6: 121/121.  Known
+    differences: clang's FIXME in `cxx-ambig-init-templ.cpp` (`int k = b
+    < c, unsigned int (x)` is two parameters) and a `_Pragma` from a macro
+    inside a struct.
 
 ### P6. Lambdas, exceptions, coroutines
 
@@ -637,6 +693,40 @@ The first grammar, about 55 nonterminals.
 - Tests: `Parser/cxx0x-lambda-expressions.cpp`, `cxx2b-lambdas.cpp`,
   `cxx1z-constexpr-lambdas.cpp`, `cxx-throw.cpp`, `cxx20-coroutines.cpp`,
   `CXX/expr/expr.prim/expr.prim.lambda`, `CXX/except`.
+- Status: done (2026-11-16).
+  - Files: `expr/expr.prim.lambda.cpp` (lambda-expression,
+    lambda-introducer, lambda-capture, capture, init-capture,
+    lambda-declarator), `expr/expr.throw.cpp`, `expr/expr.await.cpp`,
+    `expr/expr.yield.cpp`, `except/except.pre.cpp` (try-block, handler-seq,
+    handler, exception-declaration), `stmt/stmt.return.coroutine.cpp`; a
+    function-try-block in `dcl.fct.def.general.cpp`, C++14's
+    dynamic-exception-specification in `except/except.spec.cpp`.
+  - Scopes: a lambda's captures are declared in a region of their own, its
+    parameters in a function parameter scope the compound-statement
+    re-enters; a handler's exception-declaration is in the handler's block;
+    a function-try-block's handlers see the parameters ([except.handle]/11).
+    A class body's first pass skips a function-try-block as one unparsed
+    part, like a function-body.
+  - Editions by feature (`language-features.inc`): lambdas (C++11),
+    init-captures (C++14), `constexpr` lambdas and `*this` (C++17);
+    `throw ( type-id-list )` until C++17 and `throw ( )` until C++20 (P0003R5,
+    [diff.cpp14.except]/1, [diff.cpp17.except]/1; after that clang's
+    extension, P9's, and an empty one a noexcept-specifier).  Each
+    lambda-declarator specifier at most once ([dcl.spec]/2).
+  - Later steps: a template-parameter-list after the introducer and packs in
+    captures (P7), C++23's lambda without `()` before a specifier and
+    `static` lambdas, `throw(...)` (P9).  In braces, `[` starts a lambda
+    unless `=` follows its group (an array designator, P9).  `decltype` of a
+    lambda gets no declarator claim (each closure type is unique).
+  - `cxx-spec-refs.py` reads a grammar block whose head is indented
+    ([expr.yield]).
+  - V4a: 2244 runs, 12580 declarations as clang, 0 rejected that clang
+    accepts, 0 accepted that clang rejects, 9980 kept as tokens; 30025
+    `unparsed` and 1143 `erroneous` nodes.  V4b: 0 refuted.  V1: 514
+    citations, 233 productions, 0 wrong; except 6 of 6.  V2: 41 examples of
+    [expr.prim.lambda*], [except.*], [expr.await], [expr.yield],
+    [expr.throw] and [dcl.fct.def.coroutine] extracted and annotated; those
+    that need `std::` or generic lambdas are P7's.  V6: 121/121.
 
 ### P7. Templates
 
@@ -651,11 +741,82 @@ The first grammar, about 55 nonterminals.
 - The last opaque kind goes away; `unparsed` is zero on the whole corpus.
 - Tests: `CXX/temp` (210 files), the 25 `Parser/cxx*template*`,
   `*concept*`, `*requires*`, `*fold*` files, `CXX/drs` (83 files) whole.
+- Status: done (2026-11-16), except the known differences below.
+  - Files: `temp/temp.pre.cpp` (template-declaration, template-head,
+    requires-clause, constraint-logical-or/and, explicit-specialization,
+    explicit-instantiation), `temp/temp.param.cpp`, `temp/temp.names.cpp`
+    (template-ids, the `>` rule with split `>>`/`>=`/`>>=` tokens recorded in
+    `syntax_tree::split_tokens`), `temp/temp.res.cpp` (typename-specifier),
+    `temp/temp.concept.cpp` (concept-definition, deduction-guide),
+    `expr/expr.prim.fold.cpp` (fold-expression, requires-expression and its
+    requirements).
+  - `declared_names`: template-parameter scopes, searched before the
+    enclosing namespace for an out-of-class member ([temp.local]/8); template
+    kinds (class, function, variable template, concept) from
+    `parser::declared_kind`; a `dependent` flag per declaration and
+    `qualifier_dependent` for a nested-name-specifier; a specialization's
+    members are looked up in the primary template.  Implicit typename
+    ([temp.res]/5) in the contexts the paragraph lists, from C++20.
+  - Rules clang treats as syntax and the parser checks: a class template's
+    name before `class X<...>`, `template` before a dependent
+    template-name, a requires-clause only after a function declarator
+    outside classes, parenthesized non-primary operands in a
+    requires-clause, one declarator per template declaration and none after
+    a class template's definition, no enum or attributes in an explicit
+    instantiation, no template-id in a using-declarator, no ellipsis in a
+    requirement-parameter-list.
+  - V4a: 2244 runs, 20261 declarations as clang (12580 after P6), 0
+    rejected that clang accepts, 27 accepted that clang rejects, 2231 kept
+    as tokens (9980); 6363 `unparsed` and 1440 `erroneous` nodes.  What is
+    kept is P8 (modules), P9 (extensions, `throw(...)` after C++17,
+    undeclared names) and the TODO below; `unparsed` is not zero yet.
+    V4b: 0 expressions refuted; 6 declared types refuted, all cwg254's `n`
+    redeclared with clang's error inside the template.  The claims skip a
+    template-name used as a deduced class type.  V1: 616 citations, 267
+    productions, 0 wrong; temp 22 of 22.  V6: cxx-lex 121/121.
+  - Known differences (we accept, clang rejects; 8 declarations): whether
+    `A<U>` is the current instantiation (`temp.res/p3.cpp:28`); a decltype
+    or sizeof operand that is type- or value-dependent
+    (`dcl.spec.auto/p12-1y.cpp`, `cwg5xx.cpp:547`); a member template of a
+    dependent object without `template` (`cwg4xx.cpp:626`,
+    `cwg1xx.cpp:689`); a constrained parameter whose concept takes a
+    template (`cxx2a-constrained-template-param.cpp`); parameter
+    redefinition (`cxx2a-concepts-requires-expr.cpp:25`,
+    `cxx-ambig-decl-expr-xfail.cpp`).
+  - TODO (C++23/C++26, not now; each returns `beyond_this_step()`):
+    pack indexing `T...[N]` (P2662R3), braced-init-list template arguments
+    (CWG2450), variadic friends `friend Ts...;` (P2893R3), `static` lambdas
+    and lambdas without `()` before a specifier (P1169R4, P1102R2),
+    `decltype(auto)(x)` (P0849R8), placeholder-free `auto(x)`, `using enum`
+    with a simple-template-id.
 
 ### P8. Modules
 
 - [module] (8 nonterminals), [cpp.module]'s tokens from the preprocessor.
 - Tests: `CXX/module`, `Parser/cxx-modules-*.cppm`.
+- Status: done (2026-11-16).
+  - `module/module.unit.cpp`: module-declaration, module-name,
+    module-partition, module-name-qualifier, module-import-declaration (a
+    module-name, a partition or a header-name), export-declaration (one
+    declaration, braces, or `export import`), global-module-fragment and
+    private-module-fragment; translation-unit's second alternative in
+    `basic/basic.link.cpp`.  export-keyword, import-keyword and
+    module-keyword are read by their phase-4 preprocessing kind
+    (`at_phase4_keyword`); `export` elsewhere is the keyword.
+  - Checked: no export-declaration inside another or in a class
+    ([module.interface]/1), an import only at global namespace scope
+    ([module.import]/1), no `module` or `import` in a module-name, a
+    module-declaration only where translation-unit puts it.  Before C++20,
+    `export template` (C++98) is P9's and any other `export` an error.
+  - `cxxparse -dump-declarations` lists a module unit's declarations
+    across its fragments.
+  - V4a: 20338 declarations as clang, 0 rejected that clang accepts, 29
+    accepted that clang rejects (P7's 8 declarations, and two "module not
+    found": clang has no module files, not syntax), 2152 kept as tokens;
+    6275 `unparsed`.  `CXX/module` keeps three declarations as tokens, all
+    `__attribute__`/`__declspec` (P9).  V1: 622 citations, 275 productions,
+    0 wrong; module 8 of 8.  V6: cxx-lex 121/121.  There are no `.cppm`
+    tests in the harness's corpus (it reads `*.cpp`).
 
 ### P9. Real code and the extensions it needs
 

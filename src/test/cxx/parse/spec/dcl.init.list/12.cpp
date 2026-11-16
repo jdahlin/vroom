@@ -1,5 +1,5 @@
 // [dcl.init.list] Example 12 (paragraph 5), docs/cxx-spec/dcl/dcl.init.list.md
-// needs: P5
+// needs: P7
 // status: well-formed (as far as the example says)
 
 struct X {

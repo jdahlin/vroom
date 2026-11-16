@@ -23,7 +23,9 @@ namespace cplusplus
  *
  * With first, the declarator is the last pending child already (the
  * caller parsed it to see whether the declaration is a function-definition).
- * The requires-clause is P7's.
+ * [dcl.decl]/3: "The optional requires-clause in an init-declarator or
+ * member-declarator shall be present only if the declarator declares a
+ * templated function" is semantic: the grammar takes it after any.
  */
 node_index parser::init_declarator(const decl_specifier_facts &specifiers,
                                    declarator_facts &facts, bool first)
@@ -47,14 +49,34 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
            complete declarator, before the initializer */
         if (facts.name && !facts.qualified_id) {
             name_kind kind = name_kind::other;
+            if (facts.first == derivation::function)
+                kind = name_kind::function;
             if (specifiers.typedef_)
                 kind = name_kind::type_name;
-            names.declare(facts.name, kind);
+            names.declare(facts.name, declared_kind(kind), 0,
+                          specifiers.typedef_ && specifiers.dependent);
         }
     }
-    if (at(standard_keyword::requires_))
-        return beyond_this_step();
-    if (!initializer() && !failed())
+    /* init-declarator: declarator requires-clause ([dcl.decl]/1); that
+       its declarator declares a templated function is [dcl.decl]/3's
+       semantic rule */
+    if (at(standard_keyword::requires_) && facts.first != derivation::function)
+        return violates("a requires-clause only after a function's declarator",
+                        "dcl.decl", position);
+    if (at(standard_keyword::requires_)) {
+        requires_clause();
+        if (failed())
+            return 0;
+        return finish_node(syntax_kind::init_declarator, mark, first_token);
+    }
+    /* [class.static.data]/3: "The initializer expression in the definition
+       of a static data member is in the scope of its class" */
+    scope_index outer = names.current();
+    if (facts.has_member_of)
+        names.reenter(facts.member_of);
+    node_index init = initializer();
+    names.reenter(outer);
+    if (!init && !failed())
         return 0; /* no initializer: the declarator passes through */
     if (failed())
         return 0;
@@ -144,8 +166,8 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
                  at(preprocessing_op_or_punc::LEFT_BRACKET);
     if (form == declarator_form::either &&
         !(at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
-          at(preprocessing_op_or_punc::TILDE) ||
-          at(preprocessing_op_or_punc::ELLIPSIS) || at_ptr_operator() ||
+          at(preprocessing_op_or_punc::TILDE) || named_pack_follows() ||
+          abstract_pack_follows() || at_ptr_operator() ||
           at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
           at(preprocessing_op_or_punc::LEFT_BRACKET)))
         inner = false;
@@ -179,6 +201,24 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
  * [[ anywhere else in a declarator is no attribute-specifier, and
  * [dcl.attr.grammar]/7 forbids it.
  */
+/* ... before a declarator-id */
+bool parser::named_pack_follows()
+{
+    return (at(preprocessing_op_or_punc::ELLIPSIS) &&
+            (at_identifier(1) || at(preprocessing_op_or_punc::COLON_COLON, 1) ||
+             at(standard_keyword::operator_, 1)));
+}
+
+/* ... with no declarator-id after it, not before ')' */
+bool parser::abstract_pack_follows()
+{
+    return at(preprocessing_op_or_punc::ELLIPSIS) &&
+           tokens.files.behavior.has(language_feature::variadic_templates) &&
+           !named_pack_follows() &&
+           !at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 1) &&
+           !at(preprocessing_op_or_punc::LEFT_BRACKET, 1);
+}
+
 node_index parser::noptr_declarator(declarator_form form,
                                     declarator_facts &facts)
 {
@@ -214,8 +254,8 @@ node_index parser::noptr_declarator(declarator_form form,
         head = true;
     } else if (form != declarator_form::abstract &&
                (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
-                at(preprocessing_op_or_punc::TILDE) ||
-                at(preprocessing_op_or_punc::ELLIPSIS))) {
+                at(preprocessing_op_or_punc::TILDE) || named_pack_follows() ||
+                at(standard_keyword::operator_))) {
         declarator_id(facts);
         if (failed())
             return 0;
@@ -224,6 +264,15 @@ node_index parser::noptr_declarator(declarator_form form,
         attribute_specifier_seq();
         if (failed())
             return 0;
+    } else if (form != declarator_form::concrete && abstract_pack_follows()) {
+        /* [dcl.fct]/1: noptr-abstract-pack-declarator: ... ([temp.variadic]
+           /4: a parameter pack whose name is omitted).  A ... before ')'
+           is the parameter-declaration-clause's: a pack or a C variadic
+           function's ellipsis, which [dcl.fct]/? tells apart by whether the
+           type names an unexpanded pack, a semantic question */
+        add_token();
+        facts.pack = true;
+        head = true;
     } else if (form == declarator_form::concrete) {
         return expected("a declarator", "dcl.decl");
     }
@@ -265,7 +314,13 @@ node_index parser::noptr_declarator(declarator_form form,
                 bool parsed = false;
                 {
                     tentative_parse attempt(*this);
+                    /* a member's parameters are in its class's scope
+                       ([basic.scope.class]/1), and so its body */
+                    scope_index outer = names.current();
+                    if (facts.has_member_of)
+                        names.reenter(facts.member_of);
                     parameters_and_qualifiers(&facts.parameters);
+                    names.reenter(outer);
                     if (!failed()) {
                         attempt.commit();
                         parsed = true;
@@ -335,6 +390,9 @@ bool parser::parenthesis_could_be_initializer()
     case standard_keyword::const_:
     case standard_keyword::volatile_:
     case standard_keyword::register_:
+    case standard_keyword::friend_:
+    case standard_keyword::virtual_:
+    case standard_keyword::explicit_:
         return false;
     case standard_keyword::char_:
     case standard_keyword::char8_t_:
@@ -464,7 +522,11 @@ node_index parser::trailing_return_type()
     size_t mark = begin_node();
     token_index first = position;
     add_token();
-    type_id();
+    {
+        /* [temp.res]/5: a type-id-only context */
+        flag_set only(type_id_only, true);
+        type_id();
+    }
     if (failed())
         return 0;
     return finish_node(syntax_kind::trailing_return_type, mark, first);

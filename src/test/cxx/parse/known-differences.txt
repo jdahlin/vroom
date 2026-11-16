@@ -48,3 +48,10 @@ CXX/drs/cwg17xx.cpp:147 n.cwg1753::~T(): the qualified-id is the grammar's, the 
 # ([stmt.pre]/1); clang's error is about the #pragma clang attribute
 # between them
 Parser/gh137861.cpp:22 [[nodiscard]] before #pragma clang attribute push and a compound-statement
+# [cpp.pragma]/1: a pragma's effect is implementation-defined; clang's
+# error is about a _Pragma from a macro inside a class
+Parser/pragma-attribute-context.cpp:32 #pragma clang attribute (BEGIN_PRAGMA's _Pragma) inside a struct
+# [dcl.fct.default]: the default argument b < c ends at the ',' and a
+# second parameter follows; clang's parser ends it early (its FIXME:
+# "We should ideally disambiguate this as two parameters")
+Parser/cxx-ambig-init-templ.cpp:66 int k = b < c, unsigned int (missing_default): two parameters

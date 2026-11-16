@@ -1,5 +1,5 @@
 // [basic.def] Example 1, part 2 (paragraph 2), docs/cxx-spec/basic/basic.def.md
-// needs: (the step whose grammar parses it)
+// needs: P5 (names declared in another part or outside the example stay unparsed)
 // status: well-formed (as far as the example says)
 
 extern int a;                   // declares a

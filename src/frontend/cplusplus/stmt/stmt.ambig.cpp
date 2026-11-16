@@ -77,6 +77,12 @@ parser::reading parser::reading_at(unsigned ahead)
         switch (classify_name(ahead, &length, false)) {
         case name_class::type:
             return reading::either;
+        /* a concept-name: C<T> is an expression, C auto x a declaration */
+        case name_class::concept_:
+            return reading::either;
+        /* [temp.res]/2: a dependent name without typename is assumed not
+           to name a type */
+        case name_class::dependent:
         case name_class::not_a_type:
         case name_class::none:
             return reading::expression;

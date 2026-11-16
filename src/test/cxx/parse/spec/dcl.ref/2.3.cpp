@@ -1,5 +1,5 @@
 // [dcl.ref] Example 2, part 3 (paragraph 3), docs/cxx-spec/dcl/dcl.ref.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: well-formed (as far as the example says)
 
 struct link {

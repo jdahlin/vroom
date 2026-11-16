@@ -99,6 +99,9 @@ bool parser::cast_expression_follows()
  */
 bool parser::parenthesized_type_id(bool cast)
 {
+    /* [temp.names]/3: a > in brackets nested in a template-argument-list
+       is an operator */
+    flag_set greater(greater_is_operator, true);
     failure_state failed_with;
     bool compound_literal = false;
     bool as_types = unknown_names_are_types;

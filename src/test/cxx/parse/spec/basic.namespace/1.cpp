@@ -1,5 +1,5 @@
 // [basic.namespace] Example 1 (paragraph 2), docs/cxx-spec/dcl/basic.namespace.md
-// needs: (the step whose grammar parses it)
+// needs: P8
 // status: well-formed (as far as the example says)
 
 export module M;

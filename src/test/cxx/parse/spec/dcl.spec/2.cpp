@@ -1,5 +1,5 @@
 // [dcl.spec] Example 2 (paragraph 4), docs/cxx-spec/dcl/dcl.spec.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: well-formed (as far as the example says)
 
 void h(unsigned Pc);            // void h(unsigned int)

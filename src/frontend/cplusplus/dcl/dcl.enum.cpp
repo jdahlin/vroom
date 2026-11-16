@@ -65,8 +65,11 @@ node_index enum_head_name(parser &p, uint32_t *name, bool *qualified)
     }
     uint32_t identifier = p.tokens.identifier(p.position);
     p.add_token();
+    /* enum-head-name: nested-name-specifier_opt identifier: no
+       simple-template-id names an enumeration */
     if (p.at(preprocessing_op_or_punc::LESS))
-        return p.beyond_this_step(); /* a simple-template-id: P7 */
+        return p.expected("no template-argument-list after an enum-name",
+                          "dcl.enum");
     if (!qualifier) {
         *name = identifier;
         return 0;
@@ -233,6 +236,12 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
             return 0;
         base = true;
     }
+    /* [class.friend]/2 as clang reads it: no type is defined in a friend
+       declaration */
+    if (facts.friend_ && at(preprocessing_op_or_punc::LEFT_BRACE) &&
+        !facts.type_specifier_seq)
+        return violates("no enumeration defined in a friend declaration",
+                        "class.friend", facts.friend_at);
     facts.declares_type = true;
     if (!at(preprocessing_op_or_punc::LEFT_BRACE) || facts.type_specifier_seq) {
         if (scoped || attributes || base)

@@ -125,11 +125,13 @@ node_index parser::for_range_declaration()
         return 0;
     if (!specifiers.node)
         return expected("a decl-specifier-seq", "stmt.iter");
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) ||
-        ((at(preprocessing_op_or_punc::AMPERSAND) ||
-          at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) &&
-         at(preprocessing_op_or_punc::LEFT_BRACKET, 1)))
-        return beyond_this_step(); /* a structured binding: P5 */
+    if (structured_binding_follows()) {
+        /* [dcl.struct.bind] */
+        structured_binding_identifiers();
+        if (failed())
+            return 0;
+        return finish_node(syntax_kind::for_range_declaration, mark, first);
+    }
     declarator_facts facts;
     declarator(declarator_form::concrete, facts);
     if (failed())

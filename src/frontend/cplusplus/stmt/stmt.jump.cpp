@@ -9,7 +9,7 @@
  *         coroutine-return-statement
  *         goto identifier ;
  *
- * coroutine-return-statement is P6's.
+ * coroutine-return-statement is stmt.return.coroutine.cpp's.
  */
 #include "stmt.ambig.h"
 
