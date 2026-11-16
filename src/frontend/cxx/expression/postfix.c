@@ -305,7 +305,13 @@ VPRIV void cxx_postfix_expression_parse1(cxx *c)
 					cxx_entity *m = cxx_lookup_in(c, cls, id, 0);
 
 					if (m && m->kind != CXX_ENTITY_DEPENDENT) {
+						/* (x.m: the object's constness decides, below, not that of the function this is in, which
+						   is for this->m alone; a const member function's left over made r.w of a local r const) */
+						uint8_t tc = c->this_const;
+
+						c->this_const = 0;
 						cxx_name_type(c, m);
+						c->this_const = tc;
 						c->call_obj = (AST_QUALIFIED_TYPE_QUALIFIERS(obj) & AST_QUALIFIER_CONST) ? 2 : 1, c->call_obj_rv = obj_rv;
 						/* a data member of a const object is const (not a mutable one, not a reference):
 						   x.layout.begin_ptr() on a const x calls the const overload */

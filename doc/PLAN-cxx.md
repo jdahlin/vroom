@@ -2957,3 +2957,11 @@ bara mönstrets): jsons `json_pointer<basic_json<...>>::string_t` via
 `operator==` (unit-json_pointer, unit-json_patch).  Test:
 `run/member-template-partial-in-instance.cpp`.  Sviter gröna (177/177, 38/38,
 mangle).
+
+## Status 204 (2026-11-16)
+`x.m` får sin const-het från objektet, inte från funktionen vcc senast
+tolkade: `this_const` (för `this->m` i en const-medlemsfunktion) låg kvar och
+gjorde `r.w` av en lokal `r` const, så `r.w.push_back(1)` och `r.w = {...}`
+valde inget (jsons `json_pointer::top()`: `result.reference_tokens =
+{reference_tokens[0]}`).  Test: `run/member-of-local-after-const-fn.cpp`, som
+misslyckas utan ändringen.  Sviter gröna (178/178, 38/38, mangle).
