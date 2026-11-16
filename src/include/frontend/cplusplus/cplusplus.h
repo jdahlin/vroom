@@ -656,6 +656,8 @@ enum class dynamic_macro : uint8_t {
     is_target_os,
     is_target_environment,
     building_module,
+    flt_eval_method,
+    has_constexpr_builtin,
 };
 
 /* [cpp.replace]: one element of a replacement list: a preprocessing token,
@@ -777,6 +779,8 @@ class preprocessor
     source_location last_file_location = 0;
     unsigned collecting_arguments = 0, in_condition = 0;
     bool read_from_file = false;
+    /* reading stops at the end of an included file, which is read again */
+    bool stop_at_file_end = false;
     bool started = false;
     void execute_definitions(source_files::entry &file);
     preprocessing_token read_file_token(bool header_name_permitted = false);
@@ -864,11 +868,14 @@ class preprocessor
         owned_array<preprocessing_token> &tokens;
         uint32_t end; /* of the elements substituted */
         bool next_space;
+        /* the variable arguments were left out of the invocation */
+        bool variadic_elided;
     };
+    bool variadic_elided = false;
     /* the white space and line start of a macro name replaced by nothing,
        which the next token takes */
     bool pending_flags = false, pending_start_of_line = false,
-         pending_white_space = false;
+         pending_white_space = false, trailing_space = false;
     void push_tokens(const preprocessing_token *tokens, size_t count,
                      int32_t macro, bool barrier);
     void pop_context();

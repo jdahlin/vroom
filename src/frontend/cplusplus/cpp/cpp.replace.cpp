@@ -580,6 +580,7 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
 {
     unsigned depth = 0;
     uint32_t begin = (uint32_t)tokens.size();
+    variadic_elided = false;
     collecting_arguments++;
     for (;;) {
         preprocessing_token t;
@@ -616,6 +617,9 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
     if (m.parameter_count == 0 && arguments.size() == 1 &&
         arguments[0].begin == arguments[0].end)
         arguments.clear();
+    if (m.variadic && m.parameter_count == 1 && arguments.size() == 1 &&
+        arguments[0].begin == arguments[0].end)
+        variadic_elided = true;
     if (!behavior.has(language_feature::variadic_macros))
         for (const argument &a : arguments)
             if (a.begin == a.end && m.parameter_count)
@@ -653,6 +657,7 @@ bool preprocessor::collect_arguments(const preprocessing_token &name,
                     right_parenthesis->location);
             uint32_t at = (uint32_t)tokens.size();
             arguments.append({at, at, -1, -1});
+            variadic_elided = true;
         } else {
             diagnostics.issue(diagnostic_id::err_too_few_args_in_macro_invoc,
                               right_parenthesis->location);

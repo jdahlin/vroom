@@ -13,6 +13,8 @@
  *   __is_target_arch(x), __is_target_vendor(x), __is_target_os(x),
  *   __is_target_environment(x)             the target's parts
  *   __building_module(x)                   0: no modules are built
+ *   __has_constexpr_builtin(x)             0: no builtin is constant yet
+ *   __FLT_EVAL_METHOD__                    0 (clang_flt_eval_method)
  *
  * and [ext.clang] clang_has_include_next (__has_include_next, evaluated with
  * __has_include in cpp.cond.cpp), clang_file_name_macro (__FILE_NAME__, the
@@ -54,6 +56,11 @@ void preprocessor::clang_define_dynamic_macros()
                        true);
     if (behavior.has(extension::clang_file_name_macro))
         define_dynamic("__FILE_NAME__", dynamic_macro::file_name, false);
+    if (behavior.has(extension::clang_flt_eval_method))
+        define_dynamic("__FLT_EVAL_METHOD__", dynamic_macro::flt_eval_method,
+                       false);
+    define_dynamic("__has_constexpr_builtin",
+                   dynamic_macro::has_constexpr_builtin, true);
 }
 
 int preprocessor::clang_dynamic_macro(preprocessing_token &name,
@@ -65,6 +72,10 @@ int preprocessor::clang_dynamic_macro(preprocessing_token &name,
             files.position(name.expansion ? name.expansion : name.location);
         const char *f = strrchr(p.file_name, '/');
         string_literal_of(f ? f + 1 : p.file_name, text.get());
+        return 1;
+    }
+    if (m.dynamic == dynamic_macro::flt_eval_method) {
+        vbuffer_append(text.get(), "0", 1);
         return 1;
     }
     owned_buffer operand, scope;

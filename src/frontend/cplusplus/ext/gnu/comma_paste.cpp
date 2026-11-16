@@ -4,7 +4,7 @@
  *
  *     , ## __VA_ARGS__
  *
- * deletes the comma when there are no variable arguments, and is the comma
+ * deletes the comma when the variable arguments are left out, and is the comma
  * and the arguments, pasted to nothing, when there are some.  [cpp.subst]'s
  * __VA_OPT__ (,) is the standard's way to say it; clang warns of this one
  * with -pedantic.
@@ -27,6 +27,10 @@ bool preprocessor::gnu_comma_paste(substitution &s, uint32_t at,
         return false;
     const argument &a = s.arguments[next.parameter];
     if (a.begin == a.end) {
+        /* [impl.clang] only when the variable arguments are left out (f(x)
+           for f(x, ...), or g() for g(...)); g(x,) keeps the comma */
+        if (!s.variadic_elided)
+            return false;
         preprocessing_token placemarker;
         placemarker.kind = preprocessing_token_kind::placemarker;
         placemarker.location = next.token.location;

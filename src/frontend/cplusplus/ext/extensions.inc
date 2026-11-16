@@ -33,6 +33,8 @@ EXTENSION(clang_feature_checks, clang,
           "clang Language Extensions, Feature Checking Macros: __has_feature, __has_builtin, ...")
 EXTENSION(clang_has_include_next, clang, "clang Language Extensions: __has_include_next")
 EXTENSION(clang_file_name_macro, clang, "clang Language Extensions: __FILE_NAME__")
+EXTENSION(clang_flt_eval_method, clang,
+          "__FLT_EVAL_METHOD__, as #pragma clang fp eval_method sets it (0 on this target)")
 EXTENSION(clang_later_edition_features, clang,
           "a later edition's preprocessor in an earlier one, with a warning: #elifdef, #elifndef, "
           "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11)")

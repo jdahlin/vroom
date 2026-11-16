@@ -122,6 +122,17 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
 - Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
   standard's clauses.
 
+## Decisions (2026-11-16, during L3)
+
+5. Diagnostics: clang's ids and texts stay as data for now, but matching
+   clang's wording is not a goal.  The harnesses compare where an error is
+   ([intro.compliance]/2), and the text only of diagnostics already written.
+   The front end's diagnostics move to vcc's diagnostic system (spans,
+   labels, the vcc/clang/narrated styles, JSON, SARIF) later, once the
+   non-error path (preprocessor, then parser) works.
+6. Extensions are named in `ext/extensions.inc`, gated by
+   `behavior.has(extension::...)` and kept in `ext/VENDOR/` (Conventions).
+
 ## Decisions (review of PR #307, 2026-11-16)
 
 1. Files keep the dotted stable name (`lex/lex.icon.cpp`).

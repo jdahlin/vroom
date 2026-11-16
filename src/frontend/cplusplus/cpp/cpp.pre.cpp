@@ -190,6 +190,10 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             continue;
         }
         if (t.kind == preprocessing_token_kind::end_of_file) {
+            if (stop_at_file_end && inclusions.size() > 1) {
+                unread_file_token(t);
+                return t;
+            }
             leave_file();
             if (!inclusions.empty())
                 continue;

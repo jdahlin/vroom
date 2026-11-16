@@ -96,7 +96,12 @@ bool preprocessor::read_expanded(preprocessing_token &t)
 bool preprocessor::peek_left_parenthesis()
 {
     preprocessing_token t;
-    if (!read_unexpanded(t))
+    /* [impl.clang] the ( is not looked for past the end of an included
+       file */
+    stop_at_file_end = true;
+    bool more = read_unexpanded(t);
+    stop_at_file_end = false;
+    if (!more)
         return false;
     if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return true;
@@ -124,6 +129,7 @@ bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
         return replace_dynamic(name, m);
 
     owned_array<preprocessing_token> result;
+    trailing_space = false;
     if (!m.function_like) {
         owned_array<argument> none;
         owned_array<preprocessing_token> no_tokens;
@@ -134,9 +140,13 @@ bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
         owned_array<argument> arguments;
         owned_array<preprocessing_token> argument_tokens;
         preprocessing_token right_parenthesis;
+        /* [impl.clang] after an invocation that is in error, the name is
+           left as it is and the arguments read are dropped */
         if (!collect_arguments(name, m, arguments, argument_tokens,
-                               &right_parenthesis))
-            return true;
+                               &right_parenthesis)) {
+            name.not_replaceable = true;
+            return false;
+        }
         substitute(name, m, arguments, argument_tokens, result);
     }
     macros[index].used = true;
@@ -160,6 +170,10 @@ void preprocessor::finish_replacement(const preprocessing_token &name,
             continue;
         preprocessing_token t = result[i];
         t.expansion = expansion;
+        /* [cpp.concat]/5 Example 2: a ## that a replacement produces "is not
+           the ## operator" (nor a token of phase 7: clang's unknown) */
+        if (is_operator(t, preprocessing_op_or_punc::HASH_HASH))
+            t.kind = preprocessing_token_kind::other_character;
         result[kept++] = t;
     }
     result.resize(kept);
@@ -169,7 +183,7 @@ void preprocessor::finish_replacement(const preprocessing_token &name,
     } else {
         pending_flags = true;
         pending_start_of_line = name.at_start_of_line;
-        pending_white_space = name.after_white_space;
+        pending_white_space = name.after_white_space || trailing_space;
     }
 }
 

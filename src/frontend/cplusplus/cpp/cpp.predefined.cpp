@@ -221,7 +221,8 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
         quoted(diagnostics.issue(diagnostic_id::err_pp_directive_required,
                                  name.location),
                name);
-        return true;
+        name.not_replaceable = true; /* [impl.clang] left as it is */
+        return false;
     case dynamic_macro::has_cpp_attribute: {
         /* [cpp.cond]/5: "replaced by a non-zero pp-number matching the form
            of an integer-literal if the implementation supports an attribute

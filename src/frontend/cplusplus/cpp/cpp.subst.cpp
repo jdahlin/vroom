@@ -191,6 +191,8 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
            preceding preprocessing token is concatenated with the following
            preprocessing token" */
         if (is_operator(e.token, op::HASH_HASH) && !out.empty()) {
+            /* [impl.clang] white space before the ## is the deleted ##'s */
+            s.next_space = false;
             /* [ext.gnu] gnu_comma_paste */
             if (behavior.has(extension::gnu_comma_paste) &&
                 gnu_comma_paste(s, i, out)) {
@@ -225,11 +227,8 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
         if (is_va_opt(m, e)) {
             size_t first = out.size();
             va_opt(s, i, out);
-            if (out.size() > first &&
-                out[first].kind != preprocessing_token_kind::placemarker) {
-                out[first].after_white_space = s.next_space;
-                s.next_space = false;
-            }
+            /* the white space before __VA_OPT__ went to its first token */
+            (void)first;
             i = va_opt_end(i + 1, s.end) + 1;
             continue;
         }
@@ -237,9 +236,13 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
             argument &a = s.arguments[e.parameter];
             uint32_t begin = a.begin, end = a.end;
             if (paste_follows) {
-                /* [cpp.concat]/2: the argument as it is, or a placemarker */
-                if (begin == end)
+                /* [cpp.concat]/2: the argument as it is, or a placemarker,
+                   which keeps the white space for the token pasted to it */
+                if (begin == end) {
                     out.append(placemarker(e.token.location));
+                    out.back().after_white_space = s.next_space;
+                    s.next_space = false;
+                }
             } else {
                 expand_argument(a, s.tokens);
                 begin = (uint32_t)a.expanded_begin;
@@ -267,8 +270,12 @@ void preprocessor::substitute(const preprocessing_token &name,
                               owned_array<preprocessing_token> &out)
 {
     (void)name;
-    substitution s{m, arguments, tokens, m.first_element + m.length, false};
+    substitution s{m,     arguments,      tokens, m.first_element + m.length,
+                   false, variadic_elided};
     substitute_range(s, m.first_element, out);
+    /* [impl.clang] white space no token took goes to the token after an
+       empty replacement */
+    trailing_space = s.next_space;
 }
 
 } // namespace cplusplus
