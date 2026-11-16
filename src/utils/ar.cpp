@@ -335,7 +335,7 @@ static bool ar_member_file_add(ar_request *q, const char *path,
     } else {
         ar_member m = {ar_path_relative(q->directory, abs),
                        abs,
-                       st.st_mode & 07777,
+                       (uint32_t)(st.st_mode & 07777),
                        (uint64_t)st.st_size,
                        NULL,
                        (int64_t)st.st_mtime,

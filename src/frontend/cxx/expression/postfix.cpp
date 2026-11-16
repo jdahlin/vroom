@@ -1,5 +1,6 @@
 /* C++ expressions: postfix expressions (calls, members, subscripts) */
 #include "expression.h"
+#include "../declaration/declaration.h"
 
 /* did the call just resolved convert an argument by a user-defined conversion (its rank 3 or more)? */
 static bool cxx_call_ranks_converted(const cxx *c)
