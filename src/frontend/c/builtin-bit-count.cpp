@@ -187,17 +187,6 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_bitint(cc *c, int id, uint32_t x,
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
 {
     cc_id_list args;
-
-    cc_builtin_arguments_parse(c, &args);
-    return cc_builtin_bit_count_lower(c, id, &args, loc);
-}
-
-/* the generic forms from their parsed arguments (C's parser above; C++'s code generator) */
-CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id,
-                                               const cc_id_list *argl,
-                                               uint32_t loc)
-{
-    cc_id_list args = *argl;
     uint32_t x, fb = 0;
     ast_qualified_type xt;
 
@@ -207,6 +196,7 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id,
         id = id == CC_BUILTIN_STDC_COUNT_ONES ? CC_BUILTIN_POPCOUNTG
                                               : CC_BUILTIN_CTZG;
     unsigned maxargs = stdc || id == CC_BUILTIN_POPCOUNTG ? 1 : 2;
+    cc_builtin_arguments_parse(c, &args);
     if (!args.n || args.n > maxargs) {
         cc_builtin_arity_check(c, loc, args.n ? maxargs : 1, &args);
         return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);

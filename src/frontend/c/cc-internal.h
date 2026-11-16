@@ -109,9 +109,6 @@ CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
                                             uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_rotate_build(cc *c, const cc_builtin *b,
                                             uint32_t loc);
-CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id,
-                                               const cc_id_list *args,
-                                               uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc,
                                                uint32_t x, uint32_t fb,
