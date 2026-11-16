@@ -280,12 +280,24 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
     token_index first = position;
     type_specifier_count count;
     token_index other_specifier = 0;
-    bool has_other_specifier = false;
+    bool has_other_specifier = false, has_auto = false;
     for (;;) {
         standard_keyword k = keyword_of(peek());
         token_index specifier = position;
-        bool type_specifier = !is_non_type_decl_specifier(k);
-        if (is_non_type_decl_specifier(k)) {
+        /* before C++11 auto is a storage-class-specifier
+           ([diff.cpp03.dcl.dcl]/1), so a type-name may follow it */
+        bool storage_class_auto =
+            k == standard_keyword::auto_ &&
+            !tokens.files.behavior.has(language_feature::auto_type_specifier);
+        bool type_specifier =
+            !is_non_type_decl_specifier(k) && !storage_class_auto;
+        if (storage_class_auto) {
+            /* where only type-specifiers can be, auto is C++11's
+               placeholder: [ext.clang] clang's extension of C++03, P9 */
+            if (type_specifiers_only || facts.type_specifier_seq)
+                return beyond_this_step();
+            add_token();
+        } else if (is_non_type_decl_specifier(k)) {
             if (type_specifiers_only)
                 break;
             if (k == standard_keyword::typedef_) {
@@ -402,10 +414,18 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             break;
         }
         facts.count++;
-        if (type_specifier && !count.add(k))
+        if (k == standard_keyword::auto_ && !storage_class_auto)
+            has_auto = true;
+        if (type_specifier && !count.add(k)) {
+            /* auto int x: C++03's storage-class-specifier auto
+               ([diff.cpp03.dcl.dcl]/1), in a later edition [ext.clang]
+               clang's extension: P9 */
+            if (has_auto)
+                return beyond_this_step();
             return violates("at most one defining-type-specifier, except "
                             "the combinations [dcl.type]/2 lists",
                             "dcl.type", specifier);
+        }
         /* decl-specifier attribute-specifier-seq_opt: the
            attribute-specifier-seq ends the sequence ([dcl.spec]/1: it
            "appertains to the type determined by the preceding

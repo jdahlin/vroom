@@ -373,6 +373,15 @@ def check(test, opts, clang, cxxlex, cxxparse):
         body = re.sub(r'//.*', '', '\n'.join(text))
         return re.fullmatch(r'[\s)\]};]*', body) is not None
 
+    # [cpp.pragma]/1: a pragma's effect is implementation-defined, and the
+    # preprocessor consumes it: clang's errors about one (on its line, or
+    # on the next line for "expected a loop after the pragma") are not
+    # about the grammar
+    pragma_lines = {i + 1 for i, row in enumerate(lines) if re.match(r'\s*(?:/\*.*?\*/\s*)*#\s*pragma\b', row) or '_Pragma' in row}
+
+    def about_pragma(p):
+        return p[0] in pragma_lines or p[0] - 1 in pragma_lines
+
     known_lines = KNOWN.get(os.path.relpath(test, LLVM_TEST), set())
     for kind, b, e, flags, opaque in decls:
         if any(b[0] <= line <= e[0] for line in known_lines):
@@ -394,6 +403,9 @@ def check(test, opts, clang, cxxlex, cxxparse):
             clang_rejects = any(within(p) for p in any_errors)
         else:
             mine = [p for p in syntax_errors if within(p)]
+            if mine and all(about_pragma(p) for p in mine):
+                res['syntax']['not_comparable'] += 1
+                continue
             # an error in a part kept as tokens (a body, an initializer) is
             # about grammar a later step parses
             inside = [p for p in mine if any(lo <= p <= hi for lo, hi in opaque)]

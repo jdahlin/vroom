@@ -41,3 +41,10 @@ Parser/cxx0x-attributes.cpp:454 [[__clang__::annotate]]: __clang__ is a predefin
 # what a declaration turns out to be
 Parser/cxx2c-delete-with-message.cpp:45 [dcl.init], [expr.delete]: T a = delete ("hello"); is an initializer whose initializer-clause is a delete-expression; clang's parser takes = delete for a deleted definition (the tests of CWG2876)
 Parser/cxx2c-delete-with-message.cpp:46 as line 45
+# [basic.lookup.qual]/6 (n4861): which declarations `N::~T` finds is
+# lookup, not syntax; clang's parser checks it
+CXX/drs/cwg17xx.cpp:147 n.cwg1753::~T(): the qualified-id is the grammar's, the lookup fails
+# an attribute-specifier-seq before a compound-statement is the grammar's
+# ([stmt.pre]/1); clang's error is about the #pragma clang attribute
+# between them
+Parser/gh137861.cpp:22 [[nodiscard]] before #pragma clang attribute push and a compound-statement

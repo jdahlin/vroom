@@ -76,6 +76,11 @@ def examples(path):
     return out
 
 
+# a statement the standard shows outside a function is put in one by hand,
+# on the example's first (blank) line so that line numbers stay: these
+# lines are not the standard's
+WRAPPER = ('', 'void example() {', '}')
+
 ERROR_COMMENT = re.compile(r'//.*\b(error|ill-formed)\b', re.I)
 
 
@@ -123,9 +128,10 @@ def main():
             target = os.path.join(OUT, label, name)
             text = render(label, path, number, paragraph, code, part if part > 1 else 0)
             if os.path.exists(target):
-                body = open(target).read().split('\n\n', 1)[-1]
-                mine = text.split('\n\n', 1)[-1]
-                strip = lambda t: [re.sub(r'\s*// (syntax-error|semantic)\s*$', '', l) for l in t.split('\n')]
+                body = '\n'.join(open(target).read().split('\n')[3:])
+                mine = '\n'.join(text.split('\n')[3:])
+                strip = lambda t: [re.sub(r'\s*// (syntax-error|semantic)\s*$', '', l)
+                                   for l in t.split('\n') if l.strip() not in WRAPPER]
                 if strip(body) != strip(mine):
                     print(f'{os.path.relpath(target, R)}: differs from the standard\'s example')
                     status = 1

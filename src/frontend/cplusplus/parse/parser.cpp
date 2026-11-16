@@ -152,10 +152,12 @@ parser::tentative_parse::tentative_parse(parser &p)
       names(p.names.journal_mark()), failure(p.failure)
 {
     p.counters.tentative_parses++;
+    p.speculation++;
 }
 
 parser::tentative_parse::~tentative_parse()
 {
+    p.speculation--;
     if (committed)
         return;
     p.counters.rewinds++;

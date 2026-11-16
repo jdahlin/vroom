@@ -92,7 +92,8 @@ bool colon_of_this_step(parser &p, token_index first, token_index i)
  * kept as an unparsed node, not reported.  These are templates, operator
  * names, class members' syntax and the extensions' keywords (P3-P9).
  */
-bool uses_later_grammar(parser &p, token_index first, token_index end)
+bool uses_later_grammar(parser &p, token_index first, token_index end,
+                        bool statement)
 {
     /* the '?' whose ':' has not come yet */
     unsigned conditionals = 0;
@@ -126,9 +127,12 @@ bool uses_later_grammar(parser &p, token_index first, token_index end)
         default:
             break;
         }
-        if (is_operator(t, preprocessing_op_or_punc::LESS))
+        /* in a statement a '<' after a name that may be a template's sets
+           unknown_name; a ':' is a label's, a case's or a range-based
+           for's */
+        if (!statement && is_operator(t, preprocessing_op_or_punc::LESS))
             return true;
-        if (is_operator(t, preprocessing_op_or_punc::COLON) &&
+        if (!statement && is_operator(t, preprocessing_op_or_punc::COLON) &&
             !colon_of_this_step(p, first, i))
             return true;
         if (t.kind == token_kind::identifier) {
@@ -146,6 +150,12 @@ bool uses_later_grammar(parser &p, token_index first, token_index end)
 }
 
 } // namespace
+
+VPRIV bool statement_uses_later_grammar(parser &p, token_index first,
+                                        token_index end)
+{
+    return uses_later_grammar(p, first, end, true);
+}
 
 /* [lex.name]/2 Table 4: module, import and export are identifiers with
    special meaning at the start of a declaration; where [cpp.module] and
@@ -215,8 +225,26 @@ node_index parser::declaration()
     failure_state failed_with;
     unknown_name = false;
     nesting_limit_exceeded = false;
+    /* the statements of a function-body recover here or in a statement:
+       restored when the declaration is done */
+    struct recovery_point {
+        parser &p;
+        unsigned level;
+        bool block_scope;
+        explicit recovery_point(parser &p)
+            : p(p), level(p.recovery_level), block_scope(p.block_scope)
+        {
+            p.block_scope = false;
+        }
+        ~recovery_point()
+        {
+            p.recovery_level = level;
+            p.block_scope = block_scope;
+        }
+    } recovery(*this);
     {
         tentative_parse attempt(*this);
+        recovery_level = speculation;
         size_t mark = begin_node();
         node_index n = 0;
         unsigned after_attributes = attribute_specifier_seq_end(0);
@@ -311,7 +339,7 @@ node_index parser::declaration()
     /* a declaration that named something the parser does not know may have
        failed for what the name is (a type, a template): a later step's */
     if (!limit && (failed_with.beyond_step || unknown_name ||
-                   uses_later_grammar(*this, first, position))) {
+                   uses_later_grammar(*this, first, position, false))) {
         counters.beyond_step++;
         if (tree[n].kind == syntax_kind::erroneous) {
             /* the splitter's bracket diagnostics are about tokens a later
@@ -439,7 +467,13 @@ parser::simple_declaration_rest(size_t mark, token_index first,
         if (specifiers.typedef_)
             return violates("no typedef in a function-definition",
                             "dcl.typedef", specifiers.typedef_at);
-        function_body();
+        /* [dcl.fct.def.general]/2: "A function shall be defined only in
+           namespace or class scope." */
+        if (block_scope)
+            return violates("a function-definition only in namespace or "
+                            "class scope",
+                            "dcl.fct.def.general", position);
+        function_body(facts);
         if (failed())
             return 0;
         return finish_node(syntax_kind::function_definition, mark, first);

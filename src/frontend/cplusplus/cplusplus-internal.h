@@ -208,6 +208,55 @@ VPRIV bool has_builtin(const implementation_defined_behavior &b,
 /* [dcl.type.simple]: the simple-type-specifiers that are one keyword */
 VPRIV bool is_simple_type_keyword(standard_keyword k);
 
+/* tokens [first, end) of a statement that did not parse use grammar a
+   later step of doc/PLAN-cxx-parse.md writes (dcl.pre.cpp) */
+VPRIV bool statement_uses_later_grammar(parser &p, token_index first,
+                                        token_index end);
+
+/* what is between the '(' just consumed and its ')' outside other
+   brackets: how many ';' (an init-statement ends with one), and whether a
+   ':' that is no conditional-expression's follows the last of them (a
+   range-based for statement's, [stmt.iter]) */
+struct parenthesized_parts {
+    unsigned semicolons = 0;
+    bool range_colon = false;
+};
+VPRIV parenthesized_parts scan_parenthesized(parser &p);
+
+/* RAII: a declarative region of kind in declared_names for as long as the
+   object lives; the region that was current is current again after it */
+struct declarative_region {
+    declared_names &names;
+    scope_index enclosing;
+    declarative_region(declared_names &names, scope_kind kind)
+        : names(names), enclosing(names.current())
+    {
+        names.enter(kind);
+    }
+    ~declarative_region()
+    {
+        names.reenter(enclosing);
+    }
+    declarative_region(const declarative_region &) = delete;
+    declarative_region &operator=(const declarative_region &) = delete;
+};
+
+/* RAII: a flag of the parser set for as long as the object lives */
+struct flag_set {
+    bool &flag;
+    bool was;
+    flag_set(bool &flag, bool value) : flag(flag), was(flag)
+    {
+        flag = value;
+    }
+    ~flag_set()
+    {
+        flag = was;
+    }
+    flag_set(const flag_set &) = delete;
+    flag_set &operator=(const flag_set &) = delete;
+};
+
 /* [lex.operators]: whether a token is the operator or punctuator op, in
    either of its spellings ([lex.digraph]) */
 inline bool is_operator(const token &t, preprocessing_op_or_punc op)
