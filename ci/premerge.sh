@@ -77,6 +77,9 @@ arm64)
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	step cxx-builtins-generated python3 src/tools/gen-cxx-builtins.py --check
+	# the C++ front end's citations and quoted grammar against docs/cxx-spec
+	step cxx-spec-refs python3 bench/cxx-spec-refs.py
+	step cxxparse-selftest "$BUILD/cxxparse" -selftest
 	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
 	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
