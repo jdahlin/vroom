@@ -127,8 +127,8 @@ Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
   invocation or `_Pragma`), the parser-phase pragmas clang turns into
   annotations, Microsoft's header search, the standard's examples as tests (`src/test/cxx/cpp/spec/`),
   known-differences, the tests in CI (they are read from work/ now).
-- Then `[basic]`, `[expr]`, `[stmt]`, `[dcl]`, ... in the order of the
-  standard's clauses.
+- Then the parser: `PLAN-cxx-parse.md` (steps P0-P9, its validation and
+  the order of both; a plan under review, 2026-11-16).
 
 ## Decisions (2026-11-16, during L3)
 
