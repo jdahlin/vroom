@@ -839,6 +839,7 @@ class preprocessor
         owned_array<argument> &arguments;
         owned_array<preprocessing_token> &tokens;
         uint32_t end; /* of the elements substituted */
+        bool next_space;
     };
     /* the white space and line start of a macro name replaced by nothing,
        which the next token takes */
@@ -862,6 +863,8 @@ class preprocessor
                     owned_array<argument> &arguments,
                     owned_array<preprocessing_token> &tokens,
                     owned_array<preprocessing_token> &out);
+    void emit(substitution &s, const preprocessing_token *tokens, size_t count,
+              owned_array<preprocessing_token> &out);
     void substitute_range(substitution &s, uint32_t first,
                           owned_array<preprocessing_token> &out);
     void expand_argument(argument &a, owned_array<preprocessing_token> &tokens);

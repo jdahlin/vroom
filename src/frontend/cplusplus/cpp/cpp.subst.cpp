@@ -130,12 +130,8 @@ uint32_t preprocessor::paste_operand(substitution &s, uint32_t at,
         const argument &a = s.arguments[e.parameter];
         if (a.begin == a.end)
             out.append(placemarker(e.token.location));
-        for (uint32_t k = a.begin; k < a.end; k++) {
-            preprocessing_token t = s.tokens[k];
-            if (k == a.begin)
-                t.after_white_space = e.token.after_white_space;
-            out.append(t);
-        }
+        for (uint32_t k = a.begin; k < a.end; k++)
+            out.append(s.tokens[k]);
         return at + 1;
     }
     out.append(e.token);
@@ -158,6 +154,21 @@ preprocessing_token preprocessor::stringize_operand(substitution &s,
     return stringize(s.tokens.data() + a.begin, a.end - a.begin, where);
 }
 
+/* an argument's tokens substituted: the first takes the white space before
+   the parameter, and is at no line's start */
+void preprocessor::emit(substitution &s, const preprocessing_token *tokens,
+                        size_t count, owned_array<preprocessing_token> &out)
+{
+    if (!count)
+        return;
+    size_t first = out.size();
+    for (size_t k = 0; k < count; k++)
+        out.append(tokens[k]);
+    out[first].after_white_space = s.next_space;
+    out[first].at_start_of_line = false;
+    s.next_space = false;
+}
+
 void preprocessor::substitute_range(substitution &s, uint32_t i,
                                     owned_array<preprocessing_token> &out)
 {
@@ -165,6 +176,13 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
     const macro_definition &m = s.m;
     while (i < s.end) {
         const replacement_element &e = elements[i];
+        /* clang: white space before a token of the replacement list (not
+           after a ##) goes to the next token substituted, through empty
+           arguments */
+        if (i > m.first_element &&
+            !is_operator(elements[i - 1].token, op::HASH_HASH) &&
+            e.token.after_white_space)
+            s.next_space = true;
         bool paste_follows =
             i + 1 < s.end && is_operator(elements[i + 1].token, op::HASH_HASH);
 
@@ -185,12 +203,8 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
                 } else {
                     diagnostics.issue(diagnostic_id::ext_paste_comma,
                                       e.token.location);
-                    for (uint32_t k = a.begin; k < a.end; k++) {
-                        preprocessing_token t = s.tokens[k];
-                        if (k == a.begin)
-                            t.after_white_space = next.token.after_white_space;
-                        out.append(t);
-                    }
+                    for (uint32_t k = a.begin; k < a.end; k++)
+                        out.append(s.tokens[k]);
                 }
                 i += 2;
                 continue;
@@ -213,7 +227,8 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
         if (m.function_like && is_operator(e.token, op::HASH) &&
             i + 1 < s.end) {
             preprocessing_token string = stringize_operand(s, i + 1);
-            string.after_white_space = e.token.after_white_space;
+            string.after_white_space = s.next_space;
+            s.next_space = false;
             out.append(string);
             i = is_va_opt(m, elements[i + 1]) ? va_opt_end(i + 2, s.end) + 1
                                               : i + 2;
@@ -222,8 +237,11 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
         if (is_va_opt(m, e)) {
             size_t first = out.size();
             va_opt(s, i, out);
-            if (out.size() > first)
-                out[first].after_white_space = e.token.after_white_space;
+            if (out.size() > first &&
+                out[first].kind != preprocessing_token_kind::placemarker) {
+                out[first].after_white_space = s.next_space;
+                s.next_space = false;
+            }
             i = va_opt_end(i + 1, s.end) + 1;
             continue;
         }
@@ -239,16 +257,17 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
                 begin = (uint32_t)a.expanded_begin;
                 end = (uint32_t)a.expanded_end;
             }
-            for (uint32_t k = begin; k < end; k++) {
-                preprocessing_token t = s.tokens[k];
-                if (k == begin)
-                    t.after_white_space = e.token.after_white_space;
-                out.append(t);
-            }
+            emit(s, s.tokens.data() + begin, end - begin, out);
             i++;
             continue;
         }
         out.append(e.token);
+        if (s.next_space)
+            out.back().after_white_space = true;
+        else if (i > s.m.first_element &&
+                 is_operator(elements[i - 1].token, op::HASH_HASH))
+            out.back().after_white_space = false;
+        s.next_space = false;
         i++;
     }
 }
@@ -260,7 +279,7 @@ void preprocessor::substitute(const preprocessing_token &name,
                               owned_array<preprocessing_token> &out)
 {
     (void)name;
-    substitution s{m, arguments, tokens, m.first_element + m.length};
+    substitution s{m, arguments, tokens, m.first_element + m.length, false};
     substitute_range(s, m.first_element, out);
 }
 

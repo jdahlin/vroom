@@ -234,6 +234,8 @@ def check(test, opts, clang, cxxlex, regexes):
     lang = ['-x', 'c++'] if not name.endswith('.cpp') else []
     res = {}
     ours, ours_err, rc = run([cxxlex, '-dump-tokens'] + opts + [name], cwd=d)
+    if rc == 2 and 'unsupported -std' in ours_err:
+        return test, ' '.join(opts), None  # an edition the front end does not have
     if rc < 0 or rc > 1:
         res['tokens'] = f'cxxlex failed ({rc}): {ours_err[-200:]}'
         res['diags'] = res['macros'] = 'not run'
@@ -297,6 +299,8 @@ def main():
     passed = dict.fromkeys(kinds, 0)
     all_ok = known_runs = 0
     per_test = {}
+    skipped = sum(1 for _, _, res in results if res is None)
+    results = [r for r in results if r[2] is not None]
     for test, opts, res in results:
         rel = os.path.relpath(test, llvm) if test.startswith(llvm) else os.path.relpath(test, SPEC)
         bad = {k: v for k, v in res.items() if v}
@@ -314,7 +318,8 @@ def main():
     n = len(results)
     print(f'{n} runs of {len(found)} tests: ' + ', '.join(f'{k} {v}/{n}' for k, v in passed.items()) +
           f'; all three {all_ok}/{n} ({known_runs} known differences); '
-          f'tests with every run passing {sum(per_test.values())}/{len(per_test)}')
+          f'tests with every run passing {sum(per_test.values())}/{len(per_test)}' +
+          (f' ({skipped} runs in editions cxxlex lacks)' if skipped else ''))
     return 0 if all_ok == n else 1
 
 

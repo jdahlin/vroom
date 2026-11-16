@@ -345,9 +345,12 @@ preprocessing_token preprocessor::next()
     for (;;) {
         read_unexpanded(t);
         if (pending_flags) {
-            /* a macro replaced by nothing leaves its place to the next */
-            t.at_start_of_line |= pending_start_of_line;
-            t.after_white_space |= pending_white_space;
+            /* a macro replaced by nothing leaves its line start and white
+               space to the next token on its line (clang) */
+            if (!(read_from_file && t.at_start_of_line)) {
+                t.at_start_of_line |= pending_start_of_line;
+                t.after_white_space |= pending_white_space;
+            }
             pending_flags = false;
         }
         if (t.kind == preprocessing_token_kind::identifier) {

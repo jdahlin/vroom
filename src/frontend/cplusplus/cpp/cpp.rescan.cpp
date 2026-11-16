@@ -160,10 +160,6 @@ void preprocessor::finish_replacement(const preprocessing_token &name,
             continue;
         preprocessing_token t = result[i];
         t.expansion = expansion;
-        /* [cpp.replace]/12: "new-line is considered a normal white-space
-           character" */
-        t.after_white_space |= t.at_start_of_line;
-        t.at_start_of_line = false;
         result[kept++] = t;
     }
     result.resize(kept);
@@ -173,7 +169,7 @@ void preprocessor::finish_replacement(const preprocessing_token &name,
     } else {
         pending_flags = true;
         pending_start_of_line = name.at_start_of_line;
-        pending_white_space = name.after_white_space || name.at_start_of_line;
+        pending_white_space = name.after_white_space;
     }
 }
 
