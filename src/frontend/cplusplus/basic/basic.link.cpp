@@ -19,8 +19,9 @@ node_index parser::translation_unit()
     token_index first = position;
     /* the second alternative ([module.unit]) is not written yet: its
        module-declaration is one of the unparsed declarations for now */
-    add(declaration_seq());
+    declaration_seq(false);
     tree.root = finish_node(syntax_kind::translation_unit, mark, first);
+    pending.resize(mark);
     return tree.root;
 }
 

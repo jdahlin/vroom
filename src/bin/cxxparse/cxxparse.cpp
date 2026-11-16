@@ -42,14 +42,14 @@ static int selftest()
         ok &= check(names.lookup_unqualified(T) == name_kind::not_declared,
                     "an undeclared name");
         names.declare(T, name_kind::type_name);
-        scope_index n = names.enter_namespace(N);
+        scope_index n = names.enter_namespace(N, false);
         ok &= check(names.lookup_unqualified(T) == name_kind::type_name,
                     "[basic.lookup.unqual]/1: the enclosing namespace");
         names.declare(T, name_kind::other);
         names.declare(x, name_kind::other);
         ok &= check(names.lookup_unqualified(T) == name_kind::other,
                     "the innermost declaration is found first");
-        scope_index m = names.enter_namespace(M);
+        scope_index m = names.enter_namespace(M, false);
         names.leave();
         names.enter(scope_kind::block);
         names.declare(x, name_kind::type_name);
@@ -77,7 +77,7 @@ static int selftest()
                             name_kind::namespace_name &&
                         found == m,
                     "a nested namespace");
-        ok &= check(names.enter_namespace(N) == n,
+        ok &= check(names.enter_namespace(N, false) == n,
                     "[namespace.def]/2: the namespace is extended");
         ok &= check(names.lookup_unqualified(x) == name_kind::other,
                     "the extended namespace has the first part's members");
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
 {
     command_line options("cxxparse");
     bool dump_syntax = false, dump_declarations = false, dump_tokens = false,
-         stats = false, phase4_only = false;
+         stats = false, phase4_only = false, debug_fallbacks = false;
     const char *path = nullptr;
 
     for (int i = 1; i < argc; i++) {
@@ -140,6 +140,8 @@ int main(int argc, char **argv)
             dump_tokens = true;
         else if (!strcmp(a, "-phase4-diagnostics-only"))
             phase4_only = true;
+        else if (!strcmp(a, "-debug-fallbacks"))
+            debug_fallbacks = true;
         else if (!strcmp(a, "-stats"))
             stats = true;
         else if (!strcmp(a, "-fsyntax-only"))
@@ -236,12 +238,17 @@ int main(int argc, char **argv)
     syntax_tree tree;
     declared_names names;
     parser p(tokens, tree, names, diagnostics);
+    p.debug_fallbacks = debug_fallbacks;
     p.translation_unit();
 
     if (dump_syntax)
         tree.dump(tree.root, tokens, out.get());
     if (dump_declarations) {
-        /* translation-unit: declaration-seq_opt */
+        /* translation-unit: declaration-seq_opt; per declaration, whether
+           it has an erroneous node, and whether a declaration in it was
+           kept as tokens because it uses a later step's grammar (an
+           unparsed node that is a whole declaration: a child of a
+           declaration-seq or a linkage-specification) */
         const syntax_node &unit = tree[tree.root];
         if (unit.child_count) {
             node_index seq = tree.children(tree.root)[0].index();
@@ -250,6 +257,42 @@ int main(int argc, char **argv)
                 if (c.is_token())
                     continue;
                 const syntax_node &d = tree[c.index()];
+                bool erroneous = false, fallback = false;
+                owned_buffer opaque;
+                if (d.kind == syntax_kind::unparsed)
+                    fallback = true;
+                owned_array<node_index> work;
+                work.append(c.index());
+                while (!work.empty()) {
+                    node_index n = work.back();
+                    work.resize(work.size() - 1);
+                    const syntax_node &x = tree[n];
+                    if (x.kind == syntax_kind::erroneous)
+                        erroneous = true;
+                    if (x.kind == syntax_kind::unparsed &&
+                        x.end_token > x.first_token) {
+                        /* a part kept as tokens: where it starts, and where
+                           its last token ends */
+                        source_position a = tokens.position(x.first_token);
+                        source_position b = tokens.position(x.end_token - 1);
+                        uint32_t extent =
+                            tokens[x.end_token - 1].preprocessing.extent;
+                        vbuffer_format_append(opaque.get(), "%s%u:%u-%u:%u",
+                                              opaque.size() ? "," : "", a.line,
+                                              a.column, b.line,
+                                              b.column + extent);
+                    }
+                    for (uint32_t k = 0; k < x.child_count; k++) {
+                        syntax_child y = tree.children(n)[k];
+                        if (y.is_token())
+                            continue;
+                        if (tree[y.index()].kind == syntax_kind::unparsed &&
+                            (x.kind == syntax_kind::declaration_seq ||
+                             x.kind == syntax_kind::linkage_specification))
+                            fallback = true;
+                        work.append(y.index());
+                    }
+                }
                 source_position first = tokens.position(d.first_token);
                 vbuffer_format_append(out.get(), "%s %s:%u:%u",
                                       syntax_kind_name(d.kind), first.file_name,
@@ -258,8 +301,17 @@ int main(int argc, char **argv)
                 if (d.end_token > d.first_token)
                     last = d.end_token - 1;
                 source_position end = tokens.position(last);
-                vbuffer_format_append(out.get(), " %s:%u:%u\n", end.file_name,
+                vbuffer_format_append(out.get(), " %s:%u:%u", end.file_name,
                                       end.line, end.column);
+                if (erroneous)
+                    vbuffer_string_append(out.get(), " erroneous");
+                if (fallback)
+                    vbuffer_string_append(out.get(), " fallback");
+                if (opaque.size()) {
+                    vbuffer_string_append(out.get(), " opaque=");
+                    vbuffer_append(out.get(), opaque.data(), opaque.size());
+                }
+                vbuffer_string_append(out.get(), "\n");
             }
         }
     }

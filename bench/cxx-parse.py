@@ -175,7 +175,7 @@ def clang_declarations(cmd, cwd, main):
     return found
 
 
-DECL_LINE = re.compile(r'^(\S+) (.*):(\d+):(\d+) (.*):(\d+):(\d+)$')
+DECL_LINE = re.compile(r'^(\S+) (.*?):(\d+):(\d+) (.*?):(\d+):(\d+)((?: erroneous| fallback)*)(?: opaque=(\S+))?$')
 
 
 def our_declarations(text, main):
@@ -186,7 +186,13 @@ def our_declarations(text, main):
             continue
         if os.path.normpath(os.path.join(os.path.dirname(main), m.group(2))) != os.path.normpath(main):
             continue
-        out.append((m.group(1), (int(m.group(3)), int(m.group(4))), (int(m.group(6)), int(m.group(7)))))
+        opaque = []
+        for r in (m.group(9) or '').split(','):
+            if r:
+                a, b = r.split('-')
+                opaque.append((tuple(map(int, a.split(':'))), tuple(map(int, b.split(':')))))
+        out.append((m.group(1), (int(m.group(3)), int(m.group(4))), (int(m.group(6)), int(m.group(7))),
+                    set(m.group(8).split()), opaque))
     return out
 
 
@@ -212,6 +218,7 @@ def compare_declarations(ours, theirs, main, error_lines, macros):
         row = lines[begin[0] - 1] if begin[0] - 1 < len(lines) else b''
         return row[begin[1] - 1:begin[1]] == b';'
 
+    ours = [o[:3] for o in ours]  # kind, begin, end
     for b, e, kind in theirs:
         inside = [o for o in ours if o[1] <= b <= o[2]]
         if not inside:
@@ -272,6 +279,55 @@ def check(test, opts, clang, cxxlex, cxxparse):
     if c[0] == 'timeout':
         res['skip'] = 'clang timed out'
         return res
+    # syntax: per declaration of ours that is neither a fallback nor
+    # (fully) a later step's, accepted or rejected as clang does: clang
+    # rejects it when one of its Parse or Lexical errors is on its lines
+    syntax_errors = {(int(m.group(1)), int(m.group(2))) for m in
+                     re.finditer(r'^' + re.escape(name) + r':(\d+):(\d+): (?:fatal )?error: .*\[(?:Parse|Lexical or Preprocessor) Issue\]',
+                                 c[2], re.M)}
+    decls = our_declarations(ours[1], test)
+    res['syntax'] = {'agree': 0, 'we_reject': [], 'we_accept': [], 'not_comparable': 0}
+    # clang's split of the standard's rules into Parse and Sema is not the
+    # standard's: a declaration we reject is agreed on when clang reports
+    # any error on its lines (i = 4; at namespace scope is no declaration;
+    # clang parses it as one, then rejects it in Sema)
+    any_errors = {(int(m.group(1)), int(m.group(2))) for m in
+                  re.finditer(r'^' + re.escape(name) + r':(\d+):(\d+): (?:fatal )?error:', c[2], re.M)}
+    # an error belongs to the declaration whose tokens it is among: from
+    # where the declaration starts to where the next one starts (clang
+    # reports a missing ';' after the declaration's last token)
+    starts = sorted(d[1] for d in decls)
+    for kind, b, e, flags, opaque in decls:
+        later = [x for x in starts if x > b]
+        until = later[0] if later else (1 << 30, 0)
+
+        def within(p):
+            return b <= p < until
+        if 'fallback' in flags:
+            res['syntax']['not_comparable'] += 1
+            continue
+        we_reject = 'erroneous' in flags
+        if we_reject:
+            clang_rejects = any(within(p) for p in any_errors)
+        else:
+            mine = [p for p in syntax_errors if within(p)]
+            # an error in a part kept as tokens (a body, an initializer) is
+            # about grammar a later step parses
+            inside = [p for p in mine if any(lo <= p <= hi for lo, hi in opaque)]
+            if mine and len(inside) == len(mine):
+                res['syntax']['not_comparable'] += 1
+                continue
+            clang_rejects = bool(mine)
+        if clang_rejects == we_reject:
+            res['syntax']['agree'] += 1
+        elif we_reject:
+            res['syntax']['we_reject'].append(b)
+        else:
+            res['syntax']['we_accept'].append(b)
+    for b in res['syntax']['we_reject']:
+        res['fail'].append(('syntax', f'we reject the declaration at {b[0]}:{b[1]}, clang accepts it'))
+    for b in res['syntax']['we_accept']:
+        res['fail'].append(('syntax', f'we accept the declaration at {b[0]}:{b[1]}, clang rejects it'))
     if CLANG_SYNTAX_ERROR.search(c[2]):
         res['clang_syntax_error'] = True
         return res
@@ -363,7 +419,8 @@ def main():
         if a.mutate:
             results += list(ex.map(lambda j: check_mutants(j[0], j[1], cxxparse, a.mutate),
                                    [j for i, j in enumerate(jobs) if j[0] != jobs[i - 1][0] or i == 0]))
-    counts = {'tokens': 0, 'crash': 0, 'decls': 0}
+    counts = {'tokens': 0, 'crash': 0, 'decls': 0, 'syntax': 0}
+    syntax = {'agree': 0, 'we_reject': 0, 'we_accept': 0, 'not_comparable': 0}
     compared = agree = syntax_errors = 0
     unparsed = erroneous = skipped = 0
     tests_seen = set()
@@ -380,6 +437,9 @@ def main():
             skipped += 1
         if r.get('clang_syntax_error'):
             syntax_errors += 1
+        for k in syntax:
+            v = r.get('syntax', {}).get(k, 0)
+            syntax[k] += v if isinstance(v, int) else len(v)
         unparsed += r.get('unparsed', 0)
         erroneous += r.get('erroneous', 0)
         if r['fail'] or a.v:
@@ -394,6 +454,9 @@ def main():
           f'declarations {agree}/{compared} where clang finds no syntax error ({syntax_errors} runs where it does, '
           f'{skipped} skipped); '
           f'nodes: unparsed {unparsed}, erroneous {erroneous}')
+    print(f'syntax: {syntax["agree"]} declarations accepted or rejected as clang does, '
+          f'{syntax["we_reject"]} we reject and clang accepts, {syntax["we_accept"]} we accept and clang rejects, '
+          f'{syntax["not_comparable"]} kept as tokens (a later step\'s grammar)')
     return 1 if any(counts.values()) else 0
 
 

@@ -12,23 +12,33 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
                diagnostic_consumer &diagnostics)
     : tokens(tokens), tree(tree), names(names), diagnostics(diagnostics)
 {
-    const implementation_defined_behavior &b = tokens.files.behavior;
-    auto index = [&](const char *spelling) {
-        return lookup_keyword(b, spelling, strlen(spelling));
+    /* each entry of the lexer's keyword table as the standard's keyword it
+       is, or an extension's */
+    struct named {
+        const char *spelling;
+        standard_keyword keyword;
     };
-    keyword.namespace_ = index("namespace");
-    keyword.inline_ = index("inline");
-    keyword.extern_ = index("extern");
-    keyword.export_ = index("export");
-    keyword.template_ = index("template");
-    keyword.class_ = index("class");
-    keyword.struct_ = index("struct");
-    keyword.union_ = index("union");
-    keyword.enum_ = index("enum");
-    keyword.operator_ = index("operator");
-    keyword.requires_ = index("requires");
-    keyword.try_ = index("try");
-    keyword.catch_ = index("catch");
+    static constexpr named standard[] = {
+#define STANDARD_KEYWORD(name, spelling) {spelling, standard_keyword::name},
+#include "keywords.inc"
+#undef STANDARD_KEYWORD
+    };
+    int size = keyword_table_size();
+    keyword_kinds.resize(static_cast<size_t>(size));
+    for (int i = 0; i < size; i++) {
+        keyword_kinds[i] = standard_keyword::extension;
+        for (const named &n : standard)
+            if (!strcmp(n.spelling, keyword_spelling(i)))
+                keyword_kinds[i] = n.keyword;
+    }
+}
+
+standard_keyword parser::keyword_of(const token &t) const
+{
+    if (t.kind != token_kind::keyword || t.keyword < 0 ||
+        static_cast<size_t>(t.keyword) >= keyword_kinds.size())
+        return standard_keyword::none;
+    return keyword_kinds[t.keyword];
 }
 
 bool parser::at(preprocessing_op_or_punc op, unsigned ahead)
@@ -36,11 +46,60 @@ bool parser::at(preprocessing_op_or_punc op, unsigned ahead)
     return is_operator(peek(ahead), op);
 }
 
-bool parser::at_keyword(int keyword_index, unsigned ahead)
+bool parser::at(standard_keyword k, unsigned ahead)
 {
-    const token &t = peek(ahead);
-    return keyword_index >= 0 && t.kind == token_kind::keyword &&
-           t.keyword == keyword_index;
+    return keyword_of(peek(ahead)) == k;
+}
+
+bool parser::at_identifier(unsigned ahead)
+{
+    return peek(ahead).kind == token_kind::identifier;
+}
+
+bool parser::accept(preprocessing_op_or_punc op)
+{
+    if (!at(op))
+        return false;
+    add_token();
+    return true;
+}
+
+bool parser::accept(standard_keyword k)
+{
+    if (!at(k))
+        return false;
+    add_token();
+    return true;
+}
+
+node_index parser::expected(const char *what, const char *subclause)
+{
+    if (!failure.failed) {
+        failure.failed = true;
+        failure.at = position;
+        failure.expected = what;
+        failure.subclause = subclause;
+    }
+    return 0;
+}
+
+node_index parser::violates(const char *rule, const char *subclause,
+                            token_index at)
+{
+    if (!failure.failed) {
+        failure.failed = true;
+        failure.at = at;
+        failure.expected = rule;
+        failure.subclause = subclause;
+        failure.id = diagnostic_id::parse_violation;
+    }
+    return 0;
+}
+
+node_index parser::beyond_this_step()
+{
+    failure.beyond_step = true;
+    return expected("grammar of a later step", "");
 }
 
 node_index parser::finish_node(syntax_kind kind, size_t mark,
@@ -49,6 +108,7 @@ node_index parser::finish_node(syntax_kind kind, size_t mark,
     node_index n = tree.make(kind, pending.data() + mark, pending.size() - mark,
                              first_token, position);
     pending.resize(mark);
+    pending.append(syntax_child::node(n));
     return n;
 }
 
@@ -66,7 +126,8 @@ parser_statistics parser::statistics()
 parser::tentative_parse::tentative_parse(parser &p)
     : p(p), position(p.position), pending(p.pending.size()),
       nodes(p.tree.size()), messages(p.diagnostics.messages.size()),
-      errors(p.diagnostics.error_count)
+      errors(p.diagnostics.error_count), lookups(p.names.lookups.size()),
+      names(p.names.journal_mark()), failure(p.failure)
 {
     p.counters.tentative_parses++;
 }
@@ -82,6 +143,9 @@ parser::tentative_parse::~tentative_parse()
     p.tree.truncate(nodes);
     p.diagnostics.messages.resize(messages);
     p.diagnostics.error_count = errors;
+    p.names.lookups.resize(lookups);
+    p.names.rollback(names);
+    p.failure = failure;
 }
 
 void parser::tentative_parse::commit()
@@ -188,8 +252,8 @@ node_index parser::unparsed_declaration()
     bool template_head = false;
     /* namespace-body, or the braces of extern "C" and export */
     bool block_of_declarations =
-        at_keyword(keyword.namespace_) ||
-        (at_keyword(keyword.inline_) && at_keyword(keyword.namespace_, 1));
+        at(standard_keyword::namespace_) ||
+        (at(standard_keyword::inline_) && at(standard_keyword::namespace_, 1));
 
     for (;;) {
         const token &t = peek();
@@ -220,8 +284,8 @@ node_index parser::unparsed_declaration()
                 is_operator(t, preprocessing_op_or_punc::LEFT_BRACE)) {
                 const token &before = tokens[position - 1];
                 bool after_requires =
-                    position > first && (before.kind == token_kind::keyword &&
-                                         before.keyword == keyword.requires_);
+                    position > first &&
+                    keyword_of(before) == standard_keyword::requires_;
                 bool after_group =
                     position > first &&
                     (is_operator(before,
@@ -247,9 +311,8 @@ node_index parser::unparsed_declaration()
                 /* [expr.prim.req]: requires requirement-parameter-list_opt
                    requirement-body: its ( ) is no function declarator's */
                 requires_group =
-                    position > first &&
-                    tokens[position - 1].kind == token_kind::keyword &&
-                    tokens[position - 1].keyword == keyword.requires_;
+                    position > first && keyword_of(tokens[position - 1]) ==
+                                            standard_keyword::requires_;
                 requires_parameters = false;
             }
             if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACE))
@@ -261,6 +324,18 @@ node_index parser::unparsed_declaration()
         if (is_closing_bracket(t)) {
             preprocessing_op_or_punc closing =
                 preprocessing_op_or_punc_primary(t.op_or_punc);
+            if (outside && enclosing_braces &&
+                closing == preprocessing_op_or_punc::RIGHT_BRACE) {
+                /* the '}' of the namespace-body or linkage-specification
+                   the declaration is in: the declaration ended before it */
+                if (position > first && !erroneous) {
+                    diagnostics.issue(
+                        diagnostic_id::parse_expected_end_of_declaration,
+                        tokens.location(position));
+                    erroneous = true;
+                }
+                break;
+            }
             if (outside) {
                 /* the '}' of an enclosing region is not this declaration's:
                    nothing encloses a declaration of the translation unit */
@@ -311,13 +386,16 @@ node_index parser::unparsed_declaration()
                     requires_parameters = true;
                 else
                     parameters = true;
+                /* a class-key before the parameters is the return type's; one
+                   after them (a trailing-return-type's) is what a '{' is for */
+                class_key = false;
                 continue;
             }
             if (closing != preprocessing_op_or_punc::RIGHT_BRACE || !body)
                 continue;
             /* [except.pre]: function-try-block: the handler-seq follows the
                compound-statement */
-            if (at_keyword(keyword.catch_))
+            if (at(standard_keyword::catch_))
                 continue;
             break;
         }
@@ -363,7 +441,7 @@ node_index parser::unparsed_declaration()
                     template_head = false;
                 continue;
             }
-            if (at_keyword(keyword.template_) &&
+            if (at(standard_keyword::template_) &&
                 at(preprocessing_op_or_punc::LESS, 1)) {
                 template_head = true;
                 angles = 0;
@@ -372,19 +450,20 @@ node_index parser::unparsed_declaration()
             }
             if (is_operator(t, preprocessing_op_or_punc::EQUAL)) {
                 /* operator= is a name, not an initializer */
-                if (!(position > first &&
-                      tokens[position - 1].kind == token_kind::keyword &&
-                      tokens[position - 1].keyword == keyword.operator_))
+                if (!(position > first && keyword_of(tokens[position - 1]) ==
+                                              standard_keyword::operator_))
                     equal = true;
             } else if (is_operator(t, preprocessing_op_or_punc::COLON)) {
                 if (parameters && !equal)
                     mem_initializers = true;
             } else if (t.kind == token_kind::keyword) {
-                if (t.keyword == keyword.class_ ||
-                    t.keyword == keyword.struct_ ||
-                    t.keyword == keyword.union_ || t.keyword == keyword.enum_)
+                if (keyword_of(t) == standard_keyword::class_ ||
+                    keyword_of(t) == standard_keyword::struct_ ||
+                    keyword_of(t) == standard_keyword::union_ ||
+                    keyword_of(t) == standard_keyword::enum_)
                     class_key = true;
-                else if (t.keyword == keyword.namespace_ && !equal)
+                else if (keyword_of(t) == standard_keyword::namespace_ &&
+                         !equal)
                     /* [namespace.def]: inline_opt namespace ... {, also
                        after export ([module.interface]) or attributes;
                        namespace X = Y; is an alias and has no body */
@@ -392,12 +471,11 @@ node_index parser::unparsed_declaration()
             } else if (t.kind == token_kind::literal &&
                        t.literal == literal_kind::string_literal &&
                        position == first + 1 &&
-                       tokens[first].kind == token_kind::keyword &&
-                       tokens[first].keyword == keyword.extern_ &&
+                       keyword_of(tokens[first]) == standard_keyword::extern_ &&
                        at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
                 /* [dcl.link]: extern string-literal { declaration-seq_opt } */
                 block_of_declarations = true;
-            } else if (position == first && at_keyword(keyword.export_) &&
+            } else if (position == first && at(standard_keyword::export_) &&
                        at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
                 /* [module.interface]: export { declaration-seq_opt } */
                 block_of_declarations = true;
@@ -408,7 +486,72 @@ node_index parser::unparsed_declaration()
     syntax_kind kind = syntax_kind::unparsed;
     if (erroneous)
         kind = syntax_kind::erroneous;
-    return tree.make(kind, nullptr, 0, first, position);
+    node_index n = tree.make(kind, nullptr, 0, first, position);
+    add(n);
+    return n;
+}
+
+/*
+ * Scaffolding: the tokens of a part of the grammar that is not written yet
+ * (an expression, an initializer-clause, an array bound), up to one of the
+ * stops outside all brackets.  A closing bracket outside all brackets ends
+ * it too: it is the enclosing production's.
+ */
+node_index parser::unparsed_until(const preprocessing_op_or_punc *stops,
+                                  size_t stop_count)
+{
+    token_index first = position;
+    unsigned depth = 0;
+    while (!at_end()) {
+        const token &t = peek();
+        if (!depth) {
+            bool stop = is_closing_bracket(t);
+            for (size_t i = 0; i < stop_count && !stop; i++)
+                stop = is_operator(t, stops[i]);
+            if (stop)
+                break;
+        }
+        if (closing_bracket(t) != preprocessing_op_or_punc::count)
+            depth++;
+        else if (is_closing_bracket(t))
+            depth--;
+        consume();
+    }
+    if (position == first)
+        return 0;
+    node_index n =
+        tree.make(syntax_kind::unparsed, nullptr, 0, first, position);
+    add(n);
+    return n;
+}
+
+/* ( ... ), [ ... ] or { ... } at the current token, kept as its tokens */
+node_index parser::unparsed_group()
+{
+    token_index first = position;
+    owned_array<preprocessing_op_or_punc> closers;
+    do {
+        const token &t = peek();
+        preprocessing_op_or_punc closing = closing_bracket(t);
+        if (closing != preprocessing_op_or_punc::count)
+            closers.append(closing);
+        else if (is_closing_bracket(t)) {
+            if (preprocessing_op_or_punc_primary(t.op_or_punc) !=
+                closers.back()) {
+                position = first;
+                return expected(bracket_spelling(closers.back()),
+                                "lex.operators");
+            }
+            closers.resize(closers.size() - 1);
+        }
+        consume();
+    } while (!closers.empty() && !at_end());
+    if (!closers.empty())
+        return expected(bracket_spelling(closers.back()), "lex.operators");
+    node_index n =
+        tree.make(syntax_kind::unparsed, nullptr, 0, first, position);
+    add(n);
+    return n;
 }
 
 } // namespace cplusplus

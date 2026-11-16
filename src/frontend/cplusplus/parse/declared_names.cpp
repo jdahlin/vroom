@@ -27,8 +27,8 @@ declared_names::declared_names()
     global.enclosing = global_namespace;
 }
 
-const declared_names::declaration *declared_names::find(scope_index in,
-                                                        uint32_t name) const
+const declared_names::declaration *
+declared_names::find(scope_index in, uint32_t name, unsigned depth) const
 {
     const scope &s = scopes[in];
     /* the latest declaration first: a later one of another kind is the one
@@ -36,29 +36,51 @@ const declared_names::declaration *declared_names::find(scope_index in,
     for (size_t i = s.declarations.size(); i-- > 0;)
         if (s.declarations[i].name == name)
             return &s.declarations[i];
+    /* a using-directive can nominate a namespace that encloses this one:
+       the depth stops a cycle */
+    if (depth > 16)
+        return nullptr;
+    for (scope_index other : s.searched_with) {
+        const declaration *d = find(other, name, depth + 1);
+        if (d)
+            return d;
+    }
     return nullptr;
 }
 
-scope_index declared_names::enter_namespace(uint32_t name)
+scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
 {
-    /* [namespace.def]/1: "In a named-namespace-definition, the identifier
-       is the name of the namespace."  /2: an extension-namespace-definition
-       "is an original-namespace-name": the same declarative region again. */
+    /* [namespace.def]/2: "If the identifier, when looked up, refers to a
+       namespace-name ... that was introduced in the namespace in which the
+       named-namespace-definition appears ..., the namespace-definition
+       extends the previously-declared namespace." */
     if (name) {
-        const declaration *d = find(current_scope, name);
-        if (d && d->kind == name_kind::namespace_name) {
-            current_scope = d->scope;
-            return current_scope;
-        }
+        const scope &here = scopes[current_scope];
+        for (size_t i = here.declarations.size(); i-- > 0;)
+            if (here.declarations[i].name == name &&
+                here.declarations[i].kind == name_kind::namespace_name) {
+                current_scope = here.declarations[i].scope;
+                return current_scope;
+            }
     }
     scope_index enclosing = current_scope;
     scope &s = scopes.make();
     s.kind = scope_kind::namespace_;
     s.enclosing = enclosing;
     scope_index made = static_cast<scope_index>(scopes.size() - 1);
-    if (name)
+    if (name) {
         scopes[enclosing].declarations.append(
             {name, name_kind::namespace_name, made});
+        journal.append(enclosing);
+    }
+    /* [namespace.unnamed]/1: an unnamed-namespace-definition behaves as if
+       followed by `using namespace unique;`; [namespace.def]/7: "Members of
+       an inline namespace can be used in most respects as though they were
+       members of the enclosing namespace." */
+    if (!name || inline_) {
+        scopes[enclosing].searched_with.append(made);
+        journal.append(enclosing | 0x80000000u);
+    }
     current_scope = made;
     return made;
 }
@@ -80,9 +102,38 @@ void declared_names::leave()
 void declared_names::declare(uint32_t name, name_kind kind)
 {
     scopes[current_scope].declarations.append({name, kind, 0});
+    journal.append(current_scope);
 }
 
-name_kind declared_names::lookup_unqualified(uint32_t name)
+void declared_names::declare_namespace_alias(uint32_t name,
+                                             scope_index nominated)
+{
+    scopes[current_scope].declarations.append(
+        {name, name_kind::namespace_name, nominated});
+    journal.append(current_scope);
+}
+
+void declared_names::use_namespace(scope_index nominated)
+{
+    scopes[current_scope].searched_with.append(nominated);
+    journal.append(current_scope | 0x80000000u);
+}
+
+void declared_names::rollback(mark m)
+{
+    while (journal.size() > m.journal) {
+        uint32_t entry = journal.back();
+        journal.resize(journal.size() - 1);
+        scope &s = scopes[entry & 0x7FFFFFFFu];
+        if (entry & 0x80000000u)
+            s.searched_with.resize(s.searched_with.size() - 1);
+        else
+            s.declarations.resize(s.declarations.size() - 1);
+    }
+    current_scope = m.current;
+}
+
+name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope)
 {
     /* [basic.lookup.unqual]/1: "In all the cases listed in
        [basic.lookup.unqual], the scopes are searched for a declaration in
@@ -93,6 +144,8 @@ name_kind declared_names::lookup_unqualified(uint32_t name)
         const declaration *d = find(s, name);
         if (d) {
             found = d->kind;
+            if (scope && d->kind == name_kind::namespace_name)
+                *scope = d->scope;
             break;
         }
         if (s == global_namespace)

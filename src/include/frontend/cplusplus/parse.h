@@ -225,8 +225,11 @@ class declared_names
 
     /* [basic.scope.namespace]/1: a namespace-definition's region; a
        namespace already declared in the current scope is entered again
-       ([namespace.def]/1: "the same declarative region") */
-    scope_index enter_namespace(uint32_t name);
+       ([namespace.def]/2: an original-namespace-name extends it).  The
+       members of an inline namespace ([namespace.def]/7) and of an unnamed
+       one ([namespace.unnamed]/1) are found by lookup in the enclosing
+       namespace too. */
+    scope_index enter_namespace(uint32_t name, bool inline_);
     /* a new region of another kind inside the current one */
     scope_index enter(scope_kind kind);
     void leave();
@@ -238,12 +241,17 @@ class declared_names
     /* [basic.scope.declarative]/1: the name is introduced into the current
        declarative region */
     void declare(uint32_t name, name_kind kind);
+    /* [namespace.alias]/2: the identifier is a synonym of the namespace */
+    void declare_namespace_alias(uint32_t name, scope_index nominated);
+    /* [namespace.udir]/2: "the names in the nominated namespace can be
+       used in the scope in which the using-directive appears" */
+    void use_namespace(scope_index nominated);
     /* [basic.lookup.unqual]/1: "the scopes are searched for a declaration in
        the order listed ...; name lookup ends as soon as a declaration is
-       found for the name" */
-    name_kind lookup_unqualified(uint32_t name);
-    /* [basic.lookup.qual]: the name in the scope a nested-name-specifier
-       named; *scope is the namespace's region when the name is one */
+       found for the name"; *scope is a namespace-name's region */
+    name_kind lookup_unqualified(uint32_t name, scope_index *scope = nullptr);
+    /* [basic.lookup.qual]: the name in the namespace a
+       nested-name-specifier named */
     name_kind lookup_qualified(scope_index in, uint32_t name,
                                scope_index *scope = nullptr);
 
@@ -254,6 +262,17 @@ class declared_names
         name_kind found;
     };
     owned_array<recorded_lookup> lookups;
+
+    /* what a tentative parse puts back: the declarations made since a mark */
+    struct mark {
+        size_t journal;
+        scope_index current;
+    };
+    mark journal_mark() const
+    {
+        return {journal.size(), current_scope};
+    }
+    void rollback(mark m);
 
   private:
     struct declaration {
@@ -266,10 +285,17 @@ class declared_names
         scope_kind kind;
         scope_index enclosing;
         owned_array<declaration> declarations;
+        /* inline and unnamed namespaces of this one, and the namespaces
+           using-directives nominated in it: searched with it */
+        owned_array<scope_index> searched_with;
     };
     owned_objects<scope> scopes;
     scope_index current_scope = 0;
-    const declaration *find(scope_index in, uint32_t name) const;
+    /* each change, to undo: a declaration added (where) or a scope searched
+       with another (where, with the high bit) */
+    owned_array<uint32_t> journal;
+    const declaration *find(scope_index in, uint32_t name,
+                            unsigned depth = 0) const;
 };
 
 /* ---- the parser ---------------------------------------------------------- */
@@ -279,12 +305,83 @@ struct parser_statistics {
     uint64_t tentative_parses = 0, rewinds = 0, rewound_tokens = 0;
     uint64_t lookups = 0;
     uint64_t unparsed = 0, erroneous = 0;
+    /* declarations kept as tokens because they use grammar of a later step */
+    uint64_t beyond_step = 0;
+};
+
+/* [lex.key] Table 5, as parse/keywords.inc names them */
+enum class standard_keyword : uint8_t {
+    none,
+#define STANDARD_KEYWORD(name, spelling) name,
+#include "../../../frontend/cplusplus/parse/keywords.inc"
+#undef STANDARD_KEYWORD
+    /* a keyword of the lexer's table that the standard does not reserve:
+       an extension's (__attribute__, _Atomic, __int128, ...) */
+    extension,
+};
+
+/*
+ * What a declarator declares, as far as the grammar needs to know: the
+ * first derivation applied to its declarator-id ([dcl.meaning]/1: the
+ * declarator's parts bind as the grammar nests them, the suffixes of a
+ * noptr-declarator before its ptr-operators).  A function-definition
+ * needs a declarator whose first derivation is a function ([dcl.fct.def.general]).
+ */
+enum class derivation : uint8_t {
+    none,
+    pointer,
+    reference,
+    member_pointer,
+    array,
+    function
+};
+
+struct declarator_facts {
+    node_index node = 0;
+    /* the declarator-id, if there is one (an abstract-declarator has none) */
+    token_index id_first = 0, id_last = 0;
+    bool has_id = false, qualified_id = false;
+    /* the identifier the declarator declares, when it is one (0: none or
+       qualified or an operator-function-id) */
+    uint32_t name = 0;
+    derivation first = derivation::none;
+    /* noptr-declarator parameters-and-qualifiers trailing-return-type */
+    bool trailing_return = false;
+};
+
+/* what a decl-specifier-seq said that the rest of the declaration needs */
+struct decl_specifier_facts {
+    node_index node = 0;
+    bool typedef_ = false;
+    bool has_defining_type_specifier = false;
+    /* a class-specifier, enum-specifier or elaborated-type-specifier, which
+       may be all a declaration declares ([dcl.pre]/5) */
+    bool declares_type = false;
+    /* in: a type-id's type-specifier-seq, not a defining-type-specifier-seq */
+    bool type_specifier_seq = false;
+};
+
+/* the forms a declarator can take */
+enum class declarator_form : uint8_t {
+    /* declarator: a declarator-id is required */
+    concrete,
+    /* abstract-declarator_opt: no declarator-id ([dcl.name]) */
+    abstract,
+    /* a parameter-declaration's: either ([dcl.fct]/3) */
+    either,
 };
 
 /*
  * The syntactic analysis of [lex.phases]/1.7: a function per nonterminal,
  * in the file of the subclause that defines it, each starting with the
  * productions it implements.
+ *
+ * A function returns its node (0 when an _opt production matched nothing).
+ * When the tokens are not the production, it calls expected(), which notes
+ * the first place and production that failed, and returns 0; the caller
+ * returns too.  A declaration that failed is then either erroneous (its
+ * diagnostic is issued) or, when it uses grammar a later step of
+ * doc/PLAN-cxx-parse.md writes, kept as an unparsed node.
  */
 class parser
 {
@@ -313,13 +410,8 @@ class parser
         return tokens[position + ahead];
     }
     bool at(preprocessing_op_or_punc op, unsigned ahead = 0);
-    /* [lex.key]: the keywords the parser asks about, as their index in the
-       keyword table of this edition (-1: no keyword in it) */
-    struct keywords {
-        int namespace_, inline_, extern_, export_, template_, class_, struct_,
-            union_, enum_, operator_, requires_, try_, catch_;
-    } keyword;
-    bool at_keyword(int keyword_index, unsigned ahead = 0);
+    bool at(standard_keyword k, unsigned ahead = 0);
+    bool at_identifier(unsigned ahead = 0);
     bool at_end()
     {
         return tokens.at_end(position);
@@ -328,6 +420,8 @@ class parser
     {
         position++;
     }
+    standard_keyword keyword_of(const token &t) const;
+
     /* the children of the node being built: a function notes where its own
        begin, adds them, and makes its node of everything after that mark */
     owned_array<syntax_child> pending;
@@ -345,15 +439,51 @@ class parser
         pending.append(syntax_child::token(position));
         position++;
     }
+    /* how many namespace-bodies and linkage-specification braces enclose
+       the current declaration: a '}' outside the declaration ends them */
+    unsigned enclosing_braces = 0;
+    /* cxxparse -debug-fallbacks: why each declaration was not parsed */
+    bool debug_fallbacks = false;
+    /* the token if it is op: added, true */
+    bool accept(preprocessing_op_or_punc op);
+    bool accept(standard_keyword k);
+    /* the node of the children since mark, added to the pending children
+       in their place */
     node_index finish_node(syntax_kind kind, size_t mark,
                            token_index first_token);
+
+    /* ---- failure: the first place the tokens were not the grammar */
+    struct failure_state {
+        bool failed = false;
+        /* the declaration uses grammar of a later step */
+        bool beyond_step = false;
+        token_index at = 0;
+        const char *expected = nullptr, *subclause = nullptr;
+        /* parse_expected: "expected WHAT"; parse_violation: a rule the
+           tokens break, quoted */
+        diagnostic_id id = diagnostic_id::parse_expected;
+    } failure;
+    bool failed() const
+    {
+        return failure.failed;
+    }
+    /* "expected WHAT ([SUBCLAUSE])" at the current token; returns 0 */
+    node_index expected(const char *what, const char *subclause);
+    /* the tokens use grammar a later step writes (a template, an operator
+       name, an attribute, an extension's keyword ...): returns 0 */
+    node_index beyond_this_step();
+    /* the tokens are the grammar but break a rule on its form (quoted, of
+       subclause), at token at; returns 0 */
+    node_index violates(const char *rule, const char *subclause,
+                        token_index at);
 
     /*
      * A parse that may turn out not to be what the tokens are: the rules
      * worded "could possibly be" ([dcl.ambig.res], [stmt.ambig]) try one
      * reading first.  Unless commit() is called, leaving the region puts
-     * the position, the pending children and the tree back, and discards
-     * the diagnostics issued in it.
+     * the position, the pending children, the tree, the failure state and
+     * the declared names' lookups back, and discards the diagnostics
+     * issued in it.
      */
     class tentative_parse
     {
@@ -367,7 +497,9 @@ class parser
       private:
         parser &p;
         token_index position;
-        size_t pending, nodes, messages, errors;
+        size_t pending, nodes, messages, errors, lookups;
+        declared_names::mark names;
+        failure_state failure;
         bool committed = false;
     };
 
@@ -375,13 +507,77 @@ class parser
     /* one declaration's tokens as an unparsed node: up to the ';' or the
        '}' that ends it, brackets balanced */
     node_index unparsed_declaration();
+    /* tokens up to (not including) one of stops outside all brackets, as an
+       unparsed node: a part of the grammar not written yet (an expression,
+       an initializer-clause); 0 if there are none */
+    node_index unparsed_until(const preprocessing_op_or_punc *stops,
+                              size_t stop_count);
+    /* a bracketed group, ( ) [ ] or { }, at the current token, as an
+       unparsed node of all its tokens */
+    node_index unparsed_group();
 
     /* ---- [dcl.pre] */
-    node_index declaration_seq();
+    node_index declaration_seq(bool until_closing_brace);
     node_index declaration();
+    bool starts_module_declaration();
+    node_index block_or_function_declaration();
+    node_index simple_declaration_rest(size_t mark, token_index first,
+                                       const decl_specifier_facts &specifiers);
+    node_index static_assert_declaration();
+    node_index alias_declaration();
+
+    /* ---- [dcl.spec], [dcl.type], [dcl.type.simple], [dcl.type.elab] */
+    /* unknown_names: a name the parser cannot classify counts as one */
+    bool at_decl_specifier(bool unknown_names);
+    node_index decl_specifier_seq(decl_specifier_facts &facts,
+                                  bool type_specifiers_only);
+    /* a type-name at the current token (after any nested-name-specifier):
+       the identifier names a type in the scope the lookup finds */
+    bool type_name_follows(unsigned ahead);
+    node_index simple_type_specifier_with_name();
+    node_index elaborated_or_class_specifier(decl_specifier_facts &facts);
+    node_index decltype_specifier();
+
+    /* ---- [expr.prim.id], [expr.prim.id.qual] */
+    /* nested-name-specifier_opt: 0 if none; *scope is the namespace it
+       names when it names one, *known whether every name in it was found */
+    node_index nested_name_specifier(scope_index *scope, bool *known);
+    bool nested_name_specifier_follows(unsigned ahead);
+    node_index declarator_id(declarator_facts &facts);
+
+    /* ---- [dcl.decl], [dcl.name], [dcl.fct] */
+    node_index init_declarator_list(const decl_specifier_facts &specifiers,
+                                    declarator_facts &first);
+    node_index init_declarator(const decl_specifier_facts &specifiers,
+                               declarator_facts &facts, bool first);
+    node_index declarator(declarator_form form, declarator_facts &facts);
+    node_index ptr_declarator(declarator_form form, declarator_facts &facts);
+    node_index noptr_declarator(declarator_form form, declarator_facts &facts);
+    bool parenthesis_could_be_initializer();
+    bool at_ptr_operator();
+    node_index ptr_operator(derivation *kind);
+    node_index cv_qualifier_seq();
+    node_index parameters_and_qualifiers();
+    bool parameters_follow(declarator_form form);
+    node_index parameter_declaration_clause();
+    node_index parameter_declaration();
+    node_index trailing_return_type();
+    node_index type_id();
+    node_index noexcept_specifier();
+
+    /* ---- [dcl.init], [dcl.fct.def.general] */
+    node_index initializer();
+    node_index function_body();
+
+    /* ---- [basic.namespace], [dcl.link] */
+    node_index namespace_definition();
+    node_index namespace_alias_definition();
+    node_index using_directive();
+    node_index linkage_specification();
 
   private:
     parser_statistics counters;
+    owned_array<standard_keyword> keyword_kinds;
 };
 
 } // namespace cplusplus
