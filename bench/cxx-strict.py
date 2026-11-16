@@ -79,7 +79,7 @@ def main():
     ap.add_argument("-j", type=int, default=6)
     ap.add_argument("-v", action="store_true", help="every missing function of every TU")
     ap.add_argument("--top", type=int, default=15)
-    ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("pat", nargs="?", default="")
     a = ap.parse_args()
     tus = [t for t in cp.tus("json") if a.pat in t[0] and t[0] != "unit"]
