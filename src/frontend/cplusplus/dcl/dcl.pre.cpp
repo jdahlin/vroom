@@ -197,10 +197,14 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
         const char *why = "expected ";
         if (failed_with.beyond_step)
             why = "later step: ";
-        fprintf(stderr, "cxxparse: declaration at %u:%u: %s%s at %u:%u\n",
-                tokens.position(first).line, tokens.position(first).column, why,
-                failed_with.expected, tokens.position(failed_with.at).line,
-                tokens.position(failed_with.at).column);
+        owned_buffer spelling;
+        tokens.spelling(failed_with.at, spelling.get());
+        source_position at = tokens.position(failed_with.at);
+        fprintf(stderr,
+                "cxxparse: declaration at %s:%u:%u: %s%s at %u:%u `%.*s`\n",
+                at.file_name, tokens.position(first).line,
+                tokens.position(first).column, why, failed_with.expected,
+                at.line, at.column, (int)spelling.size(), spelling.data());
     }
     size_t messages = diagnostics.messages.size();
     node_index n = unparsed_declaration();
@@ -251,6 +255,8 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
 /* which alternative of declaration the tokens are, by their first ones */
 node_index parser::declaration_alternative()
 {
+    if (at(extension_keyword::extension)) /* [ext.gnu] */
+        return gnu_extension_prefixed(&parser::declaration_alternative);
     size_t mark = begin_node();
     node_index n = 0;
     token_index first = position;
@@ -448,15 +454,8 @@ parser::simple_declaration_rest(size_t mark, token_index first,
     /* [basic.scope.pdecl]/1: "The point of declaration for a name is
        immediately after its complete declarator and before its initializer
        (if any)" */
-    if (facts.name && !facts.qualified_id) {
-        name_kind kind = name_kind::other;
-        if (facts.first == derivation::function)
-            kind = name_kind::function;
-        if (specifiers.typedef_)
-            kind = name_kind::type_name;
-        names.declare(facts.name, declared_kind(kind), 0,
-                      specifiers.typedef_ && specifiers.dependent);
-    }
+    if (facts.name && !facts.qualified_id)
+        declare_declarator(specifiers, facts);
     bool function = facts.first == derivation::function;
     /* [dcl.decl]/1: init-declarator: declarator requires-clause, and
        [dcl.fct.def.general]/1: declarator requires-clause function-body */
@@ -590,7 +589,12 @@ node_index parser::alias_declaration()
     finish_node(syntax_kind::defining_type_id, type_mark, type_first);
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the alias-declaration", "dcl.pre");
-    names.declare(name, declared_kind(name_kind::type_name), 0,
+    /* [dcl.typedef]/2: the typedef-name is a synonym of the type: of a
+       class's, its members are found through it ([basic.lookup.qual]) */
+    scope_index region = 0;
+    if (facts.first == derivation::none)
+        region = specifiers.type_region;
+    names.declare(name, declared_kind(name_kind::type_name), region,
                   specifiers.dependent);
     return finish_node(syntax_kind::alias_declaration, mark, first);
 }

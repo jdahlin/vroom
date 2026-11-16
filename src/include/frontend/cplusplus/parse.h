@@ -64,6 +64,10 @@ class token_stream
     {
         return tokens.size();
     }
+    /* [ext.clang] clang_type_trait_names: the keywords (by their index in
+       the keyword table) that are identifiers when no '(' follows them;
+       set by the parser before the first token is made */
+    owned_array<bool> revertible_keywords;
 
   private:
     owned_array<token> tokens;
@@ -323,6 +327,12 @@ class declared_names
     scope_index snapshot(scope_index region);
     void set_complete(scope_index region, scope_index complete);
     unsigned complete_contexts = 0;
+    /* [class.pre]/2: a class-specifier defines a class an earlier
+       declaration in the scope `in` may have declared (class X; ...
+       class X { ... };): that declaration's region, which a typedef-name
+       or alias made in between holds, finds the members of the
+       definition's region too */
+    void define_class(scope_index in, uint32_t name, scope_index region);
     /* [namespace.alias]/2: the identifier is a synonym of the namespace */
     void declare_namespace_alias(uint32_t name, scope_index nominated);
     /* [namespace.udir]/2: "the names in the nominated namespace can be
@@ -412,6 +422,17 @@ enum class standard_keyword : uint8_t {
     extension,
 };
 
+/* the keywords of an extension's own grammar (ext/extension-keywords.inc),
+   when the extension is on */
+enum class extension_keyword : uint8_t {
+    none,
+    attribute,
+    restrict,
+    extension,
+    type_trait,
+    type_transformation,
+};
+
 /*
  * What a declarator declares, as far as the grammar needs to know: the
  * first derivation applied to its declarator-id ([dcl.meaning]/1: the
@@ -480,6 +501,9 @@ struct decl_specifier_facts {
        only as the sole constituent of a declaration) */
     bool elaborated = false, elaborated_declaring_form = false;
     bool elaborated_attributes = false;
+    /* out: the region of the class a type-name in the sequence names (0:
+       none, or not known) */
+    scope_index type_region = 0;
     /* decl-specifier attribute-specifier-seq: the sequence ends with one */
     bool trailing_attributes = false;
     token_index elaborated_attributes_at = 0;
@@ -606,6 +630,12 @@ class parser
         position++;
     }
     standard_keyword keyword_of(const token &t) const;
+    extension_keyword extension_keyword_of(const token &t) const;
+    bool at(extension_keyword k, unsigned ahead = 0);
+    bool has(extension e) const
+    {
+        return tokens.files.behavior.has(e);
+    }
 
     /* the children of the node being built: a function notes where its own
        begin, adds them, and makes its node of everything after that mark */
@@ -664,6 +694,7 @@ class parser
     /* the token if it is op: added, true */
     bool accept(preprocessing_op_or_punc op);
     bool accept(standard_keyword k);
+    bool accept(extension_keyword k);
     /* the node of the children since mark, added to the pending children
        in their place */
     node_index finish_node(syntax_kind kind, size_t mark,
@@ -755,6 +786,23 @@ class parser
     /* [dcl.attr.grammar]/7: [[ where no attribute-specifier can be */
     node_index misplaced_attribute_brackets();
 
+    /* ---- ext/gnu/attribute.cpp: __attribute__ (( ... )) */
+    bool at_gnu_attribute(unsigned ahead = 0);
+    node_index gnu_attribute_specifier();
+    node_index gnu_attributes_opt();
+    bool standard_attributes_first = false;
+    /* ---- ext/gnu/extension_keyword.cpp: __extension__ before a
+       declaration (alternative parses what follows) or an expression */
+    node_index gnu_extension_prefixed(node_index (parser::*alternative)());
+    node_index gnu_extension_expression();
+    /* ---- ext/clang/type_traits.cpp: __is_same(T, U), __remove_cv(T) */
+    node_index clang_type_trait_expression();
+    node_index clang_type_transformation();
+    /* ---- ext/gnu/asm_label.cpp: declarator asm ( "name" ) attributes */
+    bool gnu_declarator_suffix_follows(const declarator_facts &facts);
+    node_index gnu_declarator_suffix(size_t mark, token_index first,
+                                     declarator_facts &facts);
+
     /* ---- [dcl.pre] */
     node_index declaration_seq(bool until_closing_brace);
     node_index declaration();
@@ -806,6 +854,7 @@ class parser
        the identifier names a type in the scope the lookup finds */
     bool type_name_follows(unsigned ahead);
     node_index simple_type_specifier_with_name();
+    scope_index last_type_region = 0;
     node_index elaborated_or_class_specifier(decl_specifier_facts &facts);
     /* explicit ( constant-expression ) ([dcl.fct.spec]) */
     node_index explicit_specifier();
@@ -824,6 +873,9 @@ class parser
     node_index declarator_id(declarator_facts &facts);
 
     /* ---- [dcl.decl], [dcl.name], [dcl.fct] */
+    /* declares the identifier a declarator declares (facts.name) */
+    void declare_declarator(const decl_specifier_facts &specifiers,
+                            const declarator_facts &facts);
     node_index init_declarator_list(const decl_specifier_facts &specifiers,
                                     declarator_facts &first);
     node_index init_declarator(const decl_specifier_facts &specifiers,
@@ -1106,6 +1158,7 @@ class parser
   private:
     parser_statistics counters;
     owned_array<standard_keyword> keyword_kinds;
+    owned_array<extension_keyword> extension_kinds;
 };
 
 } // namespace cplusplus

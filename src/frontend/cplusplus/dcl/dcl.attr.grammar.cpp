@@ -105,14 +105,15 @@ bool parser::at_attribute_specifier(unsigned ahead)
 {
     return (at(preprocessing_op_or_punc::LEFT_BRACKET, ahead) &&
             at(preprocessing_op_or_punc::LEFT_BRACKET, ahead + 1)) ||
-           at(standard_keyword::alignas_, ahead);
+           at(standard_keyword::alignas_, ahead) ||
+           at_gnu_attribute(ahead); /* [ext.gnu] */
 }
 
 unsigned parser::attribute_specifier_seq_end(unsigned ahead)
 {
     while (at_attribute_specifier(ahead)) {
         unsigned i = ahead;
-        if (at(standard_keyword::alignas_, i))
+        if (at(standard_keyword::alignas_, i) || at_gnu_attribute(i))
             i++;
         if (closing_of(peek(i)) == preprocessing_op_or_punc::count)
             return ahead;
@@ -154,9 +155,19 @@ node_index parser::attribute_specifier_seq(bool appertains_to_type)
     attribute_facts facts;
     unsigned count = 0;
     node_index last = 0;
+    bool gnu = false;
     while (at_attribute_specifier()) {
         token_index at = position;
         bool both = facts.likely && facts.unlikely;
+        /* [ext.gnu] clang: where standard_attributes_first, the standard's
+           attribute-specifiers come before GCC's ("an attribute list
+           cannot appear here") */
+        if (gnu && standard_attributes_first && at_attribute_specifier() &&
+            !at_gnu_attribute() && !this->at(standard_keyword::alignas_))
+            return violates("the standard's attribute-specifiers before "
+                            "GCC's",
+                            "ext.gnu", at);
+        gnu |= at_gnu_attribute();
         last = attribute_specifier(facts);
         if (failed())
             return 0;
@@ -200,6 +211,8 @@ node_index parser::attribute_specifier(attribute_facts &facts)
 {
     size_t mark = begin_node();
     token_index first = position;
+    if (at_gnu_attribute())
+        return gnu_attribute_specifier(); /* [ext.gnu] */
     if (at(standard_keyword::alignas_)) {
         if (!facts.standard) {
             facts.standard = true;

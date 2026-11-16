@@ -14,7 +14,8 @@
             alternatives of that nonterminal's bnf block (spaces, the
             subscript opt written _opt, and quotes around terminals do not
             count).  Quoting some alternatives is allowed (a comment may
-            say which are not written yet).
+            say which are not written yet).  The grammar quoted in ext/ is
+            an extension's, from its vendor's manual: not checked.
   coverage  per clause, the nonterminals of docs/cxx-spec/grammar-index.md
             that some comment quotes, of all of the clause's
 
@@ -178,7 +179,10 @@ def main():
             elif para not in paragraphs(subclauses[label]):
                 print(f'{rel}:{line}: [{label}] has no paragraph {para}')
                 errors += 1
+        vendor_grammar = os.path.relpath(path, FRONTEND).split(os.sep)[0] == 'ext'
         for line, name, alternatives in quoted_productions(path):
+            if vendor_grammar:
+                continue
             productions += 1
             if name not in grammar:
                 # a nonterminal a later paper added, named near the quote

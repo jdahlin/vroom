@@ -59,6 +59,20 @@ void token_stream::make_through(token_index i)
                 preprocessing_tokens.size() - begin));
         } else {
             tokens.append(files.convert(first));
+            token &made = tokens.back();
+            if (made.kind == token_kind::keyword && made.keyword >= 0 &&
+                static_cast<size_t>(made.keyword) <
+                    revertible_keywords.size() &&
+                revertible_keywords[made.keyword]) {
+                /* [ext.clang] clang_type_trait_names */
+                lookahead = read();
+                has_lookahead = true;
+                if (!(lookahead.kind ==
+                          preprocessing_token_kind::preprocessing_op_or_punc &&
+                      preprocessing_op_or_punc_primary(lookahead.op_or_punc) ==
+                          preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                    made.kind = token_kind::identifier;
+            }
         }
         if (first.kind == preprocessing_token_kind::end_of_file)
             complete = true;

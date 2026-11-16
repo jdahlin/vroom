@@ -27,6 +27,18 @@ EXTENSION(gnu_push_pop_macro, gnu,
 EXTENSION(gnu_pragma_message, gnu, "GCC manual 6.62.11, Diagnostic Pragmas: #pragma message")
 EXTENSION(gnu_common_predefined_macros, gnu,
           "GNU cpp manual 3.7.2: __COUNTER__, __INCLUDE_LEVEL__, __BASE_FILE__, __TIMESTAMP__")
+/* GNU's C++ (doc/PLAN-cxx-parse.md P9; ext/gnu/) */
+EXTENSION(gnu_alternate_keywords, gnu,
+          "GCC manual 6.48, Alternate Keywords: __inline__, __const__, __signed__, "
+          "__volatile__, __asm__, __alignof__ for inline, const, signed, volatile, asm, alignof")
+EXTENSION(gnu_attributes, gnu,
+          "GCC manual 6.39, Attribute Syntax: __attribute__ ((attribute-list))")
+EXTENSION(gnu_asm_labels, gnu,
+          "GCC manual 6.47.4, Controlling Names Used in Assembler Code: T x asm (\"name\")")
+EXTENSION(gnu_restrict, gnu,
+          "GCC manual 7.3, Restricting Pointer Aliasing: __restrict__ as a cv-qualifier")
+EXTENSION(gnu_extension_keyword, gnu,
+          "GCC manual 6.48, Alternate Keywords: __extension__ before a declaration or expression")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,
@@ -44,6 +56,13 @@ EXTENSION(clang_embed, clang,
 EXTENSION(clang_unicode_white_space, clang,
           "white space beyond [lex.charset]/1's (U+00A0, U+2000, ...), with a warning")
 
+EXTENSION(clang_type_trait_names, clang,
+          "clang Language Extensions, Type Trait Primitives: a type trait's keyword not "
+          "followed by ( is an identifier (libstdc++ names templates __is_signed, "
+          "__make_unsigned, ...)")
+EXTENSION(clang_type_traits, clang,
+          "clang Language Extensions, Type Trait Primitives: __is_same(T, U), "
+          "__remove_cv(T), ... as expressions and type-specifiers")
 EXTENSION(clang_deleted_function_message, clang,
           "C++26's = delete(\"reason\") (P2573R2) in earlier editions, with a warning")
 EXTENSION(clang_no_operator_names, clang,
