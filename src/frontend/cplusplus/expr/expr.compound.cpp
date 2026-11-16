@@ -180,8 +180,7 @@ node_index parser::binary_expression(unsigned lowest_level)
             break;
         /* [expr.prim.fold]/1: a fold-expression is parenthesized */
         if (at(preprocessing_op_or_punc::ELLIPSIS, 1))
-            return expected("'(' around the fold-expression",
-                            "expr.prim.fold");
+            return expected("'(' around the fold-expression", "expr.prim.fold");
         add_token();
         binary_expression(level + 1);
         if (failed())

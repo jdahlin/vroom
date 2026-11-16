@@ -197,8 +197,8 @@ bool parser::template_declarator_violates(
     }
     /* "When such a declaration is used to declare a class template, no
        declarator is permitted." */
-    if (template_scope == names.declaring_scope() &&
-        specifiers.declares_type && !specifiers.elaborated) {
+    if (template_scope == names.declaring_scope() && specifiers.declares_type &&
+        !specifiers.elaborated) {
         violates("no declarator after a class template's definition",
                  "temp.pre", position);
         return true;
@@ -285,8 +285,7 @@ node_index parser::constraint_logical_or_expression()
         unsigned length = 0;
         bool type = at_identifier() &&
                     (classify_name(0, &length, false) == name_class::type ||
-                     classify_name(0, &length, false) ==
-                         name_class::dependent);
+                     classify_name(0, &length, false) == name_class::dependent);
         node_index n = primary_expression();
         if (failed())
             return 0;

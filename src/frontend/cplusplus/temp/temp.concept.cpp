@@ -66,7 +66,8 @@ bool parser::deduction_guide_follows()
         if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1))
             i = group_end(1);
     }
-    if (!at_identifier(i) || !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i + 1))
+    if (!at_identifier(i) ||
+        !at(preprocessing_op_or_punc::LEFT_PARENTHESIS, i + 1))
         return false;
     unsigned after = group_end(i + 1);
     if (!at(preprocessing_op_or_punc::ARROW, after))

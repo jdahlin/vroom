@@ -222,8 +222,7 @@ enum class name_kind : uint8_t {
    function template") */
 inline bool is_template_kind(name_kind k)
 {
-    return k == name_kind::template_name ||
-           k == name_kind::function_template ||
+    return k == name_kind::template_name || k == name_kind::function_template ||
            k == name_kind::variable_template || k == name_kind::concept_name;
 }
 

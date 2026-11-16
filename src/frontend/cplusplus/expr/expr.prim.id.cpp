@@ -44,7 +44,8 @@ bool parser::nested_name_specifier_follows(unsigned ahead)
         return true;
     if (!at(preprocessing_op_or_punc::LESS, ahead + 1))
         return false;
-    name_kind kind = names.lookup_unqualified(tokens.identifier(position + ahead));
+    name_kind kind =
+        names.lookup_unqualified(tokens.identifier(position + ahead));
     if (!is_template_kind(kind))
         return false;
     unsigned end = angle_group_end(ahead + 1);
@@ -78,11 +79,13 @@ static unsigned nested_component_length(parser &p, bool qualified, bool known,
     bool names = *template_keyword;
     if (!names && known) {
         uint32_t name = p.tokens.identifier(p.position + i);
-        name_kind kind = qualified ? p.names.lookup_qualified(scope, name)
-                                   : p.names.lookup_unqualified(name);
+        name_kind kind;
+        if (qualified)
+            kind = p.names.lookup_qualified(scope, name);
+        else
+            kind = p.names.lookup_unqualified(name);
         names = p.names_template(kind, qualified, false) &&
-                kind != name_kind::function &&
-                kind != name_kind::not_declared;
+                kind != name_kind::function && kind != name_kind::not_declared;
     }
     if (!names)
         return 0;
@@ -141,8 +144,7 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
                 kind = names.lookup_qualified(*scope, name, &found,
                                               &found_dependent);
             else
-                kind = names.lookup_unqualified(name, &found,
-                                                &found_dependent);
+                kind = names.lookup_unqualified(name, &found, &found_dependent);
         }
         bool in_class =
             qualified && *known && names.kind_of(*scope) == scope_kind::class_;

@@ -81,7 +81,8 @@ node_index parser::unary_expression()
         add_token();
         if (at(preprocessing_op_or_punc::ELLIPSIS)) {
             /* [expr.sizeof]/5: sizeof ... ( identifier ) (C++11) */
-            if (!tokens.files.behavior.has(language_feature::variadic_templates))
+            if (!tokens.files.behavior.has(
+                    language_feature::variadic_templates))
                 return beyond_this_step();
             add_token();
             if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))

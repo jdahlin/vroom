@@ -173,7 +173,9 @@ node_index parser::parameter_declaration()
     decl_specifier_facts specifiers;
     /* [temp.res]/5: where the parameter's context says (a member's,
        a requires-expression's, a template-parameter's ...) */
-    specifiers.implicit_typename = parameters_implicit_typename && tokens.files.behavior.has(language_feature::implicit_typename);
+    specifiers.implicit_typename =
+        parameters_implicit_typename &&
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;

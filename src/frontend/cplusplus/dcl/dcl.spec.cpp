@@ -93,14 +93,15 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
                 kind = p.names.lookup_qualified(scope, name, &found,
                                                 &found_dependent);
             else
-                kind = p.names.lookup_unqualified(name, &found,
-                                                  &found_dependent);
+                kind =
+                    p.names.lookup_unqualified(name, &found, &found_dependent);
         }
         unsigned after = i + 1;
         bool arguments = false;
         if (p.at(preprocessing_op_or_punc::LESS, after) &&
             ((opaque && template_keyword) ||
-             (!opaque && p.names_template(kind, qualified, template_keyword)))) {
+             (!opaque &&
+              p.names_template(kind, qualified, template_keyword)))) {
             unsigned end = p.angle_group_end(after);
             if (!end) {
                 *length = after - ahead;
@@ -508,8 +509,8 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                             placeholder_mark, placeholder_first);
                 facts.has_defining_type_specifier = true;
                 k = standard_keyword::auto_;
-            } else if (c == name_class::type ||
-                       (c == name_class::dependent && facts.implicit_typename)) {
+            } else if (c == name_class::type || (c == name_class::dependent &&
+                                                 facts.implicit_typename)) {
                 simple_type_specifier_with_name();
                 if (failed())
                     return 0;
@@ -585,8 +586,9 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
        an elaborated-type-specifier unless the latter is the sole
        constituent of a declaration." */
     if (facts.elaborated_attributes &&
-        (explicit_instantiation_ || !(facts.count == 1 && !facts.trailing_attributes &&
-          !type_specifiers_only && at(preprocessing_op_or_punc::SEMICOLON))))
+        (explicit_instantiation_ ||
+         !(facts.count == 1 && !facts.trailing_attributes &&
+           !type_specifiers_only && at(preprocessing_op_or_punc::SEMICOLON))))
         return violates("an attribute-specifier-seq in an "
                         "elaborated-type-specifier only when it is the sole "
                         "constituent of a declaration",
@@ -640,17 +642,20 @@ node_index parser::simple_type_specifier_with_name()
         kind = names.lookup_unqualified(name, nullptr, &dependent);
     else if (known)
         kind = names.lookup_qualified(scope, name, nullptr, &dependent);
-    if (kind == name_kind::template_name &&
-        !at(preprocessing_op_or_punc::LESS))
+    if (kind == name_kind::template_name && !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
     if (at(preprocessing_op_or_punc::LESS) && qualifier &&
         qualifier_dependent && !template_keyword)
         return violates("template before a dependent template-name",
                         "temp.names", name_first);
     if (at(preprocessing_op_or_punc::LESS)) {
-        if ((qualifier && !known) ? template_keyword
-                                  : names_template(kind, qualifier != 0,
-                                                   template_keyword)) {
+        bool is_template_id;
+        if (qualifier && !known)
+            is_template_id = template_keyword;
+        else
+            is_template_id =
+                names_template(kind, qualifier != 0, template_keyword);
+        if (is_template_id) {
             template_id_rest(name_mark, name_first,
                              syntax_kind::simple_template_id);
             if (failed())
@@ -746,9 +751,11 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
                [dcl.type.elab]/1 a class template's (one the parser cannot
                look up after a qualifier is taken as one) */
             if (!qualifier || known) {
-                name_kind kind = qualifier
-                                     ? names.lookup_qualified(scope, name)
-                                     : names.lookup_unqualified(name);
+                name_kind kind;
+                if (qualifier)
+                    kind = names.lookup_qualified(scope, name);
+                else
+                    kind = names.lookup_unqualified(name);
                 if (kind != name_kind::template_name)
                     return violates("a class template's name before the "
                                     "template-argument-list",

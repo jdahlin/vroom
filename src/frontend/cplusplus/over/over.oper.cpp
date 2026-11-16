@@ -130,8 +130,8 @@ node_index parser::operator_unqualified_id()
                                 "over.literal");
             add_token();
         }
-        node_index n = finish_node(syntax_kind::literal_operator_id, mark,
-                                   first);
+        node_index n =
+            finish_node(syntax_kind::literal_operator_id, mark, first);
         /* template-id: literal-operator-id < template-argument-list_opt > */
         if (at(preprocessing_op_or_punc::LESS))
             return template_id_rest(mark, first, syntax_kind::template_id);

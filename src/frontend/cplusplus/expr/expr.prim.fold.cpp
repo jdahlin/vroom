@@ -94,7 +94,8 @@ bool parser::fold_expression_follows()
             i = end - 1;
             continue;
         }
-        if (is_fold_operator(t) && at(preprocessing_op_or_punc::ELLIPSIS, i + 1))
+        if (is_fold_operator(t) &&
+            at(preprocessing_op_or_punc::ELLIPSIS, i + 1))
             return true;
     }
 }

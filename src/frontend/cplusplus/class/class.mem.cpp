@@ -300,7 +300,8 @@ node_index parser::member_declaration_alternative()
     specifiers.constructor_name = member_class_name;
     /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
        member-declaration" */
-    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
+    specifiers.implicit_typename =
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;

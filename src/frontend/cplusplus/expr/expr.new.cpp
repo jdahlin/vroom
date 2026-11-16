@@ -105,7 +105,8 @@ node_index parser::new_type_id()
     decl_specifier_facts specifiers;
     specifiers.type_specifier_seq = true;
     /* [temp.res]/5: "a type-id in a new-expression" */
-    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
+    specifiers.implicit_typename =
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, true);
     if (failed())
         return 0;

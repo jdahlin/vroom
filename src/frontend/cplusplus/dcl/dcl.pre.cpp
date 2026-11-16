@@ -359,7 +359,9 @@ node_index parser::block_or_function_declaration()
     decl_specifier_facts specifiers;
     /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
        simple-declaration or a function-definition in namespace scope" */
-    specifiers.implicit_typename = !block_scope && tokens.files.behavior.has(language_feature::implicit_typename);
+    specifiers.implicit_typename =
+        !block_scope &&
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, false);
     if (failed())
         return 0;
@@ -462,7 +464,7 @@ parser::simple_declaration_rest(size_t mark, token_index first,
        be used when declaring a function" */
     if (at(standard_keyword::requires_) && !function)
         return violates("a requires-clause only after a function's declarator",
-                            "dcl.decl", position);
+                        "dcl.decl", position);
     if (at(standard_keyword::requires_)) {
         requires_clause();
         if (failed())
@@ -574,7 +576,8 @@ node_index parser::alias_declaration()
     token_index type_first = position;
     decl_specifier_facts specifiers;
     /* [temp.res]/5: the defining-type-id of an alias-declaration */
-    specifiers.implicit_typename = tokens.files.behavior.has(language_feature::implicit_typename);
+    specifiers.implicit_typename =
+        tokens.files.behavior.has(language_feature::implicit_typename);
     decl_specifier_seq(specifiers, true);
     if (failed())
         return 0;

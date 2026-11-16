@@ -53,11 +53,12 @@ node_index parser::typename_specifier()
         if (!known)
             return violates("template before a dependent template-name",
                             "temp.names", name_first);
-        arguments = is_template_kind(names.lookup_qualified(
-            scope, tokens.identifier(name_first)));
+        arguments = is_template_kind(
+            names.lookup_qualified(scope, tokens.identifier(name_first)));
     }
     if (arguments && at(preprocessing_op_or_punc::LESS)) {
-        template_id_rest(name_mark, name_first, syntax_kind::simple_template_id);
+        template_id_rest(name_mark, name_first,
+                         syntax_kind::simple_template_id);
         if (failed())
             return 0;
     } else if (template_keyword) {

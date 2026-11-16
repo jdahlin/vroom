@@ -60,10 +60,9 @@ node_index parser::init_declarator(const decl_specifier_facts &specifiers,
     /* init-declarator: declarator requires-clause ([dcl.decl]/1); that
        its declarator declares a templated function is [dcl.decl]/3's
        semantic rule */
-    if (at(standard_keyword::requires_) &&
-        facts.first != derivation::function)
+    if (at(standard_keyword::requires_) && facts.first != derivation::function)
         return violates("a requires-clause only after a function's declarator",
-                            "dcl.decl", position);
+                        "dcl.decl", position);
     if (at(standard_keyword::requires_)) {
         requires_clause();
         if (failed())
@@ -167,9 +166,8 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
                  at(preprocessing_op_or_punc::LEFT_BRACKET);
     if (form == declarator_form::either &&
         !(at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
-          at(preprocessing_op_or_punc::TILDE) ||
-          named_pack_follows() || abstract_pack_follows() ||
-          at_ptr_operator() ||
+          at(preprocessing_op_or_punc::TILDE) || named_pack_follows() ||
+          abstract_pack_follows() || at_ptr_operator() ||
           at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
           at(preprocessing_op_or_punc::LEFT_BRACKET)))
         inner = false;
@@ -207,8 +205,8 @@ node_index parser::ptr_declarator(declarator_form form, declarator_facts &facts)
 bool parser::named_pack_follows()
 {
     return (at(preprocessing_op_or_punc::ELLIPSIS) &&
-           (at_identifier(1) || at(preprocessing_op_or_punc::COLON_COLON, 1) ||
-            at(standard_keyword::operator_, 1)));
+            (at_identifier(1) || at(preprocessing_op_or_punc::COLON_COLON, 1) ||
+             at(standard_keyword::operator_, 1)));
 }
 
 /* ... with no declarator-id after it, not before ')' */
@@ -256,8 +254,8 @@ node_index parser::noptr_declarator(declarator_form form,
         head = true;
     } else if (form != declarator_form::abstract &&
                (at_identifier() || at(preprocessing_op_or_punc::COLON_COLON) ||
-                at(preprocessing_op_or_punc::TILDE) ||
-                named_pack_follows() || at(standard_keyword::operator_))) {
+                at(preprocessing_op_or_punc::TILDE) || named_pack_follows() ||
+                at(standard_keyword::operator_))) {
         declarator_id(facts);
         if (failed())
             return 0;

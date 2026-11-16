@@ -47,7 +47,8 @@ bool parser::names_template(name_kind kind, bool qualified,
         return true;
     return !qualified &&
            (kind == name_kind::function || kind == name_kind::not_declared) &&
-           tokens.files.behavior.has(language_feature::function_names_before_less);
+           tokens.files.behavior.has(
+               language_feature::function_names_before_less);
 }
 
 name_kind parser::declared_kind(name_kind plain)
@@ -103,10 +104,11 @@ unsigned parser::angle_group_end(unsigned ahead)
                         t, preprocessing_op_or_punc::GREATER_GREATER_EQUAL))) {
             if (depth == 1)
                 return i;
-            if (depth == 2)
-                return is_operator(t, preprocessing_op_or_punc::GREATER_GREATER)
-                           ? i + 1
-                           : i;
+            if (depth == 2) {
+                if (is_operator(t, preprocessing_op_or_punc::GREATER_GREATER))
+                    return i + 1;
+                return i;
+            }
             depth -= 2;
         } else if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
                    is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET) ||
@@ -116,7 +118,8 @@ unsigned parser::angle_group_end(unsigned ahead)
                 return 0;
             i = end - 1;
         } else if (is_operator(t, preprocessing_op_or_punc::SEMICOLON) ||
-                   is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
+                   is_operator(t,
+                               preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
                    is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
                    is_operator(t, preprocessing_op_or_punc::RIGHT_BRACE)) {
             return 0;
@@ -213,7 +216,8 @@ node_index parser::template_argument_list()
             return 0;
         count++;
         if (at(preprocessing_op_or_punc::ELLIPSIS)) {
-            if (!tokens.files.behavior.has(language_feature::variadic_templates))
+            if (!tokens.files.behavior.has(
+                    language_feature::variadic_templates))
                 return beyond_this_step();
             add_token();
             expansion = true;
@@ -244,9 +248,9 @@ node_index parser::template_argument()
     {
         tentative_parse attempt(*this);
         node_index n = type_id();
-        if (!failed() && (at(preprocessing_op_or_punc::COMMA) ||
-                          at(preprocessing_op_or_punc::ELLIPSIS) ||
-                          at_closing_angle())) {
+        if (!failed() &&
+            (at(preprocessing_op_or_punc::COMMA) ||
+             at(preprocessing_op_or_punc::ELLIPSIS) || at_closing_angle())) {
             attempt.commit();
             return n;
         }

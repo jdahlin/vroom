@@ -134,8 +134,7 @@ node_index parser::class_or_decltype(scope_index *region)
     else if (known)
         kind = names.lookup_qualified(scope, name, &found);
     if (at(preprocessing_op_or_punc::LESS) &&
-        (template_keyword || is_template_kind(kind) ||
-         (qualifier && !known))) {
+        (template_keyword || is_template_kind(kind) || (qualifier && !known))) {
         if (dependent_qualifier && !template_keyword)
             return violates("template before a dependent template-name",
                             "temp.names", id_first);
@@ -152,8 +151,7 @@ node_index parser::class_or_decltype(scope_index *region)
         return finish_node(syntax_kind::class_or_decltype, mark, first);
     }
     if (template_keyword)
-        return expected("a simple-template-id after template",
-                        "class.derived");
+        return expected("a simple-template-id after template", "class.derived");
     /* [class.derived]/2: a class-or-decltype names a class (a
        mem-initializer-id a class or member, [class.base.init]/2): a name
        lookup does not find may be declared where the parser kept the
