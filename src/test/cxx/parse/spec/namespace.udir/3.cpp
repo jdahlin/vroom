@@ -1,6 +1,6 @@
 // [namespace.udir] Example 3 (paragraph 7), docs/cxx-spec/dcl/namespace.udir.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P5
+// status: annotated
 
 namespace D {
   int d1;
@@ -22,11 +22,11 @@ namespace D {       // namespace extension
 }
 
 void f() {
-  d1++;             // error: ambiguous ::d1 or D::d1?
+  d1++;             // error: ambiguous ::d1 or D::d1? // semantic
   ::d1++;           // OK
   D::d1++;          // OK
   d2++;             // OK: D::d2
   e++;              // OK: E::e
-  f(1);             // error: ambiguous: D::f(int) or E::f(int)?
+  f(1);             // error: ambiguous: D::f(int) or E::f(int)? // semantic
   f('a');           // OK: D::f(char)
 }

@@ -1,6 +1,6 @@
 // [namespace.memdef] Example 3 (paragraph 3), docs/cxx-spec/dcl/namespace.memdef.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P7
+// status: annotated
 
 // Assume f and g have not yet been declared.
 void h(int);
@@ -28,6 +28,6 @@ using A::x;
 
 void h() {
   A::f(x);
-  A::X::f(x);                   // error: f is not a member of A::X
-  A::X::Y::g();                 // error: g is not a member of A::X::Y
+  A::X::f(x);                   // error: f is not a member of A::X // semantic
+  A::X::Y::g();                 // error: g is not a member of A::X::Y // semantic
 }

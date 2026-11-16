@@ -3,5 +3,5 @@
 // status: annotated
 
 struct S {
-  int y[] = { 0 };          // error: non-static data member of incomplete type // semantic
+  int y[] = { 0 };          // error: non-static data member of incomplete type // syntax-error
 };

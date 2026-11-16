@@ -26,9 +26,10 @@ namespace cplusplus
  * Whether a name before '::' is a type-name or a namespace-name is the
  * lookup's ([basic.lookup.qual]/1: "lookup of the name preceding that ::
  * considers only namespaces, types, and templates whose specializations are
- * types").  *scope is the namespace the specifier names when it names one;
- * *known is false once it names a class, whose members the parser does not
- * know until P5; so it is after decltype-specifier ::
+ * types").  *scope is the namespace or class the specifier names; *known
+ * is false once it names a type whose members the parser does not know (an
+ * enumeration, a typedef-name, a class it has no member-specification of,
+ * a member of an unknown base); so it is after decltype-specifier ::
  * ([expr.prim.id.qual]/1: "The type denoted by a decltype-specifier in a
  * nested-name-specifier shall be a class or enumeration type").
  * simple-template-id :: is P7's.
@@ -71,16 +72,24 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
                 kind = names.lookup_qualified(*scope, name, &found);
             else
                 kind = names.lookup_unqualified(name, &found);
+            bool in_class =
+                qualified && names.kind_of(*scope) == scope_kind::class_;
             if (kind == name_kind::namespace_name)
                 *scope = found;
+            else if (kind == name_kind::type_name && found &&
+                     names.kind_of(found) == scope_kind::class_)
+                *scope = found; /* a class whose members the parser knows */
             else if (kind == name_kind::type_name)
-                *known = false; /* a class or enumeration: P5 */
+                *known = false; /* an enumeration, a typedef-name */
+            else if (kind == name_kind::not_declared && in_class)
+                /* a member of a base the parser does not know */
+                *known = false;
             else
                 /* [basic.lookup.qual]/1: "If the name found does not
                    designate a namespace or a class, enumeration, or
                    dependent type, the program is ill-formed": a semantic
                    rule; a name declared where the parser cannot see it
-                   (in a class, a template) is the same to it */
+                   (in a template) is the same to it */
                 return beyond_this_step();
         }
         add_token();
@@ -121,8 +130,8 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
  * only after a nested-name-specifier or, with member, after . or ->
  * ([expr.unary.op]/10: "a ~ followed by a type-name or decltype-specifier
  * in a member access expression or qualified-id is unambiguously parsed as
- * a destructor name").  The operator names are P5's, template and
- * template-ids P7's.
+ * a destructor name").  The operator names are over.oper.cpp's; template
+ * and template-ids are P7's.
  *
  * [expr.prim.id.unqual]/1: "An identifier is only an id-expression if it
  * has been suitably declared", which is the semantic analysis's to check.
@@ -134,7 +143,8 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
  * enumerator, and after any other name the tokens are P7's to read.  A
  * member's name ([basic.lookup.classref]/1: "The identifier is first looked
  * up in the class of the object expression") and a name of a class's scope
- * are unknown here until P5.
+ * are unknown here, a member of the object's class until types are known
+ * (the class of the object expression is the semantic analysis's).
  */
 node_index parser::id_expression(bool member)
 {
@@ -148,9 +158,13 @@ node_index parser::id_expression(bool member)
         if (failed())
             return 0;
     }
-    if (at(standard_keyword::template_) || at(standard_keyword::operator_))
+    if (at(standard_keyword::template_))
         return beyond_this_step();
-    if (at(preprocessing_op_or_punc::TILDE) && (qualifier || member)) {
+    if (at(standard_keyword::operator_)) {
+        operator_unqualified_id();
+        if (failed())
+            return 0;
+    } else if (at(preprocessing_op_or_punc::TILDE) && (qualifier || member)) {
         size_t tilde_mark = begin_node();
         token_index tilde_first = position;
         add_token();
@@ -181,7 +195,18 @@ node_index parser::id_expression(bool member)
             return beyond_this_step();
         if (kind == name_kind::not_declared)
             unknown_name = true;
-        if (at(preprocessing_op_or_punc::LESS) && kind != name_kind::other)
+        /* [temp.names]/2: "A name is also considered to refer to a
+           template if it is an unqualified-id followed by a < and name
+           lookup either finds one or more functions or finds nothing."
+           (P0846R0, C++20: before it a function's name before < is an
+           operand of <) */
+        if (at(preprocessing_op_or_punc::LESS) && kind == name_kind::function &&
+            !qualifier &&
+            tokens.files.behavior.has(
+                language_feature::function_names_before_less))
+            return beyond_this_step();
+        if (at(preprocessing_op_or_punc::LESS) && kind != name_kind::other &&
+            kind != name_kind::function)
             return beyond_this_step();
     } else if (qualifier) {
         return expected("an unqualified-id after the nested-name-specifier",
@@ -216,8 +241,14 @@ node_index parser::id_expression(bool member)
  *     qualified-id:
  *         nested-name-specifier template_opt unqualified-id
  *
- * The operator names are P5's, template-ids and the ... of a pack P7's.
- * An identifier passes through; ~ type-name is an unqualified-id node.
+ * template-ids and the ... of a pack are P7's.  An identifier passes
+ * through; ~ type-name is an unqualified-id node, the operator names are
+ * their own (over.oper.cpp).  A declarator-id that names a member of a
+ * class the parser knows makes the names after it be looked up in the
+ * class ([basic.scope.class]/1: "The potential scope of a declaration that
+ * extends to or past the end of a class definition also extends to the
+ * regions defined by its member definitions, even if the members are
+ * defined lexically outside the class").
  */
 node_index parser::declarator_id(declarator_facts &facts)
 {
@@ -232,10 +263,18 @@ node_index parser::declarator_id(declarator_facts &facts)
         return 0;
     facts.has_id = true;
     facts.id_first = position;
-    if (at(standard_keyword::operator_) || at(standard_keyword::template_))
+    if (qualifier && known && names.kind_of(scope) == scope_kind::class_) {
+        facts.has_member_of = true;
+        facts.member_of = scope;
+    }
+    if (at(standard_keyword::template_))
         return beyond_this_step();
     node_index unqualified = 0;
-    if (at(preprocessing_op_or_punc::TILDE)) {
+    if (at(standard_keyword::operator_)) {
+        unqualified = operator_unqualified_id();
+        if (failed())
+            return 0;
+    } else if (at(preprocessing_op_or_punc::TILDE)) {
         /* ~ type-name: a destructor ([class.dtor]) */
         size_t tilde_mark = begin_node();
         add_token();

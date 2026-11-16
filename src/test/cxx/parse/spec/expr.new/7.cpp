@@ -1,5 +1,5 @@
 // [expr.new] Example 7 (paragraph 27), docs/cxx-spec/expr/expr.new.md
-// needs: P5
+// needs: P7 (std::size_t is not declared)
 // status: annotated
 
 struct S {

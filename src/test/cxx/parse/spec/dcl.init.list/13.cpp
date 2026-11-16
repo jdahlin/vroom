@@ -1,5 +1,5 @@
 // [dcl.init.list] Example 13 (paragraph 6), docs/cxx-spec/dcl/dcl.init.list.md
-// needs: P5
+// needs: P7
 // status: annotated
 
 typedef std::complex<double> cmplx;

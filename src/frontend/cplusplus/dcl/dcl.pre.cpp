@@ -30,110 +30,35 @@ namespace
 {
 
 /*
- * Whether the ':' at tokens[i] is one this step parses: an enum-base's
- * ([dcl.enum]: enum-key attribute-specifier-seq_opt nested-name-specifier_opt
- * identifier :) or an attribute-using-prefix's ([dcl.attr.grammar]:
- * [[ using attribute-namespace :).  Others are a later step's (bit-fields,
- * base-clauses, ctor-initializers, labels); the ':' of a
- * conditional-expression ([expr.cond]) is counted by its '?'.
- */
-bool colon_of_this_step(parser &p, token_index first, token_index i)
-{
-    if (i < first + 2)
-        return false;
-    if (i >= first + 3 && p.tokens[i - 1].kind == token_kind::identifier &&
-        p.keyword_of(p.tokens[i - 2]) == standard_keyword::using_ &&
-        is_operator(p.tokens[i - 3], preprocessing_op_or_punc::LEFT_BRACKET))
-        return true;
-    /* the enum-head-name, if there is one */
-    token_index j = i;
-    if (p.tokens[j - 1].kind == token_kind::identifier)
-        j--;
-    while (
-        j >= first + 2 &&
-        is_operator(p.tokens[j - 1], preprocessing_op_or_punc::COLON_COLON) &&
-        p.tokens[j - 2].kind == token_kind::identifier)
-        j -= 2;
-    if (j > first &&
-        is_operator(p.tokens[j - 1], preprocessing_op_or_punc::COLON_COLON))
-        j--;
-    /* the enum-head's attribute-specifier-seq, back to its first bracket */
-    while (j > first &&
-           (is_operator(p.tokens[j - 1],
-                        preprocessing_op_or_punc::RIGHT_BRACKET) ||
-            is_operator(p.tokens[j - 1],
-                        preprocessing_op_or_punc::RIGHT_PARENTHESIS))) {
-        unsigned depth = 0;
-        do {
-            j--;
-            const token &t = p.tokens[j];
-            if (is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
-                is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-                depth++;
-            else if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET) ||
-                     is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
-                depth--;
-        } while (depth && j > first);
-        if (j > first &&
-            p.keyword_of(p.tokens[j - 1]) == standard_keyword::alignas_)
-            j--;
-    }
-    if (j > first &&
-        (p.keyword_of(p.tokens[j - 1]) == standard_keyword::class_ ||
-         p.keyword_of(p.tokens[j - 1]) == standard_keyword::struct_))
-        j--;
-    return j > first &&
-           p.keyword_of(p.tokens[j - 1]) == standard_keyword::enum_;
-}
-
-/*
  * Whether tokens [first, end) use grammar a later step of
  * doc/PLAN-cxx-parse.md writes: then a declaration that did not parse is
- * kept as an unparsed node, not reported.  These are templates, operator
- * names, class members' syntax and the extensions' keywords (P3-P9).
+ * kept as an unparsed node, not reported.  These are templates,
+ * exceptions, coroutines, modules and the extensions' keywords (P6-P9).
  */
 bool uses_later_grammar(parser &p, token_index first, token_index end,
                         bool statement)
 {
-    /* the '?' whose ':' has not come yet */
-    unsigned conditionals = 0;
     for (token_index i = first; i < end; i++) {
         const token &t = p.tokens[i];
-        if (is_operator(t, preprocessing_op_or_punc::QUESTION)) {
-            conditionals++;
-            continue;
-        }
-        if (is_operator(t, preprocessing_op_or_punc::COLON) && conditionals) {
-            conditionals--;
-            continue;
-        }
         switch (p.keyword_of(t)) {
         case standard_keyword::template_:
-        case standard_keyword::operator_:
         case standard_keyword::requires_:
         case standard_keyword::concept_:
         case standard_keyword::typename_:
         case standard_keyword::asm_:
-        case standard_keyword::friend_:
         case standard_keyword::try_:
         case standard_keyword::export_:
         case standard_keyword::co_await_:
         case standard_keyword::co_yield_:
         case standard_keyword::co_return_:
-        case standard_keyword::virtual_:
-        case standard_keyword::explicit_:
         case standard_keyword::extension:
             return true;
         default:
             break;
         }
         /* in a statement a '<' after a name that may be a template's sets
-           unknown_name; a ':' is a label's, a case's or a range-based
-           for's */
+           unknown_name */
         if (!statement && is_operator(t, preprocessing_op_or_punc::LESS))
-            return true;
-        if (!statement && is_operator(t, preprocessing_op_or_punc::COLON) &&
-            !colon_of_this_step(p, first, i))
             return true;
         if (t.kind == token_kind::identifier) {
             /* the reserved identifiers ([lex.name]/3) the implementations
@@ -221,88 +146,40 @@ bool parser::starts_module_declaration()
  */
 node_index parser::declaration()
 {
+    return recover_declaration(&parser::declaration_alternative);
+}
+
+node_index parser::recover_declaration(node_index (parser::*alternative)())
+{
     token_index first = position;
     failure_state failed_with;
-    unknown_name = false;
-    nesting_limit_exceeded = false;
-    /* the statements of a function-body recover here or in a statement:
-       restored when the declaration is done */
+    /* the statements of a function-body recover here or in a statement,
+       the member-declarations of a class here: what the enclosing
+       declaration noted is restored when this one is done */
     struct recovery_point {
         parser &p;
         unsigned level;
-        bool block_scope;
+        bool block_scope, unknown_name, limit;
         explicit recovery_point(parser &p)
-            : p(p), level(p.recovery_level), block_scope(p.block_scope)
+            : p(p), level(p.recovery_level), block_scope(p.block_scope),
+              unknown_name(p.unknown_name), limit(p.nesting_limit_exceeded)
         {
             p.block_scope = false;
+            p.unknown_name = false;
+            p.nesting_limit_exceeded = false;
         }
         ~recovery_point()
         {
             p.recovery_level = level;
             p.block_scope = block_scope;
+            p.unknown_name = unknown_name;
+            p.nesting_limit_exceeded = limit;
         }
     } recovery(*this);
     {
         tentative_parse attempt(*this);
         recovery_level = speculation;
-        size_t mark = begin_node();
-        node_index n = 0;
-        unsigned after_attributes = attribute_specifier_seq_end(0);
-        if (after_attributes) {
-            if (at(preprocessing_op_or_punc::SEMICOLON, after_attributes))
-                n = attribute_declaration();
-            else if (at(standard_keyword::using_, after_attributes) &&
-                     at(standard_keyword::namespace_, after_attributes + 1))
-                n = using_directive();
-            else if (at(standard_keyword::asm_, after_attributes))
-                n = asm_declaration();
-            else
-                n = block_or_function_declaration();
-        } else if (at(preprocessing_op_or_punc::SEMICOLON)) {
-            add_token();
-            n = finish_node(syntax_kind::empty_declaration, mark, first);
-        } else if (at(standard_keyword::namespace_) ||
-                   (at(standard_keyword::inline_) &&
-                    at(standard_keyword::namespace_, 1))) {
-            if (at_identifier(1) && at(preprocessing_op_or_punc::EQUAL, 2))
-                n = namespace_alias_definition();
-            else
-                n = namespace_definition();
-        } else if (at(standard_keyword::using_) &&
-                   at(standard_keyword::namespace_, 1)) {
-            n = using_directive();
-        } else if (at(standard_keyword::using_) &&
-                   at(standard_keyword::enum_, 1)) {
-            n = using_enum_declaration();
-        } else if (at(standard_keyword::using_) && at_identifier(1) &&
-                   (at(preprocessing_op_or_punc::EQUAL, 2) ||
-                    at_attribute_specifier(2))) {
-            n = alias_declaration();
-        } else if (at(standard_keyword::using_)) {
-            n = using_declaration();
-        } else if (at(standard_keyword::asm_)) {
-            n = asm_declaration();
-        } else if (at(standard_keyword::enum_) &&
-                   opaque_enum_declaration_follows()) {
-            n = opaque_enum_declaration();
-        } else if (at(standard_keyword::extern_) &&
-                   peek(1).literal == literal_kind::string_literal) {
-            n = linkage_specification();
-        } else if (at(standard_keyword::static_assert_)) {
-            n = static_assert_declaration();
-        } else if ((at_identifier() || peek().kind == token_kind::invalid) &&
-                   starts_module_declaration()) {
-            /* module-declaration, module-import-declaration and
-               export-declaration ([module]): P8 */
-            n = beyond_this_step();
-        } else if (at(standard_keyword::template_) ||
-                   at(standard_keyword::export_)) {
-            /* template-declaration and its kin (P7), export-declaration
-               (P8) */
-            n = beyond_this_step();
-        } else {
-            n = block_or_function_declaration();
-        }
+        node_index n = (this->*alternative)();
         if (!failed()) {
             attempt.commit();
             return n;
@@ -340,6 +217,18 @@ node_index parser::declaration()
        failed for what the name is (a type, a template): a later step's */
     if (!limit && (failed_with.beyond_step || unknown_name ||
                    uses_later_grammar(*this, first, position, false))) {
+        /* whatever grammar its tokens are, a declaration ends with ';' or
+           with the '}' of its own braces: one that runs into the '}' of
+           the region it is in is erroneous in every step (the splitter
+           said so) */
+        bool runs_into_brace =
+            position > first && at(preprocessing_op_or_punc::RIGHT_BRACE) &&
+            !is_operator(tokens[position - 1],
+                         preprocessing_op_or_punc::SEMICOLON) &&
+            !is_operator(tokens[position - 1],
+                         preprocessing_op_or_punc::RIGHT_BRACE);
+        if (tree[n].kind == syntax_kind::erroneous && runs_into_brace)
+            return n;
         counters.beyond_step++;
         if (tree[n].kind == syntax_kind::erroneous) {
             /* the splitter's bracket diagnostics are about tokens a later
@@ -368,6 +257,74 @@ node_index parser::declaration()
     return n;
 }
 
+/* which alternative of declaration the tokens are, by their first ones */
+node_index parser::declaration_alternative()
+{
+    size_t mark = begin_node();
+    node_index n = 0;
+    token_index first = position;
+    unsigned after_attributes = attribute_specifier_seq_end(0);
+    if (after_attributes) {
+        if (at(preprocessing_op_or_punc::SEMICOLON, after_attributes))
+            n = attribute_declaration();
+        else if (at(standard_keyword::using_, after_attributes) &&
+                 at(standard_keyword::namespace_, after_attributes + 1))
+            n = using_directive();
+        else if (at(standard_keyword::asm_, after_attributes))
+            n = asm_declaration();
+        else if (at(standard_keyword::using_, after_attributes))
+            /* before a using-declaration or alias-declaration: clang's
+               extension, P9's */
+            return beyond_this_step();
+        else
+            n = block_or_function_declaration();
+    } else if (at(preprocessing_op_or_punc::SEMICOLON)) {
+        add_token();
+        n = finish_node(syntax_kind::empty_declaration, mark, first);
+    } else if (at(standard_keyword::namespace_) ||
+               (at(standard_keyword::inline_) &&
+                at(standard_keyword::namespace_, 1))) {
+        if (at_identifier(1) && at(preprocessing_op_or_punc::EQUAL, 2))
+            n = namespace_alias_definition();
+        else
+            n = namespace_definition();
+    } else if (at(standard_keyword::using_) &&
+               at(standard_keyword::namespace_, 1)) {
+        n = using_directive();
+    } else if (at(standard_keyword::using_) && at(standard_keyword::enum_, 1)) {
+        n = using_enum_declaration();
+    } else if (at(standard_keyword::using_) && at_identifier(1) &&
+               (at(preprocessing_op_or_punc::EQUAL, 2) ||
+                at_attribute_specifier(2))) {
+        n = alias_declaration();
+    } else if (at(standard_keyword::using_)) {
+        n = using_declaration();
+    } else if (at(standard_keyword::asm_)) {
+        n = asm_declaration();
+    } else if (at(standard_keyword::enum_) &&
+               opaque_enum_declaration_follows()) {
+        n = opaque_enum_declaration();
+    } else if (at(standard_keyword::extern_) &&
+               peek(1).literal == literal_kind::string_literal) {
+        n = linkage_specification();
+    } else if (at(standard_keyword::static_assert_)) {
+        n = static_assert_declaration();
+    } else if ((at_identifier() || peek().kind == token_kind::invalid) &&
+               starts_module_declaration()) {
+        /* module-declaration, module-import-declaration and
+           export-declaration ([module]): P8 */
+        n = beyond_this_step();
+    } else if (at(standard_keyword::template_) ||
+               at(standard_keyword::export_)) {
+        /* template-declaration and its kin (P7), export-declaration
+           (P8) */
+        n = beyond_this_step();
+    } else {
+        n = block_or_function_declaration();
+    }
+    return n;
+}
+
 /*
  * [dcl.pre]/1, and [dcl.fct.def.general]/1:
  *
@@ -383,9 +340,9 @@ node_index parser::declaration()
  *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator virt-specifier-seq_opt function-body
  *         attribute-specifier-seq_opt decl-specifier-seq_opt declarator requires-clause function-body
  *
- * The structured binding declaration (the third alternative,
- * [dcl.struct.bind]) is P5's,
- * virt-specifier-seq and requires-clause P5's and P7's.  A declaration
+ * The third alternative is [dcl.struct.bind]'s structured binding
+ * declaration (C++17); virt-specifier-seq is a member's (class.mem.cpp),
+ * requires-clause P7's.  A declaration
  * whose first declarator declares a function and is followed by a
  * function-body is a function-definition; a decl-specifier-seq_opt that is
  * empty is a constructor's, destructor's or conversion function's
@@ -410,6 +367,13 @@ parser::simple_declaration_rest(size_t mark, token_index first,
                                 const decl_specifier_facts &specifiers,
                                 bool attributes)
 {
+    /* [class.friend]/1: "A friend of a class is a function or class that
+       is given permission to name the private and protected members of
+       the class": the friend specifier ([dcl.friend]/1) is for a
+       member-declaration (class.mem.cpp), not this declaration */
+    if (specifiers.friend_)
+        return violates("friend only in a member-declaration", "dcl.friend",
+                        specifiers.friend_at);
     if (at(preprocessing_op_or_punc::SEMICOLON)) {
         /* decl-specifier-seq init-declarator-list_opt ; ([dcl.pre]/5:
            "the decl-specifier-seq shall introduce one or more names into
@@ -436,11 +400,28 @@ parser::simple_declaration_rest(size_t mark, token_index first,
         add_token();
         return finish_node(syntax_kind::simple_declaration, mark, first);
     }
-    if (at(preprocessing_op_or_punc::LEFT_BRACKET) ||
-        ((at(preprocessing_op_or_punc::AMPERSAND) ||
-          at(preprocessing_op_or_punc::AMPERSAND_AMPERSAND)) &&
-         at(preprocessing_op_or_punc::LEFT_BRACKET, 1)))
-        return beyond_this_step(); /* a structured binding: P5 */
+    if (structured_binding_follows()) {
+        /* attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt
+           [ identifier-list ] initializer ; */
+        if (!specifiers.node) {
+            /* Microsoft's ATL attributes, [uuid("...")] before a
+               declaration: an extension, P9's */
+            const implementation_defined_behavior &b = tokens.files.behavior;
+            if (b.microsoft_extensions || b.microsoft_compatibility)
+                return beyond_this_step();
+            return expected("a decl-specifier-seq", "dcl.struct.bind");
+        }
+        structured_binding_identifiers();
+        if (failed())
+            return 0;
+        if (!initializer() && !failed())
+            return expected("an initializer", "dcl.struct.bind");
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::SEMICOLON))
+            return expected("';' after the declaration", "dcl.pre");
+        return finish_node(syntax_kind::simple_declaration, mark, first);
+    }
 
     declarator_facts facts;
     size_t list_mark = begin_node();
@@ -453,12 +434,18 @@ parser::simple_declaration_rest(size_t mark, token_index first,
        (if any)" */
     if (facts.name && !facts.qualified_id) {
         name_kind kind = name_kind::other;
+        if (facts.first == derivation::function)
+            kind = name_kind::function;
         if (specifiers.typedef_)
             kind = name_kind::type_name;
         names.declare(facts.name, kind);
     }
     bool function = facts.first == derivation::function;
+    /* function-body: ctor-initializer_opt compound-statement (a
+       constructor's ctor-initializer, [class.base.init]), = default ;,
+       = delete ; */
     if (function && (at(preprocessing_op_or_punc::LEFT_BRACE) ||
+                     at(preprocessing_op_or_punc::COLON) ||
                      (at(preprocessing_op_or_punc::EQUAL) &&
                       (at(standard_keyword::default_, 1) ||
                        at(standard_keyword::delete_, 1))))) {
@@ -479,13 +466,11 @@ parser::simple_declaration_rest(size_t mark, token_index first,
         return finish_node(syntax_kind::function_definition, mark, first);
     }
     if (function &&
-        (at(standard_keyword::try_) || at(preprocessing_op_or_punc::COLON) ||
-         at(standard_keyword::requires_)))
-        /* function-try-block (P6), ctor-initializer (P5), requires-clause
-           (P7) */
+        (at(standard_keyword::try_) || at(standard_keyword::requires_)))
+        /* function-try-block (P6), requires-clause (P7) */
         return beyond_this_step();
     if (!specifiers.node && !facts.qualified_id)
-        /* nodeclspec-function-declaration is a member's (P5), or an
+        /* nodeclspec-function-declaration is a member's, or an
            explicit-specialization's: a declaration at namespace scope
            needs a decl-specifier-seq */
         return expected("a decl-specifier-seq", "dcl.spec");

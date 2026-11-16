@@ -1,5 +1,5 @@
 // [dcl.ambig.res] Example 3, part 2 (paragraph 3), docs/cxx-spec/dcl/dcl.ambig.res.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: well-formed (as far as the example says)
 
 class C { };

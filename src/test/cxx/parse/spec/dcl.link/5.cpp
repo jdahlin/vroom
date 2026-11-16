@@ -1,11 +1,11 @@
 // [dcl.link] Example 5 (paragraph 8), docs/cxx-spec/dcl/dcl.link.md
-// needs: (the step whose grammar parses it)
-// status: unannotated (mark each error line // syntax-error or // semantic)
+// needs: P5
+// status: annotated
 
 extern "C" double f();
-static double f();                  // error
+static double f();                  // error // semantic
 extern "C" int i;                   // declaration
 extern "C" {
   int i;                            // definition
 }
-extern "C" static void g();         // error
+extern "C" static void g();         // error // semantic

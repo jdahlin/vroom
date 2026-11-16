@@ -55,6 +55,20 @@ LANGUAGE_FEATURE(list_initialization, cplusplus_11, never,
                  "N2672: a braced-init-list outside = { }")
 LANGUAGE_FEATURE(designated_initializers, cplusplus_20, never,
                  "P0329R4: designated-initializer-list")
+/* [dcl.struct.bind], [dcl.fct.spec] */
+LANGUAGE_FEATURE(structured_bindings, cplusplus_17, never, "P0217R3: structured bindings")
+LANGUAGE_FEATURE(conditional_explicit, cplusplus_20, never,
+                 "P0892R2: explicit ( constant-expression )")
+/* [class] */
+LANGUAGE_FEATURE(default_member_initializers, cplusplus_11, never,
+                 "N2756: a brace-or-equal-initializer of a non-static data member")
+LANGUAGE_FEATURE(override_control, cplusplus_11, never,
+                 "N3272: the virt-specifiers override and final, class-virt-specifier final")
+LANGUAGE_FEATURE(bit_field_default_member_initializers, cplusplus_20, never,
+                 "P0683R1: a default member initializer of a bit-field")
+/* [temp.names] */
+LANGUAGE_FEATURE(function_names_before_less, cplusplus_20, never,
+                 "P0846R0: an unqualified-id that names functions before < is a template-name")
 /* [stmt] */
 LANGUAGE_FEATURE(range_based_for, cplusplus_11, never, "N2930: the range-based for statement")
 LANGUAGE_FEATURE(selection_init_statement, cplusplus_17, never,

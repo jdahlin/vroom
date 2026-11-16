@@ -1,5 +1,5 @@
 // [dcl.name] Example 1 (paragraph 1), docs/cxx-spec/dcl/dcl.name.md
-// needs: (the step whose grammar parses it)
+// needs: P5
 // status: not a translation unit (type-ids, one per line): a syntax error is expected at its end
 
 int                 // int i

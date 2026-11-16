@@ -159,6 +159,11 @@ node_index parser::parameter_declaration()
     attribute_specifier_seq();
     if (failed())
         return 0;
+    /* C++23's explicit object parameter (P0847R7, "this
+       decl-specifier-seq declarator") is not C++20's grammar: a later
+       edition's, P9's */
+    if (at(standard_keyword::this_))
+        return beyond_this_step();
     decl_specifier_facts specifiers;
     decl_specifier_seq(specifiers, false);
     if (failed())
@@ -179,7 +184,21 @@ node_index parser::parameter_declaration()
     if (accept(preprocessing_op_or_punc::EQUAL)) {
         if (list_initialization_missing())
             return 0;
-        initializer_clause();
+        if (collecting_members) {
+            /* a default argument is a complete-class context
+               ([class.mem]/6): not read in the first pass over the
+               member-specification (class.mem.cpp) */
+            static const preprocessing_op_or_punc stops[] = {
+                preprocessing_op_or_punc::COMMA,
+                preprocessing_op_or_punc::RIGHT_PARENTHESIS,
+                preprocessing_op_or_punc::ELLIPSIS};
+            unparsed_until(stops, 3);
+        } else if (member_declarator_context) {
+            complete_class_context context(names);
+            initializer_clause();
+        } else {
+            initializer_clause();
+        }
         if (failed())
             return 0;
     }

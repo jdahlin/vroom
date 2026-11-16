@@ -241,6 +241,22 @@ struct declarative_region {
     declarative_region &operator=(const declarative_region &) = delete;
 };
 
+/* RAII: a complete-class context ([class.mem]/6) for as long as the object
+   lives: the class's members declared after it are found */
+struct complete_class_context {
+    declared_names &names;
+    explicit complete_class_context(declared_names &names) : names(names)
+    {
+        names.complete_contexts++;
+    }
+    ~complete_class_context()
+    {
+        names.complete_contexts--;
+    }
+    complete_class_context(const complete_class_context &) = delete;
+    complete_class_context &operator=(const complete_class_context &) = delete;
+};
+
 /* RAII: a flag of the parser set for as long as the object lives */
 struct flag_set {
     bool &flag;
