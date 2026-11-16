@@ -12,6 +12,7 @@ VPRIV void cxx_translation_unit_parse(cxx *c)
 	while (!cxx_is(c, LEX_TOKEN_EOF))
 		cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
 	cxx_late_template_bodies(c);
+	cxx_static_member_definitions(c);
 }
 
 

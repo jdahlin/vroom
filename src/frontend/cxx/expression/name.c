@@ -147,6 +147,9 @@ VPRIV void cxx_name_type(cxx *c, cxx_entity *e)
 		c->evalue = v->value, c->econst = 1;	/* a constant (a const or constexpr integer, a value parameter) */
 	/* a constant static data member with its initializer in the class and no definition seen: its value (the
 	   symbol may be defined nowhere) */
+	if (v && !v->field_of && !v->nsdmi_pos && v->sym && (v->member_of ? v->member_of : v->home) && (v->member_of ? v->member_of : v->home)->kind == CXX_SCOPE_CLASS && cxx_gen_on(c) &&
+	    c->ast->syms[v->sym].kind == AST_SYMBOL_VARIABLE && c->ast->syms[v->sym].sc == AST_STORAGE_EXTERN)
+		cxx_static_member_definition_use(c, v);	/* (an instance's static member defined outside its class template) */
 	bool by_value = v && v->mangled_var && v->nsdmi_pos && v->sym && v->ty != CXX_TY_UNKNOWN && (AST_QUALIFIED_TYPE_QUALIFIERS(v->ty) & AST_QUALIFIER_CONST) &&
 			c->ast->syms[v->sym].sc == AST_STORAGE_EXTERN;
 

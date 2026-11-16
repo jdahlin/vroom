@@ -303,6 +303,23 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
 					else
 						n3 = cc_conversion_apply(c->ast, cc_conversion_decay(c->ast, n3), pt);
 				}
+			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN &&
+				   ((AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t2)->ext && k3 && !v3 &&
+				     AST_TYPE_KIND(c->ast, t3) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, t3) <= AST_TYPE_UINT128) ||
+				    (AST_TYPE_KIND(c->ast, t3) == AST_TYPE_POINTER && !AST_TYPE(c->ast, t3)->ext && k2 && !v2 &&
+				     AST_TYPE_KIND(c->ast, t2) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, t2) <= AST_TYPE_UINT128))) {
+				/* a pointer and the constant 0, a null pointer constant: the pointer's type (libc++'s deque
+				   iterator(__mp, __map_.empty() ? 0 : *__mp + __start_ % __block_size)) */
+				bool p2 = AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER;
+				ast_qualified_type pt = AST_QUALIFIED_TYPE_UNQUALIFIED(p2 ? t2 : t3);
+
+				cxx_et(c, pt, false);
+				if (cxx_gen_on(c) && n2 && n3) {
+					if (p2)
+						n3 = cc_conversion_apply(c->ast, cc_node_rvalue(c->ast, n3), pt);
+					else
+						n2 = cc_conversion_apply(c->ast, cc_node_rvalue(c->ast, n2), pt);
+				}
 			} else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t2) == AST_TYPE_POINTER && AST_TYPE_KIND(c->ast, t3) == AST_TYPE_POINTER &&
 				   !AST_TYPE(c->ast, t2)->ext && !AST_TYPE(c->ast, t3)->ext &&
 				   AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, t2)->base) == AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c->ast, t3)->base)) {

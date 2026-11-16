@@ -444,6 +444,9 @@ typedef struct cxx {
 	ast_qualified_type gen_ret;			/* its return type */
 	uint32_t gen_fn;		/* (the AST's current function, restored after) */
 	uint8_t gen_assign_rv;		/* the next cxx_gen_assignment's right operand is an rvalue (an xvalue: moved from) */
+	uint8_t static_member_linkonce;	/* a class template instance's static data member being defined: weak */
+	struct cxx_entity **late_statics;	/* such members used: defined at the TU's end */
+	uint32_t nlate_statics, clate_statics;
 	char **gen_names;		/* the mangled names of the functions defined so far, a hash set (a second definition by the same name gets no code) */
 	uint32_t ngen_names, cgen_names;
 	/* a constructor's initializers so far: the members (names) and bases (types) they construct */
@@ -573,7 +576,9 @@ VPRIV void cxx_gen_bind_name(cxx *c, cxx_entity *e, uint32_t object, uint32_t fi
 VPRIV void cxx_gen_typeid(cxx *c, ast_qualified_type t, ast_qualified_type ti_type, uint32_t loc);	/* codegen/vtable.c: typeid of a static type */
 VPRIV cxx_entity *cxx_entity_prefer(cxx_entity *e, int kind);	/* declaration/name.c: of a set, the entity of that kind */
 VPRIV void cxx_gen_base_assign(cxx *c, ast_qualified_type base, uint32_t x, uint32_t loc);	/* codegen/expression.c: B::operator=(x), the implicit one */
-VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);	/* declaration.c: an extern template covers it */
+VPRIV bool cxx_member_is_extern(cxx *c, const cxx_entity *f);
+VPRIV void cxx_static_member_definition_use(cxx *c, struct cxx_entity *v);
+VPRIV void cxx_static_member_definitions(cxx *c);	/* declaration.c: an extern template covers it */
 VPRIV bool cxx_type_definitely_incomplete(cxx *c, ast_qualified_type t);	/* instantiate.c: an instance with no definition to complete it */
 VPRIV ast_qualified_type cxx_ctad(cxx *c, cxx_entity *te, const ast_qualified_type *args, const uint8_t *lval, uint32_t nargs);	/* declaration.c: Name{args} of a class template */
 VPRIV int cxx_gen_trivial_abi(cxx *c, ast_qualified_type t, int depth);	/* codegen/state.c: copied as C does (1), by address (0), not known (-1) */	/* codegen/function.c: VCC_CXX_MISSING, the functions without code */

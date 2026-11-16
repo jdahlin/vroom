@@ -328,6 +328,80 @@ static bool cxx_ooc_refs_agree2(cxx *c, uint32_t pos, const cxx_entity *e, bool 
 }
 
 /*
+ * v, a static data member of a class template's instance with no value or definition yet: its definition
+ * outside the class (template <...> const T X<...>::m = init;), parsed as the definition of the instance's
+ * member with the template's parameters bound to the instance's arguments; weak, as every TU that uses it
+ * defines it.
+ */
+static const struct cxx_ooc *cxx_static_member_ooc(cxx *c, cxx_entity *v, cxx_instance **xo)
+{
+	cxx_scope *cs = v ? (v->member_of ? v->member_of : v->home) : NULL;	/* (a static data member: its class is its home) */
+	cxx_instance *x = cs && cs->kind == CXX_SCOPE_CLASS && cs->owner ? cs->owner->instance : NULL;
+	cxx_template *t = x ? x->t : NULL;
+
+	(void)c;
+	if (!t || x->pos)
+		return NULL;
+	*xo = x;
+	for (uint32_t i = 0; i < t->noocs; i++)
+		if (t->oocs[i].name == v->name && t->oocs[i].nparams == UINT32_MAX && !t->oocs[i].partial)
+			return &t->oocs[i];
+	return NULL;
+}
+
+VPRIV void cxx_static_member_definition_use(cxx *c, cxx_entity *v)
+{
+	cxx_instance *x;
+
+	if (!v || v->late_done || c->tentative || !cxx_static_member_ooc(c, v, &x))
+		return;
+	v->late_done = 1;	/* (defined at the TU's end, outside any function: cxx_static_member_definitions) */
+	if (c->nlate_statics == c->clate_statics)
+		c->late_statics = realloc(c->late_statics, (c->clate_statics = c->clate_statics ? c->clate_statics * 2 : 8) * sizeof *c->late_statics);
+	c->late_statics[c->nlate_statics++] = v;
+}
+
+VPRIV void cxx_static_member_definitions(cxx *c)
+{
+	for (uint32_t k = 0; k < c->nlate_statics; k++) {	/* (one may add more) */
+		cxx_entity *v = c->late_statics[k];
+		cxx_instance *x;
+		const struct cxx_ooc *d = cxx_static_member_ooc(c, v, &x);
+		cxx_scope *binding;
+		cxx_outer o;
+		jmp_buf jb;
+		bool ok = true;
+
+		if (!d)
+			continue;
+		binding = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->home, NULL);
+		for (uint32_t i = 0; i < d->params->ntparams && ok; i++) {
+			if (d->params->tparams[i].pack || i >= x->nargs)
+				ok = false;
+			else
+				cxx_bind(c, binding, &d->params->tparams[i], &x->args[i]);
+		}
+		if (!ok)
+			continue;
+		/* (its class's members are in scope in the initializer: deque's value_type, difference_type) */
+		cxx_scope_use(c, binding, v->member_of ? v->member_of : v->home);
+		cxx_outer_save(c, &o);
+		c->unevaluated = 0, c->tentative = 0;
+		c->fail = &jb;
+		c->pos = d->pos;
+		c->scope = binding;
+		c->template_depth = 0, c->in_template_args = 0, c->explicit_specialization = 0, c->class_depth = 0, c->implicit_typename = 0;
+		c->static_member_linkonce = 1;
+		if (!setjmp(jb))
+			cxx_declaration_parse(c, CXX_CONTEXT_NAMESPACE);
+		c->static_member_linkonce = 0;
+		cxx_outer_restore(c, &o);
+		if (v->sym && (c->ast->syms[v->sym].flags & AST_SYMBOL_FLAG_DEFINED))
+			c->ast->syms[v->sym].depth = 0;	/* (a namespace-level object, though its class was first named in a function) */
+	}
+}
+
+/*
  * A call uses e, a member function of a class template's instance declared without a body: its
  * definition outside the class (matched by name, parameter count and const), parsed as an ordinary
  * out-of-class member definition with the definition's template parameters bound to the instance's

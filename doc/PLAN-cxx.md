@@ -3036,3 +3036,17 @@ klammerargument blivit temporära objekt: `value_type({"one", 1})` anropade
 libc++:s `pair(pair&&) = default` som en funktion som aldrig definierades
 (unit-modifiers länkade inte).  Test: `run/defaulted-move-ctor-called.cpp`,
 som misslyckas utan ändringen.  Sviter gröna (184/184, 38/38, mangle).
+
+## Status 213 (2026-11-16)
+- `c ? 0 : p` med en pekare p: konstanten 0 är en nollpekarkonstant, typen
+  pekarens (libc++:s deque-iterator `iterator(__mp, __map_.empty() ? 0 : ...)`).
+- En klassmalls statiska datamedlem definierad utanför klassen (`template <...>
+  const D X<T, D>::m = init;`, libc++:s `deque::__block_size` och
+  `__deque_iterator::__block_size`): definitionen registreras (som för
+  medlemsfunktioner, parameterantal UINT32_MAX), en instans medlem som används
+  köas och definieras vid TU:ns slut, utanför alla funktioner, med mallens
+  parametrar bundna och klassens medlemmar i räckvidd: värdet som konstant och
+  ett svagt objekt (även constexpr) för en användning av adressen.
+`std::deque` kompilerar, länkar och kör.  Tester:
+`run/template-static-member-out-of-class.cpp` (misslyckas utan ändringen).
+Sviter gröna (185/185, 38/38, mangle).

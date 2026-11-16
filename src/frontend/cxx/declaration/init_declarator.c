@@ -215,6 +215,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				}
 			}
 		}
+		if (sm_init && q && qs && qs->kind == CXX_SCOPE_CLASS && !c->tentative && c->template_depth == 1 && !c->instantiating && qs->owner &&
+		    c->scope->kind == CXX_SCOPE_TEMPLATE && c->ftmpl_scope == c->scope && name > 1) {
+			/* template <...> const T X<...>::m = init;: a static data member's definition, for the instances'
+			   members (libc++'s deque<_Tp, _Alloc>::__block_size); parameter count UINT32_MAX: a variable */
+			cxx_template_member_definition(c, qs->owner, name, c->scope, c->scope->parent, c->ftmpl_begin, UINT32_MAX, 0, false);
+		}
 		if (sm_init && q && qs && qs->kind == CXX_SCOPE_CLASS && !c->tentative && !c->template_depth) {
 			uint32_t keep = c->pos;
 
@@ -236,7 +242,7 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 					/* (T X::m; of a member initialized in its class: the definition has that initializer, not
 					   built here: left to the uses, which take the value) */
 					c->ast->syms[m->sym].sc = AST_STORAGE_NONE;
-					if (flags & DS_INLINE)	/* inline T X::m = ...; (strong_ordering::less): weak where it is
+					if ((flags & DS_INLINE) || c->static_member_linkonce)	/* inline T X::m = ...; (strong_ordering::less): weak where it is
 								   defined (cxx_gen_global_end), every TU that uses it defining it */
 						c->ast->syms[m->sym].flags |= AST_SYMBOL_FLAG_LINKONCE;
 					gen_var = m;
@@ -754,7 +760,10 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 				   array has an object) */
 				bool cx_object = (flags & DS_CONSTEXPR) && t != CXX_TY_UNKNOWN && !cc_type_is_record(c->ast, t) &&
 						 !cc_type_is_integer(c->ast, t) && AST_TYPE_KIND(c->ast, t) != AST_TYPE_ENUM;
-				bool gen_global = global && gen_var && !f && (!(flags & DS_CONSTEXPR) || cx_object) && !auto_e && cxx_gen_global_begin(c, gen_var);
+				/* (a constexpr integer: its uses take the value, no object; a class template instance's static
+				   member defined at the TU's end: its object too, for a use of its address) */
+				bool gen_global = global && gen_var && !f && (!(flags & DS_CONSTEXPR) || cx_object || c->static_member_linkonce) && !auto_e &&
+						  cxx_gen_global_begin(c, gen_var);
 				uint32_t brace_at = braced ? c->pos : 0;	/* (auto x = {...}: the list, parsed again below) */
 
 				cxx_initializer_parse(c);
@@ -770,6 +779,12 @@ VPRIV void cxx_init_declarators_parse(cxx *c, int flags, int context, cxx_scope 
 						gen_local = unsized_e->sym = unsized_static ? cxx_gen_local_static(c, name, t, name_loc) : cxx_gen_local(c, name, t, name_loc);
 					} else
 						cxx_gen_fail(c);
+				}
+				if (gen_global && !braced && c->econst && c->enode && t != CXX_TY_UNKNOWN &&
+				    AST_TYPE_KIND(c->ast, t) >= AST_TYPE_BOOL && AST_TYPE_KIND(c->ast, t) <= AST_TYPE_UNSIGNED_LONG_LONG) {
+					/* an integer constant initializer: its value (BS<T>::value of another class's constant member,
+					   whose object may be defined nowhere), not the expression's node */
+					cxx_gen_integer(c, c->evalue, AST_QUALIFIED_TYPE_UNQUALIFIED(t), name_loc);
 				}
 				if (gen_global) {
 					cxx_gen_global_end(c, gen_var, !braced ? c->enode : AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY ? cxx_gen_array_initializer(c, t, name_loc) :
