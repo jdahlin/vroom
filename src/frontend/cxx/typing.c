@@ -1223,21 +1223,36 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	/* the operator functions in the namespaces of the operands' classes (argument-dependent lookup):
 	   std's operator== for two std::string, operator+ for a string and a char */
 	if (nargs <= 2 && !c->tentative) {
-		cxx_scope *seen[4];
-		uint32_t nseen = 0;
+		cxx_scope *seen[16];
+		uint32_t nseen = 0, nq = 0;
+		ast_qualified_type q[24];
 
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs; i++)
 			all[i + 1] = args[i];
+		/* the operands' classes and their base classes ([basic.lookup.argdep]/3: a class derived from
+		   std::reverse_iterator finds std's operator==) */
 		for (uint32_t i = 0; i <= nargs; i++) {
 			ast_qualified_type t = all[i];
+
+			if (t != CXX_TY_UNKNOWN && AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
+				t = AST_TYPE(c->ast, t)->base;
+			if (t != CXX_TY_UNKNOWN && nq < 24)
+				q[nq++] = t;
+		}
+		for (uint32_t i = 0; i < nq && nq < 24; i++)
+			if (q[i] != CXX_TY_UNKNOWN && cc_type_is_record(c->ast, q[i]) && AST_TYPE_KIND(c->ast, q[i]) != AST_TYPE_ARRAY && i < 12) {
+				ast_qualified_type b[8];
+				uint32_t nb = cxx_class_bases(c, q[i], b, 8);
+
+				for (uint32_t k = 0; k < nb && nq < 24; k++)
+					q[nq++] = b[k];
+			}
+		for (uint32_t i = 0; i < nq; i++) {
+			ast_qualified_type t = q[i];
 			cxx_scope *ns;
 			bool dup = false;
 
-			if (t == CXX_TY_UNKNOWN)
-				continue;
-			if (AST_TYPE_KIND(c->ast, t) == AST_TYPE_POINTER && AST_TYPE(c->ast, t)->ext)
-				t = AST_TYPE(c->ast, t)->base;
 			if (t == CXX_TY_UNKNOWN || !cc_type_is_record(c->ast, t) || AST_TYPE_KIND(c->ast, t) == AST_TYPE_ARRAY ||
 			    !(ns = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t))))
 				continue;
@@ -1245,7 +1260,7 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 				ns = ns->parent;
 			for (uint32_t k = 0; k < nseen; k++)
 				dup |= seen[k] == ns;
-			if (!ns || dup)
+			if (!ns || dup || nseen == 16)
 				continue;
 			seen[nseen++] = ns;
 			set = cxx_lookup_in(c, ns, id, 0);
@@ -2394,12 +2409,34 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name, const ast_qualified_type *ar
 		}
 		while (s && s->kind != CXX_SCOPE_NAMESPACE)
 			s = s->parent;
-		if (!s || !(set = cxx_lookup_in(c, s, name, 0)) || set->kind == CXX_ENTITY_DEPENDENT || !cxx_adl_has_functions(c, set))
-			continue;	/* (what ADL finds is functions only: json's nlohmann::from_json, an object, is not one) */
-		c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
-		ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
-		if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
-			c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */
+		{
+			/* the class's namespace, then its base classes' ([basic.lookup.argdep]/3) */
+			cxx_scope *nsl[9];
+			ast_qualified_type b[8];
+			uint32_t nns = 0, nb = cxx_class_bases(c, t, b, 8);
+
+			if (s)
+				nsl[nns++] = s;
+			for (uint32_t k = 0; k < nb; k++) {
+				cxx_scope *bs = cxx_type_class_scope(c, AST_QUALIFIED_TYPE_UNQUALIFIED(b[k]));
+				bool dup = false;
+
+				while (bs && bs->kind != CXX_SCOPE_NAMESPACE)
+					bs = bs->parent;
+				for (uint32_t m = 0; m < nns; m++)
+					dup |= nsl[m] == bs;
+				if (bs && !dup)
+					nsl[nns++] = bs;
+			}
+			for (uint32_t k = 0; k < nns; k++) {
+				if (!(set = cxx_lookup_in(c, nsl[k], name, 0)) || set->kind == CXX_ENTITY_DEPENDENT || !cxx_adl_has_functions(c, set))
+					continue;	/* (what ADL finds is functions only: json's nlohmann::from_json, an object, is not one) */
+				c->eunsure = unsure0, cxx_call_type(c, set, CXX_TY_UNKNOWN, acopy, lcopy, nargs);
+				ADL_DONE();	/* (the caller decides what this means for the expression's validity) */
+				if (c->etype == CXX_TY_UNKNOWN && !c->none_viable)
+					c->einvalid_unsure = 1;	/* (candidates vcc could not decide between) */
+			}
+		}
 	}
 	if (held) {
 	restore:

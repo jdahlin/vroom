@@ -2827,3 +2827,10 @@ nollställt dem, så `&m` av en `std::map` eller `std::string` blev otypat
 (doctests `CHECK(&p1 == v.get_ptr<object_t *>())`).  Test:
 `run/address-of-with-operator-candidates.cpp`, som misslyckas utan ändringen.
 Sviter gröna (163/163, 38/38, mangle).
+
+## Status 188 (2026-11-16)
+Argumentberoende uppslagning söker också i basklassernas namnrymder, för
+operatorer och för vanliga anrop ([basic.lookup.argdep]/3): jsons
+`json_reverse_iterator` ärver `std::reverse_iterator` och hittar std:s
+`operator==`/`operator!=`.  Test: `run/adl-through-base-class.cpp`.  Sviter
+gröna (164/164, 38/38, mangle).
