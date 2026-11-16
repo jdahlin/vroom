@@ -14,6 +14,11 @@ AGENTS.md asks, and checked in:
                                  clang's token name and its KEY* flags
   lex/lex.name.inc               XID_Start and XID_Continue as code point
                                  ranges (Unicode of this Python's unicodedata)
+  lex/lex.charset.names.inc      Unicode's character names and name aliases
+                                 for \\N{...}: the names a rule makes
+                                 (CJK UNIFIED IDEOGRAPH-4E00) as ranges, the
+                                 others front-coded in blocks; Hangul
+                                 syllables are computed (Unicode 3.12)
 
 Usage: src/tools/gen-cplusplus-data.py [--check] [TD_DIR]
 TD_DIR is work/clang-td/VERSION (bench/clangdiag.py fetch VERSION); it must
@@ -159,6 +164,95 @@ def xid():
     return '\n'.join(lines) + '\n'
 
 
+BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+
+def work_dir():
+    """work/ of this checkout, or of the main checkout from a git worktree"""
+    if os.path.isdir(os.path.join(R, 'work', 'unicode')):
+        return os.path.join(R, 'work')
+    import subprocess
+    common = subprocess.run(['git', '-C', R, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                            capture_output=True, text=True).stdout.strip()
+    return os.path.join(os.path.dirname(common), 'work') if common else os.path.join(R, 'work')
+
+
+def name_aliases():
+    """NameAliases.txt of this Python's Unicode version, fetched once into
+    work/unicode/VERSION/"""
+    version = unicodedata.unidata_version
+    path = os.path.join(work_dir(), 'unicode', version, 'NameAliases.txt')
+    if not os.path.exists(path):
+        import subprocess
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        subprocess.run(['curl', '-fsSL', '-o', path, f'https://www.unicode.org/Public/{version}/ucd/NameAliases.txt'],
+                       check=True)
+    out = []
+    for line in open(path):
+        line = line.split('#')[0].strip()
+        if line:
+            cp, alias, _kind = line.split(';')
+            out.append((alias, int(cp, 16)))
+    return out
+
+
+def names():
+    explicit, rules = [], {}
+    for cp in range(0x110000):
+        n = unicodedata.name(chr(cp), None)
+        if not n or n.startswith('HANGUL SYLLABLE '):
+            continue
+        prefix, _, tail = n.rpartition('-')
+        if prefix and tail in ('%04X' % cp, '%05X' % cp):
+            r = rules.setdefault(prefix, [])
+            if r and r[-1][1] == cp - 1:
+                r[-1][1] = cp
+            else:
+                r.append([cp, cp])
+            continue
+        explicit.append((n, cp))
+    explicit += name_aliases()
+    explicit.sort()
+    block = 32
+    blob, offsets, prev = [], [], ''
+    position = 0
+    for i, (n, cp) in enumerate(explicit):
+        if i % block == 0:
+            offsets.append(position)
+            p = 0
+        else:
+            p = 0
+            while p < min(len(n), len(prev), 63) and n[p] == prev[p]:
+                p += 1
+        entry = BASE64[p] + n[p:] + ';' + ''.join(BASE64[(cp >> s) & 63] for s in (18, 12, 6, 0))
+        blob.append(entry)
+        position += len(entry)
+        prev = n
+    text = ''.join(blob)
+    lines = [HEADER % f"Python's unicodedata and NameAliases.txt (Unicode {unicodedata.unidata_version})",
+             '/* names a rule makes: PREFIX-XXXX for each code point of the ranges */',
+             'static constexpr struct named_range {', '    const char *prefix;', '    uint32_t first, last;',
+             '} unicode_named_ranges[] = {']
+    for prefix in sorted(rules):
+        for a, b in rules[prefix]:
+            lines.append('    {"%s", 0x%04X, 0x%04X},' % (prefix, a, b))
+    lines += ['};', '',
+              '/* the other names and the name aliases, sorted; each entry is the length of',
+              '   the prefix it shares with the previous one (0 at a block start), in the',
+              '   base64 alphabet, the rest of the name, \';\' and the code point in four',
+              '   base64 digits */',
+              '#define UNICODE_NAME_COUNT %d' % len(explicit),
+              '#define UNICODE_NAME_BLOCK %d' % block,
+              'static constexpr uint32_t unicode_name_block_offsets[] = {']
+    for i in range(0, len(offsets), 10):
+        lines.append('    ' + ' '.join('%d,' % o for o in offsets[i:i + 10]))
+    lines += ['};', 'static constexpr char unicode_names[] =']
+    for i in range(0, len(text), 96):
+        lines.append('    "%s"' % text[i:i + 96])
+    lines[-1] += ';'
+    return '\n'.join(lines) + '\n'
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     check = '--check' in sys.argv
@@ -169,6 +263,7 @@ def main():
         'intro/diagnostic-groups.inc': groups,
         'lex/lex.key.inc': keywords(td),
         'lex/lex.name.inc': xid(),
+        'lex/lex.charset.names.inc': names(),
     }
     stale = 0
     for rel, text in files.items():

@@ -37,6 +37,8 @@ LANGUAGE_FEATURE(char8_t_type, cplusplus_20, never,
 LANGUAGE_FEATURE(chrono_ud_suffixes, cplusplus_20, never, "P0355R7: the library's d and y")
 /* C++23 */
 LANGUAGE_FEATURE(size_t_suffix, cplusplus_23, never, "P0330R8: literal suffix for size_t")
+LANGUAGE_FEATURE(named_universal_character_names, cplusplus_23, never,
+                 "P2071R2: named universal character escapes")
 LANGUAGE_FEATURE(delimited_escape_sequences, cplusplus_23, never, "P2290R3: delimited escape sequences")
 /* C++26 */
 LANGUAGE_FEATURE(raw_string_delimiter_dollar_at_grave, cplusplus_26, never,

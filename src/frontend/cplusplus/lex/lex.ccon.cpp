@@ -58,6 +58,51 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
     source_location here = at + (uint32_t)start;
     unsigned char first = (unsigned char)s[start];
 
+    /* the rules for the character a universal-character-name designates
+       ([lex.charset]/2), for \u, \U and \N alike */
+    auto designated = [&](uint32_t value) {
+        /* [lex.charset]/2: "The program is ill-formed if that number is not
+           a code point or if it is a surrogate code point." */
+        if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+            d.issue(diagnostic_id::err_ucn_escape_invalid, here);
+            c.error = true;
+            return c;
+        }
+        /* [lex.charset]/2: "If a universal-character-name outside the
+           c-char-sequence, s-char-sequence, or r-char-sequence of a
+           character-literal or string-literal ... corresponds to a control
+           character or to a character in the basic source character set,
+           the program is ill-formed."  Inside a literal it is allowed since
+           C++11; C++03 forbade it everywhere ($ @ ` are not basic). */
+        if (value < 0xA0 && value != '$' && value != '@' && value != '`') {
+            bool basic = value >= 0x20 && value < 0x7F;
+            char text = (char)value;
+            if (!b.has(
+                    language_feature::
+                        universal_character_names_for_basic_characters_in_literals)) {
+                if (basic)
+                    d.issue(diagnostic_id::err_ucn_escape_basic_scs, here)
+                        .text(&text, 1);
+                else
+                    d.issue(diagnostic_id::err_ucn_control_character, here);
+                c.error = true;
+                return c;
+            }
+            if (basic)
+                d.issue(diagnostic_id::
+                            warn_cxx98_compat_literal_ucn_escape_basic_scs,
+                        here)
+                    .text(&text, 1);
+            else
+                d.issue(diagnostic_id::
+                            warn_cxx98_compat_literal_ucn_control_character,
+                        here);
+        }
+        c.value = value;
+        c.is_code_point = true;
+        return c;
+    };
+
     if (first != '\\') {
         /* a member of the basic source character set, or an extended
            character: [lex.phases]/1.1 made it a universal-character-name */
@@ -153,7 +198,7 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
                 return c;
             }
             if (!b.has(language_feature::delimited_escape_sequences))
-                d.issue(diagnostic_id::ext_delimited_escape_sequence, here)
+                d.issue(diagnostic_id::ext_delimited_escape_sequence, at)
                     << 0 << 0;
         } else if (digits != want) {
             /* "'\u' hex-quad": no hexadecimal-digit at all, or too few */
@@ -168,46 +213,50 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
             return c;
         }
         *i = j;
-        /* [lex.charset]/2: "The program is ill-formed if that number is not
-           a code point or if it is a surrogate code point." */
-        if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
-            d.issue(diagnostic_id::err_ucn_escape_invalid, here);
+        return designated(value);
+    }
+    case 'N': {
+        /*
+         * P2071R2 (C++23), clang's extension before:
+         *
+         *     named-universal-character:
+         *         '\N{' n-char-sequence '}'
+         */
+        size_t j = start + 2;
+        if (j >= n || s[j] != '{') {
+            d.issue(diagnostic_id::err_delimited_escape_missing_brace, here)
+                .text("N", 1);
             c.error = true;
             return c;
         }
-        /* [lex.charset]/2: "If a universal-character-name outside the
-           c-char-sequence, s-char-sequence, or r-char-sequence of a
-           character-literal or string-literal ... corresponds to a control
-           character or to a character in the basic source character set,
-           the program is ill-formed."  Inside a literal it is allowed since
-           C++11; C++03 forbade it everywhere ($ @ ` are not basic). */
-        if (value < 0xA0 && value != '$' && value != '@' && value != '`') {
-            bool basic = value >= 0x20 && value < 0x7F;
-            char text = (char)value;
-            if (!b.has(
-                    language_feature::
-                        universal_character_names_for_basic_characters_in_literals)) {
-                if (basic)
-                    d.issue(diagnostic_id::err_ucn_escape_basic_scs, here)
-                        .text(&text, 1);
-                else
-                    d.issue(diagnostic_id::err_ucn_control_character, here);
-                c.error = true;
-                return c;
-            }
-            if (basic)
-                d.issue(diagnostic_id::
-                            warn_cxx98_compat_literal_ucn_escape_basic_scs,
-                        here)
-                    .text(&text, 1);
-            else
-                d.issue(diagnostic_id::
-                            warn_cxx98_compat_literal_ucn_control_character,
-                        here);
+        size_t close = j + 1;
+        while (close < n && s[close] != '}')
+            close++;
+        if (close >= n) {
+            d.issue(diagnostic_id::err_delimited_escape_missing_brace, here)
+                .text("N", 1);
+            c.error = true;
+            *i = close;
+            return c;
         }
-        c.value = value;
-        c.is_code_point = true;
-        return c;
+        *i = close + 1;
+        if (close == j + 1) {
+            d.issue(diagnostic_id::err_delimited_escape_empty, here);
+            c.error = true;
+            return c;
+        }
+        uint32_t value = code_point_of_unicode_name(s + j + 1, close - j - 1);
+        if (value == UINT32_MAX) {
+            /* at the name, after \N{ */
+            d.issue(diagnostic_id::err_invalid_ucn_name, at + (uint32_t)(j + 1))
+                .text(s + j + 1, close - j - 1);
+            c.error = true;
+            return c;
+        }
+        /* an extension before C++23, diagnosed at the literal */
+        if (!b.has(language_feature::named_universal_character_names))
+            d.issue(diagnostic_id::ext_delimited_escape_sequence, at) << 1 << 0;
+        return designated(value);
     }
     case 'x':
     case 'o': {
@@ -261,7 +310,7 @@ lexer::c_char lexer::evaluate_c_char(const char *s, size_t n, size_t *i,
                 return c;
             }
             if (!b.has(language_feature::delimited_escape_sequences))
-                d.issue(diagnostic_id::ext_delimited_escape_sequence, here)
+                d.issue(diagnostic_id::ext_delimited_escape_sequence, at)
                     << 0 << 0;
         } else if (!digits) {
             d.issue(diagnostic_id::err_hex_escape_no_digits, here).text("x", 1);

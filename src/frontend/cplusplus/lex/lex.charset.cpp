@@ -3,6 +3,8 @@
  * and UTF-8, the encoding in which this implementation reads physical source
  * files ([lex.phases]/1.1 leaves the mapping implementation-defined).
  */
+#include <stdio.h>
+
 #include "../cplusplus-internal.h"
 
 namespace cplusplus
@@ -84,8 +86,46 @@ uint32_t lexer::scan_universal_character_name(uint32_t at, uint32_t *code_point,
     uint32_t p = at + backslash.extent;
     translation_character kind = peek(p);
     if (backslash.character != '\\' ||
-        (kind.character != 'u' && kind.character != 'U'))
+        (kind.character != 'u' && kind.character != 'U' &&
+         kind.character != 'N'))
         return 0;
+    if (kind.character == 'N') {
+        /* P2071R2 named-universal-character: '\N{' n-char-sequence '}',
+           C++23's, clang's extension before */
+        uint32_t q = at + backslash.extent + kind.extent;
+        translation_character open = peek(q);
+        if (open.character != '{')
+            return 0;
+        q += open.extent;
+        char name[128];
+        size_t length = 0;
+        for (;;) {
+            translation_character t = peek(q);
+            if (!t.extent || t.character == '\n' || t.character == '\r' ||
+                length == sizeof name)
+                return 0;
+            q += t.extent;
+            if (t.character == '}')
+                break;
+            name[length++] = (char)t.character;
+        }
+        uint32_t value =
+            length ? code_point_of_unicode_name(name, length) : UINT32_MAX;
+        if (issue) {
+            if (value == UINT32_MAX)
+                diagnostics.issue(diagnostic_id::err_invalid_ucn_name, at)
+                    .text(name, length);
+            else if (!behavior.has(
+                         language_feature::named_universal_character_names))
+                diagnostics.issue(diagnostic_id::ext_delimited_escape_sequence,
+                                  at)
+                    << 1 << 0;
+        }
+        if (value == UINT32_MAX)
+            return 0;
+        *code_point = value;
+        return q - at;
+    }
     p += kind.extent;
     uint32_t digits = kind.character == 'u' ? 4 : 8, value = 0, found = 0;
     bool delimited = kind.character == 'u' && peek(p).character == '{';
@@ -161,6 +201,133 @@ VPRIV bool is_unicode_white_space(uint32_t code_point)
     };
     return code_point_in(white_space, sizeof white_space / sizeof *white_space,
                          code_point);
+}
+
+#include "lex.charset.names.inc"
+
+namespace
+{
+
+int base64_digit(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return c - 'A';
+    if (c >= 'a' && c <= 'z')
+        return c - 'a' + 26;
+    if (c >= '0' && c <= '9')
+        return c - '0' + 52;
+    return c == '+' ? 62 : 63;
+}
+
+/* one entry of unicode_names at `at`, decoded onto the previous name in
+   `name` (*length its length); returns the next entry's offset */
+size_t decode_name_entry(size_t at, char *name, size_t *length,
+                         uint32_t *code_point)
+{
+    size_t shared = (size_t)base64_digit(unicode_names[at++]);
+    *length = shared;
+    while (unicode_names[at] != ';')
+        name[(*length)++] = unicode_names[at++];
+    at++;
+    uint32_t cp = 0;
+    for (int k = 0; k < 4; k++)
+        cp = cp << 6 | (uint32_t)base64_digit(unicode_names[at++]);
+    *code_point = cp;
+    return at;
+}
+
+int compare_names(const char *a, size_t an, const char *b, size_t bn)
+{
+    int c = memcmp(a, b, an < bn ? an : bn);
+    return c ? c : an < bn ? -1 : an > bn ? 1 : 0;
+}
+
+/* The Unicode Standard 3.12, "Conjoining Jamo Behavior": the names of the
+   Hangul syllables U+AC00 to U+D7A3 are made of their jamo's short names */
+constexpr const char *hangul_l[] = {"G", "GG", "N", "D",  "DD", "R", "M",
+                                    "B", "BB", "S", "SS", "",   "J", "JJ",
+                                    "C", "K",  "T", "P",  "H"};
+constexpr const char *hangul_v[] = {"A",   "AE", "YA", "YAE", "EO", "E",  "YEO",
+                                    "YE",  "O",  "WA", "WAE", "OE", "YO", "U",
+                                    "WEO", "WE", "WI", "YU",  "EU", "YI", "I"};
+constexpr const char *hangul_t[] = {"",   "G",  "GG", "GS", "N",  "NJ", "NH",
+                                    "D",  "L",  "LG", "LM", "LB", "LS", "LT",
+                                    "LP", "LH", "M",  "B",  "BS", "S",  "SS",
+                                    "NG", "J",  "C",  "K",  "T",  "P",  "H"};
+
+} // namespace
+
+/*
+ * P2071R2 (C++23), named-universal-character:
+ *
+ *     named-universal-character:
+ *         '\N{' n-char-sequence '}'
+ *
+ * "designates the character" whose Unicode name, or name alias, is the
+ * n-char-sequence: matched exactly, as clang matches it, with every kind of
+ * alias of NameAliases.txt (control, correction, alternate, figment,
+ * abbreviation).  Returns the code point, or UINT32_MAX for none.
+ */
+VPRIV uint32_t code_point_of_unicode_name(const char *name, size_t n)
+{
+    static constexpr char hangul[] = "HANGUL SYLLABLE ";
+    if (n > sizeof hangul - 1 && !memcmp(name, hangul, sizeof hangul - 1)) {
+        const char *rest = name + sizeof hangul - 1;
+        size_t rest_length = n - (sizeof hangul - 1);
+        for (uint32_t s = 0; s < 19 * 21 * 28; s++) {
+            char syllable[16];
+            int k = snprintf(syllable, sizeof syllable, "%s%s%s",
+                             hangul_l[s / (21 * 28)],
+                             hangul_v[s % (21 * 28) / 28], hangul_t[s % 28]);
+            if ((size_t)k == rest_length &&
+                !memcmp(syllable, rest, rest_length))
+                return 0xAC00 + s;
+        }
+        return UINT32_MAX;
+    }
+    for (const named_range &r : unicode_named_ranges) {
+        size_t p = strlen(r.prefix);
+        if (n < p + 5 || memcmp(name, r.prefix, p) || name[p] != '-')
+            continue;
+        uint32_t cp = 0;
+        size_t digits = n - p - 1;
+        bool hex = digits == 4 || digits == 5;
+        for (size_t k = p + 1; hex && k < n; k++) {
+            char c = name[k];
+            hex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+            cp = cp << 4 | (uint32_t)(c <= '9' ? c - '0' : c - 'A' + 10);
+        }
+        /* the name is spelled with exactly four digits below U+10000 */
+        if (hex && cp >= r.first && cp <= r.last &&
+            digits == (cp > 0xFFFF ? 5u : 4u))
+            return cp;
+    }
+
+    /* the last block whose first name is not after the name */
+    char current[128];
+    size_t length;
+    uint32_t cp;
+    size_t blocks =
+        sizeof unicode_name_block_offsets / sizeof *unicode_name_block_offsets;
+    size_t lo = 0, hi = blocks;
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        decode_name_entry(unicode_name_block_offsets[mid], current, &length,
+                          &cp);
+        (compare_names(current, length, name, n) <= 0 ? lo : hi) = mid;
+    }
+    size_t at = unicode_name_block_offsets[lo];
+    for (size_t k = 0; k < UNICODE_NAME_BLOCK &&
+                       lo * UNICODE_NAME_BLOCK + k < UNICODE_NAME_COUNT;
+         k++) {
+        at = decode_name_entry(at, current, &length, &cp);
+        int c = compare_names(current, length, name, n);
+        if (!c)
+            return cp;
+        if (c > 0)
+            break;
+    }
+    return UINT32_MAX;
 }
 
 } // namespace cplusplus

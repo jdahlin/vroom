@@ -53,24 +53,27 @@ and value (integer, character, every code unit of a string) as
 clang is understood: the standard is followed where clang is not, or the
 difference is a later phase's.
 
-Now (2026-11-16): 114 runs of 59 tests, raw, tokens, values and diags all
-114/114, 6 of them known differences.
+Now (2026-11-16): 121 runs of 62 tests, raw, tokens, values and diags all
+121/121, 9 of them known differences.
 
 ## Steps
 
 - **L0 fundamentals** (this PR): source files and presumed lines
   (`[lex.separate]`, `[cpp.line]`), diagnostics (`[intro.compliance]`),
   implementation-defined behavior, fundamental types (`[basic.fundamental]`).
-- **L1 lexer** (this PR): phases 1-3; phase 5 for character and string
-  literals (escapes, universal-character-names, UTF-8/16/32); phase 7 for
-  identifiers, keywords, alternative tokens, operators, integer literals
-  (values, Table 8 types), the types of floating-point literals.  Per-edition
-  rules are named features (`diff/language-features.inc`).  Floating-point
-  values ([lex.fcon]/2-3, nearest, ties to even; binary16/32/64/128) and
-  phase 6 (`lexer::convert_string_literals`: [lex.string]/11 Table 11,
-  [lex.ext]/8 ud-suffixes) are done.  Missing: `\N{}`, Unicode white space
-  and homoglyph diagnostics; correctly rounded subnormal floats (rounded
-  twice now).
+- **L1 lexer** (done, this PR): phases 1-3; phase 5 for character and
+  string literals (escapes, universal-character-names including C++23's
+  `\N{}` with Unicode 16's names and aliases, UTF-8/16/32); phase 6
+  (`lexer::convert_string_literals`: [lex.string]/11 Table 11, [lex.ext]/8);
+  phase 7 for identifiers (XID per P1949R7, UAX #31's mathematical notation
+  as clang's extension, look-alike and invisible character warnings),
+  keywords, alternative tokens, operators, integer literals (values, Table 8
+  types, `_BitInt` widths), floating-point literals (types, values rounded
+  once to nearest, subnormals included).  Unicode white space beyond
+  [lex.charset]/1 is white space as an extension.  Per-edition rules are
+  named features (`diff/language-features.inc`).  Checked beyond the tests:
+  3000 random floating-point literals and all 43490 Unicode names and
+  aliases agree with clang.
 - Our own tests: `src/test/cxx/lex/spec/`, one file per subclause, built from
   the standard's examples (`lex.string.cpp`).
 - **L2** citation checker (`bench/cxx-spec-refs.py`: every `[label]/N`

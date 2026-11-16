@@ -32,3 +32,7 @@ llvm/CXX/lex/lex.literal/lex.ext/p4.cpp | diags | needs [lex.ext]/4, [over.liter
 # U+00A0 a token instead of white space; when it compiles (-fsyntax-only) it
 # takes it as white space, as the front end does, and the diagnostics agree.
 spec/lex.name.cpp | tokens | clang's -dump-tokens mode skips its Unicode white space extension
+# [intro.compliance]/8: a program using an extension that the standard makes
+# ill-formed is diagnosed; clang does not warn about \N{...} in an identifier
+# before C++23, even under -pedantic.
+spec/lex.charset.cpp [-std=c++20 -pedantic] | diags | \N{} in an identifier before C++23 is diagnosed
