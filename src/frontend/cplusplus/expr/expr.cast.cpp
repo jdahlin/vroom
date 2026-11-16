@@ -19,13 +19,12 @@ namespace cplusplus
  */
 node_index parser::cast_expression()
 {
+    /* as for assignment-expression: here for the casts and unary
+       operators, which nest without one */
     nesting_level level(*this);
-    if (nesting > nesting_limit)
-        /* [implimits]/2, as for assignment-expression: here for the casts
-           and unary operators, which nest without one */
-        return violates("an expression nested no deeper than this "
-                        "implementation's limit",
-                        "implimits", position);
+    if (!nesting_within_limit("an expression nested no deeper than this "
+                              "implementation's limit"))
+        return 0;
     if (!at(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return unary_expression();
     size_t mark = begin_node();

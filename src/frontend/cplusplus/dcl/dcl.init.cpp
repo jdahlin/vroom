@@ -104,11 +104,9 @@ node_index parser::initializer_clause()
 node_index parser::braced_init_list()
 {
     nesting_level level(*this);
-    if (nesting > nesting_limit)
-        /* [implimits]/2, as for assignment-expression */
-        return violates("an initializer nested no deeper than this "
-                        "implementation's limit",
-                        "implimits", position);
+    if (!nesting_within_limit("an initializer nested no deeper than this "
+                              "implementation's limit"))
+        return 0;
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* { */

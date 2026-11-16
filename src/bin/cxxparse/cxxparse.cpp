@@ -152,36 +152,57 @@ static void write_tokens(token_stream &tokens, token_index first,
  * their own parentheses would say nothing.
  */
 static void write_parenthesized(const syntax_tree &tree, token_stream &tokens,
-                                node_index n, vbuffer *out)
+                                node_index root, vbuffer *out)
 {
-    const syntax_node &s = tree[n];
-    if (s.kind == syntax_kind::decltype_specifier ||
-        s.kind == syntax_kind::unparsed || s.kind == syntax_kind::erroneous) {
-        write_tokens(tokens, s.first_token, s.end_token, out);
-        return;
-    }
-    bool parentheses = syntax_kind_is_expression(s.kind) &&
-                       s.kind != syntax_kind::qualified_id &&
-                       s.kind != syntax_kind::primary_expression;
-    if (s.kind == syntax_kind::postfix_expression && s.child_count) {
-        syntax_child last = tree.children(n)[s.child_count - 1];
-        if (last.is_token() &&
-            tokens[last.index()].kind == token_kind::operator_or_punctuator &&
-            preprocessing_op_or_punc_primary(tokens[last.index()].op_or_punc) ==
-                preprocessing_op_or_punc::RIGHT_PARENTHESIS)
-            parentheses = false;
-    }
-    if (parentheses)
-        vbuffer_append(out, "( ", 2);
-    for (uint32_t i = 0; i < s.child_count; i++) {
-        syntax_child c = tree.children(n)[i];
+    /* the nodes being written, outermost first (a chain of a thousand
+       additions is a thousand nodes deep: no recursion) */
+    struct level {
+        node_index node;
+        uint32_t next_child;
+        bool parentheses;
+    };
+    owned_array<level> path;
+    auto enter = [&](node_index n) {
+        const syntax_node &s = tree[n];
+        if (s.kind == syntax_kind::decltype_specifier ||
+            s.kind == syntax_kind::unparsed ||
+            s.kind == syntax_kind::erroneous) {
+            write_tokens(tokens, s.first_token, s.end_token, out);
+            return;
+        }
+        bool parentheses = syntax_kind_is_expression(s.kind) &&
+                           s.kind != syntax_kind::qualified_id &&
+                           s.kind != syntax_kind::primary_expression;
+        if (s.kind == syntax_kind::postfix_expression && s.child_count) {
+            syntax_child last = tree.children(n)[s.child_count - 1];
+            if (last.is_token() &&
+                tokens[last.index()].kind ==
+                    token_kind::operator_or_punctuator &&
+                preprocessing_op_or_punc_primary(
+                    tokens[last.index()].op_or_punc) ==
+                    preprocessing_op_or_punc::RIGHT_PARENTHESIS)
+                parentheses = false;
+        }
+        if (parentheses)
+            vbuffer_append(out, "( ", 2);
+        path.append({n, 0, parentheses});
+    };
+    enter(root);
+    while (!path.empty()) {
+        level &top = path.back();
+        const syntax_node &s = tree[top.node];
+        if (top.next_child == s.child_count) {
+            if (top.parentheses)
+                vbuffer_append(out, ") ", 2);
+            path.resize(path.size() - 1);
+            continue;
+        }
+        syntax_child c = tree.children(top.node)[top.next_child++];
         if (c.is_token())
             write_tokens(tokens, c.index(), c.index() + 1, out);
         else
-            write_parenthesized(tree, tokens, c.index(), out);
+            enter(c.index());
     }
-    if (parentheses)
-        vbuffer_append(out, ") ", 2);
 }
 
 /*

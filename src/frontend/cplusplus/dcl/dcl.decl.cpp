@@ -311,6 +311,9 @@ node_index parser::noptr_declarator(declarator_form form,
  */
 bool parser::parenthesis_could_be_initializer()
 {
+    /* ( ) is no initializer: the expression-list is not optional */
+    if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 1))
+        return false;
     const token &t = peek(1);
     standard_keyword k = keyword_of(t);
     switch (k) {

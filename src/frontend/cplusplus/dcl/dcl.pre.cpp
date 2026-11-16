@@ -214,6 +214,7 @@ node_index parser::declaration()
     token_index first = position;
     failure_state failed_with;
     unknown_name = false;
+    nesting_limit_exceeded = false;
     {
         tentative_parse attempt(*this);
         size_t mark = begin_node();
@@ -280,6 +281,21 @@ node_index parser::declaration()
         }
         failed_with = failure;
     }
+    bool limit = nesting_limit_exceeded;
+    if (limit) {
+        /* [implimits]: the declaration nests deeper than this
+           implementation parses, which is its diagnostic whatever else a
+           tentative parse then found */
+        failed_with = failure_state();
+        failed_with.failed = true;
+        failed_with.at = nesting_limit_at;
+        failed_with.expected = "an expression or initializer nested no "
+                               "deeper than this implementation's limit";
+        failed_with.subclause = "implimits";
+        failed_with.id = diagnostic_id::parse_violation;
+        unknown_name = false;
+        nesting_limit_exceeded = false;
+    }
     /* the tokens were not a declaration of the grammar written so far */
     if (debug_fallbacks) {
         const char *why = "expected ";
@@ -294,8 +310,8 @@ node_index parser::declaration()
     node_index n = unparsed_declaration();
     /* a declaration that named something the parser does not know may have
        failed for what the name is (a type, a template): a later step's */
-    if (failed_with.beyond_step || unknown_name ||
-        uses_later_grammar(*this, first, position)) {
+    if (!limit && (failed_with.beyond_step || unknown_name ||
+                   uses_later_grammar(*this, first, position))) {
         counters.beyond_step++;
         if (tree[n].kind == syntax_kind::erroneous) {
             /* the splitter's bracket diagnostics are about tokens a later

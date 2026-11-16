@@ -505,6 +505,16 @@ The first grammar, about 55 nonterminals.
     line).  V3: `src/test/cxx/parse/gram/`, six files, one per group of
     productions, written so that a wrong grouping changes a value.  V6:
     `cxx-lex.py` 121/121.
+  - [implimits]: expressions and initializers nest at most 1024 levels
+    (casts and unary operators, the operands of `?:` and of assignments,
+    parentheses, braces; a parenthesized expression is two of them), so the
+    parser's recursion is bounded; a declaration past the limit gets that
+    diagnostic even when a tentative parse found another.  Chains of binary
+    operators, of commas and of postfix operators are loops and have no
+    limit.  A first look at V5: ten token mutants of every test (12470
+    inputs) and sixteen inputs nested 100000 deep end with status 0 or 1;
+    the ASan run is still V5's.  Declarators and namespaces nest without a
+    limit yet (P1's recursion).
   - Measured: 31 ms for the 83378 tokens of `CXX/drs` concatenated, about
     370 ns per token with phases 1-7 (7184 tentative parses, 2485 rewound).
   - Surprises: clang's parser rejects `T a = delete ("x");` as a deleted

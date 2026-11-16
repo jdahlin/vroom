@@ -95,13 +95,9 @@ node_index parser::conditional_expression(bool *conditional)
 node_index parser::assignment_expression()
 {
     nesting_level level(*this);
-    if (nesting > nesting_limit)
-        /* [implimits]/2: "Nesting levels of parenthesized expressions
-           within a full-expression [256]" is a minimum; this is the limit
-           here, for every way an expression nests */
-        return violates("an expression nested no deeper than this "
-                        "implementation's limit",
-                        "implimits", position);
+    if (!nesting_within_limit("an expression nested no deeper than this "
+                              "implementation's limit"))
+        return 0;
     if (at(standard_keyword::throw_) || at(standard_keyword::co_yield_))
         return beyond_this_step();
     size_t mark = begin_node();

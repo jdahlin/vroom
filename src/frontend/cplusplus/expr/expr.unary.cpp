@@ -88,6 +88,11 @@ node_index parser::unary_expression()
                 return 0;
         }
         if (!type) {
+            /* sizeof sizeof ...: nesting without a cast-expression */
+            nesting_level level(*this);
+            if (!nesting_within_limit("an expression nested no deeper than "
+                                      "this implementation's limit"))
+                return 0;
             unary_expression();
             if (failed())
                 return 0;

@@ -510,6 +510,13 @@ class parser
        ([implimits]/2), and the most this implementation accepts */
     unsigned nesting = 0;
     static constexpr unsigned nesting_limit = 1024;
+    /* the current declaration went past the limit, at this token: its
+       diagnostic is this one, whatever a tentative parse made of it */
+    bool nesting_limit_exceeded = false;
+    token_index nesting_limit_at = 0;
+    /* [implimits]/2: counts one more level for the caller's scope (level);
+       past the limit the parse fails, and 0 is returned */
+    bool nesting_within_limit(const char *what);
     struct nesting_level {
         parser &p;
         explicit nesting_level(parser &p) : p(p)

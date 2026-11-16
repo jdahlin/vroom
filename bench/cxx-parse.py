@@ -539,7 +539,9 @@ def check_mutants(test, opts, cxxparse, n):
             path = os.path.join(td, f'm{k}.cpp')
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(text)
-            st = run([cxxparse, '-fsyntax-only'] + opts + [path], os.path.dirname(test), timeout=10)[0]
+            st, _, err = run([cxxparse, '-fsyntax-only'] + opts + [path], os.path.dirname(test), timeout=10)
+            if st == 2 and 'unsupported -std' in err:
+                break  # an edition cxxparse does not have: the run is skipped
             if st not in (0, 1):
                 keep = os.path.join(R, 'build', 'cxx-parse-mutants')
                 os.makedirs(keep, exist_ok=True)
