@@ -76,6 +76,8 @@ bool preprocessor::read_unexpanded(preprocessing_token &t)
         pop_context();
     }
     t = read_file_token();
+    if (t.kind == preprocessing_token_kind::placemarker)
+        return read_unexpanded(t); /* a directive made tokens to read */
     read_from_file = true;
     return true;
 }

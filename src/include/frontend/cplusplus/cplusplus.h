@@ -614,6 +614,8 @@ struct preprocessor_options {
         include_search search;
     };
     owned_array<include_directory> include_directories;
+    /* [ext.clang] clang_embed: --embed-dir=, where #embed also looks */
+    owned_array<const char *> embed_directories;
     /* -D and -U, in command line order, as the #define and #undef lines of
        clang's "<command line>" file */
     owned_array<char> command_line;
@@ -814,6 +816,8 @@ class preprocessor
     void skip_group();
     preprocessing_token directive_token_or_line();
     bool evaluate_condition(source_location at);
+    bool evaluate_expression(const preprocessing_token *tokens, size_t count,
+                             uint64_t *result, bool *negative = nullptr);
     bool evaluate_defined_condition(const preprocessing_token &name,
                                     bool negated);
     bool expansion_is_function_like(const preprocessing_token &token) const;
@@ -939,6 +943,21 @@ class preprocessor
     /* ---- the extensions (ext/VENDOR/) */
     void gnu_line_marker(const preprocessing_token &digits);
     void gnu_ident_directive(const preprocessing_token &name);
+    struct embed_parameters {
+        bool has_limit = false, has_offset = false, has_prefix = false,
+             has_suffix = false, has_if_empty = false;
+        uint64_t limit = 0, offset = 0;
+        owned_array<preprocessing_token> prefix, suffix, if_empty;
+    };
+    void clang_embed_directive(const preprocessing_token &name);
+    bool embed_continues_line = false;
+    /* 1: parsed, 0: an unknown parameter (in __has_embed), -1: an error */
+    int parse_embed_parameters(const preprocessing_token *tokens, size_t count,
+                               embed_parameters &p, bool in_has_embed);
+    bool find_embed(const char *name, size_t length, bool angled,
+                    owned_buffer &path);
+    bool embedded_size(const char *path, const embed_parameters &p,
+                       uint64_t *size);
     bool gnu_comma_paste(substitution &s, uint32_t at,
                          owned_array<preprocessing_token> &out);
     bool gnu_pragma(const preprocessing_token *tokens, size_t count);

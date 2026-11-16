@@ -39,6 +39,8 @@ EXTENSION(clang_later_edition_features, clang,
           "a later edition's preprocessor in an earlier one, with a warning: #elifdef, #elifndef, "
           "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11)")
 EXTENSION(clang_import_directive, clang, "Objective-C's #import, an include done once")
+EXTENSION(clang_embed, clang,
+          "C23 6.10.4 #embed and __has_embed (C++26's [cpp.embed], P1967R14) in C++")
 EXTENSION(clang_unicode_white_space, clang,
           "white space beyond [lex.charset]/1's (U+00A0, U+2000, ...), with a warning")
 

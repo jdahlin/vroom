@@ -40,7 +40,7 @@ TRIPLE = ['-triple', 'aarch64-unknown-linux-gnu']
 # clang -cc1 options passed to both; options taking a value (kept or dropped)
 KEEP = re.compile(r'^(-std=.*|-fms-extensions|-fms-compatibility|-f(no-)?char8_t|-f?(no-)?trigraphs|'
                   r'-f(no-)?dollars-in-identifiers|-pedantic(-errors)?|-W[^l].*|-w|-undef|'
-                  r'-[DUI].+)$')
+                  r'-[DUI].+|--embed-dir=.*)$')
 VALUE_KEEP = {'-D', '-U', '-I', '-isystem', '-iquote', '-idirafter'}
 VALUE_DROP = {'-triple', '-x', '-o', '-include', '-verify', '-target-cpu', '-main-file-name', '-imacros',
               '-fmodule-name', '-fmodules-cache-path', '-ffile-prefix-map', '-target-feature', '-isysroot',

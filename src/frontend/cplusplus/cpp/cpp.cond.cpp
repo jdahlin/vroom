@@ -255,7 +255,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
             (condition_word(p, t, "__has_include_next") &&
              p.behavior.has(extension::clang_has_include_next)) ||
             (condition_word(p, t, "__has_embed") &&
-             p.behavior.has(extension::clang_feature_checks))) {
+             p.behavior.has(extension::clang_embed))) {
             int64_t found;
             if (!p.has_include(r, t, condition_word(p, t, "__has_include_next"),
                                &found))
@@ -682,8 +682,18 @@ bool preprocessor::evaluate_condition(source_location at)
                         : 0;
     }
     (void)at;
+    uint64_t v;
+    return evaluate_expression(line.data(), line.size(), &v) && v != 0;
+}
+
+/* [cpp.cond]/12: the value of a constant expression of preprocessing
+   tokens, macros replaced; false if it cannot be evaluated (diagnosed) */
+bool preprocessor::evaluate_expression(const preprocessing_token *tokens,
+                                       size_t count, uint64_t *result,
+                                       bool *negative)
+{
     size_t depth = contexts.size();
-    push_tokens(line.data(), line.size(), -1, true);
+    push_tokens(tokens, count, -1, true);
     in_condition++;
     expression_reader r{*this, {}};
     r.advance();
@@ -700,7 +710,10 @@ bool preprocessor::evaluate_condition(source_location at)
     in_condition--;
     while (contexts.size() > depth)
         pop_context();
-    return ok && v.bits != 0;
+    *result = v.bits;
+    if (negative)
+        *negative = v.negative();
+    return ok;
 }
 
 /* [cpp.cond]/13: "Their conditions are equivalent to #if defined
@@ -954,7 +967,8 @@ bool preprocessor::has_include(expression_reader &r,
             << name_text << "'('";
         return false;
     }
-    r.advance_unexpanded();
+    /* [cpp.cond]/3: the second form is "processed just as in normal text" */
+    r.advance();
     owned_buffer header;
     bool angled;
     source_location at = r.token.location;
@@ -987,22 +1001,22 @@ bool preprocessor::has_include(expression_reader &r,
     }
     angled = header.data()[0] == '<';
     r.advance_unexpanded();
-    bool embed = condition_word(*this, name, "__has_embed"), parameters = false;
+    bool embed = condition_word(*this, name, "__has_embed");
+    owned_array<preprocessing_token> parameter_tokens;
     if (embed) {
-        /* [ext.clang] embed-parameters: skipped; a file found is 1, an
-           empty one 2 (C23 6.10.1) */
+        /* [ext.clang] clang_embed: the embed-parameters up to the ) */
         unsigned depth = 0;
         while (!is_end(r.token) &&
                (depth ||
                 !is_operator(r.token,
                              preprocessing_op_or_punc::RIGHT_PARENTHESIS))) {
-            parameters = true;
             if (is_operator(r.token,
                             preprocessing_op_or_punc::LEFT_PARENTHESIS))
                 depth++;
             else if (is_operator(r.token,
                                  preprocessing_op_or_punc::RIGHT_PARENTHESIS))
                 depth--;
+            parameter_tokens.append(r.token);
             r.advance();
         }
     }
@@ -1021,13 +1035,25 @@ bool preprocessor::has_include(expression_reader &r,
         after = include_next_start(name);
     bool system;
     owned_buffer path;
-    *result = find_header(header.data() + 1, header.size() - 2, angled, after,
-                          path, &directory, &system);
+    *result =
+        embed ? find_embed(header.data() + 1, header.size() - 2, angled, path)
+              : find_header(header.data() + 1, header.size() - 2, angled, after,
+                            path, &directory, &system);
     if (embed && *result) {
-        struct stat st;
-        if (stat(path.data(), &st) == 0 && st.st_size == 0)
+        /* C23 6.10.1: __STDC_EMBED_FOUND__ 1, __STDC_EMBED_EMPTY__ 2; an
+           unknown parameter is not found */
+        embed_parameters parameters;
+        int parsed = parse_embed_parameters(
+            parameter_tokens.data(), parameter_tokens.size(), parameters, true);
+        if (parsed < 0)
+            return false;
+        uint64_t size;
+        if (parsed == 0)
+            *result = 0;
+        else if (!embedded_size(path.data(), parameters, &size))
+            *result = 0;
+        else if (size == 0)
             *result = 2;
-        (void)parameters;
     }
     return true;
 }

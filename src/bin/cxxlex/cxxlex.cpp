@@ -227,6 +227,10 @@ int main(int argc, char **argv)
             }
             continue;
         }
+        if (!strncmp(a, "--embed-dir=", 12)) {
+            pp_options.embed_directories.append(a + 12);
+            continue;
+        }
         if (!strcmp(a, "-dump-raw-tokens"))
             raw = true;
         else if (!strcmp(a, "-dump-tokens"))
@@ -355,8 +359,19 @@ int main(int argc, char **argv)
 
     /* phases 5 to 7 */
     const lexer &l = files.phase7();
+    auto embedded = [&](const preprocessing_token &t) {
+        const source_files::entry *e = files.find(t.location);
+        return e && e->scratch && !strcmp(e->name.c_str(), "<embed>");
+    };
     for (size_t i = 0; i < tokens.size(); i++) {
         const preprocessing_token &p = tokens[i];
+        /* #embed's bytes ([ext.clang]): one line, as clang's annot_embed */
+        if (!claims && embedded(p)) {
+            while (i + 1 < tokens.size() && embedded(tokens[i + 1]))
+                i++;
+            vbuffer_string_append(out.get(), "annot_embed ''\tLoc=<embed>\n");
+            continue;
+        }
         /* [lex.phases]/1.6: adjacent string literals become one token; each
            piece is still printed as clang prints it */
         size_t pieces = 1;

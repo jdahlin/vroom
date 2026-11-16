@@ -85,6 +85,7 @@ directive_kind find_directive(const implementation_defined_behavior &b,
         {"ident", directive_kind::ident, extension::gnu_ident_directive},
         {"sccs", directive_kind::ident, extension::gnu_ident_directive},
         {"import", directive_kind::import, extension::clang_import_directive},
+        {"embed", directive_kind::embed, extension::clang_embed},
     };
     for (const auto &d : extended)
         if (strlen(d.name) == n && !memcmp(d.name, s, n) && b.has(d.e))
@@ -185,7 +186,14 @@ preprocessing_token preprocessor::read_file_token(bool header_name_permitted)
             if (collecting_arguments)
                 diagnostics.issue(diagnostic_id::ext_embedded_directive,
                                   t.location);
+            size_t depth = contexts.size();
             execute_directive(t);
+            /* a directive that made tokens (#embed): they are read first */
+            if (contexts.size() > depth) {
+                preprocessing_token none;
+                none.kind = preprocessing_token_kind::placemarker;
+                return none;
+            }
             continue;
         }
         if (t.kind == preprocessing_token_kind::end_of_file) {
@@ -338,6 +346,9 @@ void preprocessor::execute_directive(const preprocessing_token &hash)
     case directive_kind::ident: /* [ext.gnu] */
         gnu_ident_directive(name);
         return;
+    case directive_kind::embed: /* [ext.clang] */
+        clang_embed_directive(name);
+        return;
     default:
         /* [cpp.pre]/2: "A conditionally-supported-directive is
            conditionally-supported with implementation-defined semantics":
@@ -356,6 +367,10 @@ preprocessing_token preprocessor::next()
     preprocessing_token t;
     for (;;) {
         read_unexpanded(t);
+        if (embed_continues_line && read_from_file) {
+            t.at_start_of_line = false;
+            embed_continues_line = false;
+        }
         if (pending_flags) {
             /* a macro replaced by nothing leaves its line start and white
                space to the next token on its line ([impl.clang]) */
