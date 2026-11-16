@@ -26,22 +26,8 @@ node_index parser::ctor_initializer()
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* : */
-    size_t list_mark = begin_node();
-    token_index list_first = position;
-    unsigned count = 0;
-    bool ellipsis = false;
-    for (;;) {
-        mem_initializer();
-        if (failed())
-            return 0;
-        count++;
-        if (accept(preprocessing_op_or_punc::ELLIPSIS))
-            ellipsis = true;
-        if (!accept(preprocessing_op_or_punc::COMMA))
-            break;
-    }
-    if (count > 1 || ellipsis)
-        finish_node(syntax_kind::mem_initializer_list, list_mark, list_first);
+    if (!comma_list(syntax_kind::mem_initializer_list, [this] { mem_initializer(); }))
+        return 0;
     return finish_node(syntax_kind::ctor_initializer, mark, first);
 }
 
@@ -63,15 +49,8 @@ node_index parser::mem_initializer()
     if (failed())
         return 0;
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-        add_token();
-        if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            expression_list();
-            if (failed())
-                return 0;
-        }
-        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-            return expected("')' to close the mem-initializer",
-                            "class.base.init");
+        if (!parenthesized_expression_list("')' to close the mem-initializer", "class.base.init"))
+            return 0;
     } else if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
         if (list_initialization_missing())
             return 0;

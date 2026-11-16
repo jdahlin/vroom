@@ -50,25 +50,6 @@ node_index with_attributes(parser &p, Alternative parse)
     return p.finish_node(syntax_kind::statement, mark, first);
 }
 
-/* the bracket that closes an opening one, or count */
-preprocessing_op_or_punc closer_of(const token &t)
-{
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        return preprocessing_op_or_punc::RIGHT_PARENTHESIS;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET))
-        return preprocessing_op_or_punc::RIGHT_BRACKET;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACE))
-        return preprocessing_op_or_punc::RIGHT_BRACE;
-    return preprocessing_op_or_punc::count;
-}
-
-bool is_closer(const token &t)
-{
-    return is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACE);
-}
-
 /* whether the decl-specifiers in tokens [first, end) are type-specifiers
    or constexpr; *other is where the first that is not one is.  The tokens
    of a class-specifier's or enum-specifier's braces are not
@@ -79,11 +60,11 @@ bool type_specifiers_or_constexpr(parser &p, token_index first, token_index end,
     unsigned depth = 0;
     for (token_index i = first; i < end; i++) {
         const token &t = p.tokens[i];
-        if (closer_of(t) != preprocessing_op_or_punc::count) {
+        if (closing_bracket(t) != preprocessing_op_or_punc::count) {
             depth++;
             continue;
         }
-        if (is_closer(t)) {
+        if (is_closing_bracket(t)) {
             depth--;
             continue;
         }
@@ -119,9 +100,9 @@ VPRIV parenthesized_parts scan_parenthesized(parser &p)
     unsigned depth = 0, conditionals = 0;
     for (unsigned i = 0; !p.tokens.at_end(p.position + i); i++) {
         const token &t = p.peek(i);
-        if (closer_of(t) != preprocessing_op_or_punc::count) {
+        if (closing_bracket(t) != preprocessing_op_or_punc::count) {
             depth++;
-        } else if (is_closer(t)) {
+        } else if (is_closing_bracket(t)) {
             if (!depth)
                 break;
             depth--;
@@ -303,7 +284,7 @@ node_index parser::unparsed_statement(bool *ended)
             }
             break;
         }
-        preprocessing_op_or_punc closing = closer_of(t);
+        preprocessing_op_or_punc closing = closing_bracket(t);
         if (closing != preprocessing_op_or_punc::count) {
             if (outside &&
                 is_operator(t, preprocessing_op_or_punc::LEFT_BRACE)) {
@@ -328,7 +309,7 @@ node_index parser::unparsed_statement(bool *ended)
             consume();
             continue;
         }
-        if (is_closer(t)) {
+        if (is_closing_bracket(t)) {
             preprocessing_op_or_punc kind =
                 preprocessing_op_or_punc_primary(t.op_or_punc);
             size_t i = closers.size();

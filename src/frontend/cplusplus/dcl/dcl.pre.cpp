@@ -282,24 +282,12 @@ node_index parser::declaration_alternative()
     } else if (at(standard_keyword::using_) &&
                at(standard_keyword::namespace_, 1)) {
         n = using_directive();
-    } else if (at(standard_keyword::using_) && at(standard_keyword::enum_, 1)) {
-        n = using_enum_declaration();
-    } else if (at(standard_keyword::using_) && at_identifier(1) &&
-               (at(preprocessing_op_or_punc::EQUAL, 2) ||
-                at_attribute_specifier(2))) {
-        n = alias_declaration();
-    } else if (at(standard_keyword::using_)) {
-        n = using_declaration();
+    } else if (shared_declaration_alternative(&n)) {
     } else if (at(standard_keyword::asm_)) {
         n = asm_declaration();
-    } else if (at(standard_keyword::enum_) &&
-               opaque_enum_declaration_follows()) {
-        n = opaque_enum_declaration();
     } else if (at(standard_keyword::extern_) &&
                peek(1).literal == literal_kind::string_literal) {
         n = linkage_specification();
-    } else if (at(standard_keyword::static_assert_)) {
-        n = static_assert_declaration();
     } else if (at_phase4_keyword(preprocessing_token_kind::import_keyword)) {
         n = module_import_declaration();
     } else if (at_phase4_keyword(preprocessing_token_kind::export_keyword) &&
@@ -530,6 +518,25 @@ parser::simple_declaration_rest(size_t mark, token_index first,
  *       static_assert ( constant-expression ) ;
  *       static_assert ( constant-expression , string-literal ) ;
  */
+bool parser::shared_declaration_alternative(node_index *n)
+{
+    if (at(standard_keyword::using_) && at(standard_keyword::enum_, 1))
+        *n = using_enum_declaration();
+    else if (at(standard_keyword::using_) && at_identifier(1) &&
+             (at(preprocessing_op_or_punc::EQUAL, 2) ||
+              at_attribute_specifier(2)))
+        *n = alias_declaration();
+    else if (at(standard_keyword::using_))
+        *n = using_declaration();
+    else if (at(standard_keyword::static_assert_))
+        *n = static_assert_declaration();
+    else if (at(standard_keyword::enum_) && opaque_enum_declaration_follows())
+        *n = opaque_enum_declaration();
+    else
+        return false;
+    return true;
+}
+
 node_index parser::static_assert_declaration()
 {
     size_t mark = begin_node();

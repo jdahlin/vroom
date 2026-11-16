@@ -18,25 +18,6 @@ namespace cplusplus
 namespace
 {
 
-/* the bracket that closes an opening one, or count */
-preprocessing_op_or_punc closing_of(const token &t)
-{
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        return preprocessing_op_or_punc::RIGHT_PARENTHESIS;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACKET))
-        return preprocessing_op_or_punc::RIGHT_BRACKET;
-    if (is_operator(t, preprocessing_op_or_punc::LEFT_BRACE))
-        return preprocessing_op_or_punc::RIGHT_BRACE;
-    return preprocessing_op_or_punc::count;
-}
-
-bool is_closing(const token &t)
-{
-    return is_operator(t, preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACKET) ||
-           is_operator(t, preprocessing_op_or_punc::RIGHT_BRACE);
-}
-
 const char *closing_spelling(preprocessing_op_or_punc op)
 {
     switch (op) {
@@ -114,16 +95,16 @@ unsigned parser::attribute_specifier_seq_end(unsigned ahead)
         unsigned i = ahead;
         if (at(standard_keyword::alignas_, i))
             i++;
-        if (closing_of(peek(i)) == preprocessing_op_or_punc::count)
+        if (closing_bracket(peek(i)) == preprocessing_op_or_punc::count)
             return ahead;
         unsigned depth = 0;
         for (;; i++) {
             const token &t = peek(i);
             if (t.kind == token_kind::end_of_file)
                 return ahead;
-            if (closing_of(t) != preprocessing_op_or_punc::count)
+            if (closing_bracket(t) != preprocessing_op_or_punc::count)
                 depth++;
-            else if (is_closing(t) && !--depth)
+            else if (is_closing_bracket(t) && !--depth)
                 break;
         }
         ahead = i + 1;
@@ -408,7 +389,7 @@ node_index parser::balanced_token_seq(preprocessing_op_or_punc closing)
         const token &t = peek();
         if (at_end())
             return expected(closing_spelling(closing), "dcl.attr.grammar");
-        preprocessing_op_or_punc inner = closing_of(t);
+        preprocessing_op_or_punc inner = closing_bracket(t);
         if (inner != preprocessing_op_or_punc::count) {
             size_t group_mark = begin_node();
             token_index group_first = position;
@@ -420,7 +401,7 @@ node_index parser::balanced_token_seq(preprocessing_op_or_punc closing)
                 return expected(closing_spelling(inner), "dcl.attr.grammar");
             last = finish_node(syntax_kind::balanced_token, group_mark,
                                group_first);
-        } else if (is_closing(t)) {
+        } else if (is_closing_bracket(t)) {
             return expected(closing_spelling(closing), "dcl.attr.grammar");
         } else {
             add_token();

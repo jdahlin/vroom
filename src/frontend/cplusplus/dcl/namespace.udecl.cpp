@@ -23,26 +23,14 @@ node_index parser::using_declaration()
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* using */
-    size_t list_mark = begin_node();
-    token_index list_first = position;
-    unsigned count = 0;
-    bool ellipsis = false;
-    for (;;) {
-        using_declarator();
-        if (failed())
-            return 0;
-        count++;
-        if (accept(preprocessing_op_or_punc::ELLIPSIS))
-            ellipsis = true;
-        /* an attribute-specifier-seq after a using-declarator: clang's
-           extension, P9's */
-        if (at_attribute_specifier())
-            return beyond_this_step();
-        if (!accept(preprocessing_op_or_punc::COMMA))
-            break;
-    }
-    if (count > 1 || ellipsis)
-        finish_node(syntax_kind::using_declarator_list, list_mark, list_first);
+    if (!comma_list(syntax_kind::using_declarator_list, [this] { using_declarator(); },
+                    [this] {
+                        /* an attribute-specifier-seq after a
+                           using-declarator: clang's extension, P9's */
+                        if (at_attribute_specifier())
+                            beyond_this_step();
+                    }))
+        return 0;
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the using-declaration", "namespace.udecl");
     return finish_node(syntax_kind::using_declaration, mark, first);

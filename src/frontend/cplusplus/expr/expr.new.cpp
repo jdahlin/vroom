@@ -69,14 +69,8 @@ node_index parser::new_expression()
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         size_t initializer_mark = begin_node();
         token_index initializer_first = position;
-        add_token();
-        if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-            expression_list();
-            if (failed())
-                return 0;
-        }
-        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-            return expected("')' to close the new-initializer", "expr.new");
+        if (!parenthesized_expression_list("')' to close the new-initializer", "expr.new"))
+            return 0;
         finish_node(syntax_kind::new_initializer, initializer_mark,
                     initializer_first);
     } else if (at(preprocessing_op_or_punc::LEFT_BRACE)) {

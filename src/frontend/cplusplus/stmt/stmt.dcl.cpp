@@ -45,19 +45,11 @@ node_index parser::block_declaration()
     }
     if (at(standard_keyword::using_) && at(standard_keyword::namespace_, 1))
         return using_directive();
-    if (at(standard_keyword::using_) && at(standard_keyword::enum_, 1))
-        return using_enum_declaration();
-    if (at(standard_keyword::using_) && at_identifier(1) &&
-        (at(preprocessing_op_or_punc::EQUAL, 2) || at_attribute_specifier(2)))
-        return alias_declaration();
-    if (at(standard_keyword::using_))
-        return using_declaration();
+    node_index n = 0;
+    if (shared_declaration_alternative(&n))
+        return n;
     if (at(standard_keyword::asm_))
         return asm_declaration();
-    if (at(standard_keyword::enum_) && opaque_enum_declaration_follows())
-        return opaque_enum_declaration();
-    if (at(standard_keyword::static_assert_))
-        return static_assert_declaration();
     if (at(standard_keyword::template_) || at(standard_keyword::export_))
         /* a template-declaration is no block-declaration ([temp.pre]/2:
            "A template-declaration can appear only as a namespace scope or
