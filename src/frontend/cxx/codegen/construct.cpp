@@ -139,6 +139,69 @@ VPRIV void cxx_gen_defaulted_constructor(cxx *c, cxx_entity *d)
     d->gen_tried = 1;
 }
 
+/*
+ * X& X::operator=(const X&) = default; or (X&&) = default outside its class: the function, built here
+ * ([dcl.fct.def.default]/5: user-provided, defined where it is defaulted; other TUs call it).  Its body is
+ * [class.copy.assign]/12's memberwise assignment (cxx_gen_assign_parts) and /14's return of *this.
+ */
+VPRIV void cxx_gen_defaulted_assignment(cxx *c, cxx_entity *d)
+{
+    cc *a = c->ast;
+    ast_qualified_type t, pt;
+    cxx_scope *fs;
+    cxx_param p[1];
+    uint32_t loc, src, self, body;
+    cc_id_list l;
+    bool ok;
+
+    if (!d || !d->member_of || !d->member_of->owner || d->fn_deleted ||
+        d->member_of->dependent ||
+        (t = d->member_of->owner->ty) == CXX_TY_UNKNOWN ||
+        d->ty == CXX_TY_UNKNOWN ||
+        AST_TYPE_KIND(a, d->ty) != AST_TYPE_FUNCTION ||
+        AST_TYPE(a, d->ty)->n != 1 || !a->o->emit || c->tentative ||
+        c->unevaluated || d->gen_tried)
+        return;
+    pt = a->params[AST_TYPE(a, d->ty)->aux];
+    if (!cxx_gen_is_reference(c, pt) ||
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(a, pt)->base) !=
+            AST_QUALIFIED_TYPE_UNQUALIFIED(t))
+        return;
+    d->fn_ooc_default = 1, d->fn_inline = 0;
+    p[0].name = 0, p[0].ty = pt;
+    d->gen_tried = 2;
+    fs = cxx_scope_new(c, CXX_SCOPE_BLOCK, d->member_of, NULL);
+    if (!cxx_gen_function_begin(c, d, fs, p, 1)) {
+        d->gen_tried = 1;
+        return;
+    }
+    loc = a->syms[d->sym].loc;
+    src = cc_dereference_build(
+        a,
+        cc_node_rvalue(
+            a, cxx_gen_var_node(c, a->lists[c->gen_psyms + c->gen_npsyms - 1],
+                                loc)),
+        loc);
+    self = cxx_gen_this_object(c, loc);
+    cc_id_list_init(&l);
+    ok = src && self &&
+         cxx_gen_assign_parts(c, self, t, src, AST_TYPE(a, pt)->ext == 2, &l,
+                              loc, 0);
+    if (ok) /* (the result, X&: this) */
+        cc_id_list_append(
+            a, &l,
+            cc_statement_new(
+                a, AST_NODE_RETURN, loc,
+                cc_address_of_build(a, cxx_gen_this_object(c, loc), loc), 0,
+                0));
+    else
+        c->gen_failed = 1;
+    body = cc_statement_new(a, AST_NODE_BLOCK, loc, 0, cc_id_list_freeze(a, &l),
+                            l.n);
+    cxx_gen_function_end(c, d, body);
+    d->gen_tried = 1;
+}
+
 /* the destructor the class declares (NULL: none) */
 VPRIV cxx_entity *cxx_gen_declared_destructor(cxx *c, ast_qualified_type t)
 {
@@ -388,7 +451,7 @@ static bool cxx_gen_assign_object(cxx *c, uint32_t target, ast_qualified_type t,
         return false;
     if (cxx_class_layout_info(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t), &pod,
                               &empty) &&
-        empty && cxx_gen_trivial_abi(c, t, 0) == 1)
+        empty && cxx_class_assign_trivial(c, t, 0) == 1)
         return true; /* (an empty class: nothing to assign; its byte may be another member's, an empty base's
                         or [[no_unique_address]]) */
     set = cxx_lookup_in(c, cls, vintern_cstr("operator="), 0);
@@ -423,7 +486,9 @@ static bool cxx_gen_assign_object(cxx *c, uint32_t target, ast_qualified_type t,
         c->enode = 0;
         return true;
     }
-    if (cxx_gen_trivial_abi(c, t, 0) == 1) {
+    /* (its bytes when its assignment is trivial ([class.copy.assign]); a member with a user-provided
+       operator= makes it not, whatever its copy constructor is) */
+    if (cxx_class_assign_trivial(c, t, 0) == 1) {
         cc_id_list_append(
             a, out,
             cc_statement_new(

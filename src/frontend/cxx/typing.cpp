@@ -12,7 +12,6 @@
  * an ambiguity is unknown, never a guess.
  */
 #include "cxx-internal.h"
-static int cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth);
 
 VPRIV void cxx_et(cxx *c, ast_qualified_type t, bool lvalue)
 {
@@ -3279,7 +3278,7 @@ VPRIV void cxx_adl_call_type(cxx *c, uint32_t name,
  */
 /* are the class's copy and move assignments trivial: 1 none user-declared in it, its bases or its members of
    class type (arrays of them too), 0 one is (not trivial), -1 not known (a reference or const member: deleted) */
-static int cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth)
+VPRIV int cxx_class_assign_trivial(cxx *c, ast_qualified_type t, int depth)
 {
     cxx_scope *cls = cxx_tag_scope_get(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t));
     ast_qualified_type bases[16];

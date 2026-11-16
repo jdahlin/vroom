@@ -389,9 +389,9 @@ static void cxx_gen_call_impl(cxx *c, cxx_entity *f, uint32_t object,
         CXX_CALL_WHY();
         return;
     }
-    if (f->fn_defaulted && !f->fn_deleted && nargs == 1 && object && !arrow &&
-        args[0] && f->name == vintern_cstr("operator=") && f->member_of &&
-        f->member_of->owner && f->ty != CXX_TY_UNKNOWN &&
+    if (f->fn_defaulted && !f->fn_deleted && !f->fn_ooc_default && nargs == 1 &&
+        object && !arrow && args[0] && f->name == vintern_cstr("operator=") &&
+        f->member_of && f->member_of->owner && f->ty != CXX_TY_UNKNOWN &&
         AST_TYPE(a, f->ty)->n == 1 &&
         cxx_gen_is_reference(c, a->params[AST_TYPE(a, f->ty)->aux]) &&
         AST_QUALIFIED_TYPE_UNQUALIFIED(
