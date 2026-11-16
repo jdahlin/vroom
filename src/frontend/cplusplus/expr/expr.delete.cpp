@@ -14,7 +14,7 @@ namespace cplusplus
  * [expr.delete]/1: "Whenever the delete keyword is immediately followed by
  * empty square brackets, it shall be interpreted as the second
  * alternative."  A '[' with anything in it begins the operand (a
- * lambda-expression: P6).
+ * lambda-expression).
  */
 node_index parser::delete_expression()
 {

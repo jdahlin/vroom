@@ -693,6 +693,40 @@ The first grammar, about 55 nonterminals.
 - Tests: `Parser/cxx0x-lambda-expressions.cpp`, `cxx2b-lambdas.cpp`,
   `cxx1z-constexpr-lambdas.cpp`, `cxx-throw.cpp`, `cxx20-coroutines.cpp`,
   `CXX/expr/expr.prim/expr.prim.lambda`, `CXX/except`.
+- Status: done (2026-11-16).
+  - Files: `expr/expr.prim.lambda.cpp` (lambda-expression,
+    lambda-introducer, lambda-capture, capture, init-capture,
+    lambda-declarator), `expr/expr.throw.cpp`, `expr/expr.await.cpp`,
+    `expr/expr.yield.cpp`, `except/except.pre.cpp` (try-block, handler-seq,
+    handler, exception-declaration), `stmt/stmt.return.coroutine.cpp`; a
+    function-try-block in `dcl.fct.def.general.cpp`, C++14's
+    dynamic-exception-specification in `except/except.spec.cpp`.
+  - Scopes: a lambda's captures are declared in a region of their own, its
+    parameters in a function parameter scope the compound-statement
+    re-enters; a handler's exception-declaration is in the handler's block;
+    a function-try-block's handlers see the parameters ([except.handle]/11).
+    A class body's first pass skips a function-try-block as one unparsed
+    part, like a function-body.
+  - Editions by feature (`language-features.inc`): lambdas (C++11),
+    init-captures (C++14), `constexpr` lambdas and `*this` (C++17);
+    `throw ( type-id-list )` until C++17 and `throw ( )` until C++20 (P0003R5,
+    [diff.cpp14.except]/1, [diff.cpp17.except]/1; after that clang's
+    extension, P9's, and an empty one a noexcept-specifier).  Each
+    lambda-declarator specifier at most once ([dcl.spec]/2).
+  - Later steps: a template-parameter-list after the introducer and packs in
+    captures (P7), C++23's lambda without `()` before a specifier and
+    `static` lambdas, `throw(...)` (P9).  In braces, `[` starts a lambda
+    unless `=` follows its group (an array designator, P9).  `decltype` of a
+    lambda gets no declarator claim (each closure type is unique).
+  - `cxx-spec-refs.py` reads a grammar block whose head is indented
+    ([expr.yield]).
+  - V4a: 2244 runs, 12580 declarations as clang, 0 rejected that clang
+    accepts, 0 accepted that clang rejects, 9980 kept as tokens; 30025
+    `unparsed` and 1143 `erroneous` nodes.  V4b: 0 refuted.  V1: 514
+    citations, 233 productions, 0 wrong; except 6 of 6.  V2: 41 examples of
+    [expr.prim.lambda*], [except.*], [expr.await], [expr.yield],
+    [expr.throw] and [dcl.fct.def.coroutine] extracted and annotated; those
+    that need `std::` or generic lambdas are P7's.  V6: 121/121.
 
 ### P7. Templates
 

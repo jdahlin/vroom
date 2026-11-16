@@ -29,7 +29,7 @@
  *
  * No claim is made for a name whose type the tree does not say: one with a
  * placeholder type to deduce, of an unnamed class or enumeration, a
- * destructor's; nor for a declaration with a token a macro made, or one
+ * destructor's, one that names a lambda's closure type (decltype([]{})); nor for a declaration with a token a macro made, or one
  * whose type names one of its own parameters (decltype(x), noexcept(x)),
  * which the place of the static_assert does not have in scope.  Nor for a
  * declaration with an attribute of a namespace other than the standard's:
@@ -94,6 +94,22 @@ class declarator_claims
         const token &t = tokens[c.index()];
         return t.kind == token_kind::operator_or_punctuator &&
                preprocessing_op_or_punc_primary(t.op_or_punc) == op;
+    }
+
+    /* whether node n has a lambda-expression in it: each one is a closure
+       type of its own ([expr.prim.lambda.closure]/1), so the claim's
+       decltype([]{}) would name another type */
+    bool has_lambda(node_index n) const
+    {
+        const syntax_node &node = tree[n];
+        if (node.kind == syntax_kind::lambda_expression)
+            return true;
+        for (uint32_t i = 0; i < node.child_count; i++) {
+            syntax_child c = tree.children(n)[i];
+            if (!c.is_token() && has_lambda(c.index()))
+                return true;
+        }
+        return false;
     }
 
     bool is_kind(syntax_child c, syntax_kind kind) const
@@ -225,8 +241,13 @@ class declarator_claims
             }
             const syntax_node &child = tree[c.index()];
             switch (child.kind) {
-            case syntax_kind::simple_type_specifier:
             case syntax_kind::decltype_specifier:
+                if (has_lambda(c.index()))
+                    return false;
+                verbatim(child.first_token, child.end_token, type.get());
+                named = true;
+                break;
+            case syntax_kind::simple_type_specifier:
             case syntax_kind::elaborated_type_specifier:
             case syntax_kind::elaborated_enum_specifier:
                 verbatim(child.first_token, child.end_token, type.get());

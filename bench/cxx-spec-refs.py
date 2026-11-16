@@ -81,6 +81,10 @@ def spec_grammar():
             name, alternatives, one_of = None, [], False
             for line in block.split('\n') + ['']:
                 head = re.match(r'^([A-Za-z][\w-]*):\s*(one of)?\s*$', line)
+                # [expr.yield]'s block indents its head: one that opens a
+                # production (first line, or after a blank one) is a head too
+                if not head and name is None:
+                    head = re.match(r'^\s+([A-Za-z][\w-]*):\s*(one of)?\s*$', line)
                 if head:
                     if name:
                         grammar.setdefault(name, (label, set(), one_of))[1].update(alternatives)

@@ -90,7 +90,8 @@ node_index parser::conditional_expression(bool *conditional)
  * left operand is a logical-or-expression, so a conditional-expression
  * with a '?' is not followed by an assignment-operator.
  *
- * yield-expression and throw-expression are P6's.
+ * Its other alternatives, yield-expression and throw-expression, are
+ * expr.yield.cpp's and expr.throw.cpp's.
  */
 node_index parser::assignment_expression()
 {
@@ -98,8 +99,10 @@ node_index parser::assignment_expression()
     if (!nesting_within_limit("an expression nested no deeper than this "
                               "implementation's limit"))
         return 0;
-    if (at(standard_keyword::throw_) || at(standard_keyword::co_yield_))
-        return beyond_this_step();
+    if (at(standard_keyword::throw_))
+        return throw_expression();
+    if (at(standard_keyword::co_yield_))
+        return yield_expression();
     size_t mark = begin_node();
     token_index first = position;
     bool conditional = false;
