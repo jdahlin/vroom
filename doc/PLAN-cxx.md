@@ -2915,3 +2915,11 @@ bara `e` medan kroppens `x` aldrig fick ett värde: jsons
 unit-bson snurrade (felkompilering; körningen tog tid i stället för att ge
 fel).  Test: `run/condition-declaration-while-switch.cpp` (med continue),
 som misslyckas utan ändringen.  Sviter gröna (172/172, 38/38, mangle).
+
+## Status 199 (2026-11-16)
+Ett element i en initializer_list som är en klammerlista med egna
+klammerlisteargument (`{"array", {1, 2, 3, 4}}`) skickar dem vidare till
+konstruktorns anrop (gen_call_brace) och till aggregatinitieringen: jsons
+`json::object_t o = {{"array", {1, 2, 3, 4}}, ...}` i unit-conversions.  Test:
+`run/ilist-element-nested-braces.cpp`, som misslyckas utan ändringen.  Sviter
+gröna (173/173, 38/38, mangle).

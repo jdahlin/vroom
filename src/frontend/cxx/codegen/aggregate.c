@@ -343,9 +343,22 @@ VPRIV uint32_t cxx_gen_initializer_list(cxx *c, ast_qualified_type ilt, const ui
 			n = c->ncargs;
 			if (n == UINT32_MAX || n > CXX_MAX_ARGS)
 				goto fail;
+			uint32_t *abr = malloc(sizeof c->carg_brace);	/* (its own arguments that are braced lists: {"array", {1, 2}}) */
+			bool built;
+
+			if (!abr)
+				goto fail;
 			memcpy(an, c->carg_nodes, sizeof an), memcpy(at, c->cargs, n * sizeof *at), memcpy(al, c->cargs_lval, n);
+			memcpy(abr, c->carg_brace, sizeof c->carg_brace);
 			cxx_ctor_use(c, et, at, al, n, true);
-			if (!cxx_gen_construct_at(c, slot, et, an, n, out, loc))
+			if (c->ctor_found && c->ctor_picked)
+				memcpy(c->gen_call_brace, abr, sizeof c->gen_call_brace);
+			c->gen_agg_brace = abr;
+			built = cxx_gen_construct_at(c, slot, et, an, n, out, loc);
+			c->gen_agg_brace = NULL;
+			memset(c->gen_call_brace, 0, sizeof c->gen_call_brace);
+			free(abr);
+			if (!built)
 				goto fail;
 			continue;
 		}
