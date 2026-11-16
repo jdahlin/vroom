@@ -3074,3 +3074,12 @@ Test: `run/new-aggregate-nested-braces.cpp`.  Sviter gröna (187/187, 38/38, man
 `shared_ptr` med explicit `operator bool`): typen är `bool` (x omvandlas
 kontextuellt), tidigare okänd så att anropet runt det inte fick någon nod.
 Test: `run/not-explicit-bool-class.cpp`.  Sviter gröna (188/188, 38/38, mangle).
+
+C++20:s omskrivna jämförelser i en mallsubstitution (`decltype(l <= r)` med
+libc++:s `__wrap_iter`, doctests `CHECK(it1 <= it2)` i json unit-iterators3):
+`cxx_operator_call_type` märkte uttrycket ogiltigt så fort ingen `operator<=`
+passade en klass utan konverteringar, innan `a <=> b` (och omvänt `b == a`)
+prövats.  För jämförelseoperatorerna avgör nu binary.c det när
+omskrivningarna också misslyckats.  Test: `run/rewritten-spaceship-in-decltype.cpp`
+(`le(n, n)` utan jämförelse tar fortfarande `le(...)`).  unit-iterators3
+passerar.  Sviter gröna (189/189, 38/38, mangle).

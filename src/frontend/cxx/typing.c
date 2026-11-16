@@ -1317,7 +1317,11 @@ VPRIV bool cxx_operator_call_type(cxx *c, uint32_t id, ast_qualified_type obj, c
 	{
 		const vident *v = &vintern_ents[id];
 		bool implicit = (v->len == 9 && (v->s[8] == '=' || v->s[8] == ',')) || (v->len == 10 && !memcmp(v->s + 8, "->", 2));
-		bool known = !implicit && !c->tentative && nargs <= 2, stuck = false;
+		/* (a comparison: C++20's rewritten candidates, a <=> b and the reversed b == a, are tried after this; the
+		   operator's caller decides it is ill-formed once they fail too -- decltype(l <= r) of libc++'s __wrap_iter) */
+		bool cmp = (v->len == 9 && (v->s[8] == '<' || v->s[8] == '>')) ||
+			   (v->len == 10 && (!memcmp(v->s + 8, "<=", 2) || !memcmp(v->s + 8, ">=", 2) || !memcmp(v->s + 8, "==", 2) || !memcmp(v->s + 8, "!=", 2)));
+		bool known = !implicit && !cmp && !c->tentative && nargs <= 2, stuck = false;
 
 		all[0] = obj;
 		for (uint32_t i = 0; i < nargs && nargs <= 2; i++)
