@@ -497,16 +497,23 @@ VPRIV void cxx_conditional_expression_parse(cxx *c)
                                        AST_QUALIFIED_TYPE_QUALIFIERS(b2) |
                                            AST_QUALIFIED_TYPE_QUALIFIERS(b3))),
                        false);
-            } else if (t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN &&
-                       !c->tentative && !c->template_depth &&
-                       (cc_type_is_record(c->ast, t2) !=
-                        cc_type_is_record(c->ast, t3)) &&
-                       AST_TYPE_KIND(c->ast,
-                                     cc_type_is_record(c->ast, t2) ? t2 : t3) !=
-                           AST_TYPE_ARRAY) {
+            } else if (
+                t2 != CXX_TY_UNKNOWN && t3 != CXX_TY_UNKNOWN && !c->tentative &&
+                !c->template_depth &&
+                /* (std::nullptr_t, vcc's struct, is no class: [basic.fundamental]) */
+                ((cc_type_is_record(c->ast, t2) &&
+                  AST_QUALIFIED_TYPE_UNQUALIFIED(t2) != c->nullptr_ty) !=
+                 (cc_type_is_record(c->ast, t3) &&
+                  AST_QUALIFIED_TYPE_UNQUALIFIED(t3) != c->nullptr_ty)) &&
+                AST_TYPE_KIND(c->ast, cc_type_is_record(c->ast, t2) &&
+                                              AST_QUALIFIED_TYPE_UNQUALIFIED(
+                                                  t2) != c->nullptr_ty
+                                          ? t2
+                                          : t3) != AST_TYPE_ARRAY) {
                 /* a class and another type that converts to it by a constructor (c ? std::string(...) : ""):
 				   a prvalue of the class, the other operand converted in its own branch ([expr.cond]/4) */
-                bool cls2 = cc_type_is_record(c->ast, t2);
+                bool cls2 = cc_type_is_record(c->ast, t2) &&
+                            AST_QUALIFIED_TYPE_UNQUALIFIED(t2) != c->nullptr_ty;
                 ast_qualified_type ct = AST_QUALIFIED_TYPE_UNQUALIFIED(
                                        cls2 ? t2 : t3),
                                    ot = cls2 ? t3 : t2, at[1];
