@@ -1,0 +1,123 @@
+/*
+ * lex.token.cpp: [lex.token] Tokens: translation phase 7's conversion of a
+ * preprocessing token to a token.
+ *
+ *     token:
+ *         identifier
+ *         keyword
+ *         literal
+ *         operator-or-punctuator
+ *
+ * [lex.phases]/1.7: "Each preprocessing token is converted into a token."
+ * [lex.pptoken]/1: "Each preprocessing token that is converted to a token
+ * shall have the lexical form of a keyword, an identifier, a literal, or an
+ * operator or punctuator."
+ *
+ * Phases 5 and 6 (the execution character set, concatenating string
+ * literals) are not done yet: a character or string literal keeps no value.
+ */
+#include "../cplusplus-internal.h"
+
+namespace cplusplus
+{
+
+token lexer::convert(const preprocessing_token &pp)
+{
+    token out;
+    out.preprocessing = pp;
+    vbuffer spelling_buffer = {};
+    switch (pp.kind) {
+    case preprocessing_token_kind::identifier: {
+        spelling(pp, &spelling_buffer);
+        /* [lex.key]/1: an identifier of Table 5 is a keyword; [lex.key]/2:
+           one of Table 6 is the operator it represents ([lex.digraph]/2) */
+        int k = lookup_keyword(behavior, spelling_buffer.p, spelling_buffer.n);
+        preprocessing_op_or_punc op;
+        if (k >= 0 && keyword_is_alternative_representation(k, &op)) {
+            out.kind = token_kind::operator_or_punctuator;
+            out.op_or_punc = op;
+        } else if (k >= 0) {
+            out.kind = token_kind::keyword;
+            out.keyword = (int16_t)k;
+            /* [lex.bool]/1: "The Boolean literals are the keywords false and
+               true."  [lex.nullptr]/1: "The pointer literal is the keyword
+               nullptr." */
+            if (spelling_buffer.n == 4 && !memcmp(spelling_buffer.p, "true", 4))
+                out.literal = literal_kind::boolean_literal,
+                out.type = fundamental_type::bool_, out.value = 1,
+                out.value_known = true;
+            else if (spelling_buffer.n == 5 &&
+                     !memcmp(spelling_buffer.p, "false", 5))
+                out.literal = literal_kind::boolean_literal,
+                out.type = fundamental_type::bool_, out.value = 0,
+                out.value_known = true;
+            else if (spelling_buffer.n == 7 &&
+                     !memcmp(spelling_buffer.p, "nullptr", 7))
+                out.literal = literal_kind::pointer_literal,
+                out.type = fundamental_type::std_nullptr_t;
+        } else
+            out.kind = token_kind::identifier;
+        break;
+    }
+    case preprocessing_token_kind::pp_number:
+        spelling(pp, &spelling_buffer);
+        out.kind = token_kind::literal;
+        if (is_floating_point_literal_spelling(spelling_buffer.p,
+                                               spelling_buffer.n))
+            out.literal = literal_kind::floating_point_literal;
+        else
+            convert_integer_literal(spelling_buffer.p, spelling_buffer.n, out);
+        break;
+    case preprocessing_token_kind::character_literal:
+        out.kind = token_kind::literal;
+        out.literal = literal_kind::character_literal;
+        break;
+    case preprocessing_token_kind::string_literal:
+        out.kind = token_kind::literal;
+        out.literal = literal_kind::string_literal;
+        break;
+    case preprocessing_token_kind::user_defined_character_literal:
+    case preprocessing_token_kind::user_defined_string_literal:
+        out.kind = token_kind::literal;
+        out.literal = literal_kind::user_defined_literal;
+        break;
+    case preprocessing_token_kind::preprocessing_op_or_punc:
+        /* [lex.operators]/1: "Each operator-or-punctuator is converted to a
+           single token in translation phase 7"; a preprocessing-operator
+           (# ##) outside a directive has no token form */
+        out.kind = token_kind::operator_or_punctuator;
+        out.op_or_punc = preprocessing_op_or_punc_primary(pp.op_or_punc);
+        break;
+    case preprocessing_token_kind::end_of_file:
+        out.kind = token_kind::end_of_file;
+        break;
+    default:
+        /* a header-name, a placeholder of phase 4, or a single character:
+           none has a token form */
+        out.kind = token_kind::invalid;
+        break;
+    }
+    free(spelling_buffer.p);
+    return out;
+}
+
+const char *clang_token_name(const lexer &l, const token &t)
+{
+    switch (t.kind) {
+    case token_kind::identifier:
+        return "identifier";
+    case token_kind::keyword:
+        /* tok::getTokenName names a keyword token by its spelling: kw_int is "int" */
+        return keyword_clang_name(t.keyword) + 3;
+    case token_kind::operator_or_punctuator:
+        /* clang names an alternative token by its primary's name, which is
+           what out.op_or_punc already is */
+        return preprocessing_op_or_punc_clang_name(t.op_or_punc);
+    case token_kind::end_of_file:
+        return "eof";
+    default:
+        return clang_token_name(l, t.preprocessing);
+    }
+}
+
+} // namespace cplusplus
